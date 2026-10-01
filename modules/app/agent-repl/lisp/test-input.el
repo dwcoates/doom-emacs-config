@@ -2140,6 +2140,683 @@ The second escape is treated as a FIRST again -- it warns, never clears."
     ;; Assert
     (should-not agent-repl-test-input--select-requests)))
 
+;;;; ---- The shared history save and composer fill -----------------------
+
+(ert-deftest agent-repl-test-input-save-to-history-pushes-resets-and-saves ()
+  "The shared save pushes the composer's text, resets browsing, and persists."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (agent-repl-test-input--type "draft")
+    (let (calls)
+      (cl-letf (((symbol-function 'agent-repl--history-push)
+                 (lambda (&optional _text) (push (list :push (buffer-string)) calls)))
+                ((symbol-function 'agent-repl--history-reset) (lambda () (push :reset calls)))
+                ((symbol-function 'agent-repl--history-save) (lambda (ws) (push (list :save ws) calls))))
+        ;; Act
+        (with-current-buffer agent-repl-test-input--buffer
+          (agent-repl--input-save-to-history "ws-one")))
+      ;; Assert
+      (should (equal (nreverse calls) '((:push "draft") :reset (:save "ws-one")))))))
+
+(ert-deftest agent-repl-test-input-discard-saves-through-the-shared-save ()
+  "The discard saves the composer through the one shared save."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (let (saved)
+      (cl-letf (((symbol-function 'agent-repl--input-save-to-history)
+                 (lambda (ws) (push ws saved))))
+        ;; Act
+        (with-current-buffer agent-repl-test-input--buffer
+          (agent-repl-discard-input)))
+      ;; Assert
+      (should (equal saved '("ws-one"))))))
+
+(defun agent-repl-test-input--said (&rest blocks)
+  "A decoded UserSaid holding BLOCKS."
+  (list :content (list :blocks blocks)))
+
+(defun agent-repl-test-input--text-block (text)
+  "A decoded text block saying TEXT."
+  (list :arm :text :value (list :text text)))
+
+(defun agent-repl-test-input--path-image (path)
+  "A decoded image block at host PATH."
+  (list :arm :image :value (list :location (list :arm :path :value (list :path path))
+                                 :media-type "image/png")))
+
+(defun agent-repl-test-input--url-image (url)
+  "A decoded image block by URL."
+  (list :arm :image :value (list :location (list :arm :url :value (list :url url))
+                                 :media-type "image/png")))
+
+(ert-deftest agent-repl-test-input-said-text-joins-text-blocks ()
+  "The words of what was said are its text blocks, joined by newlines."
+  (should (equal (agent-repl--input-said-text
+                  (agent-repl-test-input--said (agent-repl-test-input--text-block "one")
+                                               (agent-repl-test-input--path-image "/a.png")
+                                               (agent-repl-test-input--text-block "two")))
+                 "one\ntwo")))
+
+(ert-deftest agent-repl-test-input-said-attachments-keeps-path-images ()
+  "A path image becomes a composer attachment."
+  (should (equal (agent-repl--input-said-attachments
+                  (agent-repl-test-input--said (agent-repl-test-input--path-image "/a.png")))
+                 '(:attachments ((:path "/a.png" :media-type "image/png")) :dropped 0))))
+
+(ert-deftest agent-repl-test-input-said-attachments-counts-url-images-dropped ()
+  "An image by URL cannot be an attachment: it is counted as dropped."
+  (should (equal (agent-repl--input-said-attachments
+                  (agent-repl-test-input--said (agent-repl-test-input--url-image "https://x/i.png")))
+                 '(:attachments nil :dropped 1))))
+
+(ert-deftest agent-repl-test-input-said-attachments-counts-unsupported-dropped ()
+  "A block the schema does not model is counted as dropped."
+  (should (equal (plist-get (agent-repl--input-said-attachments
+                             (agent-repl-test-input--said '(:arm :unsupported :value (:kind "x"))))
+                            :dropped)
+                 1)))
+
+;;;; ---- Rollback --------------------------------------------------------
+
+(defvar agent-repl-test-input--plan-answer nil
+  "What the stubbed PlanRollback answers: (:response R), (:failure DETAIL).")
+
+(defvar agent-repl-test-input--roll-back-answer nil
+  "What the stubbed RollBack answers: (:response R) or (:failure DETAIL).")
+
+(defvar agent-repl-test-input--rollback-calls nil
+  "Every rollback rpc the stubs received, newest first: (VERB REQUEST).")
+
+(defvar agent-repl-test-input--asked nil
+  "The y/n question the stubbed `y-or-n-p' was asked.")
+
+(defvar agent-repl-test-input--warned nil
+  "Messages the stubbed `agent-repl--warn' received, newest first.")
+
+(defmacro agent-repl-test-input--with-rollback (plan confirm roll-back &rest body)
+  "Run BODY in a composer whose PlanRollback answers PLAN.
+CONFIRM is what the y/n question answers; ROLL-BACK is RollBack's answer."
+  (declare (indent 3))
+  `(agent-repl-test-input--with
+     (let ((agent-repl-test-input--plan-answer ,plan)
+           (agent-repl-test-input--roll-back-answer ,roll-back)
+           (agent-repl-test-input--rollback-calls nil)
+           (agent-repl-test-input--asked nil)
+           (agent-repl-test-input--warned nil)
+           (confirm ,confirm))
+       (cl-letf (((symbol-function 'agent-repl-rpc-plan-rollback-sync)
+                  (lambda (_conn request &optional _timeout)
+                    (push (list :plan request) agent-repl-test-input--rollback-calls)
+                    (pcase (car agent-repl-test-input--plan-answer)
+                      (:response (cadr agent-repl-test-input--plan-answer))
+                      (:failure (signal 'agent-repl-connect-error
+                                        (cadr agent-repl-test-input--plan-answer))))))
+                 ((symbol-function 'agent-repl-rpc-roll-back)
+                  (lambda (_conn request &rest keys)
+                    (push (list :roll-back request) agent-repl-test-input--rollback-calls)
+                    (pcase (car agent-repl-test-input--roll-back-answer)
+                      (:response (funcall (plist-get keys :on-response)
+                                          (cadr agent-repl-test-input--roll-back-answer)))
+                      (:failure (funcall (plist-get keys :on-failure)
+                                         (cadr agent-repl-test-input--roll-back-answer))))))
+                 ((symbol-function 'y-or-n-p)
+                  (lambda (prompt) (setq agent-repl-test-input--asked prompt) confirm))
+                 ((symbol-function 'agent-repl--image-insert-marker) (lambda (&rest _) nil))
+                 ((symbol-function 'agent-repl--warn)
+                  (lambda (_ws fmt &rest args)
+                    (push (apply #'format fmt args) agent-repl-test-input--warned))))
+         ,@body))))
+
+(defun agent-repl-test-input--plan (&rest overrides)
+  "A decoded plan, with OVERRIDES (a plist) replacing its fields."
+  (let ((plan (list :token '(:value "tok-1")
+                    :target '(:chosen :latest :excerpt "fix the bug" :prompts-dropped 1)
+                    :files '(:arm :kept :value nil)
+                    :interrupt nil
+                    :drop-queued nil)))
+    (while overrides
+      (setq plan (plist-put plan (pop overrides) (pop overrides))))
+    plan))
+
+(defun agent-repl-test-input--plan-answer (plan)
+  "A PlanRollback success answering PLAN."
+  (list :response (list :arm :success :value (list :outcome (list :arm :plan :value plan)))))
+
+(defun agent-repl-test-input--done (said &optional files)
+  "A RollBack success handing back SAID, FILES restored when non-nil."
+  (list :response (list :arm :success
+                        :value (list :prompt said
+                                     :files-restored (and files (list :files files))))))
+
+(defun agent-repl-test-input--refusal (arm &optional value)
+  "A refusal answer of ARM carrying VALUE."
+  (list :response (list :arm :error :value (list :cause (list :arm arm :value value)))))
+
+(defun agent-repl-test-input--roll-back-sent ()
+  "The RollBack request sent, or nil."
+  (cadr (assq :roll-back agent-repl-test-input--rollback-calls)))
+
+(defun agent-repl-test-input--face-of (text sub)
+  "The face TEXT wears where SUB begins in it."
+  (let ((at (string-search sub text)))
+    (and at (get-text-property at 'face text))))
+
+(ert-deftest agent-repl-test-input-rollback-keep-files-is-a-command ()
+  "The `C-c C-RET' target is a real interactive command."
+  (should (commandp #'agent-repl-rollback-keep-files)))
+
+(ert-deftest agent-repl-test-input-rollback-restore-files-is-a-command ()
+  "The `C-c M-RET' target is a real interactive command."
+  (should (commandp #'agent-repl-rollback-restore-files)))
+
+(ert-deftest agent-repl-test-input-c-c-c-return-rolls-back-keeping-files ()
+  "`C-c C-RET' in the composer rolls back keeping files."
+  (should (eq (lookup-key agent-repl-input-mode-map (kbd "C-c C-<return>"))
+              #'agent-repl-rollback-keep-files)))
+
+(ert-deftest agent-repl-test-input-c-c-m-return-rolls-back-restoring-files ()
+  "`C-c M-RET' in the composer rolls back restoring files."
+  (should (eq (lookup-key agent-repl-input-mode-map (kbd "C-c M-<return>"))
+              #'agent-repl-rollback-restore-files)))
+
+(ert-deftest agent-repl-test-input-rollback-leaves-c-c-c-k-alone ()
+  "`C-c C-k' still only interrupts."
+  (should (eq (lookup-key agent-repl-input-mode-map (kbd "C-c C-k"))
+              #'agent-repl-interrupt-turn)))
+
+(ert-deftest agent-repl-test-input-rollback-keep-plans-keep-files ()
+  "`C-c C-RET' asks for a plan that keeps files."
+  (agent-repl-test-input--with-rollback
+      (agent-repl-test-input--plan-answer (agent-repl-test-input--plan)) nil nil
+    ;; Act
+    (agent-repl-rollback-keep-files)
+    ;; Assert
+    (should (equal (plist-get (cadr (assq :plan agent-repl-test-input--rollback-calls)) :files)
+                   '(:arm :keep-files :value nil)))))
+
+(ert-deftest agent-repl-test-input-rollback-restore-plans-restore-files ()
+  "`C-c M-RET' asks for a plan that restores files."
+  (agent-repl-test-input--with-rollback
+      (agent-repl-test-input--plan-answer (agent-repl-test-input--plan)) nil nil
+    ;; Act
+    (agent-repl-rollback-restore-files)
+    ;; Assert
+    (should (equal (plist-get (cadr (assq :plan agent-repl-test-input--rollback-calls)) :files)
+                   '(:arm :restore-files :value nil)))))
+
+(ert-deftest agent-repl-test-input-rollback-nothing-flashes ()
+  "Nothing to roll back says so and asks nothing."
+  (agent-repl-test-input--with-rollback
+      '(:response (:arm :success :value (:outcome (:arm :nothing-to-roll-back :value nil))))
+      t nil
+    ;; Act
+    (agent-repl-rollback-keep-files)
+    ;; Assert
+    (should (equal (list (agent-repl-test-input--notice) agent-repl-test-input--asked)
+                   '("rollback: no prompt to roll back to" nil)))))
+
+(ert-deftest agent-repl-test-input-rollback-confirm-names-the-latest-prompt ()
+  "With nothing selected the question cancels the latest prompt, by excerpt."
+  (agent-repl-test-input--with-rollback
+      (agent-repl-test-input--plan-answer (agent-repl-test-input--plan)) nil nil
+    ;; Act
+    (agent-repl-rollback-keep-files)
+    ;; Assert
+    (should (string-prefix-p "Cancel the latest prompt \"fix the bug\"."
+                             agent-repl-test-input--asked))))
+
+(ert-deftest agent-repl-test-input-rollback-confirm-names-the-selected-prompt ()
+  "With a prompt selected the question rolls back to before it."
+  (agent-repl-test-input--with-rollback
+      (agent-repl-test-input--plan-answer
+       (agent-repl-test-input--plan
+        :target '(:chosen :selected :excerpt "add tests" :prompts-dropped 1)))
+      nil nil
+    ;; Act
+    (agent-repl-rollback-keep-files)
+    ;; Assert
+    (should (string-prefix-p "Roll back to before the selected prompt \"add tests\"."
+                             agent-repl-test-input--asked))))
+
+(ert-deftest agent-repl-test-input-rollback-confirm-counts-prompts-dropped ()
+  "More than one prompt dropped is counted in the question."
+  (agent-repl-test-input--with-rollback
+      (agent-repl-test-input--plan-answer
+       (agent-repl-test-input--plan
+        :target '(:chosen :selected :excerpt "add tests" :prompts-dropped 3)))
+      nil nil
+    ;; Act
+    (agent-repl-rollback-keep-files)
+    ;; Assert
+    (should (string-search "(3 prompts are dropped)" agent-repl-test-input--asked))))
+
+(ert-deftest agent-repl-test-input-rollback-confirm-keep-names-the-other-key ()
+  "Keeping files says so and names the key that restores them."
+  (agent-repl-test-input--with-rollback
+      (agent-repl-test-input--plan-answer (agent-repl-test-input--plan)) nil nil
+    ;; Act
+    (agent-repl-rollback-keep-files)
+    ;; Assert
+    (should (string-search "Files are not restored (C-c M-RET restores them)."
+                           agent-repl-test-input--asked))))
+
+(ert-deftest agent-repl-test-input-rollback-confirm-restore-names-the-other-key ()
+  "Restoring files states its limits and names the key that leaves them."
+  (agent-repl-test-input--with-rollback
+      (agent-repl-test-input--plan-answer
+       (agent-repl-test-input--plan :files '(:arm :restored :value (:cancel-detached nil))))
+      nil nil
+    ;; Act
+    (agent-repl-rollback-restore-files)
+    ;; Assert
+    (should (string-search "Files the agent's edit tools changed are restored; shell changes and git commits are not (C-c C-RET leaves files alone)."
+                           agent-repl-test-input--asked))))
+
+(ert-deftest agent-repl-test-input-rollback-confirm-interrupt-in-red ()
+  "An interrupt is stated, in the `error' face."
+  (agent-repl-test-input--with-rollback
+      (agent-repl-test-input--plan-answer (agent-repl-test-input--plan :interrupt t)) nil nil
+    ;; Act
+    (agent-repl-rollback-keep-files)
+    ;; Assert
+    (should (eq (agent-repl-test-input--face-of
+                 agent-repl-test-input--asked "The running turn will be interrupted.")
+                'error))))
+
+(ert-deftest agent-repl-test-input-rollback-confirm-drop-queued-in-red ()
+  "Queued prompts dropped are counted, in the `error' face."
+  (agent-repl-test-input--with-rollback
+      (agent-repl-test-input--plan-answer (agent-repl-test-input--plan :drop-queued '(:prompts 2)))
+      nil nil
+    ;; Act
+    (agent-repl-rollback-keep-files)
+    ;; Assert
+    (should (eq (agent-repl-test-input--face-of
+                 agent-repl-test-input--asked "2 queued prompts will be dropped.")
+                'error))))
+
+(ert-deftest agent-repl-test-input-rollback-confirm-cancel-detached-in-red ()
+  "Detached work stopped by a restore is counted, in the `error' face."
+  (agent-repl-test-input--with-rollback
+      (agent-repl-test-input--plan-answer
+       (agent-repl-test-input--plan :files '(:arm :restored :value (:cancel-detached (:items 1)))))
+      nil nil
+    ;; Act
+    (agent-repl-rollback-restore-files)
+    ;; Assert
+    (should (eq (agent-repl-test-input--face-of
+                 agent-repl-test-input--asked
+                 "1 background agent or shell started since then will be stopped.")
+                'error))))
+
+(ert-deftest agent-repl-test-input-rollback-confirm-files-sentence-not-red ()
+  "The files sentence is not a side effect and wears no red."
+  (agent-repl-test-input--with-rollback
+      (agent-repl-test-input--plan-answer (agent-repl-test-input--plan :interrupt t)) nil nil
+    ;; Act
+    (agent-repl-rollback-keep-files)
+    ;; Assert
+    (should-not (agent-repl-test-input--face-of agent-repl-test-input--asked "Files are not"))))
+
+(ert-deftest agent-repl-test-input-rollback-confirm-without-side-effects-has-no-red ()
+  "A plan with no side effects lists none."
+  (agent-repl-test-input--with-rollback
+      (agent-repl-test-input--plan-answer (agent-repl-test-input--plan)) nil nil
+    ;; Act
+    (agent-repl-rollback-keep-files)
+    ;; Assert
+    (should-not (text-property-any 0 (length agent-repl-test-input--asked)
+                                   'face 'error agent-repl-test-input--asked))))
+
+(ert-deftest agent-repl-test-input-rollback-declined-sends-nothing ()
+  "A no sends no RollBack."
+  (agent-repl-test-input--with-rollback
+      (agent-repl-test-input--plan-answer (agent-repl-test-input--plan)) nil nil
+    ;; Act
+    (agent-repl-rollback-keep-files)
+    ;; Assert
+    (should-not (agent-repl-test-input--roll-back-sent))))
+
+(ert-deftest agent-repl-test-input-rollback-declined-says-cancelled ()
+  "A no says the rollback was cancelled."
+  (agent-repl-test-input--with-rollback
+      (agent-repl-test-input--plan-answer (agent-repl-test-input--plan)) nil nil
+    ;; Act
+    (agent-repl-rollback-keep-files)
+    ;; Assert
+    (should (member "rollback: cancelled" agent-repl-test-input--messages))))
+
+(ert-deftest agent-repl-test-input-rollback-confirmed-echoes-the-token ()
+  "A yes sends RollBack with the plan's token, verbatim."
+  (agent-repl-test-input--with-rollback
+      (agent-repl-test-input--plan-answer (agent-repl-test-input--plan)) t
+      (agent-repl-test-input--done (agent-repl-test-input--said))
+    ;; Act
+    (agent-repl-rollback-keep-files)
+    ;; Assert
+    (should (equal (agent-repl-test-input--roll-back-sent)
+                   (list :workspace agent-repl-test-input--ref :token '(:value "tok-1"))))))
+
+(ert-deftest agent-repl-test-input-rollback-done-saves-the-draft-to-history ()
+  "The composer's contents are saved to its history before the refill."
+  (agent-repl-test-input--with-rollback
+      (agent-repl-test-input--plan-answer (agent-repl-test-input--plan)) t
+      (agent-repl-test-input--done
+       (agent-repl-test-input--said (agent-repl-test-input--text-block "old prompt")))
+    ;; Arrange -- the harness stubs the history ring itself, so the shared
+    ;; save is observed with what the composer held when it ran.
+    (agent-repl-test-input--type "my draft")
+    (let (saved)
+      (cl-letf (((symbol-function 'agent-repl--input-save-to-history)
+                 (lambda (ws) (push (list ws (buffer-string)) saved))))
+        ;; Act
+        (agent-repl-rollback-keep-files))
+      ;; Assert
+      (should (equal saved '(("ws-one" "my draft")))))))
+
+(ert-deftest agent-repl-test-input-rollback-done-refills-the-composer ()
+  "The composer holds the rolled-back prompt's words."
+  (agent-repl-test-input--with-rollback
+      (agent-repl-test-input--plan-answer (agent-repl-test-input--plan)) t
+      (agent-repl-test-input--done
+       (agent-repl-test-input--said (agent-repl-test-input--text-block "line one")
+                                    (agent-repl-test-input--text-block "line two")))
+    ;; Arrange
+    (agent-repl-test-input--type "my draft")
+    ;; Act
+    (agent-repl-rollback-keep-files)
+    ;; Assert
+    (should (equal (agent-repl-test-input--composer-text) "line one\nline two"))))
+
+(ert-deftest agent-repl-test-input-rollback-done-sets-path-attachments ()
+  "The rolled-back prompt's path images become the composer's attachments."
+  (agent-repl-test-input--with-rollback
+      (agent-repl-test-input--plan-answer (agent-repl-test-input--plan)) t
+      (agent-repl-test-input--done
+       (agent-repl-test-input--said (agent-repl-test-input--text-block "see")
+                                    (agent-repl-test-input--path-image "/tmp/a.png")))
+    ;; Act
+    (agent-repl-rollback-keep-files)
+    ;; Assert
+    (should (equal (buffer-local-value 'agent-repl-input-attachments
+                                       agent-repl-test-input--buffer)
+                   '((:path "/tmp/a.png" :media-type "image/png"))))))
+
+(ert-deftest agent-repl-test-input-rollback-done-says-done ()
+  "A rollback that restored no files says it is done."
+  (agent-repl-test-input--with-rollback
+      (agent-repl-test-input--plan-answer (agent-repl-test-input--plan)) t
+      (agent-repl-test-input--done (agent-repl-test-input--said))
+    ;; Act
+    (agent-repl-rollback-keep-files)
+    ;; Assert
+    (should (member "rollback: done" agent-repl-test-input--messages))))
+
+(ert-deftest agent-repl-test-input-rollback-done-counts-files-restored ()
+  "A restore says how many files it changed back."
+  (agent-repl-test-input--with-rollback
+      (agent-repl-test-input--plan-answer
+       (agent-repl-test-input--plan :files '(:arm :restored :value (:cancel-detached nil))))
+      t (agent-repl-test-input--done (agent-repl-test-input--said) 3)
+    ;; Act
+    (agent-repl-rollback-restore-files)
+    ;; Assert
+    (should (member "rollback: done, 3 files restored" agent-repl-test-input--messages))))
+
+(ert-deftest agent-repl-test-input-rollback-done-drops-a-url-image-with-a-flash ()
+  "An image by URL cannot be attached: the composer says it was dropped."
+  (agent-repl-test-input--with-rollback
+      (agent-repl-test-input--plan-answer (agent-repl-test-input--plan)) t
+      (agent-repl-test-input--done
+       (agent-repl-test-input--said (agent-repl-test-input--url-image "https://x/i.png")))
+    ;; Act
+    (agent-repl-rollback-keep-files)
+    ;; Assert
+    (should (equal (agent-repl-test-input--notice)
+                   "rollback: 1 image could not be attached and was dropped"))))
+
+(ert-deftest agent-repl-test-input-rollback-done-logs-a-dropped-url-image ()
+  "A dropped URL image is logged at WARN."
+  (agent-repl-test-input--with-rollback
+      (agent-repl-test-input--plan-answer (agent-repl-test-input--plan)) t
+      (agent-repl-test-input--done
+       (agent-repl-test-input--said (agent-repl-test-input--url-image "https://x/i.png")))
+    ;; Act
+    (agent-repl-rollback-keep-files)
+    ;; Assert
+    (should (cl-some (lambda (m) (string-match-p "rollback-attachments-dropped.*count=1" m))
+                     agent-repl-test-input--warned))))
+
+(defconst agent-repl-test-input--rollback-refusal-flashes
+  '((:unknown-workspace nil "rollback: the daemon does not know this workspace")
+    (:workspace-ref-mismatch (:registry-dir "/w")
+     "rollback: the daemon holds this workspace under another directory")
+    (:transferring-away (:address "127.0.0.1:9")
+     "rollback: the workspace is moving to another daemon; press the key again")
+    (:not-yet-adopted nil "rollback: the daemon is still taking this workspace over; press the key again")
+    (:plan-stale nil "rollback: the conversation changed; press the key again")
+    (:no-session nil "rollback: there is no running session to roll back")
+    (:prompt-not-recorded nil "rollback: the conversation holds no record of that prompt")
+    (:first-prompt nil "rollback: the first prompt can't be rolled back; /clear starts over")
+    (:unseen-prompt nil "rollback: a later prompt the feed never showed would be dropped")
+    (:vendor-refused (:vendor-message "cut refused") "rollback: the vendor refused: cut refused")
+    (:files-not-restorable (:vendor-message "no checkpoint")
+     "rollback: files can't be restored to that prompt: no checkpoint"))
+  "Each RollBack refusal arm, its payload, and the flash it must draw.")
+
+(ert-deftest agent-repl-test-input-rollback-each-roll-back-refusal-flashes-its-arm ()
+  "Every RollBack refusal flashes the composer with its arm in plain words."
+  (dolist (case agent-repl-test-input--rollback-refusal-flashes)
+    (agent-repl-test-input--with-rollback
+        (agent-repl-test-input--plan-answer (agent-repl-test-input--plan)) t
+        (agent-repl-test-input--refusal (nth 0 case) (nth 1 case))
+      ;; Act
+      (agent-repl-rollback-keep-files)
+      ;; Assert
+      (should (equal (agent-repl-test-input--notice) (nth 2 case))))))
+
+(ert-deftest agent-repl-test-input-rollback-roll-back-refusal-is-logged ()
+  "A RollBack refusal is logged at WARN with its cause."
+  (agent-repl-test-input--with-rollback
+      (agent-repl-test-input--plan-answer (agent-repl-test-input--plan)) t
+      (agent-repl-test-input--refusal :plan-stale)
+    ;; Act
+    (agent-repl-rollback-keep-files)
+    ;; Assert
+    (should (cl-some (lambda (m) (string-match-p "rollback-refused.*verb=roll-back.*plan-stale" m))
+                     agent-repl-test-input--warned))))
+
+(ert-deftest agent-repl-test-input-rollback-refused-leaves-the-composer ()
+  "A refused rollback leaves the composer as it was."
+  (agent-repl-test-input--with-rollback
+      (agent-repl-test-input--plan-answer (agent-repl-test-input--plan)) t
+      (agent-repl-test-input--refusal :first-prompt)
+    ;; Arrange
+    (agent-repl-test-input--type "my draft")
+    ;; Act
+    (agent-repl-rollback-keep-files)
+    ;; Assert
+    (should (equal (agent-repl-test-input--composer-text) "my draft"))))
+
+(ert-deftest agent-repl-test-input-rollback-plan-refusal-flashes ()
+  "A PlanRollback refusal flashes its arm in plain words."
+  (agent-repl-test-input--with-rollback
+      (agent-repl-test-input--refusal :not-yet-adopted) t nil
+    ;; Act
+    (agent-repl-rollback-keep-files)
+    ;; Assert
+    (should (equal (agent-repl-test-input--notice)
+                   "rollback: the daemon is still taking this workspace over; press the key again"))))
+
+(ert-deftest agent-repl-test-input-rollback-plan-refusal-asks-nothing ()
+  "A refused plan asks no question."
+  (agent-repl-test-input--with-rollback
+      (agent-repl-test-input--refusal :unknown-workspace) t nil
+    ;; Act
+    (agent-repl-rollback-keep-files)
+    ;; Assert
+    (should-not agent-repl-test-input--asked)))
+
+(ert-deftest agent-repl-test-input-rollback-plan-transport-failure-flashes ()
+  "A plan the daemon never answered flashes the composer."
+  (agent-repl-test-input--with-rollback
+      '(:failure (:kind :transport :message "down")) t nil
+    ;; Act
+    (agent-repl-rollback-keep-files)
+    ;; Assert
+    (should (equal (agent-repl-test-input--notice) "rollback: the daemon did not answer"))))
+
+(ert-deftest agent-repl-test-input-rollback-plan-transport-failure-is-logged ()
+  "A plan the daemon never answered is logged at WARN with the detail."
+  (agent-repl-test-input--with-rollback
+      '(:failure (:kind :transport :message "down")) t nil
+    ;; Act
+    (agent-repl-rollback-keep-files)
+    ;; Assert
+    (should (cl-some (lambda (m) (string-match-p "rollback-failure.*verb=plan.*down" m))
+                     agent-repl-test-input--warned))))
+
+(ert-deftest agent-repl-test-input-rollback-roll-back-transport-failure-flashes ()
+  "A RollBack the daemon never answered flashes the composer."
+  (agent-repl-test-input--with-rollback
+      (agent-repl-test-input--plan-answer (agent-repl-test-input--plan)) t
+      '(:failure (:kind :transport :message "down"))
+    ;; Act
+    (agent-repl-rollback-keep-files)
+    ;; Assert
+    (should (equal (agent-repl-test-input--notice) "rollback: the daemon did not answer"))))
+
+(ert-deftest agent-repl-test-input-rollback-without-a-ref-asks-nothing-of-the-daemon ()
+  "A workspace not registered yet plans nothing, and says so."
+  (agent-repl-test-input--with-rollback
+      (agent-repl-test-input--plan-answer (agent-repl-test-input--plan)) t nil
+    ;; Arrange
+    (cl-letf (((symbol-function 'agent-repl-host-ref) (lambda (_ws) nil)))
+      ;; Act
+      (agent-repl-rollback-keep-files))
+    ;; Assert
+    (should (equal (list (agent-repl-test-input--notice) agent-repl-test-input--rollback-calls)
+                   '("rollback: workspace not ready" nil)))))
+
+(ert-deftest agent-repl-test-input-rollback-without-a-connection-says-so ()
+  "No daemon connection plans nothing, and says so."
+  (agent-repl-test-input--with-rollback
+      (agent-repl-test-input--plan-answer (agent-repl-test-input--plan)) t nil
+    ;; Arrange
+    (cl-letf (((symbol-function 'agent-repl-host-conn) (lambda (_ws) nil))
+              ((symbol-function 'agent-repl-link-primary) (lambda () nil)))
+      ;; Act
+      (agent-repl-rollback-keep-files))
+    ;; Assert
+    (should (equal (agent-repl-test-input--notice) "rollback: no daemon connection"))))
+
+(ert-deftest agent-repl-test-input-rollback-unknown-plan-arm-is-an-error ()
+  "A PlanRollback answer arm the composer does not know is logged at ERROR."
+  (agent-repl-test-input--with-rollback
+      '(:response (:arm :accepted :value nil)) t nil
+    ;; Arrange
+    (let ((errors nil))
+      (cl-letf (((symbol-function 'agent-repl--error)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) errors))))
+        ;; Act
+        (agent-repl-rollback-keep-files))
+      ;; Assert
+      (should (cl-some (lambda (m) (string-match-p "rollback-unknown-arm.*verb=plan" m))
+                       errors)))))
+
+;;;; ---- Handover refusals route to host.el ------------------------------
+
+(ert-deftest agent-repl-test-input-select-transferring-away-routes-the-handover ()
+  "A SelectFeedRow `transferring_away' goes to host.el's handover walk."
+  (agent-repl-test-input--with-select
+      (agent-repl-test-input--refusal :transferring-away '(:address "127.0.0.1:9"))
+    ;; Act
+    (agent-repl-prompt-select-prev)
+    ;; Assert
+    (should (equal agent-repl-test-input--refusals
+                   '(("ws-one" (:arm :transferring-away :value (:address "127.0.0.1:9"))))))))
+
+(ert-deftest agent-repl-test-input-select-handover-still-flashes ()
+  "The routed move still did not happen, so the composer still says so."
+  (agent-repl-test-input--with-select
+      (agent-repl-test-input--refusal :not-yet-adopted)
+    ;; Act
+    (agent-repl-response-select-prev)
+    ;; Assert
+    (should (equal (agent-repl-test-input--notice) "reply-to-response: selection refused"))))
+
+(ert-deftest agent-repl-test-input-select-handover-is-not-a-warning ()
+  "A handover refusal is news, never logged as a refused move."
+  (agent-repl-test-input--with-select
+      (agent-repl-test-input--refusal :not-yet-adopted)
+    ;; Arrange
+    (let ((warned nil))
+      (cl-letf (((symbol-function 'agent-repl--warn)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) warned))))
+        ;; Act
+        (agent-repl-response-select-prev))
+      ;; Assert
+      (should-not warned))))
+
+(ert-deftest agent-repl-test-input-select-other-refusal-routes-nothing ()
+  "A refusal that is not a handover is not handed to host.el."
+  (agent-repl-test-input--with-select agent-repl-test-input--select-refused
+    ;; Act
+    (agent-repl-response-select-prev)
+    ;; Assert
+    (should-not agent-repl-test-input--refusals)))
+
+(ert-deftest agent-repl-test-input-plan-transferring-away-routes-the-handover ()
+  "A PlanRollback `transferring_away' goes to host.el's handover walk."
+  (agent-repl-test-input--with-rollback
+      (agent-repl-test-input--refusal :transferring-away '(:address "127.0.0.1:9")) t nil
+    ;; Act
+    (agent-repl-rollback-keep-files)
+    ;; Assert
+    (should (equal agent-repl-test-input--refusals
+                   '(("ws-one" (:arm :transferring-away :value (:address "127.0.0.1:9"))))))))
+
+(ert-deftest agent-repl-test-input-plan-handover-is-not-a-warning ()
+  "A PlanRollback handover refusal is not logged as a refused rollback."
+  (agent-repl-test-input--with-rollback
+      (agent-repl-test-input--refusal :not-yet-adopted) t nil
+    ;; Act
+    (agent-repl-rollback-keep-files)
+    ;; Assert
+    (should-not agent-repl-test-input--warned)))
+
+(ert-deftest agent-repl-test-input-roll-back-not-yet-adopted-routes-the-handover ()
+  "A RollBack `not_yet_adopted' goes to host.el's handover walk."
+  (agent-repl-test-input--with-rollback
+      (agent-repl-test-input--plan-answer (agent-repl-test-input--plan)) t
+      (agent-repl-test-input--refusal :not-yet-adopted)
+    ;; Act
+    (agent-repl-rollback-keep-files)
+    ;; Assert
+    (should (equal agent-repl-test-input--refusals
+                   '(("ws-one" (:arm :not-yet-adopted :value nil)))))))
+
+(ert-deftest agent-repl-test-input-roll-back-handover-still-flashes ()
+  "The routed rollback did not happen, so the composer still says so."
+  (agent-repl-test-input--with-rollback
+      (agent-repl-test-input--plan-answer (agent-repl-test-input--plan)) t
+      (agent-repl-test-input--refusal :transferring-away '(:address "127.0.0.1:9"))
+    ;; Act
+    (agent-repl-rollback-keep-files)
+    ;; Assert
+    (should (equal (agent-repl-test-input--notice)
+                   "rollback: the workspace is moving to another daemon; press the key again"))))
+
+(ert-deftest agent-repl-test-input-roll-back-other-refusal-routes-nothing ()
+  "A RollBack refusal that is not a handover is not handed to host.el."
+  (agent-repl-test-input--with-rollback
+      (agent-repl-test-input--plan-answer (agent-repl-test-input--plan)) t
+      (agent-repl-test-input--refusal :plan-stale)
+    ;; Act
+    (agent-repl-rollback-keep-files)
+    ;; Assert
+    (should-not agent-repl-test-input--refusals)))
+
 (provide 'test-input)
 
 

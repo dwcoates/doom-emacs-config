@@ -94,6 +94,10 @@
 (declare-function agent-repl-wire-encode-edit-held-prompt-request "wire-verbs" (request))
 (declare-function agent-repl-wire-decode-edit-held-prompt-response "wire-verbs" (alist))
 (declare-function agent-repl-wire-decode-select-feed-row-response "wire-verbs" (alist))
+(declare-function agent-repl-wire-encode-plan-rollback-request "wire-verbs" (request))
+(declare-function agent-repl-wire-decode-plan-rollback-response "wire-verbs" (alist))
+(declare-function agent-repl-wire-encode-roll-back-request "wire-verbs" (request))
+(declare-function agent-repl-wire-decode-roll-back-response "wire-verbs" (alist))
 (declare-function agent-repl-wire-encode-adjust-feed-text-scale-request "wire-verbs" (request))
 (declare-function agent-repl-wire-decode-adjust-feed-text-scale-response "wire-verbs" (alist))
 (declare-function agent-repl-wire-encode-interrupt-request "wire-verbs" (request))
@@ -396,6 +400,25 @@ responses or through the prompts a rollback can reach (each `:older' or
 so it computes where a step lands (both directions start at the newest row
 and wrap at each end), pushes the result to the webapp and to the host
 watch, and acks the outcome here.")
+
+(agent-repl-rpc--defverb agent-repl-rpc-plan-rollback
+  "PlanRollback"
+  agent-repl-wire-encode-plan-rollback-request
+  agent-repl-wire-decode-plan-rollback-response
+  "Say what a rollback of a workspace's conversation would do.
+The request carries the workspace ref and whether files are restored too;
+the daemon answers a plan (its opaque token, the target prompt, the files
+choice and every side effect) for the user to confirm, or that there is
+nothing to roll back.  Planning changes nothing.")
+
+(agent-repl-rpc--defverb agent-repl-rpc-roll-back
+  "RollBack"
+  agent-repl-wire-encode-roll-back-request
+  agent-repl-wire-decode-roll-back-response
+  "Perform a rollback plan the user confirmed.
+The request echoes the plan's token verbatim; the daemon refuses a plan
+that no longer describes what would happen.  On success it answers the
+prompt rolled back, for the composer to hold again.")
 
 (agent-repl-rpc--defverb agent-repl-rpc-adjust-feed-text-scale
   "AdjustFeedTextScale"
