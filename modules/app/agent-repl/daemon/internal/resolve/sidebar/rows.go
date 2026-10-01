@@ -6,6 +6,7 @@ import (
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/shimclient"
 	"claude-repld/internal/wsm"
 )
 
@@ -74,6 +75,9 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 		When:    when(rec),
 		Detail:  detail(rec, s.summary),
 		Closed:  &frontendv1.RosterRowClosed{Closed: closed},
+		// ALWAYS SET: an editor opens the workspace only once this leaves
+		// `pending`, so a row without it would never be opened.
+		Availability: availability(s),
 	}
 	setStatus(out, armName, rowLog)
 	if badge := priorityBadge(rec.Priority); badge != nil {
@@ -101,6 +105,25 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 		out.Children = append(out.Children, r.row(child, rc, rowLog))
 	}
 	return out
+}
+
+// availability resolves whether an editor may open the workspace yet, from
+// the shim link alone (frontend.v1.RosterRowAvailability): AVAILABLE once a
+// link has connected under this daemon, which never lapses; UNAVAILABLE when
+// the link went dead before it ever connected, the condition `start_failed`
+// draws; PENDING otherwise.
+func availability(s *wsState) *frontendv1.RosterRowAvailability {
+	switch {
+	case s.everConnected:
+		return &frontendv1.RosterRowAvailability{Availability: &frontendv1.RosterRowAvailability_Available{
+			Available: &frontendv1.RosterRowAvailabilityAvailable{}}}
+	case s.linkSeen && s.link == shimclient.LinkDead:
+		return &frontendv1.RosterRowAvailability{Availability: &frontendv1.RosterRowAvailability_Unavailable{
+			Unavailable: &frontendv1.RosterRowAvailabilityUnavailable{}}}
+	default:
+		return &frontendv1.RosterRowAvailability{Availability: &frontendv1.RosterRowAvailability_Pending{
+			Pending: &frontendv1.RosterRowAvailabilityPending{}}}
+	}
 }
 
 // lastSelected resolves the row's durable selection instant, or nil for a
