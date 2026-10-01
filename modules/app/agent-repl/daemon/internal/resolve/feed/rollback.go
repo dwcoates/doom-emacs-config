@@ -217,3 +217,36 @@ func (r *resolver) restoreRolledBack(s *wsState) {
 			dlog.Context{"turns": len(turns)})
 	}
 }
+
+// LiveDetachedIn answers how many detached subagents and shells drawn in
+// TURNS the feed still draws as live: the work a files-restoring rollback to
+// the first of TURNS stops. A monitor has no detached head (its feed entry is
+// its call's card), so monitors are not counted, though the rollback stops
+// them too.
+func (r *resolver) LiveDetachedIn(ws ids.WorkspaceID, turns []ids.TurnID) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s, ok := r.workspaces[ws]
+	if !ok {
+		return 0
+	}
+	dropped := make(map[string]bool, len(turns))
+	for _, turn := range turns {
+		dropped[string(turn)] = true
+	}
+	live := 0
+	for _, f := range s.feeds {
+		for _, row := range f.rows {
+			if !dropped[row.GetTurn().GetValue()] {
+				continue
+			}
+			// A detached shell's state is drawn on its HEAD (`shell_head`); its
+			// `detached_shell` row is the spool body and carries no state.
+			if row.GetDetachedSubagent().GetSubagent().GetLive() != nil ||
+				row.GetShellHead().GetLive() != nil {
+				live++
+			}
+		}
+	}
+	return live
+}

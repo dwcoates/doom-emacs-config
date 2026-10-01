@@ -1438,6 +1438,11 @@ func (c *client) KillTurn(ctx context.Context, req *shimv1.KillTurnRequest) (*sh
 	return unary(ctx, c, "kill_turn", req, validateKillTurnRequest, c.rpc.KillTurn)
 }
 
+// RollBackSession rewinds the vendor conversation to just before a prompt.
+func (c *client) RollBackSession(ctx context.Context, req *shimv1.RollBackSessionRequest) (*shimv1.RollBackSessionResponse, error) {
+	return unary(ctx, c, "roll_back_session", req, validateRollBackSessionRequest, c.rpc.RollBackSession)
+}
+
 // WatchBash opens one detached shell's stream.
 func (c *client) WatchBash(ctx context.Context, work *conversationv1.DetachedWorkId) (Stream[*conversationv1.AgentBash], error) {
 	if err := validateDetachedWorkID("WatchBashRequest.work", work); err != nil {

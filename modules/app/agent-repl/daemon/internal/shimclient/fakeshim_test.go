@@ -31,13 +31,15 @@ type fakeShim struct {
 	opened chan struct{}
 
 	// answers a test scripts.
-	startSessionResp   *shimv1.StartSessionResponse
-	startTurnResp      *shimv1.StartTurnResponse
-	killTurnResp       *shimv1.KillTurnResponse
-	watchAgentRefusal  error
-	watchAgentFrames   []*shimv1.WatchAgentResponse
-	watchBashRefusal   error
-	watchSessionRefuse error
+	startSessionResp    *shimv1.StartSessionResponse
+	startTurnResp       *shimv1.StartTurnResponse
+	killTurnResp        *shimv1.KillTurnResponse
+	rollBackSessionResp *shimv1.RollBackSessionResponse
+	rollBackSessionErr  error
+	watchAgentRefusal   error
+	watchAgentFrames    []*shimv1.WatchAgentResponse
+	watchBashRefusal    error
+	watchSessionRefuse  error
 
 	// shutdown stops the server; a test calls it through stop.
 	shutdown func()
@@ -303,6 +305,17 @@ func (f *fakeShim) KillTurn(_ context.Context, _ *connect.Request[shimv1.KillTur
 		return connect.NewResponse(f.killTurnResp), nil
 	}
 	return connect.NewResponse(&shimv1.KillTurnResponse{}), nil
+}
+
+func (f *fakeShim) RollBackSession(_ context.Context, _ *connect.Request[shimv1.RollBackSessionRequest]) (*connect.Response[shimv1.RollBackSessionResponse], error) {
+	f.record("RollBackSession")
+	if f.rollBackSessionErr != nil {
+		return nil, f.rollBackSessionErr
+	}
+	if f.rollBackSessionResp != nil {
+		return connect.NewResponse(f.rollBackSessionResp), nil
+	}
+	return connect.NewResponse(&shimv1.RollBackSessionResponse{}), nil
 }
 
 func (f *fakeShim) WatchBash(_ context.Context, _ *connect.Request[shimv1.WatchBashRequest], stream *connect.ServerStream[shimv1.WatchBashResponse]) error {

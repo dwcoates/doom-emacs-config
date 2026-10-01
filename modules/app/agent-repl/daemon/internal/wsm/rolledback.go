@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
+	"time"
 
 	"claude-repld/internal/dlog"
 )
@@ -77,4 +79,23 @@ func (s *store) RolledBackTurns(ctx context.Context, id WorkspaceID) ([]TurnID, 
 		return nil
 	})
 	return out, err
+}
+
+// TurnStartedAt answers when a workspace's turn was opened; ErrNotFound when
+// the workspace recorded no such turn (a turn the vendor started on its own).
+func (s *store) TurnStartedAt(ctx context.Context, id WorkspaceID, turn TurnID) (time.Time, error) {
+	var at time.Time
+	err := s.read(ctx, "daemon.wsm.turn_started_at", dlog.Context{"workspace": string(id), "turn": string(turn)}, func(ctx context.Context) error {
+		var started int64
+		err := s.db().QueryRowContext(ctx, `SELECT started_at FROM turns WHERE id = ? AND workspace_id = ?`, turn, id).Scan(&started)
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("wsm: turn %s of workspace %s: %w", turn, id, ErrNotFound)
+		}
+		if err != nil {
+			return err
+		}
+		at = fromNanos(started)
+		return nil
+	})
+	return at, err
 }
