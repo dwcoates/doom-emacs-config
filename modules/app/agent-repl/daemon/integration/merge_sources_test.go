@@ -71,14 +71,6 @@ func (s *sourcedRepo) awaitStartTurn(t *testing.T, n int) string {
 	return text(req.GetSaid())
 }
 
-func keepOpen() *agentreplv1.MergeWorkspaceSource {
-	return &agentreplv1.MergeWorkspaceSource{Source: &agentreplv1.MergeWorkspaceSource_OwnBranch{OwnBranch: &agentreplv1.MergeWorkspaceSourceOwnBranch{KeepOpen: true}}}
-}
-
-func branchSource(name string) *agentreplv1.MergeWorkspaceSource {
-	return &agentreplv1.MergeWorkspaceSource{Source: &agentreplv1.MergeWorkspaceSource_Branch{Branch: &agentreplv1.MergeWorkspaceSourceBranch{Name: name}}}
-}
-
 func TestAnOwnBranchKeptOpenLandsAndLeavesTheWorkspaceOpen(t *testing.T) {
 	t.Parallel()
 	// Arrange.
@@ -87,9 +79,9 @@ func TestAnOwnBranchKeptOpenLandsAndLeavesTheWorkspaceOpen(t *testing.T) {
 	harness.CommitWork(t, s.f.ws.GetDir())
 
 	// Act.
-	s.mergeAs(t, keepOpen())
+	s.mergeAs(t, harness.OwnBranch(true))
 	merge := s.awaitConcluded(t, root)
-	awaitLandingDeployed(t, s.d)
+	s.d.AwaitLandingDeployed()
 
 	// Assert.
 	if merge.GetSuccess() == nil {
@@ -118,9 +110,9 @@ func TestABranchWithAWorktreeIsRebasedThereAndLands(t *testing.T) {
 	s.repo.CommitIn(s.repo.Dir, "main.txt", "moved\n")
 
 	// Act.
-	s.mergeAs(t, branchSource("agent-fix"))
+	s.mergeAs(t, harness.BranchSource("agent-fix"))
 	merge := s.awaitConcluded(t, root)
-	awaitLandingDeployed(t, s.d)
+	s.d.AwaitLandingDeployed()
 
 	// Assert: landed, the branch's worktree kept, the requester left open.
 	if merge.GetSuccess() == nil {
@@ -142,9 +134,9 @@ func TestABranchWithNoWorktreeGetsOneThatIsRemovedAfterTheMerge(t *testing.T) {
 	s.repo.AddBranch("agent-loose")
 
 	// Act.
-	s.mergeAs(t, branchSource("agent-loose"))
+	s.mergeAs(t, harness.BranchSource("agent-loose"))
 	merge := s.awaitConcluded(t, root)
-	awaitLandingDeployed(t, s.d)
+	s.d.AwaitLandingDeployed()
 
 	// Assert: the worktree the daemon made is gone, and was under its state.
 	if merge.GetSuccess() == nil {
@@ -176,7 +168,7 @@ func TestAnotherWorkspacesBranchLandsAndClosesThatWorkspace(t *testing.T) {
 	s.mergeAs(t, &agentreplv1.MergeWorkspaceSource{Source: &agentreplv1.MergeWorkspaceSource_Workspace{
 		Workspace: &agentreplv1.MergeWorkspaceSourceWorkspace{Ref: other.ws}}})
 	merge := s.awaitConcluded(t, root)
-	awaitLandingDeployed(t, s.d)
+	s.d.AwaitLandingDeployed()
 
 	// Assert: the other workspace is merged and gone; the requester stays.
 	if merge.GetSuccess() == nil {
@@ -207,12 +199,12 @@ func TestAConflictIsResolvedByTheRequestersSessionAndTheRebaseContinues(t *testi
 	s.repo.ScriptRebaseConflict(mergeBranchOf(t, s.f.ws), 1, "work.txt")
 
 	// Act: the requester's own session resolves it.
-	s.mergeAs(t, ownBranch())
+	s.mergeAs(t, harness.OwnBranch(false))
 	brief := s.awaitStartTurn(t, 2)
 	s.repo.ResolveConflicts(s.f.ws.GetDir())
 	pushConcludedTurn(s.f.shim, mainAgent, "resolved")
 	merge := s.awaitConcluded(t, root)
-	awaitLandingDeployed(t, s.d)
+	s.d.AwaitLandingDeployed()
 
 	// Assert.
 	if !strings.Contains(brief, s.f.ws.GetDir()) {
@@ -240,8 +232,8 @@ func TestAResolutionThatGivesUpFailsInConflictsLeavesTheRebaseAndLetsTheNextMerg
 	behindRoot := behind.watchRootFeed()
 
 	// Act.
-	s.mergeAs(t, ownBranch())
-	if _, err := s.d.Client().MergeWorkspace(s.d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: behind.ws, Source: ownBranch()})); err != nil {
+	s.mergeAs(t, harness.OwnBranch(false))
+	if _, err := s.d.Client().MergeWorkspace(s.d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: behind.ws, Source: harness.OwnBranch(false)})); err != nil {
 		t.Fatalf("MergeWorkspace(behind): %v", err)
 	}
 	s.awaitStartTurn(t, 2)
@@ -260,7 +252,7 @@ func TestAResolutionThatGivesUpFailsInConflictsLeavesTheRebaseAndLetsTheNextMerg
 	merge := awaitRow(t, behind, behindRoot, "the merge behind's terminal", func(row *frontendv1.FeedRow) bool {
 		return row.GetActivity().GetMerge().GetSuccess() != nil
 	})
-	awaitLandingDeployed(t, s.d)
+	s.d.AwaitLandingDeployed()
 	if merge.GetActivity().GetMerge().GetSuccess() == nil {
 		t.Fatal("the merge behind the failed one did not land")
 	}
@@ -277,7 +269,7 @@ func TestExhaustedFixingAttemptsFailTheMergeInTests(t *testing.T) {
 	footer := s.d.WatchFooter(s.f.ws)
 
 	// Act: each fixing attempt's turn ends without a fix.
-	s.mergeAs(t, ownBranch())
+	s.mergeAs(t, harness.OwnBranch(false))
 	for attempt := 1; attempt <= 3; attempt++ {
 		s.awaitStartTurn(t, 1+attempt)
 		pushConcludedTurn(s.f.shim, mainAgent, "fix-attempt")
@@ -301,7 +293,7 @@ func TestATargetThatMovedBeforeCommittingStartsTheMergeOver(t *testing.T) {
 	root := s.f.watchRootFeed()
 
 	// Act.
-	s.mergeAs(t, ownBranch())
+	s.mergeAs(t, harness.OwnBranch(false))
 	s.awaitStartTurn(t, 2)
 	s.repo.CommitIn(s.repo.Dir, "main.txt", "moved while fixing\n")
 	s.script.SetExitCode(0)
@@ -312,7 +304,7 @@ func TestATargetThatMovedBeforeCommittingStartsTheMergeOver(t *testing.T) {
 		return m.GetSuccess() != nil || m.GetError() != nil
 	})
 	merge := row.GetActivity().GetMerge()
-	awaitLandingDeployed(t, s.d)
+	s.d.AwaitLandingDeployed()
 
 	// Assert: landed, after a second rebasing round that replayed the branch
 	// onto the new tip (the first found it already on the old one).
@@ -344,7 +336,7 @@ func TestABranchMergedUpstreamUpdatesTheDefaultBranchAndClosesTheRequester(t *te
 	s.mergeAs(t, &agentreplv1.MergeWorkspaceSource{Source: &agentreplv1.MergeWorkspaceSource_MergedUpstream{
 		MergedUpstream: &agentreplv1.MergeWorkspaceSourceMergedUpstream{}}})
 	merge := s.awaitConcluded(t, root)
-	awaitLandingDeployed(t, s.d)
+	s.d.AwaitLandingDeployed()
 
 	// Assert.
 	if merge.GetSuccess() == nil {
@@ -384,7 +376,7 @@ func TestNoMergeFactReachesAnyClientBeforeTheRequestingTurnEnds(t *testing.T) {
 
 	// Assert: the merge is put in line and lands.
 	merge := s.awaitConcluded(t, root)
-	awaitLandingDeployed(t, s.d)
+	s.d.AwaitLandingDeployed()
 	if merge.GetSuccess() == nil {
 		t.Fatalf("the merge ended %v, want landed once the turn ended", merge.GetResult())
 	}
@@ -396,11 +388,11 @@ func TestTheTestLogOpensThroughOpenInEditorByItsToken(t *testing.T) {
 	s := newSourcedRepo(t)
 	harness.CommitWork(t, s.f.ws.GetDir())
 	root := s.f.watchRootFeed()
-	s.mergeAs(t, keepOpen())
+	s.mergeAs(t, harness.OwnBranch(true))
 	merge := awaitRow(t, s.f, root, "the merge's terminal", func(row *frontendv1.FeedRow) bool {
 		return row.GetActivity().GetMerge().GetSuccess() != nil
 	})
-	awaitLandingDeployed(t, s.d)
+	s.d.AwaitLandingDeployed()
 	tests := s.f.awaitRowInFeed(merge.GetId(), "the tests tab with its log", func(row *frontendv1.FeedRow) bool {
 		return row.GetMergeTab().GetTests().GetLog() != nil
 	})
@@ -502,7 +494,7 @@ func TestAMissingConflictBriefFailsTheMergeLoudly(t *testing.T) {
 	s.repo.ScriptRebaseConflict(mergeBranchOf(t, s.f.ws), 1, "work.txt")
 
 	// Act.
-	s.mergeAs(t, ownBranch())
+	s.mergeAs(t, harness.OwnBranch(false))
 
 	// Assert.
 	awaitFooter(t, s.f, footer, "merge failed in other", func(v *frontendv1.FooterView) bool {
@@ -519,9 +511,9 @@ func TestALandedMergesLedgerRecordsEachStepsInterval(t *testing.T) {
 	root := s.f.watchRootFeed()
 
 	// Act.
-	s.mergeAs(t, keepOpen())
+	s.mergeAs(t, harness.OwnBranch(true))
 	s.awaitConcluded(t, root)
-	awaitLandingDeployed(t, s.d)
+	s.d.AwaitLandingDeployed()
 	s.d.Stop()
 
 	// Assert.
@@ -572,7 +564,7 @@ func TestARelaunchedDaemonReplaysAMirroredRepairTurnInItsTabAndOnTheRoot(t *test
 	harness.CommitWork(t, s.f.ws.GetDir())
 	s.repo.CommitIn(s.repo.Dir, "main.txt", "moved\n")
 	s.repo.ScriptRebaseConflict(mergeBranchOf(t, s.f.ws), 1, "work.txt")
-	s.mergeAs(t, keepOpen())
+	s.mergeAs(t, harness.OwnBranch(true))
 	req := s.f.shim.ExpectStartTurn()
 	s.d.AwaitWorkspaceLogOperationCount(s.f.ws.GetDir(), harness.OpTurnOpened, 2)
 	repair := req.GetTurn().GetValue()
@@ -581,7 +573,7 @@ func TestARelaunchedDaemonReplaysAMirroredRepairTurnInItsTabAndOnTheRoot(t *test
 	head := awaitRow(t, s.f, root, "the merge's landed terminal", func(row *frontendv1.FeedRow) bool {
 		return row.GetActivity().GetMerge().GetSuccess() != nil
 	})
-	awaitLandingDeployed(t, s.d)
+	s.d.AwaitLandingDeployed()
 	livePage, _ := s.f.openFeedOnceCarrying("the repair prompt's root copy", func(p *frontendv1.FeedPage) bool {
 		return pagePrompt(p, repair)
 	})
