@@ -135,9 +135,14 @@ type fakeStore struct {
 	liveAsked bool
 
 	// the locator lookup's answer, and what the last lookup asked for
-	byTaskAgent   string
-	byTaskFound   bool
-	byTaskErr     error
+	byTaskAgent string
+	byTaskFound bool
+	byTaskErr   error
+	// commission is what AgentCommission answers (nil reads as "no start on
+	// record"), commissionErr its failure, and commissionFor the agent asked.
+	commission    *conversationv1.AgentSubagentPrompt
+	commissionErr error
+	commissionFor string
 	byTaskSession string
 	byTaskID      string
 	byTaskAsked   bool
@@ -264,6 +269,13 @@ func (f *fakeStore) AgentByVendorTask(_ context.Context, session, vendorTaskID s
 	return f.byTaskAgent, f.byTaskFound, f.byTaskErr
 }
 
+func (f *fakeStore) AgentCommission(_ context.Context, agentID string) (*conversationv1.AgentSubagentPrompt, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.commissionFor = agentID
+	return f.commission, f.commission != nil, f.commissionErr
+}
+
 func (f *fakeStore) ShellRunClaims(_ context.Context, vendorTaskIDs []string) ([]db.ClaimedRun, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -363,7 +375,7 @@ func line(agent, pointer string, seq uint64) LineWritten {
 		AgentID: agent,
 		Line: &storev1.StoreLineAt{
 			At:   &storev1.StoreItemPointer{Value: pointer},
-			Line: &storev1.StorePageLine{PageAgentId: agentID(agent)},
+			Line: &storev1.StorePageLine{Book: &storev1.StorePageLine_PageAgentId{PageAgentId: agentID(agent)}},
 		},
 		WriteSeq: seq,
 	}
@@ -375,7 +387,7 @@ func validEntry(writeID, upsertKey string) *storev1.StoreEntry {
 		WriteId:   writeID,
 		UpsertKey: upsertKey,
 		Entry: &storev1.StoreEntry_AgentUpdate{AgentUpdate: &storev1.StoreAgentUpdate{
-			AgentInfo: &storev1.StoreAgentUpdate_ServeableFrame{ServeableFrame: &storev1.StorePageLine{PageAgentId: agentID("a1")}},
+			AgentInfo: &storev1.StoreAgentUpdate_ServeableFrame{ServeableFrame: &storev1.StorePageLine{Book: &storev1.StorePageLine_PageAgentId{PageAgentId: agentID("a1")}}},
 		}},
 	}
 }
@@ -383,7 +395,7 @@ func validEntry(writeID, upsertKey string) *storev1.StoreEntry {
 func attributedEntry(writeID, upsertKey, topLevel, book string) *storev1.StoreEntry {
 	entry := validEntry(writeID, upsertKey)
 	entry.GetAgentUpdate().TopLevel = agentID(topLevel)
-	entry.GetAgentUpdate().GetServeableFrame().PageAgentId = agentID(book)
+	entry.GetAgentUpdate().GetServeableFrame().Book = &storev1.StorePageLine_PageAgentId{PageAgentId: agentID(book)}
 	return entry
 }
 
@@ -565,6 +577,33 @@ func TestWriteBatchSuccessArmCarriesLegacyBookConflictSkips(t *testing.T) {
 	}
 	if got := success.GetSkipped()[0]; got.GetUpsertKey() != "u1" || got.GetFromBook() != "agent-1" || got.GetToBook() != "agent-2" {
 		t.Fatalf("skipped[0] = {%s %s %s}, want {u1 agent-1 agent-2}", got.GetUpsertKey(), got.GetFromBook(), got.GetToBook())
+	}
+}
+
+// AN UNPLACED ENTRY RIDES SUCCESS TOO: the batch was durable for every other
+// entry, and the producer records the loss from the store's own account.
+func TestWriteBatchSuccessArmCarriesUnplacedEntries(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	store.writeResult = WriteResult{Written: 1, Unplaced: []UnplacedEntry{
+		{UpsertKey: "activity:toolu_nested", Detail: "no stored row holds this upsert_key"},
+	}}
+	h := newHarness(t, store, 0)
+
+	// Act.
+	res, err := h.client.WriteBatch(context.Background(), connect.NewRequest(&storev1.WriteBatchRequest{
+		WriteClass: interactiveClass(),
+		Producer:   "claude-shim:s1",
+		Batch:      &storev1.EntryBatch{Entries: []*storev1.StoreEntry{validEntry("w1", "u1")}},
+	}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("WriteBatch = %v, want nil", err)
+	}
+	unplaced := res.Msg.GetSuccess().GetUnplaced()
+	if len(unplaced) != 1 || unplaced[0].GetUpsertKey() != "activity:toolu_nested" || unplaced[0].GetDetail() != "no stored row holds this upsert_key" {
+		t.Fatalf("unplaced = %v, want the one entry with the store's account", unplaced)
 	}
 }
 
@@ -1432,7 +1471,7 @@ func TestReadAgentPageServesAPage(t *testing.T) {
 	store.page = &storev1.ReadAgentPageSuccess{
 		Lines: []*storev1.StoreLineAt{{
 			At:   &storev1.StoreItemPointer{Value: "sip1-8"},
-			Line: &storev1.StorePageLine{PageAgentId: agentID("a1")},
+			Line: &storev1.StorePageLine{Book: &storev1.StorePageLine_PageAgentId{PageAgentId: agentID("a1")}},
 		}},
 		Boundary: &storev1.ReadAgentPageSuccess_Floor{Floor: &storev1.ReadAgentPageFloor{}},
 	}
@@ -1608,6 +1647,63 @@ func TestGetAgentByVendorTaskServesTheFoundAgent(t *testing.T) {
 	}
 	if got := res.Msg.GetSuccess().GetAgent().GetValue(); got != "toolu_spawn" {
 		t.Fatalf("result = %v, want the success arm naming toolu_spawn", res.Msg.GetResult())
+	}
+}
+
+func TestGetAgentByVendorTaskCarriesTheRecordedCommission(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	store.byTaskAgent, store.byTaskFound = "toolu_spawn", true
+	description := "fix the shim"
+	store.commission = &conversationv1.AgentSubagentPrompt{Text: "go", Description: &description}
+	h := newHarness(t, store, 0)
+
+	// Act.
+	res, err := h.client.GetAgentByVendorTask(context.Background(), connect.NewRequest(scopedAgentByVendorTask()))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("GetAgentByVendorTask = %v, want nil", err)
+	}
+	if got := res.Msg.GetSuccess().GetCommission().GetDescription(); got != description || store.commissionFor != "toolu_spawn" {
+		t.Fatalf("commission = %v (read for %q), want the found agent's recorded commission", res.Msg.GetSuccess().GetCommission(), store.commissionFor)
+	}
+}
+
+func TestGetAgentByVendorTaskLeavesTheCommissionUnsetWhenNoStartIsRecorded(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	store.byTaskAgent, store.byTaskFound = "toolu_spawn", true
+	h := newHarness(t, store, 0)
+
+	// Act.
+	res, err := h.client.GetAgentByVendorTask(context.Background(), connect.NewRequest(scopedAgentByVendorTask()))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("GetAgentByVendorTask = %v, want nil", err)
+	}
+	if success := res.Msg.GetSuccess(); success.GetAgent().GetValue() != "toolu_spawn" || success.Commission != nil {
+		t.Fatalf("success = %v, want the agent with the commission unset", success)
+	}
+}
+
+func TestGetAgentByVendorTaskMapsACommissionReadFailureToTheStorageFailureArm(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	store.byTaskAgent, store.byTaskFound = "toolu_spawn", true
+	store.commissionErr = fmt.Errorf("%w: scan failed", ErrStorage)
+	h := newHarness(t, store, 0)
+
+	// Act.
+	res, err := h.client.GetAgentByVendorTask(context.Background(), connect.NewRequest(scopedAgentByVendorTask()))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("GetAgentByVendorTask = %v, want nil", err)
+	}
+	if res.Msg.GetFailure().GetStorageFailure() == nil {
+		t.Fatalf("result = %v, want the storage_failure arm", res.Msg.GetResult())
 	}
 }
 

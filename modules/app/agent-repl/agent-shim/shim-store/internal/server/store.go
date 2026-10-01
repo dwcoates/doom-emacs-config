@@ -14,6 +14,7 @@ package server
 import (
 	"context"
 
+	conversationv1 "agentrepl/proto/conversation/v1"
 	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/shim-store/internal/db"
 )
@@ -32,6 +33,7 @@ type (
 	BashRowWritten = db.BashRowWritten
 	WriteResult    = db.WriteResult
 	SkippedEntry   = db.SkippedEntry
+	UnplacedEntry  = db.UnplacedEntry
 	OpenedPage     = db.OpenedPage
 	BashRunReplay  = db.BashRunReplay
 	// WriteClass is which queue a write takes into the store's one writer.
@@ -67,6 +69,10 @@ type Store interface {
 	// AgentByVendorTask answers which agent of `session`'s lineage a vendor
 	// task locator names; `found` false with no error is the not-found answer.
 	AgentByVendorTask(ctx context.Context, session, vendorTaskID string) (agentID string, found bool, err error)
+	// AgentCommission answers what an agent was commissioned with, as the
+	// record holds it from the agent's spawn start; `found` false with no
+	// error when the record holds no start for it.
+	AgentCommission(ctx context.Context, agentID string) (commission *conversationv1.AgentSubagentPrompt, found bool, err error)
 	// ShellRunClaims answers every claim on record for the asked task ids, each
 	// with its run's owning book when that is on record.
 	ShellRunClaims(ctx context.Context, vendorTaskIDs []string) ([]db.ClaimedRun, error)

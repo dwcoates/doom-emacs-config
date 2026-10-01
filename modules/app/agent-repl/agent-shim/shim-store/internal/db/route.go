@@ -123,6 +123,12 @@ type routed struct {
 	// bashRow is the row a WatchBashRun watcher serves. Non-nil exactly when
 	// kind == kindBash.
 	bashRow *storev1.StoreAgentBash
+	// ownerUnknown marks a page line its producer wrote `owner_unknown`
+	// (store.v1 StorePageLineOwnerUnknown): `book` is NULL until applyEntry
+	// places the line in the book that already holds its upsert_key
+	// (placeUnownedLine), and nothing downstream of the placement ever sees it
+	// set.
+	ownerUnknown bool
 	// workflowNotImplemented marks an entry that carries workflow material this
 	// wave serves nothing for. It is a FLAG rather than a `kind`, because a
 	// workflow-kind DETACHED ANNOUNCEMENT is a page line like every other
@@ -304,6 +310,13 @@ func classifyServeableFrame(r routed, line *storev1.StorePageLine, index int) (r
 	if line == nil {
 		return routed{}, invalidFieldf(entryField(index, "agent_update.serveable_frame"), "entries[%d].agent_update.serveable_frame is nil", index)
 	}
+	switch line.GetBook().(type) {
+	case *storev1.StorePageLine_PageAgentId:
+	case *storev1.StorePageLine_OwnerUnknown:
+		return classifyUnownedLine(r, line, index)
+	default:
+		return routed{}, invalidFieldf(entryField(index, "agent_update.serveable_frame.book"), "entries[%d].agent_update.serveable_frame sets no `book` arm — a page line names its book or says its owner is unknown", index)
+	}
 	book := line.GetPageAgentId().GetValue()
 	if book == "" {
 		return routed{}, invalidFieldf(entryField(index, "agent_update.serveable_frame.page_agent_id"), "entries[%d].agent_update.serveable_frame.page_agent_id is unset or empty — a page line must name its book", index)
@@ -406,24 +419,69 @@ func classifyAgentFrame(r routed, line *storev1.StorePageLine, frame *conversati
 	if err := requireBookMatchesFrame(book, frame.GetAgentId().GetValue(), "agent_frame.agent_id", index); err != nil {
 		return routed{}, err
 	}
+	workflow, err := validateFrameResult(frame, index)
+	if err != nil {
+		return routed{}, err
+	}
+	r.workflowNotImplemented = r.workflowNotImplemented || workflow
+	r.kind = kindPageLine
+	r.book = sql.NullString{String: book, Valid: true}
+	r.pageLine = line
+	return r, nil
+}
 
+// classifyUnownedLine is the base function for a page line written
+// `owner_unknown` (store.v1 StorePageLineOwnerUnknown).
+//
+// ONLY AN AGENT FRAME MAY BE UNOWNED, AND IT STATES NO ATTRIBUTION. A prompt and
+// a peer message always name their recipient, so either one unowned is a
+// producer defect; a frame that names an agent while its envelope says the
+// owner is unknown states two contradicting things, and so does a top_level.
+// The line is validated exactly as a booked frame is, and is left with no book:
+// applyEntry places it (placeUnownedLine) before anything reads one.
+func classifyUnownedLine(r routed, line *storev1.StorePageLine, index int) (routed, error) {
+	frame := line.GetAgentItem().GetAgentFrame()
+	if frame == nil {
+		return routed{}, invalidFieldf(entryField(index, "agent_update.serveable_frame.owner_unknown"), "entries[%d].agent_update.serveable_frame is owner_unknown but carries no agent_frame — only an agent frame can be filed by its unit's existing row; a prompt or a peer message names its recipient", index)
+	}
+	if frame.GetAgentId().GetValue() != "" {
+		return routed{}, invalidFieldf(frameField(index, "agent_frame.agent_id"), "entries[%d].agent_frame.agent_id is %q but the line is owner_unknown — an unowned frame states no attribution; the store stamps the book it is placed in", index, frame.GetAgentId().GetValue())
+	}
+	if r.topLevel.Valid {
+		return routed{}, invalidFieldf(entryField(index, "agent_update.top_level"), "entries[%d].agent_update.top_level is %q but the line is owner_unknown — the placed row keeps the stored row's top_level", index, r.topLevel.String)
+	}
+	workflow, err := validateFrameResult(frame, index)
+	if err != nil {
+		return routed{}, err
+	}
+	r.workflowNotImplemented = r.workflowNotImplemented || workflow
+	r.kind = kindPageLine
+	r.ownerUnknown = true
+	r.pageLine = line
+	return r, nil
+}
+
+// validateFrameResult validates an agent frame's `result` arm, for a booked
+// line and an unowned one alike, and reports whether it carries workflow
+// material this wave serves nothing for.
+func validateFrameResult(frame *conversationv1.AgentFrame, index int) (workflow bool, err error) {
 	switch arm := frame.GetResult().(type) {
 	case *conversationv1.AgentFrame_Update:
 		if err := validateAgentUpdate(arm.Update, index); err != nil {
-			return routed{}, err
+			return false, err
 		}
 	case *conversationv1.AgentFrame_Success:
 		if arm.Success.GetOutcome() == nil {
-			return routed{}, invalidFieldf(frameField(index, "agent_frame.success"), "entries[%d].agent_frame.success sets no `outcome` arm", index)
+			return false, invalidFieldf(frameField(index, "agent_frame.success"), "entries[%d].agent_frame.success sets no `outcome` arm", index)
 		}
 	case *conversationv1.AgentFrame_Failure:
 		if arm.Failure.GetFailure() == nil {
-			return routed{}, invalidFieldf(frameField(index, "agent_frame.failure"), "entries[%d].agent_frame.failure sets no `failure` arm", index)
+			return false, invalidFieldf(frameField(index, "agent_frame.failure"), "entries[%d].agent_frame.failure sets no `failure` arm", index)
 		}
 	case *conversationv1.AgentFrame_DetachedWork:
 		kind, err := validateDetachedWork(arm.DetachedWork, index)
 		if err != nil {
-			return routed{}, err
+			return false, err
 		}
 		// AN ANNOUNCEMENT IS A PAGE LINE. "Work left this stream" is something
 		// the reader of the announcing agent's book must SEE — it is the
@@ -431,17 +489,11 @@ func classifyAgentFrame(r routed, line *storev1.StorePageLine, frame *conversati
 		// claiming work that is still in the turn. It is also the one durable
 		// copy of what was announced (the spool, the cause, the timeout), which
 		// is why the lifecycle table keeps only the join columns.
-		if kind == detachedKindWorkflow {
-			r.workflowNotImplemented = true
-		}
+		workflow = kind == detachedKindWorkflow
 	default:
-		return routed{}, invalidFieldf(frameField(index, "agent_frame"), "entries[%d].agent_frame sets no `result` arm", index)
+		return false, invalidFieldf(frameField(index, "agent_frame"), "entries[%d].agent_frame sets no `result` arm", index)
 	}
-
-	r.kind = kindPageLine
-	r.book = sql.NullString{String: book, Valid: true}
-	r.pageLine = line
-	return r, nil
+	return workflow, nil
 }
 
 // validateAgentUpdate is the base function for conversation.v1.AgentUpdate at

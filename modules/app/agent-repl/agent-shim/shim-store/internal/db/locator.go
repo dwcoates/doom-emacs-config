@@ -3,8 +3,10 @@ package db
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"strings"
 
+	conversationv1 "agentrepl/proto/conversation/v1"
 	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/shim-store/internal/logging"
 )
@@ -102,4 +104,51 @@ func (d *DB) AgentByVendorTask(ctx context.Context, session, vendorTaskID string
 		return "", false, d.refuse(base, storagef(errAmbiguousLocator,
 			"vendor task %s is paired with %d agents of one lineage (%s)", vendorTaskID, len(agents), strings.Join(agents, ", ")))
 	}
+}
+
+// agentCommissionSQL reads the commission columns of one agent row, by its
+// primary key. `forked_from_caller` is what says a start was recorded: only
+// the start's own write (createSpawnedAgent) sets it, and every other row
+// (lineage from a settled spawn, an ensured placeholder) leaves it NULL.
+const agentCommissionSQL = `
+	  SELECT description, prompt_text, subagent_type, requested_name, requested_model,
+	         isolation, forked_from_caller
+	  FROM agent WHERE agent_id = ?`
+
+// AgentCommission answers WHAT AN AGENT WAS COMMISSIONED WITH, as the record
+// holds it from the agent's spawn start (store.v1
+// GetAgentByVendorTaskSuccess.commission).
+//
+// `found` is false with no error when the record holds no start for the agent:
+// no row at all, or a row that knows only its lineage. A row whose recorded
+// isolation names no arm this store writes is a corrupt record and a storage
+// failure, never an answer.
+func (d *DB) AgentCommission(ctx context.Context, agentID string) (*conversationv1.AgentSubagentPrompt, bool, error) {
+	base := logging.Fields{Operation: "store.db.agent-commission", Table: "agent", AgentID: agentID}
+	if agentID == "" {
+		return nil, false, d.refuse(base, invalidFieldf("agent", "agent is empty — the commission read names the agent it reads"))
+	}
+	started := d.mono()
+	var row commissionRow
+	err := d.read.QueryRowContext(ctx, agentCommissionSQL, agentID).Scan(
+		&row.description, &row.text, &row.subagentType, &row.requestedName, &row.requestedModel,
+		&row.isolation, &row.forkedFromCaller)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		d.observeQuery(StatementAgentCommission, "agent", base, started, 0)
+		d.log.Log(base, "the record holds no row for agent %s, so no commission", agentID)
+		return nil, false, nil
+	case err != nil:
+		return nil, false, d.refuse(base, storagef(err, "reading the commission of agent %s", agentID))
+	}
+	d.observeQuery(StatementAgentCommission, "agent", base, started, 1)
+	if !row.forkedFromCaller.Valid {
+		d.log.Log(base, "the record holds agent %s's lineage but no start, so no commission", agentID)
+		return nil, false, nil
+	}
+	commission, err := row.commission()
+	if err != nil {
+		return nil, false, d.refuse(base, err)
+	}
+	return commission, true, nil
 }

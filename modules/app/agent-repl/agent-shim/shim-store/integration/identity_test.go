@@ -73,8 +73,8 @@ func TestAPageLineWhoseEnvelopeAndFrameDisagreeIsRefused(t *testing.T) {
 		&storev1.StoreAgentUpdate{
 			AgentInfo: &storev1.StoreAgentUpdate_ServeableFrame{
 				ServeableFrame: &storev1.StorePageLine{
-					PageAgentId: agentID("main"),
-					AgentItem:   frameItem(responseFrame("someone-else", "act-1", "x")),
+					Book:      &storev1.StorePageLine_PageAgentId{PageAgentId: agentID("main")},
+					AgentItem: frameItem(responseFrame("someone-else", "act-1", "x")),
 				},
 			},
 		}))
