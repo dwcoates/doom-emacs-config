@@ -56,11 +56,10 @@ describe("arm coverage", () => {
     assertVocabCoversArms(RENDER_COLORS.roster_status, [...ROSTER_STATUS_ARMS], "roster_status");
   });
 
-  it("covers both when-column arms", () => {
+  it("covers every when-column arm", () => {
     assertCoversOneof(RosterRowWhenSchema, "shown", [
       "active",
       "created",
-      "lastSelected",
       "merged",
     ]);
   });
@@ -305,15 +304,6 @@ describe("row decoration", () => {
 });
 
 describe("the when column", () => {
-  it("draws a relative age from the last-selected arm", async () => {
-    // Arrange / Act
-    await withRoster({ rows: [rosterRow({ when: "lastSelected", whenAtMs: 0n })] });
-    // Assert
-    expect(harness.$(`[data-roster-row="${WORKSPACE_ID}"] [data-when]`)?.dataset.when).toBe(
-      "lastSelected",
-    );
-  });
-
   it("draws a relative age from the active arm", async () => {
     // Arrange / Act: `active` is what this build's daemon sends — when the
     // workspace LAST DID REAL WORK, not when it was last looked at.
@@ -359,9 +349,9 @@ describe("the when column", () => {
     expect(harness.$(`[data-roster-row="${WORKSPACE_ID}"] [data-when]`)?.dataset.when).toBe("merged");
   });
 
-  it("ages the figure as time passes", async () => {
+  it("ages an activity figure as time passes", async () => {
     // Arrange
-    await withRoster({ rows: [rosterRow({ when: "lastSelected", whenAtMs: 0n })] });
+    await withRoster({ rows: [rosterRow({ when: "active", whenAtMs: 0n })] });
     const before = harness.$(`[data-roster-row="${WORKSPACE_ID}"] [data-when]`)?.textContent;
     // Act
     await harness.tick(120_000);

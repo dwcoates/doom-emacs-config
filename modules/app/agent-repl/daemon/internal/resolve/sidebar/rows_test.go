@@ -219,10 +219,9 @@ func TestTheWhenColumnIgnoresLastSelected(t *testing.T) {
 	r.SetRegistry(registry(ws))
 
 	// Assert — the active arm, at the activity instant, not the selection one.
+	// The when column has no selection arm at all any more (field 1 is
+	// reserved), so only the instant it shows can regress.
 	row := onlyRow(t, r)
-	if row.GetWhen().GetLastSelected() != nil {
-		t.Fatalf("when = %v, want no last-selected arm", row.GetWhen())
-	}
 	if got := row.GetWhen().GetActive().GetAtMs(); got != epoch.Add(time.Hour).UnixMilli() {
 		t.Fatalf("when = %d, want the last-activity instant, never the later selection", got)
 	}
