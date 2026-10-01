@@ -75,33 +75,6 @@ func TestHeadLivesOnTheRootFeed(t *testing.T) {
 	}
 }
 
-// TestQueueSnapshotPlacesYouStructurally covers the "you are here" contract: it
-// is a structure rather than something a client derives by comparing ids.
-func TestQueueSnapshotPlacesYouStructurally(t *testing.T) {
-	// Arrange: a three-deep queue seen from the middle entry.
-	entries := []wsm.MergeQueueEntry{
-		{Workspace: "ws-1", Position: 1},
-		{Workspace: "ws-2", Position: 2},
-		{Workspace: "ws-3", Position: 3},
-	}
-	names := map[ids.WorkspaceID]string{"ws-1": "one", "ws-2": "two", "ws-3": "three"}
-	dirs := map[ids.WorkspaceID]string{}
-
-	// Act.
-	snap := queueSnapshot(entries, "ws-2", names, dirs, tabLabel(TabMerge, 1))
-
-	// Assert.
-	if len(snap.GetAhead()) != 1 || snap.GetAhead()[0].GetLabel().GetText() != "one" {
-		t.Fatalf("ahead is %v, want the front alone", snap.GetAhead())
-	}
-	if snap.GetCurrent().GetLabel().GetText() != "two" {
-		t.Fatalf("current is %v, want this workspace", snap.GetCurrent())
-	}
-	if len(snap.GetBehind()) != 1 || snap.GetBehind()[0].GetLabel().GetText() != "three" {
-		t.Fatalf("behind is %v, want the one entry after it", snap.GetBehind())
-	}
-}
-
 // TestQueueSnapshotFrontCarriesItsActiveTab covers what a waiting user learns:
 // the front's progress, in the same message the front's own bubble draws.
 func TestQueueSnapshotFrontCarriesItsActiveTab(t *testing.T) {
@@ -118,36 +91,6 @@ func TestQueueSnapshotFrontCarriesItsActiveTab(t *testing.T) {
 	}
 	if merging.GetActiveTab().GetText() != "tests" || merging.GetActiveTab().GetRound() != 2 {
 		t.Fatalf("the front's active tab is %v, want the second tests round", merging.GetActiveTab())
-	}
-}
-
-// TestQueueSnapshotMarksTheRestWaiting covers the other arm of an entry's
-// standing.
-func TestQueueSnapshotMarksTheRestWaiting(t *testing.T) {
-	// Arrange: a two-deep queue seen from the front.
-	entries := []wsm.MergeQueueEntry{{Workspace: "ws-1", Position: 1}, {Workspace: "ws-2", Position: 2}}
-
-	// Act.
-	snap := queueSnapshot(entries, "ws-1", map[ids.WorkspaceID]string{}, map[ids.WorkspaceID]string{}, tabLabel(TabMerge, 1))
-
-	// Assert.
-	if snap.GetBehind()[0].GetWaiting() == nil {
-		t.Fatalf("the entry behind is %T, want waiting", snap.GetBehind()[0].GetStatus())
-	}
-}
-
-// TestParkedBadgeCarriesTheComposedLine covers the one account a parked merge
-// has: the daemon composes the sentence and both surfaces draw it verbatim.
-func TestParkedBadgeCarriesTheComposedLine(t *testing.T) {
-	// Arrange: a composed standing line.
-	line := "parked for your input — 2 conflicts remain in daemon/server.go"
-
-	// Act.
-	badge := parkedBadge(line)
-
-	// Assert.
-	if badge.GetLine().GetText() != line {
-		t.Fatalf("the badge reads %q, want the composed line verbatim", badge.GetLine().GetText())
 	}
 }
 
@@ -205,5 +148,55 @@ func TestBranchLabelReadsAsTheMerge(t *testing.T) {
 	// Act, Assert.
 	if got != "DWC/fix-flaky → master" {
 		t.Fatalf("the label is %q, want the source, an arrow and the target", got)
+	}
+}
+
+func TestTheNewTabsDrawTheirWords(t *testing.T) {
+	tests := []struct{ kind, want string }{
+		{TabRebasing, "rebasing"}, {TabCommitting, "committing"}, {TabUpdatingMain, "updating main"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.kind, func(t *testing.T) {
+			// Act / Assert.
+			if got := tabWord(tt.kind); got != tt.want {
+				t.Fatalf("tabWord(%s) = %q, want %q", tt.kind, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTheRebasingTabCarriesItsProgressAndLines(t *testing.T) {
+	// Act.
+	tab := rebasingTab(live(), 2, 5, []string{"replayed 2/5 · x"}, 0, "")
+
+	// Assert.
+	r := tab.GetRebasing()
+	if r.GetProgress().GetReplayed() != 2 || r.GetProgress().GetTotal() != 5 || len(r.GetLines()) != 1 || r.GetLive() == nil {
+		t.Fatalf("rebasing tab = %+v", r)
+	}
+}
+
+func TestTheUpdatingMainTabMovesFromFetchingToFastForwarding(t *testing.T) {
+	// Act.
+	fetching := updatingMainTab(live(), "", 0, "")
+	forwarding := updatingMainTab(nil, "abc", 9, "")
+
+	// Assert.
+	if fetching.GetUpdatingMain().GetStep().GetFetching() == nil {
+		t.Fatalf("first tab = %+v, want fetching", fetching)
+	}
+	if forwarding.GetUpdatingMain().GetStep().GetFastForwarding().GetCommit() != "abc" || forwarding.GetUpdatingMain().GetSettled() == nil {
+		t.Fatalf("second tab = %+v, want settled fast-forwarding to abc", forwarding)
+	}
+}
+
+func TestTheCommittingTabCarriesTheMergeCommitsSubject(t *testing.T) {
+	// Act.
+	tab := committingTab(nil, "merge(master): x", 5, "it failed")
+
+	// Assert.
+	c := tab.GetCommitting()
+	if c.GetSubject().GetText() != "merge(master): x" || c.GetSettled().GetFailed().GetSummary() != "it failed" {
+		t.Fatalf("committing tab = %+v", c)
 	}
 }

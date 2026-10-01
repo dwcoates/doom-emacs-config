@@ -53,6 +53,16 @@ const (
 	// ArmNotPaused refuses an unpause of a queue that is not paused
 	// (UpdateMergeQueueError.not_paused).
 	ArmNotPaused = "not_paused"
+	// ArmUnknownSourceWorkspace refuses a request whose source workspace is
+	// not open, is in another repository, or is the requester itself
+	// (MergeWorkspaceError.unknown_source_workspace).
+	ArmUnknownSourceWorkspace = "unknown_source_workspace"
+	// ArmUnknownBranch refuses a request whose source branch does not exist
+	// (MergeWorkspaceError.unknown_branch).
+	ArmUnknownBranch = "unknown_branch"
+	// ArmUnknownMergeTestLog refuses a test log token that names no log this
+	// daemon holds for the workspace (OpenInEditorError.unknown_merge_test_log).
+	ArmUnknownMergeTestLog = "unknown_merge_test_log"
 )
 
 // RefusalError is one pre-state refusal: which arm the contract owes it, and
