@@ -144,6 +144,15 @@ func (r *resolver) stateLocked(ws ids.WorkspaceID) *wsState {
 	return s
 }
 
+// RetryStanding reports a standing API retry holding the running turn
+// (retryBlocks). A workspace the footer has never seen has none.
+func (r *resolver) RetryStanding(ws ids.WorkspaceID) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s, ok := r.states[ws]
+	return ok && s.retryBlocks()
+}
+
 // logOf answers the workspace's logger. An unbound workspace is an invariant
 // violation, recorded as one on the global sink — the only sink that exists
 // before a directory is known — rather than silently dropped.
