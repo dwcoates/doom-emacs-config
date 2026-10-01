@@ -91,9 +91,10 @@
 (declare-function agent-repl-host-ref "agent-repl-host" (ws))
 (declare-function agent-repl-host-conn "agent-repl-host" (ws))
 (declare-function agent-repl-host-composer-gate "agent-repl-host" (ws))
+(declare-function agent-repl-host-selection "agent-repl-host" (ws))
 (declare-function agent-repl-link-primary "agent-repl-daemon-link" ())
 (declare-function agent-repl-rpc-submit-prompt "agent-repl-rpc" (conn request &rest keys))
-(declare-function agent-repl-rpc-select-response "agent-repl-rpc" (conn request &rest keys))
+(declare-function agent-repl-rpc-select-feed-row "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-held-edit-active-p "held-edit" (ws))
 (declare-function agent-repl-held-edit-commit "held-edit" (ws said snapshot))
 (declare-function agent-repl-held-edit-cancel "held-edit" (ws))
@@ -201,17 +202,6 @@ Each element is the plist `(:path ABSOLUTE-PATH :media-type MIME)'.
 pasteboard image; `agent-repl--send' turns each entry into one
 `ImageBlock' beside the text block and clears the list on a submission
 the daemon accepted.")
-
-(defvar-local agent-repl--input-response-selection nil
-  "The final-response row this composer is currently REPLYING TO, or nil.
-The decoded `frontend.v1.FeedId' plist `(:value STRING)' the daemon acked
-from a `SelectResponse' nav, buffer-local to THIS composer because a reply
-target is about this workspace's feed and no other.  Non-nil is the whole
-\"a selection is active\" fact: `C-p'/`C-n' record it, escape-twice and an
-accepted submit clear it, and the next submit rides it as
-`reference_response_feedid'.  The daemon owns the authoritative selection
-state (it also pushes it to the webapp); this is Emacs's own copy for the
-escape state machine and the submit path.")
 
 (defvar-local agent-repl--input-flash-timer-key nil
   "Unique core timer-registry key for this composer's notice dwell.")
@@ -416,111 +406,125 @@ on a refusal would be silently lost user intent."
                          ws (length agent-repl-input-attachments))
         (setq agent-repl-input-attachments nil)))))
 
-;;;; ---- Response selection (reply to a past response) -------------------
+;;;; ---- Feed selection (reply to a response, roll back to a prompt) -------
 ;;
-;; REPLY-TO-A-PAST-RESPONSE, command-mode side.  In the composer's evil
-;; NORMAL state (command mode), `C-p'/`C-n' walk the ordered final-response
-;; rows and escape-twice clears the walk.  The DAEMON owns the selection
-;; state per workspace: it knows the ordered rows, so it COMPUTES the newly
-;; selected feedid (both directions start at the most recent and wrap at each
-;; end) and pushes it to the webapp; Emacs sends only the DIRECTION and keeps
-;; a buffer-local copy of the acked feedid for the escape state machine and
-;; the submit path.  The next submit rides that feedid as
-;; `reference_response_feedid'; the daemon prepends a copy of the referenced
-;; response before delivering.
+;; The feed's SELECTION, command-mode side.  In the composer, `C-p'/`C-n'
+;; (evil normal state) step through the final responses -- the next prompt
+;; sent replies to the selected one -- and `C-S-p'/`C-S-n' (normal and insert
+;; state) step through the prompts a rollback can reach; escape-twice clears
+;; it.  The DAEMON owns the selection per workspace: it knows the ordered
+;; rows, so it COMPUTES where a step lands (both directions start at the
+;; newest row and wrap at each end), pushes the result to the webapp and to
+;; the host watch, and applies its own selection when a prompt is sent.
+;; Emacs sends only the MOVE, and reads which KIND of row is selected off the
+;; host watch (`agent-repl-host-selection') for the escape state machine.
 
-(defconst agent-repl--input-response-selection-escape-warning
-  "reply-to-response: press escape again to clear the selection"
+(defconst agent-repl--input-selection-escape-warning
+  "selection: press escape again to clear the selection"
   "The minibuffer WARNING shown on the FIRST command-mode escape.
 No y/n confirmation -- a plain warning that a SECOND consecutive escape
 clears the selection, so the user reads it before anything is cleared.")
 
-(defconst agent-repl--input-response-selection-no-rows-flash
-  "reply-to-response: no final response to select"
-  "The composer flash when a nav finds no selectable final-response rows.")
+(defconst agent-repl--input-selection-flash-prefixes
+  '((:response . "reply-to-response")
+    (:prompt . "rollback")
+    (:clear . "selection"))
+  "The composer-flash prefix each `SelectFeedRow' move speaks under.")
 
-(defun agent-repl--input-response-selection-value (ws)
-  "Return WS's active reply-to-a-past-response FeedId plist, or nil.
-Read out of WS's composer, where the async nav ack stored it; nil is the
-ordinary-prompt case (no selection active)."
-  (let ((buf (agent-repl--input-buffer ws)))
-    (and buf (buffer-local-value 'agent-repl--input-response-selection buf))))
+(defconst agent-repl--input-selection-nothing-selectable-flashes
+  '((:response . "reply-to-response: no final response to select")
+    (:prompt . "rollback: no prompt to select"))
+  "The composer flash when a step finds no row of its kind to select.")
 
-(defun agent-repl--input-response-selection-active-p (ws)
-  "Return non-nil when WS's composer holds an active reply target."
-  (not (null (agent-repl--input-response-selection-value ws))))
+(defun agent-repl--input-selection-active-p (ws)
+  "Return non-nil when WS's feed has a row selected, as the host watch said."
+  (memq (agent-repl-host-selection ws) '(:response :prompt)))
 
-(defun agent-repl--input-response-selection-store (ws feedid)
-  "Store FEEDID as WS's active reply target; nil drops the local selection.
-Runs from the async `SelectResponse' ack and from the submit/clear paths,
-so it writes the SPECIFIC composer buffer rather than whatever buffer
-happens to be current when the answer arrives."
-  (let ((buf (agent-repl--input-buffer ws)))
-    (when buf
-      (with-current-buffer buf
-        (setq agent-repl--input-response-selection feedid)))))
-
-(defun agent-repl--input-response-select (ws direction)
-  "Send a `SelectResponse' nav for WS in DIRECTION and record the ack.
-DIRECTION is `:prev', `:next' or `:clear'.  The daemon computes the newly
-selected feedid (or NONE) and this stores it buffer-local so escape and
-the submit path can read it.  A refusal or transport failure leaves the
-prior selection untouched and flashes the composer -- error coverage is
-never dropped just because the daemon is the authority."
-  (let ((ref (agent-repl-host-ref ws))
-        (conn (or (agent-repl-host-conn ws) (agent-repl-link-primary))))
+(defun agent-repl--input-select-feed-row (ws move)
+  "Send the `SelectFeedRow' MOVE for WS and report how it went.
+MOVE is (:arm ARM :value V): ARM `:response' or `:prompt' with V
+\(:direction `:older'/`:newer'), or `:clear' with V nil.  THE ONE SEND of
+every composer selection move, so each answers alike: the outcome is the
+daemon's, and its push on the host watch is what changes Emacs's state; a
+step that finds nothing of its kind says so; a refusal or transport
+failure flashes the composer and is logged -- error coverage is never
+dropped just because the daemon is the authority."
+  (let* ((arm (plist-get move :arm))
+         (prefix (cdr (assq arm agent-repl--input-selection-flash-prefixes)))
+         (ref (agent-repl-host-ref ws))
+         (conn (or (agent-repl-host-conn ws) (agent-repl-link-primary))))
     (cond
      ((null ref)
-      (agent-repl--warn ws "elisp.input.response-select-no-ref ws=%s dir=%S" ws direction)
-      (agent-repl--input-flash ws "reply-to-response: workspace not ready"))
+      (agent-repl--warn ws "elisp.input.select-feed-row-no-ref ws=%s move=%S" ws move)
+      (agent-repl--input-flash ws (format "%s: workspace not ready" prefix)))
      ((null conn)
-      (agent-repl--warn ws "elisp.input.response-select-no-conn ws=%s dir=%S" ws direction)
-      (agent-repl--input-flash ws "reply-to-response: no daemon connection"))
+      (agent-repl--warn ws "elisp.input.select-feed-row-no-conn ws=%s move=%S" ws move)
+      (agent-repl--input-flash ws (format "%s: no daemon connection" prefix)))
      (t
-      (agent-repl--info ws "elisp.input.response-select ws=%s dir=%S" ws direction)
-      (agent-repl-rpc-select-response
-       conn (list :workspace ref :direction direction)
+      (agent-repl--info ws "elisp.input.select-feed-row ws=%s move=%S" ws move)
+      (agent-repl-rpc-select-feed-row
+       conn (list :workspace ref :move move)
        :on-response
        (lambda (response)
          (pcase (plist-get response :arm)
            (:success
-            (let ((selected (plist-get (plist-get response :value) :selected)))
-              (agent-repl--input-response-selection-store ws selected)
-              (agent-repl--info ws "elisp.input.response-selected ws=%s dir=%S selected=%s"
-                                ws direction (and selected t))
-              ;; A prev/next that lands on NOTHING means there are no
-              ;; selectable rows: say so rather than leave the gesture silent.
-              (when (and (memq direction '(:prev :next)) (null selected))
+            (let ((outcome (plist-get (plist-get response :value) :outcome)))
+              (agent-repl--info ws "elisp.input.select-feed-row-answered ws=%s move=%S outcome=%S"
+                                ws move (plist-get outcome :arm))
+              ;; A step that lands on NOTHING means there is no row of its
+              ;; kind: say so rather than leave the gesture silent.
+              (when (eq (plist-get outcome :arm) :nothing-selectable)
                 (agent-repl--input-flash
-                 ws agent-repl--input-response-selection-no-rows-flash))))
+                 ws (cdr (assq arm agent-repl--input-selection-nothing-selectable-flashes))))))
            (:error
-            (agent-repl--warn ws "elisp.input.response-select-refused ws=%s dir=%S cause=%S"
-                              ws direction
-                              (plist-get (plist-get response :value) :cause))
-            (agent-repl--input-flash ws "reply-to-response: selection refused"))
-           (arm
-            (agent-repl--error ws "elisp.input.response-select-unknown-arm ws=%s arm=%S"
-                               ws arm))))
+            (agent-repl--warn ws "elisp.input.select-feed-row-refused ws=%s move=%S cause=%S"
+                              ws move (plist-get (plist-get response :value) :cause))
+            (agent-repl--input-flash ws (format "%s: selection refused" prefix)))
+           (other
+            (agent-repl--error ws "elisp.input.select-feed-row-unknown-arm ws=%s arm=%S"
+                               ws other))))
        :on-failure
        (lambda (detail)
-         (agent-repl--warn ws "elisp.input.response-select-failure ws=%s dir=%S detail=%S"
-                           ws direction detail)
-         (agent-repl--input-flash ws "reply-to-response: the daemon did not answer")))))))
+         (agent-repl--warn ws "elisp.input.select-feed-row-failure ws=%s move=%S detail=%S"
+                           ws move detail)
+         (agent-repl--input-flash ws (format "%s: the daemon did not answer" prefix))))))))
+
+(defun agent-repl--input-select-step (kind direction)
+  "Step the current workspace's selection through KIND rows in DIRECTION.
+KIND is `:response' or `:prompt'; DIRECTION is `:older' or `:newer'."
+  (agent-repl--input-select-feed-row
+   (agent-repl--ws-current-name)
+   (list :arm kind :value (list :direction direction))))
 
 (defun agent-repl-response-select-prev ()
-  "Select the PREVIOUS (older) final-response row to reply to.
-Composer command mode only.  From no selection it starts at the most
-recent final response; past the oldest it wraps to the newest -- the
-daemon owns the order and computes the feedid, Emacs sends the direction."
+  "Select the PREVIOUS (older) final response, to reply to.
+Composer command mode only.  From no selected response it starts at the
+newest final response; past the oldest it wraps to the newest -- the
+daemon owns the order and computes the row, Emacs sends the step."
   (interactive)
-  (agent-repl--input-response-select (agent-repl--ws-current-name) :prev))
+  (agent-repl--input-select-step :response :older))
 
 (defun agent-repl-response-select-next ()
-  "Select the NEXT (newer) final-response row to reply to.
-Composer command mode only.  From no selection it starts at the most
-recent final response; past the newest it wraps to the oldest."
+  "Select the NEXT (newer) final response, to reply to.
+Composer command mode only.  From no selected response it starts at the
+newest final response; past the newest it wraps to the oldest."
   (interactive)
-  (agent-repl--input-response-select (agent-repl--ws-current-name) :next))
+  (agent-repl--input-select-step :response :newer))
+
+(defun agent-repl-prompt-select-prev ()
+  "Select the PREVIOUS (older) prompt a rollback can reach.
+From no selected prompt it starts at the newest such prompt; past the
+oldest it wraps to the newest -- the daemon owns which prompts a rollback
+can reach and computes the row, Emacs sends the step."
+  (interactive)
+  (agent-repl--input-select-step :prompt :older))
+
+(defun agent-repl-prompt-select-next ()
+  "Select the NEXT (newer) prompt a rollback can reach.
+From no selected prompt it starts at the newest such prompt; past the
+newest it wraps to the oldest."
+  (interactive)
+  (agent-repl--input-select-step :prompt :newer))
 
 ;; FEED TEXT ZOOM (`C-+' / `C--').  The daemon owns and persists a single
 ;; global feed text scale; Emacs only sends a DIRECTION per keypress and the
@@ -572,7 +576,7 @@ text — and holding the key auto-repeats the nudge for fine adjustment."
 
 (defun agent-repl--input-escape-default ()
   "Run escape's ORDINARY meaning in the composer.
-Called only when NO reply-to-a-past-response selection is active, so this
+Called only when NO feed selection is active, so this
 command never STEALS escape when there is nothing to clear.  `doom/escape'
 is the full Doom escape (it runs `doom-escape-hook', which is where evil's
 force-normal-state lives, and falls back to `keyboard-quit'); it is used
@@ -581,24 +585,22 @@ when present and `keyboard-quit' otherwise."
       (call-interactively 'doom/escape)
     (keyboard-quit)))
 
-(defun agent-repl--input-response-selection-clear (ws)
-  "Send `SelectResponse' CLEAR for WS and drop the local selection.
-The webapp returns to the feed bottom on the daemon's clear; Emacs sends
-the direction and forgets its own copy AT ONCE, so the escape state
-machine is settled without waiting on the async ack."
-  (agent-repl--info ws "elisp.input.response-selection-clear ws=%s" ws)
-  (agent-repl--input-response-select ws :clear)
-  (agent-repl--input-response-selection-store ws nil))
+(defun agent-repl--input-selection-clear (ws)
+  "Send `SelectFeedRow' CLEAR for WS.
+The daemon ends the selection and pushes it: the webapp returns to the
+feed bottom and the host watch tells Emacs nothing is selected."
+  (agent-repl--info ws "elisp.input.selection-clear ws=%s" ws)
+  (agent-repl--input-select-feed-row ws (list :arm :clear :value nil)))
 
-(defun agent-repl-input-response-selection-escape ()
-  "Command-mode escape for reply-to-a-past-response.
+(defun agent-repl-input-selection-escape ()
+  "Command-mode escape for the feed selection.
 WITH NO SELECTION active, escape keeps its ordinary meaning
 (`agent-repl--input-escape-default') -- this command never breaks escape
 when there is nothing to clear.  WITH a selection active it takes TWO
 CONSECUTIVE escapes to clear:
 
   1st escape  -> a minibuffer WARNING that another escape will clear it.
-  2nd escape  -> send CLEAR and drop the selection.
+  2nd escape  -> send CLEAR.
 
 CONSECUTIVE is read off `last-command': after this command runs, the
 command loop sets `last-command' to it, so a second escape with no other
@@ -608,12 +610,12 @@ re-arms the warning instead.  That is the whole two-consecutive-escapes
 state machine -- there is no separate counter to fall out of sync."
   (interactive)
   (let ((ws (agent-repl--ws-current-name)))
-    (if (not (agent-repl--input-response-selection-active-p ws))
+    (if (not (agent-repl--input-selection-active-p ws))
         (agent-repl--input-escape-default)
-      (if (eq last-command 'agent-repl-input-response-selection-escape)
-          (agent-repl--input-response-selection-clear ws)
-        (agent-repl--warn ws "elisp.input.response-selection-escape-armed ws=%s" ws)
-        (message "%s" agent-repl--input-response-selection-escape-warning)))))
+      (if (eq last-command 'agent-repl-input-selection-escape)
+          (agent-repl--input-selection-clear ws)
+        (agent-repl--warn ws "elisp.input.selection-escape-armed ws=%s" ws)
+        (message "%s" agent-repl--input-selection-escape-warning)))))
 
 ;;;; ---- Input preparation and the metaprompt ----------------------------
 
@@ -998,10 +1000,6 @@ them."
 SUCCESS is the decoded outcome oneof.  FROM-BUFFER says RAW came from the
 composer, which is the only thing that entitles an acceptance to erase
 it."
-  ;; The daemon accepted the submission and consumed any reply-to-a-past-
-  ;; response target with it, so Emacs drops its local selection: the next
-  ;; prompt is an ordinary one unless the user selects again.
-  (agent-repl--input-response-selection-store ws nil)
   (pcase (plist-get success :arm)
     (:turn
      (agent-repl--info ws "elisp.input.turn-minted ws=%s origin=%S turn=%S"
@@ -1284,20 +1282,16 @@ value Emacs constructs from a path."
          (agent-repl--input-on-failure
           ws said origin raw (list :kind :transport :message "no daemon connection") key delivery)
          (cl-return-from agent-repl--input-submit key))
-       (agent-repl--info ws "elisp.input.submit ws=%s origin=%S key=%s blocks=%d reply-to=%s delivery=%S"
+       (agent-repl--info ws "elisp.input.submit ws=%s origin=%S key=%s blocks=%d selection=%S delivery=%S"
                          ws origin key (length (plist-get (plist-get said :content) :blocks))
-                         (and (agent-repl--input-response-selection-value ws) t) delivery)
+                         (agent-repl-host-selection ws) delivery)
        (agent-repl-rpc-submit-prompt
         conn
-        ;; A reply-to-a-past-response selection rides ALONGSIDE the composed
-        ;; text: the field is present only when a selection is active, so an
-        ;; ordinary prompt sends exactly what it always did.
-        (let ((request (list :said said :idempotency-key key
-                             :origin origin :workspace ref))
-              (feedid (agent-repl--input-response-selection-value ws)))
-          (append request
-                  (when feedid (list :reference-response-feedid feedid))
-                  (when delivery (list :delivery delivery))))
+        ;; No reply target rides the request: the daemon applies its own
+        ;; selection to the prompt and ends it, pushing the result.
+        (append (list :said said :idempotency-key key
+                      :origin origin :workspace ref)
+                (when delivery (list :delivery delivery)))
         :on-response
         (lambda (response)
           (agent-repl--with-log-context
@@ -1513,15 +1507,16 @@ sits behind a harness re-read."
       :ni "C-c C-c"   #'agent-repl-discard-input
       :n  "<up>"      #'agent-repl--history-prev
       :n  "<down>"    #'agent-repl--history-next
-      ;; Reply-to-a-past-response nav is COMMAND MODE ONLY (`:n' = evil
-      ;; normal state), scoped to THIS composer's mode map like the history
-      ;; walk above -- never global, so `C-p'/`C-n' keep their meaning
-      ;; everywhere else and `<escape>' is only intercepted here.  The escape
-      ;; command itself no-ops back to the ordinary escape when no selection
-      ;; is active (see `agent-repl-input-response-selection-escape').
+      ;; Final-response selection is COMMAND MODE ONLY (`:n' = evil normal
+      ;; state), scoped to THIS composer's mode map like the history walk
+      ;; above -- never global, so `C-p'/`C-n' keep their meaning everywhere
+      ;; else and `<escape>' is only intercepted here.  The escape command
+      ;; itself no-ops back to the ordinary escape when no selection is active
+      ;; (see `agent-repl-input-selection-escape').  The prompt steps
+      ;; (`C-S-p'/`C-S-n') are bound below, in both states.
       :n  "C-p"       #'agent-repl-response-select-prev
       :n  "C-n"       #'agent-repl-response-select-next
-      :n  "<escape>"  #'agent-repl-input-response-selection-escape
+      :n  "<escape>"  #'agent-repl-input-selection-escape
       ;; Prompt-history search sits on `C-M-r', not the `C-r' its shell
       ;; reflex would suggest: `C-r' is vacated for the output feed's
       ;; incremental search, whose isearch reflex wants it.
@@ -1546,6 +1541,15 @@ sits behind a harness re-read."
 ;; RPC and never change Emacs's own font.
 (define-key agent-repl-input-mode-map (kbd "C-+") #'agent-repl-feed-text-scale-increase)
 (define-key agent-repl-input-mode-map (kbd "C--") #'agent-repl-feed-text-scale-decrease)
+
+;; PROMPT SELECTION (`C-S-p' / `C-S-n'): step through the prompts a rollback
+;; can reach.  Bound with `define-key' for the same reasons as the zoom: the
+;; binding is OBSERVABLE under `emacs -Q', and it lives in BOTH evil states,
+;; since no evil state map binds the shifted chord to shadow the mode map.
+;; The leader's `C-S-p' (keybindings.el) sits under its own prefix and does
+;; not collide.
+(define-key agent-repl-input-mode-map (kbd "C-S-p") #'agent-repl-prompt-select-prev)
+(define-key agent-repl-input-mode-map (kbd "C-S-n") #'agent-repl-prompt-select-next)
 
 (provide 'input)
 

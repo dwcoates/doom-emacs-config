@@ -446,6 +446,38 @@ The user clicked this workspace's desktop banner; the daemon posted it
 and read the click back, so selecting the tab is all that is left."
   (agent-repl-wire--decode-empty "HostWorkspaceNotificationClicked" value))
 
+;;;; ---- The selection push ----
+
+(defun agent-repl-wire-decode-host-workspace-selection (value)
+  "Decode VALUE as `HostWorkspaceSelection', the kind keyword it names.
+One of `:none', `:response' and `:prompt': which kind of row the feed has
+selected, never the row, because Emacs never names it back.  Every arm is
+empty, so the arm IS the whole fact; an unset or doubled oneof is a
+contract breach."
+  (let ((object (agent-repl-wire--object "HostWorkspaceSelection" value)))
+    (agent-repl-wire--check-keys "HostWorkspaceSelection" object '(none response prompt))
+    (plist-get
+     (agent-repl-wire--decoded
+      "HostWorkspaceSelection"
+      (agent-repl-wire--decode-oneof
+       "HostWorkspaceSelection" 'selection object
+       '((none :none agent-repl-wire-decode-host-workspace-selection-none)
+         (response :response agent-repl-wire-decode-host-workspace-selection-response)
+         (prompt :prompt agent-repl-wire-decode-host-workspace-selection-prompt))))
+     :arm)))
+
+(defun agent-repl-wire-decode-host-workspace-selection-none (value)
+  "Decode VALUE as the empty message `HostWorkspaceSelectionNone'."
+  (agent-repl-wire--decode-empty "HostWorkspaceSelectionNone" value))
+
+(defun agent-repl-wire-decode-host-workspace-selection-response (value)
+  "Decode VALUE as the empty message `HostWorkspaceSelectionResponse'."
+  (agent-repl-wire--decode-empty "HostWorkspaceSelectionResponse" value))
+
+(defun agent-repl-wire-decode-host-workspace-selection-prompt (value)
+  "Decode VALUE as the empty message `HostWorkspaceSelectionPrompt'."
+  (agent-repl-wire--decode-empty "HostWorkspaceSelectionPrompt" value))
+
 ;;;; ---- The remaining WatchHostWorkspace push arms ----
 
 (defun agent-repl-wire-decode-host-workspace-transferred (value)
@@ -493,6 +525,10 @@ directory."
   "Decode the `notification_clicked' push arm VALUE."
   (agent-repl-wire-decode-host-workspace-notification-clicked value))
 
+(defun agent-repl-wire-decode-watch-host-workspace-response-selection (value)
+  "Decode the `selection' push arm VALUE as its kind keyword."
+  (agent-repl-wire-decode-host-workspace-selection value))
+
 (defun agent-repl-wire-decode-watch-host-workspace-response-transferred (value)
   "Decode the `transferred' push arm VALUE."
   (agent-repl-wire-decode-host-workspace-transferred value))
@@ -522,14 +558,15 @@ directory."
                    agent-repl-wire-decode-watch-host-workspace-response-open-in-editor)
      (ending :ending agent-repl-wire-decode-watch-host-workspace-response-ending)
      (notificationClicked :notification-clicked
-                          agent-repl-wire-decode-watch-host-workspace-response-notification-clicked))))
+                          agent-repl-wire-decode-watch-host-workspace-response-notification-clicked)
+     (selection :selection agent-repl-wire-decode-watch-host-workspace-response-selection))))
 
 (defun agent-repl-wire-decode-watch-host-workspace-response (value)
   "Decode VALUE as `WatchHostWorkspaceResponse', the push oneof plist."
   (let ((object (agent-repl-wire--object "WatchHostWorkspaceResponse" value)))
     (agent-repl-wire--check-keys
      "WatchHostWorkspaceResponse" object
-     '(host transferred reloadWebapp openInEditor ending notificationClicked))
+     '(host transferred reloadWebapp openInEditor ending notificationClicked selection))
     (agent-repl-wire--decoded
      "WatchHostWorkspaceResponse"
      (agent-repl-wire-decode-watch-host-workspace-response-push object))))

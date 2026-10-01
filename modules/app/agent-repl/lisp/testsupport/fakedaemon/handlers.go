@@ -19,8 +19,16 @@ func (s *fakeServer) SubmitPrompt(ctx context.Context, req *connect.Request[v1.S
 	return handleUnary[v1.SubmitPromptRequest, v1.SubmitPromptResponse](ctx, s, "SubmitPrompt", req.Msg)
 }
 
-func (s *fakeServer) SelectResponse(ctx context.Context, req *connect.Request[v1.SelectResponseRequest]) (*connect.Response[v1.SelectResponseResponse], error) {
-	return handleUnary[v1.SelectResponseRequest, v1.SelectResponseResponse](ctx, s, "SelectResponse", req.Msg)
+func (s *fakeServer) SelectFeedRow(ctx context.Context, req *connect.Request[v1.SelectFeedRowRequest]) (*connect.Response[v1.SelectFeedRowResponse], error) {
+	return handleUnary[v1.SelectFeedRowRequest, v1.SelectFeedRowResponse](ctx, s, "SelectFeedRow", req.Msg)
+}
+
+func (s *fakeServer) PlanRollback(ctx context.Context, req *connect.Request[v1.PlanRollbackRequest]) (*connect.Response[v1.PlanRollbackResponse], error) {
+	return handleUnary[v1.PlanRollbackRequest, v1.PlanRollbackResponse](ctx, s, "PlanRollback", req.Msg)
+}
+
+func (s *fakeServer) RollBack(ctx context.Context, req *connect.Request[v1.RollBackRequest]) (*connect.Response[v1.RollBackResponse], error) {
+	return handleUnary[v1.RollBackRequest, v1.RollBackResponse](ctx, s, "RollBack", req.Msg)
 }
 
 func (s *fakeServer) AdjustFeedTextScale(ctx context.Context, req *connect.Request[v1.AdjustFeedTextScaleRequest]) (*connect.Response[v1.AdjustFeedTextScaleResponse], error) {
