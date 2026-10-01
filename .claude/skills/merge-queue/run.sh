@@ -1,23 +1,33 @@
 #!/usr/bin/env bash
 # run.sh — the merge-queue skill's driver.
 #
+# Every verb asks for a merge FROM the workspace this shell is inside. The
+# merge is put in line once the caller's current turn ends, runs in that
+# workspace, and reports its outcome into that workspace's session; no verb
+# waits for the outcome.
+#
 # Verbs:
-#   --enqueue-own                Enqueue the merge of the workspace this shell
-#                                is inside. Returns once the merge is in the
-#                                queue; it runs when the caller's turn ends.
-#   --land-workspace <dir>       Enqueue ANOTHER workspace's merge and wait for
-#                                its outcome.
-#   --land-branch <branch>       Enqueue a branch that is no workspace (a
-#                                subagent's) and wait for its outcome.
+#   --enqueue-own [--keep-open]  Merge this workspace's own branch. The
+#                                workspace closes once it lands, unless
+#                                --keep-open.
+#   --land-workspace <dir>       Merge ANOTHER workspace's branch, named by its
+#                                worktree. That workspace closes once it lands.
+#   --land-branch <branch>       Merge a branch that is no workspace (a
+#                                subagent's).
+#   --pr-merged                  This workspace's branch already merged
+#                                upstream: update the default branch and close
+#                                this workspace.
+#   --remove-branch <branch>     After a --land-branch merge LANDED: remove the
+#                                branch's worktree (when it has one) and the
+#                                branch, refusing a branch master lacks.
 #
 # Exit codes (every verb):
-#   0  landed (--land-*), or in the queue (--enqueue-own)
-#   2  script/usage error, or the merge could not be enqueued
-#   3  parked awaiting guidance; the parked line is printed
-#   4  failed; the reason is printed
+#   0  requested (end the turn; the outcome reports into this session), or
+#      removed (--remove-branch)
+#   2  script/usage error, or the merge could not be requested
 #   5  refused by the daemon; how to read why is printed
 #   6  the workspace has uncommitted work (--enqueue-own)
-#   7  a -wait on the caller's own workspace was refused
+#   7  --land-workspace named this shell's own workspace
 set -uo pipefail
 
 die() {
@@ -52,37 +62,15 @@ daemon_bin() {
   printf '%s\n' "$bin"
 }
 
-# failure_reason prints the daemon's recorded reason for a failed merge of dir.
-failure_reason() {
-  local dir="$1" main logs
-  main="$(main_worktree)" || die "not inside a git repository"
-  logs="$main/modules/app/agent-repl/bin/logs.sh"
-  [ -x "$logs" ] || die "the log reader $logs is missing"
-  command -v jq >/dev/null 2>&1 || die "jq is required to read the failure's reason"
-  log "the daemon's reason:"
-  "$logs" --workspace "$dir" --since 6h --json 2>/dev/null |
-    jq -r 'select(.operation == "daemon.merge.abort") | .context.summary' | tail -n 1
-}
-
 # run_verb runs claude-repld merge-queue, passing its output through, and maps
-# its exit onto this script's. A failure's reason is read from the log of the
-# worktree the verb named.
+# its exit onto this script's.
 run_verb() {
-  local bin rc out dir
+  local bin rc
   bin="$(daemon_bin)" || exit 2
-  out="$(mktemp "${TMPDIR:-/tmp}/agent-repl-merge-queue-out.XXXXXX")" || die "could not create a temp file"
-  "$bin" merge-queue "$@" | tee "$out"
-  rc=${PIPESTATUS[0]}
-  dir="$(sed -n 's/^merge-queue: worktree: //p' "$out" | head -n 1)"
-  rm -f "$out"
+  "$bin" merge-queue "$@"
+  rc=$?
   case "$rc" in
     0) exit 0 ;;
-    4) exit 3 ;;
-    5)
-      [ -n "$dir" ] || die "the merge failed, and the verb named no worktree to read the reason from"
-      failure_reason "$dir"
-      exit 4
-      ;;
     6) exit 5 ;;
     *) exit 2 ;;
   esac
@@ -90,6 +78,12 @@ run_verb() {
 
 case "${1:-}" in
   --enqueue-own)
+    keep=()
+    case "${2:-}" in
+      "") ;;
+      --keep-open) keep=(-keep-open) ;;
+      *) die "--enqueue-own takes only --keep-open, not $2" ;;
+    esac
     top="$(git rev-parse --show-toplevel 2>/dev/null)" || die "not inside a git worktree"
     main="$(main_worktree)" || die "not inside a git repository"
     [ "$top" != "$main" ] || die "$top is the repository's main worktree, not a workspace; use --land-branch for a branch"
@@ -97,7 +91,7 @@ case "${1:-}" in
       log "$top has uncommitted work; commit it before enqueueing"
       exit 6
     fi
-    run_verb -dir "$top"
+    run_verb -own "${keep[@]+"${keep[@]}"}"
     ;;
   --land-workspace)
     [ -n "${2:-}" ] || die "--land-workspace needs the workspace's worktree directory"
@@ -106,15 +100,29 @@ case "${1:-}" in
       log "$2 is this shell's own workspace; enqueue it with --enqueue-own and end the turn"
       exit 7
     fi
-    run_verb -dir "$2" -wait
+    run_verb -dir "$2"
     ;;
   --land-branch)
     [ -n "${2:-}" ] || die "--land-branch needs a branch name"
+    run_verb -branch "$2"
+    ;;
+  --pr-merged)
+    run_verb -pr-merged
+    ;;
+  --remove-branch)
+    [ -n "${2:-}" ] || die "--remove-branch needs a branch name"
     main="$(main_worktree)" || die "not inside a git repository"
-    run_verb -branch "$2" -repo "$main" -wait
+    wt="$(git -C "$main" worktree list --porcelain 2>/dev/null |
+      awk -v want="branch refs/heads/$2" '/^worktree /{dir=substr($0,10)} $0==want{print dir}')"
+    if [ -n "$wt" ]; then
+      git -C "$main" worktree remove "$wt" || die "could not remove $2's worktree $wt"
+      log "removed $2's worktree $wt"
+    fi
+    git -C "$main" branch -d "$2" || die "could not delete $2; it may not have landed on master"
+    log "deleted the branch $2"
     ;;
   *)
-    printf 'usage: run.sh --enqueue-own | --land-workspace <dir> | --land-branch <branch>\n' >&2
+    printf 'usage: run.sh --enqueue-own [--keep-open] | --land-workspace <dir> | --land-branch <branch> | --pr-merged | --remove-branch <branch>\n' >&2
     exit 1
     ;;
 esac
