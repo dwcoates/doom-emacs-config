@@ -468,9 +468,7 @@ Two edges point backwards and are closed with FORWARDERS in
 `cmd/claude-repld/forward.go`, bound by `run` immediately after `server.New`
 and before anything is served: the rollout's and the drain's pushes
 (`WorkspacePusher`, `ParticipantSource`, the announcers) and the workspace
-verbs' `HostRelay` (`srv.Relay()`). The merge orchestrator's guidance route and
-the queue's parked route read the orchestrator out of a forwarder for the same
-reason. The background loops — the drain sweep and the command-file ingress —
+verbs' `HostRelay` (`srv.Relay()`). The background loops — the drain sweep and the command-file ingress —
 start after the bindings, because each of them can push.
 
 The feed's image origin IS produced, by `internal/imageorigin` mounted at
