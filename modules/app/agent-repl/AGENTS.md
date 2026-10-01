@@ -547,6 +547,16 @@ How the daemon puts each component into service:
      Queued prompts never block a bounce; the workspace drains and they are
      delivered to the new shim. Monitors, background shells and background
      subagents DO block it, because they die with the shim's vendor child.
+     AN UNFORCED SHIM REPLACEMENT NEVER ENDS LIVE WORK: freeness is a reading
+     the vendor can overtake (it starts a turn on its own the moment a
+     subagent concludes), but the shim's `KillSession{force:false}` refusal is
+     atomic and authoritative. A `live` refusal, or a stand-down the shim never
+     answered and did not leave inside the window, is never forced: the old
+     shim keeps serving untouched, the prelaunch is retired, the hold released,
+     and the bounce is re-registered behind that work (`bounce.ErrDeferred`)
+     and runs at the next freeness. Only a FORCED bounce, or a stand-down the
+     shim answered without a `live` refusal and then did not leave (a hung
+     shim, not live work), is force-killed at the window's end.
      A shim replacement and a handover transfer asked of one workspace
      coalesce into TWO stages, replacement then transfer, and never one in
      place of the other (daemon/AGENTS.md, "A coalesced bounce runs every

@@ -1041,6 +1041,22 @@ ruling, 2026-09-30) and carries the same carry (see "A breaking state layout
 change is rolled out stop-then-start"). Only a shim REPLACEMENT (stale build,
 restart verb, log ceiling) keeps `bounce.GateFreeness`.
 
+- **The shim's refusal defers a replacement; it is never forced.** An
+  unforced replacement's stand-down (`rollout.standDown`) that the shim
+  refuses as `live` answers `rollout.ErrStandDownLive` at once (INFO, no
+  window, no kill); one whose call fails waits the window for the shim to
+  leave (the evidence it took the stand-down and lost only the answer) and
+  otherwise answers `rollout.ErrStandDownUnanswered` (ERROR). Both wrap
+  `bounce.ErrDeferred` (`bounce.OutcomeDeferred`): the registry re-registers
+  the replacement behind the work in flight with its requesters kept (a
+  `Done` hears the rerun's outcome, never the deferral), the workspace leaves
+  draining and dispatch resumes on the shim that keeps serving. A freeness edge
+  that arrived while the run decided is re-judged at once; otherwise the next
+  edge takes it, so a shim that says `live` while the watcher reads it free
+  cannot spin the bounce. A dispatch-quiet move standing behind the deferred
+  replacement runs at once and carries it across. Regression, 2026-10-01: the
+  refusal was waited out for 30s and the shim force-killed, ending a
+  vendor-started turn and a resumed subagent.
 - **What lives only in memory travels in the handover carry**
   (`rollout/carry.go`, `<state>/intent/handover-carry/<ws>.json`). The transfer
   SEALS the queue (`promptqueue.Queue.SealMove`: queued /clear and /compact
