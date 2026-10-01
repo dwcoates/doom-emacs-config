@@ -19,10 +19,6 @@ var statusArms = []string{
 	"working", "background", "turn_failed", "idle",
 }
 
-// The FooterAllowance.status arms this resolver emits, asserted the same way
-// against the footer_allowance table.
-var allowanceArms = []string{"allowed", "allowed_warning", "rejected"}
-
 // status resolves the whole status family — the coarse status, its step and
 // its activity line — as ONE tree, so an illegal pairing is unrepresentable
 // rather than forbidden by comment.

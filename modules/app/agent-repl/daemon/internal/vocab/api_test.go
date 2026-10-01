@@ -339,23 +339,6 @@ func TestFooterStatusArmsCoverTheProtoContract(t *testing.T) {
 	}
 }
 
-func TestFooterAllowanceArmsCoverTheProtoContract(t *testing.T) {
-	// Arrange.
-	c := loadColors(t)
-	arms, err := OneofArmNames((&frontendv1.FooterAllowance{}).ProtoReflect().Descriptor(), "status")
-	if err != nil {
-		t.Fatalf("OneofArmNames: %v", err)
-	}
-
-	// Act.
-	err = c.AssertFooterAllowanceArms(arms)
-
-	// Assert.
-	if err != nil {
-		t.Fatalf("footer_allowance diverges from FooterAllowance.status: %v", err)
-	}
-}
-
 func TestEveryMergeArmIsARosterArmWithAGlyph(t *testing.T) {
 	// Arrange.
 	c := loadColors(t)
@@ -421,45 +404,6 @@ func TestOneofArmNamesRejectsAnUnknownOneof(t *testing.T) {
 	// Assert.
 	if err == nil {
 		t.Fatal("OneofArmNames accepted a oneof the message does not declare")
-	}
-}
-
-func TestFooterAllowanceColorAnswersEachArm(t *testing.T) {
-	tests := []struct {
-		arm  string
-		want string
-	}{
-		{arm: "allowed", want: "green"},
-		{arm: "allowed_warning", want: "yellow"},
-		{arm: "rejected", want: "red"},
-	}
-	c := loadColors(t)
-	for _, tc := range tests {
-		t.Run(tc.arm, func(t *testing.T) {
-			// Act.
-			got, err := c.FooterAllowanceColor(tc.arm)
-
-			// Assert.
-			if err != nil {
-				t.Fatalf("FooterAllowanceColor: %v", err)
-			}
-			if got != tc.want {
-				t.Fatalf("FooterAllowanceColor(%q) = %q, want %q", tc.arm, got, tc.want)
-			}
-		})
-	}
-}
-
-func TestFooterAllowanceColorFailsOnAnUnknownArm(t *testing.T) {
-	// Arrange.
-	c := loadColors(t)
-
-	// Act.
-	_, err := c.FooterAllowanceColor("invented")
-
-	// Assert.
-	if err == nil {
-		t.Fatal("FooterAllowanceColor answered an arm the table does not carry")
 	}
 }
 

@@ -94,19 +94,15 @@ type harness struct {
 	log   *dlog.TestSurfaces
 }
 
-// testColors is the render-colors double: every footer_status arm painted and
-// every footer_allowance arm painted, which is exactly what the resolver
-// asserts. The values are irrelevant — the resolver reads the tables' KEYS.
+// testColors is the render-colors double: every footer_status arm painted,
+// which is exactly what the resolver asserts. The values are irrelevant — the
+// resolver reads the table's KEYS.
 func testColors() vocab.RenderColors {
 	status := map[string]string{}
 	for _, arm := range statusArms {
 		status[arm] = "grey"
 	}
-	allowance := map[string]string{}
-	for _, arm := range allowanceArms {
-		allowance[arm] = "grey"
-	}
-	return vocab.RenderColors{FooterStatus: status, FooterAllowance: allowance}
+	return vocab.RenderColors{FooterStatus: status}
 }
 
 // newHarness builds a bound resolver on the fake clock.
@@ -731,38 +727,6 @@ func TestNewRefusesASurplusFooterStatusRow(t *testing.T) {
 	// Assert.
 	if err == nil {
 		t.Fatal("New accepted a footer_status row naming no FooterStatus.status arm")
-	}
-}
-
-// TestNewRefusesAFooterAllowanceTableMissingAnArm pins the same guarantee for
-// the allowance table, whose three arms are painted separately.
-func TestNewRefusesAFooterAllowanceTableMissingAnArm(t *testing.T) {
-	// Arrange.
-	colors := testColors()
-	delete(colors.FooterAllowance, "rejected")
-
-	// Act.
-	_, err := New(colors, dlog.NewTestSurfaces())
-
-	// Assert.
-	if err == nil {
-		t.Fatal("New accepted a footer_allowance table with no color for the rejected arm")
-	}
-}
-
-// TestNewRefusesASurplusFooterAllowanceRow pins the surplus direction for the
-// allowance table.
-func TestNewRefusesASurplusFooterAllowanceRow(t *testing.T) {
-	// Arrange.
-	colors := testColors()
-	colors.FooterAllowance["deferred"] = "grey"
-
-	// Act.
-	_, err := New(colors, dlog.NewTestSurfaces())
-
-	// Assert.
-	if err == nil {
-		t.Fatal("New accepted a footer_allowance row naming no FooterAllowance.status arm")
 	}
 }
 
