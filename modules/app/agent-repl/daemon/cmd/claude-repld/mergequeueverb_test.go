@@ -628,3 +628,305 @@ func TestFindRosterRowLooksInTheRecentlyMergedSection(t *testing.T) {
 		t.Fatalf("found %v, want the recently merged row", row)
 	}
 }
+
+// --- the queue's controls -------------------------------------------------
+
+// controlLogRecord is one record the fake ingress writes into the run log, keyed
+// by a command file's path as the real ingress keys it.
+type controlLogRecord struct {
+	op, message, outcome, cause string
+}
+
+// appendRunLog appends records naming the command file at path to the run
+// log generation gen ("" is the current one, ".1" its newest backup).
+func (f *mergeFixture) appendRunLog(t *testing.T, gen, path string, records ...controlLogRecord) {
+	t.Helper()
+	dir := filepath.Join(f.stateDir, "logs")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Errorf("create the logs dir: %v", err)
+		return
+	}
+	file, err := os.OpenFile(filepath.Join(dir, "daemon.run.log"+gen), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Errorf("open the run log: %v", err)
+		return
+	}
+	defer file.Close()
+	for _, r := range records {
+		context := map[string]any{"path": path}
+		if r.outcome != "" {
+			context["outcome"] = r.outcome
+		}
+		if r.cause != "" {
+			context["cause"] = r.cause
+		}
+		line, err := json.Marshal(map[string]any{"operation": r.op, "message": r.message, "context": context})
+		if err != nil {
+			t.Errorf("encode a record: %v", err)
+			return
+		}
+		if _, err := file.Write(append(line, '\n')); err != nil {
+			t.Errorf("append a record: %v", err)
+		}
+	}
+}
+
+// answerTheCommand is the fake ingress answering the one command file: it
+// records into the run log generation gen, then retires the file into end.
+func (f *mergeFixture) answerTheCommand(t *testing.T, end, gen string, records ...controlLogRecord) func() {
+	return func() {
+		files, err := filepath.Glob(filepath.Join(f.outputDir(), commandfile.DefaultGlob))
+		if err != nil || len(files) != 1 {
+			t.Errorf("the ingress holds %v (%v), want one command file", files, err)
+			return
+		}
+		f.appendRunLog(t, gen, files[0], records...)
+		f.retireTheCommand(t, end)()
+	}
+}
+
+// controlScript is a daemon whose ingress answers a control with act.
+func (f *mergeFixture) controlScript(act func()) *fakeMergeDaemon {
+	idle := roster(rosterRow(f.worktree, "thinking", 0))
+	return &fakeMergeDaemon{script: []scriptStep{{roster: idle}, {roster: idle}, {act: act}, {roster: idle}}}
+}
+
+// applied is an applied control's outcome record.
+func applied(outcome string) controlLogRecord {
+	return controlLogRecord{op: opControlOutcome, message: "the queue answered " + outcome, outcome: outcome}
+}
+
+func TestTheMergeQueueVerbWritesEachControl(t *testing.T) {
+	tests := []struct {
+		name  string
+		args  func(f *mergeFixture) []string
+		check func(f *mergeFixture, e commandfile.Entry) bool
+	}{
+		{name: "evict own", args: func(*mergeFixture) []string { return []string{"-evict"} },
+			check: func(_ *mergeFixture, e commandfile.Entry) bool {
+				return e.Type == commandfile.TypeMergeEvict && e.EvictDir == ""
+			}},
+		{name: "evict another workspace", args: func(f *mergeFixture) []string { return []string{"-evict-dir", f.other} },
+			check: func(f *mergeFixture, e commandfile.Entry) bool {
+				return e.Type == commandfile.TypeMergeEvict && e.EvictDir == f.other
+			}},
+		{name: "pause every repository", args: func(*mergeFixture) []string { return []string{"-pause"} },
+			check: func(_ *mergeFixture, e commandfile.Entry) bool {
+				return e.Type == commandfile.TypeMergePause && e.RepositoryDir == ""
+			}},
+		{name: "pause one repository", args: func(f *mergeFixture) []string { return []string{"-pause", "-repository-dir", f.other} },
+			check: func(f *mergeFixture, e commandfile.Entry) bool {
+				return e.Type == commandfile.TypeMergePause && e.RepositoryDir == f.other
+			}},
+		{name: "resume every repository", args: func(*mergeFixture) []string { return []string{"-resume"} },
+			check: func(_ *mergeFixture, e commandfile.Entry) bool {
+				return e.Type == commandfile.TypeMergeResume && e.RepositoryDir == ""
+			}},
+		{name: "resume one repository", args: func(f *mergeFixture) []string { return []string{"-resume", "-repository-dir", f.other} },
+			check: func(f *mergeFixture, e commandfile.Entry) bool {
+				return e.Type == commandfile.TypeMergeResume && e.RepositoryDir == f.other
+			}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newMergeFixture(t)
+			f.daemons = []*fakeMergeDaemon{f.controlScript(f.answerTheCommand(t, "applied", "", applied("paused")))}
+
+			// Act.
+			code := f.run(t, tt.args(f)...)
+
+			// Assert.
+			entry := f.writtenEntry(t)
+			if code != exitSuccess || !tt.check(f, entry) || entry.ProjectDir != f.worktree || entry.Workspace != "ws-1" {
+				t.Fatalf("exit %d, entry %+v; want the %s control asked by the calling workspace", code, entry, tt.name)
+			}
+		})
+	}
+}
+
+func TestTheMergeQueueVerbReportsEachAppliedOutcome(t *testing.T) {
+	tests := []struct {
+		outcome string
+		args    []string
+	}{
+		{outcome: "evicted", args: []string{"-evict"}},
+		{outcome: "not_queued", args: []string{"-evict"}},
+		{outcome: "paused", args: []string{"-pause"}},
+		{outcome: "resumed", args: []string{"-resume"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.outcome, func(t *testing.T) {
+			// Arrange.
+			f := newMergeFixture(t)
+			f.daemons = []*fakeMergeDaemon{f.controlScript(f.answerTheCommand(t, "applied", "", applied(tt.outcome)))}
+
+			// Act.
+			code := f.run(t, tt.args...)
+
+			// Assert.
+			if code != exitSuccess || !strings.Contains(f.out.String(), outcomeLinePrefix+tt.outcome+"\n") {
+				t.Fatalf("exit %d, stdout %q; want the outcome %s", code, f.out.String(), tt.outcome)
+			}
+		})
+	}
+}
+
+func TestTheMergeQueueVerbReadsAnOutcomeFromTheRotatedRunLog(t *testing.T) {
+	// Arrange: the run log rolled between the record and the read.
+	f := newMergeFixture(t)
+	f.daemons = []*fakeMergeDaemon{f.controlScript(f.answerTheCommand(t, "applied", ".1", applied("evicted")))}
+
+	// Act.
+	code := f.run(t, "-evict")
+
+	// Assert.
+	if code != exitSuccess || !strings.Contains(f.out.String(), outcomeLinePrefix+"evicted\n") {
+		t.Fatalf("exit %d, stdout %q; want the outcome read off the backup generation", code, f.out.String())
+	}
+}
+
+func TestTheMergeQueueVerbIgnoresAnotherFilesRecord(t *testing.T) {
+	// Arrange: the run log holds only another command file's outcome.
+	f := newMergeFixture(t)
+	other := filepath.Join(f.outputDir(), "workspace_commands_other.json")
+	f.daemons = []*fakeMergeDaemon{f.controlScript(func() {
+		f.appendRunLog(t, "", other, applied("evicted"))
+		f.retireTheCommand(t, "applied")()
+	})}
+
+	// Act.
+	code := f.run(t, "-evict")
+
+	// Assert.
+	if code != exitSuccess || !strings.Contains(f.out.String(), outcomeLinePrefix+unreadControlAnswer+"\n") {
+		t.Fatalf("exit %d, stdout %q; want the outcome unread, not another file's", code, f.out.String())
+	}
+}
+
+func TestTheMergeQueueVerbSurfacesAnUnreadOutcome(t *testing.T) {
+	// Arrange: the file is applied and the run log carries no record of it.
+	f := newMergeFixture(t)
+	f.daemons = []*fakeMergeDaemon{f.controlScript(f.retireTheCommand(t, "applied"))}
+
+	// Act.
+	code := f.run(t, "-pause")
+
+	// Assert.
+	if code != exitSuccess || !strings.Contains(f.errOut.String(), "outcome is unread") ||
+		!strings.Contains(f.out.String(), outcomeLinePrefix+unreadControlAnswer+"\n") {
+		t.Fatalf("exit %d, stdout %q, stderr %q; want applied with the outcome surfaced unread", code, f.out.String(), f.errOut.String())
+	}
+}
+
+func TestTheMergeQueueVerbReportsARefusedControlsCause(t *testing.T) {
+	tests := []struct {
+		name   string
+		record controlLogRecord
+	}{
+		{name: "a refused entry", record: controlLogRecord{op: opControlRefusal, message: "a command-file entry was refused", cause: "already_paused: the queue is paused"}},
+		{name: "a malformed file", record: controlLogRecord{op: opControlMalformed, message: "quarantining a malformed command file", cause: "unknown field \"bogus\""}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newMergeFixture(t)
+			f.daemons = []*fakeMergeDaemon{f.controlScript(f.answerTheCommand(t, "quarantine", "", tt.record))}
+
+			// Act.
+			code := f.run(t, "-pause")
+
+			// Assert.
+			if code != exitMergeRefused || !strings.Contains(f.errOut.String(), "REFUSED") || !strings.Contains(f.errOut.String(), "cause: "+tt.record.cause) {
+				t.Fatalf("exit %d, stderr %q; want the refusal with its cause", code, f.errOut.String())
+			}
+		})
+	}
+}
+
+func TestTheMergeQueueVerbSurfacesAnUnreadRefusalCause(t *testing.T) {
+	// Arrange.
+	f := newMergeFixture(t)
+	f.daemons = []*fakeMergeDaemon{f.controlScript(f.retireTheCommand(t, "quarantine"))}
+
+	// Act.
+	code := f.run(t, "-resume")
+
+	// Assert.
+	if code != exitMergeRefused || !strings.Contains(f.errOut.String(), "cause is unread") {
+		t.Fatalf("exit %d, stderr %q; want the refusal with its cause surfaced unread", code, f.errOut.String())
+	}
+}
+
+func TestTheMergeQueueVerbFailsOnAnUndecodableRecord(t *testing.T) {
+	// Arrange: a line naming the file that is no JSON record.
+	f := newMergeFixture(t)
+	f.daemons = []*fakeMergeDaemon{f.controlScript(func() {
+		files, _ := filepath.Glob(filepath.Join(f.outputDir(), commandfile.DefaultGlob))
+		if len(files) != 1 {
+			t.Errorf("the ingress holds %v, want one command file", files)
+			return
+		}
+		dir := filepath.Join(f.stateDir, "logs")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Errorf("create the logs dir: %v", err)
+			return
+		}
+		if err := os.WriteFile(filepath.Join(dir, "daemon.run.log"), []byte("not json "+filepath.Base(files[0])+"\n"), 0o644); err != nil {
+			t.Errorf("write the run log: %v", err)
+		}
+		f.retireTheCommand(t, "applied")()
+	})}
+
+	// Act.
+	code := f.run(t, "-evict")
+
+	// Assert.
+	if code != exitSuccess || !strings.Contains(f.errOut.String(), "decode a record") {
+		t.Fatalf("exit %d, stderr %q; want the undecodable record surfaced", code, f.errOut.String())
+	}
+}
+
+func TestTheMergeQueueVerbReportsAnUnansweredControl(t *testing.T) {
+	// Arrange: the ingress never takes the file.
+	f := newMergeFixture(t)
+	f.daemons = []*fakeMergeDaemon{{script: frames(roster(rosterRow(f.worktree, "thinking", 0)))}}
+
+	// Act.
+	code := f.run(t, "-evict", "-answer-timeout", "20ms")
+
+	// Assert.
+	if code != exitControlUnanswered || !strings.Contains(f.errOut.String(), "NO ANSWER") || len(f.commandFiles(t)) != 1 {
+		t.Fatalf("exit %d, stderr %q; want the control unanswered and still pending", code, f.errOut.String())
+	}
+}
+
+func TestTheMergeQueueVerbRefusesAMalformedControl(t *testing.T) {
+	tests := []struct {
+		name string
+		args func(f *mergeFixture) []string
+	}{
+		{name: "a control that waits", args: func(*mergeFixture) []string { return []string{"-pause", "-wait"} }},
+		{name: "two controls", args: func(*mergeFixture) []string { return []string{"-pause", "-resume"} }},
+		{name: "a control and a merge", args: func(*mergeFixture) []string { return []string{"-evict", "-own"} }},
+		{name: "evict and evict-dir", args: func(f *mergeFixture) []string { return []string{"-evict", "-evict-dir", f.other} }},
+		{name: "repository-dir off a pause or resume", args: func(f *mergeFixture) []string { return []string{"-evict", "-repository-dir", f.other} }},
+		{name: "an evict-dir that is not there", args: func(*mergeFixture) []string { return []string{"-evict-dir", "/no/such/worktree"} }},
+		{name: "a repository-dir that is not there", args: func(*mergeFixture) []string { return []string{"-pause", "-repository-dir", "/no/such/repo"} }},
+		{name: "a non-positive answer timeout", args: func(*mergeFixture) []string { return []string{"-evict", "-answer-timeout", "0s"} }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newMergeFixture(t)
+
+			// Act.
+			code := f.run(t, tt.args(f)...)
+
+			// Assert.
+			if code != exitFailure || len(f.commandFiles(t)) != 0 || f.dialed != 0 {
+				t.Fatalf("exit %d, stderr %q; want a refusal before any daemon is dialed", code, f.errOut.String())
+			}
+		})
+	}
+}
