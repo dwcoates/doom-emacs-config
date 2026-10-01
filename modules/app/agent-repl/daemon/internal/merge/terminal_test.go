@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/gitclient"
@@ -1171,7 +1173,17 @@ const (
 // merge run to its landing.
 func ended(t *testing.T, phase string, res resolution) *harness {
 	t.Helper()
+	return endedObserved(t, phase, res, nil)
+}
+
+// endedObserved is ended with observe, when set, run on the fresh harness
+// before the merge is enqueued.
+func endedObserved(t *testing.T, phase string, res resolution, observe func(*harness)) *harness {
+	t.Helper()
 	h := newHarness(t)
+	if observe != nil {
+		observe(h)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	switch phase {
@@ -1530,5 +1542,70 @@ func TestAFailedMergesStateRetiresAtTheWorkspacesNextSubmission(t *testing.T) {
 	// Assert.
 	if _, standing := h.o.Facts(theWorkspace); standing {
 		t.Fatal("the failed merge's state outlived the workspace moving on")
+	}
+}
+
+// THE TERMINAL FOLLOWS THE RELEASE: whichever way a running merge ends, no
+// client is told it ended while its lease still refuses the workspace's
+// prompts.
+func TestEveryEndOfARunningMergeIsPublishedOnlyAfterItsLeaseIsReleased(t *testing.T) {
+	for _, tc := range releaseCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: record whether the lease was held as each terminal head
+			// was pushed.
+			var mu sync.Mutex
+			var heldAtTerminal []bool
+			observe := func(h *harness) {
+				h.feed.onUpsert = func(row *frontendv1.FeedRow) {
+					merge := row.GetActivity().GetMerge()
+					if merge.GetSuccess() != nil || merge.GetError() != nil {
+						held := h.leaseHeld()
+						mu.Lock()
+						heldAtTerminal = append(heldAtTerminal, held)
+						mu.Unlock()
+					}
+				}
+			}
+
+			// Act
+			endedObserved(t, tc.phase, tc.res, observe)
+
+			// Assert
+			mu.Lock()
+			defer mu.Unlock()
+			if len(heldAtTerminal) == 0 {
+				t.Fatal("no terminal head was published")
+			}
+			for _, held := range heldAtTerminal {
+				if held {
+					t.Fatal("a terminal head was published while the merge's lease was still held")
+				}
+			}
+		})
+	}
+}
+
+func TestAFailedMergesTerminalIsPublishedOnlyAfterItsLeaseIsReleased(t *testing.T) {
+	// Arrange: the conflict resolution gives up.
+	h := newHarness(t)
+	landing(h, 1)
+	h.git.rebaseConflicts[1] = []string{"a.go"}
+	h.git.conflicted = [][]string{{"a.go"}}
+	heldAtFailure := []bool{}
+	h.feed.onUpsert = func(row *frontendv1.FeedRow) {
+		if row.GetActivity().GetMerge().GetError() != nil {
+			heldAtFailure = append(heldAtFailure, h.leaseHeld())
+		}
+	}
+	enqueue(t, h)
+
+	// Act
+	if err := h.admit(context.Background()); err != nil {
+		t.Fatalf("admit: %v", err)
+	}
+
+	// Assert
+	if len(heldAtFailure) != 1 || heldAtFailure[0] {
+		t.Fatalf("lease held as the failed terminal was pushed = %v, want one push after the release", heldAtFailure)
 	}
 }

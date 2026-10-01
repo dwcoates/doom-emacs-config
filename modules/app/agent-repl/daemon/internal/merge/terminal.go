@@ -26,14 +26,17 @@ import (
 // by the user's answer to the interrupt offer); FAILED is a run that started and
 // gave up; MERGED is a run that landed. Only the last two have a teardown.
 //
-// THE ORDER OF TEARDOWN IS LOAD-BEARING. The terminal is published FIRST, then
-// the lease is released, then the displaced turn is resubmitted, then the
-// worktree is removed, and only then does the self-reload fire. Removing the
-// worktree before the terminal would delete the tree a reader is still looking
-// at; removing it before the resubmission would delete the tree that
-// resubmission writes into, losing the turn the user typed; and firing the
-// self-reload before the release would bounce the daemon while it still held a
-// lease it would then have to recover.
+// THE ORDER OF TEARDOWN IS LOAD-BEARING. The lease is released FIRST, then the
+// terminal is published, then the displaced turn is resubmitted, then the
+// worktree is removed, and only then does the self-reload fire. Publishing the
+// terminal before the release would tell a client the workspace was handed
+// back while it still refused every prompt as merging (a user answering "merge
+// failed" at once was refused); removing the worktree before the terminal
+// would delete the tree a reader is still looking at; removing it before the
+// resubmission would delete the tree that resubmission writes into, losing the
+// turn the user typed; and firing the self-reload before the release would
+// bounce the daemon while it still held a lease it would then have to
+// recover.
 
 // finish lands a completed run on its terminal and tears it down.
 func (r *run) finish(ctx context.Context, out outcome) error {
@@ -53,9 +56,16 @@ func (r *run) finish(ctx context.Context, out outcome) error {
 	if r.exiting() {
 		// The stamps and the publishes below all go through the state client
 		// that is already closing; teardown states what was left.
-		r.teardown(ctx, out)
+		r.teardown(ctx, out, nil)
 		return nil
 	}
+	r.teardown(ctx, out, func() { r.concludedTerminal(ctx, log, op, out, endedMS) })
+	return nil
+}
+
+// concludedTerminal publishes a concluded run's terminal: failed with its area,
+// merged with nothing to land, or landed.
+func (r *run) concludedTerminal(ctx context.Context, log dlog.Logger, op string, out outcome, endedMS int64) {
 	switch {
 	case out.failed != "":
 		r.failedTerminal(ctx, out.failed, out.area)
@@ -75,8 +85,6 @@ func (r *run) finish(ctx context.Context, out outcome) error {
 			"workspace": string(r.ws), "lease": string(r.lease.ID), "commit": out.landed, "commits": len(out.commits),
 			"source": r.source.Kind.String(), "closes": string(r.subject.closes)})
 	}
-	r.teardown(ctx, out)
-	return nil
 }
 
 // failedTerminal draws a merge that gave up: the bubble's failed terminal and
@@ -142,11 +150,12 @@ func (r *run) abort(ctx context.Context, summary string) {
 	if r.exiting() {
 		r.o.deps.Log.Global().Info("daemon.merge.stop", "a merge ended when the daemon exited", dlog.Context{
 			"workspace": string(r.ws), "lease": string(r.lease.ID), "cause": summary})
-		r.teardown(ctx, outcome{failed: summary, area: footer.FailedOther})
+		r.teardown(ctx, outcome{failed: summary, area: footer.FailedOther}, nil)
 		return
 	}
-	r.failedTerminal(ctx, summary, footer.FailedOther)
-	r.teardown(ctx, outcome{failed: summary, area: footer.FailedOther})
+	r.teardown(ctx, outcome{failed: summary, area: footer.FailedOther}, func() {
+		r.failedTerminal(ctx, summary, footer.FailedOther)
+	})
 }
 
 // stop ends a run whose git THIS DAEMON stopped — the context was cancelled or
@@ -162,7 +171,7 @@ func (r *run) stop(ctx context.Context, err error) {
 	defer r.leaveTerminal()
 	r.o.log(ctx, r.ws).Info("daemon.merge.stop", "a merge stopped when its git was cancelled", dlog.Context{
 		"workspace": string(r.ws), "lease": string(r.lease.ID), "cause": err.Error()})
-	r.teardown(ctx, outcome{failed: err.Error()})
+	r.teardown(ctx, outcome{failed: err.Error()}, nil)
 }
 
 // stopped classifies a run-ending error: a git the daemon itself cancelled
@@ -182,7 +191,12 @@ func (r *run) stopped(ctx context.Context, err error) bool {
 // order that is safe: the output address, the occupancy, the lease, the queue
 // entry, the displaced turn, the landed worktree, the queue's tree, and the
 // repository's slot and lock. It fires the self-reload last.
-func (r *run) teardown(ctx context.Context, out outcome) {
+//
+// terminal, when set, publishes the run's terminal. It runs right after the
+// lease is released, so no client is told the workspace was handed back while
+// the lease still refuses its prompts; nil publishes nothing (a stop, or an
+// exit that leaves the run to the recovery).
+func (r *run) teardown(ctx context.Context, out outcome, terminal func()) {
 	const op = "daemon.merge.teardown"
 	if r.exiting() {
 		r.abandonToRecovery(ctx, terminalOwed(out))
@@ -201,6 +215,9 @@ func (r *run) teardown(ctx context.Context, out outcome) {
 			"workspace": string(r.ws), "lease": string(r.lease.ID), "error": err.Error()})
 	}
 	r.o.deps.Queue.OnLeaseChanged(r.ws)
+	if terminal != nil {
+		terminal()
+	}
 
 	if err := r.o.deps.DB.RemoveMergeQueueEntry(ctx, r.repo, r.ws, terminalCause(out)); err != nil {
 		log.Error(op, "could not drop the finished merge's queue entry", dlog.Context{
@@ -776,7 +793,7 @@ func (r *run) abandonTerminal(ctx context.Context, cause AbandonCause) {
 	r.enterTerminal(terminalOwedFailed)
 	defer r.leaveTerminal()
 	if r.exiting() {
-		r.teardown(ctx, outcome{abandoned: cause})
+		r.teardown(ctx, outcome{abandoned: cause}, nil)
 		return
 	}
 	summary, declared := cause.summaryRunning()
@@ -788,11 +805,12 @@ func (r *run) abandonTerminal(ctx context.Context, cause AbandonCause) {
 	r.closeOpenRounds(ctx, "abandoned")
 	r.o.log(ctx, r.ws).Info(op, "abandoned a running merge", dlog.Context{
 		"workspace": string(r.ws), "lease": string(r.lease.ID), "cause": string(cause), "summary": summary})
-	r.head(&frontendv1.FeedMergeError{
-		EndedAtMs: r.o.nowMS(),
-		Reason:    &frontendv1.FeedMergeError_Abandoned{Abandoned: &frontendv1.FeedMergeAbandoned{Summary: summary}},
+	r.teardown(ctx, outcome{abandoned: cause}, func() {
+		r.head(&frontendv1.FeedMergeError{
+			EndedAtMs: r.o.nowMS(),
+			Reason:    &frontendv1.FeedMergeError_Abandoned{Abandoned: &frontendv1.FeedMergeAbandoned{Summary: summary}},
+		})
 	})
-	r.teardown(ctx, outcome{abandoned: cause})
 	// The surfaces come AFTER the terminal and the release, as a queued
 	// merge's abandon orders them: the merge never happened as far as the
 	// footer and the roster are concerned.
