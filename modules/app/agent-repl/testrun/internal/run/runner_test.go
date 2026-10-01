@@ -424,3 +424,20 @@ func TestRunCancelledBeforeAnythingStartsReturnsTheCancellation(t *testing.T) {
 		t.Fatalf("started %v after cancellation", e.started)
 	}
 }
+
+func TestRunBracketsEachUnitsOutputWithItsSuite(t *testing.T) {
+	// Arrange
+	e := &fakeExec{scripts: map[string]script{"ert#00": {output: "line one\nline two\n"}}}
+	r, out, _ := newRunner(1, e)
+
+	// Act
+	if _, _, err := r.Run(context.Background(), []Spec{spec("ert#00", "ert")}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert
+	want := "[agent-repl-tests] unit ert#00 [ert] output:\nline one\nline two\n[agent-repl-tests] unit ert#00 [ert] ok, "
+	if !strings.Contains(out.String(), want) {
+		t.Fatalf("the block is not bracketed by its unit lines:\n%s", out)
+	}
+}

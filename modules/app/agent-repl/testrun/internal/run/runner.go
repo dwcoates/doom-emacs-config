@@ -234,6 +234,10 @@ func (r *Runner) Run(ctx context.Context, specs []Spec) ([]Result, []SuiteResult
 			}
 			res.Items = items
 		}
+		// The block is bracketed by a line naming its unit and suite and by
+		// the unit's verdict line, so a reader of the interleaved run (the
+		// merge gate's tests tab) attributes every line to its suite.
+		r.Log.Infof("unit %s [%s] output:", c.id, spec.Suite)
 		r.Log.Block(c.output.Bytes())
 		r.reportUnit(res)
 		cancelled := q.Done(c.id, res.Outcome == Passed)
