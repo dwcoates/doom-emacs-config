@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/dlog"
@@ -40,33 +39,6 @@ func TestSameDirExcludesASiblingWorktree(t *testing.T) {
 			// Assert.
 			if got != tc.want {
 				t.Fatalf("sameDir(%q, %q) = %v, want %v", a, b, got, tc.want)
-			}
-		})
-	}
-}
-
-// TestMethodNameNamesTheMethod covers the log record's own vocabulary, which is
-// how a merge's method is read back after the fact.
-func TestMethodNameNamesTheMethod(t *testing.T) {
-	tests := []struct {
-		name      string
-		emacsRepo bool
-		want      string
-	}{
-		{name: "the daemon's own repository", emacsRepo: true, want: "emacs_repo"},
-		{name: "any other repository", emacsRepo: false, want: "other_repo"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			// Arrange: which repository the target is.
-			emacsRepo := tc.emacsRepo
-
-			// Act.
-			got := methodName(emacsRepo)
-
-			// Assert.
-			if got != tc.want {
-				t.Fatalf("methodName(%v) = %q, want %q", emacsRepo, got, tc.want)
 			}
 		})
 	}
@@ -397,104 +369,3 @@ func TestAnAdmittedMergeWaitsForTheWorkspaceToFallFree(t *testing.T) {
 // 2026-09-28, prompt-bubble-height: the agent asked for its merge from inside
 // its own turn, and the admission's displacement ended that very turn ("the
 // turn was interrupted") and marked it for resubmission.
-
-// TestWhoAskedDecidesWhetherTheTurnInFlightIsDisplaced covers the rule: only
-// the user's own ask displaces; an agent's never does, and neither does a
-// merge whose requester is not known (one the boot recovery put back).
-func TestWhoAskedDecidesWhetherTheTurnInFlightIsDisplaced(t *testing.T) {
-	tests := []struct {
-		name         string
-		enqueue      func(t *testing.T, h *harness)
-		wantCaptures int
-	}{
-		{name: "the user's merge displaces", wantCaptures: 1, enqueue: func(t *testing.T, h *harness) {
-			if err := h.o.Enqueue(context.Background(), theWorkspace, RequestedByUser); err != nil {
-				t.Fatalf("enqueueing: %v", err)
-			}
-		}},
-		{name: "an agent's merge never displaces", wantCaptures: 0, enqueue: func(t *testing.T, h *harness) {
-			if err := h.o.Enqueue(context.Background(), theWorkspace, RequestedByAgent); err != nil {
-				t.Fatalf("enqueueing: %v", err)
-			}
-		}},
-		{name: "a merge with no known requester never displaces", wantCaptures: 0, enqueue: func(t *testing.T, h *harness) {
-			if _, err := h.db.EnqueueMerge(context.Background(), h.repoKey(), theWorkspace, h.clock()); err != nil {
-				t.Fatalf("enqueueing durably: %v", err)
-			}
-		}},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			// Arrange: a turn in flight to displace.
-			h := newHarness(t)
-			h.emacsRepo()
-			h.displaceTurn("finish the feature and merge it")
-			h.landsCleanly("abc123def4567")
-			h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
-			h.gatePasses("daemon")
-			tc.enqueue(t, h)
-
-			// Act.
-			if err := h.admit(context.Background()); err != nil {
-				t.Fatalf("the merge failed: %v", err)
-			}
-
-			// Assert.
-			h.mu.Lock()
-			defer h.mu.Unlock()
-			if h.captures != tc.wantCaptures {
-				t.Fatalf("CaptureDisplaced ran %d time(s), want %d", h.captures, tc.wantCaptures)
-			}
-		})
-	}
-}
-
-// TestAnAgentsMergeMarksNothingForResubmission covers the other half of the
-// kill: nothing is put back, because nothing was taken away.
-func TestAnAgentsMergeMarksNothingForResubmission(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-	h.emacsRepo()
-	h.displaceTurn("finish the feature and merge it")
-	h.landsCleanly("abc123def4567")
-	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
-	h.gatePasses("daemon")
-	if err := h.o.Enqueue(context.Background(), theWorkspace, RequestedByAgent); err != nil {
-		t.Fatalf("enqueueing: %v", err)
-	}
-
-	// Act.
-	if err := h.admit(context.Background()); err != nil {
-		t.Fatalf("the merge failed: %v", err)
-	}
-
-	// Assert.
-	if n := h.queue.countOrigin(conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME); n != 0 {
-		t.Fatalf("%d turn(s) resubmitted for an agent's own merge, want none", n)
-	}
-}
-
-// TestAnAgentsMergeWaitsForTheTurnThatAskedToEnd covers what the lease does
-// instead of killing: it waits for the workspace to fall free.
-func TestAnAgentsMergeWaitsForTheTurnThatAskedToEnd(t *testing.T) {
-	// Arrange: the asking turn still in flight.
-	h := newHarness(t)
-	h.emacsRepo()
-	h.landsCleanly("abc123def4567")
-	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
-	h.gatePasses("daemon")
-	h.freeness.busy = true
-	if err := h.o.Enqueue(context.Background(), theWorkspace, RequestedByAgent); err != nil {
-		t.Fatalf("enqueueing: %v", err)
-	}
-
-	// Act.
-	if err := h.admit(context.Background()); err != nil {
-		t.Fatalf("the merge failed: %v", err)
-	}
-
-	// Assert.
-	if n := h.freeness.awaits(); n != 1 {
-		t.Fatalf("the merge waited %d time(s) for the workspace to fall free, want 1", n)
-	}
-}

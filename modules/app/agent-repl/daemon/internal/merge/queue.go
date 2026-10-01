@@ -2,90 +2,27 @@ package merge
 
 import (
 	"context"
-	"errors"
 	"fmt"
+
+	"time"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/feedid"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/resolve/footer"
 	"claude-repld/internal/wsm"
 )
 
-// This file is the PER-REPO QUEUE: the pre-state refusals, the durable
-// enqueue, pause and eviction, and the admission pump that starts the front.
+// This file is the PER-REPO QUEUE: pause and eviction, the queue's publication,
+// and the admission pump that starts the front. A request's refusals and its
+// wait for the requesting turn's end are request.go's.
 //
 // The queue is durable in WSM and keyed by the TARGET repository's common dir,
 // so a bounce re-enqueues exactly what was waiting in the order it was waiting
 // in. The kernel flock is what keeps two daemons from running one repository's
 // queue; the durable rows keep the order, and the lock keeps the exclusivity.
-
-// Enqueue queues a workspace's merge.
-//
-// IT REFUSES PRE-STATE. An unmergeable workspace leaves no enqueuing→failed
-// trail: nothing is recorded before the refusal, so there is no state to stamp
-// and nothing to clean up. The composer gate is the primary defense against a
-// prompt arriving after a merge starts; these refusals are the race fallback.
-func (o *orchestrator) Enqueue(ctx context.Context, ws ids.WorkspaceID, by Requester) error {
-	const op = "daemon.merge.enqueue"
-	log := o.log(ctx, ws)
-	job, err := o.layoutFor(ctx, ws)
-	if err != nil {
-		log.Warn(op, "refused a merge for a workspace with no recorded geometry", dlog.Context{"workspace": string(ws), "error": err.Error()})
-		return err
-	}
-	session, found, err := o.deps.DB.Session(ctx, ws)
-	if err != nil {
-		return err
-	}
-	if found && session.Terminal != nil && session.Terminal.Kind == "deleted" {
-		err := refuse(ArmSessionDeleted, ws, "the session was deleted, so its configured prompts can never run")
-		log.Warn(op, "refused a merge for a deleted session", dlog.Context{"workspace": string(ws), "error": err.Error()})
-		return err
-	}
-	repo, err := o.repoKeyFor(ctx, job)
-	if err != nil {
-		return err
-	}
-	if _, running := o.runFor(ws); running {
-		return refuse(ArmAlreadyMerging, ws, "this workspace's merge is already in flight")
-	}
-	o.publish(ws, MergeFacts{State: StateEnqueuing})
-	position, err := o.deps.DB.EnqueueMerge(ctx, repo, ws, o.deps.Now())
-	if err != nil {
-		o.forget(ws)
-		var queued *wsm.MergeQueuedError
-		if errors.As(err, &queued) {
-			arm := ArmAlreadyQueued
-			if queued.State == wsm.MergeAdmitted {
-				arm = ArmAlreadyMerging
-			}
-			refusal := refuse(arm, ws, "the merge already holds place %d in its repository's queue", queued.Position)
-			log.Warn(op, "refused a duplicate enqueue", dlog.Context{"workspace": string(ws), "repo": string(repo), "position": queued.Position})
-			return refusal
-		}
-		return err
-	}
-	o.mu.Lock()
-	o.repoOf[ws] = repo
-	// ONLY THE USER'S OWN ASK MAY DISPLACE THE TURN IN FLIGHT (see Requester).
-	if by == RequestedByUser {
-		o.displaces[ws] = true
-	} else {
-		delete(o.displaces, ws)
-	}
-	o.mu.Unlock()
-	// THE BUBBLE EXISTS FROM HERE: the ledger identity it is addressed by is
-	// minted at enqueue, so republishQueue below can draw the queue tab on it.
-	o.mintLedger(ws)
-	log.Debug(op, "queued a merge", dlog.Context{"workspace": string(ws), "repo": string(repo), "position": position, "requested_by": by.String()})
-	if err := o.republishQueue(ctx, repo); err != nil {
-		return err
-	}
-	o.kick(repo)
-	return nil
-}
 
 // Pause stops the queue from admitting new merges; an in-flight merge runs on.
 //
@@ -230,36 +167,20 @@ var abandonSummaries = map[AbandonCause]string{
 	CauseDaemonShutdown:  "the daemon shut down while this merge was waiting in the queue, and the restart could not put it back",
 }
 
-// The phases a RUNNING merge can be abandoned in, for its sentence.
-const (
-	phaseRunning = "running"
-	phaseParked  = "parked"
-)
-
-// runningSummaries and parkedSummaries are the resolved sentences of a merge
-// abandoned AFTER it was admitted. They are separate from abandonSummaries
-// because those say "while this merge was waiting in the queue", which is
-// false of a merge that ran (2026-09-28: "a merge left the queue without
-// running" was logged for one that had run three repair rounds).
+// runningSummaries are the resolved sentences of a merge abandoned AFTER it
+// was admitted. They are separate from abandonSummaries because those say
+// "while this merge was waiting in the queue", which is false of a merge that
+// ran (2026-09-28: "a merge left the queue without running" was logged for one
+// that had run three repair rounds).
 var runningSummaries = map[AbandonCause]string{
 	CauseUserDrop:        "the operator evicted this merge while it was running",
 	CauseUserDequeue:     "the user took this merge out of the queue while it was running",
 	CauseWorkspaceClosed: "the workspace was closed while this merge was running",
 }
 
-var parkedSummaries = map[AbandonCause]string{
-	CauseUserDrop:        "the operator evicted this merge while it was parked for input",
-	CauseUserDequeue:     "the user took this merge out of the queue while it was parked for input",
-	CauseWorkspaceClosed: "the workspace was closed while this merge was parked for input",
-}
-
-// summaryWhile resolves the sentence of a merge abandoned in one phase.
-func (c AbandonCause) summaryWhile(phase string) (string, bool) {
-	table := runningSummaries
-	if phase == phaseParked {
-		table = parkedSummaries
-	}
-	sentence, declared := table[c]
+// summaryRunning resolves the sentence of a merge abandoned while it ran.
+func (c AbandonCause) summaryRunning() (string, bool) {
+	sentence, declared := runningSummaries[c]
 	return sentence, declared
 }
 
@@ -282,9 +203,8 @@ func (o *orchestrator) Evict(ctx context.Context, ws ids.WorkspaceID) error {
 }
 
 // dequeue takes one workspace's merge out, whatever it is doing. A merge still
-// WAITING leaves its queue; a merge that is RUNNING -- merging, testing,
-// repairing, parked, or waiting for its slot again -- is ABANDONED through
-// the one release path. Before this a dequeue only ever dropped the queue
+// WAITING (or only requested) leaves its queue; a merge that is RUNNING is
+// ABANDONED through the one release path. Before this a dequeue only ever dropped the queue
 // row, so a running merge's lease, queue entry and repository lock outlived
 // it and blocked its repository's queue until the daemon restarted
 // (2026-09-28, lease c8a3a664006f46c1).
@@ -305,7 +225,7 @@ func (o *orchestrator) OnWorkspaceClosed(ctx context.Context, ws ids.WorkspaceID
 	const op = "daemon.merge.workspace_closed"
 	if r, running := o.runFor(ws); running {
 		// A RUNNING MERGE ENDS WITH ITS WORKSPACE TOO. Left alone, a merge
-		// parked on a workspace that is gone would hold its lease for ever.
+		// running on a workspace that is gone would hold its lease for ever.
 		if err := o.abandonRunning(ctx, r, CauseWorkspaceClosed); err != nil {
 			o.log(ctx, ws).Error(op, "could not abandon the running merge of a torn-down workspace",
 				dlog.Context{"workspace": string(ws), "error": err.Error()})
@@ -328,12 +248,20 @@ func (o *orchestrator) OnWorkspaceClosed(ctx context.Context, ws ids.WorkspaceID
 }
 
 // dropQueued takes one workspace off its queue with the cause it was dropped
-// for, and publishes the abandoned terminal.
+// for, and publishes the abandoned terminal. A merge only REQUESTED -- its
+// requesting turn still running -- has its wait withdrawn and draws nothing:
+// it was never reported, so there is no bubble to end.
 func (o *orchestrator) dropQueued(ctx context.Context, ws ids.WorkspaceID, cause AbandonCause) error {
 	const op = "daemon.merge.drop_queued"
 	log := o.log(ctx, ws)
 	repo, err := o.queueOf(ctx, ws)
 	if err != nil {
+		return err
+	}
+	o.withdrawRequest(ws)
+	source, err := o.sourceOf(ctx, repo, ws)
+	if err != nil {
+		log.Error(op, "could not read a queued merge's source", dlog.Context{"workspace": string(ws), "repo": string(repo), "error": err.Error()})
 		return err
 	}
 	if err := o.deps.DB.RemoveMergeQueueEntry(ctx, repo, ws, string(cause)); err != nil {
@@ -350,7 +278,7 @@ func (o *orchestrator) dropQueued(ctx context.Context, ws ids.WorkspaceID, cause
 	delete(o.ledgerOf, ws)
 	o.mu.Unlock()
 	log.Warn(op, "dropped a queued merge", dlog.Context{"workspace": string(ws), "repo": string(repo), "cause": string(cause)})
-	o.publishAbandoned(ctx, ws, ledger, cause)
+	o.publishAbandoned(ctx, ws, ledger, source, cause)
 	o.clearOffer(ws)
 	if err := o.republishQueue(ctx, repo); err != nil {
 		return err
@@ -383,17 +311,19 @@ func (o *orchestrator) queueOf(ctx context.Context, ws ids.WorkspaceID) (wsm.Rep
 }
 
 // republishQueue redraws the queue tab of every bubble on one repository's
-// queue. The snapshot is replaced whole on every queue change and on any change
-// to the front's active tab, so a waiting user always sees the current order.
+// queue, and every WAITING merge's facts. The snapshot is replaced whole on
+// every queue change and on every step change of the merge being worked on, so
+// a waiting user always sees the current order and what the merge ahead is
+// doing.
+//
+// A REQUESTED MERGE IS IN NOBODY'S LINE: its requesting turn has not ended, so
+// it is on no snapshot and has no facts.
 func (o *orchestrator) republishQueue(ctx context.Context, repo wsm.RepoKey) error {
 	stored, err := o.deps.DB.MergeQueue(ctx, repo)
 	if err != nil {
 		return err
 	}
-	// A PARKED MERGE IS OUT OF THE LINE. It holds no slot and blocks nobody,
-	// so the queue a waiting user reads is the running merge and the ones
-	// behind it, numbered from there.
-	entries := o.inLine(stored)
+	entries := inLine(stored)
 	names := map[ids.WorkspaceID]string{}
 	dirs := map[ids.WorkspaceID]string{}
 	for _, entry := range entries {
@@ -407,49 +337,74 @@ func (o *orchestrator) republishQueue(ctx context.Context, repo wsm.RepoKey) err
 	o.mu.Lock()
 	front := o.running[repo]
 	o.mu.Unlock()
-	var frontTab = tabLabel(TabQueue, 1)
+	frontTab := tabLabel(TabQueue, 1)
+	var ahead *frontendv1.FooterStatusActivityMergeStep
+	var aheadAt time.Time
 	if front != nil {
 		frontTab = tabLabel(front.activeTab(), front.roundOf(front.activeTab()))
+		ahead, aheadAt = front.enqueuedLine(names[front.ws])
 	}
+	waiting := 0
 	for _, entry := range entries {
-		// EVERY QUEUED MERGE HAS A BUBBLE. Its ledger identity is minted at
-		// enqueue, so a merge that has not been admitted still has a head to
-		// hang its queue tab on -- which is the tab a waiting user reads their
+		if entry.State == wsm.MergeQueued {
+			waiting++
+		}
+	}
+	place := 0
+	for _, entry := range entries {
+		// EVERY MERGE IN LINE HAS A BUBBLE. Its ledger identity is minted as
+		// it takes its place, so a merge that has not been admitted still has a
+		// head to hang its queue tab on -- the tab a waiting user reads their
 		// place from, and the first of the tab sequence.
 		if lease, ok := o.leaseOf(entry.Workspace); ok {
 			o.deps.Feed.UpsertSynthesized(entry.Workspace, feedid.Feed{Root: true},
-				headRow(entry.Workspace, lease, branchLabel(names[entry.Workspace], dirs[entry.Workspace]), o.nowMS(), nil))
+				headRow(entry.Workspace, lease, o.bubbleLabel(ctx, entry), o.nowMS(), nil))
 			snapshot := queueSnapshot(entries, entry.Workspace, names, dirs, frontTab)
 			o.deps.Feed.UpsertSynthesized(entry.Workspace, mergeFeed(lease), tabRow(entry.Workspace, lease, TabQueue, 1,
 				queueTab(snapshot, entry.State == wsm.MergeAdmitted, o.nowMS())))
 		}
-		facts, _ := o.Facts(entry.Workspace)
-		facts.QueuePosition = entry.Position
-		facts.QueueDepth = len(entries)
-		if entry.State == wsm.MergeQueued {
-			facts.State = StateQueued
+		if entry.State != wsm.MergeQueued {
+			continue
 		}
-		o.publish(entry.Workspace, facts)
+		// ENQUEUED k/n COUNTS ONLY THE WAITING: the merge being worked on is
+		// not counted, so 1 means next and there is never a 0.
+		place++
+		o.publish(entry.Workspace, MergeFacts{
+			State: StateQueued, Step: footer.StepEnqueued, QueuePlace: place, QueueWaiting: waiting,
+			Line: ahead, LineAt: aheadAt,
+		})
 	}
 	return nil
 }
 
-// inLine answers a repository's stored queue less its PARKED merges, with the
-// positions renumbered over what is left. A parked run is one the orchestrator
-// holds in memory that holds no slot and is not waiting for it; a run whose
-// guidance ended and that waits for its slot again is back in the line.
-func (o *orchestrator) inLine(stored []wsm.MergeQueueEntry) []wsm.MergeQueueEntry {
-	o.mu.Lock()
-	defer o.mu.Unlock()
+// inLine answers a repository's stored queue less its REQUESTED merges, with
+// the positions renumbered over what is left.
+func inLine(stored []wsm.MergeQueueEntry) []wsm.MergeQueueEntry {
 	entries := make([]wsm.MergeQueueEntry, 0, len(stored))
 	for _, entry := range stored {
-		if r, live := o.runsByWorkspace[entry.Workspace]; live && r.isParked() {
+		if entry.State == wsm.MergeRequested {
 			continue
 		}
 		entry.Position = len(entries) + 1
 		entries = append(entries, entry)
 	}
 	return entries
+}
+
+// bubbleLabel is a queued merge's head line, read off what it merges. A label
+// that cannot be read is recorded and the workspace's own id stands in: a
+// label must not stop the queue from being drawn.
+func (o *orchestrator) bubbleLabel(ctx context.Context, entry wsm.MergeQueueEntry) string {
+	if r, running := o.runFor(entry.Workspace); running {
+		return r.label()
+	}
+	label, err := o.sourceLabel(ctx, entry.Workspace, entry.Source)
+	if err != nil {
+		o.log(ctx, entry.Workspace).Error("daemon.merge.queue", "could not read what a queued merge lands for its bubble's label",
+			dlog.Context{"workspace": string(entry.Workspace), "error": err.Error()})
+		return string(entry.Workspace)
+	}
+	return label
 }
 
 // leaseOf reports the LEDGER identity a workspace's merge bubble is keyed by.
@@ -465,7 +420,7 @@ func (o *orchestrator) leaseOf(ws ids.WorkspaceID) (ids.LeaseID, bool) {
 }
 
 // mintLedger mints a workspace's merge ledger identity, or answers the one it
-// already has: a re-enqueue of a merge already in the queue keeps its bubble.
+// already has: a merge put back in line keeps its bubble.
 func (o *orchestrator) mintLedger(ws ids.WorkspaceID) ids.LeaseID {
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -492,9 +447,8 @@ func (o *orchestrator) kick(repo wsm.RepoKey) {
 		return
 	}
 	// A KICK TO A RUNNING PUMP IS REMEMBERED, NOT DROPPED. The pump reads the
-	// mark under this lock before it goes idle, so a merge enqueued -- or a
-	// parked run asking for its slot back -- in the instant between the pump's
-	// last look and its exit is still admitted.
+	// mark under this lock before it goes idle, so a merge put in line in the
+	// instant between the pump's last look and its exit is still admitted.
 	if o.pumping[repo] {
 		o.kicked[repo] = true
 		o.mu.Unlock()
@@ -503,7 +457,9 @@ func (o *orchestrator) kick(repo wsm.RepoKey) {
 	o.pumping[repo] = true
 	o.kicked[repo] = false
 	o.mu.Unlock()
+	o.live.Add(1)
 	go func() {
+		defer o.live.Done()
 		// admitted counts what this burst ran, and the burst's own terminal
 		// record carries it. THE RECORD IS THE END OF THE WHOLE MERGE, not of
 		// its terminal row: the terminal is published partway through `finish`,
@@ -544,44 +500,22 @@ func (o *orchestrator) kick(repo wsm.RepoKey) {
 	}()
 }
 
-// pumpOnce admits and runs at most one merge for a repository. It reports
-// whether it ran one, so the pump loop ends on an empty or paused queue rather
-// than spinning.
+// pumpOnce admits and runs at most one merge for a repository, and returns once
+// it has ended. It reports whether it ran one, so the pump loop ends on an
+// empty or paused queue rather than spinning.
+//
+// NOTHING PARKS, so a run holds its repository's slot from its admission to
+// its end: a merge that gives up fails, leaves the queue at once, and gives the
+// slot back through the one release path.
 func (o *orchestrator) pumpOnce(ctx context.Context, repo wsm.RepoKey) (bool, error) {
-	// A PARKED RUN WAITING FOR ITS SLOT GOES FIRST. It was admitted before
-	// anything still queued, and it has already waited out its park.
-	resumed, back, granted, err := o.grantWaiter(repo)
-	if err != nil {
-		return false, err
-	}
-	if granted {
-		if end := <-back.back; end.err != nil && !end.parked {
-			o.deps.Log.Global().Debug("daemon.merge.pump", "a resumed merge ended on its own terminal; the queue continues",
-				dlog.Context{"repo": string(repo), "workspace": string(resumed.ws), "error": end.err.Error()})
-		}
-		return true, nil
-	}
 	front, lock, admitted, err := o.admitFront(ctx, repo)
 	if err != nil || !admitted {
 		return false, err
 	}
-	// THE RUN GOES ON ITS OWN GOROUTINE, AND THE PUMP WAITS FOR THE SLOT BACK:
-	// either the run's end, or its park, after which the queue behind it
-	// proceeds while the parked run waits for its guidance.
-	t := newTenancy()
-	o.live.Add(1)
-	go func() {
-		defer o.live.Done()
-		o.runAdmitted(ctx, repo, front, lock, t)
-	}()
-	end := <-t.back
-	if end.parked {
-		return true, nil
-	}
-	if err := end.err; err != nil {
+	if err := o.runAdmitted(ctx, repo, front, lock); err != nil {
 		// ONE MERGE'S FAILURE IS NOT THE QUEUE'S. A run that reached its own
 		// terminal has already recorded the failure at ERROR, published the
-		// bubble's terminal and left the queue — so the pump goes on to the
+		// bubble's terminal and left the queue -- so the pump goes on to the
 		// next entry rather than stranding every merge behind this one.
 		//
 		// The test is whether the entry is STILL THERE: a failure early enough
@@ -600,7 +534,6 @@ func (o *orchestrator) pumpOnce(ctx context.Context, repo wsm.RepoKey) (bool, er
 		}
 		o.deps.Log.Global().Debug("daemon.merge.pump", "a merge ended on its own terminal; the queue continues",
 			dlog.Context{"repo": string(repo), "workspace": string(front), "error": err.Error()})
-		return true, nil
 	}
 	return true, nil
 }
@@ -681,7 +614,7 @@ func (o *orchestrator) admitFront(ctx context.Context, repo wsm.RepoKey) (ids.Wo
 	if err != nil {
 		return "", nil, false, err
 	}
-	front, found := o.nextInLine(entries)
+	front, found := nextInLine(entries)
 	if !found {
 		return "", nil, false, nil
 	}
@@ -700,17 +633,13 @@ func (o *orchestrator) admitFront(ctx context.Context, repo wsm.RepoKey) (ids.Wo
 	return front.Workspace, lock, true, nil
 }
 
-// nextInLine answers the first entry of a queue with no run of its own: a
-// PARKED merge is still on the durable queue (admitted), and it is skipped,
-// never admitted a second time.
-func (o *orchestrator) nextInLine(entries []wsm.MergeQueueEntry) (wsm.MergeQueueEntry, bool) {
-	o.mu.Lock()
-	defer o.mu.Unlock()
+// nextInLine answers the first entry of a queue that is waiting in line: a
+// requested merge is in nobody's line, and an admitted one is already running.
+func nextInLine(entries []wsm.MergeQueueEntry) (wsm.MergeQueueEntry, bool) {
 	for _, entry := range entries {
-		if _, live := o.runsByWorkspace[entry.Workspace]; live {
-			continue
+		if entry.State == wsm.MergeQueued {
+			return entry, true
 		}
-		return entry, true
 	}
 	return wsm.MergeQueueEntry{}, false
 }

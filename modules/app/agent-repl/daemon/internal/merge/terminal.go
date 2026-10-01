@@ -15,6 +15,7 @@ import (
 	"claude-repld/internal/gitclient"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/promptqueue"
+	"claude-repld/internal/resolve/footer"
 	"claude-repld/internal/wsm"
 )
 
@@ -39,16 +40,12 @@ func (r *run) finish(ctx context.Context, out outcome) error {
 	const op = "daemon.merge.finish"
 	// THE TERMINAL IS REGISTERED BEFORE THE FIRST DURABLE WRITE. The shutdown
 	// drain waits for exactly what is registered here, which is why the
-	// registration precedes the stamps rather than following them: a SIGTERM
-	// landing between the two would close the state client under writes that
-	// nothing was waiting for, which is the defect this exists for.
+	// registration precedes the stamps rather than following them.
 	r.enterTerminal(terminalOwed(out))
 	defer r.leaveTerminal()
 	log := r.o.log(ctx, r.ws)
 	endedMS := r.o.nowMS()
-	// THE TEST SEAM, NIL IN PRODUCTION. See Deps.PauseInTerminal: it holds a
-	// run inside its terminal, with the terminal already registered and no
-	// stamp yet written, which is the window a shutdown has to land in.
+	// THE TEST SEAM, NIL IN PRODUCTION. See Deps.PauseInTerminal.
 	if r.o.deps.PauseInTerminal != nil {
 		r.o.deps.PauseInTerminal(ctx, r.ws)
 	}
@@ -59,88 +56,97 @@ func (r *run) finish(ctx context.Context, out outcome) error {
 		r.teardown(ctx, out)
 		return nil
 	}
-	if out.alreadyOn != "" {
+	switch {
+	case out.failed != "":
+		r.failedTerminal(ctx, out.failed, out.area)
+	case out.alreadyOn != "":
 		// NOTHING WAS MERGED, AND NOTHING FAILED: the branch was on the target
 		// already. It concludes as merged, and says why there is no commit.
 		r.head(&frontendv1.FeedMergeSuccess{EndedAtMs: endedMS, Commit: out.landed})
-		r.facts(StateMerged, "")
-		facts, _ := r.o.Facts(r.ws)
-		facts.Detail = fmt.Sprintf("already on %s; nothing to merge", out.alreadyOn)
-		r.o.publish(r.ws, facts)
-		r.stampLanded(ctx, log, op)
+		r.concluded(MergeFacts{State: StateMerged, Detail: fmt.Sprintf("already on %s; nothing to merge", out.alreadyOn)})
+		r.stampClosed(ctx, log, op)
 		log.Info(op, "a merge concluded with its branch already on the target", dlog.Context{
 			"workspace": string(r.ws), "lease": string(r.lease.ID), "target": out.alreadyOn, "tip": out.landed})
-	} else if out.failed != "" {
-		r.head(&frontendv1.FeedMergeError{
-			EndedAtMs: endedMS,
-			Reason:    &frontendv1.FeedMergeError_Failed{Failed: &frontendv1.FeedMergeFailed{Summary: out.failed}},
-		})
-		r.facts(StateFailed, "")
-		facts, _ := r.o.Facts(r.ws)
-		facts.Detail = out.failed
-		r.o.publish(r.ws, facts)
-		log.Error(op, "a merge failed", dlog.Context{
-			"workspace": string(r.ws), "lease": string(r.lease.ID), "summary": out.failed, "commit": out.landed})
-	} else {
+	default:
 		r.head(&frontendv1.FeedMergeSuccess{EndedAtMs: endedMS, Commit: out.landed})
-		r.facts(StateMerged, "")
-		r.stampLanded(ctx, log, op)
-		log.Debug(op, "a merge landed", dlog.Context{
-			"workspace": string(r.ws), "lease": string(r.lease.ID), "commit": out.landed, "commits": len(out.commits)})
+		r.concluded(MergeFacts{State: StateMerged})
+		r.stampClosed(ctx, log, op)
+		log.Info(op, "a merge landed", dlog.Context{
+			"workspace": string(r.ws), "lease": string(r.lease.ID), "commit": out.landed, "commits": len(out.commits),
+			"source": r.source.Kind.String(), "closes": string(r.subject.closes)})
 	}
 	r.teardown(ctx, out)
 	return nil
 }
 
-// stampLanded writes a landed merge's durable half: merged_at and closed,
-// which put the roster row under `recently_merged`, and the republish nothing
-// else would make.
-func (r *run) stampLanded(ctx context.Context, log dlog.Logger, op string) {
-	if err := r.o.deps.DB.SetMergedAt(ctx, r.ws, r.o.deps.Now()); err != nil {
-		log.Error(op, "could not stamp the merge's landing", dlog.Context{"workspace": string(r.ws), "error": err.Error()})
-	}
-	if err := r.o.deps.DB.SetClosed(ctx, r.ws, true); err != nil {
-		log.Error(op, "could not close the merged workspace", dlog.Context{"workspace": string(r.ws), "error": err.Error()})
-	}
-	// THE ROSTER'S DURABLE HALF MOVED: merged_at and closed are what put
-	// the row under `recently_merged`, and nothing else republishes them.
-	if r.o.deps.PublishRegistry != nil {
-		if err := r.o.deps.PublishRegistry(ctx); err != nil {
-			log.Error(op, "could not republish the roster after the landing",
-				dlog.Context{"workspace": string(r.ws), "error": err.Error()})
-		}
-	}
-}
-
-// abort ends a run that could not continue. It is the FAILED end reached by an
-// error rather than by a verdict, and it takes the same teardown.
-func (r *run) abort(ctx context.Context, summary string) {
-	r.enterTerminal(terminalOwedFailed)
-	defer r.leaveTerminal()
-	// A RUN THAT ENDED BECAUSE THE DAEMON IS EXITING DID NOT FAIL. Its phase
-	// broke on a git or a shim that the orderly exit had already taken away,
-	// so recording it as a fault -- and publishing a failure the next boot
-	// contradicts -- names the wrong cause. It takes stop's account and
-	// abandons what it holds to the recovery, exactly like a cancelled git.
-	if r.exiting() {
-		r.o.deps.Log.Global().Info("daemon.merge.stop", "a merge ended when the daemon exited", dlog.Context{
-			"workspace": string(r.ws), "lease": string(r.lease.ID), "cause": summary})
-		r.teardown(ctx, outcome{failed: summary})
-		return
-	}
-	r.o.log(ctx, r.ws).Error("daemon.merge.abort", "a merge could not continue", dlog.Context{
-		"workspace": string(r.ws), "lease": string(r.lease.ID), "summary": summary})
+// failedTerminal draws a merge that gave up: the bubble's failed terminal and
+// the requester's "merge failed" with its area. The workspace is handed back:
+// the merge leaves the queue at once, and the user's next prompt is an
+// ordinary turn.
+func (r *run) failedTerminal(ctx context.Context, summary string, area footer.MergeFailedArea) {
 	if r.lease.ID != "" {
 		r.head(&frontendv1.FeedMergeError{
 			EndedAtMs: r.o.nowMS(),
 			Reason:    &frontendv1.FeedMergeError_Failed{Failed: &frontendv1.FeedMergeFailed{Summary: summary}},
 		})
 	}
-	r.facts(StateFailed, "")
-	facts, _ := r.o.Facts(r.ws)
-	facts.Detail = summary
+	r.concluded(MergeFacts{State: StateFailed, FailedArea: area, Detail: summary})
+	r.o.log(ctx, r.ws).Error("daemon.merge.abort", "a merge failed and the workspace is handed back", dlog.Context{
+		"workspace": string(r.ws), "lease": string(r.lease.ID), "summary": summary, "area": string(area)})
+}
+
+// concluded publishes a concluded merge's facts, keeping the testing round's
+// count so a later merge's first test round is a new focus.
+func (r *run) concluded(facts MergeFacts) {
+	r.mu.Lock()
+	facts.TestsRound = r.facts.TestsRound
+	r.facts = facts
+	r.mu.Unlock()
 	r.o.publish(r.ws, facts)
-	r.teardown(ctx, outcome{failed: summary})
+}
+
+// stampClosed writes the durable half of the workspace a landed merge closes:
+// merged_at and closed, which put its roster row under `recently_merged`, and
+// the republish nothing else would make. A merge that closes nothing -- a
+// requester kept open, a branch that is no workspace -- stamps nothing.
+func (r *run) stampClosed(ctx context.Context, log dlog.Logger, op string) {
+	closes := r.subject.closes
+	if closes == "" {
+		return
+	}
+	if err := r.o.deps.DB.SetMergedAt(ctx, closes, r.o.deps.Now()); err != nil {
+		log.Error(op, "could not stamp the merge's landing", dlog.Context{"workspace": string(closes), "error": err.Error()})
+	}
+	if err := r.o.deps.DB.SetClosed(ctx, closes, true); err != nil {
+		log.Error(op, "could not close the merged workspace", dlog.Context{"workspace": string(closes), "error": err.Error()})
+	}
+	// THE ROSTER'S DURABLE HALF MOVED: merged_at and closed are what put the
+	// row under `recently_merged`, and nothing else republishes them.
+	if r.o.deps.PublishRegistry != nil {
+		if err := r.o.deps.PublishRegistry(ctx); err != nil {
+			log.Error(op, "could not republish the roster after the landing",
+				dlog.Context{"workspace": string(closes), "error": err.Error()})
+		}
+	}
+}
+
+// abort ends a run that could not continue. It is the FAILED end reached by an
+// error rather than a give-up, in the area "other", and it takes the same
+// teardown.
+func (r *run) abort(ctx context.Context, summary string) {
+	r.enterTerminal(terminalOwedFailed)
+	defer r.leaveTerminal()
+	// A RUN THAT ENDED BECAUSE THE DAEMON IS EXITING DID NOT FAIL. Its step
+	// broke on a git or a shim that the orderly exit had already taken away,
+	// so it takes stop's account and abandons what it holds to the recovery.
+	if r.exiting() {
+		r.o.deps.Log.Global().Info("daemon.merge.stop", "a merge ended when the daemon exited", dlog.Context{
+			"workspace": string(r.ws), "lease": string(r.lease.ID), "cause": summary})
+		r.teardown(ctx, outcome{failed: summary, area: footer.FailedOther})
+		return
+	}
+	r.failedTerminal(ctx, summary, footer.FailedOther)
+	r.teardown(ctx, outcome{failed: summary, area: footer.FailedOther})
 }
 
 // stop ends a run whose git THIS DAEMON stopped — the context was cancelled or
@@ -210,42 +216,34 @@ func (r *run) teardown(ctx context.Context, out outcome) {
 	r.o.mu.Unlock()
 	r.o.clearOffer(r.ws)
 
-	// THE DISPLACED TURN GOES BACK BEFORE THE TREE GOES AWAY. The resubmission
-	// is a workspace-bound act — it records a turn and writes to that
-	// workspace's own log sink, which is a symlink INSIDE the worktree — so a
-	// removal ahead of it makes the "exactly once" guarantee unreachable: the
-	// sink will not resolve and the turn the user typed is lost.
+	// THE DISPLACED TURN GOES BACK BEFORE ANY TREE GOES AWAY. The
+	// resubmission is a workspace-bound act -- it records a turn and writes to
+	// that workspace's own log sink, which is a symlink INSIDE the worktree --
+	// so a removal ahead of it makes the "exactly once" guarantee unreachable.
 	r.resubmitDisplaced(ctx)
 
-	// The worktree goes only after the terminal was published, and only for a
-	// merge that landed: a failed merge's branch still holds work. Its session
-	// is ended and REAPED first. A live shim still has this directory as its
-	// working directory and can write through it while git removes it; under
-	// concurrent load that recreated the just-removed tree between git's exit
-	// and the postcondition check. A failed stand-down leaves the tree intact,
-	// loudly, because deleting a live process's working directory is forbidden.
+	// THE WORKSPACE A LANDING CLOSES goes only after the terminal was
+	// published, and only for a merge that landed: a failed merge's branch
+	// still holds work. Its session is ended and REAPED first, because a live
+	// shim still has the directory as its working directory. A failed
+	// stand-down leaves the tree intact, loudly.
 	//
-	// THE LOG SURFACES LET GO OF THE DIRECTORY INSIDE RemoveWorktree, for the
-	// same regression from the other side: a record reaching this workspace
-	// mid-removal (a forwarded sidecar diagnostic) opened a new sink whose
-	// MkdirAll recreated the tree. gitclient detaches the directory from its
-	// sinks before git runs (Surfaces.DetachDir), and a failed detachment
-	// removes nothing and is returned here as the removal's failure.
-	if out.failed == "" && out.landed != "" {
-		if err := r.o.deps.StopSession(ctx, r.ws, true); err != nil {
-			log.Error(op, "could not stop the merged workspace's session before removing its worktree", dlog.Context{
-				"workspace": string(r.ws), "worktree": r.job.Layout.SourceDir, "force": true, "error": err.Error()})
-		} else if err := r.o.deps.Git.RemoveWorktree(ctx, string(r.repo), r.job.Layout.SourceDir); err != nil {
-			log.Error(op, "could not remove the merged worktree", dlog.Context{
-				"workspace": string(r.ws), "worktree": r.job.Layout.SourceDir, "error": err.Error()})
-		} else {
-			log.Debug(op, "ensured the merged workspace has no live session before removing its worktree", dlog.Context{
-				"workspace": string(r.ws), "worktree": r.job.Layout.SourceDir, "force": true})
+	// THE LOG SURFACES LET GO OF THE DIRECTORY INSIDE RemoveWorktree
+	// (Surfaces.DetachDir), so a late record cannot recreate it.
+	if out.failed == "" && out.abandoned == "" && out.landed != "" && r.subject.closes != "" {
+		r.closeLanded(ctx, log)
+	}
+	// A WORKTREE THE MERGE MADE FOR A BRANCH goes with the merge -- except
+	// when its conflict resolution gave up, which leaves the rebase in
+	// progress in it for the user to carry on.
+	if r.subject.made && out.area != footer.FailedConflicts {
+		if err := r.o.deps.Git.RemoveWorktree(ctx, r.subject.targetDir, r.subject.dir); err != nil {
+			log.Error(op, "could not remove the worktree the merge made for the branch", dlog.Context{
+				"workspace": string(r.ws), "worktree": r.subject.dir, "error": err.Error()})
 		}
 	}
 	// THE ONE RELEASE PATH ENDS WITH THE SLOT: the queue tree an attempt was
-	// using goes, then the repository's slot and lock (a parked run holds
-	// none, and releases none).
+	// using goes, then the repository's slot and lock.
 	r.dropTree(ctx)
 	r.o.releaseSlot(ctx, r)
 	if err := r.o.republishQueue(ctx, r.repo); err != nil {
@@ -253,6 +251,33 @@ func (r *run) teardown(ctx context.Context, out outcome) {
 	}
 	r.selfReload(ctx, out)
 	r.o.kick(r.repo)
+}
+
+// closeLanded ends the landed-and-closed workspace's session and removes its
+// worktree: the requester for its own branch (unless kept open) or a branch
+// already merged upstream, the other workspace for another workspace's branch.
+func (r *run) closeLanded(ctx context.Context, log dlog.Logger) {
+	const op = "daemon.merge.teardown"
+	closes := r.subject.closes
+	job, err := r.o.layoutFor(ctx, closes)
+	if err != nil {
+		log.Error(op, "could not read the closed workspace's worktree to remove it", dlog.Context{
+			"workspace": string(closes), "error": err.Error()})
+		return
+	}
+	dir := job.Layout.SourceDir
+	if err := r.o.deps.StopSession(ctx, closes, true); err != nil {
+		log.Error(op, "could not stop the merged workspace's session before removing its worktree", dlog.Context{
+			"workspace": string(closes), "worktree": dir, "force": true, "error": err.Error()})
+		return
+	}
+	if err := r.o.deps.Git.RemoveWorktree(ctx, string(r.repo), dir); err != nil {
+		log.Error(op, "could not remove the merged worktree", dlog.Context{
+			"workspace": string(closes), "worktree": dir, "error": err.Error()})
+		return
+	}
+	log.Debug(op, "stopped the merged workspace's session and removed its worktree", dlog.Context{
+		"workspace": string(closes), "worktree": dir, "force": true})
 }
 
 // TerminalDrainBound is how long the orderly exit gives the merge runs that
@@ -296,7 +321,7 @@ const (
 
 // terminalOwed names what one outcome's terminal owes.
 func terminalOwed(out outcome) string {
-	if out.failed != "" {
+	if out.failed != "" || out.abandoned != "" {
 		return terminalOwedFailed
 	}
 	return terminalOwedLanded
@@ -590,7 +615,7 @@ func (r *run) selfReload(ctx context.Context, out outcome) {
 // landing 7 added is `FeedMergeAbandoned.summary`: the resolved sentence for
 // the collapsed line, composed from the abandon CAUSE, so the cause reaches a
 // reader in prose even though the arm does not distinguish it.
-func (o *orchestrator) publishAbandoned(ctx context.Context, ws ids.WorkspaceID, ledger ids.LeaseID, cause AbandonCause) {
+func (o *orchestrator) publishAbandoned(ctx context.Context, ws ids.WorkspaceID, ledger ids.LeaseID, source wsm.MergeSource, cause AbandonCause) {
 	const op = "daemon.merge.abandoned"
 	summary, declared := cause.summary()
 	if !declared {
@@ -607,7 +632,7 @@ func (o *orchestrator) publishAbandoned(ctx context.Context, ws ids.WorkspaceID,
 	o.deps.Log.Global().Info(op, "a merge left the queue without running",
 		dlog.Context{"workspace": string(ws), "cause": string(cause), "summary": summary})
 	if ledger != "" {
-		label := o.abandonedLabel(ctx, ws)
+		label := o.abandonedLabel(ctx, ws, source)
 		o.deps.Feed.UpsertSynthesized(ws, feedid.Feed{Root: true}, headRow(ws, ledger, label, o.nowMS(),
 			&frontendv1.FeedMergeError{
 				EndedAtMs: o.nowMS(),
@@ -623,21 +648,22 @@ func (o *orchestrator) publishAbandoned(ctx context.Context, ws ids.WorkspaceID,
 }
 
 // abandonedLabel is the head's branch line for a merge that never ran. The
-// geometry is read where it is available and the workspace's own name stands in
+// label is read where it is available and the workspace's own id stands in
 // where it is not: an unreadable label must not stop the bubble from ending.
-func (o *orchestrator) abandonedLabel(ctx context.Context, ws ids.WorkspaceID) string {
-	job, err := o.layoutFor(ctx, ws)
+func (o *orchestrator) abandonedLabel(ctx context.Context, ws ids.WorkspaceID, source wsm.MergeSource) string {
+	label, err := o.sourceLabel(ctx, ws, source)
 	if err != nil {
-		o.deps.Log.Global().Debug("daemon.merge.abandoned",
-			"the abandoned merge's geometry could not be read for its label",
+		o.deps.Log.Global().Error("daemon.merge.abandoned",
+			"the abandoned merge's label could not be read; its id stands in",
 			dlog.Context{"workspace": string(ws), "error": err.Error()})
 		return string(ws)
 	}
-	return branchLabel(job.Layout.SourceBranch, job.Layout.TargetDir)
+	return label
 }
 
 // RetireConcluded retires a concluded merge's standing state once the workspace
-// has moved on. The one release path cannot do it: it runs at the merge's
+// has moved on: the user's next prompt after a failed merge is an ordinary turn,
+// and a landed merge of a requester kept open stands until then too. The one release path cannot do it: it runs at the merge's
 // end, and the concluded state is what a reader should see until the
 // workspace does something else. What retires it is that something.
 func (o *orchestrator) RetireConcluded(ctx context.Context, ws ids.WorkspaceID) {
@@ -708,31 +734,6 @@ func (o *orchestrator) clearOffer(ws ids.WorkspaceID) {
 	}
 }
 
-// RouteParked delivers a submission that arrived while the lease stands parked,
-// and answers once the parked run has delivered it to the workspace agent's
-// own session -- or refused it. Every submission gets that answer: the parked
-// run stays listening until one is delivered.
-func (o *orchestrator) RouteParked(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID, said *conversationv1.UserSaid) error {
-	r, ok := o.runFor(ws)
-	if !ok {
-		return errNoRun
-	}
-	g := guidance{turn: turn, said: said, reply: make(chan error, 1)}
-	select {
-	case r.guidance <- g:
-	case <-r.finished:
-		return errNoRun
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-	select {
-	case err := <-g.reply:
-		return err
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-}
-
 // abandonment is the cause an abandon cancels a running merge's context with.
 type abandonment struct{ cause AbandonCause }
 
@@ -750,14 +751,13 @@ func abandonCauseOf(ctx context.Context) (AbandonCause, bool) {
 	return "", false
 }
 
-// abandonRunning ABANDONS a merge that is running -- merging, testing,
-// repairing, parked, or waiting for its slot again. Its context is cancelled
+// abandonRunning ABANDONS a merge that is running, whatever step it is on. Its context is cancelled
 // with the cause, whatever phase it is in stops, and it ends on the abandoned
 // terminal through the one release path; this returns once that is done, so
 // the caller's answer is the released state.
 func (o *orchestrator) abandonRunning(ctx context.Context, r *run, cause AbandonCause) error {
 	o.log(ctx, r.ws).Info("daemon.merge.abandon", "abandoning a running merge", dlog.Context{
-		"workspace": string(r.ws), "lease": string(r.lease.ID), "cause": string(cause), "parked": r.isParked()})
+		"workspace": string(r.ws), "lease": string(r.lease.ID), "cause": string(cause), "step": string(r.currentStep())})
 	r.cancel(&abandonment{cause: cause})
 	select {
 	case <-r.finished:
@@ -779,18 +779,14 @@ func (r *run) abandonTerminal(ctx context.Context, cause AbandonCause) {
 		r.teardown(ctx, outcome{abandoned: cause})
 		return
 	}
-	phase := phaseRunning
-	if r.isParked() {
-		phase = phaseParked
-	}
-	summary, declared := cause.summaryWhile(phase)
+	summary, declared := cause.summaryRunning()
 	if !declared {
-		summary = fmt.Sprintf("this merge was abandoned while it was %s (%s)", phase, cause)
+		summary = fmt.Sprintf("this merge was abandoned while it was running (%s)", cause)
 		r.o.deps.Log.Global().Error(op, "a merge was abandoned under a cause with no declared summary",
-			dlog.Context{"workspace": string(r.ws), "cause": string(cause), "phase": phase})
+			dlog.Context{"workspace": string(r.ws), "cause": string(cause)})
 	}
 	r.closeOpenRounds(ctx, "abandoned")
-	r.o.log(ctx, r.ws).Info(op, "abandoned a merge that was "+phase, dlog.Context{
+	r.o.log(ctx, r.ws).Info(op, "abandoned a running merge", dlog.Context{
 		"workspace": string(r.ws), "lease": string(r.lease.ID), "cause": string(cause), "summary": summary})
 	r.head(&frontendv1.FeedMergeError{
 		EndedAtMs: r.o.nowMS(),

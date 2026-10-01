@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 
@@ -12,7 +13,9 @@ import (
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/feedid"
+	"claude-repld/internal/ids"
 	"claude-repld/internal/promptqueue"
+	"claude-repld/internal/resolve/footer"
 	"claude-repld/internal/wsm"
 )
 
@@ -59,8 +62,20 @@ func (o *orchestrator) Recover(ctx context.Context) error {
 
 	for _, repo := range repos {
 		for _, entry := range queues[repo] {
+			if entry.State == wsm.MergeRequested {
+				// A REQUEST STILL WAITING FOR ITS TURN'S END is re-armed: it
+				// is put in line once the requester's turn in flight -- if one
+				// survived the restart -- has ended.
+				o.mu.Lock()
+				o.repoOf[entry.Workspace] = repo
+				o.mu.Unlock()
+				o.deps.Log.Global().Info(op, "re-armed a merge request still waiting for its turn to end", dlog.Context{
+					"workspace": string(entry.Workspace), "repo": string(repo)})
+				o.awaitRequestingTurn(entry.Workspace, repo)
+				continue
+			}
 			if entry.State != wsm.MergeAdmitted {
-				requeued, err := o.recoverWaiting(ctx, repo, entry, len(queues[repo]))
+				requeued, err := o.recoverWaiting(ctx, repo, entry)
 				if err != nil {
 					return err
 				}
@@ -77,6 +92,9 @@ func (o *orchestrator) Recover(ctx context.Context) error {
 		}
 	}
 	for _, repo := range repos {
+		if err := o.republishQueue(ctx, repo); err != nil {
+			return err
+		}
 		o.kick(repo)
 	}
 	return nil
@@ -95,10 +113,10 @@ func (o *orchestrator) Recover(ctx context.Context) error {
 //
 // A ROW THAT WILL NOT DECODE STILL REFUSES THE BOOT, exactly as an admitted
 // merge's does: half-written state is evidence, not an outcome.
-func (o *orchestrator) recoverWaiting(ctx context.Context, repo wsm.RepoKey, entry wsm.MergeQueueEntry, depth int) (bool, error) {
+func (o *orchestrator) recoverWaiting(ctx context.Context, repo wsm.RepoKey, entry wsm.MergeQueueEntry) (bool, error) {
 	const op = "daemon.merge.recover"
 	ws := entry.Workspace
-	_, jobErr := o.layoutFor(ctx, ws)
+	_, jobErr := o.recoverTarget(ctx, ws, entry.Source)
 	var decodeErr *wsm.DecodeError
 	if errors.As(jobErr, &decodeErr) {
 		fields := dlog.Context{"workspace": string(ws), "repo": string(repo), "error": decodeErr.Error()}
@@ -122,13 +140,16 @@ func (o *orchestrator) recoverWaiting(ctx context.Context, repo wsm.RepoKey, ent
 		if err := o.deps.DB.RemoveMergeQueueEntry(ctx, repo, ws, string(CauseDaemonShutdown)); err != nil {
 			return false, err
 		}
-		o.publishAbandoned(ctx, ws, ledger, CauseDaemonShutdown)
+		o.publishAbandoned(ctx, ws, ledger, entry.Source, CauseDaemonShutdown)
 		return false, nil
 	}
 	o.mu.Lock()
 	o.repoOf[ws] = repo
 	o.mu.Unlock()
-	o.publish(ws, MergeFacts{State: StateQueued, QueuePosition: entry.Position, QueueDepth: depth})
+	// A FRESH BUBBLE: a merge in line has one, and the pre-restart bubble's
+	// identity lived in memory. Recover republishes the queue once every entry
+	// is back.
+	o.mintLedger(ws)
 	return true, nil
 }
 
@@ -145,7 +166,7 @@ func (o *orchestrator) recoverAdmitted(ctx context.Context, repo wsm.RepoKey, en
 	if err != nil {
 		return err
 	}
-	job, jobErr := o.layoutFor(ctx, ws)
+	target, jobErr := o.recoverTarget(ctx, ws, entry.Source)
 	// CORRUPTION REFUSES THE LOAD, it is never an unmergeable outcome. A
 	// creation_jobs row that will not decode is a half-written record, not a
 	// workspace whose geometry was legitimately removed: dropping the merge and
@@ -166,12 +187,12 @@ func (o *orchestrator) recoverAdmitted(ctx context.Context, repo wsm.RepoKey, en
 	case jobErr != nil:
 		why = fmt.Sprintf("the workspace's merge geometry is gone: %v", jobErr)
 	default:
-		clean, err := o.deps.Git.IsClean(ctx, job.Layout.TargetDir)
+		clean, err := o.deps.Git.IsClean(ctx, target)
 		switch {
 		case err != nil:
-			why = fmt.Sprintf("the merge target %s could not be inspected: %v", job.Layout.TargetDir, err)
+			why = fmt.Sprintf("the merge target %s could not be inspected: %v", target, err)
 		case !clean:
-			why = fmt.Sprintf("the merge target %s carries an unfinished merge this daemon did not start", job.Layout.TargetDir)
+			why = fmt.Sprintf("the merge target %s carries an unfinished merge this daemon did not start", target)
 		default:
 			resumable = true
 		}
@@ -182,7 +203,7 @@ func (o *orchestrator) recoverAdmitted(ctx context.Context, repo wsm.RepoKey, en
 		// next run makes trees of its own under its own lease.
 		repoDir := string(repo)
 		if jobErr == nil {
-			repoDir = job.Layout.TargetDir
+			repoDir = target
 		}
 		o.sweepTrees(ctx, ws, repoDir, lease.ID)
 		if err := o.deps.DB.ReleaseLease(ctx, lease.ID); err != nil {
@@ -199,16 +220,19 @@ func (o *orchestrator) recoverAdmitted(ctx context.Context, repo wsm.RepoKey, en
 		o.mu.Lock()
 		o.repoOf[ws] = repo
 		o.mu.Unlock()
-		o.publish(ws, MergeFacts{State: StateQueued, QueuePosition: entry.Position})
-		// The entry goes back to WAITING so the ordinary admission path runs it
-		// again under a fresh lease; a half-owned admission is what left the
-		// lease stuck in the first place.
+		// The entry goes back in line, with the source it was asked with, so
+		// the ordinary admission path runs it again under a fresh lease; a
+		// half-owned admission is what left the lease stuck in the first place.
 		if err := o.deps.DB.RemoveMergeQueueEntry(ctx, repo, ws, "restart_resume"); err != nil {
 			return err
 		}
-		if _, err := o.deps.DB.EnqueueMerge(ctx, repo, ws, o.deps.Now()); err != nil {
+		if err := o.deps.DB.RequestMerge(ctx, repo, ws, entry.Source, o.deps.Now()); err != nil {
 			return err
 		}
+		if _, err := o.deps.DB.QueueMerge(ctx, repo, ws); err != nil {
+			return err
+		}
+		o.mintLedger(ws)
 		return nil
 	}
 	log.Error(op, "failing a merge a restart left unfinished", dlog.Context{
@@ -226,23 +250,56 @@ func (o *orchestrator) recoverAdmitted(ctx context.Context, repo wsm.RepoKey, en
 		// interrupted merge ends where a reader can see it rather than simply
 		// stopping mid-tab.
 		o.deps.Feed.UpsertSynthesized(ws, feedid.Feed{Root: true}, headRow(ws, lease.ID,
-			branchLabel(job.Layout.SourceBranch, job.Layout.TargetDir), o.nowMS(),
+			o.abandonedLabel(ctx, ws, entry.Source), o.nowMS(),
 			&frontendv1.FeedMergeError{
 				EndedAtMs: o.nowMS(),
 				Reason:    &frontendv1.FeedMergeError_Failed{Failed: &frontendv1.FeedMergeFailed{Summary: summary}},
 			}))
 	}
-	o.publish(ws, MergeFacts{State: StateFailed, Detail: summary})
+	o.publish(ws, MergeFacts{State: StateFailed, FailedArea: footer.FailedOther, Detail: summary})
 	return nil
 }
 
-// sweepTrees removes every scratch tree a dead run of one lease left under the
-// state root. A tree that will not go is recorded and left: it is the queue's
+// recoverTarget answers the checkout a recovered merge lands in, by its
+// source: a workspace's recorded target, or the repository's main worktree. A
+// creation_jobs row that will not decode is returned as the DecodeError it is.
+func (o *orchestrator) recoverTarget(ctx context.Context, ws ids.WorkspaceID, source wsm.MergeSource) (string, error) {
+	switch source.Kind {
+	case wsm.MergeSourceOwnBranch:
+		job, err := o.layoutFor(ctx, ws)
+		if err != nil {
+			return "", err
+		}
+		return job.Layout.TargetDir, nil
+	case wsm.MergeSourceWorkspace:
+		job, err := o.layoutFor(ctx, source.Workspace)
+		if err != nil {
+			return "", err
+		}
+		return job.Layout.TargetDir, nil
+	default:
+		record, err := o.deps.DB.Workspace(ctx, ws)
+		if err != nil {
+			return "", err
+		}
+		return o.deps.Git.MainWorktree(ctx, record.Dir)
+	}
+}
+
+// sweepTrees removes every scratch tree -- and the branch worktree -- a dead
+// run of one lease left under the state root. A tree that will not go is recorded and left: it is the queue's
 // own and blocks nothing.
 func (o *orchestrator) sweepTrees(ctx context.Context, ws wsm.WorkspaceID, repoDir string, lease wsm.LeaseID) {
 	const op = "daemon.merge.recover"
 	pattern := filepath.Join(o.deps.StateDir, mergeTreesDir, string(lease)+"-*")
 	trees, err := filepath.Glob(pattern)
+	// THE WORKTREE A DEAD RUN MADE FOR A BRANCH goes too: the merge runs again
+	// under a lease of its own and finds the branch free to check out.
+	if made := worktreeFor(o.deps.StateDir, lease); err == nil {
+		if _, statErr := os.Stat(made); statErr == nil {
+			trees = append(trees, made)
+		}
+	}
 	if err != nil {
 		o.deps.Log.Global().Error(op, "could not list a dead merge's queue trees", dlog.Context{
 			"workspace": string(ws), "lease": string(lease), "pattern": pattern, "error": err.Error()})

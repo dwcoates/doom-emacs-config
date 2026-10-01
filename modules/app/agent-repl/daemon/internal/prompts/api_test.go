@@ -298,9 +298,9 @@ func TestEveryCheckedInBriefLoads(t *testing.T) {
 	}
 }
 
-func TestMergeConflictBriefKeepsItsPlaceholderSet(t *testing.T) {
+func TestTheRebaseConflictBriefKeepsItsPlaceholderSet(t *testing.T) {
 	// Arrange.
-	want := []string{"conflict_commit", "source_branch", "source_dir", "target_branch", "target_dir", "conflicted_files"}
+	want := []string{"conflict_commit", "source_branch", "worktree_dir", "target_branch", "conflicted_files"}
 
 	// Act.
 	got, err := Load(repoPromptsDir, "merge-conflict-resolve")
@@ -314,9 +314,9 @@ func TestMergeConflictBriefKeepsItsPlaceholderSet(t *testing.T) {
 	}
 }
 
-func TestMergeTestFailureBriefKeepsItsPlaceholderSet(t *testing.T) {
+func TestTheFixingAttemptBriefKeepsItsPlaceholderSet(t *testing.T) {
 	// Arrange.
-	want := []string{"source_branch", "source_dir", "target_branch", "target_dir", "queue_dir", "archive_path", "failure_tail", "escalation_file", "escalation_marker"}
+	want := []string{"source_branch", "worktree_dir", "target_branch", "failing_suites", "archive_path", "failure_tail", "attempt", "max_attempts", "escalation_file", "escalation_marker"}
 
 	// Act.
 	got, err := Load(repoPromptsDir, "merge-test-failure-resolve")

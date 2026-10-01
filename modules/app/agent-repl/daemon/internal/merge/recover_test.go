@@ -39,29 +39,6 @@ func TestRecoverReEnqueuesWaitingMergesInOrder(t *testing.T) {
 	}
 }
 
-// TestRecoverPublishesAWaitingMergesFacts covers what a user sees after a
-// bounce: their merge is still queued and still says where it sits.
-func TestRecoverPublishesAWaitingMergesFacts(t *testing.T) {
-	// Arrange: a queued merge and a fresh orchestrator over the same store.
-	h := newHarness(t)
-	enqueue(t, h)
-	fresh, err := newOrchestrator(h.deps())
-	if err != nil {
-		t.Fatalf("building the successor: %v", err)
-	}
-
-	// Act.
-	if err := fresh.Recover(context.Background()); err != nil {
-		t.Fatalf("Recover failed: %v", err)
-	}
-
-	// Assert.
-	facts, ok := fresh.Facts(theWorkspace)
-	if !ok || facts.State != StateQueued || facts.QueuePosition != 1 {
-		t.Fatalf("the recovered facts are %+v (present=%v), want queued at position 1", facts, ok)
-	}
-}
-
 // TestRecoverResumesAnInFlightMergeOverACleanTarget covers the resumable case:
 // nothing of the interrupted merge is half applied, so it can run again.
 func TestRecoverResumesAnInFlightMergeOverACleanTarget(t *testing.T) {
@@ -204,30 +181,6 @@ func TestRecoverNeverLeavesAMergeInFlight(t *testing.T) {
 	}
 }
 
-// TestLastTabIsWhereAResumePicksUp covers what the ledger reconstructs: the tab
-// a merge reached, which is all a replay needs and all it holds.
-func TestLastTabIsWhereAResumePicksUp(t *testing.T) {
-	// Arrange: a ledger whose last interval is the tests tab.
-	h := newHarness(t)
-	lease := wsm.NewLeaseID()
-	if err := h.db.OpenMergeLedger(context.Background(), theWorkspace, lease); err != nil {
-		t.Fatalf("opening the ledger: %v", err)
-	}
-	for _, kind := range []string{TabMerge, TabTests} {
-		if err := h.db.RecordTabInterval(context.Background(), lease, wsm.TabInterval{Round: 1, Kind: kind}); err != nil {
-			t.Fatalf("recording %s: %v", kind, err)
-		}
-	}
-
-	// Act.
-	got := h.o.lastTab(context.Background(), theWorkspace)
-
-	// Assert.
-	if got != TabTests {
-		t.Fatalf("the last tab is %q, want %q", got, TabTests)
-	}
-}
-
 // TestLastTabDefaultsToTheQueue covers a merge with no ledger yet: it never
 // reached a phase, so the queue is where it resumes.
 func TestLastTabDefaultsToTheQueue(t *testing.T) {
@@ -246,7 +199,7 @@ func TestLastTabDefaultsToTheQueue(t *testing.T) {
 // enqueueWorkspace queues one named workspace's merge.
 func enqueueWorkspace(t *testing.T, h *harness, ws ids.WorkspaceID) {
 	t.Helper()
-	if err := h.o.Enqueue(context.Background(), ws, RequestedByUser); err != nil {
+	if err := h.o.Enqueue(context.Background(), Request{Workspace: ws, By: RequestedByUser}); err != nil {
 		t.Fatalf("enqueueing %s: %v", ws, err)
 	}
 }
@@ -515,5 +468,52 @@ func TestRecoverSweepsTheQueueTreesADeadRunLeft(t *testing.T) {
 	defer h.git.mu.Unlock()
 	if !equal(h.git.removedWorktrees, want) {
 		t.Fatalf("removed %v, want the dead run's trees %v", h.git.removedWorktrees, want)
+	}
+}
+
+func TestRecoverReArmsARequestStillWaitingForItsTurn(t *testing.T) {
+	// Arrange: a request recorded before the restart.
+	h := newHarness(t)
+	if err := h.db.RequestMerge(context.Background(), h.repoKey(), theWorkspace, ownBranch, h.clock()); err != nil {
+		t.Fatalf("RequestMerge: %v", err)
+	}
+
+	// Act.
+	if err := h.o.Recover(context.Background()); err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+
+	// Assert: re-armed, not yet in line, reported nowhere.
+	if state, _ := h.entryState(); state != wsm.MergeRequested {
+		t.Fatalf("entry state = %v, want still requested", state)
+	}
+	if _, standing := h.o.Facts(theWorkspace); standing {
+		t.Fatal("a re-armed request was reported")
+	}
+	h.runWait(t)
+	if state, _ := h.entryState(); state != wsm.MergeQueued {
+		t.Fatalf("entry state after the wait = %v, want queued", state)
+	}
+}
+
+func TestRecoverKeepsAResumedMergesSource(t *testing.T) {
+	// Arrange: an admitted merge of another workspace's branch, interrupted.
+	h := newHarness(t)
+	h.registerOther(otherWorkspace, "ws-two", "other-branch")
+	source := wsm.MergeSource{Kind: wsm.MergeSourceWorkspace, Workspace: otherWorkspace}
+	if err := h.request(t, source, RequestedByUser); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	interruptMerge(t, h)
+
+	// Act.
+	if err := h.o.Recover(context.Background()); err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+
+	// Assert.
+	entries, _ := h.db.MergeQueue(context.Background(), h.repoKey())
+	if len(entries) != 1 || entries[0].Source != source || entries[0].State != wsm.MergeQueued {
+		t.Fatalf("queue = %+v, want the merge back in line with its source", entries)
 	}
 }

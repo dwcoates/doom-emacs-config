@@ -353,69 +353,6 @@ func TestOutputAddressIsClearedAtTeardown(t *testing.T) {
 	}
 }
 
-// TestLedgerRecordsEveryTabInterval covers the ledger's whole content: the
-// intervals a replay reconstructs from, and nothing of the phases' content.
-func TestLedgerRecordsEveryTabInterval(t *testing.T) {
-	// Arrange: a merge that opens the merge and tests tabs.
-	h := newHarness(t)
-	h.emacsRepo()
-	h.landsCleanly("abc123def4567")
-	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
-	h.gatePasses("daemon")
-	enqueue(t, h)
-
-	// Act.
-	if err := h.admit(context.Background()); err != nil {
-		t.Fatalf("the merge failed: %v", err)
-	}
-
-	// Assert.
-	entries, err := h.db.MergeLedger(context.Background(), theWorkspace)
-	if err != nil || len(entries) != 1 {
-		t.Fatalf("the ledger holds %d entries, want one per lease: %v", len(entries), err)
-	}
-	var kinds []string
-	for _, interval := range entries[0].Intervals {
-		kinds = append(kinds, interval.Kind)
-	}
-	want := []string{TabQueue, TabQueue, TabMerge, TabMerge, TabTests, TabTests}
-	if !equal(kinds, want) {
-		t.Fatalf("the ledger recorded %v, want an open and a close per tab: %v", kinds, want)
-	}
-}
-
-// TestLedgerRecordsEachRoundsOutcome covers what a closed interval carries: the
-// round's outcome, which is what makes a replayed ledger legible.
-func TestLedgerRecordsEachRoundsOutcome(t *testing.T) {
-	// Arrange: a merge that conflicts, is resolved on the branch, and lands on
-	// its second attempt.
-	h := newHarness(t)
-	h.emacsRepo()
-	h.git.outcomes = append(h.git.outcomes, mergeConflicted("a.go"))
-	h.landsCleanly("abc123def4567")
-	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
-	h.gatePasses("daemon")
-	enqueue(t, h)
-
-	// Act.
-	if err := h.admit(context.Background()); err != nil {
-		t.Fatalf("the merge failed: %v", err)
-	}
-
-	// Assert.
-	entries, _ := h.db.MergeLedger(context.Background(), theWorkspace)
-	var outcomes []string
-	for _, interval := range entries[0].Intervals {
-		if interval.EndedAt != nil {
-			outcomes = append(outcomes, interval.Kind+":"+interval.Outcome)
-		}
-	}
-	want := []string{TabQueue + ":succeeded", TabMerge + ":conflicted", TabConflicts + ":succeeded", TabMerge + ":succeeded", TabTests + ":succeeded"}
-	if !equal(outcomes, want) {
-		t.Fatalf("the ledger's outcomes are %v, want %v", outcomes, want)
-	}
-}
-
 // TestInterruptRaisesTheDequeueOffer covers the ruling that an interrupt no
 // longer silently yanks a merge off the queue: the daemon asks.
 func TestInterruptRaisesTheDequeueOffer(t *testing.T) {
@@ -1222,18 +1159,22 @@ var resolutions = []resolution{
 	}},
 }
 
-// ended runs one resolution against a merge in one of its running phases: a
-// PARKED merge (on a broken gate), a RUNNING one (held inside its gate), or a
-// parked one RESUMED to its landing.
+// phaseRunning and phaseLanded are the two ends a release test drives: a
+// RUNNING merge (held inside its gate) that a resolution ends, and a merge that
+// runs to its landing.
+const (
+	phaseRunning = "running"
+	phaseLanded  = "landed"
+)
+
+// ended runs one resolution against a merge held inside its gate, or lets the
+// merge run to its landing.
 func ended(t *testing.T, phase string, res resolution) *harness {
 	t.Helper()
 	h := newHarness(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	switch phase {
-	case phaseParked:
-		parkOnABrokenGate(t, h, ctx, 1)
-		res.resolve(t, h, ctx)
 	case phaseRunning:
 		h.emacsRepo()
 		h.landsCleanly("abc123def4567")
@@ -1262,18 +1203,19 @@ func ended(t *testing.T, phase string, res resolution) *harness {
 		close(release)
 		<-resolved
 		<-done
-	case "resumed":
-		parkOnABrokenGate(t, h, ctx, 1)
+	case phaseLanded:
+		h.emacsRepo()
+		h.landsCleanly("abc123def4567")
 		h.gatePasses("daemon")
-		if err := route(h, ctx, "g-1", "go again"); err != nil {
-			t.Fatalf("the guidance: %v", err)
+		enqueue(t, h)
+		if err := h.admit(ctx); err != nil {
+			t.Fatalf("admitting: %v", err)
 		}
-		resume(t, h, ctx)
 	}
 	return h
 }
 
-// releaseCases are every (phase, resolution) pair, plus the resume.
+// releaseCases are every resolution of a running merge, plus the landing.
 func releaseCases() []struct {
 	name  string
 	phase string
@@ -1284,20 +1226,18 @@ func releaseCases() []struct {
 		phase string
 		res   resolution
 	}
-	for _, phase := range []string{phaseParked, phaseRunning} {
-		for _, res := range resolutions {
-			cases = append(cases, struct {
-				name  string
-				phase string
-				res   resolution
-			}{name: phase + " and " + res.name, phase: phase, res: res})
-		}
+	for _, res := range resolutions {
+		cases = append(cases, struct {
+			name  string
+			phase string
+			res   resolution
+		}{name: phaseRunning + " and " + res.name, phase: phaseRunning, res: res})
 	}
 	cases = append(cases, struct {
 		name  string
 		phase string
 		res   resolution
-	}{name: "parked, resumed and landed", phase: "resumed"})
+	}{name: "landed", phase: phaseLanded})
 	return cases
 }
 
@@ -1386,92 +1326,6 @@ func TestAnAbandonedRunningMergeNeverLands(t *testing.T) {
 	}
 }
 
-// TestAnAbandonedRunningMergeEndsOnTheAbandonedTerminal covers the bubble: the
-// merge ends as abandoned, never as failed and never mid-tab.
-func TestAnAbandonedRunningMergeEndsOnTheAbandonedTerminal(t *testing.T) {
-	for _, phase := range []string{phaseParked, phaseRunning} {
-		t.Run(phase, func(t *testing.T) {
-			// Arrange and Act.
-			h := ended(t, phase, resolutions[1])
-
-			// Assert.
-			if arm := h.feed.lastMergeErrorArm(); arm != "abandoned" {
-				t.Fatalf("the bubble ended on %q, want abandoned", arm)
-			}
-		})
-	}
-}
-
-// TestAnAbandonedMergesSummarySaysWhatItWasDoing covers "summaries must be
-// true": a merge that ran is never described as one that waited.
-func TestAnAbandonedMergesSummarySaysWhatItWasDoing(t *testing.T) {
-	tests := []struct {
-		phase string
-		want  string
-	}{
-		{phase: phaseParked, want: "the user took this merge out of the queue while it was parked for input"},
-		{phase: phaseRunning, want: "the user took this merge out of the queue while it was running"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.phase, func(t *testing.T) {
-			// Arrange and Act.
-			h := ended(t, tc.phase, resolutions[1])
-
-			// Assert.
-			if got := h.feed.lastAbandonedSummary(); got != tc.want {
-				t.Fatalf("the abandoned summary is %q, want %q", got, tc.want)
-			}
-		})
-	}
-}
-
-// TestAnAbandonedRunningMergeIsNeverLoggedAsNotHavingRun pins the record that
-// was false: "a merge left the queue without running".
-func TestAnAbandonedRunningMergeIsNeverLoggedAsNotHavingRun(t *testing.T) {
-	// Arrange and Act.
-	h := ended(t, phaseParked, resolutions[0])
-
-	// Assert.
-	for _, record := range h.logs.Records() {
-		if record.Message == "a merge left the queue without running" {
-			t.Fatalf("a merge that ran was logged as leaving the queue without running: %+v", record)
-		}
-	}
-}
-
-// TestEveryAbandonCauseOfARunningMergeResolvesItsOwnSentence pins the cause
-// vocabulary for a merge taken out after it was admitted.
-func TestEveryAbandonCauseOfARunningMergeResolvesItsOwnSentence(t *testing.T) {
-	for _, phase := range []string{phaseRunning, phaseParked} {
-		for _, cause := range []AbandonCause{CauseUserDrop, CauseUserDequeue, CauseWorkspaceClosed} {
-			t.Run(phase+"/"+string(cause), func(t *testing.T) {
-				// Act.
-				sentence, declared := cause.summaryWhile(phase)
-
-				// Assert.
-				if !declared || !strings.Contains(sentence, "while") {
-					t.Fatalf("the %s cause while %s resolves %q (declared %v)", cause, phase, sentence, declared)
-				}
-			})
-		}
-	}
-}
-
-// TestRouteParkedAnswersNoRunOnceTheRunEnded covers a prompt racing an
-// abandon: it is answered, never left waiting on a run that is gone.
-func TestRouteParkedAnswersNoRunOnceTheRunEnded(t *testing.T) {
-	// Arrange: a parked merge that was evicted.
-	h := ended(t, phaseParked, resolutions[0])
-
-	// Act.
-	err := h.o.RouteParked(context.Background(), theWorkspace, "g-late", saidText("too late"))
-
-	// Assert.
-	if err != errNoRun {
-		t.Fatalf("RouteParked after the run ended = %v, want the no-run answer", err)
-	}
-}
-
 // --- a concluded merge's state retires once the workspace moves on --------
 
 // TestAConcludedMergesStateRetiresWhenTheWorkspaceMovesOn covers the lingering
@@ -1511,24 +1365,6 @@ func TestAConcludedMergesStateRetiresWhenTheWorkspaceMovesOn(t *testing.T) {
 	}
 }
 
-// TestAMergeInFlightIsNeverRetiredByTheWorkspaceMovingOn covers the other side:
-// only a CONCLUDED merge retires; a parked one's prompt is its guidance.
-func TestAMergeInFlightIsNeverRetiredByTheWorkspaceMovingOn(t *testing.T) {
-	// Arrange: a parked merge.
-	h := newHarness(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	parkOnABrokenGate(t, h, ctx, 1)
-
-	// Act.
-	h.o.RetireConcluded(ctx, theWorkspace)
-
-	// Assert.
-	if facts, _ := h.o.Facts(theWorkspace); facts.State != StateParked {
-		t.Fatalf("the parked merge's state is %q, want it still parked", facts.State)
-	}
-}
-
 // TestAQueuedMergeIsNeverRetiredByTheWorkspaceMovingOn covers a merge waiting
 // in the queue: it is not concluded either.
 func TestAQueuedMergeIsNeverRetiredByTheWorkspaceMovingOn(t *testing.T) {
@@ -1542,5 +1378,157 @@ func TestAQueuedMergeIsNeverRetiredByTheWorkspaceMovingOn(t *testing.T) {
 	// Assert.
 	if facts, _ := h.o.Facts(theWorkspace); facts.State != StateQueued {
 		t.Fatalf("the queued merge's state is %q, want it still queued", facts.State)
+	}
+}
+
+// landedAs runs the harness workspace's merge of one source to its landing.
+func landedAs(t *testing.T, h *harness, source wsm.MergeSource) {
+	t.Helper()
+	landing(h, 1)
+	if source.Kind == wsm.MergeSourceBranch {
+		h.git.refs["refs/heads/"+source.Branch] = "branch0000head"
+		h.git.mu.Lock()
+		h.git.branches[source.Branch] = source.Branch
+		h.git.mu.Unlock()
+	}
+	if err := h.request(t, source, RequestedByUser); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	if err := h.admit(context.Background()); err != nil {
+		t.Fatalf("admit: %v", err)
+	}
+}
+
+func TestAnOwnBranchKeptOpenLandsWithoutClosingTheRequester(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	landedAs(t, h, wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch, KeepOpen: true})
+
+	// Assert.
+	if h.db.closed[theWorkspace] || len(h.git.removedWorktrees) != 0 || len(h.stoppedSessions) != 0 {
+		t.Fatalf("closed %v, removed %v, stopped %v; want the requester kept open", h.db.closed, h.git.removedWorktrees, h.stoppedSessions)
+	}
+	if got := h.footer.last().State; got != StateMerged {
+		t.Fatalf("state = %q, want merged", got)
+	}
+}
+
+func TestAnotherWorkspacesBranchLandingClosesThatWorkspace(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	dir := h.registerOther(otherWorkspace, "ws-two", "other-branch")
+
+	// Act.
+	landedAs(t, h, wsm.MergeSource{Kind: wsm.MergeSourceWorkspace, Workspace: otherWorkspace})
+
+	// Assert.
+	if !h.db.closed[otherWorkspace] || h.db.mergedAt[otherWorkspace].IsZero() {
+		t.Fatal("the other workspace was not stamped merged and closed")
+	}
+	if len(h.git.removedWorktrees) != 1 || h.git.removedWorktrees[0] != dir {
+		t.Fatalf("removed worktrees = %v, want the other workspace's %s", h.git.removedWorktrees, dir)
+	}
+}
+
+func TestAnotherWorkspacesBranchLandingNeverClosesTheRequester(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.registerOther(otherWorkspace, "ws-two", "other-branch")
+
+	// Act.
+	landedAs(t, h, wsm.MergeSource{Kind: wsm.MergeSourceWorkspace, Workspace: otherWorkspace})
+
+	// Assert.
+	if h.db.closed[theWorkspace] {
+		t.Fatal("the requester was closed by a merge of another workspace's branch")
+	}
+}
+
+func TestTheRepairsOfAnotherWorkspacesBranchAreTheRequestersOwn(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.registerOther(otherWorkspace, "ws-two", "other-branch")
+	h.git.rebaseConflicts[1] = []string{"a.go"}
+
+	// Act.
+	landedAs(t, h, wsm.MergeSource{Kind: wsm.MergeSourceWorkspace, Workspace: otherWorkspace})
+
+	// Assert.
+	for _, sub := range h.queue.submissions {
+		if sub.WS != theWorkspace {
+			t.Fatalf("a merge prompt went to %s, want the requester's own session", sub.WS)
+		}
+	}
+}
+
+func TestAMadeBranchWorktreeIsRemovedAfterTheMerge(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	landedAs(t, h, wsm.MergeSource{Kind: wsm.MergeSourceBranch, Branch: "agent-1/fix"})
+
+	// Assert.
+	made := worktreeFor(h.stateDir, h.db.ledger[theWorkspace][0].Lease)
+	if len(h.git.removedWorktrees) != 1 || h.git.removedWorktrees[0] != made {
+		t.Fatalf("removed worktrees = %v, want the made %s", h.git.removedWorktrees, made)
+	}
+	if h.db.closed[theWorkspace] {
+		t.Fatal("a branch's merge closed the requester")
+	}
+}
+
+func TestAMadeBranchWorktreeIsKeptWhenItsConflictResolutionGaveUp(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.git.rebaseConflicts[1] = []string{"a.go"}
+	h.git.conflicted = [][]string{{"a.go"}}
+
+	// Act.
+	landedAs(t, h, wsm.MergeSource{Kind: wsm.MergeSourceBranch, Branch: "agent-1/fix"})
+
+	// Assert.
+	if len(h.git.removedWorktrees) != 0 {
+		t.Fatalf("removed worktrees = %v, want the rebase left in progress where it stopped", h.git.removedWorktrees)
+	}
+}
+
+func TestAFailedMergeLeavesTheQueueAtOnceForTheMergeBehindIt(t *testing.T) {
+	// Arrange: the front's conflict resolution gives up.
+	h := newHarness(t)
+	landing(h, 1)
+	h.git.rebaseConflicts[1] = []string{"a.go"}
+	h.git.conflicted = [][]string{{"a.go"}}
+	enqueue(t, h)
+
+	// Act.
+	if err := h.admit(context.Background()); err != nil {
+		t.Fatalf("admit: %v", err)
+	}
+
+	// Assert.
+	if entries := h.queuedEntries(); len(entries) != 0 {
+		t.Fatalf("the queue still holds %v", entries)
+	}
+	if !h.lockFree(t) {
+		t.Fatal("the failed merge still holds its repository")
+	}
+}
+
+func TestAFailedMergesStateRetiresAtTheWorkspacesNextSubmission(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	landing(h, 1)
+	h.git.clean = false
+	admitted(t, h)
+
+	// Act.
+	h.o.RetireConcluded(context.Background(), theWorkspace)
+
+	// Assert.
+	if _, standing := h.o.Facts(theWorkspace); standing {
+		t.Fatal("the failed merge's state outlived the workspace moving on")
 	}
 }

@@ -25,36 +25,39 @@ import (
 // output address and never learns what a merge is.
 
 // The merge states MergeFacts.State carries. They are the vocabulary the footer
-// and the roster resolve their arms from, so they are spelled once here.
+// and the roster resolve their arms from, so they are spelled once here. There
+// is no state before "queued": nothing about a merge is told until the turn
+// that asked for it has ended. And nothing parks: a merge that gives up is
+// "failed".
 const (
-	// StateEnqueuing is the first instant of a merge, before it is on a queue.
-	StateEnqueuing = "enqueuing"
-	// StateQueued is waiting behind another workspace's merge.
+	// StateQueued is waiting in line behind the merge being worked on.
 	StateQueued = "queued"
-	// StateMerging is running; ActiveTab says which phase.
+	// StateMerging is running; MergeFacts.Step says which step.
 	StateMerging = "merging"
-	// StateParked is stopped, awaiting the user's guidance.
-	StateParked = "parked"
-	// StateConflict is stopped on conflicts the agent could not resolve.
-	StateConflict = "conflict"
-	// StateFailed is a merge that gave up.
+	// StateFailed is a merge that gave up; MergeFacts.FailedArea says where.
 	StateFailed = "failed"
 	// StateMerged is a merge that landed.
 	StateMerged = "merged"
 )
 
 // The tab kinds, in the order a run opens them. They are the ledger's interval
-// kinds and MergeFacts.ActiveTab's vocabulary at once, so a replayed ledger and
-// a live footer name the same phase.
+// kinds, so a replayed ledger names the same step a live bubble drew.
 const (
-	TabQueue      = "queue"
-	TabPrePrompt  = "pre_prompt"
-	TabMerge      = "merge"
-	TabConflicts  = "conflicts"
-	TabTests      = "tests"
-	TabFixes      = "fixes"
-	TabPostPrompt = "post_prompt"
+	TabQueue        = "queue"
+	TabPrePrompt    = "pre_prompt"
+	TabRebasing     = "rebasing"
+	TabConflicts    = "conflicts"
+	TabTests        = "tests"
+	TabFixes        = "fixes"
+	TabCommitting   = "committing"
+	TabUpdatingMain = "updating_main"
+	TabPostPrompt   = "post_prompt"
 )
+
+// MaxFixAttempts is THE ONE BOUND on fixing: the most fixing attempts a merge
+// makes, drawn as the y of "fixing attempt x/y", and the bound that decides the
+// merge has failed its tests. Stated once so the two can never disagree.
+const MaxFixAttempts = 3
 
 // holderMerge is the occupancy guard's holder name, matching the lease holder.
 const holderMerge = "merge"
@@ -71,16 +74,10 @@ type orchestrator struct {
 	// Facts answers from without re-deriving anything.
 	facts map[ids.WorkspaceID]MergeFacts
 	// running is the run HOLDING each repository's slot: the one merge that
-	// may make a queue tree, run the gate and move the target. A second
-	// admission for one repository is impossible in this process as well as
-	// across processes (the slot's run also holds the repository's kernel
-	// lock). A PARKED run holds no slot: it yields it the moment it parks, so
-	// the merges behind it proceed (owner ruling, 2026-09-28).
+	// may rebase, run the gate and move the target. A second admission for one
+	// repository is impossible in this process as well as across processes
+	// (the slot's run also holds the repository's kernel lock).
 	running map[wsm.RepoKey]*run
-	// waiters are the parked runs whose guidance turn ended and who want
-	// their repository's slot back, in the order they asked. Only the pump
-	// grants a slot, so a waiter and a queue front never race for one.
-	waiters map[wsm.RepoKey][]*run
 	// kicked records a kick that arrived while the repository's pump was
 	// running. The pump reads it under the same lock before it goes idle, so
 	// a kick is never lost between the pump's last look and its exit.
@@ -88,43 +85,34 @@ type orchestrator struct {
 	// displaces records the workspaces whose merge the USER asked for, which
 	// alone may displace the turn in flight at admission (see Requester).
 	displaces map[ids.WorkspaceID]bool
-	// live counts the run goroutines. Nothing in production waits on it; a
-	// test does, so a run it left behind cannot outlive the test.
+	// live counts the goroutines the orchestrator starts: the admission pumps
+	// and the requests waiting for their turn to end. Nothing in production
+	// waits on it; a test does, so nothing it started outlives the test.
 	live sync.WaitGroup
-	// runsByWorkspace addresses the in-flight run of one workspace, which is
-	// what a parked route and an interrupt need.
+	// runsByWorkspace addresses the in-flight run of one requester.
 	runsByWorkspace map[ids.WorkspaceID]*run
+	// requested are the requests waiting for their requesting turn to end.
+	requested map[ids.WorkspaceID]*requestWait
 	// offers records the workspaces with a dequeue offer standing.
 	offers map[ids.WorkspaceID]bool
 	// repoOf remembers which queue a workspace was enqueued on, so an evict
 	// does not have to re-derive geometry that may no longer resolve.
 	repoOf map[ids.WorkspaceID]wsm.RepoKey
-	// ledgerOf is the merge's LEDGER identity, minted at ENQUEUE. It addresses
-	// the merge bubble -- which a QUEUED merge already has, showing its queue
-	// tab -- and it is the identity the occupancy lease is later acquired
-	// under, so the queued bubble and the admitted one are one bubble.
+	// ledgerOf is the merge's LEDGER identity, minted when the merge is put in
+	// line. It addresses the merge bubble -- which a QUEUED merge already has,
+	// showing its queue tab -- and it is the identity the occupancy lease is
+	// later acquired under, so the queued bubble and the admitted one are one
+	// bubble.
 	ledgerOf map[ids.WorkspaceID]ids.LeaseID
 	// pumping guards one admission pump per repository.
 	pumping map[wsm.RepoKey]bool
 	// admissions counts the admission steps in flight -- the store reads and
-	// the admission write the pump makes before a run starts. It is held under
-	// mu: a step is added only while not draining (enterAdmission) and
-	// removed by leaveAdmission, so Drain reads the count under the SAME lock
-	// it sets draining under, and no admission read reaches a state client the
-	// exit has closed.
-	//
-	// IT IS A COUNT UNDER mu, NOT A sync.WaitGroup, so "nothing in flight" is
-	// known synchronously. With a WaitGroup the drain could only learn that
-	// through a goroutine's Wait, which raced the drain's own bound: under
-	// load the bound fired first and the drain reported an admission that did
-	// not exist (measured: 2 in 2000 runs of
-	// TestTheDrainWarnsWhatOneExpiredBoundLeftUnstamped under 48 busy loops).
-	admissions int
-	// admissionsIdle is made by Drain when it finds admissions in flight, and
-	// closed by the leaveAdmission that brings the count to zero. Nil while
-	// nothing waits.
-	admissionsIdle chan struct{}
-	// async reports whether Enqueue starts the admission pump itself.
+	// the admission write the pump makes before a run starts. A step is added
+	// only under mu while not draining (enterAdmission), and Drain waits for
+	// them, so no admission read reaches a state client the exit has closed.
+	admissions sync.WaitGroup
+	// async reports whether Enqueue starts the admission pump and the request
+	// waits itself.
 	async bool
 	// draining reports that the daemon is on its way out: the admission pump
 	// admits NOTHING more, so the bounded shutdown drain cannot be outrun by
@@ -132,9 +120,9 @@ type orchestrator struct {
 	draining bool
 	// terminals are the runs that have reached their TERMINAL — the durable
 	// stamps and the teardown they share — and they are the only work the
-	// shutdown drain waits for. A run still in a long phase is NOT here: it is
-	// abandoned to the boot recovery, which is what it was before. The map is
-	// built lazily, so nothing about construction has to know about draining.
+	// shutdown drain waits for. A run still in a long step is NOT here: it is
+	// abandoned to the boot recovery. The map is built lazily, so nothing
+	// about construction has to know about draining.
 	terminals map[ids.WorkspaceID]*terminal
 	// drainBound overrides TerminalDrainBound. It is a TEST-ONLY seam: a suite
 	// asserting what the bound does when it EXPIRES must not wait the
@@ -145,15 +133,6 @@ type orchestrator struct {
 	// It exists so a test releases a held terminal from inside the drain's own
 	// wait rather than guessing when the drain got there.
 	onDrainWait func()
-	// onPark, when set, is signalled the moment a run parks. It exists so a
-	// test synchronizes on the park itself rather than on elapsed time: a
-	// parked merge is a state, and waiting for a state by sleeping is how a
-	// suite becomes flaky.
-	onPark func(ids.WorkspaceID)
-	// onWait, when set, is signalled the moment a parked run whose guidance
-	// turn ended asks for its repository's slot back. Like onPark it exists so
-	// a test synchronizes on the state rather than on elapsed time.
-	onWait func(ids.WorkspaceID)
 }
 
 // New builds the orchestrator. Its admission pump runs on its own goroutine:
@@ -182,15 +161,22 @@ func newOrchestrator(deps Deps) (*orchestrator, error) {
 	if deps.Policy == nil {
 		deps.Policy = prompts.OnDisk{}
 	}
+	if deps.Home == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil, fmt.Errorf("merge: resolving the home directory a test log's label shortens: %w", err)
+		}
+		deps.Home = home
+	}
 	return &orchestrator{
 		deps:            deps,
 		lockDir:         filepath.Join(deps.StateDir, "merge-locks"),
 		facts:           map[ids.WorkspaceID]MergeFacts{},
 		running:         map[wsm.RepoKey]*run{},
-		waiters:         map[wsm.RepoKey][]*run{},
 		kicked:          map[wsm.RepoKey]bool{},
 		displaces:       map[ids.WorkspaceID]bool{},
 		runsByWorkspace: map[ids.WorkspaceID]*run{},
+		requested:       map[ids.WorkspaceID]*requestWait{},
 		ledgerOf:        map[ids.WorkspaceID]ids.LeaseID{},
 		offers:          map[ids.WorkspaceID]bool{},
 		repoOf:          map[ids.WorkspaceID]wsm.RepoKey{},
@@ -224,7 +210,7 @@ func (d Deps) validate() error {
 	check(d.StopSession != nil, "StopSession")
 	check(d.CaptureDisplaced != nil, "CaptureDisplaced")
 	check(d.Freeness != nil, "Freeness")
-	check(d.ParkedRoute != nil, "ParkedRoute")
+	check(d.TurnInFlight != nil, "TurnInFlight")
 	check(d.Rollout != nil, "Rollout")
 	check(d.Log != nil, "Log")
 	check(d.StateDir != "", "StateDir")
@@ -301,13 +287,13 @@ func (o *orchestrator) runFor(ws ids.WorkspaceID) (*run, bool) {
 	return r, ok
 }
 
-// repoKeyFor resolves the queue a workspace's merge belongs on: the TARGET
-// repository's canonical common dir. It is derived from the layout facts the
-// creation job recorded, never guessed from the worktree.
-func (o *orchestrator) repoKeyFor(ctx context.Context, job wsm.CreationJob) (wsm.RepoKey, error) {
-	common, err := o.deps.Git.CommonDir(ctx, job.Layout.TargetDir)
+// repoKeyFor resolves the queue a merge belongs on: the repository's canonical
+// common dir, read off a directory inside it. Every source a request can name
+// is in the requester's own repository, so the requester's directory keys it.
+func (o *orchestrator) repoKeyFor(ctx context.Context, dir string) (wsm.RepoKey, error) {
+	common, err := o.deps.Git.CommonDir(ctx, dir)
 	if err != nil {
-		return "", fmt.Errorf("merge: resolving the target repository of %s: %w", job.Layout.TargetDir, err)
+		return "", fmt.Errorf("merge: resolving the repository of %s: %w", dir, err)
 	}
 	return wsm.RepoKey(common), nil
 }

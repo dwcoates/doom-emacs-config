@@ -1,20 +1,17 @@
 package merge
 
 import (
-	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
-
-	"claude-repld/internal/ids"
 )
 
-// This file is the merge's TEST GATE: the run, its archive, and the parse that
-// turns the script's own lines into per-suite state.
+// This file is the merge's TEST GATE's pieces: the result, and the parse that
+// turns the script's own lines into per-suite state. The run itself, which
+// streams those lines to the footer and the log as they are written, is
+// gate.go's.
 //
 // THERE IS NO FLAKE RE-RUN. A failing suite is an error to remediate, period —
 // a deliberate reversal of the old daemon, which re-ran once and let a second
@@ -45,6 +42,9 @@ var suiteFailed = regexp.MustCompile(`(?m)^.*?([A-Za-z0-9_-]+) failed after ([0-
 // out. A skipped suite is not a state the tab draws: it was never selected.
 var suiteSkipped = regexp.MustCompile(`(?m)^.*?([A-Za-z0-9_-]+): not selected by --suites, skipping\s*$`)
 
+// suiteStarting matches the script's line as a suite starts.
+var suiteStarting = regexp.MustCompile(`^.*?([A-Za-z0-9_-]+): starting\s*$`)
+
 // GateResult is one run of the target repository's test gate.
 type GateResult struct {
 	// Passed is the run's verdict, which is the script's exit status. A suite
@@ -53,54 +53,14 @@ type GateResult struct {
 	// Suites are the per-suite rows the tests tab draws, in the order the run
 	// selected them.
 	Suites []*frontendv1.FeedMergeTestSuite
-	// Tail is the clamped tail of the run's output — what the fixes brief
-	// carries, and the only part of a run a user may ever read.
+	// Tail is the clamped tail of the run's output — what the fixing brief
+	// carries.
 	Tail string
-	// ArchivePath names the file holding the run's COMPLETE output.
+	// ArchivePath names the file holding the run's COMPLETE output: the test
+	// log the tests tab links.
 	ArchivePath string
 	// ExitCode is the script's exit status, kept as evidence on a failure.
 	ExitCode int
-}
-
-// runGate runs the selected suites in the queue's tree and archives the run.
-//
-// An error means the run could not be CLASSIFIED: the script could not be
-// spawned, or its output could not be archived. A gate whose archive failed is
-// an unrunnable gate rather than a lost archive, because the file is the only
-// account of the failure that survives the run.
-func (o *orchestrator) runGate(ctx context.Context, lease ids.LeaseID, round int, tree string, command []string, sel SuiteSelection) (GateResult, error) {
-	if err := validateSuites(sel.Suites); err != nil {
-		return GateResult{}, err
-	}
-	argv := append([]string(nil), command...)
-	if len(argv) == 0 {
-		return GateResult{}, fmt.Errorf("merge: no test command is configured for the gate")
-	}
-	// The FULL selection passes no narrowing: running everything is the
-	// script's own default, and a repository whose script knows no --suites
-	// flag is never handed one.
-	if !sel.Full {
-		argv = append(argv, "--suites", strings.Join(sel.Suites, ","))
-	}
-	output, code, err := o.deps.TestRunner.Run(ctx, tree, argv)
-	if err != nil {
-		return GateResult{}, &gateUnstartedError{err: err}
-	}
-	archive, err := o.archiveGate(lease, round, output)
-	if err != nil {
-		return GateResult{}, err
-	}
-	suites, perr := o.paintSuites(sel.Suites, output)
-	if perr != nil {
-		return GateResult{}, perr
-	}
-	return GateResult{
-		Passed:      code == 0,
-		Suites:      suites,
-		Tail:        clampTail(output, tailBytes),
-		ArchivePath: archive,
-		ExitCode:    code,
-	}, nil
 }
 
 // gateUnstartedError is a gate the runner could not start at all: the script
@@ -112,21 +72,6 @@ func (e *gateUnstartedError) Error() string {
 }
 
 func (e *gateUnstartedError) Unwrap() error { return e.err }
-
-// archiveGate writes one run's combined output under the state root's
-// merge-logs/, named by the lease and the round so a run is findable from the
-// ledger alone.
-func (o *orchestrator) archiveGate(lease ids.LeaseID, round int, output string) (string, error) {
-	dir := filepath.Join(o.deps.StateDir, "merge-logs")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", fmt.Errorf("merge: creating the gate archive directory %s: %w", dir, err)
-	}
-	path := filepath.Join(dir, fmt.Sprintf("%s-tests-%d.log", lease, round))
-	if err := os.WriteFile(path, []byte(output), 0o644); err != nil {
-		return "", fmt.Errorf("merge: archiving the gate run to %s: %w", path, err)
-	}
-	return path, nil
-}
 
 // paintSuites turns the run's output into one row per SELECTED suite, in the
 // selection's order, with the output painted into spans.
@@ -178,13 +123,13 @@ func (o *orchestrator) paintSpans(text string) ([]*frontendv1.FeedMergeTestSpan,
 }
 
 // suiteState is one suite's standing as the run's own lines report it. The
-// zero value is a selected suite the output never settled (paintSuites'
-// switch default draws it running) and carries no name of its own: nothing
-// ever needs to name "still running" directly, only fall through to it.
+// zero value is a suite that started and has not settled -- or a selected
+// suite the output never settled, which paintSuites draws running.
 type suiteState int
 
 const (
-	_ suiteState = iota // the zero value: still running, named nowhere
+	// suiteStateRunning is a suite started and not settled.
+	suiteStateRunning suiteState = iota
 	// suiteStatePassed is a suite the script reported passing.
 	suiteStatePassed
 	// suiteStateFailed is a suite the script reported failing.
