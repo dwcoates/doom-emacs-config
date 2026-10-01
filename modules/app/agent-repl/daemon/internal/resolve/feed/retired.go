@@ -8,7 +8,6 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/feedid"
 	"claude-repld/internal/ids"
-	"claude-repld/internal/sessionwatcher"
 )
 
 // RETIRED ENTRIES. The store retires a page line when the sidecar's conversion
@@ -32,7 +31,7 @@ import (
 // turn in flight and stamp; later entries stamped with that turn, or a terminal
 // ending it, are judged against those facts, and withdrawing them would report
 // a healthy session's later rows as naming a turn nobody opened.
-func (r *resolver) OnPromptRetired(ws ids.WorkspaceID, prompt *conversationv1.AgentPrompt, addr sessionwatcher.OutputAddress) {
+func (r *resolver) OnPromptRetired(ws ids.WorkspaceID, prompt *conversationv1.AgentPrompt) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)
@@ -46,7 +45,7 @@ func (r *resolver) OnPromptRetired(ws ids.WorkspaceID, prompt *conversationv1.Ag
 
 // OnPeerMessageRetired removes the row OnPeerMessage drew for a retired peer
 // message: the peer bubble or the hand-back badge, which share one id.
-func (r *resolver) OnPeerMessageRetired(ws ids.WorkspaceID, peer *conversationv1.PeerMessage, addr sessionwatcher.OutputAddress) {
+func (r *resolver) OnPeerMessageRetired(ws ids.WorkspaceID, peer *conversationv1.PeerMessage) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)
@@ -99,7 +98,7 @@ func (r *resolver) retireEntryRows(s *wsState, kind, key string, keys ...feedid.
 // A TERMINAL ALREADY DRAWN IS LEFT AS IT IS. The turn's evidence is dropped
 // when the turn ends, so a retirement arriving after the terminal finds no
 // line, and the drawn headline is not re-composed.
-func (r *resolver) OnApiErrorRetired(ws ids.WorkspaceID, agent *conversationv1.AgentId, failed *conversationv1.ApiRequestFailed, turn *conversationv1.TurnId, addr sessionwatcher.OutputAddress) {
+func (r *resolver) OnApiErrorRetired(ws ids.WorkspaceID, agent *conversationv1.AgentId, failed *conversationv1.ApiRequestFailed, turn *conversationv1.TurnId) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)

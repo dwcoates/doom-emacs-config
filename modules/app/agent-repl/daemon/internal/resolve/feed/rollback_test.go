@@ -336,7 +336,7 @@ func TestLiveDetachedInDoesNotCountAMonitor(t *testing.T) {
 	// hold live, though the rollback's files-restore would stop it too.
 	h := newHarness(t)
 	h.deliverPromptAt("t1", "watch the build", 1_000)
-	h.resolver.OnActivity(testWorkspace, mainAgent(), monitorActivity("mon-1"), nil, nil, noAddress())
+	h.resolver.OnActivity(testWorkspace, mainAgent(), monitorActivity("mon-1"), nil, nil)
 	h.detachWork("work-1", "mon-1")
 
 	// Act

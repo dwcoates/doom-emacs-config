@@ -19,7 +19,7 @@ import (
 // replayed and none is needed.
 
 // OnHistoryPage replays a watch's opening catch-up page.
-func (r *resolver) OnHistoryPage(ws ids.WorkspaceID, agent *conversationv1.AgentId, page *conversationv1.HistoryPage, addr sessionwatcher.OutputAddress) {
+func (r *resolver) OnHistoryPage(ws ids.WorkspaceID, agent *conversationv1.AgentId, page *conversationv1.HistoryPage) {
 	// A FORK'S PORTED CONVERSATION IS READ BEFORE THE LOCK IS TAKEN: it comes
 	// from the daemon's durable record, and no read of a database belongs
 	// inside the resolver's mutex.

@@ -72,7 +72,7 @@ func frameEntry(agent *conversationv1.AgentId, result any) *conversationv1.Histo
 // replay pushes one history page through the sink.
 func (h *harness) replay(page *conversationv1.HistoryPage) {
 	h.t.Helper()
-	h.resolver.OnHistoryPage(testWorkspace, mainAgent(), page, noAddress())
+	h.resolver.OnHistoryPage(testWorkspace, mainAgent(), page)
 }
 
 // cutEntry is a replayed context cut.
@@ -774,7 +774,7 @@ func TestAnEmptyPageOfAnUnnamedWatchDrawsNothingAndReportsNothing(t *testing.T) 
 	h := newHarness(t)
 
 	// Act.
-	h.resolver.OnHistoryPage(testWorkspace, nil, historyPage(&conversationv1.HistoryFloor{}), noAddress())
+	h.resolver.OnHistoryPage(testWorkspace, nil, historyPage(&conversationv1.HistoryFloor{}))
 
 	// Assert.
 	if h.hasRecord("error", "daemon.feed.unplaceable_agent") {
@@ -796,7 +796,7 @@ func TestAPageOfAnUnnamedAgentWithRowsIsReportedUnplaceable(t *testing.T) {
 		historyPage(&conversationv1.HistoryFloor{}, frameEntry(&conversationv1.AgentId{Value: "agent-ghost"},
 			&conversationv1.AgentUpdate{Update: &conversationv1.AgentUpdate_Activity{
 				Activity: responseSuccessActivity("unit-1", "orphaned prose"),
-			}})), noAddress())
+			}})))
 
 	// Assert.
 	if rows := h.everyRow(); len(rows) != 0 {
