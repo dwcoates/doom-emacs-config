@@ -38,7 +38,16 @@ const LOGGER = bindLog({ component: "shim-store-locator", operation: "shim.store
 
 /** What the store said about one vendor task locator. THE KIND IS THE ANSWER. */
 export type VendorTaskAnswer =
-  | { readonly kind: "found"; readonly agent: conversationv1.AgentId }
+  | {
+      readonly kind: "found";
+      readonly agent: conversationv1.AgentId;
+      /**
+       * What the agent was commissioned with, as the store recorded it from its
+       * spawn start (`GetAgentByVendorTaskSuccess.commission`); `undefined` when
+       * the record holds the agent's lineage but no start.
+       */
+      readonly commission: conversationv1.AgentSubagentPrompt | undefined;
+    }
   | { readonly kind: "not_found" }
   | { readonly kind: "failed"; readonly detail: string };
 
@@ -46,7 +55,9 @@ export type VendorTaskAnswer =
 export function describeVendorTaskAnswer(answer: VendorTaskAnswer): string {
   switch (answer.kind) {
     case "found":
-      return `found ${answer.agent.value}`;
+      return answer.commission === undefined
+        ? `found ${answer.agent.value}, with no recorded commission`
+        : `found ${answer.agent.value}`;
     case "not_found":
       return "not_found: no agent of this session's lineage is paired with the locator";
     case "failed":
@@ -80,7 +91,7 @@ async function lookupOnce(
       if (agent === undefined || agent.value === "") {
         throw new PersistenceError("invalid_request", "the store answered success naming no agent");
       }
-      return { kind: "found", agent };
+      return { kind: "found", agent, commission: result.value.commission };
     }
     case "notFound":
       return { kind: "not_found" };

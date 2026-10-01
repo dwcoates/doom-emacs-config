@@ -765,7 +765,7 @@ export function resumedAgentAnnouncement(
   return create(conversationv1.AgentDetachedWorkSchema, {
     work: handle,
     owner,
-    kind: detachedWorkKind({ kind: "subagent", agent }),
+    kind: detachedWorkKind({ kind: "subagent", agent, commission: start.value.prompt }),
     origin: {
       case: "created",
       value: create(conversationv1.DetachedWorkCreatedSchema, { workCreated: described }),

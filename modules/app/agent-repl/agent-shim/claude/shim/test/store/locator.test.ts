@@ -62,6 +62,32 @@ const failure = (
   });
 
 describe("lookupAgentByVendorTask", () => {
+  it("answers found with the commission the store recorded", async () => {
+    // Arrange
+    const response = found("toolu_spawn");
+    if (response.result.case === "success") {
+      response.result.value.commission = create(conversationv1.AgentSubagentPromptSchema, { text: "go", description: "fix the shim" });
+    }
+    const { client } = lookupClient(() => Promise.resolve(response));
+
+    // Act
+    const answer = await lookupAgentByVendorTask({ client, retry: RETRY, sleep: noSleep }, SESSION, "a1b2");
+
+    // Assert
+    expect(answer.kind === "found" ? answer.commission?.description : "not found").toBe("fix the shim");
+  });
+
+  it("answers found with no commission when the store recorded none", async () => {
+    // Arrange
+    const { client } = lookupClient(() => Promise.resolve(found("toolu_spawn")));
+
+    // Act
+    const answer = await lookupAgentByVendorTask({ client, retry: RETRY, sleep: noSleep }, SESSION, "a1b2");
+
+    // Assert
+    expect(answer.kind === "found" ? answer.commission : "not found").toBeUndefined();
+  });
+
   it("answers found with the agent the store names", async () => {
     // Arrange
     const { client } = lookupClient(() => Promise.resolve(found("toolu_spawn")));
@@ -177,10 +203,21 @@ describe("lookupAgentByVendorTask", () => {
 
 describe("describeVendorTaskAnswer", () => {
   it.each([
-    { answer: { kind: "found", agent: create(conversationv1.AgentIdSchema, { value: "toolu_x" }) }, text: "found toolu_x" },
+    {
+      answer: {
+        kind: "found",
+        agent: create(conversationv1.AgentIdSchema, { value: "toolu_x" }),
+        commission: create(conversationv1.AgentSubagentPromptSchema, { text: "go" }),
+      },
+      text: "found toolu_x",
+    },
+    {
+      answer: { kind: "found", agent: create(conversationv1.AgentIdSchema, { value: "toolu_x" }), commission: undefined },
+      text: "found toolu_x, with no recorded commission",
+    },
     { answer: { kind: "not_found" }, text: "not_found: no agent of this session's lineage is paired with the locator" },
     { answer: { kind: "failed", detail: "boom" }, text: "failed: boom" },
-  ] as const)("names the $answer.kind answer", ({ answer, text }) => {
+  ] as const)("names the $answer.kind answer as $text", ({ answer, text }) => {
     // Arrange, Act, Assert
     expect(describeVendorTaskAnswer(answer)).toBe(text);
   });

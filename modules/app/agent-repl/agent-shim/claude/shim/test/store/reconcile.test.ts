@@ -1377,6 +1377,29 @@ describe("the restore of a subagent resumed by a send", () => {
     expect(announcement?.kind?.kind.case === "subagent" ? announcement.kind.kind.value.agentId?.value : "").toBe("toolu_spawn");
   });
 
+  it("states the resumed agent's commission as its spawn row describes it", () => {
+    // Arrange.
+    const settledSpawn = unit("1", "toolu_spawn", {
+      case: "subagent",
+      value: create(conversationv1.AgentSubagentSchema, {
+        result: {
+          case: "success",
+          value: create(conversationv1.AgentSubagentSuccessSchema, {
+            prompt: create(conversationv1.AgentSubagentPromptSchema, { text: "count", description: "count the rows" }),
+            createdAgentId: SPAWN,
+          }),
+        },
+      }),
+    });
+
+    // Act.
+    const announcement = resumedAgentAnnouncement([send(reached("a5583")), settledSpawn], HANDLE, OWNER, SPAWN);
+
+    // Assert.
+    const kind = announcement?.kind?.kind;
+    expect(kind?.case === "subagent" ? kind.value.commission?.description : "").toBe("count the rows");
+  });
+
   it("records at ERROR a resumed agent whose spawn row states no prompt, and still announces it", () => {
     // Arrange.
     const bareSpawn = unit("1", "toolu_spawn", {

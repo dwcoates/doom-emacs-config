@@ -18,6 +18,7 @@ import {
   settledAt,
   sourceOf,
   startedAt,
+  taskUnitEntry,
   terminalEntry,
   textBlock,
   toolFailure,
@@ -269,5 +270,47 @@ describe("source coordinates", () => {
       sourceOf({ agentId: MAIN_AGENT, vendorUuid: "u", blockIndex: 0, discriminator: "d" })
         .blockIndex,
     ).toBe(0);
+  });
+});
+
+describe("taskUnitEntry", () => {
+  const ACTIVITY = agentActivity(create(conversationv1.AgentActivityIdSchema, { value: "toolu_unit" }), {
+    case: "subagent",
+    value: create(conversationv1.AgentSubagentSchema, {}),
+  });
+  const ORIGIN = { vendorUuid: "uuid-1", discriminator: "activity.subagent.update" };
+
+  it("files a known owner's frame in that owner's book, attributed to it", () => {
+    // Arrange, Act.
+    const entry = taskUnitEntry(foldContext(), { book: { agentId: MAIN_AGENT }, upsertKey: "activity:toolu_unit" }, ORIGIN, ACTIVITY);
+
+    // Assert.
+    const frame = entry.item.kind === "frame" ? entry.item.frame : undefined;
+    expect({ book: entry.agentId?.value, attributed: frame?.agentId?.value, owner: entry.ownerUnknown }).toEqual({
+      book: MAIN_AGENT.value,
+      attributed: MAIN_AGENT.value,
+      owner: undefined,
+    });
+  });
+
+  it("writes an unknown owner's frame owner-unknown, with no attribution", () => {
+    // Arrange, Act.
+    const entry = taskUnitEntry(foldContext(), { book: { ownerUnknown: true }, upsertKey: "activity:toolu_unit" }, ORIGIN, ACTIVITY);
+
+    // Assert.
+    const frame = entry.item.kind === "frame" ? entry.item.frame : undefined;
+    expect({ book: entry.agentId, attributed: frame?.agentId, owner: entry.ownerUnknown }).toEqual({
+      book: undefined,
+      attributed: undefined,
+      owner: true,
+    });
+  });
+
+  it("keys the row by the target's key, not the activity's", () => {
+    // Arrange, Act.
+    const entry = taskUnitEntry(foldContext(), { book: { agentId: MAIN_AGENT }, upsertKey: "resumed-run:toolu_unit" }, ORIGIN, ACTIVITY);
+
+    // Assert.
+    expect(entry.upsertKey).toBe("resumed-run:toolu_unit");
   });
 });

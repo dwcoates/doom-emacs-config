@@ -142,10 +142,17 @@ function agentItem(entry: PersistEntry): storev1.StoreAgentItem | undefined {
   }
 }
 
-/** The page line one servable item renders as, in its own book. */
+/**
+ * The page line one servable item renders as: in its own book, or -- for a row
+ * whose owner this shim never observed -- filed `owner_unknown`, for the store
+ * to place in the book already holding its upsert key.
+ */
 function pageLine(entry: PersistEntry, item: storev1.StoreAgentItem): storev1.StorePageLine {
   return create(storev1.StorePageLineSchema, {
-    pageAgentId: entry.agentId,
+    book:
+      entry.ownerUnknown === true
+        ? { case: "ownerUnknown", value: create(storev1.StorePageLineOwnerUnknownSchema, {}) }
+        : { case: "pageAgentId", value: entry.agentId },
     agentItem: item,
   });
 }
@@ -245,6 +252,8 @@ export function toStoreEntry(producer: string, placed: PlacedEntry): storev1.Sto
             // THE BOOK IS THE TOP LEVEL here: every book this shim writes is a
             // non-sync agent's (the main agent, or a detached agent with its own
             // stream), which is exactly what `top_level` names.
+            // An owner-unknown row states no top level either: the store keeps
+            // the stored row's.
             topLevel: entry.item.kind === "residue" ? undefined : entry.agentId,
             agentInfo: agentInfo(entry),
           }),
@@ -406,7 +415,7 @@ function storedEntries(entries: readonly PersistEntry[]): PersistEntry[] {
       continue;
     }
     LOGGER.debug(
-      { item_kind: entry.item.kind, discriminator: entry.source.discriminator, agent_id: entry.agentId.value },
+      { item_kind: entry.item.kind, discriminator: entry.source.discriminator, agent_id: entry.agentId?.value ?? "(owner unknown)" },
       "a keep-alive turn's entry is never stored; dropped before the batch",
     );
   }
@@ -425,10 +434,13 @@ function storedEntries(entries: readonly PersistEntry[]): PersistEntry[] {
  * concluded the absence was over from one would ask the store for a book that
  * still does not exist. (A keep-alive's entries never reach a batch at all.)
  */
-function booksRegisteredBy(entries: readonly PersistEntry[]): Set<string> {
+export function booksRegisteredBy(entries: readonly PersistEntry[]): Set<string> {
   const books = new Set<string>();
   for (const entry of entries) {
     if (entry.item.kind !== "prompt" && entry.item.kind !== "frame") continue;
+    // AN OWNER-UNKNOWN ROW REGISTERS NO BOOK: it can only land in a book that
+    // already holds its key, which some earlier write registered.
+    if (entry.ownerUnknown === true) continue;
     books.add(entry.agentId.value);
   }
   return books;
@@ -710,6 +722,21 @@ export function createPersistence(options: PersistenceOptions): Persistence {
    * every skip is one, and it is a row lost from the book the daemon reads --
    * an ERROR, not a caution.
    */
+  /**
+   * State every OWNER-UNKNOWN entry the store could not place
+   * (`WriteBatchSuccess.unplaced`): a fact this shim observed about a unit whose
+   * owner it never saw, written before any row of that unit existed, so no book
+   * holds it. The fact is not in the record -- an ERROR, never a caution.
+   */
+  const reportUnplaced = (unplaced: readonly storev1.WriteBatchUnplacedEntry[]): void => {
+    for (const entry of unplaced) {
+      LOGGER.error(
+        { upsert_key: entry.upsertKey, detail: entry.detail },
+        "the store did not place a row this shim wrote with no known owner: no stored row holds its upsert key, so it is not in the record",
+      );
+    }
+  };
+
   const reportSkipped = (skipped: readonly storev1.WriteBatchSkippedEntry[]): void => {
     for (const skip of skipped) {
       LOGGER.error(
@@ -764,6 +791,7 @@ export function createPersistence(options: PersistenceOptions): Persistence {
     const result = response.result;
     if (result.case === "success") {
       reportSkipped(result.value.skipped);
+      reportUnplaced(result.value.unplaced);
       return null;
     }
     if (result.case === "failure") {

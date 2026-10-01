@@ -612,18 +612,18 @@ function foldAll(messages: readonly SdkMessage[]): PersistEntry[] {
 
 /** The distinct upsert keys of the rows in the main agent's book. */
 function mainBookKeys(entries: readonly PersistEntry[]): string[] {
-  return [...new Set(entries.filter((e) => e.agentId.value === "main-agent").map((e) => e.upsertKey))];
+  return [...new Set(entries.filter((e) => e.agentId?.value === "main-agent").map((e) => e.upsertKey))];
 }
 
 /** The distinct upsert keys of the rows in any subagent's book. */
 function subagentBookKeys(entries: readonly PersistEntry[]): string[] {
-  return [...new Set(entries.filter((e) => e.agentId.value !== "main-agent").map((e) => e.upsertKey))];
+  return [...new Set(entries.filter((e) => e.agentId?.value !== "main-agent").map((e) => e.upsertKey))];
 }
 
 /** The settled prose of the main book's response unit. */
 function settledMainProse(entries: readonly PersistEntry[]): string | undefined {
   for (const entry of entries) {
-    if (entry.agentId.value !== "main-agent") continue;
+    if (entry.agentId?.value !== "main-agent") continue;
     const item = activityOf(entry)?.item;
     if (item?.case === "response" && item.value.result.case === "success") {
       return item.value.result.value.prose?.markdown;
@@ -635,7 +635,7 @@ function settledMainProse(entries: readonly PersistEntry[]): string | undefined 
 /** The settled reasoning text of the main book's thinking unit. */
 function settledMainThinking(entries: readonly PersistEntry[]): string | undefined {
   for (const entry of entries) {
-    if (entry.agentId.value !== "main-agent") continue;
+    if (entry.agentId?.value !== "main-agent") continue;
     const item = activityOf(entry)?.item;
     if (item?.case !== "thinking" || item.value.result.case !== "success") continue;
     const reasoning = item.value.result.value.reasoning;

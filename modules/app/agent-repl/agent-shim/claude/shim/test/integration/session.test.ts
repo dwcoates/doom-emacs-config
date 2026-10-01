@@ -35,6 +35,7 @@ import {
 } from "../integration-support/client.js";
 import {
   createStoreClient,
+  pageBookOf,
   pageLineOf,
   seedBashLifecycle,
   sidecarProducer,
@@ -1317,7 +1318,7 @@ describe("rotation, against the session's own facts", () => {
     // store, and the second handle never started one of its own.
     const books = new Set(
       writtenEntries(first.store?.writes() ?? [])
-        .map((entry) => pageLineOf(entry)?.pageAgentId?.value)
+        .map((entry) => pageBookOf(pageLineOf(entry)))
         .filter((book): book is string => book !== undefined && book !== ""),
     );
     expect([...books]).toEqual([started.vendorSessionId]);
