@@ -222,6 +222,15 @@ func (i *ingress) ApplyFile(ctx context.Context, path string) error {
 		}
 		return fmt.Errorf("apply %q: %w: %w", path, ErrQuarantined, joined)
 	}
+	// AN APPLIED FILE IS RETIRED TO THE APPLIED DIRECTORY, so its fate is a
+	// fact on disk a producer can read: claimed is "being applied", applied
+	// and quarantine are the two ends. `claude-repld merge-queue` reads it,
+	// because an agent's merge request reports nothing else before the
+	// requesting turn ends.
+	if err := i.retire(claimed, i.deps.AppliedDir); err != nil {
+		log.Error(opApply, "applied a command file but could not retire it to the applied directory", dlog.Context{"cause": err.Error()})
+		return fmt.Errorf("retire applied %q: %w", claimed, err)
+	}
 	log.Info(opApply, "applied a command file", dlog.Context{"entries": len(entries)})
 	return nil
 }
@@ -243,10 +252,15 @@ func (i *ingress) claim(path string) (string, error) {
 // quarantine moves a malformed file aside so the sweep does not meet it again
 // and a human can still read what was written.
 func (i *ingress) quarantine(claimed string) error {
-	if err := os.MkdirAll(i.deps.QuarantineDir, 0o755); err != nil {
-		return fmt.Errorf("create %q: %w", i.deps.QuarantineDir, err)
+	return i.retire(claimed, i.deps.QuarantineDir)
+}
+
+// retire moves a claimed file into the directory that names its end.
+func (i *ingress) retire(claimed, dir string) error {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("create %q: %w", dir, err)
 	}
-	return os.Rename(claimed, filepath.Join(i.deps.QuarantineDir, filepath.Base(claimed)))
+	return os.Rename(claimed, filepath.Join(dir, filepath.Base(claimed)))
 }
 
 // apply maps ONE entry onto the same internal path as the equivalent rpc.

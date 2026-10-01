@@ -73,6 +73,9 @@ type Deps struct {
 	// QuarantineDir is where a malformed file is renamed to; empty means
 	// "quarantine" beneath Dir.
 	QuarantineDir string
+	// AppliedDir is where an applied file is retired to; empty means
+	// "applied" beneath Dir.
+	AppliedDir string
 	// Now supplies the instant a file's age is judged against; nil means
 	// time.Now.
 	Now func() time.Time
@@ -115,6 +118,9 @@ func New(deps Deps) (Ingress, error) {
 	}
 	if deps.QuarantineDir == "" {
 		deps.QuarantineDir = filepath.Join(deps.Dir, "quarantine")
+	}
+	if deps.AppliedDir == "" {
+		deps.AppliedDir = filepath.Join(deps.Dir, "applied")
 	}
 	if deps.Now == nil {
 		deps.Now = time.Now
