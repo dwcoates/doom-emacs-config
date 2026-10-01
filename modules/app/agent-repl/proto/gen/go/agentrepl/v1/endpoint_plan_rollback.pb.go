@@ -845,7 +845,8 @@ func (x *RollbackPlanFilesRestored) GetCancelDetached() *RollbackPlanCancelDetac
 // Running detached work that will be stopped.
 type RollbackPlanCancelDetached struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// How many items (subagents, shells, monitors).
+	// How many detached subagents and shells. Monitors the dropped turns
+	// started are stopped too but have no detached head to count.
 	Items         uint32 `protobuf:"varint,1,opt,name=items,proto3" json:"items,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

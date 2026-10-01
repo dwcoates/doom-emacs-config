@@ -4236,3 +4236,47 @@ func TestTheFleetRecordsNoReapForAShimStillRunning(t *testing.T) {
 		t.Fatalf("writerGoneAt = %v, want none for a shim not yet reaped", got)
 	}
 }
+
+func TestAResumeCarriesTheWorkspacesRolledBackTurns(t *testing.T) {
+	// Arrange
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
+	f.db.rolledBack = map[ids.WorkspaceID][]ids.TurnID{ws.ID: {"t2", "t3"}}
+
+	// Act
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Assert
+	var got []string
+	for _, turn := range f.client.requests[0].GetResume().GetRolledBackTurns() {
+		got = append(got, turn.GetValue())
+	}
+	if !slices.Equal(got, []string{"t2", "t3"}) {
+		t.Fatalf("resume.rolled_back_turns = %v, want [t2 t3]", got)
+	}
+}
+
+func TestAResumeIsRefusedWhenTheRolledBackTurnsCannotBeRead(t *testing.T) {
+	// Arrange
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
+	f.db.rolledBackErr = errors.New("database is locked")
+
+	// Act
+	err := f.fleet.Start(context.Background(), ws.ID)
+
+	// Assert
+	if err == nil {
+		t.Fatal("Start resumed without knowing the rolled-back turns")
+	}
+	if len(f.client.requests) != 0 {
+		t.Fatalf("StartSession was sent %d times, want none", len(f.client.requests))
+	}
+	if !recordedAt(f, dlog.LevelError, "daemon.workspace.start_session", "the rolled-back turns could not be read; the session was not resumed") {
+		t.Fatalf("records = %+v, want the failed read at ERROR", f.log.logger.Records())
+	}
+}

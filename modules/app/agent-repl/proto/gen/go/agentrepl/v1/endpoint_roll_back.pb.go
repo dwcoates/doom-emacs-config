@@ -276,9 +276,8 @@ func (x *RollBackFilesRestored) GetFiles() uint32 {
 }
 
 // Not rolled back. THE ARM IS WHY. Every arm leaves the conversation, the
-// feed and the files as they were, except that a running turn may already
-// have been interrupted and held prompts the plan named may already have been
-// dropped.
+// feed, the held prompts and the files as they were, except that a running
+// turn may already have been interrupted.
 type RollBackError struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to Cause:

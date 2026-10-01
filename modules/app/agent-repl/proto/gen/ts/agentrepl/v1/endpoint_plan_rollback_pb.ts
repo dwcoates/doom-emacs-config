@@ -394,7 +394,8 @@ export const RollbackPlanFilesRestoredSchema: GenMessage<RollbackPlanFilesRestor
  */
 export type RollbackPlanCancelDetached = Message<"agentrepl.v1.RollbackPlanCancelDetached"> & {
   /**
-   * How many items (subagents, shells, monitors).
+   * How many detached subagents and shells. Monitors the dropped turns
+   * started are stopped too but have no detached head to count.
    *
    * @generated from field: uint32 items = 1;
    */

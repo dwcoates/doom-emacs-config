@@ -140,9 +140,8 @@ export const RollBackFilesRestoredSchema: GenMessage<RollBackFilesRestored> = /*
 
 /**
  * Not rolled back. THE ARM IS WHY. Every arm leaves the conversation, the
- * feed and the files as they were, except that a running turn may already
- * have been interrupted and held prompts the plan named may already have been
- * dropped.
+ * feed, the held prompts and the files as they were, except that a running
+ * turn may already have been interrupted.
  *
  * @generated from message agentrepl.v1.RollBackError
  */
