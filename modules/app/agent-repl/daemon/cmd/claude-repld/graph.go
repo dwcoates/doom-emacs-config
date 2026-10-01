@@ -656,7 +656,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// ---- the deploy ----
 
 	clients := &deployClientsForwarder{}
-	deployer, err := buildDeployer(ctx, deployerParams{
+	deployer, services, err := buildDeployer(ctx, deployerParams{
 		Surfaces:   p.Surfaces,
 		Checkout:   paths.Checkout,
 		ShimMain:   paths.ShimMain,
@@ -928,6 +928,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			JoiningAddress: p.Opts.joining,
 			Adopted:        fleet.Install,
 			StartSession:   fleet.Start,
+			EnsureServices: services.EnsureLoaded,
 			AdoptBound:     adoptBound,
 			Log:            p.Surfaces,
 		},

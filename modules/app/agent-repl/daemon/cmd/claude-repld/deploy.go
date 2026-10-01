@@ -94,15 +94,17 @@ func resolveDeployPaths(getenv func(string) string) (deployPaths, error) {
 // content hash of the binary it was exec'd from, taken HERE, at boot: an
 // install replaces the file under it, and the running process is still the
 // old build.
-func buildDeployer(ctx context.Context, p deployerParams) (*deploy.Deployer, error) {
+// buildDeployer also answers its service restarter, which the boot's bring-up
+// ensures the launchd services with.
+func buildDeployer(ctx context.Context, p deployerParams) (*deploy.Deployer, *deploy.Restarter, error) {
 	log := p.Surfaces.Global()
 	selfBuild, err := buildid.File(p.SelfExe)
 	if err != nil {
-		return nil, fmt.Errorf("claude-repld: hash this daemon's own binary %s: %w", p.SelfExe, err)
+		return nil, nil, fmt.Errorf("claude-repld: hash this daemon's own binary %s: %w", p.SelfExe, err)
 	}
 	where, err := resolveDeployPaths(p.Getenv)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	deployDir := filepath.Join(p.StateDir, "deploy")
 	builder := &deploy.ScriptBuilder{
@@ -149,7 +151,7 @@ func buildDeployer(ctx context.Context, p deployerParams) (*deploy.Deployer, err
 		Log:       p.Surfaces,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("claude-repld: build the deploy: %w", err)
+		return nil, nil, fmt.Errorf("claude-repld: build the deploy: %w", err)
 	}
 	if p.Joining {
 		log.Debug(graphOperation, "a joining successor leaves the standing deploy faults to the incumbent that opened them", nil)
@@ -160,7 +162,7 @@ func buildDeployer(ctx context.Context, p deployerParams) (*deploy.Deployer, err
 		"daemon_build": selfBuild, "checkout": p.Checkout, "staging": filepath.Join(deployDir, "staging"),
 		"builder_override": builder.Override != "", "report_dir": where.reportDir,
 	})
-	return deployer, nil
+	return deployer, restarter, nil
 }
 
 // rolloutForwarder carries the session watcher's build reports to the rollout
