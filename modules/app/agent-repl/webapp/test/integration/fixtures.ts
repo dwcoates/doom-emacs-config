@@ -59,6 +59,7 @@ import {
   RosterRowSchema,
   type RosterRow,
   type WorkspaceRoster,
+  RosterRepoSectionSchema,
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import {
   DaemonHoldTraySchema,
@@ -2133,6 +2134,14 @@ export const ROSTER_STATUS_ARMS = [
 export type RosterStatusArm = (typeof ROSTER_STATUS_ARMS)[number];
 
 /**
+ * A repository section's `fold` arm. The wire never leaves the oneof unset
+ * (`frontend.v1.RosterRepoSection.fold`), so every fixture section names one.
+ */
+function repositoryFold(collapsed: boolean): MessageInitShape<typeof RosterRepoSectionSchema>["fold"] {
+  return collapsed ? { case: "collapsed", value: {} } : { case: "expanded", value: {} };
+}
+
+/**
  * The merge arms the vocabulary paints with glyphs. All carry a glyph; only
  * the ones render-colors.json declares in `colored_merge_arms` also spend a
  * color (every one does since 2026-09-28; merge_failed is turquoise).
@@ -2193,8 +2202,8 @@ export function roster(init?: {
   currentUnset?: boolean;
   /** The task section header's done check, as the daemon resolved it. */
   taskDone?: boolean;
-  /** Replace the repository grouping's sections, IN WIRE ORDER. */
-  repositorySections?: { repositoryId: string; label: string; rows: RosterRow[] }[];
+  /** Replace the repository grouping's sections, IN WIRE ORDER; a section is expanded unless `collapsed`. */
+  repositorySections?: { repositoryId: string; label: string; rows: RosterRow[]; collapsed?: boolean }[];
 }): WorkspaceRoster {
   const rows = init?.rows ?? [rosterRow()];
   return create(WorkspaceRosterSchema, {
@@ -2203,8 +2212,14 @@ export function roster(init?: {
         key: { repository: repositoryRef(section.repositoryId) },
         header: { label: { text: section.label } },
         rows: { rows: section.rows },
+        fold: repositoryFold(section.collapsed === true),
       })) ?? [
-        { key: { repository: repositoryRef() }, header: { label: { text: "doom" } }, rows: { rows } },
+        {
+          key: { repository: repositoryRef() },
+          header: { label: { text: "doom" } },
+          rows: { rows },
+          fold: repositoryFold(false),
+        },
       ],
     },
     task: {
