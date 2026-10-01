@@ -98,24 +98,25 @@ stage_context() {
   # `.go` files, plus the embedded testdata and the vocab JSON the Go side
   # embeds, at their real relative paths so every `replace` and every
   # `//go:embed` resolves the same way it will at run time.
-  local src rel
-  while IFS= read -r src; do
-    rel=${src#"$repo_root/$MODULE_REL/"}
-    mkdir -p "$ctx/go-sources/$(dirname "$rel")"
-    cp "$src" "$ctx/go-sources/$rel"
-  done < <(find "$repo_root/$MODULE_REL" -name '*.go' -not -path '*/node_modules/*' -not -path '*/dist/*')
+  #
+  # ONE tar pipeline per tree, never a mkdir and a cp per file: the module
+  # holds well over a thousand .go files, and two forks each made staging alone
+  # take tens of seconds.
+  mkdir -p "$ctx/go-sources" "$ctx/go-manifests"
+  (cd "$repo_root/$MODULE_REL" &&
+    find . -name '*.go' -not -path '*/node_modules/*' -not -path '*/dist/*' -print0 |
+      tar --null -T - -cf -) | tar -xf - -C "$ctx/go-sources"
 
-  # Every go.mod/go.sum under the module, at its own relative path, so the
-  # replace directives between them still resolve during the cache prime.
-  local mod rel
-  while IFS= read -r mod; do
-    rel=${mod#"$repo_root/$MODULE_REL/"}
-    mkdir -p "$ctx/go-manifests/$(dirname "$rel")"
-    cp "$mod" "$ctx/go-manifests/$rel"
-    if [[ -f ${mod%.mod}.sum ]]; then
-      cp "${mod%.mod}.sum" "$ctx/go-manifests/${rel%.mod}.sum"
-    fi
-  done < <(find "$repo_root/$MODULE_REL" -name go.mod -not -path '*/node_modules/*')
+  # Every go.mod (with the go.sum beside it, when there is one) under the
+  # module, at its own relative path, so the replace directives between them
+  # still resolve during the cache prime. The list is built with shell
+  # builtins only, for the same reason.
+  (cd "$repo_root/$MODULE_REL" &&
+    find . -name go.mod -not -path '*/node_modules/*' -print0 |
+      while IFS= read -r -d '' mod; do
+        printf '%s\0' "$mod"
+        if [[ -f ${mod%.mod}.sum ]]; then printf '%s\0' "${mod%.mod}.sum"; fi
+      done | tar --null -T - -cf -) | tar -xf - -C "$ctx/go-manifests"
 }
 
 # --- recorded pins ---------------------------------------------------------
