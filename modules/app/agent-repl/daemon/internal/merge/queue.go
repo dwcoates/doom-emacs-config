@@ -538,6 +538,13 @@ func (o *orchestrator) pumpOnce(ctx context.Context, repo wsm.RepoKey) (bool, er
 	return true, nil
 }
 
+// isDraining reports whether the daemon's orderly exit has begun.
+func (o *orchestrator) isDraining() bool {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.draining
+}
+
 // enterAdmission registers one admission step against the shutdown drain,
 // and reports false -- registering nothing -- once the daemon is draining.
 // The caller ends the step with o.leaveAdmission().
@@ -549,13 +556,6 @@ func (o *orchestrator) pumpOnce(ctx context.Context, repo wsm.RepoKey) (bool, er
 // TestStoppingTheDaemonInsideAMergesTerminalStampsTheLandingWithNoFailedWrites).
 // The step is registered under the same lock the drain sets the flag under,
 // and the drain waits for every registered step before it returns.
-// isDraining reports whether the daemon's orderly exit has begun.
-func (o *orchestrator) isDraining() bool {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	return o.draining
-}
-
 func (o *orchestrator) enterAdmission() bool {
 	o.mu.Lock()
 	defer o.mu.Unlock()
