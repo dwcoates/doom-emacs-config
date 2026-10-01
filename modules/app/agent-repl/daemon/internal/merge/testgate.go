@@ -32,11 +32,11 @@ const tailBytes = 4000
 
 // suitePassed matches bin/test-all.sh's own per-suite pass line, whatever log
 // prefix the script decorates it with.
-var suitePassed = regexp.MustCompile(`(?m)^.*?([A-Za-z0-9_-]+): passed in ([0-9]+)s\s*$`)
+var suitePassed = regexp.MustCompile(`(?m)^.*?([A-Za-z0-9_-]+): passed in ([0-9]+(?:\.[0-9]+)?)s\s*$`)
 
 // suiteFailed matches the script's per-suite failure line, which carries the
 // suite's exit code.
-var suiteFailed = regexp.MustCompile(`(?m)^.*?([A-Za-z0-9_-]+) failed after ([0-9]+)s with exit code ([0-9]+)\s*$`)
+var suiteFailed = regexp.MustCompile(`(?m)^.*?([A-Za-z0-9_-]+) failed after ([0-9]+(?:\.[0-9]+)?)s with exit code (-?[0-9]+)\s*$`)
 
 // suiteSkipped matches the line the script prints for a suite `--suites` left
 // out. A skipped suite is not a state the tab draws: it was never selected.
