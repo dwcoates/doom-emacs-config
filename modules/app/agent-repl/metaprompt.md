@@ -186,6 +186,21 @@
 - Effort stays at `medium` for every tier.
   - Effort above `medium` is reserved for dispatches the user explicitly asks to run deeper.
 
+## GNS authentication
+
+### Renew an expired GNS token yourself, only in the dodge@chess.com Chrome profile
+
+- Whenever a GNS token has expired or is missing, run `gns auth login` (any `--env`, e.g. `production`) and any other needed `gns auth` step yourself.
+  - Do not stop to ask first; an expired token (e.g. an LLM gateway `HTTP 401: Invalid or expired JWT`) is renewed and the work continues.
+- Auth pages open ONLY in the dodge@chess.com Chrome profile (`--profile-directory="Profile 6"`).
+  - NEVER the dodge.w.coates@gmail.com profile, and never any other profile or browser.
+  - The default `gns auth login` opens the system default browser and profile, so it is not used.
+- Use the device-code flow, which hands over the URL instead of opening a browser.
+  - `gns auth login --env <env> --device` prints the sign-in URL and code.
+  - Open that URL with `open -na "Google Chrome" --args --profile-directory="Profile 6" "<url>"`.
+  - Poll `gns auth login --env <env> --device-poll` until it exits 0 (exit 1 is pending, exit 2 is an error to surface).
+  - Confirm with `gns auth status` that the environment reads authenticated as dodge@chess.com.
+
 ## Response behavior
 
 ### No rhetorical questions
