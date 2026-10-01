@@ -248,7 +248,7 @@ func (r *run) conflict(ctx context.Context, p *replay, files []string, targetBra
 	commit := p.commits[min(p.done, len(p.commits)-1)]
 	p.lines = append(p.lines, fmt.Sprintf("%s conflicted in %d file(s)", commitLine(commit.SHA, commit.Subject), len(files)))
 	r.settleRebasing(ctx, p, "the rebase stopped on a conflict")
-	r.o.log(ctx, r.ws).Warn(op, "a replayed commit conflicted; the requester's session resolves it", dlog.Context{
+	r.o.log(ctx, r.ws).Info(op, "a replayed commit conflicted; the requester's session resolves it", dlog.Context{
 		"workspace": string(r.ws), "commit": commit.SHA, "files": strings.Join(files, ", "), "worktree": r.subject.dir})
 	round := r.openTab(ctx, TabConflicts)
 	r.address(TabConflicts, round)
@@ -299,7 +299,7 @@ func (r *run) conflict(ctx context.Context, p *replay, files []string, targetBra
 		summary := fmt.Sprintf("conflict resolution gave up: %s; the rebase is left in progress in %s", why, r.subject.dir)
 		r.upsert(TabConflicts, round, conflictsTab(nil, r.o.nowMS(), summary))
 		r.closeTab(ctx, TabConflicts, round, "failed")
-		r.o.log(ctx, r.ws).Warn(op, "the conflict resolution gave up; the merge fails and the rebase is left in progress", dlog.Context{
+		r.o.log(ctx, r.ws).Info(op, "the conflict resolution gave up; the merge fails and the rebase is left in progress", dlog.Context{
 			"workspace": string(r.ws), "why": why, "worktree": r.subject.dir})
 		out := failedIn(footer.FailedConflicts, summary)
 		return &out, nil
@@ -340,7 +340,7 @@ func (r *run) testAndFix(ctx context.Context, tip, targetBranch string) (string,
 			return head, nil, nil
 		case attempt == MaxFixAttempts:
 			summary := fmt.Sprintf("the tests still fail after %d fixing attempts; the whole run is archived at %s", MaxFixAttempts, verdict.result.ArchivePath)
-			r.o.log(ctx, r.ws).Warn("daemon.merge.fixes", "the last fixing attempt left suites failing; the merge fails", dlog.Context{
+			r.o.log(ctx, r.ws).Info("daemon.merge.fixes", "the last fixing attempt left suites failing; the merge fails", dlog.Context{
 				"workspace": string(r.ws), "attempts": MaxFixAttempts, "archive": verdict.result.ArchivePath})
 			out := failedIn(footer.FailedTests, summary)
 			return "", &out, nil
@@ -402,7 +402,7 @@ func (r *run) fix(ctx context.Context, attempt int, failing GateResult, targetBr
 	if why != "" {
 		r.upsert(TabFixes, round, fixesTab(nil, attempt, r.o.nowMS(), why))
 		r.closeTab(ctx, TabFixes, round, "failed")
-		r.o.log(ctx, r.ws).Warn(op, "the fixing attempt gave up; the merge fails", dlog.Context{
+		r.o.log(ctx, r.ws).Info(op, "the fixing attempt gave up; the merge fails", dlog.Context{
 			"workspace": string(r.ws), "attempt": attempt, "why": why})
 		out := failedIn(footer.FailedTests, why)
 		return &out, nil

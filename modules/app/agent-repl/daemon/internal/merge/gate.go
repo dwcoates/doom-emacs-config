@@ -112,7 +112,7 @@ func (r *run) gate(ctx context.Context, tip, head string) (gateVerdict, error) {
 	summary := fmt.Sprintf("the test suite failed (exit %d); the whole run is archived at %s", result.ExitCode, result.ArchivePath)
 	r.upsert(TabTests, round, testsTab(nil, result.Suites, g.link(), r.o.nowMS(), summary))
 	r.closeTab(ctx, TabTests, round, "failed")
-	r.o.log(ctx, r.ws).Warn(op, "the merge's suites failed", dlog.Context{
+	r.o.log(ctx, r.ws).Info(op, "the merge's suites failed", dlog.Context{
 		"workspace": string(r.ws), "round": round, "exit_code": result.ExitCode, "archive": result.ArchivePath})
 	return gateVerdict{result: result, round: round}, nil
 }

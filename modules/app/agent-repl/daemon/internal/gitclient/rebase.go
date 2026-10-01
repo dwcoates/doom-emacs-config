@@ -115,7 +115,7 @@ func (c *client) rebaseCommand(ctx context.Context, operation, dir string, env [
 		c.log.Global().Error(operation, "the rebase failed without leaving conflicts", in.logContext())
 		return RebaseStep{}, in.fail()
 	}
-	c.log.Global().Warn(operation, "the rebase stopped on conflicts; it is left in progress for their resolution", dlog.Context{
+	c.log.Global().Info(operation, "the rebase stopped on conflicts; it is left in progress for their resolution", dlog.Context{
 		"dir":        dir,
 		"exit_code":  in.exitCode,
 		"conflicted": conflicted,

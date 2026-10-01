@@ -907,7 +907,7 @@ func promptAwaitMergeLease(t *testing.T, f *fixture) {
 	// The declared records are the evidence of the conflict the fixture
 	// scripts. They are declared HERE because reaching conflict resolution is
 	// what makes them certain rather than a matter of timing.
-	f.d.ExpectWarnings("daemon.merge.conflicts", "daemon.gitclient.start_rebase")
+
 }
 
 func TestSubmitPromptDuringAMergeLeaseAnswersMergingRefusal(t *testing.T) {
@@ -1008,8 +1008,7 @@ func TestUpdateMergeQueueEvictWhileTheDequeueOfferStandsClearsItAndTheHeadingCou
 	// then an interrupt raises the dequeue offer.
 	_, behind, _, d := mergeBlockedQueueFixture(t)
 	// The sweep covers every test; the declared records are evidence of the merge conflict the test stages, the queued merge the test abandons.
-	d.ExpectWarnings("daemon.merge.conflicts", "daemon.gitclient.merge_no_ff", "daemon.merge.drop_queued",
-		"daemon.merge.merge_tab")
+	d.ExpectWarnings("daemon.gitclient.merge_no_ff", "daemon.merge.drop_queued", "daemon.merge.merge_tab")
 	holds := behind.d.WatchHolds(behind.ws)
 	if _, err := behind.d.Client().Interrupt(behind.d.Ctx(), connect.NewRequest(&agentreplv1.InterruptRequest{
 		Workspace: behind.ws, Target: &agentreplv1.InterruptRequest_Turn{Turn: &agentreplv1.InterruptTurn{}},
