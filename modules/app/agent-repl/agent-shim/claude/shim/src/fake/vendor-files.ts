@@ -39,7 +39,6 @@
  * old file left exactly as it was.
  */
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 import { bindLog } from "../log.js";
@@ -454,81 +453,5 @@ export class VendorFiles {
   unfinishedSpools(): string[] {
     return [...this.spools.entries()].filter(([, s]) => !s.isFinished).map(([id]) => id);
   }
-
-  /**
-   * Shell runs this SESSION left running, read back OFF DISK.
-   *
-   * {@link unfinishedSpools} answers for spools THIS process opened, which is
-   * nothing at all in a freshly spawned one. A run survives a process, though —
-   * that is the whole point of backgrounding it — and the evidence it survived
-   * is on disk: a `b<hex>.output` spool with no `EXIT=` terminator, plus the
-   * transcript line whose `backgroundTaskId` names it and carries the
-   * originating call. Both halves are needed, because a task with no
-   * originating call has no wire handle and nothing can address it.
-   *
-   * This is how a resumed mock models a VENDOR PROCESS THAT SURVIVED its shim.
-   */
-  survivingShellRuns(): Array<{ taskId: string; toolUseId: string; description: string }> {
-    const tasksDir = dirname(this.spoolPathFor("probe"));
-    let spooled: string[];
-    try {
-      spooled = readdirSync(tasksDir);
-    } catch {
-      // No spool directory means this session never backgrounded anything;
-      // an absence is an answer, not a failure.
-      return [];
-    }
-    const unfinished = new Set<string>();
-    for (const name of spooled) {
-      if (!name.startsWith("b") || !name.endsWith(".output")) continue;
-      const taskId = name.slice(0, -".output".length);
-      const body = existsSync(join(tasksDir, name)) ? readFileSync(join(tasksDir, name), "utf8") : "";
-      // THE `EXIT=` LINE IS THE ONLY TERMINATOR a spool has; without it the run
-      // was still going when whoever was watching it stopped.
-      if (!/^EXIT=/m.test(body)) unfinished.add(taskId);
-    }
-    if (unfinished.size === 0) return [];
-    const surviving: Array<{ taskId: string; toolUseId: string; description: string }> = [];
-    const transcriptBody = existsSync(this.transcript.path)
-      ? readFileSync(this.transcript.path, "utf8")
-      : "";
-    for (const line of transcriptBody.split("\n")) {
-      if (line.trim() === "") continue;
-      let record: Record<string, unknown>;
-      try {
-        record = JSON.parse(line) as Record<string, unknown>;
-      } catch {
-        continue;
-      }
-      const result = record["toolUseResult"];
-      if (typeof result !== "object" || result === null) continue;
-      const taskId = (result as Record<string, unknown>)["backgroundTaskId"];
-      if (typeof taskId !== "string" || !unfinished.has(taskId)) continue;
-      const toolUseId = firstToolUseIdOf(record);
-      if (toolUseId === undefined) continue;
-      unfinished.delete(taskId);
-      surviving.push({
-        taskId,
-        toolUseId,
-        description: typeof (result as Record<string, unknown>)["command"] === "string"
-          ? ((result as Record<string, unknown>)["command"] as string)
-          : taskId,
-      });
-    }
-    return surviving;
-  }
 }
 
-/** The `tool_use_id` a transcript tool-result line answers, when it names one. */
-function firstToolUseIdOf(record: Record<string, unknown>): string | undefined {
-  const message = record["message"];
-  if (typeof message !== "object" || message === null) return undefined;
-  const content = (message as Record<string, unknown>)["content"];
-  if (!Array.isArray(content)) return undefined;
-  for (const block of content) {
-    if (typeof block !== "object" || block === null) continue;
-    const id = (block as Record<string, unknown>)["tool_use_id"];
-    if (typeof id === "string" && id !== "") return id;
-  }
-  return undefined;
-}

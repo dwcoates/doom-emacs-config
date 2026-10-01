@@ -642,32 +642,13 @@ export function createFakeQuery(
 
   const liveTasks = new Map<string, LiveTask>();
 
-  // A RESUMED VENDOR STILL HOLDS WHAT IT WAS RUNNING. Backgrounding a shell is
-  // exactly the request that it outlive the turn, and a shim that died without
-  // stopping it did not end it — so the run is adopted back from its own
-  // evidence on disk: an unterminated spool plus the transcript line naming the
-  // call that launched it. Without this the mock says "gone" for every run a
-  // resume inherits, and the shim's re-adoption path could never be exercised.
-  //
-  // SILENTLY, with no `task_started`: the shim's reconciliation ASKS
-  // (`backgroundTasks`) precisely because a revived process re-announces on its
-  // own schedule, and a start replayed here would be a second announcement of
-  // work that never restarted.
-  if (opts.resume !== undefined) {
-    for (const run of files.survivingShellRuns()) {
-      liveTasks.set(run.taskId, {
-        taskId: run.taskId,
-        toolUseId: run.toolUseId,
-        kind: "local_bash",
-        description: run.description,
-        backgrounded: true,
-      });
-      LOGGER.debug(
-        { claude_session_id: sessionUuid, task_id: run.taskId, tool_use_id: run.toolUseId },
-        "fake vendor resumed a session that still holds a running shell; re-adopted from its unterminated spool",
-      );
-    }
-  }
+  // A RESUMED VENDOR IS A NEW CLI PROCESS AND ITS TASK TABLE STARTS EMPTY.
+  // The SDK states its background-task level is per process and that nothing
+  // is emitted at startup, and no capture shows a revived process holding or
+  // re-announcing an earlier task, so a resume adopts nothing here. A shell a
+  // prior process left running is an OS process of its own: its spool may
+  // keep growing on disk, and only the sidecar's reading of that spool settles
+  // it.
 
   const blockPayload = (block: FakeBlock): Record<string, unknown> => {
     switch (block.type) {

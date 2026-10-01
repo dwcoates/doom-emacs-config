@@ -1312,7 +1312,7 @@ serves one on every entry it hands out.
     `StartSession` was never seen to START in this process, so the table does
     not hold it.
   - Re-announcing is A READ AND NOTHING ELSE. The `StartSession` reconciliation
-    writes terminals for work the vendor no longer holds; a daemon attaching is
+    writes terminals for in-process work the replaced CLI ended; a daemon attaching is
     not a reason to close anybody's run, so the two share only the pure
     description step (`announceLiveWork`). A record plane the shim cannot reach
     goes out as a session fault, never as a quietly empty membership.
@@ -1328,14 +1328,38 @@ serves one on every entry it hands out.
     recorded at ERROR. A handle no row describes at all has no kind to state:
     it is recorded at ERROR and not announced. The vendor is never asked.
   - **EVERY LIVE-WORK READ IS SCOPED TO THIS SESSION.** One store serves every
-    session on the host, and the `StartSession` reconciliation closes whatever
-    the read answers that this vendor does not hold — so on 2026-09-23 an
+    session on the host, and the `StartSession` reconciliation closes the
+    in-process work the read answers — so on 2026-09-23 an
     unscoped read let one workspace's start reap five running subagents of
     another. `Persistence.liveWork(session)` takes this conversation's main
     agent id and the store answers only its lineage; an empty session is
     refused as `invalid_request` before the store is asked, and a store's
     `invalid_request` is surfaced as that kind — never read as "no book yet",
     which would serve an empty set in silence.
+- **A REVIVAL DECIDES SURVIVAL BY WHERE THE WORK RAN, NEVER BY ASKING THE
+  VENDOR** (ruled 2026-09-30; `revivalFate` in `src/store/reconcile.ts`). A
+  revived shim's vendor is a NEW CLI process: the SDK states its
+  background-task level is per process with nothing emitted at startup, and no
+  capture shows a revived process re-announcing a task. `backgroundTasks` is
+  no observation (it moves foreground work), so it is never called here.
+  - IN-PROCESS work is closed at `StartSession` with its existing lost
+    terminal and one INFO record ("the CLI process that ran it was
+    replaced"): a subagent (`local_agent`, run inside the CLI), a subagent
+    resumed by a send (closed under the agent the store names, else under the
+    send's id at ERROR), and a monitor (its command is a `local_bash` task in
+    the monitor captures, but the WATCH is the CLI's, and the sidecar claims no
+    monitor spool).
+  - SPOOL-BACKED work (a shell: its own OS process writing its `b*` spool) is
+    NEVER given a terminal by the shim at `StartSession`. It stays live and is
+    re-announced; its terminal is the sidecar's (an `EXIT=` row, or the
+    sidecar's own lost policy). The shim's shell sweep (`closingBashTerminal`)
+    is gone.
+  - Kind from the unit the book holds, else from the item's own announcement;
+    an item nothing states a kind for is left live with a WARN decision record,
+    since only in-process work may be closed.
+  - The fake vendor matches: a resumed fake vendor's task table starts empty.
+  - The integration fake store ends detached work on its origin unit's
+    terminal arm, as the real store's `closeDetachedByOrigin` does.
 - **`StartSessionFresh.model` is optional.** UNSET = pass no model to the SDK
   and let its own default take effect; `SessionStarted.effective_model` states
   what did. A model that IS set still has to name something — saying nothing

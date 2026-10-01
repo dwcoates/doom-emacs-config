@@ -712,6 +712,55 @@ describe("ReadAgentPage", () => {
   });
 });
 
+/** A unit's own MONITOR frame in `book`, keyed `activity:<unit>`, holding `arm`. */
+function monitorUnitEntry(book: string, unit: string, arm: "start" | "ended"): storev1.StoreEntry {
+  const start = create(conversationv1.AgentMonitorStartSchema, { description: "watch" });
+  return create(storev1.StoreEntrySchema, {
+    plane: streamPlane(),
+    writeId: `w-${unit}-${arm}`,
+    upsertKey: `activity:${unit}`,
+    entry: {
+      case: "agentUpdate",
+      value: create(storev1.StoreAgentUpdateSchema, {
+        agentInfo: {
+          case: "serveableFrame",
+          value: create(storev1.StorePageLineSchema, {
+            pageAgentId: agentId(book),
+            agentItem: create(storev1.StoreAgentItemSchema, {
+              item: {
+                case: "agentFrame",
+                value: create(conversationv1.AgentFrameSchema, {
+                  agentId: agentId(book),
+                  result: {
+                    case: "update",
+                    value: create(conversationv1.AgentUpdateSchema, {
+                      update: {
+                        case: "activity",
+                        value: create(conversationv1.AgentActivitySchema, {
+                          activityId: create(conversationv1.AgentActivityIdSchema, { value: unit }),
+                          item: {
+                            case: "monitor",
+                            value: create(conversationv1.AgentMonitorSchema, {
+                              result:
+                                arm === "start"
+                                  ? { case: "start", value: start }
+                                  : { case: "ended", value: create(conversationv1.AgentMonitorEndedSchema, { call: start }) },
+                            }),
+                          },
+                        }),
+                      },
+                    }),
+                  },
+                }),
+              },
+            }),
+          }),
+        },
+      }),
+    },
+  });
+}
+
 /** A GetLiveWork request scoped to `session`, the only form the store answers. */
 function liveWorkFor(session: string): storev1.GetLiveWorkRequest {
   return create(storev1.GetLiveWorkRequestSchema, { session: agentId(session) });
@@ -810,6 +859,50 @@ describe("GetLiveWork", () => {
       response.result.case === "success"
         ? response.result.value.liveDetached.map((id) => id.value)
         : [],
+    ).toEqual(["task-1"]);
+  });
+
+  it("stops reporting detached work once its origin unit's own terminal arm lands", async () => {
+    // Arrange: the real store's closeDetachedByOrigin ends the row a unit's
+    // terminal names as its origin, whatever the unit's kind.
+    const { client } = await store();
+    await write(client, detachedEntry("main", "activity:run1", "task-1", "mon1"));
+    await write(client, monitorUnitEntry("main", "mon1", "ended"));
+
+    // Act.
+    const response = await client.getLiveWork(liveWorkFor("main"));
+
+    // Assert.
+    expect(response.result.case === "success" ? response.result.value.liveDetached : []).toEqual([]);
+  });
+
+  it("keeps reporting detached work while its origin unit is not at a terminal arm", async () => {
+    // Arrange.
+    const { client } = await store();
+    await write(client, detachedEntry("main", "activity:run1", "task-1", "mon1"));
+    await write(client, monitorUnitEntry("main", "mon1", "start"));
+
+    // Act.
+    const response = await client.getLiveWork(liveWorkFor("main"));
+
+    // Assert.
+    expect(
+      response.result.case === "success" ? response.result.value.liveDetached.map((id) => id.value) : [],
+    ).toEqual(["task-1"]);
+  });
+
+  it("reports detached work announced AFTER its origin unit's terminal, as the real store's later row is live", async () => {
+    // Arrange.
+    const { client } = await store();
+    await write(client, monitorUnitEntry("main", "mon1", "ended"));
+    await write(client, detachedEntry("main", "activity:run1", "task-1", "mon1"));
+
+    // Act.
+    const response = await client.getLiveWork(liveWorkFor("main"));
+
+    // Assert.
+    expect(
+      response.result.case === "success" ? response.result.value.liveDetached.map((id) => id.value) : [],
     ).toEqual(["task-1"]);
   });
 

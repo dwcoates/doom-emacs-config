@@ -686,41 +686,6 @@ describe("what the PRODUCER states about a shell run", () => {
     stream.close();
   });
 
-  test("a run the vendor did not keep reports its output as NOT OBSERVED", async () => {
-    // A reconciled run is closed from the RECORD, not from a shell: nobody read
-    // its output, and `not_observed` says exactly that. An empty `text` form
-    // would claim the command printed nothing, which is a different and false
-    // statement about the run.
-    const first = await spawnShim();
-    const started = sessionStarted(await first.clients.h1.startSession(freshSession()));
-    await first.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!md" }));
-    await first.clients.h1.killSession(
-      create(shimv1.KillSessionRequestSchema, { force: true }),
-    );
-    await first.exited;
-    const store = createStoreClient(first.dirs.storeSocket);
-    await seedDetachedAnnouncement(store, sidecarProducer(started.vendorSessionId), {
-      work: "unobserved-run",
-      agent: started.vendorSessionId,
-      detachedFromId: "unobserved-run",
-      outputPath: "/nonexistent/unobserved.output",
-    });
-
-    const second = await spawnShim({ reuse: first.dirs });
-    await second.clients.h1.startSession(resumeSession(started.vendorSessionId));
-    const bash = openStream((options) =>
-      second.clients.h1.watchBash(
-        create(shimv1.WatchBashRequestSchema, { work: workId("unobserved-run") }),
-        options,
-      ),
-    );
-    const terminal = (await bash.drain()).map(bashFrame).at(-1);
-
-    if (terminal?.result.case !== "success" || terminal.result.value.outcome.case !== "interrupted") {
-      throw new Error("the reconciled run was not closed with an interrupted terminal");
-    }
-    expect(terminal.result.value.outcome.value.output?.form.case).toBe("notObserved");
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1868,10 +1833,10 @@ describe("DetachForeground", () => {
 
 describe("reconciliation at session start", () => {
   test("a store-only unterminated item is re-adopted with the CREATED origin", async () => {
-    // `SessionStarted.live_work` announces what the revived vendor process
-    // actually has, and it announces it as `created` — the item's start plus its
-    // description — because a resume is not a detachment: nothing left a turn,
-    // the work simply already exists.
+    // A SHELL IS ITS OWN OS PROCESS: the replaced CLI process did not end it,
+    // so a revival re-adopts it, announced as `created` — the item's start plus
+    // its description — because a resume is not a detachment: nothing left a
+    // turn, the work simply already exists.
     const first = await spawnShim();
     const started = sessionStarted(await first.clients.h1.startSession(freshSession()));
     const stream = await openAgentStream(first);
@@ -1906,47 +1871,73 @@ describe("reconciliation at session start", () => {
     }
   });
 
-  test("an item the vendor did NOT keep is closed with a lost.swept_up terminal", async () => {
-    // EVERY STARTED THING EVENTUALLY GETS A TERMINAL ROW, by observation or by
-    // reconciliation. The dual write closes the record AND puts the stop notice
-    // in the feed, so a surface never shows work that no longer exists.
+  test("a subagent the replaced CLI process ran is closed at revival, never re-adopted", async () => {
+    // A SUBAGENT RUNS INSIDE THE CLI PROCESS, so a revival (a new CLI process)
+    // provably ended it: the revived shim closes it and does not announce it.
     const first = await spawnShim();
     const started = sessionStarted(await first.clients.h1.startSession(freshSession()));
-    await first.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!md" }));
-    await first.clients.h1.killSession(
-      create(shimv1.KillSessionRequestSchema, { force: true }),
-    );
+    const stream = await openAgentStream(first);
+    await first.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!subagent-detached-live" }));
+    const announced = await awaitAnnouncement(stream);
+    const run = announced.work?.value ?? "";
+    stream.close();
+    first.child.kill("SIGKILL");
     await first.exited;
-    // A run the RECORD believes is live and the vendor has never heard of.
-    const store = createStoreClient(first.dirs.storeSocket);
-    await seedDetachedAnnouncement(store, sidecarProducer(started.vendorSessionId), {
-      work: "orphan-run",
-      agent: started.vendorSessionId,
-      detachedFromId: "orphan-run",
-      outputPath: "/nonexistent/orphan.output",
-    });
 
     const second = await spawnShim({ reuse: first.dirs });
     const revived = sessionStarted(
       await second.clients.h1.startSession(resumeSession(started.vendorSessionId)),
     );
-
-    expect(revived.liveWork.map((item) => item.work?.value)).not.toContain("orphan-run");
-    const bash = openStream((options) =>
-      second.clients.h1.watchBash(
-        create(shimv1.WatchBashRequestSchema, { work: workId("orphan-run") }),
-        options,
-      ),
+    // An ORDERLY stand-down flushes every write the shim enqueued, so the
+    // reconciliation's closings have landed once it returns.
+    await second.clients.h1.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
+    await second.exited;
+    const store = createStoreClient(first.dirs.storeSocket);
+    const live = await store.getLiveWork(
+      create(storev1.GetLiveWorkRequestSchema, {
+        session: create(conversationv1.AgentIdSchema, { value: started.vendorSessionId }),
+      }),
     );
-    const frames = await bash.drain();
-    const terminal = frames.map(bashFrame).at(-1);
-    if (terminal?.result.case === "success" && terminal.result.value.outcome.case === "interrupted") {
-      const cause = terminal.result.value.outcome.value.cause;
-      expect(cause.case).toBe("lost");
-      if (cause.case === "lost") expect(cause.value.how.case).toBe("sweptUp");
-    } else {
-      throw new Error("the orphaned run was not closed with an interrupted terminal");
-    }
+
+    expect([
+      revived.liveWork.map((item) => item.work?.value).includes(run),
+      live.result.case === "success" ? live.result.value.liveDetached.map((id) => id.value).includes(run) : undefined,
+    ]).toEqual([false, false]);
+  });
+
+  test("a spool-backed shell is left live at revival, its terminal the sidecar's", async () => {
+    // A SHELL IS ITS OWN OS PROCESS WRITING ITS OWN SPOOL: the replaced CLI
+    // process did not end it, so the revived shim writes no terminal for it.
+    const first = await spawnShim();
+    const started = sessionStarted(await first.clients.h1.startSession(freshSession()));
+    const stream = await openAgentStream(first);
+    await first.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-detach-live" }));
+    const announced = await awaitAnnouncement(stream);
+    const run = announced.work?.value ?? "";
+    stream.close();
+    first.child.kill("SIGKILL");
+    await first.exited;
+
+    const second = await spawnShim({ reuse: first.dirs });
+    await second.clients.h1.startSession(resumeSession(started.vendorSessionId));
+    // THE WRITER IS ONE ORDERED BUFFER: a turn's terminal landing means every
+    // row the reconciliation enqueued ahead of it has landed too.
+    const agent = openStream((options) => second.clients.h1.watchAgent(watchAgentRequest(), options));
+    await second.clients.h1.startTurn(startTurnRequest({ turn: "t2", text: "!md" }));
+    await agent.until((frame) => {
+      if (frame.frame.case !== "entry") return false;
+      const result = entryFrame(watchAgentEntry(frame))?.result;
+      return result?.case === "success" || result?.case === "failure";
+    });
+    agent.close();
+    const store = createStoreClient(first.dirs.storeSocket);
+    const live = await store.getLiveWork(
+      create(storev1.GetLiveWorkRequestSchema, {
+        session: create(conversationv1.AgentIdSchema, { value: started.vendorSessionId }),
+      }),
+    );
+
+    expect(live.result.case === "success" ? live.result.value.liveDetached.map((id) => id.value) : []).toContain(run);
   });
 
   test("a session start never closes ANOTHER session's live work (2026-09-23)", async () => {
@@ -1954,8 +1945,8 @@ describe("reconciliation at session start", () => {
     // workspace reconciled the WHOLE record against its own vendor and wrote
     // lost.swept_up terminals for five subagents another session was still
     // running. Session A's work here is five live subagents and a shell run;
-    // session B starts with an orphan of its own, whose closing terminal is the
-    // proof its reconciliation actually ran.
+    // session B starts with an in-process subagent of its own, whose closing is
+    // the proof its reconciliation actually ran.
     const first = await spawnShim();
     const b = sessionStarted(await first.clients.h1.startSession(freshSession()));
     await first.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!md" }));
@@ -1973,25 +1964,14 @@ describe("reconciliation at session start", () => {
       detachedFromId: "a-run",
       outputPath: "/nonexistent/a-run.output",
     });
-    await seedDetachedAnnouncement(store, sidecarProducer(b.vendorSessionId), {
-      work: "b-orphan",
-      agent: b.vendorSessionId,
-      detachedFromId: "b-orphan",
-      outputPath: "/nonexistent/b-orphan.output",
+    await seedSubagentSpawn(store, sidecarProducer(b.vendorSessionId), {
+      spawner: b.vendorSessionId,
+      created: "b-orphan-sub",
     });
 
     // Session B starts while A's work is live.
     const second = await spawnShim({ reuse: first.dirs });
     sessionStarted(await second.clients.h1.startSession(resumeSession(b.vendorSessionId)));
-    // SYNCHRONIZATION: B's own orphan reaching its terminal proves B's
-    // reconciliation wrote its closings — they are one write.
-    const orphan = openStream((options) =>
-      second.clients.h1.watchBash(
-        create(shimv1.WatchBashRequestSchema, { work: workId("b-orphan") }),
-        options,
-      ),
-    );
-    await orphan.drain();
     // An ORDERLY stand-down flushes every write the shim ever enqueued, so
     // after it nothing B's reconciliation wrote can still be in flight.
     await second.clients.h1.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
@@ -2013,6 +1993,13 @@ describe("reconciliation at session start", () => {
     const open = live.result.case === "success" ? live.result.value : undefined;
     expect(open?.liveAgents.map((id) => id.value)).toEqual(aSubagents);
     expect(open?.liveDetached.map((id) => id.value)).toEqual(["a-run"]);
+    // ...while B's own in-process subagent, proof its reconciliation ran, is closed.
+    const bLive = await store.getLiveWork(
+      create(storev1.GetLiveWorkRequestSchema, {
+        session: create(conversationv1.AgentIdSchema, { value: b.vendorSessionId }),
+      }),
+    );
+    expect(bLive.result.case === "success" ? bLive.result.value.liveAgents.map((id) => id.value) : undefined).toEqual([]);
   });
 
   test("GetLiveWork is called exactly ONCE, at session start", async () => {
