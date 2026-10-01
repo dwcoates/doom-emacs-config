@@ -1273,3 +1273,77 @@ describe("announceItemExpanded", () => {
     expect(targets).toEqual([inner]);
   });
 });
+
+describe("sections another owner opens and closes", () => {
+  let uninstall: Array<() => void> = [];
+  let mounted: HTMLElement[] = [];
+
+  afterEach(() => {
+    for (const fn of uninstall) fn();
+    uninstall = [];
+    for (const el of mounted) el.remove();
+    mounted = [];
+  });
+
+  /** A feed whose bubble box #owned is another owner's, beside an ordinary card #free. */
+  function armed(): { owned: HTMLElement; free: HTMLElement } {
+    const feed = document.createElement("div");
+    feed.innerHTML =
+      `<div class="bubble" data-role="response"><div class="bubble-scroll" id="owned"><p>text</p></div></div>` +
+      `<div class="tool-fold" id="free"><span>card</span></div>`;
+    document.body.appendChild(feed);
+    mounted.push(feed);
+    const owned = feed.querySelector("#owned") as HTMLElement;
+    uninstall.push(installClickExpand(feed, () => "", undefined, (section) => section === owned));
+    return { owned, free: feed.querySelector("#free") as HTMLElement };
+  }
+
+  it("leaves an owned section alone on a click", () => {
+    // Arrange
+    const { owned } = armed();
+    // Act
+    owned.click();
+    // Assert
+    expect(owned.classList.contains(EXPANDED_CLASS)).toBe(false);
+  });
+
+  it("still toggles a section no other owner holds", () => {
+    // Arrange
+    const { free } = armed();
+    // Act
+    free.click();
+    // Assert
+    expect(free.classList.contains(EXPANDED_CLASS)).toBe(true);
+  });
+
+  it("never auto-collapses an owned section the other owner opened", () => {
+    // Arrange
+    const { owned } = armed();
+    expandSection(owned);
+    // Act
+    window.dispatchEvent(new FocusEvent("blur"));
+    // Assert
+    expect(owned.classList.contains(EXPANDED_CLASS)).toBe(true);
+  });
+
+  it("still auto-collapses an open section no other owner holds", () => {
+    // Arrange
+    const { free } = armed();
+    free.click();
+    // Act
+    window.dispatchEvent(new FocusEvent("blur"));
+    // Assert
+    expect(free.classList.contains(EXPANDED_CLASS)).toBe(false);
+  });
+
+  it("logs a click on an owned section rather than toggling it silently", async () => {
+    // Arrange
+    const capture = captureLogRecords("debug");
+    const { owned } = armed();
+    // Act
+    owned.click();
+    // Assert
+    const record = await forwardedRecord(capture, "expand.click-owned");
+    expect(record.context?.kind).toBe("bubble-scroll");
+  });
+});

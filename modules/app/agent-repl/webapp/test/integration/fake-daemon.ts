@@ -33,7 +33,7 @@ import { codeToString } from "@connectrpc/connect/protocol-connect";
 
 import { AgentRepl } from "../../../proto/gen/ts/agentrepl/v1/service_pb";
 import { FeedWatchTokenSchema } from "../../../proto/gen/ts/agentrepl/v1/feed_token_pb";
-import type { FeedPage, FeedRow } from "../../../proto/gen/ts/frontend/v1/feed_pb";
+import type { FeedPage, FeedRow, FeedSelection } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import type { FooterView } from "../../../proto/gen/ts/frontend/v1/footer_pb";
 import type { TopbarView } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
 import type { WorkspaceRoster } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
@@ -75,6 +75,7 @@ import {
   type WatchWebWorkspaceResponse,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_web_workspace_pb";
 import { OpenFeedResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_feed_pb";
+import { SelectFeedRowResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_feed_row_pb";
 import { GetFeedPageResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_get_feed_page_pb";
 import { SubmitPromptResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_submit_prompt_pb";
 import { InterruptResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_interrupt_pb";
@@ -252,6 +253,12 @@ export interface FakeDaemon {
   setNextPage(workspace: string, feed: FeedKey, page: FeedPage): void;
   /** Deliver a row on every live WatchFeed tailing that feed. */
   pushRow(workspace: string, feed: FeedKey, row: FeedRow): void;
+  /**
+   * Deliver the daemon's feed selection on every live root-feed WatchFeed.
+   * SelectFeedRow never pushes on its own: a test states the push, as it
+   * states every roster or row change.
+   */
+  pushSelection(workspace: string, selection: FeedSelection): void;
   /** The tokens OpenFeed has minted, oldest first, for one feed. */
   mintedTokens(workspace: string, feed: FeedKey): string[];
 
@@ -1371,6 +1378,12 @@ export function createFakeDaemon(): FakeDaemon {
           result: { case: "success", value: {} },
         });
       },
+      selectFeedRow(request) {
+        record("selectFeedRow", request);
+        return answerFor("selectFeedRow", SelectFeedRowResponseSchema, {
+          result: { case: "success", value: { outcome: { case: "none", value: {} } } },
+        });
+      },
       foldHeldPrompt(request) {
         record("foldHeldPrompt", request);
         return answerFor("foldHeldPrompt", FoldHeldPromptResponseSchema, {
@@ -1694,6 +1707,9 @@ export function createFakeDaemon(): FakeDaemon {
     },
     pushRow(workspace, feed, row) {
       broadcast("watchFeed", workspace, feed, create(WatchFeedResponseSchema, { row }));
+    },
+    pushSelection(workspace, selection) {
+      broadcast("watchFeed", workspace, ROOT_FEED, create(WatchFeedResponseSchema, { selection }));
     },
     mintedTokens(workspace, feed) {
       return [...(tokens.get(key(workspace, feed)) ?? [])];

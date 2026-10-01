@@ -1792,20 +1792,22 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
    ring: an outline pulled inside the card's own border box never reflows the
    feed, never replaces the card's own shadow, and is not clipped by the row's
    paint containment (`content-visibility`).
-   A final response and a prompt are excluded: their own border is their mark
-   (below). */
-.entry-selected:not(.final-response):not([data-role="prompt"]) {
+   A bubble is excluded: its own border is its mark (below). */
+.entry-selected:not(.bubble) {
   outline: 2px solid var(--selected-entry);
   outline-offset: -2px;
 }
-/* The SELECTED final response or prompt: its own border turns blue (in place
-   of a final answer's green, or a prompt's none or amber), which is the whole
-   mark, so no ring sits over it. Declared after the green and amber rules at
-   higher specificity, so the selected bubble reads blue while selected and
-   returns to its own border the moment it clears. */
-.bubble.final-response.entry-selected,
-.bubble[data-role="prompt"].entry-selected {
-  border-color: var(--selected-entry);
+/* THE SELECTED BUBBLE (owner ruling, 2026-10-01): whatever its kind — a final,
+   interim or thinking response, a user prompt, an agent prompt — its own
+   border turns blue (in place of a final answer's green, an interim's gold, a
+   prompt's none or amber), which is the whole mark, so no ring sits over it.
+   It recolors the border the bubble already reserves, so selecting never
+   reflows it, and it returns to its own border the moment the selection
+   clears. `!important` because it must outrank every kind's own border, and
+   the open-box eggshell below is written to exclude a selected bubble, so the
+   two can never meet on one bubble. */
+.bubble.entry-selected {
+  border-color: var(--selected-entry) !important;
 }
 /* THE EXPANDED RESPONSE (owner ruling, 2026-09-27): while a response bubble's
    own scroll box is open, its border is eggshell, whatever variant or state it
@@ -1814,11 +1816,15 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
    responses are uncapped (`BUBBLE_UNCAPPED`) and never open. ONE rule keyed on
    the role and the open box (`.expanded` lives on the box, the border on the
    bubble, so the bubble is keyed through `:has`), last on the ladder and the
-   one `!important` border in the sheet, so it outranks every other border rule
-   by construction rather than by a specificity count. It sets the color alone:
+   one `!important` border apart from the selection's, so it outranks every
+   other border rule by construction rather than by a specificity count. A
+   SELECTED bubble is excluded: on the root feed a bubble is open exactly while
+   it is selected, and the selection's blue is its mark, so the eggshell shows
+   only on an open bubble that cannot be selected (one in a sub-feed). It sets
+   the color alone:
    the 0.3px the base reserves is recolored, never reflowed, and closing the
    box hands the ladder's own border straight back. */
-.bubble[data-role="response"]:has(> .bubble-scroll.expanded) {
+.bubble[data-role="response"]:not(.entry-selected):has(> .bubble-scroll.expanded) {
   border-color: var(--expanded-response-border) !important;
 }
 /* The working-frontier BREATH is gone with the pulse machinery that drove it,

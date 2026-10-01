@@ -2,11 +2,12 @@
  * select-feed-row — THE WEBAPP'S ONE CALL OF `SelectFeedRow`.
  *
  * The daemon owns the feed's selection (endpoint_select_feed_row.proto). The
- * webapp moves it in exactly two ways, both of which end it: a click on the
- * feed's background (`clear`, background-click.ts) and the selected row leaving
- * the viewport entirely (`left_view`, selection-visibility.ts). Neither acts on
- * the answer: the daemon's selection push on the feed's watch is what changes
- * the feed (`applySelection`). So both callers send through here and share one
+ * webapp moves it in four ways: a click on a bubble (`bubble`, or `clear` when
+ * it is the selected one, bubble-selection.ts), a click on the feed's
+ * background (`clear`, background-click.ts), and the selected row leaving the
+ * viewport entirely (`left_view`, selection-visibility.ts). None acts on the
+ * answer: the daemon's selection push on the feed's watch is what changes the
+ * feed (`applySelection`). So every caller sends through here and shares one
  * reading of the answer.
  *
  * A REFUSED OR FAILED MOVE is an error the reader must see: it is filed on the
@@ -25,6 +26,12 @@ import type { AppContext } from "../rpc/context.js";
 import { callFailure, refusalOf } from "../rpc/refuse.js";
 import { requireCase, unreachableArm } from "../rpc/strict.js";
 import { callUnary } from "../rpc/unary.js";
+
+/** SelectFeedRow's own refusal arm, in the reader's words. */
+const SELECT_FEED_ROW_REFUSALS = {
+  notSelectable: (value: { row?: { value: string } }) =>
+    `that bubble cannot be selected (${value.row?.value ?? "no row named"})`,
+};
 
 /** The move one call makes: an arm of `SelectFeedRowRequest.move`. */
 type FeedRowMove = NonNullable<MessageInitShape<typeof SelectFeedRowRequestSchema>["move"]>;
@@ -62,7 +69,7 @@ export async function selectFeedRow(ctx: AppContext, move: FeedRowMove, what: st
       return;
     }
     case "error": {
-      const said = refusalOf(result.value.cause, {}, "SelectFeedRowError.cause");
+      const said = refusalOf(result.value.cause, SELECT_FEED_ROW_REFUSALS, "SelectFeedRowError.cause");
       log.error(`the daemon refused to ${what}: ${said.text}`, {
         operation: "feed.select-feed-row-refused",
         context: { move: move.case ?? "unset", arm: said.arm },

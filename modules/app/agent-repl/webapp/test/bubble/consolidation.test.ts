@@ -59,7 +59,10 @@ describe("every blue and purple bubble is built by drawBubble", () => {
   });
 
   it("names the bubble class only in the module that draws it", () => {
-    expect(sourcesMatching(/\bBUBBLE_CLASS\s*=|["']bubble["']/)).toEqual(["bubble/draw.ts"]);
+    // A oneof arm named `bubble` (`case: "bubble"` building it, `case "bubble":`
+    // switching on it: SelectFeedRowRequest.move, FeedSelection.selection) is a
+    // wire name, not the class, so it is not counted.
+    expect(sourcesMatching(/\bBUBBLE_CLASS\s*=|(?<!case:?\s*)["']bubble["']/)).toEqual(["bubble/draw.ts"]);
   });
 
   it("hangs a scroll box only there", () => {

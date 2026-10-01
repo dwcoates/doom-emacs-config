@@ -41,9 +41,16 @@ import {
   applyExpanded,
   cappedSectionsOf,
   carryExpanded,
+  collapseSection,
+  expandSection,
+  isExpanded,
   retainRows,
   snapshotExpanded,
+  type AfterToggle,
 } from "../expand.js";
+import { SELECTION_GOVERNED_ATTRIBUTE, stampSelection } from "./bubble-selection.js";
+import { BUBBLE_SCROLL_CLASS } from "./bubble-scroll.js";
+import { BUBBLE_CLASS } from "../bubble/draw.js";
 import { MalformedView, isMalformedView } from "../rpc/malformed.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { callUnary } from "../rpc/unary.js";
@@ -194,6 +201,12 @@ export interface FeedControllerOptions {
    */
   onPainted?: (ids: readonly string[], at: number) => void;
   /**
+   * Runs after the selection expands or collapses a governed bubble's box
+   * (`applySelection`), with the box and the state it landed in, so the host
+   * re-measures what it draws exactly as it does after a click's toggle.
+   */
+  onSelectionExpand?: AfterToggle;
+  /**
    * The watch that reports the selected row leaving the viewport
    * (selection-visibility.ts). Root feed only; absent where the feed has no
    * scroll box (a fixture) or the environment ships no `IntersectionObserver`.
@@ -233,6 +246,8 @@ export interface FeedController extends Handle {
   applySelection(selection: FeedSelection): void;
   /** Whether the daemon's last pushed selection names a row. */
   selectionActive(): boolean;
+  /** The row the daemon's last push selected, or null for none. */
+  selectedRow(): string | null;
   rows(): readonly FeedRow[];
   breadcrumbs(): readonly FeedBreadcrumb[];
   onChange(fn: () => void): () => void;
@@ -246,6 +261,16 @@ export interface FeedController extends Handle {
   paintedAt(id: string): number | null;
 }
 
+
+/** The arms of `FeedSelection.selection` that select a row (every arm but `none`). */
+type SelectedArm = Exclude<NonNullable<FeedSelection["selection"]["case"]>, "none">;
+
+/** The message each selected arm's row is read from, for a malformed report's path. */
+const SELECTION_ARM_MESSAGE = {
+  response: "FeedSelectionResponse",
+  prompt: "FeedSelectionPrompt",
+  bubble: "FeedSelectionBubble",
+} as const;
 
 /** Build a controller for ONE feed and draw its shell into the host. */
 export function createFeedController(opts: FeedControllerOptions): FeedController {
@@ -301,6 +326,7 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
     upsert,
     applySelection,
     selectionActive: () => selectedRow !== null,
+    selectedRow: () => selectedRow,
     rows,
     breadcrumbs: () => crumbs,
     onChange,
@@ -908,6 +934,7 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
         const viewport = requireCase(arm.value.viewport, "FeedSelectionNone.viewport");
         markSelectedRow(null);
         selectedRow = null;
+        expandSelected(null);
         if (was === null) {
           log.debug("an empty selection was restated; the feed stays", {
             operation: "feed.selection-unchanged",
@@ -929,13 +956,12 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
         }
       }
       case "response":
-      case "prompt": {
-        const row = requireMessage(
-          arm.value.row,
-          arm.case === "response" ? "FeedSelectionResponse.row" : "FeedSelectionPrompt.row",
-        );
+      case "prompt":
+      case "bubble": {
+        const row = requireMessage(arm.value.row, `${SELECTION_ARM_MESSAGE[arm.case]}.row`);
         markSelectedRow({ kind: arm.case, row });
         selectedRow = row.value;
+        expandSelected(row.value);
         if (was === row.value) {
           log.debug("the selection restated its row; the feed stays", {
             operation: "feed.selection-unchanged",
@@ -954,6 +980,24 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
   }
 
   /**
+   * SELECTED AND EXPANDED ARE ONE STATE (owner ruling, 2026-10-01): open the
+   * selected governed bubble's box and close every other governed bubble's, so
+   * at most one is ever expanded. A bubble drawn uncapped has no box to open.
+   * Every open and close goes through the one expand and the one collapse.
+   */
+  function expandSelected(selected: string | null): void {
+    for (const state of states.values()) {
+      if (!state.element.hasAttribute(SELECTION_GOVERNED_ATTRIBUTE)) continue;
+      const box = state.element.querySelector<HTMLElement>(`.${BUBBLE_CLASS} > .${BUBBLE_SCROLL_CLASS}`);
+      if (box === null) continue;
+      const open = state.element.getAttribute("data-feed-row") === selected;
+      if (open === isExpanded(box)) continue;
+      if (open) expandSection(box, opts.onSelectionExpand);
+      else collapseSection(box, opts.onSelectionExpand);
+    }
+  }
+
+  /**
    * Put the selection mark (`SELECTED_ROW_ATTRIBUTE`, valued with the row's
    * kind) on the named row and strip it from every other row of this feed, and
    * point the left-view watch at it. Null clears the mark everywhere. A named
@@ -961,7 +1005,7 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
    * nothing is marked — the same tolerance `markFinalAnswer` has, since
    * guessing which row to mark is worse than none.
    */
-  function markSelectedRow(selected: { kind: "response" | "prompt"; row: FeedId } | null): void {
+  function markSelectedRow(selected: { kind: SelectedArm; row: FeedId } | null): void {
     const target = selected === null ? null : findRowElement(selected.row);
     if (selected !== null && target === null) {
       log.debug("the selection names a row this feed has not drawn", {
@@ -1351,6 +1395,10 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
   function applyRowAttributes(el: HTMLElement, row: FeedRow): void {
     el.setAttribute("data-feed-row", requireMessage(row.id, "FeedRow.id").value);
     el.setAttribute("data-row-kind", row.row.case ?? "malformed");
+    // THE SELECTION'S SHARE OF THE ROW (bubble-selection.ts): whether the
+    // selection governs its bubble, and whether the daemon says it can be
+    // selected now. Restated on every push, so a response gains it as it lands.
+    stampSelection(el, row, opts.feed === "root");
     if (row.row.case === "activity" && row.row.value.unit.case !== undefined) {
       el.setAttribute("data-unit", row.row.value.unit.case);
     }
