@@ -128,11 +128,12 @@ type BringUpReport struct {
 	// STARTED. An open workspace is never session-less (owner ruling,
 	// 2026-09-13), so a survivor that did not survive is brought back here.
 	BroughtUp []ids.WorkspaceID
-	// HibernatedLeft are the open, client-less workspaces left asleep.
-	// Hibernation is the memory knob and it is deliberate: bringing one back
-	// at boot would spend the ~500MB the sweep reclaimed, for a workspace
-	// nobody has asked for.
-	HibernatedLeft []ids.WorkspaceID
+	// Woken are the open, client-less workspaces the idle sweep had
+	// hibernated whose session the boot STARTED. Emacs opens every registered
+	// workspace at startup and a workspace is never opened asleep (owner
+	// ruling, 2026-09-30), so the boot wakes them; they are counted apart from
+	// BroughtUp because waking one spends back the memory the sweep reclaimed.
+	Woken []ids.WorkspaceID
 	// BringUpFailed are the workspaces whose start could not complete. A
 	// failure is PER WORKSPACE — the next one is still started — and it raises
 	// the same fault an open's failed start raises, so the failure is on every
