@@ -126,16 +126,19 @@ type fakeMerge struct {
 
 	enqueued []ids.WorkspaceID
 	// by records who each enqueue said asked for the merge.
-	by  []merge.Requester
-	err error
+	by []merge.Requester
+	// sources records what each enqueue merges.
+	sources []wsm.MergeSource
+	err     error
 }
 
-func (m *fakeMerge) Enqueue(_ context.Context, ws ids.WorkspaceID, by merge.Requester) error {
+func (m *fakeMerge) Enqueue(_ context.Context, req merge.Request) error {
 	if m.err != nil {
 		return m.err
 	}
-	m.enqueued = append(m.enqueued, ws)
-	m.by = append(m.by, by)
+	m.enqueued = append(m.enqueued, req.Workspace)
+	m.by = append(m.by, req.By)
+	m.sources = append(m.sources, req.Source)
 	return nil
 }
 

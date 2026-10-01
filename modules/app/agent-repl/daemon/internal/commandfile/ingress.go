@@ -261,9 +261,14 @@ func (i *ingress) apply(ctx context.Context, log dlog.Logger, file string, index
 		if err != nil {
 			return err
 		}
+		source, err := i.mergeSource(ctx, ws, entry)
+		if err != nil {
+			return err
+		}
 		// A COMMAND-FILE MERGE IS AN AGENT'S ASK, made from inside its own
-		// turn, so it never displaces the turn in flight (merge.Requester).
-		return i.deps.Merge.Enqueue(ctx, ws, merge.RequestedByAgent)
+		// turn: it is put in line once that turn ends, and never displaces
+		// the turn in flight (merge.Requester).
+		return i.deps.Merge.Enqueue(ctx, merge.Request{Workspace: ws, Source: source, By: merge.RequestedByAgent})
 	case TypeClose:
 		ws, err := i.target(ctx, entry)
 		if err != nil {
@@ -309,6 +314,29 @@ func (i *ingress) apply(ctx context.Context, log dlog.Logger, file string, index
 		// the two disagree — which is a defect, not a bad input.
 		return fmt.Errorf("entry type %q passed validation but has no mapping", entry.Type)
 	}
+}
+
+// mergeSource reads a merge entry's source. Another workspace is keyed by its
+// worktree path, and a path no workspace is registered at is the contract's
+// unknown_source_workspace refusal.
+func (i *ingress) mergeSource(ctx context.Context, requester ids.WorkspaceID, entry Entry) (wsm.MergeSource, error) {
+	switch {
+	case entry.Branch != "":
+		return wsm.MergeSource{Kind: wsm.MergeSourceBranch, Branch: entry.Branch}, nil
+	case entry.PRWasMerged:
+		return wsm.MergeSource{Kind: wsm.MergeSourceMergedUpstream}, nil
+	case entry.SourceDir != "":
+		if i.deps.DB == nil {
+			return wsm.MergeSource{}, fmt.Errorf("this entry names a source directory and the ingress has no state client to resolve it with")
+		}
+		record, err := i.deps.DB.WorkspaceByDir(ctx, entry.SourceDir)
+		if err != nil {
+			return wsm.MergeSource{}, &merge.RefusalError{Arm: merge.ArmUnknownSourceWorkspace, Workspace: requester,
+				Reason: fmt.Sprintf("no workspace is registered at %q: %v", entry.SourceDir, err)}
+		}
+		return wsm.MergeSource{Kind: wsm.MergeSourceWorkspace, Workspace: record.ID}, nil
+	}
+	return wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch, KeepOpen: entry.KeepOpen}, nil
 }
 
 // applyCreate maps a create entry onto the ordinary creation verb. A one-shot
