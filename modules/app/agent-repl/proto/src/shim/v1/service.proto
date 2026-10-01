@@ -13,6 +13,7 @@ import "shim/v1/endpoint_gather_title_digest.proto";
 import "shim/v1/endpoint_hibernate.proto";
 import "shim/v1/endpoint_kill_session.proto";
 import "shim/v1/endpoint_kill_turn.proto";
+import "shim/v1/endpoint_roll_back_session.proto";
 import "shim/v1/endpoint_read_history.proto";
 import "shim/v1/endpoint_read_transcripts.proto";
 import "shim/v1/endpoint_set_session_model.proto";
@@ -85,6 +86,12 @@ service Shim {
   // END the turn. Unforced, the synchronous turn only: detached work runs on.
   // Forced, the agent and everything THIS turn spawned, transitively.
   rpc KillTurn(KillTurnRequest) returns (KillTurnResponse);
+
+  // REWIND the main agent's vendor conversation to just before one of its
+  // prompts: interrupt the open turn, optionally stop the dropped turns'
+  // detached work and restore the files, then resume the vendor session at
+  // the last entry before the prompt. See endpoint_roll_back_session.proto.
+  rpc RollBackSession(RollBackSessionRequest) returns (RollBackSessionResponse);
 
   // ---- Detached work: one stream per live item, and the writes each kind accepts ----
 

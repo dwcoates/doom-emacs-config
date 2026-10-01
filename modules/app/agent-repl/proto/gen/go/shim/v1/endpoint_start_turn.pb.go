@@ -38,6 +38,11 @@ type StartTurnRequest struct {
 	// durable record the turn produces is stamped with it, and the open turn is
 	// addressed by it. The shim never mints one of its own.
 	//
+	// THE PROMPT'S VENDOR MESSAGE UUID IS DERIVED FROM IT: a turn id that is a
+	// uuid is used as is, any other is mapped to a name-based (version 5) uuid.
+	// Anyone holding the turn id can therefore find the prompt's record in the
+	// vendor transcript (RollBackSession), with no mapping stored.
+	//
 	// A TURN ID IS STARTED ONCE. A StartTurn repeating a turn id this shim
 	// already accepted starts nothing and delivers nothing again: it is answered
 	// with `success` -- the prompt under this turn id, the session's agent and

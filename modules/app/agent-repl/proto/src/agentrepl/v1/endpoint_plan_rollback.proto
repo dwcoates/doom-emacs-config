@@ -1,0 +1,147 @@
+// endpoint_plan_rollback.proto — PlanRollback: say what a rollback would do,
+// for the user to confirm. ROLLBACK section.
+//
+// A rollback returns the main agent's conversation to just before one of its
+// prompts: the selected prompt (frontend.v1.FeedSelectionPrompt) when one is
+// selected, else the latest prompt — which is cancelling it. Emacs asks for a
+// plan with the user's key (`C-c C-RET` keeps files, `C-c M-RET` restores
+// them), shows its effects in the minibuffer, and on a yes sends the plan's
+// token to RollBack. Planning changes nothing.
+syntax = "proto3";
+package agentrepl.v1;
+import "workspace/v1/workspace.proto";
+import "agentrepl/v1/rollback.proto";
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message PlanRollbackRequest {
+  // The workspace whose conversation to roll back.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // Whether the files go back too. Exactly one is set; unset is refused as
+  // InvalidArgument.
+  oneof files {
+    // Roll back the conversation only.
+    PlanRollbackKeepFiles keep_files = 2;
+    // Roll back the conversation, stop the work it started, and restore the
+    // files the agent's edit tools changed.
+    PlanRollbackRestoreFiles restore_files = 3;
+  }
+}
+// Roll back the conversation only.
+message PlanRollbackKeepFiles {}
+// Also restore files and stop the dropped turns' detached work.
+message PlanRollbackRestoreFiles {}
+
+// THE ARM IS THE OUTCOME.
+message PlanRollbackResponse {
+  oneof result {
+    PlanRollbackSuccess success = 1;
+    PlanRollbackError error = 2;
+  }
+}
+
+// The plan, or that there is nothing to roll back.
+message PlanRollbackSuccess {
+  oneof outcome {
+    // What the rollback would do.
+    RollbackPlan plan = 1;
+    // No prompt is reachable: the conversation has no prompt of the main
+    // agent's own since its last clear or compaction.
+    PlanRollbackNothingToRollBack nothing_to_roll_back = 2;
+  }
+}
+// No prompt is reachable.
+message PlanRollbackNothingToRollBack {}
+
+// What a rollback would do, as the confirmation states it.
+message RollbackPlan {
+  // Handed back to RollBack once the user confirms.
+  RollbackToken token = 1;
+  // The prompt the conversation returns to just before.
+  RollbackPlanTarget target = 2;
+  // What happens to files and detached work.
+  RollbackPlanFiles files = 3;
+  // A turn is running and will be interrupted. UNSET when none is.
+  optional RollbackPlanInterrupt interrupt = 4;
+  // Held prompts queued since the prompt will be dropped. UNSET when none
+  // are.
+  optional RollbackPlanDropQueued drop_queued = 5;
+}
+
+// The prompt a rollback returns to just before.
+message RollbackPlanTarget {
+  // How the prompt was chosen.
+  oneof chosen {
+    // The selected prompt.
+    RollbackPlanTargetSelected selected = 1;
+    // No prompt was selected, so the latest: this rollback cancels it.
+    RollbackPlanTargetLatest latest = 2;
+  }
+  // The prompt's opening words, for the confirmation to name it.
+  string excerpt = 3;
+  // How many prompts are dropped: the prompt itself and every later one.
+  uint32 prompts_dropped = 4;
+}
+// The selected prompt.
+message RollbackPlanTargetSelected {}
+// The latest prompt.
+message RollbackPlanTargetLatest {}
+
+// What happens to files and detached work. Exactly one is set.
+message RollbackPlanFiles {
+  oneof files {
+    // Files and detached work are left as they are.
+    RollbackPlanFilesKept kept = 1;
+    // Files are restored, and the dropped turns' detached work is stopped.
+    RollbackPlanFilesRestored restored = 2;
+  }
+}
+// Files and detached work are left alone.
+message RollbackPlanFilesKept {}
+// Files are restored. Only changes the agent's file-editing tools made are
+// restored: changes made by shell commands are not, and git commits are not
+// undone.
+message RollbackPlanFilesRestored {
+  // Detached work the dropped turns started that is still running and will
+  // be stopped. UNSET when none is.
+  optional RollbackPlanCancelDetached cancel_detached = 1;
+}
+// Running detached work that will be stopped.
+message RollbackPlanCancelDetached {
+  // How many items (subagents, shells, monitors).
+  uint32 items = 1;
+}
+// A running turn will be interrupted.
+message RollbackPlanInterrupt {}
+// Held prompts that will be dropped.
+message RollbackPlanDropQueued {
+  // How many.
+  uint32 prompts = 1;
+}
+
+// Arms derived from the daemon's refusal sites, mirroring SelectFeedRow.
+message PlanRollbackError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    PlanRollbackUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    PlanRollbackWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    PlanRollbackTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting this workspace yet.
+    PlanRollbackNotYetAdopted not_yet_adopted = 4;
+  }
+}
+// The workspace id is not in the daemon's registry.
+message PlanRollbackUnknownWorkspace {}
+// The echoed dir disagrees with the registry's dir for this id.
+message PlanRollbackWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+// This daemon released the workspace to a successor.
+message PlanRollbackTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+// A joining daemon has not finished adopting this workspace yet.
+message PlanRollbackNotYetAdopted {}
