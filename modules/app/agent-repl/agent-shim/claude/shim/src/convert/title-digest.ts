@@ -119,6 +119,28 @@ export function isClearEnvelope(r: TitleDigestRecord): boolean {
  * its words still contributes the words.
  */
 export function promptText(r: TitleDigestRecord): string | undefined {
+  const trimmed = userRecordText(r);
+  if (trimmed === undefined) return undefined;
+  if (COMMAND_ARTIFACT_PREFIXES.some((prefix) => trimmed.startsWith(prefix))) return undefined;
+  // THE SHIM'S OWN KEEP-ALIVE IS NOBODY'S PROMPT. It is never served, so it
+  // must not name a conversation, open its listing, or count toward it either.
+  // On the FILE plane the marker is the ruled contract (engine/keepalive.ts):
+  // the transcript line carries nothing else that says whose send it was.
+  if (isKeepalivePrompt(trimmed)) return undefined;
+  return trimmed;
+}
+
+/**
+ * The trimmed text a main-thread user message states, whoever sent it, or
+ * undefined when the record is no such message: not `type:"user"`, a harness
+ * record (`isMeta`, a sidechain, a compaction summary), not `role:"user"`, or
+ * without text. Array content contributes its text blocks alone.
+ *
+ * EXPORTED because the rollback (engine/rollback.ts) recognizes the shim's own
+ * keep-alive on the file plane by this same text, which {@link promptText}
+ * refuses to answer for a keep-alive.
+ */
+export function userRecordText(r: TitleDigestRecord): string | undefined {
   if (r.type !== "user") return undefined;
   if (r.isMeta === true || r.isSidechain === true || r.isCompactSummary === true) return undefined;
   if (r.message?.role !== "user") return undefined;
@@ -138,14 +160,7 @@ export function promptText(r: TitleDigestRecord): string | undefined {
   }
 
   const trimmed = text.trim();
-  if (trimmed === "") return undefined;
-  if (COMMAND_ARTIFACT_PREFIXES.some((prefix) => trimmed.startsWith(prefix))) return undefined;
-  // THE SHIM'S OWN KEEP-ALIVE IS NOBODY'S PROMPT. It is never served, so it
-  // must not name a conversation, open its listing, or count toward it either.
-  // On the FILE plane the marker is the ruled contract (engine/keepalive.ts):
-  // the transcript line carries nothing else that says whose send it was.
-  if (isKeepalivePrompt(trimmed)) return undefined;
-  return trimmed;
+  return trimmed === "" ? undefined : trimmed;
 }
 
 /** The summary of the compaction whose boundary is at `boundaryIndex`, or undefined. */

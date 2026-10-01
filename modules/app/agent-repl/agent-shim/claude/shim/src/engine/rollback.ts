@@ -15,10 +15,13 @@
  * `parentUuid` (and across a compaction through `logicalParentUuid`), and every
  * question here is asked of that chain.
  *
- * THE HEAD. The vendor's head is the last chained record in the file. Right
- * after a rollback nothing new has been appended yet, so the file's last record
- * is still on the dropped branch; the session engine names the fork point as
- * the head until its next send appends past it.
+ * THE HEAD IS ONE RULE ({@link readLiveChain}). The vendor's head is the last
+ * chained record in the file. Right after a rollback nothing new has been
+ * appended yet, so the file's last record is still on the dropped branch; so
+ * whenever that record's chain holds a rolled-back turn's prompt, the
+ * conversation ends just before the earliest such prompt. The same rule picks
+ * where a resume starts (`StartSessionResume.rolled_back_turns`) and where the
+ * next rollback is planned, so the two can never disagree.
  *
  * Pure apart from the one read in {@link readTranscriptChain}. The mocked vendor
  * (`src/fake/`) reads its own files through the same reader, so both sides of
@@ -26,7 +29,8 @@
  */
 import { readFileSync } from "node:fs";
 import { bindLog } from "../log.js";
-import { promptText, type TitleDigestRecord } from "../convert/title-digest.js";
+import { promptText, userRecordText, type TitleDigestRecord } from "../convert/title-digest.js";
+import { isKeepalivePrompt } from "./keepalive.js";
 
 const LOGGER = bindLog({ component: "shim-engine-rollback", operation: "shim.engine.rollback" });
 
@@ -198,12 +202,70 @@ export function isPromptRecord(record: ChainRecord): boolean {
   return true;
 }
 
+/**
+ * Whether a record is the shim's own keep-alive prompt: the keep-alive marker
+ * on the file plane (engine/keepalive.ts). The shim knows every keep-alive it
+ * sent, so one past a fork point is never an unseen prompt; the vendor's guard
+ * cannot know it, and refuses it as unattributable.
+ */
+export function isKeepaliveRecord(record: ChainRecord): boolean {
+  const text = userRecordText(record);
+  return text !== undefined && isKeepalivePrompt(text);
+}
+
+/**
+ * THE SHIM'S READING OF `resumeDropsTurn`'S GUARD (sdk.d.ts,
+ * `Options.resumeDropsTurn`): whether the guard would let a discarded entry go
+ * as the dropped turns' own. The turns' prompts are, and so is anything that
+ * is not a user message of its own: an answer, a tool-result carrier, a
+ * harness meta record, a compaction summary, the interrupt marker. Any OTHER
+ * user message (an unnamed prompt, a task notification, a keep-alive) is not.
+ *
+ * ONE READING for both sides: the shim plans with it, and the mocked vendor
+ * (`src/fake/rollback.ts`) judges its truncating resume with it.
+ */
+export function guardAttributes(record: ChainRecord, droppedPromptUuids: ReadonlySet<string>): boolean {
+  if (droppedPromptUuids.has(record.uuid)) return true;
+  if (record.type !== "user" || record.isMeta === true || record.isCompactSummary === true) return true;
+  const content = record.message?.content;
+  if (Array.isArray(content) && content.some((block) => (block as { type?: unknown }).type === "tool_result")) {
+    return true;
+  }
+  return typeof content === "string" && isInterruptMarker(content);
+}
+
+/** Whether the vendor's guard is armed for a cut, and why not when it is not. */
+export type GuardArming =
+  /** One dropped turn, and every entry past the fork point is its own. */
+  | { readonly kind: "armed"; readonly resumeDropsTurn: string }
+  /** The guard validates one dropped turn; the plan's own check stands in. */
+  | { readonly kind: "severalTurns" }
+  /**
+   * An entry past the fork point the guard would refuse though the shim knows
+   * it (a keep-alive; a dropped turn's task notification): arming it would
+   * only have the vendor refuse a cut the shim's own check allowed.
+   */
+  | { readonly kind: "unattributable"; readonly recordUuid: string };
+
+/** Why the plan refuses `unseen_prompt`. */
+export type UnseenWhy =
+  /** A prompt no dropped turn names sits after the cut. */
+  | "unnamedPrompt"
+  /**
+   * Restoring files: a user message the guard would refuse sits after the
+   * cut, so the vendor could refuse the cut after the files were restored.
+   */
+  | "guardWouldRefuse";
+
 /** Where the conversation is cut, or why it cannot be. THE ARM IS THE OUTCOME. */
 export type CutPlan =
-  | { readonly kind: "cut"; readonly promptUuid: string; readonly forkPoint: string }
+  | { readonly kind: "cut"; readonly promptUuid: string; readonly forkPoint: string; readonly guard: GuardArming }
   | { readonly kind: "promptNotRecorded"; readonly detail: string }
   | { readonly kind: "firstPrompt" }
-  | { readonly kind: "unseenPrompt"; readonly vendorPromptUuid: string };
+  | { readonly kind: "unseenPrompt"; readonly vendorPromptUuid: string; readonly why: UnseenWhy };
+
+/** Whether a rollback keeps the workspace's files or restores them. */
+export type RollbackFiles = "keep" | "restore";
 
 /**
  * Plan the cut before `promptUuid` on `transcript`, for a caller that named
@@ -213,12 +275,20 @@ export type CutPlan =
  *     branch an earlier rollback dropped is no longer in the conversation;
  *   - with no predecessor it is the conversation's first, and nothing precedes
  *     it to resume at;
- *   - every later prompt on the chain must be one the caller named.
+ *   - every later prompt on the chain must be one the caller named (the
+ *     shim's own keep-alives are known, never unseen);
+ *   - restoring files, every later user message must be one the guard lets go
+ *     (keep-alives aside, which unarm it): the files are restored BEFORE the
+ *     vendor judges the cut, so a refusal must be found here, up front.
+ *
+ * The guard is armed only for one dropped turn whose entries past the fork
+ * point the guard would all let go.
  */
 export function planCut(
   transcript: TranscriptChain,
   promptUuid: string,
   droppedPromptUuids: readonly string[],
+  files: RollbackFiles,
 ): CutPlan {
   const record = transcript.byUuid.get(promptUuid);
   if (record === undefined || record.type !== "user") {
@@ -234,7 +304,82 @@ export function planCut(
   const forkPoint = parentOf(record);
   if (forkPoint === undefined) return { kind: "firstPrompt" };
   const named = new Set(droppedPromptUuids);
-  const unseen = transcript.chain.slice(at + 1).find((later) => isPromptRecord(later) && !named.has(later.uuid));
-  if (unseen !== undefined) return { kind: "unseenPrompt", vendorPromptUuid: unseen.uuid };
-  return { kind: "cut", promptUuid, forkPoint };
+  const later = transcript.chain.slice(at + 1);
+  const unseen = later.find((entry) => isPromptRecord(entry) && !named.has(entry.uuid));
+  if (unseen !== undefined) return { kind: "unseenPrompt", vendorPromptUuid: unseen.uuid, why: "unnamedPrompt" };
+  if (files === "restore") {
+    const refused = later.find((entry) => !guardAttributes(entry, named) && !isKeepaliveRecord(entry));
+    if (refused !== undefined) return { kind: "unseenPrompt", vendorPromptUuid: refused.uuid, why: "guardWouldRefuse" };
+  }
+  return { kind: "cut", promptUuid, forkPoint, guard: guardArming(later, promptUuid, droppedPromptUuids.length) };
+}
+
+/** Whether to arm the guard for a cut whose later entries are `later`. */
+function guardArming(later: readonly ChainRecord[], promptUuid: string, droppedTurns: number): GuardArming {
+  if (droppedTurns !== 1) return { kind: "severalTurns" };
+  const own = new Set([promptUuid]);
+  const foreign = later.find((entry) => !guardAttributes(entry, own));
+  if (foreign !== undefined) return { kind: "unattributable", recordUuid: foreign.uuid };
+  return { kind: "armed", resumeDropsTurn: promptUuid };
+}
+
+/** Where the live conversation ends after its rollbacks. */
+export type LiveEnd =
+  /** No rolled-back prompt is on the newest record's chain: it ends there. */
+  | { readonly kind: "whole" }
+  /** It ends at `forkPoint`, just before the rolled-back prompt `promptUuid`. */
+  | { readonly kind: "cut"; readonly promptUuid: string; readonly forkPoint: string }
+  /** A rolled-back prompt opens the chain, so nothing precedes it to end at. */
+  | { readonly kind: "firstPrompt"; readonly promptUuid: string };
+
+/**
+ * THE ONE RULE for where the conversation ends after its rollbacks
+ * (`StartSessionResume.rolled_back_turns`): the newest record's chain, unless
+ * it holds the prompt of a rolled-back turn; then the entry just before the
+ * EARLIEST such prompt on it. A branch the next prompt started holds none of
+ * them, so the rule never needs clearing.
+ */
+export function liveEnd(transcript: TranscriptChain, rolledBackPromptUuids: ReadonlySet<string>): LiveEnd {
+  const earliest = transcript.chain.find((entry) => entry.type === "user" && rolledBackPromptUuids.has(entry.uuid));
+  if (earliest === undefined) return { kind: "whole" };
+  const forkPoint = parentOf(earliest);
+  if (forkPoint === undefined) return { kind: "firstPrompt", promptUuid: earliest.uuid };
+  return { kind: "cut", promptUuid: earliest.uuid, forkPoint };
+}
+
+/** The live conversation: the transcript's chain ended by {@link liveEnd}. */
+export type LiveChainRead =
+  | { readonly kind: "ok"; readonly transcript: TranscriptChain; readonly end: LiveEnd }
+  | { readonly kind: "no_transcript" }
+  | { readonly kind: "unreadable"; readonly detail: string };
+
+/**
+ * The live conversation at `file`, after the rollbacks whose prompts are
+ * `rolledBackPromptUuids`: the chain from the newest record, ended by
+ * {@link liveEnd}. A rolled-back prompt that opens the chain is a broken
+ * invariant (a rollback never cuts before the first prompt) and answers
+ * `unreadable`.
+ */
+export function readLiveChain(file: string, rolledBackPromptUuids: ReadonlySet<string>): LiveChainRead {
+  const read = readTranscriptChain(file);
+  if (read.kind !== "ok") return read;
+  const end = liveEnd(read.transcript, rolledBackPromptUuids);
+  switch (end.kind) {
+    case "whole":
+      return { kind: "ok", transcript: read.transcript, end };
+    case "firstPrompt": {
+      const detail = `rolled-back prompt ${end.promptUuid} opens the conversation; nothing precedes it to resume at`;
+      LOGGER.error({ file, prompt_uuid: end.promptUuid, detail }, "the vendor transcript's live end cannot be found");
+      return { kind: "unreadable", detail };
+    }
+    case "cut": {
+      const chain = read.transcript.chain;
+      const at = chain.findIndex((entry) => entry.uuid === end.forkPoint);
+      LOGGER.debug(
+        { file, prompt_uuid: end.promptUuid, fork_point: end.forkPoint },
+        "the conversation ends before a rolled-back prompt still at the transcript's tail",
+      );
+      return { kind: "ok", transcript: { byUuid: read.transcript.byUuid, chain: chain.slice(0, at + 1) }, end };
+    }
+  }
 }
