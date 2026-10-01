@@ -472,3 +472,66 @@ func TestPutSessionRecordsNoSelectedRootWhenNobodyChoseOne(t *testing.T) {
 		t.Fatalf("selected config dir = %q with no choice recorded, want empty", got.SelectedConfigDir)
 	}
 }
+
+func TestSetVendorSessionIDRecordsTheIdInForceAndAnswersTheOneItReplaced(t *testing.T) {
+	// Arrange
+	db, _ := testStore(t)
+	ws := vendorSession(t, db, "vendor-start")
+
+	// Act
+	previous, err := db.SetVendorSessionID(context.Background(), ws, "vendor-rotated")
+
+	// Assert
+	if err != nil || previous != "vendor-start" {
+		t.Fatalf("SetVendorSessionID = (%q, %v), want the start's id answered", previous, err)
+	}
+	session, _, err := db.Session(context.Background(), ws)
+	if err != nil || session.VendorSessionID != "vendor-rotated" {
+		t.Fatalf("Session = (%+v, %v), want the rotated id recorded", session, err)
+	}
+}
+
+func TestSetVendorSessionIDRefusesAnEmptyId(t *testing.T) {
+	// Arrange
+	db, log := testStore(t)
+	ws := vendorSession(t, db, "vendor-start")
+
+	// Act
+	_, err := db.SetVendorSessionID(context.Background(), ws, "")
+
+	// Assert
+	if err == nil {
+		t.Fatal("an empty vendor session id was recorded")
+	}
+	if session, _, _ := db.Session(context.Background(), ws); session.VendorSessionID != "vendor-start" {
+		t.Fatalf("vendor session = %q, want the record untouched", session.VendorSessionID)
+	}
+	if _, ok := recordFor(log, "daemon.wsm.set_vendor_session_id", "error", "refused an empty vendor session id"); !ok {
+		t.Fatalf("records = %+v, want the refusal at ERROR", log.Records())
+	}
+}
+
+func TestSetVendorSessionIDRefusesAWorkspaceWithNoSession(t *testing.T) {
+	// Arrange
+	db, _ := testStore(t)
+
+	// Act
+	_, err := db.SetVendorSessionID(context.Background(), "no-such-workspace", "vendor-1")
+
+	// Assert
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("SetVendorSessionID = %v, want ErrNotFound", err)
+	}
+}
+
+// vendorSession registers a workspace whose session record names vendor.
+func vendorSession(t *testing.T, s *store, vendor string) WorkspaceID {
+	t.Helper()
+	ws := testWorkspace(t, s)
+	if err := s.PutSession(context.Background(), Session{
+		Workspace: ws.ID, HostSessionID: "host-1", VendorSessionID: vendor, StartedAt: time.Unix(1, 0),
+	}); err != nil {
+		t.Fatalf("PutSession: %v", err)
+	}
+	return ws.ID
+}

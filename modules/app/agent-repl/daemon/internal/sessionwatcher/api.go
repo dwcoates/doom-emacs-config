@@ -358,6 +358,11 @@ type LifecycleSink interface {
 	// ends the death closed. An adopted shim whose query had already died
 	// re-announces the death, so a boot that adopts it is told too.
 	OnQueryDied(ws ids.WorkspaceID)
+	// OnVendorSessionID reports the vendor session id in force as the shim
+	// stated it -- a rotation (a /clear), or a re-announced start on a new
+	// watch -- which is the id a later resume names and so the one the session
+	// record must hold. It is told off the lock, like OnTurnEnded.
+	OnVendorSessionID(ws ids.WorkspaceID, vendorSessionID string)
 	// OnLiveWorkChanged republishes the live-work set; combined with the
 	// in-flight turn it is the freeness answer every lease holder waits on.
 	OnLiveWorkChanged(ws ids.WorkspaceID, live LiveWorkSet)

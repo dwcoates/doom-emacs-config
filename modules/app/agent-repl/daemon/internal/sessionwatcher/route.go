@@ -71,6 +71,12 @@ func (w *watcher) routeSessionUpdateLocked(update *conversationv1.SessionUpdate)
 	case *conversationv1.SessionUpdate_FastMode,
 		*conversationv1.SessionUpdate_IdentityRotated,
 		*conversationv1.SessionUpdate_Title:
+		// A ROTATION MOVES THE RESUME HANDLE: the id it names is what a later
+		// resume must name, so the lifecycle sink records it once the lock is
+		// let go.
+		if rotated := update.GetIdentityRotated(); rotated != nil {
+			w.pendingVendorSessionID = rotated.GetVendorSessionId()
+		}
 		// THE VENDOR'S ai-title RIDES HERE. It was previously unrouted and fell
 		// to the default WARN, so the topbar never drew the vendor's own
 		// conversation summary in place of the workspace name (owner ruling,

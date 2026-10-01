@@ -205,6 +205,10 @@ type watcher struct {
 	// to the lifecycle sink, which flushTurnEnds tells off the lock AFTER the
 	// turn ends the death closed.
 	pendingQueryDeath bool
+	// pendingVendorSessionID is the vendor session id in force, as the shim
+	// last stated it (a rotation, a re-announced start), not yet handed to the
+	// lifecycle sink, which records it as what a later resume names.
+	pendingVendorSessionID string
 	// pendingAdoptions are the vendor-started turns this watcher stood in
 	// flight and has not yet handed to the lifecycle sink; flushTurnEnds hands
 	// them over ahead of the turn ends.
@@ -1855,6 +1859,10 @@ func (w *watcher) runSession(gen, openedAt uint64, stream shimclient.Stream[*shi
 // An item the ledger holds that the shim no longer names has ended, and is
 // retired (reconcileLiveWorkLocked).
 func (w *watcher) reannouncedLocked(started *conversationv1.SessionStarted, openedAt uint64) {
+	// THE RE-ANNOUNCED ID IS THE ONE IN FORCE, whether or not the facts are
+	// taken again: a rotation that happened while no daemon watched is stated
+	// here and nowhere else, and it is what a later resume names.
+	w.pendingVendorSessionID = started.GetVendorSessionId()
 	if w.started {
 		w.log.Debug("daemon.sessionwatcher.watch_session",
 			"ignored a re-announced SessionStarted's facts; they are already held, and only its live membership is reconciled",
@@ -2085,7 +2093,9 @@ func (w *watcher) flushTurnEnds() {
 	w.pendingUnobserved = nil
 	died := w.pendingQueryDeath
 	w.pendingQueryDeath = false
-	if len(adopted) > 0 || len(pending) > 0 || len(unobserved) > 0 || died {
+	vendorSessionID := w.pendingVendorSessionID
+	w.pendingVendorSessionID = ""
+	if len(adopted) > 0 || len(pending) > 0 || len(unobserved) > 0 || died || vendorSessionID != "" {
 		// THE DISPATCH IS JOINABLE. It is the one sink call this watcher makes
 		// off its own mutex, and the sinks it drives read the state client --
 		// so Close, which the daemon runs BEFORE closing that client, waits on
@@ -2095,6 +2105,9 @@ func (w *watcher) flushTurnEnds() {
 		defer w.dispatching.Done()
 	}
 	w.mu.Unlock()
+	if vendorSessionID != "" {
+		w.sinks.Lifecycle.OnVendorSessionID(w.ws, vendorSessionID)
+	}
 	if len(unobserved) > 0 {
 		w.sinks.Lifecycle.OnTurnsEndedUnobserved(w.ws, unobserved)
 	}

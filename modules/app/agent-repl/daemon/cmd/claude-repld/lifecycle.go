@@ -34,7 +34,16 @@ type lifecycleSink struct {
 	// builds is the rollout's staleness judge: every diagnostics frame carries
 	// the build its shim runs.
 	builds *rolloutForwarder
-	log    dlog.Logger
+	// sessions records the vendor session id in force, which is what a later
+	// resume names.
+	sessions vendorSessionRecorder
+	log      dlog.Logger
+}
+
+// vendorSessionRecorder is the slice of the state client the sink records the
+// resume handle through.
+type vendorSessionRecorder interface {
+	SetVendorSessionID(ctx context.Context, id wsm.WorkspaceID, vendorSessionID string) (string, error)
 }
 
 // OnLinkChanged republishes the workspace's HOST view: `shim_attached` is part
@@ -193,6 +202,27 @@ func (s *lifecycleSink) OnTurnAdopted(ws ids.WorkspaceID, turn ids.TurnID) {
 // the turns an adoption found open that the adopted shim no longer runs.
 func (s *lifecycleSink) OnTurnsEndedUnobserved(ws ids.WorkspaceID, turns []ids.TurnID) {
 	s.queue.OnTurnsEndedUnobserved(ws, turns)
+}
+
+// OnVendorSessionID records the vendor session id the shim states is in force
+// -- after a rotation, or on a re-announced start -- as the session record's
+// resume handle. A /clear rotates the id, and a record left naming the start's
+// id resumed nothing after a restart: the session came up FRESH and its
+// conversation was lost to the user (2026-09-30).
+func (s *lifecycleSink) OnVendorSessionID(ws ids.WorkspaceID, vendorSessionID string) {
+	fields := dlog.Context{"workspace": string(ws), "vendor_session_id": vendorSessionID}
+	previous, err := s.sessions.SetVendorSessionID(context.Background(), wsm.WorkspaceID(ws), vendorSessionID)
+	if err != nil {
+		fields["cause"] = err.Error()
+		s.log.Error("daemon.cmd.lifecycle", "could not record the vendor session id in force; a later resume names a stale one", fields)
+		return
+	}
+	if previous == vendorSessionID {
+		s.log.Debug("daemon.cmd.lifecycle", "the session record already names the vendor session id in force", fields)
+		return
+	}
+	fields["previous_vendor_session_id"] = previous
+	s.log.Info("daemon.cmd.lifecycle", "recorded the vendor session id in force as the session's resume handle", fields)
 }
 
 // OnQueryDied restarts a session whose vendor query died. Nothing in the shim

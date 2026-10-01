@@ -885,9 +885,9 @@ func TestRouteSessionUpdateArms(t *testing.T) {
 			want:   []string{"topbar.OnSessionUpdate", "footer.OnSessionUpdate"},
 		},
 		{
-			name:   "identity rotation is the topbar's",
+			name:   "identity rotation is the topbar's, and its new id is recorded as the resume handle",
 			update: identityRotatedUpdate(),
-			want:   []string{"topbar.OnSessionUpdate"},
+			want:   []string{"topbar.OnSessionUpdate", "lifecycle.OnVendorSessionID"},
 		},
 		{
 			name:   "fast mode is the topbar's",
@@ -3021,4 +3021,48 @@ func countName(have []string, name string) int {
 		}
 	}
 	return n
+}
+
+// vendorSessionIDsTold answers the ids the lifecycle sink was told, in order.
+func vendorSessionIDsTold(got []event) []string {
+	var ids []string
+	for _, e := range got {
+		if e.name() == "lifecycle.OnVendorSessionID" {
+			ids = append(ids, e.detail)
+		}
+	}
+	return ids
+}
+
+// A ROTATION MOVES THE RESUME HANDLE: the id it names is what a later resume
+// must name (2026-09-30: a /clear's new id never reached the record, and a
+// restart came up FRESH).
+func TestARotationTellsTheLifecycleSinkTheNewResumeHandle(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act.
+	got := h.routeNow(func(w *watcher) { w.routeSessionUpdateLocked(identityRotatedUpdate()) })
+
+	// Assert.
+	if told := vendorSessionIDsTold(got); len(told) != 1 || told[0] != "vendor-2" {
+		t.Fatalf("told %v, want the rotation's new id once", told)
+	}
+}
+
+func TestAReannouncedStartTellsTheLifecycleSinkItsResumeHandle(t *testing.T) {
+	// Arrange: the facts are already held, so only the re-announced id is
+	// news -- a rotation that happened while no daemon watched.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	reannounced := &conversationv1.SessionStarted{VendorSessionId: "vendor-rotated-while-unwatched"}
+
+	// Act.
+	got := h.routeNow(func(w *watcher) { w.reannouncedLocked(reannounced, 0) })
+
+	// Assert.
+	if told := vendorSessionIDsTold(got); len(told) != 1 || told[0] != "vendor-rotated-while-unwatched" {
+		t.Fatalf("told %v, want the re-announced id once", told)
+	}
 }
