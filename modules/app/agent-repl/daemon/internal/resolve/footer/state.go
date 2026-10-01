@@ -604,6 +604,14 @@ type wsState struct {
 	// the set has not listed yet, so the set change that lists them does not
 	// read as a launch. See markAdopted.
 	adoptedWork map[string]struct{}
+	// workOwners are the owners recorded for detached-work-capable items, by
+	// every identity each is addressed by, so drawsWork can tell the main
+	// agent's work from a subagent's (owner.go). Kept for the session's life,
+	// as retiredWork is, because a wait can name work long after it retired.
+	workOwners map[string]*ownerRecord
+	// unownedReported are the drawsWork refusals already recorded at ERROR,
+	// so a render repeating one does not repeat its record.
+	unownedReported map[string]struct{}
 	// entries are the FeedIds the feed drew each detached-work-capable entry
 	// under, keyed by unit (a subagent's spawn unit, a shell's work id, a
 	// monitor's unit), as the feed resolver announced them (OnEntryPlaced). They are what a jump
@@ -622,20 +630,22 @@ type wsState struct {
 // newWSState builds an empty accumulation.
 func newWSState() *wsState {
 	return &wsState{
-		permissions: map[string]standing{},
-		questions:   map[string]standing{},
-		retiredRows: map[string]*agentRow{},
-		agents:      map[string]*agentRow{},
-		shells:      map[string]*shellRow{},
-		monitors:    map[string]*monitorRow{},
-		tasks:       map[string]*taskRow{},
-		crons:       map[string]*cronRow{},
-		bashUnits:   map[string]*shellRow{},
-		retiredWork: map[string]struct{}{},
-		adoptedWork: map[string]struct{}{},
-		entries:     map[string]*frontendv1.FeedId{},
-		tok:         newTokenState(),
-		motion:      newFeedMotion(),
+		permissions:     map[string]standing{},
+		questions:       map[string]standing{},
+		retiredRows:     map[string]*agentRow{},
+		agents:          map[string]*agentRow{},
+		shells:          map[string]*shellRow{},
+		monitors:        map[string]*monitorRow{},
+		tasks:           map[string]*taskRow{},
+		crons:           map[string]*cronRow{},
+		bashUnits:       map[string]*shellRow{},
+		retiredWork:     map[string]struct{}{},
+		adoptedWork:     map[string]struct{}{},
+		workOwners:      map[string]*ownerRecord{},
+		unownedReported: map[string]struct{}{},
+		entries:         map[string]*frontendv1.FeedId{},
+		tok:             newTokenState(),
+		motion:          newFeedMotion(),
 	}
 }
 
@@ -653,7 +663,10 @@ func (s *wsState) detachedLive() bool {
 
 // detachedCount is how many detached items are running right now, read from
 // the same authority detachedLive reads: the watcher's set once it has stated
-// one, the footer's own rows until then.
+// one, the footer's own rows until then. IT COUNTS EVERY OWNER'S WORK, a
+// subagent's included, though only the main agent's is drawn (owner.go): the
+// `background` arm and the deploy's wait both say work is RUNNING, and the
+// roster and the drain count the same items.
 func (s *wsState) detachedCount() int {
 	if s.liveWorkSeen {
 		return len(s.liveWork.Agents) + len(s.liveWork.Shells) + len(s.liveWork.Monitors)

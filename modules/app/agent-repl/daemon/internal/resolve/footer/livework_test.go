@@ -7,6 +7,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/feedid"
 )
 
 // liveSet builds the watcher's set from the ids it lists.
@@ -22,6 +23,35 @@ func liveSet(agents, shells, monitors []string) LiveWorkSet {
 		out.Monitors = append(out.Monitors, &conversationv1.DetachedWorkId{Value: id})
 	}
 	return out
+}
+
+// createdMonitor is a monitor announced already detached, as the main agent's.
+func createdMonitor(work, description string) *conversationv1.AgentDetachedWork {
+	return &conversationv1.AgentDetachedWork{
+		Owner: mainAgent,
+		Work:  &conversationv1.DetachedWorkId{Value: work},
+		Origin: &conversationv1.AgentDetachedWork_Created{Created: &conversationv1.DetachedWorkCreated{
+			WorkCreated: &conversationv1.DetachableWork{Work: &conversationv1.DetachableWork_Monitor{
+				Monitor: monitorStart(work, description, false).GetMonitor(),
+			}},
+		}},
+	}
+}
+
+// announceMain announces every item a set lists as the MAIN agent's work,
+// which is the order the watcher delivers in: the announcement first, then the
+// set that lists it. Only the main agent's work is drawn (owner.go), so a test
+// of what a drawn item does states whose it is.
+func announceMain(h *harness, set LiveWorkSet) {
+	for _, a := range set.Agents {
+		h.r.OnDetachedWork(testWS, mainAgent, detachedSubagentWork(a.GetValue(), a.GetValue(), "Explore"))
+	}
+	for _, w := range set.Shells {
+		h.r.OnDetachedWork(testWS, mainAgent, createdShell(w.GetValue(), "npm test"))
+	}
+	for _, w := range set.Monitors {
+		h.r.OnDetachedWork(testWS, mainAgent, createdMonitor(w.GetValue(), "watch the build"))
+	}
 }
 
 // viewChips is the strip's live-work chip counts, which is what a reader sees.
@@ -129,10 +159,12 @@ func TestAnEmptyLiveWorkSetFallsBackToIdle(t *testing.T) {
 	}
 }
 
-// TestAnItemInTheSetWithNoFrameStillCountsLive is the other direction: the set
-// is the authority for liveness even before any frame has DESCRIBED the item,
-// so the chip counts it rather than waiting for a description.
-func TestAnItemInTheSetWithNoFrameStillCountsLive(t *testing.T) {
+// TestAnItemTheSetListsWithNoRecordedOwnerIsKeptOut is the invariant half of
+// the main-agent rule (owner ruling, 2026-09-30): whose work an item is is
+// decided by recorded ownership, never guessed, so an item the set lists that
+// no announcement or spawn frame placed is drawn by no chip, and the violation
+// is recorded at ERROR.
+func TestAnItemTheSetListsWithNoRecordedOwnerIsKeptOut(t *testing.T) {
 	tests := []struct {
 		name  string
 		live  LiveWorkSet
@@ -149,12 +181,16 @@ func TestAnItemInTheSetWithNoFrameStillCountsLive(t *testing.T) {
 			h := newHarness(t)
 			connected(h)
 
-			// Act: the set names an item the footer has never heard described.
+			// Act: the set names an item nothing stated an owner for.
 			h.r.OnLiveWorkChanged(testWS, tc.live)
 
 			// Assert
-			if got := tc.chips(chipsOf(h.view(t))); got != 1 {
-				t.Fatalf("chip = %d, want 1 minimal row for the item the set lists", got)
+			if got := tc.chips(chipsOf(h.view(t))); got != 0 {
+				t.Fatalf("chip = %d, want 0: work with no recorded owner is never drawn", got)
+			}
+			rec := lastRecord(t, h, "daemon.footer.work_unowned")
+			if rec.Level != dlog.LevelError || rec.Context["kind"] != tc.name || rec.Context["reason"] != feedid.ErrOwnerUnknown.Error() {
+				t.Fatalf("record = %+v, want an ERROR naming the %s and the unknown owner", rec, tc.name)
 			}
 		})
 	}

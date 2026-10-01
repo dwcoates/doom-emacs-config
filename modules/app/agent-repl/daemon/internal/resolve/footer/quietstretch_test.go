@@ -11,6 +11,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/shimclient"
 )
 
 // itemFrame builds one activity frame generically: the item arm named ARM
@@ -176,9 +177,10 @@ func TestASubagentsOwnCallNamesNoStep(t *testing.T) {
 }
 
 func TestAnUnnamedMainAgentNamesNoStep(t *testing.T) {
-	// Arrange
+	// Arrange: the link is up, and the main agent is never named.
 	h := newHarness(t)
-	connected(h)
+	h.r.SetParticipants(testWS, true, true)
+	h.r.OnLink(testWS, shimclient.LinkConnected)
 	h.r.SetTurn(testWS, &TurnStarted{At: instant})
 	h.r.OnTurnOpened(testWS, testTurnID)
 
@@ -389,7 +391,8 @@ func TestADetachedUnitsLaterFramesAreIgnored(t *testing.T) {
 	inTurn(h)
 	h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-1", "bash", "start"))
 	h.r.OnDetachedWork(testWS, mainAgent, &conversationv1.AgentDetachedWork{
-		Work: workID("u-1"),
+		Owner: mainAgent,
+		Work:  workID("u-1"),
 		Origin: &conversationv1.AgentDetachedWork_Detached{Detached: &conversationv1.DetachedWorkDetached{
 			DetachedFromId: &conversationv1.AgentActivityId{Value: "u-1"},
 		}},

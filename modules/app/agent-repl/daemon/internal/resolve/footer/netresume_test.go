@@ -8,6 +8,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/deployprogress"
+	"claude-repld/internal/dlog"
 )
 
 // resumeWaitOf is one standing wait for a piece of work.
@@ -179,7 +180,11 @@ func TestTheWaitingRowLeavesWhenTheWaitEnds(t *testing.T) {
 	}
 }
 
-func TestAWaitForWorkTheFooterNeverDescribedDrawsAMinimalRow(t *testing.T) {
+// TestAWaitForWorkTheFooterNeverDescribedIsKeptOut: a daemon that came up
+// mid-wait has no record of whose work the wait names, and the footer draws
+// only the main agent's work by recorded ownership (owner.go), so the wait
+// draws no row and the violation is recorded at ERROR.
+func TestAWaitForWorkTheFooterNeverDescribedIsKeptOut(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	connected(h)
@@ -188,13 +193,12 @@ func TestAWaitForWorkTheFooterNeverDescribedDrawsAMinimalRow(t *testing.T) {
 	h.r.OnSessionUpdate(testWS, resumeWaits(resumeWaitOf("w-9", 30*time.Minute, 0)))
 
 	// Assert
-	rows := agentRows(t, h)
-	if len(rows) != 1 || rows[0].GetLabel().GetText() != "subagent" || rows[0].GetWaitingForApi() == nil ||
-		rows[0].GetRuntime().GetStartedAtMs() != instant.UnixMilli() {
-		t.Fatalf("rows = %+v, want one minimal waiting row timed from the failure", rows)
+	if rows := agentRows(t, h); len(rows) != 0 {
+		t.Fatalf("rows = %+v, want none for work no owner was recorded for", rows)
 	}
-	if !hasLevel(h.log.Records(), "info", "daemon.footer.network_resume_row_minimal") {
-		t.Fatalf("no INFO daemon.footer.network_resume_row_minimal record explains the bare row")
+	rec := lastRecord(t, h, "daemon.footer.work_unowned")
+	if rec.Level != dlog.LevelError || rec.Context["kind"] != "agent" {
+		t.Fatalf("record = %+v, want an ERROR naming the unowned agent", rec)
 	}
 }
 
