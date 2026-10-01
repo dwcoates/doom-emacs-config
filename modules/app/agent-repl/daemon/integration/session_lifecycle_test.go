@@ -969,12 +969,12 @@ func TestCloseWorkspaceWithAQueuedMergeRefuses(t *testing.T) {
 	// its repository's slot, so the second one waits in the queue. (A PARKED
 	// merge would not hold it: it yields the slot, owner ruling 2026-09-28.)
 	harness.CommitWork(t, first.ws.GetDir())
-	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: first.ws})); err != nil {
+	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: first.ws, Source: ownBranch()})); err != nil {
 		t.Fatalf("MergeWorkspace(first) = error %v, want the merge enqueued", err)
 	}
 	first.shim.ExpectStartTurn()
 	harness.CommitWork(t, second.ws.GetDir())
-	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: second.ws})); err != nil {
+	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: second.ws, Source: ownBranch()})); err != nil {
 		t.Fatalf("MergeWorkspace(second) = error %v, want the merge enqueued", err)
 	}
 	roster := d.WatchRoster()

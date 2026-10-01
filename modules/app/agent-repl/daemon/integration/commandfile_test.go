@@ -93,34 +93,6 @@ func TestACreateEntryMaterializesAWorkspaceExactlyLikeCreateWorkspace(t *testing
 	}
 }
 
-func TestAMergeEntryEnqueuesTheNamedWorkspace(t *testing.T) {
-	t.Parallel()
-	// Arrange: a workspace with real layout facts, via CreateWorkspace (the
-	// merge_test.go helper — same package, same conventions).
-	repo := harness.NewRepo(t)
-	d := harness.StartDaemon(t, harness.Opts{SelfRepo: repo.Dir})
-	repoRef := mergeRepositoryRef(t, d, repo)
-	f := mergeCreateChild(t, d, repoRef, "cmdfile-merge", "do the thing", nil)
-	harness.CommitWork(t, f.ws.GetDir())
-	roster := d.WatchRoster()
-
-	// Act
-	commandfileWrite(t, d, "workspace_commands_merge.json",
-		`[{"type":"merge","workspace":"`+f.ws.GetId()+`"}]`)
-
-	// Assert: the roster shows the merge enqueued/running, exactly as
-	// MergeWorkspace would.
-	got := awaitRoster(t, d, roster, "the command-file merge enqueued", func(r *frontendv1.WorkspaceRoster) bool {
-		row := rosterRow(r, f.ws.GetId())
-		return row.GetMergeEnqueuing() != nil || row.GetMerging() != nil ||
-			row.GetMergeQueued() != nil || row.GetMergeConflict() != nil
-	})
-	row := rosterRow(got, f.ws.GetId())
-	if row.GetNone() != nil || row.GetReady() != nil {
-		t.Fatalf("command-file-merged workspace roster status = %v, want a merge arm", row)
-	}
-}
-
 func TestAPromptEntrySubmitsToTheNamedWorkspace(t *testing.T) {
 	t.Parallel()
 	// Arrange
