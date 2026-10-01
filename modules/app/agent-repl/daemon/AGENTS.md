@@ -1540,6 +1540,16 @@ and `TestSelectPublishesARegistryCarryingTheSelectionInstant`.
 - **A COMMIT REPLACES IN PLACE** (`ReplaceHeldPromptSaid` keeps `queued_at`, clears the verdict and the acceptance), retires the claim and reclassifies through `classifyHeld`, so an interject then runs the ordinary interject. A content EPOCH bumped under `wsState.verdicts` makes a verdict judged about the replaced words settle as a discard; lock order is `drain`, then `verdicts`.
 - **THE CLAIM IS SCOPED TO THE EDITOR'S HOST STREAM, never a timer.** A begin with no `WatchHostWorkspace` stream is `no_editor`; the last one closing calls `Queue.EditorGone`, which retires the claim as a cancel would. The claim is in-memory, so a restart retires it with the stream.
 
+## A held prompt folds into the one ahead in one transaction, judged afresh
+
+`FoldHeldPrompt` (owner request, 2026-09-30; `internal/promptqueue/fold.go`,
+`internal/holdfold`; design record `docs/protobuf-design/held-fold-above.md`).
+
+- **ONE READING OF ELIGIBILITY.** `holdfold.Ahead` and `holdfold.Foldable` decide both the tray's `HeldPrompt.fold_above` and the verb's refusals: never on the first entry, never into or out of a session act (`holdfold.SessionAct`: a held model or permission-mode change, /compact, /clear), never while either entry is being edited. The running turn is never "ahead"; joining it is the classifier's `after_tool_call`.
+- **THE FOLD NAMES THE ENTRY THE CLIENT SAW.** The request echoes the tray's token; an entry that is no longer directly ahead answers `above_moved` naming the one that is. Every refusal is logged at INFO under `daemon.promptqueue.fold` and folds nothing.
+- **ONE TRANSACTION.** `wsm.CoalesceHeldPrompts` writes the merged words (the folded prompt's blocks after the entry's, text meeting text across a blank line), marks the entry coalesced, discards its verdict and acceptance, and retires the folded prompt as `coalesced`, or writes nothing. The classifier's coalesce shares it, keeping the queued entry's verdict.
+- **JUDGED AFRESH, AS AN EDIT'S COMMIT IS.** Under `drain`, then `verdicts`: both turns' content epochs are bumped (`bumpEpochLocked`), their queue jumps cleared, the tray re-pushed, and the merged entry reclassified through `reclassify`.
+
 ## A /clear or /compact is queued, never classified, and nothing overtakes it
 
 Owner rulings, 2026-09-27 (`internal/sessioncommand`, `internal/promptqueue/acts.go`, `classify.go`, `lifecycle.go`).
