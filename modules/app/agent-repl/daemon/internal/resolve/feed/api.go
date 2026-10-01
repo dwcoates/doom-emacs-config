@@ -213,11 +213,12 @@ type Resolver interface {
 	// LiveDetachedIn answers how many detached subagents and shells drawn in
 	// the turns are still live: what a files-restoring rollback stops.
 	LiveDetachedIn(ws ids.WorkspaceID, turns []ids.TurnID) int
-	// ResponseMarkdown answers the settled markdown of one selectable final
-	// response, and whether the feedid is selectable at all. A miss is a
-	// feedid the daemon does not deem selectable — the submit path refuses it
-	// rather than delivering an empty reply prefix.
-	ResponseMarkdown(ws ids.WorkspaceID, id *frontendv1.FeedId) (string, bool)
+	// SelectableText answers the text of one selectable root-feed row
+	// (FeedRow.selectable: a prompt or a landed response bubble) as markdown,
+	// with whether it is a prompt, and whether the feedid is selectable at
+	// all. A miss is a feedid the daemon does not deem selectable — the submit
+	// path and the selection refuse it rather than using an empty text.
+	SelectableText(ws ids.WorkspaceID, id *frontendv1.FeedId) (SelectableText, bool)
 	// TakeTurnEnding answers what a turn's LIVE end said — the final answer's
 	// prose, the errored ending's line, the terminal's failure class — and
 	// forgets it. False is a turn whose ending was not drawn live here. The

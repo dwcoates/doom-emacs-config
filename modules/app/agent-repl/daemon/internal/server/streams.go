@@ -376,7 +376,7 @@ func (s *server) serveHost(
 	states := s.hostStateTopic(ws).Subscribe(streamCtx)
 	events := s.hostTopic(ws).Subscribe(streamCtx)
 	// THE FEED'S SELECTION reaches Emacs from the one topic the webapp's root
-	// feed watch reads, mapped to the kind of row alone (hostSelectionOf), so
+	// feed watch reads, mapped to the kind of row and its text (hostSelectionOf), so
 	// Emacs and the webapp see one sequence of selections. The topic replays
 	// the selection in force, so a late subscriber is handed it first.
 	selections := s.selectionTopic(ws).Subscribe(streamCtx)

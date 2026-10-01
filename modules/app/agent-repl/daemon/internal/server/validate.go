@@ -194,6 +194,8 @@ func validateSelectFeedRowRequest(req *agentreplv1.SelectFeedRowRequest) *connec
 		return nil
 	case *agentreplv1.SelectFeedRowRequest_LeftView:
 		return validateFeedID("move.left_view.row", move.LeftView.GetRow())
+	case *agentreplv1.SelectFeedRowRequest_Bubble:
+		return validateFeedID("move.bubble.row", move.Bubble.GetRow())
 	}
 	return invalid("move", "a selection move is required")
 }
