@@ -1059,15 +1059,6 @@ type harness struct {
 	banners *fakeTurnBanners
 	log     *dlog.TestSurfaces
 
-	// parked records every parked route, parkedTurns the turn each was routed
-	// under, and parkedErr fails it.
-	parked      []*conversationv1.UserSaid
-	parkedTurns []ids.TurnID
-	parkedErr   error
-	// onParkedRoute, when set, runs as the route is asked, which is where a
-	// test reads what was already recorded.
-	onParkedRoute func()
-
 	// noSession, when set, makes the client resolver report no session.
 	revivals   int
 	reviveErr  error
@@ -1137,14 +1128,6 @@ func newHarness(t *testing.T) *harness {
 		Watcher: func(ids.WorkspaceID) (Watcher, bool) { return h.watcher, !h.noSession },
 		ColdGate: func(ids.WorkspaceID) (string, bool) {
 			return h.coldGate, h.coldGate != ""
-		},
-		ParkedRoute: func(_ context.Context, _ ids.WorkspaceID, turn ids.TurnID, said *conversationv1.UserSaid) error {
-			if h.onParkedRoute != nil {
-				h.onParkedRoute()
-			}
-			h.parked = append(h.parked, said)
-			h.parkedTurns = append(h.parkedTurns, turn)
-			return h.parkedErr
 		},
 		DrainRefusals: h.drain,
 		PublishHost: func(ids.WorkspaceID) {
