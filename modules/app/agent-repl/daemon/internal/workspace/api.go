@@ -314,6 +314,12 @@ type Verbs interface {
 	// verbatim. The daemon validates the workspace and opens nothing itself;
 	// there is no ack and no command loop.
 	OpenInEditor(ctx context.Context, ws ids.WorkspaceID, path string, line *uint32) error
+	// OpenDaemonFileInEditor relays an open of a file the DAEMON holds for the
+	// workspace -- outside its worktree, a merge's test log -- onto the host
+	// stream. The caller has already resolved the path from a token the
+	// daemon served, which is what stands in for the worktree containment
+	// check.
+	OpenDaemonFileInEditor(ctx context.Context, ws ids.WorkspaceID, path string) error
 	// Notify raises one host notification: it raises the workspace's desktop
 	// banner (the daemon's own, decided on Emacs's focus) and sets the roster's
 	// attention marker, which SelectWorkspace and AsksSettled clear. It is the

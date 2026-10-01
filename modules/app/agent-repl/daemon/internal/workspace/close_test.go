@@ -76,22 +76,6 @@ func TestCloseRefusesHeldPrompts(t *testing.T) {
 	}
 }
 
-func TestCloseRefusesAQueuedMerge(t *testing.T) {
-	// Arrange.
-	f := newFixture(t)
-	f.workspace("w1", t.TempDir())
-	f.merge.facts["w1"] = footer.MergeFacts{State: "queued", QueuePosition: 2}
-
-	// Act.
-	err := f.verbs.Close(context.Background(), "w1")
-
-	// Assert.
-	asRefusal(t, err, "blocked")
-	if f.footer.closing["w1"].Reason != "merge_queued" {
-		t.Fatalf("footer reason = %q, want merge_queued", f.footer.closing["w1"].Reason)
-	}
-}
-
 func TestCloseIsAllowedWithAStandingColdGate(t *testing.T) {
 	// Arrange: a standing cold gate holds no undelivered user intent, so it
 	// deliberately does NOT block a close.
@@ -239,5 +223,21 @@ func TestCloseRefusalIsNotLoggedAsAWarning(t *testing.T) {
 		if record.Operation == opClose && (record.Level == "warn" || record.Level == "error") {
 			t.Fatalf("record = %+v, want the landed refusal recorded below warning", record)
 		}
+	}
+}
+
+func TestCloseRefusesAMergeWaitingInLine(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.merge.facts["w1"] = footer.MergeFacts{State: "queued", Step: footer.StepEnqueued, QueuePlace: 2, QueueWaiting: 2}
+
+	// Act.
+	err := f.verbs.Close(context.Background(), "w1")
+
+	// Assert.
+	asRefusal(t, err, "blocked")
+	if f.footer.closing["w1"].Reason != "merge_queued" {
+		t.Fatalf("footer reason = %q, want merge_queued", f.footer.closing["w1"].Reason)
 	}
 }

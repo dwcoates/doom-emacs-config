@@ -117,6 +117,26 @@ func (v *verbs) OpenInEditor(ctx context.Context, ws ids.WorkspaceID, path strin
 	return nil
 }
 
+// OpenDaemonFileInEditor relays an open of a file the daemon holds for the
+// workspace onto its host stream, exactly as a workspace file's click is
+// relayed: Emacs opens it in its one shared popup. The workspace is checked as
+// every verb checks it; the path is the daemon's own resolution of a token it
+// served, so it is not held to the worktree.
+func (v *verbs) OpenDaemonFileInEditor(ctx context.Context, ws ids.WorkspaceID, path string) error {
+	_, log, err := v.owned(ctx, "OpenInEditor", ws)
+	if err != nil {
+		return err
+	}
+	if !filepath.IsAbs(path) {
+		err := fmt.Errorf("workspace: a daemon file to open must be absolute, got %q", path)
+		log.Error(opOpenInEditor, "refused to relay a daemon file that is not absolute", dlog.Context{"path": path})
+		return err
+	}
+	v.deps.Host.OpenInEditor(ws, path, nil)
+	log.Info(opOpenInEditor, "relayed an open-in-editor of a file the daemon holds", dlog.Context{"path": path})
+	return nil
+}
+
 // within reports whether path is the directory itself or lives beneath it.
 func within(dir, path string) bool {
 	dir = filepath.Clean(dir)
