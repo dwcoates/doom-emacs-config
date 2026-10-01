@@ -53,22 +53,22 @@ Asks the merge queue, from this workspace, to land a finished branch on master. 
     - `EXIT CODE 0:` The removal is applied. Go to step 5.
     - `EXIT CODE 2:` IMMEDIATELY terminate and surface the raw error.
     - `EXIT CODE 5:` The removal was refused. Go to step 4.
-    - `EXIT CODE 8:` The daemon did not answer in time. Go to step 6.
+    - `EXIT CODE 8:` No answer arrived in time. Go to step 6.
   - f. If `dequeue workspace <worktree-dir>`: call `.claude/skills/merge-queue/run.sh --dequeue-workspace <worktree-dir>`.
     - `EXIT CODE 0:` The removal is applied. Go to step 5.
     - `EXIT CODE 2:` IMMEDIATELY terminate and surface the raw error.
     - `EXIT CODE 5:` The removal was refused. Go to step 4.
-    - `EXIT CODE 8:` The daemon did not answer in time. Go to step 6.
+    - `EXIT CODE 8:` No answer arrived in time. Go to step 6.
   - g. If `pause [<repo-dir>]`: call `.claude/skills/merge-queue/run.sh --pause-queue [<repo-dir>]`.
     - `EXIT CODE 0:` The pause is applied. Go to step 5.
     - `EXIT CODE 2:` IMMEDIATELY terminate and surface the raw error.
     - `EXIT CODE 5:` The pause was refused. Go to step 4.
-    - `EXIT CODE 8:` The daemon did not answer in time. Go to step 6.
+    - `EXIT CODE 8:` No answer arrived in time. Go to step 6.
   - h. If `resume [<repo-dir>]`: call `.claude/skills/merge-queue/run.sh --resume-queue [<repo-dir>]`.
     - `EXIT CODE 0:` The resume is applied. Go to step 5.
     - `EXIT CODE 2:` IMMEDIATELY terminate and surface the raw error.
     - `EXIT CODE 5:` The resume was refused. Go to step 4.
-    - `EXIT CODE 8:` The daemon did not answer in time. Go to step 6.
+    - `EXIT CODE 8:` No answer arrived in time. Go to step 6.
 
 2. End the turn.
   - Say in one line that the merge is requested, then END THE TURN IMMEDIATELY.
@@ -87,8 +87,8 @@ Asks the merge queue, from this workspace, to land a finished branch on master. 
   - Report the printed refusal verbatim and STOP.
 
 5. Applied (`dequeue`, `pause`, `resume`).
-  - Report the printed lines verbatim and STOP.
-  - *NOTE*: removing a merge that is not queued is applied, not refused.
+  - Report the printed outcome (`evicted`, `not_queued`, `paused`, `resumed`, or `unread`) and any other printed lines verbatim, then STOP.
+  - *NOTE*: removing a merge that is not queued is applied with `not_queued`, not refused.
 
 6. Unanswered (`dequeue`, `pause`, `resume`).
   - Report the printed lines verbatim and STOP.
@@ -96,7 +96,7 @@ Asks the merge queue, from this workspace, to land a finished branch on master. 
 
 ## Notes
 
-- **CRITICAL: NEVER merge, commit, cherry-pick, rebase, reset or push onto master by hand.** The queue is the only path, and the repository's hook refuses the rest.
+- **CRITICAL: NEVER merge, commit, cherry-pick, rebase, reset or push onto master by hand.** The queue is the only path into master, and any other path is refused.
 - **CRITICAL: On a failed or refused merge, report and stop.** Never retry by hand, never work around the queue.
 - **IMPORTANT NOTE: A subagent's branch goes through `branch`, the same sequence.** Never fold it into master yourself.
 - **CRITICAL: Removing a merge from the queue, or pausing or resuming the queue, goes through this skill, NEVER by hand.**
