@@ -265,10 +265,22 @@ func modeArm(s *agentreplv1.PersistentWifiState) string {
 	return "unknown"
 }
 
-func hotspotArm(h *agentreplv1.UpdatePersistentWifiModeHotspot) string {
-	return string(h.ProtoReflect().WhichOneof(h.ProtoReflect().Descriptor().Oneofs().ByName("outcome")).Name())
-}
+func hotspotArm(h *agentreplv1.UpdatePersistentWifiModeHotspot) string { return outcomeArm(h) }
 
-func displayArm(d *agentreplv1.UpdatePersistentWifiModeDisplay) string {
-	return string(d.ProtoReflect().WhichOneof(d.ProtoReflect().Descriptor().Oneofs().ByName("outcome")).Name())
+func displayArm(d *agentreplv1.UpdatePersistentWifiModeDisplay) string { return outcomeArm(d) }
+
+// outcomeArm names the set arm of m's `outcome` oneof. Every step outcome the
+// controller builds sets one, so an unset or absent oneof is a bug in this
+// package and panics rather than being named.
+func outcomeArm(m proto.Message) string {
+	r := m.ProtoReflect()
+	oneof := r.Descriptor().Oneofs().ByName("outcome")
+	if oneof == nil {
+		panic(fmt.Sprintf("persistentwifi: %s has no outcome oneof", r.Descriptor().FullName()))
+	}
+	field := r.WhichOneof(oneof)
+	if field == nil {
+		panic(fmt.Sprintf("persistentwifi: %s was built with no outcome", r.Descriptor().FullName()))
+	}
+	return string(field.Name())
 }
