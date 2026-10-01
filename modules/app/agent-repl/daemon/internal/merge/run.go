@@ -249,7 +249,10 @@ func (o *orchestrator) start(ctx context.Context, repo wsm.RepoKey, ws ids.Works
 	// THE OCCUPANCY IS TAKEN UNDER THE LEDGER IDENTITY minted when the merge
 	// was put in line, so the queued bubble and the running one are one bubble.
 	ledger := o.mintLedger(ws)
-	lease, err := o.deps.DB.AcquireLeaseAs(ctx, ws, ledger, wsm.HolderMerge, wsm.PolicyRefuse)
+	// THE LEASE HOLDS what the user submits while the merge runs; a prompt
+	// held under it keeps the requester open past the landing
+	// (wsm.bindMergeHold, readKeepOpen).
+	lease, err := o.deps.DB.AcquireLeaseAs(ctx, ws, ledger, wsm.HolderMerge, wsm.PolicyHold)
 	if err != nil {
 		if releaseErr := lock.Release(); releaseErr != nil {
 			log.Error(op, "could not release the repository lock of a merge that could not start", dlog.Context{"workspace": string(ws), "error": releaseErr.Error()})
@@ -257,6 +260,10 @@ func (o *orchestrator) start(ctx context.Context, repo wsm.RepoKey, ws ids.Works
 		log.Error(op, "could not take the merge lease", dlog.Context{"workspace": string(ws), "error": err.Error()})
 		return nil, err
 	}
+	// EVERY PROMPT ALREADY HELD NOW WAITS FOR THE MERGE: the restamp binds
+	// each to it (wsm.bindMergeHold), so the requester stays open for them as
+	// for a prompt submitted during the merge.
+	o.deps.Queue.OnLeaseChanged(ws)
 	runCtx, cancel := context.WithCancelCause(ctx)
 	o.mu.Lock()
 	displaces := o.displaces[ws]

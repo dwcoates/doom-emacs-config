@@ -9,8 +9,8 @@
  * this draws nothing at all rather than a disabled box the user would wonder
  * about.
  *
- * THE GATE IS THE PRIMARY DEFENSE, THE REFUSAL IS THE RACE FALLBACK. A merging,
- * closing or disconnected workspace CLOSES the composer through the gate, which
+ * THE GATE IS THE PRIMARY DEFENSE, THE REFUSAL IS THE RACE FALLBACK. A closing
+ * or disconnected workspace CLOSES the composer through the gate, which
  * is pushed state the wiring resolves from the footer. `SubmitPromptError` arms
  * exist for the submission already in flight when the state flipped: they are
  * drawn INLINE at the composer, per typed arm, and they are the submitter's own
@@ -165,7 +165,7 @@ export function mountComposer(
 
   const applyGate = (state: ComposerGateState, reason?: string): void => {
     const closed = state === "closed";
-    // R7: the composer DISABLES while the footer reads merging, closing or
+    // R7: the composer DISABLES while the footer reads closing or
     // disconnected — the whole control, not only its button. A box that still
     // takes keystrokes while nothing can be sent invites a draft the reader
     // then watches be refused.
@@ -411,9 +411,9 @@ export function drawSubmitRefusal(root: HTMLElement, arm: string, text: string):
 /**
  * What each `SubmitPromptError` arm says.
  *
- * `merging` is the RACE FALLBACK the composer's gate exists to make rare: the
- * gate closes on the merging state, and this arm answers a submission already
- * in flight when the state flipped. Its message is empty on the wire on purpose
+ * `merging` answers only a merge lease an older daemon build wrote, which
+ * refuses: a merge holds what is submitted while it runs, so the gate stays
+ * open through one. Its message is empty on the wire on purpose
  * — the footer and the merge bubble already name which merge — so the sentence
  * is this end's.
  *

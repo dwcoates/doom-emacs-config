@@ -246,8 +246,9 @@ the vendor (`AGENT_REPL_FORBID_VENDOR_CALLS=1` in every process).
   restart: restart and assert it is gone); {release} delivers now
 - a held prompt survives a daemon restart (all-or-nothing restore) and a
   corrupted held_prompts row makes the restore load nothing and log ERROR
-- a prompt submitted during a merge lease answers `merging` refusal;
-  prompts held before the merge stay held
+- a prompt submitted during a merge lease is held by the merge, with the
+  `daemon_held` verdict and no classifier (owner ruling, 2026-10-01);
+  prompts held before the merge stay held, now by the merge
 - SubmitPrompt with `feed` set to a subagent bubble delivers via
   UpdateAgent.prompt addressed to that agent
 - `/status` answers a StatusPanelView inline with no StartTurn AND mirrors a

@@ -125,10 +125,18 @@ func heldSessionAct(h wsm.HeldPrompt, log dlog.Logger) *frontendv1.HeldSessionAc
 
 // setClassification projects the durable verdict onto the tray's oneof. A
 // record with NO verdict yet is the `classifying` arm — the judge is still
-// running — which is why the arm is never left unset.
+// running — which is why the arm is never left unset. EXCEPT one a daemon
+// condition holds: the classifier never runs on such an entry, so its arm is
+// `daemon_held` rather than a decision that is not being made.
 func setClassification(out *frontendv1.HeldPrompt, h wsm.HeldPrompt, log dlog.Logger) {
 	ctx := dlog.Context{"turn_id": string(h.Turn)}
 	classifying := &frontendv1.HeldPrompt_Classifying{Classifying: &frontendv1.HeldPromptClassifying{}}
+	if h.Classification == nil && h.Hold != nil {
+		ctx["hold"] = h.Hold.String()
+		log.Debug("daemon.holds.classification", "an unjudged hold a daemon condition holds drew the daemon_held arm", ctx)
+		out.Classification = &frontendv1.HeldPrompt_DaemonHeld{DaemonHeld: &frontendv1.HeldPromptDaemonHeld{}}
+		return
+	}
 	if h.Classification == nil {
 		log.Debug("daemon.holds.classification", "an unjudged hold drew the classifying arm", ctx)
 		out.Classification = classifying
@@ -218,6 +226,10 @@ func setHold(out *frontendv1.HeldPrompt, h wsm.HeldPrompt, log dlog.Logger) {
 		log.Debug("daemon.holds.hold", "the hold waits for the build refresh", ctx)
 		out.Hold = &frontendv1.HeldPrompt_BuildRefresh{
 			BuildRefresh: &frontendv1.HeldPromptBuildRefreshHold{}}
+	case wsm.HoldMerge:
+		ctx["hold"] = "merge"
+		log.Debug("daemon.holds.hold", "the hold waits for the merge to end", ctx)
+		out.Hold = &frontendv1.HeldPrompt_Merge{Merge: &frontendv1.HeldPromptMergeHold{}}
 	default:
 		ctx["hold"] = int(*h.Hold)
 		ctx["invariant_violation"] = "unknown wsm.HoldKind"
@@ -269,6 +281,8 @@ func heldBadges(p *frontendv1.HeldPrompt, log dlog.Logger) []*frontendv1.HeldPro
 		}
 	case *frontendv1.HeldPrompt_ClassificationError:
 		out = append(out, badge("unclassified", "unclassified"))
+	case *frontendv1.HeldPrompt_DaemonHeld:
+		// No badge: the hold arm's badge below is what holds the entry.
 	default:
 		ctx["invariant_violation"] = "HeldPrompt.classification has no badge"
 		ctx["remediation"] = "add the arm to heldBadges"
@@ -293,6 +307,8 @@ func heldBadges(p *frontendv1.HeldPrompt, log dlog.Logger) []*frontendv1.HeldPro
 		out = append(out, badge("build refresh", "held for the build refresh"))
 	case *frontendv1.HeldPrompt_SessionStarting:
 		out = append(out, badge("starting up", "held until the session is up"))
+	case *frontendv1.HeldPrompt_Merge:
+		out = append(out, badge("after the merge", "held until the merge ends; the workspace stays open for it"))
 	default:
 		ctx["invariant_violation"] = "HeldPrompt.hold has no badge"
 		ctx["remediation"] = "add the arm to heldBadges"

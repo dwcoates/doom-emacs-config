@@ -96,8 +96,8 @@ const COMPOSER_CLOSED_COLORS: readonly string[] = renderColors.composer_closed_c
  *
  * THE COMPOSER INVARIANT (owner ruling, 2026-09-28): a composer is closed
  * exactly when the footer's status color is one of
- * `render-colors.json#composer_closed_colors` — blue, an unusable workspace,
- * and purple, a merge holding it. The gate is DERIVED from the color, never
+ * `render-colors.json#composer_closed_colors` — blue, an unusable workspace.
+ * A merge in flight (purple) leaves it open: its prompts are held. The gate is DERIVED from the color, never
  * from a list of arm names, so an arm cannot be drawn usable and gated shut,
  * or drawn unusable and left open. An arm the file has no color for is a
  * MalformedView, exactly as it is for the color itself.

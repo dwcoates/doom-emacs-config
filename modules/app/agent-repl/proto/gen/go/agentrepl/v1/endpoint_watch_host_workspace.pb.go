@@ -901,7 +901,10 @@ type HostSessionLive_Open struct {
 }
 
 type HostSessionLive_Merging struct {
-	// A merge owns the session (the merge lease).
+	// A merge owns the session under a lease that REFUSES prompts, which
+	// only an older build writes. A merge lease that HOLDS (every merge
+	// since 2026-10-01) answers `open`: what is submitted is held until the
+	// merge ends.
 	Merging *HostComposerMerging `protobuf:"bytes,6,opt,name=merging,proto3,oneof"`
 }
 

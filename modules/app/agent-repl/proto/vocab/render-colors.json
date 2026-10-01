@@ -36,7 +36,7 @@
     "             that stops all work until it is resolved.",
     "",
     "THE COMPOSER INVARIANT: a composer is closed exactly when its footer's",
-    "status color is one of 'composer_closed_colors' (blue, purple). A",
+    "status color is one of 'composer_closed_colors' (blue). A",
     "renderer derives its gate from this file, never from a list of arms.",
     "",
     "Whether a status draws FULL (unread) or PARTIAL (viewed) is independent",
@@ -189,13 +189,14 @@
   "_composer_closed_colors_comment": [
     "THE COMPOSER INVARIANT (owner ruling, 2026-09-28): a composer is",
     "CLOSED exactly when its footer status arm's color (footer_status) is",
-    "one of these, and open otherwise. Blue is an unusable workspace and",
-    "purple a merge holding it; every other color is a usable workspace.",
+    "one of these, and open otherwise. Blue is an unusable workspace; every",
+    "other color is a usable one. Purple, a merge in flight, left this list",
+    "on 2026-10-01 (owner ruling): a prompt submitted during a merge is held",
+    "until the merge ends, so the composer stays open.",
     "Renderers derive the gate from this list, never from arm names."
   ],
   "composer_closed_colors": [
-    "blue",
-    "purple"
+    "blue"
   ],
   "_footer_allowance_comment": [
     "The rate-limit allowance rung's status arms (frontend.v1 FooterAllowance.status,",

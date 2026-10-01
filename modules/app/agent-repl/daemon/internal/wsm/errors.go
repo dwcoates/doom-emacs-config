@@ -29,6 +29,11 @@ var ErrSessionIdentityMissing = errors.New("wsm: a session record carries no hos
 // tombstoned hold never resurrects.
 var ErrTombstoned = errors.New("wsm: held prompt is tombstoned")
 
+// ErrMergeLeaseGone refuses a merge hold recorded after the merge it waits on
+// released its lease: the merge has already decided whether its requester
+// closes, so the prompt must take the path a workspace with no merge takes.
+var ErrMergeLeaseGone = errors.New("wsm: no merge lease stands to hold the prompt")
+
 // LayoutError refuses a database file whose layout version this build cannot
 // interpret. It is NOT the ordinary answer to a version mismatch: a file
 // stamped OLDER is migrated forward (see migrate.go), because the workspace
@@ -192,7 +197,7 @@ func (p LeasePolicy) valid() bool { return p >= PolicyRefuse && p <= PolicyParke
 func (p Priority) valid() bool { return p >= PriorityP05 && p <= PriorityP3 }
 
 // valid reports whether the hold kind is one of the declared arms.
-func (h HoldKind) valid() bool { return h >= HoldShutdown && h <= HoldBuildRefresh }
+func (h HoldKind) valid() bool { return h >= HoldShutdown && h <= HoldMerge }
 
 // String names a hold kind, for logs and refusals.
 func (h HoldKind) String() string {
@@ -203,6 +208,8 @@ func (h HoldKind) String() string {
 		return "session_starting"
 	case HoldBuildRefresh:
 		return "build_refresh"
+	case HoldMerge:
+		return "merge"
 	default:
 		return fmt.Sprintf("hold_kind(%d)", int(h))
 	}
@@ -318,7 +325,7 @@ func (m MergeSource) validate() error {
 	if !m.Kind.valid() {
 		return fmt.Errorf("unknown merge source kind %d", int(m.Kind))
 	}
-	if m.KeepOpen && m.Kind != MergeSourceOwnBranch {
+	if m.KeepOpen && !m.Kind.ClosesRequester() {
 		return fmt.Errorf("a %s source cannot keep the requester open", m.Kind)
 	}
 	if (m.Workspace != "") != (m.Kind == MergeSourceWorkspace) {
