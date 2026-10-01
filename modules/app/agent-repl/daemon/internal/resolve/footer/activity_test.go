@@ -31,7 +31,7 @@ func TestAMidTurnApiFailureDrawsTheRetryLine(t *testing.T) {
 	})
 
 	// Assert
-	retry := h.view(t).GetStrip().GetStatus().GetWorking().GetActivity().GetSalient().GetRetrying()
+	retry := h.view(t).GetStrip().GetStatus().GetBlocked().GetActivity().GetSalient().GetRetrying()
 	if retry.GetAttempt() != 2 || retry.GetStatus() != "overloaded" {
 		t.Fatalf("retry = %+v, want attempt 2 with the vendor's summary", retry)
 	}
@@ -49,7 +49,7 @@ func TestASecondApiFailureCountsTheNextAttempt(t *testing.T) {
 	h.r.OnApiError(testWS, mainAgent, failed)
 
 	// Assert
-	retry := h.view(t).GetStrip().GetStatus().GetWorking().GetActivity().GetSalient().GetRetrying()
+	retry := h.view(t).GetStrip().GetStatus().GetBlocked().GetActivity().GetSalient().GetRetrying()
 	if retry.GetAttempt() != 3 {
 		t.Fatalf("attempt = %d, want 3 after two recorded failures", retry.GetAttempt())
 	}
@@ -319,8 +319,8 @@ func TestTheRetryLineEndsAtTheRetriedAgentsFirstResponse(t *testing.T) {
 			h.r.OnActivity(testWS, mainAgent, tt.act)
 
 			// Assert
-			if got := h.view(t).GetStrip().GetStatus().GetWorking().GetActivity().GetSalient().GetRetrying(); got != nil {
-				t.Fatalf("retrying = %+v, want it ended by the response", got)
+			if got := h.view(t).GetStrip().GetStatus().GetBlocked(); got != nil {
+				t.Fatalf("status = blocked %+v, want the retry ended by the response", got)
 			}
 		})
 	}
@@ -337,7 +337,7 @@ func TestTheRetryLineSurvivesAToolCallWithNoUsage(t *testing.T) {
 	h.r.OnActivity(testWS, mainAgent, subagentProgress("u-1", 10))
 
 	// Assert
-	if h.view(t).GetStrip().GetStatus().GetWorking().GetActivity().GetSalient().GetRetrying() == nil {
+	if h.view(t).GetStrip().GetStatus().GetBlocked().GetActivity().GetSalient().GetRetrying() == nil {
 		t.Fatalf("the retry line ended on a frame that proves no response")
 	}
 }
@@ -353,7 +353,7 @@ func TestAnotherAgentsResponseDoesNotEndTheRetry(t *testing.T) {
 	h.r.OnActivity(testWS, &conversationv1.AgentId{Value: "agent-other"}, thinkingActivity("th-9"))
 
 	// Assert
-	if h.view(t).GetStrip().GetStatus().GetWorking().GetActivity().GetSalient().GetRetrying() == nil {
+	if h.view(t).GetStrip().GetStatus().GetBlocked().GetActivity().GetSalient().GetRetrying() == nil {
 		t.Fatalf("another agent's reasoning ended the main agent's retry line")
 	}
 }
@@ -593,7 +593,7 @@ func TestTheRetryLineCountsAttemptsAsTheVendorDoes(t *testing.T) {
 	h.r.OnApiError(testWS, mainAgent, scheduledFailure(8, 10, instant.Add(32*time.Second)))
 
 	// Assert: attempt 9 of 11, as the request's own count runs.
-	retry := h.view(t).GetStrip().GetStatus().GetWorking().GetActivity().GetSalient().GetRetrying()
+	retry := h.view(t).GetStrip().GetStatus().GetBlocked().GetActivity().GetSalient().GetRetrying()
 	if retry.GetAttempt() != 9 || retry.GetMaxAttempt() != 11 {
 		t.Fatalf("retry = %+v, want attempt 9 of 11", retry)
 	}
@@ -610,7 +610,7 @@ func TestTheRetryLineCarriesTheNextAttemptsInstant(t *testing.T) {
 	h.r.OnApiError(testWS, mainAgent, scheduledFailure(8, 10, next))
 
 	// Assert
-	retry := h.view(t).GetStrip().GetStatus().GetWorking().GetActivity().GetSalient().GetRetrying()
+	retry := h.view(t).GetStrip().GetStatus().GetBlocked().GetActivity().GetSalient().GetRetrying()
 	if retry.GetNextAttempt().GetAtMs() != next.UnixMilli() {
 		t.Fatalf("next attempt = %v, want the vendor's stated instant", retry.GetNextAttempt())
 	}
@@ -628,7 +628,7 @@ func TestAFurtherFailureMovesTheNextAttempt(t *testing.T) {
 	h.r.OnApiError(testWS, mainAgent, scheduledFailure(2, 10, later))
 
 	// Assert
-	retry := h.view(t).GetStrip().GetStatus().GetWorking().GetActivity().GetSalient().GetRetrying()
+	retry := h.view(t).GetStrip().GetStatus().GetBlocked().GetActivity().GetSalient().GetRetrying()
 	if retry.GetAttempt() != 3 || retry.GetNextAttempt().GetAtMs() != later.UnixMilli() {
 		t.Fatalf("retry = %+v, want attempt 3 due at the later instant", retry)
 	}
@@ -644,7 +644,7 @@ func TestAnUnscheduledFailureCarriesNoNextAttempt(t *testing.T) {
 	h.r.OnApiError(testWS, mainAgent, &conversationv1.ApiRequestFailed{Message: "overloaded"})
 
 	// Assert
-	retry := h.view(t).GetStrip().GetStatus().GetWorking().GetActivity().GetSalient().GetRetrying()
+	retry := h.view(t).GetStrip().GetStatus().GetBlocked().GetActivity().GetSalient().GetRetrying()
 	if retry.NextAttempt != nil || retry.MaxAttempt != nil {
 		t.Fatalf("retry = %+v, want no schedule the vendor never stated", retry)
 	}
@@ -661,8 +661,8 @@ func TestTheRetriedCallsResponseAnnouncesTheRestoredAPI(t *testing.T) {
 	h.r.OnActivity(testWS, mainAgent, thinkingActivity("th-1"))
 
 	// Assert: the salient line ended, and a transient says the API answered.
-	if got := h.view(t).GetStrip().GetStatus().GetWorking().GetActivity().GetSalient().GetRetrying(); got != nil {
-		t.Fatalf("retrying = %+v, want it ended", got)
+	if got := h.view(t).GetStrip().GetStatus().GetBlocked(); got != nil {
+		t.Fatalf("status = blocked %+v, want the retry ended", got)
 	}
 	if restored := transientOf(t, h).GetApiRestored(); restored.GetFailedAttempts() != 8 {
 		t.Fatalf("transient = %v, want api_restored after 8 failed attempts", transientOf(t, h))
@@ -697,16 +697,16 @@ func TestEachArmResolvesItsSalientKindsInPrecedenceThenUnpinnedWithNoStoppedMerg
 			deploying(h)
 			h.r.SetTurn(testWS, &TurnStarted{At: instant})
 		}, "working", "salient.update"},
-		{"a retry outranks a deploy", func(h *harness) {
+		{"a retry blocks the turn and outranks a deploy", func(h *harness) {
 			deploying(h)
 			h.r.SetTurn(testWS, &TurnStarted{At: instant})
 			h.r.OnApiError(testWS, mainAgent, &conversationv1.ApiRequestFailed{Message: "overloaded"})
-		}, "working", "salient.retrying"},
-		{"a compaction outranks a retry", func(h *harness) {
+		}, "blocked", "salient.retrying"},
+		{"a retry blocks a compacting turn", func(h *harness) {
 			h.r.SetTurn(testWS, &TurnStarted{At: instant})
 			h.r.OnApiError(testWS, mainAgent, &conversationv1.ApiRequestFailed{Message: "overloaded"})
 			h.r.OnSessionUpdate(testWS, vendorCompacting())
-		}, "working", "salient.compaction"},
+		}, "blocked", "salient.retrying"},
 		{"interrupted, nothing salient", func(h *harness) {
 			turn := testTurnID
 			h.r.SetTurn(testWS, &TurnStarted{At: instant})

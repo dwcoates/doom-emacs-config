@@ -292,6 +292,15 @@ func (r *resolver) loading(s *wsState, log dlog.Logger) *frontendv1.FooterStatus
 // blocked resolves the block, or nil when nothing blocks the session.
 func (r *resolver) blocked(s *wsState, log dlog.Logger) *frontendv1.FooterStatus {
 	if s.blocked == nil {
+		if s.retryBlocks() {
+			// A TURN WHOSE CALL THE VENDOR IS RETRYING CANNOT ADVANCE, so it
+			// is blocked until the retried agent is answered (ladder/retry.go).
+			log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "the vendor is retrying the turn's call"})
+			return &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_Blocked{Blocked: &frontendv1.FooterStatusBlocked{
+				Substatus: &frontendv1.FooterStatusBlocked_ApiRetrying{ApiRetrying: &frontendv1.FooterSubStatusBlockedApiRetrying{}},
+				Activity:  r.blockedActivity(s),
+			}}}
+		}
 		// A DAEMON THAT CANNOT SERVE THIS SESSION BLOCKS IT. The vendor-side
 		// blocks above are the session's own; this one is the daemon's, and
 		// the shim may be perfectly healthy while it stands.
