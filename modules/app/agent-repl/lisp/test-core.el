@@ -390,9 +390,9 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
     ("history.el" agent-repl-history-search
      "[agent-repl] input history is empty"
      "answers the interactive history search")
-    ("input.el" agent-repl-input-response-selection-escape
+    ("input.el" agent-repl-input-selection-escape
      "%s"
-     "warns, in the minibuffer, that a second consecutive command-mode escape clears the reply-to-a-past-response selection")
+     "warns, in the minibuffer, that a second consecutive command-mode escape clears the feed selection")
     ("input.el" agent-repl--input-on-bubble-refusal
      "agent-repl: the prompt was refused for this agent (%S)"
      "reports a prompt refusal requiring user action")

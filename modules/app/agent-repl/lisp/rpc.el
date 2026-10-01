@@ -90,10 +90,10 @@
 (declare-function agent-repl-wire-decode-set-workspace-priority-response "wire-verbs" (alist))
 (declare-function agent-repl-wire-encode-submit-prompt-request "wire-verbs" (request))
 (declare-function agent-repl-wire-decode-submit-prompt-response "wire-verbs" (alist))
-(declare-function agent-repl-wire-encode-select-response-request "wire-verbs" (request))
+(declare-function agent-repl-wire-encode-select-feed-row-request "wire-verbs" (request))
 (declare-function agent-repl-wire-encode-edit-held-prompt-request "wire-verbs" (request))
 (declare-function agent-repl-wire-decode-edit-held-prompt-response "wire-verbs" (alist))
-(declare-function agent-repl-wire-decode-select-response-response "wire-verbs" (alist))
+(declare-function agent-repl-wire-decode-select-feed-row-response "wire-verbs" (alist))
 (declare-function agent-repl-wire-encode-adjust-feed-text-scale-request "wire-verbs" (request))
 (declare-function agent-repl-wire-decode-adjust-feed-text-scale-response "wire-verbs" (alist))
 (declare-function agent-repl-wire-encode-interrupt-request "wire-verbs" (request))
@@ -385,16 +385,17 @@ prompt's content whole (it keeps its queue place and is reclassified),
 `cancel' ends the edit with the content unchanged.  The begin is the
 webapp tray card's own; the resulting state arrives on the host stream.")
 
-(agent-repl-rpc--defverb agent-repl-rpc-select-response
-  "SelectResponse"
-  agent-repl-wire-encode-select-response-request
-  agent-repl-wire-decode-select-response-response
-  "Move or clear a workspace's reply-to-a-past-response selection cursor.
-The request carries only the workspace ref and a DIRECTION (`:prev',
-`:next', `:clear'): the daemon owns the ordered final-response rows, so it
-computes the newly selected feedid (both directions start at the most
-recent and wrap at each end) and pushes it to the webapp, then acks the
-selected feedid — or NONE — here for Emacs's own state tracking.")
+(agent-repl-rpc--defverb agent-repl-rpc-select-feed-row
+  "SelectFeedRow"
+  agent-repl-wire-encode-select-feed-row-request
+  agent-repl-wire-decode-select-feed-row-response
+  "Move or clear a workspace's feed selection.
+The request carries the workspace ref and a MOVE: a step through the final
+responses or through the prompts a rollback can reach (each `:older' or
+`:newer'), or a clear.  The daemon owns the ordered rows and the selection,
+so it computes where a step lands (both directions start at the newest row
+and wrap at each end), pushes the result to the webapp and to the host
+watch, and acks the outcome here.")
 
 (agent-repl-rpc--defverb agent-repl-rpc-adjust-feed-text-scale
   "AdjustFeedTextScale"

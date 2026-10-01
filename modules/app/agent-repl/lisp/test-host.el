@@ -1055,6 +1055,47 @@ answers `:unknown' and records the breach rather than opening."
             (should (equal (buffer-name buffer) "*agent-panel-input-ws-1*")))
         (kill-buffer buffer)))))
 
+;;;; ---- The feed selection ----
+
+(ert-deftest agent-repl-test-host-selection-push-records-the-kind ()
+  "A `selection' push records the kind of row the feed has selected."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (agent-repl-test-host--push "ws-1" (list :arm :selection :value :prompt))
+    ;; Assert
+    (should (eq (agent-repl-host-selection "ws-1") :prompt))))
+
+(ert-deftest agent-repl-test-host-selection-push-replaces-the-kind ()
+  "A later `selection' push replaces the kind in force."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (agent-repl-test-host--push "ws-1" (list :arm :selection :value :response))
+    ;; Act
+    (agent-repl-test-host--push "ws-1" (list :arm :selection :value :none))
+    ;; Assert
+    (should (eq (agent-repl-host-selection "ws-1") :none))))
+
+(ert-deftest agent-repl-test-host-selection-is-nil-before-any-push ()
+  "Before any `selection' push the kind is nil: nothing is selected."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act / Assert
+    (should (null (agent-repl-host-selection "ws-1")))))
+
+(ert-deftest agent-repl-test-host-selection-push-is-logged ()
+  "The selection reaching Emacs leaves an INFO record naming the kind."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (agent-repl-test-host--push "ws-1" (list :arm :selection :value :response))
+    ;; Assert
+    (should (agent-repl-test-host--logged-p :info "elisp.host.selection ws=ws-1 kind=:response"))))
+
 ;;;; ---- The notification click ----
 
 (ert-deftest agent-repl-test-host-notification-click-selects-this-workspace ()
