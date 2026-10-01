@@ -13168,7 +13168,10 @@ type FeedColdGateStanding struct {
 	// The session's model — what the re-read would run on.
 	Model *FeedColdGateModel `protobuf:"bytes,3,opt,name=model,proto3" json:"model,omitempty"`
 	// The compact submenu: summarizers and the offered compaction types.
-	Compact       *FeedColdGateCompactMenu `protobuf:"bytes,4,opt,name=compact,proto3" json:"compact,omitempty"`
+	// UNSET when this session's account does not offer compaction: the client
+	// draws only the pay and clear choices, and the daemon refuses a compact
+	// answer to this gate.
+	Compact       *FeedColdGateCompactMenu `protobuf:"bytes,4,opt,name=compact,proto3,oneof" json:"compact,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -17854,12 +17857,14 @@ const file_frontend_v1_feed_proto_rawDesc = "" +
 	"\fFeedColdGate\x12?\n" +
 	"\bstanding\x18\x01 \x01(\v2!.frontend.v1.FeedColdGateStandingH\x00R\bstanding\x12?\n" +
 	"\bresolved\x18\x02 \x01(\v2!.frontend.v1.FeedColdGateResolvedH\x00R\bresolvedB\a\n" +
-	"\x05state\"\xa4\x02\n" +
+	"\x05state\"\xb5\x02\n" +
 	"\x14FeedColdGateStanding\x12M\n" +
 	"\x0econtext_tokens\x18\x01 \x01(\v2&.frontend.v1.FeedColdGateContextTokensR\rcontextTokens\x12G\n" +
 	"\flast_request\x18\x02 \x01(\v2$.frontend.v1.FeedColdGateLastRequestR\vlastRequest\x124\n" +
-	"\x05model\x18\x03 \x01(\v2\x1e.frontend.v1.FeedColdGateModelR\x05model\x12>\n" +
-	"\acompact\x18\x04 \x01(\v2$.frontend.v1.FeedColdGateCompactMenuR\acompact\"3\n" +
+	"\x05model\x18\x03 \x01(\v2\x1e.frontend.v1.FeedColdGateModelR\x05model\x12C\n" +
+	"\acompact\x18\x04 \x01(\v2$.frontend.v1.FeedColdGateCompactMenuH\x00R\acompact\x88\x01\x01B\n" +
+	"\n" +
+	"\b_compact\"3\n" +
 	"\x19FeedColdGateContextTokens\x12\x16\n" +
 	"\x06tokens\x18\x01 \x01(\x03R\x06tokens\".\n" +
 	"\x17FeedColdGateLastRequest\x12\x13\n" +
@@ -18955,6 +18960,7 @@ func file_frontend_v1_feed_proto_init() {
 		(*FeedColdGate_Standing)(nil),
 		(*FeedColdGate_Resolved)(nil),
 	}
+	file_frontend_v1_feed_proto_msgTypes[211].OneofWrappers = []any{}
 	file_frontend_v1_feed_proto_msgTypes[217].OneofWrappers = []any{
 		(*FeedColdGateResolved_Pay)(nil),
 		(*FeedColdGateResolved_Clear)(nil),
