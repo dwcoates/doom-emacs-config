@@ -29,12 +29,14 @@ func (r *resolver) drawAgentPrompt(s *wsState, agent *conversationv1.AgentId, pr
 	blocks := r.drawUserBlocks(s, prompt.GetSaid().GetContent())
 
 	subFeedKey, isSub := s.agentFeeds[recipient.GetValue()]
-	if !isSub || s.address != nil {
-		// The main agent's prompt, or any prompt while a lease holder's output
-		// address is in force: one user-prompt row, placed by the address.
+	own := turnOf(turn)
+	if _, addressed := s.turnAddresses[ids.TurnID(turn.GetValue())]; !isSub || addressed {
+		// The main agent's prompt, or any prompt of an addressed turn: one
+		// user-prompt row, placed by the prompt's OWN turn (a folded prompt
+		// too: it is drawn where the turn its origin recorded draws).
 		// AN UNPLACEABLE PROMPT STILL OPENS ITS TURN: only its row is not drawn
 		// (place has reported why).
-		at, placed := r.place(s, recipient)
+		at, placed := r.placeTurn(s, recipient, own)
 		// A PROMPT FOLDED INTO A RUNNING TURN OPENS NO TURN. The vendor took it
 		// into the turn it names at a tool boundary, so its bubble belongs to
 		// that turn: stamped with it, working while it runs and settled by its
@@ -121,6 +123,11 @@ func (r *resolver) drawAgentPrompt(s *wsState, agent *conversationv1.AgentId, pr
 			return
 		}
 		row := r.userPromptRow(s, at, turn, turn, prompt.GetOrigin(), blocks)
+		if turn.GetValue() != "" && !s.rolledBack[ids.TurnID(turn.GetValue())] {
+			// THE PROMPT AS SAID, kept so a rollback can hand it back to the
+			// composer whole (rollback.go): the row holds only drawn blocks.
+			s.promptSaid[ids.TurnID(turn.GetValue())] = prompt.GetSaid()
+		}
 		log.Debug("daemon.feed.user_prompt",
 			"a delivered prompt was drawn as a user-prompt row",
 			dlog.Context{"turn": turn.GetValue(), "origin": prompt.GetOrigin().String(), "blocks": len(blocks)})
@@ -261,7 +268,7 @@ func (r *resolver) drawPortedPrompt(s *wsState, prompt PortedPrompt) {
 		s.endedTurns[ids.TurnID(prompt.Turn)] = true
 		s.knowTurn(ids.TurnID(prompt.Turn))
 	}
-	at := r.outputPlacement(s)
+	at := r.outputPlacement(s, turnOf(turn))
 	blocks := r.drawUserBlocks(s, SaidText(prompt.Text).GetContent())
 	row := r.userPromptRow(s, at, turn, turn, prompt.Origin, blocks)
 	r.logger(s.id).Debug("daemon.feed.ported_prompt",

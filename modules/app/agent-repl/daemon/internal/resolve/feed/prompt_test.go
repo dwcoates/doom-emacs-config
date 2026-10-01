@@ -25,7 +25,7 @@ func (h *harness) promptWith(turn string, origin conversationv1.PromptOrigin, bl
 		Agent:  mainAgent(),
 		Origin: origin,
 		Said:   &conversationv1.UserSaid{Content: &conversationv1.UserContent{Blocks: blocks}},
-	}, nil, noAddress())
+	}, nil)
 }
 
 // textBlock is one typed block.
@@ -204,7 +204,7 @@ func TestAnAgentAddressedPromptIsDrawnAtBothEnds(t *testing.T) {
 		Said: &conversationv1.UserSaid{Content: &conversationv1.UserContent{
 			Blocks: []*conversationv1.UserContentBlock{textBlock("also check the shim")},
 		}},
-	}, nil, noAddress())
+	}, nil)
 
 	// Assert: the outgoing send on the sender's feed…
 	var outgoing, delivered string
@@ -242,7 +242,7 @@ func TestAnAgentAddressedPromptCarriesTheSameBodyAtBothEnds(t *testing.T) {
 		Said: &conversationv1.UserSaid{Content: &conversationv1.UserContent{
 			Blocks: []*conversationv1.UserContentBlock{textBlock("also check the shim")},
 		}},
-	}, nil, noAddress())
+	}, nil)
 
 	// Assert: ONE component, both ends.
 	var senderBody, recipientBody string
@@ -261,15 +261,15 @@ func TestAnAgentAddressedPromptCarriesTheSameBodyAtBothEnds(t *testing.T) {
 	}
 }
 
-func TestAPromptWhileAnOutputAddressIsInForceStaysAUserPrompt(t *testing.T) {
-	// Arrange: a merge lease holds the session, and the recipient is a
+func TestAPromptOfAnAddressedTurnStaysAUserPrompt(t *testing.T) {
+	// Arrange: a merge's own turn is addressed, and the recipient is a
 	// subagent the resolver knows.
 	h := newHarness(t)
 	h.deliverPrompt("turn-1", "spawn an explorer")
 	created := &conversationv1.AgentId{Value: "agent-explore"}
 	h.spawnSubagent("spawn-1", created, "Explore", "map the daemon")
 	lease := ids.LeaseID("lease-7")
-	h.resolver.SetOutputAddress(testWorkspace, &sessionwatcher.OutputAddress{
+	h.resolver.AddressTurn(testWorkspace, "turn-2", &sessionwatcher.OutputAddress{
 		Feed: feedid.Feed{Merge: &lease},
 	})
 
@@ -279,7 +279,7 @@ func TestAPromptWhileAnOutputAddressIsInForceStaysAUserPrompt(t *testing.T) {
 		Agent:  created,
 		Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR,
 		Said:   &conversationv1.UserSaid{Content: &conversationv1.UserContent{Blocks: []*conversationv1.UserContentBlock{textBlock("resolve it")}}},
-	}, nil, noAddress())
+	}, nil)
 
 	// Assert: the address wins — the row lands on the merge feed as a labelled
 	// user prompt rather than being split across two agent feeds.
@@ -453,11 +453,11 @@ func completed(unit string) *conversationv1.AgentSuccess {
 func TestAPromptRowWorksUntilItsTurnsTerminal(t *testing.T) {
 	interim := func(h *harness) {
 		h.resolver.OnActivity(testWorkspace, mainAgent(),
-			responseFrame("unit-1", &conversationv1.AgentResponseUpdate{}, nil), nil, nil, noAddress())
+			responseFrame("unit-1", &conversationv1.AgentResponseUpdate{}, nil), nil, nil)
 	}
 	answer := func(h *harness) {
 		h.resolver.OnActivity(testWorkspace, mainAgent(),
-			responseSuccessActivity("unit-2", "the answer"), nil, nil, noAddress())
+			responseSuccessActivity("unit-2", "the answer"), nil, nil)
 	}
 	cases := []struct {
 		name        string
@@ -598,9 +598,9 @@ func TestAReplayedEndedTurnLeavesItsPromptSettled(t *testing.T) {
 	}
 }
 
-// THE QUEUE'S MIRROR IS STAMPED ON THE SAME PATH as the resolver's own draw: a
-// mirrored prompt of an open turn works.
-func TestAMirroredPromptOfAnOpenTurnWorks(t *testing.T) {
+// THE QUEUE'S ACCEPTED PROMPT IS STAMPED ON THE SAME PATH as the resolver's own draw: an
+// accepted prompt of an open turn works.
+func TestAnAcceptedPromptOfAnOpenTurnWorks(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	row := &frontendv1.FeedRow{
@@ -611,11 +611,11 @@ func TestAMirroredPromptOfAnOpenTurnWorks(t *testing.T) {
 	}
 
 	// Act.
-	h.resolver.UpsertAtOutputAddress(testWorkspace, feedid.RowKey{Kind: feedid.KindPrompt, ID: "turn-1"}, row)
+	h.resolver.UpsertAtTurnAddress(testWorkspace, "turn-1", feedid.RowKey{Kind: feedid.KindPrompt, ID: "turn-1"}, row)
 
 	// Assert.
 	if !h.promptWorking("turn-1") {
-		t.Fatal("the mirrored prompt of an open turn is not working")
+		t.Fatal("the accepted prompt of an open turn is not working")
 	}
 }
 
@@ -630,7 +630,7 @@ func TestAPromptNamingNoTurnIsNotWorking(t *testing.T) {
 	}
 
 	// Act.
-	h.resolver.UpsertAtOutputAddress(testWorkspace, feedid.RowKey{Kind: feedid.KindPrompt, ID: "unturned"}, row)
+	h.resolver.UpsertAtTurnAddress(testWorkspace, "unturned", feedid.RowKey{Kind: feedid.KindPrompt, ID: "unturned"}, row)
 
 	// Assert.
 	if h.only(rootFeed()).GetUserPrompt().GetWorking() {
@@ -736,7 +736,7 @@ func (h *harness) deliverFoldedPrompt(turn, into, text string) {
 		Said: &conversationv1.UserSaid{Content: &conversationv1.UserContent{
 			Blocks: []*conversationv1.UserContentBlock{textBlock(text)},
 		}},
-	}, nil, noAddress())
+	}, nil)
 }
 
 // promptRow is the user-prompt row keyed by TURN on the root feed.

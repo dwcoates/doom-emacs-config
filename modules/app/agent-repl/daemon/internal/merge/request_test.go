@@ -111,6 +111,9 @@ func TestARequestRecordsItsSource(t *testing.T) {
 	h := newHarness(t)
 	h.registerOther(otherWorkspace, "ws-two", "other-branch")
 	source := wsm.MergeSource{Kind: wsm.MergeSourceWorkspace, Workspace: otherWorkspace}
+	// The request is recorded with the branch checked out in the other worktree.
+	recorded := source
+	recorded.Branch = "other-branch"
 
 	// Act.
 	if err := h.request(t, source, RequestedByAgent); err != nil {
@@ -119,8 +122,117 @@ func TestARequestRecordsItsSource(t *testing.T) {
 
 	// Assert.
 	entries, _ := h.db.MergeQueue(context.Background(), h.repoKey())
-	if len(entries) != 1 || entries[0].Source != source {
+	if len(entries) != 1 || entries[0].Source != recorded {
 		t.Fatalf("queue = %+v, want the request's source recorded", entries)
+	}
+}
+
+// TestAnOwnBranchRequestRecordsTheBranchCheckedOutNotTheCreationBranch covers
+// the 2026-10-01 failure: the worktree had switched off the branch it was
+// created on, and the merge must take the branch checked out.
+func TestAnOwnBranchRequestRecordsTheBranchCheckedOutNotTheCreationBranch(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.git.mu.Lock()
+	h.git.branches[h.sourceD] = "renamed"
+	h.git.mu.Unlock()
+
+	// Act.
+	err := h.request(t, ownBranch, RequestedByAgent)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	entries, _ := h.db.MergeQueue(context.Background(), h.repoKey())
+	if len(entries) != 1 || entries[0].Source.Branch != "renamed" {
+		t.Fatalf("queue = %+v, want the checked-out branch recorded", entries)
+	}
+}
+
+func TestAMergedUpstreamRequestRecordsTheBranchCheckedOut(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.git.mu.Lock()
+	h.git.branches[h.sourceD] = "renamed"
+	h.git.mu.Unlock()
+
+	// Act.
+	err := h.request(t, wsm.MergeSource{Kind: wsm.MergeSourceMergedUpstream}, RequestedByAgent)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	entries, _ := h.db.MergeQueue(context.Background(), h.repoKey())
+	if len(entries) != 1 || entries[0].Source.Branch != "renamed" {
+		t.Fatalf("queue = %+v, want the checked-out branch recorded", entries)
+	}
+}
+
+func TestWithCheckedOutBranchRecordsTheBranchOfTheNamedWorkspace(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.registerOther(otherWorkspace, "ws-two", "other-branch")
+
+	// Act.
+	got, err := h.o.withCheckedOutBranch(context.Background(), theWorkspace, otherWorkspace, wsm.MergeSource{Kind: wsm.MergeSourceWorkspace, Workspace: otherWorkspace})
+
+	// Assert.
+	if err != nil || got.Branch != "other-branch" {
+		t.Fatalf("withCheckedOutBranch = %+v, %v, want other-branch", got, err)
+	}
+}
+
+func TestWithCheckedOutBranchRefusesAWorkspaceWithNoGeometry(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.db.mu.Lock()
+	delete(h.db.jobs, theWorkspace)
+	h.db.mu.Unlock()
+
+	// Act.
+	_, err := h.o.withCheckedOutBranch(context.Background(), theWorkspace, theWorkspace, ownBranch)
+
+	// Assert.
+	if refusal, refused := Refused(err); !refused || refusal.Arm != ArmNoLayoutFacts {
+		t.Fatalf("withCheckedOutBranch = %v, want the %s refusal", err, ArmNoLayoutFacts)
+	}
+}
+
+// TestEveryWorkspaceSourceRecordsTheBranchCheckedOut holds every arm that
+// merges a workspace's branch to the one shape: the checked-out branch is
+// recorded with the request.
+func TestEveryWorkspaceSourceRecordsTheBranchCheckedOut(t *testing.T) {
+	tests := []struct {
+		name   string
+		source wsm.MergeSource
+	}{
+		{name: "own branch", source: ownBranch},
+		{name: "merged upstream", source: wsm.MergeSource{Kind: wsm.MergeSourceMergedUpstream}},
+		{name: "another workspace", source: wsm.MergeSource{Kind: wsm.MergeSourceWorkspace, Workspace: otherWorkspace}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.registerOther(otherWorkspace, "ws-two", "checked-out")
+			h.git.mu.Lock()
+			h.git.branches[h.sourceD] = "checked-out"
+			h.git.mu.Unlock()
+
+			// Act.
+			err := h.request(t, tt.source, RequestedByAgent)
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("Enqueue: %v", err)
+			}
+			entries, _ := h.db.MergeQueue(context.Background(), h.repoKey())
+			if len(entries) != 1 || entries[0].Source.Branch != "checked-out" {
+				t.Fatalf("queue = %+v, want the checked-out branch recorded", entries)
+			}
+		})
 	}
 }
 
@@ -155,6 +267,25 @@ func TestARequestIsRefusedWhenItsSourceCannotBeMerged(t *testing.T) {
 			delete(h.db.jobs, theWorkspace)
 			h.db.mu.Unlock()
 		}, source: ownBranch, arm: ArmNoLayoutFacts},
+		{name: "an own branch whose worktree has a detached HEAD", arrange: func(h *harness) {
+			h.git.mu.Lock()
+			h.git.branches[h.sourceD] = ""
+			h.git.mu.Unlock()
+		}, source: ownBranch, arm: ArmUnknownBranch},
+		{name: "another workspace whose worktree has a detached HEAD", arrange: func(h *harness) {
+			h.registerOther(otherWorkspace, "ws-two", "b")
+			h.db.mu.Lock()
+			dir := h.db.jobs[otherWorkspace].Layout.SourceDir
+			h.db.mu.Unlock()
+			h.git.mu.Lock()
+			h.git.branches[dir] = ""
+			h.git.mu.Unlock()
+		}, source: wsm.MergeSource{Kind: wsm.MergeSourceWorkspace, Workspace: otherWorkspace}, arm: ArmUnknownBranch},
+		{name: "merged upstream whose worktree has a detached HEAD", arrange: func(h *harness) {
+			h.git.mu.Lock()
+			h.git.branches[h.sourceD] = ""
+			h.git.mu.Unlock()
+		}, source: wsm.MergeSource{Kind: wsm.MergeSourceMergedUpstream}, arm: ArmUnknownBranch},
 		{name: "a deleted session", arrange: func(h *harness) {
 			h.db.mu.Lock()
 			h.db.sessions[theWorkspace] = wsm.Session{Workspace: theWorkspace, Terminal: &wsm.SessionTerminal{Kind: "deleted"}}

@@ -23,6 +23,7 @@ import {
   readHistoryAfter,
   readHistoryFirst,
   readHistoryThrough,
+  resumeSession,
   startTurnRequest,
   stopAgent,
   turnId,
@@ -49,6 +50,8 @@ import {
 import { writtenKeys } from "../integration-support/store.js";
 import { KEEPALIVE_PROMPT_MARKER as KEEPALIVE_MARKER } from "../../src/engine/keepalive.js";
 import { promptText, readTranscript, userPrompts } from "../integration-support/vendor.js";
+import { promptVendorUuid } from "../../src/convert/ids.js";
+import { rollBackSessionRequestFor } from "../service/requests.js";
 
 afterEach(cleanupShims);
 
@@ -2017,5 +2020,94 @@ describe("scope, arms and ordering the verbs owe", () => {
       .map((frame) => watchAgentEntry(frame).entry?.entry.case ?? "");
     expect(servedKinds[0]).toBe("userPrompt");
     watch.close();
+  });
+});
+
+describe("RollBackSession", () => {
+  /** Run one whole turn of `text` to its terminal. */
+  async function wholeTurn(shim: Awaited<ReturnType<typeof spawnShim>>, turn: string, text: string): Promise<void> {
+    const watch = openStream((options) => shim.clients.h1.watchAgent(watchAgentRequest(), options));
+    await watch.next();
+    await shim.clients.h1.startTurn(startTurnRequest({ turn, text }));
+    await untilTerminal(watch);
+    watch.close();
+  }
+
+  const rollBack = rollBackSessionRequestFor;
+
+  test("the vendor files each prompt under its turn id's derived uuid", async () => {
+    const shim = await spawnShim();
+    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+
+    await wholeTurn(shim, "t1", "!md");
+
+    expect(userPrompts(readTranscript(shim.dirs, started.vendorSessionId)).map((record) => record.uuid)).toEqual([
+      promptVendorUuid("t1"),
+    ]);
+  });
+
+  test("a landed rollback resumes the conversation at the dropped prompt's parent", async () => {
+    const shim = await spawnShim();
+    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+    await wholeTurn(shim, "t1", "!md");
+    await wholeTurn(shim, "t2", "!md");
+    const forkPoint = readTranscript(shim.dirs, started.vendorSessionId).find(
+      (record) => record.uuid === promptVendorUuid("t2"),
+    )?.parentUuid;
+
+    const response = await shim.clients.h1.rollBackSession(rollBack("t2", ["t2"], "keep"));
+    await wholeTurn(shim, "t3", "!md");
+
+    const t3 = readTranscript(shim.dirs, started.vendorSessionId).find((record) => record.uuid === promptVendorUuid("t3"));
+    expect({ result: response.result.case, parent: t3?.parentUuid }).toEqual({ result: "success", parent: forkPoint });
+  });
+
+  test("a prompt the caller did not name after the cut refuses unseen_prompt", async () => {
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    await wholeTurn(shim, "t1", "!md");
+    await wholeTurn(shim, "t2", "!md");
+    await wholeTurn(shim, "t3", "!md");
+
+    const response = await shim.clients.h1.rollBackSession(rollBack("t2", ["t2"], "keep"));
+
+    expect(
+      response.result.case === "failure" && response.result.value.cause.case === "unseenPrompt"
+        ? response.result.value.cause.value.vendorPromptUuid
+        : response.result.case,
+    ).toBe(promptVendorUuid("t3"));
+  });
+
+  test("a shim restarted before the next prompt resumes at the rollback's cut", async () => {
+    const first = await spawnShim();
+    const started = sessionStarted(await first.clients.h1.startSession(freshSession()));
+    await wholeTurn(first, "t1", "!md");
+    await wholeTurn(first, "t2", "!md");
+    const forkPoint = readTranscript(first.dirs, started.vendorSessionId).find(
+      (record) => record.uuid === promptVendorUuid("t2"),
+    )?.parentUuid;
+    await first.clients.h1.rollBackSession(rollBack("t2", ["t2"], "keep"));
+    await first.clients.h1.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
+    await first.exited;
+
+    const second = await spawnShim({ reuse: first.dirs });
+    sessionStarted(await second.clients.h1.startSession(resumeSession(started.vendorSessionId, undefined, ["t2"])));
+    await wholeTurn(second, "t3", "!md");
+
+    const t3 = readTranscript(first.dirs, started.vendorSessionId).find((record) => record.uuid === promptVendorUuid("t3"));
+    expect(t3?.parentUuid).toBe(forkPoint);
+  });
+
+  test("files the vendor cannot restore refuse files_not_restorable", async () => {
+    const shim = await spawnShim({ env: { AGENT_REPL_FAKE_REFUSE: "rewind_files" } });
+    await shim.clients.h1.startSession(freshSession());
+    await wholeTurn(shim, "t1", "!md");
+    await wholeTurn(shim, "t2", "!md");
+
+    const response = await shim.clients.h1.rollBackSession(rollBack("t2", ["t2"], "restore"));
+
+    expect(response.result.case === "failure" ? response.result.value.cause.case : response.result.case).toBe(
+      "filesNotRestorable",
+    );
   });
 });

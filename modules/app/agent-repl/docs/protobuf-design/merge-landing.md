@@ -256,7 +256,11 @@ branch into the target as a non-fast-forward merge.
   - The test log is `<state>/merge-logs/<lease>-tests-<round>.log`, served
     by the token `<lease>/<round>`. A token whose workspace has closed is
     refused `unknown_merge_test_log`.
-  - Only the repair turns are mirrored onto the root feed.
+  - SUPERSEDED 2026-10-01 (owner ruling): nothing is mirrored onto the root
+    feed. A turn the merge itself starts (repairs and configured prompts)
+    draws in its tab alone; the user's prompts sent while the merge runs, and
+    their answers, draw on the root feed. See `daemon/AGENTS.md`, "A merge
+    runs in the workspace that asked for it".
   - The shutdown drain counts in-flight admission steps under the lock that
     sets `draining` (the race fixed on master first).
 - **The verb and the skill:** `claude-repld merge-queue -own [-keep-open] |
@@ -275,5 +279,5 @@ branch into the target as a non-fast-forward merge.
   popup.
 - **Gaps closed in the same change:** the vocabulary file
   (`proto/vocab/render-colors.json`) drops the retired arms, which the proto
-  commit had missed; mirrored repair rows are rebuilt from history on replay
-  (the e2e rewrite, `mq-e2e`).
+  commit had missed; repair rows are rebuilt from history on replay, in their
+  tab (the e2e rewrite, `mq-e2e`).

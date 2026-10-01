@@ -18,8 +18,22 @@ import { MalformedView } from "../rpc/malformed.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { callUnary } from "../rpc/unary.js";
 import { watchStream, type StreamHandle } from "../rpc/streams.js";
-import { ITEM_EXPANDED_EVENT, expandedSectionAt, installClickExpand } from "../expand.js";
+import {
+  ITEM_EXPANDED_EVENT,
+  autoCollapseFor,
+  cappedSectionsOf,
+  collapseSection,
+  expandedSectionAt,
+  installClickExpand,
+  isExpanded,
+  expandSection,
+} from "../expand.js";
+import { controlPlaneFailed } from "../failure/sink.js";
+import { createJumpCollapse } from "./jump-collapse.js";
 import { installBackgroundClear } from "./background-click.js";
+import { LEFT_VIEW_REQUEST, createSelectionVisibility } from "./selection-visibility.js";
+import { guardMalformed } from "../rpc/guard.js";
+import { selectFeedRow } from "./select-feed-row.js";
 import { refreshHasMore } from "./bubble-more.js";
 import { refreshTitleFolds } from "./title-fold.js";
 import { applyFeedTextScale } from "./feed-text-scale.js";
@@ -75,6 +89,12 @@ import { createPaintReporter, type PaintWatch } from "./painted.js";
 
 /** How long a revealed row wears the highlight that says "here". */
 export const REVEAL_HIGHLIGHT_MS = 1500;
+
+/** What the chip's `request` evidence names a jump's failed expansion as. */
+export const JUMP_EXPAND_REQUEST = "expand the entry a jump landed on";
+
+/** The scroll cause a jump centers under: the footer's own, or every other jump's. */
+type JumpCause = "detachedWorkSelected" | "entryJumped";
 
 
 export interface FeedDeps {
@@ -154,6 +174,27 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
   // works exactly as before, minus the pre-render. ONE instance is shared with
   // every sub-feed, since they all scroll inside this one box.
   const overscan = scrollBox === null ? null : createOverscan(scrollBox);
+  // THE SELECTED ROW LEAVING THE VIEWPORT ENDS THE SELECTION: the daemon is
+  // told (`left_view`), and its `none.stay` push drops the mark in place.
+  const selectionVisibility =
+    scrollBox === null
+      ? null
+      : createSelectionVisibility(scrollBox, (row) => {
+          void guardMalformed(
+            ctx,
+            "feed.selection-left-view",
+            selectFeedRow(ctx, { case: "leftView", value: { row } }, LEFT_VIEW_REQUEST),
+          );
+        });
+  // AN ENTRY A JUMP EXPANDED CLOSES ONCE IT IS WHOLLY OUT OF VIEW (owner
+  // request, 2026-10-01; jump-collapse.ts). Only what the jump itself opened is
+  // watched; the reader's own expansions are left to them.
+  const jumps = scrollBox === null ? null : createJumpCollapse(scrollBox);
+  // THE READER RETURNING TO THE TAIL CLOSES EVERY EXPANDED ENTRY (owner ruling,
+  // 2026-10-01), hooked to the tail owner's one re-latch.
+  tail?.onTailReached(() => {
+    collapseEveryExpandedEntry();
+  });
   let watch: StreamHandle | null = null;
   let disposed = false;
 
@@ -184,17 +225,20 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
   // the geometry read is the expanded layout; an item that owns its own fold (a
   // sub-feed bubble, a compaction's summary) announces ITEM_EXPANDED_EVENT and
   // centers through the listener below. A collapse never moves the feed.
+  //
+  // A READER'S TOGGLE MAKES THE ENTRY THEIRS: an entry a jump expanded and the
+  // reader then toggled by hand is no longer the jump's to close.
   const uninstallExpand = installClickExpand(host, undefined, (section, expanded) => {
-    refreshHasMore(section);
-    // A card's title fold follows the card's fold (title-fold.ts), so a toggle
-    // re-measures the titles it owns as well as the section itself.
-    refreshTitleFolds(section);
+    afterSectionToggle(section);
+    releaseJump(section);
     if (!expanded) return;
     intentScroll?.arm(section);
     centerExpandedItem(section);
   });
   const onItemExpanded = (event: Event): void => {
-    if (event.target instanceof HTMLElement) centerExpandedItem(event.target);
+    if (!(event.target instanceof HTMLElement)) return;
+    releaseJump(event.target);
+    centerExpandedItem(event.target);
   };
   host.addEventListener(ITEM_EXPANDED_EVENT, onItemExpanded);
 
@@ -210,12 +254,13 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
     bodyContext: feedContext(),
     scroll: scrollBox === null || tail === null ? undefined : { box: scrollBox, tail },
     overscan: overscan ?? undefined,
+    selectionVisibility: selectionVisibility ?? undefined,
     onPainted: (ids, at) => {
       paints.report(ids, at);
     },
   });
 
-  // A CLICK ON THE FEED OUTSIDE ANY BUBBLE ends an active reply selection
+  // A CLICK ON THE FEED OUTSIDE ANY BUBBLE ends the feed's selection
   // (owner ruling, 2026-09-23). It asks the daemon, which owns the selection;
   // the daemon's cleared push then parks the tail through `applySelection`.
   const uninstallClear =
@@ -430,23 +475,25 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
   // ---- reveal -----------------------------------------------------------
 
   /**
-   * Find a row and mark it, WITHOUT moving the feed: the breadcrumb and the
-   * hook's gated-call link open the bubbles above their target and mark it,
-   * and the reader scrolls to it themselves (owner rule, 2026-09-23: the user
-   * owns the scroll). Only the footer's detached-work selection scrolls.
+   * Every jump but the footer's (a breadcrumb, a hook's gated-call link): the
+   * same jump the footer makes (`reveal`), centered under `entryJumped`. Owner
+   * request, 2026-10-01, replacing the 2026-09-23 rule that these two only
+   * marked their target and left the scroll to the reader: every jump to a
+   * feed entry expands it and centers it.
    */
   function revealRow(id: FeedId): Promise<boolean> {
-    return reveal(id, false);
+    return reveal(id, "entryJumped");
   }
 
-  /** The footer's detached-work selection: find, mark and scroll to the card. */
+  /** The footer's detached-work selection (`detachedWorkSelected`). */
   function selectDetachedWork(id: FeedId): Promise<boolean> {
-    return reveal(id, true);
+    return reveal(id, "detachedWorkSelected");
   }
 
   /**
-   * Bring a row onto the page and mark it; SCROLL says whether the feed then
-   * moves to it (the detached-work selection) or stays where the reader has it.
+   * THE ONE JUMP TO A FEED ENTRY: bring the row onto the page, EXPAND the
+   * entry, CENTER it under CAUSE, and mark it (`land`). The expansion is the
+   * jump's, and is undone once the entry is wholly out of view (`jumps`).
    *
    * FOUND FIRST: a row already drawn — on the root feed or inside any OPEN
    * sub-feed — is simply landed on. Only when it is nowhere on screen is the
@@ -459,10 +506,10 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
    * walk that cannot complete leaves the reader where they were rather than
    * moving them somewhere plausible.
    */
-  async function reveal(id: FeedId, scroll: boolean): Promise<boolean> {
+  async function reveal(id: FeedId, cause: JumpCause): Promise<boolean> {
     const here = findAcrossOpenFeeds(root, id);
     if (here !== null) {
-      land(here, scroll);
+      await land(here, id, cause);
       return true;
     }
     log.debug("the reveal target is not drawn; asking the daemon where it lives", {
@@ -508,7 +555,11 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
     );
     if (page.case !== "success") return false;
     const crumbs = requireMessage(page.value.breadcrumbs, "FeedPageSuccess.breadcrumbs").crumbs;
-    const walked = await walk(crumbs, id);
+    const opened: BubbleLike[] = [];
+    const walked = await walk(crumbs, id, opened);
+    // A container the walk opened is the jump's expansion too, and is watched
+    // like the entry itself, whether or not the walk went on to the end.
+    for (const bubble of opened) trackJumpedBubble(bubble);
     if (!walked) return false;
     const found = findAcrossOpenFeeds(root, id);
     if (found === null) {
@@ -518,7 +569,7 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
       });
       return false;
     }
-    land(found, scroll);
+    await land(found, id, cause);
     return true;
   }
 
@@ -533,7 +584,11 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
    * for. Each crumb is therefore expanded only while the row is still not
    * found.
    */
-  async function walk(crumbs: readonly FeedBreadcrumb[], id: FeedId): Promise<boolean> {
+  async function walk(
+    crumbs: readonly FeedBreadcrumb[],
+    id: FeedId,
+    opened: BubbleLike[],
+  ): Promise<boolean> {
     let controller: FeedController = root;
     for (const crumb of crumbs) {
       if (findAcrossOpenFeeds(root, id) !== null) {
@@ -552,7 +607,9 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
         });
         return false;
       }
+      const wasOpen = bubble.isExpanded();
       if (!(await bubble.expand())) return false;
+      if (!wasOpen) opened.push(bubble);
       const child = bubble.child();
       if (child === null) return false;
       controller = child;
@@ -594,18 +651,26 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
     tail.itemExpanded(revealGeometry(scrollBox, row));
   }
 
-  /** Mark the row, briefly, as the one meant; scroll to it when SCROLL says so. */
-  function land(element: HTMLElement, scroll: boolean): void {
+  /**
+   * Land a jump on ELEMENT (the row ID names): expand the entry, then center
+   * it under CAUSE, reading the EXPANDED layout, and mark it, briefly, as the
+   * one meant.
+   */
+  async function land(element: HTMLElement, id: FeedId, cause: JumpCause): Promise<void> {
     // A grouped member sits in an inactive tab is HIDDEN and has no layout box;
     // bring its tab to the front, so the landing is on a member that is
     // actually drawn (tool-group.ts). A member outside any group is left alone.
     activateGroupedMember(element);
-    log.debug(`landed on a revealed row${scroll ? ", scrolling to it" : ""}`, {
+    await expandForJump(element, id);
+    if (disposed) return;
+    log.debug("landed on a jump's row, centering it", {
       operation: "feed.reveal-landed",
-      context: { row: element.getAttribute("data-feed-row") ?? "unset", scroll },
+      context: { row: id.value, cause },
     });
-    if (scroll && scrollBox !== null && tail !== null) {
-      tail.detachedWorkSelected(revealGeometry(scrollBox, element));
+    if (scrollBox !== null && tail !== null) {
+      const geometry = revealGeometry(scrollBox, element);
+      if (cause === "detachedWorkSelected") tail.detachedWorkSelected(geometry);
+      else tail.entryJumped(geometry);
     }
     // STATED on the row, not only styled: "this is the row you asked for" is
     // a fact about the row while it stands, and a jump's caller has no other
@@ -622,6 +687,120 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
     });
   }
 
+  /**
+   * EXPAND THE ENTRY A JUMP LANDED ON (owner request, 2026-10-01), and watch
+   * it so it closes again once wholly out of view. The entry is the row's
+   * sub-feed bubble when it holds one (a subagent's, a shell's, a merge's),
+   * otherwise every capped section the row itself owns (a tool card's fold, a
+   * hook card's boxes). An entry ALREADY open is the reader's: it is left as
+   * it is and never watched. A bubble the daemon would not open is an error
+   * on the chip; the jump still centers what is drawn.
+   */
+  async function expandForJump(row: HTMLElement, id: FeedId): Promise<void> {
+    const bubble = bubbleOfRow(root, row);
+    if (bubble !== null) {
+      if (bubble.isExpanded()) {
+        log.debug("a jump landed on a bubble already open; it is left as it is", {
+          operation: "feed.jump-expand-skipped",
+          context: { row: id.value, entry: "subFeed" },
+        });
+        return;
+      }
+      if (!(await bubble.expand())) {
+        log.error("a jump could not expand the bubble it landed on", {
+          operation: "feed.jump-expand-failed",
+          context: { row: id.value },
+        });
+        ctx.failures.report(
+          controlPlaneFailed(JUMP_EXPAND_REQUEST, "the daemon did not open the entry's feed"),
+        );
+        return;
+      }
+      trackJumpedBubble(bubble);
+      return;
+    }
+    const sections = sectionsOwnedBy(row);
+    if (sections.length === 0 || sections.some((section) => isExpanded(section))) {
+      log.debug("a jump landed on an entry with nothing closed to expand", {
+        operation: "feed.jump-expand-skipped",
+        context: { row: id.value, entry: sections.length === 0 ? "none" : "open" },
+      });
+      return;
+    }
+    for (const section of sections) expandSection(section, afterSectionToggle);
+    log.debug("a jump expanded the entry it landed on", {
+      operation: "feed.jump-expanded",
+      context: { row: id.value, sections: sections.length },
+    });
+    jumps?.track({
+      row,
+      isExpanded: () => sectionsOwnedBy(row).some((section) => isExpanded(section)),
+      collapse: () => {
+        for (const section of sectionsOwnedBy(row)) {
+          if (isExpanded(section)) collapseSection(section, afterSectionToggle);
+        }
+      },
+    });
+  }
+
+  /** Watch a bubble a jump opened, keyed by its row. */
+  function trackJumpedBubble(bubble: BubbleLike): void {
+    const row = bubble.element.closest<HTMLElement>(FEED_ROW_SELECTOR);
+    if (row === null) {
+      log.error("a bubble a jump opened hangs in no feed row", {
+        operation: "feed.jump-bubble-rowless",
+        context: { element: bubble.element.className },
+      });
+      throw new Error("feed: a bubble a jump opened hangs in no feed row");
+    }
+    jumps?.track({
+      row,
+      isExpanded: () => bubble.isExpanded(),
+      collapse: () => bubble.collapse(),
+    });
+  }
+
+  /**
+   * What a capped section's toggle redraws, whoever toggled it: the bubble's
+   * "more below" affordance and the title folds the section owns.
+   */
+  function afterSectionToggle(section: HTMLElement): void {
+    refreshHasMore(section);
+    // A card's title fold follows the card's fold (title-fold.ts), so a toggle
+    // re-measures the titles it owns as well as the section itself.
+    refreshTitleFolds(section);
+  }
+
+  /** The reader toggled something inside EL's row: the row is theirs now. */
+  function releaseJump(el: HTMLElement): void {
+    const row = el.closest<HTMLElement>(FEED_ROW_SELECTOR);
+    if (row !== null) jumps?.release(row);
+  }
+
+  /**
+   * THE READER RETURNED TO THE TAIL (owner ruling, 2026-10-01): every expanded
+   * entry collapses, ONCE. The jump watches are dropped first, since what they
+   * would close is closed here; then every open capped section on the page
+   * (the auto-collapse owner's `tailReached`), then every open root bubble,
+   * whose collapse discards whatever was open inside it.
+   */
+  function collapseEveryExpandedEntry(): void {
+    jumps?.clear();
+    const sections = autoCollapseFor(host.ownerDocument).collapseOutside("tailReached", null);
+    let bubbles = 0;
+    for (const bubble of root.bubbles()) {
+      if (!bubble.isExpanded()) continue;
+      bubble.collapse();
+      bubbles += 1;
+    }
+    const record = { operation: "feed.tail-reached-collapse", context: { sections, bubbles } };
+    if (sections + bubbles === 0) {
+      log.debug("the reader returned to the tail; nothing was expanded", record);
+      return;
+    }
+    log.info("the reader returned to the tail; every expanded entry collapses", record);
+  }
+
   function dispose(): void {
     if (disposed) return;
     disposed = true;
@@ -632,13 +811,40 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
     host.removeEventListener(ITEM_EXPANDED_EVENT, onItemExpanded);
     uninstallClear?.();
     overscan?.dispose();
+    selectionVisibility?.dispose();
+    jumps?.dispose();
     root.dispose();
   }
 }
 
-/** The row's element, searched across the root feed and every OPEN sub-feed. */
 /** Every feed row's element, at whatever depth of sub-feed it is drawn. */
 const FEED_ROW_SELECTOR = "[data-feed-row]";
+
+/**
+ * The capped sections ROW owns itself: every one whose nearest feed row is
+ * ROW, so a section of a row nested inside it (a sub-feed's, a grouped
+ * member's) is that row's, not this one's.
+ */
+function sectionsOwnedBy(row: HTMLElement): HTMLElement[] {
+  return cappedSectionsOf(row).filter((section) => section.closest(FEED_ROW_SELECTOR) === row);
+}
+
+/**
+ * The sub-feed bubble ROW holds itself, searched across CONTROLLER and every
+ * OPEN sub-feed under it, or null when the row is no bubble's.
+ */
+function bubbleOfRow(controller: FeedController, row: HTMLElement): BubbleLike | null {
+  for (const bubble of controller.bubbles()) {
+    if (bubble.element.closest(FEED_ROW_SELECTOR) === row) return bubble;
+    const child = bubble.isExpanded() ? bubble.child() : null;
+    if (child === null || !bubble.element.contains(row)) continue;
+    const found = bubbleOfRow(child, row);
+    if (found !== null) return found;
+  }
+  return null;
+}
+
+/** The row's element, searched across the root feed and every OPEN sub-feed. */
 
 /**
  * THE FEED COLUMN'S LATEST ENTRY inside the scroll BOX: the last thing drawn in

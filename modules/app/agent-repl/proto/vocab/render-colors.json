@@ -198,17 +198,6 @@
   "composer_closed_colors": [
     "blue"
   ],
-  "_footer_allowance_comment": [
-    "The rate-limit allowance rung's status arms (frontend.v1 FooterAllowance.status,",
-    "sourced from SessionUpdate.rate_limit_status): allowed is quiet, allowed_warning",
-    "is the newsworthy rung, rejected means the vendor refused. Consumers assert row",
-    "for row against the three arm names; no private fallback table exists anywhere."
-  ],
-  "footer_allowance": {
-    "allowed": "green",
-    "allowed_warning": "yellow",
-    "rejected": "red"
-  },
   "_topbar_connectivity_comment": [
     "TopbarConnectivity.tone, keyed by the daemon's link states. The topbar",
     "reports the route to the session's shim, so its whole range is green",
@@ -266,5 +255,35 @@
     "machinery": "blue",
     "vendor": "purple",
     "client_local": "blue"
+  },
+  "_feed_work_dots_comment": [
+    "The dot leading a feed subagent bubble's head (frontend.v1.FeedSubagent)",
+    "and a detached shell bubble's head (frontend.v1.FeedShell), keyed by the",
+    "state arm: 'live', else the settled outcome arm. Owner request,",
+    "2026-10-01: running is a FILLED green dot, failed a FILLED red one, and a",
+    "run that settled successfully a HOLLOW one. A dot that spends no color",
+    "('none') is drawn hollow, every colored dot filled, so the shape needs no",
+    "table of its own.",
+    "",
+    "cancelled is 'none' (hollow): the user's own stop ended it, so nothing went",
+    "wrong and nothing wants a look. lost is 'turquoise' (filled): we stopped",
+    "being able to see the run, which is unexpected and wants the user's",
+    "attention, but it is not a proven failure, so it does not take failed's",
+    "red. A shell has no 'failed' arm: a nonzero exit is still 'completed'."
+  ],
+  "feed_subagent_dot": {
+    "live": "green",
+    "succeeded": "none",
+    "failed": "red",
+    "cancelled": "none",
+    "lost": "blue"
+  },
+  "feed_shell_dot": {
+    "live": "green",
+    "completed": "none",
+    "completed_succeeded": "none",
+    "completed_failed": "red",
+    "cancelled": "none",
+    "lost": "blue"
   }
 }

@@ -1,11 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
-import { Code, ConnectError } from "@connectrpc/connect";
-import {
-  SelectResponseDirection,
-  SelectResponseResponseSchema,
-} from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_response_pb";
+import { SelectFeedRowResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_feed_row_pb";
 import type { FailureKind } from "../../../proto/gen/ts/frontend/v1/failure_pb";
 import {
   CLEAR_REQUEST,
@@ -114,9 +110,7 @@ describe("installBackgroundClear", () => {
     click(a.at("#feed"));
     await settle();
     // Assert
-    expect(a.h.calls.selectResponse.map((r) => r.direction)).toEqual([
-      SelectResponseDirection.CLEAR,
-    ]);
+    expect(a.h.calls.selectFeedRow.map((r) => r.move.case)).toEqual(["clear"]);
   });
 
   it("addresses the clear to this page's workspace", async () => {
@@ -126,7 +120,7 @@ describe("installBackgroundClear", () => {
     click(a.box);
     await settle();
     // Assert
-    expect(a.h.calls.selectResponse[0]?.workspace?.id).toBe("ws-1");
+    expect(a.h.calls.selectFeedRow[0]?.workspace?.id).toBe("ws-1");
   });
 
   it("sends nothing for a click on a bubble", async () => {
@@ -136,7 +130,7 @@ describe("installBackgroundClear", () => {
     click(a.at("#prose"));
     await settle();
     // Assert
-    expect(a.h.calls.selectResponse).toEqual([]);
+    expect(a.h.calls.selectFeedRow).toEqual([]);
   });
 
   it("sends nothing for a click on a control", async () => {
@@ -146,17 +140,17 @@ describe("installBackgroundClear", () => {
     click(a.at(".load-more"));
     await settle();
     // Assert
-    expect(a.h.calls.selectResponse).toEqual([]);
+    expect(a.h.calls.selectFeedRow).toEqual([]);
   });
 
-  it("sends nothing while no reply selection is active", async () => {
+  it("sends nothing while no row is selected", async () => {
     // Arrange
     const a = armed({}, false);
     // Act
     click(a.at("#feed"));
     await settle();
     // Assert
-    expect(a.h.calls.selectResponse).toEqual([]);
+    expect(a.h.calls.selectFeedRow).toEqual([]);
   });
 
   it("sends nothing for a click that ends a text drag", async () => {
@@ -169,7 +163,7 @@ describe("installBackgroundClear", () => {
     click(a.at("#feed"));
     await settle();
     // Assert
-    expect(a.h.calls.selectResponse).toEqual([]);
+    expect(a.h.calls.selectFeedRow).toEqual([]);
   });
 
   it("sends nothing once uninstalled", async () => {
@@ -180,7 +174,7 @@ describe("installBackgroundClear", () => {
     click(a.at("#feed"));
     await settle();
     // Assert
-    expect(a.h.calls.selectResponse).toEqual([]);
+    expect(a.h.calls.selectFeedRow).toEqual([]);
   });
 
   it("logs the click-to-clear at info", async () => {
@@ -205,11 +199,11 @@ describe("installBackgroundClear", () => {
     expect(a.reported).toEqual([]);
   });
 
-  it("files a refused clear on the warning chip with the refusal's sentence", async () => {
+  it("names a refused clear on the warning chip as the clear", async () => {
     // Arrange
     const a = armed({
-      selectResponse: () =>
-        create(SelectResponseResponseSchema, {
+      selectFeedRow: () =>
+        create(SelectFeedRowResponseSchema, {
           result: { case: "error", value: { cause: { case: "notYetAdopted", value: {} } } },
         }),
     });
@@ -219,68 +213,5 @@ describe("installBackgroundClear", () => {
     // Assert
     const kind = a.reported[0]?.kind;
     expect(kind?.case === "controlPlaneFailed" ? kind.value.what : kind?.case).toBe(CLEAR_REQUEST);
-  });
-
-  it("logs a refused clear at error with its arm", async () => {
-    // Arrange
-    const capture = captureLogRecords();
-    const a = armed({
-      selectResponse: () =>
-        create(SelectResponseResponseSchema, {
-          result: { case: "error", value: { cause: { case: "notYetAdopted", value: {} } } },
-        }),
-    });
-    // Act
-    click(a.at("#feed"));
-    await settle();
-    // Assert
-    const record = await forwardedRecord(capture, "feed.selection-clear-refused");
-    expect([record.level.case, record.context?.arm]).toEqual(["error", "notYetAdopted"]);
-  });
-
-  it("files a clear that failed at the transport on the warning chip", async () => {
-    // Arrange
-    const a = armed({
-      selectResponse: () => {
-        throw new ConnectError("connection refused", Code.Unavailable);
-      },
-    });
-    // Act
-    click(a.at("#feed"));
-    await settle();
-    // Assert
-    const kind = a.reported[0]?.kind;
-    expect(kind?.case === "controlPlaneFailed" ? kind.value.cause : kind?.case).toBe(
-      "the daemon could not be reached",
-    );
-  });
-
-  it("logs a clear that failed at the transport at error", async () => {
-    // Arrange
-    const capture = captureLogRecords();
-    const a = armed({
-      selectResponse: () => {
-        throw new ConnectError("connection refused", Code.Unavailable);
-      },
-    });
-    // Act
-    click(a.at("#feed"));
-    await settle();
-    // Assert
-    const record = await forwardedRecord(capture, "rpc.unary-transport-failure");
-    expect([record.level.case, record.context?.rpc]).toEqual(["error", "SelectResponse"]);
-  });
-
-  it("files an unreadable answer as an undecodable frame", async () => {
-    // Arrange
-    const a = armed({
-      selectResponse: () =>
-        create(SelectResponseResponseSchema, { result: { case: "error", value: {} } }),
-    });
-    // Act
-    click(a.at("#feed"));
-    await settle();
-    // Assert
-    expect(a.reported.map((k) => k.kind.case)).toEqual(["frameUndecodable"]);
   });
 });

@@ -1176,22 +1176,7 @@ export class TurnEngine {
       );
     }
     const spawned = request.force ? this.session.live.spawnedBy(open.id.value) : [];
-    const query = this.session.query();
-    // Callback liveness before the interrupt, always.
-    this.session.gate.standDown(`turn ${open.id.value} was killed`);
-    this.session.noteStopCommand(open.id, request.commandedBy);
-    if (query !== undefined) {
-      // The session declares the per-task stop (`perTaskStopAffordance`), so
-      // the vendor's interrupt ends the turn and spares its background work.
-      await query.interrupt();
-      for (const entry of spawned) await query.stopTask(entry.taskId);
-    }
-    // A SUBAGENT'S TERMINAL ARRIVES ON ITS OWN, in the `task_notification` the
-    // stop provokes; A SHELL'S DOES NOT, because no vendor message states that
-    // a shell run was stopped. Every item this kill named concludes, or the
-    // consumer is left watching work that will never end.
-    this.session.concludeStoppedRuns(spawned);
-    this.session.releaseTurn(open);
+    await this.interrupt(open, spawned, request.commandedBy);
     const killed = create(conversationv1.TurnKilledSchema, {
       how:
         spawned.length === 0
@@ -1212,6 +1197,79 @@ export class TurnEngine {
       );
     }
     return killTurnKilled(killed);
+  }
+
+  /**
+   * Interrupt `open` and stop `spawned`: THE ONE STOP of an open turn, shared by
+   * KillTurn (forced or not) and RollBackSession, so a rollback interrupts a
+   * turn exactly as an unforced kill does and the daemon sees the same
+   * interrupted terminal on WatchAgent.
+   */
+  private async interrupt(
+    open: OpenTurn,
+    spawned: readonly LiveWorkEntry[],
+    commandedBy: conversationv1.AgentInterruptedByUser | undefined,
+  ): Promise<void> {
+    const query = this.session.query();
+    // Callback liveness before the interrupt, always.
+    this.session.gate.standDown(`turn ${open.id.value} was killed`);
+    this.session.noteStopCommand(open.id, commandedBy);
+    if (query !== undefined) {
+      // The session declares the per-task stop (`perTaskStopAffordance`), so
+      // the vendor's interrupt ends the turn and spares its background work.
+      await query.interrupt();
+    }
+    await this.stopWork(spawned);
+    this.session.releaseTurn(open);
+  }
+
+  /**
+   * Stop each item of detached work through the vendor's per-task stop, and
+   * conclude it. Shared by every forced kill and by RollBackSession.
+   */
+  private async stopWork(spawned: readonly LiveWorkEntry[]): Promise<void> {
+    const query = this.session.query();
+    if (query !== undefined) {
+      for (const entry of spawned) await query.stopTask(entry.taskId);
+    }
+    // A SUBAGENT'S TERMINAL ARRIVES ON ITS OWN, in the `task_notification` the
+    // stop provokes; A SHELL'S DOES NOT, because no vendor message states that
+    // a shell run was stopped. Every item a stop named concludes, or the
+    // consumer is left watching work that will never end.
+    this.session.concludeStoppedRuns(spawned);
+  }
+
+  // -- RollBackSession ------------------------------------------------------
+
+  /**
+   * RollBackSession's interrupt: the turn a consumer may address, interrupted
+   * exactly as an unforced KillTurn interrupts it — its detached work spared.
+   * Answers the turn it interrupted, or absence when none was open.
+   */
+  async interruptForRollback(): Promise<OpenTurn | undefined> {
+    const open = this.servedTurn();
+    if (open === undefined) return undefined;
+    await this.interrupt(open, [], undefined);
+    LOGGER.info(
+      { turn_id: open.id.value, spared: this.session.live.spawnedBy(open.id.value).length },
+      "interrupted the open turn for a rollback, as an unforced KillTurn does",
+    );
+    return open;
+  }
+
+  /**
+   * RollBackSession's `restore_files` stop: every live item any of `turns`
+   * spawned, transitively, through the forced kill's own stop. Answers what
+   * was stopped.
+   */
+  async stopWorkSpawnedBy(turns: readonly string[]): Promise<readonly LiveWorkEntry[]> {
+    const spawned = [...new Set(turns.flatMap((turn) => this.session.live.spawnedBy(turn)))];
+    await this.stopWork(spawned);
+    LOGGER.info(
+      { turns, stopped: spawned.map((entry) => entry.taskId) },
+      "stopped the detached work the rolled-back turns spawned",
+    );
+    return spawned;
   }
 
   /**
@@ -1289,11 +1347,7 @@ export class TurnEngine {
     turnId: string,
     spawned: readonly LiveWorkEntry[],
   ): Promise<shimv1.KillTurnResponse> {
-    const query = this.session.query();
-    if (query !== undefined) {
-      for (const entry of spawned) await query.stopTask(entry.taskId);
-    }
-    this.session.concludeStoppedRuns(spawned);
+    await this.stopWork(spawned);
     LOGGER.info(
       { turn_id: turnId, stopped: spawned.length },
       "killed the live work a closed turn left running",

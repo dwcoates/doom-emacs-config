@@ -17,6 +17,7 @@ package shim.v1;
 import "conversation/v1/api.proto";
 import "conversation/v1/permission.proto";
 import "conversation/v1/session.proto";
+import "conversation/v1/turn.proto";
 
 option go_package = "agentrepl/proto/shim/v1;shimv1";
 
@@ -78,6 +79,16 @@ message StartSessionResume {
   // bind to a rotated conversation lands on the book its records were filed
   // under rather than minting a second name for it.
   optional StartSessionRebind rebind = 3;
+  // EVERY TURN OF THIS WORKSPACE THAT WAS ROLLED BACK (RollBackSession), as
+  // the daemon recorded them. The vendor never rewrites its transcript: after
+  // a rollback, the file still ends on the dropped branch until the next
+  // prompt appends past the cut, so a plain resume of the newest record would
+  // bring the dropped turns back into the agent's context. The shim resumes at
+  // the newest record unless that record's chain holds the prompt of a turn
+  // named here; then it resumes at the entry just before the earliest such
+  // prompt. A branch the next prompt started holds none of them, so nothing
+  // here ever needs clearing. Empty for a workspace never rolled back.
+  repeated conversation.v1.TurnId rolled_back_turns = 4;
 }
 
 // This resume is a rebind: the workspace's book becomes the resumed

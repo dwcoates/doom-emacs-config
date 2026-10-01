@@ -117,6 +117,7 @@ var layout3Undo = map[int][]string{
 	},
 	16: {`DROP TABLE durable_feed_rows`},
 	17: {`ALTER TABLE repositories DROP COLUMN folded`},
+	18: {`DROP TABLE rolled_back_turns`},
 }
 
 // demoteToLayout3 takes a stopped daemon's state database back to layout 3 by

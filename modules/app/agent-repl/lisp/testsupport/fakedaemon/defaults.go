@@ -1,6 +1,7 @@
 package main
 
 import (
+	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -204,7 +205,21 @@ func specializeDefault(method string, req, out proto.Message) error {
 		}
 		turnID.Set(valueFd, protoreflect.ValueOfString("turn-"+stringField(req, "idempotency_key")))
 		return nil
+	case "PlanRollback":
+		// PlanRollbackSuccess.outcome resolved to `plan` by fillRequired; its
+		// token is daemon-minted and a client refuses an empty one, so the
+		// default mints a stable opaque value a RollBack can echo.
+		plan := out.(*agentreplv1.PlanRollbackResponse).GetSuccess().GetPlan()
+		if plan == nil || plan.GetToken() == nil {
+			return fmt.Errorf("PlanRollback: the default success carries no plan token")
+		}
+		plan.Token.Value = defaultRollbackToken
+		return nil
 	default:
 		return nil
 	}
 }
+
+// defaultRollbackToken is the opaque token the default PlanRollback plan
+// carries.
+const defaultRollbackToken = "fake-rollback-token"

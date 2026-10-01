@@ -1,7 +1,10 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -29,6 +32,8 @@ import (
 //	claude-repld merge-queue -dir WORKTREE [-wait] [-state-dir DIR]
 //	claude-repld merge-queue -branch BRANCH [-wait] [-state-dir DIR]
 //	claude-repld merge-queue -pr-merged [-wait] [-state-dir DIR]
+//	claude-repld merge-queue -evict | -evict-dir WORKTREE [-answer-timeout D] [-state-dir DIR]
+//	claude-repld merge-queue -pause | -resume [-repository-dir DIR] [-answer-timeout D] [-state-dir DIR]
 //
 // A MERGE RUNS IN THE WORKSPACE THAT ASKED FOR IT, and the verb asks FROM THE
 // CALLING WORKSPACE: the workspace whose worktree contains the caller's working
@@ -53,6 +58,22 @@ import (
 // outcome -- LANDED (exit 0) or FAILED with its area (exitMergeFailed) -- and
 // -wait is REFUSED while the calling workspace has a turn in flight: that turn
 // is the one that would wait, and the merge cannot start until it ends.
+//
+// THE QUEUE'S CONTROLS ask, from the calling workspace too, through the same
+// ingress and the same writer, for the queue itself to change:
+//
+//   - `-evict` takes the calling workspace's merge off the queue, `-evict-dir`
+//     another workspace's (merge_evict);
+//   - `-pause` / `-resume` pause or resume the queue of the repository whose
+//     main checkout is `-repository-dir`, else of every repository
+//     (merge_pause, merge_resume).
+//
+// A control is answered AT ONCE, so the verb waits (at most -answer-timeout)
+// for the file's fate and prints the daemon's own answer, read off the record
+// the ingress keys by the file's path in the run log: `outcome: <outcome>`
+// (evicted, not_queued, paused, resumed) when applied, or the refusal's cause
+// when quarantined. An answer the run log does not carry is printed as unread,
+// on stderr, and the file's fate still decides the exit.
 
 // mergeQueueVerb is the verb's name on the command line.
 const mergeQueueVerb = "merge-queue"
@@ -64,6 +85,23 @@ const (
 	exitMergeFailed = 5
 	// exitMergeRefused is a command the daemon refused and quarantined.
 	exitMergeRefused = 6
+	// exitControlUnanswered is a queue control whose file the daemon did not
+	// retire within -answer-timeout; the file stays in the ingress, pending.
+	exitControlUnanswered = 7
+)
+
+// defaultAnswerTimeout bounds the wait for a queue control's answer. The
+// ingress answers within a poll interval of a serving daemon.
+const defaultAnswerTimeout = 15 * time.Second
+
+// The run-log operations a queue control's answer is read from
+// (internal/commandfile's records, keyed by the file's path).
+const (
+	opControlOutcome    = "daemon.commandfile.merge_queue"
+	opControlRefusal    = "daemon.commandfile.entry"
+	opControlMalformed  = "daemon.commandfile.quarantine"
+	outcomeLinePrefix   = "merge-queue: outcome: "
+	unreadControlAnswer = "unread"
 )
 
 // The roster status arms the verb reads, spelled as the proto's oneof field
@@ -111,11 +149,13 @@ type mergeQueueEnv struct {
 	poll time.Duration
 }
 
-// mergeQueueSource is what one invocation merges: the merge entry's source
-// fields, and its label on the verb's output.
+// mergeQueueSource is what one invocation asks for: the entry's type and
+// source fields, its label on the verb's output, and whether it is a queue
+// control rather than a merge.
 type mergeQueueSource struct {
-	label string
-	entry commandfile.Entry
+	label   string
+	entry   commandfile.Entry
+	control bool
 }
 
 // connectMergeQueueDaemon is the production reader over the daemon's rpcs.
@@ -184,6 +224,12 @@ func runMergeQueueVerb(ctx context.Context, args []string, dial mergeQueueDialer
 	dir := fs.String("dir", "", "merge another workspace's branch, by its worktree; it closes once it lands")
 	branch := fs.String("branch", "", "merge a branch that is no workspace (a subagent's)")
 	prMerged := fs.Bool("pr-merged", false, "the calling workspace's branch already merged upstream: update the default branch and close it")
+	evict := fs.Bool("evict", false, "take the calling workspace's merge off the queue")
+	evictDir := fs.String("evict-dir", "", "take another workspace's merge off the queue, by its worktree")
+	pause := fs.Bool("pause", false, "pause the merge queue (every repository's, or -repository-dir's)")
+	resume := fs.Bool("resume", false, "resume the merge queue (every repository's, or -repository-dir's)")
+	repositoryDir := fs.String("repository-dir", "", "with -pause or -resume: the repository's main checkout")
+	answerTimeout := fs.Duration("answer-timeout", defaultAnswerTimeout, "with a queue control: how long to wait for the daemon's answer")
 	wait := fs.Bool("wait", false, "wait for the outcome: landed (0) or failed (5)")
 	stateDir := fs.String("state-dir", "", "state root, overriding $AGENT_REPL_STATE_DIR")
 	if err := fs.Parse(args); err != nil {
@@ -192,9 +238,18 @@ func runMergeQueueVerb(ctx context.Context, args []string, dial mergeQueueDialer
 	if fs.NArg() != 0 {
 		return fail("unexpected arguments: %s", strings.Join(fs.Args(), " "))
 	}
-	source, err := resolveMergeQueueSource(*own, *keepOpen, *dir, *branch, *prMerged)
+	source, err := resolveMergeQueueSource(mergeQueueFlags{
+		own: *own, keepOpen: *keepOpen, dir: *dir, branch: *branch, prMerged: *prMerged,
+		evict: *evict, evictDir: *evictDir, pause: *pause, resume: *resume, repositoryDir: *repositoryDir,
+	})
 	if err != nil {
 		return fail("%v", err)
+	}
+	if source.control && *wait {
+		return fail("-wait waits for a merge's outcome; a queue control is answered at once")
+	}
+	if *answerTimeout <= 0 {
+		return fail("-answer-timeout must be positive, not %s", *answerTimeout)
 	}
 	cwd, err := env.getwd()
 	if err != nil {
@@ -204,43 +259,91 @@ func runMergeQueueVerb(ctx context.Context, args []string, dial mergeQueueDialer
 	if err != nil {
 		return fail("resolve the state root: %v", err)
 	}
-	w := &mergeWatch{source: source, cwd: canonicalDir(cwd), wait: *wait, dial: dial, layout: layout, env: env, out: out, errOut: errOut}
+	w := &mergeWatch{source: source, cwd: canonicalDir(cwd), wait: *wait, answerTimeout: *answerTimeout,
+		dial: dial, layout: layout, env: env, out: out, errOut: errOut}
 	return w.run(ctx)
 }
 
+// mergeQueueFlags are the flags that name what one invocation asks for.
+type mergeQueueFlags struct {
+	own, keepOpen bool
+	dir, branch   string
+	prMerged      bool
+	evict         bool
+	evictDir      string
+	pause, resume bool
+	repositoryDir string
+}
+
 // resolveMergeQueueSource turns the flags into what the calling workspace
-// merges. Exactly one source is named.
-func resolveMergeQueueSource(own, keepOpen bool, dir, branch string, prMerged bool) (mergeQueueSource, error) {
+// asks for. Exactly one merge or control is named.
+func resolveMergeQueueSource(f mergeQueueFlags) (mergeQueueSource, error) {
 	named := 0
-	for _, set := range []bool{own, dir != "", branch != "", prMerged} {
+	for _, set := range []bool{f.own, f.dir != "", f.branch != "", f.prMerged, f.evict, f.evictDir != "", f.pause, f.resume} {
 		if set {
 			named++
 		}
 	}
 	switch {
 	case named == 0:
-		return mergeQueueSource{}, errors.New("name the merge: -own, -dir WORKTREE, -branch BRANCH or -pr-merged")
+		return mergeQueueSource{}, errors.New("name the merge or control: -own, -dir WORKTREE, -branch BRANCH, -pr-merged, -evict, -evict-dir WORKTREE, -pause or -resume")
 	case named > 1:
-		return mergeQueueSource{}, errors.New("-own, -dir, -branch and -pr-merged each name a different merge; give one")
-	case keepOpen && !own:
+		return mergeQueueSource{}, errors.New("-own, -dir, -branch, -pr-merged, -evict, -evict-dir, -pause and -resume each name a different request; give one")
+	case f.keepOpen && !f.own:
 		return mergeQueueSource{}, errors.New("-keep-open goes with -own: only the calling workspace's own branch can keep it open")
+	case f.repositoryDir != "" && !f.pause && !f.resume:
+		return mergeQueueSource{}, errors.New("-repository-dir goes with -pause or -resume: it names the repository whose queue they address")
 	}
 	switch {
-	case dir != "":
-		abs, err := filepath.Abs(dir)
+	case f.dir != "":
+		abs, err := existingDir("-dir", f.dir)
 		if err != nil {
-			return mergeQueueSource{}, fmt.Errorf("resolve -dir %q: %w", dir, err)
+			return mergeQueueSource{}, err
 		}
-		if info, err := os.Stat(abs); err != nil || !info.IsDir() {
-			return mergeQueueSource{}, fmt.Errorf("-dir %q is not a worktree directory on disk", abs)
+		return mergeQueueSource{label: filepath.Base(abs), entry: commandfile.Entry{Type: commandfile.TypeMerge, SourceDir: abs}}, nil
+	case f.branch != "":
+		return mergeQueueSource{label: f.branch, entry: commandfile.Entry{Type: commandfile.TypeMerge, Branch: f.branch}}, nil
+	case f.prMerged:
+		return mergeQueueSource{label: "its own branch, already merged upstream", entry: commandfile.Entry{Type: commandfile.TypeMerge, PRWasMerged: true}}, nil
+	case f.evict:
+		return mergeQueueSource{label: "its own merge off the queue", control: true, entry: commandfile.Entry{Type: commandfile.TypeMergeEvict}}, nil
+	case f.evictDir != "":
+		abs, err := existingDir("-evict-dir", f.evictDir)
+		if err != nil {
+			return mergeQueueSource{}, err
 		}
-		return mergeQueueSource{label: filepath.Base(abs), entry: commandfile.Entry{SourceDir: abs}}, nil
-	case branch != "":
-		return mergeQueueSource{label: branch, entry: commandfile.Entry{Branch: branch}}, nil
-	case prMerged:
-		return mergeQueueSource{label: "its own branch, already merged upstream", entry: commandfile.Entry{PRWasMerged: true}}, nil
+		return mergeQueueSource{label: filepath.Base(abs) + "'s merge off the queue", control: true,
+			entry: commandfile.Entry{Type: commandfile.TypeMergeEvict, EvictDir: abs}}, nil
+	case f.pause, f.resume:
+		typ, verb := commandfile.TypeMergePause, "a pause"
+		if f.resume {
+			typ, verb = commandfile.TypeMergeResume, "a resume"
+		}
+		label := verb + " of every repository's queue"
+		var repo string
+		if f.repositoryDir != "" {
+			abs, err := existingDir("-repository-dir", f.repositoryDir)
+			if err != nil {
+				return mergeQueueSource{}, err
+			}
+			repo, label = abs, verb+" of "+abs+"'s queue"
+		}
+		return mergeQueueSource{label: label, control: true, entry: commandfile.Entry{Type: typ, RepositoryDir: repo}}, nil
 	}
-	return mergeQueueSource{label: "its own branch", entry: commandfile.Entry{KeepOpen: keepOpen}}, nil
+	return mergeQueueSource{label: "its own branch", entry: commandfile.Entry{Type: commandfile.TypeMerge, KeepOpen: f.keepOpen}}, nil
+}
+
+// existingDir resolves a flag's directory to an absolute path that is a
+// directory on disk.
+func existingDir(flagName, dir string) (string, error) {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return "", fmt.Errorf("resolve %s %q: %w", flagName, dir, err)
+	}
+	if info, err := os.Stat(abs); err != nil || !info.IsDir() {
+		return "", fmt.Errorf("%s %q is not a directory on disk", flagName, abs)
+	}
+	return abs, nil
 }
 
 // mergeWatch is one invocation's watch over the roster.
@@ -254,6 +357,8 @@ type mergeWatch struct {
 	requester     string
 	requesterName string
 	wait          bool
+	// answerTimeout bounds a queue control's wait for its answer.
+	answerTimeout time.Duration
 	dial          mergeQueueDialer
 	layout        stateroot.Layout
 	env           mergeQueueEnv
@@ -294,10 +399,23 @@ func (w *mergeWatch) run(ctx context.Context) int {
 	}
 	ticker := time.NewTicker(w.env.poll)
 	defer ticker.Stop()
+	var unanswered <-chan time.Time
+	if w.source.control {
+		timer := time.NewTimer(w.answerTimeout)
+		defer timer.Stop()
+		unanswered = timer.C
+	}
 	for {
 		select {
 		case <-ctx.Done():
 			return w.fail("interrupted before the merge's outcome: %v", ctx.Err())
+		case <-unanswered:
+			if code, done := w.checkCommand(); done {
+				return code
+			}
+			say(w.errOut, "claude-repld merge-queue: NO ANSWER: the daemon did not take %s within %s; the request stays pending in %s\n",
+				w.file, w.answerTimeout, w.layout.OutputDir())
+			return exitControlUnanswered
 		case <-ticker.C:
 			if code, done := w.checkCommand(); done {
 				return code
@@ -370,7 +488,6 @@ func (w *mergeWatch) attach(ctx context.Context) (<-chan rosterEvent, error) {
 			"and this turn is the one that would wait. Enqueue without -wait and end the turn; the merge reports into this session", w.requester, w.baseline)
 	}
 	entry := w.source.entry
-	entry.Type = commandfile.TypeMerge
 	entry.ProjectDir = row.GetWorkspace().GetWorkspace().GetDir()
 	entry.Workspace = row.GetWorkspace().GetWorkspace().GetId()
 	name, err := commandfile.Write(w.layout.OutputDir(), []commandfile.Entry{entry})
@@ -378,7 +495,11 @@ func (w *mergeWatch) attach(ctx context.Context) (<-chan rosterEvent, error) {
 		return nil, err
 	}
 	w.file = name
-	say(w.out, "merge-queue: %s asked to merge %s (command file %s)\n", w.requesterName, w.source.label, name)
+	if w.source.control {
+		say(w.out, "merge-queue: %s asked for %s (command file %s)\n", w.requesterName, w.source.label, name)
+	} else {
+		say(w.out, "merge-queue: %s asked to merge %s (command file %s)\n", w.requesterName, w.source.label, name)
+	}
 	say(w.out, "%s%s\n", worktreeLinePrefix, w.requester)
 	return events, nil
 }
@@ -388,6 +509,9 @@ func (w *mergeWatch) attach(ctx context.Context) (<-chan rosterEvent, error) {
 func (w *mergeWatch) observe(ctx context.Context, roster *frontendv1.WorkspaceRoster) (int, bool) {
 	if code, done := w.checkCommand(); done {
 		return code, true
+	}
+	if w.source.control {
+		return 0, false
 	}
 	row := findRosterRow(roster, w.requester)
 	status := rowStatus(row)
@@ -464,6 +588,8 @@ func (w *mergeWatch) checkCommand() (int, bool) {
 	}
 	applied := filepath.Join(w.layout.OutputDir(), "applied", w.file)
 	switch _, err := os.Stat(applied); {
+	case err == nil && w.source.control:
+		return w.reportApplied(), true
 	case err == nil:
 		say(w.out, "merge-queue: requested; %s's merge of %s is put in line once this turn ends, and reports into this session\n", w.requesterName, w.source.label)
 		return exitSuccess, true
@@ -481,6 +607,18 @@ func (w *mergeWatch) checkQuarantine() (int, bool) {
 	}
 	quarantined := filepath.Join(w.layout.OutputDir(), "quarantine", w.file)
 	switch _, err := os.Stat(quarantined); {
+	case err == nil && w.source.control:
+		say(w.errOut, "claude-repld merge-queue: REFUSED: the daemon quarantined %s.\n", quarantined)
+		record, found, err := readControlAnswer(w.layout, w.file, opControlRefusal, opControlMalformed)
+		switch {
+		case err != nil:
+			say(w.errOut, "claude-repld merge-queue: the refusal's cause is unread: %v\n", err)
+		case !found:
+			say(w.errOut, "claude-repld merge-queue: the refusal's cause is unread: the run log carries no record for %s\n", w.file)
+		default:
+			say(w.errOut, "claude-repld merge-queue: cause: %s\n", record.Context.Cause)
+		}
+		return exitMergeRefused, true
 	case err == nil:
 		say(w.errOut, "claude-repld merge-queue: REFUSED: the daemon quarantined %s. Its reason is the ingress's warning:\n", quarantined)
 		say(w.errOut, "  modules/app/agent-repl/bin/logs.sh --central --since 1h --json | jq -r 'select(.context.path // \"\" | endswith(\"%s\")) | .context.cause // empty'\n", w.file)
@@ -490,6 +628,90 @@ func (w *mergeWatch) checkQuarantine() (int, bool) {
 	default:
 		return w.fail("stat %s: %v", quarantined, err), true
 	}
+}
+
+// reportApplied prints an applied queue control's outcome, read off the
+// ingress's record. The file's fate is the answer the exit carries; an
+// outcome the run log does not hold is printed as unread, never guessed.
+func (w *mergeWatch) reportApplied() int {
+	record, found, err := readControlAnswer(w.layout, w.file, opControlOutcome)
+	outcome := unreadControlAnswer
+	switch {
+	case err != nil:
+		say(w.errOut, "claude-repld merge-queue: %s was applied, and its outcome is unread: %v\n", w.file, err)
+	case !found:
+		say(w.errOut, "claude-repld merge-queue: %s was applied, and its outcome is unread: the run log carries no %s record for it\n", w.file, opControlOutcome)
+	default:
+		outcome = record.Context.Outcome
+		say(w.out, "merge-queue: APPLIED: %s\n", record.Message)
+	}
+	say(w.out, "%s%s\n", outcomeLinePrefix, outcome)
+	return exitSuccess
+}
+
+// controlRecord is the slice of a run-log record a queue control's answer
+// is read from.
+type controlRecord struct {
+	Operation string `json:"operation"`
+	Message   string `json:"message"`
+	Context   struct {
+		Path    string `json:"path"`
+		Outcome string `json:"outcome"`
+		Cause   string `json:"cause"`
+	} `json:"context"`
+}
+
+// readControlAnswer finds the last record of one of ops that the ingress
+// keyed by the command file named file, in the run log and its newest backup
+// generation (a rotation may land between the record and the read).
+func readControlAnswer(layout stateroot.Layout, file string, ops ...string) (controlRecord, bool, error) {
+	for _, path := range []string{layout.RunLog(), layout.RunLog() + ".1"} {
+		record, found, err := scanControlAnswer(path, file, ops)
+		if err != nil || found {
+			return record, found, err
+		}
+	}
+	return controlRecord{}, false, nil
+}
+
+// scanControlAnswer is readControlAnswer over one log file; a file that does
+// not exist holds no answer.
+func scanControlAnswer(path, file string, ops []string) (controlRecord, bool, error) {
+	f, err := os.Open(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return controlRecord{}, false, nil
+	}
+	if err != nil {
+		return controlRecord{}, false, fmt.Errorf("open %s: %w", path, err)
+	}
+	defer f.Close()
+	var last controlRecord
+	found := false
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
+	needle := []byte(file)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if !bytes.Contains(line, needle) {
+			continue
+		}
+		var record controlRecord
+		if err := json.Unmarshal(line, &record); err != nil {
+			return controlRecord{}, false, fmt.Errorf("decode a record in %s naming %s: %w", path, file, err)
+		}
+		if filepath.Base(record.Context.Path) != file {
+			continue
+		}
+		for _, op := range ops {
+			if record.Operation == op {
+				last, found = record, true
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return controlRecord{}, false, fmt.Errorf("read %s: %w", path, err)
+	}
+	return last, found, nil
 }
 
 // fail prints the verb's own failure.

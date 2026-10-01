@@ -874,6 +874,12 @@ Owner rulings, 2026-09-30 (`internal/merge`; the contract is
   default branch in the main worktree, close the requester). An unknown
   source refuses with `unknown_source_workspace` / `unknown_branch`. No
   landing workspace is ever made.
+- **A WORKSPACE'S BRANCH IS THE ONE CHECKED OUT NOW** (owner ruling,
+  2026-10-01). For the own-branch, workspace and merged-upstream sources the
+  request records the branch checked out in that worktree when it is made
+  (`wsm.MergeSource.Branch`), never the branch the workspace was created on;
+  a detached HEAD is refused at once with `unknown_branch`. A row an older
+  build recorded with no branch reads the checked-out branch at admission.
 - **NO MERGE FACT BEFORE THE REQUESTING TURN ENDS.** The request is recorded
   durably (`wsm.RequestMerge`, state `requested`) and put in line
   (`wsm.QueueMerge`) only when the requester's turn in flight ends
@@ -910,15 +916,26 @@ Owner rulings, 2026-09-30 (`internal/merge`; the contract is
   terminal (bubble head and footer facts) is published right after the lease
   is released, so no client is told the workspace was handed back while its
   prompts are still refused as merging.
-- **REPAIRS ARE THE REQUESTER'S OWN TURNS**, drawn in the merge bubble's tab AND
-  mirrored onto the root feed (`OutputAddress.Mirror`, conflicts and fixes
-  only; the mirror copy drops the merge feed's order and parent). The mirror
-  is part of the replayed history: the prompt queue records the standing
-  output address on every turn it opens (`wsm.Turn.Address`), and a replay
-  draws each recorded turn's entries at that address through the live upsert,
-  so a late reader or a relaunched daemon rebuilds the tab rows and their root
-  copies. An entry of a turn the workspace never recorded is drawn at the
-  standing address.
+- **A MERGE'S OWN TURNS DRAW IN ITS TAB, AND NOWHERE ELSE** (owner ruling,
+  2026-10-01). The output address is scoped to TURNS, not to the session: the
+  orchestrator stands one per tab (`run.address`), and the prompt queue's
+  `recordTurn` -- the one place a turn is recorded -- stamps it on a turn
+  whose origin is one the merge submits (`MERGE_CONFLICT_REPAIR`,
+  `MERGE_TEST_REPAIR`, `MERGE_BEFORE_ACTION`, `MERGE_AFTER_ACTION`) and on no
+  other: the user's prompts sent mid-merge, the resumed displaced turn
+  (`MERGE_DISPLACED_TURN_RESUME`, the user's own work) and vendor-started
+  turns draw on the root feed as ordinary conversation. The same address is
+  handed to the feed (`Resolver.AddressTurn`) as it is recorded, and a replay
+  reads it back (`wsm.Turn.Address`, `Deps.TurnAddresses`) into the same
+  table, so live and replay place every row by its own turn's one recorded
+  fact. NOTHING COPIES A ROW BETWEEN FEEDS: the old root-feed mirror copied the
+  merge tab rows themselves onto the main feed as full-width rows, which is
+  how a merge bubble came to look fragmented. A frame of a merge turn that
+  arrives after the merge withdrew its address still draws in the turn's tab
+  (INFO `daemon.feed.turn_address_outlived`, once per turn); a merge turn
+  opened once no address stands draws on the root feed (INFO
+  `daemon.promptqueue.deliver`). An entry of a turn the workspace never
+  recorded draws on the root feed.
 - **THE TEST LOG OPENS BY TOKEN.** `FeedMergeTestLogToken` is `<lease>/<round>`;
   `OpenInEditor{merge_test_log}` resolves it through `TestLogPath` (the lease
   in the merge ledger, the file present), refuses with
@@ -946,8 +963,30 @@ Owner rulings, 2026-09-30 (`internal/merge`; the contract is
   with its area read from the footer and the `daemon.merge.abort` record named.
   `-wait` is REFUSED while the requester's turn is in flight: the merge starts
   only when that turn ends, and that turn is the one that would wait.
-- Exits: 0 landed (or requested, without `-wait`), 5 failed, 6 refused, 2 the
-  verb itself failed.
+- The queue's controls go through the same writer: `-evict` (the requester's
+  own merge) or `-evict-dir WORKTREE` (merge_evict), `-pause` / `-resume`
+  with an optional `-repository-dir DIR` (merge_pause, merge_resume). A
+  control is answered at once, so `-wait` is refused with one; the verb waits
+  at most `-answer-timeout` (15s) for the file's fate and prints the answer
+  the ingress keyed by the file's path in the run log (or its `.1`
+  generation): `merge-queue: outcome: <evicted|not_queued|paused|resumed>`
+  when applied, the refusal's `cause` when quarantined. An answer the run log
+  does not carry is printed `unread` on stderr; the fate still decides the
+  exit.
+- Exits: 0 landed (or requested, without `-wait`; or a control applied), 5
+  failed, 6 refused, 7 a control unanswered within `-answer-timeout` (the
+  file stays pending), 2 the verb itself failed.
+
+## An agent controls the merge queue through command files
+
+`merge_evict`, `merge_pause` and `merge_resume` entries
+(`internal/commandfile`, ARCHITECTURE.md "The merge queue's controls") are
+`UpdateMergeQueue`'s evict, pause and resume for an agent: the same
+orchestrator calls, the requester named by `project_dir`. The answer is the
+file's fate (`applied/` or `quarantine/`) and the record keyed by its path:
+INFO `daemon.commandfile.merge_queue` (`outcome` `evicted`, `not_queued`,
+`paused`, `resumed`) or WARN `daemon.commandfile.entry` (the refusal in
+`cause`). Evicting what is not queued is `not_queued`, never a refusal.
 
 ## A lease dies with the process that took it
 
@@ -1041,6 +1080,22 @@ ruling, 2026-09-30) and carries the same carry (see "A breaking state layout
 change is rolled out stop-then-start"). Only a shim REPLACEMENT (stale build,
 restart verb, log ceiling) keeps `bounce.GateFreeness`.
 
+- **The shim's refusal defers a replacement; it is never forced.** An
+  unforced replacement's stand-down (`rollout.standDown`) that the shim
+  refuses as `live` answers `rollout.ErrStandDownLive` at once (INFO, no
+  window, no kill); one whose call fails waits the window for the shim to
+  leave (the evidence it took the stand-down and lost only the answer) and
+  otherwise answers `rollout.ErrStandDownUnanswered` (ERROR). Both wrap
+  `bounce.ErrDeferred` (`bounce.OutcomeDeferred`): the registry re-registers
+  the replacement behind the work in flight with its requesters kept (a
+  `Done` hears the rerun's outcome, never the deferral), the workspace leaves
+  draining and dispatch resumes on the shim that keeps serving. A freeness edge
+  that arrived while the run decided is re-judged at once; otherwise the next
+  edge takes it, so a shim that says `live` while the watcher reads it free
+  cannot spin the bounce. A dispatch-quiet move standing behind the deferred
+  replacement runs at once and carries it across. Regression, 2026-10-01: the
+  refusal was waited out for 30s and the shim force-killed, ending a
+  vendor-started turn and a resumed subagent.
 - **What lives only in memory travels in the handover carry**
   (`rollout/carry.go`, `<state>/intent/handover-carry/<ws>.json`). The transfer
   SEALS the queue (`promptqueue.Queue.SealMove`: queued /clear and /compact
