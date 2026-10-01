@@ -40,16 +40,28 @@ func (r *resolver) repositoryView(live []wsm.Workspace, rc rowContext, log dlog.
 	for _, repo := range repos {
 		rows := r.sectionRows(byRepo[repo.ID], rc, log.With(dlog.Context{"repo_id": string(repo.ID)}))
 		delete(byRepo, repo.ID)
-		out.Sections = append(out.Sections, &frontendv1.RosterRepoSection{
+		section := &frontendv1.RosterRepoSection{
 			Key: &frontendv1.RosterRepoKey{
 				Repository: &workspacev1.RepositoryRef{Id: string(repo.ID), Dir: repo.Dir}},
 			Header: &frontendv1.RosterSectionHeader{
 				Label: &frontendv1.RosterLabel{Text: repo.Name}},
 			Rows: rows,
-		})
+		}
+		setRepoFold(section, repo.Folded)
+		out.Sections = append(out.Sections, section)
 	}
 	r.assertRepositoryInvariant(byRepo, log)
 	return out
+}
+
+// setRepoFold states the repository's fold on its section: the ONE arm the
+// sidebar and the Emacs tab bar both draw from.
+func setRepoFold(section *frontendv1.RosterRepoSection, folded bool) {
+	if folded {
+		section.Fold = &frontendv1.RosterRepoSection_Collapsed{Collapsed: &frontendv1.RosterRepoSectionCollapsed{}}
+		return
+	}
+	section.Fold = &frontendv1.RosterRepoSection_Expanded{Expanded: &frontendv1.RosterRepoSectionExpanded{}}
 }
 
 // assertRepositoryInvariant records a workspace whose `Repo` names no

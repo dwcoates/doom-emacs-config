@@ -80,7 +80,7 @@
 ;; Workspace.el loads before status.el; these calls fire only at runtime so
 ;; the cross-file reference is safe, but byte-compile-time would otherwise
 ;; warn about a free variable / unknown function.
-(declare-function agent-repl-roster-tab-order "roster" ())
+(declare-function agent-repl-roster-drawn-tab-order "roster" ())
 (declare-function agent-repl-status-tab-state "status" (ws))
 (declare-function agent-repl--priority-rank "agent-repl-status" (priority))
 (declare-function agent-repl--state-save "agent-repl-history" (ws))
@@ -885,16 +885,18 @@ merged) and records that order, and this function follows it strictly.
 CLIENT-AUTHORED ORDERING AND HIDING ARE DEAD.  The resolver orders the
 roster — priority included — so a local re-sort would be a second answer
 to a question the daemon already answered, and a local filter (the old
-merged-tab hiding, the old repo-fold filter) would hide a workspace the
-daemon says is open.  Repo folding survives in the webapp's sidebar,
-where it belongs, and affects nothing here.
+merged-tab hiding) would hide a workspace the daemon says is open.  The
+one hiding left is the DAEMON'S: a repository it holds collapsed
+\(frontend.v1.RosterRepoSection.fold, owner ruling 2026-10-01) keeps its
+workspaces' tabs but draws none of them, which is
+`agent-repl-roster-drawn-tab-order'.
 
 Names the roster lists but the perspective layer has not caught up with
 are dropped: the tab bar can only render tabs that exist.  Before the
 first push the order is empty, and the workspaces Emacs knows about are
 rendered in their registration order so a pre-roster boot still draws."
-  (let ((order (and (fboundp 'agent-repl-roster-tab-order)
-                    (agent-repl-roster-tab-order)))
+  (let ((order (and (fboundp 'agent-repl-roster-drawn-tab-order)
+                    (agent-repl-roster-drawn-tab-order)))
         (known (agent-repl--ws-list-names)))
     (if (null order)
         (progn

@@ -1715,7 +1715,8 @@ rest of this suite already asserts against."
      . ((sections
          . [((key . ((repository . ,agent-repl-itest-verbs--repo-protojson)))
              (header . ((label . ((text . "itest-repo")))))
-             (rows . ((rows . ,(vconcat rows)))))])))
+             (rows . ((rows . ,(vconcat rows))))
+             (expanded . ()))])))
     (task . ((sections . [])))
     (recentlyMerged . ((header . ((label . ((text . "recently merged")))))
                         (rows . ((rows . [])))))))

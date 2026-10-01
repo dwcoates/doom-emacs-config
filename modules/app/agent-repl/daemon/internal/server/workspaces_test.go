@@ -970,3 +970,136 @@ func TestMergeWorkspaceAnswersAnUnknownSourceWorkspace(t *testing.T) {
 		t.Fatalf("result = %v, want unknown_source_workspace", resp.Msg.GetResult())
 	}
 }
+
+// ---------------------------------------------------------------------------
+// FoldRepository.
+// ---------------------------------------------------------------------------
+
+func TestFoldRepositoryHandsTheResolvedRepositoryAndFoldToTheVerb(t *testing.T) {
+	tests := []struct {
+		name string
+		req  *agentreplv1.FoldRepositoryRequest
+		want repositoryFold
+	}{
+		{
+			name: "collapse by id",
+			req: &agentreplv1.FoldRepositoryRequest{
+				Repository: &workspacev1.RepositoryRef{Id: "repo-1"},
+				Fold:       &agentreplv1.FoldRepositoryRequest_Collapse{Collapse: &agentreplv1.FoldRepositoryCollapse{}},
+			},
+			want: repositoryFold{repo: "repo-1", folded: true},
+		},
+		{
+			name: "expand by dir",
+			req: &agentreplv1.FoldRepositoryRequest{
+				Repository: &workspacev1.RepositoryRef{Dir: "/repos/one"},
+				Fold:       &agentreplv1.FoldRepositoryRequest_Expand{Expand: &agentreplv1.FoldRepositoryExpand{}},
+			},
+			want: repositoryFold{repo: "repo-1", folded: false},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.DB.repositories = append(h.DB.repositories, wsm.Repository{ID: "repo-1", Dir: "/repos/one"})
+
+			// Act
+			resp, err := h.Client.FoldRepository(context.Background(), connect.NewRequest(tt.req))
+
+			// Assert
+			if err != nil {
+				t.Fatalf("FoldRepository: %v", err)
+			}
+			if resp.Msg.GetSuccess() == nil {
+				t.Fatalf("result = %v, want success", resp.Msg.GetResult())
+			}
+			if len(h.Verbs.folds) != 1 || h.Verbs.folds[0] != tt.want {
+				t.Fatalf("folds = %+v, want %+v", h.Verbs.folds, tt.want)
+			}
+		})
+	}
+}
+
+func TestFoldRepositoryRefusesAnUnknownRepository(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	resp, err := h.Client.FoldRepository(context.Background(), connect.NewRequest(&agentreplv1.FoldRepositoryRequest{
+		Repository: &workspacev1.RepositoryRef{Id: "repo-nope"},
+		Fold:       &agentreplv1.FoldRepositoryRequest_Collapse{Collapse: &agentreplv1.FoldRepositoryCollapse{}},
+	}))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("FoldRepository: %v", err)
+	}
+	if resp.Msg.GetError().GetUnknownRepository() == nil {
+		t.Fatalf("result = %v, want unknown_repository", resp.Msg.GetResult())
+	}
+	if len(h.Verbs.folds) != 0 {
+		t.Fatalf("folds = %+v, want none for an unknown repository", h.Verbs.folds)
+	}
+}
+
+func TestFoldRepositoryMapsTheVerbsRefusal(t *testing.T) {
+	// Arrange: the repository was forgotten between the resolution and the write.
+	h := newHarness(t)
+	h.DB.repositories = append(h.DB.repositories, wsm.Repository{ID: "repo-1", Dir: "/repos/one"})
+	h.Verbs.foldErr = &workspace.Refusal{Arm: "unknown_repository", Reason: "gone", NotFound: true}
+
+	// Act
+	resp, err := h.Client.FoldRepository(context.Background(), connect.NewRequest(&agentreplv1.FoldRepositoryRequest{
+		Repository: &workspacev1.RepositoryRef{Id: "repo-1"},
+		Fold:       &agentreplv1.FoldRepositoryRequest_Collapse{Collapse: &agentreplv1.FoldRepositoryCollapse{}},
+	}))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("FoldRepository: %v", err)
+	}
+	if resp.Msg.GetError().GetUnknownRepository() == nil {
+		t.Fatalf("result = %v, want unknown_repository", resp.Msg.GetResult())
+	}
+}
+
+func TestFoldRepositoryFailsAVerbError(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.DB.repositories = append(h.DB.repositories, wsm.Repository{ID: "repo-1", Dir: "/repos/one"})
+	h.Verbs.foldErr = errors.New("disk I/O error")
+
+	// Act
+	_, err := h.Client.FoldRepository(context.Background(), connect.NewRequest(&agentreplv1.FoldRepositoryRequest{
+		Repository: &workspacev1.RepositoryRef{Id: "repo-1"},
+		Fold:       &agentreplv1.FoldRepositoryRequest_Collapse{Collapse: &agentreplv1.FoldRepositoryCollapse{}},
+	}))
+
+	// Assert
+	if connect.CodeOf(err) != connect.CodeInternal {
+		t.Fatalf("FoldRepository = %v, want an internal failure", err)
+	}
+}
+
+func TestValidateFoldRepositoryRequestRefusesAnIncompleteRequest(t *testing.T) {
+	tests := []struct {
+		name string
+		req  *agentreplv1.FoldRepositoryRequest
+	}{
+		{"no repository", &agentreplv1.FoldRepositoryRequest{
+			Fold: &agentreplv1.FoldRepositoryRequest_Expand{Expand: &agentreplv1.FoldRepositoryExpand{}}}},
+		{"no fold arm", &agentreplv1.FoldRepositoryRequest{Repository: &workspacev1.RepositoryRef{Id: "repo-1"}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			err := validateFoldRepositoryRequest(tt.req)
+
+			// Assert
+			if err == nil || err.Code() != connect.CodeInvalidArgument {
+				t.Fatalf("validate = %v, want InvalidArgument", err)
+			}
+		})
+	}
+}

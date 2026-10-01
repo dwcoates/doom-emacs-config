@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { UpdateTaskResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_task_pb";
+import { FoldRepositoryResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_fold_repository_pb";
 import {
   RosterRepoSectionSchema,
   RosterTaskSectionSchema,
@@ -135,34 +136,91 @@ describe("the sections", () => {
     expect(pane(drawn, "repository").querySelector("[data-section-fold]")).not.toBeNull();
   });
 
-  it("draws a section open unless it was folded", () => {
+  it.each([
+    [false, false],
+    [true, true],
+  ])("draws a repository section collapsed=%s folded=%s, as the daemon says", (collapsed, folded) => {
     const drawn = drawWorkspaceRoster(
-      roster({ repos: [repoSection({ id: "repo-1" })] }),
+      roster({ repos: [repoSection({ id: "repo-1", collapsed })] }),
       sidebarContext(),
     );
-    expect(pane(drawn, "repository").querySelector(".repo")?.classList.contains("folded")).toBe(
-      false,
-    );
+    expect(pane(drawn, "repository").querySelector(".repo")?.classList.contains("folded")).toBe(folded);
   });
 
-  it("folds on the toggle", async () => {
-    const drawn = drawWorkspaceRoster(
-      roster({ repos: [repoSection({ id: "repo-1" })] }),
-      sidebarContext(),
+  it.each([
+    [false, "collapse"],
+    [true, "expand"],
+  ])("asks the daemon for the other fold on the toggle (collapsed=%s asks %s)", async (collapsed, want) => {
+    const asked: Array<{ repository: string | undefined; fold: string | undefined }> = [];
+    const sc = sidebarContext(
+      appContext({
+        foldRepository: (request) => {
+          asked.push({ repository: request.repository?.id, fold: request.fold.case });
+          return create(FoldRepositoryResponseSchema, { result: { case: "success", value: {} } });
+        },
+      }),
     );
+    const drawn = drawWorkspaceRoster(roster({ repos: [repoSection({ id: "repo-1", collapsed })] }), sc);
+    await click(pane(drawn, "repository").querySelector("[data-section-fold]") as Element);
+    expect(asked).toEqual([{ repository: "repo-1", fold: want }]);
+  });
+
+  it("leaves the section as the daemon drew it until the push that answers the toggle", async () => {
+    const sc = sidebarContext(
+      appContext({
+        foldRepository: () => create(FoldRepositoryResponseSchema, { result: { case: "success", value: {} } }),
+      }),
+    );
+    const drawn = drawWorkspaceRoster(roster({ repos: [repoSection({ id: "repo-1" })] }), sc);
     const section = pane(drawn, "repository").querySelector(".repo") as HTMLElement;
     await click(section.querySelector("[data-section-fold]") as Element);
-    expect(section.classList.contains("folded")).toBe(true);
+    expect(section.classList.contains("folded")).toBe(false);
   });
 
-  it("remembers a repository's fold under the repository's own id", async () => {
-    const prefs = memoryPrefs();
+  it("draws the daemon's refusal of a fold beside the toggle", async () => {
+    const sc = sidebarContext(
+      appContext({
+        foldRepository: () =>
+          create(FoldRepositoryResponseSchema, {
+            result: { case: "error", value: { cause: { case: "unknownRepository", value: {} } } },
+          }),
+      }),
+    );
+    const drawn = drawWorkspaceRoster(roster({ repos: [repoSection({ id: "repo-1" })] }), sc);
+    await click(pane(drawn, "repository").querySelector("[data-section-fold]") as Element);
+    expect(pane(drawn, "repository").textContent).toContain("the daemon no longer has that repository");
+  });
+
+  it("never folds a repository section from a remembered local fold", () => {
+    const prefs = memoryPrefs({ folded: { [repoFoldKey("repo-1")]: true } });
     const drawn = drawWorkspaceRoster(
       roster({ repos: [repoSection({ id: "repo-1" })] }),
       sidebarContext(appContext(), prefs),
     );
-    await click(pane(drawn, "repository").querySelector("[data-section-fold]") as Element);
-    expect(prefs.state.folded[repoFoldKey("repo-1")]).toBe(true);
+    expect(pane(drawn, "repository").querySelector(".repo")?.classList.contains("folded")).toBe(false);
+  });
+
+  it.each([
+    [false, "var(--repo-head-expanded)"],
+    [true, "var(--repo-head-collapsed)"],
+  ])("colors a repository header collapsed=%s with %s", (collapsed, want) => {
+    const teardown = installStylesheet();
+    try {
+      const rail = document.createElement("div");
+      rail.id = "ws-sidebar";
+      rail.appendChild(drawWorkspaceRoster(roster({ repos: [repoSection({ id: "repo-1", collapsed })] }), sidebarContext()));
+      document.body.appendChild(rail);
+      const header = rail.querySelector(".repo-section > .repo-head") as HTMLElement;
+      expect(cascadedValue(header, "color")).toBe(want);
+      rail.remove();
+    } finally {
+      teardown();
+    }
+  });
+
+  it("marks a repository section so its header takes its fold's grey", () => {
+    const drawn = drawWorkspaceRoster(roster({ repos: [repoSection({ id: "repo-1" })] }), sidebarContext());
+    expect(pane(drawn, "repository").querySelector(".repo")?.classList.contains("repo-section")).toBe(true);
   });
 
   it("remembers a task's fold under the task's id, not its title", async () => {
@@ -175,15 +233,13 @@ describe("the sections", () => {
     expect(prefs.state.folded[taskFoldKey("task-1")]).toBe(true);
   });
 
-  it("draws a remembered fold folded on the next push", () => {
-    const prefs = memoryPrefs({ folded: { [repoFoldKey("repo-1")]: true } });
+  it("draws a remembered task fold folded on the next push", () => {
+    const prefs = memoryPrefs({ grouping: "task", folded: { [taskFoldKey("task-1")]: true } });
     const drawn = drawWorkspaceRoster(
-      roster({ repos: [repoSection({ id: "repo-1" })] }),
+      roster({ tasks: [taskSection({ id: "task-1" })] }),
       sidebarContext(appContext(), prefs),
     );
-    expect(pane(drawn, "repository").querySelector(".repo")?.classList.contains("folded")).toBe(
-      true,
-    );
+    expect(pane(drawn, "task").querySelector(".repo")?.classList.contains("folded")).toBe(true);
   });
 });
 
@@ -613,6 +669,18 @@ describe("a malformed roster", () => {
     const malformed = create(RosterRepoSectionSchema, {
       header: { label: { text: "doom" } },
       rows: { rows: [] },
+      fold: { case: "expanded", value: {} },
+    });
+    expect(() =>
+      drawWorkspaceRoster(roster({ repos: [malformed] }), sidebarContext()),
+    ).toThrow(MalformedView);
+  });
+
+  it("refuses a repository section with no fold arm", () => {
+    const malformed = create(RosterRepoSectionSchema, {
+      key: { repository: { id: "repo-1", dir: "/repo" } },
+      header: { label: { text: "doom" } },
+      rows: { rows: [] },
     });
     expect(() =>
       drawWorkspaceRoster(roster({ repos: [malformed] }), sidebarContext()),
@@ -623,6 +691,7 @@ describe("a malformed roster", () => {
     const malformed = create(RosterRepoSectionSchema, {
       key: { repository: { id: "repo-1", dir: "/repo" } },
       rows: { rows: [] },
+      fold: { case: "expanded", value: {} },
     });
     expect(() =>
       drawWorkspaceRoster(roster({ repos: [malformed] }), sidebarContext()),
@@ -633,6 +702,7 @@ describe("a malformed roster", () => {
     const malformed = create(RosterRepoSectionSchema, {
       key: { repository: { id: "repo-1", dir: "/repo" } },
       header: { label: { text: "doom" } },
+      fold: { case: "expanded", value: {} },
     });
     expect(() =>
       drawWorkspaceRoster(roster({ repos: [malformed] }), sidebarContext()),
@@ -655,6 +725,7 @@ describe("a malformed roster", () => {
       key: { repository: { id: "repo-1", dir: "/repo" } },
       header: {},
       rows: { rows: [] },
+      fold: { case: "expanded", value: {} },
     });
     expect(() =>
       drawWorkspaceRoster(roster({ repos: [malformed] }), sidebarContext()),
