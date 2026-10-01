@@ -790,6 +790,8 @@ type fakeRegistry struct {
 	// asked announces every request, so a test synchronizes on one having
 	// been made rather than polling for it.
 	asked chan registryCall
+	// deferred records every run that answered bounce.ErrDeferred.
+	deferred []error
 }
 
 // registryCall is one recorded request.
@@ -909,10 +911,27 @@ func (r *fakeRegistry) run(ws ids.WorkspaceID, req bounce.Request) {
 			ctx = context.Background()
 		}
 		err := req.Run(ctx, ws)
+		if bounce.OutcomeOf(err) == bounce.OutcomeDeferred {
+			// THE QUEUE'S DEFERRAL: the replacement is registered again
+			// behind the work the shim refused to stand down over, its Done
+			// kept for the rerun, and the test's free() takes it.
+			r.mu.Lock()
+			r.pending[ws] = req
+			r.deferred = append(r.deferred, err)
+			r.mu.Unlock()
+			return
+		}
 		if req.Done != nil {
 			req.Done(err)
 		}
 	}()
+}
+
+// Deferrals answers every run error the fake re-registered as a deferral.
+func (r *fakeRegistry) Deferrals() []error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]error(nil), r.deferred...)
 }
 
 // endUnrun drops a workspace's registered bounce unrun and tells its Done

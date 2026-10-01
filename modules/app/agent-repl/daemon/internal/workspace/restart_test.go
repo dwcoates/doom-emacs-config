@@ -273,3 +273,34 @@ func TestRestartEmptiesNoFeed(t *testing.T) {
 		t.Fatalf("feed resets = %+v, want none: a restart keeps the conversation's rows", f.feed.resets)
 	}
 }
+
+// The registry keeps a deferred bounce's Done for the rerun, so a deferral
+// told to the restart is its contract broken: recorded at ERROR, and never
+// followed by the reload a finished restart pushes.
+func TestADeferralToldToTheRestartIsRecordedAsAContractBreach(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.rollout.relaunchErr = bounce.ErrDeferred
+
+	// Act.
+	if err := f.verbs.Restart(context.Background(), "w1", false); err != nil {
+		t.Fatalf("Restart: %v", err)
+	}
+
+	// Assert: the fake signals only once the completion has run.
+	f.rollout.awaitRelaunch(t)
+	const want = "the bounce registry told the restart a deferral; it owes only the rerun's outcome"
+	found := false
+	for _, r := range f.log.logger.Records() {
+		if r.Operation == opRestart && r.Level == dlog.LevelError && r.Message == want {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("records = %+v, want %q at ERROR", f.log.logger.Records(), want)
+	}
+	if got := f.rollout.reloadCalls(); len(got) != 0 {
+		t.Fatalf("webapp reloads = %v, want none for a restart that did not finish", got)
+	}
+}

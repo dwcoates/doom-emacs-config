@@ -52,6 +52,11 @@ func (c *controller) BounceShim(ctx context.Context, ws ids.WorkspaceID, reason 
 				// recorded here at ERROR for every busy workspace a deploy
 				// handed over.
 				c.log.Info(opBounce, "the shim bounce was handed across: the daemon the workspace moved to runs the replacement after its adoption", fields)
+			case bounce.OutcomeDeferred:
+				// THE REGISTRY KEEPS A DEFERRED BOUNCE'S Done FOR THE RERUN and
+				// tells it only that rerun's outcome, so this is the registry
+				// breaking its own contract: said loudly, never taken as an end.
+				c.log.Error(opBounce, "the bounce registry told a deferral to the shim bounce's completion; it owes only the rerun's outcome", withCause(fields, err))
 			case bounce.OutcomeFailed:
 				c.log.Error(opBounce, "the shim bounce failed; the workspace is served as it was", withCause(fields, err))
 			case bounce.OutcomeFinished:
@@ -91,8 +96,13 @@ func (c *controller) BounceShim(ctx context.Context, ws ids.WorkspaceID, reason 
 //  2. TAKE THE RESTART-PENDING HOLD, which is what the tray and the composer's
 //     `restarting` arm draw.
 //  3. STAND THE OLD SHIM DOWN — gracefully, or FORCED (which ends its turn and
-//     every detached item in its vendor child) — force-killing only when the
-//     stand-down window expires, and saying so loudly.
+//     every detached item in its vendor child) — force-killing only when a
+//     stand-down the shim ACCEPTED (or a forced one) outlives the window, and
+//     saying so loudly. AN UNFORCED REPLACEMENT NEVER ENDS LIVE WORK: a shim
+//     that refuses the graceful stand-down as `live`, or never answers it and
+//     does not leave, keeps serving untouched; the prelaunch is retired, the
+//     hold released, and the run answers bounce.ErrDeferred, on which the
+//     registry re-registers the bounce behind that work.
 //  4. THE REAP IS THE GATE: the old process is confirmed GONE before anything
 //     else, which is the guarantee that at most one vendor binary ever touches
 //     the session's transcript.
@@ -146,6 +156,9 @@ func (c *controller) shimBounce(reason RelaunchReason, force bool) bounce.Func {
 			}
 			if err := c.standDown(ctx, old, ws, reason, force, fields); err != nil {
 				c.retirePrelaunch(ctx, fresh, reason, fields)
+				if bounce.OutcomeOf(err) == bounce.OutcomeDeferred {
+					c.log.Info(opRelaunch, "the bounce is deferred: the old shim keeps serving untouched, and the registry takes the bounce again at the workspace's next freeness", fields)
+				}
 				return err
 			}
 		} else {
@@ -226,19 +239,19 @@ func (c *controller) replacementAlive(fresh shimclient.Client, ws ids.WorkspaceI
 	return fmt.Errorf("rollout: relaunch %q: the prelaunched replacement (pid %d) exited with code %d", ws, info.PID, info.Code)
 }
 
-// retirePrelaunch stops an inert prelaunched shim a failed bounce will never
-// install, so the failure does not leave an orphan process holding a socket.
+// retirePrelaunch stops an inert prelaunched shim a failed or deferred bounce
+// will never install, so it does not leave an orphan process holding a socket.
 // It holds no session and no lock, so the kill costs nothing.
 func (c *controller) retirePrelaunch(ctx context.Context, fresh shimclient.Client, reason RelaunchReason, fields dlog.Context) {
 	if err := fresh.Kill(ctx, shimclient.KillAttribution{
 		Actor:  "rollout.relaunch",
-		Reason: fmt.Sprintf("a %s bounce failed before the prelaunched shim was installed", reason),
+		Reason: fmt.Sprintf("a %s bounce failed or was deferred before the prelaunched shim was installed", reason),
 		Force:  true,
 	}); err != nil {
 		c.log.Error(opRelaunch, "could not stop the prelaunched shim the failed bounce leaves behind", withCause(fields, err))
 		return
 	}
-	c.log.Info(opRelaunch, "stopped the prelaunched shim the failed bounce will not install", fields)
+	c.log.Info(opRelaunch, "stopped the prelaunched shim the failed or deferred bounce will not install", fields)
 }
 
 // publishHost republishes the workspace's host view when a surface is wired.
@@ -250,17 +263,54 @@ func (c *controller) publishHost(ws ids.WorkspaceID) {
 	c.deps.PublishHost(ws)
 }
 
+// ErrStandDownLive is the run's answer when the shim REFUSED an unforced
+// stand-down as `live`: the registry judged the workspace free, but the vendor
+// started a turn on its own (a concluding subagent's notification wakes the
+// main agent) between that judgement and the stand-down. The shim's refusal is
+// atomic and authoritative about its own liveness, so it wins: nothing is
+// forced, and the bounce is deferred (bounce.ErrDeferred).
+//
+// Regression, 2026-10-01 (footer-activity-updates): the refusal was waited out
+// for the 30s window and the shim force-killed, ending the running turn and a
+// detached subagent resumed inside the window.
+var ErrStandDownLive = fmt.Errorf("rollout: the shim refused the unforced stand-down because work is live in it: %w", bounce.ErrDeferred)
+
+// ErrStandDownUnanswered is the run's answer when an unforced stand-down call
+// FAILED and the shim did not leave inside the stand-down window. A shim that
+// never answered never vouched that nothing is live in it, so it is not forced
+// either: the bounce is deferred (bounce.ErrDeferred), at ERROR.
+var ErrStandDownUnanswered = fmt.Errorf("rollout: the shim did not answer the unforced stand-down and did not leave: %w", bounce.ErrDeferred)
+
 // standDown ends the old shim and PASSES THE REAP GATE. A FORCED stand-down
 // asks the shim to end everything live at once; an unforced one asks it to end
-// a session with nothing live (the registry decided that it is free). A
-// stand-down window that expires is force-killed and logged LOUDLY: the
-// stream-only residue of the window is lost, which is accepted rather than an
-// invariant.
+// a session with nothing live (the registry decided that it is free).
+//
+// AN UNFORCED STAND-DOWN NEVER ENDS LIVE WORK. The shim's `live` refusal is
+// answered at once with ErrStandDownLive (no window, no kill); a call that
+// failed waits the window for the shim to leave -- the evidence that it did
+// take the stand-down and only its answer was lost -- and answers
+// ErrStandDownUnanswered if it did not, never killing it. A stand-down the shim
+// ACCEPTED (or a forced one, or another refusal) whose process outlives the
+// window is a hung shim, not live work: it is force-killed and logged LOUDLY,
+// and the stream-only residue of the window is lost, which is accepted rather
+// than an invariant.
 func (c *controller) standDown(ctx context.Context, old shimclient.Client, ws ids.WorkspaceID, reason RelaunchReason, force bool, fields dlog.Context) error {
 	exited := old.Exited()
 
 	answer, err := old.KillSession(ctx, &shimv1.KillSessionRequest{Force: force})
 	switch {
+	case err != nil && !force:
+		return c.awaitUnansweredStandDown(ctx, exited, ws, err, fields)
+	case answer.GetFailure().GetLive() != nil && !force:
+		live := answer.GetFailure().GetLive()
+		c.log.Info(opRelaunch, "the shim refused the unforced stand-down: work is live in it. The replacement is never forced over it; it is deferred behind that work",
+			merge(fields, dlog.Context{
+				"refusal":        "live",
+				"turn_in_flight": live.GetTurnInFlight() != nil,
+				"live_work":      len(live.GetLiveWork()),
+				"detail":         answer.GetFailure().GetDetail(),
+			}))
+		return fmt.Errorf("rollout: relaunch %q: stand down: %w", ws, ErrStandDownLive)
 	case err != nil:
 		c.log.Warn(opRelaunch, "the stand-down call failed; waiting out the window before forcing",
 			withCause(fields, err))
@@ -302,6 +352,32 @@ func (c *controller) standDown(ctx context.Context, old shimclient.Client, ws id
 		c.log.Error(opRelaunch, "the reap ended with its context", withCause(fields, ctx.Err()))
 		return fmt.Errorf("rollout: relaunch %q: reap the old shim: %w", ws, ctx.Err())
 	}
+}
+
+// awaitUnansweredStandDown decides an UNFORCED stand-down whose call failed.
+// The shim may have taken it and lost only the answer (it exits after
+// answering), so the window is waited out for its exit, which passes the reap
+// gate. A shim still running at the window's end never vouched that nothing
+// is live in it, so it is left serving untouched and the bounce is deferred,
+// at ERROR: the shim did not answer.
+func (c *controller) awaitUnansweredStandDown(ctx context.Context, exited <-chan shimclient.ExitInfo, ws ids.WorkspaceID, callErr error, fields dlog.Context) error {
+	c.log.Debug(opRelaunch, "the unforced stand-down call failed; waiting out the window for the shim to leave, and never forcing it",
+		withCause(fields, callErr))
+	select {
+	case info := <-exited:
+		// THE CALL STILL FAILED, so it is a fault; the shim's exit is the
+		// evidence that it took the stand-down, and the gate is passed.
+		c.log.Warn(opRelaunch, "the unforced stand-down call failed, but the shim left inside the window; the gate is passed",
+			merge(withCause(fields, callErr), dlog.Context{"pid": info.PID, "exit_code": info.Code, "signal": info.Signal}))
+		return nil
+	case <-c.deps.Clock.After(c.deps.StandDownWindow):
+	case <-ctx.Done():
+		c.log.Error(opRelaunch, "the stand-down ended with its context", withCause(fields, ctx.Err()))
+		return fmt.Errorf("rollout: relaunch %q: stand down: %w", ws, ctx.Err())
+	}
+	c.log.Error(opRelaunch, "the shim did not answer the unforced stand-down and did not leave inside the window; it is left serving untouched and the replacement is deferred, never forced",
+		merge(withCause(fields, callErr), dlog.Context{"stand_down_window": c.deps.StandDownWindow.String()}))
+	return fmt.Errorf("rollout: relaunch %q: stand down: %w: %w", ws, ErrStandDownUnanswered, callErr)
 }
 
 // killRefusal names the shim's stand-down refusal arm for a record.
