@@ -2310,6 +2310,8 @@ export function heldPrompt(init?: {
   classification?: HoldClassificationArm;
   hold?: HoldArm;
   accepted?: boolean;
+  /** The entry the daemon offers to fold this one into; no fold is offered when absent. */
+  foldAbove?: string;
 }): HeldPrompt {
   const classification = init?.classification ?? "interject";
   const hold = init?.hold ?? "sessionStarting";
@@ -2323,6 +2325,7 @@ export function heldPrompt(init?: {
     classification: classificationValue(classification, init?.accepted),
     hold: holdValue(hold),
     badges: statuses.map((status) => HOLD_BADGES[status] ?? { label: status }),
+    foldAbove: init?.foldAbove === undefined ? undefined : { above: turnId(init.foldAbove) },
   });
 }
 

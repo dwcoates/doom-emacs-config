@@ -10,6 +10,11 @@ import {
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_edit_held_prompt_pb";
 import { AgentRepl } from "../../../proto/gen/ts/agentrepl/v1/service_pb";
 import {
+  FoldHeldPromptErrorSchema,
+  FoldHeldPromptResponseSchema,
+  type FoldHeldPromptRequest,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_fold_held_prompt_pb";
+import {
   UpdateHeldPromptErrorSchema,
   UpdateHeldPromptResponseSchema,
   type UpdateHeldPromptRequest,
@@ -20,6 +25,7 @@ import {
   HeldPromptBadgeSchema,
   HeldPromptEditingSchema,
   HeldPromptCoalescedSchema,
+  HeldPromptFoldAboveSchema,
   HeldPromptSchema,
   HeldSessionActSchema,
   type HeldPrompt,
@@ -35,6 +41,7 @@ import type { FailureSink } from "../../src/failure/sink.js";
 import {
   DROPPED_EVENT,
   EDIT_REQUEST,
+  FOLD_ABOVE_LABEL,
   NO_RELEASE_TITLES,
   SEND_NOW_LABEL,
   HELD_BADGE_DETAIL_CLASS,
@@ -1826,5 +1833,186 @@ describe("a coalesced hold", () => {
     const card = drawHeldPrompt(u, tc);
     // Assert
     expect(card.getAttribute("data-coalesced")).toBe("true");
+  });
+});
+
+/** A context whose FoldHeldPrompt answers with ANSWER and records requests. */
+function foldContext(
+  answer: () => ReturnType<typeof foldSuccess>,
+  seen: FoldHeldPromptRequest[] = [],
+): { tc: TrayContext; seen: FoldHeldPromptRequest[] } {
+  const transport = createRouterTransport(({ service }) => {
+    service(AgentRepl, {
+      foldHeldPrompt: (request) => {
+        seen.push(request);
+        return answer();
+      },
+    });
+  });
+  const ctx = testAppContext({
+    client: createAgentReplClient(transport),
+    workspace: WORKSPACE,
+    ticker: fakeTicker(),
+    failures: SINK,
+    composerEnabled: false,
+  });
+  return { tc: { ctx, onDispose: () => undefined }, seen };
+}
+
+const foldSuccess = () =>
+  create(FoldHeldPromptResponseSchema, { result: { case: "success", value: {} } });
+
+/** A fold refusal carrying ARM. */
+const foldRefusal = (arm: string) => () =>
+  create(FoldHeldPromptResponseSchema, {
+    result: { case: "error", value: { cause: { case: arm, value: CAUSE_FILL[arm] ?? {} } } },
+  } as never);
+
+/** A held prompt the daemon offers to fold into the entry under ABOVE. */
+function foldable(above = "turn-0"): HeldPrompt {
+  const u = heldPrompt();
+  u.foldAbove = create(HeldPromptFoldAboveSchema, { above: { value: above } });
+  return u;
+}
+
+describe("the fold above control", () => {
+  it("is drawn, labelled fold above, when the daemon offers a fold", () => {
+    // Arrange
+    const { tc } = foldContext(foldSuccess);
+    // Act
+    const card = drawHeldPrompt(foldable(), tc);
+    // Assert
+    expect(card.querySelector('[data-held-action="fold"]')?.textContent).toBe(FOLD_ABOVE_LABEL);
+  });
+
+  it("is not drawn when the daemon offers no fold", () => {
+    // Arrange
+    const { tc } = foldContext(foldSuccess);
+    // Act
+    const card = drawHeldPrompt(heldPrompt(), tc);
+    // Assert
+    expect(card.querySelector('[data-held-action="fold"]')).toBeNull();
+  });
+
+  it("is a button of the held row's own kind, last in the actions row", () => {
+    // Arrange
+    const { tc } = foldContext(foldSuccess);
+    // Act
+    const card = drawHeldPrompt(foldable(), tc);
+    // Assert
+    const button = card.querySelector<HTMLButtonElement>('[data-held-action="fold"]');
+    expect([button?.tagName, button?.type, button?.className, button?.parentElement?.lastElementChild === button]).toEqual([
+      "BUTTON",
+      "button",
+      "queued-action queued-action-fold",
+      true,
+    ]);
+  });
+
+  it("refuses a served fold that names no entry ahead", () => {
+    // Arrange
+    const { tc } = foldContext(foldSuccess);
+    const u = heldPrompt();
+    u.foldAbove = create(HeldPromptFoldAboveSchema, {});
+    // Act / Assert
+    expect(() => drawHeldPrompt(u, tc)).toThrow(MalformedView);
+  });
+
+  it("echoes the entry's TurnId, the served entry ahead and the workspace", async () => {
+    // Arrange
+    const seen: FoldHeldPromptRequest[] = [];
+    const { tc } = foldContext(foldSuccess, seen);
+    const card = drawHeldPrompt(foldable("turn-ahead"), tc);
+    // Act
+    card.querySelector<HTMLButtonElement>('[data-held-action="fold"]')?.click();
+    await settle();
+    // Assert
+    expect([seen[0]?.turn?.value, seen[0]?.above?.value, seen[0]?.workspace?.id]).toEqual([
+      "turn-1",
+      "turn-ahead",
+      "ws-1",
+    ]);
+  });
+
+  it("leaves the row alone on success: the tray's push redraws it", async () => {
+    // Arrange
+    const { tc } = foldContext(foldSuccess);
+    const card = drawHeldPrompt(foldable(), tc);
+    // Act
+    card.querySelector<HTMLButtonElement>('[data-held-action="fold"]')?.click();
+    await settle();
+    // Assert
+    expect(card.querySelector(".queued-refusal")).toBeNull();
+  });
+
+  it.each(oneofArms(FoldHeldPromptErrorSchema, "cause"))(
+    "draws the %s refusal at the row, saying something about it",
+    async (arm) => {
+      // Arrange
+      const { tc } = foldContext(foldRefusal(arm));
+      const card = drawHeldPrompt(foldable(), tc);
+      // Act
+      card.querySelector<HTMLButtonElement>('[data-held-action="fold"]')?.click();
+      await settle();
+      // Assert
+      const refusal = card.querySelector(".queued-refusal");
+      expect([refusal?.getAttribute("data-arm"), refusal?.textContent === ""]).toEqual([arm, false]);
+    },
+  );
+
+  it("names the edited entry on a being-edited refusal", async () => {
+    // Arrange
+    const { tc } = foldContext(() =>
+      create(FoldHeldPromptResponseSchema, {
+        result: {
+          case: "error",
+          value: { cause: { case: "beingEdited", value: { editingTurn: { value: "turn-0" } } } },
+        },
+      }),
+    );
+    const card = drawHeldPrompt(foldable(), tc);
+    // Act
+    card.querySelector<HTMLButtonElement>('[data-held-action="fold"]')?.click();
+    await settle();
+    // Assert
+    expect(card.querySelector(".queued-refusal")?.textContent).toContain("turn-0");
+  });
+
+  it("logs a refusal through the canonical logger", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const { tc } = foldContext(foldRefusal("aboveMoved"));
+    const card = drawHeldPrompt(foldable(), tc);
+    // Act
+    card.querySelector<HTMLButtonElement>('[data-held-action="fold"]')?.click();
+    await settle();
+    // Assert
+    const record = await forwardedRecord(capture, "tray.held-prompt.action-refused");
+    expect(record.level.case).toBe("warn");
+  });
+
+  it("re-enables the row after a refusal so it can be retried", async () => {
+    // Arrange
+    const { tc } = foldContext(foldRefusal("aboveMoved"));
+    const card = drawHeldPrompt(foldable(), tc);
+    const button = card.querySelector<HTMLButtonElement>('[data-held-action="fold"]');
+    // Act
+    button?.click();
+    await settle();
+    // Assert
+    expect(button?.disabled).toBe(false);
+  });
+
+  it("says the daemon could not be reached when the call never lands", async () => {
+    // Arrange
+    const { tc } = foldContext(() => {
+      throw new ConnectError("down", Code.Unavailable);
+    });
+    const card = drawHeldPrompt(foldable(), tc);
+    // Act
+    card.querySelector<HTMLButtonElement>('[data-held-action="fold"]')?.click();
+    await settle();
+    // Assert
+    expect(card.querySelector(".queued-refusal")?.getAttribute("data-arm")).toBe("error");
   });
 });
