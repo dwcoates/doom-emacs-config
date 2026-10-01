@@ -246,7 +246,9 @@ deploy_stamp_proto_paths() {
 deploy_stamp_system_paths() {
     local rel="$2"
     case "$1" in
-        daemon)              printf '%s %s %s' "$(deploy_stamp_prefix daemon "$rel")" "$(deploy_stamp_proto_paths "$rel")" "$(deploy_stamp_prefix agent-shim/logging "$rel")" ;;
+        # The daemon compiles the test runner's roster in (the merge gate's
+        # suite selection), so the roster package and its go.mod are inputs.
+        daemon)              printf '%s %s %s %s %s' "$(deploy_stamp_prefix daemon "$rel")" "$(deploy_stamp_proto_paths "$rel")" "$(deploy_stamp_prefix agent-shim/logging "$rel")" "$(deploy_stamp_prefix testrun/roster "$rel")" "$(deploy_stamp_prefix testrun/go.mod "$rel")" ;;
         shim)                printf '%s %s %s' "$(deploy_stamp_prefix agent-shim/claude/shim "$rel")" "$(deploy_stamp_proto_paths "$rel")" "$(deploy_stamp_prefix agent-shim/logging "$rel")" ;;
         webapp)              printf '%s %s %s' "$(deploy_stamp_prefix webapp "$rel")" "$(deploy_stamp_proto_paths "$rel")" "$(deploy_stamp_prefix agent-shim/logging "$rel")" ;;
         shim-store)          printf '%s %s %s' "$(deploy_stamp_prefix agent-shim/shim-store "$rel")" "$(deploy_stamp_prefix agent-shim/logging "$rel")" "$(deploy_stamp_proto_paths "$rel")" ;;

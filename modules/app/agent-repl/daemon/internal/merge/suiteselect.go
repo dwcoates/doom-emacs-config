@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"agentrepl/testrun/roster"
 )
 
 // This file decides WHICH of the target repository's suites the test gate runs
@@ -21,43 +23,14 @@ import (
 // makes the gate more conservative, never less, and forgetting to map one costs
 // time rather than correctness.
 
-// AllSuites is bin/test-all.sh's roster, in the order that script runs them. A
-// selection is reported in this order, so it reads the way the run reads.
-//
-// IT MUST TRACK bin/test-all.sh: the script refuses a `--suites` name its own
-// ALL_SUITES does not declare, which is why validateSuites rejects an unknown
-// name at SELECTION time rather than letting the run discover it.
-var AllSuites = []string{
-	"orchestrator-harness",
-	"coverage-harness",
-	"logging-density-harness",
-	"build-frontend-harness",
-	"readiness-harness",
-	"doctor-harness",
-	"precommit-harness",
-	"merge-queue-hook-harness",
-	"merge-queue-skill-harness",
-	"ert",
-	"daemon",
-	"sidecar",
-	"store",
-	"logging",
-	"webapp",
-	"shim",
-	"proto",
-	"logging-density",
-	"e2e",
-	"e2e-emacs",
-}
+// AllSuites is the test runner's roster (agentrepl/testrun/roster), in roster
+// order. A selection is reported in this order, so it reads the way the run
+// reports. It IS the runner's list, imported rather than copied: a copy
+// drifted seven suites behind it.
+var AllSuites = roster.Names()
 
-// scriptHarnessSuites are the suites that test the module's own shell scripts.
-var scriptHarnessSuites = []string{
-	"orchestrator-harness",
-	"coverage-harness",
-	"logging-density-harness",
-	"build-frontend-harness",
-	"readiness-harness",
-}
+// scriptHarnessSuites are the suites that test the module's own bin/ scripts.
+var scriptHarnessSuites = roster.Harnesses()
 
 // moduleRoot is where the agent-repl module sits in the repository. Every rule
 // is spelled relative to the repository root, because that is what a changed
@@ -91,9 +64,10 @@ type suiteRule struct {
 // path decides it. Each entry answers "a change here can break what?", and the
 // answer is the blast radius rather than the component's own name.
 var suiteRules = []suiteRule{
-	// The three scripts that ARE the runner for every other suite. A change to
-	// one can invalidate any suite in the roster, so they take the full set
-	// rather than the harness subset their directory otherwise maps to.
+	// The runner itself and the scripts it delegates to. A change to any of them
+	// can invalidate any suite in the roster, so they take the full set rather
+	// than the harness subset their directory otherwise maps to.
+	{Kind: matchSubtree, Path: moduleRoot + "testrun/"},
 	{Kind: matchExact, Path: moduleRoot + "bin/test-all.sh"},
 	{Kind: matchExact, Path: moduleRoot + "bin/report-nonlisp-coverage.sh"},
 	{Kind: matchExact, Path: moduleRoot + "bin/report-logging-density.sh"},
@@ -118,6 +92,7 @@ var suiteRules = []suiteRule{
 	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/claude/shim/", Suites: []string{"shim", "e2e"}},
 	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/claude/shim-sidecar/", Suites: []string{"sidecar", "e2e"}},
 	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/shim-store/", Suites: []string{"store", "e2e"}},
+	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/shim-lock/", Suites: []string{"lock", "e2e"}},
 	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/logging/", Suites: []string{"logging", "logging-density", "daemon", "store", "sidecar", "e2e"}},
 
 	// The wire contract every producer and consumer is generated from.
@@ -215,7 +190,7 @@ func ruleFor(path string) (suiteRule, bool) {
 	return suiteRule{}, false
 }
 
-// inRosterOrder renders a selected set in the order bin/test-all.sh runs it.
+// inRosterOrder renders a selected set in roster order.
 func inRosterOrder(selected map[string]bool) []string {
 	var out []string
 	for _, suite := range AllSuites {
@@ -243,7 +218,7 @@ func namePaths(paths []string) string {
 	return fmt.Sprintf("%s and %d more", strings.Join(named[:maxReasonPaths], ", "), len(named)-maxReasonPaths)
 }
 
-// validateSuites refuses a name bin/test-all.sh does not declare, at selection
+// validateSuites refuses a name the roster does not declare, at selection
 // time. The script would refuse it at run time, and a gate that discovers its
 // own roster drift by failing a merge has told the user nothing useful.
 func validateSuites(suites []string) error {
@@ -253,7 +228,7 @@ func validateSuites(suites []string) error {
 	}
 	for _, suite := range suites {
 		if !known[suite] {
-			return fmt.Errorf("merge: %q is not a suite bin/test-all.sh declares", suite)
+			return fmt.Errorf("merge: %q is not a suite the test runner's roster declares", suite)
 		}
 	}
 	return nil

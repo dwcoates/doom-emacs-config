@@ -1,6 +1,7 @@
 package merge
 
 import (
+	"agentrepl/testrun/roster"
 	"strings"
 	"testing"
 )
@@ -126,6 +127,8 @@ func TestSelectSuitesUnknownPathSelectsEverything(t *testing.T) {
 func TestSelectSuitesRunnerScriptSelectsEverything(t *testing.T) {
 	tests := []string{
 		"modules/app/agent-repl/bin/test-all.sh",
+		"modules/app/agent-repl/testrun/internal/sched/plan.go",
+		"modules/app/agent-repl/testrun/roster/roster.go",
 		"modules/app/agent-repl/bin/report-nonlisp-coverage.sh",
 		"modules/app/agent-repl/bin/report-logging-density.sh",
 	}
@@ -142,6 +145,38 @@ func TestSelectSuitesRunnerScriptSelectsEverything(t *testing.T) {
 				t.Fatalf("%s did not select the full set: %v", path, got.Suites)
 			}
 		})
+	}
+}
+
+// TestSelectSuitesMapsAModuleToItsOwnSuiteAndTheWorldItRunsIn covers the
+// shim-lock module: its own suite, plus e2e, which runs the real lock.
+func TestSelectSuitesMapsAModuleToItsOwnSuiteAndTheWorldItRunsIn(t *testing.T) {
+	// Act.
+	got := SelectSuites([]string{"modules/app/agent-repl/agent-shim/shim-lock/main.go"})
+
+	// Assert.
+	if got.Full || strings.Join(got.Suites, ",") != "lock,e2e" {
+		t.Fatalf("shim-lock selected %v (full=%v), want lock and e2e", got.Suites, got.Full)
+	}
+}
+
+// TestSelectSuitesABinScriptSelectsEveryHarness covers bin/: a change there
+// can break any of the harnesses that test the module's scripts.
+func TestSelectSuitesABinScriptSelectsEveryHarness(t *testing.T) {
+	// Act.
+	got := SelectSuites([]string{"modules/app/agent-repl/bin/suite-slot.sh"})
+
+	// Assert.
+	if got.Full || strings.Join(got.Suites, ",") != strings.Join(roster.Harnesses(), ",") {
+		t.Fatalf("a bin/ change selected %v, want every bin/ harness %v", got.Suites, roster.Harnesses())
+	}
+}
+
+// TestAllSuitesIsTheRunnersRoster covers the drift this list once had: it is
+// the runner's own roster, in its order.
+func TestAllSuitesIsTheRunnersRoster(t *testing.T) {
+	if strings.Join(AllSuites, ",") != strings.Join(roster.Names(), ",") {
+		t.Fatalf("AllSuites = %v, want the roster %v", AllSuites, roster.Names())
 	}
 }
 
