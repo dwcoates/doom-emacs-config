@@ -221,7 +221,7 @@ func (q *queue) runContextCut(ctx context.Context, ws ids.WorkspaceID, act Act, 
 		turn = wsm.NewTurnID()
 	}
 	record := wsm.Turn{ID: turn, Workspace: ws, Text: text, Origin: origin.String(), StartedAt: q.deps.Now()}
-	if err := q.deps.DB.PutTurn(ctx, record); err != nil {
+	if err := q.recordTurn(ctx, record); err != nil {
 		log.Error(opAct, "could not record the context cut's turn", dlog.Context{"cause": err.Error()})
 		return fmt.Errorf("record the context cut on %q: %w", ws, err)
 	}

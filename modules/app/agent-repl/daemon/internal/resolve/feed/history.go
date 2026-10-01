@@ -9,6 +9,7 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/sessionwatcher"
+	"claude-repld/internal/wsm"
 )
 
 // HISTORY REPLAY. Rows are built from replayed entries by THE SAME per-family
@@ -24,7 +25,9 @@ func (r *resolver) OnHistoryPage(ws ids.WorkspaceID, agent *conversationv1.Agent
 	// inside the resolver's mutex.
 	ported := r.portedPrompts(ws)
 	closes := r.recordedCloses(ws, page)
-	r.learnLineage(ws, entryTurns(page)...)
+	turns := entryTurns(page)
+	addresses := r.recordedAddresses(ws, turns)
+	r.learnLineage(ws, turns...)
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -52,6 +55,7 @@ func (r *resolver) OnHistoryPage(ws ids.WorkspaceID, agent *conversationv1.Agent
 	s.replayAtFloor = page.GetFloor() != nil
 	s.replayUnstamped = 0
 	s.replayCloses = closes
+	s.replayAddresses = addresses
 	for i := len(entries) - 1; i >= 0; i-- {
 		// A FORK'S BOOK HOLDS ITS INHERITED PAST AROUND ITS OWN TURNS (the
 		// book orders by first insert, and the copy was ingested while the
@@ -67,6 +71,7 @@ func (r *resolver) OnHistoryPage(ws ids.WorkspaceID, agent *conversationv1.Agent
 	// durable row is closed, ends here, still in the history plane.
 	r.endReplayedTurn(s, "")
 	s.replayCloses = nil
+	s.replayAddresses = nil
 	s.replayTurn = nil
 	s.plane = planeLive
 	r.reportUnstampedReplay(s, agent, len(entries))
@@ -178,6 +183,7 @@ func (r *resolver) replayStamped(s *wsState, agent *conversationv1.AgentId, at *
 	}
 	defer s.drawingEntry(at.GetTurn())()
 	defer s.placingEntry(sessionwatcher.PlaceOf(at))()
+	defer r.addressingTurn(s, replayedTurnOf(s, at))()
 	r.replayEntry(s, agent, entry, at.GetAt())
 }
 
@@ -345,4 +351,64 @@ func boundaryName(page *conversationv1.HistoryPage) string {
 	default:
 		return "unset"
 	}
+}
+
+// A REPLAYED TURN IS DRAWN WHERE IT WAS DRAWN LIVE. The prompt queue records
+// the output address standing when it opens a turn (wsm.Turn.Address), and the
+// replay puts that address in force while it draws the turn's entries, so they
+// go through the very upsert a live draw took: a turn a lease holder addressed
+// at a tab lands in that tab, and a MIRRORED address draws its root copies
+// too. The mirror is therefore part of the replayed history, never a live-only
+// path a late reader or a restarted daemon would miss.
+//
+// An entry of a turn the workspace never recorded (a fork's inherited past, a
+// pre-contract entry, or a page whose addresses could not be read) is drawn at
+// the standing address, as every replay drew before turns were addressed.
+
+// recordedAddresses reads the recorded output address of every turn a history
+// page names, BEFORE the resolver's lock is taken. A FAILED READ IS RECORDED,
+// NEVER SWALLOWED, and the page still draws at the standing address: refusing
+// the page would hide the whole conversation for want of where part of it
+// goes.
+func (r *resolver) recordedAddresses(ws ids.WorkspaceID, turns []ids.TurnID) map[ids.TurnID]*wsm.OutputAddress {
+	if r.deps.TurnAddresses == nil || len(turns) == 0 {
+		return nil
+	}
+	addresses, err := r.deps.TurnAddresses(context.Background(), ws, turns)
+	if err != nil {
+		r.logger(ws).Error("daemon.feed.turn_addresses_unreadable",
+			"the replayed turns' recorded output addresses could not be read; the page is drawn at the standing address",
+			dlog.Context{"turns": len(turns), "cause": err.Error()})
+		return nil
+	}
+	return addresses
+}
+
+// replayedTurnOf is the turn a replayed entry belongs to: its stamp, else the
+// turn a user prompt opens, else the turn the replay positionally stands in
+// (the same fallback an unstamped terminal is charged by).
+func replayedTurnOf(s *wsState, at *conversationv1.HistoryEntryAt) ids.TurnID {
+	if turn := at.GetTurn().GetValue(); turn != "" {
+		return ids.TurnID(turn)
+	}
+	if turn := at.GetEntry().GetUserPrompt().GetId().GetValue(); turn != "" {
+		return ids.TurnID(turn)
+	}
+	if s.replayTurn != nil {
+		return *s.replayTurn
+	}
+	return ""
+}
+
+// addressingTurn puts a replayed turn's RECORDED output address in force for
+// as long as one of its entries is drawn, and answers the restore. A turn the
+// page's record does not name leaves the standing address in force.
+func (r *resolver) addressingTurn(s *wsState, turn ids.TurnID) func() {
+	addr, recorded := s.replayAddresses[turn]
+	if turn == "" || !recorded {
+		return func() {}
+	}
+	prior := s.address
+	s.address = addr
+	return func() { s.address = prior }
 }

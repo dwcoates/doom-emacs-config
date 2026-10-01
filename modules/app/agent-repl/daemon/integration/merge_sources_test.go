@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
+	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/integration/harness"
@@ -543,5 +544,100 @@ func TestALandedMergesLedgerRecordsEachStepsInterval(t *testing.T) {
 		if kinds[kind] != "succeeded" {
 			t.Fatalf("intervals = %v, want %q succeeded", kinds, kind)
 		}
+	}
+}
+
+// pageRowOf answers the user-prompt row of a turn on a served page, nil when
+// the page carries none.
+func pageRowOf(page *frontendv1.FeedPage, turn string) *frontendv1.FeedRow {
+	for _, row := range page.GetSuccess().GetRows() {
+		if row.GetUserPrompt() != nil && row.GetTurn().GetValue() == turn {
+			return row
+		}
+	}
+	return nil
+}
+
+// A LATE READER SEES THE FEED A LIVE ONE SAW. The repair turn's rows are drawn
+// in the merge's conflicts tab and mirrored onto the root feed live; a daemon
+// relaunched afterwards rebuilds the feed from the store's book alone, and its
+// replay must draw the same two copies, because the turn's record carries the
+// mirrored address it ran at.
+func TestARelaunchedDaemonReplaysAMirroredRepairTurnInItsTabAndOnTheRoot(t *testing.T) {
+	t.Parallel()
+	// Arrange: a conflict the requester's own session resolves, kept open.
+	s := newSourcedRepo(t)
+	s.d.ExpectWarnings("daemon.merge.conflicts", "daemon.gitclient.start_rebase")
+	root := s.f.watchRootFeed()
+	harness.CommitWork(t, s.f.ws.GetDir())
+	s.repo.CommitIn(s.repo.Dir, "main.txt", "moved\n")
+	s.repo.ScriptRebaseConflict(mergeBranchOf(t, s.f.ws), 1, "work.txt")
+	s.mergeAs(t, keepOpen())
+	req := s.f.shim.ExpectStartTurn()
+	s.d.AwaitWorkspaceLogOperationCount(s.f.ws.GetDir(), harness.OpTurnOpened, 2)
+	repair := req.GetTurn().GetValue()
+	s.repo.ResolveConflicts(s.f.ws.GetDir())
+	pushConcludedTurn(s.f.shim, mainAgent, "resolved")
+	head := awaitRow(t, s.f, root, "the merge's landed terminal", func(row *frontendv1.FeedRow) bool {
+		return row.GetActivity().GetMerge().GetSuccess() != nil
+	})
+	awaitLandingDeployed(t, s.d)
+	livePage, _ := s.f.openFeedOnceCarrying("the repair prompt's root copy", func(p *frontendv1.FeedPage) bool {
+		return pagePrompt(p, repair)
+	})
+	liveRoot := pageRowOf(livePage, repair)
+	liveTab := s.f.awaitRowInFeed(head.GetId(), "the repair prompt in its tab", func(row *frontendv1.FeedRow) bool {
+		return row.GetUserPrompt() != nil && row.GetTurn().GetValue() == repair
+	})
+
+	// Act: relaunch; the resumed shim serves the repair turn from the store.
+	expectSessionKillRecords(s.d)
+	if _, err := s.d.Client().UpdateShutdownSchedule(s.d.Ctx(), connect.NewRequest(&agentreplv1.UpdateShutdownScheduleRequest{
+		Action: &agentreplv1.UpdateShutdownScheduleRequest_Now{Now: &agentreplv1.UpdateShutdownScheduleNow{
+			Reason: drainReasonOperator("the late reader under test"),
+		}},
+	})); err != nil {
+		t.Fatalf("UpdateShutdownSchedule{now} = %v, want the immediate shutdown accepted", err)
+	}
+	s.d.AwaitExit()
+	s.d.WriteShimProfile(s.f.ws.GetDir(), harness.ShimProfile{
+		ResumeHistory: harness.EncodeHistory(t, &conversationv1.HistoryEntry{
+			Entry: &conversationv1.HistoryEntry_UserPrompt{UserPrompt: &conversationv1.AgentPrompt{
+				Id:     &conversationv1.TurnId{Value: repair},
+				Agent:  &conversationv1.AgentId{Value: mainAgent},
+				Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR,
+				Said:   req.GetSaid(),
+			}},
+		}),
+	})
+	d2 := harness.StartDaemon(t, harness.Opts{
+		StateDir:   s.d.StateDir,
+		ProfileDir: s.d.ProfileDir,
+		ExtraArgs:  []string{"--default-config-dir", s.d.DefaultConfigDir},
+	})
+	f2 := &fixture{d: d2, repo: s.repo, ws: s.f.ws, t: t}
+	if again := harness.Register(t, d2, s.f.ws.GetDir()); again.GetId() != s.f.ws.GetId() {
+		t.Fatalf("RegisterWorkspace after the relaunch = %q, want the same workspace %q", again.GetId(), s.f.ws.GetId())
+	}
+	f2.host = d2.WatchHost(s.f.ws)
+	f2.web = d2.WatchWeb(s.f.ws)
+
+	// Assert: the root copy, at the identity the live reader saw.
+	page, _ := f2.openFeedOnceCarrying("the replayed repair prompt's root copy", func(p *frontendv1.FeedPage) bool {
+		return pagePrompt(p, repair)
+	})
+	if got := pageRowOf(page, repair); got.GetId().GetValue() != liveRoot.GetId().GetValue() {
+		t.Fatalf("replayed root copy = %q, want the live root copy's %q", got.GetId().GetValue(), liveRoot.GetId().GetValue())
+	}
+	// Assert: the tab's row, at the identity and under the tab the live reader saw.
+	tabPage, _ := f2.openFeed(head.GetId())
+	var replayedTab *frontendv1.FeedRow
+	for _, row := range tabPage.GetSuccess().GetRows() {
+		if row.GetUserPrompt() != nil && row.GetTurn().GetValue() == repair {
+			replayedTab = row
+		}
+	}
+	if replayedTab.GetId().GetValue() != liveTab.GetId().GetValue() || replayedTab.GetParent().GetRow().GetValue() != liveTab.GetParent().GetRow().GetValue() {
+		t.Fatalf("replayed tab row = %v, want the live tab row %v", replayedTab, liveTab)
 	}
 }

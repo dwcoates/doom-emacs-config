@@ -170,6 +170,33 @@ func (s *store) TurnCloses(ctx context.Context, id WorkspaceID, turns []TurnID) 
 	return out, nil
 }
 
+// TurnAddresses answers the recorded output address of each named turn of one
+// workspace, all-or-nothing. A recorded turn whose output went to the root feed
+// answers nil; a turn this workspace never recorded is absent.
+func (s *store) TurnAddresses(ctx context.Context, id WorkspaceID, turns []TurnID) (map[TurnID]*OutputAddress, error) {
+	out := make(map[TurnID]*OutputAddress, len(turns))
+	if len(turns) == 0 {
+		return out, nil
+	}
+	err := s.read(ctx, "daemon.wsm.turn_addresses", dlog.Context{"workspace": string(id), "turns": len(turns)}, func(ctx context.Context) error {
+		for _, turn := range turns {
+			t, err := scanTurn(s.db().QueryRowContext(ctx, `SELECT `+turnColumns+` FROM turns WHERE id = ? AND workspace_id = ?`, turn, id))
+			if errors.Is(err, sql.ErrNoRows) {
+				continue
+			}
+			if err != nil {
+				return err
+			}
+			out[turn] = t.Address
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // RecordedTurns answers which of the named turns this workspace RECORDED,
 // open or closed, all-or-nothing. A turn another workspace recorded, and a
 // turn no workspace ever recorded, is simply absent.

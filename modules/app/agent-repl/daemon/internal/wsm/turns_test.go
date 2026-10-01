@@ -1345,3 +1345,81 @@ func TestAcceptIdempotencyKeyRefusesAnEmptyKey(t *testing.T) {
 		t.Fatalf("the refusal was not logged at error: %v", log.Records())
 	}
 }
+
+func TestTurnAddressesAnswersARecordedTurnsMirroredAddress(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	lease := NewLeaseID()
+	parent := feedid.Ref{WS: ws.ID, Feed: feedid.Feed{Merge: &lease}, Row: feedid.RowKey{Kind: feedid.KindMergeHead, ID: string(lease)}}
+	turn := NewTurnID()
+	if err := s.PutTurn(context.Background(), Turn{
+		ID: turn, Workspace: ws.ID, Origin: "merge", StartedAt: instant,
+		Address: &OutputAddress{Feed: feedid.Feed{Merge: &lease}, Parent: &parent, Mirror: true},
+	}); err != nil {
+		t.Fatalf("PutTurn: %v", err)
+	}
+
+	// Act
+	got, err := s.TurnAddresses(context.Background(), ws.ID, []TurnID{turn})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("TurnAddresses: %v", err)
+	}
+	addr, ok := got[turn]
+	if !ok || addr == nil || addr.Feed.Merge == nil || *addr.Feed.Merge != lease || !addr.Mirror {
+		t.Fatalf("TurnAddresses = %+v, want %s at the mirrored merge sub-feed", got, turn)
+	}
+}
+
+func TestTurnAddressesAnswersNilForARootTurn(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	turn := openTurn(t, s, ws.ID)
+
+	// Act
+	got, err := s.TurnAddresses(context.Background(), ws.ID, []TurnID{turn})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("TurnAddresses: %v", err)
+	}
+	if addr, ok := got[turn]; !ok || addr != nil {
+		t.Fatalf("TurnAddresses = %+v, want %s present with no address (the root feed)", got, turn)
+	}
+}
+
+func TestTurnAddressesOmitsAnotherWorkspacesTurn(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	other := testWorkspaceNamed(t, s, "other")
+	turn := openTurn(t, s, other.ID)
+
+	// Act
+	got, err := s.TurnAddresses(context.Background(), ws.ID, []TurnID{turn})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("TurnAddresses: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("TurnAddresses = %+v, want another workspace's turn absent", got)
+	}
+}
+
+func TestTurnAddressesOfNoTurnsIsAnEmptyAnswer(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+
+	// Act
+	got, err := s.TurnAddresses(context.Background(), ws.ID, nil)
+
+	// Assert
+	if err != nil || len(got) != 0 {
+		t.Fatalf("TurnAddresses(nil) = (%+v, %v), want an empty answer", got, err)
+	}
+}

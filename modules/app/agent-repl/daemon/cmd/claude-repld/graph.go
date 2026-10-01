@@ -420,7 +420,8 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		PortedPrompts: portedPrompts,
 		// A REPLAYED TURN WHOSE PAGE CARRIES NO TERMINAL is ended from its
 		// durable close, the record the prompt queue's door wrote.
-		TurnCloses: p.DB.TurnCloses,
+		TurnCloses:    p.DB.TurnCloses,
+		TurnAddresses: p.DB.TurnAddresses,
 		// A FORK'S OWN TURNS are the ones its workspace recorded; every other
 		// main-agent entry of its book is the conversation it inherited.
 		OwnedTurns: p.DB.RecordedTurns,

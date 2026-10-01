@@ -94,6 +94,11 @@ type Resolver interface {
 	// SetOutputAddress installs the address a lease holder wants this
 	// session's rows stamped with; nil restores the root feed.
 	SetOutputAddress(ws ids.WorkspaceID, addr *sessionwatcher.OutputAddress)
+	// OutputAddress answers a copy of the address standing for one
+	// workspace's session output, nil when its rows go on the root feed. The
+	// prompt queue records it on every turn it opens, so a replay of that turn
+	// draws its rows where they were drawn live (TurnAddresses).
+	OutputAddress(ws ids.WorkspaceID) *sessionwatcher.OutputAddress
 
 	// ResetWorkspace empties one workspace's feed whole: every row of every
 	// feed is retired on the wire and every accumulation is dropped, so the
@@ -269,6 +274,16 @@ type Deps struct {
 	// nil draws no ending from a record, which is what a test that is not
 	// about replayed closes wants.
 	TurnCloses func(context.Context, ids.WorkspaceID, []ids.TurnID) (map[ids.TurnID]wsm.RecordedClose, error)
+	// TurnAddresses answers the output address each named turn was recorded
+	// with (wsm.DB.TurnAddresses): a recorded turn answers its address, nil for
+	// the root feed, and an unrecorded one is absent. A replay draws each
+	// recorded turn's entries at its recorded address, through the same upsert
+	// as a live draw, so a MIRRORED address's root copies are part of the
+	// replayed history exactly as they were of the live one.
+	//
+	// nil draws every replayed entry at the standing address, which is what a
+	// test that is not about addressed turns wants.
+	TurnAddresses func(context.Context, ids.WorkspaceID, []ids.TurnID) (map[ids.TurnID]*wsm.OutputAddress, error)
 	// OwnedTurns answers which of the named turns the workspace recorded as
 	// its own (wsm.DB.RecordedTurns). On a FORK it is what tells the
 	// conversation the fork inherited from the turns it ran itself: a
