@@ -37,6 +37,7 @@ export const ROSTER_STATUS_CASES = [
   "ready",
   "idleAsync",
   "vendorBlocked",
+  "apiRetrying",
   "init",
   "severed",
   "startFailed",

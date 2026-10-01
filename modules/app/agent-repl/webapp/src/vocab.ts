@@ -96,6 +96,14 @@ export function footerStatusColor(arm: string): Color {
 const COMPOSER_CLOSED_COLORS: readonly string[] = renderColors.composer_closed_colors;
 
 /**
+ * The DECLARED exceptions to the composer invariant: per footer status arm
+ * (proto spelling), the substatus arms under which the composer stays open
+ * although the status's color closes it.
+ */
+const COMPOSER_OPEN_SUBSTATUSES: Readonly<Record<string, readonly string[]>> =
+  renderColors.composer_open_substatuses;
+
+/**
  * Whether a composer is CLOSED while its footer reads ARM.
  *
  * THE COMPOSER INVARIANT (owner ruling, 2026-09-28): a composer is closed
@@ -105,9 +113,17 @@ const COMPOSER_CLOSED_COLORS: readonly string[] = renderColors.composer_closed_c
  * from a list of arm names, so an arm cannot be drawn usable and gated shut,
  * or drawn unusable and left open. An arm the file has no color for is a
  * MalformedView, exactly as it is for the color itself.
+ *
+ * The one way a closing color leaves the composer open is a substatus
+ * DECLARED in `render-colors.json#composer_open_substatuses` (owner ruling,
+ * 2026-10-01: `blocked · api_retrying`, whose prompt interrupts the vendor's
+ * retry). SUBSTATUS is the substatus arm the footer drew, in the generated
+ * spelling, or undefined for an arm with none.
  */
-export function composerClosedFor(arm: string): boolean {
-  return COMPOSER_CLOSED_COLORS.includes(footerStatusColor(arm));
+export function composerClosedFor(arm: string, substatus?: string): boolean {
+  if (!COMPOSER_CLOSED_COLORS.includes(footerStatusColor(arm))) return false;
+  const open = COMPOSER_OPEN_SUBSTATUSES[protoArmName(arm)] ?? [];
+  return substatus === undefined || !open.includes(protoArmName(substatus));
 }
 
 /** The color a `TopbarConnectivity` link state paints its dot. */

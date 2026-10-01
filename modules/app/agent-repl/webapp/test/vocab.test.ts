@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { RosterRowSchema } from "../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { FooterStatusSchema } from "../../proto/gen/ts/frontend/v1/footer_pb";
+import { FooterStatusBlockedSchema } from "../../proto/gen/ts/frontend/v1/footer_pb";
 import {
   FeedShellSchema,
   FeedShellSettledSchema,
@@ -14,6 +15,7 @@ import { MalformedView } from "../src/rpc/malformed.js";
 import { ForwardingLogger, setLogger } from "../src/log.js";
 import {
   FEED_MERGE_HEAD_GLYPH,
+  composerClosedFor,
   FEED_SHELL_DOT_KEYS,
   FEED_SUBAGENT_DOT_KEYS,
   feedShellDotColor,
@@ -326,5 +328,31 @@ describe("feed_subagent_dot and feed_shell_dot are their heads' state arms, row 
 
   it("refuses a state the table does not name", () => {
     expect(() => feedSubagentDotColor("nonesuch")).toThrow(MalformedView);
+  });
+});
+
+describe("composerClosedFor", () => {
+  it.each([
+    ["a blue status with no substatus", "disconnected", undefined, true],
+    ["a blue block the vendor or account raised", "blocked", "usageLimit", true],
+    ["the declared api-retrying exception", "blocked", "apiRetrying", false],
+    ["a red status", "working", undefined, false],
+  ])("%s", (_name, arm, substatus, closed) => {
+    // Act
+    const got = composerClosedFor(arm, substatus);
+
+    // Assert
+    expect(got).toBe(closed);
+  });
+
+  it("declares only substatus arms the footer protos carry", () => {
+    // Arrange
+    const declared = renderColors.composer_open_substatuses.blocked;
+
+    // Act
+    const arms = oneofArmNames(FooterStatusBlockedSchema, "substatus");
+
+    // Assert
+    expect(declared.filter((sub) => !arms.includes(sub))).toEqual([]);
   });
 });
