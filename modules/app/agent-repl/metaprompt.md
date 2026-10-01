@@ -259,6 +259,14 @@ I will NEVER ask a rhetorical question -- if I ask 'why does X happen?' or 'is Y
   - This repo runs several cooperating programs (a daemon, a per-session shim, a sidecar, a store, a webapp), so a bare `Write()` could be the store client, the wire layer, or the sidecar.
 - These references are still code-like references, so they are still wrapped in markdown inline code per the section above.
 
+### Every workspace is named by its name, never by its ID
+
+- Every agent-repl workspace named anywhere in the response MUST be named by its workspace name (e.g. `footer-activity-updates`).
+  - NEVER by its daemon ID (e.g. `cd49d7e840044642`) or by its directory hash, which identify nothing to a reader.
+- When a log record, store row, or tool output carries only an ID, resolve it to the name before writing the response.
+  - `bin/logs.sh` already prints the name (its synthetic `workspace_name`), so quote that.
+  - A workspace the daemon cannot name is reported as such, with its directory, rather than as a bare ID.
+
 ### Every referenced pull request is a hyperlink to it on GitHub
 
 - Every pull request named anywhere in the response MUST be a markdown hyperlink to its GitHub URL.

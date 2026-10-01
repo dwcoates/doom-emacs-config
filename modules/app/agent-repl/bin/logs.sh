@@ -423,6 +423,17 @@ helper_args=(--mode "$format" --level "$level" --width "$width" --sample-n "$sam
 if [ "$harvest" -eq 1 ]; then
     helper_args+=(--harvest-from "$harvest_from" --harvest-to "$harvest_to")
 fi
+# EVERY WORKSPACE IS SHOWN BY ITS NAME: the reader is handed the daemon's
+# ID-to-name table and stamps a synthetic workspace_name on each record.
+# Workspace scopes have already required the table; a central-only read of a
+# state root the daemon never wrote has no workspace to name.
+if [ "$scope" != central ] || [ -f "$state_root/wsm.db" ]; then
+    while IFS=$'\t' read -r id dir name; do
+        [ -n "$id" ] || continue
+        [ -n "$name" ] || fail "daemon workspace $id has an empty name"
+        helper_args+=(--workspace-name "$id=$name")
+    done <<<"$(read_workspace_rows)"
+fi
 for base_index in "${!bases[@]}"; do
     helper_args+=(
         --base "${bases[$base_index]}"

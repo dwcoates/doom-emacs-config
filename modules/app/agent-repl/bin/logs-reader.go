@@ -49,6 +49,7 @@ type options struct {
 	baseWorkspaceDirs repeatedFlag
 	baseKinds         repeatedFlag
 	baseFormats       repeatedFlag
+	workspaceNames    repeatedFlag
 	harvestFrom       string
 	harvestTo         string
 	sampleN           int
@@ -64,6 +65,9 @@ type renderOptions struct {
 	sampleN int
 	width   int
 	fields  []string
+	// names maps a daemon workspace ID to the workspace's name, so every
+	// renderer names a workspace and never shows only its ID.
+	names map[string]string
 }
 
 type sink struct {
@@ -86,20 +90,23 @@ type sinkFinding struct {
 }
 
 type record struct {
-	Timestamp          string         `json:"timestamp"`
-	Runtime            string         `json:"runtime"`
-	Level              string         `json:"level"`
-	Verbosity          string         `json:"verbosity"`
-	Operation          string         `json:"operation"`
-	Message            string         `json:"message"`
-	Context            map[string]any `json:"context"`
-	WorkspaceDir       string         `json:"workspace_dir"`
-	WorkspaceID        string         `json:"workspace_id"`
-	AgentReplSessionID string         `json:"agent_repl_session_id"`
-	ClaudeSessionID    string         `json:"claude_session_id"`
-	RequestID          string         `json:"request_id"`
-	ConnectionID       string         `json:"connection_id"`
-	PID                *int64         `json:"pid"`
+	Timestamp    string         `json:"timestamp"`
+	Runtime      string         `json:"runtime"`
+	Level        string         `json:"level"`
+	Verbosity    string         `json:"verbosity"`
+	Operation    string         `json:"operation"`
+	Message      string         `json:"message"`
+	Context      map[string]any `json:"context"`
+	WorkspaceDir string         `json:"workspace_dir"`
+	WorkspaceID  string         `json:"workspace_id"`
+	// WorkspaceName is SYNTHETIC: the daemon's current name for WorkspaceID,
+	// stamped by nameWorkspaces at emit. A record never writes it itself.
+	WorkspaceName      string `json:"workspace_name,omitempty"`
+	AgentReplSessionID string `json:"agent_repl_session_id"`
+	ClaudeSessionID    string `json:"claude_session_id"`
+	RequestID          string `json:"request_id"`
+	ConnectionID       string `json:"connection_id"`
+	PID                *int64 `json:"pid"`
 
 	instant time.Time
 	raw     []byte
@@ -144,12 +151,17 @@ func run() error {
 	flag.Var(&opts.baseWorkspaceDirs, "base-workspace-dir", "workspace directory owning the corresponding base")
 	flag.Var(&opts.baseKinds, "base-kind", "base kind: file or symlink")
 	flag.Var(&opts.baseFormats, "base-format", "base content format: jsonl, stderr, or messages")
+	flag.Var(&opts.workspaceNames, "workspace-name", "ID=NAME for one daemon workspace, repeated for every workspace the daemon knows")
 	flag.IntVar(&opts.sampleN, "sample-n", 0, "representative records per group (0 disables sampling)")
 	flag.StringVar(&opts.fields, "fields", "", "comma-separated field projection")
 	flag.IntVar(&opts.width, "width", 120, "message truncation width for compact renderers")
 	flag.Parse()
 	if flag.NArg() != 0 {
 		return fmt.Errorf("unexpected positional argument %q", flag.Arg(0))
+	}
+	names, err := parseWorkspaceNames(opts.workspaceNames)
+	if err != nil {
+		return err
 	}
 	if len(opts.bases) == 0 {
 		return errors.New("no log paths were selected")
@@ -179,7 +191,7 @@ func run() error {
 	if opts.mode == "sample" && opts.sampleN <= 0 {
 		return errors.New("sample mode requires --sample-n greater than zero")
 	}
-	render := renderOptions{mode: opts.mode, sampleN: opts.sampleN, width: opts.width, fields: fieldNames}
+	render := renderOptions{mode: opts.mode, sampleN: opts.sampleN, width: opts.width, fields: fieldNames, names: names}
 
 	now := time.Now()
 	if opts.mode == "harvest" {
@@ -763,6 +775,9 @@ func sortRecords(records []record) {
 }
 
 func emit(records []record, findings []sinkFinding, render renderOptions) error {
+	if err := nameWorkspaces(records, render.names); err != nil {
+		return err
+	}
 	switch render.mode {
 	case "json":
 		for _, rec := range records {
@@ -808,7 +823,9 @@ func emit(records []record, findings []sinkFinding, render renderOptions) error 
 		}
 		for _, finding := range findings {
 			identity := finding.sink.workspaceDir
-			if finding.sink.workspaceID != "" {
+			if name := render.names[finding.sink.workspaceID]; name != "" {
+				identity = name
+			} else if finding.sink.workspaceID != "" {
 				identity = finding.sink.workspaceID + " " + identity
 			}
 			if identity == "" {
@@ -829,8 +846,14 @@ func compactIdentity(rec record) string {
 			fields = append(fields, name+"="+oneLine(value))
 		}
 	}
-	appendString("workspace_id", rec.WorkspaceID)
-	appendString("workspace_dir", rec.WorkspaceDir)
+	// A NAMED WORKSPACE IS SHOWN BY ITS NAME ALONE; its ID and directory are
+	// shown only when the daemon has no name for it.
+	if rec.WorkspaceName != "" {
+		appendString("workspace", rec.WorkspaceName)
+	} else {
+		appendString("workspace_id", rec.WorkspaceID)
+		appendString("workspace_dir", rec.WorkspaceDir)
+	}
 	appendString("agent_repl_session_id", rec.AgentReplSessionID)
 	appendString("claude_session_id", rec.ClaudeSessionID)
 	appendString("request_id", rec.RequestID)
@@ -1061,6 +1084,8 @@ func fieldValue(rec record, name string) string {
 		return rec.WorkspaceDir
 	case "workspace_id":
 		return rec.WorkspaceID
+	case "workspace_name":
+		return rec.WorkspaceName
 	case "agent_repl_session_id":
 		return rec.AgentReplSessionID
 	case "claude_session_id":
@@ -1196,4 +1221,55 @@ func readFollow(state *followState, sequence int64, filter filters) ([]record, i
 	state.info = info
 	state.line = nextLine
 	return records, next, nil
+}
+
+// parseWorkspaceNames reads the repeated --workspace-name ID=NAME pairs. A
+// pair with no "=", an empty ID or name, or an ID named twice is a usage
+// error: logs.sh builds the pairs from the daemon's own workspace table,
+// where IDs are unique and every workspace has a name.
+func parseWorkspaceNames(pairs []string) (map[string]string, error) {
+	names := make(map[string]string, len(pairs))
+	for _, pair := range pairs {
+		id, name, ok := strings.Cut(pair, "=")
+		if !ok || id == "" || name == "" {
+			return nil, fmt.Errorf("--workspace-name %q is not ID=NAME", pair)
+		}
+		if _, seen := names[id]; seen {
+			return nil, fmt.Errorf("--workspace-name names workspace %q twice", id)
+		}
+		names[id] = name
+	}
+	return names, nil
+}
+
+// nameWorkspaces stamps each record's synthetic workspace_name from its
+// workspace_id, into the decoded record and into the raw JSON the json mode
+// prints, so every output mode can name the workspace. The name is appended
+// as the object's last key, leaving the record's own bytes and key order
+// untouched. A record whose ID the daemon does not know keeps no name.
+func nameWorkspaces(records []record, names map[string]string) error {
+	for i := range records {
+		name := names[records[i].WorkspaceID]
+		if name == "" || records[i].WorkspaceName != "" {
+			continue
+		}
+		records[i].WorkspaceName = name
+		raw := bytes.TrimRight(records[i].raw, " \t\r\n")
+		if len(raw) < 2 || raw[len(raw)-1] != '}' {
+			return fmt.Errorf("record %s at %s is not a JSON object", records[i].Operation, records[i].Timestamp)
+		}
+		encoded, err := json.Marshal(name)
+		if err != nil {
+			return fmt.Errorf("encode workspace name %q: %w", name, err)
+		}
+		body := bytes.TrimRight(raw[:len(raw)-1], " \t\r\n")
+		separator := ","
+		if len(body) > 0 && body[len(body)-1] == '{' {
+			separator = ""
+		}
+		named := append(append([]byte(nil), body...), []byte(separator+`"workspace_name":`)...)
+		named = append(named, encoded...)
+		records[i].raw = append(named, '}')
+	}
+	return nil
 }
