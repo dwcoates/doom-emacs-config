@@ -67,8 +67,6 @@ import type {
   FooterStatusActivityNotification,
   FooterStatusActivityQueryDied,
   FooterStatusActivityQuestionLead,
-  FooterStatusActivityRateLimit,
-  FooterStatusActivityRateLimitWindow,
   FooterStatusActivityRetrying,
   FooterStatusActivityStartFailed,
   FooterStatusActivityUpdate,
@@ -106,7 +104,7 @@ import type { TransientExpirySchedule } from "./expiry.js";
 import { footerClockSpan } from "./clock-span.js";
 import { drawFooterStatusActivityMergeStep } from "./merge-step.js";
 import { grabber, statusWords, textLine } from "./parts.js";
-import { activityDatumClass, allowanceStatusClass, footerPercentColor } from "./tones.js";
+import { activityDatumClass, footerPercentColor } from "./tones.js";
 
 /**
  * What a clocked piece of the cell needs: the ticker its figure rides.
@@ -406,8 +404,6 @@ function drawSalientKind(
       return drawFooterStatusActivityStartFailed(kind.value);
     case "closeBlocked":
       return drawFooterStatusActivityCloseBlocked(kind.value);
-    case "rateLimit":
-      return drawFooterStatusActivityRateLimit(kind.value, deps, path);
     case "notification":
       return drawFooterStatusActivityNotification(kind.value);
     case "contextBudget":
@@ -431,66 +427,6 @@ export function drawFooterStatusActivityContextBudget(
   u: FooterStatusActivityContextBudget,
 ): HTMLElement {
   return textLine("footer-activity-context-budget", u.text);
-}
-
-/**
- * The vendor's rate-limit event: which allowance, what the vendor said, and
- * the figures it carried, "weekly nearly spent 85% · resets in 2h". The line
- * wears the allowance verdict's own colour, the enduring allowance cell's
- * palette, so a warning reads yellow and a refusal red wherever it appears.
- */
-export function drawFooterStatusActivityRateLimit(
-  u: FooterStatusActivityRateLimit,
-  deps: AllowanceDeps,
-  path: string,
-): HTMLElement {
-  const verdict = requireCase(u.verdict, `${path}.verdict`);
-  const line = document.createElement("span");
-  line.className = `footer-activity-rate-limit ${allowanceStatusClass(verdict.case)}`;
-  line.setAttribute("data-arm", verdict.case);
-  const window = u.window === undefined ? "usage" : rateLimitWindowWords(u.window, `${path}.window`);
-  line.appendChild(document.createTextNode(`${window} ${rateLimitVerdictWords(verdict.case, `${path}.verdict`)}`));
-  if (u.utilization !== undefined) {
-    line.appendChild(document.createTextNode(" "));
-    line.appendChild(drawFooterPercent(u.utilization));
-  }
-  if (u.resetsAtS !== undefined) {
-    line.appendChild(drawResetsCountdown(u.resetsAtS, deps, `${path}.resets_at_s`));
-  }
-  return line;
-}
-
-/** The allowance a rate-limit event names, lowercase with spaces. */
-function rateLimitWindowWords(u: FooterStatusActivityRateLimitWindow, path: string): string {
-  const window = requireCase(u.window, `${path}.window`);
-  switch (window.case) {
-    case "session":
-    case "weekly":
-    case "overage":
-      return window.case;
-    case "weeklyOpus":
-      return "weekly opus";
-    case "weeklySonnet":
-      return "weekly sonnet";
-    case "weeklyOverageIncluded":
-      return "weekly overage included";
-    default: {
-      const other: { case: string } = window;
-      return unreachableArm(`${path}.window`, other.case);
-    }
-  }
-}
-
-/** What the vendor's verdict says about the allowance. */
-function rateLimitVerdictWords(verdict: string, path: string): string {
-  switch (verdict) {
-    case "allowedWarning":
-      return "nearly spent";
-    case "rejected":
-      return "spent";
-    default:
-      return unreachableArm(path, verdict);
-  }
 }
 
 // ---- the transient tier -----------------------------------------------------
@@ -1207,8 +1143,6 @@ export function drawFooterAllowance(
 /**
  * " · resets in 1h 5m", ticking down to an allowance's reset at minute
  * resolution. RESETS_AT_S is the vendor's own SECONDS, converted once here.
- * Shared by the enduring allowance and the salient rate-limit line, which say
- * the same deadline.
  */
 export function drawResetsCountdown(resetsAtS: bigint, deps: AllowanceDeps, path: string): HTMLElement {
   const resetsAtMs = msOf(resetsAtS, path) * 1000;
