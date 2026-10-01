@@ -256,11 +256,17 @@ func TestAnExitedRunIsNeverRestatedLost(t *testing.T) {
 	opts := lostOptions(t, fake.Socket, tree)
 	opts.StaleShellSilence = shortSilence
 
-	// Act: the run exits on its own marker...
-	startSidecar(t, opts)
-	awaitCursorInBatches(ctx, t, fake, fx.Parent.Path(), fx.Parent.Offset())
+	// THE RUN HAS ALREADY EXITED when the reader first opens its spool. An exit
+	// appended only after the sidecar is up races the short silence window: a
+	// claimed spool that stays empty for the window is concluded went_silent
+	// before its marker lands, and the test then reads a terminal the sweep
+	// wrote rather than the one the marker settles.
 	spool := newGrowingFile(t, fx.SpoolPath)
 	spool.AppendRaw([]byte("did the work\nEXIT=0\n"))
+
+	// Act: the run is read to its own marker...
+	startSidecar(t, opts)
+	awaitCursorInBatches(ctx, t, fake, fx.Parent.Path(), fx.Parent.Offset())
 	rows := awaitBashRunTerminal(ctx, t, storeClient(fake.Socket), fx.CallID)
 	if rows[len(rows)-1].GetSuccess().GetCompleted() == nil {
 		t.Fatalf("the run did not settle on its EXIT marker: %v", describeBashRows(rows))
