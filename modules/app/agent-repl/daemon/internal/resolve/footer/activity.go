@@ -136,10 +136,9 @@ func (r *resolver) backgroundActivity(s *wsState) *frontendv1.FooterStatusBackgr
 }
 
 // blockedActivity resolves the cell while blocked: the kind that explains the
-// step first — the auth prompt under `auth`, the vendor's rate-limit event
-// under `usage_limit` — then an escalating fault that claims `blocked`; then
-// the shared salient lines; then unpinned, where the enduring usage figures
-// explain a usage-limit block the vendor sent no event for.
+// step first — the auth prompt under `auth` — then an escalating fault that
+// claims `blocked`; then the shared salient lines; then unpinned, where the
+// enduring usage figures explain a usage-limit block.
 func (r *resolver) blockedActivity(s *wsState) *frontendv1.FooterStatusBlockedActivity {
 	salient := func(at time.Time) *frontendv1.FooterStatusBlockedSalient {
 		return &frontendv1.FooterStatusBlockedSalient{At: stamp(at)}
@@ -152,9 +151,6 @@ func (r *resolver) blockedActivity(s *wsState) *frontendv1.FooterStatusBlockedAc
 		line = salient(s.authLine.at)
 		line.Kind = &frontendv1.FooterStatusBlockedSalient_Authenticating{
 			Authenticating: &frontendv1.FooterStatusActivityAuthenticating{Line: s.authLine.text}}
-	case s.blocked != nil && s.blocked.kind == blockedUsageLimit && s.rateEvent != nil:
-		line = salient(s.rateEvent.at)
-		line.Kind = &frontendv1.FooterStatusBlockedSalient_RateLimit{RateLimit: s.rateEvent.line}
 	case fault != nil:
 		line = salient(faultAt)
 		line.Kind = &frontendv1.FooterStatusBlockedSalient_Fault{Fault: fault}
