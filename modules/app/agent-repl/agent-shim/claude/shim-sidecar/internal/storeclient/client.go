@@ -233,6 +233,22 @@ func (c *Client) Cursors(ctx context.Context, fileID string) ([]*storev1.CursorS
 	}
 }
 
+// callFailure states one recovery read whose CALL failed and returns the error
+// the caller sees, wrapping the cause under the rpc's name.
+//
+// A CALL THIS PROCESS WITHDREW IS NOT A TRANSPORT FAILURE: the caller cancelled
+// it (a shutdown), so it is a verbose trace naming what was not done, and the
+// caller states the one INFO record for the shutdown. Anything else is the
+// store not answering, recorded once here at ERROR.
+func callFailure(bound *logging.Bound, rpc, what, abandoned string, err error) error {
+	if errors.Is(err, context.Canceled) {
+		bound.LogVerbose("%s abandoned: the caller cancelled the request, %s", what, abandoned)
+		return fmt.Errorf("storeclient: %s: %w", rpc, err)
+	}
+	bound.With(logging.Context{Level: "error"}).Log("%s transport failure: %v", what, err)
+	return fmt.Errorf("storeclient: %s: %w", rpc, err)
+}
+
 // ShellRunClaims answers the shim's claims on record for the given spool task
 // ids, each with the book holding its run's launching call when that is on
 // record. An id with no claim is absent from the answer.
@@ -247,12 +263,7 @@ func (c *Client) ShellRunClaims(ctx context.Context, vendorTaskIDs []string) ([]
 	bound.LogVerbose("shell run claims requested for %d spool(s)", len(vendorTaskIDs))
 	response, err := c.rpc.GetShellRunClaims(ctx, connect.NewRequest(&storev1.GetShellRunClaimsRequest{VendorTaskIds: vendorTaskIDs}))
 	if err != nil {
-		if errors.Is(err, context.Canceled) {
-			bound.LogVerbose("shell run claims abandoned: the caller cancelled the request, so no spool was claimed")
-			return nil, fmt.Errorf("storeclient: %s: %w", rpcGetShellRunClaims, err)
-		}
-		bound.With(logging.Context{Level: "error"}).Log("shell run claims transport failure: %v", err)
-		return nil, fmt.Errorf("storeclient: %s: %w", rpcGetShellRunClaims, err)
+		return nil, callFailure(bound, rpcGetShellRunClaims, "shell run claims", "so no spool was claimed", err)
 	}
 	switch result := response.Msg.GetResult().(type) {
 	case *storev1.GetShellRunClaimsResponse_Success:
