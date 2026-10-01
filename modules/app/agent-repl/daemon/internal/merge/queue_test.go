@@ -237,3 +237,59 @@ func TestAWaitingMergesLineNamesTheMergeAheadAndItsStep(t *testing.T) {
 		t.Fatalf("enqueued line = %+v, want ws-one testing", line)
 	}
 }
+
+// TestLeaveAdmissionReleasesTheDrainWaitingOnTheLastStep covers the release a
+// drain waits on: the step that brings the count to zero closes the drain's
+// channel, and a step that does not leaves it open.
+func TestLeaveAdmissionReleasesTheDrainWaitingOnTheLastStep(t *testing.T) {
+	tests := []struct {
+		name        string
+		inFlight    int
+		wantRelease bool
+	}{
+		{name: "the last step", inFlight: 1, wantRelease: true},
+		{name: "a step with another still in flight", inFlight: 2, wantRelease: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: steps in flight and a drain waiting on them.
+			h := newHarness(t)
+			idle := make(chan struct{})
+			h.o.mu.Lock()
+			h.o.admissions = tc.inFlight
+			h.o.admissionsIdle = idle
+			h.o.mu.Unlock()
+
+			// Act.
+			h.o.leaveAdmission()
+
+			// Assert.
+			released := false
+			select {
+			case <-idle:
+				released = true
+			default:
+			}
+			if released != tc.wantRelease {
+				t.Fatalf("the drain released = %v, want %v", released, tc.wantRelease)
+			}
+		})
+	}
+}
+
+// TestLeaveAdmissionWithNothingRegisteredPanics covers the accounting
+// invariant: a leave with no step registered fails hard rather than driving
+// the count negative.
+func TestLeaveAdmissionWithNothingRegisteredPanics(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	defer func() {
+		// Assert.
+		if recover() == nil {
+			t.Fatal("leaveAdmission with nothing registered did not panic")
+		}
+	}()
+	h.o.leaveAdmission()
+}
