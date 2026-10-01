@@ -893,6 +893,24 @@ tag inside the struct body rather than to the next line."
       (setq start (match-end 0)))
     (delete-dups names)))
 
+(defvar agent-repl-test--popups-shown nil
+  "Buffers handed to `agent-repl-popup-show' inside
+`agent-repl-test--recording-popups', newest first.")
+
+(defmacro agent-repl-test--recording-popups (&rest body)
+  "Run BODY with `agent-repl-popup-show' recorded rather than performed.
+Every buffer it is handed lands in `agent-repl-test--popups-shown', and it
+answers the selected window as a working popup does.  The popup itself is
+popup.el's subject (test-popup.el); batch Emacs has no frame to show one
+in, so every other suite records at this boundary."
+  (declare (indent 0))
+  `(let ((agent-repl-test--popups-shown nil))
+     (cl-letf (((symbol-function 'agent-repl-popup-show)
+                (lambda (buffer)
+                  (push buffer agent-repl-test--popups-shown)
+                  (selected-window))))
+       ,@body)))
+
 (defmacro agent-repl-test--with-temp-buffer (name &rest body)
   "Create (or reuse) buffer NAME, execute BODY, kill buffer only if we created it.
 If NAME already refers to a live buffer when the macro runs (e.g. `*scratch*',
