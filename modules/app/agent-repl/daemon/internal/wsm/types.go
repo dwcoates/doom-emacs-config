@@ -351,8 +351,10 @@ const (
 	PolicyRefuse LeasePolicy = iota
 	// PolicyHold parks new submissions until release (restart, drain).
 	PolicyHold
-	// PolicyParked routes new submissions to the resolution agent (a merge
-	// parked on conflicts or test failures).
+	// PolicyParked is RETIRED: nothing parks (owner ruling, 2026-09-29) and
+	// nothing writes it. A lease row a build before 2026-09-30 wrote may
+	// still carry it, so it stays decodable; it reads as a merge lease that
+	// refuses, and the boot's merge recovery releases every merge lease.
 	PolicyParked
 )
 

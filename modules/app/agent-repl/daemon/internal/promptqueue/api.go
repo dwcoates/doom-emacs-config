@@ -341,10 +341,6 @@ type Deps struct {
 	// and this is what lets the queue give it rather than reporting a missing
 	// session. Nil means no workspace is ever read as gated.
 	ColdGate ColdGateFunc
-	// ParkedRoute delivers a submission that arrived under a PARKED merge
-	// lease to the resolution agent as guidance. It is a FUNCTION, not the
-	// orchestrator, because the queue never imports merge.
-	ParkedRoute ParkedRouter
 	// DrainRefusals records each submission the drain lease refused or held.
 	// The controller rate-limits its own record; the queue only reports.
 	DrainRefusals RefusalNoter
@@ -491,13 +487,6 @@ type Watcher interface {
 	// the opening page StartTurnSuccess carried.
 	OnTurnOpened(ws ids.WorkspaceID, prompt *conversationv1.AgentPrompt, page *conversationv1.HistoryPage)
 }
-
-// ParkedRouter delivers one parked submission to the resolution agent as
-// guidance, addressed at the parked tab, as the SUBMISSION'S OWN TURN: the
-// guidance runs under turn, never one minted downstream, so a retry of the
-// submission re-driven under the same turn id is recognized by the shim as the
-// start it already took.
-type ParkedRouter func(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID, said *conversationv1.UserSaid) error
 
 // RefusalNoter records one drain-refused submission. drain.Controller
 // satisfies it.

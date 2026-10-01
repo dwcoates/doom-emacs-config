@@ -9,7 +9,6 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"claude-repld/internal/dlog"
-	"claude-repld/internal/feedid"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/resolve/footer"
 	"claude-repld/internal/sessionwatcher"
@@ -125,6 +124,21 @@ func TestSubmitRefusesUnderTheMergeLease(t *testing.T) {
 	}
 }
 
+func TestSubmitRefusesUnderARetiredParkedMergeLease(t *testing.T) {
+	// Arrange: a lease row an older build wrote parked.
+	h := newHarness(t)
+	h.lease(wsm.HolderMerge, wsm.PolicyParked)
+	// Act
+	got, err := h.q.Submit(context.Background(), submission("t1", "hello"))
+	// Assert
+	if !errors.Is(err, ErrMerging) || got.RefusedArm != ArmMerging {
+		t.Fatalf("Submit = (%+v, %v), want the merging refusal", got, err)
+	}
+	if len(h.sender.started()) != 0 {
+		t.Fatal("a submission under a retired parked lease reached the shim")
+	}
+}
+
 func TestSubmitHoldsUnderTheDrainLease(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
@@ -181,82 +195,6 @@ func TestSubmitHoldsUnderARestartLeaseAsABuildRefresh(t *testing.T) {
 	}
 	if got.Held == nil || *got.Held != wsm.HoldBuildRefresh {
 		t.Fatalf("disposition = %+v, want a build-refresh hold", got)
-	}
-}
-
-func TestSubmitRoutesAParkedLeaseToTheResolutionAgent(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	h.lease(wsm.HolderMerge, wsm.PolicyParked)
-	// Act
-	got, err := h.q.Submit(context.Background(), submission("t1", "fix the conflict this way"))
-	// Assert
-	if err != nil {
-		t.Fatalf("Submit: %v", err)
-	}
-	if !got.Delivered {
-		t.Fatalf("disposition = %+v, want a delivered disposition", got)
-	}
-	if len(h.parked) != 1 {
-		t.Fatalf("parked routes = %d, want 1", len(h.parked))
-	}
-	if len(h.sender.started()) != 0 {
-		t.Fatal("a parked submission never opens a turn of its own")
-	}
-}
-
-func TestSubmitMirrorsAParkedLeasesGuidanceAsAUserPromptRow(t *testing.T) {
-	// Arrange: a parked merge lease has addressed the session at its own tab.
-	h := newHarness(t)
-	h.lease(wsm.HolderMerge, wsm.PolicyParked)
-	lease := ids.LeaseID("lease-1")
-	h.feed.SetOutputAddress("ws-1", &sessionwatcher.OutputAddress{Feed: feedid.Feed{Merge: &lease}})
-	// Act
-	if _, err := h.q.Submit(context.Background(), submission("t1", "fix the conflict this way")); err != nil {
-		t.Fatalf("Submit: %v", err)
-	}
-	// Assert: the guidance is drawn at the ADDRESSED feed, never on the root.
-	rows := h.feed.mirrored()
-	if len(rows) != 1 {
-		t.Fatalf("mirrored rows = %d, want the guidance drawn once", len(rows))
-	}
-	want := feedid.Encode(feedid.Ref{WS: "ws-1", Feed: feedid.Feed{Merge: &lease},
-		Row: feedid.RowKey{Kind: feedid.KindPrompt, ID: "t1"}})
-	if got := rows[0].GetId().GetValue(); got != want.GetValue() {
-		t.Fatalf("guidance mirror id = %q, want the addressed feed's %q", got, want.GetValue())
-	}
-}
-
-func TestSubmitRecordsAParkedLeasesGuidanceAsATurnBeforeRoutingIt(t *testing.T) {
-	// Arrange: the route looks for the record the moment it is asked.
-	h := newHarness(t)
-	h.lease(wsm.HolderMerge, wsm.PolicyParked)
-	var recordedFirst bool
-	h.onParkedRoute = func() {
-		h.db.mu.Lock()
-		_, recordedFirst = h.db.turns["t1"]
-		h.db.mu.Unlock()
-	}
-	// Act
-	if _, err := h.q.Submit(context.Background(), submission("t1", "fix the conflict this way")); err != nil {
-		t.Fatalf("Submit: %v", err)
-	}
-	// Assert: the guidance turn's end has a row to close.
-	if !recordedFirst {
-		t.Fatal("the guidance turn was routed before its record went down")
-	}
-}
-
-func TestSubmitSurfacesAParkedRouteFailure(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	h.lease(wsm.HolderMerge, wsm.PolicyParked)
-	h.parkedErr = errors.New("the resolution agent is gone")
-	// Act
-	_, err := h.q.Submit(context.Background(), submission("t1", "guidance"))
-	// Assert
-	if err == nil {
-		t.Fatal("a parked route's failure must be surfaced, never swallowed")
 	}
 }
 
@@ -841,23 +779,6 @@ func TestSubmitOfTheTurnAlreadyInFlightStartsNothing(t *testing.T) {
 // repeatedStartMessage is the record a submission of the turn in flight
 // writes.
 const repeatedStartMessage = "a submission repeated the turn already in flight; it is answered as the delivery the original was and nothing is started again"
-
-// TestSubmitRoutesAParkedLeaseUnderTheSubmissionsOwnTurn pins that the
-// guidance is started under the submission's turn, never one minted
-// downstream, so a re-driven retry of it is the start the shim already took.
-func TestSubmitRoutesAParkedLeaseUnderTheSubmissionsOwnTurn(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	h.lease(wsm.HolderMerge, wsm.PolicyParked)
-	// Act
-	if _, err := h.q.Submit(context.Background(), submission("t1", "fix the conflict this way")); err != nil {
-		t.Fatalf("Submit: %v", err)
-	}
-	// Assert
-	if len(h.parkedTurns) != 1 || h.parkedTurns[0] != "t1" {
-		t.Fatalf("parked route turns = %v, want the submission's own t1", h.parkedTurns)
-	}
-}
 
 // TestARevivedSessionThatHasSinceDepartedIsNotAFailedRevival is the race the
 // integration suite caught: the shim a revival brought up died and was reaped
