@@ -52,8 +52,17 @@ unfettered), from the implementing agent's proposal.
   beat arrived, and a beat restated the send's empty input.
 - Consequences:
   - The footer describes a resumed row from the announcement itself
-    (`daemon/internal/resolve/footer/chips.go` `bindDetachedAgent`), so the
-    "take the label from a beat" path was deleted.
+    (`daemon/internal/resolve/footer/chips.go` `bindDetachedAgent`,
+    `takeCommission`), so the "take the label from a beat" path was deleted.
+  - The watcher refuses a `created` announcement whose commission disagrees
+    with the start it describes (`daemon.sessionwatcher.detached_commission_conflict`),
+    exactly as it refuses a kind conflict.
+  - The shim asks the store before folding whenever it lacks the commission
+    of a subagent task whose spawn it did not observe
+    (`convert/detached.ts` `taskAwaitingAgent`): a resume after a shim
+    restart, and a backgrounded subagent's own nested spawn, whose call never
+    reaches the stream. Without the ask every nested spawn's announcement
+    would record an ERROR.
   - The shim must state it on every subagent announcement, including the
     `created` re-announcements of `store/reconcile.ts` (`announceLiveWork`,
     `resumedAgentAnnouncement`), where it is the recorded start's prompt.
@@ -135,3 +144,6 @@ unfettered), from the implementing agent's proposal.
   - Accepted cost: an unowned beat that arrives before any producer wrote its
     unit's row is lost and reported at ERROR. In production the sidecar wrote
     the nested spawn's row five seconds before the shim's first beat.
+  - Accepted cost: a run resumed by a send that a BACKGROUND subagent made has
+    no observed owner and a new key (`resumed-run:<send>`), so its frames are
+    reported unplaced at ERROR rather than filed in a guessed book.
