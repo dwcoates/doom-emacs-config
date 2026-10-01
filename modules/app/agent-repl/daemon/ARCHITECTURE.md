@@ -862,7 +862,8 @@ resolved, applies nothing from the whole file, which retires to `quarantine/`
 at WARN `daemon.commandfile.quarantine` with the refused entry and field in its
 cause.
 
-EVERY DIRECTORY FIELD (`git_root`, `project_dir`, `dir`) goes through
+EVERY DIRECTORY FIELD (`git_root`, `project_dir`, `dir`, `source_dir`,
+`evict_dir`, `repository_dir`) goes through
 `dirpath.Absolute` before anything reads it. A leading `~` expands to the home
 directory the daemon resolved at boot, because the `/create-or-update-workspace`
 skill's contract says a leading `~` is expanded downstream. `~user` and any path
@@ -888,6 +889,29 @@ refused for the same reason. A create maps onto the `CreateSpec` the
 | `model` | `Model`, blank as unset |
 | `priority` | `Priority`: `p05`, `p1`, `p2`, `p3` |
 | `before_ws_merge`, `postprocessing_prompt` | `MergeActions.Before`, `MergeActions.After` |
+
+### The merge queue's controls
+
+Three entry types mirror `UpdateMergeQueue`'s three arms and call the same
+orchestrator entry points (`merge.Orchestrator.Evict`, `Pause`, `Unpause`).
+Each names its REQUESTER by `project_dir` (or `dir`, or a `workspace` id), as
+a `merge` entry does; that is the workspace whose agent wrote it.
+
+| type | fields | maps onto |
+|---|---|---|
+| `merge_evict` | `evict_dir` optional: another workspace's worktree root | `Evict` of the workspace at `evict_dir`, else of the requester |
+| `merge_pause` | `repository_dir` optional: a repository's main checkout | `Pause` of that repository's queue, else of every repository |
+| `merge_resume` | `repository_dir` optional, as for a pause | `Unpause`, scoped as a pause is |
+
+`evict_dir` is refused on any other type, and `repository_dir` on any but a
+pause or a resume. The OUTCOME is the file's fate plus one INFO
+`daemon.commandfile.merge_queue` record whose `path` is the file and whose
+`outcome` is `evicted`, `not_queued`, `paused` or `resumed`. EVICTING A
+WORKSPACE WITH NOTHING ON THE QUEUE IS AN ANSWER, NOT A FAILURE: the rpc's
+`no_such_queued_merge` applies the file with `outcome: not_queued`. Every other
+refusal (`already_paused`, `not_paused`, `unknown_repository`, an unregistered
+requester or `evict_dir`) quarantines the file at WARN
+`daemon.commandfile.entry` with the arm in its `cause`.
 
 ## heldingress
 

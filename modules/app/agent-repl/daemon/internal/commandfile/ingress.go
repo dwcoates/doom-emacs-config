@@ -28,6 +28,10 @@ const (
 	opQuarantine = "daemon.commandfile.quarantine"
 	opEntry      = "daemon.commandfile.entry"
 	opGate       = "daemon.commandfile.gate"
+	// opMergeQueue is the outcome record of a merge-queue control entry
+	// (merge_evict, merge_pause, merge_resume): the answer the requesting
+	// agent reads back, keyed by the file's path like every other record here.
+	opMergeQueue = "daemon.commandfile.merge_queue"
 )
 
 // ErrQuarantined marks the error a malformed file yields: the file was warned
@@ -283,6 +287,10 @@ func (i *ingress) apply(ctx context.Context, log dlog.Logger, file string, index
 		// turn: it is put in line once that turn ends, and never displaces
 		// the turn in flight (merge.Requester).
 		return i.deps.Merge.Enqueue(ctx, merge.Request{Workspace: ws, Source: source, By: merge.RequestedByAgent})
+	case TypeMergeEvict:
+		return i.applyMergeEvict(ctx, log, entry)
+	case TypeMergePause, TypeMergeResume:
+		return i.applyMergePause(ctx, log, entry)
 	case TypeClose:
 		ws, err := i.target(ctx, entry)
 		if err != nil {
@@ -351,6 +359,82 @@ func (i *ingress) mergeSource(ctx context.Context, requester ids.WorkspaceID, en
 		return wsm.MergeSource{Kind: wsm.MergeSourceWorkspace, Workspace: record.ID}, nil
 	}
 	return wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch, KeepOpen: entry.KeepOpen}, nil
+}
+
+// applyMergeEvict maps a merge_evict entry onto the orchestrator's Evict, the
+// entry point UpdateMergeQueue's evict arm calls. The requester's own merge is
+// evicted unless evict_dir names another workspace's.
+//
+// A WORKSPACE WITH NOTHING ON THE QUEUE IS AN ANSWER, NOT A FAILURE. The rpc
+// answers it as `no_such_queued_merge` to an operator who asked for a change;
+// an agent asking to take a merge out is satisfied when none is in, so the
+// file is applied and the outcome record says nothing was queued.
+func (i *ingress) applyMergeEvict(ctx context.Context, log dlog.Logger, entry Entry) error {
+	requester, err := i.target(ctx, entry)
+	if err != nil {
+		return err
+	}
+	evicted := requester
+	if entry.EvictDir != "" {
+		if i.deps.DB == nil {
+			return fmt.Errorf("this entry names an evict_dir and the ingress has no state client to resolve it with")
+		}
+		record, err := i.deps.DB.WorkspaceByDir(ctx, entry.EvictDir)
+		if err != nil {
+			return fmt.Errorf("unknown_workspace: no workspace is registered at evict_dir %q: %w", entry.EvictDir, err)
+		}
+		evicted = record.ID
+	}
+	outcome := dlog.Context{
+		"type": entry.Type, "requester": string(requester), "workspace": string(evicted),
+		"own": evicted == requester,
+	}
+	err = i.deps.Merge.Evict(ctx, evicted)
+	if refusal, ok := merge.Refused(err); ok && refusal.Arm == merge.ArmNoSuchQueuedMerge {
+		outcome["outcome"] = "not_queued"
+		log.Info(opMergeQueue, "nothing to evict: the workspace has no merge on the queue", outcome)
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	outcome["outcome"] = "evicted"
+	log.Info(opMergeQueue, "evicted the workspace's merge from the queue", outcome)
+	return nil
+}
+
+// applyMergePause maps a merge_pause or merge_resume entry onto the
+// orchestrator's Pause or Unpause, the entry points UpdateMergeQueue's pause
+// and resume arms call, scoped the way the rpc scopes them: an unset
+// repository_dir is every repository. A refusal (already_paused, not_paused,
+// unknown_repository) is the rpc's refusal, and quarantines the file.
+func (i *ingress) applyMergePause(ctx context.Context, log dlog.Logger, entry Entry) error {
+	requester, err := i.target(ctx, entry)
+	if err != nil {
+		return err
+	}
+	var scope *merge.RepositoryScope
+	if entry.RepositoryDir != "" {
+		scope = &merge.RepositoryScope{Dir: entry.RepositoryDir}
+	}
+	outcome := dlog.Context{
+		"type": entry.Type, "requester": string(requester), "repository_dir": entry.RepositoryDir,
+		"scoped": scope != nil,
+	}
+	if entry.Type == TypeMergePause {
+		if err := i.deps.Merge.Pause(ctx, scope); err != nil {
+			return err
+		}
+		outcome["outcome"] = "paused"
+		log.Info(opMergeQueue, "paused the merge queue", outcome)
+		return nil
+	}
+	if err := i.deps.Merge.Unpause(ctx, scope); err != nil {
+		return err
+	}
+	outcome["outcome"] = "resumed"
+	log.Info(opMergeQueue, "resumed the merge queue", outcome)
+	return nil
 }
 
 // applyCreate maps a create entry onto the ordinary creation verb. A one-shot

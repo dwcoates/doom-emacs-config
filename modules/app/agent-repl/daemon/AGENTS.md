@@ -949,6 +949,17 @@ Owner rulings, 2026-09-30 (`internal/merge`; the contract is
 - Exits: 0 landed (or requested, without `-wait`), 5 failed, 6 refused, 2 the
   verb itself failed.
 
+## An agent controls the merge queue through command files
+
+`merge_evict`, `merge_pause` and `merge_resume` entries
+(`internal/commandfile`, ARCHITECTURE.md "The merge queue's controls") are
+`UpdateMergeQueue`'s evict, pause and resume for an agent: the same
+orchestrator calls, the requester named by `project_dir`. The answer is the
+file's fate (`applied/` or `quarantine/`) and the record keyed by its path:
+INFO `daemon.commandfile.merge_queue` (`outcome` `evicted`, `not_queued`,
+`paused`, `resumed`) or WARN `daemon.commandfile.entry` (the refusal in
+`cause`). Evicting what is not queued is `not_queued`, never a refusal.
+
 ## A lease dies with the process that took it
 
 A workspace's occupancy lease (`wsm.leases`: merge, restart, drain, hibernate)

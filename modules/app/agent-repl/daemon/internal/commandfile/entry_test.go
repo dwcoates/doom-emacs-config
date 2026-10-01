@@ -25,6 +25,12 @@ func TestValidateAcceptsEveryAcceptedShape(t *testing.T) {
 		{name: "task create", entry: Entry{Type: TypeTaskCreate, Title: "t"}},
 		{name: "task toggle done", entry: Entry{Type: TypeTaskToggleDone, ID: "task-1", Done: &done}},
 		{name: "task add workspace", entry: Entry{Type: TypeTaskAddWorkspace, ID: "task-1", Workspace: "w1"}},
+		{name: "merge evict of the requester's own", entry: Entry{Type: TypeMergeEvict, ProjectDir: "/tree"}},
+		{name: "merge evict of another workspace", entry: Entry{Type: TypeMergeEvict, ProjectDir: "/tree", EvictDir: "/tree2"}},
+		{name: "merge pause of every repository", entry: Entry{Type: TypeMergePause, ProjectDir: "/tree"}},
+		{name: "merge pause of one repository", entry: Entry{Type: TypeMergePause, ProjectDir: "/tree", RepositoryDir: "/repo"}},
+		{name: "merge resume of every repository", entry: Entry{Type: TypeMergeResume, ProjectDir: "/tree"}},
+		{name: "merge resume of one repository", entry: Entry{Type: TypeMergeResume, ProjectDir: "/tree", RepositoryDir: "/repo"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -56,6 +62,11 @@ func TestValidateRefusesEveryIncompleteShape(t *testing.T) {
 		{name: "task toggle with no id", entry: Entry{Type: TypeTaskToggleDone}},
 		{name: "task toggle with no done", entry: Entry{Type: TypeTaskToggleDone, ID: "task-1"}},
 		{name: "task add workspace with no target", entry: Entry{Type: TypeTaskAddWorkspace, ID: "task-1"}},
+		{name: "merge evict with no requester", entry: Entry{Type: TypeMergeEvict}},
+		{name: "merge pause with no requester", entry: Entry{Type: TypeMergePause}},
+		{name: "merge resume with no requester", entry: Entry{Type: TypeMergeResume}},
+		{name: "evict_dir on a close", entry: Entry{Type: TypeClose, Dir: "/tree", EvictDir: "/tree2"}},
+		{name: "repository_dir on a merge", entry: Entry{Type: TypeMerge, Dir: "/tree", RepositoryDir: "/repo"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
