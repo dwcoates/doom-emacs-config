@@ -137,6 +137,13 @@ type Resolver interface {
 	// and drawn with the metaprompt sentinel spans STRIPPED — the full text
 	// stays on the durable record.
 	UpsertSynthesized(ws ids.WorkspaceID, feed feedid.Feed, row *frontendv1.FeedRow)
+	// UpsertDurable upserts a daemon-synthesized row A NEW DAEMON MUST DRAW
+	// AGAIN — a merge's bubble, which no store replays — and records it, as
+	// published and at the order key it was first drawn at, in Deps.DurableRows.
+	// A workspace's recorded rows are drawn again, each where it stood, the
+	// moment that workspace's feed is first touched; a bind's reset forgets
+	// them with every other row.
+	UpsertDurable(ws ids.WorkspaceID, feed feedid.Feed, row *frontendv1.FeedRow)
 	// UpsertAtOutputAddress upserts a daemon-synthesized row at the session's
 	// STANDING OUTPUT ADDRESS rather than a named feed: the mirror of an
 	// accepted user prompt belongs wherever the lease holder addressed the
@@ -293,6 +300,12 @@ type Deps struct {
 	// nil treats every entry as the workspace's own, which is what a test
 	// that is not about forking wants.
 	OwnedTurns func(context.Context, ids.WorkspaceID, []ids.TurnID) (map[ids.TurnID]bool, error)
+	// DurableRows records the rows UpsertDurable publishes and answers them
+	// again to a new daemon (wsm.DB's durable feed rows).
+	//
+	// nil records nothing, which is what a test that is not about a new
+	// daemon wants. Production always wires it.
+	DurableRows DurableRows
 	// Now is the resolver's clock, injected so tests never sleep. Defaults to
 	// time.Now.
 	Now func() time.Time
@@ -370,3 +383,11 @@ func New(deps Deps) (Resolver, error) {
 // Topic is the per-feed publication a tail subscribes to. It is exported so
 // the server can wire streams without reaching inside the resolver.
 type Topic = publish.Topic[*frontendv1.FeedRow]
+
+// DurableRows is the record UpsertDurable writes through to: wsm.DB's durable
+// feed rows.
+type DurableRows interface {
+	PutDurableFeedRow(ctx context.Context, row wsm.DurableFeedRow) error
+	DurableFeedRows(ctx context.Context, id ids.WorkspaceID) ([]wsm.DurableFeedRow, error)
+	ClearDurableFeedRows(ctx context.Context, id ids.WorkspaceID) error
+}
