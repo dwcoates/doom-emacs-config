@@ -62,6 +62,11 @@ type RenderColors struct {
 	// workspace, and purple, a merge holding it. Every other color is a
 	// usable workspace whose composer is open.
 	ComposerClosedColors []string
+	// ComposerOpenSubstatuses are the DECLARED exceptions to the composer
+	// invariant: per footer status arm whose color closes the composer, the
+	// substatus arms under which it stays open (owner ruling, 2026-10-01:
+	// `blocked · api_retrying`, whose prompt interrupts the retry).
+	ComposerOpenSubstatuses map[string][]string
 	// TopbarConnectivity maps each daemon link state to a topbar tone.
 	TopbarConnectivity map[string]string
 	// TopbarTones is the closed set of tone names the topbar may serve.
@@ -77,18 +82,19 @@ type RenderColors struct {
 // renderColorsJSON is the file's on-disk shape. It is separate from
 // RenderColors so an absent table is distinguishable from an empty one.
 type renderColorsJSON struct {
-	Colors               []string                     `json:"colors"`
-	Precedence           []string                     `json:"precedence"`
-	RosterStatus         map[string]string            `json:"roster_status"`
-	MergeGlyphs          map[string]string            `json:"merge_glyphs"`
-	ColoredMergeArms     []string                     `json:"colored_merge_arms"`
-	FeedMergeHeadGlyph   string                       `json:"feed_merge_head_glyph"`
-	FooterStatus         map[string]string            `json:"footer_status"`
-	ComposerClosedColors []string                     `json:"composer_closed_colors"`
-	TopbarConnectivity   map[string]string            `json:"topbar_connectivity"`
-	TopbarTones          []string                     `json:"topbar_tones"`
-	SurfaceOverrides     map[string]map[string]string `json:"surface_overrides"`
-	FailureSides         map[string]string            `json:"failure_sides"`
+	Colors                  []string                     `json:"colors"`
+	Precedence              []string                     `json:"precedence"`
+	RosterStatus            map[string]string            `json:"roster_status"`
+	MergeGlyphs             map[string]string            `json:"merge_glyphs"`
+	ColoredMergeArms        []string                     `json:"colored_merge_arms"`
+	FeedMergeHeadGlyph      string                       `json:"feed_merge_head_glyph"`
+	FooterStatus            map[string]string            `json:"footer_status"`
+	ComposerClosedColors    []string                     `json:"composer_closed_colors"`
+	ComposerOpenSubstatuses map[string][]string          `json:"composer_open_substatuses"`
+	TopbarConnectivity      map[string]string            `json:"topbar_connectivity"`
+	TopbarTones             []string                     `json:"topbar_tones"`
+	SurfaceOverrides        map[string]map[string]string `json:"surface_overrides"`
+	FailureSides            map[string]string            `json:"failure_sides"`
 }
 
 // PaintClasses is paint-classes.json: the closed inventory of paint_class
@@ -165,6 +171,23 @@ func (c RenderColors) validate() error {
 	for _, color := range c.ComposerClosedColors {
 		if color == ColorNone || !c.knownColor(color) {
 			return fmt.Errorf("composer_closed_colors names %q, which is not a color", color)
+		}
+	}
+	for status, substatuses := range c.ComposerOpenSubstatuses {
+		color, ok := c.FooterStatus[status]
+		if !ok {
+			return fmt.Errorf("composer_open_substatuses[%q] names no footer_status arm", status)
+		}
+		if !contains(c.ComposerClosedColors, color) {
+			return fmt.Errorf("composer_open_substatuses[%q]: its color %q does not close the composer, so it has nothing to open", status, color)
+		}
+		if len(substatuses) == 0 {
+			return fmt.Errorf("composer_open_substatuses[%q] is empty", status)
+		}
+		for _, sub := range substatuses {
+			if sub == "" {
+				return fmt.Errorf("composer_open_substatuses[%q] names the empty substatus", status)
+			}
 		}
 	}
 	if len(c.MergeGlyphs) == 0 {
@@ -292,6 +315,24 @@ func (c RenderColors) AssertRosterStatusArms(arms []string) error {
 // AssertFooterStatusArms is AssertRosterStatusArms for FooterStatus.status.
 func (c RenderColors) AssertFooterStatusArms(arms []string) error {
 	return assertTable("footer_status", c.FooterStatus, arms)
+}
+
+// AssertComposerOpenSubstatusArms checks that every substatus declared in
+// composer_open_substatuses is a real arm of that footer status's substatus
+// oneof. armsOf answers a footer status arm's substatus arm names.
+func (c RenderColors) AssertComposerOpenSubstatusArms(armsOf func(status string) ([]string, error)) error {
+	for status, substatuses := range c.ComposerOpenSubstatuses {
+		arms, err := armsOf(status)
+		if err != nil {
+			return fmt.Errorf("composer_open_substatuses[%q]: %w", status, err)
+		}
+		for _, sub := range substatuses {
+			if !contains(arms, sub) {
+				return fmt.Errorf("composer_open_substatuses[%q] names %q, which is not a substatus arm of it", status, sub)
+			}
+		}
+	}
+	return nil
 }
 
 // AssertMergeGlyphArms checks that every merge arm it is given carries a glyph
