@@ -141,6 +141,9 @@
   /* The running task's timer: blue, the one datapoint hue not already spoken
      for, so a live count never reads as a token figure or a subagent. */
   --info-time: #1d4ed8;
+  /* The "|" between the enduring usage line's allowances: the footer clock's
+     blue, so the line's one non-figure mark reads as a divider. */
+  --footer-rate-separator: var(--info-time);
   /* The subagent roster chip: the --tool-title purple the tool cards title
      themselves with, since a subagent IS a tool call the session made. */
   --info-agents: #7c3aed;
@@ -5272,6 +5275,8 @@ bubble-body.bubble-body { display: block; }
    set in the foreground weight; its sibling stays reference. */
 .footer-allowance-newsworthy { font-weight: 650; }
 .footer-allowance { font-variant-numeric: tabular-nums; }
+
+.footer-rate-separator { color: var(--footer-rate-separator); }
 
 .footer-rate-figures {
   flex: 1 1 auto;

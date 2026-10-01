@@ -851,6 +851,27 @@ describe("the enduring line", () => {
     ).toBe("weekly");
   });
 
+  it("draws one blue-classed separator between two allowances", () => {
+    const cell = enduringCell({
+      usage: { session: allowance(0.31, false, 60_000), weekly: allowance(0.2, false, 60_000) },
+    });
+    const separators = [...cell.querySelectorAll(".footer-rate-figures .footer-rate-separator")];
+    expect(separators.map((s) => s.textContent)).toEqual(["|"]);
+  });
+
+  it("draws no separator beside a single allowance", () => {
+    const cell = enduringCell({ usage: { session: allowance(0.31, false, 60_000) } });
+    expect(cell.querySelector(".footer-rate-separator")).toBeNull();
+  });
+
+  it("keeps the spaces around the separator in the line's own color", () => {
+    const cell = enduringCell({
+      usage: { session: allowance(0.31, false, 60_000), weekly: allowance(0.2, false, 60_000) },
+    });
+    const separator = cell.querySelector(".footer-rate-separator");
+    expect([separator?.previousSibling?.textContent, separator?.nextSibling?.textContent]).toEqual([" ", " "]);
+  });
+
   it("ticks an allowance's reset countdown on the shared clock", () => {
     const cell = enduringCell({ usage: { session: allowance(0.2, false, 3_600_000) } });
     vi.advanceTimersByTime(60_000);
