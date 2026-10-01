@@ -2255,13 +2255,14 @@ export const HOLD_CLASSIFICATION_ARMS = [
   "holdForTurnEnd",
   "uninterruptibleTurn",
   "classificationError",
+  "daemonHeld",
 ] as const;
 export type HoldClassificationArm = (typeof HOLD_CLASSIFICATION_ARMS)[number];
 
 /** The ONE classification that draws an [accept] button (ruled). */
 export const HOLD_ACCEPTABLE_ARM = "holdForTurnEnd";
 
-export const HOLD_ARMS = ["shutdown", "sessionStarting", "buildRefresh"] as const;
+export const HOLD_ARMS = ["shutdown", "sessionStarting", "buildRefresh", "merge"] as const;
 export type HoldArm = (typeof HOLD_ARMS)[number];
 
 type HeldPromptInit = MessageInitShape<typeof HeldPromptSchema>;
@@ -2286,6 +2287,8 @@ const classificationValue = (
       return { case: "uninterruptibleTurn", value: { command: SessionCommand.COMPACT } };
     case "classificationError":
       return { case: "classificationError", value: { detail: "the classifier timed out" } };
+    case "daemonHeld":
+      return { case: "daemonHeld", value: {} };
   }
 };
 
@@ -2297,6 +2300,8 @@ const holdValue = (arm: HoldArm): NonNullable<HeldPromptInit["hold"]> => {
       return { case: "sessionStarting", value: {} };
     case "buildRefresh":
       return { case: "buildRefresh", value: {} };
+    case "merge":
+      return { case: "merge", value: {} };
   }
 };
 
@@ -2317,6 +2322,7 @@ export const HOLD_BADGES: Readonly<Record<string, { label: string; detail?: stri
   shutdown: { label: "restart hold", detail: "held for the scheduled restart (sched-1)" },
   sessionStarting: { label: "starting up", detail: "held until the session is up" },
   buildRefresh: { label: "build refresh", detail: "held for the build refresh" },
+  merge: { label: "after the merge", detail: "held until the merge ends; the workspace stays open for it" },
 };
 
 export function heldPrompt(init?: {
@@ -2330,7 +2336,8 @@ export function heldPrompt(init?: {
 }): HeldPrompt {
   const classification = init?.classification ?? "interject";
   const hold = init?.hold ?? "sessionStarting";
-  const statuses: string[] = [classification];
+  // `daemon_held` draws no badge of its own: the hold arm's badge says what holds it.
+  const statuses: string[] = classification === "daemonHeld" ? [] : [classification];
   if (classification === "holdForTurnEnd" && init?.accepted === true) statuses.push("accepted");
   statuses.push(hold);
   return create(HeldPromptSchema, {

@@ -116,6 +116,7 @@ const CLASSIFICATION_TEXT: Record<HoldClassificationArm, string> = {
   holdForTurnEnd: "it is a follow-up",
   uninterruptibleTurn: "",
   classificationError: "the classifier timed out",
+  daemonHeld: "",
 };
 
 describe("classification detail", () => {
