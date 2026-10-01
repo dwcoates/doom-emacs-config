@@ -21,16 +21,24 @@
 import type { SdkMessage } from "../sdk/types.js";
 import type { PersistEntry, RecordPlace } from "../store/persistence.js";
 
-/** The record's own `timestamp` in epoch milliseconds, or undefined. */
-export function recordTimestampMs(message: SdkMessage): number | undefined {
-  // Observed shapes beat declared types: every real record carries a
-  // top-level `timestamp`, but the SDK's own union does not declare it on
-  // every arm (see stream-events.ts recordSettledAt, which reads it the same
-  // way).
+/**
+ * THE ONE READ of an SDK record's own `timestamp`, in epoch milliseconds, or
+ * undefined when it carries none that parses. Observed shapes beat declared
+ * types: every real record carries a top-level `timestamp`, but the SDK's own
+ * union does not declare it on every arm. A settle instant
+ * (stream-events.ts recordSettledAt) and a row's place both read it here.
+ */
+export function sdkRecordTimestampMs(message: SdkMessage): number | undefined {
   const raw = (message as unknown as { readonly timestamp?: unknown }).timestamp;
   if (typeof raw !== "string" || raw === "") return undefined;
   const ms = Date.parse(raw);
-  return Number.isNaN(ms) || ms <= 0 ? undefined : ms;
+  return Number.isNaN(ms) ? undefined : ms;
+}
+
+/** The record's timestamp as a place's instant: a positive one, or undefined. */
+export function recordTimestampMs(message: SdkMessage): number | undefined {
+  const ms = sdkRecordTimestampMs(message);
+  return ms === undefined || ms <= 0 ? undefined : ms;
 }
 
 /**
