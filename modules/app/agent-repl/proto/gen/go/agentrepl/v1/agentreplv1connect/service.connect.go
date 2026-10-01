@@ -44,9 +44,8 @@ const (
 const (
 	// AgentReplSubmitPromptProcedure is the fully-qualified name of the AgentRepl's SubmitPrompt RPC.
 	AgentReplSubmitPromptProcedure = "/agentrepl.v1.AgentRepl/SubmitPrompt"
-	// AgentReplSelectResponseProcedure is the fully-qualified name of the AgentRepl's SelectResponse
-	// RPC.
-	AgentReplSelectResponseProcedure = "/agentrepl.v1.AgentRepl/SelectResponse"
+	// AgentReplSelectFeedRowProcedure is the fully-qualified name of the AgentRepl's SelectFeedRow RPC.
+	AgentReplSelectFeedRowProcedure = "/agentrepl.v1.AgentRepl/SelectFeedRow"
 	// AgentReplAdjustFeedTextScaleProcedure is the fully-qualified name of the AgentRepl's
 	// AdjustFeedTextScale RPC.
 	AgentReplAdjustFeedTextScaleProcedure = "/agentrepl.v1.AgentRepl/AdjustFeedTextScale"
@@ -209,7 +208,7 @@ const (
 var (
 	agentReplServiceDescriptor                        = v1.File_agentrepl_v1_service_proto.Services().ByName("AgentRepl")
 	agentReplSubmitPromptMethodDescriptor             = agentReplServiceDescriptor.Methods().ByName("SubmitPrompt")
-	agentReplSelectResponseMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("SelectResponse")
+	agentReplSelectFeedRowMethodDescriptor            = agentReplServiceDescriptor.Methods().ByName("SelectFeedRow")
 	agentReplAdjustFeedTextScaleMethodDescriptor      = agentReplServiceDescriptor.Methods().ByName("AdjustFeedTextScale")
 	agentReplRequestCommandSupportMethodDescriptor    = agentReplServiceDescriptor.Methods().ByName("RequestCommandSupport")
 	agentReplOpenFeedMethodDescriptor                 = agentReplServiceDescriptor.Methods().ByName("OpenFeed")
@@ -277,11 +276,11 @@ type AgentReplClient interface {
 	// The composer's submission, whole; the daemon recognizes programmatically
 	// handled commands transparently. See endpoint_submit_prompt.proto.
 	SubmitPrompt(context.Context, *connect.Request[v1.SubmitPromptRequest]) (*connect.Response[v1.SubmitPromptResponse], error)
-	// Move or clear the response-selection cursor (reply-to-a-past-response):
-	// the daemon computes the newly selected final-response feedid from its
-	// ordered rows, pushes it to the webapp on the feed watch, and acks it
-	// here. See endpoint_select_response.proto.
-	SelectResponse(context.Context, *connect.Request[v1.SelectResponseRequest]) (*connect.Response[v1.SelectResponseResponse], error)
+	// Move, clear or end the feed's selection (a final response to reply to,
+	// or a prompt to roll back to): the daemon computes the selected row from
+	// its ordered rows, pushes it to the webapp and Emacs, and acks it here.
+	// See endpoint_select_feed_row.proto.
+	SelectFeedRow(context.Context, *connect.Request[v1.SelectFeedRowRequest]) (*connect.Response[v1.SelectFeedRowResponse], error)
 	// Nudge the feed text zoom one small step up or down. Daemon-global,
 	// persisted, pushed to every open feed's watch as a FeedTextScale frame. See
 	// endpoint_adjust_feed_text_scale.proto.
@@ -475,10 +474,10 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(agentReplSubmitPromptMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
-		selectResponse: connect.NewClient[v1.SelectResponseRequest, v1.SelectResponseResponse](
+		selectFeedRow: connect.NewClient[v1.SelectFeedRowRequest, v1.SelectFeedRowResponse](
 			httpClient,
-			baseURL+AgentReplSelectResponseProcedure,
-			connect.WithSchema(agentReplSelectResponseMethodDescriptor),
+			baseURL+AgentReplSelectFeedRowProcedure,
+			connect.WithSchema(agentReplSelectFeedRowMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
 		adjustFeedTextScale: connect.NewClient[v1.AdjustFeedTextScaleRequest, v1.AdjustFeedTextScaleResponse](
@@ -847,7 +846,7 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 // agentReplClient implements AgentReplClient.
 type agentReplClient struct {
 	submitPrompt             *connect.Client[v1.SubmitPromptRequest, v1.SubmitPromptResponse]
-	selectResponse           *connect.Client[v1.SelectResponseRequest, v1.SelectResponseResponse]
+	selectFeedRow            *connect.Client[v1.SelectFeedRowRequest, v1.SelectFeedRowResponse]
 	adjustFeedTextScale      *connect.Client[v1.AdjustFeedTextScaleRequest, v1.AdjustFeedTextScaleResponse]
 	requestCommandSupport    *connect.Client[v1.RequestCommandSupportRequest, v1.RequestCommandSupportResponse]
 	openFeed                 *connect.Client[v1.OpenFeedRequest, v1.OpenFeedResponse]
@@ -915,9 +914,9 @@ func (c *agentReplClient) SubmitPrompt(ctx context.Context, req *connect.Request
 	return c.submitPrompt.CallUnary(ctx, req)
 }
 
-// SelectResponse calls agentrepl.v1.AgentRepl.SelectResponse.
-func (c *agentReplClient) SelectResponse(ctx context.Context, req *connect.Request[v1.SelectResponseRequest]) (*connect.Response[v1.SelectResponseResponse], error) {
-	return c.selectResponse.CallUnary(ctx, req)
+// SelectFeedRow calls agentrepl.v1.AgentRepl.SelectFeedRow.
+func (c *agentReplClient) SelectFeedRow(ctx context.Context, req *connect.Request[v1.SelectFeedRowRequest]) (*connect.Response[v1.SelectFeedRowResponse], error) {
+	return c.selectFeedRow.CallUnary(ctx, req)
 }
 
 // AdjustFeedTextScale calls agentrepl.v1.AgentRepl.AdjustFeedTextScale.
@@ -1225,11 +1224,11 @@ type AgentReplHandler interface {
 	// The composer's submission, whole; the daemon recognizes programmatically
 	// handled commands transparently. See endpoint_submit_prompt.proto.
 	SubmitPrompt(context.Context, *connect.Request[v1.SubmitPromptRequest]) (*connect.Response[v1.SubmitPromptResponse], error)
-	// Move or clear the response-selection cursor (reply-to-a-past-response):
-	// the daemon computes the newly selected final-response feedid from its
-	// ordered rows, pushes it to the webapp on the feed watch, and acks it
-	// here. See endpoint_select_response.proto.
-	SelectResponse(context.Context, *connect.Request[v1.SelectResponseRequest]) (*connect.Response[v1.SelectResponseResponse], error)
+	// Move, clear or end the feed's selection (a final response to reply to,
+	// or a prompt to roll back to): the daemon computes the selected row from
+	// its ordered rows, pushes it to the webapp and Emacs, and acks it here.
+	// See endpoint_select_feed_row.proto.
+	SelectFeedRow(context.Context, *connect.Request[v1.SelectFeedRowRequest]) (*connect.Response[v1.SelectFeedRowResponse], error)
 	// Nudge the feed text zoom one small step up or down. Daemon-global,
 	// persisted, pushed to every open feed's watch as a FeedTextScale frame. See
 	// endpoint_adjust_feed_text_scale.proto.
@@ -1419,10 +1418,10 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(agentReplSubmitPromptMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
-	agentReplSelectResponseHandler := connect.NewUnaryHandler(
-		AgentReplSelectResponseProcedure,
-		svc.SelectResponse,
-		connect.WithSchema(agentReplSelectResponseMethodDescriptor),
+	agentReplSelectFeedRowHandler := connect.NewUnaryHandler(
+		AgentReplSelectFeedRowProcedure,
+		svc.SelectFeedRow,
+		connect.WithSchema(agentReplSelectFeedRowMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
 	agentReplAdjustFeedTextScaleHandler := connect.NewUnaryHandler(
@@ -1789,8 +1788,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		switch r.URL.Path {
 		case AgentReplSubmitPromptProcedure:
 			agentReplSubmitPromptHandler.ServeHTTP(w, r)
-		case AgentReplSelectResponseProcedure:
-			agentReplSelectResponseHandler.ServeHTTP(w, r)
+		case AgentReplSelectFeedRowProcedure:
+			agentReplSelectFeedRowHandler.ServeHTTP(w, r)
 		case AgentReplAdjustFeedTextScaleProcedure:
 			agentReplAdjustFeedTextScaleHandler.ServeHTTP(w, r)
 		case AgentReplRequestCommandSupportProcedure:
@@ -1924,8 +1923,8 @@ func (UnimplementedAgentReplHandler) SubmitPrompt(context.Context, *connect.Requ
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.SubmitPrompt is not implemented"))
 }
 
-func (UnimplementedAgentReplHandler) SelectResponse(context.Context, *connect.Request[v1.SelectResponseRequest]) (*connect.Response[v1.SelectResponseResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.SelectResponse is not implemented"))
+func (UnimplementedAgentReplHandler) SelectFeedRow(context.Context, *connect.Request[v1.SelectFeedRowRequest]) (*connect.Response[v1.SelectFeedRowResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.SelectFeedRow is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) AdjustFeedTextScale(context.Context, *connect.Request[v1.AdjustFeedTextScaleRequest]) (*connect.Response[v1.AdjustFeedTextScaleResponse], error) {

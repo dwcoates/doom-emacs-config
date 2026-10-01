@@ -33,10 +33,10 @@ var File_agentrepl_v1_service_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_service_proto_rawDesc = "" +
 	"\n" +
-	"\x1aagentrepl/v1/service.proto\x12\fagentrepl.v1\x1a)agentrepl/v1/endpoint_submit_prompt.proto\x1a+agentrepl/v1/endpoint_select_response.proto\x1a2agentrepl/v1/endpoint_adjust_feed_text_scale.proto\x1a%agentrepl/v1/endpoint_open_feed.proto\x1a&agentrepl/v1/endpoint_watch_feed.proto\x1a)agentrepl/v1/endpoint_get_feed_page.proto\x1a%agentrepl/v1/endpoint_interrupt.proto\x1a-agentrepl/v1/endpoint_answer_permission.proto\x1a+agentrepl/v1/endpoint_answer_question.proto\x1a,agentrepl/v1/endpoint_answer_cold_gate.proto\x1a2agentrepl/v1/endpoint_watch_workspace_roster.proto\x1a,agentrepl/v1/endpoint_create_workspace.proto\x1a/agentrepl/v1/endpoint_register_repository.proto\x1a2agentrepl/v1/endpoint_bind_workspace_session.proto\x1a6agentrepl/v1/endpoint_list_workspace_transcripts.proto\x1a*agentrepl/v1/endpoint_open_workspace.proto\x1a+agentrepl/v1/endpoint_close_workspace.proto\x1a*agentrepl/v1/endpoint_kill_workspace.proto\x1a,agentrepl/v1/endpoint_forget_workspace.proto\x1a*agentrepl/v1/endpoint_nuke_workspace.proto\x1a+agentrepl/v1/endpoint_merge_workspace.proto\x1a-agentrepl/v1/endpoint_restart_workspace.proto\x1a(agentrepl/v1/endpoint_watch_topbar.proto\x1a)agentrepl/v1/endpoint_open_external.proto\x1a*agentrepl/v1/endpoint_open_in_editor.proto\x1a,agentrepl/v1/endpoint_send_login_input.proto\x1a3agentrepl/v1/endpoint_request_command_support.proto\x1a'agentrepl/v1/endpoint_create_task.proto\x1a'agentrepl/v1/endpoint_update_task.proto\x1a1agentrepl/v1/endpoint_assign_workspace_task.proto\x1a&agentrepl/v1/endpoint_open_login.proto\x1a0agentrepl/v1/endpoint_watch_login_terminal.proto\x1a'agentrepl/v1/endpoint_close_login.proto\x1a%agentrepl/v1/endpoint_set_model.proto\x1a/agentrepl/v1/endpoint_set_permission_mode.proto\x1a+agentrepl/v1/endpoint_fold_repository.proto\x1a2agentrepl/v1/endpoint_set_workspace_priority.proto\x1a(agentrepl/v1/endpoint_watch_footer.proto\x1a.agentrepl/v1/endpoint_watch_daemon_holds.proto\x1a.agentrepl/v1/endpoint_update_held_prompt.proto\x1a,agentrepl/v1/endpoint_edit_held_prompt.proto\x1a,agentrepl/v1/endpoint_fold_held_prompt.proto\x1a-agentrepl/v1/endpoint_answer_held_offer.proto\x1a\"agentrepl/v1/endpoint_deploy.proto\x1a4agentrepl/v1/endpoint_update_shutdown_schedule.proto\x1a.agentrepl/v1/endpoint_update_merge_queue.proto\x1a)agentrepl/v1/endpoint_daemon_health.proto\x1a*agentrepl/v1/endpoint_session_health.proto\x1a&agentrepl/v1/endpoint_client_log.proto\x1a.agentrepl/v1/endpoint_register_workspace.proto\x1a*agentrepl/v1/endpoint_select_account.proto\x1a,agentrepl/v1/endpoint_select_workspace.proto\x1a1agentrepl/v1/endpoint_mark_workspace_viewed.proto\x1a/agentrepl/v1/endpoint_report_editor_focus.proto\x1a0agentrepl/v1/endpoint_watch_host_workspace.proto\x1a(agentrepl/v1/endpoint_watch_daemon.proto\x1a0agentrepl/v1/endpoint_adopt_host_workspace.proto\x1a/agentrepl/v1/endpoint_watch_web_workspace.proto\x1a/agentrepl/v1/endpoint_adopt_web_workspace.proto\x1a&agentrepl/v1/endpoint_watch_page.proto2\xdd-\n" +
+	"\x1aagentrepl/v1/service.proto\x12\fagentrepl.v1\x1a)agentrepl/v1/endpoint_submit_prompt.proto\x1a+agentrepl/v1/endpoint_select_feed_row.proto\x1a2agentrepl/v1/endpoint_adjust_feed_text_scale.proto\x1a%agentrepl/v1/endpoint_open_feed.proto\x1a&agentrepl/v1/endpoint_watch_feed.proto\x1a)agentrepl/v1/endpoint_get_feed_page.proto\x1a%agentrepl/v1/endpoint_interrupt.proto\x1a-agentrepl/v1/endpoint_answer_permission.proto\x1a+agentrepl/v1/endpoint_answer_question.proto\x1a,agentrepl/v1/endpoint_answer_cold_gate.proto\x1a2agentrepl/v1/endpoint_watch_workspace_roster.proto\x1a,agentrepl/v1/endpoint_create_workspace.proto\x1a/agentrepl/v1/endpoint_register_repository.proto\x1a2agentrepl/v1/endpoint_bind_workspace_session.proto\x1a6agentrepl/v1/endpoint_list_workspace_transcripts.proto\x1a*agentrepl/v1/endpoint_open_workspace.proto\x1a+agentrepl/v1/endpoint_close_workspace.proto\x1a*agentrepl/v1/endpoint_kill_workspace.proto\x1a,agentrepl/v1/endpoint_forget_workspace.proto\x1a*agentrepl/v1/endpoint_nuke_workspace.proto\x1a+agentrepl/v1/endpoint_merge_workspace.proto\x1a-agentrepl/v1/endpoint_restart_workspace.proto\x1a(agentrepl/v1/endpoint_watch_topbar.proto\x1a)agentrepl/v1/endpoint_open_external.proto\x1a*agentrepl/v1/endpoint_open_in_editor.proto\x1a,agentrepl/v1/endpoint_send_login_input.proto\x1a3agentrepl/v1/endpoint_request_command_support.proto\x1a'agentrepl/v1/endpoint_create_task.proto\x1a'agentrepl/v1/endpoint_update_task.proto\x1a1agentrepl/v1/endpoint_assign_workspace_task.proto\x1a&agentrepl/v1/endpoint_open_login.proto\x1a0agentrepl/v1/endpoint_watch_login_terminal.proto\x1a'agentrepl/v1/endpoint_close_login.proto\x1a%agentrepl/v1/endpoint_set_model.proto\x1a/agentrepl/v1/endpoint_set_permission_mode.proto\x1a+agentrepl/v1/endpoint_fold_repository.proto\x1a2agentrepl/v1/endpoint_set_workspace_priority.proto\x1a(agentrepl/v1/endpoint_watch_footer.proto\x1a.agentrepl/v1/endpoint_watch_daemon_holds.proto\x1a.agentrepl/v1/endpoint_update_held_prompt.proto\x1a,agentrepl/v1/endpoint_edit_held_prompt.proto\x1a,agentrepl/v1/endpoint_fold_held_prompt.proto\x1a-agentrepl/v1/endpoint_answer_held_offer.proto\x1a\"agentrepl/v1/endpoint_deploy.proto\x1a4agentrepl/v1/endpoint_update_shutdown_schedule.proto\x1a.agentrepl/v1/endpoint_update_merge_queue.proto\x1a)agentrepl/v1/endpoint_daemon_health.proto\x1a*agentrepl/v1/endpoint_session_health.proto\x1a&agentrepl/v1/endpoint_client_log.proto\x1a.agentrepl/v1/endpoint_register_workspace.proto\x1a*agentrepl/v1/endpoint_select_account.proto\x1a,agentrepl/v1/endpoint_select_workspace.proto\x1a1agentrepl/v1/endpoint_mark_workspace_viewed.proto\x1a/agentrepl/v1/endpoint_report_editor_focus.proto\x1a0agentrepl/v1/endpoint_watch_host_workspace.proto\x1a(agentrepl/v1/endpoint_watch_daemon.proto\x1a0agentrepl/v1/endpoint_adopt_host_workspace.proto\x1a/agentrepl/v1/endpoint_watch_web_workspace.proto\x1a/agentrepl/v1/endpoint_adopt_web_workspace.proto\x1a&agentrepl/v1/endpoint_watch_page.proto2\xda-\n" +
 	"\tAgentRepl\x12U\n" +
-	"\fSubmitPrompt\x12!.agentrepl.v1.SubmitPromptRequest\x1a\".agentrepl.v1.SubmitPromptResponse\x12[\n" +
-	"\x0eSelectResponse\x12#.agentrepl.v1.SelectResponseRequest\x1a$.agentrepl.v1.SelectResponseResponse\x12j\n" +
+	"\fSubmitPrompt\x12!.agentrepl.v1.SubmitPromptRequest\x1a\".agentrepl.v1.SubmitPromptResponse\x12X\n" +
+	"\rSelectFeedRow\x12\".agentrepl.v1.SelectFeedRowRequest\x1a#.agentrepl.v1.SelectFeedRowResponse\x12j\n" +
 	"\x13AdjustFeedTextScale\x12(.agentrepl.v1.AdjustFeedTextScaleRequest\x1a).agentrepl.v1.AdjustFeedTextScaleResponse\x12p\n" +
 	"\x15RequestCommandSupport\x12*.agentrepl.v1.RequestCommandSupportRequest\x1a+.agentrepl.v1.RequestCommandSupportResponse\x12I\n" +
 	"\bOpenFeed\x12\x1d.agentrepl.v1.OpenFeedRequest\x1a\x1e.agentrepl.v1.OpenFeedResponse\x12N\n" +
@@ -103,7 +103,7 @@ const file_agentrepl_v1_service_proto_rawDesc = "" +
 
 var file_agentrepl_v1_service_proto_goTypes = []any{
 	(*SubmitPromptRequest)(nil),              // 0: agentrepl.v1.SubmitPromptRequest
-	(*SelectResponseRequest)(nil),            // 1: agentrepl.v1.SelectResponseRequest
+	(*SelectFeedRowRequest)(nil),             // 1: agentrepl.v1.SelectFeedRowRequest
 	(*AdjustFeedTextScaleRequest)(nil),       // 2: agentrepl.v1.AdjustFeedTextScaleRequest
 	(*RequestCommandSupportRequest)(nil),     // 3: agentrepl.v1.RequestCommandSupportRequest
 	(*OpenFeedRequest)(nil),                  // 4: agentrepl.v1.OpenFeedRequest
@@ -165,7 +165,7 @@ var file_agentrepl_v1_service_proto_goTypes = []any{
 	(*SubscribePageRequest)(nil),             // 60: agentrepl.v1.SubscribePageRequest
 	(*UnsubscribePageRequest)(nil),           // 61: agentrepl.v1.UnsubscribePageRequest
 	(*SubmitPromptResponse)(nil),             // 62: agentrepl.v1.SubmitPromptResponse
-	(*SelectResponseResponse)(nil),           // 63: agentrepl.v1.SelectResponseResponse
+	(*SelectFeedRowResponse)(nil),            // 63: agentrepl.v1.SelectFeedRowResponse
 	(*AdjustFeedTextScaleResponse)(nil),      // 64: agentrepl.v1.AdjustFeedTextScaleResponse
 	(*RequestCommandSupportResponse)(nil),    // 65: agentrepl.v1.RequestCommandSupportResponse
 	(*OpenFeedResponse)(nil),                 // 66: agentrepl.v1.OpenFeedResponse
@@ -229,7 +229,7 @@ var file_agentrepl_v1_service_proto_goTypes = []any{
 }
 var file_agentrepl_v1_service_proto_depIdxs = []int32{
 	0,   // 0: agentrepl.v1.AgentRepl.SubmitPrompt:input_type -> agentrepl.v1.SubmitPromptRequest
-	1,   // 1: agentrepl.v1.AgentRepl.SelectResponse:input_type -> agentrepl.v1.SelectResponseRequest
+	1,   // 1: agentrepl.v1.AgentRepl.SelectFeedRow:input_type -> agentrepl.v1.SelectFeedRowRequest
 	2,   // 2: agentrepl.v1.AgentRepl.AdjustFeedTextScale:input_type -> agentrepl.v1.AdjustFeedTextScaleRequest
 	3,   // 3: agentrepl.v1.AgentRepl.RequestCommandSupport:input_type -> agentrepl.v1.RequestCommandSupportRequest
 	4,   // 4: agentrepl.v1.AgentRepl.OpenFeed:input_type -> agentrepl.v1.OpenFeedRequest
@@ -291,7 +291,7 @@ var file_agentrepl_v1_service_proto_depIdxs = []int32{
 	60,  // 60: agentrepl.v1.AgentRepl.SubscribePage:input_type -> agentrepl.v1.SubscribePageRequest
 	61,  // 61: agentrepl.v1.AgentRepl.UnsubscribePage:input_type -> agentrepl.v1.UnsubscribePageRequest
 	62,  // 62: agentrepl.v1.AgentRepl.SubmitPrompt:output_type -> agentrepl.v1.SubmitPromptResponse
-	63,  // 63: agentrepl.v1.AgentRepl.SelectResponse:output_type -> agentrepl.v1.SelectResponseResponse
+	63,  // 63: agentrepl.v1.AgentRepl.SelectFeedRow:output_type -> agentrepl.v1.SelectFeedRowResponse
 	64,  // 64: agentrepl.v1.AgentRepl.AdjustFeedTextScale:output_type -> agentrepl.v1.AdjustFeedTextScaleResponse
 	65,  // 65: agentrepl.v1.AgentRepl.RequestCommandSupport:output_type -> agentrepl.v1.RequestCommandSupportResponse
 	66,  // 66: agentrepl.v1.AgentRepl.OpenFeed:output_type -> agentrepl.v1.OpenFeedResponse
@@ -365,7 +365,7 @@ func file_agentrepl_v1_service_proto_init() {
 		return
 	}
 	file_agentrepl_v1_endpoint_submit_prompt_proto_init()
-	file_agentrepl_v1_endpoint_select_response_proto_init()
+	file_agentrepl_v1_endpoint_select_feed_row_proto_init()
 	file_agentrepl_v1_endpoint_adjust_feed_text_scale_proto_init()
 	file_agentrepl_v1_endpoint_open_feed_proto_init()
 	file_agentrepl_v1_endpoint_watch_feed_proto_init()
