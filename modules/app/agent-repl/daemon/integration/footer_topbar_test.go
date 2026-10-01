@@ -942,9 +942,12 @@ func TestFooterScheduledApiRetryCountsLikeTheVendorAndItsResponseAnnouncesTheRes
 	// Assert: the retrying line counts attempts as the vendor does and carries
 	// its schedule.
 	got := awaitFooter(t, f, footer, "the retrying line with the vendor's schedule", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetWorking().GetActivity().GetSalient().GetRetrying() != nil
+		return v.GetStrip().GetStatus().GetBlocked().GetActivity().GetSalient().GetRetrying() != nil
 	})
-	retry := got.GetStrip().GetStatus().GetWorking().GetActivity().GetSalient().GetRetrying()
+	if got.GetStrip().GetStatus().GetBlocked().GetApiRetrying() == nil {
+		t.Fatalf("status = %v, want blocked · api_retrying while the vendor retries", got.GetStrip().GetStatus())
+	}
+	retry := got.GetStrip().GetStatus().GetBlocked().GetActivity().GetSalient().GetRetrying()
 	if retry.GetAttempt() != 9 || retry.GetMaxAttempt() != 11 || retry.GetNextAttempt().GetAtMs() != nextAt {
 		t.Fatalf("retrying = %v, want attempt 9 of 11 next at %d", retry, nextAt)
 	}
