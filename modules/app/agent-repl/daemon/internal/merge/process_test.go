@@ -1244,7 +1244,7 @@ func TestAGivenUpConflictIsAnOutcomeRecordedAtInfo(t *testing.T) {
 	}
 }
 
-func TestRepairTurnsAreMirroredOntoTheMainFeed(t *testing.T) {
+func TestAConflictRepairStandsItsAddressAtTheConflictsTab(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	landing(h, 1)
@@ -1253,16 +1253,18 @@ func TestRepairTurnsAreMirroredOntoTheMainFeed(t *testing.T) {
 	// Act.
 	admitted(t, h)
 
-	// Assert.
-	var mirrored bool
+	// Assert: the merge's own turns are recorded at the tab, and only there.
 	for _, addr := range h.feed.installed() {
-		if addr != nil && addr.Mirror {
-			mirrored = true
+		if addr == nil {
+			continue
 		}
+		want := tabRef(theWorkspace, *addr.Feed.Merge, TabConflicts, 1)
+		if addr.Parent == nil || addr.Parent.Row != want.Row || addr.Parent.Feed.Merge == nil || *addr.Parent.Feed.Merge != *want.Feed.Merge {
+			t.Fatalf("address = %+v, want the conflicts tab %+v", addr, want)
+		}
+		return
 	}
-	if !mirrored {
-		t.Fatalf("addresses = %+v, want the repair addressed with the mirror", h.feed.installed())
-	}
+	t.Fatalf("addresses = %+v, want the conflicts tab addressed", h.feed.installed())
 }
 
 func TestFixingAttemptsAreBoundedByTheOneBoundAndThenFailTheMergeInTests(t *testing.T) {
@@ -1572,23 +1574,5 @@ func TestUpdatingMainAlreadyAtUpstreamMovesNothing(t *testing.T) {
 	}
 	if got := h.footer.last().State; got != StateMerged {
 		t.Fatalf("state = %q, want merged", got)
-	}
-}
-
-func TestConfiguredPromptsAreNotMirroredOntoTheMainFeed(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-	h.configureActions([]string{"before"}, nil)
-	h.briefs["before"] = nil
-	enqueue(t, h)
-
-	// Act.
-	_ = h.admit(context.Background())
-
-	// Assert.
-	for _, addr := range h.feed.installed() {
-		if addr != nil && addr.Mirror {
-			t.Fatalf("addresses = %+v, want the configured prompt kept in its tab", h.feed.installed())
-		}
 	}
 }

@@ -801,8 +801,8 @@ func (r *resolver) drawCreatedSubagent(s *wsState, announcer *conversationv1.Age
 // been drawn yet: the owner's own feed, by the one rule (feedid.AgentFeed),
 // and never a default.
 func (r *resolver) ownerPlacement(s *wsState, owner string) (placement, error) {
-	if s.address != nil {
-		return r.outputPlacement(s), nil
+	if at, addressed := r.addressedPlacement(s, s.rowTurn()); addressed {
+		return at, nil
 	}
 	feed, err := feedid.AgentFeed(owner, s.mainAgent)
 	if err != nil {

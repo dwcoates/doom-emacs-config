@@ -45,10 +45,10 @@ const opWorkspaceReset = "daemon.feed.workspace_reset"
 //     an ask of the conversation that was unbound now finds no served ask and
 //     is REFUSED by the ordinary path, rather than being forwarded to a
 //     session that never asked it.
-//   - The OUTPUT ADDRESS. It names a merge tab of the session that was just
-//     stopped; it cannot mean anything on a different conversation, so the
-//     next rows land on the root feed until a lease holder addresses them
-//     again.
+//   - The OUTPUT ADDRESS and every TURN'S ADDRESS. They name merge tabs of
+//     the session that was just stopped; they cannot mean anything on a
+//     different conversation, so the next turns draw on the root feed until a
+//     lease holder addresses one again.
 //   - The SYNTHESIZED rows — the cold gate, merge heads, session separations,
 //     accepted-prompt mirrors, command panels. They are rows, and they go the
 //     way of every other row, and the DURABLE ones are forgotten from their

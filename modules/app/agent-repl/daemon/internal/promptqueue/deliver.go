@@ -53,7 +53,7 @@ func (q *queue) deliver(ctx context.Context, sub Submission, sender Sender, watc
 		Origin:    sub.Origin.String(),
 		StartedAt: q.deps.Now(),
 	}
-	if err := q.recordTurn(ctx, record); err != nil {
+	if err := q.recordTurn(ctx, record, log); err != nil {
 		log.Error(opDeliver, "could not record the turn before delivering it", dlog.Context{"cause": err.Error()})
 		return Disposition{}, fmt.Errorf("record turn %q on %q: %w", sub.Turn, sub.WS, err)
 	}
@@ -170,14 +170,53 @@ func (q *queue) logRepeatedStart(log dlog.Logger, verb string, turn ids.TurnID) 
 		dlog.Context{"turn": string(turn), "verb": verb, "original_state": "in_flight"})
 }
 
-// recordTurn records a turn this queue opens, stamped with the feed's output
-// address standing as it opens: where the turn's rows land. It is the ONE
-// write of a turn's record here, so no turn is opened without the address its
-// replay draws it at (feed.Deps.TurnAddresses), and a repair turn mirrored onto
-// the root feed live is mirrored again by every replay.
-func (q *queue) recordTurn(ctx context.Context, t wsm.Turn) error {
-	t.Address = q.deps.Feed.OutputAddress(t.Workspace)
-	return q.deps.DB.PutTurn(ctx, t)
+// recordTurn records a turn this queue opens, stamped with the address it
+// draws at (turnAddress), and hands that same address to the feed. It is the
+// ONE write of a turn's record here and the one place a turn's address is
+// chosen, so the live draw (feed.Resolver.AddressTurn) and every replay
+// (feed.Deps.TurnAddresses) place the turn from one fact.
+func (q *queue) recordTurn(ctx context.Context, t wsm.Turn, log dlog.Logger) error {
+	t.Address = q.turnAddress(t, log)
+	if err := q.deps.DB.PutTurn(ctx, t); err != nil {
+		return err
+	}
+	q.deps.Feed.AddressTurn(t.Workspace, t.ID, t.Address)
+	return nil
+}
+
+// turnAddress chooses where a turn draws, BY ITS ORIGIN. A turn the merge
+// orchestrator starts itself (startedByMerge) draws at the output address the
+// merge stands at, in its tab; every other turn -- the user's own prompts sent
+// while a merge runs, the displaced turn resumed, a vendor-started turn --
+// draws on the root feed. A merge turn opened once no address stands (its
+// merge already ended) draws on the root feed, and that is said at INFO.
+func (q *queue) turnAddress(t wsm.Turn, log dlog.Logger) *wsm.OutputAddress {
+	if !startedByMerge(t.Origin) {
+		return nil
+	}
+	addr := q.deps.Feed.OutputAddress(t.Workspace)
+	if addr == nil {
+		log.Info(opDeliver, "a merge's own turn opened with no merge address standing; it draws on the root feed",
+			dlog.Context{"turn": string(t.ID), "origin": t.Origin})
+	}
+	return addr
+}
+
+// mergeStartedOrigins are the origins of the turns the merge orchestrator
+// starts in its own tabs: a conflict's resolution, a suite's fix, and the
+// configured pre and post prompts. MERGE_DISPLACED_TURN_RESUME is not one: it
+// is the user's own interrupted turn, put back once the merge has ended.
+var mergeStartedOrigins = map[string]bool{
+	conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR.String(): true,
+	conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_TEST_REPAIR.String():     true,
+	conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_BEFORE_ACTION.String():   true,
+	conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_AFTER_ACTION.String():    true,
+}
+
+// startedByMerge reports whether a recorded origin is one the merge
+// orchestrator starts its own turns with.
+func startedByMerge(origin string) bool {
+	return mergeStartedOrigins[origin]
 }
 
 // touchEngagement records that the user just engaged this session. IT IS WHAT
@@ -209,12 +248,11 @@ func (q *queue) mirrorAccepted(ws ids.WorkspaceID, turn ids.TurnID, said *conver
 			}},
 		}},
 	}
-	// THE MIRROR LANDS AT THE SESSION'S OUTPUT ADDRESS, never unconditionally
-	// on the root feed: while a merge lease has addressed the session at one of
-	// its tabs, the guidance the user types belongs on that tab, and the
-	// resolver's own draw of the same row key lands there too — so the mirror
-	// and the draw are one row.
-	q.deps.Feed.UpsertAtOutputAddress(ws, feedid.RowKey{Kind: feedid.KindPrompt, ID: string(turn)}, row)
+	// THE ACCEPTED PROMPT LANDS WHERE ITS TURN DRAWS (recordTurn), never
+	// unconditionally on the root feed: a merge's own prompt belongs in its
+	// tab and the user's on the root, and the resolver's own draw of the same
+	// row key lands there too, so the accepted row and the draw are one row.
+	q.deps.Feed.UpsertAtTurnAddress(ws, turn, feedid.RowKey{Kind: feedid.KindPrompt, ID: string(turn)}, row)
 }
 
 // mirrorBlocks renders a submission's content as drawn blocks, through the

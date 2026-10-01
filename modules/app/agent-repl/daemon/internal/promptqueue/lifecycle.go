@@ -156,7 +156,7 @@ func (q *queue) OnTurnAdopted(ws ids.WorkspaceID, turn ids.TurnID) {
 		Origin:    conversationv1.PromptOrigin_PROMPT_ORIGIN_VENDOR_STARTED.String(),
 		StartedAt: at,
 	}
-	if err := q.recordTurn(ctx, record); err != nil {
+	if err := q.recordTurn(ctx, record, log); err != nil {
 		log.Error(opTurnAdopted, "could not record the vendor-started turn; its close will find no row", dlog.Context{
 			"cause": err.Error(),
 		})

@@ -82,7 +82,7 @@ func (r *resolver) restoreDurable(s *wsState) {
 			continue
 		}
 		rank := rowRank{plane: rowPlane(stored.Plane), key: stored.OrderKey}
-		r.upsertOne(s, placement{feed: ref.Feed, inherit: &rank}, row, true)
+		r.upsert(s, placement{feed: ref.Feed, inherit: &rank}, row, true)
 		drawn++
 	}
 	if drawn > 0 {
