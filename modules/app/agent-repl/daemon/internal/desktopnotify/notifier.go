@@ -106,7 +106,11 @@ func (n *Notifier) Raise(ws ids.WorkspaceID, kind, text string) {
 // show composes and posts one banner, and relays its click.
 func (n *Notifier) show(ws ids.WorkspaceID, log dlog.Logger, compose Compose) {
 	name, err := n.deps.Names.WorkspaceName(n.ctx, ws)
-	if err != nil {
+	switch {
+	case stoodDown(n.ctx, err):
+		log.Info(opPost, "the daemon stood down while the workspace was named; no desktop banner", dlog.Context{"cause": err.Error()})
+		return
+	case err != nil:
 		log.Error(opPost, "could not name the workspace; no desktop banner", dlog.Context{"cause": err.Error()})
 		return
 	}
