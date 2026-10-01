@@ -124,13 +124,7 @@ func (q *queue) applyLeasePolicy(ctx context.Context, sub Submission, log dlog.L
 	}
 	fields := dlog.Context{"lease": string(lease.ID), "holder": holderName(lease.Holder)}
 
-	// A LEASE EXCLUDES EVERYONE BUT ITS HOLDER. The merge orchestrator holds
-	// the lease precisely so it can drive the session, and its own briefs --
-	// the conflict repair, the test repair, the configured before/after
-	// actions, the displaced turn's resume -- carry merge origins. Refusing
-	// those against the merge's own lease deadlocks the merge: it submits the
-	// brief it is waiting on and is told a merge is in flight.
-	if lease.Holder == wsm.HolderMerge && mergeOrigin(sub.Origin) {
+	if exemptFromLease(lease, sub.Origin) {
 		log.Debug(opSubmit, "the lease holder's own submission takes the ordinary path", fields)
 		return Disposition{}, false, nil
 	}
@@ -227,6 +221,19 @@ func merged(base, extra dlog.Context) dlog.Context {
 }
 
 // holderName renders a lease holder for a log record.
+// exemptFromLease reports whether a submission of origin passes the lease
+// untouched.
+//
+// A LEASE EXCLUDES EVERYONE BUT ITS HOLDER. The merge orchestrator holds the
+// lease precisely so it can drive the session, and its own briefs -- the
+// conflict repair, the test repair, the configured before/after actions, the
+// displaced turn's resume -- carry merge origins. Refusing those against the
+// merge's own lease deadlocks the merge: it submits the brief it is waiting on
+// and is told a merge is in flight.
+func exemptFromLease(lease wsm.Lease, origin conversationv1.PromptOrigin) bool {
+	return lease.Holder == wsm.HolderMerge && mergeOrigin(origin)
+}
+
 // mergeOrigin reports whether an origin is one the merge orchestrator submits
 // under. They are exactly conversation.v1 PromptOrigin's merge arms.
 func mergeOrigin(origin conversationv1.PromptOrigin) bool {
