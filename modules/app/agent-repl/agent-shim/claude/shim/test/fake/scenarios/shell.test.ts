@@ -464,17 +464,14 @@ describe("VendorBackgrounded", () => {
   });
 
 
-  it("answers backgroundTasks for a task already in the background without patching it again", async () => {
-    // The real vendor patches is_backgrounded only on the Ctrl-B transition
-    // (ctrl-b-detach-of-foreground-work, turn-stop-max-turns); a
-    // run_in_background task is never patched (bash-detached). A revived
-    // shim's reconciliation only ASKS, and a replayed patch reached it with no
-    // originating call it could name.
+  it("answers false for a task already in the background: it is no foreground task", async () => {
+    // The SDK answers `false` when the id matches no FOREGROUND task, and a
+    // run_in_background task never was one (bash-detached is never patched).
     // Arrange.
     let answered: boolean | undefined;
 
     // Act.
-    const driven = await driveScenario(["!bash-detach-live"], {
+    await driveScenario(["!bash-detach-live"], {
       during: async (query, _prompts, messages) => {
         for (let i = 0; i < 4; i++) await new Promise((r) => setImmediate(r));
         const started = messages.find((m) => m.subtype === "task_started");
@@ -484,10 +481,39 @@ describe("VendorBackgrounded", () => {
     });
 
     // Assert.
-    expect({ answered, patches: ofType(driven, "system", "task_updated").length }).toEqual({
-      answered: true,
-      patches: 0,
+    expect(answered).toBe(false);
+  });
+
+  it("patches nothing when asked about a task already in the background", async () => {
+    // Arrange, Act.
+    const driven = await driveScenario(["!bash-detach-live"], {
+      during: async (query, _prompts, messages) => {
+        for (let i = 0; i < 4; i++) await new Promise((r) => setImmediate(r));
+        const started = messages.find((m) => m.subtype === "task_started");
+        if (started === undefined) throw new Error("no task to ask about");
+        await query.backgroundTasks(String(started.tool_use_id));
+      },
     });
+
+    // Assert.
+    expect(ofType(driven, "system", "task_updated")).toHaveLength(0);
+  });
+
+  it("answers false for an unknown tool call even while another task is live", async () => {
+    // Arrange.
+    let answered: boolean | undefined;
+
+    // Act.
+    await driveScenario(["!bash-detach-live"], {
+      during: async (query, _prompts, messages) => {
+        for (let i = 0; i < 4; i++) await new Promise((r) => setImmediate(r));
+        if (!messages.some((m) => m.subtype === "task_started")) throw new Error("no live task");
+        answered = await query.backgroundTasks("toolu_absent");
+      },
+    });
+
+    // Assert.
+    expect(answered).toBe(false);
   });
 
   it("parks a foreground Bash until an interrupt lands, with no terminal on its own", async () => {

@@ -1738,30 +1738,25 @@ export function createFakeQuery(
      * result (`backgroundedByUser`), never from the task stream.
      */
     backgroundTasks: async (toolUseId?: string): Promise<boolean> => {
-      if (toolUseId === undefined) return liveTasks.size > 0;
+      // THE PINNED SDK'S ANSWERS (sdk.d.ts, `backgroundTasks`): with no id it
+      // backgrounds every foreground task and answers `true`; with an id it
+      // answers `false` when the id matches no FOREGROUND task, and a task
+      // already in the background is not a foreground task.
+      if (toolUseId === undefined) return true;
       const live = [...liveTasks.values()].find((t) => t.toolUseId === toolUseId);
       if (live === undefined) {
         LOGGER.debug(
           { claude_session_id: sessionUuid, tool_use_id: toolUseId },
-          "fake vendor background_tasks named no live task for that tool call",
+          "fake vendor background_tasks named no live task for that tool call; nothing moved",
         );
-        return liveTasks.size > 0;
+        return false;
       }
-      // ALREADY IN THE BACKGROUND IS AN ANSWER, NOT A TRANSITION. The real
-      // vendor patches `is_backgrounded` exactly once, on the Ctrl-B that moves
-      // foreground work out of the turn (the `ctrl-b-detach-of-foreground-work`
-      // and `turn-stop-max-turns` captures, each after its own `task_started`);
-      // a `run_in_background` task is never patched (`bash-detached`). Asking
-      // about work that is already backgrounded — a revived shim's
-      // reconciliation does exactly that — must not re-announce it: the
-      // replayed patch reached a shim that never saw the task start and so
-      // could name no originating call for it.
       if (live.backgrounded) {
         LOGGER.debug(
           { claude_session_id: sessionUuid, task_id: live.taskId, tool_use_id: toolUseId },
-          "fake vendor background_tasks named a task already in the background; answered without a patch",
+          "fake vendor background_tasks named a task already in the background; it is not a foreground task, nothing moved",
         );
-        return true;
+        return false;
       }
       // STATE FIRST, THEN THE ANNOUNCEMENTS. Every emit below must describe a
       // world that is already true: a consumer that read the level while the
