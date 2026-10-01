@@ -398,8 +398,6 @@ func perfFooterArm(v *frontendv1.FooterView) string {
 		return "closing"
 	case s.GetLoading() != nil:
 		return "loading"
-	case s.GetMergeConflict() != nil:
-		return "merge_conflict"
 	case s.GetMergeFailed() != nil:
 		return "merge_failed"
 	case s.GetMerged() != nil:
