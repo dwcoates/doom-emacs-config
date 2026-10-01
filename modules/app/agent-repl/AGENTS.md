@@ -73,6 +73,23 @@ How each kind of entry point routes through it:
 and fails on any entry point that bypasses the helper, and on any live-runtime
 or deploy path that references it.
 
+### CPU load only when the owner asks, and only through `bin/with-cpu-load.sh`
+
+The owner does not want the machine under load (2026-09-30). Reproducing a
+flake under CPU load is done ONLY when the owner asks for it, and then ONLY
+through `bin/with-cpu-load.sh <nloops> <command...>`. Never hand-write busy
+loops: in one evening a `( while :; do :; done ) &` generator outlived its
+author twice (zsh does not word-split `kill $PIDS`, so nothing was killed and a
+`wait` hung on the loops; and a `trap` cleanup never runs when its shell is
+killed outright).
+
+- Each of the helper's loops polls the helper's pid and exits the moment it is
+  gone, so no ending of the helper -- an exit, a signal, a SIGKILL -- leaves a
+  loop spinning.
+- The command runs as its own process group and is waited on, so a TERM stops
+  it, everything it started, and the loops at once.
+- `bin/test-with-cpu-load.sh` (the `cpu-load-harness` suite) holds all of this.
+
 ### One suite at a time: `bin/suite-slot.sh`
 
 Every suite here is already internally parallel — vitest takes one worker per
