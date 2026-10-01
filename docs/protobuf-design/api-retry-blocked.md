@@ -49,3 +49,26 @@ count and the countdown to the next attempt.
   successful response returns it to red.
 
 ## Landed changes
+
+### 1. The API-retry block on the footer and the roster
+
+- **What:** `FooterStatusBlocked.substatus` gains `api_retrying`
+  (`FooterSubStatusBlockedApiRetrying`, tag 8); `FooterStatusBlockedSalient.kind`
+  gains `retrying` (the existing `FooterStatusActivityRetrying`, tag 9);
+  `RosterRow.status` gains `api_retrying` (`RosterRowStatusApiRetrying`, tag 39).
+- **Why:** a turn whose API call is failing is unusable, so it is blue on every
+  surface, and the footer keeps the attempt count and countdown it showed while
+  red. Its own substatus because `vendor_error` means the vendor refusing
+  requests, and an unreachable network is not a refusal.
+- **Consequences:**
+  - The daemon's ladder gains a fact on the `blocked` rung for both resolvers:
+    the footer resolver's standing retry state, and a new retry fact in the
+    sidebar resolver (`daemon/internal/resolve/sidebar`), fed the same api-error
+    and cleared by the same predicate as the footer's `clearRetry`
+    (`daemon/internal/resolve/footer/resolver.go`). That predicate becomes one
+    shared helper so the two cannot drift.
+  - `FooterStatusWorkingSalient.retrying` is no longer emitted: whenever the
+    retry stands the status is `blocked`. It is kept on the wire (removing an
+    arm is breaking); a new turn opening clears the retry, so the red period
+    shows `working` with no retry line, per the settled behavior.
+  - Emacs and the webapp map `api_retrying` to blue in their color tables.
