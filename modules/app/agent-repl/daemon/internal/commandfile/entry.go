@@ -125,6 +125,23 @@ type Entry struct {
 	// PostprocessingPrompt is prompt text run after the merge lands
 	// (CreateWorkspaceMergeActions.postprocessing_prompt).
 	PostprocessingPrompt string `json:"postprocessing_prompt,omitempty"`
+
+	// THE MERGE'S SOURCE (agentrepl.v1.MergeWorkspaceSource). The entry's
+	// workspace is the REQUESTER, which the merge runs in; these name what it
+	// merges. None set is the requester's own branch. Each is merge-only.
+
+	// Branch merges a branch that is no workspace (source.branch).
+	Branch string `json:"branch,omitempty"`
+	// SourceDir merges another workspace's branch, the workspace keyed by its
+	// worktree path (source.workspace).
+	SourceDir string `json:"source_dir,omitempty"`
+	// KeepOpen keeps the requester open once its own branch lands
+	// (source.own_branch.keep_open).
+	KeepOpen bool `json:"keep_open,omitempty"`
+	// PRWasMerged says the requester's own branch already merged upstream
+	// through its pull request (source.merged_upstream): the default branch
+	// is updated from upstream and the requester closed.
+	PRWasMerged bool `json:"pr_was_merged,omitempty"`
 }
 
 // SourceWorkspace is a create's `source_ws`: the workspace it was spawned
@@ -153,6 +170,11 @@ func (e Entry) Validate() error {
 			return fmt.Errorf("%s: %s is a create's field, and no %s reads it", e.Type, field, e.Type)
 		}
 	}
+	if e.Type != TypeMerge && e.Type != "" {
+		if field := e.mergeOnly(); field != "" {
+			return fmt.Errorf("%s: %s is a merge's field, and no %s reads it", e.Type, field, e.Type)
+		}
+	}
 	switch e.Type {
 	case "":
 		return fmt.Errorf("an entry must name a type")
@@ -166,7 +188,12 @@ func (e Entry) Validate() error {
 			return fmt.Errorf("%s: prompt is required", e.Type)
 		}
 		return nil
-	case TypeMerge, TypeClose, TypeForget, TypeOpen, TypeSwitch:
+	case TypeMerge:
+		if err := e.requireTarget(); err != nil {
+			return err
+		}
+		return e.validateMergeSource()
+	case TypeClose, TypeForget, TypeOpen, TypeSwitch:
 		return e.requireTarget()
 	case TypeTaskCreate:
 		if e.Title == "" {
@@ -248,6 +275,44 @@ func (e Entry) createOnly() string {
 	return ""
 }
 
+// mergeOnly names the first merge-only field a non-merge entry carries, empty
+// for none.
+func (e Entry) mergeOnly() string {
+	fields := []struct {
+		name string
+		set  bool
+	}{
+		{"branch", e.Branch != ""},
+		{"source_dir", e.SourceDir != ""},
+		{"keep_open", e.KeepOpen},
+		{"pr_was_merged", e.PRWasMerged},
+	}
+	for _, field := range fields {
+		if field.set {
+			return field.name
+		}
+	}
+	return ""
+}
+
+// validateMergeSource refuses a merge naming more than one source, or keeping
+// open a requester whose own branch it does not merge.
+func (e Entry) validateMergeSource() error {
+	named := 0
+	for _, set := range []bool{e.Branch != "", e.SourceDir != "", e.PRWasMerged} {
+		if set {
+			named++
+		}
+	}
+	switch {
+	case named > 1:
+		return fmt.Errorf("%s: branch, source_dir and pr_was_merged each name a different merge; name one", TypeMerge)
+	case e.KeepOpen && named > 0:
+		return fmt.Errorf("%s: keep_open keeps the requester open after its OWN branch lands, and this merge lands another", TypeMerge)
+	}
+	return nil
+}
+
 // requireTarget refuses an entry that names no workspace at all.
 func (e Entry) requireTarget() error {
 	if e.Workspace == "" && e.TargetDir() == "" {
@@ -308,6 +373,7 @@ func (e Entry) withAbsolutePaths(home string) (Entry, error) {
 		{name: "git_root", value: &e.GitRoot},
 		{name: "project_dir", value: &e.ProjectDir},
 		{name: "dir", value: &e.Dir},
+		{name: "source_dir", value: &e.SourceDir},
 	}
 	if e.SourceWS != nil {
 		// A COPY, so resolving the path never writes through to the entry

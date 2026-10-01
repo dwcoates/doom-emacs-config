@@ -329,7 +329,7 @@ func TestParseRefusesAnUnknownField(t *testing.T) {
 		name string
 		body string
 	}{
-		{name: "at the entry", body: `[{"type":"merge","workspace":"w1","pr_was_merged":true}]`},
+		{name: "at the entry", body: `[{"type":"merge","workspace":"w1","no_such_field":true}]`},
 		{name: "inside source_ws", body: `[{"type":"create","name":"n","git_root":"/r","source_ws":{"path":"/r","branch":"x"}}]`},
 	}
 	for _, tt := range tests {
@@ -384,5 +384,88 @@ func TestWithAbsolutePathsRefusesARelativeSourcePath(t *testing.T) {
 	// Assert.
 	if err == nil || !strings.Contains(err.Error(), "create: source_ws.path: ") {
 		t.Fatalf("withAbsolutePaths() = %v, want source_ws.path refused", err)
+	}
+}
+
+func TestAMergeEntryNamingOneSourceValidates(t *testing.T) {
+	tests := []struct {
+		name  string
+		entry Entry
+	}{
+		{name: "own branch", entry: Entry{Type: TypeMerge, Workspace: "w1"}},
+		{name: "own branch kept open", entry: Entry{Type: TypeMerge, Workspace: "w1", KeepOpen: true}},
+		{name: "a branch", entry: Entry{Type: TypeMerge, Workspace: "w1", Branch: "agent-1/fix"}},
+		{name: "another workspace", entry: Entry{Type: TypeMerge, Workspace: "w1", SourceDir: "/wt/two"}},
+		{name: "merged upstream", entry: Entry{Type: TypeMerge, Workspace: "w1", PRWasMerged: true}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act.
+			err := tt.entry.Validate()
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("Validate() = %v, want accepted", err)
+			}
+		})
+	}
+}
+
+func TestAMergeEntryNamingTwoSourcesIsRefused(t *testing.T) {
+	tests := []struct {
+		name  string
+		entry Entry
+	}{
+		{name: "a branch and a workspace", entry: Entry{Type: TypeMerge, Workspace: "w1", Branch: "b", SourceDir: "/wt/two"}},
+		{name: "a branch already merged upstream", entry: Entry{Type: TypeMerge, Workspace: "w1", Branch: "b", PRWasMerged: true}},
+		{name: "keep_open on a branch", entry: Entry{Type: TypeMerge, Workspace: "w1", Branch: "b", KeepOpen: true}},
+		{name: "keep_open on merged upstream", entry: Entry{Type: TypeMerge, Workspace: "w1", PRWasMerged: true, KeepOpen: true}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act.
+			err := tt.entry.Validate()
+
+			// Assert.
+			if err == nil {
+				t.Fatalf("Validate() = nil, want the contradiction refused")
+			}
+		})
+	}
+}
+
+func TestAMergeFieldOnAnotherEntryIsRefused(t *testing.T) {
+	// Arrange.
+	entry := Entry{Type: TypeClose, Workspace: "w1", PRWasMerged: true}
+
+	// Act.
+	err := entry.Validate()
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "pr_was_merged is a merge's field") {
+		t.Fatalf("Validate() = %v, want the merge-only field refused", err)
+	}
+}
+
+func TestParseReadsTheSkillsPRMergedEntry(t *testing.T) {
+	// Act.
+	entries, err := parse([]byte(`[{"type":"merge","project_dir":"/wt/one","workspace":"one","pr_was_merged":true}]`))
+
+	// Assert.
+	if err != nil || len(entries) != 1 || !entries[0].PRWasMerged {
+		t.Fatalf("parse() = (%+v, %v), want the merged-upstream entry", entries, err)
+	}
+}
+
+func TestWithAbsolutePathsExpandsTheSourceDir(t *testing.T) {
+	// Arrange.
+	entry := Entry{Type: TypeMerge, Workspace: "w1", SourceDir: "~/wt/two"}
+
+	// Act.
+	got, err := entry.withAbsolutePaths("/home/u")
+
+	// Assert.
+	if err != nil || got.SourceDir != "/home/u/wt/two" {
+		t.Fatalf("withAbsolutePaths = (%+v, %v), want the source dir under home", got, err)
 	}
 }

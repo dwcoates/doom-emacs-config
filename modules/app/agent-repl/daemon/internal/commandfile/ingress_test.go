@@ -13,6 +13,7 @@ import (
 
 	"claude-repld/internal/merge"
 	"claude-repld/internal/workspace"
+	"claude-repld/internal/wsm"
 )
 
 func TestNewRefusesMissingCollaborators(t *testing.T) {
@@ -770,5 +771,56 @@ func TestApplyFileQuarantinesARelativeDirectory(t *testing.T) {
 	}
 	if !strings.Contains(cause, "entry 1: create: git_root: ") || !strings.Contains(cause, "not an absolute path") {
 		t.Fatalf("quarantine warning cause = %q, want entry 1's git_root named as not absolute", cause)
+	}
+}
+
+func TestApplyFileMapsEachMergeSourceOntoTheRequest(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want wsm.MergeSource
+	}{
+		{name: "own branch", body: `[{"type":"merge","workspace":"w1"}]`, want: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}},
+		{name: "own branch kept open", body: `[{"type":"merge","workspace":"w1","keep_open":true}]`, want: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch, KeepOpen: true}},
+		{name: "a branch", body: `[{"type":"merge","workspace":"w1","branch":"agent-1/fix"}]`, want: wsm.MergeSource{Kind: wsm.MergeSourceBranch, Branch: "agent-1/fix"}},
+		{name: "another workspace", body: `[{"type":"merge","workspace":"w1","source_dir":"/tree/w2"}]`, want: wsm.MergeSource{Kind: wsm.MergeSourceWorkspace, Workspace: "w2"}},
+		{name: "merged upstream", body: `[{"type":"merge","workspace":"w1","pr_was_merged":true}]`, want: wsm.MergeSource{Kind: wsm.MergeSourceMergedUpstream}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			f.workspace("w1", "/tree/w1")
+			f.workspace("w2", "/tree/w2")
+			path := f.write(t, "workspace_commands_s.json", tt.body)
+
+			// Act.
+			if err := f.ingress.ApplyFile(context.Background(), path); err != nil {
+				t.Fatalf("ApplyFile: %v", err)
+			}
+
+			// Assert.
+			if len(f.merge.sources) != 1 || f.merge.sources[0] != tt.want || f.merge.enqueued[0] != "w1" {
+				t.Fatalf("requests = %v from %v, want %+v from w1", f.merge.sources, f.merge.enqueued, tt.want)
+			}
+		})
+	}
+}
+
+func TestApplyFileRefusesASourceDirNoWorkspaceIsAt(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", "/tree/w1")
+	path := f.write(t, "workspace_commands_u.json", `[{"type":"merge","workspace":"w1","source_dir":"/tree/none"}]`)
+
+	// Act.
+	err := f.ingress.ApplyFile(context.Background(), path)
+
+	// Assert.
+	if !errors.Is(err, ErrQuarantined) || !strings.Contains(err.Error(), "unknown_source_workspace") {
+		t.Fatalf("ApplyFile = %v, want the file quarantined as unknown_source_workspace", err)
+	}
+	if len(f.merge.enqueued) != 0 {
+		t.Fatalf("enqueued %v, want nothing", f.merge.enqueued)
 	}
 }
