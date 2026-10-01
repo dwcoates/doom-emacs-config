@@ -78,6 +78,9 @@ type fakeDB struct {
 	// and replaceErr fails an edit's content replacement.
 	byTurnErr  error
 	replaceErr error
+	// coalesceErr fails a coalescence whole; coalescences counts attempts.
+	coalesceErr  error
+	coalescences int
 	// workspaceErr fails the workspace read when set.
 	workspaceErr error
 }
@@ -237,6 +240,31 @@ func (d *fakeDB) ReplaceHeldPromptSaid(_ context.Context, turn ids.TurnID, said 
 	h.Said = said
 	h.Classification = nil
 	h.Accepted = false
+	return nil
+}
+
+// CoalesceHeldPrompts folds FROM into INTO atomically, as the store does:
+// coalesceErr fails it whole, and nothing is written.
+func (d *fakeDB) CoalesceHeldPrompts(_ context.Context, c wsm.Coalescence) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.coalescences++
+	if d.coalesceErr != nil {
+		return d.coalesceErr
+	}
+	into, okInto := d.held[c.Into]
+	from, okFrom := d.held[c.From]
+	if !okInto || !okFrom || into.Tombstone != nil || from.Tombstone != nil || c.Into == c.From {
+		return errors.New("no such pair of standing holds")
+	}
+	into.Said = c.Said
+	into.Coalesced = true
+	if c.DiscardVerdict {
+		into.Classification = nil
+		into.Accepted = false
+	}
+	retired := c.Retired
+	from.Tombstone = &retired
 	return nil
 }
 

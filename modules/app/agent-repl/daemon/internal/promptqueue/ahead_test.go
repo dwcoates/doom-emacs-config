@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"claude-repld/internal/classifier"
+	"claude-repld/internal/holdfold"
 	"claude-repld/internal/wsm"
 )
 
@@ -187,5 +188,39 @@ func TestMergedSaidKeepsEveryBlockInOrder(t *testing.T) {
 	// Assert
 	if got := saidText(merged); got != "first\nsecond" {
 		t.Fatalf("merged = %q, want first then second", got)
+	}
+}
+
+func TestTheQueueReadsSessionActsThroughHoldfold(t *testing.T) {
+	// The queue's walk, its context-cut recognition and its text all go through
+	// the one reading the hold tray shares, so the two can never disagree about
+	// what a held entry is.
+	tests := []struct {
+		name string
+		said string
+	}{
+		{name: "a context cut", said: "/compact keep the plan"},
+		{name: "an ordinary prompt", said: "fix the flaky test"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			sub := Submission{WS: theWorkspace, Turn: "t1", Said: userSaid(tt.said)}
+
+			// Act
+			command, literal, cut := contextCutOf(sub)
+
+			// Assert
+			wantCommand, wantLiteral, wantCut := holdfold.ContextCut(sub.Target, sub.Said)
+			if command != wantCommand || literal != wantLiteral || cut != wantCut {
+				t.Fatalf("contextCutOf = (%v, %q, %v), want holdfold's (%v, %q, %v)", command, literal, cut, wantCommand, wantLiteral, wantCut)
+			}
+			if got := saidText(sub.Said); got != holdfold.SaidText(sub.Said) {
+				t.Fatalf("saidText = %q, want holdfold's %q", got, holdfold.SaidText(sub.Said))
+			}
+			if got := holdfold.SessionAct(wsm.HeldPrompt{Said: sub.Said}); got != cut {
+				t.Fatalf("holdfold.SessionAct = %v, want it to agree with the queue's cut reading %v", got, cut)
+			}
+		})
 	}
 }

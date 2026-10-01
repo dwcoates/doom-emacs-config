@@ -396,6 +396,39 @@ func TestAnInterruptVerdictAgainstAQueuedPromptCoalescesTheTwo(t *testing.T) {
 	}
 }
 
+func TestAFailedCoalescenceLeavesBothPromptsStanding(t *testing.T) {
+	// Arrange: the merge and the retirement are one store transaction, so a
+	// store that refuses it leaves the queued prompt's words and the new
+	// prompt's entry exactly as they were, and the new prompt waits its turn.
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	h.judge.verdict = classifier.Verdict{Route: classifier.RouteQueue, Reason: "independent"}
+	if _, err := h.q.Submit(context.Background(), submission("older", "an earlier question")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	h.q.waitForClassifications()
+	h.judge.verdict = classifier.Verdict{Route: classifier.RouteInterrupt, Reason: "it countermands the queued prompt"}
+	h.db.coalesceErr = errors.New("disk I/O error")
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("later", "do it the other way")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	h.q.waitForClassifications()
+
+	// Assert
+	standing, err := h.db.HeldPrompts(context.Background(), theWorkspace)
+	if err != nil || len(standing) != 2 || standing[0].Coalesced {
+		t.Fatalf("standing = (%+v, %v), want both prompts, neither coalesced", standing, err)
+	}
+	if got := saidText(standing[0].Said); got != "an earlier question" {
+		t.Fatalf("older text = %q, want its own words alone", got)
+	}
+	if !logged(h.log.Records(), "error", opClassify, "could not fold the prompt into the queued prompt ahead; both entries stand as they were") {
+		t.Fatalf("the failed coalescence was not recorded at error: %v", h.log.Records())
+	}
+}
+
 func TestAPromptJudgedAgainstAQueuedPromptIsJudgedAgainstThatPromptsText(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
