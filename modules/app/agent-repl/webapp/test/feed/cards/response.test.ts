@@ -22,6 +22,7 @@ import {
   RESPONSE_PROSE_CLASS,
   THINKING_BUBBLE_CLASS,
   USAGE_AGE_RESERVE_LABELS,
+  USAGE_RESERVE_LABELS_PROPERTY,
   USAGE_REVEALED_CLASS,
   drawFeedResponse,
   responseCap,
@@ -29,6 +30,7 @@ import {
   thinkingLanded,
   revealedSoFar,
   usageAgeWithinReserve,
+  usageReserveLabelsCss,
 } from "../../../src/feed/cards/response.js";
 import { proseHtml } from "../../../src/bubble/body.js";
 import { visibleWidth } from "../../../src/metaprompt-tree.js";
@@ -292,6 +294,60 @@ describe("the usage stamp", () => {
       rowContext(),
     );
     expect(el.querySelector(".usage-stamp")).toBeNull();
+  });
+});
+
+describe("the sizing ghost's reserved labels", () => {
+  const WITH_USAGE = {
+    usage: { text: "2.1k", heat: { position: 0.5 } },
+    result: { case: "success", value: { prose: { markdown: "hi" } } },
+  } as const;
+  const WITHOUT_USAGE = { result: { case: "success", value: { prose: { markdown: "hi" } } } } as const;
+
+  it("joins every reserve label as one CSS string, one label per line", () => {
+    // Arrange
+    const expected = `"${USAGE_AGE_RESERVE_LABELS.join("\\A ")}"`;
+
+    // Act
+    const css = usageReserveLabelsCss();
+
+    // Assert
+    expect(css).toBe(expected);
+  });
+
+  it("names every reserve label in the CSS string, in order", () => {
+    // Arrange / Act
+    const lines = usageReserveLabelsCss().slice(1, -1).split("\\A ");
+
+    // Assert
+    expect(lines).toEqual([...USAGE_AGE_RESERVE_LABELS]);
+  });
+
+  it("sets the labels on a bubble that draws a corner", () => {
+    // Arrange / Act
+    const el = drawFeedResponse(response(WITH_USAGE), rowContext());
+
+    // Assert
+    expect(el.style.getPropertyValue(USAGE_RESERVE_LABELS_PROPERTY)).toBe(usageReserveLabelsCss());
+  });
+
+  it("sets no labels on a bubble that draws no corner", () => {
+    // Arrange / Act
+    const el = drawFeedResponse(response(WITHOUT_USAGE), rowContext());
+
+    // Assert
+    expect(el.style.getPropertyValue(USAGE_RESERVE_LABELS_PROPERTY)).toBe("");
+  });
+
+  it("clears the labels when an in-place redraw drops the corner", () => {
+    // Arrange
+    const first = drawFeedResponse(response(WITH_USAGE), rowContext());
+
+    // Act
+    const again = drawFeedResponse(response(WITHOUT_USAGE), rowContext(first));
+
+    // Assert
+    expect([again === first, again.style.getPropertyValue(USAGE_RESERVE_LABELS_PROPERTY)]).toEqual([true, ""]);
   });
 });
 
