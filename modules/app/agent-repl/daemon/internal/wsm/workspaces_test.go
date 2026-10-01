@@ -1271,3 +1271,23 @@ func TestACorruptStoredResultFailsTheDecode(t *testing.T) {
 		t.Fatalf("Workspace = %v, want a result_end decode failure", err)
 	}
 }
+
+// TestScanRepositoryReadsEveryRepositoryColumn covers the one column list
+// both repository reads share: a registered repository reads back whole
+// through the single read and the list alike.
+func TestScanRepositoryReadsEveryRepositoryColumn(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+
+	// Act
+	listed, err := s.ListRepositories(context.Background())
+
+	// Assert
+	if err != nil {
+		t.Fatalf("ListRepositories: %v", err)
+	}
+	if len(listed) != 1 || listed[0].ID != ws.Repo || listed[0].Dir == "" || listed[0].Name == "" {
+		t.Fatalf("repositories = %+v, want the workspace's repository read whole", listed)
+	}
+}
