@@ -1,0 +1,71 @@
+// persistent_wifi.proto — THE HOST MACHINE'S PERSISTENT-WIFI STANDING, shared
+// by the two endpoints that carry it: WatchDaemon's `persistent_wifi` push
+// (what Emacs is told whenever it changes) and UpdatePersistentWifiMode's
+// success (what the change left standing).
+//
+// PERSISTENT WIFI MODE is the laptop's lid-closed operation: system sleep is
+// disabled outright, so closing the lid neither sleeps the machine nor drops
+// its network, its sessions or a phone hotspot it is joined to. Turning the
+// mode on also joins the configured phone hotspot and dims the display; turning
+// it off leaves the hotspot and restores the display. The daemon owns both the
+// reading and the change (it is the one process that outlives every client).
+//
+// It is a fact about the MACHINE, never about a workspace, so it rides the
+// daemon-level stream and no per-workspace one.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// The machine's persistent-wifi standing as the daemon last read it: whether
+// it is on a Wi-Fi network, and whether closing the lid would keep it awake.
+//
+// TWO INDEPENDENT FACTS, two oneofs: the mode can be on with no network (the
+// lid is safe to close, there is just nothing to keep), and a network can be
+// joined with the mode off. Neither one is derived from the other.
+//
+// EACH ONEOF LEFT UNASSIGNED IS "THE DAEMON COULD NOT READ IT": the read of
+// that fact failed (the tool was missing, or answered something the daemon
+// could not parse), and the daemon has logged why. A reader draws the fact as
+// unknown rather than guessing either arm.
+//
+// The daemon re-reads both facts on a short fixed cadence and immediately
+// after every UpdatePersistentWifiMode, and publishes only on a change, so a
+// change made outside agent-repl (a network dropping, `pmset` run by hand) is
+// reflected within one cadence.
+message PersistentWifiState {
+  // Whether the machine's Wi-Fi interface is joined to a network right now.
+  oneof wifi {
+    PersistentWifiJoined joined = 1;
+    PersistentWifiNotJoined not_joined = 2;
+  }
+  // Whether persistent wifi mode is in force — whether closing the lid keeps
+  // the machine awake and its network up.
+  oneof mode {
+    PersistentWifiModeOn on = 3;
+    PersistentWifiModeOff off = 4;
+  }
+}
+
+// The Wi-Fi interface has an active link to a network.
+message PersistentWifiJoined {
+  // The network's name, verbatim. UNSET when the operating system withholds
+  // it: macOS redacts network names from processes without a location-services
+  // grant, so on such a host the daemon knows a network is joined but not
+  // which one.
+  optional string network_name = 1;
+}
+
+// The Wi-Fi interface has no active link: the radio is off, or on and joined
+// to nothing.
+message PersistentWifiNotJoined {}
+
+// System sleep is disabled: the lid can be closed without sleeping the
+// machine or losing its network.
+message PersistentWifiModeOn {}
+
+// System sleep is enabled: closing the lid sleeps the machine and drops its
+// network.
+message PersistentWifiModeOff {}
