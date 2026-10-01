@@ -970,6 +970,9 @@ type fakeFeed struct {
 
 	rows      []synthesized
 	addresses []*wsm.OutputAddress
+	// onUpsert, when set, runs on every push before it is recorded, so a test
+	// can read the harness's state at the instant a row is published.
+	onUpsert func(row *frontendv1.FeedRow)
 }
 
 // synthesized is one published row with the feed it landed on and when it was
@@ -983,6 +986,9 @@ type synthesized struct {
 
 func (f *fakeFeed) UpsertSynthesized(ws ids.WorkspaceID, feed feedid.Feed, row *frontendv1.FeedRow) {
 	at := f.seq()
+	if f.onUpsert != nil {
+		f.onUpsert(row)
+	}
 	f.mu.Lock()
 	f.rows = append(f.rows, synthesized{WS: ws, Feed: feed, Row: row, At: at})
 	f.mu.Unlock()

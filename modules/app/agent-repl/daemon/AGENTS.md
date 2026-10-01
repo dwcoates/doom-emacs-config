@@ -882,7 +882,10 @@ Owner rulings, 2026-09-30 (`internal/merge`; the contract is
 - **EVERY END GOES THROUGH THE ONE TEARDOWN.** Evict, the dequeue answer and a
   workspace close ABANDON a running merge (`abandonRunning`); the teardown
   releases the lease, the queue entry, the open ledger intervals, the scratch
-  tree, a made worktree (kept when the area is conflicts) and the slot.
+  tree, a made worktree (kept when the area is conflicts) and the slot. The
+  terminal (bubble head and footer facts) is published right after the lease
+  is released, so no client is told the workspace was handed back while its
+  prompts are still refused as merging.
 - **REPAIRS ARE THE REQUESTER'S OWN TURNS**, drawn in the merge bubble's tab AND
   mirrored onto the root feed (`OutputAddress.Mirror`, conflicts and fixes
   only; the mirror copy drops the merge feed's order and parent). The mirror
