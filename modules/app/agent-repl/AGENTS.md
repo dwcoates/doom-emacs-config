@@ -1253,11 +1253,26 @@ against it), and this table is what it means.
 | Green | Ready for you: idle, or waiting on your input. | Yes | ready, done, interrupted, permission; a merge that landed (`merged`); footer `idle`, `waiting`, `interrupted`; a Stop hook's deliberate stop and a deferred tool read as done |
 | Purple | A merge is in progress; the daemon holds the workspace. | No: the composer is closed. | `merge_queued`, `merging` |
 | Turquoise | Something unexpected went wrong and wants your attention, but the workspace is usable. | Yes | `turn_failed` (a failed, orphaned, agent-died, dead-query or lost turn, or a transient vendor failure such as an overloaded api or a model error); `merge_failed`; `degraded` (a shim component dropping or delaying observations, or a shim taken back after a failed handover that never re-reported its state) |
-| Blue | The workspace is unusable right now. | No: the composer is closed. | `init` (starting or connecting), `severed`, `dead`, `start_failed`; footer `disconnected`, `closing`; `vendor_blocked` / footer `blocked` (a usage limit, auth, a missing permission, billing, an organization the account may not use, a blocking limit, the refill breaker — anything that stops all work until it is resolved) |
+| Blue | The workspace is unusable right now. | No: the composer is closed. | `init` (starting or connecting), `severed`, `dead`, `start_failed`; footer `disconnected`, `closing`; `vendor_blocked` / footer `blocked` (a usage limit, auth, a missing permission, billing, an organization the account may not use, a blocking limit, the refill breaker — anything that stops all work until it is resolved); `api_retrying` / footer `blocked · api_retrying` (the vendor is retrying the turn's failed API call — the composer stays open, see below) |
 | Uncolored | There is no lifecycle to report. | — | `none` (never had a session), `inactive` (no open perspective, drawn `?`) |
 
 The rules that keep this true:
 
+- **The footer's color is the sidebar's and the tab bar's color, always**
+  (owner ruling, 2026-10-01). If the footer is blue, the sidebar dot and the
+  tab are blue, and the same for every color. Every footer status that claims
+  a ladder rung has a roster arm on the same rung, both resolvers are fed the
+  same facts, and `TestTheFooterAndTheRosterAlwaysMakeTheSameCoarseClaim`
+  (`daemon/internal/resolve/sidebar/onestatus_test.go`) holds the two
+  together; a fact only one resolver sees is a defect to close by feeding the
+  other.
+- **A turn whose API call the vendor is retrying is blue** (owner ruling,
+  2026-10-01): footer `blocked · api_retrying` with the retry line, roster
+  `api_retrying`. It stands until the retried agent is answered
+  (`ladder.RetryAnswered`), the turn ends, or a new turn opens. A prompt sent
+  during the retry interrupts the wait and runs as its own turn without asking
+  the classifier, so the workspace is red — footer `working` with its step and
+  no retry line — until the API fails again.
 - **Blue is only "unusable".** Something that went wrong while the workspace
   stays usable is turquoise, never blue. An expected state that awaits you (a
   permission ask) is green, never blue. A merge never parks: one that gives up
@@ -1278,7 +1293,10 @@ The rules that keep this true:
 - **The webapp composer is closed exactly when the footer is blue**
   (`render-colors.json#composer_closed_colors`, read by
   `webapp/src/vocab.ts#composerClosedFor`). The gate is derived from the color,
-  never from a list of arm names. A merge in flight (purple) leaves it open:
+  never from a list of arm names, with one kind of exception: a substatus
+  DECLARED in `render-colors.json#composer_open_substatuses` keeps it open
+  under a closing color (`blocked · api_retrying`, whose prompt interrupts the
+  retry). A merge in flight (purple) leaves it open:
   what is submitted is held until the merge ends, and a prompt held so keeps
   the workspace open past the landing. Emacs's composer is gated by the
   daemon's host composer arm instead (a drain, a restart; a holding merge
