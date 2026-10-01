@@ -35,6 +35,8 @@ type fakeLaunchd struct {
 	bootoutErr   error
 	bootstrapErr error
 	printErr     error
+	// onBootstrap runs when a plist is bootstrapped, with its file name.
+	onBootstrap func(plist string)
 }
 
 func newFakeLaunchd() *fakeLaunchd {
@@ -98,6 +100,9 @@ func (l *fakeLaunchd) Bootout(_ context.Context, label string) error {
 
 func (l *fakeLaunchd) Bootstrap(_ context.Context, plist string) error {
 	l.record("bootstrap " + filepath.Base(plist))
+	if l.bootstrapErr == nil && l.onBootstrap != nil {
+		l.onBootstrap(filepath.Base(plist))
+	}
 	return l.bootstrapErr
 }
 
@@ -414,5 +419,155 @@ func TestRestartStoreRecordsNoWarningWhenTheSidecarWasAlreadyGone(t *testing.T) 
 		if r.Level == "warn" || r.Level == "error" {
 			t.Fatalf("RestartStore = %v, record %+v; want nothing above INFO", err, r)
 		}
+	}
+}
+
+// unload marks label as not held by launchd and writes its plist, so an
+// EnsureLoaded has something to bootstrap it from.
+func (h *restarterHarness) unload(t *testing.T, label string) {
+	t.Helper()
+	h.launchd.loaded[label] = false
+	h.launchd.pid[label] = 0
+	writeFile(t, filepath.Join(h.r.PlistDir, label+".plist"), "<plist/>")
+}
+
+// bootstraps answers the plists EnsureLoaded bootstrapped, in order.
+func (h *restarterHarness) bootstraps() []string {
+	var out []string
+	for _, c := range h.launchd.Calls() {
+		if strings.HasPrefix(c, "bootstrap ") {
+			out = append(out, strings.TrimPrefix(c, "bootstrap "))
+		}
+	}
+	return out
+}
+
+func TestEnsureLoadedLeavesLoadedServicesAlone(t *testing.T) {
+	// Arrange.
+	h := newRestarter(t)
+
+	// Act.
+	err := h.r.EnsureLoaded(context.Background())
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("EnsureLoaded: %v", err)
+	}
+	if got := h.bootstraps(); len(got) != 0 {
+		t.Fatalf("bootstrapped %v, want nothing: both services are loaded", got)
+	}
+}
+
+func TestEnsureLoadedBootstrapsAnUnloadedStore(t *testing.T) {
+	// Arrange: the bootstrapped store starts and binds its socket.
+	h := newRestarter(t)
+	h.unload(t, StoreLabel)
+	h.launchd.onBootstrap = func(string) {
+		h.launchd.mu.Lock()
+		h.launchd.loaded[StoreLabel], h.launchd.pid[StoreLabel] = true, 10
+		h.launchd.mu.Unlock()
+		h.bindSocket(t)
+	}
+
+	// Act.
+	err := h.r.EnsureLoaded(context.Background())
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("EnsureLoaded: %v", err)
+	}
+	if got, want := h.bootstraps(), []string{StoreLabel + ".plist"}; fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("bootstrapped %v, want %v", got, want)
+	}
+}
+
+func TestEnsureLoadedStartsTheSidecarOnlyOnceTheStoreServes(t *testing.T) {
+	// Arrange: both are unloaded; the sidecar's bootstrap records whether the
+	// store's socket was already up.
+	h := newRestarter(t)
+	h.unload(t, StoreLabel)
+	h.unload(t, SidecarLabel)
+	storeServedFirst := false
+	h.launchd.onBootstrap = func(plist string) {
+		switch plist {
+		case StoreLabel + ".plist":
+			h.launchd.mu.Lock()
+			h.launchd.loaded[StoreLabel], h.launchd.pid[StoreLabel] = true, 10
+			h.launchd.mu.Unlock()
+			h.bindSocket(t)
+		case SidecarLabel + ".plist":
+			storeServedFirst = socketExists(h.sock)
+		}
+	}
+
+	// Act.
+	err := h.r.EnsureLoaded(context.Background())
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("EnsureLoaded: %v", err)
+	}
+	if !storeServedFirst {
+		t.Fatalf("the sidecar was bootstrapped before the store's socket was up (bootstraps %v)", h.bootstraps())
+	}
+}
+
+func TestEnsureLoadedBootstrapsAnUnloadedSidecarWithoutTouchingTheStore(t *testing.T) {
+	// Arrange.
+	h := newRestarter(t)
+	h.unload(t, SidecarLabel)
+
+	// Act.
+	err := h.r.EnsureLoaded(context.Background())
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("EnsureLoaded: %v", err)
+	}
+	if got, want := h.bootstraps(), []string{SidecarLabel + ".plist"}; fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("bootstrapped %v, want %v", got, want)
+	}
+}
+
+func TestEnsureLoadedRefusesAnUnloadedServiceWithNoPlist(t *testing.T) {
+	// Arrange.
+	h := newRestarter(t)
+	h.launchd.loaded[StoreLabel] = false
+
+	// Act.
+	err := h.r.EnsureLoaded(context.Background())
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "install.sh") {
+		t.Fatalf("EnsureLoaded = %v, want a refusal naming the reinstall", err)
+	}
+}
+
+func TestEnsureLoadedSurfacesABootstrapFailure(t *testing.T) {
+	// Arrange.
+	h := newRestarter(t)
+	h.unload(t, StoreLabel)
+	h.launchd.bootstrapErr = errors.New("launchctl bootstrap exited 5")
+
+	// Act.
+	err := h.r.EnsureLoaded(context.Background())
+
+	// Assert.
+	if err == nil || !errors.Is(err, h.launchd.bootstrapErr) {
+		t.Fatalf("EnsureLoaded = %v, want the bootstrap failure", err)
+	}
+}
+
+func TestEnsureLoadedSurfacesAnUnreadableLaunchdState(t *testing.T) {
+	// Arrange.
+	h := newRestarter(t)
+	h.launchd.printErr = errors.New("launchctl print exited 1")
+
+	// Act.
+	err := h.r.EnsureLoaded(context.Background())
+
+	// Assert.
+	if err == nil || !errors.Is(err, h.launchd.printErr) {
+		t.Fatalf("EnsureLoaded = %v, want the print failure", err)
 	}
 }
