@@ -1073,14 +1073,61 @@ func TestAWorktreeWithUncommittedChangesFailsTheMergeBeforeTheRebase(t *testing.
 	}
 }
 
-func TestAWorktreeOnAnotherBranchFailsTheMerge(t *testing.T) {
+func TestAWorktreeOffItsCreationBranchMergesTheBranchCheckedOut(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	landing(h, 1)
-	h.git.branches[h.sourceD] = "something-else"
+	h.git.mu.Lock()
+	h.git.branches[h.sourceD] = "renamed"
+	h.git.mu.Unlock()
 
 	// Act.
 	admitted(t, h)
+
+	// Assert.
+	if got := h.footer.last(); got.State != StateMerged {
+		t.Fatalf("facts = %+v, want merged", got)
+	}
+}
+
+func TestARequestRecordedWithNoBranchMergesTheBranchCheckedOutAtAdmission(t *testing.T) {
+	// Arrange: a request an earlier build recorded, before branches were.
+	h := newHarness(t)
+	landing(h, 1)
+	if err := h.db.RequestMerge(context.Background(), h.repoKey(), theWorkspace, ownBranch, h.clock()); err != nil {
+		t.Fatalf("RequestMerge: %v", err)
+	}
+	if _, err := h.db.QueueMerge(context.Background(), h.repoKey(), theWorkspace); err != nil {
+		t.Fatalf("QueueMerge: %v", err)
+	}
+
+	// Act.
+	if err := h.admit(context.Background()); err != nil {
+		t.Logf("the merge ended on: %v", err)
+	}
+
+	// Assert.
+	if got := h.footer.last(); got.State != StateMerged {
+		t.Fatalf("facts = %+v, want merged", got)
+	}
+	if _, logged := h.recordFor("info", "daemon.merge.subject"); !logged {
+		t.Fatalf("reading the branch at admission was not recorded: %+v", h.logs.Records())
+	}
+}
+
+func TestAWorktreeSwitchedToAnotherBranchAfterTheRequestFailsTheMerge(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	landing(h, 1)
+	enqueue(t, h)
+	h.git.mu.Lock()
+	h.git.branches[h.sourceD] = "something-else"
+	h.git.mu.Unlock()
+
+	// Act.
+	if err := h.admit(context.Background()); err != nil {
+		t.Logf("the merge ended on: %v", err)
+	}
 
 	// Assert.
 	if got := h.footer.last(); got.State != StateFailed || got.FailedArea != "other" {

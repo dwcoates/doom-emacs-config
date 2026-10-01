@@ -291,6 +291,26 @@ func TestRequestMergeRefusesAnUnregisteredWorkspace(t *testing.T) {
 	}
 }
 
+func TestRequestMergeKeepsTheBranchAWorkspaceSourceWasRequestedWith(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	repo := RepoKey(t.TempDir())
+	source := MergeSource{Kind: MergeSourceOwnBranch, Branch: "renamed"}
+
+	// Act
+	err := s.RequestMerge(context.Background(), repo, ws.ID, source, instant)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("RequestMerge: %v", err)
+	}
+	entries, err := s.MergeQueue(context.Background(), repo)
+	if err != nil || len(entries) != 1 || entries[0].Source != source {
+		t.Fatalf("MergeQueue = %+v, %v, want the source with its branch", entries, err)
+	}
+}
+
 func TestRequestMergeRefusesASourceThatContradictsItself(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -300,7 +320,6 @@ func TestRequestMergeRefusesASourceThatContradictsItself(t *testing.T) {
 		{name: "keep_open off the own branch", source: MergeSource{Kind: MergeSourceBranch, Branch: "b", KeepOpen: true}},
 		{name: "a workspace source naming no workspace", source: MergeSource{Kind: MergeSourceWorkspace}},
 		{name: "a branch source naming no branch", source: MergeSource{Kind: MergeSourceBranch}},
-		{name: "an own branch naming a branch", source: MergeSource{Kind: MergeSourceOwnBranch, Branch: "b"}},
 		{name: "merged upstream naming a workspace", source: MergeSource{Kind: MergeSourceMergedUpstream, Workspace: "w"}},
 	}
 	for _, tt := range tests {
@@ -458,7 +477,7 @@ func TestAllMergeQueuesFailsWholeOnAnUndecodableRow(t *testing.T) {
 	}{
 		{name: "an undeclared state", query: `UPDATE merge_queue SET state = 99 WHERE workspace_id = ?`, field: "state"},
 		{name: "an undeclared source", query: `UPDATE merge_queue SET source_kind = 99 WHERE workspace_id = ?`, field: "source"},
-		{name: "a source contradicting itself", query: `UPDATE merge_queue SET source_branch = 'b' WHERE workspace_id = ?`, field: "source"},
+		{name: "a source contradicting itself", query: `UPDATE merge_queue SET source_kind = 2, source_branch = '' WHERE workspace_id = ?`, field: "source"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

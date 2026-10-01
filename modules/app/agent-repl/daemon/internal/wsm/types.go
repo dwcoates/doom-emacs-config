@@ -817,7 +817,9 @@ type MergeSource struct {
 	KeepOpen bool
 	// Workspace is the other workspace, for MergeSourceWorkspace only.
 	Workspace WorkspaceID
-	// Branch is the branch's name, for MergeSourceBranch only.
+	// Branch is the branch's name: the named branch for MergeSourceBranch, and
+	// the branch checked out in the workspace's worktree when the request was
+	// made for every other arm (empty on a request an earlier build recorded).
 	Branch string
 }
 

@@ -501,6 +501,9 @@ func TestRecoverKeepsAResumedMergesSource(t *testing.T) {
 	h := newHarness(t)
 	h.registerOther(otherWorkspace, "ws-two", "other-branch")
 	source := wsm.MergeSource{Kind: wsm.MergeSourceWorkspace, Workspace: otherWorkspace}
+	// The request is recorded with the branch checked out in the other worktree.
+	recorded := source
+	recorded.Branch = "other-branch"
 	if err := h.request(t, source, RequestedByUser); err != nil {
 		t.Fatalf("Enqueue: %v", err)
 	}
@@ -513,7 +516,7 @@ func TestRecoverKeepsAResumedMergesSource(t *testing.T) {
 
 	// Assert.
 	entries, _ := h.db.MergeQueue(context.Background(), h.repoKey())
-	if len(entries) != 1 || entries[0].Source != source || entries[0].State != wsm.MergeQueued {
+	if len(entries) != 1 || entries[0].Source != recorded || entries[0].State != wsm.MergeQueued {
 		t.Fatalf("queue = %+v, want the merge back in line with its source", entries)
 	}
 }
