@@ -235,3 +235,45 @@ branch into the target as a non-fast-forward merge.
   `RosterRowStatusMergeEnqueuing`, `RosterRowStatusMergeConflict`,
   `HostComposerMergeParked`: each was referenced only by the arm retired
   here.
+
+### 2. The implementation of change 1 across every system (2026-09-30)
+
+- **Decided by** change 1's contract; the choices below were left open by it
+  and were made by the implementers under the lead's review.
+- **The daemon:**
+  - A merge request is recorded before it is queued (wsm layout 15), with its
+    source, and is put in line only once the requesting turn has ended; a
+    boot re-arms recorded requests, and an evict or close withdraws one not
+    yet in line.
+  - The process runs in the requesting workspace: rebase commit by commit,
+    conflict repair turns in the requesting session, the gate, up to
+    `MaxFixAttempts = 3` test repair turns (reset by a start-over), commit,
+    update main. If master moved, the run starts over.
+  - It fails with an area: `conflicts` (the daemon-made worktree is kept, so
+    the rebase stays in progress), `tests`, or `other` (uncommitted changes,
+    a broken gate, a failed pre-merge prompt). A failed post-merge prompt is
+    a WARN and the merge still lands.
+  - The test log is `<state>/merge-logs/<lease>-tests-<round>.log`, served
+    by the token `<lease>/<round>`. A token whose workspace has closed is
+    refused `unknown_merge_test_log`.
+  - Only the repair turns are mirrored onto the root feed.
+  - The shutdown drain counts in-flight admission steps under the lock that
+    sets `draining` (the race fixed on master first).
+- **The verb and the skill:** `claude-repld merge-queue -own [-keep-open] |
+  -dir | -branch | -pr-merged` asks from the calling workspace, found as the
+  roster row whose worktree holds the cwd. Exits: 0 landed or requested, 5
+  failed, 6 refused, 2 verb failure; `-wait` is refused while the requester's
+  turn is in flight. The merge-queue skill asks the same way and ends the
+  turn.
+- **The webapp:** the footer steps and their words, the 🧪 chip and the
+  merge tests panel, the rebasing, committing and updating-main tabs, the
+  tests tab's log link (in the response bubbles' link blue, the token never
+  in the page's HTML), and the rail's Merge verb sending
+  `own_branch{keep_open:false}`.
+- **Emacs:** `SPC TAB M` sends the workspace's own branch; `C-u SPC TAB M`
+  keeps the workspace open. The log opens through the existing right-side
+  popup.
+- **Gaps closed in the same change:** the vocabulary file
+  (`proto/vocab/render-colors.json`) drops the retired arms, which the proto
+  commit had missed; mirrored repair rows are rebuilt from history on replay
+  (the e2e rewrite, `mq-e2e`).
