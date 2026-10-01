@@ -60,6 +60,8 @@ const (
 	ShimUpdateAgentProcedure = "/shim.v1.Shim/UpdateAgent"
 	// ShimKillTurnProcedure is the fully-qualified name of the Shim's KillTurn RPC.
 	ShimKillTurnProcedure = "/shim.v1.Shim/KillTurn"
+	// ShimRollBackSessionProcedure is the fully-qualified name of the Shim's RollBackSession RPC.
+	ShimRollBackSessionProcedure = "/shim.v1.Shim/RollBackSession"
 	// ShimWatchBashProcedure is the fully-qualified name of the Shim's WatchBash RPC.
 	ShimWatchBashProcedure = "/shim.v1.Shim/WatchBash"
 	// ShimStopBashProcedure is the fully-qualified name of the Shim's StopBash RPC.
@@ -93,6 +95,7 @@ var (
 	shimWatchAgentMethodDescriptor               = shimServiceDescriptor.Methods().ByName("WatchAgent")
 	shimUpdateAgentMethodDescriptor              = shimServiceDescriptor.Methods().ByName("UpdateAgent")
 	shimKillTurnMethodDescriptor                 = shimServiceDescriptor.Methods().ByName("KillTurn")
+	shimRollBackSessionMethodDescriptor          = shimServiceDescriptor.Methods().ByName("RollBackSession")
 	shimWatchBashMethodDescriptor                = shimServiceDescriptor.Methods().ByName("WatchBash")
 	shimStopBashMethodDescriptor                 = shimServiceDescriptor.Methods().ByName("StopBash")
 	shimGetWorkflowMethodDescriptor              = shimServiceDescriptor.Methods().ByName("GetWorkflow")
@@ -143,6 +146,11 @@ type ShimClient interface {
 	// END the turn. Unforced, the synchronous turn only: detached work runs on.
 	// Forced, the agent and everything THIS turn spawned, transitively.
 	KillTurn(context.Context, *connect.Request[v1.KillTurnRequest]) (*connect.Response[v1.KillTurnResponse], error)
+	// REWIND the main agent's vendor conversation to just before one of its
+	// prompts: interrupt the open turn, optionally stop the dropped turns'
+	// detached work and restore the files, then resume the vendor session at
+	// the last entry before the prompt. See endpoint_roll_back_session.proto.
+	RollBackSession(context.Context, *connect.Request[v1.RollBackSessionRequest]) (*connect.Response[v1.RollBackSessionResponse], error)
 	// Follow a backgrounded shell command: the bash unit itself.
 	WatchBash(context.Context, *connect.Request[v1.WatchBashRequest]) (*connect.ServerStreamForClient[v1.WatchBashResponse], error)
 	// Kill a backgrounded shell command — the only input a process takes.
@@ -243,6 +251,12 @@ func NewShimClient(httpClient connect.HTTPClient, baseURL string, opts ...connec
 			connect.WithSchema(shimKillTurnMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		rollBackSession: connect.NewClient[v1.RollBackSessionRequest, v1.RollBackSessionResponse](
+			httpClient,
+			baseURL+ShimRollBackSessionProcedure,
+			connect.WithSchema(shimRollBackSessionMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 		watchBash: connect.NewClient[v1.WatchBashRequest, v1.WatchBashResponse](
 			httpClient,
 			baseURL+ShimWatchBashProcedure,
@@ -312,6 +326,7 @@ type shimClient struct {
 	watchAgent               *connect.Client[v1.WatchAgentRequest, v1.WatchAgentResponse]
 	updateAgent              *connect.Client[v1.UpdateAgentRequest, v1.UpdateAgentResponse]
 	killTurn                 *connect.Client[v1.KillTurnRequest, v1.KillTurnResponse]
+	rollBackSession          *connect.Client[v1.RollBackSessionRequest, v1.RollBackSessionResponse]
 	watchBash                *connect.Client[v1.WatchBashRequest, v1.WatchBashResponse]
 	stopBash                 *connect.Client[v1.StopBashRequest, v1.StopBashResponse]
 	getWorkflow              *connect.Client[v1.GetWorkflowRequest, v1.GetWorkflowResponse]
@@ -371,6 +386,11 @@ func (c *shimClient) UpdateAgent(ctx context.Context, req *connect.Request[v1.Up
 // KillTurn calls shim.v1.Shim.KillTurn.
 func (c *shimClient) KillTurn(ctx context.Context, req *connect.Request[v1.KillTurnRequest]) (*connect.Response[v1.KillTurnResponse], error) {
 	return c.killTurn.CallUnary(ctx, req)
+}
+
+// RollBackSession calls shim.v1.Shim.RollBackSession.
+func (c *shimClient) RollBackSession(ctx context.Context, req *connect.Request[v1.RollBackSessionRequest]) (*connect.Response[v1.RollBackSessionResponse], error) {
+	return c.rollBackSession.CallUnary(ctx, req)
 }
 
 // WatchBash calls shim.v1.Shim.WatchBash.
@@ -457,6 +477,11 @@ type ShimHandler interface {
 	// END the turn. Unforced, the synchronous turn only: detached work runs on.
 	// Forced, the agent and everything THIS turn spawned, transitively.
 	KillTurn(context.Context, *connect.Request[v1.KillTurnRequest]) (*connect.Response[v1.KillTurnResponse], error)
+	// REWIND the main agent's vendor conversation to just before one of its
+	// prompts: interrupt the open turn, optionally stop the dropped turns'
+	// detached work and restore the files, then resume the vendor session at
+	// the last entry before the prompt. See endpoint_roll_back_session.proto.
+	RollBackSession(context.Context, *connect.Request[v1.RollBackSessionRequest]) (*connect.Response[v1.RollBackSessionResponse], error)
 	// Follow a backgrounded shell command: the bash unit itself.
 	WatchBash(context.Context, *connect.Request[v1.WatchBashRequest], *connect.ServerStream[v1.WatchBashResponse]) error
 	// Kill a backgrounded shell command — the only input a process takes.
@@ -553,6 +578,12 @@ func NewShimHandler(svc ShimHandler, opts ...connect.HandlerOption) (string, htt
 		connect.WithSchema(shimKillTurnMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
+	shimRollBackSessionHandler := connect.NewUnaryHandler(
+		ShimRollBackSessionProcedure,
+		svc.RollBackSession,
+		connect.WithSchema(shimRollBackSessionMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
 	shimWatchBashHandler := connect.NewServerStreamHandler(
 		ShimWatchBashProcedure,
 		svc.WatchBash,
@@ -629,6 +660,8 @@ func NewShimHandler(svc ShimHandler, opts ...connect.HandlerOption) (string, htt
 			shimUpdateAgentHandler.ServeHTTP(w, r)
 		case ShimKillTurnProcedure:
 			shimKillTurnHandler.ServeHTTP(w, r)
+		case ShimRollBackSessionProcedure:
+			shimRollBackSessionHandler.ServeHTTP(w, r)
 		case ShimWatchBashProcedure:
 			shimWatchBashHandler.ServeHTTP(w, r)
 		case ShimStopBashProcedure:
@@ -694,6 +727,10 @@ func (UnimplementedShimHandler) UpdateAgent(context.Context, *connect.Request[v1
 
 func (UnimplementedShimHandler) KillTurn(context.Context, *connect.Request[v1.KillTurnRequest]) (*connect.Response[v1.KillTurnResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("shim.v1.Shim.KillTurn is not implemented"))
+}
+
+func (UnimplementedShimHandler) RollBackSession(context.Context, *connect.Request[v1.RollBackSessionRequest]) (*connect.Response[v1.RollBackSessionResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("shim.v1.Shim.RollBackSession is not implemented"))
 }
 
 func (UnimplementedShimHandler) WatchBash(context.Context, *connect.Request[v1.WatchBashRequest], *connect.ServerStream[v1.WatchBashResponse]) error {

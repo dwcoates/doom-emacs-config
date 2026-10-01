@@ -1,0 +1,121 @@
+// endpoint_roll_back_session.proto — RollBackSession: rewind the main agent's
+// vendor conversation to just before one of its prompts, optionally restoring
+// the files the agent's edit tools changed since then.
+//
+// One operation, run by the shim because the shim alone owns the vendor query:
+//   1. The open turn, if any, is interrupted exactly as an unforced KillTurn
+//      interrupts it.
+//   2. `restore_files` only: every item of detached work (subagent, shell,
+//      monitor, workflow) that a dropped turn spawned, transitively, is
+//      stopped, and the files are restored to their state when the prompt was
+//      sent (the vendor's file checkpointing; the shim runs every session with
+//      it on).
+//   3. The query is restarted on the same vendor session, resumed at the last
+//      chain entry before the prompt, so the vendor's own conversation no
+//      longer holds the prompt or anything after it.
+//
+// THE PROMPT'S VENDOR IDENTITY IS DERIVED FROM ITS TURN ID. The shim sends each
+// prompt under a vendor message uuid computed from the turn id the daemon
+// minted (a turn id that is itself a uuid — a prompt the vendor recorded
+// first — is its own vendor uuid), so a restarted shim finds the prompt's
+// record in the vendor transcript with nothing stored anywhere.
+//
+// Nothing is retried. A cut the vendor refuses leaves the conversation whole:
+// the shim resumes the session plainly and answers the refusal.
+syntax = "proto3";
+package shim.v1;
+import "conversation/v1/turn.proto";
+option go_package = "agentrepl/proto/shim/v1;shimv1";
+
+// The rollback to perform.
+message RollBackSessionRequest {
+  // The turn whose prompt is the first thing dropped. Its prompt must have
+  // opened the turn (a prompt folded into a running turn opens none) and
+  // belong to the open vendor session.
+  conversation.v1.TurnId to_before = 1;
+  // Every turn the caller drew from `to_before` onward, oldest first,
+  // `to_before` included. The shim refuses the cut when the vendor
+  // transcript after the cut point holds a prompt of any other turn: the
+  // caller would be dropping a prompt it never saw.
+  repeated conversation.v1.TurnId dropped_turns = 2;
+  // Whether the files go back too. Exactly one is set.
+  oneof files {
+    // Leave every file as it is, and leave detached work running.
+    RollBackSessionKeepFiles keep_files = 3;
+    // Stop the dropped turns' detached work and restore the files.
+    RollBackSessionRestoreFiles restore_files = 4;
+  }
+}
+// Leave files and detached work alone.
+message RollBackSessionKeepFiles {}
+// Stop the dropped turns' detached work and restore the files.
+message RollBackSessionRestoreFiles {}
+
+// THE ARM IS THE OUTCOME.
+message RollBackSessionResponse {
+  oneof result {
+    RollBackSessionSuccess success = 1;
+    RollBackSessionFailure failure = 2;
+  }
+}
+
+// The vendor conversation now ends just before the prompt.
+message RollBackSessionSuccess {
+  // What happened to the files: present exactly when `restore_files` was
+  // asked.
+  optional RollBackSessionFilesRestored files_restored = 1;
+}
+
+// The files the restore changed back, as the vendor counted them.
+message RollBackSessionFilesRestored {
+  // Each file whose contents the restore changed, by path.
+  repeated string paths = 1;
+}
+
+// Not rolled back. THE ARM IS WHY. Every arm leaves the vendor conversation
+// as it was, except that an open turn may already have been interrupted.
+message RollBackSessionFailure {
+  oneof cause {
+    // No session is open on this shim.
+    RollBackSessionNoSession no_session = 1;
+    // The vendor transcript holds no record of the prompt (it was never
+    // recorded, or belongs to another vendor session).
+    RollBackSessionPromptNotRecorded prompt_not_recorded = 2;
+    // The prompt is the first of its vendor conversation, so no chain entry
+    // precedes it to resume at; `/clear` starts a conversation over.
+    RollBackSessionFirstPrompt first_prompt = 3;
+    // The transcript after the cut point holds a prompt of a turn not in
+    // `dropped_turns`.
+    RollBackSessionUnseenPrompt unseen_prompt = 4;
+    // The vendor refused the cut at resume; the session was resumed whole.
+    RollBackSessionVendorRefused vendor_refused = 5;
+    // `restore_files` was asked and the vendor cannot restore the files to
+    // that prompt (checkpointing was off when it was sent, or its checkpoint
+    // is gone). Nothing was changed: the files are checked before the
+    // conversation is cut.
+    RollBackSessionFilesNotRestorable files_not_restorable = 6;
+  }
+  // The shim's account, for a human and for logs; never switched on.
+  string detail = 7;
+}
+// No session is open.
+message RollBackSessionNoSession {}
+// The prompt has no record in the vendor transcript.
+message RollBackSessionPromptNotRecorded {}
+// The prompt is its conversation's first.
+message RollBackSessionFirstPrompt {}
+// A prompt the caller did not name sits after the cut point.
+message RollBackSessionUnseenPrompt {
+  // The vendor uuid of the first such prompt record.
+  string vendor_prompt_uuid = 1;
+}
+// The vendor refused the cut.
+message RollBackSessionVendorRefused {
+  // The vendor's refusal, verbatim.
+  string vendor_message = 1;
+}
+// The files cannot be restored to the prompt.
+message RollBackSessionFilesNotRestorable {
+  // The vendor's reason, verbatim.
+  string vendor_message = 1;
+}

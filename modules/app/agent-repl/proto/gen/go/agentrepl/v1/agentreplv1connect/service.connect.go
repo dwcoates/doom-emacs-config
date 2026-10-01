@@ -60,6 +60,10 @@ const (
 	AgentReplGetFeedPageProcedure = "/agentrepl.v1.AgentRepl/GetFeedPage"
 	// AgentReplInterruptProcedure is the fully-qualified name of the AgentRepl's Interrupt RPC.
 	AgentReplInterruptProcedure = "/agentrepl.v1.AgentRepl/Interrupt"
+	// AgentReplPlanRollbackProcedure is the fully-qualified name of the AgentRepl's PlanRollback RPC.
+	AgentReplPlanRollbackProcedure = "/agentrepl.v1.AgentRepl/PlanRollback"
+	// AgentReplRollBackProcedure is the fully-qualified name of the AgentRepl's RollBack RPC.
+	AgentReplRollBackProcedure = "/agentrepl.v1.AgentRepl/RollBack"
 	// AgentReplAnswerPermissionProcedure is the fully-qualified name of the AgentRepl's
 	// AnswerPermission RPC.
 	AgentReplAnswerPermissionProcedure = "/agentrepl.v1.AgentRepl/AnswerPermission"
@@ -215,6 +219,8 @@ var (
 	agentReplWatchFeedMethodDescriptor                = agentReplServiceDescriptor.Methods().ByName("WatchFeed")
 	agentReplGetFeedPageMethodDescriptor              = agentReplServiceDescriptor.Methods().ByName("GetFeedPage")
 	agentReplInterruptMethodDescriptor                = agentReplServiceDescriptor.Methods().ByName("Interrupt")
+	agentReplPlanRollbackMethodDescriptor             = agentReplServiceDescriptor.Methods().ByName("PlanRollback")
+	agentReplRollBackMethodDescriptor                 = agentReplServiceDescriptor.Methods().ByName("RollBack")
 	agentReplAnswerPermissionMethodDescriptor         = agentReplServiceDescriptor.Methods().ByName("AnswerPermission")
 	agentReplAnswerQuestionMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("AnswerQuestion")
 	agentReplAnswerColdGateMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("AnswerColdGate")
@@ -301,6 +307,11 @@ type AgentReplClient interface {
 	// "Stop that": the running turn, or a detached bubble's work — the arm is
 	// the target. See endpoint_interrupt.proto.
 	Interrupt(context.Context, *connect.Request[v1.InterruptRequest]) (*connect.Response[v1.InterruptResponse], error)
+	// Say what a rollback would do, for the user to confirm; changes nothing.
+	// See endpoint_plan_rollback.proto.
+	PlanRollback(context.Context, *connect.Request[v1.PlanRollbackRequest]) (*connect.Response[v1.PlanRollbackResponse], error)
+	// Perform a confirmed plan. See endpoint_roll_back.proto.
+	RollBack(context.Context, *connect.Request[v1.RollBackRequest]) (*connect.Response[v1.RollBackResponse], error)
 	// The permission card's verdicts and the question card's answers. See
 	// endpoint_answer_permission.proto.
 	AnswerPermission(context.Context, *connect.Request[v1.AnswerPermissionRequest]) (*connect.Response[v1.AnswerPermissionResponse], error)
@@ -514,6 +525,18 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			httpClient,
 			baseURL+AgentReplInterruptProcedure,
 			connect.WithSchema(agentReplInterruptMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		planRollback: connect.NewClient[v1.PlanRollbackRequest, v1.PlanRollbackResponse](
+			httpClient,
+			baseURL+AgentReplPlanRollbackProcedure,
+			connect.WithSchema(agentReplPlanRollbackMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		rollBack: connect.NewClient[v1.RollBackRequest, v1.RollBackResponse](
+			httpClient,
+			baseURL+AgentReplRollBackProcedure,
+			connect.WithSchema(agentReplRollBackMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
 		answerPermission: connect.NewClient[v1.AnswerPermissionRequest, v1.AnswerPermissionResponse](
@@ -853,6 +876,8 @@ type agentReplClient struct {
 	watchFeed                *connect.Client[v1.WatchFeedRequest, v1.WatchFeedResponse]
 	getFeedPage              *connect.Client[v1.GetFeedPageRequest, v1.GetFeedPageResponse]
 	interrupt                *connect.Client[v1.InterruptRequest, v1.InterruptResponse]
+	planRollback             *connect.Client[v1.PlanRollbackRequest, v1.PlanRollbackResponse]
+	rollBack                 *connect.Client[v1.RollBackRequest, v1.RollBackResponse]
 	answerPermission         *connect.Client[v1.AnswerPermissionRequest, v1.AnswerPermissionResponse]
 	answerQuestion           *connect.Client[v1.AnswerQuestionRequest, v1.AnswerQuestionResponse]
 	answerColdGate           *connect.Client[v1.AnswerColdGateRequest, v1.AnswerColdGateResponse]
@@ -947,6 +972,16 @@ func (c *agentReplClient) GetFeedPage(ctx context.Context, req *connect.Request[
 // Interrupt calls agentrepl.v1.AgentRepl.Interrupt.
 func (c *agentReplClient) Interrupt(ctx context.Context, req *connect.Request[v1.InterruptRequest]) (*connect.Response[v1.InterruptResponse], error) {
 	return c.interrupt.CallUnary(ctx, req)
+}
+
+// PlanRollback calls agentrepl.v1.AgentRepl.PlanRollback.
+func (c *agentReplClient) PlanRollback(ctx context.Context, req *connect.Request[v1.PlanRollbackRequest]) (*connect.Response[v1.PlanRollbackResponse], error) {
+	return c.planRollback.CallUnary(ctx, req)
+}
+
+// RollBack calls agentrepl.v1.AgentRepl.RollBack.
+func (c *agentReplClient) RollBack(ctx context.Context, req *connect.Request[v1.RollBackRequest]) (*connect.Response[v1.RollBackResponse], error) {
+	return c.rollBack.CallUnary(ctx, req)
 }
 
 // AnswerPermission calls agentrepl.v1.AgentRepl.AnswerPermission.
@@ -1249,6 +1284,11 @@ type AgentReplHandler interface {
 	// "Stop that": the running turn, or a detached bubble's work — the arm is
 	// the target. See endpoint_interrupt.proto.
 	Interrupt(context.Context, *connect.Request[v1.InterruptRequest]) (*connect.Response[v1.InterruptResponse], error)
+	// Say what a rollback would do, for the user to confirm; changes nothing.
+	// See endpoint_plan_rollback.proto.
+	PlanRollback(context.Context, *connect.Request[v1.PlanRollbackRequest]) (*connect.Response[v1.PlanRollbackResponse], error)
+	// Perform a confirmed plan. See endpoint_roll_back.proto.
+	RollBack(context.Context, *connect.Request[v1.RollBackRequest]) (*connect.Response[v1.RollBackResponse], error)
 	// The permission card's verdicts and the question card's answers. See
 	// endpoint_answer_permission.proto.
 	AnswerPermission(context.Context, *connect.Request[v1.AnswerPermissionRequest]) (*connect.Response[v1.AnswerPermissionResponse], error)
@@ -1458,6 +1498,18 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		AgentReplInterruptProcedure,
 		svc.Interrupt,
 		connect.WithSchema(agentReplInterruptMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplPlanRollbackHandler := connect.NewUnaryHandler(
+		AgentReplPlanRollbackProcedure,
+		svc.PlanRollback,
+		connect.WithSchema(agentReplPlanRollbackMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplRollBackHandler := connect.NewUnaryHandler(
+		AgentReplRollBackProcedure,
+		svc.RollBack,
+		connect.WithSchema(agentReplRollBackMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
 	agentReplAnswerPermissionHandler := connect.NewUnaryHandler(
@@ -1802,6 +1854,10 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplGetFeedPageHandler.ServeHTTP(w, r)
 		case AgentReplInterruptProcedure:
 			agentReplInterruptHandler.ServeHTTP(w, r)
+		case AgentReplPlanRollbackProcedure:
+			agentReplPlanRollbackHandler.ServeHTTP(w, r)
+		case AgentReplRollBackProcedure:
+			agentReplRollBackHandler.ServeHTTP(w, r)
 		case AgentReplAnswerPermissionProcedure:
 			agentReplAnswerPermissionHandler.ServeHTTP(w, r)
 		case AgentReplAnswerQuestionProcedure:
@@ -1949,6 +2005,14 @@ func (UnimplementedAgentReplHandler) GetFeedPage(context.Context, *connect.Reque
 
 func (UnimplementedAgentReplHandler) Interrupt(context.Context, *connect.Request[v1.InterruptRequest]) (*connect.Response[v1.InterruptResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.Interrupt is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) PlanRollback(context.Context, *connect.Request[v1.PlanRollbackRequest]) (*connect.Response[v1.PlanRollbackResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.PlanRollback is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) RollBack(context.Context, *connect.Request[v1.RollBackRequest]) (*connect.Response[v1.RollBackResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.RollBack is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) AnswerPermission(context.Context, *connect.Request[v1.AnswerPermissionRequest]) (*connect.Response[v1.AnswerPermissionResponse], error) {
