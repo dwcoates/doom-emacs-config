@@ -1140,15 +1140,8 @@ func (rs *retryState) line() *frontendv1.FooterStatusActivityRetrying {
 // one that carries an API response's usage, is the vendor answering. Another
 // agent's frame says nothing about this call.
 func (r *resolver) clearRetry(ws ids.WorkspaceID, s *wsState, agent string, act *conversationv1.AgentActivity) {
-	if s.retrying == nil || s.retrying.agent != agent {
+	if s.retrying == nil || s.retrying.agent != agent || !ladder.RetryAnswered(act) {
 		return
-	}
-	switch act.GetItem().(type) {
-	case *conversationv1.AgentActivity_Thinking, *conversationv1.AgentActivity_Response:
-	default:
-		if act.GetUsage() == nil {
-			return
-		}
 	}
 	r.logOf(ws, s).Debug("daemon.footer.retry_cleared", "the retried call's response landed; the retrying line ended",
 		dlog.Context{"agent_id": agent, "attempt": s.retrying.attempt})

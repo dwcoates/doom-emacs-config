@@ -83,10 +83,6 @@ func (r *resolver) workingActivity(s *wsState) *frontendv1.FooterStatusWorkingAc
 		line = salient(s.compaction.at)
 		line.Kind = &frontendv1.FooterStatusWorkingSalient_Compaction{
 			Compaction: &frontendv1.FooterStatusActivityCompaction{Text: s.compaction.text}}
-	case s.retrying != nil:
-		line = salient(s.retrying.at)
-		line.Kind = &frontendv1.FooterStatusWorkingSalient_Retrying{
-			Retrying: s.retrying.line()}
 	case ok:
 		line = fillShared(&frontendv1.FooterStatusWorkingSalient{}, shared)
 	default:
@@ -151,6 +147,10 @@ func (r *resolver) blockedActivity(s *wsState) *frontendv1.FooterStatusBlockedAc
 		line = salient(s.authLine.at)
 		line.Kind = &frontendv1.FooterStatusBlockedSalient_Authenticating{
 			Authenticating: &frontendv1.FooterStatusActivityAuthenticating{Line: s.authLine.text}}
+	case s.blocked == nil && s.retryBlocks():
+		// The `api_retrying` substatus always draws its retry line.
+		line = salient(s.retrying.at)
+		line.Kind = &frontendv1.FooterStatusBlockedSalient_Retrying{Retrying: s.retrying.line()}
 	case fault != nil:
 		line = salient(faultAt)
 		line.Kind = &frontendv1.FooterStatusBlockedSalient_Fault{Fault: fault}

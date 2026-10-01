@@ -469,6 +469,8 @@ func (r *resolver) OnAgentTerminal(ws ids.WorkspaceID, agent *conversationv1.Age
 				return
 			}
 			s.turn = nil
+			// THE TURN'S END IS THE RETRY'S END: nothing is left to retry for.
+			s.retrying = nil
 			r.endTurnMotion(s)
 			s.tok.settled = true
 			s.interrupting = false
