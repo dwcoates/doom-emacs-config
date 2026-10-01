@@ -185,29 +185,26 @@ func (r *resolver) applySubagent(s *wsState, agent *conversationv1.AgentId, unit
 // alike, so the two cannot describe one run differently.
 func (row *agentRow) takeStart(start *conversationv1.AgentSubagentStart) {
 	row.createdAgent = start.GetCreatedAgentId().GetValue()
-	row.label = subagentLabel(start.GetPrompt())
-	row.description = start.GetPrompt().GetDescription()
+	row.takeCommission(start.GetPrompt())
 	row.startedAt = time.UnixMilli(start.GetStartedAt().GetAtMs())
 }
 
 // takeUpdate folds a running beat into the row: the running token sum, and
-// the label and description when the beat restates a commission that names
-// them. The ONE reading of an update, for the spawning call's stream and the
-// run's own alike.
-//
-// THE BEAT RESTATES THE COMMISSION so it stands alone, which is what describes
-// a row this daemon never saw launch (bindDetachedAgent): a row still drawn
-// under the generic label takes the label the commission names. A row already
-// labelled keeps its label, which its start established from the same
-// commission.
+// the description when the beat restates one. The ONE reading of an update,
+// for the spawning call's stream and the run's own alike.
 func (row *agentRow) takeUpdate(update *conversationv1.AgentSubagentUpdate) {
 	row.tokens = update.GetProgress().GetTotalTokens()
-	if row.label == subagentLabel(nil) {
-		row.label = subagentLabel(update.GetPrompt())
-	}
 	if desc := update.GetPrompt().GetDescription(); desc != "" {
 		row.description = desc
 	}
+}
+
+// takeCommission describes the row from the commission its agent was spawned
+// with: the label and the description, exactly as a start states them. It is
+// what a resume announcement's DetachedWorkKindSubagent.commission is read by.
+func (row *agentRow) takeCommission(commission *conversationv1.AgentSubagentPrompt) {
+	row.label = subagentLabel(commission)
+	row.description = commission.GetDescription()
 }
 
 // minimalAgentRow is a row for a subagent the footer has not described: the
@@ -650,8 +647,8 @@ func (r *resolver) applyDetached(ws ids.WorkspaceID, s *wsState, id string, work
 		// send is detached from the SEND, which drew no row here; the
 		// announcement's kind names the agent that is running, and the run
 		// is that agent's row. See bindDetachedAgent.
-		if agent := work.GetKind().GetSubagent().GetAgentId().GetValue(); agent != "" {
-			r.bindDetachedAgent(ws, s, id, unit, agent)
+		if subagent := work.GetKind().GetSubagent(); subagent.GetAgentId().GetValue() != "" {
+			r.bindDetachedAgent(ws, s, id, unit, subagent)
 			return
 		}
 	case *conversationv1.AgentDetachedWork_Created:
@@ -670,42 +667,50 @@ func (r *resolver) applyDetached(ws ids.WorkspaceID, s *wsState, id string, work
 // agent, so its row carries the launch's identity -- label, description,
 // tokens -- rather than a minimal "subagent" row with no tokens that nothing
 // will describe again (owner's report, workspace footer-activity-updates,
-// 2026-09-30: daemon.footer.live_work_taken readded_retired). The identity is
-// taken from, in order of what the footer holds:
+// 2026-09-30: daemon.footer.live_work_taken readded_retired).
 //
-//   - the agent's LIVE row, which is re-addressed by the new handle;
-//   - the row retired at the agent's previous terminal (retiredRows), copied
-//     into a live row -- a copy, because the retired row stays the record of
-//     that earlier run for every identity it was kept under;
-//   - neither, when this daemon never saw the agent launch: a minimal row the
-//     run's own frames describe, since every one of them restates the
-//     commission (AgentSubagentUpdate.prompt, "repeated so this frame stands
-//     alone").
+// THE ANNOUNCEMENT DESCRIBES THE AGENT (DetachedWorkKindSubagent.commission),
+// whether or not this daemon ever saw it launch. The row it binds is:
+//
+//   - the agent's LIVE row, re-addressed by the new handle;
+//   - else a live copy of the row retired at the agent's previous terminal
+//     (retiredRows), which keeps that run's token figure -- a copy, because
+//     the retired row stays the record of that earlier run;
+//   - else a minimal row, when this daemon never saw the agent at all.
+//
+// Whichever it is, a stated commission is what the row is labelled and
+// described by. An announcement that states none is the producer's recorded
+// fault (it reports it at ERROR); the row keeps what this daemon knew, and
+// the record here says the identity came from nowhere.
 //
 // The handle joins the row's addresses (row.work), so the run's beats and its
 // terminal -- addressed to the handle's unit -- reach this row, and its jump
 // names the entry the feed draws for the run under that unit.
-func (r *resolver) bindDetachedAgent(ws ids.WorkspaceID, s *wsState, work, unit, agent string) {
-	ctx := dlog.Context{"work_id": work, "unit": unit, "agent_id": agent}
-	if row := s.subagentRow(agent); row != nil {
+func (r *resolver) bindDetachedAgent(ws ids.WorkspaceID, s *wsState, work, unit string, subagent *conversationv1.DetachedWorkKindSubagent) {
+	agent := subagent.GetAgentId().GetValue()
+	ctx := dlog.Context{"work_id": work, "unit": unit, "agent_id": agent, "commission": subagent.Commission != nil}
+	row := s.subagentRow(agent)
+	switch {
+	case row != nil:
 		row.work = work
 		ctx["identity"] = "live_row"
-		r.logOf(ws, s).Info("daemon.footer.detached_agent_bound",
-			"a detached run was bound to its agent's row by the run's own handle", ctx)
-		return
+	default:
+		row = s.minimalAgentRow(work, agent, r.opts.clock.Now(), provenanceDetachedAnnouncement)
+		ctx["identity"] = "undescribed"
+		if retired, ok := s.retiredRows[agent]; ok {
+			row.spawnUnit = retired.spawnUnit
+			row.label = retired.label
+			row.description = retired.description
+			row.tokens = retired.tokens
+			row.provenance = retired.provenance
+			row.spawnedOn = retired.spawnedOn
+			ctx["identity"] = "retired_row"
+		}
+		s.agents[agent] = row
 	}
-	row := s.minimalAgentRow(work, agent, r.opts.clock.Now(), provenanceDetachedAnnouncement)
-	ctx["identity"] = "undescribed"
-	if retired, ok := s.retiredRows[agent]; ok {
-		row.spawnUnit = retired.spawnUnit
-		row.label = retired.label
-		row.description = retired.description
-		row.tokens = retired.tokens
-		row.provenance = retired.provenance
-		row.spawnedOn = retired.spawnedOn
-		ctx["identity"] = "retired_row"
+	if commission := subagent.GetCommission(); commission != nil {
+		row.takeCommission(commission)
 	}
-	s.agents[agent] = row
 	r.logOf(ws, s).Info("daemon.footer.detached_agent_bound",
 		"a detached run was bound to its agent's row by the run's own handle", ctx)
 }

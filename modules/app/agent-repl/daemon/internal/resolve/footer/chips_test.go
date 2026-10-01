@@ -1565,7 +1565,7 @@ func TestTakeUpdateFoldsABeat(t *testing.T) {
 	}
 }
 
-// EVERY READING OF A SPAWN'S PROMPT INTO A ROW GOES THROUGH takeStart AND
+// EVERY READING OF A SPAWN'S PROMPT INTO A ROW GOES THROUGH takeCommission AND
 // takeUpdate: a hand-rolled site elsewhere in chips.go would let the spawning
 // call's stream and the run's own describe one run differently.
 func TestChipsReadsAPromptOnlyThroughTheSharedHelpers(t *testing.T) {
@@ -1576,11 +1576,12 @@ func TestChipsReadsAPromptOnlyThroughTheSharedHelpers(t *testing.T) {
 	}
 
 	// Act
-	reads := strings.Count(string(source), "GetPrompt().GetDescription()")
+	beats := strings.Count(string(source), "GetPrompt().GetDescription()")
+	commissions := strings.Count(string(source), "row.description = commission.GetDescription()")
 
 	// Assert
-	if reads != 2 {
-		t.Fatalf("chips.go reads a prompt's description at %d sites, want 2 (takeStart and takeUpdate)", reads)
+	if beats != 1 || commissions != 1 {
+		t.Fatalf("chips.go reads a beat's description at %d sites and a commission's at %d, want 1 each (takeUpdate, takeCommission)", beats, commissions)
 	}
 }
 
@@ -1690,23 +1691,6 @@ func TestAResumeOfAnAgentNeverDescribedOpensAMinimalRow(t *testing.T) {
 	jumps := recordsOf(h.log.Records(), "daemon.footer.jump_resolution")
 	if got := jumps[len(jumps)-1].Context["provenance"]; got != "detached_announcement" {
 		t.Fatalf("jump provenance = %v, want detached_announcement", got)
-	}
-}
-
-// AND THE RUN'S OWN BEAT DESCRIBES IT, because it restates the commission.
-func TestAResumedRunsBeatDescribesARowNeverDescribed(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	connected(h)
-	h.r.OnDetachedWork(testWS, mainAgent, resumedSubagent("send-1", "spawn-1"))
-
-	// Act
-	h.r.OnSubagent(testWS, workID("send-1"), commissionBeat("opus-medium", "fix the shim", 379_388))
-
-	// Assert
-	row := h.view(t).GetExpanded().GetAgents().GetRows()[0]
-	if row.GetLabel().GetText() != "opus-medium" || row.GetDescription().GetText() != "fix the shim" || row.GetTokens().GetText() != "379.4k tok" {
-		t.Fatalf("row = %+v, want the beat's commission and running sum", row)
 	}
 }
 
@@ -1841,19 +1825,6 @@ func TestAStartAddressedByAResumedHandleDescribesTheBoundRow(t *testing.T) {
 	}
 }
 
-func TestTakeUpdateLabelsAGenericRowFromTheCommission(t *testing.T) {
-	// Arrange
-	row := &agentRow{label: subagentLabel(nil)}
-
-	// Act
-	row.takeUpdate(commissionBeat("opus-medium", "fix the shim", 1).GetUpdate())
-
-	// Assert
-	if row.label != "opus-medium" {
-		t.Fatalf("label = %q, want the commission's type", row.label)
-	}
-}
-
 func TestTakeUpdateKeepsALabelledRowsLabel(t *testing.T) {
 	// Arrange
 	row := &agentRow{label: "Explore"}
@@ -1905,5 +1876,66 @@ func TestMinimalRowsAreBuiltOnlyByTheSharedHelper(t *testing.T) {
 		if literals != want {
 			t.Fatalf("%s builds a generic-label row literal at %d sites, want %d", file, literals, want)
 		}
+	}
+}
+
+// commissionedResume is resumedSubagent stating the commission the agent was
+// spawned with (DetachedWorkKindSubagent.commission).
+func commissionedResume(send, agent, subagentType, description string) *conversationv1.AgentDetachedWork {
+	work := resumedSubagent(send, agent)
+	work.GetKind().GetSubagent().Commission = &conversationv1.AgentSubagentPrompt{
+		Text: "go", SubagentType: &subagentType, Description: &description,
+	}
+	return work
+}
+
+// A DAEMON THAT CAME UP AFTER THE LAUNCH reads the agent's identity from the
+// announcement itself: the deploy handover of the owner's report.
+func TestAResumeCommissionDescribesARowNeverDescribed(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+
+	// Act
+	h.r.OnDetachedWork(testWS, mainAgent, commissionedResume("send-1", "spawn-1", "opus-medium", "fix the shim"))
+
+	// Assert
+	row := h.view(t).GetExpanded().GetAgents().GetRows()[0]
+	if row.GetLabel().GetText() != "opus-medium" || row.GetDescription().GetText() != "fix the shim" {
+		t.Fatalf("row = %+v, want the announcement's commission", row)
+	}
+	rec := lastRecord(t, h, "daemon.footer.detached_agent_bound")
+	if rec.Context["identity"] != "undescribed" || rec.Context["commission"] != true {
+		t.Fatalf("record = %+v, want identity undescribed with a commission", rec)
+	}
+}
+
+func TestAResumeCommissionKeepsTheRetiredRunsTokens(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	launchedThenSettled(h)
+
+	// Act
+	h.r.OnDetachedWork(testWS, mainAgent, commissionedResume("send-1", "spawn-1", "opus-medium", "fix the shim"))
+
+	// Assert
+	row := h.view(t).GetExpanded().GetAgents().GetRows()[0]
+	if row.GetTokens().GetText() != "900 tok" || row.GetLabel().GetText() != "opus-medium" {
+		t.Fatalf("row = %+v, want the retired run's tokens under the commission's label", row)
+	}
+}
+
+func TestTakeCommissionDescribesTheRow(t *testing.T) {
+	// Arrange
+	row := &agentRow{label: subagentLabel(nil)}
+	subagentType, description := "opus-medium", "fix the shim"
+
+	// Act
+	row.takeCommission(&conversationv1.AgentSubagentPrompt{SubagentType: &subagentType, Description: &description})
+
+	// Assert
+	if row.label != subagentType || row.description != description {
+		t.Fatalf("row = {label %q, description %q}, want the commission's", row.label, row.description)
 	}
 }
