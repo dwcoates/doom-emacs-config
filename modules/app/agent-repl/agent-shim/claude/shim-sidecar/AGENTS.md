@@ -618,6 +618,15 @@ lands in another run's card.
   background with no launch in any transcript (a `task_updated` patch) is
   read. The prose matcher also reads the timeout sentence ("did not complete
   within its 600s timeout and was moved to the background (ID: X)").
+- THE CLAIMS ARE HOW A RESTART REBUILDS SHELL TRACKING. A restarted reader
+  rewinds no further than each transcript's turn in progress, so a launch read
+  before the restart is never read again and its spool comes back held. The
+  shim writes a claim for EVERY shell that left its turn -- the task stream's
+  background start and patch, and the Bash result of a Ctrl-B or a timeout --
+  so the next rescan claims the spool from the store (startup backlog
+  included) and its terminal or LOST conclusion closes the run. Before the
+  result path wrote one (2026-09-30), a run orphaned by a sidecar restart
+  stayed open in the store and held a daemon restart for minutes.
 - A RENAMED CLAIMED SPOOL IS FOLLOWED by its `dev:inode` identity
   (`followRename`), never by its name: the same identity as the watched old
   path re-points the claim, anything else is resolved as a new spool.
