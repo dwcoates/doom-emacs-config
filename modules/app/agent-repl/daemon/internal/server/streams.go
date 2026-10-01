@@ -573,9 +573,13 @@ func (s *server) watchDaemon(
 	// them on the topbar and footer views it already holds. A nil channel is
 	// never ready, so a webview's select never takes that case.
 	var faults <-chan *agentreplv1.DaemonFaultsStanding
+	// THE PERSISTENT-WIFI STANDING IS AN EMACS STREAM'S ALONE too, for the
+	// same reason: a webview draws it as its topbar's chip.
+	var wifi <-chan *agentreplv1.PersistentWifiState
 	if emacs := msg.GetEmacs(); emacs != nil {
 		w.emacs, w.elispBuild = true, emacs.GetElispBuild()
 		faults = s.deps.LoudFaults.Subscribe(streamCtx)
+		wifi = s.deps.PersistentWifi.Topic().Subscribe(streamCtx)
 		// EMACS'S FOCUS LIVES AND DIES WITH THIS STREAM: attached from the
 		// request, so the daemon knows it from the stream's first instant,
 		// and released when the stream ends, after which Emacs reads as
@@ -636,6 +640,19 @@ func (s *server) watchDaemon(
 			}
 			push = &agentreplv1.WatchDaemonResponse{
 				Push: &agentreplv1.WatchDaemonResponse_FaultsStanding{FaultsStanding: standing},
+			}
+			fromState = false
+		case standing, ok := <-wifi:
+			if !ok {
+				s.log.Debug("WatchDaemon", "the standing stream's subscription closed", nil)
+				return nil
+			}
+			if standing == nil {
+				s.log.Error("WatchDaemon", "a publisher raised an empty persistent-wifi standing; it was not sent", nil)
+				continue
+			}
+			push = &agentreplv1.WatchDaemonResponse{
+				Push: &agentreplv1.WatchDaemonResponse_PersistentWifi{PersistentWifi: standing},
 			}
 			fromState = false
 		}
