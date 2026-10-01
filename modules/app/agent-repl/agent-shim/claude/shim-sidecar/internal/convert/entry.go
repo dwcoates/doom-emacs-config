@@ -254,7 +254,7 @@ type isAgentInfo func(*storev1.StoreAgentUpdate)
 func PageLine(at Attribution, discriminator, upsertKey, pageAgent string, frame *conversationv1.AgentFrame) *storev1.StoreEntry {
 	return entry(at, discriminator, upsertKey, pageAgent, func(u *storev1.StoreAgentUpdate) {
 		u.AgentInfo = &storev1.StoreAgentUpdate_ServeableFrame{ServeableFrame: &storev1.StorePageLine{
-			PageAgentId: agentID(pageAgent),
+			Book: &storev1.StorePageLine_PageAgentId{PageAgentId: agentID(pageAgent)},
 			AgentItem: &storev1.StoreAgentItem{
 				Item: &storev1.StoreAgentItem_AgentFrame{AgentFrame: frame},
 			},
@@ -276,7 +276,7 @@ func PageLine(at Attribution, discriminator, upsertKey, pageAgent string, frame 
 func PromptLine(at Attribution, discriminator, upsertKey, pageAgent string, prompt *conversationv1.AgentPrompt) *storev1.StoreEntry {
 	return entry(at, discriminator, upsertKey, pageAgent, func(u *storev1.StoreAgentUpdate) {
 		u.AgentInfo = &storev1.StoreAgentUpdate_ServeableFrame{ServeableFrame: &storev1.StorePageLine{
-			PageAgentId: agentID(pageAgent),
+			Book: &storev1.StorePageLine_PageAgentId{PageAgentId: agentID(pageAgent)},
 			AgentItem: &storev1.StoreAgentItem{
 				Item: &storev1.StoreAgentItem_AgentPrompt{AgentPrompt: prompt},
 			},
@@ -297,7 +297,7 @@ func PromptLine(at Attribution, discriminator, upsertKey, pageAgent string, prom
 func PeerLine(at Attribution, discriminator, upsertKey, pageAgent string, peer *conversationv1.PeerMessage) *storev1.StoreEntry {
 	return entry(at, discriminator, upsertKey, pageAgent, func(u *storev1.StoreAgentUpdate) {
 		u.AgentInfo = &storev1.StoreAgentUpdate_ServeableFrame{ServeableFrame: &storev1.StorePageLine{
-			PageAgentId: agentID(pageAgent),
+			Book: &storev1.StorePageLine_PageAgentId{PageAgentId: agentID(pageAgent)},
 			AgentItem: &storev1.StoreAgentItem{
 				Item: &storev1.StoreAgentItem_PeerMessage{PeerMessage: peer},
 			},
