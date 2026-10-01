@@ -79,11 +79,17 @@ message FeedId {
 }
 
 // THE SELECTION STATE for one workspace's feed: at most one row is selected,
-// either a final response (the next prompt replies to it) or a prompt (the
-// rollback keys roll the conversation back to just before it). The daemon owns
-// the selection and pushes it on the feed watch; the webapp draws it and never
-// decides it. The set arm IS the selection, so a response and a prompt can
-// never both be selected.
+// and any row the daemon published with FeedRow.selectable can be. The set arm
+// IS what the selected row is for: a final response or another bubble (the
+// next prompt replies to it), or a prompt a rollback can reach (the next
+// prompt replies to it, and the rollback keys roll the conversation back to
+// just before it). The daemon owns the selection and pushes it on the feed
+// watch; the webapp draws it and never decides it, so no two rows can ever be
+// selected at once.
+//
+// SELECTED AND EXPANDED ARE ONE STATE. The selected bubble is drawn expanded
+// and every other selectable bubble collapsed, so at most one is expanded; the
+// client never expands or collapses a selectable bubble on its own.
 //
 // While a row is selected the webapp draws the selection border on it,
 // centers it when the selection moves to it (clamped at the feed edges), and
@@ -98,8 +104,11 @@ message FeedSelection {
     FeedSelectionNone none = 4;
     // A final response is selected.
     FeedSelectionResponse response = 5;
-    // A prompt is selected.
+    // A prompt a rollback can reach is selected.
     FeedSelectionPrompt prompt = 6;
+    // Any other selectable bubble is selected: an interim or thinking
+    // response, an agent prompt, or a user prompt a rollback cannot reach.
+    FeedSelectionBubble bubble = 7;
   }
   reserved 1, 2, 3;
   reserved "selected", "active", "center";
@@ -126,17 +135,28 @@ message FeedSelectionNoneReturnToTail {}
 message FeedSelectionNoneStay {}
 
 // A selected final response: the next prompt sent is a reply to it, and the
-// daemon prepends a copy of it to that prompt.
+// daemon prepends a copy of it to that prompt. `C-p`/`C-n` in the composer
+// step through these.
 message FeedSelectionResponse {
   // The selected final-response row, on the root feed.
   FeedId row = 1;
 }
 
-// A selected prompt: the rollback keys roll the conversation back to just
-// before it. Only the main agent's prompts of the current vendor
-// conversation, after its last compaction or clear, are ever selected.
+// A selected prompt a rollback can reach: the rollback keys roll the
+// conversation back to just before it, and the next prompt sent is a reply to
+// it. Only the main agent's prompts of the current vendor conversation, after
+// its last compaction or clear, are ever selected as this arm; any other
+// prompt is selected as `bubble`.
 message FeedSelectionPrompt {
   // The selected prompt row, on the root feed.
+  FeedId row = 1;
+}
+
+// A selected bubble that is neither a final response nor a prompt a rollback
+// can reach: the next prompt sent is a reply to it, and the daemon prepends a
+// copy of its text. The rollback keys do not act on it.
+message FeedSelectionBubble {
+  // The selected row, on the root feed.
   FeedId row = 1;
 }
 
@@ -257,6 +277,18 @@ message FeedRow {
     // the result inside the subagent's own card.
     FeedSubagentHandbackBadge subagent_handback = 20;
   }
+  // PRESENT WHEN THE READER CAN SELECT THIS ROW'S BUBBLE: click it to select
+  // (and so expand) it, reply to it, and search its text from the composer.
+  // The DAEMON decides, on every publication of the row, and the client draws
+  // the affordance from this field alone; it holds no rule of its own about
+  // which kinds are selectable, so the two can never disagree.
+  //
+  // Set only on ROOT-feed rows that have LANDED: a user prompt, an agent
+  // prompt, and a settled (`success`) response bubble, whether final, interim
+  // or thinking. A response still arriving, a broken one, a vendor notice,
+  // every other row kind, and every row of a sub-feed leave it UNSET. A
+  // response row gains it on the publication that settles it.
+  optional FeedRowSelectable selectable = 22;
 }
 
 // The row-removal marker. Empty: the FeedRow's own `id` names what to drop,
@@ -360,6 +392,10 @@ message FeedCommandRefusedReason {
 message FeedCommandAddSupportOffer {}
 
 // The containing row's identity, for presentation nesting.
+// The selectable affordance of a FeedRow. DELIBERATELY EMPTY: its presence is
+// the fact. A selection names the row by its own FeedRow.id.
+message FeedRowSelectable {}
+
 message FeedRowParent {
   // The container row's FeedId, exactly as that row carried it.
   FeedId row = 1;

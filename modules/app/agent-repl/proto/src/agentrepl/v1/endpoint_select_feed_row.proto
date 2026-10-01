@@ -9,9 +9,10 @@
 // Emacs on the host workspace watch, and acked here.
 //
 // Emacs steps the selection (`C-p` / `C-n` through final responses, `C-S-p` /
-// `C-S-n` through prompts) and clears it (escape twice); the webapp clears it
-// (a click on the feed's background) and ends it when the selected row has
-// left the viewport entirely.
+// `C-S-n` through prompts) and clears it (escape twice); the webapp selects the
+// bubble the reader clicked, clears it (a click on the selected bubble or on
+// the feed's background) and ends it when the selected row has left the
+// viewport entirely.
 
 syntax = "proto3";
 
@@ -55,7 +56,18 @@ message SelectFeedRowRequest {
     // row the user has since stepped away from changes nothing. The push
     // leaves the viewport where it is (frontend.v1.FeedSelectionNoneStay).
     SelectFeedRowLeftView left_view = 5;
+    // Select exactly the bubble the reader clicked. The daemon decides which
+    // arm the selection takes (a final response, a prompt a rollback can
+    // reach, or any other bubble); a row it did not publish selectable is
+    // refused with `not_selectable`.
+    SelectFeedRowBubble bubble = 6;
   }
+}
+
+// The bubble a click names, echoed from the FeedRow.id the webview drew.
+message SelectFeedRowBubble {
+  // The clicked bubble's row.
+  frontend.v1.FeedId row = 1;
 }
 
 // One step along the selectable rows of one kind.
@@ -119,7 +131,17 @@ message SelectFeedRowError {
     SelectFeedRowTransferringAway transferring_away = 3;
     // A joining daemon has not finished adopting this workspace yet.
     SelectFeedRowNotYetAdopted not_yet_adopted = 4;
+    // The `bubble` named a row that is not selectable: not on this
+    // workspace's root feed, not landed yet (a response still arriving), or a
+    // kind that is never selectable. The selection is left as it was.
+    SelectFeedRowNotSelectable not_selectable = 5;
   }
+}
+
+// A clicked row the daemon does not deem selectable.
+message SelectFeedRowNotSelectable {
+  // The row the request named, echoed so the caller can say which.
+  frontend.v1.FeedId row = 1;
 }
 // The workspace id is not in the daemon's registry.
 message SelectFeedRowUnknownWorkspace {}
