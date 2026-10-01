@@ -87,6 +87,9 @@ type wsState struct {
 	// prompt behind it is classified. Guarded by q.mu; set under drain,
 	// cleared by the prompt's own turn ending, folded or run.
 	joining *joiningPrompt
+	// folded are the prompts the vendor folded into a running turn, by the
+	// turn they joined, kept until that turn ends (join.go). Guarded by q.mu.
+	folded map[ids.TurnID][]joiningPrompt
 
 	// edit is the workspace's standing held-prompt edit, nil when none
 	// stands. It is WRITTEN only while `drain` is held — the lock every

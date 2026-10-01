@@ -25,7 +25,15 @@ func (q *queue) OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how sessionwatc
 		// THE TURN STILL CLOSES. A workspace this queue cannot resolve is
 		// recorded by q.logger at ERROR; its turn is closed and its ending
 		// drawn all the same, and nothing is delivered.
-		q.endTurn(ctx, ws, turn, how, q.deps.Log.Global().With(dlog.Context{"workspace": string(ws)}))
+		global := q.deps.Log.Global().With(dlog.Context{"workspace": string(ws)})
+		q.mu.Lock()
+		folded := q.stateLocked(ws).takeFoldedLocked(turn)
+		q.mu.Unlock()
+		if how.Failed() && len(folded) > 0 {
+			global.Error(opJoin, "a turn that took folded prompts failed in a workspace the queue cannot resolve; they are not resubmitted",
+				dlog.Context{"turn": string(turn), "folded": len(folded)})
+		}
+		q.endTurn(ctx, ws, turn, how, global)
 		return
 	}
 	log = log.With(dlog.Context{"turn": string(turn), "close": how.String()})
@@ -40,6 +48,18 @@ func (q *queue) OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how sessionwatc
 	// SERIALIZED AGAINST A LEASE CHANGE. The turn end that frees a workspace
 	// and the handover's quiesce arrive together, and both deliver from the
 	// same standing holds: taken concurrently the intake leaves out of order.
+	//
+	// THE PROMPTS FOLDED INTO THIS TURN END WITH IT. A failed turn never
+	// answered them, so they are resubmitted — deferred here so the
+	// resubmission runs only after the delivery lock below is released, since
+	// Submit takes it.
+	q.mu.Lock()
+	folded := q.stateLocked(ws).takeFoldedLocked(turn)
+	q.mu.Unlock()
+	if how.Failed() && len(folded) > 0 {
+		defer q.resubmitFolded(ws, turn, folded, log)
+	}
+
 	drain := &q.state(ws).drain
 	drain.Lock()
 	defer drain.Unlock()

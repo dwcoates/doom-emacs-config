@@ -400,3 +400,110 @@ func TestRouteArmRefusesAnUndeclaredRoute(t *testing.T) {
 	// Act
 	routeArm(classifier.Route(9))
 }
+
+// --- a folded prompt whose turn failed ---------------------------------------
+
+// foldedThenEnded sends T1 to join the running turn, has the vendor fold it
+// in, and ends the running turn as HOW with the session left free.
+func foldedThenEnded(t *testing.T, h *harness, how wsm.TurnClose) {
+	t.Helper()
+	sentToJoin(t, h)
+	h.q.OnTurnEnded(theWorkspace, "t1", wsm.CloseFolded)
+	h.watcher.idle()
+	h.q.OnTurnEnded(theWorkspace, "running-turn", how)
+}
+
+// resubmitted answers the turns started since the join, none of which is the
+// folded prompt's own turn.
+func resubmitted(h *harness) []ids.TurnID {
+	var out []ids.TurnID
+	for _, turn := range h.sender.started() {
+		if turn != "t1" && turn != "running-turn" {
+			out = append(out, turn)
+		}
+	}
+	return out
+}
+
+func TestAPromptFoldedIntoATurnThatFailedRunsAsItsOwnTurn(t *testing.T) {
+	// Arrange, Act
+	h := newHarness(t)
+	foldedThenEnded(t, h, wsm.CloseFailed)
+
+	// Assert
+	turns := resubmitted(h)
+	if len(turns) != 1 {
+		t.Fatalf("resubmitted = %v, want the folded prompt run once as its own turn", turns)
+	}
+	if turn, ok := h.db.startedTurn(turns[0]); !ok || turn.Text != "also cover the edge case" {
+		t.Fatalf("turn = (%+v, %v), want the folded prompt's text", turn, ok)
+	}
+}
+
+func TestAPromptFoldedIntoATurnWhoseAgentDiedRunsAsItsOwnTurn(t *testing.T) {
+	// Arrange, Act
+	h := newHarness(t)
+	foldedThenEnded(t, h, wsm.CloseAgentDied)
+
+	// Assert
+	if turns := resubmitted(h); len(turns) != 1 {
+		t.Fatalf("resubmitted = %v, want the folded prompt run as its own turn", turns)
+	}
+}
+
+func TestAPromptFoldedIntoATurnThatCompletedIsNotResubmitted(t *testing.T) {
+	// Arrange, Act
+	h := newHarness(t)
+	foldedThenEnded(t, h, wsm.CloseCompleted)
+
+	// Assert
+	if turns := resubmitted(h); len(turns) != 0 {
+		t.Fatalf("resubmitted = %v, want nothing: the turn that took the prompt answered it", turns)
+	}
+}
+
+func TestAPromptFoldedIntoATurnTheUserStoppedIsNotResubmitted(t *testing.T) {
+	// Arrange, Act
+	h := newHarness(t)
+	foldedThenEnded(t, h, wsm.CloseKilled)
+
+	// Assert
+	if turns := resubmitted(h); len(turns) != 0 {
+		t.Fatalf("resubmitted = %v, want nothing after a stop", turns)
+	}
+}
+
+func TestAResubmittedFoldedPromptKeepsItsOrigin(t *testing.T) {
+	// Arrange, Act
+	h := newHarness(t)
+	foldedThenEnded(t, h, wsm.CloseFailed)
+
+	// Assert
+	turns := resubmitted(h)
+	if len(turns) != 1 {
+		t.Fatalf("resubmitted = %v, want one turn", turns)
+	}
+	original, _ := h.db.startedTurn("t1")
+	if turn, _ := h.db.startedTurn(turns[0]); turn.Origin != original.Origin {
+		t.Fatalf("origin = %q, want the folded prompt's own %q", turn.Origin, original.Origin)
+	}
+}
+
+func TestAFoldedPromptIsResubmittedOnlyOnce(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	foldedThenEnded(t, h, wsm.CloseFailed)
+	turns := resubmitted(h)
+	if len(turns) != 1 {
+		t.Fatalf("resubmitted = %v, want one turn", turns)
+	}
+
+	// Act: the resubmitted turn fails too.
+	h.watcher.idle()
+	h.q.OnTurnEnded(theWorkspace, turns[0], wsm.CloseFailed)
+
+	// Assert
+	if again := resubmitted(h); len(again) != 1 {
+		t.Fatalf("resubmitted = %v, want no second resubmission", again)
+	}
+}
