@@ -6629,13 +6629,23 @@ bubble-body.bubble-body { display: block; }
   50% { opacity: 0.45; }
 }
 
-/* The tab strip: chronological, append-only, one button per tab. */
+/* The tab strip: chronological, append-only, one button per tab.
+   PINNED TO THE TOP OF THE SCROLLING SUB-FEED (owner request, 2026-10-01): the
+   expanded bubble's `.bubble-subfeed` is the scroll box, and a strip that
+   scrolled away with the tab's content left the reader no way to switch tabs
+   without scrolling back up. `position: sticky` holds it at the scroller's top
+   edge; the opaque card fill keeps the content scrolling beneath it from
+   showing through, and `z-index` keeps it above positioned descendants. */
 .merge-strip {
   display: flex;
   flex-wrap: wrap;
   gap: 0.25rem;
   padding: 0.2rem 0;
   border-bottom: 1px solid var(--line, rgba(128, 128, 128, 0.25));
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--tool-card-bg);
 }
 .merge-tab {
   display: inline-flex;
