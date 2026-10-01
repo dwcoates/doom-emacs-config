@@ -2137,6 +2137,22 @@ describe("the conversation place a row is stamped with", () => {
     expect(() => clock.next()).toThrow(/names no instant/);
   });
 
+  it("writes a row at the place its vendor record stated, not at the clock", async () => {
+    // Arrange: the file plane places the same row from the record's own
+    // timestamp, so this plane must state that place too (convert/place.ts).
+    const fake = await startFakeStore(socketPathForTest("place-record"));
+    store = fake;
+    const plane = createPersistence({ client: createStoreClient(fake.socketPath), producer: PRODUCER, nowMs: () => 9_000 });
+
+    // Act.
+    plane.write([{ ...readEntry(BOOK, "unit-1", "/tmp/a"), recordPlace: { atMs: 1_234, ordinal: 2 } }]);
+    await plane.flush();
+
+    // Assert.
+    const place = fake.writes()[0]?.batch?.entries[0]?.place;
+    expect([place?.atMs, place?.ordinal]).toEqual([1_234n, 2]);
+  });
+
   it("carries a held row's ORIGINAL place through every retry", async () => {
     // Arrange: the clock moves on between the failed attempt and the one that lands.
     const fake = await startFakeStore(socketPathForTest("place-retry"));

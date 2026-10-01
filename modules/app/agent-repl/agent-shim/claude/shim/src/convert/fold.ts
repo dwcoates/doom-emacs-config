@@ -83,6 +83,7 @@ import {
 } from "./detached.js";
 import { describeVendorTaskAnswer, type VendorTaskAnswer } from "../store/locator.js";
 import { attachmentActivityId } from "./ids.js";
+import { placeRecordEntries } from "./place.js";
 import { spawningCallOf, type FoldContext } from "./fold-context.js";
 import {
   convertHookResponse,
@@ -239,7 +240,11 @@ export function createFold(): Fold {
   return {
     onSdkMessage(message: SdkMessage, context: FoldContext): FoldOutput {
       try {
-        return dispatch(message, context, state);
+        // EVERY ROW A TIMESTAMPED RECORD PRODUCED IS PLACED BY THAT RECORD,
+        // as the file plane places it (convert/place.ts).
+        const output = dispatch(message, context, state);
+        const placed = placeRecordEntries(message, output.entries);
+        return placed === output.entries ? output : { ...output, entries: placed };
       } catch (error) {
         // A converter that throws is a DEFECT, and the honest answer to a defect
         // is residue plus a loud log — never a dead session, and never a

@@ -66,6 +66,12 @@ export type PersistBook =
  * One row to write: what it is, which book it belongs to, and which row it
  * replaces.
  */
+/** A row's place as its vendor record states it: an instant and a rank. */
+export interface RecordPlace {
+  readonly atMs: number;
+  readonly ordinal: number;
+}
+
 export type PersistEntry = PersistBook & PersistEntryContent;
 
 /** Everything a row states besides its book. */
@@ -92,6 +98,13 @@ export interface PersistEntryContent {
    * the store envelope (`StoreEntry.turn`).
    */
   readonly turn: conversationv1.TurnId | undefined;
+  /**
+   * WHERE THE VENDOR'S RECORD PLACES THIS ROW, set by the fold for a row
+   * converted from a record with a parsable `timestamp` (convert/place.ts), by
+   * the rule the file plane places the same row by. Unset, the writer places
+   * the row at the instant it first holds it.
+   */
+  readonly recordPlace?: RecordPlace;
   /** What this row says. The arm decides the store arm it lands in. */
   readonly item:
     | { readonly kind: "prompt"; readonly prompt: conversationv1.AgentPrompt }
