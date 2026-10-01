@@ -4,6 +4,7 @@ import { FooterStatusSchema } from "../../proto/gen/ts/frontend/v1/footer_pb";
 import {
   FeedShellSchema,
   FeedShellSettledSchema,
+  FeedShellCompletedSchema,
   FeedSubagentSchema,
   FeedSubagentSettledSchema,
 } from "../../proto/gen/ts/frontend/v1/feed_pb";
@@ -293,7 +294,9 @@ describe("feed_subagent_dot and feed_shell_dot are their heads' state arms, row 
   });
 
   it("names every shell head state", () => {
-    expect([...FEED_SHELL_DOT_KEYS].sort()).toEqual(dotStates(FeedShellSchema, FeedShellSettledSchema));
+    // A completed run's daemon judgment refines its key (`completed_failed`).
+    const judged = oneofArmNames(FeedShellCompletedSchema, "judgment").map((arm) => `completed_${arm}`);
+    expect([...FEED_SHELL_DOT_KEYS].sort()).toEqual([...dotStates(FeedShellSchema, FeedShellSettledSchema), ...judged].sort());
   });
 
   it("spends only the file's colors or none", () => {
@@ -307,7 +310,7 @@ describe("feed_subagent_dot and feed_shell_dot are their heads' state arms, row 
     ["succeeded", "none"],
     ["failed", "red"],
     ["cancelled", "none"],
-    ["lost", "turquoise"],
+    ["lost", "blue"],
   ])("paints a subagent head %s %s", (state, color) => {
     expect(feedSubagentDotColor(state)).toBe(color);
   });
@@ -316,7 +319,7 @@ describe("feed_subagent_dot and feed_shell_dot are their heads' state arms, row 
     ["live", "green"],
     ["completed", "none"],
     ["cancelled", "none"],
-    ["lost", "turquoise"],
+    ["lost", "blue"],
   ])("paints a shell head %s %s", (state, color) => {
     expect(feedShellDotColor(state)).toBe(color);
   });

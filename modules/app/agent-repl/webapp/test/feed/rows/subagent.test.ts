@@ -247,7 +247,7 @@ describe("drawFeedSubagent: the settled arms", () => {
     ["succeeded", "hollow", "○", "tone-none"],
     ["failed", "filled", "●", "tone-red"],
     ["cancelled", "hollow", "○", "tone-none"],
-    ["lost", "filled", "●", "tone-turquoise"],
+    ["lost", "filled", "●", "tone-blue"],
   ] as const)("dots a %s head %s (%s) in %s", (outcome, shape, glyph, tone) => {
     const { el } = drawRow(subagentRow("b1", { settled: { endedAtMs: 1n, outcome } }));
     const dot = el.querySelector(".agent-dot");
@@ -271,7 +271,7 @@ describe("drawFeedSubagent: the settled arms", () => {
 
   it.each([
     ["failed", "var(--err)"],
-    ["lost", "var(--turquoise)"],
+    ["lost", "var(--init)"],
   ] as const)("lets the vocabulary's tone paint a %s dot %s through the real stylesheet", (outcome, color) => {
     const uninstall = installStylesheet();
     const { el } = drawRow(subagentRow("b1", { settled: { endedAtMs: 1n, outcome } }));
