@@ -165,17 +165,6 @@ describe("hibernateError", () => {
     // Assert.
     expect(error.kind.case).toBe(kind);
   });
-
-  it("carries the vendor's wording inside the compaction arm, which owns it", () => {
-    // Arrange, Act.
-    const error = failures.hibernateError({ kind: "compactionFailed", error: "context too big" });
-
-    // Assert.
-    expect(error.kind).toEqual({
-      case: "compactionFailed",
-      value: containing({ error: "context too big" }),
-    });
-  });
 });
 
 describe("hibernateRefused", () => {

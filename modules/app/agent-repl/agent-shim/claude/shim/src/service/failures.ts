@@ -206,16 +206,11 @@ export function setSessionPermissionModeRefused(
 // ---------------------------------------------------------------------------
 
 /**
- * Why the pre-hibernation compaction could not be performed.
+ * Why the shim cannot be stood down now.
  *
- * `HibernateError` carries NO `detail` field — the arm is the whole answer,
- * except `compactionFailed`, which carries the vendor's own wording in
- * `error`. So this is the one refusal whose human string lives inside an arm.
+ * `HibernateError` carries NO `detail` field — the arm is the whole answer.
  */
-type HibernateErrorKind =
-  | { readonly kind: "turnInFlight" }
-  | { readonly kind: "compactionFailed"; readonly error: string }
-  | { readonly kind: "noSession" };
+type HibernateErrorKind = { readonly kind: "turnInFlight" } | { readonly kind: "noSession" };
 
 /** The base constructor for `shim.v1.HibernateError`. */
 export function hibernateError(cause: HibernateErrorKind): shimv1.HibernateError {
@@ -223,12 +218,7 @@ export function hibernateError(cause: HibernateErrorKind): shimv1.HibernateError
     kind:
       cause.kind === "turnInFlight"
         ? { case: "turnInFlight", value: create(shimv1.HibernateTurnInFlightSchema, {}) }
-        : cause.kind === "compactionFailed"
-          ? {
-              case: "compactionFailed",
-              value: create(shimv1.HibernateCompactionFailedSchema, { error: cause.error }),
-            }
-          : { case: "noSession", value: create(shimv1.HibernateNoSessionSchema, {}) },
+        : { case: "noSession", value: create(shimv1.HibernateNoSessionSchema, {}) },
   });
 }
 
@@ -246,21 +236,6 @@ export function hibernateAcked(): shimv1.HibernateResponse {
   });
 }
 
-/**
- * `shim.v1.HibernateResponse` — the compaction has STARTED and outlives this
- * rpc.
- *
- * NEITHER AN ACK NOR A REFUSAL. The caller's deadline is seconds and a
- * compaction is a real vendor turn, so the answer cannot be the work's
- * completion: it is the fact that the work is under way. The caller defers this
- * pass and asks again, and the next ask acks at once because a transcript
- * already compacted is never compacted twice.
- */
-export function hibernateCompacting(): shimv1.HibernateResponse {
-  return create(shimv1.HibernateResponseSchema, {
-    result: { case: "compacting", value: create(shimv1.HibernateCompactingSchema, {}) },
-  });
-}
 
 // ---------------------------------------------------------------------------
 // KillSession

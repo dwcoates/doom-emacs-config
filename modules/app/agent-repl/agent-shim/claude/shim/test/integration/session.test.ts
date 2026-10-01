@@ -43,7 +43,6 @@ import {
 import {
   hibernateKind,
   hibernateAcked,
-  hibernateUntilAcked,
   killSessionCause,
   killSessionLive,
   sessionKilled,
@@ -1062,14 +1061,14 @@ describe("Hibernate", () => {
     const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
     await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!md" }));
 
-    const asks = await hibernateUntilAcked(() =>
-      shim.clients.h1.hibernate(create(shimv1.HibernateRequestSchema, {})),
+    hibernateAcked(
+      await shim.clients.h1.hibernate(create(shimv1.HibernateRequestSchema, {})),
     );
 
     const boundaries = readTranscript(shim.dirs, started.vendorSessionId).filter(
       (record) => record.type === "system" && record.subtype === "compact_boundary",
     );
-    expect([asks, boundaries.length]).toEqual([1, 0]);
+    expect(boundaries).toHaveLength(0);
   });
 
   test("a second hibernation is as cheap as the first, and still writes no boundary", async () => {
@@ -1081,18 +1080,18 @@ describe("Hibernate", () => {
     const shim = await spawnShim();
     const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
     await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!md" }));
-    await hibernateUntilAcked(() =>
-      shim.clients.h1.hibernate(create(shimv1.HibernateRequestSchema, {})),
+    hibernateAcked(
+      await shim.clients.h1.hibernate(create(shimv1.HibernateRequestSchema, {})),
     );
 
-    const asks = await hibernateUntilAcked(() =>
-      shim.clients.h1.hibernate(create(shimv1.HibernateRequestSchema, {})),
+    hibernateAcked(
+      await shim.clients.h1.hibernate(create(shimv1.HibernateRequestSchema, {})),
     );
 
     const boundaries = readTranscript(shim.dirs, started.vendorSessionId).filter(
       (record) => record.type === "system" && record.subtype === "compact_boundary",
     );
-    expect([asks, boundaries.length]).toEqual([1, 0]);
+    expect(boundaries).toHaveLength(0);
   });
 
   test("KillSession after a hibernation still tears the session down and exits", async () => {
@@ -1107,8 +1106,8 @@ describe("Hibernate", () => {
       shim.clients.h1.watchAgent(watchAgentRequest(), options),
     );
     await stream.next();
-    await hibernateUntilAcked(() =>
-      shim.clients.h1.hibernate(create(shimv1.HibernateRequestSchema, {})),
+    hibernateAcked(
+      await shim.clients.h1.hibernate(create(shimv1.HibernateRequestSchema, {})),
     );
 
     const response = await shim.clients.h1.killSession(
@@ -1627,10 +1626,9 @@ describe("Hibernate and revival", () => {
     const first = await spawnShim();
     const started = sessionStarted(await first.clients.h1.startSession(freshSession()));
     await first.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!cold-seed" }));
-    const asks = await hibernateUntilAcked(() =>
-      first.clients.h1.hibernate(create(shimv1.HibernateRequestSchema, {})),
+    hibernateAcked(
+      await first.clients.h1.hibernate(create(shimv1.HibernateRequestSchema, {})),
     );
-    expect(asks).toBe(1);
     // STOOD DOWN, NOT SIGKILLED — the graceful half the daemon actually runs.
     expect((await first.standDown()).code).toBe(0);
 
