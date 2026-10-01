@@ -302,7 +302,7 @@ export async function seedDetachedAnnouncement(
           agentInfo: {
             case: "serveableFrame",
             value: create(storev1.StorePageLineSchema, {
-              pageAgentId: create(conversationv1.AgentIdSchema, { value: init.agent }),
+              book: { case: "pageAgentId", value: create(conversationv1.AgentIdSchema, { value: init.agent }) },
               agentItem: create(storev1.StoreAgentItemSchema, {
                 item: {
                   case: "agentFrame",
@@ -345,7 +345,7 @@ export async function seedSubagentSpawn(
           agentInfo: {
             case: "serveableFrame",
             value: create(storev1.StorePageLineSchema, {
-              pageAgentId: spawner,
+              book: { case: "pageAgentId", value: spawner },
               agentItem: create(storev1.StoreAgentItemSchema, {
                 item: {
                   case: "agentFrame",
@@ -413,6 +413,14 @@ export function writtenKeys(writes: readonly storev1.WriteBatchRequest[]): strin
 }
 
 /** The page line an entry carries, when it carries one. */
+/**
+ * The book a page line names (`StorePageLine.book`'s `page_agent_id` arm), or
+ * `undefined` for a line filed owner-unknown or naming none.
+ */
+export function pageBookOf(line: storev1.StorePageLine | null | undefined): string | undefined {
+  return line?.book.case === "pageAgentId" ? line.book.value.value : undefined;
+}
+
 export function pageLineOf(entry: storev1.StoreEntry): storev1.StorePageLine | null {
   if (entry.entry.case !== "agentUpdate") return null;
   const info = entry.entry.value.agentInfo;

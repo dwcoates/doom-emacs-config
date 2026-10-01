@@ -44,17 +44,32 @@ import type { VendorTaskAnswer } from "./locator.js";
 export type { SourceCoordinates } from "./keys.js";
 
 /**
+ * WHICH BOOK A ROW IS FILED IN, as this shim knows it (store.v1
+ * `StorePageLine.book`). ONE OF TWO, never both and never neither:
+ *
+ * - `agentId`: the agent whose page this row renders in — the main agent, or a
+ *   subagent for its own frames. A session update is a fact about the session
+ *   rather than about any agent, so it carries the MAIN agent here; it lands as
+ *   a session row and never as a page line either way.
+ * - `ownerUnknown`: a WRITER NEVER CLAIMS A BOOK IT DOES NOT KNOW. A task-stream
+ *   frame about a unit whose spawning call this shim never observed (a
+ *   backgrounded subagent's own spawn) names no owner; the store files it in the
+ *   book that already holds its upsert key, and reports it unplaced when none
+ *   does. Only an agent frame can be written this way, and its frame carries no
+ *   `agent_id`.
+ */
+export type PersistBook =
+  | { readonly agentId: conversationv1.AgentId; readonly ownerUnknown?: never }
+  | { readonly agentId?: never; readonly ownerUnknown: true };
+
+/**
  * One row to write: what it is, which book it belongs to, and which row it
  * replaces.
  */
-export interface PersistEntry {
-  /**
-   * THE BOOK: the agent whose page this row renders in — the main agent, or a
-   * subagent for its own frames. A session update is a fact about the session
-   * rather than about any agent, so it carries the MAIN agent here; it lands as
-   * a session row and never as a page line either way.
-   */
-  readonly agentId: conversationv1.AgentId;
+export type PersistEntry = PersistBook & PersistEntryContent;
+
+/** Everything a row states besides its book. */
+export interface PersistEntryContent {
   /**
    * The row this write REPLACES, minted by `store/keys.ts`. Every frame of one
    * unit carries the same key, which is what makes a unit that starts, streams

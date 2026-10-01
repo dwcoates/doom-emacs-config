@@ -4643,7 +4643,7 @@ describe("GetLiveWork reconciliation", () => {
     await started(h);
 
     expect(
-      h.persistence.buffered.some((entry) => entry.agentId.value === "sub-1"),
+      h.persistence.buffered.some((entry) => entry.agentId?.value === "sub-1"),
     ).toBe(true);
   });
 
@@ -4653,7 +4653,7 @@ describe("GetLiveWork reconciliation", () => {
     const agent =
       response.result.case === "success" ? (response.result.value.session?.vendorSessionId ?? "") : "";
 
-    expect(h.persistence.buffered.some((entry) => entry.agentId.value === agent && entry.item.kind === "frame")).toBe(
+    expect(h.persistence.buffered.some((entry) => entry.agentId?.value === agent && entry.item.kind === "frame")).toBe(
       false,
     );
   });
@@ -5494,7 +5494,7 @@ describe("an ask raised under a subagent's vendor agent id", () => {
       const result = entry.item.frame.result;
       if (result.case !== "update") continue;
       if (result.value.update.case !== "permission") continue;
-      return entry.agentId.value;
+      return entry.agentId?.value;
     }
     return undefined;
   };
@@ -8892,7 +8892,7 @@ describe("whose book a gated ask lands on", () => {
       const result = entry.item.frame.result;
       if (result.case !== "update") continue;
       if (result.value.update.case !== "permission") continue;
-      return entry.agentId.value;
+      return entry.agentId?.value;
     }
     return undefined;
   };
@@ -9704,7 +9704,7 @@ describe("reconciliation's remaining descriptions", () => {
     await pending;
 
     expect(
-      h.persistence.buffered.some((entry) => entry.agentId.value === mainAgentId("resume-1").value
+      h.persistence.buffered.some((entry) => entry.agentId?.value === mainAgentId("resume-1").value
         && entry.source.discriminator.includes("swept_up")),
     ).toBe(false);
   });
@@ -11340,7 +11340,7 @@ describe("a subagent resumed by a send whose spawn this process never saw", () =
   it("hands the fold the store's agent BEFORE folding the resume", async () => {
     // Arrange.
     const h = await resumeHarness();
-    h.persistence.vendorTasks.set(LOCATOR, { kind: "found", agent: SPAWN });
+    h.persistence.vendorTasks.set(LOCATOR, { kind: "found", agent: SPAWN, commission: undefined });
     let learnedWhenFolded = -1;
     h.fold.entriesFor = (message) => {
       if (message === resumeStarted) learnedWhenFolded = h.fold.learned.length;
@@ -11370,7 +11370,7 @@ describe("a subagent resumed by a send whose spawn this process never saw", () =
   it("records the store naming the agent at INFO", async () => {
     // Arrange.
     const h = await resumeHarness();
-    h.persistence.vendorTasks.set(LOCATOR, { kind: "found", agent: SPAWN });
+    h.persistence.vendorTasks.set(LOCATOR, { kind: "found", agent: SPAWN, commission: undefined });
     const before = logSinkMark();
 
     // Act.
@@ -11429,7 +11429,7 @@ describe("a subagent resumed by a send whose spawn this process never saw", () =
     await h.engine.standDown("SIGTERM");
     await pending;
     const entry = h.persistence.buffered.find((buffered) => buffered.source.discriminator.includes("permission"));
-    return entry?.agentId.value;
+    return entry?.agentId?.value;
   }
 
   it("credits a resumed agent's ask to the agent the fold named", async () => {
@@ -11446,7 +11446,7 @@ describe("a subagent resumed by a send whose spawn this process never saw", () =
     const h = await resumeHarness();
     await h.engine.onSdkMessage(resumeStarted);
     h.fold.knowledge.set(LOCATOR, { kind: "not_its_spawn" });
-    h.persistence.vendorTasks.set(LOCATOR, { kind: "found", agent: SPAWN });
+    h.persistence.vendorTasks.set(LOCATOR, { kind: "found", agent: SPAWN, commission: undefined });
 
     // Act, Assert.
     expect(await askBook(h)).toBe("toolu_spawn");
@@ -11540,7 +11540,7 @@ describe("a subagent resumed by a send whose spawn this process never saw", () =
   it("closes a send-resumed run at StartSession under the agent the store names: it ran in the replaced CLI process", async () => {
     // Arrange.
     const h = restoredHarness();
-    h.persistence.vendorTasks.set(LOCATOR, { kind: "found", agent: SPAWN });
+    h.persistence.vendorTasks.set(LOCATOR, { kind: "found", agent: SPAWN, commission: undefined });
 
     // Act.
     await started(h);
@@ -11557,7 +11557,7 @@ describe("a subagent resumed by a send whose spawn this process never saw", () =
   it("does not re-adopt the send-resumed run at StartSession", async () => {
     // Arrange.
     const h = restoredHarness();
-    h.persistence.vendorTasks.set(LOCATOR, { kind: "found", agent: SPAWN });
+    h.persistence.vendorTasks.set(LOCATOR, { kind: "found", agent: SPAWN, commission: undefined });
 
     // Act.
     const response = await started(h);
@@ -11569,7 +11569,7 @@ describe("a subagent resumed by a send whose spawn this process never saw", () =
   it("re-announces a resumed agent to a new watch", async () => {
     // Arrange.
     const h = restoredHarness();
-    h.persistence.vendorTasks.set(LOCATOR, { kind: "found", agent: SPAWN });
+    h.persistence.vendorTasks.set(LOCATOR, { kind: "found", agent: SPAWN, commission: undefined });
     await started(h);
     const watch = h.engine.watchSession(create(shimv1.WatchSessionRequestSchema, {}))[Symbol.asyncIterator]();
     await watch.next();

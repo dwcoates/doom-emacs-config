@@ -32,6 +32,7 @@ import {
   bashStartUpsertKey,
   bashTerminalUpsertKey,
   detachedWorkUpsertKey,
+  resumedRunUpsertKey,
   terminalUpsertKey,
 } from "../store/keys.js";
 import type { PersistEntry } from "../store/persistence.js";
@@ -43,7 +44,7 @@ import { TOOL_CONVERTERS } from "./tools/registry.js";
 import { subagentConverter, subagentPrompt } from "./tools/subagent.js";
 import { bashConverter } from "./tools/bash.js";
 import type { CallRegistry, PendingCall } from "./tool-calls.js";
-import { activityEntry, agentActivity } from "./entries.js";
+import { agentActivity, taskUnitEntry, type TaskUnitTarget } from "./entries.js";
 
 const LOGGER = bindLog({ component: "shim-convert-detached", operation: "shim.convert.detached" });
 
@@ -183,10 +184,17 @@ export function isAgentTaskType(taskType: string | undefined): boolean {
 
 /**
  * The kind one announcement states. A subagent's carries the agent that is
- * running, so a subagent kind with no agent cannot be built.
+ * running, so a subagent kind with no agent cannot be built, and the commission
+ * that agent was spawned with (`DetachedWorkKindSubagent.commission`) --
+ * REQUIRED to be decided at every site, `undefined` only when this shim holds no
+ * record of the spawn at all, which the site reports.
  */
 export type AnnouncedKind =
-  | { readonly kind: "subagent"; readonly agent: conversationv1.AgentId }
+  | {
+      readonly kind: "subagent";
+      readonly agent: conversationv1.AgentId;
+      readonly commission: conversationv1.AgentSubagentPrompt | undefined;
+    }
   | { readonly kind: "bash" | "workflow" | "monitor" };
 
 /** The wire form of one announced kind. */
@@ -196,7 +204,10 @@ export function detachedWorkKind(announced: AnnouncedKind): conversationv1.Detac
       return create(conversationv1.DetachedWorkKindSchema, {
         kind: {
           case: "subagent",
-          value: create(conversationv1.DetachedWorkKindSubagentSchema, { agentId: announced.agent }),
+          value: create(conversationv1.DetachedWorkKindSubagentSchema, {
+            agentId: announced.agent,
+            commission: announced.commission,
+          }),
         },
       });
     case "bash":
@@ -226,8 +237,13 @@ export function detachableKind(work: conversationv1.DetachableWork): AnnouncedKi
   switch (work.work.case) {
     case "subagent": {
       const result = work.work.value.result;
-      const agent = result.case === "start" ? result.value.createdAgentId : undefined;
-      return agent === undefined || agent.value === "" ? undefined : { kind: "subagent", agent };
+      if (result.case !== "start") return undefined;
+      const agent = result.value.createdAgentId;
+      // THE RECORDED START IS THE COMMISSION'S ONE SOURCE here, so the two
+      // statements a `created` announcement makes cannot disagree.
+      return agent === undefined || agent.value === ""
+        ? undefined
+        : { kind: "subagent", agent, commission: result.value.prompt };
     }
     case "bash":
       return { kind: "bash" };
@@ -341,7 +357,26 @@ function announcedKind(facts: TaskFacts, taskKinds: TaskKindRegistry): Announced
   }
   if (kind !== "subagent") return { kind };
   const agent = runningAgent(facts, taskKinds);
-  return agent === undefined ? undefined : { kind, agent };
+  if (agent === undefined) return undefined;
+  const commission = knownCommission(facts.taskId, facts.call, taskKinds);
+  if (commission === undefined) {
+    // THE ANNOUNCEMENT STILL STANDS: the work is live whether or not this shim
+    // can say what it was asked. The store was asked first (engine:
+    // `taskAwaitingAgent`), and its answer is part of this record.
+    const store = taskKinds.storeAnswerOf(facts.taskId) ?? "not asked";
+    LOGGER.error(
+      {
+        uuid: facts.uuid,
+        task_id: facts.taskId,
+        tool_use_id: facts.toolUseId,
+        agent: agent.value,
+        store_answer: store,
+        detail: `no spawn of task ${facts.taskId} was seen by this process and the store answered ${store}, so agent ${agent.value}'s commission is unknown`,
+      },
+      "a subagent announcement states no commission: this shim holds no record of the spawn",
+    );
+  }
+  return { kind, agent, commission };
 }
 
 /** What one detachment announcement says. */
@@ -952,13 +987,21 @@ const AGENT_NAMING_SUBTYPES: ReadonlySet<string> = new Set(["task_started", "tas
  * THE TASK WHOSE AGENT THE STORE MUST NAME BEFORE THIS MESSAGE IS FOLDED, or
  * `undefined` when the fold can name it itself (or need not name one at all).
  *
- * It is exactly the case {@link runningAgent} would otherwise refuse: a subagent
- * task whose call is known and is NOT its spawn (a `SendMessage` that resumed
- * it), with no join in this process naming the agent — a resume of an agent
- * this process never saw spawn, typically because it restarted since. The
- * engine awaits the store's answer and hands it back through
- * {@link TaskKindRegistry.rememberAgent} / {@link TaskKindRegistry.rememberStoreAnswer}
- * before folding, so the fold itself stays synchronous.
+ * It is a subagent task whose spawn this process did not observe, so the fold
+ * lacks the agent or its commission:
+ *
+ * - the task's call is known and is NOT its spawn (a `SendMessage` that resumed
+ *   it), and the fold holds no join naming the agent or no commission for it --
+ *   a resume of an agent this process never saw spawn, typically because it
+ *   restarted since; the store names both;
+ * - the task's call was never seen (a backgrounded subagent's own spawn): the
+ *   minting rule names the agent, and the store its commission.
+ *
+ * Every subagent announcement states the commission
+ * (`DetachedWorkKindSubagent.commission`), and only the store can supply it for
+ * a spawn this process never saw. The engine awaits the store's answer and
+ * hands it back through `learnTaskAgent` before folding, so the fold itself
+ * stays synchronous.
  *
  * A PURE READ of what the fold already holds: it records nothing, so asking it
  * twice, or asking and then not folding, changes nothing.
@@ -975,14 +1018,19 @@ export function taskAwaitingAgent(
   if (raw.skip_transcript === true) return undefined;
   const taskId = raw.task_id;
   if (typeof taskId !== "string" || taskId === "") return undefined;
-  if (taskKinds.agentOf(taskId) !== undefined) return undefined;
+  const commissionKnown = taskKinds.commissionOf(taskId) !== undefined;
+  if (taskKinds.agentOf(taskId) !== undefined && commissionKnown) return undefined;
   const known = context.liveTask(taskId);
   const taskType = raw.task_type ?? taskKinds.kindOf(taskId) ?? known?.taskType;
   if (taskKindOf(taskType) !== "subagent") return undefined;
   const toolUseId = raw.tool_use_id ?? known?.toolUseId ?? taskKinds.toolUseFor(taskId);
   if (toolUseId === undefined || toolUseId === "") return undefined;
   const call = calls.peek(toolUseId) ?? taskKinds.callOf(taskId);
-  if (call === undefined || isSpawnCall(call)) return undefined;
+  // THE SPAWN STATES BOTH: its id is the agent and its input the commission.
+  if (call !== undefined && isSpawnCall(call)) return undefined;
+  // A CALL THIS FOLD NEVER SAW is read as the spawn by the minting rule, so the
+  // agent needs no store; its commission does, unless already held.
+  if (call === undefined && commissionKnown) return undefined;
   return taskId;
 }
 
@@ -1251,7 +1299,14 @@ export function convertDetached(
         { uuid, task_id: taskId, tool_use_id: toolUseId, total_tokens: raw.usage?.total_tokens ?? 0 },
         "a running beat advances the subagent unit's spend",
       );
-      return subagentProgressEntries(context, agentId, uuid, toolUseId, raw, taskCommission(taskId, spawnCall, taskKinds));
+      return subagentProgressEntries(
+        context,
+        taskUnitTarget(taskId, toolUseId, owner, taskKinds),
+        uuid,
+        toolUseId,
+        raw,
+        taskCommission(taskId, spawnCall, taskKinds),
+      );
     }
 
     case "task_notification": {
@@ -1332,7 +1387,7 @@ export function convertDetached(
       entries.push(
         ...subagentTerminalEntries(
           context,
-          agentId,
+          taskUnitTarget(taskId, toolUseId, owner, taskKinds),
           uuid,
           toolUseId,
           createdAgent,
@@ -1351,6 +1406,36 @@ export function convertDetached(
       );
       return [residueEntry(context, message, residueForMessage(message), `unknown.${String(raw.subtype)}`)];
   }
+}
+
+/**
+ * WHERE A SUBAGENT RUN'S OWN FRAMES (its running beats and its terminal) ARE
+ * FILED, from the session-wide task stream.
+ *
+ * THE BOOK IS THE OWNER'S, when this shim observed the spawning call (the open
+ * call, or the owner remembered from it); otherwise the frame is written
+ * OWNER-UNKNOWN for the store to place -- a writer never claims a book it does
+ * not know, and the task stream names none.
+ *
+ * THE KEY IS THE UNIT'S, except for a run RESUMED BY A SEND: the task's call is
+ * then the send, whose own card holds `activity:<send>`, so the run's frames
+ * take `resumed-run:<send>` and the two facts never share a row. A resume is
+ * recognized by identity, never by tool name: the agent the task runs is not
+ * the agent its call's id would mint.
+ */
+export function taskUnitTarget(
+  taskId: string,
+  toolUseId: string,
+  owner: conversationv1.AgentId | undefined,
+  taskKinds: TaskKindRegistry,
+): TaskUnitTarget {
+  const unit = toolCallActivityId(toolUseId);
+  const agent = taskKinds.agentOf(taskId);
+  const resumed = agent !== undefined && agent.value !== subagentId(toolUseId).value;
+  return {
+    book: owner === undefined ? { ownerUnknown: true } : { agentId: owner },
+    upsertKey: resumed ? resumedRunUpsertKey(unit) : activityUpsertKey(unit),
+  };
 }
 
 /**
@@ -1375,7 +1460,7 @@ export function convertDetached(
  */
 function subagentProgressEntries(
   context: FoldContext,
-  agentId: conversationv1.AgentId,
+  target: TaskUnitTarget,
   vendorUuid: string,
   toolUseId: string,
   raw: RawTask,
@@ -1386,9 +1471,10 @@ function subagentProgressEntries(
   const toolUses = raw.usage?.tool_uses;
   const durationMs = raw.usage?.duration_ms;
   return [
-    activityEntry(
+    taskUnitEntry(
       context,
-      { agentId, vendorUuid, discriminator: "activity.subagent.update" },
+      target,
+      { vendorUuid, discriminator: "activity.subagent.update" },
       agentActivity(activityId, {
         case: "subagent",
         value: create(conversationv1.AgentSubagentSchema, {
@@ -1422,6 +1508,22 @@ function nonNegativeInt(value: number | undefined): number {
 }
 
 /**
+ * The commission a task's agent was spawned with, as this process knows it: the
+ * spawn call itself when the task's call is its spawn, else the commission
+ * remembered with the agent (from the spawn this process saw, or from the
+ * store), else `undefined`. Records nothing: each caller reports a miss in its
+ * own terms.
+ */
+function knownCommission(
+  taskId: string,
+  call: PendingCall | undefined,
+  taskKinds: TaskKindRegistry,
+): conversationv1.AgentSubagentPrompt | undefined {
+  if (call !== undefined && isSpawnCall(call)) return subagentPrompt(call);
+  return taskKinds.commissionOf(taskId);
+}
+
+/**
  * WHAT THE RUNNING AGENT WAS COMMISSIONED WITH, restated on its run's frames
  * so each stands alone (`AgentSubagentUpdate.prompt`, and every settled arm's).
  *
@@ -1447,9 +1549,8 @@ export function taskCommission(
   call: PendingCall | undefined,
   taskKinds: TaskKindRegistry,
 ): conversationv1.AgentSubagentPrompt {
-  if (call !== undefined && isSpawnCall(call)) return subagentPrompt(call);
-  const remembered = taskKinds.commissionOf(taskId);
-  if (remembered !== undefined) return remembered;
+  const known = knownCommission(taskId, call, taskKinds);
+  if (known !== undefined) return known;
   if (call !== undefined) {
     LOGGER.error(
       {
@@ -1474,7 +1575,7 @@ export function taskCommission(
  */
 function subagentTerminalEntries(
   context: FoldContext,
-  agentId: conversationv1.AgentId,
+  target: TaskUnitTarget,
   vendorUuid: string,
   toolUseId: string,
   createdAgent: conversationv1.AgentId,
@@ -1496,9 +1597,10 @@ function subagentTerminalEntries(
   if (raw.status === "stopped") {
     LOGGER.info({ task_id: raw.task_id }, "a person stopped the detached run");
     return [
-      activityEntry(
+      taskUnitEntry(
         context,
-        { agentId, vendorUuid, discriminator: "activity.subagent.failure.stopped_by_user" },
+        target,
+        { vendorUuid, discriminator: "activity.subagent.failure.stopped_by_user" },
         agentActivity(activityId, {
           case: "subagent",
           value: create(conversationv1.AgentSubagentSchema, {
@@ -1524,9 +1626,10 @@ function subagentTerminalEntries(
   if (raw.status === "failed") {
     LOGGER.info({ task_id: raw.task_id }, "a detached run reached a failure terminal");
     return [
-      activityEntry(
+      taskUnitEntry(
         context,
-        { agentId, vendorUuid, discriminator: "activity.subagent.failure" },
+        target,
+        { vendorUuid, discriminator: "activity.subagent.failure" },
         agentActivity(activityId, {
           case: "subagent",
           value: create(conversationv1.AgentSubagentSchema, {
@@ -1563,9 +1666,10 @@ function subagentTerminalEntries(
   // restated from its spawning call — a settled frame describes itself.
   LOGGER.info({ task_id: raw.task_id }, "a detached run completed");
   return [
-    activityEntry(
+    taskUnitEntry(
       context,
-      { agentId, vendorUuid, discriminator: "activity.subagent.success" },
+      target,
+      { vendorUuid, discriminator: "activity.subagent.success" },
       agentActivity(activityId, {
         case: "subagent",
         value: create(conversationv1.AgentSubagentSchema, {

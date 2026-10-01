@@ -65,6 +65,19 @@ export function producerId(originalVendorSessionId: string): string {
 // ---------------------------------------------------------------------------
 
 /**
+ * A subagent RESUMED BY A SEND: every frame of the run the send woke, from its
+ * first running beat to its terminal.
+ *
+ * NOT THE SEND'S OWN KEY. The run is addressed by the send's call id (its
+ * detached-work handle and its unit are those bytes), but the send's card is a
+ * different fact, keyed `activity:<send>`; under one key the run's frames
+ * replaced the send in the record. Two facts never share one upsert key.
+ */
+export function resumedRunUpsertKey(send: conversationv1.AgentActivityId): string {
+  return `resumed-run:${requireValue(send.value, "the resuming send's activity id")}`;
+}
+
+/**
  * A unit of work: every frame of it, from its first to its last.
  *
  * The activity id is the vendor `tool_use_id` for a tool call, and

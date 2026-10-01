@@ -20,12 +20,14 @@ import {
   type PersistEntry,
 } from "../../src/store/persistence.js";
 import {
+  booksRegisteredBy,
   createPersistence,
   PlaceClock,
   toStoreEntry as toPlacedStoreEntry,
   toWriteBatchRequest as toPlacedWriteBatchRequest,
 } from "../../src/store/writer.js";
 import { startFakeStore, type FakeStore } from "../fakes/store-server.js";
+import { pageBookOf } from "../integration-support/store.js";
 import {
   agent,
   bashRunEntry,
@@ -34,6 +36,7 @@ import {
   socketPathForTest,
   spawnEntry,
   terminalEntry,
+  unownedEntry,
 } from "./persistence-fixtures.js";
 
 const PRODUCER = producerId("vendor-session-1");
@@ -114,13 +117,31 @@ async function persistence(
 }
 
 describe("PersistEntry → StoreEntry routing", () => {
+  it("files an owner-unknown frame through the owner_unknown arm", () => {
+    const entry = toStoreEntry(PRODUCER, unownedEntry("toolu_nested"));
+
+    const update = entry.entry.value as storev1.StoreAgentUpdate;
+    const line = update.agentInfo.value as storev1.StorePageLine;
+    expect(line.book.case).toBe("ownerUnknown");
+  });
+
+  it("states no top level for an owner-unknown frame", () => {
+    const entry = toStoreEntry(PRODUCER, unownedEntry("toolu_nested"));
+
+    expect((entry.entry.value as storev1.StoreAgentUpdate).topLevel).toBeUndefined();
+  });
+
+  it("registers no book for an owner-unknown frame", () => {
+    expect([...booksRegisteredBy([unownedEntry("toolu_nested"), readEntry(BOOK, "unit-1", "/tmp/a")])]).toEqual(["book-1"]);
+  });
+
   it("routes a prompt to a page line of its own book", () => {
     const entry = toStoreEntry(PRODUCER, promptEntry(BOOK, "turn-1", "hello"));
 
     expect(entry.entry.case).toBe("agentUpdate");
     const update = entry.entry.value as storev1.StoreAgentUpdate;
     expect(update.agentInfo.case).toBe("serveableFrame");
-    expect((update.agentInfo.value as storev1.StorePageLine).pageAgentId?.value).toBe("book-1");
+    expect(pageBookOf(update.agentInfo.value as storev1.StorePageLine)).toBe("book-1");
   });
 
   it("stamps the envelope with the turn the row was produced within", () => {
@@ -1021,6 +1042,39 @@ describe("a WriteBatch the store answers badly", () => {
         return [record.level, context.upsert_key, context.from_book, context.to_book];
       }),
     ).toEqual([["error", "activity:msg_1:1", "rotated-book", "book-1"]]);
+  });
+
+  it("reports every entry the store could not place at error, naming the key and the store's account", async () => {
+    // Arrange.
+    const plane = planeOver({
+      writeBatch: async () =>
+        create(storev1.WriteBatchResponseSchema, {
+          result: {
+            case: "success",
+            value: create(storev1.WriteBatchSuccessSchema, {
+              unplaced: [
+                create(storev1.WriteBatchUnplacedEntrySchema, {
+                  upsertKey: "activity:toolu_01CieP7uiZSR86ZztFV134Gv",
+                  detail: "no stored row holds this upsert_key",
+                }),
+              ],
+            }),
+          },
+        }),
+    });
+    const before = logSinkMark();
+
+    // Act.
+    plane.write([unownedEntry("toolu_01CieP7uiZSR86ZztFV134Gv")]);
+    await plane.flush();
+
+    // Assert.
+    const records = logRecordsSince(before).filter(
+      (record) => typeof record.message === "string" && record.message.startsWith("the store did not place a row"),
+    );
+    expect(records.map((record) => [record.level, record.context.upsert_key, record.context.detail])).toEqual([
+      ["error", "activity:toolu_01CieP7uiZSR86ZztFV134Gv", "no stored row holds this upsert_key"],
+    ]);
   });
 
   it("states nothing when the store skipped nothing", async () => {

@@ -56,7 +56,7 @@ function pageLineEntry(book: string, upsertKey: string, text: string): storev1.S
         agentInfo: {
           case: "serveableFrame",
           value: create(storev1.StorePageLineSchema, {
-            pageAgentId: agentId(book),
+            book: { case: "pageAgentId", value: agentId(book) },
             agentItem: create(storev1.StoreAgentItemSchema, {
               item: {
                 case: "agentPrompt",
@@ -85,7 +85,7 @@ function spawnEntry(book: string, upsertKey: string, created: string): storev1.S
         agentInfo: {
           case: "serveableFrame",
           value: create(storev1.StorePageLineSchema, {
-            pageAgentId: agentId(book),
+            book: { case: "pageAgentId", value: agentId(book) },
             agentItem: create(storev1.StoreAgentItemSchema, {
               item: {
                 case: "agentFrame",
@@ -125,6 +125,16 @@ function spawnEntry(book: string, upsertKey: string, created: string): storev1.S
   });
 }
 
+/** ENTRY rewritten OWNER-UNKNOWN: no book, and no attribution on its frame. */
+function unownedEntry(entry: storev1.StoreEntry): storev1.StoreEntry {
+  const update = entry.entry.case === "agentUpdate" ? entry.entry.value : undefined;
+  const line = update?.agentInfo.case === "serveableFrame" ? update.agentInfo.value : undefined;
+  if (line === undefined) throw new Error("unownedEntry takes a page line");
+  line.book = { case: "ownerUnknown", value: create(storev1.StorePageLineOwnerUnknownSchema, {}) };
+  if (line.agentItem?.item.case === "agentFrame") line.agentItem.item.value.agentId = undefined;
+  return entry;
+}
+
 /** A frame carrying one of the terminal arms, which concludes an agent. */
 function terminalEntry(book: string, upsertKey: string): storev1.StoreEntry {
   return create(storev1.StoreEntrySchema, {
@@ -137,7 +147,7 @@ function terminalEntry(book: string, upsertKey: string): storev1.StoreEntry {
         agentInfo: {
           case: "serveableFrame",
           value: create(storev1.StorePageLineSchema, {
-            pageAgentId: agentId(book),
+            book: { case: "pageAgentId", value: agentId(book) },
             agentItem: create(storev1.StoreAgentItemSchema, {
               item: {
                 case: "agentFrame",
@@ -174,7 +184,7 @@ function detachedEntry(book: string, upsertKey: string, workId: string, runId: s
         agentInfo: {
           case: "serveableFrame",
           value: create(storev1.StorePageLineSchema, {
-            pageAgentId: agentId(book),
+            book: { case: "pageAgentId", value: agentId(book) },
             agentItem: create(storev1.StoreAgentItemSchema, {
               item: {
                 case: "agentFrame",
@@ -265,6 +275,82 @@ async function open(
 }
 
 describe("WriteBatch", () => {
+  it("files an owner-unknown frame in the book that holds its key, attributed to it", async () => {
+    // Arrange: the spawner's book holds the nested spawn's unit.
+    const { store: fake, client } = await store();
+    await write(client, spawnEntry("toolu_016fJ1", "toolu_01CieP7", "toolu_01CieP7"));
+
+    // Act.
+    await write(client, unownedEntry(spawnEntry("x", "toolu_01CieP7", "toolu_01CieP7")));
+
+    // Assert.
+    const rows = fake.book("toolu_016fJ1");
+    const item = rows[0]?.line?.agentItem?.item;
+    expect({ rows: rows.length, attributed: item?.case === "agentFrame" ? item.value.agentId?.value : undefined }).toEqual({
+      rows: 1,
+      attributed: "toolu_016fJ1",
+    });
+  });
+
+  it("answers an owner-unknown frame of a new key unplaced, landing nothing", async () => {
+    // Arrange.
+    const { store: fake, client } = await store();
+
+    // Act.
+    const response = await client.writeBatch(
+      create(storev1.WriteBatchRequestSchema, {
+        writeClass: create(storev1.WriteClassSchema, {
+          writeClass: { case: "interactive", value: create(storev1.WriteClassInteractiveSchema, {}) },
+        }),
+        producer: "claude-shim:test",
+        batch: create(storev1.EntryBatchSchema, { entries: [unownedEntry(spawnEntry("x", "toolu_new", "toolu_new"))] }),
+      }),
+    );
+
+    // Assert.
+    const unplaced = response.result.case === "success" ? response.result.value.unplaced : [];
+    expect({ unplaced: unplaced.map((u) => u.upsertKey), landed: fake.book("x").length }).toEqual({
+      unplaced: ["toolu_new"],
+      landed: 0,
+    });
+  });
+
+  it("answers a vendor task's agent with the commission its recorded start states", async () => {
+    // Arrange: a spawn of toolu_spawn commissioned "fix the shim", paired with locator a1.
+    const { client } = await store();
+    const spawn = spawnEntry("main", "toolu_spawn", "toolu_spawn");
+    const update = spawn.entry.case === "agentUpdate" ? spawn.entry.value : undefined;
+    const line = update?.agentInfo.case === "serveableFrame" ? update.agentInfo.value : undefined;
+    const frame = line?.agentItem?.item.case === "agentFrame" ? line.agentItem.item.value : undefined;
+    const activity = frame?.result.case === "update" && frame.result.value.update.case === "activity" ? frame.result.value.update.value : undefined;
+    const start = activity?.item.case === "subagent" && activity.item.value.result.case === "start" ? activity.item.value.result.value : undefined;
+    if (start !== undefined) start.prompt = create(conversationv1.AgentSubagentPromptSchema, { text: "go", description: "fix the shim" });
+    await client.writeBatch(
+      create(storev1.WriteBatchRequestSchema, {
+        writeClass: create(storev1.WriteClassSchema, {
+          writeClass: { case: "interactive", value: create(storev1.WriteClassInteractiveSchema, {}) },
+        }),
+        producer: "claude-shim:test",
+        batch: create(storev1.EntryBatchSchema, {
+          entries: [spawn],
+          agentLocators: [create(storev1.AgentLocatorSchema, { vendorTaskId: "a1", agent: agentId("toolu_spawn") })],
+        }),
+      }),
+    );
+
+    // Act.
+    const response = await client.getAgentByVendorTask(
+      create(storev1.GetAgentByVendorTaskRequestSchema, { session: agentId("main"), vendorTaskId: "a1" }),
+    );
+
+    // Assert.
+    const success = response.result.case === "success" ? response.result.value : undefined;
+    expect({ agent: success?.agent?.value, description: success?.commission?.description }).toEqual({
+      agent: "toolu_spawn",
+      description: "fix the shim",
+    });
+  });
+
   it("acks a batch and lands its entries", async () => {
     // Arrange.
     const { store: fake, client } = await store();
@@ -725,7 +811,7 @@ function monitorUnitEntry(book: string, unit: string, arm: "start" | "ended"): s
         agentInfo: {
           case: "serveableFrame",
           value: create(storev1.StorePageLineSchema, {
-            pageAgentId: agentId(book),
+            book: { case: "pageAgentId", value: agentId(book) },
             agentItem: create(storev1.StoreAgentItemSchema, {
               item: {
                 case: "agentFrame",

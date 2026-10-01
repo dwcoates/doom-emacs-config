@@ -11,7 +11,7 @@ import { describe, expect, it, vi } from "vitest";
 import { logRecordsSince, logSinkMark } from "../log-records.js";
 import { create } from "@bufbuild/protobuf";
 import { conversationv1 } from "../../src/proto.js";
-import { EMPTY_FOLD_OUTPUT, createFold } from "../../src/convert/fold.js";
+import { EMPTY_FOLD_OUTPUT, createFold, type FoldOutput } from "../../src/convert/fold.js";
 import type { SdkMessage } from "../../src/sdk/types.js";
 import type { PersistEntry } from "../../src/store/persistence.js";
 import { activityOf, foldContext, residueOf, streamMessage } from "./fold-harness.js";
@@ -653,18 +653,52 @@ describe("a subagent resumed by a send whose spawn this fold never saw", () => {
     expect(fold.taskAwaitingAgent(resumed, foldContext())).toBe("a5583");
   });
 
-  it("announces the agent the store named", () => {
+  const COMMISSION = create(conversationv1.AgentSubagentPromptSchema, { text: "go", description: "fix the shim" });
+
+  /** The subagent kind the resume's announcement states. */
+  const announcedSubagent = (output: FoldOutput): conversationv1.DetachedWorkKindSubagent | undefined => {
+    const frame = output.entries[0]?.item.kind === "frame" ? output.entries[0].item.frame : undefined;
+    const kind = (frame?.result.value as conversationv1.AgentDetachedWork).kind?.kind;
+    return kind?.case === "subagent" ? kind.value : undefined;
+  };
+
+  it("announces the agent and the commission the store named", () => {
     // Arrange.
     const fold = foldWithOpenSend();
-    fold.learnTaskAgent("a5583", { kind: "found", agent: SPAWN });
+    fold.learnTaskAgent("a5583", { kind: "found", agent: SPAWN, commission: COMMISSION });
 
     // Act.
     const output = fold.onSdkMessage(resumed, foldContext());
 
     // Assert.
-    const frame = output.entries[0]?.item.kind === "frame" ? output.entries[0].item.frame : undefined;
-    const kind = (frame?.result.value as conversationv1.AgentDetachedWork).kind?.kind;
-    expect(kind?.case === "subagent" ? kind.value.agentId?.value : undefined).toBe("toolu_spawn");
+    const subagent = announcedSubagent(output);
+    expect({ agent: subagent?.agentId?.value, description: subagent?.commission?.description }).toEqual({
+      agent: "toolu_spawn",
+      description: "fix the shim",
+    });
+  });
+
+  it("announces with no commission, at ERROR, when the store recorded none", () => {
+    // Arrange.
+    const fold = foldWithOpenSend();
+    fold.learnTaskAgent("a5583", { kind: "found", agent: SPAWN, commission: undefined });
+    const before = logSinkMark();
+
+    // Act.
+    const output = fold.onSdkMessage(resumed, foldContext());
+
+    // Assert.
+    expect(announcedSubagent(output)?.commission).toBeUndefined();
+    expect(
+      logRecordsSince(before)
+        .filter((record) => record.level === "error")
+        .map((record) => [record.message, record.context.store_answer]),
+    ).toEqual([
+      [
+        "a subagent announcement states no commission: this shim holds no record of the spawn",
+        "found toolu_spawn, with no recorded commission",
+      ],
+    ]);
   });
 
   it("knows the task's agent once the store named it", () => {
@@ -672,7 +706,7 @@ describe("a subagent resumed by a send whose spawn this fold never saw", () => {
     const fold = foldWithOpenSend();
 
     // Act.
-    fold.learnTaskAgent("a5583", { kind: "found", agent: SPAWN });
+    fold.learnTaskAgent("a5583", { kind: "found", agent: SPAWN, commission: COMMISSION });
 
     // Assert.
     expect(fold.taskAgent("a5583")).toEqual({ kind: "named", agent: SPAWN });
@@ -1360,7 +1394,7 @@ describe("attribution", () => {
       foldContext({ subagentFor: () => subagent }),
     );
 
-    expect(output.entries[0]?.agentId.value).toBe("agent-7");
+    expect(output.entries[0]?.agentId?.value).toBe("agent-7");
   });
 
   it("mints a subagent's book from its SPAWNING CALL when the engine knows no id", () => {
@@ -1376,7 +1410,7 @@ describe("attribution", () => {
     // The pinned SDK stream states NO agent id anywhere, so the spawning call's
     // own id is the subagent's book until a ruling gives it a real producer —
     // minted in ONE function so that ruling changes one line.
-    expect(output.entries[0]?.agentId.value).toBe("toolu_spawn");
+    expect(output.entries[0]?.agentId?.value).toBe("toolu_spawn");
   });
 });
 

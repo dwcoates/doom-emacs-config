@@ -110,7 +110,7 @@ describe("createStoreClient", () => {
           agentInfo: {
             case: "serveableFrame",
             value: create(storev1.StorePageLineSchema, {
-              pageAgentId: create(conversationv1.AgentIdSchema, { value: "a" }),
+              book: { case: "pageAgentId", value: create(conversationv1.AgentIdSchema, { value: "a" }) },
               // The prompt is what makes the store record FIRST SIGHT of the
               // agent (`db.ensureAgent`); a line naming no agent item creates
               // no agent row, and the book would not be openable.

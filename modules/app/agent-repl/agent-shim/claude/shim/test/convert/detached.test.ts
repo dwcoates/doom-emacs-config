@@ -37,6 +37,7 @@ import {
   taskAgentKnowledge,
   taskAwaitingAgent,
   taskCommission,
+  taskUnitTarget,
   wentSilent,
 } from "../../src/convert/detached.js";
 import { toolResultText } from "../../src/convert/entries.js";
@@ -561,7 +562,7 @@ describe("convertDetached: task_started", () => {
       { liveTask: () => ({ toolUseId: "toolu_1", agentId: subagent }) },
     );
 
-    expect(entries[0]?.agentId.value).toBe("sub-1");
+    expect(entries[0]?.agentId?.value).toBe("sub-1");
   });
 
   it("remembers `requested` for an agent task, so its notification upserts that cause", () => {
@@ -1357,7 +1358,7 @@ describe("convertDetached: the owner of task-stream work", () => {
     const entries = convert(STARTED, {}, createTaskKindRegistry(), calls);
 
     // Assert.
-    expect(entries[0]?.agentId.value).toBe(MAIN_AGENT.value);
+    expect(entries[0]?.agentId?.value).toBe(MAIN_AGENT.value);
   });
 
   it("restates the owner on the closing notification after the call itself was forgotten", () => {
@@ -1510,15 +1511,31 @@ describe("detachedWorkKind", () => {
     expect(detachedWorkKind({ kind }).kind.case).toBe(kind);
   });
 
-  it("builds the subagent arm carrying the running agent", () => {
+  it("builds the subagent arm carrying the running agent and its commission", () => {
+    // Arrange.
+    const agent = create(conversationv1.AgentIdSchema, { value: "toolu_spawn" });
+    const commission = create(conversationv1.AgentSubagentPromptSchema, { text: "go", description: "fix the shim" });
+
+    // Act.
+    const built = detachedWorkKind({ kind: "subagent", agent, commission });
+
+    // Assert.
+    const arm = built.kind.case === "subagent" ? built.kind.value : undefined;
+    expect({ agent: arm?.agentId?.value, description: arm?.commission?.description }).toEqual({
+      agent: "toolu_spawn",
+      description: "fix the shim",
+    });
+  });
+
+  it("leaves the subagent arm's commission unset when none is known", () => {
     // Arrange.
     const agent = create(conversationv1.AgentIdSchema, { value: "toolu_spawn" });
 
     // Act.
-    const built = detachedWorkKind({ kind: "subagent", agent });
+    const built = detachedWorkKind({ kind: "subagent", agent, commission: undefined });
 
     // Assert.
-    expect(built.kind.case === "subagent" ? built.kind.value.agentId?.value : "").toBe("toolu_spawn");
+    expect(built.kind.case === "subagent" ? built.kind.value.commission : "not subagent").toBeUndefined();
   });
 });
 
@@ -1551,6 +1568,21 @@ describe("detachableKind", () => {
   it("refuses a recorded spawn start that names no created agent", () => {
     // Arrange, Act, Assert.
     expect(detachableKind(spawn())).toBeUndefined();
+  });
+
+  it("reads the recorded start's prompt as the commission", () => {
+    // Arrange.
+    const work = spawn("toolu_spawn");
+    const start = work.work.case === "subagent" ? work.work.value.result : undefined;
+    if (start?.case === "start") {
+      start.value.prompt = create(conversationv1.AgentSubagentPromptSchema, { text: "go", description: "fix the shim" });
+    }
+
+    // Act.
+    const kind = detachableKind(work);
+
+    // Assert.
+    expect(kind?.kind === "subagent" ? kind.commission?.description : "").toBe("fix the shim");
   });
 
   it.each([
@@ -1879,10 +1911,11 @@ describe("taskAwaitingAgent: the resume the store must name", () => {
     expect(awaiting(RESUME_STARTED, createTaskKindRegistry(), calls)).toBeUndefined();
   });
 
-  it("names nothing when a join already names the task's agent", () => {
+  it("names nothing when the fold holds the task's agent and its commission", () => {
     // Arrange.
     const registry = createTaskKindRegistry();
     registry.rememberAgent("a5583", create(conversationv1.AgentIdSchema, { value: "toolu_spawn" }));
+    registry.rememberCommission("a5583", create(conversationv1.AgentSubagentPromptSchema, { text: "go" }));
     const calls = createCallRegistry();
     openCall(calls, "toolu_send", "SendMessage");
 
@@ -1890,9 +1923,31 @@ describe("taskAwaitingAgent: the resume the store must name", () => {
     expect(awaiting(RESUME_STARTED, registry, calls)).toBeUndefined();
   });
 
-  it("names nothing when this fold never saw the task's call", () => {
-    // Arrange, Act, Assert: the minting rule reads the call as the spawn.
-    expect(awaiting(RESUME_STARTED)).toBeUndefined();
+  it("names the task when a join names its agent but not its commission", () => {
+    // Arrange: every subagent announcement states a commission, and only the
+    // store can name one for a spawn this process never saw.
+    const registry = createTaskKindRegistry();
+    registry.rememberAgent("a5583", create(conversationv1.AgentIdSchema, { value: "toolu_spawn" }));
+    const calls = createCallRegistry();
+    openCall(calls, "toolu_send", "SendMessage");
+
+    // Act, Assert.
+    expect(awaiting(RESUME_STARTED, registry, calls)).toBe("a5583");
+  });
+
+  it("names the task when this fold never saw its call and holds no commission", () => {
+    // Arrange, Act, Assert: the minting rule names the agent, and the store its
+    // commission (a backgrounded subagent's own spawn).
+    expect(awaiting(RESUME_STARTED)).toBe("a5583");
+  });
+
+  it("names nothing when this fold never saw its call but holds its commission", () => {
+    // Arrange.
+    const registry = createTaskKindRegistry();
+    registry.rememberCommission("a5583", create(conversationv1.AgentSubagentPromptSchema, { text: "go" }));
+
+    // Act, Assert.
+    expect(awaiting(RESUME_STARTED, registry)).toBeUndefined();
   });
 
   it("names nothing for a task that is not a subagent", () => {
@@ -2557,5 +2612,141 @@ describe("TaskKindRegistry: the facts that outlive a settle share one bounded sh
 
     // Assert
     expect(handRolled.length).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// WHERE A RUN'S OWN FRAMES ARE FILED: the book and the key (taskUnitTarget).
+// ---------------------------------------------------------------------------
+
+describe("taskUnitTarget", () => {
+  const OWNER = create(conversationv1.AgentIdSchema, { value: "main-agent" });
+
+  it("files a run whose spawning call was observed in its owner's book", () => {
+    // Arrange, Act.
+    const target = taskUnitTarget("a1", "toolu_spawn", OWNER, createTaskKindRegistry());
+
+    // Assert.
+    expect(target.book.agentId?.value).toBe("main-agent");
+  });
+
+  it("files a run whose owner was never observed owner-unknown", () => {
+    // Arrange, Act.
+    const target = taskUnitTarget("a1", "toolu_spawn", undefined, createTaskKindRegistry());
+
+    // Assert.
+    expect(target.book).toEqual({ ownerUnknown: true });
+  });
+
+  it("keys an ordinary run by its spawn unit", () => {
+    // Arrange.
+    const registry = createTaskKindRegistry();
+    registry.rememberAgent("a1", create(conversationv1.AgentIdSchema, { value: "toolu_spawn" }));
+
+    // Act, Assert.
+    expect(taskUnitTarget("a1", "toolu_spawn", OWNER, registry).upsertKey).toBe("activity:toolu_spawn");
+  });
+
+  it("keys a run resumed by a send apart from the send's own card", () => {
+    // Arrange.
+    const registry = createTaskKindRegistry();
+    registry.rememberAgent("a1", create(conversationv1.AgentIdSchema, { value: "toolu_spawn" }));
+
+    // Act, Assert.
+    expect(taskUnitTarget("a1", "toolu_send", OWNER, registry).upsertKey).toBe("resumed-run:toolu_send");
+  });
+});
+
+describe("convertDetached: where a run's own frames land", () => {
+  // THE PRODUCTION CASE (workspace footer-activity-updates, 2026-09-30): the
+  // background subagent toolu_016fJ1MXgpBhD13bnUrwNzPE spawned
+  // toolu_01CieP7uiZSR86ZztFV134Gv, whose own call never reached this stream.
+  it("writes a nested spawn's running beat owner-unknown under its unit's key", () => {
+    // Arrange.
+    const registry = createTaskKindRegistry();
+    registry.remember("a740a70bc2ffba0c4", "local_agent");
+
+    // Act.
+    const entries = convert(
+      {
+        subtype: "task_progress",
+        task_id: "a740a70bc2ffba0c4",
+        tool_use_id: "toolu_01CieP7uiZSR86ZztFV134Gv",
+        usage: { total_tokens: 900 },
+      },
+      {},
+      registry,
+    );
+
+    // Assert.
+    const beat = entries.at(-1);
+    expect({ owner: beat?.ownerUnknown, book: beat?.agentId, key: beat?.upsertKey }).toEqual({
+      owner: true,
+      book: undefined,
+      key: "activity:toolu_01CieP7uiZSR86ZztFV134Gv",
+    });
+  });
+
+  it("writes a resumed run's running beat in the sender's book under its own key", () => {
+    // Arrange.
+    const registry = createTaskKindRegistry();
+    const calls = createCallRegistry();
+    spawnedSettledAndResumed(registry, calls);
+
+    // Act.
+    const entries = convert(
+      { subtype: "task_progress", task_id: "a5583", tool_use_id: "toolu_send", usage: { total_tokens: 10 } },
+      {},
+      registry,
+      calls,
+    );
+
+    // Assert.
+    const beat = entries.at(-1);
+    expect({ book: beat?.agentId?.value, key: beat?.upsertKey }).toEqual({
+      book: MAIN_AGENT.value,
+      key: "resumed-run:toolu_send",
+    });
+  });
+
+  it("announces a spawn with the commission its own call states", () => {
+    // Arrange.
+    const registry = createTaskKindRegistry();
+    const calls = createCallRegistry();
+    calls.remember(COMMISSIONED_SPAWN);
+
+    // Act.
+    const entries = convert(
+      { subtype: "task_started", task_id: "a5583", tool_use_id: "toolu_spawn", task_type: "local_agent" },
+      {},
+      registry,
+      calls,
+    );
+
+    // Assert.
+    const kind = kindOf(entries[0]);
+    expect(kind.case === "subagent" ? kind.value.commission?.description : "").toBe("fix the shim");
+  });
+
+  it("announces a resume with its spawn's commission", () => {
+    // Arrange.
+    const registry = createTaskKindRegistry();
+    const calls = createCallRegistry();
+    calls.remember(COMMISSIONED_SPAWN);
+    convert({ subtype: "task_started", task_id: "a5583", tool_use_id: "toolu_spawn", task_type: "local_agent" }, {}, registry, calls);
+    convert({ subtype: "task_notification", task_id: "a5583", tool_use_id: "toolu_spawn", status: "completed" }, {}, registry, calls);
+    openCall(calls, "toolu_send", "SendMessage");
+
+    // Act.
+    const entries = convert(
+      { subtype: "task_started", task_id: "a5583", tool_use_id: "toolu_send", task_type: "local_agent" },
+      {},
+      registry,
+      calls,
+    );
+
+    // Assert.
+    const kind = kindOf(entries[0]);
+    expect(kind.case === "subagent" ? kind.value.commission?.subagentType : "").toBe("opus-medium");
   });
 });

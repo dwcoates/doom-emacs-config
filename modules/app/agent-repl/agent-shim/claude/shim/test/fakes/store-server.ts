@@ -64,7 +64,7 @@
  *   - WRITES CAN BE MADE TO FAIL ON DEMAND ({@link FakeStore.failWrites}), which
  *     is how the writer's retry buffer is testable at all.
  */
-import { create } from "@bufbuild/protobuf";
+import { clone, create } from "@bufbuild/protobuf";
 import { Code, ConnectError, type ConnectRouter } from "@connectrpc/connect";
 import { connectNodeAdapter } from "@connectrpc/connect-node";
 import { unlinkSync } from "node:fs";
@@ -276,6 +276,8 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
    */
   const detachedOwner = new Map<string, string>();
   const spawnedBy = new Map<string, string>();
+  /** The commission each spawned agent's recorded start states, by agent: the `agent` row's columns. */
+  const commissions = new Map<string, conversationv1.AgentSubagentPrompt>();
   /**
    * The store's `vendor_task` table: each vendor task locator, with every agent
    * a batch's `agent_locators` paired it with. `GetAgentByVendorTask` answers
@@ -397,7 +399,7 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
     turn: conversationv1.TurnId | undefined,
     stated: conversationv1.ConversationPlace | undefined,
   ): void => {
-    const bookId = line.pageAgentId?.value ?? "";
+    const bookId = line.book.case === "pageAgentId" ? (line.book.value.value ?? "") : "";
     if (stated !== undefined && stated.atMs > latestPlacedAt) latestPlacedAt = stated.atMs;
     const existing = rowsByKey.get(upsertKey);
     if (existing !== undefined) {
@@ -515,13 +517,39 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
     // spawn frame on, before a single frame of its own has arrived.
     const created = subagent.value.createdAgentId?.value;
     rememberAgent(created);
+    if (created !== undefined && created !== "" && subagent.value.prompt !== undefined) {
+      commissions.set(created, subagent.value.prompt);
+    }
     const spawner = frame.agentId?.value;
     if (created !== undefined && created !== "" && spawner !== undefined && spawner !== "") {
       spawnedBy.set(created, spawner);
     }
   };
 
-  const landEntry = (entry: storev1.StoreEntry): void => {
+  /**
+   * Place an OWNER-UNKNOWN line (store.v1 StorePageLineOwnerUnknown) as the real
+   * store does: in the book of the row already holding its upsert key, with the
+   * frame attributed to that book -- or not at all, answered unplaced.
+   */
+  const placeUnownedLine = (
+    upsertKey: string,
+    line: storev1.StorePageLine,
+  ): storev1.StorePageLine | storev1.WriteBatchUnplacedEntry => {
+    const held = rowsByKey.get(upsertKey);
+    const book = held?.line.book.case === "pageAgentId" ? held.line.book.value : undefined;
+    if (book === undefined) {
+      return create(storev1.WriteBatchUnplacedEntrySchema, {
+        upsertKey,
+        detail: "no stored row holds this upsert_key, so an owner_unknown write names no book",
+      });
+    }
+    const placed = clone(storev1.StorePageLineSchema, line);
+    placed.book = { case: "pageAgentId", value: book };
+    if (placed.agentItem?.item.case === "agentFrame") placed.agentItem.item.value.agentId = book;
+    return placed;
+  };
+
+  const landEntry = (entry: storev1.StoreEntry, unplaced: storev1.WriteBatchUnplacedEntry[]): void => {
     const update = entry.entry;
     if (update.case === "sessionUpdate") {
       sessionUpdateRows.push(update.value);
@@ -530,11 +558,21 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
     if (update.case !== "agentUpdate") return;
     const info = update.value.agentInfo;
     switch (info.case) {
-      case "serveableFrame":
-        registerFromLine(info.value);
-        recordLiveness(info.value);
-        upsertPageLine(entry.upsertKey, info.value, entry.turn, entry.place);
+      case "serveableFrame": {
+        let line = info.value;
+        if (line.book.case === "ownerUnknown") {
+          const placed = placeUnownedLine(entry.upsertKey, line);
+          if (placed.$typeName === "store.v1.WriteBatchUnplacedEntry") {
+            unplaced.push(placed);
+            return;
+          }
+          line = placed;
+        }
+        registerFromLine(line);
+        recordLiveness(line);
+        upsertPageLine(entry.upsertKey, line, entry.turn, entry.place);
         return;
+      }
       case "unservedItem": {
         unservedRows.push(info.value);
         return;
@@ -992,6 +1030,9 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
                 case: "success",
                 value: create(storev1.GetAgentByVendorTaskSuccessSchema, {
                   agent: create(conversationv1.AgentIdSchema, { value: agent }),
+                  // THE COMMISSION, as the real store answers it from the
+                  // agent's recorded spawn start: unset when none was recorded.
+                  commission: commissions.get(agent),
                 }),
               },
             });
@@ -1060,16 +1101,21 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
           paired.add(agent);
           vendorTasks.set(locator.vendorTaskId, paired);
         }
+        const unplaced: storev1.WriteBatchUnplacedEntry[] = [];
         for (const entry of request.batch?.entries ?? []) {
           // ABSORBED, as the real store's ledger absorbs it: nothing lands.
           if (entry.writeId !== "" && appliedWriteIds.has(entry.writeId)) continue;
+          const before = unplaced.length;
+          landEntry(entry, unplaced);
+          // AN UNPLACED ENTRY LANDS NOTHING, not even its ledger row, so a
+          // replay is answered unplaced again.
+          if (unplaced.length > before) continue;
           if (entry.writeId !== "") appliedWriteIds.add(entry.writeId);
-          landEntry(entry);
           landedEntries.push(entry);
           for (const wake of [...landedWaiters]) wake(entry);
         }
         return create(storev1.WriteBatchResponseSchema, {
-          result: { case: "success", value: create(storev1.WriteBatchSuccessSchema, {}) },
+          result: { case: "success", value: create(storev1.WriteBatchSuccessSchema, { unplaced }) },
         });
       },
     });

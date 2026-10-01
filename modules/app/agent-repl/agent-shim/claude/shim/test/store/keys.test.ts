@@ -51,6 +51,29 @@ describe("activityUpsertKey", () => {
   });
 });
 
+describe("resumedRunUpsertKey", () => {
+  it("keys a resumed run by the send that woke it", () => {
+    // Arrange, Act.
+    const key = keys.resumedRunUpsertKey(activityId("toolu_017kU1ffaW2CCehor3Na4mze"));
+
+    // Assert.
+    expect(key).toBe("resumed-run:toolu_017kU1ffaW2CCehor3Na4mze");
+  });
+
+  it("never shares a key with the send's own card", () => {
+    // Arrange.
+    const send = activityId("toolu_send");
+
+    // Act, Assert.
+    expect(keys.resumedRunUpsertKey(send)).not.toBe(keys.activityUpsertKey(send));
+  });
+
+  it("refuses an empty send id", () => {
+    // Arrange, Act, Assert.
+    expect(() => keys.resumedRunUpsertKey(activityId(""))).toThrow(/activity id is empty/);
+  });
+});
+
 describe("promptUpsertKey", () => {
   it("keys the one served prompt row by its daemon-minted turn id", () => {
     // Arrange.

@@ -339,3 +339,15 @@ export function terminalEntry(book: conversationv1.AgentId, turnValue: string): 
     },
   };
 }
+
+/**
+ * A unit frame written OWNER-UNKNOWN (`PersistBook`), as the task stream writes
+ * one about a unit whose spawning call this shim never observed: no book, and
+ * no attribution on its frame.
+ */
+export function unownedEntry(unitValue: string): PersistEntry {
+  const { agentId: _book, ...content } = readEntry(agent("book-1"), unitValue, "/tmp/a");
+  if (content.item.kind !== "frame") throw new Error("readEntry builds a frame");
+  const frame = create(conversationv1.AgentFrameSchema, { result: content.item.frame.result });
+  return { ...content, ownerUnknown: true, item: { kind: "frame", frame } };
+}

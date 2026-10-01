@@ -17,7 +17,7 @@
 import { create } from "@bufbuild/protobuf";
 import { conversationv1 } from "../proto.js";
 import { activityUpsertKey, terminalUpsertKey } from "../store/keys.js";
-import type { PersistEntry, SourceCoordinates } from "../store/persistence.js";
+import type { PersistBook, PersistEntry, SourceCoordinates } from "../store/persistence.js";
 import type { FoldContext } from "./fold-context.js";
 
 // ---------------------------------------------------------------------------
@@ -179,7 +179,9 @@ export interface FrameOrigin {
 }
 
 /** The source coordinates one origin names. */
-export function sourceOf(origin: FrameOrigin): SourceCoordinates {
+export function sourceOf(
+  origin: Omit<FrameOrigin, "agentId"> & { readonly agentId?: conversationv1.AgentId },
+): SourceCoordinates {
   return {
     vendorUuid: origin.vendorUuid,
     ...(origin.blockIndex === undefined ? {} : { blockIndex: origin.blockIndex }),
@@ -209,6 +211,55 @@ export function activityEntry(
     keepalive: context.keepalive,
     turn: context.turnId,
     item: { kind: "frame", frame: updateFrame(origin.agentId, activityUpdate(activity)) },
+  };
+}
+
+/** Where a unit frame from the session-wide task stream came from: no book of its own. */
+export type TaskFrameOrigin = Omit<FrameOrigin, "agentId">;
+
+/** Where a task-stream unit frame is filed: its book, and the row it replaces. */
+export interface TaskUnitTarget {
+  readonly book: PersistBook;
+  readonly upsertKey: string;
+}
+
+/**
+ * One unit frame as a row, filed in TARGET's book under TARGET's key.
+ *
+ * FOR THE SESSION-WIDE TASK STREAM, which names no agent: a unit frame it
+ * yields belongs to the book of the agent that made the unit's spawning call
+ * when this shim observed that call, and is written OWNER-UNKNOWN otherwise
+ * (`PersistBook`), with no attribution on its frame, for the store to place.
+ * The key is the caller's, because a resumed run's frames are not keyed by the
+ * activity id they carry (`resumedRunUpsertKey`).
+ */
+export function taskUnitEntry(
+  context: FoldContext,
+  target: TaskUnitTarget,
+  origin: TaskFrameOrigin,
+  activity: conversationv1.AgentActivity,
+): PersistEntry {
+  const { book, upsertKey } = target;
+  const content = {
+    upsertKey,
+    source: sourceOf(origin),
+    keepalive: context.keepalive,
+    turn: context.turnId,
+  };
+  if (book.ownerUnknown === true) {
+    return {
+      ownerUnknown: true,
+      ...content,
+      item: {
+        kind: "frame",
+        frame: create(conversationv1.AgentFrameSchema, { result: { case: "update", value: activityUpdate(activity) } }),
+      },
+    };
+  }
+  return {
+    agentId: book.agentId,
+    ...content,
+    item: { kind: "frame", frame: updateFrame(book.agentId, activityUpdate(activity)) },
   };
 }
 

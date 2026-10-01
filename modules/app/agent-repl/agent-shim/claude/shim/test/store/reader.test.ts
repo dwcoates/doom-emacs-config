@@ -628,14 +628,14 @@ describe("failure translation", () => {
   });
 
   it("raises loudly on a page line whose item arm is unset", () => {
-    const line = create(storev1.StorePageLineSchema, { pageAgentId: BOOK });
+    const line = create(storev1.StorePageLineSchema, { book: { case: "pageAgentId", value: BOOK } });
 
     expect(() => toHistoryEntry(line)).toThrow(PersistenceError);
   });
 
   it("renders a peer_message page line as a peerMessage history entry", () => {
     const line = create(storev1.StorePageLineSchema, {
-      pageAgentId: BOOK,
+      book: { case: "pageAgentId", value: BOOK },
       agentItem: create(storev1.StoreAgentItemSchema, {
         item: {
           case: "peerMessage",
@@ -858,7 +858,7 @@ function storedLine(pointerValue: string, unitValue: string): storev1.StoreLineA
   return create(storev1.StoreLineAtSchema, {
     at: create(storev1.StoreItemPointerSchema, { value: pointerValue }),
     line: create(storev1.StorePageLineSchema, {
-      pageAgentId: BOOK,
+      book: { case: "pageAgentId", value: BOOK },
       agentItem: create(storev1.StoreAgentItemSchema, {
         item: { case: "agentFrame", value: readFrame(unitValue) },
       }),
@@ -923,7 +923,7 @@ describe("a malformed opening page", () => {
     // Arrange.
     const line = create(storev1.StoreLineAtSchema, {
       line: create(storev1.StorePageLineSchema, {
-        pageAgentId: BOOK,
+        book: { case: "pageAgentId", value: BOOK },
         agentItem: create(storev1.StoreAgentItemSchema, {
           item: { case: "agentFrame", value: readFrame("unit-0") },
         }),
