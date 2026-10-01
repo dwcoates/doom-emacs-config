@@ -35,6 +35,10 @@ const (
 // already-open sink the daemon's log surfaces own.
 const shimLogFD = 3
 
+// shimSpawnGateFD is the descriptor the shim waits on before it binds: fd 4,
+// the read end of the spawn gate, second of cmd.ExtraFiles. See Spawn.
+const shimSpawnGateFD = 4
+
 // ActorStandDown is the kill attribution the supervisor's own sweep records.
 // It is how the exit of an in-flight spawn is told from a crash: nothing else
 // in the daemon knew that process existed, so nothing else could have named
@@ -260,7 +264,18 @@ func (s *supervisor) Spawn(ctx context.Context, spec Spec) (Client, error) {
 	cmd.Env = spawnEnv(spec, contracts)
 	cmd.Stdout = nil
 	cmd.Stderr = c.stderr
-	cmd.ExtraFiles = []*os.File{spec.LogSink}
+	// THE SPAWN GATE. The child inherits the read end of a pipe and binds
+	// nothing until it reads one byte from it; that byte is written only once
+	// Spec.Spawned has made the pid durable. A daemon killed in between closes
+	// the write end with its death, the child reads EOF and exits unbound, so
+	// a shim that ever binds is ALWAYS one whose pid is on record: the
+	// successor can never meet a starting shim it has no record of.
+	gate, opener, err := os.Pipe()
+	if err != nil {
+		log.Error("daemon.shimclient.spawn", "could not make the spawn gate", dlog.Context{"error": err.Error()})
+		return nil, fmt.Errorf("shimclient: make the spawn gate: %w", err)
+	}
+	cmd.ExtraFiles = []*os.File{spec.LogSink, gate}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	log.Debug("daemon.shimclient.spawn", "spawning shim", dlog.Context{
@@ -296,9 +311,14 @@ func (s *supervisor) Spawn(ctx context.Context, spec Spec) (Client, error) {
 		log.Info("daemon.shimclient.spawn", "refused a spawn: this daemon is standing down", dlog.Context{
 			"node": spec.NodeBin, "uds": spec.UDSPath,
 		})
+		closeGate(log, gate, opener)
 		return nil, ErrStandingDown
 	}
-	if err := cmd.Start(); err != nil {
+	startErr := cmd.Start()
+	// The child holds its own copy of the read end; this process never reads.
+	closeGate(log, gate, nil)
+	if err := startErr; err != nil {
+		closeGate(log, nil, opener)
 		s.mu.Unlock()
 		log.Error("daemon.shimclient.spawn", "spawn failed", dlog.Context{
 			"node": spec.NodeBin, "error": err.Error(),
@@ -322,6 +342,7 @@ func (s *supervisor) Spawn(ctx context.Context, spec Spec) (Client, error) {
 	if spec.Spawned != nil {
 		spec.Spawned(cmd.Process.Pid)
 	}
+	openGate(log, opener, cmd.Process.Pid)
 	go c.reap()
 
 	if err := c.bringUp(ctx); err != nil {
@@ -329,6 +350,30 @@ func (s *supervisor) Spawn(ctx context.Context, spec Spec) (Client, error) {
 		return nil, err
 	}
 	return c, nil
+}
+
+// openGate lets the spawned shim go on to bind: one byte, then the write end
+// is closed. A shim already gone has no reader left, which is recorded and is
+// the reaper's to report.
+func openGate(log dlog.Logger, opener *os.File, pid int) {
+	if _, err := opener.Write([]byte{1}); err != nil {
+		log.Info("daemon.shimclient.spawn", "the shim was gone before its spawn gate opened", dlog.Context{
+			"pid": pid, "error": err.Error(),
+		})
+	}
+	closeGate(log, nil, opener)
+}
+
+// closeGate closes whichever ends of the spawn gate it is handed.
+func closeGate(log dlog.Logger, ends ...*os.File) {
+	for _, end := range ends {
+		if end == nil {
+			continue
+		}
+		if err := end.Close(); err != nil {
+			log.Error("daemon.shimclient.spawn", "could not close an end of the spawn gate", dlog.Context{"error": err.Error()})
+		}
+	}
 }
 
 // Adopt dials a shim that is already running — a crash boot's surviving
@@ -445,6 +490,7 @@ func shimArgs(spec Spec) []string {
 		"--listen", spec.UDSPath,
 		"--store-socket", spec.StoreSocket,
 		"--log-fd", fmt.Sprintf("%d", shimLogFD),
+		"--spawn-gate-fd", fmt.Sprintf("%d", shimSpawnGateFD),
 	}
 	if spec.Fake {
 		args = append(args, "--fake")
