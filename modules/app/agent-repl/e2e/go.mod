@@ -31,3 +31,5 @@ replace claude-repld => ../daemon
 replace agentrepl/proto => ../proto/gen/go
 
 replace agentrepl/logging => ../agent-shim/logging/go
+
+replace agentrepl/testrun => ../testrun

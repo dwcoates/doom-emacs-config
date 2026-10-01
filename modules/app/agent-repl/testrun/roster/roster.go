@@ -35,22 +35,25 @@ type Suite struct {
 	Args []string
 	// MayDecline marks the suites allowed to exit 77 ("precondition unmet").
 	MayDecline bool
+	// Harness marks a suite that tests the module's own shell scripts in bin/,
+	// which is the blast radius the merge gate gives a change under bin/.
+	Harness bool
 }
 
 // Suites is the roster. Order is report order only; the scheduler decides run
 // order.
 var Suites = []Suite{
-	{Name: "orchestrator-harness", Kind: Script, Path: "bin/test-test-all.sh"},
-	{Name: "coverage-harness", Kind: Script, Path: "bin/test-report-nonlisp-coverage.sh"},
-	{Name: "logging-density-harness", Kind: Script, Path: "bin/test-report-logging-density.sh"},
-	{Name: "build-frontend-harness", Kind: Script, Path: "bin/test-build-frontend.sh"},
-	{Name: "suite-slot-harness", Kind: Script, Path: "bin/test-suite-slot.sh"},
-	{Name: "background-harness", Kind: Script, Path: "bin/test-background.sh"},
-	{Name: "cpu-load-harness", Kind: Script, Path: "bin/test-with-cpu-load.sh"},
-	{Name: "store-reset-harness", Kind: Script, Path: "bin/test-store-reset.sh"},
-	{Name: "readiness-harness", Kind: Script, Path: "bin/test-readiness-report.sh"},
-	{Name: "logs-harness", Kind: Script, Path: "bin/test-logs.sh"},
-	{Name: "go-deps-harness", Kind: Script, Path: "bin/test-check-go-deps.sh"},
+	{Name: "orchestrator-harness", Kind: Script, Path: "bin/test-test-all.sh", Harness: true},
+	{Name: "coverage-harness", Kind: Script, Path: "bin/test-report-nonlisp-coverage.sh", Harness: true},
+	{Name: "logging-density-harness", Kind: Script, Path: "bin/test-report-logging-density.sh", Harness: true},
+	{Name: "build-frontend-harness", Kind: Script, Path: "bin/test-build-frontend.sh", Harness: true},
+	{Name: "suite-slot-harness", Kind: Script, Path: "bin/test-suite-slot.sh", Harness: true},
+	{Name: "background-harness", Kind: Script, Path: "bin/test-background.sh", Harness: true},
+	{Name: "cpu-load-harness", Kind: Script, Path: "bin/test-with-cpu-load.sh", Harness: true},
+	{Name: "store-reset-harness", Kind: Script, Path: "bin/test-store-reset.sh", Harness: true},
+	{Name: "readiness-harness", Kind: Script, Path: "bin/test-readiness-report.sh", Harness: true},
+	{Name: "logs-harness", Kind: Script, Path: "bin/test-logs.sh", Harness: true},
+	{Name: "go-deps-harness", Kind: Script, Path: "bin/test-check-go-deps.sh", Harness: true},
 	{Name: "doctor-harness", Kind: Script, Path: "scripts/test-agent-shim-doctor.sh"},
 	{Name: "precommit-harness", Kind: Script, Path: "/.githooks/test-pre-commit.sh"},
 	{Name: "merge-queue-hook-harness", Kind: Script, Path: "/.githooks/test-reference-transaction.sh"},
@@ -75,6 +78,17 @@ func Names() []string {
 	out := make([]string, len(Suites))
 	for i, s := range Suites {
 		out[i] = s.Name
+	}
+	return out
+}
+
+// Harnesses is the names of the suites that test the module's bin/ scripts.
+func Harnesses() []string {
+	var out []string
+	for _, s := range Suites {
+		if s.Harness {
+			out = append(out, s.Name)
+		}
 	}
 	return out
 }
