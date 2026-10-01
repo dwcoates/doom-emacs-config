@@ -1037,7 +1037,7 @@ func TestAMergeAbortingAfterTheDrainIsNotRecordedAsAFailure(t *testing.T) {
 	<-done
 
 	// Assert: no abort record, and the stop record names the daemon's exit.
-	if _, found := recordWith(h, "error", "daemon.merge.abort"); found {
+	if _, found := recordWith(h, "info", "daemon.merge.abort"); found {
 		t.Fatal("a merge that ended because the daemon exited was recorded as an abort, want no fault")
 	}
 	if _, found := recordWith(h, "info", "daemon.merge.stop"); !found {

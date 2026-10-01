@@ -101,8 +101,7 @@ func TestUpdateMergeQueuePauseThenResumeToggleTheQueueStateAndRefuseNoOps(t *tes
 	// Arrange
 	_, _, repo, d := mergeBlockedQueueFixture(t)
 	// The sweep covers every test; the declared records are evidence of a refusal the test provokes, the merge conflict the test stages.
-	d.ExpectWarnings("daemon.merge.conflicts", "daemon.gitclient.merge_no_ff", "daemon.merge.merge_tab", "daemon.merge.pause",
-		"daemon.merge.unpause")
+	d.ExpectWarnings("daemon.gitclient.merge_no_ff", "daemon.merge.merge_tab", "daemon.merge.pause", "daemon.merge.unpause")
 	repoRef := mergeRepositoryRef(t, d, repo)
 
 	// Act: pause.
@@ -151,8 +150,7 @@ func TestUpdateMergeQueueEvictRemovesOneWorkspacesQueuedMerge(t *testing.T) {
 	// Arrange
 	_, behind, _, _ := mergeBlockedQueueFixture(t)
 	// The sweep covers every test; the declared records are evidence of the merge conflict the test stages, the queued merge the test abandons.
-	behind.d.ExpectWarnings("daemon.merge.conflicts", "daemon.gitclient.merge_no_ff", "daemon.merge.drop_queued",
-		"daemon.merge.merge_tab")
+	behind.d.ExpectWarnings("daemon.gitclient.merge_no_ff", "daemon.merge.drop_queued", "daemon.merge.merge_tab")
 	roster := behind.d.WatchRoster()
 	awaitRoster(t, behind.d, roster, "the behind workspace queued", func(r *frontendv1.WorkspaceRoster) bool {
 		return rosterRow(r, behind.ws.GetId()).GetMergeQueued() != nil
@@ -196,7 +194,7 @@ func TestInterruptOnAQueuedWorkspaceRaisesTheDequeueHeldOffer(t *testing.T) {
 	// Arrange
 	_, behind, _, _ := mergeBlockedQueueFixture(t)
 	// The sweep covers every test; the declared records are evidence of the merge conflict the test stages.
-	behind.d.ExpectWarnings("daemon.merge.conflicts", "daemon.gitclient.merge_no_ff", "daemon.merge.merge_tab")
+	behind.d.ExpectWarnings("daemon.gitclient.merge_no_ff", "daemon.merge.merge_tab")
 	roster := behind.d.WatchRoster()
 	awaitRoster(t, behind.d, roster, "the behind workspace queued", func(r *frontendv1.WorkspaceRoster) bool {
 		return rosterRow(r, behind.ws.GetId()).GetMergeQueued() != nil
@@ -231,8 +229,7 @@ func TestAnswerHeldOfferReleaseEvictsTheQueuedMerge(t *testing.T) {
 	// Arrange
 	_, behind, _, _ := mergeBlockedQueueFixture(t)
 	// The sweep covers every test; the declared records are evidence of the merge conflict the test stages, the queued merge the test abandons.
-	behind.d.ExpectWarnings("daemon.merge.conflicts", "daemon.gitclient.merge_no_ff",
-		"daemon.merge.drop_queued", "daemon.merge.merge_tab")
+	behind.d.ExpectWarnings("daemon.gitclient.merge_no_ff", "daemon.merge.drop_queued", "daemon.merge.merge_tab")
 	holds := behind.d.WatchHolds(behind.ws)
 	if _, err := behind.d.Client().Interrupt(behind.d.Ctx(), connect.NewRequest(&agentreplv1.InterruptRequest{
 		Workspace: behind.ws, Target: &agentreplv1.InterruptRequest_Turn{Turn: &agentreplv1.InterruptTurn{}},
@@ -269,8 +266,7 @@ func TestAnswerHeldOfferKeepKeepsTheQueuedMerge(t *testing.T) {
 	// Arrange
 	_, behind, _, _ := mergeBlockedQueueFixture(t)
 	// The sweep covers every test; the declared records are evidence of the merge conflict the test stages.
-	behind.d.ExpectWarnings("daemon.gitclient.merge_no_ff", "daemon.merge.conflicts",
-		"daemon.merge.merge_tab")
+	behind.d.ExpectWarnings("daemon.gitclient.merge_no_ff", "daemon.merge.merge_tab")
 	holds := behind.d.WatchHolds(behind.ws)
 	if _, err := behind.d.Client().Interrupt(behind.d.Ctx(), connect.NewRequest(&agentreplv1.InterruptRequest{
 		Workspace: behind.ws, Target: &agentreplv1.InterruptRequest_Turn{Turn: &agentreplv1.InterruptTurn{}},
@@ -344,11 +340,7 @@ func TestKillingAWorkspaceAbandonsItsQueuedMergeWithTheCloseAsTheCause(t *testin
 	// on is a matter of scheduling, so the record is declared here for the
 	// same reason the sibling teardown tests declare it, not because it is
 	// unimportant.
-	behind.d.ExpectWarnings("daemon.merge.conflicts", "daemon.gitclient.merge_no_ff",
-		"daemon.merge.drop_queued", "daemon.merge.merge_tab", "daemon.health.open_fault",
-		"daemon.shimclient.exit", "daemon.shimclient.kill_session", "daemon.sessionwatcher.link_fault",
-		"daemon.shimclient.redial",
-		"daemon.workspace.kill", "daemon.sessionwatcher.watch_session", "daemon.sessionwatcher.watch_agent")
+	behind.d.ExpectWarnings("daemon.gitclient.merge_no_ff", "daemon.merge.drop_queued", "daemon.merge.merge_tab", "daemon.health.open_fault", "daemon.shimclient.exit", "daemon.shimclient.kill_session", "daemon.sessionwatcher.link_fault", "daemon.shimclient.redial", "daemon.workspace.kill", "daemon.sessionwatcher.watch_session", "daemon.sessionwatcher.watch_agent")
 	root := behind.watchRootFeed()
 
 	// Act
