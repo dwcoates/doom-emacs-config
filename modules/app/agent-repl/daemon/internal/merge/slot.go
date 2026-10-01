@@ -133,7 +133,7 @@ func (o *orchestrator) grantWaiter(repo wsm.RepoKey) (*run, *tenancy, bool, erro
 	if !o.enterAdmission() {
 		return nil, nil, false, nil
 	}
-	defer o.admissions.Done()
+	defer o.leaveAdmission()
 	o.mu.Lock()
 	idle := o.running[repo] == nil && len(o.waiters[repo]) > 0
 	o.mu.Unlock()

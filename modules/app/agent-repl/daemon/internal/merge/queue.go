@@ -594,7 +594,7 @@ func (o *orchestrator) pumpOnce(ctx context.Context, repo wsm.RepoKey) (bool, er
 			return true, err
 		}
 		still, checkErr := o.stillQueued(ctx, repo, front)
-		o.admissions.Done()
+		o.leaveAdmission()
 		if checkErr != nil || still {
 			return true, err
 		}
@@ -607,7 +607,7 @@ func (o *orchestrator) pumpOnce(ctx context.Context, repo wsm.RepoKey) (bool, er
 
 // enterAdmission registers one admission step against the shutdown drain,
 // and reports false -- registering nothing -- once the daemon is draining.
-// The caller ends the step with o.admissions.Done().
+// The caller ends the step with o.leaveAdmission().
 //
 // IT IS WHAT MAKES "draining" AN EXCLUSION RATHER THAN A HINT. The pump used
 // to READ the flag and then go on to read the store, so a drain that began in
@@ -629,8 +629,25 @@ func (o *orchestrator) enterAdmission() bool {
 	if o.draining {
 		return false
 	}
-	o.admissions.Add(1)
+	o.admissions++
 	return true
+}
+
+// leaveAdmission ends one step enterAdmission registered, and releases a drain
+// waiting on the last of them. A leave with nothing registered is an
+// accounting defect and panics: the count would otherwise go negative and the
+// drain would stop waiting for steps that are still running.
+func (o *orchestrator) leaveAdmission() {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.admissions <= 0 {
+		panic("merge: leaveAdmission with no admission step registered")
+	}
+	o.admissions--
+	if o.admissions == 0 && o.admissionsIdle != nil {
+		close(o.admissionsIdle)
+		o.admissionsIdle = nil
+	}
 }
 
 // admitFront admits the repository's queue front, as ONE admission step the
@@ -646,7 +663,7 @@ func (o *orchestrator) admitFront(ctx context.Context, repo wsm.RepoKey) (ids.Wo
 	if !o.enterAdmission() {
 		return "", nil, false, nil
 	}
-	defer o.admissions.Done()
+	defer o.leaveAdmission()
 	paused, err := o.deps.DB.MergeQueuePaused(ctx, repo)
 	if err != nil {
 		return "", nil, false, err

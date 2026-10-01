@@ -866,6 +866,52 @@ func TestTheDrainWarnsWhatOneExpiredBoundLeftUnstamped(t *testing.T) {
 	}
 }
 
+// TestADrainWithNoAdmissionInFlightReportsNone covers the defect that made
+// the expired-bound test flaky: with nothing in flight the drain knows so
+// under its own lock, so an already-expired bound can never be read as an
+// admission step outliving it.
+func TestADrainWithNoAdmissionInFlightReportsNone(t *testing.T) {
+	// Arrange: no admission and no terminal, under a bound that expires
+	// before the drain could possibly look at it.
+	h := newHarness(t)
+	h.o.drainBound = time.Nanosecond
+
+	// Act.
+	h.o.Drain(context.Background())
+
+	// Assert.
+	if failures := recordsAtLevel(h, "error"); len(failures) > 0 {
+		t.Fatalf("the drain with nothing in flight wrote %d error records, want none: %v", len(failures), failures)
+	}
+}
+
+// TestADrainWaitsForTheAdmissionStepInFlight covers the other side: a step
+// registered before the drain is waited for, so a drain cancelled while it is
+// still running says so, naming how many steps it left.
+func TestADrainWaitsForTheAdmissionStepInFlight(t *testing.T) {
+	// Arrange: one admission step in flight, and a drain whose context is
+	// already gone so its wait ends on the cancellation, not on a clock.
+	h := newHarness(t)
+	if !h.o.enterAdmission() {
+		t.Fatal("enterAdmission refused before any drain")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act.
+	h.o.Drain(ctx)
+
+	// Assert.
+	record, found := recordWith(h, "error", "daemon.merge.drain")
+	if !found {
+		t.Fatal("the drain did not report the admission step it was waiting for")
+	}
+	if record.Context["in_flight"] != 1 {
+		t.Fatalf("the record names %v steps in flight, want 1", record.Context["in_flight"])
+	}
+	h.o.leaveAdmission()
+}
+
 // TestADrainingOrchestratorAdmitsNothing covers the drain's other half: the
 // bound cannot be outrun by a merge admitted inside it.
 func TestADrainingOrchestratorAdmitsNothing(t *testing.T) {

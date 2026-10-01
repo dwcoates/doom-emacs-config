@@ -385,6 +385,18 @@ func (o *orchestrator) Drain(ctx context.Context) {
 
 	o.mu.Lock()
 	o.draining = true
+	// THE ADMISSION STEPS IN FLIGHT ARE COUNTED UNDER THIS LOCK. `draining`
+	// is set under the same lock enterAdmission registers under, so none
+	// begins after it, and a zero count here means there is nothing to wait
+	// for -- known now, not learned later from a goroutine racing the bound.
+	var admitted <-chan struct{}
+	if o.admissions > 0 {
+		if o.admissionsIdle == nil {
+			o.admissionsIdle = make(chan struct{})
+		}
+		admitted = o.admissionsIdle
+	}
+	inFlight := o.admissions
 	waits := make([]*terminal, 0, len(o.terminals))
 	for _, mark := range o.terminals {
 		waits = append(waits, mark)
@@ -412,25 +424,21 @@ func (o *orchestrator) Drain(ctx context.Context) {
 	bound := o.terminalDrainBound()
 	expired := time.NewTimer(bound)
 	defer expired.Stop()
-	// THE ADMISSION STEPS ALREADY IN FLIGHT FINISH FIRST. `draining` is set
-	// above under the same lock enterAdmission registers under, so none begins
-	// after it; the ones that began before it are a few store reads, and the
-	// state client must outlive them.
-	admitted := make(chan struct{})
-	go func() {
-		o.admissions.Wait()
-		close(admitted)
-	}()
-	select {
-	case <-admitted:
-	case <-expired.C:
-		log.Error(op, "an admission step outlived the drain's bound; the state client closes under it",
-			dlog.Context{"bound": bound.String()})
-		return
-	case <-ctx.Done():
-		log.Error(op, "the drain was cancelled while an admission step was in flight; the state client closes under it",
-			dlog.Context{"bound": bound.String()})
-		return
+	// THE ADMISSION STEPS ALREADY IN FLIGHT FINISH FIRST. The ones that began
+	// before the drain are a few store reads, and the state client must
+	// outlive them.
+	if admitted != nil {
+		select {
+		case <-admitted:
+		case <-expired.C:
+			log.Error(op, "an admission step outlived the drain's bound; the state client closes under it",
+				dlog.Context{"bound": bound.String(), "in_flight": inFlight})
+			return
+		case <-ctx.Done():
+			log.Error(op, "the drain was cancelled while an admission step was in flight; the state client closes under it",
+				dlog.Context{"bound": bound.String(), "in_flight": inFlight})
+			return
+		}
 	}
 	if len(waits) == 0 {
 		log.Debug(op, "the merge drain had no terminal work to wait for",

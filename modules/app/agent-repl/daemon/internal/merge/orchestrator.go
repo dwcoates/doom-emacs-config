@@ -107,10 +107,23 @@ type orchestrator struct {
 	// pumping guards one admission pump per repository.
 	pumping map[wsm.RepoKey]bool
 	// admissions counts the admission steps in flight -- the store reads and
-	// the admission write the pump makes before a run starts. A step is added
-	// only under mu while not draining (enterAdmission), and Drain waits for
-	// them, so no admission read reaches a state client the exit has closed.
-	admissions sync.WaitGroup
+	// the admission write the pump makes before a run starts. It is held under
+	// mu: a step is added only while not draining (enterAdmission) and
+	// removed by leaveAdmission, so Drain reads the count under the SAME lock
+	// it sets draining under, and no admission read reaches a state client the
+	// exit has closed.
+	//
+	// IT IS A COUNT UNDER mu, NOT A sync.WaitGroup, so "nothing in flight" is
+	// known synchronously. With a WaitGroup the drain could only learn that
+	// through a goroutine's Wait, which raced the drain's own bound: under
+	// load the bound fired first and the drain reported an admission that did
+	// not exist (measured: 2 in 2000 runs of
+	// TestTheDrainWarnsWhatOneExpiredBoundLeftUnstamped under 48 busy loops).
+	admissions int
+	// admissionsIdle is made by Drain when it finds admissions in flight, and
+	// closed by the leaveAdmission that brings the count to zero. Nil while
+	// nothing waits.
+	admissionsIdle chan struct{}
 	// async reports whether Enqueue starts the admission pump itself.
 	async bool
 	// draining reports that the daemon is on its way out: the admission pump
