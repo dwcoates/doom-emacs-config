@@ -1186,6 +1186,94 @@ func TestOneFailedBringUpDoesNotStopTheNext(t *testing.T) {
 	}
 }
 
+// bringUpBound bounds a bring-up test's wait on its own fakes. A healthy run
+// clears every barrier in microseconds; reaching it means the starts did not
+// overlap.
+const bringUpBound = 5 * time.Second
+
+// TestABootStartsItsWorkspacesConcurrently pins that no workspace's start
+// waits on another's: every start is held until ALL of them have begun, which
+// only a concurrent bring-up can satisfy. MEASURED: run back to back, the boot
+// of 2026-09-27 20:52:08 took 64.9s to bring four sessions up.
+func TestABootStartsItsWorkspacesConcurrently(t *testing.T) {
+	// Arrange.
+	const n = 3
+	var entered sync.WaitGroup
+	entered.Add(n)
+	allIn := make(chan struct{})
+	go func() { entered.Wait(); close(allIn) }()
+	h := newHarness(t, func(deps *Deps, h *harness) {
+		deps.StartSession = func(_ context.Context, ws ids.WorkspaceID) error {
+			h.noteStarted(ws)
+			entered.Done()
+			select {
+			case <-allIn:
+				return nil
+			case <-time.After(bringUpBound):
+				return fmt.Errorf("start of %q never saw the other starts begin", ws)
+			}
+		}
+	})
+	for range n {
+		h.register(t, t.TempDir(), sessionlock.StateFree)
+	}
+
+	// Act.
+	_, brought := h.runAndBringUp(t)
+
+	// Assert.
+	if len(brought.BroughtUp) != n || len(brought.BringUpFailed) != 0 {
+		t.Fatalf("BroughtUp = %v, BringUpFailed = %v, want all %d started together", brought.BroughtUp, brought.BringUpFailed, n)
+	}
+}
+
+// TestABringUpReportsWorkspacesInPendingOrder pins that the report does not
+// depend on which concurrent start finished first: the starts here finish in
+// REVERSE pending order, and the report still lists them as they were pending.
+func TestABringUpReportsWorkspacesInPendingOrder(t *testing.T) {
+	// Arrange: each start waits for the one pending after it to finish.
+	var order []ids.WorkspaceID
+	finished := map[ids.WorkspaceID]chan struct{}{}
+	next := map[ids.WorkspaceID]ids.WorkspaceID{}
+	h := newHarness(t, func(deps *Deps, h *harness) {
+		deps.StartSession = func(_ context.Context, ws ids.WorkspaceID) error {
+			defer close(finished[ws])
+			after, ok := next[ws]
+			if !ok {
+				return nil
+			}
+			select {
+			case <-finished[after]:
+				return nil
+			case <-time.After(bringUpBound):
+				return fmt.Errorf("start of %q never saw %q finish", ws, after)
+			}
+		}
+	})
+	for range 3 {
+		h.register(t, t.TempDir(), sessionlock.StateFree)
+	}
+	report, err := h.seq.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	for i, ws := range report.PendingBringUp {
+		order = append(order, ws.ID)
+		finished[ws.ID] = make(chan struct{})
+		if i > 0 {
+			next[report.PendingBringUp[i-1].ID] = ws.ID
+		}
+	}
+
+	// Act.
+	brought := h.seq.BringUp(context.Background(), report.PendingBringUp)
+
+	// Assert.
+	if fmt.Sprint(brought.BroughtUp) != fmt.Sprint(order) {
+		t.Fatalf("BroughtUp = %v, want the pending order %v", brought.BroughtUp, order)
+	}
+}
+
 func TestABootStartsNoSessionForAClosedRow(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
@@ -1344,7 +1432,7 @@ func TestAStartAlreadyBegunIsNotCutByTheExit(t *testing.T) {
 		deps.StartSession = func(ctx context.Context, ws ids.WorkspaceID) error {
 			cancel()
 			startCtxErr = ctx.Err()
-			h.started = append(h.started, ws)
+			h.noteStarted(ws)
 			return nil
 		}
 	})
