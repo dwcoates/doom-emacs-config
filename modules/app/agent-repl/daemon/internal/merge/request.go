@@ -113,28 +113,8 @@ func (o *orchestrator) Enqueue(ctx context.Context, req Request) error {
 func (o *orchestrator) checkSource(ctx context.Context, requester wsm.Workspace, source wsm.MergeSource) (wsm.MergeSource, error) {
 	ws := requester.ID
 	switch source.Kind {
-	case wsm.MergeSourceOwnBranch:
-		job, err := o.layoutFor(ctx, ws)
-		if err != nil {
-			return wsm.MergeSource{}, err
-		}
-		branch, err := o.checkedOutBranch(ctx, ws, job.Layout.SourceDir)
-		if err != nil {
-			return wsm.MergeSource{}, err
-		}
-		source.Branch = branch
-		return source, nil
-	case wsm.MergeSourceMergedUpstream:
-		job, err := o.layoutFor(ctx, ws)
-		if err != nil {
-			return wsm.MergeSource{}, err
-		}
-		branch, err := o.checkedOutBranch(ctx, ws, job.Layout.SourceDir)
-		if err != nil {
-			return wsm.MergeSource{}, err
-		}
-		source.Branch = branch
-		return source, nil
+	case wsm.MergeSourceOwnBranch, wsm.MergeSourceMergedUpstream:
+		return o.withCheckedOutBranch(ctx, ws, ws, source)
 	case wsm.MergeSourceWorkspace:
 		if source.Workspace == ws {
 			return wsm.MergeSource{}, refuse(ArmUnknownSourceWorkspace, ws, "a workspace's own branch is the own-branch source, not another workspace")
@@ -149,16 +129,7 @@ func (o *orchestrator) checkSource(ctx context.Context, requester wsm.Workspace,
 		if other.Repo != requester.Repo {
 			return wsm.MergeSource{}, refuse(ArmUnknownSourceWorkspace, ws, "workspace %s is in another repository", source.Workspace)
 		}
-		job, err := o.layoutFor(ctx, source.Workspace)
-		if err != nil {
-			return wsm.MergeSource{}, err
-		}
-		branch, err := o.checkedOutBranch(ctx, ws, job.Layout.SourceDir)
-		if err != nil {
-			return wsm.MergeSource{}, err
-		}
-		source.Branch = branch
-		return source, nil
+		return o.withCheckedOutBranch(ctx, ws, source.Workspace, source)
 	case wsm.MergeSourceBranch:
 		exists, err := o.deps.Git.BranchExists(ctx, requester.Dir, source.Branch)
 		if err != nil {
@@ -171,6 +142,22 @@ func (o *orchestrator) checkSource(ctx context.Context, requester wsm.Workspace,
 	default:
 		return wsm.MergeSource{}, fmt.Errorf("merge: a request for %s names the undeclared source %s", ws, source.Kind)
 	}
+}
+
+// withCheckedOutBranch answers source carrying the branch checked out in the
+// worktree of workspace of, refused for requester when of has no recorded
+// geometry or no branch checked out.
+func (o *orchestrator) withCheckedOutBranch(ctx context.Context, requester, of ids.WorkspaceID, source wsm.MergeSource) (wsm.MergeSource, error) {
+	job, err := o.layoutFor(ctx, of)
+	if err != nil {
+		return wsm.MergeSource{}, err
+	}
+	branch, err := o.checkedOutBranch(ctx, requester, job.Layout.SourceDir)
+	if err != nil {
+		return wsm.MergeSource{}, err
+	}
+	source.Branch = branch
+	return source, nil
 }
 
 // checkedOutBranch answers the branch checked out in a workspace's worktree,
