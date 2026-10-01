@@ -14,7 +14,6 @@ import (
 	shimv1 "agentrepl/proto/shim/v1"
 
 	"claude-repld/internal/dlog"
-	"claude-repld/internal/feedid"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/lockwatch"
 	"claude-repld/internal/shimclient"
@@ -162,7 +161,6 @@ type watcher struct {
 	// linkNow mirrors link for the lock-free readers; every write to link
 	// writes it under mu, so the mirror can never lead the truth.
 	linkNow atomic.Int32
-	addr    OutputAddress
 
 	turn *ids.TurnID
 	// factsTurn is the turn a PURE ATTACH's re-announced facts stood in
@@ -418,7 +416,6 @@ func start(ctx context.Context, ws ids.WorkspaceID, client shimclient.Client, se
 		ctx:    runCtx,
 		cancel: cancel,
 		link:   shimclient.LinkConnected,
-		addr:   rootAddress(),
 		agents: map[string]*agentWatch{},
 		shells: map[string]*shellWatch{},
 		live:   map[string]*liveItem{},
@@ -491,12 +488,6 @@ func start(ctx context.Context, ws ids.WorkspaceID, client shimclient.Client, se
 
 	go w.runLink()
 	return w, nil
-}
-
-// rootAddress is the default output address: the workspace's root feed,
-// top-level.
-func rootAddress() OutputAddress {
-	return OutputAddress{Feed: feedid.Feed{Root: true}}
 }
 
 // ---- the Watcher answers ----
@@ -582,22 +573,6 @@ func (w *watcher) Free() bool {
 // with nothing in flight is the freeness edge instead.
 func (w *watcher) freeLocked() bool {
 	return w.started && w.turn == nil && w.liveWorkLocked().Empty()
-}
-
-// SetOutputAddress installs the address rows are stamped with; nil restores
-// the root feed.
-func (w *watcher) SetOutputAddress(addr *OutputAddress) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	before := w.addr.Feed.Root
-	if addr == nil {
-		w.addr = rootAddress()
-	} else {
-		w.addr = *addr
-	}
-	w.log.Debug("daemon.sessionwatcher.set_output_address", "output address installed", dlog.Context{
-		"root": w.addr.Feed.Root, "state": "output_feed_root", "before": before, "after": w.addr.Feed.Root,
-	})
 }
 
 // SetMainAgent names the session's main agent, from StartTurnSuccess.prompt.agent.

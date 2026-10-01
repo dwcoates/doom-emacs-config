@@ -309,7 +309,7 @@ func (w *watcher) routeOpeningPageLocked(a *agentWatch, page *conversationv1.His
 		// agent's by construction, and the views were just told who that is.
 		agent = w.viewsMain
 	}
-	w.sinks.Feed.OnHistoryPage(w.ws, agent, feedPage(page, origin, a.catchUp), w.addr)
+	w.sinks.Feed.OnHistoryPage(w.ws, agent, feedPage(page, origin, a.catchUp))
 	// A SPAWN ON THIS PAGE OWES ITS CHILD A WATCH. The page's own frames drew
 	// the commission, but the created agent's conversation lives only on the
 	// child's own book — so every spawn the page carries opens the same watch
@@ -483,14 +483,14 @@ func (w *watcher) routeRetiredLocked(a *agentWatch, at *conversationv1.HistoryEn
 		w.log.Info("daemon.sessionwatcher.prompt_retired", "a retired prompt was routed to the feed for removal", dlog.Context{
 			"agent_id": prompt.GetAgent().GetValue(), "turn_id": prompt.GetId().GetValue(), "pointer": at.GetAt().GetValue(),
 		})
-		w.sinks.Feed.OnPromptRetired(w.ws, prompt, w.addr)
+		w.sinks.Feed.OnPromptRetired(w.ws, prompt)
 		return
 	}
 	if peer := entry.GetPeerMessage(); peer != nil {
 		w.log.Info("daemon.sessionwatcher.peer_message_retired", "a retired peer message was routed to the feed for removal", dlog.Context{
 			"agent_id": peer.GetAgent().GetValue(), "peer_id": peer.GetId(), "pointer": at.GetAt().GetValue(),
 		})
-		w.sinks.Feed.OnPeerMessageRetired(w.ws, peer, w.addr)
+		w.sinks.Feed.OnPeerMessageRetired(w.ws, peer)
 		return
 	}
 	if failed := entry.GetAgentFrame().GetUpdate().GetApiError(); failed != nil {
@@ -498,7 +498,7 @@ func (w *watcher) routeRetiredLocked(a *agentWatch, at *conversationv1.HistoryEn
 		w.log.Info("daemon.sessionwatcher.api_error_retired", "a retired api error was routed to the feed for withdrawal", dlog.Context{
 			"agent_id": agent.GetValue(), "turn_id": at.GetTurn().GetValue(), "pointer": at.GetAt().GetValue(),
 		})
-		w.sinks.Feed.OnApiErrorRetired(w.ws, agent, failed, at.GetTurn(), w.addr)
+		w.sinks.Feed.OnApiErrorRetired(w.ws, agent, failed, at.GetTurn())
 		return
 	}
 	w.log.Error("daemon.sessionwatcher.retired_unretirable", "a retired entry was of a kind the store never retires; nothing was removed", dlog.Context{
@@ -559,7 +559,7 @@ func (w *watcher) routePromptLocked(a *agentWatch, prompt *conversationv1.AgentP
 	w.log.Debug("daemon.sessionwatcher.prompt", "prompt routed to the feed", dlog.Context{
 		"agent_id": prompt.GetAgent().GetValue(), "turn_id": prompt.GetId().GetValue(),
 	})
-	w.sinks.Feed.OnPrompt(w.ws, prompt.GetAgent(), prompt, place, w.addr)
+	w.sinks.Feed.OnPrompt(w.ws, prompt.GetAgent(), prompt, place)
 }
 
 // adoptVendorTurnLocked opens the turn a VENDOR_STARTED prompt row announces.
@@ -629,7 +629,7 @@ func (w *watcher) routePeerMessageLocked(a *agentWatch, peer *conversationv1.Pee
 	w.log.Debug("daemon.sessionwatcher.peer_message", "peer message routed to the feed", dlog.Context{
 		"agent_id": peer.GetAgent().GetValue(), "sender": peer.GetSender(), "peer_id": peer.GetId(),
 	})
-	w.sinks.Feed.OnPeerMessage(w.ws, peer, turn, place, w.addr)
+	w.sinks.Feed.OnPeerMessage(w.ws, peer, turn, place)
 }
 
 // routeAgentFrameLocked routes one AgentFrame by its arm. THE UNIT UPSERTED IS
@@ -747,7 +747,7 @@ func (w *watcher) routeUpdateLocked(agent *conversationv1.AgentId, update *conve
 		w.log.Debug("daemon.sessionwatcher.question", "the agent is blocked on a choice", dlog.Context{
 			"agent_id": agent.GetValue(), "question_id": question.GetId().GetValue(),
 		})
-		w.sinks.Feed.OnQuestion(w.ws, agent, question, turn, place, w.addr)
+		w.sinks.Feed.OnQuestion(w.ws, agent, question, turn, place)
 		w.sinks.Footer.OnQuestion(w.ws, agent, question)
 		w.notifyQuestionLocked(question)
 
@@ -756,7 +756,7 @@ func (w *watcher) routeUpdateLocked(agent *conversationv1.AgentId, update *conve
 		w.log.Debug("daemon.sessionwatcher.permission", "the agent is blocked on consent", dlog.Context{
 			"agent_id": agent.GetValue(), "permission_id": permission.GetId().GetValue(),
 		})
-		w.sinks.Feed.OnPermission(w.ws, agent, permission, turn, place, w.addr)
+		w.sinks.Feed.OnPermission(w.ws, agent, permission, turn, place)
 		w.sinks.Footer.OnPermission(w.ws, agent, permission)
 		w.sinks.Sidebar.OnPermission(w.ws, agent, permission)
 		w.notifyPermissionLocked(permission)
@@ -770,7 +770,7 @@ func (w *watcher) routeUpdateLocked(agent *conversationv1.AgentId, update *conve
 		w.log.Warn("daemon.sessionwatcher.api_error", "a vendor request failed mid-turn", dlog.Context{
 			"agent_id": agent.GetValue(), "message": update.GetApiError().GetMessage(),
 		})
-		w.sinks.Feed.OnApiError(w.ws, agent, update.GetApiError(), turn, place, w.addr)
+		w.sinks.Feed.OnApiError(w.ws, agent, update.GetApiError(), turn, place)
 		w.sinks.Footer.OnApiError(w.ws, agent, update.GetApiError())
 
 	case update.GetContextBudgetWarning() != nil:
@@ -822,7 +822,7 @@ func (w *watcher) routeContextCutLocked(agent *conversationv1.AgentId, cut *conv
 		w.log.Info("daemon.sessionwatcher.context_cut", "a cut written while no stream stood was caught up; the footer and the topbar take it", ctx)
 	} else {
 		w.log.Debug("daemon.sessionwatcher.context_cut", "the conversation was cut; the footer clears its cut states", ctx)
-		w.sinks.Feed.OnContextCut(w.ws, agent, cut, at, turn, place, w.addr)
+		w.sinks.Feed.OnContextCut(w.ws, agent, cut, at, turn, place)
 	}
 	w.sinks.Footer.OnContextCut(w.ws, agent, cut)
 	w.sinks.Topbar.OnContextCut(w.ws, agent, cut)
@@ -840,7 +840,7 @@ func (w *watcher) routeContextCutLocked(agent *conversationv1.AgentId, cut *conv
 func (w *watcher) routeActivityLocked(agent *conversationv1.AgentId, act *conversationv1.AgentActivity, turn *conversationv1.TurnId, place *conversationv1.ConversationPlace) {
 	w.recordActivityLocked(act)
 
-	w.sinks.Feed.OnActivity(w.ws, agent, act, turn, place, w.addr)
+	w.sinks.Feed.OnActivity(w.ws, agent, act, turn, place)
 	w.sinks.Footer.OnActivity(w.ws, agent, act)
 	// THE TOPBAR SEES EVERY ACTIVITY. It shows an unmodeled tool as a warning,
 	// but it also accumulates the SESSION's token spend from the usage every
@@ -1141,7 +1141,7 @@ func (w *watcher) routeTerminalLocked(a *agentWatch, agent *conversationv1.Agent
 	w.log.Debug("daemon.sessionwatcher.agent_terminal", "an agent's stream ended", dlog.Context{
 		"agent_id": agent.GetValue(), "main": isMain, "failed": failure != nil,
 	})
-	w.sinks.Feed.OnAgentTerminal(w.ws, agent, turn, success, failure, place, w.addr)
+	w.sinks.Feed.OnAgentTerminal(w.ws, agent, turn, success, failure, place)
 	w.sinks.Footer.OnAgentTerminal(w.ws, agent, turn, success, failure)
 	w.sinks.Sidebar.OnAgentTerminal(w.ws, agent, turn, success, failure)
 
@@ -1267,7 +1267,7 @@ func (w *watcher) flushHeldTerminalLocked() {
 	w.log.Info("daemon.sessionwatcher.turn_end_unattributed", "a held terminal was routed unattributed; the main agent was never named", dlog.Context{
 		"agent_id": held.agent.GetValue(),
 	})
-	w.sinks.Feed.OnAgentTerminal(w.ws, held.agent, nil, held.success, held.failure, held.place, w.addr)
+	w.sinks.Feed.OnAgentTerminal(w.ws, held.agent, nil, held.success, held.failure, held.place)
 	w.sinks.Footer.OnAgentTerminal(w.ws, held.agent, nil, held.success, held.failure)
 	w.sinks.Sidebar.OnAgentTerminal(w.ws, held.agent, nil, held.success, held.failure)
 	if w.retireAgentLocked(held.agent.GetValue(), concludedAgentTerminal) {
@@ -1330,7 +1330,7 @@ func (w *watcher) routeDetachedWorkLocked(announcer *conversationv1.AgentId, wor
 		w.admitUnaddressableLocked(handle)
 		return
 	}
-	w.sinks.Feed.OnDetachedWork(w.ws, announcer, work, turn, place, w.addr)
+	w.sinks.Feed.OnDetachedWork(w.ws, announcer, work, turn, place)
 	w.sinks.Footer.OnDetachedWork(w.ws, announcer, work)
 	w.sinks.Sidebar.OnDetachedWork(w.ws, announcer, work)
 
@@ -1609,7 +1609,7 @@ func (w *watcher) rememberWorkLocked(activityID string, handle *conversationv1.D
 // routeBashLocked routes one detached shell frame, and concludes the shell at
 // its run's terminal.
 func (w *watcher) routeBashLocked(s *shellWatch, bash *conversationv1.AgentBash) {
-	w.sinks.Feed.OnBash(w.ws, s.work, bash, w.addr)
+	w.sinks.Feed.OnBash(w.ws, s.work, bash)
 	w.sinks.Footer.OnBash(w.ws, s.work, bash)
 
 	if bash.GetSuccess() == nil && bash.GetFailure() == nil {

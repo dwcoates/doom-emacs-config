@@ -386,12 +386,6 @@ func testFeedValue(feed feedid.Feed) string {
 // rootFeed is the workspace's top-level feed.
 func rootFeed() feedid.Feed { return feedid.Feed{Root: true} }
 
-// noAddress is the empty output address every sink call carries when no lease
-// holder has installed one.
-func noAddress() sessionwatcher.OutputAddress {
-	return sessionwatcher.OutputAddress{Feed: rootFeed()}
-}
-
 // mainAgent is the agent id the harness treats as the main thread.
 func mainAgent() *conversationv1.AgentId { return &conversationv1.AgentId{Value: "agent-main"} }
 
@@ -795,7 +789,7 @@ func TestAnUnplaceableAgentDrawsNothingAndIsReportedLoudly(t *testing.T) {
 
 	// Act: an activity for an agent whose creation was never seen.
 	h.resolver.OnActivity(testWorkspace, &conversationv1.AgentId{Value: "agent-ghost"},
-		responseSuccessActivity("unit-1", "orphaned prose"), nil, nil, noAddress())
+		responseSuccessActivity("unit-1", "orphaned prose"), nil, nil)
 
 	// Assert.
 	if rows := h.rows(rootFeed()); len(rows) != 1 {
@@ -874,7 +868,7 @@ func TestStandingTokenIsRetrievableAndNeverOnTheRow(t *testing.T) {
 			OfferedStanding: standing,
 			StartedAt:       &conversationv1.AgentActivityStartedAt{AtMs: h.nowMs},
 		}},
-	}, nil, nil, noAddress())
+	}, nil, nil)
 
 	// Assert: presence on the row, the token held daemon-side.
 	row := h.only(rootFeed())
@@ -914,7 +908,7 @@ func (h *harness) deliverPrompt(turn, text string) {
 				Block: &conversationv1.UserContentBlock_Text{Text: &conversationv1.TextBlock{Text: text}},
 			}},
 		}},
-	}, nil, noAddress())
+	}, nil)
 }
 
 // responseSuccessActivity is a settled prose block.
@@ -1035,7 +1029,7 @@ func TestAnAgenticTabsRowsNestUnderItByTheTurnsAddress(t *testing.T) {
 
 	// Act: the lease session's own conversation, in the merge's own turn.
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		responseSuccessActivity("unit-1", "fixing TestReconnect"), &conversationv1.TurnId{Value: "repair-1"}, nil, noAddress())
+		responseSuccessActivity("unit-1", "fixing TestReconnect"), &conversationv1.TurnId{Value: "repair-1"}, nil)
 
 	// Assert: the tab's content IS the sub-feed rows parented to it.
 	rows := h.rows(mergeFeed)
@@ -1114,7 +1108,7 @@ func TestEachWorkspaceHoldsItsOwnFeedUniverse(t *testing.T) {
 		Agent:  mainAgent(),
 		Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT,
 		Said:   &conversationv1.UserSaid{Content: &conversationv1.UserContent{}},
-	}, nil, noAddress())
+	}, nil)
 
 	// Assert: one row each, and neither leaked.
 	if rows := h.rows(rootFeed()); len(rows) != 1 {

@@ -337,7 +337,7 @@ func TestADeliveredPromptsRecipientCopyCarriesNoDeliveryArm(t *testing.T) {
 		Said: &conversationv1.UserSaid{Content: &conversationv1.UserContent{
 			Blocks: []*conversationv1.UserContentBlock{textBlock("also check the shim")},
 		}},
-	}, nil, noAddress())
+	}, nil)
 
 	// Assert: the recipient's copy states no delivery — the arm is the
 	// SENDER's row alone.

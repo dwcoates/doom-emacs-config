@@ -61,7 +61,7 @@ func addressedMergeTurn(h *harness, lease ids.LeaseID, turn ids.TurnID) feedid.R
 func (h *harness) answer(turn, unit, markdown string) {
 	h.t.Helper()
 	h.resolver.OnActivity(testWorkspace, mainAgent(), responseSuccessActivity(unit, markdown),
-		&conversationv1.TurnId{Value: turn}, nil, noAddress())
+		&conversationv1.TurnId{Value: turn}, nil)
 }
 
 func TestARepairTurnsRowsLandInTheMergeTab(t *testing.T) {
@@ -95,7 +95,7 @@ func TestARepairTurnDrawsNothingOnTheRootFeed(t *testing.T) {
 	// Act
 	h.deliverPrompt("repair-1", "resolve the conflict")
 	h.answer("repair-1", "unit-1", "resolved")
-	h.resolver.OnAgentTerminal(testWorkspace, mainAgent(), turnPtr("repair-1"), completed(""), nil, nil, noAddress())
+	h.resolver.OnAgentTerminal(testWorkspace, mainAgent(), turnPtr("repair-1"), completed(""), nil, nil)
 
 	// Assert
 	if rows := h.rows(rootFeed()); len(rows) != 0 {
