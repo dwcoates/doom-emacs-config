@@ -37,7 +37,6 @@ Status: PROPOSED, not built. Owner rulings needed on the questions at the end.
 | A1 | `requested` | `Deployer.Deploy` entry | forced or not |
 | A2 | `building` | `ScriptBuilder.Build` steps | current target, done/total, over `proto shim webapp daemon store sidecar lock` |
 | A3 | `installing` | `Deployer.install` | none |
-| A4 | `restarting_services` | `Deployer.services` | `store`+`sidecar`, or `sidecar` |
 | A5 | `reloading_elisp` | `Deployer.elisp` | count of Emacs clients told |
 | A6 | `handing_over` | `rollout.HandOver` | workspaces moved / total |
 | A6' | `restarting_daemon` | `rollout.Restart` (layout change) | running and fresh layout |
@@ -80,7 +79,10 @@ client's side, whatever moves under the hood:
 - A busy workspace is SCHEDULED FOR A DEPLOY, and from that moment:
   - every prompt sent to it is enqueued as a held prompt classified `after deploy`
     (see "Held prompts");
-  - no new work starts, so the work begun before the schedule drains;
+  - no new USER prompt starts work, so the work begun before the schedule drains;
+  - work the vendor starts on its own after the schedule (a new subagent, shell or monitor from a
+    turn already running) is NOT held: it is waited on like the rest, because only the user's
+    prompts are enqueued;
   - the moment it has fully drained, the transfer runs.
 - An unknown live-work set is NEVER free.
   - GAP today: `promptqueue.queue.inFlight` (`daemon/internal/promptqueue/bounce.go:967`) reads a
@@ -109,8 +111,13 @@ With a new daemon AND a new shim:
 
 - The client sees ONE transfer, from step 3 to step 6 (`deploying · transferring`).
 - With only a new shim, the same daemon runs steps 3, 5 and 6, and the client's connection does not move.
-- This REVERSES the 2026-09-27 ruling that a handover never waits on work
-  (`daemon/internal/rollout/handover.go:275`): a workspace now always drains first.
+- This CORRECTS a misrecorded ruling. The 2026-09-27 ruling was that a deploy does not wait on
+  work the user tries to ADD while it is scheduled (those prompts are enqueued); it was recorded as
+  "a handover never waits on work", and the mid-turn handover was built on that misreading.
+  - A deploy ALWAYS waits for the work in flight when it was scheduled, and for anything the
+    vendor starts from it.
+  - The misreading is codified at `daemon/internal/rollout/handover.go:275` and in the rollout's
+    tests and docs, and is corrected with this work.
 
 ## Held prompts (to be codified in `docs/USER-GUIDE.md` and `daemon/AGENTS.md`)
 
@@ -135,6 +142,19 @@ With a new daemon AND a new shim:
   delays this workspace's deploy.
   - On yes, it is delivered, and the workspace stays scheduled until that turn drains too.
 
+## The store and sidecar are never hot reloaded (owner ruling, 2026-10-01)
+
+- They are shared by every workspace, so they cannot drain one workspace at a time; hot reloading
+  them is not supported, which removes the problem instead of solving it.
+- A deploy still detects when either is out of date: their build differs from the fresh one
+  (`Deployer.serviceStale`, `daemon/internal/deploy/deploy.go:689`). An unchanged service is never restarted.
+- When either is out of date, automatic hot reloads are BLOCKED until a full Emacs restart.
+  - The sidebar shows, at its very bottom with a small gap from the edge, in red:
+    `Full emacs restart needed to unblock automatic agent-repl hot reloads`.
+  - The text is sized to fit on one line of the sidebar and never wraps.
+  - It stands until the restart has brought the stale service onto the fresh build.
+- Required: a full Emacs restart actually restarts a stale store or sidecar onto the installed build.
+
 ## Expanded footer: yes, a `deploy` panel
 
 - It earns a panel for the same reason merge tests do: several components progress in
@@ -145,7 +165,7 @@ With a new daemon AND a new shim:
 | Row | States |
 |---|---|
 | proto, shim, webapp, daemon, store, sidecar, lock | pending, building, built, failed |
-| store, sidecar | up to date, restarting, restarted, failed |
+| store, sidecar | up to date, out of date (Emacs restart needed) |
 | daemon | up to date, handing over, restarting, handed over |
 | shim (this workspace) | up to date, replacing, when idle |
 | webapp | up to date, reloading |
@@ -171,7 +191,6 @@ With a new daemon AND a new shim:
 1. When only the daemon is stale, should the shim still be replaced (one path, steps 1 to 6 always)?
    - Recommended: yes, because the workspace is drained, so the old shim holds nothing worth keeping.
    - It would delete the mid-turn adoption machinery (sealed moves, adoption windows, take-backs).
-2. The store and sidecar are shared by every workspace, so they cannot drain one workspace at a time.
-   - Should their restart wait until every workspace is drained, or can store clients reconnect
-     across the restart without losing the vendor path?
+2. While the store or sidecar is out of date, is EVERY hot reload blocked (daemon, shim and webapp
+   too), or only the store and sidecar part, with the rest still deployed?
 3. Should a failed build row open the archived build log (`BuildFailed.Log`) when clicked?
