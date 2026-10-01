@@ -1876,6 +1876,51 @@ func (f *fakeStore) GetShellRunClaims(_ context.Context, request *connect.Reques
 	}), nil
 }
 
+// GetRunSettlements answers the way the store does: a run is settled once a
+// terminal for it is DURABLE. The record here is every batch this fake
+// acknowledged, so a fresh sidecar pointed at the same fake sees exactly what
+// an earlier one made durable.
+func (f *fakeStore) GetRunSettlements(_ context.Context, request *connect.Request[storev1.GetRunSettlementsRequest]) (*connect.Response[storev1.GetRunSettlementsResponse], error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, "GetRunSettlements")
+	ended := map[string]bool{}
+	for _, batch := range f.acked {
+		for _, entry := range batch.GetBatch().GetEntries() {
+			if run, ok := terminalRunOf(entry); ok {
+				ended[run] = true
+			}
+		}
+	}
+	var settled []*storev1.RunSettlement
+	for _, run := range request.Msg.GetRunIds() {
+		if ended[run] {
+			settled = append(settled, &storev1.RunSettlement{RunId: run, EndedAtMs: 1})
+		}
+	}
+	return connect.NewResponse(&storev1.GetRunSettlementsResponse{
+		Result: &storev1.GetRunSettlementsResponse_Success{Success: &storev1.GetRunSettlementsSuccess{Settled: settled}},
+	}), nil
+}
+
+// terminalRunOf names the run an entry ENDS, the way the store's detached_work
+// row is ended: a detached shell's terminal bash frame, or a spawn activity
+// that settled (a backgrounded subagent's settle, whose activity id is the run).
+func terminalRunOf(entry *storev1.StoreEntry) (string, bool) {
+	if bash := entry.GetAgentUpdate().GetBash(); bash != nil {
+		if bash.GetFrame().GetSuccess() != nil || bash.GetFrame().GetFailure() != nil {
+			return bash.GetRun().GetValue(), true
+		}
+		return "", false
+	}
+	activity := entry.GetAgentUpdate().GetServeableFrame().GetAgentItem().GetAgentFrame().GetUpdate().GetActivity()
+	subagent := activity.GetSubagent()
+	if subagent.GetSuccess() != nil || subagent.GetFailure() != nil {
+		return activity.GetActivityId().GetValue(), true
+	}
+	return "", false
+}
+
 // claimShellRun records a claim the shim wrote, with the book holding its
 // run's launching call.
 func (f *fakeStore) claimShellRun(taskID, run, owner string) {
