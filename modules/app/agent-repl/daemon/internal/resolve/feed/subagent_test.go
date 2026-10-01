@@ -50,13 +50,7 @@ func (h *harness) bubbleRow(unit string, created *conversationv1.AgentId) *front
 		WS: testWorkspace, Feed: rootFeed(),
 		Row: feedid.RowKey{Kind: feedid.KindActivity, ID: unit, Sub: created.GetValue()},
 	}).GetValue()
-	for _, row := range h.rows(rootFeed()) {
-		if row.GetId().GetValue() == want {
-			return row
-		}
-	}
-	h.t.Fatalf("no bubble row for spawn %q", unit)
-	return nil
+	return h.rowByID(rootFeed(), want)
 }
 
 // bubbleOf reads whichever arm carries the head.
@@ -1152,12 +1146,8 @@ func (h *harness) commissionRow(unit string, created *conversationv1.AgentId) *f
 		WS: testWorkspace, Feed: feedid.Feed{Agent: created},
 		Row: feedid.RowKey{Kind: feedid.KindPrompt, ID: unit, Sub: "commission"},
 	}).GetValue()
-	for _, row := range h.rows(feedid.Feed{Agent: created}) {
-		if row.GetId().GetValue() == want {
-			return row
-		}
-	}
-	return nil
+	row, _ := h.findRow(feedid.Feed{Agent: created}, want)
+	return row
 }
 
 // ---- THE COMMISSION: the instruction, in the bubble's BODY ----
@@ -1662,10 +1652,8 @@ func TestASettledSpawnThatLandsBeforeItsStartDrawsNoUnaddressableRow(t *testing.
 		WS: testWorkspace, Feed: rootFeed(),
 		Row: feedid.RowKey{Kind: feedid.KindActivity, ID: "spawn-1"},
 	}).GetValue()
-	for _, row := range h.rows(rootFeed()) {
-		if row.GetId().GetValue() == unaddressable {
-			t.Fatalf("rows = %v, want no bubble row that addresses no sub-feed", rowIDs(h.rows(rootFeed())))
-		}
+	if _, ok := h.findRow(rootFeed(), unaddressable); ok {
+		t.Fatalf("rows = %v, want no bubble row that addresses no sub-feed", rowIDs(h.rows(rootFeed())))
 	}
 }
 

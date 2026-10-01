@@ -698,10 +698,8 @@ func TestADivergentPlaneSettleRetiresTheUnsettledPartialsRow(t *testing.T) {
 		}, nil), nil, nil)
 
 	// Assert: the partial's row is gone from the feed.
-	for _, row := range h.rows(rootFeed()) {
-		if row.GetId().GetValue() == partialID {
-			t.Fatal("the unsettled partial's row survived beside the settled whole")
-		}
+	if _, ok := h.findRow(rootFeed(), partialID); ok {
+		t.Fatal("the unsettled partial's row survived beside the settled whole")
 	}
 }
 

@@ -426,10 +426,6 @@ func TestAResetRecordsWhatItEmptied(t *testing.T) {
 // which is what a reset has to be judged against, not what is delivered.
 func (h *harness) holdsRow(feed feedid.Feed, id string) bool {
 	h.t.Helper()
-	for _, row := range h.rows(feed) {
-		if row.GetId().GetValue() == id {
-			return true
-		}
-	}
-	return false
+	_, ok := h.findRow(feed, id)
+	return ok
 }

@@ -48,16 +48,11 @@ func activityRowID(feed feedid.Feed, unit string) string {
 // drew none.
 func (h *harness) responseOn(feed feedid.Feed, unit string) *frontendv1.FeedResponse {
 	h.t.Helper()
-	want := activityRowID(feed, unit)
-	for _, row := range h.rows(feed) {
-		if row.GetId().GetValue() == want {
-			if resp := row.GetActivity().GetResponse(); resp != nil {
-				return resp
-			}
-		}
+	resp := h.rowByID(feed, activityRowID(feed, unit)).GetActivity().GetResponse()
+	if resp == nil {
+		h.t.Fatalf("the row for unit %q on feed %s is not a response", unit, testFeedValue(feed))
 	}
-	h.t.Fatalf("no response row for unit %q on feed %s", unit, testFeedValue(feed))
-	return nil
+	return resp
 }
 
 // supersededFlags answers every thinking row's flag among ROWS, by row id.

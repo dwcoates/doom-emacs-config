@@ -317,7 +317,7 @@ func TestAResponseBecomesSelectableWhenItSettles(t *testing.T) {
 	h := newHarness(t)
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
 		responseFrame("unit-1", &conversationv1.AgentResponseUpdate{NewMarkdown: "partial"}, nil), nil, nil)
-	streaming := h.rowByID(rootFeed(), h.responseRowID("unit-1"))
+	streaming := h.activityRow("unit-1")
 	if streaming.GetSelectable() != nil {
 		t.Fatalf("a streaming response was published selectable")
 	}
@@ -329,7 +329,7 @@ func TestAResponseBecomesSelectableWhenItSettles(t *testing.T) {
 		}, nil), nil, nil)
 
 	// Assert.
-	if h.rowByID(rootFeed(), h.responseRowID("unit-1")).GetSelectable() == nil {
+	if h.activityRow("unit-1").GetSelectable() == nil {
 		t.Fatalf("the settled response was published without selectable")
 	}
 }

@@ -71,13 +71,7 @@ func (h *harness) cutPlaced(at string, cut *conversationv1.ContextCut, atMs int6
 // orderOf is the order key a feed's row carries.
 func (h *harness) orderOf(feed feedid.Feed, id string) string {
 	h.t.Helper()
-	for _, row := range h.rows(feed) {
-		if row.GetId().GetValue() == id {
-			return row.GetOrder().GetKey()
-		}
-	}
-	h.t.Fatalf("row %s is not in the feed", id)
-	return ""
+	return h.rowByID(feed, id).GetOrder().GetKey()
 }
 
 // settledResponse is a settled prose block of UNIT, as a live activity.
@@ -292,12 +286,7 @@ func TestARestatementCarryingAnotherKeyIsAnErrorAndKeepsTheKey(t *testing.T) {
 	h.sendAt(settledResponse("unit-1", "first words"), 100)
 	id := h.responseRowID("unit-1")
 	key := h.orderOf(rootFeed(), id)
-	restated := &frontendv1.FeedRow{}
-	for _, row := range h.rows(rootFeed()) {
-		if row.GetId().GetValue() == id {
-			restated = cloneRow(t, row)
-		}
-	}
+	restated := cloneRow(t, h.rowByID(rootFeed(), id))
 	restated.Order = &frontendv1.FeedRowOrder{Key: "2-not-its-key"}
 	restated.Turn = &conversationv1.TurnId{Value: "turn-restated"}
 
@@ -480,10 +469,7 @@ func TestALateRowOlderThanTheLoadedPageIsServedInPlaceByTheNextPage(t *testing.T
 
 // responseRowID is the identity a root-feed activity row of UNIT carries.
 func (h *harness) responseRowID(unit string) string {
-	return testEncode(feedid.Ref{
-		WS: testWorkspace, Feed: rootFeed(),
-		Row: feedid.RowKey{Kind: feedid.KindActivity, ID: unit},
-	}).GetValue()
+	return activityRowID(rootFeed(), unit)
 }
 
 // turnEndedRowID is the identity a root-feed turn-ended row of TURN carries.
