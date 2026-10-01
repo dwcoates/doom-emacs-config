@@ -713,8 +713,8 @@ func TestFooterAllowanceComposedFromAccountUsageAndRateLimitStatus(t *testing.T)
 		}},
 	})
 	// ...and the VERDICT comes from rate_limit_status, for the same window. An
-	// ALLOWED verdict, because a warning or a refusal is the vendor speaking and
-	// stands as the salient rate-limit line over the enduring one.
+	// ALLOWED verdict, because a refusal blocks the session and moves the
+	// enduring line out of the idle cell.
 	f.shim.PushSessionUpdate(&conversationv1.SessionUpdate{
 		Update: &conversationv1.SessionUpdate_RateLimitStatus{RateLimitStatus: &conversationv1.SessionRateLimitStatus{
 			Status: &conversationv1.SessionRateLimitStatus_Allowed{Allowed: &conversationv1.SessionRateLimitAllowed{}},
