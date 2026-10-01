@@ -483,7 +483,9 @@ func TestAMissingConflictBriefFailsTheMergeLoudly(t *testing.T) {
 	t.Parallel()
 	// Arrange: the daemon's conflict brief is not there when it is needed.
 	s := newSourcedRepo(t)
-
+	// The missing brief is a fault the merge cannot continue past: its one
+	// ERROR record is this test's subject.
+	s.d.ExpectWarnings("daemon.merge.fault")
 	if err := os.Remove(filepath.Join(s.d.PromptsDir, "merge-conflict-resolve.md")); err != nil {
 		t.Fatalf("remove the brief: %v", err)
 	}
