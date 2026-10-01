@@ -520,7 +520,8 @@ func wakeupScheduled(at time.Time) *conversationv1.AgentActivity {
 // createdShell is a shell announced already detached.
 func createdShell(work, command string) *conversationv1.AgentDetachedWork {
 	return &conversationv1.AgentDetachedWork{
-		Work: &conversationv1.DetachedWorkId{Value: work},
+		Owner: mainAgent,
+		Work:  &conversationv1.DetachedWorkId{Value: work},
 		Origin: &conversationv1.AgentDetachedWork_Created{
 			Created: &conversationv1.DetachedWorkCreated{
 				WorkCreated: &conversationv1.DetachableWork{

@@ -23,6 +23,7 @@ import (
 func connected(h *harness) {
 	h.r.SetParticipants(testWS, true, true)
 	h.r.OnLink(testWS, shimclient.LinkConnected)
+	h.r.OnMainAgent(testWS, mainAgent)
 }
 
 // permissionStart is one open consent ask.

@@ -185,11 +185,11 @@ func TestALiveSubagentRaisesTheAgentsChip(t *testing.T) {
 	}
 }
 
-func TestTheAgentRowJumpsToTheEntryTheFeedPlaced(t *testing.T) {
-	// Arrange: the feed draws the bubble on the SPAWNING subagent's sub-feed.
+func TestTheMainAgentsRowJumpsToTheEntryTheFeedPlacedOnTheRoot(t *testing.T) {
+	// Arrange: the feed draws the main agent's spawn on the root feed.
 	h := newHarness(t)
 	connected(h)
-	placed := &frontendv1.FeedId{Value: "a|outer|activity|spawn-1|agent-2"}
+	placed := &frontendv1.FeedId{Value: "r|activity|spawn-1|agent-2"}
 	h.r.OnEntryPlaced(testWS, "spawn-1", placed)
 
 	// Act
@@ -273,7 +273,8 @@ func TestASubagentsTerminalRetiresItsRow(t *testing.T) {
 // footer hears of it -- the `created` origin.
 func detachedSubagentWork(work, created, subagentType string) *conversationv1.AgentDetachedWork {
 	return &conversationv1.AgentDetachedWork{
-		Work: &conversationv1.DetachedWorkId{Value: work},
+		Owner: mainAgent,
+		Work:  &conversationv1.DetachedWorkId{Value: work},
 		Origin: &conversationv1.AgentDetachedWork_Created{Created: &conversationv1.DetachedWorkCreated{
 			WorkCreated: &conversationv1.DetachableWork{
 				Work: &conversationv1.DetachableWork_Subagent{Subagent: &conversationv1.AgentSubagent{
@@ -291,7 +292,8 @@ func detachedSubagentWork(work, created, subagentType string) *conversationv1.Ag
 // movedSubagent announces an in-turn spawn LEAVING the turn under a handle.
 func movedSubagent(unit string) *conversationv1.AgentDetachedWork {
 	return &conversationv1.AgentDetachedWork{
-		Work: &conversationv1.DetachedWorkId{Value: unit},
+		Owner: mainAgent,
+		Work:  &conversationv1.DetachedWorkId{Value: unit},
 		Origin: &conversationv1.AgentDetachedWork_Detached{Detached: &conversationv1.DetachedWorkDetached{
 			DetachedFromId: &conversationv1.AgentActivityId{Value: unit},
 			Cause:          &conversationv1.DetachedWorkDetached_Requested{Requested: &conversationv1.DetachedCauseRequested{}},
@@ -629,7 +631,8 @@ func TestAShellDetachedFromAnInTurnUnitKeepsItsCommand(t *testing.T) {
 
 	// Act
 	h.r.OnDetachedWork(testWS, mainAgent, &conversationv1.AgentDetachedWork{
-		Work: &conversationv1.DetachedWorkId{Value: "work-9"},
+		Owner: mainAgent,
+		Work:  &conversationv1.DetachedWorkId{Value: "work-9"},
 		Origin: &conversationv1.AgentDetachedWork_Detached{
 			Detached: &conversationv1.DetachedWorkDetached{
 				DetachedFromId: &conversationv1.AgentActivityId{Value: "bash-1"},
@@ -1222,7 +1225,8 @@ func TestEveryDetachedWorkRowStatesExactlyOneJumpArm(t *testing.T) {
 			arrange: func(h *harness) {
 				h.r.OnEntryPlaced(testWS, "mon-1", &frontendv1.FeedId{Value: "r|activity|mon-1"})
 				h.r.OnDetachedWork(testWS, mainAgent, &conversationv1.AgentDetachedWork{
-					Work: &conversationv1.DetachedWorkId{Value: "mon-1"},
+					Owner: mainAgent,
+					Work:  &conversationv1.DetachedWorkId{Value: "mon-1"},
 					Origin: &conversationv1.AgentDetachedWork_Created{Created: &conversationv1.DetachedWorkCreated{
 						WorkCreated: &conversationv1.DetachableWork{Work: &conversationv1.DetachableWork_Monitor{
 							Monitor: monitorStart("mon-1", "watch the build", false).GetMonitor(),
@@ -1302,11 +1306,11 @@ func TestAPlacementAfterTheRowResolvesItsJump(t *testing.T) {
 	h.r.OnActivity(testWS, mainAgent, subagentStart("spawn-1", "agent-2", "Explore", "map"))
 
 	// Act: the feed draws the entry.
-	h.r.OnEntryPlaced(testWS, "spawn-1", &frontendv1.FeedId{Value: "a|outer|spawn-1"})
+	h.r.OnEntryPlaced(testWS, "spawn-1", &frontendv1.FeedId{Value: "r|activity|spawn-1"})
 
 	// Assert
 	row := h.view(t).GetExpanded().GetAgents().GetRows()[0]
-	if got := row.GetJump().GetEntry().GetValue(); got != "a|outer|spawn-1" {
+	if got := row.GetJump().GetEntry().GetValue(); got != "r|activity|spawn-1" {
 		t.Fatalf("jump entry = %q, want the placement the feed announced after the row opened", got)
 	}
 }
@@ -1332,19 +1336,19 @@ func TestAJumpResolutionIsRecordedOncePerChange(t *testing.T) {
 	}
 }
 
-func TestAJumpRecordStatesWhatTheRowIs(t *testing.T) {
+func TestAJumpRecordStatesWhatTheMainAgentsRowIs(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	connected(h)
 
 	// Act
-	h.r.OnActivity(testWS, &conversationv1.AgentId{Value: "outer-agent"}, subagentStart("spawn-1", "agent-2", "Explore", "map"))
+	h.r.OnActivity(testWS, mainAgent, subagentStart("spawn-1", "agent-2", "Explore", "map"))
 
 	// Assert
 	note := recordsOf(h.log.Records(), "daemon.footer.jump_resolution")[0]
 	want := dlog.Context{
 		"kind": "agent", "work_id": "spawn-1", "resolution": "not_drawn", "entry": "",
-		"provenance": "spawn_frame", "spawned_on": "outer-agent", "detached": false,
+		"provenance": "spawn_frame", "spawned_on": mainAgent.GetValue(), "detached": false,
 		"label": "Explore", "has_description": true, "tokens": uint64(0), "retired_before": false,
 	}
 	for k, v := range want {
