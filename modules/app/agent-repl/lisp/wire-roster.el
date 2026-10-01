@@ -141,6 +141,42 @@ unknown fields, and refusing this one would drop every roster push."
   (agent-repl-wire--decode-empty "RosterRowReviving" value)
   t)
 
+(defun agent-repl-wire-decode-roster-row-availability-pending (value)
+  "Decode VALUE as the empty `RosterRowAvailabilityPending'.
+The daemon is still bringing the session up: the workspace is not opened."
+  (agent-repl-wire--decode-empty "RosterRowAvailabilityPending" value))
+
+(defun agent-repl-wire-decode-roster-row-availability-available (value)
+  "Decode VALUE as the empty `RosterRowAvailabilityAvailable'.
+The workspace's shim link has connected: the workspace is opened."
+  (agent-repl-wire--decode-empty "RosterRowAvailabilityAvailable" value))
+
+(defun agent-repl-wire-decode-roster-row-availability-unavailable (value)
+  "Decode VALUE as the empty `RosterRowAvailabilityUnavailable'.
+The bring-up ended without a session: the workspace is opened and draws
+its start failure."
+  (agent-repl-wire--decode-empty "RosterRowAvailabilityUnavailable" value))
+
+(defconst agent-repl-wire-roster-row-availability-arms
+  '((pending :pending agent-repl-wire-decode-roster-row-availability-pending)
+    (available :available agent-repl-wire-decode-roster-row-availability-available)
+    (unavailable :unavailable agent-repl-wire-decode-roster-row-availability-unavailable))
+  "`RosterRowAvailability.availability''s arm table: (WIRE-KEY ARM-KEYWORD DECODER).")
+
+(defun agent-repl-wire-decode-roster-row-availability (value)
+  "Decode VALUE as `RosterRowAvailability', a plist `(:arm ARM :value nil)'.
+Whether the daemon has this workspace's session to offer: the roster opens
+a workspace's tab only once its row leaves `:pending'.  AN UNSET ONEOF IS
+INVALID and is rejected loudly, as for the status."
+  (let ((object (agent-repl-wire--object "RosterRowAvailability" value)))
+    (agent-repl-wire--check-keys "RosterRowAvailability" object
+                                 (mapcar #'car agent-repl-wire-roster-row-availability-arms))
+    (agent-repl-wire--decoded
+     "RosterRowAvailability"
+     (agent-repl-wire--decode-oneof
+      "RosterRowAvailability" 'availability object
+      agent-repl-wire-roster-row-availability-arms))))
+
 (defun agent-repl-wire-decode-roster-row-last-selected (value)
   "Decode VALUE as `RosterRowLastSelected', a plist `(:at-ms)'.
 The DURABLE instant the user last selected the workspace, epoch
@@ -436,14 +472,14 @@ Nested workspaces — a spawned family under its parent — in render order."
   (agent-repl-wire-decode-roster-row value))
 
 (defconst agent-repl-wire--roster-row-keys
-  (append '(workspace attention priority viewed reviving lastSelected name current children when detail closed)
+  (append '(workspace attention priority viewed reviving lastSelected availability name current children when detail closed)
           (mapcar #'car agent-repl-wire-roster-row-status-arms))
   "Every key `RosterRow' may carry: its own fields plus the 22 status arms.")
 
 (defun agent-repl-wire-decode-roster-row (value)
   "Decode VALUE as `RosterRow'.
 Returns `(:workspace W :attention A :priority P :viewed V :reviving R
-:last-selected L :name N :status
+:last-selected L :availability AV :name N :status
 S :current C :children ROWS :when WHEN :detail D :closed CLOSED)', with
 the message tree preserved as the contract spells it."
   (let ((object (agent-repl-wire--object "RosterRow" value)))
@@ -468,6 +504,9 @@ the message tree preserved as the contract spells it."
            :last-selected (agent-repl-wire--decode-optional-message
                            "RosterRow" 'lastSelected object
                            #'agent-repl-wire-decode-roster-row-last-selected)
+           :availability (agent-repl-wire--decode-message
+                          "RosterRow" 'availability object
+                          #'agent-repl-wire-decode-roster-row-availability)
            :name (agent-repl-wire--decode-message
                   "RosterRow" 'name object
                   #'agent-repl-wire-decode-roster-row-name)

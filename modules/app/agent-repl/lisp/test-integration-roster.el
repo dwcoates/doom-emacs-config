@@ -78,7 +78,8 @@ Every non-optional field is populated.  `when' carries an unset oneof and
             (current . ((current . :false)))
             (when . ())
             (detail . ())
-            (closed . ((closed . :false))))))
+            (closed . ((closed . :false)))
+            (availability . ((available . ()))))))
 
 (defun agent-repl-itest-roster--roster (rows &rest overrides)
   "Return a WorkspaceRoster protojson alist carrying ROWS in one repo section.
