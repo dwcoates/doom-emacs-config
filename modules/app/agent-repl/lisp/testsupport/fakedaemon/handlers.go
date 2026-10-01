@@ -107,6 +107,10 @@ func (s *fakeServer) SetWorkspacePriority(ctx context.Context, req *connect.Requ
 	return handleUnary[v1.SetWorkspacePriorityRequest, v1.SetWorkspacePriorityResponse](ctx, s, "SetWorkspacePriority", req.Msg)
 }
 
+func (s *fakeServer) FoldRepository(ctx context.Context, req *connect.Request[v1.FoldRepositoryRequest]) (*connect.Response[v1.FoldRepositoryResponse], error) {
+	return handleUnary[v1.FoldRepositoryRequest, v1.FoldRepositoryResponse](ctx, s, "FoldRepository", req.Msg)
+}
+
 func (s *fakeServer) CreateTask(ctx context.Context, req *connect.Request[v1.CreateTaskRequest]) (*connect.Response[v1.CreateTaskResponse], error) {
 	return handleUnary[v1.CreateTaskRequest, v1.CreateTaskResponse](ctx, s, "CreateTask", req.Msg)
 }

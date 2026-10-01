@@ -55,6 +55,20 @@ func TestTrayConvertsEachClassificationArm(t *testing.T) {
 			held: verdict(hold("t1", "who knows"), wsm.ArmClassificationError, "the judge answered neither token"),
 			want: "classification_error",
 		},
+		{
+			name: "unjudged under a daemon hold draws daemon_held",
+			held: func() wsm.HeldPrompt { h := hold("t1", "after the merge"); h.Hold = kindOf(wsm.HoldMerge); return h }(),
+			want: "daemon_held",
+		},
+		{
+			name: "a verdict under a daemon hold keeps its verdict",
+			held: func() wsm.HeldPrompt {
+				h := verdict(hold("t1", "then run the tests"), wsm.ArmHoldForTurnEnd, "no urgency")
+				h.Hold = kindOf(wsm.HoldMerge)
+				return h
+			}(),
+			want: "hold_for_turn_end",
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -170,6 +184,7 @@ func TestTrayConvertsEachHoldArm(t *testing.T) {
 		{name: "shutdown", kind: kindOf(wsm.HoldShutdown), schedule: "sched-1", want: "shutdown"},
 		{name: "session starting", kind: kindOf(wsm.HoldSessionStarting), want: "session_starting"},
 		{name: "build refresh", kind: kindOf(wsm.HoldBuildRefresh), want: "build_refresh"},
+		{name: "merge", kind: kindOf(wsm.HoldMerge), want: "merge"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -356,6 +371,8 @@ func classificationName(p *frontendv1.HeldPrompt) string {
 		return "uninterruptible_turn"
 	case *frontendv1.HeldPrompt_ClassificationError:
 		return "classification_error"
+	case *frontendv1.HeldPrompt_DaemonHeld:
+		return "daemon_held"
 	default:
 		return ""
 	}
@@ -370,6 +387,8 @@ func holdName(p *frontendv1.HeldPrompt) string {
 		return "session_starting"
 	case *frontendv1.HeldPrompt_BuildRefresh:
 		return "build_refresh"
+	case *frontendv1.HeldPrompt_Merge:
+		return "merge"
 	default:
 		return ""
 	}
@@ -470,6 +489,11 @@ func TestHeldBadgesComposeEveryStatus(t *testing.T) {
 			want: []wantBadge{{"after this turn", ""}, {"build refresh", "held for the build refresh"}},
 		},
 		{
+			name: "merge hold under daemon_held draws the hold's badge alone",
+			p:    &frontendv1.HeldPrompt{Classification: &frontendv1.HeldPrompt_DaemonHeld{DaemonHeld: &frontendv1.HeldPromptDaemonHeld{}}, Hold: &frontendv1.HeldPrompt_Merge{Merge: &frontendv1.HeldPromptMergeHold{}}},
+			want: []wantBadge{{"after the merge", "held until the merge ends; the workspace stays open for it"}},
+		},
+		{
 			name: "session starting hold",
 			p:    &frontendv1.HeldPrompt{Classification: holdForTurnEnd(false), Hold: &frontendv1.HeldPrompt_SessionStarting{SessionStarting: &frontendv1.HeldPromptSessionStartingHold{}}},
 			want: []wantBadge{{"after this turn", ""}, {"starting up", "held until the session is up"}},
@@ -503,6 +527,7 @@ func TestHeldBadgesLabelsAreOneToThreeWords(t *testing.T) {
 		&frontendv1.HeldPrompt{Classification: holdForTurnEnd(false), Hold: &frontendv1.HeldPrompt_Shutdown{Shutdown: &frontendv1.HeldPromptShutdownHold{ScheduleId: "s"}}},
 		&frontendv1.HeldPrompt{Classification: holdForTurnEnd(false), Hold: &frontendv1.HeldPrompt_BuildRefresh{BuildRefresh: &frontendv1.HeldPromptBuildRefreshHold{}}},
 		&frontendv1.HeldPrompt{Classification: holdForTurnEnd(false), Hold: &frontendv1.HeldPrompt_SessionStarting{SessionStarting: &frontendv1.HeldPromptSessionStartingHold{}}},
+		&frontendv1.HeldPrompt{Classification: &frontendv1.HeldPrompt_DaemonHeld{DaemonHeld: &frontendv1.HeldPromptDaemonHeld{}}, Hold: &frontendv1.HeldPrompt_Merge{Merge: &frontendv1.HeldPromptMergeHold{}}},
 	}
 
 	for _, p := range all {

@@ -2053,7 +2053,24 @@ func agentLocators(target discover.Target) []*storev1.AgentLocator {
 // terminals.
 func (s *sidecar) sweep() {
 	s.requireCursors("sweep")
-	s.concludeLost("lost sweep", s.tracker.Sweep(s.bootTimeMs(), s.now().UnixMilli()))
+	s.concludeLost("lost sweep", s.tracker.Sweep(s.bootTimeMs(), s.now().UnixMilli(), s.unseenBytes))
+}
+
+// unseenBytes answers whether a file holds bytes the reader has not yet seen:
+// its size now is past the size the reader's last poll of it observed, or the
+// reader has never polled it at all. A file that cannot be stated is the vanish
+// policy's, not the silence policy's, and answers false.
+func (s *sidecar) unseenBytes(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	w, ok := s.watchers[path]
+	if !ok || w.tailer == nil {
+		return info.Size() > 0
+	}
+	seen, sized := w.tailer.LastSize()
+	return !sized || info.Size() > seen
 }
 
 // emit writes inferred records as a single CURSOR-LESS batch: they were not

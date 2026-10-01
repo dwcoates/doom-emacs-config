@@ -117,7 +117,9 @@ func headRow(ws ids.WorkspaceID, lease ids.LeaseID, label string, startedMS int6
 			Glyph:   &frontendv1.FeedMergeGlyph{Icon: "merge"},
 			Label:   &frontendv1.FeedMergeLabel{Text: label},
 			Runtime: &frontendv1.FeedMergeRuntime{StartedAtMs: startedMS},
-			Fold:    &frontendv1.FeedMergeFold{},
+			// The bubble opens folded: the footer already carries the merge's
+			// live state, so the open body would only repeat it.
+			Fold: &frontendv1.FeedMergeFold{Folded: true},
 		},
 	}
 	switch r := result.(type) {

@@ -342,6 +342,16 @@ So the spawn itself is recorded:
   UNDETERMINED, exactly as an unreadable lock is: a live process that may bind
   the path at any instant is what a second shim must not race.
 
+THE RECORD CAN NOT LOSE THE RACE WITH ITS OWN DAEMON'S DEATH: the spawn gate.
+The fork and the pid's write are two steps, and a daemon SIGKILLed between them
+(measured 2026-10-01, ~5ms after the fork) left a shim recorded nowhere, which
+its successor then raced with a second shim. So the shim inherits the read end
+of a pipe on fd 4 (`--spawn-gate-fd 4`) and binds nothing until it reads one
+byte; the supervisor writes that byte only once `Spec.Spawned` has returned. A
+daemon that dies first closes the write end, the shim reads EOF and exits
+unbound (`shim.main.lifecycle` `spawn_gate_abandoned`). A shim that ever binds
+is therefore always one whose pid is on record.
+
 A predecessor's shim is not this daemon's own spawn, so
 `refuseAdoptingOurOwnSpawn` does not fire on it: the supervisor's `SpawnedFor`
 ledger is the in-memory `held` set of one process and holds nothing across a

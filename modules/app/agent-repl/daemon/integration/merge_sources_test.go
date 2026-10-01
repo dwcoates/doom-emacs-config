@@ -634,3 +634,58 @@ func TestARelaunchedDaemonReplaysAMirroredRepairTurnInItsTabAndOnTheRoot(t *test
 		t.Fatalf("replayed tab row = %v, want the live tab row %v", replayedTab, liveTab)
 	}
 }
+
+// TestARelaunchedDaemonDrawsTheLandedMergesBubbleAgain covers the bubble a new
+// daemon has no store to replay from: its head and its tabs are drawn again
+// from the daemon's durable record, at the identity and order key the live
+// reader saw.
+func TestARelaunchedDaemonDrawsTheLandedMergesBubbleAgain(t *testing.T) {
+	t.Parallel()
+	// Arrange: a landed merge, kept open so the workspace is still served.
+	s := newSourcedRepo(t)
+	root := s.f.watchRootFeed()
+	harness.CommitWork(t, s.f.ws.GetDir())
+	s.mergeAs(t, harness.OwnBranch(true))
+	head := awaitRow(t, s.f, root, "the merge's landed terminal", func(row *frontendv1.FeedRow) bool {
+		return row.GetActivity().GetMerge().GetSuccess() != nil
+	})
+	s.d.AwaitLandingDeployed()
+	liveTabs, _ := s.f.openFeed(head.GetId())
+
+	// Act: relaunch on the same state.
+	expectSessionKillRecords(s.d)
+	if _, err := s.d.Client().UpdateShutdownSchedule(s.d.Ctx(), connect.NewRequest(&agentreplv1.UpdateShutdownScheduleRequest{
+		Action: &agentreplv1.UpdateShutdownScheduleRequest_Now{Now: &agentreplv1.UpdateShutdownScheduleNow{
+			Reason: drainReasonOperator("the relaunch under test"),
+		}},
+	})); err != nil {
+		t.Fatalf("UpdateShutdownSchedule{now} = %v, want the immediate shutdown accepted", err)
+	}
+	s.d.AwaitExit()
+	d2 := harness.StartDaemon(t, harness.Opts{
+		StateDir:   s.d.StateDir,
+		ProfileDir: s.d.ProfileDir,
+		ExtraArgs:  []string{"--default-config-dir", s.d.DefaultConfigDir},
+	})
+	f2 := &fixture{d: d2, repo: s.repo, ws: s.f.ws, t: t}
+	if again := harness.Register(t, d2, s.f.ws.GetDir()); again.GetId() != s.f.ws.GetId() {
+		t.Fatalf("RegisterWorkspace after the relaunch = %q, want the same workspace %q", again.GetId(), s.f.ws.GetId())
+	}
+
+	// Assert: the head, landed, where it stood.
+	page, _ := f2.openFeed(nil)
+	var redrawn *frontendv1.FeedRow
+	for _, row := range page.GetSuccess().GetRows() {
+		if row.GetId().GetValue() == head.GetId().GetValue() {
+			redrawn = row
+		}
+	}
+	if redrawn.GetActivity().GetMerge().GetSuccess() == nil || redrawn.GetOrder().GetKey() != head.GetOrder().GetKey() {
+		t.Fatalf("the relaunched root's merge head = %v, want the landed head at key %q", redrawn, head.GetOrder().GetKey())
+	}
+	// Assert: every tab the live reader saw.
+	tabs, _ := f2.openFeed(head.GetId())
+	if got, want := len(tabs.GetSuccess().GetRows()), len(liveTabs.GetSuccess().GetRows()); got != want || want == 0 {
+		t.Fatalf("the relaunched bubble carries %d rows, want the live bubble's %d", got, want)
+	}
+}

@@ -103,7 +103,20 @@ var migrations = []migration{
 	{To: 13, Name: "workspaces_turn_result", Kind: MigrationAdditive, DDL: turnResultDDL},
 	{To: 14, Name: "held_prompts_act_and_coalesced", Kind: MigrationAdditive, DDL: heldPromptsActDDL},
 	{To: 15, Name: "merge_queue_source", Kind: MigrationAdditive, DDL: mergeQueueSourceDDL},
+	{To: 16, Name: "durable_feed_rows", Kind: MigrationAdditive, DDL: durableFeedRowsDDL},
+	{To: 17, Name: "repositories_folded", Kind: MigrationAdditive, DDL: repositoriesFoldedDDL},
 }
+
+// repositoriesFoldedDDL adds whether a repository's roster section is
+// collapsed (frontend.v1.RosterRepoSection.fold). Every existing repository
+// is expanded (0), which is how every section drew before the fold was the
+// daemon's.
+//
+// Like the other column-add steps this ALTER cannot reuse the fresh-file DDL:
+// the fresh-file table declares the column inline in schema.go.
+const repositoriesFoldedDDL = `
+ALTER TABLE repositories ADD COLUMN folded INTEGER NOT NULL DEFAULT 0;
+`
 
 // mergeQueueSourceDDL adds WHAT a queued merge lands (agentrepl.v1
 // MergeWorkspaceSource): its arm, the own-branch arm's keep_open, and the

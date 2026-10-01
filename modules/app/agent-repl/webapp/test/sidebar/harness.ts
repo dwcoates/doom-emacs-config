@@ -200,11 +200,14 @@ export function repoSection(init: {
   id: string;
   label?: string;
   rows?: RosterRow[];
+  /** The daemon-held fold; expanded unless said. */
+  collapsed?: boolean;
 }): RosterRepoSection {
   return create(RosterRepoSectionSchema, {
     key: { repository: { id: init.id, dir: `/repo/${init.id}` } },
     header: { label: { text: init.label ?? init.id } },
     rows: { rows: init.rows ?? [] },
+    fold: init.collapsed === true ? { case: "collapsed", value: {} } : { case: "expanded", value: {} },
   });
 }
 

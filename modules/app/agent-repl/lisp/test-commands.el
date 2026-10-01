@@ -600,8 +600,17 @@ order a close lands by."
   "Run BODY with the tab bar drawing TABS and CURRENT the active workspace.
 Binds `agent-repl-test-commands--switched' to the workspace switched to."
   (declare (indent 2))
+  `(agent-repl-test-commands--with-hidden-bar ,tabs nil ,current ,@body))
+
+(defmacro agent-repl-test-commands--with-hidden-bar (tabs hidden current &rest body)
+  "Run BODY with TABS on the roster, HIDDEN of them undrawn, CURRENT active.
+HIDDEN are the tabs of a repository the daemon holds collapsed: in the
+walk order, off the drawing.  Binds `agent-repl-test-commands--switched'."
+  (declare (indent 3))
   `(let ((agent-repl-test-commands--switched nil))
      (cl-letf (((symbol-function 'agent-repl-roster-tab-order) (lambda () ,tabs))
+               ((symbol-function 'agent-repl-roster-drawn-tab-order)
+                (lambda () (cl-remove-if (lambda (name) (member name ,hidden)) ,tabs)))
                ((symbol-function 'agent-repl--ws-current-name) (lambda () ,current))
                ((symbol-function 'agent-repl--ws-current-log-name) (lambda () ,current))
                ((symbol-function 'agent-repl--ws-switch)
@@ -1196,3 +1205,33 @@ order, which is why commands.el still defines no tab ordering of its own."
 (provide 'test-commands)
 
 ;;; test-commands.el ends here
+
+;;;; ---- A collapsed repository's tabs are off the bar ----
+
+(ert-deftest agent-repl-test-commands-numerals-skip-a-hidden-tab ()
+  "The numerals count only DRAWN tabs, so they stay contiguous."
+  (agent-repl-test-commands--with-hidden-bar '("a" "hidden" "b") '("hidden") "a"
+    (agent-repl-switch-to-workspace 2)
+    (should (equal agent-repl-test-commands--switched "b"))))
+
+(ert-deftest agent-repl-test-commands-switch-right-passes-over-a-hidden-tab ()
+  "Cycling right never lands on a hidden tab."
+  (agent-repl-test-commands--with-hidden-bar '("a" "hidden" "b") '("hidden") "a"
+    (agent-repl-switch-right)
+    (should (equal agent-repl-test-commands--switched "b"))))
+
+(ert-deftest agent-repl-test-commands-switch-left-passes-over-a-hidden-tab ()
+  "Cycling left never lands on a hidden tab, wrapping included."
+  (agent-repl-test-commands--with-hidden-bar '("a" "b" "hidden") '("hidden") "a"
+    (agent-repl-switch-left)
+    (should (equal agent-repl-test-commands--switched "b"))))
+
+(ert-deftest agent-repl-test-commands-cycling-from-a-hidden-current-steps-to-its-neighbour ()
+  "A current workspace whose tab is hidden steps to the next DRAWN tab."
+  (agent-repl-test-commands--with-hidden-bar '("a" "hidden" "b") '("hidden") "hidden"
+    (agent-repl-switch-right)
+    (should (equal agent-repl-test-commands--switched "b"))))
+
+(ert-deftest agent-repl-test-commands-cycle-target-is-nil-when-nothing-is-drawn ()
+  "Every tab hidden leaves no landing."
+  (should-not (agent-repl--cycle-target '("a" "b") nil "a" 1)))

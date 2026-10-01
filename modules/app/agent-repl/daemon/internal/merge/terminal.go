@@ -223,6 +223,7 @@ func (r *run) teardown(ctx context.Context, out outcome, terminal func()) {
 		log.Error(op, "could not release the merge lease", dlog.Context{
 			"workspace": string(r.ws), "lease": string(r.lease.ID), "error": err.Error()})
 	}
+	r.keepOpenForHeldPrompts(ctx, log)
 	r.o.deps.Queue.OnLeaseChanged(r.ws)
 	if terminal != nil {
 		terminal()
@@ -277,6 +278,35 @@ func (r *run) teardown(ctx context.Context, out outcome, terminal func()) {
 	}
 	r.selfReload(ctx, out)
 	r.o.kick(r.repo)
+}
+
+// keepOpenForHeldPrompts reads, ONCE THE LEASE IS RELEASED, whether a prompt
+// held under the merge marked its queue entry to keep the requester open
+// (wsm.bindMergeHold), and if so the requester no longer closes. After the
+// release no merge hold can be recorded, so the read is final: a prompt held
+// during the merge always has a session to run in once the merge lands.
+//
+// A read that fails keeps the requester open: closing removes its worktree,
+// which cannot be undone, and an open workspace the user did not need is one
+// they close themselves.
+func (r *run) keepOpenForHeldPrompts(ctx context.Context, log dlog.Logger) {
+	const op = "daemon.merge.teardown"
+	if r.subject.closes != r.ws {
+		return
+	}
+	source, err := r.o.sourceOf(ctx, r.repo, r.ws)
+	if err != nil {
+		log.Error(op, "could not read whether a held prompt keeps the requester open; it is kept open", dlog.Context{
+			"workspace": string(r.ws), "repo": string(r.repo), "error": err.Error()})
+		r.subject.closes = ""
+		return
+	}
+	if !source.KeepOpen {
+		return
+	}
+	log.Info(op, "a prompt held during the merge keeps the requester open", dlog.Context{
+		"workspace": string(r.ws), "lease": string(r.lease.ID)})
+	r.subject.closes = ""
 }
 
 // closeLanded ends the landed-and-closed workspace's session and removes its
@@ -659,7 +689,7 @@ func (o *orchestrator) publishAbandoned(ctx context.Context, ws ids.WorkspaceID,
 		dlog.Context{"workspace": string(ws), "cause": string(cause), "summary": summary})
 	if ledger != "" {
 		label := o.abandonedLabel(ctx, ws, source)
-		o.deps.Feed.UpsertSynthesized(ws, feedid.Feed{Root: true}, headRow(ws, ledger, label, o.nowMS(),
+		o.deps.Feed.UpsertDurable(ws, feedid.Feed{Root: true}, headRow(ws, ledger, label, o.nowMS(),
 			&frontendv1.FeedMergeError{
 				EndedAtMs: o.nowMS(),
 				Reason: &frontendv1.FeedMergeError_Abandoned{

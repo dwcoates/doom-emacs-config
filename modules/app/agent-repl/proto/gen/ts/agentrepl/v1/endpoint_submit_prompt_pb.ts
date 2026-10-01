@@ -365,12 +365,13 @@ export type SubmitPromptError = Message<"agentrepl.v1.SubmitPromptError"> & {
    */
   reason: {
     /**
-     * A merge is in flight for this workspace, and the prompt arrived
-     * AFTER the merge began. It is refused outright rather than held:
-     * once the workspace merges, it closes, so work produced by a
-     * post-merge-start prompt would be orphaned. Prompts already held
-     * when the merge began stay held and are unaffected. The composer
-     * keeps the text; the user resubmits after the merge resolves.
+     * A merge lease that REFUSES stands on this workspace. Since
+     * 2026-10-01 a merge HOLDS what is submitted while it runs
+     * (frontend.v1.HeldPrompt's `merge` hold arm), and a held prompt keeps
+     * the workspace open past the landing, so the daemon's own merges never
+     * answer with this arm. Only a refusing merge lease an older build
+     * wrote still produces it. The composer keeps the text; the user
+     * resubmits after the merge resolves.
      *
      * @generated from field: agentrepl.v1.SubmitPromptRefusedMerging merging = 1;
      */

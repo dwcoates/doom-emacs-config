@@ -3,6 +3,7 @@ package merge
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -1396,7 +1397,11 @@ func TestAQueuedMergeIsNeverRetiredByTheWorkspaceMovingOn(t *testing.T) {
 // landedAs runs the harness workspace's merge of one source to its landing.
 func landedAs(t *testing.T, h *harness, source wsm.MergeSource) {
 	t.Helper()
-	landing(h, 1)
+	if source.Kind == wsm.MergeSourceMergedUpstream {
+		mergedUpstream(h)
+	} else {
+		landing(h, 1)
+	}
 	if source.Kind == wsm.MergeSourceBranch {
 		h.git.refs["refs/heads/"+source.Branch] = "branch0000head"
 		h.git.mu.Lock()
@@ -1424,6 +1429,100 @@ func TestAnOwnBranchKeptOpenLandsWithoutClosingTheRequester(t *testing.T) {
 	}
 	if got := h.footer.last().State; got != StateMerged {
 		t.Fatalf("state = %q, want merged", got)
+	}
+}
+
+// TestAPromptHeldDuringTheMergeKeepsTheRequesterOpen covers the sources a
+// landing closes the requester for: a prompt held under the merge, bound to
+// its entry before the release, leaves the requester open and merged.
+func TestAPromptHeldDuringTheMergeKeepsTheRequesterOpen(t *testing.T) {
+	tests := []struct {
+		name   string
+		source wsm.MergeSource
+	}{
+		{"own branch", wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}},
+		{"merged upstream", wsm.MergeSource{Kind: wsm.MergeSourceMergedUpstream}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: a prompt is held the instant before the release.
+			h := newHarness(t)
+			h.db.beforeRelease = func(f *fakeDB) { f.bindHeldPrompt(theWorkspace) }
+
+			// Act.
+			landedAs(t, h, tt.source)
+
+			// Assert.
+			if h.db.closed[theWorkspace] || len(h.stoppedSessions) != 0 {
+				t.Fatalf("closed %v, stopped %v; want the requester kept open for its held prompt", h.db.closed, h.stoppedSessions)
+			}
+			if got := h.footer.last().State; got != StateMerged {
+				t.Fatalf("state = %q, want merged", got)
+			}
+			if _, ok := h.recordFor("info", "daemon.merge.teardown"); !ok {
+				t.Fatal("keeping the requester open was not recorded")
+			}
+		})
+	}
+}
+
+// TestAnUnreadableKeepOpenKeepsTheRequesterOpenLoudly covers the read failing
+// after the release: the requester is kept open, since closing cannot be
+// undone, and the failure is an ERROR record.
+func TestAnUnreadableKeepOpenKeepsTheRequesterOpenLoudly(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.db.beforeRelease = func(f *fakeDB) { f.queueReadErr = errors.New("disk I/O error") }
+
+	// Act.
+	landedAs(t, h, wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch})
+
+	// Assert.
+	if h.db.closed[theWorkspace] || len(h.stoppedSessions) != 0 {
+		t.Fatalf("closed %v, stopped %v; want the requester kept open", h.db.closed, h.stoppedSessions)
+	}
+	record, ok := h.recordFor("error", "daemon.merge.teardown")
+	if !ok || record.Context["error"] != "disk I/O error" {
+		t.Fatalf("the unreadable keep-open was not an ERROR naming its cause: %+v", record)
+	}
+}
+
+// TestTheMergeLeaseHoldsSubmissions covers the lease the merge takes: it holds
+// what the user submits rather than refusing it.
+func TestTheMergeLeaseHoldsSubmissions(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	landedAs(t, h, wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch})
+
+	// Assert.
+	h.db.mu.Lock()
+	defer h.db.mu.Unlock()
+	if len(h.db.releasedLeases) != 1 {
+		t.Fatalf("released leases = %v, want the merge's one", h.db.releasedLeases)
+	}
+	if got := h.db.policies[h.db.releasedLeases[0]]; got != wsm.PolicyHold {
+		t.Fatalf("the merge lease's policy = %v, want hold", got)
+	}
+}
+
+// TestTheMergeRestampsTheHoldsWhenItTakesItsLease covers the prompts held
+// before the merge began: the queue is told the lease changed while the merge
+// lease stands, so they wait for the merge and keep the requester open, and
+// told again once it is released.
+func TestTheMergeRestampsTheHoldsWhenItTakesItsLease(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	landedAs(t, h, wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch})
+
+	// Assert.
+	h.queue.mu.Lock()
+	defer h.queue.mu.Unlock()
+	if want := []bool{true, false}; !slices.Equal(h.queue.leaseEvents, want) {
+		t.Fatalf("lease events saw the merge lease %v, want %v", h.queue.leaseEvents, want)
 	}
 }
 

@@ -273,6 +273,10 @@ type Verbs interface {
 	MarkViewed(ctx context.Context, ws ids.WorkspaceID) error
 	// SetPriority sets or clears the roster priority.
 	SetPriority(ctx context.Context, ws ids.WorkspaceID, p *wsm.Priority) error
+	// FoldRepository records whether a repository's roster section is
+	// collapsed and republishes the roster. An unknown repository is refused
+	// with ArmUnknownRepository.
+	FoldRepository(ctx context.Context, repo ids.RepoID, folded bool) error
 	// CreateTask records a new task.
 	CreateTask(ctx context.Context, title string) (wsm.Task, error)
 	// UpdateTask retitles, completes or reopens a task.

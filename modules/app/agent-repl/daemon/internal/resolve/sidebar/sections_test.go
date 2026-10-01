@@ -372,3 +372,31 @@ func TestTheRepoGroupingDrawsEveryWorkspaceOfAGoodRegistry(t *testing.T) {
 		t.Fatal("a good registry recorded a repository-invariant assertion")
 	}
 }
+
+func TestRepositorySectionStatesItsFold(t *testing.T) {
+	tests := []struct {
+		name          string
+		folded        bool
+		wantCollapsed bool
+	}{
+		{"an expanded repository", false, false},
+		{"a collapsed repository", true, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			r, _ := newResolver(t)
+			reg := registry(workspace("w1", "one"))
+			reg.Repositories[0].Folded = tt.folded
+
+			// Act.
+			r.SetRegistry(reg)
+
+			// Assert: the arm is always set, and it is the recorded fold.
+			section := latest(t, r).GetRepository().GetSections()[0]
+			if (section.GetCollapsed() != nil) != tt.wantCollapsed || (section.GetExpanded() != nil) == tt.wantCollapsed {
+				t.Fatalf("fold = %v, want collapsed=%v", section.GetFold(), tt.wantCollapsed)
+			}
+		})
+	}
+}

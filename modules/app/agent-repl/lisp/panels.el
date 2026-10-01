@@ -96,6 +96,7 @@
 (declare-function agent-repl-link-primary "daemon-link" ())
 (declare-function agent-repl--force-tab-bar-redraw "status" ())
 (declare-function agent-repl-roster-tab-order "roster" ())
+(declare-function agent-repl-roster-drawn-tab-order "roster" ())
 (declare-function agent-repl-roster-move-tab-to-back "roster" (ws))
 
 (defun agent-repl--foreign-perspective-p (ws)
@@ -917,8 +918,14 @@ No-op when there is no current workspace, or when it holds no tab."
                          "workspace-push-to-back: ws=%s branch=no-tab" current)
       (let* ((without (remove current order))
              (reordered (agent-repl-roster-move-tab-to-back current))
+             ;; THE VACATED SLOT'S DRAWN OCCUPANT: a tab of a collapsed
+             ;; repository is never a landing, so the first drawn tab at or
+             ;; after the slot, else the last drawn one before it.
+             (drawn (agent-repl-roster-drawn-tab-order))
+             (drawn-p (lambda (name) (member name drawn)))
              (next (and without
-                        (nth (min old-index (1- (length without))) without))))
+                        (or (cl-find-if drawn-p (nthcdr old-index without))
+                            (car (last (cl-remove-if-not drawn-p without)))))))
         (agent-repl--log current
                          "workspace-push-to-back: ws=%s old-index=%s next=%s keep-focus=%s"
                          current old-index next keep-focus)

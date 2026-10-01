@@ -4442,3 +4442,20 @@ the user switched away and back."
                (lambda (_ws) (setq restored t))))
       (agent-repl--panels-on-view-created "ws-a")
       (should-not restored))))
+
+(ert-deftest agent-repl-test-panels-push-to-back-passes-over-a-hidden-tab ()
+  "The vacated slot's occupant is the next DRAWN tab, never a hidden one."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((agent-repl-roster--tab-order '("a" "hidden" "c"))
+          (agent-repl-roster--hidden-tabs '("hidden"))
+          (switched 'unset))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "a"))
+                ((symbol-function 'agent-repl--ws-update-names-cache) #'ignore)
+                ((symbol-function 'agent-repl--force-tab-bar-redraw) #'ignore)
+                ((symbol-function 'agent-repl--ws-switch)
+                 (lambda (ws &rest _) (setq switched ws))))
+        ;; Act
+        (agent-repl-workspace-push-to-back)
+        ;; Assert
+        (should (equal switched "c"))))))

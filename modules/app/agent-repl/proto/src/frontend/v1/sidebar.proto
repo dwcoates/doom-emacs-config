@@ -224,7 +224,24 @@ message RosterRepoSection {
   RosterSectionHeader header = 2;
   // The rows below the header.
   RosterRows rows = 3;
+  // WHETHER THE SECTION IS FOLDED. DAEMON-HELD (FoldRepository), because two
+  // surfaces draw it: the sidebar hides a collapsed section's rows, and the
+  // Emacs tab bar hides that repository's workspaces from its tabs, numbering
+  // and navigation. Never unset on a wire section.
+  oneof fold {
+    // The rows are shown, and the repository's workspaces have tabs.
+    RosterRepoSectionExpanded expanded = 4;
+    // The rows are hidden, and the repository's workspaces have no tabs on
+    // the bar (their sessions are untouched).
+    RosterRepoSectionCollapsed collapsed = 5;
+  }
 }
+
+// An expanded repository section. DELIBERATELY EMPTY: the arm is the fact.
+message RosterRepoSectionExpanded {}
+
+// A collapsed repository section. DELIBERATELY EMPTY: the arm is the fact.
+message RosterRepoSectionCollapsed {}
 
 // A repository's stable identity — the imported join key (and the echo
 // token CreateWorkspace takes back).

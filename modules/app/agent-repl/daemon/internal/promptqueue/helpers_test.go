@@ -3,6 +3,7 @@ package promptqueue
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"sync"
 	"testing"
@@ -83,6 +84,22 @@ type fakeDB struct {
 	coalescences int
 	// workspaceErr fails the workspace read when set.
 	workspaceErr error
+	// beforeHoldWrite, when set, runs under the fake's lock as a held prompt
+	// is written or restamped: the instant a merge's release can win the race.
+	beforeHoldWrite func(d *fakeDB)
+}
+
+// requireMergeLease stands for wsm.bindMergeHold's refusal: a merge hold is
+// written only while the workspace's merge lease stands. The caller holds the
+// lock.
+func (d *fakeDB) requireMergeLease(ws ids.WorkspaceID, kind *wsm.HoldKind) error {
+	if kind == nil || *kind != wsm.HoldMerge {
+		return nil
+	}
+	if lease, ok := d.leases[ws]; ok && lease.Holder == wsm.HolderMerge {
+		return nil
+	}
+	return fmt.Errorf("a merge hold on %s: %w", ws, wsm.ErrMergeLeaseGone)
 }
 
 func newFakeDB() *fakeDB {
@@ -145,6 +162,12 @@ func (d *fakeDB) PutHeldPrompt(_ context.Context, h wsm.HeldPrompt) error {
 	if d.putHeldErr != nil {
 		return d.putHeldErr
 	}
+	if d.beforeHoldWrite != nil {
+		d.beforeHoldWrite(d)
+	}
+	if err := d.requireMergeLease(h.Workspace, h.Hold); err != nil {
+		return err
+	}
 	// AN UPSERT BY TURN, as the real store's: a re-put keeps the entry's place,
 	// and a retired hold never resurrects.
 	prior, exists := d.held[h.Turn]
@@ -177,6 +200,12 @@ func (d *fakeDB) UpdateHeldPromptHold(_ context.Context, turn ids.TurnID, kind *
 	h, ok := d.held[turn]
 	if !ok {
 		return errors.New("no such hold")
+	}
+	if d.beforeHoldWrite != nil {
+		d.beforeHoldWrite(d)
+	}
+	if err := d.requireMergeLease(h.Workspace, kind); err != nil {
+		return err
 	}
 	h.Hold, h.ScheduleID = kind, scheduleID
 	return nil

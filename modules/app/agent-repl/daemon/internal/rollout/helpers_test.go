@@ -1031,6 +1031,12 @@ func newHarness(t *testing.T, adjust ...func(*Deps)) *harness {
 		}
 	})
 
+	// THE TEST IS THE DAEMON'S LIFETIME. Work the controller runs past the
+	// call that started it (a handover followed to its end, a transfer the
+	// registry runs) ends with the test and is joined before its state
+	// directory is removed, so nothing writes into a directory being deleted.
+	lifetime, endLifetime := context.WithCancel(context.Background())
+
 	order := &steps{}
 	freeness := newFakeFreeness()
 	h := &harness{
@@ -1148,7 +1154,9 @@ func newHarness(t *testing.T, adjust ...func(*Deps)) *harness {
 		Clock:            h.clock,
 		Progress:         h.progress,
 		Log:              log,
+		Lifetime:         lifetime,
 	}
+	h.registry.runCtx = lifetime
 	for _, a := range adjust {
 		a(&deps)
 	}
@@ -1161,6 +1169,11 @@ func newHarness(t *testing.T, adjust ...func(*Deps)) *harness {
 		t.Fatalf("New returned %T, want *controller", controllerAny)
 	}
 	h.c = c
+	t.Cleanup(func() {
+		endLifetime()
+		h.registry.running.Wait()
+		c.handoverDone.Wait()
+	})
 	return h
 }
 

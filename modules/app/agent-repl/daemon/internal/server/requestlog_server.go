@@ -357,6 +357,23 @@ func (s *requestLoggingServer) RestartWorkspace(
 	return s.server.RestartWorkspace(ctx, req)
 }
 
+func (s *requestLoggingServer) FoldRepository(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.FoldRepositoryRequest],
+) (resp *connect.Response[agentreplv1.FoldRepositoryResponse], err error) {
+	boundary, err := s.server.beginRequest(ctx, "FoldRepository", req.Header().Get(requestIDHeader), requestMessage(req))
+	if err != nil {
+		return nil, boundaryFailure(err)
+	}
+	boundary.log.Debug("daemon.server.fold_repository", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
+	defer func() {
+		boundary.log.Debug("daemon.server.fold_repository", "completed the rpc handler", boundary.completionContext(err))
+	}()
+	return s.server.FoldRepository(ctx, req)
+}
+
 func (s *requestLoggingServer) SetWorkspacePriority(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.SetWorkspacePriorityRequest],

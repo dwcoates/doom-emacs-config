@@ -695,7 +695,7 @@ func TestContainsAcceptsPlainAndInventoryClasses(t *testing.T) {
 	}
 }
 
-func TestTheComposerClosesOnBlueAndPurpleOnly(t *testing.T) {
+func TestTheComposerClosesOnBlueOnly(t *testing.T) {
 	// Arrange.
 	c := loadColors(t)
 
@@ -704,8 +704,8 @@ func TestTheComposerClosesOnBlueAndPurpleOnly(t *testing.T) {
 	sort.Strings(got)
 
 	// Assert.
-	if len(got) != 2 || got[0] != "blue" || got[1] != "purple" {
-		t.Fatalf("composer_closed_colors = %v, want [blue purple] (owner ruling, 2026-09-28)", got)
+	if len(got) != 1 || got[0] != "blue" {
+		t.Fatalf("composer_closed_colors = %v, want [blue] (owner ruling, 2026-10-01)", got)
 	}
 }
 

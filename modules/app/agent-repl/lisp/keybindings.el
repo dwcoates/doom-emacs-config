@@ -154,7 +154,7 @@ the module."
 ;; perspective list -- Doom's own `main' at slot 0, persp-mode's `none'
 ;; among them -- so `M-1' landed on the splash screen with no tab
 ;; highlighted and `M-2' on the FIRST tab.  Every chord here indexes
-;; `agent-repl-roster-tab-order' instead, the same list the bar is drawn
+;; `agent-repl-roster-drawn-tab-order' instead, the same list the bar is drawn
 ;; from, so the numerals and the picture cannot disagree.  `M-0' is left to
 ;; Doom.
 ;;

@@ -84,6 +84,24 @@ type fakeDB struct {
 	// retired records the displaced turns whose mark was claimed, which is
 	// what "exactly once" is asserted against.
 	retired []wsm.TurnID
+	// beforeRelease, when set, runs under the fake's lock as the lease
+	// release begins: the last instant a prompt can be held under the merge.
+	beforeRelease func(f *fakeDB)
+	// queueReadErr, when set, fails every MergeQueue read.
+	queueReadErr error
+}
+
+// bindHeldPrompt stands for wsm.bindMergeHold: a prompt held under the
+// workspace's merge marks its queue entry to keep the requester open. The
+// caller holds the lock.
+func (f *fakeDB) bindHeldPrompt(id ids.WorkspaceID) {
+	for repo, entries := range f.queues {
+		for i := range entries {
+			if entries[i].Workspace == id && entries[i].Source.Kind.ClosesRequester() {
+				f.queues[repo][i].Source.KeepOpen = true
+			}
+		}
+	}
 }
 
 func newFakeDB() *fakeDB {
@@ -151,6 +169,9 @@ func (f *fakeDB) ReleaseLease(_ context.Context, lease wsm.LeaseID) error {
 	defer f.mu.Unlock()
 	if f.shut {
 		return errStateClientClosed
+	}
+	if f.beforeRelease != nil {
+		f.beforeRelease(f)
 	}
 	for id, held := range f.leases {
 		if held.ID == lease {
@@ -372,6 +393,9 @@ func (f *fakeDB) RemoveMergeQueueEntry(_ context.Context, repo wsm.RepoKey, id i
 func (f *fakeDB) MergeQueue(_ context.Context, repo wsm.RepoKey) ([]wsm.MergeQueueEntry, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.queueReadErr != nil {
+		return nil, f.queueReadErr
+	}
 	return append([]wsm.MergeQueueEntry(nil), f.queues[repo]...), nil
 }
 
@@ -847,7 +871,9 @@ type fakeQueue struct {
 	submissions []promptqueue.Submission
 	disposition promptqueue.Disposition
 	err         error
-	leaseEvents int
+	// leaseEvents records, per OnLeaseChanged, whether the workspace's merge
+	// lease stood when the queue was told.
+	leaseEvents []bool
 }
 
 func (q *fakeQueue) Submit(_ context.Context, sub promptqueue.Submission) (promptqueue.Disposition, error) {
@@ -881,9 +907,12 @@ func (q *fakeQueue) OnTurnEnded(ids.WorkspaceID, ids.TurnID, wsm.TurnClose) {}
 func (q *fakeQueue) OnTurnAdopted(ids.WorkspaceID, ids.TurnID)              {}
 func (q *fakeQueue) OnTurnsEndedUnobserved(ids.WorkspaceID, []ids.TurnID)   {}
 func (q *fakeQueue) Reviving(ids.WorkspaceID) bool                          { return false }
-func (q *fakeQueue) OnLeaseChanged(ids.WorkspaceID) {
+func (q *fakeQueue) OnLeaseChanged(ws ids.WorkspaceID) {
+	q.db.mu.Lock()
+	lease, held := q.db.leases[ws]
+	q.db.mu.Unlock()
 	q.mu.Lock()
-	q.leaseEvents++
+	q.leaseEvents = append(q.leaseEvents, held && lease.Holder == wsm.HolderMerge)
 	q.mu.Unlock()
 }
 func (q *fakeQueue) RestoreHolds(context.Context) error { return nil }
@@ -984,7 +1013,11 @@ type synthesized struct {
 	At   int
 }
 
-func (f *fakeFeed) UpsertSynthesized(ws ids.WorkspaceID, feed feedid.Feed, row *frontendv1.FeedRow) {
+// UpsertDurable is the ONE way the orchestrator publishes a row: every merge
+// row is drawn again by a new daemon. The fake declares no UpsertSynthesized,
+// so a merge row published any other way panics on the embedded nil
+// interface rather than passing unrecorded.
+func (f *fakeFeed) UpsertDurable(ws ids.WorkspaceID, feed feedid.Feed, row *frontendv1.FeedRow) {
 	at := f.seq()
 	if f.onUpsert != nil {
 		f.onUpsert(row)

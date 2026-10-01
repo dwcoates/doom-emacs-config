@@ -43,6 +43,9 @@ type helperRecord struct {
 	Cwd  string            `json:"cwd"`
 	PID  int               `json:"pid"`
 	PGID int               `json:"pgid"`
+	// Gate is what the child read on the spawn gate before reporting:
+	// "opened", or "abandoned" on EOF.
+	Gate string `json:"gate"`
 }
 
 // TestMain runs the helper child when the switch is set, and the tests
@@ -73,7 +76,14 @@ func runHelper(mode string) {
 	}
 	cwd, _ := os.Getwd()
 	pgid, _ := syscall.Getpgid(os.Getpid())
-	record := helperRecord{Argv: os.Args, Env: env, Cwd: cwd, PID: os.Getpid(), PGID: pgid}
+	// THE SPAWN GATE FIRST, as the shim honors it: nothing is reported before
+	// the parent has made this process's pid durable.
+	gate := "abandoned"
+	var b [1]byte
+	if n, _ := os.NewFile(shimSpawnGateFD, "spawn-gate").Read(b[:]); n == 1 {
+		gate = "opened"
+	}
+	record := helperRecord{Argv: os.Args, Env: env, Cwd: cwd, PID: os.Getpid(), PGID: pgid, Gate: gate}
 
 	sink := os.NewFile(shimLogFD, "shim-log")
 	if sink != nil {

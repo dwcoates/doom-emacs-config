@@ -8,8 +8,9 @@
 //   │ ⚡ "stop and rebase"      queued · interject         [accept]        │  HeldPrompt
 //   │ ?  take this merge off the queue?              [dequeue] [keep]     │  HeldOffer
 //
-// NOT here: gates. A merge lease or a hibernated session REFUSES input, it
-// holds nothing — those are the footer's and the refusal arms'. A context cut
+// NOT here: gates. A hibernated session REFUSES input, it holds nothing —
+// that is the footer's and the refusal arms'. A merge HOLDS what is submitted
+// while it runs (the `merge` hold arm). A context cut
 // makes the running turn uninterruptible — that is a classification below,
 // not a hold. And nothing here is a conversation record: a queued prompt is
 // daemon-owned pending intent the vendor never saw, drawn beside the feed,
@@ -106,19 +107,24 @@ message HeldPrompt {
     // draws it, because removing error coverage needs the owner's sign-off;
     // seeing it means a producer has regressed.
     HeldPromptClassificationError classification_error = 8;
+    // NOTHING CLASSIFIED THIS ENTRY AND NOTHING WILL: the daemon condition
+    // the `hold` arm names is what holds it, and the classifier never runs on
+    // an entry a daemon condition holds. Set exactly when a hold arm is set
+    // and no verdict was reached before the hold was stamped, so a held card
+    // never claims a decision is being made when none is.
+    HeldPromptDaemonHeld daemon_held = 19;
   }
   // WHAT is holding this entry, when something other than a running turn is.
   //
   // An entry is held by at most one thing at a time: a drain lease, a
-  // pending revival and a build refresh are mutually exclusive session
-  // conditions, and an entry held by two of them at once
+  // pending revival, a build refresh and a merge are mutually exclusive
+  // session conditions, and an entry held by two of them at once
   // would have two different sets of exits and two different states to
   // render. Stating them as arms makes that impossible to express rather than
   // merely unlikely. No arm set means the entry is held by the ordinary case
   // — a turn is running — and the classifier decides when it is delivered.
   //
-  // THESE THREE ARE THE WHOLE SET, and they are entry-scoped. A merge lease is
-  // NOT a hold — it refuses, and holds nothing.
+  // THESE FOUR ARE THE WHOLE SET, and they are entry-scoped.
   oneof hold {
     // The daemon is draining toward a scheduled shutdown and is not admitting
     // new work.
@@ -128,6 +134,8 @@ message HeldPrompt {
     // The session's build is being refreshed onto a newer one before it takes
     // more work.
     HeldPromptBuildRefreshHold build_refresh = 12;
+    // A merge of this workspace is in flight and drives its session.
+    HeldPromptMergeHold merge = 20;
   }
   // Tag 10 and the name `keep_alive` are RETIRED and must not be revived. A
   // cache keep-alive is the shim's own mechanism: a real prompt that arrives
@@ -143,7 +151,8 @@ message HeldPrompt {
   // THE CARD'S STATUS BADGES, DAEMON-COMPOSED: one per standing fact, in this
   // order, and no others —
   //
-  //   1. the classification arm's badge, ALWAYS (the arm is never unset);
+  //   1. the classification arm's badge, unless the arm is daemon_held
+  //      (the hold arm's badge in 5 is what holds it, and the only words);
   //   2. the editing badge, iff `editing` is present;
   //   3. the coalesced badge, iff `coalesced` is present;
   //   4. the confirmation's badge, iff the arm is hold_for_turn_end and its
@@ -336,6 +345,20 @@ message HeldPromptShutdownHold {
 // workspace's tray, so naming a session here would join the entry to nothing
 // the client could not already reach.
 message HeldPromptSessionStartingHold {}
+
+// Held because a merge of this workspace is in flight: the merge drives the
+// session, so nothing the user submits reaches it until the merge ends. The
+// classifier NEVER runs on such an entry and there is NO force-through. The
+// exit is delivery once the merge ends, or cancel.
+//
+// A PROMPT HELD HERE KEEPS THE WORKSPACE OPEN: a merge that would close its
+// requester once it lands leaves it open instead, so the prompt has a session
+// to run in. DELIBERATELY EMPTY: the arm's presence is the whole fact.
+message HeldPromptMergeHold {}
+
+// No classifier ran and none will: a daemon condition holds the entry (the
+// `hold` arm). DELIBERATELY EMPTY: the hold arm says what holds it.
+message HeldPromptDaemonHeld {}
 
 // Held because the session's shim is being restarted onto the current build
 // at the turn boundary (automatic stale-shim refresh). The classifier never

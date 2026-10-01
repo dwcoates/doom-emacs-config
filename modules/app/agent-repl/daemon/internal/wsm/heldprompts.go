@@ -182,6 +182,11 @@ func (s *store) PutHeldPrompt(ctx context.Context, h HeldPrompt) error {
 		if err := refuseTombstoned(ctx, tx, h.Turn); err != nil {
 			return err
 		}
+		if h.Hold != nil && *h.Hold == HoldMerge {
+			if err := bindMergeHold(ctx, tx, h.Workspace); err != nil {
+				return err
+			}
+		}
 		var holdKind, schedule any
 		if h.Hold != nil {
 			holdKind = int(*h.Hold)
@@ -365,6 +370,15 @@ func (s *store) UpdateHeldPromptHold(ctx context.Context, turn TurnID, h *HoldKi
 	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
 		if err := requireStandingHold(ctx, tx, turn); err != nil {
 			return err
+		}
+		if h != nil && *h == HoldMerge {
+			var ws WorkspaceID
+			if err := tx.QueryRowContext(ctx, `SELECT workspace_id FROM held_prompts WHERE turn_id = ?`, turn).Scan(&ws); err != nil {
+				return err
+			}
+			if err := bindMergeHold(ctx, tx, ws); err != nil {
+				return err
+			}
 		}
 		_, err := tx.ExecContext(ctx, `UPDATE held_prompts SET hold_kind = ?, hold_schedule_id = ? WHERE turn_id = ?`, kind, schedule, turn)
 		return err

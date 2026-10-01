@@ -278,58 +278,64 @@ func (fw *mqFeedWatch) AwaitRow(what string, pred func(*frontendv1.FeedRow) bool
 }
 
 // ---------------------------------------------------------------------------
-// #39 — MergeLeaseRefusesSubmit. daemon.md §"Queue, holds, leases — contract
-// facts": "A prompt arriving after a merge began is refused (never held)."
-// Nothing parks any more, so the lease refuses for the merge's whole run. The
-// window is HELD, never raced: the workspace's configured before-merge prompt
-// parks on the fake vendor's turn gate (its text is submitted verbatim, so it
-// is exactly the gate text), and the submission arrives while it is parked.
+// #39 — MergeLeaseHoldsSubmit (owner ruling, 2026-10-01). A prompt arriving
+// after a merge began is HELD, never classified, and delivered once the merge
+// ends; holding it keeps the requester open past the landing, so the prompt
+// has a session to run in. The window is HELD, never raced: the workspace's
+// configured before-merge prompt parks on the fake vendor's turn gate (its
+// text is submitted verbatim, so it is exactly the gate text), and the
+// submission arrives while it is parked.
 // ---------------------------------------------------------------------------
 
 // mqLeaseGateText is the before-merge prompt that holds the merge open.
 const mqLeaseGateText = "hold this merge open until the e2e test opens the gate"
 
-func TestMergeLeaseRefusesSubmit(t *testing.T) {
+func TestMergeLeaseHoldsSubmitAndKeepsTheWorkspaceOpen(t *testing.T) {
 	t.Parallel()
-	// Arrange: a workspace whose merge sits in a gated before-merge prompt.
+	// Arrange: a workspace whose merge, which would close it, sits in a gated
+	// before-merge prompt.
 	gatePath := filepath.Join(t.TempDir(), "lease-gate")
 	repo := harness.NewRepo(t)
 	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{ExtraEnv: []string{
 		turnGatePathEnv + "=" + gatePath,
 		turnGateTextEnv + "=" + mqLeaseGateText,
 	}}})
-	// The refused submit is this test's own subject.
-	w.ExpectWarnings("daemon.promptqueue.submit")
 	repoRef := mqRepositoryRef(t, w, repo)
-	child := mqCreateChildWithActions(t, w, repoRef, "mq-lease-refuse", &agentreplv1.CreateWorkspaceMergeActions{
+	child := mqCreateChildWithActions(t, w, repoRef, "mq-lease-hold", &agentreplv1.CreateWorkspaceMergeActions{
 		BeforeWsMerge: mqSaid(mqLeaseGateText),
 	})
 	root := mqOpenFeedWatch(t, w, child, nil)
 	defer root.Close()
-	mqMerge(t, w, child, harness.OwnBranch(true))
+	mqMerge(t, w, child, harness.OwnBranch(false))
 	w.AwaitWorkspaceLogOperationCount(child.GetDir(), harness.OpTurnOpened, 1)
 
-	// Act: submit a fresh prompt to the SAME workspace while the merge runs.
-	resp, err := w.Client().SubmitPrompt(w.Ctx(), connect.NewRequest(&agentreplv1.SubmitPromptRequest{
-		Workspace:      child,
-		Said:           mqSaid("please stop and do something else"),
-		IdempotencyKey: newIdempotencyKey(t),
-		Origin:         e2ePromptOrigin,
-	}))
-
-	// Assert: refused outright, never held.
-	if err != nil {
-		t.Fatalf("SubmitPrompt while a merge is in flight = transport error %v, want a SubmitPromptError.merging arm", err)
-	}
-	if resp.Msg.GetError().GetMerging() == nil {
-		t.Fatalf("SubmitPrompt while a merge is in flight = %v, want SubmitPromptError.merging", resp.Msg)
-	}
-
-	// The gate opens and the merge runs to its end, so nothing is left running.
+	// Act: submit a fresh prompt to the SAME workspace while the merge runs,
+	// then let the merge run to its end.
+	turn := SubmitPrompt(t, w, child, "please do something else once the merge is done")
+	holds := w.WatchHolds(child)
+	defer holds.Close()
+	harness.AwaitView(t, w.Ctx(), holds, "the prompt held by the merge, unclassified", func(tray *frontendv1.DaemonHoldTray) bool {
+		for _, item := range tray.GetItems() {
+			if p := item.GetPrompt(); p.GetTurn().GetValue() == turn.GetValue() {
+				return p.GetMerge() != nil && p.GetDaemonHeld() != nil
+			}
+		}
+		return false
+	})
 	if err := os.WriteFile(gatePath, nil, 0o644); err != nil {
 		t.Fatalf("opening the turn gate = error %v, want the gate created", err)
 	}
-	root.AwaitRow("the merge bubble's terminal", mqConcluded)
+	head := root.AwaitRow("the merge bubble's terminal", mqConcluded)
+
+	// Assert: the merge landed, the held prompt ran as its own turn, and the
+	// workspace it ran in is still open.
+	if head.GetActivity().GetMerge().GetSuccess() == nil {
+		t.Fatalf("merge terminal = %v, want the merge landed", head.GetActivity().GetMerge())
+	}
+	AwaitTurnEnded(t, w, child, turn)
+	if _, err := os.Stat(child.GetDir()); err != nil {
+		t.Fatalf("the workspace a held prompt kept open lost its worktree: %v", err)
+	}
 }
 
 // mqSaid builds the plain-text UserSaid every raw SubmitPromptRequest in
