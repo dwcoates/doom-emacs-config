@@ -381,10 +381,15 @@ func mainAgent() *conversationv1.AgentId { return &conversationv1.AgentId{Value:
 // rows returns one feed's rows in order, for assertions.
 func (h *harness) rows(feed feedid.Feed) []*frontendv1.FeedRow {
 	h.t.Helper()
-	h.resolver.mu.Lock()
-	defer h.resolver.mu.Unlock()
-	s := h.resolver.state(testWorkspace)
-	f := h.resolver.feed(s, feed)
+	return feedRows(h.resolver, feed)
+}
+
+// feedRows answers one feed's rows in order, for any resolver a test holds.
+func feedRows(r *resolver, feed feedid.Feed) []*frontendv1.FeedRow {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s := r.state(testWorkspace)
+	f := r.feed(s, feed)
 	out := make([]*frontendv1.FeedRow, 0, len(f.order))
 	for _, id := range f.order {
 		out = append(out, f.rows[id])
@@ -409,7 +414,12 @@ func (h *harness) records() []dlog.Record { return h.log.Records() }
 // hasRecord reports whether a record with this level and operation was
 // captured.
 func (h *harness) hasRecord(level, operation string) bool {
-	for _, record := range h.records() {
+	return hasRecordIn(h.log, level, operation)
+}
+
+// hasRecordIn reports whether LOG holds a record at LEVEL for OPERATION.
+func hasRecordIn(log *dlog.TestLogger, level, operation string) bool {
+	for _, record := range log.Records() {
 		if record.Level == level && record.Operation == operation {
 			return true
 		}
