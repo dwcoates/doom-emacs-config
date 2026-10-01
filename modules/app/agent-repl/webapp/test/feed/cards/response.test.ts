@@ -2480,18 +2480,15 @@ describe("the data-driven final-answer green", () => {
       rowContext(),
     );
     el.classList.add("entry-selected");
-    // Act, Assert — the drawn bubble matches BOTH the green rule and the
-    // higher-specificity blue rule, and the blue rule is declared AFTER the green
-    // one in the stylesheet, so the cascade paints it blue while selected and
-    // falls back to green the moment the selection clears. (var()-resolved
-    // colours are not observable under jsdom; selector + order is the
-    // deterministic proof, mirrored from styles.test.ts.)
+    // Act, Assert — the drawn bubble matches BOTH the green rule and the blue
+    // one, and the blue one forces its color (`!important`), so the cascade
+    // paints it blue while selected and falls back to green the moment the
+    // selection clears. (var()-resolved colours are not observable under jsdom;
+    // selector + the forced declaration is the deterministic proof, mirrored
+    // from styles.test.ts.)
     expect(el.matches('.bubble.final-response:not([data-variant="thinking"])')).toBe(true);
-    expect(el.matches(".bubble.final-response.entry-selected")).toBe(true);
-    const green = stylesheet.indexOf('.bubble.final-response:not([data-variant="thinking"])');
-    const blue = stylesheet.indexOf(".bubble.final-response.entry-selected");
-    expect(green).toBeGreaterThanOrEqual(0);
-    expect(blue).toBeGreaterThan(green);
+    expect(el.matches(".bubble.entry-selected")).toBe(true);
+    expect(stylesheet).toMatch(/\.bubble\.entry-selected\s*\{\s*border-color:\s*var\(--selected-entry\)\s*!important;/);
   });
 });
 

@@ -9,6 +9,7 @@ import {
   FeedPageSchema,
   FeedRowRemovedSchema,
   FeedRowSchema,
+  FeedRowSelectableSchema,
   FeedSelectionSchema,
   FeedTurnEndedInterruptedInterjectionSchema,
   type FeedId,
@@ -56,6 +57,7 @@ import { orderFor, withOrder, withoutOrder } from "../feed-order.js";
 import { TailFollow, centerDelta, type CenterGeometry } from "../../src/scroll.js";
 import { responseCapLines } from "../../src/feed/cards/response.js";
 import { codeOf } from "../source-text.js";
+import { EXPANDED_CLASS } from "../../src/expand.js";
 
 /** A scroll box's rect, for fixtures whose box is never measured for a collapse. */
 const boxRect = (): DOMRect => ({ top: 0 }) as DOMRect;
@@ -2928,5 +2930,162 @@ describe("createFeedController: when a row was painted", () => {
 
     const record = await forwardedRecord(capture, "feed.rows-painted");
     expect(record.level.case).toBe("debug");
+  });
+});
+
+describe("createFeedController: selected and expanded are one state", () => {
+  /** A capped bubble, as drawBubble lays one out: the box under the bubble. */
+  function cappedBubble(): HTMLElement {
+    const el = document.createElement("div");
+    el.className = "bubble";
+    const box = document.createElement("div");
+    box.className = "bubble-scroll";
+    el.append(box);
+    return el;
+  }
+
+  /** A controller on FEED drawing capped bubbles, its expand hook recorded. */
+  function governing(feed: "root" | FeedId = "root") {
+    const h = harness();
+    const host = document.createElement("div");
+    document.body.replaceChildren(host);
+    const expands: Array<[string, boolean]> = [];
+    const controller = createFeedController({
+      ctx: h.ctx,
+      host,
+      feed,
+      renderers: stubRenderers({ response: cappedBubble }),
+      body: defaultBubbleBody,
+      revealRow: async () => false,
+      bubble: (row) => stubBubble(row),
+      bodyContext: { ctx: h.ctx, feed, row: create(FeedRowSchema, {}), revealRow: async () => false },
+      onSelectionExpand: (section, expanded) => {
+        expands.push([section.closest("[data-feed-row]")?.getAttribute("data-feed-row") ?? "", expanded]);
+      },
+    });
+    return { controller, host, expands };
+  }
+
+  /** A response row the daemon published selectable. */
+  function selectableRow(id: string): FeedRow {
+    const row = responseRow(id);
+    row.selectable = create(FeedRowSelectableSchema, {});
+    return row;
+  }
+
+  /** The box of row ID in HOST. */
+  function boxOf(host: HTMLElement, id: string): HTMLElement {
+    const box = host.querySelector<HTMLElement>(`[data-feed-row="${id}"] .bubble > .bubble-scroll`);
+    if (box === null) throw new Error(`row ${id} drew no bubble box`);
+    return box;
+  }
+
+  /** The daemon's selection of ID as a non-final bubble, or none. */
+  const bubbleSelection = (id?: string) =>
+    create(FeedSelectionSchema, {
+      selection:
+        id === undefined
+          ? { case: "none", value: { viewport: { case: "returnToTail", value: {} } } }
+          : { case: "bubble", value: { row: feedId(id) } },
+    });
+
+  it("stamps a root response row governed and, once the daemon says so, selectable", () => {
+    // Arrange
+    const { controller, host } = governing();
+    // Act
+    controller.upsert(selectableRow("r1"));
+    // Assert
+    const el = host.querySelector('[data-feed-row="r1"]');
+    expect([el?.hasAttribute("data-selection-governed"), el?.hasAttribute("data-selectable")]).toEqual([true, true]);
+  });
+
+  it("stamps nothing on a sub-feed's rows", () => {
+    // Arrange
+    const { controller, host } = governing(feedId("sub"));
+    // Act
+    controller.upsert(selectableRow("r1"));
+    // Assert
+    expect(host.querySelector('[data-feed-row="r1"]')?.hasAttribute("data-selection-governed")).toBe(false);
+  });
+
+  it("marks a bubble-arm selection with the selection mark", () => {
+    // Arrange
+    const { controller, host } = governing();
+    controller.upsert(selectableRow("r1"));
+    // Act
+    controller.applySelection(bubbleSelection("r1"));
+    // Assert
+    expect(host.querySelector('[data-feed-row="r1"]')?.getAttribute(SELECTED_ROW_ATTRIBUTE)).toBe("bubble");
+  });
+
+  it("expands the selected bubble", () => {
+    // Arrange
+    const { controller, host } = governing();
+    controller.upsert(selectableRow("r1"));
+    // Act
+    controller.applySelection(bubbleSelection("r1"));
+    // Assert
+    expect(boxOf(host, "r1").classList.contains(EXPANDED_CLASS)).toBe(true);
+  });
+
+  it("collapses the bubble a new selection moved off", () => {
+    // Arrange
+    const { controller, host } = governing();
+    controller.upsert(selectableRow("r1"));
+    controller.upsert(selectableRow("r2"));
+    controller.applySelection(bubbleSelection("r1"));
+    // Act
+    controller.applySelection(bubbleSelection("r2"));
+    // Assert
+    expect([boxOf(host, "r1"), boxOf(host, "r2")].map((b) => b.classList.contains(EXPANDED_CLASS))).toEqual([
+      false,
+      true,
+    ]);
+  });
+
+  it("collapses the selected bubble when the selection ends", () => {
+    // Arrange
+    const { controller, host } = governing();
+    controller.upsert(selectableRow("r1"));
+    controller.applySelection(bubbleSelection("r1"));
+    // Act
+    controller.applySelection(bubbleSelection());
+    // Assert
+    expect(boxOf(host, "r1").classList.contains(EXPANDED_CLASS)).toBe(false);
+  });
+
+  it("runs the host's expand hook for every box it opens or closes, and no other", () => {
+    // Arrange
+    const { controller, expands } = governing();
+    controller.upsert(selectableRow("r1"));
+    controller.upsert(selectableRow("r2"));
+    // Act
+    controller.applySelection(bubbleSelection("r1"));
+    controller.applySelection(bubbleSelection("r2"));
+    // Assert
+    expect(expands).toEqual([
+      ["r1", true],
+      ["r1", false],
+      ["r2", true],
+    ]);
+  });
+
+  it("answers the selected row", () => {
+    // Arrange
+    const { controller } = governing();
+    controller.upsert(selectableRow("r1"));
+    // Act
+    controller.applySelection(bubbleSelection("r1"));
+    // Assert
+    expect(controller.selectedRow()).toBe("r1");
+  });
+
+  it("reports a bubble arm with no row as malformed", () => {
+    // Arrange
+    const { controller } = governing();
+    // Act / Assert
+    expect(() =>
+      controller.applySelection(create(FeedSelectionSchema, { selection: { case: "bubble", value: {} } })),
+    ).toThrow(MalformedView);
   });
 });

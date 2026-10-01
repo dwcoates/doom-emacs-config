@@ -31,6 +31,7 @@ import {
 import { controlPlaneFailed } from "../failure/sink.js";
 import { createJumpCollapse } from "./jump-collapse.js";
 import { installBackgroundClear } from "./background-click.js";
+import { governedRowAt, installBubbleSelect } from "./bubble-selection.js";
 import { LEFT_VIEW_REQUEST, createSelectionVisibility } from "./selection-visibility.js";
 import { guardMalformed } from "../rpc/guard.js";
 import { selectFeedRow } from "./select-feed-row.js";
@@ -228,13 +229,24 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
   //
   // A READER'S TOGGLE MAKES THE ENTRY THEIRS: an entry a jump expanded and the
   // reader then toggled by hand is no longer the jump's to close.
-  const uninstallExpand = installClickExpand(host, undefined, (section, expanded) => {
-    afterSectionToggle(section);
-    releaseJump(section);
-    if (!expanded) return;
-    intentScroll?.arm(section);
-    centerExpandedItem(section);
-  });
+  //
+  // A ROOT-FEED PROMPT OR RESPONSE BUBBLE'S BOX IS THE SELECTION'S
+  // (bubble-selection.ts): a click on it selects instead of toggling, and the
+  // auto-collapse never closes it, because selected and expanded are one state
+  // the daemon owns.
+  const ownedBySelection = (section: HTMLElement): boolean => governedRowAt(section, host) !== null;
+  const uninstallExpand = installClickExpand(
+    host,
+    undefined,
+    (section, expanded) => {
+      afterSectionToggle(section);
+      releaseJump(section);
+      if (!expanded) return;
+      intentScroll?.arm(section);
+      centerExpandedItem(section);
+    },
+    ownedBySelection,
+  );
   const onItemExpanded = (event: Event): void => {
     if (!(event.target instanceof HTMLElement)) return;
     releaseJump(event.target);
@@ -258,7 +270,12 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
     onPainted: (ids, at) => {
       paints.report(ids, at);
     },
+    onSelectionExpand: afterSelectionToggle,
   });
+
+  // A CLICK ON A ROOT-FEED PROMPT OR RESPONSE BUBBLE selects it, or clears the
+  // selection when it is the selected one (owner ruling, 2026-10-01).
+  const uninstallSelect = installBubbleSelect(host, ctx, () => root.selectedRow());
 
   // A CLICK ON THE FEED OUTSIDE ANY BUBBLE ends the feed's selection
   // (owner ruling, 2026-09-23). It asks the daemon, which owns the selection;
@@ -771,6 +788,16 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
     refreshTitleFolds(section);
   }
 
+  /**
+   * What the selection's expand and collapse of a governed bubble re-measures:
+   * a click's toggle minus the centering, since the selection push centers its
+   * own row, and minus the jump release, since no reader toggled anything.
+   */
+  function afterSelectionToggle(section: HTMLElement, expanded: boolean): void {
+    afterSectionToggle(section);
+    if (expanded) intentScroll?.arm(section);
+  }
+
   /** The reader toggled something inside EL's row: the row is theirs now. */
   function releaseJump(el: HTMLElement): void {
     const row = el.closest<HTMLElement>(FEED_ROW_SELECTOR);
@@ -808,6 +835,7 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
     unobserve?.();
     intentScroll?.uninstall();
     uninstallExpand();
+    uninstallSelect();
     host.removeEventListener(ITEM_EXPANDED_EVENT, onItemExpanded);
     uninstallClear?.();
     overscan?.dispose();

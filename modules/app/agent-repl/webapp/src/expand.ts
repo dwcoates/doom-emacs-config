@@ -353,6 +353,7 @@ export function installClickExpand(
   feed: HTMLElement,
   selection: () => string = () => window.getSelection()?.toString() ?? "",
   afterToggle?: AfterToggle,
+  owned: OwnedSections = () => false,
 ): () => void {
   const onClick = (e: MouseEvent): void => {
     const target = e.target instanceof HTMLElement ? e.target : null;
@@ -362,15 +363,30 @@ export function installClickExpand(
       selectedText: selection(),
     });
     if (section === null) return;
+    if (owned(section)) {
+      log.debug("a click on a section another owner opens and closes; it is not toggled", {
+        operation: "expand.click-owned",
+        context: { kind: primaryClass(section) },
+      });
+      return;
+    }
     toggleSection(section, afterToggle);
   };
   feed.addEventListener("click", onClick);
-  const unregister = autoCollapseFor(feed.ownerDocument).register(feed, afterToggle);
+  const unregister = autoCollapseFor(feed.ownerDocument).register(feed, afterToggle, owned);
   return () => {
     feed.removeEventListener("click", onClick);
     unregister();
   };
 }
+
+/**
+ * Whether a capped section is opened and closed by ANOTHER owner than the
+ * click and the auto-collapse: on the root feed, a prompt or response bubble's
+ * box is the bubble selection's (bubble-selection.ts), so neither a click nor
+ * the auto-collapse may toggle it.
+ */
+export type OwnedSections = (section: HTMLElement) => boolean;
 
 /**
  * Why an open section closed on its own (see `AutoCollapse`): the reader
@@ -419,18 +435,18 @@ export function expandedSectionsOf(host: HTMLElement): HTMLElement[] {
  * not this owner.
  */
 export class AutoCollapse {
-  private readonly hosts = new Map<HTMLElement, AfterToggle | undefined>();
+  private readonly hosts = new Map<HTMLElement, { afterToggle?: AfterToggle; owned: OwnedSections }>();
 
   constructor(private readonly doc: Document) {}
 
   /**
-   * Put HOST's open sections under this owner, closed with AFTER_TOGGLE; the
-   * page-wide listeners are attached with the first host and detached with the
-   * last. Answers the unregister.
+   * Put HOST's open sections under this owner, closed with AFTER_TOGGLE,
+   * except those OWNED by another owner; the page-wide listeners are attached
+   * with the first host and detached with the last. Answers the unregister.
    */
-  register(host: HTMLElement, afterToggle?: AfterToggle): () => void {
+  register(host: HTMLElement, afterToggle?: AfterToggle, owned: OwnedSections = () => false): () => void {
     if (this.hosts.size === 0) this.attach();
-    this.hosts.set(host, afterToggle);
+    this.hosts.set(host, { afterToggle, owned });
     return () => {
       if (!this.hosts.delete(host)) return;
       if (this.hosts.size === 0) this.detach();
@@ -444,9 +460,10 @@ export class AutoCollapse {
    */
   collapseOutside(trigger: CollapseTrigger, inside: Node | null): number {
     let closed = 0;
-    for (const [host, afterToggle] of this.hosts) {
+    for (const [host, { afterToggle, owned }] of this.hosts) {
       for (const section of expandedSectionsOf(host)) {
         if (inside !== null && section.contains(inside)) continue;
+        if (owned(section)) continue;
         log.debug(`auto-collapsing an open ${primaryClass(section)} on ${trigger}`, {
           operation: "expand.auto-collapse",
           context: { trigger, kind: primaryClass(section), role: roleOf(section) },
