@@ -25,10 +25,8 @@ Status: PROPOSED, not built. Owner rulings needed on the questions at the end.
     `deploying` either; it keeps its own status (`disconnected`, `blocked`).
 - Everything a deploy does while the workspace still works stays an ACTIVITY on the
   workspace's own status (building, installing, waiting on its own work, deferred notes).
-- `deploying` is exclusive with `working` and `merging`, because a status is one arm.
-  - Gotcha: a handover never waits on work (`daemon/internal/rollout/handover.go:275`), so a
-    transfer can happen mid-turn while the shim keeps the turn running.
-  - For that window the strip draws `deploying · transferring daemons`, and the turn's activity is not drawn.
+- `deploying` is exclusive with `working` and `merging` BY CONSTRUCTION: a workspace transfers
+  only once it has drained (see "The per-workspace deploy"), so no turn or detached work runs during it.
 
 ## Every step, in order
 
@@ -60,53 +58,82 @@ Status: PROPOSED, not built. Owner rulings needed on the questions at the end.
 
 ### B. Per-workspace (status arm `deploying`, blue, only while this workspace is cut off)
 
-| # | Substatus | Stands while | Which workspaces |
+See "The per-workspace deploy" below for the lifecycle. The substatus is ONE operation from the
+client's side, whatever moves under the hood:
+
+| # | Substatus | Stands while |
+|---|---|---|
+| B1 | `transferring` | from the old route's cleanup until the new route to the vendor serves the workspace (steps 3 to 6 below) |
+
+- It carries the components moving (`daemon`, `shim`, or both) as typed data for the expanded
+  panel, but the status reads the same either way.
+- The new daemon restates it, with its original start time, for a client that joins late.
+
+## The per-workspace deploy (owner ruling, 2026-10-01)
+
+### Scheduling
+
+- A workspace is FREE when neither of these exists:
+  - a turn connection to the workspace's current shim;
+  - a detached-work connection to that shim (background agents, shells, monitors).
+- A free workspace transfers at once.
+- A busy workspace is SCHEDULED FOR A DEPLOY, and from that moment:
+  - every prompt sent to it is enqueued as a held prompt classified `after deploy`
+    (see "Held prompts");
+  - no new work starts, so the work begun before the schedule drains;
+  - the moment it has fully drained, the transfer runs.
+- An unknown live-work set is NEVER free.
+  - GAP today: `promptqueue.queue.inFlight` (`daemon/internal/promptqueue/bounce.go:967`) reads a
+    workspace with no watcher as free, and a successor judges freeness before it knows the
+    adopted shim's live work.
+  - Observed 2026-10-01 11:17:56: the old daemon recorded `detached_work: 1`, and one second
+    later the successor recorded `the workspace is free; bouncing it now` and killed the shim
+    with a background agent running.
+- GAP today: holding begins only when a bounce RUNS (`bounce.go:650`), not when it is
+  registered, so prompts sent while waiting become new turns and push the transfer back.
+
+### The transfer: one operation from the client's side
+
+With a new daemon AND a new shim:
+
+1. The new daemon is launched.
+2. The old daemon tells Emacs and the webapp that a new daemon is up and that it is cleaning up
+   this workspace's connections.
+   - The clients now EXPECT to lose the vendor path, so they do not report it as an unexpected
+     fault or a blue disconnected status.
+3. The old daemon disconnects from the old shim and shuts it down, then acks the clients that
+   the cleanup is complete.
+4. Emacs and the webapp connect to the new daemon.
+5. The new daemon launches the new shim and connects to it.
+6. The new daemon tells the clients that this workspace's deploy is complete.
+
+- The client sees ONE transfer, from step 3 to step 6 (`deploying · transferring`).
+- With only a new shim, the same daemon runs steps 3, 5 and 6, and the client's connection does not move.
+- This REVERSES the 2026-09-27 ruling that a handover never waits on work
+  (`daemon/internal/rollout/handover.go:275`): a workspace now always drains first.
+
+## Held prompts (to be codified in `docs/USER-GUIDE.md` and `daemon/AGENTS.md`)
+
+- Every held prompt lands in the feed's held-prompt section.
+- Every held prompt has exactly one well-defined classification, drawn as its badge.
+- A classification is either classifiable (a classifier decides when it goes) or not.
+
+| Classification | Classifiable | Badge | Force |
 |---|---|---|---|
-| B1 | `transferring_store` | the store (and with it the sidecar) is swapped for the fresh build | every workspace |
-| B2 | `transferring_sidecar` | the sidecar alone is swapped | every workspace |
-| B3 | `transferring_daemon` | from the moment the old daemon stops taking this workspace's prompts until the new daemon serves it (a handover, or the stop-then-start a layout change needs) | the one being moved |
-| B4 | `transferring_shim` | from the moment the stale shim is stood down until the fresh shim serves the session | that workspace |
+| classifying | yes, deciding | | |
+| interject | yes | | |
+| after tool call | yes | | |
+| after this turn | yes | red | sends now |
+| after a context cut (uninterruptible turn) | no | red | none |
+| after deploy (NEW, replaces build refresh and shutdown holds) | no | purple | asks first in the minibuffer |
+| session starting | no | teal | none |
 
-- One verb for every component (owner ruling, 2026-10-01): from the user's side each is the same
-  thing, the workspace moving from an old process to a new one, because no work is ever interrupted.
-  How each swap works (a handover, a prelaunched shim, a launchd restart) stays in the logs.
-- `waiting` (an unforced move waiting on this workspace's own work) stays the activity's arm,
-  because the workspace still works.
-- Each step is ONE period, because the workspace cares about the gap, not about its two ends.
-  - Inside it the old daemon pauses intake, hands off, and the new daemon reconnects the shim.
-  - Those edges are logged, and a stall at either one is drawn by the fault line it already has
-    (a refused workspace taken back, an expired reconnect window), never by a separate substatus.
-- B3 straddles the two daemons:
-  - the old daemon's streams end mid-period;
-  - the new daemon restates B3, with the period's original start time, for a client that joins
-    late, so the manifest carries that start time.
-- When the substatus ends, the workspace's own status returns (`working`, `idle`, ...).
-
-## Required mechanics (owner ruling, 2026-10-01)
-
-The status is cosmetic only if the deploy behaves like this, so these are part of the work.
-
-1. **A shim transfer starts only once the workspace is free**: no turn in flight and no detached
-   work (background agents, shells, monitors) still running.
-   - The gate exists: `promptqueue.queue.inFlight` (`daemon/internal/promptqueue/bounce.go:967`).
-   - GAP: a workspace with no watcher reads as free, and a successor daemon judges freeness before the
-     adopted shim's live work is known. Observed 2026-10-01 11:17:56: the old daemon recorded
-     `detached_work: 1`, and one second later the successor recorded `the workspace is free;
-     bouncing it now` and killed the shim with a background agent running.
-   - Fix: freeness is judged only after this daemon holds the shim's live-work facts (a latch the
-     judgment awaits, as `awaitReattachedFacts` does for a reclaim). An unknown live-work set is never free.
-2. **Every prompt that arrives after a transfer is scheduled is held, unclassified, until the
-   transfer is done.**
-   - GAP: holding (draining) begins only when the bounce RUNS (`bounce.go:650`), not when it is
-     registered to wait for freeness, so prompts sent while waiting are delivered as new turns and
-     keep pushing the transfer back.
-   - Fix: registering a deploy's bounce holds the intake at once; the classifier never runs on those prompts.
-3. **Such a held prompt shows the badge `after deploy`, purple**, instead of `after this turn` (red).
-   - Today a shim swap and a daemon handover both hold with `HoldBuildRefresh` (badge `build refresh`,
-     amber) and a scheduled shutdown with `HoldShutdown` (badge `restart hold`, amber),
-     `daemon/internal/resolve/holds/tray.go`.
-   - Fix: a deploy's holds draw `after deploy` in purple, the color that already means a merge or
-     deploy is moving the workspace.
+- Today `frontend.v1.HeldPrompt` carries the classification and the hold as two oneofs
+  (`proto/src/frontend/v1/daemon_hold.proto`); codifying the table may fold them into one.
+- The blank cells are filled from the current implementation when this is codified.
+- Forcing an `after deploy` prompt asks in the Emacs minibuffer first, saying that sending it
+  delays this workspace's deploy.
+  - On yes, it is delivered, and the workspace stays scheduled until that turn drains too.
 
 ## Expanded footer: yes, a `deploy` panel
 
@@ -141,7 +168,10 @@ The status is cosmetic only if the deploy behaves like this, so these are part o
 
 ## Questions for the owner
 
-1. While a turn is mid-flight during B3, should the strip draw `deploying` and hide the turn,
-   or should a transfer that carries a live turn stay `working` with a `transferring daemons` activity?
-   - The shim keeps the turn running, but no prompt can be sent until the successor adopts it.
-2. Should a failed build row open the archived build log (`BuildFailed.Log`) when clicked?
+1. When only the daemon is stale, should the shim still be replaced (one path, steps 1 to 6 always)?
+   - Recommended: yes, because the workspace is drained, so the old shim holds nothing worth keeping.
+   - It would delete the mid-turn adoption machinery (sealed moves, adoption windows, take-backs).
+2. The store and sidecar are shared by every workspace, so they cannot drain one workspace at a time.
+   - Should their restart wait until every workspace is drained, or can store clients reconnect
+     across the restart without losing the vendor path?
+3. Should a failed build row open the archived build log (`BuildFailed.Log`) when clicked?
