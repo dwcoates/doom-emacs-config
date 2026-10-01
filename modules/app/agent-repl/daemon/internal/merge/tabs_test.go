@@ -75,6 +75,31 @@ func TestHeadLivesOnTheRootFeed(t *testing.T) {
 	}
 }
 
+// TestHeadOpensFolded covers the bubble's first draw: the footer already
+// carries the merge's live state, so every result arm ships the bubble folded.
+func TestHeadOpensFolded(t *testing.T) {
+	tests := []struct {
+		name   string
+		result any
+	}{
+		{"update", nil},
+		{"success", &frontendv1.FeedMergeSuccess{}},
+		{"error", &frontendv1.FeedMergeError{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange and act.
+			row := headRow(theWorkspace, "lease-1", "branch", 1, tt.result)
+
+			// Assert.
+			fold := row.GetActivity().GetMerge().GetHead().GetFold()
+			if fold == nil || !fold.GetFolded() {
+				t.Fatalf("the head ships fold %+v, want folded", fold)
+			}
+		})
+	}
+}
+
 // TestQueueSnapshotFrontCarriesItsActiveTab covers what a waiting user learns:
 // the front's progress, in the same message the front's own bubble draws.
 func TestQueueSnapshotFrontCarriesItsActiveTab(t *testing.T) {
