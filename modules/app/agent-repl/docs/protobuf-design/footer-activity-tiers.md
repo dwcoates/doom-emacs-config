@@ -211,7 +211,7 @@ already hold `[killed]`), and this workspace's merge and restart stop waiting.
 
 | tier | ends when | kinds |
 | --- | --- | --- |
-| salient | the condition it describes stops being true; never a timer | every existing status-bound kind (fault under `disconnected` and `blocked`, start failed, a compaction RUNNING, retrying until a response lands, wakeup, gated call, question lead, cold gate cost, interrupting, blocked on user, authenticating, merging commit, close blocked, deploy update); the dead-query line (ends at the next prompt); the agent's push notification (ends at the next prompt); the context-budget warning and "compaction failed — ..." (end when a cut shrinks the context); a vendor rate-limit event, `allowed_warning` or `rejected` (ends when a later event reports the window allowed) |
+| salient | the condition it describes stops being true; never a timer | every existing status-bound kind (fault under `disconnected` and `blocked`, start failed, a compaction RUNNING, retrying until a response lands, wakeup, gated call, question lead, cold gate cost, interrupting, blocked on user, authenticating, merging commit, close blocked, deploy update); the dead-query line (ends at the next prompt); the agent's push notification (ends at the next prompt); the context-budget warning and "compaction failed — ..." (end when a cut shrinks the context) |
 | transient | its 10 s window lapses, or a newer transient replaces it | tool-call starts (`Bash: npm test`); task-tracker moves (`write tests · 3/7`); `submitting`, which states the delivery as it happens (held behind a turn, the held queue's size, classifying, interjecting, delivered); a concluded compaction; non-escalating faults; daemon Warn and Error records; session changes; a finished deploy; network-resume edges; a detached run finishing while the status is `background` |
 | quiet | the next feed item surfaces | the quiet-stretch line (`✅ Bash finished — handling result...`, `❌ Read failed — handling failure...`, `✅ Prompt delivered — awaiting response...`), legal under `working` and `background` |
 | enduring | never | ONE line: `usage`, or `unobserved` before any figure is read |
@@ -221,8 +221,9 @@ already hold `[killed]`), and this workspace's merge and restart stop waiting.
 - A transient covers only a quiet or enduring line, never a salient one. When
   it lapses, the line beneath shows again (or for the first time).
 - Within salient: the kind that explains the standing step first, then a
-  fault, then a deploy's progress, then a rate-limit event, then the push
-  notification, then the context-budget warning.
+  fault, then a deploy's progress, then the push notification, then the
+  context-budget warning. (A rate-limit event ranked between the deploy and
+  the notification until the owner dropped its line on 2026-10-01.)
 - Within transient: the newest wins, so submitting a prompt replaces any
   standing transient.
 - The 10 s window is never changed by what arrives next: the next event may
@@ -279,8 +280,12 @@ already hold `[killed]`), and this workspace's merge and restart stop waiting.
   transient" (2026-09-28) and an intermediate "enduring" ruling.
 - **The context-budget warning is salient.** SUPERSEDES its transient
   placement in landed change 1.
-- **Rate limiting is salient** as the vendor's rate-limit event; the usage
-  percentages stay enduring.
+- ~~**Rate limiting is salient** as the vendor's rate-limit event; the usage
+  percentages stay enduring.~~ **SUPERSEDED 2026-10-01 by the owner:** the
+  salient rate-limit line (`FooterStatusActivityRateLimit`) is dropped, because
+  the enduring usage line already carries the 5-hour and weekly figures. The
+  vendor's rate-limit events still feed those figures and their verdicts; the
+  `rate_limit` arm's tag is reserved in every salient oneof.
 - **The quiet tier is new**, its own tier between transient and enduring.
   The owner first said "lowest priority"; ranked below enduring it could never
   show (an enduring line always exists), and the owner confirmed the ranking
@@ -693,7 +698,9 @@ unchanged.
     same field names:
     - `rate_limit` (`frontend.v1.FooterStatusActivityRateLimit`: `window`,
       `verdict` of `allowed_warning` or `rejected`, `utilization`,
-      `resets_at_s`).
+      `resets_at_s`). DROPPED 2026-10-01 (owner): its tag is reserved in
+      every salient oneof, and the vendor's events feed the enduring usage
+      line only.
     - `notification` (`frontend.v1.FooterStatusActivityNotification`).
     - `context_budget` (`frontend.v1.FooterStatusActivityContextBudget`),
       which also carries "compaction failed — ...".
@@ -719,7 +726,8 @@ unchanged.
     - The notification ends at the next prompt.
     - The context budget ends at a successful cut, `/clear`, a concluded
       compaction, or a session switch (a new vendor session id).
-    - A rate-limit line ends at an `allowed` event for its window.
+    - A rate-limit line ends at an `allowed` event for its window (the line
+      was dropped on 2026-10-01).
   - The cold gate's answer carries the compaction's `Progress`, so a gate
     that ran a compaction announces it concluded; the gate retires before its
     answer clears, so no intermediate status flashes.
