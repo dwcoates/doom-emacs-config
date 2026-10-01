@@ -105,6 +105,7 @@ var migrations = []migration{
 	{To: 15, Name: "merge_queue_source", Kind: MigrationAdditive, DDL: mergeQueueSourceDDL},
 	{To: 16, Name: "durable_feed_rows", Kind: MigrationAdditive, DDL: durableFeedRowsDDL},
 	{To: 17, Name: "repositories_folded", Kind: MigrationAdditive, DDL: repositoriesFoldedDDL},
+	{To: 18, Name: "rolled_back_turns", Kind: MigrationAdditive, DDL: rolledBackTurnsDDL},
 }
 
 // repositoriesFoldedDDL adds whether a repository's roster section is

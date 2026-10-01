@@ -192,6 +192,13 @@ type placedEntry struct {
 // resolver must be provable without it), and a painter that tags its spans.
 func newHarness(t *testing.T) *harness {
 	t.Helper()
+	return newStoredHarness(t, nil)
+}
+
+// newStoredHarness is newHarness whose rolled-back turns live in ROLLEDBACK;
+// two harnesses sharing it are a daemon and its restarted successor.
+func newStoredHarness(t *testing.T, rolledBack RolledBackTurnStore) *harness {
+	t.Helper()
 	log := dlog.NewTestLogger()
 	painter := &fakePainter{}
 	h := &harness{
@@ -243,11 +250,12 @@ func newHarness(t *testing.T) *harness {
 			}
 			return out, nil
 		},
-		Now:       func() time.Time { return time.UnixMilli(h.nowMs) },
-		AfterFunc: h.clock.AfterFunc,
-		Faults:    h.faults,
-		Warnings:  h.warnings,
-		PageSize:  3,
+		Now:        func() time.Time { return time.UnixMilli(h.nowMs) },
+		AfterFunc:  h.clock.AfterFunc,
+		Faults:     h.faults,
+		Warnings:   h.warnings,
+		RolledBack: rolledBack,
+		PageSize:   3,
 		EntryPlaced: func(_ ids.WorkspaceID, unit string, row *frontendv1.FeedId) {
 			h.placed = append(h.placed, placedEntry{unit: unit, row: row.GetValue()})
 		},
