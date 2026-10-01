@@ -874,6 +874,12 @@ Owner rulings, 2026-09-30 (`internal/merge`; the contract is
   default branch in the main worktree, close the requester). An unknown
   source refuses with `unknown_source_workspace` / `unknown_branch`. No
   landing workspace is ever made.
+- **A WORKSPACE'S BRANCH IS THE ONE CHECKED OUT NOW** (owner ruling,
+  2026-10-01). For the own-branch, workspace and merged-upstream sources the
+  request records the branch checked out in that worktree when it is made
+  (`wsm.MergeSource.Branch`), never the branch the workspace was created on;
+  a detached HEAD is refused at once with `unknown_branch`. A row an older
+  build recorded with no branch reads the checked-out branch at admission.
 - **NO MERGE FACT BEFORE THE REQUESTING TURN ENDS.** The request is recorded
   durably (`wsm.RequestMerge`, state `requested`) and put in line
   (`wsm.QueueMerge`) only when the requester's turn in flight ends
