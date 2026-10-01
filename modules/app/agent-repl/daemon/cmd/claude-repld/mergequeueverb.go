@@ -21,74 +21,67 @@ import (
 	"claude-repld/internal/commandfile"
 	"claude-repld/internal/envc"
 	"claude-repld/internal/stateroot"
-	"claude-repld/internal/workspace"
 )
 
 // THE `merge-queue` VERB:
 //
+//	claude-repld merge-queue -own [-keep-open] [-wait] [-state-dir DIR]
 //	claude-repld merge-queue -dir WORKTREE [-wait] [-state-dir DIR]
-//	claude-repld merge-queue -branch BRANCH -repo MAIN_WORKTREE [-wait] [-state-dir DIR]
+//	claude-repld merge-queue -branch BRANCH [-wait] [-state-dir DIR]
+//	claude-repld merge-queue -pr-merged [-wait] [-state-dir DIR]
 //
-// It ENQUEUES a merge through the daemon's command-file ingress -- the same
-// ingress, and so the same agent-requested path (merge.RequestedByAgent), the
-// merge-queue skill's agents use -- and reads the outcome off the roster the
-// daemon already streams. It decides nothing and never touches git.
+// A MERGE RUNS IN THE WORKSPACE THAT ASKED FOR IT, and the verb asks FROM THE
+// CALLING WORKSPACE: the workspace whose worktree contains the caller's working
+// directory, found on the roster the daemon streams. It ENQUEUES through the
+// daemon's command-file ingress -- the same agent-requested path
+// (merge.RequestedByAgent) the merge-queue skill's agents use -- naming what
+// the calling workspace merges:
 //
-//   - `-dir` names a workspace's worktree.
-//   - `-branch` names a branch that is NO workspace (a subagent's). The verb
-//     asks the daemon to create a workspace cut from it,
-//     "merge-queue/<bare>-landing", and to merge THAT, in one command file:
-//     the queue merges workspaces, and a branch reaches it through one, so the
-//     conflict and test repairs have a session of their own to go to.
+//   - `-own` its own branch, closed once it lands unless `-keep-open`;
+//   - `-dir` another workspace's branch, by that workspace's worktree, which
+//     closes once it lands;
+//   - `-branch` a branch that is no workspace (a subagent's);
+//   - `-pr-merged` its own branch, already merged upstream.
 //
-// Without -wait it returns once the daemon shows the merge in flight. With
-// -wait it returns at the merge's outcome: LANDED (exit 0), PARKED awaiting
-// guidance (exitMergeParked, with the daemon's parked line), or FAILED
-// (exitMergeFailed, with where the daemon recorded the reason). A command the
-// daemon refused is quarantined by the ingress, and the verb reports that
-// (exitMergeRefused).
+// No workspace is ever created for a merge. The verb decides nothing and never
+// touches git.
 //
-// AN AGENT CANNOT WAIT ON ITS OWN WORKSPACE'S MERGE. An agent-requested merge
-// starts only once the requesting workspace's turn ends, and that turn is the
-// one running the verb; -wait from inside the target worktree is refused.
+// AN AGENT'S MERGE IS PUT IN LINE ONLY ONCE ITS TURN ENDS, and nothing about it
+// is reported before then. So without -wait the verb returns as soon as the
+// daemon has APPLIED the command (it retires the file to applied/), or REFUSED
+// it (quarantine/, exitMergeRefused). With -wait it returns at the merge's
+// outcome -- LANDED (exit 0) or FAILED with its area (exitMergeFailed) -- and
+// -wait is REFUSED while the calling workspace has a turn in flight: that turn
+// is the one that would wait, and the merge cannot start until it ends.
 
 // mergeQueueVerb is the verb's name on the command line.
 const mergeQueueVerb = "merge-queue"
 
-// The verb's outcome exits beyond exitSuccess (landed, or enqueued without
+// The verb's outcome exits beyond exitSuccess (landed, or requested without
 // -wait) and exitFailure (the verb could not do its job).
 const (
-	// exitMergeParked is a merge that stopped awaiting the user's guidance.
-	exitMergeParked = 4
 	// exitMergeFailed is a merge that failed.
 	exitMergeFailed = 5
 	// exitMergeRefused is a command the daemon refused and quarantined.
 	exitMergeRefused = 6
 )
 
-// landingPrefix and landingSuffix spell the workspace a `-branch` merge lands
-// through. The suffix keeps its worktree directory apart from the branch's own,
-// which the same naming convention would otherwise put at the same path.
-const (
-	landingPrefix = "merge-queue/"
-	landingSuffix = "-landing"
-)
-
 // The roster status arms the verb reads, spelled as the proto's oneof field
 // names (frontend.v1.RosterRow.status).
 const (
 	statusAbsent     = "absent"
-	statusEnqueuing  = "merge_enqueuing"
 	statusQueued     = "merge_queued"
 	statusMerging    = "merging"
-	statusConflict   = "merge_conflict"
 	statusMergeFail  = "merge_failed"
 	statusMergedDone = "merged"
 )
 
-// worktreeLinePrefix leads the one output line naming the merged workspace's
-// worktree, which the merge-queue skill's driver reads to fetch a failure's
-// reason from that workspace's log.
+// turnArms are the roster arms of a workspace with a turn in flight.
+var turnArms = map[string]bool{"submitting": true, "thinking": true, "clearing": true, "compacting": true, "permission": true}
+
+// worktreeLinePrefix leads the one output line naming the requesting
+// workspace's worktree, which the merge-queue skill's driver reads to fetch a
+// failure's reason from that workspace's log.
 const worktreeLinePrefix = "merge-queue: worktree: "
 
 // errStreamEnding is the daemon standing the roster stream down in a planned
@@ -118,15 +111,11 @@ type mergeQueueEnv struct {
 	poll time.Duration
 }
 
-// mergeQueueTarget is what one invocation merges.
-type mergeQueueTarget struct {
-	// label names the merge on the verb's output.
+// mergeQueueSource is what one invocation merges: the merge entry's source
+// fields, and its label on the verb's output.
+type mergeQueueSource struct {
 	label string
-	// dir is the canonical worktree directory whose roster row reports the
-	// merge.
-	dir string
-	// entries is the command file.
-	entries []commandfile.Entry
+	entry commandfile.Entry
 }
 
 // connectMergeQueueDaemon is the production reader over the daemon's rpcs.
@@ -190,10 +179,12 @@ func runMergeQueueVerb(ctx context.Context, args []string, dial mergeQueueDialer
 	}
 	fs := flag.NewFlagSet(mergeQueueVerb, flag.ContinueOnError)
 	fs.SetOutput(errOut)
-	dir := fs.String("dir", "", "the worktree of the workspace to merge")
-	branch := fs.String("branch", "", "a branch that is no workspace (a subagent's), merged through a workspace cut from it")
-	repo := fs.String("repo", "", "with -branch: the repository's main worktree")
-	wait := fs.Bool("wait", false, "wait for the outcome: landed (0), parked (4) or failed (5)")
+	own := fs.Bool("own", false, "merge the calling workspace's own branch")
+	keepOpen := fs.Bool("keep-open", false, "with -own: keep the calling workspace open once its branch lands")
+	dir := fs.String("dir", "", "merge another workspace's branch, by its worktree; it closes once it lands")
+	branch := fs.String("branch", "", "merge a branch that is no workspace (a subagent's)")
+	prMerged := fs.Bool("pr-merged", false, "the calling workspace's branch already merged upstream: update the default branch and close it")
+	wait := fs.Bool("wait", false, "wait for the outcome: landed (0) or failed (5)")
 	stateDir := fs.String("state-dir", "", "state root, overriding $AGENT_REPL_STATE_DIR")
 	if err := fs.Parse(args); err != nil {
 		return exitFailure
@@ -201,89 +192,73 @@ func runMergeQueueVerb(ctx context.Context, args []string, dial mergeQueueDialer
 	if fs.NArg() != 0 {
 		return fail("unexpected arguments: %s", strings.Join(fs.Args(), " "))
 	}
-	target, err := resolveMergeQueueTarget(*dir, *branch, *repo)
+	source, err := resolveMergeQueueSource(*own, *keepOpen, *dir, *branch, *prMerged)
 	if err != nil {
 		return fail("%v", err)
 	}
-	if *wait {
-		cwd, err := env.getwd()
-		if err != nil {
-			return fail("read the working directory: %v", err)
-		}
-		if within(canonicalDir(cwd), target.dir) {
-			return fail("refusing -wait from inside %s: an agent's merge of its own workspace starts only when its turn ends, "+
-				"and this turn is the one that would wait. Enqueue without -wait and end the turn; the merge reports into this session.", target.dir)
-		}
+	cwd, err := env.getwd()
+	if err != nil {
+		return fail("read the working directory: %v", err)
 	}
 	layout, err := stateroot.Root(*stateDir, envc.Load().WithStateDir(*stateDir).StateDir())
 	if err != nil {
 		return fail("resolve the state root: %v", err)
 	}
-	w := &mergeWatch{target: target, wait: *wait, dial: dial, layout: layout, env: env, out: out, errOut: errOut}
+	w := &mergeWatch{source: source, cwd: canonicalDir(cwd), wait: *wait, dial: dial, layout: layout, env: env, out: out, errOut: errOut}
 	return w.run(ctx)
 }
 
-// resolveMergeQueueTarget turns the flags into what to enqueue and which
-// roster row reports it.
-func resolveMergeQueueTarget(dir, branch, repo string) (mergeQueueTarget, error) {
+// resolveMergeQueueSource turns the flags into what the calling workspace
+// merges. Exactly one source is named.
+func resolveMergeQueueSource(own, keepOpen bool, dir, branch string, prMerged bool) (mergeQueueSource, error) {
+	named := 0
+	for _, set := range []bool{own, dir != "", branch != "", prMerged} {
+		if set {
+			named++
+		}
+	}
 	switch {
-	case dir != "" && branch != "":
-		return mergeQueueTarget{}, errors.New("-dir and -branch name two different merges; give one")
-	case dir != "" && repo != "":
-		return mergeQueueTarget{}, errors.New("-repo goes with -branch; a -dir merge's repository is its workspace's")
+	case named == 0:
+		return mergeQueueSource{}, errors.New("name the merge: -own, -dir WORKTREE, -branch BRANCH or -pr-merged")
+	case named > 1:
+		return mergeQueueSource{}, errors.New("-own, -dir, -branch and -pr-merged each name a different merge; give one")
+	case keepOpen && !own:
+		return mergeQueueSource{}, errors.New("-keep-open goes with -own: only the calling workspace's own branch can keep it open")
+	}
+	switch {
 	case dir != "":
 		abs, err := filepath.Abs(dir)
 		if err != nil {
-			return mergeQueueTarget{}, fmt.Errorf("resolve -dir %q: %w", dir, err)
+			return mergeQueueSource{}, fmt.Errorf("resolve -dir %q: %w", dir, err)
 		}
 		if info, err := os.Stat(abs); err != nil || !info.IsDir() {
-			return mergeQueueTarget{}, fmt.Errorf("-dir %q is not a worktree directory on disk", abs)
+			return mergeQueueSource{}, fmt.Errorf("-dir %q is not a worktree directory on disk", abs)
 		}
-		return mergeQueueTarget{
-			label:   filepath.Base(abs),
-			dir:     canonicalDir(abs),
-			entries: []commandfile.Entry{{Type: commandfile.TypeMerge, ProjectDir: abs}},
-		}, nil
-	case branch != "" && repo == "":
-		return mergeQueueTarget{}, errors.New("-branch needs -repo, the repository's main worktree")
+		return mergeQueueSource{label: filepath.Base(abs), entry: commandfile.Entry{SourceDir: abs}}, nil
 	case branch != "":
-		absRepo, err := filepath.Abs(repo)
-		if err != nil {
-			return mergeQueueTarget{}, fmt.Errorf("resolve -repo %q: %w", repo, err)
-		}
-		name := landingPrefix + workspace.BareName(branch) + landingSuffix
-		landing, err := workspace.WorktreeDir(absRepo, name)
-		if err != nil {
-			return mergeQueueTarget{}, fmt.Errorf("derive the landing workspace's directory: %w", err)
-		}
-		if _, err := os.Stat(landing); err == nil {
-			return mergeQueueTarget{}, fmt.Errorf("the landing workspace's directory %s already exists; "+
-				"an earlier landing of this branch is still there, and it must be resolved first", landing)
-		} else if !errors.Is(err, os.ErrNotExist) {
-			return mergeQueueTarget{}, fmt.Errorf("stat the landing workspace's directory %s: %w", landing, err)
-		}
-		return mergeQueueTarget{
-			label: name,
-			dir:   canonicalDir(landing),
-			entries: []commandfile.Entry{
-				{Type: commandfile.TypeCreate, GitRoot: absRepo, Name: name, BaseRef: branch},
-				{Type: commandfile.TypeMerge, ProjectDir: landing, Workspace: name},
-			},
-		}, nil
-	default:
-		return mergeQueueTarget{}, errors.New("name the merge: -dir WORKTREE, or -branch BRANCH -repo MAIN_WORKTREE")
+		return mergeQueueSource{label: branch, entry: commandfile.Entry{Branch: branch}}, nil
+	case prMerged:
+		return mergeQueueSource{label: "its own branch, already merged upstream", entry: commandfile.Entry{PRWasMerged: true}}, nil
 	}
+	return mergeQueueSource{label: "its own branch", entry: commandfile.Entry{KeepOpen: keepOpen}}, nil
 }
 
 // mergeWatch is one invocation's watch over the roster.
 type mergeWatch struct {
-	target mergeQueueTarget
-	wait   bool
-	dial   mergeQueueDialer
-	layout stateroot.Layout
-	env    mergeQueueEnv
-	out    io.Writer
-	errOut io.Writer
+	source mergeQueueSource
+	// cwd is the caller's canonical working directory, which names the
+	// requesting workspace.
+	cwd string
+	// requester is the requesting workspace's canonical worktree, its name
+	// and its id, read off the first roster frame.
+	requester     string
+	requesterName string
+	wait          bool
+	dial          mergeQueueDialer
+	layout        stateroot.Layout
+	env           mergeQueueEnv
+	out           io.Writer
+	errOut        io.Writer
 
 	// daemon is the reader for the daemon serving now.
 	daemon mergeQueueDaemon
@@ -296,6 +271,8 @@ type mergeWatch struct {
 	baselineMergedAt int64
 	// seenLive is whether this merge has been seen in flight.
 	seenLive bool
+	// applied is whether the daemon applied the command.
+	applied bool
 	// last is the last status printed.
 	last string
 }
@@ -322,7 +299,7 @@ func (w *mergeWatch) run(ctx context.Context) int {
 		case <-ctx.Done():
 			return w.fail("interrupted before the merge's outcome: %v", ctx.Err())
 		case <-ticker.C:
-			if code, done := w.checkQuarantine(); done {
+			if code, done := w.checkCommand(); done {
 				return code
 			}
 		case ev := <-events:
@@ -379,41 +356,50 @@ func (w *mergeWatch) attach(ctx context.Context) (<-chan rosterEvent, error) {
 	if first.err != nil {
 		return nil, fmt.Errorf("read the roster before enqueueing: %w", first.err)
 	}
-	row := findRosterRow(first.roster, w.target.dir)
+	row := callingRow(first.roster, w.cwd)
+	if row == nil {
+		return nil, fmt.Errorf("the caller's directory %s is in no workspace's worktree; a merge runs in the workspace that asks for it", w.cwd)
+	}
+	w.requester = canonicalDir(row.GetWorkspace().GetWorkspace().GetDir())
+	w.requesterName = filepath.Base(w.requester)
 	w.baseline = rowStatus(row)
 	w.baselineMergedAt = row.GetWhen().GetMerged().GetAtMs()
 	w.last = w.baseline
-	name, err := commandfile.Write(w.layout.OutputDir(), w.target.entries)
+	if w.wait && turnArms[w.baseline] {
+		return nil, fmt.Errorf("refusing -wait from %s while its turn is in flight (%s): a merge it asks for starts only when that turn ends, "+
+			"and this turn is the one that would wait. Enqueue without -wait and end the turn; the merge reports into this session", w.requester, w.baseline)
+	}
+	entry := w.source.entry
+	entry.Type = commandfile.TypeMerge
+	entry.ProjectDir = row.GetWorkspace().GetWorkspace().GetDir()
+	entry.Workspace = row.GetWorkspace().GetWorkspace().GetId()
+	name, err := commandfile.Write(w.layout.OutputDir(), []commandfile.Entry{entry})
 	if err != nil {
 		return nil, err
 	}
 	w.file = name
-	say(w.out, "merge-queue: enqueued %s (command file %s)\n", w.target.label, name)
-	say(w.out, "%s%s\n", worktreeLinePrefix, w.target.dir)
+	say(w.out, "merge-queue: %s asked to merge %s (command file %s)\n", w.requesterName, w.source.label, name)
+	say(w.out, "%s%s\n", worktreeLinePrefix, w.requester)
 	return events, nil
 }
 
 // observe reads one roster frame, and answers the exit status once the merge
 // reached a point the verb reports.
 func (w *mergeWatch) observe(ctx context.Context, roster *frontendv1.WorkspaceRoster) (int, bool) {
-	if code, done := w.checkQuarantine(); done {
+	if code, done := w.checkCommand(); done {
 		return code, true
 	}
-	row := findRosterRow(roster, w.target.dir)
+	row := findRosterRow(roster, w.requester)
 	status := rowStatus(row)
 	if status != w.last {
-		say(w.out, "merge-queue: %s: %s\n", w.target.label, status)
+		say(w.out, "merge-queue: %s: %s\n", w.requesterName, status)
 		w.last = status
 	}
 	switch status {
-	case statusEnqueuing, statusQueued, statusMerging:
+	case statusQueued, statusMerging:
 		w.seenLive = true
-		if !w.wait {
-			say(w.out, "merge-queue: %s is in the queue\n", w.target.label)
-			return exitSuccess, true
-		}
 		return 0, false
-	case statusMergedDone, statusMergeFail, statusConflict:
+	case statusMergedDone, statusMergeFail:
 		if !w.ours(status, row) {
 			return 0, false
 		}
@@ -438,34 +424,53 @@ func (w *mergeWatch) ours(status string, row *frontendv1.RosterRow) bool {
 
 // conclude reports the merge's outcome.
 func (w *mergeWatch) conclude(ctx context.Context, status string, row *frontendv1.RosterRow) int {
-	switch status {
-	case statusMergedDone:
-		say(w.out, "merge-queue: LANDED: %s is on its target\n", w.target.label)
+	if status == statusMergedDone {
+		say(w.out, "merge-queue: LANDED: %s merged %s\n", w.requesterName, w.source.label)
 		return exitSuccess
-	case statusMergeFail:
-		say(w.out, "merge-queue: FAILED: %s did not land. The reason is the daemon's daemon.merge.abort record:\n", w.target.label)
-		say(w.out, "  modules/app/agent-repl/bin/logs.sh --workspace %s --since 6h --json | jq -r 'select(.operation == \"daemon.merge.abort\") | .context.summary'\n", w.target.dir)
-		return exitMergeFailed
+	}
+	area := "unread"
+	footer, err := w.daemon.Footer(ctx, row.GetWorkspace().GetWorkspace())
+	if err != nil {
+		say(w.errOut, "claude-repld merge-queue: %s's merge failed, and its footer could not be read for the area: %v\n", w.requesterName, err)
+	} else {
+		area = failedArea(footer.GetStrip().GetStatus().GetMergeFailed())
+	}
+	say(w.out, "merge-queue: FAILED (%s): %s's merge of %s did not land. The account is the daemon's daemon.merge.abort record:\n", area, w.requesterName, w.source.label)
+	say(w.out, "  modules/app/agent-repl/bin/logs.sh --workspace %s --since 6h --json | jq -r 'select(.operation == \"daemon.merge.abort\") | .context.summary'\n", w.requester)
+	return exitMergeFailed
+}
+
+// failedArea names where a failed merge failed, as the footer draws it.
+func failedArea(failed *frontendv1.FooterStatusMergeFailed) string {
+	switch {
+	case failed.GetConflicts() != nil:
+		return "conflicts"
+	case failed.GetTests() != nil:
+		return "tests"
+	case failed.GetOther() != nil:
+		return "other"
+	}
+	return "the footer has moved on"
+}
+
+// checkCommand reports the command's fate: refused (quarantined), or -- when
+// the verb does not wait -- applied.
+func (w *mergeWatch) checkCommand() (int, bool) {
+	if code, done := w.checkQuarantine(); done {
+		return code, true
+	}
+	if w.wait || w.file == "" {
+		return 0, false
+	}
+	applied := filepath.Join(w.layout.OutputDir(), "applied", w.file)
+	switch _, err := os.Stat(applied); {
+	case err == nil:
+		say(w.out, "merge-queue: requested; %s's merge of %s is put in line once this turn ends, and reports into this session\n", w.requesterName, w.source.label)
+		return exitSuccess, true
+	case errors.Is(err, os.ErrNotExist):
+		return 0, false
 	default:
-		footer, err := w.daemon.Footer(ctx, row.GetWorkspace().GetWorkspace())
-		if err != nil {
-			say(w.errOut, "claude-repld merge-queue: %s stopped awaiting guidance, and its footer could not be read: %v\n", w.target.label, err)
-			return exitMergeParked
-		}
-		stopped := footer.GetStrip().GetStatus().GetMergeConflict()
-		switch {
-		case stopped == nil:
-			// The roster and the footer are two streams; the footer moved on
-			// between the frame that concluded and this read.
-			say(w.out, "merge-queue: PARKED: %s stopped awaiting guidance; its footer has since moved on\n", w.target.label)
-		case stopped.GetParked() == nil:
-			// The arm's own meaning: stopped on a conflict, whose name is the
-			// whole fact.
-			say(w.out, "merge-queue: PARKED: %s stopped on a conflict its resolution could not settle\n", w.target.label)
-		default:
-			say(w.out, "merge-queue: PARKED: %s: %s\n", w.target.label, stopped.GetParked().GetLine())
-		}
-		return exitMergeParked
+		return w.fail("stat %s: %v", applied, err), true
 	}
 }
 
@@ -491,6 +496,40 @@ func (w *mergeWatch) checkQuarantine() (int, bool) {
 func (w *mergeWatch) fail(format string, a ...any) int {
 	say(w.errOut, "claude-repld merge-queue: "+format+"\n", a...)
 	return exitFailure
+}
+
+// callingRow finds the requesting workspace's row: the one whose worktree
+// contains the caller's directory, the deepest when worktrees nest.
+func callingRow(roster *frontendv1.WorkspaceRoster, cwd string) *frontendv1.RosterRow {
+	var best *frontendv1.RosterRow
+	bestLen := -1
+	for _, row := range rosterRows(roster) {
+		dir := canonicalDir(row.GetWorkspace().GetWorkspace().GetDir())
+		if row.GetWorkspace().GetWorkspace().GetDir() == "" || !within(cwd, dir) {
+			continue
+		}
+		if len(dir) > bestLen {
+			best, bestLen = row, len(dir)
+		}
+	}
+	return best
+}
+
+// rosterRows lists every row, in every grouping the roster carries.
+func rosterRows(roster *frontendv1.WorkspaceRoster) []*frontendv1.RosterRow {
+	var groups []*frontendv1.RosterRows
+	for _, section := range roster.GetRepository().GetSections() {
+		groups = append(groups, section.GetRows())
+	}
+	for _, section := range roster.GetTask().GetSections() {
+		groups = append(groups, section.GetRows())
+	}
+	groups = append(groups, roster.GetRecentlyMerged().GetRows())
+	var out []*frontendv1.RosterRow
+	for _, group := range groups {
+		out = append(out, group.GetRows()...)
+	}
+	return out
 }
 
 // findRosterRow finds a workspace's row by its canonical directory, in every
