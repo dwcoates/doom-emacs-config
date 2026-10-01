@@ -102,3 +102,43 @@ the daemon's own selection.
   - A client that does not know the `bubble` arm sees an unset selection
     oneof. The Emacs and webapp decoders are strict, so both are updated in
     the same change.
+
+### 2. Implementation consequences (2026-10-01)
+
+- **Daemon:**
+  - `selectableMarkdown` (`daemon/internal/resolve/feed/selection.go`) is the
+    one rule for which rows are selectable and what each says.
+    - Stamping rows and reading them (`SelectableText`) both go through it.
+    - `SelectableText` also says whether the row is a prompt.
+  - `setSelection` (`daemon/internal/server/select_feed_row.go`) is the one
+    way a selection changes. It stores and publishes under `selectionMu`.
+    - The topic carries the selected row's text, which the host push hands
+      to Emacs.
+  - A click is classified as `response`, `prompt` or `bubble`, or refused
+    with `not_selectable`.
+  - A sent prompt quotes whatever is selected.
+    - A prompt is quoted under its own preamble: "Replying to an earlier
+      prompt in this conversation".
+    - It is not the agent's response, so the response preamble would be
+      wrong for it.
+  - Rollback still reads only the `prompt` arm.
+- **Webapp:**
+  - Root-feed prompt and response rows are governed by the selection
+    (`webapp/src/feed/bubble-selection.ts`).
+  - A click selects or clears through the shared `selectFeedRow` sender.
+  - `applySelection` handles the `bubble` arm, expands the selected box and
+    collapses the others.
+  - Neither a click nor the auto-collapse toggles a governed box.
+  - Every selected bubble kind's border is blue.
+    - The open-box eggshell applies only to an open bubble that is not
+      selected.
+- **Emacs:**
+  - The host push decodes to the kind plus the text.
+  - The composer follows it through `agent-repl--input-selection-changed`.
+  - `/` and `?` open the selected bubble in a read-only `markdown-mode`
+    popup and run `evil-ex-search-forward` or `evil-ex-search-backward`.
+- **Owner-ruled behavior this changes on `master`:**
+  - A selected prompt was sent unchanged. It is now quoted.
+  - Only final responses and prompts had a blue border. Every bubble kind now
+    has it.
+  - An expanded selected bubble was eggshell. It is now blue.
