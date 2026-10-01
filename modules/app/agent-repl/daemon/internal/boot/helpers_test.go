@@ -225,6 +225,12 @@ func (d failingHolds) AllHeldPrompts(context.Context) ([]wsm.HeldPrompt, error) 
 	return nil, d.err
 }
 
+// bringingEdge is one BringingUp call the boot made.
+type bringingEdge struct {
+	ws       ids.WorkspaceID
+	underWay bool
+}
+
 // harness is one boot sequence under test with every fake reachable.
 type harness struct {
 	// binds counts the boot's BindViews calls; bindErr is what they answer.
@@ -249,6 +255,11 @@ type harness struct {
 	socketProbes map[string]shimsocket.State
 	// socketProbeErrs is the scripted socket-probe error per socket path.
 	socketProbeErrs map[string]error
+	// bringingMu guards bringing: the bring-up lowers it from concurrent
+	// goroutines.
+	bringingMu sync.Mutex
+	// bringing records every BringingUp edge, in order.
+	bringing []bringingEdge
 	// unserved records every workspace the reconciliation marked unserved.
 	unserved []ids.WorkspaceID
 	// ensures counts the bring-up's EnsureServices calls; ensureErr is what
@@ -349,6 +360,11 @@ func newHarness(t *testing.T, adjust ...func(*Deps, *harness)) *harness {
 		StartSession: func(_ context.Context, ws ids.WorkspaceID) error {
 			h.noteStarted(ws)
 			return h.startErrs[ws]
+		},
+		BringingUp: func(ws ids.WorkspaceID, underWay bool) {
+			h.bringingMu.Lock()
+			defer h.bringingMu.Unlock()
+			h.bringing = append(h.bringing, bringingEdge{ws, underWay})
 		},
 		Unserved: func(ws ids.WorkspaceID) {
 			h.unserved = append(h.unserved, ws)

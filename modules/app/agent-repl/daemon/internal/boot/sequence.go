@@ -123,6 +123,14 @@ func (s *sequence) Run(ctx context.Context) (Report, error) {
 		// reading. It does not run here because it must not gate the
 		// listener; see BringUp.
 		report.PendingBringUp = clientless
+		// THE BRING-UP IS STATED BEFORE THE DAEMON SERVES. The starts run
+		// after the listener is up, so without this an editor that connected
+		// in between would read these rows as having nothing under way, open
+		// them, and draw a workspace no session is behind yet. BringUp lowers
+		// it for each one on every path.
+		for _, ws := range clientless {
+			s.deps.BringingUp(ws.ID, true)
+		}
 		// AN UNDETERMINED WORKSPACE IS SERVED BY NO SESSION OF THIS DAEMON,
 		// and it is said so on its views: nothing else would ever state a
 		// link for it, so its roster row would stay `pending` and every
@@ -836,6 +844,9 @@ const (
 // it, logging the per-workspace record BringUp's summary counts.
 func (s *sequence) bringUpOne(ctx context.Context, ws wsm.Workspace) bringUpOutcome {
 	log := s.deps.Log.Global()
+	// Raised by the reconciliation; lowered here whatever this comes to, so
+	// a workspace whose start never began is not held `pending` forever.
+	defer s.deps.BringingUp(ws.ID, false)
 	// A START THAT HAS BEGUN IS FINISHED, NEVER ABANDONED MID-WRITE, and a
 	// start not yet begun is simply not begun once the daemon is leaving. The
 	// step runs beside the accept loop, so an exit CAN land in the middle of
