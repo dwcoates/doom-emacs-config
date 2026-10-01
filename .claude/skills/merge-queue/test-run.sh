@@ -74,6 +74,9 @@ invoke() {
       FAKE_DAEMON_ARGS="$FX/daemon-args" \
       FAKE_DAEMON_EXIT="${DAEMON_EXIT:-0}" \
       AGENT_REPL_DAEMON_BIN="$FX/daemon" \
+      AGENT_REPL_STATE_DIR="$FX/state" \
+      MERGE_QUEUE_COMMAND_ID="t1" \
+      MERGE_QUEUE_ANSWER_TIMEOUT="${ANSWER_TIMEOUT:-0}" \
       bash "$RUN" "$@" 2>&1
   )"
   RUN_RC=$?
@@ -241,6 +244,143 @@ test_unknown_verb_prints_usage() {
   fi
 }
 
+# answer FATE — the fake daemon's answer to the next queue-control file: it
+# already sits in applied/ or quarantine/ under the name the run will write.
+answer() {
+  mkdir -p "$FX/state/output/$1"
+  : >"$FX/state/output/$1/workspace_commands_t1.json"
+}
+
+# command_entry — the queue-control entry the run wrote, compact.
+command_entry() {
+  jq -c . "$FX/state/output/workspace_commands_t1.json" 2>/dev/null || true
+}
+
+# phys DIR — DIR's physical path, as the run spells it.
+phys() {
+  (cd "$1" && pwd -P)
+}
+
+# expect_entry NAME ENTRY — the run's exit is 0 and it wrote ENTRY.
+expect_entry() {
+  if [ "$RUN_RC" -eq 0 ] && [ "$(command_entry)" = "$2" ]; then
+    pass "$1"
+  else
+    fail "$1" "exit=$RUN_RC entry=$(command_entry)" "want=$2" "$RUN_OUT"
+  fi
+}
+
+test_dequeue_own_evicts_the_own_merge() {
+  mkfixture
+  answer applied
+  invoke --dequeue-own
+  expect_entry "--dequeue-own asks to evict this workspace's own merge" \
+    "[{\"type\":\"merge_evict\",\"project_dir\":\"$(phys "$FX/ws")\"}]"
+}
+
+test_dequeue_own_refuses_an_argument() {
+  mkfixture
+  invoke --dequeue-own extra
+  if [ "$RUN_RC" -eq 2 ] && [ -z "$(command_entry)" ]; then
+    pass "--dequeue-own refuses an argument and writes nothing"
+  else
+    fail "--dequeue-own refuses an argument and writes nothing" "exit=$RUN_RC" "$RUN_OUT"
+  fi
+}
+
+test_dequeue_workspace_names_the_evicted_worktree() {
+  mkfixture
+  mkdir -p "$FX/other"
+  answer applied
+  invoke --dequeue-workspace "$FX/other"
+  expect_entry "--dequeue-workspace names the other workspace's worktree" \
+    "[{\"type\":\"merge_evict\",\"project_dir\":\"$(phys "$FX/ws")\",\"evict_dir\":\"$(phys "$FX/other")\"}]"
+}
+
+test_dequeue_workspace_refuses_a_missing_directory() {
+  mkfixture
+  invoke --dequeue-workspace "$FX/nowhere"
+  if [ "$RUN_RC" -eq 2 ] && [ -z "$(command_entry)" ]; then
+    pass "--dequeue-workspace refuses a directory not on disk and writes nothing"
+  else
+    fail "--dequeue-workspace refuses a directory not on disk and writes nothing" "exit=$RUN_RC" "$RUN_OUT"
+  fi
+}
+
+test_pause_queue_pauses_every_repository() {
+  mkfixture
+  answer applied
+  invoke --pause-queue
+  expect_entry "--pause-queue with no directory pauses every repository" \
+    "[{\"type\":\"merge_pause\",\"project_dir\":\"$(phys "$FX/ws")\"}]"
+}
+
+test_pause_queue_names_one_repository() {
+  mkfixture
+  answer applied
+  invoke --pause-queue "$FX/main"
+  expect_entry "--pause-queue <dir> pauses that repository only" \
+    "[{\"type\":\"merge_pause\",\"project_dir\":\"$(phys "$FX/ws")\",\"repository_dir\":\"$(phys "$FX/main")\"}]"
+}
+
+test_resume_queue_resumes_every_repository() {
+  mkfixture
+  answer applied
+  invoke --resume-queue
+  expect_entry "--resume-queue with no directory resumes every repository" \
+    "[{\"type\":\"merge_resume\",\"project_dir\":\"$(phys "$FX/ws")\"}]"
+}
+
+test_resume_queue_names_one_repository() {
+  mkfixture
+  answer applied
+  invoke --resume-queue "$FX/main"
+  expect_entry "--resume-queue <dir> resumes that repository only" \
+    "[{\"type\":\"merge_resume\",\"project_dir\":\"$(phys "$FX/ws")\",\"repository_dir\":\"$(phys "$FX/main")\"}]"
+}
+
+test_queue_control_refused_is_exit_5() {
+  mkfixture
+  answer quarantine
+  invoke --pause-queue
+  if [ "$RUN_RC" -eq 5 ] && printf '%s' "$RUN_OUT" | grep -q "REFUSED"; then
+    pass "a quarantined queue-control request is refused with how to read why"
+  else
+    fail "a quarantined queue-control request is refused with how to read why" "exit=$RUN_RC" "$RUN_OUT"
+  fi
+}
+
+test_queue_control_unanswered_is_exit_8() {
+  mkfixture
+  invoke --resume-queue
+  if [ "$RUN_RC" -eq 8 ] && [ -n "$(command_entry)" ]; then
+    pass "an unanswered queue-control request stays pending and exits 8"
+  else
+    fail "an unanswered queue-control request stays pending and exits 8" "exit=$RUN_RC" "$RUN_OUT"
+  fi
+}
+
+test_queue_control_refuses_a_bad_timeout() {
+  mkfixture
+  ANSWER_TIMEOUT=soon invoke --dequeue-own
+  if [ "$RUN_RC" -eq 2 ] && [ -z "$(command_entry)" ]; then
+    pass "a non-numeric answer timeout is an error and writes nothing"
+  else
+    fail "a non-numeric answer timeout is an error and writes nothing" "exit=$RUN_RC" "$RUN_OUT"
+  fi
+}
+
+test_queue_control_leaves_no_temp_file() {
+  mkfixture
+  answer applied
+  invoke --dequeue-own
+  if [ "$RUN_RC" -eq 0 ] && [ -z "$(find "$FX/state/output" -maxdepth 1 -name '.workspace_commands_*')" ]; then
+    pass "a queue-control request leaves no temp file behind"
+  else
+    fail "a queue-control request leaves no temp file behind" "exit=$RUN_RC" "$(ls -a "$FX/state/output")" "$RUN_OUT"
+  fi
+}
+
 test_enqueue_own_requests_the_own_branch
 test_enqueue_own_keep_open_keeps_the_workspace
 test_enqueue_own_refuses_an_unknown_option
@@ -257,6 +397,18 @@ test_each_outcome_maps_to_its_exit
 test_passes_the_verbs_output_through
 test_missing_daemon_binary_is_an_error
 test_unknown_verb_prints_usage
+test_dequeue_own_evicts_the_own_merge
+test_dequeue_own_refuses_an_argument
+test_dequeue_workspace_names_the_evicted_worktree
+test_dequeue_workspace_refuses_a_missing_directory
+test_pause_queue_pauses_every_repository
+test_pause_queue_names_one_repository
+test_resume_queue_resumes_every_repository
+test_resume_queue_names_one_repository
+test_queue_control_refused_is_exit_5
+test_queue_control_unanswered_is_exit_8
+test_queue_control_refuses_a_bad_timeout
+test_queue_control_leaves_no_temp_file
 
 printf 'Passed: %d  Failed: %d\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
