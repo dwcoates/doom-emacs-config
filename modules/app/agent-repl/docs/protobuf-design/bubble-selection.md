@@ -1,0 +1,81 @@
+# One selection for every landed bubble, on the SelectFeedRow model
+
+This rebuilds the feature first designed in
+`docs/protobuf-design/response-search.md` (branch `response-search`). Read that
+record for the owner's rulings and the reasoning behind them. While that
+branch was in progress, `master` landed its own redesign of the same contract:
+`agentrepl.v1.SelectFeedRow` replaced `agentrepl.v1.SelectResponse`, and
+`frontend.v1.FeedSelection` became a `none` / `response` / `prompt` oneof,
+where a selected prompt arms the rollback keys. The branch could not be
+rebased onto that, so the feature is rebuilt here on `master`'s model.
+
+## Core design principles
+
+### Every agent-repl view of information opens through one shared opener
+
+Carried over unchanged, and already landed on `master` (`lisp/popup.el`).
+Every vertical-split popup is one Doom popup: on the right, 40% of the frame
+width, and closed by `q`, which also kills its buffer. The response view opens
+through it.
+
+### The daemon is the only holder of the selection
+
+`master` established this, and the rebuild keeps it. Everything a client draws
+or acts on comes from the daemon's pushes. A sent prompt and a rollback read
+the daemon's own selection.
+
+## Owner rulings carried over (2026-10-01)
+
+- **Selectable bubbles:** the landed bubbles the root feed draws.
+  - Final responses, interim responses and thinking responses.
+  - User prompts and agent-to-agent prompts.
+  - Never held prompts, a response still streaming, or anything in a
+    subagent's sub-feed.
+- **Look:** every selected bubble kind gets the blue selection border.
+- **Selected and expanded are one state,** so at most one bubble is expanded.
+- **Click:** clicking a bubble selects it, with the same mechanics as `C-p` and
+  `C-n`.
+  - That includes the composer's selection mode.
+  - Clicking the selected bubble clears the selection.
+- **`C-p`/`C-n` are unchanged.** They still step through final responses.
+- **Reply:** sending while any bubble is selected prepends that bubble's text.
+- **Search:** `/` and `?` in the composer's command mode, with a bubble
+  selected, open its MARKDOWN in a read-only `markdown-mode` buffer through
+  the shared popup and run real Evil search there.
+  - The webapp mirrors nothing of the search.
+- **The protobuf design is the implementer's.** The owner directed: "just make
+  the changes as we've discussed, proceed e2e without my input".
+- **Nothing reaches `master` until everything is done** (2026-10-01).
+
+## Decisions the implementer made where the two models meet
+
+- **The extra kinds get their own selection arm, without rollback.**
+  - `master` lets only final responses (reply) and rollback prompts be
+    selected.
+  - A prompt arm arms the rollback keys, and only the main agent's prompts of
+    the current conversation can be rolled back to.
+  - So a clicked bubble is classified by the daemon:
+    - a final response becomes the `response` arm;
+    - a prompt a rollback can reach becomes the `prompt` arm;
+    - every other selectable bubble becomes the new `bubble` arm, which the
+      next prompt replies to and the rollback keys do not act on.
+  - This keeps `master`'s rule that only a rollback-reachable prompt arms the
+    rollback keys, while letting every bubble kind be selected.
+- **A send prepends the selected bubble's text, whatever the arm.**
+  - That includes a selected prompt.
+  - The owner ruled that every selected kind is a reply target.
+- **A selection still ends when its row leaves the viewport,** as `master`
+  does.
+  - Because selected means expanded, that also collapses the bubble.
+- **Emacs gets the selected bubble's text on the host push**
+  (`agentrepl.v1.HostWorkspaceSelection`).
+  - Emacs needs it for `/` and `?`.
+  - The ack carries nothing new, since `master` already writes Emacs's
+    selection from the push alone.
+- **A selection change is applied and published under one lock.**
+  - On `master`, a change was applied under `mu` and published after
+    releasing it, so two changes in quick succession could reach the webapp
+    and Emacs in the opposite order from the daemon's state.
+  - The rebuild makes that reordering impossible.
+
+## Landed changes
