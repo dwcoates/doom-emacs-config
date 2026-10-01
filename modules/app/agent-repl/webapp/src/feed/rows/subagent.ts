@@ -30,6 +30,8 @@ import { formatElapsed, formatTickedElapsed } from "../../duration.js";
 import { log } from "../../log.js";
 import { callUnary } from "../../rpc/unary.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
+import { feedSubagentDotColor } from "../../vocab.js";
+import { drawWorkDot } from "../work-dot.js";
 import {
   InterruptResponseSchema,
   type InterruptResponse,
@@ -58,14 +60,6 @@ const PATH = "FeedSubagent";
 
 /** How long a stop's own answer stays on the control before it clears. */
 export const INTERRUPT_OUTCOME_MS = 4000;
-
-/** The dot class each settled outcome wears. `lost` is its own, deliberately. */
-const SETTLED_DOTS = {
-  succeeded: "agent-done",
-  failed: "agent-error",
-  cancelled: "agent-error",
-  lost: "agent-lost",
-} as const satisfies Record<string, string>;
 
 /** The word each settled outcome says. */
 const SETTLED_WORDS = {
@@ -142,11 +136,10 @@ export function drawFeedSubagent(msg: FeedSubagent, rc: RowContext): HTMLElement
   const el = document.createElement("div");
   el.className = "subagent-head";
 
-  const dot = document.createElement("span");
-  dot.className = "agent-dot";
-  dot.setAttribute("aria-hidden", "true");
-  dot.textContent = "●";
-  el.append(dot);
+  // THE STATE DOT: the shared vocabulary's color for `live` or the settled
+  // outcome; hollow when it spends none (work-dot.ts).
+  const dotState = state.case === "settled" ? requireCase(state.value.outcome, `${PATH}.settled.outcome`).case : state.case;
+  el.append(drawWorkDot(feedSubagentDotColor(dotState), state.case === "live"));
 
   const label = document.createElement("span");
   label.className = "subagent-label";
@@ -175,7 +168,6 @@ export function drawFeedSubagent(msg: FeedSubagent, rc: RowContext): HTMLElement
   switch (state.case) {
     case "live": {
       el.setAttribute("data-state", "live");
-      dot.classList.add("agent-running");
       el.append(drawLiveClock(runtime, rc));
       if (state.value.lastProgress !== undefined) {
         el.append(drawFeedSubagentLastProgress(state.value.lastProgress, rc));
@@ -186,7 +178,6 @@ export function drawFeedSubagent(msg: FeedSubagent, rc: RowContext): HTMLElement
     case "settled": {
       const outcome = requireCase(state.value.outcome, `${PATH}.settled.outcome`);
       el.setAttribute("data-state", outcome.case);
-      dot.classList.add(SETTLED_DOTS[outcome.case]);
       el.append(drawSettledClock(runtime, state.value));
       const word = document.createElement("span");
       word.className = `subagent-outcome ${SETTLED_BADGES[outcome.case]}`;

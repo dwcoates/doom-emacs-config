@@ -45,6 +45,8 @@ import {
   type InterruptResponse,
 } from "../../../../proto/gen/ts/agentrepl/v1/endpoint_interrupt_pb";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
+import { feedShellDotColor } from "../../vocab.js";
+import { drawWorkDot } from "../work-dot.js";
 import { callUnary } from "../../rpc/unary.js";
 import { armName } from "../renderers.js";
 import type { RowContext } from "../renderers.js";
@@ -132,11 +134,10 @@ export function drawFeedShellHead(u: FeedShell, rc: RowContext): HTMLElement {
   head.className = "shell-head";
   el.append(head);
 
-  const dot = document.createElement("span");
-  dot.className = "agent-dot";
-  dot.setAttribute("aria-hidden", "true");
-  dot.textContent = "●";
-  head.append(dot);
+  // THE STATE DOT: the shared vocabulary's color for `live` or the settled
+  // outcome; hollow when it spends none (work-dot.ts).
+  const dotState = state.case === "settled" ? requireCase(state.value.outcome, `${PATH}.settled.outcome`).case : state.case;
+  head.append(drawWorkDot(feedShellDotColor(dotState), state.case === "live"));
 
   const command = drawFeedShellCommand(requireMessage(u.command, `${PATH}.command`), `${PATH}.command`);
   head.append(command);
@@ -144,7 +145,6 @@ export function drawFeedShellHead(u: FeedShell, rc: RowContext): HTMLElement {
   const runtime = requireMessage(u.runtime, `${PATH}.runtime`);
   switch (state.case) {
     case "live":
-      dot.classList.add("agent-running");
       head.append(drawLiveClock(runtime, rc));
       if (state.value.lastProgress !== undefined) {
         head.append(drawFeedShellLastProgress(state.value.lastProgress, rc));
@@ -158,7 +158,6 @@ export function drawFeedShellHead(u: FeedShell, rc: RowContext): HTMLElement {
         return unreachableArm(`${PATH}.settled.outcome`, armName(outcome));
       }
       el.setAttribute("data-state", outcome.case);
-      dot.classList.add(outcome.case === "lost" ? "agent-lost" : "agent-done");
       head.append(drawSettledClock(runtime, settled));
       if (settled.exit !== undefined) {
         head.append(drawFeedShellExit(settled.exit, `${PATH}.settled.exit`));

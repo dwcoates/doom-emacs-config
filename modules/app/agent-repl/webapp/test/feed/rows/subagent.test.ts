@@ -243,9 +243,48 @@ describe("drawFeedSubagent: the settled arms", () => {
     expect([...SUBAGENT_LOST_CAUSE_ARMS].sort()).toEqual([...schemaArms].sort());
   });
 
-  it("gives `lost` its own dot, not the error hue", () => {
-    const { el } = drawRow(subagentRow("b1", { settled: { endedAtMs: 1n, outcome: "lost" } }));
-    expect(el.querySelector(".agent-dot")?.classList.contains("agent-lost")).toBe(true);
+  it.each([
+    ["succeeded", "hollow", "○", "tone-none"],
+    ["failed", "filled", "●", "tone-red"],
+    ["cancelled", "hollow", "○", "tone-none"],
+    ["lost", "filled", "●", "tone-turquoise"],
+  ] as const)("dots a %s head %s (%s) in %s", (outcome, shape, glyph, tone) => {
+    const { el } = drawRow(subagentRow("b1", { settled: { endedAtMs: 1n, outcome } }));
+    const dot = el.querySelector(".agent-dot");
+    expect([dot?.getAttribute("data-dot"), dot?.textContent, dot?.classList.contains(tone)]).toEqual([
+      shape,
+      glyph,
+      true,
+    ]);
+  });
+
+  it("dots a live head filled green, breathing", () => {
+    const { el } = drawRow(subagentRow("b1"));
+    const dot = el.querySelector(".agent-dot");
+    expect([
+      dot?.getAttribute("data-dot"),
+      dot?.textContent,
+      dot?.classList.contains("tone-green"),
+      dot?.classList.contains("work-dot-live"),
+    ]).toEqual(["filled", "●", true, true]);
+  });
+
+  it.each([
+    ["failed", "var(--err)"],
+    ["lost", "var(--turquoise)"],
+  ] as const)("lets the vocabulary's tone paint a %s dot %s through the real stylesheet", (outcome, color) => {
+    const uninstall = installStylesheet();
+    const { el } = drawRow(subagentRow("b1", { settled: { endedAtMs: 1n, outcome } }));
+    document.body.append(el);
+    const painted = cascadedValue(el.querySelector(".agent-dot") as Element, "color");
+    el.remove();
+    uninstall();
+    expect(painted).toBe(color);
+  });
+
+  it("stops a settled head's dot breathing", () => {
+    const { el } = drawRow(subagentRow("b1", { settled: { endedAtMs: 1n, outcome: "succeeded" } }));
+    expect(el.querySelector(".agent-dot")?.classList.contains("work-dot-live")).toBe(false);
   });
 
   it("refuses a settled head whose outcome arm is unset", () => {

@@ -143,7 +143,17 @@ describe("drawFeedShellHead head", () => {
 
   it("breathes the dot while the command runs", () => {
     const el = drawFeedShellHead(shell(), ctxFor().rc);
-    expect(el.querySelector(".agent-dot")?.classList.contains("agent-running")).toBe(true);
+    expect(el.querySelector(".agent-dot")?.classList.contains("work-dot-live")).toBe(true);
+  });
+
+  it("draws a filled green dot while the command runs", () => {
+    const el = drawFeedShellHead(shell(), ctxFor().rc);
+    const dot = el.querySelector(".agent-dot");
+    expect([dot?.getAttribute("data-dot"), dot?.textContent, dot?.classList.contains("tone-green")]).toEqual([
+      "filled",
+      "●",
+      true,
+    ]);
   });
 
   it("draws no spool on the head — the spool is the body", () => {
@@ -324,9 +334,9 @@ describe("drawFeedShellBody spool", () => {
 
 describe("drawFeedShellHead settled", () => {
   const outcomes = [
-    { arm: "completed", word: "completed", dot: "agent-done" },
-    { arm: "cancelled", word: "stopped", dot: "agent-done" },
-    { arm: "lost", word: "lost sight of", dot: "agent-lost" },
+    { arm: "completed", word: "completed", dot: ["hollow", "○", "tone-none"] },
+    { arm: "cancelled", word: "stopped", dot: ["hollow", "○", "tone-none"] },
+    { arm: "lost", word: "lost sight of", dot: ["filled", "●", "tone-turquoise"] },
   ] as const;
 
   for (const c of outcomes) {
@@ -346,12 +356,25 @@ describe("drawFeedShellHead settled", () => {
       expect(el.getAttribute("data-state")).toBe(c.arm);
     });
 
-    it(`dots the ${c.arm} arm as ${c.dot}`, () => {
+    it(`dots the ${c.arm} arm ${c.dot[0]} in ${c.dot[2]}`, () => {
       const el = drawFeedShellHead(
         shell({ settled: { endedAtMs: 1n, outcome: c.arm } }),
         ctxFor().rc,
       );
-      expect(el.querySelector(".agent-dot")?.classList.contains(c.dot)).toBe(true);
+      const dot = el.querySelector(".agent-dot");
+      expect([dot?.getAttribute("data-dot"), dot?.textContent, dot?.classList.contains(c.dot[2])]).toEqual([
+        c.dot[0],
+        c.dot[1],
+        true,
+      ]);
+    });
+
+    it(`stops the ${c.arm} arm's dot breathing`, () => {
+      const el = drawFeedShellHead(
+        shell({ settled: { endedAtMs: 1n, outcome: c.arm } }),
+        ctxFor().rc,
+      );
+      expect(el.querySelector(".agent-dot")?.classList.contains("work-dot-live")).toBe(false);
     });
   }
 
