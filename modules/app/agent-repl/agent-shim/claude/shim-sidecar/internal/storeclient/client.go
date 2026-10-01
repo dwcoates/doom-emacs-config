@@ -66,6 +66,7 @@ const (
 	rpcWriteBatch        = storev1connect.ShimStoreWriteBatchProcedure
 	rpcGetSidecarCursors = storev1connect.ShimStoreGetSidecarCursorsProcedure
 	rpcGetShellRunClaims = storev1connect.ShimStoreGetShellRunClaimsProcedure
+	rpcGetRunSettlements = storev1connect.ShimStoreGetRunSettlementsProcedure
 
 	// WriteBatchSite is the `refusal_site` a refused write is reported under.
 	// A caller that states the refusal itself — the cycle parking a file on an
@@ -283,6 +284,43 @@ func (c *Client) ShellRunClaims(ctx context.Context, vendorTaskIDs []string) ([]
 	default:
 		bound.With(logging.Context{Level: "error"}).Log("shell run claims answer carries neither success nor failure")
 		return nil, fmt.Errorf("storeclient: %s response carries neither success nor failure", rpcGetShellRunClaims)
+	}
+}
+
+// RunSettlements answers which of the given runs (spawning-call activity ids)
+// the record already holds as ended. A run absent from the answer is NOT
+// settled: the store holds no row for it yet, or its row is still live.
+//
+// A FAILURE IS NEVER SOFTENED INTO AN EMPTY ANSWER: "not settled" starts the
+// LOST policy's clock on a run, so reading a store that could not answer as
+// "nothing settled" is exactly how a finished run would be tracked again.
+func (c *Client) RunSettlements(ctx context.Context, runIDs []string) ([]*storev1.RunSettlement, error) {
+	bound := c.log.With(logging.Context{
+		Operation: "storeclient-run-settlements", StoreSocket: c.socket, RPC: rpcGetRunSettlements,
+	})
+	bound.LogVerbose("run settlements requested for %d run(s)", len(runIDs))
+	response, err := c.rpc.GetRunSettlements(ctx, connect.NewRequest(&storev1.GetRunSettlementsRequest{RunIds: runIDs}))
+	if err != nil {
+		return nil, callFailure(bound, rpcGetRunSettlements, "run settlements", "so no run was tracked", err)
+	}
+	switch result := response.Msg.GetResult().(type) {
+	case *storev1.GetRunSettlementsResponse_Success:
+		settled := result.Success.GetSettled()
+		bound.LogVerbose("run settlements answered settled=%d", len(settled))
+		return settled, nil
+	case *storev1.GetRunSettlementsResponse_Failure:
+		refusal := &RefusalError{RPC: rpcGetRunSettlements, Detail: result.Failure.GetDetail()}
+		switch kind := result.Failure.GetKind().(type) {
+		case *storev1.GetRunSettlementsFailure_InvalidRequest:
+			refusal.Kind, refusal.Field = RefusalInvalidRequest, kind.InvalidRequest.GetField()
+		case *storev1.GetRunSettlementsFailure_StorageFailure:
+			refusal.Kind = RefusalStorageFailure
+		}
+		bound.With(logging.Context{Level: "error"}).Log("run settlements refused: %s", refusal.Detail)
+		return nil, refusal
+	default:
+		bound.With(logging.Context{Level: "error"}).Log("run settlements answer carries neither success nor failure")
+		return nil, fmt.Errorf("storeclient: %s response carries neither success nor failure", rpcGetRunSettlements)
 	}
 }
 

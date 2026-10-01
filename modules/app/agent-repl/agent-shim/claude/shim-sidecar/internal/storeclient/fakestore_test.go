@@ -39,6 +39,17 @@ type fakeStore struct {
 	claims         *storev1.GetShellRunClaimsResponse
 	claimsErr      error
 	lastClaimsReq  *storev1.GetShellRunClaimsRequest
+	settlements    *storev1.GetRunSettlementsResponse
+	settlementsErr error
+	lastSettleReq  *storev1.GetRunSettlementsRequest
+}
+
+func (f *fakeStore) GetRunSettlements(_ context.Context, request *connect.Request[storev1.GetRunSettlementsRequest]) (*connect.Response[storev1.GetRunSettlementsResponse], error) {
+	f.lastSettleReq = request.Msg
+	if f.settlementsErr != nil {
+		return nil, f.settlementsErr
+	}
+	return connect.NewResponse(f.settlements), nil
 }
 
 func (f *fakeStore) GetShellRunClaims(_ context.Context, request *connect.Request[storev1.GetShellRunClaimsRequest]) (*connect.Response[storev1.GetShellRunClaimsResponse], error) {
