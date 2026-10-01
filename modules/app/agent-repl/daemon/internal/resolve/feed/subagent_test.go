@@ -3611,3 +3611,37 @@ func TestASubagentsFigureSpansTurns(t *testing.T) {
 		t.Fatalf("tokens = %q, want the lifetime 3k", got)
 	}
 }
+
+func TestShellJudgmentJudgesHowTheProcessTerminated(t *testing.T) {
+	tests := []struct {
+		name        string
+		termination *conversationv1.AgentBashTermination
+		want        string
+	}{
+		{name: "exit 0 succeeded", want: "succeeded", termination: &conversationv1.AgentBashTermination{
+			How: &conversationv1.AgentBashTermination_Exited{Exited: &conversationv1.AgentBashExited{Code: 0}}}},
+		{name: "a non-zero exit failed", want: "failed", termination: &conversationv1.AgentBashTermination{
+			How: &conversationv1.AgentBashTermination_Exited{Exited: &conversationv1.AgentBashExited{Code: 2}}}},
+		{name: "a signal failed", want: "failed", termination: &conversationv1.AgentBashTermination{
+			How: &conversationv1.AgentBashTermination_Killed{Killed: &conversationv1.AgentBashKilled{}}}},
+		{name: "no termination is unjudged", want: ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := shellJudgment(tc.termination)
+
+			// Assert
+			var arm string
+			switch got.GetJudgment().(type) {
+			case *frontendv1.FeedShellCompleted_Succeeded:
+				arm = "succeeded"
+			case *frontendv1.FeedShellCompleted_Failed:
+				arm = "failed"
+			}
+			if got == nil || arm != tc.want {
+				t.Fatalf("shellJudgment() = %v, want %q", got, tc.want)
+			}
+		})
+	}
+}

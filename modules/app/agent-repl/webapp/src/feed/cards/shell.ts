@@ -136,8 +136,7 @@ export function drawFeedShellHead(u: FeedShell, rc: RowContext): HTMLElement {
 
   // THE STATE DOT: the shared vocabulary's color for `live` or the settled
   // outcome; hollow when it spends none (work-dot.ts).
-  const dotState = state.case === "settled" ? requireCase(state.value.outcome, `${PATH}.settled.outcome`).case : state.case;
-  head.append(drawWorkDot(feedShellDotColor(dotState), state.case === "live"));
+  head.append(drawWorkDot(feedShellDotColor(shellDotState(state, PATH)), state.case === "live"));
 
   const command = drawFeedShellCommand(requireMessage(u.command, `${PATH}.command`), `${PATH}.command`);
   head.append(command);
@@ -452,4 +451,18 @@ function expire(el: HTMLElement, rc: RowContext): void {
     stopTicking(el);
     el.remove();
   });
+}
+
+/**
+ * The `feed_shell_dot` key a head's state draws: `live`, or the settled
+ * outcome arm, with a completed run's daemon judgment appended
+ * (`completed_failed`). An unjudged completion is plain `completed`.
+ */
+export function shellDotState(state: NonNullable<FeedShell["state"]> & { case: string }, path: string): string {
+  if (state.case !== "settled") return state.case;
+  const outcome = requireCase(state.value.outcome, `${path}.settled.outcome`);
+  if (outcome.case === "completed" && outcome.value.judgment.case !== undefined) {
+    return `completed_${outcome.value.judgment.case}`;
+  }
+  return outcome.case;
 }

@@ -1312,16 +1312,35 @@ func shellEnding(log dlog.Logger, workID string, bash *conversationv1.AgentBash)
 	return nil
 }
 
-// shellSettled renders a settled shell. A non-zero exit still COMPLETED —
-// "failure" is the reader's judgment of the code, never an arm.
+// shellJudgment judges a completed shell from how its process terminated:
+// exit 0 succeeded, a non-zero exit or a signal failed. A run that carried no
+// termination is left unjudged (set but unassigned), which draws as an
+// ordinary completion.
+func shellJudgment(termination *conversationv1.AgentBashTermination) *frontendv1.FeedShellCompleted {
+	switch how := termination.GetHow().(type) {
+	case *conversationv1.AgentBashTermination_Exited:
+		if how.Exited.GetCode() == 0 {
+			return &frontendv1.FeedShellCompleted{Judgment: &frontendv1.FeedShellCompleted_Succeeded{Succeeded: &frontendv1.FeedShellCompletedSucceeded{}}}
+		}
+		return &frontendv1.FeedShellCompleted{Judgment: &frontendv1.FeedShellCompleted_Failed{Failed: &frontendv1.FeedShellCompletedFailed{}}}
+	case *conversationv1.AgentBashTermination_Killed:
+		return &frontendv1.FeedShellCompleted{Judgment: &frontendv1.FeedShellCompleted_Failed{Failed: &frontendv1.FeedShellCompletedFailed{}}}
+	}
+	return &frontendv1.FeedShellCompleted{}
+}
+
+// shellSettled renders a settled shell. A process that ended on its own
+// COMPLETED, and the daemon judges whether it succeeded from how it
+// terminated (shellJudgment), so no client reads an exit code to decide.
 func shellSettled(log dlog.Logger, workID string, success *conversationv1.AgentBashSuccess) *frontendv1.FeedShellSettled {
 	settled := &frontendv1.FeedShellSettled{EndedAtMs: success.GetSettledAt().GetAtMs()}
 	switch outcome := success.GetOutcome().(type) {
 	case *conversationv1.AgentBashSuccess_Completed:
-		if exited, ok := outcome.Completed.GetTermination().GetHow().(*conversationv1.AgentBashTermination_Exited); ok {
+		termination := outcome.Completed.GetTermination()
+		if exited, ok := termination.GetHow().(*conversationv1.AgentBashTermination_Exited); ok {
 			settled.Exit = &frontendv1.FeedShellExit{Code: exited.Exited.GetCode()}
 		}
-		settled.Outcome = &frontendv1.FeedShellSettled_Completed{Completed: &frontendv1.FeedShellCompleted{}}
+		settled.Outcome = &frontendv1.FeedShellSettled_Completed{Completed: shellJudgment(termination)}
 	case *conversationv1.AgentBashSuccess_Interrupted:
 		if cause := lostCauseOfBash(outcome.Interrupted); cause != lostNone {
 			lost := &frontendv1.FeedShellLost{}

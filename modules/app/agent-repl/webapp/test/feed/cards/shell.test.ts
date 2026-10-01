@@ -8,8 +8,13 @@ import {
 } from "../../../../proto/gen/ts/agentrepl/v1/endpoint_interrupt_pb";
 import {
   FeedRowSchema,
+  FeedShellCompletedFailedSchema,
+  FeedShellCompletedSchema,
+  FeedShellCompletedSucceededSchema,
+  FeedShellLiveSchema,
   FeedShellLostSchema,
   FeedShellSchema,
+  FeedShellSettledSchema,
   type FeedShell,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { createTicker } from "../../../src/clock.js";
@@ -21,6 +26,7 @@ import {
   PROMPT_CHROME,
   SHELL_LOST_CAUSE_ARMS,
   SHELL_SETTLED_ARMS,
+  shellDotState,
   STOP_OUTCOME_MS,
 } from "../../../src/feed/cards/shell.js";
 import { TICKING_ATTRIBUTE } from "../../../src/feed/ticking.js";
@@ -336,7 +342,7 @@ describe("drawFeedShellHead settled", () => {
   const outcomes = [
     { arm: "completed", word: "completed", dot: ["hollow", "○", "tone-none"] },
     { arm: "cancelled", word: "stopped", dot: ["hollow", "○", "tone-none"] },
-    { arm: "lost", word: "lost sight of", dot: ["filled", "●", "tone-turquoise"] },
+    { arm: "lost", word: "lost sight of", dot: ["filled", "●", "tone-blue"] },
   ] as const;
 
   for (const c of outcomes) {
@@ -885,3 +891,26 @@ describe("drawFeedShellHead: the detached-work id", () => {
     expect(el.querySelector(".shell-head .async-work-id")?.textContent).toBe(want);
   });
 });
+
+describe("shellDotState", () => {
+  it.each<[string, () => FeedShell["state"], string]>([
+    ["a live run", () => ({ case: "live", value: create(FeedShellLiveSchema, {}) }), "live"],
+    ["a completed run the daemon judged failed", () => settledCompleted("failed"), "completed_failed"],
+    ["a completed run the daemon judged succeeded", () => settledCompleted("succeeded"), "completed_succeeded"],
+    ["a completed run left unjudged", () => settledCompleted(undefined), "completed"],
+    ["a lost run", () => ({ case: "settled", value: create(FeedShellSettledSchema, { outcome: { case: "lost", value: create(FeedShellLostSchema, {}) } }) }), "lost"],
+  ])("keys %s as %s", (_name, state, want) => {
+    // Act
+    const got = shellDotState(state() as NonNullable<FeedShell["state"]> & { case: string }, "FeedShell");
+
+    // Assert
+    expect(got).toBe(want);
+  });
+});
+
+function settledCompleted(judgment: "failed" | "succeeded" | undefined): FeedShell["state"] {
+  const completed = create(FeedShellCompletedSchema, {});
+  if (judgment === "failed") completed.judgment = { case: "failed", value: create(FeedShellCompletedFailedSchema, {}) };
+  if (judgment === "succeeded") completed.judgment = { case: "succeeded", value: create(FeedShellCompletedSucceededSchema, {}) };
+  return { case: "settled", value: create(FeedShellSettledSchema, { outcome: { case: "completed", value: completed } }) };
+}
