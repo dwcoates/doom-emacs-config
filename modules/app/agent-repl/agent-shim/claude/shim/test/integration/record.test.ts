@@ -41,6 +41,7 @@ import {
 } from "../integration-support/expect.js";
 import {
   entriesKeyed,
+  pageBookOf,
   pageLineOf,
   producers,
   writtenEntries,
@@ -478,7 +479,7 @@ describe("every entry's envelope", () => {
       );
     expect(lines.length).toBeGreaterThan(0);
     for (const { entry, line } of lines) {
-      expect(line.pageAgentId?.value).not.toBe("");
+      expect(pageBookOf(line)).not.toBe("");
       if (entry.entry.case === "agentUpdate") {
         expect(entry.entry.value.topLevel?.value).toBe(started.vendorSessionId);
       }
@@ -497,7 +498,7 @@ describe("every entry's envelope", () => {
 
     const books = new Set(
       writtenEntries(shim.store?.writes() ?? [])
-        .map((entry) => pageLineOf(entry)?.pageAgentId?.value)
+        .map((entry) => pageBookOf(pageLineOf(entry)))
         .filter((book): book is string => book !== undefined && book !== ""),
     );
     expect(books.has(started.vendorSessionId)).toBe(true);
@@ -586,7 +587,7 @@ describe("write ids and absorption", () => {
       batches
         .filter((batch) => batch.accepted)
         .flatMap((batch) => batch.request.batch?.entries ?? [])
-        .filter((entry) => pageLineOf(entry)?.pageAgentId?.value === started.vendorSessionId)
+        .filter((entry) => pageBookOf(pageLineOf(entry)) === started.vendorSessionId)
         .map((entry) => entry.upsertKey),
     );
     expect(book.length).toBe(bookKeys.size);
@@ -776,7 +777,7 @@ describe("the mocked vendor's files, at the ruled paths", () => {
     await runTurn(shim, stream, "t1", "!subagent");
 
     const created = writtenEntries(shim.store?.writes() ?? [])
-      .map((entry) => pageLineOf(entry)?.pageAgentId?.value)
+      .map((entry) => pageBookOf(pageLineOf(entry)))
       .find((book) => book !== undefined && book !== "" && book !== started.vendorSessionId);
     if (created === undefined) throw new Error("no subagent book was written");
     // `created` is the WIRE identity (the spawning call's id); the file is
@@ -799,7 +800,7 @@ describe("the mocked vendor's files, at the ruled paths", () => {
     await runTurn(shim, stream, "t1", "!subagent");
 
     const created = writtenEntries(shim.store?.writes() ?? [])
-      .map((entry) => pageLineOf(entry)?.pageAgentId?.value)
+      .map((entry) => pageBookOf(pageLineOf(entry)))
       .find((book) => book !== undefined && book !== "" && book !== started.vendorSessionId);
     if (created === undefined) throw new Error("no subagent book was written");
     const vendorAgent = vendorAgentIdForCall(shim.dirs, started.vendorSessionId, created);

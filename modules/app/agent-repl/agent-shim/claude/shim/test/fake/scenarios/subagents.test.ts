@@ -640,7 +640,7 @@ describe("a detached subagent streaming INTO the main agent's open blocks", () =
   /** The distinct units of one kind a book holds. */
   function unitsIn(entries: readonly PersistEntry[], main: boolean, kind: string): string[] {
     const keys = entries
-      .filter((entry) => (entry.agentId.value === MAIN_AGENT.value) === main)
+      .filter((entry) => (entry.agentId?.value === MAIN_AGENT.value) === main)
       .filter((entry) => activityOf(entry)?.item.case === kind)
       .map((entry) => entry.upsertKey);
     return [...new Set(keys)];
@@ -689,7 +689,7 @@ describe("a detached subagent streaming INTO the main agent's open blocks", () =
     // Assert
     const mainDeltas = entries.filter(
       (entry) =>
-        entry.agentId.value === MAIN_AGENT.value &&
+        entry.agentId?.value === MAIN_AGENT.value &&
         ["activity.thinking.update", "activity.response.update"].includes(entry.source.discriminator),
     );
     expect(mainDeltas).toHaveLength(4);

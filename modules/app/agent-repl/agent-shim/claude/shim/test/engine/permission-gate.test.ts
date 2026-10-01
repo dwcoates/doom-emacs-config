@@ -763,7 +763,7 @@ describe("whose book an ask lands on", () => {
     await Promise.resolve();
 
     // Assert.
-    expect(written[0]?.agentId.value).toBe(SUBAGENT.value);
+    expect(written[0]?.agentId?.value).toBe(SUBAGENT.value);
   });
 
   it("writes a question on the SUBAGENT that raised it", async () => {
@@ -779,7 +779,7 @@ describe("whose book an ask lands on", () => {
     await Promise.resolve();
 
     // Assert.
-    expect(written[0]?.agentId.value).toBe(SUBAGENT.value);
+    expect(written[0]?.agentId?.value).toBe(SUBAGENT.value);
   });
 
   it("leaves a backgrounded subagent's ask untagged while the main agent's keep-alive runs", async () => {
@@ -841,7 +841,7 @@ describe("whose book an ask lands on", () => {
     await Promise.resolve();
 
     // Assert.
-    expect(written[0]?.agentId.value).toBe(AGENT.value);
+    expect(written[0]?.agentId?.value).toBe(AGENT.value);
   });
 
   it("lands an ask under an UNKNOWN agent on the main agent rather than dropping it", async () => {
@@ -854,7 +854,7 @@ describe("whose book an ask lands on", () => {
     await Promise.resolve();
 
     // Assert.
-    expect(written[0]?.agentId.value).toBe(AGENT.value);
+    expect(written[0]?.agentId?.value).toBe(AGENT.value);
   });
 });
 
@@ -898,7 +898,7 @@ describe("an ask whose book is resolved asynchronously", () => {
     await Promise.resolve();
 
     // Assert.
-    expect(written[0]?.agentId.value).toBe(SUBAGENT.value);
+    expect(written[0]?.agentId?.value).toBe(SUBAGENT.value);
   });
 
   it("writes the ask on the main agent when the lookup named none", async () => {
@@ -912,7 +912,7 @@ describe("an ask whose book is resolved asynchronously", () => {
     await Promise.resolve();
 
     // Assert.
-    expect(written[0]?.agentId.value).toBe(AGENT.value);
+    expect(written[0]?.agentId?.value).toBe(AGENT.value);
   });
 
   it("denies an ask whose lookup spanned a stand-down, so the vendor is never left blocked", async () => {

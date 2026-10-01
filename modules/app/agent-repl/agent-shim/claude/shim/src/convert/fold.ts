@@ -276,6 +276,13 @@ export function createFold(): Fold {
     learnTaskAgent(taskId, answer) {
       if (answer.kind === "found") {
         state.taskKinds.rememberAgent(taskId, answer.agent);
+        if (answer.commission !== undefined) {
+          state.taskKinds.rememberCommission(taskId, answer.commission);
+          return;
+        }
+        // THE AGENT IS NAMED, ITS COMMISSION IS NOT: the miss rides the record
+        // an announcement that cannot state one writes next.
+        state.taskKinds.rememberStoreAnswer(taskId, describeVendorTaskAnswer(answer));
         return;
       }
       state.taskKinds.rememberStoreAnswer(taskId, describeVendorTaskAnswer(answer));

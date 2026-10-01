@@ -132,15 +132,15 @@ describe("which denial arm the vendor's decider selects", () => {
 
 describe("whose book the denial lands in", () => {
   it("books a main-agent denial against the main agent", () => {
-    expect(convert()[0]?.agentId.value).toBe("main-agent");
+    expect(convert()[0]?.agentId?.value).toBe("main-agent");
   });
 
   it("books a denial inside a SUBAGENT against the subagent the record names", () => {
     // The vendor's own record is the one place the stream plane states an agent id.
-    expect(convert({ agent_id: "sub-7" })[0]?.agentId.value).toBe("sub-7");
+    expect(convert({ agent_id: "sub-7" })[0]?.agentId?.value).toBe("sub-7");
   });
 
   it("falls back to the main agent when the record names an EMPTY agent id", () => {
-    expect(convert({ agent_id: "" })[0]?.agentId.value).toBe("main-agent");
+    expect(convert({ agent_id: "" })[0]?.agentId?.value).toBe("main-agent");
   });
 });
