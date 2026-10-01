@@ -290,21 +290,42 @@
   (should (equal (agent-repl-test-wire-host--decode
                   #'agent-repl-wire-decode-watch-host-workspace-response
                   "{\"selection\":{\"none\":{}}}")
-                 '(:arm :selection :value :none))))
+                 '(:arm :selection :value (:kind :none :markdown nil)))))
 
 (ert-deftest agent-repl-test-wire-host-selection-response-decodes-to-its-kind ()
   "A selected final response decodes to the `:response' kind."
   (should (equal (agent-repl-test-wire-host--decode
                   #'agent-repl-wire-decode-host-workspace-selection
-                  "{\"response\":{}}")
-                 :response)))
+                  "{\"response\":{\"markdown\":{\"text\":\"the answer\"}}}")
+                 '(:kind :response :markdown "the answer"))))
 
 (ert-deftest agent-repl-test-wire-host-selection-prompt-decodes-to-its-kind ()
   "A selected prompt decodes to the `:prompt' kind."
   (should (equal (agent-repl-test-wire-host--decode
                   #'agent-repl-wire-decode-host-workspace-selection
-                  "{\"prompt\":{}}")
-                 :prompt)))
+                  "{\"prompt\":{\"markdown\":{\"text\":\"the question\"}}}")
+                 '(:kind :prompt :markdown "the question"))))
+
+(ert-deftest agent-repl-test-wire-host-selection-bubble-decodes-to-its-kind-and-text ()
+  "Any other selected bubble decodes to the `:bubble' kind with its text."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-host-workspace-selection
+                  "{\"bubble\":{\"markdown\":{\"text\":\"meanwhile\"}}}")
+                 '(:kind :bubble :markdown "meanwhile"))))
+
+(ert-deftest agent-repl-test-wire-host-selection-empty-text-decodes-to-the-empty-string ()
+  "A selected prompt with no text (an image alone) decodes to \"\"."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-host-workspace-selection
+                  "{\"bubble\":{\"markdown\":{}}}")
+                 '(:kind :bubble :markdown ""))))
+
+(ert-deftest agent-repl-test-wire-host-selection-requires-the-text ()
+  "A selected arm with no text element is a contract breach."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-host-workspace-selection
+                  "{\"response\":{}}")
+                 '("HostWorkspaceSelectionResponse" markdown "required message field is absent"))))
 
 (ert-deftest agent-repl-test-wire-host-selection-unset-is-a-breach ()
   "A selection push naming no kind is a contract breach."
@@ -313,10 +334,10 @@
                  '("HostWorkspaceSelection" selection "oneof is unset"))))
 
 (ert-deftest agent-repl-test-wire-host-selection-refuses-a-row ()
-  "The kind arms are empty: a row riding one is refused, not ignored."
+  "The kind arms carry only the text: a row riding one is refused, not ignored."
   (should (equal (agent-repl-test-wire-host--breach
                   #'agent-repl-wire-decode-host-workspace-selection
-                  "{\"response\":{\"row\":{\"value\":\"r1\"}}}")
+                  "{\"response\":{\"markdown\":{},\"row\":{\"value\":\"r1\"}}}")
                  '("HostWorkspaceSelectionResponse" row "unknown field"))))
 
 (ert-deftest agent-repl-test-wire-host-selection-arms-pinned ()
@@ -325,7 +346,7 @@
                         "agentrepl/v1/endpoint_watch_host_workspace.pb.go"
                         "HostWorkspaceSelection")
                        #'string<)
-                 '("none" "prompt" "response"))))
+                 '("bubble" "none" "prompt" "response"))))
 
 ;;;; ---- The notification click push ----
 
