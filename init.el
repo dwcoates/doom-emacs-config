@@ -14,6 +14,11 @@
 ;;      Alternatively, press 'gd' (or 'C-c c d') on a module to browse its
 ;;      directory (for easy access to its source code).
 
+;; Evil reads this once at load, so it must be set before `doom!' loads evil.
+;; Any buffer with `visual-line-mode' on then gets screen-line `j'/`k'/`0'/`$'
+;; motions and operators, with `gj'/`gk'/`g0'/`g$' for logical lines.
+(setq evil-respect-visual-line-mode t)
+
 ;;FIXME: this is a temporary hack until i figure out why the hell the exec path isn't being correctly set / updated.
 ;;       There's some stupid caching happenign somewhere.
 (setq exec-path (cons "/opt/homebrew/Cellar/llvm@17/17.0.6/bin" exec-path))

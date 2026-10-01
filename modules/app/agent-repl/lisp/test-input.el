@@ -1375,6 +1375,25 @@ workspace's dwell clear another composer's badge."
           (should (eq cancelled 'composer-flash)))
       (when (buffer-live-p buffer) (kill-buffer buffer)))))
 
+(ert-deftest agent-repl-input-mode-enables-visual-line-mode ()
+  "The composer turns on `visual-line-mode' so Evil moves by screen line."
+  ;; Arrange.
+  (with-temp-buffer
+    ;; Act.
+    (agent-repl-input-mode)
+    ;; Assert.
+    (should visual-line-mode)))
+
+(ert-deftest agent-repl-input-mode-wraps-at-word-boundaries ()
+  "The composer soft-wraps long lines at word boundaries."
+  ;; Arrange.
+  (with-temp-buffer
+    ;; Act.
+    (agent-repl-input-mode)
+    ;; Assert.
+    (should word-wrap)
+    (should-not truncate-lines)))
+
 ;;;; ---- The send edge is durable ----
 
 ;; A user's send is a once-per-action edge, so its record has to survive the
