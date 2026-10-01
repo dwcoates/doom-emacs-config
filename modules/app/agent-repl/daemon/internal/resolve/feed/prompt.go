@@ -121,6 +121,11 @@ func (r *resolver) drawAgentPrompt(s *wsState, agent *conversationv1.AgentId, pr
 			return
 		}
 		row := r.userPromptRow(s, at, turn, turn, prompt.GetOrigin(), blocks)
+		if turn.GetValue() != "" && !s.rolledBack[ids.TurnID(turn.GetValue())] {
+			// THE PROMPT AS SAID, kept so a rollback can hand it back to the
+			// composer whole (rollback.go): the row holds only drawn blocks.
+			s.promptSaid[ids.TurnID(turn.GetValue())] = prompt.GetSaid()
+		}
 		log.Debug("daemon.feed.user_prompt",
 			"a delivered prompt was drawn as a user-prompt row",
 			dlog.Context{"turn": turn.GetValue(), "origin": prompt.GetOrigin().String(), "blocks": len(blocks)})
