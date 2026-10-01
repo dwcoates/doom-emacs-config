@@ -289,8 +289,8 @@ export async function boot(): Promise<void> {
     // and the sentence it shows is the footer's status arm rather than a
     // second vocabulary. Every other arm is a usable workspace, turquoise
     // included, so its composer is open.
-    footer.onStatus((statusCase) => {
-      const closed = composerClosedFor(statusCase);
+    footer.onStatus((statusCase, substatusCase) => {
+      const closed = composerClosedFor(statusCase, substatusCase);
       gate.set(closed ? "closed" : "open", closed ? statusCase : undefined);
     });
 
