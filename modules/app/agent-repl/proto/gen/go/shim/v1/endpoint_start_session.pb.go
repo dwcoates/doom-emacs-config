@@ -215,9 +215,19 @@ type StartSessionResume struct {
 	// forked or rotated id answers from its link file) and persists that, so a
 	// bind to a rotated conversation lands on the book its records were filed
 	// under rather than minting a second name for it.
-	Rebind        *StartSessionRebind `protobuf:"bytes,3,opt,name=rebind,proto3,oneof" json:"rebind,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Rebind *StartSessionRebind `protobuf:"bytes,3,opt,name=rebind,proto3,oneof" json:"rebind,omitempty"`
+	// EVERY TURN OF THIS WORKSPACE THAT WAS ROLLED BACK (RollBackSession), as
+	// the daemon recorded them. The vendor never rewrites its transcript: after
+	// a rollback, the file still ends on the dropped branch until the next
+	// prompt appends past the cut, so a plain resume of the newest record would
+	// bring the dropped turns back into the agent's context. The shim resumes at
+	// the newest record unless that record's chain holds the prompt of a turn
+	// named here; then it resumes at the entry just before the earliest such
+	// prompt. A branch the next prompt started holds none of them, so nothing
+	// here ever needs clearing. Empty for a workspace never rolled back.
+	RolledBackTurns []*v1.TurnId `protobuf:"bytes,4,rep,name=rolled_back_turns,json=rolledBackTurns,proto3" json:"rolled_back_turns,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *StartSessionResume) Reset() {
@@ -267,6 +277,13 @@ func (x *StartSessionResume) GetColdRemediation() *v1.SessionColdRemediation {
 func (x *StartSessionResume) GetRebind() *StartSessionRebind {
 	if x != nil {
 		return x.Rebind
+	}
+	return nil
+}
+
+func (x *StartSessionResume) GetRolledBackTurns() []*v1.TurnId {
+	if x != nil {
+		return x.RolledBackTurns
 	}
 	return nil
 }
@@ -810,7 +827,7 @@ var File_shim_v1_endpoint_start_session_proto protoreflect.FileDescriptor
 
 const file_shim_v1_endpoint_start_session_proto_rawDesc = "" +
 	"\n" +
-	"$shim/v1/endpoint_start_session.proto\x12\ashim.v1\x1a\x19conversation/v1/api.proto\x1a conversation/v1/permission.proto\x1a\x1dconversation/v1/session.proto\"\x8a\x01\n" +
+	"$shim/v1/endpoint_start_session.proto\x12\ashim.v1\x1a\x19conversation/v1/api.proto\x1a conversation/v1/permission.proto\x1a\x1dconversation/v1/session.proto\x1a\x1aconversation/v1/turn.proto\"\x8a\x01\n" +
 	"\x13StartSessionRequest\x122\n" +
 	"\x05fresh\x18\x01 \x01(\v2\x1a.shim.v1.StartSessionFreshH\x00R\x05fresh\x125\n" +
 	"\x06resume\x18\x02 \x01(\v2\x1b.shim.v1.StartSessionResumeH\x00R\x06resumeB\b\n" +
@@ -818,11 +835,12 @@ const file_shim_v1_endpoint_start_session_proto_rawDesc = "" +
 	"\x11StartSessionFresh\x126\n" +
 	"\x05model\x18\x01 \x01(\v2\x1b.conversation.v1.AgentModelH\x00R\x05model\x88\x01\x01\x12M\n" +
 	"\x0fpermission_mode\x18\x02 \x01(\v2$.conversation.v1.AgentPermissionModeR\x0epermissionModeB\b\n" +
-	"\x06_model\"\xf3\x01\n" +
+	"\x06_model\"\xb8\x02\n" +
 	"\x12StartSessionResume\x12*\n" +
 	"\x11vendor_session_id\x18\x01 \x01(\tR\x0fvendorSessionId\x12W\n" +
 	"\x10cold_remediation\x18\x02 \x01(\v2'.conversation.v1.SessionColdRemediationH\x00R\x0fcoldRemediation\x88\x01\x01\x128\n" +
-	"\x06rebind\x18\x03 \x01(\v2\x1b.shim.v1.StartSessionRebindH\x01R\x06rebind\x88\x01\x01B\x13\n" +
+	"\x06rebind\x18\x03 \x01(\v2\x1b.shim.v1.StartSessionRebindH\x01R\x06rebind\x88\x01\x01\x12C\n" +
+	"\x11rolled_back_turns\x18\x04 \x03(\v2\x17.conversation.v1.TurnIdR\x0frolledBackTurnsB\x13\n" +
 	"\x11_cold_remediationB\t\n" +
 	"\a_rebind\"\x14\n" +
 	"\x12StartSessionRebind\"\x94\x01\n" +
@@ -877,9 +895,10 @@ var file_shim_v1_endpoint_start_session_proto_goTypes = []any{
 	(*v1.AgentModel)(nil),                     // 12: conversation.v1.AgentModel
 	(*v1.AgentPermissionMode)(nil),            // 13: conversation.v1.AgentPermissionMode
 	(*v1.SessionColdRemediation)(nil),         // 14: conversation.v1.SessionColdRemediation
-	(*v1.SessionStarted)(nil),                 // 15: conversation.v1.SessionStarted
-	(*v1.SessionCold)(nil),                    // 16: conversation.v1.SessionCold
-	(*v1.LockHolderFailure)(nil),              // 17: conversation.v1.LockHolderFailure
+	(*v1.TurnId)(nil),                         // 15: conversation.v1.TurnId
+	(*v1.SessionStarted)(nil),                 // 16: conversation.v1.SessionStarted
+	(*v1.SessionCold)(nil),                    // 17: conversation.v1.SessionCold
+	(*v1.LockHolderFailure)(nil),              // 18: conversation.v1.LockHolderFailure
 }
 var file_shim_v1_endpoint_start_session_proto_depIdxs = []int32{
 	1,  // 0: shim.v1.StartSessionRequest.fresh:type_name -> shim.v1.StartSessionFresh
@@ -888,21 +907,22 @@ var file_shim_v1_endpoint_start_session_proto_depIdxs = []int32{
 	13, // 3: shim.v1.StartSessionFresh.permission_mode:type_name -> conversation.v1.AgentPermissionMode
 	14, // 4: shim.v1.StartSessionResume.cold_remediation:type_name -> conversation.v1.SessionColdRemediation
 	3,  // 5: shim.v1.StartSessionResume.rebind:type_name -> shim.v1.StartSessionRebind
-	5,  // 6: shim.v1.StartSessionResponse.success:type_name -> shim.v1.StartSessionSuccess
-	6,  // 7: shim.v1.StartSessionResponse.failure:type_name -> shim.v1.StartSessionFailure
-	15, // 8: shim.v1.StartSessionSuccess.session:type_name -> conversation.v1.SessionStarted
-	16, // 9: shim.v1.StartSessionFailure.cold:type_name -> conversation.v1.SessionCold
-	7,  // 10: shim.v1.StartSessionFailure.vendor_start_failed:type_name -> shim.v1.StartSessionVendorStartFailed
-	8,  // 11: shim.v1.StartSessionFailure.unknown_session:type_name -> shim.v1.StartSessionUnknownSession
-	9,  // 12: shim.v1.StartSessionFailure.already_started:type_name -> shim.v1.StartSessionAlreadyStarted
-	10, // 13: shim.v1.StartSessionFailure.conversation_owned:type_name -> shim.v1.StartSessionConversationOwned
-	11, // 14: shim.v1.StartSessionFailure.lock_holder_unavailable:type_name -> shim.v1.StartSessionLockHolderUnavailable
-	17, // 15: shim.v1.StartSessionLockHolderUnavailable.failure:type_name -> conversation.v1.LockHolderFailure
-	16, // [16:16] is the sub-list for method output_type
-	16, // [16:16] is the sub-list for method input_type
-	16, // [16:16] is the sub-list for extension type_name
-	16, // [16:16] is the sub-list for extension extendee
-	0,  // [0:16] is the sub-list for field type_name
+	15, // 6: shim.v1.StartSessionResume.rolled_back_turns:type_name -> conversation.v1.TurnId
+	5,  // 7: shim.v1.StartSessionResponse.success:type_name -> shim.v1.StartSessionSuccess
+	6,  // 8: shim.v1.StartSessionResponse.failure:type_name -> shim.v1.StartSessionFailure
+	16, // 9: shim.v1.StartSessionSuccess.session:type_name -> conversation.v1.SessionStarted
+	17, // 10: shim.v1.StartSessionFailure.cold:type_name -> conversation.v1.SessionCold
+	7,  // 11: shim.v1.StartSessionFailure.vendor_start_failed:type_name -> shim.v1.StartSessionVendorStartFailed
+	8,  // 12: shim.v1.StartSessionFailure.unknown_session:type_name -> shim.v1.StartSessionUnknownSession
+	9,  // 13: shim.v1.StartSessionFailure.already_started:type_name -> shim.v1.StartSessionAlreadyStarted
+	10, // 14: shim.v1.StartSessionFailure.conversation_owned:type_name -> shim.v1.StartSessionConversationOwned
+	11, // 15: shim.v1.StartSessionFailure.lock_holder_unavailable:type_name -> shim.v1.StartSessionLockHolderUnavailable
+	18, // 16: shim.v1.StartSessionLockHolderUnavailable.failure:type_name -> conversation.v1.LockHolderFailure
+	17, // [17:17] is the sub-list for method output_type
+	17, // [17:17] is the sub-list for method input_type
+	17, // [17:17] is the sub-list for extension type_name
+	17, // [17:17] is the sub-list for extension extendee
+	0,  // [0:17] is the sub-list for field type_name
 }
 
 func init() { file_shim_v1_endpoint_start_session_proto_init() }

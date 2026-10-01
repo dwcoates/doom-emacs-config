@@ -139,3 +139,33 @@ below is the lead's decision, recorded with its reasoning.
   replay after a restart, and the vendor transcript's abandoned branch the
   sidecar keeps ingesting. The store keeps the dropped entries (it has no
   delete, `store/v1/service.proto`); the feed's gate is what hides them.
+
+### 7. `shim.v1.StartSessionResume.rolled_back_turns`
+
+- What: every resume carries the workspace's rolled-back turns (the daemon's
+  wsm `rolled_back_turns`). The shim resumes at the newest transcript record
+  unless that record's chain holds a rolled-back turn's prompt; then it
+  resumes at the entry just before the earliest such prompt.
+- Why: the vendor never rewrites its transcript, so between a rollback and
+  the next prompt the file still ends on the dropped branch, and a shim
+  restart in that window would resume the dropped turns back into the
+  agent's context. The rule needs no clearing (a branch the next prompt
+  starts holds no rolled-back prompt), so there is no window in which a
+  stale resume point could cut new work: the failure is impossible rather
+  than unlikely.
+- Rejected: storing a one-shot resume point and clearing it after the next
+  StartTurn — the clear races the vendor appending the new prompt.
+
+### 8. Shim rulings on the vendor guard (no proto change)
+
+- `resumeDropsTurn` is passed only for a single-turn rollback with no
+  keep-alive record past the fork point: a keep-alive prompt is the shim's
+  own and is known to it, but the vendor guard refuses it as unattributable.
+  The shim's own check (every prompt past the fork is a dropped turn's or a
+  keep-alive) stands in otherwise.
+- A files-restoring rollback refuses `unseen_prompt` up front for ANY
+  user-role record past the fork point that the guard would reject (task
+  notifications included), so the vendor can never refuse the cut after the
+  files were restored.
+- Task notifications inside the dropped turns are dropped with them in a
+  keep-files rollback: they belong to turns the user rolled back.

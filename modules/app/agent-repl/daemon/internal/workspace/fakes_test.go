@@ -48,6 +48,11 @@ var errFake = errors.New("workspace test: arranged failure")
 type fakeDB struct {
 	wsm.DB
 
+	// rolledBack is each workspace's rolled-back turns; rolledBackErr fails
+	// the read.
+	rolledBack    map[ids.WorkspaceID][]ids.TurnID
+	rolledBackErr error
+
 	workspaces map[ids.WorkspaceID]wsm.Workspace
 	byDir      map[string]wsm.Workspace
 	// listWorkspacesErr fails the roster read, for the tests about what a
@@ -203,6 +208,14 @@ func (d *fakeDB) OpenFaults(_ context.Context, scope wsm.FaultScope) ([]wsm.Faul
 		out = append(out, f)
 	}
 	return out, nil
+}
+
+// RolledBackTurns answers the workspace's scripted rolled-back turns.
+func (d *fakeDB) RolledBackTurns(_ context.Context, ws ids.WorkspaceID) ([]ids.TurnID, error) {
+	if d.rolledBackErr != nil {
+		return nil, d.rolledBackErr
+	}
+	return d.rolledBack[ws], nil
 }
 
 func newFakeDB() *fakeDB {

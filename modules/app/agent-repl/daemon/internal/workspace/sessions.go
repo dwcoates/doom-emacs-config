@@ -1818,6 +1818,19 @@ func (f *Fleet) askToStartSession(ctx context.Context, log dlog.Logger, ws ids.W
 			VendorSessionId: src.VendorSessionID,
 			ColdRemediation: src.ColdRemediation,
 		}
+		// A ROLLED-BACK TURN STAYS ROLLED BACK ACROSS A RESTART: the vendor's
+		// transcript still ends on the dropped branch until the next prompt
+		// appends past the cut, so the shim is told every rolled-back turn and
+		// resumes before them (StartSessionResume.rolled_back_turns).
+		rolledBack, err := f.deps.DB.RolledBackTurns(ctx, ws)
+		if err != nil {
+			log.Error("daemon.workspace.start_session", "the rolled-back turns could not be read; the session was not resumed",
+				dlog.Context{"cause": err.Error()})
+			return nil, fmt.Errorf("read the rolled-back turns of %q: %w", ws, err)
+		}
+		for _, turn := range rolledBack {
+			resume.RolledBackTurns = append(resume.RolledBackTurns, &conversationv1.TurnId{Value: string(turn)})
+		}
 		if src.Rebind {
 			// PRESENCE IS THE FACT. The marker tells the shim to adopt this
 			// conversation's own identity as the workspace's book; without it
