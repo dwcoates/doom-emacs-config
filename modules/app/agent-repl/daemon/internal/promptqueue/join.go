@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 
+	conversationv1 "agentrepl/proto/conversation/v1"
+
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/resolve/footer"
@@ -23,6 +25,17 @@ import (
 //     it runs as the next turn, standing in flight the moment the running
 //     turn ends, so the turn end pops nothing into it.
 //
+// A FOLDED PROMPT IS ANSWERED ONLY IF THE TURN IT JOINED IS (owner ruling,
+// 2026-10-01). The vendor can fold a prompt into a turn in the same instant
+// that turn fails — a turn that ran out of API retries does exactly that — and
+// the prompt is then in the transcript but never answered. So the queue keeps
+// every prompt folded into a running turn until that turn ends, and when it
+// ends FAILED it resubmits each as its own turn (resubmitFolded). A turn that
+// completes answered them; one the user stopped, or an interjection
+// superseded, runs no resubmission: the stop is the user ending the work, and
+// an interjecting prompt runs next with the folded text already in its
+// transcript.
+//
 // ONE PROMPT JOINS AT A TIME. While one waits, a prompt behind it is never
 // classified: it waits its turn, as it would behind a session act.
 
@@ -38,6 +51,10 @@ type joiningPrompt struct {
 	// prompt is its text, the turn fact the footer and the roster take when
 	// it runs as its own turn.
 	prompt string
+	// said and origin are the prompt as it was submitted, kept so a prompt
+	// folded into a turn that then fails can be resubmitted as it was sent.
+	said   *conversationv1.UserSaid
+	origin conversationv1.PromptOrigin
 }
 
 // joining answers the prompt waiting to join the running turn, if one does.
@@ -143,7 +160,7 @@ func (q *queue) joinLocked(ctx context.Context, sub Submission, running ids.Turn
 		q.recordWaiting(ctx, sub, "the session would not take the prompt into the running turn, so it waits for it to end", log)
 		return
 	}
-	q.setJoining(sub.WS, joiningPrompt{turn: sub.Turn, into: running, prompt: text})
+	q.setJoining(sub.WS, joiningPrompt{turn: sub.Turn, into: running, prompt: text, said: sub.Said, origin: sub.Origin})
 	q.deps.Footer.OnSubmission(sub.WS, footer.Submission{Prompt: text, Stage: footer.StageAfterToolCall})
 	handOver(sub.WS, success, watcher)
 	q.touchEngagement(ctx, sub.WS, log)
@@ -196,7 +213,16 @@ func (state *wsState) endJoiningLocked(turn ids.TurnID) (joiningPrompt, bool) {
 // banner is raised.
 func (q *queue) onFolded(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID, log dlog.Logger) {
 	q.mu.Lock()
-	joined, wasJoining := q.stateLocked(ws).endJoiningLocked(turn)
+	state := q.stateLocked(ws)
+	joined, wasJoining := state.endJoiningLocked(turn)
+	if wasJoining {
+		// KEPT UNTIL THE TURN IT JOINED ENDS: answered if that turn completes,
+		// resubmitted if it fails (resubmitFolded).
+		if state.folded == nil {
+			state.folded = map[ids.TurnID][]joiningPrompt{}
+		}
+		state.folded[joined.into] = append(state.folded[joined.into], joined)
+	}
 	q.mu.Unlock()
 	if !wasJoining {
 		log.Error(opJoin, "a turn closed as folded that was not the prompt joining the running turn", dlog.Context{
@@ -220,4 +246,37 @@ func (q *queue) onJoinedTurnStood(ws ids.WorkspaceID, joined joiningPrompt, log 
 	log.Info(opJoin, "the turn the prompt was sent to join ended without folding it in; it runs as its own turn", dlog.Context{
 		"joining_turn": string(joined.turn), "joined_turn": string(joined.into),
 	})
+}
+
+// takeFoldedLocked removes and answers the prompts folded into TURN; q.mu is
+// held. Every end of a turn takes them, so none outlives the turn it joined.
+func (state *wsState) takeFoldedLocked(turn ids.TurnID) []joiningPrompt {
+	folded := state.folded[turn]
+	delete(state.folded, turn)
+	return folded
+}
+
+// resubmitFolded resubmits, each as its own turn and in the order they were
+// folded, the prompts the vendor folded into a turn that then FAILED: they are
+// in the transcript, but the turn that took them never answered them. It runs
+// after the failed turn's end has released the delivery lock, so each goes
+// through Submit — delivered at once into a free session, or held, DEFERRED,
+// behind whatever the turn end delivered first.
+func (q *queue) resubmitFolded(ws ids.WorkspaceID, failed ids.TurnID, folded []joiningPrompt, log dlog.Logger) {
+	for _, prompt := range folded {
+		fields := dlog.Context{"failed_turn": string(failed), "folded_turn": string(prompt.turn)}
+		disposition, err := q.Submit(context.Background(), Submission{
+			WS: ws, Turn: wsm.NewTurnID(), Said: prompt.said, Origin: prompt.origin,
+			// DEFERRED: it runs as its own turn and never interrupts one the
+			// failed turn's end delivered ahead of it.
+			Delivery: wsm.DeliveryDeferred,
+		})
+		if err != nil {
+			fields["cause"] = err.Error()
+			log.Error(opJoin, "could not resubmit a prompt folded into a turn that failed; it stays unanswered", fields)
+			continue
+		}
+		fields["delivered"] = disposition.Delivered
+		log.Info(opJoin, "resubmitted a prompt folded into a turn that failed, so it is answered as its own turn", fields)
+	}
 }
