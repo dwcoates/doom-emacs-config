@@ -571,18 +571,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Revive:         fleet.Start,
 		Watcher:        fleet.Watcher,
 		ColdGate:       fleet.ColdGateDetail,
-		// A submission that arrives under a PARKED merge lease goes to the
-		// orchestrator as guidance. The queue never imports merge, so the
-		// route is a function; the orchestrator does not exist yet, so the
-		// function reads it out of the forwarder when it is called.
-		ParkedRoute: func(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID, said *conversationv1.UserSaid) error {
-			orchestrator, ok := mergeRef.orchestrator()
-			if !ok {
-				return fmt.Errorf("claude-repld: a parked submission arrived before the merge orchestrator existed")
-			}
-			return orchestrator.RouteParked(ctx, ws, turn, said)
-		},
-		DrainRefusals: refusalNoter{ref: &drainController},
+		DrainRefusals:  refusalNoter{ref: &drainController},
 		// A held-prompt edit is state on the host view; the server exists only
 		// later, so the publish reads it out of the relay forwarder.
 		PublishHost: relay.PublishHostWorkspace,
@@ -769,7 +758,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Freeness:          fleet,
 		PauseAfterCapture: capturePause(p.Surfaces.Global()),
 		PauseInTerminal:   terminalPause(ctx, p.Surfaces.Global()),
-		ParkedRoute:       guidanceRoute(fleet, mergeRef),
+		TurnInFlight:      turnInFlight(fleet),
 		Rollout:           deployer,
 		Log:               p.Surfaces,
 	})
@@ -1187,40 +1176,16 @@ func orderlyExit(stop func()) func(context.Context) error {
 	}
 }
 
-// guidanceRoute delivers the merge's guidance into the workspace's session as
-// a turn of its own. The ORIGIN is taken from the orchestrator's own active
-// tab, because the two parked tabs are two different repairs and a prompt's
-// origin is what makes it traceable to the situation that caused it.
-func guidanceRoute(fleet *workspace.Fleet, mergeRef *mergeForwarder) merge.ParkedRouter {
-	return func(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID, said *conversationv1.UserSaid) error {
-		orchestrator, ok := mergeRef.orchestrator()
-		if !ok {
-			return fmt.Errorf("claude-repld: guidance was routed before the merge orchestrator existed")
+// turnInFlight answers a workspace's turn in flight off the session fleet: the
+// turn an agent's merge request waits on before it is put in line. A workspace
+// with no live session, or one parked behind a cold gate, has none.
+func turnInFlight(fleet *workspace.Fleet) func(ids.WorkspaceID) (ids.TurnID, bool) {
+	return func(ws ids.WorkspaceID) (ids.TurnID, bool) {
+		running, live := fleet.Running(ws)
+		if !live || running.Turn == nil {
+			return "", false
 		}
-		facts, known := orchestrator.Facts(ws)
-		if !known {
-			return fmt.Errorf("claude-repld: guidance was routed for %q, which has no merge", ws)
-		}
-		origin, err := guidanceOrigin(facts.ActiveTab)
-		if err != nil {
-			return err
-		}
-		return fleet.RouteGuidance(ctx, ws, turn, said, origin)
-	}
-}
-
-// guidanceOrigin names the repair a parked merge's guidance belongs to. A tab
-// the origin vocabulary does not cover is a REFUSAL: mislabeling a prompt's
-// origin is exactly what the closed attribution exists to prevent.
-func guidanceOrigin(tab string) (conversationv1.PromptOrigin, error) {
-	switch tab {
-	case merge.TabConflicts:
-		return conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR, nil
-	case merge.TabTests, merge.TabFixes:
-		return conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_TEST_REPAIR, nil
-	default:
-		return conversationv1.PromptOrigin_PROMPT_ORIGIN_UNSPECIFIED,
-			fmt.Errorf("claude-repld: a parked merge on the %q tab has no prompt origin to route guidance under", tab)
+		return *running.Turn, true
 	}
 }
 

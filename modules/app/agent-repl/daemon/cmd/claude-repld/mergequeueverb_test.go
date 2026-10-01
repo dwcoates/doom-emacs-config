@@ -20,7 +20,7 @@ import (
 // --- fixtures -------------------------------------------------------------
 
 // scriptStep is one thing a fake roster stream does: push a frame, or run an
-// action (the fake ingress quarantining the command file).
+// action (the fake ingress retiring the command file).
 type scriptStep struct {
 	roster *frontendv1.WorkspaceRoster
 	act    func()
@@ -60,11 +60,13 @@ func (f *fakeMergeDaemon) Footer(_ context.Context, ref *workspacev1.WorkspaceRe
 	return f.footer, f.footErr
 }
 
-// mergeFixture is a state root with a daemon.addr, a worktree to merge, and
-// the daemons the verb dials, in order.
+// mergeFixture is a state root with a daemon.addr, the CALLING workspace's
+// worktree (the caller's directory is inside it), another workspace's
+// worktree, and the daemons the verb dials, in order.
 type mergeFixture struct {
 	stateDir string
 	worktree string
+	other    string
 	daemons  []*fakeMergeDaemon
 	dialed   int
 	cwd      string
@@ -74,7 +76,11 @@ type mergeFixture struct {
 
 func newMergeFixture(t *testing.T) *mergeFixture {
 	t.Helper()
-	f := &mergeFixture{stateDir: t.TempDir(), worktree: t.TempDir(), cwd: t.TempDir()}
+	f := &mergeFixture{stateDir: t.TempDir(), worktree: t.TempDir(), other: t.TempDir()}
+	f.cwd = filepath.Join(f.worktree, "sub")
+	if err := os.MkdirAll(f.cwd, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
 	if err := os.WriteFile(filepath.Join(f.stateDir, "daemon.addr"), []byte("127.0.0.1:4242"), 0o644); err != nil {
 		t.Fatalf("write daemon.addr: %v", err)
 	}
@@ -102,31 +108,37 @@ func (f *mergeFixture) outputDir() string {
 	return filepath.Join(f.stateDir, "output")
 }
 
-// commandFiles lists the command files written to the ingress.
+// commandFiles lists the command files written to the ingress, wherever the
+// ingress has retired them.
 func (f *mergeFixture) commandFiles(t *testing.T) []string {
 	t.Helper()
-	matches, err := filepath.Glob(filepath.Join(f.outputDir(), commandfile.DefaultGlob))
-	if err != nil {
-		t.Fatalf("glob the ingress: %v", err)
+	var out []string
+	for _, dir := range []string{"", "applied", "quarantine"} {
+		matches, err := filepath.Glob(filepath.Join(f.outputDir(), dir, commandfile.DefaultGlob))
+		if err != nil {
+			t.Fatalf("glob the ingress: %v", err)
+		}
+		out = append(out, matches...)
 	}
-	return matches
+	return out
 }
 
-// quarantineTheCommand is the fake ingress refusing the command file.
-func (f *mergeFixture) quarantineTheCommand(t *testing.T) func() {
+// retireTheCommand is the fake ingress retiring the command file into one of
+// its ends: applied or quarantine.
+func (f *mergeFixture) retireTheCommand(t *testing.T, end string) func() {
 	return func() {
-		files := f.commandFiles(t)
-		if len(files) != 1 {
-			t.Errorf("the ingress holds %d command files, want 1", len(files))
+		files, err := filepath.Glob(filepath.Join(f.outputDir(), commandfile.DefaultGlob))
+		if err != nil || len(files) != 1 {
+			t.Errorf("the ingress holds %v (%v), want one command file", files, err)
 			return
 		}
-		dir := filepath.Join(f.outputDir(), "quarantine")
+		dir := filepath.Join(f.outputDir(), end)
 		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Errorf("create the quarantine: %v", err)
+			t.Errorf("create %s: %v", end, err)
 			return
 		}
 		if err := os.Rename(files[0], filepath.Join(dir, filepath.Base(files[0]))); err != nil {
-			t.Errorf("quarantine the command file: %v", err)
+			t.Errorf("retire the command file: %v", err)
 		}
 	}
 }
@@ -137,26 +149,24 @@ func rosterRow(dir string, status string, mergedAt int64) *frontendv1.RosterRow 
 		Workspace: &frontendv1.RosterRowWorkspace{Workspace: &workspacev1.WorkspaceRef{Id: "ws-1", Dir: dir}},
 	}
 	switch status {
-	case statusEnqueuing:
-		row.Status = &frontendv1.RosterRow_MergeEnqueuing{MergeEnqueuing: &frontendv1.RosterRowStatusMergeEnqueuing{}}
 	case statusQueued:
 		row.Status = &frontendv1.RosterRow_MergeQueued{MergeQueued: &frontendv1.RosterRowStatusMergeQueued{}}
 	case statusMerging:
 		row.Status = &frontendv1.RosterRow_Merging{Merging: &frontendv1.RosterRowStatusMerging{}}
-	case statusConflict:
-		row.Status = &frontendv1.RosterRow_MergeConflict{MergeConflict: &frontendv1.RosterRowStatusMergeConflict{}}
 	case statusMergeFail:
 		row.Status = &frontendv1.RosterRow_MergeFailed{MergeFailed: &frontendv1.RosterRowStatusMergeFailed{}}
 	case statusMergedDone:
 		row.Status = &frontendv1.RosterRow_Merged{Merged: &frontendv1.RosterRowStatusMerged{}}
 		row.When = &frontendv1.RosterRowWhen{Shown: &frontendv1.RosterRowWhen_Merged{Merged: &frontendv1.RosterRowWhenMerged{AtMs: mergedAt}}}
+	case "thinking":
+		row.Status = &frontendv1.RosterRow_Thinking{Thinking: &frontendv1.RosterRowStatusThinking{}}
 	case "done":
 		row.Status = &frontendv1.RosterRow_Done{Done: &frontendv1.RosterRowStatusDone{}}
 	}
 	return row
 }
 
-// roster is a roster holding one row in a repository section, or none.
+// roster is a roster holding rows in a repository section.
 func roster(rows ...*frontendv1.RosterRow) *frontendv1.WorkspaceRoster {
 	return &frontendv1.WorkspaceRoster{Repository: &frontendv1.RosterRepositoryView{
 		Sections: []*frontendv1.RosterRepoSection{{Rows: &frontendv1.RosterRows{Rows: rows}}},
@@ -172,55 +182,107 @@ func frames(rosters ...*frontendv1.WorkspaceRoster) []scriptStep {
 	return steps
 }
 
-func parkedFooter(line string) *frontendv1.FooterView {
+// failedFooter is a footer standing on merge_failed in one area.
+func failedFooter(area string) *frontendv1.FooterView {
+	failed := &frontendv1.FooterStatusMergeFailed{}
+	switch area {
+	case "conflicts":
+		failed.Substatus = &frontendv1.FooterStatusMergeFailed_Conflicts{Conflicts: &frontendv1.FooterSubStatusMergeFailedConflicts{}}
+	case "tests":
+		failed.Substatus = &frontendv1.FooterStatusMergeFailed_Tests{Tests: &frontendv1.FooterSubStatusMergeFailedTests{}}
+	case "other":
+		failed.Substatus = &frontendv1.FooterStatusMergeFailed_Other{Other: &frontendv1.FooterSubStatusMergeFailedOther{}}
+	}
 	return &frontendv1.FooterView{Strip: &frontendv1.FooterStrip{Status: &frontendv1.FooterStatus{
-		Status: &frontendv1.FooterStatus_MergeConflict{MergeConflict: &frontendv1.FooterStatusMergeConflict{
-			Substatus: &frontendv1.FooterStatusMergeConflict_Parked{Parked: &frontendv1.FooterSubStatusMergingParked{Line: line}},
-		}},
-	}}}
+		Status: &frontendv1.FooterStatus_MergeFailed{MergeFailed: failed}}}}
 }
 
-// --- the command it writes ----------------------------------------------
-
-func TestTheMergeQueueVerbEnqueuesAWorkspaceThroughTheIngress(t *testing.T) {
-	// Arrange.
-	f := newMergeFixture(t)
-	f.daemons = []*fakeMergeDaemon{{script: frames(
-		roster(rosterRow(f.worktree, "done", 0)),
-		roster(rosterRow(f.worktree, statusQueued, 0)),
-	)}}
-
-	// Act.
-	code := f.run(t, "-dir", f.worktree)
-
-	// Assert.
+// writtenEntry reads back the one merge entry the verb wrote.
+func (f *mergeFixture) writtenEntry(t *testing.T) commandfile.Entry {
+	t.Helper()
 	files := f.commandFiles(t)
-	if code != exitSuccess || len(files) != 1 {
-		t.Fatalf("exit %d with %d command files, want 0 with one; stderr: %s", code, len(files), f.errOut.String())
+	if len(files) != 1 {
+		t.Fatalf("command files = %v, want one", files)
 	}
-	var entries []commandfile.Entry
 	data, err := os.ReadFile(files[0])
 	if err != nil {
 		t.Fatalf("read the command file: %v", err)
 	}
-	if err := json.Unmarshal(data, &entries); err != nil {
-		t.Fatalf("decode the command file: %v", err)
+	var entries []commandfile.Entry
+	if err := json.Unmarshal(data, &entries); err != nil || len(entries) != 1 {
+		t.Fatalf("decode the command file = (%+v, %v), want one entry", entries, err)
 	}
-	if len(entries) != 1 || entries[0].Type != commandfile.TypeMerge || entries[0].ProjectDir != f.worktree {
-		t.Fatalf("command file = %+v, want one merge of %s", entries, f.worktree)
+	return entries[0]
+}
+
+// appliedScript is a daemon whose ingress applies the command.
+func (f *mergeFixture) appliedScript(t *testing.T) *fakeMergeDaemon {
+	idle := roster(rosterRow(f.worktree, "thinking", 0))
+	// THE SECOND FRAME IS THE RENDEZVOUS: its send blocks until the verb has
+	// written the command and gone back to the stream.
+	return &fakeMergeDaemon{script: []scriptStep{{roster: idle}, {roster: idle}, {act: f.retireTheCommand(t, "applied")}, {roster: idle}}}
+}
+
+// --- the command it writes ------------------------------------------------
+
+func TestTheMergeQueueVerbAsksFromTheCallingWorkspace(t *testing.T) {
+	// Arrange.
+	f := newMergeFixture(t)
+	f.daemons = []*fakeMergeDaemon{f.appliedScript(t)}
+
+	// Act.
+	code := f.run(t, "-own")
+
+	// Assert.
+	entry := f.writtenEntry(t)
+	if code != exitSuccess || entry.Type != commandfile.TypeMerge || entry.ProjectDir != f.worktree || entry.Workspace != "ws-1" {
+		t.Fatalf("exit %d, entry %+v; want a merge asked by the calling workspace %s", code, entry, f.worktree)
 	}
 }
 
-func TestTheMergeQueueVerbNamesTheWorktreeItMerges(t *testing.T) {
+func TestTheMergeQueueVerbNamesEachSource(t *testing.T) {
+	tests := []struct {
+		name  string
+		args  func(f *mergeFixture) []string
+		check func(f *mergeFixture, e commandfile.Entry) bool
+	}{
+		{name: "own branch", args: func(*mergeFixture) []string { return []string{"-own"} },
+			check: func(_ *mergeFixture, e commandfile.Entry) bool {
+				return !e.KeepOpen && e.Branch == "" && e.SourceDir == "" && !e.PRWasMerged
+			}},
+		{name: "own branch kept open", args: func(*mergeFixture) []string { return []string{"-own", "-keep-open"} },
+			check: func(_ *mergeFixture, e commandfile.Entry) bool { return e.KeepOpen }},
+		{name: "a branch", args: func(*mergeFixture) []string { return []string{"-branch", "agent-1/fix"} },
+			check: func(_ *mergeFixture, e commandfile.Entry) bool { return e.Branch == "agent-1/fix" }},
+		{name: "another workspace", args: func(f *mergeFixture) []string { return []string{"-dir", f.other} },
+			check: func(f *mergeFixture, e commandfile.Entry) bool { return e.SourceDir == f.other }},
+		{name: "merged upstream", args: func(*mergeFixture) []string { return []string{"-pr-merged"} },
+			check: func(_ *mergeFixture, e commandfile.Entry) bool { return e.PRWasMerged }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newMergeFixture(t)
+			f.daemons = []*fakeMergeDaemon{f.appliedScript(t)}
+
+			// Act.
+			code := f.run(t, tt.args(f)...)
+
+			// Assert.
+			if entry := f.writtenEntry(t); code != exitSuccess || !tt.check(f, entry) {
+				t.Fatalf("exit %d, entry %+v; want the %s source", code, entry, tt.name)
+			}
+		})
+	}
+}
+
+func TestTheMergeQueueVerbNamesTheRequestingWorktree(t *testing.T) {
 	// Arrange.
 	f := newMergeFixture(t)
-	f.daemons = []*fakeMergeDaemon{{script: frames(
-		roster(rosterRow(f.worktree, "done", 0)),
-		roster(rosterRow(f.worktree, statusQueued, 0)),
-	)}}
+	f.daemons = []*fakeMergeDaemon{f.appliedScript(t)}
 
 	// Act.
-	f.run(t, "-dir", f.worktree)
+	f.run(t, "-branch", "agent-1/fix")
 
 	// Assert.
 	if want := worktreeLinePrefix + canonicalDir(f.worktree) + "\n"; !strings.Contains(f.out.String(), want) {
@@ -228,207 +290,170 @@ func TestTheMergeQueueVerbNamesTheWorktreeItMerges(t *testing.T) {
 	}
 }
 
-func TestTheMergeQueueVerbLandsABranchThroughAWorkspaceCutFromIt(t *testing.T) {
-	// Arrange: a repository main worktree (a `.git` directory beside it).
-	f := newMergeFixture(t)
-	repo := filepath.Join(t.TempDir(), "repo")
-	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o755); err != nil {
-		t.Fatalf("make the repository: %v", err)
-	}
-	landing := filepath.Join(filepath.Dir(repo), "repo-worktrees", "hook-landing")
-	f.daemons = []*fakeMergeDaemon{{script: frames(
-		roster(),
-		roster(rosterRow(landing, statusQueued, 0)),
-	)}}
-
-	// Act.
-	code := f.run(t, "-branch", "feat/hook", "-repo", repo)
-
-	// Assert.
-	files := f.commandFiles(t)
-	if code != exitSuccess || len(files) != 1 {
-		t.Fatalf("exit %d with %d command files, want 0 with one; stderr: %s", code, len(files), f.errOut.String())
-	}
-	data, err := os.ReadFile(files[0])
-	if err != nil {
-		t.Fatalf("read the command file: %v", err)
-	}
-	var entries []commandfile.Entry
-	if err := json.Unmarshal(data, &entries); err != nil {
-		t.Fatalf("decode the command file: %v", err)
-	}
-	want := []commandfile.Entry{
-		{Type: commandfile.TypeCreate, GitRoot: repo, Name: "merge-queue/hook-landing", BaseRef: "feat/hook"},
-		{Type: commandfile.TypeMerge, ProjectDir: landing, Workspace: "merge-queue/hook-landing"},
-	}
-	if len(entries) != 2 || entries[0] != want[0] || entries[1] != want[1] {
-		t.Fatalf("command file = %+v, want %+v", entries, want)
-	}
-}
-
-func TestTheMergeQueueVerbRefusesAnEarlierLandingStillOnDisk(t *testing.T) {
-	// Arrange.
-	f := newMergeFixture(t)
-	repo := filepath.Join(t.TempDir(), "repo")
-	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o755); err != nil {
-		t.Fatalf("make the repository: %v", err)
-	}
-	if err := os.MkdirAll(filepath.Join(filepath.Dir(repo), "repo-worktrees", "hook-landing"), 0o755); err != nil {
-		t.Fatalf("make the earlier landing: %v", err)
-	}
-
-	// Act.
-	code := f.run(t, "-branch", "feat/hook", "-repo", repo)
-
-	// Assert.
-	if code != exitFailure || !strings.Contains(f.errOut.String(), "already exists") || len(f.commandFiles(t)) != 0 {
-		t.Fatalf("exit %d, stderr %q; want a refusal naming the earlier landing, and no command", code, f.errOut.String())
-	}
-}
-
 func TestTheMergeQueueVerbRefusesAMalformedRequest(t *testing.T) {
 	tests := []struct {
 		name string
 		args []string
-		want string
 	}{
-		{name: "nothing named", args: nil, want: "name the merge"},
-		{name: "both a dir and a branch", args: []string{"-dir", "/tmp", "-branch", "b", "-repo", "/tmp"}, want: "two different merges"},
-		{name: "a branch without a repository", args: []string{"-branch", "b"}, want: "-branch needs -repo"},
-		{name: "a repository with a dir", args: []string{"-dir", "/tmp", "-repo", "/tmp"}, want: "-repo goes with -branch"},
-		{name: "a dir that is not on disk", args: []string{"-dir", "/nowhere/at/all"}, want: "not a worktree directory"},
-		{name: "a stray argument", args: []string{"-dir", "/tmp", "extra"}, want: "unexpected arguments"},
+		{name: "no source", args: nil},
+		{name: "two sources", args: []string{"-own", "-branch", "b"}},
+		{name: "keep-open off the own branch", args: []string{"-branch", "b", "-keep-open"}},
+		{name: "a dir that is not there", args: []string{"-dir", "/no/such/worktree"}},
 	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
 			// Arrange.
 			f := newMergeFixture(t)
 
 			// Act.
-			code := f.run(t, tc.args...)
+			code := f.run(t, tt.args...)
 
 			// Assert.
-			if code != exitFailure || !strings.Contains(f.errOut.String(), tc.want) {
-				t.Fatalf("exit %d, stderr %q; want exit %d naming %q", code, f.errOut.String(), exitFailure, tc.want)
+			if code != exitFailure || len(f.commandFiles(t)) != 0 || f.dialed != 0 {
+				t.Fatalf("exit %d, stderr %q; want a refusal before any daemon is dialed", code, f.errOut.String())
 			}
 		})
 	}
 }
 
-// --- waiting ----------------------------------------------------------------
+func TestTheMergeQueueVerbRefusesACallerInNoWorkspace(t *testing.T) {
+	// Arrange: the roster holds only another workspace.
+	f := newMergeFixture(t)
+	f.daemons = []*fakeMergeDaemon{{script: frames(roster(rosterRow(f.other, "done", 0)))}}
 
-func TestTheMergeQueueVerbRefusesToWaitOnItsOwnWorkspace(t *testing.T) {
-	tests := []struct {
-		name string
-		sub  string
-	}{
-		{name: "from the worktree root", sub: ""},
-		{name: "from beneath it", sub: "lisp"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			// Arrange: the agent's own turn would be the one waiting.
-			f := newMergeFixture(t)
-			f.cwd = filepath.Join(f.worktree, tc.sub)
-			if err := os.MkdirAll(f.cwd, 0o755); err != nil {
-				t.Fatalf("make the working directory: %v", err)
-			}
+	// Act.
+	code := f.run(t, "-own")
 
-			// Act.
-			code := f.run(t, "-dir", f.worktree, "-wait")
-
-			// Assert.
-			if code != exitFailure || !strings.Contains(f.errOut.String(), "starts only when its turn ends") || len(f.commandFiles(t)) != 0 {
-				t.Fatalf("exit %d, stderr %q; want the own-workspace refusal and no command", code, f.errOut.String())
-			}
-		})
+	// Assert.
+	if code != exitFailure || !strings.Contains(f.errOut.String(), "in no workspace") || len(f.commandFiles(t)) != 0 {
+		t.Fatalf("exit %d, stderr %q; want the caller-in-no-workspace refusal", code, f.errOut.String())
 	}
 }
 
-func TestTheMergeQueueVerbReportsEachOutcome(t *testing.T) {
-	tests := []struct {
-		name     string
-		outcome  string
-		footer   *frontendv1.FooterView
-		wantCode int
-		wantOut  string
-	}{
-		{name: "landed", outcome: statusMergedDone, wantCode: exitSuccess, wantOut: "LANDED"},
-		{name: "failed", outcome: statusMergeFail, wantCode: exitMergeFailed, wantOut: "daemon.merge.abort"},
-		{name: "parked", outcome: statusConflict, footer: parkedFooter("parked for your input — 2 conflicts remain"),
-			wantCode: exitMergeParked, wantOut: "PARKED: " + "WT" + ": parked for your input — 2 conflicts remain"},
-		{name: "stopped on a conflict", outcome: statusConflict,
-			footer: &frontendv1.FooterView{Strip: &frontendv1.FooterStrip{Status: &frontendv1.FooterStatus{
-				Status: &frontendv1.FooterStatus_MergeConflict{MergeConflict: &frontendv1.FooterStatusMergeConflict{}},
-			}}},
-			wantCode: exitMergeParked, wantOut: "stopped on a conflict"},
+func TestTheMergeQueueVerbPicksTheDeepestWorkspaceHoldingTheCaller(t *testing.T) {
+	// Arrange: a workspace nested inside another's tree.
+	f := newMergeFixture(t)
+	outer := rosterRow(filepath.Dir(f.worktree), "done", 0)
+	outer.Workspace.Workspace.Id = "ws-outer"
+	inner := rosterRow(f.worktree, "thinking", 0)
+	f.daemons = []*fakeMergeDaemon{{script: []scriptStep{{roster: roster(outer, inner)}, {roster: roster(outer, inner)}, {act: f.retireTheCommand(t, "applied")}, {roster: roster(outer, inner)}}}}
+
+	// Act.
+	f.run(t, "-own")
+
+	// Assert.
+	if entry := f.writtenEntry(t); entry.Workspace != "ws-1" {
+		t.Fatalf("entry %+v, want the innermost workspace ws-1", entry)
 	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
+}
+
+// --- without -wait --------------------------------------------------------
+
+func TestTheMergeQueueVerbReturnsOnceTheCommandIsApplied(t *testing.T) {
+	// Arrange.
+	f := newMergeFixture(t)
+	f.daemons = []*fakeMergeDaemon{f.appliedScript(t)}
+
+	// Act.
+	code := f.run(t, "-own")
+
+	// Assert.
+	if code != exitSuccess || !strings.Contains(f.out.String(), "put in line once this turn ends") {
+		t.Fatalf("exit %d, stdout %q; want the request reported applied", code, f.out.String())
+	}
+}
+
+func TestTheMergeQueueVerbReportsARefusedCommand(t *testing.T) {
+	// Arrange.
+	f := newMergeFixture(t)
+	idle := roster(rosterRow(f.worktree, "thinking", 0))
+	f.daemons = []*fakeMergeDaemon{{script: []scriptStep{{roster: idle}, {roster: idle}, {act: f.retireTheCommand(t, "quarantine")}, {roster: idle}}}}
+
+	// Act.
+	code := f.run(t, "-branch", "no-such")
+
+	// Assert.
+	if code != exitMergeRefused || !strings.Contains(f.errOut.String(), "REFUSED") {
+		t.Fatalf("exit %d, stderr %q; want the refusal", code, f.errOut.String())
+	}
+}
+
+// --- with -wait -----------------------------------------------------------
+
+func TestTheMergeQueueVerbRefusesToWaitWhileTheCallersTurnRuns(t *testing.T) {
+	// Arrange.
+	f := newMergeFixture(t)
+	f.daemons = []*fakeMergeDaemon{{script: frames(roster(rosterRow(f.worktree, "thinking", 0)))}}
+
+	// Act.
+	code := f.run(t, "-own", "-wait")
+
+	// Assert.
+	if code != exitFailure || !strings.Contains(f.errOut.String(), "starts only when that turn ends") || len(f.commandFiles(t)) != 0 {
+		t.Fatalf("exit %d, stderr %q; want the refusal and no command", code, f.errOut.String())
+	}
+}
+
+func TestTheMergeQueueVerbReportsALanding(t *testing.T) {
+	// Arrange.
+	f := newMergeFixture(t)
+	f.daemons = []*fakeMergeDaemon{{script: frames(
+		roster(rosterRow(f.worktree, "done", 0)),
+		roster(rosterRow(f.worktree, statusQueued, 0)),
+		roster(rosterRow(f.worktree, statusMerging, 0)),
+		roster(rosterRow(f.worktree, statusMergedDone, 7)),
+	)}}
+
+	// Act.
+	code := f.run(t, "-branch", "agent-1/fix", "-wait")
+
+	// Assert.
+	if code != exitSuccess || !strings.Contains(f.out.String(), "LANDED") {
+		t.Fatalf("exit %d, stdout %q; want the landing", code, f.out.String())
+	}
+}
+
+func TestTheMergeQueueVerbReportsAFailureWithItsArea(t *testing.T) {
+	tests := []struct{ area string }{{"conflicts"}, {"tests"}, {"other"}}
+	for _, tt := range tests {
+		t.Run(tt.area, func(t *testing.T) {
 			// Arrange.
 			f := newMergeFixture(t)
-			f.daemons = []*fakeMergeDaemon{{
-				script: frames(
-					roster(rosterRow(f.worktree, "done", 0)),
-					roster(rosterRow(f.worktree, statusQueued, 0)),
-					roster(rosterRow(f.worktree, statusMerging, 0)),
-					roster(rosterRow(f.worktree, tc.outcome, 7)),
-				),
-				footer: tc.footer,
-			}}
+			daemon := &fakeMergeDaemon{script: frames(
+				roster(rosterRow(f.worktree, "done", 0)),
+				roster(rosterRow(f.worktree, statusMerging, 0)),
+				roster(rosterRow(f.worktree, statusMergeFail, 0)),
+			), footer: failedFooter(tt.area)}
+			f.daemons = []*fakeMergeDaemon{daemon}
 
 			// Act.
-			code := f.run(t, "-dir", f.worktree, "-wait")
+			code := f.run(t, "-own", "-wait")
 
 			// Assert.
-			want := strings.ReplaceAll(tc.wantOut, "WT", filepath.Base(f.worktree))
-			if code != tc.wantCode || !strings.Contains(f.out.String(), want) {
-				t.Fatalf("exit %d, stdout %q, stderr %q; want exit %d naming %q", code, f.out.String(), f.errOut.String(), tc.wantCode, want)
+			if code != exitMergeFailed || !strings.Contains(f.out.String(), "FAILED ("+tt.area+")") {
+				t.Fatalf("exit %d, stdout %q; want the failure in %s", code, f.out.String(), tt.area)
+			}
+			if daemon.footerRef.GetId() != "ws-1" {
+				t.Fatalf("the footer was read for %v, want the requester ws-1", daemon.footerRef)
 			}
 		})
 	}
 }
 
-func TestTheMergeQueueVerbAsksTheParkedWorkspacesOwnFooter(t *testing.T) {
+func TestTheMergeQueueVerbSurfacesAnUnreadableFailedFooter(t *testing.T) {
 	// Arrange.
 	f := newMergeFixture(t)
-	daemon := &fakeMergeDaemon{
-		script: frames(
-			roster(rosterRow(f.worktree, "done", 0)),
-			roster(rosterRow(f.worktree, statusMerging, 0)),
-			roster(rosterRow(f.worktree, statusConflict, 0)),
-		),
-		footer: parkedFooter("parked"),
-	}
-	f.daemons = []*fakeMergeDaemon{daemon}
+	f.daemons = []*fakeMergeDaemon{{script: frames(
+		roster(rosterRow(f.worktree, "done", 0)),
+		roster(rosterRow(f.worktree, statusMergeFail, 0)),
+	), footErr: errors.New("footer stream refused")}}
 
 	// Act.
-	f.run(t, "-dir", f.worktree, "-wait")
+	code := f.run(t, "-own", "-wait")
 
 	// Assert.
-	if daemon.footerRef.GetId() != "ws-1" {
-		t.Fatalf("the footer was read for %v, want the row's own workspace ws-1", daemon.footerRef)
-	}
-}
-
-func TestTheMergeQueueVerbSurfacesAnUnreadableParkedFooter(t *testing.T) {
-	// Arrange.
-	f := newMergeFixture(t)
-	f.daemons = []*fakeMergeDaemon{{
-		script: frames(
-			roster(rosterRow(f.worktree, "done", 0)),
-			roster(rosterRow(f.worktree, statusMerging, 0)),
-			roster(rosterRow(f.worktree, statusConflict, 0)),
-		),
-		footErr: errors.New("footer stream refused"),
-	}}
-
-	// Act.
-	code := f.run(t, "-dir", f.worktree, "-wait")
-
-	// Assert.
-	if code != exitMergeParked || !strings.Contains(f.errOut.String(), "footer stream refused") {
-		t.Fatalf("exit %d, stderr %q; want parked with the footer's failure surfaced", code, f.errOut.String())
+	if code != exitMergeFailed || !strings.Contains(f.errOut.String(), "footer stream refused") {
+		t.Fatalf("exit %d, stderr %q; want failed with the footer's failure surfaced", code, f.errOut.String())
 	}
 }
 
@@ -443,8 +468,7 @@ func TestTheMergeQueueVerbIgnoresAnEarlierMergesConclusion(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			// Arrange: the row still shows the earlier merge's end when the
-			// command is written; this merge then runs and lands.
+			// Arrange.
 			f := newMergeFixture(t)
 			earlier := rosterRow(f.worktree, tc.baseline, tc.baselineAt)
 			f.daemons = []*fakeMergeDaemon{{script: frames(
@@ -455,19 +479,18 @@ func TestTheMergeQueueVerbIgnoresAnEarlierMergesConclusion(t *testing.T) {
 			)}}
 
 			// Act.
-			code := f.run(t, "-dir", f.worktree, "-wait")
+			code := f.run(t, "-own", "-keep-open", "-wait")
 
 			// Assert.
 			if code != exitSuccess || !strings.Contains(f.out.String(), "LANDED") {
-				t.Fatalf("exit %d, stdout %q; want THIS merge's landing, not the earlier end", code, f.out.String())
+				t.Fatalf("exit %d, stdout %q; want THIS merge's landing", code, f.out.String())
 			}
 		})
 	}
 }
 
 func TestTheMergeQueueVerbTakesAFreshLandingWithoutSeeingItInFlight(t *testing.T) {
-	// Arrange: a merge that concluded between two frames (already on its
-	// target) still differs from the baseline by its merged instant.
+	// Arrange.
 	f := newMergeFixture(t)
 	f.daemons = []*fakeMergeDaemon{{script: frames(
 		roster(rosterRow(f.worktree, statusMergedDone, 3)),
@@ -475,7 +498,7 @@ func TestTheMergeQueueVerbTakesAFreshLandingWithoutSeeingItInFlight(t *testing.T
 	)}}
 
 	// Act.
-	code := f.run(t, "-dir", f.worktree, "-wait")
+	code := f.run(t, "-own", "-keep-open", "-wait")
 
 	// Assert.
 	if code != exitSuccess || !strings.Contains(f.out.String(), "LANDED") {
@@ -483,28 +506,8 @@ func TestTheMergeQueueVerbTakesAFreshLandingWithoutSeeingItInFlight(t *testing.T
 	}
 }
 
-func TestTheMergeQueueVerbReportsARefusedCommand(t *testing.T) {
-	// Arrange: the ingress quarantines the command; the roster never moves.
-	f := newMergeFixture(t)
-	idle := roster(rosterRow(f.worktree, "done", 0))
-	f.daemons = []*fakeMergeDaemon{{script: []scriptStep{
-		{roster: idle},
-		{roster: idle},
-		{act: f.quarantineTheCommand(t)},
-		{roster: idle},
-	}}}
-
-	// Act.
-	code := f.run(t, "-dir", f.worktree, "-wait")
-
-	// Assert.
-	if code != exitMergeRefused || !strings.Contains(f.errOut.String(), "REFUSED") {
-		t.Fatalf("exit %d, stderr %q; want the refusal", code, f.errOut.String())
-	}
-}
-
 func TestTheMergeQueueVerbReattachesAcrossAPlannedStandDown(t *testing.T) {
-	// Arrange: the first daemon hands over mid-merge; its successor lands it.
+	// Arrange.
 	f := newMergeFixture(t)
 	f.daemons = []*fakeMergeDaemon{
 		{script: frames(
@@ -515,25 +518,21 @@ func TestTheMergeQueueVerbReattachesAcrossAPlannedStandDown(t *testing.T) {
 	}
 
 	// Act.
-	code := f.run(t, "-dir", f.worktree, "-wait")
+	code := f.run(t, "-own", "-wait")
 
 	// Assert.
-	if code != exitSuccess || f.dialed != 2 || len(f.commandFiles(t)) != 1 {
-		t.Fatalf("exit %d after %d dials with %d command files; want a landing through the successor and ONE command",
-			code, f.dialed, len(f.commandFiles(t)))
+	if code != exitSuccess || f.dialed != 2 {
+		t.Fatalf("exit %d after %d dials, stderr %q; want the successor's landing", code, f.dialed, f.errOut.String())
 	}
 }
 
 func TestTheMergeQueueVerbFailsLoudlyOnABrokenStream(t *testing.T) {
 	// Arrange.
 	f := newMergeFixture(t)
-	f.daemons = []*fakeMergeDaemon{{
-		script: frames(roster(rosterRow(f.worktree, "done", 0))),
-		end:    errors.New("connection reset"),
-	}}
+	f.daemons = []*fakeMergeDaemon{{script: frames(roster(rosterRow(f.worktree, "done", 0))), end: errors.New("connection reset")}}
 
 	// Act.
-	code := f.run(t, "-dir", f.worktree, "-wait")
+	code := f.run(t, "-own", "-wait")
 
 	// Assert.
 	if code != exitFailure || !strings.Contains(f.errOut.String(), "connection reset") {
@@ -549,11 +548,25 @@ func TestTheMergeQueueVerbNeedsAServingDaemon(t *testing.T) {
 	}
 
 	// Act.
-	code := f.run(t, "-dir", f.worktree)
+	code := f.run(t, "-own")
 
 	// Assert.
 	if code != exitFailure || !strings.Contains(f.errOut.String(), "no daemon is serving") || len(f.commandFiles(t)) != 0 {
 		t.Fatalf("exit %d, stderr %q; want no daemon serving and no command", code, f.errOut.String())
+	}
+}
+
+func TestFailedAreaNamesEachArea(t *testing.T) {
+	for _, area := range []string{"conflicts", "tests", "other"} {
+		t.Run(area, func(t *testing.T) {
+			// Act.
+			got := failedArea(failedFooter(area).GetStrip().GetStatus().GetMergeFailed())
+
+			// Assert.
+			if got != area {
+				t.Fatalf("failedArea = %q, want %q", got, area)
+			}
+		})
 	}
 }
 
