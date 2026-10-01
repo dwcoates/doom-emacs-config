@@ -207,7 +207,24 @@ type GetAgentByVendorTaskSuccess struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The agent, under the cross-plane minting rule: the spawning call's
 	// `tool_use_id`, as every plane books it.
-	Agent         *v1.AgentId `protobuf:"bytes,1,opt,name=agent,proto3" json:"agent,omitempty"`
+	Agent *v1.AgentId `protobuf:"bytes,1,opt,name=agent,proto3" json:"agent,omitempty"`
+	// WHAT THE AGENT WAS COMMISSIONED WITH, as the store recorded it from the
+	// agent's spawn start (AgentSubagentStart.prompt), so a shim that never saw
+	// the spawn can restate it on the resumed run's announcement
+	// (DetachedWorkKindSubagent.commission) and on every frame of the run.
+	//
+	// THE COMMISSION, NOT THE WHOLE START. The store keeps a spawn's start as
+	// the agent row's own columns, and the start's `started_at` is not among them
+	// (the row's start instant is the store's receipt clock), so a whole start
+	// served from the record would state an instant nobody observed. Everything
+	// the commission states is recorded, except a remote isolation's session
+	// handles, which a spawn's request never states either: the remote arm is
+	// answered with both unset.
+	//
+	// UNSET when the record holds the agent's lineage but no start for it -- an
+	// agent known only from a settled spawn or as a placeholder. The caller
+	// reports that; it is never answered with an empty prompt.
+	Commission    *v1.AgentSubagentPrompt `protobuf:"bytes,2,opt,name=commission,proto3,oneof" json:"commission,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -245,6 +262,13 @@ func (*GetAgentByVendorTaskSuccess) Descriptor() ([]byte, []int) {
 func (x *GetAgentByVendorTaskSuccess) GetAgent() *v1.AgentId {
 	if x != nil {
 		return x.Agent
+	}
+	return nil
+}
+
+func (x *GetAgentByVendorTaskSuccess) GetCommission() *v1.AgentSubagentPrompt {
+	if x != nil {
+		return x.Commission
 	}
 	return nil
 }
@@ -480,9 +504,13 @@ const file_store_v1_endpoint_get_agent_by_vendor_task_proto_rawDesc = "" +
 	"\asuccess\x18\x01 \x01(\v2%.store.v1.GetAgentByVendorTaskSuccessH\x00R\asuccess\x12E\n" +
 	"\tnot_found\x18\x02 \x01(\v2&.store.v1.GetAgentByVendorTaskNotFoundH\x00R\bnotFound\x12A\n" +
 	"\afailure\x18\x03 \x01(\v2%.store.v1.GetAgentByVendorTaskFailureH\x00R\afailureB\b\n" +
-	"\x06result\"M\n" +
+	"\x06result\"\xa7\x01\n" +
 	"\x1bGetAgentByVendorTaskSuccess\x12.\n" +
-	"\x05agent\x18\x01 \x01(\v2\x18.conversation.v1.AgentIdR\x05agent\"\x1e\n" +
+	"\x05agent\x18\x01 \x01(\v2\x18.conversation.v1.AgentIdR\x05agent\x12I\n" +
+	"\n" +
+	"commission\x18\x02 \x01(\v2$.conversation.v1.AgentSubagentPromptH\x00R\n" +
+	"commission\x88\x01\x01B\r\n" +
+	"\v_commission\"\x1e\n" +
 	"\x1cGetAgentByVendorTaskNotFound\"\xef\x01\n" +
 	"\x1bGetAgentByVendorTaskFailure\x12\x16\n" +
 	"\x06detail\x18\x01 \x01(\tR\x06detail\x12W\n" +
@@ -515,6 +543,7 @@ var file_store_v1_endpoint_get_agent_by_vendor_task_proto_goTypes = []any{
 	(*GetAgentByVendorTaskInvalidRequest)(nil), // 5: store.v1.GetAgentByVendorTaskInvalidRequest
 	(*GetAgentByVendorTaskStorageFailure)(nil), // 6: store.v1.GetAgentByVendorTaskStorageFailure
 	(*v1.AgentId)(nil),                         // 7: conversation.v1.AgentId
+	(*v1.AgentSubagentPrompt)(nil),             // 8: conversation.v1.AgentSubagentPrompt
 }
 var file_store_v1_endpoint_get_agent_by_vendor_task_proto_depIdxs = []int32{
 	7, // 0: store.v1.GetAgentByVendorTaskRequest.session:type_name -> conversation.v1.AgentId
@@ -522,13 +551,14 @@ var file_store_v1_endpoint_get_agent_by_vendor_task_proto_depIdxs = []int32{
 	3, // 2: store.v1.GetAgentByVendorTaskResponse.not_found:type_name -> store.v1.GetAgentByVendorTaskNotFound
 	4, // 3: store.v1.GetAgentByVendorTaskResponse.failure:type_name -> store.v1.GetAgentByVendorTaskFailure
 	7, // 4: store.v1.GetAgentByVendorTaskSuccess.agent:type_name -> conversation.v1.AgentId
-	5, // 5: store.v1.GetAgentByVendorTaskFailure.invalid_request:type_name -> store.v1.GetAgentByVendorTaskInvalidRequest
-	6, // 6: store.v1.GetAgentByVendorTaskFailure.storage_failure:type_name -> store.v1.GetAgentByVendorTaskStorageFailure
-	7, // [7:7] is the sub-list for method output_type
-	7, // [7:7] is the sub-list for method input_type
-	7, // [7:7] is the sub-list for extension type_name
-	7, // [7:7] is the sub-list for extension extendee
-	0, // [0:7] is the sub-list for field type_name
+	8, // 5: store.v1.GetAgentByVendorTaskSuccess.commission:type_name -> conversation.v1.AgentSubagentPrompt
+	5, // 6: store.v1.GetAgentByVendorTaskFailure.invalid_request:type_name -> store.v1.GetAgentByVendorTaskInvalidRequest
+	6, // 7: store.v1.GetAgentByVendorTaskFailure.storage_failure:type_name -> store.v1.GetAgentByVendorTaskStorageFailure
+	8, // [8:8] is the sub-list for method output_type
+	8, // [8:8] is the sub-list for method input_type
+	8, // [8:8] is the sub-list for extension type_name
+	8, // [8:8] is the sub-list for extension extendee
+	0, // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_store_v1_endpoint_get_agent_by_vendor_task_proto_init() }
@@ -541,6 +571,7 @@ func file_store_v1_endpoint_get_agent_by_vendor_task_proto_init() {
 		(*GetAgentByVendorTaskResponse_NotFound)(nil),
 		(*GetAgentByVendorTaskResponse_Failure)(nil),
 	}
+	file_store_v1_endpoint_get_agent_by_vendor_task_proto_msgTypes[2].OneofWrappers = []any{}
 	file_store_v1_endpoint_get_agent_by_vendor_task_proto_msgTypes[4].OneofWrappers = []any{
 		(*GetAgentByVendorTaskFailure_InvalidRequest)(nil),
 		(*GetAgentByVendorTaskFailure_StorageFailure)(nil),
