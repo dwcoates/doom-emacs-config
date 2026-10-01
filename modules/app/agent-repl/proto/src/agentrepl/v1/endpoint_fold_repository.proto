@@ -1,0 +1,50 @@
+// endpoint_fold_repository.proto — FoldRepository: expand or collapse one
+// repository's section. SIDEBAR section. The fold is daemon-held because two
+// surfaces draw it: the sidebar's section and the Emacs tab bar, which hides a
+// collapsed repository's workspaces. The new state arrives on the roster
+// stream (frontend.v1.RosterRepoSection.fold).
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message FoldRepositoryRequest {
+  // The repository whose section folds, echoed from RosterRepoKey.
+  workspace.v1.RepositoryRef repository = 1;
+  // THE ARM IS THE FOLD ASKED FOR. Unset is a malformed request.
+  oneof fold {
+    FoldRepositoryExpand expand = 2;
+    FoldRepositoryCollapse collapse = 3;
+  }
+}
+
+// Show the section's rows and give its workspaces tabs.
+message FoldRepositoryExpand {}
+
+// Hide the section's rows and its workspaces' tabs.
+message FoldRepositoryCollapse {}
+
+// THE ARM IS THE OUTCOME.
+message FoldRepositoryResponse {
+  oneof result {
+    FoldRepositorySuccess success = 1;
+    FoldRepositoryError error = 2;
+  }
+}
+
+// Done; the roster push carries the new fold.
+message FoldRepositorySuccess {}
+
+// Validation failures (an unset field or arm) are Connect InvalidArgument,
+// never an arm.
+message FoldRepositoryError {
+  oneof cause {
+    // No registered repository matches the ref.
+    FoldRepositoryUnknownRepository unknown_repository = 1;
+  }
+}
+message FoldRepositoryUnknownRepository {}

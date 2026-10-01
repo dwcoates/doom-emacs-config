@@ -23,7 +23,7 @@ import (
 //
 // A NEW VERSION IS A NEW ENTRY IN `migrations`. Bumping this constant alone
 // makes the daemon refuse every database the previous build wrote.
-const LayoutVersion = 15
+const LayoutVersion = 17
 
 // Option configures an open. Options exist so the logger can be supplied
 // without changing the two open functions' shape for callers that do not care.
@@ -430,6 +430,13 @@ func (s *store) write(ctx context.Context, op string, fields dlog.Context, fn fu
 		var held *LeaseHeldError
 		if errors.As(err, &held) {
 			s.log.Debug(op, "the lease is already held; the arbitration refused the acquisition", withError(fields, err))
+			return err
+		}
+		// A MERGE HOLD AFTER ITS MERGE'S RELEASE is the same arbitration
+		// answering: the release won the race, and the caller takes the path
+		// of a workspace with no merge and states that at its own level.
+		if errors.Is(err, ErrMergeLeaseGone) {
+			s.log.Debug(op, "the merge lease is gone; the merge hold was refused", withError(fields, err))
 			return err
 		}
 		s.log.Error(op, "refused the write", withError(fields, err))

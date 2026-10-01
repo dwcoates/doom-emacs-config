@@ -46,6 +46,9 @@ type DB interface {
 	RegisterRepository(ctx context.Context, dir, defaultBranch string) (Repository, bool, error)
 	// ListRepositories loads every repository, all-or-nothing.
 	ListRepositories(ctx context.Context) ([]Repository, error)
+	// SetRepositoryFolded records whether a repository's roster section is
+	// collapsed; an unknown repository is ErrNotFound.
+	SetRepositoryFolded(ctx context.Context, id RepoID, folded bool) error
 	// SetClosed records whether a workspace's editor state is torn down.
 	SetClosed(ctx context.Context, id WorkspaceID, closed bool) error
 	// SetCurrent records the user's selection of a workspace at an instant.
@@ -283,6 +286,14 @@ type DB interface {
 	ClearDrainSchedule(ctx context.Context) error
 	// DrainSchedule loads the schedule in force, nil when none is.
 	DrainSchedule(ctx context.Context) (*DrainSchedule, error)
+
+	// PutDurableFeedRow records (or replaces) one daemon-synthesized feed row a
+	// new daemon must draw again.
+	PutDurableFeedRow(ctx context.Context, row DurableFeedRow) error
+	// DurableFeedRows loads every durable feed row of one workspace.
+	DurableFeedRows(ctx context.Context, id WorkspaceID) ([]DurableFeedRow, error)
+	// ClearDurableFeedRows drops every durable feed row of one workspace.
+	ClearDurableFeedRows(ctx context.Context, id WorkspaceID) error
 
 	// PutFeedTextScale persists the single daemon-global feed text zoom.
 	PutFeedTextScale(ctx context.Context, scale float64) error

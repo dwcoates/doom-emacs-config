@@ -43,6 +43,7 @@ import {
   EDIT_REQUEST,
   FOLD_ABOVE_LABEL,
   NO_RELEASE_TITLES,
+  BADGELESS_CLASSIFICATION_ARMS,
   SEND_NOW_LABEL,
   HELD_BADGE_DETAIL_CLASS,
   HELD_STATUS_BADGES,
@@ -191,7 +192,8 @@ function standingStatuses(prompt: HeldPrompt): HeldStatus[] {
   const statuses: HeldStatus[] = [];
   const classification = prompt.classification;
   if (classification.case !== undefined) {
-    statuses.push(classification.case);
+    // daemon_held draws no badge of its own: the hold arm's is the one.
+    if (classification.case !== "daemonHeld") statuses.push(classification.case);
     if (prompt.editing !== undefined) statuses.push("editing");
     if (prompt.coalesced !== undefined) statuses.push("coalesced");
     if (classification.case === "holdForTurnEnd" && classification.value.accepted?.accepted === true) {
@@ -439,6 +441,12 @@ describe("drawHeldPrompt hold arms", () => {
       arm: "buildRefresh",
       line: "wire buildRefresh",
     },
+    {
+      name: "merge",
+      prompt: heldPrompt({ classification: { case: "daemonHeld", value: {} }, hold: { case: "merge", value: {} } }),
+      arm: "merge",
+      line: "wire merge",
+    },
   ];
 
   for (const hold of holds) {
@@ -454,6 +462,40 @@ describe("drawHeldPrompt hold arms", () => {
       expect(card.querySelector(`.queued-head > [data-held-status="${hold.arm}"]`)?.textContent).toBe(hold.line);
     });
   }
+
+  it("draws a daemon-held merge entry with the hold's badge alone", () => {
+    // Arrange
+    const { tc } = trayContext();
+    // Act
+    const card = drawHeldPrompt(
+      heldPrompt({ classification: { case: "daemonHeld", value: {} }, hold: { case: "merge", value: {} } }),
+      tc,
+    );
+    // Assert
+    expect([...card.querySelectorAll(".queued-head > [data-held-status]")].map((b) => b.getAttribute("data-held-status"))).toEqual([
+      "merge",
+    ]);
+  });
+
+  it("marks a daemon-held entry's arm on the card", () => {
+    // Arrange
+    const { tc } = trayContext();
+    // Act
+    const card = drawHeldPrompt(
+      heldPrompt({ classification: { case: "daemonHeld", value: {} }, hold: { case: "merge", value: {} } }),
+      tc,
+    );
+    // Assert
+    expect(card.getAttribute("data-arm")).toBe("daemonHeld");
+  });
+
+  it("refuses daemon_held with no hold arm as a malformed view", () => {
+    // Arrange
+    const { tc } = trayContext();
+    const prompt = heldPrompt({ classification: { case: "daemonHeld", value: {} }, badges: [] });
+    // Act / Assert
+    expect(() => drawHeldPrompt(prompt, tc)).toThrow(MalformedView);
+  });
 
   it("names the schedule holding a shutdown-held entry", () => {
     const { tc } = trayContext();
@@ -526,6 +568,20 @@ describe("drawHeldPrompt release availability", () => {
     expect(
       card.querySelector<HTMLElement>('[data-held-action="release"]')?.title,
     ).toContain("the session is not up yet");
+  });
+
+  it("warns on the release button that a merge is driving the session", () => {
+    // Arrange
+    const { tc } = trayContext();
+    // Act
+    const card = drawHeldPrompt(
+      heldPrompt({ classification: { case: "daemonHeld", value: {} }, hold: { case: "merge", value: {} } }),
+      tc,
+    );
+    // Assert
+    expect(card.querySelector<HTMLElement>('[data-held-action="release"]')?.title).toContain(
+      "a merge is driving the session",
+    );
   });
 
   it("still offers release under a build refresh, which forbids nothing", () => {
@@ -862,6 +918,7 @@ describe("the held prompt's spec: a prompt bubble on the held fill", () => {
   it.each([
     ["no hold", null, []],
     ["a lease hold", { case: "shutdown", value: { scheduleId: "s" } }, ["lease-card"]],
+    ["a merge hold", { case: "merge", value: {} }, ["lease-card"]],
     ["a session-starting hold", { case: "sessionStarting", value: {} }, []],
   ] as const)("names %s by its hook, which selects no border", (_name, hold, frames) => {
     const { tc } = trayContext();
@@ -1009,6 +1066,7 @@ const EXPECTED_BADGES: Readonly<Record<HeldStatus, string>> = {
   accepted: "muted",
   shutdown: "amber",
   buildRefresh: "amber",
+  merge: "amber",
   sessionStarting: "teal",
   editing: "run",
   coalesced: "muted",
@@ -1032,6 +1090,7 @@ describe("the daemon's badge words", () => {
     ["shutdown", () => heldPrompt({ hold: { case: "shutdown", value: { scheduleId: "s" } } })],
     ["buildRefresh", () => heldPrompt({ hold: { case: "buildRefresh", value: {} } })],
     ["sessionStarting", () => heldPrompt({ hold: { case: "sessionStarting", value: {} } })],
+    ["merge", () => heldPrompt({ classification: { case: "daemonHeld", value: {} }, hold: { case: "merge", value: {} } })],
     [
       "editing",
       () => {
@@ -1174,11 +1233,19 @@ describe("the held status badge table", () => {
     expect(named).toEqual(Object.keys(EXPECTED_BADGES).sort());
   });
 
-  it("names every classification arm the schema can send", () => {
+  it("names every classification arm the schema can send, but the badgeless ones", () => {
     // Arrange / Act
     const arms = oneofArms(HeldPromptSchema, "classification");
+    const badgeless: readonly string[] = BADGELESS_CLASSIFICATION_ARMS;
     // Assert
-    expect(arms.filter((arm) => !Object.hasOwn(HELD_STATUS_BADGES, arm))).toEqual([]);
+    expect(arms.filter((arm) => !Object.hasOwn(HELD_STATUS_BADGES, arm) && !badgeless.includes(arm))).toEqual([]);
+  });
+
+  it("gives no badgeless arm a badge tone", () => {
+    // Arrange / Act
+    const toned = BADGELESS_CLASSIFICATION_ARMS.filter((arm) => Object.hasOwn(HELD_STATUS_BADGES, arm));
+    // Assert
+    expect(toned).toEqual([]);
   });
 
   it("names every hold arm the schema can send", () => {
@@ -1233,6 +1300,7 @@ describe("every status a held card shows is a badge in the table's tone", () => 
     ["shutdown", () => heldPrompt({ hold: { case: "shutdown", value: { scheduleId: "s" } } })],
     ["buildRefresh", () => heldPrompt({ hold: { case: "buildRefresh", value: {} } })],
     ["sessionStarting", () => heldPrompt({ hold: { case: "sessionStarting", value: {} } })],
+    ["merge", () => heldPrompt({ classification: { case: "daemonHeld", value: {} }, hold: { case: "merge", value: {} } })],
     [
       "editing",
       () => {

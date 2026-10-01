@@ -68,9 +68,11 @@ import type {
   HeldPromptBuildRefreshHold,
   HeldPromptClassificationError,
   HeldPromptClassifying,
+  HeldPromptDaemonHeld,
   HeldPromptHoldForTurnEnd,
   HeldPromptAfterToolCall,
   HeldPromptInterject,
+  HeldPromptMergeHold,
   HeldPromptQueuedAt,
   HeldPromptSessionStartingHold,
   HeldPromptShutdownHold,
@@ -135,6 +137,8 @@ export const NO_RELEASE_TITLES: Readonly<Record<string, string>> = {
     "a context cut is never interrupted for a queued prompt, so it cannot be sent ahead of it — it is delivered the moment that turn ends",
   sessionStarting:
     "the session is not up yet, so a prompt sent now would have nowhere to be delivered",
+  merge:
+    "a merge is driving the session, so a prompt sent now would run inside it — it is delivered the moment the merge ends",
 };
 
 /**
@@ -151,6 +155,11 @@ export function drawHeldPrompt(u: HeldPrompt, tc: TrayContext, previous?: HTMLEl
   const said = requireMessage(u.said, `${path}.said`);
   const classification = requireCase(u.classification, `${path}.classification`);
   const hold = u.hold.case === undefined ? null : requireCase(u.hold, `${path}.hold`);
+  // `daemon_held` says a daemon condition holds the entry, and the hold arm
+  // names it: the one without the other explains nothing.
+  if (classification.case === "daemonHeld" && hold === null) {
+    throw new MalformedView(`${path}.classification`, "daemon_held with no hold arm set");
+  }
   log.debug("drawing a held prompt", {
     operation: "tray.held-prompt",
     context: {
@@ -167,7 +176,7 @@ export function drawHeldPrompt(u: HeldPrompt, tc: TrayContext, previous?: HTMLEl
   head.className = "queued-head";
   const verdict = drawClassification(classification, `${path}.classification`);
   const holdStatus: HeldStatus | null = hold === null ? null : drawHold(hold, `${path}.hold`);
-  const statuses: HeldStatus[] = [verdict.status];
+  const statuses: HeldStatus[] = verdict.status === null ? [] : [verdict.status];
   // DAEMON-STATED: the editing badge stands exactly while the entry carries `editing`.
   if (u.editing !== undefined) statuses.push("editing");
   if (u.coalesced !== undefined) statuses.push("coalesced");
@@ -275,6 +284,7 @@ function holdCardHooks(hold: string | null): string[] {
       return ["held-right"];
     case "shutdown":
     case "buildRefresh":
+    case "merge":
       return ["held-right", "lease-card"];
     case "sessionStarting":
       // The card's `data-hold` names the bring-up; it wears no hook of its own.
@@ -308,8 +318,8 @@ export function drawHeldPromptQueuedAt(
 
 /** What one classification arm contributes to the card. */
 interface Verdict {
-  /** The status the verdict's badge stands for: the arm. */
-  status: HeldStatus;
+  /** The status the verdict's badge stands for: the arm, or null for an arm that draws none. */
+  status: HeldStatus | null;
   /** Whether this arm's acceptance stands, or null where it has none. */
   acceptedState: boolean | null;
   /** The rationale or failure detail, when the arm carries one. */
@@ -342,6 +352,8 @@ function drawClassification(
         classification.value,
         `${path}.classification_error`,
       );
+    case "daemonHeld":
+      return drawHeldPromptDaemonHeld(classification.value, `${path}.daemon_held`);
     default: {
       const other: { case: string } = classification;
       return unreachableArm(path, other.case);
@@ -464,6 +476,24 @@ export function drawHeldPromptClassificationError(
 }
 
 /**
+ * No classifier ran and none will: a daemon condition holds the entry. It
+ * draws NO badge — the hold arm's badge is what holds it — and offers no
+ * accept, since there is no verdict to confirm.
+ */
+export function drawHeldPromptDaemonHeld(_u: HeldPromptDaemonHeld, path: string): Verdict {
+  log.debug("drawing a daemon-held prompt", {
+    operation: "tray.held-prompt.daemon-held",
+    context: { path },
+  });
+  return {
+    status: null,
+    acceptedState: null,
+    detail: null,
+    offersAccept: false,
+  };
+}
+
+/**
  * The command a cut is running, spelled as the user types it.
  *
  * UNSPECIFIED carries no spec by design — it names no command — so it is a
@@ -495,6 +525,8 @@ function drawHold(
       return drawHeldPromptSessionStartingHold(hold.value, `${path}.session_starting`);
     case "buildRefresh":
       return drawHeldPromptBuildRefreshHold(hold.value, `${path}.build_refresh`);
+    case "merge":
+      return drawHeldPromptMergeHold(hold.value, `${path}.merge`);
     default: {
       const other: { case: string } = hold;
       return unreachableArm(path, other.case);
@@ -533,6 +565,15 @@ export function drawHeldPromptBuildRefreshHold(
     context: { path },
   });
   return "buildRefresh";
+}
+
+/** Held until the merge ends. Empty on the wire: presence is the fact. */
+export function drawHeldPromptMergeHold(_u: HeldPromptMergeHold, path: string): HeldStatus {
+  log.debug("drawing a merge hold", {
+    operation: "tray.held-prompt.merge-hold",
+    context: { path },
+  });
+  return "merge";
 }
 
 /** What the actions row needs to know about the entry it acts on. */
@@ -947,6 +988,12 @@ function clearRowRefusal(row: Element | null): void {
 }
 
 /**
+ * The classification arms that draw NO badge: `daemon_held`, whose hold arm's
+ * badge is what holds the entry (daemon_hold.proto's badge order).
+ */
+export const BADGELESS_CLASSIFICATION_ARMS = ["daemonHeld"] as const;
+
+/**
  * Every status a held card can show, each drawn as a badge.
  *
  * The classification arms and the hold arms by their generated case names, plus
@@ -955,7 +1002,7 @@ function clearRowRefusal(row: Element | null): void {
  * own: the daemon returns it to `holdForTurnEnd` (daemon_hold.proto).
  */
 export type HeldStatus =
-  | NonNullable<HeldPrompt["classification"]["case"]>
+  | Exclude<NonNullable<HeldPrompt["classification"]["case"]>, (typeof BADGELESS_CLASSIFICATION_ARMS)[number]>
   | NonNullable<HeldPrompt["hold"]["case"]>
   | "accepted"
   | "editing"
@@ -975,7 +1022,7 @@ export type HeldBadgeTone = "ok" | "err" | "run" | "muted" | "amber" | "teal";
  *   - an uninterruptible turn: the prompt WAITS for the cut's end, so red;
  *   - a classification error: a failure, the error red;
  *   - accepted: a quiet acknowledgement that changes nothing about delivery;
- *   - a shutdown or build-refresh hold: coordinated daemon work, the merge amber;
+ *   - a shutdown, build-refresh or merge hold: coordinated daemon work, amber;
  *   - a session-starting hold: the machinery bringing a session up, the
  *     hibernation teal;
  *   - editing (EditHeldPrompt): the prompt is being worked on in the editor,
@@ -993,6 +1040,7 @@ export const HELD_STATUS_BADGES = {
   accepted: "muted",
   shutdown: "amber",
   buildRefresh: "amber",
+  merge: "amber",
   sessionStarting: "teal",
   editing: "run",
   coalesced: "muted",

@@ -154,6 +154,18 @@ describe("parseArgs", () => {
     // Arrange, Act, Assert.
     expect(() => parseArgs(["--log-fd", "2"])).toThrow(/the durable sink is inherited fd 3/);
   });
+
+  it("accepts the spawn gate on fd 4", () => {
+    expect(parseArgs(["--spawn-gate-fd", "4"]).spawnGateFd).toBe(4);
+  });
+
+  it("refuses a spawn gate on any other descriptor", () => {
+    expect(() => parseArgs(["--spawn-gate-fd", "3"])).toThrow(/the spawn gate is inherited fd 4/);
+  });
+
+  it("gates nothing when the launcher hands no spawn gate", () => {
+    expect(parseArgs(["--log-fd", "3"]).spawnGateFd).toBeUndefined();
+  });
 });
 
 describe("requireServingArgs", () => {

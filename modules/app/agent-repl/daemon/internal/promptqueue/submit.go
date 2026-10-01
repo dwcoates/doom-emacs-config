@@ -2,6 +2,7 @@ package promptqueue
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -124,13 +125,7 @@ func (q *queue) applyLeasePolicy(ctx context.Context, sub Submission, log dlog.L
 	}
 	fields := dlog.Context{"lease": string(lease.ID), "holder": holderName(lease.Holder)}
 
-	// A LEASE EXCLUDES EVERYONE BUT ITS HOLDER. The merge orchestrator holds
-	// the lease precisely so it can drive the session, and its own briefs --
-	// the conflict repair, the test repair, the configured before/after
-	// actions, the displaced turn's resume -- carry merge origins. Refusing
-	// those against the merge's own lease deadlocks the merge: it submits the
-	// brief it is waiting on and is told a merge is in flight.
-	if lease.Holder == wsm.HolderMerge && mergeOrigin(sub.Origin) {
+	if exemptFromLease(lease, sub.Origin) {
 		log.Debug(opSubmit, "the lease holder's own submission takes the ordinary path", fields)
 		return Disposition{}, false, nil
 	}
@@ -151,8 +146,16 @@ func (q *queue) applyLeasePolicy(ctx context.Context, sub Submission, log dlog.L
 		if err != nil {
 			return Disposition{}, true, err
 		}
-		q.noteDrainRefusal(lease.Holder, sub.WS)
 		disposition, err := q.hold(ctx, sub, "", &leaseHold{kind: kind, scheduleID: scheduleID}, log)
+		// THE MERGE RELEASED ITS LEASE between the read above and the hold's
+		// write, and the store refused the hold (wsm.bindMergeHold): the
+		// workspace has no merge now, so the submission takes the path of a
+		// workspace with none.
+		if errors.Is(err, wsm.ErrMergeLeaseGone) {
+			log.Info(opSubmit, "the merge released its lease as the prompt was held; the submission takes the ordinary path", fields)
+			return Disposition{}, false, nil
+		}
+		q.noteDrainRefusal(lease.Holder, sub.WS)
 		return disposition, true, err
 
 	default:
@@ -174,8 +177,8 @@ type leaseHold struct {
 // RECORDED JUDGEMENT: the contract names three genuine daemon holds — shutdown
 // drain, revival pending, build refresh — and four lease holders. The drain
 // lease is the shutdown hold; a shim relaunch is the build-refresh bounce; a
-// hibernation's revival is the session-starting hold. The merge holder never
-// reaches here (its policy refuses).
+// hibernation's revival is the session-starting hold; a merge holds until it
+// ends. A merge lease an older build wrote refuses and never reaches here.
 func (q *queue) holdForLease(ctx context.Context, lease wsm.Lease, log dlog.Logger) (wsm.HoldKind, string, error) {
 	switch lease.Holder {
 	case wsm.HolderDrain:
@@ -197,6 +200,9 @@ func (q *queue) holdForLease(ctx context.Context, lease wsm.Lease, log dlog.Logg
 	case wsm.HolderHibernate:
 		log.Debug("daemon.promptqueue.disposition_decision", "selected a prompt disposition branch", dlog.Context{"function": "queue", "branch": "case wsm.HolderHibernate"})
 		return wsm.HoldSessionStarting, "", nil
+	case wsm.HolderMerge:
+		log.Debug("daemon.promptqueue.disposition_decision", "selected a prompt disposition branch", dlog.Context{"function": "queue", "branch": "case wsm.HolderMerge"})
+		return wsm.HoldMerge, "", nil
 	default:
 		log.Debug("daemon.promptqueue.disposition_decision", "selected a prompt disposition branch", dlog.Context{"function": "queue", "branch": "default"})
 		log.Error(opHold, "a holding lease names a holder with no hold kind",
@@ -227,6 +233,20 @@ func merged(base, extra dlog.Context) dlog.Context {
 }
 
 // holderName renders a lease holder for a log record.
+// exemptFromLease reports whether a submission of origin passes the lease
+// untouched: THE ONE RULE both the submission path and the restamp of
+// standing holds (OnLeaseChanged) apply.
+//
+// A LEASE EXCLUDES EVERYONE BUT ITS HOLDER. The merge orchestrator holds the
+// lease precisely so it can drive the session, and its own briefs -- the
+// conflict repair, the test repair, the configured before/after actions, the
+// displaced turn's resume -- carry merge origins. Holding or refusing those
+// against the merge's own lease deadlocks the merge: it submits the brief it
+// is waiting on and the brief waits for the merge to end.
+func exemptFromLease(lease wsm.Lease, origin conversationv1.PromptOrigin) bool {
+	return lease.Holder == wsm.HolderMerge && mergeOrigin(origin)
+}
+
 // mergeOrigin reports whether an origin is one the merge orchestrator submits
 // under. They are exactly conversation.v1 PromptOrigin's merge arms.
 func mergeOrigin(origin conversationv1.PromptOrigin) bool {

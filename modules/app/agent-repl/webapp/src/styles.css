@@ -3,6 +3,11 @@
   --bg: #ffffff;
   --fg: #1a1a1a;
   --muted: #6b7280;
+  /* A REPOSITORY HEADER'S GREY SAYS ITS FOLD (owner ruling, 2026-10-01): a
+     very light grey while its workspaces show beneath it, a darker grey once
+     it is collapsed. */
+  --repo-head-expanded: #9ca3af;
+  --repo-head-collapsed: #4b5563;
   --border: #e5e7eb;
   /* ONE STEP DARKER THAN `--border`, and derived from it rather than picked:
      the rule that partitions two SECTIONS of one surface, where `--border`
@@ -338,6 +343,8 @@
     --bg: #111318;
     --fg: #e5e7eb;
     --muted: #9ca3af;
+    --repo-head-expanded: #e5e7eb;
+    --repo-head-collapsed: #6b7280;
     --border: #2a2e37;
     --card: #16191f;
     /* The dark theme's tool card and footer dock (owner ruling, 2026-09-27):
@@ -695,6 +702,10 @@ body::after {
 #ws-sidebar .repo-head .tri { font-size: 1.05rem; line-height: 1; }
 #ws-sidebar .repo-head .n { color: var(--muted); font-weight: 400; text-transform: none; }
 #ws-sidebar .repo.folded .rows { display: none; }
+/* A repository section's header takes its fold's grey rather than the
+   --info-ws hue the task and merged headers keep. */
+#ws-sidebar .repo.repo-section > .repo-head { color: var(--repo-head-expanded); }
+#ws-sidebar .repo.repo-section.folded > .repo-head { color: var(--repo-head-collapsed); }
 
 /* Workspace rows. Children nest inside .kids, which draws the family guide
    line; indentation therefore compounds per generation. */
