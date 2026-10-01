@@ -64,8 +64,8 @@ client's side, whatever moves under the hood:
 |---|---|---|
 | B1 | `transferring` | from the old route's cleanup until the new route to the vendor serves the workspace (steps 3 to 6 below) |
 
-- It carries the components moving (`daemon`, `shim`, or both) as typed data for the expanded
-  panel, but the status reads the same either way.
+- It carries the components moving (`daemon`, `shim`, or both) as typed data for the logs,
+  but the status reads the same either way.
 - The new daemon restates it, with its original start time, for a client that joins late.
 
 ## The per-workspace deploy (owner ruling, 2026-10-01)
