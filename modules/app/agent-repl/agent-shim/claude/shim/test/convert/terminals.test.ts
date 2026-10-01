@@ -488,6 +488,34 @@ describe("classifyVendorApiFailure", () => {
     );
   });
 
+  it("names a DNS failure unreachable, never a missing model", () => {
+    expect(
+      classifyVendorApiFailure(
+        undefined,
+        "server_error",
+        "API Error: Can't reach the API server — check your internet or DNS (ENOTFOUND)",
+      ),
+    ).toBe("shim.vendor.unreachable");
+  });
+
+  it("names a refused connection unreachable", () => {
+    expect(classifyVendorApiFailure(undefined, undefined, "connect ECONNREFUSED 1.2.3.4:443")).toBe(
+      "shim.vendor.unreachable",
+    );
+  });
+
+  it("names a reset connection unreachable", () => {
+    expect(classifyVendorApiFailure(undefined, undefined, "read ECONNRESET")).toBe("shim.vendor.unreachable");
+  });
+
+  it("names a network timeout unreachable", () => {
+    expect(classifyVendorApiFailure(undefined, undefined, "connect ETIMEDOUT")).toBe("shim.vendor.unreachable");
+  });
+
+  it("keeps a 404 a missing model even when the sentence names a network errno", () => {
+    expect(classifyVendorApiFailure(404, undefined, "ENOTFOUND")).toBe("shim.vendor.model_missing");
+  });
+
   it("names anything else the generic api_error", () => {
     expect(classifyVendorApiFailure(500, "server_error", "internal")).toBe("shim.vendor.api_error");
   });

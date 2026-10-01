@@ -1899,7 +1899,8 @@ describe("remembering the vendor's API failure class", () => {
     expect(records.some((candidate) => (candidate.operation as string).startsWith("shim.vendor."))).toBe(false);
     const held = records.find(
       (candidate) =>
-        candidate.message === "the vendor stated an API failure class; held for the turn's terminal",
+        candidate.message ===
+          "an API attempt failed; the vendor may still retry past it, and the turn's terminal records the outcome",
     );
     expect(held?.verbosity).toBe("verbose");
     expect(held?.context.vendor_error).toBe("rate_limit");
