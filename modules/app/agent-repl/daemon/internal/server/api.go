@@ -284,10 +284,15 @@ type server struct {
 	// escalation can be exercised without waiting real seconds.
 	now func() time.Time
 
+	// selectionMu serializes every feed-selection change WITH its publication
+	// (setSelection), so the topic's order is the order the changes were made
+	// and no client can see an older selection overwrite a newer one. It is
+	// taken before mu (selectionTopic takes mu), never the other way round.
+	selectionMu sync.Mutex
 	// selections is each workspace's feed selection (select_feed_row.go): a
 	// selected response or prompt, ABSENT for none. The daemon is its only
 	// holder: Emacs and the webapp move it (SelectFeedRow) and are pushed it,
-	// and a sent prompt and a rollback read it here. Guarded by mu.
+	// and a sent prompt and a rollback read it here. Guarded by selectionMu.
 	selections map[ids.WorkspaceID]*frontendv1.FeedSelection
 	// rollbackPlans are the rollbacks planned and not yet performed, by the
 	// token PlanRollback minted (rollback.go). In memory: a daemon restart

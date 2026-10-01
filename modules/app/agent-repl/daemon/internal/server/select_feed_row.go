@@ -121,13 +121,12 @@ func (s *server) stepSelection(
 	rows []*frontendv1.FeedId,
 	direction agentreplv1.SelectFeedRowDirection,
 ) *agentreplv1.SelectFeedRowSuccess {
-	s.mu.Lock()
+	s.selectionMu.Lock()
+	defer s.selectionMu.Unlock()
 	current, currentKind, held := selectedRow(s.selections[ws])
 	if len(rows) == 0 {
-		delete(s.selections, ws)
-		s.mu.Unlock()
 		if held {
-			s.publishSelection(ws, &frontendv1.FeedSelection{Selection: &frontendv1.FeedSelection_None{None: returnToTail()}})
+			s.setSelection(ws, &frontendv1.FeedSelection{Selection: &frontendv1.FeedSelection_None{None: returnToTail()}})
 		}
 		log.Info(opSelectFeedRow, "a selection step found no row of its kind to select",
 			dlog.Context{"kind": kind.String(), "direction": direction.String(), "ended": held})
@@ -140,9 +139,7 @@ func (s *server) stepSelection(
 	}
 	at = stepIndex(at, len(rows), direction)
 	sel := selectionOf(kind, rows[at])
-	s.selections[ws] = sel
-	s.mu.Unlock()
-	s.publishSelection(ws, sel)
+	s.setSelection(ws, sel)
 	log.Info(opSelectFeedRow, "moved the feed selection",
 		dlog.Context{"kind": kind.String(), "direction": direction.String(), "row": rows[at].GetValue(), "index": at, "of": len(rows)})
 	return &agentreplv1.SelectFeedRowSuccess{Outcome: &agentreplv1.SelectFeedRowSuccess_Selected{
@@ -173,17 +170,15 @@ func (s *server) endSelection(
 	none *frontendv1.FeedSelectionNone,
 	because string,
 ) bool {
-	s.mu.Lock()
+	s.selectionMu.Lock()
+	defer s.selectionMu.Unlock()
 	row, kind, held := selectedRow(s.selections[ws])
 	if !held || (only != nil && row.GetValue() != only.GetValue()) {
-		s.mu.Unlock()
 		log.Debug(opSelectFeedRow, "a selection end found nothing to end",
 			dlog.Context{"because": because, "held": held, "selected": row.GetValue(), "named": only.GetValue()})
 		return false
 	}
-	delete(s.selections, ws)
-	s.mu.Unlock()
-	s.publishSelection(ws, &frontendv1.FeedSelection{Selection: &frontendv1.FeedSelection_None{None: none}})
+	s.setSelection(ws, &frontendv1.FeedSelection{Selection: &frontendv1.FeedSelection_None{None: none}})
 	log.Info(opSelectFeedRow, "ended the feed selection",
 		dlog.Context{"because": because, "kind": kind.String(), "row": row.GetValue()})
 	return true
@@ -193,14 +188,23 @@ func (s *server) endSelection(
 // false when nothing is selected. A caller acting on a selection reads it
 // once here and ends only that row (endSelection with `only`).
 func (s *server) currentSelection(ws ids.WorkspaceID) (row *frontendv1.FeedId, kind selectionKind, held bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.selectionMu.Lock()
+	defer s.selectionMu.Unlock()
 	return selectedRow(s.selections[ws])
 }
 
-// publishSelection pushes a selection to the root feed's watches; Emacs's host
-// watch maps the same topic (hostSelectionOf), so both see one sequence.
-func (s *server) publishSelection(ws ids.WorkspaceID, sel *frontendv1.FeedSelection) {
+// setSelection is THE ONE WAY a workspace's selection changes: it stores SEL
+// (a `none` selection is stored as absence) and publishes it to the topic the
+// root feed's watches and Emacs's host watch both read. The caller holds
+// selectionMu, so the store and the publication are one step and the topic's
+// order is the order the changes were made: no client can be handed an older
+// selection after a newer one.
+func (s *server) setSelection(ws ids.WorkspaceID, sel *frontendv1.FeedSelection) {
+	if _, _, held := selectedRow(sel); held {
+		s.selections[ws] = sel
+	} else {
+		delete(s.selections, ws)
+	}
 	s.selectionTopic(ws).Publish(sel)
 }
 
