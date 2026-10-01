@@ -3942,3 +3942,52 @@ func TestStartOfALiveSessionRaisesNoBringUp(t *testing.T) {
 		t.Fatalf("BringUps edges = %v, want none for a session already live", f.bringUps)
 	}
 }
+
+// TestNewestAdoptableDecidesTheDirectorysNewestTranscript covers every arm of
+// the one adoption decision: adoptable, too fresh, none, and a failed probe.
+func TestNewestAdoptableDecidesTheDirectorysNewestTranscript(t *testing.T) {
+	tests := []struct {
+		name      string
+		modTime   time.Time
+		noneOnDir bool
+		probeErr  error
+		wantOK    bool
+		wantLevel string
+		wantMsg   string
+	}{
+		{name: "an idle transcript is adoptable", modTime: fixedNow.Add(-2 * TranscriptAdoptionIdleWindow), wantOK: true},
+		{
+			name: "a transcript inside the idle window is refused", modTime: fixedNow.Add(-time.Second),
+			wantLevel: dlog.LevelInfo, wantMsg: "the newest transcript was modified too recently to adopt safely; the session comes up FRESH",
+		},
+		{
+			name: "no transcript is refused quietly", noneOnDir: true,
+			wantLevel: dlog.LevelDebug, wantMsg: "no on-disk transcript to adopt; the session comes up FRESH",
+		},
+		{
+			name: "a failed probe is refused loudly", probeErr: errors.New("readdir blew up"),
+			wantLevel: dlog.LevelWarn, wantMsg: "could not probe for a transcript to adopt; the session comes up FRESH",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFleetFixture(t)
+			if !tt.noneOnDir && tt.probeErr == nil {
+				f.accounts.newest = account.AdoptableTranscript{VendorSessionID: "newest", ModTime: tt.modTime}
+			}
+			f.accounts.newestErr = tt.probeErr
+
+			// Act
+			got, ok := f.fleet.newestAdoptable(context.Background(), f.log.logger, "/tree/w1")
+
+			// Assert
+			if ok != tt.wantOK || (ok && got.VendorSessionID != "newest") {
+				t.Fatalf("newestAdoptable = (%+v, %v), want ok=%v", got, ok, tt.wantOK)
+			}
+			if tt.wantMsg != "" && !recordedAt(f, tt.wantLevel, opBringUp, tt.wantMsg) {
+				t.Fatalf("the refusal was not recorded at %s: %q", tt.wantLevel, tt.wantMsg)
+			}
+		})
+	}
+}
