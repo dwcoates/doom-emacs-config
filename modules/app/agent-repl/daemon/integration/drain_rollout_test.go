@@ -1398,7 +1398,7 @@ func drainTriggerDeploy(t *testing.T, d *harness.Daemon, selfRepo *harness.Repo,
 	f := mergeCreateChild(t, d, repoRef, "trigger", "trigger work", nil)
 	sha := writeCommit(t, selfRepo, f.ws.GetDir(), path, "trigger\n")
 	selfRepo.SetPaths(sha, path)
-	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws})); err != nil {
+	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws, Source: ownBranch()})); err != nil {
 		t.Fatalf("MergeWorkspace(trigger) = error %v, want the merge enqueued and landed", err)
 	}
 }

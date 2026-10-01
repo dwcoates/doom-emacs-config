@@ -39,7 +39,7 @@ func mergeBlockedRepoOn(t *testing.T, d *harness.Daemon, namePrefix string) (fro
 	behind = mergeCreateChild(t, d, repoRef, namePrefix+"-behind", namePrefix+" behind work", nil)
 
 	harness.CommitWork(t, front.ws.GetDir())
-	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: front.ws})); err != nil {
+	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: front.ws, Source: ownBranch()})); err != nil {
 		t.Fatalf("MergeWorkspace(%s front) = error %v, want the merge enqueued", namePrefix, err)
 	}
 	// The pre-prompt's turn is started and NEVER answered: the run sits in it
@@ -47,7 +47,7 @@ func mergeBlockedRepoOn(t *testing.T, d *harness.Daemon, namePrefix string) (fro
 	front.shim.ExpectStartTurn()
 
 	harness.CommitWork(t, behind.ws.GetDir())
-	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: behind.ws})); err != nil {
+	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: behind.ws, Source: ownBranch()})); err != nil {
 		t.Fatalf("MergeWorkspace(%s behind) = error %v, want the merge enqueued", namePrefix, err)
 	}
 	return front, behind, repo, repoRef
@@ -62,4 +62,10 @@ func awaitLandingDeployed(t *testing.T, d *harness.Daemon) {
 	d.AwaitLogRecord(d.RunLogPath(), "the landing's deploy", func(r harness.LogRecord) bool {
 		return r.Operation == "daemon.deploy.landing" && r.Message == "the landing is deployed"
 	})
+}
+
+// ownBranch is the requester's own branch, closed once it lands: what every
+// MergeWorkspace a test makes for a workspace's own work merges.
+func ownBranch() *agentreplv1.MergeWorkspaceSource {
+	return &agentreplv1.MergeWorkspaceSource{Source: &agentreplv1.MergeWorkspaceSource_OwnBranch{OwnBranch: &agentreplv1.MergeWorkspaceSourceOwnBranch{}}}
 }
