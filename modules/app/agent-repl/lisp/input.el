@@ -259,12 +259,13 @@ The standing notice first, then the held-prompt waiting line."
   ;; Widen the fill column so wrapped prose and `fill-paragraph' reflow to
   ;; 150 columns rather than the 70-column default.
   (setq-local fill-column 150)
-  ;; Soft-wrap long input lines at word boundaries.  The two underlying
-  ;; variables are set directly rather than enabling `visual-line-mode':
-  ;; that minor mode also remaps Evil's line motions to screen lines,
-  ;; which is unwanted.
-  (setq-local truncate-lines nil)
-  (setq-local word-wrap t)
+  ;; Soft-wrap long input lines at word boundaries.  With
+  ;; `evil-respect-visual-line-mode' set in init.el, `visual-line-mode' also
+  ;; moves Evil's `j'/`k'/`0'/`$' by screen line, `gj'/`gk' by logical line.
+  ;; The composer's normal-state `<up>'/`<down>' history keys still win over
+  ;; Doom's motion-state screen-line `[up]'/`[down]', since evil consults
+  ;; normal-state maps before motion-state ones.
+  (visual-line-mode 1)
   ;; Intentionally unlogged: `after-change-functions' runs per keystroke, so
   ;; logging it would overwhelm the durable input/send lifecycle diagnostics.
   (add-hook 'after-change-functions #'agent-repl--history-on-change nil t)
