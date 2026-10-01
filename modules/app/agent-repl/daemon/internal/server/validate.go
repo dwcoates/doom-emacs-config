@@ -168,11 +168,6 @@ func validateSubmitPromptRequest(req *agentreplv1.SubmitPromptRequest) *connect.
 			return err
 		}
 	}
-	if req.ReferenceResponseFeedid != nil {
-		if err := validateFeedID("reference_response_feedid", req.GetReferenceResponseFeedid()); err != nil {
-			return err
-		}
-	}
 	// AN ABSENT delivery is the ordinary one; a present one must name a
 	// delivery the daemon honors. UNSPECIFIED is never sent, and a value this
 	// build does not know is never read as the ordinary delivery.
@@ -182,15 +177,31 @@ func validateSubmitPromptRequest(req *agentreplv1.SubmitPromptRequest) *connect.
 	return nil
 }
 
-// validateSelectResponseRequest is SelectResponseRequest's base function. The
-// direction is required: UNSPECIFIED is never sent, so a request carrying it is
+// validateSelectFeedRowRequest is SelectFeedRowRequest's base function. A move
+// is required, a step's direction is required, and a left-view report names
+// its row: each is never sent unset, so a request missing one is
 // InvalidArgument rather than a typed refusal, exactly as the proto states.
-func validateSelectResponseRequest(req *agentreplv1.SelectResponseRequest) *connect.Error {
+func validateSelectFeedRowRequest(req *agentreplv1.SelectFeedRowRequest) *connect.Error {
 	if err := validateWorkspaceRef("workspace", req.GetWorkspace()); err != nil {
 		return err
 	}
-	if req.GetDirection() == agentreplv1.SelectResponseDirection_SELECT_RESPONSE_DIRECTION_UNSPECIFIED {
-		return invalid("direction", "a response-selection direction is required")
+	switch move := req.GetMove().(type) {
+	case *agentreplv1.SelectFeedRowRequest_Response:
+		return validateSelectFeedRowStep("move.response", move.Response)
+	case *agentreplv1.SelectFeedRowRequest_Prompt:
+		return validateSelectFeedRowStep("move.prompt", move.Prompt)
+	case *agentreplv1.SelectFeedRowRequest_Clear:
+		return nil
+	case *agentreplv1.SelectFeedRowRequest_LeftView:
+		return validateFeedID("move.left_view.row", move.LeftView.GetRow())
+	}
+	return invalid("move", "a selection move is required")
+}
+
+// validateSelectFeedRowStep requires a step's direction.
+func validateSelectFeedRowStep(field string, step *agentreplv1.SelectFeedRowStep) *connect.Error {
+	if step.GetDirection() == agentreplv1.SelectFeedRowDirection_SELECT_FEED_ROW_DIRECTION_UNSPECIFIED {
+		return invalid(field+".direction", "a selection step's direction is required")
 	}
 	return nil
 }
