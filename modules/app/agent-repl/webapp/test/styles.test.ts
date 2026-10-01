@@ -999,6 +999,113 @@ describe("the footer status wave's stylesheet contract", () => {
   });
 });
 
+/** The ghost's host: the first paragraph of an uncapped response with a corner. */
+const GHOST_HOST =
+  '.bubble[data-cap-lines="none"] .usage-corner + .bubble-body > .response-prose:first-child > p:first-child';
+
+/**
+ * The corner's geometry tokens: the one rule that declares them for both of
+ * their readers, the corner and the ghost's host paragraph. They moved out of
+ * the corner's own rule when the ghost became their second reader.
+ */
+function cornerTokens(): string {
+  return (
+    rulesOf(stylesheet).find((rule) => rule.selectors.includes(".usage-corner") && rule.selectors.includes(GHOST_HOST))
+      ?.declarations ?? ""
+  );
+}
+
+describe("the usage corner's sizing ghost", () => {
+  /** The ghost's own declarations. */
+  const ghost = (): string => declarationsOf(`${GHOST_HOST}::before`) ?? "";
+
+  it("declares the corner's geometry tokens once, for the corner and the ghost's host alike", () => {
+    // Arrange / Act
+    const tokens = cornerTokens();
+
+    // Assert
+    expect(["--usage-half-leading", "--usage-bubble-pad-top", "--usage-corner-gap", "--usage-pair-gap"].filter(
+      (token) => !new RegExp(`${token}:`).test(tokens),
+    )).toEqual([]);
+  });
+
+  it("declares nothing but tokens on the shared rule, so the host paragraph's own layout is untouched", () => {
+    // Arrange / Act
+    const props = cornerTokens()
+      .split(";")
+      .map((decl) => decl.split(":")[0]?.trim() ?? "")
+      .filter((prop) => prop !== "" && !prop.startsWith("--"));
+
+    // Assert
+    expect(props).toEqual([]);
+  });
+
+  it("leaves no geometry token declared twice", () => {
+    // Arrange / Act
+    const declaring = rulesOf(stylesheet).filter((rule) => /--usage-corner-gap\s*:/.test(rule.declarations));
+
+    // Assert
+    expect(declaring.length).toBe(1);
+  });
+
+  it("floats the ghost right at zero height, invisible", () => {
+    // Arrange / Act
+    const declarations = ghost();
+
+    // Assert
+    expect([
+      /float:\s*right/.test(declarations),
+      /(?:^|;)\s*height:\s*0\s*(;|$)/.test(declarations),
+      /overflow:\s*hidden/.test(declarations),
+      /visibility:\s*hidden/.test(declarations),
+    ]).toEqual([true, true, true, true]);
+  });
+
+  it("measures in the corner's own font size", () => {
+    // Arrange / Act
+    const size = (block: string): string | undefined => /font-size:\s*([^;]+)/.exec(block)?.[1]?.trim();
+
+    // Assert
+    expect(size(ghost())).toBe(size(declarationsOf(".usage-corner") ?? ""));
+  });
+
+  it("reserves the corner's token slot and pair gap ahead of the labels", () => {
+    // Arrange / Act
+    const declarations = ghost();
+
+    // Assert
+    expect(declarations).toMatch(/padding-left:\s*calc\(6ch \+ var\(--usage-pair-gap\)\)/);
+  });
+
+  it("reserves the same token slot the corner's own ::before does", () => {
+    // Arrange / Act
+    const token = /width:\s*([^;]+)/.exec(declarationsOf(".usage-corner::before") ?? "")?.[1]?.trim();
+
+    // Assert
+    expect(token).toBe("6ch");
+  });
+
+  it("reserves the corner's right gap after the labels", () => {
+    // Arrange / Act
+    const declarations = ghost();
+
+    // Assert
+    expect(declarations).toMatch(/padding-right:\s*calc\(var\(--usage-corner-gap\) - var\(--bubble-scroll-gap\)\)/);
+  });
+
+  it("draws the reserved labels it is handed, one per line", () => {
+    // Arrange / Act
+    const declarations = ghost();
+
+    // Assert
+    expect([
+      /content:\s*var\(--usage-reserve-labels\)/.test(declarations),
+      /white-space:\s*pre\s*(;|$)/.test(declarations),
+      /font-variant-numeric:\s*tabular-nums/.test(declarations),
+    ]).toEqual([true, true, true]);
+  });
+});
+
 describe("the cost corner", () => {
   /** The five reveal triggers: the whole bubble, the corner, and the state class. */
   const TRIGGERS = [
@@ -1012,7 +1119,7 @@ describe("the cost corner", () => {
   describe("the one gap token", () => {
     it("defines the gap as the bubble's top padding plus the line's half-leading", () => {
       // Arrange / Act
-      const corner = declarationsOf(".usage-corner") ?? "";
+      const corner = cornerTokens();
 
       // Assert
       expect(corner).toMatch(
@@ -1022,7 +1129,7 @@ describe("the cost corner", () => {
 
     it("derives the half-leading from the bubble's one leading", () => {
       // Arrange / Act
-      const corner = declarationsOf(".usage-corner") ?? "";
+      const corner = cornerTokens();
 
       // Assert
       expect(corner).toMatch(
@@ -1033,9 +1140,7 @@ describe("the cost corner", () => {
     it("mirrors .bubble's top padding exactly", () => {
       // Arrange / Act
       const bubblePadTop = /padding:\s*(\S+)/.exec(declarationsOf(".bubble") ?? "")?.[1];
-      const mirrored = /--usage-bubble-pad-top:\s*([^;]+);/.exec(
-        declarationsOf(".usage-corner") ?? "",
-      )?.[1];
+      const mirrored = /--usage-bubble-pad-top:\s*([^;]+);/.exec(cornerTokens())?.[1];
 
       // Assert
       expect(mirrored).toBe(bubblePadTop);
@@ -1149,7 +1254,7 @@ describe("the cost corner", () => {
 
     it("keeps the normal gap between the token and the duration", () => {
       // Arrange / Act
-      const corner = declarationsOf(".usage-corner") ?? "";
+      const corner = cornerTokens();
       const ago = declarationsOf(".usage-ago") ?? "";
 
       // Assert
