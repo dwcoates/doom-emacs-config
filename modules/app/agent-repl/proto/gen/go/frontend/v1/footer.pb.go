@@ -15814,7 +15814,7 @@ func (x *FooterAgentRowDescription) GetText() string {
 // The row's token element.
 type FooterAgentRowTokens struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The formatted running sum ("12.4k tok"). Re-pushed as it grows.
+	// The formatted running sum ("12.4k"; the panel's "tokens" column header names the unit). Re-pushed as it grows.
 	Text          string `protobuf:"bytes,1,opt,name=text,proto3" json:"text,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
