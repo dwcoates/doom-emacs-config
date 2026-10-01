@@ -1747,6 +1747,27 @@ describe("a message carrying no conversation fact", () => {
   });
 });
 
+describe("the place a record states", () => {
+  it("places every row a timestamped record produced by that record, as the file plane does", () => {
+    const at = "2026-09-30T12:00:00.000Z";
+    const message = {
+      ...(assistant("msg-placed", [{ type: "text", text: "hello" }]) as unknown as Record<string, unknown>),
+      timestamp: at,
+    } as unknown as SdkMessage;
+
+    const output = createFold().onSdkMessage(message, foldContext());
+
+    expect(output.entries.length).toBeGreaterThan(0);
+    expect(output.entries.every((entry) => entry.recordPlace?.atMs === Date.parse(at))).toBe(true);
+  });
+
+  it("leaves a record with no timestamp to the writer's clock", () => {
+    const output = createFold().onSdkMessage(assistant("msg-unplaced", [{ type: "text", text: "hello" }]), foldContext());
+
+    expect(output.entries.some((entry) => entry.recordPlace !== undefined)).toBe(false);
+  });
+});
+
 describe("an SDK message type no converter owns", () => {
   it("lands the record as residue named by its own type", () => {
     const output = createFold().onSdkMessage(
