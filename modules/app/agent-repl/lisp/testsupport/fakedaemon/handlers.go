@@ -203,6 +203,10 @@ func (s *fakeServer) ClientLog(ctx context.Context, req *connect.Request[v1.Clie
 	return handleUnary[v1.ClientLogRequest, v1.ClientLogResponse](ctx, s, "ClientLog", req.Msg)
 }
 
+func (s *fakeServer) UpdatePersistentWifiMode(ctx context.Context, req *connect.Request[v1.UpdatePersistentWifiModeRequest]) (*connect.Response[v1.UpdatePersistentWifiModeResponse], error) {
+	return handleUnary[v1.UpdatePersistentWifiModeRequest, v1.UpdatePersistentWifiModeResponse](ctx, s, "UpdatePersistentWifiMode", req.Msg)
+}
+
 func (s *fakeServer) RegisterWorkspace(ctx context.Context, req *connect.Request[v1.RegisterWorkspaceRequest]) (*connect.Response[v1.RegisterWorkspaceResponse], error) {
 	return handleUnary[v1.RegisterWorkspaceRequest, v1.RegisterWorkspaceResponse](ctx, s, "RegisterWorkspace", req.Msg)
 }
