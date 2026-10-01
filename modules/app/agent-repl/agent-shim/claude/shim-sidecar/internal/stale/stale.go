@@ -355,7 +355,13 @@ func (t *Tracker) Open(path string) bool {
 // Sweep concludes every run whose grace or silence window has expired, and
 // stops tracking it. The conclusions are returned in path order so a sweep's
 // records are stable across runs.
-func (t *Tracker) Sweep(bootMs, nowMs int64) []Lost {
+//
+// unseen answers whether a path holds bytes the reader has not yet seen. A
+// file like that is NOT SILENT, however old its last growth: its bytes may be
+// the very terminator that settles the run, and a reader that lagged behind
+// the window must not turn a finished run into a LOST one. Silence is judged
+// only once the reader has seen everything the file holds.
+func (t *Tracker) Sweep(bootMs, nowMs int64, unseen func(path string) bool) []Lost {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if bootMs <= 0 && !t.bootUnknownSaid {
@@ -369,6 +375,10 @@ func (t *Tracker) Sweep(bootMs, nowMs int64) []Lost {
 	for path, existing := range t.open {
 		reason, concluded := t.conclude(existing, bootMs, nowMs)
 		if !concluded {
+			continue
+		}
+		if reason == ReasonWentSilent && unseen(path) {
+			t.bound(existing.work).LogVerbose("quiet past its silence window, but the reader has not seen all its bytes yet; not silent")
 			continue
 		}
 		delete(t.open, path)

@@ -159,6 +159,10 @@ func TestLostSweepArmsFromSilence(t *testing.T) {
 	}
 	handler := &lostCapable{}
 	h.sc.watchers[spool].tailer = tail.New(spool, tail.RawTextCodec{}, handler, &tail.Context{Path: spool}, h.sc.log)
+	// The reader has seen every byte the spool holds: only then is it silent.
+	if _, err := h.sc.watchers[spool].tailer.Poll(); err != nil {
+		t.Fatalf("Poll: %v", err)
+	}
 
 	// Act.
 	h.advance(stale.DefaultShellSilence)
@@ -167,6 +171,31 @@ func TestLostSweepArmsFromSilence(t *testing.T) {
 	// Assert.
 	if len(handler.calls) != 1 {
 		t.Fatalf("terminals minted = %d, want one for the silent run", len(handler.calls))
+	}
+}
+
+func TestALostSweepNeverConcludesASpoolTheReaderHasNotSeen(t *testing.T) {
+	// Arrange: a claimed spool whose bytes the reader has not polled yet --
+	// they may be its own terminator.
+	h := newHarness(t, &fakeStore{})
+	spool := h.spoolFile(t, "b1", "hello\nEXIT=0\n")
+	h.sc.TaskSpawned("b1", "call-1", "", "", false, "/workspace", "workspace-id", "session-1")
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	handler := &lostCapable{}
+	h.sc.watchers[spool].tailer = tail.New(spool, tail.RawTextCodec{}, handler, &tail.Context{Path: spool}, h.sc.log)
+
+	// Act.
+	h.advance(stale.DefaultShellSilence)
+	h.sc.sweep()
+
+	// Assert.
+	if len(handler.calls) != 0 {
+		t.Fatalf("terminals minted = %d, want none for a spool with unseen bytes", len(handler.calls))
+	}
+	if !h.sc.tracker.Open(spool) {
+		t.Fatal("the unseen spool's run stopped being tracked")
 	}
 }
 
