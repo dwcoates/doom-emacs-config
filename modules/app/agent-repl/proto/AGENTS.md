@@ -76,9 +76,24 @@ structural rather than aspirational.
 **Remediation strategy for adding a new vendor (e.g. codex):** when a new
 vendor's reality does not fit the schema, RESOLVE the incongruity by revising
 the API — a breaking schema change is the expected and acceptable remedy (no
-downstream customers exist). Do not bolt vendor-specific side-channels onto
+downstream customers exist), and it raises the package version (see "A package
+version goes up only for a breaking change"). Do not bolt vendor-specific side-channels onto
 the protocol. Breaking changes require explicit user approval first (see the
 repo-root AGENTS.md wire-protocol rule).
+
+## A package version goes up only for a breaking change
+
+Owner ruling, 2026-10-01. A package's version (the `v1` in `frontend.v1`) goes
+up for EVERY breaking change and ONLY for one:
+
+- Breaking: a field's type or meaning changed, a tag reused, a message or arm
+  removed without `reserved`, anything an older peer would misread.
+- Not breaking, so the version stays: a new message, field or oneof arm, and a
+  field retired with `reserved`. These are frequent and are hot reloaded.
+- A version change is never hot reloaded: a deploy that finds one is blocked,
+  and the footer asks for a full Emacs restart.
+- The daemon database follows the same rule with its `wsm schema version`
+  (`AGENTS.md`).
 
 ## Which package does a new message go in?
 

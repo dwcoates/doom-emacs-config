@@ -61,8 +61,9 @@ are pre-approved (no new rpc endpoints). No subagents in the implementing sessio
 - A daemon whose state LAYOUT changes cannot hand over (the successor opens state read-only), so
   it is a daemon swap that waits until EVERY workspace has drained, then stops and starts; each
   workspace draws `deploying · transferring` from the stop until the new daemon serves it.
-  - The term "state layout" is to be replaced (owner request); the new term goes into
-    `AGENTS.md` only once the owner approves it.
+  - This is a `wsm schema version` change, which happens only for a BREAKING table change
+    (`AGENTS.md`); additive table changes hand over normally, applied by the new daemon once it
+    is the only writer.
 
 ### The deploy queue (owner design, 2026-10-01)
 
@@ -76,12 +77,14 @@ deploys waiting on a deploy, described here. Only master is ever deployed.
   still around.
 - Requests that pile up before a daemon can act collapse to ONE: the newest master commit wins, and
   the older ones are disregarded (ancestry is git's: `git merge-base --is-ancestor`).
-- Proposed mechanism, so no request can be lost in a hand-off between daemons:
+- Mechanism (owner approved, over a post-merge git hook):
   - every build stamps the master commit it was built from;
   - a daemon, once it is the only one (its predecessor gone), compares its own stamped commit with
     master's head, and deploys if master is ahead;
-  - a landing or a hand request only says "master moved"; a daemon that is not yet the only one
-    ignores it, because the check above runs when it becomes the only one;
+  - a landing (the merge queue runs in the daemon and calls `rollout.Controller.Landed`,
+    `daemon/internal/merge/terminal.go:630`) or a hand request says "master moved": the only
+    daemon deploys; a daemon that is not yet the only one ignores it, because the check above
+    runs when it becomes the only one;
   - the build is of the commit, not of whatever the master checkout holds uncommitted.
 - So "the request goes to the new daemon" holds structurally: no request is carried at all, and
   the newest-commit-wins rule is the comparison itself.
@@ -284,15 +287,20 @@ the canonical log record), and keep the tracked suites green.
    (Emacs) and delays.
 3. Daemon transfers: the three combinations; a current shim survives a daemon swap and is
    re-attached; the mid-turn handover and its misread ruling at `rollout/handover.go:275` go.
-4. Deploy gating: a stale store or sidecar, or a protocol version change, blocks every hot reload;
+4. The wsm schema version rule: rename `LayoutVersion` and its docs and flags to the
+   `wsm schema version`; additive migrations are applied by the new daemon once it is the only
+   writer, and only breaking ones raise the version.
+5. Deploy gating: a stale store or sidecar, or a protocol version change, blocks every hot reload;
    the build stamps its proto package versions.
-5. Footer resolver: the status, activities, salient failure, enduring blocked line.
-6. Webapp: the status, activity arms, durations, enduring alternation by wall clock, the purple
+6. Deploy queue: builds stamp and build from a master commit; the only daemon deploys on a
+   landing or a hand request, and on becoming the only one when master is ahead of its commit.
+7. Footer resolver: the status, activities, salient failure, enduring blocked line.
+8. Webapp: the status, activity arms, durations, enduring alternation by wall clock, the purple
    `after deploy` badge.
-7. Lisp: the transfer notices (no fault or blue status during an expected transfer), the force
+9. Lisp: the transfer notices (no fault or blue status during an expected transfer), the force
    confirmation, the lisp reload after the old daemon's connection is gone.
-8. Emacs restart path: build, install and start every stale component.
-9. Docs: `docs/USER-GUIDE.md` (deploy footer, held prompts), `daemon/AGENTS.md` (held prompt
+10. Emacs restart path: build, install and start every stale component.
+11. Docs: `docs/USER-GUIDE.md` (deploy footer, held prompts), `daemon/AGENTS.md` (held prompt
    classifications, the corrected drain rule), `docs/REMEDIATION-CHANGELOG.md`.
 
 ## Before starting
