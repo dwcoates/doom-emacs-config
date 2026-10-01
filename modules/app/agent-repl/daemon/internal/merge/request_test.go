@@ -170,6 +170,72 @@ func TestAMergedUpstreamRequestRecordsTheBranchCheckedOut(t *testing.T) {
 	}
 }
 
+func TestWithCheckedOutBranchRecordsTheBranchOfTheNamedWorkspace(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.registerOther(otherWorkspace, "ws-two", "other-branch")
+
+	// Act.
+	got, err := h.o.withCheckedOutBranch(context.Background(), theWorkspace, otherWorkspace, wsm.MergeSource{Kind: wsm.MergeSourceWorkspace, Workspace: otherWorkspace})
+
+	// Assert.
+	if err != nil || got.Branch != "other-branch" {
+		t.Fatalf("withCheckedOutBranch = %+v, %v, want other-branch", got, err)
+	}
+}
+
+func TestWithCheckedOutBranchRefusesAWorkspaceWithNoGeometry(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.db.mu.Lock()
+	delete(h.db.jobs, theWorkspace)
+	h.db.mu.Unlock()
+
+	// Act.
+	_, err := h.o.withCheckedOutBranch(context.Background(), theWorkspace, theWorkspace, ownBranch)
+
+	// Assert.
+	if refusal, refused := Refused(err); !refused || refusal.Arm != ArmNoLayoutFacts {
+		t.Fatalf("withCheckedOutBranch = %v, want the %s refusal", err, ArmNoLayoutFacts)
+	}
+}
+
+// TestEveryWorkspaceSourceRecordsTheBranchCheckedOut holds every arm that
+// merges a workspace's branch to the one shape: the checked-out branch is
+// recorded with the request.
+func TestEveryWorkspaceSourceRecordsTheBranchCheckedOut(t *testing.T) {
+	tests := []struct {
+		name   string
+		source wsm.MergeSource
+	}{
+		{name: "own branch", source: ownBranch},
+		{name: "merged upstream", source: wsm.MergeSource{Kind: wsm.MergeSourceMergedUpstream}},
+		{name: "another workspace", source: wsm.MergeSource{Kind: wsm.MergeSourceWorkspace, Workspace: otherWorkspace}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.registerOther(otherWorkspace, "ws-two", "checked-out")
+			h.git.mu.Lock()
+			h.git.branches[h.sourceD] = "checked-out"
+			h.git.mu.Unlock()
+
+			// Act.
+			err := h.request(t, tt.source, RequestedByAgent)
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("Enqueue: %v", err)
+			}
+			entries, _ := h.db.MergeQueue(context.Background(), h.repoKey())
+			if len(entries) != 1 || entries[0].Source.Branch != "checked-out" {
+				t.Fatalf("queue = %+v, want the checked-out branch recorded", entries)
+			}
+		})
+	}
+}
+
 func TestARequestIsRefusedWhenItsSourceCannotBeMerged(t *testing.T) {
 	tests := []struct {
 		name    string
