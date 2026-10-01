@@ -753,70 +753,45 @@ var _ = []rollout.DispositionKind{
 // workspace's own start-failed fault and states the dead link on every
 // surface, which is the same evidence a failed open leaves. The boot's own
 // summary counts it.
+//
+// THE STARTS RUN CONCURRENTLY. Each one is a shim spawn plus a vendor child
+// that has to prove itself live, and nothing one workspace's start does waits
+// on another's: `Fleet.Start` serializes per workspace (its start gate), not
+// across them. Run one after another, N workspaces paid N starts end to end
+// before the last one's feed could draw. MEASURED: the boot of 2026-09-27
+// 20:52:08 (pid 2495) took 64.9s to bring four sessions up, 11.1s to 22.4s
+// each, back to back. The report still lists every workspace in the order it
+// was pending, so its slices do not depend on which start finished first.
 func (s *sequence) BringUp(ctx context.Context, pending []wsm.Workspace) BringUpReport {
 	log := s.deps.Log.Global()
-	report := BringUpReport{}
-	// A START THAT HAS BEGUN IS FINISHED, NEVER ABANDONED MID-WRITE, and the
-	// NEXT one is simply not begun once the daemon is leaving. The step now
-	// runs beside the accept loop, so an exit CAN land in the middle of it,
-	// and a start cancelled halfway is not a session that failed: it is a
-	// half-written session record, a shim stopped between spawn and attach,
-	// and a fault the daemon then could not record because the same
-	// cancellation refused its transaction. The exit joins this goroutine
-	// (cmd/claude-repld/run.go, loopJoinBound) rather than cutting it.
-	startCtx := context.WithoutCancel(ctx)
-	for _, ws := range pending {
-		if err := ctx.Err(); err != nil {
-			log.Info("daemon.boot.bring_up", "the daemon is leaving; the remaining workspaces are not started", dlog.Context{
-				dlog.KeyWorkspaceID: string(ws.ID),
-				"error":             err.Error(),
-			})
-			break
-		}
-		fields := dlog.Context{
-			dlog.KeyWorkspaceID:  string(ws.ID),
-			dlog.KeyWorkspaceDir: ws.Dir,
-		}
-		session, exists, err := s.deps.DB.Session(startCtx, ws.ID)
-		if err != nil {
-			fields["error"] = err.Error()
-			log.Error("daemon.boot.bring_up", "a workspace's session record could not be read; it is not brought up", fields)
-			report.BringUpFailed = append(report.BringUpFailed, ws.ID)
-			continue
-		}
-		if exists && session.Hibernated() {
-			log.Debug("daemon.boot.bring_up", "a hibernated workspace is left asleep", fields)
-			report.HibernatedLeft = append(report.HibernatedLeft, ws.ID)
-			continue
-		}
-		if err := s.deps.StartSession(startCtx, ws.ID); err != nil {
-			fields["error"] = err.Error()
-			// A START THIS DAEMON STOOD THE SHIM DOWN UNDER IS NOT A FAILED
-			// BRING-UP. The exit's drain force-stops every workspace session,
-			// and a start still in flight when it does comes back
-			// `unavailable: unexpected EOF` from a shim the same process just
-			// killed. It is the ordinary shape of an exit landing inside the
-			// bring-up -- the loop's next iteration sees ctx.Err() and stops
-			// -- and it is counted apart from the workspaces that genuinely
-			// would not start, so the summary's `failed` still means what it
-			// says. MEASURED: realtest run 2026-09-13T16:20:34 recorded it as
-			// an ERROR on three consecutive daemon generations.
-			if errors.Is(err, shimclient.ErrStandDownOrdered) {
-				log.Debug("daemon.boot.bring_up", "an open workspace's start ended in a stand-down this daemon ordered", fields)
-				report.StoodDown = append(report.StoodDown, ws.ID)
-				continue
-			}
-			log.Error("daemon.boot.bring_up", "an open workspace's session did not come up; the boot goes on", fields)
-			report.BringUpFailed = append(report.BringUpFailed, ws.ID)
-			continue
-		}
-		log.Debug("daemon.boot.bring_up", "an open workspace's session was started", fields)
-		report.BroughtUp = append(report.BroughtUp, ws.ID)
+	outcomes := make([]bringUpOutcome, len(pending))
+	var wg sync.WaitGroup
+	for i, ws := range pending {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			outcomes[i] = s.bringUpOne(ctx, ws)
+		}()
 	}
-	// ONE SUMMARY, AT INFO. The per-workspace records above are DEBUG because
-	// they are a loop body; what a person asks about after a bounce is how
-	// many sessions this daemon brought back, so that count is stated once at
-	// the level a person reads.
+	wg.Wait()
+	report := BringUpReport{}
+	for i, ws := range pending {
+		switch outcomes[i] {
+		case bringUpStarted:
+			report.BroughtUp = append(report.BroughtUp, ws.ID)
+		case bringUpHibernated:
+			report.HibernatedLeft = append(report.HibernatedLeft, ws.ID)
+		case bringUpStoodDown:
+			report.StoodDown = append(report.StoodDown, ws.ID)
+		case bringUpFailed:
+			report.BringUpFailed = append(report.BringUpFailed, ws.ID)
+		case bringUpNotBegun:
+		}
+	}
+	// ONE SUMMARY, AT INFO. The per-workspace records are DEBUG because they
+	// are a loop body; what a person asks about after a bounce is how many
+	// sessions this daemon brought back, so that count is stated once at the
+	// level a person reads.
 	log.Info("daemon.boot.bring_up", "the boot brought the open workspaces' sessions up", dlog.Context{
 		"pending":         len(pending),
 		"started":         len(report.BroughtUp),
@@ -825,6 +800,75 @@ func (s *sequence) BringUp(ctx context.Context, pending []wsm.Workspace) BringUp
 		"failed":          len(report.BringUpFailed),
 	})
 	return report
+}
+
+// bringUpOutcome is what one workspace's bring-up came to.
+type bringUpOutcome int
+
+const (
+	// bringUpNotBegun is a workspace whose start was never begun because
+	// the daemon was already leaving.
+	bringUpNotBegun bringUpOutcome = iota
+	bringUpStarted
+	bringUpHibernated
+	bringUpStoodDown
+	bringUpFailed
+)
+
+// bringUpOne brings one pending workspace's session up and says what came of
+// it, logging the per-workspace record BringUp's summary counts.
+func (s *sequence) bringUpOne(ctx context.Context, ws wsm.Workspace) bringUpOutcome {
+	log := s.deps.Log.Global()
+	// A START THAT HAS BEGUN IS FINISHED, NEVER ABANDONED MID-WRITE, and a
+	// start not yet begun is simply not begun once the daemon is leaving. The
+	// step runs beside the accept loop, so an exit CAN land in the middle of
+	// it, and a start cancelled halfway is not a session that failed: it is a
+	// half-written session record, a shim stopped between spawn and attach,
+	// and a fault the daemon then could not record because the same
+	// cancellation refused its transaction. The exit joins this goroutine
+	// (cmd/claude-repld/run.go, loopJoinBound) rather than cutting it.
+	if err := ctx.Err(); err != nil {
+		log.Info("daemon.boot.bring_up", "the daemon is leaving; this workspace is not started", dlog.Context{
+			dlog.KeyWorkspaceID: string(ws.ID),
+			"error":             err.Error(),
+		})
+		return bringUpNotBegun
+	}
+	startCtx := context.WithoutCancel(ctx)
+	fields := dlog.Context{
+		dlog.KeyWorkspaceID:  string(ws.ID),
+		dlog.KeyWorkspaceDir: ws.Dir,
+	}
+	session, exists, err := s.deps.DB.Session(startCtx, ws.ID)
+	if err != nil {
+		fields["error"] = err.Error()
+		log.Error("daemon.boot.bring_up", "a workspace's session record could not be read; it is not brought up", fields)
+		return bringUpFailed
+	}
+	if exists && session.Hibernated() {
+		log.Debug("daemon.boot.bring_up", "a hibernated workspace is left asleep", fields)
+		return bringUpHibernated
+	}
+	if err := s.deps.StartSession(startCtx, ws.ID); err != nil {
+		fields["error"] = err.Error()
+		// A START THIS DAEMON STOOD THE SHIM DOWN UNDER IS NOT A FAILED
+		// BRING-UP. The exit's drain force-stops every workspace session,
+		// and a start still in flight when it does comes back
+		// `unavailable: unexpected EOF` from a shim the same process just
+		// killed. It is the ordinary shape of an exit landing inside the
+		// bring-up, and it is counted apart from the workspaces that genuinely
+		// would not start, so the summary's `failed` still means what it
+		// says. MEASURED: realtest run 2026-09-13T16:20:34 recorded it as
+		// an ERROR on three consecutive daemon generations.
+		if errors.Is(err, shimclient.ErrStandDownOrdered) {
+			log.Debug("daemon.boot.bring_up", "an open workspace's start ended in a stand-down this daemon ordered", fields)
+			return bringUpStoodDown
+		}
+		log.Error("daemon.boot.bring_up", "an open workspace's session did not come up; the boot goes on", fields)
+		return bringUpFailed
+	}
+	log.Debug("daemon.boot.bring_up", "an open workspace's session was started", fields)
+	return bringUpStarted
 }
 
 // awaitStartingSurvivor answers whether a shim a PREVIOUS daemon spawned for
