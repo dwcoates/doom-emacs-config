@@ -764,6 +764,20 @@ func (f *Fleet) noteConversationAbandoned(ctx context.Context, log dlog.Logger, 
 	}
 }
 
+// MarkUnserved states, on every session view, that this daemon serves no
+// session for ws: its link is dead and never connected. It is the boot's
+// answer for a workspace whose kernel lock or socket could not tell whether a
+// survivor owns it — the daemon neither adopts nor spawns there, and without
+// a link state its roster row would stay `pending` forever.
+func (f *Fleet) MarkUnserved(ws ids.WorkspaceID) {
+	f.deps.Log.Global().Info(opBringUp, "this daemon serves no session for an undetermined workspace; its views say so", dlog.Context{
+		dlog.KeyWorkspaceID: string(ws),
+	})
+	f.deps.Sinks.Footer.OnLink(ws, shimclient.LinkDead)
+	f.deps.Sinks.Topbar.OnLink(ws, shimclient.LinkDead)
+	f.deps.Sinks.Sidebar.OnLink(ws, shimclient.LinkDead)
+}
+
 // Start brings a workspace's session up: the mount IS the revival.
 //
 // The order is what the rulings fix:
