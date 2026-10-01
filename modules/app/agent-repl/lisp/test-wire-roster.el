@@ -278,12 +278,12 @@ reserved."
                   #'agent-repl-wire-decode-roster-row-when "{}")
                  nil)))
 
-(ert-deftest agent-repl-test-wire-roster-when-last-selected-carries-its-instant ()
-  "The wire carries only the instant; the client ticks the relative age."
-  (should (equal (agent-repl-test-wire-roster--decode
+(ert-deftest agent-repl-test-wire-roster-when-refuses-the-retired-last-selected-arm ()
+  "`last_selected' is retired and reserved in `RosterRowWhen': it is an unknown field."
+  (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-roster-row-when
                   "{\"lastSelected\":{\"atMs\":\"1756400000000\"}}")
-                 '(:arm :last-selected :value (:at-ms 1756400000000)))))
+                 '("RosterRowWhen" lastSelected "unknown field"))))
 
 (ert-deftest agent-repl-test-wire-roster-when-active-carries-its-instant ()
   "Regression: the daemon added a `active' (last-activity) arm to the when
@@ -312,7 +312,7 @@ WatchWorkspaceRoster push and every tab falls back to a stale blue status."
   "The daemon chooses ONE value for the column; two is a breach."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-roster-row-when
-                  "{\"lastSelected\":{\"atMs\":\"1\"},\"merged\":{\"atMs\":\"2\"}}")
+                  "{\"active\":{\"atMs\":\"1\"},\"merged\":{\"atMs\":\"2\"}}")
                  '("RosterRowWhen" shown "oneof has more than one arm set"))))
 
 (ert-deftest agent-repl-test-wire-roster-row-without-when-is-a-breach ()

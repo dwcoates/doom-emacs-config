@@ -282,7 +282,7 @@ describe("mounting the rail", () => {
                 rows: [
                   row({
                     id: "ws-1",
-                    when: { case: "lastSelected", value: { atMs: BigInt(NOW) } },
+                    when: { case: "active", value: { atMs: BigInt(NOW) } },
                   }),
                 ],
               }),

@@ -180,33 +180,38 @@ describe("the when-column", () => {
     expect(drawn.querySelector(".when")?.textContent).toBe("");
   });
 
-  it("states the arm the daemon chose for a last selection", () => {
-    const drawn = drawRosterRow(
-      row({ id: "ws-1", when: { case: "lastSelected", value: { atMs: BigInt(NOW - 180_000) } } }),
-      sidebarContext(),
-      "R",
-    );
-    expect(drawn.querySelector(".when")?.getAttribute("data-when")).toBe("lastSelected");
-  });
-
-  it("draws a last selection as a relative age", () => {
-    const drawn = drawRosterRow(
-      row({ id: "ws-1", when: { case: "lastSelected", value: { atMs: BigInt(NOW - 180_000) } } }),
-      sidebarContext(),
-      "R",
-    );
-    expect(drawn.querySelector(".when")?.textContent).toBe("3m");
-  });
-
-  it("reads the nearest second when a tick samples just short of one", () => {
+  it("reads the nearest second when an activity age is sampled just short of one", () => {
     // Arrange + Act: the stamp does not share the shared ticker's phase.
     const drawn = drawRosterRow(
-      row({ id: "ws-1", when: { case: "lastSelected", value: { atMs: BigInt(NOW - 4920) } } }),
+      row({ id: "ws-1", when: { case: "active", value: { atMs: BigInt(NOW - 4920) } } }),
       sidebarContext(),
       "R",
     );
     // Assert: five real seconds ago reads 5s, not the lagging 4s.
     expect(drawn.querySelector(".when")?.textContent).toBe("5s");
+  });
+
+  it("ticks an activity age off the SHARED clock", () => {
+    const ticker = fakeTicker();
+    const sc = sidebarContext(appContext({}, ticker));
+    const drawn = drawRosterRow(
+      row({ id: "ws-1", when: { case: "active", value: { atMs: BigInt(NOW - 60_000) } } }),
+      sc,
+      "R",
+    );
+    ticker.tick(NOW + 120_000);
+    expect(drawn.querySelector(".when")?.textContent).toBe("3m");
+  });
+
+  it("registers an activity age's tick as a teardown the next push runs", () => {
+    const ticker = fakeTicker();
+    const sc = sidebarContext(appContext({}, ticker));
+    drawRosterRow(
+      row({ id: "ws-1", when: { case: "active", value: { atMs: BigInt(NOW) } } }),
+      sc,
+      "R",
+    );
+    expect(sc.disposers.length).toBe(1);
   });
 
   it("states the arm the daemon chose for last activity", () => {
@@ -245,28 +250,6 @@ describe("the when-column", () => {
     expect(drawn.querySelector(".when")?.textContent).toBe("merged 1h");
   });
 
-  it("ticks the age off the SHARED clock", () => {
-    const ticker = fakeTicker();
-    const sc = sidebarContext(appContext({}, ticker));
-    const drawn = drawRosterRow(
-      row({ id: "ws-1", when: { case: "lastSelected", value: { atMs: BigInt(NOW - 60_000) } } }),
-      sc,
-      "R",
-    );
-    ticker.tick(NOW + 120_000);
-    expect(drawn.querySelector(".when")?.textContent).toBe("3m");
-  });
-
-  it("registers its tick as a teardown the next push runs", () => {
-    const ticker = fakeTicker();
-    const sc = sidebarContext(appContext({}, ticker));
-    drawRosterRow(
-      row({ id: "ws-1", when: { case: "lastSelected", value: { atMs: BigInt(NOW) } } }),
-      sc,
-      "R",
-    );
-    expect(sc.disposers.length).toBe(1);
-  });
 });
 
 describe("the detail panel", () => {

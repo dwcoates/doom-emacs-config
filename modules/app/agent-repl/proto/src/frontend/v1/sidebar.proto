@@ -500,26 +500,20 @@ message RosterRowCurrent {
 // CREATED (a registered workspace always has a creation time). The client
 // renders whichever arm arrives and applies no precedence of its own.
 //
-// `last_selected` (field 1) is RETIRED: the column no longer shows
-// viewing-recency, because it reset on every SelectWorkspace and read as a
-// broken clock. It is kept in the oneof for wire compatibility — an older
-// daemon may still emit it — but this build's daemon never does. An UNSET
+// `last_selected` (field 1) is RETIRED and reserved: the column no longer
+// shows viewing-recency, because it reset on every SelectWorkspace and read
+// as a broken clock (2026-09-14), and nothing has produced it since. The
+// selection instant the roster orders by is RosterRow.last_selected. An UNSET
 // oneof draws an empty column; the daemon leaves it unset only when there is
 // genuinely no instant to show.
 message RosterRowWhen {
+  reserved 1;
+  reserved "last_selected";
   oneof shown {
-    RosterRowWhenLastSelected last_selected = 1;
     RosterRowWhenMerged merged = 2;
     RosterRowWhenActive active = 3;
     RosterRowWhenCreated created = 4;
   }
-}
-
-// When the user last selected the workspace, in epoch MILLISECONDS. RETIRED as
-// the when-column's source (see RosterRowWhen): it timed viewing-recency, not
-// activity. LastSelectedAt itself lives on for ordering and attention-clear.
-message RosterRowWhenLastSelected {
-  int64 at_ms = 1;
 }
 
 // When the workspace's merge settled, in epoch MILLISECONDS.

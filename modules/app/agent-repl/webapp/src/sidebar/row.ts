@@ -17,8 +17,8 @@
  * user picked, and the roster's new `current` arrives on the stream.
  *
  * WHAT TICKS AND WHAT DOES NOT. Every when-column arm ships an INSTANT
- * (`active` = last activity, `created` = the never-active fallback, `merged`,
- * and the retired `last_selected`), so the age beside a row is animated here
+ * (`active` = last activity, `created` = the never-active fallback, and
+ * `merged`), so the age beside a row is animated here
  * off the shared ticker — never a `setInterval` of this module's own. An unset
  * `shown` oneof means there is nothing to show: the column is empty, not
  * "0ms ago". The column reflects last ACTIVITY, never last VIEWING, so it does
@@ -38,7 +38,6 @@ import type {
   RosterRowWhen,
   RosterRowWhenActive,
   RosterRowWhenCreated,
-  RosterRowWhenLastSelected,
   RosterRowWhenMerged,
   RosterRowReviving,
   RosterRowViewed,
@@ -348,18 +347,6 @@ export function drawRosterRowWhen(
         (age) => age,
       );
       return when;
-    case "lastSelected":
-      // RETIRED: this build's daemon never sends it (the when-column shows last
-      // activity, not last viewing). Kept for an older daemon during rollout —
-      // rendered like `active`, a bare age — so version skew never trips the
-      // unreachable-arm guard below.
-      tickAge(
-        when,
-        sc,
-        drawRosterRowWhenLastSelected(shown.value, `${path}.last_selected`),
-        (age) => age,
-      );
-      return when;
     case "merged":
       tickAge(when, sc, drawRosterRowWhenMerged(shown.value, `${path}.merged`), (age) =>
         `merged ${age}`,
@@ -379,14 +366,6 @@ export function drawRosterRowWhenActive(u: RosterRowWhenActive, path: string): n
 
 /** When the workspace was created — the never-active fallback — as an instant. */
 export function drawRosterRowWhenCreated(u: RosterRowWhenCreated, path: string): number {
-  return msOf(u.atMs, `${path}.at_ms`);
-}
-
-/** When the user last selected the workspace, as an epoch instant. RETIRED. */
-export function drawRosterRowWhenLastSelected(
-  u: RosterRowWhenLastSelected,
-  path: string,
-): number {
   return msOf(u.atMs, `${path}.at_ms`);
 }
 
