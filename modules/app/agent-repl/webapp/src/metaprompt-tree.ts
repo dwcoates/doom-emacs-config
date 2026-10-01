@@ -620,12 +620,30 @@ function atomSubwords(a: Atom): Subword[] {
 
 /**
  * tokenize: split branch text into the atoms a wrap may be placed between.
- * Whitespace inside an inline element does not separate atoms, so an element
- * stays whole; whitespace outside any element does.
+ * Whitespace inside an inline element, or inside a CLOSED inline-code span,
+ * does not separate atoms, so the element stays whole; whitespace outside any
+ * element does.
+ *
+ * A BACKTICK THAT OPENS NO SPAN IS PROSE. An unmatched backtick is a literal
+ * character in markdown, so a body whose last span never closes is tokenized
+ * with no span at all: kept open, it would swallow every space after it into
+ * one atom no line could wrap.
  */
 function tokenize(raw: string): Atom[] {
+  const spans = tokenizeWith(raw, true);
+  return spans.balanced ? spans.atoms : tokenizeWith(raw, false).atoms;
+}
+
+/** tokenizeWith is tokenize, honoring inline-code spans or not. */
+function tokenizeWith(raw: string, honorCode: boolean): { atoms: Atom[]; balanced: boolean } {
   const atoms: Atom[] = [];
   const stack: string[] = [];
+  // INLINE CODE KEEPS ITS SPACES. A whitespace run inside an open backtick
+  // span is the span's own content, so it stays in the atom rather than
+  // splitting it: split, the packer rejoined the pieces with ONE space and
+  // `a    b` drew as `a b`. A span wider than the whole field is still broken
+  // into subwords (atomSubwords), where its breaks fall.
+  let code: CodeState = CODE_CLOSED;
   let current: Atom = { runs: [] };
   const flush = (): void => {
     if (current.runs.length > 0) {
@@ -644,12 +662,16 @@ function tokenize(raw: string): Atom[] {
       continue;
     }
     for (const segment of splitWhitespace(r.raw)) {
-      if (isSpace(segment)) flush();
-      else current.runs.push({ raw: segment, isTag: false });
+      if (isSpace(segment) && !(honorCode && code.open)) {
+        flush();
+        continue;
+      }
+      current.runs.push({ raw: segment, isTag: false });
+      code = scanCode(segment, code);
     }
   }
   flush();
-  return atoms;
+  return { atoms, balanced: !code.open };
 }
 
 // ---------------------------------------------------------------------------
