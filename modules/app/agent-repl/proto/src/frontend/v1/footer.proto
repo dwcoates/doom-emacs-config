@@ -1089,6 +1089,15 @@ message FooterStatusBlocked {
     // be perfectly healthy; what it cannot get is the daemon's service. See
     // THE FAULT PARTITION above.
     FooterSubStatusBlockedDaemonImpaired daemon_impaired = 7;
+    // The vendor is retrying a call that failed mid-turn — the API is
+    // unreachable, timing out, or answering with a retryable error — so the
+    // turn cannot advance until a retried call is answered. Distinct from
+    // `vendor_error`, which is the vendor REFUSING requests: a retry is the
+    // vendor still trying. It stands from the failure the vendor reports
+    // until the first successful response of the retried agent, the turn's
+    // end, or a new turn opening (a prompt sent during the retry opens one,
+    // which resolves `working`). The activity cell carries the retry line.
+    FooterSubStatusBlockedApiRetrying api_retrying = 8;
   }
   // The activity cell. ALWAYS SET: the enduring tier guarantees the cell has
   // something to draw under every status.
@@ -1104,6 +1113,9 @@ message FooterSubStatusBlockedVendorError {}
 message FooterSubStatusBlockedBilling {}
 // The vendor query died and is not yet restarted.
 message FooterSubStatusBlockedQueryDied {}
+// The vendor is retrying a failed mid-turn call; the salient `retrying` line
+// says which attempt is next and when it starts.
+message FooterSubStatusBlockedApiRetrying {}
 // The activity cell while blocked: the salient line, or the transient over
 // the enduring line. A blocked step with no line of its own (usage limit,
 // billing, a vendor error) draws unpinned, where the enduring usage figures
@@ -1150,6 +1162,11 @@ message FooterStatusBlockedSalient {
     // or a switch to another session. STATUS-INDEPENDENT: every status arm's
     // salient oneof carries it.
     FooterStatusActivityContextBudget context_budget = 8;
+    // THE RETRY LINE while `api_retrying` stands: the next attempt's number,
+    // the vendor's status verbatim, and — when the vendor stated a schedule —
+    // the countdown to the next attempt and the last attempt it will make.
+    // Set exactly when the substatus is `api_retrying`.
+    FooterStatusActivityRetrying retrying = 9;
   }
   // Tag 6 (`rate_limit`) is RETIRED: the enduring usage line carries
   // the vendor's allowance figures (owner ruling, 2026-10-01).
