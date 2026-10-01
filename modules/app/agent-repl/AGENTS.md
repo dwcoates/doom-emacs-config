@@ -771,6 +771,14 @@ resolves the defect, then say what you would have changed and why, and leave it
 for the owner to rule on. Restyling that arrives attached to a bug fix is hard
 to review and hard to reverse, which is why it waits.
 
+## User controls land with the user guide
+
+Any new or changed user control (a key, a button, a click, a command the
+user drives) lands in the same change as its entry in `docs/USER-GUIDE.md`.
+That covers what the control does, its confirmation if any, and its limits.
+The guide is how the owner learns a control exists, and a control missing
+from it goes unused. Controls that predate the guide are not backfilled.
+
 ## UI changes require an explicit specification
 
 Owner ruling, standing. UI/visual changes — layout, colors, sizes, borders,
