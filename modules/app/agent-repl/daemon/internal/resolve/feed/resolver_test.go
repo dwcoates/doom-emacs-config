@@ -395,6 +395,27 @@ func (h *harness) rows(feed feedid.Feed) []*frontendv1.FeedRow {
 	return feedRows(h.resolver, feed)
 }
 
+// findRow answers the row ID on FEED, and whether the feed holds it.
+func (h *harness) findRow(feed feedid.Feed, id string) (*frontendv1.FeedRow, bool) {
+	h.t.Helper()
+	for _, row := range h.rows(feed) {
+		if row.GetId().GetValue() == id {
+			return row, true
+		}
+	}
+	return nil, false
+}
+
+// rowByID answers the row ID on FEED, failing the test when the feed lacks it.
+func (h *harness) rowByID(feed feedid.Feed, id string) *frontendv1.FeedRow {
+	h.t.Helper()
+	row, ok := h.findRow(feed, id)
+	if !ok {
+		h.t.Fatalf("row %s is not in the feed", id)
+	}
+	return row
+}
+
 // feedRows answers one feed's rows in order, for any resolver a test holds.
 func feedRows(r *resolver, feed feedid.Feed) []*frontendv1.FeedRow {
 	r.mu.Lock()

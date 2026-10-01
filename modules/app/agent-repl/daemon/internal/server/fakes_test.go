@@ -792,6 +792,12 @@ type fakeFeed struct {
 	finals   []*frontendv1.FeedId
 	prompts  []*frontendv1.FeedId
 	markdown map[string]string
+	// unreadable names rows SelectableMarkdown misses even though they are
+	// finals or rollback prompts: the resolver defect a selection must refuse.
+	unreadable map[string]bool
+	// promptRows names selectable rows that are prompts but not rollback
+	// prompts (an agent prompt, a user prompt a rollback cannot reach).
+	promptRows map[string]bool
 
 	// rollbackTarget and rollbackTargetOK are what RollbackTarget answers —
 	// one scripted answer suffices, since no rollback test asks it about more
@@ -819,9 +825,23 @@ func (f *fakeFeed) RollbackPrompts(ids.WorkspaceID) []*frontendv1.FeedId {
 	return f.prompts
 }
 
-func (f *fakeFeed) ResponseMarkdown(_ ids.WorkspaceID, id *frontendv1.FeedId) (string, bool) {
-	md, ok := f.markdown[id.GetValue()]
-	return md, ok
+// SelectableMarkdown answers a row's scripted text. Like the resolver, it
+// treats every final response and rollback prompt as selectable (they are
+// landed root-feed rows by construction), answering "text of <row>" for one
+// with no scripted text; unreadable breaks that guarantee for a row, so a test
+// can drive the defect path.
+func (f *fakeFeed) SelectableText(_ ids.WorkspaceID, id *frontendv1.FeedId) (feed.SelectableText, bool) {
+	prompt := indexOfFeedID(f.prompts, id) >= 0 || f.promptRows[id.GetValue()]
+	if f.unreadable[id.GetValue()] {
+		return feed.SelectableText{}, false
+	}
+	if md, ok := f.markdown[id.GetValue()]; ok {
+		return feed.SelectableText{Markdown: md, Prompt: prompt}, true
+	}
+	if indexOfFeedID(f.finals, id) >= 0 || prompt {
+		return feed.SelectableText{Markdown: "text of " + id.GetValue(), Prompt: prompt}, true
+	}
+	return feed.SelectableText{}, false
 }
 
 // RollbackTarget records the row it was asked about and answers the seeded

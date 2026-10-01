@@ -116,10 +116,12 @@ func TestSubmitPromptRefusesAnUnresolvableReference(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	h.Feed.finals = feedIDs("resp-older", "resp-gone")
-	h.Feed.markdown = map[string]string{} // resolves nothing
+	// The resolver could read the row when it was selected, and no longer can.
+	h.Feed.unreadable = map[string]bool{}
 	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(newer))); err != nil {
 		t.Fatalf("select the response: %v", err)
 	}
+	h.Feed.unreadable["resp-gone"] = true
 
 	// Act.
 	_, err := h.Client.SubmitPrompt(context.Background(), connect.NewRequest(submitRequest()))
@@ -182,11 +184,12 @@ func TestSubmitPromptEndsTheSelectionAfterConsumingTheReference(t *testing.T) {
 	}
 }
 
-// TestSubmitPromptWithASelectedPromptSendsUnchangedAndEndsIt pins that a
-// SELECTED PROMPT (rather than a response) is not prepended to anything —
-// only a selected response changes what is sent — and that an accepted submit
-// still ends it, exactly as it ends a selected response.
-func TestSubmitPromptWithASelectedPromptSendsUnchangedAndEndsIt(t *testing.T) {
+// TestSubmitPromptWithASelectedPromptQuotesItAsAPromptAndEndsIt pins that a
+// SELECTED PROMPT is a reply target like every selected bubble (owner ruling,
+// 2026-10-01): its text is prepended under the prompt preamble, since it was
+// not the agent's response, and an accepted submit ends it, exactly as it ends
+// a selected response.
+func TestSubmitPromptWithASelectedPromptQuotesItAsAPromptAndEndsIt(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	h.Feed.prompts = feedIDs("p1", "p2")
@@ -206,9 +209,10 @@ func TestSubmitPromptWithASelectedPromptSendsUnchangedAndEndsIt(t *testing.T) {
 		t.Fatalf("SubmitPrompt: %v", err)
 	}
 
-	// Assert: sent unchanged.
-	if got := promptText(h.Prompts.lastSaid); got != "unchanged message" {
-		t.Fatalf("delivered prompt = %q, want the user's words unchanged", got)
+	// Assert: quoted as a prompt.
+	want := "⟢ Replying to an earlier prompt in this conversation:\n\ntext of p2\n\n⟢ My message:\n\nunchanged message"
+	if got := promptText(h.Prompts.lastSaid); got != want {
+		t.Fatalf("delivered prompt = %q, want %q", got, want)
 	}
 	// Assert: the prompt selection ended (NEWER restarts at the most recent
 	// rather than wrapping past it).

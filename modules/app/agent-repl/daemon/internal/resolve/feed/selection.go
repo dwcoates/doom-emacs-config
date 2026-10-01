@@ -1,19 +1,21 @@
 package feed
 
 import (
+	"strings"
+
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/feedid"
 	"claude-repld/internal/ids"
 )
 
-// The feed resolver's read side for reply-to-a-past-response mode. The resolver
-// is the one place that knows which rows wear the GREEN final-answer border —
-// it draws them — so it owns the selectable set and the copy of each row's
-// markdown. The SELECTION CURSOR itself (which of these is selected, and the
-// push to the webapp) is the server's, per the plan's "the daemon owns the
-// selection state": this package answers only what the set is and what each
-// row said.
+// The feed resolver's read side for bubble selection (reply-to mode). The
+// resolver draws every row, so it owns which rows are SELECTABLE (stamped on the
+// row itself, FeedRow.selectable), what each selectable row SAYS, and the
+// ordered FINAL responses the composer's `C-p`/`C-n` walk. The SELECTION
+// CURSOR itself (which row is selected, and its pushes) is the server's: this
+// package answers only what can be selected and what it said.
 
 // recordFinalAnswer appends one concluded turn's answering row to the
 // workspace's ordered selectable set and copies its settled markdown. It is
@@ -131,17 +133,99 @@ func (r *resolver) FinalResponses(ws ids.WorkspaceID) []*frontendv1.FeedId {
 	return out
 }
 
-// ResponseMarkdown answers the settled markdown of one selectable final
-// response, and whether the daemon deems the feedid selectable at all. A miss
-// (false) is a feedid that names no final-response row of this workspace — the
-// caller's to refuse, never to paper over with an empty prefix.
-func (r *resolver) ResponseMarkdown(ws ids.WorkspaceID, id *frontendv1.FeedId) (string, bool) {
+// SelectableText is one selectable row's text and which side of the
+// conversation said it.
+type SelectableText struct {
+	// Markdown is the row's text as markdown source, verbatim.
+	Markdown string
+	// Prompt is true for a prompt (a user's, or one agent's to another) and
+	// false for an agent's response bubble, so a reply can say which it quotes.
+	Prompt bool
+}
+
+// SelectableText answers the text of one selectable root-feed row as
+// markdown, and whether the daemon deems the feedid selectable at all. It reads
+// the row exactly as it was last published, so what a reply prepends and what
+// the composer searches is what the reader saw. A miss (false) is a feedid that
+// names no selectable row of this workspace's root feed — the caller's to
+// refuse, never to paper over with an empty text.
+func (r *resolver) SelectableText(ws ids.WorkspaceID, id *frontendv1.FeedId) (SelectableText, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s, ok := r.workspaces[ws]
 	if !ok {
-		return "", false
+		return SelectableText{}, false
 	}
-	md, ok := s.answerMarkdown[id.GetValue()]
-	return md, ok
+	root, ok := s.feeds[r.feedKey(ws, feedid.Feed{Root: true})]
+	if !ok {
+		return SelectableText{}, false
+	}
+	row, ok := root.rows[id.GetValue()]
+	if !ok || row.GetSelectable() == nil {
+		return SelectableText{}, false
+	}
+	markdown, ok := selectableMarkdown(row)
+	return SelectableText{Markdown: markdown, Prompt: row.GetUserPrompt() != nil || row.GetAgentPrompt() != nil}, ok
+}
+
+// selectableMarkdown is THE ONE RULE for which rows the reader can select, and
+// what a selected row says. A row is selectable when it is a prompt (a user's
+// or another agent's) or a LANDED response bubble (final, interim or
+// thinking); a response still arriving, a broken one and a vendor notice are
+// not, and neither is any other kind. Stamping (stampSelectable) and reading
+// (SelectableText) both go through it, so a row is selectable exactly when
+// its text can be read.
+func selectableMarkdown(row *frontendv1.FeedRow) (string, bool) {
+	switch {
+	case row.GetUserPrompt() != nil:
+		return joinPromptText(userPromptTexts(row.GetUserPrompt())), true
+	case row.GetAgentPrompt() != nil:
+		return joinPromptText(agentPromptTexts(row.GetAgentPrompt())), true
+	case row.GetActivity().GetResponse() != nil:
+		resp := row.GetActivity().GetResponse()
+		if resp.GetNotice() != nil || resp.GetSuccess() == nil {
+			return "", false
+		}
+		return resp.GetSuccess().GetProse().GetMarkdown(), true
+	}
+	return "", false
+}
+
+// stampSelectable states FeedRow.selectable on a row about to be published to
+// FEED: present exactly when the row is on the ROOT feed and selectableMarkdown
+// admits it, absent otherwise (a sub-feed's rows are never selectable).
+func stampSelectable(feed feedid.Feed, row *frontendv1.FeedRow) {
+	if _, ok := selectableMarkdown(row); ok && feed.Root {
+		row.Selectable = &frontendv1.FeedRowSelectable{}
+		return
+	}
+	row.Selectable = nil
+}
+
+// userPromptTexts answers a user prompt's text blocks, in order.
+func userPromptTexts(prompt *frontendv1.FeedUserPrompt) []string {
+	var out []string
+	for _, block := range prompt.GetSuccess().GetBody().GetBlocks() {
+		if text := block.GetText(); text != nil {
+			out = append(out, text.GetText())
+		}
+	}
+	return out
+}
+
+// agentPromptTexts answers an agent prompt's text blocks, in order.
+func agentPromptTexts(prompt *frontendv1.FeedAgentPrompt) []string {
+	var out []string
+	for _, block := range prompt.GetBody().GetBlocks() {
+		if text := block.GetText(); text != nil {
+			out = append(out, text.GetText())
+		}
+	}
+	return out
+}
+
+// joinPromptText joins a prompt's text blocks with a blank line between each,
+// the markdown paragraph break a reader sees between them.
+func joinPromptText(texts []string) string {
+	return strings.Join(texts, "\n\n")
 }
