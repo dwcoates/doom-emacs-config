@@ -13,9 +13,9 @@ Asks the merge queue, from this workspace, to land a finished branch on master. 
 
 | Argument | Behaviour |
 |---|---|
-| `own` | Merge this workspace's own branch; this workspace closes once it lands. |
-| `own keep-open` | Merge this workspace's own branch and keep this workspace open once it lands. |
-| `workspace <worktree-dir>` | Merge ANOTHER workspace's branch (for example a one-shot a subagent ran in); that workspace closes once it lands. |
+| `own` | Merge the branch checked out in this workspace's worktree now; this workspace closes once it lands. |
+| `own keep-open` | Merge the branch checked out in this workspace's worktree now, and keep this workspace open once it lands. |
+| `workspace <worktree-dir>` | Merge the branch checked out in ANOTHER workspace's worktree (for example a one-shot a subagent ran in); that workspace closes once it lands. |
 | `branch <branch-name>` | Merge a branch that is no workspace (a subagent's `Agent`-tool branch). |
 | `pr-merged` | This workspace's branch already merged upstream; update master from upstream and close this workspace. |
 | `dequeue own` | Take this workspace's own merge off the queue. |
@@ -27,6 +27,7 @@ Asks the merge queue, from this workspace, to land a finished branch on master. 
 
 0. Confirm the work is ready (merge arguments only; skip to step 1 for `dequeue`, `pause` and `resume`).
   - Every change is committed, and the applicable tests passed before each commit.
+  - The branch to land is the one checked out in the worktree being merged; a worktree with no branch checked out is refused.
   - **Why this lives here**: the queue lands exactly what is committed, and a red test gate comes back as a repair prompt in this session.
 
 1. Dispatch on the argument.
@@ -99,5 +100,6 @@ Asks the merge queue, from this workspace, to land a finished branch on master. 
 - **CRITICAL: NEVER merge, commit, cherry-pick, rebase, reset or push onto master by hand.** The queue is the only path into master, and any other path is refused.
 - **CRITICAL: On a failed or refused merge, report and stop.** Never retry by hand, never work around the queue.
 - **IMPORTANT NOTE: A subagent's branch goes through `branch`, the same sequence.** Never fold it into master yourself.
+- **CRITICAL: NEVER request a workspace merge for a branch that is not checked out in that worktree.** Check the branch out there first, or use `branch <branch-name>` for a branch that is no workspace.
 - **CRITICAL: Removing a merge from the queue, or pausing or resuming the queue, goes through this skill, NEVER by hand.**
 - **CRITICAL NOTE: Do not self-remediate a `run.sh` failure or read its internals.** React only to the documented exit codes.
