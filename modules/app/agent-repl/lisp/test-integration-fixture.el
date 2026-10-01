@@ -226,5 +226,46 @@ the fake's own answer and not an echo of the request."
       ;; Assert.
       (should (equal (car answer) 400)))))
 
+;;;; ---- The prebuilt fake ----
+
+(ert-deftest agent-repl-itest-fixture-prebuilt-unset-defers-to-the-build ()
+  "No prebuilt path answers nil, so `agent-repl-itest--ensure-binary' builds."
+  ;; Arrange.
+  (let ((agent-repl-itest--binary nil))
+    ;; Act / Assert.
+    (should-not (agent-repl-itest--prebuilt-binary nil))
+    (should-not (agent-repl-itest--prebuilt-binary ""))
+    (should-not agent-repl-itest--binary)))
+
+(ert-deftest agent-repl-itest-fixture-prebuilt-executable-is-adopted ()
+  "An executable prebuilt path becomes the process's fake daemon."
+  ;; Arrange.
+  (let ((agent-repl-itest--binary nil)
+        (path (make-temp-file "agent-repl-itest-prebuilt-")))
+    (unwind-protect
+        (progn
+          (set-file-modes path #o755)
+          ;; Act.
+          (let ((answer (agent-repl-itest--prebuilt-binary path)))
+            ;; Assert.
+            (should (equal answer path))
+            (should (equal agent-repl-itest--binary path))))
+      (delete-file path))))
+
+(ert-deftest agent-repl-itest-fixture-prebuilt-non-executable-signals ()
+  "A prebuilt path that names no executable fails loudly and adopts nothing."
+  ;; Arrange.
+  (let ((agent-repl-itest--binary nil)
+        (path (make-temp-file "agent-repl-itest-prebuilt-")))
+    (unwind-protect
+        (progn
+          (set-file-modes path #o644)
+          ;; Act.
+          (let ((err (should-error (agent-repl-itest--prebuilt-binary path))))
+            ;; Assert.
+            (should (string-match-p "not an executable fake daemon" (cadr err)))
+            (should-not agent-repl-itest--binary)))
+      (delete-file path))))
+
 (provide 'test-integration-fixture)
 ;;; test-integration-fixture.el ends here
