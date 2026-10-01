@@ -8,12 +8,14 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/gitclient"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/wsm"
 )
 
 // TestSameDirExcludesASiblingWorktree covers the self-reload's extra condition:
@@ -58,7 +60,7 @@ func TestPromptTabCannotPark(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange: a settled prompt tab.
-			tab := promptTab(tc.kind, nil, 1000, "")
+			tab := promptTab(tc.kind, tabRound{kind: tc.kind, n: 1, started: time.UnixMilli(500)}.settled(1000, ""))
 
 			// Act.
 			kind := tabKindOf(tab)
@@ -84,7 +86,7 @@ func TestPromptTabCannotPark(t *testing.T) {
 // the daemon's one-line account, with the detail in the tab's own content.
 func TestPromptTabCarriesItsFailureSummary(t *testing.T) {
 	// Arrange: a failed pre-prompt tab.
-	tab := promptTab(TabPrePrompt, nil, 1000, "the before-merge prompt did not complete")
+	tab := promptTab(TabPrePrompt, tabRound{kind: TabPrePrompt, n: 1, started: time.UnixMilli(500)}.settled(1000, "the before-merge prompt did not complete"))
 
 	// Act.
 	settled := tab.GetPrePrompt().GetSettled()
@@ -372,3 +374,158 @@ func TestAnAdmittedMergeWaitsForTheWorkspaceToFallFree(t *testing.T) {
 // 2026-09-28, prompt-bubble-height: the agent asked for its merge from inside
 // its own turn, and the admission's displacement ended that very turn ("the
 // turn was interrupted") and marked it for resubmission.
+
+// ledgeredRun is a run of the harness workspace whose lease has an open
+// ledger, so its openTab and closeTab record intervals as a real run's do.
+func ledgeredRun(t *testing.T, h *harness) *run {
+	t.Helper()
+	lease := wsm.Lease{ID: "lease-ledgered"}
+	if err := h.db.OpenMergeLedger(context.Background(), theWorkspace, lease.ID); err != nil {
+		t.Fatalf("opening the ledger: %v", err)
+	}
+	return &run{
+		o: h.o, ws: theWorkspace, repo: h.repoKey(), lease: lease,
+		startedMS:  h.clock().UnixMilli(),
+		rounds:     map[string]int{},
+		openRounds: map[string]tabRound{},
+	}
+}
+
+// ledgerIntervals answers every interval the harness workspace's ledger holds.
+func ledgerIntervals(h *harness) []wsm.TabInterval {
+	entries, _ := h.db.MergeLedger(context.Background(), theWorkspace)
+	var out []wsm.TabInterval
+	for _, entry := range entries {
+		out = append(out, entry.Intervals...)
+	}
+	return out
+}
+
+// TestATabRoundsLiveBadgeCarriesItsStart covers the live badge a round mints:
+// it ticks from the instant the round opened.
+func TestATabRoundsLiveBadgeCarriesItsStart(t *testing.T) {
+	// Arrange.
+	round := tabRound{kind: TabTests, n: 1, started: time.UnixMilli(1500)}
+
+	// Act.
+	state := round.live()
+
+	// Assert.
+	if state.settled || state.startedMS != 1500 {
+		t.Fatalf("the live badge is %+v, want live from 1500", state)
+	}
+}
+
+// TestATabRoundsSettledBadgeCarriesItsStartAndEnd covers the settled badge a
+// round mints: its fixed run time is its end less the instant it opened.
+func TestATabRoundsSettledBadgeCarriesItsStartAndEnd(t *testing.T) {
+	// Arrange.
+	round := tabRound{kind: TabTests, n: 1, started: time.UnixMilli(1500)}
+
+	// Act.
+	state := round.settled(9000, "it failed")
+
+	// Assert.
+	if !state.settled || state.startedMS != 1500 || state.endedMS != 9000 || state.failure != "it failed" {
+		t.Fatalf("the settled badge is %+v, want 1500..9000 failed", state)
+	}
+}
+
+// TestOpenTabStampsTheRoundWithItsLedgerStart covers the source of every tab's
+// start: the round openTab answers carries exactly the instant its ledger
+// interval recorded.
+func TestOpenTabStampsTheRoundWithItsLedgerStart(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	r := ledgeredRun(t, h)
+
+	// Act.
+	round := r.openTab(context.Background(), TabTests)
+
+	// Assert.
+	intervals := ledgerIntervals(h)
+	if len(intervals) != 1 || !intervals[0].StartedAt.Equal(round.started) || round.started.IsZero() {
+		t.Fatalf("the round began at %v and the ledger holds %+v, want one interval starting at the round's start", round.started, intervals)
+	}
+}
+
+// TestOpenTabMakesTheRoundTheActiveOne covers what the queue's front reads:
+// the round opened last, with its own start.
+func TestOpenTabMakesTheRoundTheActiveOne(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	r := ledgeredRun(t, h)
+	r.openTab(context.Background(), TabRebasing)
+
+	// Act.
+	tests := r.openTab(context.Background(), TabTests)
+
+	// Assert.
+	if got := r.activeRound(); got != tests {
+		t.Fatalf("the active round is %+v, want the tests round %+v", got, tests)
+	}
+}
+
+// TestCloseTabRecordsTheRoundsOwnStart covers the interval's close: it keeps
+// the start the round opened with, so the ledger's span and the tab's drawn
+// run time agree.
+func TestCloseTabRecordsTheRoundsOwnStart(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	r := ledgeredRun(t, h)
+	round := r.openTab(context.Background(), TabCommitting)
+
+	// Act.
+	r.closeTab(context.Background(), round, "succeeded")
+
+	// Assert.
+	intervals := ledgerIntervals(h)
+	closed := intervals[len(intervals)-1]
+	if closed.EndedAt == nil || !closed.StartedAt.Equal(round.started) {
+		t.Fatalf("the closing interval is %+v, want it ended and starting at %v", closed, round.started)
+	}
+}
+
+// TestEveryPublishedTabCarriesItsRoundsLedgerStart covers every call site at
+// once: across a run that rebases, fails its gate, fixes, tests again and
+// commits, each tab push -- live and settled alike -- ships the start its
+// round's ledger interval recorded.
+func TestEveryPublishedTabCarriesItsRoundsLedgerStart(t *testing.T) {
+	// Arrange: a gate that fails once and then passes.
+	h := newHarness(t)
+	h.emacsRepo()
+	h.landsCleanly("abc123def4567")
+	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
+	h.gateFails("daemon")
+	h.gatePasses("daemon")
+	enqueue(t, h)
+
+	// Act.
+	if err := h.admit(context.Background()); err != nil {
+		t.Fatalf("the merge failed: %v", err)
+	}
+
+	// Assert.
+	starts := map[string]int64{}
+	for _, interval := range ledgerIntervals(h) {
+		starts[roundKey(interval.Kind, interval.Round)] = interval.StartedAt.UnixMilli()
+	}
+	checked := 0
+	for _, row := range h.feed.rows {
+		tab := row.Row.GetMergeTab()
+		if tab == nil || tabKindOf(tab) == TabQueue {
+			continue
+		}
+		kind := tabKindOf(tab)
+		live, settled := tabBadgeOf(t, tab)
+		got := live.GetStartedAtMs() + settled.GetStartedAtMs()
+		want, ok := starts[roundKey(kind, int(tab.GetLabel().GetRound()))]
+		if !ok || got != want {
+			t.Fatalf("the %s round %d tab began at %d, want its ledger start %d", kind, tab.GetLabel().GetRound(), got, want)
+		}
+		checked++
+	}
+	if checked == 0 {
+		t.Fatal("the run published no tab to check")
+	}
+}
