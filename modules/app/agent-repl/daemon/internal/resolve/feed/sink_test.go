@@ -282,35 +282,15 @@ func TestASubagentHandbackIsNeverDrawnAsAToolCard(t *testing.T) {
 // activityRow is the root feed's row for one activity unit.
 func (h *harness) activityRow(unit string) *frontendv1.FeedRow {
 	h.t.Helper()
-	want := testEncode(feedid.Ref{
-		WS:   testWorkspace,
-		Feed: rootFeed(),
-		Row:  feedid.RowKey{Kind: feedid.KindActivity, ID: unit},
-	}).GetValue()
-	for _, row := range h.rows(rootFeed()) {
-		if row.GetId().GetValue() == want {
-			return row
-		}
-	}
-	h.t.Fatalf("no row for unit %q", unit)
-	return nil
+	return h.rowByID(rootFeed(), activityRowID(rootFeed(), unit))
 }
 
 // hasActivityRow reports whether the root feed still carries the activity row
 // for one unit — false once the row is retired.
 func (h *harness) hasActivityRow(unit string) bool {
 	h.t.Helper()
-	want := testEncode(feedid.Ref{
-		WS:   testWorkspace,
-		Feed: rootFeed(),
-		Row:  feedid.RowKey{Kind: feedid.KindActivity, ID: unit},
-	}).GetValue()
-	for _, row := range h.rows(rootFeed()) {
-		if row.GetId().GetValue() == want {
-			return true
-		}
-	}
-	return false
+	_, ok := h.findRow(rootFeed(), activityRowID(rootFeed(), unit))
+	return ok
 }
 
 // TestARowOwedByADeadTurnKeepsThatTurnsStampWhenItsTerminalLandsFirst is the
