@@ -25,7 +25,7 @@ func (h *harness) promptWith(turn string, origin conversationv1.PromptOrigin, bl
 		Agent:  mainAgent(),
 		Origin: origin,
 		Said:   &conversationv1.UserSaid{Content: &conversationv1.UserContent{Blocks: blocks}},
-	}, nil, noAddress())
+	}, nil)
 }
 
 // textBlock is one typed block.
@@ -204,7 +204,7 @@ func TestAnAgentAddressedPromptIsDrawnAtBothEnds(t *testing.T) {
 		Said: &conversationv1.UserSaid{Content: &conversationv1.UserContent{
 			Blocks: []*conversationv1.UserContentBlock{textBlock("also check the shim")},
 		}},
-	}, nil, noAddress())
+	}, nil)
 
 	// Assert: the outgoing send on the sender's feed…
 	var outgoing, delivered string
@@ -242,7 +242,7 @@ func TestAnAgentAddressedPromptCarriesTheSameBodyAtBothEnds(t *testing.T) {
 		Said: &conversationv1.UserSaid{Content: &conversationv1.UserContent{
 			Blocks: []*conversationv1.UserContentBlock{textBlock("also check the shim")},
 		}},
-	}, nil, noAddress())
+	}, nil)
 
 	// Assert: ONE component, both ends.
 	var senderBody, recipientBody string
@@ -279,7 +279,7 @@ func TestAPromptOfAnAddressedTurnStaysAUserPrompt(t *testing.T) {
 		Agent:  created,
 		Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR,
 		Said:   &conversationv1.UserSaid{Content: &conversationv1.UserContent{Blocks: []*conversationv1.UserContentBlock{textBlock("resolve it")}}},
-	}, nil, noAddress())
+	}, nil)
 
 	// Assert: the address wins — the row lands on the merge feed as a labelled
 	// user prompt rather than being split across two agent feeds.
@@ -453,11 +453,11 @@ func completed(unit string) *conversationv1.AgentSuccess {
 func TestAPromptRowWorksUntilItsTurnsTerminal(t *testing.T) {
 	interim := func(h *harness) {
 		h.resolver.OnActivity(testWorkspace, mainAgent(),
-			responseFrame("unit-1", &conversationv1.AgentResponseUpdate{}, nil), nil, nil, noAddress())
+			responseFrame("unit-1", &conversationv1.AgentResponseUpdate{}, nil), nil, nil)
 	}
 	answer := func(h *harness) {
 		h.resolver.OnActivity(testWorkspace, mainAgent(),
-			responseSuccessActivity("unit-2", "the answer"), nil, nil, noAddress())
+			responseSuccessActivity("unit-2", "the answer"), nil, nil)
 	}
 	cases := []struct {
 		name        string
@@ -736,7 +736,7 @@ func (h *harness) deliverFoldedPrompt(turn, into, text string) {
 		Said: &conversationv1.UserSaid{Content: &conversationv1.UserContent{
 			Blocks: []*conversationv1.UserContentBlock{textBlock(text)},
 		}},
-	}, nil, noAddress())
+	}, nil)
 }
 
 // promptRow is the user-prompt row keyed by TURN on the root feed.

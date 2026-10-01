@@ -143,7 +143,7 @@ func TestASubagentsOwnRowsLandOnItsSubFeed(t *testing.T) {
 
 	// Act: the subagent's own prose.
 	h.resolver.OnActivity(testWorkspace, created,
-		responseSuccessActivity("unit-9", "here is what I found"), nil, nil, noAddress())
+		responseSuccessActivity("unit-9", "here is what I found"), nil, nil)
 
 	// Assert: on the bubble's feed, never carried on the parent's row.
 	rows := h.rows(feedid.Feed{Agent: created})
@@ -325,7 +325,7 @@ func TestDetachingMovesTheSameBubbleIntoItsPlacementWrapper(t *testing.T) {
 				Requested: &conversationv1.DetachedCauseRequested{},
 			},
 		}},
-	}, nil, nil, noAddress())
+	}, nil, nil)
 
 	// Assert: ONE identity spans the move, and the drawing is unchanged.
 	after := h.bubbleRow("spawn-1", created)
@@ -390,7 +390,7 @@ func TestASubagentCreatedDetachedDrawsThroughTheWrapperAtOnce(t *testing.T) {
 				}},
 			},
 		}},
-	}, nil, nil, noAddress())
+	}, nil, nil)
 
 	// Assert.
 	rows := h.rows(rootFeed())
@@ -411,7 +411,7 @@ func TestACreatedMonitorsAnnouncementDrawsNoRowOfItsOwn(t *testing.T) {
 				Work: &conversationv1.DetachableWork_Monitor{Monitor: &conversationv1.AgentMonitor{}},
 			},
 		}},
-	}, nil, nil, noAddress())
+	}, nil, nil)
 
 	// Assert.
 	if rows := h.rows(rootFeed()); len(rows) != 0 {
@@ -516,7 +516,7 @@ func (h *harness) bashUnplaced(work string, result any) {
 	case *conversationv1.AgentBashFailure:
 		item.Result = &conversationv1.AgentBash_Failure{Failure: r}
 	}
-	h.resolver.OnBash(testWorkspace, &conversationv1.DetachedWorkId{Value: work}, item, noAddress())
+	h.resolver.OnBash(testWorkspace, &conversationv1.DetachedWorkId{Value: work}, item)
 }
 
 func TestADetachedShellDrawsItsCommandAndItsClock(t *testing.T) {
@@ -952,7 +952,7 @@ func TestAForegroundShellThatDetachesKeepsItsCommandAndClock(t *testing.T) {
 				ByUser: &conversationv1.DetachedCauseByUser{},
 			},
 		}},
-	}, nil, nil, noAddress())
+	}, nil, nil)
 
 	// Assert: the ORIGINAL instant, so the drawn clock does not reset.
 	shell := h.shellHead()
@@ -1028,7 +1028,7 @@ func TestAReannouncedDetachmentDoesNotUnsettleASettledShell(t *testing.T) {
 			DetachedFromId: &conversationv1.AgentActivityId{Value: "unit-1"},
 			Cause:          &conversationv1.DetachedWorkDetached_ByUser{ByUser: &conversationv1.DetachedCauseByUser{}},
 		}},
-	}, nil, nil, noAddress())
+	}, nil, nil)
 
 	// Assert.
 	if h.shellHead().GetSettled() == nil {
@@ -1142,7 +1142,7 @@ func (h *harness) detachWork(work, unit string) {
 				Requested: &conversationv1.DetachedCauseRequested{},
 			},
 		}},
-	}, nil, nil, noAddress())
+	}, nil, nil)
 }
 
 // commissionRow finds a spawn's commission row on the created agent's feed.
@@ -1556,7 +1556,7 @@ func wakeupActivity(unit string) *conversationv1.AgentActivity {
 func TestADetachmentNamingAFooterOnlyUnitIsNotWarnedWhenTheTurnEnds(t *testing.T) {
 	// Arrange: the footer-only unit arrives first, then a detachment naming it.
 	h := newHarness(t)
-	h.resolver.OnActivity(testWorkspace, mainAgent(), wakeupActivity("wakeup-1"), nil, nil, noAddress())
+	h.resolver.OnActivity(testWorkspace, mainAgent(), wakeupActivity("wakeup-1"), nil, nil)
 	h.detachWork("work-1", "wakeup-1")
 
 	// Act.
@@ -1577,7 +1577,7 @@ func TestADetachmentHeldBeforeAFooterOnlyUnitDrawsIsRetired(t *testing.T) {
 	h.detachWork("work-1", "wakeup-1")
 
 	// Act: the unit arrives, and its kind draws no row.
-	h.resolver.OnActivity(testWorkspace, mainAgent(), wakeupActivity("wakeup-1"), nil, nil, noAddress())
+	h.resolver.OnActivity(testWorkspace, mainAgent(), wakeupActivity("wakeup-1"), nil, nil)
 	h.terminal("turn-1", &conversationv1.AgentSuccess{
 		Outcome: &conversationv1.AgentSuccess_Completed{Completed: &conversationv1.AgentCompleted{}},
 	}, nil)
@@ -2312,7 +2312,7 @@ func TestAShellHeldBeforeItWasDrawnIsSettledLostWhenItLeavesAfterDrawing(t *test
 // sendAs pushes one activity as the given agent's own frame.
 func (h *harness) sendAs(agent *conversationv1.AgentId, act *conversationv1.AgentActivity) {
 	h.t.Helper()
-	h.resolver.OnActivity(testWorkspace, agent, act, nil, nil, noAddress())
+	h.resolver.OnActivity(testWorkspace, agent, act, nil, nil)
 }
 
 // bashCall is a Bash call's running card, as the calling agent's stream states it.
@@ -2348,7 +2348,7 @@ func (h *harness) announceDetachment(announcer, owner *conversationv1.AgentId, w
 			DetachedFromId: &conversationv1.AgentActivityId{Value: unit},
 			Cause:          &conversationv1.DetachedWorkDetached_Requested{Requested: &conversationv1.DetachedCauseRequested{}},
 		}},
-	}, nil, nil, noAddress())
+	}, nil, nil)
 }
 
 // agentFeed is one agent's sub-feed.
@@ -2648,7 +2648,7 @@ func TestACreatedSubagentWithNoKnownOwnerDrawsNothing(t *testing.T) {
 				Subagent: spawnCall("work-1", &conversationv1.AgentId{Value: "agent-remote"}).GetSubagent(),
 			}},
 		}},
-	}, nil, nil, noAddress())
+	}, nil, nil)
 
 	// Assert.
 	if rows := h.everyRow(); len(rows) != 0 {
@@ -2673,7 +2673,7 @@ func TestACreatedShellIsHeldUntilItsCallDrawsAndThenReplacesIt(t *testing.T) {
 				Bash: bashCall("toolu_bash", "npm test").GetBash(),
 			}},
 		}},
-	}, nil, nil, noAddress())
+	}, nil, nil)
 	if got := h.shellHeadFeeds(); len(got) != 0 {
 		t.Fatalf("shell heads on %v before the call drew, want none", got)
 	}
@@ -2794,7 +2794,7 @@ func TestTheDetachedWorkIdIsOnEveryAsyncHeadAndNoSyncOne(t *testing.T) {
 							}},
 						},
 					}},
-				}, nil, nil, noAddress())
+				}, nil, nil)
 				return bubbleOf(h.rows(rootFeed())[0]).GetWorkId()
 			},
 			want: "work-7",
@@ -2859,7 +2859,7 @@ func TestAnEntryIsAnnouncedOnTheFeedThatDrawsIt(t *testing.T) {
 				StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
 			}},
 		}},
-	}, nil, nil, noAddress())
+	}, nil, nil)
 
 	// Assert
 	want := testEncode(feedid.Ref{
@@ -3358,7 +3358,7 @@ func (h *harness) detachSubagentWork(work, unit, agent string) {
 			DetachedFromId: &conversationv1.AgentActivityId{Value: unit},
 			Cause:          &conversationv1.DetachedWorkDetached_Requested{Requested: &conversationv1.DetachedCauseRequested{}},
 		}},
-	}, nil, nil, noAddress())
+	}, nil, nil)
 }
 
 // resumedBeat is the running beat the task stream writes for a resumed run,
@@ -3517,7 +3517,7 @@ func TestAResumedSubagentAnnouncedBeforeItsSendIsDrawnWhenTheSendDraws(t *testin
 // riding a thinking unit.
 func (h *harness) subagentSpends(created *conversationv1.AgentId, unit string, usage *conversationv1.TokenUsage) {
 	h.t.Helper()
-	h.resolver.OnActivity(testWorkspace, created, thinkingFrame(unit, usage), nil, nil, noAddress())
+	h.resolver.OnActivity(testWorkspace, created, thinkingFrame(unit, usage), nil, nil)
 }
 
 func TestTheSubagentCardIsItsLifetimeFreshInput(t *testing.T) {

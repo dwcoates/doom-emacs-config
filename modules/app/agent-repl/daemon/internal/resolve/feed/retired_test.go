@@ -50,7 +50,7 @@ func TestARetiredPromptPublishesTheRemovalOfItsRow(t *testing.T) {
 	<-rows
 
 	// Act.
-	h.resolver.OnPromptRetired(testWorkspace, retiredPrompt("turn-1", mainAgent()), noAddress())
+	h.resolver.OnPromptRetired(testWorkspace, retiredPrompt("turn-1", mainAgent()))
 
 	// Assert.
 	removal := <-rows
@@ -65,7 +65,7 @@ func TestARetiredPromptLeavesTheFeedWithoutItsRow(t *testing.T) {
 	h.deliverPrompt("turn-1", "<task-notification>")
 
 	// Act.
-	h.resolver.OnPromptRetired(testWorkspace, retiredPrompt("turn-1", mainAgent()), noAddress())
+	h.resolver.OnPromptRetired(testWorkspace, retiredPrompt("turn-1", mainAgent()))
 
 	// Assert.
 	if got := h.rows(rootFeed()); len(got) != 0 {
@@ -83,10 +83,10 @@ func TestARetiredAgentPromptRemovesBothEnds(t *testing.T) {
 		Id:    &conversationv1.TurnId{Value: "turn-2"},
 		Agent: created,
 		Said:  &conversationv1.UserSaid{Content: &conversationv1.UserContent{Blocks: []*conversationv1.UserContentBlock{textBlock("go")}}},
-	}, nil, noAddress())
+	}, nil)
 
 	// Act.
-	h.resolver.OnPromptRetired(testWorkspace, retiredPrompt("turn-2", created), noAddress())
+	h.resolver.OnPromptRetired(testWorkspace, retiredPrompt("turn-2", created))
 
 	// Assert.
 	for _, feed := range []feedid.Feed{rootFeed(), {Agent: created}} {
@@ -106,7 +106,7 @@ func TestARetiredPeerMessagePublishesTheRemovalOfItsRow(t *testing.T) {
 	<-rows
 
 	// Act.
-	h.resolver.OnPeerMessageRetired(testWorkspace, &conversationv1.PeerMessage{Agent: mainAgent(), Id: "p1"}, noAddress())
+	h.resolver.OnPeerMessageRetired(testWorkspace, &conversationv1.PeerMessage{Agent: mainAgent(), Id: "p1"})
 
 	// Assert.
 	removal := <-rows
@@ -120,7 +120,7 @@ func TestARetiredEntryTheFeedNeverDrewIsRecordedAtDebug(t *testing.T) {
 	h := newHarness(t)
 
 	// Act.
-	h.resolver.OnPromptRetired(testWorkspace, retiredPrompt("turn-never", mainAgent()), noAddress())
+	h.resolver.OnPromptRetired(testWorkspace, retiredPrompt("turn-never", mainAgent()))
 
 	// Assert.
 	if !h.hasRecord("debug", "daemon.feed.retired_entry_undrawn") {
@@ -133,7 +133,7 @@ func TestARetiredEntryTheFeedNeverDrewWarnsNothing(t *testing.T) {
 	h := newHarness(t)
 
 	// Act.
-	h.resolver.OnPromptRetired(testWorkspace, retiredPrompt("turn-never", mainAgent()), noAddress())
+	h.resolver.OnPromptRetired(testWorkspace, retiredPrompt("turn-never", mainAgent()))
 
 	// Assert.
 	for _, record := range h.records() {
@@ -149,10 +149,10 @@ func TestARetiredApiErrorWithdrawsItsEvidenceLine(t *testing.T) {
 	h.deliverPrompt("turn-1", "go")
 	stamp := &conversationv1.TurnId{Value: "turn-1"}
 	failed := &conversationv1.ApiRequestFailed{Message: "529 overloaded"}
-	h.resolver.OnApiError(testWorkspace, mainAgent(), failed, stamp, nil, noAddress())
+	h.resolver.OnApiError(testWorkspace, mainAgent(), failed, stamp, nil)
 
 	// Act.
-	h.resolver.OnApiErrorRetired(testWorkspace, mainAgent(), failed, stamp, noAddress())
+	h.resolver.OnApiErrorRetired(testWorkspace, mainAgent(), failed, stamp)
 
 	// Assert.
 	if got := h.evidenceOf("turn-1"); len(got) != 0 {
@@ -165,10 +165,10 @@ func TestAnUnstampedRetiredApiErrorWithdrawsNothing(t *testing.T) {
 	h := newHarness(t)
 	h.deliverPrompt("turn-1", "go")
 	failed := &conversationv1.ApiRequestFailed{Message: "529 overloaded"}
-	h.resolver.OnApiError(testWorkspace, mainAgent(), failed, nil, nil, noAddress())
+	h.resolver.OnApiError(testWorkspace, mainAgent(), failed, nil, nil)
 
 	// Act.
-	h.resolver.OnApiErrorRetired(testWorkspace, mainAgent(), failed, nil, noAddress())
+	h.resolver.OnApiErrorRetired(testWorkspace, mainAgent(), failed, nil)
 
 	// Assert.
 	if got := h.evidenceOf("turn-1"); len(got) != 1 {

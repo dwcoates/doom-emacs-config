@@ -43,7 +43,7 @@ func (h *harness) liveResponse(unit, text, turn string) {
 	if turn != "" {
 		stamp = &conversationv1.TurnId{Value: turn}
 	}
-	h.resolver.OnActivity(testWorkspace, mainAgent(), responseSuccessActivity(unit, text), stamp, nil, noAddress())
+	h.resolver.OnActivity(testWorkspace, mainAgent(), responseSuccessActivity(unit, text), stamp, nil)
 }
 
 // liveCut sends one unstamped compaction at pointer AT, the way the file plane
@@ -184,7 +184,7 @@ func TestAForksOwnCutHidesItsWholeInheritedPast(t *testing.T) {
 
 	// Act: the shim stamps the fork's own cut with the fork's turn.
 	h.resolver.OnContextCut(testWorkspace, mainAgent(), compactedCut("the fork's own"),
-		&conversationv1.HistoryPointer{Value: "own-cut"}, &conversationv1.TurnId{Value: forkTurn}, nil, noAddress())
+		&conversationv1.HistoryPointer{Value: "own-cut"}, &conversationv1.TurnId{Value: forkTurn}, nil)
 
 	// Assert: the feed begins at the fork's own divider.
 	want := []string{h.separationRowID("own-cut")}
