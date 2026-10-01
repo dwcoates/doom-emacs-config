@@ -186,6 +186,9 @@ describe("task folds", () => {
   });
 });
 
+/** The one repository section, as the daemon pushes it collapsed. */
+const COLLAPSED_REPOSITORY = [{ repositoryId: "repo-1", label: "doom", rows: [rosterRow()], collapsed: true }];
+
 describe("repository folds", () => {
   it("asks the daemon to collapse an expanded repository on click", async () => {
     // Arrange
@@ -200,9 +203,7 @@ describe("repository folds", () => {
 
   it("asks the daemon to expand a collapsed repository on click", async () => {
     // Arrange
-    await withRoster({
-      repositorySections: [{ repositoryId: "repo-1", label: "doom", rows: [rosterRow()], collapsed: true }],
-    });
+    await withRoster({ repositorySections: COLLAPSED_REPOSITORY });
     harness.fake.clearCalls();
     // Act
     await harness.click(REPOSITORY_FOLD);
@@ -224,11 +225,7 @@ describe("repository folds", () => {
     // Arrange
     await withRoster({});
     // Act
-    harness.fake.setRoster(
-      roster({
-        repositorySections: [{ repositoryId: "repo-1", label: "doom", rows: [rosterRow()], collapsed: true }],
-      }),
-    );
+    harness.fake.setRoster(roster({ repositorySections: COLLAPSED_REPOSITORY }));
     await harness.settle();
     // Assert
     expect(harness.$(REPOSITORY_FOLD)?.dataset.folded).toBe("true");
