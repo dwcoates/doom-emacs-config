@@ -94,23 +94,40 @@ client's side, whatever moves under the hood:
 - GAP today: holding begins only when a bounce RUNS (`bounce.go:650`), not when it is
   registered, so prompts sent while waiting become new turns and push the transfer back.
 
-### The transfer: one operation from the client's side
+### The transfer: three supported combinations (owner ruling, 2026-10-01)
 
-With a new daemon AND a new shim:
+A deploy moves its services together or not at all, because a change to one may depend on the
+others. A store or sidecar change blocks EVERY hot reload (see below). Only these combinations
+are hot reloaded:
+
+**Daemon only.** The shim is current, so its process is KEPT.
 
 1. The new daemon is launched.
 2. The old daemon tells Emacs and the webapp that a new daemon is up and that it is cleaning up
-   this workspace's connections.
-   - The clients now EXPECT to lose the vendor path, so they do not report it as an unexpected
-     fault or a blue disconnected status.
-3. The old daemon disconnects from the old shim and shuts it down, then acks the clients that
-   the cleanup is complete.
+   this workspace's connections, so the clients expect the loss of the vendor path and do not
+   report it as a fault or a blue disconnected status.
+3. The old daemon severs its connection to the shim (the shim keeps running), then acks the
+   clients that the cleanup is complete.
 4. Emacs and the webapp connect to the new daemon.
-5. The new daemon launches the new shim and connects to it.
+5. The new daemon re-establishes the connection to the existing shim process.
 6. The new daemon tells the clients that this workspace's deploy is complete.
 
-- The client sees ONE transfer, from step 3 to step 6 (`deploying · transferring`).
-- With only a new shim, the same daemon runs steps 3, 5 and 6, and the client's connection does not move.
+- A free workspace runs this at once; a busy one is scheduled first (see "Scheduling").
+- The old daemon exits once its last workspace has moved.
+
+**Shim only.** The daemon stays, and the clients do not reconnect.
+
+- The daemon shuts down the old shim, launches the new one, and connects to it.
+- The clients are still told the transfer began and ended, so the footer, sidebar and tab bar
+  show `deploying · transferring` for it.
+
+**Daemon and shim.** The daemon-only sequence, with the shim swap as a daemon-side detail:
+
+- at step 3 the old daemon shuts the old shim down instead of only severing it;
+- at step 5 the new daemon launches the new shim and connects to it.
+
+In every combination the client sees ONE transfer, from step 3 to step 6 (`deploying · transferring`).
+
 - This CORRECTS a misrecorded ruling. The 2026-09-27 ruling was that a deploy does not wait on
   work the user tries to ADD while it is scheduled (those prompts are enqueued); it was recorded as
   "a handover never waits on work", and the mid-turn handover was built on that misreading.
@@ -148,7 +165,8 @@ With a new daemon AND a new shim:
   them is not supported, which removes the problem instead of solving it.
 - A deploy still detects when either is out of date: their build differs from the fresh one
   (`Deployer.serviceStale`, `daemon/internal/deploy/deploy.go:689`). An unchanged service is never restarted.
-- When either is out of date, automatic hot reloads are BLOCKED until a full Emacs restart.
+- When either is out of date, EVERY automatic hot reload (daemon, shim and webapp included) is
+  BLOCKED until a full Emacs restart.
   - The sidebar shows, at its very bottom with a small gap from the edge, in red:
     `Full emacs restart needed to unblock automatic agent-repl hot reloads`.
   - The text is sized to fit on one line of the sidebar and never wraps.
@@ -188,9 +206,4 @@ With a new daemon AND a new shim:
 
 ## Questions for the owner
 
-1. When only the daemon is stale, should the shim still be replaced (one path, steps 1 to 6 always)?
-   - Recommended: yes, because the workspace is drained, so the old shim holds nothing worth keeping.
-   - It would delete the mid-turn adoption machinery (sealed moves, adoption windows, take-backs).
-2. While the store or sidecar is out of date, is EVERY hot reload blocked (daemon, shim and webapp
-   too), or only the store and sidecar part, with the rest still deployed?
-3. Should a failed build row open the archived build log (`BuildFailed.Log`) when clicked?
+1. Should a failed build row open the archived build log (`BuildFailed.Log`) when clicked?
