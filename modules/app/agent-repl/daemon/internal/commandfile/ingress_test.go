@@ -65,8 +65,25 @@ func TestApplyFileClaimsByRename(t *testing.T) {
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("the original file still exists: %v", err)
 	}
-	if got := entries(t, filepath.Join(f.dir, "claimed")); len(got) != 1 {
-		t.Fatalf("claimed files = %v, want exactly one", got)
+	if got := entries(t, filepath.Join(f.dir, "applied")); len(got) != 1 {
+		t.Fatalf("applied files = %v, want exactly one", got)
+	}
+}
+
+func TestApplyFileLeavesNothingClaimedOnceApplied(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", "/tree/w1")
+	path := f.write(t, "workspace_commands_r.json", `[{"type":"merge","workspace":"w1"}]`)
+
+	// Act.
+	if err := f.ingress.ApplyFile(context.Background(), path); err != nil {
+		t.Fatalf("ApplyFile: %v", err)
+	}
+
+	// Assert.
+	if got := entries(t, filepath.Join(f.dir, "claimed")); len(got) != 0 {
+		t.Fatalf("claimed files = %v, want none: an applied file is retired", got)
 	}
 }
 
