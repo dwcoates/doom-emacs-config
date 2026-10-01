@@ -806,71 +806,85 @@ one runs is covered by ONE follow-up deploy. Every decision is a record under
 daemon must exist before it can deploy anything). `agent-shim/wire` is
 DELETED: nothing in the rebuilt daemon imports it.
 
-## The merge queue owns its target, and a park stays alive until it is resolved
+## A merge runs in the workspace that asked for it, and nothing parks
 
-Owner rulings and fixes, 2026-09-28 (`internal/merge`; the evidence is
-`../docs/investigations/2026-09-28-merge-queue-plan.md`).
+Owner rulings, 2026-09-30 (`internal/merge`; the contract is
+`../docs/protobuf-design/merge-landing.md`, landed change 1).
 
-- **THE TARGET IS NEVER A WORKING TREE FOR A MERGE.** Each attempt makes a
-  detached scratch tree of the queue's own (`<state>/merge-trees/<lease>-<n>`,
-  `gitclient.AddDetachedWorktree`) at the target's tip, merges and gates
-  there, and moves the target only by `gitclient.FastForward` to the commit
-  the gate passed. That fast-forward is the ONE git carrying
-  `gitclient.MergeQueueMarker` (`AGENT_REPL_MERGE_QUEUE=1`), which is how the
-  repository's `.githooks/reference-transaction` tells the queue's move of
-  master from a hand merge; every other git has the marker scrubbed. A target
-  that moved meanwhile is merged onto again. Repairs
-  are the workspace agent's commits on ITS OWN branch; the next attempt merges
-  the branch afresh. The daemon commits nothing of its own.
-- **ONE SLOT PER REPOSITORY, ONE GRANTOR** (`slot.go`). The admission pump
-  grants the slot to a queue front or to a parked run waiting for it back;
-  the repository's kernel lock travels with it. A PARKED run yields its slot:
-  a parked merge does not block its repository's queue.
-- **A PARK LISTENS UNTIL IT IS RESOLVED** (`parkUntilResumed`). Every
-  submission while parked is delivered to the workspace's own session and
-  answered; the run resumes on the guidance turn's end. An abandon or the
-  daemon's exit ends the run's context instead.
+- **THE REQUESTER RUNS THE MERGE.** `Orchestrator.Enqueue` takes the requesting
+  workspace and a `wsm.MergeSource`: its own branch (`keep_open` or closed on
+  landing), another workspace (closed on landing), a branch (in its existing
+  worktree, or in a daemon-made one under `<state>/merge-worktrees/<lease>`,
+  removed after the merge), or merged upstream (fetch, fast-forward the
+  default branch in the main worktree, close the requester). An unknown
+  source refuses with `unknown_source_workspace` / `unknown_branch`. No
+  landing workspace is ever made.
+- **NO MERGE FACT BEFORE THE REQUESTING TURN ENDS.** The request is recorded
+  durably (`wsm.RequestMerge`, state `requested`) and put in line
+  (`wsm.QueueMerge`) only when the requester's turn in flight ends
+  (`request.go`); a boot re-arms recorded requests. Evict or close withdraws a
+  request that is not yet in line.
+- **THE PROCESS, IN ORDER** (`process.go`): preprocessing; rebasing k/n, one
+  commit per step (`gitclient.StartRebase` / `ContinueRebase`); a conflict is
+  resolved by the requester's own session, and a give-up FAILS the merge in
+  conflicts with the rebase LEFT in progress; testing in the branch's worktree
+  (streamed per suite into `<state>/merge-logs/<lease>-tests-<round>.log`);
+  fixing attempts x/y under ONE bound (`MaxFixAttempts`), the last failing
+  attempt failing the merge in tests; committing -- a moved target STARTS
+  OVER, else the non-ff merge commit is made in a detached scratch tree
+  (`<state>/merge-trees/`) and the target fast-forwarded; postprocessing;
+  landed.
+- **THE TARGET IS NEVER A WORKING TREE FOR A MERGE.** The target moves only by
+  `gitclient.FastForward`, the ONE git carrying `gitclient.MergeQueueMarker`
+  (`AGENT_REPL_MERGE_QUEUE=1`), which is how the repository's
+  `.githooks/reference-transaction` tells the queue's move of master from a
+  hand merge; every other git has the marker scrubbed.
+- **NOTHING PARKS.** A failed merge leaves the queue at once as `merge_failed`
+  with its area (conflicts, tests, other), turquoise on the roster, logged
+  ERROR as `daemon.merge.abort`. A gate that failed to run (missing script,
+  unstartable runner, exit 127 or 126), uncommitted changes, an escalation, a
+  repair that changes the merge machinery (`daemon/internal/merge/`,
+  `bin/test-all.sh`) and a failed pre prompt all fail the merge; a failed post
+  prompt is logged and the merge still lands.
+- **ONE SLOT PER REPOSITORY.** The pump grants the slot to the queue front; the
+  repository's kernel lock travels with it.
 - **EVERY END GOES THROUGH THE ONE TEARDOWN.** Evict, the dequeue answer and a
-  workspace close ABANDON a running or parked merge (`abandonRunning`, the run
-  context cancelled with the cause); nothing ever just drops the queue row of
-  a merge that is running. The teardown releases the lease, the queue entry,
-  the open ledger intervals, the scratch tree and the slot.
-- **ONLY THE USER'S OWN ASK DISPLACES THE TURN IN FLIGHT** (`merge.Requester`).
-  A command-file merge is an agent's, from inside its own turn, and waits for
-  the workspace to fall free; nothing is marked for resubmission.
-- **A GATE THAT FAILED TO RUN IS NOT A TEST FAILURE.** A missing script, an
-  unstartable runner, exit 127 or 126: parked at once, no repair round.
-- **A REPAIR NEVER CHANGES THE MERGE MACHINERY** (`daemon/internal/merge/`,
-  `bin/test-all.sh`): the briefs say so, and a repair whose branch adds such a
-  change is refused and parks.
-- **THE RESOLVING SHIM IS THE WORKSPACE AGENT'S OWN.** A run holds one session
-  address, its own workspace; `TestEveryMergeDeliveryReachesTheWorkspacesOwnSession`
-  holds it.
+  workspace close ABANDON a running merge (`abandonRunning`); the teardown
+  releases the lease, the queue entry, the open ledger intervals, the scratch
+  tree, a made worktree (kept when the area is conflicts) and the slot.
+- **REPAIRS ARE THE REQUESTER'S OWN TURNS**, drawn in the merge bubble's tab AND
+  mirrored onto the root feed (`OutputAddress.Mirror`, conflicts and fixes
+  only; the mirror copy drops the merge feed's order and parent). A history
+  replay does not reconstruct the mirror.
+- **THE TEST LOG OPENS BY TOKEN.** `FeedMergeTestLogToken` is `<lease>/<round>`;
+  `OpenInEditor{merge_test_log}` resolves it through `TestLogPath` (the lease
+  in the merge ledger, the file present), refuses with
+  `unknown_merge_test_log`, and relays `HostOpenInEditor{path}`.
 - The integration fake: a branch with no commits is already on its target, so
-  a test that exercises a merge's phases commits work first
-  (`harness.CommitWork`), and a scripted conflict stands until its branch moves.
+  a test that exercises a merge's steps commits work first
+  (`harness.CommitWork`); a rebase conflict is scripted per commit
+  (`harness.ScriptRebaseConflict`) and stands until `harness.ResolveConflicts`.
 
-## `claude-repld merge-queue` is how an agent enqueues a merge and reads its outcome
+## `claude-repld merge-queue` is how an agent asks for a merge
 
 `cmd/claude-repld/mergequeueverb.go`, the merge-queue skill's one tool
 (`.claude/skills/merge-queue/SKILL.md`). It decides nothing and never runs git.
 
-- It ENQUEUES through the command-file ingress (`commandfile.Write`), so the
-  merge is an agent's ask (`merge.RequestedByAgent`) exactly as a skill-written
-  file is.
-- `-dir WORKTREE` merges a workspace. `-branch B -repo MAIN` merges a branch that
-  is no workspace: one command file creates `merge-queue/<bare>-landing` cut
-  from `B` and merges that, so repairs have a session of their own.
-- It READS the outcome off `WatchWorkspaceRoster`: the row's status as it stood
-  BEFORE the command was written is the baseline, and a concluded status that is
-  still the baseline's (and, for `merged`, no newer `when.merged`) is an earlier
-  merge's. A parked merge's line is read from the footer; a failure's reason is
-  the `daemon.merge.abort` record, which the verb names the query for. A
-  quarantined command file is a refusal. A planned stream ending reattaches.
-- Exits: 0 landed (or in the queue, without `-wait`), 4 parked, 5 failed,
-  6 refused, 2 the verb itself failed. `-wait` from inside the target worktree
-  is REFUSED: an agent-requested merge starts only when the requesting turn
-  ends, and that turn is the one that would wait.
+- The REQUESTER is the calling workspace: the roster row whose worktree holds
+  the cwd (the deepest match). It asks through the command-file ingress
+  (`commandfile.Write`), so the merge is an agent's ask
+  (`merge.RequestedByAgent`) exactly as a skill-written file is.
+- Exactly one source: `-own [-keep-open]`, `-dir WORKTREE` (another
+  workspace), `-branch B` (a branch that is no workspace), or `-pr-merged`.
+- Without `-wait` it returns when the ingress settles the file: `applied/` is
+  requested (exit 0), `quarantine/` is a refusal (exit 6).
+- `-wait` reads the outcome off `WatchWorkspaceRoster` (the row's status as it
+  stood BEFORE the command was written is the baseline): LANDED, or FAILED
+  with its area read from the footer and the `daemon.merge.abort` record named.
+  `-wait` is REFUSED while the requester's turn is in flight: the merge starts
+  only when that turn ends, and that turn is the one that would wait.
+- Exits: 0 landed (or requested, without `-wait`), 5 failed, 6 refused, 2 the
+  verb itself failed.
 
 ## A lease dies with the process that took it
 
@@ -1483,9 +1497,8 @@ and `TestSelectPublishesARegistryCarryingTheSelectionInstant`.
 - **DURABLE EVIDENCE MAKES AN UNSTAMPED CLAIM ACCEPTED**, stamped in the claim's own transaction: a `held_prompts` row under the claimed turn (never deleted, only tombstoned), or the claimed turn's row closed by a vendor terminal (completed, failed, killed; only a turn the shim accepted ends through one). So a crash between the hold or the turn's end and the stamp cannot re-drive a prompt that was taken.
 - **AN AMBIGUOUS CLOSE IS REOPENED.** A claimed turn closed as orphaned or agent-died (a boot, an adoption or a dying shim closing a turn nobody saw end, accepted or not) has its close cleared in the claim's transaction (`reopenAmbiguousClose`, the one statement the door guard lets clear a close), so the re-driven turn reads open again.
 - **A SUBMISSION OF THE TURN IN FLIGHT STARTS NOTHING** (`promptqueue.Submit`, `SubmitSessionAct`): finding the re-driven turn running means the original reached the shim, so it is answered as the delivery the original was, never held or queued behind itself, and recorded at ERROR.
-- **THE PARKED ROUTE RUNS UNDER THE SUBMISSION'S TURN**: `ParkedRouter`, `merge.RouteParked` and `Fleet.RouteGuidance` carry the submission's turn id to the shim rather than minting one.
 - **ONE KEY'S SUBMISSIONS ARE SERIALIZED IN-PROCESS** (`prompthandler/claim.go`): a retry arriving while its original is still inside the queue waits for it (or for its own context), so a hung original is never re-driven beside itself.
-- **THE CRASH WINDOW** (a process death after the shim accepted `StartTurn` for a prompt, a parked route or a context cut, and before the stamp commits) is closed by the shim: a repeated `StartTurn` of a turn id it already accepted starts nothing and answers success (`proto/src/shim/v1/endpoint_start_turn.proto`, `StartTurnRequest.turn`). Residual gaps: a shim that died with the daemon has no memory of the id; `UpdateAgent.prompt` (a bubble-addressed prompt) carries no turn id at all; and a re-driven turn that ALREADY ENDED on an adopted shim is answered success for a turn no terminal will follow.
+- **THE CRASH WINDOW** (a process death after the shim accepted `StartTurn` for a prompt or a context cut, and before the stamp commits) is closed by the shim: a repeated `StartTurn` of a turn id it already accepted starts nothing and answers success (`proto/src/shim/v1/endpoint_start_turn.proto`, `StartTurnRequest.turn`). Residual gaps: a shim that died with the daemon has no memory of the id; `UpdateAgent.prompt` (a bubble-addressed prompt) carries no turn id at all; and a re-driven turn that ALREADY ENDED on an adopted shim is answered success for a turn no terminal will follow.
 
 ## A held-prompt edit is a claim the queue owns under its delivery lock
 
