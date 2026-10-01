@@ -427,13 +427,7 @@ func TestAClearThenANormalPromptDrawsOnlyTheNormalBubble(t *testing.T) {
 // promptWorking answers the working flag on the turn's user-prompt row.
 func (h *harness) promptWorking(turn string) bool {
 	h.t.Helper()
-	for _, row := range h.rows(rootFeed()) {
-		if row.GetId().GetValue() == h.promptRowID(turn) {
-			return row.GetUserPrompt().GetWorking()
-		}
-	}
-	h.t.Fatalf("no user-prompt row for turn %q", turn)
-	return false
+	return h.promptRow(turn).GetUserPrompt().GetWorking()
 }
 
 // completed is a concluded terminal naming UNIT as the answer ("" names none).
@@ -742,13 +736,7 @@ func (h *harness) deliverFoldedPrompt(turn, into, text string) {
 // promptRow is the user-prompt row keyed by TURN on the root feed.
 func (h *harness) promptRow(turn string) *frontendv1.FeedRow {
 	h.t.Helper()
-	for _, row := range h.rows(rootFeed()) {
-		if row.GetId().GetValue() == h.promptRowID(turn) {
-			return row
-		}
-	}
-	h.t.Fatalf("no user-prompt row for turn %q", turn)
-	return nil
+	return h.rowByID(rootFeed(), h.promptRowID(turn))
 }
 
 func TestAFoldedPromptIsStampedWithTheTurnItJoined(t *testing.T) {

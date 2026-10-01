@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -1191,5 +1193,65 @@ func TestRowPlaneNames(t *testing.T) {
 		if got := tc.plane.String(); got != tc.want {
 			t.Fatalf("plane %d = %q, want %q", tc.plane, got, tc.want)
 		}
+	}
+}
+
+// TestFindRowFindsAPublishedRow pins the shared lookup on a row the feed holds.
+func TestFindRowFindsAPublishedRow(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "hello")
+	id := h.promptRowID("turn-1")
+
+	// Act.
+	row, ok := h.findRow(rootFeed(), id)
+
+	// Assert.
+	if !ok || row.GetId().GetValue() != id {
+		t.Fatalf("findRow = (%v, %v), want the prompt row", row, ok)
+	}
+}
+
+// TestFindRowMissesAnAbsentRow pins the shared lookup's miss.
+func TestFindRowMissesAnAbsentRow(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	_, ok := h.findRow(rootFeed(), "no-such-row")
+
+	// Assert.
+	if ok {
+		t.Fatalf("findRow found a row the feed never held")
+	}
+}
+
+// TestFeedTestsLookUpRowsThroughTheSharedHelper pins that no test in this
+// package hand-rolls the row-by-id loop findRow and rowByID replaced.
+func TestFeedTestsLookUpRowsThroughTheSharedHelper(t *testing.T) {
+	// Arrange.
+	files, err := filepath.Glob("*_test.go")
+	if err != nil {
+		t.Fatalf("glob: %v", err)
+	}
+	var offenders []string
+
+	// Act.
+	for _, file := range files {
+		if file == "resolver_test.go" {
+			continue
+		}
+		text, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatalf("read %s: %v", file, err)
+		}
+		if strings.Contains(string(text), "if row.GetId().GetValue() == ") {
+			offenders = append(offenders, file)
+		}
+	}
+
+	// Assert.
+	if len(offenders) != 0 {
+		t.Fatalf("files hand-rolling a row lookup: %v (use findRow or rowByID)", offenders)
 	}
 }

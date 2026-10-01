@@ -435,13 +435,7 @@ func TestAReplayedTurnsRecordedEndingIsDrawnAtItsRecordedAddress(t *testing.T) {
 
 	// Assert: the ending is in the tab, not drawn as one of the ordinary turn's.
 	ending := testEncode(feedid.Ref{WS: testWorkspace, Feed: feedid.Feed{Merge: &lease}, Row: feedid.RowKey{Kind: feedid.KindTurnEnded, ID: "turn-1"}}).GetValue()
-	found := false
-	for _, row := range h.rows(feedid.Feed{Merge: &lease}) {
-		if row.GetId().GetValue() == ending {
-			found = true
-		}
-	}
-	if !found {
+	if _, found := h.findRow(feedid.Feed{Merge: &lease}, ending); !found {
 		t.Fatalf("tab rows = %v, want the recorded ending %q among them", rowIDs(h.rows(feedid.Feed{Merge: &lease})), ending)
 	}
 }

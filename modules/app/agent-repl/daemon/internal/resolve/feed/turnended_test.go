@@ -253,13 +253,7 @@ func (h *harness) terminalRow(turn string) *frontendv1.FeedTurnEnded {
 		WS: testWorkspace, Feed: rootFeed(),
 		Row: feedid.RowKey{Kind: feedid.KindTurnEnded, ID: turn},
 	}).GetValue()
-	for _, row := range h.rows(rootFeed()) {
-		if row.GetId().GetValue() == want {
-			return row.GetTurnEnded()
-		}
-	}
-	h.t.Fatalf("no terminal row for turn %q", turn)
-	return nil
+	return h.rowByID(rootFeed(), want).GetTurnEnded()
 }
 
 // interruptedByUser is the success terminal a stop — the footer's stop button,
@@ -279,12 +273,8 @@ func (h *harness) hasTerminalRow(turn string) bool {
 		WS: testWorkspace, Feed: rootFeed(),
 		Row: feedid.RowKey{Kind: feedid.KindTurnEnded, ID: turn},
 	}).GetValue()
-	for _, row := range h.rows(rootFeed()) {
-		if row.GetId().GetValue() == want {
-			return true
-		}
-	}
-	return false
+	_, ok := h.findRow(rootFeed(), want)
+	return ok
 }
 
 // A /clear's interrupt is the cut, not a bubble. Once the clear is confirmed by
