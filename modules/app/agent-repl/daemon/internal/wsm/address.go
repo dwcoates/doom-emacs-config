@@ -47,13 +47,17 @@ type storedRef struct {
 }
 
 // storedAddress is an output address's persisted form.
+//
+// A RETIRED KEY IS IGNORED ON READ. Addresses written before the root-feed
+// mirror was removed may carry `"mirror": true`; the decoder skips a key this
+// struct does not name, so such a row reads as the address it names, and no
+// row draws on the root feed by it any longer. Nothing is migrated: the value
+// is one JSON column, and the next write of the row drops the key.
 type storedAddress struct {
 	// Feed is the feed rows land in.
 	Feed storedFeed `json:"feed"`
 	// Parent is the row they nest under, nil for top-level rows.
 	Parent *storedRef `json:"parent,omitempty"`
-	// Mirror draws the rows on the root feed too.
-	Mirror bool `json:"mirror,omitempty"`
 }
 
 // toStoredFeed renders a feed, refusing one that does not name exactly one arm.
@@ -204,7 +208,7 @@ func encodeAddress(addr *OutputAddress) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	stored := storedAddress{Feed: feed, Mirror: addr.Mirror}
+	stored := storedAddress{Feed: feed}
 	if addr.Parent != nil {
 		parent, err := toStoredRef(*addr.Parent)
 		if err != nil {
@@ -229,7 +233,7 @@ func decodeAddress(table, row string, raw string) (*OutputAddress, error) {
 	if err != nil {
 		return nil, err
 	}
-	out := &OutputAddress{Feed: feed, Mirror: stored.Mirror}
+	out := &OutputAddress{Feed: feed}
 	if stored.Parent != nil {
 		parent, err := fromStoredRef(table, row, *stored.Parent)
 		if err != nil {

@@ -66,9 +66,19 @@ type wsState struct {
 	// how a page deep inside nesting draws its crumbs.
 	subFeeds map[string]*subFeedHead
 
-	// address is the output address a lease holder installed; nil is the root
-	// feed.
+	// address is the output address a lease holder installed, nil when none
+	// stands. IT DRAWS NOTHING BY ITSELF: it is the address the prompt queue
+	// records on a turn the lease holder itself starts (turnaddress.go), and a
+	// row is drawn at its own turn's address, never at this one.
 	address *sessionwatcher.OutputAddress
+	// turnAddresses is the address each addressed turn draws at, as the
+	// prompt queue recorded it (AddressTurn) or a replay read it back
+	// (Deps.TurnAddresses). A turn absent from it draws on the root feed and
+	// its agents' sub-feeds. See turnaddress.go.
+	turnAddresses map[ids.TurnID]*sessionwatcher.OutputAddress
+	// outlivedReported records each addressed turn whose frame was drawn after
+	// the address it was recorded at stopped standing, so that is said once.
+	outlivedReported map[ids.TurnID]bool
 
 	// mainAgent is the session's main agent, as the session watcher NAMED it
 	// (OnMainAgent). Its rows are the root feed's; every other agent's rows are
@@ -197,11 +207,6 @@ type wsState struct {
 	// no terminal of its own is ended from it (turnclosed.go). Nil outside a
 	// replay.
 	replayCloses map[ids.TurnID]wsm.RecordedClose
-	// replayAddresses is the recorded output address of every turn the page
-	// being replayed names, read before the replay (recordedAddresses). An
-	// entry of a turn in it is drawn at that address (addressingTurn); nil
-	// outside a replay.
-	replayAddresses map[ids.TurnID]*wsm.OutputAddress
 	// entryTurn is the STAMP of the entry being drawn (HistoryEntryAt.turn),
 	// in force only while that entry is drawn (drawingEntry). Nil for an
 	// unstamped entry, which is what selects the positional fallback.
@@ -648,6 +653,8 @@ func newWSState(ws ids.WorkspaceID) *wsState {
 		finalAnswerSeen:      map[string]bool{},
 		rolledBack:           map[ids.TurnID]bool{},
 		promptSaid:           map[ids.TurnID]*conversationv1.UserSaid{},
+		turnAddresses:        map[ids.TurnID]*sessionwatcher.OutputAddress{},
+		outlivedReported:     map[ids.TurnID]bool{},
 		endedTurns:           map[ids.TurnID]bool{},
 		answerMarkdown:       map[string]string{},
 		liveEndings:          map[ids.TurnID]TurnEnding{},
@@ -778,20 +785,25 @@ type placement struct {
 	inherit *rowRank
 }
 
-// place answers where an agent's rows go, and whether they can go anywhere.
-// WHILE AN OUTPUT ADDRESS IS SET every row the session produces goes on the
-// addressed feed under the addressed row; cleared, the main agent's rows go on
-// the root and any other agent's on its own sub-feed.
+// place answers where an agent's rows go, and whether they can go anywhere,
+// for the row's own turn (rowTurn): see placeTurn.
+func (r *resolver) place(s *wsState, agent *conversationv1.AgentId) (placement, bool) {
+	return r.placeTurn(s, agent, s.rowTurn())
+}
+
+// placeTurn answers where an agent's rows of TURN go. A row of an ADDRESSED
+// turn goes on the turn's addressed feed under the addressed row, whichever
+// agent drew it (turnaddress.go); any other row of the main agent goes on the
+// root, and any other agent's on its own sub-feed.
 //
 // THERE IS NO FALLBACK. An agent that is neither the named main agent nor one
 // whose spawn minted a sub-feed is UNPLACEABLE: the caller draws nothing, and
 // the failure is logged at ERROR and raised on the topbar. It used to land on
 // the root feed with a WARN — and that is how a subagent's background shell
 // came to be drawn under the main agent's last answer.
-func (r *resolver) place(s *wsState, agent *conversationv1.AgentId) (placement, bool) {
-	if s.address != nil {
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "s.address != nil"})
-		return r.outputPlacement(s), true
+func (r *resolver) placeTurn(s *wsState, agent *conversationv1.AgentId, turn *ids.TurnID) (placement, bool) {
+	if at, addressed := r.addressedPlacement(s, turn); addressed {
+		return at, true
 	}
 	id := agent.GetValue()
 	feed, err := feedid.AgentFeed(id, s.mainAgent)
@@ -832,39 +844,23 @@ func (r *resolver) raiseWarning(s *wsState, key, line string) {
 	r.deps.Warnings.RaiseWarning(s.id, key, line)
 }
 
-// outputPlacement is where a row the SESSION ITSELF draws belongs — a person's
-// prompt, a clear's divider, a turn's terminal the daemon composes — rather
-// than any agent's work: the standing output address, or the root feed, which
-// is the session's own, when none stands.
-func (r *resolver) outputPlacement(s *wsState) placement {
-	if s.address == nil {
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "s.address == nil"})
-		return placement{feed: feedid.Feed{Root: true}}
+// outputPlacement is where a row of TURN the SESSION ITSELF draws belongs — a
+// person's prompt, a clear's divider, a turn's terminal the daemon composes —
+// rather than any agent's work: the turn's addressed placement, or the root
+// feed, which is the session's own, when the turn is not addressed.
+func (r *resolver) outputPlacement(s *wsState, turn *ids.TurnID) placement {
+	if at, addressed := r.addressedPlacement(s, turn); addressed {
+		return at
 	}
-	p := placement{feed: s.address.Feed}
-	if s.address.Parent != nil {
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "s.address.Parent != nil"})
-		p.parent = &frontendv1.FeedRowParent{Row: r.deps.Encode(*s.address.Parent)}
-	}
-	return p
+	r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "the turn is not addressed"})
+	return placement{feed: feedid.Feed{Root: true}}
 }
 
 // upsert replaces one row whole and publishes it on its feed's tail. It is the
 // ONE write path: every family function ends here, so identity, ordering and
-// publication can never disagree between families.
-//
-// A row drawn at a MIRRORED output address is drawn on the root feed too
-// (mirror.go), through this same path, so the copy is ordered and published
-// exactly as every other row is.
+// publication can never disagree between families. A row is drawn on the ONE
+// feed its placement names; nothing copies it onto another.
 func (r *resolver) upsert(s *wsState, at placement, row *frontendv1.FeedRow, durable bool) {
-	r.upsertOne(s, at, row, durable)
-	if copy, ok := r.mirrorRow(s, at.feed, row); ok {
-		r.upsertOne(s, placement{feed: feedid.Feed{Root: true}}, copy, durable)
-	}
-}
-
-// upsertOne is upsert on one feed.
-func (r *resolver) upsertOne(s *wsState, at placement, row *frontendv1.FeedRow, durable bool) {
 	f := r.feed(s, at.feed)
 	if r.rolledBackRow(s, f, row) {
 		return
@@ -1079,15 +1075,6 @@ func (r *resolver) pushWithheldByBound(s *wsState, f *feedState, id string) bool
 // of the shell bubble). The tail's already-delivered upserts of the row are
 // history; the removal is a new publication that supersedes them.
 func (r *resolver) retire(s *wsState, addr feedid.Feed, id string) bool {
-	retired := r.retireOne(s, addr, id)
-	if mirrored, ok := r.mirrorID(s, addr, id); ok {
-		r.retireOne(s, feedid.Feed{Root: true}, mirrored)
-	}
-	return retired
-}
-
-// retireOne is retire on one feed.
-func (r *resolver) retireOne(s *wsState, addr feedid.Feed, id string) bool {
 	f := r.feed(s, addr)
 	if _, ok := f.rows[id]; !ok {
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "_, ok := f.rows[id]; !ok"})
@@ -1157,8 +1144,10 @@ func (r *resolver) rowID(ws ids.WorkspaceID, addr feedid.Feed, key feedid.RowKey
 		ws, r.feedKey(ws, addr), key.Kind, key.ID, key.Sub)}
 }
 
-// SetOutputAddress installs the address a lease holder wants this session's
-// rows stamped with; nil restores the root feed.
+// SetOutputAddress installs the address a lease holder wants the turns it
+// starts drawn at; nil withdraws it. It moves no row and redirects no turn
+// already recorded: only a turn the prompt queue records while it stands takes
+// it (turnaddress.go).
 func (r *resolver) SetOutputAddress(ws ids.WorkspaceID, addr *sessionwatcher.OutputAddress) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -1186,20 +1175,20 @@ func (r *resolver) OutputAddress(ws ids.WorkspaceID) *sessionwatcher.OutputAddre
 	return &copied
 }
 
-// UpsertAtOutputAddress upserts a daemon-synthesized row AT THE SESSION'S
-// STANDING OUTPUT ADDRESS: the row's identity is composed from the addressed
-// feed and it is parented exactly as the resolver's own draw of the same row
-// key will be, so the two are ONE row rather than a root copy the addressed
-// draw can never replace.
-func (r *resolver) UpsertAtOutputAddress(ws ids.WorkspaceID, key feedid.RowKey, row *frontendv1.FeedRow) {
+// UpsertAtTurnAddress upserts a daemon-synthesized row of TURN AT THE TURN'S
+// ADDRESS: the row's identity is composed from the feed the turn draws on and
+// it is parented exactly as the resolver's own draw of the same row key will
+// be, so the two are ONE row rather than a copy the turn's draw can never
+// replace.
+func (r *resolver) UpsertAtTurnAddress(ws ids.WorkspaceID, turn ids.TurnID, key feedid.RowKey, row *frontendv1.FeedRow) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)
-	at := r.outputPlacement(s)
+	at := r.outputPlacement(s, &turn)
 	row.Id = r.rowID(ws, at.feed, key)
-	r.logger(ws).Debug("daemon.feed.synthesized_at_output",
-		"a daemon-synthesized row was upserted at the session's output address",
-		dlog.Context{"feed": r.feedKey(ws, at.feed), "row": row.GetId().GetValue()})
+	r.logger(ws).Debug("daemon.feed.synthesized_at_turn_address",
+		"a daemon-synthesized row was upserted at its turn's address",
+		dlog.Context{"feed": r.feedKey(ws, at.feed), "row": row.GetId().GetValue(), "turn": string(turn)})
 	r.upsert(s, at, row, true)
 }
 
@@ -1365,78 +1354,4 @@ func (r *resolver) mintSubFeed(s *wsState, head *frontendv1.FeedId, headFeed fee
 // over a missing highlighter would lose the file the agent read.
 func (r *resolver) painter() paint.Painter {
 	return r.deps.Painter
-}
-
-// A MIRRORED OUTPUT ADDRESS (wsm.OutputAddress.Mirror) draws every row that
-// lands at it ALSO on the root feed, as an ordinary row of the conversation.
-// It is how a merge's repair turns -- the workspace's own session resolving a
-// conflict or fixing a suite -- appear both in the merge bubble's tab and in
-// the main feed. The copy is a second resolved row with its own identity (the
-// same row key, addressed on the root feed), never one row the client fans
-// out: a row nested directly under the addressed parent (the tab) is a
-// top-level row on the root feed, and a row nested under another row of the
-// addressed feed is nested under that row's own root copy.
-
-// mirrorRow answers the root feed's copy of a row drawn on feed, and false
-// when the row is not drawn at a mirrored output address. A row whose identity
-// cannot be re-keyed is recorded at ERROR and not mirrored: the tab still has
-// it, and the main feed is missing it loudly rather than holding a guess.
-func (r *resolver) mirrorRow(s *wsState, feed feedid.Feed, row *frontendv1.FeedRow) (*frontendv1.FeedRow, bool) {
-	id, ok := r.mirrorID(s, feed, row.GetId().GetValue())
-	if !ok {
-		return nil, false
-	}
-	copy, cloned := proto.Clone(row).(*frontendv1.FeedRow)
-	if !cloned {
-		r.logger(s.id).Error("daemon.feed.mirror", "a mirrored row could not be copied onto the root feed",
-			dlog.Context{"row": row.GetId().GetValue()})
-		return nil, false
-	}
-	copy.Id = &frontendv1.FeedId{Value: id}
-	// THE COPY IS ORDERED ON THE ROOT FEED ITSELF: a restated row carries the
-	// addressed feed's order key, which is no key of the root's.
-	copy.Order = nil
-	copy.Parent = nil
-	if parent := row.GetParent().GetRow().GetValue(); parent != "" && !r.isAddressParent(s, parent) {
-		mirroredParent, ok := r.mirrorID(s, feed, parent)
-		if !ok {
-			return nil, false
-		}
-		copy.Parent = &frontendv1.FeedRowParent{Row: &frontendv1.FeedId{Value: mirroredParent}}
-	}
-	return copy, true
-}
-
-// mirrorID answers the root feed's identity for a row id drawn on feed, and
-// false when feed is not a mirrored output address.
-func (r *resolver) mirrorID(s *wsState, feed feedid.Feed, id string) (string, bool) {
-	if s.address == nil || !s.address.Mirror || feed.Root {
-		return "", false
-	}
-	if r.feedKey(s.id, feed) != r.feedKey(s.id, s.address.Feed) {
-		return "", false
-	}
-	ref, err := r.deps.Decode(&frontendv1.FeedId{Value: id})
-	if err != nil {
-		r.logger(s.id).Error("daemon.feed.mirror", "a row drawn at a mirrored output address could not be re-keyed onto the root feed; the main feed does not show it",
-			dlog.Context{"row": id, "cause": err.Error()})
-		return "", false
-	}
-	ref.Feed = feedid.Feed{Root: true}
-	mirrored := r.deps.Encode(ref).GetValue()
-	if mirrored == "" {
-		r.logger(s.id).Error("daemon.feed.mirror", "a mirrored row's root identity encoded to nothing; the main feed does not show it",
-			dlog.Context{"row": id})
-		return "", false
-	}
-	return mirrored, true
-}
-
-// isAddressParent reports whether a parent id is the output address's own
-// parent row (the merge tab the rows nest under), which a root copy drops.
-func (r *resolver) isAddressParent(s *wsState, parent string) bool {
-	if s.address.Parent == nil {
-		return false
-	}
-	return r.deps.Encode(*s.address.Parent).GetValue() == parent
 }

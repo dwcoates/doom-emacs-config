@@ -261,15 +261,15 @@ func TestAnAgentAddressedPromptCarriesTheSameBodyAtBothEnds(t *testing.T) {
 	}
 }
 
-func TestAPromptWhileAnOutputAddressIsInForceStaysAUserPrompt(t *testing.T) {
-	// Arrange: a merge lease holds the session, and the recipient is a
+func TestAPromptOfAnAddressedTurnStaysAUserPrompt(t *testing.T) {
+	// Arrange: a merge's own turn is addressed, and the recipient is a
 	// subagent the resolver knows.
 	h := newHarness(t)
 	h.deliverPrompt("turn-1", "spawn an explorer")
 	created := &conversationv1.AgentId{Value: "agent-explore"}
 	h.spawnSubagent("spawn-1", created, "Explore", "map the daemon")
 	lease := ids.LeaseID("lease-7")
-	h.resolver.SetOutputAddress(testWorkspace, &sessionwatcher.OutputAddress{
+	h.resolver.AddressTurn(testWorkspace, "turn-2", &sessionwatcher.OutputAddress{
 		Feed: feedid.Feed{Merge: &lease},
 	})
 
@@ -598,9 +598,9 @@ func TestAReplayedEndedTurnLeavesItsPromptSettled(t *testing.T) {
 	}
 }
 
-// THE QUEUE'S MIRROR IS STAMPED ON THE SAME PATH as the resolver's own draw: a
-// mirrored prompt of an open turn works.
-func TestAMirroredPromptOfAnOpenTurnWorks(t *testing.T) {
+// THE QUEUE'S ACCEPTED PROMPT IS STAMPED ON THE SAME PATH as the resolver's own draw: an
+// accepted prompt of an open turn works.
+func TestAnAcceptedPromptOfAnOpenTurnWorks(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	row := &frontendv1.FeedRow{
@@ -611,11 +611,11 @@ func TestAMirroredPromptOfAnOpenTurnWorks(t *testing.T) {
 	}
 
 	// Act.
-	h.resolver.UpsertAtOutputAddress(testWorkspace, feedid.RowKey{Kind: feedid.KindPrompt, ID: "turn-1"}, row)
+	h.resolver.UpsertAtTurnAddress(testWorkspace, "turn-1", feedid.RowKey{Kind: feedid.KindPrompt, ID: "turn-1"}, row)
 
 	// Assert.
 	if !h.promptWorking("turn-1") {
-		t.Fatal("the mirrored prompt of an open turn is not working")
+		t.Fatal("the accepted prompt of an open turn is not working")
 	}
 }
 
@@ -630,7 +630,7 @@ func TestAPromptNamingNoTurnIsNotWorking(t *testing.T) {
 	}
 
 	// Act.
-	h.resolver.UpsertAtOutputAddress(testWorkspace, feedid.RowKey{Kind: feedid.KindPrompt, ID: "unturned"}, row)
+	h.resolver.UpsertAtTurnAddress(testWorkspace, "unturned", feedid.RowKey{Kind: feedid.KindPrompt, ID: "unturned"}, row)
 
 	// Assert.
 	if h.only(rootFeed()).GetUserPrompt().GetWorking() {

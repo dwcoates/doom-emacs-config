@@ -420,11 +420,11 @@ func TestAFoldedCloseDrawsNoEndingOfItsOwn(t *testing.T) {
 }
 
 func TestAReplayedTurnsRecordedEndingIsDrawnAtItsRecordedAddress(t *testing.T) {
-	// Arrange: a repair turn recorded at a mirrored tab, closed with no
+	// Arrange: a repair turn recorded at a tab, closed with no
 	// terminal on the page, then an ordinary turn.
 	h := newHarness(t)
 	lease := ids.LeaseID("lease-7")
-	h.addresses = map[ids.TurnID]*wsm.OutputAddress{"turn-1": recordedTabAddress(lease, true), "turn-2": nil}
+	h.addresses = map[ids.TurnID]*wsm.OutputAddress{"turn-1": recordedTabAddress(lease), "turn-2": nil}
 	h.closes = map[ids.TurnID]wsm.RecordedClose{"turn-1": {How: wsm.CloseOrphaned, At: closedAt}}
 
 	// Act

@@ -91,14 +91,20 @@ type Resolver interface {
 	// CloseReader drops a reader's walk when its connection ends.
 	CloseReader(ws ids.WorkspaceID, reader ReaderID)
 
-	// SetOutputAddress installs the address a lease holder wants this
-	// session's rows stamped with; nil restores the root feed.
+	// SetOutputAddress installs the address a lease holder wants the turns
+	// IT starts drawn at; nil withdraws it. It redirects no other turn and
+	// moves no row: the prompt queue records it on a turn the holder starts,
+	// and only that turn draws there (turnaddress.go).
 	SetOutputAddress(ws ids.WorkspaceID, addr *sessionwatcher.OutputAddress)
 	// OutputAddress answers a copy of the address standing for one
-	// workspace's session output, nil when its rows go on the root feed. The
-	// prompt queue records it on every turn it opens, so a replay of that turn
-	// draws its rows where they were drawn live (TurnAddresses).
+	// workspace, nil when none stands. The prompt queue reads it as it
+	// records a turn the lease holder started.
 	OutputAddress(ws ids.WorkspaceID) *sessionwatcher.OutputAddress
+	// AddressTurn records the address one turn draws at, nil for the root
+	// feed: the address the prompt queue recorded on the turn
+	// (wsm.Turn.Address), handed over as it is recorded, so the live draw and
+	// every replay (TurnAddresses) place the turn from one fact.
+	AddressTurn(ws ids.WorkspaceID, turn ids.TurnID, addr *sessionwatcher.OutputAddress)
 
 	// ResetWorkspace empties one workspace's feed whole: every row of every
 	// feed is retired on the wire and every accumulation is dropped, so the
@@ -144,13 +150,13 @@ type Resolver interface {
 	// moment that workspace's feed is first touched; a bind's reset forgets
 	// them with every other row.
 	UpsertDurable(ws ids.WorkspaceID, feed feedid.Feed, row *frontendv1.FeedRow)
-	// UpsertAtOutputAddress upserts a daemon-synthesized row at the session's
-	// STANDING OUTPUT ADDRESS rather than a named feed: the mirror of an
-	// accepted user prompt belongs wherever the lease holder addressed the
-	// session's output (a merge tab), never unconditionally on the root feed,
-	// because the resolver's own later draw of that same row key lands at the
-	// address and would otherwise leave the root copy standing forever.
-	UpsertAtOutputAddress(ws ids.WorkspaceID, key feedid.RowKey, row *frontendv1.FeedRow)
+	// UpsertAtTurnAddress upserts a daemon-synthesized row of one turn at
+	// THE ADDRESS THAT TURN DRAWS AT rather than a named feed: the accepted
+	// prompt of a merge's own turn belongs in its tab, and every other
+	// accepted prompt on the root feed, because the resolver's own later draw
+	// of that same row key lands there and would otherwise leave a second row
+	// standing forever.
+	UpsertAtTurnAddress(ws ids.WorkspaceID, turn ids.TurnID, key feedid.RowKey, row *frontendv1.FeedRow)
 	// UpsertCommandPanel mints a NON-DURABLE root-feed row carrying a
 	// recognized command's panel. Its FeedId comes from (workspace, the
 	// per-workspace monotonically increasing synthesized sequence), so a
@@ -268,8 +274,7 @@ type Deps struct {
 	// Encode renders a row address as its FeedId. Defaults to feedid.Encode.
 	Encode func(feedid.Ref) *frontendv1.FeedId
 	// Decode parses a FeedId back into its row address. Defaults to
-	// feedid.Decode. A MIRRORED output address re-keys each row it draws onto
-	// the root feed through it.
+	// feedid.Decode.
 	Decode func(*frontendv1.FeedId) (feedid.Ref, error)
 	// EncodeFeed renders a feed address as its FeedId. Defaults to
 	// feedid.EncodeFeed.
@@ -300,13 +305,12 @@ type Deps struct {
 	TurnCloses func(context.Context, ids.WorkspaceID, []ids.TurnID) (map[ids.TurnID]wsm.RecordedClose, error)
 	// TurnAddresses answers the output address each named turn was recorded
 	// with (wsm.DB.TurnAddresses): a recorded turn answers its address, nil for
-	// the root feed, and an unrecorded one is absent. A replay draws each
-	// recorded turn's entries at its recorded address, through the same upsert
-	// as a live draw, so a MIRRORED address's root copies are part of the
-	// replayed history exactly as they were of the live one.
+	// the root feed, and an unrecorded one is absent. A replay takes each
+	// recorded turn's address into the table the live draw places it by
+	// (turnaddress.go), so a turn replays where it was drawn live.
 	//
-	// nil draws every replayed entry at the standing address, which is what a
-	// test that is not about addressed turns wants.
+	// nil adds no address, which is what a test that is not about addressed
+	// turns wants.
 	TurnAddresses func(context.Context, ids.WorkspaceID, []ids.TurnID) (map[ids.TurnID]*wsm.OutputAddress, error)
 	// OwnedTurns answers which of the named turns the workspace recorded as
 	// its own (wsm.DB.RecordedTurns). On a FORK it is what tells the
