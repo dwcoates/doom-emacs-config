@@ -21,6 +21,7 @@ var rosterArmClaims = map[string]Claim{
 	"merge_failed":   MergeFailed,
 	"merged":         Merged,
 	"vendor_blocked": Blocked,
+	"api_retrying":   Blocked,
 	"permission":     Waiting,
 	"submitting":     Thinking,
 	"thinking":       Thinking,
