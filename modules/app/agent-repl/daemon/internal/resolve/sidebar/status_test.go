@@ -1388,3 +1388,132 @@ func TestAMergeInFlightDominatesTheLink(t *testing.T) {
 		t.Fatalf("status = %q, want merging", got)
 	}
 }
+
+// ---- the API-retry block ------------------------------------------------
+
+// apiRetry is the vendor's report that it is retrying a failed call.
+func apiRetry() *conversationv1.ApiRequestFailed {
+	return &conversationv1.ApiRequestFailed{Message: "Can't reach the API server (ENOTFOUND)"}
+}
+
+// prose is a frame of the agent's prose, which answers a retried call.
+func prose() *conversationv1.AgentActivity {
+	return &conversationv1.AgentActivity{Item: &conversationv1.AgentActivity_Response{Response: &conversationv1.AgentResponse{}}}
+}
+
+func TestRowIsApiRetryingWhileTheVendorRetriesTheTurnsCall(t *testing.T) {
+	// Arrange.
+	r := live(t, arrange(t))
+	r.SetTurn(theWS, &footer.TurnStarted{At: epoch})
+
+	// Act.
+	r.OnApiError(theWS, agent("main"), apiRetry())
+
+	// Assert.
+	if got := statusName(onlyRow(t, r)); got != "api_retrying" {
+		t.Fatalf("status = %q, want api_retrying", got)
+	}
+}
+
+func TestARetryWithNoTurnInFlightDoesNotBlockTheRow(t *testing.T) {
+	// Arrange.
+	r := live(t, arrange(t))
+
+	// Act.
+	r.OnApiError(theWS, agent("main"), apiRetry())
+
+	// Assert.
+	if got := statusName(onlyRow(t, r)); got == "api_retrying" {
+		t.Fatalf("status = api_retrying with no turn in flight")
+	}
+}
+
+func TestTheRetriedAgentsAnswerEndsApiRetrying(t *testing.T) {
+	// Arrange.
+	r := live(t, arrange(t))
+	r.SetTurn(theWS, &footer.TurnStarted{At: epoch})
+	r.OnApiError(theWS, agent("main"), apiRetry())
+
+	// Act.
+	r.OnActivity(theWS, agent("main"), prose())
+
+	// Assert.
+	if got := statusName(onlyRow(t, r)); got != "thinking" {
+		t.Fatalf("status = %q, want thinking once the retried call is answered", got)
+	}
+}
+
+func TestAnotherAgentsAnswerDoesNotEndApiRetrying(t *testing.T) {
+	// Arrange.
+	r := live(t, arrange(t))
+	r.SetTurn(theWS, &footer.TurnStarted{At: epoch})
+	r.OnApiError(theWS, agent("main"), apiRetry())
+
+	// Act.
+	r.OnActivity(theWS, agent("sub-1"), prose())
+
+	// Assert.
+	if got := statusName(onlyRow(t, r)); got != "api_retrying" {
+		t.Fatalf("status = %q, want api_retrying while the main agent's call is still retried", got)
+	}
+}
+
+func TestAToolFrameWithoutUsageDoesNotEndApiRetrying(t *testing.T) {
+	// Arrange.
+	r := live(t, arrange(t))
+	r.SetTurn(theWS, &footer.TurnStarted{At: epoch})
+	r.OnApiError(theWS, agent("main"), apiRetry())
+
+	// Act.
+	r.OnActivity(theWS, agent("main"), &conversationv1.AgentActivity{Item: &conversationv1.AgentActivity_Read{}})
+
+	// Assert.
+	if got := statusName(onlyRow(t, r)); got != "api_retrying" {
+		t.Fatalf("status = %q, want api_retrying until the call is answered", got)
+	}
+}
+
+func TestANewTurnEndsApiRetrying(t *testing.T) {
+	// Arrange.
+	r := live(t, arrange(t))
+	r.SetTurn(theWS, &footer.TurnStarted{At: epoch})
+	r.OnApiError(theWS, agent("main"), apiRetry())
+
+	// Act.
+	r.SetTurn(theWS, &footer.TurnStarted{At: epoch})
+
+	// Assert.
+	if got := statusName(onlyRow(t, r)); got != "submitting" {
+		t.Fatalf("status = %q, want submitting for the prompt that opened the new turn", got)
+	}
+}
+
+func TestTheTurnsEndEndsApiRetrying(t *testing.T) {
+	// Arrange.
+	r := live(t, arrange(t))
+	r.SetTurn(theWS, &footer.TurnStarted{At: epoch})
+	r.OnApiError(theWS, agent("main"), apiRetry())
+
+	// Act.
+	r.SetTurnEnded(theWS, wsm.CloseFailed)
+
+	// Assert.
+	if got := statusName(onlyRow(t, r)); got == "api_retrying" {
+		t.Fatalf("status = api_retrying after the turn ended")
+	}
+}
+
+func TestAVendorBlockOutranksApiRetrying(t *testing.T) {
+	// Arrange.
+	r := live(t, arrange(t))
+	r.SetTurn(theWS, &footer.TurnStarted{At: epoch})
+	r.OnApiError(theWS, agent("main"), apiRetry())
+
+	// Act.
+	r.OnSessionUpdate(theWS, rejectedRateLimit())
+
+	// Assert.
+	if got := statusName(onlyRow(t, r)); got != "vendor_blocked" {
+		t.Fatalf("status = %q, want vendor_blocked over the retry", got)
+	}
+}

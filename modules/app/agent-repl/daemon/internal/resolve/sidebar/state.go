@@ -14,7 +14,7 @@ import (
 // without a color fails there rather than drawing an unpainted dot.
 var statusArms = []string{
 	"submitting", "thinking", "clearing", "compacting", "permission", "done",
-	"interrupted", "turn_failed", "ready", "idle_async", "vendor_blocked", "init", "severed",
+	"interrupted", "turn_failed", "ready", "idle_async", "vendor_blocked", "api_retrying", "init", "severed",
 	"start_failed", "degraded", "dead", "merging",
 	"merge_queued", "merge_failed", "merged", "none",
 	"inactive",
@@ -63,6 +63,10 @@ type wsState struct {
 	// compacting reports a VENDOR-initiated auto-compaction in flight, which
 	// no accepted turn of ours announces.
 	compacting bool
+	// retrying is the agent whose call the vendor is retrying mid-turn, empty
+	// when none is. It stands from the reported failure until that agent is
+	// answered (ladder.RetryAnswered), the turn ends, or a new turn opens.
+	retrying string
 
 	// permissions are the open consent asks, by permission id. A count rather
 	// than a flag: two gated calls must both be answered before the row leaves
@@ -181,6 +185,9 @@ func (s *wsState) startTurn(turn *footer.TurnStarted) {
 	s.turnEverRan = true
 	s.sawActivity = false
 	s.vendorBlocked = false
+	// A NEW TURN ENDS THE LAST ONE'S RETRY: the prompt that opened it is
+	// working until the API fails again.
+	s.retrying = ""
 	s.lastFailure = ladder.NoFailure
 	s.compacting = turn.Act == footer.ActCompact
 	// A new turn is new foreground work: the detached items announced by the
@@ -389,4 +396,10 @@ func (r *rosterState) sessions() map[ids.WorkspaceID]*wsm.Session {
 		out[r.reg.Sessions[i].Workspace] = &r.reg.Sessions[i]
 	}
 	return out
+}
+
+// retryBlocks reports a standing API retry that blocks the row: the vendor is
+// retrying a call and a turn is in flight to be held by it.
+func (s *wsState) retryBlocks() bool {
+	return s.retrying != "" && s.turn != nil
 }

@@ -32,7 +32,7 @@ func testColors() vocab.RenderColors {
 	status := map[string]string{}
 	for _, arm := range []string{
 		"submitting", "thinking", "clearing", "compacting", "permission", "done",
-		"interrupted", "turn_failed", "ready", "idle_async", "vendor_blocked", "init", "severed",
+		"interrupted", "turn_failed", "ready", "idle_async", "vendor_blocked", "api_retrying", "init", "severed",
 		"start_failed", "degraded", "dead", "merging",
 		"merge_queued", "merge_failed", "merged", "none",
 		"inactive",
@@ -184,6 +184,8 @@ func statusName(row *frontendv1.RosterRow) string {
 		return "idle_async"
 	case *frontendv1.RosterRow_VendorBlocked:
 		return "vendor_blocked"
+	case *frontendv1.RosterRow_ApiRetrying:
+		return "api_retrying"
 	case *frontendv1.RosterRow_Init:
 		return "init"
 	case *frontendv1.RosterRow_Severed:
