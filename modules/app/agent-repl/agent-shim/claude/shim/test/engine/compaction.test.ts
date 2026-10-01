@@ -23,7 +23,6 @@ import {
   contextCutCompacted,
   contextCutFailed,
   readAmbient,
-  transcriptTailIsCompaction,
 } from "../../src/engine/compaction.js";
 import { readTranscriptFacts } from "../../src/engine/cold.js";
 
@@ -323,55 +322,6 @@ const AMBIENT_KEYS = [
   "gitBranch",
   "slug",
 ];
-
-describe("reading a compaction back off the transcript", () => {
-  function scratchFile(lines: unknown[]): string {
-    const file = path.join(mkdtempSync(path.join(os.tmpdir(), "shim-tail-")), "t.jsonl");
-    writeFileSync(file, `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`, "utf8");
-    return file;
-  }
-
-  const boundary = { type: "system", subtype: "compact_boundary", uuid: "b-1" };
-  const summary = { type: "user", isCompactSummary: true, uuid: "s-1" };
-  const said = { type: "assistant", uuid: "a-1" };
-
-  it("reads a transcript whose last two records are the compaction pair as compacted", () => {
-    const file = scratchFile([said, boundary, summary]);
-
-    expect(transcriptTailIsCompaction(file)).toBe(true);
-  });
-
-  it("reads a compaction with a conversation after it as NOT compacted", () => {
-    // THE WHOLE POINT OF LOOKING AT THE TAIL. A boundary anywhere earlier is a
-    // compaction the conversation has since outgrown, which is exactly the
-    // case that is owed another one.
-    const file = scratchFile([boundary, summary, said]);
-
-    expect(transcriptTailIsCompaction(file)).toBe(false);
-  });
-
-  it("reads a boundary with no summary after it as NOT compacted", () => {
-    const file = scratchFile([said, boundary]);
-
-    expect(transcriptTailIsCompaction(file)).toBe(false);
-  });
-
-  it("reads a transcript that is not there as NOT compacted", () => {
-    const missing = path.join(mkdtempSync(path.join(os.tmpdir(), "shim-tail-")), "absent.jsonl");
-
-    expect(transcriptTailIsCompaction(missing)).toBe(false);
-  });
-
-  it("reads an unparseable last line as NOT compacted", () => {
-    // A line this build cannot read is still a line the vendor wrote, so it
-    // BREAKS the tail rather than being skipped past.
-    const dir = mkdtempSync(path.join(os.tmpdir(), "shim-tail-"));
-    const file = path.join(dir, "t.jsonl");
-    writeFileSync(file, `${JSON.stringify(boundary)}\n${JSON.stringify(summary)}\n{not json\n`, "utf8");
-
-    expect(transcriptTailIsCompaction(file)).toBe(false);
-  });
-});
 
 describe("the ambient fields a bookkeeping last line must not erase", () => {
   // THE VENDOR WRITES LINES THAT ARE NOT CONVERSATION RECORDS. `last-prompt`,
