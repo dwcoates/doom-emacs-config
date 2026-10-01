@@ -478,6 +478,78 @@ export function killTurnKilled(killed: conversationv1.TurnKilled): shimv1.KillTu
 }
 
 // ---------------------------------------------------------------------------
+// RollBackSession
+// ---------------------------------------------------------------------------
+
+/**
+ * Why the conversation was not rolled back. The vendor's own words ride the
+ * two arms that relay a vendor's no, verbatim.
+ */
+export type RollBackSessionCause =
+  | { readonly kind: "noSession" }
+  | { readonly kind: "promptNotRecorded" }
+  | { readonly kind: "firstPrompt" }
+  | { readonly kind: "unseenPrompt"; readonly vendorPromptUuid: string }
+  | { readonly kind: "vendorRefused"; readonly vendorMessage: string }
+  | { readonly kind: "filesNotRestorable"; readonly vendorMessage: string };
+
+/** The base constructor for `shim.v1.RollBackSessionFailure`. */
+export function rollBackSessionFailure(cause: RollBackSessionCause, detail: string): shimv1.RollBackSessionFailure {
+  return create(shimv1.RollBackSessionFailureSchema, { detail, cause: rollBackSessionFailureArm(cause) });
+}
+
+/** The failure's `cause` oneof arm, chosen from the closed union. */
+function rollBackSessionFailureArm(cause: RollBackSessionCause): shimv1.RollBackSessionFailure["cause"] {
+  switch (cause.kind) {
+    case "noSession":
+      return { case: "noSession", value: create(shimv1.RollBackSessionNoSessionSchema, {}) };
+    case "promptNotRecorded":
+      return { case: "promptNotRecorded", value: create(shimv1.RollBackSessionPromptNotRecordedSchema, {}) };
+    case "firstPrompt":
+      return { case: "firstPrompt", value: create(shimv1.RollBackSessionFirstPromptSchema, {}) };
+    case "unseenPrompt":
+      return {
+        case: "unseenPrompt",
+        value: create(shimv1.RollBackSessionUnseenPromptSchema, { vendorPromptUuid: cause.vendorPromptUuid }),
+      };
+    case "vendorRefused":
+      return {
+        case: "vendorRefused",
+        value: create(shimv1.RollBackSessionVendorRefusedSchema, { vendorMessage: cause.vendorMessage }),
+      };
+    case "filesNotRestorable":
+      return {
+        case: "filesNotRestorable",
+        value: create(shimv1.RollBackSessionFilesNotRestorableSchema, { vendorMessage: cause.vendorMessage }),
+      };
+  }
+}
+
+/** The refusal as the whole response the handler returns. */
+export function rollBackSessionRefused(cause: RollBackSessionCause, detail: string): shimv1.RollBackSessionResponse {
+  return create(shimv1.RollBackSessionResponseSchema, {
+    result: { case: "failure", value: rollBackSessionFailure(cause, detail) },
+  });
+}
+
+/**
+ * The conversation now ends just before the prompt. `restoredPaths` is present
+ * exactly when `restore_files` was asked: the files the restore changed back.
+ */
+export function rollBackSessionSucceeded(restoredPaths: readonly string[] | undefined): shimv1.RollBackSessionResponse {
+  return create(shimv1.RollBackSessionResponseSchema, {
+    result: {
+      case: "success",
+      value: create(shimv1.RollBackSessionSuccessSchema, {
+        ...(restoredPaths === undefined
+          ? {}
+          : { filesRestored: create(shimv1.RollBackSessionFilesRestoredSchema, { paths: [...restoredPaths] }) }),
+      }),
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
 // StopBash
 // ---------------------------------------------------------------------------
 

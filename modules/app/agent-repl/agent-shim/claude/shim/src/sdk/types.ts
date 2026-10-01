@@ -63,6 +63,7 @@ import type {
   SDKThinkingTokensMessage,
   SDKToolProgressMessage,
   SDKUserMessage,
+  RewindFilesResult,
   SlashCommand,
 } from "@anthropic-ai/claude-agent-sdk";
 
@@ -177,6 +178,9 @@ export type BackgroundTaskSummaryLike = BackgroundTaskSummary;
  */
 export type InterruptReceipt = SDKControlInterruptResponse;
 
+/** `Query.rewindFiles`' answer: whether the files can go back, and which did. */
+export type RewindFilesResultLike = RewindFilesResult;
+
 // ---------------------------------------------------------------------------
 // The query surface the shim actually drives
 // ---------------------------------------------------------------------------
@@ -218,6 +222,12 @@ export interface QueryLike extends AsyncIterable<SdkMessage> {
   stopTask(taskId: string): Promise<void>;
   /** Whether any background task is live (optionally for one tool_use_id). */
   backgroundTasks(toolUseId?: string): Promise<boolean>;
+  /**
+   * Restore the files the session's edit tools changed to their state when the
+   * user message `userMessageId` was sent (file checkpointing, which every
+   * session runs with). `dryRun` asks without changing anything.
+   */
+  rewindFiles(userMessageId: string, options?: { dryRun?: boolean }): Promise<RewindFilesResultLike>;
   /** Push more user messages into a running streaming-input query. */
   streamInput(stream: AsyncIterable<SdkUserMessage>): Promise<void>;
   /** Release the query and the CLI child behind it. */

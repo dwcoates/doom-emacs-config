@@ -214,6 +214,30 @@ describe("realQueryOptions on a resume", () => {
     });
   });
 
+  it("carries the dropped turn's prompt uuid beside the rewind target", () => {
+    // Arrange, Act — RollBackSession's single-turn guard is a vendor option too.
+    const options = realQueryOptions(
+      spec({
+        binding: { kind: "resume", resumeSessionId: "vendor-old" },
+        resumeSessionAt: "msg-uuid-7",
+        resumeDropsTurn: "prompt-uuid-8",
+      }),
+    );
+
+    // Assert.
+    expect(options.resumeDropsTurn).toBe("prompt-uuid-8");
+  });
+
+  it("omits the dropped turn when the resume named none", () => {
+    // Arrange, Act.
+    const options = realQueryOptions(
+      spec({ binding: { kind: "resume", resumeSessionId: "vendor-old" }, resumeSessionAt: "msg-uuid-7" }),
+    );
+
+    // Assert.
+    expect(options).not.toHaveProperty("resumeDropsTurn");
+  });
+
   it("omits the rewind target when the resume named none", () => {
     // Arrange, Act.
     const options = realQueryOptions(
@@ -245,6 +269,28 @@ describe("realQueryOptions declares the per-task stop", () => {
 
     // Assert.
     expect(options.perTaskStopAffordance).toBe(true);
+  });
+});
+
+/**
+ * File checkpointing. RollBackSession's `restore_files` rewinds the files to a
+ * prompt, which only works for a prompt sent with checkpointing on, so it rides
+ * every way a session comes into being.
+ */
+describe("realQueryOptions turns file checkpointing on", () => {
+  it.each([
+    { name: "a fresh start", overrides: { binding: { kind: "fresh", sessionId: "vendor-1" } } },
+    { name: "a resume", overrides: { binding: { kind: "resume", resumeSessionId: "vendor-old" } } },
+    {
+      name: "a rewound resume",
+      overrides: { binding: { kind: "resume", resumeSessionId: "vendor-old" }, resumeSessionAt: "msg-uuid-7" },
+    },
+  ] satisfies { name: string; overrides: Partial<RealQuerySpec> }[])("on $name", ({ overrides }) => {
+    // Arrange, Act.
+    const options = realQueryOptions(spec(overrides));
+
+    // Assert.
+    expect(options.enableFileCheckpointing).toBe(true);
   });
 });
 

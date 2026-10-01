@@ -3665,3 +3665,83 @@ describe("what the user said, with no content at all", () => {
     expect(saidText(create(conversationv1.UserSaidSchema, {}))).toBe("");
   });
 });
+
+describe("RollBackSession's turn steps", () => {
+  /** One live shell `turn` spawned. */
+  function spawn(h: Harness, taskId: string, turn: string): void {
+    h.live.onTaskStarted(
+      {
+        type: "system",
+        subtype: "task_started",
+        task_id: taskId,
+        tool_use_id: `toolu_${taskId}`,
+        description: "",
+        uuid: "00000000-0000-4000-8000-000000000000",
+        session_id: "s",
+      },
+      turn,
+    );
+  }
+
+  it("interrupts nothing and answers absence when no turn is open", async () => {
+    // Arrange
+    const h = await harness();
+
+    // Act
+    const interrupted = await h.turns.interruptForRollback();
+
+    // Assert
+    expect({ interrupted, calls: h.query.calls.filter((call) => call === "interrupt") }).toEqual({
+      interrupted: undefined,
+      calls: [],
+    });
+  });
+
+  it("interrupts the open turn as an unforced kill does, sparing its detached work", async () => {
+    // Arrange
+    const h = await harness();
+    h.open = { id: TURN, keepalive: false, startedAtMs: 1 };
+    spawn(h, "b01", TURN.value);
+
+    // Act
+    const interrupted = await h.turns.interruptForRollback();
+
+    // Assert
+    expect({
+      interrupted: interrupted?.id.value,
+      calls: h.query.calls.filter((call) => call === "interrupt"),
+      stopped: h.query.stoppedTasks,
+      open: h.open,
+      stopCommands: h.stopCommands.map((held) => held.turn),
+    }).toEqual({ interrupted: TURN.value, calls: ["interrupt"], stopped: [], open: undefined, stopCommands: [TURN.value] });
+  });
+
+  it("leaves the shim's own keep-alive alone", async () => {
+    // Arrange
+    const h = await harness();
+    openKeepalive(h);
+
+    // Act
+    const interrupted = await h.turns.interruptForRollback();
+
+    // Assert
+    expect(interrupted).toBeUndefined();
+  });
+
+  it("stops the work every named turn spawned and nothing else", async () => {
+    // Arrange
+    const h = await harness();
+    spawn(h, "b00", "turn-0");
+    spawn(h, "b01", "turn-1");
+    spawn(h, "b02", "turn-2");
+
+    // Act
+    const stopped = await h.turns.stopWorkSpawnedBy(["turn-1", "turn-2"]);
+
+    // Assert
+    expect({ stopped: stopped.map((entry) => entry.taskId), vendor: h.query.stoppedTasks }).toEqual({
+      stopped: ["b01", "b02"],
+      vendor: ["b01", "b02"],
+    });
+  });
+});
