@@ -2,12 +2,14 @@ package vocab
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"testing"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
+	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
 // repoVocabDir is the checked-in vocabulary directory, which is the contract
@@ -716,6 +718,78 @@ func TestTheColorAssignmentsFollowTheOwnersColorMeaningsWithNothingParked(t *tes
 			// Assert.
 			if got != tc.want {
 				t.Fatalf("%s[%s] = %q, want %q", tc.table, tc.arm, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestTheComposerStaysOpenOnBlockedApiRetrying(t *testing.T) {
+	// Arrange.
+	c := loadColors(t)
+
+	// Act.
+	got := c.ComposerOpenSubstatuses["blocked"]
+
+	// Assert.
+	if len(got) != 1 || got[0] != "api_retrying" {
+		t.Fatalf("composer_open_substatuses[blocked] = %v, want [api_retrying] (owner ruling, 2026-10-01)", got)
+	}
+}
+
+func TestComposerOpenSubstatusesNameRealSubstatusArms(t *testing.T) {
+	// Arrange.
+	c := loadColors(t)
+	armsOf := func(status string) ([]string, error) {
+		fd := (&frontendv1.FooterStatus{}).ProtoReflect().Descriptor().Fields().ByName(protoreflect.Name(status))
+		if fd == nil || fd.Message() == nil {
+			return nil, fmt.Errorf("FooterStatus has no %q arm", status)
+		}
+		return OneofArmNames(fd.Message(), "substatus")
+	}
+
+	// Act.
+	err := c.AssertComposerOpenSubstatusArms(armsOf)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("composer_open_substatuses diverges from the footer protos: %v", err)
+	}
+}
+
+func TestAssertComposerOpenSubstatusArmsRefusesAnInventedSubstatus(t *testing.T) {
+	// Arrange.
+	c := RenderColors{ComposerOpenSubstatuses: map[string][]string{"blocked": {"invented"}}}
+
+	// Act.
+	err := c.AssertComposerOpenSubstatusArms(func(string) ([]string, error) { return []string{"api_retrying"}, nil })
+
+	// Assert.
+	if err == nil {
+		t.Fatalf("an invented substatus was accepted")
+	}
+}
+
+func TestLoadRenderColorsRefusesABadComposerOpenSubstatuses(t *testing.T) {
+	tests := []struct {
+		name  string
+		value any
+	}{
+		{name: "a status that is not a footer arm", value: map[string]any{"invented": []any{"api_retrying"}}},
+		{name: "a status whose color leaves the composer open", value: map[string]any{"working": []any{"api_retrying"}}},
+		{name: "an empty substatus list", value: map[string]any{"blocked": []any{}}},
+		{name: "the empty substatus", value: map[string]any{"blocked": []any{""}}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			dir := writeColors(t, func(m map[string]any) { m["composer_open_substatuses"] = tc.value })
+
+			// Act.
+			_, err := LoadRenderColors(dir)
+
+			// Assert.
+			if err == nil {
+				t.Fatalf("LoadRenderColors accepted composer_open_substatuses = %v", tc.value)
 			}
 		})
 	}
