@@ -30,6 +30,7 @@ import {
   turnId,
   userPromptRow,
 } from "./fixtures";
+import { withoutBlockComments } from "../source-text.js";
 
 let harness: Harness;
 
@@ -123,10 +124,7 @@ describe("the prompt bubble's thinking wave, across a turn", () => {
     // Arrange — the stylesheet as it ships, not a copy. Comments come out
     // first: they are where this sheet keeps its reasoning, and a selector
     // read with one still attached is the comment, not the selector.
-    const css = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8").replace(
-      /\/\*[\s\S]*?\*\//g,
-      "",
-    );
+    const css = withoutBlockComments(readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8"));
 
     // Act — every rule that runs the wave animation.
     const selectors = [...css.matchAll(/([^{}]*)\{[^{}]*animation:\s*bubble-wave[^{}]*\}/g)].map(

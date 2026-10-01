@@ -12,6 +12,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
+import { codeOf } from "../source-text.js";
 
 const SRC = join(process.cwd(), "src");
 
@@ -28,9 +29,7 @@ function sourcesUnder(dir: string): string[] {
 const SOURCES: ReadonlyMap<string, string> = new Map(
   sourcesUnder(SRC).map((path) => [
     relative(SRC, path),
-    readFileSync(path, "utf8")
-      .replace(/\/\*[\s\S]*?\*\//g, "")
-      .replace(/^\s*\/\/.*$/gm, ""),
+    codeOf(readFileSync(path, "utf8")),
   ]),
 );
 
