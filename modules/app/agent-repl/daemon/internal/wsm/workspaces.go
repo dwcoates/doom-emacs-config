@@ -195,8 +195,9 @@ func (s *store) RegisterRepository(ctx context.Context, dir, defaultBranch strin
 		// default branch a mint records are ensureRepo's to decide, and a
 		// second spelling of them in this function is the drift that makes an
 		// answer disagree with the registry it just wrote.
-		row := tx.QueryRowContext(ctx, `SELECT id, dir, name, default_branch FROM repositories WHERE id = ?`, id)
-		return row.Scan(&out.ID, &out.Dir, &out.Name, &out.DefaultBranch)
+		var scanErr error
+		out, scanErr = scanRepository(tx.QueryRowContext(ctx, `SELECT `+repositoryColumns+` FROM repositories WHERE id = ?`, id))
+		return scanErr
 	})
 	if err != nil {
 		return Repository{}, false, err
@@ -296,19 +297,30 @@ func (s *store) ListWorkspaces(ctx context.Context) ([]Workspace, error) {
 	return out, nil
 }
 
+// repositoryColumns is every column a Repository is read from, in
+// scanRepository's order: the ONE column list both reads share.
+const repositoryColumns = `id, dir, name, default_branch`
+
+// scanRepository reads one Repository from a row of repositoryColumns.
+func scanRepository(row interface{ Scan(...any) error }) (Repository, error) {
+	var repo Repository
+	err := row.Scan(&repo.ID, &repo.Dir, &repo.Name, &repo.DefaultBranch)
+	return repo, err
+}
+
 // ListRepositories loads every repository, all-or-nothing.
 func (s *store) ListRepositories(ctx context.Context) ([]Repository, error) {
 	var out []Repository
 	err := s.read(ctx, "daemon.wsm.list_repositories", dlog.Context{}, func(ctx context.Context) error {
-		rows, err := s.db().QueryContext(ctx, `SELECT id, dir, name, default_branch FROM repositories ORDER BY dir`)
+		rows, err := s.db().QueryContext(ctx, `SELECT `+repositoryColumns+` FROM repositories ORDER BY dir`)
 		if err != nil {
 			return err
 		}
 		defer rows.Close()
 		var loaded []Repository
 		for rows.Next() {
-			var repo Repository
-			if err := rows.Scan(&repo.ID, &repo.Dir, &repo.Name, &repo.DefaultBranch); err != nil {
+			repo, err := scanRepository(rows)
+			if err != nil {
 				return err
 			}
 			loaded = append(loaded, repo)
