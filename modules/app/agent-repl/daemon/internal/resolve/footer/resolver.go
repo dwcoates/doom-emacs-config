@@ -782,7 +782,6 @@ func (r *resolver) sessionArm(ws ids.WorkspaceID, update *conversationv1.Session
 		return "rate_limit_status", func(s *wsState) {
 			r.logSessionArm(ws, s, "rate_limit_status")
 			r.observeRateLimitStatus(s, u.RateLimitStatus)
-			r.observeRateLimitEvent(ws, s, u.RateLimitStatus)
 			// A REJECTED VERDICT IS THE ACCOUNT REFUSING THE SESSION, and any
 			// other verdict lifts the block — the same rule, on the same event,
 			// as the roster's vendor_blocked (ladder.RateLimitBlocks).

@@ -742,13 +742,13 @@ func TestEachArmResolvesItsSalientKindsInPrecedenceThenUnpinnedWithNoStoppedMerg
 			deploying(h)
 			h.r.OnLiveWorkChanged(testWS, liveSet(nil, []string{"shell-1"}, nil))
 		}, "background", "salient.update"},
-		{"blocked on the account, the vendor's refusal explains it", func(h *harness) {
+		{"blocked on the account, the enduring usage figures explain it", func(h *harness) {
 			h.r.OnSessionUpdate(testWS, rejectedFiveHour())
-		}, "blocked", "salient.rate_limit"},
-		{"the refusal that explains the block outranks a deploy", func(h *harness) {
+		}, "blocked", "enduring"},
+		{"blocked on the account under a deploy", func(h *harness) {
 			deploying(h)
 			h.r.OnSessionUpdate(testWS, rejectedFiveHour())
-		}, "blocked", "salient.rate_limit"},
+		}, "blocked", "salient.update"},
 		{"an escalating blocked fault outranks a deploy", func(h *harness) {
 			deploying(h)
 			h.r.OpenFault(testWS, faultOf(t, "f-1", health.KindStateUnreadable, false))

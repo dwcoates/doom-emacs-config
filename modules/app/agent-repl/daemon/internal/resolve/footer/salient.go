@@ -6,7 +6,6 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
-	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/dlog"
@@ -20,14 +19,13 @@ import (
 //
 //	update          a deploy's progress, until the deploy is done here
 //	                (update.go);
-//	rate_limit      a vendor rate-limit event that warned or refused, until a
-//	                later event reports that allowance allowed;
 //	notification    the agent's push notification, until the next prompt;
 //	context_budget  the vendor's context-budget warning or a failed
 //	                compaction, until a cut shrinks the context.
 //
 // Each ends on its own condition and never on a timer: a timer may end only a
-// transient.
+// transient. A vendor rate-limit event stands no line: it feeds the enduring
+// usage figures (owner ruling, 2026-10-01).
 
 // budgetState is the standing context-budget line.
 type budgetState struct {
@@ -35,17 +33,6 @@ type budgetState struct {
 	// agent is the agent whose context the warning is about: empty for a
 	// failed compaction, which is always the main agent's.
 	agent string
-}
-
-// rateEventState is the standing vendor rate-limit event.
-type rateEventState struct {
-	// line is the event as the strip draws it.
-	line *frontendv1.FooterStatusActivityRateLimit
-	// window names the allowance, "" when the vendor named none, so a later
-	// event about the same allowance can end it.
-	window string
-	// at is when the event arrived.
-	at time.Time
 }
 
 // standNotification stands the agent's push notification.
@@ -93,79 +80,6 @@ func (r *resolver) endSubagentBudget(ws ids.WorkspaceID, s *wsState, agent strin
 	r.endContextBudget(ws, s, "daemon.footer.on_agent_terminal")
 }
 
-// observeRateLimitEvent stands or ends the rate-limit event line: a warning or
-// a refusal stands it, and an event reporting the same allowance allowed ends
-// it. A statusless event changes nothing.
-func (r *resolver) observeRateLimitEvent(ws ids.WorkspaceID, s *wsState, status *conversationv1.SessionRateLimitStatus) {
-	window, name := rateLimitWindow(status.GetRateLimitType())
-	line := &frontendv1.FooterStatusActivityRateLimit{Window: window}
-	switch status.GetStatus().(type) {
-	case *conversationv1.SessionRateLimitStatus_Allowed:
-		if s.rateEvent == nil || s.rateEvent.window != name {
-			return
-		}
-		r.logOf(ws, s).Debug("daemon.footer.rate_limit_ended", "an event reported the allowance allowed; the rate-limit line ended",
-			dlog.Context{"window": name})
-		s.rateEvent = nil
-		return
-	case *conversationv1.SessionRateLimitStatus_AllowedWarning:
-		line.Verdict = &frontendv1.FooterStatusActivityRateLimit_AllowedWarning{AllowedWarning: &frontendv1.FooterAllowanceAllowedWarning{}}
-	case *conversationv1.SessionRateLimitStatus_Rejected:
-		line.Verdict = &frontendv1.FooterStatusActivityRateLimit_Rejected{Rejected: &frontendv1.FooterAllowanceRejected{}}
-	default:
-		return
-	}
-	if status.UtilizationPercent != nil {
-		utilization := status.GetUtilizationPercent() / 100
-		line.Utilization = &utilization
-	}
-	if status.ResetsAtMs != nil {
-		resets := status.GetResetsAtMs() / 1000
-		line.ResetsAtS = &resets
-	}
-	s.rateEvent = &rateEventState{line: line, window: name, at: r.opts.clock.Now()}
-	r.logOf(ws, s).Debug("daemon.footer.rate_limit_stood", "the footer stood the vendor's rate-limit event",
-		dlog.Context{"window": name, "verdict": rateVerdictName(line)})
-}
-
-// rateLimitWindow maps the vendor's window onto the strip's, with its name for
-// the record and for matching a later event; nil and "" when the vendor named
-// none.
-func rateLimitWindow(t *conversationv1.SessionRateLimitType) (*frontendv1.FooterStatusActivityRateLimitWindow, string) {
-	w := &frontendv1.FooterStatusActivityRateLimitWindow{}
-	switch t.GetWindow().(type) {
-	case *conversationv1.SessionRateLimitType_FiveHour:
-		w.Window = &frontendv1.FooterStatusActivityRateLimitWindow_Session{Session: &frontendv1.FooterStatusActivityRateLimitWindowSession{}}
-		return w, "session"
-	case *conversationv1.SessionRateLimitType_SevenDay:
-		w.Window = &frontendv1.FooterStatusActivityRateLimitWindow_Weekly{Weekly: &frontendv1.FooterStatusActivityRateLimitWindowWeekly{}}
-		return w, "weekly"
-	case *conversationv1.SessionRateLimitType_SevenDayOpus:
-		w.Window = &frontendv1.FooterStatusActivityRateLimitWindow_WeeklyOpus{WeeklyOpus: &frontendv1.FooterStatusActivityRateLimitWindowWeeklyOpus{}}
-		return w, "weekly_opus"
-	case *conversationv1.SessionRateLimitType_SevenDaySonnet:
-		w.Window = &frontendv1.FooterStatusActivityRateLimitWindow_WeeklySonnet{WeeklySonnet: &frontendv1.FooterStatusActivityRateLimitWindowWeeklySonnet{}}
-		return w, "weekly_sonnet"
-	case *conversationv1.SessionRateLimitType_SevenDayOverageIncluded:
-		w.Window = &frontendv1.FooterStatusActivityRateLimitWindow_WeeklyOverageIncluded{
-			WeeklyOverageIncluded: &frontendv1.FooterStatusActivityRateLimitWindowWeeklyOverageIncluded{}}
-		return w, "weekly_overage_included"
-	case *conversationv1.SessionRateLimitType_Overage:
-		w.Window = &frontendv1.FooterStatusActivityRateLimitWindow_Overage{Overage: &frontendv1.FooterStatusActivityRateLimitWindowOverage{}}
-		return w, "overage"
-	default:
-		return nil, ""
-	}
-}
-
-// rateVerdictName names a rate-limit line's verdict for the record.
-func rateVerdictName(line *frontendv1.FooterStatusActivityRateLimit) string {
-	if line.GetRejected() != nil {
-		return "rejected"
-	}
-	return "allowed_warning"
-}
-
 // sharedLine is one status-independent salient line: the salient oneof's field
 // that carries it, its message, and when it began standing.
 type sharedLine struct {
@@ -175,14 +89,11 @@ type sharedLine struct {
 }
 
 // sharedSalient answers the highest-ranked status-independent salient line
-// standing: a deploy's progress, then a rate-limit event, then the push
-// notification, then the context-budget line. ok is false when none stands.
+// standing: a deploy's progress, then the push notification, then the
+// context-budget line. ok is false when none stands.
 func (r *resolver) sharedSalient(s *wsState) (sharedLine, bool) {
 	if update, at := r.updateLine(s); update != nil {
 		return sharedLine{field: "update", value: update, at: at}, true
-	}
-	if s.rateEvent != nil {
-		return sharedLine{field: "rate_limit", value: s.rateEvent.line, at: s.rateEvent.at}, true
 	}
 	if s.notification != nil {
 		return sharedLine{field: "notification", value: &frontendv1.FooterStatusActivityNotification{Text: s.notification.text}, at: s.notification.at}, true
