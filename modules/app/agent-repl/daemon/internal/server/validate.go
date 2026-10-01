@@ -617,10 +617,40 @@ func validateOpenInEditorRequest(req *agentreplv1.OpenInEditorRequest) *connect.
 	if err := validateWorkspaceRef("workspace", req.GetWorkspace()); err != nil {
 		return err
 	}
-	if req.GetPath() == "" {
-		return invalid("path", "a path is required")
+	switch target := req.GetTarget().(type) {
+	case *agentreplv1.OpenInEditorRequest_WorkspaceFile:
+		if target.WorkspaceFile.GetPath() == "" {
+			return invalid("workspace_file.path", "a path is required")
+		}
+	case *agentreplv1.OpenInEditorRequest_MergeTestLog:
+		if target.MergeTestLog.GetValue() == "" {
+			return invalid("merge_test_log.value", "a test log token is required")
+		}
+	default:
+		return invalid("target", "a target arm is required")
 	}
 	return nil
+}
+
+// validateMergeWorkspaceRequest is MergeWorkspaceRequest's base function: the
+// requester's ref, and exactly one source arm, each carrying what it names.
+func validateMergeWorkspaceRequest(req *agentreplv1.MergeWorkspaceRequest) *connect.Error {
+	if err := validateWorkspaceRef("workspace", req.GetWorkspace()); err != nil {
+		return err
+	}
+	switch source := req.GetSource().GetSource().(type) {
+	case *agentreplv1.MergeWorkspaceSource_OwnBranch, *agentreplv1.MergeWorkspaceSource_MergedUpstream:
+		return nil
+	case *agentreplv1.MergeWorkspaceSource_Workspace:
+		return validateWorkspaceRef("source.workspace.ref", source.Workspace.GetRef())
+	case *agentreplv1.MergeWorkspaceSource_Branch:
+		if source.Branch.GetName() == "" {
+			return invalid("source.branch.name", "a branch name is required")
+		}
+		return nil
+	default:
+		return invalid("source", "a source arm is required")
+	}
 }
 
 // validateSendLoginInputRequest is SendLoginInputRequest's base function.

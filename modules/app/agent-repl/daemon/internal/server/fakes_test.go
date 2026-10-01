@@ -212,6 +212,10 @@ func (f *fakeOwnership) Standing(context.Context, ids.WorkspaceID) (workspace.St
 type fakeVerbs struct {
 	workspace.Verbs
 
+	// editorOpens records every relayed open, a workspace file's path or a
+	// daemon file's.
+	editorOpens []string
+
 	interruptOutcome workspace.InterruptOutcome
 	interruptErr     error
 	interruptTarget  workspace.InterruptTarget
@@ -524,13 +528,36 @@ type fakeMerge struct {
 	pauseScope       *merge.RepositoryScope
 	answerDequeueErr error
 	evictErr         error
-	// enqueuedBy records who each enqueue said asked for the merge.
+	// enqueuedBy records who each enqueue said asked for the merge, and
+	// requests every request whole.
 	enqueuedBy []merge.Requester
+	requests   []merge.Request
+	// logPaths answers TestLogPath by token; logErr refuses every one.
+	logPaths map[string]string
+	logErr   error
 }
 
-func (f *fakeMerge) Enqueue(_ context.Context, _ ids.WorkspaceID, by merge.Requester) error {
-	f.enqueuedBy = append(f.enqueuedBy, by)
+func (f *fakeMerge) Enqueue(_ context.Context, req merge.Request) error {
+	f.enqueuedBy = append(f.enqueuedBy, req.By)
+	f.requests = append(f.requests, req)
 	return f.enqueueErr
+}
+
+func (v *fakeVerbs) OpenInEditor(_ context.Context, _ ids.WorkspaceID, path string, _ *uint32) error {
+	v.editorOpens = append(v.editorOpens, "file:"+path)
+	return nil
+}
+
+func (v *fakeVerbs) OpenDaemonFileInEditor(_ context.Context, _ ids.WorkspaceID, path string) error {
+	v.editorOpens = append(v.editorOpens, "daemon:"+path)
+	return nil
+}
+
+func (f *fakeMerge) TestLogPath(_ context.Context, _ ids.WorkspaceID, token string) (string, error) {
+	if f.logErr != nil {
+		return "", f.logErr
+	}
+	return f.logPaths[token], nil
 }
 
 func (f *fakeMerge) AnswerDequeue(context.Context, ids.WorkspaceID, bool) error {

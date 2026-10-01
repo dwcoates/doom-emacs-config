@@ -283,71 +283,6 @@ func TestAFailingLeaseReadWithholdsTheView(t *testing.T) {
 
 // ---- the composer gate ----------------------------------------------------
 
-// TestTheComposerGateFollowsTheOccupancyLease pins every holder's gate. The
-// lease is the one place that knows a session is spoken for, so the gate and
-// the prompt queue's refusal cannot disagree.
-func TestTheComposerGateFollowsTheOccupancyLease(t *testing.T) {
-	tests := []struct {
-		name   string
-		held   bool
-		holder wsm.LeaseHolder
-		policy wsm.LeasePolicy
-		want   func(*agentreplv1.HostSessionLive) bool
-	}{
-		{
-			name: "no lease is open",
-			want: func(l *agentreplv1.HostSessionLive) bool { return l.GetOpen() != nil },
-		},
-		{
-			name: "a merge refusing work is merging",
-			held: true, holder: wsm.HolderMerge, policy: wsm.PolicyRefuse,
-			want: func(l *agentreplv1.HostSessionLive) bool { return l.GetMerging() != nil },
-		},
-		{
-			name: "a merge parked for guidance is merge_parked",
-			held: true, holder: wsm.HolderMerge, policy: wsm.PolicyParked,
-			want: func(l *agentreplv1.HostSessionLive) bool { return l.GetMergeParked() != nil },
-		},
-		{
-			name: "a restart is restarting",
-			held: true, holder: wsm.HolderRestart, policy: wsm.PolicyHold,
-			want: func(l *agentreplv1.HostSessionLive) bool { return l.GetRestarting() != nil },
-		},
-		{
-			name: "a drain is draining",
-			held: true, holder: wsm.HolderDrain, policy: wsm.PolicyHold,
-			want: func(l *agentreplv1.HostSessionLive) bool { return l.GetDraining() != nil },
-		},
-		{
-			name: "a hibernation is draining",
-			held: true, holder: wsm.HolderHibernate, policy: wsm.PolicyHold,
-			want: func(l *agentreplv1.HostSessionLive) bool { return l.GetDraining() != nil },
-		},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			// Arrange.
-			h := newHarness(t)
-			h.DB.sessions = map[ids.WorkspaceID]wsm.Session{testWorkspaceID: {Workspace: testWorkspaceID}}
-			h.Facts.facts[testWorkspaceID] = liveFacts()
-			if test.held {
-				h.DB.leases = map[ids.WorkspaceID]wsm.Lease{testWorkspaceID: {
-					Workspace: testWorkspaceID, Holder: test.holder, Policy: test.policy,
-				}}
-			}
-
-			// Act.
-			view := composeHost(t, h)
-
-			// Assert.
-			if !test.want(view.GetExisting().GetLive()) {
-				t.Fatalf("composer = %v, want the %s arm", view.GetExisting().GetLive().GetComposer(), test.name)
-			}
-		})
-	}
-}
-
 // ---- naming ---------------------------------------------------------------
 
 // TestNamingCarriesTheDerivedSlug pins what Emacs names buffers from.
@@ -1161,5 +1096,67 @@ func TestTheHostViewCarriesNoEditWhenNoneStands(t *testing.T) {
 	// Assert.
 	if view.GetHeldPromptEdit() != nil {
 		t.Fatalf("held_prompt_edit = %v, want absent", view.GetHeldPromptEdit())
+	}
+}
+
+func TestTheComposerGateFollowsTheOccupancyLeaseWithNothingParked(t *testing.T) {
+	tests := []struct {
+		name   string
+		held   bool
+		holder wsm.LeaseHolder
+		policy wsm.LeasePolicy
+		want   func(*agentreplv1.HostSessionLive) bool
+	}{
+		{
+			name: "no lease is open",
+			want: func(l *agentreplv1.HostSessionLive) bool { return l.GetOpen() != nil },
+		},
+		{
+			name: "a merge refusing work is merging",
+			held: true, holder: wsm.HolderMerge, policy: wsm.PolicyRefuse,
+			want: func(l *agentreplv1.HostSessionLive) bool { return l.GetMerging() != nil },
+		},
+		{
+			name: "a merge lease an older build parked is merging",
+			held: true, holder: wsm.HolderMerge, policy: wsm.PolicyParked,
+			want: func(l *agentreplv1.HostSessionLive) bool { return l.GetMerging() != nil },
+		},
+		{
+			name: "a restart is restarting",
+			held: true, holder: wsm.HolderRestart, policy: wsm.PolicyHold,
+			want: func(l *agentreplv1.HostSessionLive) bool { return l.GetRestarting() != nil },
+		},
+		{
+			name: "a drain is draining",
+			held: true, holder: wsm.HolderDrain, policy: wsm.PolicyHold,
+			want: func(l *agentreplv1.HostSessionLive) bool { return l.GetDraining() != nil },
+		},
+		{
+			name: "a hibernation is draining",
+			held: true, holder: wsm.HolderHibernate, policy: wsm.PolicyHold,
+			want: func(l *agentreplv1.HostSessionLive) bool { return l.GetDraining() != nil },
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.DB.sessions = map[ids.WorkspaceID]wsm.Session{testWorkspaceID: {Workspace: testWorkspaceID}}
+			h.Facts.facts[testWorkspaceID] = liveFacts()
+			if test.held {
+				h.DB.leases = map[ids.WorkspaceID]wsm.Lease{testWorkspaceID: {
+					Workspace: testWorkspaceID, Holder: test.holder, Policy: test.policy,
+				}}
+			}
+
+			// Act.
+			view := composeHost(t, h)
+
+			// Assert.
+			if !test.want(view.GetExisting().GetLive()) {
+				t.Fatalf("composer = %v, want the %s arm", view.GetExisting().GetLive().GetComposer(), test.name)
+			}
+		})
 	}
 }

@@ -139,44 +139,6 @@ func TestCloseWorkspaceMapsTheBlockedArm(t *testing.T) {
 	}
 }
 
-// TestMergeWorkspaceMapsAPreStateRefusal pins that the orchestrator's arm name
-// lands on MergeWorkspaceError.
-func TestMergeWorkspaceMapsAPreStateRefusal(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-	h.Merge.enqueueErr = &merge.RefusalError{Arm: merge.ArmAlreadyQueued, Reason: "already waiting"}
-
-	// Act.
-	resp, err := h.Client.MergeWorkspace(context.Background(),
-		connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: ref()}))
-
-	// Assert.
-	if err != nil {
-		t.Fatalf("MergeWorkspace: %v", err)
-	}
-	if resp.Msg.GetError().GetAlreadyQueued() == nil {
-		t.Fatalf("result = %v, want already_queued", resp.Msg.GetResult())
-	}
-}
-
-// TestMergeWorkspaceEnqueuesAsTheUsersAsk pins who an rpc merge is from: the
-// user, whose ask alone may displace the turn in flight (merge.Requester).
-func TestMergeWorkspaceEnqueuesAsTheUsersAsk(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-
-	// Act.
-	if _, err := h.Client.MergeWorkspace(context.Background(),
-		connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: ref()})); err != nil {
-		t.Fatalf("MergeWorkspace: %v", err)
-	}
-
-	// Assert.
-	if len(h.Merge.enqueuedBy) != 1 || h.Merge.enqueuedBy[0] != merge.RequestedByUser {
-		t.Fatalf("the merge was enqueued as %v, want the user's ask", h.Merge.enqueuedBy)
-	}
-}
-
 // TestCreateWorkspaceRefusesAnUnknownRepository pins that a repository ref
 // matching nothing registered is refused rather than materialized somewhere.
 func TestCreateWorkspaceRefusesAnUnknownRepository(t *testing.T) {
@@ -893,5 +855,118 @@ func awaitClosed(t *testing.T, ch <-chan struct{}, what string) {
 	case <-ch:
 	case <-time.After(5 * time.Second):
 		t.Fatalf("%s never happened", what)
+	}
+}
+
+// ownBranchSource is the requester's own branch, closed on landing.
+func ownBranchSource() *agentreplv1.MergeWorkspaceSource {
+	return &agentreplv1.MergeWorkspaceSource{Source: &agentreplv1.MergeWorkspaceSource_OwnBranch{OwnBranch: &agentreplv1.MergeWorkspaceSourceOwnBranch{}}}
+}
+
+func TestMergeWorkspaceMapsAPreStateRefusalOntoItsArm(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Merge.enqueueErr = &merge.RefusalError{Arm: merge.ArmAlreadyQueued, Reason: "already waiting"}
+
+	// Act.
+	resp, err := h.Client.MergeWorkspace(context.Background(),
+		connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: ref(), Source: ownBranchSource()}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("MergeWorkspace: %v", err)
+	}
+	if resp.Msg.GetError().GetAlreadyQueued() == nil {
+		t.Fatalf("result = %v, want already_queued", resp.Msg.GetResult())
+	}
+}
+
+func TestMergeWorkspaceAsksAsTheUser(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	if _, err := h.Client.MergeWorkspace(context.Background(),
+		connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: ref(), Source: ownBranchSource()})); err != nil {
+		t.Fatalf("MergeWorkspace: %v", err)
+	}
+
+	// Assert.
+	if len(h.Merge.enqueuedBy) != 1 || h.Merge.enqueuedBy[0] != merge.RequestedByUser {
+		t.Fatalf("the merge was enqueued as %v, want the user's ask", h.Merge.enqueuedBy)
+	}
+}
+
+func TestMergeWorkspaceMapsEachSourceArm(t *testing.T) {
+	tests := []struct {
+		name   string
+		source *agentreplv1.MergeWorkspaceSource
+		want   wsm.MergeSource
+	}{
+		{name: "own branch kept open", source: &agentreplv1.MergeWorkspaceSource{Source: &agentreplv1.MergeWorkspaceSource_OwnBranch{
+			OwnBranch: &agentreplv1.MergeWorkspaceSourceOwnBranch{KeepOpen: true}}},
+			want: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch, KeepOpen: true}},
+		{name: "a branch", source: &agentreplv1.MergeWorkspaceSource{Source: &agentreplv1.MergeWorkspaceSource_Branch{
+			Branch: &agentreplv1.MergeWorkspaceSourceBranch{Name: "agent-1/fix"}}},
+			want: wsm.MergeSource{Kind: wsm.MergeSourceBranch, Branch: "agent-1/fix"}},
+		{name: "another workspace", source: &agentreplv1.MergeWorkspaceSource{Source: &agentreplv1.MergeWorkspaceSource_Workspace{
+			Workspace: &agentreplv1.MergeWorkspaceSourceWorkspace{Ref: ref()}}},
+			want: wsm.MergeSource{Kind: wsm.MergeSourceWorkspace, Workspace: testWorkspaceID}},
+		{name: "merged upstream", source: &agentreplv1.MergeWorkspaceSource{Source: &agentreplv1.MergeWorkspaceSource_MergedUpstream{
+			MergedUpstream: &agentreplv1.MergeWorkspaceSourceMergedUpstream{}}},
+			want: wsm.MergeSource{Kind: wsm.MergeSourceMergedUpstream}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+
+			// Act.
+			if _, err := h.Client.MergeWorkspace(context.Background(),
+				connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: ref(), Source: tt.source})); err != nil {
+				t.Fatalf("MergeWorkspace: %v", err)
+			}
+
+			// Assert.
+			if len(h.Merge.requests) != 1 || h.Merge.requests[0].Source != tt.want {
+				t.Fatalf("requests = %+v, want source %+v", h.Merge.requests, tt.want)
+			}
+		})
+	}
+}
+
+func TestMergeWorkspaceRefusesARequestWithNoSourceAsInvalid(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	_, err := h.Client.MergeWorkspace(context.Background(),
+		connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: ref()}))
+
+	// Assert.
+	if connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("MergeWorkspace = %v, want invalid_argument", err)
+	}
+	if len(h.Merge.requests) != 0 {
+		t.Fatalf("an invalid request reached the queue: %+v", h.Merge.requests)
+	}
+}
+
+func TestMergeWorkspaceAnswersAnUnknownSourceWorkspace(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	source := &agentreplv1.MergeWorkspaceSource{Source: &agentreplv1.MergeWorkspaceSource_Workspace{
+		Workspace: &agentreplv1.MergeWorkspaceSourceWorkspace{Ref: &workspacev1.WorkspaceRef{Id: "no-such-workspace"}}}}
+
+	// Act.
+	resp, err := h.Client.MergeWorkspace(context.Background(),
+		connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: ref(), Source: source}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("MergeWorkspace: %v", err)
+	}
+	if resp.Msg.GetError().GetUnknownSourceWorkspace() == nil {
+		t.Fatalf("result = %v, want unknown_source_workspace", resp.Msg.GetResult())
 	}
 }

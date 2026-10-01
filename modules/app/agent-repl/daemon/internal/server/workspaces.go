@@ -615,19 +615,26 @@ func (s *server) ForgetWorkspace(
 	return connect.NewResponse(resp), nil
 }
 
-// MergeWorkspace enqueues the workspace's merge. Its life from there is the
-// feed's merge bubble.
+// MergeWorkspace enqueues a merge that runs in the requesting workspace. Its
+// life from there is that workspace's merge bubble.
 func (s *server) MergeWorkspace(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.MergeWorkspaceRequest],
 ) (*connect.Response[agentreplv1.MergeWorkspaceResponse], error) {
 	const rpc = "MergeWorkspace"
+	if err := validateMergeWorkspaceRequest(req.Msg); err != nil {
+		return nil, err
+	}
 	resp := &agentreplv1.MergeWorkspaceResponse{}
 	subject, cerr, done := s.subjectFor(ctx, rpc, req.Msg.GetWorkspace(), resp)
 	if done {
 		return answer(resp, cerr)
 	}
-	if err := s.deps.Merge.Enqueue(ctx, subject.Record.ID, merge.RequestedByUser); err != nil {
+	source, err := s.mergeSource(ctx, subject.Record.ID, req.Msg.GetSource())
+	if err != nil {
+		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
+	}
+	if err := s.deps.Merge.Enqueue(ctx, merge.Request{Workspace: subject.Record.ID, Source: source, By: merge.RequestedByUser}); err != nil {
 		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
 	}
 	// The verb moved the session's standing or the composer's gate; the host
@@ -637,6 +644,36 @@ func (s *server) MergeWorkspace(
 		Success: &agentreplv1.MergeWorkspaceSuccess{},
 	}
 	return connect.NewResponse(resp), nil
+}
+
+// mergeSource reads the request's source arm. Another workspace is named by
+// its ref, and a ref that names no workspace is the unknown_source_workspace
+// refusal; whether it is open and in the requester's repository is the
+// orchestrator's to judge.
+func (s *server) mergeSource(ctx context.Context, requester ids.WorkspaceID, source *agentreplv1.MergeWorkspaceSource) (wsm.MergeSource, error) {
+	switch arm := source.GetSource().(type) {
+	case *agentreplv1.MergeWorkspaceSource_OwnBranch:
+		return wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch, KeepOpen: arm.OwnBranch.GetKeepOpen()}, nil
+	case *agentreplv1.MergeWorkspaceSource_Workspace:
+		id := ids.WorkspaceID(arm.Workspace.GetRef().GetId())
+		record, ended, err := s.registryWorkspace(ctx, id)
+		switch {
+		case ended:
+			return wsm.MergeSource{}, connect.NewError(connect.CodeUnavailable, fmt.Errorf("MergeWorkspace: source workspace %q: %w", id, errServingEnded))
+		case errors.Is(err, wsm.ErrNotFound):
+			return wsm.MergeSource{}, &merge.RefusalError{Arm: merge.ArmUnknownSourceWorkspace, Workspace: requester,
+				Reason: fmt.Sprintf("no workspace %q is registered", id)}
+		case err != nil:
+			return wsm.MergeSource{}, fmt.Errorf("MergeWorkspace: reading source workspace %q: %w", id, err)
+		}
+		return wsm.MergeSource{Kind: wsm.MergeSourceWorkspace, Workspace: record.ID}, nil
+	case *agentreplv1.MergeWorkspaceSource_Branch:
+		return wsm.MergeSource{Kind: wsm.MergeSourceBranch, Branch: arm.Branch.GetName()}, nil
+	case *agentreplv1.MergeWorkspaceSource_MergedUpstream:
+		return wsm.MergeSource{Kind: wsm.MergeSourceMergedUpstream}, nil
+	}
+	// validateMergeWorkspaceRequest refused an unset arm before this.
+	return wsm.MergeSource{}, fmt.Errorf("server: MergeWorkspace source arm %T is unknown", source.GetSource())
 }
 
 // RestartWorkspace bounces the workspace's shim, gracefully unless forced.

@@ -278,9 +278,49 @@ func TestOperatorDrainNoteIsAccepted(t *testing.T) {
 	}
 }
 
-// Five request validators had no caller of their own. Each one names the FIELD
-// a producer has to fix, so the table pins the field name and not just the code.
-func TestEachRequestValidatorNamesTheFieldItRefuses(t *testing.T) {
+func TestEditHeldPromptRefusesAMalformedRequest(t *testing.T) {
+	tests := []struct {
+		name string
+		req  func() *agentreplv1.EditHeldPromptRequest
+	}{
+		{"no turn", func() *agentreplv1.EditHeldPromptRequest {
+			req := editRequest("begin")
+			req.Turn = nil
+			return req
+		}},
+		{"a blank turn", func() *agentreplv1.EditHeldPromptRequest {
+			req := editRequest("begin")
+			req.Turn = &conversationv1.TurnId{}
+			return req
+		}},
+		{"no step", func() *agentreplv1.EditHeldPromptRequest {
+			req := editRequest("begin")
+			req.Action = nil
+			return req
+		}},
+		{"a commit with no content", func() *agentreplv1.EditHeldPromptRequest {
+			req := editRequest("begin")
+			req.Action = &agentreplv1.EditHeldPromptRequest_Commit{Commit: &agentreplv1.EditHeldPromptCommit{}}
+			return req
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+
+			// Act.
+			_, err := h.Client.EditHeldPrompt(context.Background(), connect.NewRequest(tt.req()))
+
+			// Assert.
+			if code := connectCode(t, err); code != connect.CodeInvalidArgument {
+				t.Fatalf("code = %v, want InvalidArgument", code)
+			}
+		})
+	}
+}
+
+func TestEachRequestValidatorNamesTheFieldItRefusesWithTargetsAndSources(t *testing.T) {
 	tests := []struct {
 		name  string
 		check func() *connect.Error
@@ -342,11 +382,55 @@ func TestEachRequestValidatorNamesTheFieldItRefuses(t *testing.T) {
 			field: "workspace",
 		},
 		{
-			name: "open in editor with no path",
+			name: "open in editor with no target",
 			check: func() *connect.Error {
 				return validateOpenInEditorRequest(&agentreplv1.OpenInEditorRequest{Workspace: ref()})
 			},
-			field: "path",
+			field: "target",
+		},
+		{
+			name: "open in editor with an empty workspace file",
+			check: func() *connect.Error {
+				return validateOpenInEditorRequest(&agentreplv1.OpenInEditorRequest{Workspace: ref(),
+					Target: &agentreplv1.OpenInEditorRequest_WorkspaceFile{WorkspaceFile: &agentreplv1.OpenInEditorWorkspaceFile{}}})
+			},
+			field: "workspace_file.path",
+		},
+		{
+			name: "open in editor with an empty test log token",
+			check: func() *connect.Error {
+				return validateOpenInEditorRequest(&agentreplv1.OpenInEditorRequest{Workspace: ref(),
+					Target: &agentreplv1.OpenInEditorRequest_MergeTestLog{MergeTestLog: &frontendv1.FeedMergeTestLogToken{}}})
+			},
+			field: "merge_test_log.value",
+		},
+		{
+			name:  "merge with no workspace",
+			check: func() *connect.Error { return validateMergeWorkspaceRequest(&agentreplv1.MergeWorkspaceRequest{}) },
+			field: "workspace",
+		},
+		{
+			name: "merge with no source",
+			check: func() *connect.Error {
+				return validateMergeWorkspaceRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: ref()})
+			},
+			field: "source",
+		},
+		{
+			name: "merge of a branch with no name",
+			check: func() *connect.Error {
+				return validateMergeWorkspaceRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: ref(),
+					Source: &agentreplv1.MergeWorkspaceSource{Source: &agentreplv1.MergeWorkspaceSource_Branch{Branch: &agentreplv1.MergeWorkspaceSourceBranch{}}}})
+			},
+			field: "source.branch.name",
+		},
+		{
+			name: "merge of another workspace with no ref",
+			check: func() *connect.Error {
+				return validateMergeWorkspaceRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: ref(),
+					Source: &agentreplv1.MergeWorkspaceSource{Source: &agentreplv1.MergeWorkspaceSource_Workspace{Workspace: &agentreplv1.MergeWorkspaceSourceWorkspace{}}}})
+			},
+			field: "source.workspace.ref",
 		},
 	}
 	for _, tc := range tests {
@@ -368,9 +452,7 @@ func TestEachRequestValidatorNamesTheFieldItRefuses(t *testing.T) {
 	}
 }
 
-// A well-formed request of each shape is ACCEPTED, so the table above is
-// proving a refusal rather than a validator that refuses everything.
-func TestEachRequestValidatorAcceptsAWellFormedRequest(t *testing.T) {
+func TestEachRequestValidatorAcceptsAWellFormedRequestWithTargetsAndSources(t *testing.T) {
 	tests := []struct {
 		name  string
 		check func() *connect.Error
@@ -405,11 +487,24 @@ func TestEachRequestValidatorAcceptsAWellFormedRequest(t *testing.T) {
 			},
 		},
 		{
-			name: "open in editor",
+			name: "open in editor of a workspace file",
 			check: func() *connect.Error {
-				return validateOpenInEditorRequest(&agentreplv1.OpenInEditorRequest{
-					Workspace: ref(), Path: "/tmp/a.go",
-				})
+				return validateOpenInEditorRequest(&agentreplv1.OpenInEditorRequest{Workspace: ref(),
+					Target: &agentreplv1.OpenInEditorRequest_WorkspaceFile{WorkspaceFile: &agentreplv1.OpenInEditorWorkspaceFile{Path: "/tmp/a.go"}}})
+			},
+		},
+		{
+			name: "open in editor of a test log",
+			check: func() *connect.Error {
+				return validateOpenInEditorRequest(&agentreplv1.OpenInEditorRequest{Workspace: ref(),
+					Target: &agentreplv1.OpenInEditorRequest_MergeTestLog{MergeTestLog: &frontendv1.FeedMergeTestLogToken{Value: "lease/1"}}})
+			},
+		},
+		{
+			name: "merge of the own branch",
+			check: func() *connect.Error {
+				return validateMergeWorkspaceRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: ref(),
+					Source: &agentreplv1.MergeWorkspaceSource{Source: &agentreplv1.MergeWorkspaceSource_OwnBranch{OwnBranch: &agentreplv1.MergeWorkspaceSourceOwnBranch{}}}})
 			},
 		},
 	}
@@ -421,48 +516,6 @@ func TestEachRequestValidatorAcceptsAWellFormedRequest(t *testing.T) {
 			// Assert.
 			if err != nil {
 				t.Fatalf("a well-formed request was refused: %v", err)
-			}
-		})
-	}
-}
-
-func TestEditHeldPromptRefusesAMalformedRequest(t *testing.T) {
-	tests := []struct {
-		name string
-		req  func() *agentreplv1.EditHeldPromptRequest
-	}{
-		{"no turn", func() *agentreplv1.EditHeldPromptRequest {
-			req := editRequest("begin")
-			req.Turn = nil
-			return req
-		}},
-		{"a blank turn", func() *agentreplv1.EditHeldPromptRequest {
-			req := editRequest("begin")
-			req.Turn = &conversationv1.TurnId{}
-			return req
-		}},
-		{"no step", func() *agentreplv1.EditHeldPromptRequest {
-			req := editRequest("begin")
-			req.Action = nil
-			return req
-		}},
-		{"a commit with no content", func() *agentreplv1.EditHeldPromptRequest {
-			req := editRequest("begin")
-			req.Action = &agentreplv1.EditHeldPromptRequest_Commit{Commit: &agentreplv1.EditHeldPromptCommit{}}
-			return req
-		}},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange.
-			h := newHarness(t)
-
-			// Act.
-			_, err := h.Client.EditHeldPrompt(context.Background(), connect.NewRequest(tt.req()))
-
-			// Assert.
-			if code := connectCode(t, err); code != connect.CodeInvalidArgument {
-				t.Fatalf("code = %v, want InvalidArgument", code)
 			}
 		})
 	}
