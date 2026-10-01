@@ -910,15 +910,26 @@ Owner rulings, 2026-09-30 (`internal/merge`; the contract is
   terminal (bubble head and footer facts) is published right after the lease
   is released, so no client is told the workspace was handed back while its
   prompts are still refused as merging.
-- **REPAIRS ARE THE REQUESTER'S OWN TURNS**, drawn in the merge bubble's tab AND
-  mirrored onto the root feed (`OutputAddress.Mirror`, conflicts and fixes
-  only; the mirror copy drops the merge feed's order and parent). The mirror
-  is part of the replayed history: the prompt queue records the standing
-  output address on every turn it opens (`wsm.Turn.Address`), and a replay
-  draws each recorded turn's entries at that address through the live upsert,
-  so a late reader or a relaunched daemon rebuilds the tab rows and their root
-  copies. An entry of a turn the workspace never recorded is drawn at the
-  standing address.
+- **A MERGE'S OWN TURNS DRAW IN ITS TAB, AND NOWHERE ELSE** (owner ruling,
+  2026-10-01). The output address is scoped to TURNS, not to the session: the
+  orchestrator stands one per tab (`run.address`), and the prompt queue's
+  `recordTurn` -- the one place a turn is recorded -- stamps it on a turn
+  whose origin is one the merge submits (`MERGE_CONFLICT_REPAIR`,
+  `MERGE_TEST_REPAIR`, `MERGE_BEFORE_ACTION`, `MERGE_AFTER_ACTION`) and on no
+  other: the user's prompts sent mid-merge, the resumed displaced turn
+  (`MERGE_DISPLACED_TURN_RESUME`, the user's own work) and vendor-started
+  turns draw on the root feed as ordinary conversation. The same address is
+  handed to the feed (`Resolver.AddressTurn`) as it is recorded, and a replay
+  reads it back (`wsm.Turn.Address`, `Deps.TurnAddresses`) into the same
+  table, so live and replay place every row by its own turn's one recorded
+  fact. NOTHING COPIES A ROW BETWEEN FEEDS: the old root-feed mirror copied the
+  merge tab rows themselves onto the main feed as full-width rows, which is
+  how a merge bubble came to look fragmented. A frame of a merge turn that
+  arrives after the merge withdrew its address still draws in the turn's tab
+  (INFO `daemon.feed.turn_address_outlived`, once per turn); a merge turn
+  opened once no address stands draws on the root feed (INFO
+  `daemon.promptqueue.deliver`). An entry of a turn the workspace never
+  recorded draws on the root feed.
 - **THE TEST LOG OPENS BY TOKEN.** `FeedMergeTestLogToken` is `<lease>/<round>`;
   `OpenInEditor{merge_test_log}` resolves it through `TestLogPath` (the lease
   in the merge ledger, the file present), refuses with

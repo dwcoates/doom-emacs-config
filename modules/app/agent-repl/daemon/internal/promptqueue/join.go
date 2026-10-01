@@ -129,7 +129,7 @@ func (q *queue) joinLocked(ctx context.Context, sub Submission, running ids.Turn
 	text := saidText(sub.Said)
 	if err := q.recordTurn(ctx, wsm.Turn{
 		ID: sub.Turn, Workspace: sub.WS, Text: text, Origin: sub.Origin.String(), StartedAt: q.deps.Now(),
-	}); err != nil {
+	}, log); err != nil {
 		watcher.OnTurnOpenFailed(sub.WS, sub.Turn)
 		log.Error(opJoin, "could not record the turn before sending the prompt to join the running turn; it waits for it to end", dlog.Context{"cause": err.Error()})
 		q.recordWaiting(ctx, sub, "the prompt's turn could not be recorded, so it waits for the running turn to end", log)

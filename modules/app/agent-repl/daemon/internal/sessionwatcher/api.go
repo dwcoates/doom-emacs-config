@@ -31,8 +31,8 @@ type LinkState = shimclient.LinkState
 // record and the lifecycle notification cannot disagree.
 type TurnClose = wsm.TurnClose
 
-// OutputAddress is where a lease holder wants this session's rows to land. It
-// aliases wsm's spelling for the same reason.
+// OutputAddress is where a turn's rows land (wsm.OutputAddress). It aliases
+// wsm's spelling for the same reason.
 type OutputAddress = wsm.OutputAddress
 
 // LiveWorkSet is the set of detached work items currently live on a session:

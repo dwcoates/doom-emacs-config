@@ -61,7 +61,7 @@ func (r *resolver) OnClearReceived(ws ids.WorkspaceID, turn ids.TurnID) {
 	// visible outcome is this divider.
 	s.directiveTurns[turn] = true
 
-	at := r.outputPlacement(s)
+	at := r.outputPlacement(s, &turn)
 	id := r.rowID(ws, at.feed, feedid.RowKey{Kind: feedid.KindSeparation, ID: clearCutRowID(turn)})
 	row := &frontendv1.FeedRow{
 		Id: id,
@@ -121,7 +121,7 @@ func (r *resolver) OnContextCutAborted(ws ids.WorkspaceID, turn ids.TurnID) {
 // when a clear FAILS — refused before dispatch, or ended without ever cutting
 // context — so the divider does not outlive the clear it promised.
 func (r *resolver) retireOptimisticClear(s *wsState, turn ids.TurnID, why string) {
-	at := r.outputPlacement(s)
+	at := r.outputPlacement(s, &turn)
 	id := r.rowID(s.id, at.feed, feedid.RowKey{Kind: feedid.KindSeparation, ID: clearCutRowID(turn)})
 	removed := r.retire(s, at.feed, id.GetValue())
 	r.logger(s.id).Info("daemon.feed.clear_bar_retired",

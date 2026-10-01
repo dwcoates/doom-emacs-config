@@ -21,8 +21,9 @@ import (
 // The orchestrator owns no view. It publishes FACTS — to the footer, to the
 // roster, and as synthesized rows on the merge bubble's sub-feed — and the
 // resolvers decide how a fact is drawn. Only the footer resolver and this
-// package know "merge" as a concept at all; the feed resolver honors a generic
-// output address and never learns what a merge is.
+// package know "merge" as a concept at all; the feed resolver draws each turn
+// at the generic output address recorded on it and never learns what a merge
+// is.
 
 // The merge states MergeFacts.State carries. They are the vocabulary the footer
 // and the roster resolve their arms from, so they are spelled once here. There

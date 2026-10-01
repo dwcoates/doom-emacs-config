@@ -174,18 +174,18 @@ func TestAResetDropsTheSelectableFinalResponses(t *testing.T) {
 	}
 }
 
-func TestAResetDropsTheOutputAddress(t *testing.T) {
-	// Arrange: a lease holder's address naming a merge tab of the session that
-	// is being swapped out.
+func TestAResetDropsTheTurnAddresses(t *testing.T) {
+	// Arrange: a turn addressed at a merge tab of the session that is being
+	// swapped out.
 	h := newHarness(t)
 	lease := ids.LeaseID("lease-7")
-	h.resolver.SetOutputAddress(testWorkspace, &sessionwatcher.OutputAddress{
+	h.resolver.AddressTurn(testWorkspace, "turn-9", &sessionwatcher.OutputAddress{
 		Feed: feedid.Feed{Merge: &lease},
 	})
 
 	// Act.
 	h.reset()
-	h.resolver.UpsertAtOutputAddress(testWorkspace,
+	h.resolver.UpsertAtTurnAddress(testWorkspace, "turn-9",
 		feedid.RowKey{Kind: feedid.KindPrompt, ID: "turn-9"},
 		&frontendv1.FeedRow{
 			Id: &frontendv1.FeedId{Value: "row|after-the-reset"},
@@ -194,7 +194,8 @@ func TestAResetDropsTheOutputAddress(t *testing.T) {
 			},
 		})
 
-	// Assert: the row lands on the ROOT feed, because no address stands.
+	// Assert: the row lands on the ROOT feed, because the turn's address went
+	// with the conversation it belonged to.
 	if got := len(h.rows(rootFeed())); got != 1 {
 		t.Fatalf("root feed rows = %d, want the one row the reset re-rooted", got)
 	}

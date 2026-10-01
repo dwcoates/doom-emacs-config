@@ -412,16 +412,18 @@ func TestDeliveringAPromptTellsTheRosterATurnIsRunning(t *testing.T) {
 	}
 }
 
-func TestDeliverMirrorsTheAcceptedPromptAtTheSessionsOutputAddress(t *testing.T) {
-	// Arrange: a lease holder has addressed the session at a merge sub-feed.
+func TestDeliverDrawsAMergeTurnsAcceptedPromptAtTheMergeAddress(t *testing.T) {
+	// Arrange: a merge stands an address at one of its tabs, and submits.
 	h := newHarness(t)
 	lease := ids.LeaseID("lease-1")
 	h.feed.SetOutputAddress("ws-1", &sessionwatcher.OutputAddress{Feed: feedid.Feed{Merge: &lease}})
+	sub := submission("t1", "resolve the conflict")
+	sub.Origin = conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR
 	// Act
-	if _, err := h.q.Submit(context.Background(), submission("t1", "hello")); err != nil {
+	if _, err := h.q.Submit(context.Background(), sub); err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
-	// Assert: the mirror carries the ADDRESSED feed's identity, not the root's.
+	// Assert: the row carries the ADDRESSED feed's identity, not the root's.
 	want := feedid.Encode(feedid.Ref{
 		WS:   "ws-1",
 		Feed: feedid.Feed{Merge: &lease},
@@ -429,6 +431,26 @@ func TestDeliverMirrorsTheAcceptedPromptAtTheSessionsOutputAddress(t *testing.T)
 	})
 	if got := h.feed.mirrored()[0].GetId().GetValue(); got != want.GetValue() {
 		t.Fatalf("mirror id = %q, want the addressed feed's %q", got, want.GetValue())
+	}
+}
+
+func TestDeliverDrawsAUserPromptSentMidMergeOnTheRootFeed(t *testing.T) {
+	// Arrange: a merge stands an address, and the user sends a prompt.
+	h := newHarness(t)
+	lease := ids.LeaseID("lease-1")
+	h.feed.SetOutputAddress("ws-1", &sessionwatcher.OutputAddress{Feed: feedid.Feed{Merge: &lease}})
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("t1", "hello")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	// Assert
+	want := feedid.Encode(feedid.Ref{
+		WS:   "ws-1",
+		Feed: feedid.Feed{Root: true},
+		Row:  feedid.RowKey{Kind: feedid.KindPrompt, ID: "t1"},
+	})
+	if got := h.feed.mirrored()[0].GetId().GetValue(); got != want.GetValue() {
+		t.Fatalf("row id = %q, want the root feed's %q", got, want.GetValue())
 	}
 }
 
@@ -646,5 +668,32 @@ func TestAPromptThatWaitedForTheTurnIsDeliveredWithNoNote(t *testing.T) {
 	// Assert
 	if started, notes := h.sender.started(), h.sender.notes; len(started) != 1 || len(notes) != 0 {
 		t.Fatalf("started = %v, notes = %q; want t1 delivered with no note", started, notes)
+	}
+}
+
+func TestStartedByMergeNamesExactlyTheMergesOwnOrigins(t *testing.T) {
+	cases := []struct {
+		origin conversationv1.PromptOrigin
+		want   bool
+	}{
+		{conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR, true},
+		{conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_TEST_REPAIR, true},
+		{conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_BEFORE_ACTION, true},
+		{conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_AFTER_ACTION, true},
+		{conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME, false},
+		{conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, false},
+		{conversationv1.PromptOrigin_PROMPT_ORIGIN_VENDOR_STARTED, false},
+		{conversationv1.PromptOrigin_PROMPT_ORIGIN_UNSPECIFIED, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.origin.String(), func(t *testing.T) {
+			// Arrange / Act
+			got := startedByMerge(tc.origin.String())
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("startedByMerge(%s) = %v, want %v", tc.origin, got, tc.want)
+			}
+		})
 	}
 }

@@ -540,23 +540,12 @@ func TestALandedMergesLedgerRecordsEachStepsInterval(t *testing.T) {
 	}
 }
 
-// pageRowOf answers the user-prompt row of a turn on a served page, nil when
-// the page carries none.
-func pageRowOf(page *frontendv1.FeedPage, turn string) *frontendv1.FeedRow {
-	for _, row := range page.GetSuccess().GetRows() {
-		if row.GetUserPrompt() != nil && row.GetTurn().GetValue() == turn {
-			return row
-		}
-	}
-	return nil
-}
-
 // A LATE READER SEES THE FEED A LIVE ONE SAW. The repair turn's rows are drawn
-// in the merge's conflicts tab and mirrored onto the root feed live; a daemon
-// relaunched afterwards rebuilds the feed from the store's book alone, and its
-// replay must draw the same two copies, because the turn's record carries the
-// mirrored address it ran at.
-func TestARelaunchedDaemonReplaysAMirroredRepairTurnInItsTabAndOnTheRoot(t *testing.T) {
+// in the merge's conflicts tab, and nowhere else, live; a daemon relaunched
+// afterwards rebuilds the feed from the store's book alone, and its replay
+// must draw them in the same tab and nowhere else, because the turn's record
+// carries the address it ran at.
+func TestARelaunchedDaemonReplaysARepairTurnInItsTabAlone(t *testing.T) {
 	t.Parallel()
 	// Arrange: a conflict the requester's own session resolves, kept open.
 	s := newSourcedRepo(t)
@@ -575,13 +564,12 @@ func TestARelaunchedDaemonReplaysAMirroredRepairTurnInItsTabAndOnTheRoot(t *test
 		return row.GetActivity().GetMerge().GetSuccess() != nil
 	})
 	s.d.AwaitLandingDeployed()
-	livePage, _ := s.f.openFeedOnceCarrying("the repair prompt's root copy", func(p *frontendv1.FeedPage) bool {
-		return pagePrompt(p, repair)
-	})
-	liveRoot := pageRowOf(livePage, repair)
 	liveTab := s.f.awaitRowInFeed(head.GetId(), "the repair prompt in its tab", func(row *frontendv1.FeedRow) bool {
 		return row.GetUserPrompt() != nil && row.GetTurn().GetValue() == repair
 	})
+	if livePage, _ := s.f.openFeed(nil); pagePrompt(livePage, repair) {
+		t.Fatalf("the live root feed carries the repair prompt %q, want it in its tab alone", repair)
+	}
 
 	// Act: relaunch; the resumed shim serves the repair turn from the store.
 	expectSessionKillRecords(s.d)
@@ -615,23 +603,16 @@ func TestARelaunchedDaemonReplaysAMirroredRepairTurnInItsTabAndOnTheRoot(t *test
 	f2.host = d2.WatchHost(s.f.ws)
 	f2.web = d2.WatchWeb(s.f.ws)
 
-	// Assert: the root copy, at the identity the live reader saw.
-	page, _ := f2.openFeedOnceCarrying("the replayed repair prompt's root copy", func(p *frontendv1.FeedPage) bool {
-		return pagePrompt(p, repair)
-	})
-	if got := pageRowOf(page, repair); got.GetId().GetValue() != liveRoot.GetId().GetValue() {
-		t.Fatalf("replayed root copy = %q, want the live root copy's %q", got.GetId().GetValue(), liveRoot.GetId().GetValue())
-	}
 	// Assert: the tab's row, at the identity and under the tab the live reader saw.
-	tabPage, _ := f2.openFeed(head.GetId())
-	var replayedTab *frontendv1.FeedRow
-	for _, row := range tabPage.GetSuccess().GetRows() {
-		if row.GetUserPrompt() != nil && row.GetTurn().GetValue() == repair {
-			replayedTab = row
-		}
-	}
+	replayedTab := f2.awaitRowInFeed(head.GetId(), "the replayed repair prompt in its tab", func(row *frontendv1.FeedRow) bool {
+		return row.GetUserPrompt() != nil && row.GetTurn().GetValue() == repair
+	})
 	if replayedTab.GetId().GetValue() != liveTab.GetId().GetValue() || replayedTab.GetParent().GetRow().GetValue() != liveTab.GetParent().GetRow().GetValue() {
 		t.Fatalf("replayed tab row = %v, want the live tab row %v", replayedTab, liveTab)
+	}
+	// Assert: the replay that drew the tab drew nothing of the turn on the root.
+	if page, _ := f2.openFeed(nil); pagePrompt(page, repair) {
+		t.Fatalf("the replayed root feed carries the repair prompt %q, want it in its tab alone", repair)
 	}
 }
 

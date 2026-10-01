@@ -1346,7 +1346,7 @@ func TestAcceptIdempotencyKeyRefusesAnEmptyKey(t *testing.T) {
 	}
 }
 
-func TestTurnAddressesAnswersARecordedTurnsMirroredAddress(t *testing.T) {
+func TestTurnAddressesAnswersARecordedTurnsAddress(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)
 	ws := testWorkspace(t, s)
@@ -1355,7 +1355,7 @@ func TestTurnAddressesAnswersARecordedTurnsMirroredAddress(t *testing.T) {
 	turn := NewTurnID()
 	if err := s.PutTurn(context.Background(), Turn{
 		ID: turn, Workspace: ws.ID, Origin: "merge", StartedAt: instant,
-		Address: &OutputAddress{Feed: feedid.Feed{Merge: &lease}, Parent: &parent, Mirror: true},
+		Address: &OutputAddress{Feed: feedid.Feed{Merge: &lease}, Parent: &parent},
 	}); err != nil {
 		t.Fatalf("PutTurn: %v", err)
 	}
@@ -1368,8 +1368,8 @@ func TestTurnAddressesAnswersARecordedTurnsMirroredAddress(t *testing.T) {
 		t.Fatalf("TurnAddresses: %v", err)
 	}
 	addr, ok := got[turn]
-	if !ok || addr == nil || addr.Feed.Merge == nil || *addr.Feed.Merge != lease || !addr.Mirror {
-		t.Fatalf("TurnAddresses = %+v, want %s at the mirrored merge sub-feed", got, turn)
+	if !ok || addr == nil || addr.Feed.Merge == nil || *addr.Feed.Merge != lease {
+		t.Fatalf("TurnAddresses = %+v, want %s at the merge sub-feed", got, turn)
 	}
 }
 

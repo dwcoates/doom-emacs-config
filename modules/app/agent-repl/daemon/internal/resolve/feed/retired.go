@@ -18,7 +18,7 @@ import (
 // tail drops the row live and a tail that connects later replays the removal.
 //
 // THE ROWS ARE FOUND BY IDENTITY, NOT BY PLACEMENT. Where a prompt was placed
-// depended on the output address and the sub-feed map as they stood when it
+// depended on its turn's address and the sub-feed map as they stood when it
 // was drawn, and either may have moved since. A row's id is minted from its
 // feed and the entry's own key, so every feed is asked for the ids that entry
 // could have drawn there, and exactly the rows that exist are retired.

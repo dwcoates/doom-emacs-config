@@ -213,8 +213,9 @@ func (r *run) teardown(ctx context.Context, out outcome, terminal func()) {
 	}
 	log := r.o.log(ctx, r.ws)
 
-	// The session's rows go back to the root feed the moment the bubble stops
-	// being where its output belongs.
+	// No turn opened from here on is the merge's: the standing address is
+	// withdrawn the moment the bubble stops being where the merge's output
+	// belongs.
 	r.o.deps.Feed.SetOutputAddress(r.ws, nil)
 	if r.releaseOccupancy != nil {
 		r.releaseOccupancy()

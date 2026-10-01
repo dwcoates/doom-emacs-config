@@ -2,6 +2,7 @@ package wsm
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -137,23 +138,39 @@ func TestEncodeAddressRoundTripsTheParent(t *testing.T) {
 	}
 }
 
-func TestEncodeAddressRoundTripsTheMirror(t *testing.T) {
+// An address an older build wrote carries the retired root-feed mirror flag;
+// it still reads, as the address it names.
+func TestDecodeAddressReadsAStoredMirrorFlag(t *testing.T) {
 	// Arrange
-	address := OutputAddress{Feed: feedid.Feed{Root: true}, Mirror: true}
+	raw := `{"feed":{"merge":"lease-1"},"mirror":true}`
 
 	// Act
-	raw, err := encodeAddress(&address)
-	if err != nil {
-		t.Fatalf("encodeAddress: %v", err)
-	}
-	got, err := decodeAddress("turns", "turn-1", raw.(string))
+	got, err := decodeAddress("turns", "turn-1", raw)
 
 	// Assert
 	if err != nil {
 		t.Fatalf("decodeAddress: %v", err)
 	}
-	if !got.Mirror {
-		t.Fatalf("decoded address = %+v, want the mirror kept", got)
+	if got.Feed.Merge == nil || *got.Feed.Merge != LeaseID("lease-1") || got.Parent != nil {
+		t.Fatalf("decoded address = %+v, want the merge sub-feed it names", got)
+	}
+}
+
+// A write drops the retired flag: nothing it encodes names a mirror.
+func TestEncodeAddressWritesNoMirrorFlag(t *testing.T) {
+	// Arrange
+	lease := LeaseID("lease-1")
+	address := OutputAddress{Feed: feedid.Feed{Merge: &lease}}
+
+	// Act
+	raw, err := encodeAddress(&address)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("encodeAddress: %v", err)
+	}
+	if strings.Contains(raw.(string), "mirror") {
+		t.Fatalf("encoded address = %s, want no mirror key", raw)
 	}
 }
 
