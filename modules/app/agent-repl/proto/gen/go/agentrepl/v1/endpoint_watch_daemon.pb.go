@@ -239,6 +239,7 @@ type WatchDaemonResponse struct {
 	//	*WatchDaemonResponse_ReloadElisp
 	//	*WatchDaemonResponse_Ending
 	//	*WatchDaemonResponse_FaultsStanding
+	//	*WatchDaemonResponse_PersistentWifi
 	Push          isWatchDaemonResponse_Push `protobuf_oneof:"push"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -344,6 +345,15 @@ func (x *WatchDaemonResponse) GetFaultsStanding() *DaemonFaultsStanding {
 	return nil
 }
 
+func (x *WatchDaemonResponse) GetPersistentWifi() *PersistentWifiState {
+	if x != nil {
+		if x, ok := x.Push.(*WatchDaemonResponse_PersistentWifi); ok {
+			return x.PersistentWifi
+		}
+	}
+	return nil
+}
+
 type isWatchDaemonResponse_Push interface {
 	isWatchDaemonResponse_Push()
 }
@@ -405,6 +415,16 @@ type WatchDaemonResponse_FaultsStanding struct {
 	FaultsStanding *DaemonFaultsStanding `protobuf:"bytes,7,opt,name=faults_standing,json=faultsStanding,proto3,oneof"`
 }
 
+type WatchDaemonResponse_PersistentWifi struct {
+	// THE MACHINE'S PERSISTENT-WIFI STANDING, whole: whether it is on a Wi-Fi
+	// network and whether persistent wifi mode keeps it awake with the lid
+	// closed. STATE, not an event: pushed whenever either fact changes, and
+	// replayed to a late subscriber, so an Emacs that reconnects is told what
+	// stands. Sent ONLY on an Emacs stream: a webview draws the same standing
+	// as its topbar's persistent-wifi chip, which its topbar view carries.
+	PersistentWifi *PersistentWifiState `protobuf:"bytes,8,opt,name=persistent_wifi,json=persistentWifi,proto3,oneof"`
+}
+
 func (*WatchDaemonResponse_ShutdownAnnounced) isWatchDaemonResponse_Push() {}
 
 func (*WatchDaemonResponse_DrainScheduled) isWatchDaemonResponse_Push() {}
@@ -418,6 +438,8 @@ func (*WatchDaemonResponse_ReloadElisp) isWatchDaemonResponse_Push() {}
 func (*WatchDaemonResponse_Ending) isWatchDaemonResponse_Push() {}
 
 func (*WatchDaemonResponse_FaultsStanding) isWatchDaemonResponse_Push() {}
+
+func (*WatchDaemonResponse_PersistentWifi) isWatchDaemonResponse_Push() {}
 
 // Every standing loud fault, oldest first. An empty list is the daemon
 // saying none stands (the last one closed).
@@ -1010,7 +1032,7 @@ var File_agentrepl_v1_endpoint_watch_daemon_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_watch_daemon_proto_rawDesc = "" +
 	"\n" +
-	"(agentrepl/v1/endpoint_watch_daemon.proto\x12\fagentrepl.v1\x1a'agentrepl/v1/daemon_stream_ending.proto\x1a)agentrepl/v1/endpoint_daemon_health.proto\x1a\x1fagentrepl/v1/drain_reason.proto\x1a\x1fagentrepl/v1/editor_focus.proto\x1a.agentrepl/v1/workspace_mutation_progress.proto\"\x94\x01\n" +
+	"(agentrepl/v1/endpoint_watch_daemon.proto\x12\fagentrepl.v1\x1a'agentrepl/v1/daemon_stream_ending.proto\x1a)agentrepl/v1/endpoint_daemon_health.proto\x1a\x1fagentrepl/v1/drain_reason.proto\x1a\x1fagentrepl/v1/editor_focus.proto\x1a\"agentrepl/v1/persistent_wifi.proto\x1a.agentrepl/v1/workspace_mutation_progress.proto\"\x94\x01\n" +
 	"\x12WatchDaemonRequest\x126\n" +
 	"\x05emacs\x18\x01 \x01(\v2\x1e.agentrepl.v1.WatchDaemonEmacsH\x00R\x05emacs\x12<\n" +
 	"\awebview\x18\x02 \x01(\v2 .agentrepl.v1.WatchDaemonWebviewH\x00R\awebviewB\b\n" +
@@ -1019,7 +1041,7 @@ const file_agentrepl_v1_endpoint_watch_daemon_proto_rawDesc = "" +
 	"\velisp_build\x18\x01 \x01(\tR\n" +
 	"elispBuild\x12/\n" +
 	"\x05focus\x18\x02 \x01(\v2\x19.agentrepl.v1.EditorFocusR\x05focus\"\x14\n" +
-	"\x12WatchDaemonWebview\"\xbc\x04\n" +
+	"\x12WatchDaemonWebview\"\x8a\x05\n" +
 	"\x13WatchDaemonResponse\x12V\n" +
 	"\x12shutdown_announced\x18\x01 \x01(\v2%.agentrepl.v1.DaemonShutdownAnnouncedH\x00R\x11shutdownAnnounced\x12M\n" +
 	"\x0fdrain_scheduled\x18\x02 \x01(\v2\".agentrepl.v1.DaemonDrainScheduledH\x00R\x0edrainScheduled\x12M\n" +
@@ -1027,7 +1049,8 @@ const file_agentrepl_v1_endpoint_watch_daemon_proto_rawDesc = "" +
 	"\x11mutation_progress\x18\x04 \x01(\v2'.agentrepl.v1.WorkspaceMutationProgressH\x00R\x10mutationProgress\x12D\n" +
 	"\freload_elisp\x18\x05 \x01(\v2\x1f.agentrepl.v1.DaemonReloadElispH\x00R\vreloadElisp\x12:\n" +
 	"\x06ending\x18\x06 \x01(\v2 .agentrepl.v1.DaemonStreamEndingH\x00R\x06ending\x12M\n" +
-	"\x0ffaults_standing\x18\a \x01(\v2\".agentrepl.v1.DaemonFaultsStandingH\x00R\x0efaultsStandingB\x06\n" +
+	"\x0ffaults_standing\x18\a \x01(\v2\".agentrepl.v1.DaemonFaultsStandingH\x00R\x0efaultsStanding\x12L\n" +
+	"\x0fpersistent_wifi\x18\b \x01(\v2!.agentrepl.v1.PersistentWifiStateH\x00R\x0epersistentWifiB\x06\n" +
 	"\x04push\"Q\n" +
 	"\x14DaemonFaultsStanding\x129\n" +
 	"\x06faults\x18\x01 \x03(\v2!.agentrepl.v1.DaemonStandingFaultR\x06faults\"\x97\x01\n" +
@@ -1095,8 +1118,9 @@ var file_agentrepl_v1_endpoint_watch_daemon_proto_goTypes = []any{
 	(*EditorFocus)(nil),                    // 14: agentrepl.v1.EditorFocus
 	(*WorkspaceMutationProgress)(nil),      // 15: agentrepl.v1.WorkspaceMutationProgress
 	(*DaemonStreamEnding)(nil),             // 16: agentrepl.v1.DaemonStreamEnding
-	(*DaemonFault)(nil),                    // 17: agentrepl.v1.DaemonFault
-	(*DrainReason)(nil),                    // 18: agentrepl.v1.DrainReason
+	(*PersistentWifiState)(nil),            // 17: agentrepl.v1.PersistentWifiState
+	(*DaemonFault)(nil),                    // 18: agentrepl.v1.DaemonFault
+	(*DrainReason)(nil),                    // 19: agentrepl.v1.DrainReason
 }
 var file_agentrepl_v1_endpoint_watch_daemon_proto_depIdxs = []int32{
 	1,  // 0: agentrepl.v1.WatchDaemonRequest.emacs:type_name -> agentrepl.v1.WatchDaemonEmacs
@@ -1109,20 +1133,21 @@ var file_agentrepl_v1_endpoint_watch_daemon_proto_depIdxs = []int32{
 	6,  // 7: agentrepl.v1.WatchDaemonResponse.reload_elisp:type_name -> agentrepl.v1.DaemonReloadElisp
 	16, // 8: agentrepl.v1.WatchDaemonResponse.ending:type_name -> agentrepl.v1.DaemonStreamEnding
 	4,  // 9: agentrepl.v1.WatchDaemonResponse.faults_standing:type_name -> agentrepl.v1.DaemonFaultsStanding
-	5,  // 10: agentrepl.v1.DaemonFaultsStanding.faults:type_name -> agentrepl.v1.DaemonStandingFault
-	17, // 11: agentrepl.v1.DaemonStandingFault.fault:type_name -> agentrepl.v1.DaemonFault
-	8,  // 12: agentrepl.v1.DaemonShutdownAnnounced.cause:type_name -> agentrepl.v1.DaemonShutdownCause
-	9,  // 13: agentrepl.v1.DaemonShutdownCause.self_merge_rollout:type_name -> agentrepl.v1.DaemonShutdownSelfMergeRollout
-	10, // 14: agentrepl.v1.DaemonShutdownCause.scheduled_drain:type_name -> agentrepl.v1.DaemonShutdownScheduledDrain
-	11, // 15: agentrepl.v1.DaemonShutdownCause.immediate:type_name -> agentrepl.v1.DaemonShutdownImmediate
-	18, // 16: agentrepl.v1.DaemonShutdownScheduledDrain.reason:type_name -> agentrepl.v1.DrainReason
-	18, // 17: agentrepl.v1.DaemonShutdownImmediate.reason:type_name -> agentrepl.v1.DrainReason
-	18, // 18: agentrepl.v1.DaemonDrainScheduled.reason:type_name -> agentrepl.v1.DrainReason
-	19, // [19:19] is the sub-list for method output_type
-	19, // [19:19] is the sub-list for method input_type
-	19, // [19:19] is the sub-list for extension type_name
-	19, // [19:19] is the sub-list for extension extendee
-	0,  // [0:19] is the sub-list for field type_name
+	17, // 10: agentrepl.v1.WatchDaemonResponse.persistent_wifi:type_name -> agentrepl.v1.PersistentWifiState
+	5,  // 11: agentrepl.v1.DaemonFaultsStanding.faults:type_name -> agentrepl.v1.DaemonStandingFault
+	18, // 12: agentrepl.v1.DaemonStandingFault.fault:type_name -> agentrepl.v1.DaemonFault
+	8,  // 13: agentrepl.v1.DaemonShutdownAnnounced.cause:type_name -> agentrepl.v1.DaemonShutdownCause
+	9,  // 14: agentrepl.v1.DaemonShutdownCause.self_merge_rollout:type_name -> agentrepl.v1.DaemonShutdownSelfMergeRollout
+	10, // 15: agentrepl.v1.DaemonShutdownCause.scheduled_drain:type_name -> agentrepl.v1.DaemonShutdownScheduledDrain
+	11, // 16: agentrepl.v1.DaemonShutdownCause.immediate:type_name -> agentrepl.v1.DaemonShutdownImmediate
+	19, // 17: agentrepl.v1.DaemonShutdownScheduledDrain.reason:type_name -> agentrepl.v1.DrainReason
+	19, // 18: agentrepl.v1.DaemonShutdownImmediate.reason:type_name -> agentrepl.v1.DrainReason
+	19, // 19: agentrepl.v1.DaemonDrainScheduled.reason:type_name -> agentrepl.v1.DrainReason
+	20, // [20:20] is the sub-list for method output_type
+	20, // [20:20] is the sub-list for method input_type
+	20, // [20:20] is the sub-list for extension type_name
+	20, // [20:20] is the sub-list for extension extendee
+	0,  // [0:20] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_watch_daemon_proto_init() }
@@ -1134,6 +1159,7 @@ func file_agentrepl_v1_endpoint_watch_daemon_proto_init() {
 	file_agentrepl_v1_endpoint_daemon_health_proto_init()
 	file_agentrepl_v1_drain_reason_proto_init()
 	file_agentrepl_v1_editor_focus_proto_init()
+	file_agentrepl_v1_persistent_wifi_proto_init()
 	file_agentrepl_v1_workspace_mutation_progress_proto_init()
 	file_agentrepl_v1_endpoint_watch_daemon_proto_msgTypes[0].OneofWrappers = []any{
 		(*WatchDaemonRequest_Emacs)(nil),
@@ -1147,6 +1173,7 @@ func file_agentrepl_v1_endpoint_watch_daemon_proto_init() {
 		(*WatchDaemonResponse_ReloadElisp)(nil),
 		(*WatchDaemonResponse_Ending)(nil),
 		(*WatchDaemonResponse_FaultsStanding)(nil),
+		(*WatchDaemonResponse_PersistentWifi)(nil),
 	}
 	file_agentrepl_v1_endpoint_watch_daemon_proto_msgTypes[7].OneofWrappers = []any{}
 	file_agentrepl_v1_endpoint_watch_daemon_proto_msgTypes[8].OneofWrappers = []any{

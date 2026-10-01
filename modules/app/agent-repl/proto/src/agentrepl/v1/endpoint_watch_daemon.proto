@@ -15,6 +15,7 @@ import "agentrepl/v1/daemon_stream_ending.proto";
 import "agentrepl/v1/endpoint_daemon_health.proto";
 import "agentrepl/v1/drain_reason.proto";
 import "agentrepl/v1/editor_focus.proto";
+import "agentrepl/v1/persistent_wifi.proto";
 import "agentrepl/v1/workspace_mutation_progress.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
@@ -98,6 +99,13 @@ message WatchDaemonResponse {
     // re-told. Sent ONLY on an Emacs stream: a webview draws the same faults
     // on its topbar and footer, whose views already carry them.
     DaemonFaultsStanding faults_standing = 7;
+    // THE MACHINE'S PERSISTENT-WIFI STANDING, whole: whether it is on a Wi-Fi
+    // network and whether persistent wifi mode keeps it awake with the lid
+    // closed. STATE, not an event: pushed whenever either fact changes, and
+    // replayed to a late subscriber, so an Emacs that reconnects is told what
+    // stands. Sent ONLY on an Emacs stream: a webview draws the same standing
+    // as its topbar's persistent-wifi chip, which its topbar view carries.
+    PersistentWifiState persistent_wifi = 8;
   }
 }
 
