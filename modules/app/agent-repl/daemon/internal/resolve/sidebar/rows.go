@@ -107,22 +107,27 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 	return out
 }
 
-// availability resolves whether an editor may open the workspace yet, from
-// the shim link alone (frontend.v1.RosterRowAvailability): AVAILABLE once a
-// link has connected under this daemon, which never lapses; UNAVAILABLE when
-// the link went dead before it ever connected, the condition `start_failed`
-// draws; PENDING otherwise.
+// availability resolves whether an editor may open the workspace yet
+// (frontend.v1.RosterRowAvailability): AVAILABLE once a link has connected
+// under this daemon, which never lapses; otherwise PENDING while a bring-up is
+// under way; otherwise UNAVAILABLE when the link is dead (it died before it
+// ever connected, the condition `start_failed` draws); otherwise AVAILABLE,
+// since a workspace with nothing under way and nothing failed has nothing to
+// wait for.
 func availability(s *wsState) *frontendv1.RosterRowAvailability {
 	switch {
 	case s.everConnected:
 		return &frontendv1.RosterRowAvailability{Availability: &frontendv1.RosterRowAvailability_Available{
 			Available: &frontendv1.RosterRowAvailabilityAvailable{}}}
+	case s.bringingUp:
+		return &frontendv1.RosterRowAvailability{Availability: &frontendv1.RosterRowAvailability_Pending{
+			Pending: &frontendv1.RosterRowAvailabilityPending{}}}
 	case s.linkSeen && s.link == shimclient.LinkDead:
 		return &frontendv1.RosterRowAvailability{Availability: &frontendv1.RosterRowAvailability_Unavailable{
 			Unavailable: &frontendv1.RosterRowAvailabilityUnavailable{}}}
 	default:
-		return &frontendv1.RosterRowAvailability{Availability: &frontendv1.RosterRowAvailability_Pending{
-			Pending: &frontendv1.RosterRowAvailabilityPending{}}}
+		return &frontendv1.RosterRowAvailability{Availability: &frontendv1.RosterRowAvailability_Available{
+			Available: &frontendv1.RosterRowAvailabilityAvailable{}}}
 	}
 }
 

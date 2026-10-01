@@ -926,16 +926,18 @@ func availabilityName(row *frontendv1.RosterRow) string {
 	}
 }
 
-func TestAvailabilityFollowsTheShimLink(t *testing.T) {
+func TestAvailabilityFollowsTheBringUpAndTheShimLink(t *testing.T) {
 	cases := []struct {
-		name  string
-		links []shimclient.LinkState
-		want  string
+		name       string
+		bringingUp bool
+		links      []shimclient.LinkState
+		want       string
 	}{
-		{name: "no link was ever seen", links: nil, want: "pending"},
-		{name: "the link is still dialing", links: []shimclient.LinkState{shimclient.LinkDialing}, want: "pending"},
-		{name: "the link connected", links: []shimclient.LinkState{shimclient.LinkConnected}, want: "available"},
-		{name: "the link died before it ever connected", links: []shimclient.LinkState{shimclient.LinkDialing, shimclient.LinkDead}, want: "unavailable"},
+		{name: "nothing under way and no link: nothing to wait for", want: "available"},
+		{name: "a bring-up under way with no link yet", bringingUp: true, want: "pending"},
+		{name: "a bring-up under way still dialing", bringingUp: true, links: []shimclient.LinkState{shimclient.LinkDialing}, want: "pending"},
+		{name: "a bring-up whose link connected", bringingUp: true, links: []shimclient.LinkState{shimclient.LinkConnected}, want: "available"},
+		{name: "a link that died before it ever connected", links: []shimclient.LinkState{shimclient.LinkDialing, shimclient.LinkDead}, want: "unavailable"},
 		{name: "a link that connected and then died", links: []shimclient.LinkState{shimclient.LinkConnected, shimclient.LinkDead}, want: "available"},
 		{name: "a failed start that a later start brought up", links: []shimclient.LinkState{shimclient.LinkDead, shimclient.LinkConnected}, want: "available"},
 	}
@@ -943,6 +945,7 @@ func TestAvailabilityFollowsTheShimLink(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange.
 			r := arrange(t)
+			r.SetBringingUp(theWS, tc.bringingUp)
 
 			// Act.
 			for _, link := range tc.links {
@@ -954,5 +957,19 @@ func TestAvailabilityFollowsTheShimLink(t *testing.T) {
 				t.Fatalf("availability = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestAvailabilityLeavesPendingWhenTheBringUpEnds(t *testing.T) {
+	// Arrange: a bring-up that ends with no link at all (a cold gate, say).
+	r := arrange(t)
+	r.SetBringingUp(theWS, true)
+
+	// Act.
+	r.SetBringingUp(theWS, false)
+
+	// Assert.
+	if got := availabilityName(onlyRow(t, r)); got != "available" {
+		t.Fatalf("availability = %q, want available", got)
 	}
 }

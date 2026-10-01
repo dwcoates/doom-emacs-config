@@ -96,6 +96,11 @@ type FleetDeps struct {
 	// Sinks are the five resolvers plus the lifecycle sink the watcher routes
 	// into.
 	Sinks sessionwatcher.Sinks
+	// BringUps is told when a start of a workspace's session begins (true)
+	// and ends (false), whatever it came to: the roster holds the row's
+	// availability at `pending` between the two until a link connects
+	// (sidebar.Resolver.SetBringingUp).
+	BringUps func(ws ids.WorkspaceID, underWay bool)
 	// Feed carries the cold gate's row.
 	Feed feed.Resolver
 	// Footer carries the parked-session status a standing cold gate produces.
@@ -364,6 +369,8 @@ func NewFleet(deps FleetDeps) (*Fleet, error) {
 		return nil, fmt.Errorf("workspace: the session fleet needs log surfaces")
 	case !filepath.IsAbs(deps.LockDir):
 		return nil, fmt.Errorf("workspace: the session fleet needs the absolute kernel-lock directory, got %q", deps.LockDir)
+	case deps.BringUps == nil:
+		return nil, fmt.Errorf("workspace: the session fleet needs a bring-up marker; the roster holds a starting workspace unopened by it")
 	}
 	probe := deps.Probe
 	if probe == nil {
@@ -842,6 +849,12 @@ func (f *Fleet) start(ctx context.Context, ws ids.WorkspaceID, rebind bool) erro
 	if f.Live(ws) {
 		return nil
 	}
+	// THE BRING-UP IS UNDER WAY FROM HERE UNTIL THIS START RETURNS, however
+	// it ends. A success has connected the link and a failure has stated it
+	// dead before the lowering runs, so the row never reads `available` in
+	// between for want of either.
+	f.deps.BringUps(ws, true)
+	defer f.deps.BringUps(ws, false)
 	// A SELECTED TRANSCRIPT IS A DIFFERENT CONVERSATION: the watcher this
 	// start opens replays its first page, and the previous watcher's pointers,
 	// which name another book, are forgotten. See opening.go.
