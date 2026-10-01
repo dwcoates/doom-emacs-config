@@ -772,6 +772,7 @@ func (w *watcher) routeUpdateLocked(agent *conversationv1.AgentId, update *conve
 		})
 		w.sinks.Feed.OnApiError(w.ws, agent, update.GetApiError(), turn, place)
 		w.sinks.Footer.OnApiError(w.ws, agent, update.GetApiError())
+		w.sinks.Sidebar.OnApiError(w.ws, agent, update.GetApiError())
 
 	case update.GetContextBudgetWarning() != nil:
 		// THE AGENT PLANE owns the budget warning: it is a transcript

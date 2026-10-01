@@ -212,6 +212,29 @@ var turnCases = []turnCase{
 		s.footer.OnSessionUpdate(theWS, rejectedRateLimit())
 		s.roster.OnSessionUpdate(theWS, rejectedRateLimit())
 	}},
+	{name: "the vendor retrying the turn's call", apply: func(s *surfaces) {
+		s.startTurn()
+		s.apiError()
+	}},
+	{name: "the retried call answered", apply: func(s *surfaces) {
+		s.startTurn()
+		s.apiError()
+		act := &conversationv1.AgentActivity{Item: &conversationv1.AgentActivity_Response{Response: &conversationv1.AgentResponse{}}}
+		s.footer.OnActivity(theWS, agent("main"), act)
+		s.roster.OnActivity(theWS, agent("main"), act)
+	}},
+	{name: "a prompt sent during the retry opening its own turn", apply: func(s *surfaces) {
+		s.startTurn()
+		s.apiError()
+		s.startTurn()
+	}},
+}
+
+// apiError reports the vendor retrying the main agent's call to both surfaces.
+func (s *surfaces) apiError() {
+	failed := &conversationv1.ApiRequestFailed{Message: "Can't reach the API server (ENOTFOUND)"}
+	s.footer.OnApiError(theWS, agent("main"), failed)
+	s.roster.OnApiError(theWS, agent("main"), failed)
 }
 
 // mergeStates is every state the merge orchestrator states, "none" included,

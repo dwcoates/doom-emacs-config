@@ -344,8 +344,9 @@ func TestRouteContextBudgetWarning(t *testing.T) {
 	assertNames(t, got, []string{"footer.OnContextBudgetWarning"})
 }
 
-// TestRouteApiError covers mid-turn evidence: it is a page line and a footer
-// retry notice, and never a terminal — the turn goes on.
+// TestRouteApiError covers mid-turn evidence: it is a page line, and the
+// footer's and the roster's retry block, and never a terminal — the turn goes
+// on.
 func TestRouteApiError(t *testing.T) {
 	// Arrange.
 	h := newHarness(t, Session{Started: sessionStarted("turn-1")})
@@ -355,7 +356,7 @@ func TestRouteApiError(t *testing.T) {
 	got := h.route(h.main, entryFrame(frameUpdate("main-1", apiErrorUpdate("529 overloaded"))))
 
 	// Assert.
-	assertNames(t, got, []string{"feed.OnApiError", "footer.OnApiError"})
+	assertNames(t, got, []string{"feed.OnApiError", "footer.OnApiError", "sidebar.OnApiError"})
 	if h.w.TurnInFlight() == nil {
 		t.Fatal("a mid-turn api error ended the turn; it is evidence, never a terminal")
 	}

@@ -106,6 +106,10 @@ func rosterRung(claim ladder.Claim, s *wsState, session *wsm.Session, log dlog.L
 			log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case s.vendorBlocked"})
 			return "vendor_blocked"
 		}
+		if s.retryBlocks() {
+			log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case s.retryBlocks()"})
+			return "api_retrying"
+		}
 		return ""
 	case ladder.Waiting:
 		if len(s.permissions) > 0 {
@@ -313,6 +317,9 @@ func setStatus(row *frontendv1.RosterRow, arm string, log dlog.Logger) {
 	case "vendor_blocked":
 		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"vendor_blocked\""})
 		row.Status = &frontendv1.RosterRow_VendorBlocked{VendorBlocked: &frontendv1.RosterRowStatusVendorBlocked{}}
+	case "api_retrying":
+		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"api_retrying\""})
+		row.Status = &frontendv1.RosterRow_ApiRetrying{ApiRetrying: &frontendv1.RosterRowStatusApiRetrying{}}
 	case "init":
 		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"init\""})
 		row.Status = &frontendv1.RosterRow_Init{Init: &frontendv1.RosterRowStatusInit{}}

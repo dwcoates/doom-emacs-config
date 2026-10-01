@@ -909,6 +909,10 @@ func (s *sidebarSink) OnDetachedWork(_ ids.WorkspaceID, agent *conversationv1.Ag
 	s.rec.emit(event{sink: "sidebar", method: "OnDetachedWork", agent: agent.GetValue(), detail: work.GetWork().GetValue()})
 }
 
+func (s *sidebarSink) OnApiError(_ ids.WorkspaceID, agent *conversationv1.AgentId, _ *conversationv1.ApiRequestFailed) {
+	s.rec.emit(event{sink: "sidebar", method: "OnApiError", agent: agent.GetValue()})
+}
+
 func (s *sidebarSink) OnPermission(_ ids.WorkspaceID, agent *conversationv1.AgentId, _ *conversationv1.AgentPermission) {
 	s.rec.emit(event{sink: "sidebar", method: "OnPermission", agent: agent.GetValue()})
 }
