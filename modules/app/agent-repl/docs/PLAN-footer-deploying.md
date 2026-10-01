@@ -21,12 +21,14 @@ Status: PROPOSED, not built. Owner rulings needed on the questions at the end.
   path to the vendor because the deploy is moving something it runs on.
   - It is an unusable state, so it draws blue.
   - Another workspace's move, or a build that touches nothing running, is NOT this workspace deploying.
+  - A lost vendor path from any OTHER cause (a dead shim, a severed link, a vendor outage) is NOT
+    `deploying` either; it keeps its own status (`disconnected`, `blocked`).
 - Everything a deploy does while the workspace still works stays an ACTIVITY on the
   workspace's own status (building, installing, waiting on its own work, deferred notes).
 - `deploying` is exclusive with `working` and `merging`, because a status is one arm.
   - Gotcha: a handover never waits on work (`daemon/internal/rollout/handover.go:275`), so a
     transfer can happen mid-turn while the shim keeps the turn running.
-  - For that window the strip draws `deploying · transferring`, and the turn's activity is not drawn.
+  - For that window the strip draws `deploying · handing off`, and the turn's activity is not drawn.
 
 ## Every step, in order
 
@@ -62,14 +64,17 @@ Status: PROPOSED, not built. Owner rulings needed on the questions at the end.
 |---|---|---|---|
 | B1 | `restarting_store` | the store and sidecar restart, so no record path exists | every workspace |
 | B2 | `restarting_sidecar` | the sidecar alone restarts | every workspace |
-| B3 | `quiescing` | the incumbent holds this workspace's intake and seals its queue | the one being moved |
-| B4 | `transferring` | this workspace is handed to the successor | the one being moved |
-| B5 | `adopting` | the successor claims serving and re-attaches the shim | the one being moved |
+| B3 | `pausing` | the old daemon stops taking prompts for this workspace and waits for any prompt mid-delivery to land | the one being moved |
+| B4 | `handing_off` | the old daemon writes down this workspace's state and lets go of its shim | the one being moved |
+| B5 | `reconnecting` | the new daemon takes the workspace and connects to the shim the old one let go of | the one being moved |
 | B6 | `restarting_daemon` | the stop-then-start layout restart has stopped this workspace | every workspace |
 | B7 | `replacing_shim` | this workspace's stale shim is bounced and the fresh one starts | that workspace |
 
 - `waiting` (an unforced move waiting on this workspace's own work) stays the activity's arm,
   because the workspace still works.
+- B4 and B5 are kept apart because each is a different daemon's step, and each can stall on its own:
+  - B4 belongs to the old daemon, and stalls when the new daemon refuses the workspace (it is taken back);
+  - B5 belongs to the new daemon, and stalls when the shim does not re-attach in time (the window expires).
 - B4 and B5 straddle the two daemons:
   - the incumbent's streams end at the transfer;
   - the successor restates B5 for a client that joins late, so the manifest carries the step
@@ -109,7 +114,7 @@ Status: PROPOSED, not built. Owner rulings needed on the questions at the end.
 
 ## Questions for the owner
 
-1. While a turn is transferred mid-flight (B4), should the strip draw `deploying` and hide the turn,
-   or should a transfer that carries a live turn stay `working` with a `transferring` activity?
+1. While a turn is handed off mid-flight (B4), should the strip draw `deploying` and hide the turn,
+   or should a transfer that carries a live turn stay `working` with a `handing off` activity?
    - The shim keeps the turn running, but no prompt can be sent until the successor adopts it.
 2. Should a failed build row open the archived build log (`BuildFailed.Log`) when clicked?
