@@ -79,3 +79,26 @@ the daemon's own selection.
   - The rebuild makes that reordering impossible.
 
 ## Landed changes
+
+### 1. The selectable affordance, the bubble arm, the click, the text for Emacs
+
+- **What changed:**
+  - `frontend.v1.FeedRow.selectable` (new `frontend.v1.FeedRowSelectable`,
+    tag 22) marks landed root-feed prompts and response bubbles.
+  - `frontend.v1.FeedSelection.selection` gains the `bubble` arm
+    (`frontend.v1.FeedSelectionBubble`, tag 7).
+  - `agentrepl.v1.SelectFeedRowRequest.move` gains `bubble`
+    (`agentrepl.v1.SelectFeedRowBubble`, tag 6), a click.
+  - `agentrepl.v1.SelectFeedRowError.cause` gains `not_selectable`
+    (`agentrepl.v1.SelectFeedRowNotSelectable`, tag 5).
+  - `agentrepl.v1.HostWorkspaceSelection` gains the `bubble` arm (tag 4).
+    - Each selected arm now carries the bubble's text
+      (`agentrepl.v1.HostWorkspaceSelectionMarkdown`).
+- **Why:** this is the owner's widened selection, expressed as additions to
+  `master`'s model (see "Decisions the implementer made").
+- **Consequences:**
+  - Every new field and arm is additive.
+  - No existing tag moved, and no client of the old shapes breaks on the wire.
+  - A client that does not know the `bubble` arm sees an unset selection
+    oneof. The Emacs and webapp decoders are strict, so both are updated in
+    the same change.
