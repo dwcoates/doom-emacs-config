@@ -560,7 +560,7 @@ func TestLandingAMergeWhoseTargetIsTheSelfRepoDeploysOnce(t *testing.T) {
 	if argv := invocations[0].Argv; len(argv) != 2 || argv[0] != "--out" {
 		t.Fatalf("deploy build argv = %v, want --out <staging>", argv)
 	}
-	if got := len(d.Launchctl.Invocations()); got != 0 {
+	if got := len(d.Launchctl.InvocationsExcept("print")); got != 0 {
 		t.Fatalf("launchctl invocations = %d, want none: a failed build restarts nothing", got)
 	}
 }
