@@ -222,10 +222,6 @@ func (f *Fleet) Prelaunch(ctx context.Context, ws ids.WorkspaceID) (shimclient.C
 		UDSPath:      uds,
 		StoreSocket:  f.deps.StoreSocket,
 		ConfigDir:    configDir,
-		// Work (multi-repo) accounts disable vendor auto-compaction; the
-		// account layer owns the work-vs-personal policy and this session's
-		// account is exactly the configDir it spends under.
-		DisableAutoCompact: f.deps.Accounts.IsMultiRepo(configDir),
 		// The relaunched shim carries the SAME host session identity: a
 		// relaunch rotates the process, never the session.
 		SessionID:    session.HostSessionID,

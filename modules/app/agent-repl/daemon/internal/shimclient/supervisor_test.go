@@ -1017,33 +1017,25 @@ func TestAnAdoptedClientsOrderedDepartureIsNotADeath(t *testing.T) {
 	}
 }
 
-// TestSpawnDisableAutoCompactControlsTheCompactEnv asserts DISABLE_COMPACT is
-// set on the child ONLY when the Spec asks for it, so a work-account session
-// disables vendor auto-compaction while a personal one is untouched.
-func TestSpawnDisableAutoCompactControlsTheCompactEnv(t *testing.T) {
-	tests := []struct {
-		name    string
-		disable bool
-		want    string
-	}{
-		{name: "disabled sets DISABLE_COMPACT=1", disable: true, want: "1"},
-		{name: "enabled omits DISABLE_COMPACT", disable: false, want: ""},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			// Arrange.
+// TestSpawnNeverDisablesVendorCompaction asserts the daemon sets no vendor
+// compaction switch on any shim child: the vendor's own auto-compaction is what
+// keeps a session's context window from filling, for every account.
+func TestSpawnNeverDisablesVendorCompaction(t *testing.T) {
+	for _, name := range []string{"DISABLE_COMPACT", "DISABLE_AUTO_COMPACT"} {
+		t.Run(name, func(t *testing.T) {
+			// Arrange: the daemon's own environment carries no such switch.
+			t.Setenv(name, "")
 			dir := shortDir(t)
 			f, uds := startFakeShim(t, dir)
 			spec, sink := newTestSpec(t, dir, uds, helperIdle)
-			spec.DisableAutoCompact = tc.disable
 
 			// Act.
 			_ = spawnReady(t, f, spec)
 			record := sink.record(t)
 
 			// Assert.
-			if got := record.Env[EnvDisableCompact]; got != tc.want {
-				t.Fatalf("child %s = %q, want %q", EnvDisableCompact, got, tc.want)
+			if got := record.Env[name]; got != "" {
+				t.Fatalf("child %s = %q, want unset", name, got)
 			}
 		})
 	}

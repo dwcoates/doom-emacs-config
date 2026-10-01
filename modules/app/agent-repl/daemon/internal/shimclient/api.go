@@ -38,13 +38,6 @@ type Spec struct {
 	StoreSocket string
 	// ConfigDir is CLAUDE_CONFIG_DIR: the account root.
 	ConfigDir string
-	// DisableAutoCompact, when true, sets DISABLE_COMPACT=1 in the shim
-	// child's environment so the vendor CLI does NOT auto-compact this
-	// session's context window. It is the work-account switch (the daemon
-	// decides which accounts get it; shimclient only honors the flag). Manual
-	// /compact still works; when false, DISABLE_COMPACT is not set and the
-	// session auto-compacts exactly as before.
-	DisableAutoCompact bool
 	// ShimBuildSHA is SHIM_BUILD_SHA.
 	ShimBuildSHA string
 	// NodeBin is the node binary.
