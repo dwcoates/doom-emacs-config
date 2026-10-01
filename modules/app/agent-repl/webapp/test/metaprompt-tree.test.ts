@@ -703,3 +703,52 @@ describe("dotted labels with more than one level", () => {
     expect(isMetapromptTree(text)).toBe(true);
   });
 });
+
+describe("inline code keeps its runs of spaces", () => {
+  const wrapped = (body: string, width: number): string[] => formatTree(body.split("\n"), width).lines.map(lineText);
+
+  it("keeps a run of spaces inside an inline-code span on an unwrapped line", () => {
+    // Arrange
+    const body = ["1 Root", "└── 1.1 Inline `a    b` here."].join("\n");
+
+    // Act
+    const lines = wrapped(body, 200);
+
+    // Assert
+    expect(lines[1]).toBe("└── 1.1 Inline `a    b` here.");
+  });
+
+  it("keeps the span whole, spaces and all, when its line wraps elsewhere", () => {
+    // Arrange
+    const body = ["1 Root", "└── 1.1 a long line of plain prose that has to wrap `x  y` and then more prose after it"].join("\n");
+
+    // Act
+    const lines = wrapped(body, 40);
+
+    // Assert
+    expect(lines.some((line) => line.includes("`x  y`"))).toBe(true);
+  });
+
+  it("still collapses runs of spaces outside any span", () => {
+    // Arrange
+    const body = ["1 Root", "└── 1.1 plain    prose"].join("\n");
+
+    // Act
+    const lines = wrapped(body, 200);
+
+    // Assert
+    expect(lines[1]).toBe("└── 1.1 plain prose");
+  });
+
+  it("reads an unmatched backtick as prose, so the rest of the line still wraps", () => {
+    // Arrange
+    const body = ["1 Root", "└── 1.1 a stray ` backtick followed by enough plain words to need a wrap here"].join("\n");
+
+    // Act
+    const lines = wrapped(body, 40);
+
+    // Assert
+    expect(lines.length).toBeGreaterThan(2);
+    expect(lines.every((line) => line.length <= 40)).toBe(true);
+  });
+});
