@@ -1,6 +1,7 @@
 # Plan: a deploy in the footer (status, steps, activities, enduring blocked line)
 
-Status: PROPOSED, not built. Owner rulings needed on the questions at the end.
+Status: APPROVED 2026-10-01, to be implemented end to end without owner input. Protobuf changes
+are pre-approved (no new rpc endpoints). No subagents in the implementing session.
 
 ## What stands today
 
@@ -34,26 +35,32 @@ Status: PROPOSED, not built. Owner rulings needed on the questions at the end.
 
 | # | Step (arm) | Source today | Typed data |
 |---|---|---|---|
-| A1 | `requested` | `Deployer.Deploy` entry | forced or not |
-| A2 | `building` | `ScriptBuilder.Build` steps | current target, done/total, over `proto shim webapp daemon store sidecar lock` |
-| A3 | `installing` | `Deployer.install` | none |
-| A5 | `reloading_elisp` | `Deployer.elisp` | count of Emacs clients told |
-| A6 | `handing_over` | `rollout.HandOver` | workspaces moved / total |
-| A6' | `restarting_daemon` | `rollout.Restart` (layout change) | running and fresh layout |
-| A7 | `replacing_shims` | `Deployer.shims` | replaced now / deferred to idle |
-| A8 | `reloading_webviews` | `Deployer.webapp` | none |
-| A9 | `rolling_back` | `Deployer.rollback` | what is being restored |
+| A1 | `building` | `ScriptBuilder.Build` steps | current target, done/total, over `proto shim webapp daemon store sidecar lock` |
+| A2 | `installing` | `Deployer.install` | none |
+| A3 | `waiting` (per workspace, derived) | the scheduled workspace's own live work | turn and detached counts, falling as the work drains |
+| A4 | `reloading_webapp` | `Deployer.webapp` | none |
+| A5 | `reloading_emacs` | `Deployer.elisp` | none |
+| A6 | `rolling_back` | `Deployer.rollback` | none |
 
-- Endings stay as they are:
-  - `updated` transient on success;
-  - `deploy_failed` fault on failure, now also naming the failed step and whether the rollback finished.
-- Refusals (`ErrAlreadyDeploying`, `rollout.ErrJoining`, `ErrAlreadyRollingOut`) raise a
-  transient, because today only the rpc caller hears them.
-- New producer plumbing:
-  - `deploy.Builder` gains a per-step progress callback (today it reports nothing until done).
-  - A5, A7, A8 and A9 call `progress` where they currently only log.
+- The `restarting_services` and `handing_over` phases are RETIRED: store and sidecar are never
+  restarted by a deploy, and a workspace's move is the `deploying` status (B), not an activity.
+- Endings:
+  - `updated` transient on success, as today;
+  - a failure is a SALIENT activity naming the failed step (see "Expanded footer"), replacing
+    the transient `deploy_failed` fault line.
+- A blocked deploy (stale store or sidecar, protocol bump) raises the enduring blocked line and
+  ends with no other step.
+- Refusals (`ErrAlreadyDeploying`, `rollout.ErrJoining`, `ErrAlreadyRollingOut`) are logged at
+  INFO as today and draw nothing: the deploy already running is on the line.
+- New producer plumbing: `deploy.Builder` gains a per-step progress callback (today it reports
+  nothing until done), and A4 to A6 call `progress` where they only log today.
 - Every step carries `stage_entered_at_ms`, the same field the merge bubble uses, so the client
   draws its duration.
+- A FORCED deploy keeps its meaning: it does not wait for work (it is the user's explicit choice),
+  so a forced transfer runs at once and ends the work in flight, as a forced bounce does today.
+- A daemon whose state LAYOUT changes cannot hand over (the successor opens state read-only), so
+  it is a daemon swap that waits until EVERY workspace has drained, then stops and starts; each
+  workspace draws `deploying · transferring` from the stop until the new daemon serves it.
 
 ### B. Per-workspace (status arm `deploying`, blue, only while this workspace is cut off)
 
@@ -235,17 +242,44 @@ In every combination the client sees ONE transfer, from step 3 to step 6 (`deplo
 - "The old daemon has exited" means the old connection is gone and only the new one remains;
   that is when the Emacs lisp reloads.
 
-## Work, by system
+## Implementation order
 
-1. Proto (`frontend.v1`): new status arm and substatuses, new activity arms, the failed-deploy salient activity, and the enduring blocked line.
-2. Daemon:
-   - `deployprogress.Progress` grows the steps and per-component rows;
-   - the builder callback;
-   - the resolver derives the B substatuses from the rollout's per-workspace transfer state;
-   - the manifest carries steps and rows across the handover.
-3. Webapp: the status, activity arms, durations, the enduring blocked line, and the 10-second enduring alternation in `footer/`.
-4. Lisp: nothing beyond the generic status rendering, to be confirmed.
-5. Docs: `docs/USER-GUIDE.md` gains the deploy footer, per the `AGENTS.md` rule.
+Land each as its own commits, tests with each (AAA, one edge case per test, error paths assert
+the canonical log record), and keep the tracked suites green.
+
+1. Proto (`frontend.v1`, regenerate with `make -C proto all`):
+   - `FooterStatusDeploying` status arm with the `transferring` substatus and its activity cell;
+   - `FooterStatusActivityUpdate`: retire `restarting_services` and `handing_over`, add the A steps
+     with `stage_entered_at_ms`;
+   - the failed-deploy salient activity (step and detail);
+   - the enduring deploy-blocked line beside the usage line;
+   - the held prompt's `after deploy` hold, replacing `build_refresh` and `shutdown` for deploys;
+   - the client-facing transfer notices (steps 2, 3 and 6) on the existing daemon streams.
+2. Daemon scheduling and holds: freeness never reads an unknown live-work set as free; a
+   scheduled workspace holds user prompts as `after deploy` from the schedule; force asks
+   (Emacs) and delays.
+3. Daemon transfers: the three combinations; a current shim survives a daemon swap and is
+   re-attached; the mid-turn handover and its misread ruling at `rollout/handover.go:275` go.
+4. Deploy gating: a stale store or sidecar, or a protocol version change, blocks every hot reload;
+   the build stamps its proto package versions.
+5. Footer resolver: the status, activities, salient failure, enduring blocked line.
+6. Webapp: the status, activity arms, durations, enduring alternation by wall clock, the purple
+   `after deploy` badge.
+7. Lisp: the transfer notices (no fault or blue status during an expected transfer), the force
+   confirmation, the lisp reload after the old daemon's connection is gone.
+8. Emacs restart path: build, install and start every stale component.
+9. Docs: `docs/USER-GUIDE.md` (deploy footer, held prompts), `daemon/AGENTS.md` (held prompt
+   classifications, the corrected drain rule), `docs/REMEDIATION-CHANGELOG.md`.
+
+## Before starting
+
+- Remove `sessionwatcher.watcher.SetOutputAddress` and the `addr` sink parameters the feed
+  ignores (owner rule: delete code only tests call), as its own commit.
+- Request the merge of `merge-queue-rework` through `/merge-queue` (`--enqueue-own --keep-open`)
+  before starting this plan, and do not edit the worktree while that merge runs.
+- Known defect outside this plan, not yet ruled on: a user interrupt replaced the vendor process
+  and killed a background agent (2026-10-01 13:03:29) while the shim logged that detached work
+  keeps running.
 
 ## Questions for the owner
 
