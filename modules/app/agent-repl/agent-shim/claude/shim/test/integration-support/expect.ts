@@ -259,28 +259,6 @@ export function hibernateKind(response: shimv1.HibernateResponse): string {
   return response.result.value.kind.case ?? "unset";
 }
 
-/**
- * Drive `Hibernate` THE WAY THE DAEMON'S SWEEP DOES, and answer how many asks
- * it took.
- *
- * The directive is two-phase: a compaction outlives the rpc that started it, so
- * the first ask answers `compacting` and a later one acks. The sweep's own
- * shape is exactly this loop — ask, defer, ask again — and the ask count is
- * what a test asserts idempotence with, because an ack on the SECOND ask means
- * the compaction was not run a second time.
- */
-export async function hibernateUntilAcked(
-  ask: () => Promise<shimv1.HibernateResponse>,
-): Promise<number> {
-  for (let asks = 1; asks <= 200; asks++) {
-    const response = await ask();
-    if (response.result.case === "compacting") continue;
-    hibernateAcked(response);
-    return asks;
-  }
-  throw new Error("Hibernate never stopped answering `compacting`");
-}
-
 /** Assert Hibernate acked. */
 export function hibernateAcked(response: shimv1.HibernateResponse): void {
   if (response.result.case !== "success") {
@@ -288,7 +266,7 @@ export function hibernateAcked(response: shimv1.HibernateResponse): void {
       "Hibernate",
       response.result.case === "error"
         ? `error.${response.result.value.kind.case ?? "unset"}`
-        : response.result.case,
+        : "an unset oneof",
     );
   }
 }

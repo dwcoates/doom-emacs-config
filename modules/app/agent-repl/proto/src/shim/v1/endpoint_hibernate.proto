@@ -1,21 +1,10 @@
 // endpoint_hibernate.proto — Hibernate: the daemon's pre-hibernation
-// directive. SESSION section. The daemon calls this BEFORE standing a shim
-// down for hibernation; the shim COMPACTS the session (its ordinary
-// compaction mechanism — a throwaway summarizing session rewriting the
-// transcript), then acks. Only after the ack does the daemon stand the
-// shim down, so a later revival never pays a cold context.
-//
-// THE DIRECTIVE IS TWO-PHASE, BECAUSE A COMPACTION OUTLIVES THE CALLER'S
-// DEADLINE. A compaction is a real vendor turn and takes as long as one; the
-// daemon's stand bound is a sum of TEARDOWN bounds and is seconds. While the
-// answer was the compaction's own completion, the caller's deadline expired
-// first, the daemon recorded a failed directive, the shim finished compacting
-// anyway, and the next sweep pass ran the WHOLE compaction again — 13 vendor
-// summary turns in one morning on one workspace (2026-09-14). So the answer
-// is now bounded by the call: `compacting` says the work STARTED and is
-// running past this rpc, `success` says there is nothing left to do. The
-// shim's compaction is idempotent per transcript, so the pass that gets
-// `compacting` simply defers and the next one gets `success` at once.
+// directive. SESSION section. The daemon calls this BEFORE standing an idle
+// shim down to free what it holds. The shim never compacts for it: the
+// transcript is left exactly as it stands, and a session revived later pays
+// for its own context through the cold gate. The directive exists for its two
+// refusals — no session to stand down, or a turn still in flight — and acks
+// otherwise, after which the daemon stands the shim down.
 
 syntax = "proto3";
 
@@ -23,44 +12,40 @@ package shim.v1;
 
 option go_package = "agentrepl/proto/shim/v1;shimv1";
 
+// The directive carries nothing: the shim answers from its own session state.
 message HibernateRequest {
 }
 
 // THE ARM IS THE OUTCOME.
 message HibernateResponse {
+  // Whether the shim may be stood down now, or why not.
   oneof result {
     HibernateSuccess success = 1;
     HibernateError error = 2;
-    HibernateCompacting compacting = 3;
   }
+  reserved 3;
+  reserved "compacting";
 }
 
-// The session is compacted; the daemon may stand the shim down.
+// Nothing is in flight; the daemon may stand the shim down. The transcript is
+// untouched.
 message HibernateSuccess {
-}
-
-// The compaction has STARTED and outlives this rpc. Not a failure and not an
-// ack: the daemon defers this pass without standing the shim down, and asks
-// again. The shim acks the next ask the moment the compaction has landed,
-// because a transcript already compacted is never compacted twice.
-message HibernateCompacting {
 }
 
 // Not hibernated. THE ARM IS WHY.
 message HibernateError {
+  // The one condition that keeps the shim from being stood down now.
   oneof kind {
     // A turn is in flight; hibernation waits for freeness.
     HibernateTurnInFlight turn_in_flight = 1;
-    // The compaction ran and failed; nothing was cut.
-    HibernateCompactionFailed compaction_failed = 2;
     // No session is open on this shim.
     HibernateNoSession no_session = 3;
   }
+  reserved 2;
+  reserved "compaction_failed";
 }
+// A turn is in flight; standing the shim down would kill it. The daemon
+// defers and asks again on its next sweep pass.
 message HibernateTurnInFlight {}
-// The compaction failed; the context is as it was.
-message HibernateCompactionFailed {
-  // What went wrong, verbatim.
-  string error = 1;
-}
+// No session is open on this shim, so there is nothing to stand down.
 message HibernateNoSession {}

@@ -121,8 +121,8 @@ const (
 	// hibernateDone: the session was stood down and recorded.
 	hibernateDone hibernateOutcome = iota
 	// hibernateDeferred: an ORDINARY deferral -- another lease holder, a
-	// session that went away, a turn in flight, a compaction under way. The
-	// next pass asks again at the sweep's own cadence.
+	// session that went away, a turn in flight. The next pass asks again at
+	// the sweep's own cadence.
 	hibernateDeferred
 	// hibernateFailed: something that should have worked did not -- a failed
 	// or unreadable directive, a warned refusal, a failed stand-down or
@@ -182,26 +182,9 @@ func (c *controller) hibernate(ctx context.Context, log dlog.Logger, ws ids.Work
 			withCause(fields, err))
 		return hibernateFailed
 	}
-	// A COMPACTION THAT IS UNDER WAY IS NOT A FAILURE, AND NOT AN ACK. The
-	// directive is two-phase precisely because a compaction is a real vendor
-	// turn and StandBound is a sum of TEARDOWN bounds: the shim answers that
-	// the work has started and finishes it past this rpc, and this pass simply
-	// defers. The next pass is acked at once, because the shim never compacts
-	// a transcript twice.
-	//
-	// DEBUG AND NOT AN ERROR. While the answer WAS the compaction's
-	// completion, every pass recorded a failed directive, never stood the
-	// session down, and re-ran the whole summary turn five minutes later --
-	// thirteen of them on one workspace in one morning (2026-09-14), with an
-	// ERROR beside each one saying nothing had gone wrong that anybody could
-	// fix.
-	if answer.GetCompacting() != nil {
-		log.Debug(opSweep, "compaction in flight; deferring the hibernation", fields)
-		return hibernateDeferred
-	}
 	if refusal := answer.GetError(); refusal != nil {
-		// A REFUSAL IS AN ANSWER. turn_in_flight simply defers; the other two
-		// arms are worth a warning, and defer just the same.
+		// A REFUSAL IS AN ANSWER. turn_in_flight simply defers; the other
+		// arm is worth a warning, and defers just the same.
 		refused := merge(fields, dlog.Context{"refusal": hibernateRefusal(refusal)})
 		if refusal.GetTurnInFlight() != nil {
 			log.Debug(opSweep, "a turn is in flight; deferring the hibernation", refused)
@@ -210,11 +193,11 @@ func (c *controller) hibernate(ctx context.Context, log dlog.Logger, ws ids.Work
 		log.Warn(opSweep, "the shim refused to hibernate; deferring", refused)
 		return hibernateFailed
 	}
-	// AND EVERY OTHER ARM IS A DEFERRAL, NOT A STAND-DOWN. The three arms
-	// above are the whole of what this daemon knows how to read; anything else
-	// is a shim built against a contract this daemon has not been taught, and
-	// standing a session down on an answer nobody here understood would kill a
-	// session whose transcript was never compacted.
+	// AND EVERY OTHER ARM IS A DEFERRAL, NOT A STAND-DOWN. The arms above are
+	// the whole of what this daemon knows how to read; anything else is a shim
+	// built against a contract this daemon has not been taught, and standing a
+	// session down on an answer nobody here understood could kill a turn the
+	// shim was refusing to let go of.
 	if answer.GetSuccess() == nil {
 		log.Error(opSweep, "the shim answered the hibernate directive with an arm this daemon cannot read; deferring the hibernation", fields)
 		return hibernateFailed
@@ -231,7 +214,7 @@ func (c *controller) hibernate(ctx context.Context, log dlog.Logger, ws ids.Work
 
 	if err := c.deps.DB.SetSessionTerminal(ctx, ws, wsm.SessionTerminal{
 		Kind:   TerminalHibernated,
-		Detail: fmt.Sprintf("idle past the %s cutoff; the transcript was compacted before the stand-down", c.deps.IdleCutoff),
+		Detail: fmt.Sprintf("idle past the %s cutoff; the transcript was left as it stood", c.deps.IdleCutoff),
 		At:     c.deps.Clock.Now(),
 	}); err != nil {
 		log.Error(opSweep, "could not record the hibernation stand-down", withCause(fields, err))
@@ -302,8 +285,6 @@ func hibernateRefusal(err *shimv1.HibernateError) string {
 	switch {
 	case err.GetTurnInFlight() != nil:
 		return "turn_in_flight"
-	case err.GetCompactionFailed() != nil:
-		return "compaction_failed"
 	case err.GetNoSession() != nil:
 		return "no_session"
 	default:
