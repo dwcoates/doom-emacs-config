@@ -418,3 +418,30 @@ func TestAFoldedCloseDrawsNoEndingOfItsOwn(t *testing.T) {
 		t.Fatalf("records = %+v, want the folded close recorded", h.records())
 	}
 }
+
+func TestAReplayedTurnsRecordedEndingIsDrawnAtItsRecordedAddress(t *testing.T) {
+	// Arrange: a repair turn recorded at a mirrored tab, closed with no
+	// terminal on the page, then an ordinary turn.
+	h := newHarness(t)
+	lease := ids.LeaseID("lease-7")
+	h.addresses = map[ids.TurnID]*wsm.OutputAddress{"turn-1": recordedTabAddress(lease, true), "turn-2": nil}
+	h.closes = map[ids.TurnID]wsm.RecordedClose{"turn-1": {How: wsm.CloseOrphaned, At: closedAt}}
+
+	// Act
+	h.replay(historyPage(&conversationv1.HistoryFloor{},
+		promptEntry("turn-2", "second"),
+		promptEntry("turn-1", "resolve the conflict"),
+	))
+
+	// Assert: the ending is in the tab, not drawn as one of the ordinary turn's.
+	ending := testEncode(feedid.Ref{WS: testWorkspace, Feed: feedid.Feed{Merge: &lease}, Row: feedid.RowKey{Kind: feedid.KindTurnEnded, ID: "turn-1"}}).GetValue()
+	found := false
+	for _, row := range h.rows(feedid.Feed{Merge: &lease}) {
+		if row.GetId().GetValue() == ending {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("tab rows = %v, want the recorded ending %q among them", rowIDs(h.rows(feedid.Feed{Merge: &lease})), ending)
+	}
+}

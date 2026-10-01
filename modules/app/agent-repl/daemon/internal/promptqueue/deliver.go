@@ -53,7 +53,7 @@ func (q *queue) deliver(ctx context.Context, sub Submission, sender Sender, watc
 		Origin:    sub.Origin.String(),
 		StartedAt: q.deps.Now(),
 	}
-	if err := q.deps.DB.PutTurn(ctx, record); err != nil {
+	if err := q.recordTurn(ctx, record); err != nil {
 		log.Error(opDeliver, "could not record the turn before delivering it", dlog.Context{"cause": err.Error()})
 		return Disposition{}, fmt.Errorf("record turn %q on %q: %w", sub.Turn, sub.WS, err)
 	}
@@ -168,6 +168,16 @@ func (q *queue) deliverToAgent(ctx context.Context, sub Submission, sender Sende
 func (q *queue) logRepeatedStart(log dlog.Logger, verb string, turn ids.TurnID) {
 	log.Error(opSubmit, "a submission repeated the turn already in flight; it is answered as the delivery the original was and nothing is started again",
 		dlog.Context{"turn": string(turn), "verb": verb, "original_state": "in_flight"})
+}
+
+// recordTurn records a turn this queue opens, stamped with the feed's output
+// address standing as it opens: where the turn's rows land. It is the ONE
+// write of a turn's record here, so no turn is opened without the address its
+// replay draws it at (feed.Deps.TurnAddresses), and a repair turn mirrored onto
+// the root feed live is mirrored again by every replay.
+func (q *queue) recordTurn(ctx context.Context, t wsm.Turn) error {
+	t.Address = q.deps.Feed.OutputAddress(t.Workspace)
+	return q.deps.DB.PutTurn(ctx, t)
 }
 
 // touchEngagement records that the user just engaged this session. IT IS WHAT

@@ -191,6 +191,11 @@ type wsState struct {
 	// no terminal of its own is ended from it (turnclosed.go). Nil outside a
 	// replay.
 	replayCloses map[ids.TurnID]wsm.RecordedClose
+	// replayAddresses is the recorded output address of every turn the page
+	// being replayed names, read before the replay (recordedAddresses). An
+	// entry of a turn in it is drawn at that address (addressingTurn); nil
+	// outside a replay.
+	replayAddresses map[ids.TurnID]*wsm.OutputAddress
 	// entryTurn is the STAMP of the entry being drawn (HistoryEntryAt.turn),
 	// in force only while that entry is drawn (drawingEntry). Nil for an
 	// unstamped entry, which is what selects the positional fallback.
@@ -1153,6 +1158,19 @@ func (r *resolver) SetOutputAddress(ws ids.WorkspaceID, addr *sessionwatcher.Out
 	}
 	r.logger(ws).Debug("daemon.feed.output_address",
 		"the feed's output address changed", dlog.Context{"feed": target, "cleared": addr == nil})
+}
+
+// OutputAddress answers a copy of the address standing for one workspace's
+// session output, nil when none stands.
+func (r *resolver) OutputAddress(ws ids.WorkspaceID) *sessionwatcher.OutputAddress {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s, ok := r.workspaces[ws]
+	if !ok || s.address == nil {
+		return nil
+	}
+	copied := *s.address
+	return &copied
 }
 
 // UpsertAtOutputAddress upserts a daemon-synthesized row AT THE SESSION'S

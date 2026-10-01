@@ -2,6 +2,7 @@ package feed
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 
@@ -10,6 +11,8 @@ import (
 
 	"claude-repld/internal/feedid"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/sessionwatcher"
+	"claude-repld/internal/wsm"
 )
 
 // HISTORY REPLAY goes through THE SAME per-family functions a live frame does,
@@ -982,5 +985,202 @@ func TestAStampedPromptIsNeverJudgedAnUnknownTurn(t *testing.T) {
 	// Assert
 	if h.hasRecord("error", "daemon.feed.replayed_turn_unknown") {
 		t.Fatal("a stamped prompt was reported as naming an unknown turn")
+	}
+}
+
+// A REPLAYED TURN IS DRAWN WHERE IT WAS DRAWN LIVE: at its recorded output
+// address, through the same upsert, so a mirrored address's root copies are
+// part of the replayed history.
+
+// recordedTabAddress is a merge tab's output address as the prompt queue
+// records it on a turn.
+func recordedTabAddress(lease ids.LeaseID, mirror bool) *wsm.OutputAddress {
+	parent := feedid.Ref{WS: testWorkspace, Feed: feedid.Feed{Merge: &lease},
+		Row: feedid.RowKey{Kind: feedid.KindMergeTab, ID: "conflicts", Sub: "1"}}
+	return &wsm.OutputAddress{Feed: feedid.Feed{Merge: &lease}, Parent: &parent, Mirror: mirror}
+}
+
+// repairReply is a replayed, unstamped main-agent terminal that ends the turn
+// it answers.
+func repairReply() *conversationv1.HistoryEntry {
+	return frameEntry(mainAgent(), &conversationv1.AgentSuccess{
+		Outcome: &conversationv1.AgentSuccess_Completed{Completed: &conversationv1.AgentCompleted{}},
+	})
+}
+
+func TestAReplayedTurnRecordedAtAMirroredAddressIsDrawnInItsTab(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	lease := ids.LeaseID("lease-7")
+	h.addresses = map[ids.TurnID]*wsm.OutputAddress{"turn-1": recordedTabAddress(lease, true)}
+
+	// Act
+	h.replay(historyPage(&conversationv1.HistoryFloor{}, promptEntry("turn-1", "resolve the conflict")))
+
+	// Assert
+	row := h.only(feedid.Feed{Merge: &lease})
+	if row.GetParent().GetRow().GetValue() != testEncode(*recordedTabAddress(lease, true).Parent).GetValue() {
+		t.Fatalf("tab row parent = %v, want the recorded tab", row.GetParent())
+	}
+}
+
+func TestAReplayedTurnRecordedAtAMirroredAddressDrawsItsRootCopy(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	lease := ids.LeaseID("lease-7")
+	h.addresses = map[ids.TurnID]*wsm.OutputAddress{"turn-1": recordedTabAddress(lease, true)}
+
+	// Act
+	h.replay(historyPage(&conversationv1.HistoryFloor{}, promptEntry("turn-1", "resolve the conflict")))
+
+	// Assert
+	row := h.only(rootFeed())
+	if row.GetId().GetValue() != h.promptRowID("turn-1") || row.GetParent() != nil {
+		t.Fatalf("root row = %v, want the prompt's top-level root copy %q", row, h.promptRowID("turn-1"))
+	}
+}
+
+func TestAReplayedTurnRecordedAtAnUnmirroredAddressDrawsNothingOnTheRoot(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	lease := ids.LeaseID("lease-7")
+	h.addresses = map[ids.TurnID]*wsm.OutputAddress{"turn-1": recordedTabAddress(lease, false)}
+
+	// Act
+	h.replay(historyPage(&conversationv1.HistoryFloor{}, promptEntry("turn-1", "the before-merge prompt")))
+
+	// Assert
+	if rows := h.rows(rootFeed()); len(rows) != 0 {
+		t.Fatalf("root rows = %v, want none for a turn recorded at an unmirrored tab", rowIDs(rows))
+	}
+	h.only(feedid.Feed{Merge: &lease})
+}
+
+func TestAReplayedTurnsUnstampedTerminalFollowsItsTurnsRecordedAddress(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	lease := ids.LeaseID("lease-7")
+	h.addresses = map[ids.TurnID]*wsm.OutputAddress{"turn-1": recordedTabAddress(lease, true)}
+
+	// Act
+	h.replay(historyPage(&conversationv1.HistoryFloor{},
+		repairReply(),
+		promptEntry("turn-1", "resolve the conflict"),
+	))
+
+	// Assert: the tab and the root carry the same rows, the root's as copies.
+	tab, root := h.rows(feedid.Feed{Merge: &lease}), h.rows(rootFeed())
+	if len(tab) < 2 || len(root) != len(tab) {
+		t.Fatalf("tab rows = %v, root rows = %v, want the reply drawn in the tab and mirrored", rowIDs(tab), rowIDs(root))
+	}
+}
+
+func TestAReplayedRootTurnIsDrawnOnTheRootWhileAnAddressStands(t *testing.T) {
+	// Arrange: the turn ran with no address; a merge's address stands now.
+	h := newHarness(t)
+	lease := ids.LeaseID("lease-7")
+	mirroredMergeAddress(h, lease)
+	h.addresses = map[ids.TurnID]*wsm.OutputAddress{"turn-1": nil}
+
+	// Act
+	h.replay(historyPage(&conversationv1.HistoryFloor{}, promptEntry("turn-1", "an ordinary turn")))
+
+	// Assert
+	if rows := h.rows(feedid.Feed{Merge: &lease}); len(rows) != 0 {
+		t.Fatalf("tab rows = %v, want none for a turn recorded at the root", rowIDs(rows))
+	}
+	h.only(rootFeed())
+}
+
+func TestAReplayedUnrecordedTurnIsDrawnAtTheStandingAddress(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	lease := ids.LeaseID("lease-7")
+	h.resolver.SetOutputAddress(testWorkspace, &sessionwatcher.OutputAddress{Feed: feedid.Feed{Merge: &lease}})
+
+	// Act
+	h.replay(historyPage(&conversationv1.HistoryFloor{}, promptEntry("turn-1", "never recorded")))
+
+	// Assert
+	h.only(feedid.Feed{Merge: &lease})
+}
+
+func TestAReplayRestoresTheStandingAddressAfterDrawingARecordedTurn(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.addresses = map[ids.TurnID]*wsm.OutputAddress{"turn-1": recordedTabAddress("lease-7", true)}
+
+	// Act
+	h.replay(historyPage(&conversationv1.HistoryFloor{}, promptEntry("turn-1", "resolve the conflict")))
+
+	// Assert
+	if addr := h.resolver.OutputAddress(testWorkspace); addr != nil {
+		t.Fatalf("standing address after the replay = %+v, want none, as before it", addr)
+	}
+}
+
+func TestAnUnreadableRecordedAddressIsAnErrorAndThePageStillDraws(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.addresses = map[ids.TurnID]*wsm.OutputAddress{"turn-1": recordedTabAddress("lease-7", true)}
+	h.addressesErr = errors.New("database is locked")
+
+	// Act
+	h.replay(historyPage(&conversationv1.HistoryFloor{}, promptEntry("turn-1", "resolve the conflict")))
+
+	// Assert
+	if !h.hasRecord("error", "daemon.feed.turn_addresses_unreadable") {
+		t.Fatalf("the failed read was not recorded at ERROR: %+v", h.records())
+	}
+	h.only(rootFeed())
+}
+
+// THE INVARIANT: a reader joining late sees the root feed a live reader saw.
+func TestAReplayedMirroredTurnDrawsTheRootFeedTheLiveDrawDrew(t *testing.T) {
+	// Arrange: one resolver draws the repair turn live under its mirrored
+	// address; another replays it from history with the address recorded.
+	lease := ids.LeaseID("lease-7")
+	live := newHarness(t)
+	mirroredMergeAddress(live, lease)
+	live.deliverPrompt("turn-1", "resolve the conflict")
+	replayed := newHarness(t)
+	replayed.addresses = map[ids.TurnID]*wsm.OutputAddress{"turn-1": recordedTabAddress(lease, true)}
+
+	// Act
+	replayed.replay(historyPage(&conversationv1.HistoryFloor{}, promptEntry("turn-1", "resolve the conflict")))
+
+	// Assert
+	want, got := rowIDs(live.rows(rootFeed())), rowIDs(replayed.rows(rootFeed()))
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("replayed root rows = %v, want the live draw's %v", got, want)
+	}
+}
+
+func TestOutputAddressAnswersACopyOfTheStandingAddress(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	lease := ids.LeaseID("lease-7")
+	mirroredMergeAddress(h, lease)
+
+	// Act
+	got := h.resolver.OutputAddress(testWorkspace)
+	got.Mirror = false
+
+	// Assert
+	if again := h.resolver.OutputAddress(testWorkspace); again == nil || !again.Mirror {
+		t.Fatalf("standing address = %+v, want the caller's copy not to alter it", again)
+	}
+}
+
+func TestOutputAddressOfAWorkspaceTheFeedNeverSawIsNone(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	got := h.resolver.OutputAddress("never-seen")
+
+	// Assert
+	if got != nil {
+		t.Fatalf("OutputAddress = %+v, want none", got)
 	}
 }

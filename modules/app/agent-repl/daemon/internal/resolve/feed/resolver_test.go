@@ -127,6 +127,11 @@ type harness struct {
 	// closesErr fails that read.
 	closes    map[ids.TurnID]wsm.RecordedClose
 	closesErr error
+	// addresses are the recorded output addresses of turns the resolver reads
+	// at a history page (an entry present with a nil value is a root turn);
+	// addressesErr fails that read.
+	addresses    map[ids.TurnID]*wsm.OutputAddress
+	addressesErr error
 	// owned is the set of turns the workspace recorded as its own; nil
 	// answers every turn owned (a test that is not about a fork's lineage).
 	// ownedErr fails the read.
@@ -215,6 +220,18 @@ func newHarness(t *testing.T) *harness {
 				}
 			}
 			return out, h.closesErr
+		},
+		TurnAddresses: func(_ context.Context, _ ids.WorkspaceID, turns []ids.TurnID) (map[ids.TurnID]*wsm.OutputAddress, error) {
+			if h.addressesErr != nil {
+				return nil, h.addressesErr
+			}
+			out := map[ids.TurnID]*wsm.OutputAddress{}
+			for _, turn := range turns {
+				if addr, ok := h.addresses[turn]; ok {
+					out[turn] = addr
+				}
+			}
+			return out, nil
 		},
 		OwnedTurns: func(_ context.Context, _ ids.WorkspaceID, turns []ids.TurnID) (map[ids.TurnID]bool, error) {
 			if h.ownedErr != nil {

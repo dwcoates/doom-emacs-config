@@ -127,7 +127,7 @@ func (q *queue) joinLocked(ctx context.Context, sub Submission, running ids.Turn
 		return
 	}
 	text := saidText(sub.Said)
-	if err := q.deps.DB.PutTurn(ctx, wsm.Turn{
+	if err := q.recordTurn(ctx, wsm.Turn{
 		ID: sub.Turn, Workspace: sub.WS, Text: text, Origin: sub.Origin.String(), StartedAt: q.deps.Now(),
 	}); err != nil {
 		watcher.OnTurnOpenFailed(sub.WS, sub.Turn)
