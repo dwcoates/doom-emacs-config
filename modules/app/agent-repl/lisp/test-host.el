@@ -1055,6 +1055,63 @@ answers `:unknown' and records the breach rather than opening."
             (should (equal (buffer-name buffer) "*agent-panel-input-ws-1*")))
         (kill-buffer buffer)))))
 
+;;;; ---- Routing a verb's handover refusal ----
+
+(ert-deftest agent-repl-test-host-route-handover-routes-transferring-away ()
+  "A `transferring_away' refusal goes to the handover walk."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let (handed)
+      (cl-letf (((symbol-function 'agent-repl-host-handle-refusal)
+                 (lambda (ws arm) (push (list ws arm) handed))))
+        ;; Act
+        (agent-repl-host-route-handover
+         "ws-1" '(:arm :transferring-away :value (:address "127.0.0.1:9")) "elisp.x.verb-handover"))
+      ;; Assert
+      (should (equal handed '(("ws-1" (:arm :transferring-away :value (:address "127.0.0.1:9")))))))))
+
+(ert-deftest agent-repl-test-host-route-handover-routes-not-yet-adopted ()
+  "A `not_yet_adopted' refusal goes to the handover walk."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let (handed)
+      (cl-letf (((symbol-function 'agent-repl-host-handle-refusal)
+                 (lambda (_ws arm) (push (plist-get arm :arm) handed))))
+        ;; Act
+        (agent-repl-host-route-handover "ws-1" '(:arm :not-yet-adopted :value nil) "elisp.x.v"))
+      ;; Assert
+      (should (equal handed '(:not-yet-adopted))))))
+
+(ert-deftest agent-repl-test-host-route-handover-answers-t-when-routed ()
+  "A routed handover answers non-nil, so the caller reports nothing more."
+  (agent-repl-test-host--with-harness
+    (cl-letf (((symbol-function 'agent-repl-host-handle-refusal) #'ignore))
+      ;; Act / Assert
+      (should (agent-repl-host-route-handover "ws-1" '(:arm :not-yet-adopted :value nil) "elisp.x.v")))))
+
+(ert-deftest agent-repl-test-host-route-handover-leaves-other-arms ()
+  "Any other arm is the caller's: nil, and nothing is handed over."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let (handed answer)
+      (cl-letf (((symbol-function 'agent-repl-host-handle-refusal)
+                 (lambda (&rest args) (push args handed))))
+        ;; Act
+        (setq answer (agent-repl-host-route-handover "ws-1" '(:arm :plan-stale :value nil) "elisp.x.v")))
+      ;; Assert
+      (should (equal (list answer handed) '(nil nil))))))
+
+(ert-deftest agent-repl-test-host-route-handover-logs-under-the-slug ()
+  "A routed handover is logged at INFO under the caller's slug."
+  (agent-repl-test-host--with-harness
+    (cl-letf (((symbol-function 'agent-repl-host-handle-refusal) #'ignore))
+      ;; Act
+      (agent-repl-host-route-handover "ws-1" '(:arm :not-yet-adopted :value nil)
+                                      "elisp.input.rollback-plan-handover-refusal"))
+    ;; Assert
+    (should (agent-repl-test-host--logged-p
+             :info "elisp.input.rollback-plan-handover-refusal ws=ws-1 arm=:not-yet-adopted"))))
+
 ;;;; ---- The feed selection ----
 
 (ert-deftest agent-repl-test-host-selection-push-records-the-kind ()
