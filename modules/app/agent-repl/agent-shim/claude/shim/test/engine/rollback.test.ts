@@ -7,8 +7,12 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  guardAttributes,
+  isKeepaliveRecord,
   isPromptRecord,
+  liveEnd,
   planCut,
+  readLiveChain,
   readTranscriptChain,
   RESUME_DROPS_TURN_REFUSAL_PREFIX,
   vendorCutRefusal,
@@ -16,6 +20,7 @@ import {
   type TranscriptChain,
 } from "../../src/engine/rollback.js";
 import { KEEPALIVE_PROMPT_MARKER } from "../../src/engine/keepalive.js";
+import { logRecordsDuring } from "../log-records.js";
 
 /** A transcript file holding `lines`, one JSON record (or raw text) per line. */
 function transcript(lines: (Record<string, unknown> | string)[]): string {
@@ -228,23 +233,23 @@ describe("planCut", () => {
 
   it("cuts at the prompt's parent when every later prompt is named", () => {
     // Arrange, Act.
-    const plan = planCut(conversation(), "p1", ["p1", "p2"]);
+    const plan = planCut(conversation(), "p1", ["p1", "p2"], "keep");
 
     // Assert.
-    expect(plan).toEqual({ kind: "cut", promptUuid: "p1", forkPoint: "a0" });
+    expect(plan).toEqual({ kind: "cut", promptUuid: "p1", forkPoint: "a0", guard: { kind: "severalTurns" } });
   });
 
   it("refuses an unnamed later prompt, naming the first", () => {
     // Arrange, Act.
-    const plan = planCut(conversation(), "p1", ["p1"]);
+    const plan = planCut(conversation(), "p1", ["p1"], "keep");
 
     // Assert.
-    expect(plan).toEqual({ kind: "unseenPrompt", vendorPromptUuid: "p2" });
+    expect(plan).toEqual({ kind: "unseenPrompt", vendorPromptUuid: "p2", why: "unnamedPrompt" });
   });
 
   it("refuses the conversation's first prompt", () => {
     // Arrange, Act.
-    const plan = planCut(conversation(), "p0", ["p0", "p1", "p2"]);
+    const plan = planCut(conversation(), "p0", ["p0", "p1", "p2"], "keep");
 
     // Assert.
     expect(plan).toEqual({ kind: "firstPrompt" });
@@ -252,7 +257,7 @@ describe("planCut", () => {
 
   it("refuses a prompt the transcript holds no record of", () => {
     // Arrange, Act.
-    const plan = planCut(conversation(), "p9", ["p9"]);
+    const plan = planCut(conversation(), "p9", ["p9"], "keep");
 
     // Assert.
     expect(plan.kind).toBe("promptNotRecorded");
@@ -260,7 +265,7 @@ describe("planCut", () => {
 
   it("refuses a record that is not a user record", () => {
     // Arrange, Act.
-    const plan = planCut(conversation(), "a1", ["a1"]);
+    const plan = planCut(conversation(), "a1", ["a1"], "keep");
 
     // Assert.
     expect(plan.kind).toBe("promptNotRecorded");
@@ -271,9 +276,209 @@ describe("planCut", () => {
     const dropped = chainOf(transcript([user("p0", null), assistant("a0", "p0"), user("p1", "a0"), user("p2", "a0")]));
 
     // Act.
-    const plan = planCut(dropped, "p1", ["p1"]);
+    const plan = planCut(dropped, "p1", ["p1"], "keep");
 
     // Assert.
     expect(plan.kind).toBe("promptNotRecorded");
+  });
+});
+
+describe("isKeepaliveRecord", () => {
+  it("recognizes the shim's own keep-alive by its marker", () => {
+    // Arrange.
+    const record = user("k", "a", `${KEEPALIVE_PROMPT_MARKER}\nRespond with "." (3)`) as unknown as ChainRecord;
+
+    // Act, Assert.
+    expect(isKeepaliveRecord(record)).toBe(true);
+  });
+
+  it("does not take a person's prompt for one", () => {
+    // Arrange.
+    const record = user("p", "a") as unknown as ChainRecord;
+
+    // Act, Assert.
+    expect(isKeepaliveRecord(record)).toBe(false);
+  });
+});
+
+describe("guardAttributes", () => {
+  const record = (overrides: Record<string, unknown>): ChainRecord =>
+    ({ ...user("u", "a"), ...overrides }) as unknown as ChainRecord;
+
+  it.each([
+    ["a dropped turn's prompt", { uuid: "p1" }],
+    ["an assistant record", { type: "assistant" }],
+    ["a tool-result carrier", { message: { role: "user", content: [{ type: "tool_result", tool_use_id: "t", content: "x" }] } }],
+    ["a harness meta record", { isMeta: true }],
+    ["a compaction summary", { isCompactSummary: true }],
+    ["the interrupt marker", { message: { role: "user", content: "[Request interrupted by user]" } }],
+  ])("lets %s go", (_name, overrides) => {
+    // Arrange, Act, Assert.
+    expect(guardAttributes(record(overrides), new Set(["p1"]))).toBe(true);
+  });
+
+  it.each([
+    ["an unnamed prompt", {}],
+    ["a task notification", { message: { role: "user", content: "<task-notification>done</task-notification>" } }],
+    ["the shim's keep-alive", { message: { role: "user", content: `${KEEPALIVE_PROMPT_MARKER} .` } }],
+  ])("refuses %s", (_name, overrides) => {
+    // Arrange, Act, Assert.
+    expect(guardAttributes(record(overrides), new Set(["p1"]))).toBe(false);
+  });
+});
+
+describe("planCut, the vendor's guard and the files", () => {
+  /** p0 answered, then p1's turn: its answer and one extra user record after it. */
+  const withAfter = (extra: Record<string, unknown>): TranscriptChain =>
+    chainOf(transcript([user("p0", null), assistant("a0", "p0"), user("p1", "a0"), assistant("a1", "p1"), extra]));
+
+  const keepalive = user("k1", "a1", `${KEEPALIVE_PROMPT_MARKER}\nRespond with "." (1)`);
+  const notification = user("n1", "a1", "<task-notification>done</task-notification>");
+
+  it("arms the guard for one dropped turn whose entries are all its own", () => {
+    // Arrange.
+    const chain = chainOf(transcript([user("p0", null), assistant("a0", "p0"), user("p1", "a0"), assistant("a1", "p1")]));
+
+    // Act.
+    const plan = planCut(chain, "p1", ["p1"], "keep");
+
+    // Assert.
+    expect(plan).toEqual({ kind: "cut", promptUuid: "p1", forkPoint: "a0", guard: { kind: "armed", resumeDropsTurn: "p1" } });
+  });
+
+  it("does not arm the guard, and does not refuse, when a keep-alive sits past the fork point", () => {
+    // Arrange, Act.
+    const plan = planCut(withAfter(keepalive), "p1", ["p1"], "keep");
+
+    // Assert.
+    expect(plan).toEqual({ kind: "cut", promptUuid: "p1", forkPoint: "a0", guard: { kind: "unattributable", recordUuid: "k1" } });
+  });
+
+  it("does not refuse a restore over a keep-alive past the fork point", () => {
+    // Arrange, Act.
+    const plan = planCut(withAfter(keepalive), "p1", ["p1"], "restore");
+
+    // Assert.
+    expect(plan.kind).toBe("cut");
+  });
+
+  it("refuses a restore unseen_prompt for a task notification past the fork point", () => {
+    // Arrange, Act.
+    const plan = planCut(withAfter(notification), "p1", ["p1"], "restore");
+
+    // Assert.
+    expect(plan).toEqual({ kind: "unseenPrompt", vendorPromptUuid: "n1", why: "guardWouldRefuse" });
+  });
+
+  it("cuts a keep-files rollback over a task notification, with the guard unarmed", () => {
+    // Arrange, Act.
+    const plan = planCut(withAfter(notification), "p1", ["p1"], "keep");
+
+    // Assert.
+    expect(plan).toEqual({ kind: "cut", promptUuid: "p1", forkPoint: "a0", guard: { kind: "unattributable", recordUuid: "n1" } });
+  });
+});
+
+describe("liveEnd", () => {
+  const rolledBack = (...uuids: string[]): ReadonlySet<string> => new Set(uuids);
+
+  it("answers whole when no rolled-back prompt is on the chain", () => {
+    // Arrange.
+    const chain = chainOf(transcript([user("p0", null), assistant("a0", "p0"), user("p1", "a0")]));
+
+    // Act, Assert.
+    expect(liveEnd(chain, rolledBack("p9"))).toEqual({ kind: "whole" });
+  });
+
+  it("ends just before the earliest rolled-back prompt on the chain", () => {
+    // Arrange.
+    const chain = chainOf(
+      transcript([user("p0", null), assistant("a0", "p0"), user("p1", "a0"), assistant("a1", "p1"), user("p2", "a1"), assistant("a2", "p2")]),
+    );
+
+    // Act, Assert.
+    expect(liveEnd(chain, rolledBack("p2", "p1"))).toEqual({ kind: "cut", promptUuid: "p1", forkPoint: "a0" });
+  });
+
+  it("answers whole once the next prompt started a branch at the fork point", () => {
+    // Arrange: p1 was rolled back, and p2 was sent at a0.
+    const chain = chainOf(transcript([user("p0", null), assistant("a0", "p0"), user("p1", "a0"), assistant("a1", "p1"), user("p2", "a0")]));
+
+    // Act, Assert.
+    expect(liveEnd(chain, rolledBack("p1"))).toEqual({ kind: "whole" });
+  });
+
+  it("crosses a compaction to the rolled-back prompt before it", () => {
+    // Arrange.
+    const chain = chainOf(
+      transcript([
+        user("p0", null),
+        assistant("a0", "p0"),
+        user("p1", "a0"),
+        assistant("a1", "p1"),
+        { type: "system", subtype: "compact_boundary", uuid: "b0", parentUuid: null, logicalParentUuid: "a1" },
+        { ...user("s0", "b0", "summary"), isCompactSummary: true },
+      ]),
+    );
+
+    // Act, Assert.
+    expect(liveEnd(chain, rolledBack("p1"))).toEqual({ kind: "cut", promptUuid: "p1", forkPoint: "a0" });
+  });
+
+  it("answers firstPrompt when a rolled-back prompt opens the chain", () => {
+    // Arrange.
+    const chain = chainOf(transcript([user("p0", null), assistant("a0", "p0")]));
+
+    // Act, Assert.
+    expect(liveEnd(chain, rolledBack("p0"))).toEqual({ kind: "firstPrompt", promptUuid: "p0" });
+  });
+});
+
+describe("readLiveChain", () => {
+  it("ends the live chain at the fork point before a rolled-back prompt", () => {
+    // Arrange.
+    const file = transcript([user("p0", null), assistant("a0", "p0"), user("p1", "a0"), assistant("a1", "p1")]);
+
+    // Act.
+    const read = readLiveChain(file, new Set(["p1"]));
+
+    // Assert.
+    expect(read.kind === "ok" ? uuids(read.transcript) : read.kind).toEqual(["p0", "a0"]);
+  });
+
+  it("answers the newest record's whole chain when nothing on it was rolled back", () => {
+    // Arrange.
+    const file = transcript([user("p0", null), assistant("a0", "p0"), user("p1", "a0")]);
+
+    // Act.
+    const read = readLiveChain(file, new Set(["p9"]));
+
+    // Assert.
+    expect(read.kind === "ok" ? uuids(read.transcript) : read.kind).toEqual(["p0", "a0", "p1"]);
+  });
+
+  it("answers no_transcript when the vendor wrote none", () => {
+    // Arrange, Act.
+    const read = readLiveChain(path.join(os.tmpdir(), "shim-rollback-absent", "none.jsonl"), new Set(["p1"]));
+
+    // Assert.
+    expect(read.kind).toBe("no_transcript");
+  });
+
+  it("answers unreadable, at ERROR, when a rolled-back prompt opens the conversation", () => {
+    // Arrange.
+    const file = transcript([user("p0", null), assistant("a0", "p0")]);
+    let kind = "";
+
+    // Act.
+    const records = logRecordsDuring(() => {
+      kind = readLiveChain(file, new Set(["p0"])).kind;
+    });
+
+    // Assert.
+    expect({ kind, record: records.find((record) => record.message.includes("live end cannot be found")) }).toMatchObject({
+      kind: "unreadable",
+      record: { level: "error", context: { prompt_uuid: "p0" } },
+    });
   });
 });

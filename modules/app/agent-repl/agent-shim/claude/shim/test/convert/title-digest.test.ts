@@ -10,7 +10,7 @@
  * whole history after a compaction, and a title synthesized from machine noise.
  */
 import { describe, expect, it } from "vitest";
-import { computeTitleDigest, promptText, type TitleDigestRecord } from "../../src/convert/title-digest.js";
+import { computeTitleDigest, promptText, userRecordText, type TitleDigestRecord } from "../../src/convert/title-digest.js";
 import { keepalivePromptText } from "../../src/engine/keepalive.js";
 
 /** A person's prompt record. */
@@ -164,5 +164,41 @@ describe("promptText extraction", () => {
 
     // Act, Assert.
     expect(promptText(record)).toBeUndefined();
+  });
+});
+
+describe("userRecordText", () => {
+  it("states the shim's own keep-alive text, which promptText refuses", () => {
+    // Arrange.
+    const text = keepalivePromptText(1);
+
+    // Act, Assert.
+    expect(userRecordText(prompt(text))).toBe(text);
+  });
+
+  it("states a command envelope's text", () => {
+    // Arrange, Act, Assert.
+    expect(userRecordText(commandEnvelope("/clear"))).toBe("<command-name>/clear</command-name>");
+  });
+
+  it("joins an array's text blocks alone", () => {
+    // Arrange.
+    const record: TitleDigestRecord = {
+      type: "user",
+      message: { role: "user", content: [{ type: "text", text: " a" }, { type: "image" }, { type: "text", text: "b " }] },
+    };
+
+    // Act, Assert.
+    expect(userRecordText(record)).toBe("ab");
+  });
+
+  it.each([
+    ["an assistant record", { type: "assistant", message: { role: "assistant", content: "x" } }],
+    ["a harness meta record", caveat()],
+    ["a tool-result carrier", toolResult("t")],
+    ["a blank message", prompt("   ")],
+  ])("states nothing for %s", (_name, record) => {
+    // Arrange, Act, Assert.
+    expect(userRecordText(record)).toBeUndefined();
   });
 });

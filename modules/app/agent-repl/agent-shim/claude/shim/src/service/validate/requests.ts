@@ -70,6 +70,9 @@ export function validateStartSessionRequest(request: shimv1.StartSessionRequest)
             "start_session.resume.cold_remediation",
           );
         }
+        resume.rolledBackTurns.forEach((turn, index) => {
+          validateTurnId(turn, `start_session.resume.rolled_back_turns[${index}]`);
+        });
         return;
       }
       default:

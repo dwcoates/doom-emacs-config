@@ -712,7 +712,8 @@ non-keep-alive traffic a cold-gate resume had produced.
 **AND THE ANCHOR DOES NOT CROSS A BOUNDARY.** A uuid from before a compaction,
 a conversation reset, or a query rebinding may no longer be resumable, so each
 CLEARS it: `startQuery` drops it on every binding that is not itself the rewind
-(the opening, a cold-gate answer, a rotation, a restart, a plain replacement),
+(`keepsAnchor`: the opening, a cold-gate answer, a rotation, a restart, a
+rollback's cut, a plain replacement),
 the vendor's `compact_boundary` and `conversation_reset` drop it as they arrive,
 and the shim's own compaction drops it as it lands. After a clear the next real
 prompt CARRIES the keep-alive turns rather than rewinding — the existing "no
@@ -873,9 +874,34 @@ The contract is `endpoint_start_turn.proto` (`StartTurnRequest.turn`) and
   parent (`first_prompt`), and every later PROMPT record (`isPromptRecord`:
   not a tool-result carrier, meta, compaction summary, keep-alive, interrupt
   marker, task notification, or a record whose `origin` is not a person) must
-  be a dropped turn's (`unseen_prompt`). After a rollback the session names
-  the fork point as the head until its next send, because nothing past it has
-  been appended yet.
+  be a dropped turn's (`unseen_prompt`). The shim's own keep-alives are
+  known to it and never unseen.
+- **ONE RULE ENDS THE LIVE CONVERSATION** (`readLiveChain`, `liveEnd`): the
+  vendor never rewrites its file, so until the next send appends past a fork
+  point the file's tail still sits on the dropped branch. The conversation is
+  the newest record's chain, unless that chain holds the prompt (derived
+  uuid) of a rolled-back turn; then it ends at the entry just before the
+  EARLIEST such prompt, across a compaction through `logicalParentUuid`. The
+  rolled-back turns are `StartSessionResume.rolled_back_turns` (validated:
+  every turn id non-empty) plus the dropped turns of every rollback landed
+  since; nothing clears them, because a branch the next prompt started holds
+  none of their prompts. The SAME rule picks where the next rollback is
+  planned, where StartSession resumes (`resumeSessionAt`, never
+  `resumeDropsTurn`), where the cold gate's compaction query resumes, and
+  where `resumePlainly` resumes after a refused cut. A rolled-back prompt
+  that opens the chain is a broken invariant: logged at ERROR and the resume
+  refused (`vendor_start_failed`).
+- **THE GUARD IS ARMED ONLY WHERE IT AGREES** (`planCut`, `GuardArming`):
+  `resumeDropsTurn` is passed for a single dropped turn whose every entry
+  past the fork point the guard lets go (`guardAttributes`, the one reading
+  of the guard, shared with the mock). A keep-alive past the fork point (or
+  a dropped turn's task notification under `keep_files`) leaves it unarmed,
+  logged at INFO with the record; the plan's own check stands in.
+- **RESTORING FILES NEVER MEETS A LATER REFUSAL.** For `restore_files` the
+  plan refuses `unseen_prompt` up front (`why: guardWouldRefuse`) for any
+  user record past the fork point the guard would refuse, task
+  notifications included and keep-alives excepted, before the dry run and
+  before anything changes.
 - **THE ORDER**: plan; `restore_files` dry run (`files_not_restorable`
   changes nothing); interrupt through KillTurn's own unforced path
   (`TurnEngine.interruptForRollback`) and wait (bounded,
@@ -884,7 +910,7 @@ The contract is `endpoint_start_turn.proto` (`StartTurnRequest.turn`) and
   stops the dropped turns' detached work through the forced kill's own stop
   (`stopWorkSpawnedBy`) and rewinds the files on the old query; then the one
   in-place restart (`replaceQuery`) resumes at the fork point, with
-  `resumeDropsTurn` ONLY for a single dropped turn.
+  `resumeDropsTurn` only as the plan armed it.
 - **THE BOOT IS JUDGED ON THE LIVE SIGNAL.** The CLI loads the conversation —
   where `resumeDropsTurn`'s guard runs — in its headless boot, BEFORE its input
   loop starts, and its input loop is what answers control requests (verified
