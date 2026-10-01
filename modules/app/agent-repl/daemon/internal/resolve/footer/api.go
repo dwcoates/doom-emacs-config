@@ -329,6 +329,11 @@ type Resolver interface {
 	OnSubmission(ws ids.WorkspaceID, sub Submission)
 	// SetMerge installs the merge facts the footer draws.
 	SetMerge(ws ids.WorkspaceID, facts MergeFacts)
+	// RetryStanding reports whether the vendor is retrying the running turn's
+	// call — the footer's `blocked · api_retrying`. The prompt queue reads it
+	// so a prompt sent during the retry interrupts the wait instead of
+	// joining a turn that cannot reach a tool boundary until the API answers.
+	RetryStanding(ws ids.WorkspaceID) bool
 	// SetParked states that the idle sweep stood this workspace's shim down on
 	// purpose and recorded the `hibernated` session terminal. While it stands,
 	// a DEAD link is not a fault: the daemon put the route down and a prompt

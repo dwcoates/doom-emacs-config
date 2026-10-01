@@ -1044,3 +1044,49 @@ func TestTheUnboundViolationIsStatedOncePerWorkspace(t *testing.T) {
 		t.Fatalf("unbound-workspace ERROR records = %d, want 1 across two frames", got)
 	}
 }
+
+func TestRetryStandingWhileTheVendorRetriesTheTurnsCall(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+	h.r.OnApiError(testWS, mainAgent, &conversationv1.ApiRequestFailed{Message: "ENOTFOUND"})
+
+	// Act
+	got := h.r.RetryStanding(testWS)
+
+	// Assert
+	if !got {
+		t.Fatalf("RetryStanding = false, want true while the vendor retries")
+	}
+}
+
+func TestRetryStandingIsFalseForAnUnseenWorkspace(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	got := h.r.RetryStanding(ids.WorkspaceID("never-seen"))
+
+	// Assert
+	if got {
+		t.Fatalf("RetryStanding = true for a workspace the footer never saw")
+	}
+}
+
+func TestRetryStandingEndsWhenTheRetriedCallIsAnswered(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+	h.r.OnApiError(testWS, mainAgent, &conversationv1.ApiRequestFailed{Message: "ENOTFOUND"})
+	h.r.OnActivity(testWS, mainAgent, thinkingActivity("th-1"))
+
+	// Act
+	got := h.r.RetryStanding(testWS)
+
+	// Assert
+	if got {
+		t.Fatalf("RetryStanding = true after the retried call was answered")
+	}
+}
