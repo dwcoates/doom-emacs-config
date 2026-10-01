@@ -53,6 +53,7 @@ import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import { orderFor, withOrder, withoutOrder } from "../feed-order.js";
 import { TailFollow, centerDelta, type CenterGeometry } from "../../src/scroll.js";
 import { responseCapLines } from "../../src/feed/cards/response.js";
+import { codeOf } from "../source-text.js";
 
 /** A scroll box's rect, for fixtures whose box is never measured for a collapse. */
 const boxRect = (): DOMRect => ({ top: 0 }) as DOMRect;
@@ -2703,9 +2704,7 @@ describe("createFeedController: every row is placed by its order key", () => {
 
   it("never places a new row by arrival order (source scan)", () => {
     // Arrange — feed-view.ts, comments stripped.
-    const source = readFileSync(join(process.cwd(), "src/feed/feed-view.ts"), "utf8")
-      .replace(/\/\*[\s\S]*?\*\//g, "")
-      .replace(/^\s*\/\/.*$/gm, "");
+    const source = codeOf(readFileSync(join(process.cwd(), "src/feed/feed-view.ts"), "utf8"));
     // Act — every insertion into the order, and every arrival-order index.
     const insertions = [...source.matchAll(/\border\.splice\(([^,)]*),\s*0\b/g)].map((m) => m[1].trim());
     const arrival = [
