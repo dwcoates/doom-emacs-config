@@ -215,6 +215,12 @@ reach-through lives here once instead of at every reader."
   "Return ROW's status arm keyword — the set arm IS the status."
   (plist-get (plist-get row :status) :arm))
 
+(defun agent-repl-roster-row-availability (row)
+  "Return ROW's availability arm keyword: `:pending', `:available' or `:unavailable'.
+The daemon resolves it from the workspace's shim link; a tab is opened for
+the row only once it leaves `:pending'."
+  (plist-get (plist-get row :availability) :arm))
+
 (defun agent-repl-roster-row-closed-p (row)
   "Return non-nil when ROW is CLOSED: no tab, whatever its lifecycle."
   (eq (plist-get (plist-get row :closed) :closed) t))
@@ -359,7 +365,8 @@ Once per push over every closed row, which is why it is DEBUG."
               (let ((row (plist-get entry :row)))
                 (list :id (agent-repl-roster-row-id row)
                       :name (agent-repl-roster--tab-name entry collisions)
-                      :ref (agent-repl-roster-row-ref row))))
+                      :ref (agent-repl-roster-row-ref row)
+                      :availability (agent-repl-roster-row-availability row))))
             entries)))
 
 ;;;; ---- Reconciliation ---------------------------------------------------
@@ -568,6 +575,18 @@ must never take down the reconciliation it is reporting on."
         "elisp.roster.bringup-handler-failed fn=%s error=%s"
         fn (error-message-string err))))))
 
+(defvar agent-repl-roster--held-id nil
+  "Ref id of the row the last reconcile pass held `:pending', or nil.
+Only so the hold is recorded once per row rather than once per push.")
+
+(defvar agent-repl-roster--bringup-carry nil
+  "`(OPENED . TOTAL)' of a bring-up a held row left unfinished, or nil.
+A row held `:pending' ends a reconcile pass with the bring-up still under
+way, and the push that resolves it opens the rest in a LATER pass.  The
+carry is what lets that later pass go on counting the same bring-up
+\(\"loading workspaces (3/5)\") instead of starting a new count over the
+rows still tabless.")
+
 (defun agent-repl-roster-reconcile (roster)
   "Bring the tab bar in line with ROSTER and return the tab names in order.
 Opens a tab for each `closed = false' row that has none, renames the tab
@@ -585,17 +604,42 @@ A row that fails to reconcile is contained rather than fatal; see
                     (lambda (want)
                       (null (agent-repl--ws-by-ref-id (plist-get want :id))))
                     desired))
+         (carried (or (car agent-repl-roster--bringup-carry) 0))
+         (total (+ carried untabbed))
          (opened 0)
-         (names nil))
+         (names nil)
+         ;; The first tabless row still `:pending', once the walk meets it.
+         (held nil))
     (dolist (want desired)
-      (let* ((fresh (null (agent-repl--ws-by-ref-id (plist-get want :id))))
-             (name (agent-repl-roster--reconcile-row want wanted-ids)))
-        (when name (push name names))
-        ;; A row that FAILED opened no tab, so it does not count towards
-        ;; the bring-up and the pass ends below `untabbed'.
-        (when (and fresh name)
-          (setq opened (1+ opened))
-          (agent-repl-roster--note-bringup opened untabbed nil))))
+      (let ((fresh (null (agent-repl--ws-by-ref-id (plist-get want :id)))))
+        ;; A WORKSPACE IS OPENED ONLY ONCE THE DAEMON HAS ITS SESSION, AND IN
+        ;; REGISTRY ORDER (owner ruling, 2026-09-30).  A tabless row whose
+        ;; availability is still `:pending' holds itself AND every tabless row
+        ;; after it, however ready a later one already is; the next push that
+        ;; resolves it opens it and walks on.  A row that already has a tab is
+        ;; never held -- it was opened, and a daemon relaunch re-reporting it
+        ;; `:pending' must not tear down what the user is looking at -- so it
+        ;; is reconciled as before.  An `:unavailable' row opens: its status
+        ;; arm draws the failure.
+        (when (and fresh (not held)
+                   (eq (plist-get want :availability) :pending))
+          (setq held want)
+          ;; Stated once per held row, not once per push that still finds it
+          ;; held: a bring-up pushes the roster many times over.
+          (unless (equal (plist-get want :id) agent-repl-roster--held-id)
+            (agent-repl--info '(:agent-repl-central "roster reconciliation spans every workspace")
+                              "elisp.roster.held: id=%s name=%s reason=pending"
+                              (plist-get want :id) (plist-get want :name))))
+        (if (and fresh held)
+            ;; Recorded as wanted so nothing about it is torn down.
+            (puthash (plist-get want :id) t wanted-ids)
+          (let ((name (agent-repl-roster--reconcile-row want wanted-ids)))
+            (when name (push name names))
+            ;; A row that FAILED opened no tab, so it does not count towards
+            ;; the bring-up and the pass ends below `untabbed'.
+            (when (and fresh name)
+              (setq opened (1+ opened))
+              (agent-repl-roster--note-bringup (+ carried opened) total nil))))))
     (dolist (name (agent-repl-roster--roster-owned-names))
       (let ((id (plist-get (agent-repl--ws-get name :ref) :id)))
         (unless (gethash id wanted-ids)
@@ -625,12 +669,20 @@ A row that fails to reconcile is contained rather than fatal; see
                       agent-repl-roster--tab-order)
     ;; LAST, after the order is set, so a handler that reads the tab bar
     ;; sees the one this pass produced rather than the previous pass's.
-    (when (> opened 0)
-      (agent-repl-roster--note-bringup opened untabbed t))
+    ;; The pass is FINISHED only when nothing is held: a held row is a
+    ;; bring-up still under way, and the next push carries it on.
+    (setq agent-repl-roster--bringup-carry
+          (and held (cons (+ carried opened) total))
+          agent-repl-roster--held-id (plist-get held :id))
+    (when (and (> (+ carried opened) 0) (not held))
+      (agent-repl-roster--note-bringup (+ carried opened) total t))
     ;; The startup roster has now been delivered, so every LATER arrival is a
     ;; workspace that became open with this editor watching and opens its own
-    ;; panels (`agent-repl--panels-open-on-arrival').
-    (agent-repl--panels-arm-arrivals)
+    ;; panels (`agent-repl--panels-open-on-arrival').  A held row means the
+    ;; startup's own rows are still arriving, pass by pass, and they keep the
+    ;; startup's exemption until the last of them is open.
+    (unless held
+      (agent-repl--panels-arm-arrivals))
     agent-repl-roster--tab-order))
 
 ;;;; ---- Lookups the renderers use ----------------------------------------
