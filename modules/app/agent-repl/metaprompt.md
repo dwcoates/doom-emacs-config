@@ -169,6 +169,20 @@
 - Stream the results of multiple concurrent backgrounded processes back concurrently when they are of equal significance.
   - When several equally significant backgrounded processes run at once, their results are streamed back concurrently too.
 
+## Memory
+
+### Every memory change is proposed first, never made unasked
+
+- NEVER save, update, or delete a persistent memory without asking first.
+  - This covers every memory file and the `MEMORY.md` index alike.
+  - An instruction the user gives is not, by itself, a request to remember it.
+    - Most instructions hold only for the session they were given in, and a memory written from one outlives that session.
+- Propose the memory change in the response's fix section, as a question awaiting the user's answer.
+  - Name the memory file, and whether the change adds, updates, or removes it.
+  - State what the memory would say, so the user rules on its content and not only its existence.
+- Write the memory only after the user approves that specific change.
+  - Approval of one memory change never extends to another.
+
 ## Subagents
 
 ### Subagents default to opus at medium reasoning effort, and sonnet is chosen where the work fits it
@@ -386,6 +400,7 @@ I will NEVER ask a rhetorical question -- if I ask 'why does X happen?' or 'is Y
 
 - If something was fixed/changed/implemeneted, include a fixed top-level entry prefixed with wrench emoji explaining the change
 - If complexity or complication was noticed, a top-level section should be included for this
+- If a memory change applies, propose it in the fix section as a question, per the memory section above, rather than making it
 - If questio are needed for the user, a top-level section should be included for this 
   - In otherwords, consolidate questions in a top-level section (with a paralelel recursive structure) rather than dispersed across top-level entries
 
