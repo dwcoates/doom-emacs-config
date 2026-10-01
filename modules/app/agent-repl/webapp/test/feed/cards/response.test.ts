@@ -2472,7 +2472,7 @@ describe("the data-driven final-answer green", () => {
     expect(el.classList.contains(THINKING_BUBBLE_CLASS)).toBe(true);
   });
 
-  it("lets the BLUE selected-response border win over the green", () => {
+  it("lets the BLUE selection border win over the green", () => {
     // Arrange — a green final answer that is also the selected reply target, so
     // both classes ride the same bubble.
     const el = drawFeedResponse(

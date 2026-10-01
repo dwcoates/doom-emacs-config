@@ -1323,6 +1323,38 @@ describe("TailFollow's latest-visible latch", () => {
     expect(l.tail.isFollowing()).toBe(true);
   });
 
+  it("moves nothing when the selection ends in place", () => {
+    // Arrange
+    const l = withLatest(100);
+    l.tail.selectionMoved(null);
+    // Act — the selected row left the viewport (none.stay).
+    l.tail.selectionEnded();
+    // Assert
+    expect([l.tail.isFollowing(), l.box.scrollTop]).toEqual([false, 100]);
+  });
+
+  it("latches once the reader reaches the latest entry after the selection ended in place", () => {
+    // Arrange
+    const l = withLatest(100);
+    l.tail.selectionMoved(null);
+    l.tail.selectionEnded();
+    // Act
+    l.box.scrollTop = 650;
+    l.gesture();
+    // Assert
+    expect(l.tail.isFollowing()).toBe(true);
+  });
+
+  it("latches where the view stands when the latest entry is visible as the selection ends", () => {
+    // Arrange
+    const l = withLatest(650);
+    l.tail.selectionMoved(null);
+    // Act
+    l.tail.selectionEnded();
+    // Assert
+    expect([l.tail.isFollowing(), l.box.scrollTop]).toEqual([true, 650]);
+  });
+
   it("latches after a detached-work selection that leaves the latest entry in view", () => {
     // Arrange
     const l = withLatest(500);

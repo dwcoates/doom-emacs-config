@@ -1717,19 +1717,19 @@ describe("the removed amber async border", () => {
   });
 });
 
-describe("the selected-entry mark (a jump's landing, a reply selection)", () => {
+describe("the selected-entry mark (a jump's landing, the feed selection)", () => {
   it("rings the selected card with the selection token", () => {
     // Arrange / Act
-    const rule = declarationsOf(".entry-selected:not(.final-response)");
+    const rule = declarationsOf('.entry-selected:not(.final-response):not([data-role="prompt"])');
 
     // Assert
-    expect(rule).toMatch(/outline:\s*2px solid var\(--selected-response\)/);
+    expect(rule).toMatch(/outline:\s*2px solid var\(--selected-entry\)/);
   });
 
   it("pulls the ring inside the card's own box, so nothing reflows or clips", () => {
     // Arrange / Act — an outline takes no layout space; a negative offset of
     // its own width keeps it inside the row's paint containment.
-    const rule = declarationsOf(".entry-selected:not(.final-response)");
+    const rule = declarationsOf('.entry-selected:not(.final-response):not([data-role="prompt"])');
 
     // Assert
     expect(rule).toMatch(/outline-offset:\s*-2px/);
@@ -1737,7 +1737,7 @@ describe("the selected-entry mark (a jump's landing, a reply selection)", () => 
 
   it("never changes a border width or the card's own shadow to mark a card", () => {
     // Arrange / Act
-    const rule = declarationsOf(".entry-selected:not(.final-response)") ?? "";
+    const rule = declarationsOf('.entry-selected:not(.final-response):not([data-role="prompt"])') ?? "";
 
     // Assert
     expect(/\bborder(-width)?\s*:|box-shadow\s*:/.test(rule)).toBe(false);
@@ -1757,7 +1757,7 @@ describe("the selected-entry mark (a jump's landing, a reply selection)", () => 
     card.className = "bubble final-response entry-selected";
 
     // Act, Assert — the ring's selector does not match it.
-    expect(card.matches(".entry-selected:not(.final-response)")).toBe(false);
+    expect(card.matches('.entry-selected:not(.final-response):not([data-role="prompt"])')).toBe(false);
   });
 
   it("recolors the selected final-response bubble with the blue selection token", () => {
@@ -1765,12 +1765,39 @@ describe("the selected-entry mark (a jump's landing, a reply selection)", () => 
     const rule = declarationsOf(".bubble.final-response.entry-selected");
 
     // Assert
-    expect(rule).toMatch(/border-color:\s*var\(--selected-response\)/);
+    expect(rule).toMatch(/border-color:\s*var\(--selected-entry\)/);
   });
 
-  it("defines the --selected-response token so the blue rule resolves", () => {
+  it("keeps the ring off a selected prompt, whose own border turns blue", () => {
+    // Arrange
+    const card = document.createElement("div");
+    card.className = "bubble user entry-selected";
+    card.setAttribute("data-role", "prompt");
+
+    // Act, Assert — the ring's selector does not match it.
+    expect(card.matches('.entry-selected:not(.final-response):not([data-role="prompt"])')).toBe(false);
+  });
+
+  it("recolors a selected prompt's border with the same selection token", () => {
+    // Arrange / Act
+    const rule = declarationsOf('.bubble[data-role="prompt"].entry-selected');
+
+    // Assert
+    expect(rule).toMatch(/border-color:\s*var\(--selected-entry\)/);
+  });
+
+  it("declares the selected prompt's border after the agent prompt's amber", () => {
+    // Arrange / Act — equal specificity, so source order decides.
+    const amber = stylesheet.indexOf('.bubble[data-role="prompt"][data-variant="agent"]');
+    const blue = stylesheet.indexOf('.bubble[data-role="prompt"].entry-selected');
+
+    // Assert
+    expect(amber >= 0 && blue > amber).toBe(true);
+  });
+
+  it("defines the --selected-entry token so the blue rule resolves", () => {
     // Arrange / Act — comments are stripped, so a bare token declaration remains.
-    const declared = /--selected-response:\s*#[0-9a-fA-F]{3,6}/.test(
+    const declared = /--selected-entry:\s*#[0-9a-fA-F]{3,6}/.test(
       withoutBlockComments(stylesheet),
     );
 

@@ -15,7 +15,7 @@ import {
   standingClientFailure,
 } from "../../src/rpc/link.js";
 import { latestEntry, mountFeed } from "../../src/feed/feed.js";
-import { SELECTED_ENTRY_CLASS } from "../../src/feed/selected-entry.js";
+import { SELECTED_ENTRY_CLASS, SELECTED_ROW_ATTRIBUTE } from "../../src/feed/selected-entry.js";
 import {
   Channel,
   feedId,
@@ -132,12 +132,12 @@ describe("mountFeed: opening the root feed", () => {
     channel.push(push(responseRow("r1")));
     await settle();
     // Act — a selection frame naming that row (no row of its own).
-    channel.push(pushSelection({ selected: "r1", active: true, center: "r1" }));
+    channel.push(pushSelection({ response: "r1" }));
     await settle();
     // Assert — the row wears the selection mark, so the frame reached
     // applySelection rather than being rejected as a malformed row.
-    expect(host.querySelector('[data-feed-row="r1"]')?.getAttribute("data-selected-response")).toBe(
-      "true",
+    expect(host.querySelector('[data-feed-row="r1"]')?.getAttribute(SELECTED_ROW_ATTRIBUTE)).toBe(
+      "response",
     );
   });
 
@@ -150,13 +150,13 @@ describe("mountFeed: opening the root feed", () => {
     const { host } = mount(h);
     await settle();
     channel.push(push(responseRow("r1")));
-    channel.push(pushSelection({ selected: "r1", active: true, center: "r1" }));
+    channel.push(pushSelection({ response: "r1" }));
     await settle();
     // Act — the clear frame (double-escape).
-    channel.push(pushSelection({ active: false }));
+    channel.push(pushSelection({ none: "returnToTail" }));
     await settle();
     // Assert
-    expect(host.querySelector('[data-feed-row="r1"]')?.hasAttribute("data-selected-response")).toBe(
+    expect(host.querySelector('[data-feed-row="r1"]')?.hasAttribute(SELECTED_ROW_ATTRIBUTE)).toBe(
       false,
     );
   });
@@ -1405,7 +1405,7 @@ describe("mountFeed: the latest-visible latch", () => {
   });
 });
 
-describe("mountFeed: a click on the feed background ends a reply selection", () => {
+describe("mountFeed: a click on the feed background ends the selection", () => {
   /**
    * A mounted root feed in a 300px viewport over HEIGHT px of content, with r1
    * drawn and the reader wheeled up to 100, and then r1 selected on the live
@@ -1439,7 +1439,7 @@ describe("mountFeed: a click on the feed background ends a reply selection", () 
     scroll.dispatchEvent(new Event("wheel"));
     geometry.top = 100;
     scroll.dispatchEvent(new Event("scroll"));
-    channel.push(pushSelection({ selected: "r1", active: true }));
+    channel.push(pushSelection({ response: "r1" }));
     await settle();
     return { feed, h, host, scroll, channel, geometry };
   }
@@ -1455,20 +1455,21 @@ describe("mountFeed: a click on the feed background ends a reply selection", () 
     clickBackground(m.host);
     await settle();
     // Assert
-    expect(m.h.calls.selectResponse).toHaveLength(1);
+    expect(m.h.calls.selectFeedRow.map((r) => r.move.case)).toEqual(["clear"]);
     m.feed.dispose();
   });
 
   it("clears nothing locally before the daemon's push", async () => {
-    // Arrange
+    // Arrange — selecting r1 centered it; the click must move nothing from there.
     const m = await selected();
+    const centered = m.scroll.scrollTop;
     // Act
     clickBackground(m.host);
     await settle();
     // Assert
     expect(
-      [m.host.querySelector('[data-feed-row="r1"]')?.getAttribute("data-selected-response"), m.scroll.scrollTop],
-    ).toEqual(["true", 100]);
+      [m.host.querySelector('[data-feed-row="r1"]')?.getAttribute(SELECTED_ROW_ATTRIBUTE), m.scroll.scrollTop],
+    ).toEqual(["response", centered]);
     m.feed.dispose();
   });
 
@@ -1478,7 +1479,7 @@ describe("mountFeed: a click on the feed background ends a reply selection", () 
     clickBackground(m.host);
     await settle();
     // Act
-    m.channel.push(pushSelection({ active: false }));
+    m.channel.push(pushSelection({ none: "returnToTail" }));
     await settle();
     // Assert
     expect(m.scroll.scrollTop).toBe(2000);
@@ -1490,7 +1491,7 @@ describe("mountFeed: a click on the feed background ends a reply selection", () 
     const m = await selected();
     clickBackground(m.host);
     await settle();
-    m.channel.push(pushSelection({ active: false }));
+    m.channel.push(pushSelection({ none: "returnToTail" }));
     await settle();
     // Act
     m.geometry.height = 2400;
@@ -1504,13 +1505,13 @@ describe("mountFeed: a click on the feed background ends a reply selection", () 
   it("sends nothing once the selection has cleared", async () => {
     // Arrange
     const m = await selected();
-    m.channel.push(pushSelection({ active: false }));
+    m.channel.push(pushSelection({ none: "returnToTail" }));
     await settle();
     // Act
     clickBackground(m.host);
     await settle();
     // Assert
-    expect(m.h.calls.selectResponse).toEqual([]);
+    expect(m.h.calls.selectFeedRow).toEqual([]);
     m.feed.dispose();
   });
 
@@ -1522,7 +1523,73 @@ describe("mountFeed: a click on the feed background ends a reply selection", () 
     clickBackground(m.host);
     await settle();
     // Assert
-    expect(m.h.calls.selectResponse).toEqual([]);
+    expect(m.h.calls.selectFeedRow).toEqual([]);
+  });
+});
+
+describe("mountFeed: the selected row leaving the viewport ends the selection", () => {
+  /** A mounted root feed with r1 and r2 drawn on a live tail. */
+  async function mounted() {
+    const channels = new Map<string, Channel<WatchFeedResponse>>();
+    const channel = new Channel<WatchFeedResponse>();
+    channels.set("tok:root", channel);
+    const h = harness({
+      channels,
+      openFeed: (req) => openSuccess(page([responseRow("r1"), responseRow("r2")]), tokenFor(req)),
+    });
+    const scroll = document.createElement("div");
+    const host = document.createElement("div");
+    scroll.append(host);
+    document.body.replaceChildren(scroll);
+    const geometry = { top: 0 };
+    Object.defineProperties(scroll, {
+      scrollHeight: { get: () => 2000 },
+      clientHeight: { get: () => 300 },
+      scrollTop: {
+        get: () => geometry.top,
+        set: (next: number) => {
+          geometry.top = next;
+        },
+      },
+    });
+    const feed = mountFeed(host, h.ctx, { renderers: stubRenderers(), scrollBox: scroll });
+    await settle();
+    const row = (id: string): HTMLElement => {
+      const el = host.querySelector<HTMLElement>(`[data-feed-row="${id}"]`);
+      if (el === null) throw new Error(`no row ${id}`);
+      return el;
+    };
+    return { feed, h, host, scroll, channel, row };
+  }
+
+  it("tells the daemon once the selected row it saw has left the viewport", async () => {
+    // Arrange
+    const m = await mounted();
+    m.channel.push(pushSelection({ response: "r1" }));
+    await settle();
+    fireIntersection(m.row("r1"), true);
+    // Act
+    fireIntersection(m.row("r1"), false);
+    await settle();
+    // Assert
+    expect(
+      m.h.calls.selectFeedRow.map((r) => (r.move.case === "leftView" ? r.move.value.row?.value : r.move.case)),
+    ).toEqual(["r1"]);
+    m.feed.dispose();
+  });
+
+  it("leaves the viewport where it is on the daemon's stay push", async () => {
+    // Arrange
+    const m = await mounted();
+    m.channel.push(pushSelection({ response: "r1" }));
+    await settle();
+    m.scroll.scrollTop = 37;
+    // Act
+    m.channel.push(pushSelection({ none: "stay" }));
+    await settle();
+    // Assert
+    expect([m.scroll.scrollTop, m.row("r1").hasAttribute(SELECTED_ROW_ATTRIBUTE)]).toEqual([37, false]);
+    m.feed.dispose();
   });
 });
 

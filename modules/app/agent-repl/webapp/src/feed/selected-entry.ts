@@ -4,8 +4,8 @@
  * `.feed-item` wrapper.
  *
  * Two acts select an entry: a footer detached-work click lands on it (the
- * reveal, `data-revealed`, feed.ts) and the reader's reply-to-a-past-response
- * selection names it (`data-selected-response`, feed-view.ts). They are one
+ * reveal, `data-revealed`, feed.ts) and the daemon's feed selection names it
+ * (`data-selected-row`, feed-view.ts: a final response or a prompt). They are one
  * concept, so they share one class. Each act states ITS fact on the row's
  * `<article>`, which outlives every redraw of the card inside it, and then
  * calls {@link syncSelectedEntry}, which derives the class on the card from
@@ -26,14 +26,14 @@ export const SELECTED_ENTRY_CLASS = "entry-selected";
 export const REVEAL_ATTRIBUTE = "data-revealed";
 
 /**
- * The attribute the row of the reply-to-a-past-response selection wears — the
- * dual of the final-answer marker (`data-final-answer`, turn-ended.ts), spelled
- * once so a re-push naming a different row can strip it from every other row.
+ * The attribute the row the daemon's feed selection names wears, valued with
+ * the row's kind (`response` or `prompt`) — spelled once so a re-push naming a
+ * different row can strip it from every other row.
  */
-export const SELECTED_RESPONSE_ATTRIBUTE = "data-selected-response";
+export const SELECTED_ROW_ATTRIBUTE = "data-selected-row";
 
 /** The row facts that each select the entry. */
-const SELECTING_ATTRIBUTES = [REVEAL_ATTRIBUTE, SELECTED_RESPONSE_ATTRIBUTE] as const;
+const SELECTING_ATTRIBUTES = [REVEAL_ATTRIBUTE, SELECTED_ROW_ATTRIBUTE] as const;
 
 /** The card ROW draws: its first element child, or null for an empty row. */
 export function cardOf(row: HTMLElement): HTMLElement | null {
