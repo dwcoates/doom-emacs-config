@@ -486,6 +486,10 @@ type Watcher interface {
 	// LiveWork is the live detached work: what a bounce registered on the
 	// workspace waits on besides the turn.
 	LiveWork() sessionwatcher.LiveWorkSet
+	// Free is the watcher's own freeness judgement: its facts are in, and
+	// they leave no turn in flight and no live work. A pure attach whose
+	// facts have not arrived is NOT free, whatever TurnInFlight answers.
+	Free() bool
 	// SetMainAgent names the session's main agent from an accepted turn.
 	SetMainAgent(agent *conversationv1.AgentId)
 	// OnTurnOpening records a turn BEFORE StartTurn is dispatched, so a
