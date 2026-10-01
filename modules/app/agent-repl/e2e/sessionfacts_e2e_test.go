@@ -13,8 +13,8 @@
 //     arms), and `rate_limit_status` (SessionRateLimitStatus, "a STREAM-ONLY
 //     event... the footer's allowance cell draws it").
 //   - proto/src/frontend/v1/footer.proto — the ENDURING usage line
-//     (FooterActivityEnduringUsage, always drawn when nothing covers it and
-//     the 80% rule chooses it) with its FooterAllowance cells (`newsworthy`,
+//     (FooterActivityEnduringUsage, always drawn when nothing covers it)
+//     with its FooterAllowance cells (`newsworthy`,
 //     `resets_at_s`, `utilization`, the typed verdict), and the SALIENT
 //     vendor rate-limit line (FooterStatusActivityRateLimit: a warning or a
 //     refusal, standing until a later event reports the allowance allowed).
@@ -45,9 +45,8 @@
 //     naming its allowance.
 //
 //  3. AN UNREAD SAMPLE DRAWS NO CAVEAT (owner ruling, fc4917be4,
-//     2026-09-15). The enduring usage line carries `figures_read_at_ms`
-//     (stamped by a READABLE sample and never by an unread attempt or an
-//     event), and an unread sample's outcome — its reason, and a sampling
+//     2026-09-15). An unread sample leaves the read figures standing, and
+//     its outcome — its reason, and a sampling
 //     failure's cause — is recorded on the daemon's `daemon.footer.usage_
 //     sample_unreadable` breadcrumb instead. The enduring usage line is drawn
 //     whatever the figures (owner ruling, 2026-09-28), so the tests below
@@ -554,14 +553,11 @@ func TestAccountUsageUnreadArmsLeaveTheReadFiguresStanding(t *testing.T) {
 			line := sfAwaitUsage(t, w, ws)
 
 			// Assert: ALONGSIDE, never instead of. The five-hour figure the
-			// last readable sample filed is still drawn, with the age of THAT
-			// reading, and no caveat is drawn for the unread.
+			// last readable sample filed is still drawn, and no caveat is
+			// drawn for the unread.
 			if got := line.GetSession().GetUtilization(); got != sfFiveHourUtilization {
 				t.Errorf("FooterAllowance(session).utilization = %v, want the standing %v left alone by the %s sample",
 					got, sfFiveHourUtilization, tc.reason)
-			}
-			if line.FiguresReadAtMs == nil {
-				t.Errorf("figures_read_at_ms is UNSET, want the instant the start-time probe's figures were read")
 			}
 			sfAssertNoCaveat(t, line)
 		})
@@ -633,9 +629,6 @@ func TestAccountUsageProbedAtSessionStartReachesTheFooter(t *testing.T) {
 		t.Errorf("FooterAllowance(session).utilization = %v, want %v from the session's own start-time probe",
 			got, sfFiveHourUtilization)
 	}
-	if line.FiguresReadAtMs == nil {
-		t.Errorf("figures_read_at_ms is UNSET, want the start-time probe's read instant")
-	}
 }
 
 // THE SAMPLING FAILURE KEEPS THE SHIM'S OWN CAUSE. The arm exists so a reader
@@ -663,25 +656,21 @@ func TestAccountUsageSamplingFailureCarriesACause(t *testing.T) {
 // `!usage-opus-absent` IS NOT AN UNAVAILABILITY, and that is the whole
 // scenario: the service answered in full and this account simply has no opus
 // window (catalogs.ts: "An ABSENT OPTIONAL WINDOW, which is NOT an
-// unavailability"). So the sample READS: its turn-close reprobe re-files the
-// figures and stamps a fresh read instant, where an unread arm in its place
-// would have left the start-time probe's instant standing, exactly as the
-// tests above assert.
-func TestAccountUsageOpusAbsentIsReadAndRestampsTheFigures(t *testing.T) {
+// unavailability"). The enduring line draws no opus window, so what a reader
+// sees is the session and weekly allowances the sample read, both drawn.
+func TestAccountUsageOpusAbsentDrawsTheSessionAndWeeklyAllowances(t *testing.T) {
 	t.Parallel()
-	// Arrange: figures standing from the start-time probe, over an unread probe.
+	// Arrange
 	w, ws, _ := sfNewWorkspace(t)
-	sfSwitchedToUnread(t, w, ws, driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "usage-service-unavailable"), "service_unavailable")
-	before := sfAwaitUsage(t, w, ws).GetFiguresReadAtMs()
 
 	// Act
 	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "usage-opus-absent")
 	sfAwaitConclusion(t, w, ws, turn,
 		"The account-usage probe now answers with the opus_absent shape.")
 
-	// Assert: the sample read again, so the figures carry a newer read instant.
-	footer := w.WatchFooter(ws)
-	defer footer.Close()
-	harness.AwaitView(t, w.Ctx(), footer.Stream, "the footer to re-stamp the figures an absent optional window re-read",
-		func(v *frontendv1.FooterView) bool { return footerEnduringUsage(v).GetFiguresReadAtMs() > before })
+	// Assert
+	line := sfAwaitUsage(t, w, ws)
+	if line.GetWeekly() == nil {
+		t.Errorf("FooterActivityEnduringUsage.weekly is UNSET, want the weekly allowance an absent opus window leaves drawn")
+	}
 }

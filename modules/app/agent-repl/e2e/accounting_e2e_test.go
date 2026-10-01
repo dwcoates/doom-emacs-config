@@ -162,8 +162,7 @@ func TestAccountUsage(t *testing.T) {
 	// ruling, 2026-09-30: only a rate-limit EVENT that warns or refuses does);
 	// its figures are the enduring usage line's, drawn whatever they are.
 	// `usage-full`'s five_hour window is 41% (agent-shim/claude/shim/src/fake/
-	// catalogs.ts fakeAccountUsage), which is also under the 80% rule's
-	// threshold, so the enduring line is the usage one.
+	// catalogs.ts fakeAccountUsage), drawn on the enduring usage line.
 	assertTheSampleDrawsOnlyTheEnduringUsage(t, w, ws)
 }
 
