@@ -36,6 +36,7 @@
   (load (expand-file-name "test-commands.el" dir) nil t)
   (load (expand-file-name "test-config.el" dir) nil t)
   (load (expand-file-name "test-connect.el" dir) nil t)
+  (load (expand-file-name "test-conversations.el" dir) nil t)
   (load (expand-file-name "test-core.el" dir) nil t)
   (load (expand-file-name "test-daemon.el" dir) nil t)
   (load (expand-file-name "test-daemon-link.el" dir) nil t)
