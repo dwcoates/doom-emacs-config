@@ -525,8 +525,9 @@ type wsState struct {
 	// contextWindow is the main agent's last readable context-usage report,
 	// nil until one arrives. The enduring line draws it.
 	// retrying is the standing mid-turn retry evidence. It stands until the
-	// retried call's response lands (the first frame that proves the vendor
-	// answered) or the next turn opens.
+	// retried call's response lands (ladder.RetryAnswered), the turn ends, or
+	// the next turn opens; while it stands with a turn in flight the status is
+	// `blocked · api_retrying` (retryBlocks).
 	retrying *retryState
 	// authLine is the standing auth prompt line.
 	authLine *standing
@@ -709,4 +710,10 @@ func (s *wsState) observeLine(view *frontendv1.FooterView) (line activityLine, c
 func (s *wsState) nextOrder() int {
 	s.seq++
 	return s.seq
+}
+
+// retryBlocks reports a standing API retry that blocks the workspace: the
+// vendor is retrying a call and a turn is in flight to be held by it.
+func (s *wsState) retryBlocks() bool {
+	return s.retrying != nil && s.turn != nil
 }

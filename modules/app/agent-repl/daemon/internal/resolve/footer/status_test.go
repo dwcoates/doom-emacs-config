@@ -1568,3 +1568,103 @@ func TestMergeStepWordsAreThePlainWordsOfEachStep(t *testing.T) {
 		})
 	}
 }
+
+// ---- the API-retry block ------------------------------------------------
+
+// enotfound is the vendor's report that it is retrying a call it could not
+// send.
+func enotfound() *conversationv1.ApiRequestFailed {
+	return &conversationv1.ApiRequestFailed{Message: "Can't reach the API server (ENOTFOUND)"}
+}
+
+func TestARetriedCallBlocksTheTurnAsApiRetrying(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+
+	// Act
+	h.r.OnApiError(testWS, mainAgent, enotfound())
+
+	// Assert
+	if h.view(t).GetStrip().GetStatus().GetBlocked().GetApiRetrying() == nil {
+		t.Fatalf("status = %q, want blocked · api_retrying", h.status(t))
+	}
+}
+
+func TestARetryWithNoTurnInFlightDoesNotBlock(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+
+	// Act
+	h.r.OnApiError(testWS, mainAgent, enotfound())
+
+	// Assert
+	if got := h.status(t); got == "blocked" {
+		t.Fatalf("status = blocked with no turn in flight")
+	}
+}
+
+func TestAPromptOpeningATurnDuringARetryIsWorkingWithNoRetryLine(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+	h.r.OnApiError(testWS, mainAgent, enotfound())
+
+	// Act
+	h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActPrompt})
+
+	// Assert: the whole strip is the working one — status, step and a
+	// cell with no retry line.
+	working := h.view(t).GetStrip().GetStatus().GetWorking()
+	if working == nil {
+		t.Fatalf("status = %q, want working for the prompt that opened the turn", h.status(t))
+	}
+	if working.GetSubmitting() == nil {
+		t.Fatalf("working = %v, want the submitting step", working)
+	}
+	if line := lineName(t, h); line == "salient.retrying" {
+		t.Fatalf("activity = %q, want no retry line while the new turn works", line)
+	}
+}
+
+func TestTheTurnsTerminalEndsApiRetrying(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	turn := testTurnID
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+	h.r.OnApiError(testWS, mainAgent, enotfound())
+
+	// Act
+	h.r.OnAgentTerminal(testWS, mainAgent, &turn, nil, &conversationv1.AgentFailure{
+		Failure: &conversationv1.AgentFailure_ApiRequestFailed{ApiRequestFailed: enotfound()},
+	})
+
+	// Assert
+	if got := h.status(t); got == "blocked" {
+		t.Fatalf("status = blocked after the turn's terminal")
+	}
+}
+
+func TestAVendorBlockOutranksApiRetrying(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+	h.r.OnApiError(testWS, mainAgent, enotfound())
+	update := rateLimitStatus(fiveHourWindow(), 100, 5*time.Hour)
+	update.GetRateLimitStatus().Status = &conversationv1.SessionRateLimitStatus_Rejected{
+		Rejected: &conversationv1.SessionRateLimitRejected{},
+	}
+
+	// Act
+	h.r.OnSessionUpdate(testWS, update)
+
+	// Assert
+	if h.view(t).GetStrip().GetStatus().GetBlocked().GetUsageLimit() == nil {
+		t.Fatalf("status = %v, want blocked · usage_limit over the retry", h.view(t).GetStrip().GetStatus())
+	}
+}
