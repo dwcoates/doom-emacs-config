@@ -163,6 +163,10 @@ func (s *fakeServer) EditHeldPrompt(ctx context.Context, req *connect.Request[v1
 	return handleUnary[v1.EditHeldPromptRequest, v1.EditHeldPromptResponse](ctx, s, "EditHeldPrompt", req.Msg)
 }
 
+func (s *fakeServer) FoldHeldPrompt(ctx context.Context, req *connect.Request[v1.FoldHeldPromptRequest]) (*connect.Response[v1.FoldHeldPromptResponse], error) {
+	return handleUnary[v1.FoldHeldPromptRequest, v1.FoldHeldPromptResponse](ctx, s, "FoldHeldPrompt", req.Msg)
+}
+
 func (s *fakeServer) AnswerHeldOffer(ctx context.Context, req *connect.Request[v1.AnswerHeldOfferRequest]) (*connect.Response[v1.AnswerHeldOfferResponse], error) {
 	return handleUnary[v1.AnswerHeldOfferRequest, v1.AnswerHeldOfferResponse](ctx, s, "AnswerHeldOffer", req.Msg)
 }
