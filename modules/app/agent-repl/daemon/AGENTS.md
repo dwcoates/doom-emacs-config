@@ -946,8 +946,19 @@ Owner rulings, 2026-09-30 (`internal/merge`; the contract is
   with its area read from the footer and the `daemon.merge.abort` record named.
   `-wait` is REFUSED while the requester's turn is in flight: the merge starts
   only when that turn ends, and that turn is the one that would wait.
-- Exits: 0 landed (or requested, without `-wait`), 5 failed, 6 refused, 2 the
-  verb itself failed.
+- The queue's controls go through the same writer: `-evict` (the requester's
+  own merge) or `-evict-dir WORKTREE` (merge_evict), `-pause` / `-resume`
+  with an optional `-repository-dir DIR` (merge_pause, merge_resume). A
+  control is answered at once, so `-wait` is refused with one; the verb waits
+  at most `-answer-timeout` (15s) for the file's fate and prints the answer
+  the ingress keyed by the file's path in the run log (or its `.1`
+  generation): `merge-queue: outcome: <evicted|not_queued|paused|resumed>`
+  when applied, the refusal's `cause` when quarantined. An answer the run log
+  does not carry is printed `unread` on stderr; the fate still decides the
+  exit.
+- Exits: 0 landed (or requested, without `-wait`; or a control applied), 5
+  failed, 6 refused, 7 a control unanswered within `-answer-timeout` (the
+  file stays pending), 2 the verb itself failed.
 
 ## An agent controls the merge queue through command files
 
