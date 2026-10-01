@@ -636,26 +636,29 @@ func TestSpawnReplacementStartsAnOrdinaryDaemonThatReplaces(t *testing.T) {
 func TestEverySpawnStartsItsProcessOnTheConfigurationArgv(t *testing.T) {
 	config := []string{"--default-config-dir=/roots/default", "--node=node"}
 	tests := []struct {
-		name  string
-		spawn func(s *ProcessSpawner) error
+		name string
+		// spawn starts the stand-in and answers a channel closed when it has
+		// exited, or nil when this process cannot observe its exit.
+		spawn func(s *ProcessSpawner) (<-chan struct{}, error)
 		want  []string
 	}{
 		{
 			name: "successor",
-			spawn: func(s *ProcessSpawner) error {
+			spawn: func(s *ProcessSpawner) (<-chan struct{}, error) {
 				successor, err := s.Spawn(context.Background(), "127.0.0.1:7777")
-				if successor != nil {
-					t.Cleanup(func() { _ = successor.Stop(context.Background()) })
+				if successor == nil {
+					return nil, err
 				}
-				return err
+				t.Cleanup(func() { _ = successor.Stop(context.Background()) })
+				return successor.(*processSuccessor).exited, err
 			},
 			want: append(slices.Clone(config), JoiningFlag, "127.0.0.1:7777"),
 		},
 		{
 			name: "replacement",
-			spawn: func(s *ProcessSpawner) error {
+			spawn: func(s *ProcessSpawner) (<-chan struct{}, error) {
 				_, err := s.SpawnReplacement(context.Background())
-				return err
+				return nil, err
 			},
 			want: append(slices.Clone(config), "--"+ReplacingFlagName),
 		},
@@ -674,15 +677,14 @@ func TestEverySpawnStartsItsProcessOnTheConfigurationArgv(t *testing.T) {
 			spawner.Poll = time.Millisecond
 
 			// Act
-			if err := tt.spawn(spawner); err != nil {
+			exited, err := tt.spawn(spawner)
+			if err != nil {
 				t.Fatalf("spawn: %v", err)
 			}
 
-			// Assert
-			raw, err := os.ReadFile(fifo)
-			if err != nil {
-				t.Fatalf("read the stand-in's argv: %v", err)
-			}
+			// Assert: the argv, or the stand-in's exit if it died before
+			// writing it -- a FIFO read alone would wait for a writer forever.
+			raw := readArgvFIFO(t, fifo, exited)
 			got := strings.Split(strings.TrimSuffix(string(raw), "\n"), "\n")
 			if !slices.Equal(got, tt.want) {
 				t.Fatalf("argv = %v, want %v", got, tt.want)
@@ -701,5 +703,43 @@ func TestSpawnReplacementRefusesWithNoDaemonBinary(t *testing.T) {
 	// Assert
 	if err == nil {
 		t.Fatal("SpawnReplacement accepted an empty binary path")
+	}
+}
+
+// readArgvFIFO reads the stand-in's argv from FIFO. When EXITED is known, a
+// stand-in that exits without ever opening the FIFO fails the test with that
+// fact instead of leaving the blocking open to wait for a writer forever.
+func readArgvFIFO(t *testing.T, fifo string, exited <-chan struct{}) []byte {
+	t.Helper()
+	type read struct {
+		raw []byte
+		err error
+	}
+	done := make(chan read, 1)
+	go func() {
+		raw, err := os.ReadFile(fifo)
+		done <- read{raw, err}
+	}()
+	select {
+	case r := <-done:
+		if r.err != nil {
+			t.Fatalf("read the stand-in's argv: %v", r.err)
+		}
+		return r.raw
+	case <-exited:
+		// The stand-in is gone, so whatever it wrote is all it ever will.
+		// Opening the write end releases a read still blocked in its open;
+		// the read then ends with what was written, or nothing.
+		if w, err := os.OpenFile(fifo, os.O_WRONLY, 0); err == nil {
+			_ = w.Close()
+		}
+		r := <-done
+		if r.err != nil {
+			t.Fatalf("read the stand-in's argv: %v", r.err)
+		}
+		if len(r.raw) == 0 {
+			t.Fatalf("the stand-in exited without writing its argv to %s", fifo)
+		}
+		return r.raw
 	}
 }
