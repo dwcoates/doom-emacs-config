@@ -111,9 +111,9 @@ would abort the very branch a test is asserting."
     ("EditHeldPrompt" agent-repl-rpc-edit-held-prompt
      agent-repl-wire-encode-edit-held-prompt-request
      agent-repl-wire-decode-edit-held-prompt-response)
-    ("SelectResponse" agent-repl-rpc-select-response
-     agent-repl-wire-encode-select-response-request
-     agent-repl-wire-decode-select-response-response)
+    ("SelectFeedRow" agent-repl-rpc-select-feed-row
+     agent-repl-wire-encode-select-feed-row-request
+     agent-repl-wire-decode-select-feed-row-response)
     ("AdjustFeedTextScale" agent-repl-rpc-adjust-feed-text-scale
      agent-repl-wire-encode-adjust-feed-text-scale-request
      agent-repl-wire-decode-adjust-feed-text-scale-response)

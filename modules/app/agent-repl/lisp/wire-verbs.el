@@ -2036,12 +2036,6 @@ arm this codec does not know is refused as an unknown field."
   "Encode SubmitPromptRequest's `workspace' use site from REF."
   (agent-repl-wire-encode-workspace-ref ref))
 
-(defun agent-repl-wire-encode-submit-prompt-request-reference-response-feedid (feedid)
-  "Encode SubmitPromptRequest's `reference_response_feedid' use site from FEEDID.
-FEEDID is the decoded `frontend.v1.FeedId' plist SelectResponse acked; it
-is echoed back verbatim, never a value Emacs builds."
-  (agent-repl-wire-encode-feed-id feedid))
-
 (defconst agent-repl-wire-submit-prompt-deliveries
   '((:deferred . "SUBMIT_PROMPT_DELIVERY_DEFERRED"))
   "The SubmitPromptDelivery vocabulary Emacs sends, keyword to wire name.
@@ -2063,9 +2057,9 @@ unknown keyword is refused before anything is built."
 (defun agent-repl-wire-encode-submit-prompt-request (request)
   "Encode SubmitPromptRequest from plist REQUEST.
 REQUEST is (:workspace REF :said SAID :idempotency-key STRING :origin
-KEYWORD) plus the OPTIONAL :reference-response-feedid FEEDID and the
-OPTIONAL :delivery KEYWORD (`agent-repl-wire-submit-prompt-deliveries';
-absent is the ordinary delivery, so it is appended only when set).  The first
+KEYWORD) plus the OPTIONAL :delivery KEYWORD
+\(`agent-repl-wire-submit-prompt-deliveries'; absent is the ordinary
+delivery, so it is appended only when set).  The first
 four are required: the workspace names WHICH workspace the submission
 belongs to and is echoed verbatim like every other per-workspace request
 (it is required even though `feed' is not, because the root feed has no id
@@ -2075,17 +2069,12 @@ because a stored turn must trace back to the exact send site.  `feed' is
 never set — Emacs composes into the workspace's root feed only, so the
 absent field IS that fact.
 
-`reference-response-feedid' is the reply-to-a-past-response target: when
-present it carries the FeedId of the earlier final-response row the user
-selected (via SelectResponse), and the daemon prepends a copy of that
-response before delivering.  It rides ALONGSIDE `said' — the user still
-authored a prompt — and its ABSENCE is an ordinary prompt, so the field is
-appended only when set rather than sent empty."
+No reply target rides the request: the daemon holds the feed's selection
+(SelectFeedRow) and applies its own when the prompt is sent."
   (let ((message "SubmitPromptRequest")
-        (feedid (plist-get request :reference-response-feedid))
         (delivery (plist-get request :delivery)))
-    (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.verbs-encode-submit-prompt-request origin=%s reply-to=%s delivery=%S"
-                      (plist-get request :origin) (and feedid t) delivery)
+    (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.verbs-encode-submit-prompt-request origin=%s delivery=%S"
+                      (plist-get request :origin) delivery)
     (append
      (list (cons 'workspace
                  (agent-repl-wire-encode-submit-prompt-request-workspace
@@ -2100,12 +2089,6 @@ appended only when set rather than sent empty."
            (cons 'origin (agent-repl-wire-encode-submit-prompt-request-origin
                           (agent-repl-wire-verbs--require message "origin"
                                                            (plist-get request :origin)))))
-     ;; OPTIONAL field: its absence is the ordinary-prompt fact, so it is
-     ;; appended only when a selection was active at submit time.
-     (when feedid
-       (list (cons 'referenceResponseFeedid
-                   (agent-repl-wire-encode-submit-prompt-request-reference-response-feedid
-                    feedid))))
      ;; OPTIONAL field: its absence is the ordinary delivery.
      (when delivery
        (list (cons 'delivery (agent-repl-wire-encode-submit-prompt-delivery delivery)))))))
@@ -3605,142 +3588,186 @@ with the same accessor every other verb's error uses."
    #'agent-repl-wire-decode-interrupt-success
    #'agent-repl-wire-decode-interrupt-error))
 
-;;;; ---- SelectResponse -------------------------------------------------
+;;;; ---- SelectFeedRow --------------------------------------------------
 ;;
-;; Reply-to-a-past-response cursor nav.  The client sends only a DIRECTION;
-;; the daemon owns the ordered final-response rows, computes the newly
-;; selected feedid (both directions start at the most recent and wrap at each
-;; end) and acks it here so Emacs can track selection state.
+;; Moving the feed's selection.  THE ARM IS THE MOVE on the request: Emacs
+;; steps through the final responses (`C-p' / `C-n') or through the prompts a
+;; rollback can reach (`C-S-p' / `C-S-n'), or clears the selection (escape
+;; twice).  The daemon owns the ordered rows and the selection, computes where
+;; a step lands, pushes the result to the webapp and to Emacs's host watch,
+;; and acks it here.  THE ARM IS THE OUTCOME on the success.  See
+;; endpoint_select_feed_row.proto.  The webapp's own `left_view' move is
+;; never sent from Emacs, so it has no elisp spelling.
 
-(defconst agent-repl-wire-select-response-directions
-  '((:prev . "SELECT_RESPONSE_DIRECTION_PREV")
-    (:next . "SELECT_RESPONSE_DIRECTION_NEXT")
-    (:clear . "SELECT_RESPONSE_DIRECTION_CLEAR"))
-  "The SelectResponseDirection vocabulary Emacs sends, keyword to wire name.
+(defconst agent-repl-wire-select-feed-row-directions
+  '((:older . "SELECT_FEED_ROW_DIRECTION_OLDER")
+    (:newer . "SELECT_FEED_ROW_DIRECTION_NEWER"))
+  "The SelectFeedRowDirection vocabulary Emacs sends, keyword to wire name.
 UNSPECIFIED is deliberately ABSENT: a request carrying it is refused as
 InvalidArgument, so the zero value has no elisp spelling to reach for by
 accident.")
 
-(defun agent-repl-wire-encode-select-response-direction (value)
-  "Encode the SelectResponseDirection keyword VALUE as its protojson enum name.
+(defun agent-repl-wire-encode-select-feed-row-direction (value)
+  "Encode the SelectFeedRowDirection keyword VALUE as its protojson enum name.
 The vocabulary is closed; an unknown keyword — `:unspecified' in
 particular — is refused before the request is built."
-  (let ((name (cdr (assq value agent-repl-wire-select-response-directions))))
+  (let ((name (cdr (assq value agent-repl-wire-select-feed-row-directions))))
     (unless name
-      (agent-repl-wire-verbs--fail "SelectResponseRequest" "direction" "unknown direction"))
+      (agent-repl-wire-verbs--fail "SelectFeedRowStep" "direction" "unknown direction"))
     name))
 
-(defun agent-repl-wire-encode-select-response-request-workspace (ref)
-  "Encode SelectResponseRequest's `workspace' use site from REF."
+(defun agent-repl-wire-encode-select-feed-row-step (value)
+  "Encode SelectFeedRowStep from plist VALUE (:direction K).
+The direction is REQUIRED: a step names which way it moves."
+  (list (cons 'direction
+              (agent-repl-wire-encode-select-feed-row-direction
+               (agent-repl-wire-verbs--require "SelectFeedRowStep" "direction"
+                                                (plist-get value :direction))))))
+
+(defun agent-repl-wire-encode-select-feed-row-clear (_value)
+  "Encode the empty SelectFeedRowClear.  Presence IS the dismissal."
+  nil)
+
+(defun agent-repl-wire-encode-select-feed-row-request-workspace (ref)
+  "Encode SelectFeedRowRequest's `workspace' use site from REF."
   (agent-repl-wire-encode-workspace-ref ref))
 
-(defun agent-repl-wire-encode-select-response-request (request)
-  "Encode SelectResponseRequest from plist REQUEST (:workspace REF :direction K).
+(defun agent-repl-wire-encode-select-feed-row-request-move (value)
+  "Encode SelectFeedRowRequest's `move' oneof from VALUE.
+VALUE is (:arm KEYWORD :value V), KEYWORD one of `:response' and `:prompt'
+\(V a step plist) and `:clear' (V nil)."
+  (agent-repl-wire-verbs--encode-oneof
+   "SelectFeedRowRequest" "move" value
+   (list (list :response 'response #'agent-repl-wire-encode-select-feed-row-step)
+         (list :prompt 'prompt #'agent-repl-wire-encode-select-feed-row-step)
+         (list :clear 'clear #'agent-repl-wire-encode-select-feed-row-clear))))
+
+(defun agent-repl-wire-encode-select-feed-row-request (request)
+  "Encode SelectFeedRowRequest from plist REQUEST (:workspace REF :move MOVE).
 Both are required: the workspace is the daemon-minted echo token naming
-WHICH workspace's cursor to move, and the direction says which way (or to
-clear).  An incomplete request errors here rather than reaching the wire."
-  (let ((message "SelectResponseRequest"))
+WHICH workspace's selection to change, and the move says what to do to
+it.  An incomplete request errors here rather than reaching the wire."
+  (let ((message "SelectFeedRowRequest"))
     (list (cons 'workspace
-                (agent-repl-wire-encode-select-response-request-workspace
+                (agent-repl-wire-encode-select-feed-row-request-workspace
                  (agent-repl-wire-verbs--require message "workspace"
                                                   (plist-get request :workspace))))
-          (cons 'direction
-                (agent-repl-wire-encode-select-response-direction
-                 (agent-repl-wire-verbs--require message "direction"
-                                                  (plist-get request :direction)))))))
+          (agent-repl-wire-encode-select-feed-row-request-move
+           (agent-repl-wire-verbs--require message "move" (plist-get request :move))))))
 
-(defun agent-repl-wire-decode-select-response-success-selected (json)
-  "Decode SelectResponseSuccess's `selected' use site from JSON."
-  (agent-repl-wire-decode-feed-id json))
+(defun agent-repl-wire-decode-feed-selection-row (message json)
+  "Decode the selected-row MESSAGE (`FeedSelectionResponse' or
+`FeedSelectionPrompt') from JSON into (:row FEEDID).  The row is REQUIRED:
+a selection that names no row is a contract breach."
+  (let ((cell nil))
+    (agent-repl-wire-verbs--check-keys message json '(row))
+    (setq cell (assq 'row json))
+    (unless (and cell (not (eq (cdr cell) :null)))
+      (agent-repl-wire-verbs--fail message "row" "required field is unset"))
+    (list :row (agent-repl-wire-decode-feed-id (cdr cell)))))
 
-(defun agent-repl-wire-decode-select-response-success (json)
-  "Decode SelectResponseSuccess from JSON into (:selected FEEDID-or-nil).
-`selected' is OPTIONAL: unset is `none' — a CLEAR, or a workspace with no
-selectable final-response rows — and nil is exactly that fact."
-  (let ((message "SelectResponseSuccess")
+(defun agent-repl-wire-decode-feed-selection-none (json)
+  "Decode FeedSelectionNone from JSON into (:viewport (:arm ARM :value nil)).
+ARM is `:return-to-tail' or `:stay'; exactly one is set."
+  (let ((message "FeedSelectionNone"))
+    (agent-repl-wire-verbs--check-keys message json '(returnToTail stay))
+    (list :viewport
+          (agent-repl-wire-verbs--decode-oneof
+           message "viewport" json
+           (list (list 'returnToTail :return-to-tail
+                       (lambda (v) (agent-repl-wire-verbs--decode-empty
+                                    "FeedSelectionNoneReturnToTail" v)))
+                 (list 'stay :stay
+                       (lambda (v) (agent-repl-wire-verbs--decode-empty
+                                    "FeedSelectionNoneStay" v))))))))
+
+(defun agent-repl-wire-decode-feed-selection (json)
+  "Decode frontend.v1.FeedSelection from JSON into (:arm ARM :value V).
+ARM is `:none' (V the none plist), `:response' or `:prompt' (V (:row ID))."
+  (let ((message "FeedSelection"))
+    (agent-repl-wire-verbs--check-keys message json '(none response prompt))
+    (agent-repl-wire-verbs--decode-oneof
+     message "selection" json
+     (list (list 'none :none #'agent-repl-wire-decode-feed-selection-none)
+           (list 'response :response
+                 (lambda (v) (agent-repl-wire-decode-feed-selection-row
+                              "FeedSelectionResponse" v)))
+           (list 'prompt :prompt
+                 (lambda (v) (agent-repl-wire-decode-feed-selection-row
+                              "FeedSelectionPrompt" v)))))))
+
+(defun agent-repl-wire-decode-select-feed-row-success-selected (json)
+  "Decode SelectFeedRowSuccessSelected from JSON into (:selection SEL).
+The selection is REQUIRED: a selected outcome names what is selected."
+  (let ((message "SelectFeedRowSuccessSelected")
         (cell nil))
-    (agent-repl-wire-verbs--check-keys message json '(selected))
-    (setq cell (assq 'selected json))
-    (list :selected
-          (when (and cell (not (eq (cdr cell) :null)))
-            (agent-repl-wire-decode-select-response-success-selected (cdr cell))))))
+    (agent-repl-wire-verbs--check-keys message json '(selection))
+    (setq cell (assq 'selection json))
+    (unless (and cell (not (eq (cdr cell) :null)))
+      (agent-repl-wire-verbs--fail message "selection" "required field is unset"))
+    (list :selection (agent-repl-wire-decode-feed-selection (cdr cell)))))
 
-(defun agent-repl-wire-decode-select-response-unknown-workspace (json)
-  "Decode SelectResponseUnknownWorkspace from JSON.  Empty: the workspace id is
-not in the daemon's registry."
-  (agent-repl-wire-verbs--decode-empty "SelectResponseUnknownWorkspace" json))
+(defun agent-repl-wire-decode-select-feed-row-success (json)
+  "Decode SelectFeedRowSuccess from JSON into (:outcome (:arm ARM :value V)).
+ARM is `:selected' (V (:selection SEL)), `:nothing-selectable' or `:none'
+\(V nil).  THE ARM IS THE OUTCOME, so an unset outcome is a contract breach."
+  (let ((message "SelectFeedRowSuccess"))
+    (agent-repl-wire-verbs--check-keys message json '(selected nothingSelectable none))
+    (list :outcome
+          (agent-repl-wire-verbs--decode-oneof
+           message "outcome" json
+           (list (list 'selected :selected
+                       #'agent-repl-wire-decode-select-feed-row-success-selected)
+                 (list 'nothingSelectable :nothing-selectable
+                       (lambda (v) (agent-repl-wire-verbs--decode-empty
+                                    "SelectFeedRowSuccessNothingSelectable" v)))
+                 (list 'none :none
+                       (lambda (v) (agent-repl-wire-verbs--decode-empty
+                                    "SelectFeedRowSuccessNone" v))))))))
 
-(defun agent-repl-wire-decode-select-response-workspace-ref-mismatch (json)
-  "Decode SelectResponseWorkspaceRefMismatch from JSON into a plist
-(`:registry-dir').  The echoed dir disagrees with the registry's dir for
-this id."
-  (let ((message "SelectResponseWorkspaceRefMismatch"))
+(defun agent-repl-wire-decode-select-feed-row-workspace-ref-mismatch (json)
+  "Decode SelectFeedRowWorkspaceRefMismatch from JSON into (:registry-dir).
+The echoed dir disagrees with the registry's dir for this id."
+  (let ((message "SelectFeedRowWorkspaceRefMismatch"))
     (agent-repl-wire-verbs--check-keys message json '(registryDir))
     (list :registry-dir (agent-repl-wire-verbs--decode-string
                          message 'registryDir json))))
 
-(defun agent-repl-wire-decode-select-response-transferring-away (json)
-  "Decode SelectResponseTransferringAway from JSON into a plist (`:address').
+(defun agent-repl-wire-decode-select-feed-row-transferring-away (json)
+  "Decode SelectFeedRowTransferringAway from JSON into (:address).
 This daemon released the workspace to a successor; dial `address'."
-  (let ((message "SelectResponseTransferringAway"))
+  (let ((message "SelectFeedRowTransferringAway"))
     (agent-repl-wire-verbs--check-keys message json '(address))
     (list :address (agent-repl-wire-verbs--decode-string
                     message 'address json))))
 
-(defun agent-repl-wire-decode-select-response-not-yet-adopted (json)
-  "Decode SelectResponseNotYetAdopted from JSON.  Empty: a joining daemon has
-not finished adopting this workspace yet."
-  (agent-repl-wire-verbs--decode-empty "SelectResponseNotYetAdopted" json))
-
-(defun agent-repl-wire-decode-select-response-error-unknown-workspace (json)
-  "Decode SelectResponseError's `unknown_workspace' cause arm from JSON."
-  (agent-repl-wire-decode-select-response-unknown-workspace json))
-
-(defun agent-repl-wire-decode-select-response-error-workspace-ref-mismatch (json)
-  "Decode SelectResponseError's `workspace_ref_mismatch' cause arm from JSON."
-  (agent-repl-wire-decode-select-response-workspace-ref-mismatch json))
-
-(defun agent-repl-wire-decode-select-response-error-transferring-away (json)
-  "Decode SelectResponseError's `transferring_away' cause arm from JSON."
-  (agent-repl-wire-decode-select-response-transferring-away json))
-
-(defun agent-repl-wire-decode-select-response-error-not-yet-adopted (json)
-  "Decode SelectResponseError's `not_yet_adopted' cause arm from JSON."
-  (agent-repl-wire-decode-select-response-not-yet-adopted json))
-
-(defun agent-repl-wire-decode-select-response-error (json)
-  "Decode SelectResponseError from JSON into (:cause (:arm ARM :value V)).
+(defun agent-repl-wire-decode-select-feed-row-error (json)
+  "Decode SelectFeedRowError from JSON into (:cause (:arm ARM :value V)).
 THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an arm
 this codec does not know is refused as an unknown field."
-  (let ((message "SelectResponseError"))
+  (let ((message "SelectFeedRowError"))
     (agent-repl-wire-verbs--check-keys
      message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted))
     (list :cause
           (agent-repl-wire-verbs--decode-oneof
            message "cause" json
            (list (list 'unknownWorkspace :unknown-workspace
-                       #'agent-repl-wire-decode-select-response-error-unknown-workspace)
+                       (lambda (v) (agent-repl-wire-verbs--decode-empty
+                                    "SelectFeedRowUnknownWorkspace" v)))
                  (list 'workspaceRefMismatch :workspace-ref-mismatch
-                       #'agent-repl-wire-decode-select-response-error-workspace-ref-mismatch)
+                       #'agent-repl-wire-decode-select-feed-row-workspace-ref-mismatch)
                  (list 'transferringAway :transferring-away
-                       #'agent-repl-wire-decode-select-response-error-transferring-away)
+                       #'agent-repl-wire-decode-select-feed-row-transferring-away)
                  (list 'notYetAdopted :not-yet-adopted
-                       #'agent-repl-wire-decode-select-response-error-not-yet-adopted))))))
+                       (lambda (v) (agent-repl-wire-verbs--decode-empty
+                                    "SelectFeedRowNotYetAdopted" v))))))))
 
-(defun agent-repl-wire-decode-select-response-response-success (json)
-  "Decode SelectResponseResponse's `success' arm from JSON."
-  (agent-repl-wire-decode-select-response-success json))
-
-(defun agent-repl-wire-decode-select-response-response-error (json)
-  "Decode SelectResponseResponse's `error' arm from JSON."
-  (agent-repl-wire-decode-select-response-error json))
-
-(defun agent-repl-wire-decode-select-response-response (json)
-  "Decode SelectResponseResponse from JSON into (:arm ARM :value V)."
+(defun agent-repl-wire-decode-select-feed-row-response (json)
+  "Decode SelectFeedRowResponse from JSON into (:arm ARM :value V)."
   (agent-repl-wire-verbs--decode-result
-   "SelectResponseResponse" json
-   #'agent-repl-wire-decode-select-response-response-success
-   #'agent-repl-wire-decode-select-response-response-error))
+   "SelectFeedRowResponse" json
+   #'agent-repl-wire-decode-select-feed-row-success
+   #'agent-repl-wire-decode-select-feed-row-error))
 
 ;;;; ---- EditHeldPrompt -------------------------------------------------
 ;;

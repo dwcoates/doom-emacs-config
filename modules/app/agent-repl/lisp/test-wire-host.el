@@ -231,7 +231,8 @@
                       (list "{\"notificationClicked\":{}}" :notification-clicked)
                       (list "{\"transferred\":{}}" :transferred)
                       (list "{\"reloadWebapp\":{}}" :reload-webapp)
-                      (list "{\"openInEditor\":{\"path\":\"/w/a.el\"}}" :open-in-editor)))
+                      (list "{\"openInEditor\":{\"path\":\"/w/a.el\"}}" :open-in-editor)
+                      (list "{\"selection\":{\"none\":{}}}" :selection)))
     (should (equal (plist-get (agent-repl-test-wire-host--decode
                                #'agent-repl-wire-decode-watch-host-workspace-response
                                (nth 0 case))
@@ -281,6 +282,50 @@
                   #'agent-repl-wire-decode-host-open-in-editor
                   "{\"path\":\"/w/a.el\",\"column\":3}")
                  '("HostOpenInEditor" column "unknown field"))))
+
+;;;; ---- The selection push ----
+
+(ert-deftest agent-repl-test-wire-host-selection-none-decodes-to-its-kind ()
+  "Nothing selected decodes to the `:none' kind."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-watch-host-workspace-response
+                  "{\"selection\":{\"none\":{}}}")
+                 '(:arm :selection :value :none))))
+
+(ert-deftest agent-repl-test-wire-host-selection-response-decodes-to-its-kind ()
+  "A selected final response decodes to the `:response' kind."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-host-workspace-selection
+                  "{\"response\":{}}")
+                 :response)))
+
+(ert-deftest agent-repl-test-wire-host-selection-prompt-decodes-to-its-kind ()
+  "A selected prompt decodes to the `:prompt' kind."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-host-workspace-selection
+                  "{\"prompt\":{}}")
+                 :prompt)))
+
+(ert-deftest agent-repl-test-wire-host-selection-unset-is-a-breach ()
+  "A selection push naming no kind is a contract breach."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-host-workspace-selection "{}")
+                 '("HostWorkspaceSelection" selection "oneof is unset"))))
+
+(ert-deftest agent-repl-test-wire-host-selection-refuses-a-row ()
+  "The kind arms are empty: a row riding one is refused, not ignored."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-host-workspace-selection
+                  "{\"response\":{\"row\":{\"value\":\"r1\"}}}")
+                 '("HostWorkspaceSelectionResponse" row "unknown field"))))
+
+(ert-deftest agent-repl-test-wire-host-selection-arms-pinned ()
+  "The selection push's arms are exactly what the frozen schema declares."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_watch_host_workspace.pb.go"
+                        "HostWorkspaceSelection")
+                       #'string<)
+                 '("none" "prompt" "response"))))
 
 ;;;; ---- The notification click push ----
 
@@ -785,7 +830,7 @@ composer and vendor_info arms together."
                         "WatchHostWorkspaceResponse")
                        #'string<)
                  (sort (list "host" "transferred" "reloadWebapp"
-                             "openInEditor" "ending" "notificationClicked")
+                             "openInEditor" "ending" "notificationClicked" "selection")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-host-host-ending-decodes-to-its-arm ()
