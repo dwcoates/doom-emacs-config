@@ -114,6 +114,12 @@ would abort the very branch a test is asserting."
     ("SelectFeedRow" agent-repl-rpc-select-feed-row
      agent-repl-wire-encode-select-feed-row-request
      agent-repl-wire-decode-select-feed-row-response)
+    ("PlanRollback" agent-repl-rpc-plan-rollback
+     agent-repl-wire-encode-plan-rollback-request
+     agent-repl-wire-decode-plan-rollback-response)
+    ("RollBack" agent-repl-rpc-roll-back
+     agent-repl-wire-encode-roll-back-request
+     agent-repl-wire-decode-roll-back-response)
     ("AdjustFeedTextScale" agent-repl-rpc-adjust-feed-text-scale
      agent-repl-wire-encode-adjust-feed-text-scale-request
      agent-repl-wire-decode-adjust-feed-text-scale-response)

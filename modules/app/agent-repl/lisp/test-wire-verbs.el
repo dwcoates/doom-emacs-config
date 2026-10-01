@@ -3301,6 +3301,261 @@ Emacs spells three of them; `leftView' is the webapp's alone."
                        #'string<)
                  '("returnToTail" "stay"))))
 
+;;;; ---- PlanRollback -----------------------------------------------------
+
+(defun agent-repl-test-wire-verbs--plan-response (plan-json)
+  "Decode a PlanRollback success carrying PLAN-JSON as its plan."
+  (agent-repl-wire-decode-plan-rollback-response
+   (agent-repl-test-wire-verbs--parse
+    (concat "{\"success\":{\"plan\":" plan-json "}}"))))
+
+(defun agent-repl-test-wire-verbs--plan (plan-json)
+  "Return the decoded plan plist out of PLAN-JSON."
+  (plist-get (plist-get (plist-get (agent-repl-test-wire-verbs--plan-response plan-json)
+                                   :value)
+                        :outcome)
+             :value))
+
+(defconst agent-repl-test-wire-verbs--minimal-plan
+  "{\"token\":{\"value\":\"tok-1\"},\"target\":{\"latest\":{},\"excerpt\":\"fix it\",\"promptsDropped\":1},\"files\":{\"kept\":{}}}"
+  "A plan with nothing optional set.")
+
+(ert-deftest agent-repl-test-wire-verbs-plan-rollback-keep-files-request-shape ()
+  "Keeping files rides the empty `keepFiles' arm."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (json-serialize
+                    (agent-repl-wire-encode-plan-rollback-request
+                     (list :workspace agent-repl-test-wire-verbs--ref
+                           :files '(:arm :keep-files :value nil))))
+                   "{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"},\"keepFiles\":{}}"))))
+
+(ert-deftest agent-repl-test-wire-verbs-plan-rollback-restore-files-request-shape ()
+  "Restoring files rides the empty `restoreFiles' arm."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (json-serialize
+                    (agent-repl-wire-encode-plan-rollback-request
+                     (list :workspace agent-repl-test-wire-verbs--ref
+                           :files '(:arm :restore-files :value nil))))
+                   "{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"},\"restoreFiles\":{}}"))))
+
+(ert-deftest agent-repl-test-wire-verbs-plan-rollback-missing-files-refused ()
+  "The files choice is REQUIRED."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-encode-plan-rollback-request
+                   (list :workspace agent-repl-test-wire-verbs--ref))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-plan-rollback-files-arms-pinned ()
+  "PlanRollbackRequest's files oneof has exactly the arms encoded here."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_plan_rollback.pb.go" "PlanRollbackRequest")
+                       #'string<)
+                 '("keepFiles" "restoreFiles"))))
+
+(ert-deftest agent-repl-test-wire-verbs-plan-rollback-nothing-to-roll-back ()
+  "Nothing reachable decodes as the empty outcome arm."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-plan-rollback-response
+                    (agent-repl-test-wire-verbs--parse "{\"success\":{\"nothingToRollBack\":{}}}"))
+                   '(:arm :success :value (:outcome (:arm :nothing-to-roll-back :value nil)))))))
+
+(ert-deftest agent-repl-test-wire-verbs-plan-rollback-minimal-plan ()
+  "A plan with nothing optional decodes every field, the optionals nil."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-test-wire-verbs--plan agent-repl-test-wire-verbs--minimal-plan)
+                   '(:token (:value "tok-1")
+                     :target (:chosen :latest :excerpt "fix it" :prompts-dropped 1)
+                     :files (:arm :kept :value nil)
+                     :interrupt nil
+                     :drop-queued nil)))))
+
+(ert-deftest agent-repl-test-wire-verbs-plan-rollback-selected-target ()
+  "A selected target decodes to `:selected'."
+  (agent-repl-test-wire-verbs--with-common
+    (should (eq (plist-get (plist-get (agent-repl-test-wire-verbs--plan
+                                       "{\"token\":{\"value\":\"t\"},\"target\":{\"selected\":{},\"excerpt\":\"x\",\"promptsDropped\":3},\"files\":{\"kept\":{}}}")
+                                      :target)
+                           :chosen)
+                :selected))))
+
+(ert-deftest agent-repl-test-wire-verbs-plan-rollback-interrupt-presence-is-t ()
+  "The empty `interrupt' message decodes to t when present."
+  (agent-repl-test-wire-verbs--with-common
+    (should (eq (plist-get (agent-repl-test-wire-verbs--plan
+                            "{\"token\":{\"value\":\"t\"},\"target\":{\"latest\":{}},\"files\":{\"kept\":{}},\"interrupt\":{}}")
+                           :interrupt)
+                t))))
+
+(ert-deftest agent-repl-test-wire-verbs-plan-rollback-drop-queued-count ()
+  "Queued prompts to drop carry their count."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (plist-get (agent-repl-test-wire-verbs--plan
+                               "{\"token\":{\"value\":\"t\"},\"target\":{\"latest\":{}},\"files\":{\"kept\":{}},\"dropQueued\":{\"prompts\":2}}")
+                              :drop-queued)
+                   '(:prompts 2)))))
+
+(ert-deftest agent-repl-test-wire-verbs-plan-rollback-restored-with-cancel-detached ()
+  "Restoring files carries the detached work it stops."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (plist-get (agent-repl-test-wire-verbs--plan
+                               "{\"token\":{\"value\":\"t\"},\"target\":{\"latest\":{}},\"files\":{\"restored\":{\"cancelDetached\":{\"items\":4}}}}")
+                              :files)
+                   '(:arm :restored :value (:cancel-detached (:items 4)))))))
+
+(ert-deftest agent-repl-test-wire-verbs-plan-rollback-restored-without-cancel-detached ()
+  "Restoring files with no detached work leaves cancel-detached nil."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (plist-get (agent-repl-test-wire-verbs--plan
+                               "{\"token\":{\"value\":\"t\"},\"target\":{\"latest\":{}},\"files\":{\"restored\":{}}}")
+                              :files)
+                   '(:arm :restored :value (:cancel-detached nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-plan-rollback-missing-token-refused ()
+  "A plan without a token cannot be confirmed: a contract breach."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-test-wire-verbs--plan
+                   "{\"target\":{\"latest\":{}},\"files\":{\"kept\":{}}}")
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-plan-rollback-empty-token-refused ()
+  "An empty token value is a contract breach."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-test-wire-verbs--plan
+                   "{\"token\":{},\"target\":{\"latest\":{}},\"files\":{\"kept\":{}}}")
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-plan-rollback-target-unset-chosen-refused ()
+  "A target that says neither selected nor latest is a contract breach."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-test-wire-verbs--plan
+                   "{\"token\":{\"value\":\"t\"},\"target\":{\"excerpt\":\"x\"},\"files\":{\"kept\":{}}}")
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-plan-rollback-error-arms ()
+  "Every PlanRollback refusal arm decodes to its keyword and payload."
+  (agent-repl-test-wire-verbs--with-common
+    (dolist (case '(("{\"unknownWorkspace\":{}}" (:arm :unknown-workspace :value nil))
+                    ("{\"workspaceRefMismatch\":{\"registryDir\":\"/w/real\"}}"
+                     (:arm :workspace-ref-mismatch :value (:registry-dir "/w/real")))
+                    ("{\"transferringAway\":{\"address\":\"127.0.0.1:9\"}}"
+                     (:arm :transferring-away :value (:address "127.0.0.1:9")))
+                    ("{\"notYetAdopted\":{}}" (:arm :not-yet-adopted :value nil))))
+      (should (equal (agent-repl-wire-decode-plan-rollback-response
+                      (agent-repl-test-wire-verbs--parse
+                       (concat "{\"error\":" (car case) "}")))
+                     (list :arm :error :value (list :cause (cadr case))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-plan-rollback-error-arms-pinned ()
+  "PlanRollbackError's cause oneof has exactly the arms decoded here."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_plan_rollback.pb.go" "PlanRollbackError")
+                       #'string<)
+                 '("notYetAdopted" "transferringAway" "unknownWorkspace" "workspaceRefMismatch"))))
+
+(ert-deftest agent-repl-test-wire-verbs-plan-rollback-outcome-arms-pinned ()
+  "PlanRollbackSuccess's outcome oneof has exactly the arms decoded here."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_plan_rollback.pb.go" "PlanRollbackSuccess")
+                       #'string<)
+                 '("nothingToRollBack" "plan"))))
+
+;;;; ---- RollBack ---------------------------------------------------------
+
+(ert-deftest agent-repl-test-wire-verbs-roll-back-request-echoes-the-token ()
+  "The plan's token goes back verbatim beside the workspace ref."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (json-serialize
+                    (agent-repl-wire-encode-roll-back-request
+                     (list :workspace agent-repl-test-wire-verbs--ref
+                           :token (plist-get (agent-repl-test-wire-verbs--plan
+                                              agent-repl-test-wire-verbs--minimal-plan)
+                                             :token))))
+                   "{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"},\"token\":{\"value\":\"tok-1\"}}"))))
+
+(ert-deftest agent-repl-test-wire-verbs-roll-back-missing-token-refused ()
+  "The token is REQUIRED."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-encode-roll-back-request
+                   (list :workspace agent-repl-test-wire-verbs--ref))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-roll-back-empty-token-refused ()
+  "An empty token is never sent."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-encode-roll-back-request
+                   (list :workspace agent-repl-test-wire-verbs--ref :token '(:value "")))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-roll-back-success-carries-the-prompt ()
+  "The rolled-back prompt decodes through the UserSaid codec."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-roll-back-response
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"success\":{\"prompt\":{\"content\":{\"blocks\":[{\"text\":{\"text\":\"hi\"}},{\"image\":{\"path\":{\"path\":\"/i.png\"},\"mediaType\":\"image/png\"}}]}}}}"))
+                   '(:arm :success
+                     :value (:prompt (:content (:blocks ((:arm :text :value (:text "hi"))
+                                                         (:arm :image
+                                                          :value (:location (:arm :path :value (:path "/i.png"))
+                                                                  :media-type "image/png")))))
+                             :files-restored nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-roll-back-success-files-restored ()
+  "A restore carries how many files it changed back."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (plist-get (plist-get (agent-repl-wire-decode-roll-back-response
+                                          (agent-repl-test-wire-verbs--parse
+                                           "{\"success\":{\"prompt\":{\"content\":{}},\"filesRestored\":{\"files\":3}}}"))
+                                         :value)
+                              :files-restored)
+                   '(:files 3)))))
+
+(ert-deftest agent-repl-test-wire-verbs-roll-back-success-without-prompt-refused ()
+  "The prompt is REQUIRED on a success."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-roll-back-response
+                   (agent-repl-test-wire-verbs--parse "{\"success\":{}}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-roll-back-error-arms ()
+  "Every RollBack refusal arm decodes to its keyword and payload."
+  (agent-repl-test-wire-verbs--with-common
+    (dolist (case '(("{\"unknownWorkspace\":{}}" (:arm :unknown-workspace :value nil))
+                    ("{\"workspaceRefMismatch\":{\"registryDir\":\"/w/real\"}}"
+                     (:arm :workspace-ref-mismatch :value (:registry-dir "/w/real")))
+                    ("{\"transferringAway\":{\"address\":\"127.0.0.1:9\"}}"
+                     (:arm :transferring-away :value (:address "127.0.0.1:9")))
+                    ("{\"notYetAdopted\":{}}" (:arm :not-yet-adopted :value nil))
+                    ("{\"planStale\":{}}" (:arm :plan-stale :value nil))
+                    ("{\"noSession\":{}}" (:arm :no-session :value nil))
+                    ("{\"promptNotRecorded\":{}}" (:arm :prompt-not-recorded :value nil))
+                    ("{\"firstPrompt\":{}}" (:arm :first-prompt :value nil))
+                    ("{\"unseenPrompt\":{}}" (:arm :unseen-prompt :value nil))
+                    ("{\"vendorRefused\":{\"vendorMessage\":\"no\"}}"
+                     (:arm :vendor-refused :value (:vendor-message "no")))
+                    ("{\"filesNotRestorable\":{\"vendorMessage\":\"gone\"}}"
+                     (:arm :files-not-restorable :value (:vendor-message "gone")))))
+      (should (equal (agent-repl-wire-decode-roll-back-response
+                      (agent-repl-test-wire-verbs--parse
+                       (concat "{\"error\":" (car case) "}")))
+                     (list :arm :error :value (list :cause (cadr case))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-roll-back-error-unset-refused ()
+  "THE ARM IS WHY: an error naming no cause is a contract breach."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-roll-back-response
+                   (agent-repl-test-wire-verbs--parse "{\"error\":{}}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-roll-back-error-arms-pinned ()
+  "RollBackError's cause oneof has exactly the arms decoded here."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_roll_back.pb.go" "RollBackError")
+                       #'string<)
+                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway"
+                             "notYetAdopted" "planStale" "noSession" "promptNotRecorded"
+                             "firstPrompt" "unseenPrompt" "vendorRefused" "filesNotRestorable")
+                       #'string<))))
+
 ;;;; ---- EditHeldPrompt ------------------------------------------------------
 
 (defconst agent-repl-test-wire-verbs--edit-said '(:text "fixed")

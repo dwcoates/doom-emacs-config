@@ -42,8 +42,8 @@
 (declare-function agent-repl--input-buffer "input" (ws))
 (declare-function agent-repl--read-input-buffer "input" (ws))
 (declare-function agent-repl--input-restore "input" (ws snapshot))
-(declare-function agent-repl-input-attach-image "input" (path media-type))
-(declare-function agent-repl--image-insert-marker "clipboard-image" (path &optional ws))
+(declare-function agent-repl--input-said-attachments "input" (said))
+(declare-function agent-repl--input-fill-said "input" (ws buf said attachments))
 (declare-function agent-repl--history-push "history" (&optional text))
 (declare-function agent-repl--history-reset "history" ())
 (declare-function agent-repl--history-save "history" (&optional ws))
@@ -52,8 +52,6 @@
 (declare-function agent-repl-verbs--conn "verbs" (&optional ws))
 (declare-function agent-repl-verbs--send "verbs" (rpc conn request &rest keys))
 (declare-function agent-repl-verbs--refusal-arm "verbs" (value))
-(defvar agent-repl--history-navigating)
-(defvar agent-repl-input-attachments)
 (defvar agent-repl-verbs--handover-arms)
 
 (defconst agent-repl-held-edit-indicator "editing held prompt"
@@ -89,33 +87,6 @@ edit is about THIS composer's contents.")
 
 ;;;; ---- Entering and leaving -------------------------------------------
 
-(defun agent-repl--held-edit-text (said)
-  "Return the words of SAID, its text blocks joined in order."
-  (mapconcat (lambda (block) (plist-get (plist-get block :value) :text))
-             (cl-remove-if-not (lambda (block) (eq (plist-get block :arm) :text))
-                               (plist-get (plist-get said :content) :blocks))
-             "\n"))
-
-(defun agent-repl--held-edit-images (said)
-  "Return SAID's image blocks as composer attachments, or `:unrepresentable'.
-A composer attachment is a host PATH; an image by URL, or a block this
-schema does not model, cannot be put into the composer at all."
-  (let ((attachments nil)
-        (unrepresentable nil))
-    (dolist (block (plist-get (plist-get said :content) :blocks))
-      (pcase (plist-get block :arm)
-        (:text nil)
-        (:image
-         (let* ((image (plist-get block :value))
-                (location (plist-get image :location)))
-           (if (eq (plist-get location :arm) :path)
-               (push (list :path (plist-get (plist-get location :value) :path)
-                           :media-type (plist-get image :media-type))
-                     attachments)
-             (setq unrepresentable t))))
-        (_ (setq unrepresentable t))))
-    (if unrepresentable :unrepresentable (nreverse attachments))))
-
 (defun agent-repl--held-edit-save-draft (ws buf)
   "Save BUF's standing draft for WS to history, exactly as a send saves it.
 `agent-repl--history-push' skips a blank draft, so only non-whitespace
@@ -127,20 +98,6 @@ words are recorded.  Returns non-nil when the draft was non-blank."
     (agent-repl--history-save ws)
     (not (string-empty-p (string-trim raw)))))
 
-(defun agent-repl--held-edit-fill (ws buf said attachments)
-  "Replace BUF's contents with SAID's words and ATTACHMENTS, for WS."
-  (with-current-buffer buf
-    (let ((agent-repl--history-navigating t))
-      (erase-buffer)
-      (insert (agent-repl--held-edit-text said))
-      (setq agent-repl-input-attachments nil)
-      (dolist (attachment attachments)
-        (goto-char (point-max))
-        (agent-repl-input-attach-image (plist-get attachment :path)
-                                       (plist-get attachment :media-type))
-        (agent-repl--image-insert-marker (plist-get attachment :path) ws))
-      (goto-char (point-max)))))
-
 (defun agent-repl--held-edit-enter (ws edit)
   "Take EDIT, WS's new standing held-prompt edit, into the composer.
 The standing draft goes to history first; then the composer is replaced
@@ -149,7 +106,13 @@ composer to edit in, or content no composer can hold, the edit is
 cancelled, said, and logged, rather than left claimed by nobody."
   (let* ((buf (agent-repl--input-buffer ws))
          (said (plist-get edit :said))
-         (attachments (agent-repl--held-edit-images said))
+         (images (agent-repl--input-said-attachments said))
+         ;; An attachment the composer cannot hold makes the whole content
+         ;; unholdable: an edit that silently lost an image would commit
+         ;; the prompt without it.
+         (attachments (if (> (plist-get images :dropped) 0)
+                          :unrepresentable
+                        (plist-get images :attachments)))
          (turn (plist-get (plist-get edit :turn) :value)))
     (cond
      ((null buf)
@@ -162,7 +125,7 @@ cancelled, said, and logged, rather than left claimed by nobody."
       (agent-repl--held-edit-send ws (plist-get edit :turn) '(:arm :cancel :value nil) "cancel"))
      (t
       (let ((saved (agent-repl--held-edit-save-draft ws buf)))
-        (agent-repl--held-edit-fill ws buf said attachments)
+        (agent-repl--input-fill-said ws buf said attachments)
         (with-current-buffer buf
           (setq agent-repl--held-edit (list :turn (plist-get edit :turn) :edit (plist-get edit :edit)))
           (unless (member agent-repl--held-edit-mode-line-spec mode-line-format)

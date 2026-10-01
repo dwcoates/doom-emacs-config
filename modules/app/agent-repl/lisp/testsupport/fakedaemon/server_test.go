@@ -116,6 +116,48 @@ func TestDefaultSubmitPromptCarriesATurnId(t *testing.T) {
 	}
 }
 
+func TestDefaultPlanRollbackCarriesAToken(t *testing.T) {
+	// Arrange.
+	_, baseURL := newTestServer(t)
+	client := newTestClient(t, baseURL)
+
+	// Act.
+	resp, err := client.PlanRollback(context.Background(),
+		connect.NewRequest(&agentreplv1.PlanRollbackRequest{
+			Workspace: &workspaceRef,
+			Files:     &agentreplv1.PlanRollbackRequest_KeepFiles{KeepFiles: &agentreplv1.PlanRollbackKeepFiles{}},
+		}))
+	if err != nil {
+		t.Fatalf("PlanRollback: %v", err)
+	}
+
+	// Assert: the token is daemon-minted and a client refuses an empty one.
+	if resp.Msg.GetSuccess().GetPlan().GetToken().GetValue() == "" {
+		t.Fatalf("PlanRollback default is %v, want success.plan.token.value set", resp.Msg)
+	}
+}
+
+func TestDefaultRollBackIsSuccess(t *testing.T) {
+	// Arrange.
+	_, baseURL := newTestServer(t)
+	client := newTestClient(t, baseURL)
+
+	// Act.
+	resp, err := client.RollBack(context.Background(),
+		connect.NewRequest(&agentreplv1.RollBackRequest{
+			Workspace: &workspaceRef,
+			Token:     &agentreplv1.RollbackToken{Value: defaultRollbackToken},
+		}))
+	if err != nil {
+		t.Fatalf("RollBack: %v", err)
+	}
+
+	// Assert: RollBackSuccess.prompt is non-optional, so it must be present.
+	if resp.Msg.GetSuccess().GetPrompt() == nil {
+		t.Fatalf("RollBack default is %v, want success.prompt set", resp.Msg)
+	}
+}
+
 func TestScriptedResponseWinsOverTheDefault(t *testing.T) {
 	// Arrange: script the error arm the default synthesis never produces.
 	_, baseURL := newTestServer(t)

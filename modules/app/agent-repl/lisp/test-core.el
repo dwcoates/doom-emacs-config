@@ -390,6 +390,12 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
     ("history.el" agent-repl-history-search
      "[agent-repl] input history is empty"
      "answers the interactive history search")
+    ("input.el" agent-repl--input-rollback-done
+     "%s"
+     "tells the user the rollback they confirmed is done, with the files it restored")
+    ("input.el" agent-repl--input-rollback
+     "rollback: cancelled"
+     "confirms the user declined the rollback confirmation, so nothing was rolled back")
     ("input.el" agent-repl-input-selection-escape
      "%s"
      "warns, in the minibuffer, that a second consecutive command-mode escape clears the feed selection")

@@ -95,11 +95,15 @@
 (declare-function agent-repl-link-primary "agent-repl-daemon-link" ())
 (declare-function agent-repl-rpc-submit-prompt "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-select-feed-row "agent-repl-rpc" (conn request &rest keys))
+(declare-function agent-repl-rpc-plan-rollback-sync "agent-repl-rpc" (conn request &optional timeout))
+(declare-function agent-repl-rpc-roll-back "agent-repl-rpc" (conn request &rest keys))
+(declare-function agent-repl--image-insert-marker "clipboard-image" (path &optional ws))
 (declare-function agent-repl-held-edit-active-p "held-edit" (ws))
 (declare-function agent-repl-held-edit-commit "held-edit" (ws said snapshot))
 (declare-function agent-repl-held-edit-cancel "held-edit" (ws))
 (declare-function agent-repl-rpc-adjust-feed-text-scale "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-host-handle-refusal "agent-repl-host" (ws arm-plist))
+(declare-function agent-repl-host-route-handover "agent-repl-host" (ws arm slug))
 (declare-function agent-repl-interrupt-turn "agent-repl-verbs" (&optional ws))
 (declare-function agent-repl-held-ingress-write "held-ingress" (ws said origin key &optional delivery))
 (declare-function agent-repl--kickoff-prompt-summary "agent-repl-prompt-summary" (ws raw))
@@ -266,6 +270,64 @@ The standing notice first, then the held-prompt waiting line."
   (let ((buf (agent-repl--ws-get ws :input-buffer)))
     (and buf (buffer-live-p buf) buf)))
 
+(defun agent-repl--input-save-to-history (ws)
+  "Save the current composer's contents to WS's prompt history.
+THE ONE SAVE a composer makes before its contents are replaced, shared by
+the discard (`agent-repl-discard-input') and a rollback's refill
+\(`agent-repl--input-rollback-done'): push the text (a blank or repeated
+one is skipped), stop any history browsing, and persist the ring."
+  (agent-repl--history-push)
+  (agent-repl--history-reset)
+  (agent-repl--history-save ws))
+
+;;;; ---- Filling the composer from what a person said -------------------
+
+(defun agent-repl--input-said-text (said)
+  "Return the words of SAID (a decoded `UserSaid').
+Its text blocks, joined in order by newlines."
+  (mapconcat (lambda (block) (plist-get (plist-get block :value) :text))
+             (cl-remove-if-not (lambda (block) (eq (plist-get block :arm) :text))
+                               (plist-get (plist-get said :content) :blocks))
+             "\n"))
+
+(defun agent-repl--input-said-attachments (said)
+  "Return SAID's image blocks as composer attachments, and what cannot be one.
+The answer is the plist (:attachments LIST :dropped N).  A composer
+attachment is a host PATH, `(:path :media-type)'; an image by URL, or a
+block this schema does not model, cannot be put into the composer, and is
+counted in N instead."
+  (let ((attachments nil)
+        (dropped 0))
+    (dolist (block (plist-get (plist-get said :content) :blocks))
+      (pcase (plist-get block :arm)
+        (:text nil)
+        (:image
+         (let* ((image (plist-get block :value))
+                (location (plist-get image :location)))
+           (if (eq (plist-get location :arm) :path)
+               (push (list :path (plist-get (plist-get location :value) :path)
+                           :media-type (plist-get image :media-type))
+                     attachments)
+             (cl-incf dropped))))
+        (_ (cl-incf dropped))))
+    (list :attachments (nreverse attachments) :dropped dropped)))
+
+(defun agent-repl--input-fill-said (ws buf said attachments)
+  "Replace composer BUF's contents with SAID's words and ATTACHMENTS, for WS.
+ATTACHMENTS are `(:path :media-type)' plists; each is attached and its
+marker drawn, as a pasted image is."
+  (with-current-buffer buf
+    (let ((agent-repl--history-navigating t))
+      (erase-buffer)
+      (insert (agent-repl--input-said-text said))
+      (setq agent-repl-input-attachments nil)
+      (dolist (attachment attachments)
+        (goto-char (point-max))
+        (agent-repl-input-attach-image (plist-get attachment :path)
+                                       (plist-get attachment :media-type))
+        (agent-repl--image-insert-marker (plist-get attachment :path) ws))
+      (goto-char (point-max)))))
+
 (defun agent-repl-discard-input ()
   "Save current input to history, clear the buffer, and enter insert state.
 While the composer is editing a held prompt this is also the edit's
@@ -277,9 +339,7 @@ CANCEL: the held prompt keeps its content and the queue resumes
     (agent-repl--log ws "elisp.input.discard ws=%s input-len=%d" ws input-len)
     (when (agent-repl-held-edit-active-p ws)
       (agent-repl-held-edit-cancel ws))
-    (agent-repl--history-push)
-    (agent-repl--history-reset)
-    (agent-repl--history-save ws)
+    (agent-repl--input-save-to-history ws)
     (erase-buffer)
     (setq agent-repl-input-attachments nil)
     (when (fboundp 'evil-insert-state) (evil-insert-state))))
@@ -477,9 +537,14 @@ dropped just because the daemon is the authority."
                 (agent-repl--input-flash
                  ws (cdr (assq arm agent-repl--input-selection-nothing-selectable-flashes))))))
            (:error
-            (agent-repl--warn ws "elisp.input.select-feed-row-refused ws=%s move=%S cause=%S"
-                              ws move (plist-get (plist-get response :value) :cause))
-            (agent-repl--input-flash ws (format "%s: selection refused" prefix)))
+            (let ((cause (plist-get (plist-get response :value) :cause)))
+              ;; A handover arm is news, not a fault: host.el walks it.  The
+              ;; move itself did not happen, so the composer still says so.
+              (unless (agent-repl-host-route-handover
+                       ws cause "elisp.input.select-feed-row-handover-refusal")
+                (agent-repl--warn ws "elisp.input.select-feed-row-refused ws=%s move=%S cause=%S"
+                                  ws move cause))
+              (agent-repl--input-flash ws (format "%s: selection refused" prefix))))
            (other
             (agent-repl--error ws "elisp.input.select-feed-row-unknown-arm ws=%s arm=%S"
                                ws other))))
@@ -525,6 +590,205 @@ From no selected prompt it starts at the newest such prompt; past the
 newest it wraps to the oldest."
   (interactive)
   (agent-repl--input-select-step :prompt :newer))
+
+;;;; ---- Rollback (`C-c C-RET' / `C-c M-RET') -----------------------------
+;;
+;; ROLLING THE CONVERSATION BACK to just before a prompt: the selected one,
+;; or the latest (which cancels it).  The DAEMON plans it (PlanRollback):
+;; Emacs shows the plan as a y/n question in the minibuffer, its side effects
+;; in red, and on a yes hands the plan's opaque token back (RollBack).  On
+;; success the composer's contents go to its history and the composer holds
+;; the rolled-back prompt again.  `C-c C-RET' keeps the files, `C-c M-RET'
+;; restores the ones the agent's edit tools changed.
+
+(defconst agent-repl--input-rollback-refusals
+  '((:unknown-workspace . "the daemon does not know this workspace")
+    (:workspace-ref-mismatch . "the daemon holds this workspace under another directory")
+    (:transferring-away . "the workspace is moving to another daemon; press the key again")
+    (:not-yet-adopted . "the daemon is still taking this workspace over; press the key again")
+    (:plan-stale . "the conversation changed; press the key again")
+    (:no-session . "there is no running session to roll back")
+    (:prompt-not-recorded . "the conversation holds no record of that prompt")
+    (:first-prompt . "the first prompt can't be rolled back; /clear starts over")
+    (:unseen-prompt . "a later prompt the feed never showed would be dropped")
+    (:vendor-refused . "the vendor refused")
+    (:files-not-restorable . "files can't be restored to that prompt"))
+  "Each PlanRollback / RollBack refusal arm, in plain words.")
+
+(defun agent-repl--input-rollback-refusal-text (cause)
+  "Return the composer flash for the refusal CAUSE, `(:arm ARM :value V)'.
+A vendor refusal carries the vendor's own words, which are appended."
+  (let* ((arm (plist-get cause :arm))
+         (said (or (cdr (assq arm agent-repl--input-rollback-refusals))
+                   (format "refused (%S)" arm)))
+         (vendor (plist-get (plist-get cause :value) :vendor-message)))
+    (if (and vendor (not (string-empty-p vendor)))
+        (format "rollback: %s: %s" said vendor)
+      (format "rollback: %s" said))))
+
+(defun agent-repl--input-rollback-plural (n one many)
+  "Return \"N ONE\" when N is 1, else \"N MANY\"."
+  (format "%d %s" n (if (= n 1) one many)))
+
+(defun agent-repl--input-rollback-side-effects (plan)
+  "Return PLAN's side effects as sentences.
+They come in the order the confirmation lists them."
+  (let* ((files (plist-get plan :files))
+         (cancel (and (eq (plist-get files :arm) :restored)
+                      (plist-get (plist-get files :value) :cancel-detached)))
+         (queued (plist-get plan :drop-queued)))
+    (delq nil
+          (list (when (plist-get plan :interrupt)
+                  "The running turn will be interrupted.")
+                (when queued
+                  (format "%s will be dropped."
+                          (agent-repl--input-rollback-plural
+                           (plist-get queued :prompts) "queued prompt" "queued prompts")))
+                (when cancel
+                  (format "%s started since then will be stopped."
+                          (agent-repl--input-rollback-plural
+                           (plist-get cancel :items)
+                           "background agent or shell" "background agents and shells")))))))
+
+(defun agent-repl--input-rollback-confirmation (plan)
+  "Return the y/n question that states PLAN, side effects in the `error' face."
+  (let* ((target (plist-get plan :target))
+         (dropped (plist-get target :prompts-dropped))
+         (head (format "%s \"%s\"%s."
+                       (if (eq (plist-get target :chosen) :selected)
+                           "Roll back to before the selected prompt"
+                         "Cancel the latest prompt")
+                       (plist-get target :excerpt)
+                       (if (> dropped 1)
+                           (format " (%d prompts are dropped)" dropped)
+                         "")))
+         (files (if (eq (plist-get (plist-get plan :files) :arm) :restored)
+                    "Files the agent's edit tools changed are restored; shell changes and git commits are not (C-c C-RET leaves files alone)."
+                  "Files are not restored (C-c M-RET restores them)."))
+         (effects (mapcar (lambda (sentence) (propertize sentence 'face 'error))
+                          (agent-repl--input-rollback-side-effects plan))))
+    (concat (mapconcat #'identity (append (list head files) effects) " ")
+            " Roll back? ")))
+
+(defun agent-repl--input-rollback-refused (ws verb cause)
+  "Log and flash WS's VERB (`plan' or `roll-back') refusal CAUSE.
+A handover arm is routed to host.el's handover walk (logged at INFO there)
+instead of logged as a refusal; the flash stands either way, because the
+rollback did not happen and the key must be pressed again."
+  (unless (agent-repl-host-route-handover
+           ws cause (format "elisp.input.rollback-%s-handover-refusal" verb))
+    (agent-repl--warn ws "elisp.input.rollback-refused ws=%s verb=%s cause=%S" ws verb cause))
+  (agent-repl--input-flash ws (agent-repl--input-rollback-refusal-text cause)))
+
+(defun agent-repl--input-rollback-failed (ws verb detail)
+  "Log and flash WS's VERB transport failure DETAIL."
+  (agent-repl--warn ws "elisp.input.rollback-failure ws=%s verb=%s detail=%S" ws verb detail)
+  (agent-repl--input-flash ws "rollback: the daemon did not answer"))
+
+(defun agent-repl--input-rollback-done (ws success)
+  "Refill WS's composer from the RollBack SUCCESS and say it is done.
+The composer's contents go to its history first, as a discard saves them;
+then it holds the rolled-back prompt's words and path attachments.  An
+image by URL (or a block the composer cannot hold) is dropped: logged at
+WARN and flashed, never silently lost."
+  (let* ((said (plist-get success :prompt))
+         (images (agent-repl--input-said-attachments said))
+         (dropped (plist-get images :dropped))
+         (restored (plist-get success :files-restored))
+         (buf (agent-repl--input-buffer ws)))
+    (if (null buf)
+        (agent-repl--warn ws "elisp.input.rollback-no-composer ws=%s" ws)
+      (with-current-buffer buf
+        (agent-repl--input-save-to-history ws))
+      (agent-repl--input-fill-said ws buf said (plist-get images :attachments)))
+    (when (> dropped 0)
+      (agent-repl--warn ws "elisp.input.rollback-attachments-dropped ws=%s count=%d" ws dropped)
+      (agent-repl--input-flash
+       ws (format "rollback: %s could not be attached and %s dropped"
+                  (agent-repl--input-rollback-plural dropped "image" "images")
+                  (if (= dropped 1) "was" "were"))))
+    (agent-repl--info ws "elisp.input.rollback-done ws=%s attachments=%d dropped=%d files-restored=%S"
+                      ws (length (plist-get images :attachments)) dropped
+                      (and restored (plist-get restored :files)))
+    (message "%s" (if restored
+                      (format "rollback: done, %s restored"
+                              (agent-repl--input-rollback-plural
+                               (plist-get restored :files) "file" "files"))
+                    "rollback: done"))))
+
+(defun agent-repl--input-rollback-perform (ws conn ref plan)
+  "Send RollBack for WS on CONN with PLAN's token, echoed verbatim."
+  (agent-repl--info ws "elisp.input.rollback-confirmed ws=%s" ws)
+  (agent-repl-rpc-roll-back
+   conn (list :workspace ref :token (plist-get plan :token))
+   :on-response
+   (lambda (response)
+     (pcase (plist-get response :arm)
+       (:success (agent-repl--input-rollback-done ws (plist-get response :value)))
+       (:error (agent-repl--input-rollback-refused
+                ws "roll-back" (plist-get (plist-get response :value) :cause)))
+       (other (agent-repl--error ws "elisp.input.rollback-unknown-arm ws=%s verb=roll-back arm=%S"
+                                 ws other))))
+   :on-failure
+   (lambda (detail) (agent-repl--input-rollback-failed ws "roll-back" detail))))
+
+(defun agent-repl--input-rollback (ws files)
+  "Plan a rollback of WS's conversation, confirm it, and perform it.
+FILES is `:keep-files' or `:restore-files'.  The plan is asked for
+synchronously, so the confirmation is read in the command loop of the key
+that asked for it."
+  (let ((ref (agent-repl-host-ref ws))
+        (conn (or (agent-repl-host-conn ws) (agent-repl-link-primary))))
+    (cond
+     ((null ref)
+      (agent-repl--warn ws "elisp.input.rollback-no-ref ws=%s files=%S" ws files)
+      (agent-repl--input-flash ws "rollback: workspace not ready"))
+     ((null conn)
+      (agent-repl--warn ws "elisp.input.rollback-no-conn ws=%s files=%S" ws files)
+      (agent-repl--input-flash ws "rollback: no daemon connection"))
+     (t
+      (agent-repl--info ws "elisp.input.rollback-plan ws=%s files=%S" ws files)
+      (let ((response
+             (condition-case err
+                 (agent-repl-rpc-plan-rollback-sync
+                  conn (list :workspace ref :files (list :arm files :value nil)))
+               (agent-repl-connect-error
+                (agent-repl--input-rollback-failed ws "plan" (cdr err))
+                nil))))
+        (when response
+          (pcase (plist-get response :arm)
+            (:success
+             (let ((outcome (plist-get (plist-get response :value) :outcome)))
+               (pcase (plist-get outcome :arm)
+                 (:nothing-to-roll-back
+                  (agent-repl--info ws "elisp.input.rollback-nothing ws=%s" ws)
+                  (agent-repl--input-flash ws "rollback: no prompt to roll back to"))
+                 (:plan
+                  (let ((plan (plist-get outcome :value)))
+                    (if (y-or-n-p (agent-repl--input-rollback-confirmation plan))
+                        (agent-repl--input-rollback-perform ws conn ref plan)
+                      (agent-repl--info ws "elisp.input.rollback-declined ws=%s" ws)
+                      (message "rollback: cancelled"))))
+                 (other
+                  (agent-repl--error ws "elisp.input.rollback-unknown-outcome ws=%s outcome=%S"
+                                     ws other)))))
+            (:error (agent-repl--input-rollback-refused
+                     ws "plan" (plist-get (plist-get response :value) :cause)))
+            (other (agent-repl--error ws "elisp.input.rollback-unknown-arm ws=%s verb=plan arm=%S"
+                                      ws other)))))))))
+
+(defun agent-repl-rollback-keep-files ()
+  "Roll the conversation back to before the selected prompt, keeping files.
+With no prompt selected, cancel the latest prompt.  Asks first."
+  (interactive)
+  (agent-repl--input-rollback (agent-repl--ws-current-name) :keep-files))
+
+(defun agent-repl-rollback-restore-files ()
+  "Roll the conversation back to before the selected prompt, restoring files.
+Only files the agent's edit tools changed are restored.  With no prompt
+selected, cancel the latest prompt.  Asks first."
+  (interactive)
+  (agent-repl--input-rollback (agent-repl--ws-current-name) :restore-files))
 
 ;; FEED TEXT ZOOM (`C-+' / `C--').  The daemon owns and persists a single
 ;; global feed text scale; Emacs only sends a DIRECTION per keypress and the
@@ -1550,6 +1814,13 @@ sits behind a harness re-read."
 ;; not collide.
 (define-key agent-repl-input-mode-map (kbd "C-S-p") #'agent-repl-prompt-select-prev)
 (define-key agent-repl-input-mode-map (kbd "C-S-n") #'agent-repl-prompt-select-next)
+
+;; ROLLBACK (`C-c C-RET' keeps files, `C-c M-RET' restores them).  Bound with
+;; `define-key' like `C-c C-k': a `C-c'-prefixed chord is not shadowed by any
+;; evil state map, so it is live in both states, and the binding is
+;; observable under `emacs -Q'.  `RET' and `C-c C-k' keep their meanings.
+(define-key agent-repl-input-mode-map (kbd "C-c C-<return>") #'agent-repl-rollback-keep-files)
+(define-key agent-repl-input-mode-map (kbd "C-c M-<return>") #'agent-repl-rollback-restore-files)
 
 (provide 'input)
 
