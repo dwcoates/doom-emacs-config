@@ -326,9 +326,41 @@ func TestAnswerQuestionSurfacesADeliveryFailure(t *testing.T) {
 func standingGate(f *fixture) {
 	f.cards.coldGate = &ServedColdGate{
 		VendorSessionID: "vendor-1",
-		Models:          []*conversationv1.AgentModel{{Name: "opus"}},
-		Scopes:          []conversationv1.SessionCompactScope{conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_ALL},
+		Compact: &ServedColdGateCompact{
+			Models: []*conversationv1.AgentModel{{Name: "opus"}},
+			Scopes: []conversationv1.SessionCompactScope{conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_ALL},
+		},
 	}
+}
+
+func TestAnswerColdGateRefusesCompactWhenTheGateOfferedNone(t *testing.T) {
+	// Arrange: a work-account gate, served with no compact menu.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.cards.coldGate = &ServedColdGate{VendorSessionID: "vendor-1"}
+	answer := &frontendv1.FeedColdGateResolved{
+		Choice: &frontendv1.FeedColdGateResolved_Compact{Compact: &frontendv1.FeedColdGateResolvedCompact{
+			Model: &frontendv1.FeedColdGateModel{Model: &conversationv1.AgentModel{Name: "opus"}},
+		}},
+	}
+
+	// Act.
+	err := f.verbs.AnswerColdGate(context.Background(), "w1", answer,
+		conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_ALL)
+
+	// Assert.
+	asRefusal(t, err, ArmUnservedRemediation)
+	if f.cards.coldGatesCleared != 0 || len(f.fleet.resumes) != 0 {
+		t.Fatalf("gates spent = %d, re-opens = %d; want the gate left standing and nothing re-opened",
+			f.cards.coldGatesCleared, len(f.fleet.resumes))
+	}
+	for _, record := range f.log.logger.Records() {
+		if record.Operation == opRefusal && record.Context["arm"] == ArmUnservedRemediation &&
+			record.Context["reason"] == "the cold gate offered no compaction for this account" {
+			return
+		}
+	}
+	t.Fatalf("no refusal record names the withheld compaction; records = %+v", f.log.logger.Records())
 }
 
 func TestAnswerColdGatePayReopensTheConversation(t *testing.T) {

@@ -300,14 +300,18 @@ func coldRemediation(log dlog.Logger, served ServedColdGate, answer *frontendv1.
 		}, nil
 	case answer.GetCompact() != nil:
 		log.Debug("daemon.workspace.transition_decision", "selected a workspace transition branch", dlog.Context{"function": "workspace", "branch": "case answer.GetCompact() != nil"})
+		if served.Compact == nil {
+			return nil, refuse(log, "AnswerColdGate", ArmUnservedRemediation,
+				"the cold gate offered no compaction for this account", false)
+		}
 		model := answer.GetCompact().GetModel().GetModel()
-		if !servedModel(served.Models, model) {
-			log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "!servedModel(served.Models, model)"})
+		if !servedModel(served.Compact.Models, model) {
+			log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "!servedModel(served.Compact.Models, model)"})
 			return nil, refuse(log, "AnswerColdGate", ArmUnservedRemediation,
 				fmt.Sprintf("the compact menu never offered the model %q", model.GetName()), false)
 		}
-		if !servedScope(served.Scopes, scope) {
-			log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "!servedScope(served.Scopes, scope)"})
+		if !servedScope(served.Compact.Scopes, scope) {
+			log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "!servedScope(served.Compact.Scopes, scope)"})
 			return nil, refuse(log, "AnswerColdGate", ArmUnservedRemediation,
 				fmt.Sprintf("the compact menu never offered the scope %s", scope), false)
 		}

@@ -484,6 +484,9 @@ func (f *Fleet) Health(ws ids.WorkspaceID) (bool, bool) {
 type coldGate struct {
 	served    ServedColdGate
 	answering bool
+	// configDir is the account root the parked session spends from, kept so
+	// a gate raised again serves the same menu.
+	configDir string
 }
 
 // ColdGate answers the menu a STANDING cold gate served, which is what the
@@ -544,11 +547,12 @@ func (f *Fleet) EndColdGate(ws ids.WorkspaceID, vendorSessionID string) {
 func (f *Fleet) ReraiseColdGate(ws ids.WorkspaceID, vendorSessionID string) bool {
 	f.mu.RLock()
 	cold := f.lastCold[ws]
+	held, stood := f.coldGates[ws]
 	f.mu.RUnlock()
-	if cold == nil {
+	if cold == nil || !stood {
 		return false
 	}
-	f.raiseColdGate(ws, vendorSessionID, cold)
+	f.raiseColdGate(ws, vendorSessionID, cold, held.configDir)
 	return true
 }
 
@@ -941,7 +945,7 @@ func (f *Fleet) start(ctx context.Context, ws ids.WorkspaceID, rebind bool) erro
 		return nil
 	}
 
-	started, err := f.startSession(ctx, log, ws, client, src, session)
+	started, err := f.startSession(ctx, log, ws, client, src, session, configDir)
 	if err != nil {
 		// A START THAT FAILED LEAVES NO SHIM OF ITS OWN SERVING. The refusal
 		// returns before anything remembers this client, so nothing else in
@@ -1111,11 +1115,12 @@ func (f *Fleet) ResumeCold(ctx context.Context, ws ids.WorkspaceID, resume ColdR
 	// opened after the call would subscribe to a fan-out that had already sent
 	// every frame it was going to send. The stream is closed the moment
 	// StartSession answers, whichever way it answered.
+	configDir := accountRootFor(f.deps.Accounts, record.Dir, previous)
 	stopPhases := f.relayCompactionPhases(ctx, log, ws, session.client, resume.OnPhase)
 	started, err := f.startSession(ctx, log, ws, session.client, source{
 		VendorSessionID: resume.VendorSessionID,
 		ColdRemediation: resume.Remediation,
-	}, previous)
+	}, previous, configDir)
 	stopPhases()
 	if err != nil {
 		return err
@@ -1128,7 +1133,6 @@ func (f *Fleet) ResumeCold(ctx context.Context, ws ids.WorkspaceID, resume ColdR
 		return refuse(log, "AnswerColdGate", ArmNoSession,
 			fmt.Sprintf("the shim refused the remediated resume of %q as cold again", ws), false)
 	}
-	configDir := accountRootFor(f.deps.Accounts, record.Dir, previous)
 	return f.sessionUp(ctx, log, ws, session.client, started, previous, configDir, hostSessionID)
 }
 
@@ -1667,8 +1671,8 @@ const DefaultStartSessionBound = 60 * time.Second
 // forgetting a call. The two conditions that are NOT failures — a cold gate,
 // which is a designed product state the user answers, and a stand-down this
 // daemon ordered — are the only ones that pass through unfiled.
-func (f *Fleet) startSession(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, client shimclient.Client, src source, session wsm.Session) (*conversationv1.SessionStarted, error) {
-	started, err := f.askToStartSession(ctx, log, ws, client, src, session)
+func (f *Fleet) startSession(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, client shimclient.Client, src source, session wsm.Session, configDir string) (*conversationv1.SessionStarted, error) {
+	started, err := f.askToStartSession(ctx, log, ws, client, src, session, configDir)
 	switch {
 	case err != nil && !errors.Is(err, shimclient.ErrStandDownOrdered):
 		f.noteSessionRefused(ctx, log, ws, err)
@@ -1681,7 +1685,7 @@ func (f *Fleet) startSession(ctx context.Context, log dlog.Logger, ws ids.Worksp
 	return started, err
 }
 
-func (f *Fleet) askToStartSession(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, client shimclient.Client, src source, session wsm.Session) (*conversationv1.SessionStarted, error) {
+func (f *Fleet) askToStartSession(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, client shimclient.Client, src source, session wsm.Session, configDir string) (*conversationv1.SessionStarted, error) {
 	req := &shimv1.StartSessionRequest{}
 	if src.Fresh {
 		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "src.Fresh"})
@@ -1740,7 +1744,7 @@ func (f *Fleet) askToStartSession(ctx context.Context, log dlog.Logger, ws ids.W
 	}
 	if failure := response.GetFailure(); failure != nil {
 		if cold := failure.GetCold(); cold != nil {
-			f.raiseColdGate(ws, src.VendorSessionID, cold)
+			f.raiseColdGate(ws, src.VendorSessionID, cold, configDir)
 			// AN ANSWER, NOT A FAILURE -- as this function's own doc says. The
 			// gate is a designed product state: the shim states the cost of
 			// resuming a large context, `raiseColdGate` publishes it to the
@@ -1831,16 +1835,12 @@ func (f *Fleet) askToStartSession(ctx context.Context, log dlog.Logger, ws ids.W
 // the cold start requested, plus the model the record holds when it differs.
 // Every scope but the unspecified one is offered, because an unspecified scope
 // is not a choice.
-func (f *Fleet) raiseColdGate(ws ids.WorkspaceID, vendorSessionID string, cold *conversationv1.SessionCold) {
-	models := []*conversationv1.AgentModel{cold.GetRequestedModel()}
-	scopes := []conversationv1.SessionCompactScope{
-		conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_ALL,
-		conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_PROMPTS,
-		conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_RESPONSES,
-	}
-	options := make([]*frontendv1.FeedColdGateModelOption, 0, len(models))
-	for _, m := range models {
-		options = append(options, &frontendv1.FeedColdGateModelOption{Model: m})
+func (f *Fleet) raiseColdGate(ws ids.WorkspaceID, vendorSessionID string, cold *conversationv1.SessionCold, configDir string) {
+	var compact *ServedColdGateCompact
+	var menu *frontendv1.FeedColdGateCompactMenu
+	offered := offersColdCompaction(f.deps.Accounts, configDir)
+	if offered {
+		compact, menu = coldCompactMenu(cold)
 	}
 
 	detail := coldGateDetail(cold)
@@ -1849,11 +1849,11 @@ func (f *Fleet) raiseColdGate(ws ids.WorkspaceID, vendorSessionID string, cold *
 	held, stood := f.coldGates[ws]
 	stood = stood && !held.answering
 	f.coldGates[ws] = coldGate{served: ServedColdGate{
-		VendorSessionID: vendorSessionID, Models: models, Scopes: scopes, Detail: detail}}
+		VendorSessionID: vendorSessionID, Compact: compact, Detail: detail}, configDir: configDir}
 	f.lastCold[ws] = cold
 	f.mu.Unlock()
 	f.logTransition(ws, "cold_gate_standing", stood, true,
-		dlog.Context{"vendor_session_id": vendorSessionID})
+		dlog.Context{"vendor_session_id": vendorSessionID, "compaction_offered": offered})
 
 	f.deps.Feed.UpsertSynthesized(ws, feedid.Feed{Root: true}, &frontendv1.FeedRow{
 		Id: coldGateRowID(ws, vendorSessionID),
@@ -1862,7 +1862,7 @@ func (f *Fleet) raiseColdGate(ws ids.WorkspaceID, vendorSessionID string, cold *
 				ContextTokens: &frontendv1.FeedColdGateContextTokens{Tokens: int64(cold.GetContextTokens())},
 				LastRequest:   &frontendv1.FeedColdGateLastRequest{AtMs: cold.GetLastRequestAtMs()},
 				Model:         &frontendv1.FeedColdGateModel{Model: cold.GetRequestedModel()},
-				Compact:       &frontendv1.FeedColdGateCompactMenu{Models: options, Scopes: scopes},
+				Compact:       menu,
 			}},
 		}},
 	})
@@ -1871,6 +1871,26 @@ func (f *Fleet) raiseColdGate(ws ids.WorkspaceID, vendorSessionID string, cold *
 		Standing:      true,
 		ContextTokens: int64(cold.GetContextTokens()),
 	})
+}
+
+// coldCompactMenu is the compact menu a gate serves: the model the cold start
+// requested, and every scope but the unspecified one, which is not a choice.
+// The served half is what the answer is echoed against; the drawn half is the
+// gate card's submenu.
+func coldCompactMenu(cold *conversationv1.SessionCold) (*ServedColdGateCompact, *frontendv1.FeedColdGateCompactMenu) {
+	served := &ServedColdGateCompact{
+		Models: []*conversationv1.AgentModel{cold.GetRequestedModel()},
+		Scopes: []conversationv1.SessionCompactScope{
+			conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_ALL,
+			conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_PROMPTS,
+			conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_RESPONSES,
+		},
+	}
+	options := make([]*frontendv1.FeedColdGateModelOption, 0, len(served.Models))
+	for _, m := range served.Models {
+		options = append(options, &frontendv1.FeedColdGateModelOption{Model: m})
+	}
+	return served, &frontendv1.FeedColdGateCompactMenu{Models: options, Scopes: served.Scopes}
 }
 
 // coldGateDetail is the ONE sentence a standing gate is accounted for by. The
