@@ -25,38 +25,23 @@
 // cannot collide with another area file's helper of the same shape (all 20
 // area files compile into one package).
 //
-// TWO RECORDS SEEN ONCE UNDER UNCAPPED `-parallel`, MEASURED AND NOT
-// REPRODUCED (2026-09-04):
-//   - `daemon.feed.response_fragment_after_settle`, from
-//     TestMergeParkedRecognizedFromLeaseState. SETTLED SINCE, AND NOT A
-//     FAULT: one block's frames reach the fold from two store planes that
-//     share an upsert key and are not ordered against one another, so the
-//     sidecar's settled `success` routinely lands between the shim's `start`
-//     and its own trailing deltas. A settled frame restates the WHOLE, so the
-//     dropped delta was already on screen. The daemon records it at DEBUG now
-//     (daemon/internal/resolve/feed/response.go), and nothing here should
-//     chase it.
-//   - an OpenFeed resolve-workspace "no such file or directory", from
-//     TestMergeBubbleCoalescesIntoOneFeedRow/self-repo. STILL A FAULT: a feed
-//     opened against a workspace path already gone is a daemon fault whenever
-//     it happens.
+// A MERGE RUNS IN THE WORKSPACE THAT ASKED FOR IT (docs/protobuf-design/
+// merge-landing.md, landed change 1): every MergeWorkspace names its source,
+// a conflict is resolved by the requesting workspace's own session, and
+// nothing parks. A merge that gives up FAILS with its area and hands the
+// workspace back. The tests here drive that contract against the real shim.
 //
-// Both were observed in a single whole-suite run left uncapped on `-parallel`
-// (one world per test, far more concurrent daemons than cores). The
-// measurement: these two were re-run at `-count=10` under `-parallel 32` and
-// `-parallel 64`, nine times over, and NEITHER appeared in any of the 180
-// executions. One run of TestMergeParkedRecognizedFromLeaseState DID fail in
-// that campaign, on a host carrying an unrelated load average near ten, and
-// did not recur in the 80 executions that followed.
-//
-// So the SECOND is real but LOAD-DEPENDENT, and its source is the daemon
-// rather than the arrangement here. This note is the evidence for whoever
-// sees it again — a warning to root-cause in the daemon, never a flake to
-// re-run past.
+// ONE RECORD SEEN ONCE UNDER UNCAPPED `-parallel`, MEASURED AND NOT
+// REPRODUCED (2026-09-04): an OpenFeed resolve-workspace "no such file or
+// directory", from TestMergeBubbleCoalescesIntoOneFeedRow/self-repo. STILL A
+// FAULT: a feed opened against a workspace path already gone is a daemon
+// fault whenever it happens. It was re-run at `-count=10` under `-parallel
+// 32` and `-parallel 64` and did not recur; this note is the evidence for
+// whoever sees it again -- a warning to root-cause in the daemon, never a
+// flake to re-run past.
 package e2e
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -155,6 +140,57 @@ func mqBranchOf(ws *workspacev1.WorkspaceRef) string {
 }
 
 func mqStrPtr(s string) *string { return &s }
+
+// mqOwnBranch is the requester's own branch, closed once it lands.
+func mqOwnBranch() *agentreplv1.MergeWorkspaceSource {
+	return &agentreplv1.MergeWorkspaceSource{Source: &agentreplv1.MergeWorkspaceSource_OwnBranch{OwnBranch: &agentreplv1.MergeWorkspaceSourceOwnBranch{}}}
+}
+
+// mqKeepOpen is the requester's own branch, its workspace kept open after it
+// lands.
+func mqKeepOpen() *agentreplv1.MergeWorkspaceSource {
+	return &agentreplv1.MergeWorkspaceSource{Source: &agentreplv1.MergeWorkspaceSource_OwnBranch{OwnBranch: &agentreplv1.MergeWorkspaceSourceOwnBranch{KeepOpen: true}}}
+}
+
+// mqMerge asks for one workspace's merge of a source and fails the test unless
+// it is enqueued.
+func mqMerge(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, source *agentreplv1.MergeWorkspaceSource) {
+	t.Helper()
+	resp, err := w.Client().MergeWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: ws, Source: source}))
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("MergeWorkspace = (%v, %v), want the merge enqueued", resp.Msg.GetResult(), err)
+	}
+}
+
+// mqAwaitLandingDeployed waits for the ONE deploy a landing in the daemon's own
+// checkout runs, so the test never ends mid-build and reads the build's kill
+// as a failed deploy (daemon/integration's awaitLandingDeployed).
+func mqAwaitLandingDeployed(t *testing.T, w *World) {
+	t.Helper()
+	w.AwaitLogRecord(w.RunLogPath(), "the landing's deploy", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.deploy.landing" && r.Message == "the landing is deployed"
+	})
+}
+
+// mqConcluded answers whether a root row is a merge bubble's terminal.
+func mqConcluded(row *frontendv1.FeedRow) bool {
+	merge := row.GetActivity().GetMerge()
+	return merge.GetError() != nil || merge.GetSuccess() != nil
+}
+
+// mqSubFeedTabs answers the merge tab rows of a bubble's sub-feed as its page
+// stands. Opened after the run's terminal, the page is the whole of it.
+func mqSubFeedTabs(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, head *frontendv1.FeedId) []*frontendv1.FeedMergeTab {
+	t.Helper()
+	rows, _ := mqOpenFeedRows(t, w, ws, head)
+	var tabs []*frontendv1.FeedMergeTab
+	for _, row := range rows {
+		if tab := row.GetMergeTab(); tab != nil {
+			tabs = append(tabs, tab)
+		}
+	}
+	return tabs
+}
 
 // mqRosterRow finds a workspace's own row anywhere in the repository
 // grouping (top-level or nested under a parent), by workspace id.
@@ -265,38 +301,36 @@ func (fw *mqFeedWatch) AwaitRow(what string, pred func(*frontendv1.FeedRow) bool
 // ---------------------------------------------------------------------------
 // #39 — MergeLeaseRefusesSubmit. daemon.md §"Queue, holds, leases — contract
 // facts": "A prompt arriving after a merge began is refused (never held)."
-// The merge lease's error-on-submit policy is exercised while the daemon's
-// own conflict-repair turn is genuinely in flight (StartTurn recorded, no
-// terminal yet) — a window with real, measurable wall-clock width because
-// the repair turn is answered by the REAL shim's default scenario, not a
-// synchronous fake-shim push. This is deliberately NOT the parked case
-// (#41): parked guidance is explicitly NOT refused, so this test's window
-// is bounded to "turn open, not yet parked."
+// Nothing parks any more, so the lease refuses for the merge's whole run. The
+// window is HELD, never raced: the workspace's configured before-merge prompt
+// parks on the fake vendor's turn gate (its text is submitted verbatim, so it
+// is exactly the gate text), and the submission arrives while it is parked.
 // ---------------------------------------------------------------------------
+
+// mqLeaseGateText is the before-merge prompt that holds the merge open.
+const mqLeaseGateText = "hold this merge open until the e2e test opens the gate"
 
 func TestMergeLeaseRefusesSubmit(t *testing.T) {
 	t.Parallel()
-	// Arrange: a workspace whose merge will hit a scripted conflict, so the
-	// daemon starts a real conflict-repair turn on it.
-	repo, _ := mqCleanRepo(t)
-	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{SelfRepo: repo.Dir}})
-	// The scripted conflict makes the no-fast-forward merge fail and opens
-	// the merge tab; the refused submit is this test's own subject.
-	w.ExpectWarnings("daemon.gitclient.merge_no_ff", "daemon.merge.merge_tab", "daemon.promptqueue.submit")
+	// Arrange: a workspace whose merge sits in a gated before-merge prompt.
+	gatePath := filepath.Join(t.TempDir(), "lease-gate")
+	repo := harness.NewRepo(t)
+	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{ExtraEnv: []string{
+		turnGatePathEnv + "=" + gatePath,
+		turnGateTextEnv + "=" + mqLeaseGateText,
+	}}})
+	// The refused submit is this test's own subject.
+	w.ExpectWarnings("daemon.promptqueue.submit")
 	repoRef := mqRepositoryRef(t, w, repo)
-	child := mqCreateTopLevelChild(t, w, repoRef, "mq-lease-refuse")
-	repo.ScriptConflict(repo.Dir, mqBranchOf(child), "conflict.txt")
-
-	// Act: enqueue the merge (admits immediately — an empty queue) and wait
-	// for the conflict-repair turn to be genuinely open.
-	harness.CommitWork(t, child.GetDir())
-	if _, err := w.Client().MergeWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: child})); err != nil {
-		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
-	}
+	child := mqCreateChildWithActions(t, w, repoRef, "mq-lease-refuse", &agentreplv1.CreateWorkspaceMergeActions{
+		BeforeWsMerge: mqSaid(mqLeaseGateText),
+	})
+	root := mqOpenFeedWatch(t, w, child, nil)
+	defer root.Close()
+	mqMerge(t, w, child, mqKeepOpen())
 	w.AwaitWorkspaceLogOperationCount(child.GetDir(), harness.OpTurnOpened, 1)
 
-	// Act: submit a fresh prompt to the SAME workspace while that turn is
-	// still open (not yet parked).
+	// Act: submit a fresh prompt to the SAME workspace while the merge runs.
 	resp, err := w.Client().SubmitPrompt(w.Ctx(), connect.NewRequest(&agentreplv1.SubmitPromptRequest{
 		Workspace:      child,
 		Said:           mqSaid("please stop and do something else"),
@@ -311,9 +345,12 @@ func TestMergeLeaseRefusesSubmit(t *testing.T) {
 	if resp.Msg.GetError().GetMerging() == nil {
 		t.Fatalf("SubmitPrompt while a merge is in flight = %v, want SubmitPromptError.merging", resp.Msg)
 	}
-	if resp.Msg.GetSuccess() != nil {
-		t.Fatalf("SubmitPrompt while a merge is in flight = %v, want no success (never held)", resp.Msg)
+
+	// The gate opens and the merge runs to its end, so nothing is left running.
+	if err := os.WriteFile(gatePath, nil, 0o644); err != nil {
+		t.Fatalf("opening the turn gate = error %v, want the gate created", err)
 	}
+	root.AwaitRow("the merge bubble's terminal", mqConcluded)
 }
 
 // mqSaid builds the plain-text UserSaid every raw SubmitPromptRequest in
@@ -335,7 +372,7 @@ func mqSaid(text string) *conversationv1.UserSaid {
 // methods daemon.md keys on self-repo-or-not: the daemon's own checkout
 // (harness.Opts.SelfRepo) and an ordinary repository. In both cases the
 // child workspace's ROOT feed carries exactly ONE row for the whole merge
-// (the FeedMerge head); the phase detail (queue/merge/tests/... tabs) lives
+// (the FeedMerge head); the phase detail (queue/rebasing/tests/... tabs) lives
 // only on that row's OWN sub-feed, never as separate root-feed rows.
 // ---------------------------------------------------------------------------
 
@@ -382,12 +419,13 @@ func TestMergeBubbleCoalescesIntoOneFeedRow(t *testing.T) {
 
 			// Act: a clean merge (no conflict, a passing test gate) lands.
 			harness.CommitWork(t, child.GetDir())
-			if _, err := w.Client().MergeWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: child})); err != nil {
-				t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
-			}
+			mqMerge(t, w, child, mqOwnBranch())
 			mergeRow := root.AwaitRow("the merge bubble's landed terminal", func(row *frontendv1.FeedRow) bool {
 				return row.GetActivity().GetMerge().GetSuccess() != nil
 			})
+			if tc.selfRepo {
+				mqAwaitLandingDeployed(t, w)
+			}
 
 			// Assert: exactly ONE distinct root-feed row (by FeedId) ever
 			// carried merge activity for this workspace's whole merge —
@@ -419,87 +457,132 @@ func TestMergeBubbleCoalescesIntoOneFeedRow(t *testing.T) {
 				}
 			}
 			if !foundTab {
-				t.Fatalf("the merge bubble's sub-feed carried no FeedMergeTab row, want at least one (e.g. the merge or queue tab)")
+				t.Fatalf("the merge bubble's sub-feed carried no FeedMergeTab row, want at least one (e.g. the queue tab)")
 			}
 		})
 	}
 }
 
 // ---------------------------------------------------------------------------
-// #41 — MergeParkedRecognizedFromLeaseState. daemon.md §"Merge
-// (daemon-synthesized)": "PARKED is recognized purely from lease state (no
-// content classifier) and the conversational parked flow is the only resume
-// path — no hand-resolution verb exists." Mirrors
-// daemon/integration/merge_test.go's
-// TestSubmitPromptWhileMergeParkedLandsInTheConflictsTabNotAsARefusal,
-// adapted to the real shim: the conflict brief's own turn is answered by the
-// real fake SDK's default scenario (no bang prefix), and its conclusion
-// without resolving the scripted conflict is what parks the merge.
+// #41 — a REBASE CONFLICT is resolved by the requesting workspace's own
+// session, and one left unresolved FAILS the merge in conflicts
+// (merge-landing.md: "a failed merge leaves the queue and hands the workspace
+// back"; "a failed conflict resolution LEAVES THE REBASE IN PROGRESS"). The
+// target moved, and replaying the workspace's work onto it conflicts; the
+// repair turn is answered by the real shim's default scenario, which resolves
+// nothing, so the resolution gives up. Nothing parks.
 // ---------------------------------------------------------------------------
 
-func TestMergeParkedRecognizedFromLeaseState(t *testing.T) {
-	t.Parallel()
-	// Arrange: park a merge on a scripted conflict.
-	repo, _ := mqCleanRepo(t)
-	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{SelfRepo: repo.Dir}})
-	// The scripted conflict this test parks on: the no-fast-forward failure,
-	// the merge tab it opens, and the conflicts record itself.
-	w.ExpectWarnings("daemon.gitclient.merge_no_ff", "daemon.merge.merge_tab", "daemon.merge.conflicts")
+// mqConflictedMerge is one requesting workspace whose merge stops on a
+// scripted rebase conflict.
+type mqConflictedMerge struct {
+	w     *World
+	repo  *harness.Repo
+	child *workspacev1.WorkspaceRef
+	root  *mqFeedWatch
+}
+
+// mqStartConflictedMerge requests a merge whose rebase conflicts. The root
+// feed is opened first, so every row the merge draws is watched.
+func mqStartConflictedMerge(t *testing.T, name string) *mqConflictedMerge {
+	t.Helper()
+	repo := harness.NewRepo(t)
+	w := mqSelfRepoWorld(t, repo)
+	// The scripted conflict is this test's subject: the rebase stops on it,
+	// the conflict is recorded, and the resolution that gives up ends the run.
+	w.ExpectWarnings("daemon.gitclient.start_rebase", "daemon.merge.conflicts", "daemon.merge.abort")
 	repoRef := mqRepositoryRef(t, w, repo)
-	child := mqCreateTopLevelChild(t, w, repoRef, "mq-parked")
-	repo.ScriptConflict(repo.Dir, mqBranchOf(child), "conflict.txt")
+	child := mqCreateTopLevelChild(t, w, repoRef, name)
 	harness.CommitWork(t, child.GetDir())
-	if _, err := w.Client().MergeWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: child})); err != nil {
-		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
-	}
+	repo.CommitIn(repo.Dir, "main.txt", "moved\n")
+	repo.ScriptRebaseConflict(mqBranchOf(child), 1, "work.txt")
+	root := mqOpenFeedWatch(t, w, child, nil)
+	t.Cleanup(root.Close)
+	mqMerge(t, w, child, mqOwnBranch())
+	return &mqConflictedMerge{w: w, repo: repo, child: child, root: root}
+}
 
-	// The conflict brief's own turn concludes (the real shim's default
-	// scenario), and — since nothing in this suite's harness surface can
-	// clear a scripted conflict — the run PARKS rather than landing.
-	footer := w.WatchFooter(child)
+// awaitFailed waits for the merge's failed terminal.
+func (m *mqConflictedMerge) awaitFailed(t *testing.T) *frontendv1.FeedMerge {
+	t.Helper()
+	merge := m.root.AwaitRow("the merge bubble's terminal", mqConcluded).GetActivity().GetMerge()
+	if merge.GetError() == nil {
+		t.Fatalf("merge terminal = %v, want the merge failed", merge)
+	}
+	return merge
+}
+
+func TestARebaseConflictDrivesARepairPromptInTheRequestingWorkspace(t *testing.T) {
+	t.Parallel()
+	// Arrange, Act
+	m := mqStartConflictedMerge(t, "mq-conflict-prompt")
+
+	// Assert: the conflict brief is a turn of the requesting workspace's own
+	// session, drawn on its main feed as an ordinary row and naming the
+	// worktree the rebase stopped in.
+	prompt := m.root.AwaitRow("the conflict-resolution prompt on the main feed", func(row *frontendv1.FeedRow) bool {
+		return row.GetUserPrompt() != nil && strings.Contains(mqFeedRowText(row), m.child.GetDir())
+	})
+	if prompt.GetParent() != nil {
+		t.Fatalf("the repair prompt's main-feed row = %v, want an ordinary top-level row", prompt)
+	}
+	head := m.root.AwaitRow("the merge bubble's terminal", mqConcluded)
+	conflicts := false
+	for _, tab := range mqSubFeedTabs(t, m.w, m.child, head.GetId()) {
+		if tab.GetConflicts() != nil {
+			conflicts = true
+		}
+	}
+	if !conflicts {
+		t.Fatal("the merge bubble carried no conflicts tab, want the repair drawn in it too")
+	}
+}
+
+func TestAnUnresolvedRebaseConflictFailsTheMergeInConflicts(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	m := mqStartConflictedMerge(t, "mq-conflict-failed")
+	footer := m.w.WatchFooter(m.child)
 	defer footer.Close()
-	fv := harness.AwaitView(t, w.Ctx(), footer.Stream, "the footer's parked substatus", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetMergeConflict().GetParked() != nil
-	})
-	if fv.GetStrip().GetStatus().GetMergeConflict().GetParked().GetLine() == "" {
-		t.Fatalf("footer parked = %v, want a composed line", fv.GetStrip().GetStatus().GetMergeConflict().GetParked())
-	}
-	host := w.WatchHost(child)
-	hv := harness.AwaitView(t, w.Ctx(), host, "the host composer parked on the merge", func(r *agentreplv1.WatchHostWorkspaceResponse) bool {
-		return r.GetHost().GetExisting().GetLive().GetMergeParked() != nil
-	})
-	if hv.GetHost().GetExisting().GetLive().GetMergeParked() == nil {
-		t.Fatalf("host composer = %v, want merge_parked", hv.GetHost())
-	}
-	roster := w.WatchRoster()
-	rgot := harness.AwaitView(t, w.Ctx(), roster, "the roster's merge_conflict arm", func(r *frontendv1.WorkspaceRoster) bool {
-		return mqRosterRow(r, child.GetId()).GetMergeConflict() != nil
-	})
-	if row := mqRosterRow(rgot, child.GetId()); row.GetMergeConflict() == nil {
-		t.Fatalf("parked workspace roster status = %v, want merge_conflict", row)
-	}
+	roster := m.w.WatchRoster()
 
-	// Act: submit conversational guidance to the SAME workspace while
-	// parked — the ONLY resume path the contract names; there is no
-	// dedicated hand-resolution verb.
-	resp, err := w.Client().SubmitPrompt(w.Ctx(), connect.NewRequest(&agentreplv1.SubmitPromptRequest{
-		Workspace:      child,
-		Said:           mqSaid("please look again"),
-		IdempotencyKey: newIdempotencyKey(t),
-		Origin:         e2ePromptOrigin,
-	}))
+	// Act: the repair turn concludes without resolving anything.
+	m.awaitFailed(t)
 
-	// Assert: NOT refused — delivered as a real turn, never the merging
-	// refusal #39 pins for the pre-parked window.
-	if err != nil {
-		t.Fatalf("SubmitPrompt while merge-parked = transport error %v, want it delivered, not refused", err)
+	// Assert: merge failed, in conflicts, on the footer and the roster.
+	harness.AwaitView(t, m.w.Ctx(), footer.Stream, "the footer's merge failed in conflicts", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetStatus().GetMergeFailed().GetConflicts() != nil
+	})
+	harness.AwaitView(t, m.w.Ctx(), roster, "the roster's merge_failed", func(r *frontendv1.WorkspaceRoster) bool {
+		return mqRosterRow(r, m.child.GetId()).GetMergeFailed() != nil
+	})
+}
+
+func TestAnUnresolvedRebaseConflictLeavesTheRebaseInProgress(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	m := mqStartConflictedMerge(t, "mq-conflict-left")
+
+	// Act
+	m.awaitFailed(t)
+
+	// Assert: the daemon never aborts the rebase; the user carries it on.
+	if !m.repo.RebaseInProgress(m.child.GetDir()) {
+		t.Fatal("the failed resolution's rebase was not left in progress")
 	}
-	if resp.Msg.GetError() != nil {
-		t.Fatalf("SubmitPrompt while merge-parked = %v, want no refusal (the conversational parked flow is the only resume path)", resp.Msg)
-	}
-	if resp.Msg.GetSuccess().GetTurn().GetTurn().GetValue() == "" {
-		t.Fatalf("SubmitPrompt while merge-parked = %v, want a minted turn", resp.Msg)
-	}
+}
+
+func TestAWorkspaceWhoseMergeFailedTakesTheNextPromptAsAnOrdinaryTurn(t *testing.T) {
+	t.Parallel()
+	// Arrange: the merge failed and handed the workspace back.
+	m := mqStartConflictedMerge(t, "mq-conflict-next")
+	m.awaitFailed(t)
+
+	// Act
+	turn := SubmitPrompt(t, m.w, m.child, "please help carry the rebase on")
+
+	// Assert: delivered and run to its end, never refused as merging.
+	AwaitTurnEnded(t, m.w, m.child, turn)
 }
 
 // ---------------------------------------------------------------------------
@@ -593,9 +676,7 @@ func TestDisplacedTurnCapturedEndedThenResubmittedExactlyOnce(t *testing.T) {
 	turn := SubmitPrompt(t, w, child, displacedText)
 	w.AwaitWorkspaceLogOperationCount(child.GetDir(), harness.OpTurnOpened, 1)
 	harness.CommitWork(t, child.GetDir())
-	if _, err := w.Client().MergeWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: child})); err != nil {
-		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
-	}
+	mqMerge(t, w, child, mqOwnBranch())
 
 	// Assert: the displaced turn is CAPTURED then ENDED — its own terminal
 	// arrives on the feed.
@@ -923,17 +1004,16 @@ func TestFailMarkerFailsABeforeActionRunAndRidesAnAfterActionTerminal(t *testing
 		})
 		root := mqOpenFeedWatch(t, w, child, nil)
 		defer root.Close()
-		// Warning discipline: this run's own subject produces exactly one
-		// daemon record — "a merge could not continue" (daemon.merge.abort,
-		// internal/merge/terminal.go), the loud abort the failed precondition
-		// is SUPPOSED to cause. It is declared rather than silenced.
-		w.ExpectWarnings("daemon.merge.abort")
+		// Warning discipline: this run's own subject produces exactly two
+		// daemon records -- the failed precondition itself
+		// (daemon.merge.pre_prompt, internal/merge/run.go) and the merge
+		// failing and handing the workspace back (daemon.merge.abort,
+		// internal/merge/terminal.go). Both are declared rather than silenced.
+		w.ExpectWarnings("daemon.merge.pre_prompt", "daemon.merge.abort")
 
 		// Act
 		harness.CommitWork(t, child.GetDir())
-		if _, err := w.Client().MergeWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: child})); err != nil {
-			t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
-		}
+		mqMerge(t, w, child, mqOwnBranch())
 		head := root.AwaitRow("the merge bubble's head", func(row *frontendv1.FeedRow) bool {
 			return row.GetActivity().GetMerge() != nil
 		})
@@ -941,16 +1021,17 @@ func TestFailMarkerFailsABeforeActionRunAndRidesAnAfterActionTerminal(t *testing
 		defer tabs.Close()
 
 		// Assert: the pre_prompt tab settles FAILED, with the daemon's own
-		// composed account of which action did not complete
-		// (internal/merge/run.go's prePrompt: `the before-merge prompt %q did
-		// not complete`, %q of the action's verbatim text).
+		// composed account (internal/merge/run.go's prePrompt). Since the
+		// merge rework the summary is plain words for a human reader; the
+		// action's own text is the preprocessing step's footer line, never the
+		// summary.
 		preTab := tabs.AwaitRow("the pre_prompt tab, settled", func(row *frontendv1.FeedRow) bool {
 			return row.GetMergeTab().GetPrePrompt().GetSettled() != nil
 		}).GetMergeTab().GetPrePrompt().GetSettled()
 		if preTab.GetFailed() == nil {
 			t.Fatalf("pre_prompt tab settled = %v, want the failed arm (the marked action's turn failed)", preTab)
 		}
-		wantSummary := fmt.Sprintf("the before-merge prompt %q did not complete", mqMarkedAction)
+		const wantSummary = "the before-merge prompt did not complete"
 		if got := preTab.GetFailed().GetSummary(); got != wantSummary {
 			t.Errorf("pre_prompt tab failure summary = %q, want %q", got, wantSummary)
 		}
@@ -971,10 +1052,10 @@ func TestFailMarkerFailsABeforeActionRunAndRidesAnAfterActionTerminal(t *testing
 
 		// Assert the SPECIFIC NEGATIVE that makes "BEFORE the landing" a fact
 		// rather than a word: the run never reached a later phase at all, so
-		// its sub-feed carries no merge, tests or post_prompt tab. A
-		// before-action that failed AFTER the no-ff merge had already run
-		// would satisfy every assertion above and still have landed work its
-		// author's own precondition refused.
+		// its sub-feed carries no rebasing, tests, committing or post_prompt
+		// tab. A before-action that failed AFTER the rebase or the merge
+		// commit had already run would satisfy every assertion above and still
+		// have moved work its author's own precondition refused.
 		//
 		// THE SNAPSHOT IS A FRESH PAGE, NOT THE WATCH'S DRAINED PREFIX. The
 		// watch above stopped draining the moment the pre_prompt tab settled,
@@ -985,8 +1066,10 @@ func TestFailMarkerFailsABeforeActionRunAndRidesAnAfterActionTerminal(t *testing
 		subRows, _ := mqOpenFeedRows(t, w, child, head.GetId())
 		for _, row := range subRows {
 			switch tab := row.GetMergeTab(); {
-			case tab.GetMerge() != nil:
-				t.Errorf("the run opened a merge tab after its before-action failed: %v", row)
+			case tab.GetRebasing() != nil:
+				t.Errorf("the run opened a rebasing tab after its before-action failed: %v", row)
+			case tab.GetCommitting() != nil:
+				t.Errorf("the run opened a committing tab after its before-action failed: %v", row)
 			case tab.GetTests() != nil:
 				t.Errorf("the run opened a tests tab after its before-action failed: %v", row)
 			case tab.GetPostPrompt() != nil:
@@ -1044,9 +1127,7 @@ func TestFailMarkerFailsABeforeActionRunAndRidesAnAfterActionTerminal(t *testing
 
 			// Act
 			harness.CommitWork(t, child.GetDir())
-			if _, err := w.Client().MergeWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: child})); err != nil {
-				t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
-			}
+			mqMerge(t, w, child, mqOwnBranch())
 			head := root.AwaitRow("the merge bubble's head", func(row *frontendv1.FeedRow) bool {
 				return row.GetActivity().GetMerge() != nil
 			})
@@ -1061,7 +1142,7 @@ func TestFailMarkerFailsABeforeActionRunAndRidesAnAfterActionTerminal(t *testing
 			if postTab.GetFailed() == nil {
 				t.Fatalf("post_prompt tab settled = %v, want the failed arm (the marked action's turn failed)", postTab)
 			}
-			wantSummary := fmt.Sprintf("the after-merge prompt %q did not complete", mqMarkedAction)
+			const wantSummary = "the after-merge prompt did not complete"
 			if got := postTab.GetFailed().GetSummary(); got != wantSummary {
 				t.Errorf("post_prompt tab failure summary = %q, want %q", got, wantSummary)
 			}
@@ -1075,6 +1156,159 @@ func TestFailMarkerFailsABeforeActionRunAndRidesAnAfterActionTerminal(t *testing
 			if terminal.GetSuccess() == nil {
 				t.Fatalf("merge terminal = %v, want FeedMergeSuccess (an after-action failure rides the terminal)", terminal)
 			}
+			if tc.selfRepo {
+				mqAwaitLandingDeployed(t, w)
+			}
 		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// The rebase-first process's tabs, the merge's sources, and keep_open
+// (merge-landing.md, landed change 1). Each merge here runs the daemon's own
+// checkout method, so a landing deploys once and the test waits for it.
+// ---------------------------------------------------------------------------
+
+// mqTabKinds answers which of the rebase-first tabs a sub-feed carries.
+func mqTabKinds(tabs []*frontendv1.FeedMergeTab) (rebasing, committing, updatingMain bool) {
+	for _, tab := range tabs {
+		switch {
+		case tab.GetRebasing() != nil:
+			rebasing = true
+		case tab.GetCommitting() != nil:
+			committing = true
+		case tab.GetUpdatingMain() != nil:
+			updatingMain = true
+		}
+	}
+	return rebasing, committing, updatingMain
+}
+
+// mqLandedOwnBranch lands a kept-open workspace's work onto a target that moved,
+// so the rebase replays it, and answers the world, the workspace and the
+// landed bubble's head.
+func mqLandedOwnBranch(t *testing.T, name string) (*World, *workspacev1.WorkspaceRef, *frontendv1.FeedRow) {
+	t.Helper()
+	repo := harness.NewRepo(t)
+	w := mqSelfRepoWorld(t, repo)
+	repoRef := mqRepositoryRef(t, w, repo)
+	child := mqCreateTopLevelChild(t, w, repoRef, name)
+	harness.CommitWork(t, child.GetDir())
+	repo.CommitIn(repo.Dir, "main.txt", "moved\n")
+	root := mqOpenFeedWatch(t, w, child, nil)
+	t.Cleanup(root.Close)
+	mqMerge(t, w, child, mqKeepOpen())
+	head := root.AwaitRow("the merge bubble's terminal", mqConcluded)
+	mqAwaitLandingDeployed(t, w)
+	if head.GetActivity().GetMerge().GetSuccess() == nil {
+		t.Fatalf("merge terminal = %v, want landed", head.GetActivity().GetMerge())
+	}
+	return w, child, head
+}
+
+func TestALandedMergesBubbleCarriesItsRebasingTab(t *testing.T) {
+	t.Parallel()
+	// Arrange, Act
+	w, child, head := mqLandedOwnBranch(t, "mq-tab-rebasing")
+
+	// Assert
+	if rebasing, _, _ := mqTabKinds(mqSubFeedTabs(t, w, child, head.GetId())); !rebasing {
+		t.Fatal("the landed merge's bubble carried no rebasing tab")
+	}
+}
+
+func TestALandedMergesBubbleCarriesItsCommittingTab(t *testing.T) {
+	t.Parallel()
+	// Arrange, Act
+	w, child, head := mqLandedOwnBranch(t, "mq-tab-committing")
+
+	// Assert
+	if _, committing, _ := mqTabKinds(mqSubFeedTabs(t, w, child, head.GetId())); !committing {
+		t.Fatal("the landed merge's bubble carried no committing tab")
+	}
+}
+
+func TestAKeptOpenMergeLeavesTheWorkspaceOpen(t *testing.T) {
+	t.Parallel()
+	// Arrange, Act
+	w, child, _ := mqLandedOwnBranch(t, "mq-keep-open")
+
+	// Assert: its worktree stands and the roster still lists it in its
+	// repository, not among the recently merged.
+	if _, err := os.Stat(child.GetDir()); err != nil {
+		t.Fatalf("the kept-open workspace's worktree is gone: %v", err)
+	}
+	roster := w.WatchRoster()
+	harness.AwaitView(t, w.Ctx(), roster, "the kept-open workspace's roster row", func(r *frontendv1.WorkspaceRoster) bool {
+		return mqRosterRow(r, child.GetId()) != nil
+	})
+}
+
+func TestAMergedUpstreamSourceCarriesTheUpdatingMainTab(t *testing.T) {
+	t.Parallel()
+	// Arrange: the workspace's pull request merged upstream.
+	repo := harness.NewRepo(t)
+	w := mqSelfRepoWorld(t, repo)
+	repoRef := mqRepositoryRef(t, w, repo)
+	child := mqCreateTopLevelChild(t, w, repoRef, "mq-merged-upstream")
+	upstream := repo.SetUpstream(harness.DefaultBranch)
+	root := mqOpenFeedWatch(t, w, child, nil)
+	defer root.Close()
+
+	// Act
+	mqMerge(t, w, child, &agentreplv1.MergeWorkspaceSource{Source: &agentreplv1.MergeWorkspaceSource_MergedUpstream{
+		MergedUpstream: &agentreplv1.MergeWorkspaceSourceMergedUpstream{}}})
+	head := root.AwaitRow("the merge bubble's terminal", mqConcluded)
+	mqAwaitLandingDeployed(t, w)
+
+	// Assert: the default branch moved to upstream's tip through the updating
+	// main step, drawn as its own tab.
+	if head.GetActivity().GetMerge().GetSuccess() == nil {
+		t.Fatalf("merge terminal = %v, want landed", head.GetActivity().GetMerge())
+	}
+	if got := repo.BranchHead(harness.DefaultBranch); got != upstream {
+		t.Fatalf("the default branch is at %s, want upstream's %s", got, upstream)
+	}
+	if _, _, updatingMain := mqTabKinds(mqSubFeedTabs(t, w, child, head.GetId())); !updatingMain {
+		t.Fatal("the merged-upstream merge's bubble carried no updating main tab")
+	}
+}
+
+func TestAMergeRequestThatNamesNoSourceIsRefused(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	repo := harness.NewRepo(t)
+	w := NewWorld(t, WorldOpts{})
+	repoRef := mqRepositoryRef(t, w, repo)
+	child := mqCreateTopLevelChild(t, w, repoRef, "mq-no-source")
+
+	// Act
+	_, err := w.Client().MergeWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: child}))
+
+	// Assert
+	if connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("MergeWorkspace with no source = %v, want invalid_argument: a merge request names what it merges", err)
+	}
+}
+
+func TestAMergeOfABranchThatDoesNotExistIsRefused(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	repo := harness.NewRepo(t)
+	w := NewWorld(t, WorldOpts{})
+	// The refused request is this test's own subject.
+	w.ExpectWarnings("daemon.merge.enqueue")
+	repoRef := mqRepositoryRef(t, w, repo)
+	child := mqCreateTopLevelChild(t, w, repoRef, "mq-unknown-branch")
+
+	// Act
+	resp, err := w.Client().MergeWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{
+		Workspace: child,
+		Source:    &agentreplv1.MergeWorkspaceSource{Source: &agentreplv1.MergeWorkspaceSource_Branch{Branch: &agentreplv1.MergeWorkspaceSourceBranch{Name: "no-such-branch"}}},
+	}))
+
+	// Assert
+	if err != nil || resp.Msg.GetError().GetUnknownBranch() == nil {
+		t.Fatalf("MergeWorkspace of a missing branch = (%v, %v), want unknown_branch", resp.Msg.GetResult(), err)
 	}
 }

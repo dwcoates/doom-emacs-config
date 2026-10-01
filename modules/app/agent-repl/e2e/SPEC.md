@@ -856,15 +856,20 @@ docs. File-per-area grouping is given in section E.
     vendor knows nothing about" it) — a prompt arriving after a merge began
     is REFUSED, never held (`SubmitPromptError`), per `daemon.md` §"Queue,
     holds, leases": "A prompt arriving after a merge began is refused
-    (never held)".
+    (never held)". The window is held by a before-merge prompt parked on the
+    fake vendor's turn gate, never raced.
 40. **MergeBubbleCoalescesIntoOneFeedRow** — drives a real merge (self-repo
     and non-self-repo methods both, per `daemon.md`'s "two methods keyed by
     self-repo-or-not") — everything produced during the merge lands on ONE
     feed bubble (own `FeedId`, `OpenFeed`/`WatchFeed`).
-41. **MergeParkedRecognizedFromLeaseState** — no content classifier; the
-    conversational parked flow is the only resume path (`daemon.md`) —
-    asserts a parked merge resumes ONLY via the conversational flow, never
-    a hand-resolution verb (there is none).
+41. **A rebase conflict in the requesting workspace**
+    (`docs/protobuf-design/merge-landing.md`, landed change 1; nothing
+    parks) — the conflict brief is a turn of the requesting workspace's own
+    session, drawn in the bubble's conflicts tab and on the main feed; a
+    resolution that gives up fails the merge in conflicts (footer and
+    roster), leaves the rebase in progress, and the workspace takes its next
+    prompt as an ordinary turn. The sources, keep_open, and the rebasing,
+    committing and updating main tabs are pinned beside it.
 42. **DisplacedTurnCapturedEndedThenResubmittedExactlyOnce** — the commit at
     the top of this branch (`8ad7e279c docs(overhaul): daemon.md —
     displaced turn is ENDED after durable capture, before the exactly-once
