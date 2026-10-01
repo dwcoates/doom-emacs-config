@@ -95,7 +95,9 @@
     "went wrong, but the workspace is usable. 'init', 'severed', 'dead',",
     "'start_failed' and 'vendor_blocked' are BLUE: the workspace cannot be",
     "used until the route comes up or the vendor or account block is",
-    "resolved (owner ruling, 2026-09-28)."
+    "resolved (owner ruling, 2026-09-28). 'api_retrying' is BLUE: the vendor",
+    "is retrying a failed call and the turn cannot advance until it is",
+    "answered (owner ruling, 2026-10-01)."
   ],
   "roster_status": {
     "none": "none",
@@ -106,6 +108,7 @@
     "degraded": "turquoise",
     "start_failed": "blue",
     "vendor_blocked": "blue",
+    "api_retrying": "blue",
     "turn_failed": "turquoise",
     "submitting": "red",
     "thinking": "red",
@@ -198,6 +201,21 @@
   "composer_closed_colors": [
     "blue"
   ],
+  "_composer_open_substatuses_comment": [
+    "The DECLARED exceptions to the composer invariant, keyed by footer",
+    "status arm then listing that arm's substatus arms (spelled as the proto",
+    "spells them) whose composer stays OPEN although the status's color",
+    "closes it. 'blocked · api_retrying' is blue because the turn cannot",
+    "advance, but a prompt sent during the retry interrupts it and is",
+    "delivered as its own turn at once, so the composer must accept it",
+    "(owner ruling, 2026-10-01). An exception is only ever declared here;",
+    "a renderer never opens a closed color on its own."
+  ],
+  "composer_open_substatuses": {
+    "blocked": [
+      "api_retrying"
+    ]
+  },
   "_topbar_connectivity_comment": [
     "TopbarConnectivity.tone, keyed by the daemon's link states. The topbar",
     "reports the route to the session's shim, so its whole range is green",
