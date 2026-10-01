@@ -3,6 +3,7 @@ package feed
 import (
 	"context"
 	"errors"
+	"maps"
 	"sort"
 	"sync"
 	"testing"
@@ -220,6 +221,56 @@ func TestARowDrawnAfterTheRedrawFollowsIt(t *testing.T) {
 	}
 }
 
+func TestARowDrawnAfterSeveralRedrawnRowsFollowsThemAll(t *testing.T) {
+	// Arrange: the first daemon drew three rows on the merge's feed, each
+	// minted to follow the one before; a new daemon has drawn them again.
+	store := newFakeDurableRows()
+	first, _ := daemonOver(t, store)
+	tabFeed, _ := mergeTabRow()
+	for _, id := range []string{"one", "two", "three"} {
+		first.UpsertDurable(testWorkspace, tabFeed, &frontendv1.FeedRow{
+			Id:  testEncode(feedid.Ref{WS: testWorkspace, Feed: tabFeed, Row: feedid.RowKey{Kind: feedid.KindSynth, ID: id}}),
+			Row: &frontendv1.FeedRow_MergeTab{MergeTab: &frontendv1.FeedMergeTab{}},
+		})
+	}
+	second, _ := daemonOver(t, store)
+
+	// Act: the new daemon draws a row of its own on the same feed.
+	later := &frontendv1.FeedRow{
+		Id:  testEncode(feedid.Ref{WS: testWorkspace, Feed: tabFeed, Row: feedid.RowKey{Kind: feedid.KindSynth, ID: "four"}}),
+		Row: &frontendv1.FeedRow_MergeTab{MergeTab: &frontendv1.FeedMergeTab{}},
+	}
+	second.UpsertDurable(testWorkspace, tabFeed, later)
+
+	// Assert
+	rows := feedRows(second, tabFeed)
+	if len(rows) != 4 || rows[3].GetId().GetValue() != later.GetId().GetValue() {
+		t.Fatalf("rows = %+v, want the new row after every redrawn row", rows)
+	}
+}
+
+func TestARedrawnRowWhoseKeyCannotBeReadIsAnErrorAndDrawsNothing(t *testing.T) {
+	// Arrange: a record whose order key carries no count after its separator.
+	store := newFakeDurableRows()
+	first, _ := daemonOver(t, store)
+	first.UpsertDurable(testWorkspace, rootFeed(), mergeHeadRow("landed"))
+	for id, row := range store.rows[testWorkspace] {
+		row.OrderKey = "L.zz"
+		store.rows[testWorkspace][id] = row
+	}
+
+	// Act
+	second, log := daemonOver(t, store)
+
+	// Assert
+	if rows := feedRows(second, rootFeed()); len(rows) != 0 {
+		t.Fatalf("rows = %+v, want none drawn", rows)
+	}
+	if !hasRecordIn(log, "error", opDurable) {
+		t.Fatalf("records = %+v, want the unreadable key recorded at ERROR", log.Records())
+	}
+}
+
 func TestAFailedRecordIsAnErrorAndTheRowStillStands(t *testing.T) {
 	// Arrange
 	store := newFakeDurableRows()
@@ -310,5 +361,60 @@ func TestAResetThatCannotForgetIsAnError(t *testing.T) {
 	// Assert
 	if !hasRecordIn(log, "error", opDurable) {
 		t.Fatalf("records = %+v, want the failed forget at error", log.Records())
+	}
+}
+
+func TestReserveOrderAdvancesTheCounterItsKeyWasMintedFrom(t *testing.T) {
+	tests := []struct {
+		name          string
+		key           string
+		wantFollowers map[string]uint32
+		wantEntryRows map[string]uint32
+	}{
+		{name: "a follower key", key: "L.0000000a", wantFollowers: map[string]uint32{"L": 10}, wantEntryRows: map[string]uint32{}},
+		{name: "an entry key", key: "E000000000000000100000002" + "00000004", wantFollowers: map[string]uint32{}, wantEntryRows: map[string]uint32{"E000000000000000100000002": 5}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := &feedState{followers: map[string]uint32{}, entryRows: map[string]uint32{}}
+
+			// Act
+			err := reserveOrder(f, tt.key)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("reserveOrder(%q) = %v", tt.key, err)
+			}
+			if !maps.Equal(f.followers, tt.wantFollowers) || !maps.Equal(f.entryRows, tt.wantEntryRows) {
+				t.Fatalf("followers = %v, entryRows = %v, want %v and %v", f.followers, f.entryRows, tt.wantFollowers, tt.wantEntryRows)
+			}
+		})
+	}
+}
+
+func TestReserveOrderNeverMovesACounterBack(t *testing.T) {
+	// Arrange
+	f := &feedState{followers: map[string]uint32{"L": 9}, entryRows: map[string]uint32{}}
+
+	// Act
+	err := reserveOrder(f, "L.00000002")
+
+	// Assert
+	if err != nil || f.followers["L"] != 9 {
+		t.Fatalf("reserveOrder = %v, followers = %v, want L kept at 9", err, f.followers)
+	}
+}
+
+func TestReserveOrderRefusesAKeyTooShortToBeAnEntryKey(t *testing.T) {
+	// Arrange
+	f := &feedState{followers: map[string]uint32{}, entryRows: map[string]uint32{}}
+
+	// Act
+	err := reserveOrder(f, "E01")
+
+	// Assert
+	if err == nil {
+		t.Fatal("reserveOrder accepted a key too short to be an entry key")
 	}
 }
