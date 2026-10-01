@@ -86,7 +86,7 @@ export interface FooterHandle extends Handle {
    * Observe the status ARM on every push, and immediately on subscribe when a
    * push has already landed. Returns its unsubscriber.
    */
-  onStatus(fn: (statusCase: string) => void): () => void;
+  onStatus(fn: (statusCase: string, substatusCase?: string) => void): () => void;
 }
 
 /** The stream's request: the workspace, echoed from the page's one ref. */
@@ -99,7 +99,7 @@ export function mountFooter(host: HTMLElement, ctx: AppContext, deps: FooterDeps
   log.info("mounting the footer", { operation: "footer.mount", context: {} });
   host.setAttribute("data-component", "footer");
 
-  const statusListeners = new Set<(statusCase: string) => void>();
+  const statusListeners = new Set<(statusCase: string, substatusCase?: string) => void>();
   let selection: FooterPanel | null = readSelection(ctx);
   // THE SECOND PIECE OF LOCAL STATE, and for the same reason as the first: it
   // is the reader's, not the daemon's. A stop's answer -- the note, the
@@ -131,6 +131,8 @@ export function mountFooter(host: HTMLElement, ctx: AppContext, deps: FooterDeps
   // The last focus generation this page applied; see `applyFocus`.
   let appliedFocus: bigint | null = null;
   let statusCase: string | null = null;
+  // The substatus arm the last push drew under statusCase, if it has one.
+  let substatusCase: string | undefined;
   let disposed = false;
   // THE FOURTH: the one pending re-render at the drawn transient's expiry.
   const expiry = createTransientExpiry(ctx.ticker, () => {
@@ -167,10 +169,10 @@ export function mountFooter(host: HTMLElement, ctx: AppContext, deps: FooterDeps
   });
 
   return {
-    onStatus(fn: (statusCase: string) => void): () => void {
+    onStatus(fn: (statusCase: string, substatusCase?: string) => void): () => void {
       statusListeners.add(fn);
       // A composer mounted after the first push must not wait for the next one.
-      if (statusCase !== null) fn(statusCase);
+      if (statusCase !== null) fn(statusCase, substatusCase);
       return () => {
         statusListeners.delete(fn);
       };
@@ -369,8 +371,10 @@ export function mountFooter(host: HTMLElement, ctx: AppContext, deps: FooterDeps
     if (view === null) return;
     const strip = requireMessage(view.strip, "FooterView.strip");
     const status = requireMessage(strip.status, "FooterStrip.status");
-    statusCase = requireCase(status.status, "FooterStatus.status").case;
-    for (const fn of [...statusListeners]) fn(statusCase);
+    const arm = requireCase(status.status, "FooterStatus.status");
+    statusCase = arm.case;
+    substatusCase = substatusOf(arm.value);
+    for (const fn of [...statusListeners]) fn(statusCase, substatusCase);
   }
 
   /**
@@ -467,4 +471,14 @@ export function writeSelection(ctx: AppContext, selection: FooterPanel | null): 
       context: { cause: err },
     });
   }
+}
+
+/**
+ * The substatus arm a status arm's message drew, in the generated spelling,
+ * or undefined when that arm has no substatus oneof or leaves it unset.
+ */
+function substatusOf(value: unknown): string | undefined {
+  if (typeof value !== "object" || value === null || !("substatus" in value)) return undefined;
+  const substatus = (value as { substatus?: { case?: string } }).substatus;
+  return substatus?.case;
 }

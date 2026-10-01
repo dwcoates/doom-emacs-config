@@ -636,6 +636,32 @@ describe("mountFooter: onStatus", () => {
     expect(seen).toEqual(["idle", "merging"]);
   });
 
+  it("announces the substatus arm the push drew beside the status", async () => {
+    // Arrange
+    const { footer, h } = mount();
+    const seen: [string, string | undefined][] = [];
+    footer.onStatus((arm, sub) => seen.push([arm, sub]));
+    await settle();
+
+    // Act
+    h.tail.push(
+      pushView(
+        footerView({
+          strip: strip({
+            status: {
+              case: "blocked",
+              value: { substatus: { case: "apiRetrying", value: {} }, activity: quietActivity("blocked") },
+            } as never,
+          }),
+        }),
+      ),
+    );
+    await settle();
+
+    // Assert
+    expect(seen).toEqual([["blocked", "apiRetrying"]]);
+  });
+
   it("tells a LATE subscriber the current arm immediately", async () => {
     const { footer, h } = mount();
     await settle();
