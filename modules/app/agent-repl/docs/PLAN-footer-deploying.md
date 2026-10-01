@@ -50,8 +50,8 @@ are pre-approved (no new rpc endpoints). No subagents in the implementing sessio
     the transient `deploy_failed` fault line.
 - A blocked deploy (stale store or sidecar, protocol bump) raises the enduring blocked line and
   ends with no other step.
-- Refusals (`ErrAlreadyDeploying`, `rollout.ErrJoining`, `ErrAlreadyRollingOut`) are logged at
-  INFO as today and draw nothing: the deploy already running is on the line.
+- A deploy asked for while another is in flight is never refused or lost: it goes through the
+  deploy queue (see "The deploy queue").
 - New producer plumbing: `deploy.Builder` gains a per-step progress callback (today it reports
   nothing until done), and A4 to A6 call `progress` where they only log today.
 - Every step carries `stage_entered_at_ms`, the same field the merge bubble uses, so the client
@@ -61,6 +61,30 @@ are pre-approved (no new rpc endpoints). No subagents in the implementing sessio
 - A daemon whose state LAYOUT changes cannot hand over (the successor opens state read-only), so
   it is a daemon swap that waits until EVERY workspace has drained, then stops and starts; each
   workspace draws `deploying · transferring` from the stop until the new daemon serves it.
+  - The term "state layout" is to be replaced (owner request); the new term goes into
+    `AGENTS.md` only once the owner approves it.
+
+### The deploy queue (owner design, 2026-10-01)
+
+There are two queues: workspaces waiting on a deploy (see "The per-workspace deploy"), and
+deploys waiting on a deploy, described here. Only master is ever deployed.
+
+- A deploy asked for (a landing on master, or by hand) while one is in flight is scheduled, never
+  dropped, so the newest code is always deployed in the end.
+- It is scheduled with the NEW daemon of the deploy in flight, never the old one.
+- A daemon starts a deploy only when it is fully deployed itself: no older daemon it supersedes is
+  still around.
+- Requests that pile up before a daemon can act collapse to ONE: the newest master commit wins, and
+  the older ones are disregarded (ancestry is git's: `git merge-base --is-ancestor`).
+- Proposed mechanism, so no request can be lost in a hand-off between daemons:
+  - every build stamps the master commit it was built from;
+  - a daemon, once it is the only one (its predecessor gone), compares its own stamped commit with
+    master's head, and deploys if master is ahead;
+  - a landing or a hand request only says "master moved"; a daemon that is not yet the only one
+    ignores it, because the check above runs when it becomes the only one;
+  - the build is of the commit, not of whatever the master checkout holds uncommitted.
+- So "the request goes to the new daemon" holds structurally: no request is carried at all, and
+  the newest-commit-wins rule is the comparison itself.
 
 ### B. Per-workspace (status arm `deploying`, blue, only while this workspace is cut off)
 
