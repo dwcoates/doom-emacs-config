@@ -72,3 +72,20 @@ count and the countdown to the next attempt.
     arm is breaking); a new turn opening clears the retry, so the red period
     shows `working` with no retry line, per the settled behavior.
   - Emacs and the webapp map `api_retrying` to blue in their color tables.
+
+### 2. Judgment call: the composer stays open under `blocked · api_retrying`
+
+- **What:** `render-colors.json` gains `composer_open_substatuses`, the declared
+  exceptions to the composer invariant, holding `blocked: [api_retrying]`.
+  The Go vocab loader validates it (the status must close the composer; every
+  substatus must be a real arm of that status's substatus oneof), and the
+  webapp's `composerClosedFor(arm, substatus)` honors it.
+- **Why:** blue closes the composer by the 2026-09-28 ruling, but the owner's
+  settled behavior needs a prompt sent during the retry to go through and cut
+  the retry short. The owner was asked to choose between this, turquoise, and
+  a closed composer, and asked instead for all changes to proceed; the
+  recommended option was taken. Reversible by deleting the one entry.
+- **Consequences:** the composer gate is no longer a pure function of the
+  status color; it reads the substatus too. Emacs is unaffected: its composer
+  is gated by the daemon's host composer arm, which already takes prompts while
+  the workspace is unusable.
