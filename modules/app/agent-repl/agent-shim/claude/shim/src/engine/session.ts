@@ -4838,8 +4838,16 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    */
   async function reannounceStart(): Promise<conversationv1.SessionStarted | undefined> {
     if (announcedStart === undefined) return undefined;
+    if (identity === undefined) {
+      throw new Error("shim session: a started session holds no identity to re-announce");
+    }
     return create(conversationv1.SessionStartedSchema, {
-      vendorSessionId: announcedStart.vendorSessionId,
+      // THE RESUME HANDLE IN FORCE NOW, not the one the start answered: the
+      // field is what a later resume names, and a rotation since the start (a
+      // /clear) left the start's id naming a conversation nobody continues. A
+      // daemon that adopted this shim after the rotation would otherwise
+      // resume the wrong one (2026-09-30: a restart came up FRESH).
+      vendorSessionId: identity.vendorSessionId,
       ...(announcedStart.runtime === undefined ? {} : { runtime: announcedStart.runtime }),
       ...(announcedStart.effectiveModel === undefined
         ? {}

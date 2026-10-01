@@ -4294,6 +4294,32 @@ describe("WatchSession", () => {
     ).toBe(announced);
   });
 
+  it("re-states the resume handle IN FORCE after a rotation, not the start's", async () => {
+    // A /clear rotates the conversation to a new id, and the start's id then
+    // names a conversation nobody continues. A daemon adopting this shim
+    // records what a later resume names, so it must hear the new one.
+    const h = harness();
+    const opening = await started(h);
+    const original = opening.result.case === "success" ? opening.result.value.session?.vendorSessionId : undefined;
+    await h.engine.onSdkMessage({
+      type: "conversation_reset",
+      new_conversation_id: "an-id-nothing-uses",
+      uuid: "00000000-0000-4000-8000-000000000019",
+      session_id: original,
+    } as never);
+    await h.engine.onSdkMessage(initMessage({ sessionId: "the-id-the-session-moved-to" }));
+    // The rotation writes the link files, so it lands a tick later.
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const iterator = h.engine.watchSession(create(shimv1.WatchSessionRequestSchema, {}))[Symbol.asyncIterator]();
+    await iterator.next();
+    const second = await nextPush(iterator);
+    await iterator.return?.();
+    const start = second.frame.case === "sessionStarted" ? second.frame.value : undefined;
+
+    expect(start?.vendorSessionId).toBe("the-id-the-session-moved-to");
+  });
+
   it("re-states the turn in flight as it is NOW, not as the opening found it", async () => {
     // The opening's live membership is the one thing that is not a fact at
     // start: an adopting daemon needs what is live now.
