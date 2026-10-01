@@ -712,15 +712,21 @@ type fakeFeed struct {
 	lastFeed  feedid.Feed
 	lastRead  feed.ReaderID
 	openCalls int
-	// finals is the ordered selectable final-response set SelectResponse walks;
-	// markdown is each selectable row's copied markdown, keyed by FeedId value,
-	// for the reply-prefix path.
+	// finals is the ordered selectable final-response set SelectFeedRow's
+	// response step walks; prompts is the ordered selectable rollback-prompt
+	// set its prompt step walks; markdown is each selectable row's copied
+	// markdown, keyed by FeedId value, for the reply-prefix path.
 	finals   []*frontendv1.FeedId
+	prompts  []*frontendv1.FeedId
 	markdown map[string]string
 }
 
 func (f *fakeFeed) FinalResponses(ids.WorkspaceID) []*frontendv1.FeedId {
 	return f.finals
+}
+
+func (f *fakeFeed) RollbackPrompts(ids.WorkspaceID) []*frontendv1.FeedId {
+	return f.prompts
 }
 
 func (f *fakeFeed) ResponseMarkdown(_ ids.WorkspaceID, id *frontendv1.FeedId) (string, bool) {
