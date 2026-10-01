@@ -416,7 +416,10 @@ export type HostSessionLive = Message<"agentrepl.v1.HostSessionLive"> & {
     case: "open";
   } | {
     /**
-     * A merge owns the session (the merge lease).
+     * A merge owns the session under a lease that REFUSES prompts, which
+     * only an older build writes. A merge lease that HOLDS (every merge
+     * since 2026-10-01) answers `open`: what is submitted is held until the
+     * merge ends.
      *
      * @generated from field: agentrepl.v1.HostComposerMerging merging = 6;
      */

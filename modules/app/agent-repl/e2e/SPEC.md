@@ -851,12 +851,12 @@ docs. File-per-area grouping is given in section E.
 
 ### Merge queue, including displaced turns (`mergequeue_e2e_test.go`)
 
-39. **MergeLeaseRefusesSubmit** — plain prose, no named golden (merge is
+39. **MergeLeaseHoldsSubmit** — plain prose, no named golden (merge is
     daemon-synthesized, `daemon.md` §"Merge (daemon-synthesized)": "the
     vendor knows nothing about" it) — a prompt arriving after a merge began
-    is REFUSED, never held (`SubmitPromptError`), per `daemon.md` §"Queue,
-    holds, leases": "A prompt arriving after a merge began is refused
-    (never held)". The window is held by a before-merge prompt parked on the
+    is HELD by the merge, never classified, and delivered once it ends; the
+    hold keeps the requester open past the landing (owner ruling,
+    2026-10-01). The window is held by a before-merge prompt parked on the
     fake vendor's turn gate, never raced.
 40. **MergeBubbleCoalescesIntoOneFeedRow** — drives a real merge (self-repo
     and non-self-repo methods both, per `daemon.md`'s "two methods keyed by

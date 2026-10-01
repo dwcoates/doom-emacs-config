@@ -2,6 +2,7 @@ package promptqueue
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 
@@ -214,10 +215,10 @@ func (q *queue) popAndDeliver(ctx context.Context, ws ids.WorkspaceID, log dlog.
 	}
 	// A REFUSING LEASE OWNS THE SESSION, so nothing held is delivered into it.
 	// PolicyHold stamps every standing hold and nextDeliverable filters those,
-	// but the merge's PolicyRefuse stamps none — it refuses NEW submissions —
-	// so a turn ending underneath a merge would otherwise release a prompt
-	// straight into the session the merge is driving. The lease's release
-	// re-runs this through OnLeaseChanged, so nothing is lost.
+	// but PolicyRefuse (a merge lease an older build wrote) stamps none — it
+	// refuses NEW submissions — so a turn ending underneath it would otherwise
+	// release a prompt straight into the session the merge is driving. The
+	// lease's release re-runs this through OnLeaseChanged, so nothing is lost.
 	lease, held, err := q.deps.DB.Lease(ctx, ws)
 	if err != nil {
 		log.Error(opTurnEnded, "could not read the occupancy lease before delivering", dlog.Context{"cause": err.Error()})
@@ -228,13 +229,17 @@ func (q *queue) popAndDeliver(ctx context.Context, ws ids.WorkspaceID, log dlog.
 			dlog.Context{"lease": string(lease.ID), "holder": holderName(lease.Holder)})
 		return false, nil
 	}
+	var holding *wsm.Lease
+	if held && lease.Policy == wsm.PolicyHold {
+		holding = &lease
+	}
 	// A HELD ACT OPENS NO TURN, so the pop goes on to the entry behind it:
 	// every act at the head of the queue is applied, in order, and the first
 	// prompt behind them is delivered as the turn they preceded. A context cut
 	// is a turn, so it ends the pop like any prompt.
 	delivered := false
 	for {
-		next, ok, withheld, err := q.nextDeliverable(ctx, ws)
+		next, ok, withheld, err := q.nextDeliverable(ctx, ws, holding)
 		if err != nil {
 			return delivered, err
 		}
@@ -264,7 +269,13 @@ func (q *queue) popAndDeliver(ctx context.Context, ws ids.WorkspaceID, log dlog.
 // nextDeliverable picks the hold a turn end delivers, and counts the holds a
 // standing edit withheld. The caller holds the delivery lock, which is what
 // keeps the edit it reads from moving under the pick.
-func (q *queue) nextDeliverable(ctx context.Context, ws ids.WorkspaceID) (wsm.HeldPrompt, bool, int, error) {
+//
+// A HOLDING LEASE HOLDS EVERY ENTRY IT DOES NOT EXEMPT, STAMPED OR NOT. The
+// stamp is the lease's projection, written by OnLeaseChanged after the lease
+// is taken; deciding from the lease itself (holding, nil when none holds)
+// leaves no instant between the two in which a turn end delivers an entry
+// into the session the lease holder is driving.
+func (q *queue) nextDeliverable(ctx context.Context, ws ids.WorkspaceID, holding *wsm.Lease) (wsm.HeldPrompt, bool, int, error) {
 	standing, err := q.deps.DB.HeldPrompts(ctx, ws)
 	if err != nil {
 		return wsm.HeldPrompt{}, false, 0, fmt.Errorf("read the holds for %q: %w", ws, err)
@@ -273,6 +284,9 @@ func (q *queue) nextDeliverable(ctx context.Context, ws ids.WorkspaceID) (wsm.He
 	withheld := 0
 	for _, h := range standing {
 		if h.Tombstone != nil || h.Hold != nil {
+			continue
+		}
+		if holding != nil && !exemptFromLease(*holding, submissionOf(h).Origin) {
 			continue
 		}
 		// AN EDIT WITHHOLDS ITS PROMPT AND EVERYTHING AFTER IT, the semantic
@@ -362,16 +376,30 @@ func (q *queue) OnLeaseChanged(ws ids.WorkspaceID) {
 
 	changed := false
 	for _, h := range standing {
-		if h.Tombstone != nil || sameHold(h, want) {
+		// THE LEASE HOLDER'S OWN ENTRY IS NEVER STAMPED BY ITS LEASE, by the
+		// rule the submission path applies (exemptFromLease).
+		target := want
+		if held && exemptFromLease(lease, submissionOf(h).Origin) {
+			target = nil
+		}
+		if h.Tombstone != nil || sameHold(h, target) {
 			continue
 		}
 		var kind *wsm.HoldKind
 		scheduleID := ""
-		if want != nil {
-			k := want.kind
-			kind, scheduleID = &k, want.scheduleID
+		if target != nil {
+			k := target.kind
+			kind, scheduleID = &k, target.scheduleID
 		}
 		if err := q.deps.DB.UpdateHeldPromptHold(ctx, h.Turn, kind, scheduleID); err != nil {
+			// THE MERGE RELEASED ITS LEASE after the read above. Its release
+			// re-runs this evaluation, which un-stamps what this one could
+			// not stamp, so nothing is left to do here.
+			if errors.Is(err, wsm.ErrMergeLeaseGone) {
+				log.Info(opLeaseChange, "the merge released its lease before the hold was stamped; the release re-evaluates it",
+					dlog.Context{"turn": string(h.Turn)})
+				continue
+			}
 			log.Error(opLeaseChange, "could not re-stamp a hold against the new lease",
 				dlog.Context{"turn": string(h.Turn), "cause": err.Error()})
 			continue
