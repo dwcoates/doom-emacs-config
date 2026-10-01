@@ -45,7 +45,7 @@ func TestMergeWorkspaceOnAWorkspaceWithoutLayoutFactsIsRefused(t *testing.T) {
 
 	// Act
 	harness.CommitWork(t, f.ws.GetDir())
-	resp, err := f.d.Client().MergeWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws, Source: ownBranch()}))
+	resp, err := f.d.Client().MergeWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws, Source: harness.OwnBranch(false)}))
 
 	// Assert
 	if err != nil {
@@ -78,7 +78,7 @@ func mergeBlockedQueueFixture(t *testing.T) (front, behind *fixture, repo *harne
 	behind = mergeCreateChild(t, d, repoRef, "behind", "behind work", nil)
 
 	harness.CommitWork(t, front.ws.GetDir())
-	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: front.ws, Source: ownBranch()})); err != nil {
+	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: front.ws, Source: harness.OwnBranch(false)})); err != nil {
 		t.Fatalf("MergeWorkspace(front) = error %v, want the merge enqueued", err)
 	}
 	// The pre-prompt's turn is started and NEVER answered: the run sits in it
@@ -86,7 +86,7 @@ func mergeBlockedQueueFixture(t *testing.T) (front, behind *fixture, repo *harne
 	front.shim.ExpectStartTurn()
 
 	harness.CommitWork(t, behind.ws.GetDir())
-	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: behind.ws, Source: ownBranch()})); err != nil {
+	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: behind.ws, Source: harness.OwnBranch(false)})); err != nil {
 		t.Fatalf("MergeWorkspace(behind) = error %v, want the merge enqueued", err)
 	}
 	return front, behind, repo, d
@@ -408,7 +408,7 @@ func TestTheTestGatePassingSettlesTheTestsTab(t *testing.T) {
 
 	// Act
 	harness.CommitWork(t, f.ws.GetDir())
-	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws, Source: ownBranch()})); err != nil {
+	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws, Source: harness.OwnBranch(false)})); err != nil {
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 	}
 
@@ -416,7 +416,7 @@ func TestTheTestGatePassingSettlesTheTestsTab(t *testing.T) {
 	mergeRow := awaitRow(t, f, root, "the merge's terminal push", func(row *frontendv1.FeedRow) bool {
 		return row.GetActivity().GetMerge().GetSuccess() != nil || row.GetActivity().GetMerge().GetError() != nil
 	})
-	awaitLandingDeployed(t, d)
+	d.AwaitLandingDeployed()
 	if mergeRow.GetActivity().GetMerge().GetError() != nil {
 		t.Fatalf("merge terminal = %v, want success", mergeRow.GetActivity().GetMerge())
 	}
@@ -441,7 +441,7 @@ func TestATestGateFailureIsNeverAutomaticallyRerun(t *testing.T) {
 
 	// Act
 	harness.CommitWork(t, f.ws.GetDir())
-	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws, Source: ownBranch()})); err != nil {
+	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws, Source: harness.OwnBranch(false)})); err != nil {
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 	}
 	// The fixes tab opening and briefing the agent is proof the gate ran once
@@ -491,7 +491,7 @@ func TestALandedMergeProducesSuccessFooterRosterAndRemovesTheWorktree(t *testing
 
 	// Act
 	harness.CommitWork(t, f.ws.GetDir())
-	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws, Source: ownBranch()})); err != nil {
+	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws, Source: harness.OwnBranch(false)})); err != nil {
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 	}
 
@@ -499,7 +499,7 @@ func TestALandedMergeProducesSuccessFooterRosterAndRemovesTheWorktree(t *testing
 	mergeRow := awaitRow(t, f, root, "the merge's success", func(row *frontendv1.FeedRow) bool {
 		return row.GetActivity().GetMerge().GetSuccess() != nil
 	})
-	awaitLandingDeployed(t, d)
+	d.AwaitLandingDeployed()
 	if mergeRow.GetActivity().GetMerge().GetSuccess().GetCommit() == "" {
 		t.Fatalf("FeedMergeSuccess = %v, want a landed commit", mergeRow.GetActivity().GetMerge().GetSuccess())
 	}
@@ -546,7 +546,7 @@ func TestLandingAMergeWhoseTargetIsTheSelfRepoDeploysOnce(t *testing.T) {
 	root := f.watchRootFeed()
 
 	// Act
-	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws, Source: ownBranch()})); err != nil {
+	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws, Source: harness.OwnBranch(false)})); err != nil {
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 	}
 	awaitRow(t, f, root, "the merge's success", func(row *frontendv1.FeedRow) bool {
@@ -627,7 +627,7 @@ func TestASiblingWorktreeOfTheSelfRepoRunsTheEmacsMethodButNeverTriggersTheDeplo
 	writeCommit(t, repo, child.GetDir(), "modules/app/agent-repl/daemon/cmd/claude-repld/main.go", "landed\n")
 
 	// Act
-	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: child, Source: ownBranch()})); err != nil {
+	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: child, Source: harness.OwnBranch(false)})); err != nil {
 		t.Fatalf("MergeWorkspace(child) = error %v, want the merge enqueued", err)
 	}
 	roster := d.WatchRoster()
@@ -683,7 +683,7 @@ func TestAOneShotMergeOnANonSelfRepoNeverTriggersTheDeploy(t *testing.T) {
 	// carrying the completion directive asks for it — the ordinary merge verb.
 	shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
 	harness.CommitWork(t, ws.GetDir())
-	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: ws, Source: ownBranch()})); err != nil {
+	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: ws, Source: harness.OwnBranch(false)})); err != nil {
 		t.Fatalf("MergeWorkspace(one_shot) = error %v, want the merge enqueued", err)
 	}
 
@@ -733,7 +733,7 @@ func TestPrePromptTabRunsUnderTheLeaseAndParentsItsRowsToItsTabNotTheRoot(t *tes
 
 	// Act: enqueue and answer the pre-prompt's own turn.
 	harness.CommitWork(t, f.ws.GetDir())
-	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws, Source: ownBranch()})); err != nil {
+	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws, Source: harness.OwnBranch(false)})); err != nil {
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 	}
 	req := f.shim.ExpectStartTurn()
@@ -806,7 +806,7 @@ func TestAFailingPostPromptNeverFailsTheRunAndRidesTheTerminalSuccess(t *testing
 
 	// Act: land, then answer the post-prompt's turn with a FAILURE.
 	harness.CommitWork(t, f.ws.GetDir())
-	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws, Source: ownBranch()})); err != nil {
+	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws, Source: harness.OwnBranch(false)})); err != nil {
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 	}
 	req := f.shim.ExpectStartTurn()
@@ -984,7 +984,7 @@ func displacedTurnAcrossABounce(t *testing.T) (*fixture, *harness.Daemon, *shimv
 	// turn when the merge admits, which is what CaptureDisplaced reads.
 	f.shim.ExpectStartTurn()
 	harness.CommitWork(t, f.ws.GetDir())
-	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws, Source: ownBranch()})); err != nil {
+	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws, Source: harness.OwnBranch(false)})); err != nil {
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 	}
 	d.AwaitFileExists(rendezvous)
@@ -1093,13 +1093,13 @@ func TestTheTestGateNarrowsToTheBlastRadiusOfTheLandedChange(t *testing.T) {
 	root := f.watchRootFeed()
 
 	// Act
-	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws, Source: ownBranch()})); err != nil {
+	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws, Source: harness.OwnBranch(false)})); err != nil {
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 	}
 	awaitRow(t, f, root, "the merge's success", func(row *frontendv1.FeedRow) bool {
 		return row.GetActivity().GetMerge().GetSuccess() != nil
 	})
-	awaitLandingDeployed(t, d)
+	d.AwaitLandingDeployed()
 
 	// Assert: the script was invoked with EXACTLY the narrowed selection, not
 	// the full 17-suite roster.
@@ -1133,13 +1133,13 @@ func TestTheTestsTabPaintsANSISpansFromTheScriptedOutput(t *testing.T) {
 	root := f.watchRootFeed()
 
 	// Act
-	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws, Source: ownBranch()})); err != nil {
+	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws, Source: harness.OwnBranch(false)})); err != nil {
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 	}
 	mergeRow := awaitRow(t, f, root, "the merge's success", func(row *frontendv1.FeedRow) bool {
 		return row.GetActivity().GetMerge().GetSuccess() != nil
 	})
-	awaitLandingDeployed(t, d)
+	d.AwaitLandingDeployed()
 
 	// Assert: the settled tests tab carries the scripted run's output as
 	// DAEMON-PARSED paint spans — the client never sees the raw escape. This
@@ -1315,7 +1315,7 @@ func TestAMergeOverATurnWithDetachedWorkEndsOnlyTheTurnAndWaitsForTheWork(t *tes
 	// Act: the merge admits over the running turn, and is seen waiting on the
 	// live subagent before the subagent settles.
 	harness.CommitWork(t, f.ws.GetDir())
-	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws, Source: ownBranch()})); err != nil {
+	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws, Source: harness.OwnBranch(false)})); err != nil {
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 	}
 	killReq := f.shim.ExpectKillTurn()

@@ -141,17 +141,6 @@ func mqBranchOf(ws *workspacev1.WorkspaceRef) string {
 
 func mqStrPtr(s string) *string { return &s }
 
-// mqOwnBranch is the requester's own branch, closed once it lands.
-func mqOwnBranch() *agentreplv1.MergeWorkspaceSource {
-	return &agentreplv1.MergeWorkspaceSource{Source: &agentreplv1.MergeWorkspaceSource_OwnBranch{OwnBranch: &agentreplv1.MergeWorkspaceSourceOwnBranch{}}}
-}
-
-// mqKeepOpen is the requester's own branch, its workspace kept open after it
-// lands.
-func mqKeepOpen() *agentreplv1.MergeWorkspaceSource {
-	return &agentreplv1.MergeWorkspaceSource{Source: &agentreplv1.MergeWorkspaceSource_OwnBranch{OwnBranch: &agentreplv1.MergeWorkspaceSourceOwnBranch{KeepOpen: true}}}
-}
-
 // mqMerge asks for one workspace's merge of a source and fails the test unless
 // it is enqueued.
 func mqMerge(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, source *agentreplv1.MergeWorkspaceSource) {
@@ -160,16 +149,6 @@ func mqMerge(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, source *agent
 	if err != nil || resp.Msg.GetSuccess() == nil {
 		t.Fatalf("MergeWorkspace = (%v, %v), want the merge enqueued", resp.Msg.GetResult(), err)
 	}
-}
-
-// mqAwaitLandingDeployed waits for the ONE deploy a landing in the daemon's own
-// checkout runs, so the test never ends mid-build and reads the build's kill
-// as a failed deploy (daemon/integration's awaitLandingDeployed).
-func mqAwaitLandingDeployed(t *testing.T, w *World) {
-	t.Helper()
-	w.AwaitLogRecord(w.RunLogPath(), "the landing's deploy", func(r harness.LogRecord) bool {
-		return r.Operation == "daemon.deploy.landing" && r.Message == "the landing is deployed"
-	})
 }
 
 // mqConcluded answers whether a root row is a merge bubble's terminal.
@@ -327,7 +306,7 @@ func TestMergeLeaseRefusesSubmit(t *testing.T) {
 	})
 	root := mqOpenFeedWatch(t, w, child, nil)
 	defer root.Close()
-	mqMerge(t, w, child, mqKeepOpen())
+	mqMerge(t, w, child, harness.OwnBranch(true))
 	w.AwaitWorkspaceLogOperationCount(child.GetDir(), harness.OpTurnOpened, 1)
 
 	// Act: submit a fresh prompt to the SAME workspace while the merge runs.
@@ -419,12 +398,12 @@ func TestMergeBubbleCoalescesIntoOneFeedRow(t *testing.T) {
 
 			// Act: a clean merge (no conflict, a passing test gate) lands.
 			harness.CommitWork(t, child.GetDir())
-			mqMerge(t, w, child, mqOwnBranch())
+			mqMerge(t, w, child, harness.OwnBranch(false))
 			mergeRow := root.AwaitRow("the merge bubble's landed terminal", func(row *frontendv1.FeedRow) bool {
 				return row.GetActivity().GetMerge().GetSuccess() != nil
 			})
 			if tc.selfRepo {
-				mqAwaitLandingDeployed(t, w)
+				w.AwaitLandingDeployed()
 			}
 
 			// Assert: exactly ONE distinct root-feed row (by FeedId) ever
@@ -498,7 +477,7 @@ func mqStartConflictedMerge(t *testing.T, name string) *mqConflictedMerge {
 	repo.ScriptRebaseConflict(mqBranchOf(child), 1, "work.txt")
 	root := mqOpenFeedWatch(t, w, child, nil)
 	t.Cleanup(root.Close)
-	mqMerge(t, w, child, mqOwnBranch())
+	mqMerge(t, w, child, harness.OwnBranch(false))
 	return &mqConflictedMerge{w: w, repo: repo, child: child, root: root}
 }
 
@@ -676,7 +655,7 @@ func TestDisplacedTurnCapturedEndedThenResubmittedExactlyOnce(t *testing.T) {
 	turn := SubmitPrompt(t, w, child, displacedText)
 	w.AwaitWorkspaceLogOperationCount(child.GetDir(), harness.OpTurnOpened, 1)
 	harness.CommitWork(t, child.GetDir())
-	mqMerge(t, w, child, mqOwnBranch())
+	mqMerge(t, w, child, harness.OwnBranch(false))
 
 	// Assert: the displaced turn is CAPTURED then ENDED — its own terminal
 	// arrives on the feed.
@@ -1013,7 +992,7 @@ func TestFailMarkerFailsABeforeActionRunAndRidesAnAfterActionTerminal(t *testing
 
 		// Act
 		harness.CommitWork(t, child.GetDir())
-		mqMerge(t, w, child, mqOwnBranch())
+		mqMerge(t, w, child, harness.OwnBranch(false))
 		head := root.AwaitRow("the merge bubble's head", func(row *frontendv1.FeedRow) bool {
 			return row.GetActivity().GetMerge() != nil
 		})
@@ -1127,7 +1106,7 @@ func TestFailMarkerFailsABeforeActionRunAndRidesAnAfterActionTerminal(t *testing
 
 			// Act
 			harness.CommitWork(t, child.GetDir())
-			mqMerge(t, w, child, mqOwnBranch())
+			mqMerge(t, w, child, harness.OwnBranch(false))
 			head := root.AwaitRow("the merge bubble's head", func(row *frontendv1.FeedRow) bool {
 				return row.GetActivity().GetMerge() != nil
 			})
@@ -1157,7 +1136,7 @@ func TestFailMarkerFailsABeforeActionRunAndRidesAnAfterActionTerminal(t *testing
 				t.Fatalf("merge terminal = %v, want FeedMergeSuccess (an after-action failure rides the terminal)", terminal)
 			}
 			if tc.selfRepo {
-				mqAwaitLandingDeployed(t, w)
+				w.AwaitLandingDeployed()
 			}
 		})
 	}
@@ -1197,9 +1176,9 @@ func mqLandedOwnBranch(t *testing.T, name string) (*World, *workspacev1.Workspac
 	repo.CommitIn(repo.Dir, "main.txt", "moved\n")
 	root := mqOpenFeedWatch(t, w, child, nil)
 	t.Cleanup(root.Close)
-	mqMerge(t, w, child, mqKeepOpen())
+	mqMerge(t, w, child, harness.OwnBranch(true))
 	head := root.AwaitRow("the merge bubble's terminal", mqConcluded)
-	mqAwaitLandingDeployed(t, w)
+	w.AwaitLandingDeployed()
 	if head.GetActivity().GetMerge().GetSuccess() == nil {
 		t.Fatalf("merge terminal = %v, want landed", head.GetActivity().GetMerge())
 	}
@@ -1259,7 +1238,7 @@ func TestAMergedUpstreamSourceCarriesTheUpdatingMainTab(t *testing.T) {
 	mqMerge(t, w, child, &agentreplv1.MergeWorkspaceSource{Source: &agentreplv1.MergeWorkspaceSource_MergedUpstream{
 		MergedUpstream: &agentreplv1.MergeWorkspaceSourceMergedUpstream{}}})
 	head := root.AwaitRow("the merge bubble's terminal", mqConcluded)
-	mqAwaitLandingDeployed(t, w)
+	w.AwaitLandingDeployed()
 
 	// Assert: the default branch moved to upstream's tip through the updating
 	// main step, drawn as its own tab.
@@ -1304,7 +1283,7 @@ func TestAMergeOfABranchThatDoesNotExistIsRefused(t *testing.T) {
 	// Act
 	resp, err := w.Client().MergeWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{
 		Workspace: child,
-		Source:    &agentreplv1.MergeWorkspaceSource{Source: &agentreplv1.MergeWorkspaceSource_Branch{Branch: &agentreplv1.MergeWorkspaceSourceBranch{Name: "no-such-branch"}}},
+		Source:    harness.BranchSource("no-such-branch"),
 	}))
 
 	// Assert

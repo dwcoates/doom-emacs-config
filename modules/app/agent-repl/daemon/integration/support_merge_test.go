@@ -39,7 +39,7 @@ func mergeBlockedRepoOn(t *testing.T, d *harness.Daemon, namePrefix string) (fro
 	behind = mergeCreateChild(t, d, repoRef, namePrefix+"-behind", namePrefix+" behind work", nil)
 
 	harness.CommitWork(t, front.ws.GetDir())
-	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: front.ws, Source: ownBranch()})); err != nil {
+	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: front.ws, Source: harness.OwnBranch(false)})); err != nil {
 		t.Fatalf("MergeWorkspace(%s front) = error %v, want the merge enqueued", namePrefix, err)
 	}
 	// The pre-prompt's turn is started and NEVER answered: the run sits in it
@@ -47,25 +47,8 @@ func mergeBlockedRepoOn(t *testing.T, d *harness.Daemon, namePrefix string) (fro
 	front.shim.ExpectStartTurn()
 
 	harness.CommitWork(t, behind.ws.GetDir())
-	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: behind.ws, Source: ownBranch()})); err != nil {
+	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: behind.ws, Source: harness.OwnBranch(false)})); err != nil {
 		t.Fatalf("MergeWorkspace(%s behind) = error %v, want the merge enqueued", namePrefix, err)
 	}
 	return front, behind, repo, repoRef
-}
-
-// awaitLandingDeployed waits for the ONE deploy a landing in the daemon's own
-// checkout runs. A landing now always carries work (harness.CommitWork), so it
-// always deploys, and a test that ends mid-build kills the build under the
-// deploy and reads the kill as a failed deploy.
-func awaitLandingDeployed(t *testing.T, d *harness.Daemon) {
-	t.Helper()
-	d.AwaitLogRecord(d.RunLogPath(), "the landing's deploy", func(r harness.LogRecord) bool {
-		return r.Operation == "daemon.deploy.landing" && r.Message == "the landing is deployed"
-	})
-}
-
-// ownBranch is the requester's own branch, closed once it lands: what every
-// MergeWorkspace a test makes for a workspace's own work merges.
-func ownBranch() *agentreplv1.MergeWorkspaceSource {
-	return &agentreplv1.MergeWorkspaceSource{Source: &agentreplv1.MergeWorkspaceSource_OwnBranch{OwnBranch: &agentreplv1.MergeWorkspaceSourceOwnBranch{}}}
 }
