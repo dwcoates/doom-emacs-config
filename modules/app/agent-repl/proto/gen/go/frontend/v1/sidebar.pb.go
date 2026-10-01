@@ -357,6 +357,247 @@ func (*RosterRowReviving) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{4}
 }
 
+// The workspace's AVAILABILITY: whether the daemon has this workspace's
+// session to offer an editor. An editor OPENS a workspace — its tab, its
+// panels, its webapp — only once the row says the daemon has finished
+// bringing it up, either way; before that there is nothing behind the
+// workspace to draw. At startup an editor opens the registry's rows strictly
+// IN ROSTER ORDER, each one waiting until its row leaves `pending`, so a row
+// that is `available` before an earlier one stays unopened until that earlier
+// one resolves.
+//
+// THE DAEMON DECIDES IT FROM THE SHIM LINK. `available` is the shim link
+// having CONNECTED at least once under this daemon, and it is STICKY for the
+// daemon's lifetime: a session parked by the idle sweep, severed, or killed
+// later is still a workspace the editor has opened, and its status arm
+// reports what became of it. `unavailable` is the link going dead before it
+// ever connected — the start failed, or the boot could not tell whether a
+// surviving shim owns the workspace and so served none. `pending` is
+// everything before either.
+//
+// A hibernated workspace is never `available` merely by being registered:
+// the boot wakes it, and it becomes available when the woken shim connects.
+type RosterRowAvailability struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The availability. The set arm IS the availability; an unset oneof is
+	// invalid.
+	//
+	// Types that are valid to be assigned to Availability:
+	//
+	//	*RosterRowAvailability_Pending
+	//	*RosterRowAvailability_Available
+	//	*RosterRowAvailability_Unavailable
+	Availability  isRosterRowAvailability_Availability `protobuf_oneof:"availability"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RosterRowAvailability) Reset() {
+	*x = RosterRowAvailability{}
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RosterRowAvailability) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RosterRowAvailability) ProtoMessage() {}
+
+func (x *RosterRowAvailability) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RosterRowAvailability.ProtoReflect.Descriptor instead.
+func (*RosterRowAvailability) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *RosterRowAvailability) GetAvailability() isRosterRowAvailability_Availability {
+	if x != nil {
+		return x.Availability
+	}
+	return nil
+}
+
+func (x *RosterRowAvailability) GetPending() *RosterRowAvailabilityPending {
+	if x != nil {
+		if x, ok := x.Availability.(*RosterRowAvailability_Pending); ok {
+			return x.Pending
+		}
+	}
+	return nil
+}
+
+func (x *RosterRowAvailability) GetAvailable() *RosterRowAvailabilityAvailable {
+	if x != nil {
+		if x, ok := x.Availability.(*RosterRowAvailability_Available); ok {
+			return x.Available
+		}
+	}
+	return nil
+}
+
+func (x *RosterRowAvailability) GetUnavailable() *RosterRowAvailabilityUnavailable {
+	if x != nil {
+		if x, ok := x.Availability.(*RosterRowAvailability_Unavailable); ok {
+			return x.Unavailable
+		}
+	}
+	return nil
+}
+
+type isRosterRowAvailability_Availability interface {
+	isRosterRowAvailability_Availability()
+}
+
+type RosterRowAvailability_Pending struct {
+	// The daemon is still bringing the session up (or has not yet begun to):
+	// no shim link has connected and none has died. The editor does not open
+	// the workspace yet.
+	Pending *RosterRowAvailabilityPending `protobuf:"bytes,1,opt,name=pending,proto3,oneof"`
+}
+
+type RosterRowAvailability_Available struct {
+	// A shim link to this workspace's session has connected under this
+	// daemon. The editor opens the workspace.
+	Available *RosterRowAvailabilityAvailable `protobuf:"bytes,2,opt,name=available,proto3,oneof"`
+}
+
+type RosterRowAvailability_Unavailable struct {
+	// The bring-up ended without a session: the link went dead before it
+	// ever connected. The editor still opens the workspace, and the row's
+	// status arm (`start_failed`) is what it draws.
+	Unavailable *RosterRowAvailabilityUnavailable `protobuf:"bytes,3,opt,name=unavailable,proto3,oneof"`
+}
+
+func (*RosterRowAvailability_Pending) isRosterRowAvailability_Availability() {}
+
+func (*RosterRowAvailability_Available) isRosterRowAvailability_Availability() {}
+
+func (*RosterRowAvailability_Unavailable) isRosterRowAvailability_Availability() {}
+
+// The session is still being brought up; the workspace is not opened yet.
+type RosterRowAvailabilityPending struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RosterRowAvailabilityPending) Reset() {
+	*x = RosterRowAvailabilityPending{}
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RosterRowAvailabilityPending) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RosterRowAvailabilityPending) ProtoMessage() {}
+
+func (x *RosterRowAvailabilityPending) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RosterRowAvailabilityPending.ProtoReflect.Descriptor instead.
+func (*RosterRowAvailabilityPending) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{6}
+}
+
+// The workspace's shim link has connected; the workspace is opened.
+type RosterRowAvailabilityAvailable struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RosterRowAvailabilityAvailable) Reset() {
+	*x = RosterRowAvailabilityAvailable{}
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RosterRowAvailabilityAvailable) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RosterRowAvailabilityAvailable) ProtoMessage() {}
+
+func (x *RosterRowAvailabilityAvailable) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RosterRowAvailabilityAvailable.ProtoReflect.Descriptor instead.
+func (*RosterRowAvailabilityAvailable) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{7}
+}
+
+// The bring-up ended without a session; the workspace is opened and draws
+// its start failure.
+type RosterRowAvailabilityUnavailable struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RosterRowAvailabilityUnavailable) Reset() {
+	*x = RosterRowAvailabilityUnavailable{}
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RosterRowAvailabilityUnavailable) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RosterRowAvailabilityUnavailable) ProtoMessage() {}
+
+func (x *RosterRowAvailabilityUnavailable) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RosterRowAvailabilityUnavailable.ProtoReflect.Descriptor instead.
+func (*RosterRowAvailabilityUnavailable) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{8}
+}
+
 // The selected workspace, by identity. Compared against RosterRowWorkspace,
 // never against a display name, which is not unique.
 type RosterCurrentWorkspace struct {
@@ -370,7 +611,7 @@ type RosterCurrentWorkspace struct {
 
 func (x *RosterCurrentWorkspace) Reset() {
 	*x = RosterCurrentWorkspace{}
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[5]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -382,7 +623,7 @@ func (x *RosterCurrentWorkspace) String() string {
 func (*RosterCurrentWorkspace) ProtoMessage() {}
 
 func (x *RosterCurrentWorkspace) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[5]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -395,7 +636,7 @@ func (x *RosterCurrentWorkspace) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RosterCurrentWorkspace.ProtoReflect.Descriptor instead.
 func (*RosterCurrentWorkspace) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{5}
+	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *RosterCurrentWorkspace) GetWorkspace() *v1.WorkspaceRef {
@@ -417,7 +658,7 @@ type RosterRepositoryView struct {
 
 func (x *RosterRepositoryView) Reset() {
 	*x = RosterRepositoryView{}
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[6]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -429,7 +670,7 @@ func (x *RosterRepositoryView) String() string {
 func (*RosterRepositoryView) ProtoMessage() {}
 
 func (x *RosterRepositoryView) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[6]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -442,7 +683,7 @@ func (x *RosterRepositoryView) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RosterRepositoryView.ProtoReflect.Descriptor instead.
 func (*RosterRepositoryView) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{6}
+	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *RosterRepositoryView) GetSections() []*RosterRepoSection {
@@ -463,7 +704,7 @@ type RosterTaskView struct {
 
 func (x *RosterTaskView) Reset() {
 	*x = RosterTaskView{}
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[7]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -475,7 +716,7 @@ func (x *RosterTaskView) String() string {
 func (*RosterTaskView) ProtoMessage() {}
 
 func (x *RosterTaskView) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[7]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -488,7 +729,7 @@ func (x *RosterTaskView) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RosterTaskView.ProtoReflect.Descriptor instead.
 func (*RosterTaskView) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{7}
+	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *RosterTaskView) GetSections() []*RosterTaskSection {
@@ -514,7 +755,7 @@ type RosterRepoSection struct {
 
 func (x *RosterRepoSection) Reset() {
 	*x = RosterRepoSection{}
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[8]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -526,7 +767,7 @@ func (x *RosterRepoSection) String() string {
 func (*RosterRepoSection) ProtoMessage() {}
 
 func (x *RosterRepoSection) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[8]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -539,7 +780,7 @@ func (x *RosterRepoSection) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RosterRepoSection.ProtoReflect.Descriptor instead.
 func (*RosterRepoSection) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{8}
+	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *RosterRepoSection) GetKey() *RosterRepoKey {
@@ -574,7 +815,7 @@ type RosterRepoKey struct {
 
 func (x *RosterRepoKey) Reset() {
 	*x = RosterRepoKey{}
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[9]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -586,7 +827,7 @@ func (x *RosterRepoKey) String() string {
 func (*RosterRepoKey) ProtoMessage() {}
 
 func (x *RosterRepoKey) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[9]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -599,7 +840,7 @@ func (x *RosterRepoKey) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RosterRepoKey.ProtoReflect.Descriptor instead.
 func (*RosterRepoKey) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{9}
+	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *RosterRepoKey) GetRepository() *v1.RepositoryRef {
@@ -625,7 +866,7 @@ type RosterTaskSection struct {
 
 func (x *RosterTaskSection) Reset() {
 	*x = RosterTaskSection{}
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[10]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -637,7 +878,7 @@ func (x *RosterTaskSection) String() string {
 func (*RosterTaskSection) ProtoMessage() {}
 
 func (x *RosterTaskSection) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[10]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -650,7 +891,7 @@ func (x *RosterTaskSection) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RosterTaskSection.ProtoReflect.Descriptor instead.
 func (*RosterTaskSection) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{10}
+	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *RosterTaskSection) GetKey() *RosterTaskKey {
@@ -684,7 +925,7 @@ type RosterTaskKey struct {
 
 func (x *RosterTaskKey) Reset() {
 	*x = RosterTaskKey{}
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[11]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -696,7 +937,7 @@ func (x *RosterTaskKey) String() string {
 func (*RosterTaskKey) ProtoMessage() {}
 
 func (x *RosterTaskKey) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[11]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -709,7 +950,7 @@ func (x *RosterTaskKey) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RosterTaskKey.ProtoReflect.Descriptor instead.
 func (*RosterTaskKey) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{11}
+	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *RosterTaskKey) GetTaskId() string {
@@ -731,7 +972,7 @@ type RosterMergedSection struct {
 
 func (x *RosterMergedSection) Reset() {
 	*x = RosterMergedSection{}
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[12]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -743,7 +984,7 @@ func (x *RosterMergedSection) String() string {
 func (*RosterMergedSection) ProtoMessage() {}
 
 func (x *RosterMergedSection) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[12]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -756,7 +997,7 @@ func (x *RosterMergedSection) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RosterMergedSection.ProtoReflect.Descriptor instead.
 func (*RosterMergedSection) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{12}
+	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *RosterMergedSection) GetHeader() *RosterSectionHeader {
@@ -784,7 +1025,7 @@ type RosterSectionHeader struct {
 
 func (x *RosterSectionHeader) Reset() {
 	*x = RosterSectionHeader{}
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[13]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -796,7 +1037,7 @@ func (x *RosterSectionHeader) String() string {
 func (*RosterSectionHeader) ProtoMessage() {}
 
 func (x *RosterSectionHeader) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[13]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -809,7 +1050,7 @@ func (x *RosterSectionHeader) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RosterSectionHeader.ProtoReflect.Descriptor instead.
 func (*RosterSectionHeader) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{13}
+	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *RosterSectionHeader) GetLabel() *RosterLabel {
@@ -833,7 +1074,7 @@ type RosterTaskSectionHeader struct {
 
 func (x *RosterTaskSectionHeader) Reset() {
 	*x = RosterTaskSectionHeader{}
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[14]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -845,7 +1086,7 @@ func (x *RosterTaskSectionHeader) String() string {
 func (*RosterTaskSectionHeader) ProtoMessage() {}
 
 func (x *RosterTaskSectionHeader) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[14]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -858,7 +1099,7 @@ func (x *RosterTaskSectionHeader) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RosterTaskSectionHeader.ProtoReflect.Descriptor instead.
 func (*RosterTaskSectionHeader) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{14}
+	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *RosterTaskSectionHeader) GetLabel() *RosterLabel {
@@ -886,7 +1127,7 @@ type RosterLabel struct {
 
 func (x *RosterLabel) Reset() {
 	*x = RosterLabel{}
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[15]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -898,7 +1139,7 @@ func (x *RosterLabel) String() string {
 func (*RosterLabel) ProtoMessage() {}
 
 func (x *RosterLabel) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[15]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -911,7 +1152,7 @@ func (x *RosterLabel) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RosterLabel.ProtoReflect.Descriptor instead.
 func (*RosterLabel) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{15}
+	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *RosterLabel) GetText() string {
@@ -931,7 +1172,7 @@ type RosterTaskDone struct {
 
 func (x *RosterTaskDone) Reset() {
 	*x = RosterTaskDone{}
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[16]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -943,7 +1184,7 @@ func (x *RosterTaskDone) String() string {
 func (*RosterTaskDone) ProtoMessage() {}
 
 func (x *RosterTaskDone) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[16]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -956,7 +1197,7 @@ func (x *RosterTaskDone) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RosterTaskDone.ProtoReflect.Descriptor instead.
 func (*RosterTaskDone) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{16}
+	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *RosterTaskDone) GetDone() bool {
@@ -976,7 +1217,7 @@ type RosterRows struct {
 
 func (x *RosterRows) Reset() {
 	*x = RosterRows{}
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[17]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -988,7 +1229,7 @@ func (x *RosterRows) String() string {
 func (*RosterRows) ProtoMessage() {}
 
 func (x *RosterRows) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[17]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1001,7 +1242,7 @@ func (x *RosterRows) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RosterRows.ProtoReflect.Descriptor instead.
 func (*RosterRows) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{17}
+	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *RosterRows) GetRows() []*RosterRow {
@@ -1050,6 +1291,11 @@ type RosterRow struct {
 	// the daemon keeps across restarts of every client. UNSET = never selected.
 	// See RosterRowLastSelected, which carries the field's whole contract.
 	LastSelected *RosterRowLastSelected `protobuf:"bytes,37,opt,name=last_selected,json=lastSelected,proto3,oneof" json:"last_selected,omitempty"`
+	// Whether this workspace may be OPENED by an editor yet: its session is
+	// being brought up, is up, or could not be brought up. See
+	// RosterRowAvailability, which carries the field's whole contract. ALWAYS
+	// SET; a row without it is a contract breach and is rejected loudly.
+	Availability *RosterRowAvailability `protobuf:"bytes,38,opt,name=availability,proto3" json:"availability,omitempty"`
 	// The row's display name.
 	Name *RosterRowName `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
 	// The workspace's lifecycle AS THE DAEMON RESOLVES IT: its own RenderState
@@ -1112,7 +1358,7 @@ type RosterRow struct {
 
 func (x *RosterRow) Reset() {
 	*x = RosterRow{}
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[18]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1124,7 +1370,7 @@ func (x *RosterRow) String() string {
 func (*RosterRow) ProtoMessage() {}
 
 func (x *RosterRow) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[18]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1137,7 +1383,7 @@ func (x *RosterRow) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RosterRow.ProtoReflect.Descriptor instead.
 func (*RosterRow) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{18}
+	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *RosterRow) GetWorkspace() *RosterRowWorkspace {
@@ -1178,6 +1424,13 @@ func (x *RosterRow) GetReviving() *RosterRowReviving {
 func (x *RosterRow) GetLastSelected() *RosterRowLastSelected {
 	if x != nil {
 		return x.LastSelected
+	}
+	return nil
+}
+
+func (x *RosterRow) GetAvailability() *RosterRowAvailability {
+	if x != nil {
+		return x.Availability
 	}
 	return nil
 }
@@ -1628,7 +1881,7 @@ type RosterRowWorkspace struct {
 
 func (x *RosterRowWorkspace) Reset() {
 	*x = RosterRowWorkspace{}
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[19]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1640,7 +1893,7 @@ func (x *RosterRowWorkspace) String() string {
 func (*RosterRowWorkspace) ProtoMessage() {}
 
 func (x *RosterRowWorkspace) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[19]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1653,7 +1906,7 @@ func (x *RosterRowWorkspace) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RosterRowWorkspace.ProtoReflect.Descriptor instead.
 func (*RosterRowWorkspace) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{19}
+	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *RosterRowWorkspace) GetWorkspace() *v1.WorkspaceRef {
@@ -1673,7 +1926,7 @@ type RosterRowName struct {
 
 func (x *RosterRowName) Reset() {
 	*x = RosterRowName{}
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[20]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1685,7 +1938,7 @@ func (x *RosterRowName) String() string {
 func (*RosterRowName) ProtoMessage() {}
 
 func (x *RosterRowName) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[20]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1698,7 +1951,7 @@ func (x *RosterRowName) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RosterRowName.ProtoReflect.Descriptor instead.
 func (*RosterRowName) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{20}
+	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *RosterRowName) GetText() string {
@@ -1732,7 +1985,7 @@ type RosterRowLastSelected struct {
 
 func (x *RosterRowLastSelected) Reset() {
 	*x = RosterRowLastSelected{}
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[21]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1744,7 +1997,7 @@ func (x *RosterRowLastSelected) String() string {
 func (*RosterRowLastSelected) ProtoMessage() {}
 
 func (x *RosterRowLastSelected) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[21]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1757,7 +2010,7 @@ func (x *RosterRowLastSelected) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RosterRowLastSelected.ProtoReflect.Descriptor instead.
 func (*RosterRowLastSelected) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{21}
+	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *RosterRowLastSelected) GetAtMs() int64 {
@@ -1777,7 +2030,7 @@ type RosterRowCurrent struct {
 
 func (x *RosterRowCurrent) Reset() {
 	*x = RosterRowCurrent{}
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[22]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1789,7 +2042,7 @@ func (x *RosterRowCurrent) String() string {
 func (*RosterRowCurrent) ProtoMessage() {}
 
 func (x *RosterRowCurrent) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[22]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1802,7 +2055,7 @@ func (x *RosterRowCurrent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RosterRowCurrent.ProtoReflect.Descriptor instead.
 func (*RosterRowCurrent) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{22}
+	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *RosterRowCurrent) GetCurrent() bool {
@@ -1841,7 +2094,7 @@ type RosterRowWhen struct {
 
 func (x *RosterRowWhen) Reset() {
 	*x = RosterRowWhen{}
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[23]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1853,7 +2106,7 @@ func (x *RosterRowWhen) String() string {
 func (*RosterRowWhen) ProtoMessage() {}
 
 func (x *RosterRowWhen) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[23]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1866,7 +2119,7 @@ func (x *RosterRowWhen) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RosterRowWhen.ProtoReflect.Descriptor instead.
 func (*RosterRowWhen) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{23}
+	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *RosterRowWhen) GetShown() isRosterRowWhen_Shown {
@@ -1952,7 +2205,7 @@ type RosterRowWhenLastSelected struct {
 
 func (x *RosterRowWhenLastSelected) Reset() {
 	*x = RosterRowWhenLastSelected{}
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[24]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1964,7 +2217,7 @@ func (x *RosterRowWhenLastSelected) String() string {
 func (*RosterRowWhenLastSelected) ProtoMessage() {}
 
 func (x *RosterRowWhenLastSelected) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[24]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1977,7 +2230,7 @@ func (x *RosterRowWhenLastSelected) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RosterRowWhenLastSelected.ProtoReflect.Descriptor instead.
 func (*RosterRowWhenLastSelected) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{24}
+	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *RosterRowWhenLastSelected) GetAtMs() int64 {
@@ -1997,7 +2250,7 @@ type RosterRowWhenMerged struct {
 
 func (x *RosterRowWhenMerged) Reset() {
 	*x = RosterRowWhenMerged{}
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[25]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2009,7 +2262,7 @@ func (x *RosterRowWhenMerged) String() string {
 func (*RosterRowWhenMerged) ProtoMessage() {}
 
 func (x *RosterRowWhenMerged) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[25]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2022,7 +2275,7 @@ func (x *RosterRowWhenMerged) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RosterRowWhenMerged.ProtoReflect.Descriptor instead.
 func (*RosterRowWhenMerged) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{25}
+	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *RosterRowWhenMerged) GetAtMs() int64 {
@@ -2044,7 +2297,7 @@ type RosterRowWhenActive struct {
 
 func (x *RosterRowWhenActive) Reset() {
 	*x = RosterRowWhenActive{}
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[26]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2056,7 +2309,7 @@ func (x *RosterRowWhenActive) String() string {
 func (*RosterRowWhenActive) ProtoMessage() {}
 
 func (x *RosterRowWhenActive) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[26]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2069,7 +2322,7 @@ func (x *RosterRowWhenActive) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RosterRowWhenActive.ProtoReflect.Descriptor instead.
 func (*RosterRowWhenActive) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{26}
+	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *RosterRowWhenActive) GetAtMs() int64 {
@@ -2091,7 +2344,7 @@ type RosterRowWhenCreated struct {
 
 func (x *RosterRowWhenCreated) Reset() {
 	*x = RosterRowWhenCreated{}
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[27]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2103,7 +2356,7 @@ func (x *RosterRowWhenCreated) String() string {
 func (*RosterRowWhenCreated) ProtoMessage() {}
 
 func (x *RosterRowWhenCreated) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[27]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2116,7 +2369,7 @@ func (x *RosterRowWhenCreated) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RosterRowWhenCreated.ProtoReflect.Descriptor instead.
 func (*RosterRowWhenCreated) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{27}
+	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *RosterRowWhenCreated) GetAtMs() int64 {
@@ -2140,7 +2393,7 @@ type RosterRowDetail struct {
 
 func (x *RosterRowDetail) Reset() {
 	*x = RosterRowDetail{}
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[28]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2152,7 +2405,7 @@ func (x *RosterRowDetail) String() string {
 func (*RosterRowDetail) ProtoMessage() {}
 
 func (x *RosterRowDetail) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[28]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2165,7 +2418,7 @@ func (x *RosterRowDetail) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RosterRowDetail.ProtoReflect.Descriptor instead.
 func (*RosterRowDetail) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{28}
+	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *RosterRowDetail) GetBranch() *RosterRowDetailBranch {
@@ -2199,7 +2452,7 @@ type RosterRowDetailBranch struct {
 
 func (x *RosterRowDetailBranch) Reset() {
 	*x = RosterRowDetailBranch{}
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[29]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2211,7 +2464,7 @@ func (x *RosterRowDetailBranch) String() string {
 func (*RosterRowDetailBranch) ProtoMessage() {}
 
 func (x *RosterRowDetailBranch) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[29]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2224,7 +2477,7 @@ func (x *RosterRowDetailBranch) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RosterRowDetailBranch.ProtoReflect.Descriptor instead.
 func (*RosterRowDetailBranch) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{29}
+	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *RosterRowDetailBranch) GetName() string {
@@ -2244,7 +2497,7 @@ type RosterRowDetailParentBranch struct {
 
 func (x *RosterRowDetailParentBranch) Reset() {
 	*x = RosterRowDetailParentBranch{}
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[30]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2256,7 +2509,7 @@ func (x *RosterRowDetailParentBranch) String() string {
 func (*RosterRowDetailParentBranch) ProtoMessage() {}
 
 func (x *RosterRowDetailParentBranch) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[30]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2269,7 +2522,7 @@ func (x *RosterRowDetailParentBranch) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RosterRowDetailParentBranch.ProtoReflect.Descriptor instead.
 func (*RosterRowDetailParentBranch) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{30}
+	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *RosterRowDetailParentBranch) GetName() string {
@@ -2290,7 +2543,7 @@ type RosterRowDetailSummary struct {
 
 func (x *RosterRowDetailSummary) Reset() {
 	*x = RosterRowDetailSummary{}
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[31]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2302,7 +2555,7 @@ func (x *RosterRowDetailSummary) String() string {
 func (*RosterRowDetailSummary) ProtoMessage() {}
 
 func (x *RosterRowDetailSummary) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[31]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2315,7 +2568,7 @@ func (x *RosterRowDetailSummary) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RosterRowDetailSummary.ProtoReflect.Descriptor instead.
 func (*RosterRowDetailSummary) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{31}
+	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *RosterRowDetailSummary) GetText() string {
@@ -2335,7 +2588,7 @@ type RosterRowClosed struct {
 
 func (x *RosterRowClosed) Reset() {
 	*x = RosterRowClosed{}
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[32]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2347,7 +2600,7 @@ func (x *RosterRowClosed) String() string {
 func (*RosterRowClosed) ProtoMessage() {}
 
 func (x *RosterRowClosed) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[32]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2360,7 +2613,7 @@ func (x *RosterRowClosed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RosterRowClosed.ProtoReflect.Descriptor instead.
 func (*RosterRowClosed) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{32}
+	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *RosterRowClosed) GetClosed() bool {
@@ -2378,7 +2631,7 @@ type RosterRowStatusSubmitting struct {
 
 func (x *RosterRowStatusSubmitting) Reset() {
 	*x = RosterRowStatusSubmitting{}
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[33]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2390,7 +2643,7 @@ func (x *RosterRowStatusSubmitting) String() string {
 func (*RosterRowStatusSubmitting) ProtoMessage() {}
 
 func (x *RosterRowStatusSubmitting) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[33]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2403,7 +2656,7 @@ func (x *RosterRowStatusSubmitting) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RosterRowStatusSubmitting.ProtoReflect.Descriptor instead.
 func (*RosterRowStatusSubmitting) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{33}
+	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{37}
 }
 
 type RosterRowStatusThinking struct {
@@ -2414,7 +2667,7 @@ type RosterRowStatusThinking struct {
 
 func (x *RosterRowStatusThinking) Reset() {
 	*x = RosterRowStatusThinking{}
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[34]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2426,7 +2679,7 @@ func (x *RosterRowStatusThinking) String() string {
 func (*RosterRowStatusThinking) ProtoMessage() {}
 
 func (x *RosterRowStatusThinking) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[34]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2439,7 +2692,7 @@ func (x *RosterRowStatusThinking) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RosterRowStatusThinking.ProtoReflect.Descriptor instead.
 func (*RosterRowStatusThinking) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{34}
+	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{38}
 }
 
 type RosterRowStatusClearing struct {
@@ -2450,7 +2703,7 @@ type RosterRowStatusClearing struct {
 
 func (x *RosterRowStatusClearing) Reset() {
 	*x = RosterRowStatusClearing{}
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[35]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2462,7 +2715,7 @@ func (x *RosterRowStatusClearing) String() string {
 func (*RosterRowStatusClearing) ProtoMessage() {}
 
 func (x *RosterRowStatusClearing) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[35]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2475,7 +2728,7 @@ func (x *RosterRowStatusClearing) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RosterRowStatusClearing.ProtoReflect.Descriptor instead.
 func (*RosterRowStatusClearing) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{35}
+	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{39}
 }
 
 type RosterRowStatusCompacting struct {
@@ -2486,7 +2739,7 @@ type RosterRowStatusCompacting struct {
 
 func (x *RosterRowStatusCompacting) Reset() {
 	*x = RosterRowStatusCompacting{}
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[36]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2498,7 +2751,7 @@ func (x *RosterRowStatusCompacting) String() string {
 func (*RosterRowStatusCompacting) ProtoMessage() {}
 
 func (x *RosterRowStatusCompacting) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[36]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2511,7 +2764,7 @@ func (x *RosterRowStatusCompacting) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RosterRowStatusCompacting.ProtoReflect.Descriptor instead.
 func (*RosterRowStatusCompacting) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{36}
+	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{40}
 }
 
 type RosterRowStatusPermission struct {
@@ -2522,7 +2775,7 @@ type RosterRowStatusPermission struct {
 
 func (x *RosterRowStatusPermission) Reset() {
 	*x = RosterRowStatusPermission{}
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[37]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2534,7 +2787,7 @@ func (x *RosterRowStatusPermission) String() string {
 func (*RosterRowStatusPermission) ProtoMessage() {}
 
 func (x *RosterRowStatusPermission) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[37]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2547,7 +2800,7 @@ func (x *RosterRowStatusPermission) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RosterRowStatusPermission.ProtoReflect.Descriptor instead.
 func (*RosterRowStatusPermission) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{37}
+	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{41}
 }
 
 type RosterRowStatusDone struct {
@@ -2558,7 +2811,7 @@ type RosterRowStatusDone struct {
 
 func (x *RosterRowStatusDone) Reset() {
 	*x = RosterRowStatusDone{}
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[38]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2570,7 +2823,7 @@ func (x *RosterRowStatusDone) String() string {
 func (*RosterRowStatusDone) ProtoMessage() {}
 
 func (x *RosterRowStatusDone) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[38]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2583,7 +2836,7 @@ func (x *RosterRowStatusDone) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RosterRowStatusDone.ProtoReflect.Descriptor instead.
 func (*RosterRowStatusDone) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{38}
+	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{42}
 }
 
 type RosterRowStatusInterrupted struct {
@@ -2594,7 +2847,7 @@ type RosterRowStatusInterrupted struct {
 
 func (x *RosterRowStatusInterrupted) Reset() {
 	*x = RosterRowStatusInterrupted{}
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[39]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2606,7 +2859,7 @@ func (x *RosterRowStatusInterrupted) String() string {
 func (*RosterRowStatusInterrupted) ProtoMessage() {}
 
 func (x *RosterRowStatusInterrupted) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[39]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2619,7 +2872,7 @@ func (x *RosterRowStatusInterrupted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RosterRowStatusInterrupted.ProtoReflect.Descriptor instead.
 func (*RosterRowStatusInterrupted) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{39}
+	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{43}
 }
 
 type RosterRowStatusTurnFailed struct {
@@ -2630,7 +2883,7 @@ type RosterRowStatusTurnFailed struct {
 
 func (x *RosterRowStatusTurnFailed) Reset() {
 	*x = RosterRowStatusTurnFailed{}
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[40]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2642,7 +2895,7 @@ func (x *RosterRowStatusTurnFailed) String() string {
 func (*RosterRowStatusTurnFailed) ProtoMessage() {}
 
 func (x *RosterRowStatusTurnFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[40]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2655,7 +2908,7 @@ func (x *RosterRowStatusTurnFailed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RosterRowStatusTurnFailed.ProtoReflect.Descriptor instead.
 func (*RosterRowStatusTurnFailed) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{40}
+	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{44}
 }
 
 type RosterRowStatusReady struct {
@@ -2666,7 +2919,7 @@ type RosterRowStatusReady struct {
 
 func (x *RosterRowStatusReady) Reset() {
 	*x = RosterRowStatusReady{}
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[41]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2678,7 +2931,7 @@ func (x *RosterRowStatusReady) String() string {
 func (*RosterRowStatusReady) ProtoMessage() {}
 
 func (x *RosterRowStatusReady) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[41]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2691,7 +2944,7 @@ func (x *RosterRowStatusReady) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RosterRowStatusReady.ProtoReflect.Descriptor instead.
 func (*RosterRowStatusReady) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{41}
+	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{45}
 }
 
 type RosterRowStatusIdleAsync struct {
@@ -2702,7 +2955,7 @@ type RosterRowStatusIdleAsync struct {
 
 func (x *RosterRowStatusIdleAsync) Reset() {
 	*x = RosterRowStatusIdleAsync{}
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[42]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2714,7 +2967,7 @@ func (x *RosterRowStatusIdleAsync) String() string {
 func (*RosterRowStatusIdleAsync) ProtoMessage() {}
 
 func (x *RosterRowStatusIdleAsync) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[42]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2727,7 +2980,7 @@ func (x *RosterRowStatusIdleAsync) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RosterRowStatusIdleAsync.ProtoReflect.Descriptor instead.
 func (*RosterRowStatusIdleAsync) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{42}
+	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{46}
 }
 
 type RosterRowStatusVendorBlocked struct {
@@ -2738,7 +2991,7 @@ type RosterRowStatusVendorBlocked struct {
 
 func (x *RosterRowStatusVendorBlocked) Reset() {
 	*x = RosterRowStatusVendorBlocked{}
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[43]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[47]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2750,7 +3003,7 @@ func (x *RosterRowStatusVendorBlocked) String() string {
 func (*RosterRowStatusVendorBlocked) ProtoMessage() {}
 
 func (x *RosterRowStatusVendorBlocked) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[43]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[47]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2763,7 +3016,7 @@ func (x *RosterRowStatusVendorBlocked) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RosterRowStatusVendorBlocked.ProtoReflect.Descriptor instead.
 func (*RosterRowStatusVendorBlocked) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{43}
+	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{47}
 }
 
 type RosterRowStatusInit struct {
@@ -2774,7 +3027,7 @@ type RosterRowStatusInit struct {
 
 func (x *RosterRowStatusInit) Reset() {
 	*x = RosterRowStatusInit{}
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[44]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[48]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2786,7 +3039,7 @@ func (x *RosterRowStatusInit) String() string {
 func (*RosterRowStatusInit) ProtoMessage() {}
 
 func (x *RosterRowStatusInit) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[44]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[48]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2799,7 +3052,7 @@ func (x *RosterRowStatusInit) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RosterRowStatusInit.ProtoReflect.Descriptor instead.
 func (*RosterRowStatusInit) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{44}
+	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{48}
 }
 
 type RosterRowStatusSevered struct {
@@ -2810,7 +3063,7 @@ type RosterRowStatusSevered struct {
 
 func (x *RosterRowStatusSevered) Reset() {
 	*x = RosterRowStatusSevered{}
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[45]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[49]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2822,7 +3075,7 @@ func (x *RosterRowStatusSevered) String() string {
 func (*RosterRowStatusSevered) ProtoMessage() {}
 
 func (x *RosterRowStatusSevered) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[45]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[49]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2835,7 +3088,7 @@ func (x *RosterRowStatusSevered) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RosterRowStatusSevered.ProtoReflect.Descriptor instead.
 func (*RosterRowStatusSevered) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{45}
+	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{49}
 }
 
 type RosterRowStatusStartFailed struct {
@@ -2846,7 +3099,7 @@ type RosterRowStatusStartFailed struct {
 
 func (x *RosterRowStatusStartFailed) Reset() {
 	*x = RosterRowStatusStartFailed{}
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[46]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[50]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2858,7 +3111,7 @@ func (x *RosterRowStatusStartFailed) String() string {
 func (*RosterRowStatusStartFailed) ProtoMessage() {}
 
 func (x *RosterRowStatusStartFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[46]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[50]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2871,7 +3124,7 @@ func (x *RosterRowStatusStartFailed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RosterRowStatusStartFailed.ProtoReflect.Descriptor instead.
 func (*RosterRowStatusStartFailed) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{46}
+	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{50}
 }
 
 type RosterRowStatusDegraded struct {
@@ -2882,7 +3135,7 @@ type RosterRowStatusDegraded struct {
 
 func (x *RosterRowStatusDegraded) Reset() {
 	*x = RosterRowStatusDegraded{}
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[47]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[51]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2894,7 +3147,7 @@ func (x *RosterRowStatusDegraded) String() string {
 func (*RosterRowStatusDegraded) ProtoMessage() {}
 
 func (x *RosterRowStatusDegraded) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[47]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[51]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2907,7 +3160,7 @@ func (x *RosterRowStatusDegraded) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RosterRowStatusDegraded.ProtoReflect.Descriptor instead.
 func (*RosterRowStatusDegraded) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{47}
+	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{51}
 }
 
 type RosterRowStatusDead struct {
@@ -2918,7 +3171,7 @@ type RosterRowStatusDead struct {
 
 func (x *RosterRowStatusDead) Reset() {
 	*x = RosterRowStatusDead{}
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[48]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[52]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2930,7 +3183,7 @@ func (x *RosterRowStatusDead) String() string {
 func (*RosterRowStatusDead) ProtoMessage() {}
 
 func (x *RosterRowStatusDead) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[48]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[52]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2943,7 +3196,7 @@ func (x *RosterRowStatusDead) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RosterRowStatusDead.ProtoReflect.Descriptor instead.
 func (*RosterRowStatusDead) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{48}
+	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{52}
 }
 
 type RosterRowStatusMerging struct {
@@ -2954,7 +3207,7 @@ type RosterRowStatusMerging struct {
 
 func (x *RosterRowStatusMerging) Reset() {
 	*x = RosterRowStatusMerging{}
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[49]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[53]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2966,7 +3219,7 @@ func (x *RosterRowStatusMerging) String() string {
 func (*RosterRowStatusMerging) ProtoMessage() {}
 
 func (x *RosterRowStatusMerging) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[49]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[53]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2979,7 +3232,7 @@ func (x *RosterRowStatusMerging) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RosterRowStatusMerging.ProtoReflect.Descriptor instead.
 func (*RosterRowStatusMerging) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{49}
+	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{53}
 }
 
 type RosterRowStatusMergeQueued struct {
@@ -2990,7 +3243,7 @@ type RosterRowStatusMergeQueued struct {
 
 func (x *RosterRowStatusMergeQueued) Reset() {
 	*x = RosterRowStatusMergeQueued{}
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[50]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[54]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3002,7 +3255,7 @@ func (x *RosterRowStatusMergeQueued) String() string {
 func (*RosterRowStatusMergeQueued) ProtoMessage() {}
 
 func (x *RosterRowStatusMergeQueued) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[50]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[54]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3015,7 +3268,7 @@ func (x *RosterRowStatusMergeQueued) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RosterRowStatusMergeQueued.ProtoReflect.Descriptor instead.
 func (*RosterRowStatusMergeQueued) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{50}
+	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{54}
 }
 
 type RosterRowStatusMergeFailed struct {
@@ -3026,7 +3279,7 @@ type RosterRowStatusMergeFailed struct {
 
 func (x *RosterRowStatusMergeFailed) Reset() {
 	*x = RosterRowStatusMergeFailed{}
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[51]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[55]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3038,7 +3291,7 @@ func (x *RosterRowStatusMergeFailed) String() string {
 func (*RosterRowStatusMergeFailed) ProtoMessage() {}
 
 func (x *RosterRowStatusMergeFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[51]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[55]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3051,7 +3304,7 @@ func (x *RosterRowStatusMergeFailed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RosterRowStatusMergeFailed.ProtoReflect.Descriptor instead.
 func (*RosterRowStatusMergeFailed) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{51}
+	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{55}
 }
 
 type RosterRowStatusMerged struct {
@@ -3062,7 +3315,7 @@ type RosterRowStatusMerged struct {
 
 func (x *RosterRowStatusMerged) Reset() {
 	*x = RosterRowStatusMerged{}
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[52]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[56]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3074,7 +3327,7 @@ func (x *RosterRowStatusMerged) String() string {
 func (*RosterRowStatusMerged) ProtoMessage() {}
 
 func (x *RosterRowStatusMerged) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[52]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[56]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3087,7 +3340,7 @@ func (x *RosterRowStatusMerged) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RosterRowStatusMerged.ProtoReflect.Descriptor instead.
 func (*RosterRowStatusMerged) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{52}
+	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{56}
 }
 
 type RosterRowStatusNone struct {
@@ -3098,7 +3351,7 @@ type RosterRowStatusNone struct {
 
 func (x *RosterRowStatusNone) Reset() {
 	*x = RosterRowStatusNone{}
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[53]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[57]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3110,7 +3363,7 @@ func (x *RosterRowStatusNone) String() string {
 func (*RosterRowStatusNone) ProtoMessage() {}
 
 func (x *RosterRowStatusNone) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[53]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[57]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3123,7 +3376,7 @@ func (x *RosterRowStatusNone) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RosterRowStatusNone.ProtoReflect.Descriptor instead.
 func (*RosterRowStatusNone) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{53}
+	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{57}
 }
 
 type RosterRowStatusInactive struct {
@@ -3134,7 +3387,7 @@ type RosterRowStatusInactive struct {
 
 func (x *RosterRowStatusInactive) Reset() {
 	*x = RosterRowStatusInactive{}
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[54]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[58]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3146,7 +3399,7 @@ func (x *RosterRowStatusInactive) String() string {
 func (*RosterRowStatusInactive) ProtoMessage() {}
 
 func (x *RosterRowStatusInactive) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[54]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[58]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3159,7 +3412,7 @@ func (x *RosterRowStatusInactive) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RosterRowStatusInactive.ProtoReflect.Descriptor instead.
 func (*RosterRowStatusInactive) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{54}
+	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{58}
 }
 
 var File_frontend_v1_sidebar_proto protoreflect.FileDescriptor
@@ -3180,7 +3433,15 @@ const file_frontend_v1_sidebar_proto_rawDesc = "" +
 	"\x05label\x18\x01 \x01(\tR\x05label\"\x14\n" +
 	"\x12RosterRowAttention\"\x11\n" +
 	"\x0fRosterRowViewed\"\x13\n" +
-	"\x11RosterRowReviving\"R\n" +
+	"\x11RosterRowReviving\"\x8e\x02\n" +
+	"\x15RosterRowAvailability\x12E\n" +
+	"\apending\x18\x01 \x01(\v2).frontend.v1.RosterRowAvailabilityPendingH\x00R\apending\x12K\n" +
+	"\tavailable\x18\x02 \x01(\v2+.frontend.v1.RosterRowAvailabilityAvailableH\x00R\tavailable\x12Q\n" +
+	"\vunavailable\x18\x03 \x01(\v2-.frontend.v1.RosterRowAvailabilityUnavailableH\x00R\vunavailableB\x0e\n" +
+	"\favailability\"\x1e\n" +
+	"\x1cRosterRowAvailabilityPending\" \n" +
+	"\x1eRosterRowAvailabilityAvailable\"\"\n" +
+	" RosterRowAvailabilityUnavailable\"R\n" +
 	"\x16RosterCurrentWorkspace\x128\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\"R\n" +
 	"\x14RosterRepositoryView\x12:\n" +
@@ -3215,14 +3476,15 @@ const file_frontend_v1_sidebar_proto_rawDesc = "" +
 	"\x04done\x18\x01 \x01(\bR\x04done\"8\n" +
 	"\n" +
 	"RosterRows\x12*\n" +
-	"\x04rows\x18\x01 \x03(\v2\x16.frontend.v1.RosterRowR\x04rows\"\xba\x12\n" +
+	"\x04rows\x18\x01 \x03(\v2\x16.frontend.v1.RosterRowR\x04rows\"\x82\x13\n" +
 	"\tRosterRow\x12=\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1f.frontend.v1.RosterRowWorkspaceR\tworkspace\x12B\n" +
 	"\tattention\x18  \x01(\v2\x1f.frontend.v1.RosterRowAttentionH\x01R\tattention\x88\x01\x01\x12D\n" +
 	"\bpriority\x18! \x01(\v2#.frontend.v1.RosterRowPriorityBadgeH\x02R\bpriority\x88\x01\x01\x129\n" +
 	"\x06viewed\x18\" \x01(\v2\x1c.frontend.v1.RosterRowViewedH\x03R\x06viewed\x88\x01\x01\x12?\n" +
 	"\breviving\x18# \x01(\v2\x1e.frontend.v1.RosterRowRevivingH\x04R\breviving\x88\x01\x01\x12L\n" +
-	"\rlast_selected\x18% \x01(\v2\".frontend.v1.RosterRowLastSelectedH\x05R\flastSelected\x88\x01\x01\x12.\n" +
+	"\rlast_selected\x18% \x01(\v2\".frontend.v1.RosterRowLastSelectedH\x05R\flastSelected\x88\x01\x01\x12F\n" +
+	"\favailability\x18& \x01(\v2\".frontend.v1.RosterRowAvailabilityR\favailability\x12.\n" +
 	"\x04name\x18\x02 \x01(\v2\x1a.frontend.v1.RosterRowNameR\x04name\x12H\n" +
 	"\n" +
 	"submitting\x18\x03 \x01(\v2&.frontend.v1.RosterRowStatusSubmittingH\x00R\n" +
@@ -3336,134 +3598,142 @@ func file_frontend_v1_sidebar_proto_rawDescGZIP() []byte {
 	return file_frontend_v1_sidebar_proto_rawDescData
 }
 
-var file_frontend_v1_sidebar_proto_msgTypes = make([]protoimpl.MessageInfo, 55)
+var file_frontend_v1_sidebar_proto_msgTypes = make([]protoimpl.MessageInfo, 59)
 var file_frontend_v1_sidebar_proto_goTypes = []any{
-	(*WorkspaceRoster)(nil),              // 0: frontend.v1.WorkspaceRoster
-	(*RosterRowPriorityBadge)(nil),       // 1: frontend.v1.RosterRowPriorityBadge
-	(*RosterRowAttention)(nil),           // 2: frontend.v1.RosterRowAttention
-	(*RosterRowViewed)(nil),              // 3: frontend.v1.RosterRowViewed
-	(*RosterRowReviving)(nil),            // 4: frontend.v1.RosterRowReviving
-	(*RosterCurrentWorkspace)(nil),       // 5: frontend.v1.RosterCurrentWorkspace
-	(*RosterRepositoryView)(nil),         // 6: frontend.v1.RosterRepositoryView
-	(*RosterTaskView)(nil),               // 7: frontend.v1.RosterTaskView
-	(*RosterRepoSection)(nil),            // 8: frontend.v1.RosterRepoSection
-	(*RosterRepoKey)(nil),                // 9: frontend.v1.RosterRepoKey
-	(*RosterTaskSection)(nil),            // 10: frontend.v1.RosterTaskSection
-	(*RosterTaskKey)(nil),                // 11: frontend.v1.RosterTaskKey
-	(*RosterMergedSection)(nil),          // 12: frontend.v1.RosterMergedSection
-	(*RosterSectionHeader)(nil),          // 13: frontend.v1.RosterSectionHeader
-	(*RosterTaskSectionHeader)(nil),      // 14: frontend.v1.RosterTaskSectionHeader
-	(*RosterLabel)(nil),                  // 15: frontend.v1.RosterLabel
-	(*RosterTaskDone)(nil),               // 16: frontend.v1.RosterTaskDone
-	(*RosterRows)(nil),                   // 17: frontend.v1.RosterRows
-	(*RosterRow)(nil),                    // 18: frontend.v1.RosterRow
-	(*RosterRowWorkspace)(nil),           // 19: frontend.v1.RosterRowWorkspace
-	(*RosterRowName)(nil),                // 20: frontend.v1.RosterRowName
-	(*RosterRowLastSelected)(nil),        // 21: frontend.v1.RosterRowLastSelected
-	(*RosterRowCurrent)(nil),             // 22: frontend.v1.RosterRowCurrent
-	(*RosterRowWhen)(nil),                // 23: frontend.v1.RosterRowWhen
-	(*RosterRowWhenLastSelected)(nil),    // 24: frontend.v1.RosterRowWhenLastSelected
-	(*RosterRowWhenMerged)(nil),          // 25: frontend.v1.RosterRowWhenMerged
-	(*RosterRowWhenActive)(nil),          // 26: frontend.v1.RosterRowWhenActive
-	(*RosterRowWhenCreated)(nil),         // 27: frontend.v1.RosterRowWhenCreated
-	(*RosterRowDetail)(nil),              // 28: frontend.v1.RosterRowDetail
-	(*RosterRowDetailBranch)(nil),        // 29: frontend.v1.RosterRowDetailBranch
-	(*RosterRowDetailParentBranch)(nil),  // 30: frontend.v1.RosterRowDetailParentBranch
-	(*RosterRowDetailSummary)(nil),       // 31: frontend.v1.RosterRowDetailSummary
-	(*RosterRowClosed)(nil),              // 32: frontend.v1.RosterRowClosed
-	(*RosterRowStatusSubmitting)(nil),    // 33: frontend.v1.RosterRowStatusSubmitting
-	(*RosterRowStatusThinking)(nil),      // 34: frontend.v1.RosterRowStatusThinking
-	(*RosterRowStatusClearing)(nil),      // 35: frontend.v1.RosterRowStatusClearing
-	(*RosterRowStatusCompacting)(nil),    // 36: frontend.v1.RosterRowStatusCompacting
-	(*RosterRowStatusPermission)(nil),    // 37: frontend.v1.RosterRowStatusPermission
-	(*RosterRowStatusDone)(nil),          // 38: frontend.v1.RosterRowStatusDone
-	(*RosterRowStatusInterrupted)(nil),   // 39: frontend.v1.RosterRowStatusInterrupted
-	(*RosterRowStatusTurnFailed)(nil),    // 40: frontend.v1.RosterRowStatusTurnFailed
-	(*RosterRowStatusReady)(nil),         // 41: frontend.v1.RosterRowStatusReady
-	(*RosterRowStatusIdleAsync)(nil),     // 42: frontend.v1.RosterRowStatusIdleAsync
-	(*RosterRowStatusVendorBlocked)(nil), // 43: frontend.v1.RosterRowStatusVendorBlocked
-	(*RosterRowStatusInit)(nil),          // 44: frontend.v1.RosterRowStatusInit
-	(*RosterRowStatusSevered)(nil),       // 45: frontend.v1.RosterRowStatusSevered
-	(*RosterRowStatusStartFailed)(nil),   // 46: frontend.v1.RosterRowStatusStartFailed
-	(*RosterRowStatusDegraded)(nil),      // 47: frontend.v1.RosterRowStatusDegraded
-	(*RosterRowStatusDead)(nil),          // 48: frontend.v1.RosterRowStatusDead
-	(*RosterRowStatusMerging)(nil),       // 49: frontend.v1.RosterRowStatusMerging
-	(*RosterRowStatusMergeQueued)(nil),   // 50: frontend.v1.RosterRowStatusMergeQueued
-	(*RosterRowStatusMergeFailed)(nil),   // 51: frontend.v1.RosterRowStatusMergeFailed
-	(*RosterRowStatusMerged)(nil),        // 52: frontend.v1.RosterRowStatusMerged
-	(*RosterRowStatusNone)(nil),          // 53: frontend.v1.RosterRowStatusNone
-	(*RosterRowStatusInactive)(nil),      // 54: frontend.v1.RosterRowStatusInactive
-	(*v1.WorkspaceRef)(nil),              // 55: workspace.v1.WorkspaceRef
-	(*v1.RepositoryRef)(nil),             // 56: workspace.v1.RepositoryRef
+	(*WorkspaceRoster)(nil),                  // 0: frontend.v1.WorkspaceRoster
+	(*RosterRowPriorityBadge)(nil),           // 1: frontend.v1.RosterRowPriorityBadge
+	(*RosterRowAttention)(nil),               // 2: frontend.v1.RosterRowAttention
+	(*RosterRowViewed)(nil),                  // 3: frontend.v1.RosterRowViewed
+	(*RosterRowReviving)(nil),                // 4: frontend.v1.RosterRowReviving
+	(*RosterRowAvailability)(nil),            // 5: frontend.v1.RosterRowAvailability
+	(*RosterRowAvailabilityPending)(nil),     // 6: frontend.v1.RosterRowAvailabilityPending
+	(*RosterRowAvailabilityAvailable)(nil),   // 7: frontend.v1.RosterRowAvailabilityAvailable
+	(*RosterRowAvailabilityUnavailable)(nil), // 8: frontend.v1.RosterRowAvailabilityUnavailable
+	(*RosterCurrentWorkspace)(nil),           // 9: frontend.v1.RosterCurrentWorkspace
+	(*RosterRepositoryView)(nil),             // 10: frontend.v1.RosterRepositoryView
+	(*RosterTaskView)(nil),                   // 11: frontend.v1.RosterTaskView
+	(*RosterRepoSection)(nil),                // 12: frontend.v1.RosterRepoSection
+	(*RosterRepoKey)(nil),                    // 13: frontend.v1.RosterRepoKey
+	(*RosterTaskSection)(nil),                // 14: frontend.v1.RosterTaskSection
+	(*RosterTaskKey)(nil),                    // 15: frontend.v1.RosterTaskKey
+	(*RosterMergedSection)(nil),              // 16: frontend.v1.RosterMergedSection
+	(*RosterSectionHeader)(nil),              // 17: frontend.v1.RosterSectionHeader
+	(*RosterTaskSectionHeader)(nil),          // 18: frontend.v1.RosterTaskSectionHeader
+	(*RosterLabel)(nil),                      // 19: frontend.v1.RosterLabel
+	(*RosterTaskDone)(nil),                   // 20: frontend.v1.RosterTaskDone
+	(*RosterRows)(nil),                       // 21: frontend.v1.RosterRows
+	(*RosterRow)(nil),                        // 22: frontend.v1.RosterRow
+	(*RosterRowWorkspace)(nil),               // 23: frontend.v1.RosterRowWorkspace
+	(*RosterRowName)(nil),                    // 24: frontend.v1.RosterRowName
+	(*RosterRowLastSelected)(nil),            // 25: frontend.v1.RosterRowLastSelected
+	(*RosterRowCurrent)(nil),                 // 26: frontend.v1.RosterRowCurrent
+	(*RosterRowWhen)(nil),                    // 27: frontend.v1.RosterRowWhen
+	(*RosterRowWhenLastSelected)(nil),        // 28: frontend.v1.RosterRowWhenLastSelected
+	(*RosterRowWhenMerged)(nil),              // 29: frontend.v1.RosterRowWhenMerged
+	(*RosterRowWhenActive)(nil),              // 30: frontend.v1.RosterRowWhenActive
+	(*RosterRowWhenCreated)(nil),             // 31: frontend.v1.RosterRowWhenCreated
+	(*RosterRowDetail)(nil),                  // 32: frontend.v1.RosterRowDetail
+	(*RosterRowDetailBranch)(nil),            // 33: frontend.v1.RosterRowDetailBranch
+	(*RosterRowDetailParentBranch)(nil),      // 34: frontend.v1.RosterRowDetailParentBranch
+	(*RosterRowDetailSummary)(nil),           // 35: frontend.v1.RosterRowDetailSummary
+	(*RosterRowClosed)(nil),                  // 36: frontend.v1.RosterRowClosed
+	(*RosterRowStatusSubmitting)(nil),        // 37: frontend.v1.RosterRowStatusSubmitting
+	(*RosterRowStatusThinking)(nil),          // 38: frontend.v1.RosterRowStatusThinking
+	(*RosterRowStatusClearing)(nil),          // 39: frontend.v1.RosterRowStatusClearing
+	(*RosterRowStatusCompacting)(nil),        // 40: frontend.v1.RosterRowStatusCompacting
+	(*RosterRowStatusPermission)(nil),        // 41: frontend.v1.RosterRowStatusPermission
+	(*RosterRowStatusDone)(nil),              // 42: frontend.v1.RosterRowStatusDone
+	(*RosterRowStatusInterrupted)(nil),       // 43: frontend.v1.RosterRowStatusInterrupted
+	(*RosterRowStatusTurnFailed)(nil),        // 44: frontend.v1.RosterRowStatusTurnFailed
+	(*RosterRowStatusReady)(nil),             // 45: frontend.v1.RosterRowStatusReady
+	(*RosterRowStatusIdleAsync)(nil),         // 46: frontend.v1.RosterRowStatusIdleAsync
+	(*RosterRowStatusVendorBlocked)(nil),     // 47: frontend.v1.RosterRowStatusVendorBlocked
+	(*RosterRowStatusInit)(nil),              // 48: frontend.v1.RosterRowStatusInit
+	(*RosterRowStatusSevered)(nil),           // 49: frontend.v1.RosterRowStatusSevered
+	(*RosterRowStatusStartFailed)(nil),       // 50: frontend.v1.RosterRowStatusStartFailed
+	(*RosterRowStatusDegraded)(nil),          // 51: frontend.v1.RosterRowStatusDegraded
+	(*RosterRowStatusDead)(nil),              // 52: frontend.v1.RosterRowStatusDead
+	(*RosterRowStatusMerging)(nil),           // 53: frontend.v1.RosterRowStatusMerging
+	(*RosterRowStatusMergeQueued)(nil),       // 54: frontend.v1.RosterRowStatusMergeQueued
+	(*RosterRowStatusMergeFailed)(nil),       // 55: frontend.v1.RosterRowStatusMergeFailed
+	(*RosterRowStatusMerged)(nil),            // 56: frontend.v1.RosterRowStatusMerged
+	(*RosterRowStatusNone)(nil),              // 57: frontend.v1.RosterRowStatusNone
+	(*RosterRowStatusInactive)(nil),          // 58: frontend.v1.RosterRowStatusInactive
+	(*v1.WorkspaceRef)(nil),                  // 59: workspace.v1.WorkspaceRef
+	(*v1.RepositoryRef)(nil),                 // 60: workspace.v1.RepositoryRef
 }
 var file_frontend_v1_sidebar_proto_depIdxs = []int32{
-	6,  // 0: frontend.v1.WorkspaceRoster.repository:type_name -> frontend.v1.RosterRepositoryView
-	7,  // 1: frontend.v1.WorkspaceRoster.task:type_name -> frontend.v1.RosterTaskView
-	12, // 2: frontend.v1.WorkspaceRoster.recently_merged:type_name -> frontend.v1.RosterMergedSection
-	5,  // 3: frontend.v1.WorkspaceRoster.current:type_name -> frontend.v1.RosterCurrentWorkspace
-	55, // 4: frontend.v1.RosterCurrentWorkspace.workspace:type_name -> workspace.v1.WorkspaceRef
-	8,  // 5: frontend.v1.RosterRepositoryView.sections:type_name -> frontend.v1.RosterRepoSection
-	10, // 6: frontend.v1.RosterTaskView.sections:type_name -> frontend.v1.RosterTaskSection
-	9,  // 7: frontend.v1.RosterRepoSection.key:type_name -> frontend.v1.RosterRepoKey
-	13, // 8: frontend.v1.RosterRepoSection.header:type_name -> frontend.v1.RosterSectionHeader
-	17, // 9: frontend.v1.RosterRepoSection.rows:type_name -> frontend.v1.RosterRows
-	56, // 10: frontend.v1.RosterRepoKey.repository:type_name -> workspace.v1.RepositoryRef
-	11, // 11: frontend.v1.RosterTaskSection.key:type_name -> frontend.v1.RosterTaskKey
-	14, // 12: frontend.v1.RosterTaskSection.header:type_name -> frontend.v1.RosterTaskSectionHeader
-	17, // 13: frontend.v1.RosterTaskSection.rows:type_name -> frontend.v1.RosterRows
-	13, // 14: frontend.v1.RosterMergedSection.header:type_name -> frontend.v1.RosterSectionHeader
-	17, // 15: frontend.v1.RosterMergedSection.rows:type_name -> frontend.v1.RosterRows
-	15, // 16: frontend.v1.RosterSectionHeader.label:type_name -> frontend.v1.RosterLabel
-	15, // 17: frontend.v1.RosterTaskSectionHeader.label:type_name -> frontend.v1.RosterLabel
-	16, // 18: frontend.v1.RosterTaskSectionHeader.done:type_name -> frontend.v1.RosterTaskDone
-	18, // 19: frontend.v1.RosterRows.rows:type_name -> frontend.v1.RosterRow
-	19, // 20: frontend.v1.RosterRow.workspace:type_name -> frontend.v1.RosterRowWorkspace
-	2,  // 21: frontend.v1.RosterRow.attention:type_name -> frontend.v1.RosterRowAttention
-	1,  // 22: frontend.v1.RosterRow.priority:type_name -> frontend.v1.RosterRowPriorityBadge
-	3,  // 23: frontend.v1.RosterRow.viewed:type_name -> frontend.v1.RosterRowViewed
-	4,  // 24: frontend.v1.RosterRow.reviving:type_name -> frontend.v1.RosterRowReviving
-	21, // 25: frontend.v1.RosterRow.last_selected:type_name -> frontend.v1.RosterRowLastSelected
-	20, // 26: frontend.v1.RosterRow.name:type_name -> frontend.v1.RosterRowName
-	33, // 27: frontend.v1.RosterRow.submitting:type_name -> frontend.v1.RosterRowStatusSubmitting
-	34, // 28: frontend.v1.RosterRow.thinking:type_name -> frontend.v1.RosterRowStatusThinking
-	35, // 29: frontend.v1.RosterRow.clearing:type_name -> frontend.v1.RosterRowStatusClearing
-	36, // 30: frontend.v1.RosterRow.compacting:type_name -> frontend.v1.RosterRowStatusCompacting
-	37, // 31: frontend.v1.RosterRow.permission:type_name -> frontend.v1.RosterRowStatusPermission
-	38, // 32: frontend.v1.RosterRow.done:type_name -> frontend.v1.RosterRowStatusDone
-	39, // 33: frontend.v1.RosterRow.interrupted:type_name -> frontend.v1.RosterRowStatusInterrupted
-	40, // 34: frontend.v1.RosterRow.turn_failed:type_name -> frontend.v1.RosterRowStatusTurnFailed
-	41, // 35: frontend.v1.RosterRow.ready:type_name -> frontend.v1.RosterRowStatusReady
-	42, // 36: frontend.v1.RosterRow.idle_async:type_name -> frontend.v1.RosterRowStatusIdleAsync
-	43, // 37: frontend.v1.RosterRow.vendor_blocked:type_name -> frontend.v1.RosterRowStatusVendorBlocked
-	44, // 38: frontend.v1.RosterRow.init:type_name -> frontend.v1.RosterRowStatusInit
-	45, // 39: frontend.v1.RosterRow.severed:type_name -> frontend.v1.RosterRowStatusSevered
-	46, // 40: frontend.v1.RosterRow.start_failed:type_name -> frontend.v1.RosterRowStatusStartFailed
-	47, // 41: frontend.v1.RosterRow.degraded:type_name -> frontend.v1.RosterRowStatusDegraded
-	48, // 42: frontend.v1.RosterRow.dead:type_name -> frontend.v1.RosterRowStatusDead
-	49, // 43: frontend.v1.RosterRow.merging:type_name -> frontend.v1.RosterRowStatusMerging
-	50, // 44: frontend.v1.RosterRow.merge_queued:type_name -> frontend.v1.RosterRowStatusMergeQueued
-	51, // 45: frontend.v1.RosterRow.merge_failed:type_name -> frontend.v1.RosterRowStatusMergeFailed
-	52, // 46: frontend.v1.RosterRow.merged:type_name -> frontend.v1.RosterRowStatusMerged
-	53, // 47: frontend.v1.RosterRow.none:type_name -> frontend.v1.RosterRowStatusNone
-	54, // 48: frontend.v1.RosterRow.inactive:type_name -> frontend.v1.RosterRowStatusInactive
-	22, // 49: frontend.v1.RosterRow.current:type_name -> frontend.v1.RosterRowCurrent
-	18, // 50: frontend.v1.RosterRow.children:type_name -> frontend.v1.RosterRow
-	23, // 51: frontend.v1.RosterRow.when:type_name -> frontend.v1.RosterRowWhen
-	28, // 52: frontend.v1.RosterRow.detail:type_name -> frontend.v1.RosterRowDetail
-	32, // 53: frontend.v1.RosterRow.closed:type_name -> frontend.v1.RosterRowClosed
-	55, // 54: frontend.v1.RosterRowWorkspace.workspace:type_name -> workspace.v1.WorkspaceRef
-	24, // 55: frontend.v1.RosterRowWhen.last_selected:type_name -> frontend.v1.RosterRowWhenLastSelected
-	25, // 56: frontend.v1.RosterRowWhen.merged:type_name -> frontend.v1.RosterRowWhenMerged
-	26, // 57: frontend.v1.RosterRowWhen.active:type_name -> frontend.v1.RosterRowWhenActive
-	27, // 58: frontend.v1.RosterRowWhen.created:type_name -> frontend.v1.RosterRowWhenCreated
-	29, // 59: frontend.v1.RosterRowDetail.branch:type_name -> frontend.v1.RosterRowDetailBranch
-	30, // 60: frontend.v1.RosterRowDetail.parent_branch:type_name -> frontend.v1.RosterRowDetailParentBranch
-	31, // 61: frontend.v1.RosterRowDetail.summary:type_name -> frontend.v1.RosterRowDetailSummary
-	62, // [62:62] is the sub-list for method output_type
-	62, // [62:62] is the sub-list for method input_type
-	62, // [62:62] is the sub-list for extension type_name
-	62, // [62:62] is the sub-list for extension extendee
-	0,  // [0:62] is the sub-list for field type_name
+	10, // 0: frontend.v1.WorkspaceRoster.repository:type_name -> frontend.v1.RosterRepositoryView
+	11, // 1: frontend.v1.WorkspaceRoster.task:type_name -> frontend.v1.RosterTaskView
+	16, // 2: frontend.v1.WorkspaceRoster.recently_merged:type_name -> frontend.v1.RosterMergedSection
+	9,  // 3: frontend.v1.WorkspaceRoster.current:type_name -> frontend.v1.RosterCurrentWorkspace
+	6,  // 4: frontend.v1.RosterRowAvailability.pending:type_name -> frontend.v1.RosterRowAvailabilityPending
+	7,  // 5: frontend.v1.RosterRowAvailability.available:type_name -> frontend.v1.RosterRowAvailabilityAvailable
+	8,  // 6: frontend.v1.RosterRowAvailability.unavailable:type_name -> frontend.v1.RosterRowAvailabilityUnavailable
+	59, // 7: frontend.v1.RosterCurrentWorkspace.workspace:type_name -> workspace.v1.WorkspaceRef
+	12, // 8: frontend.v1.RosterRepositoryView.sections:type_name -> frontend.v1.RosterRepoSection
+	14, // 9: frontend.v1.RosterTaskView.sections:type_name -> frontend.v1.RosterTaskSection
+	13, // 10: frontend.v1.RosterRepoSection.key:type_name -> frontend.v1.RosterRepoKey
+	17, // 11: frontend.v1.RosterRepoSection.header:type_name -> frontend.v1.RosterSectionHeader
+	21, // 12: frontend.v1.RosterRepoSection.rows:type_name -> frontend.v1.RosterRows
+	60, // 13: frontend.v1.RosterRepoKey.repository:type_name -> workspace.v1.RepositoryRef
+	15, // 14: frontend.v1.RosterTaskSection.key:type_name -> frontend.v1.RosterTaskKey
+	18, // 15: frontend.v1.RosterTaskSection.header:type_name -> frontend.v1.RosterTaskSectionHeader
+	21, // 16: frontend.v1.RosterTaskSection.rows:type_name -> frontend.v1.RosterRows
+	17, // 17: frontend.v1.RosterMergedSection.header:type_name -> frontend.v1.RosterSectionHeader
+	21, // 18: frontend.v1.RosterMergedSection.rows:type_name -> frontend.v1.RosterRows
+	19, // 19: frontend.v1.RosterSectionHeader.label:type_name -> frontend.v1.RosterLabel
+	19, // 20: frontend.v1.RosterTaskSectionHeader.label:type_name -> frontend.v1.RosterLabel
+	20, // 21: frontend.v1.RosterTaskSectionHeader.done:type_name -> frontend.v1.RosterTaskDone
+	22, // 22: frontend.v1.RosterRows.rows:type_name -> frontend.v1.RosterRow
+	23, // 23: frontend.v1.RosterRow.workspace:type_name -> frontend.v1.RosterRowWorkspace
+	2,  // 24: frontend.v1.RosterRow.attention:type_name -> frontend.v1.RosterRowAttention
+	1,  // 25: frontend.v1.RosterRow.priority:type_name -> frontend.v1.RosterRowPriorityBadge
+	3,  // 26: frontend.v1.RosterRow.viewed:type_name -> frontend.v1.RosterRowViewed
+	4,  // 27: frontend.v1.RosterRow.reviving:type_name -> frontend.v1.RosterRowReviving
+	25, // 28: frontend.v1.RosterRow.last_selected:type_name -> frontend.v1.RosterRowLastSelected
+	5,  // 29: frontend.v1.RosterRow.availability:type_name -> frontend.v1.RosterRowAvailability
+	24, // 30: frontend.v1.RosterRow.name:type_name -> frontend.v1.RosterRowName
+	37, // 31: frontend.v1.RosterRow.submitting:type_name -> frontend.v1.RosterRowStatusSubmitting
+	38, // 32: frontend.v1.RosterRow.thinking:type_name -> frontend.v1.RosterRowStatusThinking
+	39, // 33: frontend.v1.RosterRow.clearing:type_name -> frontend.v1.RosterRowStatusClearing
+	40, // 34: frontend.v1.RosterRow.compacting:type_name -> frontend.v1.RosterRowStatusCompacting
+	41, // 35: frontend.v1.RosterRow.permission:type_name -> frontend.v1.RosterRowStatusPermission
+	42, // 36: frontend.v1.RosterRow.done:type_name -> frontend.v1.RosterRowStatusDone
+	43, // 37: frontend.v1.RosterRow.interrupted:type_name -> frontend.v1.RosterRowStatusInterrupted
+	44, // 38: frontend.v1.RosterRow.turn_failed:type_name -> frontend.v1.RosterRowStatusTurnFailed
+	45, // 39: frontend.v1.RosterRow.ready:type_name -> frontend.v1.RosterRowStatusReady
+	46, // 40: frontend.v1.RosterRow.idle_async:type_name -> frontend.v1.RosterRowStatusIdleAsync
+	47, // 41: frontend.v1.RosterRow.vendor_blocked:type_name -> frontend.v1.RosterRowStatusVendorBlocked
+	48, // 42: frontend.v1.RosterRow.init:type_name -> frontend.v1.RosterRowStatusInit
+	49, // 43: frontend.v1.RosterRow.severed:type_name -> frontend.v1.RosterRowStatusSevered
+	50, // 44: frontend.v1.RosterRow.start_failed:type_name -> frontend.v1.RosterRowStatusStartFailed
+	51, // 45: frontend.v1.RosterRow.degraded:type_name -> frontend.v1.RosterRowStatusDegraded
+	52, // 46: frontend.v1.RosterRow.dead:type_name -> frontend.v1.RosterRowStatusDead
+	53, // 47: frontend.v1.RosterRow.merging:type_name -> frontend.v1.RosterRowStatusMerging
+	54, // 48: frontend.v1.RosterRow.merge_queued:type_name -> frontend.v1.RosterRowStatusMergeQueued
+	55, // 49: frontend.v1.RosterRow.merge_failed:type_name -> frontend.v1.RosterRowStatusMergeFailed
+	56, // 50: frontend.v1.RosterRow.merged:type_name -> frontend.v1.RosterRowStatusMerged
+	57, // 51: frontend.v1.RosterRow.none:type_name -> frontend.v1.RosterRowStatusNone
+	58, // 52: frontend.v1.RosterRow.inactive:type_name -> frontend.v1.RosterRowStatusInactive
+	26, // 53: frontend.v1.RosterRow.current:type_name -> frontend.v1.RosterRowCurrent
+	22, // 54: frontend.v1.RosterRow.children:type_name -> frontend.v1.RosterRow
+	27, // 55: frontend.v1.RosterRow.when:type_name -> frontend.v1.RosterRowWhen
+	32, // 56: frontend.v1.RosterRow.detail:type_name -> frontend.v1.RosterRowDetail
+	36, // 57: frontend.v1.RosterRow.closed:type_name -> frontend.v1.RosterRowClosed
+	59, // 58: frontend.v1.RosterRowWorkspace.workspace:type_name -> workspace.v1.WorkspaceRef
+	28, // 59: frontend.v1.RosterRowWhen.last_selected:type_name -> frontend.v1.RosterRowWhenLastSelected
+	29, // 60: frontend.v1.RosterRowWhen.merged:type_name -> frontend.v1.RosterRowWhenMerged
+	30, // 61: frontend.v1.RosterRowWhen.active:type_name -> frontend.v1.RosterRowWhenActive
+	31, // 62: frontend.v1.RosterRowWhen.created:type_name -> frontend.v1.RosterRowWhenCreated
+	33, // 63: frontend.v1.RosterRowDetail.branch:type_name -> frontend.v1.RosterRowDetailBranch
+	34, // 64: frontend.v1.RosterRowDetail.parent_branch:type_name -> frontend.v1.RosterRowDetailParentBranch
+	35, // 65: frontend.v1.RosterRowDetail.summary:type_name -> frontend.v1.RosterRowDetailSummary
+	66, // [66:66] is the sub-list for method output_type
+	66, // [66:66] is the sub-list for method input_type
+	66, // [66:66] is the sub-list for extension type_name
+	66, // [66:66] is the sub-list for extension extendee
+	0,  // [0:66] is the sub-list for field type_name
 }
 
 func init() { file_frontend_v1_sidebar_proto_init() }
@@ -3472,7 +3742,12 @@ func file_frontend_v1_sidebar_proto_init() {
 		return
 	}
 	file_frontend_v1_sidebar_proto_msgTypes[0].OneofWrappers = []any{}
-	file_frontend_v1_sidebar_proto_msgTypes[18].OneofWrappers = []any{
+	file_frontend_v1_sidebar_proto_msgTypes[5].OneofWrappers = []any{
+		(*RosterRowAvailability_Pending)(nil),
+		(*RosterRowAvailability_Available)(nil),
+		(*RosterRowAvailability_Unavailable)(nil),
+	}
+	file_frontend_v1_sidebar_proto_msgTypes[22].OneofWrappers = []any{
 		(*RosterRow_Submitting)(nil),
 		(*RosterRow_Thinking)(nil),
 		(*RosterRow_Clearing)(nil),
@@ -3496,7 +3771,7 @@ func file_frontend_v1_sidebar_proto_init() {
 		(*RosterRow_None)(nil),
 		(*RosterRow_Inactive)(nil),
 	}
-	file_frontend_v1_sidebar_proto_msgTypes[23].OneofWrappers = []any{
+	file_frontend_v1_sidebar_proto_msgTypes[27].OneofWrappers = []any{
 		(*RosterRowWhen_LastSelected)(nil),
 		(*RosterRowWhen_Merged)(nil),
 		(*RosterRowWhen_Active)(nil),
@@ -3508,7 +3783,7 @@ func file_frontend_v1_sidebar_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_frontend_v1_sidebar_proto_rawDesc), len(file_frontend_v1_sidebar_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   55,
+			NumMessages:   59,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
