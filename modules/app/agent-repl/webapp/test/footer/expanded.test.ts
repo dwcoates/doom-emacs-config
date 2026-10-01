@@ -26,6 +26,7 @@ import {
 } from "./harness.js";
 import { createStopControls } from "../../src/footer/stop.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
+import { withoutBlockComments } from "../source-text.js";
 import { cascadedValue, installStylesheet } from "../stylesheet.js";
 import stylesheet from "../../src/styles.css?raw";
 import type { ClientLogRecord } from "../../../proto/gen/ts/agentrepl/v1/endpoint_client_log_pb";
@@ -840,7 +841,7 @@ describe("a detached-work row is one hit target", () => {
 
   it("washes the whole row on hover, as the agent roster's pressable rows do", () => {
     // Arrange
-    const rule = /\.footer-row-jump:hover\s*\{([^}]*)\}/.exec(stylesheet.replace(/\/\*[\s\S]*?\*\//g, ""));
+    const rule = /\.footer-row-jump:hover\s*\{([^}]*)\}/.exec(withoutBlockComments(stylesheet));
     // Act
     const declarations = rule?.[1] ?? "";
     // Assert
