@@ -731,3 +731,101 @@ func TestTrayComposesTheCoalescedBadgeAfterEditing(t *testing.T) {
 		t.Fatalf("badges = %v, want the arm's badge then the coalesced badge", badges)
 	}
 }
+
+// queuedSecond is a hold queued one second after queuedAt, behind hold().
+func queuedSecond(turn, text string) wsm.HeldPrompt {
+	h := hold(turn, text)
+	h.QueuedAt = queuedAt.Add(time.Second)
+	return h
+}
+
+// foldAboveOf answers the turn an entry's fold button names, "" when the entry
+// offers none.
+func foldAboveOf(p *frontendv1.HeldPrompt) string {
+	if p.FoldAbove == nil {
+		return ""
+	}
+	return p.GetFoldAbove().GetAbove().GetValue()
+}
+
+func TestTrayOffersFoldAbove(t *testing.T) {
+	modelChange := func(turn string) wsm.HeldPrompt {
+		h := hold(turn, "model")
+		h.Act = &wsm.HeldAct{Kind: wsm.ActModel, Value: "opus"}
+		return h
+	}
+	tests := []struct {
+		name    string
+		holds   []wsm.HeldPrompt
+		editing ids.TurnID
+		// want is each drawn entry's fold target, in display order.
+		want []string
+	}{
+		{
+			name:  "the second of two prompts folds into the first, and the first offers nothing",
+			holds: []wsm.HeldPrompt{hold("t1", "first"), queuedSecond("t2", "second")},
+			want:  []string{"", "t1"},
+		},
+		{
+			name:  "nothing is offered behind a held model change",
+			holds: []wsm.HeldPrompt{modelChange("t1"), queuedSecond("t2", "second")},
+			want:  []string{"", ""},
+		},
+		{
+			name:  "nothing is offered behind a held /compact",
+			holds: []wsm.HeldPrompt{hold("t1", "/compact"), queuedSecond("t2", "second")},
+			want:  []string{"", ""},
+		},
+		{
+			name:  "a held model change offers nothing itself",
+			holds: []wsm.HeldPrompt{hold("t1", "first"), func() wsm.HeldPrompt { h := modelChange("t2"); h.QueuedAt = queuedAt.Add(time.Second); return h }()},
+			want:  []string{"", ""},
+		},
+		{
+			name:    "nothing is offered while the entry ahead is being edited",
+			holds:   []wsm.HeldPrompt{hold("t1", "first"), queuedSecond("t2", "second")},
+			editing: "t1",
+			want:    []string{"", ""},
+		},
+		{
+			name:    "nothing is offered while the entry itself is being edited",
+			holds:   []wsm.HeldPrompt{hold("t1", "first"), queuedSecond("t2", "second")},
+			editing: "t2",
+			want:    []string{"", ""},
+		},
+		{
+			name: "a retired entry between two prompts is skipped: the fold names the standing one",
+			holds: []wsm.HeldPrompt{
+				hold("t1", "first"),
+				func() wsm.HeldPrompt {
+					h := queuedSecond("t2", "gone")
+					h.Tombstone = &wsm.Tombstone{Kind: "dropped", At: queuedAt}
+					return h
+				}(),
+				func() wsm.HeldPrompt { h := hold("t3", "third"); h.QueuedAt = queuedAt.Add(2 * time.Second); return h }(),
+			},
+			want: []string{"", "t1"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			r, _ := newResolver(t)
+			r.SetEditing(testWS, tt.editing)
+
+			// Act.
+			r.SetHeldPrompts(testWS, tt.holds)
+
+			// Assert.
+			got := prompts(t, latest(t, r))
+			if len(got) != len(tt.want) {
+				t.Fatalf("the tray drew %d prompts, want %d", len(got), len(tt.want))
+			}
+			for i, p := range got {
+				if foldAboveOf(p) != tt.want[i] {
+					t.Fatalf("entry %d (%s) folds above %q, want %q", i, p.GetTurn().GetValue(), foldAboveOf(p), tt.want[i])
+				}
+			}
+		})
+	}
+}

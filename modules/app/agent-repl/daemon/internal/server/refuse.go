@@ -98,6 +98,16 @@ func (s *server) asRefusal(err error) (refusal, bool) {
 			Fields: map[string]any{"editing_turn": &conversationv1.TurnId{Value: string(beingEdited.Turn)}},
 		}), true
 	}
+	// THE ENTRY THAT IS AHEAD NOW rides the above_moved arm, so the refusal
+	// names it; nothing ahead leaves the optional field unset.
+	var aboveMoved *promptqueue.AboveMovedError
+	if errors.As(err, &aboveMoved) {
+		fields := map[string]any{}
+		if aboveMoved.Current != "" {
+			fields["current_above"] = &conversationv1.TurnId{Value: string(aboveMoved.Current)}
+		}
+		return s.fill(refusal{Arm: "above_moved", Reason: err.Error(), Fields: fields}), true
+	}
 	// THE COLD GATE'S OWN SENTENCE, not this package's error string: the arm's
 	// `detail` is what a client shows the user, and it must read the way the
 	// gate card and the footer's cold-gate line read.
@@ -132,6 +142,10 @@ func (s *server) asRefusal(err error) (refusal, bool) {
 		return s.fill(refusal{Arm: "not_editing", Reason: err.Error()}), true
 	case errors.Is(err, promptqueue.ErrNoEditor):
 		return s.fill(refusal{Arm: "no_editor", Reason: err.Error()}), true
+	case errors.Is(err, promptqueue.ErrNotAPrompt):
+		return s.fill(refusal{Arm: "not_a_prompt", Reason: err.Error()}), true
+	case errors.Is(err, promptqueue.ErrAboveNotAPrompt):
+		return s.fill(refusal{Arm: "above_not_a_prompt", Reason: err.Error()}), true
 
 	// The feed resolver's page-walk refusals.
 	case errors.Is(err, feed.ErrNoWalk):

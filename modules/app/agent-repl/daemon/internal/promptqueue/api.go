@@ -49,6 +49,12 @@ import (
 //	ErrBeingEdited       → EditHeldPromptError.being_edited
 //	ErrNotEditing        → EditHeldPromptError.not_editing
 //	ErrNoEditor          → EditHeldPromptError.no_editor
+//	ErrNoSuchHold        → FoldHeldPromptError.no_such_hold
+//	ErrNotHeld           → FoldHeldPromptError.not_held
+//	ErrNotAPrompt        → FoldHeldPromptError.not_a_prompt
+//	ErrAboveMoved        → FoldHeldPromptError.above_moved (AboveMovedError)
+//	ErrAboveNotAPrompt   → FoldHeldPromptError.above_not_a_prompt
+//	ErrBeingEdited       → FoldHeldPromptError.being_edited (BeingEditedError)
 var (
 	// ErrMerging is a submission that arrived AFTER a merge began. It is
 	// refused outright rather than held: a merged workspace closes, so work a
@@ -77,7 +83,8 @@ var (
 	// was dropped.
 	ErrNotHeld = errors.New("promptqueue: that prompt is no longer held")
 	// ErrBeingEdited is a begin while an edit already stands on the
-	// workspace. BeingEditedError carries it with the turn being edited.
+	// workspace, or a fold naming the prompt an edit stands on.
+	// BeingEditedError carries it with the turn being edited.
 	ErrBeingEdited = errors.New("promptqueue: a held prompt is already being edited on this workspace")
 	// ErrNotEditing is a commit or cancel naming a prompt no edit stands on.
 	ErrNotEditing = errors.New("promptqueue: no edit stands on that prompt")
@@ -213,6 +220,15 @@ type Queue interface {
 	// CancelEdit retires the claim with the content unchanged and resumes the
 	// queue (EditHeldPrompt.cancel).
 	CancelEdit(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID) error
+	// Fold folds the held prompt TURN into ABOVE, the entry the client saw
+	// directly ahead of it (FoldHeldPrompt): ABOVE takes TURN's content after
+	// a blank line, keeps its place, has its verdict discarded and is
+	// reclassified, and TURN leaves the queue, in one store transaction. It
+	// refuses, folding nothing, a turn nothing was held under (ErrNoSuchHold),
+	// one no longer held (ErrNotHeld), a session act (ErrNotAPrompt), an ABOVE
+	// that is no longer directly ahead (AboveMovedError), a session act ahead
+	// (ErrAboveNotAPrompt), and either entry being edited (BeingEditedError).
+	Fold(ctx context.Context, ws ids.WorkspaceID, turn, above ids.TurnID) error
 	// EditorGone retires the workspace's claim, as a cancel would, because no
 	// editor's host stream stands for it any more. The server calls it on the
 	// last host stream's close; a workspace with no claim is a no-op.

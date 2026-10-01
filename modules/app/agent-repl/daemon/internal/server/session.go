@@ -179,6 +179,36 @@ func (s *server) EditHeldPrompt(
 	return connect.NewResponse(resp), nil
 }
 
+// FoldHeldPrompt folds one held prompt into the held prompt directly ahead of
+// it. It is the queue's own verb; the two typed echo tokens travel to it
+// unchanged, so the queue refuses a fold into anything but the entry the
+// client saw ahead.
+func (s *server) FoldHeldPrompt(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.FoldHeldPromptRequest],
+) (*connect.Response[agentreplv1.FoldHeldPromptResponse], error) {
+	const rpc = "FoldHeldPrompt"
+	if err := validateFoldHeldPromptRequest(req.Msg); err != nil {
+		return nil, err
+	}
+	resp := &agentreplv1.FoldHeldPromptResponse{}
+	subject, cerr, done := s.subjectFor(ctx, rpc, req.Msg.GetWorkspace(), resp)
+	if done {
+		return answer(resp, cerr)
+	}
+	turn := ids.TurnID(req.Msg.GetTurn().GetValue())
+	above := ids.TurnID(req.Msg.GetAbove().GetValue())
+	if err := s.deps.Queue.Fold(ctx, subject.Record.ID, turn, above); err != nil {
+		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
+	}
+	subject.Log.Debug("daemon.server.fold_held_prompt", "folded a held prompt into the one ahead",
+		dlog.Context{"turn": string(turn), "above_turn": string(above)})
+	resp.Result = &agentreplv1.FoldHeldPromptResponse_Success{
+		Success: &agentreplv1.FoldHeldPromptSuccess{},
+	}
+	return connect.NewResponse(resp), nil
+}
+
 // AnswerHeldOffer answers a question the daemon parked in the tray. The one
 // offer that exists is the merge dequeue: keep the queued merge, or release it.
 func (s *server) AnswerHeldOffer(
