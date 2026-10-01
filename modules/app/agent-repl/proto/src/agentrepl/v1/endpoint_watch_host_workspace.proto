@@ -289,8 +289,9 @@ message HostFault {
 }
 
 
-// What the workspace's feed has selected, as Emacs needs it: only which kind of
-// row, never the row, because Emacs never names it back.
+// What the workspace's feed has selected, as Emacs needs it: which kind of
+// row, and the selected bubble's text, never the row, because Emacs never names
+// it back. The text is what the composer's `/` and `?` search.
 message HostWorkspaceSelection {
   // Exactly one is set on every push.
   oneof selection {
@@ -298,13 +299,35 @@ message HostWorkspaceSelection {
     HostWorkspaceSelectionNone none = 1;
     // A final response is selected; the next prompt replies to it.
     HostWorkspaceSelectionResponse response = 2;
-    // A prompt is selected; the rollback keys roll back to just before it.
+    // A prompt a rollback can reach is selected; the rollback keys roll back
+    // to just before it, and the next prompt replies to it.
     HostWorkspaceSelectionPrompt prompt = 3;
+    // Any other bubble is selected; the next prompt replies to it.
+    HostWorkspaceSelectionBubble bubble = 4;
   }
 }
 // Nothing is selected.
 message HostWorkspaceSelectionNone {}
 // A final response is selected.
-message HostWorkspaceSelectionResponse {}
-// A prompt is selected.
-message HostWorkspaceSelectionPrompt {}
+message HostWorkspaceSelectionResponse {
+  // The response's text.
+  HostWorkspaceSelectionMarkdown markdown = 1;
+}
+// A prompt a rollback can reach is selected.
+message HostWorkspaceSelectionPrompt {
+  // The prompt's text.
+  HostWorkspaceSelectionMarkdown markdown = 1;
+}
+// Any other bubble is selected: an interim or thinking response, an agent
+// prompt, or a user prompt a rollback cannot reach.
+message HostWorkspaceSelectionBubble {
+  // The bubble's text.
+  HostWorkspaceSelectionMarkdown markdown = 1;
+}
+// A selected bubble's text as markdown source, verbatim: a response's prose,
+// or a prompt's text blocks joined by blank lines. Empty for a prompt that
+// carries no text (an image alone).
+message HostWorkspaceSelectionMarkdown {
+  // The markdown.
+  string text = 1;
+}
