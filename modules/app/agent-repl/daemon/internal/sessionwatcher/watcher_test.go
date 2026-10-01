@@ -365,6 +365,11 @@ func TestAMalformedAnnouncementIsRefused(t *testing.T) {
 			work:      withKind(createdWork("w-1", subagentWork("sub-1")), subagentKind("sub-2")),
 			operation: "daemon.sessionwatcher.detached_kind_conflict",
 		},
+		{
+			name:      "a created spawn whose commission disagrees with its start",
+			work:      withKind(createdWork("w-1", subagentWork("sub-1")), commissionedKind("sub-1", "not what the start says")),
+			operation: "daemon.sessionwatcher.detached_commission_conflict",
+		},
 	}
 
 	for _, tt := range tests {
@@ -393,6 +398,25 @@ func TestAMalformedAnnouncementIsRefused(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A COMMISSION THAT RESTATES ITS START is the ordinary created announcement,
+// and is admitted like any other.
+func TestACreatedSpawnWhoseCommissionAgreesIsAdmitted(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	work := subagentWork("sub-1")
+	description := "fix the shim"
+	work.GetSubagent().GetStart().Prompt = &conversationv1.AgentSubagentPrompt{Text: "go", Description: &description}
+	kind := commissionedKind("sub-1", description)
+
+	// Act.
+	h.route(h.main, entryFrame(frameDetached("main-1", withKind(createdWork("w-1", work), kind))))
+
+	// Assert.
+	h.client.nextAgentOpen(t)
+	assertLiveWork(t, h.w.LiveWork(), LiveWorkSet{Agents: []*conversationv1.AgentId{agentID("sub-1")}})
 }
 
 // TestAgentTerminalReapsItsWatch covers the reap: the open set IS the live

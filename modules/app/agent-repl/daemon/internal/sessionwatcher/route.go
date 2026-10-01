@@ -5,6 +5,7 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	shimv1 "agentrepl/proto/shim/v1"
+	"google.golang.org/protobuf/proto"
 
 	"claude-repld/internal/contextcut"
 	"claude-repld/internal/dlog"
@@ -1509,6 +1510,17 @@ func (w *watcher) resolveDetachedLocked(work *conversationv1.AgentDetachedWork) 
 			w.log.Error("daemon.sessionwatcher.detached_kind_conflict", "a created announcement describes different work than its own kind names; it is refused", dlog.Context{
 				"work_id": handle, "kind": kind.String(), "agent_id": agent.GetValue(),
 				"described_kind": described.String(), "described_agent_id": describedAgent.GetValue(),
+			})
+			return kindUnknown, nil, false
+		}
+		// THE COMMISSION RESTATES THE DESCRIBED START (DetachedWorkKindSubagent.
+		// commission), and two statements of one fact that disagree are refused
+		// exactly as two kinds are: neither can be chosen.
+		start := created.GetWorkCreated().GetSubagent().GetStart()
+		if commission := work.GetKind().GetSubagent().GetCommission(); commission != nil && !proto.Equal(commission, start.GetPrompt()) {
+			w.log.Error("daemon.sessionwatcher.detached_commission_conflict", "a created announcement's commission disagrees with the start it describes; it is refused", dlog.Context{
+				"work_id": handle, "agent_id": agent.GetValue(),
+				"commission_description": commission.GetDescription(), "described_description": start.GetPrompt().GetDescription(),
 			})
 			return kindUnknown, nil, false
 		}
