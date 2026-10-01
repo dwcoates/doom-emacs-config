@@ -481,41 +481,11 @@ func TestADeadQueryReplacesTheShimAtFreeness(t *testing.T) {
 	if len(bouncer.asked) != 1 {
 		t.Fatalf("asked = %+v, want one replacement", bouncer.asked)
 	}
-	if got := bouncer.asked[0]; got.ws != "ws-1" || got.reason != rollout.ReasonQueryDied || got.force {
-		t.Fatalf("asked = %+v, want an unforced query_died replacement of ws-1", got)
+	if got := bouncer.asked[0]; got.ws != "ws-1" || got.reason != rollout.ReasonQueryDied || got.force || got.done != nil {
+		t.Fatalf("asked = %+v, want an unforced query_died replacement of ws-1 whose outcome BounceShim records alone", got)
 	}
 	if !hasLifecycleRecord(log, "info", "the session's vendor query died; its shim is replaced through the bounce registry") {
 		t.Fatalf("records = %+v, want the replacement stated", log.Records())
-	}
-}
-
-func TestADeadQuerysReplacementOutcomeIsRecorded(t *testing.T) {
-	tests := []struct {
-		name  string
-		err   error
-		level string
-		msg   string
-	}{
-		{"it finished", nil, "info", "restarted the session whose query died"},
-		{"it failed", errors.New("resume refused"), "error", "could not restart the session whose query died"},
-		{"the shim departed first", bounce.ErrUnregistered, "info", "the shim whose query died departed before its replacement; the next bring-up starts the session afresh"},
-		{"a handover carried it", bounce.ErrHandedAcross, "info", "the restart of the session whose query died was handed across: the daemon the workspace moved to runs it"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange
-			bouncer := &fakeShimBouncer{}
-			sink, log := queryDiedSink(bouncer)
-			sink.OnQueryDied("ws-1")
-
-			// Act
-			bouncer.asked[0].done(tt.err)
-
-			// Assert
-			if !hasLifecycleRecord(log, tt.level, tt.msg) {
-				t.Fatalf("records = %+v, want %q at %s", log.Records(), tt.msg, tt.level)
-			}
-		})
 	}
 }
 
