@@ -23,6 +23,7 @@ import {
   readHistoryAfter,
   readHistoryFirst,
   readHistoryThrough,
+  resumeSession,
   startTurnRequest,
   stopAgent,
   turnId,
@@ -2075,6 +2076,26 @@ describe("RollBackSession", () => {
         ? response.result.value.cause.value.vendorPromptUuid
         : response.result.case,
     ).toBe(promptVendorUuid("t3"));
+  });
+
+  test("a shim restarted before the next prompt resumes at the rollback's cut", async () => {
+    const first = await spawnShim();
+    const started = sessionStarted(await first.clients.h1.startSession(freshSession()));
+    await wholeTurn(first, "t1", "!md");
+    await wholeTurn(first, "t2", "!md");
+    const forkPoint = readTranscript(first.dirs, started.vendorSessionId).find(
+      (record) => record.uuid === promptVendorUuid("t2"),
+    )?.parentUuid;
+    await first.clients.h1.rollBackSession(rollBack("t2", ["t2"], "keep"));
+    await first.clients.h1.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
+    await first.exited;
+
+    const second = await spawnShim({ reuse: first.dirs });
+    sessionStarted(await second.clients.h1.startSession(resumeSession(started.vendorSessionId, undefined, ["t2"])));
+    await wholeTurn(second, "t3", "!md");
+
+    const t3 = readTranscript(first.dirs, started.vendorSessionId).find((record) => record.uuid === promptVendorUuid("t3"));
+    expect(t3?.parentUuid).toBe(forkPoint);
   });
 
   test("files the vendor cannot restore refuse files_not_restorable", async () => {

@@ -395,13 +395,14 @@ function freshRequestNoModel(): shimv1.StartSessionRequest {
 function resumeRequest(
   vendorSessionId: string,
   remediation?: conversationv1.SessionColdRemediation,
-  options: { rebind?: boolean } = {},
+  options: { rebind?: boolean; rolledBackTurns?: readonly string[] } = {},
 ): shimv1.StartSessionRequest {
   return create(shimv1.StartSessionRequestSchema, {
     source: {
       case: "resume",
       value: create(shimv1.StartSessionResumeSchema, {
         vendorSessionId,
+        rolledBackTurns: (options.rolledBackTurns ?? []).map((value) => create(conversationv1.TurnIdSchema, { value })),
         ...(remediation === undefined ? {} : { coldRemediation: remediation }),
         ...(options.rebind === true
           ? { rebind: create(shimv1.StartSessionRebindSchema, {}) }
@@ -12226,6 +12227,247 @@ describe("RollBackSession", () => {
     }).toMatchObject({
       level: "error",
       context: { outcome: "vendor_refused", detail: "Resume rejected by --resume-drops-turn: no" },
+    });
+  });
+  /** A keep-alive prompt record of the shim's own, chained under `parent`. */
+  const keepaliveLine = (uuid: string, parent: string): Record<string, unknown> => ({
+    type: "user",
+    uuid,
+    parentUuid: parent,
+    message: { role: "user", content: `${KEEPALIVE_PROMPT_MARKER}\nRespond with "." (1)` },
+  });
+
+  /** A background task's notification, delivered as a user record under `parent`. */
+  const notificationLine = (uuid: string, parent: string): Record<string, unknown> => ({
+    type: "user",
+    uuid,
+    parentUuid: parent,
+    message: { role: "user", content: "<task-notification>done</task-notification>" },
+  });
+
+  it("cuts without arming the vendor's guard when a keep-alive sits past the fork point", async () => {
+    // Arrange
+    const h = await withTranscript([...threeTurns(), keepaliveLine("k2", "a2")]);
+
+    // Act
+    const response = await h.engine.rollBackSession(rollBack("turn-2", ["turn-2"]));
+
+    // Assert
+    expect({ outcome: outcome(response), armed: h.queries[1]?.spec !== undefined && "resumeDropsTurn" in h.queries[1].spec }).toEqual({
+      outcome: "success",
+      armed: false,
+    });
+  });
+
+  it("records why the vendor's guard was left unarmed", async () => {
+    // Arrange
+    const h = await withTranscript([...threeTurns(), keepaliveLine("k2", "a2")]);
+    const from = logSinkMark();
+
+    // Act
+    await h.engine.rollBackSession(rollBack("turn-2", ["turn-2"]));
+
+    // Assert
+    expect({
+      level: logLevelFor(from, "the vendor's guard is not armed: an entry"),
+      context: logContextFor(from, "the vendor's guard is not armed: an entry"),
+    }).toMatchObject({ level: "info", context: { guard: "unattributable", record_uuid: "k2", fork_point: "a1" } });
+  });
+
+  it("refuses a files-restoring rollback unseen_prompt over a task notification, changing nothing", async () => {
+    // Arrange
+    const h = await withTranscript([...threeTurns(), notificationLine("n2", "a2")]);
+    await realPrompt(h, "turn-3");
+    const before = h.queries[0]?.query;
+    if (before === undefined) throw new Error("no query");
+
+    // Act
+    const response = await h.engine.rollBackSession(rollBack("turn-2", ["turn-2"], "restore"));
+
+    // Assert
+    expect({
+      outcome: outcome(response),
+      unseen: response.result.case === "failure" && response.result.value.cause.case === "unseenPrompt"
+        ? response.result.value.cause.value.vendorPromptUuid
+        : "",
+      queries: h.queries.length,
+      interrupted: before.calls.includes("interrupt"),
+      rewound: before.calls.filter((call) => call.startsWith("rewindFiles")),
+    }).toEqual({ outcome: "unseenPrompt", unseen: "n2", queries: 1, interrupted: false, rewound: [] });
+  });
+
+  it("records the up-front refusal of a files-restoring rollback with its record", async () => {
+    // Arrange
+    const h = await withTranscript([...threeTurns(), notificationLine("n2", "a2")]);
+    const from = logSinkMark();
+
+    // Act
+    await h.engine.rollBackSession(rollBack("turn-2", ["turn-2"], "restore"));
+
+    // Assert
+    expect({
+      level: logLevelFor(from, "the vendor's guard would refuse"),
+      context: logContextFor(from, "the vendor's guard would refuse"),
+    }).toMatchObject({
+      level: "info",
+      context: { outcome: "unseen_prompt", unseen_prompt_uuid: "n2", why: "guardWouldRefuse" },
+    });
+  });
+
+  it("keeps the files and cuts over the same task notification", async () => {
+    // Arrange
+    const h = await withTranscript([...threeTurns(), notificationLine("n2", "a2")]);
+
+    // Act
+    const response = await h.engine.rollBackSession(rollBack("turn-2", ["turn-2"]));
+
+    // Assert
+    expect({ outcome: outcome(response), fork: h.queries[1]?.spec.resumeSessionAt }).toEqual({
+      outcome: "success",
+      fork: "a1",
+    });
+  });
+
+  it("resumes at a landed rollback's cut after a later rollback is refused", async () => {
+    // Arrange
+    const h = await withTranscript(threeTurns(), {
+      onQueryCreated: (query, _spec, index) => {
+        if (index !== 2) return;
+        query.supportedModels = () => Promise.reject(new Error("Claude Code process exited with code 1"));
+        query.emit(errorResultMessage({ errors: ["Resume rejected by --resume-drops-turn: no"] }));
+        query.end();
+      },
+    });
+    await h.engine.rollBackSession(rollBack("turn-2", ["turn-2"]));
+
+    // Act
+    await h.engine.rollBackSession(rollBack("turn-1", ["turn-1"]));
+
+    // Assert
+    expect(h.queries.map((created) => created.spec.resumeSessionAt ?? "plain")).toEqual(["plain", "a1", "a0", "a1"]);
+  });
+
+  describe("a resume after a rollback (StartSessionResume.rolled_back_turns)", () => {
+    /** Resume `resume-1`, whose transcript holds `lines`, naming `rolledBack`; answers the first query's spec. */
+    async function resumed(lines: Record<string, unknown>[], rolledBack: readonly string[]): Promise<QuerySpec> {
+      const h = harness({ nowMs: 1_000_100 });
+      writeTranscript(h.configDir, h.cwd, "resume-1", lines);
+      const pending = h.engine.startSession(resumeRequest("resume-1", undefined, { rolledBackTurns: rolledBack }));
+      const first = await untilQuery(h, 0);
+      first.query.emit(initMessage({ sessionId: "resume-1" }));
+      await pending;
+      return first.spec;
+    }
+
+    it("resumes at the cut when the shim restarts before the next prompt", async () => {
+      // Arrange, Act
+      const spec = await resumed(threeTurns(), ["turn-2"]);
+
+      // Assert
+      expect(spec.resumeSessionAt).toBe("a1");
+    });
+
+    it("never arms the vendor's guard on a resume", async () => {
+      // Arrange, Act
+      const spec = await resumed(threeTurns(), ["turn-2"]);
+
+      // Assert
+      expect(spec).not.toHaveProperty("resumeDropsTurn");
+    });
+
+    it("resumes plainly once the next prompt started a branch at the fork point", async () => {
+      // Arrange, Act
+      const spec = await resumed(
+        [...threeTurns(), promptLine("turn-3", "a1"), answerLine("a3", promptVendorUuid("turn-3"))],
+        ["turn-2"],
+      );
+
+      // Assert
+      expect(spec).not.toHaveProperty("resumeSessionAt");
+    });
+
+    it("resumes plainly when no turn was rolled back", async () => {
+      // Arrange, Act
+      const spec = await resumed(threeTurns(), []);
+
+      // Assert
+      expect(spec).not.toHaveProperty("resumeSessionAt");
+    });
+
+    it("crosses a compaction to the rolled-back prompt before it", async () => {
+      // Arrange, Act
+      const spec = await resumed(
+        [
+          ...threeTurns(),
+          { type: "system", subtype: "compact_boundary", uuid: "b0", parentUuid: null, logicalParentUuid: "a2" },
+          { type: "user", uuid: "s0", parentUuid: "b0", isCompactSummary: true, message: { role: "user", content: "summary" } },
+        ],
+        ["turn-2"],
+      );
+
+      // Assert
+      expect(spec.resumeSessionAt).toBe("a1");
+    });
+
+    it("records the cut it resumes at", async () => {
+      // Arrange
+      const from = logSinkMark();
+
+      // Act
+      await resumed(threeTurns(), ["turn-2"]);
+
+      // Assert
+      expect({
+        level: logLevelFor(from, "resuming at the cut"),
+        context: logContextFor(from, "resuming at the cut"),
+      }).toMatchObject({
+        level: "info",
+        context: { rolled_back_turns: ["turn-2"], prompt_uuid: promptVendorUuid("turn-2"), resume_session_at: "a1" },
+      });
+    });
+
+    it("refuses vendor_start_failed when a rolled-back prompt opens the conversation", async () => {
+      // Arrange
+      const h = harness({ nowMs: 1_000_100 });
+      writeTranscript(h.configDir, h.cwd, "resume-1", threeTurns());
+
+      // Act
+      const response = await h.engine.startSession(resumeRequest("resume-1", undefined, { rolledBackTurns: ["turn-0"] }));
+
+      // Assert
+      expect({
+        cause: failureCause(response),
+        queries: h.queries.length,
+        opensConversation: response.result.case === "failure" && response.result.value.detail.includes("opens the conversation"),
+      }).toEqual({ cause: "vendorStartFailed", queries: 0, opensConversation: true });
+    });
+
+    it("summarizes a cold resume's compaction from the cut", async () => {
+      // Arrange
+      const h = harness({
+        nowMs: 1_000_000 + 10 * 60 * 1000,
+        onQueryCreated: (query, _spec, index) => {
+          if (index === 0) query.emit(resultMessage("77777777-7777-4777-8777-777777777777"));
+        },
+      });
+      writeTranscript(h.configDir, h.cwd, "resume-1", [
+        ...threeTurns().slice(0, 5),
+        assistantLine({ uuid: "a2", parentUuid: promptVendorUuid("turn-2") }),
+      ]);
+      const compact = create(conversationv1.SessionColdRemediationSchema, {
+        remediation: {
+          case: "compact",
+          value: create(conversationv1.SessionColdCompactSchema, { scope: conversationv1.SessionCompactScope.ALL }),
+        },
+      });
+
+      // Act
+      const pending = h.engine.startSession(resumeRequest("resume-1", compact, { rolledBackTurns: ["turn-2"] }));
+      (await untilQuery(h, 1)).query.emit(initMessage({ sessionId: "resume-1" }));
+      await pending;
+
+      // Assert
+      expect(h.queries[0]?.spec.resumeSessionAt).toBe("a1");
     });
   });
 });

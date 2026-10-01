@@ -30,3 +30,15 @@ configuration.
    - Affected: `first_prompt` refusal scope.
    - Verify: read a fresh and a compacted vendor JSONL.
    - Status: OPEN.
+5. **The vendor's `resumeDropsTurn` guard accepts exactly what the shim's
+   `guardAttributes` (`agent-shim/claude/shim/src/engine/rollback.ts`) says it
+   accepts.**
+   - Affected: whether the shim arms the guard (`shim.v1.RollBackSession`) and
+     whether a `restore_files` rollback is refused up front as `unseen_prompt`.
+     The fake SDK uses the same helper, so the suites cannot detect a
+     disagreement.
+   - Verify: against the real SDK, resume with `resumeDropsTurn` over
+     transcripts whose dropped range holds a keep-alive, a task notification,
+     an interrupt marker, and a tool result, and compare refusals with
+     `guardAttributes`.
+   - Status: OPEN.
