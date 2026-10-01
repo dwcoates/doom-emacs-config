@@ -136,41 +136,14 @@ func (q *queue) applyLeasePolicy(ctx context.Context, sub Submission, log dlog.L
 	}
 
 	switch lease.Policy {
-	case wsm.PolicyRefuse:
+	// A RETIRED PARKED LEASE refuses as any merge lease does: nothing parks
+	// any more, a build before 2026-09-30 is the only writer of one, and the
+	// boot's merge recovery releases every merge lease it finds.
+	case wsm.PolicyRefuse, wsm.PolicyParked:
 		log.Debug("daemon.promptqueue.disposition_decision", "selected a prompt disposition branch", dlog.Context{"function": "queue", "branch": "case wsm.PolicyRefuse"})
 		refusalLevel(ctx, log, log.Warn)(opSubmit, "the submission is refused: a merge is in flight", fields)
 		q.noteDrainRefusal(lease.Holder, sub.WS)
 		return Disposition{RefusedArm: ArmMerging}, true, ErrMerging
-
-	case wsm.PolicyParked:
-		log.Debug("daemon.promptqueue.disposition_decision", "selected a prompt disposition branch", dlog.Context{"function": "queue", "branch": "case wsm.PolicyParked"})
-		if q.deps.ParkedRoute == nil {
-			log.Error(opSubmit, "a parked lease stands but no parked route is wired", fields)
-			return Disposition{}, true, fmt.Errorf("route the parked submission on %q: no parked route is wired", sub.WS)
-		}
-		// THE GUIDANCE IS A TURN, AND ITS RECORD GOES DOWN FIRST, exactly as a
-		// delivery's does: its terminal closes the row through the one door.
-		// Without it a guidance turn that ENDED closed nothing -- `could not
-		// stamp the turn's close ... not found` at ERROR -- because until the
-		// park answered every prompt, no guidance turn ever ended.
-		if err := q.deps.DB.PutTurn(ctx, wsm.Turn{
-			ID: sub.Turn, Workspace: sub.WS, Text: saidText(sub.Said), Origin: sub.Origin.String(), StartedAt: q.deps.Now(),
-		}); err != nil {
-			log.Error(opSubmit, "could not record the guidance turn before routing it", merged(fields, dlog.Context{"cause": err.Error()}))
-			return Disposition{}, true, fmt.Errorf("record the guidance turn %q on %q: %w", sub.Turn, sub.WS, err)
-		}
-		if err := q.deps.ParkedRoute(ctx, sub.WS, sub.Turn, sub.Said); err != nil {
-			log.Error(opSubmit, "the parked route refused the submission",
-				merged(fields, dlog.Context{"cause": err.Error()}))
-			return Disposition{}, true, fmt.Errorf("route the parked submission on %q: %w", sub.WS, err)
-		}
-		// THE GUIDANCE IS STILL SOMETHING THE USER TYPED, so it is drawn like
-		// every other accepted prompt -- at the session's standing output
-		// address, which the parked lease holder has pointed at its own tab, so
-		// the guidance lands there and never on the root feed.
-		q.mirrorAccepted(sub.WS, sub.Turn, sub.Said, sub.Origin)
-		log.Info(opSubmit, "routed the submission to the resolution agent as guidance, under the submission's own turn", fields)
-		return Disposition{Delivered: true}, true, nil
 
 	case wsm.PolicyHold:
 		log.Debug("daemon.promptqueue.disposition_decision", "selected a prompt disposition branch", dlog.Context{"function": "queue", "branch": "case wsm.PolicyHold"})
