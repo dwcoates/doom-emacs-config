@@ -47,6 +47,11 @@
  * daemon's tray entry carries `editing`. A refused or failed begin is filed on
  * the topbar's warning chip (owner spec, 2026-09-23), never drawn at the row.
  *
+ * FOLD ABOVE IS DAEMON-OFFERED (FoldHeldPrompt). The control is drawn only
+ * while the entry carries `fold_above`, and it sends back that element's token
+ * for the entry ahead, so the daemon folds into the entry the reader saw or
+ * refuses; the refusal is said at the row, as Send now's and Cancel's are.
+ *
  * WHY DROP RAISES A DOM EVENT. Dropping a held prompt discards text the user
  * typed and never got to send. Losing it silently is the exact failure the old
  * `heldPromptUnsentFailure` stub existed to prevent, so the text is handed
@@ -95,6 +100,10 @@ import {
   EditHeldPromptResponseSchema,
   type EditHeldPromptBeingEdited,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_edit_held_prompt_pb";
+import {
+  FoldHeldPromptResponseSchema,
+  type FoldHeldPromptError,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_fold_held_prompt_pb";
 import { ConnectError } from "@connectrpc/connect";
 import { controlPlaneFailed } from "../failure/sink.js";
 import { formatTickedAge } from "../duration.js";
@@ -191,6 +200,8 @@ export function drawHeldPrompt(u: HeldPrompt, tc: TrayContext, previous?: HTMLEl
       classification: classification.case,
       hold: hold === null ? null : hold.case,
       accept: verdict.offersAccept,
+      foldAbove:
+        u.foldAbove === undefined ? null : requireMessage(u.foldAbove.above, `${path}.fold_above.above`),
     }),
   );
 
@@ -532,6 +543,8 @@ interface ActionSpec {
   classification: string;
   hold: string | null;
   accept: boolean;
+  /** The entry the "fold above" control folds into, or null when the daemon offers no fold. */
+  foldAbove: TurnId | null;
 }
 
 /** The three answers an entry takes, exactly as the request's arms name them. */
@@ -554,6 +567,7 @@ export function drawHeldPromptActions(spec: ActionSpec): HTMLElement {
       turn: spec.turn.value,
       release: noReleaseTitle === undefined,
       accept: spec.accept,
+      fold_above: spec.foldAbove?.value ?? null,
     },
   });
 
@@ -581,6 +595,9 @@ export function drawHeldPromptActions(spec: ActionSpec): HTMLElement {
   // wire verb is still `drop`, and so are the hooks it is found by.
   actions.appendChild(actionButton("drop", "Cancel", spec));
   if (spec.accept) actions.appendChild(actionButton("accept", "Accept", spec));
+  // DAEMON-OFFERED: the fold stands exactly while the entry carries
+  // `fold_above` (FoldHeldPrompt).
+  if (spec.foldAbove !== null) actions.appendChild(foldAboveButton(spec, spec.foldAbove));
   return actions;
 }
 
@@ -600,10 +617,7 @@ function actionButton(action: HeldAction, label: string, spec: ActionSpec): HTML
 
 /** Issue the action; a refusal is said at the row that made the call. */
 async function run(action: HeldAction, spec: ActionSpec, button: HTMLButtonElement): Promise<void> {
-  const row = button.parentElement;
-  clearRowRefusal(row);
-  setRowDisabled(row, true);
-  try {
+  const succeeded = await rowCall(button, "UpdateHeldPrompt", action, spec.turn.value, async () => {
     const response = await callUnary(
       spec.tc.ctx,
       "UpdateHeldPrompt",
@@ -616,39 +630,143 @@ async function run(action: HeldAction, spec: ActionSpec, button: HTMLButtonEleme
       UpdateHeldPromptResponseSchema,
     );
     const result = requireCase(response.result, "UpdateHeldPromptResponse.result");
-    if (result.case !== "success") {
-      const cause = requireCase(
-        (result.value).cause,
-        "UpdateHeldPromptError.cause",
-      );
-      const say =
-        crossCuttingSentence("UpdateHeldPrompt", cause) ?? updateHeldPromptRefusal(cause, action);
-      drawRowRefusal(row, cause.case, say);
-      log.warn(`UpdateHeldPrompt refused a ${action}`, {
-        operation: "tray.held-prompt.action-refused",
-        context: { turn: spec.turn.value, action, arm: cause.case, sentence: say },
-      });
-      return;
-    }
-    // A drop DISCARDS TEXT THE USER TYPED. It leaves on the next push, so the
-    // words are handed back here, on the way out, while they still exist.
-    if (action === "drop") handBackDroppedText(button, spec.text, spec.turn.value);
-    // Success leaves the row alone: the tray's own push is what takes the card
-    // down, and re-enabling a row about to be replaced would only flicker.
+    if (result.case === "success") return null;
+    const cause = requireCase(result.value.cause, "UpdateHeldPromptError.cause");
+    const say = crossCuttingSentence("UpdateHeldPrompt", cause) ?? updateHeldPromptRefusal(cause, action);
+    return { arm: cause.case, say };
+  });
+  // A drop DISCARDS TEXT THE USER TYPED. It leaves on the next push, so the
+  // words are handed back here, on the way out, while they still exist.
+  if (succeeded && action === "drop") handBackDroppedText(button, spec.text, spec.turn.value);
+}
+
+/** A refusal a row's call answered: the error's arm and the sentence said for it. */
+interface RowRefusal {
+  arm: string;
+  say: string;
+}
+
+/**
+ * THE ROW'S ONE CALL LIFECYCLE, shared by every held-prompt control whose
+ * refusal is said at the row: the row's standing refusal is cleared and its
+ * controls disabled for the call; a typed refusal (ATTEMPT answering one) or a
+ * call that never landed is drawn as the row's next sibling and logged, and
+ * re-enables the row so it can be retried. Answers whether the call succeeded.
+ *
+ * Success leaves the row alone: the tray's own push is what takes the card
+ * down or redraws it, and re-enabling a row about to be replaced would only
+ * flicker.
+ */
+async function rowCall(
+  button: HTMLButtonElement,
+  rpc: string,
+  action: string,
+  turn: string,
+  attempt: () => Promise<RowRefusal | null>,
+): Promise<boolean> {
+  const row = button.parentElement;
+  clearRowRefusal(row);
+  setRowDisabled(row, true);
+  try {
+    const refused = await attempt();
+    if (refused === null) return true;
+    drawRowRefusal(row, refused.arm, refused.say);
+    log.warn(`${rpc} refused a ${action}`, {
+      operation: "tray.held-prompt.action-refused",
+      context: { turn, action, arm: refused.arm, sentence: refused.say },
+    });
+    return false;
   } catch (err) {
     // A MALFORMED VIEW IS NOT A TRANSPORT FAILURE: the daemon answered, and
     // this renderer could not read the answer. It travels up loudly rather
     // than being drawn as "could not be reached", which would be a lie.
     if (isMalformedView(err)) throw err;
     drawRowRefusal(row, "error", "the daemon could not be reached");
-    log.error(`UpdateHeldPrompt failed for a ${action}: ${String(err)}`, {
+    log.error(`${rpc} failed for a ${action}: ${String(err)}`, {
       operation: "tray.held-prompt.action-failed",
-      context: { turn: spec.turn.value, action, cause: err },
+      context: { turn, action, cause: err },
     });
+    return false;
   } finally {
     // Only a refusal leaves the row on screen; re-enable so it can be retried.
     if (row !== null && row.parentElement?.querySelector(".queued-refusal") != null) {
       setRowDisabled(row, false);
+    }
+  }
+}
+
+/** The fold control's label: what the reader sees it do. */
+export const FOLD_ABOVE_LABEL = "fold above";
+
+/**
+ * The "fold above" control (FoldHeldPrompt): folds this prompt into the entry
+ * directly ahead of it. Drawn only when the daemon's entry carries
+ * `fold_above`, and it sends back exactly the token that element served, so
+ * the daemon folds into the entry the reader saw above this one or refuses.
+ */
+function foldAboveButton(spec: ActionSpec, above: TurnId): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "queued-action queued-action-fold";
+  button.setAttribute("data-held-action", "fold");
+  button.textContent = FOLD_ABOVE_LABEL;
+  button.addEventListener("click", (event: MouseEvent) => {
+    event.preventDefault();
+    void guardMalformed(spec.tc.ctx, "tray.held-prompt.fold", fold(spec, above, button));
+  });
+  return button;
+}
+
+/** Fold this prompt into ABOVE; a refusal is said at the row, as every row action's is. */
+async function fold(spec: ActionSpec, above: TurnId, button: HTMLButtonElement): Promise<void> {
+  log.info("folding a held prompt into the one ahead", {
+    operation: "tray.held-prompt.fold",
+    context: { turn: spec.turn.value, above: above.value },
+  });
+  await rowCall(button, "FoldHeldPrompt", "fold", spec.turn.value, async () => {
+    const response = await callUnary(
+      spec.tc.ctx,
+      "FoldHeldPrompt",
+      (client) =>
+        client.foldHeldPrompt({
+          workspace: spec.tc.ctx.workspace,
+          turn: spec.turn,
+          above,
+        }),
+      FoldHeldPromptResponseSchema,
+    );
+    const result = requireCase(response.result, "FoldHeldPromptResponse.result");
+    if (result.case === "success") return null;
+    const cause = requireCase(result.value.cause, "FoldHeldPromptError.cause");
+    const say = crossCuttingSentence("FoldHeldPrompt", cause) ?? foldHeldPromptRefusal(cause);
+    return { arm: cause.case, say };
+  });
+}
+
+/** `FoldHeldPromptError`'s cause union, narrowed to a SET arm. */
+type FoldHeldPromptCause = NonNullable<FoldHeldPromptError["cause"]> & { case: string };
+
+/**
+ * What each of FoldHeldPrompt's OWN arms says. Every one means the card is
+ * stale or blocked, and nothing was folded; each says which.
+ */
+export function foldHeldPromptRefusal(cause: FoldHeldPromptCause): string {
+  switch (cause.case) {
+    case "noSuchHold":
+      return "no prompt was ever held under this card";
+    case "notHeld":
+      return "this prompt is no longer held";
+    case "notAPrompt":
+      return "a queued session change cannot be folded";
+    case "aboveMoved":
+      return "the entry above has changed; nothing was folded";
+    case "aboveNotAPrompt":
+      return "the entry above is a session change, which takes no prompt";
+    case "beingEdited":
+      return `a held prompt being edited cannot be folded (turn ${cause.value.editingTurn?.value ?? ""})`;
+    default: {
+      const other: { case: string } = cause;
+      return unreachableArm("FoldHeldPromptError.cause", other.case);
     }
   }
 }

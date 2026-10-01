@@ -25,6 +25,7 @@ import {
   UpdateHeldPromptResponseSchema,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_held_prompt_pb";
 import { AnswerHeldOfferRequestSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_answer_held_offer_pb";
+import { FoldHeldPromptResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_fold_held_prompt_pb";
 import { create } from "@bufbuild/protobuf";
 
 import { bootColdOnce, startHarness, type Harness } from "./harness";
@@ -273,6 +274,62 @@ describe("release and drop", () => {
     await harness.click('[data-held-action="drop"]');
     // Assert: the daemon still holds it, so the tray must still show it.
     expect(harness.$(`[data-held-turn="${HELD_TURN_ID}"]`)).not.toBeNull();
+  });
+});
+
+describe("the fold above button", () => {
+  /** Two held prompts, the second offered a fold into the first. */
+  const foldable = (): Parameters<typeof holdTray>[0] => ({
+    items: [
+      heldPromptItem({ turn: "turn-ahead", text: "first words" }),
+      heldPromptItem({ turn: "turn-behind", text: "second words", foldAbove: "turn-ahead" }),
+    ],
+  });
+
+  it("is drawn on the entry the daemon offers a fold", async () => {
+    // Arrange / Act
+    await withTray(foldable());
+    // Assert
+    const button = harness.$('[data-held-turn="turn-behind"] [data-held-action="fold"]');
+    expect(button?.textContent).toBe("fold above");
+  });
+
+  it("is not drawn on an entry the daemon offers no fold", async () => {
+    // Arrange / Act
+    await withTray(foldable());
+    // Assert
+    expect(harness.$('[data-held-turn="turn-ahead"] [data-held-action="fold"]')).toBeNull();
+  });
+
+  it("calls FoldHeldPrompt echoing the entry's own TurnId and the served entry ahead", async () => {
+    // Arrange
+    await withTray(foldable());
+    // Act
+    await harness.click('[data-held-turn="turn-behind"] [data-held-action="fold"]');
+    // Assert
+    const [request] = harness.fake.calls<{ turn?: { value: string }; above?: { value: string }; workspace?: { id: string } }>(
+      "foldHeldPrompt",
+    );
+    expect([request.turn?.value, request.above?.value, request.workspace?.id]).toEqual([
+      "turn-behind",
+      "turn-ahead",
+      WORKSPACE_ID,
+    ]);
+  });
+
+  it("draws a refusal at the tray row, naming the arm", async () => {
+    // Arrange
+    await withTray(foldable());
+    harness.fake.answer(
+      "foldHeldPrompt",
+      create(FoldHeldPromptResponseSchema, {
+        result: { case: "error", value: { cause: { case: "aboveMoved", value: {} } } },
+      }),
+    );
+    // Act
+    await harness.click('[data-held-turn="turn-behind"] [data-held-action="fold"]');
+    // Assert
+    expect(harness.$('[data-held-turn="turn-behind"] .refusal')?.getAttribute("data-arm")).toBe("aboveMoved");
   });
 });
 
