@@ -58,7 +58,6 @@
 (declare-function agent-repl--info "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--warn "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--error "agent-repl-core" (ws fmt &rest args))
-(declare-function agent-repl--path-canonical "agent-repl-core" (path))
 (declare-function agent-repl--next-log-request-id "agent-repl-core" ())
 (declare-function agent-repl--with-log-context "agent-repl-core"
                   (workspace request-id function))
