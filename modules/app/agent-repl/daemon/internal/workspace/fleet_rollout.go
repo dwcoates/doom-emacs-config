@@ -965,57 +965,6 @@ func (a *fleetFreeness) AwaitFree(ctx context.Context, ws ids.WorkspaceID) error
 	return a.fleet.AwaitFree(ctx, ws)
 }
 
-// RouteGuidance delivers one submission straight to the workspace's session as
-// a turn of its own, BYPASSING the prompt queue's lease policy.
-//
-// It is the merge orchestrator's guidance route. The queue cannot serve it: a
-// parked merge lease is precisely what sends a submission to the orchestrator,
-// so routing the orchestrator's own delivery back through the queue would loop
-// on the lease that produced it.
-//
-// The turn is the SUBMISSION'S OWN, minted at submission and never here: a
-// retry of the submission re-driven under the same turn id is then the start
-// the shim already took, which it answers as a no-op rather than starting the
-// guidance twice. It is handed to the watcher, so the orchestrator resumes on
-// that turn's REAL end rather than on a timer.
-func (f *Fleet) RouteGuidance(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID, said *conversationv1.UserSaid, origin conversationv1.PromptOrigin) error {
-	if origin == conversationv1.PromptOrigin_PROMPT_ORIGIN_UNSPECIFIED {
-		return fmt.Errorf("workspace: route guidance on %q: an unspecified prompt origin is never delivered", ws)
-	}
-	if turn == "" {
-		return fmt.Errorf("workspace: route guidance on %q: the guidance names no turn", ws)
-	}
-	sender, ok := f.Sender(ws)
-	if !ok {
-		return fmt.Errorf("workspace: route guidance on %q: the workspace has no live session", ws)
-	}
-	// The watcher learns the turn before the shim does: a terminal on the
-	// agent stream can beat StartTurn's response back, and one routed with no
-	// turn in flight ends nothing.
-	watcher, live := f.Watcher(ws)
-	if live {
-		watcher.OnTurnOpening(ws, turn)
-	}
-	success, err := sender.StartTurn(ctx, turn, said, origin)
-	if err != nil {
-		if live {
-			watcher.OnTurnOpenFailed(ws, turn)
-		}
-		return fmt.Errorf("workspace: route guidance on %q: %w", ws, err)
-	}
-	// The watcher is handed the accepted turn the same way the queue hands one
-	// over: it names the main agent and feeds the opening page through the
-	// history path, which is what makes the turn's end attributable.
-	if live {
-		watcher.SetMainAgent(success.GetPrompt().GetAgent())
-		watcher.OnTurnOpened(ws, success.GetPrompt(), success.GetPage())
-	}
-	f.deps.Log.Global().Debug(opFleetRollout, "routed guidance into the session as its own turn", dlog.Context{
-		"workspace": string(ws), "turn": string(turn), "origin": origin.String(),
-	})
-	return nil
-}
-
 // RaiseColdGate draws the ordinary cold gate for a workspace whose resume
 // answered `cold`. It is rollout.ColdGateFunc: the relaunch engine learns the
 // cold facts and the fleet, which owns the gate's menu, is what serves them.
