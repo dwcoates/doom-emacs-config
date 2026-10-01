@@ -61,6 +61,7 @@ import os from "node:os";
 import path from "node:path";
 import { configureLog } from "./log.js";
 import { MAIN_LIFECYCLE_LOGGER, reportFatal } from "./fatal.js";
+import { SPAWN_GATE_FD, awaitSpawnGate } from "./spawn-gate.js";
 import { lockBinaryPath, lockDir, LOCK_DIR_ENV } from "./locks.js";
 import { runtimeIdentity } from "./build-identity.js";
 import { type Engine } from "./engine/engine.js";
@@ -105,6 +106,8 @@ export interface CliArgs {
   readonly storeSocket?: string;
   /** The inherited, already-open durable log descriptor. Always 3. */
   readonly logFd?: 3;
+  /** The inherited spawn gate (spawn-gate.ts). Always 4; absent, nothing gates. */
+  readonly spawnGateFd?: 4;
   /** Drive the mocked vendor instead of the real SDK. */
   readonly fake: boolean;
   /** Print the version and exit, touching nothing. */
@@ -116,6 +119,7 @@ export function parseArgs(argv: readonly string[]): CliArgs {
   let listen: string | undefined;
   let storeSocket: string | undefined;
   let logFd: 3 | undefined;
+  let spawnGateFd: 4 | undefined;
   let fake = false;
   let version = false;
 
@@ -145,6 +149,16 @@ export function parseArgs(argv: readonly string[]): CliArgs {
         logFd = 3;
         break;
       }
+      case "--spawn-gate-fd": {
+        const value = next();
+        // Only fd 4, for the reason --log-fd takes only fd 3: the daemon
+        // inherits exactly this descriptor as the gate.
+        if (value !== String(SPAWN_GATE_FD)) {
+          throw new Error(`shim: invalid --spawn-gate-fd ${JSON.stringify(value)}; the spawn gate is inherited fd 4`);
+        }
+        spawnGateFd = SPAWN_GATE_FD;
+        break;
+      }
       case "--fake":
         fake = true;
         break;
@@ -154,7 +168,7 @@ export function parseArgs(argv: readonly string[]): CliArgs {
       default:
         throw new Error(
           `shim: unknown argument ${JSON.stringify(String(arg))}; the spawn contract is ` +
-            "--listen <uds> --store-socket <uds> --log-fd 3 [--fake] [--version]",
+            "--listen <uds> --store-socket <uds> --log-fd 3 [--spawn-gate-fd 4] [--fake] [--version]",
         );
     }
   }
@@ -163,6 +177,7 @@ export function parseArgs(argv: readonly string[]): CliArgs {
     ...(listen === undefined ? {} : { listen }),
     ...(storeSocket === undefined ? {} : { storeSocket }),
     ...(logFd === undefined ? {} : { logFd }),
+    ...(spawnGateFd === undefined ? {} : { spawnGateFd }),
     fake,
     version,
   };
@@ -915,6 +930,21 @@ export async function main(): Promise<void> {
     },
     "validated the spawn contract and configured durable logging",
   );
+
+  // NOTHING IS BOUND BEFORE THE SPAWN GATE OPENS (spawn-gate.ts): the daemon
+  // opens it only once this process's pid is durable, and a daemon that died
+  // first leaves EOF, on which this shim leaves without ever binding.
+  if (args.spawnGateFd !== undefined) {
+    const gate = await awaitSpawnGate(args.spawnGateFd);
+    if (gate === "abandoned") {
+      MAIN_LIFECYCLE_LOGGER.info(
+        { outcome: "spawn_gate_abandoned" },
+        "the daemon that spawned this shim died before recording it; exiting without binding",
+      );
+      process.exit(0);
+    }
+    MAIN_LIFECYCLE_LOGGER.debug({ outcome: "spawn_gate_opened" }, "the daemon recorded this shim; binding");
+  }
 
   // NO LOCK IS TAKEN HERE. Startup is parse argv -> configure the log -> bind
   // the socket -> serve, and a shim that has served but has no session is

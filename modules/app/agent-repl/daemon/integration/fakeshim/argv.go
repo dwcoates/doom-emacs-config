@@ -8,7 +8,7 @@ import (
 
 // Argv is the shim's spawn contract, as the fake parses it:
 //
-//	<main.js> --listen <uds> --store-socket <uds> --log-fd 3 [--fake]
+//	<main.js> --listen <uds> --store-socket <uds> --log-fd 3 [--spawn-gate-fd 4] [--fake]
 //
 // The daemon runs `node <main.js> ...`; the harness substitutes this binary
 // for node, so argv[1] is the module path and the flags follow.
@@ -17,6 +17,9 @@ type Argv struct {
 	Listen      string
 	StoreSocket string
 	LogFD       int
+	// SpawnGateFD is the descriptor the shim waits on before it binds, -1
+	// when the launcher gates nothing.
+	SpawnGateFD int
 	Fake        bool
 }
 
@@ -25,9 +28,10 @@ type Argv struct {
 func ParseArgv(args []string) (Argv, error) {
 	var a Argv
 	a.LogFD = -1
+	a.SpawnGateFD = -1
 	for i := 0; i < len(args); i++ {
 		switch arg := args[i]; arg {
-		case "--listen", "--store-socket", "--log-fd":
+		case "--listen", "--store-socket", "--log-fd", "--spawn-gate-fd":
 			if i+1 >= len(args) {
 				return Argv{}, fmt.Errorf("fakeshim: %s wants a value", arg)
 			}
@@ -43,6 +47,12 @@ func ParseArgv(args []string) (Argv, error) {
 					return Argv{}, fmt.Errorf("fakeshim: --log-fd %q: %w", args[i], err)
 				}
 				a.LogFD = fd
+			case "--spawn-gate-fd":
+				fd, err := strconv.Atoi(args[i])
+				if err != nil {
+					return Argv{}, fmt.Errorf("fakeshim: --spawn-gate-fd %q: %w", args[i], err)
+				}
+				a.SpawnGateFD = fd
 			}
 		case "--fake":
 			a.Fake = true
