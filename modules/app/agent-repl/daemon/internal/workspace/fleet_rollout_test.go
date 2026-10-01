@@ -459,6 +459,42 @@ func TestAdoptParkedHoldsTheShimWithNoWatcherAndRaisesTheGate(t *testing.T) {
 	}
 }
 
+func TestAdoptParkedWithholdsTheCompactMenuForAWorkAccount(t *testing.T) {
+	// Arrange: the parked session lives under the work account.
+	f := newFleetFixture(t)
+	f.accounts.multiRepoDir = "/work"
+	ws := f.workspace("w1")
+	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1", HostSessionID: "host-1", ConfigDir: "/work"}
+
+	// Act.
+	if _, err := f.fleet.AdoptParked(context.Background(), ws.ID, &conversationv1.SessionCold{ContextTokens: 1}); err != nil {
+		t.Fatalf("AdoptParked: %v", err)
+	}
+
+	// Assert.
+	if gate, standing := f.fleet.ColdGate(ws.ID); !standing || gate.Compact != nil {
+		t.Fatalf("ColdGate = (%+v, %v), want the gate raised with no compact menu", gate, standing)
+	}
+}
+
+func TestRaiseColdGateWithholdsTheCompactMenuForAWorkAccount(t *testing.T) {
+	// Arrange: the relaunched session is filed under the work account.
+	f := newFleetFixture(t)
+	f.accounts.multiRepoDir = "/work"
+	ws := f.workspace("w1")
+	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1", ConfigDir: "/work"}
+
+	// Act.
+	if err := f.fleet.RaiseColdGate(context.Background(), ws.ID, &conversationv1.SessionCold{ContextTokens: 1}); err != nil {
+		t.Fatalf("RaiseColdGate: %v", err)
+	}
+
+	// Assert.
+	if gate, standing := f.fleet.ColdGate(ws.ID); !standing || gate.Compact != nil {
+		t.Fatalf("ColdGate = (%+v, %v), want the gate raised with no compact menu", gate, standing)
+	}
+}
+
 func TestAdoptParkedRefusesWithNoColdFacts(t *testing.T) {
 	// Arrange.
 	f := newFleetFixture(t)
