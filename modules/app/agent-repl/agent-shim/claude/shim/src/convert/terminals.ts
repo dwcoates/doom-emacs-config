@@ -74,14 +74,20 @@ export interface VendorApiError {
  * again" and "the model or resource does not exist") land under a stable
  * operation a harvest can grep, without reading each free-text sentence:
  *
+ *   - `shim.vendor.unreachable` — the request never reached the API (DNS,
+ *     a refused or reset connection, a network timeout),
  *   - `shim.vendor.auth_rejected` — a credential/authentication refusal,
  *   - `shim.vendor.model_missing` — a model/resource-not-found refusal,
  *   - `shim.vendor.api_error` — every other recorded API failure.
  *
  * It reads the vendor's own class first, then the status, then the human
  * sentence, so a failure that named a class is not overruled by loose text.
+ * UNREACHABLE IS READ FIRST: a network failure has no status, and its errno
+ * (`ENOTFOUND`) would otherwise match the not-found pattern and read as a
+ * missing model.
  */
 export type VendorApiFailureKind =
+  | "shim.vendor.unreachable"
   | "shim.vendor.auth_rejected"
   | "shim.vendor.model_missing"
   | "shim.vendor.api_error";
@@ -92,6 +98,14 @@ export function classifyVendorApiFailure(
   message: string,
 ): VendorApiFailureKind {
   const haystack = `${errorClass ?? ""} ${message}`.toLowerCase();
+  if (
+    status === undefined &&
+    /\b(enotfound|eai_again|econnrefused|econnreset|etimedout|enetunreach|ehostunreach)\b|can't reach the api|socket hang up/.test(
+      haystack,
+    )
+  ) {
+    return "shim.vendor.unreachable";
+  }
   if (
     status === 401 ||
     status === 403 ||
