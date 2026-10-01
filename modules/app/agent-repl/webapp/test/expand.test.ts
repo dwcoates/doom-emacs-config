@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   BUBBLE_STRIP_CLASS,
   CAPPED_CLASSES,
@@ -21,18 +21,14 @@ import {
   ownsSection,
   sectionAt,
   toggleSection,
+  expandSection,
   collapseSection,
   autoCollapseFor,
   expandedSectionAt,
   expandedSectionsOf,
-  onVerticalScrollbar,
   ITEM_EXPANDED_EVENT,
   announceItemExpanded,
-  useVisibilityWatcher,
-  intersectionWatcher,
-  scrollRootOf,
 } from "../src/expand.js";
-import { fakeVisibility } from "./visibility-fake.js";
 import { captureLogRecords, forwardedRecord } from "./log-capture.js";
 import { BUBBLE_UNCAPPED, drawBubble, type BubbleCapLines } from "../src/bubble/draw.js";
 import { BUBBLE_BOX_CLASS } from "../src/feed/bubble-scroll.js";
@@ -263,6 +259,34 @@ describe("toggleSection", () => {
     toggleSection(sec);
     // Assert
     expect(sec.scrollTop).toBe(0);
+  });
+});
+
+describe("expandSection", () => {
+  it("lifts a capped section's cap", () => {
+    // Arrange
+    const sec = sectionElement("tool-fold");
+    // Act
+    expandSection(sec);
+    // Assert
+    expect(sec.classList.contains(EXPANDED_CLASS)).toBe(true);
+  });
+
+  it("hands afterToggle the expanded state", () => {
+    // Arrange
+    const sec = sectionElement("tool-fold");
+    const calls: Array<[HTMLElement, boolean]> = [];
+    // Act
+    expandSection(sec, (s, e) => calls.push([s, e]));
+    // Assert
+    expect(calls).toEqual([[sec, true]]);
+  });
+
+  it("refuses an element that is not a capped section", () => {
+    // Arrange
+    const el = document.createElement("div");
+    // Act / Assert
+    expect(() => expandSection(el)).toThrow(/only a capped section/);
   });
 });
 
@@ -908,40 +932,6 @@ describe("expandedSectionsOf", () => {
   });
 });
 
-/** Stub EL's layout: WIDTH wide at x=LEFT, with a BAR-px classic vertical scrollbar. */
-function layOut(el: HTMLElement, left: number, width: number, bar: number): void {
-  Object.defineProperty(el, "offsetWidth", { configurable: true, value: width });
-  Object.defineProperty(el, "clientWidth", { configurable: true, value: width - bar });
-  Object.defineProperty(el, "clientLeft", { configurable: true, value: 0 });
-  el.getBoundingClientRect = () => new DOMRect(left, 0, width, 100);
-}
-
-describe("onVerticalScrollbar", () => {
-  /** A 200px-wide box at x=100 with a BAR-px classic bar. */
-  function laidOut(bar: number): HTMLElement {
-    const el = document.createElement("div");
-    layOut(el, 100, 200, bar);
-    return el;
-  }
-
-  it("reads a pointer over the classic bar as on it", () => {
-    expect(onVerticalScrollbar(laidOut(15), 290)).toBe(true);
-  });
-
-  it("reads a pointer over the content as off it", () => {
-    expect(onVerticalScrollbar(laidOut(15), 200)).toBe(false);
-  });
-
-  it("reads an overlay bar, which takes no layout width, as never hit", () => {
-    expect(onVerticalScrollbar(laidOut(0), 299)).toBe(false);
-  });
-
-  it("reads a non-HTML element as having no bar", () => {
-    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-    expect(onVerticalScrollbar(svg, 0)).toBe(false);
-  });
-});
-
 describe("autoCollapseFor", () => {
   it("answers one owner per document", () => {
     expect(autoCollapseFor(document)).toBe(autoCollapseFor(document));
@@ -958,12 +948,6 @@ describe("autoCollapseFor", () => {
 describe("AutoCollapse", () => {
   let uninstall: Array<() => void> = [];
   let mounted: HTMLElement[] = [];
-  let seen: ReturnType<typeof fakeVisibility>;
-
-  beforeEach(() => {
-    seen = fakeVisibility();
-    useVisibilityWatcher(document, seen.watcher);
-  });
 
   afterEach(() => {
     for (const fn of uninstall) fn();
@@ -996,94 +980,80 @@ describe("AutoCollapse", () => {
     };
   }
 
-  /** A wheel gesture landing on TARGET. */
-  function wheel(target: EventTarget): void {
-    target.dispatchEvent(new Event("wheel", { bubbles: true, cancelable: true }));
-  }
-
   /** Flip the shared document's visibility and announce it. */
   function setVisibility(state: "visible" | "hidden"): void {
     Object.defineProperty(document, "visibilityState", { configurable: true, get: () => state });
     document.dispatchEvent(new Event("visibilitychange"));
   }
 
-  it("keeps an open section open under a wheel inside it", () => {
+  it("keeps a section the reader opened open under a wheel outside it (owner ruling, 2026-10-01)", () => {
     // Arrange
     const { feed, first } = armed();
     first.click();
     // Act
-    wheel(feed.querySelector("#inner") as HTMLElement);
+    feed.dispatchEvent(new Event("wheel", { bubbles: true, cancelable: true }));
     // Assert
     expect(first.classList.contains(EXPANDED_CLASS)).toBe(true);
   });
 
-  it("closes an open section once a wheel outside it has scrolled it wholly out of view", () => {
+  it("never closes on a scroll event, however far it takes the section", () => {
     // Arrange
     const { feed, first } = armed();
     first.click();
-    wheel(feed);
     // Act
-    seen.report(first, false);
-    // Assert
-    expect(first.classList.contains(EXPANDED_CLASS)).toBe(false);
-  });
-
-  it("keeps an open section open under a wheel outside it while any part still shows", () => {
-    // Arrange
-    const { feed, first } = armed();
-    first.click();
-    wheel(feed);
-    // Act
-    seen.report(first, true);
+    feed.dispatchEvent(new Event("scroll"));
     // Assert
     expect(first.classList.contains(EXPANDED_CLASS)).toBe(true);
   });
 
-  it("never closes a section no reader gesture armed, however far a layout move takes it", () => {
-    // Arrange: a tail follow scrolls the open section out of view.
-    const { first } = armed();
-    first.click();
-    // Act
-    seen.report(first, false);
-    // Assert
-    expect(first.classList.contains(EXPANDED_CLASS)).toBe(true);
-  });
-
-  it("watches an armed section only until it closes", () => {
+  it("closes every open section when the reader returns to the tail", () => {
     // Arrange
-    const { feed, first } = armed();
+    const { first, second } = armed();
     first.click();
-    wheel(feed);
+    second.click();
     // Act
-    seen.report(first, false);
+    autoCollapseFor(document).collapseOutside("tailReached", null);
     // Assert
-    expect(seen.observed()).toEqual([]);
+    expect([first.classList.contains(EXPANDED_CLASS), second.classList.contains(EXPANDED_CLASS)]).toEqual([
+      false,
+      false,
+    ]);
   });
 
-  it("stops watching an armed section a click closed first", () => {
+  it("answers how many sections the close closed", () => {
     // Arrange
-    const { feed, first } = armed();
+    const { first, second } = armed();
     first.click();
-    wheel(feed);
-    first.click();
+    second.click();
     // Act
-    seen.report(first, false);
+    const closed = autoCollapseFor(document).collapseOutside("tailReached", null);
     // Assert
-    expect([first.classList.contains(EXPANDED_CLASS), seen.observed()]).toEqual([false, []]);
+    expect(closed).toBe(2);
   });
 
-  it("closes an open section under a wheel on another element of the page", () => {
-    // Arrange — the sidebar, say: outside the feed altogether.
-    const { first } = armed();
-    const other = document.createElement("nav");
-    document.body.appendChild(other);
-    mounted.push(other);
+  it("closes each section once: a second return to the tail closes nothing", () => {
+    // Arrange
+    const { first, calls } = armed();
     first.click();
-    wheel(other);
+    autoCollapseFor(document).collapseOutside("tailReached", null);
     // Act
-    seen.report(first, false);
+    const closed = autoCollapseFor(document).collapseOutside("tailReached", null);
     // Assert
-    expect(first.classList.contains(EXPANDED_CLASS)).toBe(false);
+    expect([closed, calls.filter(([, expanded]) => !expanded)]).toEqual([0, [[first, false]]]);
+  });
+
+  it("keeps the section that contains INSIDE open", () => {
+    // Arrange
+    const { feed, first, second } = armed();
+    first.click();
+    second.click();
+    // Act
+    autoCollapseFor(document).collapseOutside("tailReached", feed.querySelector("#card-body"));
+    // Assert
+    expect([first.classList.contains(EXPANDED_CLASS), second.classList.contains(EXPANDED_CLASS)]).toEqual([
+      false,
+      true,
+    ]);
   });
 
   it("closes an open section when the window loses focus", () => {
@@ -1128,95 +1098,22 @@ describe("AutoCollapse", () => {
     expect(first.classList.contains(EXPANDED_CLASS)).toBe(true);
   });
 
-  it("closes an open section under a pointer grab of another box's classic scrollbar", () => {
-    // Arrange — the feed wears a 15px classic bar at its right edge.
-    const { feed, first } = armed();
-    layOut(feed, 0, 200, 15);
-    first.click();
-    feed.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, clientX: 190 }));
-    // Act
-    seen.report(first, false);
-    // Assert
-    expect(first.classList.contains(EXPANDED_CLASS)).toBe(false);
-  });
-
-  it("keeps an open section open under a pointer press that is not on a scrollbar", () => {
-    // Arrange
-    const { feed, first } = armed();
-    layOut(feed, 0, 200, 15);
-    first.click();
-    // Act
-    feed.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, clientX: 10 }));
-    // Assert
-    expect(first.classList.contains(EXPANDED_CLASS)).toBe(true);
-  });
-
-  it("never closes on a scroll event, which the expand's own layout change fires", () => {
-    // Arrange
-    const { feed, first } = armed();
-    first.click();
-    // Act
-    feed.dispatchEvent(new Event("scroll"));
-    // Assert
-    expect(first.classList.contains(EXPANDED_CLASS)).toBe(true);
-  });
-
-  it("closes once: the collapse's own scroll-to-top does not re-trigger it", () => {
-    // Arrange — the collapse writes scrollTop, and the box announces the move.
-    const { feed, first, calls } = armed();
-    let top = 50;
-    Object.defineProperty(first, "scrollTop", {
-      configurable: true,
-      get: () => top,
-      set: (v: number) => {
-        top = v;
-        first.dispatchEvent(new Event("scroll", { bubbles: true }));
-      },
-    });
-    first.click();
-    wheel(feed);
-    // Act
-    seen.report(first, false);
-    // Assert
-    expect(calls).toEqual([
-      [first, true],
-      [first, false],
-    ]);
-  });
-
   it("leaves a closed section untouched", () => {
     // Arrange
-    const { feed, first, second, calls } = armed();
+    const { first, second, calls } = armed();
     first.click();
     // Act
-    wheel(feed);
+    autoCollapseFor(document).collapseOutside("tailReached", null);
     // Assert
     expect([second.className, calls.filter(([s]) => s === second)]).toEqual(["tool-fold", []]);
   });
 
-  it("closes only the open section the wheel is outside of", () => {
-    // Arrange — both open; the wheel lands inside the card.
-    const { feed, first, second } = armed();
-    first.click();
-    second.click();
-    wheel(feed.querySelector("#card-body") as HTMLElement);
-    // Act
-    seen.report(first, false);
-    seen.report(second, false);
-    // Assert
-    expect([first.classList.contains(EXPANDED_CLASS), second.classList.contains(EXPANDED_CLASS)]).toEqual([
-      false,
-      true,
-    ]);
-  });
-
   it("closes through the one collapse, handing the host's afterToggle the collapsed state", () => {
     // Arrange
-    const { feed, first, calls } = armed();
+    const { first, calls } = armed();
     first.click();
-    wheel(feed);
     // Act
-    seen.report(first, false);
+    autoCollapseFor(document).collapseOutside("tailReached", null);
     // Assert
     expect(calls.at(-1)).toEqual([first, false]);
   });
@@ -1238,12 +1135,12 @@ describe("AutoCollapse", () => {
 
   it("closes nothing of a host that has been uninstalled", () => {
     // Arrange
-    const { feed, first } = armed();
+    const { first } = armed();
     first.click();
     for (const fn of uninstall) fn();
     uninstall = [];
     // Act
-    wheel(feed);
+    autoCollapseFor(document).collapseOutside("tailReached", null);
     // Assert
     expect(first.classList.contains(EXPANDED_CLASS)).toBe(true);
   });
@@ -1360,19 +1257,6 @@ describe("an uncapped bubble", () => {
     expect(next.querySelector(`.${EXPANDED_CLASS}`)).toBeNull();
   });
 
-  it("does not hold an open capped section open under a wheel inside it", () => {
-    // Arrange — an open thinking bubble, then an uncapped response elsewhere.
-    const seen = fakeVisibility();
-    useVisibilityWatcher(document, seen.watcher);
-    const { box: open } = feedWith("feed");
-    open.click();
-    const { text } = feedWith(BUBBLE_UNCAPPED);
-    text.dispatchEvent(new Event("wheel", { bubbles: true, cancelable: true }));
-    // Act
-    seen.report(open, false);
-    // Assert
-    expect(open.classList.contains(EXPANDED_CLASS)).toBe(false);
-  });
 });
 
 describe("announceItemExpanded", () => {
@@ -1387,75 +1271,5 @@ describe("announceItemExpanded", () => {
     announceItemExpanded(inner);
     // Assert
     expect(targets).toEqual([inner]);
-  });
-});
-
-describe("scrollRootOf", () => {
-  it("answers the nearest box that scrolls vertically", () => {
-    // Arrange
-    const zone = document.createElement("div");
-    zone.style.overflowY = "auto";
-    const host = document.createElement("div");
-    zone.appendChild(host);
-    document.body.appendChild(zone);
-    // Act
-    const root = scrollRootOf(host);
-    zone.remove();
-    // Assert
-    expect(root).toBe(zone);
-  });
-
-  it("answers the viewport when no box scrolls", () => {
-    // Arrange
-    const host = document.createElement("div");
-    document.body.appendChild(host);
-    // Act
-    const root = scrollRootOf(host);
-    host.remove();
-    // Assert
-    expect(root).toBeNull();
-  });
-});
-
-describe("intersectionWatcher", () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
-  it("reports a section visible while any part of it intersects its root", () => {
-    // Arrange
-    let fire: ((entries: Array<{ target: Element; isIntersecting: boolean }>) => void) | undefined;
-    let options: IntersectionObserverInit | undefined;
-    vi.stubGlobal(
-      "IntersectionObserver",
-      class {
-        constructor(cb: typeof fire, init: IntersectionObserverInit) {
-          fire = cb;
-          options = init;
-        }
-        observe(): void {}
-        unobserve(): void {}
-        disconnect(): void {}
-      },
-    );
-    const root = document.createElement("div");
-    const section = document.createElement("div");
-    const seen: Array<[HTMLElement, boolean]> = [];
-    const watch = intersectionWatcher(root, (s, visible) => seen.push([s, visible]));
-    watch.observe(section);
-    // Act
-    fire?.([
-      { target: section, isIntersecting: true },
-      { target: section, isIntersecting: false },
-    ]);
-    // Assert
-    expect([options?.root, options?.threshold, seen]).toEqual([
-      root,
-      0,
-      [
-        [section, true],
-        [section, false],
-      ],
-    ]);
   });
 });

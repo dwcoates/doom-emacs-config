@@ -26,6 +26,8 @@ import {
 } from "./harness.js";
 import { createStopControls } from "../../src/footer/stop.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
+import { cascadedValue, installStylesheet } from "../stylesheet.js";
+import stylesheet from "../../src/styles.css?raw";
 import type { ClientLogRecord } from "../../../proto/gen/ts/agentrepl/v1/endpoint_client_log_pb";
 
 const NOW = 1_800_000_000_000;
@@ -527,7 +529,7 @@ const AGENT_ROW = {
   jump: toEntry("bubble-1"),
   label: { text: "Explore" },
   description: { text: "sweep the repo" },
-  tokens: { text: "12.4k tok" },
+  tokens: { text: "12.4k" },
   runtime: { startedAtMs: BigInt(NOW - 65_000) },  state: { case: "running" as const, value: {} },
 };
 
@@ -556,7 +558,7 @@ describe("the agents panel", () => {
 
   it("draws the running token sum verbatim", () => {
     const { panel } = drawPanel("agents", { agents: [AGENT_ROW] });
-    expect(panel.querySelector(".footer-row-tokens")?.textContent).toBe("12.4k tok");
+    expect(panel.querySelector(".footer-row-tokens")?.textContent).toBe("12.4k");
   });
 
   it("ticks the row's runtime from the shipped instant", () => {
@@ -643,6 +645,206 @@ describe("the agents panel", () => {
     expect(() =>
       drawPanel("agents", { agents: [{ ...AGENT_ROW, jump: undefined }] }),
     ).toThrow(MalformedView);
+  });
+});
+
+/**
+ * FIXED COLUMNS FOR TOKENS AND DURATION (owner request, 2026-10-01): the panel
+ * is one grid whose header and rows share its columns, "stop all" leads the
+ * header, and "tokens" and "duration" head their columns. jsdom lays nothing
+ * out, so the widths themselves are measured in WebKit
+ * (test/webkit/footer-columns.webkit.test.ts); these pin the cells and the
+ * declarations the cascade hands them.
+ */
+describe("the agents panel's fixed columns", () => {
+  let uninstall: () => void = () => undefined;
+  afterEach(() => {
+    uninstall();
+    uninstall = () => undefined;
+  });
+
+  /** A drawn panel attached to the document, with the real stylesheet installed. */
+  function styled(rows = [AGENT_ROW]) {
+    uninstall = installStylesheet();
+    const { panel } = drawPanel("agents", { agents: rows });
+    document.body.append(panel);
+    const header = panel.querySelector<HTMLElement>(".footer-panel-header");
+    const row = panel.querySelector<HTMLElement>(".footer-row");
+    if (header === null || row === null) throw new Error("the panel drew no header or row");
+    return { panel, header, row };
+  }
+
+  /** The classes (or column name) of EL's children, in order. */
+  const cells = (el: HTMLElement): string[] =>
+    [...el.children].map((c) => c.getAttribute("data-column") ?? c.classList[0] ?? "");
+
+  it("leads the header with the stop-all control, where the title was", () => {
+    // Arrange / Act
+    const { panel } = drawPanel("agents", { agents: [AGENT_ROW] });
+    // Assert
+    const header = panel.querySelector(".footer-panel-header");
+    expect(header?.firstElementChild?.querySelector("[data-interrupt]")).not.toBeNull();
+  });
+
+  it("no longer draws the live agents title", () => {
+    // Arrange / Act
+    const { panel } = drawPanel("agents", { agents: [AGENT_ROW] });
+    // Assert
+    expect([panel.querySelector(".footer-panel-title"), panel.textContent?.includes("live agents")]).toEqual([
+      null,
+      false,
+    ]);
+  });
+
+  it("heads the figure columns 'tokens' then 'duration'", () => {
+    // Arrange / Act
+    const { panel } = drawPanel("agents", { agents: [AGENT_ROW] });
+    // Assert
+    expect([...panel.querySelectorAll(".footer-column-header")].map((h) => h.textContent)).toEqual([
+      "tokens",
+      "duration",
+    ]);
+  });
+
+  it("draws the header as the grid's four cells: stop, tokens, duration, caret", () => {
+    // Arrange / Act
+    const { panel } = drawPanel("agents", { agents: [AGENT_ROW] });
+    const header = panel.querySelector<HTMLElement>(".footer-panel-header") as HTMLElement;
+    // Assert
+    expect(cells(header)).toEqual(["footer-stop", "tokens", "duration", ""]);
+  });
+
+  it("draws each row as the grid's four cells: main, tokens, duration, caret", () => {
+    // Arrange / Act
+    const { panel } = drawPanel("agents", { agents: [AGENT_ROW] });
+    const row = panel.querySelector<HTMLElement>(".footer-row") as HTMLElement;
+    // Assert
+    expect(cells(row)).toEqual(["footer-row-main", "footer-row-tokens", "footer-row-clock", "footer-row-caret"]);
+  });
+
+  it("keeps a waiting row's wait inside the main cell, so the row stays four cells", () => {
+    // Arrange / Act
+    const { panel } = drawPanel("agents", {
+      agents: [
+        {
+          ...AGENT_ROW,
+          state: { case: "waitingForApi" as const, value: { failedAtMs: BigInt(NOW), givesUpAtMs: BigInt(NOW + 60_000) } },
+        },
+      ],
+    });
+    const row = panel.querySelector<HTMLElement>(".footer-row") as HTMLElement;
+    // Assert
+    expect([row.children.length, row.querySelector(".footer-row-main .footer-row-state")]).toEqual([
+      4,
+      expect.any(HTMLElement),
+    ]);
+  });
+
+  it("keeps the not-on-screen note inside the main cell", async () => {
+    // Arrange
+    const { panel } = drawPanel("agents", { agents: [AGENT_ROW] }, false);
+    // Act
+    panel.querySelector<HTMLElement>("[data-jump]")?.dispatchEvent(new MouseEvent("click"));
+    await settle();
+    // Assert
+    expect(panel.querySelector(".footer-row-main > .footer-row-unreachable")).not.toBeNull();
+  });
+
+  it("lays the section out as one grid with floors for the figure columns", () => {
+    // Arrange / Act
+    const { panel } = styled();
+    // Assert
+    expect([
+      cascadedValue(panel, "display"),
+      cascadedValue(panel, "grid-template-columns").replace(/\s+/g, " "),
+    ]).toEqual([
+      "grid",
+      "minmax(0, 1fr) minmax(var(--footer-tokens-col-min), max-content) minmax(var(--footer-duration-col-min), max-content) auto",
+    ]);
+  });
+
+  it.each([
+    ["the header", ".footer-panel-header"],
+    ["a row", ".footer-row"],
+  ])("has %s take the section's columns through subgrid", (_name, selector) => {
+    // Arrange
+    const { panel } = styled();
+    const el = panel.querySelector(selector) as HTMLElement;
+    // Act
+    const columns = [cascadedValue(el, "display"), cascadedValue(el, "grid-template-columns")];
+    // Assert
+    expect(columns).toEqual(["grid", "subgrid"]);
+  });
+
+  it.each([
+    ["the duration header", '[data-column="duration"]'],
+    ["a row's duration cell", ".footer-row > .footer-row-clock"],
+  ])("draws the bar left of %s at the row delimiters' thickness and color", (_name, selector) => {
+    // Arrange
+    const { panel } = styled();
+    const el = panel.querySelector(selector) as HTMLElement;
+    // Act
+    const bar = ["width", "style", "color"].map((part) => cascadedValue(el, `border-left-${part}`));
+    // Assert
+    expect(bar).toEqual(["1px", "solid", "var(--border)"]);
+  });
+
+  it("puts the stop-all control at the header's left edge", () => {
+    // Arrange
+    const { header } = styled();
+    const stop = header.firstElementChild as HTMLElement;
+    // Act
+    const placement = [cascadedValue(stop, "margin-left"), cascadedValue(stop, "justify-self")];
+    // Assert
+    expect(placement).toEqual(["0px", "start"]);
+  });
+});
+
+/**
+ * THE WHOLE ROW IS THE HIT TARGET (owner request, 2026-10-01): a click on any
+ * part of a detached-work row is the row's jump, through ONE handler on the
+ * row, and hovering anywhere in it washes the whole row.
+ */
+describe("a detached-work row is one hit target", () => {
+  it.each([
+    ["the label", ".footer-row-label"],
+    ["the description", ".footer-row-description"],
+    ["the glyph", ".footer-glyph"],
+    ["the tokens column", ".footer-row-tokens"],
+    ["the duration column", ".footer-row-clock"],
+    ["the caret", ".footer-row-caret"],
+    ["the row itself (a gap between columns)", ".footer-row"],
+  ])("jumps to the row's entry on a click on %s", async (_name, selector) => {
+    // Arrange
+    const { panel, revealed } = drawPanel("agents", { agents: [AGENT_ROW] });
+    // Act
+    panel.querySelector<HTMLElement>(selector)?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await settle();
+    // Assert
+    expect(revealed.map((id) => id.value)).toEqual(["bubble-1"]);
+  });
+
+  it("answers every click through one handler, on the row", () => {
+    // Arrange
+    const spy = vi.spyOn(HTMLElement.prototype, "addEventListener");
+    // Act
+    const { panel } = drawPanel("agents", { agents: [AGENT_ROW] });
+    const clickers = spy.mock.calls.flatMap(([type], i) =>
+      type === "click" ? [spy.mock.contexts[i] as Element] : [],
+    );
+    spy.mockRestore();
+    // Assert -- the row's own handler; the header's stop control owns its own.
+    const row = panel.querySelector(".footer-row");
+    expect(clickers.filter((el) => row?.contains(el))).toEqual([row]);
+  });
+
+  it("washes the whole row on hover, as the agent roster's pressable rows do", () => {
+    // Arrange
+    const rule = /\.footer-row-jump:hover\s*\{([^}]*)\}/.exec(stylesheet.replace(/\/\*[\s\S]*?\*\//g, ""));
+    // Act
+    const declarations = rule?.[1] ?? "";
+    // Assert
+    expect(declarations).toMatch(/background:\s*var\(--bg\)/);
   });
 });
 

@@ -996,11 +996,13 @@ func (r *resolver) agentsPanel(ws ids.WorkspaceID, s *wsState) *frontendv1.Foote
 			"retired_before":  retiredAny(s, row.spawnUnit, row.work),
 			"waiting_for_api": d.wait != nil,
 		})
+		// Tokens is the bare figure: the panel's "tokens" column header names
+		// the unit (owner request, 2026-10-01), so the row no longer says "tok".
 		drawn := &frontendv1.FooterAgentRow{
 			Work:    &frontendv1.FooterWorkId{Value: workID},
 			Jump:    jump,
 			Label:   &frontendv1.FooterAgentRowLabel{Text: row.label},
-			Tokens:  &frontendv1.FooterAgentRowTokens{Text: figures.Tokens(row.tokens) + " tok"},
+			Tokens:  &frontendv1.FooterAgentRowTokens{Text: figures.Tokens(row.tokens)},
 			Runtime: &frontendv1.FooterAgentRowRuntime{StartedAtMs: epochMs(row.startedAt)},
 		}
 		if row.description != "" {

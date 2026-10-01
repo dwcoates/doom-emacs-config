@@ -29,9 +29,9 @@ export interface RowContext {
   /** The whole row, for renderers that need its identity or its parent. */
   row: FeedRow;
   /**
-   * Find a row and mark it, opening what must open to get there; it NEVER
-   * scrolls (the user owns the scroll, scroll.ts). Answers whether the row
-   * could be reached (a collapsed shell bubble cannot, so `false` is a real
+   * Jump to a row: open what must open to get there, expand the entry, center
+   * it (`entryJumped`, scroll.ts; owner request, 2026-10-01) and mark it.
+   * Answers whether the row could be reached (a collapsed shell bubble cannot, so `false` is a real
    * answer, not an error).
    */
   readonly revealRow: (id: FeedId) => Promise<boolean>;
