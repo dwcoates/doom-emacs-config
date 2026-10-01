@@ -156,28 +156,69 @@ func parseSuiteStates(output string) map[string]suiteState {
 
 // splitSuiteOutput attributes the run's lines to the suites they belong to.
 //
-// The script interleaves nothing: it runs suites one at a time and announces
-// each terminal, so a line belongs to the suite whose terminal comes NEXT. What
-// trails the last terminal belongs to no suite and is dropped from the tab —
+// The runner (testrun) runs many suites' units at once and prints each unit's
+// output whole, bracketed by a line naming its unit and suite ("unit ID
+// [SUITE] output:") and by the unit's own verdict line ("unit ID [SUITE]
+// ok|FAILED|declined ..."). So a line inside a bracket belongs to that
+// bracket's suite, and a line that names a suite -- its starting and verdict
+// lines, a unit cancelled before it ran -- belongs to the suite it names.
+//
+// Any other line belongs to the suite whose verdict comes NEXT, which is the
+// whole rule for a run that prints no brackets (one suite at a time). What
+// trails the last verdict belongs to no suite and is dropped from the tab --
 // the archive keeps it.
 func splitSuiteOutput(output string, selected []string) map[string]string {
 	wanted := map[string]bool{}
 	for _, name := range selected {
 		wanted[name] = true
 	}
-	sections := map[string]string{}
+	lines := map[string][]string{}
 	var pending []string
+	blockUnit, blockSuite := "", ""
 	for _, line := range strings.Split(output, "\n") {
-		pending = append(pending, line)
-		name, settled := settledSuite(line)
-		if !settled || !wanted[name] {
+		if blockUnit != "" {
+			lines[blockSuite] = append(lines[blockSuite], line)
+			if m := unitVerdict.FindStringSubmatch(line); m != nil && m[1] == blockUnit {
+				blockUnit, blockSuite = "", ""
+			}
 			continue
 		}
-		sections[name] = strings.Join(pending, "\n")
+		if m := unitBegin.FindStringSubmatch(line); m != nil {
+			blockUnit, blockSuite = m[1], m[2]
+			lines[blockSuite] = append(lines[blockSuite], line)
+			continue
+		}
+		if m := unitVerdict.FindStringSubmatch(line); m != nil {
+			lines[m[2]] = append(lines[m[2]], line)
+			continue
+		}
+		if m := suiteStarting.FindStringSubmatch(line); m != nil {
+			lines[m[1]] = append(lines[m[1]], line)
+			continue
+		}
+		name, settled := settledSuite(line)
+		if !settled {
+			pending = append(pending, line)
+			continue
+		}
+		lines[name] = append(append(lines[name], pending...), line)
 		pending = nil
+	}
+	sections := map[string]string{}
+	for name, ls := range lines {
+		if wanted[name] {
+			sections[name] = strings.Join(ls, "\n")
+		}
 	}
 	return sections
 }
+
+// unitBegin is the runner's line opening one unit's output block.
+var unitBegin = regexp.MustCompile(`^.*?unit (\S+) \[([A-Za-z0-9_-]+)\] output:\s*$`)
+
+// unitVerdict is the runner's line settling one unit: it closes the unit's
+// block, or names a unit cancelled before it ran.
+var unitVerdict = regexp.MustCompile(`^.*?unit (\S+) \[([A-Za-z0-9_-]+)\] (?:ok|FAILED|declined|NOT RUN)\b`)
 
 // settledSuite reports the suite one line settles, if it settles one.
 func settledSuite(line string) (string, bool) {

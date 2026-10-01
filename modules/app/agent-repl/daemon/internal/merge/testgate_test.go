@@ -135,9 +135,9 @@ func TestSkippedSuiteDrawsNoRow(t *testing.T) {
 	}
 }
 
-// TestSuiteOutputIsAttributedToTheSuiteItPrecedes covers the split: the script
-// runs suites one at a time and announces each terminal, so a line belongs to
-// the suite whose terminal comes next.
+// TestSuiteOutputIsAttributedToTheSuiteItPrecedes covers the split for a run
+// that prints no unit brackets: a line belongs to the suite whose terminal
+// comes next.
 func TestSuiteOutputIsAttributedToTheSuiteItPrecedes(t *testing.T) {
 	// Arrange: two suites' output, interleaved by nothing.
 	output := "building daemon\n[agent-repl-tests] daemon: passed in 3s\n" +
@@ -152,6 +152,50 @@ func TestSuiteOutputIsAttributedToTheSuiteItPrecedes(t *testing.T) {
 	}
 	if !strings.Contains(sections["webapp"], "building webapp") {
 		t.Fatalf("the webapp section is %q, want its own lines", sections["webapp"])
+	}
+}
+
+// TestInterleavedUnitBlocksAreAttributedToTheirOwnSuites covers the runner's
+// real shape: units of different suites finish interleaved, each block
+// bracketed by its begin line and its own verdict line.
+func TestInterleavedUnitBlocksAreAttributedToTheirOwnSuites(t *testing.T) {
+	// Arrange: daemon and webapp units interleaved, a cancelled e2e chunk, and
+	// planner noise that names no suite.
+	output := strings.Join([]string{
+		"[agent-repl-tests] plan: 3 units on 14 core slots",
+		"[agent-repl-tests] daemon: starting",
+		"[agent-repl-tests] webapp: starting",
+		"[agent-repl-tests] unit webapp#00 [webapp] output:",
+		"webapp chunk zero",
+		"[agent-repl-tests] unit webapp#00 [webapp] ok, 3.000s wall, 2.000s cpu",
+		"[agent-repl-tests] unit daemon:internal/x [daemon] output:",
+		"daemon package x",
+		"[agent-repl-tests] ERROR: unit daemon:internal/x [daemon] FAILED with exit code 1 after 2.000s",
+		"[agent-repl-tests] ERROR: daemon failed after 2.000s with exit code 1",
+		"[agent-repl-tests] unit webapp#01 [webapp] output:",
+		"webapp chunk one",
+		"[agent-repl-tests] unit webapp#01 [webapp] ok, 4.000s wall, 2.000s cpu",
+		"[agent-repl-tests] webapp: passed in 4.000s",
+		"[agent-repl-tests] ERROR: unit e2e#00 [e2e] NOT RUN: its dependency e2e:build did not pass",
+	}, "\n")
+
+	// Act
+	sections := splitSuiteOutput(output, []string{"daemon", "webapp", "e2e"})
+
+	// Assert
+	for suite, want := range map[string][]string{
+		"daemon": {"daemon: starting", "daemon package x", "daemon failed after"},
+		"webapp": {"webapp: starting", "webapp chunk zero", "webapp chunk one", "webapp: passed in"},
+		"e2e":    {"unit e2e#00 [e2e] NOT RUN"},
+	} {
+		for _, w := range want {
+			if !strings.Contains(sections[suite], w) {
+				t.Errorf("the %s section lacks %q:\n%s", suite, w, sections[suite])
+			}
+		}
+	}
+	if strings.Contains(sections["daemon"], "webapp chunk") || strings.Contains(sections["webapp"], "daemon package") {
+		t.Fatalf("a section carries another suite's block:\ndaemon:\n%s\nwebapp:\n%s", sections["daemon"], sections["webapp"])
 	}
 }
 
