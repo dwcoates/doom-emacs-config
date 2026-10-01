@@ -291,18 +291,15 @@ func TestUpdateShutdownScheduleNowAfterACompletedTurnExitsWellInsideItsOwnBound(
 // stopAfterATurnBound is how long the whole stop above may take, from the
 // request leaving the client to the daemon's process being reaped.
 //
-// MEASURED rather than chosen: 7ms at the median and 8ms at the worst across
-// a -count=10 run of this test, and 5ms for the same stop against the REAL
-// quartet (e2e/daemonstop_e2e_test.go). It covers the WHOLE orderly exit --
+// MEASURED rather than chosen: 12-40ms across a -count=20 run of this test
+// alone, 17-73ms inside the parallel integration suite, and 314ms at worst in
+// that suite on a box at load average ~40. It covers the WHOLE orderly exit --
 // the announcement, the forced stand-down of the one live session, the
 // in-flight write grace, the merge drain, the watchers and the background
-// loops -- so anything approaching it means a step of that exit has started
-// riding its own bound instead of ending on an event. 250ms is ~31x the
-// observed worst case, which is headroom for a loaded box and still an order
-// of magnitude under the smallest bound the exit itself states
-// (`writesQuietBound`, 250ms, is the only one this small, and every other
-// step is measured in seconds).
-const stopAfterATurnBound = 250 * time.Millisecond
+// loops. 1s is ~3x the loaded worst case, and still under every bound the exit
+// states in seconds, so an exit riding one of THOSE fails here. It is above
+// `writesQuietBound` (250ms), so an exit riding that one bound alone does not.
+const stopAfterATurnBound = time.Second
 
 // strayReclaimBound is how long the kernel is given to finish reaping a
 // process group the daemon already SIGKILLed and already waited on.
