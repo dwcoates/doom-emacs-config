@@ -53,6 +53,18 @@ func runSuite(m *testing.M) int {
 	}
 
 	code := harness.MainAt(m, l.daemonDir)
+	// A PREBUILD process ran no test: the harness built its binaries and
+	// returned, and this suite's own are built here, then the process exits.
+	if mode, _, _ := harness.BinaryMode(os.Getenv); mode == harness.BuildInto {
+		if code != 0 {
+			return code
+		}
+		if err := prebuildE2E(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+		return 0
+	}
 	// The perf phase's final summary block (PERF-SPEC.md §D4), after every
 	// test has reported. A no-op in the default build, where the perf files
 	// are not compiled at all.
@@ -117,6 +129,16 @@ func resolveLayout() (layout, error) {
 // dead run never reached.
 func e2eBinDir() string {
 	e2eBinOnce.Do(func() {
+		// A PREBUILD process fills the shared directory every chunk reads.
+		if mode, shared, err := harness.BinaryMode(os.Getenv); err != nil || mode == harness.BuildInto {
+			if err != nil {
+				e2eBinErr = err
+				return
+			}
+			e2eBinPath = filepath.Join(shared, e2eSharedSub)
+			e2eBinErr = os.MkdirAll(e2eBinPath, 0o755)
+			return
+		}
 		root := harness.RunRoot()
 		if root == "" {
 			e2eBinErr = fmt.Errorf("e2e: the harness run root is not laid out; TestMain must run the suite through harness.MainAt")
@@ -212,7 +234,7 @@ func requireShimBundle(t *testing.T) string {
 			repo.shimDir, repo.shimDir)
 	}
 	shimOnce.Do(func() {
-		shimPath, shimErr = buildShimBundle(node)
+		shimPath, shimErr = sharedOr(shimBundleName, func() (string, error) { return buildShimBundle(node) })
 	})
 	if shimErr != nil {
 		t.Fatalf("e2e: build the real shim bundle: %v", shimErr)
@@ -233,14 +255,14 @@ func buildShimBundle(node string) (string, error) {
 	if covRoot := harness.CoverageRoot(); covRoot != "" {
 		root = filepath.Join(covRoot, "shim-bundle")
 	}
-	outDir := filepath.Join(root, "shim-dist")
+	out := filepath.Join(root, shimBundleName)
+	outDir := filepath.Dir(out)
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return "", fmt.Errorf("make shim build dir: %w", err)
 	}
 	if err := stageShimSiblings(outDir); err != nil {
 		return "", err
 	}
-	out := filepath.Join(outDir, "main.js")
 	cmd := exec.Command(node, "build.mjs")
 	cmd.Dir = repo.shimDir
 	cmd.Env = append(os.Environ(), "SHIM_BUILD_OUTFILE="+out)
@@ -335,7 +357,9 @@ var (
 func requireStoreBinary(t *testing.T) string {
 	t.Helper()
 	storeOnce.Do(func() {
-		storePath, storeErr = goBuildCovered(repo.storeDir, filepath.Join(e2eBinDir(), "shim-store"))
+		storePath, storeErr = sharedOr("shim-store", func() (string, error) {
+			return goBuildCovered(repo.storeDir, filepath.Join(e2eBinDir(), "shim-store"))
+		})
 	})
 	if storeErr != nil {
 		t.Fatalf("e2e: this suite runs against the REAL store, which does not build: %v", storeErr)
@@ -353,7 +377,9 @@ var (
 func requireSidecarBinary(t *testing.T) string {
 	t.Helper()
 	sidecarOnce.Do(func() {
-		sidecarPath, sidecarErr = goBuildCovered(repo.sidecarDir, filepath.Join(e2eBinDir(), "shim-claude-sidecar"))
+		sidecarPath, sidecarErr = sharedOr("shim-claude-sidecar", func() (string, error) {
+			return goBuildCovered(repo.sidecarDir, filepath.Join(e2eBinDir(), "shim-claude-sidecar"))
+		})
 	})
 	if sidecarErr != nil {
 		t.Fatalf("e2e: this suite runs against the REAL sidecar, which does not build: %v", sidecarErr)
@@ -377,12 +403,64 @@ var (
 func requireLockBinary(t *testing.T) string {
 	t.Helper()
 	lockOnce.Do(func() {
-		lockPath, lockErr = goBuildOnce(repo.lockDir, filepath.Join(e2eBinDir(), "shim-lock"))
+		lockPath, lockErr = sharedOr("shim-lock", func() (string, error) {
+			return goBuildOnce(repo.lockDir, filepath.Join(e2eBinDir(), "shim-lock"))
+		})
 	})
 	if lockErr != nil {
 		t.Fatalf("e2e: this suite runs against the REAL shim, whose lock holder does not build: %v", lockErr)
 	}
 	return lockPath
+}
+
+// e2eSharedSub is this suite's subdirectory of a shared prebuilt directory
+// (harness.PrebuildEnv / harness.PrebuiltEnv); the harness keeps its own
+// binaries beside it.
+const e2eSharedSub = "e2e-bin"
+
+// shimBundleName is the staged shim bundle's path under e2eBinDir.
+const shimBundleName = "shim-dist/main.js"
+
+// sharedOr answers a binary from the shared prebuilt directory when this
+// process was told to read one, and builds it otherwise.
+func sharedOr(name string, build func() (string, error)) (string, error) {
+	mode, shared, err := harness.BinaryMode(os.Getenv)
+	if err != nil {
+		return "", err
+	}
+	if mode == harness.UsePrebuilt {
+		return harness.SharedBinary(shared, e2eSharedSub, name)
+	}
+	return build()
+}
+
+// prebuildE2E builds every binary this suite's tests would build lazily, into
+// the shared directory, for a PREBUILD process. Each is built exactly as the
+// lazy path builds it, by the same functions.
+func prebuildE2E() error {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		return fmt.Errorf("e2e: prebuild: node not found on PATH: %w", err)
+	}
+	if _, err := os.Stat(filepath.Join(repo.shimDir, "node_modules")); err != nil {
+		return fmt.Errorf("e2e: prebuild: shim deps not installed (%s/node_modules missing): run `npm ci` in %s", repo.shimDir, repo.shimDir)
+	}
+	if _, err := buildShimBundle(node); err != nil {
+		return fmt.Errorf("e2e: prebuild the shim bundle: %w", err)
+	}
+	for _, b := range []struct {
+		dir, name string
+		build     func(string, string) (string, error)
+	}{
+		{repo.storeDir, "shim-store", goBuildCovered},
+		{repo.sidecarDir, "shim-claude-sidecar", goBuildCovered},
+		{repo.lockDir, "shim-lock", goBuildOnce},
+	} {
+		if _, err := b.build(b.dir, filepath.Join(e2eBinDir(), b.name)); err != nil {
+			return fmt.Errorf("e2e: prebuild %s: %w", b.name, err)
+		}
+	}
+	return nil
 }
 
 // goBuildOnce builds one module's binary into out, uninstrumented.
