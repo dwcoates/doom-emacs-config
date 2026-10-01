@@ -1,0 +1,159 @@
+// endpoint_fold_held_prompt.proto — FoldHeldPrompt: FOLDING a held prompt into
+// the held prompt directly ahead of it. DAEMON-HOLD TRAY section.
+//
+// The tray card's "fold above" button sends it. The folded prompt's content
+// (text, images and every other block it carries, in order) is appended to the
+// entry ahead of it, separated from that entry's own words by a blank line, and
+// the folded prompt leaves the queue. The entry ahead keeps its place in the
+// queue and its identity (its turn, its origin, its target, its delivery), so
+// the two are delivered together, as that one entry, when its turn comes.
+//
+// ONE TRANSACTION. The merged content and the folded prompt's retirement are
+// written in one durable transaction, so no reader ever sees both prompts
+// standing with the merged text, or the folded prompt gone with nothing merged.
+//
+// THE MERGED ENTRY IS JUDGED AFRESH, exactly as an edit's commit is judged: its
+// standing verdict and its acceptance are discarded, a verdict still being
+// reached about its old words is discarded when it lands, and it is
+// reclassified through the ordinary classifier path. A verdict reached on the
+// old words never applies to the new ones.
+//
+// BOTH ENTRIES ARE NAMED BY TYPED ECHO TOKENS: `turn` is the folded prompt's
+// own TurnId from its tray entry, and `above` is the TurnId the same entry's
+// HeldPromptFoldAbove carried. The daemon folds into `above` and nothing else:
+// when `above` is no longer the entry directly ahead, the request is refused
+// and nothing is folded, so a prompt is never folded into an entry the user
+// did not see above it.
+//
+// NOT THIS: joining the RUNNING turn. A prompt cannot be folded into a turn
+// that has started; that is the classifier's after_tool_call verdict, which
+// sends the prompt into the running turn at its next tool boundary.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+import "conversation/v1/turn.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// Fold one held prompt into the held prompt directly ahead of it.
+message FoldHeldPromptRequest {
+  // The workspace whose queue both entries stand in.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // The held prompt being folded: the daemon-minted turn it is held under,
+  // echoed from its tray entry (HeldPrompt.turn). It leaves the queue on
+  // success.
+  conversation.v1.TurnId turn = 2;
+  // The entry the client saw directly ahead of `turn`, echoed verbatim from
+  // that same tray entry's HeldPromptFoldAbove.above. The daemon folds into
+  // this entry only, and refuses with `above_moved` when it is no longer the
+  // one directly ahead. It must differ from `turn`; a request naming one
+  // entry twice is Connect InvalidArgument.
+  conversation.v1.TurnId above = 3;
+}
+
+// THE ARM IS THE OUTCOME.
+message FoldHeldPromptResponse {
+  // Exactly one of the two is set: the fold happened, or it was refused (and
+  // nothing changed).
+  oneof result {
+    // The prompt was folded into the entry ahead of it.
+    FoldHeldPromptSuccess success = 1;
+    // The fold was refused; both entries are exactly as they were.
+    FoldHeldPromptError error = 2;
+  }
+}
+
+// Done. The tray's new state — the folded card gone, the entry ahead carrying
+// the merged words and its coalesced badge — arrives on WatchDaemonHolds.
+message FoldHeldPromptSuccess {}
+
+// Why the fold was refused. Every arm leaves BOTH entries exactly as they
+// were. Validation failures (an unset field, a blank turn, `above` equal to
+// `turn`) are Connect InvalidArgument, never an arm.
+message FoldHeldPromptError {
+  // The refusal. The first four are the workspace-addressing refusals every
+  // workspace-scoped rpc shares; the rest are about the two entries.
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    FoldHeldPromptUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    FoldHeldPromptWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    FoldHeldPromptTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting this workspace yet.
+    FoldHeldPromptNotYetAdopted not_yet_adopted = 4;
+    // No hold was ever recorded under `turn`.
+    FoldHeldPromptNoSuchHold no_such_hold = 5;
+    // The prompt under `turn` was held once and no longer is: it was
+    // delivered, dropped, or folded into another entry.
+    FoldHeldPromptNotHeld not_held = 6;
+    // The entry under `turn` is a session act (a model or permission-mode
+    // change, or a /compact or /clear), not a prompt: an act is never folded.
+    FoldHeldPromptNotAPrompt not_a_prompt = 7;
+    // `above` is no longer the entry directly ahead of `turn`: the queue's
+    // order changed, or `above` was delivered, dropped or folded since the
+    // tray was drawn.
+    FoldHeldPromptAboveMoved above_moved = 8;
+    // The entry directly ahead of `turn` is a session act, which never takes
+    // a prompt's words.
+    FoldHeldPromptAboveNotAPrompt above_not_a_prompt = 9;
+    // One of the two entries is being edited (EditHeldPrompt): its words are
+    // in the editor, and changing them underneath it is refused.
+    FoldHeldPromptBeingEdited being_edited = 10;
+  }
+}
+
+// The workspace id is not in the daemon's registry. DELIBERATELY EMPTY: the
+// arm's presence is the whole fact.
+message FoldHeldPromptUnknownWorkspace {}
+
+// The echoed workspace dir disagrees with the registry's.
+message FoldHeldPromptWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+
+// The workspace now belongs to a successor daemon.
+message FoldHeldPromptTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+
+// A joining daemon has not finished adopting the workspace. DELIBERATELY
+// EMPTY: the arm's presence is the whole fact.
+message FoldHeldPromptNotYetAdopted {}
+
+// No hold was ever recorded under `turn`. DELIBERATELY EMPTY: the arm's
+// presence is the whole fact.
+message FoldHeldPromptNoSuchHold {}
+
+// The folded prompt is no longer held. DELIBERATELY EMPTY: the tray's next
+// push already takes its card down, and how it left (delivered, dropped,
+// folded) changes nothing the client does.
+message FoldHeldPromptNotHeld {}
+
+// The entry under `turn` is a session act. DELIBERATELY EMPTY: the arm's
+// presence is the whole fact.
+message FoldHeldPromptNotAPrompt {}
+
+// `above` is not the entry directly ahead of `turn` any more.
+message FoldHeldPromptAboveMoved {
+  // The entry that IS directly ahead of `turn` now, for the record and the
+  // log. UNSET when nothing stands ahead of `turn` (it is first in the
+  // queue). A client never folds into it on its own: the next tray push
+  // offers it, and the user decides again.
+  optional conversation.v1.TurnId current_above = 1;
+}
+
+// The entry directly ahead of `turn` is a session act. DELIBERATELY EMPTY:
+// the arm's presence is the whole fact.
+message FoldHeldPromptAboveNotAPrompt {}
+
+// One of the two entries is being edited.
+message FoldHeldPromptBeingEdited {
+  // The entry the standing edit is on: `turn` or `above`.
+  conversation.v1.TurnId editing_turn = 1;
+}
