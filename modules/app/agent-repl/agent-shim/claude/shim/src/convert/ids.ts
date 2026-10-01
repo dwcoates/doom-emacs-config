@@ -13,6 +13,7 @@
  * typed message for exactly one space. Downstream code holds typed ids from
  * that point on, so the compiler carries the discipline instead of the reader.
  */
+import { createHash } from "node:crypto";
 import { create } from "@bufbuild/protobuf";
 import { bindLog } from "../log.js";
 import { conversationv1 } from "../proto.js";
@@ -195,4 +196,39 @@ export function historyPointer(storePointerValue: string): conversationv1.Histor
 /** The store's pointer value back out of a history pointer the daemon echoed. */
 export function storeItemPointerValue(pointer: conversationv1.HistoryPointer): string {
   return requireVendorValue(pointer.value, "the history pointer");
+}
+
+/**
+ * THE NAMESPACE every turn's prompt uuid is derived under (RFC 4122 §4.3).
+ *
+ * Fixed for all time: a shim that derived under a different namespace would
+ * look for its prompts under uuids no transcript holds. Minted once, at random,
+ * on 2026-10-01; it names nothing else.
+ */
+export const TURN_PROMPT_UUID_NAMESPACE = "9f0a205c-d387-4732-826e-b46e8bdf5b78";
+
+/** A uuid in canonical 8-4-4-4-12 hex form, any version. */
+const CANONICAL_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * The VENDOR MESSAGE UUID a turn's prompt is sent under, derived from the turn
+ * id (`StartTurnRequest.turn`, endpoint_start_turn.proto).
+ *
+ * A turn id that is already a uuid (a prompt the vendor recorded first) IS its
+ * own vendor uuid; any other id (the daemon's 16-hex ids, the shim's own
+ * `adopted-…` ids) maps to the version-5 uuid of its bytes under
+ * {@link TURN_PROMPT_UUID_NAMESPACE}. Deterministic, so anyone holding the turn
+ * id finds the prompt's transcript record with no mapping stored anywhere —
+ * which is what `RollBackSession` stands on.
+ */
+export function promptVendorUuid(turnId: string): string {
+  const id = requireVendorValue(turnId, "the turn id");
+  if (CANONICAL_UUID.test(id)) return id;
+  const namespace = Buffer.from(TURN_PROMPT_UUID_NAMESPACE.replace(/-/g, ""), "hex");
+  const digest = createHash("sha1").update(namespace).update(id, "utf8").digest();
+  const bytes = digest.subarray(0, 16);
+  bytes[6] = (bytes[6] & 0x0f) | 0x50;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = bytes.toString("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }

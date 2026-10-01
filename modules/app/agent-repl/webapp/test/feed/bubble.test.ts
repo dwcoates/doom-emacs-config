@@ -162,6 +162,30 @@ describe("mountBubble: the initial fold (R2)", () => {
   });
 });
 
+describe("mountBubble: collapse, the jump's and the tail's handle on the fold", () => {
+  it("closes an open bubble", async () => {
+    // Arrange
+    const { bubble } = mount(subagentRow("b1"));
+    await bubble.expand();
+    // Act
+    bubble.collapse();
+    // Assert
+    expect(bubble.isExpanded()).toBe(false);
+  });
+
+  it("leaves a closed bubble as it is, collapsing nothing", async () => {
+    // Arrange
+    const { bubble } = mount(subagentRow("b1"));
+    const capture = captureLogRecords();
+    // Act
+    bubble.collapse();
+    // Assert
+    capture.logger.flush();
+    await Promise.resolve();
+    expect(capture.sent.filter((r) => r.operation === "feed.bubble-collapse")).toEqual([]);
+  });
+});
+
 describe("mountBubble: expansion", () => {
   it("opens the sub-feed at the bubble row's OWN id", async () => {
     const { bubble, h } = mount(subagentRow("b1"));
@@ -1495,7 +1519,7 @@ describe("mountBubble: the non-row frames a sub-feed tail carries", () => {
     // Arrange
     const { h, channel } = await expandedTail(subagentRow("b1"));
     // Act
-    channel.push(pushSelection({ active: false }));
+    channel.push(pushSelection({ none: "returnToTail" }));
     await settle();
     // Assert
     expect(h.sink.reported).toEqual(["frameUndecodable"]);

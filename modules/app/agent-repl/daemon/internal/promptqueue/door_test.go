@@ -13,7 +13,6 @@ import (
 	"claude-repld/internal/feedid"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/resolve/feed"
-	"claude-repld/internal/sessionwatcher"
 	"claude-repld/internal/wsm"
 )
 
@@ -108,7 +107,7 @@ func (w *doorWorld) endings(t *testing.T, resolver feed.Resolver) int {
 // does before the queue hears of the end.
 func (w *doorWorld) terminal(success *conversationv1.AgentSuccess, failure *conversationv1.AgentFailure) {
 	turn := w.turn
-	w.feed.OnAgentTerminal(w.ws, doorAgent(), &turn, success, failure, nil, sessionwatcher.OutputAddress{})
+	w.feed.OnAgentTerminal(w.ws, doorAgent(), &turn, success, failure, nil)
 }
 
 // replayPage is the turn's page as a fresh daemon replays it: its prompt, and
@@ -260,7 +259,7 @@ func TestEveryClosePathDrawsExactlyOneEndingOnReplay(t *testing.T) {
 			fresh.OnMainAgent(w.ws, doorAgent())
 
 			// Act: a fresh daemon replays the turn.
-			fresh.OnHistoryPage(w.ws, doorAgent(), w.replayPage(path.stored), sessionwatcher.OutputAddress{})
+			fresh.OnHistoryPage(w.ws, doorAgent(), w.replayPage(path.stored))
 
 			// Assert
 			if n := w.endings(t, fresh); n != 1 {

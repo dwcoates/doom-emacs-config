@@ -569,13 +569,3 @@ func mcpServer(name string, health any) *conversationv1.SessionUpdate {
 	}
 	return &conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_McpServer{McpServer: server}}
 }
-
-// responseSuccess is a settled prose unit carrying its whole markdown.
-func responseSuccess(unit, markdown string) *conversationv1.AgentActivity {
-	return &conversationv1.AgentActivity{
-		ActivityId: &conversationv1.AgentActivityId{Value: unit},
-		Item: &conversationv1.AgentActivity_Response{Response: &conversationv1.AgentResponse{
-			Result: &conversationv1.AgentResponse_Success{Success: &conversationv1.AgentResponseSuccess{
-				Prose: &conversationv1.AgentResponseProse{Markdown: markdown}}}}},
-	}
-}

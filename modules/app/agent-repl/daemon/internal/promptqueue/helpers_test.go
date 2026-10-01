@@ -240,6 +240,25 @@ func (d *fakeDB) TombstoneHeldPrompt(_ context.Context, turn ids.TurnID, why wsm
 	return nil
 }
 
+// TombstoneHeldPrompts retires several holds all or nothing, as the store does.
+func (d *fakeDB) TombstoneHeldPrompts(_ context.Context, turns []ids.TurnID, why wsm.Tombstone) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.tombstoneErr != nil {
+		return d.tombstoneErr
+	}
+	for _, turn := range turns {
+		if _, ok := d.held[turn]; !ok {
+			return errors.New("no such hold")
+		}
+	}
+	for _, turn := range turns {
+		copied := why
+		d.held[turn].Tombstone = &copied
+	}
+	return nil
+}
+
 // HeldPromptByTurn answers one hold, retired or not.
 func (d *fakeDB) HeldPromptByTurn(_ context.Context, turn ids.TurnID) (wsm.HeldPrompt, bool, error) {
 	d.mu.Lock()
@@ -767,9 +786,12 @@ func (b *fakeTurnBanners) raised() []bannerEnd {
 
 type fakeFeed struct {
 	feed.Resolver
-	mu              sync.Mutex
-	rows            []*frontendv1.FeedRow
-	address         *sessionwatcher.OutputAddress
+	mu      sync.Mutex
+	rows    []*frontendv1.FeedRow
+	address *sessionwatcher.OutputAddress
+	// turnAddrs are the addresses AddressTurn handed over, by turn; nil
+	// entries are turns handed over with no address.
+	turnAddrs       map[ids.TurnID]*sessionwatcher.OutputAddress
 	clearReceived   []ids.TurnID
 	compactReceived []ids.TurnID
 	cutAborted      []ids.TurnID
@@ -853,14 +875,15 @@ func (f *fakeFeed) UpsertSynthesized(_ ids.WorkspaceID, _ feedid.Feed, row *fron
 	f.rows = append(f.rows, row)
 }
 
-// UpsertAtOutputAddress records the row the way the resolver does: the id is
-// composed from the recorded address (root when none stands) and the row key.
-func (f *fakeFeed) UpsertAtOutputAddress(ws ids.WorkspaceID, key feedid.RowKey, row *frontendv1.FeedRow) {
+// UpsertAtTurnAddress records the row the way the resolver does: the id is
+// composed from the address the turn was handed over with (root when none)
+// and the row key.
+func (f *fakeFeed) UpsertAtTurnAddress(ws ids.WorkspaceID, turn ids.TurnID, key feedid.RowKey, row *frontendv1.FeedRow) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	feedAt := feedid.Feed{Root: true}
-	if f.address != nil {
-		feedAt = f.address.Feed
+	if addr := f.turnAddrs[turn]; addr != nil {
+		feedAt = addr.Feed
 	}
 	row.Id = feedid.Encode(feedid.Ref{WS: ws, Feed: feedAt, Row: key})
 	f.rows = append(f.rows, row)
@@ -878,7 +901,27 @@ func (f *fakeFeed) OutputAddress(_ ids.WorkspaceID) *sessionwatcher.OutputAddres
 	return &copied
 }
 
-// SetOutputAddress records the standing output address the mirror lands at.
+// AddressTurn records the address a turn was handed over with.
+func (f *fakeFeed) AddressTurn(_ ids.WorkspaceID, turn ids.TurnID, addr *sessionwatcher.OutputAddress) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.turnAddrs == nil {
+		f.turnAddrs = map[ids.TurnID]*sessionwatcher.OutputAddress{}
+	}
+	f.turnAddrs[turn] = addr
+}
+
+// turnAddress answers the address a turn was handed over with, and whether
+// it was handed over at all.
+func (f *fakeFeed) turnAddress(turn ids.TurnID) (*sessionwatcher.OutputAddress, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	addr, ok := f.turnAddrs[turn]
+	return addr, ok
+}
+
+// SetOutputAddress records the standing output address a merge's own turns
+// are recorded at.
 func (f *fakeFeed) SetOutputAddress(_ ids.WorkspaceID, addr *sessionwatcher.OutputAddress) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

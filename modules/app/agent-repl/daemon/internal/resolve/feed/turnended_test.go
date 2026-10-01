@@ -235,7 +235,7 @@ func TestOnlyInterruptedArmBuildsTheInterruptedOutcome(t *testing.T) {
 func (h *harness) terminal(turn string, success *conversationv1.AgentSuccess, failure *conversationv1.AgentFailure) {
 	h.t.Helper()
 	id := ids.TurnID(turn)
-	h.resolver.OnAgentTerminal(testWorkspace, mainAgent(), &id, success, failure, nil, noAddress())
+	h.resolver.OnAgentTerminal(testWorkspace, mainAgent(), &id, success, failure, nil)
 }
 
 // terminalRow finds the terminal row for a turn.
@@ -297,7 +297,7 @@ func TestAConfirmedClearTurnDrawsNoTerminalBubble(t *testing.T) {
 	h.resolver.OnTurnOpened(testWorkspace, ids.TurnID("turn-2"))
 	h.resolver.OnContextCut(testWorkspace, mainAgent(),
 		&conversationv1.ContextCut{Cut: &conversationv1.ContextCut_Cleared{Cleared: &conversationv1.ContextCleared{}}},
-		&conversationv1.HistoryPointer{Value: "entry-clear"}, nil, nil, noAddress())
+		&conversationv1.HistoryPointer{Value: "entry-clear"}, nil, nil)
 
 	// Act: the interrupted terminal the clear left arrives.
 	h.terminal("turn-2", interruptedByUser(), nil)
@@ -353,7 +353,7 @@ func TestAConcludedTurnNamesItsAnsweringRow(t *testing.T) {
 	h := newHarness(t)
 	h.deliverPrompt("turn-1", "what is it")
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		responseSuccessActivity("unit-9", "it is this"), nil, nil, noAddress())
+		responseSuccessActivity("unit-9", "it is this"), nil, nil)
 
 	// Act.
 	h.terminal("turn-1", &conversationv1.AgentSuccess{
@@ -746,7 +746,7 @@ func TestAModelErrorAfterARefusedResponseDrawsTheRefusalArm(t *testing.T) {
 					Refused: &conversationv1.AgentResponseRefused{},
 				},
 			},
-		}, nil), nil, nil, noAddress())
+		}, nil), nil, nil)
 
 	// Act.
 	h.terminal("turn-1", nil, &conversationv1.AgentFailure{
@@ -777,7 +777,7 @@ func TestAModelErrorAfterAMaxTokensResponseIsNotARefusal(t *testing.T) {
 					MaxTokens: &conversationv1.AgentResponseStoppedAtMaxTokens{},
 				},
 			},
-		}, nil), nil, nil, noAddress())
+		}, nil), nil, nil)
 
 	// Act.
 	h.terminal("turn-1", nil, &conversationv1.AgentFailure{
@@ -808,7 +808,7 @@ func TestARefusalDoesNotColorTheNextTurnsModelError(t *testing.T) {
 					Refused: &conversationv1.AgentResponseRefused{},
 				},
 			},
-		}, nil), nil, nil, noAddress())
+		}, nil), nil, nil)
 	h.terminal("turn-1", nil, &conversationv1.AgentFailure{
 		Failure: &conversationv1.AgentFailure_ModelError{ModelError: &conversationv1.AgentModelError{}},
 	})
@@ -1088,7 +1088,7 @@ func TestAMidTurnApiErrorRidesTheTerminalsHeadlineAsEvidence(t *testing.T) {
 	h.deliverPrompt("turn-1", "hello")
 	h.resolver.OnApiError(testWorkspace, mainAgent(), &conversationv1.ApiRequestFailed{
 		Message: "connection reset",
-	}, nil, nil, noAddress())
+	}, nil, nil)
 
 	// Act: the turn then dies of something else.
 	h.terminal("turn-1", nil, &conversationv1.AgentFailure{
@@ -1318,7 +1318,7 @@ func TestASubagentStreamEndingDrawsNoTurnTerminal(t *testing.T) {
 	h := newHarness(t)
 	h.resolver.OnAgentTerminal(testWorkspace, mainAgent(), nil, &conversationv1.AgentSuccess{
 		Outcome: &conversationv1.AgentSuccess_Completed{Completed: &conversationv1.AgentCompleted{}},
-	}, nil, nil, noAddress())
+	}, nil, nil)
 
 	// Assert.
 	if rows := h.rows(rootFeed()); len(rows) != 0 {
@@ -1374,7 +1374,7 @@ func TestATerminalDoesNotRestateTheApiFailureItEndedOn(t *testing.T) {
 	h.deliverPrompt("turn-1", "!api-401")
 	h.resolver.OnApiError(testWorkspace, mainAgent(), &conversationv1.ApiRequestFailed{
 		Message: message,
-	}, nil, nil, noAddress())
+	}, nil, nil)
 
 	// Act: the turn then ends on THAT failure.
 	h.terminal("turn-1", nil, &conversationv1.AgentFailure{
@@ -1419,7 +1419,7 @@ func TestATerminalRestatesNothingWhateverOrderTheTwoProducersArriveIn(t *testing
 	})
 	h.resolver.OnApiError(testWorkspace, mainAgent(), &conversationv1.ApiRequestFailed{
 		Message: message,
-	}, nil, nil, noAddress())
+	}, nil, nil)
 
 	// Assert: the same sentence the other ordering drew.
 	headline := h.terminalRow("turn-1").GetErrored().GetHeadline().GetText()
@@ -1438,7 +1438,7 @@ func TestATerminalStatesAMidTurnApiFailureItDidNotDieOf(t *testing.T) {
 	h.deliverPrompt("turn-1", "hello")
 	h.resolver.OnApiError(testWorkspace, mainAgent(), &conversationv1.ApiRequestFailed{
 		Message: "Rate limited; retry after 30 seconds.",
-	}, nil, nil, noAddress())
+	}, nil, nil)
 
 	// Act
 	h.terminal("turn-1", nil, &conversationv1.AgentFailure{
@@ -1474,7 +1474,7 @@ func TestInterruptedTerminalDrawsForAUserStopButNotAClear(t *testing.T) {
 	h.resolver.OnTurnOpened(testWorkspace, ids.TurnID("clear-turn"))
 	h.resolver.OnContextCut(testWorkspace, mainAgent(),
 		&conversationv1.ContextCut{Cut: &conversationv1.ContextCut_Cleared{Cleared: &conversationv1.ContextCleared{}}},
-		&conversationv1.HistoryPointer{Value: "entry-clear"}, nil, nil, noAddress())
+		&conversationv1.HistoryPointer{Value: "entry-clear"}, nil, nil)
 
 	// An ordinary turn the user stops — no cut.
 	h.deliverPrompt("stop-turn", "do the thing")

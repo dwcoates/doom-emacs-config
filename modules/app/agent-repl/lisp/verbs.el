@@ -81,6 +81,7 @@
 (declare-function agent-repl-host-conn "agent-repl-host" (ws))
 (declare-function agent-repl-host-faults "agent-repl-host" (ws))
 (declare-function agent-repl-host-handle-refusal "agent-repl-host" (ws arm))
+(declare-function agent-repl-host-route-handover "agent-repl-host" (ws arm slug))
 (declare-function agent-repl-host-take-restart-hold "agent-repl-host" (ws))
 (declare-function agent-repl-host-release-restart-hold "agent-repl-host" (ws reason))
 (declare-function agent-repl-switch-to-project "commands" (&optional project))
@@ -295,10 +296,7 @@ the user as the verb, the word refused, the arm keyword, and the fields."
   (let* ((arm (agent-repl-verbs--refusal-arm value))
          (keyword (plist-get arm :arm)))
     (cond
-     ((memq keyword agent-repl-verbs--handover-arms)
-      (agent-repl--info ws (format "elisp.verbs.%s-handover-refusal ws=%%s arm=%%S fields=%%S" op)
-                        ws keyword (plist-get arm :value))
-      (agent-repl-host-handle-refusal ws arm))
+     ((agent-repl-host-route-handover ws arm (format "elisp.verbs.%s-handover-refusal" op)))
      ((eq keyword :lock-holder-unavailable)
       ;; THE ONE ARM WHOSE KEYWORD WOULD MISLEAD ON ITS OWN.  Nobody owns
       ;; the conversation: the shim's own lock helper failed, and the binary

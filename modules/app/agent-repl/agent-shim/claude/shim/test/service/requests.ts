@@ -92,6 +92,26 @@ export function killTurnRequest(): shimv1.KillTurnRequest {
   });
 }
 
+/** A rollback cutting before `toBefore`, dropping `dropped`, keeping or restoring the files. */
+export function rollBackSessionRequestFor(
+  toBefore: string,
+  dropped: readonly string[],
+  files: "keep" | "restore" = "keep",
+): shimv1.RollBackSessionRequest {
+  return create(shimv1.RollBackSessionRequestSchema, {
+    toBefore: create(conversationv1.TurnIdSchema, { value: toBefore }),
+    droppedTurns: dropped.map((value) => create(conversationv1.TurnIdSchema, { value })),
+    files:
+      files === "keep"
+        ? { case: "keepFiles", value: create(shimv1.RollBackSessionKeepFilesSchema, {}) }
+        : { case: "restoreFiles", value: create(shimv1.RollBackSessionRestoreFilesSchema, {}) },
+  });
+}
+
+export function rollBackSessionRequest(): shimv1.RollBackSessionRequest {
+  return rollBackSessionRequestFor("turn-1", ["turn-1", "turn-2"]);
+}
+
 export function watchBashRequest(): shimv1.WatchBashRequest {
   return create(shimv1.WatchBashRequestSchema, {
     work: create(conversationv1.DetachedWorkIdSchema, { value: "b1" }),

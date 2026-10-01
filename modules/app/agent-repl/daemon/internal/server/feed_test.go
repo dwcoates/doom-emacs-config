@@ -228,9 +228,9 @@ func receiveSelection(
 	return nil
 }
 
-// TestWatchFeedPushesTheSelectionOnTheRootFeed pins that a SelectResponse move
-// reaches the root feed's watch as a FeedSelection frame carrying the selected
-// row, active, and the row to center.
+// TestWatchFeedPushesTheSelectionOnTheRootFeed pins that a SelectFeedRow
+// response step reaches the root feed's watch as a FeedSelection frame
+// carrying the selected row under the response arm.
 func TestWatchFeedPushesTheSelectionOnTheRootFeed(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
@@ -240,30 +240,20 @@ func TestWatchFeedPushesTheSelectionOnTheRootFeed(t *testing.T) {
 	stream := openRootWatch(t, h, ctx)
 
 	// Act.
-	if _, err := h.Client.SelectResponse(context.Background(),
-		connect.NewRequest(&agentreplv1.SelectResponseRequest{
-			Workspace: ref(),
-			Direction: agentreplv1.SelectResponseDirection_SELECT_RESPONSE_DIRECTION_NEXT,
-		})); err != nil {
-		t.Fatalf("SelectResponse: %v", err)
+	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(newer))); err != nil {
+		t.Fatalf("SelectFeedRow: %v", err)
 	}
 	sel := receiveSelection(t, stream)
 
 	// Assert.
-	if !sel.GetActive() {
-		t.Fatalf("active = false, want true while a selection stands")
-	}
-	if got := sel.GetSelected().GetValue(); got != "c" {
-		t.Fatalf("selected = %q, want the most recent c", got)
-	}
-	if got := sel.GetCenter().GetValue(); got != "c" {
-		t.Fatalf("center = %q, want c", got)
+	if got := sel.GetResponse().GetRow().GetValue(); got != "c" {
+		t.Fatalf("selected response = %q, want the most recent c", got)
 	}
 }
 
-// TestWatchFeedPushesTheClearedSelection pins that CLEAR pushes a frame with
-// active=false and no selected row, which is what returns the webapp to the
-// feed bottom.
+// TestWatchFeedPushesTheClearedSelection pins that CLEAR pushes a
+// none{return_to_tail} frame, which is what returns the webapp to the feed
+// bottom.
 func TestWatchFeedPushesTheClearedSelection(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
@@ -271,32 +261,21 @@ func TestWatchFeedPushesTheClearedSelection(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	stream := openRootWatch(t, h, ctx)
-	if _, err := h.Client.SelectResponse(context.Background(),
-		connect.NewRequest(&agentreplv1.SelectResponseRequest{
-			Workspace: ref(),
-			Direction: agentreplv1.SelectResponseDirection_SELECT_RESPONSE_DIRECTION_NEXT,
-		})); err != nil {
+	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(newer))); err != nil {
 		t.Fatalf("seed selection: %v", err)
 	}
-	if got := receiveSelection(t, stream).GetSelected().GetValue(); got != "c" {
+	if got := receiveSelection(t, stream).GetResponse().GetRow().GetValue(); got != "c" {
 		t.Fatalf("seed selection = %q, want c", got)
 	}
 
 	// Act.
-	if _, err := h.Client.SelectResponse(context.Background(),
-		connect.NewRequest(&agentreplv1.SelectResponseRequest{
-			Workspace: ref(),
-			Direction: agentreplv1.SelectResponseDirection_SELECT_RESPONSE_DIRECTION_CLEAR,
-		})); err != nil {
-		t.Fatalf("SelectResponse clear: %v", err)
+	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(clearMove())); err != nil {
+		t.Fatalf("SelectFeedRow clear: %v", err)
 	}
 	sel := receiveSelection(t, stream)
 
 	// Assert.
-	if sel.GetActive() {
-		t.Fatalf("active = true, want false after a clear")
-	}
-	if sel.Selected != nil {
-		t.Fatalf("selected = %v, want none after a clear", sel.GetSelected())
+	if sel.GetNone().GetReturnToTail() == nil {
+		t.Fatalf("selection = %v, want none{return_to_tail} after a clear", sel)
 	}
 }

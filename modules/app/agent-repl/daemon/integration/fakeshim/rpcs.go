@@ -20,6 +20,7 @@ const (
 	RPCWatchAgent               = "WatchAgent"
 	RPCUpdateAgent              = "UpdateAgent"
 	RPCKillTurn                 = "KillTurn"
+	RPCRollBackSession          = "RollBackSession"
 	RPCWatchBash                = "WatchBash"
 	RPCStopBash                 = "StopBash"
 	RPCDetachForeground         = "DetachForeground"
@@ -42,6 +43,8 @@ func newResponse(rpc string) proto.Message {
 		return &shimv1.HibernateResponse{}
 	case RPCKillSession:
 		return &shimv1.KillSessionResponse{}
+	case RPCRollBackSession:
+		return &shimv1.RollBackSessionResponse{}
 	case RPCStartTurn:
 		return &shimv1.StartTurnResponse{}
 	case RPCUpdateAgent:

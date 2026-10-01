@@ -1071,25 +1071,6 @@ func TestStatusArmsCoverTheProtoOneof(t *testing.T) {
 	}
 }
 
-// TestAllowanceArmsCoverTheProtoOneof pins the same for the allowance list.
-func TestAllowanceArmsCoverTheProtoOneof(t *testing.T) {
-	// Arrange.
-	arms, err := vocab.OneofArmNames((&frontendv1.FooterAllowance{}).ProtoReflect().Descriptor(), "status")
-	if err != nil {
-		t.Fatalf("OneofArmNames: %v", err)
-	}
-
-	// Act.
-	got := append([]string(nil), allowanceArms...)
-	sort.Strings(got)
-	sort.Strings(arms)
-
-	// Assert.
-	if !slices.Equal(got, arms) {
-		t.Fatalf("allowanceArms = %v, want the FooterAllowance.status arms %v", got, arms)
-	}
-}
-
 // THE VENDOR ANNOUNCES A COMPACTION BEFORE THE TURN THAT RUNS IT. The
 // compacting signal and the turn-open edge arrive within a millisecond of each
 // other and the signal wins the race, so a turn opening must not wipe it.

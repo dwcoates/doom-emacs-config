@@ -2,9 +2,21 @@
  * queue — the merge queue tab: who is ahead, this workspace, who is behind.
  *
  * THE SNAPSHOT IS STRUCTURAL. `ahead`, `current` and `behind` are three fields,
- * so "you are here" is READ, never derived by comparing workspace ids against
- * the page's own — the client would get that wrong the moment a workspace
- * appears twice or the ids are respelled, and it has no business deciding it.
+ * so this workspace's own row is READ, never derived by comparing workspace ids
+ * against the page's own — the client would get that wrong the moment a
+ * workspace appears twice or the ids are respelled, and it has no business
+ * deciding it. That row is marked `data-queue-place="current"`, which the
+ * stylesheet draws as a subtle highlight.
+ *
+ * A TABLE (owner request, 2026-10-01): a header row, then one row per entry,
+ * every row the same height, in three columns — the workspace, its stage (the
+ * front's active tab; "waiting" for everyone behind it) and how long it has
+ * been in that stage. It is a COLUMN TABLE exactly as the expanded footer's
+ * agents panel is (src/columns.ts): one grid whose header and rows share its
+ * columns through `subgrid`, the duration column floored for "5hr 30m 30s"
+ * and growing to its widest value. The duration ticks from the entry's
+ * `stage_entered_at_ms`, so it starts over at zero whenever the daemon pushes
+ * a new stage.
  *
  * EVERY ENTRY IS A CROSS-WORKSPACE JUMP, and a cross-workspace click is
  * `SelectWorkspace` and nothing else (R8): the editor switches, the roster
@@ -17,8 +29,10 @@
  * its own bubble draws — imported, never respelled — so a waiting user watches
  * real progress instead of a spinner.
  */
+import { columnHeader, COLUMNS_ROW_CLASS } from "../../columns.js";
+import { liveElapsedClock } from "../../elapsed-clock.js";
 import { log } from "../../log.js";
-import { requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
+import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import { guardMalformed } from "../../rpc/guard.js";
 import { crossCuttingSentence } from "../../rpc/refuse.js";
 import { callUnary } from "../../rpc/unary.js";
@@ -43,6 +57,12 @@ const PATH = "FeedMergeQueue";
 /** Where an entry stands relative to this workspace's own. */
 export type QueuePlace = "ahead" | "current" | "behind";
 
+/** The table's columns, in order, each named by its header. */
+export const QUEUE_COLUMNS = ["workspace", "stage", "duration"] as const;
+
+/** A waiting entry's stage, drawn in the stage column. */
+export const WAITING_STAGE = "waiting";
+
 /** The whole snapshot: ahead front-first, this workspace, behind nearest-first. */
 export function drawFeedMergeQueue(queue: FeedMergeQueue, rc: RowContext): HTMLElement {
   log.debug("drawing a merge queue snapshot", {
@@ -51,6 +71,7 @@ export function drawFeedMergeQueue(queue: FeedMergeQueue, rc: RowContext): HTMLE
   });
   const el = document.createElement("div");
   el.className = "merge-queue list-rows";
+  el.append(drawQueueHeader());
   for (const entry of queue.ahead) el.append(drawFeedMergeQueueEntry(entry, rc, "ahead"));
   el.append(
     drawFeedMergeQueueEntry(requireMessage(queue.current, `${PATH}.current`), rc, "current"),
@@ -59,7 +80,15 @@ export function drawFeedMergeQueue(queue: FeedMergeQueue, rc: RowContext): HTMLE
   return el;
 }
 
-/** One entry: its name, its standing, and its jump. */
+/** The header row: one header per column, above its column. */
+function drawQueueHeader(): HTMLElement {
+  const header = document.createElement("div");
+  header.className = `merge-queue-header ${COLUMNS_ROW_CLASS}`;
+  for (const column of QUEUE_COLUMNS) header.append(columnHeader(column));
+  return header;
+}
+
+/** One entry: its name, its stage and how long it has been in it, and its jump. */
 export function drawFeedMergeQueueEntry(
   entry: FeedMergeQueueEntry,
   rc: RowContext,
@@ -72,13 +101,13 @@ export function drawFeedMergeQueueEntry(
   );
 
   const el = document.createElement("div");
-  el.className = "merge-queue-entry";
+  el.className = `merge-queue-entry ${COLUMNS_ROW_CLASS}`;
   el.setAttribute("data-queue-place", place);
   el.setAttribute("data-queue-status", status.case);
 
   const line = document.createElement("button");
   line.type = "button";
-  line.className = "merge-queue-line";
+  line.className = `merge-queue-line ${COLUMNS_ROW_CLASS}`;
   line.setAttribute("data-select", "");
   el.append(line);
 
@@ -87,30 +116,28 @@ export function drawFeedMergeQueueEntry(
   label.textContent = requireMessage(entry.label, `${PATH}Entry.label`).text;
   line.append(label);
 
-  if (place === "current") {
-    const here = document.createElement("span");
-    here.className = "merge-queue-here";
-    here.textContent = "you are here";
-    line.append(here);
-  }
-
+  const stage = document.createElement("span");
+  stage.className = "merge-queue-stage";
+  let enteredMs: number;
   switch (status.case) {
-    case "merging": {
-      const active = document.createElement("span");
-      active.className = "merge-queue-active";
-      active.append(
+    case "merging":
+      stage.append(
         drawFeedMergeTabLabel(
           requireMessage(status.value.activeTab, `${PATH}Merging.active_tab`),
         ),
       );
-      line.append(active);
+      enteredMs = msOf(status.value.stageEnteredAtMs, `${PATH}Merging.stage_entered_at_ms`);
       break;
-    }
     case "waiting":
+      stage.textContent = WAITING_STAGE;
+      enteredMs = msOf(status.value.stageEnteredAtMs, `${PATH}Waiting.stage_entered_at_ms`);
       break;
     default:
       return unreachableArm(`${PATH}Entry.status`, armName(status));
   }
+  line.append(stage);
+
+  line.append(liveElapsedClock(rc.ctx.ticker, "footer-row-clock merge-queue-duration", enteredMs));
 
   line.addEventListener("click", () => {
     void guardMalformed(

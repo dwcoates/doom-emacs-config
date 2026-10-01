@@ -32,7 +32,7 @@ func (r *resolver) drawTerminal(s *wsState, agent *conversationv1.AgentId, turn 
 	// AN UNPLACEABLE TERMINAL STILL ENDS ITS TURN. Only its row is not drawn
 	// (place has reported why); the turn's bookkeeping below — its stalls, its
 	// prompts, its held detachments — is owed whether or not a row can land.
-	at, placed := r.place(s, agent)
+	at, placed := r.placeTurn(s, agent, turn)
 
 	turnID := &conversationv1.TurnId{Value: string(*turn)}
 	ended := &frontendv1.FeedTurnEnded{EndedAtMs: r.deps.Now().UnixMilli()}
@@ -583,7 +583,7 @@ func (r *resolver) drawQueryDied(s *wsState, died *conversationv1.SessionQueryDi
 		return
 	}
 	turn := string(*s.turnInFlight)
-	at := r.outputPlacement(s)
+	at := r.outputPlacement(s, s.turnInFlight)
 
 	errored := queryDiedErrored(died)
 

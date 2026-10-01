@@ -1,0 +1,15 @@
+// rollback.proto — what PlanRollback and RollBack share: the plan's token.
+syntax = "proto3";
+package agentrepl.v1;
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// THE PLAN THE USER CONFIRMED, as the daemon minted it (PlanRollback) and
+// the client hands back unchanged (RollBack). Opaque to the client. It names
+// the prompt, whether files are restored, and every side effect the plan
+// stated; the daemon refuses a RollBack whose plan no longer describes what
+// would happen, so a rollback never does anything the confirmation did not
+// say.
+message RollbackToken {
+  // Opaque, daemon-minted; never parsed or constructed by a client.
+  string value = 1;
+}

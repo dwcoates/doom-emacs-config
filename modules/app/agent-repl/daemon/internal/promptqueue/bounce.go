@@ -82,6 +82,13 @@ type pendingBounce struct {
 	// (SealMove). From then on nothing asked of this daemon can reach the
 	// next one, so a request is refused with bounce.ErrMovedAway.
 	sealed bool
+	// freedWhileRunning reports that a freeness edge (a turn's end, the last
+	// detached item's end, the awaited shim's departure) arrived while the
+	// bounce was DRAINING, when the edge decides nothing. A replacement that
+	// is then DEFERRED is re-judged at once only on such an edge, so an edge
+	// the run swallowed is not lost -- and a shim that says `live` while the
+	// watcher reads it free cannot spin the bounce in a loop.
+	freedWhileRunning bool
 }
 
 // quietMove reports whether the bounce's MOVE waits only for the delivery
@@ -457,6 +464,9 @@ func (q *queue) decideDeparture(ws ids.WorkspaceID, departed Watcher, departure 
 		}
 		return
 	case pending.draining:
+		q.mu.Lock()
+		pending.freedWhileRunning = true
+		q.mu.Unlock()
 		state.drain.Unlock()
 		log.Debug(opBounce, "the shim departed inside the bounce that is replacing it", fields)
 		return
@@ -612,6 +622,9 @@ func (q *queue) checkRegistryLocked(ws ids.WorkspaceID, state *wsState, log dlog
 		return false
 	}
 	if pending.draining {
+		q.mu.Lock()
+		pending.freedWhileRunning = true
+		q.mu.Unlock()
 		return true
 	}
 	turn, detached, free := q.inFlight(ws)
@@ -635,6 +648,8 @@ func (q *queue) startBounceLocked(ws ids.WorkspaceID, state *wsState, log dlog.L
 	q.mu.Lock()
 	pending := state.bounce
 	pending.draining = true
+	// Only an edge that arrives WHILE this run decides is one it can swallow.
+	pending.freedWhileRunning = false
 	reason := pending.reason()
 	first := pending.next()
 	q.mu.Unlock()
@@ -663,9 +678,22 @@ func (q *queue) finishStage(ws ids.WorkspaceID, stage *bounceStage, runErr error
 	state.drain.Lock()
 
 	q.mu.Lock()
+	pending := state.bounce
+	if pending != nil && stage == pending.replace && bounce.OutcomeOf(runErr) == bounce.OutcomeDeferred {
+		// THE REPLACEMENT GAVE ITSELF BACK UNPERFORMED: the shim refused to
+		// stand down over live work, and keeps serving. The stage is
+		// registered again, its requesters kept for the rerun.
+		stage.started = false
+		pending.draining = false
+		edge := pending.freedWhileRunning
+		pending.freedWhileRunning = false
+		q.mu.Unlock()
+		q.deferReplacementLocked(ws, state, pending, edge, runErr, log)
+		state.drain.Unlock()
+		return nil
+	}
 	dones := stage.dones
 	stage.dones = nil
-	pending := state.bounce
 	var next *bounceStage
 	if pending != nil {
 		next = pending.next()
@@ -767,6 +795,45 @@ func (q *queue) finishStage(ws ids.WorkspaceID, stage *bounceStage, runErr error
 		done(fmt.Errorf("bounce %q: %w", ws, errMoveNeverSealed))
 	}
 	return nil
+}
+
+// deferReplacementLocked re-registers a shim REPLACEMENT its run DEFERRED
+// (bounce.ErrDeferred) behind the work in flight it could not stand down over.
+//
+// AN UNFORCED SHIM REPLACEMENT NEVER ENDS LIVE WORK. The registry's freeness is
+// a reading the vendor can overtake -- it starts a turn on its own the moment
+// a subagent concludes -- but the shim's refusal is atomic and authoritative,
+// so the refusal wins: the workspace leaves draining, dispatch resumes on the
+// shim that keeps serving, and the replacement waits for the next freeness
+// edge. Its requesters are NOT told: they hear the rerun's outcome. A freeness
+// edge that arrived while the run decided is re-judged now; a dispatch-quiet
+// move standing behind the replacement runs now and carries it across, as it
+// would have had the workspace been busy when the move was asked. The caller
+// holds the delivery lock and has already reset the stage.
+func (q *queue) deferReplacementLocked(ws ids.WorkspaceID, state *wsState, pending *pendingBounce, edge bool, runErr error, log dlog.Logger) {
+	current, _ := q.deps.Watcher(ws)
+	q.mu.Lock()
+	pending.waitsOn = current
+	reason := pending.reason()
+	quiet := pending.quietMove()
+	overtook := quiet && pending.overtake()
+	q.mu.Unlock()
+	log.Info(opBounce, "the shim refused to stand down over live work; the bounce is re-registered behind that work and dispatch resumes on the shim that keeps serving", dlog.Context{
+		"reason": reason, "cause": runErr.Error(), "edge_while_running": edge,
+		"state": "draining", "before": true, "after": false,
+	})
+	switch {
+	case quiet:
+		log.Info(opBounce, "a dispatch-quiet move stands behind the deferred replacement; moving the workspace now and carrying the replacement with it", dlog.Context{
+			"overtook_replacement": overtook,
+		})
+		q.startBounceLocked(ws, state, log)
+	case edge && q.checkRegistryLocked(ws, state, log):
+		// A FREENESS EDGE THE RUN SWALLOWED left the workspace free: the
+		// re-registered bounce is taken now, and its own finish delivers.
+	default:
+		q.resumeDispatchLocked(context.Background(), ws, log)
+	}
 }
 
 // errMoveNeverSealed is what a replacement's requester is told when the

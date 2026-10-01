@@ -134,6 +134,7 @@ func TestTheShimLogRollRecordsHowItsBounceEnded(t *testing.T) {
 		{name: "the bounce failed", endOf: errors.New("prelaunch refused"), wantLevel: "error", wantText: "could not roll"},
 		{name: "the bounce was unregistered", endOf: bounce.ErrUnregistered, wantLevel: "info", wantText: "nothing is left to roll"},
 		{name: "the bounce was handed across", endOf: bounce.ErrHandedAcross, wantLevel: "info", wantText: "handed across"},
+		{name: "the registry told a deferral it owes only the rerun's outcome", endOf: bounce.ErrDeferred, wantLevel: "error", wantText: "told the shim-log roll a deferral"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

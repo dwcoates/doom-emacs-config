@@ -2,6 +2,9 @@ package feed
 
 import (
 	"context"
+	"fmt"
+	"strconv"
+	"strings"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 	"google.golang.org/protobuf/proto"
@@ -73,8 +76,13 @@ func (r *resolver) restoreDurable(s *wsState) {
 			log.Error(opDurable, "a durable row's id names no feed and is drawn nowhere", fields)
 			continue
 		}
+		if err := reserveOrder(r.feed(s, ref.Feed), stored.OrderKey); err != nil {
+			fields["cause"] = err.Error()
+			log.Error(opDurable, "a durable row's order key cannot be read and the row is drawn nowhere", fields)
+			continue
+		}
 		rank := rowRank{plane: rowPlane(stored.Plane), key: stored.OrderKey}
-		r.upsertOne(s, placement{feed: ref.Feed, inherit: &rank}, row, true)
+		r.upsert(s, placement{feed: ref.Feed, inherit: &rank}, row, true)
 		drawn++
 	}
 	if drawn > 0 {
@@ -92,4 +100,33 @@ func (r *resolver) forgetDurable(ws ids.WorkspaceID) {
 		r.logger(ws).Error(opDurable, "the durable rows could not be forgotten; a new daemon would draw the reset conversation's rows again",
 			dlog.Context{"cause": err.Error()})
 	}
+}
+
+// reserveOrder advances a feed's key counters past a key restored into it, so
+// a row this daemon mints later can never take a restored row's key or sort
+// above it: the counters live only in memory, and a new daemon's start at zero.
+func reserveOrder(f *feedState, key string) error {
+	if i := strings.IndexByte(key, followSep); i >= 0 {
+		n, err := strconv.ParseUint(key[i+1:], 16, 32)
+		if err != nil {
+			return fmt.Errorf("the order key %q has no follow count: %w", key, err)
+		}
+		if base := key[:i]; uint64(f.followers[base]) < n {
+			f.followers[base] = uint32(n)
+		}
+		return nil
+	}
+	const subWidth = 8
+	if len(key) <= subWidth {
+		return fmt.Errorf("the order key %q is too short to be an entry key", key)
+	}
+	base := key[:len(key)-subWidth]
+	sub, err := strconv.ParseUint(key[len(key)-subWidth:], 16, 32)
+	if err != nil {
+		return fmt.Errorf("the order key %q has no entry index: %w", key, err)
+	}
+	if uint64(f.entryRows[base]) <= sub {
+		f.entryRows[base] = uint32(sub) + 1
+	}
+	return nil
 }

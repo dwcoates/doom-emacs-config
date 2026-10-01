@@ -68,8 +68,7 @@ import {
   statusWaveStyle,
   statusWordWaves,
 } from "../breathing.js";
-import { formatTickedElapsed } from "../duration.js";
-import { tick } from "../feed/ticking.js";
+import { liveElapsedClock } from "../elapsed-clock.js";
 import { log } from "../log.js";
 import { tokenHeatColor } from "../token-heat.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
@@ -470,20 +469,17 @@ export function drawFooterClock(u: FooterClock, deps: StripDeps): HTMLElement {
   const cell = document.createElement("div");
   cell.className = "pfooter-cell pfooter-clock footer-clock";
 
-  const label = document.createElement("span");
-  label.className = "info-time";
-  cell.appendChild(label);
-
   if (u.turnStartedAtMs === undefined) {
+    const label = document.createElement("span");
+    label.className = "info-time";
     label.textContent = IDLE_CLOCK_LABEL;
+    cell.appendChild(label);
     cell.setAttribute("data-live", "false");
     return cell;
   }
   cell.setAttribute("data-live", "true");
   const startedAtMs = msOf(u.turnStartedAtMs, "FooterClock.turn_started_at_ms");
-  tick(label, deps.ctx.ticker, (nowMs) => {
-    label.textContent = formatTickedElapsed(nowMs - startedAtMs);
-  });
+  cell.appendChild(liveElapsedClock(deps.ctx.ticker, "info-time", startedAtMs));
   cell.appendChild(deps.stops.turn);
   return cell;
 }

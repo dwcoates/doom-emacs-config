@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -87,8 +86,11 @@ type run struct {
 	selfCheckout bool
 	// policy is where the requester's repository states its merge policy.
 	policy prompts.Source
-	// startedMS is the head's running clock.
+	// startedMS is when the run was admitted: the queue tab's end.
 	startedMS int64
+	// queuedMS is when the merge was queued: the head's running clock
+	// (frontend.v1.FeedMergeRuntime).
+	queuedMS int64
 	// displaced is the user turn this merge displaced, captured at admission
 	// with the text it carried.
 	displaced *Displaced
@@ -98,19 +100,18 @@ type run struct {
 	afterDrain bool
 	// queueRound is the ledger round of the QUEUE tab, opened at admission and
 	// closed when the run leaves the queue for its first step.
-	queueRound int
+	queueRound tabRound
 
 	mu sync.Mutex
 	// rounds counts each tab kind's opened rounds, which is what makes a second
 	// pass a second tab.
 	rounds map[string]int
-	// opened remembers when each round opened.
-	opened map[string]time.Time
-	// tab is the tab kind currently live.
-	tab string
-	// openRounds are the tab rounds whose ledger interval is still open, so an
-	// abandon closes exactly those and nothing twice.
-	openRounds map[string]bool
+	// active is the round opened last: the tab currently live, and when it
+	// began. Zero until the queue round opens at admission.
+	active tabRound
+	// openRounds are the tab rounds whose ledger interval is still open, keyed
+	// by roundKey, so an abandon closes exactly those and nothing twice.
+	openRounds map[string]tabRound
 	// facts are this merge's standing facts, the footer's and the roster's.
 	facts footer.MergeFacts
 	// stepAt is when the current step began, which the merges waiting behind
@@ -127,84 +128,101 @@ type run struct {
 	machinery map[string]bool
 }
 
-// activeTab reports the tab currently live, for the queue snapshot's front
-// entry.
-func (r *run) activeTab() string {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.tab
+// tabRound is one opened round of one tab kind, carrying the instant its
+// ledger interval began. openTab is the ONLY place one is minted, so every tab
+// a run publishes ships the start its own interval recorded, and a round with
+// no start cannot be represented.
+type tabRound struct {
+	kind    string
+	n       int
+	started time.Time
 }
 
-// roundOf reports a tab kind's current round.
-func (r *run) roundOf(kind string) int {
+// key is the round's roundKey.
+func (t tabRound) key() string { return roundKey(t.kind, t.n) }
+
+// live is the round's live badge.
+func (t tabRound) live() tabState { return tabState{startedMS: t.started.UnixMilli()} }
+
+// settled is the round's settled badge: ended at endedMS, failed with the
+// one-line account when failure is set, succeeded otherwise.
+func (t tabRound) settled(endedMS int64, failure string) tabState {
+	return tabState{startedMS: t.started.UnixMilli(), settled: true, endedMS: endedMS, failure: failure}
+}
+
+// activeTab reports the kind of the tab currently live, empty before the
+// queue round opens.
+func (r *run) activeTab() string {
+	return r.activeRound().kind
+}
+
+// activeRound reports the round currently live -- its kind, its number and
+// when it began -- read whole under one lock, so the queue snapshot's front
+// entry never pairs one round's label with another's start. Zero before the
+// queue round opens.
+func (r *run) activeRound() tabRound {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if n := r.rounds[kind]; n > 0 {
-		return n
-	}
-	return 1
+	return r.active
 }
 
 // openTab opens the next round of one tab kind and records the interval's
 // start in the ledger. Tabs are append-only, so opening is always a NEW round
 // rather than a reopened tab.
-func (r *run) openTab(ctx context.Context, kind string) int {
+func (r *run) openTab(ctx context.Context, kind string) tabRound {
 	started := r.o.deps.Now()
 	r.mu.Lock()
 	r.rounds[kind]++
-	round := r.rounds[kind]
-	r.tab = kind
-	r.opened[roundKey(kind, round)] = started
-	r.openRounds[roundKey(kind, round)] = true
+	round := tabRound{kind: kind, n: r.rounds[kind], started: started}
+	r.active = round
+	r.openRounds[round.key()] = round
 	r.mu.Unlock()
 	if err := r.o.deps.DB.RecordTabInterval(ctx, r.lease.ID, wsm.TabInterval{
-		Round: round, Kind: kind, StartedAt: started,
+		Round: round.n, Kind: kind, StartedAt: started,
 	}); err != nil {
 		r.o.log(ctx, r.ws).Error("daemon.merge.tab_open", "could not record a tab interval",
-			dlog.Context{"workspace": string(r.ws), "tab": kind, "round": round, "error": err.Error()})
+			dlog.Context{"workspace": string(r.ws), "tab": kind, "round": round.n, "error": err.Error()})
 	}
 	r.o.log(ctx, r.ws).Debug("daemon.merge.tab_open", "opened a merge tab",
-		dlog.Context{"workspace": string(r.ws), "tab": kind, "round": round})
+		dlog.Context{"workspace": string(r.ws), "tab": kind, "round": round.n})
 	return round
 }
 
 // closeTab records a tab interval's end and its outcome. The ledger holds the
 // intervals and NOTHING of the content: step history is feed content the
 // daemon synthesizes, never a WSM column.
-func (r *run) closeTab(ctx context.Context, kind string, round int, outcome string) {
+func (r *run) closeTab(ctx context.Context, round tabRound, outcome string) {
 	ended := r.o.deps.Now()
 	r.mu.Lock()
-	started := r.opened[roundKey(kind, round)]
-	delete(r.openRounds, roundKey(kind, round))
+	delete(r.openRounds, round.key())
 	r.mu.Unlock()
 	if err := r.o.deps.DB.RecordTabInterval(ctx, r.lease.ID, wsm.TabInterval{
-		Round: round, Kind: kind, StartedAt: started, EndedAt: &ended, Outcome: outcome,
+		Round: round.n, Kind: round.kind, StartedAt: round.started, EndedAt: &ended, Outcome: outcome,
 	}); err != nil {
 		r.o.log(ctx, r.ws).Error("daemon.merge.tab_close", "could not record a tab interval's end",
-			dlog.Context{"workspace": string(r.ws), "tab": kind, "round": round, "error": err.Error()})
+			dlog.Context{"workspace": string(r.ws), "tab": round.kind, "round": round.n, "error": err.Error()})
 	}
 }
 
-// address stamps the requester's session output at one tab: the rows its
-// session produces land on the merge sub-feed, parented to that tab's row. A
-// REPAIR -- conflict resolution, test fixing -- is mirrored: its rows are ALSO
-// drawn on the main feed as ordinary turns (owner ruling, 2026-09-29), while
-// a configured prompt's stay in its tab. The feed resolver is merge-agnostic
-// and applies the address without knowing what a merge is.
-func (r *run) address(kind string, round int) {
-	ref := tabRef(r.ws, r.lease.ID, kind, round)
-	repair := kind == TabConflicts || kind == TabFixes
-	r.o.deps.Feed.SetOutputAddress(r.ws, &wsm.OutputAddress{Feed: mergeFeed(r.lease.ID), Parent: &ref, Mirror: repair})
+// address stands one tab as where the merge's OWN turns draw: the prompt
+// queue records it on each turn the merge submits (a merge origin), so that
+// turn's rows land on the merge sub-feed, parented to the tab's row, and
+// NOWHERE ELSE (owner ruling, 2026-10-01). A turn the user sends while the
+// merge runs is not the merge's and draws on the main feed. The feed resolver
+// is merge-agnostic and applies the address without knowing what a merge is.
+func (r *run) address(round tabRound) {
+	ref := tabRef(r.ws, r.lease.ID, round.kind, round.n)
+	r.o.deps.Feed.SetOutputAddress(r.ws, &wsm.OutputAddress{Feed: mergeFeed(r.lease.ID), Parent: &ref})
 }
 
 // upsert publishes one tab row.
-func (r *run) upsert(kind string, round int, tab *frontendv1.FeedMergeTab) {
-	r.o.deps.Feed.UpsertDurable(r.ws, mergeFeed(r.lease.ID), tabRow(r.ws, r.lease.ID, kind, round, tab))
+func (r *run) upsert(round tabRound, tab *frontendv1.FeedMergeTab) {
+	r.o.deps.Feed.UpsertDurable(r.ws, mergeFeed(r.lease.ID), tabRow(r.ws, r.lease.ID, round.kind, round.n, tab))
 }
 
 // head publishes the bubble's head row with the state arm in force.
 func (r *run) head(result any) {
-	r.o.deps.Feed.UpsertDurable(r.ws, feedid.Feed{Root: true}, headRow(r.ws, r.lease.ID, r.label(), r.startedMS, result))
+	r.o.deps.Feed.UpsertDurable(r.ws, feedid.Feed{Root: true}, headRow(r.ws, r.lease.ID, r.label(), r.queuedMS, result))
 }
 
 // label is the bubble's head line: what is merged, and where to.
@@ -230,7 +248,13 @@ func (o *orchestrator) runAdmitted(ctx context.Context, repo wsm.RepoKey, ws ids
 func (o *orchestrator) start(ctx context.Context, repo wsm.RepoKey, ws ids.WorkspaceID, lock *repoLock) (*run, error) {
 	const op = "daemon.merge.start"
 	log := o.log(ctx, ws)
-	source, err := o.sourceOf(ctx, repo, ws)
+	entry, err := o.entryOf(ctx, repo, ws)
+	if err == nil {
+		// THE HEAD'S CLOCK RUNS FROM WHEN THE MERGE WAS QUEUED
+		// (frontend.v1.FeedMergeRuntime), the same instant every drawing of
+		// the head ships, so the clock never restarts between phases.
+		_, err = enqueuedMS(entry)
+	}
 	if err != nil {
 		if releaseErr := lock.Release(); releaseErr != nil {
 			log.Error(op, "could not release the repository lock of a merge that could not start", dlog.Context{"workspace": string(ws), "error": releaseErr.Error()})
@@ -270,28 +294,29 @@ func (o *orchestrator) start(ctx context.Context, repo wsm.RepoKey, ws ids.Works
 	delete(o.displaces, ws)
 	o.mu.Unlock()
 	r := &run{
-		o: o, ws: ws, source: source, job: job, repo: repo, lease: lease, lock: lock,
+		o: o, ws: ws, source: entry.Source, job: job, repo: repo, lease: lease, lock: lock,
 		ctx: runCtx, cancel: cancel, finished: make(chan struct{}), displaces: displaces,
 		startedMS:  o.deps.Now().UnixMilli(),
+		queuedMS:   entry.EnqueuedAt.UnixMilli(),
 		rounds:     map[string]int{},
-		opened:     map[string]time.Time{},
-		openRounds: map[string]bool{},
+		openRounds: map[string]tabRound{},
 	}
 	return r, r.admit(runCtx)
 }
 
-// sourceOf reads what a queued merge lands off its queue entry.
-func (o *orchestrator) sourceOf(ctx context.Context, repo wsm.RepoKey, ws ids.WorkspaceID) (wsm.MergeSource, error) {
+// entryOf reads a queued merge's queue entry: what it lands, and when it was
+// queued.
+func (o *orchestrator) entryOf(ctx context.Context, repo wsm.RepoKey, ws ids.WorkspaceID) (wsm.MergeQueueEntry, error) {
 	entries, err := o.deps.DB.MergeQueue(ctx, repo)
 	if err != nil {
-		return wsm.MergeSource{}, err
+		return wsm.MergeQueueEntry{}, err
 	}
 	for _, entry := range entries {
 		if entry.Workspace == ws {
-			return entry.Source, nil
+			return entry, nil
 		}
 	}
-	return wsm.MergeSource{}, fmt.Errorf("merge: no queue entry of %s stands in %s", ws, repo)
+	return wsm.MergeQueueEntry{}, fmt.Errorf("merge: no queue entry of %s stands in %s", ws, repo)
 }
 
 // admit is start's body once the run exists: every failure from here ends the
@@ -413,21 +438,8 @@ func (r *run) awaitFree(ctx context.Context, ws ids.WorkspaceID) error {
 	return nil
 }
 
-// roundKey addresses one tab round's recorded start.
+// roundKey addresses one tab round.
 func roundKey(kind string, round int) string { return fmt.Sprintf("%s/%d", kind, round) }
-
-// splitRoundKey reads a roundKey back into its kind and round.
-func splitRoundKey(key string) (string, int, bool) {
-	kind, n, found := strings.Cut(key, "/")
-	if !found {
-		return "", 0, false
-	}
-	round, err := strconv.Atoi(n)
-	if err != nil {
-		return "", 0, false
-	}
-	return kind, round, true
-}
 
 // methodName names the method a run took, for the log record.
 func methodName(emacsRepo bool, source wsm.MergeSource) string {
@@ -461,7 +473,7 @@ func sameDir(a, b string) bool {
 func (r *run) execute(ctx context.Context) error {
 	// The run leaves the queue here: the wait is over and the first step
 	// begins, so the queue interval ends.
-	r.closeTab(ctx, TabQueue, r.queueRound, "succeeded")
+	r.closeTab(ctx, r.queueRound, "succeeded")
 	outcome, err := r.method(ctx)
 	if err != nil {
 		r.end(ctx, err)
@@ -591,14 +603,14 @@ func (r *run) prePrompt(ctx context.Context) (outcome, bool, error) {
 	}
 	for _, text := range actions {
 		round := r.openTab(ctx, TabPrePrompt)
-		r.address(TabPrePrompt, round)
+		r.address(round)
 		r.setStep(ctx, footer.StepPreprocessing, func(f *footer.MergeFacts) { f.Line = promptLine(footer.StepPreprocessing, text) })
-		r.upsert(TabPrePrompt, round, promptTab(TabPrePrompt, live(), 0, ""))
+		r.upsert(round, promptTab(TabPrePrompt, round.live()))
 		close, err := r.runConfiguredPrompt(ctx, text, conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_BEFORE_ACTION)
 		if err != nil || close.Failed() {
 			summary := "the before-merge prompt did not complete"
-			r.upsert(TabPrePrompt, round, promptTab(TabPrePrompt, nil, r.o.nowMS(), summary))
-			r.closeTab(ctx, TabPrePrompt, round, "failed")
+			r.upsert(round, promptTab(TabPrePrompt, round.settled(r.o.nowMS(), summary)))
+			r.closeTab(ctx, round, "failed")
 			if err != nil {
 				return outcome{}, false, err
 			}
@@ -606,8 +618,8 @@ func (r *run) prePrompt(ctx context.Context) (outcome, bool, error) {
 				dlog.Context{"workspace": string(r.ws), "close": close.String()})
 			return failedIn(footer.FailedOther, summary), true, nil
 		}
-		r.upsert(TabPrePrompt, round, promptTab(TabPrePrompt, nil, r.o.nowMS(), ""))
-		r.closeTab(ctx, TabPrePrompt, round, "succeeded")
+		r.upsert(round, promptTab(TabPrePrompt, round.settled(r.o.nowMS(), "")))
+		r.closeTab(ctx, round, "succeeded")
 	}
 	return outcome{}, false, nil
 }
@@ -621,21 +633,21 @@ func (r *run) postPrompt(ctx context.Context) error {
 	}
 	for _, text := range actions {
 		round := r.openTab(ctx, TabPostPrompt)
-		r.address(TabPostPrompt, round)
+		r.address(round)
 		r.setStep(ctx, footer.StepPostprocessing, func(f *footer.MergeFacts) { f.Line = promptLine(footer.StepPostprocessing, text) })
-		r.upsert(TabPostPrompt, round, promptTab(TabPostPrompt, live(), 0, ""))
+		r.upsert(round, promptTab(TabPostPrompt, round.live()))
 		close, err := r.runConfiguredPrompt(ctx, text, conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_AFTER_ACTION)
 		if err != nil || close.Failed() {
 			summary := "the after-merge prompt did not complete"
-			r.upsert(TabPostPrompt, round, promptTab(TabPostPrompt, nil, r.o.nowMS(), summary))
-			r.closeTab(ctx, TabPostPrompt, round, "failed")
+			r.upsert(round, promptTab(TabPostPrompt, round.settled(r.o.nowMS(), summary)))
+			r.closeTab(ctx, round, "failed")
 			if err != nil {
 				return err
 			}
 			return fmt.Errorf("merge: %s", summary)
 		}
-		r.upsert(TabPostPrompt, round, promptTab(TabPostPrompt, nil, r.o.nowMS(), ""))
-		r.closeTab(ctx, TabPostPrompt, round, "succeeded")
+		r.upsert(round, promptTab(TabPostPrompt, round.settled(r.o.nowMS(), "")))
+		r.closeTab(ctx, round, "succeeded")
 	}
 	return nil
 }
@@ -681,27 +693,22 @@ func (r *run) submit(ctx context.Context, text string, origin conversationv1.Pro
 }
 
 // promptTab builds an agentic prompt tab's kind arm.
-func promptTab(kind string, liveState *frontendv1.FeedMergeTabLive, endedMS int64, failure string) *frontendv1.FeedMergeTab {
-	settled := func() *frontendv1.FeedMergeTabSettled {
-		if failure != "" {
-			return settledFailed(endedMS, failure)
-		}
-		return settledOK(endedMS)
-	}
+func promptTab(kind string, st tabState) *frontendv1.FeedMergeTab {
+	live, settled := st.badge()
 	if kind == TabPostPrompt {
 		inner := &frontendv1.FeedMergeTabPostPrompt{}
-		if liveState != nil {
-			inner.State = &frontendv1.FeedMergeTabPostPrompt_Live{Live: liveState}
+		if live != nil {
+			inner.State = &frontendv1.FeedMergeTabPostPrompt_Live{Live: live}
 		} else {
-			inner.State = &frontendv1.FeedMergeTabPostPrompt_Settled{Settled: settled()}
+			inner.State = &frontendv1.FeedMergeTabPostPrompt_Settled{Settled: settled}
 		}
 		return &frontendv1.FeedMergeTab{Kind: &frontendv1.FeedMergeTab_PostPrompt{PostPrompt: inner}}
 	}
 	inner := &frontendv1.FeedMergeTabPrePrompt{}
-	if liveState != nil {
-		inner.State = &frontendv1.FeedMergeTabPrePrompt_Live{Live: liveState}
+	if live != nil {
+		inner.State = &frontendv1.FeedMergeTabPrePrompt_Live{Live: live}
 	} else {
-		inner.State = &frontendv1.FeedMergeTabPrePrompt_Settled{Settled: settled()}
+		inner.State = &frontendv1.FeedMergeTabPrePrompt_Settled{Settled: settled}
 	}
 	return &frontendv1.FeedMergeTab{Kind: &frontendv1.FeedMergeTab_PrePrompt{PrePrompt: inner}}
 }

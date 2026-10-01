@@ -25,7 +25,7 @@ func (h *harness) ask(askID, gated string, result any) {
 	case *conversationv1.AgentPermissionFailure:
 		p.Result = &conversationv1.AgentPermission_Failure{Failure: r}
 	}
-	h.resolver.OnPermission(testWorkspace, mainAgent(), p, nil, nil, noAddress())
+	h.resolver.OnPermission(testWorkspace, mainAgent(), p, nil, nil)
 }
 
 // permissionCard finds the consent card on the root feed.
@@ -458,7 +458,7 @@ func TestAPermissionFrameWithNoAskIdentityIsRefusedLoudly(t *testing.T) {
 	h := newHarness(t)
 	h.resolver.OnPermission(testWorkspace, mainAgent(), &conversationv1.AgentPermission{
 		Result: &conversationv1.AgentPermission_Start{Start: &conversationv1.AgentPermissionStart{}},
-	}, nil, nil, noAddress())
+	}, nil, nil)
 
 	// Assert.
 	if !h.hasRecord("error", "daemon.feed.permission_without_identity") {

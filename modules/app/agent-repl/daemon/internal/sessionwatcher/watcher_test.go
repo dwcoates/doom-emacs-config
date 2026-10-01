@@ -33,11 +33,6 @@ func TestWatcherStateTransitionsRecordTheirBeforeAndAfter(t *testing.T) {
 		act       func(*harness)
 	}{
 		{
-			name: "an output route leaves the root feed", operation: "daemon.sessionwatcher.set_output_address",
-			state: "output_feed_root", before: true, after: false, legacyKey: "root", legacy: false,
-			act: func(h *harness) { h.w.SetOutputAddress(&OutputAddress{Feed: feedFor("sub-1")}) },
-		},
-		{
 			name: "the main agent is named", operation: "daemon.sessionwatcher.main_agent",
 			state: "main_agent", before: "", after: "main-9", legacyKey: "agent_id", legacy: "main-9",
 			act: func(h *harness) { h.w.SetMainAgent(agentID("main-9")) },
@@ -1248,26 +1243,6 @@ func TestOnTurnOpenedRefusesAnotherWorkspacesTurn(t *testing.T) {
 	}
 	if !h.hasRecord("error", "daemon.sessionwatcher.turn_opened_foreign") {
 		t.Fatal("a foreign turn was not recorded as an error")
-	}
-}
-
-// TestSetOutputAddress covers the lease holder's redirection and its
-// restoration, since every feed row the session produces is stamped with it.
-func TestSetOutputAddress(t *testing.T) {
-	// Arrange.
-	h := newHarness(t, Session{Started: sessionStarted("")})
-	elsewhere := OutputAddress{Feed: feedFor("sub-1")}
-
-	// Act / Assert: installed.
-	h.w.SetOutputAddress(&elsewhere)
-	if h.addressNow().Feed.Root {
-		t.Fatal("the installed address was ignored")
-	}
-
-	// Act / Assert: nil restores the root feed.
-	h.w.SetOutputAddress(nil)
-	if !h.addressNow().Feed.Root {
-		t.Fatal("nil did not restore the root feed")
 	}
 }
 

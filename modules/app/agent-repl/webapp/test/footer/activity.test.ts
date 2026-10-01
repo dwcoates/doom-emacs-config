@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
-import { FooterStatusSchema } from "../../../proto/gen/ts/frontend/v1/footer_pb";
+import { FooterAllowanceSchema, FooterStatusSchema } from "../../../proto/gen/ts/frontend/v1/footer_pb";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import {
   drawFooterStatusActivity,
@@ -12,12 +12,23 @@ import {
 } from "../../src/footer/activity.js";
 import { footerStatusActivity } from "../../src/footer/strip.js";
 import {
-  FOOTER_ALLOWANCE_STATUS_CASES,
   FOOTER_STATUS_CASES,
   activityDatumClass,
-  allowanceStatusClass,
   footerPercentColor,
 } from "../../src/footer/tones.js";
+
+/**
+ * Every `FooterAllowance.status` arm, read off the generated schema.
+ *
+ * Read directly here rather than through `src/footer/tones.ts`: the colour
+ * chain that once lived there (`ALLOWANCE_ARM_CLASS`) was removed as dead
+ * code once the salient rate-limit line stopped painting an allowance
+ * colour, but this suite still needs the arm set itself to parametrize its
+ * assertions about `drawFooterAllowance`.
+ */
+const FOOTER_ALLOWANCE_STATUS_CASES: readonly string[] = (
+  FooterAllowanceSchema.oneofs.find((oneof) => oneof.name === "status")?.fields ?? []
+).map((field) => field.localName);
 
 /** The color a footer percent of PERCENT is painted, as the DOM reports it. */
 function paintedAs(percent: number): string {
@@ -393,37 +404,8 @@ describe("the salient kinds", () => {
     ["blocked", "fault", { kind: "prompts_dir_missing", detail: "no prompts" }, "prompts dir missing · no prompts"],
     ["idle", "notification", { text: "the agent addressed you" }, "the agent addressed you"],
     ["working", "contextBudget", { text: "compaction failed — the summary was empty" }, "compaction failed — the summary was empty"],
-    ["background", "rateLimit", { window: { window: { case: "weekly", value: {} } }, verdict: { case: "allowedWarning", value: {} }, utilization: 0.85 }, "weekly nearly spent 85%"],
-    ["blocked", "rateLimit", { window: { window: { case: "session", value: {} } }, verdict: { case: "rejected", value: {} } }, "session spent"],
-    ["merging", "rateLimit", { verdict: { case: "rejected", value: {} } }, "usage spent"],
-    ["loading", "rateLimit", { window: { window: { case: "weeklyOverageIncluded", value: {} } }, verdict: { case: "allowedWarning", value: {} } }, "weekly overage included nearly spent"],
   ])("draws the %s cell's %s line", (statusCase, kindCase, value, expected) => {
     expect(salientCell(kindCase, value, statusCase).textContent).toContain(expected);
-  });
-
-  it("counts a rate-limit event's reset down on the shared clock", () => {
-    const cell = salientCell(
-      "rateLimit",
-      { verdict: { case: "rejected", value: {} }, resetsAtS: BigInt(Math.floor(NOW / 1000) + 3600) },
-      "idle",
-    );
-    expect(cell.querySelector("[data-countdown]")?.textContent).toBe(" · resets in 1h");
-  });
-
-  it("colours a rate-limit event by its verdict", () => {
-    const cell = salientCell("rateLimit", { verdict: { case: "rejected", value: {} } }, "idle");
-    expect(cell.querySelector(".footer-activity-rate-limit")?.className).toContain(allowanceStatusClass("rejected"));
-  });
-
-  it("colours a rate-limit event's utilization by how full it is", () => {
-    const cell = salientCell("rateLimit", { verdict: { case: "allowedWarning", value: {} }, utilization: 0.92 }, "idle");
-    const percent = cell.querySelector<HTMLElement>('.footer-activity-rate-limit [data-datum="percent"]');
-    expect(percent?.textContent).toBe("92%");
-    expect(percent?.style.color).toBe(paintedAs(92));
-  });
-
-  it("refuses a rate-limit event with no verdict", () => {
-    expect(() => salientCell("rateLimit", {}, "idle")).toThrow(MalformedView);
   });
 
   it("draws the bring-up failure's cause verbatim", () => {

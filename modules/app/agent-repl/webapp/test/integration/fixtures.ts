@@ -1148,10 +1148,16 @@ export type MergeTabKind = (typeof MERGE_TAB_KINDS)[number];
 export const MERGE_TAB_STATES = ["live", "settled"] as const;
 export type MergeTabState = (typeof MERGE_TAB_STATES)[number];
 
-const liveState = () => ({ case: "live" as const, value: {} });
+/** When every fixture tab's work began, and each queue entry its stage. */
+const MERGE_TAB_STARTED_AT_MS = 1_000n;
+const liveState = () => ({ case: "live" as const, value: { startedAtMs: MERGE_TAB_STARTED_AT_MS } });
 const settledState = () => ({
   case: "settled" as const,
-  value: { endedAtMs: 9_000n, outcome: { case: "succeeded" as const, value: {} } },
+  value: {
+    startedAtMs: MERGE_TAB_STARTED_AT_MS,
+    endedAtMs: 9_000n,
+    outcome: { case: "succeeded" as const, value: {} },
+  },
 });
 
 /** The state arm a tab carries. */
@@ -1184,19 +1190,22 @@ const mergeTabKindValue = (
               {
                 workspace: { ref: workspaceRef("ws-ahead") },
                 label: { text: "ws-ahead" },
-                status: { case: "waiting", value: {} },
+                status: { case: "waiting", value: { stageEnteredAtMs: MERGE_TAB_STARTED_AT_MS } },
               },
             ],
             current: {
               workspace: { ref: workspaceRef() },
               label: { text: "ws-1" },
-              status: { case: "merging", value: { activeTab: { text: "tests", round: 2 } } },
+              status: {
+                case: "merging",
+                value: { activeTab: { text: "tests", round: 2 }, stageEnteredAtMs: MERGE_TAB_STARTED_AT_MS },
+              },
             },
             behind: [
               {
                 workspace: { ref: workspaceRef("ws-behind") },
                 label: { text: "ws-behind" },
-                status: { case: "waiting", value: {} },
+                status: { case: "waiting", value: { stageEnteredAtMs: MERGE_TAB_STARTED_AT_MS } },
               },
             ],
           },
@@ -1512,17 +1521,12 @@ export const FOOTER_SALIENT_KINDS: Record<string, object> = {
   fault: { kind: "link_severed", detail: "the socket closed" },
   startFailed: { detail: "exit 1: no module", droppedPrompts: 0 },
   closeBlocked: { text: "a turn is live" },
-  rateLimit: {
-    window: { window: { case: "weekly", value: {} } },
-    verdict: { case: "allowedWarning", value: {} },
-    utilization: 0.85,
-  },
   notification: { text: "the agent addressed you" },
   contextBudget: { text: "84% of the window" },
 };
 
 /** The salient kinds every status arm carries after its own and `update`. */
-const SHARED_SALIENTS = ["rateLimit", "notification", "contextBudget"] as const;
+const SHARED_SALIENTS = ["notification", "contextBudget"] as const;
 
 /**
  * Which salient kinds each status arm's cell legally carries (footer.proto;

@@ -31,10 +31,10 @@ import {
   type InterruptResponse,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_interrupt_pb";
 import {
-  SelectResponseResponseSchema,
-  type SelectResponseRequest,
-  type SelectResponseResponse,
-} from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_response_pb";
+  SelectFeedRowResponseSchema,
+  type SelectFeedRowRequest,
+  type SelectFeedRowResponse,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_feed_row_pb";
 import { FeedWatchTokenSchema } from "../../../proto/gen/ts/agentrepl/v1/feed_token_pb";
 import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { TurnIdSchema } from "../../../proto/gen/ts/conversation/v1/turn_pb";
@@ -54,6 +54,7 @@ import {
   type FeedId,
   type FeedPage,
   type FeedRow,
+  type FeedSelection,
 } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import type { FailureKind } from "../../../proto/gen/ts/frontend/v1/failure_pb";
 import { createTicker, type Ticker } from "../../src/clock.js";
@@ -166,8 +167,8 @@ export interface FeedScript {
   channels?: Map<string, Channel<WatchFeedResponse>>;
   getFeedPage?: (req: GetFeedPageRequest) => GetFeedPageResponse;
   interrupt?: (req: InterruptRequest) => InterruptResponse;
-  /** Answers SelectResponse; a success selecting nothing when unscripted. */
-  selectResponse?: (req: SelectResponseRequest) => SelectResponseResponse;
+  /** Answers SelectFeedRow; a success selecting nothing when unscripted. */
+  selectFeedRow?: (req: SelectFeedRowRequest) => SelectFeedRowResponse;
   /** The page's clock. Pass a `countingTicker` to assert on live subscriptions. */
   ticker?: Ticker;
 }
@@ -178,7 +179,7 @@ export interface FeedCalls {
   watchFeed: WatchFeedRequest[];
   getFeedPage: GetFeedPageRequest[];
   interrupt: InterruptRequest[];
-  selectResponse: SelectResponseRequest[];
+  selectFeedRow: SelectFeedRowRequest[];
 }
 
 export interface Harness {
@@ -190,7 +191,7 @@ export interface Harness {
 
 /** A context whose client speaks to the scripted daemon. */
 export function harness(script: FeedScript = {}): Harness {
-  const calls: FeedCalls = { openFeed: [], watchFeed: [], getFeedPage: [], interrupt: [], selectResponse: [] };
+  const calls: FeedCalls = { openFeed: [], watchFeed: [], getFeedPage: [], interrupt: [], selectFeedRow: [] };
   const channels = script.channels ?? new Map<string, Channel<WatchFeedResponse>>();
   const sink = new RecordingSink();
   const transport = createRouterTransport(({ service }) => {
@@ -229,11 +230,13 @@ export function harness(script: FeedScript = {}): Harness {
           })
         );
       },
-      selectResponse: (req) => {
-        calls.selectResponse.push(req);
+      selectFeedRow: (req) => {
+        calls.selectFeedRow.push(req);
         return (
-          script.selectResponse?.(req) ??
-          create(SelectResponseResponseSchema, { result: { case: "success", value: {} } })
+          script.selectFeedRow?.(req) ??
+          create(SelectFeedRowResponseSchema, {
+            result: { case: "success", value: { outcome: { case: "none", value: {} } } },
+          })
         );
       },
     });
@@ -576,19 +579,38 @@ export function pushScale(scale: number): WatchFeedResponse {
 }
 
 /**
- * A tail push carrying the reply-to-a-past-response SELECTION state (and no
- * row): the daemon's per-workspace selection, pushed on the root feed's watch.
+ * The feed selection the daemon holds, in the test's shorthand: nothing
+ * selected (and what the viewport does), or the id of a selected final
+ * response or prompt.
  */
-export function pushSelection(
-  selection: { selected?: string; active: boolean; center?: string },
-): WatchFeedResponse {
-  return create(WatchFeedResponseSchema, {
-    selection: create(FeedSelectionSchema, {
-      selected: selection.selected === undefined ? undefined : feedId(selection.selected),
-      active: selection.active,
-      center: selection.center === undefined ? undefined : feedId(selection.center),
-    }),
+export type SelectionShape =
+  | { none: "returnToTail" | "stay" }
+  | { response: string }
+  | { prompt: string };
+
+/** The daemon's `FeedSelection` for SHAPE. */
+export function selectionOf(shape: SelectionShape): FeedSelection {
+  if ("none" in shape) {
+    return create(FeedSelectionSchema, {
+      selection: { case: "none", value: { viewport: { case: shape.none, value: {} } } },
+    });
+  }
+  if ("response" in shape) {
+    return create(FeedSelectionSchema, {
+      selection: { case: "response", value: { row: feedId(shape.response) } },
+    });
+  }
+  return create(FeedSelectionSchema, {
+    selection: { case: "prompt", value: { row: feedId(shape.prompt) } },
   });
+}
+
+/**
+ * A tail push carrying the feed SELECTION (and no row): the daemon's
+ * per-workspace selection, pushed on the root feed's watch.
+ */
+export function pushSelection(shape: SelectionShape): WatchFeedResponse {
+  return create(WatchFeedResponseSchema, { selection: selectionOf(shape) });
 }
 
 /** Stub renderers: each draws a marked element naming the arm it was given. */

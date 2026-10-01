@@ -162,6 +162,9 @@ type Client interface {
 	// KillTurn interrupts the open turn, forced when the confirm challenge was
 	// answered.
 	KillTurn(ctx context.Context, req *shimv1.KillTurnRequest) (*shimv1.KillTurnResponse, error)
+	// RollBackSession rewinds the main agent's vendor conversation to just
+	// before one of its prompts.
+	RollBackSession(ctx context.Context, req *shimv1.RollBackSessionRequest) (*shimv1.RollBackSessionResponse, error)
 	// WatchBash opens one detached shell's stream.
 	WatchBash(ctx context.Context, work *conversationv1.DetachedWorkId) (Stream[*conversationv1.AgentBash], error)
 	// StopBash stops one detached shell.

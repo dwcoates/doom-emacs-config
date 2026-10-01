@@ -140,7 +140,7 @@ func (o *orchestrator) recoverWaiting(ctx context.Context, repo wsm.RepoKey, ent
 		if err := o.deps.DB.RemoveMergeQueueEntry(ctx, repo, ws, string(CauseDaemonShutdown)); err != nil {
 			return false, err
 		}
-		o.publishAbandoned(ctx, ws, ledger, entry.Source, CauseDaemonShutdown)
+		o.publishAbandoned(ctx, ws, ledger, entry, CauseDaemonShutdown)
 		return false, nil
 	}
 	o.mu.Lock()

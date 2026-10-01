@@ -38,9 +38,13 @@ func (o *orchestrator) Enqueue(ctx context.Context, req Request) error {
 		log.Error(op, "could not read the requesting workspace", withField(fields, "error", err.Error()))
 		return err
 	}
-	if err := o.checkSource(ctx, record, req.Source); err != nil {
+	source, err := o.checkSource(ctx, record, req.Source)
+	if err != nil {
 		log.Warn(op, "refused a merge request", withField(fields, "error", err.Error()))
 		return err
+	}
+	if source.Branch != "" {
+		fields["branch"] = source.Branch
 	}
 	session, found, err := o.deps.DB.Session(ctx, ws)
 	if err != nil {
@@ -62,7 +66,7 @@ func (o *orchestrator) Enqueue(ctx context.Context, req Request) error {
 		log.Warn(op, "refused a merge request while the workspace's merge runs", withField(fields, "error", err.Error()))
 		return err
 	}
-	if err := o.deps.DB.RequestMerge(ctx, repo, ws, req.Source, o.deps.Now()); err != nil {
+	if err := o.deps.DB.RequestMerge(ctx, repo, ws, source, o.deps.Now()); err != nil {
 		var queued *wsm.MergeQueuedError
 		if errors.As(err, &queued) {
 			arm := ArmAlreadyQueued
@@ -94,46 +98,79 @@ func (o *orchestrator) Enqueue(ctx context.Context, req Request) error {
 	return nil
 }
 
-// checkSource refuses a request whose source cannot be merged: a requester
+// checkSource refuses a request whose source cannot be merged -- a requester
 // with no recorded geometry for a source that is its own branch, another
 // workspace that is not open in the same repository, or a branch that is not
-// there.
-func (o *orchestrator) checkSource(ctx context.Context, requester wsm.Workspace, source wsm.MergeSource) error {
+// there -- and answers the source as it is recorded.
+//
+// A WORKSPACE'S BRANCH IS THE ONE CHECKED OUT IN ITS WORKTREE NOW (owner
+// ruling, 2026-10-01), read here and recorded with the request. The branch
+// the workspace was created on is not consulted: a worktree that switched or
+// renamed its branch would otherwise merge a branch that may not even exist
+// (2026-10-01: `footer-activity-updates` was requested while the worktree had
+// `merge-queue-rework` checked out, and the merge failed at its first git
+// command). A worktree with no branch checked out is refused at once.
+func (o *orchestrator) checkSource(ctx context.Context, requester wsm.Workspace, source wsm.MergeSource) (wsm.MergeSource, error) {
 	ws := requester.ID
 	switch source.Kind {
 	case wsm.MergeSourceOwnBranch, wsm.MergeSourceMergedUpstream:
-		_, err := o.layoutFor(ctx, ws)
-		return err
+		return o.withCheckedOutBranch(ctx, ws, ws, source)
 	case wsm.MergeSourceWorkspace:
 		if source.Workspace == ws {
-			return refuse(ArmUnknownSourceWorkspace, ws, "a workspace's own branch is the own-branch source, not another workspace")
+			return wsm.MergeSource{}, refuse(ArmUnknownSourceWorkspace, ws, "a workspace's own branch is the own-branch source, not another workspace")
 		}
 		other, err := o.deps.DB.Workspace(ctx, source.Workspace)
 		if err != nil {
-			return refuse(ArmUnknownSourceWorkspace, ws, "no workspace %s is registered", source.Workspace)
+			return wsm.MergeSource{}, refuse(ArmUnknownSourceWorkspace, ws, "no workspace %s is registered", source.Workspace)
 		}
 		if other.Closed {
-			return refuse(ArmUnknownSourceWorkspace, ws, "workspace %s is closed", source.Workspace)
+			return wsm.MergeSource{}, refuse(ArmUnknownSourceWorkspace, ws, "workspace %s is closed", source.Workspace)
 		}
 		if other.Repo != requester.Repo {
-			return refuse(ArmUnknownSourceWorkspace, ws, "workspace %s is in another repository", source.Workspace)
+			return wsm.MergeSource{}, refuse(ArmUnknownSourceWorkspace, ws, "workspace %s is in another repository", source.Workspace)
 		}
-		if _, err := o.layoutFor(ctx, source.Workspace); err != nil {
-			return err
-		}
-		return nil
+		return o.withCheckedOutBranch(ctx, ws, source.Workspace, source)
 	case wsm.MergeSourceBranch:
 		exists, err := o.deps.Git.BranchExists(ctx, requester.Dir, source.Branch)
 		if err != nil {
-			return fmt.Errorf("merge: asking whether branch %q exists: %w", source.Branch, err)
+			return wsm.MergeSource{}, fmt.Errorf("merge: asking whether branch %q exists: %w", source.Branch, err)
 		}
 		if !exists {
-			return refuse(ArmUnknownBranch, ws, "no branch %q exists in the repository", source.Branch)
+			return wsm.MergeSource{}, refuse(ArmUnknownBranch, ws, "no branch %q exists in the repository", source.Branch)
 		}
-		return nil
+		return source, nil
 	default:
-		return fmt.Errorf("merge: a request for %s names the undeclared source %s", ws, source.Kind)
+		return wsm.MergeSource{}, fmt.Errorf("merge: a request for %s names the undeclared source %s", ws, source.Kind)
 	}
+}
+
+// withCheckedOutBranch answers source carrying the branch checked out in the
+// worktree of workspace of, refused for requester when of has no recorded
+// geometry or no branch checked out.
+func (o *orchestrator) withCheckedOutBranch(ctx context.Context, requester, of ids.WorkspaceID, source wsm.MergeSource) (wsm.MergeSource, error) {
+	job, err := o.layoutFor(ctx, of)
+	if err != nil {
+		return wsm.MergeSource{}, err
+	}
+	branch, err := o.checkedOutBranch(ctx, requester, job.Layout.SourceDir)
+	if err != nil {
+		return wsm.MergeSource{}, err
+	}
+	source.Branch = branch
+	return source, nil
+}
+
+// checkedOutBranch answers the branch checked out in a workspace's worktree,
+// refusing a detached HEAD: there is no branch to merge.
+func (o *orchestrator) checkedOutBranch(ctx context.Context, ws ids.WorkspaceID, dir string) (string, error) {
+	branch, err := o.deps.Git.CurrentBranch(ctx, dir)
+	if err != nil {
+		return "", fmt.Errorf("merge: reading the branch checked out in %s: %w", dir, err)
+	}
+	if branch == "" {
+		return "", refuse(ArmUnknownBranch, ws, "the worktree %s has no branch checked out (its HEAD is detached), so there is no branch to merge", dir)
+	}
+	return branch, nil
 }
 
 // requestWait is one request's wait for its requesting turn's end.

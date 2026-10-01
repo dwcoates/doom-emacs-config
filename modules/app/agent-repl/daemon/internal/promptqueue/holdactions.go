@@ -15,6 +15,9 @@ import (
 const (
 	tombstoneDelivered = "delivered"
 	tombstoneDropped   = "dropped"
+	// tombstoneRolledBack retires a held prompt a rollback dropped: it was
+	// queued after the prompt the conversation was rolled back to.
+	tombstoneRolledBack = "rolled_back"
 	// tombstoneCoalesced retires a prompt folded into the queued prompt ahead
 	// of it.
 	tombstoneCoalesced = "coalesced"

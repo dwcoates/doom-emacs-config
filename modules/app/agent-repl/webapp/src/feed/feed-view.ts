@@ -35,7 +35,8 @@
  * card was unreadable would lose the reader everything, including the evidence.
  */
 import { log } from "../log.js";
-import { SELECTED_RESPONSE_ATTRIBUTE, syncSelectedEntry } from "./selected-entry.js";
+import { SELECTED_ROW_ATTRIBUTE, syncSelectedEntry } from "./selected-entry.js";
+import type { SelectionVisibility } from "./selection-visibility.js";
 import {
   applyExpanded,
   cappedSectionsOf,
@@ -142,6 +143,11 @@ export interface BubbleLike extends Handle {
   expand(): Promise<boolean>;
   /** Whether the sub-feed is open right now. */
   isExpanded(): boolean;
+  /**
+   * Close the sub-feed through the bubble's one collapse, as a head click
+   * does. A bubble that is not open is left as it is.
+   */
+  collapse(): void;
   /** The sub-feed's controller, once it has been opened at least once. */
   child(): FeedController | null;
 }
@@ -187,6 +193,12 @@ export interface FeedControllerOptions {
    * after their insert (`feed/painted.ts`). Root feed only; absent elsewhere.
    */
   onPainted?: (ids: readonly string[], at: number) => void;
+  /**
+   * The watch that reports the selected row leaving the viewport
+   * (selection-visibility.ts). Root feed only; absent where the feed has no
+   * scroll box (a fixture) or the environment ships no `IntersectionObserver`.
+   */
+  selectionVisibility?: SelectionVisibility;
 }
 
 /** One row, as the controller holds it. */
@@ -214,12 +226,12 @@ export interface FeedController extends Handle {
   /** One live upsert. */
   upsert(row: FeedRow): void;
   /**
-   * Apply the daemon's reply-to-a-past-response selection state: recolor the
-   * selected final-response bubble, center-scroll it, and suppress tail-follow
-   * while a selection is active — returning to the bottom when it clears.
+   * Apply the daemon's feed selection: mark the selected row (a final response
+   * or a prompt), center-scroll it, and suppress tail-follow while a row is
+   * selected — returning to the bottom, or staying put, when it ends.
    */
   applySelection(selection: FeedSelection): void;
-  /** Whether the daemon's last pushed reply selection is active. */
+  /** Whether the daemon's last pushed selection names a row. */
   selectionActive(): boolean;
   rows(): readonly FeedRow[];
   breadcrumbs(): readonly FeedBreadcrumb[];
@@ -250,10 +262,9 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
   // WHETHER THIS FEED HAS PAINTED A PAGE YET. Its first replace is the feed's
   // initial PLACEMENT; every later one is a re-open (`replaceRestore`).
   let placed = false;
-  // THE READER'S REPLY SELECTION, as last applied: whether one stood and which
-  // row it centered, so a re-push of the same state moves nothing.
-  let selectionActive = false;
-  let centeredOn: string | null = null;
+  // THE FEED'S SELECTION, as last applied: the selected row's id (null while
+  // nothing is selected), so a re-push of the same state moves nothing.
+  let selectedRow: string | null = null;
   // THE WALK'S EDGE, as the last page stated it: whether older pages remain
   // unloaded above the oldest held row. Null until the first page lands. It is
   // what decides whether a pushed row sorting before every held row is drawn
@@ -289,7 +300,7 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
     applyPage,
     upsert,
     applySelection,
-    selectionActive: () => selectionActive,
+    selectionActive: () => selectedRow !== null,
     rows,
     breadcrumbs: () => crumbs,
     onChange,
@@ -871,87 +882,118 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
   }
 
   /**
-   * Apply the daemon's reply-to-a-past-response selection state.
+   * Apply the daemon's feed selection (`FeedSelection`, one oneof).
    *
    * THREE EFFECTS, in the order the reader experiences them:
-   *  - the BLUE border moves to the selected final-response bubble and off
-   *    every other row's -- a re-push (C-p/C-n) recolors one row and clears the
-   *    rest, and a cleared selection (`selected` unset) clears them all;
-   *  - while a selection is ACTIVE the follow is released, so new rows append
+   *  - the selection border moves to the selected row (a final response or a
+   *    prompt) and off every other row's -- a re-push (C-p/C-n, C-S-p/C-S-n)
+   *    marks one row and clears the rest, and `none` clears them all;
+   *  - while a row is selected the follow is released, so new rows append
    *    without pulling the viewport off the centered selection. When the
-   *    selection CLEARS the feed returns to its tail (`selectionCleared`);
-   *  - the `center` row is scrolled to the middle of the viewport, clamped at
-   *    the feed edges (`selectionMoved`).
+   *    selection ends the feed either returns to its tail (`return_to_tail`:
+   *    the reader dismissed it, `selectionCleared`) or stays where the reader
+   *    has it (`stay`: the row left the viewport, `selectionEnded`);
+   *  - a newly selected row is scrolled to the middle of the viewport, clamped
+   *    at the feed edges (`selectionMoved`).
    *
    * ONLY A CHANGE MOVES THE FEED (owner rule, 2026-09-23: the user owns the
-   * scroll). The selection is the reader's keybinding act, so a push that
-   * restates the state already applied -- an inactive selection re-sent on a
-   * re-open, the same center pushed again -- recolors and moves nothing.
+   * scroll). A push that restates the state already applied -- `none` re-sent
+   * on a re-open, the same row pushed again -- moves nothing.
    */
   function applySelection(selection: FeedSelection): void {
-    markSelectedResponse(selection.selected);
-    const wasActive = selectionActive;
-    selectionActive = selection.active;
-    if (!selection.active) {
-      centeredOn = null;
-      if (!wasActive) {
-        log.debug("an inactive selection was restated; the feed stays", {
-          operation: "feed.selection-unchanged",
-          context: { feed: feedName(), active: false },
-        });
+    const arm = requireCase(selection.selection, "FeedSelection.selection");
+    const was = selectedRow;
+    switch (arm.case) {
+      case "none": {
+        const viewport = requireCase(arm.value.viewport, "FeedSelectionNone.viewport");
+        markSelectedRow(null);
+        selectedRow = null;
+        if (was === null) {
+          log.debug("an empty selection was restated; the feed stays", {
+            operation: "feed.selection-unchanged",
+            context: { feed: feedName(), selected: "none" },
+          });
+          return;
+        }
+        switch (viewport.case) {
+          case "returnToTail":
+            opts.scroll?.tail.selectionCleared();
+            return;
+          case "stay":
+            opts.scroll?.tail.selectionEnded();
+            return;
+          default: {
+            const other: { case: string } = viewport;
+            return unreachableArm("FeedSelectionNone.viewport", other.case);
+          }
+        }
+      }
+      case "response":
+      case "prompt": {
+        const row = requireMessage(
+          arm.value.row,
+          arm.case === "response" ? "FeedSelectionResponse.row" : "FeedSelectionPrompt.row",
+        );
+        markSelectedRow({ kind: arm.case, row });
+        selectedRow = row.value;
+        if (was === row.value) {
+          log.debug("the selection restated its row; the feed stays", {
+            operation: "feed.selection-unchanged",
+            context: { feed: feedName(), selected: arm.case, row: row.value },
+          });
+          return;
+        }
+        centerOnRow(row);
         return;
       }
-      opts.scroll?.tail.selectionCleared();
-      return;
+      default: {
+        const other: { case: string } = arm;
+        return unreachableArm("FeedSelection.selection", other.case);
+      }
     }
-    const center = selection.center?.value ?? null;
-    if (wasActive && center === centeredOn) {
-      log.debug("the selection restated its center; the feed stays", {
-        operation: "feed.selection-unchanged",
-        context: { feed: feedName(), active: true, center: center ?? "none" },
-      });
-      return;
-    }
-    centeredOn = center;
-    centerOnRow(selection.center);
   }
 
   /**
-   * Put the BLUE selected-response mark on the named row and strip it from
-   * every other row of this feed. An unset id clears the mark everywhere, which
-   * is the cleared-selection case. A named row this feed has not drawn (a page
-   * not walked back to) is reported and nothing is marked — the same tolerance
-   * `markFinalAnswer` has, since guessing which row to recolor is worse than
-   * none.
+   * Put the selection mark (`SELECTED_ROW_ATTRIBUTE`, valued with the row's
+   * kind) on the named row and strip it from every other row of this feed, and
+   * point the left-view watch at it. Null clears the mark everywhere. A named
+   * row this feed has not drawn (a page not walked back to) is reported and
+   * nothing is marked — the same tolerance `markFinalAnswer` has, since
+   * guessing which row to mark is worse than none.
    */
-  function markSelectedResponse(selected: FeedId | undefined): void {
-    const target = selected === undefined ? null : findRowElement(selected);
-    if (selected !== undefined && target === null) {
+  function markSelectedRow(selected: { kind: "response" | "prompt"; row: FeedId } | null): void {
+    const target = selected === null ? null : findRowElement(selected.row);
+    if (selected !== null && target === null) {
       log.debug("the selection names a row this feed has not drawn", {
         operation: "feed.selection-row-absent",
-        context: { feed: feedName(), row: selected.value },
+        context: { feed: feedName(), row: selected.row.value },
       });
     }
     for (const state of states.values()) {
-      const chosen = state.element === target;
-      if (chosen) state.element.setAttribute(SELECTED_RESPONSE_ATTRIBUTE, "true");
-      else state.element.removeAttribute(SELECTED_RESPONSE_ATTRIBUTE);
-      // The mark goes on the row's CARD, the same bubble the green
-      // `.final-response` rule reads, so the blue replaces the green there.
+      if (selected !== null && state.element === target) {
+        state.element.setAttribute(SELECTED_ROW_ATTRIBUTE, selected.kind);
+      } else {
+        state.element.removeAttribute(SELECTED_ROW_ATTRIBUTE);
+      }
+      // The mark goes on the row's CARD: a final response's border turns from
+      // green to the selection color there, and a prompt's border takes it.
       syncSelectedEntry(state.element);
     }
+    opts.selectionVisibility?.watch(
+      selected === null || target === null ? null : { element: target, id: selected.row },
+    );
   }
 
   /**
    * Scroll the box so the CENTER row sits in the middle of the viewport,
    * clamped at the feed's edges (`centerDelta`), read in the box's own scroll
-   * coordinates through `offsetTop`. A row this feed has not drawn (or no
-   * center at all) centers nothing, but the follow is still released.
+   * coordinates through `offsetTop`. A row this feed has not drawn centers
+   * nothing, but the follow is still released.
    */
-  function centerOnRow(center: FeedId | undefined): void {
+  function centerOnRow(center: FeedId): void {
     if (opts.scroll === undefined) return;
-    const node = center === undefined ? null : findRowElement(center);
-    if (center !== undefined && node === null) {
+    const node = findRowElement(center);
+    if (node === null) {
       log.debug("the selection centers a row this feed has not drawn", {
         operation: "feed.selection-center-absent",
         context: { feed: feedName(), row: center.value },

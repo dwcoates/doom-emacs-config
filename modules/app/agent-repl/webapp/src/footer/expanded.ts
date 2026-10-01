@@ -68,9 +68,10 @@ import type {
 } from "../../../proto/gen/ts/frontend/v1/footer_pb";
 import type { FeedId } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import { placeChildren } from "../dom.js";
-import { formatElapsed, formatTickedElapsed } from "../duration.js";
+import { columnHeader, COLUMNS_ROW_CLASS } from "../columns.js";
+import { liveElapsedClock, settledElapsedClock } from "../elapsed-clock.js";
 import { frameUndecodable } from "../failure/sink.js";
-import { stopTicking, tick } from "../feed/ticking.js";
+import { stopTicking } from "../feed/ticking.js";
 import { log } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
 import { isMalformedView } from "../rpc/malformed.js";
@@ -532,6 +533,15 @@ function usageRow(usage: string): HTMLElement {
  * The header exists for the stop control (a working ruling — see `stop.ts`);
  * the rows beneath it are exactly what that control would end, which is what
  * makes this the panel it belongs in.
+ *
+ * FIXED COLUMNS (owner request, 2026-10-01). The panel is ONE grid whose rows
+ * share its columns (`subgrid`, styles.css): the row's main cell, then tokens,
+ * then duration, then the caret. Every row's tokens and duration therefore
+ * share one width, at least wide enough for the largest common value and
+ * growing with a longer one, so a clock going from "4m 59s" to "5m" no longer
+ * moves the token count. The header is the same four cells: the "stop all"
+ * control on the LEFT (where the "live agents" title was), then the "tokens"
+ * and "duration" column headers above their columns.
  */
 export function drawFooterExpandedAgents(
   u: FooterExpandedAgents,
@@ -539,12 +549,11 @@ export function drawFooterExpandedAgents(
   path: string,
 ): HTMLElement[] {
   const header = document.createElement("div");
-  header.className = "footer-panel-header";
-  const title = document.createElement("span");
-  title.className = "footer-panel-title";
-  title.textContent = "live agents";
-  header.appendChild(title);
+  header.className = `footer-panel-header ${COLUMNS_ROW_CLASS}`;
   header.appendChild(deps.stops.allAgents);
+  header.appendChild(columnHeader("tokens"));
+  header.appendChild(columnHeader("duration"));
+  header.appendChild(document.createElement("span"));
 
   if (u.rows.length === 0) return [header, emptyRow("no live agents")];
   return [
@@ -564,10 +573,15 @@ export function drawFooterAgentRow(
   path: string,
 ): HTMLElement {
   const row = jumpRow("agents", u.work, u.jump, deps, path);
-  row.appendChild(glyph("agents", "⚙"));
-  row.appendChild(drawFooterAgentRowLabel(requireMessage(u.label, `${path}.label`)));
+  row.classList.add(COLUMNS_ROW_CLASS);
+  // THE MAIN CELL holds everything before the figure columns, so the row is
+  // exactly the grid's four cells whatever optional parts it carries.
+  const main = document.createElement("span");
+  main.className = "footer-row-main";
+  main.appendChild(glyph("agents", "⚙"));
+  main.appendChild(drawFooterAgentRowLabel(requireMessage(u.label, `${path}.label`)));
   if (u.description !== undefined) {
-    row.appendChild(drawFooterAgentRowDescription(u.description));
+    main.appendChild(drawFooterAgentRowDescription(u.description));
   }
   const state = requireCase(u.state, `${path}.state`);
   row.setAttribute("data-state", state.case);
@@ -575,23 +589,22 @@ export function drawFooterAgentRow(
     case "running":
       break;
     case "waitingForApi":
-      row.appendChild(drawFooterAgentRowWaitingForApi(state.value, deps, `${path}.waiting_for_api`));
+      main.appendChild(drawFooterAgentRowWaitingForApi(state.value, deps, `${path}.waiting_for_api`));
       break;
     default: {
       const other: { case: string } = state;
       return unreachableArm(`${path}.state`, other.case);
     }
   }
-  const figures = document.createElement("span");
-  figures.className = "footer-row-figures";
-  figures.appendChild(drawFooterAgentRowTokens(requireMessage(u.tokens, `${path}.tokens`)));
-  figures.appendChild(
+  row.appendChild(main);
+  row.appendChild(drawFooterAgentRowTokens(requireMessage(u.tokens, `${path}.tokens`)));
+  row.appendChild(
     drawFooterAgentRowRuntime(requireMessage(u.runtime, `${path}.runtime`), deps, `${path}.runtime`),
   );
-  figures.appendChild(caret());
-  row.appendChild(figures);
-  return finishJumpRow(row);
+  row.appendChild(caret());
+  return finishJumpRow(row, main);
 }
+
 
 /**
  * An agent waiting for the API: "waiting for the API · gives up in 24m",
@@ -963,10 +976,8 @@ export function drawFooterMergeTestRow(
 
 /** A finished suite's run time, drawn once and never ticked. */
 function finishedClock(durationMs: bigint, path: string): HTMLElement {
-  const clock = document.createElement("span");
-  clock.className = "footer-row-clock";
+  const clock = settledElapsedClock("footer-row-clock", msOf(durationMs, path));
   clock.setAttribute("data-duration", "");
-  clock.textContent = formatElapsed(msOf(durationMs, path));
   return clock;
 }
 
@@ -1023,13 +1034,13 @@ const NOTICE_PENDING = "data-notice-pending";
  * Close a jump row: the standing notice, if any, is the row's LAST element, so
  * it reads after the figures exactly as the old in-place note did.
  */
-function finishJumpRow(row: HTMLElement): HTMLElement {
+function finishJumpRow(row: HTMLElement, into: HTMLElement = row): HTMLElement {
   if (!row.hasAttribute(NOTICE_PENDING)) return row;
   row.removeAttribute(NOTICE_PENDING);
   const note = document.createElement("span");
   note.className = "footer-row-unreachable";
   note.textContent = "not on screen";
-  row.appendChild(note);
+  into.appendChild(note);
   return row;
 }
 
@@ -1181,13 +1192,7 @@ function marker(name: string): HTMLElement {
 
 /** A ticking elapsed clock from an instant on the wire. */
 function runtimeClock(startedAtMs: bigint, deps: ExpandedDeps, path: string): HTMLElement {
-  const clock = document.createElement("span");
-  clock.className = "footer-row-clock";
-  const startedMs = msOf(startedAtMs, path);
-  tick(clock, deps.ctx.ticker, (nowMs) => {
-    clock.textContent = formatTickedElapsed(nowMs - startedMs);
-  });
-  return clock;
+  return liveElapsedClock(deps.ctx.ticker, "footer-row-clock", msOf(startedAtMs, path));
 }
 
 /** The jump affordance's caret. */

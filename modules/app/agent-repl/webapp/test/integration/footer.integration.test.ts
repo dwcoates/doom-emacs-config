@@ -110,10 +110,6 @@ describe("arm coverage", () => {
     assertCoversOneof(FooterAllowanceSchema, "status", [...FOOTER_ALLOWANCE_ARMS]);
   });
 
-  it("gives every allowance verdict a color in the vocabulary", () => {
-    assertVocabCoversArms(RENDER_COLORS.footer_allowance, FOOTER_ALLOWANCE_ARMS, "footer_allowance");
-  });
-
   it("covers every tokens-cell verdict", () => {
     assertCoversOneof(FooterTokensCellVerdictSchema, "verdict", [...FOOTER_TOKENS_VERDICTS]);
   });
