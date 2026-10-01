@@ -842,6 +842,7 @@ func (c *client) publishExit(info ExitInfo) {
 	}
 	c.exited = true
 	info.Attribution = c.attribution
+	info.At = time.Now()
 	c.exitInfo = &info
 	c.mu.Unlock()
 
