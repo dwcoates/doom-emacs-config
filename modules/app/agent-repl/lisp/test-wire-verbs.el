@@ -4162,3 +4162,132 @@ cheapest, so an absent `context_tokens' decodes to nil rather than 0."
                              "unknownTranscript" "alreadyBound" "transcriptActive"
                              "transcriptHeld" "turnInFlight" "stopFailed" "startFailed")
                        #'string<))))
+
+;;;; ---- UpdatePersistentWifiMode ----------------------------------------
+
+(defun agent-repl-test-wire-verbs--wifi (decoder json)
+  "Decode JSON with DECODER, quietly."
+  (agent-repl-test-wire-verbs--with-common
+    (funcall decoder (agent-repl-test-wire-verbs--parse json))))
+
+(defun agent-repl-test-wire-verbs--wifi-breach (decoder json)
+  "Return the `agent-repl-wire-error' data decoding JSON with DECODER raises."
+  (condition-case err
+      (progn (agent-repl-test-wire-verbs--wifi decoder json) nil)
+    (agent-repl-wire-error (cdr err))))
+
+(ert-deftest agent-repl-test-wire-verbs-persistent-wifi-state-joined-with-a-name ()
+  "A joined network with its name and the mode on decode arm for arm."
+  (should (equal (agent-repl-test-wire-verbs--wifi
+                  #'agent-repl-wire-decode-persistent-wifi-state
+                  "{\"joined\":{\"networkName\":\"Home\"},\"on\":{}}")
+                 '(:wifi (:arm :joined :value (:network-name "Home"))
+                   :mode (:arm :on :value nil)))))
+
+(ert-deftest agent-repl-test-wire-verbs-persistent-wifi-state-withheld-name-is-nil ()
+  "A joined network whose name macOS withholds decodes with no name."
+  (should (equal (agent-repl-test-wire-verbs--wifi
+                  #'agent-repl-wire-decode-persistent-wifi-state
+                  "{\"joined\":{},\"off\":{}}")
+                 '(:wifi (:arm :joined :value (:network-name nil))
+                   :mode (:arm :off :value nil)))))
+
+(ert-deftest agent-repl-test-wire-verbs-persistent-wifi-state-unread-facts-are-nil ()
+  "Facts the daemon could not read are unassigned oneofs, never a breach."
+  (should (equal (agent-repl-test-wire-verbs--wifi
+                  #'agent-repl-wire-decode-persistent-wifi-state "{}")
+                 '(:wifi nil :mode nil))))
+
+(ert-deftest agent-repl-test-wire-verbs-persistent-wifi-state-unknown-field-refused ()
+  "A field the codec does not hold is refused, not dropped."
+  (should (equal (agent-repl-test-wire-verbs--wifi-breach
+                  #'agent-repl-wire-decode-persistent-wifi-state "{\"radio\":{}}")
+                 '("PersistentWifiState" radio "unknown field"))))
+
+(ert-deftest agent-repl-test-wire-verbs-persistent-wifi-request-encodes-each-action ()
+  "Each action arm encodes as the arm alone."
+  (dolist (case '((:on . "{\"on\":{}}") (:off . "{\"off\":{}}") (:toggle . "{\"toggle\":{}}")))
+    (should (equal (json-serialize
+                    (agent-repl-test-wire-verbs--with-common
+                      (agent-repl-wire-encode-update-persistent-wifi-mode-request
+                       (list :action (list :arm (car case))))))
+                   (cdr case)))))
+
+(ert-deftest agent-repl-test-wire-verbs-persistent-wifi-request-without-action-refused ()
+  "A request naming no action errors before send."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-encode-update-persistent-wifi-mode-request '(:action nil))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-persistent-wifi-success-decodes-every-step ()
+  "A success decodes the re-read standing and both steps' outcomes."
+  (should (equal (agent-repl-test-wire-verbs--wifi
+                  #'agent-repl-wire-decode-update-persistent-wifi-mode-response
+                  (concat "{\"success\":{\"state\":{\"joined\":{},\"on\":{}},"
+                          "\"hotspot\":{\"failed\":{\"networkName\":\"Phone\",\"detail\":\"not visible\"}},"
+                          "\"display\":{\"toolMissing\":{\"toolPath\":\"/b/mac-brightness\"}}}}"))
+                 '(:arm :success
+                   :value (:state (:wifi (:arm :joined :value (:network-name nil))
+                                   :mode (:arm :on :value nil))
+                           :hotspot (:arm :failed :value (:network-name "Phone" :detail "not visible"))
+                           :display (:arm :tool-missing :value (:tool-path "/b/mac-brightness")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-persistent-wifi-success-with-an-unread-state ()
+  "A success whose standing could not be re-read carries the empty state."
+  (should (equal (plist-get (plist-get (agent-repl-test-wire-verbs--wifi
+                                        #'agent-repl-wire-decode-update-persistent-wifi-mode-response
+                                        (concat "{\"success\":{\"state\":{},"
+                                                "\"hotspot\":{\"notOnHotspot\":{}},"
+                                                "\"display\":{\"restored\":{}}}}"))
+                                       :value)
+                            :state)
+                 '(:wifi nil :mode nil))))
+
+(ert-deftest agent-repl-test-wire-verbs-persistent-wifi-success-without-hotspot-refused ()
+  "A success missing its required hotspot outcome is a breach."
+  (should (equal (agent-repl-test-wire-verbs--wifi-breach
+                  #'agent-repl-wire-decode-update-persistent-wifi-mode-response
+                  "{\"success\":{\"state\":{},\"display\":{\"dimmed\":{}}}}")
+                 '("UpdatePersistentWifiModeSuccess" hotspot "required message field is absent"))))
+
+(ert-deftest agent-repl-test-wire-verbs-persistent-wifi-error-decodes-its-cause ()
+  "A refused power step decodes its cause and the refusal's words."
+  (should (equal (agent-repl-test-wire-verbs--wifi
+                  #'agent-repl-wire-decode-update-persistent-wifi-mode-response
+                  "{\"error\":{\"powerSettingsRefused\":{\"detail\":\"sudo: a password is required\"}}}")
+                 '(:arm :error
+                   :value (:cause (:arm :power-settings-refused
+                                   :value (:detail "sudo: a password is required")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-persistent-wifi-arm-with-an-unknown-field-refused ()
+  "An outcome arm carrying a field its table does not name is refused."
+  (should (equal (agent-repl-test-wire-verbs--wifi-breach
+                  #'agent-repl-wire-decode-update-persistent-wifi-mode-error
+                  "{\"modeUnreadable\":{\"detail\":\"x\",\"code\":1}}")
+                 '("UpdatePersistentWifiModeError.modeUnreadable" "code" "unknown field"))))
+
+(ert-deftest agent-repl-test-wire-verbs-decode-string-fields-reads-every-named-string ()
+  "The all-strings decoder answers each named field, absent ones as empty."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-verbs--decode-string-fields
+                    "M" (agent-repl-test-wire-verbs--parse "{\"a\":\"x\"}")
+                    '((a :a) (b :b)))
+                   '(:a "x" :b "")))))
+
+(ert-deftest agent-repl-test-wire-verbs-persistent-wifi-arm-tables-pinned ()
+  "Each outcome table names exactly the arms the frozen schema declares."
+  (dolist (case `(("UpdatePersistentWifiModeHotspot" . ,agent-repl-wire-persistent-wifi-hotspot-arms)
+                  ("UpdatePersistentWifiModeDisplay" . ,agent-repl-wire-persistent-wifi-display-arms)
+                  ("UpdatePersistentWifiModeError" . ,agent-repl-wire-persistent-wifi-error-arms)))
+    (should (equal (sort (agent-repl-test--generated-oneof-arms
+                          "agentrepl/v1/endpoint_update_persistent_wifi_mode.pb.go" (car case))
+                         #'string<)
+                   (sort (mapcar (lambda (arm) (symbol-name (car arm))) (cdr case)) #'string<)))))
+
+(ert-deftest agent-repl-test-wire-verbs-persistent-wifi-action-arms-pinned ()
+  "UpdatePersistentWifiModeRequest's action oneof has exactly the arms encoded here."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_update_persistent_wifi_mode.pb.go"
+                        "UpdatePersistentWifiModeRequest")
+                       #'string<)
+                 '("off" "on" "toggle"))))
