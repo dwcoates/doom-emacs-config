@@ -192,6 +192,20 @@ workspace unusable until it is resolved (owner ruling, 2026-09-28)."
   (should (equal agent-repl--color-init-blue
                  (plist-get (agent-repl--tab-spec :vendor-blocked nil) :bg))))
 
+(ert-deftest agent-repl-test-tab-spec-api-retrying-is-blue ()
+  "An api-retrying tab paints BLUE: the vendor is retrying the turn's call,
+so the workspace cannot advance until it is answered (owner ruling,
+2026-10-01)."
+  ;; Act / Assert
+  (should (equal agent-repl--color-init-blue
+                 (plist-get (agent-repl--tab-spec :api-retrying nil) :bg))))
+
+(ert-deftest agent-repl-test-status-color-table-api-retrying-is-blue ()
+  "An api-retrying row takes BLUE in the shared assignment, the footer's
+`blocked' color, so every surface is blue together."
+  ;; Act / Assert
+  (should (equal "blue" (alist-get :api-retrying agent-repl-status-color-table))))
+
 (ert-deftest agent-repl-test-status-color-table-turn-failed-is-turquoise ()
   "A failed turn end takes TURQUOISE in the shared assignment (owner
 ruling, 2026-09-28), where done and interrupted take green."
@@ -3305,11 +3319,13 @@ test can assert the re-assertion left an already-correct frame alone."
     (should (stringp (agent-repl-status-tab-color arm)))))
 
 (ert-deftest agent-repl-test-status-the-blue-band-is-the-unusable-workspace ()
-  "Blue is every way the workspace is UNUSABLE right now (owner ruling,
-2026-09-28): a route that is not up, and a vendor or account block."
+  "Blue is every way the workspace is UNUSABLE right now (owner rulings,
+2026-09-28 and 2026-10-01): a route that is not up, a vendor or account
+block, and a turn whose call the vendor is retrying."
   ;; Act / Assert
   (should (equal (sort (agent-repl-test-status--arms-taking "blue") #'string<)
-                 (sort (list :init :severed :dead :start-failed :vendor-blocked)
+                 (sort (list :init :severed :dead :start-failed :vendor-blocked
+                             :api-retrying)
                        #'string<))))
 
 (ert-deftest agent-repl-test-status-the-turquoise-band-is-the-usable-fault ()

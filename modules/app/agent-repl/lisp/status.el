@@ -635,6 +635,7 @@ sits flush on the bar with no ground of its own.  See
     (:start-failed    . "blue")
 
     (:vendor-blocked  . "blue")
+    (:api-retrying    . "blue")
 
     (:degraded        . "turquoise")
     (:turn-failed     . "turquoise")
@@ -910,6 +911,12 @@ in `agent-repl--color-default-bracket'."
                          'agent-repl-tab-init
                          agent-repl--color-init-blue
                          agent-repl--color-light))
+    ;; API-RETRYING is BLUE (owner ruling, 2026-10-01): the vendor is retrying
+    ;; the turn's call, so the turn cannot advance until it is answered.
+    (:api-retrying . ,(agent-repl--tab-palette-row
+                       'agent-repl-tab-init
+                       agent-repl--color-init-blue
+                       agent-repl--color-light))
     ;; MERGE-FAILED is TURQUOISE and keeps its ✗ (owner ruling, 2026-09-28):
     ;; something went wrong, but the merge no longer holds the workspace, so
     ;; it is usable.
