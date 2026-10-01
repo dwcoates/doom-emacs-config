@@ -674,25 +674,38 @@ const TranscriptAdoptionIdleWindow = 45 * time.Second
 // adoptOrFresh decides how a workspace with NO session record of its own comes
 // up: it ADOPTS the newest idle transcript already on disk when there is one,
 // and otherwise starts FRESH.
-//
-// EVERY FAILURE FALLS BACK TO FRESH, LOUDLY. A probe or parse error, or an
-// idle-guard skip, never crashes the bring-up and never mis-routes it — a fresh
-// start is always safe, so the worst case of adoption going wrong is the exact
-// behavior the workspace had before adoption existed. The reason is logged
-// every time so a fresh start is never silent about a transcript it declined.
 func (f *Fleet) adoptOrFresh(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, dir string) source {
+	candidate, ok := f.newestAdoptable(ctx, log, dir)
+	if !ok {
+		return source{Fresh: true}
+	}
+	log.Info(opBringUp, "no session record; adopting the newest idle on-disk transcript", dlog.Context{
+		"workspace_dir":     dir,
+		"vendor_session_id": candidate.VendorSessionID,
+		"last_record_at":    candidate.LastRecordAt.Format(time.RFC3339Nano),
+	})
+	return source{VendorSessionID: candidate.VendorSessionID}
+}
+
+// newestAdoptable is THE ONE DECISION whether the directory's newest on-disk
+// transcript may be adopted: it answers the candidate and true when it may.
+//
+// EVERY REFUSAL IS LOGGED HERE, with its reason, so a caller that then comes
+// up fresh is never silent about a transcript it declined. A probe or parse
+// error never crashes the bring-up and never mis-routes it.
+func (f *Fleet) newestAdoptable(ctx context.Context, log dlog.Logger, dir string) (account.AdoptableTranscript, bool) {
 	candidate, err := f.deps.Accounts.NewestTranscript(ctx, dir)
 	if err != nil {
 		if errors.Is(err, account.ErrNoTranscripts) {
 			log.Debug(opBringUp, "no on-disk transcript to adopt; the session comes up FRESH", dlog.Context{
 				"workspace_dir": dir,
 			})
-			return source{Fresh: true}
+			return account.AdoptableTranscript{}, false
 		}
 		log.Warn(opBringUp, "could not probe for a transcript to adopt; the session comes up FRESH", dlog.Context{
 			"workspace_dir": dir, "cause": err.Error(),
 		})
-		return source{Fresh: true}
+		return account.AdoptableTranscript{}, false
 	}
 
 	if idle := f.now().Sub(candidate.ModTime); idle < TranscriptAdoptionIdleWindow {
@@ -706,15 +719,9 @@ func (f *Fleet) adoptOrFresh(ctx context.Context, log dlog.Logger, ws ids.Worksp
 			"idle_ms":           idle.Milliseconds(),
 			"idle_window_ms":    TranscriptAdoptionIdleWindow.Milliseconds(),
 		})
-		return source{Fresh: true}
+		return account.AdoptableTranscript{}, false
 	}
-
-	log.Info(opBringUp, "no session record; adopting the newest idle on-disk transcript", dlog.Context{
-		"workspace_dir":     dir,
-		"vendor_session_id": candidate.VendorSessionID,
-		"last_record_at":    candidate.LastRecordAt.Format(time.RFC3339Nano),
-	})
-	return source{VendorSessionID: candidate.VendorSessionID}
+	return candidate, true
 }
 
 // neverEngaged is the PROOF that a missing transcript lost nothing: the
