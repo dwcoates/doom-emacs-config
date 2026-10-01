@@ -106,7 +106,7 @@ proxy for `no dial' the transport records would otherwise prove.")
   "Captured `(LEVEL . TEXT)' log entries, newest first.")
 
 (defvar agent-repl-test-daemon--displayed nil
-  "Buffers handed to `display-buffer', newest first.")
+  "Names of buffers handed to `agent-repl-popup-show', newest first.")
 
 (defvar agent-repl-test-daemon--addr-file nil
   "The throwaway path the stubbed `daemon.addr' resolver answers.
@@ -281,10 +281,10 @@ a scenario names which pids are alive rather than depending on the host.")
                 (lambda (seconds _repeat function &rest _args)
                   (push (cons seconds function) agent-repl-test-daemon--timers)
                   (timer-create)))
-               ((symbol-function 'display-buffer)
-                (lambda (buffer &rest _)
-                  (push buffer agent-repl-test-daemon--displayed)
-                  nil))
+               ((symbol-function 'agent-repl-popup-show)
+                (lambda (buffer)
+                  (push (buffer-name buffer) agent-repl-test-daemon--displayed)
+                  (selected-window)))
                ((symbol-function 'message) (lambda (&rest _) nil))
                ;; `agent-repl--backend-phase' and `agent-repl--phase-echo' are
                ;; NOT stubbed: they are how the startup phases reach the echo

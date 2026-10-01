@@ -93,6 +93,7 @@
 (require 'cl-lib)
 (require 'subr-x)
 
+(declare-function agent-repl-popup-show "popup" (buffer))
 (declare-function agent-repl--with-deferred-quit "core")
 (declare-function agent-repl--deferred-quit-arm-audit "core" (context))
 (declare-function agent-repl--deferred-quit-hand-off "core" (context))
@@ -913,7 +914,7 @@ mode-line segment is raised, and the interactive ensure is the retry."
   "Surface build failure DETAIL: the buffer, a WARNING, an echo, the segment."
   (setq agent-repl-daemon-build-failure detail)
   (agent-repl--warn '(:agent-repl-central "the resident daemon lifecycle spans workspaces") "elisp.daemon.build-failed detail=%s" detail)
-  (display-buffer agent-repl-daemon-build-buffer)
+  (agent-repl-popup-show (get-buffer-create agent-repl-daemon-build-buffer))
   ;; ONE CALL, NOT A LOG PLUS A BARE `message'.  The echo goes out through
   ;; the module's own logging function in echo mode, so the line the user
   ;; reads is the line the log file carries.  A FAILURE is deliberately not

@@ -256,7 +256,7 @@ In a magit hunk: that hunk's file:startline-endline.  Otherwise
 (defun agent-repl-link-code (file start-line &optional _end-line workspace)
   "Open FILE at START-LINE through the ONE shared editor popup.
 Entry point for the /runtime-eval-code skill.  Everything about HOW the
-file is shown -- the right side, half the frame width, dired for a
+file is shown -- the shared popup's side and width, dired for a
 directory -- belongs to `agent-repl-popup-open' and is deliberately not
 re-decided here: divergence between the call sites of that subroutine is
 a defect, so this site has no display logic of its own.
