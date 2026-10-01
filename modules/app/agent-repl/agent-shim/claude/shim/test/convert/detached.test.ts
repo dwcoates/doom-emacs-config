@@ -1570,6 +1570,21 @@ describe("detachableKind", () => {
     expect(detachableKind(spawn())).toBeUndefined();
   });
 
+  it("refuses a recorded subagent unit that is not a start", () => {
+    // Arrange.
+    const work = create(conversationv1.DetachableWorkSchema, {
+      work: {
+        case: "subagent",
+        value: create(conversationv1.AgentSubagentSchema, {
+          result: { case: "update", value: create(conversationv1.AgentSubagentUpdateSchema, {}) },
+        }),
+      },
+    });
+
+    // Act, Assert.
+    expect(detachableKind(work)).toBeUndefined();
+  });
+
   it("reads the recorded start's prompt as the commission", () => {
     // Arrange.
     const work = spawn("toolu_spawn");
@@ -1966,6 +1981,24 @@ describe("taskAwaitingAgent: the resume the store must name", () => {
 
     // Act, Assert.
     expect(awaiting({ ...RESUME_STARTED, subtype: "task_progress" }, createTaskKindRegistry(), calls)).toBeUndefined();
+  });
+
+  it("names nothing for a message that is not a system message", () => {
+    // Arrange.
+    const message = { type: "assistant", uuid: "u", session_id: "s" } as unknown as SdkMessage;
+
+    // Act, Assert.
+    expect(taskAwaitingAgent(message, foldContext({}), createTaskKindRegistry(), createCallRegistry())).toBeUndefined();
+  });
+
+  it("names nothing for a task message that names no task", () => {
+    // Arrange, Act, Assert.
+    expect(awaiting({ ...RESUME_STARTED, task_id: "" })).toBeUndefined();
+  });
+
+  it("names nothing for a subagent task that names no call and none is remembered", () => {
+    // Arrange, Act, Assert.
+    expect(awaiting({ ...RESUME_STARTED, tool_use_id: undefined })).toBeUndefined();
   });
 
   it("names nothing for an ambient task", () => {
