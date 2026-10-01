@@ -57,6 +57,7 @@
 (require 'subr-x)
 
 (declare-function agent-repl--log "core" (ws fmt &rest args))
+(declare-function agent-repl-persistent-wifi-handle "persistent-wifi" (state))
 (declare-function agent-repl--info "core" (ws fmt &rest args))
 (declare-function agent-repl--warn "core" (ws fmt &rest args))
 (declare-function agent-repl--error "core" (ws fmt &rest args))
@@ -606,6 +607,9 @@ live daemon afresh.  The caller has already recorded why."
       ;; The daemon's standing loud faults (a failed deploy, whoever started
       ;; it): each one not yet surfaced is echoed and recorded at ERROR.
       (:faults-standing (agent-repl-link--faults-standing value))
+      ;; The machine's persistent-wifi standing: persistent-wifi.el keeps it
+      ;; and echoes a change.
+      (:persistent-wifi (agent-repl-persistent-wifi-handle value))
       ;; The daemon is standing down on purpose and this was the stream's
       ;; last frame; `agent-repl-link--handle-close' reads the mark.
       (:ending

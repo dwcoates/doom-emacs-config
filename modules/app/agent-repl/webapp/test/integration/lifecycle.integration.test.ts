@@ -231,16 +231,22 @@ describe("a reload_elisp push reaching a webview", () => {
   });
 });
 
-// `faults_standing` IS EMACS'S TOO. The daemon subscribes only Emacs streams to
-// it; a webview draws the same faults on its topbar and footer, and one that
-// met the push would skip it as skew.
-describe("a faults_standing push reaching a webview", () => {
+// THE EMACS-ONLY STANDING PUSHES. The daemon subscribes only Emacs streams to
+// `faults_standing` and `persistent_wifi`; a webview draws the same facts from
+// its topbar (and, for the faults, its footer), and one that met either push
+// would skip it as skew.
+const EMACS_ONLY_PUSHES: ReadonlyArray<readonly [string, (h: Harness) => void]> = [
+  ["faults_standing", (h) => h.fake.pushFaultsStanding("f-1", "deploy failed: build webapp: tsc")],
+  ["persistent_wifi", (h) => h.fake.pushPersistentWifi()],
+];
+
+describe.each(EMACS_ONLY_PUSHES)("a %s push reaching a webview", (_arm, push) => {
   it("raises no failure card", async () => {
     // Arrange
     harness = await startHarness();
     await harness.fake.awaitStream("watchDaemon");
     // Act
-    harness.fake.pushFaultsStanding("f-1", "deploy failed: build webapp: tsc");
+    push(harness);
     await harness.settle();
     // Assert
     expect(harness.failureArms()).toEqual([]);
@@ -250,7 +256,7 @@ describe("a faults_standing push reaching a webview", () => {
     // Arrange
     harness = await startHarness();
     await harness.fake.awaitStream("watchDaemon");
-    harness.fake.pushFaultsStanding("f-1", "deploy failed: build webapp: tsc");
+    push(harness);
     await harness.settle();
     // Act
     harness.fake.scheduleDrain(60_000n, drainReason("deploy"));

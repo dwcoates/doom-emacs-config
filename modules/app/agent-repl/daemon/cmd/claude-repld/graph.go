@@ -17,6 +17,7 @@ import (
 	"claude-repld/internal/buildid"
 	"claude-repld/internal/checkout"
 	"claude-repld/internal/classifier"
+	"claude-repld/internal/clock"
 	"claude-repld/internal/commandfile"
 	"claude-repld/internal/desktopnotify"
 	"claude-repld/internal/dlog"
@@ -34,6 +35,7 @@ import (
 	"claude-repld/internal/login"
 	"claude-repld/internal/merge"
 	"claude-repld/internal/paint"
+	"claude-repld/internal/persistentwifi"
 	"claude-repld/internal/prompthandler"
 	"claude-repld/internal/promptqueue"
 	"claude-repld/internal/prompts"
@@ -605,6 +607,25 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	if err != nil {
 		return nil, fmt.Errorf("claude-repld: build the script runner: %w", err)
 	}
+
+	// ---- the persistent-wifi controller ----
+	//
+	// Every host tool it runs goes through the one script runner, and every
+	// standing it reads reaches the topbar's chip on every strip.
+	wifiConfig, err := persistentwifi.ConfigFromEnv(os.Getenv)
+	if err != nil {
+		return nil, fmt.Errorf("claude-repld: resolve the persistent-wifi config: %w", err)
+	}
+	wifi, err := persistentwifi.New(persistentwifi.Deps{
+		Config:   wifiConfig,
+		Runner:   scripts,
+		Clock:    clock.System{},
+		OnChange: topbarResolver.SetPersistentWifi,
+		Log:      log,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("claude-repld: build the persistent-wifi controller: %w", err)
+	}
 	selfExe, err := os.Executable()
 	if err != nil {
 		return nil, fmt.Errorf("claude-repld: resolve this daemon's own binary: %w", err)
@@ -917,6 +938,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			Holds:            holdsResolver,
 			LoudFaults:       loudFaults.Topic(),
 			Focus:            focus,
+			PersistentWifi:   wifi,
 			WebappDist:       paths.WebappDist,
 			ImageOrigin:      images.Handler(),
 			Log:              p.Surfaces,
@@ -961,6 +983,10 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 				return err
 			}
 			pushes.SeedFeedTextScale(scale)
+			// THE PERSISTENT-WIFI STANDING IS READ BEFORE ANYTHING IS SERVED,
+			// so no topbar chip or Emacs stream is ever drawn from a standing
+			// nobody read.
+			wifi.Refresh(ctx)
 			return nil
 		},
 		Bind: func(srv server.Server) {
@@ -978,6 +1004,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			}},
 			{Name: "worktree_reaper", Run: reaper.Run},
 			{Name: "lock_watchdog", Run: stalls.Run},
+			{Name: "persistent_wifi", Run: wifi.Run},
 		},
 		CloseWatchers: fleet.CloseWatchers,
 		CloseBanners:  notifier.Close,

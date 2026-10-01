@@ -3,10 +3,11 @@
 // one cell. Center: the title, centered on ITS OWN content against the whole
 // strip, with all free width split evenly either side of it — the flank
 // groups never spread and never push it. Right, tight, in order: model
-// selector, context chip, warning chip at the far edge. The strip stands off
-// the window's edges exactly as far as its cells stand off each other.
+// selector, context chip, persistent-wifi chip, warning chip at the far edge.
+// The strip stands off the window's edges exactly as far as its cells stand
+// off each other.
 //
-//   │● dodge@…com          DWC/fix-flaky-reconnect     haiku 4.5 ▾  142.3k  ⚠ 2│
+//   │● dodge@…com        DWC/fix-flaky-reconnect    haiku 4.5 ▾  142.3k  ᯤ  ⚠ 2│
 //
 // REVEAL CONVENTION: every strip element's detail (session line, model
 // options, the context chip's usage breakdown, the warning dropdown and
@@ -102,6 +103,60 @@ message TopbarView {
   // gate's figure is the context chip's, its reason the chip's hover, and its
   // standing is one warning line.
   reserved 12;
+  // The persistent-wifi chip, between the context chip and the warning chip.
+  // ALWAYS SET: the machine's standing is a daemon fact that every workspace's
+  // strip draws alike, session or no session, and a fact the daemon could not
+  // read is stated INSIDE the chip rather than by its absence.
+  TopbarPersistentWifi persistent_wifi = 13;
+}
+
+// THE PERSISTENT-WIFI CHIP: one wifi glyph stating two facts about the
+// MACHINE the daemon runs on — whether it is on a Wi-Fi network, and whether
+// persistent wifi mode keeps it awake (and that network up) with the lid
+// closed. It is the same standing in every workspace's strip; the daemon
+// resolves it once and states it on each.
+//
+// THE TWO ONEOFS ARE DRAWN INDEPENDENTLY, and the client maps each arm to
+// exactly one paint, deciding nothing else:
+//   wifi:  joined → the glyph is green; not_joined → the glyph is red;
+//          unassigned → the glyph is muted (the daemon could not read it).
+//   mode:  on → the glyph sits on a blue disc it is just inscribed in;
+//          off, or unassigned → no disc.
+// So a green glyph on blue is "on a network, and closing the lid keeps it",
+// and a red glyph on blue is "no network, but closing the lid would keep one".
+//
+// A STATUS, NOT A CONTROL: the chip has no click. The mode is changed from the
+// editor (UpdatePersistentWifiMode), and the chip redraws from the next push.
+message TopbarPersistentWifi {
+  // Whether the machine is joined to a Wi-Fi network. UNASSIGNED = the daemon
+  // could not read it, and the tooltip says so.
+  oneof wifi {
+    TopbarPersistentWifiJoined joined = 1;
+    TopbarPersistentWifiNotJoined not_joined = 2;
+  }
+  // Whether persistent wifi mode is in force. UNASSIGNED = the daemon could
+  // not read it, and the tooltip says so.
+  oneof mode {
+    TopbarPersistentWifiModeOn on = 3;
+    TopbarPersistentWifiModeOff off = 4;
+  }
+  // The hover text, composed by the daemon from both facts.
+  TopbarPersistentWifiTooltip tooltip = 5;
+}
+// On a Wi-Fi network: the glyph is green.
+message TopbarPersistentWifiJoined {}
+// On no Wi-Fi network: the glyph is red.
+message TopbarPersistentWifiNotJoined {}
+// Persistent wifi mode is on — the lid can close without sleeping the machine
+// or dropping its network: the glyph sits on the blue disc.
+message TopbarPersistentWifiModeOn {}
+// Persistent wifi mode is off — closing the lid sleeps the machine: no disc.
+message TopbarPersistentWifiModeOff {}
+// The chip's hover text.
+message TopbarPersistentWifiTooltip {
+  // Drawn verbatim ("Wi-Fi: joined (network name withheld by macOS) ·
+  // persistent wifi on: the lid can close").
+  string text = 1;
 }
 
 // The vendor's fast mode, as it stands. THE ARM IS THE STATE, carried by

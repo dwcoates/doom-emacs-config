@@ -230,6 +230,7 @@ structurally; see the commentary above."
        :desc "Reload agent-repl config"            "R"   #'agent-repl-reload-config
        :desc "Register repository from file"       "."   #'agent-repl-register-repository
        :desc "Bind workspace to a conversation"    "c"   #'agent-repl-bind-conversation
+       :desc "Toggle persistent wifi mode"         "w"   #'agent-repl-persistent-wifi-mode-toggle
        (:prefix ("h" . "help")
         :desc "Copy workspace name" "y" #'agent-repl-copy-workspace-name)
        (:prefix ("e" . "explain")

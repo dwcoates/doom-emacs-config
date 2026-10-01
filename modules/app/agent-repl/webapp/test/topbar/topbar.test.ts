@@ -39,6 +39,11 @@ function view(overrides: Partial<TopbarView> = {}): TopbarView {
     },
     context: { text: "142.3k", breakdown: { sections: [] } },
     warnings: { warnings: [] },
+    persistentWifi: {
+      wifi: { case: "joined", value: {} },
+      mode: { case: "off", value: {} },
+      tooltip: { text: "Wi-Fi: joined to Home · persistent wifi off: closing the lid sleeps" },
+    },
   });
   return { ...base, ...overrides };
 }
@@ -56,6 +61,11 @@ function sessionlessView(reason: string, context = "0"): TopbarView {
     connectivity: { tone: "none", glyph: "○", title: "no session" },
     context: { text: context, breakdown: { sections: [{ heading: { text: reason }, rows: [] }] } },
     warnings: { warnings: [{ line: { text: reason } }] },
+    persistentWifi: {
+      wifi: { case: "joined", value: {} },
+      mode: { case: "off", value: {} },
+      tooltip: { text: "Wi-Fi: joined to Home · persistent wifi off: closing the lid sleeps" },
+    },
   });
 }
 
@@ -68,6 +78,20 @@ describe("drawTopbarView", () => {
       row.querySelector(".topbar-title") !== null,
       row.querySelector(".topbar-right") !== null,
     ]).toEqual([true, true, true]);
+  });
+
+  it("places the persistent-wifi chip between the context chip and the warning chip", () => {
+    const { tc } = topbarContext();
+    const row = drawTopbarView(view({ warnings: sessionlessView("parked").warnings }), tc);
+    const right = [...(row.querySelector(".topbar-right")?.children ?? [])];
+    const at = (cls: string): number => right.findIndex((el) => el.classList.contains(cls));
+    expect([at("topbar-wifi") === at("topbar-context") + 1, at("topbar-warnings") === at("topbar-wifi") + 1])
+      .toEqual([true, true]);
+  });
+
+  it("refuses a view with no persistent-wifi chip", () => {
+    const { tc } = topbarContext();
+    expect(() => drawTopbarView(view({ persistentWifi: undefined }), tc)).toThrow(MalformedView);
   });
 
   // THE SESSION-LESS STRIP. It is the SAME strip: every slot is filled, the

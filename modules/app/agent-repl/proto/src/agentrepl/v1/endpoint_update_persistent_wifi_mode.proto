@@ -1,0 +1,172 @@
+// endpoint_update_persistent_wifi_mode.proto — UpdatePersistentWifiMode: turn
+// the host machine's persistent wifi mode (lid-closed operation) on, off, or
+// over. HOST MACHINE section. Daemon-scoped: nothing here names a workspace,
+// and Emacs calls it over its one daemon-level connection.
+//
+// THE CHANGE RUNS IN THIS ORDER, and the order is the contract:
+//   1. the hotspot — joined when turning on, left when turning off — FIRST, so
+//      the network is settled before anything else;
+//   2. the power settings — sleep disabled (on) or enabled (off), together
+//      with network-over-sleep and wake-on-network — the one step that
+//      decides whether the change happened at all;
+//   3. the display — dimmed (on) or restored (off) — LAST, as the visible
+//      sign that the machine is in its final state and the lid may close.
+// A failed hotspot or display step never stops the power step: staying awake
+// on whatever network is present is still the outcome asked for, so those two
+// steps report how they went inside the SUCCESS, and only a refused power step
+// is a failure.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/persistent_wifi.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message UpdatePersistentWifiModeRequest {
+  // THE ARM IS THE ACTION. REQUIRED — a request naming no action is refused
+  // as invalid.
+  oneof action {
+    UpdatePersistentWifiModeOn on = 1;
+    UpdatePersistentWifiModeOff off = 2;
+    UpdatePersistentWifiModeToggle toggle = 3;
+  }
+}
+
+// Turn the mode on. Idempotent: already on re-applies every step.
+message UpdatePersistentWifiModeOn {}
+
+// Turn the mode off. Idempotent: already off re-applies every step.
+message UpdatePersistentWifiModeOff {}
+
+// Turn the mode over: off if the daemon reads it on, on if it reads it off.
+// THE DAEMON READS THE MODE ITSELF, at the moment it acts and under the same
+// lock as the change, so two toggles in quick succession turn it over twice
+// rather than both acting on one stale reading a client held.
+message UpdatePersistentWifiModeToggle {}
+
+// THE ARM IS THE OUTCOME.
+message UpdatePersistentWifiModeResponse {
+  oneof result {
+    UpdatePersistentWifiModeSuccess success = 1;
+    UpdatePersistentWifiModeError error = 2;
+  }
+}
+
+// The power step took effect. Every field is what the change LEFT, read back
+// after it ran.
+message UpdatePersistentWifiModeSuccess {
+  // The standing re-read after the change: the same state the daemon-level
+  // stream pushes, so a caller can report it without waiting for that push.
+  PersistentWifiState state = 1;
+  // How the hotspot step went.
+  UpdatePersistentWifiModeHotspot hotspot = 2;
+  // How the display step went.
+  UpdatePersistentWifiModeDisplay display = 3;
+}
+
+// The hotspot step's outcome. THE ARM IS THE OUTCOME. None of these is a
+// failure of the request: the power step ran regardless.
+message UpdatePersistentWifiModeHotspot {
+  oneof outcome {
+    // Turning on: the machine joined the hotspot.
+    UpdatePersistentWifiModeHotspotJoined joined = 1;
+    // Turning on: the machine was already on the hotspot; nothing was done.
+    UpdatePersistentWifiModeHotspotAlreadyJoined already_joined = 2;
+    // Turning off: the machine left the hotspot.
+    UpdatePersistentWifiModeHotspotLeft left = 3;
+    // Turning off: the machine was not on the hotspot; nothing was done.
+    UpdatePersistentWifiModeHotspotNotOnHotspot not_on_hotspot = 4;
+    // Turning off: the operating system withholds the joined network's name,
+    // so the daemon cannot tell whether it is the hotspot and left nothing.
+    UpdatePersistentWifiModeHotspotNetworkUnreadable network_unreadable = 5;
+    // The machine has no Wi-Fi interface; the step was skipped.
+    UpdatePersistentWifiModeHotspotNoWifiInterface no_wifi_interface = 6;
+    // Joining or leaving was attempted and did not take.
+    UpdatePersistentWifiModeHotspotFailed failed = 7;
+  }
+}
+// Joined.
+message UpdatePersistentWifiModeHotspotJoined {
+  // The hotspot's network name, verbatim.
+  string network_name = 1;
+}
+// Already joined.
+message UpdatePersistentWifiModeHotspotAlreadyJoined {
+  // The hotspot's network name, verbatim.
+  string network_name = 1;
+}
+// Left.
+message UpdatePersistentWifiModeHotspotLeft {
+  // The hotspot's network name, verbatim.
+  string network_name = 1;
+}
+// Not on the hotspot, so nothing to leave.
+message UpdatePersistentWifiModeHotspotNotOnHotspot {}
+// The joined network's name is withheld, so nothing was left.
+message UpdatePersistentWifiModeHotspotNetworkUnreadable {}
+// No Wi-Fi interface.
+message UpdatePersistentWifiModeHotspotNoWifiInterface {}
+// Attempted, and it did not take.
+message UpdatePersistentWifiModeHotspotFailed {
+  // The hotspot's network name, verbatim.
+  string network_name = 1;
+  // What went wrong, composed by the daemon from the tool's own output
+  // ("the hotspot is not visible", "still joined after a disconnect and a
+  // radio restart").
+  string detail = 2;
+}
+
+// The display step's outcome. THE ARM IS THE OUTCOME, and none of these is a
+// failure of the request.
+message UpdatePersistentWifiModeDisplay {
+  oneof outcome {
+    // Turning on: the display was dimmed.
+    UpdatePersistentWifiModeDisplayDimmed dimmed = 1;
+    // Turning off: the display was restored to full brightness.
+    UpdatePersistentWifiModeDisplayRestored restored = 2;
+    // The brightness tool is not installed; the step was skipped.
+    UpdatePersistentWifiModeDisplayToolMissing tool_missing = 3;
+    // The brightness tool ran and failed.
+    UpdatePersistentWifiModeDisplayFailed failed = 4;
+  }
+}
+// Dimmed.
+message UpdatePersistentWifiModeDisplayDimmed {}
+// Restored.
+message UpdatePersistentWifiModeDisplayRestored {}
+// The brightness tool is absent.
+message UpdatePersistentWifiModeDisplayToolMissing {
+  // The path the daemon looked for it at.
+  string tool_path = 1;
+}
+// The brightness tool failed.
+message UpdatePersistentWifiModeDisplayFailed {
+  // The tool's own output, verbatim.
+  string detail = 1;
+}
+
+// The power step did not take effect, so the mode is as it was. The hotspot
+// step may already have run; the state re-read after the failure is not
+// carried because the mode, the one fact the request was about, did not move.
+message UpdatePersistentWifiModeError {
+  oneof cause {
+    // Changing the power settings needs a passwordless sudo grant for the
+    // exact `pmset` invocations, and the grant refused or is absent.
+    UpdatePersistentWifiModePowerSettingsRefused power_settings_refused = 1;
+    // A toggle could not read the current mode, so it could not tell which
+    // way to turn it; nothing was changed.
+    UpdatePersistentWifiModeModeUnreadable mode_unreadable = 2;
+  }
+}
+// The power settings change was refused.
+message UpdatePersistentWifiModePowerSettingsRefused {
+  // The refusal, verbatim from sudo or pmset.
+  string detail = 1;
+}
+// The current mode could not be read.
+message UpdatePersistentWifiModeModeUnreadable {
+  // Why, composed by the daemon from the read's own failure.
+  string detail = 1;
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"connectrpc.com/connect"
+	"google.golang.org/protobuf/proto"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -573,9 +574,13 @@ func (s *server) watchDaemon(
 	// them on the topbar and footer views it already holds. A nil channel is
 	// never ready, so a webview's select never takes that case.
 	var faults <-chan *agentreplv1.DaemonFaultsStanding
+	// THE PERSISTENT-WIFI STANDING IS AN EMACS STREAM'S ALONE too, for the
+	// same reason: a webview draws it as its topbar's chip.
+	var wifi <-chan *agentreplv1.PersistentWifiState
 	if emacs := msg.GetEmacs(); emacs != nil {
 		w.emacs, w.elispBuild = true, emacs.GetElispBuild()
 		faults = s.deps.LoudFaults.Subscribe(streamCtx)
+		wifi = s.deps.PersistentWifi.Topic().Subscribe(streamCtx)
 		// EMACS'S FOCUS LIVES AND DIES WITH THIS STREAM: attached from the
 		// request, so the daemon knows it from the stream's first instant,
 		// and released when the stream ends, after which Emacs reads as
@@ -626,18 +631,33 @@ func (s *server) watchDaemon(
 		case addressed := <-w.elisp:
 			push, fromState = addressed, false
 		case standing, ok := <-faults:
-			if !ok {
-				s.log.Debug("WatchDaemon", "the standing stream's subscription closed", nil)
+			wrapped, ended := emacsStandingPush(s.log, standing, ok, "fault set",
+				func(v *agentreplv1.DaemonFaultsStanding) *agentreplv1.WatchDaemonResponse {
+					return &agentreplv1.WatchDaemonResponse{
+						Push: &agentreplv1.WatchDaemonResponse_FaultsStanding{FaultsStanding: v},
+					}
+				})
+			if ended {
 				return nil
 			}
-			if standing == nil {
-				s.log.Error("WatchDaemon", "a publisher raised an empty fault set; it was not sent", nil)
+			if wrapped == nil {
 				continue
 			}
-			push = &agentreplv1.WatchDaemonResponse{
-				Push: &agentreplv1.WatchDaemonResponse_FaultsStanding{FaultsStanding: standing},
+			push, fromState = wrapped, false
+		case standing, ok := <-wifi:
+			wrapped, ended := emacsStandingPush(s.log, standing, ok, "persistent-wifi standing",
+				func(v *agentreplv1.PersistentWifiState) *agentreplv1.WatchDaemonResponse {
+					return &agentreplv1.WatchDaemonResponse{
+						Push: &agentreplv1.WatchDaemonResponse_PersistentWifi{PersistentWifi: v},
+					}
+				})
+			if ended {
+				return nil
 			}
-			fromState = false
+			if wrapped == nil {
+				continue
+			}
+			push, fromState = wrapped, false
 		}
 		if err := out.Send(push); err != nil {
 			s.log.Debug("WatchDaemon", "the standing stream's client went away",
@@ -651,6 +671,27 @@ func (s *server) watchDaemon(
 			w.done()
 		}
 	}
+}
+
+// emacsStandingPush turns one receive from an Emacs-only standing topic
+// (the loud faults, the persistent-wifi standing) into the frame it sends. A
+// closed subscription answers ended; an empty value is a publisher's bug,
+// recorded at ERROR and answered as no frame; anything else is wrapped. what
+// names the value in that record.
+func emacsStandingPush[T interface {
+	comparable
+	proto.Message
+}](log dlog.Logger, v T, ok bool, what string, wrap func(T) *agentreplv1.WatchDaemonResponse) (*agentreplv1.WatchDaemonResponse, bool) {
+	var empty T
+	switch {
+	case !ok:
+		log.Debug("WatchDaemon", "the standing stream's subscription closed", nil)
+		return nil, true
+	case v == empty:
+		log.Error("WatchDaemon", "a publisher raised an empty "+what+"; it was not sent", nil)
+		return nil, false
+	}
+	return wrap(v), false
 }
 
 // MutationProgress pushes one workspace-mutation progress event onto every
