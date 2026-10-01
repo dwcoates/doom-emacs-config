@@ -1235,11 +1235,20 @@ The rules that keep this true:
 - **The status ladder ranks every unusable rung above every usable one**
   (`daemon/internal/resolve/ladder`), so a blue claim is never hidden under a
   turquoise one.
-- **The webapp composer is closed exactly when the footer is blue or purple**
+- **A repository's fold is the daemon's** (`agentrepl.v1.FoldRepository`,
+  `frontend.v1.RosterRepoSection.fold`): the sidebar draws it (header grey:
+  very light expanded, darker collapsed) and the Emacs tab bar hides a
+  collapsed repository's workspaces, numbering and navigating only the drawn
+  tabs (`agent-repl-roster-drawn-tab-order`). Task and merged folds stay
+  webview-local.
+- **The webapp composer is closed exactly when the footer is blue**
   (`render-colors.json#composer_closed_colors`, read by
   `webapp/src/vocab.ts#composerClosedFor`). The gate is derived from the color,
-  never from a list of arm names. Emacs's composer is gated by the daemon's
-  host composer arm instead (a merge lease, a drain, a restart), and while the
+  never from a list of arm names. A merge in flight (purple) leaves it open:
+  what is submitted is held until the merge ends, and a prompt held so keeps
+  the workspace open past the landing. Emacs's composer is gated by the
+  daemon's host composer arm instead (a drain, a restart; a holding merge
+  lease answers `open`), and while the
   workspace is unusable it still takes prompts and holds them durably (the held
   ingress), per the ruling that held prompts survive outages.
 - **Whether a status draws FULL (unread) or PARTIAL (viewed) is independent of

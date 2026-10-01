@@ -11,9 +11,9 @@ config, not hand-written framing.
 
 ## Composer refusal treatment (settled with the user)
 Wherever the composer lives (Emacs host-native today; browser dev mode if
-ever enabled), it CLOSES on the merging state (the host stream's composer
-gate / the footer's merging status) — that is the PRIMARY defense against
-post-merge-start prompts. SubmitPromptError arms are the RACE FALLBACK for
+ever enabled), it stays OPEN through a merge (owner ruling, 2026-10-01):
+what is submitted is held until the merge ends. It closes on an unusable
+workspace (blue). SubmitPromptError arms are the RACE FALLBACK for
 a submission already in flight when the state flipped: rendered inline at
 the composer, per typed arm, with the text preserved. The refusal is the
 submitter's own — no pushed view carries it.

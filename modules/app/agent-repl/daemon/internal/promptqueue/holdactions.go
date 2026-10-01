@@ -24,8 +24,8 @@ const (
 // running turn when that is what delivery takes.
 //
 // It REFUSES a hold nothing could deliver through: an uninterruptible turn has
-// no interrupt to send, and a session that is still coming up has nothing to
-// send to.
+// no interrupt to send, a session that is still coming up has nothing to send
+// to, and a session a merge drives is the merge's.
 func (q *queue) Release(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID) error {
 	log, err := q.logger(ctx, ws)
 	if err != nil {
@@ -54,6 +54,12 @@ func (q *queue) Release(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID
 	}
 	if held.Hold != nil && *held.Hold == wsm.HoldSessionStarting {
 		log.Warn(opRelease, "the session is still coming up; the release is refused", nil)
+		return ErrReleaseRefused
+	}
+	// A MERGE DRIVES THE SESSION: a prompt forced into it would run inside the
+	// merge's own turns. The merge's end delivers it.
+	if held.Hold != nil && *held.Hold == wsm.HoldMerge {
+		log.Warn(opRelease, "a merge drives the session; the release is refused", nil)
 		return ErrReleaseRefused
 	}
 	// THE HOLD STAMP IS NOT THE ONLY EVIDENCE THE SESSION IS STILL COMING UP.

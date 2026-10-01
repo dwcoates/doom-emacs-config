@@ -173,9 +173,16 @@ The viewed-cleared edge is a comparison against this table, so it is
 replaced only after that edge has been computed.")
 
 (defvar agent-repl-roster--tab-order nil
-  "Workspace names in roster walk order — the tab bar's order, strictly.
+  "Workspace names in roster walk order — every workspace with a tab.
 No local ordering exists: the resolver orders the roster (priority
-included) and the tab bar follows it.")
+included) and the tab bar follows it.  The bar DRAWS the subset
+`agent-repl-roster-drawn-tab-order' answers.")
+
+(defvar agent-repl-roster--hidden-tabs nil
+  "Tab names whose repository the daemon holds COLLAPSED.
+They keep their tabs (their sessions are untouched) and are off the
+bar's drawing, numbering and navigation.  Set by the reconcile pass from
+the same push as `agent-repl-roster--tab-order'.")
 
 ;;;; ---- The status vocabulary --------------------------------------------
 
@@ -246,14 +253,19 @@ the tab-bar's partial/full decision: the daemon owns the mode."
 
 ;;;; ---- The walk ---------------------------------------------------------
 
-(defun agent-repl-roster--walk-rows (rows label acc)
+(defun agent-repl-roster--walk-rows (rows label acc &optional collapsed)
   "Walk ROWS depth-first under section LABEL, pushing entries onto ACC.
-Each entry is `(:row ROW :label LABEL)'.  A row precedes its children,
-which is the render order the contract's nesting states."
+Each entry is `(:row ROW :label LABEL :collapsed COLLAPSED)'; COLLAPSED is
+non-nil when the section's repository is folded.  A row precedes its
+children, which is the render order the contract's nesting states."
   (dolist (row rows)
-    (push (list :row row :label label) (car acc))
-    (agent-repl-roster--walk-rows (plist-get row :children) label acc))
+    (push (list :row row :label label :collapsed collapsed) (car acc))
+    (agent-repl-roster--walk-rows (plist-get row :children) label acc collapsed))
   acc)
+
+(defun agent-repl-roster--section-collapsed-p (section)
+  "Return non-nil when the daemon holds repository SECTION collapsed."
+  (eq (plist-get (plist-get section :fold) :arm) :collapsed))
 
 (defun agent-repl-roster-walk (roster)
   "Return ROSTER's rows in tab order: `(:row ROW :label REPO-LABEL)' entries.
@@ -266,7 +278,8 @@ give every workspace a second tab."
       (agent-repl-roster--walk-rows
        (plist-get (plist-get section :rows) :rows)
        (plist-get (plist-get (plist-get section :header) :label) :text)
-       acc))
+       acc
+       (agent-repl-roster--section-collapsed-p section)))
     (let ((merged (plist-get roster :recently-merged)))
       (agent-repl-roster--walk-rows
        (plist-get (plist-get merged :rows) :rows)
@@ -366,7 +379,8 @@ Once per push over every closed row, which is why it is DEBUG."
                 (list :id (agent-repl-roster-row-id row)
                       :name (agent-repl-roster--tab-name entry collisions)
                       :ref (agent-repl-roster-row-ref row)
-                      :availability (agent-repl-roster-row-availability row))))
+                      :availability (agent-repl-roster-row-availability row)
+                      :collapsed (plist-get entry :collapsed))))
             entries)))
 
 ;;;; ---- Reconciliation ---------------------------------------------------
@@ -608,6 +622,8 @@ A row that fails to reconcile is contained rather than fatal; see
          (total (+ carried untabbed))
          (opened 0)
          (names nil)
+         ;; The tabs of rows whose repository the daemon holds collapsed.
+         (hidden nil)
          ;; The first tabless row still `:pending', once the walk meets it.
          (held nil))
     (dolist (want desired)
@@ -634,7 +650,9 @@ A row that fails to reconcile is contained rather than fatal; see
             ;; Recorded as wanted so nothing about it is torn down.
             (puthash (plist-get want :id) t wanted-ids)
           (let ((name (agent-repl-roster--reconcile-row want wanted-ids)))
-            (when name (push name names))
+            (when name
+              (push name names)
+              (when (plist-get want :collapsed) (push name hidden)))
             ;; A row that FAILED opened no tab, so it does not count towards
             ;; the bring-up and the pass ends below `untabbed'.
             (when (and fresh name)
@@ -653,7 +671,8 @@ A row that fails to reconcile is contained rather than fatal; see
              (agent-repl-roster--log-row-failure
               name "elisp.roster.row-teardown-failed: ws=%s error=%s"
               name (error-message-string err)))))))
-    (setq agent-repl-roster--tab-order (nreverse names))
+    (setq agent-repl-roster--tab-order (nreverse names)
+          agent-repl-roster--hidden-tabs hidden)
     ;; INFO, not DEBUG.  This is the record that says the roster push became
     ;; a tab bar, and it is the end of the startup's first-roster phase --
     ;; but the DEBUG rung does not clear the durable sink's default `info'
@@ -664,9 +683,10 @@ A row that fails to reconcile is contained rather than fatal; see
     ;; lifecycle a person asks about, at the level its siblings in this file
     ;; already use.
     (agent-repl--info '(:agent-repl-central "roster reconciliation spans every workspace")
-                      "elisp.roster.reconcile: tabs=%d order=%S"
+                      "elisp.roster.reconcile: tabs=%d order=%S hidden=%S"
                       (length agent-repl-roster--tab-order)
-                      agent-repl-roster--tab-order)
+                      agent-repl-roster--tab-order
+                      agent-repl-roster--hidden-tabs)
     ;; LAST, after the order is set, so a handler that reads the tab bar
     ;; sees the one this pass produced rather than the previous pass's.
     ;; The pass is FINISHED only when nothing is held: a held row is a
@@ -730,8 +750,16 @@ NAMES is never filtered, only reordered."
             never)))
 
 (defun agent-repl-roster-tab-order ()
-  "Return the tab names in roster walk order — the tab bar's only order."
+  "Return every tab name in roster walk order, the hidden ones included."
   agent-repl-roster--tab-order)
+
+(defun agent-repl-roster-drawn-tab-order ()
+  "Return the tab names the bar DRAWS, in roster walk order.
+Every tab but those of a repository the daemon holds collapsed
+\(`agent-repl-roster--hidden-tabs').  The bar's numbering and its
+navigation index THIS list, so a hidden tab takes no number and no stop."
+  (cl-remove-if (lambda (name) (member name agent-repl-roster--hidden-tabs))
+                agent-repl-roster--tab-order))
 
 (defun agent-repl-roster-move-tab-to-back (ws)
   "Move WS to the LAST slot of the tab order and return the new order.

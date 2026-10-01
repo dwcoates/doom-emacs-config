@@ -761,15 +761,13 @@ Only a status update resets; a plain activation just restarts the clock."
     (should (equal agent-repl--color-default-bracket (plist-get spec :bracket-fg)))))
 
 (ert-deftest agent-repl-test-tab-spec-bracket-only-selected-thinking ()
-  "Bracket-only spec for :thinking selected paints the SELECTION GREY on
-the bracket, not thinking-red (owner ruling, 2026-09-14): a selected
-panels-closed tab shows EXTENT (bracket-only), the owner\='s grey in
-place of COLOR, and the selection marker all at once."
+  "Bracket-only spec for :thinking selected keeps THINKING-RED on the
+bracket (owner ruling, 2026-10-01): a selected panels-closed tab shows its
+status on [N] and the selection marker under its name."
   (let ((spec (agent-repl--tab-spec-bracket-only :thinking t)))
     (should (eq 'unspecified (plist-get spec :bg)))
     (should (eq 'unspecified (plist-get spec :fg)))
-    (should (equal agent-repl--color-selected-bg (plist-get spec :bracket-bg)))
-    (should-not (equal agent-repl--color-thinking-red (plist-get spec :bracket-bg)))
+    (should (equal agent-repl--color-thinking-red (plist-get spec :bracket-bg)))
     (should (eq t (plist-get spec :underline)))))
 
 (ert-deftest agent-repl-test-tab-spec-bracket-only-unselected-has-no-underline ()
@@ -906,10 +904,11 @@ row, not blue."
 ;; is kept as a secondary marker.
 
 (ert-deftest agent-repl-test-tab-spec-selected-init-is-grey-not-blue ()
-  "Selected :init paints the selection grey, not the init blue, plus underline."
+  "Selected :init paints its name the selection grey, not the init blue,
+keeps the init blue on its bracket, and carries the underline."
   (let ((spec (agent-repl--tab-spec :init t)))
     (should (equal (plist-get spec :bg) agent-repl--color-selected-bg))
-    (should-not (plist-member spec :bracket-bg))
+    (should (equal (plist-get spec :bracket-bg) agent-repl--color-init-blue))
     (should (eq t (plist-get spec :underline)))))
 
 (ert-deftest agent-repl-test-tab-spec-selected-thinking-is-grey-not-red ()
@@ -940,12 +939,21 @@ the selection grey — the exact pairing the owner's change must not break."
                                                    (plist-get spec :bg))
                   agent-repl-tab-contrast-floor)))))
 
-(ert-deftest agent-repl-test-tab-spec-no-look-carries-bracket-bg ()
-  "Neither look carries :bracket-bg: the entry is ONE color end to end, so
-the bracket inherits :bg in the renderer for selected and unselected alike."
+(ert-deftest agent-repl-test-tab-spec-unselected-carries-no-bracket-bg ()
+  "The unselected look carries no :bracket-bg: the entry is ONE color end
+to end, so the bracket inherits :bg in the renderer."
   (dolist (state '(:init :thinking :done :permission :ready))
-    (should-not (plist-get (agent-repl--tab-spec state nil) :bracket-bg))
-    (should-not (plist-get (agent-repl--tab-spec state t) :bracket-bg))))
+    (should-not (plist-get (agent-repl--tab-spec state nil) :bracket-bg))))
+
+(ert-deftest agent-repl-test-tab-spec-selected-bracket-is-the-unselected-ground ()
+  "The selected look's bracket is the UNSELECTED look's ground and
+foreground (owner ruling, 2026-10-01), for every state."
+  (dolist (state '(:init :thinking :done :permission :ready))
+    (let ((status (agent-repl--tab-spec state nil))
+          (selected (agent-repl--tab-spec state t)))
+      (should (equal (plist-get selected :bracket-bg) (plist-get status :bg)))
+      (should (equal (plist-get selected :bracket-fg)
+                     (or (plist-get status :bracket-fg) (plist-get status :fg)))))))
 
 (ert-deftest agent-repl-test-render-tab-bracket-bg-applied ()
   "render-tab should use :bracket-bg for the bracket background when present."
@@ -1441,11 +1449,10 @@ tab was reached by."
 
 ;;;; ---- Tests: render-tab-entry edge cases ----
 
-(ert-deftest agent-repl-test-render-tab-entry-selected-bracket-and-name-are-grey ()
-  "A rendered SELECTED tab's [N] bracket and name both carry the selection
-grey as their BACKGROUND (owner ruling, 2026-09-14) — the same grey the
-`agent-repl--tab-spec'/`agent-repl--tab-face' unit tests exercise in
-isolation, exercised here end to end through the real renderer."
+(ert-deftest agent-repl-test-render-tab-entry-selected-bracket-keeps-status-and-name-is-grey ()
+  "A rendered SELECTED tab's [N] bracket keeps its STATUS color and only its
+name carries the selection grey (owner ruling, 2026-10-01, replacing the
+2026-09-14 all-grey look), exercised end to end through the real renderer."
   ;; Arrange
   (let* ((state :thinking)
          (spec  (agent-repl--tab-spec state t))
@@ -1456,7 +1463,7 @@ isolation, exercised here end to end through the real renderer."
          (bracket-face (get-text-property bracket-pos 'face result))
          (name-face (get-text-property name-pos 'face result)))
     ;; Act / Assert
-    (should (equal agent-repl--color-selected-bg
+    (should (equal agent-repl--color-thinking-red
                    (plist-get bracket-face :background)))
     (should (equal agent-repl--color-selected-bg
                    (plist-get (nth 1 name-face) :background)))))
@@ -1702,7 +1709,7 @@ exercised on the selected tab instead."
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws"))
                 ((symbol-function 'frame-width) (lambda () 80))
                 ;; Before the roster's first push the registered names are drawn.
-                ((symbol-function 'agent-repl-roster-tab-order) (lambda () nil))
+                ((symbol-function 'agent-repl-roster-drawn-tab-order) (lambda () nil))
                 ((symbol-function 'agent-repl--ws-display-state)
                  (lambda (_ws) arm)))
         ;; Act
@@ -1718,11 +1725,10 @@ exercised on the selected tab instead."
               (should (equal (visible thinking) (visible done)))
               (should-not (equal thinking done)))))))))
 
-(ert-deftest agent-repl-test-workspace-tabline-formatted-selected-tab-ignores-arm-change ()
-  "A SELECTED tab's drawn string is UNCHANGED across an arm change (owner
-ruling, 2026-09-14): the selection grey replaces the connection color for
-the tab the user is standing in, so there is nothing left for the arm to
-vary visually."
+(ert-deftest agent-repl-test-workspace-tabline-formatted-selected-tab-shows-arm-change ()
+  "A SELECTED tab's drawn string CHANGES across an arm change (owner ruling,
+2026-10-01): its [N] bracket keeps the status color, so the tab the user is
+standing in still says when its status moves."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
     (let ((persp-names-cache '("ws1"))
@@ -1730,7 +1736,7 @@ vary visually."
           (arm :thinking))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
                 ((symbol-function 'frame-width) (lambda () 80))
-                ((symbol-function 'agent-repl-roster-tab-order) (lambda () nil))
+                ((symbol-function 'agent-repl-roster-drawn-tab-order) (lambda () nil))
                 ((symbol-function 'agent-repl--ws-display-state)
                  (lambda (_ws) arm)))
         ;; Act
@@ -1738,7 +1744,7 @@ vary visually."
           (setq arm :done)
           (let ((done (agent-repl-workspace-tabline-formatted)))
             ;; Assert
-            (should (equal thinking done))))))))
+            (should-not (equal-including-properties thinking done))))))))
 
 (ert-deftest agent-repl-test-workspace-tabline-formatted-keeps-content-when-nothing-changed ()
   "Two renders of an unchanged world are `equal', so no repaint is forced."
@@ -1749,7 +1755,7 @@ vary visually."
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
                 ((symbol-function 'frame-width) (lambda () 80))
                 ;; Before the roster's first push the registered names are drawn.
-                ((symbol-function 'agent-repl-roster-tab-order) (lambda () nil))
+                ((symbol-function 'agent-repl-roster-drawn-tab-order) (lambda () nil))
                 ((symbol-function 'agent-repl--ws-display-state)
                  (lambda (_ws) :thinking)))
         (should (equal (agent-repl-workspace-tabline-formatted)
@@ -1777,7 +1783,7 @@ vary visually."
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "solo"))
                 ((symbol-function 'frame-width) (lambda () 80))
                 ;; Before the roster's first push the registered names are drawn.
-                ((symbol-function 'agent-repl-roster-tab-order) (lambda () nil)))
+                ((symbol-function 'agent-repl-roster-drawn-tab-order) (lambda () nil)))
         (let ((visible (substring-no-properties
                         (agent-repl-workspace-tabline-formatted))))
           (should (= 1 (cl-count ?\[ visible)))
@@ -1793,7 +1799,7 @@ vary visually."
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "second"))
                 ((symbol-function 'frame-width) (lambda () 80))
                 ;; Before the roster's first push the registered names are drawn.
-                ((symbol-function 'agent-repl-roster-tab-order) (lambda () nil)))
+                ((symbol-function 'agent-repl-roster-drawn-tab-order) (lambda () nil)))
         (let ((visible (substring-no-properties
                         (agent-repl-workspace-tabline-formatted))))
           (should (= 2 (cl-count ?\[ visible)))

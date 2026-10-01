@@ -357,10 +357,10 @@ func (o *orchestrator) republishQueue(ctx context.Context, repo wsm.RepoKey) err
 		// head to hang its queue tab on -- the tab a waiting user reads their
 		// place from, and the first of the tab sequence.
 		if lease, ok := o.leaseOf(entry.Workspace); ok {
-			o.deps.Feed.UpsertSynthesized(entry.Workspace, feedid.Feed{Root: true},
+			o.deps.Feed.UpsertDurable(entry.Workspace, feedid.Feed{Root: true},
 				headRow(entry.Workspace, lease, o.bubbleLabel(ctx, entry), o.nowMS(), nil))
 			snapshot := queueSnapshot(entries, entry.Workspace, names, dirs, frontTab)
-			o.deps.Feed.UpsertSynthesized(entry.Workspace, mergeFeed(lease), tabRow(entry.Workspace, lease, TabQueue, 1,
+			o.deps.Feed.UpsertDurable(entry.Workspace, mergeFeed(lease), tabRow(entry.Workspace, lease, TabQueue, 1,
 				queueTab(snapshot, entry.State == wsm.MergeAdmitted, o.nowMS())))
 		}
 		if entry.State != wsm.MergeQueued {

@@ -23,7 +23,10 @@ CREATE TABLE repositories (
   id             TEXT PRIMARY KEY,
   dir            TEXT NOT NULL UNIQUE,
   name           TEXT NOT NULL,
-  default_branch TEXT NOT NULL
+  default_branch TEXT NOT NULL,
+  -- Whether the repository's roster section is collapsed. See
+  -- repositoriesFoldedDDL and SetRepositoryFolded.
+  folded         INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE tasks (
@@ -232,7 +235,24 @@ CREATE TABLE drain_schedule (
   deadline INTEGER NOT NULL,
   set_at   INTEGER NOT NULL
 );
-` + feedTextScaleDDL
+` + feedTextScaleDDL + durableFeedRowsDDL
+
+// durableFeedRowsDDL is the layout-16 addition: the daemon-synthesized feed
+// rows a NEW DAEMON must draw again (a merge's bubble), each with the order key
+// it was first drawn at, so a restart or a handover draws it where it stood.
+// The row is the encoded frontend.v1.FeedRow as last published. Kept apart for
+// the reason portedPromptsDDL is: a fresh file and a migrated one share one
+// text.
+const durableFeedRowsDDL = `
+CREATE TABLE durable_feed_rows (
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  row_id       TEXT NOT NULL,
+  plane        INTEGER NOT NULL,
+  order_key    TEXT NOT NULL,
+  row          BLOB NOT NULL,
+  PRIMARY KEY (workspace_id, row_id)
+);
+`
 
 // feedTextScaleDDL is the layout-10 addition — the single daemon-global feed
 // text zoom (frontend.v1.FeedTextScale), persisted so the zoom survives a

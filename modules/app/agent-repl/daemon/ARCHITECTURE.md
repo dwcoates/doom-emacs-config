@@ -454,7 +454,12 @@ the slot. A repair that changes the merge machinery (`daemon/internal/merge/`,
 addressed to the merging workspace's own session.
 
 Tabs are FeedMergeTab rows on the merge bubble's sub-feed
-(`feedid.Feed{Merge{leaseID}}`), append-only, round-numbered. Briefs are read
+(`feedid.Feed{Merge{leaseID}}`), append-only, round-numbered. Every bubble row
+(head and tabs) is published through `feed.Resolver.UpsertDurable`, which
+records it in wsm's `durable_feed_rows` at its order key, so a new daemon
+(restart or handover) draws the bubble again where it stood; no store replays
+it. A held prompt keeps the requester open past the landing
+(`wsm.bindMergeHold`). Briefs are read
 from `prompts/` at use time (`merge-conflict-resolve.md`,
 `merge-test-failure-resolve.md`). Post-merge worktree removal after terminal
 publication. A user-requested merge captures the displaced user turn durably

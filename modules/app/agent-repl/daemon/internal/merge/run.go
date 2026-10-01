@@ -199,12 +199,12 @@ func (r *run) address(kind string, round int) {
 
 // upsert publishes one tab row.
 func (r *run) upsert(kind string, round int, tab *frontendv1.FeedMergeTab) {
-	r.o.deps.Feed.UpsertSynthesized(r.ws, mergeFeed(r.lease.ID), tabRow(r.ws, r.lease.ID, kind, round, tab))
+	r.o.deps.Feed.UpsertDurable(r.ws, mergeFeed(r.lease.ID), tabRow(r.ws, r.lease.ID, kind, round, tab))
 }
 
 // head publishes the bubble's head row with the state arm in force.
 func (r *run) head(result any) {
-	r.o.deps.Feed.UpsertSynthesized(r.ws, feedid.Feed{Root: true}, headRow(r.ws, r.lease.ID, r.label(), r.startedMS, result))
+	r.o.deps.Feed.UpsertDurable(r.ws, feedid.Feed{Root: true}, headRow(r.ws, r.lease.ID, r.label(), r.startedMS, result))
 }
 
 // label is the bubble's head line: what is merged, and where to.
@@ -249,7 +249,10 @@ func (o *orchestrator) start(ctx context.Context, repo wsm.RepoKey, ws ids.Works
 	// THE OCCUPANCY IS TAKEN UNDER THE LEDGER IDENTITY minted when the merge
 	// was put in line, so the queued bubble and the running one are one bubble.
 	ledger := o.mintLedger(ws)
-	lease, err := o.deps.DB.AcquireLeaseAs(ctx, ws, ledger, wsm.HolderMerge, wsm.PolicyRefuse)
+	// THE LEASE HOLDS what the user submits while the merge runs; a prompt
+	// held under it keeps the requester open past the landing
+	// (wsm.bindMergeHold, readKeepOpen).
+	lease, err := o.deps.DB.AcquireLeaseAs(ctx, ws, ledger, wsm.HolderMerge, wsm.PolicyHold)
 	if err != nil {
 		if releaseErr := lock.Release(); releaseErr != nil {
 			log.Error(op, "could not release the repository lock of a merge that could not start", dlog.Context{"workspace": string(ws), "error": releaseErr.Error()})
@@ -257,6 +260,10 @@ func (o *orchestrator) start(ctx context.Context, repo wsm.RepoKey, ws ids.Works
 		log.Error(op, "could not take the merge lease", dlog.Context{"workspace": string(ws), "error": err.Error()})
 		return nil, err
 	}
+	// EVERY PROMPT ALREADY HELD NOW WAITS FOR THE MERGE: the restamp binds
+	// each to it (wsm.bindMergeHold), so the requester stays open for them as
+	// for a prompt submitted during the merge.
+	o.deps.Queue.OnLeaseChanged(ws)
 	runCtx, cancel := context.WithCancelCause(ctx)
 	o.mu.Lock()
 	displaces := o.displaces[ws]

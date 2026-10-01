@@ -56,6 +56,11 @@ func TestARestartedSidecarNeverTracksOrLosesARunThatSettledBeforeIt(t *testing.T
 	fencePath := appendDetachedLaunch(t, fx, "b0fence", capturedBashCall2)
 	restarted := opts
 	restarted.LogPath = filepath.Join(t.TempDir(), "sidecar-restarted.log")
+	// THE SETTLE IS STATED AT EITHER LEVEL: a restarted reader meets the spool
+	// as boot backlog, so whether its settle lands inside the startup catch-up
+	// (stated at DEBUG) or just after it (INFO) is a matter of scheduling, not
+	// of the subject. The restarted process records both.
+	restarted.ExtraEnv = append(append([]string(nil), opts.ExtraEnv...), "AGENT_REPL_LOG_LEVEL=debug")
 	startSidecar(t, restarted)
 	fence := newGrowingFile(t, fencePath)
 	fence.AppendRaw([]byte("said once and never again\n"))

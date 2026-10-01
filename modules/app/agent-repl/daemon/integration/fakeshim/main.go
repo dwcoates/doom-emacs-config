@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -71,6 +72,19 @@ func run(args []string) error {
 	}
 	if sha := os.Getenv(EnvBuildSHA); sha != "" && profile.BuildSHA == "" {
 		profile.BuildSHA = sha
+	}
+
+	// THE SPAWN GATE, as the real shim honors it: nothing is bound until the
+	// daemon has recorded this process, and a daemon that died first leaves
+	// EOF, on which the fake exits unbound.
+	if argv.SpawnGateFD >= 0 {
+		opened, err := awaitSpawnGate(argv.SpawnGateFD)
+		if err != nil {
+			return err
+		}
+		if !opened {
+			os.Exit(0)
+		}
 	}
 
 	log := newLogSink(argv.LogFD)
@@ -500,4 +514,21 @@ func commandContext(cmd Command) (context.Context, context.CancelFunc) {
 		return context.WithCancel(context.Background())
 	}
 	return context.WithTimeout(context.Background(), time.Duration(cmd.TimeoutMS)*time.Millisecond)
+}
+
+// awaitSpawnGate blocks until the daemon opens the spawn gate on fd, and
+// reports whether it did: one byte is the opening, EOF a daemon that died
+// before recording this process.
+func awaitSpawnGate(fd int) (bool, error) {
+	gate := os.NewFile(uintptr(fd), "spawn-gate")
+	defer gate.Close()
+	buf := make([]byte, 1)
+	n, err := gate.Read(buf)
+	if n == 1 {
+		return true, nil
+	}
+	if errors.Is(err, io.EOF) {
+		return false, nil
+	}
+	return false, fmt.Errorf("fakeshim: read the spawn gate: %w", err)
 }

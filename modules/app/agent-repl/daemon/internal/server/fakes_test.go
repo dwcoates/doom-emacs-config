@@ -233,9 +233,13 @@ type fakeVerbs struct {
 	// verb, so the handler's own resolution is what a test asserts.
 	markViewed    []ids.WorkspaceID
 	markViewedErr error
-	closeErr      error
-	openErr       error
-	forgetErr     error
+	// folds records every FoldRepository the handler resolved onto the verb,
+	// and foldErr is what the verb answers instead.
+	folds     []repositoryFold
+	foldErr   error
+	closeErr  error
+	openErr   error
+	forgetErr error
 
 	// openStages are replayed into whatever reporter the rpc armed, and
 	// openProgress is the reporter itself so a test can assert its absence.
@@ -1082,4 +1086,15 @@ func receiveHostEvent(
 	}
 	t.Fatalf("the host stream ended before an event arrived: %v", stream.Err())
 	return nil
+}
+
+// repositoryFold is one FoldRepository the verb received.
+type repositoryFold struct {
+	repo   ids.RepoID
+	folded bool
+}
+
+func (v *fakeVerbs) FoldRepository(_ context.Context, repo ids.RepoID, folded bool) error {
+	v.folds = append(v.folds, repositoryFold{repo: repo, folded: folded})
+	return v.foldErr
 }

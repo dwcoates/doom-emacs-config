@@ -78,6 +78,7 @@
 (declare-function agent-repl-workspace-progress-report "mutation-progress" (kind phase &rest details))
 (declare-function agent-repl-verbs--all-rows "agent-repl-verbs" (&optional roster))
 (declare-function agent-repl-roster-tab-order "agent-repl-roster" ())
+(declare-function agent-repl-roster-drawn-tab-order "agent-repl-roster" ())
 (declare-function agent-repl-roster-selection-recency-order "agent-repl-roster" (names))
 (declare-function agent-repl-verbs--row-ref "agent-repl-verbs" (row))
 (declare-function agent-repl-verbs--row-closed-p "agent-repl-verbs" (row))
@@ -906,9 +907,33 @@ carries persp-mode's own pseudo perspectives -- `none' and Doom's `main'
 Cycling over it therefore went the wrong way relative to the bar, and off
 one end it switched to a splash screen with no tab highlighted or signaled
 an error trying to reach `none'.  A pseudo perspective can never appear in
-the roster's tab order, so it can never be a navigation target."
-  (and (fboundp 'agent-repl-roster-tab-order)
-       (agent-repl-roster-tab-order)))
+the roster's tab order, so it can never be a navigation target.
+
+A TAB OF A COLLAPSED REPOSITORY IS NOT DRAWN, so it is not here either:
+the numerals count only the drawn tabs and stay contiguous."
+  (and (fboundp 'agent-repl-roster-drawn-tab-order)
+       (agent-repl-roster-drawn-tab-order)))
+
+(defun agent-repl--cycle-target (all drawn current n)
+  "Return the DRAWN tab N steps from CURRENT along ALL, or nil.
+ALL is every tab in walk order and DRAWN its drawn subset.  The walk
+starts at CURRENT's place in ALL, so a current workspace whose tab is
+hidden (its repository was collapsed) still steps to its drawn
+neighbours, and every hidden tab on the way is passed over.  Nil when
+CURRENT has no tab or nothing is drawn."
+  (let ((index (cl-position current all :test #'equal))
+        (count (length all)))
+    (when (and index drawn)
+      (let ((step (if (< n 0) -1 1))
+            (remaining (abs n))
+            (at index)
+            (seen 0))
+        (while (and (> remaining 0) (< seen (* count (abs n))))
+          (setq at (mod (+ at step) count)
+                seen (1+ seen))
+          (when (member (nth at all) drawn)
+            (setq remaining (1- remaining))))
+        (and (zerop remaining) (nth at all))))))
 
 (defun agent-repl--workspace-cycle (n)
   "Switch N places from the current workspace along the DRAWN tab order.
@@ -926,15 +951,15 @@ one switched correctly, and not one could be read back afterwards.  A routine
 action is never promoted to `warn' to make it easier to find -- the realtest
 harvest fails a run on every warning."
   (let* ((names (agent-repl--drawn-tab-names))
+         (all (and (fboundp 'agent-repl-roster-tab-order) (agent-repl-roster-tab-order)))
          (current (agent-repl--ws-current-name))
          (log-ws (agent-repl--ws-log-name current))
-         (index (cl-position current names :test #'equal)))
-    (if (or (null names) (null index))
+         (target (agent-repl--cycle-target all names current n)))
+    (if (null target)
         (agent-repl--info log-ws "elisp.commands.cycle-no-position n=%d tabs=%d"
                           n (length names))
-      (let ((target (nth (mod (+ index n) (length names)) names)))
-        (agent-repl--info log-ws "elisp.commands.cycle n=%d target=%s" n target)
-        (agent-repl--ws-switch target)))))
+      (agent-repl--info log-ws "elisp.commands.cycle n=%d target=%s" n target)
+      (agent-repl--ws-switch target))))
 
 (defun agent-repl-switch-left ()
   "Switch to the tab LEFT of the current one on the tab bar, wrapping."
