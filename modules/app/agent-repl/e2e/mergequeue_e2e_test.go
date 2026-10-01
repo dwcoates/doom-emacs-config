@@ -502,23 +502,35 @@ func TestARebaseConflictDrivesARepairPromptInTheRequestingWorkspace(t *testing.T
 	m := mqStartConflictedMerge(t, "mq-conflict-prompt")
 
 	// Assert: the conflict brief is a turn of the requesting workspace's own
-	// session, drawn on its main feed as an ordinary row and naming the
-	// worktree the rebase stopped in.
-	prompt := m.root.AwaitRow("the conflict-resolution prompt on the main feed", func(row *frontendv1.FeedRow) bool {
-		return row.GetUserPrompt() != nil && strings.Contains(mqFeedRowText(row), m.child.GetDir())
+	// session, drawn ONLY in the merge bubble, under its conflicts tab, and
+	// naming the worktree the rebase stopped in. A merge-started turn never
+	// draws on the main feed.
+	head := m.root.AwaitRow("the merge bubble's head", func(row *frontendv1.FeedRow) bool {
+		return row.GetActivity().GetMerge() != nil
 	})
-	if prompt.GetParent() != nil {
-		t.Fatalf("the repair prompt's main-feed row = %v, want an ordinary top-level row", prompt)
+	bubble := mqOpenFeedWatch(t, m.w, m.child, head.GetId())
+	defer bubble.Close()
+	isBrief := func(row *frontendv1.FeedRow) bool {
+		return row.GetUserPrompt() != nil && strings.Contains(mqFeedRowText(row), m.child.GetDir())
 	}
-	head := m.root.AwaitRow("the merge bubble's terminal", mqConcluded)
-	conflicts := false
-	for _, tab := range mqSubFeedTabs(t, m.w, m.child, head.GetId()) {
-		if tab.GetConflicts() != nil {
-			conflicts = true
+	prompt := bubble.AwaitRow("the conflict-resolution prompt in the merge bubble", isBrief)
+	m.root.AwaitRow("the merge bubble's terminal", mqConcluded)
+	conflictsTab := ""
+	for _, row := range bubble.Rows() {
+		if row.GetMergeTab().GetConflicts() != nil {
+			conflictsTab = row.GetId().GetValue()
 		}
 	}
-	if !conflicts {
-		t.Fatal("the merge bubble carried no conflicts tab, want the repair drawn in it too")
+	if conflictsTab == "" {
+		t.Fatal("the merge bubble carried no conflicts tab, want the repair drawn in it")
+	}
+	if prompt.GetParent().GetRow().GetValue() != conflictsTab {
+		t.Fatalf("the repair prompt's parent = %v, want the conflicts tab %s", prompt.GetParent(), conflictsTab)
+	}
+	for _, row := range m.root.Rows() {
+		if isBrief(row) {
+			t.Fatalf("the repair prompt reached the main feed: %v", row)
+		}
 	}
 }
 
