@@ -118,6 +118,10 @@ type Deps struct {
 	// Focus is Emacs's desktop focus: an Emacs WatchDaemon stream attaches it
 	// for the stream's lifetime, and ReportEditorFocus moves it.
 	Focus *desktopnotify.Focus
+	// PersistentWifi backs UpdatePersistentWifiMode, and its topic is the
+	// `persistent_wifi` state every Emacs WatchDaemon stream subscribes to (a
+	// webview's never does: its topbar view carries the same standing).
+	PersistentWifi PersistentWifi
 
 	// WebappDist is the webapp's dist directory, served on the same origin.
 	// Its entry point is re-stat'd per request and answered with
@@ -370,6 +374,8 @@ func New(deps Deps) (Server, error) {
 		return nil, missing("the standing loud faults")
 	case deps.Focus == nil:
 		return nil, missing("Emacs's focus")
+	case deps.PersistentWifi == nil:
+		return nil, missing("the persistent-wifi controller")
 	case deps.WebappDist == "":
 		return nil, missing("the webapp dist directory")
 	case deps.ImageOrigin == nil:
