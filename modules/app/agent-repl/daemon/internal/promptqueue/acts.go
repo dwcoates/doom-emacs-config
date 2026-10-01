@@ -8,9 +8,9 @@ import (
 
 	"claude-repld/internal/bounce"
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/holdfold"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/resolve/footer"
-	"claude-repld/internal/sessioncommand"
 	"claude-repld/internal/wsm"
 )
 
@@ -355,10 +355,7 @@ func (q *queue) workspaceLog(ctx context.Context, ws ids.WorkspaceID) func() (dl
 // context cut, and which, with its argument. A bubble-addressed prompt goes to
 // a subagent's own composer and is never a session act.
 func contextCutOf(sub Submission) (conversationv1.SessionCommand, string, bool) {
-	if sub.Target != nil {
-		return conversationv1.SessionCommand_SESSION_COMMAND_UNSPECIFIED, "", false
-	}
-	return sessioncommand.ContextCut(saidText(sub.Said))
+	return holdfold.ContextCut(sub.Target, sub.Said)
 }
 
 // actKindOf names the act kind a context-cut command is carried as.

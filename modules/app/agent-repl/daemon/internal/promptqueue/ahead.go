@@ -8,6 +8,7 @@ import (
 
 	"claude-repld/internal/classifier"
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/holdfold"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/resolve/footer"
 	"claude-repld/internal/wsm"
@@ -56,20 +57,10 @@ func (q *queue) itemAhead(ctx context.Context, ws ids.WorkspaceID, turn ids.Turn
 	if prev == nil {
 		return aheadRunning, wsm.HeldPrompt{}, nil
 	}
-	if heldIsAct(*prev) {
+	if holdfold.SessionAct(*prev) {
 		return aheadAct, *prev, nil
 	}
 	return aheadQueued, *prev, nil
-}
-
-// heldIsAct reports whether a hold is a session act: a held model or
-// permission-mode change, or a prompt whose text is a context cut.
-func heldIsAct(h wsm.HeldPrompt) bool {
-	if h.Act != nil {
-		return true
-	}
-	_, _, cut := contextCutOf(submissionOf(h))
-	return cut
 }
 
 // behindActVerdict is the verdict a prompt held behind a session act earns.
@@ -208,18 +199,18 @@ func (q *queue) isRunning(ws ids.WorkspaceID, turn ids.TurnID) bool {
 // coalesce folds SUB into the queued prompt INTO: INTO keeps its place and
 // takes SUB's content after its own, marked coalesced, and SUB leaves the
 // tray as its own entry. The caller holds the delivery and verdict locks.
+//
+// THE MERGE AND THE RETIREMENT ARE ONE TRANSACTION (CoalesceHeldPrompts), so a
+// failure leaves both entries exactly as they were. The queued prompt's own
+// verdict stands: it was reached against the running turn, not about SUB.
 func (q *queue) coalesce(ctx context.Context, sub Submission, into wsm.HeldPrompt, log dlog.Logger) error {
-	merged := into
-	merged.Said = mergedSaid(into.Said, sub.Said)
-	merged.Coalesced = true
-	if err := q.deps.DB.PutHeldPrompt(ctx, merged); err != nil {
-		log.Error(opClassify, "could not fold the prompt into the queued prompt ahead", dlog.Context{
-			"turn": string(sub.Turn), "into_turn": string(into.Turn), "cause": err.Error(),
-		})
-		return err
-	}
-	if err := q.deps.DB.TombstoneHeldPrompt(ctx, sub.Turn, wsm.Tombstone{Kind: tombstoneCoalesced, At: q.deps.Now()}); err != nil {
-		log.Error(opClassify, "the prompt was folded into the one ahead but its own entry was not retired", dlog.Context{
+	if err := q.deps.DB.CoalesceHeldPrompts(ctx, wsm.Coalescence{
+		Into:    into.Turn,
+		From:    sub.Turn,
+		Said:    mergedSaid(into.Said, sub.Said),
+		Retired: wsm.Tombstone{Kind: tombstoneCoalesced, At: q.deps.Now()},
+	}); err != nil {
+		log.Error(opClassify, "could not fold the prompt into the queued prompt ahead; both entries stand as they were", dlog.Context{
 			"turn": string(sub.Turn), "into_turn": string(into.Turn), "cause": err.Error(),
 		})
 		return err

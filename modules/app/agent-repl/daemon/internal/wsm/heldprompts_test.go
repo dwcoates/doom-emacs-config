@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
@@ -1044,5 +1045,240 @@ func TestUpdateHeldPromptClassificationRoundTripsAfterToolCall(t *testing.T) {
 	// Assert
 	if err != nil || readErr != nil || len(got) != 1 || got[0].Classification.Arm != ArmAfterToolCall {
 		t.Fatalf("HeldPrompts = (%+v, %v / %v), want an after_tool_call verdict", got, err, readErr)
+	}
+}
+
+// coalescePair records two standing holds in one workspace, the first queued
+// ahead of the second, and returns their turns.
+func coalescePair(t *testing.T, s *store, ws WorkspaceID) (into, from TurnID) {
+	t.Helper()
+	into, from = NewTurnID(), NewTurnID()
+	for i, turn := range []TurnID{into, from} {
+		if err := s.PutHeldPrompt(context.Background(), HeldPrompt{
+			Workspace: ws, Turn: turn, Said: said(string(turn)), Origin: "webapp", QueuedAt: instant.Add(time.Duration(i) * time.Second),
+		}); err != nil {
+			t.Fatalf("PutHeldPrompt: %v", err)
+		}
+	}
+	return into, from
+}
+
+// acceptedHoldForTurnEnd stamps TURN with an accepted hold_for_turn_end
+// verdict, the one a coalescence either keeps or discards.
+func acceptedHoldForTurnEnd(t *testing.T, s *store, turn TurnID) {
+	t.Helper()
+	if err := s.UpdateHeldPromptClassification(context.Background(), turn, Classification{Arm: ArmHoldForTurnEnd, Reason: "waits", At: instant}); err != nil {
+		t.Fatalf("UpdateHeldPromptClassification: %v", err)
+	}
+	if err := s.SetHeldPromptAccepted(context.Background(), turn); err != nil {
+		t.Fatalf("SetHeldPromptAccepted: %v", err)
+	}
+}
+
+// heldRow loads one hold, retired or not, failing the test when it is absent.
+func heldRow(t *testing.T, s *store, turn TurnID) HeldPrompt {
+	t.Helper()
+	got, ok, err := s.HeldPromptByTurn(context.Background(), turn)
+	if err != nil || !ok {
+		t.Fatalf("HeldPromptByTurn(%s) = (%v, %v), want the hold", turn, ok, err)
+	}
+	return got
+}
+
+func TestCoalesceHeldPromptsMergesIntoTheEntryAndRetiresTheFoldedOne(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	into, from := coalescePair(t, s, ws.ID)
+
+	// Act
+	err := s.CoalesceHeldPrompts(context.Background(), Coalescence{
+		Into: into, From: from, Said: said("merged"), Retired: Tombstone{Kind: "coalesced", At: instant},
+	})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("CoalesceHeldPrompts: %v", err)
+	}
+	gotInto, gotFrom := heldRow(t, s, into), heldRow(t, s, from)
+	if firstText(gotInto.Said) != "merged" || !gotInto.Coalesced || gotInto.Tombstone != nil {
+		t.Fatalf("into = %+v, want the merged words, marked coalesced, still standing", gotInto)
+	}
+	if gotFrom.Tombstone == nil || gotFrom.Tombstone.Kind != "coalesced" || !gotFrom.Tombstone.At.Equal(instant) {
+		t.Fatalf("from tombstone = %+v, want coalesced at %v", gotFrom.Tombstone, instant)
+	}
+}
+
+func TestCoalesceHeldPromptsKeepsTheEntrysQueuePosition(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	into, from := coalescePair(t, s, ws.ID)
+
+	// Act
+	err := s.CoalesceHeldPrompts(context.Background(), Coalescence{
+		Into: into, From: from, Said: said("merged"), Retired: Tombstone{Kind: "coalesced", At: instant},
+	})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("CoalesceHeldPrompts: %v", err)
+	}
+	if got := heldRow(t, s, into); !got.QueuedAt.Equal(instant) {
+		t.Fatalf("queued_at = %v, want the original %v", got.QueuedAt, instant)
+	}
+}
+
+func TestCoalesceHeldPromptsVerdict(t *testing.T) {
+	tests := []struct {
+		name           string
+		discardVerdict bool
+		wantVerdict    bool
+	}{
+		{name: "kept when the coalescence keeps it", discardVerdict: false, wantVerdict: true},
+		{name: "discarded with the acceptance when the coalescence discards it", discardVerdict: true, wantVerdict: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			ws := testWorkspace(t, s)
+			into, from := coalescePair(t, s, ws.ID)
+			acceptedHoldForTurnEnd(t, s, into)
+
+			// Act
+			err := s.CoalesceHeldPrompts(context.Background(), Coalescence{
+				Into: into, From: from, Said: said("merged"),
+				Retired: Tombstone{Kind: "coalesced", At: instant}, DiscardVerdict: tt.discardVerdict,
+			})
+
+			// Assert
+			if err != nil {
+				t.Fatalf("CoalesceHeldPrompts: %v", err)
+			}
+			got := heldRow(t, s, into)
+			if hasVerdict := got.Classification != nil && got.Accepted; hasVerdict != tt.wantVerdict {
+				t.Fatalf("into verdict = %+v accepted %v, want verdict standing = %v", got.Classification, got.Accepted, tt.wantVerdict)
+			}
+		})
+	}
+}
+
+func TestCoalesceHeldPromptsRefuses(t *testing.T) {
+	tests := []struct {
+		name string
+		// arrange returns the coalescence to attempt over the pair it was given.
+		arrange func(t *testing.T, s *store, into, from TurnID) Coalescence
+		wantErr error
+	}{
+		{
+			name: "a folded hold already retired",
+			arrange: func(t *testing.T, s *store, into, from TurnID) Coalescence {
+				if err := s.TombstoneHeldPrompt(context.Background(), from, Tombstone{Kind: "dropped", At: instant}); err != nil {
+					t.Fatalf("TombstoneHeldPrompt: %v", err)
+				}
+				return Coalescence{Into: into, From: from, Said: said("merged"), Retired: Tombstone{Kind: "coalesced", At: instant}}
+			},
+			wantErr: ErrTombstoned,
+		},
+		{
+			name: "an entry already retired",
+			arrange: func(t *testing.T, s *store, into, from TurnID) Coalescence {
+				if err := s.TombstoneHeldPrompt(context.Background(), into, Tombstone{Kind: "delivered", At: instant}); err != nil {
+					t.Fatalf("TombstoneHeldPrompt: %v", err)
+				}
+				return Coalescence{Into: into, From: from, Said: said("merged"), Retired: Tombstone{Kind: "coalesced", At: instant}}
+			},
+			wantErr: ErrTombstoned,
+		},
+		{
+			name: "an entry nothing was ever held under",
+			arrange: func(t *testing.T, s *store, _, from TurnID) Coalescence {
+				return Coalescence{Into: NewTurnID(), From: from, Said: said("merged"), Retired: Tombstone{Kind: "coalesced", At: instant}}
+			},
+			wantErr: ErrNotFound,
+		},
+		{
+			name: "a hold coalesced into itself",
+			arrange: func(t *testing.T, s *store, into, _ TurnID) Coalescence {
+				return Coalescence{Into: into, From: into, Said: said("merged"), Retired: Tombstone{Kind: "coalesced", At: instant}}
+			},
+		},
+		{
+			name: "no merged submission",
+			arrange: func(t *testing.T, s *store, into, from TurnID) Coalescence {
+				return Coalescence{Into: into, From: from, Retired: Tombstone{Kind: "coalesced", At: instant}}
+			},
+		},
+		{
+			name: "no tombstone kind",
+			arrange: func(t *testing.T, s *store, into, from TurnID) Coalescence {
+				return Coalescence{Into: into, From: from, Said: said("merged"), Retired: Tombstone{At: instant}}
+			},
+		},
+		{
+			name: "two workspaces' holds",
+			arrange: func(t *testing.T, s *store, into, _ TurnID) Coalescence {
+				other := testWorkspaceNamed(t, s, "other")
+				return Coalescence{Into: into, From: standingHold(t, s, other.ID), Said: said("merged"), Retired: Tombstone{Kind: "coalesced", At: instant}}
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			ws := testWorkspace(t, s)
+			into, from := coalescePair(t, s, ws.ID)
+			c := tt.arrange(t, s, into, from)
+			beforeInto, _, _ := s.HeldPromptByTurn(context.Background(), c.Into)
+
+			// Act
+			err := s.CoalesceHeldPrompts(context.Background(), c)
+
+			// Assert
+			if err == nil {
+				t.Fatalf("CoalesceHeldPrompts succeeded, want a refusal")
+			}
+			if tt.wantErr != nil && !errors.Is(err, tt.wantErr) {
+				t.Fatalf("CoalesceHeldPrompts = %v, want %v", err, tt.wantErr)
+			}
+			afterInto, _, _ := s.HeldPromptByTurn(context.Background(), c.Into)
+			if firstText(afterInto.Said) != firstText(beforeInto.Said) || afterInto.Coalesced {
+				t.Fatalf("into = %+v, want it untouched by the refusal", afterInto)
+			}
+		})
+	}
+}
+
+func TestCoalesceHeldPromptsIsAtomic(t *testing.T) {
+	// Arrange — the folded hold's retirement fails AFTER the merged words were
+	// written in the same transaction, so only a rollback can leave the entry
+	// as it was.
+	s, log := testStore(t)
+	ws := testWorkspace(t, s)
+	into, from := coalescePair(t, s, ws.ID)
+	acceptedHoldForTurnEnd(t, s, into)
+	corrupt(t, s, `CREATE TRIGGER fail_the_retirement BEFORE UPDATE OF tombstone_kind ON held_prompts
+		BEGIN SELECT RAISE(ABORT, 'the retirement failed'); END`)
+
+	// Act
+	err := s.CoalesceHeldPrompts(context.Background(), Coalescence{
+		Into: into, From: from, Said: said("merged"), Retired: Tombstone{Kind: "coalesced", At: instant}, DiscardVerdict: true,
+	})
+
+	// Assert
+	if err == nil {
+		t.Fatalf("CoalesceHeldPrompts succeeded through a failed retirement")
+	}
+	gotInto, gotFrom := heldRow(t, s, into), heldRow(t, s, from)
+	if firstText(gotInto.Said) != string(into) || gotInto.Coalesced || gotInto.Classification == nil || !gotInto.Accepted {
+		t.Fatalf("into = %+v, want its own words, verdict and acceptance, uncoalesced", gotInto)
+	}
+	if gotFrom.Tombstone != nil || firstText(gotFrom.Said) != string(from) {
+		t.Fatalf("from = %+v, want it standing with its own words", gotFrom)
+	}
+	if !loggedOperation(log, "daemon.wsm.coalesce_held_prompts", "error") {
+		t.Fatalf("the failed transaction was not logged at error: %v", log.Records())
 	}
 }

@@ -419,6 +419,85 @@ func (s *store) ReplaceHeldPromptSaid(ctx context.Context, turn TurnID, said *co
 	})
 }
 
+// CoalesceHeldPrompts folds one standing hold into another in ONE transaction:
+// INTO takes the merged content and is marked coalesced, and FROM is retired
+// with its tombstone. Either both land or neither does, so no reader ever sees
+// the merged words beside a FROM still standing, or FROM gone with nothing
+// merged. INTO keeps its queued_at, so it keeps its place in the queue.
+//
+// It refuses, writing nothing, when either hold is unknown or retired, when the
+// two are one hold, or when they stand in different workspaces.
+func (s *store) CoalesceHeldPrompts(ctx context.Context, c Coalescence) error {
+	const op = "daemon.wsm.coalesce_held_prompts"
+	fields := dlog.Context{
+		"into_turn": string(c.Into), "from_turn": string(c.From),
+		"tombstone_kind": c.Retired.Kind, "discard_verdict": c.DiscardVerdict,
+	}
+	if err := validateCoalescence(c); err != nil {
+		s.log.Error(op, "refused an inconsistent coalescence", withError(fields, err))
+		return err
+	}
+	blob, err := proto.Marshal(c.Said)
+	if err != nil {
+		wrapped := fmt.Errorf("wsm: encode the coalesced submission: %w", err)
+		s.log.Error(op, "refused an unencodable coalesced submission", withError(fields, wrapped))
+		return wrapped
+	}
+	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+		if err := requireStandingHold(ctx, tx, c.Into); err != nil {
+			return err
+		}
+		if err := requireStandingHold(ctx, tx, c.From); err != nil {
+			return err
+		}
+		if err := requireSameWorkspace(ctx, tx, c.Into, c.From); err != nil {
+			return err
+		}
+		update := `UPDATE held_prompts SET said = ?, coalesced = 1 WHERE turn_id = ?`
+		if c.DiscardVerdict {
+			update = `UPDATE held_prompts SET said = ?, coalesced = 1, classification_arm = NULL,
+			   classification_reason = NULL, classification_command = NULL, classification_at = NULL, accepted = 0
+			 WHERE turn_id = ?`
+		}
+		if _, err := tx.ExecContext(ctx, update, blob, c.Into); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, `UPDATE held_prompts SET tombstone_kind = ?, tombstone_at = ? WHERE turn_id = ?`,
+			c.Retired.Kind, nanos(c.Retired.At), c.From)
+		return err
+	})
+}
+
+// validateCoalescence refuses the coalescences no row may record.
+func validateCoalescence(c Coalescence) error {
+	switch {
+	case c.Said == nil:
+		return errors.New("wsm: a coalescence carries the merged submission")
+	case c.Into == "" || c.From == "":
+		return errors.New("wsm: a coalescence names both holds")
+	case c.Into == c.From:
+		return fmt.Errorf("wsm: held prompt %s cannot be coalesced into itself", c.Into)
+	case c.Retired.Kind == "":
+		return errors.New("wsm: a coalescence names the retired hold's tombstone")
+	}
+	return nil
+}
+
+// requireSameWorkspace refuses a coalescence across two workspaces' queues.
+func requireSameWorkspace(ctx context.Context, tx *sql.Tx, into, from TurnID) error {
+	var intoWS, fromWS string
+	if err := tx.QueryRowContext(ctx, `SELECT workspace_id FROM held_prompts WHERE turn_id = ?`, into).Scan(&intoWS); err != nil {
+		return err
+	}
+	if err := tx.QueryRowContext(ctx, `SELECT workspace_id FROM held_prompts WHERE turn_id = ?`, from).Scan(&fromWS); err != nil {
+		return err
+	}
+	if intoWS != fromWS {
+		return fmt.Errorf("wsm: held prompt %s stands in %s, not in %s with %s", from, fromWS, intoWS, into)
+	}
+	return nil
+}
+
 // HeldPromptByTurn loads one hold by its turn, INCLUDING a retired one, so a
 // caller can tell a turn nothing was ever held under from a hold that was
 // delivered or dropped. The bool reports whether any row exists.

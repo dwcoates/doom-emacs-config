@@ -518,6 +518,23 @@ type Tombstone struct {
 	At time.Time
 }
 
+// Coalescence is one held prompt folded into another standing in the same
+// queue: INTO keeps its place and identity and takes SAID, and FROM is retired.
+type Coalescence struct {
+	// Into is the hold that takes the merged content and keeps its place.
+	Into TurnID
+	// From is the hold folded into it, retired by the same transaction.
+	From TurnID
+	// Said is INTO's whole content after the merge.
+	Said *conversationv1.UserSaid
+	// Retired is FROM's tombstone.
+	Retired Tombstone
+	// DiscardVerdict clears INTO's verdict and acceptance with the merge, as
+	// an edit's replacement does, because both were about the words the merge
+	// replaced. False keeps them.
+	DiscardVerdict bool
+}
+
 // Turn is a turn's durable record: the origin that survives a restart, the
 // displaced capture a merge takes, and the idempotency claim.
 type Turn struct {
