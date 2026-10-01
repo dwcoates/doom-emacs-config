@@ -246,6 +246,11 @@ type Fleet struct {
 	// last watcher: the next watcher replays the selected transcript's first
 	// page. See opening.go.
 	selected map[ids.WorkspaceID]bool
+	// reapedAt is, per workspace, when the last shim THIS DAEMON HELD for it
+	// was concluded gone (shimclient.ExitInfo.At). Nothing that shim wrote can
+	// be later, so a transcript last written at or before it has no writer
+	// this daemon cannot account for. See noteReap and newestAdoptable.
+	reapedAt map[ids.WorkspaceID]time.Time
 
 	// detached counts the session starts running OFF a caller's goroutine, and
 	// detachedCtx is the context every one of them runs under. See
@@ -418,6 +423,7 @@ func NewFleet(deps FleetDeps) (*Fleet, error) {
 		sessions:        map[ids.WorkspaceID]*live{},
 		coldGates:       map[ids.WorkspaceID]coldGate{},
 		lastCold:        map[ids.WorkspaceID]*conversationv1.SessionCold{},
+		reapedAt:        map[ids.WorkspaceID]time.Time{},
 		generation:      map[ids.WorkspaceID]int{},
 		startGates:      map[ids.WorkspaceID]*sync.Mutex{},
 		watched:         map[ids.WorkspaceID]sessionwatcher.Watcher{},
@@ -644,6 +650,21 @@ func (f *Fleet) classifySource(ctx context.Context, log dlog.Logger, ws ids.Work
 			})
 			return source{Fresh: true}, nil
 		}
+		// THE DIRECTORY'S LAST SESSION IS RESTORED. The recorded id can name
+		// a conversation whose transcript is gone while the conversation the
+		// workspace really ran sits in its own directory (2026-09-30: a stale
+		// id after an unrecorded rotation lost the master workspace's whole
+		// conversation). Owner ruling: restore the directory's newest
+		// transcript; come up fresh only when there is none to restore.
+		if candidate, ok := f.newestAdoptable(ctx, log, dir, f.writerGoneAt(ws)); ok {
+			log.Info(opBringUp, "the recorded conversation has no transcript on disk; restoring the directory's newest transcript", dlog.Context{
+				"recorded_vendor_session_id": session.VendorSessionID,
+				"adopted_vendor_session_id":  candidate.VendorSessionID,
+				"cause":                      err.Error(),
+			})
+			f.recordAdopted(ctx, log, ws, candidate.VendorSessionID)
+			return source{VendorSessionID: candidate.VendorSessionID}, nil
+		}
 		log.Warn(opBringUp, "the recorded conversation has no transcript on disk; the session comes up FRESH", dlog.Context{
 			"vendor_session_id": session.VendorSessionID, "cause": err.Error(),
 		})
@@ -675,7 +696,9 @@ const TranscriptAdoptionIdleWindow = 45 * time.Second
 // up: it ADOPTS the newest idle transcript already on disk when there is one,
 // and otherwise starts FRESH.
 func (f *Fleet) adoptOrFresh(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, dir string) source {
-	candidate, ok := f.newestAdoptable(ctx, log, dir)
+	// NO RECORD IS NO WRITER THIS DAEMON CAN ACCOUNT FOR, so the idle guard
+	// stands whatever this daemon reaped.
+	candidate, ok := f.newestAdoptable(ctx, log, dir, time.Time{})
 	if !ok {
 		return source{Fresh: true}
 	}
@@ -690,10 +713,19 @@ func (f *Fleet) adoptOrFresh(ctx context.Context, log dlog.Logger, ws ids.Worksp
 // newestAdoptable is THE ONE DECISION whether the directory's newest on-disk
 // transcript may be adopted: it answers the candidate and true when it may.
 //
+// THE IDLE GUARD IS WAIVED FOR A TRANSCRIPT WHOSE WRITER IS ACCOUNTED FOR.
+// writerGoneAt is when the last shim this daemon held for the workspace was
+// concluded gone, zero when there is none. A transcript last written at or
+// before it was written by nothing still running that this daemon cannot
+// account for, so the two-writer hazard the guard exists for does not arise
+// -- and right after a relaunch or a shim's death the transcript was always
+// just written, so the guard would otherwise refuse the very conversation
+// being restored. A write after it is another writer's, and the guard stands.
+//
 // EVERY REFUSAL IS LOGGED HERE, with its reason, so a caller that then comes
 // up fresh is never silent about a transcript it declined. A probe or parse
 // error never crashes the bring-up and never mis-routes it.
-func (f *Fleet) newestAdoptable(ctx context.Context, log dlog.Logger, dir string) (account.AdoptableTranscript, bool) {
+func (f *Fleet) newestAdoptable(ctx context.Context, log dlog.Logger, dir string, writerGoneAt time.Time) (account.AdoptableTranscript, bool) {
 	candidate, err := f.deps.Accounts.NewestTranscript(ctx, dir)
 	if err != nil {
 		if errors.Is(err, account.ErrNoTranscripts) {
@@ -708,6 +740,15 @@ func (f *Fleet) newestAdoptable(ctx context.Context, log dlog.Logger, dir string
 		return account.AdoptableTranscript{}, false
 	}
 
+	if !writerGoneAt.IsZero() && !candidate.ModTime.After(writerGoneAt) {
+		log.Info(opBringUp, "the newest transcript was last written before this daemon's own shim for it was gone; the idle guard is waived", dlog.Context{
+			"workspace_dir":     dir,
+			"vendor_session_id": candidate.VendorSessionID,
+			"modified_at":       candidate.ModTime.Format(time.RFC3339Nano),
+			"writer_gone_at":    writerGoneAt.Format(time.RFC3339Nano),
+		})
+		return candidate, true
+	}
 	if idle := f.now().Sub(candidate.ModTime); idle < TranscriptAdoptionIdleWindow {
 		// TOO FRESH TO ADOPT: another writer may still hold it. See
 		// TranscriptAdoptionIdleWindow — two writers on one transcript corrupt
@@ -722,6 +763,51 @@ func (f *Fleet) newestAdoptable(ctx context.Context, log dlog.Logger, dir string
 		return account.AdoptableTranscript{}, false
 	}
 	return candidate, true
+}
+
+// noteReap records that a shim this daemon held for the workspace is gone, at
+// the instant its death was concluded. A client not yet reaped records
+// nothing: its writes may not be over.
+func (f *Fleet) noteReap(ws ids.WorkspaceID, c shimclient.Client) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.noteReapLocked(ws, c)
+}
+
+// noteReapLocked is noteReap with the fleet's lock already held.
+func (f *Fleet) noteReapLocked(ws ids.WorkspaceID, c shimclient.Client) {
+	info, reaped := c.Reaped()
+	if !reaped {
+		return
+	}
+	if info.At.After(f.reapedAt[ws]) {
+		f.reapedAt[ws] = info.At
+	}
+}
+
+// writerGoneAt answers when the last shim this daemon held for the workspace
+// was concluded gone, zero when this daemon reaped none.
+func (f *Fleet) writerGoneAt(ws ids.WorkspaceID) time.Time {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.reapedAt[ws]
+}
+
+// recordAdopted records an adopted conversation as the session's resume
+// handle, so the next bring-up resumes it directly. A record that fails is an
+// ERROR and the session still resumes the adopted conversation: the record
+// only saves the next bring-up the adoption.
+func (f *Fleet) recordAdopted(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, vendorSessionID string) {
+	replaced, err := f.deps.DB.SetVendorSessionID(ctx, ws, vendorSessionID)
+	if err != nil {
+		log.Error(opBringUp, "could not record the adopted conversation as the session's resume handle; the session still resumes it", dlog.Context{
+			"adopted_vendor_session_id": vendorSessionID, "cause": err.Error(),
+		})
+		return
+	}
+	log.Debug(opBringUp, "recorded the adopted conversation as the session's resume handle", dlog.Context{
+		"adopted_vendor_session_id": vendorSessionID, "replaced_vendor_session_id": replaced,
+	})
 }
 
 // neverEngaged is the PROOF that a missing transcript lost nothing: the
@@ -2050,6 +2136,7 @@ func (f *Fleet) Stop(ctx context.Context, ws ids.WorkspaceID, force bool) error 
 	if killErr != nil {
 		return fmt.Errorf("stop session for %q: kill the shim: %w", ws, killErr)
 	}
+	f.noteReap(ws, session.client)
 	f.deps.Log.Global().With(dlog.Context{"workspace": string(ws)}).Info(opBringUp,
 		"stopped the workspace session", dlog.Context{"force": force, "shim_pid": session.client.PID()})
 	return nil
@@ -2147,6 +2234,7 @@ func (f *Fleet) retireReaped(ws ids.WorkspaceID) {
 	delete(f.sessions, ws)
 	delete(f.coldGates, ws)
 	delete(f.lastCold, ws)
+	f.noteReapLocked(ws, session.client)
 	f.mu.Unlock()
 	f.logTransition(ws, "session_live", true, false,
 		dlog.Context{"reason": "shim_reaped", "shim_pid": session.client.PID()})
