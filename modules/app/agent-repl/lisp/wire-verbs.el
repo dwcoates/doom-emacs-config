@@ -3816,8 +3816,8 @@ it.  An incomplete request errors here rather than reaching the wire."
            (agent-repl-wire-verbs--require message "move" (plist-get request :move))))))
 
 (defun agent-repl-wire-decode-feed-selection-row (message json)
-  "Decode the selected-row MESSAGE (`FeedSelectionResponse' or
-`FeedSelectionPrompt') from JSON into (:row FEEDID).  The row is REQUIRED:
+  "Decode the selected-row MESSAGE (`FeedSelectionResponse',
+`FeedSelectionPrompt' or `FeedSelectionBubble') from JSON into (:row FEEDID).  The row is REQUIRED:
 a selection that names no row is a contract breach."
   (agent-repl-wire-verbs--check-keys message json '(row))
   (list :row (agent-repl-wire-verbs--decode-required-message
@@ -3840,9 +3840,10 @@ ARM is `:return-to-tail' or `:stay'; exactly one is set."
 
 (defun agent-repl-wire-decode-feed-selection (json)
   "Decode frontend.v1.FeedSelection from JSON into (:arm ARM :value V).
-ARM is `:none' (V the none plist), `:response' or `:prompt' (V (:row ID))."
+ARM is `:none' (V the none plist), `:response', `:prompt' or `:bubble'
+\(V (:row ID))."
   (let ((message "FeedSelection"))
-    (agent-repl-wire-verbs--check-keys message json '(none response prompt))
+    (agent-repl-wire-verbs--check-keys message json '(none response prompt bubble))
     (agent-repl-wire-verbs--decode-oneof
      message "selection" json
      (list (list 'none :none #'agent-repl-wire-decode-feed-selection-none)
@@ -3851,7 +3852,10 @@ ARM is `:none' (V the none plist), `:response' or `:prompt' (V (:row ID))."
                               "FeedSelectionResponse" v)))
            (list 'prompt :prompt
                  (lambda (v) (agent-repl-wire-decode-feed-selection-row
-                              "FeedSelectionPrompt" v)))))))
+                              "FeedSelectionPrompt" v)))
+           (list 'bubble :bubble
+                 (lambda (v) (agent-repl-wire-decode-feed-selection-row
+                              "FeedSelectionBubble" v)))))))
 
 (defun agent-repl-wire-decode-select-feed-row-success-selected (json)
   "Decode SelectFeedRowSuccessSelected from JSON into (:selection SEL).
@@ -3885,10 +3889,23 @@ THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an arm
 this codec does not know is refused as an unknown field."
   (let ((message "SelectFeedRowError"))
     (agent-repl-wire-verbs--check-keys
-     message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted))
+     message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted
+                    notSelectable))
     (list :cause
           (agent-repl-wire-verbs--decode-oneof
-           message "cause" json (agent-repl-wire-verbs--handover-arms "SelectFeedRow")))))
+           message "cause" json
+           (append (agent-repl-wire-verbs--handover-arms "SelectFeedRow")
+                   (list (list 'notSelectable :not-selectable
+                               #'agent-repl-wire-decode-select-feed-row-not-selectable)))))))
+
+(defun agent-repl-wire-decode-select-feed-row-not-selectable (json)
+  "Decode SelectFeedRowNotSelectable from JSON into (:row FEEDID).
+The clicked row the daemon does not deem selectable, echoed.  Emacs never
+sends a click, but its decoder knows every arm the contract has."
+  (let ((message "SelectFeedRowNotSelectable"))
+    (agent-repl-wire-verbs--check-keys message json '(row))
+    (list :row (agent-repl-wire-verbs--decode-required-message
+                message 'row json #'agent-repl-wire-decode-feed-id))))
 
 (defun agent-repl-wire-decode-select-feed-row-response (json)
   "Decode SelectFeedRowResponse from JSON into (:arm ARM :value V)."

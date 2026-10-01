@@ -3122,12 +3122,21 @@ Emacs encodes two of them and refuses the FeedId-bearing `detached'."
 
 (ert-deftest agent-repl-test-wire-verbs-select-feed-row-move-arms-pinned ()
   "SelectFeedRowRequest's move oneof has exactly the arms the schema declares.
-Emacs spells three of them; `leftView' is the webapp's alone."
+Emacs spells three of them; `leftView' and `bubble' (a click) are the
+webapp's alone."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_select_feed_row.pb.go"
                         "SelectFeedRowRequest")
                        #'string<)
-                 '("clear" "leftView" "prompt" "response"))))
+                 '("bubble" "clear" "leftView" "prompt" "response"))))
+
+(ert-deftest agent-repl-test-wire-verbs-select-feed-row-bubble-has-no-spelling ()
+  "The webapp's click move is never sent from Emacs, so it is refused."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-encode-select-feed-row-request
+                   (list :workspace agent-repl-test-wire-verbs--ref
+                         :move '(:arm :bubble :value (:row (:value "r1")))))
+                  :type 'agent-repl-wire-error)))
 
 ;;;; ---- SelectFeedRowResponse ------------------------------------------
 
@@ -3254,8 +3263,16 @@ Emacs spells three of them; `leftView' is the webapp's alone."
                         "agentrepl/v1/endpoint_select_feed_row.pb.go"
                         "SelectFeedRowError")
                        #'string<)
-                 '("notYetAdopted" "transferringAway"
+                 '("notSelectable" "notYetAdopted" "transferringAway"
                    "unknownWorkspace" "workspaceRefMismatch"))))
+
+(ert-deftest agent-repl-test-wire-verbs-select-feed-row-error-not-selectable ()
+  "The not-selectable refusal decodes with the row it echoes."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-select-feed-row-response
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"error\":{\"notSelectable\":{\"row\":{\"value\":\"r1\"}}}}"))
+                   '(:arm :error :value (:cause (:arm :not-selectable :value (:row (:value "r1")))))))))
 
 ;;;; ---- frontend.v1.FeedSelection --------------------------------------
 
@@ -3292,7 +3309,14 @@ Emacs spells three of them; `leftView' is the webapp's alone."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "frontend/v1/feed.pb.go" "FeedSelection")
                        #'string<)
-                 '("none" "prompt" "response"))))
+                 '("bubble" "none" "prompt" "response"))))
+
+(ert-deftest agent-repl-test-wire-verbs-feed-selection-bubble-decodes-its-row ()
+  "A selected bubble decodes to the `:bubble' arm with its row."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-feed-selection
+                    (agent-repl-test-wire-verbs--parse "{\"bubble\":{\"row\":{\"value\":\"r1\"}}}"))
+                   '(:arm :bubble :value (:row (:value "r1")))))))
 
 (ert-deftest agent-repl-test-wire-verbs-feed-selection-none-arms-pinned ()
   "FeedSelectionNone's viewport oneof has exactly the arms decoded here."

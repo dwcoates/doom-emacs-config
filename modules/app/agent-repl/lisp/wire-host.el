@@ -450,34 +450,57 @@ and read the click back, so selecting the tab is all that is left."
 ;;;; ---- The selection push ----
 
 (defun agent-repl-wire-decode-host-workspace-selection (value)
-  "Decode VALUE as `HostWorkspaceSelection', the kind keyword it names.
-One of `:none', `:response' and `:prompt': which kind of row the feed has
-selected, never the row, because Emacs never names it back.  Every arm is
-empty, so the arm IS the whole fact; an unset or doubled oneof is a
-contract breach."
+  "Decode VALUE as `HostWorkspaceSelection', a plist `(:kind :markdown)'.
+KIND is `:none', `:response', `:prompt' or `:bubble': which kind of row the
+feed has selected, never the row, because Emacs never names it back.
+MARKDOWN is the selected bubble's text, which the composer's `/' and `?'
+search, and nil exactly when KIND is `:none'.  An unset or doubled oneof is
+a contract breach."
   (let ((object (agent-repl-wire--object "HostWorkspaceSelection" value)))
-    (agent-repl-wire--check-keys "HostWorkspaceSelection" object '(none response prompt))
-    (plist-get
-     (agent-repl-wire--decoded
-      "HostWorkspaceSelection"
-      (agent-repl-wire--decode-oneof
-       "HostWorkspaceSelection" 'selection object
-       '((none :none agent-repl-wire-decode-host-workspace-selection-none)
-         (response :response agent-repl-wire-decode-host-workspace-selection-response)
-         (prompt :prompt agent-repl-wire-decode-host-workspace-selection-prompt))))
-     :arm)))
+    (agent-repl-wire--check-keys "HostWorkspaceSelection" object '(none response prompt bubble))
+    (let ((selection
+           (agent-repl-wire--decoded
+            "HostWorkspaceSelection"
+            (agent-repl-wire--decode-oneof
+             "HostWorkspaceSelection" 'selection object
+             '((none :none agent-repl-wire-decode-host-workspace-selection-none)
+               (response :response agent-repl-wire-decode-host-workspace-selection-response)
+               (prompt :prompt agent-repl-wire-decode-host-workspace-selection-prompt)
+               (bubble :bubble agent-repl-wire-decode-host-workspace-selection-bubble))))))
+      (list :kind (plist-get selection :arm)
+            :markdown (plist-get selection :value)))))
 
 (defun agent-repl-wire-decode-host-workspace-selection-none (value)
   "Decode VALUE as the empty message `HostWorkspaceSelectionNone'."
   (agent-repl-wire--decode-empty "HostWorkspaceSelectionNone" value))
 
+(defun agent-repl-wire--decode-host-workspace-selection-text (message-name value)
+  "Decode VALUE as the selected-arm MESSAGE-NAME, answering its text.
+Every selected arm carries the bubble's text in a REQUIRED `markdown'
+element; the text itself may be empty (a prompt that is an image alone)."
+  (let ((object (agent-repl-wire--object message-name value)))
+    (agent-repl-wire--check-keys message-name object '(markdown))
+    (agent-repl-wire--decode-message
+     message-name 'markdown object
+     #'agent-repl-wire-decode-host-workspace-selection-markdown)))
+
+(defun agent-repl-wire-decode-host-workspace-selection-markdown (value)
+  "Decode VALUE as `HostWorkspaceSelectionMarkdown', answering its text."
+  (let ((object (agent-repl-wire--object "HostWorkspaceSelectionMarkdown" value)))
+    (agent-repl-wire--check-keys "HostWorkspaceSelectionMarkdown" object '(text))
+    (agent-repl-wire--decode-string "HostWorkspaceSelectionMarkdown" 'text object)))
+
 (defun agent-repl-wire-decode-host-workspace-selection-response (value)
-  "Decode VALUE as the empty message `HostWorkspaceSelectionResponse'."
-  (agent-repl-wire--decode-empty "HostWorkspaceSelectionResponse" value))
+  "Decode VALUE as `HostWorkspaceSelectionResponse', answering its text."
+  (agent-repl-wire--decode-host-workspace-selection-text "HostWorkspaceSelectionResponse" value))
 
 (defun agent-repl-wire-decode-host-workspace-selection-prompt (value)
-  "Decode VALUE as the empty message `HostWorkspaceSelectionPrompt'."
-  (agent-repl-wire--decode-empty "HostWorkspaceSelectionPrompt" value))
+  "Decode VALUE as `HostWorkspaceSelectionPrompt', answering its text."
+  (agent-repl-wire--decode-host-workspace-selection-text "HostWorkspaceSelectionPrompt" value))
+
+(defun agent-repl-wire-decode-host-workspace-selection-bubble (value)
+  "Decode VALUE as `HostWorkspaceSelectionBubble', answering its text."
+  (agent-repl-wire--decode-host-workspace-selection-text "HostWorkspaceSelectionBubble" value))
 
 ;;;; ---- The remaining WatchHostWorkspace push arms ----
 
@@ -527,7 +550,7 @@ directory."
   (agent-repl-wire-decode-host-workspace-notification-clicked value))
 
 (defun agent-repl-wire-decode-watch-host-workspace-response-selection (value)
-  "Decode the `selection' push arm VALUE as its kind keyword."
+  "Decode the `selection' push arm VALUE as its `(:kind :markdown)' plist."
   (agent-repl-wire-decode-host-workspace-selection value))
 
 (defun agent-repl-wire-decode-watch-host-workspace-response-transferred (value)
