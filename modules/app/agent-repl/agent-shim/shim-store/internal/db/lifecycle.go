@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"errors"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	storev1 "agentrepl/proto/store/v1"
@@ -450,6 +451,53 @@ func (d *DB) closeDetachedByOrigin(ctx context.Context, tx *sql.Tx, activityID s
 			"detached work closed by its origin unit's terminal rows=%d", closed)
 	}
 	return nil
+}
+
+// commissionRow is the agent row's commission columns, exactly as
+// createSpawnedAgent wrote them from a spawn start's prompt.
+type commissionRow struct {
+	description, text, subagentType, requestedName, requestedModel, isolation sql.NullString
+	forkedFromCaller                                                          sql.NullBool
+}
+
+// commission is the prompt the columns were written from: the INVERSE of
+// createSpawnedAgent's column mapping, kept beside it so the two are read
+// together. A remote isolation's session handles are not columns (a spawn's
+// request never states them), so the remote arm is answered with both unset.
+func (row commissionRow) commission() (*conversationv1.AgentSubagentPrompt, error) {
+	prompt := &conversationv1.AgentSubagentPrompt{
+		Description:      stringOf(row.description),
+		Text:             row.text.String,
+		SubagentType:     stringOf(row.subagentType),
+		RequestedName:    stringOf(row.requestedName),
+		ForkedFromCaller: row.forkedFromCaller.Bool,
+	}
+	if row.requestedModel.Valid {
+		prompt.RequestedModel = &conversationv1.AgentModel{Name: row.requestedModel.String}
+	}
+	switch {
+	case !row.isolation.Valid:
+	case row.isolation.String == "none":
+		prompt.Isolation = &conversationv1.AgentSubagentPrompt_None{None: &conversationv1.AgentSubagentIsolationNone{}}
+	case row.isolation.String == "worktree":
+		prompt.Isolation = &conversationv1.AgentSubagentPrompt_Worktree{Worktree: &conversationv1.AgentSubagentIsolationWorktree{}}
+	case row.isolation.String == "remote":
+		prompt.Isolation = &conversationv1.AgentSubagentPrompt_Remote{Remote: &conversationv1.AgentSubagentIsolationRemote{}}
+	default:
+		return nil, storagef(errUnknownIsolation, "the agent row records isolation %q, which names no arm this store writes", row.isolation.String)
+	}
+	return prompt, nil
+}
+
+// errUnknownIsolation marks an agent row whose isolation column names no arm.
+var errUnknownIsolation = errors.New("unknown recorded isolation")
+
+// stringOf is the inverse of optionalString: a NULL column is an UNSET field.
+func stringOf(value sql.NullString) *string {
+	if !value.Valid {
+		return nil
+	}
+	return &value.String
 }
 
 func optionalString(value *string) sql.NullString {

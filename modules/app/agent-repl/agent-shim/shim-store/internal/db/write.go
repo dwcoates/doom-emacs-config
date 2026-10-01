@@ -6,6 +6,7 @@ import (
 	"errors"
 	"time"
 
+	conversationv1 "agentrepl/proto/conversation/v1"
 	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/shim-store/internal/logging"
 	"google.golang.org/protobuf/proto"
@@ -53,6 +54,17 @@ type SkippedEntry struct {
 	ToBook string
 }
 
+// UnplacedEntry is one batch entry the store did NOT STORE: a page line its
+// producer wrote `owner_unknown` (store.v1 StorePageLineOwnerUnknown) whose
+// upsert_key no stored row holds, so it names no book the store could place it
+// in. Nothing of it is committed and it is recorded at ERROR; the batch's other
+// entries still commit.
+type UnplacedEntry struct {
+	UpsertKey string
+	// Detail is the store's account, for a human and for logs.
+	Detail string
+}
+
 // WriteResult reports what one batch did. Absorbed is not a lesser success:
 // a replayed batch whose write_ids all landed before is the SAME durable
 // answer, and the producer retires it from its retry buffer either way.
@@ -63,7 +75,10 @@ type WriteResult struct {
 	// SkippedEntry). A skip commits nothing for that entry and keeps the stored
 	// row, but the batch still commits every other entry.
 	Skipped []SkippedEntry
-	Lines   []LineWritten
+	// Unplaced is the owner-unknown entries the store could not place (see
+	// UnplacedEntry). Each committed nothing.
+	Unplaced []UnplacedEntry
+	Lines    []LineWritten
 	// BashRows is the bash rows this write produced, ready for the WatchBashRun
 	// fan-out. A run's rows are published exactly as a book's lines are.
 	BashRows []BashRowWritten
@@ -247,6 +262,7 @@ func (r *WriteResult) merge(part WriteResult) {
 	r.Written += part.Written
 	r.Absorbed += part.Absorbed
 	r.Skipped = append(r.Skipped, part.Skipped...)
+	r.Unplaced = append(r.Unplaced, part.Unplaced...)
 	r.Lines = append(r.Lines, part.Lines...)
 	r.BashRows = append(r.BashRows, part.BashRows...)
 	r.Shapes += part.Shapes
@@ -412,6 +428,24 @@ func (d *DB) applyEntry(ctx context.Context, tx *sql.Tx, base logging.Fields, r 
 		result.Absorbed++
 		d.log.LogVerbose(fields, "write absorbed: this write_id already landed entries_index=%d", r.index)
 		return nil
+	}
+
+	if r.ownerUnknown {
+		placed, unplaced, err := d.placeUnownedLine(ctx, tx, r)
+		if err != nil {
+			return d.refuse(fields, err)
+		}
+		if unplaced != nil {
+			result.Unplaced = append(result.Unplaced, *unplaced)
+			failed := fields
+			failed.Level = "error"
+			failed.ErrorCause = unplaced.Detail
+			d.log.Log(failed, "entry not stored: it is owner_unknown and no stored row holds its upsert_key, so it names no book entries_index=%d", r.index)
+			return nil
+		}
+		r = placed
+		fields.BookAgentID = r.book.String
+		d.log.LogVerbose(fields, "owner_unknown entry placed in the book that holds its upsert_key entries_index=%d", r.index)
 	}
 
 	skip, retiredFrom, prior, err := d.applyIdentityPolicy(ctx, tx, fields, &r)
@@ -726,6 +760,47 @@ func (d *DB) applyIdentityPolicy(ctx context.Context, tx *sql.Tx, fields logging
 		return nil, "", nil, err
 	}
 	return nil, "", row, nil
+}
+
+// placeUnownedLine places a page line its producer wrote `owner_unknown` in the
+// book that already holds its upsert_key (store.v1 StorePageLineOwnerUnknown).
+//
+// THE PLACED LINE IS THE WRITE A KNOWN BOOK WOULD HAVE MADE. The entry is
+// re-built with the stored row's book on the envelope, that book as the
+// frame's attribution, and the stored row's top_level, and is classified
+// again from the top -- so every check a booked line passes, it passes, and
+// nothing after this point can tell the two apart.
+//
+// A KEY NO STORED ROW HOLDS, or one held only by a never-served row, names no
+// book: the entry is answered unplaced, never filed in a guessed one.
+func (d *DB) placeUnownedLine(ctx context.Context, tx *sql.Tx, r routed) (routed, *UnplacedEntry, error) {
+	var book, topLevel sql.NullString
+	switch err := tx.QueryRowContext(ctx,
+		`SELECT book_agent_id, top_level FROM entry WHERE upsert_key = ?`, r.upsertKey).Scan(&book, &topLevel); {
+	case errors.Is(err, sql.ErrNoRows):
+		return routed{}, &UnplacedEntry{UpsertKey: r.upsertKey,
+			Detail: "no stored row holds this upsert_key, so an owner_unknown write names no book"}, nil
+	case err != nil:
+		return routed{}, nil, storagef(err, "reading the book of row %q to place an owner_unknown write", r.upsertKey)
+	}
+	if !book.Valid {
+		return routed{}, &UnplacedEntry{UpsertKey: r.upsertKey,
+			Detail: "the stored row under this upsert_key is never served and has no book, so an owner_unknown write names none"}, nil
+	}
+	entry := proto.Clone(r.entry).(*storev1.StoreEntry)
+	update := entry.GetAgentUpdate()
+	line := update.GetServeableFrame()
+	owner := &conversationv1.AgentId{Value: book.String}
+	line.Book = &storev1.StorePageLine_PageAgentId{PageAgentId: owner}
+	line.GetAgentItem().GetAgentFrame().AgentId = owner
+	if topLevel.Valid {
+		update.TopLevel = &conversationv1.AgentId{Value: topLevel.String}
+	}
+	placed, err := classify(entry, r.index)
+	if err != nil {
+		return routed{}, nil, err
+	}
+	return placed, nil, nil
 }
 
 // storedRow is the row an upsert found under its key: what the identity policy

@@ -854,3 +854,95 @@ func TestClassifyAcceptsAPositivePlace(t *testing.T) {
 		t.Fatalf("classify = %v, want nil", err)
 	}
 }
+
+// ---- a page line written owner_unknown (StorePageLineOwnerUnknown) ----
+
+// unownedEntry is an owner-unknown page line carrying FRAME, as the shim writes
+// a task-stream frame whose owner it never observed.
+func unownedEntry(writeID, upsertKey string, frame *conversationv1.AgentFrame) *storev1.StoreEntry {
+	return agentUpdateEntry(writeID, upsertKey, &storev1.StoreAgentUpdate{
+		AgentInfo: &storev1.StoreAgentUpdate_ServeableFrame{ServeableFrame: &storev1.StorePageLine{
+			Book:      &storev1.StorePageLine_OwnerUnknown{OwnerUnknown: &storev1.StorePageLineOwnerUnknown{}},
+			AgentItem: frameItem(frame),
+		}},
+	})
+}
+
+// beat is a subagent unit's running beat with no attribution, as an unowned
+// frame is.
+func beat(unit string, tokens uint64) *conversationv1.AgentFrame {
+	frame := activityFrame("", unit, &conversationv1.AgentSubagent{Result: &conversationv1.AgentSubagent_Update{
+		Update: &conversationv1.AgentSubagentUpdate{
+			Prompt:   &conversationv1.AgentSubagentPrompt{Text: "go"},
+			Progress: &conversationv1.AgentSubagentProgress{TotalTokens: tokens},
+		},
+	}})
+	frame.AgentId = nil
+	return frame
+}
+
+func TestClassifyRefusesAnUnownedLineThatClaimsAnything(t *testing.T) {
+	tests := []struct {
+		name  string
+		entry *storev1.StoreEntry
+		want  string
+	}{
+		{
+			name: "a prompt, which always names its recipient",
+			entry: agentUpdateEntry("w", "u", &storev1.StoreAgentUpdate{AgentInfo: &storev1.StoreAgentUpdate_ServeableFrame{ServeableFrame: &storev1.StorePageLine{
+				Book:      &storev1.StorePageLine_OwnerUnknown{OwnerUnknown: &storev1.StorePageLineOwnerUnknown{}},
+				AgentItem: promptItem("agent-1"),
+			}}}),
+			want: "carries no agent_frame",
+		},
+		{
+			name:  "a frame that names its agent",
+			entry: unownedEntry("w", "u", activityFrame("agent-1", "unit-1", subagentStart("unit-1"))),
+			want:  "an unowned frame states no attribution",
+		},
+		{
+			name: "a top_level",
+			entry: func() *storev1.StoreEntry {
+				e := unownedEntry("w", "u", beat("unit-1", 1))
+				e.GetAgentUpdate().TopLevel = &conversationv1.AgentId{Value: "agent-1"}
+				return e
+			}(),
+			want: "keeps the stored row's top_level",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			_, err := classify(tt.entry, 0)
+
+			// Assert
+			if !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("err = %v, want an invalid request saying %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestClassifyRefusesAPageLineThatNamesNoBookArm(t *testing.T) {
+	// Arrange
+	entry := pageEntry("w", "u", "agent-1", promptItem("agent-1"))
+	entry.GetAgentUpdate().GetServeableFrame().Book = nil
+
+	// Act
+	_, err := classify(entry, 0)
+
+	// Assert
+	if !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), "sets no `book` arm") {
+		t.Fatalf("err = %v, want an invalid request naming the unset book arm", err)
+	}
+}
+
+func TestClassifyLeavesAnUnownedLineUnbooked(t *testing.T) {
+	// Act
+	r, err := classify(unownedEntry("w", "u", beat("unit-1", 1)), 0)
+
+	// Assert
+	if err != nil || !r.ownerUnknown || r.book.Valid || r.kind != kindPageLine {
+		t.Fatalf("routed = {ownerUnknown %t, book %v, kind %q}, err %v; want an unbooked page line awaiting placement", r.ownerUnknown, r.book, r.kind, err)
+	}
+}

@@ -364,7 +364,7 @@ func TestRetirableAnswersPerItem(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			// Arrange
-			line := &storev1.StorePageLine{PageAgentId: &conversationv1.AgentId{Value: "agent-1"}, AgentItem: test.item}
+			line := &storev1.StorePageLine{Book: &storev1.StorePageLine_PageAgentId{PageAgentId: &conversationv1.AgentId{Value: "agent-1"}}, AgentItem: test.item}
 
 			// Act
 			_, got := retirable(line)

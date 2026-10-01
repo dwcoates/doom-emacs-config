@@ -174,8 +174,8 @@ func agentUpdateEntry(writeID, upsertKey string, update *storev1.StoreAgentUpdat
 func pageEntry(writeID, upsertKey, book string, item *storev1.StoreAgentItem) *storev1.StoreEntry {
 	return agentUpdateEntry(writeID, upsertKey, &storev1.StoreAgentUpdate{
 		AgentInfo: &storev1.StoreAgentUpdate_ServeableFrame{ServeableFrame: &storev1.StorePageLine{
-			PageAgentId: &conversationv1.AgentId{Value: book},
-			AgentItem:   item,
+			Book:      &storev1.StorePageLine_PageAgentId{PageAgentId: &conversationv1.AgentId{Value: book}},
+			AgentItem: item,
 		}},
 	})
 }

@@ -210,3 +210,58 @@ func TestTheLocatorLookupBuildsNoAutomaticIndex(t *testing.T) {
 	// Assert
 	assertNoAutomaticIndex(t, "the locator lookup", plan)
 }
+
+// ---- an agent's recorded commission (AgentCommission) ----
+
+func TestAnAgentWithNoRowHasNoCommission(t *testing.T) {
+	// Arrange
+	d, s := newStore(t)
+
+	// Act
+	commission, found, err := d.AgentCommission(ctx(), "toolu_nobody")
+
+	// Assert
+	if err != nil || found || commission != nil {
+		t.Fatalf("commission = %v (found %t, err %v), want no commission and no error", commission, found, err)
+	}
+	s.assertLogged(t, "info", "holds no row for agent toolu_nobody")
+}
+
+func TestAnAgentKnownOnlyByItsLineageHasNoCommission(t *testing.T) {
+	// Arrange: a settled spawn records the lineage and nothing of the start.
+	d, s := newStore(t)
+	writeOK(t, d, pageEntry("settle", "activity:toolu_sub", "agent-main", frameItem(activityFrame("agent-main", "toolu_sub", subagentSuccess("toolu_sub")))))
+
+	// Act
+	commission, found, err := d.AgentCommission(ctx(), "toolu_sub")
+
+	// Assert
+	if err != nil || found || commission != nil {
+		t.Fatalf("commission = %v (found %t, err %v), want no commission for a lineage-only row", commission, found, err)
+	}
+	s.assertLogged(t, "info", "lineage but no start")
+}
+
+func TestTheCommissionReadRefusesAnEmptyAgent(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+
+	// Act
+	_, _, err := d.AgentCommission(ctx(), "")
+
+	// Assert
+	if !errors.Is(err, ErrInvalid) {
+		t.Fatalf("err = %v, want an invalid request", err)
+	}
+}
+
+func TestTheCommissionReadScansNoTable(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+
+	// Act
+	plan := queryPlan(t, d, agentCommissionSQL, "toolu_spawn")
+
+	// Assert
+	assertNoTableScan(t, "the commission read", plan)
+}

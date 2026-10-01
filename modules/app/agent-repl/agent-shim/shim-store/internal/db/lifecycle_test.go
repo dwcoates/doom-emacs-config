@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
+	"google.golang.org/protobuf/proto"
 )
 
 // The ARM IS THE ISOLATION, so the column holds the arm's name. A new arm that
@@ -258,4 +259,108 @@ func TestASettledSpawnWhoseLineageCannotBeWrittenFailsTheBatchLoudly(t *testing.
 		t.Fatalf("error = %v, want ErrStorage", err)
 	}
 	s.assertLogged(t, "error", "recording the spawner of settled spawn")
+}
+
+// ---- the commission columns read back (commissionRow.commission) ----
+
+// everyPromptField is a commission stating every field AgentSubagentPrompt has,
+// with the isolation the columns can carry whole.
+func everyPromptField() *conversationv1.AgentSubagentPrompt {
+	description, subagentType, name := "fix the shim", "opus-medium", "fixer"
+	return &conversationv1.AgentSubagentPrompt{
+		Description:      &description,
+		Text:             "go",
+		SubagentType:     &subagentType,
+		RequestedName:    &name,
+		RequestedModel:   &conversationv1.AgentModel{Name: "opus"},
+		ForkedFromCaller: true,
+		Isolation:        &conversationv1.AgentSubagentPrompt_Worktree{Worktree: &conversationv1.AgentSubagentIsolationWorktree{}},
+	}
+}
+
+// spawnWith records a spawn of AGENT commissioned with PROMPT, as a start frame
+// in the main agent's book.
+func spawnWith(t *testing.T, d *DB, agent string, prompt *conversationv1.AgentSubagentPrompt) {
+	t.Helper()
+	start := subagentStart(agent)
+	start.GetStart().Prompt = prompt
+	writeOK(t, d, pageEntry("spawn-"+agent, "activity:"+agent, "agent-main", frameItem(activityFrame("agent-main", agent, start))))
+}
+
+func TestTheCommissionRoundTripsEveryRecordedPromptField(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+	spawnWith(t, d, "toolu_spawn", everyPromptField())
+
+	// Act
+	commission, found, err := d.AgentCommission(ctx(), "toolu_spawn")
+
+	// Assert
+	if err != nil || !found || !proto.Equal(commission, everyPromptField()) {
+		t.Fatalf("commission = %v (found %t, err %v), want the spawn's own prompt %v", commission, found, err, everyPromptField())
+	}
+}
+
+// THE MAPPING HAS NO COMPILER: a field AgentSubagentPrompt gains that the round
+// trip above does not set fails here, so it is mapped (or ruled out) rather than
+// silently dropped.
+func TestTheRoundTripFixtureSetsEveryPromptField(t *testing.T) {
+	// Arrange
+	fixture := everyPromptField().ProtoReflect()
+	fields := fixture.Descriptor().Fields()
+
+	// Act
+	var unset []string
+	for i := 0; i < fields.Len(); i++ {
+		field := fields.Get(i)
+		if oneof := field.ContainingOneof(); oneof != nil && !oneof.IsSynthetic() {
+			if fixture.WhichOneof(oneof) == nil {
+				unset = append(unset, string(oneof.Name()))
+			}
+			continue
+		}
+		if !fixture.Has(field) {
+			unset = append(unset, string(field.Name()))
+		}
+	}
+
+	// Assert
+	if len(unset) != 0 {
+		t.Fatalf("the round-trip fixture leaves %v unset; every AgentSubagentPrompt field must be mapped to an agent column or ruled out", unset)
+	}
+}
+
+func TestARemoteIsolationIsAnsweredWithItsHandlesUnset(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+	url, task := "https://remote/s", "rt-1"
+	prompt := everyPromptField()
+	prompt.Isolation = &conversationv1.AgentSubagentPrompt_Remote{Remote: &conversationv1.AgentSubagentIsolationRemote{SessionUrl: &url, RemoteTaskId: &task}}
+	spawnWith(t, d, "toolu_spawn", prompt)
+
+	// Act
+	commission, _, err := d.AgentCommission(ctx(), "toolu_spawn")
+
+	// Assert
+	remote := commission.GetRemote()
+	if err != nil || remote == nil || remote.SessionUrl != nil || remote.RemoteTaskId != nil {
+		t.Fatalf("isolation = %v (err %v), want the remote arm with no handles", commission.GetIsolation(), err)
+	}
+}
+
+func TestAnUnknownRecordedIsolationIsAStorageFailure(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+	spawnWith(t, d, "toolu_spawn", everyPromptField())
+	if _, err := d.sql.Exec(`UPDATE agent SET isolation = 'teleport' WHERE agent_id = 'toolu_spawn'`); err != nil {
+		t.Fatalf("corrupt the isolation column: %v", err)
+	}
+
+	// Act
+	_, _, err := d.AgentCommission(ctx(), "toolu_spawn")
+
+	// Assert
+	if !errors.Is(err, ErrStorage) || !errors.Is(err, errUnknownIsolation) {
+		t.Fatalf("err = %v, want a storage failure naming the unknown isolation", err)
+	}
 }
