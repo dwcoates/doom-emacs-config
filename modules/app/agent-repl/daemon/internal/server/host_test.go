@@ -1112,6 +1112,11 @@ func TestTheComposerGateFollowsTheOccupancyLeaseWithNothingParked(t *testing.T) 
 			want: func(l *agentreplv1.HostSessionLive) bool { return l.GetOpen() != nil },
 		},
 		{
+			name: "a merge holding work is open",
+			held: true, holder: wsm.HolderMerge, policy: wsm.PolicyHold,
+			want: func(l *agentreplv1.HostSessionLive) bool { return l.GetOpen() != nil },
+		},
+		{
 			name: "a merge refusing work is merging",
 			held: true, holder: wsm.HolderMerge, policy: wsm.PolicyRefuse,
 			want: func(l *agentreplv1.HostSessionLive) bool { return l.GetMerging() != nil },

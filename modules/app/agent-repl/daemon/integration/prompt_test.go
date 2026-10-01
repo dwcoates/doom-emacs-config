@@ -910,7 +910,7 @@ func promptAwaitMergeLease(t *testing.T, f *fixture) {
 
 }
 
-func TestSubmitPromptDuringAMergeLeaseAnswersMergingRefusal(t *testing.T) {
+func TestSubmitPromptDuringAMergeLeaseIsHeldUnclassified(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	f, _, _ := promptMergeFixture(t)
@@ -928,16 +928,17 @@ func TestSubmitPromptDuringAMergeLeaseAnswersMergingRefusal(t *testing.T) {
 		Origin:         origin,
 	})
 
-	// Assert: `merging` is a LANDED arm of SubmitPromptError, so the refusal
-	// is a typed answer rather than a transport error.
-	if resp.GetError().GetMerging() == nil {
-		t.Fatalf("SubmitPrompt during a merge lease = %v, want error.merging", resp)
+	// Assert: the submission is accepted and held by the merge, with no
+	// classifier behind it (owner ruling, 2026-10-01).
+	turn := resp.GetSuccess().GetTurn().GetTurn()
+	if turn.GetValue() == "" {
+		t.Fatalf("SubmitPrompt during a merge lease = %v, want the prompt accepted and held", resp)
 	}
-	// The refusal IS the subject, and the queue records it at WARNING
-	// (internal/promptqueue/submit.go). `merging` is a LANDED arm (refuse.go
-	// maps promptqueue.ErrMerging to it), so the server's own refusal path
-	// answers it at DEBUG, not WARN -- only the queue's own warning fires.
-	f.d.ExpectWarnings("daemon.promptqueue.submit")
+	got := harness.AwaitNext(t, f.d.Ctx(), f.d.WatchHolds(f.ws), "the tray a late subscriber is replayed")
+	entry := promptHeldEntry(got, turn)
+	if entry.GetMerge() == nil || entry.GetDaemonHeld() == nil {
+		t.Fatalf("the held entry = %v, want the merge hold arm and the daemon_held verdict", entry)
+	}
 }
 
 func TestPromptsHeldBeforeAMergeLeaseStayHeld(t *testing.T) {
@@ -965,8 +966,14 @@ func TestPromptsHeldBeforeAMergeLeaseStayHeld(t *testing.T) {
 	// the current view, which is exactly the question being asked.
 	promptAwaitMergeLease(t, f)
 	got := harness.AwaitNext(t, f.d.Ctx(), f.d.WatchHolds(f.ws), "the tray a late subscriber is replayed")
-	if promptHeldEntry(got, turn2) == nil {
+	entry := promptHeldEntry(got, turn2)
+	if entry == nil {
 		t.Fatalf("a prompt held before the merge began was dropped once the merge started: %v", got)
+	}
+	// The merge's lease stamps it: it waits for the merge, as a prompt
+	// submitted during the merge does.
+	if entry.GetMerge() == nil {
+		t.Fatalf("the pre-merge held entry = %v, want it held by the merge", entry)
 	}
 }
 

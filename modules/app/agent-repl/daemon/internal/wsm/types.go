@@ -346,10 +346,12 @@ type LeasePolicy int
 
 // The lease policies.
 const (
-	// PolicyRefuse errors new submissions (the merge lease: post-merge-start
-	// work would be orphaned because a merged workspace closes).
+	// PolicyRefuse errors new submissions. Nothing writes it since
+	// 2026-10-01, when the merge lease began to hold; a merge lease a build
+	// before then wrote may still carry it, and it still refuses.
 	PolicyRefuse LeasePolicy = iota
-	// PolicyHold parks new submissions until release (restart, drain).
+	// PolicyHold parks new submissions until release (restart, drain,
+	// merge).
 	PolicyHold
 	// PolicyParked is RETIRED: nothing parks (owner ruling, 2026-09-29) and
 	// nothing writes it. A lease row a build before 2026-09-30 wrote may
@@ -466,6 +468,10 @@ const (
 	HoldSessionStarting
 	// HoldBuildRefresh holds across a build-staleness bounce.
 	HoldBuildRefresh
+	// HoldMerge holds while a merge of the workspace drives its session. It
+	// is bound to the merge it waits on (bindMergeHold): recording one keeps
+	// the merge's requester open once it lands.
+	HoldMerge
 )
 
 // ClassificationArm is the classifier's verdict on a held prompt: ONE column
@@ -795,6 +801,13 @@ const (
 	// upstream.
 	MergeSourceMergedUpstream
 )
+
+// ClosesRequester reports whether a landed merge of this source closes the
+// workspace that asked for it, which is exactly when keeping that workspace
+// open means anything.
+func (k MergeSourceKind) ClosesRequester() bool {
+	return k == MergeSourceOwnBranch || k == MergeSourceMergedUpstream
+}
 
 // MergeSource is one merge's source, stored with its queue entry so a restart
 // runs the merge that was asked for.

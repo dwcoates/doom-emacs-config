@@ -395,8 +395,13 @@ func (s *server) setHostComposer(
 	}
 	switch lease.Holder {
 	case wsm.HolderMerge:
-		// NOTHING PARKS: a merge lease, whatever policy an older build wrote
-		// on it, closes the composer while the merge runs.
+		// A HOLDING MERGE LEASE LEAVES THE COMPOSER OPEN: what is submitted
+		// while the merge runs is held until it ends, so the gate agrees with
+		// the queue. A merge lease an older build wrote refuses, and closes it.
+		if lease.Policy == wsm.PolicyHold {
+			out.Composer = &agentreplv1.HostSessionLive_Open{Open: &agentreplv1.HostComposerOpen{}}
+			return true
+		}
 		out.Composer = &agentreplv1.HostSessionLive_Merging{Merging: &agentreplv1.HostComposerMerging{}}
 		return true
 	case wsm.HolderRestart:

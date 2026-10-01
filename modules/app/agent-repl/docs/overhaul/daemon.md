@@ -77,10 +77,11 @@ unmarked is DISCRETIONARY by default.
      conversation" even before that shim dials in. Daemon-side
      occupancy (which peer may drive the session) is the WSM lease
      row's, in-memory-guarded per the shim-client mutex. The lease projects PER-HOLDER REFUSAL POLICY onto new
-     submissions — the merge lease ERRORS them (SubmitPrompt's merging
-     refusal arm; post-merge-start work would be orphaned since a merged
-     workspace closes), restart-pending and shutdown-drain leases HOLD
-     them; items already held when a lease is acquired stay held.
+     submissions — the merge, restart-pending and shutdown-drain leases
+     HOLD them (since 2026-10-01 the merge's hold is unclassified, and a
+     prompt it holds keeps the requester open past the landing, so no
+     post-merge-start work is orphaned); items already held when a lease
+     is acquired stay held, now by that lease.
    - DURABLE FACT INVENTORY (ruled; the facts are prescribed, the DDL is
      the orchestrator's):
      - MERGE GEOMETRY: per-workspace source branch, source dir, target
@@ -353,9 +354,9 @@ unmarked is DISCRETIONARY by default.
      merge-lease ledger records only lease id + tab intervals for
      replay reconstruction — never the content); an
      in-flight merge across a daemon restart is resumed or LOUDLY
-     failed, never left with the lease stuck; the composer gate is the
-     primary defense against post-merge-start prompts and the merging
-     refusal arm is the race fallback; the old daemon's merge code is
+     failed, never left with the lease stuck; the composer stays open
+     during a merge and what is submitted is held until it ends (owner
+     ruling, 2026-10-01); the old daemon's merge code is
      the edge-case reference.
    - PREREQUISITES: WSM, shim client, prompt queue.
 
@@ -1086,7 +1087,7 @@ its own file only when >1 endpoint needs it.
   whole-list-replaced: `HeldPrompt` (deliver/force/cancel via
   UpdateHeldPrompt) and `HeldOffer` (a daemon-parked question, e.g. the
   merge-dequeue offer, answered via AnswerHeldOffer). Gates are NOT
-  holds: a merge lease REFUSES input, and so does a hibernating
+  holds: a hibernating
   session's own occupancy lease FOR THE STAND-DOWN WINDOW ONLY — while
   the Hibernate directive, its ack and the shim's exit are still in
   flight, that lease refuses rather than holds. ONCE THE SHIM IS GONE

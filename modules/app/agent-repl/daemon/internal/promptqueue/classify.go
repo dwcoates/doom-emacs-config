@@ -72,7 +72,12 @@ func (q *queue) hold(ctx context.Context, sub Submission, running ids.TurnID, le
 	}
 
 	if err := q.deps.DB.PutHeldPrompt(ctx, held); err != nil {
-		log.Error(opHold, "could not record the hold", dlog.Context{"cause": err.Error()})
+		// A merge hold the release outran is the arbitration answering, and
+		// the submission path that asked for it states the outcome
+		// (applyLeasePolicy).
+		if !errors.Is(err, wsm.ErrMergeLeaseGone) {
+			log.Error(opHold, "could not record the hold", dlog.Context{"cause": err.Error()})
+		}
 		return Disposition{}, fmt.Errorf("hold prompt %q on %q: %w", sub.Turn, sub.WS, err)
 	}
 	if err := q.pushTray(ctx, sub.WS, log); err != nil {

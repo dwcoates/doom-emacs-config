@@ -283,8 +283,9 @@ export async function boot(): Promise<void> {
     });
     // THE GATE IS THE FOOTER'S OWN COLOR (owner ruling, 2026-09-28). A
     // composer is closed exactly when the footer's status arm is blue (the
-    // workspace is unusable: disconnected, closing, blocked) or purple (a
-    // merge in flight holds it) — render-colors.json#composer_closed_colors —
+    // workspace is unusable: disconnected, closing, blocked) —
+    // render-colors.json#composer_closed_colors; a merge in flight holds
+    // what is submitted, so purple leaves it open —
     // and the sentence it shows is the footer's status arm rather than a
     // second vocabulary. Every other arm is a usable workspace, turquoise
     // included, so its composer is open.

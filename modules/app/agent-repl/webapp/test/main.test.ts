@@ -553,12 +553,14 @@ describe("the boot", { timeout: BOOT_TIMEOUT_MS }, () => {
     expect(page.feedDeps?.composerFactory).toBeUndefined();
   });
 
-  test("closes the gate in the footer's own word when the workspace is merging", async () => {
+  // A MERGE IN FLIGHT HOLDS WHAT IS SUBMITTED (owner ruling, 2026-10-01), so
+  // its composer stays open and the prompt waits in the tray for the merge.
+  test("keeps the gate open while the workspace is merging", async () => {
     await bootMain();
 
     page.onFooterStatus?.("merging");
 
-    expect(page.gateSet).toHaveBeenCalledWith("closed", "merging");
+    expect(page.gateSet).toHaveBeenCalledWith("open", undefined);
   });
 
   // A STOPPED MERGE NO LONGER HOLDS THE SESSION (owner ruling, 2026-09-28): a
@@ -575,14 +577,15 @@ describe("the boot", { timeout: BOOT_TIMEOUT_MS }, () => {
     },
   );
 
-  // THE COMPOSER INVARIANT (owner ruling, 2026-09-28): the gate is closed
-  // exactly when the footer's color is blue (unusable) or purple (a merge
-  // holds it). One row per arm the ruling places on either side of the line.
+  // THE COMPOSER INVARIANT (owner rulings, 2026-09-28 and 2026-10-01): the
+  // gate is closed exactly when the footer's color is blue (unusable); purple,
+  // a merge in flight, holds its prompts and leaves it open. One row per arm
+  // the rulings place on either side of the line.
   test.each([
     ["disconnected", "closed"],
     ["closing", "closed"],
     ["blocked", "closed"],
-    ["merging", "closed"],
+    ["merging", "open"],
     ["turnFailed", "open"],
     ["degraded", "open"],
     ["idle", "open"],
