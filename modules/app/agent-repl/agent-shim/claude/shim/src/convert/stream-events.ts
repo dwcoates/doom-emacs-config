@@ -53,6 +53,7 @@ import {
 } from "../api-usage.js";
 import { bindLog } from "../log.js";
 import { conversationv1 } from "../proto.js";
+import { sdkRecordTimestampMs } from "./place.js";
 import type { SdkMessage } from "../sdk/types.js";
 import type { PersistEntry } from "../store/persistence.js";
 import { activityEntry, agentActivity, prose, settledAt, type FrameOrigin } from "./entries.js";
@@ -680,12 +681,8 @@ function recordSettledAt(
   // NO START IS RESTATED: a prose or reasoning block's start arm carries no
   // instant (AgentResponseStart and AgentThinkingStart are empty), so there is
   // nothing for the settle to restate and no runtime a surface draws for it.
-  const raw = (message as unknown as { readonly timestamp?: unknown }).timestamp;
-  if (typeof raw === "string" && raw !== "") {
-    const ms = Date.parse(raw);
-    if (!Number.isNaN(ms)) return settledAt(ms, undefined);
-  }
-  return settledAt(context.nowMs(), undefined);
+  const ms = sdkRecordTimestampMs(message);
+  return settledAt(ms ?? context.nowMs(), undefined);
 }
 
 /**
