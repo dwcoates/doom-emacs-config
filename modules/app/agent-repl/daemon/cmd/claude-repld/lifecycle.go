@@ -8,7 +8,6 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
-	"claude-repld/internal/bounce"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/health"
 	"claude-repld/internal/ids"
@@ -241,21 +240,9 @@ func (s *lifecycleSink) OnQueryDied(ws ids.WorkspaceID) {
 		s.log.Error("daemon.cmd.lifecycle", "a session's query died before the rollout controller existed; nothing restarts it", fields)
 		return
 	}
-	done := func(err error) {
-		ended := copyFields(fields)
-		switch bounce.OutcomeOf(err) {
-		case bounce.OutcomeUnregistered:
-			s.log.Info("daemon.cmd.lifecycle", "the shim whose query died departed before its replacement; the next bring-up starts the session afresh", ended)
-		case bounce.OutcomeHandedAcross:
-			s.log.Info("daemon.cmd.lifecycle", "the restart of the session whose query died was handed across: the daemon the workspace moved to runs it", ended)
-		case bounce.OutcomeFailed:
-			ended["cause"] = err.Error()
-			s.log.Error("daemon.cmd.lifecycle", "could not restart the session whose query died", ended)
-		case bounce.OutcomeFinished:
-			s.log.Info("daemon.cmd.lifecycle", "restarted the session whose query died", ended)
-		}
-	}
-	decision, err := controller.BounceShim(context.Background(), ws, rollout.ReasonQueryDied, false, done)
+	// THE OUTCOME IS RECORDED ONCE, by BounceShim itself under the
+	// replacement's reason; nothing here waits on it.
+	decision, err := controller.BounceShim(context.Background(), ws, rollout.ReasonQueryDied, false, nil)
 	if err != nil {
 		// BounceShim recorded the refusal at ERROR with its cause.
 		return
