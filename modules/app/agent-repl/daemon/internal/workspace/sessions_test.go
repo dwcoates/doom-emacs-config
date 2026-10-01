@@ -3861,3 +3861,24 @@ func TestEndColdGateRetiresOnlyTheTakenGateItNames(t *testing.T) {
 		})
 	}
 }
+
+// TestMarkUnservedTellsTheViewsTheLinkIsDead pins the boot's answer for an
+// undetermined workspace: the footer, topbar and roster each hear a dead link,
+// so the roster row resolves `unavailable` rather than `pending` forever.
+func TestMarkUnservedTellsTheViewsTheLinkIsDead(t *testing.T) {
+	// Arrange
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.links.links = nil
+
+	// Act
+	f.fleet.MarkUnserved(ws.ID)
+
+	// Assert
+	want := []sessionwatcher.LinkState{
+		shimclient.LinkDead, shimclient.LinkDead, shimclient.LinkDead,
+	}
+	if fmt.Sprint(f.links.links) != fmt.Sprint(want) {
+		t.Fatalf("OnLink calls = %v, want the footer, topbar and roster each told the link is dead", f.links.links)
+	}
+}

@@ -249,6 +249,8 @@ type harness struct {
 	socketProbes map[string]shimsocket.State
 	// socketProbeErrs is the scripted socket-probe error per socket path.
 	socketProbeErrs map[string]error
+	// unserved records every workspace the reconciliation marked unserved.
+	unserved []ids.WorkspaceID
 	// ensures counts the bring-up's EnsureServices calls; ensureErr is what
 	// they answer.
 	ensures   atomic.Int32
@@ -347,6 +349,9 @@ func newHarness(t *testing.T, adjust ...func(*Deps, *harness)) *harness {
 		StartSession: func(_ context.Context, ws ids.WorkspaceID) error {
 			h.noteStarted(ws)
 			return h.startErrs[ws]
+		},
+		Unserved: func(ws ids.WorkspaceID) {
+			h.unserved = append(h.unserved, ws)
 		},
 		EnsureServices: func(context.Context) error {
 			h.ensures.Add(1)
