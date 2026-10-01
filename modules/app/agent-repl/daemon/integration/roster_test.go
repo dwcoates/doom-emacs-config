@@ -826,7 +826,7 @@ func TestRosterRowIsMergeFailedWhenTheMergeGitCommandFails(t *testing.T) {
 	f, d, repo, _ := mergeCleanRepo(t)
 	repo.ScriptFailure("", 1, "fatal: refusing to merge unrelated histories", "merge")
 	roster := d.WatchRoster()
-	d.ExpectWarnings("daemon.gitclient.merge_no_ff", "daemon.merge.merge_tab", "daemon.merge.abort")
+	d.ExpectWarnings("daemon.gitclient.merge_no_ff", "daemon.merge.merge_tab", "daemon.merge.fault")
 
 	// Act
 	harness.CommitWork(t, f.ws.GetDir())
