@@ -54,6 +54,8 @@ type fakeDB struct {
 	// republish does with a state client that would not answer.
 	listWorkspacesErr error
 	repositories      []wsm.Repository
+	// setFoldedErr fails the fold write, which the slice cannot.
+	setFoldedErr error
 	// listRepositoriesErr fails the registry read, which the create path must
 	// surface rather than read as "the repository is not registered".
 	listRepositoriesErr error
@@ -2047,4 +2049,19 @@ func (f *fixture) selectAsync(ctx context.Context, ws ids.WorkspaceID) <-chan er
 	done := make(chan error, 1)
 	go func() { done <- f.verbs.Select(ctx, ws) }()
 	return done
+}
+
+// SetRepositoryFolded records the fold on the fake's repository row; an
+// unknown repository is wsm.ErrNotFound, as the store answers it.
+func (d *fakeDB) SetRepositoryFolded(_ context.Context, id ids.RepoID, folded bool) error {
+	if d.setFoldedErr != nil {
+		return d.setFoldedErr
+	}
+	for i := range d.repositories {
+		if d.repositories[i].ID == id {
+			d.repositories[i].Folded = folded
+			return nil
+		}
+	}
+	return fmt.Errorf("fake: repository %s: %w", id, wsm.ErrNotFound)
 }

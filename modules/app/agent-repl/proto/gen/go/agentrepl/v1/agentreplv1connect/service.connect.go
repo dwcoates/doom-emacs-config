@@ -106,6 +106,9 @@ const (
 	// AgentReplSetWorkspacePriorityProcedure is the fully-qualified name of the AgentRepl's
 	// SetWorkspacePriority RPC.
 	AgentReplSetWorkspacePriorityProcedure = "/agentrepl.v1.AgentRepl/SetWorkspacePriority"
+	// AgentReplFoldRepositoryProcedure is the fully-qualified name of the AgentRepl's FoldRepository
+	// RPC.
+	AgentReplFoldRepositoryProcedure = "/agentrepl.v1.AgentRepl/FoldRepository"
 	// AgentReplCreateTaskProcedure is the fully-qualified name of the AgentRepl's CreateTask RPC.
 	AgentReplCreateTaskProcedure = "/agentrepl.v1.AgentRepl/CreateTask"
 	// AgentReplUpdateTaskProcedure is the fully-qualified name of the AgentRepl's UpdateTask RPC.
@@ -229,6 +232,7 @@ var (
 	agentReplMergeWorkspaceMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("MergeWorkspace")
 	agentReplRestartWorkspaceMethodDescriptor         = agentReplServiceDescriptor.Methods().ByName("RestartWorkspace")
 	agentReplSetWorkspacePriorityMethodDescriptor     = agentReplServiceDescriptor.Methods().ByName("SetWorkspacePriority")
+	agentReplFoldRepositoryMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("FoldRepository")
 	agentReplCreateTaskMethodDescriptor               = agentReplServiceDescriptor.Methods().ByName("CreateTask")
 	agentReplUpdateTaskMethodDescriptor               = agentReplServiceDescriptor.Methods().ByName("UpdateTask")
 	agentReplAssignWorkspaceTaskMethodDescriptor      = agentReplServiceDescriptor.Methods().ByName("AssignWorkspaceTask")
@@ -341,6 +345,7 @@ type AgentReplClient interface {
 	// Set or clear a workspace's priority; the roster orders by it. See
 	// endpoint_set_workspace_priority.proto.
 	SetWorkspacePriority(context.Context, *connect.Request[v1.SetWorkspacePriorityRequest]) (*connect.Response[v1.SetWorkspacePriorityResponse], error)
+	FoldRepository(context.Context, *connect.Request[v1.FoldRepositoryRequest]) (*connect.Response[v1.FoldRepositoryResponse], error)
 	// A new user task; the roster's task view renders it. See
 	// endpoint_create_task.proto.
 	CreateTask(context.Context, *connect.Request[v1.CreateTaskRequest]) (*connect.Response[v1.CreateTaskResponse], error)
@@ -608,6 +613,12 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(agentReplSetWorkspacePriorityMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		foldRepository: connect.NewClient[v1.FoldRepositoryRequest, v1.FoldRepositoryResponse](
+			httpClient,
+			baseURL+AgentReplFoldRepositoryProcedure,
+			connect.WithSchema(agentReplFoldRepositoryMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 		createTask: connect.NewClient[v1.CreateTaskRequest, v1.CreateTaskResponse](
 			httpClient,
 			baseURL+AgentReplCreateTaskProcedure,
@@ -859,6 +870,7 @@ type agentReplClient struct {
 	mergeWorkspace           *connect.Client[v1.MergeWorkspaceRequest, v1.MergeWorkspaceResponse]
 	restartWorkspace         *connect.Client[v1.RestartWorkspaceRequest, v1.RestartWorkspaceResponse]
 	setWorkspacePriority     *connect.Client[v1.SetWorkspacePriorityRequest, v1.SetWorkspacePriorityResponse]
+	foldRepository           *connect.Client[v1.FoldRepositoryRequest, v1.FoldRepositoryResponse]
 	createTask               *connect.Client[v1.CreateTaskRequest, v1.CreateTaskResponse]
 	updateTask               *connect.Client[v1.UpdateTaskRequest, v1.UpdateTaskResponse]
 	assignWorkspaceTask      *connect.Client[v1.AssignWorkspaceTaskRequest, v1.AssignWorkspaceTaskResponse]
@@ -1016,6 +1028,11 @@ func (c *agentReplClient) RestartWorkspace(ctx context.Context, req *connect.Req
 // SetWorkspacePriority calls agentrepl.v1.AgentRepl.SetWorkspacePriority.
 func (c *agentReplClient) SetWorkspacePriority(ctx context.Context, req *connect.Request[v1.SetWorkspacePriorityRequest]) (*connect.Response[v1.SetWorkspacePriorityResponse], error) {
 	return c.setWorkspacePriority.CallUnary(ctx, req)
+}
+
+// FoldRepository calls agentrepl.v1.AgentRepl.FoldRepository.
+func (c *agentReplClient) FoldRepository(ctx context.Context, req *connect.Request[v1.FoldRepositoryRequest]) (*connect.Response[v1.FoldRepositoryResponse], error) {
+	return c.foldRepository.CallUnary(ctx, req)
 }
 
 // CreateTask calls agentrepl.v1.AgentRepl.CreateTask.
@@ -1276,6 +1293,7 @@ type AgentReplHandler interface {
 	// Set or clear a workspace's priority; the roster orders by it. See
 	// endpoint_set_workspace_priority.proto.
 	SetWorkspacePriority(context.Context, *connect.Request[v1.SetWorkspacePriorityRequest]) (*connect.Response[v1.SetWorkspacePriorityResponse], error)
+	FoldRepository(context.Context, *connect.Request[v1.FoldRepositoryRequest]) (*connect.Response[v1.FoldRepositoryResponse], error)
 	// A new user task; the roster's task view renders it. See
 	// endpoint_create_task.proto.
 	CreateTask(context.Context, *connect.Request[v1.CreateTaskRequest]) (*connect.Response[v1.CreateTaskResponse], error)
@@ -1537,6 +1555,12 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		AgentReplSetWorkspacePriorityProcedure,
 		svc.SetWorkspacePriority,
 		connect.WithSchema(agentReplSetWorkspacePriorityMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplFoldRepositoryHandler := connect.NewUnaryHandler(
+		AgentReplFoldRepositoryProcedure,
+		svc.FoldRepository,
+		connect.WithSchema(agentReplFoldRepositoryMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
 	agentReplCreateTaskHandler := connect.NewUnaryHandler(
@@ -1811,6 +1835,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplRestartWorkspaceHandler.ServeHTTP(w, r)
 		case AgentReplSetWorkspacePriorityProcedure:
 			agentReplSetWorkspacePriorityHandler.ServeHTTP(w, r)
+		case AgentReplFoldRepositoryProcedure:
+			agentReplFoldRepositoryHandler.ServeHTTP(w, r)
 		case AgentReplCreateTaskProcedure:
 			agentReplCreateTaskHandler.ServeHTTP(w, r)
 		case AgentReplUpdateTaskProcedure:
@@ -1988,6 +2014,10 @@ func (UnimplementedAgentReplHandler) RestartWorkspace(context.Context, *connect.
 
 func (UnimplementedAgentReplHandler) SetWorkspacePriority(context.Context, *connect.Request[v1.SetWorkspacePriorityRequest]) (*connect.Response[v1.SetWorkspacePriorityResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.SetWorkspacePriority is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) FoldRepository(context.Context, *connect.Request[v1.FoldRepositoryRequest]) (*connect.Response[v1.FoldRepositoryResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.FoldRepository is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) CreateTask(context.Context, *connect.Request[v1.CreateTaskRequest]) (*connect.Response[v1.CreateTaskResponse], error) {

@@ -44,11 +44,13 @@ OVERRIDES is a plist merged over the defaults: `:closed', `:children',
                                     (plist-get overrides :closed)
                                   :false)))))
 
-(defun agent-repl-test-roster--section (label rows)
-  "Return a decoded `RosterRepoSection' plist labelled LABEL carrying ROWS."
+(defun agent-repl-test-roster--section (label rows &optional collapsed)
+  "Return a decoded `RosterRepoSection' plist labelled LABEL carrying ROWS.
+COLLAPSED non-nil makes the daemon hold the section collapsed."
   (list :key (list :repository (list :id (concat "repo-" label) :dir (concat "/r/" label)))
         :header (list :label (list :text label))
-        :rows (list :rows rows)))
+        :rows (list :rows rows)
+        :fold (list :arm (if collapsed :collapsed :expanded) :value nil)))
 
 (cl-defun agent-repl-test-roster--roster (&key sections merged current)
   "Return a decoded `WorkspaceRoster' plist from SECTIONS, MERGED and CURRENT."
@@ -101,6 +103,7 @@ whose calls are the observation."
            (agent-repl-test-roster--current-name nil)
            (agent-repl-roster-view nil)
            (agent-repl-roster--tab-order nil)
+           (agent-repl-roster--hidden-tabs nil)
            (agent-repl-roster--rows-by-id (make-hash-table :test 'equal))
            (agent-repl-roster--status-by-id (make-hash-table :test 'equal))
            (agent-repl-roster--viewed-by-id (make-hash-table :test 'equal))
@@ -2315,3 +2318,42 @@ saying the roster had been asked for one and declined."
       ;; Assert
       (should (= 1 (seq-count (lambda (text) (string-search "elisp.roster.held:" text))
                               logs))))))
+
+;;;; ---- A collapsed repository's tabs are off the bar ----
+
+(ert-deftest agent-repl-test-roster-walk-marks-a-collapsed-sections-rows ()
+  "Each walked row says whether its repository is collapsed."
+  (let ((walked (agent-repl-roster-walk
+                 (agent-repl-test-roster--roster
+                  :sections (list (agent-repl-test-roster--section
+                                   "open" (list (agent-repl-test-roster--row "w1" "one" :ready)))
+                                  (agent-repl-test-roster--section
+                                   "shut" (list (agent-repl-test-roster--row "w2" "two" :ready)) t))))))
+    (should (equal (mapcar (lambda (entry) (plist-get entry :collapsed)) walked) '(nil t)))))
+
+(ert-deftest agent-repl-test-roster-reconcile-keeps-a-collapsed-repositorys-tabs-off-the-drawing ()
+  "A collapsed repository's workspaces keep their tabs and are not drawn."
+  (agent-repl-test-roster--with-editor
+    (agent-repl-roster-reconcile
+     (agent-repl-test-roster--roster
+      :sections (list (agent-repl-test-roster--section
+                       "open" (list (agent-repl-test-roster--row "w1" "one" :ready)))
+                      (agent-repl-test-roster--section
+                       "shut" (list (agent-repl-test-roster--row "w2" "two" :ready)) t)
+                      (agent-repl-test-roster--section
+                       "late" (list (agent-repl-test-roster--row "w3" "three" :ready))))))
+    (should (equal (agent-repl-roster-tab-order) '("one" "two" "three")))
+    (should (equal (agent-repl-roster-drawn-tab-order) '("one" "three")))))
+
+(ert-deftest agent-repl-test-roster-reconcile-draws-a-repository-again-once-expanded ()
+  "The next push that expands the repository draws its tabs again."
+  (agent-repl-test-roster--with-editor
+    (let ((push (lambda (collapsed)
+                  (agent-repl-roster-reconcile
+                   (agent-repl-test-roster--roster
+                    :sections (list (agent-repl-test-roster--section
+                                     "shut" (list (agent-repl-test-roster--row "w2" "two" :ready))
+                                     collapsed)))))))
+      (funcall push t)
+      (funcall push nil)
+      (should (equal (agent-repl-roster-drawn-tab-order) '("two"))))))

@@ -1291,3 +1291,76 @@ func TestScanRepositoryReadsEveryRepositoryColumn(t *testing.T) {
 		t.Fatalf("repositories = %+v, want the workspace's repository read whole", listed)
 	}
 }
+
+func TestSetRepositoryFoldedIsReadBack(t *testing.T) {
+	tests := []struct {
+		name   string
+		folded bool
+	}{{"collapsed", true}, {"expanded", false}}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			ws := testWorkspace(t, s)
+			if err := s.SetRepositoryFolded(context.Background(), ws.Repo, !tt.folded); err != nil {
+				t.Fatalf("SetRepositoryFolded: %v", err)
+			}
+
+			// Act
+			err := s.SetRepositoryFolded(context.Background(), ws.Repo, tt.folded)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("SetRepositoryFolded: %v", err)
+			}
+			listed, _ := s.ListRepositories(context.Background())
+			if len(listed) != 1 || listed[0].Folded != tt.folded {
+				t.Fatalf("repositories = %+v, want folded=%v", listed, tt.folded)
+			}
+		})
+	}
+}
+
+func TestANewRepositoryIsExpanded(t *testing.T) {
+	// Arrange, Act
+	s, _ := testStore(t)
+	testWorkspace(t, s)
+
+	// Assert
+	listed, _ := s.ListRepositories(context.Background())
+	if len(listed) != 1 || listed[0].Folded {
+		t.Fatalf("repositories = %+v, want a new repository expanded", listed)
+	}
+}
+
+func TestSetRepositoryFoldedRefusesAnUnknownRepository(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+
+	// Act
+	err := s.SetRepositoryFolded(context.Background(), RepoID("absent"), true)
+
+	// Assert
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("SetRepositoryFolded = %v, want ErrNotFound", err)
+	}
+}
+
+// TestTheMigrationAddsTheRepositoriesFoldedColumn pins the layout-17 step.
+func TestTheMigrationAddsTheRepositoriesFoldedColumn(t *testing.T) {
+	// Arrange — a file the build at layout 16 left.
+	path := fixtureAt(t, 16)
+
+	// Act
+	handle, err := Open(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Open on a layout-16 database: %v", err)
+	}
+	defer handle.Close()
+
+	// Assert
+	got := scalar[int](t, handle.(*store), `SELECT count(*) FROM pragma_table_info('repositories') WHERE name = 'folded'`)
+	if got != 1 {
+		t.Fatalf("repositories carries the folded column %d times after the migration, want 1", got)
+	}
+}

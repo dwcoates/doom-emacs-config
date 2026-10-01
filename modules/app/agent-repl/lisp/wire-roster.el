@@ -607,10 +607,28 @@ The ID, NOT the title: a task can be renamed without becoming another."
   "Decode `RosterRepoSection''s `rows' field VALUE as RosterRows."
   (agent-repl-wire-decode-roster-rows value))
 
+(defun agent-repl-wire-decode-roster-repo-section-expanded (value)
+  "Decode VALUE as the empty message `RosterRepoSectionExpanded'."
+  (agent-repl-wire--decode-empty "RosterRepoSectionExpanded" value))
+
+(defun agent-repl-wire-decode-roster-repo-section-collapsed (value)
+  "Decode VALUE as the empty message `RosterRepoSectionCollapsed'."
+  (agent-repl-wire--decode-empty "RosterRepoSectionCollapsed" value))
+
+(defun agent-repl-wire-decode-roster-repo-section-fold (object)
+  "Decode `RosterRepoSection''s `fold' oneof from OBJECT.
+THE ARM IS THE FOLD, and it is never unset: a collapsed repository's
+workspaces have no tabs on the bar."
+  (agent-repl-wire--decode-oneof
+   "RosterRepoSection" 'fold object
+   '((expanded :expanded agent-repl-wire-decode-roster-repo-section-expanded)
+     (collapsed :collapsed agent-repl-wire-decode-roster-repo-section-collapsed))))
+
 (defun agent-repl-wire-decode-roster-repo-section (value)
-  "Decode VALUE as `RosterRepoSection', a plist `(:key :header :rows)'."
+  "Decode VALUE as `RosterRepoSection', a plist `(:key :header :rows :fold)'."
   (let ((object (agent-repl-wire--object "RosterRepoSection" value)))
-    (agent-repl-wire--check-keys "RosterRepoSection" object '(key header rows))
+    (agent-repl-wire--check-keys "RosterRepoSection" object
+                                 '(key header rows expanded collapsed))
     (agent-repl-wire--decoded
      "RosterRepoSection"
      (list :key (agent-repl-wire--decode-message
@@ -621,7 +639,8 @@ The ID, NOT the title: a task can be renamed without becoming another."
                     #'agent-repl-wire-decode-roster-repo-section-header)
            :rows (agent-repl-wire--decode-message
                   "RosterRepoSection" 'rows object
-                  #'agent-repl-wire-decode-roster-repo-section-rows)))))
+                  #'agent-repl-wire-decode-roster-repo-section-rows)
+           :fold (agent-repl-wire-decode-roster-repo-section-fold object)))))
 
 (defun agent-repl-wire-decode-roster-task-section-key (value)
   "Decode `RosterTaskSection''s `key' field VALUE as a RosterTaskKey."

@@ -408,15 +408,44 @@ WatchWorkspaceRoster push and every tab falls back to a stale blue status."
                    '(:ready :merged)))))
 
 (ert-deftest agent-repl-test-wire-roster-repo-section-decodes-key-header-rows ()
-  "A repo section carries its stable key, its header, and its rows."
+  "A repo section carries its stable key, its header, its rows and its fold."
   (should (equal (agent-repl-test-wire-roster--decode
                   #'agent-repl-wire-decode-roster-repo-section
                   (concat "{\"key\":{\"repository\":{\"id\":\"r1\",\"dir\":\"/src\"}},"
                           "\"header\":{\"label\":{\"text\":\"doom\"}},"
-                          "\"rows\":{\"rows\":[]}}"))
+                          "\"rows\":{\"rows\":[]},\"expanded\":{}}"))
                  '(:key (:repository (:id "r1" :dir "/src"))
                    :header (:label (:text "doom"))
-                   :rows (:rows nil)))))
+                   :rows (:rows nil)
+                   :fold (:arm :expanded :value nil)))))
+
+(ert-deftest agent-repl-test-wire-roster-repo-section-decodes-a-collapsed-fold ()
+  "A collapsed section decodes its fold arm as `:collapsed'."
+  (should (eq (plist-get
+               (plist-get (agent-repl-test-wire-roster--decode
+                           #'agent-repl-wire-decode-roster-repo-section
+                           (concat "{\"key\":{\"repository\":{\"id\":\"r1\",\"dir\":\"/src\"}},"
+                                   "\"header\":{\"label\":{\"text\":\"doom\"}},"
+                                   "\"rows\":{\"rows\":[]},\"collapsed\":{}}"))
+                          :fold)
+               :arm)
+              :collapsed)))
+
+(ert-deftest agent-repl-test-wire-roster-repo-section-without-a-fold-is-a-breach ()
+  "The fold is never unset on a wire section."
+  (should (agent-repl-test-wire-roster--breach
+           #'agent-repl-wire-decode-roster-repo-section
+           (concat "{\"key\":{\"repository\":{\"id\":\"r1\",\"dir\":\"/src\"}},"
+                   "\"header\":{\"label\":{\"text\":\"doom\"}},"
+                   "\"rows\":{\"rows\":[]}}"))))
+
+(ert-deftest agent-repl-test-wire-roster-repo-section-with-both-folds-is-a-breach ()
+  "Expanded and collapsed at once is a malformed frame."
+  (should (agent-repl-test-wire-roster--breach
+           #'agent-repl-wire-decode-roster-repo-section
+           (concat "{\"key\":{\"repository\":{\"id\":\"r1\",\"dir\":\"/src\"}},"
+                   "\"header\":{\"label\":{\"text\":\"doom\"}},"
+                   "\"rows\":{\"rows\":[]},\"expanded\":{},\"collapsed\":{}}"))))
 
 (ert-deftest agent-repl-test-wire-roster-repo-section-without-a-key-is-a-breach ()
   "The section's fold and join key is required."
@@ -478,7 +507,7 @@ WatchWorkspaceRoster push and every tab falls back to a stale blue status."
   (concat "{\"repository\":{\"sections\":[{"
           "\"key\":{\"repository\":{\"id\":\"r1\",\"dir\":\"/src\"}},"
           "\"header\":{\"label\":{\"text\":\"doom\"}},"
-          "\"rows\":{\"rows\":[]}}]},"
+          "\"rows\":{\"rows\":[]},\"expanded\":{}}]},"
           "\"task\":{\"sections\":[]},"
           "\"recentlyMerged\":{\"header\":{\"label\":{\"text\":\"Recently Merged\"}},"
           "\"rows\":{\"rows\":[]}},"
@@ -492,7 +521,8 @@ WatchWorkspaceRoster push and every tab falls back to a stale blue status."
                   agent-repl-test-wire-roster--roster-json)
                  '(:repository (:sections ((:key (:repository (:id "r1" :dir "/src"))
                                             :header (:label (:text "doom"))
-                                            :rows (:rows nil))))
+                                            :rows (:rows nil)
+                                            :fold (:arm :expanded :value nil))))
                    :task (:sections nil)
                    :recently-merged (:header (:label (:text "Recently Merged"))
                                      :rows (:rows nil))

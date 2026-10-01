@@ -488,6 +488,17 @@ func validateSetWorkspacePriorityRequest(req *agentreplv1.SetWorkspacePriorityRe
 	return nil
 }
 
+// validateFoldRepositoryRequest is FoldRepositoryRequest's base function.
+func validateFoldRepositoryRequest(req *agentreplv1.FoldRepositoryRequest) *connect.Error {
+	if err := validateRepositoryRef("repository", req.GetRepository()); err != nil {
+		return err
+	}
+	if req.GetFold() == nil {
+		return invalid("fold", "a fold arm is required")
+	}
+	return nil
+}
+
 // validateUpdateHeldPromptRequest is UpdateHeldPromptRequest's base function.
 func validateUpdateHeldPromptRequest(req *agentreplv1.UpdateHeldPromptRequest) *connect.Error {
 	if err := validateWorkspaceRef("workspace", req.GetWorkspace()); err != nil {

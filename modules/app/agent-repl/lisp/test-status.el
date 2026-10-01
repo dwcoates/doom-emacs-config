@@ -1709,7 +1709,7 @@ exercised on the selected tab instead."
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws"))
                 ((symbol-function 'frame-width) (lambda () 80))
                 ;; Before the roster's first push the registered names are drawn.
-                ((symbol-function 'agent-repl-roster-tab-order) (lambda () nil))
+                ((symbol-function 'agent-repl-roster-drawn-tab-order) (lambda () nil))
                 ((symbol-function 'agent-repl--ws-display-state)
                  (lambda (_ws) arm)))
         ;; Act
@@ -1736,7 +1736,7 @@ standing in still says when its status moves."
           (arm :thinking))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
                 ((symbol-function 'frame-width) (lambda () 80))
-                ((symbol-function 'agent-repl-roster-tab-order) (lambda () nil))
+                ((symbol-function 'agent-repl-roster-drawn-tab-order) (lambda () nil))
                 ((symbol-function 'agent-repl--ws-display-state)
                  (lambda (_ws) arm)))
         ;; Act
@@ -1755,7 +1755,7 @@ standing in still says when its status moves."
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
                 ((symbol-function 'frame-width) (lambda () 80))
                 ;; Before the roster's first push the registered names are drawn.
-                ((symbol-function 'agent-repl-roster-tab-order) (lambda () nil))
+                ((symbol-function 'agent-repl-roster-drawn-tab-order) (lambda () nil))
                 ((symbol-function 'agent-repl--ws-display-state)
                  (lambda (_ws) :thinking)))
         (should (equal (agent-repl-workspace-tabline-formatted)
@@ -1783,7 +1783,7 @@ standing in still says when its status moves."
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "solo"))
                 ((symbol-function 'frame-width) (lambda () 80))
                 ;; Before the roster's first push the registered names are drawn.
-                ((symbol-function 'agent-repl-roster-tab-order) (lambda () nil)))
+                ((symbol-function 'agent-repl-roster-drawn-tab-order) (lambda () nil)))
         (let ((visible (substring-no-properties
                         (agent-repl-workspace-tabline-formatted))))
           (should (= 1 (cl-count ?\[ visible)))
@@ -1799,7 +1799,7 @@ standing in still says when its status moves."
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "second"))
                 ((symbol-function 'frame-width) (lambda () 80))
                 ;; Before the roster's first push the registered names are drawn.
-                ((symbol-function 'agent-repl-roster-tab-order) (lambda () nil)))
+                ((symbol-function 'agent-repl-roster-drawn-tab-order) (lambda () nil)))
         (let ((visible (substring-no-properties
                         (agent-repl-workspace-tabline-formatted))))
           (should (= 2 (cl-count ?\[ visible)))

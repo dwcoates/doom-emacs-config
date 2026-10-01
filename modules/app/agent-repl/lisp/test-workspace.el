@@ -2361,7 +2361,7 @@ The screen must only demote names that could not be routed at all."
   "Tab order is the roster's walk order strictly."
   ;; Arrange
   (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'agent-repl-roster-tab-order)
+    (cl-letf (((symbol-function 'agent-repl-roster-drawn-tab-order)
                (lambda () '("two" "one")))
               ((symbol-function 'agent-repl--ws-list-names)
                (lambda () '("one" "two"))))
@@ -2372,7 +2372,7 @@ The screen must only demote names that could not be routed at all."
   "The tab bar can only render tabs that exist."
   ;; Arrange
   (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'agent-repl-roster-tab-order)
+    (cl-letf (((symbol-function 'agent-repl-roster-drawn-tab-order)
                (lambda () '("one" "ghost")))
               ((symbol-function 'agent-repl--ws-list-names)
                (lambda () '("one"))))
@@ -2383,7 +2383,7 @@ The screen must only demote names that could not be routed at all."
   "Before the roster speaks, the workspaces Emacs knows are drawn as they are."
   ;; Arrange
   (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'agent-repl-roster-tab-order) (lambda () nil))
+    (cl-letf (((symbol-function 'agent-repl-roster-drawn-tab-order) (lambda () nil))
               ((symbol-function 'agent-repl--ws-list-names)
                (lambda () '("one" "two"))))
       ;; Act / Assert
@@ -3641,3 +3641,14 @@ from memory -- is what this now pins, plus the rejoin that follows it."
         (agent-repl--delete-pseudos-on-bringup 0 0 t)
         ;; Assert
         (should-not called)))))
+
+(ert-deftest agent-repl-test-ws-tabline-names-leave-out-a-collapsed-repositorys-tabs ()
+  "The bar draws only the drawn order, which leaves a collapsed repository out."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl-roster--tab-order '("one" "hidden" "two"))
+          (agent-repl-roster--hidden-tabs '("hidden")))
+      (cl-letf (((symbol-function 'agent-repl--ws-list-names)
+                 (lambda () '("one" "hidden" "two"))))
+        ;; Act / Assert
+        (should (equal (agent-repl--ws-tabline-names) '("one" "two")))))))

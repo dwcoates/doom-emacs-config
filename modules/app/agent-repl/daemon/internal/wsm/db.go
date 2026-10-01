@@ -46,6 +46,9 @@ type DB interface {
 	RegisterRepository(ctx context.Context, dir, defaultBranch string) (Repository, bool, error)
 	// ListRepositories loads every repository, all-or-nothing.
 	ListRepositories(ctx context.Context) ([]Repository, error)
+	// SetRepositoryFolded records whether a repository's roster section is
+	// collapsed; an unknown repository is ErrNotFound.
+	SetRepositoryFolded(ctx context.Context, id RepoID, folded bool) error
 	// SetClosed records whether a workspace's editor state is torn down.
 	SetClosed(ctx context.Context, id WorkspaceID, closed bool) error
 	// SetCurrent records the user's selection of a workspace at an instant.

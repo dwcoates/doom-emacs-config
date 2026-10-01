@@ -46,6 +46,7 @@ import "agentrepl/v1/endpoint_watch_login_terminal.proto";
 import "agentrepl/v1/endpoint_close_login.proto";
 import "agentrepl/v1/endpoint_set_model.proto";
 import "agentrepl/v1/endpoint_set_permission_mode.proto";
+import "agentrepl/v1/endpoint_fold_repository.proto";
 import "agentrepl/v1/endpoint_set_workspace_priority.proto";
 import "agentrepl/v1/endpoint_watch_footer.proto";
 import "agentrepl/v1/endpoint_watch_daemon_holds.proto";
@@ -167,6 +168,7 @@ service AgentRepl {
   // Set or clear a workspace's priority; the roster orders by it. See
   // endpoint_set_workspace_priority.proto.
   rpc SetWorkspacePriority(SetWorkspacePriorityRequest) returns (SetWorkspacePriorityResponse);
+  rpc FoldRepository(FoldRepositoryRequest) returns (FoldRepositoryResponse);
 
   // A new user task; the roster's task view renders it. See
   // endpoint_create_task.proto.

@@ -299,13 +299,27 @@ func (s *store) ListWorkspaces(ctx context.Context) ([]Workspace, error) {
 
 // repositoryColumns is every column a Repository is read from, in
 // scanRepository's order: the ONE column list both reads share.
-const repositoryColumns = `id, dir, name, default_branch`
+const repositoryColumns = `id, dir, name, default_branch, folded`
 
 // scanRepository reads one Repository from a row of repositoryColumns.
 func scanRepository(row interface{ Scan(...any) error }) (Repository, error) {
 	var repo Repository
-	err := row.Scan(&repo.ID, &repo.Dir, &repo.Name, &repo.DefaultBranch)
+	err := row.Scan(&repo.ID, &repo.Dir, &repo.Name, &repo.DefaultBranch, &repo.Folded)
 	return repo, err
+}
+
+// SetRepositoryFolded records whether a repository's roster section is
+// collapsed. An unknown repository is refused (ErrNotFound), never a write
+// that touched nothing.
+func (s *store) SetRepositoryFolded(ctx context.Context, id RepoID, folded bool) error {
+	return s.write(ctx, "daemon.wsm.set_repository_folded", dlog.Context{"repo_id": string(id), "folded": folded},
+		func(ctx context.Context, tx *sql.Tx) error {
+			res, err := tx.ExecContext(ctx, `UPDATE repositories SET folded = ? WHERE id = ?`, folded, id)
+			if err != nil {
+				return err
+			}
+			return requireOneRow(res, fmt.Sprintf("wsm: repository %s", id))
+		})
 }
 
 // ListRepositories loads every repository, all-or-nothing.
