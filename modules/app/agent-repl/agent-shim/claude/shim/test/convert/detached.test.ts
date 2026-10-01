@@ -36,6 +36,7 @@ import {
   startedInForeground,
   taskAgentKnowledge,
   taskAwaitingAgent,
+  taskCommission,
   wentSilent,
 } from "../../src/convert/detached.js";
 import { toolResultText } from "../../src/convert/entries.js";
@@ -2319,5 +2320,193 @@ describe("the shell run's lifecycle rows", () => {
 
     // Assert.
     expect(entries.some((entry) => entry.item.kind === "bash_run")).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A RESUMED RUN RESTATES ITS SPAWN'S COMMISSION, never the send's input.
+// ---------------------------------------------------------------------------
+
+const COMMISSIONED_SPAWN: PendingCall = {
+  toolUseId: "toolu_spawn",
+  toolName: "Agent",
+  input: { description: "fix the shim", subagent_type: "opus-medium", prompt: "go" },
+  startedAtMs: 1,
+  agentId: MAIN_AGENT,
+};
+
+/** The spawn "toolu_spawn" of task a5583, launched and settled, then resumed by "toolu_send". */
+function spawnedSettledAndResumed(registry: ReturnType<typeof createTaskKindRegistry>, calls: CallRegistry): void {
+  calls.remember(COMMISSIONED_SPAWN);
+  convert({ subtype: "task_started", task_id: "a5583", tool_use_id: "toolu_spawn", task_type: "local_agent" }, {}, registry, calls);
+  convert({ subtype: "task_notification", task_id: "a5583", tool_use_id: "toolu_spawn", status: "completed" }, {}, registry, calls);
+  openCall(calls, "toolu_send", "SendMessage");
+  convert({ subtype: "task_started", task_id: "a5583", tool_use_id: "toolu_send", task_type: "local_agent" }, {}, registry, calls);
+}
+
+/** The prompt a subagent frame restates, whichever arm it is. */
+function restatedPrompt(entry: PersistEntry | undefined): conversationv1.AgentSubagentPrompt | undefined {
+  const subagent = activityOf(entry)?.item.value as conversationv1.AgentSubagent | undefined;
+  const result = subagent?.result;
+  switch (result?.case) {
+    case "update":
+    case "success":
+    case "failure":
+      return result.value.prompt;
+    default:
+      return undefined;
+  }
+}
+
+describe("a resumed subagent's frames restate its spawn's commission", () => {
+  it("restates the spawn's commission on a resumed run's running beat", () => {
+    // Arrange
+    const registry = createTaskKindRegistry();
+    const calls = createCallRegistry();
+    spawnedSettledAndResumed(registry, calls);
+
+    // Act
+    const entries = convert(
+      { subtype: "task_progress", task_id: "a5583", tool_use_id: "toolu_send", usage: { total_tokens: 379388 } },
+      {},
+      registry,
+      calls,
+    );
+
+    // Assert
+    const prompt = restatedPrompt(entries.at(-1));
+    expect({ description: prompt?.description, type: prompt?.subagentType }).toEqual({
+      description: "fix the shim",
+      type: "opus-medium",
+    });
+  });
+
+  it("restates the spawn's commission on a resumed run's terminal", () => {
+    // Arrange
+    const registry = createTaskKindRegistry();
+    const calls = createCallRegistry();
+    spawnedSettledAndResumed(registry, calls);
+
+    // Act
+    const entries = convert(
+      { subtype: "task_notification", task_id: "a5583", tool_use_id: "toolu_send", status: "completed" },
+      {},
+      registry,
+      calls,
+    );
+
+    // Assert
+    expect(restatedPrompt(entries.at(-1))?.description).toBe("fix the shim");
+  });
+
+  it("restates an empty prompt, at ERROR, for a resume whose spawn this process never saw", () => {
+    // Arrange: the agent named by the store, as after a shim restart.
+    const registry = createTaskKindRegistry();
+    registry.remember("a5583", "local_agent");
+    registry.rememberAgent("a5583", create(conversationv1.AgentIdSchema, { value: "toolu_spawn" }));
+    const calls = createCallRegistry();
+    openCall(calls, "toolu_send", "SendMessage");
+    const before = logSinkMark();
+
+    // Act
+    const entries = convert(
+      { subtype: "task_progress", task_id: "a5583", tool_use_id: "toolu_send", usage: { total_tokens: 10 } },
+      {},
+      registry,
+      calls,
+    );
+
+    // Assert
+    const prompt = restatedPrompt(entries.at(-1));
+    expect({ description: prompt?.description, type: prompt?.subagentType, text: prompt?.text }).toEqual({
+      description: undefined,
+      type: undefined,
+      text: "",
+    });
+    const errors = logRecordsSince(before).filter((record) => record.level === "error");
+    expect(
+      errors.map((record) => [
+        record.message,
+        record.context.task_id,
+        record.context.tool_use_id,
+        record.context.tool,
+        record.context.detail,
+      ]),
+    ).toEqual([
+      [
+        "a subagent run's frames name a call that is not its spawn, and this process never saw the spawn's commission; they restate an empty prompt",
+        "a5583",
+        "toolu_send",
+        "SendMessage",
+        "the task's call toolu_send is a SendMessage, not a spawn, and no spawn of task a5583 was seen by this process",
+      ],
+    ]);
+  });
+});
+
+describe("taskCommission", () => {
+  it("reads the spawn call itself when the task's call is its spawn", () => {
+    // Arrange, Act
+    const prompt = taskCommission("a5583", COMMISSIONED_SPAWN, createTaskKindRegistry());
+
+    // Assert
+    expect(prompt.description).toBe("fix the shim");
+  });
+
+  it("answers the remembered commission when the task's call is not its spawn", () => {
+    // Arrange
+    const registry = createTaskKindRegistry();
+    registry.rememberCommission("a5583", create(conversationv1.AgentSubagentPromptSchema, { text: "go", description: "remembered" }));
+    const send: PendingCall = { ...COMMISSIONED_SPAWN, toolUseId: "toolu_send", toolName: "SendMessage", input: {} };
+
+    // Act
+    const prompt = taskCommission("a5583", send, registry);
+
+    // Assert
+    expect(prompt.description).toBe("remembered");
+  });
+
+  it("answers an empty prompt without an error when the fold never saw the task's call", () => {
+    // Arrange
+    const before = logSinkMark();
+
+    // Act
+    const prompt = taskCommission("a5583", undefined, createTaskKindRegistry());
+
+    // Assert
+    expect({ text: prompt.text, errors: errorsSince(before) }).toEqual({ text: "", errors: [] });
+  });
+});
+
+describe("TaskKindRegistry: the commission", () => {
+  it("keeps a task's commission past the task's settle, so a resume can restate it", () => {
+    // Arrange
+    const registry = createTaskKindRegistry();
+    registry.rememberCommission("a5583", create(conversationv1.AgentSubagentPromptSchema, { text: "go", description: "kept" }));
+
+    // Act
+    registry.settlesAsSubagent("a5583");
+
+    // Assert
+    expect(registry.commissionOf("a5583")?.description).toBe("kept");
+  });
+
+  it("forgets the oldest commission at the bound, and says so", () => {
+    // Arrange
+    const registry = createTaskKindRegistry();
+    for (let i = 0; i < TASK_KIND_CAPACITY; i += 1) {
+      registry.rememberCommission(`t${String(i)}`, create(conversationv1.AgentSubagentPromptSchema, { text: "" }));
+    }
+    const before = logSinkMark();
+
+    // Act
+    registry.rememberCommission("one-more", create(conversationv1.AgentSubagentPromptSchema, { text: "" }));
+
+    // Assert
+    const warned = logRecordsSince(before).filter((record) => record.level === "warn");
+    expect({ oldest: registry.commissionOf("t0"), lost: warned.map((record) => record.context.lost) }).toEqual({
+      oldest: undefined,
+      lost: ["the commission its agent was spawned with, so a resume of that agent cannot restate it"],
+    });
   });
 });

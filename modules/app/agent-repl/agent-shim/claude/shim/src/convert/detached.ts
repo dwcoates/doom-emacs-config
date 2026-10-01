@@ -284,6 +284,7 @@ function runningAgent(facts: TaskFacts, taskKinds: TaskKindRegistry): conversati
   if (facts.call !== undefined && isSpawnCall(facts.call)) {
     const agent = subagentId(facts.toolUseId);
     taskKinds.rememberAgent(facts.taskId, agent);
+    taskKinds.rememberCommission(facts.taskId, subagentPrompt(facts.call));
     return agent;
   }
   const joined = taskKinds.agentOf(facts.taskId);
@@ -684,6 +685,18 @@ export interface TaskKindRegistry {
   /** The agent remembered for a task, or `undefined` if this process never named one. */
   agentOf(taskId: string): conversationv1.AgentId | undefined;
   /**
+   * Remember WHAT A SUBAGENT TASK'S AGENT WAS COMMISSIONED WITH: its spawn's
+   * prompt (see {@link taskCommission}).
+   *
+   * OUTLIVES THE TASK'S SETTLE, exactly as the agent does, and for the same
+   * reason: a RESUMED run's frames restate the commission so each stands
+   * alone, and the resume's own call is the send, which states none. Bounded
+   * all the same.
+   */
+  rememberCommission(taskId: string, commission: conversationv1.AgentSubagentPrompt): void;
+  /** The commission remembered for a task, or `undefined` if this process never saw its spawn. */
+  commissionOf(taskId: string): conversationv1.AgentSubagentPrompt | undefined;
+  /**
    * Remember what the STORE answered when asked which agent a task names, for
    * a task it did not name one for — so the refusal that follows can say so.
    * Forgotten with the task's other facts.
@@ -806,6 +819,8 @@ export function createTaskKindRegistry(): TaskKindRegistry {
   /** Make room for one more task, forgetting the oldest when the cap is hit. */
   /** The agents subagent tasks run, by task id; kept past each task's settle. */
   const agents = new Map<string, conversationv1.AgentId>();
+  /** The commissions subagent tasks' agents were spawned with, by task id; kept past each task's settle. */
+  const commissions = new Map<string, conversationv1.AgentSubagentPrompt>();
   /**
    * Make room for one more entry in either table, forgetting the oldest when
    * the cap is hit. ONE BOUND, ONE RECORD for both tables: what is lost differs
@@ -863,6 +878,14 @@ export function createTaskKindRegistry(): TaskKindRegistry {
     },
     agentOf(taskId) {
       return agents.get(taskId);
+    },
+    rememberCommission(taskId, commission) {
+      commissions.delete(taskId);
+      reserve(commissions, "the commission its agent was spawned with, so a resume of that agent cannot restate it");
+      commissions.set(taskId, commission);
+    },
+    commissionOf(taskId) {
+      return commissions.get(taskId);
     },
     rememberStoreAnswer(taskId, storeAnswer) {
       reserve(facts, FACTS_LOST);
@@ -1223,7 +1246,7 @@ export function convertDetached(
         { uuid, task_id: taskId, tool_use_id: toolUseId, total_tokens: raw.usage?.total_tokens ?? 0 },
         "a running beat advances the subagent unit's spend",
       );
-      return subagentProgressEntries(context, agentId, uuid, toolUseId, raw, spawnCall);
+      return subagentProgressEntries(context, agentId, uuid, toolUseId, raw, taskCommission(taskId, spawnCall, taskKinds));
     }
 
     case "task_notification": {
@@ -1302,7 +1325,16 @@ export function convertDetached(
       // its own call.
       const createdAgent = taskKinds.agentOf(taskId) ?? subagentId(toolUseId);
       entries.push(
-        ...subagentTerminalEntries(context, agentId, uuid, toolUseId, createdAgent, raw, spawnCall),
+        ...subagentTerminalEntries(
+          context,
+          agentId,
+          uuid,
+          toolUseId,
+          createdAgent,
+          raw,
+          spawnCall,
+          taskCommission(taskId, spawnCall, taskKinds),
+        ),
       );
       return entries;
     }
@@ -1342,7 +1374,7 @@ function subagentProgressEntries(
   vendorUuid: string,
   toolUseId: string,
   raw: RawTask,
-  spawnCall: PendingCall | undefined,
+  commission: conversationv1.AgentSubagentPrompt,
 ): readonly PersistEntry[] {
   const activityId = toolCallActivityId(toolUseId);
   const totalTokens = raw.usage?.total_tokens;
@@ -1358,7 +1390,7 @@ function subagentProgressEntries(
           result: {
             case: "update",
             value: create(conversationv1.AgentSubagentUpdateSchema, {
-              prompt: spawnPrompt(spawnCall),
+              prompt: commission,
               progress: create(conversationv1.AgentSubagentProgressSchema, {
                 totalTokens: nonNegativeBigInt(totalTokens),
                 toolUseCount: nonNegativeInt(toolUses),
@@ -1385,16 +1417,46 @@ function nonNegativeInt(value: number | undefined): number {
 }
 
 /**
- * What a detached spawn was asked, restated from its spawning call.
+ * WHAT THE RUNNING AGENT WAS COMMISSIONED WITH, restated on its run's frames
+ * so each stands alone (`AgentSubagentUpdate.prompt`, and every settled arm's).
  *
- * The call is the one authority — {@link subagentPrompt} reads it exactly as
- * the start did, so the two cannot disagree. A call the fold never saw open
- * leaves an EMPTY prompt, never an invented one.
+ * THE SPAWN IS THE ONE AUTHORITY, and the task's call is not always the spawn:
+ * a subagent RESUMED BY A SEND runs under the send's call, whose input states
+ * no description and no type. Restating THAT as the commission drew the resumed
+ * agent as a bare "subagent" row with no description to any consumer that had
+ * not seen it launch (owner's report, workspace footer-activity-updates,
+ * 2026-09-30). So:
+ *
+ * - The call is the spawn: {@link subagentPrompt} reads it exactly as the start
+ *   did, so the two cannot disagree.
+ * - Otherwise the commission the spawn was remembered with, which outlives
+ *   the task's settle ({@link TaskKindRegistry.rememberCommission}).
+ * - Otherwise a call that is NOT the spawn names a run whose commission this
+ *   process never saw (it restarted since the spawn): recorded at ERROR, and
+ *   the prompt is carried EMPTY rather than invented from the send.
+ * - No call at all: the fold never saw the task's call open, and the prompt is
+ *   carried empty, as it always has been.
  */
-function spawnPrompt(spawnCall: PendingCall | undefined): conversationv1.AgentSubagentPrompt {
-  return spawnCall === undefined
-    ? create(conversationv1.AgentSubagentPromptSchema, { text: "" })
-    : subagentPrompt(spawnCall);
+export function taskCommission(
+  taskId: string,
+  call: PendingCall | undefined,
+  taskKinds: TaskKindRegistry,
+): conversationv1.AgentSubagentPrompt {
+  if (call !== undefined && isSpawnCall(call)) return subagentPrompt(call);
+  const remembered = taskKinds.commissionOf(taskId);
+  if (remembered !== undefined) return remembered;
+  if (call !== undefined) {
+    LOGGER.error(
+      {
+        task_id: taskId,
+        tool_use_id: call.toolUseId,
+        tool: call.toolName,
+        detail: `the task's call ${call.toolUseId} is a ${call.toolName}, not a spawn, and no spawn of task ${taskId} was seen by this process`,
+      },
+      "a subagent run's frames name a call that is not its spawn, and this process never saw the spawn's commission; they restate an empty prompt",
+    );
+  }
+  return create(conversationv1.AgentSubagentPromptSchema, { text: "" });
 }
 
 /**
@@ -1413,6 +1475,7 @@ function subagentTerminalEntries(
   createdAgent: conversationv1.AgentId,
   raw: RawTask,
   spawnCall: PendingCall | undefined,
+  commission: conversationv1.AgentSubagentPrompt,
 ): readonly PersistEntry[] {
   const activityId = toolCallActivityId(toolUseId);
   if (spawnCall === undefined) {
@@ -1444,7 +1507,7 @@ function subagentTerminalEntries(
                 // RESTATED, so the stopped spawn a replay serves alone still
                 // draws its label and addresses its sub-feed: the spawning
                 // call's prompt, and the created agent the minting rule names.
-                prompt: spawnPrompt(spawnCall),
+                prompt: commission,
                 createdAgentId: createdAgent,
               }),
             },
@@ -1481,7 +1544,7 @@ function subagentTerminalEntries(
                         }),
                   settledAt: settled,
                 }),
-                prompt: spawnPrompt(spawnCall),
+                prompt: commission,
                 createdAgentId: createdAgent,
               }),
             },
@@ -1510,7 +1573,7 @@ function subagentTerminalEntries(
               // this one need not share — so the id is restated here from the
               // spawning call, which the minting rule makes the same value.
               createdAgentId: createdAgent,
-              prompt: spawnPrompt(spawnCall),
+              prompt: commission,
               report: create(conversationv1.AgentSubagentReportSchema, {
                 prose: prose(raw.summary ?? ""),
               }),
