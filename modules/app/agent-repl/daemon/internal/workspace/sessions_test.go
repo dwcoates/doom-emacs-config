@@ -1323,39 +1323,6 @@ func TestStartPassesTheRoutedConfigDirToTheSpawn(t *testing.T) {
 	}
 }
 
-func TestStartDisablesAutoCompactForAWorkAccountSpawn(t *testing.T) {
-	// Arrange: the routed config dir IS the work (multi-repo) account.
-	f := newFleetFixture(t)
-	f.accounts.multiRepoDir = "/config"
-	ws := f.workspace("w1")
-
-	// Act.
-	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-
-	// Assert.
-	if !f.supervisor.spawns[0].DisableAutoCompact {
-		t.Fatal("spawn DisableAutoCompact = false, want true for a work-account session")
-	}
-}
-
-func TestStartKeepsAutoCompactForAPersonalAccountSpawn(t *testing.T) {
-	// Arrange: no work account, so the routed config dir is personal.
-	f := newFleetFixture(t)
-	ws := f.workspace("w1")
-
-	// Act.
-	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-
-	// Assert.
-	if f.supervisor.spawns[0].DisableAutoCompact {
-		t.Fatal("spawn DisableAutoCompact = true, want false for a personal-account session")
-	}
-}
-
 func TestStartRecordsTheSessionFacts(t *testing.T) {
 	// Arrange.
 	f := newFleetFixture(t)

@@ -29,13 +29,6 @@ const (
 	// LOG CORRELATION only. Session facts still travel exclusively in
 	// StartSession.
 	EnvSessionID = "AGENT_REPL_SESSION_ID"
-	// EnvDisableCompact is DISABLE_COMPACT: the vendor CLI's own switch that
-	// turns off AUTOMATIC context compaction. Set to "1" on a shim child whose
-	// Spec asks for it (Spec.DisableAutoCompact), and omitted otherwise so a
-	// personal-account session compacts exactly as before. Manual /compact is
-	// unaffected. shimclient is policy-free: it only honors the flag, it never
-	// decides which accounts get it.
-	EnvDisableCompact = "DISABLE_COMPACT"
 )
 
 // shimLogFD is the descriptor the shim writes its own log to: fd 3, the
@@ -477,9 +470,6 @@ func spawnEnv(spec Spec, contracts envc.Contracts) []string {
 	}
 	if spec.ForbidVendor || contracts.ForbidVendorCalls() {
 		overrides = append(overrides, [2]string{envc.EnvForbidVendorCalls, "1"})
-	}
-	if spec.DisableAutoCompact {
-		overrides = append(overrides, [2]string{EnvDisableCompact, "1"})
 	}
 
 	overridden := make(map[string]bool, len(overrides))
