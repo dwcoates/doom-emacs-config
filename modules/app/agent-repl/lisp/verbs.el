@@ -51,6 +51,7 @@
 (require 'cl-lib)
 (require 'subr-x)
 
+(declare-function agent-repl-popup-show "popup" (buffer))
 (declare-function agent-repl--panels-note-arrival-reason "agent-repl-panels"
                   (id reason))
 (declare-function agent-repl--path-canonical "agent-repl-core" (path))
@@ -1417,11 +1418,11 @@ component; every refusal is reported loudly with its detail."
   "Buffer every health pull renders into.")
 
 (defun agent-repl-verbs--health-insert (lines)
-  "Append LINES to the health buffer and display it."
+  "Append LINES to the health buffer and show it in the shared popup."
   (with-current-buffer (get-buffer-create agent-repl-verbs-health-buffer)
     (goto-char (point-max))
     (dolist (line lines) (insert line "\n")))
-  (display-buffer agent-repl-verbs-health-buffer))
+  (agent-repl-popup-show (get-buffer agent-repl-verbs-health-buffer)))
 
 (defun agent-repl-verbs--fault-line (fault indent)
   "Render FAULT as one line, prefixed by INDENT.

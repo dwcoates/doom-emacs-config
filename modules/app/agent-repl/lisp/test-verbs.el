@@ -133,6 +133,9 @@ answers a bare success, which is what almost every verb's success is."
                  (lambda (_ws _context) nil))
                 ((symbol-function 'agent-repl-host-conn) (lambda (_ws) 'test-conn))
                 ((symbol-function 'agent-repl-host-faults) (lambda (_ws) nil))
+                ;; The shared popup is its own module's subject (test-popup.el);
+                ;; batch Emacs has no frame to show one in.
+                ((symbol-function 'agent-repl-popup-show) (lambda (_buffer) (selected-window)))
                 ((symbol-function 'agent-repl-host-handle-refusal)
                  (lambda (ws arm) (push (list ws arm) agent-repl-test-verbs--handover)))
                 ((symbol-function 'agent-repl-host-take-restart-hold)
@@ -2196,6 +2199,17 @@ pause sent."
   "Return the health buffer's contents."
   (with-current-buffer (get-buffer-create agent-repl-verbs-health-buffer)
     (buffer-string)))
+
+(ert-deftest agent-repl-verbs-health-insert-shows-the-health-buffer-in-the-popup ()
+  "The health report is shown through the ONE shared popup."
+  ;; Arrange
+  (let ((shown nil))
+    (cl-letf (((symbol-function 'agent-repl-popup-show)
+               (lambda (buffer) (push buffer shown) (selected-window))))
+      ;; Act
+      (agent-repl-verbs--health-insert '("daemon: HEALTHY"))
+      ;; Assert
+      (should (equal shown (list (get-buffer agent-repl-verbs-health-buffer)))))))
 
 (ert-deftest agent-repl-verbs-daemon-health-healthy-says-so ()
   "A healthy daemon renders the verdict and no faults."
