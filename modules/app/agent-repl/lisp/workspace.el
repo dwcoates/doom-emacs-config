@@ -988,6 +988,7 @@ Returns:
     (:idle-async     . "🌙")
     (:permission     . "❓")
     (:vendor-blocked . "⛔")
+    (:api-retrying   . "🔁")
     (:start-failed   . "🚫")
     (:dead           . "❌")
     (:degraded       . "📡")

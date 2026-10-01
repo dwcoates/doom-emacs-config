@@ -348,6 +348,10 @@ BOTH the idle and ready render states resolve here."
   "Decode VALUE as the empty `RosterRowStatusVendorBlocked'."
   (agent-repl-wire--decode-empty "RosterRowStatusVendorBlocked" value))
 
+(defun agent-repl-wire-decode-roster-row-status-api-retrying (value)
+  "Decode VALUE as the empty `RosterRowStatusApiRetrying'."
+  (agent-repl-wire--decode-empty "RosterRowStatusApiRetrying" value))
+
 (defun agent-repl-wire-decode-roster-row-status-init (value)
   "Decode VALUE as the empty `RosterRowStatusInit'."
   (agent-repl-wire--decode-empty "RosterRowStatusInit" value))
@@ -407,6 +411,8 @@ an assertion, where an unset oneof is the absence of one."
     (idleAsync :idle-async agent-repl-wire-decode-roster-row-status-idle-async)
     (vendorBlocked :vendor-blocked
                    agent-repl-wire-decode-roster-row-status-vendor-blocked)
+    (apiRetrying :api-retrying
+                 agent-repl-wire-decode-roster-row-status-api-retrying)
     (init :init agent-repl-wire-decode-roster-row-status-init)
     (severed :severed agent-repl-wire-decode-roster-row-status-severed)
     (startFailed :start-failed agent-repl-wire-decode-roster-row-status-start-failed)
