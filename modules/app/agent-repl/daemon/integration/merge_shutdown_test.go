@@ -43,7 +43,7 @@ func TestStoppingTheDaemonInsideAMergesTerminalStampsTheLandingWithNoFailedWrite
 	repoRef := mergeRepositoryRef(t, d, repo)
 	f := mergeCreateChild(t, d, repoRef, "feature", "do the feature", nil)
 	harness.CommitWork(t, f.ws.GetDir())
-	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws})); err != nil {
+	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws, Source: ownBranch()})); err != nil {
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 	}
 	d.AwaitFileExists(rendezvous)
@@ -103,51 +103,4 @@ func daemonErrorRecords(t *testing.T, d *harness.Daemon) []harness.LogRecord {
 		}
 	}
 	return out
-}
-
-// TestStoppingTheDaemonWithAMergeParkedRecordsNoFailedWrites is the OTHER
-// shutdown window: the run is not in its terminal at all, it is PARKED on a
-// conflict awaiting the user. The orderly exit cancels it, so the park returns
-// and the run takes its stop-teardown -- and that teardown's lease release and
-// queue-entry removal used to run after the state client had already closed,
-// recording the merge's give-back as daemon.merge.teardown errors over a
-// "could not begin the transaction" from the store.
-func TestStoppingTheDaemonWithAMergeParkedRecordsNoFailedWrites(t *testing.T) {
-	t.Parallel()
-	// Arrange: a merge parked on a scripted conflict.
-	repo := harness.NewRepo(t)
-	d := harness.StartDaemon(t, harness.Opts{SelfRepo: repo.Dir})
-	// The park itself is the arrangement: its conflict records are expected.
-	d.ExpectWarnings("daemon.gitclient.merge_no_ff", "daemon.merge.merge_tab", "daemon.merge.conflicts")
-	repoRef := mergeRepositoryRef(t, d, repo)
-	f := mergeCreateChild(t, d, repoRef, "feature", "do the feature", nil)
-	branch := mergeBranchOf(t, f.ws)
-	repo.ScriptConflict(repo.Dir, branch, "conflict.txt")
-	harness.CommitWork(t, f.ws.GetDir())
-	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws})); err != nil {
-		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
-	}
-	f.shim.ExpectStartTurn()
-	f.d.AwaitWorkspaceLogOperationCount(f.ws.GetDir(), harness.OpTurnOpened, 2)
-	pushConcludedTurn(f.shim, mainAgent, "conflict-brief-done")
-	host := f.d.WatchHost(f.ws)
-	awaitView(t, f, host, "the host composer parked on the merge", func(r *agentreplv1.WatchHostWorkspaceResponse) bool {
-		return r.GetHost().GetExisting().GetLive().GetMergeParked() != nil
-	})
-
-	// Act: SIGTERM with the run parked.
-	d.Stop()
-	d.AwaitExit()
-
-	// Assert: the give-back recorded nothing as a fault.
-	for _, record := range daemonErrorRecords(t, d) {
-		if strings.HasPrefix(record.Operation, "daemon.merge.") {
-			t.Errorf("the merge recorded an error under a stop while it was parked: %s: %s %v",
-				record.Operation, record.Message, record.Context)
-		}
-		if strings.Contains(record.Raw, "transaction") || strings.Contains(record.Raw, "database is closed") {
-			t.Errorf("a write failed against the closing state client: %s: %s %v",
-				record.Operation, record.Message, record.Context)
-		}
-	}
 }

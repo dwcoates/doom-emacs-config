@@ -287,6 +287,81 @@ func (r *Repo) ScriptConflict(worktreeDir, branch string, paths ...string) {
 	})
 }
 
+// ScriptRebaseConflict makes replaying branch's commit at the 1-based place
+// commit stop on these paths, the first time the merge queue's rebase meets it.
+func (r *Repo) ScriptRebaseConflict(branch string, commit int, paths ...string) {
+	r.t.Helper()
+	r.edit(func(s *fakegit.State) {
+		s.Conflicts = append(s.Conflicts, &fakegit.Conflict{Dir: r.Dir, Branch: branch, Paths: paths, RebaseCommit: commit})
+	})
+}
+
+// ResolveConflicts clears the conflicted paths in one worktree, as an agent
+// that resolved them and `git add`ed them leaves it.
+func (r *Repo) ResolveConflicts(worktreeDir string) {
+	r.t.Helper()
+	r.edit(func(s *fakegit.State) {
+		wt := r.state(s).Worktree(worktreeDir)
+		if wt == nil {
+			r.t.Fatalf("harness: %s is not a worktree of %s", worktreeDir, r.Dir)
+		}
+		wt.Conflicted = nil
+	})
+}
+
+// RebaseInProgress reports whether a rebase stands in one worktree.
+func (r *Repo) RebaseInProgress(worktreeDir string) bool {
+	r.t.Helper()
+	wt := r.state(r.w.read()).Worktree(worktreeDir)
+	return wt != nil && wt.Rebase != nil
+}
+
+// BranchHead answers the commit a branch points at.
+func (r *Repo) BranchHead(branch string) string {
+	r.t.Helper()
+	return r.state(r.w.read()).BranchHeads[branch]
+}
+
+// SetUpstream points origin's branch at a new commit on top of the local
+// one, as a pull request merged upstream leaves it, and answers that commit.
+func (r *Repo) SetUpstream(branch string) string {
+	r.t.Helper()
+	var sha string
+	r.edit(func(s *fakegit.State) {
+		repo := r.state(s)
+		c := s.AddCommit(repo, "", "merged upstream", []string{repo.BranchHeads[branch]}, []string{"upstream.txt"})
+		if repo.RemoteHeads == nil {
+			repo.RemoteHeads = map[string]string{}
+		}
+		repo.RemoteHeads[branch] = c.SHA
+		sha = c.SHA
+	})
+	return sha
+}
+
+// AddBranchWorktree adds a branch cut from the default branch, carrying one
+// commit of work, checked out in a sibling worktree, and answers the worktree.
+func (r *Repo) AddBranchWorktree(name string) string {
+	r.t.Helper()
+	dir := r.AddWorktree(name)
+	CommitWork(r.t, dir)
+	return dir
+}
+
+// AddBranch adds a branch cut from the default branch carrying one commit of
+// work, checked out NOWHERE, and answers its head.
+func (r *Repo) AddBranch(name string) string {
+	r.t.Helper()
+	var sha string
+	r.edit(func(s *fakegit.State) {
+		repo := r.state(s)
+		base := repo.BranchHeads[DefaultBranch]
+		repo.AddBranch(name, base)
+		sha = s.AddCommit(repo, name, "the branch's work", []string{base}, []string{"branch.txt"}).SHA
+	})
+	return sha
+}
+
 // ScriptFailure makes the NEXT git command matching this prefix fail.
 func (r *Repo) ScriptFailure(dir string, exit int, stderr string, match ...string) {
 	r.t.Helper()
