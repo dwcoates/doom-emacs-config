@@ -238,6 +238,12 @@ type Deps struct {
 	// against a store that is gone for good retries a socket that never
 	// appears, and its feed stays blank.
 	EnsureServices func(context.Context) error
+	// Unserved states, on a workspace's views, that this daemon serves no
+	// session for it: its link is dead before it ever connected. The
+	// reconciliation calls it for every UNDETERMINED workspace, which no
+	// bring-up starts and no adoption installs, so its roster row resolves
+	// `unavailable` (drawn `start_failed`) rather than `pending` forever.
+	Unserved func(ids.WorkspaceID)
 	// AdoptBound bounds ONE surviving shim's adoption; zero means
 	// DefaultAdoptBound. An adoption that overruns it is reported at ERROR and
 	// the workspace is UNDETERMINED — neither adopted nor orphan-closed — which
@@ -319,6 +325,8 @@ func New(deps Deps) (Sequence, error) {
 		return nil, missing("a session starter")
 	case deps.EnsureServices == nil:
 		return nil, missing("a launchd service ensurer")
+	case deps.Unserved == nil:
+		return nil, missing("an unserved-workspace marker")
 	case deps.BindViews == nil:
 		return nil, missing("a view binder")
 	case deps.RunDir == "":

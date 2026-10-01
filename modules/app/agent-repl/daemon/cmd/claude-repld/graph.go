@@ -929,6 +929,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			Adopted:        fleet.Install,
 			StartSession:   fleet.Start,
 			EnsureServices: services.EnsureLoaded,
+			Unserved:       fleet.MarkUnserved,
 			AdoptBound:     adoptBound,
 			Log:            p.Surfaces,
 		},

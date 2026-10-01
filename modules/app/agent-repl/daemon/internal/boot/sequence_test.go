@@ -1357,6 +1357,41 @@ func TestABootStartsNoSessionForAClosedRow(t *testing.T) {
 	}
 }
 
+// TestAnUndeterminedWorkspaceIsMarkedUnserved pins that a workspace the boot
+// neither adopts nor starts still resolves on its views: nothing else would
+// ever state a link for it, and an editor opening rows in registry order would
+// wait on its `pending` row forever.
+func TestAnUndeterminedWorkspaceIsMarkedUnserved(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	ws := h.register(t, t.TempDir(), sessionlock.StateUnknown)
+	h.probeErrs[ws.Dir] = errBoom
+
+	// Act.
+	h.runAndBringUp(t)
+
+	// Assert.
+	if len(h.unserved) != 1 || h.unserved[0] != ws.ID {
+		t.Fatalf("unserved = %v, want [%v]", h.unserved, ws.ID)
+	}
+}
+
+// TestAStartedWorkspaceIsNotMarkedUnserved pins the other side: a workspace
+// the bring-up starts is resolved by its own link, never marked dead.
+func TestAStartedWorkspaceIsNotMarkedUnserved(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.register(t, t.TempDir(), sessionlock.StateFree)
+
+	// Act.
+	h.runAndBringUp(t)
+
+	// Assert.
+	if len(h.unserved) != 0 {
+		t.Fatalf("unserved = %v, want none for a workspace the bring-up starts", h.unserved)
+	}
+}
+
 // TestAnUndeterminedWorkspaceIsNeverStarted pins the other half of "could not
 // tell is never read as free": spawning a second shim onto a conversation a
 // survivor may still own is the loss that discipline prevents.

@@ -123,6 +123,13 @@ func (s *sequence) Run(ctx context.Context) (Report, error) {
 		// reading. It does not run here because it must not gate the
 		// listener; see BringUp.
 		report.PendingBringUp = clientless
+		// AN UNDETERMINED WORKSPACE IS SERVED BY NO SESSION OF THIS DAEMON,
+		// and it is said so on its views: nothing else would ever state a
+		// link for it, so its roster row would stay `pending` and every
+		// editor walking the registry in order would wait on it forever.
+		for _, ws := range report.Undetermined {
+			s.deps.Unserved(ws)
+		}
 	}
 	if err := s.join(ctx, log); err != nil {
 		return Report{}, err
