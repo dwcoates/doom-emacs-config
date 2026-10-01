@@ -6,10 +6,11 @@
  */
 import { afterEach, describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
-import { FeedRowSelectableSchema, FeedSelectionSchema, type FeedRow } from "../../../proto/gen/ts/frontend/v1/feed_pb";
+import { FeedSelectionSchema, type FeedRow } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import { bootColdOnce, startHarness, type Harness } from "./harness";
 import { ROOT_FEED } from "./fake-daemon";
 import { WORKSPACE_ID, feedId, responseRow, userPromptRow } from "./fixtures";
+import { selectable } from "../selectable.js";
 
 let harness: Harness;
 
@@ -18,12 +19,6 @@ bootColdOnce();
 afterEach(async () => {
   await harness?.stop();
 });
-
-/** A row the daemon published selectable. */
-function selectable(row: FeedRow): FeedRow {
-  row.selectable = create(FeedRowSelectableSchema, {});
-  return row;
-}
 
 /** Boot with ROWS on the root feed's tail. */
 async function withRows(...rows: FeedRow[]): Promise<void> {
