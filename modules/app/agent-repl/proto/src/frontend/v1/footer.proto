@@ -131,8 +131,10 @@ message FooterStrip {
 //                on a timer. STATUS-BOUND: each status arm declares its own
 //                salient kinds, so a salient line illegal under a status is
 //                unrepresentable. A deploy's progress, the agent's push
-//                notification, a vendor rate-limit event and the
-//                context-budget warning ride every arm's salient oneof.
+//                notification and the context-budget warning ride every
+//                arm's salient oneof. A vendor rate-limit event draws no
+//                salient line: it feeds the enduring usage figures (owner
+//                ruling, 2026-10-01).
 //     TRANSIENT  ends when a newer transient replaces it or its expiry
 //                instant passes. STATUS-INDEPENDENT (FooterActivityTransient):
 //                an event can land under any status, and the last event may
@@ -147,9 +149,8 @@ message FooterStrip {
 //   enduring. A standing salient line outranks every other tier, so a push
 //   carries EITHER the salient line OR the unpinned tiers beneath it, never
 //   both. Within the salient tier a kind that explains the standing substatus
-//   ranks first, then a fault, then a deploy's progress (`update`), then a
-//   rate-limit event, then the push notification, then the context-budget
-//   warning. Within the transient tier the NEWEST wins, so a push carries at
+//   ranks first, then a fault, then a deploy's progress (`update`), then the
+//   push notification, then the context-budget warning. Within the transient tier the NEWEST wins, so a push carries at
 //   most one transient.
 // - THE DAEMON DECIDES A TRANSIENT'S EXPIRY; THE CLIENT APPLIES IT. The
 //   transient ships with its expiry instant beside the lines beneath it, and
@@ -339,8 +340,8 @@ message FooterStatusIdleActivity {
 // The salient kinds legal while idle, and under the `turn_failed` and
 // `degraded` statuses, which share this cell. The dead-query line ranks
 // first, because it explains a `turn_failed` status; then a deploy's
-// progress; then a rate-limit event, the push notification and the
-// context-budget warning, in that order.
+// progress; then the push notification and the context-budget warning, in
+// that order.
 message FooterStatusIdleSalient {
   // When this line began standing; the client ticks the relative age per the
   // clock convention. A push without it is a loud daemon fault.
@@ -357,11 +358,6 @@ message FooterStatusIdleSalient {
     // the prompt the failed turn carried was never answered, which blocks the
     // user until they prompt again.
     FooterStatusActivityQueryDied query_died = 3;
-    // A VENDOR RATE-LIMIT EVENT: the vendor warned that an allowance is
-    // nearly spent, or refused a request against it. STATUS-INDEPENDENT:
-    // every status arm's salient oneof carries it. It stands until a later
-    // event reports that allowance allowed. See FooterStatusActivityRateLimit.
-    FooterStatusActivityRateLimit rate_limit = 4;
     // THE AGENT'S PUSH NOTIFICATION, standing until the next prompt is
     // submitted. STATUS-INDEPENDENT: every status arm's salient oneof carries
     // it.
@@ -373,6 +369,10 @@ message FooterStatusIdleSalient {
     // salient oneof carries it.
     FooterStatusActivityContextBudget context_budget = 6;
   }
+  // Tag 4 (`rate_limit`) is RETIRED: the enduring usage line carries
+  // the vendor's allowance figures (owner ruling, 2026-10-01).
+  reserved 4;
+  reserved "rate_limit";
 }
 
 // Never ran a turn this session.
@@ -473,9 +473,8 @@ message FooterStatusWorkingSalient {
   // When this line began standing; the client ticks the relative age.
   FooterStatusActivityAt at = 1;
   // The one salient line. A compaction ranks first, because it explains the
-  // `compacting` step; a retry next; then a deploy's progress, a rate-limit
-  // event, the push notification and the context-budget warning, in that
-  // order.
+  // `compacting` step; a retry next; then a deploy's progress, the push
+  // notification and the context-budget warning, in that order.
   oneof kind {
     // A COMPACTION'S OWN PROGRESS, phase by phase, standing while the
     // compaction RUNS and ending with the cut (or the turn's terminal) that
@@ -492,11 +491,6 @@ message FooterStatusWorkingSalient {
     // A DEPLOY'S PROGRESS. STATUS-INDEPENDENT: every status arm's salient
     // oneof carries it. See FooterStatusActivityUpdate.
     FooterStatusActivityUpdate update = 4;
-    // A VENDOR RATE-LIMIT EVENT: the vendor warned that an allowance is
-    // nearly spent, or refused a request against it. STATUS-INDEPENDENT:
-    // every status arm's salient oneof carries it. It stands until a later
-    // event reports that allowance allowed. See FooterStatusActivityRateLimit.
-    FooterStatusActivityRateLimit rate_limit = 5;
     // THE AGENT'S PUSH NOTIFICATION, standing until the next prompt is
     // submitted. STATUS-INDEPENDENT: every status arm's salient oneof carries
     // it.
@@ -508,6 +502,10 @@ message FooterStatusWorkingSalient {
     // salient oneof carries it.
     FooterStatusActivityContextBudget context_budget = 7;
   }
+  // Tag 5 (`rate_limit`) is RETIRED: the enduring usage line carries
+  // the vendor's allowance figures (owner ruling, 2026-10-01).
+  reserved 5;
+  reserved "rate_limit";
 }
 // THE QUIET TIER's line, composed by the daemon out of the feed item that
 // landed last ("✅ Bash finished — handling result...", "❌ Read failed —
@@ -630,8 +628,8 @@ message FooterStatusWaitingActivity {
 }
 // The salient kinds legal while waiting. The kind that explains the standing
 // substatus ranks first (the interrupt, the gated call, the question lead,
-// the cold gate, the countdown), then a deploy's progress, then a rate-limit
-// event, the push notification and the context-budget warning, in that order.
+// the cold gate, the countdown), then a deploy's progress, then the push
+// notification and the context-budget warning, in that order.
 message FooterStatusWaitingSalient {
   // When this line began standing; the client ticks the relative age.
   FooterStatusActivityAt at = 1;
@@ -658,11 +656,6 @@ message FooterStatusWaitingSalient {
     // A DEPLOY'S PROGRESS. STATUS-INDEPENDENT: every status arm's salient
     // oneof carries it. See FooterStatusActivityUpdate.
     FooterStatusActivityUpdate update = 8;
-    // A VENDOR RATE-LIMIT EVENT: the vendor warned that an allowance is
-    // nearly spent, or refused a request against it. STATUS-INDEPENDENT:
-    // every status arm's salient oneof carries it. It stands until a later
-    // event reports that allowance allowed. See FooterStatusActivityRateLimit.
-    FooterStatusActivityRateLimit rate_limit = 9;
     // THE AGENT'S PUSH NOTIFICATION, standing until the next prompt is
     // submitted. STATUS-INDEPENDENT: every status arm's salient oneof carries
     // it.
@@ -674,6 +667,10 @@ message FooterStatusWaitingSalient {
     // salient oneof carries it.
     FooterStatusActivityContextBudget context_budget = 11;
   }
+  // Tag 9 (`rate_limit`) is RETIRED: the enduring usage line carries
+  // the vendor's allowance figures (owner ruling, 2026-10-01).
+  reserved 9;
+  reserved "rate_limit";
 }
 // The composed interrupting line.
 message FooterStatusActivityInterrupting {
@@ -728,8 +725,8 @@ message FooterStatusInterruptedActivity {
 }
 // The salient kinds legal while interrupted. A stopped turn has no line of
 // its own, so only the status-independent kinds can stand: a deploy's
-// progress, a rate-limit event, the push notification and the context-budget
-// warning, in that order.
+// progress, the push notification and the context-budget warning, in that
+// order.
 message FooterStatusInterruptedSalient {
   // When this line began standing; the client ticks the relative age.
   FooterStatusActivityAt at = 1;
@@ -738,11 +735,6 @@ message FooterStatusInterruptedSalient {
     // A DEPLOY'S PROGRESS. STATUS-INDEPENDENT: every status arm's salient
     // oneof carries it. See FooterStatusActivityUpdate.
     FooterStatusActivityUpdate update = 2;
-    // A VENDOR RATE-LIMIT EVENT: the vendor warned that an allowance is
-    // nearly spent, or refused a request against it. STATUS-INDEPENDENT:
-    // every status arm's salient oneof carries it. It stands until a later
-    // event reports that allowance allowed. See FooterStatusActivityRateLimit.
-    FooterStatusActivityRateLimit rate_limit = 3;
     // THE AGENT'S PUSH NOTIFICATION, standing until the next prompt is
     // submitted. STATUS-INDEPENDENT: every status arm's salient oneof carries
     // it.
@@ -754,6 +746,10 @@ message FooterStatusInterruptedSalient {
     // salient oneof carries it.
     FooterStatusActivityContextBudget context_budget = 5;
   }
+  // Tag 3 (`rate_limit`) is RETIRED: the enduring usage line carries
+  // the vendor's allowance figures (owner ruling, 2026-10-01).
+  reserved 3;
+  reserved "rate_limit";
 }
 
 // A daemon-orchestrated merge is in flight in this workspace: the workspace
@@ -881,19 +877,14 @@ message FooterStatusMergingSalient {
   // When this line began standing; the client ticks the relative age.
   FooterStatusActivityAt at = 1;
   // The one salient line. The merge step's own line ranks first, because it
-  // explains the step; then a deploy's progress, a rate-limit event, the
-  // push notification and the context-budget warning, in that order.
+  // explains the step; then a deploy's progress, the push notification and
+  // the context-budget warning, in that order.
   oneof kind {
     // The current step's own line, standing until the step ends.
     FooterStatusActivityMergeStep merge_step = 7;
     // A DEPLOY'S PROGRESS. STATUS-INDEPENDENT: every status arm's salient
     // oneof carries it. See FooterStatusActivityUpdate.
     FooterStatusActivityUpdate update = 3;
-    // A VENDOR RATE-LIMIT EVENT: the vendor warned that an allowance is
-    // nearly spent, or refused a request against it. STATUS-INDEPENDENT:
-    // every status arm's salient oneof carries it. It stands until a later
-    // event reports that allowance allowed. See FooterStatusActivityRateLimit.
-    FooterStatusActivityRateLimit rate_limit = 4;
     // THE AGENT'S PUSH NOTIFICATION, standing until the next prompt is
     // submitted. STATUS-INDEPENDENT: every status arm's salient oneof carries
     // it.
@@ -905,6 +896,10 @@ message FooterStatusMergingSalient {
     // salient oneof carries it.
     FooterStatusActivityContextBudget context_budget = 6;
   }
+  // Tag 4 (`rate_limit`) is RETIRED: the enduring usage line carries
+  // the vendor's allowance figures (owner ruling, 2026-10-01).
+  reserved 4;
+  reserved "rate_limit";
   // Tag 2 (`merging_commit`) is RETIRED: the committing step's line is the
   // merge step's `committing` arm.
   reserved 2;
@@ -1044,9 +1039,8 @@ message FooterStatusBackgroundActivity {
 }
 // The salient kinds legal while background. Detached work has no line of
 // its own here (its landings are the quiet tier's), so only the
-// status-independent kinds can stand: a deploy's progress, a rate-limit
-// event, the push notification and the context-budget warning, in that
-// order.
+// status-independent kinds can stand: a deploy's progress, the push
+// notification and the context-budget warning, in that order.
 message FooterStatusBackgroundSalient {
   // When this line began standing; the client ticks the relative age.
   FooterStatusActivityAt at = 1;
@@ -1055,11 +1049,6 @@ message FooterStatusBackgroundSalient {
     // A DEPLOY'S PROGRESS. STATUS-INDEPENDENT: every status arm's salient
     // oneof carries it. See FooterStatusActivityUpdate.
     FooterStatusActivityUpdate update = 2;
-    // A VENDOR RATE-LIMIT EVENT: the vendor warned that an allowance is
-    // nearly spent, or refused a request against it. STATUS-INDEPENDENT:
-    // every status arm's salient oneof carries it. It stands until a later
-    // event reports that allowance allowed. See FooterStatusActivityRateLimit.
-    FooterStatusActivityRateLimit rate_limit = 3;
     // THE AGENT'S PUSH NOTIFICATION, standing until the next prompt is
     // submitted. STATUS-INDEPENDENT: every status arm's salient oneof carries
     // it.
@@ -1071,6 +1060,10 @@ message FooterStatusBackgroundSalient {
     // salient oneof carries it.
     FooterStatusActivityContextBudget context_budget = 5;
   }
+  // Tag 3 (`rate_limit`) is RETIRED: the enduring usage line carries
+  // the vendor's allowance figures (owner ruling, 2026-10-01).
+  reserved 3;
+  reserved "rate_limit";
 }
 
 // The session cannot proceed until something outside it changes.
@@ -1127,10 +1120,10 @@ message FooterStatusBlockedActivity {
   }
 }
 // The salient kinds legal while blocked. The kind that explains the standing
-// substatus ranks first (the auth prompt, or under `usage_limit` the
-// vendor's rate-limit event), then a standing fault, then a deploy's
-// progress, then a rate-limit event, the push notification and the
-// context-budget warning, in that order.
+// substatus ranks first (the auth prompt; `usage_limit` has no line of its
+// own, since the enduring usage line carries the allowance figures), then a
+// standing fault, then a deploy's progress, then the push notification and
+// the context-budget warning, in that order.
 message FooterStatusBlockedSalient {
   // When this line began standing; the client ticks the relative age.
   FooterStatusActivityAt at = 1;
@@ -1147,11 +1140,6 @@ message FooterStatusBlockedSalient {
     // A DEPLOY'S PROGRESS. STATUS-INDEPENDENT: every status arm's salient
     // oneof carries it. See FooterStatusActivityUpdate.
     FooterStatusActivityUpdate update = 5;
-    // A VENDOR RATE-LIMIT EVENT: the vendor warned that an allowance is
-    // nearly spent, or refused a request against it. STATUS-INDEPENDENT:
-    // every status arm's salient oneof carries it. It stands until a later
-    // event reports that allowance allowed. See FooterStatusActivityRateLimit.
-    FooterStatusActivityRateLimit rate_limit = 6;
     // THE AGENT'S PUSH NOTIFICATION, standing until the next prompt is
     // submitted. STATUS-INDEPENDENT: every status arm's salient oneof carries
     // it.
@@ -1163,6 +1151,10 @@ message FooterStatusBlockedSalient {
     // salient oneof carries it.
     FooterStatusActivityContextBudget context_budget = 8;
   }
+  // Tag 6 (`rate_limit`) is RETIRED: the enduring usage line carries
+  // the vendor's allowance figures (owner ruling, 2026-10-01).
+  reserved 6;
+  reserved "rate_limit";
   reserved 3;
 }
 // The daemon itself is impaired; the fault line says how.
@@ -1356,8 +1348,8 @@ message FooterStatusDisconnectedActivity {
 }
 // The salient kinds legal while disconnected. The bring-up failure ranks
 // first, because it explains the `start_failed` step; then a standing fault;
-// then a deploy's progress; then a rate-limit event, the push notification
-// and the context-budget warning, in that order.
+// then a deploy's progress; then the push notification and the
+// context-budget warning, in that order.
 message FooterStatusDisconnectedSalient {
   // When this line began standing; the client ticks the relative age.
   FooterStatusActivityAt at = 1;
@@ -1374,11 +1366,6 @@ message FooterStatusDisconnectedSalient {
     // A DEPLOY'S PROGRESS. STATUS-INDEPENDENT: every status arm's salient
     // oneof carries it. See FooterStatusActivityUpdate.
     FooterStatusActivityUpdate update = 4;
-    // A VENDOR RATE-LIMIT EVENT: the vendor warned that an allowance is
-    // nearly spent, or refused a request against it. STATUS-INDEPENDENT:
-    // every status arm's salient oneof carries it. It stands until a later
-    // event reports that allowance allowed. See FooterStatusActivityRateLimit.
-    FooterStatusActivityRateLimit rate_limit = 5;
     // THE AGENT'S PUSH NOTIFICATION, standing until the next prompt is
     // submitted. STATUS-INDEPENDENT: every status arm's salient oneof carries
     // it.
@@ -1390,6 +1377,10 @@ message FooterStatusDisconnectedSalient {
     // salient oneof carries it.
     FooterStatusActivityContextBudget context_budget = 7;
   }
+  // Tag 5 (`rate_limit`) is RETIRED: the enduring usage line carries
+  // the vendor's allowance figures (owner ruling, 2026-10-01).
+  reserved 5;
+  reserved "rate_limit";
 }
 
 // A close was requested and has not completed.
@@ -1421,8 +1412,8 @@ message FooterStatusClosingActivity {
   }
 }
 // The salient kinds legal while closing. The refusal ranks first, because it
-// explains the `blocked` step; then a deploy's progress, a rate-limit event,
-// the push notification and the context-budget warning, in that order.
+// explains the `blocked` step; then a deploy's progress, the push
+// notification and the context-budget warning, in that order.
 message FooterStatusClosingSalient {
   // When this line began standing; the client ticks the relative age.
   FooterStatusActivityAt at = 1;
@@ -1435,11 +1426,6 @@ message FooterStatusClosingSalient {
     // A DEPLOY'S PROGRESS. STATUS-INDEPENDENT: every status arm's salient
     // oneof carries it. See FooterStatusActivityUpdate.
     FooterStatusActivityUpdate update = 3;
-    // A VENDOR RATE-LIMIT EVENT: the vendor warned that an allowance is
-    // nearly spent, or refused a request against it. STATUS-INDEPENDENT:
-    // every status arm's salient oneof carries it. It stands until a later
-    // event reports that allowance allowed. See FooterStatusActivityRateLimit.
-    FooterStatusActivityRateLimit rate_limit = 4;
     // THE AGENT'S PUSH NOTIFICATION, standing until the next prompt is
     // submitted. STATUS-INDEPENDENT: every status arm's salient oneof carries
     // it.
@@ -1451,6 +1437,10 @@ message FooterStatusClosingSalient {
     // salient oneof carries it.
     FooterStatusActivityContextBudget context_budget = 6;
   }
+  // Tag 4 (`rate_limit`) is RETIRED: the enduring usage line carries
+  // the vendor's allowance figures (owner ruling, 2026-10-01).
+  reserved 4;
+  reserved "rate_limit";
 }
 
 // MOMENTARY: context is being injected (memory, skills).
@@ -1494,8 +1484,8 @@ message FooterStatusLoadingActivity {
 }
 // The salient kinds legal while loading. An injection has no line of its own
 // (it is the `context_injected` transient), so only the status-independent
-// kinds can stand: a deploy's progress, a rate-limit event, the push
-// notification and the context-budget warning, in that order.
+// kinds can stand: a deploy's progress, the push notification and the
+// context-budget warning, in that order.
 message FooterStatusLoadingSalient {
   // When this line began standing; the client ticks the relative age.
   FooterStatusActivityAt at = 1;
@@ -1504,11 +1494,6 @@ message FooterStatusLoadingSalient {
     // A DEPLOY'S PROGRESS. STATUS-INDEPENDENT: every status arm's salient
     // oneof carries it. See FooterStatusActivityUpdate.
     FooterStatusActivityUpdate update = 2;
-    // A VENDOR RATE-LIMIT EVENT: the vendor warned that an allowance is
-    // nearly spent, or refused a request against it. STATUS-INDEPENDENT:
-    // every status arm's salient oneof carries it. It stands until a later
-    // event reports that allowance allowed. See FooterStatusActivityRateLimit.
-    FooterStatusActivityRateLimit rate_limit = 3;
     // THE AGENT'S PUSH NOTIFICATION, standing until the next prompt is
     // submitted. STATUS-INDEPENDENT: every status arm's salient oneof carries
     // it.
@@ -1520,6 +1505,10 @@ message FooterStatusLoadingSalient {
     // salient oneof carries it.
     FooterStatusActivityContextBudget context_budget = 5;
   }
+  // Tag 3 (`rate_limit`) is RETIRED: the enduring usage line carries
+  // the vendor's allowance figures (owner ruling, 2026-10-01).
+  reserved 3;
+  reserved "rate_limit";
 }
 
 // ---- Shared activity leaf payloads ----------------------------------------
@@ -1603,59 +1592,6 @@ message FooterStatusActivityContextBudget {
   // drawn verbatim.
   string text = 1;
 }
-
-// A vendor rate-limit event that warned or refused: WHICH allowance, WHAT the
-// vendor said, and the figures the event carried. The enduring usage line
-// draws the account's figures whether or not the vendor has spoken; this line
-// is the vendor SPEAKING.
-message FooterStatusActivityRateLimit {
-  // Which allowance the event is about. UNSET when the vendor named none.
-  optional FooterStatusActivityRateLimitWindow window = 1;
-  // What the vendor said. Exactly one is set: an event that reports the
-  // allowance allowed ends the line rather than standing one.
-  oneof verdict {
-    // Requests are allowed, and the allowance is nearly spent.
-    FooterAllowanceAllowedWarning allowed_warning = 2;
-    // Requests against the allowance are refused.
-    FooterAllowanceRejected rejected = 3;
-  }
-  // How much of the allowance is used, 0..1. UNSET when the event carried no
-  // figure.
-  optional double utilization = 4;
-  // When the allowance resets, epoch SECONDS. UNSET when the event carried
-  // no reset instant; the client ticks the countdown from it.
-  optional int64 resets_at_s = 5;
-}
-// The allowance a rate-limit event is about, by the vendor's own windows.
-message FooterStatusActivityRateLimitWindow {
-  // Exactly one is set.
-  oneof window {
-    // The rolling five-hour session allowance.
-    FooterStatusActivityRateLimitWindowSession session = 1;
-    // The seven-day weekly allowance.
-    FooterStatusActivityRateLimitWindowWeekly weekly = 2;
-    // The seven-day allowance for Opus models.
-    FooterStatusActivityRateLimitWindowWeeklyOpus weekly_opus = 3;
-    // The seven-day allowance for Sonnet models.
-    FooterStatusActivityRateLimitWindowWeeklySonnet weekly_sonnet = 4;
-    // The seven-day allowance with overage included.
-    FooterStatusActivityRateLimitWindowWeeklyOverageIncluded weekly_overage_included = 5;
-    // The overage allowance billed beyond the others.
-    FooterStatusActivityRateLimitWindowOverage overage = 6;
-  }
-}
-// The rolling five-hour session allowance.
-message FooterStatusActivityRateLimitWindowSession {}
-// The seven-day weekly allowance.
-message FooterStatusActivityRateLimitWindowWeekly {}
-// The seven-day allowance for Opus models.
-message FooterStatusActivityRateLimitWindowWeeklyOpus {}
-// The seven-day allowance for Sonnet models.
-message FooterStatusActivityRateLimitWindowWeeklySonnet {}
-// The seven-day allowance with overage included.
-message FooterStatusActivityRateLimitWindowWeeklyOverageIncluded {}
-// The overage allowance.
-message FooterStatusActivityRateLimitWindowOverage {}
 
 // ---- The transient tier ------------------------------------------------------
 // Events that give the reader continual feedback that the session is doing
