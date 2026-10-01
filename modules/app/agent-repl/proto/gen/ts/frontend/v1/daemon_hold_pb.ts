@@ -38,7 +38,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file frontend/v1/daemon_hold.proto.
  */
 export const file_frontend_v1_daemon_hold: GenFile = /*@__PURE__*/
-  fileDesc("Ch1mcm9udGVuZC92MS9kYWVtb25faG9sZC5wcm90bxILZnJvbnRlbmQudjEiPAoORGFlbW9uSG9sZFRyYXkSKgoFaXRlbXMYAiADKAsyGy5mcm9udGVuZC52MS5EYWVtb25Ib2xkSXRlbSJsCg5EYWVtb25Ib2xkSXRlbRIpCgZwcm9tcHQYASABKAsyFy5mcm9udGVuZC52MS5IZWxkUHJvbXB0SAASJwoFb2ZmZXIYAiABKAsyFi5mcm9udGVuZC52MS5IZWxkT2ZmZXJIAEIGCgRpdGVtIswHCgpIZWxkUHJvbXB0EiUKBHR1cm4YASABKAsyFy5jb252ZXJzYXRpb24udjEuVHVybklkEicKBHNhaWQYAiABKAsyGS5jb252ZXJzYXRpb24udjEuVXNlclNhaWQSMgoJcXVldWVkX2F0GAMgASgLMh8uZnJvbnRlbmQudjEuSGVsZFByb21wdFF1ZXVlZEF0EjkKC2NsYXNzaWZ5aW5nGAQgASgLMiIuZnJvbnRlbmQudjEuSGVsZFByb21wdENsYXNzaWZ5aW5nSAASNQoJaW50ZXJqZWN0GAUgASgLMiAuZnJvbnRlbmQudjEuSGVsZFByb21wdEludGVyamVjdEgAEkIKEWhvbGRfZm9yX3R1cm5fZW5kGAYgASgLMiUuZnJvbnRlbmQudjEuSGVsZFByb21wdEhvbGRGb3JUdXJuRW5kSAASPwoPYWZ0ZXJfdG9vbF9jYWxsGBEgASgLMiQuZnJvbnRlbmQudjEuSGVsZFByb21wdEFmdGVyVG9vbENhbGxIABJKChR1bmludGVycnVwdGlibGVfdHVybhgHIAEoCzIqLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRVbmludGVycnVwdGlibGVUdXJuSAASSgoUY2xhc3NpZmljYXRpb25fZXJyb3IYCCABKAsyKi5mcm9udGVuZC52MS5IZWxkUHJvbXB0Q2xhc3NpZmljYXRpb25FcnJvckgAEjcKCHNodXRkb3duGAkgASgLMiMuZnJvbnRlbmQudjEuSGVsZFByb21wdFNodXRkb3duSG9sZEgBEkYKEHNlc3Npb25fc3RhcnRpbmcYCyABKAsyKi5mcm9udGVuZC52MS5IZWxkUHJvbXB0U2Vzc2lvblN0YXJ0aW5nSG9sZEgBEkAKDWJ1aWxkX3JlZnJlc2gYDCABKAsyJy5mcm9udGVuZC52MS5IZWxkUHJvbXB0QnVpbGRSZWZyZXNoSG9sZEgBEi8KB2VkaXRpbmcYDSABKAsyHi5mcm9udGVuZC52MS5IZWxkUHJvbXB0RWRpdGluZxIsCgZiYWRnZXMYDiADKAsyHC5mcm9udGVuZC52MS5IZWxkUHJvbXB0QmFkZ2USMwoJY29hbGVzY2VkGA8gASgLMiAuZnJvbnRlbmQudjEuSGVsZFByb21wdENvYWxlc2NlZBIoCgNhY3QYECABKAsyGy5mcm9udGVuZC52MS5IZWxkU2Vzc2lvbkFjdEIQCg5jbGFzc2lmaWNhdGlvbkIGCgRob2xkSgQIChALUgprZWVwX2FsaXZlIhUKE0hlbGRQcm9tcHRDb2FsZXNjZWQikAEKDkhlbGRTZXNzaW9uQWN0EjEKBW1vZGVsGAEgASgLMiAuZnJvbnRlbmQudjEuSGVsZFNlc3Npb25BY3RNb2RlbEgAEkQKD3Blcm1pc3Npb25fbW9kZRgCIAEoCzIpLmZyb250ZW5kLnYxLkhlbGRTZXNzaW9uQWN0UGVybWlzc2lvbk1vZGVIAEIFCgNhY3QiJAoTSGVsZFNlc3Npb25BY3RNb2RlbBINCgVtb2RlbBgBIAEoCSIsChxIZWxkU2Vzc2lvbkFjdFBlcm1pc3Npb25Nb2RlEgwKBG1vZGUYASABKAkiQAoPSGVsZFByb21wdEJhZGdlEg0KBWxhYmVsGAEgASgJEhMKBmRldGFpbBgCIAEoCUgAiAEBQgkKB19kZXRhaWwiEwoRSGVsZFByb21wdEVkaXRpbmciIwoSSGVsZFByb21wdFF1ZXVlZEF0Eg0KBWF0X21zGAEgASgDIhcKFUhlbGRQcm9tcHRDbGFzc2lmeWluZyIoChNIZWxkUHJvbXB0SW50ZXJqZWN0EhEKCXJhdGlvbmFsZRgBIAEoCSIsChdIZWxkUHJvbXB0QWZ0ZXJUb29sQ2FsbBIRCglyYXRpb25hbGUYASABKAkiYAoYSGVsZFByb21wdEhvbGRGb3JUdXJuRW5kEhEKCXJhdGlvbmFsZRgBIAEoCRIxCghhY2NlcHRlZBgCIAEoCzIfLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRBY2NlcHRlZCImChJIZWxkUHJvbXB0QWNjZXB0ZWQSEAoIYWNjZXB0ZWQYASABKAgiUQodSGVsZFByb21wdFVuaW50ZXJydXB0aWJsZVR1cm4SMAoHY29tbWFuZBgBIAEoDjIfLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uQ29tbWFuZCIvCh1IZWxkUHJvbXB0Q2xhc3NpZmljYXRpb25FcnJvchIOCgZkZXRhaWwYASABKAkiLQoWSGVsZFByb21wdFNodXRkb3duSG9sZBITCgtzY2hlZHVsZV9pZBgBIAEoCSIfCh1IZWxkUHJvbXB0U2Vzc2lvblN0YXJ0aW5nSG9sZCIcChpIZWxkUHJvbXB0QnVpbGRSZWZyZXNoSG9sZCJRCglIZWxkT2ZmZXISOwoNbWVyZ2VfZGVxdWV1ZRgBIAEoCzIiLmZyb250ZW5kLnYxLkhlbGRPZmZlck1lcmdlRGVxdWV1ZUgAQgcKBW9mZmVyIkkKFUhlbGRPZmZlck1lcmdlRGVxdWV1ZRIwCghoZWFkbGluZRgBIAEoCzIeLmZyb250ZW5kLnYxLkhlbGRPZmZlckhlYWRsaW5lIiEKEUhlbGRPZmZlckhlYWRsaW5lEgwKBHRleHQYASABKAlCKFomYWdlbnRyZXBsL3Byb3RvL2Zyb250ZW5kL3YxO2Zyb250ZW5kdjFiBnByb3RvMw", [file_conversation_v1_slash_command, file_conversation_v1_turn, file_conversation_v1_user]);
+  fileDesc("Ch1mcm9udGVuZC92MS9kYWVtb25faG9sZC5wcm90bxILZnJvbnRlbmQudjEiPAoORGFlbW9uSG9sZFRyYXkSKgoFaXRlbXMYAiADKAsyGy5mcm9udGVuZC52MS5EYWVtb25Ib2xkSXRlbSJsCg5EYWVtb25Ib2xkSXRlbRIpCgZwcm9tcHQYASABKAsyFy5mcm9udGVuZC52MS5IZWxkUHJvbXB0SAASJwoFb2ZmZXIYAiABKAsyFi5mcm9udGVuZC52MS5IZWxkT2ZmZXJIAEIGCgRpdGVtIpYICgpIZWxkUHJvbXB0EiUKBHR1cm4YASABKAsyFy5jb252ZXJzYXRpb24udjEuVHVybklkEicKBHNhaWQYAiABKAsyGS5jb252ZXJzYXRpb24udjEuVXNlclNhaWQSMgoJcXVldWVkX2F0GAMgASgLMh8uZnJvbnRlbmQudjEuSGVsZFByb21wdFF1ZXVlZEF0EjkKC2NsYXNzaWZ5aW5nGAQgASgLMiIuZnJvbnRlbmQudjEuSGVsZFByb21wdENsYXNzaWZ5aW5nSAASNQoJaW50ZXJqZWN0GAUgASgLMiAuZnJvbnRlbmQudjEuSGVsZFByb21wdEludGVyamVjdEgAEkIKEWhvbGRfZm9yX3R1cm5fZW5kGAYgASgLMiUuZnJvbnRlbmQudjEuSGVsZFByb21wdEhvbGRGb3JUdXJuRW5kSAASPwoPYWZ0ZXJfdG9vbF9jYWxsGBEgASgLMiQuZnJvbnRlbmQudjEuSGVsZFByb21wdEFmdGVyVG9vbENhbGxIABJKChR1bmludGVycnVwdGlibGVfdHVybhgHIAEoCzIqLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRVbmludGVycnVwdGlibGVUdXJuSAASSgoUY2xhc3NpZmljYXRpb25fZXJyb3IYCCABKAsyKi5mcm9udGVuZC52MS5IZWxkUHJvbXB0Q2xhc3NpZmljYXRpb25FcnJvckgAEjcKCHNodXRkb3duGAkgASgLMiMuZnJvbnRlbmQudjEuSGVsZFByb21wdFNodXRkb3duSG9sZEgBEkYKEHNlc3Npb25fc3RhcnRpbmcYCyABKAsyKi5mcm9udGVuZC52MS5IZWxkUHJvbXB0U2Vzc2lvblN0YXJ0aW5nSG9sZEgBEkAKDWJ1aWxkX3JlZnJlc2gYDCABKAsyJy5mcm9udGVuZC52MS5IZWxkUHJvbXB0QnVpbGRSZWZyZXNoSG9sZEgBEi8KB2VkaXRpbmcYDSABKAsyHi5mcm9udGVuZC52MS5IZWxkUHJvbXB0RWRpdGluZxIsCgZiYWRnZXMYDiADKAsyHC5mcm9udGVuZC52MS5IZWxkUHJvbXB0QmFkZ2USMwoJY29hbGVzY2VkGA8gASgLMiAuZnJvbnRlbmQudjEuSGVsZFByb21wdENvYWxlc2NlZBIoCgNhY3QYECABKAsyGy5mcm9udGVuZC52MS5IZWxkU2Vzc2lvbkFjdBI5Cgpmb2xkX2Fib3ZlGBIgASgLMiAuZnJvbnRlbmQudjEuSGVsZFByb21wdEZvbGRBYm92ZUgCiAEBQhAKDmNsYXNzaWZpY2F0aW9uQgYKBGhvbGRCDQoLX2ZvbGRfYWJvdmVKBAgKEAtSCmtlZXBfYWxpdmUiPQoTSGVsZFByb21wdEZvbGRBYm92ZRImCgVhYm92ZRgBIAEoCzIXLmNvbnZlcnNhdGlvbi52MS5UdXJuSWQiFQoTSGVsZFByb21wdENvYWxlc2NlZCKQAQoOSGVsZFNlc3Npb25BY3QSMQoFbW9kZWwYASABKAsyIC5mcm9udGVuZC52MS5IZWxkU2Vzc2lvbkFjdE1vZGVsSAASRAoPcGVybWlzc2lvbl9tb2RlGAIgASgLMikuZnJvbnRlbmQudjEuSGVsZFNlc3Npb25BY3RQZXJtaXNzaW9uTW9kZUgAQgUKA2FjdCIkChNIZWxkU2Vzc2lvbkFjdE1vZGVsEg0KBW1vZGVsGAEgASgJIiwKHEhlbGRTZXNzaW9uQWN0UGVybWlzc2lvbk1vZGUSDAoEbW9kZRgBIAEoCSJACg9IZWxkUHJvbXB0QmFkZ2USDQoFbGFiZWwYASABKAkSEwoGZGV0YWlsGAIgASgJSACIAQFCCQoHX2RldGFpbCITChFIZWxkUHJvbXB0RWRpdGluZyIjChJIZWxkUHJvbXB0UXVldWVkQXQSDQoFYXRfbXMYASABKAMiFwoVSGVsZFByb21wdENsYXNzaWZ5aW5nIigKE0hlbGRQcm9tcHRJbnRlcmplY3QSEQoJcmF0aW9uYWxlGAEgASgJIiwKF0hlbGRQcm9tcHRBZnRlclRvb2xDYWxsEhEKCXJhdGlvbmFsZRgBIAEoCSJgChhIZWxkUHJvbXB0SG9sZEZvclR1cm5FbmQSEQoJcmF0aW9uYWxlGAEgASgJEjEKCGFjY2VwdGVkGAIgASgLMh8uZnJvbnRlbmQudjEuSGVsZFByb21wdEFjY2VwdGVkIiYKEkhlbGRQcm9tcHRBY2NlcHRlZBIQCghhY2NlcHRlZBgBIAEoCCJRCh1IZWxkUHJvbXB0VW5pbnRlcnJ1cHRpYmxlVHVybhIwCgdjb21tYW5kGAEgASgOMh8uY29udmVyc2F0aW9uLnYxLlNlc3Npb25Db21tYW5kIi8KHUhlbGRQcm9tcHRDbGFzc2lmaWNhdGlvbkVycm9yEg4KBmRldGFpbBgBIAEoCSItChZIZWxkUHJvbXB0U2h1dGRvd25Ib2xkEhMKC3NjaGVkdWxlX2lkGAEgASgJIh8KHUhlbGRQcm9tcHRTZXNzaW9uU3RhcnRpbmdIb2xkIhwKGkhlbGRQcm9tcHRCdWlsZFJlZnJlc2hIb2xkIlEKCUhlbGRPZmZlchI7Cg1tZXJnZV9kZXF1ZXVlGAEgASgLMiIuZnJvbnRlbmQudjEuSGVsZE9mZmVyTWVyZ2VEZXF1ZXVlSABCBwoFb2ZmZXIiSQoVSGVsZE9mZmVyTWVyZ2VEZXF1ZXVlEjAKCGhlYWRsaW5lGAEgASgLMh4uZnJvbnRlbmQudjEuSGVsZE9mZmVySGVhZGxpbmUiIQoRSGVsZE9mZmVySGVhZGxpbmUSDAoEdGV4dBgBIAEoCUIoWiZhZ2VudHJlcGwvcHJvdG8vZnJvbnRlbmQvdjE7ZnJvbnRlbmR2MWIGcHJvdG8z", [file_conversation_v1_slash_command, file_conversation_v1_turn, file_conversation_v1_user]);
 
 /**
  * The tray, resolved by the daemon and pushed on EVERY change. An empty
@@ -295,8 +295,10 @@ export type HeldPrompt = Message<"frontend.v1.HeldPrompt"> & {
   /**
    * PRESENT WHEN LATER PROMPTS WERE FOLDED INTO THIS ONE while it was still
    * queued: a prompt the classifier ruled should interrupt a prompt that had
-   * not started yet is merged into it rather than queued behind it. `said`
-   * already carries the merged text; this says the merge happened.
+   * not started yet is merged into it rather than queued behind it, and a
+   * prompt the user folded into it with its "fold above" button
+   * (FoldHeldPrompt) is merged the same way. `said` already carries the
+   * merged text; this says the merge happened.
    *
    * @generated from field: frontend.v1.HeldPromptCoalesced coalesced = 15;
    */
@@ -312,6 +314,23 @@ export type HeldPrompt = Message<"frontend.v1.HeldPrompt"> & {
    * @generated from field: frontend.v1.HeldSessionAct act = 16;
    */
   act?: HeldSessionAct | undefined;
+
+  /**
+   * THE CARD'S "fold above" BUTTON. PRESENT EXACTLY WHEN this entry can be
+   * folded into the entry directly ahead of it (FoldHeldPrompt), absent
+   * otherwise. Daemon-decided: the card draws the button off this field alone
+   * and derives nothing from the entries around it.
+   *
+   * It is present only when ALL of these hold: this entry is a prompt (not a
+   * session act); an entry stands directly ahead of it in the queue (so never
+   * on the first entry); that entry is a prompt too (never a model or
+   * permission-mode change, /compact or /clear); and neither of the two is
+   * being edited. The running turn is never "ahead" here: a turn that has
+   * started is joined by the classifier's after_tool_call verdict, not folded.
+   *
+   * @generated from field: optional frontend.v1.HeldPromptFoldAbove fold_above = 18;
+   */
+  foldAbove?: HeldPromptFoldAbove | undefined;
 };
 
 /**
@@ -320,6 +339,32 @@ export type HeldPrompt = Message<"frontend.v1.HeldPrompt"> & {
  */
 export const HeldPromptSchema: GenMessage<HeldPrompt> = /*@__PURE__*/
   messageDesc(file_frontend_v1_daemon_hold, 2);
+
+/**
+ * The "fold above" button: folds this prompt into the entry directly ahead of
+ * it, so the two are delivered together as that one entry.
+ *
+ * @generated from message frontend.v1.HeldPromptFoldAbove
+ */
+export type HeldPromptFoldAbove = Message<"frontend.v1.HeldPromptFoldAbove"> & {
+  /**
+   * The entry directly ahead of this one, as the daemon resolved this tray.
+   * A TYPED ECHO TOKEN: the click sends it back verbatim as
+   * FoldHeldPromptRequest.above, and the daemon refuses the fold when it is
+   * no longer the entry directly ahead, so a prompt is only ever folded into
+   * the entry the user saw above it.
+   *
+   * @generated from field: conversation.v1.TurnId above = 1;
+   */
+  above?: TurnId | undefined;
+};
+
+/**
+ * Describes the message frontend.v1.HeldPromptFoldAbove.
+ * Use `create(HeldPromptFoldAboveSchema)` to create a new message.
+ */
+export const HeldPromptFoldAboveSchema: GenMessage<HeldPromptFoldAbove> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_daemon_hold, 3);
 
 /**
  * Later prompts were folded into this one while it was queued. DELIBERATELY
@@ -335,7 +380,7 @@ export type HeldPromptCoalesced = Message<"frontend.v1.HeldPromptCoalesced"> & {
  * Use `create(HeldPromptCoalescedSchema)` to create a new message.
  */
 export const HeldPromptCoalescedSchema: GenMessage<HeldPromptCoalesced> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_daemon_hold, 3);
+  messageDesc(file_frontend_v1_daemon_hold, 4);
 
 /**
  * A session act held in the queue. THE ARM IS THE ACT.
@@ -370,7 +415,7 @@ export type HeldSessionAct = Message<"frontend.v1.HeldSessionAct"> & {
  * Use `create(HeldSessionActSchema)` to create a new message.
  */
 export const HeldSessionActSchema: GenMessage<HeldSessionAct> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_daemon_hold, 4);
+  messageDesc(file_frontend_v1_daemon_hold, 5);
 
 /**
  * A model change.
@@ -391,7 +436,7 @@ export type HeldSessionActModel = Message<"frontend.v1.HeldSessionActModel"> & {
  * Use `create(HeldSessionActModelSchema)` to create a new message.
  */
 export const HeldSessionActModelSchema: GenMessage<HeldSessionActModel> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_daemon_hold, 5);
+  messageDesc(file_frontend_v1_daemon_hold, 6);
 
 /**
  * A permission-mode change.
@@ -412,7 +457,7 @@ export type HeldSessionActPermissionMode = Message<"frontend.v1.HeldSessionActPe
  * Use `create(HeldSessionActPermissionModeSchema)` to create a new message.
  */
 export const HeldSessionActPermissionModeSchema: GenMessage<HeldSessionActPermissionMode> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_daemon_hold, 6);
+  messageDesc(file_frontend_v1_daemon_hold, 7);
 
 /**
  * One status badge on a held prompt's card, composed daemon-side.
@@ -444,7 +489,7 @@ export type HeldPromptBadge = Message<"frontend.v1.HeldPromptBadge"> & {
  * Use `create(HeldPromptBadgeSchema)` to create a new message.
  */
 export const HeldPromptBadgeSchema: GenMessage<HeldPromptBadge> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_daemon_hold, 7);
+  messageDesc(file_frontend_v1_daemon_hold, 8);
 
 /**
  * The prompt is being edited in the editor's input. DELIBERATELY EMPTY: the
@@ -460,7 +505,7 @@ export type HeldPromptEditing = Message<"frontend.v1.HeldPromptEditing"> & {
  * Use `create(HeldPromptEditingSchema)` to create a new message.
  */
 export const HeldPromptEditingSchema: GenMessage<HeldPromptEditing> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_daemon_hold, 8);
+  messageDesc(file_frontend_v1_daemon_hold, 9);
 
 /**
  * When a held prompt was queued.
@@ -481,7 +526,7 @@ export type HeldPromptQueuedAt = Message<"frontend.v1.HeldPromptQueuedAt"> & {
  * Use `create(HeldPromptQueuedAtSchema)` to create a new message.
  */
 export const HeldPromptQueuedAtSchema: GenMessage<HeldPromptQueuedAt> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_daemon_hold, 9);
+  messageDesc(file_frontend_v1_daemon_hold, 10);
 
 /**
  * The classifier is still running: the entry is queued and undecided.
@@ -496,7 +541,7 @@ export type HeldPromptClassifying = Message<"frontend.v1.HeldPromptClassifying">
  * Use `create(HeldPromptClassifyingSchema)` to create a new message.
  */
 export const HeldPromptClassifyingSchema: GenMessage<HeldPromptClassifying> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_daemon_hold, 10);
+  messageDesc(file_frontend_v1_daemon_hold, 11);
 
 /**
  * Deliver NOW: interrupt the running turn and submit once it has ended.
@@ -517,7 +562,7 @@ export type HeldPromptInterject = Message<"frontend.v1.HeldPromptInterject"> & {
  * Use `create(HeldPromptInterjectSchema)` to create a new message.
  */
 export const HeldPromptInterjectSchema: GenMessage<HeldPromptInterject> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_daemon_hold, 11);
+  messageDesc(file_frontend_v1_daemon_hold, 12);
 
 /**
  * Deliver NOW into the running turn, which takes it after its current tool
@@ -539,7 +584,7 @@ export type HeldPromptAfterToolCall = Message<"frontend.v1.HeldPromptAfterToolCa
  * Use `create(HeldPromptAfterToolCallSchema)` to create a new message.
  */
 export const HeldPromptAfterToolCallSchema: GenMessage<HeldPromptAfterToolCall> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_daemon_hold, 12);
+  messageDesc(file_frontend_v1_daemon_hold, 13);
 
 /**
  * Deliver when the turn ends on its own; do not interrupt for it.
@@ -570,7 +615,7 @@ export type HeldPromptHoldForTurnEnd = Message<"frontend.v1.HeldPromptHoldForTur
  * Use `create(HeldPromptHoldForTurnEndSchema)` to create a new message.
  */
 export const HeldPromptHoldForTurnEndSchema: GenMessage<HeldPromptHoldForTurnEnd> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_daemon_hold, 13);
+  messageDesc(file_frontend_v1_daemon_hold, 14);
 
 /**
  * The user's confirmation of a hold.
@@ -593,7 +638,7 @@ export type HeldPromptAccepted = Message<"frontend.v1.HeldPromptAccepted"> & {
  * Use `create(HeldPromptAcceptedSchema)` to create a new message.
  */
 export const HeldPromptAcceptedSchema: GenMessage<HeldPromptAccepted> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_daemon_hold, 14);
+  messageDesc(file_frontend_v1_daemon_hold, 15);
 
 /**
  * NOTHING CLASSIFIED THIS ENTRY, because the turn in front of it is a CONTEXT
@@ -631,7 +676,7 @@ export type HeldPromptUninterruptibleTurn = Message<"frontend.v1.HeldPromptUnint
  * Use `create(HeldPromptUninterruptibleTurnSchema)` to create a new message.
  */
 export const HeldPromptUninterruptibleTurnSchema: GenMessage<HeldPromptUninterruptibleTurn> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_daemon_hold, 15);
+  messageDesc(file_frontend_v1_daemon_hold, 16);
 
 /**
  * The classifier could not be believed (it answered with neither token, or
@@ -656,7 +701,7 @@ export type HeldPromptClassificationError = Message<"frontend.v1.HeldPromptClass
  * Use `create(HeldPromptClassificationErrorSchema)` to create a new message.
  */
 export const HeldPromptClassificationErrorSchema: GenMessage<HeldPromptClassificationError> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_daemon_hold, 16);
+  messageDesc(file_frontend_v1_daemon_hold, 17);
 
 /**
  * Held by a scheduled shutdown's drain lease. The classifier NEVER runs on
@@ -682,7 +727,7 @@ export type HeldPromptShutdownHold = Message<"frontend.v1.HeldPromptShutdownHold
  * Use `create(HeldPromptShutdownHoldSchema)` to create a new message.
  */
 export const HeldPromptShutdownHoldSchema: GenMessage<HeldPromptShutdownHold> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_daemon_hold, 17);
+  messageDesc(file_frontend_v1_daemon_hold, 18);
 
 /**
  * Held because the session is still coming up — a cold resume in progress, a
@@ -707,7 +752,7 @@ export type HeldPromptSessionStartingHold = Message<"frontend.v1.HeldPromptSessi
  * Use `create(HeldPromptSessionStartingHoldSchema)` to create a new message.
  */
 export const HeldPromptSessionStartingHoldSchema: GenMessage<HeldPromptSessionStartingHold> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_daemon_hold, 18);
+  messageDesc(file_frontend_v1_daemon_hold, 19);
 
 /**
  * Held because the session's shim is being restarted onto the current build
@@ -725,7 +770,7 @@ export type HeldPromptBuildRefreshHold = Message<"frontend.v1.HeldPromptBuildRef
  * Use `create(HeldPromptBuildRefreshHoldSchema)` to create a new message.
  */
 export const HeldPromptBuildRefreshHoldSchema: GenMessage<HeldPromptBuildRefreshHold> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_daemon_hold, 19);
+  messageDesc(file_frontend_v1_daemon_hold, 20);
 
 /**
  * A question the daemon holds for the user's answer. THE ARM IS THE QUESTION.
@@ -759,7 +804,7 @@ export type HeldOffer = Message<"frontend.v1.HeldOffer"> & {
  * Use `create(HeldOfferSchema)` to create a new message.
  */
 export const HeldOfferSchema: GenMessage<HeldOffer> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_daemon_hold, 20);
+  messageDesc(file_frontend_v1_daemon_hold, 21);
 
 /**
  * The merge-dequeue question, resolved for drawing: the daemon composes the
@@ -785,7 +830,7 @@ export type HeldOfferMergeDequeue = Message<"frontend.v1.HeldOfferMergeDequeue">
  * Use `create(HeldOfferMergeDequeueSchema)` to create a new message.
  */
 export const HeldOfferMergeDequeueSchema: GenMessage<HeldOfferMergeDequeue> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_daemon_hold, 21);
+  messageDesc(file_frontend_v1_daemon_hold, 22);
 
 /**
  * The sentence an offer card leads with, composed daemon-side.
@@ -807,5 +852,5 @@ export type HeldOfferHeadline = Message<"frontend.v1.HeldOfferHeadline"> & {
  * Use `create(HeldOfferHeadlineSchema)` to create a new message.
  */
 export const HeldOfferHeadlineSchema: GenMessage<HeldOfferHeadline> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_daemon_hold, 22);
+  messageDesc(file_frontend_v1_daemon_hold, 23);
 

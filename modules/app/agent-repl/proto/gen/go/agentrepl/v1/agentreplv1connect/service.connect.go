@@ -133,6 +133,9 @@ const (
 	// AgentReplEditHeldPromptProcedure is the fully-qualified name of the AgentRepl's EditHeldPrompt
 	// RPC.
 	AgentReplEditHeldPromptProcedure = "/agentrepl.v1.AgentRepl/EditHeldPrompt"
+	// AgentReplFoldHeldPromptProcedure is the fully-qualified name of the AgentRepl's FoldHeldPrompt
+	// RPC.
+	AgentReplFoldHeldPromptProcedure = "/agentrepl.v1.AgentRepl/FoldHeldPrompt"
 	// AgentReplAnswerHeldOfferProcedure is the fully-qualified name of the AgentRepl's AnswerHeldOffer
 	// RPC.
 	AgentReplAnswerHeldOfferProcedure = "/agentrepl.v1.AgentRepl/AnswerHeldOffer"
@@ -237,6 +240,7 @@ var (
 	agentReplWatchDaemonHoldsMethodDescriptor         = agentReplServiceDescriptor.Methods().ByName("WatchDaemonHolds")
 	agentReplUpdateHeldPromptMethodDescriptor         = agentReplServiceDescriptor.Methods().ByName("UpdateHeldPrompt")
 	agentReplEditHeldPromptMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("EditHeldPrompt")
+	agentReplFoldHeldPromptMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("FoldHeldPrompt")
 	agentReplAnswerHeldOfferMethodDescriptor          = agentReplServiceDescriptor.Methods().ByName("AnswerHeldOffer")
 	agentReplUpdateShutdownScheduleMethodDescriptor   = agentReplServiceDescriptor.Methods().ByName("UpdateShutdownSchedule")
 	agentReplDeployMethodDescriptor                   = agentReplServiceDescriptor.Methods().ByName("Deploy")
@@ -368,6 +372,10 @@ type AgentReplClient interface {
 	// commit (replace and reclassify), or cancel. See
 	// endpoint_edit_held_prompt.proto.
 	EditHeldPrompt(context.Context, *connect.Request[v1.EditHeldPromptRequest]) (*connect.Response[v1.EditHeldPromptResponse], error)
+	// Fold a held prompt into the held prompt directly ahead of it: its content
+	// is appended to that entry and it leaves the queue, in one transaction. See
+	// endpoint_fold_held_prompt.proto.
+	FoldHeldPrompt(context.Context, *connect.Request[v1.FoldHeldPromptRequest]) (*connect.Response[v1.FoldHeldPromptResponse], error)
 	// Answer a question the daemon parked in the tray. See
 	// endpoint_answer_held_offer.proto.
 	AnswerHeldOffer(context.Context, *connect.Request[v1.AnswerHeldOfferRequest]) (*connect.Response[v1.AnswerHeldOfferResponse], error)
@@ -666,6 +674,12 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(agentReplEditHeldPromptMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		foldHeldPrompt: connect.NewClient[v1.FoldHeldPromptRequest, v1.FoldHeldPromptResponse](
+			httpClient,
+			baseURL+AgentReplFoldHeldPromptProcedure,
+			connect.WithSchema(agentReplFoldHeldPromptMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 		answerHeldOffer: connect.NewClient[v1.AnswerHeldOfferRequest, v1.AnswerHeldOfferResponse](
 			httpClient,
 			baseURL+AgentReplAnswerHeldOfferProcedure,
@@ -856,6 +870,7 @@ type agentReplClient struct {
 	watchDaemonHolds         *connect.Client[v1.WatchDaemonHoldsRequest, v1.WatchDaemonHoldsResponse]
 	updateHeldPrompt         *connect.Client[v1.UpdateHeldPromptRequest, v1.UpdateHeldPromptResponse]
 	editHeldPrompt           *connect.Client[v1.EditHeldPromptRequest, v1.EditHeldPromptResponse]
+	foldHeldPrompt           *connect.Client[v1.FoldHeldPromptRequest, v1.FoldHeldPromptResponse]
 	answerHeldOffer          *connect.Client[v1.AnswerHeldOfferRequest, v1.AnswerHeldOfferResponse]
 	updateShutdownSchedule   *connect.Client[v1.UpdateShutdownScheduleRequest, v1.UpdateShutdownScheduleResponse]
 	deploy                   *connect.Client[v1.DeployRequest, v1.DeployResponse]
@@ -1056,6 +1071,11 @@ func (c *agentReplClient) UpdateHeldPrompt(ctx context.Context, req *connect.Req
 // EditHeldPrompt calls agentrepl.v1.AgentRepl.EditHeldPrompt.
 func (c *agentReplClient) EditHeldPrompt(ctx context.Context, req *connect.Request[v1.EditHeldPromptRequest]) (*connect.Response[v1.EditHeldPromptResponse], error) {
 	return c.editHeldPrompt.CallUnary(ctx, req)
+}
+
+// FoldHeldPrompt calls agentrepl.v1.AgentRepl.FoldHeldPrompt.
+func (c *agentReplClient) FoldHeldPrompt(ctx context.Context, req *connect.Request[v1.FoldHeldPromptRequest]) (*connect.Response[v1.FoldHeldPromptResponse], error) {
+	return c.foldHeldPrompt.CallUnary(ctx, req)
 }
 
 // AnswerHeldOffer calls agentrepl.v1.AgentRepl.AnswerHeldOffer.
@@ -1287,6 +1307,10 @@ type AgentReplHandler interface {
 	// commit (replace and reclassify), or cancel. See
 	// endpoint_edit_held_prompt.proto.
 	EditHeldPrompt(context.Context, *connect.Request[v1.EditHeldPromptRequest]) (*connect.Response[v1.EditHeldPromptResponse], error)
+	// Fold a held prompt into the held prompt directly ahead of it: its content
+	// is appended to that entry and it leaves the queue, in one transaction. See
+	// endpoint_fold_held_prompt.proto.
+	FoldHeldPrompt(context.Context, *connect.Request[v1.FoldHeldPromptRequest]) (*connect.Response[v1.FoldHeldPromptResponse], error)
 	// Answer a question the daemon parked in the tray. See
 	// endpoint_answer_held_offer.proto.
 	AnswerHeldOffer(context.Context, *connect.Request[v1.AnswerHeldOfferRequest]) (*connect.Response[v1.AnswerHeldOfferResponse], error)
@@ -1581,6 +1605,12 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(agentReplEditHeldPromptMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
+	agentReplFoldHeldPromptHandler := connect.NewUnaryHandler(
+		AgentReplFoldHeldPromptProcedure,
+		svc.FoldHeldPrompt,
+		connect.WithSchema(agentReplFoldHeldPromptMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
 	agentReplAnswerHeldOfferHandler := connect.NewUnaryHandler(
 		AgentReplAnswerHeldOfferProcedure,
 		svc.AnswerHeldOffer,
@@ -1803,6 +1833,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplUpdateHeldPromptHandler.ServeHTTP(w, r)
 		case AgentReplEditHeldPromptProcedure:
 			agentReplEditHeldPromptHandler.ServeHTTP(w, r)
+		case AgentReplFoldHeldPromptProcedure:
+			agentReplFoldHeldPromptHandler.ServeHTTP(w, r)
 		case AgentReplAnswerHeldOfferProcedure:
 			agentReplAnswerHeldOfferHandler.ServeHTTP(w, r)
 		case AgentReplUpdateShutdownScheduleProcedure:
@@ -2000,6 +2032,10 @@ func (UnimplementedAgentReplHandler) UpdateHeldPrompt(context.Context, *connect.
 
 func (UnimplementedAgentReplHandler) EditHeldPrompt(context.Context, *connect.Request[v1.EditHeldPromptRequest]) (*connect.Response[v1.EditHeldPromptResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.EditHeldPrompt is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) FoldHeldPrompt(context.Context, *connect.Request[v1.FoldHeldPromptRequest]) (*connect.Response[v1.FoldHeldPromptResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.FoldHeldPrompt is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) AnswerHeldOffer(context.Context, *connect.Request[v1.AnswerHeldOfferRequest]) (*connect.Response[v1.AnswerHeldOfferResponse], error) {
