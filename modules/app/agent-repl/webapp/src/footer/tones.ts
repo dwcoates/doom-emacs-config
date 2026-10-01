@@ -134,9 +134,8 @@ const FOOTER_PERCENT_STOPS: readonly PercentStop[] = [
 ];
 
 /**
- * The colour a footer percentage takes: an allowance's use, the context
- * window's fill, a rate-limit line's utilization. PERCENT is the figure as
- * drawn, 0..100.
+ * The colour a footer percentage takes: an allowance's use or the context
+ * window's fill. PERCENT is the figure as drawn, 0..100.
  */
 export function footerPercentColor(percent: number): string {
   return percentGradientColor(percent, FOOTER_PERCENT_STOPS);

@@ -15,7 +15,6 @@ import {
   FOOTER_ALLOWANCE_STATUS_CASES,
   FOOTER_STATUS_CASES,
   activityDatumClass,
-  allowanceStatusClass,
   footerPercentColor,
 } from "../../src/footer/tones.js";
 
@@ -393,37 +392,8 @@ describe("the salient kinds", () => {
     ["blocked", "fault", { kind: "prompts_dir_missing", detail: "no prompts" }, "prompts dir missing · no prompts"],
     ["idle", "notification", { text: "the agent addressed you" }, "the agent addressed you"],
     ["working", "contextBudget", { text: "compaction failed — the summary was empty" }, "compaction failed — the summary was empty"],
-    ["background", "rateLimit", { window: { window: { case: "weekly", value: {} } }, verdict: { case: "allowedWarning", value: {} }, utilization: 0.85 }, "weekly nearly spent 85%"],
-    ["blocked", "rateLimit", { window: { window: { case: "session", value: {} } }, verdict: { case: "rejected", value: {} } }, "session spent"],
-    ["merging", "rateLimit", { verdict: { case: "rejected", value: {} } }, "usage spent"],
-    ["loading", "rateLimit", { window: { window: { case: "weeklyOverageIncluded", value: {} } }, verdict: { case: "allowedWarning", value: {} } }, "weekly overage included nearly spent"],
   ])("draws the %s cell's %s line", (statusCase, kindCase, value, expected) => {
     expect(salientCell(kindCase, value, statusCase).textContent).toContain(expected);
-  });
-
-  it("counts a rate-limit event's reset down on the shared clock", () => {
-    const cell = salientCell(
-      "rateLimit",
-      { verdict: { case: "rejected", value: {} }, resetsAtS: BigInt(Math.floor(NOW / 1000) + 3600) },
-      "idle",
-    );
-    expect(cell.querySelector("[data-countdown]")?.textContent).toBe(" · resets in 1h");
-  });
-
-  it("colours a rate-limit event by its verdict", () => {
-    const cell = salientCell("rateLimit", { verdict: { case: "rejected", value: {} } }, "idle");
-    expect(cell.querySelector(".footer-activity-rate-limit")?.className).toContain(allowanceStatusClass("rejected"));
-  });
-
-  it("colours a rate-limit event's utilization by how full it is", () => {
-    const cell = salientCell("rateLimit", { verdict: { case: "allowedWarning", value: {} }, utilization: 0.92 }, "idle");
-    const percent = cell.querySelector<HTMLElement>('.footer-activity-rate-limit [data-datum="percent"]');
-    expect(percent?.textContent).toBe("92%");
-    expect(percent?.style.color).toBe(paintedAs(92));
-  });
-
-  it("refuses a rate-limit event with no verdict", () => {
-    expect(() => salientCell("rateLimit", {}, "idle")).toThrow(MalformedView);
   });
 
   it("draws the bring-up failure's cause verbatim", () => {
