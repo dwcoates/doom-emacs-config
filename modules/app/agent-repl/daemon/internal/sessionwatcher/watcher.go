@@ -201,6 +201,10 @@ type watcher struct {
 	// yet handed to the lifecycle sink; flushTurnEnds hands them over with
 	// the turn ends.
 	pendingUnobserved []ids.TurnID
+	// pendingQueryDeath is a query death routed under mu and not yet handed
+	// to the lifecycle sink, which flushTurnEnds tells off the lock AFTER the
+	// turn ends the death closed.
+	pendingQueryDeath bool
 	// pendingAdoptions are the vendor-started turns this watcher stood in
 	// flight and has not yet handed to the lifecycle sink; flushTurnEnds hands
 	// them over ahead of the turn ends.
@@ -2079,7 +2083,9 @@ func (w *watcher) flushTurnEnds() {
 	w.pendingTurnEnds = nil
 	unobserved := w.pendingUnobserved
 	w.pendingUnobserved = nil
-	if len(adopted) > 0 || len(pending) > 0 || len(unobserved) > 0 {
+	died := w.pendingQueryDeath
+	w.pendingQueryDeath = false
+	if len(adopted) > 0 || len(pending) > 0 || len(unobserved) > 0 || died {
 		// THE DISPATCH IS JOINABLE. It is the one sink call this watcher makes
 		// off its own mutex, and the sinks it drives read the state client --
 		// so Close, which the daemon runs BEFORE closing that client, waits on
@@ -2105,6 +2111,11 @@ func (w *watcher) flushTurnEnds() {
 		if w.sinks.Title != nil {
 			w.sinks.Title.OnTurnEnded(w.ws)
 		}
+	}
+	// THE DEATH IS TOLD AFTER THE TURNS IT ENDED, so the queue has closed them
+	// before anything is asked to restart the session they ran in.
+	if died {
+		w.sinks.Lifecycle.OnQueryDied(w.ws)
 	}
 }
 

@@ -400,6 +400,47 @@ func TestTheDeadQueryLineStandsUntilTheNextTurnOpens(t *testing.T) {
 	}
 }
 
+// THE RESTART THE DEATH ASKED FOR LIFTS THE LINE: the replacement shim's
+// session start is a live query again.
+func TestTheDeadQueryLineComesDownWhenTheSessionStartsAgain(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+	h.r.OnSessionUpdate(testWS, queryDiedUpdate())
+
+	// Act
+	h.r.OnSessionStarted(testWS, &conversationv1.SessionStarted{VendorSessionId: "vendor-1"})
+
+	// Assert
+	if got := lineName(t, h); got == "salient.query_died" {
+		t.Fatalf("activity = %q, want the dead-query line gone once the session started again", got)
+	}
+}
+
+// AN ADOPTED SHIM RE-ANNOUNCES ITS START, THEN ITS DEATH: the line stands.
+func TestADeathReannouncedAfterTheStartRaisesTheLine(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.OnSessionStarted(testWS, &conversationv1.SessionStarted{VendorSessionId: "vendor-1"})
+
+	// Act
+	h.r.OnSessionUpdate(testWS, queryDiedUpdate())
+
+	// Assert
+	if got := lineName(t, h); got != "salient.query_died" {
+		t.Fatalf("activity = %q, want the re-announced death's line", got)
+	}
+}
+
+func TestTheDeadQueryLineSaysTheSessionIsRestarting(t *testing.T) {
+	// Assert
+	if deadQueryLine != "vendor query died — restarting the session" {
+		t.Fatalf("deadQueryLine = %q, want it to say the daemon is restarting the session", deadQueryLine)
+	}
+}
+
 func TestTheDeadQueryLineOutlivesATransient(t *testing.T) {
 	// Arrange
 	h := newHarness(t)

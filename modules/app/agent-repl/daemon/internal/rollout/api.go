@@ -51,6 +51,10 @@ const (
 	// ReasonShimLogCeiling is dlog forcing a process roll after shim.log
 	// reached its hard ceiling.
 	ReasonShimLogCeiling RelaunchReason = "shim_log_hard_ceiling"
+	// ReasonQueryDied is a session whose vendor query died: nothing in the
+	// shim restarts a query it lost, so the daemon replaces the shim, and the
+	// replacement's resume brings the session back.
+	ReasonQueryDied RelaunchReason = "query_died"
 	// ReasonHandoverTransfer is a workspace handed to a successor daemon. It is
 	// a bounce of what SERVES the workspace (the daemon), not of its shim, and
 	// it keeps the workspace drained on this daemon afterwards.
