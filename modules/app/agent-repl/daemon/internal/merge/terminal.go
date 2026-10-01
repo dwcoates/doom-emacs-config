@@ -689,7 +689,7 @@ func (o *orchestrator) publishAbandoned(ctx context.Context, ws ids.WorkspaceID,
 		dlog.Context{"workspace": string(ws), "cause": string(cause), "summary": summary})
 	if ledger != "" {
 		label := o.abandonedLabel(ctx, ws, source)
-		o.deps.Feed.UpsertSynthesized(ws, feedid.Feed{Root: true}, headRow(ws, ledger, label, o.nowMS(),
+		o.deps.Feed.UpsertDurable(ws, feedid.Feed{Root: true}, headRow(ws, ledger, label, o.nowMS(),
 			&frontendv1.FeedMergeError{
 				EndedAtMs: o.nowMS(),
 				Reason: &frontendv1.FeedMergeError_Abandoned{

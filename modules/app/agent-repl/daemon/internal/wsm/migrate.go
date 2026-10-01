@@ -103,6 +103,7 @@ var migrations = []migration{
 	{To: 13, Name: "workspaces_turn_result", Kind: MigrationAdditive, DDL: turnResultDDL},
 	{To: 14, Name: "held_prompts_act_and_coalesced", Kind: MigrationAdditive, DDL: heldPromptsActDDL},
 	{To: 15, Name: "merge_queue_source", Kind: MigrationAdditive, DDL: mergeQueueSourceDDL},
+	{To: 16, Name: "durable_feed_rows", Kind: MigrationAdditive, DDL: durableFeedRowsDDL},
 }
 
 // mergeQueueSourceDDL adds WHAT a queued merge lands (agentrepl.v1

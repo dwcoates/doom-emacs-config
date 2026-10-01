@@ -593,6 +593,7 @@ func (r *resolver) state(ws ids.WorkspaceID) *wsState {
 	}
 	s = newWSState(ws)
 	r.workspaces[ws] = s
+	r.restoreDurable(s)
 	return s
 }
 
@@ -1199,6 +1200,21 @@ func (r *resolver) UpsertSynthesized(ws ids.WorkspaceID, feed feedid.Feed, row *
 		"a daemon-synthesized row was upserted",
 		dlog.Context{"feed": r.feedKey(ws, feed), "row": row.GetId().GetValue()})
 	r.upsert(s, placement{feed: feed}, row, true)
+}
+
+// UpsertDurable upserts a daemon-synthesized row and records it for a new
+// daemon. The record is written UNDER THE FEED'S LOCK, in publication order, so
+// two publications of one row can never be recorded out of the order they
+// were published in.
+func (r *resolver) UpsertDurable(ws ids.WorkspaceID, feed feedid.Feed, row *frontendv1.FeedRow) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s := r.state(ws)
+	r.logger(ws).Debug("daemon.feed.durable",
+		"a durable daemon-synthesized row was upserted",
+		dlog.Context{"feed": r.feedKey(ws, feed), "row": row.GetId().GetValue()})
+	r.upsert(s, placement{feed: feed}, row, true)
+	r.recordDurable(s, feed, row.GetId().GetValue())
 }
 
 // UpsertCommandPanel mints a NON-DURABLE root-feed row carrying a recognized

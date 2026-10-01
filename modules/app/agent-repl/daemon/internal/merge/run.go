@@ -199,12 +199,12 @@ func (r *run) address(kind string, round int) {
 
 // upsert publishes one tab row.
 func (r *run) upsert(kind string, round int, tab *frontendv1.FeedMergeTab) {
-	r.o.deps.Feed.UpsertSynthesized(r.ws, mergeFeed(r.lease.ID), tabRow(r.ws, r.lease.ID, kind, round, tab))
+	r.o.deps.Feed.UpsertDurable(r.ws, mergeFeed(r.lease.ID), tabRow(r.ws, r.lease.ID, kind, round, tab))
 }
 
 // head publishes the bubble's head row with the state arm in force.
 func (r *run) head(result any) {
-	r.o.deps.Feed.UpsertSynthesized(r.ws, feedid.Feed{Root: true}, headRow(r.ws, r.lease.ID, r.label(), r.startedMS, result))
+	r.o.deps.Feed.UpsertDurable(r.ws, feedid.Feed{Root: true}, headRow(r.ws, r.lease.ID, r.label(), r.startedMS, result))
 }
 
 // label is the bubble's head line: what is merged, and where to.

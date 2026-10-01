@@ -51,7 +51,8 @@ const opWorkspaceReset = "daemon.feed.workspace_reset"
 //     again.
 //   - The SYNTHESIZED rows — the cold gate, merge heads, session separations,
 //     accepted-prompt mirrors, command panels. They are rows, and they go the
-//     way of every other row. The gate the BIND's own start raises is drawn
+//     way of every other row, and the DURABLE ones are forgotten from their
+//     record too, so no later daemon draws them again. The gate the BIND's own start raises is drawn
 //     after this reset, which is why the reset runs before the new session
 //     starts.
 //   - The final-response SELECTION SET and its markdown, so a reply-to-a-past
@@ -125,6 +126,7 @@ func (r *resolver) ResetWorkspace(ws ids.WorkspaceID, because string) {
 	fresh.synthSeq = old.synthSeq
 	fresh.stallSeq = old.stallSeq
 	r.workspaces[ws] = fresh
+	r.forgetDurable(ws)
 
 	log.Info(opWorkspaceReset,
 		"a workspace's feed was emptied: every row was retired and every accumulation dropped",
