@@ -1149,7 +1149,10 @@ func TestABootStartsANonAdoptedOpenWorkspace(t *testing.T) {
 	}
 }
 
-func TestABootLeavesAHibernatedWorkspaceAsleep(t *testing.T) {
+// TestABootWakesAHibernatedWorkspace pins the owner's ruling of 2026-09-30:
+// Emacs never opens a workspace asleep, so the boot starts a hibernated
+// workspace's session and counts it as woken.
+func TestABootWakesAHibernatedWorkspace(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	ws := h.register(t, t.TempDir(), sessionlock.StateFree)
@@ -1159,11 +1162,11 @@ func TestABootLeavesAHibernatedWorkspaceAsleep(t *testing.T) {
 	_, brought := h.runAndBringUp(t)
 
 	// Assert.
-	if len(h.started) != 0 {
-		t.Fatalf("started = %v, want none: hibernation is deliberate", h.started)
+	if len(h.started) != 1 || h.started[0] != ws.ID {
+		t.Fatalf("started = %v, want [%v]: a hibernated workspace is woken at boot", h.started, ws.ID)
 	}
-	if len(brought.HibernatedLeft) != 1 || brought.HibernatedLeft[0] != ws.ID {
-		t.Fatalf("HibernatedLeft = %v, want [%v]", brought.HibernatedLeft, ws.ID)
+	if len(brought.Woken) != 1 || brought.Woken[0] != ws.ID {
+		t.Fatalf("Woken = %v, want [%v]", brought.Woken, ws.ID)
 	}
 }
 

@@ -715,7 +715,7 @@ var _ = []rollout.DispositionKind{
 }
 
 // BringUp starts the session of every open, client-less workspace the
-// reconciliation named, EXCEPT the hibernated ones.
+// reconciliation named, the hibernated ones included.
 //
 // IT RUNS AFTER THE DAEMON ANSWERS, NOT INSIDE THE RECONCILIATION. The boot
 // claim and daemon.addr are published before the reconciliation and nothing is
@@ -742,11 +742,12 @@ var _ = []rollout.DispositionKind{
 // exact loss that discipline exists to prevent. So an undetermined workspace
 // is left alone here too, as it is by the orphan close beside it.
 //
-// A HIBERNATED WORKSPACE IS LEFT ASLEEP. Hibernation is the memory knob: the
-// sweep spent a stand-down to reclaim ~500MB from a workspace nobody had
-// touched for six hours, and a boot that woke it would spend it straight back
-// for no one. Its topbar says so (the hibernated view), and opening or
-// switching to it revives it.
+// A HIBERNATED WORKSPACE IS WOKEN (owner ruling, 2026-09-30, replacing the
+// 2026-09-13 one that left it asleep). Emacs opens every registered workspace
+// at startup, and a workspace is never opened in its hibernated state: the
+// daemon wakes it before Emacs is told it is available. The wake is the same
+// start a look-driven revival takes (internal/workspace/revive.go), and the
+// start's own PutSession clears the hibernated terminal.
 //
 // EVERY FAILURE IS PER WORKSPACE. One workspace's start failing does not stop
 // the next, and it does not fail the boot: `Fleet.Start` already raises the
@@ -779,8 +780,8 @@ func (s *sequence) BringUp(ctx context.Context, pending []wsm.Workspace) BringUp
 		switch outcomes[i] {
 		case bringUpStarted:
 			report.BroughtUp = append(report.BroughtUp, ws.ID)
-		case bringUpHibernated:
-			report.HibernatedLeft = append(report.HibernatedLeft, ws.ID)
+		case bringUpWoken:
+			report.Woken = append(report.Woken, ws.ID)
 		case bringUpStoodDown:
 			report.StoodDown = append(report.StoodDown, ws.ID)
 		case bringUpFailed:
@@ -793,11 +794,11 @@ func (s *sequence) BringUp(ctx context.Context, pending []wsm.Workspace) BringUp
 	// sessions this daemon brought back, so that count is stated once at the
 	// level a person reads.
 	log.Info("daemon.boot.bring_up", "the boot brought the open workspaces' sessions up", dlog.Context{
-		"pending":         len(pending),
-		"started":         len(report.BroughtUp),
-		"hibernated_left": len(report.HibernatedLeft),
-		"stood_down":      len(report.StoodDown),
-		"failed":          len(report.BringUpFailed),
+		"pending":    len(pending),
+		"started":    len(report.BroughtUp),
+		"woken":      len(report.Woken),
+		"stood_down": len(report.StoodDown),
+		"failed":     len(report.BringUpFailed),
 	})
 	return report
 }
@@ -810,7 +811,8 @@ const (
 	// the daemon was already leaving.
 	bringUpNotBegun bringUpOutcome = iota
 	bringUpStarted
-	bringUpHibernated
+	// bringUpWoken is a hibernated workspace whose session was started.
+	bringUpWoken
 	bringUpStoodDown
 	bringUpFailed
 )
@@ -845,10 +847,7 @@ func (s *sequence) bringUpOne(ctx context.Context, ws wsm.Workspace) bringUpOutc
 		log.Error("daemon.boot.bring_up", "a workspace's session record could not be read; it is not brought up", fields)
 		return bringUpFailed
 	}
-	if exists && session.Hibernated() {
-		log.Debug("daemon.boot.bring_up", "a hibernated workspace is left asleep", fields)
-		return bringUpHibernated
-	}
+	hibernated := exists && session.Hibernated()
 	if err := s.deps.StartSession(startCtx, ws.ID); err != nil {
 		fields["error"] = err.Error()
 		// A START THIS DAEMON STOOD THE SHIM DOWN UNDER IS NOT A FAILED
@@ -866,6 +865,10 @@ func (s *sequence) bringUpOne(ctx context.Context, ws wsm.Workspace) bringUpOutc
 		}
 		log.Error("daemon.boot.bring_up", "an open workspace's session did not come up; the boot goes on", fields)
 		return bringUpFailed
+	}
+	if hibernated {
+		log.Debug("daemon.boot.bring_up", "a hibernated workspace was woken", fields)
+		return bringUpWoken
 	}
 	log.Debug("daemon.boot.bring_up", "an open workspace's session was started", fields)
 	return bringUpStarted
