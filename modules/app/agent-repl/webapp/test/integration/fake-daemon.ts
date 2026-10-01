@@ -280,6 +280,8 @@ export interface FakeDaemon {
   pushReloadElisp(moduleRoot: string, build: string): void;
   /** Push `faults_standing` naming one standing fault, as to an Emacs stream. */
   pushFaultsStanding(faultId: string, line: string): void;
+  /** Push `persistent_wifi` (joined, mode on), as to an Emacs stream. */
+  pushPersistentWifi(): void;
   /**
    * Push the planned-ending arm (`DaemonStreamEnding`) on every live stream of
    * RPC: the frame a daemon standing down in a PLANNED exit sends as a
@@ -1769,6 +1771,19 @@ export function createFakeDaemon(): FakeDaemon {
           push: {
             case: "faultsStanding",
             value: { faults: [{ faultId, line, fault: { detail: line }, openedAtMs: 1_000n }] },
+          },
+        }),
+      );
+    },
+    pushPersistentWifi() {
+      broadcast(
+        "watchDaemon",
+        undefined,
+        undefined,
+        create(WatchDaemonResponseSchema, {
+          push: {
+            case: "persistentWifi",
+            value: { wifi: { case: "joined", value: {} }, mode: { case: "on", value: {} } },
           },
         }),
       );
