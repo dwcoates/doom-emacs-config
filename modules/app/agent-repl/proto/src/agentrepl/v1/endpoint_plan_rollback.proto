@@ -107,7 +107,8 @@ message RollbackPlanFilesRestored {
 }
 // Running detached work that will be stopped.
 message RollbackPlanCancelDetached {
-  // How many items (subagents, shells, monitors).
+  // How many detached subagents and shells. Monitors the dropped turns
+  // started are stopped too but have no detached head to count.
   uint32 items = 1;
 }
 // A running turn will be interrupted.
