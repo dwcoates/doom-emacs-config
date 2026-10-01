@@ -51,9 +51,14 @@ const (
 	// the one question a deploy asks of it.
 	DeployStaleDaemon DeployBuild = "stale-daemon"
 	// DeployStaleDaemonNewLayout stages a daemon binary that writes the NEXT
-	// state layout, so the deploy restarts the daemon rather than handing it
-	// over (a joining successor cannot open an older layout).
+	// state layout by a BREAKING step, so the deploy restarts the daemon
+	// rather than handing it over (a joining successor carries an older
+	// layout forward by additive steps alone).
 	DeployStaleDaemonNewLayout DeployBuild = "stale-daemon-new-layout"
+	// DeployStaleDaemonAdditiveLayout stages a daemon binary that writes the
+	// NEXT state layout by ADDITIVE steps alone, so the deploy hands the
+	// daemon over as it does for the same layout.
+	DeployStaleDaemonAdditiveLayout DeployBuild = "stale-daemon-additive-layout"
 	// DeployStaleWebapp stages a webapp whose entry bundle is not the one the
 	// webviews report, so the deploy pushes them the reload.
 	DeployStaleWebapp DeployBuild = "stale-webapp"
@@ -129,7 +134,10 @@ func NewFakeDeployBuilder(t *testing.T, dir string, src DeploySources) *DeployBu
     printf '#!/bin/sh\n# a harness daemon build\necho ` + strconv.Itoa(wsm.LayoutVersion) + `\n' > "$out/daemon/bin/claude-repld"
     chmod +x "$out/daemon/bin/claude-repld"
   elif [ "$mode" = "` + string(DeployStaleDaemonNewLayout) + `" ]; then
-    printf '#!/bin/sh\n# a harness daemon build on the next layout\necho ` + strconv.Itoa(wsm.LayoutVersion+1) + `\n' > "$out/daemon/bin/claude-repld"
+    printf '#!/bin/sh\n# a harness daemon build on the next layout, by a breaking step\ncase "$1" in -migration-kind-from=*) echo breaking ;; *) echo ` + strconv.Itoa(wsm.LayoutVersion+1) + ` ;; esac\n' > "$out/daemon/bin/claude-repld"
+    chmod +x "$out/daemon/bin/claude-repld"
+  elif [ "$mode" = "` + string(DeployStaleDaemonAdditiveLayout) + `" ]; then
+    printf '#!/bin/sh\n# a harness daemon build on the next layout, by additive steps\ncase "$1" in -migration-kind-from=*) echo additive ;; *) echo ` + strconv.Itoa(wsm.LayoutVersion+1) + ` ;; esac\n' > "$out/daemon/bin/claude-repld"
     chmod +x "$out/daemon/bin/claude-repld"
   else
     cp ` + shellQuote(daemonBinary) + ` "$out/daemon/bin/claude-repld"
