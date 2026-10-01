@@ -276,12 +276,14 @@
     "succeeded": "none",
     "failed": "red",
     "cancelled": "none",
-    "lost": "turquoise"
+    "lost": "blue"
   },
   "feed_shell_dot": {
     "live": "green",
     "completed": "none",
+    "completed_succeeded": "none",
+    "completed_failed": "red",
     "cancelled": "none",
-    "lost": "turquoise"
+    "lost": "blue"
   }
 }

@@ -1560,9 +1560,8 @@ message FeedShellSettled {
   optional FeedShellExit exit = 2;
   // How it ended; the arm picks the treatment.
   oneof outcome {
-    // The process exited on its own; the exit chip says how it went — a
-    // non-zero exit still COMPLETED, and "failure" is the reader's judgment
-    // of the code, never an arm.
+    // The process ended on its own; `completed` says whether it succeeded,
+    // and the exit chip shows the code.
     FeedShellCompleted completed = 3;
     // Stopped by hand.
     FeedShellCancelled cancelled = 4;
@@ -1577,7 +1576,23 @@ message FeedShellExit {
   // client's mapping of zero vs non-zero.
   int32 code = 1;
 }
-message FeedShellCompleted {}
+// The process ended on its own.
+message FeedShellCompleted {
+  // Whether it succeeded, as the daemon judged it from how the process
+  // terminated. The bubble's dot draws it (failed is a filled red dot). SET
+  // BUT UNASSIGNED when the run carried no termination to judge: drawn as
+  // an ordinary completion, never as a failure.
+  oneof judgment {
+    // It exited with code 0.
+    FeedShellCompletedSucceeded succeeded = 1;
+    // It exited with a non-zero code, or was ended by a signal.
+    FeedShellCompletedFailed failed = 2;
+  }
+}
+// The process exited with code 0.
+message FeedShellCompletedSucceeded {}
+// The process exited non-zero or was ended by a signal.
+message FeedShellCompletedFailed {}
 message FeedShellCancelled {}
 // Why the run was lost — the sidecar's own staleness ruling, relayed by name
 // from conversation.v1 DetachedLost so the client can say WHICH lost it was.
