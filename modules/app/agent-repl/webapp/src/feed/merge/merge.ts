@@ -23,13 +23,13 @@
  * the generic merge glyph with a warning rather than failing the row: the head
  * is the only thing standing between the reader and a merge they cannot see.
  */
-import { formatElapsed, formatTickedElapsed } from "../../duration.js";
+import { liveElapsedClock, settledElapsedClock } from "../../elapsed-clock.js";
 import { log } from "../../log.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import { FEED_MERGE_HEAD_GLYPH } from "../../vocab.js";
 import { armName } from "../renderers.js";
 import type { RowContext } from "../renderers.js";
-import { stopTicking, tick } from "../ticking.js";
+import { stopTicking } from "../ticking.js";
 import type {
   FeedMerge,
   FeedMergeError,
@@ -182,19 +182,11 @@ function badge(word: string, tone: string): HTMLElement {
 /** The live clock, counting up from the enqueue instant. */
 function drawLiveClock(runtime: FeedMergeRuntime, rc: RowContext): HTMLElement {
   const startedMs = msOf(runtime.startedAtMs, `${PATH}.head.runtime.started_at_ms`);
-  const el = document.createElement("span");
-  el.className = "merge-clock";
-  tick(el, rc.ctx.ticker, (nowMs) => {
-    el.textContent = formatTickedElapsed(nowMs - startedMs);
-  });
-  return el;
+  return liveElapsedClock(rc.ctx.ticker, "merge-clock", startedMs);
 }
 
 /** The settled clock: the span that ran, stopped where it stopped. */
 function settledClock(runtime: FeedMergeRuntime, endedMs: number): HTMLElement {
   const startedMs = msOf(runtime.startedAtMs, `${PATH}.head.runtime.started_at_ms`);
-  const el = document.createElement("span");
-  el.className = "merge-clock";
-  el.textContent = formatElapsed(endedMs - startedMs);
-  return el;
+  return settledElapsedClock("merge-clock", endedMs - startedMs);
 }

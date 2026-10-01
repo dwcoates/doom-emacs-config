@@ -39,7 +39,7 @@ export function drawFeedMergeTabRow(
 
   const strip = document.createElement("div");
   strip.className = "merge-strip";
-  strip.append(drawFeedMergeTab(tab, { active: true }));
+  strip.append(drawFeedMergeTab(tab, { active: true, ticker: rc.ctx.ticker }));
 
   const summary = document.createElement("div");
   summary.className = "merge-tab-summary";

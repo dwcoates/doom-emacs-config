@@ -26,7 +26,8 @@
  * to see it" is not "it failed", and drawing the two the same way would state
  * something the daemon deliberately refused to state.
  */
-import { formatElapsed, formatTickedElapsed } from "../../duration.js";
+import { formatTickedElapsed } from "../../duration.js";
+import { liveElapsedClock, settledElapsedClock } from "../../elapsed-clock.js";
 import { log } from "../../log.js";
 import { callUnary } from "../../rpc/unary.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
@@ -214,12 +215,7 @@ function isDetachedRow(rc: RowContext): boolean {
 /** The live clock, counting up from the original start. */
 function drawLiveClock(runtime: FeedSubagentRuntime, rc: RowContext): HTMLElement {
   const startedMs = msOf(runtime.startedAtMs, `${PATH}.runtime.started_at_ms`);
-  const el = document.createElement("span");
-  el.className = "subagent-clock";
-  tick(el, rc.ctx.ticker, (nowMs) => {
-    el.textContent = formatTickedElapsed(nowMs - startedMs);
-  });
-  return el;
+  return liveElapsedClock(rc.ctx.ticker, "subagent-clock", startedMs);
 }
 
 /** The settled clock: the span that ran, stopped where the run stopped. */
@@ -229,10 +225,7 @@ function drawSettledClock(
 ): HTMLElement {
   const startedMs = msOf(runtime.startedAtMs, `${PATH}.runtime.started_at_ms`);
   const endedMs = msOf(settled.endedAtMs, `${PATH}.settled.ended_at_ms`);
-  const el = document.createElement("span");
-  el.className = "subagent-clock";
-  el.textContent = formatElapsed(endedMs - startedMs);
-  return el;
+  return settledElapsedClock("subagent-clock", endedMs - startedMs);
 }
 
 /**
