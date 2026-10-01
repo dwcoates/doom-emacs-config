@@ -50,3 +50,19 @@ func TestOnlyTheSandboxSuiteMayDecline(t *testing.T) {
 		}
 	}
 }
+
+func TestEveryHarnessTestsAScriptInTheModulesBin(t *testing.T) {
+	// Arrange / Act
+	names := Harnesses()
+
+	// Assert
+	if len(names) == 0 {
+		t.Fatal("no suite is marked as a bin/ harness")
+	}
+	for _, n := range names {
+		s, _ := Lookup(n)
+		if s.Kind != Script || len(s.Path) < len("bin/test-") || s.Path[:len("bin/test-")] != "bin/test-" {
+			t.Errorf("%s is marked a bin/ harness but runs %q", n, s.Path)
+		}
+	}
+}

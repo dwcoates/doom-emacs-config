@@ -630,6 +630,8 @@ func (r *run) consumeEscalation(ctx context.Context) (string, bool) {
 var mergeMachinery = []string{
 	"modules/app/agent-repl/daemon/internal/merge/",
 	"modules/app/agent-repl/bin/test-all.sh",
+	// The entry point's logic: test-all.sh builds and runs this.
+	"modules/app/agent-repl/testrun/",
 }
 
 // isMachinery reports whether a repository path is merge machinery.

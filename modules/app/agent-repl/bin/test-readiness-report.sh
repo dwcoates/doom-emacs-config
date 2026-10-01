@@ -340,6 +340,32 @@ t_proto_commit_stales_every_system() {
     rm -rf "$root"
 }
 
+# --- 7a. the runner's roster is a daemon build input ------------------------
+# The daemon compiles testrun/roster in (the merge gate's suite selection), so
+# a roster commit stales the daemon; the rest of testrun/ is no system's input.
+t_runner_roster_commit_stales_only_the_daemon() {
+    local root before; root="$(new_root)"
+    before="$(head_sha "$root")"
+    mkdir -p "$root/testrun/roster" "$root/testrun/internal"
+    echo "package roster" > "$root/testrun/roster/roster.go"
+    git_c "$root" add testrun/roster
+    git_c "$root" commit -qm "roster change"
+    local roster; roster="$(head_sha "$root")"
+    echo "package sched" > "$root/testrun/internal/sched.go"
+    git_c "$root" add testrun/internal
+    git_c "$root" commit -qm "runner-only change"
+    run_report "$root"
+    if [ "$(jq_get "$OUT" 'sysmap["daemon"]["source_sha"]')" = "$roster" ] \
+       && [ "$(jq_get "$OUT" "any(s['source_sha'] == '$roster' for s in d['systems'] if s['name'] != 'daemon')")" = "False" ] \
+       && [ "$(jq_get "$OUT" "any(s['source_sha'] == '$(head_sha "$root")' for s in d['systems'])")" = "False" ]; then
+        pass "a roster commit is the daemon's source revision and no other system's"
+    else
+        fail "a roster commit is the daemon's source revision and no other system's" \
+             "before=$before roster=$roster out: $(cat "$OUT")"
+    fi
+    rm -rf "$root"
+}
+
 # --- 7b. proto review artifacts are not build inputs ------------------------
 # A commit touching only proto/figma-idl-draft/ or the sketch must not advance
 # any system's source revision: no build reads them, so the staleness check
@@ -586,6 +612,7 @@ t_minutes_behind_is_timestamp_delta
 t_dirty_stamp_flagged_and_still_measured
 t_unknown_deployed_revision_errors_per_system
 t_proto_commit_stales_every_system
+t_runner_roster_commit_stales_only_the_daemon
 t_proto_review_artifact_commit_stales_nothing
 t_daemon_binary_newer_than_process_is_stale
 t_daemon_started_after_binary_is_fresh

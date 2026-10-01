@@ -893,8 +893,13 @@ func TestTheRepairBriefForbidsChangingTheMergeMachinery(t *testing.T) {
 			brief, err := LoadBrief(dir, tc.brief)
 
 			// Assert.
-			if err != nil || !strings.Contains(brief.Body, "daemon/internal/merge/") || !strings.Contains(brief.Body, "bin/test-all.sh") {
-				t.Fatalf("the %s brief (err %v) does not forbid changing the merge machinery", tc.brief, err)
+			if err != nil {
+				t.Fatalf("loading the %s brief: %v", tc.brief, err)
+			}
+			for _, m := range mergeMachinery {
+				if !strings.Contains(brief.Body, "`"+m+"`") {
+					t.Errorf("the %s brief does not forbid changing the merge machinery %s", tc.brief, m)
+				}
 			}
 		})
 	}
@@ -1621,5 +1626,28 @@ func TestUpdatingMainAlreadyAtUpstreamMovesNothing(t *testing.T) {
 	}
 	if got := h.footer.last().State; got != StateMerged {
 		t.Fatalf("state = %q, want merged", got)
+	}
+}
+
+// TestIsMachinery covers what a repair may not change: the merge itself, the
+// gate's entry point, and the runner the entry point builds.
+func TestIsMachinery(t *testing.T) {
+	tests := []struct {
+		path string
+		want bool
+	}{
+		{"modules/app/agent-repl/daemon/internal/merge/gate.go", true},
+		{"modules/app/agent-repl/bin/test-all.sh", true},
+		{"modules/app/agent-repl/testrun/internal/sched/plan.go", true},
+		{"modules/app/agent-repl/bin/test-e2e.sh", false},
+		{"modules/app/agent-repl/daemon/internal/server/server.go", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			// Act / Assert.
+			if got := isMachinery(tt.path); got != tt.want {
+				t.Fatalf("isMachinery(%q) = %v, want %v", tt.path, got, tt.want)
+			}
+		})
 	}
 }

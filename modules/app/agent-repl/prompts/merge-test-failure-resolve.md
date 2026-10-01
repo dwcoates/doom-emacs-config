@@ -8,7 +8,7 @@ Failing output (tail; the whole run is archived at {{archive_path}}):
 
 This is fixing attempt {{attempt}} of {{max_attempts}}. Fix it in {{worktree_dir}}: change the tests or the code so the suite passes, and COMMIT the fix to {{source_branch}} there. When your turn ends the queue runs the suite again on the branch. If the last attempt still fails, the merge fails and the workspace is handed back to the user.
 
-Do NOT change the merge machinery while this merge is running: nothing under `modules/app/agent-repl/daemon/internal/merge/` and not `modules/app/agent-repl/bin/test-all.sh`. The running daemon is what gates this merge, so a change there cannot fix it; a repair that makes one fails the merge. A fix to the merge or its gate lands through a branch of its own.
+Do NOT change the merge machinery while this merge is running: nothing under `modules/app/agent-repl/daemon/internal/merge/` or `modules/app/agent-repl/testrun/`, and not `modules/app/agent-repl/bin/test-all.sh`. The running daemon is what gates this merge, so a change there cannot fix it; a repair that makes one fails the merge. A fix to the merge or its gate lands through a branch of its own.
 
 If you conclude that a correct fix requires unforeseen non-trivial ARCHITECTURAL changes — a redesign rather than a repair — stop fixing and write the file `{{escalation_file}}` at the root of {{worktree_dir}} (do not commit it), whose FIRST line is exactly:
 
