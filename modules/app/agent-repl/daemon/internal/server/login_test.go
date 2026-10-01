@@ -8,8 +8,10 @@ import (
 	"connectrpc.com/connect"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/login"
+	"claude-repld/internal/merge"
 )
 
 // TestOpenLoginAnswersTheConfigDir pins that the caller learns which account
@@ -177,5 +179,52 @@ func TestOpenInEditorRelaysOntoTheHostStream(t *testing.T) {
 	got := push.GetOpenInEditor()
 	if got.GetPath() != "lisp/core.el" || got.GetLine() != 42 {
 		t.Fatalf("open_in_editor = %v, want lisp/core.el:42", got)
+	}
+}
+
+func TestOpenInEditorOpensAWorkspaceFileThroughTheVerb(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	_, err := h.Client.OpenInEditor(context.Background(), connect.NewRequest(&agentreplv1.OpenInEditorRequest{Workspace: ref(),
+		Target: &agentreplv1.OpenInEditorRequest_WorkspaceFile{WorkspaceFile: &agentreplv1.OpenInEditorWorkspaceFile{Path: "lisp/core.el"}}}))
+
+	// Assert.
+	if err != nil || len(h.Verbs.editorOpens) != 1 || h.Verbs.editorOpens[0] != "file:lisp/core.el" {
+		t.Fatalf("OpenInEditor = %v, opens %v, want the workspace file relayed", err, h.Verbs.editorOpens)
+	}
+}
+
+func TestOpenInEditorOpensAMergeTestLogByItsToken(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Merge.logPaths = map[string]string{"lease-1/2": "/state/merge-logs/lease-1-tests-2.log"}
+
+	// Act.
+	_, err := h.Client.OpenInEditor(context.Background(), connect.NewRequest(&agentreplv1.OpenInEditorRequest{Workspace: ref(),
+		Target: &agentreplv1.OpenInEditorRequest_MergeTestLog{MergeTestLog: &frontendv1.FeedMergeTestLogToken{Value: "lease-1/2"}}}))
+
+	// Assert.
+	if err != nil || len(h.Verbs.editorOpens) != 1 || h.Verbs.editorOpens[0] != "daemon:/state/merge-logs/lease-1-tests-2.log" {
+		t.Fatalf("OpenInEditor = %v, opens %v, want the log relayed", err, h.Verbs.editorOpens)
+	}
+}
+
+func TestOpenInEditorAnswersAnUnknownMergeTestLog(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Merge.logErr = &merge.RefusalError{Arm: merge.ArmUnknownMergeTestLog, Reason: "no such log"}
+
+	// Act.
+	resp, err := h.Client.OpenInEditor(context.Background(), connect.NewRequest(&agentreplv1.OpenInEditorRequest{Workspace: ref(),
+		Target: &agentreplv1.OpenInEditorRequest_MergeTestLog{MergeTestLog: &frontendv1.FeedMergeTestLogToken{Value: "x"}}}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("OpenInEditor: %v", err)
+	}
+	if resp.Msg.GetError().GetUnknownMergeTestLog() == nil || len(h.Verbs.editorOpens) != 0 {
+		t.Fatalf("result = %v, opens %v, want unknown_merge_test_log and nothing relayed", resp.Msg.GetResult(), h.Verbs.editorOpens)
 	}
 }

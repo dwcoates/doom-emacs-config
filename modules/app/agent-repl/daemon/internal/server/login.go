@@ -223,13 +223,27 @@ func (s *server) OpenInEditor(
 	if done {
 		return answer(resp, cerr)
 	}
-	var line *uint32
-	if req.Msg.Line != nil {
-		value := req.Msg.GetLine()
-		line = &value
-	}
-	if err := s.deps.Verbs.OpenInEditor(ctx, subject.Record.ID, req.Msg.GetPath(), line); err != nil {
-		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
+	switch target := req.Msg.GetTarget().(type) {
+	case *agentreplv1.OpenInEditorRequest_WorkspaceFile:
+		var line *uint32
+		if target.WorkspaceFile.Line != nil {
+			value := target.WorkspaceFile.GetLine()
+			line = &value
+		}
+		if err := s.deps.Verbs.OpenInEditor(ctx, subject.Record.ID, target.WorkspaceFile.GetPath(), line); err != nil {
+			return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
+		}
+	case *agentreplv1.OpenInEditorRequest_MergeTestLog:
+		// THE LOG LIVES IN THE DAEMON'S STATE, outside the worktree, so it is
+		// named by the token the bubble served and resolved here, for this
+		// workspace, rather than by a path a client could choose.
+		path, err := s.deps.Merge.TestLogPath(ctx, subject.Record.ID, target.MergeTestLog.GetValue())
+		if err != nil {
+			return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
+		}
+		if err := s.deps.Verbs.OpenDaemonFileInEditor(ctx, subject.Record.ID, path); err != nil {
+			return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
+		}
 	}
 	resp.Result = &agentreplv1.OpenInEditorResponse_Success{
 		Success: &agentreplv1.OpenInEditorSuccess{},
