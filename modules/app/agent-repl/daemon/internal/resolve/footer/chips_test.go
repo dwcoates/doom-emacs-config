@@ -1592,7 +1592,8 @@ func TestChipsReadsAPromptOnlyThroughTheSharedHelpers(t *testing.T) {
 // that is running (AgentDetachedWork.kind).
 func resumedSubagent(send, agent string) *conversationv1.AgentDetachedWork {
 	return &conversationv1.AgentDetachedWork{
-		Work: &conversationv1.DetachedWorkId{Value: send},
+		Work:  &conversationv1.DetachedWorkId{Value: send},
+		Owner: mainAgent,
 		Kind: &conversationv1.DetachedWorkKind{Kind: &conversationv1.DetachedWorkKind_Subagent{
 			Subagent: &conversationv1.DetachedWorkKindSubagent{AgentId: &conversationv1.AgentId{Value: agent}},
 		}},
