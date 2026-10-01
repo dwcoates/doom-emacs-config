@@ -389,6 +389,8 @@ func (r *resolver) SetTurnEnded(ws ids.WorkspaceID, how TurnClose) {
 	r.mutateWorkspaceLogged(ws, "daemon.sidebar.set_turn_ended", "the roster took the turn's close",
 		dlog.Context{"close": int(how)}, func(s *wsState, log dlog.Logger) {
 			s.turn = nil
+			// THE TURN'S END IS THE RETRY'S END: nothing is left to retry for.
+			s.retrying = ""
 			s.turnEverRan = true
 			s.lastClose = how
 			s.compacting = false
@@ -447,8 +449,26 @@ func (r *resolver) SetStateUnreported(ws ids.WorkspaceID, unreported bool) {
 
 // OnActivity moves the row to thinking.
 func (r *resolver) OnActivity(ws ids.WorkspaceID, agent *conversationv1.AgentId, act *conversationv1.AgentActivity) {
-	r.mutateWorkspace(ws, "daemon.sidebar.on_activity", "the roster took a turn's activity",
-		dlog.Context{"agent_id": agent.GetValue()}, func(s *wsState) { s.sawActivity = true })
+	r.mutateWorkspaceLogged(ws, "daemon.sidebar.on_activity", "the roster took a turn's activity",
+		dlog.Context{"agent_id": agent.GetValue()}, func(s *wsState, log dlog.Logger) {
+			s.sawActivity = true
+			if s.retrying != "" && s.retrying == agent.GetValue() && ladder.RetryAnswered(act) {
+				log.Debug("daemon.sidebar.retry_cleared", "the retried call was answered; the row leaves api_retrying",
+					dlog.Context{"agent_id": agent.GetValue()})
+				s.retrying = ""
+			}
+		})
+}
+
+// OnApiError stands the vendor's mid-turn retry of AGENT's call: the row is
+// `api_retrying` (blue) until that agent is answered, the turn ends, or a new
+// turn opens — the same lifetime the footer's `blocked · api_retrying` has.
+func (r *resolver) OnApiError(ws ids.WorkspaceID, agent *conversationv1.AgentId, failed *conversationv1.ApiRequestFailed) {
+	if failed == nil {
+		return
+	}
+	r.mutateWorkspace(ws, "daemon.sidebar.on_api_error", "the roster took mid-turn api failure evidence",
+		dlog.Context{"agent_id": agent.GetValue()}, func(s *wsState) { s.retrying = agent.GetValue() })
 }
 
 // OnPermission moves the row to waiting, and moves it off waiting again when
@@ -554,6 +574,7 @@ func sessionUpdateArm(update *conversationv1.SessionUpdate) (string, func(*wsSta
 		// account refuses the session.
 		return "query_died", func(s *wsState) {
 			s.turn = nil
+			s.retrying = ""
 		}
 	case *conversationv1.SessionUpdate_RateLimitStatus:
 		return "rate_limit_status", func(s *wsState) {
