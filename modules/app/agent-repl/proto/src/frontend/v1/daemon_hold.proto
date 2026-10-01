@@ -158,8 +158,10 @@ message HeldPrompt {
   repeated HeldPromptBadge badges = 14;
   // PRESENT WHEN LATER PROMPTS WERE FOLDED INTO THIS ONE while it was still
   // queued: a prompt the classifier ruled should interrupt a prompt that had
-  // not started yet is merged into it rather than queued behind it. `said`
-  // already carries the merged text; this says the merge happened.
+  // not started yet is merged into it rather than queued behind it, and a
+  // prompt the user folded into it with its "fold above" button
+  // (FoldHeldPrompt) is merged the same way. `said` already carries the
+  // merged text; this says the merge happened.
   HeldPromptCoalesced coalesced = 15;
   // PRESENT WHEN THIS ENTRY IS A SESSION ACT rather than a prompt: a model or
   // permission-mode change queued in order with the prompts around it, never
@@ -167,6 +169,29 @@ message HeldPrompt {
   // is shown as; this is what it does. A context cut is not here: /compact and
   // /clear are prompts whose text is the command.
   HeldSessionAct act = 16;
+  // THE CARD'S "fold above" BUTTON. PRESENT EXACTLY WHEN this entry can be
+  // folded into the entry directly ahead of it (FoldHeldPrompt), absent
+  // otherwise. Daemon-decided: the card draws the button off this field alone
+  // and derives nothing from the entries around it.
+  //
+  // It is present only when ALL of these hold: this entry is a prompt (not a
+  // session act); an entry stands directly ahead of it in the queue (so never
+  // on the first entry); that entry is a prompt too (never a model or
+  // permission-mode change, /compact or /clear); and neither of the two is
+  // being edited. The running turn is never "ahead" here: a turn that has
+  // started is joined by the classifier's after_tool_call verdict, not folded.
+  optional HeldPromptFoldAbove fold_above = 18;
+}
+
+// The "fold above" button: folds this prompt into the entry directly ahead of
+// it, so the two are delivered together as that one entry.
+message HeldPromptFoldAbove {
+  // The entry directly ahead of this one, as the daemon resolved this tray.
+  // A TYPED ECHO TOKEN: the click sends it back verbatim as
+  // FoldHeldPromptRequest.above, and the daemon refuses the fold when it is
+  // no longer the entry directly ahead, so a prompt is only ever folded into
+  // the entry the user saw above it.
+  conversation.v1.TurnId above = 1;
 }
 
 // Later prompts were folded into this one while it was queued. DELIBERATELY

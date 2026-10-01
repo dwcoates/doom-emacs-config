@@ -51,6 +51,7 @@ import "agentrepl/v1/endpoint_watch_footer.proto";
 import "agentrepl/v1/endpoint_watch_daemon_holds.proto";
 import "agentrepl/v1/endpoint_update_held_prompt.proto";
 import "agentrepl/v1/endpoint_edit_held_prompt.proto";
+import "agentrepl/v1/endpoint_fold_held_prompt.proto";
 import "agentrepl/v1/endpoint_answer_held_offer.proto";
 import "agentrepl/v1/endpoint_deploy.proto";
 import "agentrepl/v1/endpoint_update_shutdown_schedule.proto";
@@ -212,6 +213,11 @@ service AgentRepl {
   // commit (replace and reclassify), or cancel. See
   // endpoint_edit_held_prompt.proto.
   rpc EditHeldPrompt(EditHeldPromptRequest) returns (EditHeldPromptResponse);
+
+  // Fold a held prompt into the held prompt directly ahead of it: its content
+  // is appended to that entry and it leaves the queue, in one transaction. See
+  // endpoint_fold_held_prompt.proto.
+  rpc FoldHeldPrompt(FoldHeldPromptRequest) returns (FoldHeldPromptResponse);
 
   // Answer a question the daemon parked in the tray. See
   // endpoint_answer_held_offer.proto.
