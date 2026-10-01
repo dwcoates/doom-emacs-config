@@ -5491,7 +5491,8 @@ bubble-body.bubble-body { display: block; }
   animation: pfooter-breath 2.6s ease-in-out infinite;
 }
 
-/* ---- expanded footer: the agents panel's fixed columns (src/footer/expanded.ts) ---- */
+/* ---- shared column tables: the expanded footer's agents panel and the merge
+   queue tab (src/columns.ts) ---- */
 
 /* FIXED COLUMNS FOR TOKENS AND DURATION (owner request, 2026-10-01). The
    agents panel is ONE grid, and its header and every row take its columns
@@ -5504,24 +5505,35 @@ bubble-body.bubble-body { display: block; }
    turning "4m 59s" into "5m" no longer moves the token count. A vertical bar
    (the row delimiters' own 1px `--border`) separates tokens from duration,
    header included. The header is the same four cells: "stop all" on the LEFT,
-   then the "tokens" and "duration" headers above their columns. */
-.pfooter-sheet[data-panel="agents"] {
-  --footer-tokens-col-min: 6ch;
+   then the "tokens" and "duration" headers above their columns.
+
+   THE MERGE QUEUE TAB IS THE SAME TABLE (owner request, 2026-10-01): its
+   workspace, stage and duration columns take the one duration floor, bar,
+   spacing and tabular figures declared here, so the two tables' duration
+   columns cannot drift apart. Each table declares only its own columns. */
+.pfooter-sheet[data-panel="agents"],
+.merge-queue {
   /* The floor counts the bar and its padding, which sit inside the cell. */
   --footer-duration-col-min: calc(11ch + 11px);
   display: grid;
+  column-gap: 10px;
+  align-content: start;
+}
+.pfooter-sheet[data-panel="agents"] {
+  --footer-tokens-col-min: 6ch;
   grid-template-columns:
     minmax(0, 1fr)
     minmax(var(--footer-tokens-col-min), max-content)
     minmax(var(--footer-duration-col-min), max-content)
     auto;
-  column-gap: 10px;
-  align-content: start;
 }
-.pfooter-sheet[data-panel="agents"] > * { grid-column: 1 / -1; }
-.pfooter-sheet[data-panel="agents"] > .footer-columns {
+.pfooter-sheet[data-panel="agents"] > *,
+.merge-queue > * { grid-column: 1 / -1; }
+.pfooter-sheet[data-panel="agents"] > .footer-columns,
+.merge-queue .footer-columns {
   display: grid;
   grid-template-columns: subgrid;
+  grid-column: 1 / -1;
   /* `normal` on a subgrid is the parent grid's gap, so the header and the rows
      cannot space their columns differently. */
   column-gap: normal;
@@ -6745,6 +6757,15 @@ bubble-body.bubble-body { display: block; }
   border-color: var(--line, rgba(128, 128, 128, 0.35));
   background: rgba(128, 128, 128, 0.16);
 }
+/* How long the tab has been in its state, beside its label: QUIET (muted,
+   smaller) and one unbroken run of tabular figures, so a ticking value never
+   wraps inside the tab or jitters its digits. */
+.merge-tab-duration {
+  color: var(--muted);
+  font-size: 0.85em;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
 .merge-tab-glyph.is-live { color: var(--blocked); animation: merge-breathe 1.8s ease-in-out infinite; }
 /* HOLLOWED OUT FOR DONE: a settled success should recede, not compete with
    the live tab for attention. */
@@ -6756,14 +6777,33 @@ bubble-body.bubble-body { display: block; }
 }
 .merge-tab-panel { padding-top: 0.3rem; }
 
-/* The queue snapshot. Rows are delimited by the ONE shared `.list-rows` rule. */
-.merge-queue-entry { padding: 0.15rem 0; }
-.merge-queue-line {
+/* The queue snapshot: a COLUMN TABLE (shared column tables, above) of
+   workspace · stage · duration under a header row. Rows are delimited by the
+   ONE shared `.list-rows` rule. */
+.merge-queue {
+  grid-template-columns:
+    minmax(0, 1fr)
+    max-content
+    minmax(var(--footer-duration-col-min), max-content);
+}
+/* EVERY ROW THE SAME HEIGHT, its cells vertically centered: each cell is one
+   unwrapped line, centered in the stretched cell the bar needs. */
+.merge-queue-header > *,
+.merge-queue-line > * {
   display: flex;
-  align-items: baseline;
-  gap: 0.4rem;
-  width: 100%;
-  padding: 0.1rem 0;
+  align-items: center;
+  min-width: 0;
+  padding-top: 0.15rem;
+  padding-bottom: 0.15rem;
+  white-space: nowrap;
+}
+/* The header reads as the agents panel's does: muted words above their columns. */
+.merge-queue-header { color: var(--muted); }
+.merge-queue-header > .footer-column-header:not([data-column="duration"]) { justify-content: flex-start; }
+.merge-queue-header > [data-column="duration"],
+.merge-queue-line > .merge-queue-duration { justify-content: flex-end; }
+.merge-queue-line {
+  padding: 0;
   border: none;
   background: none;
   color: inherit;
@@ -6772,9 +6812,21 @@ bubble-body.bubble-body { display: block; }
   text-align: left;
 }
 .merge-queue-line:hover { background: rgba(128, 128, 128, 0.1); }
-.merge-queue-entry[data-queue-place="current"] .merge-queue-line { font-weight: 600; }
-.merge-queue-here,
-.merge-queue-active { color: var(--muted); font-size: 0.85em; }
+/* THIS WORKSPACE'S OWN ROW is subtly highlighted -- the sidebar's own wash for
+   "the workspace you are in" -- rather than labelled. */
+.merge-queue-entry[data-queue-place="current"] {
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+}
+/* The name is the one elastic cell, so a long one ends in an ellipsis rather
+   than widening the table; it centers itself in its row like the flex cells. */
+.merge-queue-line > .merge-queue-label {
+  display: block;
+  align-self: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.merge-queue-stage { color: var(--muted); }
+.merge-queue-entry > .merge-queue-refusal { grid-column: 1 / -1; }
 .merge-queue-refusal { color: var(--err); font-size: 0.85em; }
 
 /* The test suites and their daemon-painted output. */

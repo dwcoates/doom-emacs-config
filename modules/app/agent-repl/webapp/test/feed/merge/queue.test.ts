@@ -30,6 +30,7 @@ import { oneofArms } from "../../arms.js";
 
 beforeEach(() => {
   vi.useFakeTimers();
+  vi.setSystemTime(NOW_MS);
 });
 afterEach(() => {
   vi.useRealTimers();
@@ -74,37 +75,48 @@ function refusedWith(cause: { case: string; value: unknown }): SelectWorkspaceRe
   });
 }
 
-/** One entry of a queue snapshot. */
+/** The instant the page's clock reads when a snapshot is drawn. */
+const NOW_MS = 1_000_000;
+
+/** One entry of a queue snapshot, in its stage since ENTEREDMS. */
 function entry(
   name: string,
   status: { case: "merging"; activeTab: { text: string; round: number } } | { case: "waiting" },
+  enteredMs: number = NOW_MS - 5_000,
 ) {
+  const stageEnteredAtMs = BigInt(enteredMs);
   return create(FeedMergeQueueEntrySchema, {
     workspace: { ref: create(WorkspaceRefSchema, { id: name, dir: `/w/${name}` }) },
     label: { text: name },
     status:
       status.case === "merging"
-        ? { case: "merging", value: { activeTab: status.activeTab } }
-        : { case: "waiting", value: {} },
+        ? { case: "merging", value: { activeTab: status.activeTab, stageEnteredAtMs } }
+        : { case: "waiting", value: { stageEnteredAtMs } },
   });
 }
 
 /** A snapshot with one ahead, this workspace, one behind. */
-function snapshot(): FeedMergeQueue {
+function snapshot(frontEnteredMs: number = NOW_MS - 5_000, frontTab = { text: "tests", round: 2 }): FeedMergeQueue {
   return create(FeedMergeQueueSchema, {
-    ahead: [entry("front", { case: "merging", activeTab: { text: "tests", round: 2 } })],
-    current: entry("mine", { case: "waiting" }),
-    behind: [entry("after", { case: "waiting" })],
+    ahead: [entry("front", { case: "merging", activeTab: frontTab }, frontEnteredMs)],
+    current: entry("mine", { case: "waiting" }, NOW_MS - 65_000),
+    behind: [entry("after", { case: "waiting" }, NOW_MS - 3_000)],
   });
 }
 
 /** Draw a snapshot against a scripted daemon. */
-function draw(answer: SelectWorkspaceResponse = SELECTED): {
+function draw(answer: SelectWorkspaceResponse = SELECTED, queue: FeedMergeQueue = snapshot()): {
   el: HTMLElement;
   s: Scripted;
 } {
   const s = scripted(answer);
-  return { el: drawFeedMergeQueue(snapshot(), rowContext(s.ctx, mergeRow("m1"))), s };
+  return { el: drawFeedMergeQueue(queue, rowContext(s.ctx, mergeRow("m1"))), s };
+}
+
+/** One drawn entry's cells' text, in column order. */
+function cellsOf(el: HTMLElement, place: string): string[] {
+  const line = el.querySelector(`[data-queue-place="${place}"] .merge-queue-line`);
+  return [...(line?.children ?? [])].map((c) => c.textContent ?? "");
 }
 
 /** Let the scripted answer land. */
@@ -124,8 +136,12 @@ describe("drawFeedMergeQueue: the snapshot's shape is READ, never derived", () =
 
   it("marks this workspace's own entry from the field, not by comparing ids", () => {
     const { el } = draw();
-    const current = el.querySelector('[data-queue-place="current"]');
-    expect(current?.querySelector(".merge-queue-here")?.textContent).toBe("you are here");
+    expect(el.querySelector('[data-queue-place="current"] .merge-queue-label')?.textContent).toBe("mine");
+  });
+
+  it("labels no row 'you are here'", () => {
+    const { el } = draw();
+    expect(el.textContent ?? "").not.toContain("you are here");
   });
 
   it("draws each entry's label verbatim", () => {
@@ -136,17 +152,84 @@ describe("drawFeedMergeQueue: the snapshot's shape is READ, never derived", () =
   });
 });
 
-describe("drawFeedMergeQueueEntry: the front's progress", () => {
-  it("shows the front entry's active tab, rounds decorated as the tab draws them", () => {
+describe("drawFeedMergeQueue: a table of workspace, stage and duration", () => {
+  it("leads with a header row naming the three columns", () => {
     const { el } = draw();
-    const front = el.querySelector('[data-queue-place="ahead"]');
-    expect(front?.querySelector(".merge-queue-active")?.textContent).toBe("tests (2)");
+    const header = el.firstElementChild;
+    expect([
+      header?.classList.contains("merge-queue-header"),
+      [...(header?.children ?? [])].map((c) => c.getAttribute("data-column")),
+      [...(header?.children ?? [])].map((c) => c.textContent),
+    ]).toEqual([true, ["workspace", "stage", "duration"], ["workspace", "stage", "duration"]]);
   });
 
-  it("draws a waiting entry plain, with no progress line of its own", () => {
+  it("draws every row as the same three cells, in the header's column order", () => {
     const { el } = draw();
-    const behind = el.querySelector('[data-queue-place="behind"]');
-    expect(behind?.querySelector(".merge-queue-active")).toBeNull();
+    expect(
+      [...el.querySelectorAll(".merge-queue-line")].map((line) =>
+        [...line.children].map((c) => c.className),
+      ),
+    ).toEqual(
+      Array.from({ length: 3 }, () => [
+        "merge-queue-label",
+        "merge-queue-stage",
+        "footer-row-clock merge-queue-duration",
+      ]),
+    );
+  });
+
+  it("takes the shared column table's columns on the header and every row", () => {
+    const { el } = draw();
+    expect(
+      [el.querySelector(".merge-queue-header"), ...el.querySelectorAll(".merge-queue-entry, .merge-queue-line")].every(
+        (row) => row?.classList.contains("footer-columns"),
+      ),
+    ).toBe(true);
+  });
+
+  it("marks only this workspace's own row as the current one", () => {
+    const { el } = draw();
+    expect(
+      [...el.querySelectorAll('.merge-queue-entry[data-queue-place="current"]')].map(
+        (e) => e.querySelector(".merge-queue-label")?.textContent,
+      ),
+    ).toEqual(["mine"]);
+  });
+});
+
+describe("drawFeedMergeQueueEntry: each entry's duration in its stage", () => {
+  it("ticks the front's duration from when it entered its stage", () => {
+    const { el } = draw();
+    vi.advanceTimersByTime(2_000);
+    expect(cellsOf(el, "ahead")[2]).toBe("7s");
+  });
+
+  it("ticks a waiting entry's duration from when it was queued", () => {
+    const { el } = draw();
+    vi.advanceTimersByTime(1_000);
+    expect(cellsOf(el, "current")[2]).toBe("1m 6s");
+  });
+
+  it("starts over at zero when the front's stage changes", () => {
+    const { el: before } = draw();
+    vi.advanceTimersByTime(4_000);
+    const { el: after } = draw(SELECTED, snapshot(NOW_MS + 4_000, { text: "committing", round: 1 }));
+    expect([cellsOf(before, "ahead")[2], cellsOf(after, "ahead").slice(1)]).toEqual([
+      "9s",
+      ["committing", "0s"],
+    ]);
+  });
+});
+
+describe("drawFeedMergeQueueEntry: the front's progress", () => {
+  it("shows the front entry's active tab as its stage, rounds decorated as the tab draws them", () => {
+    const { el } = draw();
+    expect(cellsOf(el, "ahead")[1]).toBe("tests (2)");
+  });
+
+  it("draws a waiting entry's stage as 'waiting'", () => {
+    const { el } = draw();
+    expect(cellsOf(el, "behind")[1]).toBe("waiting");
   });
 
   it("refuses an entry whose status oneof is unset", () => {

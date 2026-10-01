@@ -28,7 +28,8 @@
  * turn target, so there is NO confirm step here — every error arm is an
  * ordinary call-site refusal beside the button.
  */
-import { formatElapsed, formatTickedElapsed } from "../../duration.js";
+import { formatTickedElapsed } from "../../duration.js";
+import { liveElapsedClock, settledElapsedClock } from "../../elapsed-clock.js";
 import { log } from "../../log.js";
 import type {
   FeedShell,
@@ -295,12 +296,7 @@ export function drawFeedShellLastProgress(
 /** The live clock, counting up from the original start. */
 function drawLiveClock(runtime: FeedShellRuntime, rc: RowContext): HTMLElement {
   const startedMs = msOf(runtime.startedAtMs, `${PATH}.runtime.started_at_ms`);
-  const el = document.createElement("span");
-  el.className = "shell-clock";
-  tick(el, rc.ctx.ticker, (nowMs) => {
-    el.textContent = formatTickedElapsed(nowMs - startedMs);
-  });
-  return el;
+  return liveElapsedClock(rc.ctx.ticker, "shell-clock", startedMs);
 }
 
 /** The settled clock: the span that ran, stopped where the command stopped. */
@@ -310,10 +306,7 @@ function drawSettledClock(
 ): HTMLElement {
   const startedMs = msOf(runtime.startedAtMs, `${PATH}.runtime.started_at_ms`);
   const endedMs = msOf(settled.endedAtMs, `${PATH}.settled.ended_at_ms`);
-  const el = document.createElement("span");
-  el.className = "shell-clock";
-  el.textContent = formatElapsed(endedMs - startedMs);
-  return el;
+  return settledElapsedClock("shell-clock", endedMs - startedMs);
 }
 
 /** The stop control on a live shell. */

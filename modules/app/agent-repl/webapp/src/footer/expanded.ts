@@ -68,9 +68,10 @@ import type {
 } from "../../../proto/gen/ts/frontend/v1/footer_pb";
 import type { FeedId } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import { placeChildren } from "../dom.js";
-import { formatElapsed, formatTickedElapsed } from "../duration.js";
+import { columnHeader, COLUMNS_ROW_CLASS } from "../columns.js";
+import { liveElapsedClock, settledElapsedClock } from "../elapsed-clock.js";
 import { frameUndecodable } from "../failure/sink.js";
-import { stopTicking, tick } from "../feed/ticking.js";
+import { stopTicking } from "../feed/ticking.js";
 import { log } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
 import { isMalformedView } from "../rpc/malformed.js";
@@ -548,7 +549,7 @@ export function drawFooterExpandedAgents(
   path: string,
 ): HTMLElement[] {
   const header = document.createElement("div");
-  header.className = "footer-panel-header footer-columns";
+  header.className = `footer-panel-header ${COLUMNS_ROW_CLASS}`;
   header.appendChild(deps.stops.allAgents);
   header.appendChild(columnHeader("tokens"));
   header.appendChild(columnHeader("duration"));
@@ -572,7 +573,7 @@ export function drawFooterAgentRow(
   path: string,
 ): HTMLElement {
   const row = jumpRow("agents", u.work, u.jump, deps, path);
-  row.classList.add("footer-columns");
+  row.classList.add(COLUMNS_ROW_CLASS);
   // THE MAIN CELL holds everything before the figure columns, so the row is
   // exactly the grid's four cells whatever optional parts it carries.
   const main = document.createElement("span");
@@ -604,14 +605,6 @@ export function drawFooterAgentRow(
   return finishJumpRow(row, main);
 }
 
-/** A figure column's header, above its column ("tokens", "duration"). */
-function columnHeader(name: "tokens" | "duration"): HTMLElement {
-  const el = document.createElement("span");
-  el.className = "footer-column-header";
-  el.setAttribute("data-column", name);
-  el.textContent = name;
-  return el;
-}
 
 /**
  * An agent waiting for the API: "waiting for the API · gives up in 24m",
@@ -983,10 +976,8 @@ export function drawFooterMergeTestRow(
 
 /** A finished suite's run time, drawn once and never ticked. */
 function finishedClock(durationMs: bigint, path: string): HTMLElement {
-  const clock = document.createElement("span");
-  clock.className = "footer-row-clock";
+  const clock = settledElapsedClock("footer-row-clock", msOf(durationMs, path));
   clock.setAttribute("data-duration", "");
-  clock.textContent = formatElapsed(msOf(durationMs, path));
   return clock;
 }
 
@@ -1201,13 +1192,7 @@ function marker(name: string): HTMLElement {
 
 /** A ticking elapsed clock from an instant on the wire. */
 function runtimeClock(startedAtMs: bigint, deps: ExpandedDeps, path: string): HTMLElement {
-  const clock = document.createElement("span");
-  clock.className = "footer-row-clock";
-  const startedMs = msOf(startedAtMs, path);
-  tick(clock, deps.ctx.ticker, (nowMs) => {
-    clock.textContent = formatTickedElapsed(nowMs - startedMs);
-  });
-  return clock;
+  return liveElapsedClock(deps.ctx.ticker, "footer-row-clock", msOf(startedAtMs, path));
 }
 
 /** The jump affordance's caret. */
