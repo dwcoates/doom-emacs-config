@@ -67,12 +67,21 @@ nothing is."
                      "suite needs it to build lisp/testsupport/fakedaemon.  This is a "
                      "FAILURE, not a skip: the suite cannot be believed without it"))))
 
+(defconst agent-repl-itest-prebuilt-env "AGENT_REPL_ITEST_FAKEDAEMON"
+  "Environment variable naming an already-built fake daemon.
+The test runner (testrun) builds the fake ONCE and hands its path to every
+ERT chunk through this variable, so N chunks do not pay N builds.  When it
+is set the binary must exist: a chunk told to use a binary that was never
+built is a broken run, never a reason to build one quietly.")
+
 (defun agent-repl-itest--ensure-binary ()
-  "Build the fake daemon once per Emacs process and return its path.
-Builds OFFLINE (`GOPROXY=off') against the module cache, so a run never
-depends on the network."
+  "Return the fake daemon's path, building it once per Emacs process.
+A path in `agent-repl-itest-prebuilt-env' is used as-is and never built.
+Otherwise builds OFFLINE (`GOPROXY=off') against the module cache, so a
+run never depends on the network."
   (or (and agent-repl-itest--binary (file-executable-p agent-repl-itest--binary)
            agent-repl-itest--binary)
+      (agent-repl-itest--prebuilt-binary (getenv agent-repl-itest-prebuilt-env))
       (let* ((go (agent-repl-itest--go-program))
              (output (expand-file-name (format "agent-repl-fakedaemon-%d" (emacs-pid))
                                        temporary-file-directory))
@@ -88,6 +97,15 @@ depends on the network."
                    status text)))
         (kill-buffer log)
         (setq agent-repl-itest--binary output))))
+
+(defun agent-repl-itest--prebuilt-binary (path)
+  "Adopt the prebuilt fake daemon at PATH, or return nil when PATH is unset.
+Signals when PATH is set but names no executable."
+  (when (and path (not (string-empty-p path)))
+    (unless (file-executable-p path)
+      (error "agent-repl-itest: %s names %s, which is not an executable fake daemon"
+             agent-repl-itest-prebuilt-env path))
+    (setq agent-repl-itest--binary path)))
 
 ;;;; ---- The running fake ----
 
