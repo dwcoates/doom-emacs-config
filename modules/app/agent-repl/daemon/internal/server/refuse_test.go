@@ -15,6 +15,7 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
+
 	"google.golang.org/protobuf/proto"
 
 	"claude-repld/internal/bounce"
