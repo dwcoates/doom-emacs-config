@@ -567,6 +567,36 @@ ids the watcher ADOPTED (an `OnDetachedWork` with no announcer, the one shape
 adoption takes) and ids already retired (a replay). A re-take of the same set
 mints nothing, and crons, tasks and workflows are never in the set.
 
+### The footer draws only the MAIN AGENT's live work
+
+Owner ruling, 2026-09-30: "work the subagents started should not appear in the
+expanded footer. only work detached by the main agent should appear there." A
+subagent the main agent spawned is drawn; a subagent, shell or monitor a
+SUBAGENT started is not.
+
+ONE PREDICATE, `drawsWork` (`resolve/footer/owner.go`), decides it, and every
+reader that draws a live-work row asks it: the ⚙/$/👁 chips and panels
+(`agentRowsDrawn`, `shellRowsDrawn`, `monitorRowsDrawn`, network-resume waiting
+rows included) and the focus a launch mints (`mainAgentWork` filters the set
+before `launchedWork`/`focusOf`). Rows themselves stay in state as
+descriptions (usage attribution, transient labels read them); only drawing is
+refused, so no path that opens a row can put a nested item on screen.
+
+OWNERSHIP IS RECORDED, never guessed: the announcement's stated owner, or the
+carrier of the spawning call's start frame when it states none
+(`feedid.DetachedOwner`, the feed's rule), kept per identity in
+`wsState.workOwners`. No owner on record, or two sources disagreeing
+(`daemon.footer.work_owner_conflict`), is ERROR `daemon.footer.work_unowned`,
+once per item, and the item is kept out. An UNNAMED main agent is an ordering,
+not a violation: a boot's adoption announces restored work before the main
+watch names the agent, so it is held at DEBUG
+(`daemon.footer.work_awaits_main_agent`) and drawn on `OnMainAgent`.
+
+COUNTING IS NOT DRAWING. The `background` status arm and the deploy's
+"waiting: background N" read the watcher's WHOLE set (`detachedCount`): both
+say work is running, the roster's `idle_async` and the drain count the same
+items, and a subagent's running shell is running work.
+
 ### Live work follows the SHIM's conclusion, never a watch
 
 The set is read from a LEDGER (`sessionwatcher/livework.go`) that is separate
@@ -614,7 +644,8 @@ composed by the footer. The feed resolver announces each subagent bubble's,
 shell head's and Monitor call's tool-call card's FeedId the moment it first
 draws it, and again when it changes (`feed.Deps.EntryPlaced`, wired in
 `graph.go` to `footer.OnEntryPlaced`). A subagent of a subagent lives on its
-parent's sub-feed, and only the feed knows that. The call runs under the feed's
+parent's sub-feed, and only the feed knows that; the footer draws no row for
+it (see "The footer draws only the MAIN AGENT's live work"). The call runs under the feed's
 lock and takes the footer's, which is the same feed-then-footer order the fault
 path already takes. The footer never calls back into the feed. Each row's
 resolution change is recorded as `daemon.footer.jump_resolution`.

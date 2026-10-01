@@ -39,7 +39,9 @@ type LiveWorkSet = sessionwatcher.LiveWorkSet
 //
 // THE SET IS ALSO WHERE A LAUNCH IS SEEN. An item the set lists for the first
 // time is detached work that has just started, and each such change mints the
-// view's focus (see launchedWork and mintFocus).
+// view's focus (see launchedWork and mintFocus) -- read off the MAIN AGENT'S
+// part of the set alone, because only the main agent's work is drawn
+// (owner.go). The whole set is still what the footer holds and counts.
 func (r *resolver) OnLiveWorkChanged(ws ids.WorkspaceID, live LiveWorkSet) {
 	var dropped, added, readded []string
 	var minted *mintedFocus
@@ -47,7 +49,12 @@ func (r *resolver) OnLiveWorkChanged(ws ids.WorkspaceID, live LiveWorkSet) {
 		dlog.Context{
 			"agents": len(live.Agents), "shells": len(live.Shells), "monitors": len(live.Monitors),
 		}, func(s *wsState) {
-			minted = mintFocus(s, launchedWork(s, s.liveWork, live), live)
+			// A LAUNCH IS SEEN, AND A FOCUS MINTED, ONLY IN THE MAIN AGENT'S
+			// WORK: a subagent's own launch would open a panel it is not
+			// drawn in (owner.go). The whole set is still what s.liveWork
+			// holds, because `background` and the deploy's wait count it.
+			drawn := r.mainAgentWork(s, live)
+			minted = mintFocus(s, launchedWork(s, r.mainAgentWork(s, s.liveWork), drawn), drawn)
 			s.liveWork = live
 			s.liveWorkSeen = true
 			dropped, added, readded = reconcileLiveWork(s, live, r.opts.clock.Now())

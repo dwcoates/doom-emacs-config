@@ -37,6 +37,7 @@ func (r *resolver) OnActivity(ws ids.WorkspaceID, agent *conversationv1.AgentId,
 			s.tok.evaluateAlarm(r.opts.alarmTokens)
 			label := s.agentLabel(agent.GetValue())
 			r.clearRetry(ws, s, agent.GetValue(), act)
+			r.recordSpawnOwner(s, agent, act)
 			r.applyActivity(ws, s, agent, label, unit, act)
 			r.trackFeed(ws, s, agent, unit, act)
 			if call, started := toolCallStart(act); started {
@@ -572,6 +573,7 @@ func (r *resolver) OnDetachedWork(ws ids.WorkspaceID, agent *conversationv1.Agen
 			if agent == nil {
 				markAdopted(s, id, work)
 			}
+			r.recordAnnouncedOwner(s, work)
 			r.applyDetached(ws, s, id, work)
 		})
 }
@@ -796,7 +798,7 @@ func (r *resolver) chips(s *wsState) *frontendv1.FooterLiveWorkChips {
 	out := &frontendv1.FooterLiveWorkChips{}
 	// THE ⚙ CHIP COUNTS THE PANEL'S ROWS, waiting rows included, and carries
 	// the waiting-for-the-API glyph while any row waits (netresume.go).
-	if rows := s.agentRowsDrawn(); len(rows) > 0 {
+	if rows := r.agentRowsDrawn(s); len(rows) > 0 {
 		out.Agents = &frontendv1.FooterChipAgents{Count: uint32(len(rows))}
 		waiting := 0
 		for _, d := range rows {
@@ -811,10 +813,10 @@ func (r *resolver) chips(s *wsState) *frontendv1.FooterLiveWorkChips {
 	if done, total := s.taskCounts(); total > 0 {
 		out.Tasks = &frontendv1.FooterChipTasks{Done: done, Total: total}
 	}
-	if n := len(s.shells); n > 0 {
+	if n := len(r.shellRowsDrawn(s)); n > 0 {
 		out.Shells = &frontendv1.FooterChipShells{Count: uint32(n)}
 	}
-	if n := len(s.monitors); n > 0 {
+	if n := len(r.monitorRowsDrawn(s)); n > 0 {
 		out.Monitors = &frontendv1.FooterChipMonitors{Count: uint32(n)}
 	}
 	// THE ⏱ CHIP COUNTS EVERY SCHEDULED JOB, not just the crons: footer.proto
@@ -879,7 +881,7 @@ func (r *resolver) expanded(ws ids.WorkspaceID, s *wsState) *frontendv1.FooterEx
 // one per subagent waiting for the API to resume it.
 func (r *resolver) agentsPanel(ws ids.WorkspaceID, s *wsState) *frontendv1.FooterExpandedAgents {
 	out := &frontendv1.FooterExpandedAgents{}
-	for _, d := range s.agentRowsDrawn() {
+	for _, d := range r.agentRowsDrawn(s) {
 		row := d.row
 		workID := row.work
 		if workID == "" {
@@ -947,13 +949,8 @@ func (r *resolver) tasksPanel(s *wsState) *frontendv1.FooterExpandedTasks {
 
 // shellsPanel renders the $ panel: one jump-target row per live shell.
 func (r *resolver) shellsPanel(ws ids.WorkspaceID, s *wsState) *frontendv1.FooterExpandedShells {
-	rows := make([]*shellRow, 0, len(s.shells))
-	for _, row := range s.shells {
-		rows = append(rows, row)
-	}
-	sort.Slice(rows, func(i, j int) bool { return rows[i].order < rows[j].order })
 	out := &frontendv1.FooterExpandedShells{}
-	for _, row := range rows {
+	for _, row := range r.shellRowsDrawn(s) {
 		// The jump lands on the shell bubble's HEAD, the row a reader expands —
 		// not the spool BODY on the sub-feed. The feed announces the head.
 		jump := jumpTo(s.entryFor(row.work))
@@ -972,13 +969,8 @@ func (r *resolver) shellsPanel(ws ids.WorkspaceID, s *wsState) *frontendv1.Foote
 
 // monitorsPanel renders the 👁 panel: one jump-target row per live monitor.
 func (r *resolver) monitorsPanel(s *wsState) *frontendv1.FooterExpandedMonitors {
-	rows := make([]*monitorRow, 0, len(s.monitors))
-	for _, row := range s.monitors {
-		rows = append(rows, row)
-	}
-	sort.Slice(rows, func(i, j int) bool { return rows[i].order < rows[j].order })
 	out := &frontendv1.FooterExpandedMonitors{}
-	for _, row := range rows {
+	for _, row := range r.monitorRowsDrawn(s) {
 		// The jump lands on the Monitor call's tool-call card, which the feed
 		// announces by the monitor's id — the same bytes the row is keyed by.
 		jump := jumpTo(s.entryFor(row.unit))

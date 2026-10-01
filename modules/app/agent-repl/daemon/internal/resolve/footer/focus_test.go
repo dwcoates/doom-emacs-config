@@ -85,8 +85,10 @@ func TestALaunchFocusesTheHighestPriorityLiveKind(t *testing.T) {
 			h := newHarness(t)
 			connected(h)
 			for _, set := range tc.arrange {
+				announceMain(h, set)
 				h.r.OnLiveWorkChanged(testWS, set)
 			}
+			announceMain(h, tc.act)
 
 			// Act
 			h.r.OnLiveWorkChanged(testWS, tc.act)
@@ -153,6 +155,7 @@ func TestAChangeThatLaunchesNothingKeepsTheStandingFocus(t *testing.T) {
 		{
 			name: "a replayed run whose terminal already landed",
 			act: func(h *harness) {
+				h.r.OnDetachedWork(testWS, mainAgent, detachedSubagentWork("agent-2", "agent-2", "Explore"))
 				h.r.OnSubagent(testWS, workID("agent-2"), subagentSettled(false))
 				h.r.OnLiveWorkChanged(testWS, liveSet([]string{"agent-2"}, []string{"shell-1"}, nil))
 			},
@@ -178,6 +181,7 @@ func TestAChangeThatLaunchesNothingKeepsTheStandingFocus(t *testing.T) {
 			// Arrange
 			h := newHarness(t)
 			connected(h)
+			announceMain(h, launched)
 			h.r.OnLiveWorkChanged(testWS, launched)
 
 			// Act
@@ -200,6 +204,7 @@ func TestAnAdoptedItemDoesNotMaskALaterLaunch(t *testing.T) {
 	connected(h)
 	h.r.OnDetachedWork(testWS, nil, createdShell("shell-1", "make"))
 	h.r.OnLiveWorkChanged(testWS, liveSet(nil, []string{"shell-1"}, nil))
+	announceMain(h, liveSet(nil, nil, []string{"monitor-1"}))
 
 	// Act: a monitor starts.
 	h.r.OnLiveWorkChanged(testWS, liveSet(nil, []string{"shell-1"}, []string{"monitor-1"}))
@@ -216,6 +221,7 @@ func TestAMintedFocusIsRecordedOnce(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	connected(h)
+	announceMain(h, liveSet(nil, []string{"shell-1"}, nil))
 
 	// Act
 	h.r.OnLiveWorkChanged(testWS, liveSet(nil, []string{"shell-1"}, nil))

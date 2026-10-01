@@ -94,9 +94,11 @@ func (r *resolver) observeResumeWaits(ws ids.WorkspaceID, s *wsState, stated *co
 
 // describeUnknownWait gives a wait for work the footer never described (a
 // daemon that came up mid-wait learns the set before any frame of the agent) a
-// MINIMAL row — the generic label, no description, no tokens, its clock from
-// the failure — kept with the retired rows so it is one row for as long as the
-// wait stands. It is recorded so a bare row is explained by the log alone.
+// MINIMAL description — the generic label, no description, no tokens, its
+// clock from the failure — kept with the retired rows so it is one row for as
+// long as the wait stands. It is recorded so a bare row is explained by the
+// log alone. WHETHER IT IS DRAWN is drawsWork's (owner.go): no source has
+// stated whose work it is, so it is drawn only once one does.
 func (r *resolver) describeUnknownWait(ws ids.WorkspaceID, s *wsState, wait resumeWait) {
 	if s.waitingRow(wait.work) != nil {
 		return
@@ -107,7 +109,7 @@ func (r *resolver) describeUnknownWait(ws ids.WorkspaceID, s *wsState, wait resu
 		order: s.nextOrder(), provenance: provenanceResumeWait,
 	}
 	r.logOf(ws, s).Info("daemon.footer.network_resume_row_minimal",
-		"a network-resume wait names work the footer never described; its row is drawn minimal",
+		"a network-resume wait names work the footer never described; its row is described minimally",
 		dlog.Context{"work": wait.work})
 }
 
@@ -200,8 +202,10 @@ type drawnAgent struct {
 // agentRowsDrawn is the agents panel's rows in spawn order: every live
 // subagent, plus every waiting subagent whose run has ended. A live row that a
 // wait names is drawn waiting. Every wait has a row by construction
-// (describeUnknownWait), so a standing wait is never invisible.
-func (s *wsState) agentRowsDrawn() []drawnAgent {
+// (describeUnknownWait), so a standing wait is never invisible -- unless it is
+// a SUBAGENT'S own subagent, which drawsWork keeps out of the footer whether
+// it runs or waits (owner.go).
+func (r *resolver) agentRowsDrawn(s *wsState) []drawnAgent {
 	out := make([]drawnAgent, 0, len(s.agents)+len(s.resumeWaits))
 	claimed := map[*agentRow]bool{}
 	for i := range s.resumeWaits {
@@ -211,10 +215,12 @@ func (s *wsState) agentRowsDrawn() []drawnAgent {
 			continue
 		}
 		claimed[row] = true
-		out = append(out, drawnAgent{row: row, wait: wait})
+		if r.drawsWork(s, "agent", wait.work, row.work, row.spawnUnit, row.createdAgent) {
+			out = append(out, drawnAgent{row: row, wait: wait})
+		}
 	}
 	for _, row := range s.agents {
-		if !claimed[row] {
+		if !claimed[row] && r.drawsWork(s, "agent", row.work, row.spawnUnit, row.createdAgent) {
 			out = append(out, drawnAgent{row: row})
 		}
 	}
