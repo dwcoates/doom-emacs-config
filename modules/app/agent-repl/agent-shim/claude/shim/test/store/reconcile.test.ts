@@ -19,7 +19,8 @@ import {
   announceLiveWork,
   bashUnitsWithoutCommand,
   createReconciler,
-  findBashStart,
+  findAnnouncedKind,
+  revivalFate,
   findUnit,
   reconciledCoordinate,
   resumedAgentAnnouncement,
@@ -637,74 +638,6 @@ describe("closingMonitorTerminal", () => {
   });
 });
 
-describe("closingBashTerminal", () => {
-  it("restates the command recovered from the record", async () => {
-    const { reconciler: plane } = await reconciler("close-bash");
-    const start = findBashStart([recordedBashStart("sleep 100")], RUN);
-
-    const entry = plane.closingBashTerminal(BOOK, RUN, start as conversationv1.AgentBashStart);
-
-    const frame = entry.item.kind === "bash_run" ? entry.item.frame : undefined;
-    const success = frame?.result.value as conversationv1.AgentBashSuccess;
-    expect(success.command?.line).toBe("sleep 100");
-  });
-
-  it("settles the run as interrupted because we lost sight of it, not because it failed", async () => {
-    const { reconciler: plane } = await reconciler("close-bash-cause");
-    const start = findBashStart([recordedBashStart("sleep 100")], RUN);
-
-    const entry = plane.closingBashTerminal(BOOK, RUN, start as conversationv1.AgentBashStart);
-
-    const frame = entry.item.kind === "bash_run" ? entry.item.frame : undefined;
-    const success = frame?.result.value as conversationv1.AgentBashSuccess;
-    const interrupted = success.outcome.value as conversationv1.AgentBashInterrupted;
-    expect(success.outcome.case).toBe("interrupted");
-    expect(interrupted.cause.case).toBe("lost");
-    const lost = interrupted.cause.value as conversationv1.DetachedLost;
-    expect(lost.how.case).toBe("sweptUp");
-  });
-
-  it("states not_observed for output the reconciliation never saw", async () => {
-    // LANDING 5: the producer says it does not know, rather than claiming an
-    // omission of zero bytes — which read as "we saw all none of it".
-    const { reconciler: plane } = await reconciler("close-bash-output");
-    const start = findBashStart([recordedBashStart("sleep 100")], RUN);
-
-    const entry = plane.closingBashTerminal(BOOK, RUN, start as conversationv1.AgentBashStart);
-
-    const frame = entry.item.kind === "bash_run" ? entry.item.frame : undefined;
-    const success = frame?.result.value as conversationv1.AgentBashSuccess;
-    const interrupted = success.outcome.value as conversationv1.AgentBashInterrupted;
-    expect(interrupted.output?.form.case).toBe("notObserved");
-  });
-
-  it("refuses to invent a command when the record holds no start", async () => {
-    const { reconciler: plane } = await reconciler("close-bash-no-start");
-
-    expect(() =>
-      plane.closingBashTerminal(BOOK, RUN, create(conversationv1.AgentBashStartSchema, {})),
-    ).toThrow(PersistenceError);
-  });
-});
-
-describe("findBashStart", () => {
-  it("finds the run's own start among a book's entries", () => {
-    const start = findBashStart([recordedBashStart("sleep 100")], RUN);
-
-    expect(start?.command?.line).toBe("sleep 100");
-  });
-
-  it("answers nothing for a run the book does not hold", () => {
-    const start = findBashStart([recordedBashStart("sleep 100")], unit("run-other"));
-
-    expect(start).toBeUndefined();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// What a restarted consumer is told about work that is still running
-// ---------------------------------------------------------------------------
-
 describe("announceLiveWork", () => {
   /** One recorded shell run in a book, as the store holds it. */
   function recordedRun(unit: string): conversationv1.HistoryEntryAt {
@@ -942,54 +875,6 @@ describe("findUnit", () => {
     });
   }
 });
-
-describe("findBashStart on a unit that is not at its start", () => {
-  it("answers nothing for a shell run the record already holds settled", () => {
-    // A terminal restates the command, but it is not the START arm -- and the
-    // reconciler asks only for the start it must restate.
-    // Arrange.
-    const settled = create(conversationv1.HistoryEntryAtSchema, {
-      at: create(conversationv1.HistoryPointerSchema, { value: "1" }),
-      entry: create(conversationv1.HistoryEntrySchema, {
-        entry: {
-          case: "agentFrame",
-          value: create(conversationv1.AgentFrameSchema, {
-            agentId: BOOK,
-            result: {
-              case: "update",
-              value: create(conversationv1.AgentUpdateSchema, {
-                update: {
-                  case: "activity",
-                  value: create(conversationv1.AgentActivitySchema, {
-                    activityId: RUN,
-                    item: {
-                      case: "bash",
-                      value: create(conversationv1.AgentBashSchema, {
-                        result: {
-                          case: "tail",
-                          value: create(conversationv1.AgentBashTailSchema, {
-                            text: "working\n",
-                          }),
-                        },
-                      }),
-                    },
-                  }),
-                },
-              }),
-            },
-          }),
-        },
-      }),
-    });
-
-    // Act, Assert.
-    expect(findBashStart([settled], RUN)).toBeUndefined();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// The other two kinds of work that can detach
-// ---------------------------------------------------------------------------
 
 describe("announceLiveWork for the non-shell kinds", () => {
   /** One recorded unit of `item`'s kind, keyed as `run-1`. */
@@ -1339,6 +1224,14 @@ describe("announceLiveWork for a unit whose row moved past its start", () => {
     expect(bashUnitsWithoutCommand([recordedAt(PROGRESSING_SHELL)], [HANDLE]).map((h) => h.value)).toEqual(["run-1"]);
   });
 
+  it("names a shell whose row holds no arm as needing its run's start row", () => {
+    // Arrange.
+    const bare = recordedAt({ case: "bash", value: create(conversationv1.AgentBashSchema, {}) });
+
+    // Act, Assert.
+    expect(bashUnitsWithoutCommand([bare], [HANDLE]).map((h) => h.value)).toEqual(["run-1"]);
+  });
+
   it("does not name a running subagent as needing a shell start row", () => {
     // Arrange, Act, Assert.
     expect(bashUnitsWithoutCommand([recordedAt(RUNNING_SPAWN)], [HANDLE])).toEqual([]);
@@ -1508,5 +1401,100 @@ describe("the restore of a subagent resumed by a send", () => {
 
   it("announces nothing when the spawn created a different agent", () => {
     expect(resumedAgentAnnouncement([spawn("toolu_other")], HANDLE, OWNER, SPAWN)).toBeUndefined();
+  });
+});
+
+describe("revivalFate", () => {
+  const bash: conversationv1.AgentActivity["item"] = { case: "bash", value: create(conversationv1.AgentBashSchema, {}) };
+  const subagent: conversationv1.AgentActivity["item"] = {
+    case: "subagent",
+    value: create(conversationv1.AgentSubagentSchema, {}),
+  };
+  const monitor: conversationv1.AgentActivity["item"] = {
+    case: "monitor",
+    value: create(conversationv1.AgentMonitorSchema, {}),
+  };
+  const send: conversationv1.AgentActivity["item"] = {
+    case: "sendMessage",
+    value: create(conversationv1.AgentSendMessageSchema, {}),
+  };
+
+  it.each([
+    ["a subagent", subagent, "in_process"],
+    ["a send-resumed subagent", send, "in_process"],
+    ["a monitor", monitor, "in_process"],
+    ["a shell", bash, "spool"],
+  ] as const)("judges %s by its unit", (_name, item, fate) => {
+    // Arrange, Act, Assert.
+    expect(revivalFate(item, undefined).kind).toBe(fate);
+  });
+
+  it("takes the announced kind when the book holds no unit", () => {
+    // Arrange, Act, Assert.
+    expect(revivalFate(undefined, "bash")).toEqual({ kind: "spool", unit: "bash" });
+  });
+
+  it("prefers the unit the book holds over the announced kind", () => {
+    // Arrange, Act, Assert.
+    expect(revivalFate(subagent, "bash").kind).toBe("in_process");
+  });
+
+  it("cannot judge an item nothing states a kind for", () => {
+    // Arrange, Act, Assert.
+    expect(revivalFate(undefined, undefined)).toEqual({ kind: "unknown" });
+  });
+
+  it("cannot judge a unit of a kind that never detaches", () => {
+    // Arrange.
+    const read: conversationv1.AgentActivity["item"] = { case: "read", value: create(conversationv1.AgentReadSchema, {}) };
+
+    // Act, Assert.
+    expect(revivalFate(read, undefined)).toEqual({ kind: "unknown" });
+  });
+});
+
+describe("findAnnouncedKind", () => {
+  /** The main book's announcement of `work`, stating `kind` when given. */
+  function announcement(work: string, kind?: conversationv1.DetachedWorkKind["kind"]): conversationv1.HistoryEntryAt {
+    return create(conversationv1.HistoryEntryAtSchema, {
+      at: create(conversationv1.HistoryPointerSchema, { value: work }),
+      entry: create(conversationv1.HistoryEntrySchema, {
+        entry: {
+          case: "agentFrame",
+          value: create(conversationv1.AgentFrameSchema, {
+            result: {
+              case: "detachedWork",
+              value: create(conversationv1.AgentDetachedWorkSchema, {
+                work: create(conversationv1.DetachedWorkIdSchema, { value: work }),
+                ...(kind === undefined ? {} : { kind: create(conversationv1.DetachedWorkKindSchema, { kind }) }),
+              }),
+            },
+          }),
+        },
+      }),
+    });
+  }
+
+  const handle = (work: string): conversationv1.DetachedWorkId => create(conversationv1.DetachedWorkIdSchema, { value: work });
+
+  it("answers the kind the handle's announcement states", () => {
+    // Arrange.
+    const book = [announcement("b1", { case: "bash", value: create(conversationv1.DetachedWorkKindBashSchema, {}) })];
+
+    // Act, Assert.
+    expect(findAnnouncedKind(book, handle("b1"))).toBe("bash");
+  });
+
+  it("answers nothing for an announcement that states no kind", () => {
+    // Arrange, Act, Assert.
+    expect(findAnnouncedKind([announcement("b1")], handle("b1"))).toBeUndefined();
+  });
+
+  it("answers nothing for another handle's announcement", () => {
+    // Arrange.
+    const book = [announcement("b2", { case: "bash", value: create(conversationv1.DetachedWorkKindBashSchema, {}) })];
+
+    // Act, Assert.
+    expect(findAnnouncedKind(book, handle("b1"))).toBeUndefined();
   });
 });

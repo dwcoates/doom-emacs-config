@@ -52,13 +52,13 @@ import {
   announceLiveWork,
   bashUnitsWithoutCommand,
   closingAgentTerminal,
-  closingBashTerminal,
   closingMonitorTerminal,
   findMonitorCall,
   closingSubagentTerminal,
-  findBashStart,
+  findAnnouncedKind,
   findUnit,
   resumedAgentAnnouncement,
+  revivalFate,
   resumedRecipient,
   stoppedBashTerminal,
 } from "../store/reconcile.js";
@@ -4372,110 +4372,75 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       }
     }
 
+    // A REVIVED SHIM'S VENDOR IS A NEW CLI PROCESS, and it holds NOTHING from
+    // before: the SDK states its background-task level is per process and
+    // nothing is emitted at startup, and no capture shows a revived process
+    // re-announcing any task. So survival is never asked of the vendor (its
+    // `backgroundTasks` MOVES foreground work and answers `false` for work
+    // already in the background; it is no observation). It is decided by WHERE
+    // THE WORK RAN, from the record (`revivalFate`):
+    //
+    // - IN THE CLI PROCESS (a subagent's run, a subagent resumed by a send, a
+    //   monitor's watch, whose events only the CLI delivered): provably ended
+    //   by the replacement, so it is closed here with its lost terminal.
+    // - BACKED BY ITS OWN OS PROCESS AND SPOOL (a shell): it may still be
+    //   running, so the shim NEVER writes its terminal here. It stays live,
+    //   re-announced, and its terminal is the sidecar's, read off the spool.
+    //
+    // Work this process has already seen start under the current query is
+    // live by observation and is re-announced whatever its kind.
+    const readoptable: conversationv1.DetachedWorkId[] = [];
+    for (const work of open.liveDetached) {
+      const run = toolCallActivityId(work.value);
+      const item = findUnit(book, run);
+      if (live.byToolUseId(work.value) !== undefined) {
+        readoptable.push(work);
+        continue;
+      }
+      const fate = revivalFate(item, findAnnouncedKind(book, work));
+      switch (fate.kind) {
+        case "spool":
+          LOGGER.debug(
+            { work_id: work.value, kind: fate.unit },
+            "a spool-backed run outlives the CLI process; it stays live and its terminal is the sidecar's",
+          );
+          readoptable.push(work);
+          continue;
+        case "unknown":
+          // warn: a decision because the record states no kind for this live handle, so it cannot be judged in-process and is left live rather than risk closing a running process.
+          LOGGER.warn(
+            { work_id: work.value, unit: item?.case ?? "" },
+            "the record states no kind for this live work; it is left live, since only work that ran in the CLI process may be closed at revival",
+          );
+          continue;
+        case "in_process":
+          LOGGER.info(
+            { work_id: work.value, kind: fate.unit, reason: "the CLI process that ran it was replaced" },
+            "closed live work that ran inside the CLI process: the CLI process that ran it was replaced",
+          );
+          closing.push(await closingInProcessWork(agentId, book, run, item));
+          continue;
+      }
+    }
     // RE-ADOPTED WORK IS ANNOUNCED `created`, NEVER `detached`: a daemon that
     // restarted was not there for the original announcement and has no element
     // to continue, so it must be told what the work IS.
-    // A HANDLE NAMES THE SPAWNING CALL, so "does the revived vendor still have
-    // it" is a lookup by tool_use_id and never by the vendor's own task id.
-    //
-    // ASK THE VENDOR, do not wait to be told. The live table is built from
-    // messages the shim has ALREADY seen, and at StartSession it has seen
-    // almost none -- a revived process announces its surviving tasks on its own
-    // schedule, after the init this reconciliation follows. Judging survival
-    // off that table alone therefore swept up work the vendor still had, and
-    // wrote a lost.swept_up terminal over a run that was still producing.
-    // `backgroundTasks(handle)` is the same declared observation DetachForeground
-    // uses, and it answers now.
-    const active = query;
-    const surviving = new Set<string>();
-    for (const work of open.liveDetached) {
-      if (live.byToolUseId(work.value) !== undefined) {
-        surviving.add(work.value);
-        continue;
-      }
-      if (active === undefined) continue;
-      try {
-        if (await active.backgroundTasks(work.value)) surviving.add(work.value);
-      } catch (err) {
-        // A vendor that cannot answer is not a vendor that said "gone": leaving
-        // the item to be swept would close a run that may still be producing.
-        // warn: a defect because the vendor could not confirm ownership while reconciliation continued.
-        LOGGER.warn(
-          { work_id: work.value, cause: err instanceof Error ? err.message : String(err) },
-          "the vendor could not be asked whether it still holds this work; treating it as surviving",
-        );
-        surviving.add(work.value);
-      }
-    }
-    const survives = (work: conversationv1.DetachedWorkId): boolean =>
-      surviving.has(work.value);
-    // A SURVIVING HANDLE THE RECORD CANNOT DESCRIBE IS A DEFECT, and here it is
-    // provably one: this vendor process was just ASKED and said it still holds
-    // the work, so the missing start belongs to work that really is this
-    // conversation's. Nothing is written for it -- an announcement with an
-    // invented description is worse than a missing one -- but it is stated as
-    // the record-plane loss it is.
     const undescribedSurvivors: conversationv1.DetachedWorkId[] = [];
-    const survivingWork = open.liveDetached.filter(survives);
     const readopted = announceLiveWork(
       book,
-      survivingWork,
+      readoptable,
       agentId,
       (handle) => {
         undescribedSurvivors.push(handle);
       },
-      await bashStartsFor(bashUnitsWithoutCommand(book, survivingWork)),
+      await bashStartsFor(bashUnitsWithoutCommand(book, readoptable)),
     );
-    // A SURVIVING SUBAGENT RESUMED BY A SEND is described from its spawn, named
-    // by the store; only what is not a send is the record-plane loss.
+    // A SUBAGENT RESUMED BY A SEND is described from its spawn, named by the
+    // store; only what is not a send is the record-plane loss.
     const resumed = await announceResumedAgents(agentId, book, undescribedSurvivors);
     readopted.push(...resumed.announced);
     for (const handle of resumed.notResumes) reportUndescribableWork(handle);
 
-    for (const work of open.liveDetached) {
-      if (survives(work)) continue;
-      // The vendor no longer has it and nobody stopped it: we simply stopped
-      // being able to see it, which is what `lost.swept_up` says.
-      //
-      // THE KIND COMES FROM WHERE THE WORK WAS FOUND (ruling, landing 5).
-      // `live_detached` is the store's NON-AGENT detached table — shell runs —
-      // so a row there is a shell run whether or not the book still describes
-      // its start, and a spawn unit found in the book is a spawn. NOTHING IS
-      // EVER LEFT OPEN: an obligation the shim declines to close is one that
-      // never gets a terminal at all, which breaks the whole invariant this
-      // reconciliation exists to hold.
-      const run = toolCallActivityId(work.value);
-      const item = findUnit(book, run);
-      if (item?.case === "subagent") {
-        closing.push(closingSubagentTerminal(agentId, run, item.value));
-        continue;
-      }
-      if (item?.case === "monitor") {
-        closing.push(closingMonitorTerminal(agentId, run, findMonitorCall(book, run)));
-        continue;
-      }
-      const recorded = findBashStart(book, run);
-      if (recorded === undefined) {
-        LOGGER.debug(
-          { work_id: work.value, kind: item?.case ?? "" },
-          "the record holds no describable start for this live shell run; closing it as swept up with no command stated",
-        );
-      }
-      closing.push(
-        closingBashTerminal(
-          agentId,
-          run,
-          recorded ??
-            // AN EMPTY LINE IS THE RECORD SAYING IT NEVER SAW ONE, which is
-            // exactly the situation; a terminal naming a command nobody
-            // observed would be the invention. The WARN above names the run so
-            // the gap is investigable rather than merely present.
-            create(conversationv1.AgentBashStartSchema, {
-              command: create(conversationv1.AgentBashCommandSchema, { line: "" }),
-            }),
-        ),
-      );
-    }
     for (const agent of open.liveAgents) {
       if (agent.value === agentId.value) continue;
       // NAMED BY THE RECORD, so a consumer may address it even though this
@@ -4963,6 +4928,52 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       );
       return [];
     }
+  }
+
+  /**
+   * The closing row of one live item that ran INSIDE the replaced CLI process,
+   * in the vocabulary of the unit the record holds: a spawn's lost terminal, a
+   * monitor's ended arm, or, for a subagent resumed by a send, the lost
+   * terminal of the agent the store names for that send.
+   */
+  async function closingInProcessWork(
+    agentId: conversationv1.AgentId,
+    book: readonly conversationv1.HistoryEntryAt[],
+    run: conversationv1.AgentActivityId,
+    item: conversationv1.AgentActivity["item"] | undefined,
+  ): Promise<PersistEntry> {
+    if (item?.case === "monitor") return closingMonitorTerminal(agentId, run, findMonitorCall(book, run));
+    if (item?.case === "subagent") return closingSubagentTerminal(agentId, run, item.value);
+    // A SEND: the run behind the handle is the agent it resumed, named by the
+    // store from the send's recipient. The closing names that agent, so it
+    // cannot be read as a spawn of a new one.
+    const recipient = resumedRecipient(book, create(conversationv1.DetachedWorkIdSchema, { value: run.value }));
+    const agent = recipient.kind === "locator" ? await agentFromStore(recipient.vendorTaskId, "restore") : undefined;
+    if (agent === undefined) {
+      LOGGER.error(
+        {
+          work_id: run.value,
+          recipient: recipient.kind,
+          detail:
+            recipient.kind === "locator"
+              ? "the store named no agent for the send's recipient"
+              : "the send's record states no recipient the vendor resolved",
+        },
+        "the agent a send resumed could not be named; its run is closed under the send's own id",
+      );
+    }
+    return closingSubagentTerminal(
+      agentId,
+      run,
+      create(conversationv1.AgentSubagentSchema, {
+        result: {
+          case: "start",
+          value: create(conversationv1.AgentSubagentStartSchema, {
+            createdAgentId: agent ?? subagentId(run.value),
+          }),
+        },
+      }),
+    );
   }
 
   /**

@@ -72,20 +72,6 @@ interface Reconciler {
   /** The row that closes an agent that did not survive the shim's restart. */
   closingAgentTerminal(agent: conversationv1.AgentId): PersistEntry;
   /**
-   * The row that closes a shell run that did not survive, with its command and
-   * its ORIGINAL start instant recovered from the record.
-   *
-   * `originalStart` is the start frame read back from the agent's book — see
-   * {@link findBashStart}. Rejects with `unknown_work` when the record holds no
-   * start for the run, because a terminal restating a command nobody observed
-   * would be an invention.
-   */
-  closingBashTerminal(
-    agent: conversationv1.AgentId,
-    run: conversationv1.AgentActivityId,
-    originalStart: conversationv1.AgentBashStart,
-  ): PersistEntry;
-  /**
    * The row that closes a SPAWN unit the record holds no terminal for.
    *
    * Distinct from {@link Reconciler.closingAgentTerminal}: that closes the
@@ -287,63 +273,6 @@ export function closingMonitorTerminal(
   };
 }
 
-export function closingBashTerminal(
-  agent: conversationv1.AgentId,
-  run: conversationv1.AgentActivityId,
-  originalStart: conversationv1.AgentBashStart,
-): PersistEntry {
-  if (originalStart.command === undefined) {
-    throw new PersistenceError(
-      "unknown_work",
-      `the recorded start for shell run ${JSON.stringify(run.value)} states no command`,
-    );
-  }
-  LOGGER.debug(
-    { agent: agent.value, run: run.value },
-    "closing a shell run that did not survive the shim's restart as interrupted",
-  );
-  const frame = create(conversationv1.AgentBashSchema, {
-    result: {
-      case: "success",
-      value: create(conversationv1.AgentBashSuccessSchema, {
-        command: originalStart.command,
-        outcome: {
-          case: "interrupted",
-          value: create(conversationv1.AgentBashInterruptedSchema, {
-            // NOT OURS TO STATE, AND NOW SAYABLE (landing 5): the
-            // reconciliation observed no output at all, so the form is
-            // `not_observed` — the producer stating that it does not know,
-            // rather than a `partial` omission of zero bytes claiming we saw
-            // all none of what it printed.
-            output: create(conversationv1.AgentBashOutputSchema, {
-              form: {
-                case: "notObserved",
-                value: create(conversationv1.AgentBashOutputNotObservedSchema, {}),
-              },
-            }),
-            // THE CAUSE IS NOW STATEABLE (landing 3): we stopped being
-            // able to see the run, which is what `lost.swept_up` says.
-            cause: { case: "lost", value: sweptUp() },
-          }),
-}
-      }),
-}
-  });
-  return {
-    agentId: agent,
-    upsertKey: bashTerminalUpsertKey(run),
-    source: {
-      vendorUuid: reconciledCoordinate(run.value),
-      discriminator: "agent_bash.success.interrupted.lost.swept_up",
-    },
-    keepalive: false,
-    // A BOOT SWEEP RUNS OUTSIDE ANY TURN; the store keeps a swept row's stamp.
-    turn: undefined,
-    item: { kind: "bash_run", run, frame },
-  };
-}
-
-
 /**
  * The terminal for a run THIS SHIM ENDED, by a stop it issued itself.
  *
@@ -474,6 +403,71 @@ function findUnitEntry(
   return undefined;
 }
 
+/** What a revived shim does with one live item, decided by where it ran. */
+export type RevivalFate =
+  /** It ran inside the replaced CLI process, so it ended with it: close it. */
+  | { readonly kind: "in_process"; readonly unit: string }
+  /** It is its own OS process writing its own spool: leave it for the sidecar. */
+  | { readonly kind: "spool"; readonly unit: string }
+  /** Nothing in the record states its kind: it cannot be judged, so it is left live. */
+  | { readonly kind: "unknown" };
+
+/**
+ * WHERE A LIVE ITEM RAN, from the unit the record holds (else the kind its
+ * own announcement states), which decides whether a revival ended it.
+ *
+ * Verified from the code and the captures, not from the names:
+ *
+ * - A SUBAGENT runs in the CLI process (`local_agent`; its transcript is the
+ *   CLI's own `agent-<id>.jsonl`), so it ends with that process. A send-
+ *   resumed subagent is the same run under the send's handle.
+ * - A MONITOR's command runs as a `local_bash` task (the `monitor-persistent`
+ *   and `monitor-deadline` captures), but the WATCH is the CLI's: only the CLI
+ *   turns its output into events, and the sidecar claims no monitor spool (its
+ *   launch report reads `isAsync`, `backgroundTaskId` and `runId`; a monitor's
+ *   receipt is `{taskId, timeoutMs, persistent}`). A new CLI cannot resume the
+ *   watch, so the monitor ended with the old one.
+ * - A SHELL is its own OS process writing its `b*` spool, which the sidecar
+ *   tails and settles (its `EXIT=` row, or its own lost policy).
+ * - A WORKFLOW is never in this list (`GetLiveWork` lists it apart).
+ */
+export function revivalFate(
+  item: conversationv1.AgentActivity["item"] | undefined,
+  announced: conversationv1.DetachedWorkKind["kind"]["case"],
+): RevivalFate {
+  const unit = item?.case ?? announced;
+  switch (unit) {
+    case "subagent":
+    case "sendMessage":
+    case "monitor":
+      return { kind: "in_process", unit };
+    case "bash":
+      return { kind: "spool", unit };
+    default:
+      return { kind: "unknown" };
+  }
+}
+
+/**
+ * The kind a detached item's own ANNOUNCEMENT in this book states, for a
+ * handle whose unit the book does not hold. Undefined when no announcement of
+ * it states one (an announcement written before every one carried its kind).
+ */
+export function findAnnouncedKind(
+  entries: readonly conversationv1.HistoryEntryAt[],
+  handle: conversationv1.DetachedWorkId,
+): conversationv1.DetachedWorkKind["kind"]["case"] {
+  for (const at of entries) {
+    const entry = at.entry?.entry;
+    if (entry?.case !== "agentFrame") continue;
+    const result = entry.value.result;
+    if (result.case !== "detachedWork" || result.value.work?.value !== handle.value) continue;
+    const kind = result.value.kind?.kind.case;
+    if (kind !== undefined) return kind;
+  }
+  return undefined;
+}
+
 /**
  * The start a monitor was armed with, found in one agent's book: its `start`
  * frame, or the call a settled arm restated. Undefined when the book holds no
@@ -495,16 +489,6 @@ export function findMonitorCall(
     case undefined:
       return undefined;
   }
-}
-
-/** The shell run's own `start` frame, found in one agent's book. */
-export function findBashStart(
-  entries: readonly conversationv1.HistoryEntryAt[],
-  run: conversationv1.AgentActivityId,
-): conversationv1.AgentBashStart | undefined {
-  const item = findUnit(entries, run);
-  if (item?.case !== "bash") return undefined;
-  return item.value.result.case === "start" ? item.value.result.value : undefined;
 }
 
 /**
@@ -610,7 +594,7 @@ function described(work: conversationv1.DetachableWork["work"]): Description {
 
 /**
  * The live shell handles whose unit row states no command (it moved past its
- * start without a settle): the caller reads each run's own start row and
+ * start without a settle, or holds no arm at all): the caller reads each run's own start row and
  * hands it to {@link announceLiveWork}.
  */
 export function bashUnitsWithoutCommand(
@@ -619,7 +603,9 @@ export function bashUnitsWithoutCommand(
 ): conversationv1.DetachedWorkId[] {
   return work.filter((handle) => {
     const item = findUnit(entries, create(conversationv1.AgentActivityIdSchema, { value: handle.value }));
-    return item?.case === "bash" && (item.value.result.case === "tail" || item.value.result.case === "progress");
+    if (item?.case !== "bash") return false;
+    const arm = item.value.result.case;
+    return arm !== "start" && arm !== "success" && arm !== "failure";
   });
 }
 
@@ -862,6 +848,5 @@ export function createReconciler(options: ReconcilerOptions): Reconciler {
     },
     closingAgentTerminal,
     closingSubagentTerminal,
-    closingBashTerminal,
   };
 }
