@@ -1347,6 +1347,9 @@ func (r *resolver) mirrorRow(s *wsState, feed feedid.Feed, row *frontendv1.FeedR
 		return nil, false
 	}
 	copy.Id = &frontendv1.FeedId{Value: id}
+	// THE COPY IS ORDERED ON THE ROOT FEED ITSELF: a restated row carries the
+	// addressed feed's order key, which is no key of the root's.
+	copy.Order = nil
 	copy.Parent = nil
 	if parent := row.GetParent().GetRow().GetValue(); parent != "" && !r.isAddressParent(s, parent) {
 		mirroredParent, ok := r.mirrorID(s, feed, parent)

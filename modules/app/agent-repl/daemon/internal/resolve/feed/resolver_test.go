@@ -803,6 +803,31 @@ func TestAnUnmirroredOutputAddressDrawsNothingOnTheRoot(t *testing.T) {
 	}
 }
 
+func TestAMirroredRowsCopyIsOrderedOnTheRootFeedItself(t *testing.T) {
+	// Arrange: a restated row carries the addressed feed's order key.
+	h := newHarness(t)
+	lease := ids.LeaseID("lease-7")
+	mirroredMergeAddress(h, lease)
+	row := &frontendv1.FeedRow{
+		Id:    testEncode(feedid.Ref{WS: testWorkspace, Feed: feedid.Feed{Merge: &lease}, Row: feedid.RowKey{Kind: feedid.KindPrompt, ID: "turn-1"}}),
+		Order: &frontendv1.FeedRowOrder{Key: "9.99999999"},
+		Row:   &frontendv1.FeedRow_UserPrompt{UserPrompt: &frontendv1.FeedUserPrompt{}},
+	}
+
+	// Act.
+	h.resolver.mu.Lock()
+	h.resolver.upsert(h.resolver.state(testWorkspace), placement{feed: feedid.Feed{Merge: &lease}}, row, true)
+	h.resolver.mu.Unlock()
+
+	// Assert: the addressed feed's own first draw refuses the carried key;
+	// the root copy carries none to refuse.
+	for _, record := range h.records() {
+		if record.Operation == "daemon.feed.order_changed" && strings.HasSuffix(fmt.Sprint(record.Context["feed"]), "|root") {
+			t.Fatalf("the root copy contradicted its own order: %+v", record)
+		}
+	}
+}
+
 func TestRetiringAMirroredRowRetiresItsRootCopy(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
