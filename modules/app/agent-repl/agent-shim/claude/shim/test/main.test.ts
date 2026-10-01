@@ -1556,6 +1556,30 @@ describe("queryFactory forwards the whole spec to the real query", () => {
     expect(calls[0]).toMatchObject({ resumeSessionAt: "uuid-9" });
   });
 
+  it("forwards the rollback's dropped turn so the vendor's guard is armed", async () => {
+    // Arrange: the describe block's mocked real-query seam.
+    // Act.
+    await factory(false, env, "/ws")(
+      spec({
+        binding: { kind: "resume", resumeSessionId: "vendor-old" },
+        resumeSessionAt: "uuid-9",
+        resumeDropsTurn: "prompt-10",
+      }),
+    );
+
+    // Assert.
+    expect(calls[0]).toMatchObject({ resumeDropsTurn: "prompt-10" });
+  });
+
+  it("omits the dropped turn when the query names none", async () => {
+    // Arrange: the describe block's mocked real-query seam.
+    // Act.
+    await factory(false, env, "/ws")(spec());
+
+    // Assert.
+    expect(calls[0]).not.toHaveProperty("resumeDropsTurn");
+  });
+
   it("omits the rewind target when the turn asked for no rewind", async () => {
     // Arrange: the describe block's mocked real-query seam.
     // Act.
@@ -1622,6 +1646,23 @@ describe("queryFactory hands the mocked vendor the per-task stop declaration", (
 
     // Assert.
     expect(handed[0]).toMatchObject({ perTaskStopAffordance: true });
+  });
+
+  it("hands the mocked vendor the rollback's fork point and dropped turn", async () => {
+    // Arrange: the describe block's mocked fake seam.
+    // Act.
+    await factory(true, env, cwd)({
+      binding: { kind: "resume", resumeSessionId: "vendor-old" },
+      permissionMode: "default",
+      canUseTool: async (_name, input) => ({ behavior: "allow", updatedInput: input }),
+      abortController: new AbortController(),
+      prompt: (async function* () {})(),
+      resumeSessionAt: "fork-1",
+      resumeDropsTurn: "prompt-2",
+    });
+
+    // Assert.
+    expect(handed[0]).toMatchObject({ resumeSessionAt: "fork-1", resumeDropsTurn: "prompt-2" });
   });
 });
 

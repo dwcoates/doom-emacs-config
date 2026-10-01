@@ -13,6 +13,7 @@
  */
 import type { shimv1 } from "../../proto.js";
 import { bindLog } from "../../log.js";
+import { invalidArgument } from "../failures.js";
 import {
   validateAgentActivityId,
   validateAgentId,
@@ -177,6 +178,27 @@ export function validateKillTurnRequest(request: shimv1.KillTurnRequest): void {
     validateTurnId(request.turn, "kill_turn.turn");
   } catch (err) {
     refuse("KillTurn", err);
+  }
+}
+
+/**
+ * `shim.v1.RollBackSessionRequest` — the turn cut before, every dropped turn
+ * (`to_before` among them), and keep-or-restore, never neither.
+ */
+export function validateRollBackSessionRequest(request: shimv1.RollBackSessionRequest): void {
+  try {
+    validateTurnId(request.toBefore, "roll_back_session.to_before");
+    request.droppedTurns.forEach((turn, index) => {
+      validateTurnId(turn, `roll_back_session.dropped_turns[${index}]`);
+    });
+    if (request.droppedTurns[0]?.value !== request.toBefore?.value) {
+      throw invalidArgument(
+        "roll_back_session.dropped_turns must begin with to_before: the turns are drawn from it onward, oldest first",
+      );
+    }
+    if (request.files.case === undefined) throw unsetOneof("roll_back_session.files");
+  } catch (err) {
+    refuse("RollBackSession", err);
   }
 }
 

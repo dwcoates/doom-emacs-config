@@ -6,7 +6,9 @@
  * scenario stands on, because a defect here is invisible in a scenario test
  * (which asserts what the scenario said, not how the engine said it).
  */
-import { describe, expect, it } from "vitest";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { logRecordsSince } from "../log-records.js";
 import { join } from "node:path";
 
@@ -23,7 +25,9 @@ import {
   TURN_GATE_PATH_ENV,
   TURN_GATE_TEXT_ENV,
 } from "../../src/fake/index.js";
-import type { CanUseToolLike, SdkUserMessage } from "../../src/sdk/types.js";
+import type { CanUseToolLike, QueryLike, SdkMessage, SdkUserMessage } from "../../src/sdk/types.js";
+import { transcriptPath } from "../../src/fake/vendor-files.js";
+import { RESUME_DROPS_TURN_REFUSAL_PREFIX } from "../../src/engine/rollback.js";
 import {
   FAKE_SESSION_WINDOW_RESETS_IN_MS,
   FAKE_WEEKLY_WINDOW_RESETS_IN_MS,
@@ -1153,5 +1157,156 @@ describe("a task's spool, from the moment the task starts", () => {
 
     // Assert.
     expect(taskIds.map((id) => driven.spool(id) !== null)).toEqual([true, true, true]);
+  });
+});
+
+describe("the prompt record's uuid", () => {
+  it("is the send's client uuid, as the CLI files a named streaming-input message", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["hello"], { clientUuids: ["client-send-1"] });
+
+    // Assert
+    expect(recordsOfType(driven.transcript(), "user").map((line) => line.uuid)).toEqual(["client-send-1"]);
+  });
+});
+
+describe("a truncating resume and file checkpointing", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  /** A world whose resumed session's transcript holds `lines`. */
+  function world(lines: Record<string, unknown>[]): { configDir: string; cwd: string; file: string } {
+    const root = mkdtempSync(join(tmpdir(), "fake-rollback-"));
+    const configDir = join(root, "cfg");
+    const cwd = join(root, "workspace");
+    const file = transcriptPath(configDir, cwd, "sess-r");
+    mkdirSync(join(file, ".."), { recursive: true });
+    writeFileSync(file, `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`);
+    return { configDir, cwd, file };
+  }
+
+  const user = (uuid: string, parentUuid: string | null) => ({
+    type: "user",
+    uuid,
+    parentUuid,
+    message: { role: "user", content: `prompt ${uuid}` },
+  });
+  const assistant = (uuid: string, parentUuid: string) => ({
+    type: "assistant",
+    uuid,
+    parentUuid,
+    message: { role: "assistant", content: [{ type: "text", text: "ok" }] },
+  });
+  const twoTurns = () => [user("p0", null), assistant("a0", "p0"), user("p1", "a0"), assistant("a1", "p1")];
+
+  /** A resumed fake query over `where`, fed `prompts`. */
+  function resumed(
+    where: { configDir: string; cwd: string },
+    prompts: SdkUserMessage[],
+    opts: { resumeSessionAt?: string; resumeDropsTurn?: string } = {},
+  ): QueryLike {
+    let counter = 0;
+    return createFakeQuery(
+      (async function* () {
+        yield* prompts;
+      })(),
+      ALLOW,
+      {
+        cwd: where.cwd,
+        configDir: where.configDir,
+        sessionId: "sess-r",
+        resume: "sess-r",
+        newUuid: () => `n${++counter}`,
+        nowMs: () => HARNESS_NOW_MS,
+        ...opts,
+      },
+    );
+  }
+
+  async function drain(query: QueryLike): Promise<SdkMessage[]> {
+    const messages: SdkMessage[] = [];
+    for await (const message of query) messages.push(message);
+    return messages;
+  }
+
+  const prompt = (uuid: string): SdkUserMessage =>
+    ({ type: "user", message: { role: "user", content: "again" }, parent_tool_use_id: null, uuid }) as never;
+
+  it("refuses a fork point it does not hold with an error result, then ends", async () => {
+    // Arrange
+    const where = world(twoTurns());
+
+    // Act
+    const messages = await drain(resumed(where, [], { resumeSessionAt: "a9" }));
+
+    // Assert
+    expect(messages.map((message) => (message as { errors?: unknown }).errors)).toEqual([
+      ["No message found with message.uuid of: a9"],
+    ]);
+  });
+
+  it("refuses a guarded cut over another turn's prompt in the guard's words", async () => {
+    // Arrange
+    const where = world(twoTurns());
+
+    // Act
+    const messages = await drain(resumed(where, [], { resumeSessionAt: "a0", resumeDropsTurn: "p9" }));
+
+    // Assert
+    const errors = (messages[0] as { errors?: string[] }).errors ?? [];
+    expect(errors[0]?.startsWith(RESUME_DROPS_TURN_REFUSAL_PREFIX)).toBe(true);
+  });
+
+  it("fails its control calls once its boot refused, as a gone process does", async () => {
+    // Arrange
+    const where = world(twoTurns());
+    const query = resumed(where, [], { resumeSessionAt: "a9" });
+
+    // Act + Assert
+    await expect(query.supportedModels()).rejects.toThrow(/exited at boot/);
+  });
+
+  it("chains the next record under the fork point after a booted cut", async () => {
+    // Arrange
+    const where = world(twoTurns());
+
+    // Act
+    await drain(resumed(where, [prompt("p2")], { resumeSessionAt: "a0", resumeDropsTurn: "p1" }));
+
+    // Assert
+    const lines = readFileSync(where.file, "utf8").trim().split("\n").map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(lines.find((line) => line.uuid === "p2")?.parentUuid).toBe("a0");
+  });
+
+  it("answers a file rewind with the files the edit tools touched from the prompt on", async () => {
+    // Arrange
+    const where = world([
+      user("p0", null),
+      {
+        ...assistant("a0", "p0"),
+        message: { role: "assistant", content: [{ type: "tool_use", id: "t", name: "Write", input: { file_path: "/ws/x.ts" } }] },
+      },
+    ]);
+    const query = resumed(where, []);
+
+    // Act
+    const rewind = await query.rewindFiles("p0", { dryRun: true });
+
+    // Assert
+    expect(rewind).toMatchObject({ canRewind: true, filesChanged: ["/ws/x.ts"] });
+  });
+
+  it("answers canRewind false under the rewind_files lever", async () => {
+    // Arrange
+    vi.stubEnv("AGENT_REPL_FAKE_REFUSE", "rewind_files");
+    const where = world(twoTurns());
+    const query = resumed(where, []);
+
+    // Act
+    const rewind = await query.rewindFiles("p1");
+
+    // Assert
+    expect(rewind.canRewind).toBe(false);
   });
 });

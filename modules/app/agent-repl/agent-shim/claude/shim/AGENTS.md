@@ -55,7 +55,7 @@ src/
   engine/
     engine.ts          the Engine seam + NotImplementedEngine
     session.ts turn.ts identity.ts cold.ts keepalive.ts compaction.ts
-    backup.ts detached.ts pushes.ts permission-gate.ts
+    backup.ts detached.ts pushes.ts permission-gate.ts rollback.ts
   convert/
     fold.ts            the fold seam and FoldOutput
     ids.ts             the four identifier spaces, minted
@@ -252,6 +252,7 @@ comma-separated:
 | `start-error-result` | the query answers the opening with an error `result` and ends | `StartSession{vendor_start_failed}` carrying the vendor's own refusal text |
 | `set_model` | `setModel()` rejects | `SetSessionModel{vendor_refused}` |
 | `set_permission_mode` | `setPermissionMode()` rejects | `SetSessionPermissionMode{vendor_refused}` |
+| `rewind_files` | `rewindFiles()` answers `canRewind: false`, dry run or real | `RollBackSession{files_not_restorable}` |
 
 An unrecognized verb is a refusal to start, never a silently ignored knob.
 
@@ -817,7 +818,9 @@ to turns. Arrival order attributes nothing.
   held, session acts, merge-repair, guidance), `deliverNetworkResume` and the
   keep-alive beat all push through `pushSend`, which registers a client uuid
   in the ledger BEFORE the push. A refused rewind re-delivers the same send
-  under the same uuid. `newUuid` names sends only; turn ids never use it.
+  under the same uuid. `newUuid` names the KEEP-ALIVE's sends only; every
+  other send (a StartTurn's prompt, a join, the network-resume prompt) goes
+  under its turn's DERIVED prompt uuid (`promptVendorUuid`, below).
 - **THE VENDOR'S ECHO ATTRIBUTES EACH VENDOR TURN.** `user_message_uuid` /
   `user_message_uuids` (sdk.d.ts) on a turn's first reply frames and its
   `result` name the send it answers; the SDK's binding rule lets a sender find
@@ -846,6 +849,63 @@ to turns. Arrival order attributes nothing.
   again when it ends.
 - **NOTHING VENDOR-SHAPED CROSSES THE WIRE.** The client uuids stay in this
   process; the daemon correlates by turn id, so no proto field carries them.
+
+## A prompt's vendor uuid is its turn id's, and RollBackSession cuts on it (2026-10-01)
+
+The contract is `endpoint_start_turn.proto` (`StartTurnRequest.turn`) and
+`endpoint_roll_back_session.proto`.
+
+- **THE PROMPT UUID IS DERIVED, NEVER STORED.** `promptVendorUuid`
+  (`src/convert/ids.ts`): a turn id that is already a uuid is used as is; any
+  other (the daemon's 16-hex ids, the shim's `adopted-…` ids) is the version-5
+  uuid of its bytes under `TURN_PROMPT_UUID_NAMESPACE`
+  (`9f0a205c-d387-4732-826e-b46e8bdf5b78`, fixed for all time). Every non
+  keep-alive send carries it as its client uuid, and the vendor files a named
+  streaming-input message under that uuid, so a restarted shim finds a
+  prompt's transcript record from the turn id alone.
+- **EVERY SESSION CHECKPOINTS ITS FILES** (`enableFileCheckpointing: true` in
+  `realQueryOptions`), so `restore_files` can rewind to any prompt.
+- **THE CUT IS PLANNED ON THE CHAIN** (`src/engine/rollback.ts`): the live
+  conversation is the transcript walked from its head through `parentUuid`
+  (and `logicalParentUuid` across a compaction), never file order — the vendor
+  never rewrites its file, so a dropped branch stays in it. The prompt must be
+  a user record on that chain (`prompt_not_recorded` otherwise), must have a
+  parent (`first_prompt`), and every later PROMPT record (`isPromptRecord`:
+  not a tool-result carrier, meta, compaction summary, keep-alive, interrupt
+  marker, task notification, or a record whose `origin` is not a person) must
+  be a dropped turn's (`unseen_prompt`). After a rollback the session names
+  the fork point as the head until its next send, because nothing past it has
+  been appended yet.
+- **THE ORDER**: plan; `restore_files` dry run (`files_not_restorable`
+  changes nothing); interrupt through KillTurn's own unforced path
+  (`TurnEngine.interruptForRollback`) and wait (bounded,
+  `ROLLBACK_STOP_SETTLE_MS`) for the stop result to be folded on the OLD
+  query, so WatchAgent gets the ordinary interrupted terminal; `restore_files`
+  stops the dropped turns' detached work through the forced kill's own stop
+  (`stopWorkSpawnedBy`) and rewinds the files on the old query; then the one
+  in-place restart (`replaceQuery`) resumes at the fork point, with
+  `resumeDropsTurn` ONLY for a single dropped turn.
+- **THE BOOT IS JUDGED ON THE LIVE SIGNAL.** The CLI loads the conversation —
+  where `resumeDropsTurn`'s guard runs — in its headless boot, BEFORE its input
+  loop starts, and its input loop is what answers control requests (verified
+  in the 0.3.280 binary); a refused boot writes an `error_during_execution`
+  result starting `Resume rejected by --resume-drops-turn:` (and the same line
+  on stderr) and exits 1. So `supportedModels()` answering within
+  `LIVE_SIGNAL_TIMEOUT_MS` proves the cut was taken; its failure is followed
+  by the query's end, and the refusal is read (`vendorCutRefusal`, the one
+  matcher the keep-alive rewind shares) off the error result the boot watch
+  held out of the fold, the stream's end and the stderr tail. A refusal is
+  never retried: the session is resumed plainly through `resumePlainly` (the
+  keep-alive rewind's recovery) and answered `vendor_refused`. A boot that
+  died without a refusal resumes plainly too and fails the rpc loudly.
+- **THE KEEP-ALIVE STATE STARTS OVER** on a landed rollback: anchor cleared,
+  debt settled, rewind watch dropped; a keep-alive in flight is let go, and no
+  beat or network-resume delivery runs while a rollback is in progress.
+- **THE MOCK MODELS IT** (`src/fake/rollback.ts`): a truncating resume is
+  judged at creation (unknown fork point, or the guard), a refused boot emits
+  the CLI's error result and fails every control call, a booted one chains
+  its next record under the fork point, and `rewindFiles` reports the files
+  the main agent's edit tools touched from that prompt on.
 
 ## A turn id is started once
 

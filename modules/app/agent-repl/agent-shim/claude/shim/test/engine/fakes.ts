@@ -21,6 +21,7 @@ import type {
   SlashCommandLike,
   AgentInfoLike,
   QueryLike,
+  RewindFilesResultLike,
 } from "../../src/sdk/types.js";
 import type {
   AgentPageSession,
@@ -189,6 +190,14 @@ export class ScriptedQuery implements QueryLike {
   }
   initializationResult(): Promise<InitializationResultLike> {
     return Promise.resolve({} as InitializationResultLike);
+  }
+  /** What `rewindFiles` answers a dry run, and a real rewind. */
+  rewindDryRun: RewindFilesResultLike = { canRewind: true, filesChanged: [] };
+  rewindReal: RewindFilesResultLike = { canRewind: true, filesChanged: [] };
+  rewindFiles(userMessageId: string, options?: { dryRun?: boolean }): Promise<RewindFilesResultLike> {
+    const dryRun = options?.dryRun === true;
+    this.calls.push(`rewindFiles:${userMessageId}:${dryRun ? "dry" : "real"}`);
+    return Promise.resolve(dryRun ? this.rewindDryRun : this.rewindReal);
   }
   stopTask(taskId: string): Promise<void> {
     this.calls.push(`stopTask:${taskId}`);
