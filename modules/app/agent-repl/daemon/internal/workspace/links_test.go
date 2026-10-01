@@ -211,3 +211,48 @@ func TestWithinRejectsASiblingWithASharedPrefix(t *testing.T) {
 		t.Fatal("within() accepted a sibling sharing a name prefix")
 	}
 }
+
+func TestOpenDaemonFileInEditorRelaysAFileOutsideTheWorktree(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	log := filepath.Join(t.TempDir(), "merge-logs", "lease-tests-1.log")
+
+	// Act.
+	err := f.verbs.OpenDaemonFileInEditor(context.Background(), "w1", log)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("OpenDaemonFileInEditor: %v", err)
+	}
+	if len(f.host.editorOpens) != 1 || f.host.editorOpens[0].Path != log || f.host.editorOpens[0].Line != nil {
+		t.Fatalf("relayed opens = %+v, want the log at its top", f.host.editorOpens)
+	}
+}
+
+func TestOpenDaemonFileInEditorRefusesARelativePath(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+
+	// Act.
+	err := f.verbs.OpenDaemonFileInEditor(context.Background(), "w1", "merge-logs/a.log")
+
+	// Assert.
+	if err == nil || len(f.host.editorOpens) != 0 {
+		t.Fatalf("OpenDaemonFileInEditor = %v with opens %+v, want a refusal and nothing relayed", err, f.host.editorOpens)
+	}
+}
+
+func TestOpenDaemonFileInEditorRefusesAnUnknownWorkspace(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+
+	// Act.
+	err := f.verbs.OpenDaemonFileInEditor(context.Background(), "w9", "/state/merge-logs/a.log")
+
+	// Assert.
+	if err == nil || len(f.host.editorOpens) != 0 {
+		t.Fatalf("OpenDaemonFileInEditor = %v, want the unknown workspace refused", err)
+	}
+}

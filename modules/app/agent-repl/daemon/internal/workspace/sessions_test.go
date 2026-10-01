@@ -15,6 +15,7 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	shimv1 "agentrepl/proto/shim/v1"
+
 	"google.golang.org/protobuf/proto"
 
 	"claude-repld/internal/account"
