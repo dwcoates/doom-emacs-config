@@ -1,11 +1,13 @@
 package holdfold
 
 import (
+	"errors"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"claude-repld/internal/feedid"
+	"claude-repld/internal/ids"
 	"claude-repld/internal/wsm"
 )
 
@@ -93,6 +95,68 @@ func TestSessionAct(t *testing.T) {
 			// Assert
 			if got != tt.want {
 				t.Fatalf("SessionAct = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// prompt is an ordinary held prompt under TURN.
+func prompt(turn ids.TurnID) wsm.HeldPrompt {
+	return wsm.HeldPrompt{Turn: turn, Said: said(textBlock("words of " + string(turn)))}
+}
+
+func TestAhead(t *testing.T) {
+	standing := []wsm.HeldPrompt{prompt("a"), prompt("b"), prompt("c")}
+	tests := []struct {
+		name     string
+		turn     ids.TurnID
+		want     ids.TurnID
+		wantSeen bool
+	}{
+		{name: "the entry before it in queue order", turn: "c", want: "b", wantSeen: true},
+		{name: "nothing ahead of the first entry", turn: "a", wantSeen: false},
+		{name: "nothing ahead of an entry that does not stand", turn: "gone", wantSeen: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got, ok := Ahead(standing, tt.turn)
+
+			// Assert
+			if ok != tt.wantSeen || (ok && got.Turn != tt.want) {
+				t.Fatalf("Ahead(%s) = (%s, %v), want (%s, %v)", tt.turn, got.Turn, ok, tt.want, tt.wantSeen)
+			}
+		})
+	}
+}
+
+func TestFoldable(t *testing.T) {
+	act := wsm.HeldPrompt{Turn: "act", Said: said(textBlock("model")), Act: &wsm.HeldAct{Kind: wsm.ActPermissionMode, Value: "plan"}}
+	cut := wsm.HeldPrompt{Turn: "cut", Said: said(textBlock("/compact"))}
+	tests := []struct {
+		name    string
+		folded  wsm.HeldPrompt
+		ahead   wsm.HeldPrompt
+		editing ids.TurnID
+		want    error
+	}{
+		{name: "two prompts with no edit standing fold", folded: prompt("b"), ahead: prompt("a"), want: nil},
+		{name: "an edit on a third entry does not matter", folded: prompt("b"), ahead: prompt("a"), editing: "z", want: nil},
+		{name: "a folded session act is refused", folded: act, ahead: prompt("a"), want: ErrNotAPrompt},
+		{name: "a folded context cut is refused", folded: cut, ahead: prompt("a"), want: ErrNotAPrompt},
+		{name: "an act ahead is refused", folded: prompt("b"), ahead: act, want: ErrAboveNotAPrompt},
+		{name: "a context cut ahead is refused", folded: prompt("b"), ahead: cut, want: ErrAboveNotAPrompt},
+		{name: "the folded entry being edited is refused", folded: prompt("b"), ahead: prompt("a"), editing: "b", want: ErrEdited},
+		{name: "the entry ahead being edited is refused", folded: prompt("b"), ahead: prompt("a"), editing: "a", want: ErrEdited},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := Foldable(tt.folded, tt.ahead, tt.editing)
+
+			// Assert
+			if !errors.Is(got, tt.want) || (tt.want == nil && got != nil) {
+				t.Fatalf("Foldable = %v, want %v", got, tt.want)
 			}
 		})
 	}

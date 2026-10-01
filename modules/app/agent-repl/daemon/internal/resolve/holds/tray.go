@@ -11,6 +11,8 @@ import (
 	"google.golang.org/protobuf/types/descriptorpb"
 
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/holdfold"
+	"claude-repld/internal/ids"
 	"claude-repld/internal/wsm"
 )
 
@@ -77,6 +79,26 @@ func heldPrompt(h wsm.HeldPrompt, editing bool, log dlog.Logger) *frontendv1.Hel
 	}
 	out.Badges = heldBadges(out, log)
 	return out
+}
+
+// foldAbove is the entry's "fold above" button, or nil when it is not offered:
+// there is no entry ahead of it, or holdfold.Foldable refuses the pair. It is
+// the same reading FoldHeldPrompt refuses by, so the button stands exactly
+// when the fold would be taken.
+func foldAbove(h wsm.HeldPrompt, ahead *wsm.HeldPrompt, editing ids.TurnID, log dlog.Logger) *frontendv1.HeldPromptFoldAbove {
+	ctx := dlog.Context{"turn_id": string(h.Turn)}
+	if ahead == nil {
+		log.Debug("daemon.holds.fold_above", "the first entry offers no fold: nothing stands ahead of it", ctx)
+		return nil
+	}
+	ctx["above_turn"] = string(ahead.Turn)
+	if err := holdfold.Foldable(h, *ahead, editing); err != nil {
+		ctx["reason"] = err.Error()
+		log.Debug("daemon.holds.fold_above", "the entry offers no fold into the entry ahead", ctx)
+		return nil
+	}
+	log.Debug("daemon.holds.fold_above", "the entry offers a fold into the entry ahead", ctx)
+	return &frontendv1.HeldPromptFoldAbove{Above: &conversationv1.TurnId{Value: string(ahead.Turn)}}
 }
 
 // heldSessionAct projects a held model or permission-mode change. The store

@@ -175,7 +175,7 @@ func (q *queue) CommitEdit(ctx context.Context, ws ids.WorkspaceID, turn ids.Tur
 	held.Said = said
 	held.Classification = nil
 	held.Accepted = false
-	q.reclassify(ctx, ws, held, log)
+	q.reclassify(ctx, ws, held, log, opEditCommit)
 	return nil
 }
 
@@ -350,9 +350,12 @@ func (q *queue) withheldByEdit(ws ids.WorkspaceID, held wsm.HeldPrompt) bool {
 //
 // A LEASE-HELD PROMPT IS NOT CLASSIFIED, exactly as a submission held by a
 // lease is not: the lease owns it, and its release delivers it.
-func (q *queue) reclassify(ctx context.Context, ws ids.WorkspaceID, held wsm.HeldPrompt, log dlog.Logger) {
+//
+// OP names the verb whose new content is being judged: an edit's commit or a
+// fold.
+func (q *queue) reclassify(ctx context.Context, ws ids.WorkspaceID, held wsm.HeldPrompt, log dlog.Logger, op string) {
 	if held.Hold != nil {
-		log.Info(opEditCommit, "the edited prompt is held by a lease; no classifier runs until the lease releases it",
+		log.Info(op, "the prompt's new content is held by a lease; no classifier runs until the lease releases it",
 			dlog.Context{"hold": held.Hold.String()})
 		return
 	}
@@ -362,7 +365,7 @@ func (q *queue) reclassify(ctx context.Context, ws ids.WorkspaceID, held wsm.Hel
 			return
 		}
 	}
-	q.resume(ctx, ws, log, opEditCommit)
+	q.resume(ctx, ws, log, op)
 }
 
 // resume is what an edit ending owes the queue: when nothing is running, the

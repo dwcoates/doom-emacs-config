@@ -527,6 +527,31 @@ func validateEditHeldPromptRequest(req *agentreplv1.EditHeldPromptRequest) *conn
 	return nil
 }
 
+// validateFoldHeldPromptRequest is FoldHeldPromptRequest's base function. A
+// request naming one entry as both the folded prompt and the entry ahead is
+// malformed rather than a state of the queue.
+func validateFoldHeldPromptRequest(req *agentreplv1.FoldHeldPromptRequest) *connect.Error {
+	if err := validateWorkspaceRef("workspace", req.GetWorkspace()); err != nil {
+		return err
+	}
+	if req.GetTurn() == nil {
+		return invalid("turn", "a turn id is required")
+	}
+	if req.GetTurn().GetValue() == "" {
+		return invalid("turn.value", "a turn id value is required")
+	}
+	if req.GetAbove() == nil {
+		return invalid("above", "the turn id of the entry ahead is required")
+	}
+	if req.GetAbove().GetValue() == "" {
+		return invalid("above.value", "the turn id value of the entry ahead is required")
+	}
+	if req.GetAbove().GetValue() == req.GetTurn().GetValue() {
+		return invalid("above", "the entry ahead must be another entry than the one folded")
+	}
+	return nil
+}
+
 // validateAnswerHeldOfferRequest is AnswerHeldOfferRequest's base function.
 func validateAnswerHeldOfferRequest(req *agentreplv1.AnswerHeldOfferRequest) *connect.Error {
 	if err := validateWorkspaceRef("workspace", req.GetWorkspace()); err != nil {

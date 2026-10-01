@@ -80,10 +80,7 @@ func (q *queue) SealMove(ctx context.Context, ws ids.WorkspaceID) (bounce.Handof
 		if h.Tombstone != nil || h.Classification == nil || h.Classification.Arm != wsm.ArmClassifying {
 			continue
 		}
-		if state.epochs == nil {
-			state.epochs = map[ids.TurnID]uint64{}
-		}
-		state.epochs[h.Turn]++
+		state.bumpEpochLocked(h.Turn)
 		superseded++
 	}
 

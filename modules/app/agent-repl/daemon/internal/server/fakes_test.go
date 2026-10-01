@@ -474,6 +474,14 @@ type fakeQueue struct {
 	editorGone []ids.WorkspaceID
 	// edit is the standing edit Editing answers, nil when none stands.
 	edit *promptqueue.Edit
+	// foldErr answers a fold; folds records every fold's two turns, in order.
+	foldErr error
+	folds   [][2]ids.TurnID
+}
+
+func (f *fakeQueue) Fold(_ context.Context, _ ids.WorkspaceID, turn, above ids.TurnID) error {
+	f.folds = append(f.folds, [2]ids.TurnID{turn, above})
+	return f.foldErr
 }
 
 func (f *fakeQueue) BeginEdit(_ context.Context, _ ids.WorkspaceID, _ ids.TurnID, editor promptqueue.EditorProbe) error {

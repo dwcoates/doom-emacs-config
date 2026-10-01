@@ -520,3 +520,53 @@ func TestEachRequestValidatorAcceptsAWellFormedRequestWithTargetsAndSources(t *t
 		})
 	}
 }
+
+func TestFoldHeldPromptRefusesAMalformedRequest(t *testing.T) {
+	tests := []struct {
+		name string
+		req  func() *agentreplv1.FoldHeldPromptRequest
+	}{
+		{"no turn", func() *agentreplv1.FoldHeldPromptRequest {
+			req := foldRequest()
+			req.Turn = nil
+			return req
+		}},
+		{"a blank turn", func() *agentreplv1.FoldHeldPromptRequest {
+			req := foldRequest()
+			req.Turn = &conversationv1.TurnId{}
+			return req
+		}},
+		{"no entry ahead", func() *agentreplv1.FoldHeldPromptRequest {
+			req := foldRequest()
+			req.Above = nil
+			return req
+		}},
+		{"a blank entry ahead", func() *agentreplv1.FoldHeldPromptRequest {
+			req := foldRequest()
+			req.Above = &conversationv1.TurnId{}
+			return req
+		}},
+		{"the entry ahead is the folded entry", func() *agentreplv1.FoldHeldPromptRequest {
+			req := foldRequest()
+			req.Above = &conversationv1.TurnId{Value: req.GetTurn().GetValue()}
+			return req
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+
+			// Act.
+			_, err := h.Client.FoldHeldPrompt(context.Background(), connect.NewRequest(tt.req()))
+
+			// Assert.
+			if code := connectCode(t, err); code != connect.CodeInvalidArgument {
+				t.Fatalf("code = %v, want InvalidArgument", code)
+			}
+			if len(h.Queue.folds) != 0 {
+				t.Fatalf("folds = %v, want a malformed request never to reach the queue", h.Queue.folds)
+			}
+		})
+	}
+}

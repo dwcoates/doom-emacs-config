@@ -193,11 +193,16 @@ func (r *resolver) SetOffer(ws ids.WorkspaceID, offer *frontendv1.HeldOffer) {
 // display order.
 func (r *resolver) render(s *wsState, log dlog.Logger) *frontendv1.DaemonHoldTray {
 	items := make([]*frontendv1.DaemonHoldItem, 0, len(s.held)+1)
+	// ahead is the standing entry drawn just before this one: what its "fold
+	// above" button would fold it into.
+	var ahead *wsm.HeldPrompt
 	for _, h := range orderedHolds(s.held) {
 		prompt := heldPrompt(h, s.editing != "" && h.Turn == s.editing, log)
 		if prompt == nil {
 			continue
 		}
+		prompt.FoldAbove = foldAbove(h, ahead, s.editing, log)
+		ahead = &h
 		items = append(items, &frontendv1.DaemonHoldItem{
 			Item: &frontendv1.DaemonHoldItem_Prompt{Prompt: prompt},
 		})

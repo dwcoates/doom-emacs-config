@@ -10,6 +10,7 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 
+	"claude-repld/internal/ids"
 	"claude-repld/internal/promptqueue"
 	"claude-repld/internal/workspace"
 )
@@ -497,5 +498,91 @@ func TestEditHeldPromptSurfacesAnOrdinaryFailureAsAnError(t *testing.T) {
 	// Assert.
 	if err == nil {
 		t.Fatal("EditHeldPrompt succeeded, want the failure surfaced")
+	}
+}
+
+// foldRequest folds turn-2 into turn-1, the entry it saw ahead.
+func foldRequest() *agentreplv1.FoldHeldPromptRequest {
+	return &agentreplv1.FoldHeldPromptRequest{
+		Workspace: ref(),
+		Turn:      &conversationv1.TurnId{Value: "turn-2"},
+		Above:     &conversationv1.TurnId{Value: "turn-1"},
+	}
+}
+
+func TestFoldHeldPromptHandsBothTokensToTheQueue(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	resp, err := h.Client.FoldHeldPrompt(context.Background(), connect.NewRequest(foldRequest()))
+
+	// Assert.
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("FoldHeldPrompt = (%v, %v), want success", resp, err)
+	}
+	if len(h.Queue.folds) != 1 || h.Queue.folds[0] != [2]ids.TurnID{"turn-2", "turn-1"} {
+		t.Fatalf("folds = %v, want turn-2 folded into turn-1", h.Queue.folds)
+	}
+}
+
+func TestFoldHeldPromptMapsEveryRefusal(t *testing.T) {
+	tests := []struct {
+		name  string
+		err   error
+		armOf func(*agentreplv1.FoldHeldPromptError) bool
+	}{
+		{"no such hold", promptqueue.ErrNoSuchHold,
+			func(e *agentreplv1.FoldHeldPromptError) bool { return e.GetNoSuchHold() != nil }},
+		{"not held", promptqueue.ErrNotHeld,
+			func(e *agentreplv1.FoldHeldPromptError) bool { return e.GetNotHeld() != nil }},
+		{"not a prompt", promptqueue.ErrNotAPrompt,
+			func(e *agentreplv1.FoldHeldPromptError) bool { return e.GetNotAPrompt() != nil }},
+		{"above moved, naming the entry ahead now", &promptqueue.AboveMovedError{Current: "turn-0"},
+			func(e *agentreplv1.FoldHeldPromptError) bool {
+				return e.GetAboveMoved().GetCurrentAbove().GetValue() == "turn-0"
+			}},
+		{"above moved, with nothing ahead now", &promptqueue.AboveMovedError{},
+			func(e *agentreplv1.FoldHeldPromptError) bool {
+				return e.GetAboveMoved() != nil && e.GetAboveMoved().CurrentAbove == nil
+			}},
+		{"above not a prompt", promptqueue.ErrAboveNotAPrompt,
+			func(e *agentreplv1.FoldHeldPromptError) bool { return e.GetAboveNotAPrompt() != nil }},
+		{"being edited", &promptqueue.BeingEditedError{Turn: "turn-1"},
+			func(e *agentreplv1.FoldHeldPromptError) bool {
+				return e.GetBeingEdited().GetEditingTurn().GetValue() == "turn-1"
+			}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.Queue.foldErr = tt.err
+
+			// Act.
+			resp, err := h.Client.FoldHeldPrompt(context.Background(), connect.NewRequest(foldRequest()))
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("FoldHeldPrompt: %v", err)
+			}
+			if !tt.armOf(resp.Msg.GetError()) {
+				t.Fatalf("result = %v, want the %s arm", resp.Msg.GetResult(), tt.name)
+			}
+		})
+	}
+}
+
+func TestFoldHeldPromptSurfacesAnOrdinaryFailureAsAnError(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Queue.foldErr = errors.New("disk full")
+
+	// Act.
+	_, err := h.Client.FoldHeldPrompt(context.Background(), connect.NewRequest(foldRequest()))
+
+	// Assert.
+	if code := connectCode(t, err); code != connect.CodeInternal {
+		t.Fatalf("code = %v, want Internal for a fold the store could not record", code)
 	}
 }
