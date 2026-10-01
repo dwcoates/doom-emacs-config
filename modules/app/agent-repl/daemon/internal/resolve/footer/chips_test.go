@@ -250,7 +250,7 @@ func TestTheAgentRowsTokenSumGrows(t *testing.T) {
 
 	// Assert
 	rows := h.view(t).GetExpanded().GetAgents().GetRows()
-	if got := rows[0].GetTokens().GetText(); got != "12.4k tok" {
+	if got := rows[0].GetTokens().GetText(); got != "12.4k" {
 		t.Fatalf("tokens = %q, want the running sum", got)
 	}
 }
@@ -344,7 +344,7 @@ func TestSuccessiveDetachedProgressReplacesTheAgentFigure(t *testing.T) {
 
 	// Assert
 	rows := h.view(t).GetExpanded().GetAgents().GetRows()
-	if got := rows[0].GetTokens().GetText(); got != "20k tok" {
+	if got := rows[0].GetTokens().GetText(); got != "20k" {
 		t.Fatalf("tokens = %q, want the latest beat's whole sum, never 12.4k + 20k", got)
 	}
 }
@@ -1640,7 +1640,7 @@ func TestAResumedSubagentCarriesItsRetiredLaunchsIdentity(t *testing.T) {
 	}
 	row := rows[0]
 	if row.GetLabel().GetText() != "opus-medium" || row.GetDescription().GetText() != "fix the shim" ||
-		row.GetTokens().GetText() != "900 tok" || row.GetWork().GetValue() != "send-1" {
+		row.GetTokens().GetText() != "900" || row.GetWork().GetValue() != "send-1" {
 		t.Fatalf("row = %+v, want the launch's label, description and tokens under the resume's handle", row)
 	}
 	rec := lastRecord(t, h, "daemon.footer.detached_agent_bound")
@@ -1708,7 +1708,7 @@ func TestAResumedRunsBeatOnTheCallersStreamReachesItsRow(t *testing.T) {
 	h.r.OnActivity(testWS, mainAgent, subagentProgress("send-1", 2_000))
 
 	// Assert
-	if got := h.view(t).GetExpanded().GetAgents().GetRows()[0].GetTokens().GetText(); got != "2k tok" {
+	if got := h.view(t).GetExpanded().GetAgents().GetRows()[0].GetTokens().GetText(); got != "2k" {
 		t.Fatalf("tokens = %q, want the resumed run's beat", got)
 	}
 }
@@ -1745,7 +1745,7 @@ func TestASecondResumeCarriesTheFirstResumesTokens(t *testing.T) {
 
 	// Assert
 	row := h.view(t).GetExpanded().GetAgents().GetRows()[0]
-	if row.GetTokens().GetText() != "5k tok" || row.GetLabel().GetText() != "opus-medium" || row.GetWork().GetValue() != "send-2" {
+	if row.GetTokens().GetText() != "5k" || row.GetLabel().GetText() != "opus-medium" || row.GetWork().GetValue() != "send-2" {
 		t.Fatalf("row = %+v, want the first resume's tokens and the launch's label under send-2", row)
 	}
 }
@@ -1922,7 +1922,7 @@ func TestAResumeCommissionKeepsTheRetiredRunsTokens(t *testing.T) {
 
 	// Assert
 	row := h.view(t).GetExpanded().GetAgents().GetRows()[0]
-	if row.GetTokens().GetText() != "900 tok" || row.GetLabel().GetText() != "opus-medium" {
+	if row.GetTokens().GetText() != "900" || row.GetLabel().GetText() != "opus-medium" {
 		t.Fatalf("row = %+v, want the retired run's tokens under the commission's label", row)
 	}
 }

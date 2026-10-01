@@ -5432,8 +5432,16 @@ bubble-body.bubble-body { display: block; }
   gap: 8px;
   min-width: 0;
 }
+/* THE WHOLE ROW IS THE TARGET (owner request, 2026-10-01): hovering anywhere
+   in a detached-work row -- its figures and the gaps between its columns
+   included -- marks the whole row as the one a click will open, in the same
+   pressable-row wash the agent roster's rows take, and the row's ONE click
+   handler (expanded.ts `jumpRow`) answers a click on any part of it. */
 .footer-row-jump { cursor: pointer; }
-.footer-row-jump:hover { color: var(--fg); }
+.footer-row-jump:hover {
+  color: var(--fg);
+  background: var(--bg);
+}
 .footer-row-label { font-weight: 600; white-space: nowrap; }
 /* The description is the row's only elastic part, so a long commission
    truncates instead of pushing the figures off the sheet's right edge. */
@@ -5476,6 +5484,71 @@ bubble-body.bubble-body { display: block; }
   display: inline-block;
   color: var(--thinking);
   animation: pfooter-breath 2.6s ease-in-out infinite;
+}
+
+/* ---- expanded footer: the agents panel's fixed columns (src/footer/expanded.ts) ---- */
+
+/* FIXED COLUMNS FOR TOKENS AND DURATION (owner request, 2026-10-01). The
+   agents panel is ONE grid, and its header and every row take its columns
+   through `subgrid`, so all rows share each column's width with no width
+   measured in script: the main cell (glyph, label, description, any wait) takes
+   what is left, then tokens, then duration, then the caret. Each figure column
+   is at least wide enough for the largest common value -- "999.9k" tokens, a
+   "5hr 30m 30s"-sized duration -- and grows to the widest value actually drawn
+   (`max-content`), shrinking back to that floor when the value goes. So a clock
+   turning "4m 59s" into "5m" no longer moves the token count. A vertical bar
+   (the row delimiters' own 1px `--border`) separates tokens from duration,
+   header included. The header is the same four cells: "stop all" on the LEFT,
+   then the "tokens" and "duration" headers above their columns. */
+.pfooter-sheet[data-panel="agents"] {
+  --footer-tokens-col-min: 6ch;
+  /* The floor counts the bar and its padding, which sit inside the cell. */
+  --footer-duration-col-min: calc(11ch + 11px);
+  display: grid;
+  grid-template-columns:
+    minmax(0, 1fr)
+    minmax(var(--footer-tokens-col-min), max-content)
+    minmax(var(--footer-duration-col-min), max-content)
+    auto;
+  column-gap: 10px;
+  align-content: start;
+}
+.pfooter-sheet[data-panel="agents"] > * { grid-column: 1 / -1; }
+.pfooter-sheet[data-panel="agents"] > .footer-columns {
+  display: grid;
+  grid-template-columns: subgrid;
+  /* `normal` on a subgrid is the parent grid's gap, so the header and the rows
+     cannot space their columns differently. */
+  column-gap: normal;
+  /* Stretched, so the bar runs the row's full height and meets the delimiters. */
+  align-items: stretch;
+  font-variant-numeric: tabular-nums;
+}
+.footer-row-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.footer-columns > .footer-row-tokens,
+.footer-columns > .footer-row-clock,
+.footer-column-header {
+  white-space: nowrap;
+  text-align: right;
+}
+.footer-columns > .footer-row-clock,
+.footer-column-header[data-column="duration"] {
+  /* LONGHANDS, as the strip's partition writes them: a `var()` inside the
+     shorthand is not readable back through `getComputedStyle` under jsdom. */
+  border-left-width: 1px;
+  border-left-style: solid;
+  border-left-color: var(--border);
+  padding-left: 10px;
+}
+/* "stop all" leads the header now, so it no longer pushes itself right. */
+.pfooter-sheet[data-panel="agents"] > .footer-panel-header > .footer-stop {
+  margin-left: 0;
+  justify-self: start;
 }
 
 /* The tokens panel's lines: name dim, value bright, thinking indented under

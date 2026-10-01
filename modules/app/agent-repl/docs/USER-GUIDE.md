@@ -26,6 +26,45 @@ response, and the other way round.
   - Prompts before the last `/clear` or compaction can't be selected.
   - Neither can a subagent's prompts, or a prompt folded into a turn that was already running.
 
+## Jumping to an entry
+
+These clicks jump to an entry in the feed:
+
+- a background agent, shell or monitor row in the expanded footer;
+- a breadcrumb above a subagent's feed;
+- the "gated:" link on a hook card.
+
+- **A jump opens the entry and centers it.**
+  - Any subagent bubble the entry sits inside is opened first.
+  - The entry itself is then expanded: a subagent, shell or merge bubble opens its feed, and a tool card opens its output.
+  - The feed scrolls so the expanded entry sits in the middle of the view. Near the top or bottom of the feed it goes as close to the middle as the feed allows.
+  - The entry is briefly marked so your eye lands on it.
+- **An entry the jump opened closes again once you scroll it out of view.**
+  - It closes only when no part of it is visible any more.
+  - Scrolling back to it then shows it closed.
+  - Each jump's entry is watched on its own. A second jump never closes the first one's entry early.
+- **An entry you opened yourself stays open when you scroll away from it.**
+  - A jump to an entry that was already open leaves it as it is.
+  - Clicking an entry the jump opened, to close or reopen it, makes it yours: the jump no longer closes it.
+- **Scrolling back to the bottom of the feed closes every open entry.**
+  - This happens when the newest entry comes back into view and the feed starts following new output again.
+  - It closes the entries you opened and any a jump opened that are still open.
+  - Switching to another window or application also closes open tool output and bubble text, as before.
+- **If a subagent's feed cannot be opened, the jump still scrolls to its bubble.**
+  - The failure is listed under the warning chip in the top bar.
+
+## Background work in the expanded footer
+
+The expanded footer lists the running background agents, shells and monitors, one row each.
+
+- **Clicking anywhere on a row jumps to its entry in the feed.**
+  - Hovering anywhere on the row highlights the whole row.
+  - The jump works as described in "Jumping to an entry".
+- **The agents list has columns.**
+  - Its header line starts with the "stop all" button, which stops every running background agent.
+  - The "tokens" and "duration" headers sit above their columns.
+  - Every row's figures line up under those headers, so a changing clock never moves the token count.
+
 ## Replying to a response
 
 Select a final response with `C-p` / `C-n` and send a prompt with `RET`. The

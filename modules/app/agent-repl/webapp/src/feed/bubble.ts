@@ -180,6 +180,9 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
     },
     expand,
     isExpanded: () => expanded,
+    collapse: () => {
+      if (expanded) collapse();
+    },
     child: () => child,
     dispose,
   };
@@ -226,8 +229,8 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
     // the scroll). AN EXPANSION THE READER ASKED FOR CENTERS THE BUBBLE (owner
     // request, 2026-09-30): once its sub-feed is drawn, the bubble announces
     // itself expanded and the root feed puts its middle on the viewport's
-    // (`itemExpanded`). A reveal that opens bubbles along its way calls
-    // `expand` directly, announces nothing, and never scrolls.
+    // (`itemExpanded`). A jump that opens bubbles calls `expand` directly and
+    // announces nothing: it centers the entry it landed on itself.
     if (expanded) {
       collapse();
       return;

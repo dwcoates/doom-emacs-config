@@ -122,6 +122,7 @@ and are contract on the same terms:
 | `data-merge-test-log` + `.merge-test-log-link` | the merge bubble tests tab's log link (`renderMergeTestLogLink`, src/link.ts), inside `.merge-test-log` | — (drawn in the response bubble's link blue, `var(--accent)`; its text is `FeedMergeTestLogLabel.text`; a click sends `OpenInEditor` with `target.merge_test_log` = the served token, which never appears in the markup) | merge queue rework, 2026-09-30 |
 | `data-chip="mergeTests"` / `data-panel="mergeTests"` | the 🧪 chip ("🧪 8/12") and the expanded merge tests panel | — (the panel folds away, like the agents panel, when the daemon empties it at the end of testing; a new `FooterExpandedFocus.merge_tests` generation opens and selects it) | merge queue rework, 2026-09-30 |
 | `data-suite-state` / `data-duration` | every merge tests panel row (`data-suite-state`), and a finished row's run-time clock (`data-duration`) | `waiting` \| `running` \| `passed` \| `failed`; a running row's `.footer-row-clock` ticks, a finished one's does not, a waiting one has none | merge queue rework, 2026-09-30 |
+| `.footer-columns` / `.footer-row-main` / `.footer-column-header` + `data-column` | the agents panel's header and rows (`.footer-columns`, each exactly four cells sharing the section's grid through `subgrid`), a row's first cell (`.footer-row-main`: glyph, label, description, any wait, any "not on screen"), and the header's column headers | `data-column`: `tokens` \| `duration`; the header's first cell is the "stop all" control (the "live agents" title is gone), and the row's tokens figure carries no "tok" (the daemon dropped it); widths are measured in test/webkit/footer-columns.webkit.test.ts | footer columns, 2026-10-01 |
 | `data-step` + `.footer-activity-merge-step` | the salient `merge_step` line under `merging` and `merge failed` (src/footer/merge-step.ts) | the step's case name: `enqueued` \| `preprocessing` \| `rebasing` \| `conflictResolution` \| `testing` \| `fixing` \| `committing` \| `updatingMain` \| `postprocessing`; a testing line also wears `data-edge` (`started` \| `passed` in `tone-green` \| `failed` in `tone-red`), a rebasing line `data-line` (`running` \| `failed`), an updating-main line `data-update-step` (`fetching` \| `fastForwarding`) | merge queue rework, 2026-09-30 |
 | `data-merge-progress` / `data-merge-attempt` / `data-update-step` | the merge bubble's rebasing tab progress ("3/7"), a fixes tab's attempt ("attempt 2/3"), and the updating main tab's step (src/feed/merge/step-tabs.ts) | `data-update-step`: `fetching` \| `fastForwarding`; the other two carry no value | merge queue rework, 2026-09-30 |
 
@@ -350,13 +351,28 @@ hand any more:
   (`expand.toggle-uncapped`) anything that is not a capped section. Thinking
   bubbles, prompts, held prompts, peers, agentic cards and compaction
   summaries stay capped.
-- **AN EXPANDED ITEM COLLAPSES ON SCROLL ONLY ONCE NO PART OF IT IS VISIBLE**
-  (owner ruling, 2026-09-30; `src/feed/expand.ts`). The reader's own scroll
-  gesture ARMS an expanded section, and an `IntersectionObserver` on the feed's
-  scroll root closes it when its intersection falls to zero; a section still
-  partly in view stays open however far the reader scrolled. The watcher is a
-  seam (`VisibilityWatcher`, faked by `test/visibility-fake.ts`), since jsdom
-  has none.
+- **ONLY A JUMP'S EXPANSION CLOSES ON LEAVING THE VIEW; THE READER'S CLOSE AT
+  THE TAIL** (owner rulings, 2026-10-01, replacing the wheel-armed close of
+  2026-09-30). EVERY JUMP to a feed entry (a footer detached-work row, a
+  breadcrumb, a hook's gated-call link: `reveal` in `src/feed/feed.ts`)
+  EXPANDS the entry (its sub-feed bubble, else every capped section its row
+  owns), then CENTERS it on the expanded layout, then marks it. An entry the
+  jump expanded is watched (`src/feed/jump-collapse.ts`) and collapsed once NO
+  PART of it is visible; one already open when the jump landed, or one the
+  reader toggles by hand afterwards, is the reader's and is never watched. An
+  entry the READER expanded does NOT close when scrolled out of view: it
+  closes when the reader scrolls back to the tail so the follow re-latches
+  (`TailFollow.onTailReached`, the one re-latch in `latchIfLatestVisible`,
+  fired only for the reader's own scroll after the latest entry was out of
+  view), which closes EVERY expanded entry once (INFO
+  `feed.tail-reached-collapse`) and drops the jump watches. "Left the view" is
+  ONE detector, `createLeftViewWatch` (`src/feed/left-view.ts`: seen first,
+  then wholly out, once; a detached row is no departure), shared by the jump
+  watch and the selection's `left_view` (selection-visibility.ts). Every
+  expansion is client-owned: `FeedMergeFold` is the merge bubble's INITIAL
+  fold only, and there is no daemon fold verb. A bubble the daemon will not
+  open for a jump is ERROR `feed.jump-expand-failed` and a
+  `controlPlaneFailed` on the chip.
 - **ONE HEAT RULE FOR EVERY TOKEN FIGURE AND PERCENTAGE** (owner rulings,
   2026-09-30). A footer percentage is painted by `footerPercentColor`
   (`tones.ts`): green below 40%, yellow by 70%, orange by 90%, red from 90%,
@@ -435,7 +451,9 @@ hand any more:
   feed moves implicitly only for the closed set `SCROLL_CAUSES` —
   `promptSent`, `promptHeld` (a held prompt's card drawn in the tray for the
   FIRST time parks the feed at its tail and follows, as a sent prompt does; a
-  re-push or a removal moves nothing), `selectionMoved`, `detachedWorkSelected`, `itemExpanded`, `initialPlacement`,
+  re-push or a removal moves nothing), `selectionMoved`, `detachedWorkSelected`,
+  `entryJumped` (every other jump: a breadcrumb, a hook's gated-call link,
+  centered by the same `revealCenterDelta`), `itemExpanded`, `initialPlacement`,
   `replaceRestore`, `prependCompensation`, `collapseCompensation` (a thinking
   bubble wholly above the reader collapsing when its own final text lands,
   i.e. the daemon re-pushes it settled; the view shifts by exactly the height it lost), `latestVisible`
@@ -457,8 +475,9 @@ hand any more:
   collapse click are input, not causes, and are the only other writes.
   `detachedWorkSelected` CENTERS the picked card in the feed's viewport
   (`revealCenterDelta`: midpoint onto midpoint, a card taller than the
-  viewport top-aligned, clamped at the feed's edges), and a reveal opens only
-  the containers selecting the row requires. `itemExpanded` (owner request,
+  viewport top-aligned, clamped at the feed's edges); the walk opens only the
+  containers selecting the row requires, and the landing then expands the
+  entry itself (owner request, 2026-10-01). `itemExpanded` (owner request,
   2026-09-30, widening the bubble-only ruling of 2026-09-29) puts the vertical
   middle of ANY feed item the reader expands on the feed viewport's vertical
   middle at once (`expandCenterDelta`: midpoint onto midpoint whatever the
@@ -495,7 +514,8 @@ hand any more:
 - **A DETACHED-WORK ROW'S CLICK HAS EXACTLY ONE OUTCOME** (owner ruling,
   2026-09-23). Every agent, shell and monitor row in the expanded footer
   carries the daemon's `FooterJump`: `entry` selects that FeedId through the
-  feed's `selectDetachedWork`; `unresolved` (and an entry the reveal could not
+  feed's `selectDetachedWork`, the one jump (expand, center, close again once
+  wholly out of view); `unresolved` (and an entry the reveal could not
   land, an unreadable answer, or a throw) draws "not on screen" at the row and
   writes `footer.expanded.jump-unreachable` with `work_id`, `kind`, `feed_id`,
   `jump` and `reason`. The notice is the footer mount's state
@@ -520,14 +540,15 @@ hand any more:
   reconnect, reload, compaction replay — snapshots them by row `FeedId` across
   the teardown (`snapshotExpanded`/`retainRows` in src/expand.ts, spent in
   `feed-view.ts`), the expanded bubble's own 50vh scroll box included.
-- **AN OPEN SECTION CLOSES WHEN THE READER LEAVES IT** (2026-09-27). The one
-  `AutoCollapse` owner in `src/expand.ts` (one per document; every
-  `installClickExpand` host registers with it) closes every open capped section
-  through the same `collapseSection` a click uses, on: a `wheel` whose target
-  is outside that section, a `pointerdown` on another box's classic scrollbar,
-  the window's own `blur`, or `visibilitychange` to hidden. It never listens to
-  `scroll`, so no layout change (the expand, the collapse, a follow) can trip
-  it. Each close is a DEBUG `expand.auto-collapse` with `trigger` and `kind`.
+- **AN OPEN SECTION CLOSES WHEN THE READER LEAVES IT** (2026-09-27; scroll
+  triggers replaced 2026-10-01). The one `AutoCollapse` owner in
+  `src/expand.ts` (one per document; every `installClickExpand` host registers
+  with it) closes every open capped section through the same `collapseSection`
+  a click uses, on: the reader's return to the tail (`tailReached`, called by
+  the feed), the window's own `blur`, or `visibilitychange` to hidden. A wheel
+  or a scrollbar grab no longer closes anything, and it never listens to
+  `scroll`. Each close is a DEBUG `expand.auto-collapse` with `trigger` and
+  `kind`.
   Known gap: a keyboard-only Emacs window or workspace switch made while the
   WKWebView still holds first responder fires no DOM signal at all.
   Its twin: A WHEEL INSIDE AN OPEN SECTION NEVER MOVES THE FEED. The open box

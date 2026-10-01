@@ -80,6 +80,7 @@ function stubBubble(row: FeedRow): BubbleLike & { updates: number } {
     },
     expand: async () => true,
     isExpanded: () => false,
+    collapse: () => undefined,
     child: () => null,
     dispose: () => el.remove(),
   };

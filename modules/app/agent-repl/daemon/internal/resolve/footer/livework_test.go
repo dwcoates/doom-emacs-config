@@ -310,7 +310,7 @@ func TestASetThatReListsARetiredRunReopensAMinimalRowAndSaysSo(t *testing.T) {
 
 	// Assert
 	rows := h.view(t).GetExpanded().GetAgents().GetRows()
-	if len(rows) != 1 || rows[0].GetLabel().GetText() != "subagent" || rows[0].GetTokens().GetText() != "0 tok" {
+	if len(rows) != 1 || rows[0].GetLabel().GetText() != "subagent" || rows[0].GetTokens().GetText() != "0" {
 		t.Fatalf("rows = %+v, want one minimal row labelled subagent with 0 tokens", rows)
 	}
 	rec := lastRecord(t, h, "daemon.footer.live_work_taken")

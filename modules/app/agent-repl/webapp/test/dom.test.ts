@@ -37,7 +37,7 @@ describe("scrollbarWidthPx", () => {
     const callers = [...code].filter(([, text]) => /\bscrollbarWidthPx\(/.test(text)).map(([p]) => p).sort();
     const rolled = [...code].filter(([, text]) => /offsetWidth\s*-[^;]*clientWidth/.test(text)).map(([p]) => p);
     // Assert
-    expect([callers, rolled]).toEqual([["bubble/body.ts", "dom.ts", "expand.ts"], ["dom.ts"]]);
+    expect([callers, rolled]).toEqual([["bubble/body.ts", "dom.ts"], ["dom.ts"]]);
   });
 });
 
