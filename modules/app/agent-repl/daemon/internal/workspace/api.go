@@ -337,10 +337,12 @@ type Verbs interface {
 	// OpenFeedLink resolves a non-web link clicked in a prompt or response
 	// bubble (OpenInEditorFeedLink's order) and relays the file it names
 	// exactly as OpenInEditor relays a workspace file. A link that names no
-	// existing file raises the transient `unknown_file` footer line and is
-	// answered with the composed follow-up question, for the caller to submit,
-	// beside the `link_unresolved` refusal.
-	OpenFeedLink(ctx context.Context, ws ids.WorkspaceID, href string) (*UnresolvedLink, error)
+	// existing file is answered with the `link_unresolved` refusal; when
+	// REPORT is set (OpenInEditorFeedLink.on_unresolved's `report` arm) it
+	// also raises the transient `unknown_file` footer line and answers the
+	// composed follow-up question, for the caller to submit. Unset is the
+	// `web_fallback` arm: the refusal alone, silently.
+	OpenFeedLink(ctx context.Context, ws ids.WorkspaceID, href string, report bool) (*UnresolvedLink, error)
 	// Notify raises one host notification: it raises the workspace's desktop
 	// banner (the daemon's own, decided on Emacs's focus) and sets the roster's
 	// attention marker, which SelectWorkspace and AsksSettled clear. It is the

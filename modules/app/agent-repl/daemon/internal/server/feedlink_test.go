@@ -19,11 +19,27 @@ import (
 // openFeedLink clicks one feed link in the source row.
 func openFeedLink(t *testing.T, h *harness, href, source string) *agentreplv1.OpenInEditorResponse {
 	t.Helper()
+	return openFeedLinkOn(t, h, href, source, true)
+}
+
+// reportArm is on_unresolved's `report` arm.
+func reportArm() *agentreplv1.OpenInEditorFeedLink_Report {
+	return &agentreplv1.OpenInEditorFeedLink_Report{Report: &agentreplv1.OpenInEditorFeedLinkReport{}}
+}
+
+// openFeedLinkOn clicks one feed link carrying on_unresolved's `report` arm
+// when report is set, its `web_fallback` arm otherwise.
+func openFeedLinkOn(t *testing.T, h *harness, href, source string, report bool) *agentreplv1.OpenInEditorResponse {
+	t.Helper()
+	link := &agentreplv1.OpenInEditorFeedLink{Href: href, SourceRow: &frontendv1.FeedId{Value: source}}
+	if report {
+		link.OnUnresolved = reportArm()
+	} else {
+		link.OnUnresolved = &agentreplv1.OpenInEditorFeedLink_WebFallback{WebFallback: &agentreplv1.OpenInEditorFeedLinkWebFallback{}}
+	}
 	resp, err := h.Client.OpenInEditor(context.Background(), connect.NewRequest(&agentreplv1.OpenInEditorRequest{
 		Workspace: ref(),
-		Target: &agentreplv1.OpenInEditorRequest_FeedLink{FeedLink: &agentreplv1.OpenInEditorFeedLink{
-			Href: href, SourceRow: &frontendv1.FeedId{Value: source},
-		}},
+		Target:    &agentreplv1.OpenInEditorRequest_FeedLink{FeedLink: link},
 	}))
 	if err != nil {
 		t.Fatalf("OpenInEditor: %v", err)
@@ -144,7 +160,7 @@ func TestAFailedQuestionSubmissionFailsTheClickLoudly(t *testing.T) {
 	_, err := h.Client.OpenInEditor(context.Background(), connect.NewRequest(&agentreplv1.OpenInEditorRequest{
 		Workspace: ref(),
 		Target: &agentreplv1.OpenInEditorRequest_FeedLink{FeedLink: &agentreplv1.OpenInEditorFeedLink{
-			Href: "nowhere.md", SourceRow: &frontendv1.FeedId{Value: "row-1"},
+			Href: "nowhere.md", SourceRow: &frontendv1.FeedId{Value: "row-1"}, OnUnresolved: reportArm(),
 		}},
 	}))
 
@@ -167,5 +183,64 @@ func TestOpenInEditorRefusesAFeedLinkWithNoHref(t *testing.T) {
 	// Assert.
 	if connect.CodeOf(err) != connect.CodeInvalidArgument {
 		t.Fatalf("err = %v, want invalid_argument", err)
+	}
+}
+
+func TestAReportFeedLinkAsksTheVerbToReport(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	openFeedLinkOn(t, h, "AGENTS.md", "row-1", true)
+
+	// Assert.
+	if len(h.Verbs.feedLinkReport) != 1 || !h.Verbs.feedLinkReport[0] {
+		t.Fatalf("report flags = %v, want one report", h.Verbs.feedLinkReport)
+	}
+}
+
+func TestAWebFallbackFeedLinkAsksTheVerbNotToReport(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	openFeedLinkOn(t, h, "notes.org", "row-1", false)
+
+	// Assert.
+	if len(h.Verbs.feedLinkReport) != 1 || h.Verbs.feedLinkReport[0] {
+		t.Fatalf("report flags = %v, want one silent call", h.Verbs.feedLinkReport)
+	}
+}
+
+func TestAnUnresolvedWebFallbackFeedLinkAnswersLinkUnresolvedAndAsksNothing(t *testing.T) {
+	// Arrange: the verb answers the silent refusal, with no question.
+	h := newHarness(t)
+	h.Verbs.feedLinkErr = &workspace.Refusal{Rpc: "OpenInEditor", Arm: workspace.ArmLinkUnresolved,
+		Reason: "no file", Fields: map[string]any{"href": "notes.org"}}
+
+	// Act.
+	msg := openFeedLinkOn(t, h, "notes.org", "row-1", false)
+
+	// Assert.
+	if msg.GetError().GetLinkUnresolved().GetHref() != "notes.org" || h.Prompts.submits != 0 {
+		t.Fatalf("result = %v, submits = %d; want link_unresolved and no question", msg.GetResult(), h.Prompts.submits)
+	}
+}
+
+func TestOpenInEditorRefusesAFeedLinkWithNoOnUnresolvedArm(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	_, err := h.Client.OpenInEditor(context.Background(), connect.NewRequest(&agentreplv1.OpenInEditorRequest{
+		Workspace: ref(),
+		Target: &agentreplv1.OpenInEditorRequest_FeedLink{FeedLink: &agentreplv1.OpenInEditorFeedLink{
+			Href: "AGENTS.md", SourceRow: &frontendv1.FeedId{Value: "row-1"},
+		}},
+	}))
+
+	// Assert.
+	if connect.CodeOf(err) != connect.CodeInvalidArgument || len(h.Verbs.editorOpens) != 0 {
+		t.Fatalf("err = %v, opens = %v; want invalid_argument and nothing opened", err, h.Verbs.editorOpens)
 	}
 }
