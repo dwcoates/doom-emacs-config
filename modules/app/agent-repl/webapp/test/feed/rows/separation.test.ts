@@ -5,8 +5,6 @@ import {
   FeedSessionSeparationSchema,
   type FeedSessionSeparation,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
-import { ITEM_EXPANDED_EVENT } from "../../../src/expand.js";
-import stylesheet from "../../../src/styles.css?raw";
 import { MalformedView } from "../../../src/rpc/malformed.js";
 import {
   SEPARATION_ARMS,
@@ -21,7 +19,6 @@ import {
   BUBBLE_VARIANT_ATTRIBUTE,
 } from "../../../src/bubble/draw.js";
 import { FITTING_TREE, WIDE_TREE, stagedCols, treeLineWidths, useTreeLayout } from "../../tree-layout.js";
-import { fireResize } from "../../resize-observer.js";
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -159,36 +156,12 @@ describe("drawFeedSessionSeparation: the size change", () => {
 });
 
 describe("drawFeedSessionSeparation: the compaction", () => {
-  it("starts folded when the wire says folded", () => {
+  it("draws the summary bubble when the wire says folded", () => {
     const el = drawFeedSessionSeparation(separation(ARMS[1][1]), ctxFor());
-    expect(el.querySelector<HTMLElement>(".sep-summary")?.hidden).toBe(true);
+    expect(el.querySelector<HTMLElement>(".sep-summary")?.hidden).toBe(false);
   });
 
-  // A FOLDED SUMMARY MUST ACTUALLY BE INVISIBLE, which the assertion above
-  // does NOT establish: it reads the DOM property, and jsdom applies no
-  // stylesheet, so `hidden` reads true while the real page drew the summary
-  // anyway. That is exactly what happened — a headless run of the real webview
-  // photographed a divider whose toggle said FOLDED with the summary sitting
-  // open beneath it.
-  //
-  // THE CAUSE IS SPECIFICITY, so this is pinned against the stylesheet rather
-  // than against the DOM: the fold hides an element carrying `.bubble`,
-  // `.bubble` sets `display`, and a class selector outranks the user-agent
-  // `[hidden]` rule — so without an explicit guard `hidden` is inert here.
-  it("hides the folded summary in the stylesheet too, not only as a DOM property", () => {
-    // Arrange: the element the fold actually toggles.
-    const el = drawFeedSessionSeparation(separation(ARMS[1][1]), ctxFor());
-    const summary = el.querySelector<HTMLElement>(".sep-summary");
-
-    // Act / Assert: it is a bubble, and `.bubble` sets display...
-    expect(summary?.classList.contains("bubble")).toBe(true);
-    expect(/\.bubble\s*\{[^}]*\bdisplay\s*:/.test(stylesheet)).toBe(true);
-
-    // ...so the sheet must carry the guard that makes `hidden` bite.
-    expect(/\.bubble\[hidden\]\s*\{[^}]*\bdisplay\s*:\s*none/.test(stylesheet)).toBe(true);
-  });
-
-  it("starts open when the wire says unfolded", () => {
+  it("draws the summary bubble when the wire says unfolded", () => {
     const el = drawFeedSessionSeparation(
       separation({
         case: "compacted",
@@ -199,41 +172,34 @@ describe("drawFeedSessionSeparation: the compaction", () => {
     expect(el.querySelector<HTMLElement>(".sep-summary")?.hidden).toBe(false);
   });
 
-  it("opens on the reader's click", () => {
+  it("draws no summary disclosure toggle", () => {
     const el = drawFeedSessionSeparation(separation(ARMS[1][1]), ctxFor());
-    el.querySelector<HTMLElement>(".sep-fold-toggle")?.click();
-    expect(el.querySelector<HTMLElement>(".sep-summary")?.hidden).toBe(false);
+    expect(el.querySelector("button, [data-fold]")).toBeNull();
   });
 
-  it("announces the row expanded when the reader opens the summary", () => {
+  it("draws the summary bubble in its collapsed form", () => {
     const el = drawFeedSessionSeparation(separation(ARMS[1][1]), ctxFor());
-    let announced = 0;
-    el.addEventListener(ITEM_EXPANDED_EVENT, () => announced++);
-    el.querySelector<HTMLElement>(".sep-fold-toggle")?.click();
-    expect(announced).toBe(1);
+    expect(el.querySelector(".sep-summary > .bubble-scroll")?.classList.contains("expanded")).toBe(false);
   });
 
-  it("announces nothing when the reader folds the summary again", () => {
-    const el = drawFeedSessionSeparation(separation(ARMS[1][1]), ctxFor());
-    el.querySelector<HTMLElement>(".sep-fold-toggle")?.click();
-    let announced = 0;
-    el.addEventListener(ITEM_EXPANDED_EVENT, () => announced++);
-    el.querySelector<HTMLElement>(".sep-fold-toggle")?.click();
-    expect(announced).toBe(0);
-  });
-
-  it("keeps the reader's toggle across a re-push (R2)", () => {
-    const first = drawFeedSessionSeparation(separation(ARMS[1][1]), ctxFor());
-    first.querySelector<HTMLElement>(".sep-fold-toggle")?.click();
-    const second = drawFeedSessionSeparation(separation(ARMS[1][1]), ctxFor(first));
-    expect(second.querySelector<HTMLElement>(".sep-summary")?.hidden).toBe(false);
+  it("logs the wire's fold it no longer acts on", async () => {
+    // Arrange
+    const capture = captureLogRecords("debug");
+    // Act
+    drawFeedSessionSeparation(separation(ARMS[1][1]), ctxFor());
+    // Assert
+    const record = await forwardedRecord(capture, "feed.separation-summary-drawn");
+    expect([record.level.case, record.context]).toEqual([
+      "debug",
+      expect.objectContaining({ wire_folded: true, cold_read: false }),
+    ]);
   });
 
   it("renders the summary as prose, not as raw markdown", () => {
     const el = drawFeedSessionSeparation(
       separation({
         case: "compacted",
-        value: { summary: { markdown: "**done**" }, fold: { folded: false } },
+        value: { summary: { markdown: "**done**" }, fold: { folded: true } },
       }),
       ctxFor(),
     );
@@ -461,29 +427,12 @@ describe("drawFeedSessionSeparation: a tree in the summary", () => {
     expect(treeLineWidths(el)).toHaveLength(3);
   });
 
-  it("waits while the summary is folded, measuring nothing hidden", () => {
+  it("wraps it at the cap when the wire says folded, the fold being ignored", () => {
     // Arrange / Act
     const el = mounted(WIDE_TREE, true);
-    // Assert
-    expect(treeLineWidths(el)).toHaveLength(0);
-  });
-
-  it("wraps it once the reader unfolds the summary", () => {
-    // Arrange
-    const el = mounted(WIDE_TREE, true);
-    // Act — the fold opens, and the summary's column grows to hold it.
-    el.querySelector<HTMLElement>(".sep-fold-toggle")?.click();
-    fireResize(el.querySelector(".sep-compacted") as HTMLElement);
-    vi.runOnlyPendingTimers();
     // Assert
     const widths = treeLineWidths(el);
     expect(widths.length).toBeGreaterThan(3);
     expect(Math.max(...widths)).toBeLessThanOrEqual(stagedCols(staged.layout));
-  });
-});
-
-describe("the compaction summary's fold toggle style", () => {
-  it("draws the toggle at twice the divider's size, in white", () => {
-    expect(stylesheet).toMatch(/\.sep-fold-toggle \{[^}]*font-size: 2em;[^}]*color: #ffffff;/);
   });
 });

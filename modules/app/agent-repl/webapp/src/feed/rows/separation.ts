@@ -14,13 +14,10 @@
  * same bar in BLUE. That is why the rule's own class is shared and only the
  * accent differs.
  *
- * THE FOLD IS THE CLIENT'S, INITIALIZED FROM THE WIRE (R2): the shipped
- * `folded` is the state on a row's FIRST draw, and the reader's toggle wins
- * thereafter — so a re-push re-reads the toggle off the previous element rather
- * than resetting it.
+ * A COMPACTION'S SUMMARY HAS NO FOLD: its bubble is always drawn under the
+ * bar (owner ruling, 2026-10-02), in its collapsed bubble form.
  */
 import { log } from "../../log.js";
-import { announceItemExpanded } from "../../expand.js";
 import { markdownSlot } from "../../bubble/body.js";
 import { drawBubble } from "../../bubble/draw.js";
 import { renderEditorLink } from "../../link.js";
@@ -115,7 +112,7 @@ export function drawFeedSessionSeparation(
       case "cleared":
         return drawFeedContextCutCleared(kind.value);
       case "compacted":
-        return drawFeedContextCutCompacted(kind.value, rc);
+        return drawFeedContextCutCompacted(kind.value);
       case "worktreeEntered":
         return drawFeedWorktreeEntered(kind.value, rc);
       case "worktreeLeft":
@@ -165,32 +162,35 @@ export function drawFeedContextCutCleared(_cleared: FeedContextCutCleared): null
 }
 
 /**
- * The compaction's surviving account, folded, plus the cold-read notice when the
- * compaction paid full price for the read it exists to avoid.
+ * The compaction's surviving account, always shown, plus the cold-read notice
+ * when the compaction paid full price for the read it exists to avoid.
+ *
+ * THERE IS NO FOLD (owner ruling, 2026-10-02): the summary bubble stands under
+ * the divider bar as soon as the row is drawn, with no "summary" disclosure
+ * and no chevron. It is still the one capped bubble, so it starts in its
+ * collapsed bubble form and opens through the shared toggle like any other.
+ * The wire's `fold` is still required (an unset one is a `MalformedView`, as
+ * for every non-optional message field), but its value no longer selects
+ * anything here.
  *
  * The notice is a WARNING ON A COMPACTION THAT HAPPENED, not a failure of it,
  * which is why it sits beside the summary rather than replacing it.
  */
-export function drawFeedContextCutCompacted(
-  compacted: FeedContextCutCompacted,
-  rc: RowContext,
-): HTMLElement {
+export function drawFeedContextCutCompacted(compacted: FeedContextCutCompacted): HTMLElement {
   const el = document.createElement("div");
   el.className = "sep-compacted";
 
   const fold = requireMessage(compacted.fold, `${PATH}.compacted.fold`);
   const summary = requireMessage(compacted.summary, `${PATH}.compacted.summary`);
-  const folded = initialFold(fold.folded, rc);
-
-  const toggle = document.createElement("button");
-  toggle.type = "button";
-  toggle.className = "sep-fold-toggle";
-  toggle.setAttribute("data-fold", "compaction-summary");
+  log.debug("drawing a compaction summary open, ignoring the wire's fold", {
+    operation: "feed.separation-summary-drawn",
+    context: { wire_folded: fold.folded, cold_read: compacted.coldRead !== undefined },
+  });
 
   // THE SUMMARY IS A RESPONSE BUBBLE, drawn by the one bubble: the response
   // fill and rail, the shared cap, the one expand toggle and has-more, and a
   // tree in it wrapped at its cap. Its border is the divider bar's own color
-  // (the compaction variant, styles.css). The fold below hides it whole.
+  // (the compaction variant, styles.css).
   const body = drawBubble({
     role: "response",
     variant: "compaction",
@@ -199,39 +199,11 @@ export function drawFeedContextCutCompacted(
     capLines: "feed",
   }).bubble;
 
-  const apply = (next: boolean): void => {
-    toggle.setAttribute("data-folded", next ? "true" : "false");
-    toggle.textContent = next ? "▸ summary" : "▾ summary";
-    body.hidden = next;
-  };
-  apply(folded);
-  toggle.addEventListener("click", () => {
-    const next = toggle.getAttribute("data-folded") !== "true";
-    log.debug(`the reader ${next ? "folded" : "unfolded"} a compaction summary`, {
-      operation: "feed.separation-fold-toggled",
-      context: { folded: next },
-    });
-    apply(next);
-    // Unfolding is the reader expanding the item: the feed centers it.
-    if (!next) announceItemExpanded(el);
-  });
-
-  el.append(toggle, body);
+  el.append(body);
   if (compacted.coldRead !== undefined) {
     el.append(drawFeedContextCutColdRead(compacted.coldRead));
   }
   return el;
-}
-
-/**
- * The fold state a fresh draw starts in: the reader's own toggle when this row
- * has been drawn before, and the wire's value only on the FIRST draw (R2).
- */
-function initialFold(wireFolded: boolean, rc: RowContext): boolean {
-  const previous = rc.previous?.querySelector('[data-fold="compaction-summary"]') ?? null;
-  const held = previous?.getAttribute("data-folded") ?? null;
-  if (held === null) return wireFolded;
-  return held === "true";
 }
 
 /** What the cold read cost, stated rather than alluded to. */

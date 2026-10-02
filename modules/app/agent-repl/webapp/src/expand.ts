@@ -67,8 +67,7 @@ export const CAPPED_CLASSES = [
 
 /**
  * The DOM event a feed item's OWN expansion dispatches from the expanded
- * element, bubbling, when the READER expanded it (a sub-feed bubble's fold, a
- * compaction's summary fold). The root feed, which owns the scroll box,
+ * element, bubbling, when the READER expanded it (a sub-feed bubble's fold). The root feed, which owns the scroll box,
  * centers the item's row on it (`itemExpanded`). The capped sections this
  * module toggles center through the click owner's own callback instead.
  */
