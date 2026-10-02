@@ -371,6 +371,12 @@ type HostRelay interface {
 	// orchestrator. The topic dedupes, so a caller never has to decide
 	// whether its edge actually changed the view.
 	PublishHostWorkspace(ws ids.WorkspaceID)
+	// ReturnFeedToTail ends the workspace's feed reply selection with
+	// `return_to_tail`, because the user just switched to the workspace: a
+	// switch lands on the newest row with the follow re-armed (owner ruling,
+	// 2026-10-02), and a standing selection holds the follow off. Nothing
+	// selected is nothing to end.
+	ReturnFeedToTail(ws ids.WorkspaceID)
 }
 
 // Banners raises a workspace's desktop banner (desktopnotify.Notifier.Raise):
