@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+
+# Tests run only at background priority: re-exec once through bin/background.sh.
+[[ -n ${AGENT_REPL_BACKGROUND_PRIORITY:-} ]] || exec "$(dirname "${BASH_SOURCE[0]}")/../bin/background.sh" bash "${BASH_SOURCE[0]}" "$@"
+
 # test-bounce-agent-repl-forcefully.sh -- hermetic tests of
 # bounce-agent-repl-forcefully.sh.
 #
