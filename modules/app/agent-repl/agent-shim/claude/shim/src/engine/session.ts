@@ -42,6 +42,7 @@ import { workspaceLockKey } from "../locks.js";
 import { recordAgentBinaryVersion, requireSessionRuntime } from "../build-identity.js";
 import { isAgentTaskType } from "../convert/detached.js";
 import { effortLevelOf, vendorEffortLevel } from "../convert/effort.js";
+import { boundaryChange } from "./boundary-change.js";
 import { promptVendorUuid, subagentId, toolCallActivityId } from "../convert/ids.js";
 import { hookBlockingText } from "../convert/hooks.js";
 import { classifyVendorApiFailure, redactVendorMessage } from "../convert/terminals.js";
@@ -772,22 +773,12 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   let standingDeath: conversationv1.SessionQueryDied | undefined;
   let standingDown = false;
   /** A model change accepted mid-turn, and the call still waiting on it. */
-  let pendingModel:
-    | {
-        readonly model: conversationv1.AgentModel;
-        readonly resolve: (response: shimv1.SetSessionModelResponse) => void;
-      }
-    | undefined;
+  const pendingModel = boundaryChange<conversationv1.AgentModel, shimv1.SetSessionModelResponse>();
   /**
    * An effort change accepted mid-turn, and the call still waiting on it. A
    * turn runs at ONE effort throughout, exactly as it runs on one model.
    */
-  let pendingEffort:
-    | {
-        readonly effort: conversationv1.AgentEffortLevel;
-        readonly resolve: (response: shimv1.SetSessionEffortResponse) => void;
-      }
-    | undefined;
+  const pendingEffort = boundaryChange<conversationv1.AgentEffortLevel, shimv1.SetSessionEffortResponse>();
   let accountUsageHandle: unknown;
   let cadence: KeepaliveCadence | undefined;
   /**
@@ -2815,18 +2806,17 @@ export function createEngine(deps: EngineDeps): SessionEngine {
 
   /** A model change that waited for the turn to end lands now, and its caller is answered. */
   async function applyPendingModel(): Promise<void> {
-    if (pendingModel === undefined) return;
-    const waiting = pendingModel;
-    pendingModel = undefined;
+    const waiting = pendingModel.take();
+    if (waiting === undefined) return;
     try {
-      await applyModel(waiting.model);
+      await applyModel(waiting.value);
       waiting.resolve(
         create(shimv1.SetSessionModelResponseSchema, {
           result: {
             case: "success",
             value: create(shimv1.SetSessionModelSuccessSchema, {
               modelChanged: create(conversationv1.SessionModelChangedSchema, {
-                effectiveModel: waiting.model,
+                effectiveModel: waiting.value,
               }),
             }),
           },
@@ -2847,10 +2837,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
 
   /** An effort change that waited for the turn to end lands now, and its caller is answered. */
   async function applyPendingEffort(): Promise<void> {
-    if (pendingEffort === undefined) return;
-    const waiting = pendingEffort;
-    pendingEffort = undefined;
-    waiting.resolve(await effortApplied(waiting.effort));
+    const waiting = pendingEffort.take();
+    if (waiting === undefined) return;
+    waiting.resolve(await effortApplied(waiting.value));
   }
 
   /**
@@ -5270,18 +5259,16 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       // `context_usage.model` would contradict the ack it already had. The
       // response waits for the boundary that makes it true.
       LOGGER.debug({ model: model.name, turn_id: running.id.value }, "model change accepted; it resolves at the turn boundary");
-      return new Promise<shimv1.SetSessionModelResponse>((resolve) => {
-        // A second SetSessionModel during one turn REPLACES the first, and the
-        // first caller is told so rather than left holding a promise nothing
-        // will ever settle.
-        pendingModel?.resolve(
-          setSessionModelRefused(
-            { kind: "vendorRefused" },
-            "a later SetSessionModel replaced this one before the turn ended",
-          ),
-        );
-        pendingModel = { model, resolve };
-      });
+      // A second SetSessionModel during one turn REPLACES the first, and the
+      // first caller is told so rather than left holding a promise nothing
+      // will ever settle.
+      return pendingModel.wait(
+        model,
+        setSessionModelRefused(
+          { kind: "vendorRefused" },
+          "a later SetSessionModel replaced this one before the turn ended",
+        ),
+      );
     }
     try {
       await applyModel(model);
@@ -5346,18 +5333,13 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         { effort: conversationv1.AgentEffortLevel[effort], turn_id: running.id.value },
         "effort change accepted; it resolves at the turn boundary",
       );
-      return new Promise<shimv1.SetSessionEffortResponse>((resolve) => {
-        // A second SetSessionEffort during one turn REPLACES the first, and the
-        // first caller is told so rather than left holding a promise nothing
-        // will ever settle.
-        pendingEffort?.resolve(
-          setSessionEffortRefused(
-            { kind: "vendorRefused" },
-            "a later SetSessionEffort replaced this one before the turn ended",
-          ),
-        );
-        pendingEffort = { effort, resolve };
-      });
+      return pendingEffort.wait(
+        effort,
+        setSessionEffortRefused(
+          { kind: "vendorRefused" },
+          "a later SetSessionEffort replaced this one before the turn ended",
+        ),
+      );
     }
     return effortApplied(effort);
   }
@@ -5765,26 +5747,18 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // A CALL WAITING ON A TURN BOUNDARY THAT WILL NEVER COME still gets an
     // answer: leaving the daemon holding a promise nothing can settle is worse
     // than telling it the change did not land.
-    if (pendingModel !== undefined) {
-      const waiting = pendingModel;
-      pendingModel = undefined;
-      waiting.resolve(
-        setSessionModelRefused(
-          { kind: "vendorRefused" },
-          `the session stood down before the turn ended (${reason}); the model change did not land`,
-        ),
-      );
-    }
-    if (pendingEffort !== undefined) {
-      const waiting = pendingEffort;
-      pendingEffort = undefined;
-      waiting.resolve(
-        setSessionEffortRefused(
-          { kind: "vendorRefused" },
-          `the session stood down before the turn ended (${reason}); the effort change did not land`,
-        ),
-      );
-    }
+    pendingModel.take()?.resolve(
+      setSessionModelRefused(
+        { kind: "vendorRefused" },
+        `the session stood down before the turn ended (${reason}); the model change did not land`,
+      ),
+    );
+    pendingEffort.take()?.resolve(
+      setSessionEffortRefused(
+        { kind: "vendorRefused" },
+        `the session stood down before the turn ended (${reason}); the effort change did not land`,
+      ),
+    );
     cadence?.stop();
     networkResume.stop(reason);
     if (accountUsageHandle !== undefined) {
