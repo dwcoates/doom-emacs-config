@@ -123,15 +123,19 @@ message StartSessionFailure {
     // resuming would cost, so a remediation can be chosen.
     conversation.v1.SessionCold cold = 1;
     // The agent binary (or the SDK query) failed to start; `detail` carries
-    // the cause.
+    // the cause, and the arm says whether asking again can help.
     StartSessionVendorStartFailed vendor_start_failed = 3;
     // A resume named a session id with no transcript on disk — refused
     // BEFORE any process spawns (a vanished file yields no death evidence).
+    // NOT RETRYABLE: the transcript will not reappear by asking again.
     StartSessionUnknownSession unknown_session = 4;
-    // A second StartSession on a shim that already holds a session.
+    // A second StartSession on a shim that already holds a session. Neither
+    // retryable nor a rejection: the caller dialed a live shim, which is a
+    // defect in the caller, and it attaches rather than starts.
     StartSessionAlreadyStarted already_started = 5;
     // Another shim holds this conversation's kernel lock: the holder exited
     // with the code reserved for "already held". Nothing else answers this.
+    // NOT RETRYABLE: the other shim's ownership is a real conflict.
     StartSessionConversationOwned conversation_owned = 6;
     // THIS shim's own kernel-lock holder (`shim-lock`) FAILED — it could not
     // be spawned, exited or was killed before holding the lock, answered the
@@ -139,13 +143,46 @@ message StartSessionFailure {
     // conversation. Distinct from conversation_owned, which is a real
     // ownership conflict: this one is a defect in this shim's deployment, and
     // naming it as an ownership conflict sends the reader hunting for a second
-    // process that does not exist.
+    // process that does not exist. RETRYABLE: a holder that failed to spawn or
+    // answer may succeed on the next StartSession on the same shim.
     StartSessionLockHolderUnavailable lock_holder_unavailable = 7;
   }
   // The shim's account, for a human and for logs; never switched on.
   string detail = 2;
 }
-message StartSessionVendorStartFailed {}
+// The vendor (the agent binary or its SDK query) did not come up inside a shim
+// that is itself healthy.
+//
+// THE SHIM LABELS WHETHER ASKING AGAIN CAN HELP, because only the shim sees
+// what the vendor said and did before it failed: a child that went silent or
+// died, or an API answer of overloaded / server error / network failure, is
+// transient; a credential rejection, a missing model, a refused resume or a
+// blocking hook will fail identically every time. The daemon owns the retry
+// loop and its schedule and never re-derives this label from `detail`.
+//
+// A retryable failure leaves the shim able to take another StartSession for
+// the same session on the SAME process: the caller retries without
+// relaunching it.
+message StartSessionVendorStartFailed {
+  // Whether a later StartSession can succeed. Always set; a frame with
+  // neither arm is malformed and the caller treats it as a rejection.
+  oneof retry {
+    // Transient: the same request may succeed if asked again.
+    StartSessionVendorStartRetryable retryable = 1;
+    // Deterministic: the same request will fail the same way.
+    StartSessionVendorStartRejected rejected = 2;
+  }
+}
+// The vendor start failed for a reason that can pass: it stayed silent past
+// its liveness bound, its process or stream ended before it was ready, or the
+// API answered with a transient error (overloaded, a server error, a network
+// failure). The caller retries on its own backoff.
+message StartSessionVendorStartRetryable {}
+// The vendor refused the start for a reason that will not pass on its own: a
+// credential rejection, a missing model, a refused resume, or a hook that
+// blocked the opening. The caller does not retry; the user must change
+// something and restart.
+message StartSessionVendorStartRejected {}
 message StartSessionUnknownSession {}
 message StartSessionAlreadyStarted {}
 message StartSessionConversationOwned {}

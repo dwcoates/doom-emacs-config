@@ -343,6 +343,9 @@ type SessionFault struct {
 	//	*SessionFault_DaemonStateUnreadable
 	//	*SessionFault_AdoptionWindowExpired
 	//	*SessionFault_FinalAnswerUnresolved
+	//	*SessionFault_VendorStartRetrying
+	//	*SessionFault_VendorStartRejected
+	//	*SessionFault_VendorStartFailed
 	Kind          isSessionFault_Kind `protobuf_oneof:"kind"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -518,6 +521,33 @@ func (x *SessionFault) GetFinalAnswerUnresolved() *SessionFaultFinalAnswerUnreso
 	return nil
 }
 
+func (x *SessionFault) GetVendorStartRetrying() *SessionFaultVendorStartRetrying {
+	if x != nil {
+		if x, ok := x.Kind.(*SessionFault_VendorStartRetrying); ok {
+			return x.VendorStartRetrying
+		}
+	}
+	return nil
+}
+
+func (x *SessionFault) GetVendorStartRejected() *SessionFaultVendorStartRejected {
+	if x != nil {
+		if x, ok := x.Kind.(*SessionFault_VendorStartRejected); ok {
+			return x.VendorStartRejected
+		}
+	}
+	return nil
+}
+
+func (x *SessionFault) GetVendorStartFailed() *SessionFaultVendorStartFailed {
+	if x != nil {
+		if x, ok := x.Kind.(*SessionFault_VendorStartFailed); ok {
+			return x.VendorStartFailed
+		}
+	}
+	return nil
+}
+
 type isSessionFault_Kind interface {
 	isSessionFault_Kind()
 }
@@ -593,6 +623,21 @@ type SessionFault_FinalAnswerUnresolved struct {
 	FinalAnswerUnresolved *SessionFaultFinalAnswerUnresolved `protobuf:"bytes,15,opt,name=final_answer_unresolved,json=finalAnswerUnresolved,proto3,oneof"`
 }
 
+type SessionFault_VendorStartRetrying struct {
+	// The vendor did not start and the daemon is retrying it on its backoff.
+	VendorStartRetrying *SessionFaultVendorStartRetrying `protobuf:"bytes,16,opt,name=vendor_start_retrying,json=vendorStartRetrying,proto3,oneof"`
+}
+
+type SessionFault_VendorStartRejected struct {
+	// The vendor refused the start for a reason retrying cannot fix.
+	VendorStartRejected *SessionFaultVendorStartRejected `protobuf:"bytes,17,opt,name=vendor_start_rejected,json=vendorStartRejected,proto3,oneof"`
+}
+
+type SessionFault_VendorStartFailed struct {
+	// The vendor kept failing to start for the whole retry window.
+	VendorStartFailed *SessionFaultVendorStartFailed `protobuf:"bytes,18,opt,name=vendor_start_failed,json=vendorStartFailed,proto3,oneof"`
+}
+
 func (*SessionFault_ShimStartFailed) isSessionFault_Kind() {}
 
 func (*SessionFault_ShimDied) isSessionFault_Kind() {}
@@ -620,6 +665,12 @@ func (*SessionFault_DaemonStateUnreadable) isSessionFault_Kind() {}
 func (*SessionFault_AdoptionWindowExpired) isSessionFault_Kind() {}
 
 func (*SessionFault_FinalAnswerUnresolved) isSessionFault_Kind() {}
+
+func (*SessionFault_VendorStartRetrying) isSessionFault_Kind() {}
+
+func (*SessionFault_VendorStartRejected) isSessionFault_Kind() {}
+
+func (*SessionFault_VendorStartFailed) isSessionFault_Kind() {}
 
 type SessionFaultShimStartFailed struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -1590,6 +1641,196 @@ func (*SessionHealthNotYetAdopted) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_session_health_proto_rawDescGZIP(), []int{24}
 }
 
+// The session's vendor failed to start for a reason the shim labeled
+// RETRYABLE, and the daemon is asking the same shim again on a capped
+// multiplicative backoff (x1.5 from 200ms, capped at 5s). The fault is
+// replaced on every failed attempt, so it always names the latest attempt; it
+// closes when a start succeeds, and gives way to `vendor_start_failed` when
+// the retry window runs out or `vendor_start_rejected` when an attempt is
+// refused outright.
+type SessionFaultVendorStartRetrying struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// How many attempts have failed so far in this run of failures, counting
+	// from 1.
+	FailedAttempts uint32 `protobuf:"varint,1,opt,name=failed_attempts,json=failedAttempts,proto3" json:"failed_attempts,omitempty"`
+	// WHY the latest attempt failed, in the shim's own words. Drawn verbatim.
+	Cause string `protobuf:"bytes,2,opt,name=cause,proto3" json:"cause,omitempty"`
+	// When the first failure of this contiguous run happened, in epoch
+	// milliseconds. The retry window is measured from here: a successful start
+	// ends the run, and the next failure after it begins a new one.
+	FailingSinceMs int64 `protobuf:"varint,3,opt,name=failing_since_ms,json=failingSinceMs,proto3" json:"failing_since_ms,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *SessionFaultVendorStartRetrying) Reset() {
+	*x = SessionFaultVendorStartRetrying{}
+	mi := &file_agentrepl_v1_endpoint_session_health_proto_msgTypes[25]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SessionFaultVendorStartRetrying) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SessionFaultVendorStartRetrying) ProtoMessage() {}
+
+func (x *SessionFaultVendorStartRetrying) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_session_health_proto_msgTypes[25]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SessionFaultVendorStartRetrying.ProtoReflect.Descriptor instead.
+func (*SessionFaultVendorStartRetrying) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_session_health_proto_rawDescGZIP(), []int{25}
+}
+
+func (x *SessionFaultVendorStartRetrying) GetFailedAttempts() uint32 {
+	if x != nil {
+		return x.FailedAttempts
+	}
+	return 0
+}
+
+func (x *SessionFaultVendorStartRetrying) GetCause() string {
+	if x != nil {
+		return x.Cause
+	}
+	return ""
+}
+
+func (x *SessionFaultVendorStartRetrying) GetFailingSinceMs() int64 {
+	if x != nil {
+		return x.FailingSinceMs
+	}
+	return 0
+}
+
+// The session's vendor refused the start for a reason the shim labeled a
+// REJECTION (a credential rejection, a missing model, a refused resume, a
+// blocking hook): asking again would fail the same way, so nothing retries.
+// It stands until a start succeeds, which only a change by the user and a
+// restart of the workspace can bring about.
+type SessionFaultVendorStartRejected struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// WHY the vendor refused, in the shim's own words. Drawn verbatim.
+	Cause         string `protobuf:"bytes,1,opt,name=cause,proto3" json:"cause,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SessionFaultVendorStartRejected) Reset() {
+	*x = SessionFaultVendorStartRejected{}
+	mi := &file_agentrepl_v1_endpoint_session_health_proto_msgTypes[26]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SessionFaultVendorStartRejected) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SessionFaultVendorStartRejected) ProtoMessage() {}
+
+func (x *SessionFaultVendorStartRejected) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_session_health_proto_msgTypes[26]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SessionFaultVendorStartRejected.ProtoReflect.Descriptor instead.
+func (*SessionFaultVendorStartRejected) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_session_health_proto_rawDescGZIP(), []int{26}
+}
+
+func (x *SessionFaultVendorStartRejected) GetCause() string {
+	if x != nil {
+		return x.Cause
+	}
+	return ""
+}
+
+// The session's vendor failed to start on every attempt for the whole retry
+// window (ten minutes of wall time from the first failure of the run), so the
+// daemon stopped retrying. Prompts sent meanwhile stay held. It stands until a
+// start succeeds; restarting the workspace begins a fresh run.
+type SessionFaultVendorStartFailed struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// How many attempts failed before the window ran out.
+	FailedAttempts uint32 `protobuf:"varint,1,opt,name=failed_attempts,json=failedAttempts,proto3" json:"failed_attempts,omitempty"`
+	// WHY the last attempt failed, in the shim's own words. Drawn verbatim.
+	LastCause string `protobuf:"bytes,2,opt,name=last_cause,json=lastCause,proto3" json:"last_cause,omitempty"`
+	// When the first failure of the run happened, in epoch milliseconds.
+	FailingSinceMs int64 `protobuf:"varint,3,opt,name=failing_since_ms,json=failingSinceMs,proto3" json:"failing_since_ms,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *SessionFaultVendorStartFailed) Reset() {
+	*x = SessionFaultVendorStartFailed{}
+	mi := &file_agentrepl_v1_endpoint_session_health_proto_msgTypes[27]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SessionFaultVendorStartFailed) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SessionFaultVendorStartFailed) ProtoMessage() {}
+
+func (x *SessionFaultVendorStartFailed) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_session_health_proto_msgTypes[27]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SessionFaultVendorStartFailed.ProtoReflect.Descriptor instead.
+func (*SessionFaultVendorStartFailed) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_session_health_proto_rawDescGZIP(), []int{27}
+}
+
+func (x *SessionFaultVendorStartFailed) GetFailedAttempts() uint32 {
+	if x != nil {
+		return x.FailedAttempts
+	}
+	return 0
+}
+
+func (x *SessionFaultVendorStartFailed) GetLastCause() string {
+	if x != nil {
+		return x.LastCause
+	}
+	return ""
+}
+
+func (x *SessionFaultVendorStartFailed) GetFailingSinceMs() int64 {
+	if x != nil {
+		return x.FailingSinceMs
+	}
+	return 0
+}
+
 var File_agentrepl_v1_endpoint_session_health_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_session_health_proto_rawDesc = "" +
@@ -1607,8 +1848,7 @@ const file_agentrepl_v1_endpoint_session_health_proto_rawDesc = "" +
 	"\x06health\"\x10\n" +
 	"\x0eSessionHealthy\"F\n" +
 	"\x10SessionUnhealthy\x122\n" +
-	"\x06faults\x18\x01 \x03(\v2\x1a.agentrepl.v1.SessionFaultR\x06faults\"\x83\n" +
-	"\n" +
+	"\x06faults\x18\x01 \x03(\v2\x1a.agentrepl.v1.SessionFaultR\x06faults\"\xac\f\n" +
 	"\fSessionFault\x12\x16\n" +
 	"\x06detail\x18\x01 \x01(\tR\x06detail\x12W\n" +
 	"\x11shim_start_failed\x18\x02 \x01(\v2).agentrepl.v1.SessionFaultShimStartFailedH\x00R\x0fshimStartFailed\x12A\n" +
@@ -1626,7 +1866,10 @@ const file_agentrepl_v1_endpoint_session_health_proto_rawDesc = "" +
 	"\x12watch_open_refused\x18\f \x01(\v2*.agentrepl.v1.SessionFaultWatchOpenRefusedH\x00R\x10watchOpenRefused\x12i\n" +
 	"\x17daemon_state_unreadable\x18\r \x01(\v2/.agentrepl.v1.SessionFaultDaemonStateUnreadableH\x00R\x15daemonStateUnreadable\x12i\n" +
 	"\x17adoption_window_expired\x18\x0e \x01(\v2/.agentrepl.v1.SessionFaultAdoptionWindowExpiredH\x00R\x15adoptionWindowExpired\x12i\n" +
-	"\x17final_answer_unresolved\x18\x0f \x01(\v2/.agentrepl.v1.SessionFaultFinalAnswerUnresolvedH\x00R\x15finalAnswerUnresolvedB\x06\n" +
+	"\x17final_answer_unresolved\x18\x0f \x01(\v2/.agentrepl.v1.SessionFaultFinalAnswerUnresolvedH\x00R\x15finalAnswerUnresolved\x12c\n" +
+	"\x15vendor_start_retrying\x18\x10 \x01(\v2-.agentrepl.v1.SessionFaultVendorStartRetryingH\x00R\x13vendorStartRetrying\x12c\n" +
+	"\x15vendor_start_rejected\x18\x11 \x01(\v2-.agentrepl.v1.SessionFaultVendorStartRejectedH\x00R\x13vendorStartRejected\x12]\n" +
+	"\x13vendor_start_failed\x18\x12 \x01(\v2+.agentrepl.v1.SessionFaultVendorStartFailedH\x00R\x11vendorStartFailedB\x06\n" +
 	"\x04kind\"[\n" +
 	"\x1bSessionFaultShimStartFailed\x12\x1b\n" +
 	"\texit_code\x18\x01 \x01(\x05R\bexitCode\x12\x1f\n" +
@@ -1669,7 +1912,18 @@ const file_agentrepl_v1_endpoint_session_health_proto_rawDesc = "" +
 	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\"9\n" +
 	"\x1dSessionHealthTransferringAway\x12\x18\n" +
 	"\aaddress\x18\x01 \x01(\tR\aaddress\"\x1c\n" +
-	"\x1aSessionHealthNotYetAdoptedB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\x1aSessionHealthNotYetAdopted\"\x8a\x01\n" +
+	"\x1fSessionFaultVendorStartRetrying\x12'\n" +
+	"\x0ffailed_attempts\x18\x01 \x01(\rR\x0efailedAttempts\x12\x14\n" +
+	"\x05cause\x18\x02 \x01(\tR\x05cause\x12(\n" +
+	"\x10failing_since_ms\x18\x03 \x01(\x03R\x0efailingSinceMs\"7\n" +
+	"\x1fSessionFaultVendorStartRejected\x12\x14\n" +
+	"\x05cause\x18\x01 \x01(\tR\x05cause\"\x91\x01\n" +
+	"\x1dSessionFaultVendorStartFailed\x12'\n" +
+	"\x0ffailed_attempts\x18\x01 \x01(\rR\x0efailedAttempts\x12\x1d\n" +
+	"\n" +
+	"last_cause\x18\x02 \x01(\tR\tlastCause\x12(\n" +
+	"\x10failing_since_ms\x18\x03 \x01(\x03R\x0efailingSinceMsB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_session_health_proto_rawDescOnce sync.Once
@@ -1683,7 +1937,7 @@ func file_agentrepl_v1_endpoint_session_health_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_session_health_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_session_health_proto_msgTypes = make([]protoimpl.MessageInfo, 25)
+var file_agentrepl_v1_endpoint_session_health_proto_msgTypes = make([]protoimpl.MessageInfo, 28)
 var file_agentrepl_v1_endpoint_session_health_proto_goTypes = []any{
 	(*SessionHealthRequest)(nil),              // 0: agentrepl.v1.SessionHealthRequest
 	(*SessionHealthResponse)(nil),             // 1: agentrepl.v1.SessionHealthResponse
@@ -1710,10 +1964,13 @@ var file_agentrepl_v1_endpoint_session_health_proto_goTypes = []any{
 	(*SessionHealthWorkspaceRefMismatch)(nil), // 22: agentrepl.v1.SessionHealthWorkspaceRefMismatch
 	(*SessionHealthTransferringAway)(nil),     // 23: agentrepl.v1.SessionHealthTransferringAway
 	(*SessionHealthNotYetAdopted)(nil),        // 24: agentrepl.v1.SessionHealthNotYetAdopted
-	(*v1.WorkspaceRef)(nil),                   // 25: workspace.v1.WorkspaceRef
+	(*SessionFaultVendorStartRetrying)(nil),   // 25: agentrepl.v1.SessionFaultVendorStartRetrying
+	(*SessionFaultVendorStartRejected)(nil),   // 26: agentrepl.v1.SessionFaultVendorStartRejected
+	(*SessionFaultVendorStartFailed)(nil),     // 27: agentrepl.v1.SessionFaultVendorStartFailed
+	(*v1.WorkspaceRef)(nil),                   // 28: workspace.v1.WorkspaceRef
 }
 var file_agentrepl_v1_endpoint_session_health_proto_depIdxs = []int32{
-	25, // 0: agentrepl.v1.SessionHealthRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	28, // 0: agentrepl.v1.SessionHealthRequest.workspace:type_name -> workspace.v1.WorkspaceRef
 	2,  // 1: agentrepl.v1.SessionHealthResponse.success:type_name -> agentrepl.v1.SessionHealthSuccess
 	20, // 2: agentrepl.v1.SessionHealthResponse.error:type_name -> agentrepl.v1.SessionHealthError
 	3,  // 3: agentrepl.v1.SessionHealthSuccess.healthy:type_name -> agentrepl.v1.SessionHealthy
@@ -1733,15 +1990,18 @@ var file_agentrepl_v1_endpoint_session_health_proto_depIdxs = []int32{
 	17, // 17: agentrepl.v1.SessionFault.daemon_state_unreadable:type_name -> agentrepl.v1.SessionFaultDaemonStateUnreadable
 	18, // 18: agentrepl.v1.SessionFault.adoption_window_expired:type_name -> agentrepl.v1.SessionFaultAdoptionWindowExpired
 	19, // 19: agentrepl.v1.SessionFault.final_answer_unresolved:type_name -> agentrepl.v1.SessionFaultFinalAnswerUnresolved
-	21, // 20: agentrepl.v1.SessionHealthError.unknown_workspace:type_name -> agentrepl.v1.SessionHealthUnknownWorkspace
-	22, // 21: agentrepl.v1.SessionHealthError.workspace_ref_mismatch:type_name -> agentrepl.v1.SessionHealthWorkspaceRefMismatch
-	23, // 22: agentrepl.v1.SessionHealthError.transferring_away:type_name -> agentrepl.v1.SessionHealthTransferringAway
-	24, // 23: agentrepl.v1.SessionHealthError.not_yet_adopted:type_name -> agentrepl.v1.SessionHealthNotYetAdopted
-	24, // [24:24] is the sub-list for method output_type
-	24, // [24:24] is the sub-list for method input_type
-	24, // [24:24] is the sub-list for extension type_name
-	24, // [24:24] is the sub-list for extension extendee
-	0,  // [0:24] is the sub-list for field type_name
+	25, // 20: agentrepl.v1.SessionFault.vendor_start_retrying:type_name -> agentrepl.v1.SessionFaultVendorStartRetrying
+	26, // 21: agentrepl.v1.SessionFault.vendor_start_rejected:type_name -> agentrepl.v1.SessionFaultVendorStartRejected
+	27, // 22: agentrepl.v1.SessionFault.vendor_start_failed:type_name -> agentrepl.v1.SessionFaultVendorStartFailed
+	21, // 23: agentrepl.v1.SessionHealthError.unknown_workspace:type_name -> agentrepl.v1.SessionHealthUnknownWorkspace
+	22, // 24: agentrepl.v1.SessionHealthError.workspace_ref_mismatch:type_name -> agentrepl.v1.SessionHealthWorkspaceRefMismatch
+	23, // 25: agentrepl.v1.SessionHealthError.transferring_away:type_name -> agentrepl.v1.SessionHealthTransferringAway
+	24, // 26: agentrepl.v1.SessionHealthError.not_yet_adopted:type_name -> agentrepl.v1.SessionHealthNotYetAdopted
+	27, // [27:27] is the sub-list for method output_type
+	27, // [27:27] is the sub-list for method input_type
+	27, // [27:27] is the sub-list for extension type_name
+	27, // [27:27] is the sub-list for extension extendee
+	0,  // [0:27] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_session_health_proto_init() }
@@ -1772,6 +2032,9 @@ func file_agentrepl_v1_endpoint_session_health_proto_init() {
 		(*SessionFault_DaemonStateUnreadable)(nil),
 		(*SessionFault_AdoptionWindowExpired)(nil),
 		(*SessionFault_FinalAnswerUnresolved)(nil),
+		(*SessionFault_VendorStartRetrying)(nil),
+		(*SessionFault_VendorStartRejected)(nil),
+		(*SessionFault_VendorStartFailed)(nil),
 	}
 	file_agentrepl_v1_endpoint_session_health_proto_msgTypes[20].OneofWrappers = []any{
 		(*SessionHealthError_UnknownWorkspace)(nil),
@@ -1785,7 +2048,7 @@ func file_agentrepl_v1_endpoint_session_health_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_session_health_proto_rawDesc), len(file_agentrepl_v1_endpoint_session_health_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   25,
+			NumMessages:   28,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
