@@ -1253,10 +1253,15 @@ func newHarness(t *testing.T, adjust ...func(*Deps)) *harness {
 	h.c = c
 	t.Cleanup(func() {
 		endLifetime()
-		h.registry.running.Wait()
+		// THE CONTROLLER'S OWN GOROUTINES ARE JOINED FIRST: a handover asks
+		// the registry for bounces, and each run is Added to `running` from
+		// that goroutine. Waiting on `running` first raced those Adds (a
+		// WaitGroup Add concurrent with its Wait at zero), which -race
+		// reported on TestAMoveTakenBackAsksForItsCarriedReplacementAgainHere.
 		c.handoverDone.Wait()
 		c.stragglerAdoptions.Wait()
 		c.bringUps.Wait()
+		h.registry.running.Wait()
 	})
 	return h
 }
