@@ -1238,6 +1238,17 @@ cleared would be silently lost user intent."
     (should (equal (length (agent-repl-test-input--blocks)) 1))
     (should (eq (plist-get (car (agent-repl-test-input--blocks)) :arm) :image))))
 
+(ert-deftest agent-repl-input-discard-saves-as-a-discard ()
+  "`agent-repl-discard-input' saves through the discard-aware history push."
+  (agent-repl-test-input--with
+    (let ((calls nil))
+      (cl-letf (((symbol-function 'agent-repl--history-push-discard)
+                 (lambda () (push :discard calls))))
+        (with-current-buffer agent-repl-test-input--buffer
+          (insert "hello")
+          (agent-repl-discard-input)))
+      (should (equal calls '(:discard))))))
+
 (ert-deftest agent-repl-input-discard-drops-attachments ()
   "Discarding the composer discards what was attached to it."
   (agent-repl-test-input--with
@@ -2164,12 +2175,12 @@ The second escape is treated as a FIRST again -- it warns, never clears."
     ;; Arrange
     (let (saved)
       (cl-letf (((symbol-function 'agent-repl--input-save-to-history)
-                 (lambda (ws) (push ws saved))))
+                 (lambda (ws &optional discard) (push (list ws discard) saved))))
         ;; Act
         (with-current-buffer agent-repl-test-input--buffer
           (agent-repl-discard-input)))
-      ;; Assert
-      (should (equal saved '("ws-one"))))))
+      ;; Assert: saved once, as a discard.
+      (should (equal saved '(("ws-one" t)))))))
 
 (defun agent-repl-test-input--said (&rest blocks)
   "A decoded UserSaid holding BLOCKS."

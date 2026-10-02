@@ -865,6 +865,39 @@ That covers what the control does, its confirmation if any, and its limits.
 The guide is how the owner learns a control exists, and a control missing
 from it goes unused. Controls that predate the guide are not backfilled.
 
+## The editor popup is the one place a file opens
+
+Emacs has ONE path that shows a file or directory the system points at, named
+**the editor popup**: `agent-repl-popup-open PATH [LINE]` in `lisp/popup.el`. It
+is a Doom popup on the right at 40% of the frame's width, focused on open and
+closed (buffer killed) by `q` in command mode; a file opens at LINE (1-indexed,
+the top when absent) and a directory opens in dired. A path that does not exist
+is refused, never created. It shares its display with `agent-repl-popup-show`
+(a buffer rather than a path), so every agent-repl popup has one geometry.
+
+- **Every agent-repl file open goes through it.** Its callers are the host
+  stream's `open_in_editor` push (`agent-repl-host--open-in-editor`), the plan
+  bubble's edit button and every findings-row location jump (both ride that
+  push), the worktree divider's paths and `commands.el`'s link-code, and
+  `notes.el`'s notes file. A call site never calls `find-file` or
+  `display-buffer` for such a window itself, and a per-caller variant is the
+  defect this exists to prevent.
+- **Feed links in bubbles open through it too.** The webapp sends
+  `OpenInEditor{feed_link}` and the DAEMON resolves the href, in this order:
+  an absolute path; a path relative to the worktree root; a bare name as
+  `<worktree>/modules/app/agent-repl/<name>`, then `<git root>/<name>`. A
+  resolved link is relayed to Emacs as the same `open_in_editor` push a
+  `workspace_file` target produces. An unresolved link draws the footer's
+  transient "unknown file <name>" line (no status change) and queues a
+  non-interrupting prompt to the agent quoting the source bubble and asking
+  which file was meant (`PROMPT_ORIGIN_LINK_UNRESOLVED`). Emacs does no
+  resolution of its own.
+- **Deliberate exceptions, not file-opening for a reference:** switching to a
+  project opens that project's most recent file in the ordinary editor window
+  (`commands.el`, `agent-repl--switch-to-project`), and a new worktree's
+  initial buffers are added to its perspective without being shown
+  (`worktree.el`). Neither is a popup.
+
 ## UI changes require an explicit specification
 
 Owner ruling, standing. UI/visual changes — layout, colors, sizes, borders,

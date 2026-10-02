@@ -522,6 +522,34 @@ Skips empty strings and duplicates of the most recent entry."
       (push text agent-repl--input-history)
       (agent-repl--log ws "history-push: recorded input ws=%s input-chars=%d history-count=%d" ws (length text) (length agent-repl--input-history))))))
 
+(defvar-local agent-repl--history-discard-entry nil
+  "The history item the discard command added, as that very string object, or nil.
+Provenance for `agent-repl--history-push-discard': only an item the discard
+added is ever replaced, and it is recognized by identity, so a sent prompt
+that happens to read the same is never mistaken for one.")
+
+(defun agent-repl--history-push-discard ()
+  "Save the buffer's text to history as a DISCARD does.
+When the MOST RECENT history item was added by a discard and is a strict
+substring of the text being discarded now, that item is REPLACED by the
+new text (the new discard extends the earlier one); otherwise the text is
+pushed as `agent-repl--history-push' does."
+  (let ((text (string-trim (buffer-string)))
+        (ws (agent-repl--buffer-owner (current-buffer)))
+        (previous (car agent-repl--input-history)))
+    (if (and previous
+             (eq previous agent-repl--history-discard-entry)
+             (not (equal previous text))
+             (string-search previous text))
+        (progn
+          (setcar agent-repl--input-history text)
+          (setq agent-repl--history-discard-entry (car agent-repl--input-history))
+          (agent-repl--log ws "history-push-discard: replaced the previous discard ws=%s input-chars=%d history-count=%d" ws (length text) (length agent-repl--input-history)))
+      (let ((count (length agent-repl--input-history)))
+        (agent-repl--history-push text)
+        (when (> (length agent-repl--input-history) count)
+          (setq agent-repl--history-discard-entry (car agent-repl--input-history)))))))
+
 (defun agent-repl--history-reset ()
   "Reset history browsing index to the default (not browsing) state."
   (agent-repl--log-verbose (agent-repl--buffer-owner (current-buffer))
