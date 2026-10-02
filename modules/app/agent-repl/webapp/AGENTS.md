@@ -30,6 +30,7 @@ src/feed/                 the feed mechanism (feed, feed-view, bubble, rows)
   cards/ asks/ merge/       the fifteen row renderers
 src/footer/ src/topbar/ src/sidebar/ src/tray/ src/composer/ src/panels/
 src/login/ src/lifecycle/ src/failure/      the remaining components
+src/news-digest/          the daily Claude news digest overlay over the feed
 test/                     one test file per source module, mirroring src/
 test/integration/         the whole app under jsdom against a fake daemon
 ```
@@ -50,7 +51,9 @@ test/integration/         the whole app under jsdom against a fake daemon
    exceptions: the login overlay precedes the topbar's `watch` (whose account
    control opens it), and the feed precedes the footer (whose jump rows reveal
    rows). sidebar, topbar `watch`, feed, hold tray, footer, composer (dev mode
-   only), login overlay, lifecycle.
+   only), login overlay, lifecycle. The news digest overlay is mounted with the
+   lifecycle (just before it), because the lifecycle's `WatchDaemon` stream is
+   what carries its `news_digest` standing.
 
 ## The seams
 
@@ -128,6 +131,7 @@ and are contract on the same terms:
 | `data-merge-progress` / `data-merge-attempt` / `data-update-step` | the merge bubble's rebasing tab progress ("3/7"), a fixes tab's attempt ("attempt 2/3"), and the updating main tab's step (src/feed/merge/step-tabs.ts) | `data-update-step`: `fetching` \| `fastForwarding`; the other two carry no value | merge queue rework, 2026-09-30 |
 | `.merge-queue-header` / `.merge-queue-stage` / `.merge-queue-duration` + `data-queue-place="current"` | the merge bubble's queue tab, a COLUMN TABLE sharing the agents panel's `.footer-columns` subgrid, `.footer-column-header` and duration column (src/columns.ts, src/feed/merge/queue.ts) | the header's `data-column`: `workspace` \| `stage` \| `duration`; each row is exactly three cells (`.merge-queue-label`, `.merge-queue-stage`: the front's active tab label or "waiting", `.merge-queue-duration`: a `.footer-row-clock` ticking from the entry's `stage_entered_at_ms`); "you are here" is gone and this workspace's own row (`data-queue-place="current"`) is subtly highlighted; widths and row heights are measured in test/webkit/merge-queue-columns.webkit.test.ts | merge bubble durations, 2026-10-01 |
 | `.merge-tab-duration` | every merge tab badge, between `.merge-tab-label` and `.merge-tab-glyph` (src/feed/merge/tab-strip.ts) | — (a live tab ticks from its state's `started_at_ms`, a settled one shows `ended_at_ms - started_at_ms`; muted, never wrapping, measured in test/webkit/merge-tab-duration.webkit.test.ts) | merge bubble durations, 2026-10-01 |
+| `data-component="news-digest"` + `data-news-digest-close` / `data-kind` / `data-effective` / `data-outcome` | the news digest overlay's host (fixed on `#feed-scroll`'s rectangle, src/news-digest/news-digest.ts), its close control, each `.news-digest-section`, an item's effective-date pill, and each `.news-digest-source` row | `data-kind`: the `NewsDigestSectionKind` arm (`backend` \| `deprecation` \| `policy` \| `feature` \| `release` \| `incident`; `backend` is drawn in the warning red); `data-outcome`: `read` \| `failed`; the close control and Escape send `DismissNewsDigest` with the served id, which never appears in the markup, and only the daemon's `none` push takes the overlay down | news digest, 2026-10-02 |
 
 ## Commands
 

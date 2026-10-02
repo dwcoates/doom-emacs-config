@@ -117,6 +117,8 @@ describe("every rpc answers", () => {
       ["openExternal", client.openExternal({ workspace, url: "https://example.test" })],
       ["openInEditor", client.openInEditor({ workspace, target: { case: "workspaceFile", value: { path: "/repo/a.ts" } } })],
       ["requestCommandSupport", client.requestCommandSupport({ workspace, command: "/agents" })],
+      ["dismissNewsDigest", client.dismissNewsDigest({ id: { value: "d1" } })],
+      ["refreshNewsDigest", client.refreshNewsDigest({})],
     ];
     // Act
     const settled = await Promise.all(calls.map(async ([name, p]) => [name, (await p).result.case] as const));

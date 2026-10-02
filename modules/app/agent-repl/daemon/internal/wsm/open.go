@@ -23,7 +23,7 @@ import (
 //
 // A NEW VERSION IS A NEW ENTRY IN `migrations`. Bumping this constant alone
 // makes the daemon refuse every database the previous build wrote.
-const LayoutVersion = 18
+const LayoutVersion = 19
 
 // Option configures an open. Options exist so the logger can be supplied
 // without changing the two open functions' shape for callers that do not care.
