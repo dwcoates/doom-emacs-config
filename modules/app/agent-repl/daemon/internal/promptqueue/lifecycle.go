@@ -407,7 +407,7 @@ func (q *queue) OnLeaseChanged(ws ids.WorkspaceID) {
 	revivalPending := false
 	if want == nil && len(standing) > 0 {
 		if _, live := q.deps.Client(ws); !live {
-			want = &leaseHold{kind: wsm.HoldSessionStarting}
+			want = &leaseHold{kind: wsm.HoldReconnect}
 			revivalPending = true
 		}
 	}

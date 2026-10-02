@@ -462,8 +462,11 @@ type HoldKind int
 const (
 	// HoldShutdown holds for the shutdown drain's lease.
 	HoldShutdown HoldKind = iota
-	// HoldSessionStarting holds while the session is still coming up.
-	HoldSessionStarting
+	// HoldReconnect holds while the session is not up: coming up, being
+	// retried, or down until a restart. A failed bring-up never drops it.
+	// ITS STORED VALUE IS 1 AND MUST STAY SO: held_prompts.hold_kind persists
+	// the integer, and the rename from session_starting kept it.
+	HoldReconnect
 	// HoldBuildRefresh holds across a build-staleness bounce.
 	HoldBuildRefresh
 	// HoldMerge holds while a merge of the workspace drives its session. It

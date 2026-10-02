@@ -124,64 +124,6 @@ func TestTheBringUpFailureLineStandsUnderTheStartFailedStep(t *testing.T) {
 	}
 }
 
-func TestTheBringUpFailureLineCarriesTheDroppedPromptCount(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	h.r.SetStartFailed(testWS, &StartFailed{Detail: "exit 1: boom"})
-	h.r.OnLink(testWS, shimclient.LinkDead)
-
-	// Act
-	h.r.AddDroppedPrompts(testWS, 2)
-
-	// Assert
-	if got := startFailedLine(t, h).GetDroppedPrompts(); got != 2 {
-		t.Fatalf("dropped_prompts = %d, want 2", got)
-	}
-}
-
-func TestABringUpFailureThatDroppedNothingCountsZero(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-
-	// Act
-	h.r.SetStartFailed(testWS, &StartFailed{Detail: "exit 1: boom"})
-	h.r.OnLink(testWS, shimclient.LinkDead)
-
-	// Assert
-	if got := startFailedLine(t, h).GetDroppedPrompts(); got != 0 {
-		t.Fatalf("dropped_prompts = %d, want 0 for a failure that dropped none", got)
-	}
-}
-
-func TestASecondBringUpFailureStartsItsOwnDroppedCount(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	h.r.SetStartFailed(testWS, &StartFailed{Detail: "exit 1: boom"})
-	h.r.AddDroppedPrompts(testWS, 3)
-
-	// Act
-	h.r.SetStartFailed(testWS, &StartFailed{Detail: "exit 2: boom again"})
-	h.r.OnLink(testWS, shimclient.LinkDead)
-
-	// Assert
-	if got := startFailedLine(t, h).GetDroppedPrompts(); got != 0 {
-		t.Fatalf("dropped_prompts = %d, want 0: the count belongs to the failure that dropped them", got)
-	}
-}
-
-func TestDroppedPromptsWithNoStandingFailureAreRecordedLoudly(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-
-	// Act
-	h.r.AddDroppedPrompts(testWS, 1)
-
-	// Assert
-	if !hasLevel(h.log.Records(), dlog.LevelWarn, "daemon.footer.dropped_prompts_unattributed") {
-		t.Fatalf("records = %+v, want a WARN for a drop with no failure to attribute it to", h.log.Records())
-	}
-}
-
 func TestASuccessfulLinkClearsTheBringUpFailureLine(t *testing.T) {
 	// Arrange
 	h := newHarness(t)

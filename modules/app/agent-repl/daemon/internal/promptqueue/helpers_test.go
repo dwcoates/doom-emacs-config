@@ -1018,7 +1018,6 @@ type fakeFooter struct {
 	mu           sync.Mutex
 	interrupting []bool
 	turns        []*footer.TurnStarted
-	dropped      []uint32
 	submissions  []footer.Submission
 	retrying     bool
 }
@@ -1069,21 +1068,6 @@ func (f *fakeFooter) SetInterrupting(_ ids.WorkspaceID, on bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.interrupting = append(f.interrupting, on)
-}
-
-// AddDroppedPrompts records what the queue told the footer a failed bring-up
-// cost in held prompts.
-func (f *fakeFooter) AddDroppedPrompts(_ ids.WorkspaceID, n uint32) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.dropped = append(f.dropped, n)
-}
-
-// droppedPrompts answers the recorded drop counts.
-func (f *fakeFooter) droppedPrompts() []uint32 {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return append([]uint32(nil), f.dropped...)
 }
 
 func (f *fakeFooter) interruptions() []bool {

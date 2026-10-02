@@ -418,7 +418,7 @@ func TestAPromptHeldBehindAnUninterruptibleContextCutSkipsClassifyingAndRefusesR
 // TestCloseWorkspaceWithAHeldPromptRefuses (session_lifecycle_test.go) builds
 // to exercise CloseWorkspace's blocked answer is read here for the tray's own
 // hold arm and UpdateHeldPrompt's release refusal on it
-// (internal/promptqueue/submit.go's holdForLease projects HoldSessionStarting
+// (internal/promptqueue/submit.go's holdForLease projects HoldReconnect
 // for a hibernate-holder lease; internal/promptqueue/holdactions.go's Release
 // refuses a force-through on it -- there is nothing live to send an interrupt
 // to yet).
