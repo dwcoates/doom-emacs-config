@@ -787,7 +787,7 @@ export function drawFooterActivityEnduringUsage(
     const figures = document.createElement("span");
     figures.className = "footer-rate-figures";
     ordered.forEach((allowance, index) => {
-      if (index > 0) figures.append(" ", drawFooterRateSeparator(), " ");
+      if (index > 0) figures.append(...drawFooterRateDivider());
       figures.appendChild(
         drawFooterAllowance(
           allowance.value,
@@ -803,9 +803,30 @@ export function drawFooterActivityEnduringUsage(
 }
 
 /**
+ * The gap on EACH side of the usage line's "|": exactly three spaces (owner
+ * ruling, 2026-10-02). They are NO-BREAK spaces, which white-space collapsing
+ * never folds into one, and they are drawn in the line's own font and color.
+ */
+export const FOOTER_RATE_SEPARATOR_GAP = "\u00a0".repeat(3);
+
+/**
+ * Everything drawn between two allowances on the enduring usage line: the
+ * gap, the "|", the gap. The one place the divider is composed, so no caller
+ * can space it differently.
+ */
+export function drawFooterRateDivider(): [string, HTMLElement, string] {
+  return [
+    FOOTER_RATE_SEPARATOR_GAP,
+    drawFooterRateSeparator(),
+    FOOTER_RATE_SEPARATOR_GAP,
+  ];
+}
+
+/**
  * The "|" between two allowances on the enduring usage line, drawn blue
- * (`--footer-rate-separator`) so the figures it divides read as separate
- * windows (owner ruling, 2026-09-30). The spaces around it stay the line's.
+ * (`--footer-rate-separator`) and bold so the figures it divides read as
+ * separate windows (owner rulings, 2026-09-30 and 2026-10-02). The gaps around
+ * it stay the line's (`drawFooterRateDivider`).
  */
 export function drawFooterRateSeparator(): HTMLElement {
   const separator = document.createElement("span");

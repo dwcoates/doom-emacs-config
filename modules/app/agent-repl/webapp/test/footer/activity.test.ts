@@ -7,6 +7,8 @@ import {
 } from "../../../proto/gen/ts/frontend/v1/footer_pb";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import {
+  FOOTER_RATE_SEPARATOR_GAP,
+  drawFooterRateDivider,
   drawFooterStatusActivity,
   enduringUsage,
   orderedAllowances,
@@ -14,6 +16,8 @@ import {
   type FooterActivity,
 } from "../../src/footer/activity.js";
 import { footerStatusActivity } from "../../src/footer/strip.js";
+import ACTIVITY_SOURCE from "../../src/footer/activity.ts?raw";
+import { cascadedValue, installStylesheet } from "../stylesheet.js";
 import {
   FOOTER_STATUS_CASES,
   activityDatumClass,
@@ -1241,7 +1245,7 @@ describe("the enduring line", () => {
       },
     });
     expect(cell.querySelector(".footer-activity-enduring")?.textContent).toBe(
-      "session 72% · resets in 1h 5m | weekly 31% · resets in 3d",
+      `session 72% · resets in 1h 5m${FOOTER_RATE_SEPARATOR_GAP}|${FOOTER_RATE_SEPARATOR_GAP}weekly 31% · resets in 3d`,
     );
   });
 
@@ -1335,7 +1339,21 @@ describe("the enduring line", () => {
     expect(cell.querySelector(".footer-rate-separator")).toBeNull();
   });
 
-  it("keeps the spaces around the separator in the line's own color", () => {
+  it("keeps the gaps around the separator in the line's own color", () => {
+    const cell = enduringCell({
+      usage: {
+        session: allowance(0.31, false, 60_000),
+        weekly: allowance(0.2, false, 60_000),
+      },
+    });
+    const separator = cell.querySelector(".footer-rate-separator");
+    expect([
+      separator?.previousSibling?.nodeType,
+      separator?.nextSibling?.nodeType,
+    ]).toEqual([Node.TEXT_NODE, Node.TEXT_NODE]);
+  });
+
+  it("spaces the separator with exactly three spaces on each side", () => {
     const cell = enduringCell({
       usage: {
         session: allowance(0.31, false, 60_000),
@@ -1346,7 +1364,51 @@ describe("the enduring line", () => {
     expect([
       separator?.previousSibling?.textContent,
       separator?.nextSibling?.textContent,
-    ]).toEqual([" ", " "]);
+    ]).toEqual(["\u00a0\u00a0\u00a0", "\u00a0\u00a0\u00a0"]);
+  });
+
+  it("spaces the separator with no-break spaces, which whitespace collapsing never folds", () => {
+    expect([...FOOTER_RATE_SEPARATOR_GAP]).toEqual([
+      "\u00a0",
+      "\u00a0",
+      "\u00a0",
+    ]);
+  });
+
+  it("composes the divider as gap, bar, gap", () => {
+    const [before, bar, after] = drawFooterRateDivider();
+    expect([before, bar.className, bar.textContent, after]).toEqual([
+      FOOTER_RATE_SEPARATOR_GAP,
+      "footer-rate-separator",
+      "|",
+      FOOTER_RATE_SEPARATOR_GAP,
+    ]);
+  });
+
+  it("draws the divider between the allowances through the one helper", () => {
+    expect(ACTIVITY_SOURCE).not.toMatch(
+      /append\([^)]*drawFooterRateSeparator\(\)/,
+    );
+  });
+
+  it("sets the separator bold in the stylesheet", () => {
+    // Arrange
+    const teardown = installStylesheet();
+    const cell = enduringCell({
+      usage: {
+        session: allowance(0.31, false, 60_000),
+        weekly: allowance(0.2, false, 60_000),
+      },
+    });
+    document.body.replaceChildren(cell);
+    // Act
+    const weight = cascadedValue(
+      cell.querySelector(".footer-rate-separator") as Element,
+      "font-weight",
+    );
+    teardown();
+    // Assert
+    expect(weight).toBe("700");
   });
 
   it("ticks an allowance's reset countdown on the shared clock", () => {
