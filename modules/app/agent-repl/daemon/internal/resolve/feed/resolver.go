@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -45,6 +46,9 @@ type resolver struct {
 	// fork, and which turns are its own (lineage.go). It has a mutex of its
 	// own because the reads that fill it run outside mu.
 	lineage lineages
+	// loads serializes each workspace's page loads across the read they make
+	// off mu (book.go loadMu).
+	loads map[ids.WorkspaceID]*sync.Mutex
 }
 
 // wsState is one workspace's whole feed universe plus the accumulation every
@@ -106,6 +110,9 @@ type wsState struct {
 	// publication is held on its feed until the page is wholly placed
 	// (resolver.holdPushes).
 	holdingPushes bool
+	// load is the reader-requested page load being drawn, nil outside one
+	// (book.go): what its feed's book is told of every row it draws.
+	load *pageLoad
 
 	// readers are the standing page walks, one per open connection.
 	readers map[ReaderID]*walk
@@ -468,10 +475,9 @@ type feedState struct {
 	// until its page is wholly placed (resolver.holdPushes). Empty outside a
 	// replay.
 	held []*frontendv1.FeedRow
-	// historyMore records that older history exists beyond what was replayed,
-	// so a walk that reaches the oldest replayed row answers truncated rather
-	// than claiming the start.
-	historyMore *frontendv1.FailureHistoryReplayTruncated
+	// book is the feed's loaded history when it is an agent's book (book.go):
+	// the pages a reader's request loaded, and what the next one reads.
+	book bookState
 }
 
 // loggedRow is one publication: the row as published, and the sequence it took.
@@ -486,8 +492,13 @@ type walk struct {
 	// feedKey is the feed this walk is of.
 	feedKey string
 	// oldest is the order key of the oldest row served so far; nil when the
-	// walk has been served nothing, which stands it at the feed's start.
+	// walk has been served nothing, which stands it at the feed's start —
+	// unless top is set.
 	oldest *string
+	// top reports a walk that was served nothing and stands above every row:
+	// a LoadFeedThrough with no walk standing begins one here, so its first
+	// page is the newest.
+	top bool
 	// standing reports whether the walk has been opened at all.
 	standing bool
 }
@@ -528,9 +539,6 @@ func newResolver(deps Deps) (*resolver, error) {
 	}
 	if deps.AnswerStall <= 0 {
 		deps.AnswerStall = DefaultAnswerStall
-	}
-	if deps.PageSize <= 0 {
-		deps.PageSize = DefaultPageSize
 	}
 	if deps.TailRetention <= 0 {
 		deps.TailRetention = DefaultTailRetention
@@ -914,6 +922,7 @@ func (r *resolver) upsert(s *wsState, at placement, row *frontendv1.FeedRow, dur
 	if s.plane != planeLive {
 		s.replayTail[f.key] = rank.key
 	}
+	quiet := r.noteBook(s, f, id, rank.key, !seen)
 	if seen && proto.Equal(existing, snapshot) {
 		// AN IDENTICAL ROW IS NOT A PUBLICATION. A repeated frame — a stream
 		// re-opening with the start it already announced, a re-delivered
@@ -924,8 +933,14 @@ func (r *resolver) upsert(s *wsState, at placement, row *frontendv1.FeedRow, dur
 			dlog.Context{"feed": f.key, "row": id})
 		return
 	}
-	f.seq++
-	if seen {
+	// A ROW A READER'S LOAD DREW BELOW EVERYTHING LOADED BEFORE is QUIET: it
+	// is that reader's page, the page delivers it, and it is stored where it
+	// belongs without being published, so no tail inserts it ahead of the
+	// page (book.go).
+	if !quiet {
+		f.seq++
+	}
+	if seen && !quiet {
 		r.recordRepublication(s, f, id, rank)
 	}
 	if !seen {
@@ -949,6 +964,7 @@ func (r *resolver) upsert(s *wsState, at placement, row *frontendv1.FeedRow, dur
 				"index": f.indexOf(id),
 				"seq":   f.seq,
 				"turn":  row.GetTurn().GetValue(),
+				"quiet": quiet,
 			})
 		// A RESPONSE ROW'S PLACEMENT SUPERSEDES THE THINKING ROW BEFORE IT. The
 		// earlier row is re-pushed AFTER this row's own publication, so a reader
@@ -965,12 +981,32 @@ func (r *resolver) upsert(s *wsState, at placement, row *frontendv1.FeedRow, dur
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "!durable"})
 		f.nonDurable[id] = true
 	}
+	if quiet {
+		return
+	}
 	f.log = append(f.log, &loggedRow{seq: f.seq, row: snapshot})
 	if len(f.log) > f.retention {
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "len(f.log) > f.retention"})
 		f.log = f.log[len(f.log)-f.retention:]
 	}
 	r.publish(s, f, snapshot)
+}
+
+// noteBook tells a feed's book of one row drawn in it, and reports whether the
+// row is QUIET (pageLoad.noteDrawn). A row an entry draws NEW outside a
+// reader's load means the agent's newest store page has moved since it was
+// loaded (bookState.liveSince).
+func (r *resolver) noteBook(s *wsState, f *feedState, id, key string, fresh bool) bool {
+	if s.load != nil && s.load.feedKey == f.key {
+		return s.load.noteDrawn(id, key, fresh)
+	}
+	if fresh && s.inEntry && f.book.newestLoaded && !f.book.liveSince {
+		f.book.liveSince = true
+		r.logger(s.id).Debug("daemon.feed.newest_page_moved",
+			"an entry drew a new row after the feed's newest page was loaded; the next open reads the newest page again",
+			dlog.Context{"feed": f.key, "row": id})
+	}
+	return false
 }
 
 // publish hands one publication — an upsert's snapshot or a removal — to the

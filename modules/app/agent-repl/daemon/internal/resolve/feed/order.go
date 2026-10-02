@@ -41,7 +41,8 @@ import (
 //     base and the next follow count on it, so it sorts just after that row
 //     and every earlier follower, and before the next entry's rows. The row it
 //     follows is the one a replay last placed while a replay draws, and the
-//     feed's newest row of its class otherwise.
+//     feed's newest row of its class otherwise; with no such row, a live one
+//     follows the moment it was made (orderNowBase).
 //
 // The fixed-width hex fields make key order the numeric order of the places,
 // and '.' (0x2E) sorts below every hex digit, so a follower lands between its
@@ -107,7 +108,7 @@ func (r *resolver) mintOrder(s *wsState, f *feedState, id string) (string, strin
 	}
 	base := baseOf(r.predecessor(s, f, class))
 	if base == "" {
-		base = string(class)
+		base = r.orderNowBase(s, class)
 	}
 	n := f.followers[base] + 1
 	f.followers[base] = n
@@ -118,6 +119,23 @@ func (r *resolver) mintOrder(s *wsState, f *feedState, id string) (string, strin
 		how = "entry_unplaced"
 	}
 	return fmt.Sprintf("%s%c%08x", base, followSep, n), how
+}
+
+// orderNowBase is the base a row follows when its feed holds no row of its
+// class to follow: the moment it is made, as a conversation place. History is
+// loaded only on a reader's request (book.go), so a feed can hold nothing yet
+// while its conversation has a long past, and a daemon-made row keyed at the
+// top of the feed would be served with the conversation's oldest page and
+// stand above all of it. Keyed at the moment it was made, it sorts after every
+// entry written before it and before every entry written after it.
+//
+// A REPLAY'S rows and a fork's past keep the bare class base: they are drawn
+// from what the page placed, never at a moment of the daemon's own.
+func (r *resolver) orderNowBase(s *wsState, class byte) string {
+	if s.plane != planeLive {
+		return string(class)
+	}
+	return entryBase(class, &conversationv1.ConversationPlace{AtMs: r.deps.Now().UnixMilli()})
 }
 
 // predecessor is the key of the row a row the daemon makes itself follows:
