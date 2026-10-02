@@ -1287,6 +1287,32 @@ carries: the turn, the unit, and the `why' that IS this kind's substatus."
                    :kind (:arm :final-answer-unresolved
                           :value (:turn "turn-7" :unit "msg_01:0" :why "stalled"))))))
 
+(ert-deftest agent-repl-test-wire-host-fault-vendor-start-retrying-kind ()
+  "HostFault's `vendor_start_retrying' kind decodes with everything it carries."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-host-fault
+                  "{\"detail\":\"d\",\"openedAtMs\":\"5\",\"vendorStartRetrying\":{\"failedAttempts\":3,\"cause\":\"timed out\",\"failingSinceMs\":\"1000\"}}")
+                 '(:detail "d" :opened-at-ms 5
+                   :kind (:arm :vendor-start-retrying
+                          :value (:failed-attempts 3 :cause "timed out" :failing-since-ms 1000))))))
+
+(ert-deftest agent-repl-test-wire-host-fault-vendor-start-rejected-kind ()
+  "HostFault's `vendor_start_rejected' kind decodes with everything it carries."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-host-fault
+                  "{\"detail\":\"d\",\"openedAtMs\":\"5\",\"vendorStartRejected\":{\"cause\":\"auth rejected\"}}")
+                 '(:detail "d" :opened-at-ms 5
+                   :kind (:arm :vendor-start-rejected :value (:cause "auth rejected"))))))
+
+(ert-deftest agent-repl-test-wire-host-fault-vendor-start-failed-kind ()
+  "HostFault's `vendor_start_failed' kind decodes with everything it carries."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-host-fault
+                  "{\"detail\":\"d\",\"openedAtMs\":\"5\",\"vendorStartFailed\":{\"failedAttempts\":90,\"lastCause\":\"overloaded\",\"failingSinceMs\":\"2000\"}}")
+                 '(:detail "d" :opened-at-ms 5
+                   :kind (:arm :vendor-start-failed
+                          :value (:failed-attempts 90 :last-cause "overloaded" :failing-since-ms 2000))))))
+
 (ert-deftest agent-repl-test-wire-host-fault-unset-kind-is-a-breach ()
   "A fault with no kind is a breach: `detail' supplements the class, never
 replaces it."
@@ -1302,12 +1328,12 @@ replaces it."
                  '("HostFault" shimDead "unknown field"))))
 
 (ert-deftest agent-repl-test-wire-host-fault-kind-arms-pinned ()
-  "HostFault's kind oneof has exactly the fourteen arms decoded here."
+  "HostFault's kind oneof has exactly the seventeen arms decoded here."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_watch_host_workspace.pb.go"
                         "HostFault")
                        #'string<)
-                 (sort (list "shimStartFailed" "shimDied" "linkSevered" "resumeFailed" "bounceDied" "bounceUnknown" "classifierFailed" "shimReported" "conversationAbandoned" "sessionAbsent" "watchOpenRefused" "daemonStateUnreadable" "adoptionWindowExpired" "finalAnswerUnresolved")
+                 (sort (list "shimStartFailed" "shimDied" "linkSevered" "resumeFailed" "bounceDied" "bounceUnknown" "classifierFailed" "shimReported" "conversationAbandoned" "sessionAbsent" "watchOpenRefused" "daemonStateUnreadable" "adoptionWindowExpired" "finalAnswerUnresolved" "vendorStartRetrying" "vendorStartRejected" "vendorStartFailed")
                        #'string<))))
 
 
