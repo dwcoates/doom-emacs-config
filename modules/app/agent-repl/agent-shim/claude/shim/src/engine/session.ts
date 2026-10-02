@@ -3913,6 +3913,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     preInitKinds = [];
     preInitKindsDropped = 0;
     vendorStderrTail = "";
+    vendorExit = undefined;
     return new Promise<void>((resolve, reject) => {
       const timeout = deps.initTimeoutMs ?? INIT_TIMEOUT_MS;
       startResolve = () => {
@@ -4072,6 +4073,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     if (source.case === undefined) {
       throw new Error("shim session: StartSession reached the engine with no source");
     }
+    // WHEN THIS ATTEMPT BEGAN, for the failed start's record: how long the
+    // vendor was given before the start was refused is half its diagnosis.
+    const startBeganMs = deps.nowMs();
     let vendorSessionId: string;
     let clearedTo: string | undefined;
     let facts: TranscriptFacts | undefined;
@@ -4143,6 +4147,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
           {
             vendor_session_id: vendorSessionId,
             retry: remedy.retry,
+            elapsed_ms: deps.nowMs() - startBeganMs,
             cause: remedy.detail,
           },
           "refused StartSession: the cold gate's remediation failed",
@@ -4302,6 +4307,18 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         {
           vendor_session_id: inForce,
           binding: brandNew || clearedTo !== undefined ? "fresh" : "resume",
+          // WHAT THE DAEMON IS TOLD, AND WHY: the retry label this refusal
+          // carries, how long the vendor was given, and the bound that tripped
+          // when one did ("" and -1 when the start failed on an answer).
+          retry: label.retry,
+          elapsed_ms: deps.nowMs() - startBeganMs,
+          bound: label.bound?.name ?? "",
+          bound_ms: label.bound?.ms ?? -1,
+          // THE CHILD AS IT STOOD WHEN THE START FAILED, before the teardown
+          // below closes it: alive means no exit was observed this attempt.
+          vendor_child_alive: vendorExit === undefined,
+          vendor_exit_code: vendorExit?.code ?? -1,
+          vendor_exit_signal: vendorExit?.signal ?? "",
           pre_init_messages: preInitKinds.length + preInitKindsDropped,
           pre_init_kinds: preInitKinds.join(","),
           vendor_stderr: vendorStderrTail.trim(),
