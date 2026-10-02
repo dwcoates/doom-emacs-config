@@ -260,3 +260,24 @@ func TestTailOnlyWatchDeliversOnlyLinesWrittenAfterTheOpen(t *testing.T) {
 	assertTexts(t, "the tail", receivedTexts(receiveLines(t, stream, 1)), []string{"later"})
 	store.assertNoErrorRecords()
 }
+
+// TestTailOnlyOpenNamesTheBooksNewestItem: the anchor a tail-only caller
+// stands on without reading a page.
+func TestTailOnlyOpenNamesTheBooksNewestItem(t *testing.T) {
+	// Arrange.
+	store := startStore(t, storeOptions{})
+	ctx, cancel := callContext(t)
+	defer cancel()
+	cli := store.client()
+	writeNumberedLines(ctx, t, streamProducer(cli), "main", 3)
+	head := pagePointers(openSession(ctx, t, cli, "main", nil).GetPage())[0]
+
+	// Act.
+	opened := openTailOnly(ctx, t, cli, "main")
+
+	// Assert.
+	if got := opened.GetNewest().GetValue(); got != head {
+		t.Fatalf("newest = %q, want the book's head %q", got, head)
+	}
+	store.assertNoErrorRecords()
+}

@@ -19,6 +19,12 @@ import (
 type OpenedPage struct {
 	Page   *storev1.AgentSessionPage
 	PinSeq uint64
+	// Newest is the book's newest line BY PLACE as of the open — the line a
+	// repaint would serve first — read in the same transaction as the page and
+	// the pin, whatever the opening asked for. Nil when the book holds no
+	// line. A tail-only caller anchors on it (its teardown head, its lossless
+	// re-open mark, whether the book was empty) without reading a page.
+	Newest *storev1.StoreItemPointer
 }
 
 // PageSize IS THE PAGE: the number of lines every page this store serves holds
@@ -126,6 +132,12 @@ func (d *DB) beginRead(ctx context.Context) (*sql.Tx, error) {
 // looked like patience. The `agent` table is the register that separates them:
 // every page-line write ensures a row there, so "no row" is "never heard of".
 //
+// EVERY OPEN NAMES THE BOOK'S NEWEST LINE (OpenedPage.Newest), by place, so
+// the head a repaint would lead with is stated even when the page is not
+// served. By place rather than by write order because that is the head every
+// reader means; a catch-up from it is still lossless, since `position > mark`
+// is a superset of what was written after the open.
+//
 // A TAIL-ONLY OPEN SERVES NO LINES AND REPORTS THE FLOOR. The boundary arm
 // describes what lies below THIS page, and `more` must point at the page's
 // oldest line — an empty page has none, and no pointer can name "the top of
@@ -190,6 +202,10 @@ func (d *DB) OpenPage(ctx context.Context, agentID string, opening Opening) (Ope
 	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(write_seq), 0) FROM entry`).Scan(&pinSeq); err != nil {
 		return OpenedPage{}, d.refuse(base, storagef(err, "reading the watch pin"))
 	}
+	newest, err := newestLine(ctx, tx, agentID)
+	if err != nil {
+		return OpenedPage{}, d.refuse(base, err)
+	}
 
 	page := &storev1.AgentSessionPage{Lines: lines}
 	if more {
@@ -204,7 +220,22 @@ func (d *DB) OpenPage(ctx context.Context, agentID string, opening Opening) (Ope
 	verbose := base
 	verbose.WriteSeq = pinSeq
 	d.log.LogVerbose(verbose, "page opened lines=%d more=%t opening=%s", len(lines), more, opening)
-	return OpenedPage{Page: page, PinSeq: pinSeq}, nil
+	return OpenedPage{Page: page, PinSeq: pinSeq, Newest: newest}, nil
+}
+
+// newestLine is the pointer of a book's newest page line by place, or nil for
+// a book that holds none. It reads the same place index the repaint seeks.
+func newestLine(ctx context.Context, tx *sql.Tx, agentID string) (*storev1.StoreItemPointer, error) {
+	var position int64
+	err := tx.QueryRowContext(ctx, newestLineSQL, agentID, kindPageLine).Scan(&position)
+	switch {
+	case err == nil:
+		return encodePointer(position), nil
+	case isNoRows(err):
+		return nil, nil
+	default:
+		return nil, storagef(err, "reading the newest line of book %q", agentID)
+	}
 }
 
 // ReadPage walks one book to the lines placed strictly BEFORE a served
@@ -439,6 +470,13 @@ const (
 	  FROM entry_place p CROSS JOIN entry e ON e.position = p.position
 	  WHERE p.book_agent_id = ? AND e.kind = ?
 	  ORDER BY p.at_ms DESC, p.ordinal DESC, p.position DESC LIMIT ?`
+
+	// newestLineSQL binds (book, the page-line kind): the position a repaint
+	// would serve first, from the same place-index seek.
+	newestLineSQL = `SELECT p.position
+	  FROM entry_place p CROSS JOIN entry e ON e.position = p.position
+	  WHERE p.book_agent_id = ? AND e.kind = ?
+	  ORDER BY p.at_ms DESC, p.ordinal DESC, p.position DESC LIMIT 1`
 
 	// pageBeforeSQL binds (book, the page-line kind, the named line's at_ms,
 	// ordinal and position, limit): every line placed strictly before it.
