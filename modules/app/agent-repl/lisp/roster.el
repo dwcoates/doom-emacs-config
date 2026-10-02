@@ -819,6 +819,12 @@ the decisions.  The FIRST judgment of an id is INFO, its repeats DEBUG.")
 (declare-function agent-repl-host-ref "host" (ws))
 (declare-function agent-repl--maybe-autoselect-input "panels" (ws))
 
+(defvar agent-repl-host-last-request)
+
+(defun agent-repl-roster--ms-since (time)
+  "Return the whole milliseconds since TIME (a `float-time'), or \"none\"."
+  (if time (round (* 1000 (- (float-time) time))) "none"))
+
 (defun agent-repl-roster--current-scope (ws)
   "Return the log scope for a `current' decision about WS (nil: no tab)."
   (or ws '(:agent-repl-central
@@ -848,7 +854,9 @@ be invisible:
   - no tab yet: the workspace has no tab to land on; the tab's opener
     calls this again;
   - already shown;
-  - followed: the switch, landing in the destination's input window.
+  - followed: the switch, landing in the destination's input window; the
+    record carries the push's arrival, the milliseconds since it, and the
+    milliseconds since Emacs's own request for this workspace, if any.
 
 A roster with no `current' decides nothing and says so at DEBUG."
   (let* ((roster agent-repl-roster-view)
@@ -882,14 +890,17 @@ A roster with no `current' decides nothing and says so at DEBUG."
       nil)
      (t
       (setq agent-repl-roster--judged-current id)
-      (agent-repl--info name "elisp.roster.current: followed ws=%s id=%s from=%s pushed-at=%s since-push-ms=%s"
+      (agent-repl--info name "elisp.roster.current: followed ws=%s id=%s from=%s pushed-at=%s since-push-ms=%s since-request-ms=%s"
                         name id shown
                         (if agent-repl-roster--pushed-at
                             (format-time-string "%T.%3N" agent-repl-roster--pushed-at)
                           "none")
-                        (if agent-repl-roster--pushed-at
-                            (round (* 1000 (- (float-time) agent-repl-roster--pushed-at)))
-                          "none"))
+                        (agent-repl-roster--ms-since agent-repl-roster--pushed-at)
+                        ;; Only a request for THIS workspace is the switch's origin;
+                        ;; a sidebar click has no Emacs request behind it.
+                        (agent-repl-roster--ms-since
+                         (and (equal (car agent-repl-host-last-request) name)
+                              (cdr agent-repl-host-last-request))))
       (let ((agent-repl-roster-following t))
         (agent-repl--ws-switch name))
       ;; LAND IN THE INPUT WINDOW AT ONCE, before the next redisplay, rather

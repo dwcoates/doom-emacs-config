@@ -126,6 +126,7 @@ whose calls are the observation."
            (agent-repl-host-reselect-pending nil)
            (agent-repl-host--select-in-flight nil)
            (agent-repl-host--select-queued nil)
+           (agent-repl-host-last-request nil)
            (agent-repl-roster--judged-current nil)
            (agent-repl-roster--pushed-at nil)
            (agent-repl-test-roster--landed nil)
@@ -1195,8 +1196,23 @@ activation hook sends no SelectWorkspace echo."
       ;; Assert
       (should (cl-find-if (lambda (m)
                             (string-match-p
-                             "\\`elisp\\.roster\\.current: followed ws=two id=b from=one pushed-at=[0-9:.]+ since-push-ms=[0-9]+\\'"
+                             "\\`elisp\\.roster\\.current: followed ws=two id=b from=one pushed-at=[0-9:.]+ since-push-ms=[0-9]+ since-request-ms=none\\'"
                              m))
+                          infos)))))
+
+(ert-deftest agent-repl-test-roster-a-followed-request-records-its-latency ()
+  "A follow of Emacs's own request states the milliseconds since it."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let ((infos nil))
+      (setq agent-repl-test-roster--current-name "one"
+            agent-repl-host-last-request (cons "two" (float-time)))
+      (cl-letf (((symbol-function 'agent-repl--info)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) infos))))
+        ;; Act
+        (agent-repl-roster-apply (agent-repl-test-roster--two-tabs "b")))
+      ;; Assert
+      (should (cl-find-if (lambda (m) (string-match-p "since-request-ms=[0-9]+\\'" m))
                           infos)))))
 
 (ert-deftest agent-repl-test-roster-already-shown-is-info-the-first-time ()

@@ -589,6 +589,12 @@ ON-SETTLED is as `agent-repl-host-select' documents."
      (agent-repl--error ws "elisp.host.select-unknown-arm ws=%s arm=%S" ws arm)
      (when on-settled (funcall on-settled :error)))))
 
+(defvar agent-repl-host-last-request nil
+  "The newest switch request, as (WS . FLOAT-TIME), or nil.
+Read by the roster's follow record, which states how long the frame took
+to arrive after the request: the end-to-end latency of a keyboard switch,
+from one log line.")
+
 (defun agent-repl-host-request-switch (ws trigger)
   "Ask the daemon to make WS the current workspace; move nothing here.
 TRIGGER names what the user did (a symbol such as `cycle', `slot',
@@ -599,6 +605,7 @@ A request that cannot be sent is LOUD: a switch the user asked for that
 goes nowhere is reported in the echo area and at WARN, never dropped.
 Answers t when the request was sent or queued, nil otherwise."
   (let ((shown (agent-repl--ws-current-name)))
+    (setq agent-repl-host-last-request (cons ws (float-time)))
     (agent-repl--info ws "elisp.host.switch-requested ws=%s trigger=%s shown=%s pending=%s"
                       ws trigger shown (or (agent-repl-host-pending-selection) "none"))
     (cond

@@ -176,6 +176,7 @@ unary rpc can produce, which the contract never collapses into one."
   `(let ((agent-repl-host--by-name (make-hash-table :test 'equal))
          (agent-repl-host--select-in-flight nil)
          (agent-repl-host--select-queued nil)
+         (agent-repl-host-last-request nil)
          (agent-repl-roster-following nil)
          (agent-repl-test-host--held nil)
          (agent-repl-test-host--reapplied 0)
@@ -725,6 +726,16 @@ says now rather than wait for a push that will never come."
     (agent-repl-host-request-switch "ws-2" 'slot)
     ;; Assert
     (should (equal (agent-repl-test-host--selected-ids) '("ws-id-2")))))
+
+(ert-deftest agent-repl-test-host-a-request-is-remembered-for-the-follow-record ()
+  "The newest request names its workspace, for the follow's latency field."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe-three)
+    ;; Act
+    (agent-repl-host-request-switch "ws-2" 'slot)
+    ;; Assert
+    (should (equal (car agent-repl-host-last-request) "ws-2"))))
 
 (ert-deftest agent-repl-test-host-a-request-is-recorded-at-info ()
   "The user's request is durable, naming its target and its trigger."
