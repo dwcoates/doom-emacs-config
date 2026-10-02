@@ -215,9 +215,6 @@ func (r *resolver) drawContextCut(s *wsState, agent *conversationv1.AgentId, cut
 		separation.Label = &frontendv1.FeedSessionSeparationLabel{Text: compactionLabel(compacted)}
 		separation.Kind = &frontendv1.FeedSessionSeparation_Compacted{Compacted: &frontendv1.FeedContextCutCompacted{
 			Summary: &frontendv1.FeedContextCutSummary{Markdown: compacted.GetSummary().GetMarkdown()},
-			// Folded by default: the cut is not a hole in the conversation,
-			// but it is not the conversation either.
-			Fold: &frontendv1.FeedContextCutFold{Folded: true},
 		}}
 		// BOTH SIDES ARE FORMATTED HERE. The client renders them verbatim and
 		// does no arithmetic and no unit rounding of its own.
