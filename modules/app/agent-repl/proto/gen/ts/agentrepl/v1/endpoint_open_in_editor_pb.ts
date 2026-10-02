@@ -26,7 +26,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_open_in_editor.proto.
  */
 export const file_agentrepl_v1_endpoint_open_in_editor: GenFile = /*@__PURE__*/
-  fileDesc("CiphZ2VudHJlcGwvdjEvZW5kcG9pbnRfb3Blbl9pbl9lZGl0b3IucHJvdG8SDGFnZW50cmVwbC52MSKgAgoTT3BlbkluRWRpdG9yUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEkEKDndvcmtzcGFjZV9maWxlGAQgASgLMicuYWdlbnRyZXBsLnYxLk9wZW5JbkVkaXRvcldvcmtzcGFjZUZpbGVIABI8Cg5tZXJnZV90ZXN0X2xvZxgFIAEoCzIiLmZyb250ZW5kLnYxLkZlZWRNZXJnZVRlc3RMb2dUb2tlbkgAEjcKCWZlZWRfbGluaxgGIAEoCzIiLmFnZW50cmVwbC52MS5PcGVuSW5FZGl0b3JGZWVkTGlua0gAQggKBnRhcmdldEoECAIQA0oECAMQBFIEcGF0aFIEbGluZSJFChlPcGVuSW5FZGl0b3JXb3Jrc3BhY2VGaWxlEgwKBHBhdGgYASABKAkSEQoEbGluZRgCIAEoDUgAiAEBQgcKBV9saW5lIogBChRPcGVuSW5FZGl0b3JSZXNwb25zZRI0CgdzdWNjZXNzGAEgASgLMiEuYWdlbnRyZXBsLnYxLk9wZW5JbkVkaXRvclN1Y2Nlc3NIABIwCgVlcnJvchgCIAEoCzIfLmFnZW50cmVwbC52MS5PcGVuSW5FZGl0b3JFcnJvckgAQggKBnJlc3VsdCIVChNPcGVuSW5FZGl0b3JTdWNjZXNzIqwEChFPcGVuSW5FZGl0b3JFcnJvchJHChF1bmtub3duX3dvcmtzcGFjZRgBIAEoCzIqLmFnZW50cmVwbC52MS5PcGVuSW5FZGl0b3JVbmtub3duV29ya3NwYWNlSAASUAoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgCIAEoCzIuLmFnZW50cmVwbC52MS5PcGVuSW5FZGl0b3JXb3Jrc3BhY2VSZWZNaXNtYXRjaEgAEkcKEXRyYW5zZmVycmluZ19hd2F5GAMgASgLMiouYWdlbnRyZXBsLnYxLk9wZW5JbkVkaXRvclRyYW5zZmVycmluZ0F3YXlIABJCCg9ub3RfeWV0X2Fkb3B0ZWQYBCABKAsyJy5hZ2VudHJlcGwudjEuT3BlbkluRWRpdG9yTm90WWV0QWRvcHRlZEgAElAKFnBhdGhfZXNjYXBlc193b3Jrc3BhY2UYBSABKAsyLi5hZ2VudHJlcGwudjEuT3BlbkluRWRpdG9yUGF0aEVzY2FwZXNXb3Jrc3BhY2VIABJPChZ1bmtub3duX21lcmdlX3Rlc3RfbG9nGAYgASgLMi0uYWdlbnRyZXBsLnYxLk9wZW5JbkVkaXRvclVua25vd25NZXJnZVRlc3RMb2dIABJDCg9saW5rX3VucmVzb2x2ZWQYByABKAsyKC5hZ2VudHJlcGwudjEuT3BlbkluRWRpdG9yTGlua1VucmVzb2x2ZWRIAEIHCgVjYXVzZSIeChxPcGVuSW5FZGl0b3JVbmtub3duV29ya3NwYWNlIjgKIE9wZW5JbkVkaXRvcldvcmtzcGFjZVJlZk1pc21hdGNoEhQKDHJlZ2lzdHJ5X2RpchgBIAEoCSIvChxPcGVuSW5FZGl0b3JUcmFuc2ZlcnJpbmdBd2F5Eg8KB2FkZHJlc3MYASABKAkiGwoZT3BlbkluRWRpdG9yTm90WWV0QWRvcHRlZCIiCiBPcGVuSW5FZGl0b3JQYXRoRXNjYXBlc1dvcmtzcGFjZSIhCh9PcGVuSW5FZGl0b3JVbmtub3duTWVyZ2VUZXN0TG9nIk0KFE9wZW5JbkVkaXRvckZlZWRMaW5rEgwKBGhyZWYYASABKAkSJwoKc291cmNlX3JvdxgCIAEoCzITLmZyb250ZW5kLnYxLkZlZWRJZCIqChpPcGVuSW5FZGl0b3JMaW5rVW5yZXNvbHZlZBIMCgRocmVmGAEgASgJQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_frontend_v1_feed, file_workspace_v1_workspace]);
+  fileDesc("CiphZ2VudHJlcGwvdjEvZW5kcG9pbnRfb3Blbl9pbl9lZGl0b3IucHJvdG8SDGFnZW50cmVwbC52MSKgAgoTT3BlbkluRWRpdG9yUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEkEKDndvcmtzcGFjZV9maWxlGAQgASgLMicuYWdlbnRyZXBsLnYxLk9wZW5JbkVkaXRvcldvcmtzcGFjZUZpbGVIABI8Cg5tZXJnZV90ZXN0X2xvZxgFIAEoCzIiLmZyb250ZW5kLnYxLkZlZWRNZXJnZVRlc3RMb2dUb2tlbkgAEjcKCWZlZWRfbGluaxgGIAEoCzIiLmFnZW50cmVwbC52MS5PcGVuSW5FZGl0b3JGZWVkTGlua0gAQggKBnRhcmdldEoECAIQA0oECAMQBFIEcGF0aFIEbGluZSJFChlPcGVuSW5FZGl0b3JXb3Jrc3BhY2VGaWxlEgwKBHBhdGgYASABKAkSEQoEbGluZRgCIAEoDUgAiAEBQgcKBV9saW5lIogBChRPcGVuSW5FZGl0b3JSZXNwb25zZRI0CgdzdWNjZXNzGAEgASgLMiEuYWdlbnRyZXBsLnYxLk9wZW5JbkVkaXRvclN1Y2Nlc3NIABIwCgVlcnJvchgCIAEoCzIfLmFnZW50cmVwbC52MS5PcGVuSW5FZGl0b3JFcnJvckgAQggKBnJlc3VsdCIVChNPcGVuSW5FZGl0b3JTdWNjZXNzIqwEChFPcGVuSW5FZGl0b3JFcnJvchJHChF1bmtub3duX3dvcmtzcGFjZRgBIAEoCzIqLmFnZW50cmVwbC52MS5PcGVuSW5FZGl0b3JVbmtub3duV29ya3NwYWNlSAASUAoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgCIAEoCzIuLmFnZW50cmVwbC52MS5PcGVuSW5FZGl0b3JXb3Jrc3BhY2VSZWZNaXNtYXRjaEgAEkcKEXRyYW5zZmVycmluZ19hd2F5GAMgASgLMiouYWdlbnRyZXBsLnYxLk9wZW5JbkVkaXRvclRyYW5zZmVycmluZ0F3YXlIABJCCg9ub3RfeWV0X2Fkb3B0ZWQYBCABKAsyJy5hZ2VudHJlcGwudjEuT3BlbkluRWRpdG9yTm90WWV0QWRvcHRlZEgAElAKFnBhdGhfZXNjYXBlc193b3Jrc3BhY2UYBSABKAsyLi5hZ2VudHJlcGwudjEuT3BlbkluRWRpdG9yUGF0aEVzY2FwZXNXb3Jrc3BhY2VIABJPChZ1bmtub3duX21lcmdlX3Rlc3RfbG9nGAYgASgLMi0uYWdlbnRyZXBsLnYxLk9wZW5JbkVkaXRvclVua25vd25NZXJnZVRlc3RMb2dIABJDCg9saW5rX3VucmVzb2x2ZWQYByABKAsyKC5hZ2VudHJlcGwudjEuT3BlbkluRWRpdG9yTGlua1VucmVzb2x2ZWRIAEIHCgVjYXVzZSIeChxPcGVuSW5FZGl0b3JVbmtub3duV29ya3NwYWNlIjgKIE9wZW5JbkVkaXRvcldvcmtzcGFjZVJlZk1pc21hdGNoEhQKDHJlZ2lzdHJ5X2RpchgBIAEoCSIvChxPcGVuSW5FZGl0b3JUcmFuc2ZlcnJpbmdBd2F5Eg8KB2FkZHJlc3MYASABKAkiGwoZT3BlbkluRWRpdG9yTm90WWV0QWRvcHRlZCIiCiBPcGVuSW5FZGl0b3JQYXRoRXNjYXBlc1dvcmtzcGFjZSIhCh9PcGVuSW5FZGl0b3JVbmtub3duTWVyZ2VUZXN0TG9nIuEBChRPcGVuSW5FZGl0b3JGZWVkTGluaxIMCgRocmVmGAEgASgJEicKCnNvdXJjZV9yb3cYAiABKAsyEy5mcm9udGVuZC52MS5GZWVkSWQSOgoGcmVwb3J0GAMgASgLMiguYWdlbnRyZXBsLnYxLk9wZW5JbkVkaXRvckZlZWRMaW5rUmVwb3J0SAASRQoMd2ViX2ZhbGxiYWNrGAQgASgLMi0uYWdlbnRyZXBsLnYxLk9wZW5JbkVkaXRvckZlZWRMaW5rV2ViRmFsbGJhY2tIAEIPCg1vbl91bnJlc29sdmVkIhwKGk9wZW5JbkVkaXRvckZlZWRMaW5rUmVwb3J0IiEKH09wZW5JbkVkaXRvckZlZWRMaW5rV2ViRmFsbGJhY2siKgoaT3BlbkluRWRpdG9yTGlua1VucmVzb2x2ZWQSDAoEaHJlZhgBIAEoCUIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_frontend_v1_feed, file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.OpenInEditorRequest
@@ -356,6 +356,38 @@ export type OpenInEditorFeedLink = Message<"agentrepl.v1.OpenInEditorFeedLink"> 
    * @generated from field: frontend.v1.FeedId source_row = 2;
    */
   sourceRow?: FeedId | undefined;
+
+  /**
+   * What the daemon does when the link resolves to no file. Always set; a
+   * request with neither arm is malformed. Either way the answer is
+   * `link_unresolved`.
+   *
+   * @generated from oneof agentrepl.v1.OpenInEditorFeedLink.on_unresolved
+   */
+  onUnresolved: {
+    /**
+     * The link was unambiguously meant as a file (an explicit link, or a bare
+     * name whose extension is no web domain ending): publish the transient
+     * "unknown file" footer line and send the workspace its follow-up
+     * question.
+     *
+     * @generated from field: agentrepl.v1.OpenInEditorFeedLinkReport report = 3;
+     */
+    value: OpenInEditorFeedLinkReport;
+    case: "report";
+  } | {
+    /**
+     * The link is AMBIGUOUS: a bare name whose extension is also a web domain
+     * ending (`notes.org` / `wikipedia.org`, `.md`, `.sh`, `.py`, `.rs`). The
+     * file is tried first; when nothing resolves, the daemon stays silent (no
+     * footer line, no follow-up question) and the client opens the name as a
+     * web URL instead.
+     *
+     * @generated from field: agentrepl.v1.OpenInEditorFeedLinkWebFallback web_fallback = 4;
+     */
+    value: OpenInEditorFeedLinkWebFallback;
+    case: "webFallback";
+  } | { case: undefined; value?: undefined };
 };
 
 /**
@@ -364,6 +396,36 @@ export type OpenInEditorFeedLink = Message<"agentrepl.v1.OpenInEditorFeedLink"> 
  */
 export const OpenInEditorFeedLinkSchema: GenMessage<OpenInEditorFeedLink> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_open_in_editor, 11);
+
+/**
+ * Report an unresolved link to the user and the agent.
+ *
+ * @generated from message agentrepl.v1.OpenInEditorFeedLinkReport
+ */
+export type OpenInEditorFeedLinkReport = Message<"agentrepl.v1.OpenInEditorFeedLinkReport"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.OpenInEditorFeedLinkReport.
+ * Use `create(OpenInEditorFeedLinkReportSchema)` to create a new message.
+ */
+export const OpenInEditorFeedLinkReportSchema: GenMessage<OpenInEditorFeedLinkReport> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_open_in_editor, 12);
+
+/**
+ * Resolve silently; the client falls back to the web.
+ *
+ * @generated from message agentrepl.v1.OpenInEditorFeedLinkWebFallback
+ */
+export type OpenInEditorFeedLinkWebFallback = Message<"agentrepl.v1.OpenInEditorFeedLinkWebFallback"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.OpenInEditorFeedLinkWebFallback.
+ * Use `create(OpenInEditorFeedLinkWebFallbackSchema)` to create a new message.
+ */
+export const OpenInEditorFeedLinkWebFallbackSchema: GenMessage<OpenInEditorFeedLinkWebFallback> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_open_in_editor, 13);
 
 /**
  * The feed link resolved to no file.
@@ -384,5 +446,5 @@ export type OpenInEditorLinkUnresolved = Message<"agentrepl.v1.OpenInEditorLinkU
  * Use `create(OpenInEditorLinkUnresolvedSchema)` to create a new message.
  */
 export const OpenInEditorLinkUnresolvedSchema: GenMessage<OpenInEditorLinkUnresolved> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_in_editor, 12);
+  messageDesc(file_agentrepl_v1_endpoint_open_in_editor, 14);
 
