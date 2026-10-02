@@ -40,9 +40,10 @@ type Deps struct {
 }
 
 // SlotsForHost is the core budget: every core but two, which stay free for
-// the owner's live runtime and the machine itself. Never fewer than one.
+// the owner's live runtime and the machine itself. A host with too few cores
+// is refused by the planner rather than silently changing that contract.
 func SlotsForHost(numCPU int) int {
-	return max(1, numCPU-2)
+	return numCPU - 2
 }
 
 // Run executes `testrun run` and returns the process exit status.
