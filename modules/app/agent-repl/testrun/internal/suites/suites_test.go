@@ -562,6 +562,65 @@ func TestGoPkgUnitsUsesACustomBuild(t *testing.T) {
 	}
 }
 
+func TestGoPkgSharedPrebuild(t *testing.T) {
+	// Arrange
+	p := goPkg{Module: "/module with space", Rel: "integration", Bin: "/work/pkg.test"}
+
+	// Act
+	p.sharePrebuilt("/work/shared", "prepare deps")
+
+	// Assert
+	wantScript := "set -euo pipefail\nprepare deps\ngo test -c -o \"/work/pkg.test\" \"./integration\"\n" +
+		"AGENT_REPL_TEST_PREBUILD=\"/work/shared\" \"/work/pkg.test\" -test.run '^$'"
+	if !reflect.DeepEqual(p.Build, []string{"bash", "-c", wantScript}) {
+		t.Fatalf("build = %q, want %q", p.Build, wantScript)
+	}
+	if !reflect.DeepEqual(p.ChunkEnv, []string{"AGENT_REPL_TEST_PREBUILT=/work/shared"}) {
+		t.Fatalf("chunk env = %v", p.ChunkEnv)
+	}
+}
+
+func TestGoModulePrebuildPackage(t *testing.T) {
+	for _, coverage := range []bool{false, true} {
+		t.Run(map[bool]string{false: "ordinary run shares prebuilt binaries", true: "coverage run builds in every process"}[coverage], func(t *testing.T) {
+			// Arrange
+			module := goPackageFixture(t, "func TestA(t *testing.T) {}\n")
+			l := Layout{Module: module, Work: t.TempDir(), Coverage: coverage}
+			s := roster.Suite{Name: "sidecar", PrebuildPackage: "p"}
+
+			// Act
+			u, err := goModuleUnitsForPackages(l, s, module, []string{"p"})
+
+			// Assert
+			if err != nil {
+				t.Fatal(err)
+			}
+			build := u.Atomic[1]
+			usesPrebuild := len(build.Argv) == 3 && build.Argv[0] == "bash" && strings.Contains(build.Argv[2], "AGENT_REPL_TEST_PREBUILD")
+			chunk := u.Splits[0].Chunk("sidecar:p#00", []string{"TestA"})
+			usesPrebuilt := strings.Contains(strings.Join(chunk.Env, " "), "AGENT_REPL_TEST_PREBUILT")
+			if usesPrebuild != !coverage || usesPrebuilt != !coverage {
+				t.Fatalf("coverage=%v: prebuild command=%v prebuilt env=%v", coverage, usesPrebuild, usesPrebuilt)
+			}
+		})
+	}
+}
+
+func TestGoModuleRefusesAMissingPrebuildPackage(t *testing.T) {
+	// Arrange
+	module := goPackageFixture(t, "func TestA(t *testing.T) {}\n")
+	l := Layout{Module: module, Work: t.TempDir()}
+	s := roster.Suite{Name: "sidecar", PrebuildPackage: "not-present"}
+
+	// Act
+	_, err := goModuleUnitsForPackages(l, s, module, []string{"p"})
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "prebuild package \"not-present\" is not a tested package") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
 func TestGoModuleCoverageModes(t *testing.T) {
 	for _, coverage := range []bool{false, true} {
 		t.Run(map[bool]string{false: "ordinary run", true: "coverage run"}[coverage], func(t *testing.T) {

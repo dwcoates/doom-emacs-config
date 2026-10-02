@@ -36,6 +36,9 @@ type Suite struct {
 	Args []string
 	// MayDecline marks the suites allowed to exit 77 ("precondition unmet").
 	MayDecline bool
+	// PrebuildPackage names the Go package whose TestMain fills and consumes
+	// shared binaries before its test chunks run. Empty means no prebuild.
+	PrebuildPackage string
 	// Harness marks a suite that tests the module's own shell scripts in bin/,
 	// which is the blast radius the merge gate gives a change under bin/.
 	Harness bool
@@ -62,7 +65,7 @@ var Suites = []Suite{
 	{Name: "ert", Kind: ERT, Path: "lisp"},
 	{Name: "testrun", Kind: GoModule, Path: "testrun"},
 	{Name: "daemon", Kind: GoModule, Path: "daemon"},
-	{Name: "sidecar", Kind: GoModule, Path: "agent-shim/claude/shim-sidecar"},
+	{Name: "sidecar", Kind: GoModule, Path: "agent-shim/claude/shim-sidecar", PrebuildPackage: "integration"},
 	{Name: "store", Kind: GoModule, Path: "agent-shim/shim-store"},
 	{Name: "lock", Kind: GoModule, Path: "agent-shim/shim-lock"},
 	{Name: "logging", Kind: GoModule, Path: "agent-shim/logging/go"},

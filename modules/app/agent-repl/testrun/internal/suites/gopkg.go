@@ -17,6 +17,7 @@ import (
 	"strings"
 
 	"agentrepl/testrun/internal/run"
+	"agentrepl/testrun/testenv"
 )
 
 // EVERY GO PACKAGE IS SPLIT THE SAME WAY: one unit compiles its test binary,
@@ -51,6 +52,18 @@ type goPkg struct {
 	ChunkEnv []string
 	// Timeout is each chunk's -test.timeout.
 	Timeout string
+}
+
+// sharePrebuilt makes this package's build process compile its test binary,
+// run TestMain once to fill a shared directory, and point every chunk there.
+func (p *goPkg) sharePrebuilt(dir string, before ...string) {
+	lines := append([]string{"set -euo pipefail"}, before...)
+	lines = append(lines,
+		"go test -c -o "+strconv.Quote(p.Bin)+" "+strconv.Quote(goPackageArg(p.Rel)),
+		testenv.Prebuild+"="+strconv.Quote(dir)+" "+strconv.Quote(p.Bin)+" -test.run '^$'",
+	)
+	p.Build = []string{"bash", "-c", strings.Join(lines, "\n")}
+	p.ChunkEnv = append(p.ChunkEnv, testenv.Prebuilt+"="+dir)
 }
 
 // group is the package's chunk group, which is also its unit ID prefix.

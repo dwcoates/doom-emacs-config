@@ -50,6 +50,7 @@ import (
 	"agentrepl/proto/store/v1/storev1connect"
 	"agentrepl/shim-claude-sidecar/internal/convert"
 	"agentrepl/shim-claude-sidecar/internal/testclose"
+	"agentrepl/testrun/testenv"
 )
 
 // ---------------------------------------------------------------------------
@@ -149,8 +150,9 @@ func resolveLayout() (layout, error) {
 // ---------------------------------------------------------------------------
 
 var (
-	repo       layout
-	sidecarBin string
+	repo           layout
+	sidecarBin     string
+	testBinaryMode testenv.BuildMode
 
 	// The store binary is built LAZILY, on the first test that needs it.
 	//
@@ -182,25 +184,72 @@ func runSuite(m *testing.M) int {
 	}
 	repo = l
 
-	binDir, err := os.MkdirTemp("", "agent-repl-itest-bin-")
+	mode, shared, err := testenv.BinaryMode(os.Getenv)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "integration: temp bin dir: %v\n", err)
+		fmt.Fprintf(os.Stderr, "integration: binary mode: %v\n", err)
 		return 1
 	}
-	defer func() {
-		if err := os.RemoveAll(binDir); err != nil {
-			fmt.Fprintf(os.Stderr, "integration: removing temp bin dir %s: %v\n", binDir, err)
-		}
-	}()
+	testBinaryMode = mode
 
-	binPath := filepath.Join(binDir, "shim-claude-sidecar")
-	if err := goBuild(repo.sidecarDir, binPath); err != nil {
-		fmt.Fprintf(os.Stderr, "integration: building the sidecar: %v\n", err)
-		return 1
+	var binDir string
+	if mode == testenv.BuildHere {
+		binDir, err = os.MkdirTemp("", "agent-repl-itest-bin-")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "integration: temp bin dir: %v\n", err)
+			return 1
+		}
+		defer func() {
+			if err := os.RemoveAll(binDir); err != nil {
+				fmt.Fprintf(os.Stderr, "integration: removing temp bin dir %s: %v\n", binDir, err)
+			}
+		}()
+	} else {
+		binDir = filepath.Join(shared, sidecarIntegrationSharedSub)
+		if mode == testenv.BuildInto {
+			if err := os.MkdirAll(binDir, 0o755); err != nil {
+				fmt.Fprintf(os.Stderr, "integration: create shared bin dir: %v\n", err)
+				return 1
+			}
+		}
 	}
-	sidecarBin = binPath
+
+	sidecarBin = filepath.Join(binDir, "shim-claude-sidecar")
 	storeBinPath = filepath.Join(binDir, "shim-store")
 	lockBinPath = filepath.Join(binDir, "shim-lock")
+	if mode == testenv.UsePrebuilt {
+		for _, binary := range []struct {
+			name string
+			dst  *string
+		}{
+			{name: "shim-claude-sidecar", dst: &sidecarBin},
+			{name: "shim-store", dst: &storeBinPath},
+			{name: "shim-lock", dst: &lockBinPath},
+		} {
+			path, err := testenv.SharedBinary(shared, sidecarIntegrationSharedSub, binary.name)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "integration: resolve prebuilt %s: %v\n", binary.name, err)
+				return 1
+			}
+			*binary.dst = path
+		}
+	} else {
+		if err := goBuild(repo.sidecarDir, sidecarBin); err != nil {
+			fmt.Fprintf(os.Stderr, "integration: building the sidecar: %v\n", err)
+			return 1
+		}
+	}
+	if mode == testenv.BuildInto {
+		for _, binary := range []struct{ name, dir string }{
+			{name: "shim-store", dir: repo.storeDir},
+			{name: "shim-lock", dir: repo.lockDir},
+		} {
+			if err := goBuild(binary.dir, filepath.Join(binDir, binary.name)); err != nil {
+				fmt.Fprintf(os.Stderr, "integration: prebuilding %s: %v\n", binary.name, err)
+				return 1
+			}
+		}
+		return 0
+	}
 
 	// Nothing here ever reaches a vendor; the guard is stated so a regression
 	// that tried would fail loudly rather than silently make a call.
@@ -213,6 +262,8 @@ func runSuite(m *testing.M) int {
 	defer stopSharedVendorStore()
 	return m.Run()
 }
+
+const sidecarIntegrationSharedSub = "sidecar-integration-bin"
 
 func goBuild(moduleDir, out string) error {
 	cmd := exec.Command("go", "build", "-o", out, ".")
@@ -965,7 +1016,13 @@ func storeBinary(t *testing.T) string {
 // lifetime is the TEST BINARY's rather than one subject's.
 func storeBinaryPath() (string, error) {
 	storeBinOnce.Do(func() {
-		storeBinErr = goBuild(repo.storeDir, storeBinPath)
+		switch testBinaryMode {
+		case testenv.BuildHere:
+			storeBinErr = goBuild(repo.storeDir, storeBinPath)
+		case testenv.UsePrebuilt:
+		case testenv.BuildInto:
+			storeBinErr = fmt.Errorf("integration: store binary requested while TestMain is only prebuilding")
+		}
 	})
 	if storeBinErr != nil {
 		return "", storeBinErr
@@ -981,7 +1038,13 @@ func storeBinaryPath() (string, error) {
 func lockBinary(t *testing.T) string {
 	t.Helper()
 	lockBinOnce.Do(func() {
-		lockBinErr = goBuild(repo.lockDir, lockBinPath)
+		switch testBinaryMode {
+		case testenv.BuildHere:
+			lockBinErr = goBuild(repo.lockDir, lockBinPath)
+		case testenv.UsePrebuilt:
+		case testenv.BuildInto:
+			lockBinErr = fmt.Errorf("integration: lock binary requested while TestMain is only prebuilding")
+		}
 	})
 	if lockBinErr != nil {
 		t.Fatalf("the real shim takes its kernel claims with shim-lock, which does not build: %v", lockBinErr)
