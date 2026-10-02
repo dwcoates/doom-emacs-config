@@ -55,7 +55,7 @@ func (r *resolver) LoadThrough(ctx context.Context, ws ids.WorkspaceID, reader R
 			return nil, err
 		}
 		if plan != nil {
-			if _, err := r.load(ctx, ws, root, *plan); err != nil {
+			if _, err := r.load(ctx, *plan); err != nil {
 				if !errors.Is(err, ErrNoHistorySource) {
 					return nil, err
 				}
@@ -143,7 +143,7 @@ func (r *resolver) LoadOlder(ctx context.Context, ws ids.WorkspaceID) (bool, err
 		return false, nil
 	}
 	plan.pushAll = true
-	got, err := r.load(ctx, ws, root, plan)
+	got, err := r.load(ctx, plan)
 	if errors.Is(err, ErrNoHistorySource) {
 		return false, nil
 	}
