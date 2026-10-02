@@ -39,7 +39,6 @@
 (declare-function agent-repl--ws-current-name "workspace")
 (declare-function agent-repl--ws-dir "status")
 (declare-function agent-repl--ws-frame-ordered-names "workspace")
-(declare-function agent-repl--ws-frame-save-state "workspace")
 (declare-function agent-repl--ws-frontend "frontends")
 (declare-function agent-repl--ws-frontend-name "frontends")
 (declare-function agent-repl--ws-get "workspace")
@@ -744,10 +743,20 @@ side-window-only frame)."
 ;; countdown left to restart, because there is no decay left to pace.
 
 (defun agent-repl--before-persp-deactivate (&rest _)
-  "Save window state before perspective deactivation.
-Redirects away from agent buffers and saves frame state.  Also
-records `:panels-were-visible' so `--ensure-own-panels-on-persp-switch'
-can restore the correct workspace's panels after activation.
+  "Prepare the departing frame for persp-mode's own snapshot.
+Redirects away from agent buffers, so the window persp-mode saves as
+selected is one a later `switch-to-buffer' can reuse.  Also records
+`:panels-were-visible' so `--ensure-own-panels-on-persp-switch' can
+restore the correct workspace's panels after activation.
+
+IT TAKES NO SNAPSHOT ITSELF.  persp-mode's own deactivation
+\(`persp--deactivate') runs `persp-before-deactivate-functions' and then
+calls `persp-frame-save-state' on the departing frame, so the redirect
+made here is already in the snapshot it takes.  This hook used to call
+`persp-frame-save-state' as well, which snapshotted the departing frame
+TWICE per switch -- the first copy overwritten by the second a moment
+later, at the cost of a full window-state serialization on every
+`s-{' and `s-}'.
 Logs `persp-names-cache' so cache mutations across persp lifecycle
 events (kill, switch, add) are traceable.
 
@@ -767,11 +776,7 @@ its deactivation is a genuinely global-scope event."
        ;; Record whether panels are visible BEFORE redirecting/saving so
        ;; the activated hook can restore them if persp-mode drops them.
        (agent-repl--ws-put ws :panels-were-visible (agent-repl--panels-visible-p))
-       (agent-repl--redirect-from-agent-before-save)
-       (condition-case err
-           (agent-repl--ws-frame-save-state)
-         (error (agent-repl--warn log-ws "persp-frame-save-state failed for ws=%s: %S" ws err)
-                (agent-repl--log log-ws "before-persp-deactivate: persp-frame-save-state error ws=%s: %S" ws err)))))))
+       (agent-repl--redirect-from-agent-before-save)))))
 
 (defvar agent-repl--switch-activation-generation 0
   "The generation of the newest perspective activation.

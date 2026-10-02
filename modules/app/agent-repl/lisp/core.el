@@ -1166,7 +1166,6 @@ and logging its own resolution would recurse through the same boundary."
     ("state-file" . "workspace registry storage is process-wide")
     ("after-persp-activated:" . "foreign perspective activation has no agent workspace")
     ("before-persp-deactivate:" . "perspective deactivation can precede workspace selection")
-    ("persp-frame-save-state failed" . "perspective teardown can run without an agent workspace")
     ("on-window-change" . "frame-wide window reconciliation can run without an agent workspace")
     ("sync-panels" . "frame-wide orphan-panel reconciliation spans workspaces")
     ("frontend webview adopt-hook failed" . "the frontend hook resolves no safe workspace")

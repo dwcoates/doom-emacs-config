@@ -13,6 +13,10 @@
                                             (or load-file-name buffer-file-name)))
       nil t)
 
+;; persp-mode's hook, bound dynamically by the snapshot-count tests that
+;; drive its deactivation protocol; persp-mode itself is not loaded here.
+(defvar persp-before-deactivate-functions)
+
 ;;;; ---- Tests: Input panel height ----
 
 (ert-deftest agent-repl-test-panels-input-height-fraction-default ()
@@ -3629,8 +3633,7 @@ rather than booting a session as a side effect."
   (agent-repl-test--with-clean-state
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
               ((symbol-function 'agent-repl--panels-visible-p) (lambda () t))
-              ((symbol-function 'agent-repl--redirect-from-agent-before-save) #'ignore)
-              ((symbol-function 'agent-repl--ws-frame-save-state) #'ignore))
+              ((symbol-function 'agent-repl--redirect-from-agent-before-save) #'ignore))
       (agent-repl--before-persp-deactivate)
       (should (eq (agent-repl--ws-get "ws1" :panels-were-visible) t)))))
 
@@ -3639,8 +3642,7 @@ rather than booting a session as a side effect."
   (agent-repl-test--with-clean-state
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
               ((symbol-function 'agent-repl--panels-visible-p) (lambda () nil))
-              ((symbol-function 'agent-repl--redirect-from-agent-before-save) #'ignore)
-              ((symbol-function 'agent-repl--ws-frame-save-state) #'ignore))
+              ((symbol-function 'agent-repl--redirect-from-agent-before-save) #'ignore))
       (agent-repl--before-persp-deactivate)
       (should-not (agent-repl--ws-get "ws1" :panels-were-visible)))))
 
@@ -3656,12 +3658,69 @@ rather than booting a session as a side effect."
                    (setq captured workspace)
                    (funcall function)))
                 ((symbol-function 'agent-repl--panels-visible-p) (lambda () nil))
-                ((symbol-function 'agent-repl--redirect-from-agent-before-save) #'ignore)
-                ((symbol-function 'agent-repl--ws-frame-save-state) #'ignore))
+                ((symbol-function 'agent-repl--redirect-from-agent-before-save) #'ignore))
         ;; Act.
         (agent-repl--before-persp-deactivate))
       ;; Assert.
       (should (eq captured agent-repl--global-log-scope)))))
+
+;;;; ---- Tests: one departing-frame snapshot per switch ----
+
+(ert-deftest agent-repl-test-panels-before-persp-deactivate-takes-no-snapshot ()
+  "The deactivate hook leaves the frame snapshot to persp-mode alone."
+  (agent-repl-test--with-clean-state
+    ;; Arrange.
+    (let ((snapshots 0))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
+                ((symbol-function 'agent-repl--panels-visible-p) (lambda () nil))
+                ((symbol-function 'agent-repl--redirect-from-agent-before-save) #'ignore)
+                ((symbol-function 'persp-frame-save-state)
+                 (lambda (&rest _) (setq snapshots (1+ snapshots)))))
+        ;; Act.
+        (agent-repl--before-persp-deactivate))
+      ;; Assert.
+      (should (= snapshots 0)))))
+
+(ert-deftest agent-repl-test-panels-switch-snapshots-departing-frame-once ()
+  "A switch snapshots the departing frame exactly once.
+Drives persp-mode's frame deactivation protocol (`persp--deactivate'):
+the before-deactivate hooks, this module's included, then persp-mode's
+own `persp-frame-save-state'."
+  (agent-repl-test--with-clean-state
+    ;; Arrange.
+    (let ((snapshots 0)
+          (persp-before-deactivate-functions
+           (list #'agent-repl--before-persp-deactivate)))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
+                ((symbol-function 'agent-repl--panels-visible-p) (lambda () nil))
+                ((symbol-function 'agent-repl--redirect-from-agent-before-save) #'ignore)
+                ((symbol-function 'persp-frame-save-state)
+                 (lambda (&rest _) (setq snapshots (1+ snapshots)))))
+        ;; Act.
+        (run-hook-with-args 'persp-before-deactivate-functions 'frame)
+        (persp-frame-save-state (selected-frame) nil))
+      ;; Assert.
+      (should (= snapshots 1)))))
+
+(ert-deftest agent-repl-test-panels-before-persp-deactivate-redirects-before-the-snapshot ()
+  "The redirect lands before persp-mode snapshots the frame.
+The snapshot follows the hooks, so the redirect is what it records."
+  (agent-repl-test--with-clean-state
+    ;; Arrange.
+    (let ((order nil)
+          (persp-before-deactivate-functions
+           (list #'agent-repl--before-persp-deactivate)))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
+                ((symbol-function 'agent-repl--panels-visible-p) (lambda () nil))
+                ((symbol-function 'agent-repl--redirect-from-agent-before-save)
+                 (lambda () (push :redirect order)))
+                ((symbol-function 'persp-frame-save-state)
+                 (lambda (&rest _) (push :snapshot order))))
+        ;; Act.
+        (run-hook-with-args 'persp-before-deactivate-functions 'frame)
+        (persp-frame-save-state (selected-frame) nil))
+      ;; Assert.
+      (should (equal (nreverse order) '(:redirect :snapshot))))))
 
 ;;;; ---- Tests: before-persp-deactivate log routing ----
 
@@ -3676,7 +3735,6 @@ own no durable sink, so the record is global by design."
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "none"))
                 ((symbol-function 'agent-repl--panels-visible-p) (lambda () nil))
                 ((symbol-function 'agent-repl--redirect-from-agent-before-save) #'ignore)
-                ((symbol-function 'agent-repl--ws-frame-save-state) #'ignore)
                 ((symbol-function 'agent-repl--log)
                  (lambda (ws &rest _)
                    (when (eq logged 'no-record) (setq logged ws)))))
@@ -3684,25 +3742,6 @@ own no durable sink, so the record is global by design."
         (agent-repl--before-persp-deactivate))
       ;; Assert
       (should (null logged)))))
-
-(ert-deftest agent-repl-test-panels-before-persp-deactivate-placeholder-warns-loudly-once ()
-  "The failure path of a placeholder deactivation is global too.
-`--ws-frame-save-state' can fail for a placeholder as readily as for a real
-workspace, and that warning must not itself become an unroutable record."
-  (agent-repl-test--with-clean-state
-    ;; Arrange
-    (let ((warned 'no-warning))
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "none"))
-                ((symbol-function 'agent-repl--panels-visible-p) (lambda () nil))
-                ((symbol-function 'agent-repl--redirect-from-agent-before-save) #'ignore)
-                ((symbol-function 'agent-repl--ws-frame-save-state)
-                 (lambda () (error "save blew up")))
-                ((symbol-function 'agent-repl--warn)
-                 (lambda (ws &rest _) (setq warned ws))))
-        ;; Act
-        (agent-repl--before-persp-deactivate))
-      ;; Assert
-      (should (null warned)))))
 
 (ert-deftest agent-repl-test-panels-before-persp-deactivate-routable-ws-keeps-attribution ()
   "A REAL workspace's deactivation record still routes to that workspace.
@@ -3717,7 +3756,6 @@ Screening the log name must not demote records that legitimately own a sink."
             (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
                       ((symbol-function 'agent-repl--panels-visible-p) (lambda () nil))
                       ((symbol-function 'agent-repl--redirect-from-agent-before-save) #'ignore)
-                      ((symbol-function 'agent-repl--ws-frame-save-state) #'ignore)
                       ((symbol-function 'agent-repl--log)
                        (lambda (ws &rest _)
                          (when (eq logged 'no-record) (setq logged ws)))))
