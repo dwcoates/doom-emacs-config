@@ -8,6 +8,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/effortlevel"
 	"claude-repld/internal/feedid"
 )
 
@@ -203,27 +204,10 @@ func findingsHeading(findings []*conversationv1.AgentFinding, level conversation
 		return "Findings · none"
 	}
 	heading := fmt.Sprintf("Findings · %d", len(findings))
-	if word := effortWord(level); word != "" {
+	if word := effortlevel.Word(level); word != "" {
 		heading = heading + " · " + word
 	}
 	return heading
-}
-
-// effortWord names a review's effort level, empty when the tool stated none.
-func effortWord(level conversationv1.AgentEffortLevel) string {
-	switch level {
-	case conversationv1.AgentEffortLevel_AGENT_EFFORT_LEVEL_LOW:
-		return "low"
-	case conversationv1.AgentEffortLevel_AGENT_EFFORT_LEVEL_MEDIUM:
-		return "medium"
-	case conversationv1.AgentEffortLevel_AGENT_EFFORT_LEVEL_HIGH:
-		return "high"
-	case conversationv1.AgentEffortLevel_AGENT_EFFORT_LEVEL_XHIGH:
-		return "xhigh"
-	case conversationv1.AgentEffortLevel_AGENT_EFFORT_LEVEL_MAX:
-		return "max"
-	}
-	return ""
 }
 
 // findingRow renders one finding: the verdict badge, the category chip, the
