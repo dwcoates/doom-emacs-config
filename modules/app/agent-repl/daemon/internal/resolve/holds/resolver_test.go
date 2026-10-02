@@ -1,7 +1,11 @@
 package holds_test
 
 import (
+	"fmt"
+	"sync"
 	"testing"
+
+	"google.golang.org/protobuf/proto"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -335,5 +339,34 @@ func TestAHoldForAnUnboundWorkspaceStatesTheViolationAtError(t *testing.T) {
 	}
 	if n != 1 {
 		t.Fatalf("unbound-workspace ERROR records = %d, want 1", n)
+	}
+}
+
+// TestConcurrentChangesLeaveTheNewestTrayPublished pins the tray's
+// publication order: each change's tray is published under the lock that
+// rendered it, so once concurrent changes are all in, the topic holds the
+// render of the state they left, never a stale tray published late.
+func TestConcurrentChangesLeaveTheNewestTrayPublished(t *testing.T) {
+	// Arrange
+	r, _ := newResolver(t)
+	const writers = 64
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < writers; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			r.SetHeldPrompts(testWS, []wsm.HeldPrompt{hold(fmt.Sprintf("t%d", i), "held")})
+		}(i)
+	}
+
+	// Act
+	close(start)
+	wg.Wait()
+
+	// Assert
+	if got, want := latest(t, r), holds.RenderNow(r, testWS); !proto.Equal(got, want) {
+		t.Fatalf("published tray = %v, want the render of the final state %v", got, want)
 	}
 }

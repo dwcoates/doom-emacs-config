@@ -1,8 +1,11 @@
 package topbar
 
 import (
+	"sync"
 	"testing"
 	"time"
+
+	"google.golang.org/protobuf/proto"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -1481,5 +1484,42 @@ func TestAFactForAnUnboundWorkspaceStatesTheViolationAtError(t *testing.T) {
 	}
 	if n != 1 {
 		t.Fatalf("unbound-workspace ERROR records = %d, want 1", n)
+	}
+}
+
+// TestConcurrentChangesLeaveTheNewestViewPublished pins the topbar's
+// publication order: each change's view is published under the lock that
+// rendered it, so once concurrent changes are all in, the topic holds the
+// render of the state they left, never a stale view published late.
+func TestConcurrentChangesLeaveTheNewestViewPublished(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.ready(t)
+	const writers = 64
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < writers; i++ {
+		wg.Add(1)
+		go func(i int64) {
+			defer wg.Done()
+			<-start
+			h.r.OnSessionUpdate(testWS, contextUsage(1_000*(i+1), 200_000, i, "claude-opus-5"))
+		}(int64(i))
+	}
+
+	// Act
+	close(start)
+	wg.Wait()
+
+	// Assert
+	h.r.mu.Lock()
+	want, err := h.r.render(h.r.stateLocked(testWS))
+	h.r.mu.Unlock()
+	if err != nil || want == nil {
+		t.Fatalf("render = (%v, %v), want a complete view", want, err)
+	}
+	got, ok := h.r.Topic(testWS).Latest()
+	if !ok || !proto.Equal(got, want) {
+		t.Fatalf("published view = %v, want the render of the final state %v", got, want)
 	}
 }

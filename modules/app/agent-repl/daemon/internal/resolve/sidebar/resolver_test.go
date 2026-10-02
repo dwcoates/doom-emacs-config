@@ -7,9 +7,11 @@ import (
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/resolve/footer"
 	"claude-repld/internal/resolve/sidebar"
 	"claude-repld/internal/shimclient"
 	"claude-repld/internal/vocab"
+	"claude-repld/internal/wsm"
 )
 
 func TestNewRefusesWithoutLogSurfaces(t *testing.T) {
@@ -344,5 +346,46 @@ func TestNewRefusesASurplusMergeGlyphRow(t *testing.T) {
 	// Assert.
 	if err == nil {
 		t.Fatal("New accepted a merge_glyphs row naming no merge arm")
+	}
+}
+
+// TestAViewIsPublishedBeforeAnotherChangeCanPublishItsOwn pins the roster's
+// publication order: a change's view is published under the lock that
+// rendered it, so a change made after it can never be overwritten by it. The
+// result sink is told off the lock and is the window a later change runs in:
+// here the accepted prompt's ack and first activity land inside it.
+// (2026-10-02: the roster walked submitting, ready, thinking for an accepted
+// prompt, a stale view published after a newer one.)
+func TestAViewIsPublishedBeforeAnotherChangeCanPublishItsOwn(t *testing.T) {
+	// Arrange: a restored result, which the next turn's start reports gone.
+	var r sidebar.Resolver
+	inSink := false
+	r, err := sidebar.New(testColors(), dlog.NewTestSurfaces(), sidebar.WithResultSink(
+		func(ids.WorkspaceID, *wsm.TurnResult) {
+			if inSink {
+				return
+			}
+			inSink = true
+			r.AckTurn(theWS)
+			r.OnActivity(theWS, &conversationv1.AgentId{Value: "main"}, &conversationv1.AgentActivity{})
+		}))
+	if err != nil {
+		t.Fatalf("sidebar.New: %v", err)
+	}
+	rec := workspace(string(theWS), "one")
+	rec.Result = &wsm.TurnResult{End: wsm.TurnResultDone, Read: true}
+	r.SetRegistry(registry(rec))
+	r.OnLink(theWS, shimclient.LinkConnected)
+	r.OnSessionStarted(theWS, &conversationv1.SessionStarted{VendorSessionId: "vendor-1"})
+
+	// Act
+	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
+
+	// Assert
+	if !inSink {
+		t.Fatal("the result sink was never told the cleared result")
+	}
+	if got := statusName(onlyRow(t, r)); got != "thinking" {
+		t.Fatalf("latest status = %q, want thinking: the submitting view was published after the newer one", got)
 	}
 }

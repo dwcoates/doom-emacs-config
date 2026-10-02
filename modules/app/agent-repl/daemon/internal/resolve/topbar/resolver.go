@@ -154,9 +154,17 @@ func (r *resolver) mutate(ws ids.WorkspaceID, operation, message string, ctx dlo
 	if view != nil {
 		s.sessionlessPublished = sessionlessPublished
 	}
-	topic := r.topicLocked(ws)
 	log := r.logOf(ws, s)
 	edges := sourceEdges(s, view)
+	parked, coldGate, started := s.parked, s.coldGate, s.started
+	// PUBLISHED UNDER THE LOCK THAT RENDERED IT, so views reach the topic in
+	// the order the changes were made. Published after the unlock, a change
+	// rendered first could be published second, and a stale view overwrote a
+	// newer one on the wire. Topic.Publish only enqueues, so it never waits on
+	// a subscriber.
+	if err == nil && view != nil {
+		r.topicLocked(ws).Publish(view)
+	}
 	r.mu.Unlock()
 	for _, edge := range edges {
 		log.Info(edge.operation, edge.message, edge.ctx)
@@ -184,17 +192,14 @@ func (r *resolver) mutate(ws ids.WorkspaceID, operation, message string, ctx dlo
 		// and "why" has to be answerable from the default level rather than
 		// from a reproduction — the same reason the incomplete record above
 		// sits at info.
-		ctx["parked"] = s.parked
-		ctx["cold_gate"] = s.coldGate
-		ctx["started"] = s.started
+		ctx["parked"] = parked
+		ctx["cold_gate"] = coldGate
+		ctx["started"] = started
 		log.Info(operation, "the topbar published the strip with no session facts", ctx)
-		topic.Publish(view)
 	case returnedToFull:
 		log.Info(operation, "the topbar's session facts arrived and the strip is whole", ctx)
-		topic.Publish(view)
 	default:
 		log.Debug(operation, "the topbar took a fact and republished", ctx)
-		topic.Publish(view)
 	}
 }
 

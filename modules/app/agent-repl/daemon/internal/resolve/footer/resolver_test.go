@@ -1090,3 +1090,34 @@ func TestRetryStandingEndsWhenTheRetriedCallIsAnswered(t *testing.T) {
 		t.Fatalf("RetryStanding = true after the retried call was answered")
 	}
 }
+
+// TestConcurrentChangesLeaveTheNewestViewPublished pins the footer's
+// publication order: each change's view is published under the lock that
+// rendered it, so once concurrent changes are all in, the topic holds the
+// view of the state they left, never a stale one published late.
+func TestConcurrentChangesLeaveTheNewestViewPublished(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.r.SetStartFailed(testWS, &StartFailed{Detail: "exit 1: boom"})
+	h.r.OnLink(testWS, shimclient.LinkDead)
+	const writers = 64
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < writers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			h.r.AddDroppedPrompts(testWS, 1)
+		}()
+	}
+
+	// Act
+	close(start)
+	wg.Wait()
+
+	// Assert
+	if got := h.view(t).GetStrip().GetStatus().GetDisconnected().GetActivity().GetSalient().GetStartFailed().GetDroppedPrompts(); got != writers {
+		t.Fatalf("published dropped_prompts = %d, want %d: a stale view was published after a newer one", got, writers)
+	}
+}

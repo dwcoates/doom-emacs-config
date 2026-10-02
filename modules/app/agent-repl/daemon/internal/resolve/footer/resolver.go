@@ -188,8 +188,14 @@ func (r *resolver) mutate(ws ids.WorkspaceID, operation, message string, ctx dlo
 	arm, armChanged, previousArm := s.observeArm(view)
 	line, lineChanged, previousLine := s.observeLine(view)
 	jumps := s.drainJumpNotes()
-	topic := r.topicLocked(ws)
 	log := r.logOf(ws, s)
+	// PUBLISHED UNDER THE LOCK THAT RENDERED IT, so views reach the topic in
+	// the order the changes were made. Published after the unlock, a change
+	// rendered first could be published second, and a stale view overwrote a
+	// newer one on the wire (2026-10-02: the roster walked submitting, ready,
+	// thinking for an accepted prompt). Topic.Publish only enqueues, so it
+	// never waits on a subscriber.
+	r.topicLocked(ws).Publish(view)
 	r.mu.Unlock()
 
 	if ctx == nil {
@@ -199,7 +205,6 @@ func (r *resolver) mutate(ws ids.WorkspaceID, operation, message string, ctx dlo
 	logArmChange(log, operation, arm, armChanged, previousArm)
 	logLineChange(log, operation, arm, line, lineChanged, previousLine)
 	logJumpNotes(log, jumps)
-	topic.Publish(view)
 }
 
 // logArmChange records the PUBLISHED status arm whenever it changes, and only
@@ -279,6 +284,11 @@ func (r *resolver) mutateAll(operation, message string, ctx dlog.Context, apply 
 			jumps: s.drainJumpNotes(),
 		})
 	}
+	// Published under the lock that rendered them, for the reason mutate
+	// states.
+	for _, p := range out {
+		p.topic.Publish(p.view)
+	}
 	r.mu.Unlock()
 
 	if ctx == nil {
@@ -290,7 +300,6 @@ func (r *resolver) mutateAll(operation, message string, ctx dlog.Context, apply 
 		logArmChange(p.log, operation, p.arm, p.armChanged, p.previousArm)
 		logLineChange(p.log, operation, p.arm, p.line, p.lineChanged, p.previousLine)
 		logJumpNotes(p.log, p.jumps)
-		p.topic.Publish(p.view)
 	}
 }
 
