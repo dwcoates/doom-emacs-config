@@ -523,6 +523,14 @@ func (f *Fleet) Adopt(ctx context.Context, ws ids.WorkspaceID) (shimclient.Clien
 	return client, nil
 }
 
+// NoteAdoptedSession states that the shim installed for a workspace by a boot
+// adoption holds its started session (a survivor that is not inert). Install
+// leaves the fact false, because a relaunch installs a shim with none. The
+// boot releases the reconnect holds itself, once the holds are restored.
+func (f *Fleet) NoteAdoptedSession(ws ids.WorkspaceID) {
+	f.noteSessionStarted(ws)
+}
+
 // watchInstalled opens an adopted shim's watches. The durable record is read
 // for ONE decision only — whether there is a conversation here at all — because
 // a workspace with no session record has nothing to watch. Every FACT about the
