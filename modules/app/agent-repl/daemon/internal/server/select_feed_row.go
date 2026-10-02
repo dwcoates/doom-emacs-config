@@ -47,11 +47,17 @@ func (s *server) SelectFeedRow(
 	)
 	switch move := req.Msg.GetMove().(type) {
 	case *agentreplv1.SelectFeedRowRequest_Response:
-		success, err = s.stepSelection(subject.Log, ws, selectionResponse,
-			s.deps.Feed.FinalResponses(ws), move.Response.GetDirection())
+		var rows []*frontendv1.FeedId
+		rows, err = s.selectableRows(ctx, subject.Log, ws, selectionResponse, move.Response.GetDirection())
+		if err == nil {
+			success, err = s.stepSelection(subject.Log, ws, selectionResponse, rows, move.Response.GetDirection())
+		}
 	case *agentreplv1.SelectFeedRowRequest_Prompt:
-		success, err = s.stepSelection(subject.Log, ws, selectionPrompt,
-			s.deps.Feed.RollbackPrompts(ws), move.Prompt.GetDirection())
+		var rows []*frontendv1.FeedId
+		rows, err = s.selectableRows(ctx, subject.Log, ws, selectionPrompt, move.Prompt.GetDirection())
+		if err == nil {
+			success, err = s.stepSelection(subject.Log, ws, selectionPrompt, rows, move.Prompt.GetDirection())
+		}
 	case *agentreplv1.SelectFeedRowRequest_Clear:
 		s.endSelection(subject.Log, ws, nil, returnToTail(), "cleared")
 		success = selectedNone()
@@ -137,6 +143,58 @@ func stayInView() *frontendv1.FeedSelectionNone {
 func selectedNone() *agentreplv1.SelectFeedRowSuccess {
 	return &agentreplv1.SelectFeedRowSuccess{Outcome: &agentreplv1.SelectFeedRowSuccess_None{
 		None: &agentreplv1.SelectFeedRowSuccessNone{}}}
+}
+
+// selectableRows answers the selectable rows of KIND, oldest first, from the
+// pages the daemon holds — LOADING THE NEXT OLDER ROOT PAGE while a step OLDER
+// would otherwise run past the oldest loaded row (feed paging on demand,
+// ruling 7). A loaded page's rows are pushed to the root feed's tails, so the
+// row the step lands on is on the reader's screen. Nothing older to load
+// leaves the rows as held, and the step wraps as it always has.
+func (s *server) selectableRows(
+	ctx context.Context,
+	log dlog.Logger,
+	ws ids.WorkspaceID,
+	kind selectionKind,
+	direction agentreplv1.SelectFeedRowDirection,
+) ([]*frontendv1.FeedId, error) {
+	read := func() []*frontendv1.FeedId {
+		if kind == selectionPrompt {
+			return s.deps.Feed.RollbackPrompts(ws)
+		}
+		return s.deps.Feed.FinalResponses(ws)
+	}
+	rows := read()
+	loads := 0
+	for direction == agentreplv1.SelectFeedRowDirection_SELECT_FEED_ROW_DIRECTION_OLDER && s.atOldestOf(ws, kind, rows) {
+		loaded, err := s.deps.Feed.LoadOlder(ctx, ws)
+		if err != nil {
+			return nil, err
+		}
+		if !loaded {
+			break
+		}
+		loads++
+		rows = read()
+	}
+	if loads > 0 {
+		log.Info(opSelectFeedRow, "a step older ran past the oldest loaded row; older pages were loaded for it",
+			dlog.Context{"kind": kind.String(), "pages": loads, "rows": len(rows)})
+	}
+	return rows, nil
+}
+
+// atOldestOf reports whether a step older along ROWS would run past the
+// oldest loaded row of KIND: none is loaded, or the selection stands on the
+// oldest one.
+func (s *server) atOldestOf(ws ids.WorkspaceID, kind selectionKind, rows []*frontendv1.FeedId) bool {
+	if len(rows) == 0 {
+		return true
+	}
+	s.selectionMu.Lock()
+	defer s.selectionMu.Unlock()
+	current, currentKind, held := selectedRow(s.selections[ws].GetSelection())
+	return held && currentKind == kind && indexOfFeedID(rows, current) == 0
 }
 
 // stepSelection moves the selection one row of KIND in DIRECTION along ROWS

@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -714,4 +715,117 @@ func TestReturnFeedToTailForAnUnknownWorkspaceIsAnError(t *testing.T) {
 		}
 	}
 	t.Fatalf("records = %v, want an error under daemon.server.return_feed_to_tail", log.Records())
+}
+
+// TestSelectFeedRowStepOlderPastTheOldestLoadsTheOlderPage pins ruling 7 of
+// feed paging on demand: a step older from the oldest loaded final response
+// loads the next older page and lands on its newest final, rather than
+// wrapping to the newest.
+func TestSelectFeedRowStepOlderPastTheOldestLoadsTheOlderPage(t *testing.T) {
+	// Arrange: "b" is selected and is the oldest loaded final.
+	h := newHarness(t)
+	h.Feed.finals = feedIDs("b", "c")
+	h.Feed.olderFinals = [][]*frontendv1.FeedId{feedIDs("a")}
+	h.selectResponse(t, "b")
+
+	// Act.
+	resp, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(older)))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("SelectFeedRow: %v", err)
+	}
+	if got := resp.Msg.GetSuccess().GetSelected().GetSelection().GetResponse().GetRow().GetValue(); got != "a" {
+		t.Fatalf("selected response = %q, want a from the older page", got)
+	}
+}
+
+// TestSelectFeedRowStepOlderWithNothingOlderWraps pins the conversation's
+// start: nothing older to load leaves the wrap as it always was.
+func TestSelectFeedRowStepOlderWithNothingOlderWraps(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Feed.finals = feedIDs("b", "c")
+	h.selectResponse(t, "b")
+
+	// Act.
+	resp, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(older)))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("SelectFeedRow: %v", err)
+	}
+	if got := resp.Msg.GetSuccess().GetSelected().GetSelection().GetResponse().GetRow().GetValue(); got != "c" {
+		t.Fatalf("selected response = %q, want the wrap to c", got)
+	}
+}
+
+// TestSelectFeedRowStepNewerLoadsNothing pins that only a step older past the
+// oldest loaded row reads history.
+func TestSelectFeedRowStepNewerLoadsNothing(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Feed.finals = feedIDs("b", "c")
+	h.Feed.olderFinals = [][]*frontendv1.FeedId{feedIDs("a")}
+	h.selectResponse(t, "b")
+
+	// Act.
+	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(newer))); err != nil {
+		t.Fatalf("SelectFeedRow: %v", err)
+	}
+
+	// Assert.
+	if h.Feed.loadOlderCalls != 0 {
+		t.Fatalf("LoadOlder calls = %d, want none", h.Feed.loadOlderCalls)
+	}
+}
+
+// TestSelectFeedRowStepOlderWhoseLoadFailsIsAnError pins that a page the step
+// needed and could not read fails the rpc loudly rather than wrapping.
+func TestSelectFeedRowStepOlderWhoseLoadFailsIsAnError(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Feed.finals = feedIDs("b")
+	h.Feed.loadOlderErr = errors.New("store unreachable")
+	h.selectResponse(t, "b")
+
+	// Act.
+	_, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(older)))
+
+	// Assert.
+	if err == nil {
+		t.Fatal("SelectFeedRow = nil error, want the failed load surfaced")
+	}
+}
+
+// TestSelectFeedRowPromptStepOlderPastTheOldestLoadsTheOlderPage pins the
+// same for the prompts a rollback can reach.
+func TestSelectFeedRowPromptStepOlderPastTheOldestLoadsTheOlderPage(t *testing.T) {
+	// Arrange: nothing of the kind is loaded yet.
+	h := newHarness(t)
+	h.Feed.olderPrompts = [][]*frontendv1.FeedId{feedIDs("p1")}
+
+	// Act.
+	resp, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(promptStep(older)))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("SelectFeedRow: %v", err)
+	}
+	if got := resp.Msg.GetSuccess().GetSelected().GetSelection().GetPrompt().GetRow().GetValue(); got != "p1" {
+		t.Fatalf("selected prompt = %q, want p1 from the older page", got)
+	}
+}
+
+// selectResponse selects one final response by clicking it.
+func (h *harness) selectResponse(t *testing.T, row string) {
+	t.Helper()
+	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(&agentreplv1.SelectFeedRowRequest{
+		Workspace: ref(),
+		Move: &agentreplv1.SelectFeedRowRequest_Bubble{Bubble: &agentreplv1.SelectFeedRowBubble{
+			Row: &frontendv1.FeedId{Value: row},
+		}},
+	})); err != nil {
+		t.Fatalf("select %q: %v", row, err)
+	}
 }

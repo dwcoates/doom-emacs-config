@@ -444,16 +444,13 @@ func TestALiveEntryGrowingItsRowIsNotRecordedAtInfo(t *testing.T) {
 // ---- the page walk ----
 
 func TestALateRowOlderThanTheLoadedPageIsServedInPlaceByTheNextPage(t *testing.T) {
-	// Arrange: a reader holds the newest page of a feed longer than one page.
+	// Arrange: a reader holds the newest store page of a longer book.
 	h := newHarness(t)
-	h.resolver.deps.PageSize = 2
-	h.deliverPromptAt("turn-1", "one", 100)
-	h.deliverPromptAt("turn-2", "two", 300)
-	h.deliverPromptAt("turn-3", "three", 400)
+	h.mainBook(2, promptsBook(3))
 	h.openPage(rootFeed(), "reader-1")
 
 	// Act: a row placed before everything the reader loaded arrives late.
-	h.sendAt(settledResponse("late", "written at 200"), 200)
+	h.sendAt(settledResponse("late", "written at 150"), 150)
 	page, err := h.resolver.NextPage(context.Background(), testWorkspace, rootFeed(), "reader-1")
 	if err != nil {
 		t.Fatalf("NextPage: %v", err)
@@ -461,7 +458,7 @@ func TestALateRowOlderThanTheLoadedPageIsServedInPlaceByTheNextPage(t *testing.T
 
 	// Assert: the older page is exactly the rows before the reader's oldest,
 	// the late row in its place among them.
-	want := []string{h.promptRowID("turn-1"), h.responseRowID("late")}
+	want := []string{h.promptRowID("turn-0"), h.responseRowID("late")}
 	if got := rowIDs(pageRows(t, page)); strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("next page = %v, want %v", got, want)
 	}

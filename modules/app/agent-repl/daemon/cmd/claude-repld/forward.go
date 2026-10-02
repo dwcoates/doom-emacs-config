@@ -1,12 +1,16 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"sync"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
+	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"claude-repld/internal/health"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/resolve/feed"
 	"claude-repld/internal/rollout"
 	"claude-repld/internal/workspace"
 )
@@ -201,4 +205,31 @@ func (f *healthForwarder) reporter() (health.Reporter, bool) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	return f.target, f.target != nil
+}
+
+// historyForwarder is the feed resolver's history source, which is the session
+// fleet's: the fleet is built after the feed resolver (it routes into it), so
+// the source is bound once the fleet exists.
+type historyForwarder struct {
+	mu    sync.RWMutex
+	fleet feed.HistorySource
+}
+
+// bind installs the fleet.
+func (h *historyForwarder) bind(fleet feed.HistorySource) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.fleet = fleet
+}
+
+// ReadHistory reads through the fleet. A read before the fleet exists is a
+// boot-order defect and fails loudly rather than reading as "no session".
+func (h *historyForwarder) ReadHistory(ctx context.Context, ws ids.WorkspaceID, target *conversationv1.AgentId, after *conversationv1.HistoryPointer) (*conversationv1.HistoryPage, error) {
+	h.mu.RLock()
+	fleet := h.fleet
+	h.mu.RUnlock()
+	if fleet == nil {
+		return nil, errors.New("claude-repld: history was read before the session fleet was built")
+	}
+	return fleet.ReadHistory(ctx, ws, target, after)
 }

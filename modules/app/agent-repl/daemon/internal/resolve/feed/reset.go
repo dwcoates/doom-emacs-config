@@ -165,9 +165,9 @@ func (r *resolver) emptyFeed(f *feedState) int {
 	f.superseded = map[string]bool{}
 	f.entryRows = map[string]uint32{}
 	f.followers = map[string]uint32{}
-	// THE TRUNCATION NOTICE GOES TOO. It says older history exists above the
-	// oldest row the replay delivered, and it was a statement about the
-	// conversation whose rows have just been retired.
-	f.historyMore = nil
+	// THE LOADED HISTORY GOES TOO: its pages, its read position and its
+	// withheld entries were the conversation whose rows have just been
+	// retired, and the next reader loads the new one's newest page.
+	f.book = bookState{}
 	return dropped
 }

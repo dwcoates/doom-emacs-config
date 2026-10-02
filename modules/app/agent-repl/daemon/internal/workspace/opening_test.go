@@ -168,22 +168,23 @@ func TestFailedWatcherStartKeepsTheSelectionOwed(t *testing.T) {
 //
 //   - The two replay openings each have ONE production caller, the fleet's
 //     openingFor.
-//   - A WatchAgentRequest is built in ONE place, the watcher's
-//     openAgentStreamLocked, which states the watch's known pointer whenever
-//     the watcher holds one.
+//   - A WatchAgentRequest is built in ONE place, the watcher's watchRequest,
+//     which opens tail_only or from the pointer the watcher holds.
 //   - A StartTurnRequest is built in ONE place, the sender's startTurn (behind
-//     both StartTurn and JoinRunningTurn), whose page is bounded to the turn's
-//     own row.
-//   - Nothing in production asks ReadHistory for its newest page.
+//     both StartTurn and JoinRunningTurn), which opens tail_only or from the
+//     main pointer the daemon holds.
+//   - ReadHistory's newest page is asked for in ONE place, the fleet's
+//     readHistory, which serves only a reader's request (feed paging on
+//     demand): no watch and no turn reads history.
 func TestFirstPageRequestsHaveNamedSitesOnly(t *testing.T) {
 	// Arrange.
 	want := map[string][]string{
 		"sessionwatcher.WorkspaceOpened":    {"internal/workspace/opening.go:openingFor"},
 		"sessionwatcher.TranscriptSelected": {"internal/workspace/opening.go:openingFor"},
-		"shimv1.WatchAgentRequest":          {"internal/sessionwatcher/watcher.go:openAgentStreamLocked"},
+		"shimv1.WatchAgentRequest":          {"internal/sessionwatcher/watcher.go:watchRequest"},
 		"shimv1.StartTurnRequest":           {"internal/workspace/sender.go:startTurn"},
-		"shimv1.ReadHistoryFirst":           nil,
-		"shimv1.ReadHistoryRequest_First":   nil,
+		"shimv1.ReadHistoryFirst":           {"internal/workspace/history.go:readHistory"},
+		"shimv1.ReadHistoryRequest_First":   {"internal/workspace/history.go:readHistory"},
 	}
 
 	// Act.

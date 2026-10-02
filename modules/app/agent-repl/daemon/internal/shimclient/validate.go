@@ -197,13 +197,25 @@ func validateStartTurnRequest(req *shimv1.StartTurnRequest) error {
 	if req.GetOrigin() == conversationv1.PromptOrigin_PROMPT_ORIGIN_UNSPECIFIED {
 		return invalid(m, m+".origin", "is unspecified")
 	}
-	if req.GetPageSize() == 0 {
-		return invalid(m, m+".page_size", "is zero")
-	}
-	if req.KnownThrough == nil {
+	return validateStartTurnOpening(m, req)
+}
+
+// validateStartTurnOpening is StartTurnRequest.opening's dedicated function.
+// UNSET IS REFUSED although the wire reads it as a repaint: the daemon never
+// asks a turn's opening page to replay history (owner ruling, feed paging on
+// demand), so a request without an arm is the daemon breaking its own rule.
+func validateStartTurnOpening(m string, req *shimv1.StartTurnRequest) error {
+	switch arm := req.GetOpening().(type) {
+	case *shimv1.StartTurnRequest_KnownThrough:
+		return validateHistoryPointer(m+".known_through", arm.KnownThrough)
+	case *shimv1.StartTurnRequest_TailOnly:
+		if arm.TailOnly == nil {
+			return invalid(m, m+".tail_only", "arm is nil")
+		}
 		return nil
+	default:
+		return invalid(m, m+".opening", "oneof is unset: the daemon never asks for a repaint")
 	}
-	return validateHistoryPointer(m+".known_through", req.GetKnownThrough())
 }
 
 // validateTurnID is TurnId's base function.
@@ -275,13 +287,25 @@ func validateWatchAgentRequest(req *shimv1.WatchAgentRequest) error {
 			return err
 		}
 	}
-	if req.GetPageSize() == 0 {
-		return invalid(m, m+".page_size", "is zero")
-	}
-	if req.KnownThrough == nil {
+	return validateWatchAgentOpening(m, req)
+}
+
+// validateWatchAgentOpening is WatchAgentRequest.opening's dedicated function.
+// UNSET IS REFUSED although the wire reads it as a repaint: opening a watch
+// replays no history (owner ruling, feed paging on demand), so a request
+// without an arm is the daemon breaking its own rule.
+func validateWatchAgentOpening(m string, req *shimv1.WatchAgentRequest) error {
+	switch arm := req.GetOpening().(type) {
+	case *shimv1.WatchAgentRequest_KnownThrough:
+		return validateHistoryPointer(m+".known_through", arm.KnownThrough)
+	case *shimv1.WatchAgentRequest_TailOnly:
+		if arm.TailOnly == nil {
+			return invalid(m, m+".tail_only", "arm is nil")
+		}
 		return nil
+	default:
+		return invalid(m, m+".opening", "oneof is unset: the daemon never asks for a repaint")
 	}
-	return validateHistoryPointer(m+".known_through", req.GetKnownThrough())
 }
 
 // validateUpdateAgentRequest is UpdateAgentRequest's base function.
@@ -469,9 +493,6 @@ func validateReadHistoryRequest(req *shimv1.ReadHistoryRequest) error {
 		if err := validateAgentID(m+".target", req.GetTarget()); err != nil {
 			return err
 		}
-	}
-	if req.GetPageSize() == 0 {
-		return invalid(m, m+".page_size", "is zero")
 	}
 	switch position := req.GetPosition().(type) {
 	case *shimv1.ReadHistoryRequest_First:

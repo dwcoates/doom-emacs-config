@@ -24,7 +24,6 @@ import (
 
 	"claude-repld/integration/fakegit"
 	"claude-repld/internal/daemonaddr"
-	"claude-repld/internal/resolve/feed"
 	"claude-repld/internal/stateroot"
 
 	"connectrpc.com/connect"
@@ -1773,10 +1772,13 @@ func (d *Daemon) RemoveTranscripts(workspaceDir string) {
 	}
 }
 
-// FeedPageSize is the number of rows one feed page carries. It is the daemon's
-// OWN constant rather than a copy, so a page-size change can never leave a
-// walk test silently pushing too few rows to produce a second page.
-const FeedPageSize = feed.DefaultPageSize
+// FeedPageSize is the fake store's page size in ENTRIES
+// (fakeshim.DefaultHistoryPageSize): a page is the store's page and the daemon
+// states none of its own (feed paging on demand). A walk test pushing one
+// row-drawing entry per row and more than this many is guaranteed a second
+// page. The fakeshim is its own main package, so the value is restated here;
+// fakeshim's book_test pins the two together.
+const FeedPageSize = 50
 
 // TranscriptPath answers where the vendor CLI files one conversation's
 // transcript under an account root: `<ProjectDir>/<vendor session id>.jsonl`.

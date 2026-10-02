@@ -66,9 +66,12 @@ type ShimProfile struct {
 	LiveWork [][]byte `json:"live_work,omitempty"`
 	// ResumeHistory is the conversation a RESUMED session already holds, each
 	// element one binary-encoded conversation.v1 HistoryEntry stated NEWEST
-	// FIRST. Every WatchAgent stream of a resumed session opens with them;
-	// a fresh start still opens on an empty floor.
+	// FIRST. They seed the main agent's book, which the daemon reads through
+	// ReadHistory when a reader opens the feed.
 	ResumeHistory [][]byte `json:"resume_history,omitempty"`
+	// HistoryPageSize is the fake store's page size in entries; zero is
+	// FeedPageSize. ReadHistory pages each agent's book in it.
+	HistoryPageSize int `json:"history_page_size,omitempty"`
 }
 
 // EncodeHistory renders history entries for a ShimProfile's ResumeHistory
