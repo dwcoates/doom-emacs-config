@@ -177,11 +177,6 @@ type wsState struct {
 	// picker is exactly the switchable set the daemon will accept.
 	picker *frontendv1.TopbarPermissionModePicker
 
-	// fastMode is the vendor's fast mode as last stated, nil until the
-	// session has stated one. Standing, like the permission mode beside it:
-	// the state sticks until the vendor states another.
-	fastMode *conversationv1.SessionFastMode
-
 	// effortSettings is what the session's config root persists for the
 	// effort level, read at workspace initialization (claudesettings).
 	effortSettings claudesettings.Effort
@@ -348,7 +343,7 @@ func (s *wsState) sessionless() bool {
 // config root's) — under the FIXED SCHEMA ruling of 2026-09-13.
 //
 // NO SESSION FACT IS EVER A GATE. Every session-scoped cell states "I do not
-// know yet" in its own slot: the three controls by ABSENCE, which the client
+// know yet" in its own slot: the two controls by ABSENCE, which the client
 // draws as a dash, and the context chip and warning strip by their own
 // content. So a workspace with no session — hibernated, cold-gated, or simply
 // not started — publishes the same strip as every other workspace, and the
