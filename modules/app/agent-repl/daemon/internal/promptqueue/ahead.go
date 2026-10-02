@@ -128,9 +128,9 @@ func (q *queue) settleQueued(ctx context.Context, sub Submission, ahead wsm.Held
 // settleQueuedLocked is settleQueued under the delivery and verdict locks. It
 // reports whether the prompt ahead is now running and must be interrupted.
 func (q *queue) settleQueuedLocked(ctx context.Context, sub Submission, ahead wsm.HeldPrompt, epoch uint64, c wsm.Classification, route classifier.Route, log dlog.Logger) bool {
-	state := q.state(sub.WS)
-	state.drain.Lock()
-	defer state.drain.Unlock()
+	d := q.lockDelivery(sub.WS)
+	defer d.unlock()
+	state := d.state
 	state.verdicts.Lock()
 	if state.verdictStaleLocked(sub.Turn, epoch, c, log) {
 		state.verdicts.Unlock()
@@ -151,14 +151,18 @@ func (q *queue) settleQueuedLocked(ctx context.Context, sub Submission, ahead ws
 		q.recordWaiting(ctx, sub, "the prompt ahead could not be read, so the prompt waits its turn", log)
 		return false
 	}
+	// THE PROMPT AHEAD MAY BE ON ITS WAY TO THE SHIM: a call in flight claims
+	// it (call.go). Folding into it now would change words already sent, so
+	// it is read as started, as it is the moment its call settles.
+	claimed := found && current.Tombstone == nil && q.claimedByCall(sub.WS, ahead.Turn)
 	switch {
-	case found && current.Tombstone == nil:
+	case found && current.Tombstone == nil && !claimed:
 		err := q.coalesce(ctx, sub, current, log)
 		state.verdicts.Unlock()
 		if err != nil {
 			q.recordWaiting(ctx, sub, "the prompt could not be folded into the one ahead, so it waits its turn", log)
 		}
-	case q.isRunning(sub.WS, ahead.Turn):
+	case claimed || q.isRunning(sub.WS, ahead.Turn):
 		q.record(ctx, sub, c, log)
 		state.verdicts.Unlock()
 		log.Info(opClassify, "the prompt ahead started while the verdict was reached; the prompt is routed against it as it runs", dlog.Context{
@@ -166,7 +170,7 @@ func (q *queue) settleQueuedLocked(ctx context.Context, sub Submission, ahead ws
 		})
 		if route == classifier.RouteAfterToolCall {
 			// THE DELIVERY LOCK IS ALREADY HELD, which is what the join needs.
-			q.joinLocked(ctx, sub, ahead.Turn, log)
+			q.joinLocked(ctx, d, sub, ahead.Turn, log)
 			return false
 		}
 		return true

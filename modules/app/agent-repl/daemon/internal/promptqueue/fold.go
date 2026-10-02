@@ -76,9 +76,8 @@ func (q *queue) Fold(ctx context.Context, ws ids.WorkspaceID, turn, above ids.Tu
 	}
 	log = log.With(dlog.Context{"turn": string(turn), "above_turn": string(above)})
 
-	drain := &q.state(ws).drain
-	drain.Lock()
-	defer drain.Unlock()
+	d := q.lockDelivery(ws)
+	defer d.unlock()
 
 	folded, err := q.heldForFold(ctx, ws, turn, log)
 	if err != nil {
@@ -103,7 +102,7 @@ func (q *queue) Fold(ctx context.Context, ws ids.WorkspaceID, turn, above ids.Tu
 	ahead.Coalesced = true
 	ahead.Classification = nil
 	ahead.Accepted = false
-	q.reclassify(ctx, ws, ahead, log, opFold)
+	q.reclassify(ctx, d, ahead, log, opFold)
 	return nil
 }
 
@@ -126,6 +125,9 @@ func (q *queue) heldForFold(ctx context.Context, ws ids.WorkspaceID, turn ids.Tu
 			dlog.Context{"tombstone": held.Tombstone.Kind})
 		return wsm.HeldPrompt{}, ErrNotHeld
 	}
+	if err := q.unclaimed(ws, held, log, opFold); err != nil {
+		return wsm.HeldPrompt{}, err
+	}
 	return held, nil
 }
 
@@ -147,6 +149,9 @@ func (q *queue) aheadForFold(ctx context.Context, ws ids.WorkspaceID, folded wsm
 		log.Info(opFold, "the fold is refused: the entry named is no longer directly ahead",
 			dlog.Context{"current_above": string(moved.Current)})
 		return wsm.HeldPrompt{}, moved
+	}
+	if err := q.unclaimed(ws, ahead, log, opFold); err != nil {
+		return wsm.HeldPrompt{}, err
 	}
 	editing, _ := q.Editing(ws)
 	switch err := holdfold.Foldable(folded, ahead, editing.Turn); {

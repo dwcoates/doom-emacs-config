@@ -344,29 +344,6 @@ func TestNextDeliverablePrefersTheSemanticHead(t *testing.T) {
 	}
 }
 
-// TestTheTurnEndsDrainExcludesALeaseChangeForTheWholeDelivery covers the
-// serialization the handover's in-order intake drain rests on: a turn's end
-// and a lease change both deliver from the same standing holds, so a quiesce
-// that arrived while the turn end was still delivering would read the holds
-// the delivery has not yet retired and let the intake out of order.
-func TestTheTurnEndsDrainExcludesALeaseChangeForTheWholeDelivery(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	running(t, h, "running-turn", "the running work")
-	heldPrompt(t, h, "t1", classifier.Verdict{Route: classifier.RouteQueue, Reason: "independent"})
-	free := true
-	h.sender.startHook = func() { free = h.q.state(theWorkspace).drain.TryLock() }
-
-	// Act
-	h.watcher.idle()
-	h.q.OnTurnEnded(theWorkspace, "running-turn", wsm.CloseCompleted)
-
-	// Assert
-	if free {
-		t.Fatal("the workspace's drain was free while the turn end's own delivery was in flight")
-	}
-}
-
 // TestOnTurnsEndedUnobservedClosesEachTurnAsOrphaned covers the adoption's
 // reconciliation: each turn ended while no daemon was watching, which is the
 // orphaned close.

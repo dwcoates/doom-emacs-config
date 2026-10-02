@@ -54,12 +54,17 @@ func (q *queue) Submit(ctx context.Context, sub Submission) (Disposition, error)
 	// same lock a turn end, a lease change and the bounce registry decide
 	// under. Without it a submission could start a turn in the instant after
 	// the registry judged the workspace free and before the bounce began.
-	drain := &q.state(sub.WS).drain
-	drain.Lock()
-	defer drain.Unlock()
+	d := q.lockDelivery(sub.WS)
+	defer d.unlock()
 	if q.isDraining(sub.WS) {
 		log.Info(opSubmit, "the workspace is draining for a bounce; the submission is held for the new shim", nil)
 		return q.hold(ctx, sub, "", &leaseHold{kind: wsm.HoldBuildRefresh}, log)
+	}
+	// A SHIM CALL IN FLIGHT IS A DELIVERY ALREADY UNDER WAY, made with this
+	// lock released (call.go): the submission is held behind it, never
+	// delivered beside it, and the call's settle takes it from there.
+	if call, ok := q.standingCall(sub.WS); ok {
+		return q.holdBehindCall(ctx, d, sub, call, log)
 	}
 
 	sender, ok := q.deps.Client(sub.WS)
@@ -78,7 +83,7 @@ func (q *queue) Submit(ctx context.Context, sub Submission) (Disposition, error)
 	// It is not the session's turn, so it is neither classified nor held: the
 	// main turn's queue has no say over a subagent's own composer.
 	if sub.Target != nil {
-		return q.deliverToAgent(ctx, sub, sender, log)
+		return q.deliverToAgent(ctx, d, sub, sender, log)
 	}
 
 	watcher, ok := q.deps.Watcher(sub.WS)
@@ -107,7 +112,7 @@ func (q *queue) Submit(ctx context.Context, sub Submission) (Disposition, error)
 	if claim, editing := q.Editing(sub.WS); editing {
 		return q.holdBehindEdit(ctx, sub, claim, log)
 	}
-	return q.deliver(ctx, sub, sender, watcher, log)
+	return q.deliver(ctx, d, sub, sender, watcher, log)
 }
 
 // applyLeasePolicy projects the workspace's occupancy lease onto the
@@ -393,9 +398,8 @@ func (q *queue) reviveInBackground(ctx context.Context, ws ids.WorkspaceID, log 
 // failure VISIBLE and actionable — the tray re-pushes without them, and the
 // warning names each turn so nothing vanishes unrecorded.
 func (q *queue) dropRevivalHolds(ctx context.Context, ws ids.WorkspaceID, log dlog.Logger, cause string) {
-	drain := &q.state(ws).drain
-	drain.Lock()
-	defer drain.Unlock()
+	d := q.lockDelivery(ws)
+	defer d.unlock()
 
 	standing, err := q.deps.DB.HeldPrompts(ctx, ws)
 	if err != nil {
@@ -417,7 +421,7 @@ func (q *queue) dropRevivalHolds(ctx context.Context, ws ids.WorkspaceID, log dl
 		}
 		log.Warn(opSubmit, "dropped a revival-pending hold whose bring-up failed",
 			dlog.Context{"turn": string(h.Turn), "cause": cause})
-		q.retireEditIf(ctx, ws, h.Turn, tombstoneDropped, log)
+		q.retireEditIf(ctx, d, h.Turn, tombstoneDropped, log)
 		dropped++
 	}
 	if dropped == 0 {
@@ -442,9 +446,8 @@ func (q *queue) dropRevivalHolds(ctx context.Context, ws ids.WorkspaceID, log dl
 func (q *queue) releaseRevivalHolds(ctx context.Context, ws ids.WorkspaceID, log dlog.Logger) {
 	// SERIALIZED AGAINST A TURN END AND A LEASE CHANGE, for the reason
 	// OnTurnEnded states: all three deliver from the same standing holds.
-	drain := &q.state(ws).drain
-	drain.Lock()
-	defer drain.Unlock()
+	d := q.lockDelivery(ws)
+	defer d.unlock()
 
 	standing, err := q.deps.DB.HeldPrompts(ctx, ws)
 	if err != nil {
@@ -473,7 +476,7 @@ func (q *queue) releaseRevivalHolds(ctx context.Context, ws ids.WorkspaceID, log
 	if err := q.pushTray(ctx, ws, log); err != nil {
 		return
 	}
-	if _, err := q.popAndDeliver(ctx, ws, log); err != nil {
+	if _, err := q.popAndDeliver(ctx, d, log); err != nil {
 		log.Error(opSubmit, "the revived hold was not delivered", dlog.Context{"cause": err.Error()})
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
+	shimv1 "agentrepl/proto/shim/v1"
 
 	"claude-repld/internal/bounce"
 	"claude-repld/internal/dlog"
@@ -53,18 +54,17 @@ func (q *queue) SubmitSessionAct(ctx context.Context, ws ids.WorkspaceID, act Ac
 		}
 	}
 
-	drain := &q.state(ws).drain
-	drain.Lock()
-	defer drain.Unlock()
+	d := q.lockDelivery(ws)
+	defer d.unlock()
 
-	running, ahead, err := q.whatIsAhead(ctx, ws)
+	running, ahead, err := q.whatIsAhead(ctx, d, log)
 	if err != nil {
 		log.Error(opAct, "could not tell whether anything is ahead of the act",
 			dlog.Context{"cause": err.Error()})
 		return err
 	}
 	if !ahead {
-		return q.runAct(ctx, ws, act, log)
+		return q.runAct(ctx, d, act, nil, log)
 	}
 	if q.sealedForMove(ws) {
 		// THE MOVE HAS SEALED WHAT IT CARRIES: an act held here now would be
@@ -136,16 +136,21 @@ func saidOf(text string) *conversationv1.UserSaid {
 }
 
 // whatIsAhead reports whether anything stands ahead of a new act -- a bounce
-// draining, a turn running (or a context cut recorded as the running turn),
-// or a held entry -- and the running turn when one is. The caller holds the
-// delivery lock.
-func (q *queue) whatIsAhead(ctx context.Context, ws ids.WorkspaceID) (ids.TurnID, bool, error) {
-	var running ids.TurnID
-	if watcher, ok := q.deps.Watcher(ws); ok && watcher.TurnInFlight() != nil {
-		running = *watcher.TurnInFlight()
-	} else if cut, ok := q.runningCut(ws); ok {
-		running = cut.turn
+// draining, a shim call in flight, a turn running (or a context cut recorded
+// as the running turn), or a held entry -- and the running turn when one is.
+// The caller holds the delivery lock (d).
+func (q *queue) whatIsAhead(ctx context.Context, d *delivery, log dlog.Logger) (ids.TurnID, bool, error) {
+	ws := d.ws
+	// A SHIM CALL IN FLIGHT IS AHEAD: the act is held behind it, and the
+	// call's settle delivers it in order (call.go).
+	if call, ok := q.standingCall(ws); ok {
+		q.deferToCall(d, log, "session act")
+		if call.opensTurn {
+			return call.turn, true, nil
+		}
+		return "", true, nil
 	}
+	running, _ := q.runningTurn(ws)
 	// A BOUNCE IS AHEAD OF EVERYTHING: the act applies to the new shim.
 	if q.isDraining(ws) || running != "" {
 		return running, true, nil
@@ -166,8 +171,11 @@ func (q *queue) sealedForMove(ws ids.WorkspaceID) bool {
 	return ok && state.bounce != nil && state.bounce.sealed
 }
 
-// runAct performs one act against the shim now.
-func (q *queue) runAct(ctx context.Context, ws ids.WorkspaceID, act Act, log dlog.Logger) error {
+// runAct performs one act against the shim now, with the delivery lock
+// released for the call (call.go). CLAIMS are the holds the act is delivered
+// from.
+func (q *queue) runAct(ctx context.Context, d *delivery, act Act, claims []ids.TurnID, log dlog.Logger) error {
+	ws := d.ws
 	sender, ok := q.deps.Client(ws)
 	if !ok {
 		refusalLevel(ctx, log, log.Warn)(opAct, "the workspace has no session to act on", nil)
@@ -177,19 +185,27 @@ func (q *queue) runAct(ctx context.Context, ws ids.WorkspaceID, act Act, log dlo
 	switch act.Kind {
 	case ActSetModel:
 		log.Debug("daemon.promptqueue.disposition_decision", "selected a prompt disposition branch", dlog.Context{"function": "queue", "branch": "case ActSetModel"})
-		if err := sender.SetModel(ctx, act.Value); err != nil {
+		var err error
+		d.outside(shimCall{what: "session_act", turn: act.Turn, holds: claims}, log, func() {
+			err = sender.SetModel(ctx, act.Value)
+		})
+		if err != nil {
 			log.Error(opAct, "the shim refused the model change", dlog.Context{"cause": err.Error()})
 			return fmt.Errorf("set model on %q: %w", ws, err)
 		}
 	case ActSetPermissionMode:
 		log.Debug("daemon.promptqueue.disposition_decision", "selected a prompt disposition branch", dlog.Context{"function": "queue", "branch": "case ActSetPermissionMode"})
-		if err := sender.SetPermissionMode(ctx, act.Value); err != nil {
+		var err error
+		d.outside(shimCall{what: "session_act", turn: act.Turn, holds: claims}, log, func() {
+			err = sender.SetPermissionMode(ctx, act.Value)
+		})
+		if err != nil {
 			log.Error(opAct, "the shim refused the permission-mode change", dlog.Context{"cause": err.Error()})
 			return fmt.Errorf("set permission mode on %q: %w", ws, err)
 		}
 	case ActClear, ActCompact:
 		log.Debug("daemon.promptqueue.disposition_decision", "selected a prompt disposition branch", dlog.Context{"function": "queue", "branch": "case ActClear, ActCompact"})
-		if err := q.runContextCut(ctx, ws, act, sender, log); err != nil {
+		if err := q.runContextCut(ctx, d, act, sender, claims, log); err != nil {
 			return err
 		}
 	}
@@ -199,8 +215,11 @@ func (q *queue) runAct(ctx context.Context, ws ids.WorkspaceID, act Act, log dlo
 
 // runContextCut delivers /clear or /compact as a turn — the vendor's own CLI
 // answers the command — and marks the running turn UNINTERRUPTIBLE, which is
-// the classification a prompt arriving behind it earns.
-func (q *queue) runContextCut(ctx context.Context, ws ids.WorkspaceID, act Act, sender Sender, log dlog.Logger) error {
+// the classification a prompt arriving behind it earns. Its StartTurn is made
+// with the delivery lock released (call.go); the running-cut record is the
+// claim a prompt submitted meanwhile is held behind.
+func (q *queue) runContextCut(ctx context.Context, d *delivery, act Act, sender Sender, claims []ids.TurnID, log dlog.Logger) error {
+	ws := d.ws
 	command, literal := contextCutCommand(act.Kind)
 	text := literal
 	if act.Value != "" {
@@ -263,7 +282,11 @@ func (q *queue) runContextCut(ctx context.Context, ws ids.WorkspaceID, act Act, 
 	if watching {
 		watcher.OnTurnOpening(ws, turn)
 	}
-	success, err := sender.StartTurn(ctx, turn, said, origin)
+	var success *shimv1.StartTurnSuccess
+	var err error
+	d.outside(shimCall{what: "context_cut", turn: turn, opensTurn: true, holds: claims}, log, func() {
+		success, err = sender.StartTurn(ctx, turn, said, origin)
+	})
 	if err != nil {
 		if watching {
 			watcher.OnTurnOpenFailed(ws, turn)
