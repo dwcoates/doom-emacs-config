@@ -631,7 +631,9 @@ indicator at all, which is how a decode failure would show up here."
           (let ((cause (car case))
                 (expected (cdr case)))
             ;; Act.
-            (agent-repl-itest-link--announce daemon nil cause)
+            ;; The window outlasts the wait below; see the helper.
+            (agent-repl-itest-link--announce
+             daemon nil cause (* 2 1000 agent-repl-itest-default-timeout))
             ;; Assert.
             (agent-repl-itest--wait-until
              (lambda () (and agent-repl-link-drain-segment
