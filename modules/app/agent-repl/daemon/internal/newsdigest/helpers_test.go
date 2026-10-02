@@ -257,7 +257,7 @@ func (w *world) digester() *Digester {
 		Sources: w.sources, Fetcher: w.fetcher, Headless: w.runner, PromptsDir: repoPromptsDir,
 		ConfigDir: "/accounts/default", Store: w.store, Clock: w.clock, LockPath: w.lock,
 		Serves: func() bool { return w.serves },
-		MintID: func() (string, error) { w.minted++; return fmt.Sprintf("digest-%d", w.minted), nil },
+		MintID: func() string { w.minted++; return fmt.Sprintf("digest-%d", w.minted) },
 		Every:  DefaultEvery, StartDelay: DefaultStartDelay, Recheck: DefaultRecheck, Log: w.log,
 	})
 	if err != nil {

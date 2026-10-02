@@ -33,7 +33,7 @@ func TestNewRefusesAMissingCollaboratorOrWindow(t *testing.T) {
 			deps := Deps{
 				Sources: w.sources, Fetcher: w.fetcher, Headless: w.runner, PromptsDir: repoPromptsDir,
 				Store: w.store, Clock: w.clock, LockPath: w.lock, Serves: func() bool { return true },
-				MintID: func() (string, error) { return "x", nil },
+				MintID: func() string { return "x" },
 				Every:  DefaultEvery, StartDelay: DefaultStartDelay, Recheck: DefaultRecheck, Log: w.log,
 			}
 			tt.mutate(&deps)
