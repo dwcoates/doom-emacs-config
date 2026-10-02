@@ -31,8 +31,12 @@ const EnvToolsDir = "AGENT_REPL_PERSISTENT_WIFI_TOOLS_DIR"
 // off leaves. Unset is DefaultHotspot.
 const EnvHotspot = "AGENT_REPL_PERSISTENT_WIFI_HOTSPOT"
 
-// DefaultHotspot is the hotspot the owner's script was written for.
-const DefaultHotspot = "Dodge's iPhone"
+// DefaultHotspot is the hotspot the owner's script was written for, spelled
+// as the iPhone names itself: with a RIGHT SINGLE QUOTATION MARK (U+2019),
+// not an ASCII apostrophe. The ASCII spelling made every join fail with
+// "Could not find network" (2026-10-02); the join now resolves the name
+// against the saved networks either way (savedHotspot).
+const DefaultHotspot = "Dodge\u2019s iPhone"
 
 // Tools are the absolute paths of every host tool the package runs.
 type Tools struct {
