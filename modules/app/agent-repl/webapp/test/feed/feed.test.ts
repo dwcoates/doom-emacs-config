@@ -7,6 +7,12 @@ import {
   FeedPageSchema,
   type FeedRow,
 } from "../../../proto/gen/ts/frontend/v1/feed_pb";
+import {
+  LoadFeedThroughResponseSchema,
+  type LoadFeedThroughResponse,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_load_feed_through_pb";
+import { ConnectError, Code } from "@connectrpc/connect";
+import { withOrder } from "../feed-order.js";
 import { OpenFeedResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_feed_pb";
 import type { WatchFeedResponse } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_feed_pb";
 import {
@@ -680,6 +686,219 @@ describe("mountFeed: selectDetachedWork", () => {
     const { feed } = mount(h);
     await settle();
     expect(await feed.selectDetachedWork(feedId("deep"))).toBe(false);
+  });
+});
+
+describe("mountFeed: selectDetachedWork walks older pages (LoadFeedThrough)", () => {
+  const pageFrame = (rows: FeedRow[], hasMore = true): LoadFeedThroughResponse =>
+    create(LoadFeedThroughResponseSchema, {
+      frame: { case: "page", value: page(rows, { hasMore }) },
+    });
+  const reachedFrame = (target: string): LoadFeedThroughResponse =>
+    create(LoadFeedThroughResponseSchema, {
+      frame: { case: "reached", value: { target: feedId(target) } },
+    });
+  const errorFrame = (
+    cause: "notFound" | "historyUnavailable",
+  ): LoadFeedThroughResponse =>
+    create(LoadFeedThroughResponseSchema, {
+      frame: {
+        case: "error",
+        value: {
+          cause:
+            cause === "notFound"
+              ? { case: "notFound", value: {} }
+              : { case: "historyUnavailable", value: { detail: "store down" } },
+        },
+      },
+    });
+
+  /** A root feed holding ROWS with older pages remaining; every sub-feed probe refuses. */
+  function olderHarness(
+    frames: LoadFeedThroughResponse[],
+    rows: FeedRow[] = [responseRow("newest")],
+  ) {
+    return harness({
+      openFeed: (req) =>
+        req.feed === undefined
+          ? openSuccess(page(rows, { hasMore: true }), tokenFor(req))
+          : create(OpenFeedResponseSchema, { result: { case: "error", value: {} } }),
+      loadFeedThrough: async function* () {
+        yield* frames;
+      },
+    });
+  }
+
+  const rowOrder = (host: HTMLElement) =>
+    [...host.querySelectorAll("[data-feed-row]")].map((el) => el.getAttribute("data-feed-row"));
+
+  it("makes no LoadFeedThrough call for a row already drawn", async () => {
+    const h = olderHarness([]);
+    const { feed } = mount(h);
+    await settle();
+    await feed.selectDetachedWork(feedId("newest"));
+    expect(h.calls.loadFeedThrough).toHaveLength(0);
+  });
+
+  it("makes no LoadFeedThrough call when the root feed holds no older page", async () => {
+    const h = harness({
+      openFeed: (req) =>
+        req.feed === undefined
+          ? openSuccess(page([responseRow("newest")]), tokenFor(req))
+          : create(OpenFeedResponseSchema, { result: { case: "error", value: {} } }),
+    });
+    const { feed } = mount(h);
+    await settle();
+    expect(await feed.selectDetachedWork(feedId("gone"))).toBe(false);
+    expect(h.calls.loadFeedThrough).toHaveLength(0);
+  });
+
+  it("asks for the target by its own id, scoped to the workspace", async () => {
+    const h = olderHarness([pageFrame([withOrder(responseRow("t"), "a")]), reachedFrame("t")]);
+    const { feed } = mount(h);
+    await settle();
+    await feed.selectDetachedWork(feedId("t"));
+    expect(h.calls.loadFeedThrough.map((r) => [r.workspace?.id, r.target?.value])).toEqual([["ws-1", "t"]]);
+  });
+
+  it("prepends each streamed page in order, then lands on the target", async () => {
+    const h = olderHarness([
+      pageFrame([withOrder(responseRow("p1"), "b")]),
+      pageFrame([withOrder(responseRow("t"), "a")], false),
+      reachedFrame("t"),
+    ]);
+    const { feed, host } = mount(h);
+    await settle();
+    const reached = await feed.selectDetachedWork(feedId("t"));
+    expect({ reached, order: rowOrder(host) }).toEqual({
+      reached: true,
+      order: ["t", "p1", "newest"],
+    });
+  });
+
+  it("marks the landed target's card after the walk", async () => {
+    const h = olderHarness([pageFrame([withOrder(responseRow("t"), "a")]), reachedFrame("t")]);
+    const { feed, host } = mount(h);
+    await settle();
+    await feed.selectDetachedWork(feedId("t"));
+    expect(
+      host.querySelector('[data-feed-row="t"]')?.firstElementChild?.classList.contains(SELECTED_ENTRY_CLASS),
+    ).toBe(true);
+  });
+
+  it("keeps the pages and lands nothing when the target is not found", async () => {
+    const h = olderHarness([pageFrame([withOrder(responseRow("p1"), "a")]), errorFrame("notFound")]);
+    const { feed, host } = mount(h);
+    await settle();
+    const reached = await feed.selectDetachedWork(feedId("t"));
+    expect({ reached, order: rowOrder(host), marked: host.querySelector(`.${SELECTED_ENTRY_CLASS}`) }).toEqual({
+      reached: false,
+      order: ["p1", "newest"],
+      marked: null,
+    });
+  });
+
+  it("does not invent a footer failure of its own when the target is not found", async () => {
+    const h = olderHarness([errorFrame("notFound")]);
+    const { feed } = mount(h);
+    await settle();
+    await feed.selectDetachedWork(feedId("t"));
+    expect(standingClientFailure()).toBeNull();
+  });
+
+  it("keeps the pages already streamed when history becomes unavailable mid-walk", async () => {
+    const h = olderHarness([
+      pageFrame([withOrder(responseRow("p1"), "a")]),
+      errorFrame("historyUnavailable"),
+    ]);
+    const { feed, host } = mount(h);
+    await settle();
+    const reached = await feed.selectDetachedWork(feedId("t"));
+    expect({ reached, order: rowOrder(host) }).toEqual({ reached: false, order: ["p1", "newest"] });
+  });
+
+  it("reports a transport failure mid-walk and keeps the applied pages", async () => {
+    const h = harness({
+      openFeed: (req) =>
+        req.feed === undefined
+          ? openSuccess(page([responseRow("newest")], { hasMore: true }), tokenFor(req))
+          : create(OpenFeedResponseSchema, { result: { case: "error", value: {} } }),
+      loadFeedThrough: async function* () {
+        yield pageFrame([withOrder(responseRow("p1"), "a")]);
+        throw new ConnectError("link dropped", Code.Unavailable);
+      },
+    });
+    const { feed, host } = mount(h);
+    await settle();
+    const reached = await feed.selectDetachedWork(feedId("t"));
+    expect({ reached, order: rowOrder(host), failure: standingClientFailure()?.kind }).toEqual({
+      reached: false,
+      order: ["p1", "newest"],
+      failure: "unary_transport",
+    });
+  });
+
+  it("refuses a stream that ends without a terminal frame", async () => {
+    const h = olderHarness([pageFrame([withOrder(responseRow("p1"), "a")])]);
+    const { feed } = mount(h);
+    await settle();
+    await expect(feed.selectDetachedWork(feedId("t"))).rejects.toThrow(/terminal/);
+  });
+
+  it("disables the older control for the whole walk and re-enables it after", async () => {
+    const gate = new Channel<LoadFeedThroughResponse>();
+    const h = harness({
+      openFeed: (req) =>
+        req.feed === undefined
+          ? openSuccess(page([responseRow("newest")], { hasMore: true }), tokenFor(req))
+          : create(OpenFeedResponseSchema, { result: { case: "error", value: {} } }),
+      loadFeedThrough: () => gate.iterate(),
+    });
+    const { feed, host } = mount(h);
+    await settle();
+    const control = () => host.querySelector<HTMLButtonElement>("[data-load-more]");
+    // Act
+    const walking = feed.selectDetachedWork(feedId("t"));
+    await settle();
+    const during = control()?.disabled;
+    gate.push(pageFrame([withOrder(responseRow("t"), "a")]));
+    await settle();
+    const midWalk = control()?.disabled;
+    gate.push(reachedFrame("t"));
+    await walking;
+    // Assert
+    expect({ during, midWalk, after: control()?.disabled }).toEqual({
+      during: true,
+      midWalk: true,
+      after: false,
+    });
+  });
+
+  it("walks to a root container the crumbs name when the container's page is unloaded", async () => {
+    const h = harness({
+      openFeed: (req) =>
+        req.feed === undefined
+          ? openSuccess(page([responseRow("newest")], { hasMore: true }), tokenFor(req))
+          : openSuccess(
+              page([], { crumbs: [create(FeedBreadcrumbSchema, { target: feedId("sub"), label: "sub" })] }),
+              tokenFor(req),
+            ),
+      loadFeedThrough: async function* () {
+        yield reachedFrame("sub");
+      },
+    });
+    const { feed } = mount(h);
+    await settle();
+    await feed.selectDetachedWork(feedId("inner"));
+    expect(h.calls.loadFeedThrough.map((r) => r.target?.value)).toEqual(["sub"]);
+  });
+
+  it("walks at most once per selection", async () => {
+    const h = olderHarness([reachedFrame("t")]);
+    const { feed } = mount(h);
+    await settle();
+    expect(await feed.selectDetachedWork(feedId("t"))).toBe(false);
+    expect(h.calls.loadFeedThrough).toHaveLength(1);
   });
 });
 
