@@ -5,8 +5,8 @@
  * THE TWO ONEOFS ARE PAINTED INDEPENDENTLY, and each arm maps to exactly one
  * paint (topbar.proto, TopbarPersistentWifi):
  *   wifi  joined → green glyph; not_joined → red glyph; unassigned → muted.
- *   mode  on → the glyph sits on a blue disc it is just inscribed in; off or
- *         unassigned → no disc.
+ *   mode  on → the glyph sits on a black disc it is just inscribed in; off
+ *         or unassigned → no disc.
  * The arms ride as data attributes and the stylesheet does the painting, so
  * this file decides nothing beyond naming the arm.
  *
@@ -20,9 +20,9 @@ import { requireMessage, unreachableArm } from "../rpc/strict.js";
 const SVG_NS = "http://www.w3.org/2000/svg";
 
 /**
- * The wifi glyph: three arcs and a dot, stroked in the current color. Its
- * stroked bounding box is about 23 by 17 viewBox units, so its diagonal is the
- * disc's diameter at the stylesheet's glyph-to-disc ratio.
+ * The wifi glyph: three arcs and a dot, stroked in the current color, drawn
+ * on a 24-unit grid centered on (12, 12). Every arc is symmetric about x = 12,
+ * so the glyph's horizontal center IS the grid's.
  */
 const GLYPH_PATHS = [
   "M1.42 9a16 16 0 0 1 21.16 0",
@@ -31,12 +31,33 @@ const GLYPH_PATHS = [
   "M12 20h.01",
 ];
 
-/** The glyph element. */
+/**
+ * THE DISC IS DRAWN IN THE GLYPH'S OWN SVG, centered on the same (12, 12).
+ * It used to be the chip's CSS background with a smaller svg centered inside
+ * it by flexbox; the two then landed on the pixel grid separately, and WebKit
+ * snaps an inline svg to whole pixels while it paints a background where
+ * layout put it, so the glyph sat up to a pixel right of the disc's center
+ * (measured in test/webkit/topbar.webkit.test.ts). One svg has one placement,
+ * so the glyph and the disc cannot drift apart. The radius keeps the glyph
+ * just inscribed: its farthest stroked corner is under 15 units from center.
+ */
+export const DISC_RADIUS = 15;
+
+/** The viewBox: the disc's square, so the svg's box is the disc's. */
+const VIEW_BOX = `${12 - DISC_RADIUS} ${12 - DISC_RADIUS} ${2 * DISC_RADIUS} ${2 * DISC_RADIUS}`;
+
+/** The glyph element: the disc, then the arcs over it. */
 function drawGlyph(): SVGSVGElement {
   const svg = document.createElementNS(SVG_NS, "svg");
-  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("viewBox", VIEW_BOX);
   svg.setAttribute("aria-hidden", "true");
   svg.setAttribute("class", "topbar-wifi-glyph");
+  const disc = document.createElementNS(SVG_NS, "circle");
+  disc.setAttribute("class", "topbar-wifi-disc");
+  disc.setAttribute("cx", "12");
+  disc.setAttribute("cy", "12");
+  disc.setAttribute("r", String(DISC_RADIUS));
+  svg.append(disc);
   for (const d of GLYPH_PATHS) {
     const path = document.createElementNS(SVG_NS, "path");
     path.setAttribute("d", d);

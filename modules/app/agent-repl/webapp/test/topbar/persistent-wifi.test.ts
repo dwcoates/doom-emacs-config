@@ -9,7 +9,7 @@ import {
   type TopbarPersistentWifi,
 } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
 import { MalformedView } from "../../src/rpc/malformed.js";
-import { drawTopbarPersistentWifi } from "../../src/topbar/persistent-wifi.js";
+import { DISC_RADIUS, drawTopbarPersistentWifi } from "../../src/topbar/persistent-wifi.js";
 
 /** A chip with the given arms and a tooltip. */
 function chip(
@@ -38,7 +38,7 @@ describe("drawTopbarPersistentWifi", () => {
     expect(drawTopbarPersistentWifi(chip(unset as never, off)).getAttribute("data-wifi")).toBe("unknown");
   });
 
-  it("marks the mode on for the blue disc", () => {
+  it("marks the mode on for the black disc", () => {
     expect(drawTopbarPersistentWifi(chip(notJoined, on)).getAttribute("data-mode")).toBe("on");
   });
 
@@ -56,6 +56,16 @@ describe("drawTopbarPersistentWifi", () => {
 
   it("draws the wifi glyph", () => {
     expect(drawTopbarPersistentWifi(chip(joined, on)).querySelector("svg.topbar-wifi-glyph")).not.toBeNull();
+  });
+
+  it("draws the disc inside the glyph's own svg, centered on the glyph's center", () => {
+    const disc = drawTopbarPersistentWifi(chip(joined, on)).querySelector("svg.topbar-wifi-glyph > circle.topbar-wifi-disc");
+    expect([disc?.getAttribute("cx"), disc?.getAttribute("cy")]).toEqual(["12", "12"]);
+  });
+
+  it("sizes the svg's viewBox to the disc's square", () => {
+    const svg = drawTopbarPersistentWifi(chip(joined, on)).querySelector("svg.topbar-wifi-glyph");
+    expect(svg?.getAttribute("viewBox")).toBe(`${12 - DISC_RADIUS} ${12 - DISC_RADIUS} ${2 * DISC_RADIUS} ${2 * DISC_RADIUS}`);
   });
 
   it("refuses a wifi arm this bundle cannot name", () => {
