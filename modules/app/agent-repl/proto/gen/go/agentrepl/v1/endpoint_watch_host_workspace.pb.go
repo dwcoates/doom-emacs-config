@@ -458,8 +458,20 @@ type HostWorkspace struct {
 	// input when an edit it has not yet taken appears, and leaves its edit mode
 	// when the field goes absent (a commit, a cancel, the prompt dropped).
 	HeldPromptEdit *HostHeldPromptEdit `protobuf:"bytes,4,opt,name=held_prompt_edit,json=heldPromptEdit,proto3" json:"held_prompt_edit,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// THE GATE STANDING ON THIS WORKSPACE, absent when none stands. A gate is
+	// a choice the user must answer before the conversation can go on, and
+	// whose answer REPLACES the composer (owner, 2026-10-02). While one
+	// stands, Emacs HIDES the workspace's input window and the webview, grown
+	// into that space, docks the gate's banner at the bottom at the input's
+	// height; the moment it is answered or retracted the field goes absent and
+	// both return. STATE, not an event: a subscriber always reads the gate that
+	// stands now. It is workspace-level, a sibling of the session lifecycle,
+	// because a gate can stand with no session started (a cold gate parks the
+	// bring-up before StartSession). The webapp reads the same daemon state
+	// through its feed (FeedColdGate.standing) and footer.
+	Gate          *HostGate `protobuf:"bytes,5,opt,name=gate,proto3,oneof" json:"gate,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *HostWorkspace) Reset() {
@@ -531,6 +543,13 @@ func (x *HostWorkspace) GetHeldPromptEdit() *HostHeldPromptEdit {
 	return nil
 }
 
+func (x *HostWorkspace) GetGate() *HostGate {
+	if x != nil {
+		return x.Gate
+	}
+	return nil
+}
+
 type isHostWorkspace_Session interface {
 	isHostWorkspace_Session()
 }
@@ -549,6 +568,113 @@ func (*HostWorkspace_None) isHostWorkspace_Session() {}
 
 func (*HostWorkspace_Existing) isHostWorkspace_Session() {}
 
+// One standing gate. THE ARM IS THE KIND; set-but-unassigned is a gate this
+// schema revision does not name, which Emacs treats as a gate (it hides the
+// input) and records.
+type HostGate struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Kind:
+	//
+	//	*HostGate_ColdGate
+	Kind          isHostGate_Kind `protobuf_oneof:"kind"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HostGate) Reset() {
+	*x = HostGate{}
+	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HostGate) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HostGate) ProtoMessage() {}
+
+func (x *HostGate) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HostGate.ProtoReflect.Descriptor instead.
+func (*HostGate) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *HostGate) GetKind() isHostGate_Kind {
+	if x != nil {
+		return x.Kind
+	}
+	return nil
+}
+
+func (x *HostGate) GetColdGate() *HostGateColdGate {
+	if x != nil {
+		if x, ok := x.Kind.(*HostGate_ColdGate); ok {
+			return x.ColdGate
+		}
+	}
+	return nil
+}
+
+type isHostGate_Kind interface {
+	isHostGate_Kind()
+}
+
+type HostGate_ColdGate struct {
+	// The cold gate: resuming would re-read a large context; the user picks
+	// pay / compact / clear.
+	ColdGate *HostGateColdGate `protobuf:"bytes,1,opt,name=cold_gate,json=coldGate,proto3,oneof"`
+}
+
+func (*HostGate_ColdGate) isHostGate_Kind() {}
+
+type HostGateColdGate struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HostGateColdGate) Reset() {
+	*x = HostGateColdGate{}
+	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HostGateColdGate) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HostGateColdGate) ProtoMessage() {}
+
+func (x *HostGateColdGate) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HostGateColdGate.ProtoReflect.Descriptor instead.
+func (*HostGateColdGate) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP(), []int{8}
+}
+
 // One standing held-prompt edit.
 type HostHeldPromptEdit struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -565,7 +691,7 @@ type HostHeldPromptEdit struct {
 
 func (x *HostHeldPromptEdit) Reset() {
 	*x = HostHeldPromptEdit{}
-	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[7]
+	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -577,7 +703,7 @@ func (x *HostHeldPromptEdit) String() string {
 func (*HostHeldPromptEdit) ProtoMessage() {}
 
 func (x *HostHeldPromptEdit) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[7]
+	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -590,7 +716,7 @@ func (x *HostHeldPromptEdit) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostHeldPromptEdit.ProtoReflect.Descriptor instead.
 func (*HostHeldPromptEdit) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP(), []int{7}
+	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *HostHeldPromptEdit) GetTurn() *v11.TurnId {
@@ -622,7 +748,7 @@ type HostSessionNone struct {
 
 func (x *HostSessionNone) Reset() {
 	*x = HostSessionNone{}
-	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[8]
+	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -634,7 +760,7 @@ func (x *HostSessionNone) String() string {
 func (*HostSessionNone) ProtoMessage() {}
 
 func (x *HostSessionNone) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[8]
+	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -647,7 +773,7 @@ func (x *HostSessionNone) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostSessionNone.ProtoReflect.Descriptor instead.
 func (*HostSessionNone) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP(), []int{8}
+	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP(), []int{10}
 }
 
 // A session that exists: its identity, and its standing.
@@ -671,7 +797,7 @@ type HostSessionExisting struct {
 
 func (x *HostSessionExisting) Reset() {
 	*x = HostSessionExisting{}
-	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[9]
+	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -683,7 +809,7 @@ func (x *HostSessionExisting) String() string {
 func (*HostSessionExisting) ProtoMessage() {}
 
 func (x *HostSessionExisting) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[9]
+	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -696,7 +822,7 @@ func (x *HostSessionExisting) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostSessionExisting.ProtoReflect.Descriptor instead.
 func (*HostSessionExisting) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP(), []int{9}
+	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *HostSessionExisting) GetId() *HostSessionId {
@@ -788,7 +914,7 @@ type HostSessionLive struct {
 
 func (x *HostSessionLive) Reset() {
 	*x = HostSessionLive{}
-	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[10]
+	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -800,7 +926,7 @@ func (x *HostSessionLive) String() string {
 func (*HostSessionLive) ProtoMessage() {}
 
 func (x *HostSessionLive) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[10]
+	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -813,7 +939,7 @@ func (x *HostSessionLive) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostSessionLive.ProtoReflect.Descriptor instead.
 func (*HostSessionLive) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP(), []int{10}
+	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *HostSessionLive) GetGeneration() *HostGenerationId {
@@ -958,7 +1084,7 @@ type HostSessionTerminal struct {
 
 func (x *HostSessionTerminal) Reset() {
 	*x = HostSessionTerminal{}
-	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[11]
+	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -970,7 +1096,7 @@ func (x *HostSessionTerminal) String() string {
 func (*HostSessionTerminal) ProtoMessage() {}
 
 func (x *HostSessionTerminal) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[11]
+	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -983,7 +1109,7 @@ func (x *HostSessionTerminal) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostSessionTerminal.ProtoReflect.Descriptor instead.
 func (*HostSessionTerminal) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP(), []int{11}
+	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *HostSessionTerminal) GetRehydratable() bool {
@@ -1003,7 +1129,7 @@ type HostSessionId struct {
 
 func (x *HostSessionId) Reset() {
 	*x = HostSessionId{}
-	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[12]
+	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1015,7 +1141,7 @@ func (x *HostSessionId) String() string {
 func (*HostSessionId) ProtoMessage() {}
 
 func (x *HostSessionId) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[12]
+	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1028,7 +1154,7 @@ func (x *HostSessionId) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostSessionId.ProtoReflect.Descriptor instead.
 func (*HostSessionId) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP(), []int{12}
+	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *HostSessionId) GetValue() string {
@@ -1049,7 +1175,7 @@ type HostGenerationId struct {
 
 func (x *HostGenerationId) Reset() {
 	*x = HostGenerationId{}
-	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[13]
+	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1061,7 +1187,7 @@ func (x *HostGenerationId) String() string {
 func (*HostGenerationId) ProtoMessage() {}
 
 func (x *HostGenerationId) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[13]
+	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1074,7 +1200,7 @@ func (x *HostGenerationId) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostGenerationId.ProtoReflect.Descriptor instead.
 func (*HostGenerationId) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP(), []int{13}
+	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *HostGenerationId) GetValue() string {
@@ -1098,7 +1224,7 @@ type HostVendorClaude struct {
 
 func (x *HostVendorClaude) Reset() {
 	*x = HostVendorClaude{}
-	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[14]
+	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1110,7 +1236,7 @@ func (x *HostVendorClaude) String() string {
 func (*HostVendorClaude) ProtoMessage() {}
 
 func (x *HostVendorClaude) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[14]
+	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1123,7 +1249,7 @@ func (x *HostVendorClaude) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostVendorClaude.ProtoReflect.Descriptor instead.
 func (*HostVendorClaude) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP(), []int{14}
+	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *HostVendorClaude) GetSessionId() string {
@@ -1155,7 +1281,7 @@ type HostWorkspaceNaming struct {
 
 func (x *HostWorkspaceNaming) Reset() {
 	*x = HostWorkspaceNaming{}
-	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[15]
+	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1167,7 +1293,7 @@ func (x *HostWorkspaceNaming) String() string {
 func (*HostWorkspaceNaming) ProtoMessage() {}
 
 func (x *HostWorkspaceNaming) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[15]
+	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1180,7 +1306,7 @@ func (x *HostWorkspaceNaming) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostWorkspaceNaming.ProtoReflect.Descriptor instead.
 func (*HostWorkspaceNaming) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP(), []int{15}
+	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *HostWorkspaceNaming) GetSlug() string {
@@ -1214,7 +1340,7 @@ type HostBackfill struct {
 
 func (x *HostBackfill) Reset() {
 	*x = HostBackfill{}
-	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[16]
+	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1226,7 +1352,7 @@ func (x *HostBackfill) String() string {
 func (*HostBackfill) ProtoMessage() {}
 
 func (x *HostBackfill) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[16]
+	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1239,7 +1365,7 @@ func (x *HostBackfill) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostBackfill.ProtoReflect.Descriptor instead.
 func (*HostBackfill) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP(), []int{16}
+	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *HostBackfill) GetState() isHostBackfill_State {
@@ -1325,7 +1451,7 @@ type HostBackfillNone struct {
 
 func (x *HostBackfillNone) Reset() {
 	*x = HostBackfillNone{}
-	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[17]
+	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1337,7 +1463,7 @@ func (x *HostBackfillNone) String() string {
 func (*HostBackfillNone) ProtoMessage() {}
 
 func (x *HostBackfillNone) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[17]
+	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1350,7 +1476,7 @@ func (x *HostBackfillNone) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostBackfillNone.ProtoReflect.Descriptor instead.
 func (*HostBackfillNone) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP(), []int{17}
+	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP(), []int{19}
 }
 
 type HostBackfillPending struct {
@@ -1361,7 +1487,7 @@ type HostBackfillPending struct {
 
 func (x *HostBackfillPending) Reset() {
 	*x = HostBackfillPending{}
-	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[18]
+	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1373,7 +1499,7 @@ func (x *HostBackfillPending) String() string {
 func (*HostBackfillPending) ProtoMessage() {}
 
 func (x *HostBackfillPending) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[18]
+	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1386,7 +1512,7 @@ func (x *HostBackfillPending) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostBackfillPending.ProtoReflect.Descriptor instead.
 func (*HostBackfillPending) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP(), []int{18}
+	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP(), []int{20}
 }
 
 type HostBackfillDone struct {
@@ -1397,7 +1523,7 @@ type HostBackfillDone struct {
 
 func (x *HostBackfillDone) Reset() {
 	*x = HostBackfillDone{}
-	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[19]
+	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1409,7 +1535,7 @@ func (x *HostBackfillDone) String() string {
 func (*HostBackfillDone) ProtoMessage() {}
 
 func (x *HostBackfillDone) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[19]
+	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1422,7 +1548,7 @@ func (x *HostBackfillDone) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostBackfillDone.ProtoReflect.Descriptor instead.
 func (*HostBackfillDone) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP(), []int{19}
+	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP(), []int{21}
 }
 
 type HostBackfillFailed struct {
@@ -1437,7 +1563,7 @@ type HostBackfillFailed struct {
 
 func (x *HostBackfillFailed) Reset() {
 	*x = HostBackfillFailed{}
-	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[20]
+	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1449,7 +1575,7 @@ func (x *HostBackfillFailed) String() string {
 func (*HostBackfillFailed) ProtoMessage() {}
 
 func (x *HostBackfillFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[20]
+	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1462,7 +1588,7 @@ func (x *HostBackfillFailed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostBackfillFailed.ProtoReflect.Descriptor instead.
 func (*HostBackfillFailed) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP(), []int{20}
+	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *HostBackfillFailed) GetDetail() string {
@@ -1480,7 +1606,7 @@ type HostComposerOpen struct {
 
 func (x *HostComposerOpen) Reset() {
 	*x = HostComposerOpen{}
-	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[21]
+	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1492,7 +1618,7 @@ func (x *HostComposerOpen) String() string {
 func (*HostComposerOpen) ProtoMessage() {}
 
 func (x *HostComposerOpen) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[21]
+	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1505,7 +1631,7 @@ func (x *HostComposerOpen) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostComposerOpen.ProtoReflect.Descriptor instead.
 func (*HostComposerOpen) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP(), []int{21}
+	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP(), []int{23}
 }
 
 type HostComposerMerging struct {
@@ -1516,7 +1642,7 @@ type HostComposerMerging struct {
 
 func (x *HostComposerMerging) Reset() {
 	*x = HostComposerMerging{}
-	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[22]
+	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1528,7 +1654,7 @@ func (x *HostComposerMerging) String() string {
 func (*HostComposerMerging) ProtoMessage() {}
 
 func (x *HostComposerMerging) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[22]
+	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1541,7 +1667,7 @@ func (x *HostComposerMerging) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostComposerMerging.ProtoReflect.Descriptor instead.
 func (*HostComposerMerging) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP(), []int{22}
+	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP(), []int{24}
 }
 
 type HostComposerDraining struct {
@@ -1552,7 +1678,7 @@ type HostComposerDraining struct {
 
 func (x *HostComposerDraining) Reset() {
 	*x = HostComposerDraining{}
-	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[23]
+	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1564,7 +1690,7 @@ func (x *HostComposerDraining) String() string {
 func (*HostComposerDraining) ProtoMessage() {}
 
 func (x *HostComposerDraining) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[23]
+	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1577,7 +1703,7 @@ func (x *HostComposerDraining) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostComposerDraining.ProtoReflect.Descriptor instead.
 func (*HostComposerDraining) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP(), []int{23}
+	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP(), []int{25}
 }
 
 type HostComposerRestarting struct {
@@ -1588,7 +1714,7 @@ type HostComposerRestarting struct {
 
 func (x *HostComposerRestarting) Reset() {
 	*x = HostComposerRestarting{}
-	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[24]
+	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1600,7 +1726,7 @@ func (x *HostComposerRestarting) String() string {
 func (*HostComposerRestarting) ProtoMessage() {}
 
 func (x *HostComposerRestarting) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[24]
+	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1613,7 +1739,7 @@ func (x *HostComposerRestarting) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostComposerRestarting.ProtoReflect.Descriptor instead.
 func (*HostComposerRestarting) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP(), []int{24}
+	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP(), []int{26}
 }
 
 // One standing fault — the same kinds SessionHealth's SessionFault carries,
@@ -1652,7 +1778,7 @@ type HostFault struct {
 
 func (x *HostFault) Reset() {
 	*x = HostFault{}
-	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[25]
+	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1664,7 +1790,7 @@ func (x *HostFault) String() string {
 func (*HostFault) ProtoMessage() {}
 
 func (x *HostFault) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[25]
+	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1677,7 +1803,7 @@ func (x *HostFault) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostFault.ProtoReflect.Descriptor instead.
 func (*HostFault) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP(), []int{25}
+	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *HostFault) GetDetail() string {
@@ -1998,7 +2124,7 @@ type HostWorkspaceSelection struct {
 
 func (x *HostWorkspaceSelection) Reset() {
 	*x = HostWorkspaceSelection{}
-	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[26]
+	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2010,7 +2136,7 @@ func (x *HostWorkspaceSelection) String() string {
 func (*HostWorkspaceSelection) ProtoMessage() {}
 
 func (x *HostWorkspaceSelection) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[26]
+	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2023,7 +2149,7 @@ func (x *HostWorkspaceSelection) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostWorkspaceSelection.ProtoReflect.Descriptor instead.
 func (*HostWorkspaceSelection) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP(), []int{26}
+	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *HostWorkspaceSelection) GetSelection() isHostWorkspaceSelection_Selection {
@@ -2111,7 +2237,7 @@ type HostWorkspaceSelectionNone struct {
 
 func (x *HostWorkspaceSelectionNone) Reset() {
 	*x = HostWorkspaceSelectionNone{}
-	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[27]
+	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2123,7 +2249,7 @@ func (x *HostWorkspaceSelectionNone) String() string {
 func (*HostWorkspaceSelectionNone) ProtoMessage() {}
 
 func (x *HostWorkspaceSelectionNone) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[27]
+	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2136,7 +2262,7 @@ func (x *HostWorkspaceSelectionNone) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostWorkspaceSelectionNone.ProtoReflect.Descriptor instead.
 func (*HostWorkspaceSelectionNone) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP(), []int{27}
+	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP(), []int{29}
 }
 
 // A final response is selected.
@@ -2150,7 +2276,7 @@ type HostWorkspaceSelectionResponse struct {
 
 func (x *HostWorkspaceSelectionResponse) Reset() {
 	*x = HostWorkspaceSelectionResponse{}
-	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[28]
+	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2162,7 +2288,7 @@ func (x *HostWorkspaceSelectionResponse) String() string {
 func (*HostWorkspaceSelectionResponse) ProtoMessage() {}
 
 func (x *HostWorkspaceSelectionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[28]
+	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2175,7 +2301,7 @@ func (x *HostWorkspaceSelectionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostWorkspaceSelectionResponse.ProtoReflect.Descriptor instead.
 func (*HostWorkspaceSelectionResponse) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP(), []int{28}
+	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *HostWorkspaceSelectionResponse) GetMarkdown() *HostWorkspaceSelectionMarkdown {
@@ -2196,7 +2322,7 @@ type HostWorkspaceSelectionPrompt struct {
 
 func (x *HostWorkspaceSelectionPrompt) Reset() {
 	*x = HostWorkspaceSelectionPrompt{}
-	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[29]
+	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2208,7 +2334,7 @@ func (x *HostWorkspaceSelectionPrompt) String() string {
 func (*HostWorkspaceSelectionPrompt) ProtoMessage() {}
 
 func (x *HostWorkspaceSelectionPrompt) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[29]
+	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2221,7 +2347,7 @@ func (x *HostWorkspaceSelectionPrompt) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostWorkspaceSelectionPrompt.ProtoReflect.Descriptor instead.
 func (*HostWorkspaceSelectionPrompt) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP(), []int{29}
+	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *HostWorkspaceSelectionPrompt) GetMarkdown() *HostWorkspaceSelectionMarkdown {
@@ -2243,7 +2369,7 @@ type HostWorkspaceSelectionBubble struct {
 
 func (x *HostWorkspaceSelectionBubble) Reset() {
 	*x = HostWorkspaceSelectionBubble{}
-	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[30]
+	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2255,7 +2381,7 @@ func (x *HostWorkspaceSelectionBubble) String() string {
 func (*HostWorkspaceSelectionBubble) ProtoMessage() {}
 
 func (x *HostWorkspaceSelectionBubble) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[30]
+	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2268,7 +2394,7 @@ func (x *HostWorkspaceSelectionBubble) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostWorkspaceSelectionBubble.ProtoReflect.Descriptor instead.
 func (*HostWorkspaceSelectionBubble) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP(), []int{30}
+	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *HostWorkspaceSelectionBubble) GetMarkdown() *HostWorkspaceSelectionMarkdown {
@@ -2291,7 +2417,7 @@ type HostWorkspaceSelectionMarkdown struct {
 
 func (x *HostWorkspaceSelectionMarkdown) Reset() {
 	*x = HostWorkspaceSelectionMarkdown{}
-	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[31]
+	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2303,7 +2429,7 @@ func (x *HostWorkspaceSelectionMarkdown) String() string {
 func (*HostWorkspaceSelectionMarkdown) ProtoMessage() {}
 
 func (x *HostWorkspaceSelectionMarkdown) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[31]
+	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2316,7 +2442,7 @@ func (x *HostWorkspaceSelectionMarkdown) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostWorkspaceSelectionMarkdown.ProtoReflect.Descriptor instead.
 func (*HostWorkspaceSelectionMarkdown) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP(), []int{31}
+	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *HostWorkspaceSelectionMarkdown) GetText() string {
@@ -2348,13 +2474,19 @@ const file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDesc = "" +
 	"\x05_line\"\x1a\n" +
 	"\x18HostWorkspaceTransferred\"\x1b\n" +
 	"\x19HostWorkspaceReloadWebapp\"\"\n" +
-	" HostWorkspaceNotificationClicked\"\x97\x02\n" +
+	" HostWorkspaceNotificationClicked\"\xd1\x02\n" +
 	"\rHostWorkspace\x123\n" +
 	"\x04none\x18\x01 \x01(\v2\x1d.agentrepl.v1.HostSessionNoneH\x00R\x04none\x12?\n" +
 	"\bexisting\x18\x02 \x01(\v2!.agentrepl.v1.HostSessionExistingH\x00R\bexisting\x129\n" +
 	"\x06naming\x18\x03 \x01(\v2!.agentrepl.v1.HostWorkspaceNamingR\x06naming\x12J\n" +
-	"\x10held_prompt_edit\x18\x04 \x01(\v2 .agentrepl.v1.HostHeldPromptEditR\x0eheldPromptEditB\t\n" +
-	"\asession\"\x84\x01\n" +
+	"\x10held_prompt_edit\x18\x04 \x01(\v2 .agentrepl.v1.HostHeldPromptEditR\x0eheldPromptEdit\x12/\n" +
+	"\x04gate\x18\x05 \x01(\v2\x16.agentrepl.v1.HostGateH\x01R\x04gate\x88\x01\x01B\t\n" +
+	"\asessionB\a\n" +
+	"\x05_gate\"Q\n" +
+	"\bHostGate\x12=\n" +
+	"\tcold_gate\x18\x01 \x01(\v2\x1e.agentrepl.v1.HostGateColdGateH\x00R\bcoldGateB\x06\n" +
+	"\x04kind\"\x12\n" +
+	"\x10HostGateColdGate\"\x84\x01\n" +
 	"\x12HostHeldPromptEdit\x12+\n" +
 	"\x04turn\x18\x01 \x01(\v2\x17.conversation.v1.TurnIdR\x04turn\x12-\n" +
 	"\x04said\x18\x02 \x01(\v2\x19.conversation.v1.UserSaidR\x04said\x12\x12\n" +
@@ -2467,7 +2599,7 @@ func file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP() []byte 
 	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 32)
+var file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 34)
 var file_agentrepl_v1_endpoint_watch_host_workspace_proto_goTypes = []any{
 	(*WatchHostWorkspaceRequest)(nil),         // 0: agentrepl.v1.WatchHostWorkspaceRequest
 	(*WatchHostWorkspaceResponse)(nil),        // 1: agentrepl.v1.WatchHostWorkspaceResponse
@@ -2476,112 +2608,116 @@ var file_agentrepl_v1_endpoint_watch_host_workspace_proto_goTypes = []any{
 	(*HostWorkspaceReloadWebapp)(nil),         // 4: agentrepl.v1.HostWorkspaceReloadWebapp
 	(*HostWorkspaceNotificationClicked)(nil),  // 5: agentrepl.v1.HostWorkspaceNotificationClicked
 	(*HostWorkspace)(nil),                     // 6: agentrepl.v1.HostWorkspace
-	(*HostHeldPromptEdit)(nil),                // 7: agentrepl.v1.HostHeldPromptEdit
-	(*HostSessionNone)(nil),                   // 8: agentrepl.v1.HostSessionNone
-	(*HostSessionExisting)(nil),               // 9: agentrepl.v1.HostSessionExisting
-	(*HostSessionLive)(nil),                   // 10: agentrepl.v1.HostSessionLive
-	(*HostSessionTerminal)(nil),               // 11: agentrepl.v1.HostSessionTerminal
-	(*HostSessionId)(nil),                     // 12: agentrepl.v1.HostSessionId
-	(*HostGenerationId)(nil),                  // 13: agentrepl.v1.HostGenerationId
-	(*HostVendorClaude)(nil),                  // 14: agentrepl.v1.HostVendorClaude
-	(*HostWorkspaceNaming)(nil),               // 15: agentrepl.v1.HostWorkspaceNaming
-	(*HostBackfill)(nil),                      // 16: agentrepl.v1.HostBackfill
-	(*HostBackfillNone)(nil),                  // 17: agentrepl.v1.HostBackfillNone
-	(*HostBackfillPending)(nil),               // 18: agentrepl.v1.HostBackfillPending
-	(*HostBackfillDone)(nil),                  // 19: agentrepl.v1.HostBackfillDone
-	(*HostBackfillFailed)(nil),                // 20: agentrepl.v1.HostBackfillFailed
-	(*HostComposerOpen)(nil),                  // 21: agentrepl.v1.HostComposerOpen
-	(*HostComposerMerging)(nil),               // 22: agentrepl.v1.HostComposerMerging
-	(*HostComposerDraining)(nil),              // 23: agentrepl.v1.HostComposerDraining
-	(*HostComposerRestarting)(nil),            // 24: agentrepl.v1.HostComposerRestarting
-	(*HostFault)(nil),                         // 25: agentrepl.v1.HostFault
-	(*HostWorkspaceSelection)(nil),            // 26: agentrepl.v1.HostWorkspaceSelection
-	(*HostWorkspaceSelectionNone)(nil),        // 27: agentrepl.v1.HostWorkspaceSelectionNone
-	(*HostWorkspaceSelectionResponse)(nil),    // 28: agentrepl.v1.HostWorkspaceSelectionResponse
-	(*HostWorkspaceSelectionPrompt)(nil),      // 29: agentrepl.v1.HostWorkspaceSelectionPrompt
-	(*HostWorkspaceSelectionBubble)(nil),      // 30: agentrepl.v1.HostWorkspaceSelectionBubble
-	(*HostWorkspaceSelectionMarkdown)(nil),    // 31: agentrepl.v1.HostWorkspaceSelectionMarkdown
-	(*v1.WorkspaceRef)(nil),                   // 32: workspace.v1.WorkspaceRef
-	(*DaemonStreamEnding)(nil),                // 33: agentrepl.v1.DaemonStreamEnding
-	(*v11.TurnId)(nil),                        // 34: conversation.v1.TurnId
-	(*v11.UserSaid)(nil),                      // 35: conversation.v1.UserSaid
-	(*SessionFaultShimStartFailed)(nil),       // 36: agentrepl.v1.SessionFaultShimStartFailed
-	(*SessionFaultShimDied)(nil),              // 37: agentrepl.v1.SessionFaultShimDied
-	(*SessionFaultLinkSevered)(nil),           // 38: agentrepl.v1.SessionFaultLinkSevered
-	(*SessionFaultResumeFailed)(nil),          // 39: agentrepl.v1.SessionFaultResumeFailed
-	(*SessionFaultBounceDied)(nil),            // 40: agentrepl.v1.SessionFaultBounceDied
-	(*SessionFaultBounceUnknown)(nil),         // 41: agentrepl.v1.SessionFaultBounceUnknown
-	(*SessionFaultClassifierFailed)(nil),      // 42: agentrepl.v1.SessionFaultClassifierFailed
-	(*SessionFaultShimReported)(nil),          // 43: agentrepl.v1.SessionFaultShimReported
-	(*SessionFaultConversationAbandoned)(nil), // 44: agentrepl.v1.SessionFaultConversationAbandoned
-	(*SessionFaultSessionAbsent)(nil),         // 45: agentrepl.v1.SessionFaultSessionAbsent
-	(*SessionFaultWatchOpenRefused)(nil),      // 46: agentrepl.v1.SessionFaultWatchOpenRefused
-	(*SessionFaultDaemonStateUnreadable)(nil), // 47: agentrepl.v1.SessionFaultDaemonStateUnreadable
-	(*SessionFaultAdoptionWindowExpired)(nil), // 48: agentrepl.v1.SessionFaultAdoptionWindowExpired
-	(*SessionFaultFinalAnswerUnresolved)(nil), // 49: agentrepl.v1.SessionFaultFinalAnswerUnresolved
-	(*SessionFaultVendorStartRetrying)(nil),   // 50: agentrepl.v1.SessionFaultVendorStartRetrying
-	(*SessionFaultVendorStartRejected)(nil),   // 51: agentrepl.v1.SessionFaultVendorStartRejected
-	(*SessionFaultVendorStartFailed)(nil),     // 52: agentrepl.v1.SessionFaultVendorStartFailed
+	(*HostGate)(nil),                          // 7: agentrepl.v1.HostGate
+	(*HostGateColdGate)(nil),                  // 8: agentrepl.v1.HostGateColdGate
+	(*HostHeldPromptEdit)(nil),                // 9: agentrepl.v1.HostHeldPromptEdit
+	(*HostSessionNone)(nil),                   // 10: agentrepl.v1.HostSessionNone
+	(*HostSessionExisting)(nil),               // 11: agentrepl.v1.HostSessionExisting
+	(*HostSessionLive)(nil),                   // 12: agentrepl.v1.HostSessionLive
+	(*HostSessionTerminal)(nil),               // 13: agentrepl.v1.HostSessionTerminal
+	(*HostSessionId)(nil),                     // 14: agentrepl.v1.HostSessionId
+	(*HostGenerationId)(nil),                  // 15: agentrepl.v1.HostGenerationId
+	(*HostVendorClaude)(nil),                  // 16: agentrepl.v1.HostVendorClaude
+	(*HostWorkspaceNaming)(nil),               // 17: agentrepl.v1.HostWorkspaceNaming
+	(*HostBackfill)(nil),                      // 18: agentrepl.v1.HostBackfill
+	(*HostBackfillNone)(nil),                  // 19: agentrepl.v1.HostBackfillNone
+	(*HostBackfillPending)(nil),               // 20: agentrepl.v1.HostBackfillPending
+	(*HostBackfillDone)(nil),                  // 21: agentrepl.v1.HostBackfillDone
+	(*HostBackfillFailed)(nil),                // 22: agentrepl.v1.HostBackfillFailed
+	(*HostComposerOpen)(nil),                  // 23: agentrepl.v1.HostComposerOpen
+	(*HostComposerMerging)(nil),               // 24: agentrepl.v1.HostComposerMerging
+	(*HostComposerDraining)(nil),              // 25: agentrepl.v1.HostComposerDraining
+	(*HostComposerRestarting)(nil),            // 26: agentrepl.v1.HostComposerRestarting
+	(*HostFault)(nil),                         // 27: agentrepl.v1.HostFault
+	(*HostWorkspaceSelection)(nil),            // 28: agentrepl.v1.HostWorkspaceSelection
+	(*HostWorkspaceSelectionNone)(nil),        // 29: agentrepl.v1.HostWorkspaceSelectionNone
+	(*HostWorkspaceSelectionResponse)(nil),    // 30: agentrepl.v1.HostWorkspaceSelectionResponse
+	(*HostWorkspaceSelectionPrompt)(nil),      // 31: agentrepl.v1.HostWorkspaceSelectionPrompt
+	(*HostWorkspaceSelectionBubble)(nil),      // 32: agentrepl.v1.HostWorkspaceSelectionBubble
+	(*HostWorkspaceSelectionMarkdown)(nil),    // 33: agentrepl.v1.HostWorkspaceSelectionMarkdown
+	(*v1.WorkspaceRef)(nil),                   // 34: workspace.v1.WorkspaceRef
+	(*DaemonStreamEnding)(nil),                // 35: agentrepl.v1.DaemonStreamEnding
+	(*v11.TurnId)(nil),                        // 36: conversation.v1.TurnId
+	(*v11.UserSaid)(nil),                      // 37: conversation.v1.UserSaid
+	(*SessionFaultShimStartFailed)(nil),       // 38: agentrepl.v1.SessionFaultShimStartFailed
+	(*SessionFaultShimDied)(nil),              // 39: agentrepl.v1.SessionFaultShimDied
+	(*SessionFaultLinkSevered)(nil),           // 40: agentrepl.v1.SessionFaultLinkSevered
+	(*SessionFaultResumeFailed)(nil),          // 41: agentrepl.v1.SessionFaultResumeFailed
+	(*SessionFaultBounceDied)(nil),            // 42: agentrepl.v1.SessionFaultBounceDied
+	(*SessionFaultBounceUnknown)(nil),         // 43: agentrepl.v1.SessionFaultBounceUnknown
+	(*SessionFaultClassifierFailed)(nil),      // 44: agentrepl.v1.SessionFaultClassifierFailed
+	(*SessionFaultShimReported)(nil),          // 45: agentrepl.v1.SessionFaultShimReported
+	(*SessionFaultConversationAbandoned)(nil), // 46: agentrepl.v1.SessionFaultConversationAbandoned
+	(*SessionFaultSessionAbsent)(nil),         // 47: agentrepl.v1.SessionFaultSessionAbsent
+	(*SessionFaultWatchOpenRefused)(nil),      // 48: agentrepl.v1.SessionFaultWatchOpenRefused
+	(*SessionFaultDaemonStateUnreadable)(nil), // 49: agentrepl.v1.SessionFaultDaemonStateUnreadable
+	(*SessionFaultAdoptionWindowExpired)(nil), // 50: agentrepl.v1.SessionFaultAdoptionWindowExpired
+	(*SessionFaultFinalAnswerUnresolved)(nil), // 51: agentrepl.v1.SessionFaultFinalAnswerUnresolved
+	(*SessionFaultVendorStartRetrying)(nil),   // 52: agentrepl.v1.SessionFaultVendorStartRetrying
+	(*SessionFaultVendorStartRejected)(nil),   // 53: agentrepl.v1.SessionFaultVendorStartRejected
+	(*SessionFaultVendorStartFailed)(nil),     // 54: agentrepl.v1.SessionFaultVendorStartFailed
 }
 var file_agentrepl_v1_endpoint_watch_host_workspace_proto_depIdxs = []int32{
-	32, // 0: agentrepl.v1.WatchHostWorkspaceRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	34, // 0: agentrepl.v1.WatchHostWorkspaceRequest.workspace:type_name -> workspace.v1.WorkspaceRef
 	6,  // 1: agentrepl.v1.WatchHostWorkspaceResponse.host:type_name -> agentrepl.v1.HostWorkspace
 	3,  // 2: agentrepl.v1.WatchHostWorkspaceResponse.transferred:type_name -> agentrepl.v1.HostWorkspaceTransferred
 	4,  // 3: agentrepl.v1.WatchHostWorkspaceResponse.reload_webapp:type_name -> agentrepl.v1.HostWorkspaceReloadWebapp
 	2,  // 4: agentrepl.v1.WatchHostWorkspaceResponse.open_in_editor:type_name -> agentrepl.v1.HostOpenInEditor
-	33, // 5: agentrepl.v1.WatchHostWorkspaceResponse.ending:type_name -> agentrepl.v1.DaemonStreamEnding
+	35, // 5: agentrepl.v1.WatchHostWorkspaceResponse.ending:type_name -> agentrepl.v1.DaemonStreamEnding
 	5,  // 6: agentrepl.v1.WatchHostWorkspaceResponse.notification_clicked:type_name -> agentrepl.v1.HostWorkspaceNotificationClicked
-	26, // 7: agentrepl.v1.WatchHostWorkspaceResponse.selection:type_name -> agentrepl.v1.HostWorkspaceSelection
-	8,  // 8: agentrepl.v1.HostWorkspace.none:type_name -> agentrepl.v1.HostSessionNone
-	9,  // 9: agentrepl.v1.HostWorkspace.existing:type_name -> agentrepl.v1.HostSessionExisting
-	15, // 10: agentrepl.v1.HostWorkspace.naming:type_name -> agentrepl.v1.HostWorkspaceNaming
-	7,  // 11: agentrepl.v1.HostWorkspace.held_prompt_edit:type_name -> agentrepl.v1.HostHeldPromptEdit
-	34, // 12: agentrepl.v1.HostHeldPromptEdit.turn:type_name -> conversation.v1.TurnId
-	35, // 13: agentrepl.v1.HostHeldPromptEdit.said:type_name -> conversation.v1.UserSaid
-	12, // 14: agentrepl.v1.HostSessionExisting.id:type_name -> agentrepl.v1.HostSessionId
-	10, // 15: agentrepl.v1.HostSessionExisting.live:type_name -> agentrepl.v1.HostSessionLive
-	11, // 16: agentrepl.v1.HostSessionExisting.terminal:type_name -> agentrepl.v1.HostSessionTerminal
-	13, // 17: agentrepl.v1.HostSessionLive.generation:type_name -> agentrepl.v1.HostGenerationId
-	14, // 18: agentrepl.v1.HostSessionLive.claude:type_name -> agentrepl.v1.HostVendorClaude
-	16, // 19: agentrepl.v1.HostSessionLive.backfill:type_name -> agentrepl.v1.HostBackfill
-	21, // 20: agentrepl.v1.HostSessionLive.open:type_name -> agentrepl.v1.HostComposerOpen
-	22, // 21: agentrepl.v1.HostSessionLive.merging:type_name -> agentrepl.v1.HostComposerMerging
-	23, // 22: agentrepl.v1.HostSessionLive.draining:type_name -> agentrepl.v1.HostComposerDraining
-	24, // 23: agentrepl.v1.HostSessionLive.restarting:type_name -> agentrepl.v1.HostComposerRestarting
-	25, // 24: agentrepl.v1.HostSessionLive.faults:type_name -> agentrepl.v1.HostFault
-	17, // 25: agentrepl.v1.HostBackfill.none:type_name -> agentrepl.v1.HostBackfillNone
-	18, // 26: agentrepl.v1.HostBackfill.pending:type_name -> agentrepl.v1.HostBackfillPending
-	19, // 27: agentrepl.v1.HostBackfill.done:type_name -> agentrepl.v1.HostBackfillDone
-	20, // 28: agentrepl.v1.HostBackfill.failed:type_name -> agentrepl.v1.HostBackfillFailed
-	36, // 29: agentrepl.v1.HostFault.shim_start_failed:type_name -> agentrepl.v1.SessionFaultShimStartFailed
-	37, // 30: agentrepl.v1.HostFault.shim_died:type_name -> agentrepl.v1.SessionFaultShimDied
-	38, // 31: agentrepl.v1.HostFault.link_severed:type_name -> agentrepl.v1.SessionFaultLinkSevered
-	39, // 32: agentrepl.v1.HostFault.resume_failed:type_name -> agentrepl.v1.SessionFaultResumeFailed
-	40, // 33: agentrepl.v1.HostFault.bounce_died:type_name -> agentrepl.v1.SessionFaultBounceDied
-	41, // 34: agentrepl.v1.HostFault.bounce_unknown:type_name -> agentrepl.v1.SessionFaultBounceUnknown
-	42, // 35: agentrepl.v1.HostFault.classifier_failed:type_name -> agentrepl.v1.SessionFaultClassifierFailed
-	43, // 36: agentrepl.v1.HostFault.shim_reported:type_name -> agentrepl.v1.SessionFaultShimReported
-	44, // 37: agentrepl.v1.HostFault.conversation_abandoned:type_name -> agentrepl.v1.SessionFaultConversationAbandoned
-	45, // 38: agentrepl.v1.HostFault.session_absent:type_name -> agentrepl.v1.SessionFaultSessionAbsent
-	46, // 39: agentrepl.v1.HostFault.watch_open_refused:type_name -> agentrepl.v1.SessionFaultWatchOpenRefused
-	47, // 40: agentrepl.v1.HostFault.daemon_state_unreadable:type_name -> agentrepl.v1.SessionFaultDaemonStateUnreadable
-	48, // 41: agentrepl.v1.HostFault.adoption_window_expired:type_name -> agentrepl.v1.SessionFaultAdoptionWindowExpired
-	49, // 42: agentrepl.v1.HostFault.final_answer_unresolved:type_name -> agentrepl.v1.SessionFaultFinalAnswerUnresolved
-	50, // 43: agentrepl.v1.HostFault.vendor_start_retrying:type_name -> agentrepl.v1.SessionFaultVendorStartRetrying
-	51, // 44: agentrepl.v1.HostFault.vendor_start_rejected:type_name -> agentrepl.v1.SessionFaultVendorStartRejected
-	52, // 45: agentrepl.v1.HostFault.vendor_start_failed:type_name -> agentrepl.v1.SessionFaultVendorStartFailed
-	27, // 46: agentrepl.v1.HostWorkspaceSelection.none:type_name -> agentrepl.v1.HostWorkspaceSelectionNone
-	28, // 47: agentrepl.v1.HostWorkspaceSelection.response:type_name -> agentrepl.v1.HostWorkspaceSelectionResponse
-	29, // 48: agentrepl.v1.HostWorkspaceSelection.prompt:type_name -> agentrepl.v1.HostWorkspaceSelectionPrompt
-	30, // 49: agentrepl.v1.HostWorkspaceSelection.bubble:type_name -> agentrepl.v1.HostWorkspaceSelectionBubble
-	31, // 50: agentrepl.v1.HostWorkspaceSelectionResponse.markdown:type_name -> agentrepl.v1.HostWorkspaceSelectionMarkdown
-	31, // 51: agentrepl.v1.HostWorkspaceSelectionPrompt.markdown:type_name -> agentrepl.v1.HostWorkspaceSelectionMarkdown
-	31, // 52: agentrepl.v1.HostWorkspaceSelectionBubble.markdown:type_name -> agentrepl.v1.HostWorkspaceSelectionMarkdown
-	53, // [53:53] is the sub-list for method output_type
-	53, // [53:53] is the sub-list for method input_type
-	53, // [53:53] is the sub-list for extension type_name
-	53, // [53:53] is the sub-list for extension extendee
-	0,  // [0:53] is the sub-list for field type_name
+	28, // 7: agentrepl.v1.WatchHostWorkspaceResponse.selection:type_name -> agentrepl.v1.HostWorkspaceSelection
+	10, // 8: agentrepl.v1.HostWorkspace.none:type_name -> agentrepl.v1.HostSessionNone
+	11, // 9: agentrepl.v1.HostWorkspace.existing:type_name -> agentrepl.v1.HostSessionExisting
+	17, // 10: agentrepl.v1.HostWorkspace.naming:type_name -> agentrepl.v1.HostWorkspaceNaming
+	9,  // 11: agentrepl.v1.HostWorkspace.held_prompt_edit:type_name -> agentrepl.v1.HostHeldPromptEdit
+	7,  // 12: agentrepl.v1.HostWorkspace.gate:type_name -> agentrepl.v1.HostGate
+	8,  // 13: agentrepl.v1.HostGate.cold_gate:type_name -> agentrepl.v1.HostGateColdGate
+	36, // 14: agentrepl.v1.HostHeldPromptEdit.turn:type_name -> conversation.v1.TurnId
+	37, // 15: agentrepl.v1.HostHeldPromptEdit.said:type_name -> conversation.v1.UserSaid
+	14, // 16: agentrepl.v1.HostSessionExisting.id:type_name -> agentrepl.v1.HostSessionId
+	12, // 17: agentrepl.v1.HostSessionExisting.live:type_name -> agentrepl.v1.HostSessionLive
+	13, // 18: agentrepl.v1.HostSessionExisting.terminal:type_name -> agentrepl.v1.HostSessionTerminal
+	15, // 19: agentrepl.v1.HostSessionLive.generation:type_name -> agentrepl.v1.HostGenerationId
+	16, // 20: agentrepl.v1.HostSessionLive.claude:type_name -> agentrepl.v1.HostVendorClaude
+	18, // 21: agentrepl.v1.HostSessionLive.backfill:type_name -> agentrepl.v1.HostBackfill
+	23, // 22: agentrepl.v1.HostSessionLive.open:type_name -> agentrepl.v1.HostComposerOpen
+	24, // 23: agentrepl.v1.HostSessionLive.merging:type_name -> agentrepl.v1.HostComposerMerging
+	25, // 24: agentrepl.v1.HostSessionLive.draining:type_name -> agentrepl.v1.HostComposerDraining
+	26, // 25: agentrepl.v1.HostSessionLive.restarting:type_name -> agentrepl.v1.HostComposerRestarting
+	27, // 26: agentrepl.v1.HostSessionLive.faults:type_name -> agentrepl.v1.HostFault
+	19, // 27: agentrepl.v1.HostBackfill.none:type_name -> agentrepl.v1.HostBackfillNone
+	20, // 28: agentrepl.v1.HostBackfill.pending:type_name -> agentrepl.v1.HostBackfillPending
+	21, // 29: agentrepl.v1.HostBackfill.done:type_name -> agentrepl.v1.HostBackfillDone
+	22, // 30: agentrepl.v1.HostBackfill.failed:type_name -> agentrepl.v1.HostBackfillFailed
+	38, // 31: agentrepl.v1.HostFault.shim_start_failed:type_name -> agentrepl.v1.SessionFaultShimStartFailed
+	39, // 32: agentrepl.v1.HostFault.shim_died:type_name -> agentrepl.v1.SessionFaultShimDied
+	40, // 33: agentrepl.v1.HostFault.link_severed:type_name -> agentrepl.v1.SessionFaultLinkSevered
+	41, // 34: agentrepl.v1.HostFault.resume_failed:type_name -> agentrepl.v1.SessionFaultResumeFailed
+	42, // 35: agentrepl.v1.HostFault.bounce_died:type_name -> agentrepl.v1.SessionFaultBounceDied
+	43, // 36: agentrepl.v1.HostFault.bounce_unknown:type_name -> agentrepl.v1.SessionFaultBounceUnknown
+	44, // 37: agentrepl.v1.HostFault.classifier_failed:type_name -> agentrepl.v1.SessionFaultClassifierFailed
+	45, // 38: agentrepl.v1.HostFault.shim_reported:type_name -> agentrepl.v1.SessionFaultShimReported
+	46, // 39: agentrepl.v1.HostFault.conversation_abandoned:type_name -> agentrepl.v1.SessionFaultConversationAbandoned
+	47, // 40: agentrepl.v1.HostFault.session_absent:type_name -> agentrepl.v1.SessionFaultSessionAbsent
+	48, // 41: agentrepl.v1.HostFault.watch_open_refused:type_name -> agentrepl.v1.SessionFaultWatchOpenRefused
+	49, // 42: agentrepl.v1.HostFault.daemon_state_unreadable:type_name -> agentrepl.v1.SessionFaultDaemonStateUnreadable
+	50, // 43: agentrepl.v1.HostFault.adoption_window_expired:type_name -> agentrepl.v1.SessionFaultAdoptionWindowExpired
+	51, // 44: agentrepl.v1.HostFault.final_answer_unresolved:type_name -> agentrepl.v1.SessionFaultFinalAnswerUnresolved
+	52, // 45: agentrepl.v1.HostFault.vendor_start_retrying:type_name -> agentrepl.v1.SessionFaultVendorStartRetrying
+	53, // 46: agentrepl.v1.HostFault.vendor_start_rejected:type_name -> agentrepl.v1.SessionFaultVendorStartRejected
+	54, // 47: agentrepl.v1.HostFault.vendor_start_failed:type_name -> agentrepl.v1.SessionFaultVendorStartFailed
+	29, // 48: agentrepl.v1.HostWorkspaceSelection.none:type_name -> agentrepl.v1.HostWorkspaceSelectionNone
+	30, // 49: agentrepl.v1.HostWorkspaceSelection.response:type_name -> agentrepl.v1.HostWorkspaceSelectionResponse
+	31, // 50: agentrepl.v1.HostWorkspaceSelection.prompt:type_name -> agentrepl.v1.HostWorkspaceSelectionPrompt
+	32, // 51: agentrepl.v1.HostWorkspaceSelection.bubble:type_name -> agentrepl.v1.HostWorkspaceSelectionBubble
+	33, // 52: agentrepl.v1.HostWorkspaceSelectionResponse.markdown:type_name -> agentrepl.v1.HostWorkspaceSelectionMarkdown
+	33, // 53: agentrepl.v1.HostWorkspaceSelectionPrompt.markdown:type_name -> agentrepl.v1.HostWorkspaceSelectionMarkdown
+	33, // 54: agentrepl.v1.HostWorkspaceSelectionBubble.markdown:type_name -> agentrepl.v1.HostWorkspaceSelectionMarkdown
+	55, // [55:55] is the sub-list for method output_type
+	55, // [55:55] is the sub-list for method input_type
+	55, // [55:55] is the sub-list for extension type_name
+	55, // [55:55] is the sub-list for extension extendee
+	0,  // [0:55] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_watch_host_workspace_proto_init() }
@@ -2605,25 +2741,28 @@ func file_agentrepl_v1_endpoint_watch_host_workspace_proto_init() {
 		(*HostWorkspace_None)(nil),
 		(*HostWorkspace_Existing)(nil),
 	}
-	file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[9].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[7].OneofWrappers = []any{
+		(*HostGate_ColdGate)(nil),
+	}
+	file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[11].OneofWrappers = []any{
 		(*HostSessionExisting_Live)(nil),
 		(*HostSessionExisting_Terminal)(nil),
 	}
-	file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[10].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[12].OneofWrappers = []any{
 		(*HostSessionLive_Claude)(nil),
 		(*HostSessionLive_Open)(nil),
 		(*HostSessionLive_Merging)(nil),
 		(*HostSessionLive_Draining)(nil),
 		(*HostSessionLive_Restarting)(nil),
 	}
-	file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[15].OneofWrappers = []any{}
-	file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[16].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[17].OneofWrappers = []any{}
+	file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[18].OneofWrappers = []any{
 		(*HostBackfill_None)(nil),
 		(*HostBackfill_Pending)(nil),
 		(*HostBackfill_Done)(nil),
 		(*HostBackfill_Failed)(nil),
 	}
-	file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[25].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[27].OneofWrappers = []any{
 		(*HostFault_ShimStartFailed)(nil),
 		(*HostFault_ShimDied)(nil),
 		(*HostFault_LinkSevered)(nil),
@@ -2642,7 +2781,7 @@ func file_agentrepl_v1_endpoint_watch_host_workspace_proto_init() {
 		(*HostFault_VendorStartRejected)(nil),
 		(*HostFault_VendorStartFailed)(nil),
 	}
-	file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[26].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[28].OneofWrappers = []any{
 		(*HostWorkspaceSelection_None)(nil),
 		(*HostWorkspaceSelection_Response)(nil),
 		(*HostWorkspaceSelection_Prompt)(nil),
@@ -2654,7 +2793,7 @@ func file_agentrepl_v1_endpoint_watch_host_workspace_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDesc), len(file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   32,
+			NumMessages:   34,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

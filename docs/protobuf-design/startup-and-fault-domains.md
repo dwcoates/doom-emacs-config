@@ -85,3 +85,9 @@
 - Ordering, restated: tabs open in the daemon REGISTRY order — never in the
   order workspaces become available. Workspace 3 waits for 1 and 2 even when
   it is ready first.
+
+## Addendum 2 (2026-10-02): the gate reaches Emacs
+
+- WHAT: `HostWorkspace.gate` (5) = optional `HostGate { oneof kind { HostGateColdGate cold_gate = 1; } }` on WatchHostWorkspace.
+- WHY: the docked gate banner hides Emacs's input window, and Emacs read no gate signal (implementer's gap report). Chosen over a roster field: the gate is Emacs's per-workspace state (the host stream already carries the composer), and the webapp already holds it via FeedColdGate.standing; both are resolved from the one daemon state.
+- Scope: only the cold gate is edge-to-edge today; open permission/question rows and held offers are feed items, not gates. A future edge-to-edge gate adds an arm.
