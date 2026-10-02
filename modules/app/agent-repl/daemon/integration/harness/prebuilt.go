@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"agentrepl/testrun/testenv"
 )
 
 // BUILD ONCE, RUN IN MANY PROCESSES.
@@ -22,11 +24,11 @@ import (
 
 // PrebuildEnv names a directory to build every binary into; the process then
 // exits without running a test.
-const PrebuildEnv = "AGENT_REPL_TEST_PREBUILD"
+const PrebuildEnv = testenv.Prebuild
 
 // PrebuiltEnv names a directory a PrebuildEnv process filled; every binary is
 // read from it and none is built.
-const PrebuiltEnv = "AGENT_REPL_TEST_PREBUILT"
+const PrebuiltEnv = testenv.Prebuilt
 
 // BuildMode is how a test process gets its binaries.
 type BuildMode int
