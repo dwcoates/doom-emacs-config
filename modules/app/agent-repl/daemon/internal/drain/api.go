@@ -219,11 +219,15 @@ type Announcer interface {
 }
 
 // shimTeardownWorstCase is the whole of the shim's own graceful teardown, as
-// the shim states it: the teardown spends at most FOUR of its per-stage
+// the shim states it: the teardown spends at most FIVE of its per-stage
 // `WATCHER_CONCLUSION_BUDGET_MS` budgets back to back (1s each,
-// agent-shim/claude/shim/src/engine/session.ts), and that teardown runs INSIDE
-// the `KillSession` rpc the stand bound below covers.
-const shimTeardownWorstCase = 4 * time.Second
+// agent-shim/claude/shim/src/engine/session.ts) -- the vendor's interrupt and
+// per-task stops, the message loop's end, the book-head read, the tails' end
+// and the bash tails -- and that teardown runs INSIDE the `KillSession` rpc the
+// stand bound below covers. It was FOUR until the vendor's half was bounded
+// (2026-10-02): unbounded, a stuck vendor kept a forced KillSession from ever
+// answering.
+const shimTeardownWorstCase = 5 * time.Second
 
 // standBoundMargin is what separates the stand bound from the sum of the two
 // promises nested inside it. MEASURED, the whole daemon-side stop takes 9ms p50
@@ -245,7 +249,7 @@ const standBoundMargin = 500 * time.Millisecond
 // The graceful `KillSession(..., false)` this bounds is two stops in sequence,
 // and both are inside it:
 //
-//   - the shim's own teardown, inside the rpc: shimTeardownWorstCase, 4s;
+//   - the shim's own teardown, inside the rpc: shimTeardownWorstCase, 5s;
 //   - the process stop that follows it: shimclient.GracefulKillBound, the
 //     SIGTERM grace (1.25s) plus the SIGKILL and the reap (250ms);
 //   - standBoundMargin, 500ms, so both land inside this rather than on it.

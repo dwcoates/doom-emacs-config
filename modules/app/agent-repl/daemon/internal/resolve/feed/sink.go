@@ -452,13 +452,15 @@ func (r *resolver) OnDetachedWork(ws ids.WorkspaceID, agent *conversationv1.Agen
 	r.drawEntry(s, agent, stamp, func() { r.drawDetachedWork(s, agent, work) })
 }
 
-// OnLiveWorkChanged settles every detached shell, and every monitor's card,
-// that left the live set without its own terminal having settled it.
+// OnLiveWorkChanged settles every detached shell, every detached subagent's
+// bubble, and every monitor's card, that left the live set without its own
+// terminal having settled it.
 func (r *resolver) OnLiveWorkChanged(ws ids.WorkspaceID, live sessionwatcher.LiveWorkSet) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)
 	r.settleShellsLeftLive(s, live)
+	r.settleSubagentsLeftLive(s, live)
 	r.settleMonitorsLeftLive(s, live)
 }
 

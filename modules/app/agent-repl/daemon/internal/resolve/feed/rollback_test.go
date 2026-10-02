@@ -367,6 +367,25 @@ func TestLiveDetachedInCountsLiveDetachedSubagentsAndShellsOfTheNamedTurns(t *te
 	}
 }
 
+func TestLiveDetachedInDoesNotCountASubagentThatLeftTheLiveSet(t *testing.T) {
+	// Arrange: a live detached subagent started in t1, whose shim was then
+	// killed: the live set held it and was republished without it.
+	h := newHarness(t)
+	h.deliverPromptAt("t1", "start background work", 1_000)
+	h.spawnSubagent("toolu_sub", &conversationv1.AgentId{Value: "agent-sub"}, "Explore", "look around")
+	h.detachWork("work-sub", "toolu_sub")
+	h.resolver.OnLiveWorkChanged(testWorkspace, liveAgents("agent-sub"))
+	h.resolver.OnLiveWorkChanged(testWorkspace, liveAgents())
+
+	// Act
+	got := h.resolver.LiveDetachedIn(testWorkspace, []ids.TurnID{"t1"})
+
+	// Assert: nothing is left for a rollback to stop.
+	if got != 0 {
+		t.Fatalf("LiveDetachedIn() = %d, want 0 once the subagent left the live set", got)
+	}
+}
+
 // assertRecordedFault asserts an ERROR record of op naming cause, and a warning
 // raised under op.
 func assertRecordedFault(t *testing.T, h *harness, op, cause string) {

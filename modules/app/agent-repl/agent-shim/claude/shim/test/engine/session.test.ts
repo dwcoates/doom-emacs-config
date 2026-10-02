@@ -4258,6 +4258,187 @@ describe("the teardown's waits are bounded", () => {
   });
 });
 
+describe("the teardown's vendor half is bounded", () => {
+  /** A detached shell the vendor started, live in the table. */
+  async function liveShell(h: Harness, taskId: string, toolUseId: string): Promise<void> {
+    await h.engine.onSdkMessage({
+      type: "system",
+      subtype: "task_started",
+      task_id: taskId,
+      tool_use_id: toolUseId,
+      task_type: "local_bash",
+      description: "sleep 600",
+      uuid: `00000000-0000-4000-8000-${taskId.padStart(12, "0")}`,
+      session_id: "s",
+    } as never);
+  }
+
+  /** The KillSession's closing arm, or undefined for a refusal. */
+  function closedHow(response: shimv1.KillSessionResponse): string | undefined {
+    return response.result.case === "success" ? response.result.value.closed?.how.case : undefined;
+  }
+
+  it("answers a forced KillSession when the vendor never answers the interrupt", async () => {
+    // Arrange
+    const h = harness({
+      watcherConclusionBudgetMs: 5,
+      onQueryCreated: (query) => {
+        query.interrupt = () => new Promise(() => undefined);
+      },
+    });
+    await started(h);
+    await liveShell(h, "t01", "toolu_hung_interrupt");
+
+    // Act
+    const response = await h.engine.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
+
+    // Assert
+    expect(closedHow(response)).toBe("forced");
+  });
+
+  it("closes a live shell run when the vendor never answers the interrupt", async () => {
+    // Arrange
+    const h = harness({
+      watcherConclusionBudgetMs: 5,
+      onQueryCreated: (query) => {
+        query.interrupt = () => new Promise(() => undefined);
+      },
+    });
+    await started(h);
+    await liveShell(h, "t01", "toolu_hung_interrupt");
+
+    // Act
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
+
+    // Assert
+    expect(
+      h.persistence.buffered.some((entry) => entry.upsertKey === "bash:toolu_hung_interrupt:terminal"),
+    ).toBe(true);
+  });
+
+  it("answers a forced KillSession when the vendor never answers a task's stop", async () => {
+    // Arrange
+    const h = harness({
+      watcherConclusionBudgetMs: 5,
+      onQueryCreated: (query) => {
+        query.stopTask = () => new Promise(() => undefined);
+      },
+    });
+    await started(h);
+    await liveShell(h, "t01", "toolu_hung_stop");
+
+    // Act
+    const response = await h.engine.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
+
+    // Assert
+    expect(closedHow(response)).toBe("forced");
+  });
+
+  it("closes a live shell run whose stop the vendor never answers", async () => {
+    // Arrange
+    const h = harness({
+      watcherConclusionBudgetMs: 5,
+      onQueryCreated: (query) => {
+        query.stopTask = () => new Promise(() => undefined);
+      },
+    });
+    await started(h);
+    await liveShell(h, "t01", "toolu_hung_stop");
+
+    // Act
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
+
+    // Assert
+    expect(
+      h.persistence.buffered.some((entry) => entry.upsertKey === "bash:toolu_hung_stop:terminal"),
+    ).toBe(true);
+  });
+
+  it("asks every task to stop even when the vendor never answers the first", async () => {
+    // Arrange: the first stop hangs; the second must still be asked.
+    const asked: string[] = [];
+    const h = harness({
+      watcherConclusionBudgetMs: 5,
+      onQueryCreated: (query) => {
+        query.stopTask = (taskId: string) => {
+          asked.push(taskId);
+          return taskId === "t01" ? new Promise(() => undefined) : Promise.resolve();
+        };
+      },
+    });
+    await started(h);
+    await liveShell(h, "t01", "toolu_first");
+    await liveShell(h, "t02", "toolu_second");
+
+    // Act
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
+
+    // Assert
+    expect(asked).toEqual(["t01", "t02"]);
+  });
+
+  it("ends the open turn as a host shutdown when the vendor never answers the interrupt", async () => {
+    // Arrange
+    const h = harness({
+      watcherConclusionBudgetMs: 5,
+      onQueryCreated: (query) => {
+        query.interrupt = () => new Promise(() => undefined);
+      },
+    });
+    await started(h);
+    await h.engine.startTurn(
+      create(shimv1.StartTurnRequestSchema, {
+        turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
+        said: textSaid("go"),
+        origin: conversationv1.PromptOrigin.USER_SENT,
+        pageSize: 5,
+      }),
+    );
+
+    // Act
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
+
+    // Assert
+    expect(
+      h.persistence.buffered.some(
+        (entry) =>
+          entry.turn?.value === "turn-1" &&
+          entry.source.discriminator === "agent_frame.success.interrupted.host_shutdown",
+      ),
+    ).toBe(true);
+  });
+
+  it("sends no stops when the vendor answers the interrupt only after the budget", async () => {
+    // Arrange: the interrupt answers when the test says so, after the
+    // stand-down has moved on.
+    let answer: () => void = () => undefined;
+    const asked: string[] = [];
+    const h = harness({
+      watcherConclusionBudgetMs: 5,
+      onQueryCreated: (query) => {
+        query.interrupt = () =>
+          new Promise((resolve) => {
+            answer = () => resolve(undefined);
+          });
+        query.stopTask = (taskId: string) => {
+          asked.push(taskId);
+          return Promise.resolve();
+        };
+      },
+    });
+    await started(h);
+    await liveShell(h, "t01", "toolu_late");
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
+
+    // Act
+    answer();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    // Assert
+    expect(asked).toEqual([]);
+  });
+});
+
 describe("the record plane's faults", () => {
   it("restates the diagnostics as unhealthy when the store raises a fault", async () => {
     // The record plane's faults are the SESSION's: nothing subscribing to them

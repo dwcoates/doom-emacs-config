@@ -382,13 +382,14 @@ type BootOutcome =
  *
  * IT IS SIZED AGAINST THE DAEMON'S STAND BOUND, NOT AGAINST ITSELF. The whole
  * teardown runs INSIDE the daemon's `KillSession` call, which
- * `drain.DefaultStandBound` (5s) gives up on; a per-stage budget large enough
+ * `drain.DefaultStandBound` (7s) gives up on; a per-stage budget large enough
  * that the daemon's bound fires first would mean the shim's own last resort
  * can never be reached, and the daemon would report a shim as leaked while it
- * was still legitimately working. The teardown spends at most FOUR of these
- * back to back -- the message loop's end, then, per agent, the book-head read
- * and the tail's own end, then the bash tails -- so the worst case must stay
- * strictly under the daemon's bound: 4 x 1s = 4s, one second inside it.
+ * was still legitimately working. The teardown spends at most FIVE of these
+ * back to back -- the vendor's interrupt and per-task stops, the message
+ * loop's end, then, per agent, the book-head read and the tail's own end, then
+ * the bash tails -- and the daemon's `shimTeardownWorstCase` is that sum:
+ * 5 x 1s = 5s, inside its stand bound.
  *
  * MEASURED: a forced `KillSession` on a session parked at an OPEN permission
  * ask, with a `WatchAgent` tail standing, concluded in 9ms in the shim's own
@@ -5995,37 +5996,40 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     }
     const active = query;
     if (active !== undefined) {
-      try {
-        await active.interrupt();
-      } catch (err) {
-        // warn: a defect because teardown continued after the vendor refused its interrupt.
-        LOGGER.warn(
-          { cause: err instanceof Error ? err.message : String(err) },
-          "the vendor refused the interrupt during teardown; continuing",
-        );
-      }
       // SNAPSHOT FIRST. Stopping a task provokes the vendor's own
       // `task_notification`, which retires the entry from the live table — so
       // reading the table again afterwards asks what is STILL live and gets
-      // exactly the items this teardown did not have to close.
-      const stopping = live.all();
-      for (const entry of stopping) {
-        try {
-          await active.stopTask(entry.taskId);
-        } catch (err) {
-          // warn: a defect because teardown continued after a detached item could not be stopped.
-          LOGGER.warn(
-            { task_id: entry.taskId, cause: err instanceof Error ? err.message : String(err) },
-            "could not stop a detached item during teardown; continuing",
-          );
-        }
-      }
-      concludeStoppedRuns(stopping);
+      // exactly the items this teardown did not have to close. It is taken
+      // again once the interrupt has answered, and this first one stands when
+      // the interrupt never does.
+      const snapshot = { stopping: live.all(), abandoned: false };
+      // THE VENDOR'S HALF IS BOUNDED, as one stage. A restart is asked for
+      // because something is stuck, and the vendor is the likeliest thing to be
+      // (2026-10-02: a vendor that never answered its first control request).
+      // Its interrupt and its per-task stops were awaited with no bound, so a
+      // forced `KillSession` on a stuck vendor never answered: the daemon
+      // escalated to the process kill, and the shell runs this teardown owed
+      // a terminal stayed open in the store, for the next shim to re-announce
+      // as live. The stops are asked AT ONCE, so one task the vendor cannot
+      // stop does not keep the others from being asked.
+      //
+      // THE OPEN TURN IS ENDED THE MOMENT THE INTERRUPT ANSWERS, in the same
+      // continuation, exactly as it was before this stage was bounded: the
+      // vendor's own `by_user` result for the interrupt follows it down the
+      // message loop, and a teardown that yielded first let that result end
+      // the turn as a user's stop instead of the host shutdown it is.
+      await withBudget(
+        stopVendorWork(active, snapshot, () => endTurnsForTeardown(reason)),
+        watcherConclusionBudgetMs,
+        "the vendor did not answer the teardown's interrupt and per-task stops within its budget; the stopped shell runs are closed and the stand-down goes on",
+      );
+      // A LATE INTERRUPT ASKS NOTHING MORE: the stand-down has moved on and
+      // the query is about to be closed under it.
+      snapshot.abandoned = true;
+      concludeStoppedRuns(snapshot.stopping);
     }
-    // BEFORE `open` IS CLEARED: the terminal names the turn, and a teardown
-    // that forgot the turn first would have nothing to write it for.
-    writeHostShutdownTerminal(reason);
-    setOpen(undefined);
+    // A no-op when the interrupt answered in time; otherwise the turn ends here.
+    endTurnsForTeardown(reason);
     keepaliveScope.abandon(`the session is being torn down: ${reason}`);
     prompts?.close();
     abort?.abort();
@@ -6067,6 +6071,65 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     releaseLock = undefined;
     await releaseWorkspaceLock?.();
     releaseWorkspaceLock = undefined;
+  }
+
+  /**
+   * End every turn the teardown owes an end, as interrupted by host shutdown,
+   * and clear the turn slot. Idempotent: once the slot is cleared there is no
+   * turn left owed, so a second call writes nothing.
+   *
+   * BEFORE `open` IS CLEARED: the terminal names the turn, and a teardown that
+   * forgot the turn first would have nothing to write it for.
+   */
+  function endTurnsForTeardown(reason: string): void {
+    writeHostShutdownTerminal(reason);
+    setOpen(undefined);
+  }
+
+  /**
+   * The teardown's vendor half: interrupt the query, re-take the snapshot of
+   * what is live, and ask the vendor to stop every item of it at once.
+   *
+   * NOTHING HERE MAY END THE TEARDOWN. A refused interrupt or stop is warned
+   * and the rest goes on; the caller bounds the whole of it, because a vendor
+   * that answers nothing is the case a restart exists for.
+   */
+  async function stopVendorWork(
+    active: QueryLike,
+    snapshot: { stopping: readonly LiveWorkEntry[]; abandoned: boolean },
+    interrupted: () => void,
+  ): Promise<void> {
+    try {
+      await active.interrupt();
+    } catch (err) {
+      // warn: a defect because teardown continued after the vendor refused its interrupt.
+      LOGGER.warn(
+        { cause: err instanceof Error ? err.message : String(err) },
+        "the vendor refused the interrupt during teardown; continuing",
+      );
+    }
+    if (snapshot.abandoned) {
+      LOGGER.debug(
+        { stopping: snapshot.stopping.length },
+        "the vendor answered the teardown's interrupt after its budget; the stops it would have asked are not sent",
+      );
+      return;
+    }
+    interrupted();
+    snapshot.stopping = live.all();
+    await Promise.all(
+      snapshot.stopping.map(async (entry) => {
+        try {
+          await active.stopTask(entry.taskId);
+        } catch (err) {
+          // warn: a defect because teardown continued after a detached item could not be stopped.
+          LOGGER.warn(
+            { task_id: entry.taskId, cause: err instanceof Error ? err.message : String(err) },
+            "could not stop a detached item during teardown; continuing",
+          );
+        }
+      }),
+    );
   }
 
   /**
