@@ -18,11 +18,8 @@ import {
 import { footerStatusActivity } from "../../src/footer/strip.js";
 import ACTIVITY_SOURCE from "../../src/footer/activity.ts?raw";
 import { cascadedValue, installStylesheet } from "../stylesheet.js";
-import {
-  FOOTER_STATUS_CASES,
-  activityDatumClass,
-  footerPercentColor,
-} from "../../src/footer/tones.js";
+import { FOOTER_STATUS_CASES, activityDatumClass } from "../../src/footer/tones.js";
+import { pressurePercentColor } from "../../src/pressure-color.js";
 
 /**
  * Every `FooterAllowance.status` arm, read off the generated schema.
@@ -41,7 +38,7 @@ const FOOTER_ALLOWANCE_STATUS_CASES: readonly string[] = (
 /** The color a footer percent of PERCENT is painted, as the DOM reports it. */
 function paintedAs(percent: number): string {
   const probe = document.createElement("span");
-  probe.style.color = footerPercentColor(percent);
+  probe.style.color = pressurePercentColor(percent);
   return probe.style.color;
 }
 import { harness } from "./harness.js";

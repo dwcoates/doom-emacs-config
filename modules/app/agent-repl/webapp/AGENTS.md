@@ -399,9 +399,9 @@ hand any more:
   open for a jump is ERROR `feed.jump-expand-failed` and a
   `controlPlaneFailed` on the chip.
 - **ONE HEAT RULE FOR EVERY TOKEN FIGURE AND PERCENTAGE** (owner rulings,
-  2026-09-30). A footer percentage is painted by `footerPercentColor`
-  (`tones.ts`): green below 40%, yellow by 70%, orange by 90%, red from 90%,
-  a continuous gradient between the stops (`src/percent-gradient.ts`). The
+  2026-09-30). A footer percentage is painted by `pressurePercentColor`
+  (`src/pressure-color.ts`): green below 40%, yellow by 70%, orange by 90%, red
+  from 90%, a continuous gradient between the stops (`src/percent-gradient.ts`). The
   response bubble's token stamp and the footer's token count share
   `tokenHeatColor` (`src/token-heat.ts`) over the daemon's
   `frontend.v1.TokenHeat` position; neither is re-derived locally.
