@@ -16,11 +16,11 @@ import (
 //     selection instant, which is what "current" means; the ATTENTION MARKER
 //     is cleared, because the user has now looked at what raised it; and the
 //     roster is told, so every webview's selection agrees at once.
-//  2. THEN, IF THE WORKSPACE IS PARKED, THE REVIVAL. Switching to a workspace
-//     is looking at it, and an open workspace the user is looking at is never
-//     session-less (owner ruling, 2026-09-13). `reviveIfParked` is a no-op for
-//     anything the idle sweep did not stand down, so a select on a live
-//     workspace changes nothing but the selection.
+//  2. THEN, IF THE WORKSPACE HAS NO SESSION, THE REVIVAL. Switching to a
+//     workspace is looking at it, and an open workspace the user is looking
+//     at is never session-less (owner rulings, 2026-09-13 and 2026-10-02).
+//     `reviveIfSessionless` is a no-op for a live or closed workspace, so a
+//     select on a live workspace changes nothing but the selection.
 //
 // THE SELECTION NEVER WAITS ON THE REVIVAL (owner ruling, 2026-09-19). A
 // bring-up takes most of a second, and the revival used to run first: the
@@ -44,7 +44,7 @@ func (v *verbs) Select(ctx context.Context, ws ids.WorkspaceID) error {
 	if err := v.selectCurrent(ctx, log, ws); err != nil {
 		return err
 	}
-	if _, err := v.reviveIfParked(ctx, log, opSelect, ws); err != nil {
+	if _, err := v.reviveIfSessionless(ctx, log, opSelect, ws); err != nil {
 		return fmt.Errorf("select %q: %w", ws, err)
 	}
 	return nil

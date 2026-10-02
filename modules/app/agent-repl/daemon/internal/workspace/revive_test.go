@@ -99,13 +99,13 @@ func TestUnparkLiftsTheParkFromBothSessionScopedViews(t *testing.T) {
 
 // ---- Single flight: at most one revival in flight per workspace -----------
 
-// reviveAsync runs reviveIfParked on its own goroutine and answers its
+// reviveAsync runs reviveIfSessionless on its own goroutine and answers its
 // outcome.
 func reviveAsync(f *fixture, ctx context.Context, ws ids.WorkspaceID) <-chan error {
 	done := make(chan error, 1)
 	v := f.verbs.(*verbs)
 	go func() {
-		_, err := v.reviveIfParked(ctx, f.log.logger, opSelect, ws)
+		_, err := v.reviveIfSessionless(ctx, f.log.logger, opSelect, ws)
 		done <- err
 	}()
 	return done
@@ -143,7 +143,7 @@ func TestARevivalIsAPlainResumeAndNeverARebind(t *testing.T) {
 	// Act.
 	close(release)
 	if err := receive(t, outcomes[0], "the revival's answer"); err != nil {
-		t.Fatalf("reviveIfParked: %v", err)
+		t.Fatalf("reviveIfSessionless: %v", err)
 	}
 
 	// Assert.
@@ -161,7 +161,7 @@ func TestConcurrentRevivalsOfOneWorkspaceStartOneSession(t *testing.T) {
 	close(release)
 	for _, outcome := range outcomes {
 		if err := receive(t, outcome, "a revival's answer"); err != nil {
-			t.Fatalf("reviveIfParked: %v", err)
+			t.Fatalf("reviveIfSessionless: %v", err)
 		}
 	}
 
@@ -212,12 +212,12 @@ func TestARevivalAfterTheFlightEndedLeadsAFreshOne(t *testing.T) {
 	f.workspace("w1", t.TempDir())
 	f.hibernate("w1")
 	v := f.verbs.(*verbs)
-	if _, err := v.reviveIfParked(context.Background(), f.log.logger, opSelect, "w1"); err != nil {
+	if _, err := v.reviveIfSessionless(context.Background(), f.log.logger, opSelect, "w1"); err != nil {
 		t.Fatalf("first revival: %v", err)
 	}
 
 	// Act.
-	if _, err := v.reviveIfParked(context.Background(), f.log.logger, opSelect, "w1"); err != nil {
+	if _, err := v.reviveIfSessionless(context.Background(), f.log.logger, opSelect, "w1"); err != nil {
 		t.Fatalf("second revival: %v", err)
 	}
 
@@ -280,5 +280,118 @@ func TestStartEndedByDaemonTellsTheDaemonLeavingFromAFailure(t *testing.T) {
 				t.Fatalf("startEndedByDaemon = (%q, %v), want ended=%v with a reason", why, ended, tt.wantEnded)
 			}
 		})
+	}
+}
+
+// ---- A look starts any open workspace with no session behind it -----------
+
+// lookAt runs reviveIfSessionless on the caller's goroutine.
+func lookAt(f *fixture, ws ids.WorkspaceID) (bool, error) {
+	return f.verbs.(*verbs).reviveIfSessionless(context.Background(), f.log.logger, opSelect, ws)
+}
+
+func TestALookStartsAnOpenWorkspaceWithNoSession(t *testing.T) {
+	// Arrange: neither parked nor live.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+
+	// Act
+	revived, err := lookAt(f, "w1")
+
+	// Assert
+	if err != nil || !revived {
+		t.Fatalf("reviveIfSessionless = (%v, %v), want (true, nil)", revived, err)
+	}
+	if !slices.Equal(f.fleet.started, []ids.WorkspaceID{"w1"}) {
+		t.Fatalf("started = %v, want [w1]", f.fleet.started)
+	}
+}
+
+func TestALookStartsNothingForAClosedWorkspace(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	ws := f.workspace("w1", t.TempDir())
+	ws.Closed = true
+	f.db.with(ws)
+
+	// Act
+	revived, err := lookAt(f, "w1")
+
+	// Assert
+	if err != nil || revived {
+		t.Fatalf("reviveIfSessionless = (%v, %v), want (false, nil)", revived, err)
+	}
+	if len(f.fleet.startCalls) != 0 {
+		t.Fatalf("start calls = %v, want none for a closed workspace", f.fleet.startCalls)
+	}
+}
+
+func TestALookAtAnUnparkedWorkspaceRaisesNoRevivingMarker(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+
+	// Act
+	if _, err := lookAt(f, "w1"); err != nil {
+		t.Fatalf("reviveIfSessionless: %v", err)
+	}
+
+	// Assert
+	if _, _, reviving := f.sidebar.snapshot(); len(reviving) != 0 {
+		t.Fatalf("reviving edges = %v, want none: the shimmer is the hibernation's", reviving)
+	}
+}
+
+func TestALookWhoseStartFailsAnswersTheFailure(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.fleet.startErr = errors.New("boom")
+
+	// Act
+	revived, err := lookAt(f, "w1")
+
+	// Assert
+	if err == nil || revived {
+		t.Fatalf("reviveIfSessionless = (%v, %v), want the start's failure", revived, err)
+	}
+	if got := recordLevel(f, "the looked-at workspace's session did not come up"); got != "error" {
+		t.Fatalf("failure record level = %q, want error", got)
+	}
+}
+
+func TestALookWhoseStartTheDaemonEndedRecordsNoError(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.fleet.startErr = fmt.Errorf("start: %w", shimclient.ErrStandingDown)
+
+	// Act
+	if _, err := lookAt(f, "w1"); err == nil {
+		t.Fatalf("reviveIfSessionless answered no error for a start that did not run")
+	}
+
+	// Assert
+	if got := recordLevel(f, "the looked-at workspace's start stopped because this daemon is standing down"); got != "info" {
+		t.Fatalf("record level = %q, want info", got)
+	}
+}
+
+func TestALookAtAnUnreadableWorkspaceFails(t *testing.T) {
+	// Arrange: no record answers for "ghost".
+	f := newFixture(t)
+
+	// Act
+	revived, err := lookAt(f, "ghost")
+
+	// Assert
+	if err == nil || revived {
+		t.Fatalf("reviveIfSessionless = (%v, %v), want the read's failure", revived, err)
+	}
+	if got := recordLevel(f, "could not read the workspace looked at with no session behind it"); got != "error" {
+		t.Fatalf("failure record level = %q, want error", got)
+	}
+	if len(f.fleet.startCalls) != 0 {
+		t.Fatalf("start calls = %v, want none for an unreadable workspace", f.fleet.startCalls)
 	}
 }

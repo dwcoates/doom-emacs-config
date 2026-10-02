@@ -325,7 +325,7 @@ func (r *resolver) SetBringingUp(ws ids.WorkspaceID, bringingUp bool) {
 // SetReviving raises or lowers the workspace's REVIVING marker, which draws a
 // shimmer across the row's name while its parked session comes back up.
 //
-// Both edges are the workspace verbs' (reviveIfParked): the raise when a
+// Both edges are the workspace verbs' (reviveIfSessionless): the raise when a
 // revival is decided, the lower when it ends whichever way it ended. A marker
 // left standing past its revival would say "coming back" about a session that
 // already did, or never will.
