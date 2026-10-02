@@ -3516,9 +3516,6 @@ introducing a sibling raw `make-process' site."
 (defvar agent-repl--external-boundary-functions
   '(agent-repl--git-string
     agent-repl--git-string-quiet
-    agent-repl--git-exit-code
-    agent-repl--git-exit-code-streaming
-    agent-repl--git-branch-exists-p
     agent-repl--async-git
     agent-repl--gh-string-quiet
     agent-repl--early-git-string
@@ -3540,8 +3537,6 @@ introducing a sibling raw `make-process' site."
     agent-repl--shim-store-socket-present-p
     agent-repl--elisp-reload-load-file
     agent-repl--frontend-make-webview-buffer
-    agent-repl--frontend-webview-selection
-    agent-repl--frontend-webview-execute-script-1
     agent-repl--frontend-webview-execute-script-value
     agent-repl--frontend-webview-live-widget
     agent-repl--frontend-webview-reload-widget
