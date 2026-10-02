@@ -827,6 +827,39 @@ func TestOpenAgentSessionPassesTheRequestsOpeningToTheStore(t *testing.T) {
 	}
 }
 
+func TestOpenAgentSessionAnswersTheBooksNewestItem(t *testing.T) {
+	tests := []struct {
+		name     string
+		pageOnly bool
+	}{
+		{name: "a watched open", pageOnly: false},
+		{name: "a page-only open", pageOnly: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Arrange.
+			store := newFakeStore()
+			store.opened = OpenedPage{Page: &storev1.AgentSessionPage{
+				Boundary: &storev1.AgentSessionPage_Floor{Floor: &storev1.ReadAgentPageFloor{}},
+			}, PinSeq: 7, Newest: &storev1.StoreItemPointer{Value: "p7"}}
+			h := newHarness(t, store, 0)
+
+			// Act.
+			res, err := h.client.OpenAgentSession(context.Background(), connect.NewRequest(&storev1.OpenAgentSessionRequest{
+				Agent: agentID("a1"), PageOnly: test.pageOnly,
+			}))
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("OpenAgentSession = %v, want nil", err)
+			}
+			if got := res.Msg.GetSuccess().GetNewest().GetValue(); got != "p7" {
+				t.Fatalf("newest = %q, want %q", got, "p7")
+			}
+		})
+	}
+}
+
 func TestOpenAgentSessionRecordsCarryTheAgentAndBook(t *testing.T) {
 	// Arrange.
 	store := newFakeStore()

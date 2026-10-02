@@ -677,15 +677,17 @@ stated nowhere else. `page_size` is retired on `WatchAgent`, `ReadHistory`,
   `openingOf` and relayed to the store's own `opening` arm as it stands.
   `ReadHistory{first}`, the reconciliation walk and the teardown's book head
   read as `REPAINT`.
-- **A TAIL-ONLY WATCH READS THE BOOK'S HEAD ONCE, PAGE-ONLY, AND NEVER RELAYS
-  IT.** The tail-only page is empty by request, so it carries none of what the
-  session stands on. Right after the store open, the reader reads the newest
-  store page page-only and notes its lines as SERVED: a teardown concluding
-  through an old head ends at once instead of spending its conclusion budget,
-  a refused or unasked-for end re-opens with `known_through` = that head (never
-  a repaint, which would replay history nobody asked for), and
-  `AgentPageSession.foundNothing` says whether the BOOK was empty — which is
-  what `watchAgent`'s unannounced-empty-book refusal reads, never the page.
+- **A TAIL-ONLY WATCH STANDS ON THE STORE'S `newest`** (feed-paging change
+  5: every `OpenAgentSession` names the book's newest item, unset = empty
+  book). The tail-only page is empty by request, so `newest` is what the
+  session anchors on, and no extra page is read: it is noted as SERVED (a
+  teardown concluding through that head ends at once instead of spending its
+  conclusion budget), it is the mark a refused or unasked-for end re-opens
+  from as `known_through` (never a repaint, which would replay history nobody
+  asked for; a markless re-open happens only for a book that was empty, where
+  everything is news), and `AgentPageSession.foundNothing` is exactly "the
+  store named no newest" — what `watchAgent`'s unannounced-empty-book refusal
+  reads, never the page.
 - **A CATCH-UP WIDER THAN ONE STORE PAGE IS WALKED.** A re-open's page is the
   store's page; when it answers `more`, the reader walks `ReadAgentPage` down
   to the caller's own mark (the store's recovery contract) and serves every
