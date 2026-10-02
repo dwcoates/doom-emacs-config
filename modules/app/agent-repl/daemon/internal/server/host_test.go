@@ -925,6 +925,9 @@ func TestHostFaultFillsEveryTypedArm(t *testing.T) {
 		{name: "daemon state unreadable", kind: health.KindStateUnreadable},
 		{name: "adoption window expired", kind: health.KindAdoptionWindowExpired},
 		{name: "final answer unresolved", kind: health.KindFinalAnswerUnresolved},
+		{name: "vendor start retrying", kind: health.KindVendorStartRetrying},
+		{name: "vendor start rejected", kind: health.KindVendorStartRejected},
+		{name: "vendor start failed", kind: health.KindVendorStartFailed},
 	}
 	for _, tt := range tests {
 		tt := tt
@@ -1163,5 +1166,52 @@ func TestTheComposerGateFollowsTheOccupancyLeaseWithNothingParked(t *testing.T) 
 				t.Fatalf("composer = %v, want the %s arm", view.GetExisting().GetLive().GetComposer(), test.name)
 			}
 		})
+	}
+}
+
+func TestHostFaultCarriesTheVendorRetryEvidence(t *testing.T) {
+	// Arrange
+	f := wsm.Fault{Kind: health.KindVendorStartRetrying, Evidence: map[string]string{
+		health.EvidenceFailedAttempts: "2", health.EvidenceCause: "stream ended before ready",
+		health.EvidenceFailingSinceMs: "1700000000000",
+	}}
+
+	// Act
+	got, _ := hostFault(f)
+
+	// Assert
+	arm := got.GetVendorStartRetrying()
+	if arm.GetFailedAttempts() != 2 || arm.GetCause() != "stream ended before ready" || arm.GetFailingSinceMs() != 1700000000000 {
+		t.Fatalf("vendor_start_retrying = %+v, want the recorded evidence", arm)
+	}
+}
+
+func TestHostFaultCarriesTheVendorRejectionCause(t *testing.T) {
+	// Arrange
+	f := wsm.Fault{Kind: health.KindVendorStartRejected, Evidence: map[string]string{health.EvidenceCause: "model missing"}}
+
+	// Act
+	got, _ := hostFault(f)
+
+	// Assert
+	if cause := got.GetVendorStartRejected().GetCause(); cause != "model missing" {
+		t.Fatalf("vendor_start_rejected.cause = %q, want the recorded cause", cause)
+	}
+}
+
+func TestHostFaultCarriesTheVendorFailedLastCause(t *testing.T) {
+	// Arrange
+	f := wsm.Fault{Kind: health.KindVendorStartFailed, Evidence: map[string]string{
+		health.EvidenceFailedAttempts: "40", health.EvidenceCause: "liveness timeout",
+		health.EvidenceFailingSinceMs: "1700000000000",
+	}}
+
+	// Act
+	got, _ := hostFault(f)
+
+	// Assert
+	arm := got.GetVendorStartFailed()
+	if arm.GetFailedAttempts() != 40 || arm.GetLastCause() != "liveness timeout" || arm.GetFailingSinceMs() != 1700000000000 {
+		t.Fatalf("vendor_start_failed = %+v, want the recorded evidence", arm)
 	}
 }
