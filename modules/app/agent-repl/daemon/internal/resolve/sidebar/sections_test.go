@@ -400,3 +400,68 @@ func TestRepositorySectionStatesItsFold(t *testing.T) {
 		})
 	}
 }
+
+func TestRepoSectionCountsEveryRowItsRegionCarries(t *testing.T) {
+	// Arrange: two unrelated workspaces.
+	r, _ := newResolver(t)
+
+	// Act.
+	r.SetRegistry(registry(workspace("w1", "one"), workspace("w2", "two")))
+
+	// Assert.
+	got := latest(t, r).GetRepository().GetSections()[0].GetHeader().GetCount().GetWorkspaces()
+	if got != 2 {
+		t.Fatalf("count = %d, want 2", got)
+	}
+}
+
+func TestRepoSectionCountIncludesANestedFamilyRow(t *testing.T) {
+	// Arrange: a child nested under its recorded parent.
+	r, _ := newResolver(t)
+	parent := workspace("w-parent", "parent")
+	child := workspace("w-child", "child")
+	child.Parent = &parent.ID
+
+	// Act.
+	r.SetRegistry(registry(parent, child))
+
+	// Assert: one top-level row, two workspaces.
+	section := latest(t, r).GetRepository().GetSections()[0]
+	if top := len(section.GetRows().GetRows()); top != 1 {
+		t.Fatalf("top-level rows = %d, want the child nested under its parent", top)
+	}
+	got := section.GetHeader().GetCount().GetWorkspaces()
+	if got != 2 {
+		t.Fatalf("count = %d, want 2 (the nested child counted)", got)
+	}
+}
+
+func TestAnEmptyRepoSectionStatesACountOfZero(t *testing.T) {
+	// Arrange.
+	r, _ := newResolver(t)
+
+	// Act.
+	r.SetRegistry(registry())
+
+	// Assert: always set, even at zero.
+	count := latest(t, r).GetRepository().GetSections()[0].GetHeader().GetCount()
+	if count == nil || count.GetWorkspaces() != 0 {
+		t.Fatalf("count = %v, want set to 0", count)
+	}
+}
+
+func TestRecentlyMergedCountsItsRows(t *testing.T) {
+	// Arrange.
+	r, _ := newResolver(t)
+	merged := workspace("w-merged", "merged")
+	merged.MergedAt = at(0)
+
+	// Act.
+	r.SetRegistry(registry(merged, workspace("w-live", "live")))
+
+	// Assert.
+	got := latest(t, r).GetRecentlyMerged().GetHeader().GetCount().GetWorkspaces()
+	if got != 1 {
+		t.Fatalf("count = %d, want 1", got)
+	}
+}
