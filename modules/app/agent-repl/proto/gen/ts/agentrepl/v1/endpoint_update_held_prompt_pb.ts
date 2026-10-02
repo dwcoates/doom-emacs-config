@@ -239,7 +239,10 @@ export type UpdateHeldPromptError = Message<"agentrepl.v1.UpdateHeldPromptError"
     /**
      * A force-through on an uninterruptible or session_starting hold, or on
      * a prompt that is being edited or queued after one that is
-     * (EditHeldPrompt): an edit keeps it and everything after it held.
+     * (EditHeldPrompt): an edit keeps it and everything after it held. Also
+     * refused while the workspace drains for a bounce, a merge drives the
+     * session, the session is still coming up, or another prompt's delivery
+     * to the agent is in flight (ask again once it settles).
      *
      * @generated from field: agentrepl.v1.UpdateHeldPromptReleaseRefused release_refused = 8;
      */
