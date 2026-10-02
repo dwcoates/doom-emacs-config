@@ -564,19 +564,13 @@ body::after {
 }
 #ws-sidebar[hidden] { display: none; }
 
-/* THE RAIL'S TEXT IS INFORMATION AND IS THEREFORE SELECTABLE (owner ruling,
+/* THE RAIL'S TEXT IS INFORMATION AND IS THEREFORE SELECTABLE (owner rulings,
    2026-09-14: "ensure that everything in the webapp (all text) can be copied
-   to clipboard; I need to be able to do this to easily relay errors"). The
-   rail used to carry a blanket `user-select: none`, which made workspace
-   names, repo headers, task lines and the rail's own error text impossible to
-   drag-select — exactly the text a reader needs to relay. The suppression now
-   lives ONLY on the two fold glyphs, whose character ("▸"/"▾") is a control's
-   state and carries no information a reader would ever quote, and where a
-   stray selection during a double-click-to-fold is pure noise. */
-#ws-sidebar [data-section-fold],
-#ws-sidebar .repo-head .tri {
-  user-select: none;
-}
+   to clipboard", and 2026-10-02: "all text must be supported, everywhere in
+   the webapp"). The rail used to carry a blanket `user-select: none`, and
+   then kept one on its two fold glyphs; neither survives. A click that ENDS a
+   drag-select is not a click (src/selection.ts), so a fold glyph a selection
+   runs across is not toggled by it. */
 
 #ws-sidebar .sb-head {
   display: flex;
@@ -1910,10 +1904,8 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
 }
 /* The fold keeps its click-to-toggle, and its TEXT stays selectable: the
    summary line is the only label the folded thinking has, so a reader
-   relaying it must be able to drag across it. Only the disclosure MARKER —
-   a glyph, not information — opts out. */
+   relaying it must be able to drag across it. */
 .thinking summary { cursor: pointer; user-select: text; }
-.thinking summary::marker { user-select: none; }
 
 .tool-card {
   border: 1px solid var(--border);
