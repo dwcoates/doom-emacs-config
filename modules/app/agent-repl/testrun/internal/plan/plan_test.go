@@ -102,6 +102,33 @@ func TestBuildChunksASplitAndBuildsEachChunksSpec(t *testing.T) {
 	}
 }
 
+func TestBuildCapsAProvenProcessOverhead(t *testing.T) {
+	// Arrange: history attributed a large queueing gap to startup, but this
+	// split's provider knows its already-built process starts within one second.
+	sp := split("go", "a", "b", "c", "d")
+	sp.OverheadCap = 1
+	est := estimates{OverheadKey("go"): 100}
+	for _, item := range sp.Items {
+		est[ItemKey("go", item)] = 10
+	}
+
+	// Act
+	p, err := Build(est, []suites.Units{{Splits: []suites.Split{sp}}}, 4)
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := p.Chunks["go"]; got != 4 {
+		t.Fatalf("chunks = %d, want 4 after the one-second overhead cap", got)
+	}
+	for _, spec := range p.Specs {
+		if spec.Est != 11 {
+			t.Fatalf("%s estimate = %v, want one 10s item + 1s startup", spec.ID, spec.Est)
+		}
+	}
+}
+
 func TestBuildEstimatesAnUnmeasuredItemAtItsGroupsMean(t *testing.T) {
 	// Arrange: two measured items average 3s; "new" is unmeasured; one slot
 	// keeps everything in one chunk so its estimate is the sum.
