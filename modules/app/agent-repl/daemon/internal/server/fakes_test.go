@@ -1130,9 +1130,10 @@ type harness struct {
 	// PersistentWifi is the persistent-wifi controller the rpc delegates to.
 	PersistentWifi *fakePersistentWifi
 	// NewsDigest is the news digest the two rpcs delegate to.
-	NewsDigest *fakeNewsDigest
-	Surfaces   *fakeSurfaces
-	WebappDist string
+	NewsDigest      *fakeNewsDigest
+	EditorInstances *fakeEditorInstances
+	Surfaces        *fakeSurfaces
+	WebappDist      string
 }
 
 // option customizes a harness before it is built.
@@ -1175,8 +1176,9 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		Focus:      desktopnotify.NewFocus(dlog.NewTestLogger()),
 		WebappDist: dist,
 
-		PersistentWifi: &fakePersistentWifi{},
-		NewsDigest:     &fakeNewsDigest{},
+		PersistentWifi:  &fakePersistentWifi{},
+		NewsDigest:      &fakeNewsDigest{},
+		EditorInstances: &fakeEditorInstances{},
 	}
 
 	deps := Deps{
@@ -1202,6 +1204,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		Focus:            h.Focus,
 		PersistentWifi:   h.PersistentWifi,
 		NewsDigest:       h.NewsDigest,
+		EditorInstances:  h.EditorInstances,
 		WebappDist:       dist,
 		ImageOrigin:      http.NotFoundHandler(),
 		Log:              h.Surfaces,
@@ -1358,14 +1361,16 @@ func (f *fakePersistentWifi) Topic() *publish.Topic[*agentreplv1.PersistentWifiS
 // fakeNewsDigest records every dismiss and refresh and answers scripted
 // responses or failures.
 type fakeNewsDigest struct {
-	mu         sync.Mutex
-	topic      publish.Topic[*agentreplv1.NewsDigestStanding]
-	dismissals []*agentreplv1.DismissNewsDigestRequest
-	refreshes  int
-	dismiss    *agentreplv1.DismissNewsDigestResponse
-	dismissErr error
-	refresh    *agentreplv1.RefreshNewsDigestResponse
-	refreshErr error
+	mu           sync.Mutex
+	topic        publish.Topic[*agentreplv1.NewsDigestStanding]
+	dismissals   []*agentreplv1.DismissNewsDigestRequest
+	refreshes    int
+	dismiss      *agentreplv1.DismissNewsDigestResponse
+	dismissErr   error
+	refresh      *agentreplv1.RefreshNewsDigestResponse
+	refreshErr   error
+	redisplays   int
+	redisplayErr error
 }
 
 func (f *fakeNewsDigest) Dismiss(_ context.Context, req *agentreplv1.DismissNewsDigestRequest) (*agentreplv1.DismissNewsDigestResponse, error) {
@@ -1380,6 +1385,29 @@ func (f *fakeNewsDigest) Refresh(context.Context) (*agentreplv1.RefreshNewsDiges
 	defer f.mu.Unlock()
 	f.refreshes++
 	return f.refresh, f.refreshErr
+}
+
+func (f *fakeNewsDigest) Redisplay(context.Context) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.redisplays++
+	return f.redisplayErr
+}
+
+// fakeEditorInstances answers a scripted verdict on every Emacs instance and
+// records what it was told.
+type fakeEditorInstances struct {
+	mu    sync.Mutex
+	isNew bool
+	err   error
+	seen  []string
+}
+
+func (f *fakeEditorInstances) Connected(_ context.Context, instance string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.seen = append(f.seen, instance)
+	return f.isNew, f.err
 }
 
 func (f *fakeNewsDigest) Topic() *publish.Topic[*agentreplv1.NewsDigestStanding] {

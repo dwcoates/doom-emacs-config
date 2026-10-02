@@ -261,6 +261,9 @@ func validateWatchDaemonRequest(req *agentreplv1.WatchDaemonRequest) *connect.Er
 		if client.Emacs.GetFocus().GetFocus() == nil {
 			return invalid("client.emacs.focus", "whether this Emacs is focused is required")
 		}
+		if client.Emacs.GetInstance().GetValue() == "" {
+			return invalid("client.emacs.instance", "this Emacs process's identity is required")
+		}
 		return nil
 	case *agentreplv1.WatchDaemonRequest_Webview:
 		return nil
