@@ -490,26 +490,18 @@ THE ARM IS THE REFUSAL, so a bare error says nothing the caller can act on."
 
 ;;;; ---- RestartWorkspace ------------------------------------------------
 
-(ert-deftest agent-repl-test-wire-verbs-restart-force-true ()
-  "A forced restart states force explicitly on the wire."
-  (agent-repl-test-wire-verbs--with-common
-    (should (equal (json-serialize
-                    (agent-repl-wire-encode-restart-workspace-request
-                     (list :workspace agent-repl-test-wire-verbs--ref :force t)))
-                   "{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"},\"force\":true}"))))
-
-(ert-deftest agent-repl-test-wire-verbs-restart-force-false-explicit ()
-  "A graceful restart still SPELLS force, rather than omitting the default."
+(ert-deftest agent-repl-test-wire-verbs-restart-request-carries-only-the-workspace ()
+  "A restart request is the workspace alone: no force field, ever."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (json-serialize
                     (agent-repl-wire-encode-restart-workspace-request
                      (list :workspace agent-repl-test-wire-verbs--ref)))
-                   "{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"},\"force\":false}"))))
+                   "{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"}}"))))
 
 (ert-deftest agent-repl-test-wire-verbs-restart-without-workspace ()
   "A restart with no workspace is incomplete and errors before send."
   (agent-repl-test-wire-verbs--with-common
-    (should-error (agent-repl-wire-encode-restart-workspace-request '(:force t))
+    (should-error (agent-repl-wire-encode-restart-workspace-request '())
                   :type 'agent-repl-wire-error)))
 
 (ert-deftest agent-repl-test-wire-verbs-restart-response-success ()
@@ -2157,12 +2149,13 @@ carries."
                     (agent-repl-test-wire-verbs--parse "{\"notYetAdopted\":{}}"))
                    '(:cause (:arm :not-yet-adopted :value nil))))))
 
-(ert-deftest agent-repl-test-wire-verbs-restart-error-no-session-arm ()
-  "RestartWorkspaceError's `no_session' arm decodes with everything it carries."
+(ert-deftest agent-repl-test-wire-verbs-restart-error-no-session-arm-is-retired ()
+  "The retired `no_session' arm is refused: every restart is immediate, so a
+workspace with no session is restarted by bringing one up."
   (agent-repl-test-wire-verbs--with-common
-    (should (equal (agent-repl-wire-decode-restart-workspace-error
-                    (agent-repl-test-wire-verbs--parse "{\"noSession\":{}}"))
-                   '(:cause (:arm :no-session :value nil))))))
+    (should-error (agent-repl-wire-decode-restart-workspace-error
+                   (agent-repl-test-wire-verbs--parse "{\"noSession\":{}}"))
+                  :type 'agent-repl-wire-error)))
 
 (ert-deftest agent-repl-test-wire-verbs-restart-error-unset-cause-is-a-breach ()
   "RestartWorkspaceError with no arm set says nothing actionable, so it is a
@@ -2184,7 +2177,7 @@ at."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_restart_workspace.pb.go" "RestartWorkspaceError")
                        #'string<)
-                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "noSession")
+                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-set-priority-error-unknown-workspace-arm ()

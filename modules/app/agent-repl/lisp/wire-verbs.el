@@ -1743,18 +1743,13 @@ arm this codec does not know is refused as an unknown field."
   (agent-repl-wire-encode-workspace-ref ref))
 
 (defun agent-repl-wire-encode-restart-workspace-request (request)
-  "Encode RestartWorkspaceRequest from plist REQUEST (:workspace REF :force
-BOOL).
-`force' is spelled EXPLICITLY on the wire even when false: a forced
-restart interrupts live work, so the request states the mode rather than
-leaning on an omitted default."
-  (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.verbs-encode-restart-workspace-request force=%S"
-                    (and (plist-get request :force) t))
+  "Encode RestartWorkspaceRequest from plist REQUEST (:workspace REF).
+Every restart is immediate: the request carries no mode."
+  (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.verbs-encode-restart-workspace-request")
   (list (cons 'workspace
               (agent-repl-wire-encode-restart-workspace-request-workspace
                (agent-repl-wire-verbs--require "RestartWorkspaceRequest" "workspace"
-                                                (plist-get request :workspace))))
-        (cons 'force (agent-repl-wire-verbs--encode-bool (plist-get request :force)))))
+                                                (plist-get request :workspace))))))
 
 (defun agent-repl-wire-decode-restart-workspace-success (json)
   "Decode RestartWorkspaceSuccess from JSON.  Empty: the restart is accepted."
@@ -1787,11 +1782,6 @@ This daemon released the workspace to a successor; dial `address'."
 not finished adopting this workspace yet."
   (agent-repl-wire-verbs--decode-empty "RestartWorkspaceNotYetAdopted" json))
 
-(defun agent-repl-wire-decode-restart-workspace-no-session (json)
-  "Decode RestartWorkspaceNoSession from JSON.  Empty: The workspace has no
-session to restart."
-  (agent-repl-wire-verbs--decode-empty "RestartWorkspaceNoSession" json))
-
 (defun agent-repl-wire-decode-restart-workspace-error-unknown-workspace (json)
   "Decode RestartWorkspaceError's `unknown_workspace' cause arm from JSON."
   (agent-repl-wire-decode-restart-workspace-unknown-workspace json))
@@ -1808,10 +1798,6 @@ session to restart."
   "Decode RestartWorkspaceError's `not_yet_adopted' cause arm from JSON."
   (agent-repl-wire-decode-restart-workspace-not-yet-adopted json))
 
-(defun agent-repl-wire-decode-restart-workspace-error-no-session (json)
-  "Decode RestartWorkspaceError's `no_session' cause arm from JSON."
-  (agent-repl-wire-decode-restart-workspace-no-session json))
-
 (defun agent-repl-wire-decode-restart-workspace-error (json)
   "Decode RestartWorkspaceError from JSON into (:cause (:arm ARM :value V)).
 THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
@@ -1824,8 +1810,7 @@ arm this codec does not know is refused as an unknown field."
            (list (list 'unknownWorkspace :unknown-workspace #'agent-repl-wire-decode-restart-workspace-error-unknown-workspace)
          (list 'workspaceRefMismatch :workspace-ref-mismatch #'agent-repl-wire-decode-restart-workspace-error-workspace-ref-mismatch)
          (list 'transferringAway :transferring-away #'agent-repl-wire-decode-restart-workspace-error-transferring-away)
-         (list 'notYetAdopted :not-yet-adopted #'agent-repl-wire-decode-restart-workspace-error-not-yet-adopted)
-         (list 'noSession :no-session #'agent-repl-wire-decode-restart-workspace-error-no-session))))))
+         (list 'notYetAdopted :not-yet-adopted #'agent-repl-wire-decode-restart-workspace-error-not-yet-adopted))))))
 
 (defun agent-repl-wire-decode-restart-workspace-response-success (json)
   "Decode RestartWorkspaceResponse's `success' arm from JSON."
