@@ -689,10 +689,19 @@ func TestASessionlessWorkspaceHandedOverDrawsItsFeedWithNoPrompt(t *testing.T) {
 	// left down. The shim deaths are what this test provokes: the link
 	// records, the redials, the fault and the loop guard's own WARN are their
 	// evidence, not defects.
+	//
+	// THE SECOND KILL LANDS THE MOMENT THE REVIVED SESSION IS UP, which is
+	// exactly when the bring-up's follow-on calls are on the wire: its title
+	// digest and its agent and session watches. Whichever of them the SIGKILL
+	// catches in flight fails on the shim client with an EOF, at ERROR because
+	// nobody in the daemon ordered that death. Which ones it catches is the
+	// schedule's choice, so they are declared with the rest of the trail.
 	w := dpStaleDaemonWorld(t)
 	w.ExpectWarnings("daemon.promptqueue.revive", "daemon.sessionwatcher.link_fault",
 		"daemon.shimclient.redial", "daemon.health.open_fault", "daemon.shimclient.exit",
-		"daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.watch_session")
+		"daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.watch_session",
+		"daemon.shimclient.gather_title_digest", "daemon.shimclient.watch_agent",
+		"daemon.shimclient.watch_session")
 	repo := harness.NewRepo(t)
 	ws := harness.Register(t, w.Daemon, repo.Dir)
 	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "prose-streamed")
