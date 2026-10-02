@@ -165,6 +165,14 @@ func main() {
 		stop()
 		os.Exit(code)
 	}
+	if len(os.Args) > 1 && os.Args[1] == callVerb {
+		// THE VERB STARTS NOTHING: it sends one unary rpc to the serving
+		// daemon and prints the answer.
+		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+		code := runCallVerb(ctx, os.Args[2:], productionCallDeps(), os.Stdout, os.Stderr)
+		stop()
+		os.Exit(code)
+	}
 	if len(os.Args) > 1 && os.Args[1] == mergeQueueVerb {
 		// THE VERB STARTS NOTHING: it drops a command file for the serving
 		// daemon and reads the outcome off its roster.
