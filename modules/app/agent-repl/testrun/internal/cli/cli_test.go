@@ -582,3 +582,34 @@ func TestRunInterruptedKillsAndExits130(t *testing.T) {
 		t.Fatalf("exit = %d, stderr:\n%s", code, h.errOut)
 	}
 }
+
+func TestParseCoverArgs(t *testing.T) {
+	tests := []struct {
+		name    string
+		argv    []string
+		want    CoverArgs
+		wantErr string
+	}{
+		{name: "every flag", argv: []string{"-name", "daemon", "-module", "/m", "-covdirs", "/c"}, want: CoverArgs{Name: "daemon", Module: "/m", CovDirs: "/c"}},
+		{name: "a missing flag", argv: []string{"-name", "daemon", "-module", "/m"}, wantErr: "needs -name, -module and -covdirs"},
+		{name: "an unknown flag", argv: []string{"-bogus"}, wantErr: "flag provided but not defined: -bogus"},
+		{name: "a stray argument", argv: []string{"-name", "d", "-module", "/m", "-covdirs", "/c", "extra"}, wantErr: "unexpected arguments [extra]"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got, err := ParseCoverArgs(tt.argv)
+
+			// Assert
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("err = %v, want it to mention %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil || got != tt.want {
+				t.Fatalf("ParseCoverArgs = %+v, %v; want %+v", got, err, tt.want)
+			}
+		})
+	}
+}

@@ -8,7 +8,6 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"os"
 	"os/exec"
@@ -84,18 +83,12 @@ func runCmd(log *run.Log, argv []string) int {
 }
 
 func coverCmd(log *run.Log, argv []string) int {
-	fs := flag.NewFlagSet("cover-report", flag.ContinueOnError)
-	name := fs.String("name", "", "the module's suite name")
-	module := fs.String("module", "", "the Go module directory")
-	covRoot := fs.String("covdirs", "", "the directory holding one coverage directory per package unit")
-	if err := fs.Parse(argv); err != nil {
+	a, err := cli.ParseCoverArgs(argv)
+	if err != nil {
+		log.Errorf("%v", err)
 		return 2
 	}
-	if *name == "" || *module == "" || *covRoot == "" {
-		log.Errorf("cover-report needs -name, -module and -covdirs")
-		return 2
-	}
-	if err := cover.Report(cover.GoTool, os.Stdout, *name, *module, *covRoot); err != nil {
+	if err := cover.Report(cover.GoTool, os.Stdout, a.Name, a.Module, a.CovDirs); err != nil {
 		log.Errorf("%v", err)
 		return 1
 	}
