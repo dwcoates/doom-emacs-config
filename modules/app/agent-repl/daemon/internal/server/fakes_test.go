@@ -752,6 +752,12 @@ func (f *fakeHealth) OpenFaults(context.Context, wsm.FaultScope) ([]wsm.Fault, e
 // them out.
 type fakeSessionFacts struct {
 	facts map[ids.WorkspaceID]HostFacts
+	gates map[ids.WorkspaceID]HostGateKind
+}
+
+func (f *fakeSessionFacts) StandingGate(ws ids.WorkspaceID) (HostGateKind, bool) {
+	got, ok := f.gates[ws]
+	return got, ok
 }
 
 func (f *fakeSessionFacts) HostSessionFacts(ws ids.WorkspaceID) (HostFacts, bool) {

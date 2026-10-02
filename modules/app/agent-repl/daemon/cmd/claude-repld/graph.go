@@ -1226,6 +1226,15 @@ func (h hostSessionFacts) HostSessionFacts(ws ids.WorkspaceID) (server.HostFacts
 	}, true
 }
 
+// StandingGate answers the gate the user must answer on the workspace: the
+// cold gate while it stands unanswered.
+func (h hostSessionFacts) StandingGate(ws ids.WorkspaceID) (server.HostGateKind, bool) {
+	if h.fleet.ColdGateShown(ws) {
+		return server.HostGateColdGate, true
+	}
+	return 0, false
+}
+
 // sentinelStripper adapts prompts.StripSentinels to the resolvers' drawing
 // seam. An UNBALANCED marker is a producer bug: it is recorded at WARNING and
 // the text is drawn as it stands, because losing the prompt row is worse than
