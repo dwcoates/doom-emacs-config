@@ -288,7 +288,7 @@ or `:terminal'; `:unknown' means no host push has arrived yet."
       :unknown))))
 
 (defun agent-repl-host-take-restart-hold (ws)
-  "Close WS's composer LOCALLY from the instant a forced restart is accepted.
+  "Close WS's composer LOCALLY from the instant a restart is sent.
 
 THE SEND IS THE EDGE, NOT THE PUSH.  RestartWorkspace is sent
 asynchronously and answers success once the daemon has taken the work on;
@@ -307,9 +307,8 @@ the gate here, and nothing reopens it but the daemon.  The generation
 current at the moment of the hold is recorded because it is what the
 release below compares against.
 
-The hold is taken for FORCED restarts only.  A graceful restart is
-SCHEDULED -- the daemon defers the bounce until the turn settles -- and
-the composer stays open until the daemon itself says otherwise."
+The hold is taken for EVERY restart: a restart is always immediate, so
+the bounce is always coming."
   (let ((generation (agent-repl-host-generation ws)))
     (agent-repl-host--put ws :restart-hold (list :generation generation))
     (agent-repl--info ws "elisp.host.restart-hold-taken ws=%s generation=%s"
@@ -325,7 +324,7 @@ the composer stays open until the daemon itself says otherwise."
 (defun agent-repl-host--settle-restart-hold (ws)
   "Release WS's restart hold once the DAEMON's own push resolves it.
 
-Two edges end the hold, and a forced restart is guaranteed to produce one
+Two edges end the hold, and a restart is guaranteed to produce one
 of them: the daemon publishes `restarting' -- it now owns the fact, and
 the pushed arm is the gate again -- or the live generation ROLLS, which is
 the relaunched shim reporting itself and means the bounce is already over.
@@ -345,7 +344,7 @@ generation is read off the same state as the arm."
   "Return the composer gate for WS as one keyword of the fixed vocabulary.
 
 The pushed arm IS the gate, save for one local fact the daemon has not
-had time to publish yet: an accepted forced restart holds the gate at
+had time to publish yet: an accepted restart holds the gate at
 `:restarting' until the daemon's own push resolves it (see
 `agent-repl-host-take-restart-hold').
 
