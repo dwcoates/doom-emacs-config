@@ -70,6 +70,7 @@ func goModuleUnitsForPackages(l Layout, s roster.Suite, dir string, pkgs []strin
 	u := Units{Atomic: []run.Spec{vet}}
 	var reportDeps []string
 	hasTests := false
+	prebuildConfigured := false
 	for i, rel := range pkgs {
 		p := goPkg{
 			Suite: s.Name, Module: dir, Rel: rel,
@@ -77,6 +78,9 @@ func goModuleUnitsForPackages(l Layout, s roster.Suite, dir string, pkgs []strin
 		}
 		if l.Coverage {
 			p.CovDir = filepath.Join(covRoot, fmt.Sprintf("%03d", i))
+		} else if rel == s.PrebuildPackage && s.PrebuildPackage != "" {
+			p.sharePrebuilt(filepath.Join(l.Work, "prebuilt", s.Name))
+			prebuildConfigured = true
 		}
 		build, split, err := p.units()
 		if err != nil {
@@ -91,6 +95,9 @@ func goModuleUnitsForPackages(l Layout, s roster.Suite, dir string, pkgs []strin
 		if l.Coverage {
 			reportDeps = append(reportDeps, split.Group)
 		}
+	}
+	if s.PrebuildPackage != "" && !l.Coverage && !prebuildConfigured {
+		return Units{}, fmt.Errorf("suites: %s prebuild package %q is not a tested package", s.Name, s.PrebuildPackage)
 	}
 	if !hasTests {
 		return Units{}, fmt.Errorf("suites: %s has test files but no test to run under %s", s.Name, dir)

@@ -4,10 +4,8 @@ import (
 	"fmt"
 	"path/filepath"
 	"strconv"
-	"strings"
 
 	"agentrepl/testrun/roster"
-	"agentrepl/testrun/testenv"
 )
 
 // e2eUnits is the root package split the one Go way (goPkg), with a build
@@ -26,13 +24,7 @@ func e2eUnits(l Layout, s roster.Suite) (Units, error) {
 		p := goPkg{Suite: s.Name, Module: dir, Rel: rel, Bin: filepath.Join(work, fmt.Sprintf("%03d.test", i))}
 		if rel == "." {
 			prebuilt := filepath.Join(work, "prebuilt")
-			p.Build = []string{"bash", "-c", strings.Join([]string{
-				"set -euo pipefail",
-				strconv.Quote(filepath.Join(l.Module, "bin", "ensure-e2e-deps.sh")),
-				"go test -c -o " + strconv.Quote(p.Bin) + " .",
-				testenv.Prebuild + "=" + strconv.Quote(prebuilt) + " " + strconv.Quote(p.Bin) + " -test.run '^$'",
-			}, "\n")}
-			p.ChunkEnv = []string{testenv.Prebuilt + "=" + prebuilt}
+			p.sharePrebuilt(prebuilt, strconv.Quote(filepath.Join(l.Module, "bin", "ensure-e2e-deps.sh")))
 			p.Timeout = "45m"
 		}
 		build, split, err := p.units()
