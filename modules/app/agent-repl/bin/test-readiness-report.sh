@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 
+# Tests run only at background priority: re-exec once through bin/background.sh.
+[[ -n ${AGENT_REPL_BACKGROUND_PRIORITY:-} ]] || exec "$(dirname "${BASH_SOURCE[0]}")/background.sh" bash "${BASH_SOURCE[0]}" "$@"
+
 # shellcheck disable=SC2250,SC2292,SC2312,SC2310
 # Opt-in (`-o all`) style checks, declined for the same reasons spelled out at
 # the top of build-frontend.sh.
@@ -30,9 +33,6 @@ set -euo pipefail
 # shellcheck source=lib-test-split.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib-test-split.sh"
 test_split_init "${BASH_SOURCE[0]}" "$@"
-
-# Tests run only at background priority: re-exec once through bin/background.sh.
-[[ -n ${AGENT_REPL_BACKGROUND_PRIORITY:-} ]] || exec "$(dirname "${BASH_SOURCE[0]}")/background.sh" bash "${BASH_SOURCE[0]}" "$@"
 
 # A pre-commit hook exports its live index to children. The fake git ignores
 # them, but nothing here should carry a binding to the caller's repository.
