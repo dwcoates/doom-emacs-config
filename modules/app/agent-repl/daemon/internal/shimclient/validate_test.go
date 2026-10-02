@@ -11,10 +11,17 @@ import (
 // validStartTurnRequest is the smallest legal StartTurn.
 func validStartTurnRequest() *shimv1.StartTurnRequest {
 	return &shimv1.StartTurnRequest{
-		Turn:     &conversationv1.TurnId{Value: "turn-1"},
-		Said:     validUserSaid(),
-		Origin:   conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT,
-		PageSize: DefaultPageSize,
+		Turn:    &conversationv1.TurnId{Value: "turn-1"},
+		Said:    validUserSaid(),
+		Origin:  conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT,
+		Opening: &shimv1.StartTurnRequest_TailOnly{TailOnly: &shimv1.StartTurnTailOnly{}},
+	}
+}
+
+// tailOnlyWatch is the smallest legal WatchAgent: the main agent, no history.
+func tailOnlyWatch() *shimv1.WatchAgentRequest {
+	return &shimv1.WatchAgentRequest{
+		Opening: &shimv1.WatchAgentRequest_TailOnly{TailOnly: &shimv1.WatchAgentTailOnly{}},
 	}
 }
 
@@ -132,9 +139,12 @@ func TestValidateStartTurnRequest(t *testing.T) {
 		{name: "unspecified origin", mut: func(r *shimv1.StartTurnRequest) {
 			r.Origin = conversationv1.PromptOrigin_PROMPT_ORIGIN_UNSPECIFIED
 		}, field: "StartTurnRequest.origin"},
-		{name: "zero page size", mut: func(r *shimv1.StartTurnRequest) { r.PageSize = 0 }, field: "StartTurnRequest.page_size"},
+		{name: "unset opening", mut: func(r *shimv1.StartTurnRequest) { r.Opening = nil }, field: "StartTurnRequest.opening"},
+		{name: "nil tail-only arm", mut: func(r *shimv1.StartTurnRequest) {
+			r.Opening = &shimv1.StartTurnRequest_TailOnly{}
+		}, field: "StartTurnRequest.tail_only"},
 		{name: "empty known-through", mut: func(r *shimv1.StartTurnRequest) {
-			r.KnownThrough = &conversationv1.HistoryPointer{}
+			r.Opening = &shimv1.StartTurnRequest_KnownThrough{KnownThrough: &conversationv1.HistoryPointer{}}
 		}, field: "StartTurnRequest.known_through.value"},
 	}
 	for _, tc := range tests {
@@ -159,15 +169,25 @@ func TestValidateWatchAgentRequest(t *testing.T) {
 		req   *shimv1.WatchAgentRequest
 		field string
 	}{
-		{name: "zero page size", req: &shimv1.WatchAgentRequest{}, field: "WatchAgentRequest.page_size"},
+		{name: "unset opening", req: &shimv1.WatchAgentRequest{}, field: "WatchAgentRequest.opening"},
 		{
-			name:  "empty target",
-			req:   &shimv1.WatchAgentRequest{PageSize: DefaultPageSize, Target: &conversationv1.AgentId{}},
+			name:  "nil tail-only arm",
+			req:   &shimv1.WatchAgentRequest{Opening: &shimv1.WatchAgentRequest_TailOnly{}},
+			field: "WatchAgentRequest.tail_only",
+		},
+		{
+			name: "empty target",
+			req: &shimv1.WatchAgentRequest{
+				Target:  &conversationv1.AgentId{},
+				Opening: &shimv1.WatchAgentRequest_TailOnly{TailOnly: &shimv1.WatchAgentTailOnly{}},
+			},
 			field: "WatchAgentRequest.target.value",
 		},
 		{
-			name:  "empty known-through",
-			req:   &shimv1.WatchAgentRequest{PageSize: DefaultPageSize, KnownThrough: &conversationv1.HistoryPointer{}},
+			name: "empty known-through",
+			req: &shimv1.WatchAgentRequest{
+				Opening: &shimv1.WatchAgentRequest_KnownThrough{KnownThrough: &conversationv1.HistoryPointer{}},
+			},
 			field: "WatchAgentRequest.known_through.value",
 		},
 	}
@@ -230,16 +250,14 @@ func TestValidateReadHistoryRequest(t *testing.T) {
 		req   *shimv1.ReadHistoryRequest
 		field string
 	}{
-		{name: "zero page size", req: &shimv1.ReadHistoryRequest{}, field: "ReadHistoryRequest.page_size"},
 		{
 			name:  "no position arm",
-			req:   &shimv1.ReadHistoryRequest{PageSize: DefaultPageSize},
+			req:   &shimv1.ReadHistoryRequest{},
 			field: "ReadHistoryRequest.position",
 		},
 		{
 			name: "empty after pointer",
 			req: &shimv1.ReadHistoryRequest{
-				PageSize: DefaultPageSize,
 				Position: &shimv1.ReadHistoryRequest_After{After: &conversationv1.HistoryPointer{}},
 			},
 			field: "ReadHistoryRequest.after.value",
@@ -381,5 +399,59 @@ func TestValidateStartSessionFreshAcceptsAnUnsetModel(t *testing.T) {
 	// Assert.
 	if err != nil {
 		t.Fatalf("validateStartSessionRequest with no model = %v, want it accepted", err)
+	}
+}
+
+// TestValidateWatchAgentRequestAcceptsEachOpening asserts both openings the
+// daemon asks for — no history, or catch-up past a held pointer — are legal.
+func TestValidateWatchAgentRequestAcceptsEachOpening(t *testing.T) {
+	tests := []struct {
+		name string
+		req  *shimv1.WatchAgentRequest
+	}{
+		{name: "tail only", req: tailOnlyWatch()},
+		{name: "known through", req: &shimv1.WatchAgentRequest{
+			Opening: &shimv1.WatchAgentRequest_KnownThrough{KnownThrough: &conversationv1.HistoryPointer{Value: "ptr-1"}},
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange, Act.
+			err := validateWatchAgentRequest(tc.req)
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("validateWatchAgentRequest() = %v, want nil", err)
+			}
+		})
+	}
+}
+
+// TestValidateStartTurnRequestAcceptsEachOpening asserts both openings the
+// daemon asks a turn's page for are legal.
+func TestValidateStartTurnRequestAcceptsEachOpening(t *testing.T) {
+	tests := []struct {
+		name    string
+		opening func(*shimv1.StartTurnRequest)
+	}{
+		{name: "tail only", opening: func(*shimv1.StartTurnRequest) {}},
+		{name: "known through", opening: func(r *shimv1.StartTurnRequest) {
+			r.Opening = &shimv1.StartTurnRequest_KnownThrough{KnownThrough: &conversationv1.HistoryPointer{Value: "ptr-1"}}
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			req := validStartTurnRequest()
+			tc.opening(req)
+
+			// Act.
+			err := validateStartTurnRequest(req)
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("validateStartTurnRequest() = %v, want nil", err)
+			}
+		})
 	}
 }
