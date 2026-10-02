@@ -347,11 +347,12 @@
      0.2rem + 2 x (0.3rem + 1px) = 14.8px, 30% under the old 21.2px. */
   --topbar-right-chip-gap: 0.2rem;
   --topbar-right-chip-inset: 0.3rem;
-  /* THE PERSISTENT-WIFI CHIP'S TWO PAINTS (owner request, 2026-10-02): the
-     joined glyph a step brighter than `--ok` (green-500 over green-600), and
-     the mode-on disc black. */
-  --wifi-joined: #22c55e;
-  --wifi-mode-on-disc: #000000;
+  /* THE PERSISTENT-WIFI CHIP'S PAINTS (owner request, 2026-10-02): the glyph
+     is black; the disc behind it is white when the mode is off and green when
+     it is on (green-500, a step brighter than `--ok`). */
+  --wifi-glyph: #000000;
+  --wifi-mode-on-disc: #22c55e;
+  --wifi-mode-off-disc: #ffffff;
   font-family: ui-sans-serif, system-ui, sans-serif;
 }
 
@@ -7015,23 +7016,23 @@ bubble-body.bubble-body { display: block; }
   color: var(--muted);
   white-space: nowrap;
 }
-/* THE PERSISTENT-WIFI CHIP (src/topbar/persistent-wifi.ts). The glyph's color
-   is the wifi arm, the disc behind it is the mode arm, each painted on its
-   own: green on a network, red on none, muted when the daemon could not
-   read it; a black disc when the lid can close without losing the network
-   (owner request, 2026-10-02: black rather than blue, and the green a step
-   brighter than `--ok`). The disc is a circle inside the glyph's own svg,
-   whose viewBox is the disc's square, so the svg's 16px box IS the disc and
-   the glyph inside it is centered by geometry rather than by layout. */
+/* THE PERSISTENT-WIFI CHIP (src/topbar/persistent-wifi.ts). The glyph is
+   always black; the disc behind it is the mode arm: white when the mode is off
+   (or the daemon could not read it), green when on (owner request,
+   2026-10-02). The wifi arm is not painted: the tooltip, which the daemon
+   composes from both facts, carries it. The disc is a circle inside the
+   glyph's own svg, whose viewBox is the disc's square, so the svg's 16px box
+   IS the disc and the glyph inside it is centered by geometry rather than by
+   layout. */
 .topbar-wifi {
   display: inline-flex;
   align-items: center;
   flex: none;
-  color: var(--muted);
+  color: var(--wifi-glyph);
 }
 /* THE GLYPH IS THE CONTROL (owner request, 2026-10-02): a click turns the
    mode over. It takes the right group's quiet button box like its siblings,
-   but keeps the chip's color, since the glyph's color IS the wifi arm. */
+   but keeps the chip's color, which is the glyph's black. */
 .topbar-wifi-button {
   display: inline-flex;
   align-items: center;
@@ -7047,10 +7048,19 @@ bubble-body.bubble-body { display: block; }
   stroke-linecap: round;
   stroke-linejoin: round;
 }
-.topbar-wifi-disc { stroke: none; }
-.topbar-wifi[data-wifi="joined"] { color: var(--wifi-joined); }
-.topbar-wifi[data-wifi="not-joined"] { color: var(--err); }
+.topbar-wifi-disc { stroke: none; fill: var(--wifi-mode-off-disc); }
 .topbar-wifi[data-mode="on"] .topbar-wifi-disc { fill: var(--wifi-mode-on-disc); }
+/* A TOGGLE IN FLIGHT PULSES, subtly: turning the mode on runs the whole
+   change (hotspot, power settings, display) before the daemon answers, which
+   takes seconds. The attribute is set while the call stands and removed at
+   its answer. */
+.topbar-wifi[data-settling] {
+  animation: topbar-wifi-settling 1.4s ease-in-out infinite;
+}
+@keyframes topbar-wifi-settling { 50% { opacity: 0.55; } }
+@media (prefers-reduced-motion: reduce) {
+  .topbar-wifi[data-settling] { animation: none; opacity: 0.7; }
+}
 
 /* ---- bubble scrollbars (src/styles.css) --------------------------------- */
 
