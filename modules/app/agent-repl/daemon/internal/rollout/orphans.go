@@ -9,6 +9,7 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/sessionlock"
+	"claude-repld/internal/wsm"
 )
 
 // opOrphans is the operation the takeover's orphan recovery is recorded under.
@@ -37,6 +38,13 @@ const opOrphans = "daemon.rollout.orphans"
 // which is the same door the handover's successor uses and which claims
 // serving. A lock that could not be read is never read as held or free: it is
 // named and left. No stand-down is attempted here, forced or otherwise.
+//
+// AND A FREE LOCK HAS ITS SESSION STARTED. An open workspace this daemon was
+// never handed, with no client here and a lock nobody holds, is served by this
+// daemon from the takeover on and has nothing behind it: its feed would stay
+// empty until a prompt revived it. It is started through the boot's own
+// bring-up (sessionless.go), exactly as a fresh boot starts a client-less
+// workspace.
 func (c *controller) recoverOrphans(fields dlog.Context) {
 	if c.deps.LockProbe == nil || c.deps.Shims == nil {
 		return
@@ -55,6 +63,7 @@ func (c *controller) recoverOrphans(fields dlog.Context) {
 	c.mu.Unlock()
 
 	var orphans []ids.WorkspaceID
+	var sessionless []wsm.Workspace
 	for _, ws := range workspaces {
 		wsFields := merge(fields, dlog.Context{"workspace": string(ws.ID)})
 		switch {
@@ -85,9 +94,11 @@ func (c *controller) recoverOrphans(fields dlog.Context) {
 		case state == sessionlock.StateHeld:
 			orphans = append(orphans, ws.ID)
 		default:
-			c.log.Debug(opOrphans, "no shim holds this workspace's lock; nothing to recover", wsFields)
+			c.log.Debug(opOrphans, "no shim holds this workspace's lock; its session is started", wsFields)
+			sessionless = append(sessionless, ws)
 		}
 	}
+	c.bringUpSessionless(sessionless, fields)
 	if len(orphans) == 0 {
 		c.log.Debug(opOrphans, "no shim was left running unadopted", fields)
 		return

@@ -73,7 +73,7 @@ func TestTheTakeoverClaimsTheRecoveredOrphansWorkspace(t *testing.T) {
 	}
 }
 
-func TestTheTakeoverLeavesAFreeLockAlone(t *testing.T) {
+func TestTheTakeoverDialsNoShimForAFreeLock(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	ws := orphan(t, h)
@@ -218,5 +218,109 @@ func TestATakeoverThatCannotPromoteRecoversNoOrphan(t *testing.T) {
 	}
 	if errs := levelRecords(records(h.log, opAdopt), dlog.LevelError); len(errs) != 1 {
 		t.Fatalf("takeover ERROR records = %d, want exactly one naming the refused promotion", len(errs))
+	}
+}
+
+func TestTheTakeoverStartsTheSessionOfAFreeLock(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := orphan(t, h)
+	record, err := h.db.Workspace(context.Background(), ws)
+	if err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+	h.mu.Lock()
+	h.lockStates[record.Dir] = sessionlock.StateFree
+	h.mu.Unlock()
+
+	// Act
+	takeOver(h)
+
+	// Assert
+	if got := h.Started(); !slices.Equal(got, []ids.WorkspaceID{ws}) {
+		t.Fatalf("started = %v, want the session-less workspace started", got)
+	}
+}
+
+func TestTheTakeoverStartsNoSessionForAHeldLock(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	orphan(t, h)
+
+	// Act
+	takeOver(h)
+
+	// Assert
+	if got := h.Started(); len(got) != 0 {
+		t.Fatalf("started = %v, want none: the orphaned shim is adopted instead", got)
+	}
+}
+
+func TestTheTakeoverStartsNoSessionForALiveClient(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.workspace(t)
+
+	// Act
+	takeOver(h)
+
+	// Assert
+	if got := h.Started(); len(got) != 0 {
+		t.Fatalf("started = %v, want none for a workspace this daemon already serves", got)
+	}
+}
+
+func TestTheTakeoverStartsNoSessionForAClosedWorkspace(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := orphan(t, h)
+	record, err := h.db.Workspace(context.Background(), ws)
+	if err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+	h.mu.Lock()
+	h.lockStates[record.Dir] = sessionlock.StateFree
+	h.mu.Unlock()
+	if err := h.db.SetClosed(context.Background(), ws, true); err != nil {
+		t.Fatalf("SetClosed: %v", err)
+	}
+
+	// Act
+	takeOver(h)
+
+	// Assert
+	if got := h.Started(); len(got) != 0 {
+		t.Fatalf("started = %v, want none for a closed workspace", got)
+	}
+}
+
+func TestTheTakeoverLeavesAHandedOverWorkspaceToItsAdoption(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := orphan(t, h)
+	record, err := h.db.Workspace(context.Background(), ws)
+	if err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+	h.mu.Lock()
+	h.lockStates[record.Dir] = sessionlock.StateFree
+	h.mu.Unlock()
+	h.c.mu.Lock()
+	if h.c.joining == nil {
+		h.c.joining = map[ids.WorkspaceID]bool{}
+	}
+	h.c.joining[ws] = true
+	if h.c.owned == nil {
+		h.c.owned = map[ids.WorkspaceID]bool{}
+	}
+	h.c.owned[ws] = true
+	h.c.mu.Unlock()
+
+	// Act
+	takeOver(h)
+
+	// Assert
+	if got := h.Started(); len(got) != 0 {
+		t.Fatalf("started = %v, want none: the handover's own adoption decides a handed-over workspace", got)
 	}
 }
