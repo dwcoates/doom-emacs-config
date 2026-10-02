@@ -1,0 +1,94 @@
+// endpoint_load_feed_through.proto — LoadFeedThrough: bring ONE entry of the
+// root feed into the reader's loaded pages, loading every page between. FEED
+// section.
+//
+// WHY ITS OWN RPC. Selecting an expanded-footer item (a detached subagent, a
+// shell, a monitor) whose row is older than the reader's oldest loaded page
+// cannot be answered by one "older" page: the row may be many pages back, and
+// the feed never has holes, so EVERY page from the reader's oldest loaded page
+// down to the one holding the row is loaded. The daemon walks those pages
+// itself (each one daemon → shim → store, or from daemon memory when it holds
+// it) and streams each to the reader as it lands, so the reader paints the
+// walk progressively instead of waiting on the whole of it.
+//
+// The walk is the reader's ordinary `older` walk, advanced: once this stream
+// ends, GetFeedPage `next` continues from the oldest page it delivered.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+import "frontend/v1/feed.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message LoadFeedThroughRequest {
+  workspace.v1.WorkspaceRef workspace = 1;
+  // The row to bring into the loaded pages: the root-feed row the selected
+  // footer item names, echoed exactly as the daemon served it.
+  frontend.v1.FeedId target = 2;
+}
+
+// One frame of the walk. THE ARM IS THE FRAME. Zero or more `page` frames,
+// then exactly one terminal frame (`reached` or `error`), then the stream ends.
+message LoadFeedThroughResponse {
+  oneof frame {
+    // One older page of the root feed, oldest-so-far last: the reader
+    // prepends it exactly as it prepends a GetFeedPage `next` page.
+    frontend.v1.FeedPage page = 1;
+    // TERMINAL: the target row is now in the reader's loaded pages (or
+    // already was, in which case no page preceded this frame).
+    LoadFeedThroughReached reached = 2;
+    // TERMINAL: the target could not be brought into the feed.
+    LoadFeedThroughError error = 3;
+  }
+}
+
+// The target is loaded; the reader may land on it.
+message LoadFeedThroughReached {
+  // The row the reader lands on, as the daemon now serves it.
+  frontend.v1.FeedId target = 1;
+}
+
+// Why the walk could not bring the target into the feed. Every arm that is
+// about the TARGET (not about the request) is also published by the daemon as
+// a transient fault line on the workspace's footer activity, so the failure is
+// visible where the selection was made.
+message LoadFeedThroughError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    LoadFeedThroughUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    LoadFeedThroughWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    LoadFeedThroughTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting this workspace yet.
+    LoadFeedThroughNotYetAdopted not_yet_adopted = 4;
+    // The FeedId does not decode, or decodes to another workspace.
+    LoadFeedThroughTargetUndecodable target_undecodable = 5;
+    // The walk reached the start of the conversation without finding the
+    // target: no entry of this conversation corresponds to the selection.
+    // Pages already streamed stay loaded.
+    LoadFeedThroughNotFound not_found = 6;
+    // The shim or the store could not serve a page the walk needed. Pages
+    // already streamed stay loaded; selecting the item again resumes the walk.
+    LoadFeedThroughHistoryUnavailable history_unavailable = 7;
+  }
+}
+message LoadFeedThroughUnknownWorkspace {}
+message LoadFeedThroughWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+message LoadFeedThroughTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+message LoadFeedThroughNotYetAdopted {}
+message LoadFeedThroughTargetUndecodable {}
+message LoadFeedThroughNotFound {}
+message LoadFeedThroughHistoryUnavailable {
+  // The shim's or store's account, for a human and for logs; never switched on.
+  string detail = 1;
+}

@@ -48,3 +48,66 @@ and the daemon to hold and pull only the pages a webapp asked for.
   predecessor's fate in StartSession, and a "killed with its process" lost
   cause. Open: whether Claude Code background shells share the shim's process
   group; whether a restart's kill should draw as `cancelled` rather than lost.
+
+## Landed changes
+
+### 1. One page size, owned by the store (store.v1, shim.v1)
+
+- WHAT: every caller-supplied page budget is RETIRED — `page_size` on
+  store `OpenAgentSessionRequest` (2) and `ReadAgentPageRequest` (2), and on
+  shim `WatchAgentRequest` (2), `ReadHistoryRequest` (2) and
+  `StartTurnRequest` (4). A page is the store's page: 50 entries, a single
+  store-owned constant.
+- WHY: owner ruling 1 ("ONE single definition of what constitutes one page …
+  the daemon is simply asking for a page").
+- Consequences: the store's validation of `page_size` and the shim's and
+  daemon's budget constants (`openingPageSize = 200`, `turnPageSize = 1`,
+  `shimclient.DefaultPageSize`) go away; the feed resolver's row-count
+  `DefaultPageSize` stops defining pages — a feed page is what one store page
+  resolves to.
+
+### 2. Tail-only openings (store.v1, shim.v1)
+
+- WHAT: store `OpenAgentSessionRequest`, shim `WatchAgentRequest` and shim
+  `StartTurnRequest` each gain `oneof opening { known_through; tail_only; }`
+  (`known_through` moved into the oneof on its existing tag;
+  `AgentSessionTailOnly` = 5, `WatchAgentTailOnly` = 4, `StartTurnTailOnly`
+  = 8). UNSET stays "repaint: the newest page".
+- WHY: owner ruling 2 — opening a watch replays no history.
+- Consequences: the daemon's session watches open `tail_only` when it holds
+  nothing of the agent and `known_through` otherwise, never a repaint; an
+  entry received both on the tail and in a later page read is absorbed by
+  identity.
+
+### 3. LoadFeedThrough (agentrepl.v1, endpoint_load_feed_through.proto)
+
+- WHAT: new server-streaming rpc `LoadFeedThrough(workspace, target FeedId)`
+  → zero or more `page` frames (older root-feed pages, prepended like a
+  `next` page) then exactly one terminal `reached{target}` or `error`
+  (unknown_workspace, workspace_ref_mismatch, transferring_away,
+  not_yet_adopted, target_undecodable, not_found, history_unavailable{detail}).
+  After it ends, `GetFeedPage next` continues from the oldest page it
+  delivered.
+- WHY: owner ruling 8 — selecting an expanded-footer item not in the loaded
+  feed loads every intermediate page, via its own rpc, and a failure surfaces
+  in the footer activity.
+- Mechanism (orchestrator judgement): the daemon walks older store pages
+  until the target row is drawn or the conversation's start is reached
+  (`not_found`), so no shim "locate" rpc is needed — the walk IS the
+  every-intermediate-page requirement. Target-scoped errors are ALSO
+  published as a transient footer fault line (existing
+  `FooterStatusActivityFault`, kind e.g. `feed_entry_not_found`), so no
+  footer proto change.
+
+### 4. GetFeedPage semantics (comment only)
+
+- A page is the store's page; the daemon fetches a `next` past what it holds
+  on the spot; a row whose starting entry is on an unloaded page is not drawn
+  until that page is.
+
+### Obviation candidates (owner to rule; not removed)
+
+- `frontend.v1.FeedPageError.history_replay_truncated` /
+  `FailureHistoryReplayTruncated`: with on-demand paging a walk can always
+  reach the conversation's start, so the daemon stops emitting it. Still
+  referenced by the webapp's page-error rendering.

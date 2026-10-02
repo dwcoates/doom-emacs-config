@@ -33,16 +33,14 @@ type WatchAgentRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// WHOM. UNSET = the session's prompt thread, resolved by the shim.
 	Target *v1.AgentId `protobuf:"bytes,1,opt,name=target,proto3,oneof" json:"target,omitempty"`
-	// The opening page's budget.
-	PageSize uint32 `protobuf:"varint,2,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
-	// The newest entry the caller already holds. UNSET = repaint: a full first
-	// page in descending conversation place. SET = catch-up: the opening page
-	// carries only entries FIRST WRITTEN AFTER this one — catch-up is about what
-	// was written since, never about place, so a late-written entry placed
-	// earlier in the conversation is delivered rather than skipped. The shim tracks nothing about what it previously served — the
-	// caller states its own high-water mark. A fresh agent simply yields an
-	// empty page.
-	KnownThrough  *v1.HistoryPointer `protobuf:"bytes,3,opt,name=known_through,json=knownThrough,proto3,oneof" json:"known_through,omitempty"`
+	// What the opening page carries. UNSET = repaint: the newest page in
+	// descending conversation place.
+	//
+	// Types that are valid to be assigned to Opening:
+	//
+	//	*WatchAgentRequest_KnownThrough
+	//	*WatchAgentRequest_TailOnly
+	Opening       isWatchAgentRequest_Opening `protobuf_oneof:"opening"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -84,19 +82,57 @@ func (x *WatchAgentRequest) GetTarget() *v1.AgentId {
 	return nil
 }
 
-func (x *WatchAgentRequest) GetPageSize() uint32 {
+func (x *WatchAgentRequest) GetOpening() isWatchAgentRequest_Opening {
 	if x != nil {
-		return x.PageSize
+		return x.Opening
 	}
-	return 0
+	return nil
 }
 
 func (x *WatchAgentRequest) GetKnownThrough() *v1.HistoryPointer {
 	if x != nil {
-		return x.KnownThrough
+		if x, ok := x.Opening.(*WatchAgentRequest_KnownThrough); ok {
+			return x.KnownThrough
+		}
 	}
 	return nil
 }
+
+func (x *WatchAgentRequest) GetTailOnly() *WatchAgentTailOnly {
+	if x != nil {
+		if x, ok := x.Opening.(*WatchAgentRequest_TailOnly); ok {
+			return x.TailOnly
+		}
+	}
+	return nil
+}
+
+type isWatchAgentRequest_Opening interface {
+	isWatchAgentRequest_Opening()
+}
+
+type WatchAgentRequest_KnownThrough struct {
+	// The newest entry the caller already holds: catch-up. The opening page
+	// carries only entries FIRST WRITTEN AFTER this one — catch-up is about
+	// what was written since, never about place, so a late-written entry
+	// placed earlier in the conversation is delivered rather than skipped. The
+	// shim tracks nothing about what it previously served — the caller states
+	// its own high-water mark. A fresh agent simply yields an empty page.
+	KnownThrough *v1.HistoryPointer `protobuf:"bytes,3,opt,name=known_through,json=knownThrough,proto3,oneof"`
+}
+
+type WatchAgentRequest_TailOnly struct {
+	// No history: the opening page carries no entries and the stream carries
+	// only what is written from now on. The daemon opens every watch this way
+	// when it holds nothing of the agent's history, and loads history only
+	// when a reader asks for it (ReadHistory). An entry read that way and also
+	// received on this stream is absorbed by its identity.
+	TailOnly *WatchAgentTailOnly `protobuf:"bytes,4,opt,name=tail_only,json=tailOnly,proto3,oneof"`
+}
+
+func (*WatchAgentRequest_KnownThrough) isWatchAgentRequest_Opening() {}
+
+func (*WatchAgentRequest_TailOnly) isWatchAgentRequest_Opening() {}
 
 // A STANDING stream: the opening page, then one frame per entry as written —
 // upserts included, each with its pointer so the caller always holds a
@@ -208,22 +244,61 @@ func (*WatchAgentResponse_Entry) isWatchAgentResponse_Frame() {}
 
 func (*WatchAgentResponse_Retired) isWatchAgentResponse_Frame() {}
 
+// Open the stream with no history. DELIBERATELY EMPTY: the arm's presence is
+// the whole instruction.
+type WatchAgentTailOnly struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WatchAgentTailOnly) Reset() {
+	*x = WatchAgentTailOnly{}
+	mi := &file_shim_v1_endpoint_watch_agent_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WatchAgentTailOnly) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WatchAgentTailOnly) ProtoMessage() {}
+
+func (x *WatchAgentTailOnly) ProtoReflect() protoreflect.Message {
+	mi := &file_shim_v1_endpoint_watch_agent_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WatchAgentTailOnly.ProtoReflect.Descriptor instead.
+func (*WatchAgentTailOnly) Descriptor() ([]byte, []int) {
+	return file_shim_v1_endpoint_watch_agent_proto_rawDescGZIP(), []int{2}
+}
+
 var File_shim_v1_endpoint_watch_agent_proto protoreflect.FileDescriptor
 
 const file_shim_v1_endpoint_watch_agent_proto_rawDesc = "" +
 	"\n" +
-	"\"shim/v1/endpoint_watch_agent.proto\x12\ashim.v1\x1a$conversation/v1/agent_activity.proto\x1a\x1dconversation/v1/history.proto\"\xcf\x01\n" +
+	"\"shim/v1/endpoint_watch_agent.proto\x12\ashim.v1\x1a$conversation/v1/agent_activity.proto\x1a\x1dconversation/v1/history.proto\"\xf5\x01\n" +
 	"\x11WatchAgentRequest\x125\n" +
-	"\x06target\x18\x01 \x01(\v2\x18.conversation.v1.AgentIdH\x00R\x06target\x88\x01\x01\x12\x1b\n" +
-	"\tpage_size\x18\x02 \x01(\rR\bpageSize\x12I\n" +
-	"\rknown_through\x18\x03 \x01(\v2\x1f.conversation.v1.HistoryPointerH\x01R\fknownThrough\x88\x01\x01B\t\n" +
-	"\a_targetB\x10\n" +
-	"\x0e_known_through\"\xc7\x01\n" +
+	"\x06target\x18\x01 \x01(\v2\x18.conversation.v1.AgentIdH\x01R\x06target\x88\x01\x01\x12F\n" +
+	"\rknown_through\x18\x03 \x01(\v2\x1f.conversation.v1.HistoryPointerH\x00R\fknownThrough\x12:\n" +
+	"\ttail_only\x18\x04 \x01(\v2\x1b.shim.v1.WatchAgentTailOnlyH\x00R\btailOnlyB\t\n" +
+	"\aopeningB\t\n" +
+	"\a_targetJ\x04\b\x02\x10\x03R\tpage_size\"\xc7\x01\n" +
 	"\x12WatchAgentResponse\x122\n" +
 	"\x04page\x18\x01 \x01(\v2\x1c.conversation.v1.HistoryPageH\x00R\x04page\x127\n" +
 	"\x05entry\x18\x02 \x01(\v2\x1f.conversation.v1.HistoryEntryAtH\x00R\x05entry\x12;\n" +
 	"\aretired\x18\x03 \x01(\v2\x1f.conversation.v1.HistoryEntryAtH\x00R\aretiredB\a\n" +
-	"\x05frameB Z\x1eagentrepl/proto/shim/v1;shimv1b\x06proto3"
+	"\x05frame\"\x14\n" +
+	"\x12WatchAgentTailOnlyB Z\x1eagentrepl/proto/shim/v1;shimv1b\x06proto3"
 
 var (
 	file_shim_v1_endpoint_watch_agent_proto_rawDescOnce sync.Once
@@ -237,26 +312,28 @@ func file_shim_v1_endpoint_watch_agent_proto_rawDescGZIP() []byte {
 	return file_shim_v1_endpoint_watch_agent_proto_rawDescData
 }
 
-var file_shim_v1_endpoint_watch_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_shim_v1_endpoint_watch_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
 var file_shim_v1_endpoint_watch_agent_proto_goTypes = []any{
 	(*WatchAgentRequest)(nil),  // 0: shim.v1.WatchAgentRequest
 	(*WatchAgentResponse)(nil), // 1: shim.v1.WatchAgentResponse
-	(*v1.AgentId)(nil),         // 2: conversation.v1.AgentId
-	(*v1.HistoryPointer)(nil),  // 3: conversation.v1.HistoryPointer
-	(*v1.HistoryPage)(nil),     // 4: conversation.v1.HistoryPage
-	(*v1.HistoryEntryAt)(nil),  // 5: conversation.v1.HistoryEntryAt
+	(*WatchAgentTailOnly)(nil), // 2: shim.v1.WatchAgentTailOnly
+	(*v1.AgentId)(nil),         // 3: conversation.v1.AgentId
+	(*v1.HistoryPointer)(nil),  // 4: conversation.v1.HistoryPointer
+	(*v1.HistoryPage)(nil),     // 5: conversation.v1.HistoryPage
+	(*v1.HistoryEntryAt)(nil),  // 6: conversation.v1.HistoryEntryAt
 }
 var file_shim_v1_endpoint_watch_agent_proto_depIdxs = []int32{
-	2, // 0: shim.v1.WatchAgentRequest.target:type_name -> conversation.v1.AgentId
-	3, // 1: shim.v1.WatchAgentRequest.known_through:type_name -> conversation.v1.HistoryPointer
-	4, // 2: shim.v1.WatchAgentResponse.page:type_name -> conversation.v1.HistoryPage
-	5, // 3: shim.v1.WatchAgentResponse.entry:type_name -> conversation.v1.HistoryEntryAt
-	5, // 4: shim.v1.WatchAgentResponse.retired:type_name -> conversation.v1.HistoryEntryAt
-	5, // [5:5] is the sub-list for method output_type
-	5, // [5:5] is the sub-list for method input_type
-	5, // [5:5] is the sub-list for extension type_name
-	5, // [5:5] is the sub-list for extension extendee
-	0, // [0:5] is the sub-list for field type_name
+	3, // 0: shim.v1.WatchAgentRequest.target:type_name -> conversation.v1.AgentId
+	4, // 1: shim.v1.WatchAgentRequest.known_through:type_name -> conversation.v1.HistoryPointer
+	2, // 2: shim.v1.WatchAgentRequest.tail_only:type_name -> shim.v1.WatchAgentTailOnly
+	5, // 3: shim.v1.WatchAgentResponse.page:type_name -> conversation.v1.HistoryPage
+	6, // 4: shim.v1.WatchAgentResponse.entry:type_name -> conversation.v1.HistoryEntryAt
+	6, // 5: shim.v1.WatchAgentResponse.retired:type_name -> conversation.v1.HistoryEntryAt
+	6, // [6:6] is the sub-list for method output_type
+	6, // [6:6] is the sub-list for method input_type
+	6, // [6:6] is the sub-list for extension type_name
+	6, // [6:6] is the sub-list for extension extendee
+	0, // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_shim_v1_endpoint_watch_agent_proto_init() }
@@ -264,7 +341,10 @@ func file_shim_v1_endpoint_watch_agent_proto_init() {
 	if File_shim_v1_endpoint_watch_agent_proto != nil {
 		return
 	}
-	file_shim_v1_endpoint_watch_agent_proto_msgTypes[0].OneofWrappers = []any{}
+	file_shim_v1_endpoint_watch_agent_proto_msgTypes[0].OneofWrappers = []any{
+		(*WatchAgentRequest_KnownThrough)(nil),
+		(*WatchAgentRequest_TailOnly)(nil),
+	}
 	file_shim_v1_endpoint_watch_agent_proto_msgTypes[1].OneofWrappers = []any{
 		(*WatchAgentResponse_Page)(nil),
 		(*WatchAgentResponse_Entry)(nil),
@@ -276,7 +356,7 @@ func file_shim_v1_endpoint_watch_agent_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_shim_v1_endpoint_watch_agent_proto_rawDesc), len(file_shim_v1_endpoint_watch_agent_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   2,
+			NumMessages:   3,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
