@@ -82,6 +82,14 @@ type bookState struct {
 	after *conversationv1.HistoryPointer
 	// floor reports that a loaded page reached the conversation's start.
 	floor bool
+	// gapAfter and gapFloor describe the UNPAGED GAP a re-read newest page
+	// leaves: the rows between the old newest page's bound (gapFloor) and the
+	// new one were drawn live, so no store page bounds them. A walk that
+	// reaches the gap reads its store pages after gapAfter — rows it already
+	// holds are restated, and only the page boundaries are new — until a read
+	// reaches gapFloor. Nil when there is no gap.
+	gapAfter *conversationv1.HistoryPointer
+	gapFloor string
 	// awaitingSource reports that a reader opened this feed while no session
 	// was up to read its history from: the newest page is loaded for it the
 	// moment a watch of the session opens (kickWaitingReaders).
@@ -208,6 +216,8 @@ type loadPlan struct {
 	target *conversationv1.AgentId
 	after  *conversationv1.HistoryPointer
 	newest bool
+	// gap reads the unpaged gap a re-read newest page left (gapAfter).
+	gap bool
 	// pushAll publishes every row the load draws, quiet or not: a load no
 	// reader's page delivers (LoadOlder).
 	pushAll bool
@@ -337,8 +347,23 @@ func (r *resolver) load(ctx context.Context, plan loadPlan) (loaded, error) {
 	// already loaded stay loaded, and the next older page is still read from
 	// below the oldest of them.
 	reread := plan.newest && f.book.newestLoaded
-	reachedStart := !reread && page.GetFloor() != nil
-	if !reread {
+	reachedStart := !reread && !plan.gap && page.GetFloor() != nil
+	switch {
+	case plan.gap:
+		f.book.gapAfter = page.GetMore().GetLastEntry()
+		if page.GetFloor() != nil || (l.drew && l.low <= f.book.gapFloor) {
+			f.book.gapAfter = nil
+		}
+	case reread:
+		// THE ROWS BETWEEN THE OLD NEWEST PAGE AND THIS ONE WERE DRAWN LIVE:
+		// a walk into them reads their store pages (gapAfter).
+		f.book.gapAfter, f.book.gapFloor = nil, ""
+		if more := page.GetMore().GetLastEntry(); more.GetValue() != "" && len(f.book.bounds) > 0 {
+			if top := f.book.bounds[len(f.book.bounds)-1]; !l.drew || l.low > top {
+				f.book.gapAfter, f.book.gapFloor = more, top
+			}
+		}
+	default:
 		f.book.after = page.GetMore().GetLastEntry()
 		f.book.floor = page.GetFloor() != nil
 	}

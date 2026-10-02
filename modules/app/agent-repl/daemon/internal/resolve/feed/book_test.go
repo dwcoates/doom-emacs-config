@@ -738,3 +738,32 @@ func TestTheOldestPageAtTheStartCarriesRowsKeyedAboveTheHistory(t *testing.T) {
 		t.Fatalf("page rows = %v, want the ported question and both prompts", rowIDs(pageRows(t, page)))
 	}
 }
+
+// ---- the live gap a re-read newest page leaves ----
+
+func TestAWalkIntoTheLiveGapReadsItsStorePages(t *testing.T) {
+	// Arrange: the newest page was loaded at the start of the book, then the
+	// conversation ran on live past a whole store page.
+	h := newHarness(t)
+	store := h.mainBook(2, promptsBook(1))
+	h.openPage(rootFeed(), "reader-1")
+	book := promptsBook(6)
+	for i := 1; i < 6; i++ {
+		h.deliverPromptAt(fmt.Sprintf("turn-%d", i), "prompt turn-"+fmt.Sprint(i), int64(i+1)*100)
+	}
+	store.mu.Lock()
+	store.books[""] = newestFirst(book)
+	store.mu.Unlock()
+	h.openPage(rootFeed(), "reader-2")
+
+	// Act.
+	page := h.nextPage("reader-2")
+
+	// Assert: the next page is the store's page below the newest, read.
+	if got, want := strings.Join(rowIDs(pageRows(t, page)), ","), h.promptRowIDs("turn-2", "turn-3"); got != want {
+		t.Fatalf("next page = %v, want the store page %v", got, want)
+	}
+	if got := store.lastRead().after; got != "p-4" {
+		t.Fatalf("last read after %q, want p-4", got)
+	}
+}
