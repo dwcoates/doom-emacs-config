@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { WatchTopbarResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_topbar_pb";
 import { TopbarViewSchema, type TopbarView } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
+import { createControl } from "../../src/control.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import STYLESHEET from "../../src/styles.css?raw";
 import { drawTopbarView, mountTopbar } from "../../src/topbar/topbar.js";
@@ -845,13 +846,15 @@ describe("the effort selector's place and form", () => {
     ["the button", "topbar-mode-button", "topbar-effort-button", ""],
     ["a menu row", "topbar-mode-option", "topbar-effort-option", ""],
     ["the dash", "topbar-mode", "topbar-effort", "data-no-session"],
+    ["the disabled button", "topbar-mode-button", "topbar-effort-button", "aria-disabled"],
   ])("draws %s as the permission-mode picker draws it", (_what, mode, effort, attribute) => {
     // Arrange
     const remove = installStylesheet();
     const make = (className: string): HTMLElement => {
-      const element = document.createElement(className.endsWith("-option") || className.endsWith("-button") ? "button" : "span");
+      const element =
+        className.endsWith("-option") || className.endsWith("-button") ? createControl() : document.createElement("span");
       element.className = className;
-      if (attribute !== "") element.setAttribute(attribute, "");
+      if (attribute !== "") element.setAttribute(attribute, attribute === "aria-disabled" ? "true" : "");
       document.body.append(element);
       return element;
     };
@@ -874,10 +877,10 @@ describe("the no-session cells", () => {
   // the cursor nor the hover border that would promise a click.
   it("boxes every no-session cell exactly as the strip's other right-hand cells", () => {
     expect(
-      declaration(".topbar-fast,\n.topbar-model[data-no-session],\n.topbar-mode[data-no-session]", "padding-block"),
+      declaration(".topbar-fast,\n.topbar-model[data-no-session],\n.topbar-effort[data-no-session],\n.topbar-effort[data-effort-unsupported],\n.topbar-mode[data-no-session]", "padding-block"),
     ).toBe(
       declaration(
-        ".topbar-model-button,\n.topbar-mode-button,\n.topbar-context-figure,\n.topbar-wifi-button,\n.topbar-warning-chip",
+        ".topbar-model-button,\n.topbar-effort-button,\n.topbar-mode-button,\n.topbar-context-figure,\n.topbar-wifi-button,\n.topbar-warning-chip",
         "padding-block",
       ),
     );
@@ -886,8 +889,8 @@ describe("the no-session cells", () => {
   // The inline inset is the group's, so a cell's own rule setting the
   // `padding` shorthand would quietly win over it for that one cell.
   it.each([
-    ".topbar-fast,\n.topbar-model[data-no-session],\n.topbar-mode[data-no-session]",
-    ".topbar-model-button,\n.topbar-mode-button,\n.topbar-context-figure,\n.topbar-wifi-button,\n.topbar-warning-chip",
+    ".topbar-fast,\n.topbar-model[data-no-session],\n.topbar-effort[data-no-session],\n.topbar-effort[data-effort-unsupported],\n.topbar-mode[data-no-session]",
+    ".topbar-model-button,\n.topbar-effort-button,\n.topbar-mode-button,\n.topbar-context-figure,\n.topbar-wifi-button,\n.topbar-warning-chip",
   ])("leaves the inline inset of %s to the group", (selector) => {
     expect(withoutBlockComments(ruleBody(selector))).not.toMatch(/(?:^|[;\s])padding(?:-inline)?(?:-left|-right)?\s*:/);
   });

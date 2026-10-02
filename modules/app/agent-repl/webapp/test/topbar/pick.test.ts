@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { SetEffortResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_effort_pb";
 import { AgentEffortLevel } from "../../../proto/gen/ts/conversation/v1/api_pb";
+import { createControl } from "../../src/control.js";
 import type { SentenceTable } from "../../src/rpc/refuse.js";
 import { sendPick } from "../../src/topbar/pick.js";
 import { RecordingSink, appContext, topbarContext } from "./fixtures.js";
@@ -25,8 +26,8 @@ async function send(
   tc.reveals.close = closed;
   const wrap = document.createElement("div");
   host.append(wrap);
-  const button = document.createElement("button");
-  const row = document.createElement("button");
+  const button = createControl();
+  const row = createControl();
   await sendPick(
     {
       rpc: "SetEffort",

@@ -10,6 +10,7 @@ import {
   TopbarEffortOptionSchema,
   TopbarEffortSelectorSchema,
 } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
+import { createControl, type Control } from "../../src/control.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import {
   EFFORT_TOOLTIP,
@@ -36,10 +37,10 @@ const supported = (current = MEDIUM, options = [LOW, MEDIUM, HIGH]) =>
 
 function mountSelector(tc: ReturnType<typeof topbarContext>["tc"], host: HTMLElement, view = supported()) {
   host.append(drawTopbarEffortSelector(view, tc));
-  return host.querySelector<HTMLButtonElement>(".topbar-effort-button")!;
+  return host.querySelector<Control>(".topbar-effort-button")!;
 }
 
-function openAndPick(host: HTMLElement, button: HTMLButtonElement, level: string): void {
+function openAndPick(host: HTMLElement, button: Control, level: string): void {
   button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
   openPanel(host)!
     .querySelector(`[data-effort-option="${level}"]`)!
@@ -284,7 +285,7 @@ describe("the pick", () => {
     host.append(wrap);
     // Act / Assert
     await expect(
-      pickEffort(HIGH, tc, wrap, document.createElement("button"), document.createElement("button")),
+      pickEffort(HIGH, tc, wrap, createControl(), createControl()),
     ).rejects.toThrow("the reveal layer is gone");
   });
 });

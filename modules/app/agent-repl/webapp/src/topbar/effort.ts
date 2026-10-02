@@ -29,6 +29,7 @@ import type { SentenceTable } from "../rpc/refuse.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import type { TopbarContext } from "./context.js";
 import { drawNoSessionCell, NO_SESSION_DASH } from "./no-session.js";
+import { createControl, type Control } from "../control.js";
 import { sendPick } from "./pick.js";
 import { asAnchor } from "./strip.js";
 
@@ -98,8 +99,7 @@ export function drawEffortSupported(u: TopbarEffortSelectorSupported, tc: Topbar
   wrap.title = EFFORT_TOOLTIP;
   wrap.setAttribute(SELECTED_EFFORT_ATTRIBUTE, effortToken(current));
 
-  const button = document.createElement("button");
-  button.type = "button";
+  const button = createControl();
   button.className = "topbar-effort-button";
   button.textContent = current.displayName;
   wrap.append(button);
@@ -133,7 +133,7 @@ export function drawEffortOptions(
   current: TopbarEffortOption,
   tc: TopbarContext,
   wrap: HTMLElement,
-  button: HTMLButtonElement,
+  button: Control,
 ): HTMLElement {
   const list = document.createElement("div");
   list.className = "topbar-effort-options list-rows";
@@ -150,10 +150,9 @@ export function drawEffortOption(
   option: TopbarEffortOption,
   tc: TopbarContext,
   wrap: HTMLElement,
-  button: HTMLButtonElement,
-): HTMLButtonElement {
-  const row = document.createElement("button");
-  row.type = "button";
+  button: Control,
+): Control {
+  const row = createControl();
   row.className = "topbar-effort-option";
   row.setAttribute("data-effort-option", effortToken(option));
   row.textContent = option.displayName;
@@ -168,8 +167,8 @@ export async function pickEffort(
   option: TopbarEffortOption,
   tc: TopbarContext,
   wrap: HTMLElement,
-  button: HTMLButtonElement,
-  row: HTMLButtonElement,
+  button: Control,
+  row: Control,
 ): Promise<void> {
   log.info(`the reader picked the effort level ${option.displayName}`, {
     operation: "topbar.effort-picked",
