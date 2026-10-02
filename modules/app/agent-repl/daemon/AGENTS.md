@@ -740,6 +740,37 @@ open of the workspace: its feed holds nothing, so it still replays the first
 page. Whether it should instead carry the incumbent's feed is an owner
 question, recorded in `docs/REMEDIATION-CHANGELOG.md` (`replay-first-page-only`).
 
+## A feed's history source is the shim, never the vendor session
+
+Owner principle, 2026-10-02: the vendor and its state never gate agent-repl's
+own functions, and a restarted workspace shows what it showed before. History
+is read through any shim client the fleet can reach (`workspace.Fleet.ReadHistory`,
+`internal/workspace/history.go`), whatever the vendor session is doing:
+
+- **Held clients**: a started session's, and one with no session started (a
+  cold gate, a parked adoption). The shim serves the workspace's PERSISTED
+  book (`agent-id.json`) before any StartSession. With no watcher up, the
+  fleet names the page's main agent for the feed and the footer itself and
+  hands the footer the page (`noteHistoryWithoutWatcher`).
+- **A RESUME's running start** (`beginHistoryClient`, `startingClients`): the
+  client is a source while StartSession is answered or retried. A FRESH start
+  registers none: its conversation is new.
+- **A failed resume** secures the root's newest page through its client
+  (`feed.KeepNewestPage`, bounded by `keepNewestPageBound`) before the shim
+  is stopped, so a reader that opens later is served the conversation.
+- **No shim at all** (or a shim that holds no book yet before any session:
+  `unknown_agent` with no watcher, INFO `daemon.workspace.history_no_book`)
+  is `feed.ErrNoHistorySource`: the reader is served what the feed holds and
+  waits (`awaitingSource`). A new arrival with no session started and a
+  resume's running start call `feed.SourceUp`, which loads and pushes every
+  waiting feed's newest page; a started session's readers are kicked by its
+  watch opening, because a fresh book is not written until its first turn.
+- **The daemon's own rows never stand in for the newest page**: while a
+  book's newest page is unloaded, a row the daemon makes follows the moment it
+  was made when that is later than the row before it (`order.go`
+  `awaitsNewestPage`), so a cold gate made after a restart is not drawn above
+  turns run since an older merge row.
+
 ## The feed never serves a row the newest cut withholds
 
 THE FEED BEGINS AT THE NEWEST SEPARATION (`cleared`/`compacted`;
