@@ -51,6 +51,13 @@ import {
 import { drawNoSessionCell } from "./no-session.js";
 import { asAnchor } from "./strip.js";
 
+/**
+ * The selector's hover (owner, 2026-10-01; design record 2026-10-02 decision
+ * 2). Client-owned static copy.
+ */
+export const MODEL_TOOLTIP =
+  "Changes the model this workspace uses for the rest of the session. Will cause token cache misses.";
+
 /** What the button says when the daemon reports no selection. */
 export const MODEL_PLACEHOLDER = "model";
 
@@ -203,6 +210,7 @@ export function drawTopbarModelSelector(
 
   const wrap = document.createElement("div");
   wrap.className = "topbar-model";
+  wrap.title = MODEL_TOOLTIP;
 
   const button = createControl();
   button.className = "topbar-model-button";

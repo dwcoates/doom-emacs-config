@@ -7194,3 +7194,49 @@ bubble-body.bubble-body { display: block; }
 .merge-updating-main { padding: 0.15rem 0; }
 /* The tests tab's log line sits under its suites. */
 .merge-test-log { padding-top: 0.3rem; color: var(--muted); }
+
+/* ---- topbar effort selector (src/topbar/effort.ts) ---- */
+
+/* The effort selector sits between the model selector and the permission-mode
+   picker IN THEIR FORM (owner, 2026-10-01): the same quiet button, the same
+   menu rows, the same dash when it states nothing. Kept as its own block so
+   the shared topbar rules above are untouched. */
+.topbar-effort-button {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  padding: 0.15rem 0.45rem;
+  font: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  color: var(--muted);
+}
+.topbar-effort-button:hover {
+  border-color: var(--border);
+  color: var(--fg);
+}
+.topbar-effort-option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.15rem;
+  width: 100%;
+  background: none;
+  border: none;
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  padding: 0.4rem 0.7rem;
+  cursor: pointer;
+}
+.topbar-effort-option:hover {
+  background: var(--border);
+}
+.topbar-effort[data-no-session],
+.topbar-effort[data-effort-unsupported] {
+  padding: 0.15rem 0.45rem;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  color: var(--muted);
+  white-space: nowrap;
+}

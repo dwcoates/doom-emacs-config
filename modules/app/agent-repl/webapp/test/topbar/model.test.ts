@@ -21,6 +21,7 @@ import {
   COLD_NOTICE_ATTRIBUTE,
   COLD_REFUSAL_SENTENCE,
   MODEL_PLACEHOLDER,
+  MODEL_TOOLTIP,
   SELECTED_MODEL_ATTRIBUTE,
   SELECTED_OPTION_ATTRIBUTE,
   drawModelCapabilities,
@@ -81,6 +82,15 @@ describe("drawTopbarModelSelector", () => {
     const { host, tc } = topbarContext();
     const button = mountSelector(tc, host, selector({ selected: option("opus", { displayName: "Opus 5" }) }));
     expect(button.textContent).toBe("Opus 5");
+  });
+
+  it("carries the owner's hover copy", () => {
+    // Arrange
+    const { host, tc } = topbarContext();
+    // Act
+    mountSelector(tc, host, selector({ selected: option("opus", { displayName: "Opus 5" }) }));
+    // Assert
+    expect(host.querySelector<HTMLElement>(".topbar-model")?.title).toBe(MODEL_TOOLTIP);
   });
 
   it("shows the placeholder when the daemon reports no selection", () => {

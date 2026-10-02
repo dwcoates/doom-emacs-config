@@ -51,6 +51,7 @@ import { requireMessage } from "../rpc/strict.js";
 import { watchStream, type StreamHandle } from "../rpc/streams.js";
 import { drawTopbarContextChip } from "./context-chip.js";
 import type { TopbarContext, WarningChipContext } from "./context.js";
+import { drawTopbarEffortSelector } from "./effort.js";
 import { drawTopbarModelSelector } from "./model.js";
 import { drawTopbarPermissionModePicker } from "./permission-mode.js";
 import { drawTopbarFastMode } from "./fast-mode.js";
@@ -246,6 +247,7 @@ export function drawTopbarView(u: TopbarView, tc: TopbarContext): HTMLElement {
   // carrying it as a line.
   right.append(
     drawTopbarModelSelector(u.modelSelector, tc),
+    drawTopbarEffortSelector(u.effortSelector, tc),
     drawTopbarPermissionModePicker(u.permissionModePicker, tc),
     // The fast-mode cell sits directly after the mode picker it is the
     // sibling of.
