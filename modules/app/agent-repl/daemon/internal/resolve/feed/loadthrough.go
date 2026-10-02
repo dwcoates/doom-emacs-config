@@ -118,57 +118,8 @@ func (r *resolver) targetServed(ws ids.WorkspaceID, feed feedid.Feed, reader Rea
 
 // LoadOlder loads the ROOT feed's next older store page for a feature that
 // reads held rows past the oldest one loaded (selection stepping). No reader's
-// page delivers it, so every row it draws is PUSHED, and every standing root
-// walk that had served down to the oldest loaded page is moved down to the
-// page just loaded — a reader then holds those rows exactly as a `next` would
-// have served them, and its next `next` continues below them. False when
-// nothing older can be loaded.
+// page delivers it, so it is a pushed load (loadPushed). False when nothing
+// older can be loaded.
 func (r *resolver) LoadOlder(ctx context.Context, ws ids.WorkspaceID) (bool, error) {
-	mu := r.loadMu(ws)
-	mu.Lock()
-	defer mu.Unlock()
-	root := feedid.Feed{Root: true}
-
-	r.mu.Lock()
-	s := r.state(ws)
-	f := r.feed(s, root)
-	_, bounded := r.deliverable(s, f, "load_older")
-	plan, ok := r.planLoad(s, f, false)
-	prevLow := f.book.lowest()
-	r.mu.Unlock()
-	if !ok || bounded {
-		r.lockedLogger(ws).Debug("daemon.feed.load_older_nothing",
-			"a feature asked for an older root page and nothing older can be loaded",
-			dlog.Context{"bounded_by_separation": bounded})
-		return false, nil
-	}
-	plan.pushAll = true
-	got, err := r.load(ctx, plan)
-	if errors.Is(err, ErrNoHistorySource) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	moved := 0
-	for _, w := range s.readers {
-		if w.feedKey != f.key || w.top || w.oldest == nil || !got.drew {
-			continue
-		}
-		if prevLow != "" && *w.oldest > prevLow {
-			continue
-		}
-		if got.low < *w.oldest {
-			low := got.low
-			w.oldest = &low
-			moved++
-		}
-	}
-	r.logger(ws).Debug("daemon.feed.load_older",
-		"an older root page was loaded for a feature and pushed; the walks that held everything loaded were moved to it",
-		dlog.Context{"walks_moved": moved, "drew_rows": got.drew})
-	return true, nil
+	return r.loadPushed(ctx, ws, feedid.Feed{Root: true}, false)
 }

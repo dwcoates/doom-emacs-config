@@ -58,6 +58,9 @@ func (r *resolver) walkPage(ctx context.Context, ws ids.WorkspaceID, feed feedid
 				return nil, nil, err
 			}
 			step.noSource = true
+			if plan.newest {
+				r.awaitSource(*plan)
+			}
 		}
 	}
 }
@@ -378,4 +381,17 @@ func (r *resolver) breadcrumbs(s *wsState, feedKey string) *frontendv1.FeedBread
 		crumbs = append(crumbs, reversed[i])
 	}
 	return &frontendv1.FeedBreadcrumbs{Crumbs: crumbs}
+}
+
+// awaitSource marks the book PLAN read as wanted by a reader with no session
+// up to read it from: the reader is served what is held, and the page it lacks
+// is loaded and pushed to it the moment a watch of the session opens
+// (kickWaitingReaders).
+func (r *resolver) awaitSource(plan loadPlan) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.workspaces[plan.state.id] != plan.state {
+		return
+	}
+	r.feed(plan.state, plan.addr).book.awaitingSource = true
 }

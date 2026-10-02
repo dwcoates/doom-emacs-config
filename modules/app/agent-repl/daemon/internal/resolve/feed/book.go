@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
@@ -81,6 +82,10 @@ type bookState struct {
 	after *conversationv1.HistoryPointer
 	// floor reports that a loaded page reached the conversation's start.
 	floor bool
+	// awaitingSource reports that a reader opened this feed while no session
+	// was up to read its history from: the newest page is loaded for it the
+	// moment a watch of the session opens (kickWaitingReaders).
+	awaitingSource bool
 	// pending are the entries a load withheld because the turn they belong to
 	// opened on a page not yet loaded (owner ruling 5: a row whose starting
 	// entry lies on an unloaded page is not drawn until that page is), oldest
@@ -342,6 +347,13 @@ func (r *resolver) load(ctx context.Context, plan loadPlan) (loaded, error) {
 	if l.drew {
 		f.book.addBound(l.low)
 	}
+	if f.book.floor && len(f.book.bounds) > 0 {
+		// AT THE CONVERSATION'S START THE OLDEST PAGE REACHES THE FEED'S TOP:
+		// every row held below its bound — a fork's ported conversation, a
+		// daemon-made row keyed before the history — is served with it rather
+		// than standing on a page of its own.
+		f.book.bounds[0] = ""
+	}
 	log.Info("daemon.feed.history_loaded",
 		"a store page a reader's request needed was loaded into its feed",
 		dlog.Context{
@@ -369,4 +381,104 @@ func (r *resolver) lockedLogger(ws ids.WorkspaceID) dlog.Logger {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.logger(ws)
+}
+
+// historyKickBound bounds the newest-page read a session's first watch opening
+// makes for a reader that opened its feed before the session was up. It is a
+// last resort on one local ReadHistory (the shim answers it off the store in
+// milliseconds), sized like boot.DefaultAdoptBound; an overrun is ERROR and
+// the reader's next open reads the page again.
+const historyKickBound = 10 * time.Second
+
+// kickWaitingReaders loads AGENT's newest page for the readers that opened its
+// feed before a session was up to read it from (bookState.awaitingSource). A
+// watch of AGENT just opened, so its session is up now. The load runs OFF the
+// caller's goroutine: the caller is the session watcher, and the read hands
+// the page back to it (HistorySource). Called with r.mu held.
+func (r *resolver) kickWaitingReaders(s *wsState, agent *conversationv1.AgentId) {
+	addr := feedid.Feed{Root: true}
+	if agent.GetValue() != "" && agent.GetValue() != s.mainAgent {
+		addr = feedid.Feed{Agent: agent}
+	}
+	f, ok := s.feeds[r.feedKey(s.id, addr)]
+	if !ok || !f.book.awaitingSource {
+		return
+	}
+	f.book.awaitingSource = false
+	r.logger(s.id).Info("daemon.feed.history_kick",
+		"a watch opened for a feed a reader holds without its history; its newest page is loaded for it",
+		dlog.Context{"feed": f.key, "agent": agent.GetValue()})
+	ws := s.id
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), historyKickBound)
+		defer cancel()
+		if _, err := r.loadPushed(ctx, ws, addr, true); err != nil {
+			r.lockedLogger(ws).Error("daemon.feed.history_kick_failed",
+				"the newest page a waiting reader needed could not be loaded; its next open reads it again",
+				dlog.Context{"feed": f.key, "cause": err.Error()})
+		}
+	}()
+}
+
+// loadPushed loads ADDR's newest (NEWEST) or next older page for no reader's
+// page in particular: every row it draws is PUSHED, and every standing walk of
+// the feed that had served down to the oldest loaded row is moved down to the
+// page loaded, so a reader holds those rows exactly as a page would have
+// served them. False when nothing could be loaded.
+func (r *resolver) loadPushed(ctx context.Context, ws ids.WorkspaceID, addr feedid.Feed, newest bool) (bool, error) {
+	mu := r.loadMu(ws)
+	mu.Lock()
+	defer mu.Unlock()
+
+	r.mu.Lock()
+	s := r.state(ws)
+	f := r.feed(s, addr)
+	_, bounded := r.deliverable(s, f, "load_pushed")
+	var (
+		plan loadPlan
+		ok   bool
+	)
+	if newest {
+		plan, ok = r.planOpening(s, f)
+	} else {
+		plan, ok = r.planLoad(s, f, false)
+		ok = ok && !bounded
+	}
+	prevLow := f.book.lowest()
+	r.mu.Unlock()
+	if !ok {
+		r.lockedLogger(ws).Debug("daemon.feed.load_pushed_nothing",
+			"a pushed page load found nothing to load",
+			dlog.Context{"feed": f.key, "newest": newest, "bounded_by_separation": bounded})
+		return false, nil
+	}
+	plan.pushAll = true
+	got, err := r.load(ctx, plan)
+	if errors.Is(err, ErrNoHistorySource) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	moved := 0
+	for _, w := range s.readers {
+		if w.feedKey != f.key || w.top || w.oldest == nil || !got.drew {
+			continue
+		}
+		if prevLow != "" && *w.oldest > prevLow {
+			continue
+		}
+		if got.low < *w.oldest {
+			low := got.low
+			w.oldest = &low
+			moved++
+		}
+	}
+	r.logger(ws).Debug("daemon.feed.load_pushed",
+		"a page was loaded for no reader's page and pushed; the walks that held everything loaded were moved to it",
+		dlog.Context{"feed": f.key, "newest": newest, "walks_moved": moved, "drew_rows": got.drew})
+	return true, nil
 }
