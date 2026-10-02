@@ -27,11 +27,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"agentrepl/testrun/testenv"
 )
 
 // CoverageEnvVar names the directory every spawned system writes its coverage
 // under. Set it to turn coverage collection on for a whole `go test` run.
-const CoverageEnvVar = "AGENT_REPL_E2E_COVERAGE"
+const CoverageEnvVar = testenv.Coverage
 
 // NodeCoverageDirName is the subdirectory the shim's v8 coverage lands in.
 const NodeCoverageDirName = "shim"
