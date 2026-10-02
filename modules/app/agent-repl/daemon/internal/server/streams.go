@@ -584,6 +584,9 @@ func (s *server) watchDaemon(
 		digest = s.deps.NewsDigest.Topic().Subscribe(streamCtx)
 	}
 	if emacs := msg.GetEmacs(); emacs != nil {
+		if _, err := s.editorConnected(ctx, emacs); err != nil {
+			return err
+		}
 		w.emacs, w.elispBuild = true, emacs.GetElispBuild()
 		faults = s.deps.LoudFaults.Subscribe(streamCtx)
 		wifi = s.deps.PersistentWifi.Topic().Subscribe(streamCtx)

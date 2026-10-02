@@ -367,7 +367,7 @@ func (d *Daemon) watchEmacsDaemonStream(client interface {
 	d.t.Helper()
 	return runStream(d.t, d.ctx,
 		func(ctx context.Context) (*connect.ServerStreamForClient[agentreplv1.WatchDaemonResponse], error) {
-			return client.WatchDaemon(ctx, connect.NewRequest(&agentreplv1.WatchDaemonRequest{Client: &agentreplv1.WatchDaemonRequest_Emacs{Emacs: &agentreplv1.WatchDaemonEmacs{ElispBuild: PinnedElispBuild, Focus: focus}}}))
+			return client.WatchDaemon(ctx, connect.NewRequest(&agentreplv1.WatchDaemonRequest{Client: &agentreplv1.WatchDaemonRequest_Emacs{Emacs: &agentreplv1.WatchDaemonEmacs{ElispBuild: PinnedElispBuild, Focus: focus, Instance: EditorInstance()}}}))
 		},
 		func(r *agentreplv1.WatchDaemonResponse) *agentreplv1.WatchDaemonResponse { return r })
 }
@@ -426,6 +426,11 @@ func AwaitProcessGone(t *testing.T, ctx context.Context, pid int) {
 
 // UnfocusedEditor is the focus a harness Emacs stream connects with: the
 // harness is never the focused application, so the daemon posts banners.
+func EditorInstance() *agentreplv1.EditorInstance {
+	return &agentreplv1.EditorInstance{Value: "itest-emacs"}
+}
+
+// UnfocusedEditor is the focus an unfocused Emacs connects with.
 func UnfocusedEditor() *agentreplv1.EditorFocus {
 	return &agentreplv1.EditorFocus{Focus: &agentreplv1.EditorFocus_Unfocused{Unfocused: &agentreplv1.EditorFocusUnfocused{}}}
 }

@@ -22,6 +22,7 @@ import (
 	"claude-repld/internal/desktopnotify"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/drain"
+	"claude-repld/internal/editorinstance"
 	"claude-repld/internal/envc"
 	"claude-repld/internal/externalbrowser"
 	"claude-repld/internal/gitclient"
@@ -946,6 +947,14 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		return nil, err
 	}
 
+	// A FULL EMACS RESTART is told apart from a reconnect by the Emacs
+	// process identity every Emacs WatchDaemon carries, judged only by the
+	// daemon that serves (a joining successor's state client is read-only).
+	editors, err := editorinstance.New(p.DB, rolloutController.ServesIntake, time.Now, log)
+	if err != nil {
+		return nil, fmt.Errorf("claude-repld: build the editor instance tracker: %w", err)
+	}
+
 	log.Debug(graphOperation, "the component graph is built", dlog.Context{
 		"joining": p.Opts.joining != "",
 	})
@@ -976,6 +985,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			Focus:            focus,
 			PersistentWifi:   wifi,
 			NewsDigest:       digest,
+			EditorInstances:  editors,
 			WebappDist:       paths.WebappDist,
 			ImageOrigin:      images.Handler(),
 			Log:              p.Surfaces,
