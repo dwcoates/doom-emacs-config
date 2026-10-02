@@ -184,14 +184,16 @@ func (d *DB) acquireWrite(ctx context.Context, class WriteClass) (release func()
 
 // releaseWrite is every writer's release: it reads the WAL-index for the
 // checkpoint job while it still holds the writer (checkpoint.go), then hands
-// the slot on. The checkpoint itself releases through writes.release directly.
+// the slot on. The checkpoint's own WAL-index readings release through
+// writes.release directly.
 func (d *DB) releaseWrite() {
 	d.observeWAL()
 	d.writes.release()
 }
 
 // acquireSlot is acquireWrite without the release wrapper, for the one caller
-// whose release must not wake the checkpoint job: the checkpoint itself.
+// whose release must not wake the checkpoint job: the checkpoint's own
+// WAL-index readings (readWALUnderWriter).
 func (d *DB) acquireSlot(ctx context.Context, class WriteClass) error {
 	if !class.valid() {
 		return invalidSitef(SiteWriteClassUnset, "write_class",
