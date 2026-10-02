@@ -889,3 +889,65 @@ func TestAClaimClosedWhileItWaitsReleasesTheClaimItLaterTakes(t *testing.T) {
 	}
 	next.Close()
 }
+
+func TestPublishLeavesTheClaimToAWaitAlreadyUnderWay(t *testing.T) {
+	// Arrange: a successor is waiting for the claim, and the incumbent exits.
+	path := filepath.Join(t.TempDir(), "daemon.addr")
+	incumbent, err := Bind(path, 0)
+	if err != nil {
+		t.Fatalf("Bind: %v", err)
+	}
+	successor, err := BindJoining(path, 0)
+	if err != nil {
+		t.Fatalf("BindJoining: %v", err)
+	}
+	defer successor.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	parked := awaitResult(ctx, successor)
+	cancel()
+	<-parked
+	if err := incumbent.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// Act: Publish is asked before the wait is seen to land, then after.
+	if err := successor.AwaitBootClaim(context.Background()); err != nil {
+		t.Fatalf("AwaitBootClaim: %v", err)
+	}
+	err = successor.Publish()
+
+	// Assert: the claim the wait took is the one advertised under.
+	if err != nil {
+		t.Fatalf("Publish under the awaited claim = %v, want nil", err)
+	}
+	if _, err := BindWithin(path, 0, 0); !errors.Is(err, ErrClaimed) {
+		t.Fatalf("Bind after the takeover = %v, want ErrClaimed", err)
+	}
+}
+
+func TestPublishWhileAWaitIsUnderWayIsAHeldClaim(t *testing.T) {
+	// Arrange: the incumbent holds the claim and a successor's wait is queued.
+	path := filepath.Join(t.TempDir(), "daemon.addr")
+	incumbent, err := Bind(path, 0)
+	if err != nil {
+		t.Fatalf("Bind: %v", err)
+	}
+	defer incumbent.Close()
+	successor, err := BindJoining(path, 0)
+	if err != nil {
+		t.Fatalf("BindJoining: %v", err)
+	}
+	defer successor.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	parked := awaitResult(ctx, successor)
+	cancel()
+	<-parked
+
+	// Act
+	err = successor.Publish()
+
+	// Assert
+	if !errors.Is(err, ErrClaimed) || !strings.Contains(err.Error(), "a wait for it is under way") {
+		t.Fatalf("Publish = %v, want ErrClaimed naming the wait under way", err)
+	}
+}
