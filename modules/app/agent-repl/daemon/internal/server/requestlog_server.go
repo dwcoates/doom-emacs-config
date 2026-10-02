@@ -1164,3 +1164,37 @@ func (s *requestLoggingServer) BindWorkspaceSession(
 	}()
 	return s.server.BindWorkspaceSession(ctx, req)
 }
+
+func (s *requestLoggingServer) DismissNewsDigest(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.DismissNewsDigestRequest],
+) (resp *connect.Response[agentreplv1.DismissNewsDigestResponse], err error) {
+	boundary, err := s.server.beginRequest(ctx, "DismissNewsDigest", req.Header().Get(requestIDHeader), requestMessage(req))
+	if err != nil {
+		return nil, boundaryFailure(err)
+	}
+	boundary.log.Debug("daemon.server.dismiss_news_digest", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
+	defer func() {
+		boundary.log.Debug("daemon.server.dismiss_news_digest", "completed the rpc handler", boundary.completionContext(err))
+	}()
+	return s.server.DismissNewsDigest(ctx, req)
+}
+
+func (s *requestLoggingServer) RefreshNewsDigest(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.RefreshNewsDigestRequest],
+) (resp *connect.Response[agentreplv1.RefreshNewsDigestResponse], err error) {
+	boundary, err := s.server.beginRequest(ctx, "RefreshNewsDigest", req.Header().Get(requestIDHeader), requestMessage(req))
+	if err != nil {
+		return nil, boundaryFailure(err)
+	}
+	boundary.log.Debug("daemon.server.refresh_news_digest", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
+	defer func() {
+		boundary.log.Debug("daemon.server.refresh_news_digest", "completed the rpc handler", boundary.completionContext(err))
+	}()
+	return s.server.RefreshNewsDigest(ctx, req)
+}

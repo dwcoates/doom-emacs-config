@@ -122,6 +122,10 @@ type Deps struct {
 	// `persistent_wifi` state every Emacs WatchDaemon stream subscribes to (a
 	// webview's never does: its topbar view carries the same standing).
 	PersistentWifi PersistentWifi
+	// NewsDigest backs DismissNewsDigest and RefreshNewsDigest, and its topic
+	// is the `news_digest` state every WEBVIEW WatchDaemon stream subscribes
+	// to (an Emacs stream's never does: only a webview draws the overlay).
+	NewsDigest NewsDigest
 
 	// WebappDist is the webapp's dist directory, served on the same origin.
 	// Its entry point is re-stat'd per request and answered with
@@ -381,6 +385,8 @@ func New(deps Deps) (Server, error) {
 		return nil, missing("Emacs's focus")
 	case deps.PersistentWifi == nil:
 		return nil, missing("the persistent-wifi controller")
+	case deps.NewsDigest == nil:
+		return nil, missing("the news digest")
 	case deps.WebappDist == "":
 		return nil, missing("the webapp dist directory")
 	case deps.ImageOrigin == nil:
