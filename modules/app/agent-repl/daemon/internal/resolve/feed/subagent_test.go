@@ -2289,6 +2289,138 @@ func TestAShellHeldBeforeItWasDrawnIsSettledLostWhenItLeavesAfterDrawing(t *test
 	}
 }
 
+// ---- A DETACHED SUBAGENT THAT LEFT THE LIVE SET ----
+
+// liveAgents is the watcher's live-work publication naming these subagents.
+func liveAgents(agents ...string) sessionwatcher.LiveWorkSet {
+	var live sessionwatcher.LiveWorkSet
+	for _, agent := range agents {
+		live.Agents = append(live.Agents, &conversationv1.AgentId{Value: agent})
+	}
+	return live
+}
+
+// runningDetachedSubagent draws a detached subagent that has started and not
+// settled, its spawn unit and handle "spawn-1" and its agent "agent-explore".
+func runningDetachedSubagent(h *harness) *conversationv1.AgentId {
+	h.t.Helper()
+	created := &conversationv1.AgentId{Value: "agent-explore"}
+	h.detachWork("spawn-1", "spawn-1")
+	h.spawnSubagent("spawn-1", created, "Explore", "map the daemon")
+	return created
+}
+
+func TestADetachedSubagentThatLeftTheLiveSetUnsettledIsSettledLost(t *testing.T) {
+	// Arrange: the bubble is drawn live and the live set holds its agent.
+	h := newHarness(t)
+	created := runningDetachedSubagent(h)
+	h.resolver.OnLiveWorkChanged(testWorkspace, liveAgents("agent-explore"))
+
+	// Act: the set is republished without it, and no terminal came.
+	h.resolver.OnLiveWorkChanged(testWorkspace, liveAgents())
+
+	// Assert: lost, with no cause claimed, ended now.
+	settled := bubbleOf(h.bubbleRow("spawn-1", created)).GetSettled()
+	if settled.GetLost() == nil || settled.GetLost().GetHow() != nil {
+		t.Fatalf("settled = %+v, want lost with no cause", settled)
+	}
+	if settled.GetEndedAtMs() != h.nowMs {
+		t.Fatalf("ended = %d, want the daemon's clock %d", settled.GetEndedAtMs(), h.nowMs)
+	}
+}
+
+func TestADetachedSubagentThatLeftTheLiveSetUnsettledIsRecordedAtInfo(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	runningDetachedSubagent(h)
+	h.resolver.OnLiveWorkChanged(testWorkspace, liveAgents("agent-explore"))
+
+	// Act.
+	h.resolver.OnLiveWorkChanged(testWorkspace, liveAgents())
+
+	// Assert.
+	if !h.hasRecord("info", "daemon.feed.detached_subagent_left_live") {
+		t.Fatalf("records = %+v, want the settle recorded at info", h.records())
+	}
+}
+
+func TestADetachedSubagentListedByItsHandleIsSettledLostWhenItLeaves(t *testing.T) {
+	// Arrange: the set lists it by its handle, as it does a subagent whose
+	// announcement named no agent.
+	h := newHarness(t)
+	created := runningDetachedSubagent(h)
+	h.resolver.OnLiveWorkChanged(testWorkspace, liveAgents("spawn-1"))
+
+	// Act.
+	h.resolver.OnLiveWorkChanged(testWorkspace, liveAgents())
+
+	// Assert.
+	if bubbleOf(h.bubbleRow("spawn-1", created)).GetSettled().GetLost() == nil {
+		t.Fatalf("state = %T, want the bubble settled lost", bubbleOf(h.bubbleRow("spawn-1", created)).GetState())
+	}
+}
+
+func TestADetachedSubagentItsOwnTerminalSettledKeepsThatEndingWhenItLeaves(t *testing.T) {
+	// Arrange: its own success settles the bubble before the set drops it.
+	h := newHarness(t)
+	created := runningDetachedSubagent(h)
+	h.resolver.OnLiveWorkChanged(testWorkspace, liveAgents("agent-explore"))
+	h.settleSubagent("spawn-1", created, nil)
+
+	// Act.
+	h.resolver.OnLiveWorkChanged(testWorkspace, liveAgents())
+
+	// Assert.
+	if bubbleOf(h.bubbleRow("spawn-1", created)).GetSettled().GetSucceeded() == nil {
+		t.Fatalf("state = %+v, want the run's own success", bubbleOf(h.bubbleRow("spawn-1", created)).GetState())
+	}
+}
+
+func TestADetachedSubagentTheLiveSetNeverHeldIsNotSettledByASetWithoutIt(t *testing.T) {
+	// Arrange: drawn, but the watcher never listed it.
+	h := newHarness(t)
+	created := runningDetachedSubagent(h)
+
+	// Act.
+	h.resolver.OnLiveWorkChanged(testWorkspace, liveAgents())
+
+	// Assert.
+	if bubbleOf(h.bubbleRow("spawn-1", created)).GetLive() == nil {
+		t.Fatalf("state = %T, want the bubble still live", bubbleOf(h.bubbleRow("spawn-1", created)).GetState())
+	}
+}
+
+func TestADetachedSubagentStillInTheLiveSetStaysLive(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	created := runningDetachedSubagent(h)
+	h.resolver.OnLiveWorkChanged(testWorkspace, liveAgents("agent-explore"))
+
+	// Act: another change that still lists it.
+	h.resolver.OnLiveWorkChanged(testWorkspace, liveAgents("agent-explore", "agent-other"))
+
+	// Assert.
+	if bubbleOf(h.bubbleRow("spawn-1", created)).GetLive() == nil {
+		t.Fatalf("state = %T, want the bubble still live", bubbleOf(h.bubbleRow("spawn-1", created)).GetState())
+	}
+}
+
+func TestADetachedSubagentSettledLostIsResettledByItsLateTerminal(t *testing.T) {
+	// Arrange: settled lost when it left the set.
+	h := newHarness(t)
+	created := runningDetachedSubagent(h)
+	h.resolver.OnLiveWorkChanged(testWorkspace, liveAgents("agent-explore"))
+	h.resolver.OnLiveWorkChanged(testWorkspace, liveAgents())
+
+	// Act: its own success arrives after all.
+	h.settleSubagent("spawn-1", created, nil)
+
+	// Assert: the truth overtakes the loss.
+	if bubbleOf(h.bubbleRow("spawn-1", created)).GetSettled().GetSucceeded() == nil {
+		t.Fatalf("state = %+v, want the late success", bubbleOf(h.bubbleRow("spawn-1", created)).GetState())
+	}
+}
+
 // ---- DETACHED WORK IS DRAWN ONLY IN THE FEED IT BELONGS TO ----
 //
 // Owner's rule (2026-09-23): work spawned by the main agent is drawn on the
