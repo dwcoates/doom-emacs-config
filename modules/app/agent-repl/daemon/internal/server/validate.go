@@ -256,6 +256,14 @@ func validateOpenFeedRequest(req *agentreplv1.OpenFeedRequest) *connect.Error {
 	return nil
 }
 
+// validateLoadFeedThroughRequest is LoadFeedThroughRequest's base function.
+func validateLoadFeedThroughRequest(req *agentreplv1.LoadFeedThroughRequest) *connect.Error {
+	if err := validateWorkspaceRef("workspace", req.GetWorkspace()); err != nil {
+		return err
+	}
+	return validateFeedID("target", req.GetTarget())
+}
+
 // validateWatchFeedRequest is WatchFeedRequest's base function.
 func validateWatchFeedRequest(req *agentreplv1.WatchFeedRequest) *connect.Error {
 	if req.GetWatch() == nil {

@@ -248,7 +248,6 @@ func newStoredHarness(t *testing.T, rolledBack RolledBackTurnStore) *harness {
 		Faults:     h.faults,
 		Warnings:   h.warnings,
 		RolledBack: rolledBack,
-		PageSize:   3,
 		EntryPlaced: func(_ ids.WorkspaceID, unit string, row *frontendv1.FeedId) {
 			h.placed = append(h.placed, placedEntry{unit: unit, row: row.GetValue()})
 		},

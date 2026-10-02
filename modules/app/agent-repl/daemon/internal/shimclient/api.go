@@ -318,11 +318,6 @@ type KillAttribution struct {
 	Force bool
 }
 
-// DefaultPageSize is the opening page budget every paged request carries. The
-// shim REFUSES page_size == 0, so no request is ever sent with a zero-as-
-// default; a caller with its own budget states it instead.
-const DefaultPageSize uint32 = 50
-
 // Option adjusts the supervisor. Every option exists because a peer must be
 // able to state a policy the client itself must not own.
 type Option func(*supervisor)

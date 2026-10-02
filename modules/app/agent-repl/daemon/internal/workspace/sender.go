@@ -21,20 +21,12 @@ import (
 // because every shim refusal is already given its typed arm in this package —
 // a second unwrapping elsewhere would answer the same failures differently.
 
-// turnPageSize is the budget of an accepted turn's opening page: ONE entry,
-// which R15 makes the turn's own prompt row. The shim writes that row durable
-// and reads the page BEFORE it submits the prompt, so the newest entry at the
-// read is the row the turn itself produced.
-//
-// A TURN OPENING NEVER REPLAYS HISTORY (owner rule, 2026-09-23). The page
-// used to be asked for at 200 with no known_through, and a pointerless page
-// is the agent's first page: the newest 200 entries, re-resolved by every view
-// on every turn, with their history effects firing again. The main agent's
-// standing watch serves everything the turn writes live, so the page owes the
-// views nothing but the turn's own row. The request also states the main
-// watch's pointer (see sender.known), so even the one entry is bounded to what
-// was written after everything the daemon has already been served.
-const turnPageSize = 1
+// A TURN OPENING NEVER REPLAYS HISTORY (owner rule, 2026-09-23; feed paging
+// on demand, 2026-10-02). The main agent's standing watch serves everything
+// the turn writes live, so the page owes the views nothing: StartTurn opens
+// tail_only when the daemon holds nothing of the main agent, and otherwise
+// catches up from the newest pointer it holds (see sender.known). The page's
+// size is the store's; the daemon states none.
 
 // coldThresholdPolicy is the context size, in tokens, above which a MODEL
 // CHANGE is refused as an unasked cold-cache cost rather than paid. It is
@@ -143,9 +135,12 @@ func (s *sender) startTurn(ctx context.Context, turn ids.TurnID, said *conversat
 		Turn:            &conversationv1.TurnId{Value: string(turn)},
 		Said:            said,
 		Origin:          origin,
-		PageSize:        turnPageSize,
-		KnownThrough:    s.knownThrough(),
 		JoinRunningTurn: how.join,
+	}
+	if held := s.knownThrough(); held != nil {
+		req.Opening = &shimv1.StartTurnRequest_KnownThrough{KnownThrough: held}
+	} else {
+		req.Opening = &shimv1.StartTurnRequest_TailOnly{TailOnly: &shimv1.StartTurnTailOnly{}}
 	}
 	if how.note != "" {
 		req.VendorNote = &how.note
