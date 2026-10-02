@@ -137,6 +137,8 @@ function smallAssistantLine(): Record<string, unknown> {
 function harness(
   options: {
     nowMs?: number;
+    /** A clock that MOVES, for a suite that measures an elapsed time; wins over `nowMs`. */
+    clock?: () => number;
     lockThrows?: boolean;
     /** Make the WORKSPACE claim refuse, so its own conversation_owned arm shows. */
     workspaceLockThrows?: boolean;
@@ -295,7 +297,7 @@ function harness(
       return uuid;
     },
     env: { stateDir, configDir, cwd },
-    nowMs: () => options.nowMs ?? 1_000_100,
+    nowMs: options.clock ?? (() => options.nowMs ?? 1_000_100),
     probeApiReachable: probe.probe,
     networkResumeScheduler: networkScheduler,
     ...(options.withoutScheduler === true ? {} : { scheduler }),
@@ -492,6 +494,13 @@ function exitedHolder(): LockHolderUnavailableError {
 
 function failureCause(response: shimv1.StartSessionResponse): string | undefined {
   return response.result.case === "failure" ? response.result.value.cause.case : undefined;
+}
+
+/** The retry label a `vendor_start_failed` refusal carries, or undefined for any other answer. */
+function retryLabel(response: shimv1.StartSessionResponse): string | undefined {
+  if (response.result.case !== "failure") return undefined;
+  const cause = response.result.value.cause;
+  return cause.case === "vendorStartFailed" ? cause.value.retry.case : undefined;
 }
 
 beforeEach(() => {
@@ -7658,6 +7667,329 @@ describe("the proven-live signal a start settles on", () => {
     expect(seen).toContain("22222222-2222-4222-8222-222222222222");
   });
 });
+/**
+ * THE RETRY LABEL EVERY FAILED VENDOR START CARRIES.
+ *
+ * WHAT THIS GUARDS: the daemon retries a `vendor_start_failed` refusal on this
+ * label alone (`endpoint_start_session.proto`), so each way a start can fail is
+ * pinned to its bucket here, one row per settle site. The 2026-10-02 incident —
+ * a relaunched child that did not answer `supportedModels` inside the liveness
+ * bound — is the first row: it was never retried.
+ */
+describe("the retry label a failed vendor start carries", () => {
+  const AMPLE = 60_000;
+
+  /** An error result carrying the API status the SDK reports beside it. */
+  function statusedErrorResult(status: number, words: string): SdkMessage {
+    return {
+      ...(errorResultMessage({ errors: [words] }) as unknown as Record<string, unknown>),
+      api_error_status: status,
+    } as unknown as SdkMessage;
+  }
+
+  it("labels a liveness-bound timeout retryable", async () => {
+    // Arrange.
+    const h = harness({ liveSignalTimeoutMs: 5, holdLiveSignal: true });
+
+    // Act.
+    const response = await h.engine.startSession(freshRequest());
+
+    // Assert.
+    expect(retryLabel(response)).toBe("retryable");
+  });
+
+  it("labels a refused liveness round-trip retryable", async () => {
+    // Arrange.
+    const h = harness({
+      onQueryCreated: (query) => {
+        query.supportedModels = () => Promise.reject(new Error("Query closed before response received"));
+      },
+    });
+
+    // Act.
+    const response = await h.engine.startSession(freshRequest());
+
+    // Assert.
+    expect(retryLabel(response)).toBe("retryable");
+  });
+
+  it("labels the init-silence timeout retryable", async () => {
+    // Arrange.
+    const h = harness({ initTimeoutMs: 5, liveSignalTimeoutMs: AMPLE, holdLiveSignal: true });
+
+    // Act.
+    const response = await h.engine.startSession(freshRequest());
+
+    // Assert.
+    expect(retryLabel(response)).toBe("retryable");
+  });
+
+  it("labels a stream that ENDED before the start settled retryable", async () => {
+    // Arrange.
+    const h = harness({ initTimeoutMs: AMPLE, liveSignalTimeoutMs: AMPLE, holdLiveSignal: true });
+    const pending = h.engine.startSession(freshRequest());
+
+    // Act.
+    (await untilQuery(h, 0)).query.end();
+
+    // Assert.
+    expect(retryLabel(await pending)).toBe("retryable");
+  });
+
+  it("labels a stream that THREW before the start settled retryable", async () => {
+    // Arrange.
+    const h = harness({ initTimeoutMs: AMPLE, liveSignalTimeoutMs: AMPLE, holdLiveSignal: true });
+    const pending = h.engine.startSession(freshRequest());
+    const first = await untilQuery(h, 0);
+
+    // Act: one message unparks the loop, so the failure throws on the next pull.
+    first.query.emit(hookResponse({ outcome: "success", output: "" }));
+    first.query.fail(new Error("Claude Code process exited with code 1"));
+
+    // Assert.
+    expect(retryLabel(await pending)).toBe("retryable");
+  });
+
+  it.each([
+    ["a refused resume", errorResultMessage({ errors: ["No conversation found with session ID: bf5fcae1"] }), "rejected"],
+    ["a rejected credential", statusedErrorResult(401, "invalid x-api-key"), "rejected"],
+    ["a missing model", statusedErrorResult(404, "model: claude-nope"), "rejected"],
+    ["an overloaded API", statusedErrorResult(529, "Overloaded"), "retryable"],
+    ["a server error", statusedErrorResult(500, "Internal server error"), "retryable"],
+    ["a rate limit", statusedErrorResult(429, "Too many requests"), "retryable"],
+    ["a network failure", errorResultMessage({ errors: ["getaddrinfo ENOTFOUND api.anthropic.com"] }), "retryable"],
+  ] as const)("labels an opening error result from %s", async (_case, message, retry) => {
+    // Arrange.
+    const h = harness({ initTimeoutMs: AMPLE, liveSignalTimeoutMs: AMPLE, holdLiveSignal: true });
+    const pending = h.engine.startSession(freshRequest());
+
+    // Act.
+    (await untilQuery(h, 0)).query.emit(message);
+
+    // Assert.
+    expect(retryLabel(await pending)).toBe(retry);
+  });
+
+  it("labels a hook that blocked the opening rejected", async () => {
+    // Arrange.
+    const h = harness({ holdLiveSignal: true });
+    const pending = h.engine.startSession(freshRequest());
+
+    // Act.
+    (await untilQuery(h, 0)).query.emit(hookResponse({ outcome: "error", output: "not today" }));
+
+    // Assert.
+    expect(retryLabel(await pending)).toBe("rejected");
+  });
+
+  it("labels a query that could not be created rejected", async () => {
+    // Arrange.
+    const h = harness({ createQueryFailsFrom: 0 });
+
+    // Act.
+    const response = await h.engine.startSession(freshRequest());
+
+    // Assert.
+    expect(retryLabel(response)).toBe("rejected");
+  });
+
+  describe("on the failed start's own record", () => {
+    const RECORD = "what the vendor emitted before the start failed";
+
+    it("states the label the refusal carried", async () => {
+      // Arrange.
+      const h = harness({ liveSignalTimeoutMs: 5, holdLiveSignal: true });
+      const before = logSinkMark();
+
+      // Act.
+      await h.engine.startSession(freshRequest());
+
+      // Assert.
+      expect(logContextFor(before, RECORD)?.["retry"]).toBe("retryable");
+    });
+
+    it("states how long the start ran before it failed", async () => {
+      // Arrange: the clock moves 250ms between the start's first and last reads.
+      let now = 1_000_000;
+      const h = harness({
+        clock: () => now,
+        holdLiveSignal: true,
+        initTimeoutMs: AMPLE,
+        liveSignalTimeoutMs: AMPLE,
+      });
+      const before = logSinkMark();
+      const pending = h.engine.startSession(freshRequest());
+      const first = await untilQuery(h, 0);
+
+      // Act.
+      now += 250;
+      first.query.end();
+      await pending;
+
+      // Assert.
+      expect(logContextFor(before, RECORD)?.["elapsed_ms"]).toBe(250);
+    });
+
+    it("names the liveness bound that tripped, and its size", async () => {
+      // Arrange.
+      const h = harness({ liveSignalTimeoutMs: 5, holdLiveSignal: true });
+      const before = logSinkMark();
+
+      // Act.
+      await h.engine.startSession(freshRequest());
+
+      // Assert.
+      const context = logContextFor(before, RECORD);
+      expect({ bound: context?.["bound"], bound_ms: context?.["bound_ms"] }).toEqual({
+        bound: "live_signal",
+        bound_ms: 5,
+      });
+    });
+
+    it("names the init-silence bound that tripped, and its size", async () => {
+      // Arrange.
+      const h = harness({ initTimeoutMs: 5, liveSignalTimeoutMs: AMPLE, holdLiveSignal: true });
+      const before = logSinkMark();
+
+      // Act.
+      await h.engine.startSession(freshRequest());
+
+      // Assert.
+      const context = logContextFor(before, RECORD);
+      expect({ bound: context?.["bound"], bound_ms: context?.["bound_ms"] }).toEqual({
+        bound: "init_silence",
+        bound_ms: 5,
+      });
+    });
+
+    it("names no bound when the start failed on an answer", async () => {
+      // Arrange.
+      const h = harness({ holdLiveSignal: true });
+      const before = logSinkMark();
+      const pending = h.engine.startSession(freshRequest());
+
+      // Act.
+      (await untilQuery(h, 0)).query.emit(hookResponse({ outcome: "error", output: "not today" }));
+      await pending;
+
+      // Assert.
+      const context = logContextFor(before, RECORD);
+      expect({ bound: context?.["bound"], bound_ms: context?.["bound_ms"] }).toEqual({ bound: "", bound_ms: -1 });
+    });
+
+    it("says the child was still alive when no exit was observed", async () => {
+      // Arrange.
+      const h = harness({ liveSignalTimeoutMs: 5, holdLiveSignal: true });
+      const before = logSinkMark();
+
+      // Act.
+      await h.engine.startSession(freshRequest());
+
+      // Assert.
+      expect(logContextFor(before, RECORD)?.["vendor_child_alive"]).toBe(true);
+    });
+
+    it("states the child's exit code and signal when it exited before the start settled", async () => {
+      // Arrange.
+      const h = harness({ initTimeoutMs: AMPLE, liveSignalTimeoutMs: AMPLE, holdLiveSignal: true });
+      const before = logSinkMark();
+      const pending = h.engine.startSession(freshRequest());
+      const first = await untilQuery(h, 0);
+
+      // Act.
+      first.spec.onChildExit?.({ code: null, signal: "SIGKILL" });
+      first.query.end();
+      await pending;
+
+      // Assert.
+      const context = logContextFor(before, RECORD);
+      expect({
+        alive: context?.["vendor_child_alive"],
+        code: context?.["vendor_exit_code"],
+        signal: context?.["vendor_exit_signal"],
+      }).toEqual({ alive: false, code: -1, signal: "SIGKILL" });
+    });
+
+    it("does not carry a previous attempt's child exit into a retry's record", async () => {
+      // Arrange: attempt one's child exits; attempt two's stays up and times out.
+      const h = harness({
+        initTimeoutMs: AMPLE,
+        liveSignalTimeoutMs: 5,
+        holdLiveSignal: true,
+      });
+      const firstAttempt = h.engine.startSession(freshRequest());
+      const first = await untilQuery(h, 0);
+      first.spec.onChildExit?.({ code: 1, signal: null });
+      first.query.end();
+      await firstAttempt;
+      const before = logSinkMark();
+
+      // Act.
+      await h.engine.startSession(freshRequest());
+
+      // Assert.
+      expect(logContextFor(before, RECORD)?.["vendor_child_alive"]).toBe(true);
+    });
+  });
+});
+
+/**
+ * VETTING ITEM V1: A RETRYABLE START IS RETRIED ON THE SAME SHIM.
+ *
+ * The daemon's retry loop re-asks the SAME process (`StartSessionVendorStart-
+ * Failed`: "A retryable failure leaves the shim able to take another
+ * StartSession for the same session on the SAME process"). These drive the
+ * grounded 2026-10-02 failure — a liveness probe that timed out — and then a
+ * second StartSession whose probe answers, on one engine instance.
+ */
+describe("a start retried after its liveness probe timed out", () => {
+  /** Hold the live signal on the FIRST query only, so the retry's answers. */
+  const holdFirstOnly = {
+    liveSignalTimeoutMs: 5,
+    onQueryCreated: (query: ScriptedQuery, _spec: QuerySpec, index: number): void => {
+      if (index === 0) query.holdModels();
+    },
+  };
+
+  it("succeeds on a fresh start", async () => {
+    // Arrange.
+    const h = harness(holdFirstOnly);
+    expect(retryLabel(await h.engine.startSession(freshRequest()))).toBe("retryable");
+
+    // Act.
+    const retried = await h.engine.startSession(freshRequest());
+
+    // Assert.
+    expect(retried.result.case).toBe("success");
+  });
+
+  it("re-announces the same conversation identity on a resume", async () => {
+    // Arrange: an identity an earlier session established, and its transcript.
+    const h = harness({ nowMs: 1_000_100, ...holdFirstOnly });
+    mkdirSync(path.dirname(agentIdPath(h.stateDir, workspaceLockKey(h.cwd))), { recursive: true });
+    writeFileSync(
+      agentIdPath(h.stateDir, workspaceLockKey(h.cwd)),
+      JSON.stringify({
+        original_vendor_session_id: "established-by-an-earlier-session",
+        workspace_key: workspaceLockKey(h.cwd),
+        minted_at_ms: 1,
+      }),
+      "utf8",
+    );
+    writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+    expect(retryLabel(await h.engine.startSession(resumeRequest("resume-1")))).toBe("retryable");
+
+    // Act.
+    const retried = await h.engine.startSession(resumeRequest("resume-1"));
+
+    // Assert.
+    expect({
+      vendorSessionId:
+        retried.result.case === "success" ? retried.result.value.session?.vendorSessionId : undefined,
+      producer: h.persistence.producer,
+    }).toEqual({ vendorSessionId: "resume-1", producer: "established-by-an-earlier-session" });
+  });
+});
 describe("StartSession's remaining refusals", () => {
   it("refuses vendor_start_failed when the vendor answers nothing at all", async () => {
     // A CHILD THAT ANSWERS NEITHER ITS CONTROL CHANNEL NOR ITS STREAM. Without
@@ -7920,6 +8252,135 @@ describe("the cold gate's COMPACT remediation", () => {
     expect(
       response.result.case === "failure" ? response.result.value.detail : undefined,
     ).toBe("the vendor refused another query");
+  });
+
+  describe("labels the refusal by the compaction's own cause", () => {
+    const COLD_NOW = 1_000_000 + 10 * 60 * 1000;
+
+    it("labels an error result with no transient words rejected", async () => {
+      // Arrange.
+      const h = harness({
+        nowMs: COLD_NOW,
+        onQueryCreated: (query, _spec, index) => {
+          if (index === 0) query.emit(errorResultMessage({ errors: ["the budget is exhausted"] }));
+        },
+      });
+      writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+
+      // Act.
+      const response = await h.engine.startSession(resumeRequest("resume-1", compactRemediation()));
+
+      // Assert.
+      expect(retryLabel(response)).toBe("rejected");
+    });
+
+    it("labels an overloaded error result retryable", async () => {
+      // Arrange.
+      const h = harness({
+        nowMs: COLD_NOW,
+        onQueryCreated: (query, _spec, index) => {
+          if (index !== 0) return;
+          query.emit({
+            ...(errorResultMessage({ errors: ["Overloaded"] }) as unknown as Record<string, unknown>),
+            api_error_status: 529,
+          } as unknown as SdkMessage);
+        },
+      });
+      writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+
+      // Act.
+      const response = await h.engine.startSession(resumeRequest("resume-1", compactRemediation()));
+
+      // Assert.
+      expect(retryLabel(response)).toBe("retryable");
+    });
+
+    it("labels a result that summarized nothing rejected", async () => {
+      // Arrange.
+      const h = harness({
+        nowMs: COLD_NOW,
+        onQueryCreated: (query, _spec, index) => {
+          if (index !== 0) return;
+          query.emit({
+            ...(resultMessage("99999999-9999-4999-8999-999999999990") as unknown as Record<string, unknown>),
+            result: "",
+          } as never);
+        },
+      });
+      writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+
+      // Act.
+      const response = await h.engine.startSession(resumeRequest("resume-1", compactRemediation()));
+
+      // Assert.
+      expect(retryLabel(response)).toBe("rejected");
+    });
+
+    it("labels a stream that ended with no result retryable", async () => {
+      // Arrange.
+      const h = harness({
+        nowMs: COLD_NOW,
+        onQueryCreated: (query, _spec, index) => {
+          if (index === 0) query.end();
+        },
+      });
+      writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+
+      // Act.
+      const response = await h.engine.startSession(resumeRequest("resume-1", compactRemediation()));
+
+      // Assert.
+      expect(retryLabel(response)).toBe("retryable");
+    });
+
+    it("labels a stream that threw retryable", async () => {
+      // Arrange.
+      const h = harness({
+        nowMs: COLD_NOW,
+        onQueryCreated: (query, _spec, index) => {
+          if (index === 0) query.fail(new Error("Claude Code process exited with code 1"));
+        },
+      });
+      writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+
+      // Act.
+      const response = await h.engine.startSession(resumeRequest("resume-1", compactRemediation()));
+
+      // Assert.
+      expect(retryLabel(response)).toBe("retryable");
+    });
+
+    it("labels a throwaway query that could not be created rejected", async () => {
+      // Arrange.
+      const h = harness({ nowMs: COLD_NOW, createQueryFailsFrom: 0 });
+      writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+
+      // Act.
+      const response = await h.engine.startSession(resumeRequest("resume-1", compactRemediation()));
+
+      // Assert.
+      expect(retryLabel(response)).toBe("rejected");
+    });
+
+    it("records the label on the refusal's own line", async () => {
+      // Arrange.
+      const h = harness({
+        nowMs: COLD_NOW,
+        onQueryCreated: (query, _spec, index) => {
+          if (index === 0) query.end();
+        },
+      });
+      writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+      const before = logSinkMark();
+
+      // Act.
+      await h.engine.startSession(resumeRequest("resume-1", compactRemediation()));
+
+      // Assert.
+      expect(logContextFor(before, "refused StartSession: the cold gate's remediation failed")?.["retry"]).toBe(
+        "retryable",
+      );
+    });
   });
 
   /** A `pay` remediation: the caller elects to pay for the cold read. */
