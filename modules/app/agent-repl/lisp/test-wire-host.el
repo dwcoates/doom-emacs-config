@@ -772,13 +772,16 @@ composer and vendor_info arms together."
                  '("emacs" "webview"))))
 
 (ert-deftest agent-repl-test-wire-host-daemon-push-arms-pinned ()
-  "The daemon stream's push arms are exactly what the frozen schema declares."
+  "The daemon stream's push arms are exactly what the frozen schema declares.
+`newsDigest' is a webview stream's alone: the daemon never sends it to an
+Emacs stream, so Emacs's decoder does not accept it and would report one
+as a contract breach."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_watch_daemon.pb.go" "WatchDaemonResponse")
                        #'string<)
                  (sort (list "shutdownAnnounced" "drainScheduled" "drainCancelled"
                              "mutationProgress" "reloadElisp" "ending" "faultsStanding"
-                             "persistentWifi")
+                             "persistentWifi" "newsDigest")
                        #'string<))))
 
 (defconst agent-repl-test-wire-host--standing-fault-json
