@@ -201,8 +201,24 @@ export interface QuerySpec {
    * transports and nothing at all about why its process was gone. Optional:
    * the mocked vendor has no child to end.
    */
-  readonly onChildExit?: (exit: { code: number | null; signal: string | null }) => void;
+  readonly onChildExit?: (exit: VendorEnd) => void;
 }
+
+/**
+ * How the vendor child ended: its exit code, the signal that killed it, or —
+ * for a child that never ran — the errno its spawn failed with.
+ */
+export interface VendorEnd {
+  readonly code: number | null;
+  readonly signal: string | null;
+  readonly spawnErrno?: string;
+}
+
+/**
+ * The spawn errnos that say the binary cannot run at all (missing, or not
+ * executable): a start that met one is REJECTED, never retried.
+ */
+const UNSPAWNABLE_ERRNOS: ReadonlySet<string> = new Set(["ENOENT", "EACCES"]);
 
 /** Build one query. `--fake` swaps the implementation and nothing else. */
 export type CreateQuery = (spec: QuerySpec) => Promise<QueryLike>;
@@ -852,7 +868,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * death. Absent means the child has not ended — or, for the mocked vendor,
    * that there was never a child to end.
    */
-  let vendorExit: { code: number | null; signal: string | null } | undefined;
+  let vendorExit: VendorEnd | undefined;
   let loop: Promise<void> | undefined;
   /**
    * What the cold gate's own compaction measured, kept for the phases AFTER it.
@@ -2233,10 +2249,14 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   }
 
   /** Remember how the vendor child ended, for the death record. */
-  function noteVendorExit(exit: { code: number | null; signal: string | null }): void {
+  function noteVendorExit(exit: VendorEnd): void {
     vendorExit = exit;
     LOGGER.debug(
-      { vendor_exit_code: exit.code ?? -1, vendor_exit_signal: exit.signal ?? "" },
+      {
+        vendor_exit_code: exit.code ?? -1,
+        vendor_exit_signal: exit.signal ?? "",
+        vendor_spawn_errno: exit.spawnErrno ?? "",
+      },
       "the vendor child ended",
     );
   }
@@ -2258,6 +2278,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       // ended" the same record, and those are opposite diagnoses.
       vendor_exit_code: vendorExit?.code ?? -1,
       vendor_exit_signal: vendorExit?.signal ?? "",
+      vendor_spawn_errno: vendorExit?.spawnErrno ?? "",
       vendor_stderr: vendorStderrTail.trim(),
     };
   }
@@ -2383,7 +2404,17 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     if (reject === undefined) return;
     // RETRYABLE: a child that exited or a stream that ended before it was
     // ready says nothing about whether the next one will.
-    reject(new VendorStartError(`the vendor query ended before its init message: ${detail}`, "retryable"));
+    //
+    // ...UNLESS THE CHILD NEVER SPAWNED because its binary is missing or not
+    // executable: that errno is structured, and it will be the same next time.
+    const errno = vendorExit?.spawnErrno;
+    const deterministic = errno !== undefined && UNSPAWNABLE_ERRNOS.has(errno);
+    reject(
+      new VendorStartError(
+        `the vendor query ended before its init message: ${detail}`,
+        deterministic ? "rejected" : "retryable",
+      ),
+    );
   }
 
   /**
@@ -4319,6 +4350,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
           vendor_child_alive: vendorExit === undefined,
           vendor_exit_code: vendorExit?.code ?? -1,
           vendor_exit_signal: vendorExit?.signal ?? "",
+          vendor_spawn_errno: vendorExit?.spawnErrno ?? "",
           pre_init_messages: preInitKinds.length + preInitKindsDropped,
           pre_init_kinds: preInitKinds.join(","),
           vendor_stderr: vendorStderrTail.trim(),
@@ -4607,20 +4639,32 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       for await (const message of throwaway) {
         if (message.type !== "result") continue;
         sawResult = true;
-        if (message.subtype !== "success") {
-          // AN ERROR RESULT IS READ EXACTLY AS THE OPENING'S IS: its status and
-          // its words decide whether it can pass.
-          // READ DEFENSIVELY: this result is the vendor's, and an error result
-          // that states no `errors` must still be labeled, not throw.
+        // AN ERROR RESULT IS A FAILURE WHATEVER ITS SUBTYPE. The vendor ends a
+        // turn whose API call failed with `subtype: "success"` and `is_error`,
+        // its `result` the error's own sentence ("API Error: ..."); reading
+        // that as a summary would write the error into the transcript as the
+        // conversation's compacted context.
+        if (message.subtype !== "success" || message.is_error) {
+          // READ EXACTLY AS THE OPENING'S IS: its status and its words decide
+          // whether it can pass. READ DEFENSIVELY: this result is the vendor's,
+          // and one that states no `errors` must still be labeled, not throw.
           const { api_error_status: status, errors } = message as unknown as {
             api_error_status?: number | null;
             errors?: unknown;
           };
-          const verdict = openingErrorVerdict(
-            typeof status === "number" ? status : undefined,
-            Array.isArray(errors) ? errors.map(String).join("; ") : "",
+          const words =
+            message.subtype === "success"
+              ? message.result
+              : Array.isArray(errors)
+                ? errors.map(String).join("; ")
+                : "";
+          const verdict = openingErrorVerdict(typeof status === "number" ? status : undefined, words);
+          return failed(
+            message.subtype === "success"
+              ? `the summarizing session ended with an error result: ${words}`
+              : `the summarizing session ended as ${message.subtype}`,
+            verdict.retry,
           );
-          return failed(`the summarizing session ended as ${message.subtype}`, verdict.retry);
         }
         summary = message.result;
         outputTokens = message.usage.output_tokens;
