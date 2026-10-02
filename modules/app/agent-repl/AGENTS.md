@@ -93,14 +93,32 @@ killed outright).
   it, everything it started, and the loops at once.
 - `bin/test-with-cpu-load.sh` (the `cpu-load-harness` suite) holds all of this.
 
-### One suite at a time: `bin/suite-slot.sh`
+### One scheduled run at a time: `bin/test-all.sh` and `bin/suite-slot.sh`
 
-Every suite here is already internally parallel — vitest takes one worker per
-CPU by default, `go test` takes GOMAXPROCS, and the Go e2e suite runs
-`-parallel 8` with each test booting a real daemon/shim/store/sidecar quartet.
-A single run is sized to fill the machine ON PURPOSE, so two runs do not go
-twice as fast: they go slower, and one of them reports a bound as missed that
-a quiet box meets.
+`bin/test-all.sh` builds `testrun`, which turns the whole roster into one DAG
+and schedules it across `runtime.NumCPU()-2` slots. There is no special case
+for smaller hosts. The planner chooses each suite's chunk count by simulating
+the run against EWMA unit timings in
+`~/.cache/agent-repl/test-history.json`, then assigns the longest remaining
+dependency chain first. Parallelism belongs to this scheduler:
+
+- every Go package is compiled once and split by top-level test; the go
+  command carries `GOFLAGS=-p=1`, every process carries `GOMAXPROCS=2`, and
+  chunks carry `-test.parallel=1`;
+- ERT is split by authored test file;
+- vitest is split by test file and pinned to one worker;
+- e2e and integration packages build their shared binaries once in a prebuild
+  unit, then every test chunk consumes those exact binaries;
+- slow shell harnesses expose `--list` / `--only` groups and per-group timing.
+
+`--suites a,b` selects a roster subset and refuses an unknown name.
+`--coverage` explicitly adds Go and vitest instrumentation and report units;
+ordinary and merge-gate runs omit them. `--record` is reserved for the
+canonical post-merge timing run on master.
+
+The WHOLE scheduled run holds `bin/suite-slot.sh`. A second run does not go
+twice as fast: it competes with an already host-filling schedule and turns
+ordinary bounds into noise.
 
 That is not hypothetical. Several agents each running their own suites at once
 took this box to a load average of 253, and the Emacs layer then failed 37 of
@@ -133,7 +151,8 @@ climbing for a minute after the work stops, and every waiter reads the same
 number and starts at the same instant — a thundering herd that recreates the
 overload. This was tried; it is what produced the 253.
 
-Two standing rules follow from the same measurement:
+Two standing rules follow from the same measurement for direct, focused suite
+runs outside `testrun`:
 
 - The vitest configs cap `maxWorkers` at 50%. A suite may not claim every CPU
   even when it does hold the slot.
