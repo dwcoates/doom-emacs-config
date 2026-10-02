@@ -14,6 +14,7 @@ import (
 	"claude-repld/internal/headless"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/prompts"
+	"claude-repld/internal/runecap"
 )
 
 // opSynth is the operation the synthesizer's records carry.
@@ -436,7 +437,7 @@ func quoteTemplateBraces(s string) string {
 func composeDigest(summary string, all []string) string {
 	trimmedSummary := ""
 	if strings.TrimSpace(summary) != "" {
-		trimmedSummary = truncateRunes(strings.TrimSpace(summary), MaxPromptRunes*4)
+		trimmedSummary = runecap.Ellipsis(strings.TrimSpace(summary), MaxPromptRunes*4)
 	}
 	recent := all
 	if len(recent) > MaxPrompts {
@@ -444,7 +445,7 @@ func composeDigest(summary string, all []string) string {
 	}
 	trimmedPrompts := make([]string, len(recent))
 	for i, p := range recent {
-		trimmedPrompts[i] = truncateRunes(strings.TrimSpace(p), MaxPromptRunes)
+		trimmedPrompts[i] = runecap.Ellipsis(strings.TrimSpace(p), MaxPromptRunes)
 	}
 
 	for utf8.RuneCountInString(renderDigest(trimmedSummary, trimmedPrompts)) > MaxDigestTotalRunes {
@@ -478,17 +479,6 @@ func renderDigest(summary string, prompts []string) string {
 		b.WriteString("\n")
 	}
 	return b.String()
-}
-
-// truncateRunes bounds a string to at most n runes, appending an ellipsis when
-// it cut. It counts runes, not bytes, so a multibyte prompt is never split
-// mid-character.
-func truncateRunes(s string, n int) string {
-	if utf8.RuneCountInString(s) <= n {
-		return s
-	}
-	runes := []rune(s)
-	return string(runes[:n]) + "…"
 }
 
 // cleanTitle reduces the model's answer to one plain line: the first non-empty
