@@ -245,7 +245,15 @@ type OpenAgentSessionSuccess struct {
 	// begin exactly after this page's newest item — nothing is missed or
 	// doubled between page and stream. A caller cannot watch an agent it did
 	// not open. UNSET when the request said `page_only`: no token was minted.
-	Watch         *AgentSessionToken `protobuf:"bytes,2,opt,name=watch,proto3" json:"watch,omitempty"`
+	Watch *AgentSessionToken `protobuf:"bytes,2,opt,name=watch,proto3" json:"watch,omitempty"`
+	// The book's NEWEST item as of this open, whatever the opening asked for.
+	// UNSET = the book holds no items yet. It is what a `tail_only` open
+	// anchors to without reading a page nobody asked for: the tail begins
+	// strictly after it, a later lossless re-open passes it as `known_through`,
+	// and its absence says the book is empty (a `tail_only` page is always
+	// empty, so the page cannot say that itself). A reader that later wants
+	// history still starts with a repaint and walks older from that page.
+	Newest        *StoreItemPointer `protobuf:"bytes,3,opt,name=newest,proto3,oneof" json:"newest,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -290,6 +298,13 @@ func (x *OpenAgentSessionSuccess) GetPage() *AgentSessionPage {
 func (x *OpenAgentSessionSuccess) GetWatch() *AgentSessionToken {
 	if x != nil {
 		return x.Watch
+	}
+	return nil
+}
+
+func (x *OpenAgentSessionSuccess) GetNewest() *StoreItemPointer {
+	if x != nil {
+		return x.Newest
 	}
 	return nil
 }
@@ -634,10 +649,12 @@ const file_store_v1_endpoint_open_agent_session_proto_rawDesc = "" +
 	"\x18OpenAgentSessionResponse\x12=\n" +
 	"\asuccess\x18\x01 \x01(\v2!.store.v1.OpenAgentSessionSuccessH\x00R\asuccess\x12=\n" +
 	"\afailure\x18\x02 \x01(\v2!.store.v1.OpenAgentSessionFailureH\x00R\afailureB\b\n" +
-	"\x06result\"|\n" +
+	"\x06result\"\xc0\x01\n" +
 	"\x17OpenAgentSessionSuccess\x12.\n" +
 	"\x04page\x18\x01 \x01(\v2\x1a.store.v1.AgentSessionPageR\x04page\x121\n" +
-	"\x05watch\x18\x02 \x01(\v2\x1b.store.v1.AgentSessionTokenR\x05watch\"\x81\x03\n" +
+	"\x05watch\x18\x02 \x01(\v2\x1b.store.v1.AgentSessionTokenR\x05watch\x127\n" +
+	"\x06newest\x18\x03 \x01(\v2\x1a.store.v1.StoreItemPointerH\x00R\x06newest\x88\x01\x01B\t\n" +
+	"\a_newest\"\x81\x03\n" +
 	"\x17OpenAgentSessionFailure\x12\x16\n" +
 	"\x06detail\x18\x01 \x01(\tR\x06detail\x12S\n" +
 	"\x0finvalid_request\x18\x02 \x01(\v2(.store.v1.OpenAgentSessionInvalidRequestH\x00R\x0einvalidRequest\x12M\n" +
@@ -688,15 +705,16 @@ var file_store_v1_endpoint_open_agent_session_proto_depIdxs = []int32{
 	3,  // 4: store.v1.OpenAgentSessionResponse.failure:type_name -> store.v1.OpenAgentSessionFailure
 	11, // 5: store.v1.OpenAgentSessionSuccess.page:type_name -> store.v1.AgentSessionPage
 	12, // 6: store.v1.OpenAgentSessionSuccess.watch:type_name -> store.v1.AgentSessionToken
-	5,  // 7: store.v1.OpenAgentSessionFailure.invalid_request:type_name -> store.v1.OpenAgentSessionInvalidRequest
-	7,  // 8: store.v1.OpenAgentSessionFailure.stale_pointer:type_name -> store.v1.OpenAgentSessionStalePointer
-	6,  // 9: store.v1.OpenAgentSessionFailure.storage_failure:type_name -> store.v1.OpenAgentSessionStorageFailure
-	4,  // 10: store.v1.OpenAgentSessionFailure.unknown_agent:type_name -> store.v1.OpenAgentSessionUnknownAgent
-	11, // [11:11] is the sub-list for method output_type
-	11, // [11:11] is the sub-list for method input_type
-	11, // [11:11] is the sub-list for extension type_name
-	11, // [11:11] is the sub-list for extension extendee
-	0,  // [0:11] is the sub-list for field type_name
+	10, // 7: store.v1.OpenAgentSessionSuccess.newest:type_name -> store.v1.StoreItemPointer
+	5,  // 8: store.v1.OpenAgentSessionFailure.invalid_request:type_name -> store.v1.OpenAgentSessionInvalidRequest
+	7,  // 9: store.v1.OpenAgentSessionFailure.stale_pointer:type_name -> store.v1.OpenAgentSessionStalePointer
+	6,  // 10: store.v1.OpenAgentSessionFailure.storage_failure:type_name -> store.v1.OpenAgentSessionStorageFailure
+	4,  // 11: store.v1.OpenAgentSessionFailure.unknown_agent:type_name -> store.v1.OpenAgentSessionUnknownAgent
+	12, // [12:12] is the sub-list for method output_type
+	12, // [12:12] is the sub-list for method input_type
+	12, // [12:12] is the sub-list for extension type_name
+	12, // [12:12] is the sub-list for extension extendee
+	0,  // [0:12] is the sub-list for field type_name
 }
 
 func init() { file_store_v1_endpoint_open_agent_session_proto_init() }
@@ -713,6 +731,7 @@ func file_store_v1_endpoint_open_agent_session_proto_init() {
 		(*OpenAgentSessionResponse_Success)(nil),
 		(*OpenAgentSessionResponse_Failure)(nil),
 	}
+	file_store_v1_endpoint_open_agent_session_proto_msgTypes[2].OneofWrappers = []any{}
 	file_store_v1_endpoint_open_agent_session_proto_msgTypes[3].OneofWrappers = []any{
 		(*OpenAgentSessionFailure_InvalidRequest)(nil),
 		(*OpenAgentSessionFailure_StalePointer)(nil),
