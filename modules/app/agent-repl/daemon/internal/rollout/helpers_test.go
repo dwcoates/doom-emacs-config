@@ -1025,7 +1025,12 @@ type harness struct {
 	// unreported records every StateUnreported statement, in order.
 	unreported   []stateUnreportedCall
 	addrWrites   int
-	exits        chan struct{}
+	// claimFree is closed by incumbentExits: until then the boot claim is the
+	// incumbent's, and AwaitBootClaim waits, as the kernel's lock does.
+	// claimErr is what the wait answers once it lands.
+	claimFree chan struct{}
+	claimErr  error
+	exits     chan struct{}
 	lockStates   map[string]sessionlock.State
 	lockErr      map[string]error
 	shimBuild    string
@@ -1038,6 +1043,9 @@ type harness struct {
 	// marker records every bring-up marker edge, in order.
 	marker []markerEdge
 }
+
+// incumbentExits releases the boot claim, as the outgoing daemon's exit does.
+func (h *harness) incumbentExits() { close(h.claimFree) }
 
 // markerEdge is one BringingUp call.
 type markerEdge struct {
@@ -1102,6 +1110,7 @@ func newHarness(t *testing.T, adjust ...func(*Deps)) *harness {
 		log:          log,
 		state:        state,
 		exits:        make(chan struct{}, 4),
+		claimFree:    make(chan struct{}),
 		lockStates:   make(map[string]sessionlock.State),
 		lockErr:      make(map[string]error),
 		shimBuild:    "installed-build",
@@ -1186,6 +1195,16 @@ func newHarness(t *testing.T, adjust ...func(*Deps)) *harness {
 			h.mu.Lock()
 			h.unreported = append(h.unreported, stateUnreportedCall{ws: ws, unreported: unreported})
 			h.mu.Unlock()
+		},
+		AwaitBootClaim: func(ctx context.Context) error {
+			select {
+			case <-h.claimFree:
+				h.mu.Lock()
+				defer h.mu.Unlock()
+				return h.claimErr
+			case <-ctx.Done():
+				return ctx.Err()
+			}
 		},
 		WriteDaemonAddr: func(context.Context) error {
 			h.mu.Lock()

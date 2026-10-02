@@ -662,6 +662,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			sidebarResolver.SetStateUnreported(ws, unreported)
 		},
 		WriteDaemonAddr: func(context.Context) error { return p.Claim.Publish() },
+		AwaitBootClaim:  p.Claim.AwaitBootClaim,
 		ShimBuild:       shimBundle.Build,
 		ColdGate:        fleet.RaiseColdGate,
 		Progress:        footerResolver,

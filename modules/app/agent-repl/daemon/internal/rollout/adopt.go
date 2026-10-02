@@ -908,34 +908,10 @@ func (c *controller) awaitServingRelease(ctx context.Context, ws ids.WorkspaceID
 	}
 }
 
-// advertiseBackoffCeiling caps the wait between two attempts to take the boot
-// claim and write daemon.addr. The first retry waits manifestPoll and each one
-// after doubles it. The claim is released by the incumbent's own exit, bounded
-// by daemonaddr.ClaimWaitBound (2.32s), so an ordinary handover spends a
-// handful of attempts here and a claim that is never released costs one
-// attempt a second rather than forty.
-const advertiseBackoffCeiling = time.Second
-
-// advertiseRefusedBound is how long the claim may stay refused before the
+// advertiseRefusedBound is how long the claim may stay held before the
 // successor says so at ERROR: well past daemonaddr.ClaimWaitBound, the
 // longest an orderly incumbent holds the claim after its last transfer.
 const advertiseRefusedBound = 30 * time.Second
-
-// advertiseDelay is the wait before retry n (n >= 1): manifestPoll doubled
-// n-1 times, capped at advertiseBackoffCeiling.
-func advertiseDelay(n int) time.Duration {
-	delay := manifestPoll
-	for i := 1; i < n; i++ {
-		if delay >= advertiseBackoffCeiling/2 {
-			return advertiseBackoffCeiling
-		}
-		delay *= 2
-	}
-	if delay > advertiseBackoffCeiling {
-		return advertiseBackoffCeiling
-	}
-	return delay
-}
 
 // advertise writes daemon.addr once every workspace is owned, retrying while
 // the OUTGOING daemon still holds the boot claim.
@@ -945,10 +921,11 @@ func advertiseDelay(n int) time.Duration {
 // adoption because the claim is still held deadlocks the handover on itself.
 // The workspace is adopted either way; only the address file waits.
 //
-// ONLY A HELD CLAIM IS WAITED ON, AND WITH A BOUNDED BACKOFF. Any other
-// failure -- a state root that is gone, a directory that cannot be written --
-// is not the incumbent departing and will not fix itself, so it is an ERROR
-// and the retry stops. It once retried every failure every 25ms forever.
+// ONLY A HELD CLAIM IS WAITED ON, AND IN THE KERNEL (retryAdvertise). Any
+// other failure -- a state root that is gone, a directory that cannot be
+// written -- is not the incumbent departing and will not fix itself, so it is
+// an ERROR and nothing is retried. It once retried every failure every 25ms
+// forever.
 func (c *controller) advertise(ctx context.Context, fields dlog.Context) {
 	err := c.deps.WriteDaemonAddr(ctx)
 	if err == nil {
@@ -1130,88 +1107,64 @@ func (c *controller) bounceStaleAdopted(fields dlog.Context) {
 	c.finishDeployStory(deferred, fields)
 }
 
-// retryAdvertise is advertise's retry loop, on the injected clock.
+// retryAdvertise writes daemon.addr once the outgoing daemon's exit releases
+// the boot claim, which it awaits in the kernel (Deps.AwaitBootClaim). A
+// claim still held past advertiseRefusedBound is said once at ERROR, and the
+// wait goes on: the incumbent may yet exit.
 func (c *controller) retryAdvertise(ctx context.Context, fields dlog.Context) {
-	started := c.deps.Clock.Now()
-	reported := false
-	for attempt := 1; ; attempt++ {
-		select {
-		case <-ctx.Done():
-			c.log.Debug(opAdopt, "the daemon's lifetime ended before daemon.addr could be written", fields)
-			return
-		case <-c.deps.Clock.After(advertiseDelay(attempt)):
-		}
-		err := c.deps.WriteDaemonAddr(ctx)
-		if err == nil {
-			c.log.Info(opAdopt, "every workspace is owned; wrote daemon.addr", merge(fields, dlog.Context{"attempts": attempt + 1}))
-			c.becomeIncumbent(fields)
-			return
-		}
-		if !errors.Is(err, daemonaddr.ErrClaimed) {
-			c.log.Error(opAdopt, "daemon.addr could not be written; not retrying a failure that is not a held boot claim",
-				withCause(merge(fields, dlog.Context{"attempts": attempt + 1}), err))
-			return
-		}
-		if held := c.deps.Clock.Now().Sub(started); !reported && held >= advertiseRefusedBound {
-			reported = true
-			c.log.Error(opAdopt, "the boot claim is still held long after the outgoing daemon should have exited; still retrying",
-				withCause(merge(fields, dlog.Context{"attempts": attempt + 1, "held": held.String()}), err))
-		}
+	claimed := make(chan error, 1)
+	go func() { claimed <- c.deps.AwaitBootClaim(ctx) }()
+	select {
+	case err := <-claimed:
+		c.takeOverOnClaim(ctx, err, fields)
+		return
+	case <-c.deps.Clock.After(advertiseRefusedBound):
+		c.log.Error(opAdopt, "the boot claim is still held long after the outgoing daemon should have exited; still waiting",
+			merge(fields, dlog.Context{"held_for": advertiseRefusedBound.String()}))
+	case <-ctx.Done():
+		c.log.Debug(opAdopt, "the daemon's lifetime ended before daemon.addr could be written", fields)
+		return
 	}
+	c.takeOverOnClaim(ctx, <-claimed, fields)
 }
 
 // awaitIncumbentExit writes daemon.addr the moment the outgoing daemon lets go
 // of the boot claim, and then takes over.
 //
-// The claim is released by the incumbent's EXIT, so a successful write is the
-// proof that no other daemon serves anything. It waits as long as the handover
-// does — a busy workspace can hold the incumbent for an hour — so unlike
+// The claim is released by the incumbent's EXIT, so holding it is the proof
+// that no other daemon serves anything. It waits as long as the handover
+// does -- a busy workspace can hold the incumbent for an hour -- so unlike
 // retryAdvertise it never reports a claim held "too long": a long handover is
-// ordinary. It retries on the same capped backoff, and a failure that is not a
-// held claim ends it loudly.
+// ordinary. The wait is the kernel's (Deps.AwaitBootClaim), so a killed
+// incumbent is taken over from at once, never at the next look of a backoff
+// (TestTheTakeoversOrphanRecoveryReconcilesItsOpenTurn missed its bound under
+// load behind a 2.4s poll, 2026-10-02).
 func (c *controller) awaitIncumbentExit(ctx context.Context) {
-	for attempt := 1; ; attempt++ {
-		select {
-		case <-ctx.Done():
-			c.log.Debug(opAdopt, "the daemon's lifetime ended before the incumbent exited", nil)
-			return
-		case <-c.deps.Clock.After(incumbentExitDelay(attempt)):
-		}
-		if c.deps.WriteDaemonAddr == nil {
-			return
-		}
-		err := c.deps.WriteDaemonAddr(ctx)
-		if err == nil {
-			c.log.Info(opAdopt, "the incumbent exited; wrote daemon.addr", dlog.Context{"attempts": attempt})
-			c.becomeIncumbent(nil)
-			return
-		}
-		if !errors.Is(err, daemonaddr.ErrClaimed) {
-			c.log.Error(opAdopt, "daemon.addr could not be written; not retrying a failure that is not a held boot claim",
-				withCause(dlog.Context{"attempts": attempt}, err))
-			return
-		}
+	if c.deps.WriteDaemonAddr == nil {
+		return
 	}
+	c.takeOverOnClaim(ctx, c.deps.AwaitBootClaim(ctx), nil)
 }
 
-// The exit watcher's backoff. Its OWN cadence, slower than the adoption
-// polls: an incumbent's exit is a rare edge that may be an hour away, and a
-// successor has nothing to gain from asking every 25ms.
-const (
-	incumbentExitPollInitial = 150 * time.Millisecond
-	incumbentExitPollCeiling = 2400 * time.Millisecond
-)
-
-// incumbentExitDelay is the wait before the watcher's nth look.
-func incumbentExitDelay(n int) time.Duration {
-	delay := incumbentExitPollInitial
-	for i := 1; i < n && delay < incumbentExitPollCeiling; i++ {
-		delay *= 2
+// takeOverOnClaim is what follows the boot-claim wait: with the claim held,
+// daemon.addr is written and this daemon takes over. A wait the daemon's
+// lifetime ended is said at DEBUG; any other failure, and a write that fails
+// under the held claim, is an ERROR and nothing is retried.
+func (c *controller) takeOverOnClaim(ctx context.Context, awaited error, fields dlog.Context) {
+	if awaited != nil {
+		if ctx.Err() != nil {
+			c.log.Debug(opAdopt, "the daemon's lifetime ended before the incumbent exited", fields)
+			return
+		}
+		c.log.Error(opAdopt, "the boot claim could not be awaited; daemon.addr is not written", withCause(fields, awaited))
+		return
 	}
-	if delay > incumbentExitPollCeiling {
-		return incumbentExitPollCeiling
+	if err := c.deps.WriteDaemonAddr(ctx); err != nil {
+		c.log.Error(opAdopt, "daemon.addr could not be written under the held boot claim", withCause(fields, err))
+		return
 	}
-	return delay
+	c.log.Info(opAdopt, "the incumbent exited; wrote daemon.addr", fields)
+	c.becomeIncumbent(fields)
 }
 
 // releaseHeadless undoes a headless claim whose adoption failed.

@@ -279,6 +279,12 @@ type Deps struct {
 	// WriteDaemonAddr writes daemon.addr. A joining daemon calls it ONLY once
 	// every workspace is adopted, and otherwise never writes it.
 	WriteDaemonAddr WriteDaemonAddrFunc
+	// AwaitBootClaim returns once this daemon HOLDS the boot claim, which the
+	// outgoing daemon releases by exiting (daemonaddr.Claim.AwaitBootClaim).
+	// A successor takes over on it: the wait is the kernel's, never a poll,
+	// so the takeover follows the incumbent's exit at once. Required whenever
+	// WriteDaemonAddr is set.
+	AwaitBootClaim AwaitBootClaimFunc
 	// ShimBuild answers the INSTALLED shim bundle's build: the content hash a
 	// fresh spawn would report. It is the staleness authority every reported
 	// build is judged against.
@@ -477,6 +483,10 @@ type StateUnreportedFunc func(ws ids.WorkspaceID, unreported bool)
 // JOINING daemon must not write it until it owns every workspace.
 type WriteDaemonAddrFunc func(ctx context.Context) error
 
+// AwaitBootClaimFunc returns once this daemon holds the boot claim, or ctx's
+// error when ctx ends first.
+type AwaitBootClaimFunc func(ctx context.Context) error
+
 // ColdGateFunc raises the ordinary cold gate for a resume that answered `cold`.
 type ColdGateFunc func(ctx context.Context, ws ids.WorkspaceID, cold *conversationv1.SessionCold) error
 
@@ -581,6 +591,9 @@ func New(deps Deps) (Controller, error) {
 	}
 	if deps.Bounces == nil {
 		return nil, errors.New("rollout: the prompt queue's bounce registry is required; every bounce and every transfer is decided there")
+	}
+	if deps.WriteDaemonAddr != nil && deps.AwaitBootClaim == nil {
+		return nil, errors.New("rollout: the boot-claim wait is required beside the daemon.addr writer; a successor takes over on it")
 	}
 	if deps.ShimBuild == nil {
 		return nil, errors.New("rollout: the installed shim build is required; a reported build is judged against it")

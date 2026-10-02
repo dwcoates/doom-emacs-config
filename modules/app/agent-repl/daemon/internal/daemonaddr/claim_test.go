@@ -1,6 +1,7 @@
 package daemonaddr
 
 import (
+	"context"
 	"errors"
 	"net"
 	"os"
@@ -8,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // newAddrPath is a daemon.addr path inside a fresh temp state root.
@@ -697,4 +699,193 @@ func TestVerify(t *testing.T) {
 			}
 		})
 	}
+}
+
+// awaitResult runs AwaitBootClaim on its own goroutine and answers its result.
+func awaitResult(ctx context.Context, c Claim) <-chan error {
+	out := make(chan error, 1)
+	go func() { out <- c.AwaitBootClaim(ctx) }()
+	return out
+}
+
+// awaitBound bounds a wait the kernel answers at once once the incumbent lets
+// go: a failure ceiling, never a delay a passing test pays.
+const awaitBound = 5 * time.Second
+
+func TestAClaimThatHoldsTheBootClaimIsAnsweredAtOnce(t *testing.T) {
+	// Arrange
+	c, err := Bind(filepath.Join(t.TempDir(), "daemon.addr"), 0)
+	if err != nil {
+		t.Fatalf("Bind: %v", err)
+	}
+	defer c.Close()
+
+	// Act
+	err = c.AwaitBootClaim(context.Background())
+
+	// Assert
+	if err != nil {
+		t.Fatalf("AwaitBootClaim = %v, want nil for a claim that holds it", err)
+	}
+}
+
+func TestASuccessorTakesTheBootClaimTheMomentTheIncumbentLetsGo(t *testing.T) {
+	// Arrange: an incumbent holds the claim; the successor waits for it.
+	path := filepath.Join(t.TempDir(), "daemon.addr")
+	incumbent, err := Bind(path, 0)
+	if err != nil {
+		t.Fatalf("Bind: %v", err)
+	}
+	successor, err := BindJoining(path, 0)
+	if err != nil {
+		t.Fatalf("BindJoining: %v", err)
+	}
+	defer successor.Close()
+	waiters := []<-chan error{awaitResult(context.Background(), successor), awaitResult(context.Background(), successor)}
+
+	// Act: the incumbent exits.
+	if err := incumbent.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// Assert: every waiter is answered, and the successor advertises under
+	// the claim it now holds.
+	for i, w := range waiters {
+		select {
+		case err := <-w:
+			if err != nil {
+				t.Fatalf("waiter %d = %v, want nil", i, err)
+			}
+		case <-time.After(awaitBound):
+			t.Fatalf("waiter %d was not answered once the incumbent let go", i)
+		}
+	}
+	if err := successor.Publish(); err != nil {
+		t.Fatalf("Publish under the awaited claim: %v", err)
+	}
+	if _, err := BindWithin(path, 0, 0); !errors.Is(err, ErrClaimed) {
+		t.Fatalf("Bind after the takeover = %v, want ErrClaimed", err)
+	}
+}
+
+func TestAWaiterWhoseContextEndsIsAnsweredWithItsCause(t *testing.T) {
+	// Arrange: the incumbent never lets go.
+	path := filepath.Join(t.TempDir(), "daemon.addr")
+	incumbent, err := Bind(path, 0)
+	if err != nil {
+		t.Fatalf("Bind: %v", err)
+	}
+	defer incumbent.Close()
+	successor, err := BindJoining(path, 0)
+	if err != nil {
+		t.Fatalf("BindJoining: %v", err)
+	}
+	defer successor.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	waiter := awaitResult(ctx, successor)
+
+	// Act
+	cancel()
+
+	// Assert
+	select {
+	case err := <-waiter:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("AwaitBootClaim = %v, want the context's cancellation", err)
+		}
+	case <-time.After(awaitBound):
+		t.Fatal("a cancelled waiter was not answered")
+	}
+}
+
+func TestAWaiterIsAnsweredWhenPublishTakesTheClaimFirst(t *testing.T) {
+	// Arrange: an incumbent holds the claim, and a waiter is parked on it.
+	path := filepath.Join(t.TempDir(), "daemon.addr")
+	incumbent, err := Bind(path, 0)
+	if err != nil {
+		t.Fatalf("Bind: %v", err)
+	}
+	successor, err := BindJoining(path, 0)
+	if err != nil {
+		t.Fatalf("BindJoining: %v", err)
+	}
+	defer successor.Close()
+	waiter := awaitResult(context.Background(), successor)
+
+	// Act: the incumbent exits and the successor's own Publish takes the
+	// claim, which the parked wait may or may not have reached first.
+	if err := incumbent.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	select {
+	case err := <-waiter:
+		if err != nil {
+			t.Fatalf("AwaitBootClaim = %v, want nil", err)
+		}
+	case <-time.After(awaitBound):
+		t.Fatal("the waiter was not answered once the claim was free")
+	}
+
+	// Assert: the claim is the successor's either way.
+	if err := successor.Publish(); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+}
+
+func TestAWaitThatCannotOpenTheLockSurfacesTheFailure(t *testing.T) {
+	// Arrange: a successor whose state root vanished under it.
+	root := t.TempDir()
+	successor, err := BindJoining(filepath.Join(root, "daemon.addr"), 0)
+	if err != nil {
+		t.Fatalf("BindJoining: %v", err)
+	}
+	defer successor.Close()
+	if err := os.RemoveAll(root); err != nil {
+		t.Fatalf("RemoveAll: %v", err)
+	}
+
+	// Act
+	err = successor.AwaitBootClaim(context.Background())
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "open the boot lock") {
+		t.Fatalf("AwaitBootClaim = %v, want the lock's open failure", err)
+	}
+}
+
+func TestAClaimClosedWhileItWaitsReleasesTheClaimItLaterTakes(t *testing.T) {
+	// Arrange: a successor waits on an incumbent, then is closed.
+	path := filepath.Join(t.TempDir(), "daemon.addr")
+	incumbent, err := Bind(path, 0)
+	if err != nil {
+		t.Fatalf("Bind: %v", err)
+	}
+	successor, err := BindJoining(path, 0)
+	if err != nil {
+		t.Fatalf("BindJoining: %v", err)
+	}
+	waiter := awaitResult(context.Background(), successor)
+	if err := successor.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// Act: the incumbent exits, and the closed successor's wait lands.
+	if err := incumbent.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// Assert: the waiter is told, and the claim is free for the next daemon.
+	select {
+	case err := <-waiter:
+		if err == nil || !strings.Contains(err.Error(), "the claim was closed") {
+			t.Fatalf("AwaitBootClaim = %v, want the closed claim named", err)
+		}
+	case <-time.After(awaitBound):
+		t.Fatal("the closed successor's waiter was not answered")
+	}
+	next, err := BindWithin(path, 0, 0)
+	if err != nil {
+		t.Fatalf("Bind after the closed successor = %v, want the claim free", err)
+	}
+	next.Close()
 }

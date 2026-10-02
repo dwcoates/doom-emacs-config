@@ -16,6 +16,7 @@
 package daemonaddr
 
 import (
+	"context"
 	"errors"
 	"net"
 	"time"
@@ -48,6 +49,14 @@ type Claim interface {
 	Verify() error
 	// Close closes the listener. It does not withdraw the advertisement.
 	Close() error
+	// AwaitBootClaim returns once this claim HOLDS the boot claim: at once
+	// for a claim that already does, and for a successor the moment the
+	// outgoing daemon's exit releases it. The wait is a blocking kernel lock,
+	// never a poll, so the takeover follows the exit by nothing but the
+	// kernel's wake-up. Every caller shares one wait; a caller whose ctx ends
+	// first gets ctx's error while the wait goes on for the others. Publish
+	// after it advertises under the held claim.
+	AwaitBootClaim(ctx context.Context) error
 }
 
 // ErrVanished marks a Verify failure that is a LOSS: something this claim owns

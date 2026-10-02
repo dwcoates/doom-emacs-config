@@ -1,6 +1,7 @@
 package daemonaddr
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"os"
@@ -33,6 +34,24 @@ type claim struct {
 	lock *bootLock
 	// published is true from a successful Publish until a Withdraw.
 	published bool
+	// closed is true once Close ran: a boot claim that lands after it is
+	// released at once, never kept by a closed claim.
+	closed bool
+	// taken is closed the moment this claim holds the boot claim, by
+	// whichever path took it (bind, Publish, or the wait below).
+	taken chan struct{}
+	// bootWait is the one blocking wait for the boot claim, closed when it
+	// settles; nil until AwaitBootClaim first runs. bootWaitErr is how it
+	// settled when it did not take the claim.
+	bootWait    chan struct{}
+	bootWaitErr error
+}
+
+// holdLocked makes LOCK this claim's boot claim and tells every waiter. The
+// caller holds c.mu and c.lock is nil.
+func (c *claim) holdLocked(lock *bootLock) {
+	c.lock = lock
+	close(c.taken)
 }
 
 // pidLinePrefix marks the second line of a daemon.addr advertisement, which
@@ -155,8 +174,13 @@ func bindWith(addrPath string, port int, claimBoot bool, wait time.Duration) (Cl
 		release()
 		return nil, fmt.Errorf("stat the state root %q: %w", dir, err)
 	}
+	taken := make(chan struct{})
+	if lock != nil {
+		close(taken)
+	}
 	return &claim{
 		lock:     lock,
+		taken:    taken,
 		ln:       ln,
 		addrPath: addrPath,
 		address:  net.JoinHostPort(LoopbackHost, strconv.Itoa(bound.Port)),
@@ -195,7 +219,7 @@ func (c *claim) Publish() error {
 		if err != nil {
 			return fmt.Errorf("take the boot claim before advertising %q: %w", c.addrPath, err)
 		}
-		c.lock = lock
+		c.holdLocked(lock)
 	}
 	dir := filepath.Dir(c.addrPath)
 	tmp, err := os.CreateTemp(dir, "."+filepath.Base(c.addrPath)+".*")
@@ -317,6 +341,7 @@ func dialLoopback(addr string) error {
 func (c *claim) Close() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.closed = true
 	var firstErr error
 	if err := c.ln.Close(); err != nil {
 		firstErr = fmt.Errorf("close the daemon listener: %w", err)
@@ -328,6 +353,60 @@ func (c *claim) Close() error {
 		}
 	}
 	return firstErr
+}
+
+// AwaitBootClaim implements Claim.
+func (c *claim) AwaitBootClaim(ctx context.Context) error {
+	c.mu.Lock()
+	if c.lock != nil {
+		c.mu.Unlock()
+		return nil
+	}
+	if c.bootWait == nil {
+		c.bootWait = make(chan struct{})
+		go c.waitForBootClaim(c.bootWait)
+	}
+	settled, taken := c.bootWait, c.taken
+	c.mu.Unlock()
+	select {
+	case <-taken:
+		return nil
+	case <-settled:
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		if c.lock != nil {
+			return nil
+		}
+		return c.bootWaitErr
+	case <-ctx.Done():
+		return fmt.Errorf("await the boot claim beside %q: %w", c.addrPath, ctx.Err())
+	}
+}
+
+// waitForBootClaim blocks in the kernel for the boot claim and keeps it as
+// this claim's, then closes SETTLED. A claim taken some other way meanwhile
+// (Publish's own single-shot attempt) or closed meanwhile releases the one
+// this wait took.
+func (c *claim) waitForBootClaim(settled chan struct{}) {
+	lock, err := blockForBootLock(LockPath(c.addrPath))
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	defer close(settled)
+	if err != nil {
+		c.bootWaitErr = err
+		return
+	}
+	if c.lock != nil || c.closed {
+		if rerr := lock.release(); rerr != nil {
+			c.bootWaitErr = rerr
+			return
+		}
+		if c.closed && c.lock == nil {
+			c.bootWaitErr = fmt.Errorf("await the boot claim beside %q: the claim was closed", c.addrPath)
+		}
+		return
+	}
+	c.holdLocked(lock)
 }
 
 // Verify implements Claim.

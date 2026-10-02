@@ -3,7 +3,6 @@ package rollout
 import (
 	"context"
 	"errors"
-	"fmt"
 	"runtime"
 	"slices"
 	"sync"
@@ -912,148 +911,127 @@ func TestAnAdoptCallForAWorkspaceAnArrivedManifestDoesNotNameIsRefusedAtOnce(t *
 	}
 }
 
-func TestAdvertiseDelay(t *testing.T) {
-	cases := []struct {
-		name  string
-		retry int
-		want  time.Duration
-	}{
-		{name: "the first retry waits one manifest poll", retry: 1, want: manifestPoll},
-		{name: "each further retry doubles the wait", retry: 3, want: 4 * manifestPoll},
-		{name: "the wait never passes the ceiling", retry: 7, want: advertiseBackoffCeiling},
-		{name: "a long run of retries cannot overflow past the ceiling", retry: 500, want: advertiseBackoffCeiling},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Arrange: the table row.
-
-			// Act
-			got := advertiseDelay(tc.retry)
-
-			// Assert
-			if got != tc.want {
-				t.Fatalf("advertiseDelay(%d) = %s, want %s", tc.retry, got, tc.want)
-			}
-		})
-	}
+// addrWritesSoFar answers how many times daemon.addr was written.
+func (h *harness) addrWritesSoFar() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.addrWrites
 }
 
-// scriptedAddrWrites is a WriteDaemonAddr that answers each call from a
-// script, advancing the clock by `advance` per call. Calls past the script's
-// end fail the test.
-type scriptedAddrWrites struct {
-	t       *testing.T
-	clock   *fakeClock
-	advance time.Duration
-	mu      sync.Mutex
-	script  []error
-	calls   int
-}
-
-func (s *scriptedAddrWrites) write(context.Context) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.clock.advance(s.advance)
-	if s.calls >= len(s.script) {
-		s.t.Errorf("daemon.addr write %d is past the %d scripted", s.calls+1, len(s.script))
-		return errors.New("unscripted")
+// recordWithMessage reports whether OPERATION recorded MESSAGE at LEVEL.
+func recordWithMessage(h *harness, operation, level, message string) bool {
+	for _, r := range levelRecords(records(h.log, operation), level) {
+		if r.Message == message {
+			return true
+		}
 	}
-	err := s.script[s.calls]
-	s.calls++
-	return err
-}
-
-func (s *scriptedAddrWrites) count() int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.calls
-}
-
-var errHeldClaim = fmt.Errorf("%w: daemon.lock", daemonaddr.ErrClaimed)
-
-// TestTheAdvertiseRetryBacksOffWhileTheClaimIsHeld drives the successor's
-// daemon.addr retry on the fake clock: every wait it arms is fired, and the
-// waits, the writes and the ERROR records are counted.
-func TestTheAdvertiseRetryBacksOffWhileTheClaimIsHeld(t *testing.T) {
-	errGone := errors.New("the state root is gone")
-	cases := []struct {
-		name       string
-		script     []error
-		advance    time.Duration
-		wantWaits  []time.Duration
-		wantErrors int
-	}{
-		{
-			name:      "a held claim is retried on a doubling wait until it is released",
-			script:    []error{errHeldClaim, errHeldClaim, nil},
-			wantWaits: []time.Duration{manifestPoll, 2 * manifestPoll, 4 * manifestPoll},
-		},
-		{
-			name:       "a failure that is not a held claim ends the retry at ERROR",
-			script:     []error{errHeldClaim, errGone},
-			wantWaits:  []time.Duration{manifestPoll, 2 * manifestPoll},
-			wantErrors: 1,
-		},
-		{
-			name:       "a claim held past its bound is reported once and still retried",
-			script:     []error{errHeldClaim, errHeldClaim, errHeldClaim, errHeldClaim, nil},
-			advance:    advertiseRefusedBound / 3,
-			wantWaits:  []time.Duration{manifestPoll, 2 * manifestPoll, 4 * manifestPoll, 8 * manifestPoll, 16 * manifestPoll},
-			wantErrors: 1,
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Arrange
-			var writes *scriptedAddrWrites
-			h := newHarness(t, func(d *Deps) {
-				d.WriteDaemonAddr = func(ctx context.Context) error { return writes.write(ctx) }
-			})
-			writes = &scriptedAddrWrites{t: t, clock: h.clock, advance: tc.advance, script: tc.script}
-			done := make(chan struct{})
-
-			// Act
-			go func() {
-				defer close(done)
-				h.c.retryAdvertise(context.Background(), nil)
-			}()
-			for _, wait := range tc.wantWaits {
-				h.clock.awaitArmed(t, wait)
-				h.clock.Fire(wait)
-			}
-			<-done
-
-			// Assert
-			if got := writes.count(); got != len(tc.script) {
-				t.Fatalf("daemon.addr writes = %d, want %d", got, len(tc.script))
-			}
-			if got := len(levelRecords(records(h.log, opAdopt), "error")); got != tc.wantErrors {
-				t.Fatalf("ERROR records = %d, want %d", got, tc.wantErrors)
-			}
-		})
-	}
+	return false
 }
 
 // TestTheAdvertiseRetryEndsWithTheDaemonsLifetime pins that the retry is not
 // a goroutine that outlives the daemon's serving lifetime.
 func TestTheAdvertiseRetryEndsWithTheDaemonsLifetime(t *testing.T) {
-	// Arrange
-	h := newHarness(t, func(d *Deps) {
-		d.WriteDaemonAddr = func(context.Context) error { return errHeldClaim }
-	})
+	// Arrange: the incumbent never lets go.
+	h := newHarness(t)
 	lifetime, end := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
 		h.c.retryAdvertise(lifetime, nil)
 	}()
-	h.clock.awaitArmed(t, manifestPoll)
+	h.clock.awaitArmed(t, advertiseRefusedBound)
 
 	// Act
 	end()
 
-	// Assert: the retry returns without its wait ever being fired.
+	// Assert: the retry returns, writing nothing and recording no ERROR.
 	<-done
+	if h.addrWritesSoFar() != 0 {
+		t.Fatalf("daemon.addr writes = %d, want none", h.addrWritesSoFar())
+	}
+	if got := len(levelRecords(records(h.log, opAdopt), "error")); got != 0 {
+		t.Fatalf("ERROR records = %d, want none for a lifetime that ended", got)
+	}
+}
+
+func TestTheAdvertiseRetryWritesOnceTheClaimIsReleased(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		h.c.retryAdvertise(context.Background(), nil)
+	}()
+	h.clock.awaitArmed(t, advertiseRefusedBound)
+
+	// Act
+	h.incumbentExits()
+
+	// Assert
+	<-done
+	<-h.c.tookOverSignal()
+	if h.addrWritesSoFar() != 1 {
+		t.Fatalf("daemon.addr writes = %d, want 1", h.addrWritesSoFar())
+	}
+}
+
+func TestAClaimHeldPastItsBoundIsReportedOnceAndStillAwaited(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		h.c.retryAdvertise(context.Background(), nil)
+	}()
+	h.clock.awaitArmed(t, advertiseRefusedBound)
+
+	// Act: the bound passes, then the incumbent exits.
+	h.clock.Fire(advertiseRefusedBound)
+	awaitRecord(t, h, opAdopt, "the boot claim is still held long after the outgoing daemon should have exited; still waiting")
+	h.incumbentExits()
+
+	// Assert
+	<-done
+	if got := len(levelRecords(records(h.log, opAdopt), "error")); got != 1 {
+		t.Fatalf("ERROR records = %d, want the held claim reported once", got)
+	}
+	if h.addrWritesSoFar() != 1 {
+		t.Fatalf("daemon.addr writes = %d, want 1 once the claim was released", h.addrWritesSoFar())
+	}
+}
+
+func TestAClaimThatCannotBeAwaitedIsAnErrorAndWritesNothing(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.claimErr = errors.New("open the boot lock: no such directory")
+	h.incumbentExits()
+
+	// Act
+	h.c.retryAdvertise(context.Background(), nil)
+
+	// Assert
+	if h.addrWritesSoFar() != 0 {
+		t.Fatalf("daemon.addr writes = %d, want none", h.addrWritesSoFar())
+	}
+	if !recordWithMessage(h, opAdopt, "error", "the boot claim could not be awaited; daemon.addr is not written") {
+		t.Fatalf("records = %+v, want the failed wait at ERROR", records(h.log, opAdopt))
+	}
+}
+
+func TestAWriteThatFailsUnderTheHeldClaimIsAnError(t *testing.T) {
+	// Arrange
+	h := newHarness(t, func(d *Deps) {
+		d.WriteDaemonAddr = func(context.Context) error { return errors.New("the state root is gone") }
+	})
+	h.incumbentExits()
+
+	// Act
+	h.c.retryAdvertise(context.Background(), nil)
+
+	// Assert
+	if !recordWithMessage(h, opAdopt, "error", "daemon.addr could not be written under the held boot claim") {
+		t.Fatalf("records = %+v, want the failed write at ERROR", records(h.log, opAdopt))
+	}
 }
 
 // TestAdvertiseDoesNotRetryAFailureThatIsNotAHeldClaim pins the first
@@ -1130,19 +1108,15 @@ func TestAWorkspaceNeverHandedOverIsOwnedOnceTheSuccessorAdvertises(t *testing.T
 }
 
 func TestTheSuccessorTakesOverOnceTheIncumbentLetsGoOfTheClaim(t *testing.T) {
-	// Arrange: the claim is held once, then released by the incumbent's exit.
-	var writes *scriptedAddrWrites
-	h := newHarness(t, func(d *Deps) {
-		d.WriteDaemonAddr = func(ctx context.Context) error { return writes.write(ctx) }
-	})
-	writes = &scriptedAddrWrites{t: t, clock: h.clock, script: []error{errHeldClaim, nil}}
+	// Arrange: the claim is the incumbent's until it exits.
+	h := newHarness(t)
 	_, second := joinedWithOneOfTwo(t, h)
+	if standing := h.c.Standing(second); standing != StandingNotYetAdopted {
+		t.Fatalf("standing = %v before the exit, want not_yet_adopted", standing)
+	}
 
-	// Act: Join's own watcher retries on its backoff.
-	h.clock.awaitArmed(t, incumbentExitPollInitial)
-	h.clock.Fire(incumbentExitPollInitial)
-	h.clock.awaitArmed(t, 2*incumbentExitPollInitial)
-	h.clock.Fire(2 * incumbentExitPollInitial)
+	// Act: the incumbent exits; Join's own watcher is waiting on the claim.
+	h.incumbentExits()
 	<-h.c.tookOverSignal()
 
 	// Assert
@@ -1154,16 +1128,11 @@ func TestTheSuccessorTakesOverOnceTheIncumbentLetsGoOfTheClaim(t *testing.T) {
 func TestAWorkspaceWhoseHandoverNeverFinishedIsOwnedAfterTheTakeover(t *testing.T) {
 	// Arrange: FIRST was being handed over, and nobody ever adopted it — its
 	// participants never called (closed mid-handover).
-	var writes *scriptedAddrWrites
-	h := newHarness(t, func(d *Deps) {
-		d.WriteDaemonAddr = func(ctx context.Context) error { return writes.write(ctx) }
-	})
-	writes = &scriptedAddrWrites{t: t, clock: h.clock, script: []error{nil}}
+	h := newHarness(t)
 	first, _ := joinedWithOneOfTwo(t, h)
 
-	// Act: the incumbent is gone at the watcher's first look.
-	h.clock.awaitArmed(t, incumbentExitPollInitial)
-	h.clock.Fire(incumbentExitPollInitial)
+	// Act: the incumbent exits.
+	h.incumbentExits()
 	<-h.c.tookOverSignal()
 	h.c.stragglerAdoptions.Wait()
 
@@ -1175,22 +1144,20 @@ func TestAWorkspaceWhoseHandoverNeverFinishedIsOwnedAfterTheTakeover(t *testing.
 
 func TestTheTakeoverDoesNotWaitForEveryRendezvous(t *testing.T) {
 	// Arrange: the one handed-over workspace is never adopted.
-	var writes *scriptedAddrWrites
-	h := newHarness(t, func(d *Deps) {
-		d.WriteDaemonAddr = func(ctx context.Context) error { return writes.write(ctx) }
-	})
-	writes = &scriptedAddrWrites{t: t, clock: h.clock, script: []error{nil}}
+	h := newHarness(t)
 	joinedWithOneOfTwo(t, h)
 
 	// Act
-	h.clock.awaitArmed(t, incumbentExitPollInitial)
-	h.clock.Fire(incumbentExitPollInitial)
+	h.incumbentExits()
 	<-h.c.tookOverSignal()
 	h.c.stragglerAdoptions.Wait()
 
 	// Assert: daemon.addr was written although no rendezvous completed.
-	if got := writes.count(); got != 1 {
-		t.Fatalf("daemon.addr writes = %d, want 1", got)
+	h.mu.Lock()
+	writes := h.addrWrites
+	h.mu.Unlock()
+	if writes != 1 {
+		t.Fatalf("daemon.addr writes = %d, want 1", writes)
 	}
 }
 
@@ -1260,24 +1227,6 @@ func TestTheSuccessorChecksEveryLiveShimOnlyOnce(t *testing.T) {
 	}
 	if checks != 1 {
 		t.Fatalf("fleet checks = %d, want exactly 1", checks)
-	}
-}
-
-func TestIncumbentExitDelay(t *testing.T) {
-	cases := []struct {
-		attempt int
-		want    time.Duration
-	}{
-		{1, 150 * time.Millisecond},
-		{2, 300 * time.Millisecond},
-		{5, 2400 * time.Millisecond},
-		{9, 2400 * time.Millisecond},
-	}
-	for _, tc := range cases {
-		// Act + Assert
-		if got := incumbentExitDelay(tc.attempt); got != tc.want {
-			t.Fatalf("incumbentExitDelay(%d) = %v, want %v", tc.attempt, got, tc.want)
-		}
 	}
 }
 
