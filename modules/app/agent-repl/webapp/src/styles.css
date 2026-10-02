@@ -4825,17 +4825,6 @@ bubble-body.bubble-body { display: block; }
   margin-right: auto;
   font-size: 0.75rem;
 }
-/* The compaction summary's fold toggle ("▸ summary") reads at twice the
-   divider's size, in white (owner request, 2026-09-30). */
-.sep-fold-toggle {
-  background: none;
-  border: none;
-  padding: 0;
-  font: inherit;
-  font-size: 2em;
-  color: #ffffff;
-  cursor: pointer;
-}
 /* The cold read is a WARNING on a compaction that happened, not a failure of
    it, so it takes the warning register rather than the error one. */
 .sep-cold-read { color: var(--thinking); }
