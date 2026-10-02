@@ -2305,7 +2305,7 @@ export type HoldClassificationArm = (typeof HOLD_CLASSIFICATION_ARMS)[number];
 /** The ONE classification that draws an [accept] button (ruled). */
 export const HOLD_ACCEPTABLE_ARM = "holdForTurnEnd";
 
-export const HOLD_ARMS = ["shutdown", "sessionStarting", "buildRefresh", "merge"] as const;
+export const HOLD_ARMS = ["shutdown", "reconnect", "buildRefresh", "merge"] as const;
 export type HoldArm = (typeof HOLD_ARMS)[number];
 
 type HeldPromptInit = MessageInitShape<typeof HeldPromptSchema>;
@@ -2339,8 +2339,8 @@ const holdValue = (arm: HoldArm): NonNullable<HeldPromptInit["hold"]> => {
   switch (arm) {
     case "shutdown":
       return { case: "shutdown", value: { scheduleId: "sched-1" } };
-    case "sessionStarting":
-      return { case: "sessionStarting", value: {} };
+    case "reconnect":
+      return { case: "reconnect", value: {} };
     case "buildRefresh":
       return { case: "buildRefresh", value: {} };
     case "merge":
@@ -2363,7 +2363,7 @@ export const HOLD_BADGES: Readonly<Record<string, { label: string; detail?: stri
   classificationError: { label: "unclassified" },
   accepted: { label: "confirmed" },
   shutdown: { label: "restart hold", detail: "held for the scheduled restart (sched-1)" },
-  sessionStarting: { label: "starting up", detail: "held until the session is up" },
+  reconnect: { label: "after reconnect", detail: "held until the session reconnects" },
   buildRefresh: { label: "build refresh", detail: "held for the build refresh" },
   merge: { label: "after the merge", detail: "held until the merge ends; the workspace stays open for it" },
 };
@@ -2378,7 +2378,7 @@ export function heldPrompt(init?: {
   foldAbove?: string;
 }): HeldPrompt {
   const classification = init?.classification ?? "interject";
-  const hold = init?.hold ?? "sessionStarting";
+  const hold = init?.hold ?? "reconnect";
   // `daemon_held` draws no badge of its own: the hold arm's badge says what holds it.
   const statuses: string[] = classification === "daemonHeld" ? [] : [classification];
   if (classification === "holdForTurnEnd" && init?.accepted === true) statuses.push("accepted");
