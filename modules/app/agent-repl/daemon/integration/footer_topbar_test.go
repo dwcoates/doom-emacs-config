@@ -884,10 +884,13 @@ func TestFooterApiErrorMidTurnDrawsRetryingEvidenceWithoutEndingTheTurn(t *testi
 		}},
 	}))
 
-	// Assert: the turn is still thinking (not ended) and the footer shows the
-	// retry evidence.
-	got := awaitFooter(t, f, footer, "thinking.retrying evidence mid-turn", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetWorking() != nil
+	// Assert: the turn is not ended; it is blocked · api_retrying with the
+	// retry line, the status a turn whose call the vendor is retrying stands
+	// in (owner ruling, 2026-10-01: the turn cannot advance until the retried
+	// call is answered).
+	got := awaitFooter(t, f, footer, "blocked.api_retrying with the retry line mid-turn", func(v *frontendv1.FooterView) bool {
+		blocked := v.GetStrip().GetStatus().GetBlocked()
+		return blocked.GetApiRetrying() != nil && blocked.GetActivity().GetSalient().GetRetrying() != nil
 	})
 	if got.GetStrip().GetStatus().GetIdle() != nil {
 		t.Fatalf("footer status = %v after a recovered mid-turn api_error, want the turn still in flight", got.GetStrip().GetStatus())
