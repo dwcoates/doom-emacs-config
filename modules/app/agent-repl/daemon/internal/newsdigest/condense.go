@@ -148,13 +148,13 @@ func (c condenser) condense(ctx context.Context, period string, material []sourc
 func renderMaterial(material []sourceNews) string {
 	var b strings.Builder
 	for _, m := range material {
-		fmt.Fprintf(&b, "=== SOURCE: %s\nURL: %s\n", m.src.Name, m.src.Home)
+		b.WriteString(fmt.Sprintf("=== SOURCE: %s\nURL: %s\n", m.src.Name, m.src.Home))
 		for _, e := range m.entries {
-			fmt.Fprintf(&b, "\n--- ENTRY: %s\n", e.Title)
+			b.WriteString(fmt.Sprintf("\n--- ENTRY: %s\n", e.Title))
 			if !e.At.IsZero() {
-				fmt.Fprintf(&b, "DATE: %s\n", e.At.Format(time.RFC3339))
+				b.WriteString(fmt.Sprintf("DATE: %s\n", e.At.Format(time.RFC3339)))
 			}
-			fmt.Fprintf(&b, "URL: %s\n%s\n", e.Link, e.Body)
+			b.WriteString(fmt.Sprintf("URL: %s\n%s\n", e.Link, e.Body))
 		}
 		b.WriteString("\n")
 	}
@@ -172,12 +172,12 @@ func renderCarried(carried []*frontendv1.NewsDigestSection) string {
 	for _, section := range carried {
 		token := kindToken(section.GetKind())
 		for _, item := range section.GetItems() {
-			fmt.Fprintf(&b, "\n- kind: %s\n  title: %s\n  summary: %s\n", token, item.GetTitle().GetText(), item.GetSummary().GetText())
+			b.WriteString(fmt.Sprintf("\n- kind: %s\n  title: %s\n  summary: %s\n", token, item.GetTitle().GetText(), item.GetSummary().GetText()))
 			if item.Effective != nil {
-				fmt.Fprintf(&b, "  effective: %s\n", item.GetEffective().GetText())
+				b.WriteString(fmt.Sprintf("  effective: %s\n", item.GetEffective().GetText()))
 			}
 			for _, link := range item.GetLinks() {
-				fmt.Fprintf(&b, "  link: %s <%s>\n", link.GetLabel(), link.GetUrl())
+				b.WriteString(fmt.Sprintf("  link: %s <%s>\n", link.GetLabel(), link.GetUrl()))
 			}
 		}
 	}
