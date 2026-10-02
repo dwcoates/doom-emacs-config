@@ -70,28 +70,42 @@ function transientStatus(status: number): boolean {
 }
 
 /**
- * The vendor's words for a transient failure, read only when it stated NO
- * status: an overloaded or rate-limited API, a server error, a timeout, or a
- * network failure the errno patterns of {@link classifyVendorApiFailure} do not
- * name (`fetch failed`, and the API client's `Connection error.`).
+ * The words for a NETWORK failure, read only when the vendor stated NO status:
+ * the errno names {@link classifyVendorApiFailure} also reads, and the sentences
+ * it does not (`fetch failed`, the API client's `Connection error.`, a timeout).
+ */
+const NETWORK_WORDS =
+  /fetch failed|network|connection (?:error|refused|reset|closed)|timed?[\s_-]?out|socket hang up|\b(?:enotfound|eai_again|econnrefused|econnreset|etimedout|enetunreach|ehostunreach)\b/;
+
+/**
+ * The words for any OTHER transient failure, read only when the vendor stated
+ * no status: an overloaded or rate-limited API, or a server error.
  */
 const TRANSIENT_WORDS =
-  /overloaded|rate[\s_-]?limit|too many requests|server error|service unavailable|bad gateway|gateway timeout|timed?[\s_-]?out|fetch failed|network|connection (?:error|refused|reset|closed)/;
+  /overloaded|rate[\s_-]?limit|too many requests|server error|service unavailable|bad gateway|gateway timeout/;
 
 /**
  * Whether an error result that ended the session's opening can pass.
  *
- * A TRANSIENT STATUS WINS OVER THE TEXT. `classifyVendorApiFailure` reads loose
- * text patterns ("resource", "auth"), and a 503 whose sentence happens to say
- * "resource" is still a server that will come back. Otherwise the diagnostic
- * kind decides: unreachable is a network failure and RETRYABLE; a rejected
- * credential and a missing model are REJECTED; every other API error is
- * RETRYABLE only when it reads as overloaded / server / rate-limit / network,
- * and REJECTED otherwise — which is where a refused resume lands.
+ * WITH A STATUS, THE STATUS DECIDES FIRST: a transient one (408, 429, 5xx) is
+ * RETRYABLE whatever the sentence says, because `classifyVendorApiFailure`
+ * reads loose patterns ("resource", "auth") and a 503 that says "resource" is
+ * still a server that will come back; an explicit 401/403 is REJECTED.
+ *
+ * WITH NO STATUS, NETWORK WORDING WINS OVER AUTH WORDING (orchestrator ruling,
+ * 2026-10-02): "OAuth token refresh failed: fetch failed" is an outage that
+ * happened to strike a token refresh, not a rejected credential.
+ *
+ * Otherwise the diagnostic kind decides: a rejected credential and a missing
+ * model are REJECTED; every other API error is RETRYABLE only when it reads as
+ * overloaded / server / rate-limit, and REJECTED otherwise — which is where a
+ * refused resume lands.
  */
 export function openingErrorVerdict(status: number | undefined, text: string): OpeningErrorVerdict {
   const kind = classifyVendorApiFailure(status, undefined, text);
   if (status !== undefined && transientStatus(status)) return { kind, retry: "retryable" };
+  const said = text.toLowerCase();
+  if (status === undefined && NETWORK_WORDS.test(said)) return { kind, retry: "retryable" };
   switch (kind) {
     case "shim.vendor.unreachable":
       return { kind, retry: "retryable" };
@@ -99,10 +113,7 @@ export function openingErrorVerdict(status: number | undefined, text: string): O
     case "shim.vendor.model_missing":
       return { kind, retry: "rejected" };
     case "shim.vendor.api_error":
-      return {
-        kind,
-        retry: status === undefined && TRANSIENT_WORDS.test(text.toLowerCase()) ? "retryable" : "rejected",
-      };
+      return { kind, retry: status === undefined && TRANSIENT_WORDS.test(said) ? "retryable" : "rejected" };
   }
 }
 
