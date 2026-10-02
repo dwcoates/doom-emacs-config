@@ -18,32 +18,32 @@ import { classifyAgentFailure } from "../../src/engine/network-resume.js";
 
 describe("openingErrorVerdict", () => {
   it.each([
-    // [case, status, text, kind, retry]
-    ["a network failure the errno names", undefined, "connect ECONNREFUSED 1.2.3.4:443", "shim.vendor.unreachable", "retryable"],
-    ["a credential rejected by status", 401, "invalid x-api-key", "shim.vendor.auth_rejected", "rejected"],
-    ["a credential rejected by its words", undefined, "OAuth token has expired", "shim.vendor.auth_rejected", "rejected"],
-    ["a missing model by status", 404, "model: claude-nope", "shim.vendor.model_missing", "rejected"],
-    ["a refused resume", undefined, "No conversation found with session ID: bf5fcae1", "shim.vendor.api_error", "rejected"],
-    ["an overloaded API", 529, "Overloaded", "shim.vendor.api_error", "retryable"],
-    ["a server error", 500, "Internal server error", "shim.vendor.api_error", "retryable"],
-    ["an unavailable service", 503, "Service unavailable", "shim.vendor.api_error", "retryable"],
-    ["a rate limit", 429, "Too many requests", "shim.vendor.api_error", "retryable"],
-    ["a request timeout", 408, "Request timeout", "shim.vendor.api_error", "retryable"],
-    ["a malformed request", 400, "messages: field required", "shim.vendor.api_error", "rejected"],
-    ["an overloaded API that stated no status", undefined, "API Error: Overloaded", "shim.vendor.api_error", "retryable"],
-    ["a network failure only the SDK's sentence names", undefined, "TypeError: fetch failed", "shim.vendor.api_error", "retryable"],
-    ["the API client's own connection failure", undefined, "API Error: Connection error.", "shim.vendor.api_error", "retryable"],
-    ["a token refresh an outage broke", undefined, "OAuth token refresh failed: fetch failed", "shim.vendor.auth_rejected", "retryable"],
-    ["an authentication the API client could not reach", undefined, "Failed to authenticate. API Error: Connection error.", "shim.vendor.auth_rejected", "retryable"],
-    ["a credential rejected by its words with a network word beside an explicit 401", 401, "invalid api key (network check passed)", "shim.vendor.auth_rejected", "rejected"],
-    ["a forbidden credential by status", 403, "forbidden", "shim.vendor.auth_rejected", "rejected"],
-    ["an execution error with no transient words", undefined, "the budget is exhausted", "shim.vendor.api_error", "rejected"],
-  ] as const)("labels %s", (_case, status, text, kind, retry) => {
+    // [case, status, text, kind, retry, cause]
+    ["a network failure the errno names", undefined, "connect ECONNREFUSED 1.2.3.4:443", "shim.vendor.unreachable", "retryable", "network"],
+    ["a credential rejected by status", 401, "invalid x-api-key", "shim.vendor.auth_rejected", "rejected", "vendor"],
+    ["a credential rejected by its words", undefined, "OAuth token has expired", "shim.vendor.auth_rejected", "rejected", "vendor"],
+    ["a missing model by status", 404, "model: claude-nope", "shim.vendor.model_missing", "rejected", "vendor"],
+    ["a refused resume", undefined, "No conversation found with session ID: bf5fcae1", "shim.vendor.api_error", "rejected", "vendor"],
+    ["an overloaded API", 529, "Overloaded", "shim.vendor.api_error", "retryable", "vendor"],
+    ["a server error", 500, "Internal server error", "shim.vendor.api_error", "retryable", "vendor"],
+    ["an unavailable service", 503, "Service unavailable", "shim.vendor.api_error", "retryable", "vendor"],
+    ["a rate limit", 429, "Too many requests", "shim.vendor.api_error", "retryable", "vendor"],
+    ["a request timeout", 408, "Request timeout", "shim.vendor.api_error", "retryable", "vendor"],
+    ["a malformed request", 400, "messages: field required", "shim.vendor.api_error", "rejected", "vendor"],
+    ["an overloaded API that stated no status", undefined, "API Error: Overloaded", "shim.vendor.api_error", "retryable", "vendor"],
+    ["a network failure only the SDK's sentence names", undefined, "TypeError: fetch failed", "shim.vendor.api_error", "retryable", "network"],
+    ["the API client's own connection failure", undefined, "API Error: Connection error.", "shim.vendor.api_error", "retryable", "network"],
+    ["a token refresh an outage broke", undefined, "OAuth token refresh failed: fetch failed", "shim.vendor.auth_rejected", "retryable", "network"],
+    ["an authentication the API client could not reach", undefined, "Failed to authenticate. API Error: Connection error.", "shim.vendor.auth_rejected", "retryable", "network"],
+    ["a credential rejected by its words with a network word beside an explicit 401", 401, "invalid api key (network check passed)", "shim.vendor.auth_rejected", "rejected", "vendor"],
+    ["a forbidden credential by status", 403, "forbidden", "shim.vendor.auth_rejected", "rejected", "vendor"],
+    ["an execution error with no transient words", undefined, "the budget is exhausted", "shim.vendor.api_error", "rejected", "vendor"],
+  ] as const)("labels %s", (_case, status, text, kind, retry, cause) => {
     // Arrange, Act.
     const verdict = openingErrorVerdict(status, text);
 
     // Assert.
-    expect(verdict).toEqual({ kind, retry });
+    expect(verdict).toEqual({ kind, retry, cause });
   });
 
   it("lets a transient status win over text the classifier reads as a missing model", () => {
@@ -95,7 +95,7 @@ describe("startFailureLabel", () => {
     const label = startFailureLabel(err);
 
     // Assert.
-    expect(label).toEqual({ retry: "retryable", bound: { name: "live_signal", ms: 3_000 } });
+    expect(label).toEqual({ retry: "retryable", bound: { name: "live_signal", ms: 3_000 }, cause: "vendor" });
   });
 
   it("answers an UNLABELED error as rejected, never as retryable", () => {
@@ -106,7 +106,7 @@ describe("startFailureLabel", () => {
     const label = startFailureLabel(err);
 
     // Assert.
-    expect(label).toEqual({ retry: "rejected", bound: undefined });
+    expect(label).toEqual({ retry: "rejected", bound: undefined, cause: "vendor" });
   });
 
   it("says an unlabeled error loudly, as the defect it is", () => {
@@ -124,5 +124,29 @@ describe("startFailureLabel", () => {
       level: "warn",
       cause: "not even an Error",
     });
+  });
+});
+
+describe("startFailureLabel's cause", () => {
+  it("reads the network cause a settle site saw", () => {
+    // Arrange.
+    const err = new VendorStartError("offline", "retryable", undefined, "network");
+
+    // Act.
+    const label = startFailureLabel(err);
+
+    // Assert.
+    expect(label.cause).toBe("network");
+  });
+
+  it("takes the vendor as the cause when the settle site saw no outage", () => {
+    // Arrange.
+    const err = new VendorStartError("silent", "retryable");
+
+    // Act.
+    const label = startFailureLabel(err);
+
+    // Assert.
+    expect(label.cause).toBe("vendor");
   });
 });
