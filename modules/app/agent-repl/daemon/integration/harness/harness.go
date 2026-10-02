@@ -162,11 +162,11 @@ func mainIn(m *testing.M, module, root string) int {
 		// The pinned checkout is this process's own, never shared.
 		return runPinned(m, module, root)
 	}
-	dir := filepath.Join(shared, prebuiltSub)
+	var dir string
 	if mode == testenv.BuildHere {
 		dir, err = os.MkdirTemp(root, "agent-repl-integration-bin-")
 	} else {
-		err = os.MkdirAll(dir, 0o755)
+		dir, err = testenv.PrebuildDir(shared, prebuiltSub)
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "harness: binary dir:", err)

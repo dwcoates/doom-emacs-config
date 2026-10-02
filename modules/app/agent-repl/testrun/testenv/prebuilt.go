@@ -72,3 +72,14 @@ func SharedBinary(dir, sub, name string) (string, error) {
 	}
 	return filepath.EvalSymlinks(p)
 }
+
+// PrebuildDir creates and answers a prebuild process's own subdirectory of
+// the shared directory. Each harness fills only its sub, so the binaries of
+// suites that share one prebuilt directory never collide.
+func PrebuildDir(shared, sub string) (string, error) {
+	dir := filepath.Join(shared, sub)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("testenv: create the prebuild directory %s: %w", dir, err)
+	}
+	return dir, nil
+}
