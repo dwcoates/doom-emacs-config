@@ -4,6 +4,7 @@ import { FeedWatchTokenSchema } from "../../../proto/gen/ts/agentrepl/v1/feed_to
 import {
   buildGetFeedPageRequest,
   buildInterruptDetachedRequest,
+  buildLoadFeedThroughRequest,
   buildOpenFeedRequest,
   buildWatchFeedRequest,
 } from "../../src/feed/requests.js";
@@ -61,5 +62,15 @@ describe("buildInterruptDetachedRequest", () => {
 
   it("leaves confirm_agents false, being meaningless on this target", () => {
     expect(buildInterruptDetachedRequest(WORKSPACE, feedId("b")).confirmAgents).toBe(false);
+  });
+});
+
+describe("buildLoadFeedThroughRequest", () => {
+  it("addresses the workspace", () => {
+    expect(buildLoadFeedThroughRequest(WORKSPACE, feedId("r-1")).workspace?.id).toBe("ws-1");
+  });
+
+  it("echoes the target's id verbatim", () => {
+    expect(buildLoadFeedThroughRequest(WORKSPACE, feedId("r-1")).target?.value).toBe("r-1");
   });
 });
