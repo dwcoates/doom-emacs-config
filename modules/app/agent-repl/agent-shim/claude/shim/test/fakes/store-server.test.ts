@@ -21,7 +21,7 @@ function streamPlane(): storev1.Plane {
   });
 }
 import { createStoreClient, type StoreClient } from "../../src/store/client.js";
-import { startFakeStore, type FakeStore } from "./store-server.js";
+import { FAKE_STORE_PAGE_SIZE, startFakeStore, type FakeStore, type FakeStoreOptions } from "./store-server.js";
 
 /** The pushed line, when the push is on the `line` arm. */
 function lineOf(push: storev1.WatchAgentSessionResponse): storev1.StoreLineAt | undefined {
@@ -34,9 +34,9 @@ afterEach(async () => {
   for (const store of running.splice(0)) await store.close();
 });
 
-async function store(): Promise<{ store: FakeStore; client: StoreClient }> {
+async function store(options: FakeStoreOptions = {}): Promise<{ store: FakeStore; client: StoreClient }> {
   const sock = path.join(mkdtempSync(path.join(os.tmpdir(), "fake-store-")), "store.sock");
-  const started = await startFakeStore(sock);
+  const started = await startFakeStore(sock, options);
   running.push(started);
   return { store: started, client: createStoreClient(sock) };
 }
@@ -257,17 +257,21 @@ async function write(client: StoreClient, ...entries: storev1.StoreEntry[]): Pro
   }
 }
 
+/** Open a book: the repaint, a catch-up from `opening`'s mark, or tail-only. */
 async function open(
   client: StoreClient,
   book: string,
-  pageSize: number,
-  knownThrough?: storev1.StoreItemPointer,
+  opening?: storev1.StoreItemPointer | "tailOnly",
 ): Promise<storev1.OpenAgentSessionSuccess> {
   const response = await client.openAgentSession(
     create(storev1.OpenAgentSessionRequestSchema, {
       agent: agentId(book),
-      pageSize,
-      ...(knownThrough === undefined ? {} : { knownThrough }),
+      opening:
+        opening === undefined
+          ? { case: undefined }
+          : opening === "tailOnly"
+            ? { case: "tailOnly", value: create(storev1.AgentSessionTailOnlySchema, {}) }
+            : { case: "knownThrough", value: opening },
     }),
   );
   if (response.result.case !== "success") throw new Error("fake store refused an open");
@@ -526,21 +530,21 @@ describe("OpenAgentSession", () => {
     await write(client, pageLineEntry("a", "prompt:t2", "two"));
 
     // Act.
-    const success = await open(client, "a", 10);
+    const success = await open(client, "a");
 
     // Assert.
     expect(success.page?.lines.map((line) => line.at?.value)).toEqual(["2", "1"]);
   });
 
-  it("caps the page at the caller's budget", async () => {
+  it("caps the page at the store's own page size", async () => {
     // Arrange.
-    const { client } = await store();
+    const { client } = await store({ pageSize: 2 });
     await write(client, pageLineEntry("a", "prompt:t1", "one"));
     await write(client, pageLineEntry("a", "prompt:t2", "two"));
     await write(client, pageLineEntry("a", "prompt:t3", "three"));
 
     // Act.
-    const success = await open(client, "a", 2);
+    const success = await open(client, "a");
 
     // Assert.
     expect(success.page?.lines).toHaveLength(2);
@@ -548,13 +552,13 @@ describe("OpenAgentSession", () => {
 
   it("points `more` at the page's OLDEST line, which the next read echoes", async () => {
     // Arrange.
-    const { client } = await store();
+    const { client } = await store({ pageSize: 2 });
     await write(client, pageLineEntry("a", "prompt:t1", "one"));
     await write(client, pageLineEntry("a", "prompt:t2", "two"));
     await write(client, pageLineEntry("a", "prompt:t3", "three"));
 
     // Act.
-    const success = await open(client, "a", 2);
+    const success = await open(client, "a");
 
     // Assert.
     expect(success.page?.boundary).toEqual({
@@ -571,7 +575,7 @@ describe("OpenAgentSession", () => {
     await write(client, pageLineEntry("a", "prompt:t1", "one"));
 
     // Act.
-    const success = await open(client, "a", 10);
+    const success = await open(client, "a");
 
     // Assert.
     expect(success.page?.boundary.case).toBe("floor");
@@ -585,10 +589,36 @@ describe("OpenAgentSession", () => {
     const knownThrough = create(storev1.StoreItemPointerSchema, { value: "1" });
 
     // Act.
-    const success = await open(client, "a", 10, knownThrough);
+    const success = await open(client, "a", knownThrough);
 
     // Assert.
     expect(success.page?.lines.map((line) => line.at?.value)).toEqual(["2"]);
+  });
+
+  it("serves a tail_only open an EMPTY page at the floor", async () => {
+    // Arrange.
+    const { client } = await store();
+    await write(client, pageLineEntry("a", "prompt:t1", "one"));
+
+    // Act.
+    const success = await open(client, "a", "tailOnly");
+
+    // Assert.
+    expect([success.page?.lines.length, success.page?.boundary.case]).toEqual([0, "floor"]);
+  });
+
+  it("serves the real store's page size when a test names none", async () => {
+    // Arrange.
+    const { client } = await store();
+    for (let n = 1; n <= FAKE_STORE_PAGE_SIZE + 1; n++) {
+      await write(client, pageLineEntry("a", `prompt:t${String(n)}`, `n${String(n)}`));
+    }
+
+    // Act.
+    const success = await open(client, "a");
+
+    // Assert.
+    expect([FAKE_STORE_PAGE_SIZE, success.page?.lines.length]).toEqual([50, 50]);
   });
 
   it("mints a watch token with the page", async () => {
@@ -597,7 +627,7 @@ describe("OpenAgentSession", () => {
     await write(client, pageLineEntry("a", "prompt:t1", "t1"));
 
     // Act.
-    const success = await open(client, "a", 10);
+    const success = await open(client, "a");
 
     // Assert.
     expect(success.watch?.value).not.toBe("");
@@ -611,7 +641,7 @@ describe("WatchAgentSession", () => {
     // in another book created it — so everything the tail carries is news.
     const { client } = await store();
     await write(client, spawnEntry("parent", "k-spawn", "a"));
-    const success = await open(client, "a", 10);
+    const success = await open(client, "a");
     const tail = client.watchAgentSession(
       create(storev1.WatchAgentSessionRequestSchema, { watch: success.watch }),
     )[Symbol.asyncIterator]();
@@ -629,7 +659,7 @@ describe("WatchAgentSession", () => {
     // Arrange.
     const { client } = await store();
     await write(client, pageLineEntry("a", "prompt:t1", "before-open"));
-    const success = await open(client, "a", 10);
+    const success = await open(client, "a");
     const tail = client.watchAgentSession(
       create(storev1.WatchAgentSessionRequestSchema, { watch: success.watch }),
     )[Symbol.asyncIterator]();
@@ -650,7 +680,7 @@ describe("WatchAgentSession", () => {
     // Arrange.
     const { client } = await store();
     await write(client, pageLineEntry("a", "prompt:t1", "started"));
-    const success = await open(client, "a", 10);
+    const success = await open(client, "a");
     const tail = client.watchAgentSession(
       create(storev1.WatchAgentSessionRequestSchema, { watch: success.watch }),
     )[Symbol.asyncIterator]();
@@ -668,7 +698,7 @@ describe("WatchAgentSession", () => {
     const { client } = await store();
     await write(client, pageLineEntry("a", "prompt:t1", "started"));
     await write(client, pageLineEntry("a", "prompt:t2", "other"));
-    const success = await open(client, "a", 10);
+    const success = await open(client, "a");
     const tail = client.watchAgentSession(
       create(storev1.WatchAgentSessionRequestSchema, { watch: success.watch }),
     )[Symbol.asyncIterator]();
@@ -689,7 +719,7 @@ describe("WatchAgentSession", () => {
     // Arrange.
     const { client } = await store();
     await write(client, pageLineEntry("a", "prompt:t1", "first"));
-    const success = await open(client, "a", 0);
+    const success = await open(client, "a");
     const tail = client.watchAgentSession(
       create(storev1.WatchAgentSessionRequestSchema, { watch: success.watch }),
     )[Symbol.asyncIterator]();
@@ -736,7 +766,6 @@ describe("ReadAgentPage", () => {
     const response = await client.readAgentPage(
       create(storev1.ReadAgentPageRequestSchema, {
         book: agentId("a"),
-        pageSize: 10,
         position: {
           case: "after",
           value: create(storev1.StoreItemPointerSchema, { value: "3" }),
@@ -758,7 +787,6 @@ describe("ReadAgentPage", () => {
     const response = await client.readAgentPage(
       create(storev1.ReadAgentPageRequestSchema, {
         book: agentId("a"),
-        pageSize: 10,
         position: {
           case: "after",
           value: create(storev1.StoreItemPointerSchema, { value: "2" }),
@@ -772,9 +800,9 @@ describe("ReadAgentPage", () => {
     );
   });
 
-  it("reports `more` when the budget cut the walk short", async () => {
+  it("reports `more` when the store's page cut the walk short", async () => {
     // Arrange.
-    const { client } = await store();
+    const { client } = await store({ pageSize: 1 });
     await write(client, pageLineEntry("a", "prompt:t1", "one"));
     await write(client, pageLineEntry("a", "prompt:t2", "two"));
     await write(client, pageLineEntry("a", "prompt:t3", "three"));
@@ -783,7 +811,6 @@ describe("ReadAgentPage", () => {
     const response = await client.readAgentPage(
       create(storev1.ReadAgentPageRequestSchema, {
         book: agentId("a"),
-        pageSize: 1,
         position: {
           case: "after",
           value: create(storev1.StoreItemPointerSchema, { value: "3" }),
@@ -1161,7 +1188,7 @@ describe("the read ledger", () => {
     await write(client, pageLineEntry("a", "prompt:t1", "t1"));
 
     // Act.
-    await open(client, "a", 5);
+    await open(client, "a");
 
     // Assert.
     const read = fake.reads().filter((entry) => entry.rpc === "OpenAgentSession")[0];
@@ -1177,7 +1204,7 @@ describe("the read ledger", () => {
 
     // Act.
     await client.readAgentPage(
-      create(storev1.ReadAgentPageRequestSchema, { book: agentId("a"), pageSize: 5 }),
+      create(storev1.ReadAgentPageRequestSchema, { book: agentId("a") }),
     );
 
     // Assert.
@@ -1214,7 +1241,7 @@ describe("typed read refusals", () => {
 
     // Act.
     const response = await client.openAgentSession(
-      create(storev1.OpenAgentSessionRequestSchema, { agent: agentId("a"), pageSize: 10 }),
+      create(storev1.OpenAgentSessionRequestSchema, { agent: agentId("a") }),
     );
 
     // Assert.
@@ -1230,7 +1257,7 @@ describe("typed read refusals", () => {
 
     // Act.
     const response = await client.openAgentSession(
-      create(storev1.OpenAgentSessionRequestSchema, { agent: agentId("a"), pageSize: 10 }),
+      create(storev1.OpenAgentSessionRequestSchema, { agent: agentId("a") }),
     );
 
     // Assert.
@@ -1248,7 +1275,7 @@ describe("typed read refusals", () => {
 
     // Act.
     const response = await client.openAgentSession(
-      create(storev1.OpenAgentSessionRequestSchema, { agent: agentId("a"), pageSize: 10 }),
+      create(storev1.OpenAgentSessionRequestSchema, { agent: agentId("a") }),
     );
 
     // Assert.
@@ -1266,7 +1293,6 @@ describe("typed read refusals", () => {
     const response = await client.readAgentPage(
       create(storev1.ReadAgentPageRequestSchema, {
         book: agentId("a"),
-        pageSize: 10,
         position: {
           case: "after",
           value: create(storev1.StoreItemPointerSchema, { value: "9" }),
@@ -1302,7 +1328,7 @@ describe("typed read refusals", () => {
 
     // Act.
     const response = await client.openAgentSession(
-      create(storev1.OpenAgentSessionRequestSchema, { agent: agentId("a"), pageSize: 10 }),
+      create(storev1.OpenAgentSessionRequestSchema, { agent: agentId("a") }),
     );
 
     // Assert.
@@ -1318,7 +1344,7 @@ describe("typed read refusals", () => {
 
     // Act.
     const response = await client.openAgentSession(
-      create(storev1.OpenAgentSessionRequestSchema, { agent: agentId("a"), pageSize: 10 }),
+      create(storev1.OpenAgentSessionRequestSchema, { agent: agentId("a") }),
     );
 
     // Assert.
@@ -1334,7 +1360,7 @@ describe("typed read refusals", () => {
 
     // Act.
     const response = await client.openAgentSession(
-      create(storev1.OpenAgentSessionRequestSchema, { agent: agentId("child"), pageSize: 10 }),
+      create(storev1.OpenAgentSessionRequestSchema, { agent: agentId("child") }),
     );
 
     // Assert.
@@ -1376,7 +1402,7 @@ describe("typed read refusals", () => {
     // Act.
     fake.failReads("OpenAgentSession", null);
     const response = await client.openAgentSession(
-      create(storev1.OpenAgentSessionRequestSchema, { agent: agentId("a"), pageSize: 10 }),
+      create(storev1.OpenAgentSessionRequestSchema, { agent: agentId("a") }),
     );
 
     // Assert.
@@ -1391,7 +1417,7 @@ describe("typed read refusals", () => {
 
     // Act.
     const response = await client.openAgentSession(
-      create(storev1.OpenAgentSessionRequestSchema, { agent: agentId("a"), pageSize: 10 }),
+      create(storev1.OpenAgentSessionRequestSchema, { agent: agentId("a") }),
     );
 
     // Assert.
@@ -1479,7 +1505,7 @@ describe("the open-tail ledger", () => {
     // Arrange.
     const { store: fake, client } = await store();
     await write(client, pageLineEntry("a", "prompt:t1", "first"));
-    const success = await open(client, "a", 10);
+    const success = await open(client, "a");
     const tail = client.watchAgentSession(
       create(storev1.WatchAgentSessionRequestSchema, { watch: success.watch }),
     )[Symbol.asyncIterator]();
@@ -1496,7 +1522,7 @@ describe("the open-tail ledger", () => {
     // Arrange.
     const { store: fake, client } = await store();
     await write(client, pageLineEntry("a", "prompt:t1", "first"));
-    const success = await open(client, "a", 10);
+    const success = await open(client, "a");
     const opened = fake.tailOpened();
 
     // Act.
@@ -1514,7 +1540,7 @@ describe("the open-tail ledger", () => {
     // Arrange.
     const { store: fake, client } = await store();
     await write(client, pageLineEntry("a", "prompt:t1", "first"));
-    const success = await open(client, "a", 10);
+    const success = await open(client, "a");
     const tail = client.watchAgentSession(
       create(storev1.WatchAgentSessionRequestSchema, { watch: success.watch }),
     )[Symbol.asyncIterator]();
@@ -1538,7 +1564,7 @@ describe("the open-tail ledger", () => {
     // Arrange.
     const { store: fake, client } = await store();
     await write(client, pageLineEntry("a", "prompt:t1", "first"));
-    const success = await open(client, "a", 10);
+    const success = await open(client, "a");
     const abort = new AbortController();
     const tail = client.watchAgentSession(
       create(storev1.WatchAgentSessionRequestSchema, { watch: success.watch }),
@@ -1561,7 +1587,7 @@ describe("the open-tail ledger", () => {
     // Arrange.
     const { store: fake, client } = await store();
     await write(client, pageLineEntry("a", "prompt:t1", "first"));
-    const success = await open(client, "a", 10);
+    const success = await open(client, "a");
     const tail = client.watchAgentSession(
       create(storev1.WatchAgentSessionRequestSchema, { watch: success.watch }),
     )[Symbol.asyncIterator]();
@@ -1596,7 +1622,6 @@ describe("the conversation place", () => {
     client.readAgentPage(
       create(storev1.ReadAgentPageRequestSchema, {
         book: agentId(book),
-        pageSize: 10,
         position: { case: "through", value: create(conversationv1.ConversationThroughSchema, { atMs }) },
       }),
     );
@@ -1607,7 +1632,7 @@ describe("the conversation place", () => {
     await write(client, placedLine("a", "prompt:t1", "one", 500n, 2));
 
     // Act.
-    const opened = await open(client, "a", 10);
+    const opened = await open(client, "a");
 
     // Assert.
     const place = opened.page?.lines[0]?.place;
@@ -1620,7 +1645,7 @@ describe("the conversation place", () => {
     await write(client, pageLineEntry("a", "prompt:t1", "one"));
 
     // Act.
-    const opened = await open(client, "a", 10);
+    const opened = await open(client, "a");
 
     // Assert.
     expect(opened.page?.lines[0]?.place.case).toBe("receivedPlace");
@@ -1633,7 +1658,7 @@ describe("the conversation place", () => {
     await write(client, placedLine("a", "prompt:t1", "two", 900n));
 
     // Act.
-    const opened = await open(client, "a", 10);
+    const opened = await open(client, "a");
 
     // Assert.
     expect(opened.page?.lines[0]?.place.value?.atMs).toBe(500n);
@@ -1646,7 +1671,7 @@ describe("the conversation place", () => {
     await write(client, placedLine("a", "prompt:t1", "two", 900n));
 
     // Act.
-    const opened = await open(client, "a", 10);
+    const opened = await open(client, "a");
 
     // Assert.
     const place = opened.page?.lines[0]?.place;
@@ -1660,7 +1685,7 @@ describe("the conversation place", () => {
     await write(client, placedLine("a", "prompt:t2", "earlier", 500n));
 
     // Act.
-    const opened = await open(client, "a", 10);
+    const opened = await open(client, "a");
 
     // Assert.
     expect(texts(opened.page?.lines ?? [])).toEqual(["later", "earlier"]);
@@ -1670,11 +1695,11 @@ describe("the conversation place", () => {
     // Arrange.
     const { client } = await store();
     await write(client, placedLine("a", "prompt:t1", "mark", 900n));
-    const mark = (await open(client, "a", 10)).page?.lines[0]?.at;
+    const mark = (await open(client, "a")).page?.lines[0]?.at;
     await write(client, placedLine("a", "prompt:t2", "late", 500n));
 
     // Act.
-    const opened = await open(client, "a", 10, mark);
+    const opened = await open(client, "a", mark);
 
     // Assert.
     expect(texts(opened.page?.lines ?? [])).toEqual(["late"]);
@@ -1686,13 +1711,12 @@ describe("the conversation place", () => {
     await write(client, placedLine("a", "prompt:t1", "low", 100n));
     await write(client, placedLine("a", "prompt:t2", "named", 200n));
     await write(client, placedLine("a", "prompt:t3", "high", 300n));
-    const named = (await open(client, "a", 10)).page?.lines[1]?.at;
+    const named = (await open(client, "a")).page?.lines[1]?.at;
 
     // Act.
     const response = await client.readAgentPage(
       create(storev1.ReadAgentPageRequestSchema, {
         book: agentId("a"),
-        pageSize: 10,
         position: { case: "after", value: named ?? create(storev1.StoreItemPointerSchema, {}) },
       }),
     );
@@ -1710,7 +1734,6 @@ describe("the conversation place", () => {
     const response = await client.readAgentPage(
       create(storev1.ReadAgentPageRequestSchema, {
         book: agentId("a"),
-        pageSize: 10,
         position: { case: "after", value: create(storev1.StoreItemPointerSchema, { value: "99" }) },
       }),
     );
@@ -1750,7 +1773,7 @@ describe("the conversation place", () => {
 
     // Act.
     const response = await client.readAgentPage(
-      create(storev1.ReadAgentPageRequestSchema, { book: agentId("a"), pageSize: 10 }),
+      create(storev1.ReadAgentPageRequestSchema, { book: agentId("a") }),
     );
 
     // Assert.

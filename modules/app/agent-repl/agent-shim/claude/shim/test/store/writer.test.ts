@@ -15,6 +15,7 @@ import { producerId } from "../../src/store/keys.js";
 import {
   DEFAULT_BATCH_POLICY,
   DEFAULT_RETRY_POLICY,
+  REPAINT,
   type Persistence,
   type PersistenceBatchPolicy,
   type PersistEntry,
@@ -1334,7 +1335,7 @@ describe("which writes end a minted book's absence", () => {
     // Arrange.
     const { store: fake, persistence: plane } = await persistence("minted-session-update");
     plane.noteAgentMinted("book-1");
-    const session = await plane.openAgentPage(BOOK, 10, undefined, () => true);
+    const session = await plane.openAgentPage(BOOK, REPAINT, () => true);
     void session.tail[Symbol.asyncIterator]().next();
 
     // Act.
@@ -1350,7 +1351,7 @@ describe("which writes end a minted book's absence", () => {
     // Arrange.
     const { store: fake, persistence: plane } = await persistence("minted-prompt");
     plane.noteAgentMinted("book-1");
-    const session = await plane.openAgentPage(BOOK, 10, undefined, () => true);
+    const session = await plane.openAgentPage(BOOK, REPAINT, () => true);
     const first = session.tail[Symbol.asyncIterator]().next();
 
     // Act.

@@ -353,7 +353,7 @@ describe("shimRoutes validation ordering", () => {
       turn: create(conversationv1.TurnIdSchema, { value: "t" }),
       said: requests.said(),
       origin: conversationv1.PromptOrigin.USER_SENT,
-      pageSize: 0,
+      opening: { case: "knownThrough", value: create(conversationv1.HistoryPointerSchema, { value: "" }) },
     });
 
     // Act.
@@ -362,7 +362,7 @@ describe("shimRoutes validation ordering", () => {
       .then(() => null, (err: unknown) => ConnectError.from(err));
 
     // Assert.
-    expect(rejection?.message).toContain("start_turn.page_size");
+    expect(rejection?.message).toContain("start_turn.known_through");
   });
 });
 

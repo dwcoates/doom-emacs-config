@@ -10,7 +10,7 @@
 import { describe, expect, it } from "vitest";
 import { containing } from "../expect-shapes.js";
 
-import { PersistenceError, unavailablePersistence } from "../../src/store/persistence.js";
+import { PersistenceError, REPAINT, unavailablePersistence } from "../../src/store/persistence.js";
 
 describe("unavailablePersistence", () => {
   const persistence = unavailablePersistence();
@@ -29,19 +29,19 @@ describe("unavailablePersistence", () => {
   });
 
   it("openAgentPage rejects with store_unavailable", async () => {
-    await expect(persistence.openAgentPage({} as never, 1)).rejects.toMatchObject({
+    await expect(persistence.openAgentPage({} as never, REPAINT)).rejects.toMatchObject({
       kind: "store_unavailable",
     });
   });
 
   it("readFirstPage rejects with store_unavailable", async () => {
-    await expect(persistence.readFirstPage({} as never, 1)).rejects.toMatchObject({
+    await expect(persistence.readFirstPage({} as never, REPAINT)).rejects.toMatchObject({
       kind: "store_unavailable",
     });
   });
 
   it("readAgentPage rejects with store_unavailable", async () => {
-    await expect(persistence.readAgentPage({} as never, 1, {} as never)).rejects.toMatchObject({
+    await expect(persistence.readAgentPage({} as never, {} as never)).rejects.toMatchObject({
       kind: "store_unavailable",
     });
   });
