@@ -5358,7 +5358,10 @@ bubble-body.bubble-body { display: block; }
 .footer-allowance-newsworthy { font-weight: 650; }
 .footer-allowance { font-variant-numeric: tabular-nums; }
 
-.footer-rate-separator { color: var(--footer-rate-separator); }
+/* The "|" between the usage line's allowances: blue, and bold so it reads as
+   a divider rather than a hairline (owner ruling, 2026-10-02). Its three-space
+   gaps are no-break text drawn beside it (src/footer/activity.ts). */
+.footer-rate-separator { color: var(--footer-rate-separator); font-weight: 700; }
 
 .footer-rate-figures {
   flex: 1 1 auto;
