@@ -41,7 +41,7 @@ const NoAnswerLine = "The turn ended with no final answer."
 // ConfigDirs resolves the account a workspace's headless call bills, so the
 // summary is paid for by the account the workspace's session spends as.
 type ConfigDirs interface {
-	ConfigDirFor(ws ids.WorkspaceID) (string, bool)
+	ConfigDirFor(ctx context.Context, ws ids.WorkspaceID) (string, error)
 }
 
 // Summarizer writes the completed-turn banner's body: a Sonnet summary of the
@@ -92,9 +92,18 @@ func (s Summarizer) summarize(ctx context.Context, ws ids.WorkspaceID, answer st
 		})
 		return "", "the summary brief could not be spliced"
 	}
-	configDir, ok := s.ConfigDirs.ConfigDirFor(ws)
-	if !ok {
-		log.Error(opSummary, "no account root for this workspace; the turn was not summarized", nil)
+	configDir, err := s.ConfigDirs.ConfigDirFor(ctx, ws)
+	if stoodDown(ctx, err) {
+		// ctx is the notifier's lifetime: the daemon stood down while the
+		// workspace's account was being read, which is the stand-down
+		// working, not a workspace with no account.
+		log.Info(opSummary, "the daemon stood down while the workspace's account was read", dlog.Context{
+			"cause": ctx.Err().Error(), "detail": err.Error(),
+		})
+		return "", StoodDownCause
+	}
+	if err != nil {
+		log.Error(opSummary, "no account root for this workspace; the turn was not summarized", dlog.Context{"cause": err.Error()})
 		return "", "no account for this workspace"
 	}
 	timeout := s.Timeout

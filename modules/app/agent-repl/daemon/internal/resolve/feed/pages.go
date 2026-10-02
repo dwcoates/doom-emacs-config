@@ -386,10 +386,10 @@ func (r *resolver) breadcrumbs(s *wsState, feedKey string) *frontendv1.FeedBread
 	return &frontendv1.FeedBreadcrumbs{Crumbs: crumbs}
 }
 
-// awaitSource marks the book PLAN read as wanted by a reader with no session
-// up to read it from: the reader is served what is held, and the page it lacks
-// is loaded and pushed to it the moment a watch of the session opens
-// (kickWaitingReaders).
+// awaitSource marks the book PLAN read as wanted by a reader with no source up
+// to read it from: the reader is served what is held, and the page it lacks is
+// loaded and pushed to it the moment a source comes up (SourceUp) or a watch of
+// the session opens (kickWaitingReaders).
 func (r *resolver) awaitSource(plan loadPlan) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

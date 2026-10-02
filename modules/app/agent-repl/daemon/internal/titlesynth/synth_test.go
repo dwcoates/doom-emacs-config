@@ -2,6 +2,7 @@ package titlesynth
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -72,7 +73,12 @@ type fakeConfigDirs struct {
 	ok  bool
 }
 
-func (c *fakeConfigDirs) ConfigDirFor(_ ids.WorkspaceID) (string, bool) { return c.dir, c.ok }
+func (c *fakeConfigDirs) ConfigDirFor(_ context.Context, _ ids.WorkspaceID) (string, error) {
+	if !c.ok {
+		return "", errors.New("workspace not found")
+	}
+	return c.dir, nil
+}
 
 // fakeTitles records every SetSynthesizedTitle.
 type fakeTitles struct {

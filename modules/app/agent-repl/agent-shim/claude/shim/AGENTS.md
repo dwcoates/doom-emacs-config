@@ -699,6 +699,13 @@ stated nowhere else. `page_size` is retired on `WatchAgent`, `ReadHistory`,
 - Tests shape page boundaries through the FAKE store's own page size
   (`startFakeStore(socket, { pageSize })`, `spawnShim({ storePageSize })`),
   never through a request.
+- **`ReadHistory` serves the WORKSPACE'S book, never only a started
+  session's** (owner principle, 2026-10-02: the vendor never gates showing the
+  conversation). With no settled identity (no StartSession yet, a start being
+  retried or refused, a session parked at its cold gate) the main agent is the
+  workspace's persisted `agent-id.json` (`SessionContext.persistedAgent`), and
+  its pages are read exactly as a started session's are. A workspace that never
+  persisted one answers `unknown_agent`; an unreadable record rejects loudly.
 
 ## A retired line is relayed, never dropped
 
