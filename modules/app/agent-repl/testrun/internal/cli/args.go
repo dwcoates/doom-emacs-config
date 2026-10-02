@@ -64,6 +64,12 @@ func ParseArgs(argv []string) (Args, error) {
 	if a.Module == "" {
 		return Args{}, errors.New("--module is required")
 	}
+	if a.Record && a.Coverage {
+		// Instrumentation and the report units inflate every Go and vitest
+		// suite's unit time, so a coverage run's figures are not comparable
+		// with the canonical history's.
+		return Args{}, errors.New("--record and --coverage cannot be combined: coverage instrumentation changes the suite timings --record keeps")
+	}
 	return a, nil
 }
 

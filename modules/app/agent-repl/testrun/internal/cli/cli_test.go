@@ -36,6 +36,7 @@ func TestParseArgs(t *testing.T) {
 		{name: "--suites without a value", argv: []string{"--module", "/m", "--suites"}, wantErr: "--suites needs a comma-separated suite list"},
 		{name: "--module without a value", argv: []string{"--module"}, wantErr: "--module needs a directory"},
 		{name: "no module", argv: []string{"--record"}, wantErr: "--module is required"},
+		{name: "record with coverage", argv: []string{"--module", "/m", "--record", "--coverage"}, wantErr: "--record and --coverage cannot be combined"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
