@@ -110,6 +110,13 @@ dependency chain first. Parallelism belongs to this scheduler:
 - e2e and integration packages build their shared binaries once in a prebuild
   unit, then every test chunk consumes those exact binaries;
 - slow shell harnesses expose `--list` / `--only` groups and per-group timing.
+- a unit that cannot be pinned to one core holds a WIDTH of slots and caps
+  itself to exactly that many cores. `e2e-emacs` is four slots wide (the VM its
+  Emacs parallelism bound was measured on); testrun hands the width over in
+  `AGENT_REPL_UNIT_SLOTS`, and the sandbox applies it as `docker run --cpus`
+  and `GOMAXPROCS` inside the container. A unit starts only when its whole
+  width is free, nothing narrower overtakes it while it waits, and a plan with
+  a unit wider than the host's slot count is refused before anything runs.
 
 `--suites a,b` selects a roster subset and refuses an unknown name.
 `--coverage` explicitly adds Go and vitest instrumentation and report units;

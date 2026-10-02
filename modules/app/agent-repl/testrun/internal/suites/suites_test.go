@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -148,6 +149,45 @@ func TestScriptUnitsCarryTheDeclineRight(t *testing.T) {
 	// Assert
 	if err != nil || !u.Atomic[0].MayDecline {
 		t.Fatalf("spec = %+v, %v; want MayDecline", u.Atomic, err)
+	}
+}
+
+func TestScriptUnitsCarryTheirWidth(t *testing.T) {
+	tests := []struct {
+		name      string
+		slots     int
+		wantSlots int
+		wantEnv   string
+		wantErr   string
+	}{
+		{name: "an ordinary script is one slot and is told so", slots: 0, wantSlots: 0, wantEnv: "AGENT_REPL_UNIT_SLOTS=1"},
+		{name: "a wide script holds its width and is told it", slots: 4, wantSlots: 4, wantEnv: "AGENT_REPL_UNIT_SLOTS=4"},
+		{name: "a negative width is refused", slots: -1, wantErr: "suites: e has a negative width -1"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			repo := t.TempDir()
+			write(t, filepath.Join(repo, "bin", "e.sh"), "#!/bin/sh\n", 0o755)
+
+			// Act
+			u, err := scriptUnits(Layout{Repo: repo, Module: repo}, roster.Suite{Name: "e", Path: "bin/e.sh", Slots: tt.slots})
+
+			// Assert
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("err = %v, want %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			sp := u.Atomic[0]
+			if sp.Slots != tt.wantSlots || !slices.Contains(sp.Env, tt.wantEnv) {
+				t.Fatalf("spec slots %d env %v, want slots %d and %q", sp.Slots, sp.Env, tt.wantSlots, tt.wantEnv)
+			}
+		})
 	}
 }
 

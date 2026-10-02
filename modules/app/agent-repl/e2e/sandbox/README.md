@@ -401,7 +401,8 @@ directory aside: a slot becomes claimable only by disappearing.
 | `AGENT_REPL_SANDBOX_SLOT_DIR` | `/tmp/agent-repl-e2e-sandbox.slots` | where the slots live |
 | `AGENT_REPL_SANDBOX_MEM_BUDGET_MB` | 2048 | assumed memory per sandbox (measured peak 1.22-1.58 GiB, plus a quarter) |
 | `AGENT_REPL_SANDBOX_MEM_HEADROOM_MB` | 1024 | left to the VM itself |
-| `AGENT_REPL_SANDBOX_MAX_SLOTS` | 4 | cap regardless of memory; past a handful the 4 CPUs bind, not the RAM |
+| `AGENT_REPL_SANDBOX_MAX_SLOTS` | 4 | cap regardless of memory; past a handful the shared CPUs bind, not the RAM |
+| `AGENT_REPL_SANDBOX_CPUS` | 4 | CPUs one container may use (`docker run --cpus` and `GOMAXPROCS` inside); `bin/test-e2e-emacs.sh` sets it to the core slots testrun reserved |
 | `AGENT_REPL_SANDBOX_NO_GATE` | unset | run without the gate, deliberately |
 
 `GOPROXY=off` and `npm_config_offline=true` are set in the image, so a

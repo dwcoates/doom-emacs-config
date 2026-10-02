@@ -67,3 +67,23 @@ func TestEveryHarnessTestsAScriptInTheModulesBin(t *testing.T) {
 		}
 	}
 }
+
+func TestOnlyScriptSuitesHaveAWidth(t *testing.T) {
+	// Every other kind is split into one-core units; a width there would be
+	// silently ignored by its unit builder.
+	for _, s := range Suites {
+		if s.Slots != 0 && s.Kind != Script {
+			t.Errorf("suite %s has width %d but is not a Script suite", s.Name, s.Slots)
+		}
+	}
+}
+
+func TestTheSandboxSuiteHoldsTheCoresItsContainerUses(t *testing.T) {
+	// Arrange
+	s, ok := Lookup("e2e-emacs")
+
+	// Assert
+	if !ok || s.Slots != 4 {
+		t.Fatalf("e2e-emacs = %+v, want a width of 4: the VM its parallelism bound was measured on", s)
+	}
+}

@@ -1034,6 +1034,12 @@ The bound is not the number that goes fastest on one lucky pass; it is the
 largest number whose worst measured boot still fits the budget the product is
 held to.
 
+The container is held to that VM by construction: `e2e-sandbox.sh` caps it to
+`AGENT_REPL_SANDBOX_CPUS` (default 4) with `docker run --cpus` and sets
+`GOMAXPROCS` to the same number, and under testrun the `e2e-emacs` unit holds
+exactly that many core slots. A Docker VM with more CPUs no longer lets the
+layer spread past the slots the scheduler reserved for it.
+
 Those numbers were taken before the AT-SPI fix (`NO_AT_BRIDGE`), which turned
 out to be the real source of the boot outliers the table blames on contention.
 On the shipped layer, at two slots: a `-count=1` runs in **78s** with a

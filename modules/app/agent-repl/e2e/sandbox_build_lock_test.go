@@ -434,3 +434,107 @@ func reapedPid(t *testing.T) int {
 	}
 	return c.Process.Pid
 }
+
+// containerCPUArgs runs the script's own container_cpu_args section on its
+// own, the way currentSandboxStamp runs the stamp section: the rule under
+// test is the script's, never a copy of it kept here.
+func containerCPUArgs(t *testing.T, cpus string) (string, error) {
+	t.Helper()
+	script := sandboxScript(t)
+	cmd := exec.Command("bash", "-c",
+		fmt.Sprintf(`set -euo pipefail; eval "$(sed -n '/^# --- the container.s CPU cap/,/^# --- run/p' %q | sed '$d')"; container_cpu_args %q`,
+			script, cpus))
+	out, err := cmd.CombinedOutput()
+	return strings.TrimSpace(string(out)), err
+}
+
+// TestSandboxContainerCPUArgs: the container is capped to exactly the CPUs it
+// is given, both by the runtime and by every Go process inside it, and a
+// width that is not a positive whole number is refused rather than dropped.
+func TestSandboxContainerCPUArgs(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		cpus    string
+		want    string
+		wantErr bool
+	}{
+		{name: "four CPUs", cpus: "4", want: "--cpus 4 --env GOMAXPROCS=4"},
+		{name: "one CPU", cpus: "1", want: "--cpus 1 --env GOMAXPROCS=1"},
+		{name: "zero is refused", cpus: "0", want: "AGENT_REPL_SANDBOX_CPUS must be a positive whole number of CPUs, got '0'", wantErr: true},
+		{name: "a fraction is refused", cpus: "1.5", want: "AGENT_REPL_SANDBOX_CPUS must be a positive whole number of CPUs, got '1.5'", wantErr: true},
+		{name: "empty is refused", cpus: "", want: "AGENT_REPL_SANDBOX_CPUS must be a positive whole number of CPUs, got ''", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			// Act.
+			got, err := containerCPUArgs(t, tt.cpus)
+
+			// Assert.
+			if (err != nil) != tt.wantErr || got != tt.want {
+				t.Fatalf("container_cpu_args %q = %q, %v; want %q (error %v)", tt.cpus, got, err, tt.want, tt.wantErr)
+			}
+		})
+	}
+}
+
+// TestE2EEmacsScriptHandsItsSlotWidthToTheSandbox: under testrun the suite
+// holds AGENT_REPL_UNIT_SLOTS core slots, and the container must be capped to
+// exactly that many CPUs; a direct run leaves the sandbox's own default.
+func TestE2EEmacsScriptHandsItsSlotWidthToTheSandbox(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		extra []string
+		want  string
+	}{
+		{name: "the unit's width becomes the container's CPUs", extra: []string{"AGENT_REPL_UNIT_SLOTS=4"}, want: "cpus=4"},
+		{name: "a direct run leaves the sandbox default", want: "cpus=unset"},
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	suiteScript, err := os.ReadFile(filepath.Join(wd, "..", "bin", "test-e2e-emacs.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			// Arrange: the suite script in a module of its own, beside a
+			// sandbox runner that reports the CPU cap it was handed.
+			module := t.TempDir()
+			for path, body := range map[string]string{
+				filepath.Join(module, "bin", "test-e2e-emacs.sh"): string(suiteScript),
+				filepath.Join(module, "e2e", "sandbox", "bin", "e2e-sandbox.sh"): "#!/usr/bin/env bash\n" +
+					"[ \"$1\" = preflight ] && exit 0\n" +
+					"printf 'cpus=%s\\n' \"${AGENT_REPL_SANDBOX_CPUS:-unset}\"\n",
+			} {
+				if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			cmd := exec.Command("bash", filepath.Join(module, "bin", "test-e2e-emacs.sh"))
+			var env []string
+			for _, kv := range os.Environ() {
+				if !strings.HasPrefix(kv, "AGENT_REPL_UNIT_SLOTS=") && !strings.HasPrefix(kv, "AGENT_REPL_SANDBOX_CPUS=") {
+					env = append(env, kv)
+				}
+			}
+			cmd.Env = append(append(env, "AGENT_REPL_BACKGROUND_PRIORITY=1"), tt.extra...)
+
+			// Act.
+			out, err := cmd.CombinedOutput()
+
+			// Assert.
+			if err != nil || !strings.Contains(string(out), tt.want+"\n") {
+				t.Fatalf("test-e2e-emacs.sh = %v:\n%s\nwant a line %q", err, out, tt.want)
+			}
+		})
+	}
+}
