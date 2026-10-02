@@ -1,0 +1,198 @@
+package newsdigest
+
+import (
+	"context"
+	"errors"
+	"testing"
+
+	agentreplv1 "agentrepl/proto/agentrepl/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	"google.golang.org/protobuf/proto"
+)
+
+// dismissReq is a DismissNewsDigest request naming id.
+func dismissReq(id string) *agentreplv1.DismissNewsDigestRequest {
+	return &agentreplv1.DismissNewsDigestRequest{Id: &frontendv1.NewsDigestId{Value: id}}
+}
+
+func TestRepublishPublishesTheStandingDigest(t *testing.T) {
+	// Arrange
+	w := newWorld(t)
+	w.store.state.LatestID = "d1"
+	w.store.state.Standing = encodedOverlay(t, "d1", 1)
+	d := w.digester()
+
+	// Act
+	err := d.Republish(context.Background())
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Republish: %v", err)
+	}
+	if got := latestStanding(t, d).GetShown().GetId().GetValue(); got != "d1" {
+		t.Fatalf("shown id = %q, want d1", got)
+	}
+}
+
+func TestRepublishPublishesNoneWhenNoDigestStands(t *testing.T) {
+	// Arrange
+	w := newWorld(t)
+	d := w.digester()
+
+	// Act
+	err := d.Republish(context.Background())
+
+	// Assert
+	if err != nil || latestStanding(t, d).GetNone() == nil {
+		t.Fatalf("Republish = %v, standing %v, want none", err, latestStanding(t, d))
+	}
+}
+
+func TestRepublishReportsAnUnreadableStore(t *testing.T) {
+	// Arrange
+	w := newWorld(t)
+	w.store.stateErr = errScripted
+	d := w.digester()
+
+	// Act
+	err := d.Republish(context.Background())
+
+	// Assert
+	if !errors.Is(err, errScripted) {
+		t.Fatalf("Republish = %v, want the store's failure", err)
+	}
+	if len(records(w.log, "error", opStanding)) != 1 {
+		t.Fatalf("records = %v, want one ERROR", w.log.Records())
+	}
+	if _, ok := d.Topic().Latest(); ok {
+		t.Fatal("a standing was published from an unreadable store")
+	}
+}
+
+func TestRepublishRefusesAStoredDigestThatDoesNotDecode(t *testing.T) {
+	// Arrange
+	w := newWorld(t)
+	w.store.state.LatestID = "d1"
+	w.store.state.Standing = []byte{0xff, 0xff}
+	d := w.digester()
+
+	// Act
+	err := d.Republish(context.Background())
+
+	// Assert
+	if err == nil || len(records(w.log, "error", opStanding)) != 1 {
+		t.Fatalf("Republish = %v, records %v, want a refusal recorded at ERROR", err, w.log.Records())
+	}
+}
+
+func TestDecodeStandingRefusesAnIncompleteOverlay(t *testing.T) {
+	tests := []struct {
+		name    string
+		overlay *frontendv1.NewsDigestOverlay
+	}{
+		{name: "no id", overlay: &frontendv1.NewsDigestOverlay{}},
+		{name: "a section with no kind", overlay: &frontendv1.NewsDigestOverlay{
+			Id:       &frontendv1.NewsDigestId{Value: "d"},
+			Sections: []*frontendv1.NewsDigestSection{{Items: []*frontendv1.NewsDigestItem{{}}}},
+		}},
+		{name: "a section with no items", overlay: &frontendv1.NewsDigestOverlay{
+			Id:       &frontendv1.NewsDigestId{Value: "d"},
+			Sections: []*frontendv1.NewsDigestSection{{Kind: kinds[0].arm()}},
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			encoded, err := proto.Marshal(tt.overlay)
+			if err != nil {
+				t.Fatalf("marshal: %v", err)
+			}
+
+			// Act
+			_, err = decodeStanding(encoded)
+
+			// Assert
+			if err == nil {
+				t.Fatal("decodeStanding = nil, want a refusal")
+			}
+		})
+	}
+}
+
+func TestDismissingTheStandingDigestPublishesNone(t *testing.T) {
+	// Arrange
+	w := newWorld(t)
+	w.store.state.LatestID = "d1"
+	w.store.state.Standing = encodedOverlay(t, "d1", 1)
+	d := w.digester()
+	if err := d.Republish(context.Background()); err != nil {
+		t.Fatalf("Republish: %v", err)
+	}
+
+	// Act
+	resp, err := d.Dismiss(context.Background(), dismissReq("d1"))
+
+	// Assert
+	if err != nil || resp.GetSuccess() == nil {
+		t.Fatalf("Dismiss = (%v, %v), want success", resp, err)
+	}
+	if latestStanding(t, d).GetNone() == nil {
+		t.Fatalf("standing = %v, want none", latestStanding(t, d))
+	}
+}
+
+func TestDismissingTwiceIsSuccess(t *testing.T) {
+	// Arrange
+	w := newWorld(t)
+	w.store.state.LatestID = "d1"
+	w.store.state.Standing = encodedOverlay(t, "d1", 1)
+	d := w.digester()
+	if _, err := d.Dismiss(context.Background(), dismissReq("d1")); err != nil {
+		t.Fatalf("first Dismiss: %v", err)
+	}
+
+	// Act
+	resp, err := d.Dismiss(context.Background(), dismissReq("d1"))
+
+	// Assert
+	if err != nil || resp.GetSuccess() == nil {
+		t.Fatalf("second Dismiss = (%v, %v), want success", resp, err)
+	}
+}
+
+func TestDismissingAnUnknownDigestAnswersUnknownDigest(t *testing.T) {
+	// Arrange
+	w := newWorld(t)
+	w.store.state.LatestID = "d2"
+	w.store.state.Standing = encodedOverlay(t, "d2", 1)
+	d := w.digester()
+	if err := d.Republish(context.Background()); err != nil {
+		t.Fatalf("Republish: %v", err)
+	}
+
+	// Act
+	resp, err := d.Dismiss(context.Background(), dismissReq("d1"))
+
+	// Assert
+	if err != nil || resp.GetError().GetUnknownDigest() == nil {
+		t.Fatalf("Dismiss = (%v, %v), want unknown_digest", resp, err)
+	}
+	if latestStanding(t, d).GetShown() == nil {
+		t.Fatal("an unknown dismiss took the standing digest down")
+	}
+}
+
+func TestDismissReportsAStoreFailure(t *testing.T) {
+	// Arrange
+	w := newWorld(t)
+	w.store.dismissErr = errScripted
+	d := w.digester()
+
+	// Act
+	_, err := d.Dismiss(context.Background(), dismissReq("d1"))
+
+	// Assert
+	if !errors.Is(err, errScripted) || len(records(w.log, "error", opDismiss)) != 1 {
+		t.Fatalf("Dismiss = %v, records %v, want the failure recorded at ERROR", err, w.log.Records())
+	}
+}
