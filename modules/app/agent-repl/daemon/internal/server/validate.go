@@ -640,6 +640,14 @@ func validateUpdatePersistentWifiModeRequest(req *agentreplv1.UpdatePersistentWi
 	return nil
 }
 
+// validateDismissNewsDigestRequest refuses a dismiss naming no digest.
+func validateDismissNewsDigestRequest(req *agentreplv1.DismissNewsDigestRequest) *connect.Error {
+	if req.GetId().GetValue() == "" {
+		return invalid("id.value", "the digest being dismissed is required")
+	}
+	return nil
+}
+
 func validateUpdateShutdownScheduleRequest(req *agentreplv1.UpdateShutdownScheduleRequest) *connect.Error {
 	if req.GetAction() == nil {
 		return invalid("action", "a shutdown-schedule action arm is required")

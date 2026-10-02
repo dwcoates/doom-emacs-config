@@ -577,6 +577,12 @@ func (s *server) watchDaemon(
 	// THE PERSISTENT-WIFI STANDING IS AN EMACS STREAM'S ALONE too, for the
 	// same reason: a webview draws it as its topbar's chip.
 	var wifi <-chan *agentreplv1.PersistentWifiState
+	// THE NEWS DIGEST STANDING IS A WEBVIEW STREAM'S ALONE: only a webview
+	// draws the overlay, so an Emacs stream's select never takes that case.
+	var digest <-chan *agentreplv1.NewsDigestStanding
+	if msg.GetWebview() != nil {
+		digest = s.deps.NewsDigest.Topic().Subscribe(streamCtx)
+	}
 	if emacs := msg.GetEmacs(); emacs != nil {
 		w.emacs, w.elispBuild = true, emacs.GetElispBuild()
 		faults = s.deps.LoudFaults.Subscribe(streamCtx)
@@ -631,7 +637,7 @@ func (s *server) watchDaemon(
 		case addressed := <-w.elisp:
 			push, fromState = addressed, false
 		case standing, ok := <-faults:
-			wrapped, ended := emacsStandingPush(s.log, standing, ok, "fault set",
+			wrapped, ended := standingPush(s.log, standing, ok, "fault set",
 				func(v *agentreplv1.DaemonFaultsStanding) *agentreplv1.WatchDaemonResponse {
 					return &agentreplv1.WatchDaemonResponse{
 						Push: &agentreplv1.WatchDaemonResponse_FaultsStanding{FaultsStanding: v},
@@ -645,10 +651,24 @@ func (s *server) watchDaemon(
 			}
 			push, fromState = wrapped, false
 		case standing, ok := <-wifi:
-			wrapped, ended := emacsStandingPush(s.log, standing, ok, "persistent-wifi standing",
+			wrapped, ended := standingPush(s.log, standing, ok, "persistent-wifi standing",
 				func(v *agentreplv1.PersistentWifiState) *agentreplv1.WatchDaemonResponse {
 					return &agentreplv1.WatchDaemonResponse{
 						Push: &agentreplv1.WatchDaemonResponse_PersistentWifi{PersistentWifi: v},
+					}
+				})
+			if ended {
+				return nil
+			}
+			if wrapped == nil {
+				continue
+			}
+			push, fromState = wrapped, false
+		case standing, ok := <-digest:
+			wrapped, ended := standingPush(s.log, standing, ok, "news digest standing",
+				func(v *agentreplv1.NewsDigestStanding) *agentreplv1.WatchDaemonResponse {
+					return &agentreplv1.WatchDaemonResponse{
+						Push: &agentreplv1.WatchDaemonResponse_NewsDigest{NewsDigest: v},
 					}
 				})
 			if ended {
@@ -673,12 +693,13 @@ func (s *server) watchDaemon(
 	}
 }
 
-// emacsStandingPush turns one receive from an Emacs-only standing topic
-// (the loud faults, the persistent-wifi standing) into the frame it sends. A
+// standingPush turns one receive from a standing topic only one kind of
+// client is told (Emacs's loud faults and persistent-wifi standing, a
+// webview's news digest standing) into the frame it sends. A
 // closed subscription answers ended; an empty value is a publisher's bug,
 // recorded at ERROR and answered as no frame; anything else is wrapped. what
 // names the value in that record.
-func emacsStandingPush[T interface {
+func standingPush[T interface {
 	comparable
 	proto.Message
 }](log dlog.Logger, v T, ok bool, what string, wrap func(T) *agentreplv1.WatchDaemonResponse) (*agentreplv1.WatchDaemonResponse, bool) {
