@@ -93,6 +93,7 @@ import { SetWorkspacePriorityResponseSchema } from "../../../proto/gen/ts/agentr
 import { CreateTaskResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_create_task_pb";
 import { UpdateTaskResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_task_pb";
 import { AssignWorkspaceTaskResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_assign_workspace_task_pb";
+import { SetEffortResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_effort_pb";
 import { SetModelResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_model_pb";
 import { SetPermissionModeResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_permission_mode_pb";
 import { SelectAccountResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_account_pb";
@@ -1327,6 +1328,12 @@ export function createFakeDaemon(): FakeDaemon {
       setModel(request) {
         record("setModel", request);
         return answerFor("setModel", SetModelResponseSchema, {
+          result: { case: "success", value: {} },
+        });
+      },
+      setEffort(request) {
+        record("setEffort", request);
+        return answerFor("setEffort", SetEffortResponseSchema, {
           result: { case: "success", value: {} },
         });
       },

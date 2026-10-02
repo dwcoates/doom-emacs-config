@@ -25,7 +25,7 @@ import { create, type DescMessage, type MessageInitShape } from "@bufbuild/proto
 
 import { WorkspaceRefSchema, RepositoryRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { TurnIdSchema } from "../../../proto/gen/ts/conversation/v1/turn_pb";
-import { AgentModelSchema, ModelOptionSchema } from "../../../proto/gen/ts/conversation/v1/api_pb";
+import { AgentEffortLevel, AgentModelSchema, ModelOptionSchema } from "../../../proto/gen/ts/conversation/v1/api_pb";
 import { UserSaidSchema } from "../../../proto/gen/ts/conversation/v1/user_pb";
 import { SessionCompactScope } from "../../../proto/gen/ts/conversation/v1/session_pb";
 import { SessionCommand } from "../../../proto/gen/ts/conversation/v1/slash_command_pb";
@@ -49,9 +49,11 @@ import {
 } from "../../../proto/gen/ts/frontend/v1/footer_pb";
 import {
   TopbarAccountOptionSchema,
+  TopbarEffortSelectorSchema,
   TopbarViewSchema,
   TopbarWarningSchema,
   type TopbarAccountOption,
+  type TopbarEffortSelector,
   type TopbarView,
 } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
 import {
@@ -2023,6 +2025,12 @@ type TopbarInit = {
   shares?: boolean;
   warnings?: WarningInit[];
   permissionMode?: string;
+  /**
+   * The effort selector. Omitted, the selector is ABSENT (the no-session
+   * dash); "unsupported" draws the model-takes-no-level arm; a level name
+   * draws the supported arm with that level current over low, medium, high.
+   */
+  effort?: "unsupported" | "low" | "medium" | "high";
 };
 
 /** One offered root: the arm is the state, exactly as the cell's own is. */
@@ -2034,6 +2042,28 @@ function accountOption(init: AccountOptionInit): TopbarAccountOption {
       init.email === undefined
         ? { case: "loggedOut", value: {} }
         : { case: "loggedIn", value: { email: init.email } },
+  });
+}
+
+/** The levels the fixture's effort selector offers, in the served order. */
+export const EFFORT_LEVELS = [
+  { level: AgentEffortLevel.LOW, displayName: "low" },
+  { level: AgentEffortLevel.MEDIUM, displayName: "medium" },
+  { level: AgentEffortLevel.HIGH, displayName: "high" },
+] as const;
+
+/** The effort selector a TopbarInit asks for; see TopbarInit.effort. */
+function effortSelector(effort: TopbarInit["effort"]): TopbarEffortSelector | undefined {
+  if (effort === undefined) return undefined;
+  if (effort === "unsupported") {
+    return create(TopbarEffortSelectorSchema, { support: { case: "unsupported", value: {} } });
+  }
+  const current = EFFORT_LEVELS.find((option) => option.displayName === effort);
+  return create(TopbarEffortSelectorSchema, {
+    support: {
+      case: "supported",
+      value: { current: { ...current }, options: EFFORT_LEVELS.map((option) => ({ ...option })) },
+    },
   });
 }
 
@@ -2103,6 +2133,7 @@ export function topbarView(init?: TopbarInit): TopbarView {
         ]
       ).map(accountOption),
     },
+    effortSelector: effortSelector(init?.effort),
     permissionModePicker: {
       current:
         PERMISSION_MODES.find((m) => m.mode === (init?.permissionMode ?? "auto")) ??

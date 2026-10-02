@@ -15,6 +15,7 @@ import { createGrpcWebTransport, createConnectTransport } from "@connectrpc/conn
 
 import { AgentRepl } from "../../../proto/gen/ts/agentrepl/v1/service_pb";
 import { create } from "@bufbuild/protobuf";
+import { AgentEffortLevel } from "../../../proto/gen/ts/conversation/v1/api_pb";
 import { SubmitPromptResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_submit_prompt_pb";
 import { createFakeDaemon, ROOT_FEED, REFUSAL_FACTS, type FakeDaemon } from "./fake-daemon";
 import {
@@ -98,6 +99,7 @@ describe("every rpc answers", () => {
       ["assignWorkspaceTask", client.assignWorkspaceTask({ workspace })],
       ["setModel", client.setModel({ workspace })],
       ["setPermissionMode", client.setPermissionMode({ workspace, mode: "default" })],
+      ["setEffort", client.setEffort({ workspace, effort: AgentEffortLevel.HIGH })],
       ["updateHeldPrompt", client.updateHeldPrompt({ workspace, action: { case: "release", value: {} } })],
       ["answerHeldOffer", client.answerHeldOffer({ workspace })],
       ["updateShutdownSchedule", client.updateShutdownSchedule({ action: { case: "cancel", value: {} } })],

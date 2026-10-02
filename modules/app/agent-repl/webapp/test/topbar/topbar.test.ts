@@ -19,6 +19,7 @@ import {
 } from "../../src/failure/sink.js";
 import { GEOMETRY, RecordingSink, appContext, openPanel, topbarContext } from "./fixtures.js";
 import { withoutBlockComments } from "../source-text.js";
+import { cascadedValue, installStylesheet } from "../stylesheet.js";
 
 /** A complete view; each test overrides only what it is about. */
 function view(overrides: Partial<TopbarView> = {}): TopbarView {
@@ -116,7 +117,7 @@ describe("drawTopbarView", () => {
     const { tc } = topbarContext();
     const row = drawTopbarView(sessionlessView("hibernated since 14:03"), tc);
     expect([...row.querySelectorAll("[data-no-session]")].map((el) => el.getAttribute("data-no-session")))
-      .toEqual(["model", "mode", "fast"]);
+      .toEqual(["model", "effort", "mode", "fast"]);
   });
 
   it("keeps the cells in one order whether or not there is a session", () => {
@@ -808,6 +809,62 @@ describe("the account cell", () => {
       row.querySelector(".topbar-account-cell")?.getAttribute("data-reveal-anchor"),
       row.querySelector(".topbar-account")?.getAttribute("data-reveal-anchor"),
     ]).toEqual(["account", null]);
+  });
+});
+
+describe("the effort selector's place and form", () => {
+  it("is drawn between the model selector and the permission-mode picker", () => {
+    // Arrange
+    const { tc } = topbarContext();
+    const withEffort = view({
+      effortSelector: create(TopbarViewSchema, {
+        effortSelector: {
+          support: {
+            case: "supported",
+            value: { current: { level: 2, displayName: "medium" }, options: [{ level: 2, displayName: "medium" }] },
+          },
+        },
+      }).effortSelector,
+    });
+    // Act
+    const classes = [...(drawTopbarView(withEffort, tc).querySelector(".topbar-right")?.children ?? [])].map(
+      (el) => el.className.split(" ")[0],
+    );
+    // Assert
+    expect(classes.slice(classes.indexOf("topbar-model"), classes.indexOf("topbar-model") + 3)).toEqual([
+      "topbar-model",
+      "topbar-effort",
+      "topbar-mode",
+    ]);
+  });
+
+  // THE SAME FORM AS ITS NEIGHBOURS (owner, 2026-10-01): its button, its rows
+  // and its dash compute exactly what the permission-mode picker's do, so a
+  // later change to one that leaves the other behind fails here.
+  it.each([
+    ["the button", "topbar-mode-button", "topbar-effort-button", ""],
+    ["a menu row", "topbar-mode-option", "topbar-effort-option", ""],
+    ["the dash", "topbar-mode", "topbar-effort", "data-no-session"],
+  ])("draws %s as the permission-mode picker draws it", (_what, mode, effort, attribute) => {
+    // Arrange
+    const remove = installStylesheet();
+    const make = (className: string): HTMLElement => {
+      const element = document.createElement(className.endsWith("-option") || className.endsWith("-button") ? "button" : "span");
+      element.className = className;
+      if (attribute !== "") element.setAttribute(attribute, "");
+      document.body.append(element);
+      return element;
+    };
+    const modeElement = make(mode);
+    const effortElement = make(effort);
+    const properties = ["padding", "border", "border-radius", "font-size", "font-family", "color", "white-space", "cursor", "background"];
+    // Act
+    const computed = (element: HTMLElement): string[] => properties.map((property) => cascadedValue(element, property));
+    // Assert
+    expect(computed(effortElement)).toEqual(computed(modeElement));
+    modeElement.remove();
+    effortElement.remove();
+    remove();
   });
 });
 
