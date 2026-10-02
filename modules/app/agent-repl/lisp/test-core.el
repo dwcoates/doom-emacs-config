@@ -390,6 +390,12 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
     ("history.el" agent-repl-history-search
      "[agent-repl] input history is empty"
      "answers the interactive history search")
+    ("host.el" agent-repl-host-request-switch
+     "[agent-repl] Cannot switch to %s: the daemon has not registered it"
+     "explains why the user's switch request went nowhere")
+    ("host.el" agent-repl-host-request-switch
+     "[agent-repl] Cannot switch to %s: no daemon connection"
+     "explains why the user's switch request went nowhere")
     ("input.el" agent-repl--input-rollback-done
      "%s"
      "tells the user the rollback they confirmed is done, with the files it restored")

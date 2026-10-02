@@ -90,6 +90,12 @@ COLLAPSED non-nil makes the daemon hold the section collapsed."
 (defvar agent-repl-test-roster--current-name nil
   "What `agent-repl--ws-current-name' answers during a test.")
 
+(defvar agent-repl-test-roster--landed nil
+  "Workspaces whose input window the roster asked to land in, newest first.")
+
+(defvar agent-repl-test-roster--following-at-switch :unset
+  "`agent-repl-roster-following' as the stubbed switch saw it.")
+
 (defmacro agent-repl-test-roster--with-editor (&rest body)
   "Run BODY with the editor and host boundaries stubbed and recorded.
 persp-mode is absent in batch, so workspace creation is reduced to the
@@ -117,7 +123,14 @@ whose calls are the observation."
            (agent-repl-roster--bringup-carry nil)
            (agent-repl-roster--held-id nil)
            (agent-repl-host-last-selected-id nil)
-           (agent-repl-host-reselect-pending nil))
+           (agent-repl-host-reselect-pending nil)
+           (agent-repl-host--select-in-flight nil)
+           (agent-repl-host--select-queued nil)
+           (agent-repl-host-last-request nil)
+           (agent-repl-roster--judged-current nil)
+           (agent-repl-roster--pushed-at nil)
+           (agent-repl-test-roster--landed nil)
+           (agent-repl-test-roster--following-at-switch :unset))
        (cl-letf (((symbol-function 'agent-repl--ws-create)
                   (lambda (ws &optional dir)
                     (push ws agent-repl-test-roster--created)
@@ -130,7 +143,12 @@ whose calls are the observation."
                  ((symbol-function 'agent-repl--ws-rename-persp)
                   (lambda (_old _new) t))
                  ((symbol-function 'agent-repl--ws-switch)
-                  (lambda (ws &rest _) (push ws agent-repl-test-roster--switched) ws))
+                  (lambda (ws &rest _)
+                    (setq agent-repl-test-roster--following-at-switch
+                          agent-repl-roster-following)
+                    (push ws agent-repl-test-roster--switched) ws))
+                 ((symbol-function 'agent-repl--maybe-autoselect-input)
+                  (lambda (ws) (push ws agent-repl-test-roster--landed)))
                  ((symbol-function 'agent-repl--ws-current-name)
                   (lambda () agent-repl-test-roster--current-name))
                  ((symbol-function 'agent-repl--ws-log-routable-p)
@@ -1038,22 +1056,211 @@ that follows must not care which of the two got there first."
     ;; Assert
     (should (equal agent-repl-test-roster--switched '("two")))))
 
-(ert-deftest agent-repl-test-roster-emacs-own-selection-switches-nothing ()
-  "A `current' matching Emacs's own last selection is not a request.
-Re-selection is idempotent, which is what keeps this from looping."
+(defun agent-repl-test-roster--two-tabs (current)
+  "Return a roster with tabs one (a) and two (b) and CURRENT selected."
+  (agent-repl-test-roster--roster
+   :sections (list (agent-repl-test-roster--section
+                    "repo" (list (agent-repl-test-roster--row "a" "one" :ready)
+                                 (agent-repl-test-roster--row "b" "two" :ready))))
+   :current current))
+
+(ert-deftest agent-repl-test-roster-a-current-emacs-selected-before-still-moves-the-frame ()
+  "A `current' naming a workspace Emacs once selected is still obeyed.
+Regression, 2026-10-02: every id Emacs had ever selected was taken for
+\"Emacs's own\" and skipped, so a sidebar click to a visited workspace
+went nowhere.  Emacs never leads now, so there is nothing to skip."
   ;; Arrange
   (agent-repl-test-roster--with-editor
     (setq agent-repl-test-roster--current-name "one"
           agent-repl-host-last-selected-id "b")
     ;; Act
-    (agent-repl-roster-apply
-     (agent-repl-test-roster--roster
-      :sections (list (agent-repl-test-roster--section
-                       "repo" (list (agent-repl-test-roster--row "a" "one" :ready)
-                                    (agent-repl-test-roster--row "b" "two" :ready))))
-      :current "b"))
+    (agent-repl-roster-apply (agent-repl-test-roster--two-tabs "b"))
+    ;; Assert
+    (should (equal agent-repl-test-roster--switched '("two")))))
+
+(ert-deftest agent-repl-test-roster-a-current-is-deferred-behind-another-pending-request ()
+  "While Emacs's request for another workspace is unanswered, a `current'
+naming something else moves nothing: rapid presses do not walk the frame
+through every stop."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (setq agent-repl-test-roster--current-name "one")
+    (agent-repl-roster-apply (agent-repl-test-roster--two-tabs "a"))
+    (setq agent-repl-host--select-in-flight "one")
+    ;; Act
+    (agent-repl-roster-apply (agent-repl-test-roster--two-tabs "b"))
     ;; Assert
     (should (equal agent-repl-test-roster--switched nil))))
+
+(ert-deftest agent-repl-test-roster-a-current-naming-the-pending-request-is-followed ()
+  "The push stamping the very workspace Emacs requested moves the frame at
+once, without waiting for the request's answer."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (setq agent-repl-test-roster--current-name "one")
+    (agent-repl-roster-apply (agent-repl-test-roster--two-tabs "a"))
+    (setq agent-repl-host--select-in-flight "two")
+    (cl-letf (((symbol-function 'agent-repl-host-ref)
+               (lambda (ws) (and (equal ws "two") (list :id "b" :dir "/w/b")))))
+      ;; Act
+      (agent-repl-roster-apply (agent-repl-test-roster--two-tabs "b")))
+    ;; Assert
+    (should (equal agent-repl-test-roster--switched '("two")))))
+
+(ert-deftest agent-repl-test-roster-a-deferred-current-is-applied-once-nothing-is-pending ()
+  "Re-applying reads the LAST accepted roster, so a deferred `current' is
+obeyed once the pending request is answered: the last push wins."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (setq agent-repl-test-roster--current-name "one"
+          agent-repl-host--select-in-flight "one")
+    (agent-repl-roster-apply (agent-repl-test-roster--two-tabs "b"))
+    (setq agent-repl-host--select-in-flight nil)
+    ;; Act
+    (agent-repl-roster-apply-current)
+    ;; Assert
+    (should (equal agent-repl-test-roster--switched '("two")))))
+
+(ert-deftest agent-repl-test-roster-a-followed-switch-is-marked-as-following ()
+  "The switch runs with `agent-repl-roster-following' bound, so the
+activation hook sends no SelectWorkspace echo."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (setq agent-repl-test-roster--current-name "one")
+    ;; Act
+    (agent-repl-roster-apply (agent-repl-test-roster--two-tabs "b"))
+    ;; Assert
+    (should (eq agent-repl-test-roster--following-at-switch t))))
+
+(ert-deftest agent-repl-test-roster-a-followed-switch-lands-in-the-input-window ()
+  "Following `current' lands the destination's input window at once."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (setq agent-repl-test-roster--current-name "one")
+    ;; Act
+    (agent-repl-roster-apply (agent-repl-test-roster--two-tabs "b"))
+    ;; Assert
+    (should (equal agent-repl-test-roster--landed '("two")))))
+
+(ert-deftest agent-repl-test-roster-a-current-already-shown-lands-nothing ()
+  "No switch means no landing: the user's window is left where it is."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (setq agent-repl-test-roster--current-name "two")
+    ;; Act
+    (agent-repl-roster-apply (agent-repl-test-roster--two-tabs "b"))
+    ;; Assert
+    (should (equal agent-repl-test-roster--landed nil))))
+
+(ert-deftest agent-repl-test-roster-a-current-without-a-tab-is-recorded-at-info ()
+  "A `current' whose workspace has no tab yet is a durable decision."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let ((infos nil))
+      (setq agent-repl-test-roster--current-name "one")
+      (cl-letf (((symbol-function 'agent-repl--info)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) infos))))
+        ;; Act
+        (agent-repl-roster-apply
+         (agent-repl-test-roster--roster
+          :sections (list (agent-repl-test-roster--section
+                           "repo" (list (agent-repl-test-roster--row "a" "one" :ready))))
+          :current "zz")))
+      ;; Assert
+      (should (member "elisp.roster.current: no tab yet id=zz" infos)))))
+
+(ert-deftest agent-repl-test-roster-a-deferred-current-is-recorded-at-info ()
+  "A `current' put off behind a pending request is a durable decision."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let ((infos nil))
+      (setq agent-repl-test-roster--current-name "one"
+            agent-repl-host--select-in-flight "one")
+      (cl-letf (((symbol-function 'agent-repl--info)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) infos))))
+        ;; Act
+        (agent-repl-roster-apply (agent-repl-test-roster--two-tabs "b")))
+      ;; Assert
+      (should (member "elisp.roster.current: deferred id=b ws=two requested=one" infos)))))
+
+(ert-deftest agent-repl-test-roster-a-followed-current-is-recorded-at-info ()
+  "The follow is recorded at INFO with its push arrival."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let ((infos nil))
+      (setq agent-repl-test-roster--current-name "one")
+      (cl-letf (((symbol-function 'agent-repl--info)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) infos))))
+        ;; Act
+        (agent-repl-roster-apply (agent-repl-test-roster--two-tabs "b")))
+      ;; Assert
+      (should (cl-find-if (lambda (m)
+                            (string-match-p
+                             "\\`elisp\\.roster\\.current: followed ws=two id=b from=one pushed-at=[0-9:.]+ since-push-ms=[0-9]+ since-request-ms=none\\'"
+                             m))
+                          infos)))))
+
+(ert-deftest agent-repl-test-roster-a-followed-request-records-its-latency ()
+  "A follow of Emacs's own request states the milliseconds since it."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let ((infos nil))
+      (setq agent-repl-test-roster--current-name "one"
+            agent-repl-host-last-request (cons "two" (float-time)))
+      (cl-letf (((symbol-function 'agent-repl--info)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) infos))))
+        ;; Act
+        (agent-repl-roster-apply (agent-repl-test-roster--two-tabs "b")))
+      ;; Assert
+      (should (cl-find-if (lambda (m) (string-match-p "since-request-ms=[0-9]+\\'" m))
+                          infos)))))
+
+(ert-deftest agent-repl-test-roster-already-shown-is-info-the-first-time ()
+  "The first push naming the shown workspace records the judgment at INFO."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let ((infos nil))
+      (setq agent-repl-test-roster--current-name "two")
+      (cl-letf (((symbol-function 'agent-repl--info)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) infos))))
+        ;; Act
+        (agent-repl-roster-apply (agent-repl-test-roster--two-tabs "b")))
+      ;; Assert
+      (should (member "elisp.roster.current: already shown ws=two" infos)))))
+
+(ert-deftest agent-repl-test-roster-already-shown-repeats-drop-to-debug ()
+  "Every push carries `current'; a repeat judgment is not re-recorded at INFO."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let ((infos nil))
+      (setq agent-repl-test-roster--current-name "two")
+      (agent-repl-roster-apply (agent-repl-test-roster--two-tabs "b"))
+      (cl-letf (((symbol-function 'agent-repl--info)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) infos))))
+        ;; Act
+        (agent-repl-roster-apply (agent-repl-test-roster--two-tabs "b")))
+      ;; Assert
+      (should-not (member "elisp.roster.current: already shown ws=two" infos)))))
+
+(ert-deftest agent-repl-test-roster-the-switch-precedes-the-finish-hooks ()
+  "The selection is applied before the edge hooks run, so a switch the
+user is waiting on never queues behind repaint and notification work."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let ((seen :unset))
+      (setq agent-repl-test-roster--current-name "one")
+      (agent-repl-roster-apply (agent-repl-test-roster--two-tabs "a"))
+      (setq agent-repl-roster-status-change-functions
+            (list (lambda (&rest _) (setq seen agent-repl-test-roster--switched))))
+      ;; Act: row b changes status in the same push that selects it.
+      (agent-repl-roster-apply
+       (agent-repl-test-roster--roster
+        :sections (list (agent-repl-test-roster--section
+                         "repo" (list (agent-repl-test-roster--row "a" "one" :ready)
+                                      (agent-repl-test-roster--row "b" "two" :done))))
+        :current "b"))
+      ;; Assert
+      (should (equal seen '("two"))))))
 
 (ert-deftest agent-repl-test-roster-a-current-during-a-relink-switches-nothing ()
   "A roster push landing mid re-registration must not move the frame.

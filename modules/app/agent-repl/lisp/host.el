@@ -82,6 +82,7 @@
 (declare-function agent-repl--ws-add-activated-hook "workspace" (fn))
 (defvar agent-repl--eager-open-in-progress)
 (defvar agent-repl--global-log-scope)
+(defvar agent-repl-roster-following)
 
 (declare-function agent-repl--notification-activate "notifications" (ws))
 (declare-function agent-repl--notification-activate "notifications" (ws))
@@ -115,7 +116,7 @@ is the only verb that sets it — so the first thing it stamps is whatever
 Emacs re-registered first, which is an arbitrary order and not a choice
 the user made.  This is set for the length of a re-registration and
 cleared when the re-select is acknowledged; while it stands,
-`agent-repl-roster-react-to-current' does not move the frame, so a roster
+`agent-repl-roster-apply-current' does not move the frame, so a roster
 push carrying that arbitrary `current' cannot drag the user onto the
 other workspace's panel.")
 
@@ -443,17 +444,77 @@ one place the handover walk lives."
 
 ;;;; ---- Select ----
 
+;; THE DAEMON IS THE ONE PLACE A WORKSPACE SWITCH HAPPENS.  Every switch
+;; trigger Emacs owns -- the adjacent and slot chords, the pickers, a
+;; notification click -- REQUESTS the switch here
+;; (`agent-repl-host-request-switch') and moves nothing; the frame moves only
+;; when the roster's `current' names a workspace other than the one shown
+;; (`agent-repl-roster-apply-current'), exactly as a sidebar click does.
+;;
+;; Regression, 2026-10-02: Emacs used to switch first and select after, and
+;; the roster handler skipped every `current' it took for "Emacs's own" -- a
+;; list that grew to every workspace visited, so a sidebar click to any of
+;; them was silently ignored.  With Emacs never leading there is nothing of
+;; its own to recognize, and that bookkeeping is gone; watch for it
+;; returning.
+
+(defvar agent-repl-host--select-in-flight nil
+  "The workspace whose SelectWorkspace awaits its answer, or nil.
+EMACS SENDS ONE SELECTION AT A TIME.  Every unary call rides its own
+socket, so two selects sent back to back -- `s-}' pressed twice -- reach
+the daemon in whatever order its accepts are scheduled, and the older one
+could land LAST, leaving `current' on a workspace the user had already
+walked past.  With one in flight, the daemon receives Emacs's selections
+in the order the user made them, and the last press is the last stamp.")
+
+(defvar agent-repl-host--select-queued nil
+  "The newest selection waiting behind the one in flight, or nil.
+A cons (WS . ON-SETTLED).  Only the newest is kept: a selection the user
+has already moved past is never sent, because the daemon would stamp it
+`current' only for the next one to overwrite it.  The one it replaces is
+settled `:superseded' so its caller is not left waiting.")
+
+(declare-function agent-repl-roster-apply-current "roster" ())
+
+(defun agent-repl-host-pending-selection ()
+  "Return the workspace most recently REQUESTED and not yet answered, or nil.
+The queued selection when there is one, else the one in flight.  Adjacent
+keys step from it while it stands (so rapid presses walk before the roster
+catches up), and `agent-repl-roster-apply-current' defers any `current'
+naming another workspace until it is answered."
+  (or (car agent-repl-host--select-queued)
+      agent-repl-host--select-in-flight))
+
 (defun agent-repl-host-select (ws &optional on-settled)
   "Tell the daemon the user switched to workspace WS.
 ON-SETTLED, when given, is called with `:success', `:error' or
 `:failure' once the call has an outcome — the one moment a caller
 holding state on the selection\='s behalf (the link-up re-assertion) may
-let go of it, whichever way it went.
+let go of it, whichever way it went — and with `:superseded' when a
+newer selection replaced it before it was sent.
 Idempotent by contract — re-selecting the current workspace succeeds —
 and the daemon's own act of stamping `current' also CLEARS the
-workspace's attention marker, which is why no ack verb exists.  Answers
-nil without calling anything when WS has no ref yet: an unregistered
-workspace has no identity to select."
+workspace's attention marker, which is why no ack verb exists.
+
+While another selection is in flight this one WAITS
+\(`agent-repl-host--select-in-flight'), replacing any older one already
+waiting, and is sent when the one in flight is answered.  Answers t when
+the selection was sent or queued, nil when it was skipped because WS has
+no ref yet (an unregistered workspace has no identity to select) or there
+is no connection to send it on."
+  (if agent-repl-host--select-in-flight
+      (let ((older agent-repl-host--select-queued))
+        (setq agent-repl-host--select-queued (cons ws on-settled))
+        (agent-repl--info ws "elisp.host.select-queued ws=%s behind=%s superseded=%s"
+                          ws agent-repl-host--select-in-flight (or (car older) "none"))
+        (when (and older (cdr older))
+          (funcall (cdr older) :superseded))
+        t)
+    (agent-repl-host--send-select ws on-settled)))
+
+(defun agent-repl-host--send-select (ws on-settled)
+  "Send WS\='s SelectWorkspace now, holding the in-flight slot until it answers.
+ON-SETTLED is as `agent-repl-host-select' documents."
   (let ((ref (agent-repl-host-ref ws))
         (conn (or (agent-repl-host-conn ws) (agent-repl-link-primary))))
     (cond
@@ -465,32 +526,105 @@ workspace has no identity to select."
       nil)
      (t
       (agent-repl--info ws "elisp.host.select ws=%s id=%S" ws (plist-get ref :id))
-      (agent-repl-rpc-select-workspace
-       conn (list :workspace ref)
-       :on-response
-       (lambda (response)
-         (pcase (plist-get response :arm)
-           (:success
-            ;; RECORDED ONLY ON THE ACK.  `agent-repl-host-last-selected-id' is
-            ;; what Emacs believes the daemon stamped as `current'; a refusal is
-            ;; the daemon saying it stamped nothing, and recording the id anyway
-            ;; would leave Emacs disagreeing with the daemon about which
-            ;; workspace is current.
-            (setq agent-repl-host-last-selected-id (plist-get ref :id))
-            (agent-repl--log ws "elisp.host.selected ws=%s id=%S"
-                             ws (plist-get ref :id))
-            (when on-settled (funcall on-settled :success)))
-           (:error
-            (agent-repl-host--on-refused ws "select" (plist-get response :value))
-            (when on-settled (funcall on-settled :error)))
-           (arm
-            (agent-repl--error ws "elisp.host.select-unknown-arm ws=%s arm=%S" ws arm)
-            (when on-settled (funcall on-settled :error)))))
-       :on-failure
-       (lambda (detail)
-         (agent-repl--error ws "elisp.host.select-failed ws=%s detail=%S" ws detail)
-         (when on-settled (funcall on-settled :failure))))
+      (setq agent-repl-host--select-in-flight ws)
+      (condition-case err
+          (agent-repl-rpc-select-workspace
+           conn (list :workspace ref)
+           :on-response
+           (lambda (response)
+             (agent-repl-host--select-settled
+              ws (lambda () (agent-repl-host--select-answered ws ref response on-settled))))
+           :on-failure
+           (lambda (detail)
+             (agent-repl-host--select-settled
+              ws (lambda ()
+                   (agent-repl--error ws "elisp.host.select-failed ws=%s detail=%S" ws detail)
+                   (when on-settled (funcall on-settled :failure))))))
+        (error
+         ;; The call never went out, so nothing will ever answer it: the
+         ;; slot is released here or no later selection is ever sent.
+         (setq agent-repl-host--select-in-flight nil)
+         (agent-repl--error ws "elisp.host.select-unsent ws=%s id=%S error=%S"
+                            ws (plist-get ref :id) err)
+         (signal (car err) (cdr err))))
       t))))
+
+(defun agent-repl-host--select-settled (ws handle)
+  "Release WS\='s in-flight selection slot, run HANDLE, then drain.
+The slot is released FIRST, so a selection HANDLE itself starts (a
+handover\='s re-attach selects the current workspace) is sent at once
+rather than queued behind an answer that has already arrived.  The
+queued selection, if any, is sent next.  When nothing is left pending,
+the roster's `current' is applied again: a push that arrived while the
+selection was pending was DEFERRED (`agent-repl-roster-apply-current'),
+and this is the moment it is judged -- the last push wins."
+  (setq agent-repl-host--select-in-flight nil)
+  (agent-repl--log ws "elisp.host.select-settled ws=%s queued=%s"
+                   ws (or (car agent-repl-host--select-queued) "none"))
+  (unwind-protect
+      (funcall handle)
+    (if agent-repl-host--select-queued
+        (let ((next agent-repl-host--select-queued))
+          (setq agent-repl-host--select-queued nil)
+          (agent-repl-host-select (car next) (cdr next)))
+      (agent-repl-roster-apply-current))))
+
+(defun agent-repl-host--select-answered (ws ref response on-settled)
+  "Act on the daemon\='s RESPONSE to WS\='s selection of REF.
+ON-SETTLED is as `agent-repl-host-select' documents."
+  (pcase (plist-get response :arm)
+    (:success
+     ;; RECORDED ONLY ON THE ACK.  `agent-repl-host-last-selected-id' is
+     ;; what Emacs believes the daemon stamped as `current'; a refusal is
+     ;; the daemon saying it stamped nothing, and recording the id anyway
+     ;; would leave Emacs disagreeing with the daemon about which
+     ;; workspace is current.
+     (setq agent-repl-host-last-selected-id (plist-get ref :id))
+     (agent-repl--log ws "elisp.host.selected ws=%s id=%S" ws (plist-get ref :id))
+     (when on-settled (funcall on-settled :success)))
+    (:error
+     (agent-repl-host--on-refused ws "select" (plist-get response :value))
+     (when on-settled (funcall on-settled :error)))
+    (arm
+     (agent-repl--error ws "elisp.host.select-unknown-arm ws=%s arm=%S" ws arm)
+     (when on-settled (funcall on-settled :error)))))
+
+(defvar agent-repl-host-last-request nil
+  "The newest switch request, as (WS . FLOAT-TIME), or nil.
+Read by the roster's follow record, which states how long the frame took
+to arrive after the request: the end-to-end latency of a keyboard switch,
+from one log line.")
+
+(defun agent-repl-host-request-switch (ws trigger)
+  "Ask the daemon to make WS the current workspace; move nothing here.
+TRIGGER names what the user did (a symbol such as `cycle', `slot',
+`picker', `notification'), for the record.  The frame follows when the
+roster's `current' names WS (`agent-repl-roster-apply-current').
+
+A request that cannot be sent is LOUD: a switch the user asked for that
+goes nowhere is reported in the echo area and at WARN, never dropped.
+Answers t when the request was sent or queued, nil otherwise."
+  (let ((shown (agent-repl--ws-current-name)))
+    (setq agent-repl-host-last-request (cons ws (float-time)))
+    (agent-repl--info ws "elisp.host.switch-requested ws=%s trigger=%s shown=%s pending=%s"
+                      ws trigger shown (or (agent-repl-host-pending-selection) "none"))
+    (cond
+     ((null (agent-repl-host-ref ws))
+      (agent-repl--warn ws "elisp.host.switch-request-unsent ws=%s trigger=%s reason=no-ref"
+                        ws trigger)
+      (message "[agent-repl] Cannot switch to %s: the daemon has not registered it" ws)
+      nil)
+     ((null (or (agent-repl-host-conn ws) (agent-repl-link-primary)))
+      (agent-repl--warn ws "elisp.host.switch-request-unsent ws=%s trigger=%s reason=no-connection"
+                        ws trigger)
+      (message "[agent-repl] Cannot switch to %s: no daemon connection" ws)
+      nil)
+     (t
+      (agent-repl-host-select
+       ws (lambda (outcome)
+            (unless (eq outcome :success)
+              (agent-repl--info ws "elisp.host.switch-request-settled ws=%s outcome=%S"
+                                ws outcome))))))))
 
 (defun agent-repl-host-mark-viewed (ws)
   "Tell the daemon the user has now SEEN workspace WS.
@@ -537,10 +671,13 @@ yet: an unregistered workspace has no row to mark."
       t))))
 
 (defun agent-repl-host--on-workspace-activated (&rest _)
-  "Select the newly activated perspective's workspace with the daemon.
-Registered on workspace.el's perspective-activation boundary: an ordinary
-tab switch IS the SelectWorkspace, and it is also what clears the
-workspace's attention marker.
+  "Tell the daemon about a perspective activation Emacs made on its own.
+Registered on workspace.el's perspective-activation boundary.  The user's
+switch triggers never land here first -- they REQUEST the switch
+\(`agent-repl-host-request-switch') and the frame follows the roster, an
+activation this hook leaves alone (`agent-repl-roster-following').  What
+remains is a switch Emacs made itself, which the daemon is told about
+after the fact so its `current' matches the frame.
 
 A TRANSIENT BACKGROUND ACTIVATION IS NOT A TAB SWITCH, and reporting one
 as such told the daemon the user had chosen a workspace they never
@@ -556,10 +693,21 @@ the user was standing in.  It is the same flag the other two
 activation-reactive hooks consult for the same reason (see its
 docstring in `core.el\=')."
   (let ((ws (agent-repl--ws-current-name)))
-    (if agent-repl--eager-open-in-progress
-        (agent-repl--log ws "elisp.host.select-skipped reason=background-activation")
-      (when (and ws (agent-repl-host--entry ws))
-        (agent-repl-host-select ws)))))
+    (cond
+     (agent-repl--eager-open-in-progress
+      (agent-repl--log ws "elisp.host.select-skipped reason=background-activation"))
+     ;; THE ROSTER MOVED THE FRAME, so the daemon already holds this
+     ;; selection: echoing it back would race a newer request -- a sidebar
+     ;; click landing between the follow and the echo was overwritten by the
+     ;; echo and the frame went back.
+     (agent-repl-roster-following
+      (agent-repl--log ws "elisp.host.select-skipped ws=%s reason=followed-roster" ws))
+     ((and ws (agent-repl-host--entry ws))
+      ;; A switch Emacs made itself (a Doom command, a teardown landing, a
+      ;; file placed in its workspace): the daemon is told after the fact.
+      (agent-repl--info ws "elisp.host.select-local-activation ws=%s command=%S"
+                        ws this-command)
+      (agent-repl-host-select ws)))))
 
 ;;;; ---- Subscribe ----
 
@@ -1345,7 +1493,7 @@ The daemon that came back stamped `current\=' on whichever workspace
 re-registered first — an order Emacs happens to walk in, never a choice
 the user made — so Emacs says again what the user chose.  Clearing
 `agent-repl-host-reselect-pending\=' is what re-arms
-`agent-repl-roster-react-to-current\=', and every arm below clears it: a
+`agent-repl-roster-apply-current\=', and every arm below clears it: a
 suppression that outlived its re-select would deafen Emacs to the user\='s
 next sidebar click."
   (cond
