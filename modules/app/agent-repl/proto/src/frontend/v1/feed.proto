@@ -2157,7 +2157,11 @@ message FeedContextCutCleared {}
 // not a hole in the conversation.
 message FeedContextCutCompacted {
   FeedContextCutSummary summary = 1;
-  FeedContextCutFold fold = 2;
+  // Tag 2 (`fold`, FeedContextCutFold) is RETIRED: the summary bubble is
+  // always drawn open under the compaction bar, in its normal collapsed
+  // bubble form, with no disclosure of its own (owner ruling, 2026-10-01).
+  reserved 2;
+  reserved "fold";
   // Set when the compaction re-read the whole conversation at the uncached
   // rate — the cost compaction exists to avoid. A NOTICE on a compaction
   // that happened, not a failure of it; drawn as a warning on the divider.
@@ -2171,11 +2175,6 @@ message FeedContextCutColdRead {
 // The compression of the preceding conversation, drawn as markdown.
 message FeedContextCutSummary {
   string markdown = 1;
-}
-
-// Whether the compression is drawn folded.
-message FeedContextCutFold {
-  bool folded = 1;
 }
 
 // The entered-worktree payload.

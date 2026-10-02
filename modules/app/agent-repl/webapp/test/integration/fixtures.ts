@@ -974,7 +974,6 @@ const separationKind = (arm: SeparationArm): SeparationKind => {
         case: "compacted",
         value: {
           summary: { markdown: "the session so far" },
-          fold: { folded: true },
           coldRead: { evidence: { uncachedInputTokens: 40_000n } },
         },
       };

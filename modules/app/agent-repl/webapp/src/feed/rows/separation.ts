@@ -169,9 +169,7 @@ export function drawFeedContextCutCleared(_cleared: FeedContextCutCleared): null
  * the divider bar as soon as the row is drawn, with no "summary" disclosure
  * and no chevron. It is still the one capped bubble, so it starts in its
  * collapsed bubble form and opens through the shared toggle like any other.
- * The wire's `fold` is still required (an unset one is a `MalformedView`, as
- * for every non-optional message field), but its value no longer selects
- * anything here.
+ * The wire carries no fold for it (`fold` is reserved in feed.proto).
  *
  * The notice is a WARNING ON A COMPACTION THAT HAPPENED, not a failure of it,
  * which is why it sits beside the summary rather than replacing it.
@@ -180,11 +178,10 @@ export function drawFeedContextCutCompacted(compacted: FeedContextCutCompacted):
   const el = document.createElement("div");
   el.className = "sep-compacted";
 
-  const fold = requireMessage(compacted.fold, `${PATH}.compacted.fold`);
   const summary = requireMessage(compacted.summary, `${PATH}.compacted.summary`);
-  log.debug("drawing a compaction summary open, ignoring the wire's fold", {
+  log.debug("drawing a compaction summary open", {
     operation: "feed.separation-summary-drawn",
-    context: { wire_folded: fold.folded, cold_read: compacted.coldRead !== undefined },
+    context: { cold_read: compacted.coldRead !== undefined },
   });
 
   // THE SUMMARY IS A RESPONSE BUBBLE, drawn by the one bubble: the response
