@@ -39,9 +39,12 @@ func rpTurnPageEntries(t *testing.T, w *World, workspaceDir, turn string) float6
 }
 
 // TestATurnOpeningNeverReplaysHistory drives two turns on one workspace and
-// asserts that neither turn's opening page carried anything but its own
-// prompt row: the second turn, whose conversation already holds the first,
-// is the case that used to replay the newest 200 entries.
+// asserts that neither turn's opening page carried anything but, at most, its
+// own prompt row: the second turn, whose conversation already holds the
+// first, is the case that used to replay the newest 200 entries. A turn
+// opened `tail_only` carries no entry at all (its prompt arrives on the
+// watch), and one opened from a held pointer carries only what was written
+// since, which is its own prompt.
 func TestATurnOpeningNeverReplaysHistory(t *testing.T) {
 	t.Parallel()
 	// Arrange.
@@ -57,8 +60,8 @@ func TestATurnOpeningNeverReplaysHistory(t *testing.T) {
 
 	// Assert.
 	for _, turn := range []string{first.GetValue(), second.GetValue()} {
-		if got := rpTurnPageEntries(t, w, repo.Dir, turn); got != 1 {
-			t.Errorf("turn %s opened on a page of %v entries, want 1: its own prompt row", turn, got)
+		if got := rpTurnPageEntries(t, w, repo.Dir, turn); got > 1 {
+			t.Errorf("turn %s opened on a page of %v entries, want at most 1: its own prompt row", turn, got)
 		}
 	}
 	for _, rec := range w.Daemon.WorkspaceLog(repo.Dir, "daemon") {
