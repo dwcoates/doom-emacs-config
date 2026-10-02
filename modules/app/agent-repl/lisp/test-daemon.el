@@ -2388,8 +2388,12 @@ whole promise is that the process is still there afterwards."
          (agent-repl-daemon-multi-repo-config-dir "/b"))
     (unwind-protect
         (progn
+          ;; THE PID LANDS BY RENAME, never by a redirect into the watched
+          ;; name: `>' creates the file before it writes, so the wait below
+          ;; could see it existing and read it EMPTY (pid 0) under load.
           (with-temp-file stub
-            (insert "#!/bin/sh\necho $$ > " pidfile "\nsleep 30\n"))
+            (insert "#!/bin/sh\necho $$ > " pidfile ".tmp && mv " pidfile ".tmp " pidfile
+                    "\nsleep 30\n"))
           (set-file-modes stub #o755)
           ;; Act
           (let ((proc (make-process :name "agent-repl-test-detach"
