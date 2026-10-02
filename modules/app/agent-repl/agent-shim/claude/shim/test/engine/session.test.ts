@@ -7933,6 +7933,63 @@ describe("the retry label a failed vendor start carries", () => {
   });
 });
 
+/**
+ * VETTING ITEM V1: A RETRYABLE START IS RETRIED ON THE SAME SHIM.
+ *
+ * The daemon's retry loop re-asks the SAME process (`StartSessionVendorStart-
+ * Failed`: "A retryable failure leaves the shim able to take another
+ * StartSession for the same session on the SAME process"). These drive the
+ * grounded 2026-10-02 failure — a liveness probe that timed out — and then a
+ * second StartSession whose probe answers, on one engine instance.
+ */
+describe("a start retried after its liveness probe timed out", () => {
+  /** Hold the live signal on the FIRST query only, so the retry's answers. */
+  const holdFirstOnly = {
+    liveSignalTimeoutMs: 5,
+    onQueryCreated: (query: ScriptedQuery, _spec: QuerySpec, index: number): void => {
+      if (index === 0) query.holdModels();
+    },
+  };
+
+  it("succeeds on a fresh start", async () => {
+    // Arrange.
+    const h = harness(holdFirstOnly);
+    expect(retryLabel(await h.engine.startSession(freshRequest()))).toBe("retryable");
+
+    // Act.
+    const retried = await h.engine.startSession(freshRequest());
+
+    // Assert.
+    expect(retried.result.case).toBe("success");
+  });
+
+  it("re-announces the same conversation identity on a resume", async () => {
+    // Arrange: an identity an earlier session established, and its transcript.
+    const h = harness({ nowMs: 1_000_100, ...holdFirstOnly });
+    mkdirSync(path.dirname(agentIdPath(h.stateDir, workspaceLockKey(h.cwd))), { recursive: true });
+    writeFileSync(
+      agentIdPath(h.stateDir, workspaceLockKey(h.cwd)),
+      JSON.stringify({
+        original_vendor_session_id: "established-by-an-earlier-session",
+        workspace_key: workspaceLockKey(h.cwd),
+        minted_at_ms: 1,
+      }),
+      "utf8",
+    );
+    writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+    expect(retryLabel(await h.engine.startSession(resumeRequest("resume-1")))).toBe("retryable");
+
+    // Act.
+    const retried = await h.engine.startSession(resumeRequest("resume-1"));
+
+    // Assert.
+    expect({
+      vendorSessionId:
+        retried.result.case === "success" ? retried.result.value.session?.vendorSessionId : undefined,
+      producer: h.persistence.producer,
+    }).toEqual({ vendorSessionId: "resume-1", producer: "established-by-an-earlier-session" });
+  });
+});
 describe("StartSession's remaining refusals", () => {
   it("refuses vendor_start_failed when the vendor answers nothing at all", async () => {
     // A CHILD THAT ANSWERS NEITHER ITS CONTROL CHANNEL NOR ITS STREAM. Without
