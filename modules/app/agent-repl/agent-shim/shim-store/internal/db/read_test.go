@@ -414,6 +414,74 @@ func TestOpenPageTailOnlyRefusesAnAgentTheStoreHasNeverHeardOf(t *testing.T) {
 	}
 }
 
+// ---- newest ----
+
+func TestOpenPageNamesTheNewestLineForEveryOpening(t *testing.T) {
+	tests := []struct {
+		name    string
+		opening func(pointers []*storev1.StoreItemPointer) Opening
+	}{
+		{name: "repaint", opening: func([]*storev1.StoreItemPointer) Opening { return Repaint() }},
+		{name: "known_through", opening: func(p []*storev1.StoreItemPointer) Opening { return CatchUp(p[0]) }},
+		{name: "tail_only", opening: func([]*storev1.StoreItemPointer) Opening { return TailOnly() }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Arrange
+			d, _ := newStore(t)
+			pointers := seedBook(t, d, "agent-1", 3)
+
+			// Act
+			opened, err := d.OpenPage(ctx(), "agent-1", test.opening(pointers))
+
+			// Assert
+			if err != nil {
+				t.Fatalf("OpenPage: %v", err)
+			}
+			if got := opened.Newest.GetValue(); got != pointers[2].GetValue() {
+				t.Fatalf("Newest = %q, want the newest line %q", got, pointers[2].GetValue())
+			}
+		})
+	}
+}
+
+func TestOpenPageNamesNoNewestLineForAnEmptyBook(t *testing.T) {
+	// Arrange: a known agent with no lines — unset newest is the empty book.
+	d, _ := newStore(t)
+	writeOK(t, d, pageEntry("w-spawn-newest", "u-spawn-newest", "agent-1",
+		frameItem(activityFrame("agent-1", "act-spawn-newest", subagentStart("agent-quiet")))))
+
+	// Act
+	opened, err := d.OpenPage(ctx(), "agent-quiet", TailOnly())
+
+	// Assert
+	if err != nil {
+		t.Fatalf("OpenPage: %v", err)
+	}
+	if opened.Newest != nil {
+		t.Fatalf("Newest = %v, want unset for an empty book", opened.Newest)
+	}
+}
+
+func TestOpenPageNamesTheNewestLineByPlaceNotByArrival(t *testing.T) {
+	// Arrange: the later-placed line arrives first, so the head is the one a
+	// repaint leads with, not the last written.
+	d, _ := newStore(t)
+	late := pointerOf(t, writeOK(t, d, placedLine("w1", "u1", "agent-1", 200, 0)))
+	writeOK(t, d, placedLine("w2", "u2", "agent-1", 100, 0))
+
+	// Act
+	opened, err := d.OpenPage(ctx(), "agent-1", TailOnly())
+
+	// Assert
+	if err != nil {
+		t.Fatalf("OpenPage: %v", err)
+	}
+	if got := opened.Newest.GetValue(); got != late {
+		t.Fatalf("Newest = %q, want the newest-placed line %q", got, late)
+	}
+}
+
 // A WATCH OPENED BEHIND THE HEAD IS CAUGHT UP BY ITS OWN OPEN, and these three
 // say so at each distance a caller can be behind by. The catch-up is the OPEN's
 // page — every line newer than `known_through` — and the pin is taken in that
@@ -984,6 +1052,7 @@ func TestEveryReadStatementBuildsNoAutomaticIndex(t *testing.T) {
 		args      []any
 	}{
 		{name: "the newest page", statement: pageNewestSQL, args: []any{"agent-1", kindPageLine, 11}},
+		{name: "the newest line", statement: newestLineSQL, args: []any{"agent-1", kindPageLine}},
 		{name: "the page before a line", statement: pageBeforeSQL, args: []any{"agent-1", kindPageLine, testNow, 0, 100, 11}},
 		{name: "the page through an instant", statement: pageThroughSQL, args: []any{"agent-1", kindPageLine, testNow, 11}},
 		{name: "the catch-up page", statement: pageWrittenAfterSQL, args: []any{"agent-1", kindPageLine, 100, 11}},
