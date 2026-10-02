@@ -16,7 +16,7 @@
 
 import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
-import type { FeedMergeTestLogToken } from "../../frontend/v1/feed_pb";
+import type { FeedId, FeedMergeTestLogToken } from "../../frontend/v1/feed_pb";
 import { file_frontend_v1_feed } from "../../frontend/v1/feed_pb";
 import type { WorkspaceRef } from "../../workspace/v1/workspace_pb";
 import { file_workspace_v1_workspace } from "../../workspace/v1/workspace_pb";
@@ -26,7 +26,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_open_in_editor.proto.
  */
 export const file_agentrepl_v1_endpoint_open_in_editor: GenFile = /*@__PURE__*/
-  fileDesc("CiphZ2VudHJlcGwvdjEvZW5kcG9pbnRfb3Blbl9pbl9lZGl0b3IucHJvdG8SDGFnZW50cmVwbC52MSLnAQoTT3BlbkluRWRpdG9yUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEkEKDndvcmtzcGFjZV9maWxlGAQgASgLMicuYWdlbnRyZXBsLnYxLk9wZW5JbkVkaXRvcldvcmtzcGFjZUZpbGVIABI8Cg5tZXJnZV90ZXN0X2xvZxgFIAEoCzIiLmZyb250ZW5kLnYxLkZlZWRNZXJnZVRlc3RMb2dUb2tlbkgAQggKBnRhcmdldEoECAIQA0oECAMQBFIEcGF0aFIEbGluZSJFChlPcGVuSW5FZGl0b3JXb3Jrc3BhY2VGaWxlEgwKBHBhdGgYASABKAkSEQoEbGluZRgCIAEoDUgAiAEBQgcKBV9saW5lIogBChRPcGVuSW5FZGl0b3JSZXNwb25zZRI0CgdzdWNjZXNzGAEgASgLMiEuYWdlbnRyZXBsLnYxLk9wZW5JbkVkaXRvclN1Y2Nlc3NIABIwCgVlcnJvchgCIAEoCzIfLmFnZW50cmVwbC52MS5PcGVuSW5FZGl0b3JFcnJvckgAQggKBnJlc3VsdCIVChNPcGVuSW5FZGl0b3JTdWNjZXNzIucDChFPcGVuSW5FZGl0b3JFcnJvchJHChF1bmtub3duX3dvcmtzcGFjZRgBIAEoCzIqLmFnZW50cmVwbC52MS5PcGVuSW5FZGl0b3JVbmtub3duV29ya3NwYWNlSAASUAoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgCIAEoCzIuLmFnZW50cmVwbC52MS5PcGVuSW5FZGl0b3JXb3Jrc3BhY2VSZWZNaXNtYXRjaEgAEkcKEXRyYW5zZmVycmluZ19hd2F5GAMgASgLMiouYWdlbnRyZXBsLnYxLk9wZW5JbkVkaXRvclRyYW5zZmVycmluZ0F3YXlIABJCCg9ub3RfeWV0X2Fkb3B0ZWQYBCABKAsyJy5hZ2VudHJlcGwudjEuT3BlbkluRWRpdG9yTm90WWV0QWRvcHRlZEgAElAKFnBhdGhfZXNjYXBlc193b3Jrc3BhY2UYBSABKAsyLi5hZ2VudHJlcGwudjEuT3BlbkluRWRpdG9yUGF0aEVzY2FwZXNXb3Jrc3BhY2VIABJPChZ1bmtub3duX21lcmdlX3Rlc3RfbG9nGAYgASgLMi0uYWdlbnRyZXBsLnYxLk9wZW5JbkVkaXRvclVua25vd25NZXJnZVRlc3RMb2dIAEIHCgVjYXVzZSIeChxPcGVuSW5FZGl0b3JVbmtub3duV29ya3NwYWNlIjgKIE9wZW5JbkVkaXRvcldvcmtzcGFjZVJlZk1pc21hdGNoEhQKDHJlZ2lzdHJ5X2RpchgBIAEoCSIvChxPcGVuSW5FZGl0b3JUcmFuc2ZlcnJpbmdBd2F5Eg8KB2FkZHJlc3MYASABKAkiGwoZT3BlbkluRWRpdG9yTm90WWV0QWRvcHRlZCIiCiBPcGVuSW5FZGl0b3JQYXRoRXNjYXBlc1dvcmtzcGFjZSIhCh9PcGVuSW5FZGl0b3JVbmtub3duTWVyZ2VUZXN0TG9nQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_frontend_v1_feed, file_workspace_v1_workspace]);
+  fileDesc("CiphZ2VudHJlcGwvdjEvZW5kcG9pbnRfb3Blbl9pbl9lZGl0b3IucHJvdG8SDGFnZW50cmVwbC52MSKgAgoTT3BlbkluRWRpdG9yUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEkEKDndvcmtzcGFjZV9maWxlGAQgASgLMicuYWdlbnRyZXBsLnYxLk9wZW5JbkVkaXRvcldvcmtzcGFjZUZpbGVIABI8Cg5tZXJnZV90ZXN0X2xvZxgFIAEoCzIiLmZyb250ZW5kLnYxLkZlZWRNZXJnZVRlc3RMb2dUb2tlbkgAEjcKCWZlZWRfbGluaxgGIAEoCzIiLmFnZW50cmVwbC52MS5PcGVuSW5FZGl0b3JGZWVkTGlua0gAQggKBnRhcmdldEoECAIQA0oECAMQBFIEcGF0aFIEbGluZSJFChlPcGVuSW5FZGl0b3JXb3Jrc3BhY2VGaWxlEgwKBHBhdGgYASABKAkSEQoEbGluZRgCIAEoDUgAiAEBQgcKBV9saW5lIogBChRPcGVuSW5FZGl0b3JSZXNwb25zZRI0CgdzdWNjZXNzGAEgASgLMiEuYWdlbnRyZXBsLnYxLk9wZW5JbkVkaXRvclN1Y2Nlc3NIABIwCgVlcnJvchgCIAEoCzIfLmFnZW50cmVwbC52MS5PcGVuSW5FZGl0b3JFcnJvckgAQggKBnJlc3VsdCIVChNPcGVuSW5FZGl0b3JTdWNjZXNzIqwEChFPcGVuSW5FZGl0b3JFcnJvchJHChF1bmtub3duX3dvcmtzcGFjZRgBIAEoCzIqLmFnZW50cmVwbC52MS5PcGVuSW5FZGl0b3JVbmtub3duV29ya3NwYWNlSAASUAoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgCIAEoCzIuLmFnZW50cmVwbC52MS5PcGVuSW5FZGl0b3JXb3Jrc3BhY2VSZWZNaXNtYXRjaEgAEkcKEXRyYW5zZmVycmluZ19hd2F5GAMgASgLMiouYWdlbnRyZXBsLnYxLk9wZW5JbkVkaXRvclRyYW5zZmVycmluZ0F3YXlIABJCCg9ub3RfeWV0X2Fkb3B0ZWQYBCABKAsyJy5hZ2VudHJlcGwudjEuT3BlbkluRWRpdG9yTm90WWV0QWRvcHRlZEgAElAKFnBhdGhfZXNjYXBlc193b3Jrc3BhY2UYBSABKAsyLi5hZ2VudHJlcGwudjEuT3BlbkluRWRpdG9yUGF0aEVzY2FwZXNXb3Jrc3BhY2VIABJPChZ1bmtub3duX21lcmdlX3Rlc3RfbG9nGAYgASgLMi0uYWdlbnRyZXBsLnYxLk9wZW5JbkVkaXRvclVua25vd25NZXJnZVRlc3RMb2dIABJDCg9saW5rX3VucmVzb2x2ZWQYByABKAsyKC5hZ2VudHJlcGwudjEuT3BlbkluRWRpdG9yTGlua1VucmVzb2x2ZWRIAEIHCgVjYXVzZSIeChxPcGVuSW5FZGl0b3JVbmtub3duV29ya3NwYWNlIjgKIE9wZW5JbkVkaXRvcldvcmtzcGFjZVJlZk1pc21hdGNoEhQKDHJlZ2lzdHJ5X2RpchgBIAEoCSIvChxPcGVuSW5FZGl0b3JUcmFuc2ZlcnJpbmdBd2F5Eg8KB2FkZHJlc3MYASABKAkiGwoZT3BlbkluRWRpdG9yTm90WWV0QWRvcHRlZCIiCiBPcGVuSW5FZGl0b3JQYXRoRXNjYXBlc1dvcmtzcGFjZSIhCh9PcGVuSW5FZGl0b3JVbmtub3duTWVyZ2VUZXN0TG9nIk0KFE9wZW5JbkVkaXRvckZlZWRMaW5rEgwKBGhyZWYYASABKAkSJwoKc291cmNlX3JvdxgCIAEoCzITLmZyb250ZW5kLnYxLkZlZWRJZCIqChpPcGVuSW5FZGl0b3JMaW5rVW5yZXNvbHZlZBIMCgRocmVmGAEgASgJQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_frontend_v1_feed, file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.OpenInEditorRequest
@@ -61,6 +61,17 @@ export type OpenInEditorRequest = Message<"agentrepl.v1.OpenInEditorRequest"> & 
      */
     value: FeedMergeTestLogToken;
     case: "mergeTestLog";
+  } | {
+    /**
+     * A link the reader clicked inside a prompt or response bubble whose href
+     * is not a web URL: a path or a bare file name. The DAEMON resolves it
+     * (see OpenInEditorFeedLink) and relays the resolved path exactly as a
+     * `workspace_file` click.
+     *
+     * @generated from field: agentrepl.v1.OpenInEditorFeedLink feed_link = 6;
+     */
+    value: OpenInEditorFeedLink;
+    case: "feedLink";
   } | { case: undefined; value?: undefined };
 };
 
@@ -205,6 +216,16 @@ export type OpenInEditorError = Message<"agentrepl.v1.OpenInEditorError"> & {
      */
     value: OpenInEditorUnknownMergeTestLog;
     case: "unknownMergeTestLog";
+  } | {
+    /**
+     * A feed link resolved to no existing file. The daemon has already
+     * published the transient "unknown file" footer line and sent the
+     * workspace its non-interrupting question about the link.
+     *
+     * @generated from field: agentrepl.v1.OpenInEditorLinkUnresolved link_unresolved = 7;
+     */
+    value: OpenInEditorLinkUnresolved;
+    case: "linkUnresolved";
   } | { case: undefined; value?: undefined };
 };
 
@@ -304,4 +325,64 @@ export type OpenInEditorUnknownMergeTestLog = Message<"agentrepl.v1.OpenInEditor
  */
 export const OpenInEditorUnknownMergeTestLogSchema: GenMessage<OpenInEditorUnknownMergeTestLog> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_open_in_editor, 10);
+
+/**
+ * A non-web link clicked in a prompt or response bubble.
+ *
+ * RESOLUTION, in order, first existing file wins:
+ *   1. An absolute path: as given.
+ *   2. A path with a directory part: relative to the workspace's worktree root.
+ *   3. A BARE file name: <worktree root>/modules/app/agent-repl/<name>, then
+ *      <git project root of the worktree>/<name>.
+ * A link that resolves outside the worktree is refused as for any workspace
+ * file. A link that resolves to nothing is `link_unresolved`.
+ *
+ * @generated from message agentrepl.v1.OpenInEditorFeedLink
+ */
+export type OpenInEditorFeedLink = Message<"agentrepl.v1.OpenInEditorFeedLink"> & {
+  /**
+   * The link's href exactly as the bubble rendered it, optionally carrying a
+   * `:<line>` suffix the bubble drew.
+   *
+   * @generated from field: string href = 1;
+   */
+  href: string;
+
+  /**
+   * The prompt or response row the link was clicked in, echoed as served: the
+   * row the daemon's follow-up question quotes when the link resolves to
+   * nothing.
+   *
+   * @generated from field: frontend.v1.FeedId source_row = 2;
+   */
+  sourceRow?: FeedId | undefined;
+};
+
+/**
+ * Describes the message agentrepl.v1.OpenInEditorFeedLink.
+ * Use `create(OpenInEditorFeedLinkSchema)` to create a new message.
+ */
+export const OpenInEditorFeedLinkSchema: GenMessage<OpenInEditorFeedLink> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_open_in_editor, 11);
+
+/**
+ * The feed link resolved to no file.
+ *
+ * @generated from message agentrepl.v1.OpenInEditorLinkUnresolved
+ */
+export type OpenInEditorLinkUnresolved = Message<"agentrepl.v1.OpenInEditorLinkUnresolved"> & {
+  /**
+   * The href as clicked.
+   *
+   * @generated from field: string href = 1;
+   */
+  href: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.OpenInEditorLinkUnresolved.
+ * Use `create(OpenInEditorLinkUnresolvedSchema)` to create a new message.
+ */
+export const OpenInEditorLinkUnresolvedSchema: GenMessage<OpenInEditorLinkUnresolved> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_open_in_editor, 12);
 
