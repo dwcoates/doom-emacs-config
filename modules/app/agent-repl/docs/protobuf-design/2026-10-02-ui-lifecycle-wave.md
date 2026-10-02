@@ -102,6 +102,24 @@ what an implementer must know that the schema does not say.
     shared helper used by both the footer allowance percentage and the
     topbar chip, with a test asserting both call sites use it.
 
+### 4. The roster row states its live detached work
+
+- WHAT: `frontend.v1.RosterRow.detached_live` (tag 40,
+  `frontend.v1.RosterRowDetachedLive`), a presence-only marker set while
+  detached work runs, on any status arm. The comments of
+  `agentrepl.v1.MarkWorkspaceViewed` and `frontend.v1.RosterRowViewed` now
+  also name the daemon's own read-on-cut.
+- WHY: the owner's viewed-timing rule 2. A `done` row with background work
+  goes PARTIAL (yellow, `idle_async`) after one second of viewing rather
+  than five. An unread `done` deliberately outranks `idle_async`, so the
+  status alone cannot tell the editor that background work runs.
+- CONSEQUENCES:
+  - The dwell threshold stays the editor's own (`lisp/status.el`
+    `agent-repl--tab-dwell-seconds`); the marker only states the fact it
+    is chosen from. The daemon does not pick thresholds.
+  - A completed `/clear` or compaction is marked read by the daemon itself
+    on the push that ends the cut (rule 3), with no editor dwell.
+
 ## Features that need no protobuf change
 
 - Persistent-wifi click: the webapp calls the existing
