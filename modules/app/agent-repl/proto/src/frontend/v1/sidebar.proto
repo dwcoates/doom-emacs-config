@@ -291,6 +291,18 @@ message RosterMergedSection {
 // WEBVIEW-LOCAL (stage-3 ruling) and is no element of this view.
 message RosterSectionHeader {
   RosterLabel label = 1;
+  // How many workspaces the section holds, drawn as "(N)" beside the label
+  // while the section is FOLDED (fold state is webview-local, so the client
+  // shows or hides this resolved value by its own fold; it never counts rows
+  // itself). Always set.
+  RosterSectionCount count = 2;
+}
+
+// A section's workspace count: every row the section's rows region carries,
+// nested family rows included. Drawn smaller than the label, in the label's
+// own color.
+message RosterSectionCount {
+  uint32 workspaces = 1;
 }
 
 // A task section's header: label + the task's done check. Its own message
