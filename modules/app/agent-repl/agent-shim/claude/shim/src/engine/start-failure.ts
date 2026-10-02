@@ -73,10 +73,10 @@ function transientStatus(status: number): boolean {
  * The vendor's words for a transient failure, read only when it stated NO
  * status: an overloaded or rate-limited API, a server error, a timeout, or a
  * network failure the errno patterns of {@link classifyVendorApiFailure} do not
- * name (`fetch failed` is the SDK's own sentence for one).
+ * name (`fetch failed`, and the API client's `Connection error.`).
  */
 const TRANSIENT_WORDS =
-  /overloaded|rate[\s_-]?limit|too many requests|server error|service unavailable|bad gateway|gateway timeout|timed?[\s_-]?out|fetch failed|network/;
+  /overloaded|rate[\s_-]?limit|too many requests|server error|service unavailable|bad gateway|gateway timeout|timed?[\s_-]?out|fetch failed|network|connection (?:error|refused|reset|closed)/;
 
 /**
  * Whether an error result that ended the session's opening can pass.
