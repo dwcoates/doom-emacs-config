@@ -112,6 +112,15 @@ type fakeQueue struct {
 	db func() wsm.DB
 	// leaseChanged records every OnLeaseChanged, in order.
 	leaseChanged []wsm.WorkspaceID
+	// reconnects records every ReleaseReconnectHolds, in order.
+	reconnects []wsm.WorkspaceID
+}
+
+// ReleaseReconnectHolds records the release the boot asked for.
+func (q *fakeQueue) ReleaseReconnectHolds(ws wsm.WorkspaceID) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.reconnects = append(q.reconnects, ws)
 }
 
 // CloseOrphans is the queue's door, closing on the boot's own state client.
@@ -273,6 +282,8 @@ type harness struct {
 	log        *dlog.TestSurfaces
 	// installed records every workspace whose adopted client was installed.
 	installed []ids.WorkspaceID
+	// sessionsAdopted records every adopted survivor stated to hold a session.
+	sessionsAdopted []ids.WorkspaceID
 	// probes is the scripted lock state per workspace directory.
 	probes map[string]sessionlock.State
 	// probeErrs is the scripted probe error per workspace directory.
@@ -384,6 +395,7 @@ func newHarness(t *testing.T, adjust ...func(*Deps, *harness)) *harness {
 			h.installed = append(h.installed, ws)
 			return nil
 		},
+		SessionAdopted: func(ws ids.WorkspaceID) { h.sessionsAdopted = append(h.sessionsAdopted, ws) },
 		StartSession: func(_ context.Context, ws ids.WorkspaceID) error {
 			h.noteStarted(ws)
 			return h.startErrs[ws]

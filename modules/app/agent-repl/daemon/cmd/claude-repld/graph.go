@@ -955,6 +955,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			RunDir:         paths.RunDir,
 			JoiningAddress: p.Opts.joining,
 			Adopted:        fleet.Install,
+			SessionAdopted: fleet.NoteAdoptedSession,
 			StartSession:   fleet.Start,
 			EnsureServices: services.EnsureLoaded,
 			Unserved:       fleet.MarkUnserved,

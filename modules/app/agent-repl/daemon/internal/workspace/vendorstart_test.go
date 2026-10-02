@@ -517,3 +517,20 @@ func TestAFailedStartTellsTheQueueNothing(t *testing.T) {
 		t.Fatalf("sessions up = %v, want none for a start that failed", f.sessionsUp)
 	}
 }
+
+func TestAnAdoptedSessionIsStarted(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	if err := f.fleet.Install(context.Background(), ws.ID, f.client); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	// Act.
+	f.fleet.NoteAdoptedSession(ws.ID)
+
+	// Assert.
+	if !f.fleet.Serving(ws.ID) {
+		t.Fatal("serving = false, want the adopted session started")
+	}
+}

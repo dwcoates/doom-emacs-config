@@ -225,6 +225,13 @@ type Deps struct {
 	// it. It is required: an adoption nothing installed would leave the daemon
 	// believing it adopted a shim it cannot reach.
 	Adopted AdoptFunc
+	// SessionAdopted states that an adopted survivor that is NOT inert holds
+	// a started session (workspace.Fleet.NoteAdoptedSession): the fleet's
+	// session-started fact, which the prompt queue reads to deliver rather
+	// than hold. The prompts held until a session reconnected are released
+	// once the holds are restored (restoreHolds). Required for the same
+	// reason Adopted is.
+	SessionAdopted func(ws ids.WorkspaceID)
 	// StartSession brings ONE workspace's session up, through the same path
 	// OpenWorkspace takes (workspace.Fleet.Start). It is a FUNCTION for the
 	// same reason Adopted is: the session fleet sits beside boot rather than
@@ -327,6 +334,8 @@ func New(deps Deps) (Sequence, error) {
 		return nil, missing("a rollout controller")
 	case deps.Adopted == nil:
 		return nil, missing("an adoption installer")
+	case deps.SessionAdopted == nil:
+		return nil, missing("an adopted-session marker")
 	case deps.StartSession == nil:
 		return nil, missing("a session starter")
 	case deps.EnsureServices == nil:
