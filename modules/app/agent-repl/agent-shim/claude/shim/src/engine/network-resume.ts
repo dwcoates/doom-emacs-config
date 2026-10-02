@@ -96,10 +96,24 @@ export const NETWORK_ERROR_CODES: readonly string[] = [
   "ENETDOWN",
 ];
 
-const NETWORK_CODE_PATTERN = new RegExp(`\\b(${NETWORK_ERROR_CODES.join("|")})\\b`);
+const NETWORK_CODE_PATTERN = new RegExp(`\\b(${NETWORK_ERROR_CODES.join("|")})\\b`, "i");
 
-/** The vendor's own sentences for "the API could not be reached". */
-const NETWORK_PROSE: readonly RegExp[] = [/can['’]t reach the api server/i, /\bconnection error\b/i];
+/**
+ * The words for "the API could not be reached", read only when nothing
+ * structured decided: the vendor's own sentences, the API client's
+ * (`Connection error.`), Node's (`fetch failed`, `socket hang up`), and a
+ * connect that timed out. THE ONE LIST: a failed vendor START is read through
+ * {@link classifyAgentFailure} too (engine/start-failure.ts), so the start and
+ * a mid-turn failure can never disagree about what an outage sounds like.
+ */
+const NETWORK_PROSE: readonly RegExp[] = [
+  /can['’]t reach the api server/i,
+  /\bconnection (?:error|refused|reset|closed)\b/i,
+  /\bfetch failed\b/i,
+  /\bnetwork\b/i,
+  /\btimed?[\s_-]?out\b/i,
+  /\bsocket hang up\b/i,
+];
 
 /** The vendor's `(error type <class>)` suffix on a failed agent's summary. */
 const ERROR_TYPE_PATTERN = /\(error type ([a-z_]+)\)/i;

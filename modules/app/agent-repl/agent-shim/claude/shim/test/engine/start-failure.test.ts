@@ -14,6 +14,7 @@ import {
   startFailureLabel,
   VendorStartError,
 } from "../../src/engine/start-failure.js";
+import { classifyAgentFailure } from "../../src/engine/network-resume.js";
 
 describe("openingErrorVerdict", () => {
   it.each([
@@ -54,6 +55,24 @@ describe("openingErrorVerdict", () => {
 
     // Assert.
     expect(verdict.retry).toBe("retryable");
+  });
+});
+
+describe("openingErrorVerdict and the mid-turn classifier", () => {
+  it.each([
+    "TypeError: fetch failed",
+    "API Error: Connection error.",
+    "connect ECONNREFUSED 1.2.3.4:443",
+    "socket hang up",
+  ])("agree that %s is an outage", (text) => {
+    // Arrange, Act: the start's label and the mid-turn classifier read the
+    // same words through the one helper.
+    const start = openingErrorVerdict(undefined, text).retry === "retryable";
+    const midTurn = classifyAgentFailure({ text }).network;
+
+    // Assert
+    expect(midTurn).toBe(true);
+    expect(start).toBe(true);
   });
 });
 
