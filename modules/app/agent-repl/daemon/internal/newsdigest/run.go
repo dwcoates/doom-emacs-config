@@ -176,11 +176,7 @@ func (d *Digester) run(ctx context.Context, trigger string, onlyIfDue bool) (out
 		return outcome{}, nil
 	}
 
-	id, err := d.deps.MintID()
-	if err != nil {
-		log.Error(opRun, "the news digest id could not be minted", dlog.Context{"cause": err.Error()})
-		return outcome{}, fmt.Errorf("newsdigest: mint the digest id: %w", err)
-	}
+	id := d.deps.MintID()
 	from := since
 	if carried != nil {
 		from = time.UnixMilli(carried.GetHeader().GetPeriod().GetFromMs())
