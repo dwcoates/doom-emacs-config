@@ -305,6 +305,15 @@ hand any more:
   fire-and-forget click handler goes through it, so a `MalformedView` is logged
   once and filed as `frame_undecodable` instead of escaping as an unhandled
   rejection.
+- **A CLICK THAT ENDS A DRAG-SELECT IS NOT A CLICK** (owner ruling,
+  2026-10-02: all text everywhere is selectable, and selecting it must not
+  break the click targets it lies on). `installSelectionClickGuard`
+  (src/selection.ts), installed once by `main.ts`, swallows at document
+  capture every MOUSE click whose press-drag-release changed the selection
+  into one holding text (DEBUG `selection.click-swallowed`); a click beside an
+  unchanged old highlight, and every keyboard click (`detail` 0), go through.
+  The selection's text is read through `selectedText` alone.
+  `test/webkit/selection.webkit.test.ts` drags the real mouse in WebKit.
 - **ONE BUBBLE** (owner rulings, 2026-09-23). Every blue (prompt) and purple
   (response) bubble — a response, thinking, an agentic card, a compaction
   summary, a user or agent prompt, a peer message, a held prompt — is built by
