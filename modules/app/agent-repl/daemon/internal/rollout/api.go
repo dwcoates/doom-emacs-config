@@ -28,6 +28,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"claude-repld/internal/bounce"
+	"claude-repld/internal/bringup"
 	"claude-repld/internal/clock"
 	"claude-repld/internal/deployprogress"
 	"claude-repld/internal/dlog"
@@ -255,6 +256,18 @@ type Deps struct {
 	// LockProbe probes a workspace's shim-held kernel lock. It is what makes a
 	// headless transfer and the bounce accounting possible without any channel.
 	LockProbe LockProbeFunc
+	// StartSession brings one workspace's session up through the one path
+	// every bring-up takes (workspace.Fleet.Start). A successor that comes to
+	// serve an open workspace with no shim behind it -- handed over with a
+	// free lock, or never handed over at all -- starts its session through
+	// it, so the workspace's feed draws its history with no prompt needed.
+	// Required.
+	StartSession bringup.StartFunc
+	// BringingUp raises or lowers the roster's bring-up marker
+	// (sidebar.Resolver.SetBringingUp) around those starts, so the row reads
+	// as starting rather than idle and usable while nothing is behind it.
+	// Required.
+	BringingUp func(ws ids.WorkspaceID, underWay bool)
 	// PublishViews republishes a workspace's whole views once it is owned.
 	PublishViews PublishViewsFunc
 	// StateUnreported tells every status surface whether a shim taken back
@@ -574,6 +587,12 @@ func New(deps Deps) (Controller, error) {
 	}
 	if deps.Progress == nil {
 		return nil, errors.New("rollout: the deploy progress sink is required; a successor ends the deploy's story on it")
+	}
+	if deps.StartSession == nil {
+		return nil, errors.New("rollout: a session starter is required; a successor that serves an open workspace with no shim must start its session")
+	}
+	if deps.BringingUp == nil {
+		return nil, errors.New("rollout: the bring-up marker is required; a workspace whose session is starting must not read as usable")
 	}
 	if deps.Clock == nil {
 		deps.Clock = SystemClock{}

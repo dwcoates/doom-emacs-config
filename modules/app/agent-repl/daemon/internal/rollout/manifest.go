@@ -629,9 +629,11 @@ func (c *controller) recordDisposition(ctx context.Context, session ManifestSess
 		if d.Kind == DispositionDied {
 			// A DEAD SHIM WITH A FREE LOCK IS THE ORDINARY DEAD-SHIM PATH, not
 			// a question for a human. The lock being free is the kernel's
-			// proof the process is gone and owns nothing; the boot's own steps
-			// already treat the workspace as client-less (its in-flight turns
-			// are closed, and an open one's session is brought back up). No
+			// proof the process is gone and owns nothing. A fresh boot treats
+			// the workspace as client-less (its in-flight turns are closed and
+			// an open one's session is brought back up), and a joining
+			// successor's adoption starts the session of a workspace it adopts
+			// with a free lock (sessionless.go). No
 			// verb could close an open fault here, so one stood on the
 			// footer's strip and the host view for good: seven of them for one
 			// workspace on 2026-09-24. The record stays, resolved, under

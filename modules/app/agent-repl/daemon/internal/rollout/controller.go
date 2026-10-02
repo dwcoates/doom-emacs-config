@@ -118,6 +118,10 @@ type controller struct {
 	// stragglerAdoptions counts the adoptions becomeIncumbent started for
 	// workspaces whose handover never finished, for the same reason.
 	stragglerAdoptions sync.WaitGroup
+	// bringUps counts the session starts bringUpSessionless runs off its
+	// caller's goroutine, so a caller (a test) joins them rather than
+	// guessing with a delay.
+	bringUps sync.WaitGroup
 	// tookOver closes once this daemon stops JOINING and becomes the only
 	// daemon (becomeIncumbent). Made lazily under mu (tookOverSignal).
 	tookOver chan struct{}

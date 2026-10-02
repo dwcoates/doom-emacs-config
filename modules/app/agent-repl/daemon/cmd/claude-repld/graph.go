@@ -654,6 +654,8 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Freeness:         fleet.Freeness(),
 		Shims:            fleet,
 		LockProbe:        fleet.ProbeLock,
+		StartSession:     fleet.Start,
+		BringingUp:       sidebarResolver.SetBringingUp,
 		PublishViews:     views.PublishViews,
 		StateUnreported: func(ws ids.WorkspaceID, unreported bool) {
 			footerResolver.SetStateUnreported(ws, unreported)

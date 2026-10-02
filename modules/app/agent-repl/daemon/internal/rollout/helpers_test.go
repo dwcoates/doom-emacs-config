@@ -3,6 +3,7 @@ package rollout
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -1030,6 +1031,35 @@ type harness struct {
 	shimBuild    string
 	shimBuildErr error
 	coldGateCall []ids.WorkspaceID
+	// started records every session start, in order; startErr fails the
+	// start of the workspaces it names.
+	started  []ids.WorkspaceID
+	startErr map[ids.WorkspaceID]error
+	// marker records every bring-up marker edge, in order.
+	marker []markerEdge
+}
+
+// markerEdge is one BringingUp call.
+type markerEdge struct {
+	ws ids.WorkspaceID
+	up bool
+}
+
+// Started answers the workspaces whose session was started, once every start
+// the controller ran off its goroutine has finished.
+func (h *harness) Started() []ids.WorkspaceID {
+	h.c.bringUps.Wait()
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]ids.WorkspaceID(nil), h.started...)
+}
+
+// Marker answers every bring-up marker edge, once every start has finished.
+func (h *harness) Marker() []markerEdge {
+	h.c.bringUps.Wait()
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]markerEdge(nil), h.marker...)
 }
 
 // newHarness builds a controller over a real WSM store in the test's temp dir:
@@ -1076,6 +1106,7 @@ func newHarness(t *testing.T, adjust ...func(*Deps)) *harness {
 		lockErr:      make(map[string]error),
 		shimBuild:    "installed-build",
 		progress:     &fakeProgress{},
+		startErr:     make(map[ids.WorkspaceID]error),
 	}
 	deps := Deps{
 		SelfExe:        filepath.Join(state, "claude-repld"),
@@ -1130,6 +1161,19 @@ func newHarness(t *testing.T, adjust ...func(*Deps)) *harness {
 			h.mu.Lock()
 			defer h.mu.Unlock()
 			return h.lockStates[dir], h.lockErr[dir]
+		},
+		StartSession: func(_ context.Context, ws ids.WorkspaceID) error {
+			order.record("start_session")
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			h.started = append(h.started, ws)
+			return h.startErr[ws]
+		},
+		BringingUp: func(ws ids.WorkspaceID, up bool) {
+			order.record(fmt.Sprintf("bringing_up:%v", up))
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			h.marker = append(h.marker, markerEdge{ws: ws, up: up})
 		},
 		PublishViews: func(_ context.Context, ws ids.WorkspaceID) error {
 			order.record("publish_views")
@@ -1192,6 +1236,8 @@ func newHarness(t *testing.T, adjust ...func(*Deps)) *harness {
 		endLifetime()
 		h.registry.running.Wait()
 		c.handoverDone.Wait()
+		c.stragglerAdoptions.Wait()
+		c.bringUps.Wait()
 	})
 	return h
 }
