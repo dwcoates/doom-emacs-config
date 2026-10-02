@@ -415,8 +415,9 @@ func displayMode(mode string) string {
 // the figure is not live rides the hover, where it costs the strip no width.
 func (r *resolver) contextChip(s *wsState) *frontendv1.TopbarContextChip {
 	return &frontendv1.TopbarContextChip{
-		Text:      contextChipText(s),
-		Breakdown: r.tokenBreakdown(s),
+		Text:       contextChipText(s),
+		Breakdown:  r.tokenBreakdown(s),
+		WindowFill: windowFill(s),
 	}
 }
 
