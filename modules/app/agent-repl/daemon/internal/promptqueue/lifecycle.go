@@ -247,8 +247,14 @@ func (q *queue) popAndDeliver(ctx context.Context, d *delivery, log dlog.Logger)
 			return delivered, nil
 		}
 		log.Info(opTurnEnded, "delivering the next held entry", dlog.Context{"next_turn": string(next.Turn), "session_act": next.Act != nil})
-		if err := q.deliverHeld(ctx, d, next, log); err != nil {
+		sent, err := q.deliverHeld(ctx, d, next, log)
+		if err != nil {
 			return delivered, err
+		}
+		if !sent {
+			// The entry is held again (the shim held no session); nothing
+			// behind it goes before it.
+			return delivered, nil
 		}
 		delivered = true
 		// A HELD ACT OPENS NO TURN, so the pop goes on to the entry behind it:

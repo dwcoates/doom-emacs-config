@@ -45,6 +45,20 @@ type vendorSessionRecorder interface {
 	SetVendorSessionID(ctx context.Context, id wsm.WorkspaceID, vendorSessionID string) (string, error)
 }
 
+// SessionUp tells the prompt queue a session came up on the workspace, so the
+// prompts held until it reconnected are delivered. The queue is bound after
+// the fleet that calls this (graph.go); a session coming up before it is a
+// wiring defect, said at ERROR.
+func (s *lifecycleSink) SessionUp(ws ids.WorkspaceID) {
+	if s.queue == nil {
+		s.log.Error("daemon.cmd.lifecycle", "a session came up before the prompt queue was wired; its reconnect holds were not released", dlog.Context{
+			"workspace": string(ws), "invariant_violation": "the queue is bound before any session starts",
+		})
+		return
+	}
+	s.queue.ReleaseReconnectHolds(ws)
+}
+
 // OnLinkChanged republishes the workspace's HOST view: `shim_attached` is part
 // of it, and the server cannot see a link edge for itself.
 func (s *lifecycleSink) OnLinkChanged(ws ids.WorkspaceID, attached bool) {

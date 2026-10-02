@@ -77,7 +77,7 @@ func (q *queue) Release(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID
 		return ErrReleaseRefused
 	}
 	if held.Hold != nil && *held.Hold == wsm.HoldReconnect {
-		log.Warn(opRelease, "the session is still coming up; the release is refused", nil)
+		log.Warn(opRelease, "the session is not up; the release is refused until it reconnects", nil)
 		return ErrReleaseRefused
 	}
 	// A MERGE DRIVES THE SESSION: a prompt forced into it would run inside the
@@ -87,7 +87,7 @@ func (q *queue) Release(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID
 		return ErrReleaseRefused
 	}
 	// THE HOLD STAMP IS NOT THE ONLY EVIDENCE THE SESSION IS STILL COMING UP.
-	// releaseRevivalHolds un-stamps every revival-pending hold as soon as the
+	// releaseReconnectHolds un-stamps every reconnect hold as soon as the
 	// bring-up reports a client, and only then delivers them; a release that
 	// lands inside that window finds no stamp but still has nothing live to
 	// send to. Answering "there is no session" there would be a lie about a
@@ -128,7 +128,8 @@ func (q *queue) Release(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID
 		interrupt = func() { q.sendInterrupt(ctx, sub, *running, log) }
 		return nil
 	}
-	return q.deliverHeld(ctx, d, held, log)
+	_, err = q.deliverHeld(ctx, d, held, log)
+	return err
 }
 
 // Drop discards a held prompt, DURABLY FIRST: the tombstone is written before
@@ -201,14 +202,14 @@ func (q *queue) Accept(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID)
 // caller's defect from sending an edited prompt anyway. Every call it makes
 // -- the revival, the delivery itself -- is made with the lock released and
 // claims the hold while it stands (call.go).
-func (q *queue) deliverHeld(ctx context.Context, d *delivery, held wsm.HeldPrompt, log dlog.Logger) error {
+func (q *queue) deliverHeld(ctx context.Context, d *delivery, held wsm.HeldPrompt, log dlog.Logger) (bool, error) {
 	ws := d.ws
 	if q.withheldByEdit(ws, held) {
 		log.Error(opDeliver, "a hold a standing edit withholds reached delivery; it was not sent", dlog.Context{
 			"invariant_violation": "delivery of a held prompt at or after a standing edit",
 			"remediation":         "filter withheldByEdit under the delivery lock before delivering",
 		})
-		return errDeliveryBehindEdit
+		return false, errDeliveryBehindEdit
 	}
 	sender, ok := q.deps.Client(ws)
 	if !ok {
@@ -224,37 +225,43 @@ func (q *queue) deliverHeld(ctx context.Context, d *delivery, held wsm.HeldPromp
 			revived, err = q.revive(ctx, ws, log)
 		})
 		if err != nil {
-			return err
+			return false, err
 		}
 		if !revived {
 			log.Warn(opDeliver, "the workspace has no session to deliver the hold to", nil)
-			return ErrNoSession
+			return false, ErrNoSession
 		}
 		if sender, ok = q.deps.Client(ws); !ok {
 			log.Error(opDeliver, "the revived workspace still has no session to deliver the hold to", nil)
-			return ErrNoSession
+			return false, ErrNoSession
 		}
 	}
 	watcher, ok := q.deps.Watcher(ws)
 	if !ok {
 		log.Warn(opDeliver, "the workspace has no session watcher", nil)
-		return ErrNoSession
+		return false, ErrNoSession
 	}
 
 	sub := submissionOf(held)
 	sub.interjected = held.Classification != nil && held.Classification.Arm == wsm.ArmInterject
 	sub.fromHold = true
 	var derr error
+	var disposition Disposition
 	if sub.Target != nil {
-		_, derr = q.deliverToAgent(ctx, d, sub, sender, log)
+		disposition, derr = q.deliverToAgent(ctx, d, sub, sender, log)
 	} else {
-		_, derr = q.deliver(ctx, d, sub, sender, watcher, log)
+		disposition, derr = q.deliver(ctx, d, sub, sender, watcher, log)
 	}
 	if derr != nil {
-		return derr
+		return false, derr
+	}
+	if !disposition.Delivered {
+		// THE SHIM HELD NO SESSION: the hold was stamped to wait for the
+		// session to reconnect, and stays standing.
+		return false, nil
 	}
 
-	return q.retireDelivered(ctx, ws, held.Turn, log)
+	return true, q.retireDelivered(ctx, ws, held.Turn, log)
 }
 
 // retireDelivered retires a hold the session took: tombstoned as delivered,

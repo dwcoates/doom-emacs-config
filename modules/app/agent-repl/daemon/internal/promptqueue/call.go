@@ -241,7 +241,7 @@ func (q *queue) redrive(d *delivery) {
 			})
 			continue
 		}
-		if err := q.deliverHeld(ctx, d, held, log); err != nil {
+		if _, err := q.deliverHeld(ctx, d, held, log); err != nil {
 			log.Error(opCall, "a prompt parked behind the shim call was not delivered to its agent; it stays held", dlog.Context{
 				"turn": string(sub.Turn), "cause": err.Error(),
 			})

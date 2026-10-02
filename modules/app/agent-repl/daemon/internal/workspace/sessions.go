@@ -181,6 +181,11 @@ type FleetDeps struct {
 	// (owner ruling); it is a field so the exhaustion is exercised without
 	// waiting ten minutes.
 	VendorRetryWindow time.Duration
+	// SessionsUp is told that a session has come up on a workspace, however
+	// it came up -- a start, a retried vendor start, a relaunch's resume, a
+	// cold-gate re-open, an adoption -- so the prompts held until it
+	// reconnected are delivered (promptqueue.Queue.ReleaseReconnectHolds).
+	SessionsUp func(ws ids.WorkspaceID)
 }
 
 // live is one workspace's live session: the client, its watcher, and the facts
@@ -400,6 +405,8 @@ func NewFleet(deps FleetDeps) (*Fleet, error) {
 		return nil, fmt.Errorf("workspace: the session fleet needs the absolute kernel-lock directory, got %q", deps.LockDir)
 	case deps.BringUps == nil:
 		return nil, fmt.Errorf("workspace: the session fleet needs a bring-up marker; the roster holds a starting workspace unopened by it")
+	case deps.SessionsUp == nil:
+		return nil, fmt.Errorf("workspace: the session fleet needs a session-up hook; prompts held until a session reconnects are delivered by it")
 	case deps.VendorStarts == nil:
 		return nil, fmt.Errorf("workspace: the session fleet needs a vendor-start marker; the roster draws a retried or failed vendor start by it")
 	}
@@ -1099,6 +1106,7 @@ func (f *Fleet) start(ctx context.Context, ws ids.WorkspaceID, rebind bool) erro
 		log.Info(opBringUp, "attached to a surviving shim without starting a session", dlog.Context{
 			"adopted": true, "shim_pid": client.PID(),
 		})
+		f.deps.SessionsUp(ws)
 		return nil
 	}
 
@@ -1216,6 +1224,7 @@ func (f *Fleet) sessionUp(
 	// A SESSION NOW EXISTS where none did: the host view's whole session arm
 	// changed, and nothing the server can see says so.
 	f.publishHost(ws)
+	f.deps.SessionsUp(ws)
 	return nil
 }
 

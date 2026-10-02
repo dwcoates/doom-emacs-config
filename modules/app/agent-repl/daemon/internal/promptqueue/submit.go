@@ -79,6 +79,17 @@ func (q *queue) Submit(ctx context.Context, sub Submission) (Disposition, error)
 		return q.holdForRevival(ctx, sub, log)
 	}
 
+	// A SHIM WITH NO STARTED SESSION TAKES NO PROMPT. A relaunch installs its
+	// shim before it resumes, and a vendor start being retried -- or one that
+	// failed -- leaves a shim with no session at all. Sent there, the prompt
+	// was drawn in the feed and then refused `no_session` and lost
+	// (2026-10-02). It waits under the reconnect hold, and the session's
+	// coming up delivers it (ReleaseReconnectHolds).
+	if sub.Target == nil && !q.deps.SessionStarted(sub.WS) {
+		log.Info(opSubmit, "the workspace's shim holds no started session; the prompt is held until it reconnects", nil)
+		return q.hold(ctx, sub, "", &leaseHold{kind: wsm.HoldReconnect}, log)
+	}
+
 	// A BUBBLE-ADDRESSED prompt goes to THAT agent through UpdateAgent.prompt.
 	// It is not the session's turn, so it is neither classified nor held: the
 	// main turn's queue has no say over a subagent's own composer.
@@ -384,7 +395,7 @@ func (q *queue) reviveInBackground(ctx context.Context, ws ids.WorkspaceID, log 
 			q.keepReconnectHolds(ctx, ws, log, "the revival reported success but no session came up")
 			return
 		}
-		q.releaseRevivalHolds(ctx, ws, log)
+		q.releaseReconnectHolds(ctx, ws, log)
 	}()
 }
 
@@ -423,9 +434,19 @@ func (q *queue) keepReconnectHolds(ctx context.Context, ws ids.WorkspaceID, log 
 		dlog.Context{"cause": cause, "held": len(waiting), "turns": waiting})
 }
 
-// releaseRevivalHolds un-stamps every revival-pending hold on a workspace whose
+// ReleaseReconnectHolds implements Queue.
+func (q *queue) ReleaseReconnectHolds(ws ids.WorkspaceID) {
+	ctx := context.Background()
+	log, err := q.logger(ctx, ws)
+	if err != nil {
+		return
+	}
+	q.releaseReconnectHolds(ctx, ws, log)
+}
+
+// releaseReconnectHolds un-stamps every reconnect hold on a workspace whose
 // session is now up and delivers the next one down the ordinary path.
-func (q *queue) releaseRevivalHolds(ctx context.Context, ws ids.WorkspaceID, log dlog.Logger) {
+func (q *queue) releaseReconnectHolds(ctx context.Context, ws ids.WorkspaceID, log dlog.Logger) {
 	// SERIALIZED AGAINST A TURN END AND A LEASE CHANGE, for the reason
 	// OnTurnEnded states: all three deliver from the same standing holds.
 	d := q.lockDelivery(ws)
@@ -450,16 +471,19 @@ func (q *queue) releaseRevivalHolds(ctx context.Context, ws ids.WorkspaceID, log
 		released++
 	}
 	if released == 0 {
-		log.Debug(opSubmit, "the revival released no hold", dlog.Context{"holds": len(standing)})
+		log.Debug(opSubmit, "the session's coming up released no reconnect hold", dlog.Context{"holds": len(standing)})
 		return
 	}
-	log.Debug(opSubmit, "the revival released its pending holds", dlog.Context{"released": released})
-	log.Info(opSubmit, "released the revival-pending prompts", dlog.Context{"released": released})
+	log.Info(opSubmit, "the session is up; released the prompts held until it reconnected", dlog.Context{"released": released})
 	if err := q.pushTray(ctx, ws, log); err != nil {
 		return
 	}
+	if watcher, ok := q.deps.Watcher(ws); ok && watcher.TurnInFlight() != nil {
+		log.Debug(opSubmit, "a turn is already in flight on the session that came up; the released prompts wait for its end", nil)
+		return
+	}
 	if _, err := q.popAndDeliver(ctx, d, log); err != nil {
-		log.Error(opSubmit, "the revived hold was not delivered", dlog.Context{"cause": err.Error()})
+		log.Error(opSubmit, "a prompt held until the session reconnected was not delivered", dlog.Context{"cause": err.Error()})
 	}
 }
 

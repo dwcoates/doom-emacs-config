@@ -469,3 +469,51 @@ func TestTheRosterIsToldARejectionStopsTheRun(t *testing.T) {
 		t.Fatalf("roster vendor states = %v, want the run stopped", f.vendorStarts)
 	}
 }
+
+func TestASessionComingUpOnAStartTellsTheQueue(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+
+	// Act.
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Assert.
+	if len(f.sessionsUp) != 1 || f.sessionsUp[0] != ws.ID {
+		t.Fatalf("sessions up = %v, want the started workspace", f.sessionsUp)
+	}
+}
+
+func TestASessionComingUpOnAResumeTellsTheQueue(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
+
+	// Act.
+	if _, err := f.fleet.Resume(context.Background(), ws.ID, f.client); err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+
+	// Assert.
+	if len(f.sessionsUp) != 1 || f.sessionsUp[0] != ws.ID {
+		t.Fatalf("sessions up = %v, want the resumed workspace", f.sessionsUp)
+	}
+}
+
+func TestAFailedStartTellsTheQueueNothing(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.client.response = vendorRefusal(rejectedVendorStart(), "invalid api key")
+
+	// Act.
+	_ = f.fleet.Start(context.Background(), ws.ID)
+
+	// Assert.
+	if len(f.sessionsUp) != 0 {
+		t.Fatalf("sessions up = %v, want none for a start that failed", f.sessionsUp)
+	}
+}
