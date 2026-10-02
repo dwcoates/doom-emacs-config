@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 
+	"agentrepl/testrun/internal/command"
 	"agentrepl/testrun/internal/run"
 	"agentrepl/testrun/internal/sched"
 	"agentrepl/testrun/roster"
@@ -25,14 +26,16 @@ func vitestFiles(module, dir string) ([]string, error) {
 	list := exec.Command("npx", "vitest", "list", "--filesOnly", "--json")
 	list.Dir = dir
 	list.Env = os.Environ()
-	out, err := list.Output()
+	out, err := command.Output(list)
 	if err != nil {
-		var stderr string
-		if ee, ok := err.(*exec.ExitError); ok {
-			stderr = string(ee.Stderr)
-		}
-		return nil, fmt.Errorf("suites: vitest list in %s: %w\n%s", dir, err, stderr)
+		return nil, fmt.Errorf("suites: list the vitest files: %w", err)
 	}
+	return parseVitestList(dir, out)
+}
+
+// parseVitestList reads `vitest list --filesOnly --json`: every test file,
+// answered relative to the package dir and sorted.
+func parseVitestList(dir string, out []byte) ([]string, error) {
 	var entries []struct {
 		File string `json:"file"`
 	}
@@ -41,9 +44,9 @@ func vitestFiles(module, dir string) ([]string, error) {
 	}
 	var files []string
 	for _, e := range entries {
-		rel, err := filepath.Rel(dir, e.File)
+		rel, err := under(dir, e.File)
 		if err != nil {
-			return nil, fmt.Errorf("suites: %s is not under %s: %w", e.File, dir, err)
+			return nil, err
 		}
 		files = append(files, rel)
 	}
@@ -135,9 +138,9 @@ func ParseVitestItems(path, dir string, want []string) (map[string]float64, erro
 	}
 	got := map[string]float64{}
 	for file, secs := range costs {
-		rel, err := filepath.Rel(dir, file)
+		rel, err := under(dir, file)
 		if err != nil {
-			return nil, fmt.Errorf("%s is not under %s: %w", file, dir, err)
+			return nil, err
 		}
 		if secs < 0 {
 			return nil, fmt.Errorf("%s has a negative cost %v", rel, secs)
