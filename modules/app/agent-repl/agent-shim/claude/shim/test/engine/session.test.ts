@@ -3810,6 +3810,276 @@ describe("SetSessionModel", () => {
   });
 });
 
+describe("SetSessionEffort", () => {
+  /** A request for `effort`. */
+  function effortRequest(effort: conversationv1.AgentEffortLevel): shimv1.SetSessionEffortRequest {
+    return create(shimv1.SetSessionEffortRequestSchema, { effort });
+  }
+
+  /** A harness whose catalog states `levels` for the model the init names. */
+  function catalogHarness(supportsEffort: boolean, levels: ("low" | "medium" | "high" | "xhigh" | "max")[]): Harness {
+    return harness({
+      onQueryCreated: (query) => {
+        query.models = [
+          { value: "claude-opus-5", displayName: "O", description: "d", supportsEffort, supportedEffortLevels: levels },
+        ];
+      },
+    });
+  }
+
+  /** Open a turn so a change has a boundary to wait for. */
+  async function openTurn(h: Harness): Promise<void> {
+    await h.engine.startTurn(
+      create(shimv1.StartTurnRequestSchema, {
+        turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
+        said: textSaid("go"),
+        origin: conversationv1.PromptOrigin.USER_SENT,
+        pageSize: 5,
+      }),
+    );
+  }
+
+  /** The failure arm's cause, or undefined on success. */
+  function causeOf(response: shimv1.SetSessionEffortResponse): string | undefined {
+    return response.result.case === "failure" ? response.result.value.cause.case : undefined;
+  }
+
+  it("refuses when no session has been started", async () => {
+    // Arrange.
+    const h = harness();
+
+    // Act.
+    const response = await h.engine.setSessionEffort(effortRequest(conversationv1.AgentEffortLevel.HIGH));
+
+    // Assert.
+    expect(causeOf(response)).toBe("noSession");
+  });
+
+  it("refuses a level when the model in effect takes no effort level", async () => {
+    // Arrange.
+    const h = catalogHarness(false, []);
+    await started(h);
+
+    // Act.
+    const response = await h.engine.setSessionEffort(effortRequest(conversationv1.AgentEffortLevel.HIGH));
+
+    // Assert.
+    expect(causeOf(response)).toBe("notSupported");
+  });
+
+  it("refuses a level the model in effect does not list", async () => {
+    // Arrange.
+    const h = catalogHarness(true, ["low", "medium", "high"]);
+    await started(h);
+
+    // Act.
+    const response = await h.engine.setSessionEffort(effortRequest(conversationv1.AgentEffortLevel.MAX));
+
+    // Assert.
+    expect(causeOf(response)).toBe("notSupported");
+  });
+
+  it("asks the vendor nothing when it refuses a level", async () => {
+    // Arrange.
+    const h = catalogHarness(true, ["low"]);
+    await started(h);
+
+    // Act.
+    await h.engine.setSessionEffort(effortRequest(conversationv1.AgentEffortLevel.MAX));
+
+    // Assert.
+    expect(h.queries[0]?.query.calls.some((call) => call.startsWith("applyFlagSettings"))).toBe(false);
+  });
+
+  it("records the refusal with the level and the model in effect", async () => {
+    // Arrange.
+    const h = catalogHarness(true, ["low"]);
+    await started(h);
+    const before = logSinkMark();
+
+    // Act.
+    await h.engine.setSessionEffort(effortRequest(conversationv1.AgentEffortLevel.MAX));
+
+    // Assert.
+    const context = logContextFor(before, "refused SetSessionEffort");
+    expect([context?.effort, context?.model]).toEqual(["MAX", "claude-opus-5"]);
+  });
+
+  it("records the vendor's refusal with its cause", async () => {
+    // Arrange.
+    const h = harness({
+      onQueryCreated: (query) => {
+        query.applyFlagSettingsRejects = new Error("flag layer closed");
+      },
+    });
+    await started(h);
+    const before = logSinkMark();
+
+    // Act.
+    await h.engine.setSessionEffort(effortRequest(conversationv1.AgentEffortLevel.HIGH));
+
+    // Assert.
+    expect(logContextFor(before, "the vendor refused the effort change")?.cause).toBe("flag layer closed");
+  });
+
+  it("applies a listed level through the vendor's flag layer when no turn is open", async () => {
+    // Arrange.
+    const h = catalogHarness(true, ["low", "medium", "high"]);
+    await started(h);
+
+    // Act.
+    await h.engine.setSessionEffort(effortRequest(conversationv1.AgentEffortLevel.MEDIUM));
+
+    // Assert.
+    expect(h.queries[0]?.query.calls).toContain("applyFlagSettings:effortLevel=medium");
+  });
+
+  it("answers success carrying the level now in effect", async () => {
+    // Arrange.
+    const h = catalogHarness(true, ["low", "medium", "high"]);
+    await started(h);
+
+    // Act.
+    const response = await h.engine.setSessionEffort(effortRequest(conversationv1.AgentEffortLevel.LOW));
+
+    // Assert.
+    expect(
+      response.result.case === "success" ? response.result.value.effortChanged?.effectiveEffort : undefined,
+    ).toBe(conversationv1.AgentEffortLevel.LOW);
+  });
+
+  it("leaves the decision to the vendor when the catalog states nothing about the model", async () => {
+    // Arrange.
+    const h = harness();
+    await started(h);
+
+    // Act.
+    const response = await h.engine.setSessionEffort(effortRequest(conversationv1.AgentEffortLevel.XHIGH));
+
+    // Assert.
+    expect(response.result.case).toBe("success");
+  });
+
+  it("answers vendor_refused when the vendor rejects the flag settings", async () => {
+    // Arrange.
+    const h = harness({
+      onQueryCreated: (query) => {
+        query.applyFlagSettingsRejects = new Error("no");
+      },
+    });
+    await started(h);
+
+    // Act.
+    const response = await h.engine.setSessionEffort(effortRequest(conversationv1.AgentEffortLevel.HIGH));
+
+    // Assert.
+    expect(causeOf(response)).toBe("vendorRefused");
+  });
+
+  it("DEFERS the level to the turn boundary while a turn is open", async () => {
+    // Arrange.
+    const h = harness();
+    await started(h);
+    await openTurn(h);
+
+    // Act.
+    const pending = h.engine.setSessionEffort(effortRequest(conversationv1.AgentEffortLevel.HIGH));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    // Assert.
+    expect(h.queries[0]?.query.calls).not.toContain("applyFlagSettings:effortLevel=high");
+    h.queries[0]?.query.emit(resultMessage());
+    await pending;
+  });
+
+  it("does not RESOLVE the call until the turn ends", async () => {
+    // Arrange.
+    const h = harness();
+    await started(h);
+    await openTurn(h);
+    let settled = false;
+
+    // Act.
+    const pending = h.engine.setSessionEffort(effortRequest(conversationv1.AgentEffortLevel.HIGH)).then((response) => {
+      settled = true;
+      return response;
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    // Assert.
+    expect(settled).toBe(false);
+    h.queries[0]?.query.emit(resultMessage());
+    await pending;
+  });
+
+  it("applies the deferred level once the turn ends", async () => {
+    // Arrange.
+    const h = harness();
+    await started(h);
+    await openTurn(h);
+    const pending = h.engine.setSessionEffort(effortRequest(conversationv1.AgentEffortLevel.HIGH));
+
+    // Act.
+    h.queries[0]?.query.emit(resultMessage());
+    const response = await pending;
+
+    // Assert.
+    expect(response.result.case).toBe("success");
+    expect(h.queries[0]?.query.calls).toContain("applyFlagSettings:effortLevel=high");
+  });
+
+  it("refuses the first of two calls during one turn, which the second replaced", async () => {
+    // Arrange.
+    const h = harness();
+    await started(h);
+    await openTurn(h);
+    const first = h.engine.setSessionEffort(effortRequest(conversationv1.AgentEffortLevel.LOW));
+
+    // Act.
+    const second = h.engine.setSessionEffort(effortRequest(conversationv1.AgentEffortLevel.HIGH));
+    h.queries[0]?.query.emit(resultMessage());
+
+    // Assert.
+    expect(causeOf(await first)).toBe("vendorRefused");
+    expect((await second).result.case).toBe("success");
+  });
+
+  it("applies a deferred model before a deferred level at the same boundary", async () => {
+    // Arrange.
+    const h = harness();
+    await started(h);
+    await openTurn(h);
+    const model = h.engine.setSessionModel(
+      create(shimv1.SetSessionModelRequestSchema, {
+        model: create(conversationv1.AgentModelSchema, { name: "claude-sonnet-5" }),
+      }),
+    );
+    const effort = h.engine.setSessionEffort(effortRequest(conversationv1.AgentEffortLevel.HIGH));
+
+    // Act.
+    h.queries[0]?.query.emit(resultMessage());
+    await Promise.all([model, effort]);
+
+    // Assert.
+    const calls = h.queries[0]?.query.calls ?? [];
+    expect(calls.indexOf("setModel:claude-sonnet-5")).toBeLessThan(calls.indexOf("applyFlagSettings:effortLevel=high"));
+  });
+
+  it("answers a call still waiting on a turn boundary when the session stands down", async () => {
+    // Arrange.
+    const h = harness();
+    await started(h);
+    await openTurn(h);
+    const pending = h.engine.setSessionEffort(effortRequest(conversationv1.AgentEffortLevel.HIGH));
+
+    // Act.
+    await h.engine.standDown("KillSession");
+
+    // Assert.
+    expect(causeOf(await pending)).toBe("vendorRefused");
+  });
+});
+
 describe("SetSessionPermissionMode", () => {
   it("refuses when no session has been started", async () => {
     const h = harness();

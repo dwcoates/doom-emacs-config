@@ -31,6 +31,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	"claude-repld/internal/claudesettings"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/publish"
@@ -167,6 +168,20 @@ type Resolver interface {
 	// the order served, reporting false before a session has stated one.
 	// SetModel validates against what was served here.
 	ModelCatalog(ws ids.WorkspaceID) ([]string, bool)
+	// SetEffortSettings installs what the session's config root persists for
+	// the effort level — the selector's current level before any pick. The
+	// daemon reads it at workspace initialization and on every account switch.
+	SetEffortSettings(ws ids.WorkspaceID, settings claudesettings.Effort)
+	// SetPickedEffort installs the level the shim confirmed for a SetEffort.
+	// It holds for the rest of the workspace's session, across every shim.
+	SetPickedEffort(ws ids.WorkspaceID, level conversationv1.AgentEffortLevel)
+	// PickedEffort answers the level a pick put in force, false before any
+	// pick. A newly spawned shim is put back at it.
+	PickedEffort(ws ids.WorkspaceID) (conversationv1.AgentEffortLevel, bool)
+	// EffortLevels answers the levels the selected model accepts, false when
+	// it takes none or its capabilities were never stated. SetEffort
+	// validates against it.
+	EffortLevels(ws ids.WorkspaceID) ([]conversationv1.AgentEffortLevel, bool)
 	// SetAccount installs the account cell: the root in force and EVERY root
 	// the daemon knows beside it. An EMPTY email is the logged-out arm, which
 	// is a drawn warning rather than a blank label.

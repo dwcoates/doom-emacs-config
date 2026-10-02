@@ -53,6 +53,8 @@ import {
   setModelAccepted,
   setModelCause,
   setModelCold,
+  setEffortAccepted,
+  setEffortCause,
   setPermissionModeAccepted,
   setPermissionModeCause,
   startSessionCause,
@@ -310,6 +312,38 @@ describe("SetSessionPermissionMode", () => {
     setPermissionModeAccepted(response);
     expect(sessionUpdate(pushed).update.case).toBe("permissionModeChanged");
     watch.close();
+  });
+});
+
+describe("SetSessionEffort", () => {
+  test("with no turn open it succeeds carrying the level now in effect", async () => {
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+
+    const response = await shim.clients.h1.setSessionEffort(
+      create(shimv1.SetSessionEffortRequestSchema, { effort: conversationv1.AgentEffortLevel.HIGH }),
+    );
+
+    expect(setEffortAccepted(response)).toBe(conversationv1.AgentEffortLevel.HIGH);
+  });
+
+  test("a model that takes no effort level answers not_supported", async () => {
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    setModelAccepted(
+      await shim.clients.h1.setSessionModel(
+        create(shimv1.SetSessionModelRequestSchema, {
+          model: modelNamed("fake-haiku-4-5"),
+          coldThresholdTokens: 1_000_000n,
+        }),
+      ),
+    );
+
+    const response = await shim.clients.h1.setSessionEffort(
+      create(shimv1.SetSessionEffortRequestSchema, { effort: conversationv1.AgentEffortLevel.HIGH }),
+    );
+
+    expect(setEffortCause(response)).toBe("notSupported");
   });
 });
 
@@ -1732,6 +1766,17 @@ describe("the vendor refusing a CONTROL call", () => {
     );
 
     expect(setModelCause(response)).toBe("vendorRefused");
+  });
+
+  test("SetSessionEffort answers vendor_refused when the vendor rejects the flag settings", async () => {
+    const shim = await spawnShim({ env: { AGENT_REPL_FAKE_REFUSE: "apply_flag_settings" } });
+    await shim.clients.h1.startSession(freshSession());
+
+    const response = await shim.clients.h1.setSessionEffort(
+      create(shimv1.SetSessionEffortRequestSchema, { effort: conversationv1.AgentEffortLevel.HIGH }),
+    );
+
+    expect(setEffortCause(response)).toBe("vendorRefused");
   });
 
   test("SetSessionPermissionMode answers vendor_refused when the vendor rejects it", async () => {

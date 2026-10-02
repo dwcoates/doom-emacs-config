@@ -225,6 +225,7 @@ const QUERY_METHODS: ReadonlyArray<readonly [string, string]> = [
   ["interrupt", "Promise<SDKControlInterruptResponse | undefined>"],
   ["setPermissionMode", "Promise<void>"],
   ["setModel", "Promise<void>"],
+  ["applyFlagSettings", "Promise<void>"],
   ["supportedModels", "Promise<ModelInfo[]>"],
   ["supportedCommands", "Promise<SlashCommand[]>"],
   ["supportedAgents", "Promise<AgentInfo[]>"],

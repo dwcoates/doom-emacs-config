@@ -239,6 +239,32 @@ export function setModelCold(
   return cold;
 }
 
+/** The level a SetSessionEffort success put in effect; throws on a refusal. */
+export function setEffortAccepted(
+  response: shimv1.SetSessionEffortResponse,
+): conversationv1.AgentEffortLevel {
+  if (response.result.case !== "success") {
+    throw wrongArm(
+      "SetSessionEffort",
+      response.result.case === "failure"
+        ? `failure.${response.result.value.cause.case ?? "unset"}`
+        : response.result.case,
+      response.result.case === "failure" ? response.result.value.detail : undefined,
+    );
+  }
+  const changed = response.result.value.effortChanged;
+  if (changed === undefined) throw new Error("SetSessionEffort: success carries no effort_changed");
+  return changed.effectiveEffort;
+}
+
+/** The SetSessionEffort refusal's arm. */
+export function setEffortCause(response: shimv1.SetSessionEffortResponse): string {
+  if (response.result.case !== "failure") {
+    throw new Error(`SetSessionEffort: expected a failure, got ${response.result.case ?? "an unset oneof"}`);
+  }
+  return response.result.value.cause.case ?? "unset";
+}
+
 /** The SetSessionPermissionMode refusal's arm. */
 export function setPermissionModeCause(
   response: shimv1.SetSessionPermissionModeResponse,

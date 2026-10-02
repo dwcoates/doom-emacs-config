@@ -35,6 +35,12 @@ import (
 type fakeClient struct {
 	shimclient.Client
 
+	// efforts is every SetSessionEffort asked; effortResponse and effortErr
+	// script the answer (a nil response confirms the level asked for).
+	efforts        []*shimv1.SetSessionEffortRequest
+	effortResponse *shimv1.SetSessionEffortResponse
+	effortErr      error
+
 	// detached counts Detach calls: the link let go, the process left running.
 	detached int
 
@@ -199,6 +205,20 @@ func (c *fakeClient) Hibernate(context.Context, *shimv1.HibernateRequest) (*shim
 }
 
 func (c *fakeClient) PID() int { return c.pid }
+
+// SetSessionEffort records the ask and answers the scripted outcome; with none
+// scripted it confirms the level asked for.
+func (c *fakeClient) SetSessionEffort(_ context.Context, req *shimv1.SetSessionEffortRequest) (*shimv1.SetSessionEffortResponse, error) {
+	c.efforts = append(c.efforts, req)
+	if c.effortErr != nil || c.effortResponse != nil {
+		return c.effortResponse, c.effortErr
+	}
+	return &shimv1.SetSessionEffortResponse{Result: &shimv1.SetSessionEffortResponse_Success{
+		Success: &shimv1.SetSessionEffortSuccess{
+			EffortChanged: &conversationv1.SessionEffortChanged{EffectiveEffort: req.GetEffort()},
+		},
+	}}, nil
+}
 
 func (c *fakeClient) Kill(_ context.Context, attr shimclient.KillAttribution) error {
 	if c.killErr != nil {
@@ -427,11 +447,15 @@ type fleetFixture struct {
 	// cold-gated workspace starts no session, so the topbar's own state is
 	// the only thing standing between the reader and a blank strip.
 	topbarGates []topbar.ColdGate
-	log         *fakeSurfaces
-	watcher     *fakeWatcher
-	links       *recordingLinkSink
-	probeState  sessionlock.State
-	probeErr    error
+	// picked is the effort level the topbar holds as picked, and
+	// topbarWarnings every warning line the fleet raised on the strip.
+	picked         conversationv1.AgentEffortLevel
+	topbarWarnings []string
+	log            *fakeSurfaces
+	watcher        *fakeWatcher
+	links          *recordingLinkSink
+	probeState     sessionlock.State
+	probeErr       error
 	// socketState and socketErr script the shim-socket listener probe, which
 	// decides adopt-versus-spawn beside the lock.
 	socketState shimsocket.State
@@ -558,7 +582,7 @@ func newFleetFixtureBoundedAt(t *testing.T, adoptBound time.Duration) *fleetFixt
 
 	fleet, err := NewFleet(FleetDeps{
 		DB: f.db, Instance: fixtureInstance, Accounts: f.accounts, Supervisor: f.supervisor, ShimBundle: f.bundle,
-		Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{coldGates: &f.topbarGates}, Log: f.log,
+		Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{coldGates: &f.topbarGates, picked: &f.picked, warnings: &f.topbarWarnings}, Log: f.log,
 		Sinks: sessionwatcher.Sinks{
 			Footer:  footerLinkSink{rec: f.links},
 			Topbar:  topbarLinkSink{rec: f.links},

@@ -113,6 +113,7 @@ const (
 	RPCWatchSession             = "WatchSession"
 	RPCSetSessionModel          = "SetSessionModel"
 	RPCSetSessionPermissionMode = "SetSessionPermissionMode"
+	RPCSetSessionEffort         = "SetSessionEffort"
 	RPCHibernate                = "Hibernate"
 	RPCKillSession              = "KillSession"
 	RPCStartTurn                = "StartTurn"
@@ -561,6 +562,14 @@ func (s *ShimControl) ExpectSetSessionPermissionMode() *shimv1.SetSessionPermiss
 	s.t.Helper()
 	msg := &shimv1.SetSessionPermissionModeRequest{}
 	s.expect(RPCSetSessionPermissionMode, msg)
+	return msg
+}
+
+// ExpectSetSessionEffort pops the next SetSessionEffort.
+func (s *ShimControl) ExpectSetSessionEffort() *shimv1.SetSessionEffortRequest {
+	s.t.Helper()
+	msg := &shimv1.SetSessionEffortRequest{}
+	s.expect(RPCSetSessionEffort, msg)
 	return msg
 }
 

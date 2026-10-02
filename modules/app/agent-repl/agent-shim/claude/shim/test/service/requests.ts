@@ -53,6 +53,10 @@ export function setSessionModelRequest(): shimv1.SetSessionModelRequest {
   });
 }
 
+export function setSessionEffortRequest(): shimv1.SetSessionEffortRequest {
+  return create(shimv1.SetSessionEffortRequestSchema, { effort: conversationv1.AgentEffortLevel.HIGH });
+}
+
 export function setSessionPermissionModeRequest(): shimv1.SetSessionPermissionModeRequest {
   return create(shimv1.SetSessionPermissionModeRequestSchema, { permissionMode: permissionMode() });
 }

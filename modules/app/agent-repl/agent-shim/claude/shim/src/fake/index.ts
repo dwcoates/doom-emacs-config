@@ -43,6 +43,7 @@ import type {
   AgentInfoLike,
   CanUseToolLike,
   ContextUsageLike,
+  EffortLevelLike,
   InitializationResultLike,
   InterruptReceipt,
   McpServerStatusLike,
@@ -190,6 +191,7 @@ const REFUSABLE = new Set([
   "start-auth-error",
   "set_model",
   "set_permission_mode",
+  "apply_flag_settings",
   "rewind_files",
 ]);
 
@@ -565,6 +567,8 @@ export function createFakeQuery(
   let sessionUuid = opts.resume ?? opts.sessionId;
   let model = opts.model ?? FAKE_DEFAULT_MODEL;
   let permissionMode: PermissionModeLike = opts.permissionMode ?? "default";
+  /** The effort the flag layer holds; undefined until `applyFlagSettings` sets one. */
+  let effortLevel: EffortLevelLike | undefined;
   let accountUsageArm: AccountUsageArm = "available";
   // Every sampled window a `rate_limit_event` of this query announced since the
   // scenario last chose the usage answer, so the probe reports the same account
@@ -1731,6 +1735,19 @@ export function createFakeQuery(
       // The vendor announces the new mode on its `status` message, the only
       // place outside `init` where `sdk.d.ts` declares a permission mode at all.
       systemMessage("status", { status: null, permissionMode: mode });
+    },
+
+    applyFlagSettings: async (settings: { effortLevel: EffortLevelLike }): Promise<void> => {
+      if (refuse.has("apply_flag_settings")) {
+        throw new Error("the mocked vendor refused the flag settings");
+      }
+      LOGGER.debug(
+        { claude_session_id: sessionUuid, previous_effort: effortLevel ?? "", effort: settings.effortLevel },
+        "fake vendor effort level changed",
+      );
+      // The vendor announces nothing for a flag-layer change: `sdk.d.ts`
+      // declares no message for it, so the mock emits none either.
+      effortLevel = settings.effortLevel;
     },
 
     setModel: async (next?: string): Promise<void> => {
