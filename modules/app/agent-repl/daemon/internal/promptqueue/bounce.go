@@ -299,9 +299,9 @@ func (q *queue) RequestBounce(ctx context.Context, ws ids.WorkspaceID, req bounc
 			tellNow()
 		}
 	}()
-	state := q.state(ws)
-	state.drain.Lock()
-	defer state.drain.Unlock()
+	d := q.lockDelivery(ws)
+	defer d.unlock()
+	state := d.state
 
 	turn, detached, free := q.inFlight(ws)
 	decision := bounce.Decision{TurnInFlight: turn, DetachedWork: detached}
@@ -355,10 +355,18 @@ func (q *queue) RequestBounce(ctx context.Context, ws ids.WorkspaceID, req bounc
 		existing.register(req)
 		state.bounce = existing
 	}
+	q.mu.Unlock()
+	// A SHIM CALL IN FLIGHT IS WORK IN FLIGHT the bounce cannot be decided
+	// past: the request stays registered, and the call's settle decides it
+	// (decideBounceLocked), dispatch-quiet and forced alike.
+	if q.deferToCall(d, log, "bounce") {
+		return decision, nil
+	}
+	q.mu.Lock()
 	force := existing.force()
 	// A DISPATCH-QUIET MOVE IS DECIDED NOW, under the delivery lock this
-	// function holds: no StartTurn is mid-flight, and none can start once the
-	// workspace drains. The work in flight runs on through the move, on the
+	// function holds: no shim call is mid-flight (one standing deferred the
+	// decision above), and none can start once the workspace drains. The work in flight runs on through the move, on the
 	// shim the move detaches and never stops. A replacement registered behind
 	// that work is not waited for: it is carried across and runs on the next
 	// daemon at its freeness.
@@ -371,7 +379,7 @@ func (q *queue) RequestBounce(ctx context.Context, ws ids.WorkspaceID, req bounc
 		log.Info(opBounce, "a dispatch-quiet move: moving the workspace now; the work in flight runs on through the move", dlog.Context{
 			"turn_in_flight": turn, "detached_work": detached, "overtook_replacement": overtook,
 		})
-		q.startBounceLocked(ws, state, log)
+		q.startBounceLocked(d, log)
 		return decision, nil
 	}
 	if !free && !force {
@@ -391,7 +399,7 @@ func (q *queue) RequestBounce(ctx context.Context, ws ids.WorkspaceID, req bounc
 	} else {
 		log.Info(opBounce, "the workspace is free; bouncing it now", nil)
 	}
-	q.startBounceLocked(ws, state, log)
+	q.startBounceLocked(d, log)
 	return decision, nil
 }
 
@@ -404,10 +412,9 @@ func (q *queue) OnFree(ws ids.WorkspaceID) {
 	if err != nil {
 		return
 	}
-	state := q.state(ws)
-	state.drain.Lock()
-	defer state.drain.Unlock()
-	if !q.checkRegistryLocked(ws, state, log) {
+	d := q.lockDelivery(ws)
+	defer d.unlock()
+	if !q.checkRegistryLocked(d, log) {
 		log.Debug(opBounce, "the workspace fell free with no bounce to take", nil)
 	}
 }
@@ -450,14 +457,14 @@ func (q *queue) decideDeparture(ws ids.WorkspaceID, departed Watcher, departure 
 		log = q.deps.Log.WorkspaceOrCentral(record.Dir).With(dlog.Context{"workspace": string(ws)})
 	}
 
-	state := q.state(ws)
-	state.drain.Lock()
+	d := q.lockDelivery(ws)
+	state := d.state
 	q.mu.Lock()
 	pending := state.bounce
 	q.mu.Unlock()
 	switch {
 	case pending == nil:
-		state.drain.Unlock()
+		d.unlock()
 		log.Debug(opBounce, "the shim departed with no bounce registered", fields)
 		if !departure.Ordered {
 			q.reviveAfterDeath(ws, state, record, recordErr, log)
@@ -467,7 +474,7 @@ func (q *queue) decideDeparture(ws ids.WorkspaceID, departed Watcher, departure 
 		q.mu.Lock()
 		pending.freedWhileRunning = true
 		q.mu.Unlock()
-		state.drain.Unlock()
+		d.unlock()
 		log.Debug(opBounce, "the shim departed inside the bounce that is replacing it", fields)
 		return
 	case pending.waitsOn != departed:
@@ -475,8 +482,8 @@ func (q *queue) decideDeparture(ws ids.WorkspaceID, departed Watcher, departure 
 		// another shim now, so its OWN work is what the bounce waits on, and
 		// the ordinary judgement decides.
 		log.Debug(opBounce, "the departed shim is not the one the registered bounce waits on; judging the workspace's current shim", fields)
-		q.checkRegistryLocked(ws, state, log)
-		state.drain.Unlock()
+		q.checkRegistryLocked(d, log)
+		d.unlock()
 		return
 	}
 	fields["reason"] = pending.reason()
@@ -528,9 +535,11 @@ func (q *queue) decideDeparture(ws ids.WorkspaceID, departed Watcher, departure 
 				// workspace still has to leave this daemon, and the work it
 				// waited on ended with the shim.
 				log.Info(opBounce, "the shim departed under a registered bounce; its move is taken now without the replacement", fields)
-				q.startBounceLocked(ws, state, log)
+				if !q.deferToCall(d, log, "bounce") {
+					q.startBounceLocked(d, log)
+				}
 			}
-			state.drain.Unlock()
+			d.unlock()
 			for _, done := range dones {
 				done(unregister)
 			}
@@ -539,14 +548,16 @@ func (q *queue) decideDeparture(ws ids.WorkspaceID, departed Watcher, departure 
 		log.Info(opBounce, "the shim died with work recorded in flight; that work ended with it, so its registered bounce relaunches it now", fields)
 	} else if replaced {
 		log.Debug(opBounce, "the shim departed and a newer one already serves the workspace; judging the newer shim's work", fields)
-		q.checkRegistryLocked(ws, state, log)
-		state.drain.Unlock()
+		q.checkRegistryLocked(d, log)
+		d.unlock()
 		return
 	} else {
 		log.Info(opBounce, "the shim departed; the work its registered bounce waited on ended with it, so the bounce is taken now", fields)
 	}
-	q.startBounceLocked(ws, state, log)
-	state.drain.Unlock()
+	if !q.deferToCall(d, log, "bounce") {
+		q.startBounceLocked(d, log)
+	}
+	d.unlock()
 }
 
 // reviveAfterDeath brings back the session of a shim that DIED ON ITS OWN.
@@ -612,9 +623,11 @@ func (q *queue) unregisterReplacementLocked(state *wsState) (dones []func(error)
 
 // checkRegistryLocked takes a registered bounce the moment the workspace is
 // free, and reports whether the workspace is DRAINING when it returns — just
-// decided, or already. The caller holds the workspace's delivery lock, which
-// is what makes "free" and "bounce" one decision.
-func (q *queue) checkRegistryLocked(ws ids.WorkspaceID, state *wsState, log dlog.Logger) bool {
+// decided, or already. The caller holds the workspace's delivery lock (d),
+// which is what makes "free" and "bounce" one decision. A shim call in flight
+// is work the decision waits for: its settle takes it (call.go).
+func (q *queue) checkRegistryLocked(d *delivery, log dlog.Logger) bool {
+	ws, state := d.ws, d.state
 	q.mu.Lock()
 	pending := state.bounce
 	q.mu.Unlock()
@@ -627,6 +640,9 @@ func (q *queue) checkRegistryLocked(ws ids.WorkspaceID, state *wsState, log dlog
 		q.mu.Unlock()
 		return true
 	}
+	if q.deferToCall(d, log, "bounce") {
+		return false
+	}
 	turn, detached, free := q.inFlight(ws)
 	if !free {
 		log.Debug(opBounce, "a registered bounce is still waiting on the workspace's work", dlog.Context{
@@ -637,15 +653,70 @@ func (q *queue) checkRegistryLocked(ws ids.WorkspaceID, state *wsState, log dlog
 	log.Info(opBounce, "the workspace's work ended; taking its registered bounce now", dlog.Context{
 		"reason": pending.reason(),
 	})
-	q.startBounceLocked(ws, state, log)
+	q.startBounceLocked(d, log)
+	return true
+}
+
+// decideBounceLocked takes a registered bounce whose decision a shim call
+// deferred (call.go), as RequestBounce would have taken it with no call in
+// flight: a dispatch-quiet move while work runs, a forced bounce over it, any
+// bounce once the workspace is free. It reports whether the workspace is
+// DRAINING when it returns. The caller holds the delivery lock (d).
+func (q *queue) decideBounceLocked(d *delivery, log dlog.Logger) bool {
+	state := d.state
+	q.mu.Lock()
+	pending := state.bounce
+	q.mu.Unlock()
+	if pending == nil || pending.kept {
+		return pending != nil
+	}
+	if pending.draining {
+		return true
+	}
+	turn, detached, free := q.inFlight(d.ws)
+	q.mu.Lock()
+	quiet := !free && pending.quietMove()
+	overtook := quiet && pending.overtake()
+	force := pending.force()
+	q.mu.Unlock()
+	switch {
+	case quiet:
+		log.Info(opBounce, "a dispatch-quiet move deferred behind a shim call: moving the workspace now; the work in flight runs on through the move", dlog.Context{
+			"turn_in_flight": turn, "detached_work": detached, "overtook_replacement": overtook,
+		})
+	case free:
+		log.Info(opBounce, "a bounce deferred behind a shim call: the workspace is free; bouncing it now", dlog.Context{"reason": pending.reason()})
+	case force:
+		log.Info(opBounce, "a FORCED bounce deferred behind a shim call: bouncing now over the work in flight, which ends with it", dlog.Context{
+			"turn_in_flight": turn, "detached_work": detached,
+		})
+	default:
+		log.Debug(opBounce, "a bounce deferred behind a shim call still waits on the workspace's work", dlog.Context{
+			"reason": pending.reason(), "turn_in_flight": turn, "detached_work": detached,
+		})
+		return false
+	}
+	q.startBounceLocked(d, log)
 	return true
 }
 
 // startBounceLocked moves the workspace to DRAINING and runs the bounce's
 // stages on its own goroutine, one after the other, joinable through Drain.
-// The caller holds the delivery lock.
-func (q *queue) startBounceLocked(ws ids.WorkspaceID, state *wsState, log dlog.Logger) {
+// The caller holds the delivery lock (d) and has deferred to any shim call in
+// flight: a bounce never starts beside one, so no delivery runs on a shim the
+// bounce is standing down.
+func (q *queue) startBounceLocked(d *delivery, log dlog.Logger) {
+	ws, state := d.ws, d.state
 	q.mu.Lock()
+	if call := state.call; call != nil {
+		q.mu.Unlock()
+		log.Error(opBounce, "a bounce was started while a shim call stands", dlog.Context{
+			"call": call.what, "call_turn": string(call.turn),
+			"invariant_violation": "a bounce never starts beside a shim call",
+			"remediation":         "defer the bounce decision to the call (deferToCall)",
+		})
+		panic(fmt.Sprintf("promptqueue: a bounce started on %s while a %s call stands", ws, call.what))
+	}
 	pending := state.bounce
 	pending.draining = true
 	// Only an edge that arrives WHILE this run decides is one it can swallow.
@@ -674,8 +745,8 @@ func (q *queue) startBounceLocked(ws ids.WorkspaceID, state *wsState, log dlog.L
 func (q *queue) finishStage(ws ids.WorkspaceID, stage *bounceStage, runErr error, log dlog.Logger) *bounceStage {
 	ctx := context.Background()
 	req := stage.req
-	state := q.state(ws)
-	state.drain.Lock()
+	d := q.lockDelivery(ws)
+	state := d.state
 
 	q.mu.Lock()
 	pending := state.bounce
@@ -688,8 +759,8 @@ func (q *queue) finishStage(ws ids.WorkspaceID, stage *bounceStage, runErr error
 		edge := pending.freedWhileRunning
 		pending.freedWhileRunning = false
 		q.mu.Unlock()
-		q.deferReplacementLocked(ws, state, pending, edge, runErr, log)
-		state.drain.Unlock()
+		q.deferReplacementLocked(d, pending, edge, runErr, log)
+		d.unlock()
 		return nil
 	}
 	dones := stage.dones
@@ -739,7 +810,7 @@ func (q *queue) finishStage(ws ids.WorkspaceID, stage *bounceStage, runErr error
 				"reason": req.Reason, "next": next.req.Reason,
 			})
 		}
-		state.drain.Unlock()
+		d.unlock()
 		for _, done := range dones {
 			done(runErr)
 		}
@@ -776,7 +847,7 @@ func (q *queue) finishStage(ws ids.WorkspaceID, stage *bounceStage, runErr error
 
 	switch {
 	case keep:
-	case registeredAgain && q.checkRegistryLocked(ws, state, log):
+	case registeredAgain && q.checkRegistryLocked(d, log):
 		// THE REPLACEMENT THE FAILED MOVE WAS CARRYING RUNS HERE NOW, the
 		// workspace being free: it drains the workspace, and its own finish
 		// delivers what is held.
@@ -784,9 +855,9 @@ func (q *queue) finishStage(ws ids.WorkspaceID, stage *bounceStage, runErr error
 		if registeredAgain {
 			log.Info(opBounce, "the failed move left the replacements it was carrying registered here, behind the workspace's work", nil)
 		}
-		q.resumeDispatchLocked(ctx, ws, log)
+		q.resumeDispatchLocked(ctx, d, log)
 	}
-	state.drain.Unlock()
+	d.unlock()
 
 	for _, done := range dones {
 		done(runErr)
@@ -810,7 +881,8 @@ func (q *queue) finishStage(ws ids.WorkspaceID, stage *bounceStage, runErr error
 // move standing behind the replacement runs now and carries it across, as it
 // would have had the workspace been busy when the move was asked. The caller
 // holds the delivery lock and has already reset the stage.
-func (q *queue) deferReplacementLocked(ws ids.WorkspaceID, state *wsState, pending *pendingBounce, edge bool, runErr error, log dlog.Logger) {
+func (q *queue) deferReplacementLocked(d *delivery, pending *pendingBounce, edge bool, runErr error, log dlog.Logger) {
+	ws := d.ws
 	current, _ := q.deps.Watcher(ws)
 	q.mu.Lock()
 	pending.waitsOn = current
@@ -827,12 +899,12 @@ func (q *queue) deferReplacementLocked(ws ids.WorkspaceID, state *wsState, pendi
 		log.Info(opBounce, "a dispatch-quiet move stands behind the deferred replacement; moving the workspace now and carrying the replacement with it", dlog.Context{
 			"overtook_replacement": overtook,
 		})
-		q.startBounceLocked(ws, state, log)
-	case edge && q.checkRegistryLocked(ws, state, log):
+		q.startBounceLocked(d, log)
+	case edge && q.checkRegistryLocked(d, log):
 		// A FREENESS EDGE THE RUN SWALLOWED left the workspace free: the
 		// re-registered bounce is taken now, and its own finish delivers.
 	default:
-		q.resumeDispatchLocked(context.Background(), ws, log)
+		q.resumeDispatchLocked(context.Background(), d, log)
 	}
 }
 
@@ -864,9 +936,9 @@ func (p *pendingBounce) registerStage(s *bounceStage) {
 // behind a bounce that finished long ago.
 func (q *queue) EndKeptDrain(ws ids.WorkspaceID) {
 	log := q.deps.Log.Global().With(dlog.Context{"workspace": string(ws)})
-	state := q.state(ws)
-	state.drain.Lock()
-	defer state.drain.Unlock()
+	d := q.lockDelivery(ws)
+	defer d.unlock()
+	state := d.state
 	q.mu.Lock()
 	pending := state.bounce
 	kept := pending != nil && pending.kept
@@ -881,13 +953,14 @@ func (q *queue) EndKeptDrain(ws ids.WorkspaceID) {
 	log.Info(opBounce, "ended the handover's kept drain; the workspace was taken back and dispatch resumes here", dlog.Context{
 		"reason": pending.reason(), "state": "draining", "before": true, "after": false,
 	})
-	q.resumeDispatchLocked(context.Background(), ws, log)
+	q.resumeDispatchLocked(context.Background(), d, log)
 }
 
 // resumeDispatchLocked delivers what the drain held, in order, exactly as a
 // turn end would. The caller holds the delivery
 // lock.
-func (q *queue) resumeDispatchLocked(ctx context.Context, ws ids.WorkspaceID, log dlog.Logger) {
+func (q *queue) resumeDispatchLocked(ctx context.Context, d *delivery, log dlog.Logger) {
+	ws := d.ws
 	if !q.releaseDrainHoldsLocked(ctx, ws, log) {
 		return
 	}
@@ -895,7 +968,7 @@ func (q *queue) resumeDispatchLocked(ctx context.Context, ws ids.WorkspaceID, lo
 		log.Debug(opBounce, "a turn is already in flight on the new shim; the held prompts wait for its end", nil)
 		return
 	}
-	delivered, err := q.popAndDeliver(ctx, ws, log)
+	delivered, err := q.popAndDeliver(ctx, d, log)
 	if err != nil {
 		log.Error(opBounce, "a prompt held through the bounce was not delivered", dlog.Context{"cause": err.Error()})
 		return
@@ -957,9 +1030,9 @@ func (q *queue) isDraining(ws ids.WorkspaceID) bool {
 // inFlight answers what a bounce would have to wait on: the turn in flight
 // and the live detached items. free is the watcher's own judgement, which is
 // their conjunction once the session's facts are in and false before. A prompt the shim is
-// holding behind its own keep-alive is a StartTurn still in flight, and the
-// bounce is decided under the same delivery lock that call is made under, so
-// it can never be judged free past one.
+// holding behind its own keep-alive is a StartTurn still in flight: every
+// bounce decision defers to a shim call standing (deferToCall) before it
+// reads this, so it can never be judged free past one.
 //
 // A DEPARTED WATCHER HAS NOTHING IN FLIGHT. The fleet keeps a dead shim's
 // session until the next bring-up retires it, and the turn and live work its

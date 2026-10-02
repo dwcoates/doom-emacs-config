@@ -50,9 +50,8 @@ func (q *queue) RollBack(ctx context.Context, ws ids.WorkspaceID, since time.Tim
 	}
 	log = log.With(dlog.Context{"drop": len(drop)})
 
-	drain := &q.state(ws).drain
-	drain.Lock()
-	defer drain.Unlock()
+	d := q.lockDelivery(ws)
+	defer d.unlock()
 
 	standing, err := q.deps.DB.HeldPrompts(ctx, ws)
 	if err != nil {
@@ -64,7 +63,10 @@ func (q *queue) RollBack(ctx context.Context, ws ids.WorkspaceID, since time.Tim
 			dlog.Context{"planned": len(drop), "standing": len(now)})
 		return ErrHoldsChanged
 	}
-	if err := perform(ctx); err != nil {
+	// THE SHIM REWINDS WITH THE DELIVERY LOCK RELEASED (call.go): the call
+	// claims every hold it drops, and no delivery runs beside it.
+	d.outside(shimCall{what: "rollback", holds: drop}, log, func() { err = perform(ctx) })
+	if err != nil {
 		log.Info(opRollBack, "the rollback was not performed; the held prompts stand", dlog.Context{"cause": err.Error()})
 		return err
 	}
@@ -79,7 +81,7 @@ func (q *queue) RollBack(ctx context.Context, ws ids.WorkspaceID, since time.Tim
 	}
 	for _, turn := range drop {
 		q.clearHeadIf(ws, turn)
-		q.retireEditIf(ctx, ws, turn, tombstoneRolledBack, log)
+		q.retireEditIf(ctx, d, turn, tombstoneRolledBack, log)
 	}
 	log.Info(opRollBack, "the rollback was performed and the held prompts queued since were dropped", nil)
 	return q.pushTray(ctx, ws, log)

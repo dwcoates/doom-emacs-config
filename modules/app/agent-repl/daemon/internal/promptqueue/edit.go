@@ -95,9 +95,8 @@ func (q *queue) BeginEdit(ctx context.Context, ws ids.WorkspaceID, turn ids.Turn
 	}
 	log = log.With(dlog.Context{"turn": string(turn)})
 
-	drain := &q.state(ws).drain
-	drain.Lock()
-	defer drain.Unlock()
+	d := q.lockDelivery(ws)
+	defer d.unlock()
 
 	held, err := q.heldForEdit(ctx, ws, turn, log, opEditBegin)
 	if err != nil {
@@ -137,9 +136,8 @@ func (q *queue) CommitEdit(ctx context.Context, ws ids.WorkspaceID, turn ids.Tur
 	}
 	log = log.With(dlog.Context{"turn": string(turn)})
 
-	drain := &q.state(ws).drain
-	drain.Lock()
-	defer drain.Unlock()
+	d := q.lockDelivery(ws)
+	defer d.unlock()
 
 	held, err := q.heldForEdit(ctx, ws, turn, log, opEditCommit)
 	if err != nil {
@@ -175,7 +173,7 @@ func (q *queue) CommitEdit(ctx context.Context, ws ids.WorkspaceID, turn ids.Tur
 	held.Said = said
 	held.Classification = nil
 	held.Accepted = false
-	q.reclassify(ctx, ws, held, log, opEditCommit)
+	q.reclassify(ctx, d, held, log, opEditCommit)
 	return nil
 }
 
@@ -188,9 +186,8 @@ func (q *queue) CancelEdit(ctx context.Context, ws ids.WorkspaceID, turn ids.Tur
 	}
 	log = log.With(dlog.Context{"turn": string(turn)})
 
-	drain := &q.state(ws).drain
-	drain.Lock()
-	defer drain.Unlock()
+	d := q.lockDelivery(ws)
+	defer d.unlock()
 
 	if _, err := q.heldForEdit(ctx, ws, turn, log, opEditCancel); err != nil {
 		return err
@@ -203,7 +200,7 @@ func (q *queue) CancelEdit(ctx context.Context, ws ids.WorkspaceID, turn ids.Tur
 	log.Info(opEditCancel, "the edit was cancelled; the content is unchanged and the queue resumes",
 		dlog.Context{"edit": claim.ID})
 	q.publishEdit(ws, "")
-	q.resume(ctx, ws, log, opEditCancel)
+	q.resume(ctx, d, log, opEditCancel)
 	return nil
 }
 
@@ -226,9 +223,8 @@ func (q *queue) EditorGone(ws ids.WorkspaceID) {
 		return
 	}
 
-	drain := &q.state(ws).drain
-	drain.Lock()
-	defer drain.Unlock()
+	d := q.lockDelivery(ws)
+	defer d.unlock()
 
 	claim, ok := q.Editing(ws)
 	if !ok {
@@ -239,7 +235,7 @@ func (q *queue) EditorGone(ws ids.WorkspaceID) {
 	log.Info(opEditRelease, "the editor's host stream ended; the edit is released with the content unchanged",
 		dlog.Context{"turn": string(claim.Turn), "edit": claim.ID})
 	q.publishEdit(ws, "")
-	q.resume(ctx, ws, log, opEditRelease)
+	q.resume(ctx, d, log, opEditRelease)
 }
 
 // Editing answers the workspace's standing edit. It decides nothing, so it
@@ -276,6 +272,9 @@ func (q *queue) heldForEdit(ctx context.Context, ws ids.WorkspaceID, turn ids.Tu
 			dlog.Context{"tombstone": held.Tombstone.Kind})
 		return wsm.HeldPrompt{}, ErrNotHeld
 	}
+	if err := q.unclaimed(ws, held, log, op); err != nil {
+		return wsm.HeldPrompt{}, err
+	}
 	return held, nil
 }
 
@@ -305,8 +304,9 @@ func (q *queue) retireClaim(ws ids.WorkspaceID) {
 
 // retireEditIf retires the claim when it is on TURN, because that prompt left
 // the queue (dropped) while it was being edited, and resumes the queue. It
-// reports whether it did. The caller holds the delivery lock.
-func (q *queue) retireEditIf(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID, why string, log dlog.Logger) bool {
+// reports whether it did. The caller holds the delivery lock (d).
+func (q *queue) retireEditIf(ctx context.Context, d *delivery, turn ids.TurnID, why string, log dlog.Logger) bool {
+	ws := d.ws
 	claim, ok := q.Editing(ws)
 	if !ok || claim.Turn != turn {
 		return false
@@ -315,7 +315,7 @@ func (q *queue) retireEditIf(ctx context.Context, ws ids.WorkspaceID, turn ids.T
 	log.Info(opEditRelease, "the prompt being edited left the queue; the edit is released",
 		dlog.Context{"turn": string(turn), "edit": claim.ID, "why": why})
 	q.publishEdit(ws, "")
-	q.resume(ctx, ws, log, opEditRelease)
+	q.resume(ctx, d, log, opEditRelease)
 	return true
 }
 
@@ -353,7 +353,8 @@ func (q *queue) withheldByEdit(ws ids.WorkspaceID, held wsm.HeldPrompt) bool {
 //
 // OP names the verb whose new content is being judged: an edit's commit or a
 // fold.
-func (q *queue) reclassify(ctx context.Context, ws ids.WorkspaceID, held wsm.HeldPrompt, log dlog.Logger, op string) {
+func (q *queue) reclassify(ctx context.Context, d *delivery, held wsm.HeldPrompt, log dlog.Logger, op string) {
+	ws := d.ws
 	if held.Hold != nil {
 		log.Info(op, "the prompt's new content is held by a lease; no classifier runs until the lease releases it",
 			dlog.Context{"hold": held.Hold.String()})
@@ -365,18 +366,19 @@ func (q *queue) reclassify(ctx context.Context, ws ids.WorkspaceID, held wsm.Hel
 			return
 		}
 	}
-	q.resume(ctx, ws, log, op)
+	q.resume(ctx, d, log, op)
 }
 
 // resume is what an edit ending owes the queue: when nothing is running, the
 // next deliverable prompt is delivered now, because no turn's end is coming to
-// do it. A running turn's own end delivers otherwise.
-func (q *queue) resume(ctx context.Context, ws ids.WorkspaceID, log dlog.Logger, op string) {
-	if watcher, ok := q.deps.Watcher(ws); ok && watcher.TurnInFlight() != nil {
+// do it. A running turn's own end delivers otherwise. The caller holds the
+// delivery lock (d).
+func (q *queue) resume(ctx context.Context, d *delivery, log dlog.Logger, op string) {
+	if watcher, ok := q.deps.Watcher(d.ws); ok && watcher.TurnInFlight() != nil {
 		log.Debug(op, "a turn is running; its end delivers the next held prompt", nil)
 		return
 	}
-	if _, err := q.popAndDeliver(ctx, ws, log); err != nil {
+	if _, err := q.popAndDeliver(ctx, d, log); err != nil {
 		log.Error(op, "the queue could not resume after the edit ended", dlog.Context{"cause": err.Error()})
 	}
 }

@@ -113,68 +113,38 @@ func TestRollBackSuccess(t *testing.T) {
 	}
 }
 
-// TestRollBackUnderDrainLock proves RollBack runs PERFORM while it still owns
-// the workspace's drain lock: a concurrent Submit, which takes the same lock
-// before doing anything else, must not complete until perform returns.
-func TestRollBackUnderDrainLock(t *testing.T) {
-	// Arrange: one held prompt to roll back, and a perform that signals it
-	// started, then blocks on the test's release.
+// TestASubmissionDuringARollbackIsDeliveredOnlyOnceItSettles proves no
+// prompt is delivered while the conversation is being cut, with the delivery
+// lock free for the rewind (call.go): a submission made during PERFORM is
+// held, and is delivered once the rollback has settled.
+func TestASubmissionDuringARollbackIsDeliveredOnlyOnceItSettles(t *testing.T) {
+	// Arrange: one held prompt to roll back, and a perform that submits.
 	h := newHarness(t)
 	seedHeld(t, h, "t1", since)
-	started := make(chan struct{})
-	proceed := make(chan struct{})
+	var during Disposition
+	var startedDuring []ids.TurnID
 	perform := func(context.Context) error {
-		close(started)
-		<-proceed
+		var err error
+		during, err = h.q.Submit(context.Background(), submission("t-other", "a concurrent submission"))
+		if err != nil {
+			t.Errorf("Submit during the rewind: %v", err)
+		}
+		startedDuring = h.sender.started()
 		return nil
 	}
 
-	rollBackDone := make(chan error, 1)
-	go func() {
-		rollBackDone <- h.q.RollBack(context.Background(), theWorkspace, since, []ids.TurnID{"t1"}, perform)
-	}()
+	// Act
+	err := h.q.RollBack(context.Background(), theWorkspace, since, []ids.TurnID{"t1"}, perform)
 
-	// Act: wait for perform to be running (and so the drain lock to be held),
-	// then launch a concurrent Submit that takes the same lock.
-	select {
-	case <-started:
-	case <-time.After(bounceStartBound):
-		t.Fatal("RollBack's perform never started")
+	// Assert
+	if err != nil {
+		t.Fatalf("RollBack: %v", err)
 	}
-	submitDone := make(chan error, 1)
-	go func() {
-		_, err := h.q.Submit(context.Background(), submission("t-other", "a concurrent submission"))
-		submitDone <- err
-	}()
-
-	// Assert: the concurrent Submit has not completed while perform still
-	// holds the drain lock. This is a bounded negative check, not a sleep used
-	// for synchronization: the rendezvous above already proved perform is in
-	// flight, and nothing legitimate completes a Submit in this window unless
-	// the lock was not actually held.
-	select {
-	case got := <-submitDone:
-		t.Fatalf("Submit completed (%v) while RollBack's perform still held the drain lock", got)
-	case <-time.After(50 * time.Millisecond):
+	if during.Delivered || len(startedDuring) != 0 {
+		t.Fatalf("submission during the rewind = %+v with %v started, want it held", during, startedDuring)
 	}
-
-	// Release perform and require both calls to finish promptly.
-	close(proceed)
-	select {
-	case err := <-rollBackDone:
-		if err != nil {
-			t.Fatalf("RollBack: %v", err)
-		}
-	case <-time.After(bounceStartBound):
-		t.Fatal("RollBack never returned after perform was released")
-	}
-	select {
-	case err := <-submitDone:
-		if err != nil {
-			t.Fatalf("Submit: %v", err)
-		}
-	case <-time.After(bounceStartBound):
-		t.Fatal("the concurrent Submit never completed once the drain lock was released")
+	if started := h.sender.started(); len(started) != 1 || started[0] != "t-other" {
+		t.Fatalf("started = %v, want the held submission delivered once the rollback settled", started)
 	}
 }
 

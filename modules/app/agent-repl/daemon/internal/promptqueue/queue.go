@@ -35,6 +35,7 @@ const (
 	opRestore     = "daemon.promptqueue.restore_holds"
 	opRevive      = "daemon.promptqueue.revive"
 	opTray        = "daemon.promptqueue.tray"
+	opCall        = "daemon.promptqueue.shim_call"
 )
 
 // wsState is the queue's in-memory memory of one workspace: the semantic head
@@ -52,9 +53,22 @@ type wsState struct {
 	// the workspace, and the held intake leaves in whichever order the two
 	// races settle in rather than in arrival order.
 	//
-	// It is NOT q.mu: a delivery is an rpc to the shim, and holding the
-	// queue's own mutex across it would wedge every other workspace.
+	// IT IS NEVER HELD ACROSS A CALL TO THE SHIM (call.go): a decision claims
+	// its call (`call`), releases the lock, calls, and settles under it again.
+	// It is taken and released only through lockDelivery and delivery.unlock.
 	drain lockwatch.Mutex
+
+	// call is the shim call a decision is making with the delivery lock
+	// released, nil when none stands. Guarded by q.mu; set and cleared only
+	// with the delivery lock held (delivery.outside).
+	call *shimCall
+	// redrive records that a decision found a call standing and deferred to
+	// its settle (deferToCall). Guarded by q.mu; consumed by delivery.unlock.
+	redrive bool
+	// parked are the submissions held behind a standing call with no turn to
+	// be judged against; the call's settle delivers or judges them (redrive).
+	// Guarded by q.mu.
+	parked []Submission
 
 	// reviving reports that a BACKGROUND revival goroutine is already running,
 	// so a second submission joins it rather than spawning a second one.

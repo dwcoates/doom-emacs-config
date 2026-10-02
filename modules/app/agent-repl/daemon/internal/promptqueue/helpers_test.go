@@ -489,6 +489,10 @@ type fakeSender struct {
 	// startHook runs inside StartTurn, so a test can observe what the queue
 	// holds while a delivery is in flight.
 	startHook func()
+	// callHook runs inside every OTHER call (StartInterjection,
+	// JoinRunningTurn, PromptAgent, KillTurn, SetModel, SetPermissionMode),
+	// named, so a test can act on the queue while that call is in flight.
+	callHook func(call string)
 	// attempts counts every StartTurn call, so a test can assert the queue
 	// delivered a prompt exactly once.
 	attempts int
@@ -502,7 +506,18 @@ type fakeSender struct {
 
 func newFakeSender() *fakeSender { return &fakeSender{mainAgent: "main-agent"} }
 
+// hookFor reads the call hook under the sender's lock, for the calls that run
+// their hook before taking it.
+func (s *fakeSender) hookFor() func(string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.callHook
+}
+
 func (s *fakeSender) StartInterjection(ctx context.Context, turn ids.TurnID, said *conversationv1.UserSaid, origin conversationv1.PromptOrigin, note string) (*shimv1.StartTurnSuccess, error) {
+	if hook := s.hookFor(); hook != nil {
+		hook("StartInterjection")
+	}
 	s.mu.Lock()
 	s.notes = append(s.notes, note)
 	s.mu.Unlock()
@@ -510,6 +525,9 @@ func (s *fakeSender) StartInterjection(ctx context.Context, turn ids.TurnID, sai
 }
 
 func (s *fakeSender) JoinRunningTurn(_ context.Context, turn ids.TurnID, said *conversationv1.UserSaid, _ conversationv1.PromptOrigin) (*shimv1.StartTurnSuccess, error) {
+	if hook := s.hookFor(); hook != nil {
+		hook("JoinRunningTurn")
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.joinErr != nil {
@@ -553,6 +571,9 @@ func (s *fakeSender) StartTurn(_ context.Context, turn ids.TurnID, said *convers
 func (s *fakeSender) PromptAgent(_ context.Context, agent *conversationv1.AgentId, said *conversationv1.UserSaid) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.callHook != nil {
+		s.callHook("PromptAgent")
+	}
 	if s.promptErr != nil {
 		return s.promptErr
 	}
@@ -564,6 +585,9 @@ func (s *fakeSender) PromptAgent(_ context.Context, agent *conversationv1.AgentI
 func (s *fakeSender) KillTurn(_ context.Context, turn ids.TurnID, force bool, commandedBy *conversationv1.AgentInterruptedByUser) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.callHook != nil {
+		s.callHook("KillTurn")
+	}
 	if s.killErr != nil {
 		return s.killErr
 	}
@@ -592,6 +616,9 @@ func (s *fakeSender) killedCommands() []*conversationv1.AgentInterruptedByUser {
 func (s *fakeSender) SetModel(_ context.Context, model string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.callHook != nil {
+		s.callHook("SetModel")
+	}
 	if s.setModelErr != nil {
 		return s.setModelErr
 	}
@@ -602,6 +629,9 @@ func (s *fakeSender) SetModel(_ context.Context, model string) error {
 func (s *fakeSender) SetPermissionMode(_ context.Context, mode string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.callHook != nil {
+		s.callHook("SetPermissionMode")
+	}
 	s.modes = append(s.modes, mode)
 	return nil
 }
@@ -656,6 +686,10 @@ type fakeWatcher struct {
 	// factsPending reports a pure attach whose session facts have not
 	// arrived: the watcher then answers not free, whatever it holds.
 	factsPending bool
+	// standOnOpening makes the fake stand an opening turn in flight, and
+	// retire it on a refused open, as the real watcher does (OnTurnOpening,
+	// OnTurnOpenFailed).
+	standOnOpening bool
 }
 
 // Free answers the real watcher's judgement: facts in, no turn, no live work.
@@ -711,6 +745,9 @@ func (w *fakeWatcher) OnTurnOpening(_ ids.WorkspaceID, turn ids.TurnID) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.opening = append(w.opening, turn)
+	if w.standOnOpening {
+		w.inFlight = &turn
+	}
 }
 
 func (w *fakeWatcher) OnTurnJoining(_ ids.WorkspaceID, turn ids.TurnID) bool {
@@ -727,6 +764,9 @@ func (w *fakeWatcher) OnTurnOpenFailed(_ ids.WorkspaceID, turn ids.TurnID) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.openFailed = append(w.openFailed, turn)
+	if w.standOnOpening && w.inFlight != nil && *w.inFlight == turn {
+		w.inFlight = nil
+	}
 }
 
 func (w *fakeWatcher) OnTurnOpened(_ ids.WorkspaceID, prompt *conversationv1.AgentPrompt, _ *conversationv1.HistoryPage) {

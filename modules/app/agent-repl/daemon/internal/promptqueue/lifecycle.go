@@ -60,9 +60,8 @@ func (q *queue) OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how sessionwatc
 		defer q.resubmitFolded(ws, turn, folded, log)
 	}
 
-	drain := &q.state(ws).drain
-	drain.Lock()
-	defer drain.Unlock()
+	d := q.lockDelivery(ws)
+	defer d.unlock()
 
 	q.mu.Lock()
 	var joined joiningPrompt
@@ -122,12 +121,12 @@ func (q *queue) OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how sessionwatc
 	// for the new shim rather than started on the one about to be stood down.
 	// Deciding it here, under the delivery lock, is what makes the race
 	// "a queued prompt starts a turn between is-free and bounce" impossible.
-	if q.checkRegistryLocked(ws, q.state(ws), log) {
+	if q.checkRegistryLocked(d, log) {
 		log.Info(opTurnEnded, "the turn ended into a bounce; what is queued waits for the new shim", nil)
 		return
 	}
 
-	delivered, err := q.popAndDeliver(ctx, ws, log)
+	delivered, err := q.popAndDeliver(ctx, d, log)
 	if err != nil {
 		log.Error(opTurnEnded, "the next held prompt was not delivered", dlog.Context{"cause": err.Error()})
 		return
@@ -215,55 +214,27 @@ func (q *queue) OnTurnsEndedUnobserved(ws ids.WorkspaceID, turns []ids.TurnID) {
 // popAndDeliver delivers the next deliverable hold: the SEMANTIC HEAD an
 // interjection or a release installed, else the oldest standing hold no
 // daemon-side condition is holding. It reports whether a hold was delivered.
-func (q *queue) popAndDeliver(ctx context.Context, ws ids.WorkspaceID, log dlog.Logger) (bool, error) {
-	// A DRAINING WORKSPACE DISPATCHES NOTHING: its bounce is replacing the
-	// shim, and the bounce's own finish delivers what is held.
-	if q.isDraining(ws) {
-		log.Debug(opTurnEnded, "the workspace is draining for a bounce; the held prompts wait for the new shim", nil)
+// The caller holds the delivery lock (d).
+//
+// EVERY ENTRY IS DECIDED AFRESH. A held act's call releases the lock (call.go),
+// so the conditions below -- a bounce, a running cut, a lease -- are read
+// again before each entry rather than once for the whole pop.
+func (q *queue) popAndDeliver(ctx context.Context, d *delivery, log dlog.Logger) (bool, error) {
+	// A SHIM CALL IN FLIGHT POPS NOTHING BESIDE IT: its settle pops (call.go).
+	if q.deferToCall(d, log, "pop") {
 		return false, nil
 	}
-	// A RUNNING SESSION ACT IS OVERTAKEN BY NOTHING. A turn end that drained a
-	// queued /clear or /compact has just started it as the session's turn, and
-	// every prompt held behind it — a still-classifying one included — waits
-	// for ITS end, which pops them in order. The running-cut record is the
-	// queue's own fact, read under q.mu, so this holds whichever caller pops.
-	if cut, ok := q.runningCut(ws); ok {
-		log.Info(opTurnEnded, "a session act is running; the held prompts wait for it to end", dlog.Context{
-			"session_act_turn": string(cut.turn), "session_act": cut.command.String(),
-		})
-		return false, nil
-	}
-	// A REFUSING LEASE OWNS THE SESSION, so nothing held is delivered into it.
-	// PolicyHold stamps every standing hold and nextDeliverable filters those,
-	// but PolicyRefuse (a merge lease an older build wrote) stamps none — it
-	// refuses NEW submissions — so a turn ending underneath it would otherwise
-	// release a prompt straight into the session the merge is driving. The
-	// lease's release re-runs this through OnLeaseChanged, so nothing is lost.
-	lease, held, err := q.deps.DB.Lease(ctx, ws)
-	if err != nil {
-		log.Error(opTurnEnded, "could not read the occupancy lease before delivering", dlog.Context{"cause": err.Error()})
-		return false, fmt.Errorf("read the lease for %q: %w", ws, err)
-	}
-	if held && lease.Policy == wsm.PolicyRefuse {
-		log.Debug(opTurnEnded, "a refusing lease stands; the held prompts wait for its release",
-			dlog.Context{"lease": string(lease.ID), "holder": holderName(lease.Holder)})
-		return false, nil
-	}
-	var holding *wsm.Lease
-	if held && lease.Policy == wsm.PolicyHold {
-		holding = &lease
-	}
-	// A HELD ACT OPENS NO TURN, so the pop goes on to the entry behind it:
-	// every act at the head of the queue is applied, in order, and the first
-	// prompt behind them is delivered as the turn they preceded. A context cut
-	// is a turn, so it ends the pop like any prompt.
 	delivered := false
 	for {
-		next, ok, withheld, err := q.nextDeliverable(ctx, ws, holding)
+		holding, ok, err := q.mayPop(ctx, d.ws, log)
+		if err != nil || !ok {
+			return delivered, err
+		}
+		next, found, withheld, err := q.nextDeliverable(ctx, d.ws, holding)
 		if err != nil {
 			return delivered, err
 		}
-		if !ok {
+		if !found {
 			if withheld > 0 {
 				// AN EDIT IS WHY NOTHING WENT. Said at INFO, because "the turn
 				// ended and my prompt did not go" is exactly the question it
@@ -276,14 +247,62 @@ func (q *queue) popAndDeliver(ctx context.Context, ws ids.WorkspaceID, log dlog.
 			return delivered, nil
 		}
 		log.Info(opTurnEnded, "delivering the next held entry", dlog.Context{"next_turn": string(next.Turn), "session_act": next.Act != nil})
-		if err := q.deliverHeld(ctx, ws, next, log); err != nil {
+		if err := q.deliverHeld(ctx, d, next, log); err != nil {
 			return delivered, err
 		}
 		delivered = true
+		// A HELD ACT OPENS NO TURN, so the pop goes on to the entry behind it:
+		// every act at the head of the queue is applied, in order, and the
+		// first prompt behind them is delivered as the turn they preceded. A
+		// context cut is a turn, so it ends the pop like any prompt.
 		if next.Act == nil {
 			return true, nil
 		}
 	}
+}
+
+// mayPop reports whether the pop may deliver the next entry -- no bounce
+// drains the workspace, no session act runs, and no refusing lease owns the
+// session -- and answers the holding lease the entry is picked under, nil
+// when none holds.
+func (q *queue) mayPop(ctx context.Context, ws ids.WorkspaceID, log dlog.Logger) (*wsm.Lease, bool, error) {
+	// A DRAINING WORKSPACE DISPATCHES NOTHING: its bounce is replacing the
+	// shim, and the bounce's own finish delivers what is held.
+	if q.isDraining(ws) {
+		log.Debug(opTurnEnded, "the workspace is draining for a bounce; the held prompts wait for the new shim", nil)
+		return nil, false, nil
+	}
+	// A RUNNING SESSION ACT IS OVERTAKEN BY NOTHING. A turn end that drained a
+	// queued /clear or /compact has just started it as the session's turn, and
+	// every prompt held behind it — a still-classifying one included — waits
+	// for ITS end, which pops them in order. The running-cut record is the
+	// queue's own fact, read under q.mu, so this holds whichever caller pops.
+	if cut, ok := q.runningCut(ws); ok {
+		log.Info(opTurnEnded, "a session act is running; the held prompts wait for it to end", dlog.Context{
+			"session_act_turn": string(cut.turn), "session_act": cut.command.String(),
+		})
+		return nil, false, nil
+	}
+	// A REFUSING LEASE OWNS THE SESSION, so nothing held is delivered into it.
+	// PolicyHold stamps every standing hold and nextDeliverable filters those,
+	// but PolicyRefuse (a merge lease an older build wrote) stamps none — it
+	// refuses NEW submissions — so a turn ending underneath it would otherwise
+	// release a prompt straight into the session the merge is driving. The
+	// lease's release re-runs this through OnLeaseChanged, so nothing is lost.
+	lease, held, err := q.deps.DB.Lease(ctx, ws)
+	if err != nil {
+		log.Error(opTurnEnded, "could not read the occupancy lease before delivering", dlog.Context{"cause": err.Error()})
+		return nil, false, fmt.Errorf("read the lease for %q: %w", ws, err)
+	}
+	if held && lease.Policy == wsm.PolicyRefuse {
+		log.Debug(opTurnEnded, "a refusing lease stands; the held prompts wait for its release",
+			dlog.Context{"lease": string(lease.ID), "holder": holderName(lease.Holder)})
+		return nil, false, nil
+	}
+	if held && lease.Policy == wsm.PolicyHold {
+		return &lease, true, nil
+	}
+	return nil, true, nil
 }
 
 // nextDeliverable picks the hold a turn end delivers, and counts the holds a
@@ -352,9 +371,8 @@ func (q *queue) OnLeaseChanged(ws ids.WorkspaceID) {
 
 	// SERIALIZED AGAINST A TURN END, for the reason OnTurnEnded states: the
 	// two events deliver from the same standing holds.
-	drain := &q.state(ws).drain
-	drain.Lock()
-	defer drain.Unlock()
+	d := q.lockDelivery(ws)
+	defer d.unlock()
 
 	standing, err := q.deps.DB.HeldPrompts(ctx, ws)
 	if err != nil {
@@ -452,7 +470,7 @@ func (q *queue) OnLeaseChanged(ws ids.WorkspaceID) {
 	if watcher, ok := q.deps.Watcher(ws); ok && watcher.TurnInFlight() != nil {
 		return
 	}
-	if _, err := q.popAndDeliver(ctx, ws, log); err != nil {
+	if _, err := q.popAndDeliver(ctx, d, log); err != nil {
 		log.Error(opLeaseChange, "the released hold was not delivered", dlog.Context{"cause": err.Error()})
 	}
 }

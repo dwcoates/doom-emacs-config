@@ -51,9 +51,9 @@ func (q *queue) SealMove(ctx context.Context, ws ids.WorkspaceID) (bounce.Handof
 	if err != nil {
 		return bounce.Handoff{}, nil, err
 	}
-	state := q.state(ws)
-	state.drain.Lock()
-	defer state.drain.Unlock()
+	d := q.lockDelivery(ws)
+	defer d.unlock()
+	state := d.state
 
 	q.mu.Lock()
 	pending := state.bounce
@@ -129,9 +129,9 @@ func (q *queue) UnsealMove(ctx context.Context, ws ids.WorkspaceID, handoff boun
 	if err != nil {
 		return err
 	}
-	state := q.state(ws)
-	state.drain.Lock()
-	defer state.drain.Unlock()
+	d := q.lockDelivery(ws)
+	defer d.unlock()
+	state := d.state
 	q.mu.Lock()
 	if pending := state.bounce; pending != nil {
 		pending.sealed = false
@@ -164,9 +164,9 @@ func (q *queue) AdoptHandoff(ctx context.Context, ws ids.WorkspaceID, handoff bo
 		log.Debug(opHandoff, "the handover carried nothing the queue held in memory", nil)
 		return nil
 	}
-	state := q.state(ws)
-	state.drain.Lock()
-	defer state.drain.Unlock()
+	d := q.lockDelivery(ws)
+	defer d.unlock()
+	state := d.state
 	q.installLocked(ws, state, handoff)
 	if err := q.verifyInstalledLocked(ctx, ws, handoff, log); err != nil {
 		return err

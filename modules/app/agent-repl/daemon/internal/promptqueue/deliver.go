@@ -24,14 +24,19 @@ import (
 // it came by (a held /compact, an edit that became one, a caller that never
 // went through recognition): runContextCut runs it, so the queue records it as
 // the running session act and nothing can interject it or be popped into it.
-func (q *queue) deliver(ctx context.Context, sub Submission, sender Sender, watcher Watcher, log dlog.Logger) (Disposition, error) {
+//
+// THE StartTurn IS MADE WITH THE DELIVERY LOCK RELEASED (call.go). Everything
+// before it -- the turn record, the mirrored row, the submitting phase, the
+// watcher's opening record -- is the claim the turn stands on while the lock
+// is free: a prompt submitted meanwhile is held behind this turn.
+func (q *queue) deliver(ctx context.Context, d *delivery, sub Submission, sender Sender, watcher Watcher, log dlog.Logger) (Disposition, error) {
 	// A HELD ACT IS APPLIED, NOT STARTED: it opens no turn, so the pop that
 	// delivered it goes on to the entry behind it.
 	if sub.Act != nil {
 		log.Info(opDeliver, "the entry is a held session act; it is applied now", dlog.Context{
 			"session_act": sub.Act.Kind, "value": sub.Act.Value,
 		})
-		if err := q.runAct(ctx, sub.WS, actOfHeld(sub), log); err != nil {
+		if err := q.runAct(ctx, d, actOfHeld(sub), sub.claims(), log); err != nil {
 			return Disposition{}, err
 		}
 		return Disposition{Delivered: true}, nil
@@ -41,7 +46,7 @@ func (q *queue) deliver(ctx context.Context, sub Submission, sender Sender, watc
 		log.Info(opDeliver, "the prompt is a session act; it is delivered as one", dlog.Context{
 			"session_act": command.String(),
 		})
-		if err := q.runContextCut(ctx, sub.WS, act, sender, log); err != nil {
+		if err := q.runContextCut(ctx, d, act, sender, sub.claims(), log); err != nil {
 			return Disposition{}, err
 		}
 		return Disposition{Delivered: true}, nil
@@ -82,7 +87,11 @@ func (q *queue) deliver(ctx context.Context, sub Submission, sender Sender, watc
 	// call returns; a terminal routed while no turn stands in flight is
 	// attributable to nothing, and every AwaitTurnEnd on that turn hangs.
 	watcher.OnTurnOpening(sub.WS, sub.Turn)
-	success, err := q.startTurn(ctx, sender, sub, log)
+	var success *shimv1.StartTurnSuccess
+	var err error
+	d.outside(shimCall{what: "start_turn", turn: sub.Turn, opensTurn: true, holds: sub.claims()}, log, func() {
+		success, err = q.startTurn(ctx, sender, sub, log)
+	})
 	if err != nil {
 		// A refusal is surfaced to the caller (which answers the rpc with it)
 		// rather than swallowed, and the footer and roster drop the submitting
@@ -129,8 +138,9 @@ func (q *queue) retireOpenedTurn(sub Submission, watcher Watcher) {
 	q.deps.Sidebar.SetTurn(sub.WS, nil)
 }
 
-// deliverToAgent sends a bubble composer's prompt to the addressed agent.
-func (q *queue) deliverToAgent(ctx context.Context, sub Submission, sender Sender, log dlog.Logger) (Disposition, error) {
+// deliverToAgent sends a bubble composer's prompt to the addressed agent, with
+// the delivery lock released for the call (call.go).
+func (q *queue) deliverToAgent(ctx context.Context, d *delivery, sub Submission, sender Sender, log dlog.Logger) (Disposition, error) {
 	agent := sub.Target.Feed.Agent
 	if agent == nil && sub.Target.Row.Sub != "" {
 		// A subagent BUBBLE row addresses its own sub-feed: the created agent
@@ -141,7 +151,11 @@ func (q *queue) deliverToAgent(ctx context.Context, sub Submission, sender Sende
 		log.Error(opDeliver, "the addressed feed row names no agent", nil)
 		return Disposition{}, fmt.Errorf("submit to %q: the addressed feed row names no agent", sub.WS)
 	}
-	if err := sender.PromptAgent(ctx, agent, sub.Said); err != nil {
+	var err error
+	d.outside(shimCall{what: "agent_prompt", turn: sub.Turn, holds: sub.claims()}, log, func() {
+		err = sender.PromptAgent(ctx, agent, sub.Said)
+	})
+	if err != nil {
 		log.Error(opDeliver, "the shim refused the agent-addressed prompt", dlog.Context{
 			"agent": agent.GetValue(), "cause": err.Error(),
 		})
