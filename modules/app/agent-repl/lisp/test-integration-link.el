@@ -109,7 +109,7 @@ the seam, never the test driving it by hand."
            ,@body)
        (ignore-errors (agent-repl-link-teardown)))))
 
-(defun agent-repl-itest-link--announce (daemon &optional address cause)
+(defun agent-repl-itest-link--announce (daemon &optional address cause outage-ms)
   "Push `shutdown_announced' on DAEMON, optionally naming ADDRESS.
 CAUSE defaults to the self-merge rollout arm.  Without an address this is
 a plain bounce: the same daemon is coming back, so nothing dual-attaches.
@@ -120,13 +120,20 @@ window's LENGTH is a parameter of the fixture, never of the contract.
 500ms is an order of magnitude above the 50ms poll tolerance the one
 scenario that asserts against the deadline allows itself, so a client
 that ignored the window entirely still cannot pass -- and three
-scenarios stop spending 1.5s each waiting to prove it."
+scenarios stop spending 1.5s each waiting to prove it.
+
+OUTAGE-MS overrides that window for a scenario that asserts on what the
+STANDING announcement draws: the indicator is computed only while the
+window stands, so such a scenario passes a window longer than its own
+wait bound, and the window cannot lapse before the assertion has had its
+whole bound to hold (a 500ms window lapsed under a full-suite load before
+the push was even read, and the indicator then drew nothing to assert on)."
   (agent-repl-itest--push
    daemon "daemon"
    `((shutdownAnnounced
       . ,(append (when address `((address . ,address)))
                  `((cause . ,(or cause '((selfMergeRollout . ()))))
-                   (expectedOutageMs . "500")
+                   (expectedOutageMs . ,(format "%d" (or outage-ms 500)))
                    (mintedAtMs . ,(format "%d" (truncate (* 1000 (float-time)))))))))))
 
 (defun agent-repl-itest-link--boom-up-hook (&rest _)
@@ -1304,7 +1311,9 @@ reached only via the bounce indicator's own recompute."
     (agent-repl-itest-link--with-link daemon
       ;; Act.
       (agent-repl-itest-link--announce
-       daemon nil '((immediate . ((reason . ((operator . ())))))))
+       daemon nil '((immediate . ((reason . ((operator . ()))))))
+       ;; The window outlasts the wait below; see the helper.
+       (* 2 1000 agent-repl-itest-default-timeout))
       ;; Assert.
       (agent-repl-itest--await-log
        daemon "elisp.link.drain-operator-note-blank" "error")
