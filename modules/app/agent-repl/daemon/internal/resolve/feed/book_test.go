@@ -643,3 +643,21 @@ func TestBookTarget(t *testing.T) {
 		})
 	}
 }
+
+func TestAnUnstampedEntryAtAPagesHeadIsDrawn(t *testing.T) {
+	// Arrange: the newest page opens with an unstamped answer, its prompt
+	// older (store page of one).
+	h := newHarness(t)
+	h.mainBook(1, []bookEntry{
+		{entry: promptEntry("turn-1", "first")},
+		{entry: frameEntry(mainAgent(), &conversationv1.AgentUpdate{Update: &conversationv1.AgentUpdate_Activity{Activity: responseSuccessActivity("ans-1", "unstamped")}})},
+	})
+
+	// Act.
+	page, _ := h.openPage(rootFeed(), "reader-1")
+
+	// Assert: nothing names its turn, so it is drawn by position.
+	if got := rowIDs(pageRows(t, page)); len(got) != 1 || got[0] != h.responseRowID("ans-1") {
+		t.Fatalf("page rows = %v, want the unstamped answer", got)
+	}
+}
