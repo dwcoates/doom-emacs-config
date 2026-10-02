@@ -3375,3 +3375,16 @@ describe("the persistent-wifi chip's paints (owner request, 2026-10-02)", () => 
     expect(declarationsOf(".topbar-wifi-disc") ?? "").toMatch(/stroke:\s*none/);
   });
 });
+
+describe("the persistent-wifi glyph button", () => {
+  it("carries the chip's color, which is the wifi arm", () => {
+    // Arrange / Act
+    const own = rulesOf(stylesheet).find((rule) => rule.selectors.length === 1 && rule.selectors[0] === ".topbar-wifi-button");
+    // Assert
+    expect(own?.declarations ?? "").toMatch(/color:\s*inherit/);
+  });
+
+  it("takes the right group's quiet button box", () => {
+    expect(declarationsOf(".topbar-wifi-button") ?? "").toMatch(/cursor:\s*pointer/);
+  });
+});
