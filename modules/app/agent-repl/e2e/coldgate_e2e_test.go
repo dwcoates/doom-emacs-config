@@ -356,11 +356,8 @@ func raiseColdGate(t *testing.T) *coldGate {
 	return &coldGate{w: w, ws: ws, row: row, configDir: configDir, footer: footer}
 }
 
-// coldGateKillShims SIGKILLs this daemon's shim processes and nothing else, and
-// does not return until they are GONE. It narrows Daemon.StrayPIDs (every live
-// process naming the state directory) to the ones whose argv names the shim
-// bundle, so the store and the sidecar — which name the same state root only
-// because their logs live under it — are left running.
+// coldGateKillShims SIGKILLs this daemon's shim processes and nothing else
+// (killShimProcesses), and does not return until they are GONE.
 //
 // THE WAIT IS THE POINT, and leaving it out cost a run. `kill` only DELIVERS
 // the signal; the kernel closes the dead process's file descriptors, and with
@@ -379,8 +376,29 @@ func raiseColdGate(t *testing.T) *coldGate {
 // about how long a SIGKILL takes.
 func coldGateKillShims(t *testing.T, d *harness.Daemon) {
 	t.Helper()
+	awaitPIDsGone(t, killShimProcesses(t, d), coldGateReapBound)
+}
+
+// killShimProcesses SIGKILLs this daemon's shim processes and nothing else,
+// answering the pids it signalled. It narrows Daemon.StrayPIDs (every live
+// process naming the state directory) to the ones whose argv names the shim
+// bundle, so the store and the sidecar — which name the same state root only
+// because their logs live under it — are left running.
+//
+// It does NOT wait for the pids to leave the process table. A shim killed
+// under a LIVE daemon is that daemon's child, reaped on the daemon's own
+// schedule, so a caller there synchronizes on the daemon's record of the death
+// instead; coldGateKillShims waits on the pids because its daemon is already
+// gone and the shims were reparented.
+func killShimProcesses(t *testing.T, d *harness.Daemon) []int {
+	t.Helper()
 	killed := []int{}
 	for _, pid := range d.StrayPIDs() {
+		// THE DAEMON ITSELF NAMES THE SHIM BUNDLE TOO (its `--shim-main`
+		// argument), so a live daemon would match the argv test below.
+		if pid == d.PID() {
+			continue
+		}
 		args, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "args=").Output()
 		if err != nil {
 			continue
@@ -389,14 +407,15 @@ func coldGateKillShims(t *testing.T, d *harness.Daemon) {
 			continue
 		}
 		if err := syscall.Kill(pid, syscall.SIGKILL); err != nil {
-			t.Fatalf("kill the seeding shim (pid %d): %v", pid, err)
+			t.Fatalf("kill the shim (pid %d): %v", pid, err)
 		}
+		t.Logf("SIGKILLed shim pid %d: %s", pid, strings.TrimSpace(string(args)))
 		killed = append(killed, pid)
 	}
 	if len(killed) == 0 {
-		t.Fatal("no shim process was found to kill; the successor would adopt the survivor instead of resuming")
+		t.Fatal("no shim process was found to kill")
 	}
-	awaitPIDsGone(t, killed, coldGateReapBound)
+	return killed
 }
 
 // coldGateReapBound is how long a SIGKILLed shim has to leave the process table.
