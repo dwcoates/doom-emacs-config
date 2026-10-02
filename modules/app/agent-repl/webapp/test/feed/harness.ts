@@ -396,7 +396,7 @@ export function separationRow(
       ? { case: "cleared", value: {} }
       : arm === "compactionFailed"
         ? { case: "compactionFailed", value: { error: "the summarizer refused" } }
-        : { case: "compacted", value: { summary: { markdown: summary }, fold: { folded: true } } };
+        : { case: "compacted", value: { summary: { markdown: summary } } };
   return create(FeedRowSchema, {
     id: feedId(id),
     order: orderFor(id),

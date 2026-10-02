@@ -217,9 +217,6 @@ func TestACompactionDrawsItsSummaryFoldedWithBothFormattedSides(t *testing.T) {
 	if compacted.GetSummary().GetMarkdown() != "we were fixing the flaky test" {
 		t.Fatalf("summary = %q", compacted.GetSummary().GetMarkdown())
 	}
-	if !compacted.GetFold().GetFolded() {
-		t.Fatal("the summary is not folded; the cut is not the conversation")
-	}
 	if separation.GetTokens().GetBeforeText() != "180k" || separation.GetTokens().GetAfterText() != "12k" {
 		t.Fatalf("tokens = %+v, want the formatted 180k → 12k", separation.GetTokens())
 	}

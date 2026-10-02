@@ -53,7 +53,7 @@ const ARMS: ReadonlyArray<[string, SeparationInit["kind"]]> = [
     "compacted",
     {
       case: "compacted",
-      value: { summary: { markdown: "we did things" }, fold: { folded: true } },
+      value: { summary: { markdown: "we did things" } },
     },
   ],
   ["worktreeEntered", { case: "worktreeEntered", value: { path: { text: "/w/tree" } } }],
@@ -131,7 +131,7 @@ describe("drawFeedSessionSeparation: the compaction that did not happen", () => 
 
   it("draws no summary to fold, no compaction having happened", () => {
     const el = drawFeedSessionSeparation(separation(failed), ctxFor());
-    expect(el.querySelector(".sep-fold-toggle")).toBeNull();
+    expect(el.querySelector(".sep-summary")).toBeNull();
   });
 
   it("refuses a failed compaction with no label", () => {
@@ -156,19 +156,8 @@ describe("drawFeedSessionSeparation: the size change", () => {
 });
 
 describe("drawFeedSessionSeparation: the compaction", () => {
-  it("draws the summary bubble when the wire says folded", () => {
+  it("draws the summary bubble", () => {
     const el = drawFeedSessionSeparation(separation(ARMS[1][1]), ctxFor());
-    expect(el.querySelector<HTMLElement>(".sep-summary")?.hidden).toBe(false);
-  });
-
-  it("draws the summary bubble when the wire says unfolded", () => {
-    const el = drawFeedSessionSeparation(
-      separation({
-        case: "compacted",
-        value: { summary: { markdown: "s" }, fold: { folded: false } },
-      }),
-      ctxFor(),
-    );
     expect(el.querySelector<HTMLElement>(".sep-summary")?.hidden).toBe(false);
   });
 
@@ -182,7 +171,7 @@ describe("drawFeedSessionSeparation: the compaction", () => {
     expect(el.querySelector(".sep-summary > .bubble-scroll")?.classList.contains("expanded")).toBe(false);
   });
 
-  it("logs the wire's fold it no longer acts on", async () => {
+  it("records the summary's draw at debug", async () => {
     // Arrange
     const capture = captureLogRecords("debug");
     // Act
@@ -191,7 +180,7 @@ describe("drawFeedSessionSeparation: the compaction", () => {
     const record = await forwardedRecord(capture, "feed.separation-summary-drawn");
     expect([record.level.case, record.context]).toEqual([
       "debug",
-      expect.objectContaining({ wire_folded: true, cold_read: false }),
+      expect.objectContaining({ cold_read: false }),
     ]);
   });
 
@@ -199,7 +188,7 @@ describe("drawFeedSessionSeparation: the compaction", () => {
     const el = drawFeedSessionSeparation(
       separation({
         case: "compacted",
-        value: { summary: { markdown: "**done**" }, fold: { folded: true } },
+        value: { summary: { markdown: "**done**" } },
       }),
       ctxFor(),
     );
@@ -212,7 +201,6 @@ describe("drawFeedSessionSeparation: the compaction", () => {
         case: "compacted",
         value: {
           summary: { markdown: "s" },
-          fold: { folded: true },
           coldRead: { evidence: { uncachedInputTokens: 180000n } },
         },
       }),
@@ -224,11 +212,6 @@ describe("drawFeedSessionSeparation: the compaction", () => {
   it("draws no cold-read notice on an ordinary compaction", () => {
     const el = drawFeedSessionSeparation(separation(ARMS[1][1]), ctxFor());
     expect(el.querySelector(".sep-cold-read")).toBeNull();
-  });
-
-  it("refuses a compaction with no fold field", () => {
-    const msg = separation({ case: "compacted", value: { summary: { markdown: "s" } } });
-    expect(() => drawFeedSessionSeparation(msg, ctxFor())).toThrow(MalformedView);
   });
 });
 
@@ -371,26 +354,26 @@ describe("separationBoundsFeed", () => {
 });
 
 describe("drawFeedSessionSeparation: the summary is a response bubble", () => {
-  /** A compacted divider of SUMMARY, FOLDED or open. */
-  function compacted(summary: string, folded: boolean): HTMLElement {
+  /** A compacted divider of SUMMARY. */
+  function compacted(summary: string): HTMLElement {
     return drawFeedSessionSeparation(
-      separation({ case: "compacted", value: { summary: { markdown: summary }, fold: { folded } } }),
+      separation({ case: "compacted", value: { summary: { markdown: summary } } }),
       ctxFor(),
     );
   }
 
   it("is a response-role bubble", () => {
-    expect(compacted("s", false).querySelector(".sep-summary")?.getAttribute(BUBBLE_ROLE_ATTRIBUTE)).toBe("response");
+    expect(compacted("s").querySelector(".sep-summary")?.getAttribute(BUBBLE_ROLE_ATTRIBUTE)).toBe("response");
   });
 
   it("is the compaction variant, whose border is the divider bar's", () => {
-    expect(compacted("s", false).querySelector(".sep-summary")?.getAttribute(BUBBLE_VARIANT_ATTRIBUTE)).toBe(
+    expect(compacted("s").querySelector(".sep-summary")?.getAttribute(BUBBLE_VARIANT_ATTRIBUTE)).toBe(
       "compaction",
     );
   });
 
   it("collapses at the shared feed cap, in the one scroll box", () => {
-    const summary = compacted("s", false).querySelector(".sep-summary");
+    const summary = compacted("s").querySelector(".sep-summary");
     expect([summary?.getAttribute(BUBBLE_CAP_ATTRIBUTE), summary?.querySelector(":scope > .bubble-scroll") !== null]).toEqual([
       "feed",
       true,
@@ -401,10 +384,10 @@ describe("drawFeedSessionSeparation: the summary is a response bubble", () => {
 describe("drawFeedSessionSeparation: a tree in the summary", () => {
   const staged = useTreeLayout();
 
-  /** A compacted divider of SUMMARY, FOLDED or open, attached. */
-  function mounted(summary: string, folded: boolean): HTMLElement {
+  /** A compacted divider of SUMMARY, attached. */
+  function mounted(summary: string): HTMLElement {
     const el = drawFeedSessionSeparation(
-      separation({ case: "compacted", value: { summary: { markdown: summary }, fold: { folded } } }),
+      separation({ case: "compacted", value: { summary: { markdown: summary } } }),
       ctxFor(),
     );
     document.body.append(el);
@@ -413,7 +396,7 @@ describe("drawFeedSessionSeparation: a tree in the summary", () => {
 
   it("wraps at the summary bubble's own cap", () => {
     // Arrange / Act
-    const el = mounted(WIDE_TREE, false);
+    const el = mounted(WIDE_TREE);
     // Assert
     const widths = treeLineWidths(el);
     expect(widths.length).toBeGreaterThan(3);
@@ -422,17 +405,8 @@ describe("drawFeedSessionSeparation: a tree in the summary", () => {
 
   it("never wraps below its max width", () => {
     // Arrange / Act
-    const el = mounted(FITTING_TREE, false);
+    const el = mounted(FITTING_TREE);
     // Assert
     expect(treeLineWidths(el)).toHaveLength(3);
-  });
-
-  it("wraps it at the cap when the wire says folded, the fold being ignored", () => {
-    // Arrange / Act
-    const el = mounted(WIDE_TREE, true);
-    // Assert
-    const widths = treeLineWidths(el);
-    expect(widths.length).toBeGreaterThan(3);
-    expect(Math.max(...widths)).toBeLessThanOrEqual(stagedCols(staged.layout));
   });
 });
