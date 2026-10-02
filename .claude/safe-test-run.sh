@@ -194,7 +194,7 @@ if [ "$DRIFT" -eq 0 ]; then
   git tag -d "$CHECKPOINT_TAG" >/dev/null
   echo "[safe-test-run] Checkpoint $CHECKPOINT_TAG auto-removed."
   if [ "$TEST_RC" -ne 0 ]; then
-    echo "[safe-test-run] (Tests themselves failed; see ert output above.)"
+    echo "[safe-test-run] (The command itself failed; see its output above.)"
     exit "$TEST_RC"
   fi
   echo "[safe-test-run] DONE — exit 0"
@@ -211,7 +211,7 @@ echo "[safe-test-run] To accept the drift and discard the checkpoint:" >&2
 echo "[safe-test-run]     git tag -d $CHECKPOINT_TAG" >&2
 
 if [ "$TEST_RC" -ne 0 ]; then
-  echo "[safe-test-run] (Tests also failed — see ert output above.)" >&2
+  echo "[safe-test-run] (The command also failed; see its output above.)" >&2
   # Surface the more severe condition (test failure) over the warning.
   exit "$TEST_RC"
 fi
