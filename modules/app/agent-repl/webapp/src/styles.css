@@ -6470,6 +6470,7 @@ bubble-body.bubble-body { display: block; }
    learns the affordance once. THE SHARED TREATMENT IS THE BOX AND NOT THE
    COLOR — see the muted rule just below it. */
 .topbar-model-button,
+.topbar-effort-button,
 .topbar-mode-button,
 .topbar-context-figure,
 .topbar-wifi-button,
@@ -6495,11 +6496,13 @@ bubble-body.bubble-body { display: block; }
    the controls that ARE quiet say so here, and the figure's color is left to
    the tone it carries. */
 .topbar-model-button,
+.topbar-effort-button,
 .topbar-mode-button,
 .topbar-warning-chip {
   color: var(--muted);
 }
 .topbar-model-button:hover,
+.topbar-effort-button:hover,
 .topbar-mode-button:hover,
 .topbar-context-figure:hover,
 .topbar-wifi-button:hover,
@@ -6510,6 +6513,7 @@ bubble-body.bubble-body { display: block; }
    AMONG THEM: its color IS its register, and a register that vanishes under the
    pointer is the same defect the rule above fixes, only intermittent. */
 .topbar-model-button:hover,
+.topbar-effort-button:hover,
 .topbar-mode-button:hover,
 .topbar-warning-chip:hover {
   color: var(--fg);
@@ -6581,6 +6585,7 @@ bubble-body.bubble-body { display: block; }
    `.list-rows` rule rather than borders of their own. */
 .topbar-account-option,
 .topbar-model-option,
+.topbar-effort-option,
 .topbar-mode-option,
 .topbar-warning-row {
   display: flex;
@@ -6598,6 +6603,7 @@ bubble-body.bubble-body { display: block; }
 }
 .topbar-account-option:hover,
 .topbar-model-option:hover,
+.topbar-effort-option:hover,
 .topbar-mode-option:hover,
 .topbar-warning-row:hover {
   background: var(--border);
@@ -7005,6 +7011,8 @@ bubble-body.bubble-body { display: block; }
    were retired with their proto fields on 2026-09-13.) */
 .topbar-fast,
 .topbar-model[data-no-session],
+.topbar-effort[data-no-session],
+.topbar-effort[data-effort-unsupported],
 .topbar-mode[data-no-session] {
   /* Block only: the inline inset is the right group's. */
   padding-block: 0.15rem;
@@ -7194,49 +7202,3 @@ bubble-body.bubble-body { display: block; }
 .merge-updating-main { padding: 0.15rem 0; }
 /* The tests tab's log line sits under its suites. */
 .merge-test-log { padding-top: 0.3rem; color: var(--muted); }
-
-/* ---- topbar effort selector (src/topbar/effort.ts) ---- */
-
-/* The effort selector sits between the model selector and the permission-mode
-   picker IN THEIR FORM (owner, 2026-10-01): the same quiet button, the same
-   menu rows, the same dash when it states nothing. Kept as its own block so
-   the shared topbar rules above are untouched. */
-.topbar-effort-button {
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 3px;
-  padding: 0.15rem 0.45rem;
-  font: inherit;
-  cursor: pointer;
-  white-space: nowrap;
-  color: var(--muted);
-}
-.topbar-effort-button:hover {
-  border-color: var(--border);
-  color: var(--fg);
-}
-.topbar-effort-option {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 0.15rem;
-  width: 100%;
-  background: none;
-  border: none;
-  color: var(--fg);
-  font: inherit;
-  text-align: left;
-  padding: 0.4rem 0.7rem;
-  cursor: pointer;
-}
-.topbar-effort-option:hover {
-  background: var(--border);
-}
-.topbar-effort[data-no-session],
-.topbar-effort[data-effort-unsupported] {
-  padding: 0.15rem 0.45rem;
-  border: 1px solid transparent;
-  border-radius: 3px;
-  color: var(--muted);
-  white-space: nowrap;
-}
