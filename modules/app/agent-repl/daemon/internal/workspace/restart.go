@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"claude-repld/internal/bounce"
 	"claude-repld/internal/dlog"
@@ -11,38 +12,58 @@ import (
 	"claude-repld/internal/rollout"
 )
 
-// Restart bounces a workspace's shim. The bounce itself is the ROLLOUT's one
-// engine, asked through the prompt queue's bounce registry — at once when the
-// workspace is free, when its work ends otherwise — so this verb adds only the
-// two things the engine deliberately does not own.
+// DefaultRestartStopBound bounds the ONE stop a restart asks of the shim before
+// it bounces it: the forced end of the running turn.
 //
-// force sends KillTurn{force:true} FIRST and then asks for a FORCED bounce,
-// which the registry takes at once over whatever is still running. The
-// interrupt is synchronous: the caller is told whether it could be sent at all.
+// A RESTART IS ASKED FOR BECAUSE SOMETHING IS STUCK, and the vendor is usually
+// unreachable when it is: a forced KillTurn that waits on the vendor to
+// acknowledge can wait forever, and a restart that waits with it is the
+// deadlock the 2026-10-02 incident was. The kill is a local rpc to the shim,
+// which answers once it has signalled its vendor child, so a healthy one
+// answers in milliseconds; 2s is generous for that and short enough that a
+// stuck one costs the user a moment, not a hang. An overrun is ERROR and the
+// bounce PROCEEDS: the forced stand-down that follows hard-kills whatever did
+// not stop (endpoint_restart_workspace.proto).
+const DefaultRestartStopBound = 2 * time.Second
+
+// Restart bounces a workspace's shim IMMEDIATELY, always
+// (endpoint_restart_workspace.proto: there is no graceful mode). The bounce is
+// the ROLLOUT's one engine, asked through the prompt queue's bounce registry
+// as a FORCED bounce, which the registry takes at once over whatever still
+// runs. The verb adds only what the engine deliberately does not own:
 //
-// The verb also owns the WEBAPP's half of a restart: when the bounce is done,
-// the webview is told to reload, so the user is not left on a page built
-// against a different shim.
-func (v *verbs) Restart(ctx context.Context, ws ids.WorkspaceID, force bool) error {
+//  1. a vendor-start retry run still in flight for the workspace is ENDED
+//     first, so the restart begins a fresh run with the full window rather
+//     than queueing behind the old one;
+//  2. the running turn is force-ended with a BOUNDED call; a failure or an
+//     overrun is recorded at ERROR and the bounce proceeds, because the
+//     bounce's forced stand-down is the remedy for exactly a shim that will
+//     not stop;
+//  3. once the bounce is done, the webview is told to reload, so the user is
+//     not left on a page built against a different shim.
+//
+// A workspace with no shim or no session is restarted by the same bounce: the
+// engine prelaunches a shim and resumes the session on it.
+func (v *verbs) Restart(ctx context.Context, ws ids.WorkspaceID) error {
 	_, log, err := v.owned(ctx, "RestartWorkspace", ws)
 	if err != nil {
 		return err
 	}
-
-	if force {
-		if err := v.forceEndTurn(ctx, log, ws); err != nil {
-			return err
-		}
+	if v.deps.Sessions.CancelVendorStart(ctx, ws) {
+		log.Info(opRestart, "ended the vendor-start retry run in flight; the restart begins a fresh one", nil)
 	}
+	v.forceEndTurn(ctx, log, ws)
+	return v.bounceShim(ctx, log, ws, true)
+}
 
-	// THE VERB ACCEPTS; THE BOUNCE RUNS BEHIND IT. An unforced bounce waits
-	// for FREENESS, forever if need be -- that wait is the whole design, and a
-	// graceful restart asked for while a turn is running is precisely the
-	// case it exists for. Answering only once it finished would make the
-	// verb's answer a function of how long the agent takes; the registry's
-	// completion is what the reload and the record below hang off instead.
-	//
-	// The context is DETACHED from the request: the bounce outlives the rpc.
+// bounceShim asks the bounce registry for the restart's shim replacement and
+// hangs the webapp reload off its completion. force is false only for the
+// account switch (SelectAccount), which bounces at the workspace's freeness
+// rather than over its work.
+func (v *verbs) bounceShim(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, force bool) error {
+	// THE VERB ACCEPTS; THE BOUNCE RUNS BEHIND IT. Its completion is what the
+	// reload and the record below hang off. The context is DETACHED from the
+	// request: the bounce outlives the rpc.
 	detached := context.WithoutCancel(ctx)
 	decision, err := v.deps.Rollout.BounceShim(detached, ws, rollout.ReasonRestartVerb, force, func(err error) {
 		v.finishRestart(detached, log, ws, force, err)
@@ -107,28 +128,35 @@ func (v *verbs) finishRestart(ctx context.Context, log dlog.Logger, ws ids.Works
 	log.Info(opRestart, "restarted the workspace", dlog.Context{"force": force})
 }
 
-// forceEndTurn ends whatever turn is running so the relaunch engine's freeness
-// wait can complete. A workspace with no live session and no open turn is
-// already free, which is success.
-func (v *verbs) forceEndTurn(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID) error {
+// forceEndTurn ends whatever turn is running before the bounce, BOUNDED by
+// restartStopBound. A workspace with no live session or no open turn has
+// nothing to end.
+//
+// IT NEVER FAILS THE RESTART. A kill that fails or overruns its bound is
+// recorded at ERROR -- surfaced, not swallowed -- and the restart proceeds to
+// its forced bounce, whose stand-down hard-kills what this could not stop: a
+// restart that gave up here would leave the stuck workspace exactly as stuck
+// as it was.
+func (v *verbs) forceEndTurn(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID) {
 	running, live := v.deps.Freeness(ws)
 	if !live || running.Turn == nil {
 		log.Debug(opRestart, "no turn to force-end before the relaunch", nil)
-		return nil
+		return
 	}
 	shim, ok := v.deps.Shim(ws)
 	if !ok {
 		log.Debug(opRestart, "no shim to force-end the turn through", nil)
-		return nil
+		return
 	}
-	if err := shim.KillTurn(ctx, *running.Turn, true, nil); err != nil {
-		log.Error(opRestart, "could not force-end the running turn", dlog.Context{
-			"turn": string(*running.Turn), "cause": err.Error(),
+	stopCtx, cancel := context.WithTimeout(ctx, v.restartStopBound)
+	defer cancel()
+	if err := shim.KillTurn(stopCtx, *running.Turn, true, nil); err != nil {
+		log.Error(opRestart, "could not force-end the running turn; the forced bounce ends it with the shim", dlog.Context{
+			"turn": string(*running.Turn), "cause": err.Error(), "bound_ms": v.restartStopBound.Milliseconds(),
 		})
-		return fmt.Errorf("restart %q: force-end turn %q: %w", ws, *running.Turn, err)
+		return
 	}
 	log.Debug(opRestart, "force-ended the running turn before the relaunch", dlog.Context{
 		"turn": string(*running.Turn),
 	})
-	return nil
 }

@@ -618,7 +618,9 @@ func (f *Fleet) Resume(ctx context.Context, ws ids.WorkspaceID, c shimclient.Cli
 		}
 	}
 
-	started, err := f.startSession(ctx, log, ws, c, src, session, configDir)
+	runCtx, finishRun := f.beginVendorStart(ctx, ws)
+	started, err := f.startSession(runCtx, log, ws, c, src, session, configDir)
+	finishRun()
 	if err != nil {
 		return rollout.Resumed{}, err
 	}

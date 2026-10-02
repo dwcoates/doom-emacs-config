@@ -678,7 +678,8 @@ func (s *server) mergeSource(ctx context.Context, requester ids.WorkspaceID, sou
 	return wsm.MergeSource{}, fmt.Errorf("server: MergeWorkspace source arm %T is unknown", source.GetSource())
 }
 
-// RestartWorkspace bounces the workspace's shim, gracefully unless forced.
+// RestartWorkspace bounces the workspace's shim and reloads its webapp page,
+// immediately: there is no graceful mode.
 func (s *server) RestartWorkspace(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.RestartWorkspaceRequest],
@@ -689,7 +690,7 @@ func (s *server) RestartWorkspace(
 	if done {
 		return answer(resp, cerr)
 	}
-	if err := s.deps.Verbs.Restart(ctx, subject.Record.ID, req.Msg.GetForce()); err != nil {
+	if err := s.deps.Verbs.Restart(ctx, subject.Record.ID); err != nil {
 		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
 	}
 	// The verb moved the session's standing or the composer's gate; the host
