@@ -1316,6 +1316,16 @@ workspace that genuinely should own a sink and does not still reaches the
 ladder unscreened from its own call sites and still warns."
   (and (agent-repl--ws-log-routable-p ws) ws))
 
+(defun agent-repl--ws-log-scope (ws)
+  "Return the log scope a record about perspective WS is written under.
+WS itself when it owns a durable sink (`agent-repl--ws-log-name'), and
+otherwise `agent-repl--global-log-scope': persp-mode\='s own placeholders
+\(\"none\", Doom\='s \"main\") own no sink, so a record about one is central by
+explicit request rather than left for the ladder to resolve against a
+sink that does not exist.  The scope for `agent-repl--with-log-context'
+on every perspective-lifecycle path."
+  (or (agent-repl--ws-log-name ws) agent-repl--global-log-scope))
+
 (defun agent-repl--ws-current-log-name ()
   "Return the current workspace name, or nil when it owns no log sink.
 `agent-repl--ws-current-name' answers a persp-mode question, and persp-mode

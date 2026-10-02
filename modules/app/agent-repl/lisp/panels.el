@@ -46,6 +46,7 @@
 (declare-function agent-repl--ws-known-p "workspace")
 (declare-function agent-repl--ws-live-p "workspace")
 (declare-function agent-repl--ws-log-name "workspace")
+(declare-function agent-repl--ws-log-scope "workspace" (ws))
 (declare-function agent-repl--ws-names-cache "workspace")
 (declare-function agent-repl--ws-put "workspace")
 (declare-function agent-repl--ws-remove-buffer "workspace")
@@ -777,7 +778,7 @@ bookkeeping uses the unscreened name while the log lines use
 its deactivation is a genuinely global-scope event."
   (let* ((ws (agent-repl--ws-current-name))
          (log-ws (agent-repl--ws-current-log-name))
-         (scope (if log-ws log-ws agent-repl--global-log-scope)))
+         (scope (agent-repl--ws-log-scope ws)))
     (agent-repl--with-log-context
      scope nil
      (lambda ()
@@ -812,14 +813,6 @@ Cancelled when a newer activation supersedes it, so the timer list holds
 at most one pass; the generation check is what guarantees a superseded
 pass does nothing even if it was already dequeued to run.")
 
-(defun agent-repl--switch-activation-log-scope (ws)
-  "Return the log scope a switch pass for WS records under.
-WS is whatever perspective persp-mode activated, persp-mode\='s own
-placeholders included, and those own no durable sink, so their records
-are central by explicit request rather than left for the ladder to
-resolve against a sink that does not exist."
-  (or (agent-repl--ws-log-name ws) agent-repl--global-log-scope))
-
 (defun agent-repl--schedule-switch-activation (ws)
   "Supersede every pending switch pass and schedule WS\='s under a new generation.
 Returns the generation WS\='s pass carries."
@@ -829,7 +822,7 @@ Returns the generation WS\='s pass carries."
       (cancel-timer agent-repl--switch-activation-timer))
     (setq agent-repl--switch-activation-timer
           (run-at-time 0 nil #'agent-repl--run-switch-activation ws generation))
-    (agent-repl--log-verbose (agent-repl--switch-activation-log-scope ws)
+    (agent-repl--log-verbose (agent-repl--ws-log-scope ws)
                              "elisp.panels.switch-activation-scheduled ws=%s generation=%d"
                              ws generation)
     generation))
@@ -855,7 +848,7 @@ superseded: it records that at INFO and does nothing else, because the
 user is no longer standing in WS.  The pass that runs records the
 generation that won at INFO, so a switch read back from the log says
 which activation it was."
-  (let ((log-ws (agent-repl--switch-activation-log-scope ws))
+  (let ((log-ws (agent-repl--ws-log-scope ws))
         (newest agent-repl--switch-activation-generation))
     (if (/= generation newest)
         (agent-repl--info log-ws
@@ -1233,7 +1226,7 @@ own input box there, which Emacs's input panel replaced); the webview
 hides its composer declaratively instead, so there is nothing left to
 refresh."
   (let* ((log-ws (agent-repl--ws-current-log-name))
-         (scope (if log-ws log-ws agent-repl--global-log-scope)))
+         (scope (agent-repl--ws-log-scope (agent-repl--ws-current-name))))
     (agent-repl--with-log-context
      scope nil
      (lambda ()
