@@ -82,7 +82,12 @@ daemon/
     drain/         shutdown schedule + idle sweep (hibernation policy incl. Hibernate directive)
     worktreereap/  the landed-worktree reaper: a daily low-priority sweep that removes linked
                    worktrees whose changes landed on the default branch (see AGENTS.md)
-    flock/         the one held non-blocking exclusive kernel lock (merge repo lock, reaper sweep lock)
+    newsdigest/    the daily Claude news digest: reads the watched sources, keeps what is new, has
+                   Sonnet condense it (through headless/), stands it over every webview's feed until
+                   dismissed; a durable daily cadence, one run at a time across processes (see AGENTS.md)
+    runecap/       the one rune bound for every composed model prompt
+    flock/         the one held non-blocking exclusive kernel lock (merge repo lock, reaper sweep
+                   lock, news digest run lock)
     clock/         the one injectable Now/After clock every waiting package takes (drain, rollout,
                    startingshim, worktreereap alias it)
     rollout/       self-reload trigger consumer: daemon handover, adopt rendezvous, shim relaunch engine,
@@ -107,10 +112,10 @@ daemon/
 
 Package dependency direction (a package may import only what is at or
 below it in this list): proto gen, dlog, envc, stateroot, vocab, paint,
-feedid, prompts, publish, apiresponses, flock, clock, sessioncommand  <  wsm, sessionlock, shimclient, gitclient,
+feedid, prompts, publish, apiresponses, flock, clock, sessioncommand, runecap  <  wsm, sessionlock, shimclient, gitclient,
 account, externalbrowser, login  <  sessionwatcher, resolve/*  <
 prompthandler, promptqueue, classifier, merge, drain, rollout, workspace,
-health, intakegate  <  commandfile, heldingress, worktreereap  <  server, boot  <  cmd. The shim client and git
+health, intakegate  <  commandfile, heldingress, worktreereap, newsdigest  <  server, boot  <  cmd. The shim client and git
 client know no other daemon package. The prompt queue, merge orchestrator
 and drain controller never import each other; they meet at wsm (the
 lease) and at the shim client.
