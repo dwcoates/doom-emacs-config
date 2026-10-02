@@ -20,12 +20,6 @@ import (
 	"claude-repld/internal/wsm"
 )
 
-// openingPageSize is the budget every watch's opening catch-up page is opened
-// with. One value for every watch: the page is a catch-up bounded by a
-// known_through pointer in the ordinary case, and a cold subagent bubble pages
-// older history through ReadHistory rather than through a bigger first page.
-const openingPageSize = 200
-
 // mainWatchKey is the known_through map's key for the MAIN agent's watch,
 // which is addressed by an UNSET target and therefore has no AgentId to key
 // on. Empty is safe: a real AgentId.value is never empty on the wire.
@@ -54,17 +48,6 @@ type agentWatch struct {
 	// completion is judged against: a completion whose ticket is no longer
 	// this field is superseded and discarded.
 	opening *openTicket
-	// paged records that this watch has been served an opening page — its
-	// own, or the one StartTurn's answer carried for the main watch. From then
-	// on, everything a later opening page carries was written after it.
-	paged bool
-	// catchUp records that the open in force asked for a CATCH-UP page: one
-	// carrying only entries this watch has not been served, because the open
-	// named a known_through pointer or the watch had already been paged. Its
-	// entries were written while no stream stood, so a cut among them is an
-	// edge the views missed and is routed (routePageCutLocked). A watch's
-	// FIRST page is a repaint instead: history, whose cuts are never edges.
-	catchUp bool
 }
 
 // shellWatch is one open WatchBash stream for one detached shell.
@@ -309,9 +292,11 @@ type watcher struct {
 	// it (see reconcileLiveWorkLocked).
 	liveSeq uint64
 
-	// known is the newest pointer served on each watch, keyed by AgentId.value
-	// with mainWatchKey for the main agent's. It is what a re-open passes as
-	// known_through so the opening page is a catch-up, not a repaint.
+	// known is the newest pointer the daemon holds of each watched agent,
+	// keyed by AgentId.value with mainWatchKey for the main agent's: the newest
+	// entry a watch served, or the newest entry of a newest page a reader's
+	// request loaded (NoteHistoryLoaded). It is what an open passes as
+	// known_through; an agent with no pointer is opened tail_only.
 	known map[string]*conversationv1.HistoryPointer
 
 	// facts is what the watcher learned from the activities it routed, keyed
@@ -1617,19 +1602,38 @@ func (w *watcher) openAgentStreamLocked(a *agentWatch) {
 	if !ok {
 		return
 	}
-	req := &shimv1.WatchAgentRequest{Target: a.id, PageSize: openingPageSize}
-	if ptr := w.known[watchKey(a.id)]; ptr != nil {
-		req.KnownThrough = ptr
-	}
-	// WHAT THE OPEN ASKS FOR IS DECIDED WITH IT: the page it will be served
-	// answers this request, whatever is routed while it is in flight.
-	catchUp := req.KnownThrough != nil || a.paged
+	req := watchRequest(a.id, w.known[watchKey(a.id)])
 	a.opening = t
-	go w.openAgent(t, a, req, catchUp)
+	go w.openAgent(t, a, req)
+}
+
+// watchRequest is one watch's open: TARGET (nil for the main agent), opening
+// on what the daemon already holds of it.
+//
+// OPENING A WATCH REPLAYS NO HISTORY (owner ruling, feed paging on demand): an
+// agent the daemon holds nothing of is opened tail_only, and one it holds a
+// pointer of catches up from exactly that pointer. History is loaded only when
+// a reader asks for it, by the feed (ReadHistory), never by a watch.
+func watchRequest(target *conversationv1.AgentId, held *conversationv1.HistoryPointer) *shimv1.WatchAgentRequest {
+	req := &shimv1.WatchAgentRequest{Target: target}
+	if held != nil {
+		req.Opening = &shimv1.WatchAgentRequest_KnownThrough{KnownThrough: held}
+		return req
+	}
+	req.Opening = &shimv1.WatchAgentRequest_TailOnly{TailOnly: &shimv1.WatchAgentTailOnly{}}
+	return req
+}
+
+// openingName names a watch request's opening for a record.
+func openingName(req *shimv1.WatchAgentRequest) string {
+	if req.GetKnownThrough() != nil {
+		return "known_through"
+	}
+	return "tail_only"
 }
 
 // openAgent makes one decided WatchAgent open OFF mu and installs it.
-func (w *watcher) openAgent(t *openTicket, a *agentWatch, req *shimv1.WatchAgentRequest, catchUp bool) {
+func (w *watcher) openAgent(t *openTicket, a *agentWatch, req *shimv1.WatchAgentRequest) {
 	defer w.opens.Done()
 	stream, err := w.client.WatchAgent(t.ctx, req)
 	w.mu.Lock()
@@ -1657,9 +1661,8 @@ func (w *watcher) openAgent(t *openTicket, a *agentWatch, req *shimv1.WatchAgent
 	installed := &ticketedStream[*shimv1.WatchAgentResponse]{Stream: stream, cancel: t.cancel}
 	a.refusals = 0
 	a.stream = installed
-	a.catchUp = catchUp
 	w.log.Debug("daemon.sessionwatcher.watch_agent", "agent watch opened", dlog.Context{
-		"agent_id": a.id.GetValue(), "catch_up": a.catchUp,
+		"agent_id": a.id.GetValue(), "opening": openingName(req),
 	})
 	go w.runAgent(t.gen, a, installed)
 	w.mu.Unlock()

@@ -1654,11 +1654,10 @@ func TestACutIsRoutedOncePerPointer(t *testing.T) {
 	}
 }
 
-// TestACutOnAFirstPageIsHistory covers a watch's FIRST page, a repaint: the
-// cuts on it ended acts this daemon never saw begin, so none reaches the
-// footer or the topbar — routed, it would end the turn the footer is drawing
-// and drop the context figure the topbar read after it.
-func TestACutOnAFirstPageIsHistory(t *testing.T) {
+// TestACutOnAFirstPageIsAnEdge covers a watch's FIRST page: no watch replays
+// history, so whatever its opening page carries was written after what the
+// daemon holds, and a cut on it reaches the footer and the topbar.
+func TestACutOnAFirstPageIsAnEdge(t *testing.T) {
 	// Arrange.
 	h := newHarness(t, Session{Started: sessionStarted("")})
 	h.quiet()
@@ -1667,10 +1666,7 @@ func TestACutOnAFirstPageIsHistory(t *testing.T) {
 	got := h.route(h.main, pageFrame(cutEntryAt("ptr-cut", compactedCut())))
 
 	// Assert.
-	assertNames(t, got, []string{"feed.OnHistoryPage", "footer.OnHistoryPage"})
-	if !h.hasRecord("debug", "daemon.sessionwatcher.context_cut_history") {
-		t.Fatal("the history cut left no debug record")
-	}
+	assertNames(t, got, []string{"feed.OnHistoryPage", "footer.OnHistoryPage", "footer.OnContextCut", "topbar.OnContextCut"})
 }
 
 // TestACompactingEndedByACaughtUpCutLeavesNothingStanding covers the defect:
@@ -1874,11 +1870,12 @@ func TestATurnOpeningReFiresNoHistory(t *testing.T) {
 	}
 }
 
-// TestTheFeedIsHandedABoundaryOnlyOnAFirstPage covers what a page's boundary
+// TestTheFeedIsHandedNoBoundaryOnAnOpeningPage covers what a page's boundary
 // means to the feed: whether older history remains below the TOP of the book.
-// Only a watch's first page is read from there; a catch-up is bounded by its
-// pointer and a turn page by its one-row budget, so theirs say nothing.
-func TestTheFeedIsHandedABoundaryOnlyOnAFirstPage(t *testing.T) {
+// No opening page is read from there any more — a watch opens tail_only or
+// catches up from its pointer, and a turn page likewise — so none says
+// anything, and only a reader's own page load (the feed's) states a floor.
+func TestTheFeedIsHandedNoBoundaryOnAnOpeningPage(t *testing.T) {
 	floor := &conversationv1.HistoryPage_Floor{Floor: &conversationv1.HistoryFloor{}}
 	more := &conversationv1.HistoryPage_More{More: &conversationv1.HistoryMore{}}
 	tests := []struct {
@@ -1888,13 +1885,12 @@ func TestTheFeedIsHandedABoundaryOnlyOnAFirstPage(t *testing.T) {
 		want string
 	}{
 		{
-			name: "a watch's first page keeps its floor",
+			name: "a tail-only watch's first page's floor is withheld",
 			act: func(h *harness) []event {
 				return h.route(h.main, &shimv1.WatchAgentResponse{Frame: &shimv1.WatchAgentResponse_Page{
 					Page: &conversationv1.HistoryPage{Boundary: floor},
 				}})
 			},
-			want: "floor",
 		},
 		{
 			name: "a catch-up page's floor is withheld",
