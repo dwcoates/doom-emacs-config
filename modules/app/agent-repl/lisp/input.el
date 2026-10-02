@@ -75,6 +75,7 @@
 (declare-function agent-repl--ws-current-log-name "agent-repl-workspace" ())
 (declare-function agent-repl--ws-get "agent-repl-workspace" (ws key))
 (declare-function agent-repl--history-push "agent-repl-history" (&optional text))
+(declare-function agent-repl--history-push-discard "agent-repl-history" ())
 (declare-function agent-repl--history-reset "agent-repl-history" ())
 (declare-function agent-repl--history-save "agent-repl-history" (ws))
 (declare-function agent-repl--history-on-change "agent-repl-history" (&rest args))
@@ -340,9 +341,9 @@ marker drawn, as a pasted image is."
   "Save current input to history, clear the buffer, and enter insert state.
 When the most recent history item is one an earlier discard added and is a
 substring of this input, it is replaced by this input instead of a new item
-being pushed.  While the composer is editing a held prompt this is also the edit's
-CANCEL: the held prompt keeps its content and the queue resumes
-(`agent-repl-held-edit-cancel')."
+being pushed.  While the composer is editing a held prompt this is also the
+edit's CANCEL: the held prompt keeps its content and the queue resumes
+\(`agent-repl-held-edit-cancel')."
   (interactive)
   (let ((ws (agent-repl--ws-current-name))
         (input-len (buffer-size)))
