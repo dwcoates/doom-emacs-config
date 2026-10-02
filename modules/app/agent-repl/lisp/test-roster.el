@@ -25,13 +25,15 @@
 (defun agent-repl-test-roster--row (id name status &rest overrides)
   "Return a decoded `RosterRow' plist for ID, NAME and STATUS.
 OVERRIDES is a plist merged over the defaults: `:closed', `:children',
-`:attention', `:priority', `:viewed', `:current', `:dir', `:availability'
+`:attention', `:priority', `:viewed', `:detached-live', `:current', `:dir',
+`:availability'
 \(an arm keyword, default `:available')."
   (let ((dir (or (plist-get overrides :dir) (concat "/w/" id))))
     (list :workspace (list :workspace (list :id id :dir dir))
           :attention (plist-get overrides :attention)
           :priority (plist-get overrides :priority)
           :viewed (plist-get overrides :viewed)
+          :detached-live (plist-get overrides :detached-live)
           :availability (list :arm (or (plist-get overrides :availability) :available)
                               :value nil)
           :name (list :text name)
@@ -1224,6 +1226,33 @@ user's next sidebar click."
   "Before any push carried its row, a workspace has no marker."
   (agent-repl-test-roster--with-editor
     (should-not (agent-repl-roster-viewed-for-ws "one"))))
+
+(ert-deftest agent-repl-test-roster-row-detached-live-p-when-marker-present ()
+  "A row carrying `RosterRowDetachedLive' reads as having live detached work."
+  (should (agent-repl-roster-row-detached-live-p
+           (agent-repl-test-roster--row "a" "one" :done :detached-live t))))
+
+(ert-deftest agent-repl-test-roster-row-detached-live-p-when-marker-absent ()
+  "A row without the marker reads as having no live detached work."
+  (should-not (agent-repl-roster-row-detached-live-p
+               (agent-repl-test-roster--row "a" "one" :done))))
+
+(ert-deftest agent-repl-test-roster-detached-live-for-ws-after-a-push ()
+  "After a push, a workspace's detached-work fact is its current row's."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    ;; Act
+    (agent-repl-roster-apply
+     (agent-repl-test-roster--roster
+      :sections (list (agent-repl-test-roster--section
+                       "repo" (list (agent-repl-test-roster--row "a" "one" :done :detached-live t))))))
+    ;; Assert
+    (should (agent-repl-roster-detached-live-for-ws "one"))))
+
+(ert-deftest agent-repl-test-roster-detached-live-for-ws-before-any-push ()
+  "Before any push carried its row, a workspace has no detached-work fact."
+  (agent-repl-test-roster--with-editor
+    (should-not (agent-repl-roster-detached-live-for-ws "one"))))
 
 (defmacro agent-repl-test-roster--recording-viewed-clears (var &rest body)
   "Run BODY with the viewed-cleared hook recording each WS onto VAR."
