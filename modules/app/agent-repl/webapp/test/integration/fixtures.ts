@@ -2016,6 +2016,8 @@ type TopbarInit = {
    */
   unselected?: boolean;
   contextText?: string;
+  /** The chip's window fill, 0..1; omitted, an empty window. */
+  windowFill?: number;
   breakdown?: boolean;
   /** Omit the per-row share, which is `optional` and drawn only when set. */
   shares?: boolean;
@@ -2067,6 +2069,7 @@ export function topbarView(init?: TopbarInit): TopbarView {
     },
     context: {
       text: init?.contextText ?? "184k",
+      windowFill: init?.windowFill ?? 0,
       breakdown:
         init?.breakdown === false
           ? undefined

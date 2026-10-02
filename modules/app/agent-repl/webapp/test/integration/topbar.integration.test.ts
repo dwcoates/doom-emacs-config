@@ -24,6 +24,7 @@ import {
 import { SetModelResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_model_pb";
 import { SetPermissionModeResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_permission_mode_pb";
 
+import { pressurePercentColor } from "../../src/pressure-color.js";
 import { cascadedValue, installStylesheet } from "../stylesheet.js";
 import { bootColdOnce, chipFailureText, startHarness, type Harness } from "./harness";
 import { MODEL_PLACEHOLDER } from "../../src/topbar/model";
@@ -505,27 +506,21 @@ describe("the context chip", () => {
     expect(harness.text(".topbar-context")).toContain("184k");
   });
 
-  it("draws the figure in the context color", async () => {
-    // Arrange / Act
-    await withTopbar({});
-    // Assert: yellow is the context figure's own color by directive.
-    expect(harness.$(".topbar-context")?.className).toContain("tone-yellow");
-  });
-
-  it("paints the figure yellow with the REAL stylesheet over the whole strip", async () => {
-    // The class above is what the drawing code decides; this is what a reader
-    // gets, and the two disagreed. A later same-specificity topbar-button rule
-    // set `color: var(--muted)` on the figure, so the one colored number in the
-    // strip came out GREY in the running application while every class
-    // assertion in this suite stayed green. A screenshot of the real topbar
-    // caught it; this is the assertion that keeps it caught.
+  it("paints the figure by its window fill with the REAL stylesheet over the whole strip", async () => {
+    // The drawing code decides a color; this is what a reader gets, and the
+    // two once disagreed: a later same-specificity topbar-button rule painted
+    // the one colored number in the strip GREY in the running application
+    // while every class assertion stayed green. This keeps that caught for the
+    // fill's color, which is the footer percentages' own rule.
     // Arrange
     const remove = installStylesheet();
+    const probe = document.createElement("span");
+    probe.style.color = pressurePercentColor(72);
     // Act
-    await withTopbar({ contextText: "184k" });
+    await withTopbar({ contextText: "184k", windowFill: 0.72 });
     // Assert
     expect(cascadedValue(harness.$(".topbar-context-figure") as Element, "color")).toBe(
-      "var(--async)",
+      probe.style.color,
     );
     remove();
   });

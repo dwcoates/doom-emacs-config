@@ -15,6 +15,7 @@ import {
   formatSharePermille,
   formatTokenCount,
 } from "../../src/topbar/context-chip.js";
+import { pressurePercentColor } from "../../src/pressure-color.js";
 import { cascadedValue, installStylesheet } from "../stylesheet.js";
 import { openPanel, topbarContext } from "./fixtures.js";
 
@@ -27,10 +28,11 @@ const row = (init: Partial<{ label: string; tokens: number; sharePermille: numbe
     depth: init.depth ?? 0,
   });
 
-const chip = (text: string, sections: unknown[] = []) =>
+const chip = (text: string, sections: unknown[] = [], windowFill = 0) =>
   create(TopbarContextChipSchema, {
     text,
     breakdown: create(TokenBreakdownViewSchema, { sections: sections as never }),
+    windowFill,
   });
 
 describe("drawTopbarContextChip", () => {
@@ -39,28 +41,43 @@ describe("drawTopbarContextChip", () => {
     expect(drawTopbarContextChip(chip("142.3k"), tc).textContent).toBe("142.3k");
   });
 
-  it("paints the figure yellow, the context register", () => {
+  it.each([
+    ["green well inside the window", 0.1, 10],
+    ["between green and yellow past 40%", 0.55, 55],
+    ["red at 90% and above", 0.93, 93],
+  ])("paints the figure %s, by the footer's own rule", (_name, fill, percent) => {
+    // ARRANGE
     const { tc } = topbarContext();
-    const drawn = drawTopbarContextChip(chip("142.3k"), tc);
-    expect(drawn.querySelector(".topbar-context-figure")?.classList.contains("tone-yellow")).toBe(
-      true,
-    );
+    const probe = document.createElement("span");
+    probe.style.color = pressurePercentColor(percent);
+    // ACT
+    const drawn = drawTopbarContextChip(chip("142.3k", [], fill), tc);
+    // ASSERT
+    const figure = drawn.querySelector<HTMLElement>(".topbar-context-figure");
+    expect(figure?.style.color).toBe(probe.style.color);
   });
 
-  it("lets the yellow WIN the cascade, the class alone having been a lie once", () => {
-    // The class assertion above passed for as long as the stylesheet's shared
-    // topbar-button rule carried `color: var(--muted)`: same specificity,
-    // declared later, so the one colored number in the strip was drawn grey in
-    // every running page and only a screenshot of the real topbar saw it.
+  it("lets the fill's color WIN the cascade over the stylesheet", () => {
+    // A stylesheet rule once painted the strip's one colored number grey while
+    // every class assertion stayed green; the color is inline so no rule can.
     // ARRANGE
     const remove = installStylesheet();
     const { host, tc } = topbarContext();
-    host.append(drawTopbarContextChip(chip("142.3k"), tc));
+    const probe = document.createElement("span");
+    probe.style.color = pressurePercentColor(55);
+    host.append(drawTopbarContextChip(chip("142.3k", [], 0.55), tc));
     // ACT
     const figure = host.querySelector(".topbar-context-figure");
     // ASSERT
-    expect(cascadedValue(figure as Element, "color")).toBe("var(--async)");
+    expect(cascadedValue(figure as Element, "color")).toBe(probe.style.color);
     remove();
+  });
+
+  it("refuses a window fill outside [0, 1] as a malformed view", () => {
+    // ARRANGE
+    const { tc } = topbarContext();
+    // ACT / ASSERT
+    expect(() => drawTopbarContextChip(chip("142.3k", [], 1.5), tc)).toThrow(MalformedView);
   });
 
   it("leaves the quiet controls beside it quiet", () => {

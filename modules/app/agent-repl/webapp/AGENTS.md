@@ -401,7 +401,11 @@ hand any more:
 - **ONE HEAT RULE FOR EVERY TOKEN FIGURE AND PERCENTAGE** (owner rulings,
   2026-09-30). A footer percentage is painted by `pressurePercentColor`
   (`src/pressure-color.ts`): green below 40%, yellow by 70%, orange by 90%, red
-  from 90%, a continuous gradient between the stops (`src/percent-gradient.ts`). The
+  from 90%, a continuous gradient between the stops (`src/percent-gradient.ts`).
+  The topbar's context figure is painted by the SAME helper over the daemon's
+  `TopbarContextChip.window_fill` (owner, 2026-10-01), inline so no stylesheet
+  rule can override it; `test/pressure-color-call-sites.test.ts` fails either
+  surface that stops calling it. The
   response bubble's token stamp and the footer's token count share
   `tokenHeatColor` (`src/token-heat.ts`) over the daemon's
   `frontend.v1.TokenHeat` position; neither is re-derived locally.
