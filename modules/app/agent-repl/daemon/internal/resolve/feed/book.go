@@ -336,7 +336,9 @@ func (r *resolver) load(ctx context.Context, plan loadPlan) (loaded, error) {
 	// A RE-READ NEWEST PAGE MOVES ONLY THE TOP: the older pages a walk
 	// already loaded stay loaded, and the next older page is still read from
 	// below the oldest of them.
-	if !plan.newest || !f.book.newestLoaded {
+	reread := plan.newest && f.book.newestLoaded
+	reachedStart := !reread && page.GetFloor() != nil
+	if !reread {
 		f.book.after = page.GetMore().GetLastEntry()
 		f.book.floor = page.GetFloor() != nil
 	}
@@ -344,15 +346,15 @@ func (r *resolver) load(ctx context.Context, plan loadPlan) (loaded, error) {
 		f.book.newestLoaded = true
 		f.book.liveSince = false
 	}
-	if l.drew {
-		f.book.addBound(l.low)
-	}
-	if f.book.floor && len(f.book.bounds) > 0 {
+	switch {
+	case reachedStart:
 		// AT THE CONVERSATION'S START THE OLDEST PAGE REACHES THE FEED'S TOP:
-		// every row held below its bound — a fork's ported conversation, a
-		// daemon-made row keyed before the history — is served with it rather
-		// than standing on a page of its own.
-		f.book.bounds[0] = ""
+		// every row held above the history — a fork's ported conversation, a
+		// row the daemon keyed before it — is served with the page that
+		// reached the start rather than on a page of its own.
+		f.book.addBound("")
+	case l.drew:
+		f.book.addBound(l.low)
 	}
 	log.Info("daemon.feed.history_loaded",
 		"a store page a reader's request needed was loaded into its feed",
