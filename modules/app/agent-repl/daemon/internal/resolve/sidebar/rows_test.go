@@ -9,6 +9,7 @@ import (
 
 	"claude-repld/internal/ids"
 	"claude-repld/internal/resolve/footer"
+	"claude-repld/internal/resolve/sidebar"
 	"claude-repld/internal/shimclient"
 	"claude-repld/internal/wsm"
 )
@@ -541,6 +542,78 @@ func finished(t *testing.T, r sidebarResolver) sidebarResolver {
 		t.Fatalf("status = %q, want done — the arrangement did not finish the turn", got)
 	}
 	return r
+}
+
+func TestAContextCutsEndDrawsTheRowPartialAtOnce(t *testing.T) {
+	cases := []struct {
+		name       string
+		act        footer.SessionAct
+		how        sidebar.TurnClose
+		wantStatus string
+		wantViewed bool
+	}{
+		{name: "a completed clear is read at once", act: footer.ActClear, how: wsm.CloseCompleted, wantStatus: "done", wantViewed: true},
+		{name: "a completed compaction is read at once", act: footer.ActCompact, how: wsm.CloseCompleted, wantStatus: "done", wantViewed: true},
+		{name: "an interrupted clear stays unread", act: footer.ActClear, how: wsm.CloseKilled, wantStatus: "interrupted", wantViewed: false},
+		{name: "a failed compaction stays unread", act: footer.ActCompact, how: wsm.CloseFailed, wantStatus: "turn_failed", wantViewed: false},
+		{name: "a completed prompt stays unread", act: footer.ActPrompt, how: wsm.CloseCompleted, wantStatus: "done", wantViewed: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			r := live(t, arrange(t))
+			r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: tc.act})
+
+			// Act.
+			r.SetTurnEnded(theWS, tc.how)
+
+			// Assert: the marker rides the very push that ends the turn.
+			row := onlyRow(t, r)
+			if got := statusName(row); got != tc.wantStatus {
+				t.Fatalf("status = %q, want %q", got, tc.wantStatus)
+			}
+			if got := row.GetViewed() != nil; got != tc.wantViewed {
+				t.Fatalf("viewed = %v, want %v", got, tc.wantViewed)
+			}
+		})
+	}
+}
+
+func TestAContextCutReadAtOnceIsRecorded(t *testing.T) {
+	// Arrange.
+	r := live(t, arrange(t))
+	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActClear})
+
+	// Act.
+	r.SetTurnEnded(theWS, wsm.CloseCompleted)
+
+	// Assert.
+	for _, rec := range r.surfaces.Records() {
+		if rec.Operation == "daemon.sidebar.result_read_on_cut" && rec.Context["act"] == "clear" {
+			return
+		}
+	}
+	t.Fatal("no daemon.sidebar.result_read_on_cut record naming the clear")
+}
+
+func TestAContextCutReadAtOnceStaysReadAfterItsDetachedWorkEnds(t *testing.T) {
+	// Arrange: a clear completed while detached work ran, so the read row
+	// yielded to idle_async.
+	r := live(t, arrange(t))
+	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActClear})
+	r.OnDetachedWork(theWS, agent("a1"), detachedWork("work-1"))
+	r.SetTurnEnded(theWS, wsm.CloseCompleted)
+	if got := statusName(onlyRow(t, r)); got != "idle_async" {
+		t.Fatalf("status = %q, want idle_async — the read cut yields to live detached work", got)
+	}
+
+	// Act: the detached work ends.
+	r.OnLiveWorkChanged(theWS, sidebar.LiveWorkSet{})
+
+	// Assert.
+	if got := onlyRow(t, r).GetViewed(); got == nil {
+		t.Fatal("viewed = unset, want the cut's done still PARTIAL once the detached work ends")
+	}
 }
 
 func TestRowCarriesNoViewedMarkerUntilTheEditorReportsOne(t *testing.T) {
