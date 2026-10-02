@@ -821,13 +821,26 @@ describe("per-rpc refusal arms", () => {
 
   it.each(
     REFUSAL_SITES.flatMap((testCase) =>
-      perRpcArms(testCase.rpc).map((arm) => ({ name: testCase.name, testCase, arm })),
+      perRpcArms(testCase.rpc)
+        // `link_unresolved` is drawn nowhere by this page: the daemon publishes
+        // the footer line and asks the question in the conversation.
+        .filter((arm) => arm !== "linkUnresolved")
+        .map((arm) => ({ name: testCase.name, testCase, arm })),
     ),
   )("draws $name's $arm arm at its call site", async ({ testCase, arm }) => {
     // Arrange / Act
     harness = await provoke(testCase, arm);
     // Assert
     expect(harness.$(`${testCase.site} .refusal[data-arm="${arm}"]`)).not.toBeNull();
+  });
+});
+
+describe("OpenInEditor's link_unresolved arm", () => {
+  it("draws nothing at the link, the daemon speaking for it", async () => {
+    // Arrange / Act
+    harness = await provoke(REFUSAL_SITES.find((s) => s.rpc === "openInEditor")!, "linkUnresolved");
+    // Assert
+    expect(harness.$('[data-feed-row="row-1"] .refusal')).toBeNull();
   });
 });
 
