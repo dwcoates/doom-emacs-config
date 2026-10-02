@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { type Control } from "../../src/control.js";
 import { describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { createRouterTransport } from "@connectrpc/connect";
@@ -128,7 +129,7 @@ interface Harness {
   gate: ReturnType<typeof createComposerGate>;
   handle: ComposerHandle;
   input: HTMLTextAreaElement;
-  send: HTMLButtonElement;
+  send: Control;
   reports: FailureKind[];
 }
 
@@ -171,7 +172,7 @@ function mount(
     gate,
     handle,
     input: host.querySelector("textarea") as HTMLTextAreaElement,
-    send: host.querySelector("button") as HTMLButtonElement,
+    send: host.querySelector("ar-button") as Control,
     reports: sink.reports,
   };
 }

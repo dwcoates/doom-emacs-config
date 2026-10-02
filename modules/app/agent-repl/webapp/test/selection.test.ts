@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 /** The one reader of the selection's text, and the proof every reader uses it. */
+import { createControl, type Control } from "../src/control.js";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -82,8 +83,8 @@ describe("selectedText", () => {
 });
 
 /** A button the guard stands in front of, counting the clicks that reach it. */
-function clickTarget(): { button: HTMLButtonElement; reached: () => number } {
-  const button = document.createElement("button");
+function clickTarget(): { button: Control; reached: () => number } {
+  const button = createControl();
   button.textContent = "Send now";
   document.body.append(button);
   let reached = 0;
@@ -190,7 +191,7 @@ describe("installSelectionClickGuard", () => {
     const record = await forwardedRecord(capture, "selection.click-swallowed");
     expect([record.level.case, record.context]).toEqual([
       "debug",
-      expect.objectContaining({ target: "button", characters: 16 }),
+      expect.objectContaining({ target: "ar-button", characters: 16 }),
     ]);
   });
 

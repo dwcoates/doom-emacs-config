@@ -343,7 +343,7 @@
      before the warning chip), so that space was 21.2px between most chips and
      13 and 21 either side of the wifi glyph. Now EVERY right-hand cell takes
      the same inset from one rule keyed on the group, not on the cell's name
-     (see `.topbar-right button` below), so a cell added later inherits it:
+     (see `.topbar-right ar-button` below), so a cell added later inherits it:
      0.2rem + 2 x (0.3rem + 1px) = 14.8px, 30% under the old 21.2px. */
   --topbar-right-chip-gap: 0.2rem;
   --topbar-right-chip-inset: 0.3rem;
@@ -462,6 +462,64 @@
 }
 
 * { box-sizing: border-box; }
+
+/* ---- the one control (src/control.ts) ---- */
+/* EVERY CONTROL IS AN <ar-button>, NEVER A <button> (owner ruling,
+   2026-10-02: WebKit starts no text selection inside a <button>, and all
+   text must be selectable). The user agent styled a button; nothing styles an
+   undefined element, so its base look is restated here, once, as WebKit's own
+   stylesheet declares it for `button` (the look a button takes once author
+   styling turns the native theme off). `:where()` keeps the rule at zero
+   specificity, so every author rule (which always beat the user agent's) still
+   wins. A control stays as selectable as the text around it. */
+:where(ar-button) {
+  display: inline-block;
+  margin: 0;
+  font: -webkit-small-control;
+  color: ButtonText;
+  letter-spacing: normal;
+  word-spacing: normal;
+  line-height: normal;
+  text-transform: none;
+  text-indent: 0;
+  text-shadow: none;
+  text-rendering: auto;
+  padding: 2px 6px 3px 6px;
+  border: 2px outset ButtonBorder;
+  background-color: ButtonFace;
+  align-items: flex-start;
+  text-align: center;
+  cursor: default;
+}
+:where(ar-button[aria-disabled="true"]) { color: GrayText; }
+/* THE CONTROLS NO AUTHOR RULE GAVE A BACKGROUND OR A BORDER were drawn by
+   macOS as native push buttons, which no element but a button can request.
+   They are drawn here to the native bezel's measured geometry and colors
+   (test/webkit/control.webkit.test.ts holds the geometry to a real button's):
+   the same box, a rounded fill, a hairline ring and a soft drop. */
+:where(.perm-actions ar-button, ar-button.composer-send, ar-button.command-refused-support) {
+  min-height: 15px;
+  padding: 1px 8px 2px 8px;
+  border: 1px solid transparent;
+  border-left-width: 0;
+  border-right-width: 0;
+  border-radius: 5px;
+  background-clip: padding-box;
+  background-color: #ffffff;
+  box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.14), inset 0 -0.5px 0 rgba(0, 0, 0, 0.18);
+}
+:where(.perm-actions ar-button, ar-button.composer-send, ar-button.command-refused-support)[aria-disabled="true"] {
+  box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.08), inset 0 -0.5px 0 rgba(0, 0, 0, 0.1);
+}
+@media (prefers-color-scheme: dark) {
+  :where(.perm-actions ar-button, ar-button.composer-send, ar-button.command-refused-support) {
+    background-color: rgb(86, 86, 86);
+    box-shadow: inset 0 0.5px 0 rgba(255, 255, 255, 0.09), inset 0 0 0 0.5px rgba(0, 0, 0, 0.25);
+  }
+  :where(.perm-actions ar-button, ar-button.composer-send, ar-button.command-refused-support)[aria-disabled="true"] {
+    background-color: rgb(58, 58, 58);
+  }
+}
 
 /* A flex row of exactly one growing child (#main-col), which fills the
    viewport. */
@@ -1138,8 +1196,8 @@ body::after {
   font: inherit;
   cursor: pointer;
 }
-#account:hover:not(:disabled) { color: var(--fg); border-color: var(--border); }
-#account:disabled { opacity: 0.5; cursor: default; }
+#account:hover:not([aria-disabled="true"]) { color: var(--fg); border-color: var(--border); }
+#account[aria-disabled="true"] { opacity: 0.5; cursor: default; }
 #account.logged-out { color: var(--err); }
 
 /* The current root's mode label ("(work)") riding beside the email on the
@@ -1168,7 +1226,7 @@ body::after {
   overflow: hidden;
 }
 #account-menu[hidden] { display: none; }
-#account-menu button {
+#account-menu ar-button {
   background: none;
   border: none;
   color: var(--fg);
@@ -1177,7 +1235,7 @@ body::after {
   padding: 0.4rem 0.7rem;
   cursor: pointer;
 }
-#account-menu button:hover { background: var(--border); }
+#account-menu ar-button:hover { background: var(--border); }
 
 /* The remediation notice sits immediately right of the alarm dot. */
 #remediation { color: var(--remediation); }
@@ -1322,13 +1380,13 @@ body::after {
   padding: 0.2rem 0.9rem;
 }
 
-.load-more:hover:not(:disabled) {
+.load-more:hover:not([aria-disabled="true"]) {
   color: var(--fg);
 }
 
 /* Disabled means a request is already out; the cursor says so rather than
    letting a click look ignored. */
-.load-more:disabled {
+.load-more[aria-disabled="true"] {
   cursor: default;
   opacity: 0.6;
 }
@@ -2610,7 +2668,7 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
 .permission.resolved { border-color: var(--border); color: var(--muted); }
 .perm-head { font-weight: 600; margin-bottom: 0.35rem; }
 .perm-actions { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
-.perm-actions button { cursor: pointer; }
+.perm-actions ar-button { cursor: pointer; }
 
 .result {
   font-size: calc(0.75rem * var(--feed-text-scale));
@@ -2799,7 +2857,7 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
 /* A held badge's full sentence, the daemon's words, in the expand-only details. */
 .queued-status-detail { margin-top: 0.3rem; font-size: calc(0.8rem * var(--feed-text-scale)); }
 .queued-actions { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
-.queued-actions button { cursor: pointer; font: inherit; }
+.queued-actions ar-button { cursor: pointer; font: inherit; }
 /* A release the holding arm is likely to refuse: offered, because the daemon
    is the one that answers, but drawn back so it does not read as the ordinary
    next step. Its title says which arm stands in the way. */
@@ -2880,7 +2938,7 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
    the merge owns the session. The TEXTAREA is deliberately left enabled — the
    draft stays editable, and an attempted send still reaches the gate, which
    answers with the explanation instead of nothing. */
-#send-btn:disabled {
+#send-btn[aria-disabled="true"] {
   cursor: not-allowed;
   opacity: 0.5;
 }
@@ -2989,7 +3047,7 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
    allow/deny prompt. Scoped to .pending so a resolved picker keeps the muted
    grey border of a settled prompt. */
 .permission.pending.question { border-color: var(--q-border); }
-.permission.question .perm-actions button[data-q-submit]:disabled {
+.permission.question .perm-actions ar-button[data-q-submit][aria-disabled="true"] {
   opacity: 0.45;
   cursor: not-allowed;
 }
@@ -2999,7 +3057,7 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
    settled grey once the support workspace has been asked for. The in-flight
    button dims exactly like the picker's, since both mean "already sent". */
 .permission.pending.unsupported { border-color: var(--err); }
-.permission.unsupported .perm-actions button:disabled {
+.permission.unsupported .perm-actions ar-button[aria-disabled="true"] {
   opacity: 0.45;
   cursor: not-allowed;
 }
@@ -3973,13 +4031,13 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
 }
 /* The button keeps its own width regardless of how long its sentence is, so
    the column of labels reads as one list. */
-.hibernation-option > button { flex: 0 0 auto; }
+.hibernation-option > ar-button { flex: 0 0 auto; }
 .hibernation-option-text { flex: 1 1 auto; }
 /* The direct-resume row carries a COST, so it is not muted into the same
    grey as the compacting rows above it — the options must not read as
    equally weighted when one of them is paid for on every later turn. */
 .hibernation-option.warn { color: var(--info-tokens); }
-.hibernation-actions button {
+.hibernation-actions ar-button {
   font: inherit;
   padding: 0.25rem 0.7rem;
   border-radius: 6px;
@@ -3991,18 +4049,18 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
 /* The compacting paths are the filled ones. The costlier resume-as-is stays
    outlined rather than being disabled or hidden: it is a legitimate deliberate
    choice, and the UI's job is to make it deliberate, not unavailable. */
-.hibernation-actions button.hibernation-compact {
+.hibernation-actions ar-button.hibernation-compact {
   background: var(--hibernated);
   color: var(--bg);
   font-weight: 700;
 }
-.hibernation-actions button.hibernation-direct { border-color: var(--info-tokens); }
+.hibernation-actions ar-button.hibernation-direct { border-color: var(--info-tokens); }
 /* The one DESTRUCTIVE option, outlined in the error color and never filled: it
    must be reachable and must never be the button a stray click lands on. The
    color is not "clearing is a fault" — it is the only option on the card whose
    result cannot be undone, and it sits one click from four that keep a
    summary. */
-.hibernation-actions button.hibernation-clear {
+.hibernation-actions ar-button.hibernation-clear {
   border-color: var(--err);
   color: var(--err);
 }
@@ -4072,7 +4130,7 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
   display: flex;
   gap: 0.5rem;
 }
-.merge-dequeue-actions button {
+.merge-dequeue-actions ar-button {
   font: inherit;
   padding: 0.25rem 0.7rem;
   border-radius: 6px;
@@ -4084,7 +4142,7 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
 /* THE DESTRUCTIVE BUTTON IS THE FILLED ONE, and it is filled in the alarm red
    rather than in an affirmative color. It is not the safe default and must not
    look like one; keeping the merge queued stays plainly outlined beside it. */
-.merge-dequeue-actions button.merge-dequeue-confirm {
+.merge-dequeue-actions ar-button.merge-dequeue-confirm {
   background: var(--err);
   border-color: var(--err);
   color: var(--bg);
@@ -4688,7 +4746,7 @@ bubble-body.bubble-body { display: block; }
   color: var(--muted);
   cursor: pointer;
 }
-.feed-load-more:disabled { cursor: progress; opacity: 0.6; }
+.feed-load-more[aria-disabled="true"] { cursor: progress; opacity: 0.6; }
 
 /* The breadcrumb header a nested page draws — ONLY when the trail is non-empty
    (R6): expansion is inline, so this is context, never navigation. */
@@ -4899,14 +4957,14 @@ bubble-body.bubble-body { display: block; }
   color: var(--muted);
 }
 /* The row's controls, and the refusal that lands under them. */
-.queued-actions button {
+.queued-actions ar-button {
   padding: 0.15rem 0.6rem;
   border-radius: 6px;
   border: 1px solid var(--border);
   background: var(--bg);
   color: var(--fg);
 }
-.queued-actions button:disabled { cursor: not-allowed; opacity: 0.5; }
+.queued-actions ar-button[aria-disabled="true"] { cursor: not-allowed; opacity: 0.5; }
 .queued-refusal {
   margin-top: 0.35rem;
   font-size: 0.75rem;
@@ -4950,7 +5008,7 @@ bubble-body.bubble-body { display: block; }
 .composer-send { cursor: pointer; }
 /* THE SEND CONTROL CARRIES THE GATE, never the textarea: a closed composer
    keeps the draft editable, exactly as the legacy merge gate left it. */
-.composer-send:disabled { cursor: not-allowed; opacity: 0.5; }
+.composer-send[aria-disabled="true"] { cursor: not-allowed; opacity: 0.5; }
 /* Why the composer is closed, in the footer's own words. Muted rather than
    alarming: merging and closing are deliberate, routine states. */
 .composer-notice {
@@ -5207,7 +5265,7 @@ bubble-body.bubble-body { display: block; }
   cursor: pointer;
 }
 #ws-sidebar .sb-menu-item:hover { background: var(--code-bg); }
-#ws-sidebar .sb-menu-item:disabled { color: var(--muted); cursor: default; }
+#ws-sidebar .sb-menu-item[aria-disabled="true"] { color: var(--muted); cursor: default; }
 #ws-sidebar .sb-menu-destructive .sb-menu-item { color: var(--err); }
 #ws-sidebar .sb-confirm { padding: 0.3rem 0.6rem 0.5rem; }
 #ws-sidebar .sb-confirm-note { color: var(--muted); font-size: 0.72rem; margin-bottom: 0.3rem; }
@@ -5911,7 +5969,7 @@ bubble-body.bubble-body { display: block; }
   color: var(--fg);
   cursor: pointer;
 }
-.shell-stop-button:disabled {
+.shell-stop-button[aria-disabled="true"] {
   color: var(--muted);
   cursor: default;
 }
@@ -5976,7 +6034,7 @@ bubble-body.bubble-body { display: block; }
   background: var(--bg);
   color: var(--fg);
 }
-.perm-actions button:disabled {
+.perm-actions ar-button[aria-disabled="true"] {
   opacity: 0.45;
   cursor: not-allowed;
 }
@@ -6320,8 +6378,8 @@ bubble-body.bubble-body { display: block; }
    in `--topbar-right-chip-gap` and `--topbar-right-chip-inset`, and a cell
    added to the group later is spaced the same with no rule of its own. The
    cells' own rules set only `padding-block`, so nothing competes with this. */
-.topbar-right button,
-.topbar-right > :not(:has(button)) {
+.topbar-right ar-button,
+.topbar-right > :not(:has(ar-button)) {
   padding-inline: var(--topbar-right-chip-inset);
 }
 /* THE MIDDLE TRACK: THE SPACE BETWEEN THE FLANKS, AND THE TEXT CENTERED IN IT.
@@ -6357,7 +6415,7 @@ bubble-body.bubble-body { display: block; }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.topbar-account:hover:not(:disabled) {
+.topbar-account:hover:not([aria-disabled="true"]) {
   color: var(--fg);
   border-color: var(--border);
 }

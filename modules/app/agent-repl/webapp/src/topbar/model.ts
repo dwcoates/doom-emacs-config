@@ -21,6 +21,7 @@
  * wave offers no way to set them, and a control that cannot be operated is
  * worse than a fact that can be read.
  */
+import { createControl, type Control } from "../control.js";
 import { getExtension } from "@bufbuild/protobuf";
 import {
   AgentEffortLevel,
@@ -33,7 +34,7 @@ import {
 } from "../../../proto/gen/ts/conversation/v1/api_pb";
 import { SetModelResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_model_pb";
 import type { TopbarModelSelector } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
-import { whileInFlight } from "../feed/cards/controls.js";
+import { release, whileInFlight } from "../feed/cards/controls.js";
 import { log } from "../log.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { callUnary } from "../rpc/unary.js";
@@ -203,8 +204,7 @@ export function drawTopbarModelSelector(
   const wrap = document.createElement("div");
   wrap.className = "topbar-model";
 
-  const button = document.createElement("button");
-  button.type = "button";
+  const button = createControl();
   button.className = "topbar-model-button";
   // PRESENCE, NOT AN EMPTY STRING: an unset selection is the placeholder, and
   // a served option whose display name happens to be empty is still a
@@ -251,7 +251,7 @@ export function drawModelOptions(
   u: TopbarModelSelector,
   tc: TopbarContext,
   wrap: HTMLElement,
-  button: HTMLButtonElement,
+  button: Control,
 ): HTMLElement {
   const list = document.createElement("div");
   list.className = "topbar-model-options list-rows";
@@ -275,11 +275,10 @@ export function drawModelOption(
   option: ModelOption,
   tc: TopbarContext,
   wrap: HTMLElement,
-  button: HTMLButtonElement,
+  button: Control,
 ): HTMLElement {
   const model = requireMessage(option.model, "ModelOption.model");
-  const row = document.createElement("button");
-  row.type = "button";
+  const row = createControl();
   row.className = "topbar-model-option";
   row.setAttribute("data-model-option", model.name);
 
@@ -364,8 +363,8 @@ export async function pickModel(
   option: ModelOption,
   tc: TopbarContext,
   wrap: HTMLElement,
-  button: HTMLButtonElement,
-  row: HTMLButtonElement,
+  button: Control,
+  row: Control,
 ): Promise<void> {
   const model = requireMessage(option.model, "ModelOption.model");
   log.info(`the reader picked the model ${model.name}`, {
@@ -414,7 +413,7 @@ export async function pickModel(
         // The cold refusal is the only arm whose remediation lives on ANOTHER
         // surface, so it is the only one that moves the page.
         if (arm === "cold") routeToColdGate(wrap.ownerDocument);
-        button.disabled = false;
+        release([row, button]);
         return;
       }
       default: {
@@ -423,7 +422,7 @@ export async function pickModel(
       }
     }
   } catch (err) {
-    button.disabled = false;
+    release([row, button]);
     if (!drawUnreadableRefusal(tc.ctx, wrap, "topbar.model-malformed-refusal", err)) throw err;
   }
 }

@@ -31,6 +31,7 @@
  * is missing. It does not send a partial batch and it does not silently drop the
  * question — either would answer for the user.
  */
+import { createControl, type Control } from "../../control.js";
 import { log } from "../../log.js";
 import {
   AnswerQuestionResponseSchema,
@@ -115,7 +116,7 @@ export function drawFeedQuestion(u: FeedQuestion, rc: RowContext): HTMLElement {
 /** One tab's live handle: its selector button and the panel it shows. */
 interface QuestionTab {
   /** The tab strip button that reveals this question. */
-  tab: HTMLButtonElement;
+  tab: Control;
   /** The `.q-block` panel this tab reveals; hidden while another is active. */
   block: HTMLElement;
   /** Reports whether this question currently carries an answer. */
@@ -204,8 +205,7 @@ function drawOpenBatch(u: FeedQuestion, rc: RowContext): HTMLElement {
     });
     collectors.push(block.collect);
 
-    const tab = document.createElement("button");
-    tab.type = "button";
+    const tab = createControl();
     tab.className = "q-tab";
     tab.setAttribute("role", "tab");
     tab.setAttribute("data-question-tab", String(index));
@@ -354,8 +354,7 @@ export function drawFeedQuestionItem(
   // gets no button; a multi-select has no natural "the pick is finished"
   // moment, so the reader presses this to commit and advance.
   if (!single) {
-    const confirm = document.createElement("button");
-    confirm.type = "button";
+    const confirm = createControl();
     confirm.className = "q-confirm";
     confirm.setAttribute("data-question-confirm", "");
     confirm.textContent = CONFIRM_TEXT;
@@ -545,8 +544,7 @@ function drawSubmit(
   const actions = document.createElement("div");
   actions.className = "perm-actions";
 
-  const submit = document.createElement("button");
-  submit.type = "button";
+  const submit = createControl();
   submit.className = "q-submit";
   submit.setAttribute("data-question-submit", "");
   submit.textContent = SUBMIT_TEXT;
@@ -562,7 +560,7 @@ function drawSubmit(
 async function send(
   rc: RowContext,
   actions: HTMLElement,
-  submit: HTMLButtonElement,
+  submit: Control,
   collectors: readonly QuestionCollector[],
   reveal?: (index: number) => void,
 ): Promise<void> {
@@ -626,7 +624,7 @@ const OWN_CAUSES = {
 function drawAnswerOutcome(
   response: AnswerQuestionResponse,
   actions: HTMLElement,
-  submit: HTMLButtonElement,
+  submit: Control,
 ): void {
   const result = requireCase(response.result, "AnswerQuestionResponse.result");
   switch (result.case) {

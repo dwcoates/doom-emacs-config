@@ -18,6 +18,7 @@
  * duration of one awaited call. A module-level map keyed by row id would
  * outlive the row it described.
  */
+import { createControl, type Control } from "../../control.js";
 import { log } from "../../log.js";
 import { drawBubble } from "../../bubble/draw.js";
 import type { RowContext } from "../renderers.js";
@@ -57,8 +58,7 @@ export function foldSection(spec: {
   const wrap = document.createElement("div");
   wrap.className = "card-fold";
 
-  const toggle = document.createElement("button");
-  toggle.type = "button";
+  const toggle = createControl();
   toggle.className = "card-fold-toggle";
   toggle.setAttribute("data-fold", spec.name);
 
@@ -106,7 +106,7 @@ export function initialFold(name: string, wireFolded: boolean, rc: RowContext): 
  * meantime offers a click that can no longer be legitimate.
  */
 export async function whileInFlight<T>(
-  buttons: readonly HTMLButtonElement[],
+  buttons: readonly Control[],
   fn: () => Promise<T>,
 ): Promise<{ value: T } | { failed: unknown }> {
   for (const button of buttons) button.disabled = true;
@@ -119,7 +119,7 @@ export async function whileInFlight<T>(
 }
 
 /** Give the controls back after an answer the card drew in place. */
-export function release(buttons: readonly HTMLButtonElement[]): void {
+export function release(buttons: readonly Control[]): void {
   for (const button of buttons) button.disabled = false;
 }
 

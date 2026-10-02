@@ -28,6 +28,7 @@
  * re-push redraws the head and never touches the fold, because a bubble
  * snapping shut under a reader who opened it is the whole failure R2 names.
  */
+import { CONTROL_SELECTOR } from "../control.js";
 import { log } from "../log.js";
 import { announceItemExpanded } from "../expand.js";
 import { applyFeedTextScale } from "./feed-text-scale.js";
@@ -249,7 +250,7 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
   function isInteractiveTarget(target: EventTarget | null): boolean {
     return (
       target instanceof Element &&
-      target.closest("button, a[href], input, select, textarea, [data-interrupt]") !== null
+      target.closest(`${CONTROL_SELECTOR}, a[href], input, select, textarea, [data-interrupt]`) !== null
     );
   }
 

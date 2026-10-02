@@ -31,6 +31,7 @@
  * to. `findRowElement` still returns the member's element wherever it sits, so
  * feedids, selection and the reveal walk keep working.
  */
+import { createControl, type Control } from "../control.js";
 import { log } from "../log.js";
 import { placeChildren } from "../dom.js";
 import type { FeedRow } from "../../../proto/gen/ts/frontend/v1/feed_pb";
@@ -270,12 +271,11 @@ function createToolGroup(kind: string): ToolGroup {
   }
 
   /** One tab: the kind's icon and the member's 1-based index. */
-  function tab(member: GroupMember, index: number, activeId: string): HTMLButtonElement {
-    const btn = document.createElement("button");
-    // A BUTTON so the feed-wide click-to-expand handler treats it as a control
+  function tab(member: GroupMember, index: number, activeId: string): Control {
+    const btn = createControl();
+    // A CONTROL so the feed-wide click-to-expand handler treats it as one
     // (CLICK_THROUGH_SELECTOR in expand.ts) and a tab pick never toggles a
     // capped section.
-    btn.type = "button";
     btn.className = "feed-group-tab";
     btn.setAttribute(GROUP_TAB_MEMBER_ATTRIBUTE, member.id);
     btn.setAttribute("role", "tab");

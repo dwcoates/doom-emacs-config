@@ -31,7 +31,7 @@ function tab(t: Tab): string {
   const glyph = t.live === true
     ? `<span class="merge-tab-glyph is-live" aria-hidden="true">●</span>`
     : `<span class="merge-tab-glyph is-succeeded" aria-hidden="true">✓</span>`;
-  return `<button type="button" class="merge-tab" aria-selected="false"><span class="merge-tab-label">${t.label}</span>${duration}${glyph}</button>`;
+  return `<ar-button role="button" class="merge-tab" aria-selected="false"><span class="merge-tab-label">${t.label}</span>${duration}${glyph}</ar-button>`;
 }
 
 /** A box's edges. */

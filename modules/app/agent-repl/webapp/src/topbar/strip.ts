@@ -24,6 +24,7 @@
  * THE TITLE IS PRE-COMPOSED. The daemon decides whether a branch is worth
  * showing; this end never concatenates identity fragments.
  */
+import { createControl } from "../control.js";
 import type {
   TopbarAccount,
   TopbarConnectivity,
@@ -54,8 +55,7 @@ export function drawTopbarAccount(u: TopbarAccount): HTMLElement {
     context: { arm: state.case },
   });
 
-  const button = document.createElement("button");
-  button.type = "button";
+  const button = createControl();
   button.className = "topbar-account";
   button.setAttribute("data-arm", state.case);
   button.classList.add(`arm-${state.case}`);

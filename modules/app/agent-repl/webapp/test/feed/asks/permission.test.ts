@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { type Control } from "../../../src/control.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create, type MessageInitShape } from "@bufbuild/protobuf";
 import {
@@ -160,7 +161,7 @@ describe("answering", () => {
     it(`sends the ${c.arm} arm from the ${c.hook} button`, async () => {
       const h = askHarness();
       const el = drawFeedPermission(permission({ case: "open", value: {} }), h.rc);
-      el.querySelector<HTMLButtonElement>(`[data-permission="${c.hook}"]`)?.click();
+      el.querySelector<Control>(`[data-permission="${c.hook}"]`)?.click();
       await settle();
       expect(h.calls.permission[0]?.answer.case).toBe(c.arm);
     });
@@ -172,7 +173,7 @@ describe("answering", () => {
       permission({ case: "open", value: {} }, { standing: true }),
       h.rc,
     );
-    el.querySelector<HTMLButtonElement>('[data-permission="allowStanding"]')?.click();
+    el.querySelector<Control>('[data-permission="allowStanding"]')?.click();
     await settle();
     expect(h.calls.permission[0]?.answer.case).toBe("allowStanding");
   });
@@ -180,7 +181,7 @@ describe("answering", () => {
   it("echoes this card's own row", async () => {
     const h = askHarness();
     const el = drawFeedPermission(permission({ case: "open", value: {} }), h.rc);
-    el.querySelector<HTMLButtonElement>('[data-permission="allowOnce"]')?.click();
+    el.querySelector<Control>('[data-permission="allowOnce"]')?.click();
     await settle();
     expect(h.calls.permission[0]?.permission?.value).toBe(ROW_ID);
   });
@@ -188,7 +189,7 @@ describe("answering", () => {
   it("echoes the workspace", async () => {
     const h = askHarness();
     const el = drawFeedPermission(permission({ case: "open", value: {} }), h.rc);
-    el.querySelector<HTMLButtonElement>('[data-permission="allowOnce"]')?.click();
+    el.querySelector<Control>('[data-permission="allowOnce"]')?.click();
     await settle();
     expect(h.calls.permission[0]?.workspace).toEqual(WORKSPACE);
   });
@@ -198,7 +199,7 @@ describe("answering", () => {
     const el = drawFeedPermission(permission({ case: "open", value: {} }), h.rc);
     const reason = el.querySelector<HTMLInputElement>("[data-permission-reason]");
     if (reason !== null) reason.value = "not that path";
-    el.querySelector<HTMLButtonElement>('[data-permission="deny"]')?.click();
+    el.querySelector<Control>('[data-permission="deny"]')?.click();
     await settle();
     const answer = h.calls.permission[0]?.answer;
     expect(answer?.case === "deny" ? answer.value.reason?.text : null).toBe("not that path");
@@ -207,7 +208,7 @@ describe("answering", () => {
   it("sends no reason when the field was left blank", async () => {
     const h = askHarness();
     const el = drawFeedPermission(permission({ case: "open", value: {} }), h.rc);
-    el.querySelector<HTMLButtonElement>('[data-permission="deny"]')?.click();
+    el.querySelector<Control>('[data-permission="deny"]')?.click();
     await settle();
     const answer = h.calls.permission[0]?.answer;
     expect(answer?.case === "deny" ? answer.value.reason : "set").toBeUndefined();
@@ -215,22 +216,22 @@ describe("answering", () => {
 
   it("latches every button inert while the answer is in flight", () => {
     const el = drawFeedPermission(permission({ case: "open", value: {} }), askHarness().rc);
-    el.querySelector<HTMLButtonElement>('[data-permission="allowOnce"]')?.click();
-    expect([...el.querySelectorAll("button")].every((b) => b.disabled)).toBe(true);
+    el.querySelector<Control>('[data-permission="allowOnce"]')?.click();
+    expect([...el.querySelectorAll<Control>("ar-button")].every((b) => b.disabled)).toBe(true);
   });
 
   it("draws nothing on success — the card's new state is the row's re-push", async () => {
     const el = drawFeedPermission(permission({ case: "open", value: {} }), askHarness().rc);
-    el.querySelector<HTMLButtonElement>('[data-permission="allowOnce"]')?.click();
+    el.querySelector<Control>('[data-permission="allowOnce"]')?.click();
     await settle();
     expect(el.querySelector(".refusal")).toBeNull();
   });
 
   it("keeps the buttons latched after an answer that landed", async () => {
     const el = drawFeedPermission(permission({ case: "open", value: {} }), askHarness().rc);
-    el.querySelector<HTMLButtonElement>('[data-permission="allowOnce"]')?.click();
+    el.querySelector<Control>('[data-permission="allowOnce"]')?.click();
     await settle();
-    expect(el.querySelector<HTMLButtonElement>('[data-permission="allowOnce"]')?.disabled).toBe(
+    expect(el.querySelector<Control>('[data-permission="allowOnce"]')?.disabled).toBe(
       true,
     );
   });
@@ -238,7 +239,7 @@ describe("answering", () => {
   it("draws a transport failure at the buttons", async () => {
     const h = askHarness({ fail: true });
     const el = drawFeedPermission(permission({ case: "open", value: {} }), h.rc);
-    el.querySelector<HTMLButtonElement>('[data-permission="allowOnce"]')?.click();
+    el.querySelector<Control>('[data-permission="allowOnce"]')?.click();
     await settle();
     expect(el.querySelector(".perm-actions .refusal")?.getAttribute("data-arm")).toBe("transport");
   });
@@ -283,7 +284,7 @@ describe("a refused answer", () => {
     it(`draws the ${c.arm} cause at the buttons`, async () => {
       const h = askHarness({ permission: refused(c.cause) });
       const el = drawFeedPermission(permission({ case: "open", value: {} }), h.rc);
-      el.querySelector<HTMLButtonElement>('[data-permission="allowOnce"]')?.click();
+      el.querySelector<Control>('[data-permission="allowOnce"]')?.click();
       await settle();
       expect(el.querySelector(".perm-actions .refusal")?.getAttribute("data-arm")).toBe(c.arm);
     });
@@ -291,7 +292,7 @@ describe("a refused answer", () => {
     it(`says what ${c.arm} means`, async () => {
       const h = askHarness({ permission: refused(c.cause) });
       const el = drawFeedPermission(permission({ case: "open", value: {} }), h.rc);
-      el.querySelector<HTMLButtonElement>('[data-permission="allowOnce"]')?.click();
+      el.querySelector<Control>('[data-permission="allowOnce"]')?.click();
       await settle();
       expect(el.querySelector(".perm-actions .refusal")?.textContent).toBe(c.text);
     });
@@ -306,7 +307,7 @@ describe("a refused answer", () => {
   it("gives the buttons back so the reader can act on the cause", async () => {
     const h = askHarness({ permission: refused({ case: "noSession", value: {} } as never) });
     const el = drawFeedPermission(permission({ case: "open", value: {} }), h.rc);
-    const button = el.querySelector<HTMLButtonElement>('[data-permission="allowOnce"]');
+    const button = el.querySelector<Control>('[data-permission="allowOnce"]');
     button?.click();
     await settle();
     expect(button?.disabled).toBe(false);
@@ -319,7 +320,7 @@ describe("a refused answer", () => {
       }),
     });
     const el = drawFeedPermission(permission({ case: "open", value: {} }), h.rc);
-    el.querySelector<HTMLButtonElement>('[data-permission="allowOnce"]')?.click();
+    el.querySelector<Control>('[data-permission="allowOnce"]')?.click();
     await settle();
     // An error with no cause set is a frame this build cannot read, not a
     // refusal with no words: it is reported through the failure sink, and no
@@ -567,7 +568,7 @@ describe("an answer this build cannot read", () => {
     const h = unalteredPermission(answer);
     const el = drawFeedPermission(permission({ case: "open", value: {} }), h.rc);
     // Act
-    el.querySelector<HTMLButtonElement>('[data-permission="allowOnce"]')?.click();
+    el.querySelector<Control>('[data-permission="allowOnce"]')?.click();
     await settle();
     // Assert
     const kind = h.filed[0]?.kind;

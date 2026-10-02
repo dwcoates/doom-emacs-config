@@ -28,6 +28,7 @@
  * turn target, so there is NO confirm step here — every error arm is an
  * ordinary call-site refusal beside the button.
  */
+import { createControl, type Control } from "../../control.js";
 import { formatTickedElapsed } from "../../duration.js";
 import { liveElapsedClock, settledElapsedClock } from "../../elapsed-clock.js";
 import { log } from "../../log.js";
@@ -314,8 +315,7 @@ function drawStopControl(rc: RowContext): HTMLElement {
   const wrap = document.createElement("span");
   wrap.className = "shell-stop";
 
-  const button = document.createElement("button");
-  button.type = "button";
+  const button = createControl();
   button.className = "shell-stop-button";
   button.setAttribute("data-interrupt", requireMessage(rc.row.id, "FeedRow.id").value);
   button.textContent = "stop";
@@ -331,7 +331,7 @@ function drawStopControl(rc: RowContext): HTMLElement {
 async function stop(
   rc: RowContext,
   wrap: HTMLElement,
-  button: HTMLButtonElement,
+  button: Control,
 ): Promise<void> {
   const id = requireMessage(rc.row.id, "FeedRow.id");
   clearOutcome(wrap);
@@ -384,7 +384,7 @@ function drawAnswer(
   response: InterruptResponse,
   rc: RowContext,
   wrap: HTMLElement,
-  button: HTMLButtonElement,
+  button: Control,
 ): void {
   const result = requireCase(response.result, "InterruptResponse.result");
   switch (result.case) {

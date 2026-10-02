@@ -29,6 +29,7 @@
  * its own bubble draws — imported, never respelled — so a waiting user watches
  * real progress instead of a spinner.
  */
+import { createControl } from "../../control.js";
 import { columnHeader, COLUMNS_ROW_CLASS } from "../../columns.js";
 import { liveElapsedClock } from "../../elapsed-clock.js";
 import { log } from "../../log.js";
@@ -105,8 +106,7 @@ export function drawFeedMergeQueueEntry(
   el.setAttribute("data-queue-place", place);
   el.setAttribute("data-queue-status", status.case);
 
-  const line = document.createElement("button");
-  line.type = "button";
+  const line = createControl();
   line.className = `merge-queue-line ${COLUMNS_ROW_CLASS}`;
   line.setAttribute("data-select", "");
   el.append(line);

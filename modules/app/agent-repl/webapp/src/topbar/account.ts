@@ -18,6 +18,7 @@
  * choice is; a cell that silently did nothing because there was nothing else
  * to pick is the defect this replaces.
  */
+import { createControl, type Control } from "../control.js";
 import { SelectAccountResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_account_pb";
 import type {
   TopbarAccount,
@@ -102,8 +103,7 @@ export function drawAccountOption(
   tc: TopbarContext,
   button: HTMLElement,
 ): HTMLElement {
-  const row = document.createElement("button");
-  row.type = "button";
+  const row = createControl();
   row.className = "topbar-account-option";
   row.setAttribute(ACCOUNT_OPTION_ATTRIBUTE, option.configDir);
   // The row that IS the current account, so the reveal shows where the reader
@@ -153,7 +153,7 @@ export async function pickAccount(
   option: TopbarAccountOption,
   tc: TopbarContext,
   button: HTMLElement,
-  row: HTMLButtonElement,
+  row: Control,
 ): Promise<void> {
   log.info(`the reader chose the account root ${option.configDir}`, {
     operation: "topbar.account-picked",

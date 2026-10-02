@@ -10,6 +10,7 @@
  * mapping from a drawn family to its scenario was established empirically
  * against the real chain and is recorded in `e2e/WEBAPP-LAYER-SPEC.md` §F2.
  */
+import { type Control } from "../../src/control.js";
 import { expect } from "vitest";
 
 import type { MountedApp } from "../integration/harness";
@@ -248,8 +249,8 @@ export async function press(
   host = '[data-component="composer"]',
 ): Promise<boolean> {
   const selector = `${host} [data-composer-send]`;
-  const button = (): HTMLButtonElement | null =>
-    app.$(selector) as HTMLButtonElement | null;
+  const button = (): Control | null =>
+    app.$(selector) as Control | null;
   if (button() === null) throw new Error(`no composer send button at ${selector}`);
 
   await awaitSettled(

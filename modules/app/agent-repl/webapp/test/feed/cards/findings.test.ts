@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { type Control } from "../../../src/control.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { createRouterTransport } from "@connectrpc/connect";
@@ -266,20 +267,20 @@ describe("a finding's parts", () => {
 
   it("opens the scenario on the reader's click", () => {
     const el = drawFeedFindings(findings([finding()]), harness().rc);
-    el.querySelector<HTMLButtonElement>('[data-fold="finding-scenario-0"]')?.click();
+    el.querySelector<Control>('[data-fold="finding-scenario-0"]')?.click();
     expect(el.querySelector<HTMLElement>(".finding-scenario")?.hidden).toBe(false);
   });
 
   it("folds each finding's scenario independently", () => {
     const el = drawFeedFindings(findings([finding(), finding()]), harness().rc);
-    el.querySelector<HTMLButtonElement>('[data-fold="finding-scenario-0"]')?.click();
+    el.querySelector<Control>('[data-fold="finding-scenario-0"]')?.click();
     const bodies = [...el.querySelectorAll<HTMLElement>(".finding-scenario")];
     expect(bodies.map((b) => b.hidden)).toEqual([false, true]);
   });
 
   it("keeps a scenario the reader opened open across a re-push", () => {
     const first = drawFeedFindings(findings([finding()]), harness().rc);
-    first.querySelector<HTMLButtonElement>('[data-fold="finding-scenario-0"]')?.click();
+    first.querySelector<Control>('[data-fold="finding-scenario-0"]')?.click();
     const second = drawFeedFindings(findings([finding()]), harness(undefined, first).rc);
     expect(second.querySelector<HTMLElement>(".finding-scenario")?.hidden).toBe(false);
   });

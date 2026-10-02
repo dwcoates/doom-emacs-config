@@ -120,7 +120,7 @@ function stripView(session: boolean) {
  * inside padding and border, are where the cell's text or glyph is drawn.
  */
 function measureCell(cell: Element): CellMeasure {
-  const box = cell.querySelector("button") ?? cell;
+  const box = cell.querySelector("ar-button") ?? cell;
   const r = box.getBoundingClientRect();
   const st = getComputedStyle(box);
   const px = (v: string): number => Number.parseFloat(v);
