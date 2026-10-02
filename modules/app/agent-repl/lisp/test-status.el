@@ -185,26 +185,37 @@ They can no more act on the workspace than during the merge itself."
   (should (equal agent-repl--color-merging-purple
                  (plist-get (agent-repl--tab-spec :merge-queued nil) :bg))))
 
-(ert-deftest agent-repl-test-tab-spec-vendor-blocked-is-blue ()
-  "A vendor-blocked tab paints BLUE: a vendor or account block makes the
-workspace unusable until it is resolved (owner ruling, 2026-09-28)."
+(ert-deftest agent-repl-test-tab-spec-vendor-blocked-is-turquoise ()
+  "A vendor-blocked tab paints TURQUOISE: a vendor fault leaves the
+workspace usable (owner ruling, 2026-10-02)."
   ;; Act / Assert
-  (should (equal agent-repl--color-init-blue
+  (should (equal agent-repl--color-usable-fault-turquoise
                  (plist-get (agent-repl--tab-spec :vendor-blocked nil) :bg))))
 
-(ert-deftest agent-repl-test-tab-spec-api-retrying-is-blue ()
-  "An api-retrying tab paints BLUE: the vendor is retrying the turn's call,
-so the workspace cannot advance until it is answered (owner ruling,
-2026-10-01)."
+(ert-deftest agent-repl-test-tab-spec-vendor-fault-is-turquoise ()
+  "A vendor that will not start paints TURQUOISE: a vendor fault."
+  ;; Act / Assert
+  (should (equal agent-repl--color-usable-fault-turquoise
+                 (plist-get (agent-repl--tab-spec :vendor-fault nil) :bg))))
+
+(ert-deftest agent-repl-test-tab-spec-network-fault-is-blue ()
+  "An unreachable network paints BLUE: a network fault is unusable."
   ;; Act / Assert
   (should (equal agent-repl--color-init-blue
+                 (plist-get (agent-repl--tab-spec :network-fault nil) :bg))))
+
+(ert-deftest agent-repl-test-tab-spec-api-retrying-is-turquoise ()
+  "An api-retrying tab paints TURQUOISE: a call the vendor retries is a
+vendor fault (owner ruling, 2026-10-02)."
+  ;; Act / Assert
+  (should (equal agent-repl--color-usable-fault-turquoise
                  (plist-get (agent-repl--tab-spec :api-retrying nil) :bg))))
 
-(ert-deftest agent-repl-test-status-color-table-api-retrying-is-blue ()
-  "An api-retrying row takes BLUE in the shared assignment, the footer's
-`blocked' color, so every surface is blue together."
+(ert-deftest agent-repl-test-status-color-table-api-retrying-is-turquoise ()
+  "An api-retrying row takes TURQUOISE in the shared assignment, the
+footer's `vendor_fault' color, so every surface agrees."
   ;; Act / Assert
-  (should (equal "blue" (alist-get :api-retrying agent-repl-status-color-table))))
+  (should (equal "turquoise" (alist-get :api-retrying agent-repl-status-color-table))))
 
 (ert-deftest agent-repl-test-status-color-table-turn-failed-is-turquoise ()
   "A failed turn end takes TURQUOISE in the shared assignment (owner
@@ -261,14 +272,14 @@ renders with, and a merge must stay visible through it."
     (should (equal 'unspecified (plist-get spec :bg)))
     (should (equal agent-repl--color-merging-purple (plist-get spec :bracket-bg)))))
 
-(ert-deftest agent-repl-test-tab-spec-bracket-only-vendor-blocked-is-blue ()
-  "A vendor-blocked tab with panels dismissed keeps BLUE on the bracket.
+(ert-deftest agent-repl-test-tab-spec-bracket-only-vendor-blocked-is-turquoise ()
+  "A vendor-blocked tab with panels dismissed keeps TURQUOISE on the bracket.
 The bracket is the only colored region left there, so it has to carry
 the color this surface actually assigns the state."
   ;; Arrange
   (let ((spec (agent-repl--tab-spec-bracket-only :vendor-blocked nil)))
     ;; Act / Assert
-    (should (equal agent-repl--color-init-blue (plist-get spec :bracket-bg)))))
+    (should (equal agent-repl--color-usable-fault-turquoise (plist-get spec :bracket-bg)))))
 
 (ert-deftest agent-repl-test-tab-spec-bracket-only-ready-stays-green ()
   "A `:ready\=' tab with panels dismissed keeps green on the bracket."
@@ -2474,9 +2485,9 @@ Mocks the unguarded `-now' entrypoint; matches what production code calls."
 ;;;; ---- Tests: :vendor-blocked palette resolution ----
 
 (ert-deftest agent-repl-test-tab-spec-vendor-blocked-unselected ()
-  "tab-spec for :vendor-blocked unselected returns the blue plist."
+  "tab-spec for :vendor-blocked unselected returns the turquoise plist."
   (let ((spec (agent-repl--tab-spec :vendor-blocked nil)))
-    (should (equal (plist-get spec :bg) agent-repl--color-init-blue))
+    (should (equal (plist-get spec :bg) agent-repl--color-usable-fault-turquoise))
     (should (equal (plist-get spec :fg) agent-repl--color-light))))
 
 (ert-deftest agent-repl-test-tab-spec-vendor-blocked-selected ()
@@ -3553,19 +3564,17 @@ test can assert the re-assertion left an already-correct frame alone."
                             agent-repl-status-tab-bar-color-table)))
 
 (ert-deftest agent-repl-test-status-every-arm-has-a-tab-colour ()
-  "All 24 arms answer with a colour: an unpainted dot is not a state."
+  "Every arm answers with a colour: an unpainted dot is not a state."
   ;; Act / Assert
   (dolist (arm agent-repl-wire-roster-row-status-keywords)
     (should (stringp (agent-repl-status-tab-color arm)))))
 
 (ert-deftest agent-repl-test-status-the-blue-band-is-the-unusable-workspace ()
-  "Blue is every way the workspace is UNUSABLE right now (owner rulings,
-2026-09-28 and 2026-10-01): a route that is not up, a vendor or account
-block, and a turn whose call the vendor is retrying."
+  "Blue is every way the workspace is UNUSABLE right now (owner ruling,
+2026-10-02): an agent-repl fault and a network fault."
   ;; Act / Assert
   (should (equal (sort (agent-repl-test-status--arms-taking "blue") #'string<)
-                 (sort (list :init :severed :dead :start-failed :vendor-blocked
-                             :api-retrying)
+                 (sort (list :init :severed :dead :start-failed :network-fault)
                        #'string<))))
 
 (ert-deftest agent-repl-test-status-the-turquoise-band-is-the-usable-fault ()
@@ -3573,7 +3582,9 @@ block, and a turn whose call the vendor is retrying."
 usable (owner ruling, 2026-09-28)."
   ;; Act / Assert
   (should (equal (sort (agent-repl-test-status--arms-taking "turquoise") #'string<)
-                 (sort (list :degraded :turn-failed :merge-failed) #'string<))))
+                 (sort (list :degraded :turn-failed :merge-failed
+                             :vendor-blocked :vendor-fault :api-retrying)
+                       #'string<))))
 
 (ert-deftest agent-repl-test-status-purple-is-the-queued-or-running-merge ()
   "Purple is spent on the two merge arms with no verdict yet, and on
