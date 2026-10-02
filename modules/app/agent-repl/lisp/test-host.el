@@ -146,12 +146,39 @@ ANSWER is `(:response PLIST)' or `(:failure DETAIL)' — the two facts a
 unary rpc can produce, which the contract never collapses into one."
   (pcase (car answer)
     (:response (when on-response (funcall on-response (cadr answer))))
-    (:failure (when on-failure (funcall on-failure (cadr answer))))))
+    (:failure (when on-failure (funcall on-failure (cadr answer))))
+    ;; HELD: the call stays unanswered until the test answers it, in the
+    ;; order it chooses (`agent-repl-test-host--answer-held').
+    (:held (setq agent-repl-test-host--held
+                 (append agent-repl-test-host--held
+                         (list (cons on-response on-failure)))))))
+
+(defvar agent-repl-test-host--held nil
+  "Unanswered calls under a `(:held)' answer, oldest first, as (ON-RESPONSE . ON-FAILURE).")
+
+(defvar agent-repl-test-host--reapplied 0
+  "How many times host.el asked roster.el to re-apply `current'.")
+
+(defun agent-repl-test-host--answer-held (response)
+  "Answer the OLDEST held call with RESPONSE (a response plist)."
+  (let ((call (pop agent-repl-test-host--held)))
+    (funcall (car call) response)))
+
+(defun agent-repl-test-host--selected-ids ()
+  "The ref ids SelectWorkspace was sent for, oldest first."
+  (mapcar (lambda (call) (plist-get (plist-get (nth 2 call) :workspace) :id))
+          (reverse (cl-remove-if-not (lambda (call) (equal (car call) "SelectWorkspace"))
+                                     agent-repl-test-host--calls))))
 
 (defmacro agent-repl-test-host--with-harness (&rest body)
   "Run BODY with host.el's whole world faked and its state reset."
   (declare (indent 0))
   `(let ((agent-repl-host--by-name (make-hash-table :test 'equal))
+         (agent-repl-host--select-in-flight nil)
+         (agent-repl-host--select-queued nil)
+         (agent-repl-roster-following nil)
+         (agent-repl-test-host--held nil)
+         (agent-repl-test-host--reapplied 0)
          (agent-repl-host-last-selected-id nil)
          (agent-repl-host-reselect-pending nil)
          (agent-repl--eager-open-in-progress nil)
@@ -239,6 +266,8 @@ unary rpc can produce, which the contract never collapses into one."
                 (lambda () agent-repl-test-host--current-ws))
                ((symbol-function 'agent-repl--notification-activate)
                 (lambda (ws) (push (cons :activate ws) agent-repl-test-host--effects)))
+               ((symbol-function 'agent-repl-roster-apply-current)
+                (lambda () (cl-incf agent-repl-test-host--reapplied)))
                ((symbol-function 'agent-repl-frontend-reload-webview)
                 (lambda (ws)
                   ;; The conn is captured AS THE RELOAD SEES IT: frontend.el
@@ -387,7 +416,7 @@ off the one they were standing in."
     (should (null agent-repl-test-host--calls))))
 
 (ert-deftest agent-repl-test-host-an-ordinary-activation-still-selects ()
-  "An ordinary tab switch IS the SelectWorkspace, and stays one."
+  "A switch Emacs made on its own is still told to the daemon."
   (agent-repl-test-host--with-harness
     ;; Arrange
     (agent-repl-test-host--subscribe "ws-1")
@@ -527,6 +556,263 @@ looked at."
     (agent-repl-host-select "ws-1")
     ;; Assert
     (should (null agent-repl-host-last-selected-id))))
+
+;;;; ---- Select: one at a time, the last press wins ----
+
+(defconst agent-repl-test-host--success '(:arm :success :value nil)
+  "A SelectWorkspace success answer.")
+
+(defun agent-repl-test-host--subscribe-three ()
+  "Subscribe ws-1, ws-2 and ws-3, each with its own ref id."
+  (dolist (n '(1 2 3))
+    (agent-repl-test-host--subscribe
+     (format "ws-%d" n) nil
+     (agent-repl-test-host--ref (format "ws-id-%d" n) (format "/tmp/ws-%d" n))))
+  (setq agent-repl-test-host--calls nil
+        agent-repl-test-host--select-answer '(:held)))
+
+(ert-deftest agent-repl-test-host-rapid-requests-send-only-the-first-at-once ()
+  "Three presses before any answer put ONE SelectWorkspace on the wire."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe-three)
+    ;; Act
+    (agent-repl-host-request-switch "ws-1" 'cycle)
+    (agent-repl-host-request-switch "ws-2" 'cycle)
+    (agent-repl-host-request-switch "ws-3" 'cycle)
+    ;; Assert
+    (should (equal (agent-repl-test-host--selected-ids) '("ws-id-1")))))
+
+(ert-deftest agent-repl-test-host-rapid-requests-end-on-the-last-press ()
+  "Rapid presses reach the daemon in order and the LAST press is the last
+selection sent; a press already passed over is never sent at all."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe-three)
+    (agent-repl-host-request-switch "ws-1" 'cycle)
+    (agent-repl-host-request-switch "ws-2" 'cycle)
+    (agent-repl-host-request-switch "ws-3" 'cycle)
+    ;; Act
+    (agent-repl-test-host--answer-held agent-repl-test-host--success)
+    (agent-repl-test-host--answer-held agent-repl-test-host--success)
+    ;; Assert
+    (should (equal (agent-repl-test-host--selected-ids) '("ws-id-1" "ws-id-3")))))
+
+(ert-deftest agent-repl-test-host-a-replaced-queued-selection-settles-superseded ()
+  "The caller of a selection replaced before it was sent is told so."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let ((outcome nil))
+      (agent-repl-test-host--subscribe-three)
+      (agent-repl-host-select "ws-1")
+      (agent-repl-host-select "ws-2" (lambda (o) (setq outcome o)))
+      ;; Act
+      (agent-repl-host-select "ws-3")
+      ;; Assert
+      (should (eq outcome :superseded)))))
+
+(ert-deftest agent-repl-test-host-pending-selection-is-the-newest-queued ()
+  "With one in flight and one queued, the queued one is the newest request."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe-three)
+    ;; Act
+    (agent-repl-host-select "ws-1")
+    (agent-repl-host-select "ws-2")
+    ;; Assert
+    (should (equal (agent-repl-host-pending-selection) "ws-2"))))
+
+(ert-deftest agent-repl-test-host-pending-selection-is-the-one-in-flight ()
+  "With nothing queued, the selection in flight is the pending one."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe-three)
+    ;; Act
+    (agent-repl-host-select "ws-1")
+    ;; Assert
+    (should (equal (agent-repl-host-pending-selection) "ws-1"))))
+
+(ert-deftest agent-repl-test-host-pending-selection-clears-on-the-answer ()
+  "Once every selection is answered nothing is pending."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe-three)
+    (agent-repl-host-select "ws-1")
+    ;; Act
+    (agent-repl-test-host--answer-held agent-repl-test-host--success)
+    ;; Assert
+    (should (null (agent-repl-host-pending-selection)))))
+
+(ert-deftest agent-repl-test-host-the-last-answer-re-applies-the-roster ()
+  "When nothing is left pending the roster's `current' is judged again,
+so a push deferred behind the request is obeyed: the last push wins."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe-three)
+    (agent-repl-host-select "ws-1")
+    ;; Act
+    (agent-repl-test-host--answer-held agent-repl-test-host--success)
+    ;; Assert
+    (should (= agent-repl-test-host--reapplied 1))))
+
+(ert-deftest agent-repl-test-host-an-answer-with-a-queued-selection-does-not-re-apply ()
+  "While a queued selection is still to be sent, nothing is re-applied yet."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe-three)
+    (agent-repl-host-select "ws-1")
+    (agent-repl-host-select "ws-2")
+    ;; Act
+    (agent-repl-test-host--answer-held agent-repl-test-host--success)
+    ;; Assert
+    (should (= agent-repl-test-host--reapplied 0))))
+
+(ert-deftest agent-repl-test-host-a-refused-selection-re-applies-the-roster ()
+  "A refusal stamped nothing, so the frame must follow whatever the roster
+says now rather than wait for a push that will never come."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe-three)
+    (agent-repl-host-select "ws-1")
+    ;; Act
+    (agent-repl-test-host--answer-held '(:arm :error :value nil))
+    ;; Assert
+    (should (= agent-repl-test-host--reapplied 1))))
+
+(ert-deftest agent-repl-test-host-a-failed-selection-releases-the-slot ()
+  "A transport failure answers the call too, so the next one is sent."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe-three)
+    (setq agent-repl-test-host--select-answer
+          (list :failure (list :kind :transport :message "no route")))
+    (agent-repl-host-select "ws-1")
+    ;; Act
+    (agent-repl-host-select "ws-2")
+    ;; Assert
+    (should (equal (agent-repl-test-host--selected-ids) '("ws-id-1" "ws-id-2")))))
+
+(ert-deftest agent-repl-test-host-an-unsent-selection-releases-the-slot ()
+  "A call that signals before going out leaves no selection in flight."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe-three)
+    (cl-letf (((symbol-function 'agent-repl-rpc-select-workspace)
+               (lambda (&rest _) (error "socket refused"))))
+      ;; Act
+      (ignore-errors (agent-repl-host-select "ws-1")))
+    ;; Assert
+    (should (null agent-repl-host--select-in-flight))))
+
+(ert-deftest agent-repl-test-host-an-unsent-selection-signals ()
+  "The error of a call that never went out reaches the caller."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe-three)
+    (cl-letf (((symbol-function 'agent-repl-rpc-select-workspace)
+               (lambda (&rest _) (error "socket refused"))))
+      ;; Act / Assert
+      (should-error (agent-repl-host-select "ws-1")))))
+
+;;;; ---- Request a switch ----
+
+(ert-deftest agent-repl-test-host-a-request-sends-select-workspace ()
+  "A switch request is a SelectWorkspace for the workspace's ref."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe-three)
+    ;; Act
+    (agent-repl-host-request-switch "ws-2" 'slot)
+    ;; Assert
+    (should (equal (agent-repl-test-host--selected-ids) '("ws-id-2")))))
+
+(ert-deftest agent-repl-test-host-a-request-is-recorded-at-info ()
+  "The user's request is durable, naming its target and its trigger."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe-three)
+    (setq agent-repl-test-host--current-ws "ws-1")
+    ;; Act
+    (agent-repl-host-request-switch "ws-2" 'slot)
+    ;; Assert
+    (should (agent-repl-test-host--logged-p
+             :info "elisp.host.switch-requested ws=ws-2 trigger=slot shown=ws-1 pending=none"))))
+
+(ert-deftest agent-repl-test-host-a-request-moves-no-frame ()
+  "A request never switches the frame itself."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let ((switched nil))
+      (agent-repl-test-host--subscribe-three)
+      (cl-letf (((symbol-function 'agent-repl--ws-switch)
+                 (lambda (ws &rest _) (setq switched ws))))
+        ;; Act
+        (agent-repl-host-request-switch "ws-2" 'slot))
+      ;; Assert
+      (should (null switched)))))
+
+(ert-deftest agent-repl-test-host-a-request-without-a-ref-warns ()
+  "A switch the user asked for that cannot be sent is reported, not dropped."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (cl-letf (((symbol-function 'message) (lambda (&rest _) nil)))
+      ;; Act
+      (agent-repl-host-request-switch "ws-unknown" 'slot))
+    ;; Assert
+    (should (agent-repl-test-host--logged-p
+             :warn "elisp.host.switch-request-unsent ws=ws-unknown trigger=slot reason=no-ref"))))
+
+(ert-deftest agent-repl-test-host-a-request-without-a-connection-warns ()
+  "No daemon connection is reported, not dropped."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe-three)
+    (agent-repl-host--put "ws-2" :conn nil)
+    (cl-letf (((symbol-function 'message) (lambda (&rest _) nil)))
+      ;; Act
+      (agent-repl-host-request-switch "ws-2" 'slot))
+    ;; Assert
+    (should (agent-repl-test-host--logged-p
+             :warn "elisp.host.switch-request-unsent ws=ws-2 trigger=slot reason=no-connection"))))
+
+(ert-deftest agent-repl-test-host-a-request-that-cannot-be-sent-tells-the-user ()
+  "The echo area says why the switch went nowhere."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let ((said nil))
+      (cl-letf (((symbol-function 'message)
+                 (lambda (fmt &rest args) (setq said (apply #'format fmt args)))))
+        ;; Act
+        (agent-repl-host-request-switch "ws-unknown" 'slot))
+      ;; Assert
+      (should (string-match-p "Cannot switch to ws-unknown" said)))))
+
+(ert-deftest agent-repl-test-host-an-activation-following-the-roster-selects-nothing ()
+  "The roster moved the frame, so the daemon already holds the selection;
+an echo would race a newer request and take the frame back."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (setq agent-repl-test-host--current-ws "ws-1"
+          agent-repl-test-host--calls nil)
+    ;; Act
+    (let ((agent-repl-roster-following t))
+      (agent-repl-host--on-workspace-activated))
+    ;; Assert
+    (should (null agent-repl-test-host--calls))))
+
+(ert-deftest agent-repl-test-host-a-local-activation-is-recorded-at-info ()
+  "A switch Emacs made on its own is told to the daemon, and recorded."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (setq agent-repl-test-host--current-ws "ws-1")
+    ;; Act
+    (let ((this-command 'some-command))
+      (agent-repl-host--on-workspace-activated))
+    ;; Assert
+    (should (agent-repl-test-host--logged-p
+             :info "elisp.host.select-local-activation ws=ws-1 command=some-command"))))
 
 (ert-deftest agent-repl-test-host-select-transferring-away-goes-to-the-handover ()
   "The refusal is where a lagging client learns the workspace moved."
