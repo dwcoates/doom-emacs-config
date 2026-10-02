@@ -1518,18 +1518,6 @@ Callers must use this function instead of reading `+workspaces-main'
 directly or guarding it themselves with `boundp'."
   (and (boundp '+workspaces-main) +workspaces-main))
 
-(defun agent-repl--ws-frame-save-state ()
-  "Save the current frame's persp window-configuration state.
-Delegates to `persp-frame-save-state'.  No-op when that function is
-unbound (persp-mode not loaded).  Errors propagate to the caller — wrap
-at the call site when the save must stay robust.
-
-This is the persp-mode frame-save boundary owned by `workspace.el'.
-Callers must use this function instead of calling `persp-frame-save-state'
-directly or wrapping it themselves with `fboundp'."
-  (when (fboundp 'persp-frame-save-state)
-    (persp-frame-save-state)))
-
 (defun agent-repl--ws-create (ws &optional project-dir)
   "Create persp WS via `persp-add-new' and tag it with PROJECT-DIR.
 Returns the new persp object, or nil when `persp-add-new' is unbound.

@@ -1249,23 +1249,6 @@ gated push would then drop the very repaint this exists for."
 
 ;;;; ---- Tests: --ws-frame-switch ----
 
-;;;; ---- Tests: --ws-frame-save-state ----
-
-(ert-deftest agent-repl-test-ws-frame-save-state-delegates-when-bound ()
-  "ws-frame-save-state calls persp-frame-save-state when bound."
-  (agent-repl-test--with-clean-state
-    (let (saved)
-      (cl-letf (((symbol-function 'persp-frame-save-state) (lambda () (setq saved t))))
-        (agent-repl--ws-frame-save-state)
-        (should saved)))))
-
-(ert-deftest agent-repl-test-ws-frame-save-state-noop-when-unbound ()
-  "ws-frame-save-state is a no-op when persp-frame-save-state is not fboundp."
-  (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'persp-frame-save-state) nil))
-      (fmakunbound 'persp-frame-save-state)
-      (should-not (agent-repl--ws-frame-save-state)))))
-
 ;;;; ---- Tests: --ws-create ----
 
 (ert-deftest agent-repl-test-ws-create-returns-persp-and-tags-project ()
