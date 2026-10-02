@@ -92,7 +92,7 @@ describe("every rpc answers", () => {
       ["killWorkspace", client.killWorkspace({ workspace })],
       ["nukeWorkspace", client.nukeWorkspace({ workspace })],
       ["mergeWorkspace", client.mergeWorkspace({ workspace, source: { source: { case: "ownBranch", value: {} } } })],
-      ["restartWorkspace", client.restartWorkspace({ workspace, force: false })],
+      ["restartWorkspace", client.restartWorkspace({ workspace })],
       ["setWorkspacePriority", client.setWorkspacePriority({ workspace })],
       ["createTask", client.createTask({ title: "t" })],
       ["updateTask", client.updateTask({ task: { id: "t" }, change: { case: "setDone", value: {} } })],
