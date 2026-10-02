@@ -416,6 +416,9 @@ type fakeShim struct {
 	// onKillSession, when set, runs as KillSession is asked, so a test acts
 	// at the point of no return.
 	onKillSession func()
+	// killHangs makes KillSession answer only when its context ends, as a
+	// shim whose vendor is unreachable does.
+	killHangs bool
 }
 
 func newFakeShim(pid int, order *steps) *fakeShim {
@@ -442,11 +445,15 @@ func (s *fakeShim) Detached() bool {
 	return s.detached
 }
 
-func (s *fakeShim) KillSession(_ context.Context, req *shimv1.KillSessionRequest) (*shimv1.KillSessionResponse, error) {
+func (s *fakeShim) KillSession(ctx context.Context, req *shimv1.KillSessionRequest) (*shimv1.KillSessionResponse, error) {
 	s.mu.Lock()
 	s.killReq = append(s.killReq, req)
-	answer, err := s.killAnswer, s.killErr
+	answer, err, hangs := s.killAnswer, s.killErr, s.killHangs
 	s.mu.Unlock()
+	if hangs {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
 	s.order.record("kill_session")
 	if s.onKillSession != nil {
 		s.onKillSession()

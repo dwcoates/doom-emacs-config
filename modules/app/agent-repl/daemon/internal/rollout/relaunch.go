@@ -339,7 +339,14 @@ var ErrStandDownUnanswered = fmt.Errorf("rollout: the shim did not answer the un
 func (c *controller) standDown(ctx context.Context, old shimclient.Client, ws ids.WorkspaceID, reason RelaunchReason, force bool, fields dlog.Context) error {
 	exited := old.Exited()
 
-	answer, err := old.KillSession(ctx, &shimv1.KillSessionRequest{Force: force})
+	// THE CALL IS BOUNDED. A shim whose vendor is unreachable can hold the
+	// stand-down rpc forever, and an unbounded call never reaches the window
+	// or the SIGKILL behind it -- the restart that exists for a stuck
+	// workspace would then be stuck itself. The bound contains the shim's own
+	// teardown worst case (drain.DefaultStandBound).
+	callCtx, endCall := context.WithTimeout(ctx, c.deps.StandDownCallBound)
+	answer, err := old.KillSession(callCtx, &shimv1.KillSessionRequest{Force: force})
+	endCall()
 	switch {
 	case err != nil && !force:
 		return c.awaitUnansweredStandDown(ctx, exited, ws, err, fields)
@@ -354,8 +361,19 @@ func (c *controller) standDown(ctx context.Context, old shimclient.Client, ws id
 			}))
 		return fmt.Errorf("rollout: relaunch %q: stand down: %w", ws, ErrStandDownLive)
 	case err != nil:
-		c.log.Warn(opRelaunch, "the stand-down call failed; waiting out the window before forcing",
-			withCause(fields, err))
+		// A FORCED STAND-DOWN THE SHIM DID NOT ANSWER inside a bound that
+		// contains its own teardown is a hung shim: unless it has already
+		// left, it is killed now rather than after the window.
+		select {
+		case info := <-exited:
+			c.log.Warn(opRelaunch, "the forced stand-down call failed, but the shim left; the gate is passed",
+				merge(withCause(fields, err), dlog.Context{"pid": info.PID, "exit_code": info.Code, "signal": info.Signal}))
+			return nil
+		default:
+		}
+		c.log.Warn(opRelaunch, "the forced stand-down call failed; killing the shim now",
+			merge(withCause(fields, err), dlog.Context{"call_bound": c.deps.StandDownCallBound.String()}))
+		return c.killAndReap(ctx, old, exited, ws, reason, "the forced stand-down went unanswered", fields)
 	case answer.GetFailure().GetNoSession() != nil:
 		// A SHIM HOLDING NO SESSION HAS NOTHING TO END: its vendor never
 		// started (a refused or retried start, a restart of a stuck bring-up),
