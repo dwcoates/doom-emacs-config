@@ -139,25 +139,35 @@ with its callbacks in `answers', so a test answers each one itself."
 
 ;;;; ---- Tests: agent-repl--notification-activate ----
 
-(ert-deftest agent-repl-test-activate-jumps-to-workspace ()
-  "A banner click selects the workspace's tab, through workspace.el's boundary.
-THE CLICK ACTION of the host stream's notification policy: decider and
-actor are one process, so no daemon round-trip and no SelectWorkspace of
-its own — the tab switch that follows issues that verb."
+(ert-deftest agent-repl-test-activate-requests-the-workspace ()
+  "A banner click REQUESTS the workspace's selection of the daemon.
+Like every switch trigger, the frame follows the roster's `current'."
+  (let (requested)
+    (cl-letf (((symbol-function 'agent-repl--log) (lambda (&rest _) nil))
+              ((symbol-function 'agent-repl-host-request-switch)
+               (lambda (ws trigger) (setq requested (cons ws trigger))))
+              ((symbol-function 'select-frame-set-input-focus) (lambda (&rest _) nil))
+              ((symbol-function 'selected-frame) (lambda () 'frame)))
+      (agent-repl--notification-activate "ws-a")
+      (should (equal requested '("ws-a" . notification))))))
+
+(ert-deftest agent-repl-test-activate-moves-no-frame-itself ()
+  "A banner click never switches the frame locally."
   (let (jumped)
     (cl-letf (((symbol-function 'agent-repl--log) (lambda (&rest _) nil))
+              ((symbol-function 'agent-repl-host-request-switch) (lambda (&rest _) t))
               ((symbol-function 'agent-repl--ws-switch)
                (lambda (ws &rest _) (setq jumped ws)))
               ((symbol-function 'select-frame-set-input-focus) (lambda (&rest _) nil))
               ((symbol-function 'selected-frame) (lambda () 'frame)))
       (agent-repl--notification-activate "ws-a")
-      (should (equal jumped "ws-a")))))
+      (should-not jumped))))
 
 (ert-deftest agent-repl-test-activate-focuses-selected-frame ()
   "Activate should focus the selected frame so Emacs comes forward."
   (let (focused)
     (cl-letf (((symbol-function 'agent-repl--log) (lambda (&rest _) nil))
-              ((symbol-function 'agent-repl--ws-switch) (lambda (&rest _) nil))
+              ((symbol-function 'agent-repl-host-request-switch) (lambda (&rest _) t))
               ((symbol-function 'selected-frame) (lambda () 'the-frame))
               ((symbol-function 'select-frame-set-input-focus)
                (lambda (frame) (setq focused frame))))
@@ -168,7 +178,7 @@ its own — the tab switch that follows issues that verb."
   "Activate with a nil WS should focus Emacs but not attempt a jump."
   (let ((jumped nil) (focused nil))
     (cl-letf (((symbol-function 'agent-repl--log) (lambda (&rest _) nil))
-              ((symbol-function 'agent-repl--ws-switch)
+              ((symbol-function 'agent-repl-host-request-switch)
                (lambda (&rest _) (setq jumped t)))
               ((symbol-function 'selected-frame) (lambda () 'frame))
               ((symbol-function 'select-frame-set-input-focus)
@@ -184,7 +194,7 @@ the click happened and went nowhere, which is worth the record."
     (cl-letf (((symbol-function 'agent-repl--log) (lambda (&rest _) nil))
               ((symbol-function 'agent-repl--warn)
                (lambda (_ws fmt &rest args) (setq warned (apply #'format fmt args))))
-              ((symbol-function 'agent-repl--ws-switch)
+              ((symbol-function 'agent-repl-host-request-switch)
                (lambda (&rest _) (error "an unknown workspace must not be switched to")))
               ((symbol-function 'selected-frame) (lambda () 'frame))
               ((symbol-function 'select-frame-set-input-focus) (lambda (&rest _) nil)))

@@ -558,7 +558,8 @@ order a close lands by."
     (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "here"))
               ((symbol-function 'agent-repl--roster-recent-names)
                (lambda () '("here" "there")))
-              ((symbol-function 'agent-repl--ws-switch) (lambda (ws) (setq switched ws)))
+              ((symbol-function 'agent-repl-host-request-switch)
+               (lambda (ws _trigger) (setq switched ws)))
               ((symbol-function 'message) (lambda (&rest _) nil)))
       (agent-repl-open-most-recent-workspace)
       (should (equal switched "there")))))
@@ -570,8 +571,8 @@ order a close lands by."
     (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "here"))
               ((symbol-function 'agent-repl--roster-recent-names)
                (lambda () '("a" "b")))
-              ((symbol-function 'agent-repl--ws-switch)
-               (lambda (ws) (push ws visited)))
+              ((symbol-function 'agent-repl-host-request-switch)
+               (lambda (ws _trigger) (push ws visited)))
               ((symbol-function 'message) (lambda (&rest _) nil)))
       (agent-repl-open-most-recent-workspace)
       (agent-repl-open-most-recent-workspace)
@@ -583,7 +584,8 @@ order a close lands by."
         (switched nil))
     (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "here"))
               ((symbol-function 'agent-repl--roster-recent-names) (lambda () '("a")))
-              ((symbol-function 'agent-repl--ws-switch) (lambda (ws) (setq switched ws)))
+              ((symbol-function 'agent-repl-host-request-switch)
+               (lambda (ws _trigger) (setq switched ws)))
               ((symbol-function 'message) (lambda (&rest _) nil)))
       (agent-repl-open-most-recent-workspace)
       (should-not switched)
@@ -598,25 +600,38 @@ order a close lands by."
 
 (defmacro agent-repl-test-commands--with-bar (tabs current &rest body)
   "Run BODY with the tab bar drawing TABS and CURRENT the active workspace.
-Binds `agent-repl-test-commands--switched' to the workspace switched to."
+Binds `agent-repl-test-commands--switched' to the workspace REQUESTED."
   (declare (indent 2))
   `(agent-repl-test-commands--with-hidden-bar ,tabs nil ,current ,@body))
 
 (defmacro agent-repl-test-commands--with-hidden-bar (tabs hidden current &rest body)
   "Run BODY with TABS on the roster, HIDDEN of them undrawn, CURRENT active.
 HIDDEN are the tabs of a repository the daemon holds collapsed: in the
-walk order, off the drawing.  Binds `agent-repl-test-commands--switched'."
+walk order, off the drawing.  Binds `agent-repl-test-commands--switched'
+to the workspace requested of the daemon, and fails nothing by itself on a
+local switch -- `agent-repl-test-commands--local-switched' records it."
   (declare (indent 3))
-  `(let ((agent-repl-test-commands--switched nil))
+  `(let ((agent-repl-test-commands--switched nil)
+         (agent-repl-test-commands--local-switched nil))
      (cl-letf (((symbol-function 'agent-repl-roster-tab-order) (lambda () ,tabs))
                ((symbol-function 'agent-repl-roster-drawn-tab-order)
                 (lambda () (cl-remove-if (lambda (name) (member name ,hidden)) ,tabs)))
                ((symbol-function 'agent-repl--ws-current-name) (lambda () ,current))
                ((symbol-function 'agent-repl--ws-current-log-name) (lambda () ,current))
+               ((symbol-function 'agent-repl-host-request-switch)
+                (lambda (ws _trigger) (setq agent-repl-test-commands--switched ws) t))
+               ((symbol-function 'agent-repl-host-pending-selection)
+                (lambda () agent-repl-test-commands--pending))
                ((symbol-function 'agent-repl--ws-switch)
-                (lambda (ws &rest _) (setq agent-repl-test-commands--switched ws)))
+                (lambda (ws &rest _) (setq agent-repl-test-commands--local-switched ws)))
                ((symbol-function 'message) (lambda (&rest _) nil)))
        ,@body)))
+
+(defvar agent-repl-test-commands--pending nil
+  "The workspace the stubbed host reports as requested and unanswered.")
+
+(defvar agent-repl-test-commands--local-switched nil
+  "The workspace a LOCAL switch was handed; a switch command must leave it nil.")
 
 (defvar agent-repl-test-commands--switched nil
   "The workspace the stubbed switch boundary was handed.")
@@ -668,6 +683,57 @@ highlighted. The drawn order cannot carry either name."
     (agent-repl-switch-right)
     (should-not agent-repl-test-commands--switched)))
 
+;;;; ---- A switch is a REQUEST; the roster moves the frame ----
+
+(ert-deftest agent-repl-test-commands-cycle-steps-from-the-pending-request ()
+  "A second press before the roster catches up steps from the FIRST press's
+target, not from the tab still shown, so rapid presses walk the bar."
+  ;; Arrange
+  (let ((agent-repl-test-commands--pending "second"))
+    (agent-repl-test-commands--with-bar '("first" "second" "third") "first"
+      ;; Act
+      (agent-repl-switch-right)
+      ;; Assert
+      (should (equal agent-repl-test-commands--switched "third")))))
+
+(ert-deftest agent-repl-test-commands-cycle-steps-from-the-shown-tab-when-nothing-is-pending ()
+  "With no request outstanding the step starts at the tab shown."
+  ;; Arrange
+  (let ((agent-repl-test-commands--pending nil))
+    (agent-repl-test-commands--with-bar '("first" "second" "third") "second"
+      ;; Act
+      (agent-repl-switch-left)
+      ;; Assert
+      (should (equal agent-repl-test-commands--switched "first")))))
+
+(ert-deftest agent-repl-test-commands-cycle-moves-no-frame-itself ()
+  "Cycling requests the switch and never switches the frame locally."
+  ;; Arrange
+  (agent-repl-test-commands--with-bar '("first" "second") "first"
+    ;; Act
+    (agent-repl-switch-right)
+    ;; Assert
+    (should-not agent-repl-test-commands--local-switched)))
+
+(ert-deftest agent-repl-test-commands-slot-chord-moves-no-frame-itself ()
+  "A numeral requests the switch and never switches the frame locally."
+  ;; Arrange
+  (agent-repl-test-commands--with-bar '("first" "second") "first"
+    ;; Act
+    (agent-repl-switch-to-workspace 2)
+    ;; Assert
+    (should-not agent-repl-test-commands--local-switched)))
+
+(ert-deftest agent-repl-test-commands-slot-chord-ignores-the-pending-request ()
+  "A slot names an absolute tab, so a pending request does not shift it."
+  ;; Arrange
+  (let ((agent-repl-test-commands--pending "third"))
+    (agent-repl-test-commands--with-bar '("first" "second" "third") "first"
+      ;; Act
+      (agent-repl-switch-to-workspace 2)
+      ;; Assert
+      (should (equal agent-repl-test-commands--switched "second")))))
+
 ;;;; ---- A switch is DURABLE in the log ----
 
 ;; The switch records were emitted on the `agent-repl--log' (debug) rung, and
@@ -712,7 +778,7 @@ highlighted. The drawn order cannot carry either name."
     (agent-repl-test-commands--with-bar '("first" "second" "third") "first"
       (agent-repl-switch-right))
     ;; Assert
-    (should (member "elisp.commands.cycle n=1 target=second"
+    (should (member "elisp.commands.cycle n=1 from=first target=second"
                     (agent-repl-test-commands--info-messages)))))
 
 (ert-deftest agent-repl-test-commands-cycle-left-records-its-target ()
@@ -722,7 +788,7 @@ highlighted. The drawn order cannot carry either name."
     (agent-repl-test-commands--with-bar '("first" "second" "third") "third"
       (agent-repl-switch-left))
     ;; Assert
-    (should (member "elisp.commands.cycle n=-1 target=second"
+    (should (member "elisp.commands.cycle n=-1 from=third target=second"
                     (agent-repl-test-commands--info-messages)))))
 
 (ert-deftest agent-repl-test-commands-cycle-is-never-recorded-on-the-debug-rung ()
@@ -744,7 +810,7 @@ disk, so a switch the user made could not be read back."
     (agent-repl-test-commands--with-bar '("first" "second") "elsewhere"
       (agent-repl-switch-right))
     ;; Assert
-    (should (member "elisp.commands.cycle-no-position n=1 tabs=2"
+    (should (member "elisp.commands.cycle-no-position n=1 tabs=2 from=elsewhere"
                     (agent-repl-test-commands--info-messages)))))
 
 (ert-deftest agent-repl-test-commands-cycle-attributes-the-screened-log-name ()
@@ -771,7 +837,7 @@ routed to a sink that does not exist."
                 ((symbol-function 'agent-repl--ws-log-name) (lambda (ws) ws))
                 ((symbol-function 'agent-repl--roster-recent-names)
                  (lambda () '("a")))
-                ((symbol-function 'agent-repl--ws-switch) (lambda (&rest _) nil)))
+                ((symbol-function 'agent-repl-host-request-switch) (lambda (&rest _) nil)))
         (agent-repl-open-most-recent-workspace))
       ;; Assert
       (should (member "elisp.commands.open-most-recent target=a"
@@ -866,7 +932,7 @@ workspaces only."
                  (lambda (_prompt candidates &rest _)
                    (setq offered candidates)
                    "real-ws"))
-                ((symbol-function 'agent-repl--ws-switch) (lambda (_ws) nil))
+                ((symbol-function 'agent-repl-host-request-switch) (lambda (_ws _trigger) nil))
                 ((symbol-function 'agent-repl--ws-current-log-name) (lambda () nil)))
         ;; Act
         (agent-repl-switch-to-project))
@@ -909,7 +975,7 @@ nothing to switch to."
 Binds `agent-repl-test-commands--offered' to the candidate strings the
 picker was handed, `--opened' to the ref `OpenWorkspace' was given,
 `--landed' to the (REF . LANDER) the pending landing was registered with
-and `--switched' to the workspace the editor-local switch stood on."
+and `--switched' to the workspace whose switch was requested of the daemon."
   (declare (indent 2))
   `(let ((agent-repl-roster-view (agent-repl-test-commands--roster ,rows))
          (agent-repl-test-commands--offered nil)
@@ -921,8 +987,8 @@ and `--switched' to the workspace the editor-local switch stood on."
                ((symbol-function 'agent-repl--log) (lambda (&rest _) nil))
                ((symbol-function 'agent-repl--info) (lambda (&rest _) nil))
                ((symbol-function 'agent-repl--warn) (lambda (&rest _) nil))
-               ((symbol-function 'agent-repl--ws-switch)
-                (lambda (ws &rest _) (setq agent-repl-test-commands--switched ws)))
+               ((symbol-function 'agent-repl-host-request-switch)
+                (lambda (ws _trigger) (setq agent-repl-test-commands--switched ws)))
                ((symbol-function 'agent-repl-verb-open)
                 (lambda (ref) (setq agent-repl-test-commands--opened ref)))
                ((symbol-function 'agent-repl-verbs-select-minted)
@@ -1000,7 +1066,7 @@ and `--switched' to the workspace the editor-local switch stood on."
     (should (equal (mapcar #'car alist) '("api [/a/api]" "api [/b/api] (closed)")))))
 
 (ert-deftest agent-repl-test-commands-switcher-switches-to-an-open-workspace ()
-  "An open workspace is an editor-local switch and nothing more."
+  "An open workspace is a switch REQUEST and nothing more."
   ;; Arrange
   (agent-repl-test-commands--switcher
       (list (agent-repl-test-commands--row "here" "id-here" 100)) nil
