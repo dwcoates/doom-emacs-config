@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"agentrepl/testrun/internal/run"
 	"agentrepl/testrun/roster"
 )
 
@@ -856,5 +857,51 @@ func TestParseGoTestItemsReadsPastALineLongerThanAnyScanBuffer(t *testing.T) {
 	// Assert
 	if err != nil || got["TestA"] != 1.5 {
 		t.Fatalf("ParseGoTestItems = %v, %v", got, err)
+	}
+}
+
+func TestEveryGoModuleKindIsVetted(t *testing.T) {
+	// Arrange: the same module built as an ordinary Go module and as the e2e
+	// suite; each must carry exactly goVet's unit, since a compiled test
+	// binary vets nothing.
+	module := goPackageFixture(t, "func TestA(t *testing.T) {}\n")
+	build := map[string]func(Layout, roster.Suite, string, []string) (Units, error){
+		"go module": goModuleUnitsForPackages,
+		"e2e":       e2eUnitsForPackages,
+	}
+	for kind, units := range build {
+		t.Run(kind, func(t *testing.T) {
+			l := Layout{Module: module, Work: t.TempDir()}
+
+			// Act
+			u, err := units(l, roster.Suite{Name: "m"}, module, []string{"p"})
+
+			// Assert
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := goVet("m", module)
+			var vets []run.Spec
+			for _, a := range u.Atomic {
+				if a.ID == want.ID {
+					vets = append(vets, a)
+				}
+			}
+			if len(vets) != 1 || !reflect.DeepEqual(vets[0].Argv, want.Argv) || vets[0].Dir != module {
+				t.Fatalf("vet units = %+v, want exactly one with argv %v in %s", vets, want.Argv, module)
+			}
+		})
+	}
+}
+
+func TestGoVetRunsTheAnalyzersGoTestRuns(t *testing.T) {
+	// Act
+	v := goVet("m", "/mod")
+
+	// Assert
+	want := []string{"go", "vet", "-atomic", "-bool", "-buildtags", "-directive", "-errorsas",
+		"-ifaceassert", "-nilfunc", "-printf", "-stringintconv", "-tests", "./..."}
+	if v.ID != "m:vet" || v.Suite != "m" || v.Dir != "/mod" || !reflect.DeepEqual(v.Argv, want) {
+		t.Fatalf("goVet = %+v", v)
 	}
 }

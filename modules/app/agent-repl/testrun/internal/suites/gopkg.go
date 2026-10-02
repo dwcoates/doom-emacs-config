@@ -34,6 +34,13 @@ var goTestVetFlags = []string{
 	"-ifaceassert", "-nilfunc", "-printf", "-stringintconv", "-tests",
 }
 
+// goVet is a Go module's vet unit: exactly the analyzers `go test` would have
+// run over every package of the module in dir, which the compiled test
+// binaries never run.
+func goVet(suite, dir string) run.Spec {
+	return spec(suite+":vet", suite, dir, append(append([]string{"go", "vet"}, goTestVetFlags...), "./..."))
+}
+
 // goPkg is one Go package's units.
 type goPkg struct {
 	Suite string
