@@ -104,7 +104,12 @@ export function expandVisibleRows(rows: readonly RosterRow[], basePath: string):
  * A row's CLOSED children are hoisted away by `expandVisibleRows`, so a killed
  * child never draws while its live siblings do.
  */
-export function drawRosterRow(u: RosterRow, sc: SidebarContext, path: string): HTMLElement {
+export function drawRosterRow(
+  u: RosterRow,
+  sc: SidebarContext,
+  path: string,
+  merged = false,
+): HTMLElement {
   const workspace = drawRosterRowWorkspace(
     requireMessage(u.workspace, `${path}.workspace`),
     `${path}.workspace`,
@@ -158,7 +163,15 @@ export function drawRosterRow(u: RosterRow, sc: SidebarContext, path: string): H
     toggleRowMenu(ws, { sc, workspace, name });
   });
 
-  line.appendChild(drawStatusMark(status.case, `${path}.status`));
+  // A RECENTLY-MERGED ROW DRAWS PLAIN (owner request, 2026-10-02): no status
+  // dot, and its name in the grey a viewed workspace's wears. The dot is the
+  // detail panel's pointer trigger, so such a row opens that panel by keyboard
+  // focus alone.
+  let statusMark: HTMLElement | null = null;
+  if (!merged) {
+    statusMark = drawStatusMark(status.case, `${path}.status`);
+    line.appendChild(statusMark);
+  }
 
   const label = document.createElement("span");
   label.className = "name";
@@ -174,6 +187,7 @@ export function drawRosterRow(u: RosterRow, sc: SidebarContext, path: string): H
     label.classList.add("viewed");
     ws.setAttribute("data-viewed", "true");
   }
+  if (merged) label.classList.add("viewed");
   // THE REVIVING SHIMMER IS THE NAME'S TOO, and only while the wire carries
   // the marker: the daemon lowers it when the revival ends, whichever way.
   if (u.reviving !== undefined && drawRosterRowReviving(u.reviving, `${path}.reviving`)) {
@@ -211,14 +225,14 @@ export function drawRosterRow(u: RosterRow, sc: SidebarContext, path: string): H
   );
   // AFTER the panel is in the tree: the hover wiring listens on the panel too,
   // so the pointer can travel from the row into it without it closing.
-  installHoverPanel(ws, line, sc, workspace.id);
+  installHoverPanel(ws, line, statusMark, sc, workspace.id);
 
   const visibleChildren = expandVisibleRows(u.children, `${path}.children`);
   if (visibleChildren.length > 0) {
     const kids = document.createElement("div");
     kids.className = "kids";
     for (const child of visibleChildren) {
-      kids.appendChild(drawRosterRow(child.row, sc, child.path));
+      kids.appendChild(drawRosterRow(child.row, sc, child.path, merged));
     }
     ws.appendChild(kids);
   }
@@ -478,6 +492,10 @@ export function drawStatusMark(arm: RosterStatusCase, path: string): HTMLElement
  * `prefs`, exactly as the chevron's click left it, so a redraw arriving while
  * the pointer rests on a row keeps that row's panel open.
  *
+ * THE POINTER'S TRIGGER IS THE STATUS DOT ALONE (owner request, 2026-10-02):
+ * hovering the rest of the row opens nothing, and the pointer leaving the dot
+ * for the row closes the panel as it does for anywhere else.
+ *
  * The keyboard gets the same panel through `focusin`/`focusout`, without the
  * intent delay — a focus move is deliberate in a way a pointer's path is not.
  */
@@ -487,6 +505,7 @@ export const HOVER_CLOSE_GRACE_MS = 120;
 function installHoverPanel(
   ws: HTMLElement,
   line: HTMLElement,
+  dot: HTMLElement | null,
   sc: SidebarContext,
   workspaceId: string,
 ): void {
@@ -537,12 +556,13 @@ function installHoverPanel(
     }, HOVER_CLOSE_GRACE_MS);
   };
 
-  line.addEventListener("mouseenter", () => {
+  // A row with no dot (a recently-merged one) has no pointer trigger.
+  dot?.addEventListener("mouseenter", () => {
     pointerOverRow = true;
     if (ws.classList.contains("open")) cancelTimers();
     else scheduleOpen();
   });
-  line.addEventListener("mouseleave", () => {
+  dot?.addEventListener("mouseleave", () => {
     pointerOverRow = false;
     scheduleClose();
   });

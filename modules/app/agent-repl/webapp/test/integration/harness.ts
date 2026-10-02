@@ -43,6 +43,7 @@ import {
 import { createLocalFailures } from "../../src/failure/local";
 import { bootFailed } from "../../src/failure/sink";
 import { mountFeed, type FeedHandle } from "../../src/feed/feed";
+import { installProseLinkRouting } from "../../src/link";
 import { createRowRenderers } from "../../src/feed/renderers";
 import { mountFooter, type FooterHandle } from "../../src/footer/footer";
 import { mountTopbar } from "../../src/topbar/topbar";
@@ -618,6 +619,10 @@ async function mountApp(
     selectDetachedWork: (id: FeedId) => feed.selectDetachedWork(id),
   });
   handles.push(footer);
+  // PROSE LINKS ROUTE as the boot routes them (main.ts hangs the same one
+  // delegated interceptor over the feed's scroll zone).
+  const removeProseLinkRouting = installProseLinkRouting(ctx, shell.feedScroll);
+  handles.push({ dispose: removeProseLinkRouting });
   // The per-bubble composers close on exactly these statuses (R7).
   footer.onStatus((statusCase) =>
     gate.set(
