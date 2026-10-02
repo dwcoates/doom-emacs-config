@@ -1,10 +1,13 @@
 /**
  * The context chip and the token-breakdown menu behind it.
  *
- * THE CHIP IS A NUMBER, IN YELLOW. "How full is my context" is the question the
- * topbar's token presence exists to answer, so the figure stays visible rather
- * than hiding behind an icon — and the figure is the DAEMON'S text ("142.3k"),
- * never a formatting of a count this end did itself.
+ * THE CHIP IS A NUMBER, COLORED BY HOW FULL THE WINDOW IS. "How full is my
+ * context" is the question the topbar's token presence exists to answer, so the
+ * figure stays visible rather than hiding behind an icon — and the figure is
+ * the DAEMON'S text ("142.3k"), never a formatting of a count this end did
+ * itself. Its color is the footer percentages' own rule (`pressurePercentColor`,
+ * owner ruling 2026-10-01) over the daemon's `window_fill`, so a chip at 40% of
+ * its window wears the color a 40% allowance wears.
  *
  * THE BREAKDOWN IS SESSION-SCOPED, ALWAYS POPULATED. It rides the view so the
  * reveal costs no round trip, and it never carries turn figures: those are the
@@ -25,8 +28,9 @@ import type {
   TopbarContextChip,
 } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
 import { log } from "../log.js";
+import { MalformedView } from "../rpc/malformed.js";
 import { msOf, requireMessage } from "../rpc/strict.js";
-import { toneClass } from "../vocab.js";
+import { pressurePercentColor } from "../pressure-color.js";
 import type { TopbarContext } from "./context.js";
 import { asAnchor } from "./strip.js";
 
@@ -50,15 +54,15 @@ export function drawTopbarContextChip(u: TopbarContextChip, tc: TopbarContext): 
   });
 
   const wrap = document.createElement("div");
-  // YELLOW rides the control itself as well as the figure: `.topbar-context` is
-  // the hook the DOM contract names, and the context figure's color is a fact
-  // about the control, not about one span inside it.
-  wrap.className = `topbar-context ${toneClass("yellow")}`;
+  wrap.className = "topbar-context";
 
   const button = createControl();
-  // YELLOW is the context figure's color across the app.
-  button.className = `topbar-context-figure ${toneClass("yellow")}`;
+  button.className = "topbar-context-figure";
   button.textContent = u.text;
+  // INLINE, so it wins the cascade over every class rule: the figure's color
+  // IS its reading, and a stylesheet rule painting it once already cost the
+  // strip its one colored number (see styles.css's topbar-button rules).
+  button.style.color = contextFigureColor(u.windowFill);
   wrap.append(button);
 
   // The wrap is the control; see `drawTopbarModelSelector` for the reasoning.
@@ -69,6 +73,18 @@ export function drawTopbarContextChip(u: TopbarContextChip, tc: TopbarContext): 
     tc.reveals.toggle("context", "context", body);
   });
   return wrap;
+}
+
+/**
+ * The figure's color: the window fill (0..1 on the wire) as the whole percent
+ * the footer would draw it, through the footer's own rule. A fill outside
+ * [0, 1] breaks the contract (the daemon clamps) and is refused, never painted.
+ */
+export function contextFigureColor(windowFill: number): string {
+  if (!(windowFill >= 0 && windowFill <= 1)) {
+    throw new MalformedView("TopbarContextChip.window_fill", `${String(windowFill)} is outside [0, 1]`);
+  }
+  return pressurePercentColor(Math.round(windowFill * 100));
 }
 
 /** The menu: titled sections of rows, in the served order. */
