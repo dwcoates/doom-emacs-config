@@ -48,7 +48,10 @@ import {
   snapshotExpanded,
   type AfterToggle,
 } from "../expand.js";
-import { SELECTION_GOVERNED_ATTRIBUTE, stampSelection } from "./bubble-selection.js";
+import {
+  SELECTION_GOVERNED_ATTRIBUTE,
+  stampSelection,
+} from "./bubble-selection.js";
 import { BUBBLE_SCROLL_CLASS } from "./bubble-scroll.js";
 import { BUBBLE_CLASS } from "../bubble/draw.js";
 import { MalformedView, isMalformedView } from "../rpc/malformed.js";
@@ -121,12 +124,18 @@ interface CollapseSample {
 function isLandingEdge(drawn: FeedRow, next: FeedRow): boolean {
   const before = responseOf(drawn);
   const after = responseOf(next);
-  return before !== null && after !== null && !thinkingLanded(before) && thinkingLanded(after);
+  return (
+    before !== null &&
+    after !== null &&
+    !thinkingLanded(before) &&
+    thinkingLanded(after)
+  );
 }
 
 /** The response bubble a row carries, or null. */
 function responseOf(row: FeedRow): FeedResponse | null {
-  if (row.row.case !== "activity" || row.row.value.unit.case !== "response") return null;
+  if (row.row.case !== "activity" || row.row.value.unit.case !== "response")
+    return null;
   return row.row.value.unit.value;
 }
 
@@ -185,7 +194,10 @@ export interface FeedControllerOptions {
    * The page's scroll box and tail owner. Root feed only. The box's own rect is
    * read to tell whether a collapsing row lies above the viewport.
    */
-  scroll?: { box: ScrollPosition & Pick<Element, "getBoundingClientRect">; tail: TailFollow };
+  scroll?: {
+    box: ScrollPosition & Pick<Element, "getBoundingClientRect">;
+    tail: TailFollow;
+  };
   /**
    * The overscan buffer, rooted on the page's scroll box. One instance is
    * shared across the root feed and every sub-feed nested inside the same box,
@@ -195,11 +207,6 @@ export interface FeedControllerOptions {
    * `IntersectionObserver`.
    */
   overscan?: Overscan;
-  /**
-   * Told the rows that were PAINTED: in the document with a frame painted
-   * after their insert (`feed/painted.ts`). Root feed only; absent elsewhere.
-   */
-  onPainted?: (ids: readonly string[], at: number) => void;
   /**
    * Runs after the selection expands or collapses a governed bubble's box
    * (`applySelection`), with the box and the state it landed in, so the host
@@ -228,8 +235,6 @@ interface RowState {
   bubble: BubbleLike | null;
   /** Whether the message changed since the body was last drawn. */
   dirty: boolean;
-  /** When the row was painted (`Date.now()` ms), null until it has been. */
-  paintedAt: number | null;
 }
 
 export interface FeedController extends Handle {
@@ -257,13 +262,13 @@ export interface FeedController extends Handle {
   bubbles(): readonly BubbleLike[];
   /** The view a body renderer draws from. */
   view(): SubfeedView;
-  /** When row ID was painted, or null when it is not held or not painted yet. */
-  paintedAt(id: string): number | null;
 }
 
-
 /** The arms of `FeedSelection.selection` that select a row (every arm but `none`). */
-type SelectedArm = Exclude<NonNullable<FeedSelection["selection"]["case"]>, "none">;
+type SelectedArm = Exclude<
+  NonNullable<FeedSelection["selection"]["case"]>,
+  "none"
+>;
 
 /** The message each selected arm's row is read from, for a malformed report's path. */
 const SELECTION_ARM_MESSAGE = {
@@ -273,7 +278,9 @@ const SELECTION_ARM_MESSAGE = {
 } as const;
 
 /** Build a controller for ONE feed and draw its shell into the host. */
-export function createFeedController(opts: FeedControllerOptions): FeedController {
+export function createFeedController(
+  opts: FeedControllerOptions,
+): FeedController {
   const order: string[] = [];
   const states = new Map<string, RowState>();
   const listeners = new Set<() => void>();
@@ -295,12 +302,11 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
   // what decides whether a pushed row sorting before every held row is drawn
   // (the feed is at its start) or left to the walk (unloaded history).
   let walkEdge: "hasMore" | "atStart" | null = null;
-  // ROWS INSERTED AND NOT YET PAINTED, and whether a paint check is scheduled
-  // (`schedulePaintCheck`). Only a feed told `onPainted` keeps them.
-  const unpainted = new Set<string>();
-  let paintCheckPending = false;
 
-  opts.host.setAttribute("data-feed", opts.feed === "root" ? "root" : opts.feed.value);
+  opts.host.setAttribute(
+    "data-feed",
+    opts.feed === "root" ? "root" : opts.feed.value,
+  );
 
   const loadMore = document.createElement("button");
   loadMore.type = "button";
@@ -334,7 +340,6 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
     findRowElement,
     bubbles,
     view: () => subfeed,
-    paintedAt: (id) => states.get(id)?.paintedAt ?? null,
     dispose,
   };
 
@@ -368,7 +373,8 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
   function rows(): readonly FeedRow[] {
     return order.map((id) => {
       const state = states.get(id);
-      if (state === undefined) throw new Error(`feed: row ${id} is ordered but not held`);
+      if (state === undefined)
+        throw new Error(`feed: row ${id} is ordered but not held`);
       return state.row;
     });
   }
@@ -385,44 +391,6 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
     markLatestPrompt();
     stopEndedTurns();
     followTail();
-    schedulePaintCheck();
-  }
-
-  /**
-   * Check the unpainted rows once the next frame has been painted: the second
-   * `requestAnimationFrame` runs after the first frame drawn with them. A row
-   * not in the document yet stays unpainted for the next check.
-   */
-  function schedulePaintCheck(): void {
-    if (opts.onPainted === undefined || unpainted.size === 0 || paintCheckPending) return;
-    paintCheckPending = true;
-    requestAnimationFrame(() => {
-      requestAnimationFrame(checkPainted);
-    });
-  }
-
-  function checkPainted(): void {
-    paintCheckPending = false;
-    if (disposed || opts.onPainted === undefined) return;
-    const at = Date.now();
-    const painted: string[] = [];
-    for (const id of [...unpainted]) {
-      const state = states.get(id);
-      if (state === undefined) {
-        unpainted.delete(id);
-        continue;
-      }
-      if (!state.element.isConnected) continue;
-      state.paintedAt = at;
-      unpainted.delete(id);
-      painted.push(id);
-    }
-    if (painted.length === 0) return;
-    log.debug(`${painted.length.toString()} feed rows were painted`, {
-      operation: "feed.rows-painted",
-      context: { feed: feedName(), rows: painted.length, last: painted[painted.length - 1] },
-    });
-    opts.onPainted(painted, at);
   }
 
   /**
@@ -465,10 +433,17 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
       stopped.push(requireMessage(state.row.id, "FeedRow.id").value);
     }
     if (stopped.length === 0) return;
-    log.debug("a turn ended with clocks still running; the backstop stopped them", {
-      operation: "feed.turn-end-stopped-clocks",
-      context: { feed: feedName(), turns: [...ended].join(","), rows: stopped.join(",") },
-    });
+    log.debug(
+      "a turn ended with clocks still running; the backstop stopped them",
+      {
+        operation: "feed.turn-end-stopped-clocks",
+        context: {
+          feed: feedName(),
+          turns: [...ended].join(","),
+          rows: stopped.join(","),
+        },
+      },
+    );
   }
 
   /**
@@ -499,7 +474,10 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
         if (edge.case === "hasMore") opts.host.prepend(loadMore);
         else loadMore.remove();
         walkEdge = edge.case;
-        crumbs = requireMessage(result.value.breadcrumbs, "FeedPageSuccess.breadcrumbs").crumbs;
+        crumbs = requireMessage(
+          result.value.breadcrumbs,
+          "FeedPageSuccess.breadcrumbs",
+        ).crumbs;
         const above = placement === "prepend" ? sampleFirstRow() : null;
         if (placement === "replace") {
           // OWNER RULING (2026-09-18): A REDRAW NEVER UN-TOGGLES, WHATEVER ITS
@@ -508,16 +486,20 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
           // snapshotted by row id here, across the teardown.
           carriedFolds = snapshotExpanded(
             [...states].flatMap(([id, state]) =>
-              state.body === null ? [] : [[id, state.body] as [string, HTMLElement]],
+              state.body === null
+                ? []
+                : [[id, state.body] as [string, HTMLElement]],
             ),
           );
           clearRows();
         }
-        for (let i = 0; i < incoming.length; i += 1) adoptPageRow(incoming[i], keys[i]);
+        for (let i = 0; i < incoming.length; i += 1)
+          adoptPageRow(incoming[i], keys[i]);
         logPagePlaced(placement, keys);
         // A ROW THE REPLACE DID NOT SERVE AGAIN IS GONE: its keys drop rather
         // than linger for a row that will never be drawn.
-        if (placement === "replace") retainRows(carriedFolds, new Set(states.keys()));
+        if (placement === "replace")
+          retainRows(carriedFolds, new Set(states.keys()));
         announce();
         if (placement === "replace") placeAfterReplace();
         else keepPlaceAbovePrepend(above);
@@ -600,13 +582,20 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
   }
 
   /** A push of a row this feed holds: redrawn IN PLACE, never moved. */
-  function replaceHeld(held: RowState, row: FeedRow, id: string, key: string): void {
+  function replaceHeld(
+    held: RowState,
+    row: FeedRow,
+    id: string,
+    key: string,
+  ): void {
     log.debug(`replacing feed row ${id}`, {
       operation: "feed.row-replaced",
       context: { feed: feedName(), row: id, kind: row.row.case ?? "unset" },
     });
     keepKey(held, id, key);
-    const collapsing = isLandingEdge(held.row, row) ? sampleCollapse(id, held) : null;
+    const collapsing = isLandingEdge(held.row, row)
+      ? sampleCollapse(id, held)
+      : null;
     updateHeld(held, row);
     truncateAtSeparation(row, id);
     announce();
@@ -621,10 +610,19 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
   function insertPushed(row: FeedRow, id: string, key: string): void {
     const index = positionOf(key, id);
     if (index === 0 && order.length > 0 && walkEdge === "hasMore") {
-      log.info(`feed row ${id} sorts before every loaded row; it is unloaded history, left to the walk`, {
-        operation: "feed.row-placed",
-        context: { feed: feedName(), row: id, key, outcome: "unloadedHistory", oldest: keyAt(0) },
-      });
+      log.info(
+        `feed row ${id} sorts before every loaded row; it is unloaded history, left to the walk`,
+        {
+          operation: "feed.row-placed",
+          context: {
+            feed: feedName(),
+            row: id,
+            key,
+            outcome: "unloadedHistory",
+            oldest: keyAt(0),
+          },
+        },
+      );
       return;
     }
     const atTail = index === order.length;
@@ -634,7 +632,13 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
         : `feed row ${id} inserted at position ${index.toString()} of ${order.length.toString()}`,
       {
         operation: "feed.row-placed",
-        context: { feed: feedName(), row: id, key, outcome: atTail ? "appended" : "inserted", position: index },
+        context: {
+          feed: feedName(),
+          row: id,
+          key,
+          outcome: atTail ? "appended" : "inserted",
+          position: index,
+        },
       },
     );
     const below = atTail ? null : sampleSuccessor(index);
@@ -666,18 +670,24 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
   }
 
   /** One INFO record per page placed: how many rows, and the keys they span. */
-  function logPagePlaced(placement: "replace" | "prepend", keys: readonly string[]): void {
-    log.info(`placed a ${placement} page of ${keys.length.toString()} rows by their keys`, {
-      operation: "feed.page-placed",
-      context: {
-        feed: feedName(),
-        placement,
-        rows: keys.length,
-        first_key: keys[0] ?? "none",
-        last_key: keys[keys.length - 1] ?? "none",
-        held: order.length,
+  function logPagePlaced(
+    placement: "replace" | "prepend",
+    keys: readonly string[],
+  ): void {
+    log.info(
+      `placed a ${placement} page of ${keys.length.toString()} rows by their keys`,
+      {
+        operation: "feed.page-placed",
+        context: {
+          feed: feedName(),
+          placement,
+          rows: keys.length,
+          first_key: keys[0] ?? "none",
+          last_key: keys[keys.length - 1] ?? "none",
+          held: order.length,
+        },
       },
-    });
+    );
   }
 
   /**
@@ -687,10 +697,18 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
    */
   function keepKey(held: RowState, id: string, key: string): void {
     if (held.key === key) return;
-    log.error(`feed row ${id} was re-pushed with a different order key; it stays where it was placed`, {
-      operation: "feed.row-order-changed",
-      context: { feed: feedName(), row: id, placed_key: held.key, pushed_key: key },
-    });
+    log.error(
+      `feed row ${id} was re-pushed with a different order key; it stays where it was placed`,
+      {
+        operation: "feed.row-order-changed",
+        context: {
+          feed: feedName(),
+          row: id,
+          placed_key: held.key,
+          pushed_key: key,
+        },
+      },
+    );
   }
 
   /**
@@ -709,10 +727,13 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
       else hi = mid;
     }
     if (lo > 0 && keyAt(lo - 1) === key) {
-      log.error(`feed row ${id} carries an order key another row of this feed already holds`, {
-        operation: "feed.row-order-duplicate",
-        context: { feed: feedName(), row: id, key, holder: order[lo - 1] },
-      });
+      log.error(
+        `feed row ${id} carries an order key another row of this feed already holds`,
+        {
+          operation: "feed.row-order-duplicate",
+          context: { feed: feedName(), row: id, key, holder: order[lo - 1] },
+        },
+      );
     }
     return lo;
   }
@@ -721,7 +742,8 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
   function keyAt(index: number): string {
     const id = order[index];
     const state = states.get(id);
-    if (state === undefined) throw new Error(`feed: row ${id} is ordered but not held`);
+    if (state === undefined)
+      throw new Error(`feed: row ${id} is ordered but not held`);
     return state.key;
   }
 
@@ -734,7 +756,8 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
     if (opts.scroll === undefined) return null;
     const id = order[index];
     const state = states.get(id);
-    if (state === undefined) throw new Error(`feed: row ${id} is ordered but not held`);
+    if (state === undefined)
+      throw new Error(`feed: row ${id} is ordered but not held`);
     return {
       id,
       element: state.element,
@@ -758,24 +781,35 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
   function keepPlaceAboveInsert(below: InsertSample | null): void {
     if (opts.scroll === undefined || below === null) return;
     if (!below.element.isConnected) {
-      log.error("an insert detached the row the reader's place was measured from", {
-        operation: "feed.insert-anchor-detached",
-        context: { feed: feedName(), row: below.id },
-      });
+      log.error(
+        "an insert detached the row the reader's place was measured from",
+        {
+          operation: "feed.insert-anchor-detached",
+          context: { feed: feedName(), row: below.id },
+        },
+      );
       return;
     }
     if (below.top >= below.boxTop) {
       log.debug("a late row landed in or below the viewport; the view stays", {
         operation: "feed.insert-in-view",
-        context: { feed: feedName(), row: below.id, top: below.top, box_top: below.boxTop },
+        context: {
+          feed: feedName(),
+          row: below.id,
+          top: below.top,
+          box_top: below.boxTop,
+        },
       });
       return;
     }
     const grown = below.element.getBoundingClientRect().top - below.top;
-    log.debug(`a late row grew ${grown.toString()}px above the reader; the view shifts by it`, {
-      operation: "feed.insert-kept-place",
-      context: { feed: feedName(), row: below.id, grown },
-    });
+    log.debug(
+      `a late row grew ${grown.toString()}px above the reader; the view shifts by it`,
+      {
+        operation: "feed.insert-kept-place",
+        context: { feed: feedName(), row: below.id, grown },
+      },
+    );
     opts.scroll.tail.prependCompensation(grown);
   }
 
@@ -807,17 +841,29 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
   function keepPlaceAboveCollapse(sample: CollapseSample | null): void {
     if (opts.scroll === undefined || sample === null) return;
     if (!sample.element.isConnected) {
-      log.error("a landed thinking row's redraw detached the row its collapse was measured from", {
-        operation: "feed.collapse-anchor-detached",
-        context: { feed: feedName(), row: sample.id },
-      });
+      log.error(
+        "a landed thinking row's redraw detached the row its collapse was measured from",
+        {
+          operation: "feed.collapse-anchor-detached",
+          context: { feed: feedName(), row: sample.id },
+        },
+      );
       return;
     }
     const after = sample.element.getBoundingClientRect().bottom;
-    log.debug(`a landed thinking row above ${sample.boxTop}px changed by ${after - sample.bottom}px`, {
-      operation: "feed.collapse-kept-place",
-      context: { feed: feedName(), row: sample.id, box_top: sample.boxTop, before: sample.bottom, after },
-    });
+    log.debug(
+      `a landed thinking row above ${sample.boxTop}px changed by ${after - sample.bottom}px`,
+      {
+        operation: "feed.collapse-kept-place",
+        context: {
+          feed: feedName(),
+          row: sample.id,
+          box_top: sample.boxTop,
+          before: sample.bottom,
+          after,
+        },
+      },
+    );
     opts.scroll.tail.collapseCompensation({
       boxTop: sample.boxTop,
       rowBottomBefore: sample.bottom,
@@ -839,10 +885,13 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
     const first = !placed;
     placed = true;
     if (opts.scroll === undefined) return;
-    log.debug(`a ${first ? "first" : "replaced"} page landed the feed at its tail`, {
-      operation: "feed.replace-parked",
-      context: { feed: feedName(), rows: order.length, first },
-    });
+    log.debug(
+      `a ${first ? "first" : "replaced"} page landed the feed at its tail`,
+      {
+        operation: "feed.replace-parked",
+        context: { feed: feedName(), rows: order.length, first },
+      },
+    );
     if (first) opts.scroll.tail.initialPlacement();
     else opts.scroll.tail.replaceRestore();
   }
@@ -870,12 +919,20 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
    * Sample the first row already drawn and where its top sits, BEFORE a prepend
    * lands rows above it. Null when the feed draws no row yet.
    */
-  function sampleFirstRow(): { id: string; element: HTMLElement; top: number } | null {
+  function sampleFirstRow(): {
+    id: string;
+    element: HTMLElement;
+    top: number;
+  } | null {
     const id = order[0];
     if (id === undefined) return null;
     const state = states.get(id);
     if (state === undefined) return null;
-    return { id, element: state.element, top: state.element.getBoundingClientRect().top };
+    return {
+      id,
+      element: state.element,
+      top: state.element.getBoundingClientRect().top,
+    };
   }
 
   /**
@@ -890,20 +947,28 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
    * A first row the prepend DETACHED is an invariant violation (a prepend only
    * ever adds rows above), and is recorded as one rather than guessed around.
    */
-  function keepPlaceAbovePrepend(above: { id: string; element: HTMLElement; top: number } | null): void {
+  function keepPlaceAbovePrepend(
+    above: { id: string; element: HTMLElement; top: number } | null,
+  ): void {
     if (opts.scroll === undefined || above === null) return;
     if (!above.element.isConnected) {
-      log.error("a prepend detached the row the reader's place was measured from", {
-        operation: "feed.prepend-anchor-detached",
-        context: { feed: feedName(), row: above.id },
-      });
+      log.error(
+        "a prepend detached the row the reader's place was measured from",
+        {
+          operation: "feed.prepend-anchor-detached",
+          context: { feed: feedName(), row: above.id },
+        },
+      );
       return;
     }
     const grown = above.element.getBoundingClientRect().top - above.top;
-    log.debug(`a prepend grew ${grown}px above the reader; the view shifts by it`, {
-      operation: "feed.prepend-kept-place",
-      context: { feed: feedName(), row: above.id, grown },
-    });
+    log.debug(
+      `a prepend grew ${grown}px above the reader; the view shifts by it`,
+      {
+        operation: "feed.prepend-kept-place",
+        context: { feed: feedName(), row: above.id, grown },
+      },
+    );
     opts.scroll.tail.prependCompensation(grown);
   }
 
@@ -931,7 +996,10 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
     const was = selectedRow;
     switch (arm.case) {
       case "none": {
-        const viewport = requireCase(arm.value.viewport, "FeedSelectionNone.viewport");
+        const viewport = requireCase(
+          arm.value.viewport,
+          "FeedSelectionNone.viewport",
+        );
         markSelectedRow(null);
         selectedRow = null;
         expandSelected(null);
@@ -958,7 +1026,10 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
       case "response":
       case "prompt":
       case "bubble": {
-        const row = requireMessage(arm.value.row, `${SELECTION_ARM_MESSAGE[arm.case]}.row`);
+        const row = requireMessage(
+          arm.value.row,
+          `${SELECTION_ARM_MESSAGE[arm.case]}.row`,
+        );
         markSelectedRow({ kind: arm.case, row });
         selectedRow = row.value;
         expandSelected(row.value);
@@ -988,7 +1059,9 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
   function expandSelected(selected: string | null): void {
     for (const state of states.values()) {
       if (!state.element.hasAttribute(SELECTION_GOVERNED_ATTRIBUTE)) continue;
-      const box = state.element.querySelector<HTMLElement>(`.${BUBBLE_CLASS} > .${BUBBLE_SCROLL_CLASS}`);
+      const box = state.element.querySelector<HTMLElement>(
+        `.${BUBBLE_CLASS} > .${BUBBLE_SCROLL_CLASS}`,
+      );
       if (box === null) continue;
       const open = state.element.getAttribute("data-feed-row") === selected;
       if (open === isExpanded(box)) continue;
@@ -1005,7 +1078,9 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
    * nothing is marked — the same tolerance `markFinalAnswer` has, since
    * guessing which row to mark is worse than none.
    */
-  function markSelectedRow(selected: { kind: SelectedArm; row: FeedId } | null): void {
+  function markSelectedRow(
+    selected: { kind: SelectedArm; row: FeedId } | null,
+  ): void {
     const target = selected === null ? null : findRowElement(selected.row);
     if (selected !== null && target === null) {
       log.debug("the selection names a row this feed has not drawn", {
@@ -1024,7 +1099,9 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
       syncSelectedEntry(state.element);
     }
     opts.selectionVisibility?.watch(
-      selected === null || target === null ? null : { element: target, id: selected.row },
+      selected === null || target === null
+        ? null
+        : { element: target, id: selected.row },
     );
   }
 
@@ -1114,10 +1191,13 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
       state.element.remove();
       states.delete(gone);
     }
-    log.info(`dropped ${dropped.length.toString()} rows above the newest separation`, {
-      operation: "feed.truncated-at-separation",
-      context: { feed: feedName(), row: id, dropped: dropped.length },
-    });
+    log.info(
+      `dropped ${dropped.length.toString()} rows above the newest separation`,
+      {
+        operation: "feed.truncated-at-separation",
+        context: { feed: feedName(), row: id, dropped: dropped.length },
+      },
+    );
   }
 
   /**
@@ -1137,13 +1217,24 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
    * Put a NEW row in the store at INDEX, the position its KEY was found at
    * (`positionOf`). This is the one place a row enters the order.
    */
-  function insertAt(row: FeedRow, id: string, key: string, index: number): void {
+  function insertAt(
+    row: FeedRow,
+    id: string,
+    key: string,
+    index: number,
+  ): void {
     const element = document.createElement("article");
     element.className = "feed-item";
     applyRowAttributes(element, row);
-    const state: RowState = { row, key, element, body: null, bubble: null, dirty: true, paintedAt: null };
+    const state: RowState = {
+      row,
+      key,
+      element,
+      body: null,
+      bubble: null,
+      dirty: true,
+    };
     states.set(id, state);
-    if (opts.onPainted !== undefined) unpainted.add(id);
     order.splice(index, 0, id);
     // WATCH THE NEW ROW so the overscan buffer can pre-render it before the
     // reader reaches it. Every row born on this feed passes here exactly once,
@@ -1185,7 +1276,8 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
   function drawRow(row: FeedRow): HTMLElement {
     const id = requireMessage(row.id, "FeedRow.id").value;
     const state = states.get(id);
-    if (state === undefined) throw new Error(`feed: asked to draw unheld row ${id}`);
+    if (state === undefined)
+      throw new Error(`feed: asked to draw unheld row ${id}`);
     if (!state.dirty) return state.element;
     state.dirty = false;
     drawBody(state);
@@ -1351,7 +1443,10 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
   }
 
   /** One unit of synchronous turn progress, by arm. */
-  function drawActivity(activity: FeedTurnActivity, rc: RowContext): HTMLElement {
+  function drawActivity(
+    activity: FeedTurnActivity,
+    rc: RowContext,
+  ): HTMLElement {
     const unit = requireCase(activity.unit, "FeedTurnActivity.unit");
     switch (unit.case) {
       case "response":
@@ -1393,7 +1488,10 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
    * be held at all and the refusal is the whole row's.
    */
   function applyRowAttributes(el: HTMLElement, row: FeedRow): void {
-    el.setAttribute("data-feed-row", requireMessage(row.id, "FeedRow.id").value);
+    el.setAttribute(
+      "data-feed-row",
+      requireMessage(row.id, "FeedRow.id").value,
+    );
     el.setAttribute("data-row-kind", row.row.case ?? "malformed");
     // THE SELECTION'S SHARE OF THE ROW (bubble-selection.ts): whether the
     // selection governs its bubble, and whether the daemon says it can be
@@ -1484,7 +1582,8 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
 
   /** Drop whatever a previous walk's refusal left beside the control. */
   function clearRefusals(): void {
-    for (const stale of opts.host.querySelectorAll(":scope > .refusal")) stale.remove();
+    for (const stale of opts.host.querySelectorAll(":scope > .refusal"))
+      stale.remove();
   }
 
   /** Keep the tail on screen while a named cause's follow stands. */
@@ -1505,7 +1604,9 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
       const state = states.get(id);
       if (state?.row.row.case === "userPrompt") latest = state.element;
     }
-    for (const el of opts.host.querySelectorAll<HTMLElement>("[data-latest-prompt]")) {
+    for (const el of opts.host.querySelectorAll<HTMLElement>(
+      "[data-latest-prompt]",
+    )) {
       if (el !== latest) el.removeAttribute("data-latest-prompt");
     }
     latest?.setAttribute("data-latest-prompt", "true");
@@ -1532,12 +1633,17 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
     if (promptWorking(held.row) === null) return false;
     const bubble = held.element.querySelector<HTMLElement>(".bubble.user");
     if (bubble === null) return false;
-    if (!equals(FeedRowSchema, withWorking(held.row, working), row)) return false;
+    if (!equals(FeedRowSchema, withWorking(held.row, working), row))
+      return false;
     held.row = row;
     setPromptWave(bubble, working);
     log.debug(`moved the prompt wave in place: working=${String(working)}`, {
       operation: "feed.prompt-wave-moved",
-      context: { feed: feedName(), row: requireMessage(row.id, "FeedRow.id").value, working },
+      context: {
+        feed: feedName(),
+        row: requireMessage(row.id, "FeedRow.id").value,
+        working,
+      },
     });
     return true;
   }
@@ -1583,7 +1689,11 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
  */
 export function orderKeyOf(row: FeedRow): string {
   const key = requireMessage(row.order, "FeedRow.order").key;
-  if (key === "") throw new MalformedView("FeedRow.order.key", "a feed row's order key is empty");
+  if (key === "")
+    throw new MalformedView(
+      "FeedRow.order.key",
+      "a feed row's order key is empty",
+    );
   return key;
 }
 
@@ -1626,7 +1736,10 @@ export function isBubbleRow(row: FeedRow): boolean {
   // sub-feed its FeedId addresses (the detached_shell BODY row rides there).
   if (row.row.case === "shellHead") return true;
   if (row.row.case !== "activity") return false;
-  return row.row.value.unit.case === "subagent" || row.row.value.unit.case === "merge";
+  return (
+    row.row.value.unit.case === "subagent" ||
+    row.row.value.unit.case === "merge"
+  );
 }
 
 /** The refusal drawn beside the control that made the call. */

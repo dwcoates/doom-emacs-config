@@ -100,19 +100,18 @@ func TestFooterStatusTreeFollowsIdleWorkingDone(t *testing.T) {
 	})
 }
 
-// TestFooterNamesTheRunningCallAndTheQuietStretch pins the working step and
-// the quiet-stretch line through the real watcher: the main agent's running
-// shell command is the `executing` step, and once it lands the activity line
-// says so until the next feed item surfaces.
-func TestFooterNamesTheRunningCallAndTheQuietStretch(t *testing.T) {
+// TestFooterNamesTheRunningCall pins the working step through the real
+// watcher: the main agent's running shell command is the `executing` step, and
+// once it lands the step is `thinking` again.
+func TestFooterNamesTheRunningCall(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	footer := f.d.WatchFooter(f.ws)
-	f.submit("do it", "k-quiet", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	f.submit("do it", "k-step", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	bash := func(result *conversationv1.AgentBash) *conversationv1.AgentFrame {
 		return activityFrame(mainAgent, &conversationv1.AgentActivity{
-			ActivityId: activityID("bash-quiet"),
+			ActivityId: activityID("bash-step"),
 			Item:       &conversationv1.AgentActivity_Bash{Bash: result},
 		})
 	}
@@ -131,23 +130,8 @@ func TestFooterNamesTheRunningCallAndTheQuietStretch(t *testing.T) {
 		Result: &conversationv1.AgentBash_Success{Success: &conversationv1.AgentBashSuccess{}}}))
 
 	// Assert
-	awaitFooter(t, f, footer, "the quiet-stretch line once the shell command lands", func(v *frontendv1.FooterView) bool {
-		working := v.GetStrip().GetStatus().GetWorking()
-		return working.GetThinking() != nil &&
-			working.GetActivity().GetUnpinned().GetQuietStretch().GetText() == "✅ Bash finished — handling result..."
-	})
-
-	// Act: the response's first frame surfaces.
-	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
-		ActivityId: activityID("resp-quiet"),
-		Item: &conversationv1.AgentActivity_Response{Response: &conversationv1.AgentResponse{
-			Result: &conversationv1.AgentResponse_Start{Start: &conversationv1.AgentResponseStart{}}}},
-	}))
-
-	// Assert
-	awaitFooter(t, f, footer, "the quiet-stretch line cleared by the next surfacing", func(v *frontendv1.FooterView) bool {
-		working := v.GetStrip().GetStatus().GetWorking()
-		return working != nil && working.GetActivity().GetUnpinned().GetQuietStretch() == nil
+	awaitFooter(t, f, footer, "working.thinking once the shell command lands", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetStatus().GetWorking().GetThinking() != nil
 	})
 }
 

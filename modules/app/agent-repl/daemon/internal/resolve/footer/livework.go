@@ -58,7 +58,6 @@ func (r *resolver) OnLiveWorkChanged(ws ids.WorkspaceID, live LiveWorkSet) {
 			s.liveWork = live
 			s.liveWorkSeen = true
 			dropped, added, readded = reconcileLiveWork(s, live, r.opts.clock.Now())
-			r.settleBackgroundLine(s)
 		})
 	r.workspaceLog(ws).Info("daemon.footer.live_work_taken",
 		"the footer took the watcher's live-work set as the authority for which detached work is live",

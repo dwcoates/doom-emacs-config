@@ -32,7 +32,10 @@ import { controlPlaneFailed } from "../failure/sink.js";
 import { createJumpCollapse } from "./jump-collapse.js";
 import { installBackgroundClear } from "./background-click.js";
 import { governedRowAt, installBubbleSelect } from "./bubble-selection.js";
-import { LEFT_VIEW_REQUEST, createSelectionVisibility } from "./selection-visibility.js";
+import {
+  LEFT_VIEW_REQUEST,
+  createSelectionVisibility,
+} from "./selection-visibility.js";
 import { guardMalformed } from "../rpc/guard.js";
 import { selectFeedRow } from "./select-feed-row.js";
 import { refreshHasMore } from "./bubble-more.js";
@@ -86,7 +89,6 @@ import { HELD_ENTRY_SELECTOR } from "../tray/tray.js";
 import { tick, stopTicking } from "./ticking.js";
 import { createOverscan } from "./overscan.js";
 import { REVEAL_ATTRIBUTE, syncSelectedEntry } from "./selected-entry.js";
-import { createPaintReporter, type PaintWatch } from "./painted.js";
 
 /** How long a revealed row wears the highlight that says "here". */
 export const REVEAL_HIGHLIGHT_MS = 1500;
@@ -96,7 +98,6 @@ export const JUMP_EXPAND_REQUEST = "expand the entry a jump landed on";
 
 /** The scroll cause a jump centers under: the footer's own, or every other jump's. */
 type JumpCause = "detachedWorkSelected" | "entryJumped";
-
 
 export interface FeedDeps {
   renderers: RowRenderers;
@@ -124,17 +125,14 @@ export interface FeedHandle extends Handle {
    * so the tail is where the card is.
    */
   readonly promptHeld: (turn: string) => void;
-  /** When the root feed's rows were painted (`feed/painted.ts`). */
-  readonly paints: PaintWatch;
-  /**
-   * Whether the reader is following the live tail. A reader scrolled back
-   * through history is not looking where a new row paints.
-   */
-  readonly followingTail: () => boolean;
 }
 
 /** Mount the root feed into HOST. */
-export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): FeedHandle {
+export function mountFeed(
+  host: HTMLElement,
+  ctx: AppContext,
+  deps: FeedDeps,
+): FeedHandle {
   log.info("mounting the feed", { operation: "feed.mount", context: {} });
 
   const scrollBox = deps.scrollBox ?? host.parentElement ?? null;
@@ -157,7 +155,10 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
   // The size half is the footer occlusion (see `observeScrollBox`) — the
   // docked footer settling after a render shrinks this box, and a tail parked
   // before that shrink is left below the fold with the last bubble clipped.
-  const unobserve = scrollBox === null || tail === null ? null : observeScrollBox(scrollBox, tail);
+  const unobserve =
+    scrollBox === null || tail === null
+      ? null
+      : observeScrollBox(scrollBox, tail);
   // INTENT-ARMED INNER SCROLLING, on the same box. A capped section keeps the
   // wheel only while the reader has deliberately entered it; otherwise the
   // wheel redirects to the feed. Without it, a section the feed scrolled under
@@ -166,7 +167,11 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
   // An OPEN (expanded) section is the exception: it keeps its whole wheel, and
   // nothing chains from it to the feed (expand.ts says which sections are open).
   const intentScroll =
-    scrollBox === null ? null : installIntentScroll(scrollBox, (el) => expandedSectionAt(el, scrollBox));
+    scrollBox === null
+      ? null
+      : installIntentScroll(scrollBox, (el) =>
+          expandedSectionAt(el, scrollBox),
+        );
   // THE OVERSCAN BUFFER, rooted on the same scroll box, blows the pre-render
   // band out to ~5 viewport heights so a row within it lays out at its true
   // height before the reader scrolls to it — the cure for the first-scroll
@@ -184,7 +189,11 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
           void guardMalformed(
             ctx,
             "feed.selection-left-view",
-            selectFeedRow(ctx, { case: "leftView", value: { row } }, LEFT_VIEW_REQUEST),
+            selectFeedRow(
+              ctx,
+              { case: "leftView", value: { row } },
+              LEFT_VIEW_REQUEST,
+            ),
           );
         });
   // AN ENTRY A JUMP EXPANDED CLOSES ONCE IT IS WHOLLY OUT OF VIEW (owner
@@ -234,7 +243,8 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
   // (bubble-selection.ts): a click on it selects instead of toggling, and the
   // auto-collapse never closes it, because selected and expanded are one state
   // the daemon owns.
-  const ownedBySelection = (section: HTMLElement): boolean => governedRowAt(section, host) !== null;
+  const ownedBySelection = (section: HTMLElement): boolean =>
+    governedRowAt(section, host) !== null;
   const uninstallExpand = installClickExpand(
     host,
     undefined,
@@ -254,7 +264,6 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
   };
   host.addEventListener(ITEM_EXPANDED_EVENT, onItemExpanded);
 
-  const paints = createPaintReporter((id) => root.paintedAt(id));
   const root: FeedController = createFeedController({
     ctx,
     host,
@@ -264,32 +273,34 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
     revealRow,
     bubble: bubbleFor,
     bodyContext: feedContext(),
-    scroll: scrollBox === null || tail === null ? undefined : { box: scrollBox, tail },
+    scroll:
+      scrollBox === null || tail === null
+        ? undefined
+        : { box: scrollBox, tail },
     overscan: overscan ?? undefined,
     selectionVisibility: selectionVisibility ?? undefined,
-    onPainted: (ids, at) => {
-      paints.report(ids, at);
-    },
     onSelectionExpand: afterSelectionToggle,
   });
 
   // A CLICK ON A ROOT-FEED PROMPT OR RESPONSE BUBBLE selects it, or clears the
   // selection when it is the selected one (owner ruling, 2026-10-01).
-  const uninstallSelect = installBubbleSelect(host, ctx, () => root.selectedRow());
+  const uninstallSelect = installBubbleSelect(host, ctx, () =>
+    root.selectedRow(),
+  );
 
   // A CLICK ON THE FEED OUTSIDE ANY BUBBLE ends the feed's selection
   // (owner ruling, 2026-09-23). It asks the daemon, which owns the selection;
   // the daemon's cleared push then parks the tail through `applySelection`.
   const uninstallClear =
-    scrollBox === null ? null : installBackgroundClear(scrollBox, ctx, () => root.selectionActive());
+    scrollBox === null
+      ? null
+      : installBackgroundClear(scrollBox, ctx, () => root.selectionActive());
 
   openWatch();
 
   return {
     selectDetachedWork,
     promptHeld,
-    paints: paints.watch,
-    followingTail: () => tail?.isFollowing() ?? false,
     dispose,
   };
 
@@ -396,15 +407,24 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
     const result = requireCase(response.result, "OpenFeedResponse.result");
     switch (result.case) {
       case "success": {
-        root.applyPage(requireMessage(result.value.page, "OpenFeedSuccess.page"), "replace");
-        const token = requireMessage(result.value.watch, "OpenFeedSuccess.watch");
+        root.applyPage(
+          requireMessage(result.value.page, "OpenFeedSuccess.page"),
+          "replace",
+        );
+        const token = requireMessage(
+          result.value.watch,
+          "OpenFeedSuccess.watch",
+        );
         yield* ctx.streams.watch("feed", buildWatchFeedRequest(token), signal);
         return;
       }
       case "error":
         log.error("the daemon refused to open the workspace's root feed", {
           operation: "feed.root-open-refused",
-          context: { arm: requireCase(result.value.cause ?? {}, "OpenFeedError.cause").case },
+          context: {
+            arm: requireCase(result.value.cause ?? {}, "OpenFeedError.cause")
+              .case,
+          },
         });
         // THE DAEMON ANSWERED AND REFUSED, so the loop's own card would name a
         // daemon that is plainly reachable (the audit's N3 row 14). The footer
@@ -471,7 +491,10 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
       composerFactory: deps.composerFactory,
       head: bubbleHead,
       overscan: overscan ?? undefined,
-      scroll: scrollBox === null || tail === null ? undefined : { box: scrollBox, tail },
+      scroll:
+        scrollBox === null || tail === null
+          ? undefined
+          : { box: scrollBox, tail },
     };
     if (unitCase(row) === "merge") {
       return mountBubble({
@@ -486,7 +509,11 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
     // A subagent row ships no fold, so it starts collapsed and transfers
     // nothing but its head until the reader asks for more -- synchronous and
     // detached alike, since the two are one bubble that moved placement.
-    return mountBubble({ ...shared, body: defaultBubbleBody, initialFolded: true });
+    return mountBubble({
+      ...shared,
+      body: defaultBubbleBody,
+      initialFolded: true,
+    });
   }
 
   // ---- reveal -----------------------------------------------------------
@@ -529,10 +556,13 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
       await land(here, id, cause);
       return true;
     }
-    log.debug("the reveal target is not drawn; asking the daemon where it lives", {
-      operation: "feed.reveal-probe",
-      context: { row: id.value },
-    });
+    log.debug(
+      "the reveal target is not drawn; asking the daemon where it lives",
+      {
+        operation: "feed.reveal-probe",
+        context: { row: id.value },
+      },
+    );
     let response: OpenFeedResponse;
     try {
       response = await callUnary(
@@ -560,10 +590,14 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
         operation: "feed.reveal-refused",
         context: { row: id.value },
       });
-      reportClientFailure("feed_not_tailing", "the daemon refused the feed's reveal probe");
+      reportClientFailure(
+        "feed_not_tailing",
+        "the daemon refused the feed's reveal probe",
+      );
       return false;
     }
-    if (result.case !== "success") return unreachableArm("OpenFeedResponse.result", armName(result));
+    if (result.case !== "success")
+      return unreachableArm("OpenFeedResponse.result", armName(result));
     // The probe's token is deliberately ABANDONED: the walk below opens each
     // bubble properly, which mints the token that bubble will actually tail.
     const page = requireCase(
@@ -571,7 +605,10 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
       "FeedPage.result",
     );
     if (page.case !== "success") return false;
-    const crumbs = requireMessage(page.value.breadcrumbs, "FeedPageSuccess.breadcrumbs").crumbs;
+    const crumbs = requireMessage(
+      page.value.breadcrumbs,
+      "FeedPageSuccess.breadcrumbs",
+    ).crumbs;
     const opened: BubbleLike[] = [];
     const walked = await walk(crumbs, id, opened);
     // A container the walk opened is the jump's expansion too, and is watched
@@ -580,10 +617,13 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
     if (!walked) return false;
     const found = findAcrossOpenFeeds(root, id);
     if (found === null) {
-      log.warn("the breadcrumb walk finished without the reveal target appearing", {
-        operation: "feed.reveal-lost",
-        context: { row: id.value, crumbs: crumbs.length },
-      });
+      log.warn(
+        "the breadcrumb walk finished without the reveal target appearing",
+        {
+          operation: "feed.reveal-lost",
+          context: { row: id.value, crumbs: crumbs.length },
+        },
+      );
       return false;
     }
     await land(found, id, cause);
@@ -609,10 +649,13 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
     let controller: FeedController = root;
     for (const crumb of crumbs) {
       if (findAcrossOpenFeeds(root, id) !== null) {
-        log.debug("the reveal target is drawn; the walk opens nothing further", {
-          operation: "feed.reveal-walk-stopped",
-          context: { row: id.value, crumb: crumb.target?.value ?? "unset" },
-        });
+        log.debug(
+          "the reveal target is drawn; the walk opens nothing further",
+          {
+            operation: "feed.reveal-walk-stopped",
+            context: { row: id.value, crumb: crumb.target?.value ?? "unset" },
+          },
+        );
         return true;
       }
       const target = requireMessage(crumb.target, "FeedBreadcrumb.target");
@@ -635,7 +678,10 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
   }
 
   /** The bubble for TARGET on CONTROLLER, if it holds one. */
-  function bubbleOn(controller: FeedController, target: FeedId): BubbleLike | null {
+  function bubbleOn(
+    controller: FeedController,
+    target: FeedId,
+  ): BubbleLike | null {
     const element = controller.findRowElement(target);
     if (element === null) return null;
     for (const bubble of controller.bubbles()) {
@@ -663,7 +709,10 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
     if (scrollBox === null || tail === null) return;
     log.debug("centering an expanded feed item", {
       operation: "feed.center-expanded-item",
-      context: { row: row.getAttribute("data-feed-row") ?? "unset", element: expanded.className },
+      context: {
+        row: row.getAttribute("data-feed-row") ?? "unset",
+        element: expanded.className,
+      },
     });
     tail.itemExpanded(revealGeometry(scrollBox, row));
   }
@@ -673,7 +722,11 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
    * it under CAUSE, reading the EXPANDED layout, and mark it, briefly, as the
    * one meant.
    */
-  async function land(element: HTMLElement, id: FeedId, cause: JumpCause): Promise<void> {
+  async function land(
+    element: HTMLElement,
+    id: FeedId,
+    cause: JumpCause,
+  ): Promise<void> {
     // A grouped member sits in an inactive tab is HIDDEN and has no layout box;
     // bring its tab to the front, so the landing is on a member that is
     // actually drawn (tool-group.ts). A member outside any group is left alone.
@@ -717,10 +770,13 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
     const bubble = bubbleOfRow(root, row);
     if (bubble !== null) {
       if (bubble.isExpanded()) {
-        log.debug("a jump landed on a bubble already open; it is left as it is", {
-          operation: "feed.jump-expand-skipped",
-          context: { row: id.value, entry: "subFeed" },
-        });
+        log.debug(
+          "a jump landed on a bubble already open; it is left as it is",
+          {
+            operation: "feed.jump-expand-skipped",
+            context: { row: id.value, entry: "subFeed" },
+          },
+        );
         return;
       }
       if (!(await bubble.expand())) {
@@ -729,7 +785,10 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
           context: { row: id.value },
         });
         ctx.failures.report(
-          controlPlaneFailed(JUMP_EXPAND_REQUEST, "the daemon did not open the entry's feed"),
+          controlPlaneFailed(
+            JUMP_EXPAND_REQUEST,
+            "the daemon did not open the entry's feed",
+          ),
         );
         return;
       }
@@ -737,10 +796,16 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
       return;
     }
     const sections = sectionsOwnedBy(row);
-    if (sections.length === 0 || sections.some((section) => isExpanded(section))) {
+    if (
+      sections.length === 0 ||
+      sections.some((section) => isExpanded(section))
+    ) {
       log.debug("a jump landed on an entry with nothing closed to expand", {
         operation: "feed.jump-expand-skipped",
-        context: { row: id.value, entry: sections.length === 0 ? "none" : "open" },
+        context: {
+          row: id.value,
+          entry: sections.length === 0 ? "none" : "open",
+        },
       });
       return;
     }
@@ -751,7 +816,8 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
     });
     jumps?.track({
       row,
-      isExpanded: () => sectionsOwnedBy(row).some((section) => isExpanded(section)),
+      isExpanded: () =>
+        sectionsOwnedBy(row).some((section) => isExpanded(section)),
       collapse: () => {
         for (const section of sectionsOwnedBy(row)) {
           if (isExpanded(section)) collapseSection(section, afterSectionToggle);
@@ -813,19 +879,31 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
    */
   function collapseEveryExpandedEntry(): void {
     jumps?.clear();
-    const sections = autoCollapseFor(host.ownerDocument).collapseOutside("tailReached", null);
+    const sections = autoCollapseFor(host.ownerDocument).collapseOutside(
+      "tailReached",
+      null,
+    );
     let bubbles = 0;
     for (const bubble of root.bubbles()) {
       if (!bubble.isExpanded()) continue;
       bubble.collapse();
       bubbles += 1;
     }
-    const record = { operation: "feed.tail-reached-collapse", context: { sections, bubbles } };
+    const record = {
+      operation: "feed.tail-reached-collapse",
+      context: { sections, bubbles },
+    };
     if (sections + bubbles === 0) {
-      log.debug("the reader returned to the tail; nothing was expanded", record);
+      log.debug(
+        "the reader returned to the tail; nothing was expanded",
+        record,
+      );
       return;
     }
-    log.info("the reader returned to the tail; every expanded entry collapses", record);
+    log.info(
+      "the reader returned to the tail; every expanded entry collapses",
+      record,
+    );
   }
 
   function dispose(): void {
@@ -854,14 +932,19 @@ const FEED_ROW_SELECTOR = "[data-feed-row]";
  * member's) is that row's, not this one's.
  */
 function sectionsOwnedBy(row: HTMLElement): HTMLElement[] {
-  return cappedSectionsOf(row).filter((section) => section.closest(FEED_ROW_SELECTOR) === row);
+  return cappedSectionsOf(row).filter(
+    (section) => section.closest(FEED_ROW_SELECTOR) === row,
+  );
 }
 
 /**
  * The sub-feed bubble ROW holds itself, searched across CONTROLLER and every
  * OPEN sub-feed under it, or null when the row is no bubble's.
  */
-function bubbleOfRow(controller: FeedController, row: HTMLElement): BubbleLike | null {
+function bubbleOfRow(
+  controller: FeedController,
+  row: HTMLElement,
+): BubbleLike | null {
   for (const bubble of controller.bubbles()) {
     if (bubble.element.closest(FEED_ROW_SELECTOR) === row) return bubble;
     const child = bubble.isExpanded() ? bubble.child() : null;
@@ -893,7 +976,8 @@ export function latestEntry(box: Element): Element | null {
   const rows = box.querySelectorAll(FEED_ROW_SELECTOR);
   let row = rows[rows.length - 1] ?? null;
   if (row === null) return null;
-  const outer = (el: Element): Element | null => el.parentElement?.closest(FEED_ROW_SELECTOR) ?? null;
+  const outer = (el: Element): Element | null =>
+    el.parentElement?.closest(FEED_ROW_SELECTOR) ?? null;
   for (let up = outer(row); up !== null; up = outer(up)) row = up;
   return row.closest(`.${FEED_GROUP_CLASS}`) ?? row;
 }
@@ -923,7 +1007,10 @@ function unitCase(row: FeedRow): string | undefined {
 /** The detached wrapper on a row the caller has established is one. */
 function detachedSubagentOf(row: FeedRow): FeedDetachedSubagent {
   if (row.row.case !== "detachedSubagent") {
-    throw new MalformedView("FeedRow.row", "the row is not a detached subagent");
+    throw new MalformedView(
+      "FeedRow.row",
+      "the row is not a detached subagent",
+    );
   }
   return row.row.value;
 }
@@ -931,7 +1018,10 @@ function detachedSubagentOf(row: FeedRow): FeedDetachedSubagent {
 /** The subagent unit on a row the caller has established is one. */
 function subagentOf(row: FeedRow): FeedSubagent {
   if (row.row.case !== "activity" || row.row.value.unit.case !== "subagent") {
-    throw new MalformedView("FeedTurnActivity.unit", "the row is not a subagent bubble");
+    throw new MalformedView(
+      "FeedTurnActivity.unit",
+      "the row is not a subagent bubble",
+    );
   }
   return row.row.value.unit.value;
 }
@@ -939,7 +1029,10 @@ function subagentOf(row: FeedRow): FeedSubagent {
 /** The merge unit on a row the caller has established is one. */
 function mergeOf(row: FeedRow): FeedMerge {
   if (row.row.case !== "activity" || row.row.value.unit.case !== "merge") {
-    throw new MalformedView("FeedTurnActivity.unit", "the row is not a merge bubble");
+    throw new MalformedView(
+      "FeedTurnActivity.unit",
+      "the row is not a merge bubble",
+    );
   }
   return row.row.value.unit.value;
 }
@@ -947,7 +1040,10 @@ function mergeOf(row: FeedRow): FeedMerge {
 /** The shell head on a row the caller has established is one. */
 function shellHeadOf(row: FeedRow): FeedShell {
   if (row.row.case !== "shellHead") {
-    throw new MalformedView("FeedRow.row", "the row is not a shell head bubble");
+    throw new MalformedView(
+      "FeedRow.row",
+      "the row is not a shell head bubble",
+    );
   }
   return row.row.value;
 }

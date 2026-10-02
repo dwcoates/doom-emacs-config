@@ -632,7 +632,7 @@ func (r *resolver) applyDetached(ws ids.WorkspaceID, s *wsState, id string, work
 	switch origin := work.GetOrigin().(type) {
 	case *conversationv1.AgentDetachedWork_Detached:
 		unit := origin.Detached.GetDetachedFromId().GetValue()
-		r.leaveTurn(ws, s, unit)
+		r.leaveTurn(s, unit)
 		if row, ok := s.bashUnits[unit]; ok {
 			s.shells[id] = &shellRow{
 				work: id, command: row.command, startedAt: row.startedAt, order: s.nextOrder()}
@@ -656,7 +656,7 @@ func (r *resolver) applyDetached(ws ids.WorkspaceID, s *wsState, id string, work
 	case *conversationv1.AgentDetachedWork_Created:
 		// The work's handle IS the unit that created it
 		// (`DetachedWorkId.value == AgentActivityId.value`).
-		r.leaveTurn(ws, s, id)
+		r.leaveTurn(s, id)
 		r.applyCreatedWork(s, id, origin.Created.GetWorkCreated())
 	}
 }
@@ -785,9 +785,6 @@ func (r *resolver) OnSubagent(ws ids.WorkspaceID, work *conversationv1.DetachedW
 					row.takeUpdate(item.Update)
 				}
 			default:
-				if _, done := s.retiredWork[id]; !done {
-					r.landBackground(s, "Subagent", detachedPhase(sub.GetFailure() != nil))
-				}
 				retireWork(s, id)
 			}
 		})
@@ -876,9 +873,6 @@ func (r *resolver) OnBash(ws ids.WorkspaceID, work *conversationv1.DetachedWorkI
 				row.startedAt = time.UnixMilli(item.Start.GetStartedAt().GetAtMs())
 			case *conversationv1.AgentBash_Tail:
 			default:
-				if _, done := s.retiredWork[id]; !done {
-					r.landBackground(s, "Bash", detachedPhase(bash.GetFailure() != nil))
-				}
 				s.retiredWork[id] = struct{}{}
 				delete(s.shells, id)
 			}

@@ -172,7 +172,7 @@ Two further limits, stated rather than hidden:
 | `!rate-limit` | ungrounded | sessionfacts_e2e_test.go | — | — | Go: TestRateLimitOverageWindowFeedsTheOverageAllowance asserts the exact conclusion prose, the event's `allowed_warning` verdict and 0.79 utilization on the overage `FooterAllowance` of the enduring usage line, a non-zero `resets_at_s`, and the specific negative that no salient line stands, with the harness warning sweep holding that the retired `daemon.footer.rate_limit_overage` warn stays gone. | covered |
 | `!rate-limit-five-hour` | ungrounded | sessionfacts_e2e_test.go | — | — | Go: TestRateLimitFiveHourWindowFeedsTheSessionAllowance asserts the session `FooterAllowance` of the enduring usage line carries the event's `allowed_warning` verdict, its 0.82 utilization and a non-zero `resets_at_s`, and the specific negative that no salient line stands. | covered |
 | `!rate-limit-seven-day` | ungrounded | sessionfacts_e2e_test.go | — | — | Go: TestRateLimitSevenDayWindowFeedsTheWeeklyAllowance asserts the weekly `FooterAllowance` of the enduring usage line carries the event's `allowed_warning` verdict, its 0.91 utilization and a non-zero `resets_at_s`, the specific negative that no salient line stands, and the event's session-arm record. | covered |
-| `!read` | grounded | filetools_e2e_test.go | feed-families.layer.test.ts | — | Go: TestReadWholeHeadRange asserts code output form, paint spans, omitted-line composed for the cut. Web: feed-families.layer asserts .tool-name/[data-output-body]. | covered |
+| `!read` | grounded | filetools_e2e_test.go, footeractivity_e2e_test.go | feed-families.layer.test.ts | — | Go: TestReadWholeHeadRange asserts code output form, paint spans, omitted-line composed for the cut. Web: feed-families.layer asserts .tool-name/[data-output-body]. | covered |
 | `!read-head` | grounded | filetools_e2e_test.go | — | — | Go: TestReadWholeHeadRange (head subtest) asserts omitted line composed for the cut. | covered |
 | `!read-image` | grounded | filetools_e2e_test.go | — | — | Go: TestReadImageSettlesWithNoOutput asserts the card SETTLED with the succeeded verdict and specifically the FeedToolCallNoOutput arm — an unset AgentReadSuccess.extent draws no output form, and a perpetually-running card would be the defect. | covered |
 | `!read-range` | grounded | filetools_e2e_test.go | — | — | Go: TestReadWholeHeadRange (range subtest) asserts paint spans, no omitted line. | covered |
@@ -237,7 +237,7 @@ wrong: the by-layer lines once read 33 and 5 where the table's columns held
 - Total canonical scenarios: 157
 
 By layer, scenarios with at least one hit:
-- Go e2e (non-emacs): 153 scenarios referenced across 26 files
+- Go e2e (non-emacs): 153 scenarios referenced across 27 files
 - Webapp layer: 36 scenarios referenced across 8 files
 - Emacs e2e: 3 scenarios referenced across 3 files
 

@@ -364,17 +364,6 @@ type Deps struct {
 	// into this resolver. nil tells nobody, which is what a test that is not
 	// about the footer wants.
 	EntryPlaced func(ws ids.WorkspaceID, unit string, row *frontendv1.FeedId)
-	// ItemDrawn is told the FeedId of EVERY activity row the moment the feed
-	// first draws it for its unit, and again whenever that FeedId changes, and
-	// whether the row is on the ROOT feed. It is how the footer ends a quiet
-	// stretch on the row that ended it (frontend.v1.FooterStatusQuietStretchEnding):
-	// the client holds the ended line until it has painted that row, which it
-	// can promise only for the root feed it always shows.
-	//
-	// CALLED WITH THE RESOLVER'S LOCK HELD, as EntryPlaced is, and before the
-	// footer takes the same frame (the watcher routes every frame to the feed
-	// first). nil tells nobody.
-	ItemDrawn func(ws ids.WorkspaceID, unit string, row *frontendv1.FeedId, onRoot bool)
 	// RolledBack is the durable record of rolled-back turns (wsm.DB). nil
 	// records and loads nothing, which is what a test that is not about
 	// surviving a restart wants.

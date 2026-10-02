@@ -1,19 +1,17 @@
 /**
  * activity — the strip's activity cell: the one elastic segment, and the one
- * place the footer's four activity TIERS are drawn.
+ * place the footer's three activity TIERS are drawn.
  *
  * THE DAEMON RESOLVES THE TIER (footer.proto, the status family's rules): each
  * status arm's activity is a `oneof tier` holding EITHER that arm's salient
- * line OR the unpinned tiers beneath it: the transient over the enduring line,
- * and under `working` and `background` the quiet-stretch line between them.
+ * line OR the unpinned tiers beneath it: the transient over the enduring line.
  * The waiting arm has no unpinned branch at all, because a waiting session is
  * always parked on a salient line. This module walks what it was pushed and
  * ranks nothing.
  *
  * THE ONE DECISION THIS CLIENT TAKES is the clock comparison inside the
  * unpinned tiers: the transient is drawn while the clock is before its
- * `expiry.expires_at_ms`, and the quiet-stretch line (when one stands) or the
- * enduring line otherwise. A draw that picks
+ * `expiry.expires_at_ms`, and the enduring line otherwise. A draw that picks
  * the transient asks the mount for exactly one re-render at that instant
  * (`expiry.ts`); nothing here polls, and the daemon pushes nothing at the
  * lapse.
@@ -36,7 +34,6 @@
 import type {
   FooterActivityEnduring,
   FooterActivityEnduringUsage,
-  FooterActivityQuietStretch,
   FooterActivityTransient,
   FooterActivityTransientApiRestored,
   FooterActivityTransientCompactionConcluded,
@@ -46,7 +43,6 @@ import type {
   FooterActivityTransientHook,
   FooterActivityTransientNetworkResume,
   FooterActivityTransientOverEnduring,
-  FooterActivityTransientOverQuietOverEnduring,
   FooterActivityTransientSessionChange,
   FooterActivityTransientSubmitting,
   FooterActivityTransientSubmittingHeld,
@@ -99,7 +95,12 @@ import { formatAge, formatCountdown, formatTickedAge } from "../duration.js";
 import { tick } from "../feed/ticking.js";
 import { log } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
-import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
+import {
+  msOf,
+  requireCase,
+  requireMessage,
+  unreachableArm,
+} from "../rpc/strict.js";
 import type { TransientExpirySchedule } from "./expiry.js";
 import { footerClockSpan } from "./clock-span.js";
 import { drawFooterStatusActivityMergeStep } from "./merge-step.js";
@@ -151,18 +152,13 @@ export type FooterSalient =
   | FooterStatusClosingSalient
   | FooterStatusLoadingSalient;
 
-/**
- * The unpinned tiers a cell carries: the quiet-stretch line rides only under
- * `working` and `background`.
- */
-export type FooterUnpinned =
-  | FooterActivityTransientOverEnduring
-  | FooterActivityTransientOverQuietOverEnduring;
-
 /** The tier the daemon resolved for a cell. */
 export type ActivityTier =
   | { readonly case: "salient"; readonly value: FooterSalient }
-  | { readonly case: "unpinned"; readonly value: FooterUnpinned };
+  | {
+      readonly case: "unpinned";
+      readonly value: FooterActivityTransientOverEnduring;
+    };
 
 /**
  * The tier a cell carries.
@@ -171,9 +167,15 @@ export type ActivityTier =
  * directly, so it is read as the salient tier by construction. Every other
  * cell's `tier` is switched exhaustively, and an unset one is malformed.
  */
-export function activityTier(activity: FooterActivity, path: string): ActivityTier {
+export function activityTier(
+  activity: FooterActivity,
+  path: string,
+): ActivityTier {
   if (activity.$typeName === "frontend.v1.FooterStatusWaitingActivity") {
-    return { case: "salient", value: requireMessage(activity.salient, `${path}.salient`) };
+    return {
+      case: "salient",
+      value: requireMessage(activity.salient, `${path}.salient`),
+    };
   }
   const tier = requireCase(activity.tier, `${path}.tier`);
   switch (tier.case) {
@@ -216,7 +218,10 @@ export function enduringUsage(
 ): FooterActivityEnduringUsage | undefined {
   const tier = activityTier(activity, path);
   if (tier.case !== "unpinned") return undefined;
-  const line = requireMessage(tier.value.enduring, `${path}.unpinned.enduring`).line;
+  const line = requireMessage(
+    tier.value.enduring,
+    `${path}.unpinned.enduring`,
+  ).line;
   return line.case === "usage" ? line.value : undefined;
 }
 
@@ -260,14 +265,18 @@ export function drawFooterStatusActivity(
 
 /** One drawn line: which tier and kind it is, the line, and its age if any. */
 interface DrawnLine {
-  readonly tier: "salient" | "transient" | "quiet" | "enduring";
+  readonly tier: "salient" | "transient" | "enduring";
   readonly arm: string;
   readonly line: HTMLElement;
   readonly age: HTMLElement | null;
 }
 
 /** The line a resolved tier draws. */
-function drawTier(tier: ActivityTier, deps: ActivityDeps, path: string): DrawnLine {
+function drawTier(
+  tier: ActivityTier,
+  deps: ActivityDeps,
+  path: string,
+): DrawnLine {
   switch (tier.case) {
     case "salient": {
       const salientPath = `${path}.salient`;
@@ -290,14 +299,14 @@ function drawTier(tier: ActivityTier, deps: ActivityDeps, path: string): DrawnLi
 
 /**
  * THE ONE CLOCK DECISION: the transient while the clock is before its expiry
- * instant, then the quiet-stretch line when one stands, then the enduring line.
+ * instant, then the enduring line.
  *
  * The transient is validated whether or not it is drawn, so a malformed one
  * is refused on the push that carried it rather than silently outlived. A
  * drawn transient schedules the one re-render at its expiry.
  */
 function drawUnpinned(
-  u: FooterUnpinned,
+  u: FooterActivityTransientOverEnduring,
   deps: ActivityDeps,
   path: string,
 ): DrawnLine {
@@ -306,15 +315,25 @@ function drawUnpinned(
     const transientPath = `${path}.transient`;
     const transient = u.transient;
     const expiry = requireMessage(transient.expiry, `${transientPath}.expiry`);
-    const expiresAtMs = msOf(expiry.expiresAtMs, `${transientPath}.expiry.expires_at_ms`);
+    const expiresAtMs = msOf(
+      expiry.expiresAtMs,
+      `${transientPath}.expiry.expires_at_ms`,
+    );
     const at = requireMessage(transient.at, `${transientPath}.at`);
     const kind = requireCase(transient.kind, `${transientPath}.kind`);
     const nowMs = deps.ctx.ticker.now();
     if (nowMs < expiresAtMs) {
-      log.debug(`the transient ${kind.case} is live; drawing it until it lapses`, {
-        operation: "footer.strip.transient-live",
-        context: { kind: kind.case, expires_at_ms: expiresAtMs, now_ms: nowMs },
-      });
+      log.debug(
+        `the transient ${kind.case} is live; drawing it until it lapses`,
+        {
+          operation: "footer.strip.transient-live",
+          context: {
+            kind: kind.case,
+            expires_at_ms: expiresAtMs,
+            now_ms: nowMs,
+          },
+        },
+      );
       deps.expiry.schedule(expiresAtMs);
       return {
         tier: "transient",
@@ -323,23 +342,13 @@ function drawUnpinned(
         age: drawFooterStatusActivityAt(at, deps, `${transientPath}.at`),
       };
     }
-    log.debug(`the transient ${kind.case} has lapsed; drawing the enduring line`, {
-      operation: "footer.strip.transient-lapsed",
-      context: { kind: kind.case, expires_at_ms: expiresAtMs, now_ms: nowMs },
-    });
-  }
-  const quiet = quietStretchOf(u);
-  if (quiet !== undefined) {
-    return {
-      tier: "quiet",
-      arm: "quietStretch",
-      line: drawFooterActivityQuietStretch(quiet),
-      age: drawFooterStatusActivityAt(
-        requireMessage(quiet.at, `${path}.quiet_stretch.at`),
-        deps,
-        `${path}.quiet_stretch.at`,
-      ),
-    };
+    log.debug(
+      `the transient ${kind.case} has lapsed; drawing the enduring line`,
+      {
+        operation: "footer.strip.transient-lapsed",
+        context: { kind: kind.case, expires_at_ms: expiresAtMs, now_ms: nowMs },
+      },
+    );
   }
   return {
     tier: "enduring",
@@ -347,22 +356,6 @@ function drawUnpinned(
     line: drawFooterActivityEnduring(enduring, deps, `${path}.enduring`),
     age: null,
   };
-}
-
-/** The quiet-stretch line an unpinned container carries, if its status admits one. */
-function quietStretchOf(u: FooterUnpinned): FooterActivityQuietStretch | undefined {
-  return u.$typeName === "frontend.v1.FooterActivityTransientOverQuietOverEnduring"
-    ? u.quietStretch
-    : undefined;
-}
-
-/**
- * The quiet-stretch line, verbatim: what just landed in the feed and what the
- * turn does next, standing until the next feed item surfaces. The daemon
- * words it; this end adds no word of its own.
- */
-export function drawFooterActivityQuietStretch(u: FooterActivityQuietStretch): HTMLElement {
-  return textLine("footer-activity-quiet-stretch", u.text);
 }
 
 // ---- the salient tier -------------------------------------------------------
@@ -512,7 +505,9 @@ export function drawFooterActivityTransientToolCall(
  * The task tracker moving: the task's subject, then the tracker's progress
  * "3/7" as the figure it is — the tasks chip's own fraction.
  */
-export function drawFooterActivityTransientTask(u: FooterActivityTransientTask): HTMLElement {
+export function drawFooterActivityTransientTask(
+  u: FooterActivityTransientTask,
+): HTMLElement {
   const line = document.createElement("span");
   line.className = "footer-activity-task";
   line.appendChild(document.createTextNode(`${u.subject} · `));
@@ -566,7 +561,10 @@ export function drawFooterActivityTransientSubmitting(
 }
 
 /** "queued 2/3": the prompt's place in the queue, as the figure it is. */
-function appendHeldPlace(line: HTMLElement, held: FooterActivityTransientSubmittingHeld): void {
+function appendHeldPlace(
+  line: HTMLElement,
+  held: FooterActivityTransientSubmittingHeld,
+): void {
   line.appendChild(document.createTextNode("queued "));
   const place = document.createElement("span");
   place.className = activityDatumClass("position");
@@ -576,7 +574,9 @@ function appendHeldPlace(line: HTMLElement, held: FooterActivityTransientSubmitt
 }
 
 /** The running hook's name. */
-export function drawFooterActivityTransientHook(u: FooterActivityTransientHook): HTMLElement {
+export function drawFooterActivityTransientHook(
+  u: FooterActivityTransientHook,
+): HTMLElement {
   return textLine("footer-activity-hook", u.name);
 }
 
@@ -591,14 +591,20 @@ export function drawFooterActivityTransientContextInjected(
 export function drawFooterActivityTransientDaemonWarning(
   u: FooterActivityTransientDaemonWarning,
 ): HTMLElement {
-  return textLine("footer-activity-daemon-warning", `${u.operation} · ${u.message}`);
+  return textLine(
+    "footer-activity-daemon-warning",
+    `${u.operation} · ${u.message}`,
+  );
 }
 
 /** A daemon error that blocks nothing: the operation, then its message. */
 export function drawFooterActivityTransientDaemonError(
   u: FooterActivityTransientDaemonError,
 ): HTMLElement {
-  return textLine("footer-activity-daemon-error", `${u.operation} · ${u.message}`);
+  return textLine(
+    "footer-activity-daemon-error",
+    `${u.operation} · ${u.message}`,
+  );
 }
 
 /**
@@ -670,13 +676,19 @@ export function drawFooterActivityTransientNetworkResume(
   line.className = "footer-activity-network-resume";
   line.setAttribute("data-edge", edge.case);
   line.appendChild(
-    document.createTextNode(`${statusWords("networkResume")} · ${statusWords(edge.case)}`),
+    document.createTextNode(
+      `${statusWords("networkResume")} · ${statusWords(edge.case)}`,
+    ),
   );
   switch (edge.case) {
     case "waiting":
       line.appendChild(document.createTextNode(" · "));
       line.appendChild(
-        drawGivesUpCountdown(edge.value.givesUpAtMs, deps, `${path}.waiting.gives_up_at_ms`),
+        drawGivesUpCountdown(
+          edge.value.givesUpAtMs,
+          deps,
+          `${path}.waiting.gives_up_at_ms`,
+        ),
       );
       return line;
     case "abandoned":
@@ -704,9 +716,14 @@ export function drawGivesUpCountdown(
   path: string,
 ): HTMLElement {
   const deadlineMs = msOf(givesUpAtMs, path);
-  return footerClockSpan(deps.ctx.ticker, "countdown", "footer-gives-up", (span, nowMs) => {
-    span.textContent = `gives up in ${formatCountdown(deadlineMs - nowMs)}`;
-  });
+  return footerClockSpan(
+    deps.ctx.ticker,
+    "countdown",
+    "footer-gives-up",
+    (span, nowMs) => {
+      span.textContent = `gives up in ${formatCountdown(deadlineMs - nowMs)}`;
+    },
+  );
 }
 
 // ---- the enduring tier ------------------------------------------------------
@@ -731,7 +748,11 @@ export function drawFooterActivityEnduring(
   line.setAttribute("data-line", chosen.case);
   switch (chosen.case) {
     case "usage":
-      for (const part of drawFooterActivityEnduringUsage(chosen.value, deps, `${path}.usage`)) {
+      for (const part of drawFooterActivityEnduringUsage(
+        chosen.value,
+        deps,
+        `${path}.usage`,
+      )) {
         line.appendChild(part);
       }
       break;
@@ -768,7 +789,12 @@ export function drawFooterActivityEnduringUsage(
     ordered.forEach((allowance, index) => {
       if (index > 0) figures.append(" ", drawFooterRateSeparator(), " ");
       figures.appendChild(
-        drawFooterAllowance(allowance.value, allowance.label, deps, `${path}.${allowance.label}`),
+        drawFooterAllowance(
+          allowance.value,
+          allowance.label,
+          deps,
+          `${path}.${allowance.label}`,
+        ),
       );
     });
     parts.push(figures);
@@ -815,11 +841,16 @@ export interface LabelledAllowance {
  * the contract's own order and nothing moves under a reader for no reason.
  * The strip and the tokens sheet draw exactly this list.
  */
-export function orderedAllowances(u: FooterActivityEnduringUsage): LabelledAllowance[] {
+export function orderedAllowances(
+  u: FooterActivityEnduringUsage,
+): LabelledAllowance[] {
   const present: LabelledAllowance[] = [];
-  if (u.session !== undefined) present.push({ label: "session", value: u.session });
-  if (u.weekly !== undefined) present.push({ label: "weekly", value: u.weekly });
-  if (u.overage !== undefined) present.push({ label: "overage", value: u.overage });
+  if (u.session !== undefined)
+    present.push({ label: "session", value: u.session });
+  if (u.weekly !== undefined)
+    present.push({ label: "weekly", value: u.weekly });
+  if (u.overage !== undefined)
+    present.push({ label: "overage", value: u.overage });
   return [
     ...present.filter((a) => a.value.newsworthy),
     ...present.filter((a) => !a.value.newsworthy),
@@ -845,7 +876,9 @@ export function drawFooterStatusActivityCompaction(
 }
 
 /** The gated call's composed line, verbatim. */
-export function drawFooterStatusActivityGatedCall(u: FooterStatusActivityGatedCall): HTMLElement {
+export function drawFooterStatusActivityGatedCall(
+  u: FooterStatusActivityGatedCall,
+): HTMLElement {
   return textLine("footer-activity-gated-call", u.text);
 }
 
@@ -878,7 +911,9 @@ export function drawFooterStatusActivityInterrupting(
 }
 
 /** The dead-query line, verbatim. */
-export function drawFooterStatusActivityQueryDied(u: FooterStatusActivityQueryDied): HTMLElement {
+export function drawFooterStatusActivityQueryDied(
+  u: FooterStatusActivityQueryDied,
+): HTMLElement {
   return textLine("footer-activity-query-died", u.text);
 }
 
@@ -891,7 +926,8 @@ export function drawFooterStatusActivityQueryDied(u: FooterStatusActivityQueryDi
 export function drawFooterStatusActivityStartFailed(
   u: FooterStatusActivityStartFailed,
 ): HTMLElement {
-  if (u.droppedPrompts === 0) return textLine("footer-activity-start-failed", u.detail);
+  if (u.droppedPrompts === 0)
+    return textLine("footer-activity-start-failed", u.detail);
   const prompts = u.droppedPrompts === 1 ? "prompt" : "prompts";
   return textLine(
     "footer-activity-start-failed",
@@ -912,7 +948,9 @@ export function drawFooterStatusActivityStartFailed(
  * name says the whole thing carries none, and the line is then the kind alone
  * rather than a dangling separator.
  */
-export function drawFooterStatusActivityFault(u: FooterStatusActivityFault): HTMLElement {
+export function drawFooterStatusActivityFault(
+  u: FooterStatusActivityFault,
+): HTMLElement {
   const kind = u.kind.replace(/_/g, " ");
   if (u.detail === "") return textLine("footer-activity-fault", kind);
   return textLine("footer-activity-fault", `${kind} · ${u.detail}`);
@@ -941,10 +979,18 @@ export function drawFooterStatusActivityUpdate(
   line.appendChild(document.createTextNode(statusWords(phase.case)));
   switch (phase.case) {
     case "building":
-      appendComponents(line, phase.value.components, `${path}.building.components`);
+      appendComponents(
+        line,
+        phase.value.components,
+        `${path}.building.components`,
+      );
       break;
     case "restartingServices":
-      appendComponents(line, phase.value.services, `${path}.restarting_services.services`);
+      appendComponents(
+        line,
+        phase.value.services,
+        `${path}.restarting_services.services`,
+      );
       break;
     case "waiting":
       appendWaitingCounts(line, phase.value);
@@ -984,12 +1030,17 @@ function appendComponents(
   path: string,
 ): void {
   if (components.length === 0) return;
-  const names = components.map((c, i) => statusWords(requireCase(c.component, `${path}[${i}].component`).case));
+  const names = components.map((c, i) =>
+    statusWords(requireCase(c.component, `${path}[${i}].component`).case),
+  );
   line.appendChild(document.createTextNode(` · ${names.join(", ")}`));
 }
 
 /** " · 1 turn, 2 background" — what the workspace's move waits on. */
-function appendWaitingCounts(line: HTMLElement, waiting: FooterStatusActivityUpdateWaiting): void {
+function appendWaitingCounts(
+  line: HTMLElement,
+  waiting: FooterStatusActivityUpdateWaiting,
+): void {
   const figures: [number, string, string][] = [
     [waiting.turns, "turn", "turns"],
     [waiting.background, "background", "background"],
@@ -1050,7 +1101,9 @@ export function drawFooterStatusActivityRetrying(
   }
   if (u.nextAttempt !== undefined) {
     line.appendChild(document.createTextNode(" · "));
-    line.appendChild(drawNextAttempt(u.nextAttempt, deps, `${path}.next_attempt`));
+    line.appendChild(
+      drawNextAttempt(u.nextAttempt, deps, `${path}.next_attempt`),
+    );
   }
   line.appendChild(document.createTextNode(` · ${u.status}`));
   return line;
@@ -1060,15 +1113,24 @@ export function drawFooterStatusActivityRetrying(
  * "next try in 12s" ticking down to the vendor's promised instant at second
  * resolution, then "next try overdue by 2m" counting up once it has passed.
  */
-function drawNextAttempt(u: FooterStatusActivityAt, deps: AllowanceDeps, path: string): HTMLElement {
+function drawNextAttempt(
+  u: FooterStatusActivityAt,
+  deps: AllowanceDeps,
+  path: string,
+): HTMLElement {
   const atMs = msOf(u.atMs, `${path}.at_ms`);
-  return footerClockSpan(deps.ctx.ticker, "countdown", "footer-next-attempt", (span, nowMs) => {
-    const overdue = nowMs >= atMs;
-    span.toggleAttribute("data-overdue", overdue);
-    span.textContent = overdue
-      ? `next try overdue by ${formatAge(nowMs - atMs)}`
-      : `next try in ${remainingLabel(atMs - nowMs)}`;
-  });
+  return footerClockSpan(
+    deps.ctx.ticker,
+    "countdown",
+    "footer-next-attempt",
+    (span, nowMs) => {
+      const overdue = nowMs >= atMs;
+      span.toggleAttribute("data-overdue", overdue);
+      span.textContent = overdue
+        ? `next try overdue by ${formatAge(nowMs - atMs)}`
+        : `next try in ${remainingLabel(atMs - nowMs)}`;
+    },
+  );
 }
 
 /**
@@ -1095,7 +1157,6 @@ export function drawFooterStatusActivityWakeup(
   return line;
 }
 
-
 /**
  * One allowance: "session 72% · resets in 1h 5m".
  *
@@ -1120,7 +1181,10 @@ export function drawFooterAllowance(
 ): HTMLElement {
   const status = u.status.case === undefined ? null : u.status;
   const span = document.createElement("span");
-  span.className = status === null ? "footer-allowance" : `footer-allowance arm-${status.case}`;
+  span.className =
+    status === null
+      ? "footer-allowance"
+      : `footer-allowance arm-${status.case}`;
   span.setAttribute("data-allowance", label);
   if (status !== null) {
     span.setAttribute("data-arm", status.case);
@@ -1128,15 +1192,24 @@ export function drawFooterAllowance(
   }
   if (u.newsworthy) span.setAttribute("data-newsworthy", "true");
   if (u.newsworthy) span.classList.add("footer-allowance-newsworthy");
-  log.debug(`drawing the ${label} allowance as ${status?.case ?? "unverdicted"}`, {
-    operation: "footer.strip.allowance",
-    context: { allowance: label, status: status?.case, newsworthy: u.newsworthy },
-  });
+  log.debug(
+    `drawing the ${label} allowance as ${status?.case ?? "unverdicted"}`,
+    {
+      operation: "footer.strip.allowance",
+      context: {
+        allowance: label,
+        status: status?.case,
+        newsworthy: u.newsworthy,
+      },
+    },
+  );
 
   span.appendChild(document.createTextNode(`${label} `));
   span.appendChild(drawFooterPercent(u.utilization));
 
-  span.appendChild(drawResetsCountdown(u.resetsAtS, deps, `${path}.resets_at_s`));
+  span.appendChild(
+    drawResetsCountdown(u.resetsAtS, deps, `${path}.resets_at_s`),
+  );
   return span;
 }
 
@@ -1144,11 +1217,20 @@ export function drawFooterAllowance(
  * " · resets in 1h 5m", ticking down to an allowance's reset at minute
  * resolution. RESETS_AT_S is the vendor's own SECONDS, converted once here.
  */
-export function drawResetsCountdown(resetsAtS: bigint, deps: AllowanceDeps, path: string): HTMLElement {
+export function drawResetsCountdown(
+  resetsAtS: bigint,
+  deps: AllowanceDeps,
+  path: string,
+): HTMLElement {
   const resetsAtMs = msOf(resetsAtS, path) * 1000;
-  return footerClockSpan(deps.ctx.ticker, "countdown", undefined, (span, nowMs) => {
-    span.textContent = ` · resets in ${formatCountdown(resetsAtMs - nowMs)}`;
-  });
+  return footerClockSpan(
+    deps.ctx.ticker,
+    "countdown",
+    undefined,
+    (span, nowMs) => {
+      span.textContent = ` · resets in ${formatCountdown(resetsAtMs - nowMs)}`;
+    },
+  );
 }
 
 /**
@@ -1189,9 +1271,14 @@ export function drawFooterStatusActivityAt(
   path: string,
 ): HTMLElement {
   const atMs = msOf(u.atMs, `${path}.at_ms`);
-  return footerClockSpan(deps.ctx.ticker, "age", "footer-activity-age", (span, nowMs) => {
-    span.textContent = ` · ${formatTickedAge(nowMs - atMs)} ago`;
-  });
+  return footerClockSpan(
+    deps.ctx.ticker,
+    "age",
+    "footer-activity-age",
+    (span, nowMs) => {
+      span.textContent = ` · ${formatTickedAge(nowMs - atMs)} ago`;
+    },
+  );
 }
 
 /**

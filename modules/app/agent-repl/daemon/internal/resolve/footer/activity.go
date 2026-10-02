@@ -13,22 +13,19 @@ import (
 
 // THE ACTIVITY CELL is the strip's finest cell, and every status arm ALWAYS
 // sets it. Every line belongs to exactly one TIER, defined by what ends it
-// (owner rulings, 2026-09-28 and 2026-09-30; agent-repl AGENTS.md "Footer
-// activity lines are salient, transient, quiet, or enduring"):
+// (owner rulings, 2026-09-28, 2026-09-30 and 2026-10-01; agent-repl AGENTS.md
+// "Footer activity lines are salient, transient, or enduring"):
 //
 //	salient    ends when the system state it describes stops being true, never
 //	           on a timer. Each status arm declares its own salient kinds.
 //	transient  ends when a newer transient replaces it or its expiry passes
 //	           (transient.go).
-//	quiet      the quiet-stretch line, legal under `working` and `background`:
-//	           ends when the next feed item surfaces (quietstretch.go).
 //	enduring   never ends (enduring.go).
 //
 // PRECEDENCE IS BY TIER, and this file applies it: a standing salient line
 // outranks every other tier, so the cell carries EITHER the arm's salient line
-// OR the unpinned tiers beneath it (`unpinned`): the transient over the quiet
-// line over the enduring line. Within the salient tier the
-// kind that explains the standing substatus ranks first, then an escalating
+// OR the unpinned tiers beneath it (`unpinned`): the transient over the
+// enduring line. Within the salient tier the kind that explains the standing substatus ranks first, then an escalating
 // fault, then a deploy's progress (`update`), then the rest — each arm below
 // states its own order, which is footer.proto's.
 //
@@ -86,7 +83,7 @@ func (r *resolver) workingActivity(s *wsState) *frontendv1.FooterStatusWorkingAc
 	case ok:
 		line = fillShared(&frontendv1.FooterStatusWorkingSalient{}, shared)
 	default:
-		return &frontendv1.FooterStatusWorkingActivity{Tier: &frontendv1.FooterStatusWorkingActivity_Unpinned{Unpinned: r.unpinnedQuiet(s)}}
+		return &frontendv1.FooterStatusWorkingActivity{Tier: &frontendv1.FooterStatusWorkingActivity_Unpinned{Unpinned: r.unpinned(s)}}
 	}
 	return &frontendv1.FooterStatusWorkingActivity{Tier: &frontendv1.FooterStatusWorkingActivity_Salient{Salient: line}}
 }
@@ -121,14 +118,13 @@ func (r *resolver) mergingActivity(s *wsState) *frontendv1.FooterStatusMergingAc
 }
 
 // backgroundActivity resolves the cell while detached work runs: the detached
-// work's landings are the quiet tier's, so only the shared salient lines can
-// stand.
+// work's landings are the feed's, so only the shared salient lines can stand.
 func (r *resolver) backgroundActivity(s *wsState) *frontendv1.FooterStatusBackgroundActivity {
 	if line, ok := r.sharedSalient(s); ok {
 		return &frontendv1.FooterStatusBackgroundActivity{Tier: &frontendv1.FooterStatusBackgroundActivity_Salient{
 			Salient: fillShared(&frontendv1.FooterStatusBackgroundSalient{}, line)}}
 	}
-	return &frontendv1.FooterStatusBackgroundActivity{Tier: &frontendv1.FooterStatusBackgroundActivity_Unpinned{Unpinned: r.unpinnedQuiet(s)}}
+	return &frontendv1.FooterStatusBackgroundActivity{Tier: &frontendv1.FooterStatusBackgroundActivity_Unpinned{Unpinned: r.unpinned(s)}}
 }
 
 // blockedActivity resolves the cell while blocked: the kind that explains the
@@ -233,14 +229,6 @@ func (r *resolver) loadingActivity(s *wsState) *frontendv1.FooterStatusLoadingAc
 	return &frontendv1.FooterStatusLoadingActivity{Tier: &frontendv1.FooterStatusLoadingActivity_Unpinned{Unpinned: r.unpinned(s)}}
 }
 
-// coversEnduring reports whether a quiet-capable cell draws anything above its
-// enduring line: a salient line, a live transient or the quiet-stretch line.
-// Any of them is newer than a quiet-stretch line the next feed item ended, so
-// the ending is not stated beside it (quietStretchEnding).
-func coversEnduring(salient bool, unpinned *frontendv1.FooterActivityTransientOverQuietOverEnduring) bool {
-	return salient || unpinned.GetTransient() != nil || unpinned.GetQuietStretch() != nil
-}
-
 // waitingSalient is the one salient line a waiting status stands on. It is
 // composed BY THE SAME DECISION that picks the waiting step (status.go
 // waiting, wakeup), so the kind that explains the step always exists and ranks
@@ -261,7 +249,7 @@ type activityLine struct {
 }
 
 // name is the tier and kind for the record ("salient.update",
-// "transient.tool_call", "quiet", "enduring"), "none" when no line stands.
+// "transient.tool_call", "enduring"), "none" when no line stands.
 func (l activityLine) name() string {
 	switch {
 	case l.tier == "":
@@ -307,10 +295,6 @@ func activityLineOf(status *frontendv1.FooterStatus) activityLine {
 	transientField := cell.Descriptor().Fields().ByName("transient")
 	if cell.Has(transientField) {
 		return kindLine("transient", cell.Get(transientField).Message())
-	}
-	if quietField := cell.Descriptor().Fields().ByName("quiet_stretch"); quietField != nil && cell.Has(quietField) {
-		quiet := cell.Get(quietField).Message()
-		return activityLine{tier: "quiet", text: quiet.Get(quiet.Descriptor().Fields().ByName("text")).String()}
 	}
 	return activityLine{tier: "enduring"}
 }

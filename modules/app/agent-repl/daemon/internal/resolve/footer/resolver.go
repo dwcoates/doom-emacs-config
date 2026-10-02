@@ -352,11 +352,9 @@ func (r *resolver) OnTurnOpened(ws ids.WorkspaceID, turn ids.TurnID) {
 				r.logOf(ws, s).Debug("daemon.footer.on_turn_opened",
 					"the turn was already installed at acceptance; the edge re-took the context baseline and kept what the turn had said",
 					dlog.Context{"turn_id": string(turn), "saw_activity": s.sawActivity})
-				r.deliverTurn(ws, s)
 				return
 			}
 			r.applyTurnStarted(s, &TurnStarted{At: r.opts.clock.Now(), Act: ActPrompt})
-			r.deliverTurn(ws, s)
 		})
 }
 
@@ -415,7 +413,6 @@ func (r *resolver) OnTurnRunningAtAttach(ws ids.WorkspaceID, turn ids.TurnID, st
 			}
 			r.applyTurnStarted(s, &TurnStarted{At: at, Act: ActPrompt})
 			s.sawActivity = true
-			r.deliverTurn(ws, s)
 		})
 }
 

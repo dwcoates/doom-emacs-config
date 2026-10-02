@@ -18,15 +18,24 @@ import {
 import { GetFeedPageResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_get_feed_page_pb";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import { TurnIdSchema } from "../../../proto/gen/ts/conversation/v1/turn_pb";
-import { forgetOwnTurns, rememberOwnTurn } from "../../src/composer/own-turns.js";
+import {
+  forgetOwnTurns,
+  rememberOwnTurn,
+} from "../../src/composer/own-turns.js";
 import {
   createFeedController,
   isBubbleRow,
   type BubbleLike,
   type FeedController,
 } from "../../src/feed/feed-view.js";
-import { defaultBubbleBody, type RowContext } from "../../src/feed/renderers.js";
-import { SELECTED_ENTRY_CLASS, SELECTED_ROW_ATTRIBUTE } from "../../src/feed/selected-entry.js";
+import {
+  defaultBubbleBody,
+  type RowContext,
+} from "../../src/feed/renderers.js";
+import {
+  SELECTED_ENTRY_CLASS,
+  SELECTED_ROW_ATTRIBUTE,
+} from "../../src/feed/selected-entry.js";
 import type { SelectionVisibility } from "../../src/feed/selection-visibility.js";
 import type { Overscan } from "../../src/feed/overscan.js";
 import { drawFeedSimpleToolCall } from "../../src/feed/cards/tool-call.js";
@@ -50,10 +59,17 @@ import {
   userPromptRow,
   type Harness,
 } from "./harness.js";
-import { PROMPT_WAVE_ATTRIBUTE, PROMPT_WAVE_WORKING } from "../../src/breathing.js";
+import {
+  PROMPT_WAVE_ATTRIBUTE,
+  PROMPT_WAVE_WORKING,
+} from "../../src/breathing.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import { orderFor, withOrder, withoutOrder } from "../feed-order.js";
-import { TailFollow, centerDelta, type CenterGeometry } from "../../src/scroll.js";
+import {
+  TailFollow,
+  centerDelta,
+  type CenterGeometry,
+} from "../../src/scroll.js";
 import { responseCapLines } from "../../src/feed/cards/response.js";
 import { codeOf } from "../source-text.js";
 import { EXPANDED_CLASS } from "../../src/expand.js";
@@ -102,7 +118,6 @@ function fixture(
     feed?: FeedId;
     renderers?: Partial<Parameters<typeof stubRenderers>[0]>;
     overscan?: Overscan;
-    onPainted?: (ids: readonly string[], at: number) => void;
   } = {},
 ): Fixture {
   const host = document.createElement("div");
@@ -128,13 +143,15 @@ function fixture(
       ...overrides,
     },
     overscan: opts.overscan,
-    onPainted: opts.onPainted,
   });
   return { h, host, controller, bubbles };
 }
 
 /** An overscan spy: records the elements it is asked to observe and unobserve. */
-function spyOverscan(): Overscan & { observed: HTMLElement[]; unobserved: HTMLElement[] } {
+function spyOverscan(): Overscan & {
+  observed: HTMLElement[];
+  unobserved: HTMLElement[];
+} {
   const observed: HTMLElement[] = [];
   const unobserved: HTMLElement[] = [];
   return {
@@ -203,33 +220,44 @@ describe("createFeedController: painting a page", () => {
 
   it("paints a page oldest → newest, in the served order", () => {
     const { controller, host } = fixture();
-    controller.applyPage(page([userPromptRow("a", "1"), responseRow("b")]), "replace");
+    controller.applyPage(
+      page([userPromptRow("a", "1"), responseRow("b")]),
+      "replace",
+    );
     expect(drawnIds(host)).toEqual(["a", "b"]);
   });
 
   it("stamps each row with its own kind", () => {
     const { controller, host } = fixture();
     controller.applyPage(page([userPromptRow("a", "1")]), "replace");
-    expect(host.querySelector("[data-feed-row]")?.getAttribute("data-row-kind")).toBe("userPrompt");
+    expect(
+      host.querySelector("[data-feed-row]")?.getAttribute("data-row-kind"),
+    ).toBe("userPrompt");
   });
 
   it("stamps an activity row with its unit as well", () => {
     const { controller, host } = fixture();
     controller.applyPage(page([responseRow("b")]), "replace");
-    expect(host.querySelector('[data-feed-row="b"]')?.getAttribute("data-unit")).toBe("response");
+    expect(
+      host.querySelector('[data-feed-row="b"]')?.getAttribute("data-unit"),
+    ).toBe("response");
   });
 
   it("stamps the turn a row belongs to, so a composer can find its prompt", () => {
     const { controller, host } = fixture();
     controller.applyPage(page([userPromptRow("a", "1", "turn-7")]), "replace");
-    expect(host.querySelector('[data-feed-row="a"]')?.getAttribute("data-turn")).toBe("turn-7");
+    expect(
+      host.querySelector('[data-feed-row="a"]')?.getAttribute("data-turn"),
+    ).toBe("turn-7");
   });
 
   it("marks a row whose turn this page submitted", () => {
     const { controller, host } = fixture();
     rememberOwnTurn(create(TurnIdSchema, { value: "turn-7" }));
     controller.applyPage(page([userPromptRow("a", "1", "turn-7")]), "replace");
-    expect(host.querySelector('[data-feed-row="a"]')?.getAttribute("data-mine")).toBe("true");
+    expect(
+      host.querySelector('[data-feed-row="a"]')?.getAttribute("data-mine"),
+    ).toBe("true");
     forgetOwnTurns();
   });
 
@@ -237,7 +265,9 @@ describe("createFeedController: painting a page", () => {
     const { controller, host } = fixture();
     rememberOwnTurn(create(TurnIdSchema, { value: "turn-mine" }));
     controller.applyPage(page([userPromptRow("a", "1", "turn-7")]), "replace");
-    expect(host.querySelector('[data-feed-row="a"]')?.hasAttribute("data-mine")).toBe(false);
+    expect(
+      host.querySelector('[data-feed-row="a"]')?.hasAttribute("data-mine"),
+    ).toBe(false);
     forgetOwnTurns();
   });
 
@@ -245,13 +275,17 @@ describe("createFeedController: painting a page", () => {
     const { controller, host } = fixture();
     controller.applyPage(page([userPromptRow("a", "1", "turn-7")]), "replace");
     controller.upsert(userPromptRow("a", "1"));
-    expect(host.querySelector('[data-feed-row="a"]')?.hasAttribute("data-turn")).toBe(false);
+    expect(
+      host.querySelector('[data-feed-row="a"]')?.hasAttribute("data-turn"),
+    ).toBe(false);
   });
 
   it("stamps no turn on a row that belongs to none", () => {
     const { controller, host } = fixture();
     controller.applyPage(page([userPromptRow("a", "1")]), "replace");
-    expect(host.querySelector('[data-feed-row="a"]')?.hasAttribute("data-turn")).toBe(false);
+    expect(
+      host.querySelector('[data-feed-row="a"]')?.hasAttribute("data-turn"),
+    ).toBe(false);
   });
 
   it("dispatches an activity unit to its own renderer", () => {
@@ -269,9 +303,9 @@ describe("createFeedController: painting a page", () => {
 
   it("refuses a page whose result arm is unset", () => {
     const { controller } = fixture();
-    expect(() => controller.applyPage(create(FeedPageSchema, {}), "replace")).toThrow(
-      MalformedView,
-    );
+    expect(() =>
+      controller.applyPage(create(FeedPageSchema, {}), "replace"),
+    ).toThrow(MalformedView);
   });
 });
 
@@ -285,7 +319,10 @@ describe("createFeedController: upserts", () => {
 
   it("REPLACES a known id in place, which is how a response grows", () => {
     const { controller, host } = fixture();
-    controller.applyPage(page([responseRow("a", "one"), responseRow("b")]), "replace");
+    controller.applyPage(
+      page([responseRow("a", "one"), responseRow("b")]),
+      "replace",
+    );
     controller.upsert(responseRow("a", "two"));
     expect(drawnIds(host)).toEqual(["a", "b"]);
   });
@@ -295,7 +332,9 @@ describe("createFeedController: upserts", () => {
     controller.applyPage(page([responseRow("a", "one")]), "replace");
     const before = host.querySelector('[data-feed-row="a"]')?.firstElementChild;
     controller.upsert(responseRow("a", "two"));
-    expect(host.querySelector('[data-feed-row="a"]')?.firstElementChild).not.toBe(before);
+    expect(
+      host.querySelector('[data-feed-row="a"]')?.firstElementChild,
+    ).not.toBe(before);
   });
 
   it("keeps the row element itself across a replacement", () => {
@@ -315,7 +354,9 @@ describe("createFeedController: upserts", () => {
     // Act
     controller.upsert(responseRow("a", "one"));
     // Assert
-    expect(host.querySelector('[data-feed-row="a"]')?.firstElementChild).toBe(before);
+    expect(host.querySelector('[data-feed-row="a"]')?.firstElementChild).toBe(
+      before,
+    );
   });
 
   it("does not ask the tail owner to follow for an unchanged re-push", () => {
@@ -336,8 +377,21 @@ describe("createFeedController: upserts", () => {
       body: defaultBubbleBody,
       revealRow: async () => false,
       bubble: (row) => stubBubble(row),
-      bodyContext: { ctx: h.ctx, feed: "root", row: create(FeedRowSchema, {}), revealRow: async () => false },
-      scroll: { box: { scrollTop: 0, scrollHeight: 0, clientHeight: 0, getBoundingClientRect: boxRect }, tail: tail as never },
+      bodyContext: {
+        ctx: h.ctx,
+        feed: "root",
+        row: create(FeedRowSchema, {}),
+        revealRow: async () => false,
+      },
+      scroll: {
+        box: {
+          scrollTop: 0,
+          scrollHeight: 0,
+          clientHeight: 0,
+          getBoundingClientRect: boxRect,
+        },
+        tail: tail as never,
+      },
     });
     controller.applyPage(page([responseRow("a", "one")]), "replace");
     follows.length = 0;
@@ -362,8 +416,13 @@ describe("createFeedController: upserts", () => {
   it("leaves a body its renderer updated in place in the document", () => {
     // Arrange -- a renderer that hands back the element it drew before, as the
     // response bubble does so its scroll box keeps the reader's position.
-    const inPlace = (_u: unknown, rc: RowContext): HTMLElement => rc.previous ?? document.createElement("div");
-    const { controller, host } = fixture(undefined, {}, { renderers: { response: inPlace } });
+    const inPlace = (_u: unknown, rc: RowContext): HTMLElement =>
+      rc.previous ?? document.createElement("div");
+    const { controller, host } = fixture(
+      undefined,
+      {},
+      { renderers: { response: inPlace } },
+    );
     controller.applyPage(page([responseRow("a", "one")]), "replace");
     const row = host.querySelector('[data-feed-row="a"]');
     if (row === null) throw new Error("row a is not drawn");
@@ -372,7 +431,9 @@ describe("createFeedController: upserts", () => {
     // Act
     controller.upsert(responseRow("a", "two"));
     // Assert -- nothing was removed from the row, so nothing re-attached.
-    expect(observer.takeRecords().flatMap((record) => [...record.removedNodes])).toEqual([]);
+    expect(
+      observer.takeRecords().flatMap((record) => [...record.removedNodes]),
+    ).toEqual([]);
   });
 
   it("keeps a box the reader scrolled when its card is re-pushed", () => {
@@ -384,20 +445,31 @@ describe("createFeedController: upserts", () => {
       card.append(box);
       return card;
     };
-    const { controller, host } = fixture(undefined, {}, { renderers: { response: boxed } });
+    const { controller, host } = fixture(
+      undefined,
+      {},
+      { renderers: { response: boxed } },
+    );
     controller.applyPage(page([responseRow("a", "one")]), "replace");
-    const box = host.querySelector<HTMLElement>('[data-feed-row="a"] .tool-output');
+    const box = host.querySelector<HTMLElement>(
+      '[data-feed-row="a"] .tool-output',
+    );
     if (box === null) throw new Error("the card drew no box");
     box.scrollTop = 80;
     // Act
     controller.upsert(responseRow("a", "two"));
     // Assert -- the same box, still where the reader left it.
-    expect([host.querySelector('[data-feed-row="a"] .tool-output') === box, box.scrollTop]).toEqual([true, 80]);
+    expect([
+      host.querySelector('[data-feed-row="a"] .tool-output') === box,
+      box.scrollTop,
+    ]).toEqual([true, 80]);
   });
 
   it("refuses a row with no id, the id being the upsert key", () => {
     const { controller } = fixture();
-    expect(() => controller.upsert(create(FeedRowSchema, {}))).toThrow(MalformedView);
+    expect(() => controller.upsert(create(FeedRowSchema, {}))).toThrow(
+      MalformedView,
+    );
   });
 });
 
@@ -449,7 +521,10 @@ describe("createFeedController: the newest separation bounds the feed", () => {
     const { controller } = fixture();
     controller.applyPage(page([responseRow("a"), responseRow("b")]), "replace");
     controller.upsert(separationRow("cut"));
-    const record = await forwardedRecord(capture, "feed.truncated-at-separation");
+    const record = await forwardedRecord(
+      capture,
+      "feed.truncated-at-separation",
+    );
     expect(record.level.case).toBe("info");
     expect(record.context).toMatchObject({ dropped: 2 });
   });
@@ -500,9 +575,13 @@ describe("createFeedController: a live removal drops the row", () => {
   it("stops the removed row's clocks", () => {
     // Arrange: a running tool-call card holding a live clock.
     const ticker = countingTicker();
-    const { controller } = fixture(harness({ ticker }), {}, {
-      renderers: { simpleToolCall: drawFeedSimpleToolCall },
-    });
+    const { controller } = fixture(
+      harness({ ticker }),
+      {},
+      {
+        renderers: { simpleToolCall: drawFeedSimpleToolCall },
+      },
+    );
     controller.applyPage(page([toolCallRow("t", "running")]), "replace");
     expect(ticker.live()).toBe(1);
     // Act.
@@ -532,7 +611,10 @@ describe("createFeedController: a feed emptied whole", () => {
   it("draws nothing once every row has been removed", () => {
     // Arrange.
     const { controller, host } = fixture();
-    controller.applyPage(page([responseRow("a"), responseRow("b"), responseRow("c")]), "replace");
+    controller.applyPage(
+      page([responseRow("a"), responseRow("b"), responseRow("c")]),
+      "replace",
+    );
     // Act.
     for (const id of ["a", "b", "c"]) controller.upsert(removedRow(id));
     // Assert.
@@ -553,7 +635,10 @@ describe("createFeedController: a feed emptied whole", () => {
   it("disposes every emptied row's bubble", () => {
     // Arrange: two bubble rows, their disposals counted.
     const { controller, bubbles } = fixture();
-    controller.applyPage(page([subagentRow("b1"), subagentRow("b2")]), "replace");
+    controller.applyPage(
+      page([subagentRow("b1"), subagentRow("b2")]),
+      "replace",
+    );
     let disposals = 0;
     for (const id of ["b1", "b2"]) {
       const bubble = bubbles.get(id)!;
@@ -572,9 +657,13 @@ describe("createFeedController: a feed emptied whole", () => {
   it("stops every emptied row's clocks", () => {
     // Arrange: two running tool-call cards, each holding a live clock.
     const ticker = countingTicker();
-    const { controller } = fixture(harness({ ticker }), {}, {
-      renderers: { simpleToolCall: drawFeedSimpleToolCall },
-    });
+    const { controller } = fixture(
+      harness({ ticker }),
+      {},
+      {
+        renderers: { simpleToolCall: drawFeedSimpleToolCall },
+      },
+    );
     controller.applyPage(
       page([toolCallRow("t1", "running"), toolCallRow("t2", "running")]),
       "replace",
@@ -665,13 +754,21 @@ describe("createFeedController: the overscan buffer watches a row's whole life",
 describe("createFeedController: nesting", () => {
   it("nests a row inside the container it names", () => {
     const { controller, host } = fixture();
-    controller.applyPage(page([responseRow("a"), responseRow("b", "x", "a")]), "replace");
-    expect(host.querySelector('[data-feed-row="a"] [data-nest] [data-feed-row="b"]')).not.toBeNull();
+    controller.applyPage(
+      page([responseRow("a"), responseRow("b", "x", "a")]),
+      "replace",
+    );
+    expect(
+      host.querySelector('[data-feed-row="a"] [data-nest] [data-feed-row="b"]'),
+    ).not.toBeNull();
   });
 
   it("draws a row whose container is unknown at the top level rather than dropping it", () => {
     const { controller, host } = fixture();
-    controller.applyPage(page([responseRow("b", "x", "never-seen")]), "replace");
+    controller.applyPage(
+      page([responseRow("b", "x", "never-seen")]),
+      "replace",
+    );
     expect(drawnIds(host)).toEqual(["b"]);
   });
 });
@@ -679,8 +776,13 @@ describe("createFeedController: nesting", () => {
 describe("createFeedController: the walk", () => {
   it("shows the load-more control while older rows exist", () => {
     const { controller, host } = fixture();
-    controller.applyPage(page([responseRow("a")], { hasMore: true }), "replace");
-    expect(host.querySelector<HTMLElement>("[data-load-more]")?.hidden).toBe(false);
+    controller.applyPage(
+      page([responseRow("a")], { hasMore: true }),
+      "replace",
+    );
+    expect(host.querySelector<HTMLElement>("[data-load-more]")?.hidden).toBe(
+      false,
+    );
   });
 
   it("takes it away once the walk reaches the start", () => {
@@ -696,11 +798,17 @@ describe("createFeedController: the walk", () => {
     const h = harness({
       getFeedPage: () =>
         create(GetFeedPageResponseSchema, {
-          result: { case: "success", value: page([withOrder(responseRow("older"), "a")]) },
+          result: {
+            case: "success",
+            value: page([withOrder(responseRow("older"), "a")]),
+          },
         }),
     });
     const { controller, host } = fixture(h);
-    controller.applyPage(page([responseRow("a")], { hasMore: true }), "replace");
+    controller.applyPage(
+      page([responseRow("a")], { hasMore: true }),
+      "replace",
+    );
     host.querySelector<HTMLElement>("[data-load-more]")?.click();
     await settle();
     expect(h.calls.getFeedPage[0]?.page.case).toBe("next");
@@ -710,11 +818,17 @@ describe("createFeedController: the walk", () => {
     const h = harness({
       getFeedPage: () =>
         create(GetFeedPageResponseSchema, {
-          result: { case: "success", value: page([withOrder(responseRow("older"), "a")]) },
+          result: {
+            case: "success",
+            value: page([withOrder(responseRow("older"), "a")]),
+          },
         }),
     });
     const { controller, host } = fixture(h);
-    controller.applyPage(page([responseRow("a")], { hasMore: true }), "replace");
+    controller.applyPage(
+      page([responseRow("a")], { hasMore: true }),
+      "replace",
+    );
     host.querySelector<HTMLElement>("[data-load-more]")?.click();
     await settle();
     expect(drawnIds(host)).toEqual(["older", "a"]);
@@ -723,13 +837,20 @@ describe("createFeedController: the walk", () => {
   it("draws the daemon's refusal at the control that asked", async () => {
     const h = harness({
       getFeedPage: () =>
-        create(GetFeedPageResponseSchema, { result: { case: "error", value: {} } }),
+        create(GetFeedPageResponseSchema, {
+          result: { case: "error", value: {} },
+        }),
     });
     const { controller, host } = fixture(h);
-    controller.applyPage(page([responseRow("a")], { hasMore: true }), "replace");
+    controller.applyPage(
+      page([responseRow("a")], { hasMore: true }),
+      "replace",
+    );
     host.querySelector<HTMLElement>("[data-load-more]")?.click();
     await settle();
-    expect(host.querySelector(".refusal")?.getAttribute("data-arm")).toBe("error");
+    expect(host.querySelector(".refusal")?.getAttribute("data-arm")).toBe(
+      "error",
+    );
   });
 
   it("says so when the walk never reached the daemon", async () => {
@@ -739,10 +860,15 @@ describe("createFeedController: the walk", () => {
       },
     });
     const { controller, host } = fixture(h);
-    controller.applyPage(page([responseRow("a")], { hasMore: true }), "replace");
+    controller.applyPage(
+      page([responseRow("a")], { hasMore: true }),
+      "replace",
+    );
     host.querySelector<HTMLElement>("[data-load-more]")?.click();
     await settle();
-    expect(host.querySelector(".refusal")?.getAttribute("data-arm")).toBe("transport");
+    expect(host.querySelector(".refusal")?.getAttribute("data-arm")).toBe(
+      "transport",
+    );
   });
 });
 
@@ -756,7 +882,12 @@ describe("createFeedController: the page error", () => {
           headline: { text: "history has a gap", tone: "red" },
           kind: {
             case: "historyReplayTruncated",
-            value: { fromSeq: 1n, stopAtSeq: 9n, delivered: 2n, reason: "store closed" },
+            value: {
+              fromSeq: 1n,
+              stopAtSeq: 9n,
+              delivered: 2n,
+              reason: "store closed",
+            },
           },
         },
       },
@@ -766,27 +897,33 @@ describe("createFeedController: the page error", () => {
   it("draws the daemon's own sentence where the rows would be", () => {
     const { controller, host } = fixture();
     controller.applyPage(errorPage(), "replace");
-    expect(host.querySelector(".feed-page-error-headline")?.textContent).toBe("history has a gap");
+    expect(host.querySelector(".feed-page-error-headline")?.textContent).toBe(
+      "history has a gap",
+    );
   });
 
   it("names the typed evidence's arm", () => {
     const { controller, host } = fixture();
     controller.applyPage(errorPage(), "replace");
-    expect(host.querySelector("[data-page-error]")?.getAttribute("data-page-error")).toBe(
-      "historyReplayTruncated",
-    );
+    expect(
+      host.querySelector("[data-page-error]")?.getAttribute("data-page-error"),
+    ).toBe("historyReplayTruncated");
   });
 
   it("draws the evidence's own reason", () => {
     const { controller, host } = fixture();
     controller.applyPage(errorPage(), "replace");
-    expect(host.querySelector(".feed-page-error-evidence")?.textContent).toBe("store closed");
+    expect(host.querySelector(".feed-page-error-evidence")?.textContent).toBe(
+      "store closed",
+    );
   });
 
   it("paints the headline in the tone the daemon chose", () => {
     const { controller, host } = fixture();
     controller.applyPage(errorPage(), "replace");
-    expect(host.querySelector(".feed-page-error")?.className).toContain("tone-red");
+    expect(host.querySelector(".feed-page-error")?.className).toContain(
+      "tone-red",
+    );
   });
 
   it("refuses a tone outside the shared vocabulary", () => {
@@ -829,7 +966,9 @@ describe("createFeedController: a malformed row", () => {
   it("names the path the refusal happened at", () => {
     const { controller, host } = fixture();
     controller.applyPage(page([unreadableRow()]), "replace");
-    expect(host.querySelector(".row-malformed")?.textContent).toContain("FeedTurnActivity.unit");
+    expect(host.querySelector(".row-malformed")?.textContent).toContain(
+      "FeedTurnActivity.unit",
+    );
   });
 
   it("reports the failure once, as frame_undecodable", () => {
@@ -846,7 +985,6 @@ describe("createFeedController: a malformed row", () => {
     // dropping it would hide a phase of a real run (src/feed/merge/tab-row.ts).
     expect(drawnIds(host)).toEqual(["t"]);
   });
-
 });
 
 describe("createFeedController: bubbles", () => {
@@ -859,7 +997,9 @@ describe("createFeedController: bubbles", () => {
   it("puts the bubble's own element in the row", () => {
     const { controller, host } = fixture();
     controller.applyPage(page([subagentRow("b1")]), "replace");
-    expect(host.querySelector('[data-feed-row="b1"] .stub-bubble')).not.toBeNull();
+    expect(
+      host.querySelector('[data-feed-row="b1"] .stub-bubble'),
+    ).not.toBeNull();
   });
 
   it("UPDATES the bubble on a re-push rather than rebuilding it", () => {
@@ -882,27 +1022,33 @@ describe("createFeedController: the rolling highlight", () => {
   it("marks the newest user prompt", () => {
     const { controller, host } = fixture();
     controller.applyPage(page([userPromptRow("p1", "one")]), "replace");
-    expect(host.querySelector('[data-feed-row="p1"]')?.getAttribute("data-latest-prompt")).toBe(
-      "true",
-    );
+    expect(
+      host
+        .querySelector('[data-feed-row="p1"]')
+        ?.getAttribute("data-latest-prompt"),
+    ).toBe("true");
   });
 
   it("moves to the newer prompt when one arrives", () => {
     const { controller, host } = fixture();
     controller.applyPage(page([userPromptRow("p1", "one")]), "replace");
     controller.upsert(userPromptRow("p2", "two"));
-    expect(host.querySelector('[data-feed-row="p2"]')?.getAttribute("data-latest-prompt")).toBe(
-      "true",
-    );
+    expect(
+      host
+        .querySelector('[data-feed-row="p2"]')
+        ?.getAttribute("data-latest-prompt"),
+    ).toBe("true");
   });
 
   it("leaves the older prompt unmarked once it has moved", () => {
     const { controller, host } = fixture();
     controller.applyPage(page([userPromptRow("p1", "one")]), "replace");
     controller.upsert(userPromptRow("p2", "two"));
-    expect(host.querySelector('[data-feed-row="p1"]')?.hasAttribute("data-latest-prompt")).toBe(
-      false,
-    );
+    expect(
+      host
+        .querySelector('[data-feed-row="p1"]')
+        ?.hasAttribute("data-latest-prompt"),
+    ).toBe(false);
   });
 
   it("marks nothing on a feed with no prompt at all", () => {
@@ -918,13 +1064,17 @@ describe("createFeedController: the working prompt's thinking wave", () => {
     const bubble = host.querySelector<HTMLElement>(
       `[data-feed-row="${id}"] .bubble.user`,
     );
-    if (bubble === null) throw new Error(`no prompt bubble drawn for row ${id}`);
+    if (bubble === null)
+      throw new Error(`no prompt bubble drawn for row ${id}`);
     return bubble;
   }
 
   it("waves a prompt whose row says its turn is working", () => {
     const { controller, host } = fixture();
-    controller.applyPage(page([userPromptRow("p1", "one", "t1", true)]), "replace");
+    controller.applyPage(
+      page([userPromptRow("p1", "one", "t1", true)]),
+      "replace",
+    );
     expect(promptBubble(host, "p1").getAttribute(PROMPT_WAVE_ATTRIBUTE)).toBe(
       PROMPT_WAVE_WORKING,
     );
@@ -932,14 +1082,22 @@ describe("createFeedController: the working prompt's thinking wave", () => {
 
   it("does not wave a prompt whose row says its turn is not working", () => {
     const { controller, host } = fixture();
-    controller.applyPage(page([userPromptRow("p1", "one", "t1", false)]), "replace");
-    expect(promptBubble(host, "p1").hasAttribute(PROMPT_WAVE_ATTRIBUTE)).toBe(false);
+    controller.applyPage(
+      page([userPromptRow("p1", "one", "t1", false)]),
+      "replace",
+    );
+    expect(promptBubble(host, "p1").hasAttribute(PROMPT_WAVE_ATTRIBUTE)).toBe(
+      false,
+    );
   });
 
   it("keeps waving a working prompt when a turn_ended row for its turn arrives", () => {
     // The row's flag is the whole answer; the terminal row infers nothing.
     const { controller, host } = fixture();
-    controller.applyPage(page([userPromptRow("p1", "one", "t1", true)]), "replace");
+    controller.applyPage(
+      page([userPromptRow("p1", "one", "t1", true)]),
+      "replace",
+    );
     controller.upsert(turnEndedRow("e1", "t1"));
     expect(promptBubble(host, "p1").getAttribute(PROMPT_WAVE_ATTRIBUTE)).toBe(
       PROMPT_WAVE_WORKING,
@@ -964,16 +1122,23 @@ describe("createFeedController: the working prompt's thinking wave", () => {
   it("does not wave a prompt whose row is not working though no turn_ended arrived", () => {
     const { controller, host } = fixture();
     controller.applyPage(
-      page([userPromptRow("p1", "one", "t1", false), responseRow("r1", "going", undefined, "t1")]),
+      page([
+        userPromptRow("p1", "one", "t1", false),
+        responseRow("r1", "going", undefined, "t1"),
+      ]),
       "replace",
     );
-    expect(promptBubble(host, "p1").hasAttribute(PROMPT_WAVE_ATTRIBUTE)).toBe(false);
+    expect(promptBubble(host, "p1").hasAttribute(PROMPT_WAVE_ATTRIBUTE)).toBe(
+      false,
+    );
   });
 
   it("does not wave an unstamped prompt whose row is not working", () => {
     const { controller, host } = fixture();
     controller.applyPage(page([userPromptRow("p1", "one")]), "replace");
-    expect(promptBubble(host, "p1").hasAttribute(PROMPT_WAVE_ATTRIBUTE)).toBe(false);
+    expect(promptBubble(host, "p1").hasAttribute(PROMPT_WAVE_ATTRIBUTE)).toBe(
+      false,
+    );
   });
 
   it("waves an agent-addressed prompt whose row says working", () => {
@@ -989,14 +1154,22 @@ describe("createFeedController: the working prompt's thinking wave", () => {
 
   it("stops the wave when the prompt row is re-pushed not working", () => {
     const { controller, host } = fixture();
-    controller.applyPage(page([userPromptRow("p1", "one", "t1", true)]), "replace");
+    controller.applyPage(
+      page([userPromptRow("p1", "one", "t1", true)]),
+      "replace",
+    );
     controller.upsert(userPromptRow("p1", "one", "t1", false));
-    expect(promptBubble(host, "p1").hasAttribute(PROMPT_WAVE_ATTRIBUTE)).toBe(false);
+    expect(promptBubble(host, "p1").hasAttribute(PROMPT_WAVE_ATTRIBUTE)).toBe(
+      false,
+    );
   });
 
   it("starts the wave when the prompt row is re-pushed working", () => {
     const { controller, host } = fixture();
-    controller.applyPage(page([userPromptRow("p1", "one", "t1", false)]), "replace");
+    controller.applyPage(
+      page([userPromptRow("p1", "one", "t1", false)]),
+      "replace",
+    );
     controller.upsert(userPromptRow("p1", "one", "t1", true));
     expect(promptBubble(host, "p1").getAttribute(PROMPT_WAVE_ATTRIBUTE)).toBe(
       PROMPT_WAVE_WORKING,
@@ -1009,13 +1182,20 @@ describe("createFeedController: the working prompt's thinking wave", () => {
       page([agentPromptRow("a1", "\u2192 Explore", "go", "t1", true)]),
       "replace",
     );
-    controller.upsert(agentPromptRow("a1", "\u2192 Explore", "go", "t1", false));
-    expect(promptBubble(host, "a1").hasAttribute(PROMPT_WAVE_ATTRIBUTE)).toBe(false);
+    controller.upsert(
+      agentPromptRow("a1", "\u2192 Explore", "go", "t1", false),
+    );
+    expect(promptBubble(host, "a1").hasAttribute(PROMPT_WAVE_ATTRIBUTE)).toBe(
+      false,
+    );
   });
 
   it("stops the wave without redrawing the bubble it stopped", () => {
     const { controller, host } = fixture();
-    controller.applyPage(page([userPromptRow("p1", "one", "t1", true)]), "replace");
+    controller.applyPage(
+      page([userPromptRow("p1", "one", "t1", true)]),
+      "replace",
+    );
     const before = promptBubble(host, "p1");
     controller.upsert(userPromptRow("p1", "one", "t1", false));
     expect(promptBubble(host, "p1")).toBe(before);
@@ -1023,7 +1203,10 @@ describe("createFeedController: the working prompt's thinking wave", () => {
 
   it("stops the wave without redrawing the prompt's text", () => {
     const { controller, host } = fixture();
-    controller.applyPage(page([userPromptRow("p1", "one", "t1", true)]), "replace");
+    controller.applyPage(
+      page([userPromptRow("p1", "one", "t1", true)]),
+      "replace",
+    );
     const body = promptBubble(host, "p1").querySelector(".bubble-body");
     controller.upsert(userPromptRow("p1", "one", "t1", false));
     expect(promptBubble(host, "p1").querySelector(".bubble-body")).toBe(body);
@@ -1031,7 +1214,10 @@ describe("createFeedController: the working prompt's thinking wave", () => {
 
   it("redraws a re-push that changes more than the flag, drawing the new flag", () => {
     const { controller, host } = fixture();
-    controller.applyPage(page([userPromptRow("p1", "one", "t1", true)]), "replace");
+    controller.applyPage(
+      page([userPromptRow("p1", "one", "t1", true)]),
+      "replace",
+    );
     controller.upsert(userPromptRow("p1", "one, edited", "t1", false));
     expect({
       text: promptBubble(host, "p1").textContent?.includes("one, edited"),
@@ -1052,7 +1238,12 @@ describe("createFeedController: following the tail", () => {
     const acts: string[] = [];
     const parkedOver: string[][] = [];
     const shifts: number[] = [];
-    const box = { scrollTop: 0, scrollHeight: 1000, clientHeight: 100, getBoundingClientRect: boxRect };
+    const box = {
+      scrollTop: 0,
+      scrollHeight: 1000,
+      clientHeight: 100,
+      getBoundingClientRect: boxRect,
+    };
     const park = (cause: string) => (): void => {
       acts.push(cause);
       parkedOver.push(drawnIds(host));
@@ -1103,7 +1294,10 @@ describe("createFeedController: following the tail", () => {
     const el = host.querySelector<HTMLElement>(`[data-feed-row="${id}"]`);
     if (el === null) throw new Error(`row ${id} is not drawn`);
     el.getBoundingClientRect = () => {
-      const index = el.parentElement === null ? 0 : [...el.parentElement.children].indexOf(el);
+      const index =
+        el.parentElement === null
+          ? 0
+          : [...el.parentElement.children].indexOf(el);
       return { top: 100 + 400 * index } as DOMRect;
     };
     return el;
@@ -1118,9 +1312,15 @@ describe("createFeedController: following the tail", () => {
 
   it("asks the tail owner to keep a standing follow when older rows land above", () => {
     const { controller, acts } = scrolled(true);
-    controller.applyPage(page([responseRow("a")], { hasMore: true }), "replace");
+    controller.applyPage(
+      page([responseRow("a")], { hasMore: true }),
+      "replace",
+    );
     acts.length = 0;
-    controller.applyPage(page([withOrder(responseRow("older"), "a")]), "prepend");
+    controller.applyPage(
+      page([withOrder(responseRow("older"), "a")]),
+      "prepend",
+    );
     expect(acts).toContain("follow");
   });
 
@@ -1161,7 +1361,11 @@ describe("createFeedController: following the tail", () => {
     controller.applyPage(page([responseRow("a")]), "replace");
     // Assert
     const record = await forwardedRecord(capture, "feed.replace-parked");
-    expect(record.context).toMatchObject({ feed: "root", rows: 1, first: true });
+    expect(record.context).toMatchObject({
+      feed: "root",
+      rows: 1,
+      first: true,
+    });
   });
 
   it("parks at the tail when a new prompt is drawn while the reader was scrolled up", () => {
@@ -1201,7 +1405,10 @@ describe("createFeedController: following the tail", () => {
   it("does not re-park on a redraw of a prompt already drawn", () => {
     // Arrange
     const { controller, acts } = scrolled(false);
-    controller.applyPage(page([userPromptRow("p", "hi", "t1", true)]), "replace");
+    controller.applyPage(
+      page([userPromptRow("p", "hi", "t1", true)]),
+      "replace",
+    );
     acts.length = 0;
     // Act
     controller.upsert(userPromptRow("p", "hi, edited", "t1", true));
@@ -1218,18 +1425,29 @@ describe("createFeedController: following the tail", () => {
     await Promise.resolve();
     capture.sent.length = 0;
     // Act
-    controller.applyPage(page([userPromptRow("p", "hi", "t1", true)]), "replace");
+    controller.applyPage(
+      page([userPromptRow("p", "hi", "t1", true)]),
+      "replace",
+    );
     // Assert
-    await expect(forwardedRecord(capture, "feed.sent-prompt-parked")).rejects.toThrow();
+    await expect(
+      forwardedRecord(capture, "feed.sent-prompt-parked"),
+    ).rejects.toThrow();
   });
 
   it("does not park when a prepend draws a prompt from history", () => {
     // Arrange
     const { controller, acts } = scrolled(false);
-    controller.applyPage(page([responseRow("a")], { hasMore: true }), "replace");
+    controller.applyPage(
+      page([responseRow("a")], { hasMore: true }),
+      "replace",
+    );
     acts.length = 0;
     // Act
-    controller.applyPage(page([withOrder(userPromptRow("old", "hi", "t0", true), "a")]), "prepend");
+    controller.applyPage(
+      page([withOrder(userPromptRow("old", "hi", "t0", true), "a")]),
+      "prepend",
+    );
     // Assert
     expect(acts).not.toContain("promptSent");
   });
@@ -1248,10 +1466,16 @@ describe("createFeedController: following the tail", () => {
   it("keeps the reader's content in place when older rows land above it", () => {
     // Arrange — `a` sits 100px down; the older row lands above it.
     const { controller, host, shifts } = scrolled(false);
-    controller.applyPage(page([responseRow("a")], { hasMore: true }), "replace");
+    controller.applyPage(
+      page([responseRow("a")], { hasMore: true }),
+      "replace",
+    );
     layOutByIndex(host, "a");
     // Act
-    controller.applyPage(page([withOrder(responseRow("older"), "a")]), "prepend");
+    controller.applyPage(
+      page([withOrder(responseRow("older"), "a")]),
+      "prepend",
+    );
     // Assert — the view moves down by exactly the 400px that grew above.
     expect(shifts).toEqual([400]);
   });
@@ -1261,7 +1485,10 @@ describe("createFeedController: following the tail", () => {
     const { controller, shifts } = scrolled(false);
     controller.applyPage(page([], { hasMore: true }), "replace");
     // Act
-    controller.applyPage(page([withOrder(responseRow("older"), "a")]), "prepend");
+    controller.applyPage(
+      page([withOrder(responseRow("older"), "a")]),
+      "prepend",
+    );
     // Assert
     expect(shifts).toEqual([]);
   });
@@ -1270,14 +1497,27 @@ describe("createFeedController: following the tail", () => {
     // Arrange — a listener that tears the first row out mid-page.
     const capture = captureLogRecords();
     const { controller, host, shifts } = scrolled(false);
-    controller.applyPage(page([responseRow("a")], { hasMore: true }), "replace");
+    controller.applyPage(
+      page([responseRow("a")], { hasMore: true }),
+      "replace",
+    );
     const a = layOutByIndex(host, "a");
     controller.onChange(() => a.remove());
     // Act
-    controller.applyPage(page([withOrder(responseRow("older"), "a")]), "prepend");
+    controller.applyPage(
+      page([withOrder(responseRow("older"), "a")]),
+      "prepend",
+    );
     // Assert
-    const record = await forwardedRecord(capture, "feed.prepend-anchor-detached");
-    expect({ level: record.level.case, context: record.context, shifts }).toEqual({
+    const record = await forwardedRecord(
+      capture,
+      "feed.prepend-anchor-detached",
+    );
+    expect({
+      level: record.level.case,
+      context: record.context,
+      shifts,
+    }).toEqual({
       level: "error",
       context: expect.objectContaining({ feed: "root", row: "a" }) as unknown,
       shifts: [],
@@ -1295,7 +1535,10 @@ describe("createFeedController: following the tail", () => {
     const fx = scrolled(opts.following);
     fx.box.getBoundingClientRect = () => ({ top: opts.boxTop }) as DOMRect;
     fx.controller.applyPage(
-      page([withOrder(responseRow("a"), "k10"), withOrder(responseRow("b"), "k30")]),
+      page([
+        withOrder(responseRow("a"), "k10"),
+        withOrder(responseRow("b"), "k30"),
+      ]),
       "replace",
     );
     layOutByIndex(fx.host, "b");
@@ -1305,7 +1548,10 @@ describe("createFeedController: following the tail", () => {
 
   it("keeps the reader's content in place when a late row lands above the viewport", () => {
     // Arrange — `b` sits at 500px, above a viewport whose top is at 1000px.
-    const { controller, shifts } = lateAbove({ following: false, boxTop: 1000 });
+    const { controller, shifts } = lateAbove({
+      following: false,
+      boxTop: 1000,
+    });
     // Act — a late row whose key sorts between `a` and `b`.
     controller.upsert(withOrder(responseRow("late"), "k20"));
     // Assert — `b` moved down one 400px row, and the view follows it.
@@ -1333,14 +1579,24 @@ describe("createFeedController: following the tail", () => {
   it("records an error, and does not shift, when an insert detaches the measured row", async () => {
     // Arrange — a listener that tears the measured row out mid-insert.
     const capture = captureLogRecords();
-    const { controller, host, shifts } = lateAbove({ following: false, boxTop: 1000 });
+    const { controller, host, shifts } = lateAbove({
+      following: false,
+      boxTop: 1000,
+    });
     const b = host.querySelector('[data-feed-row="b"]');
     controller.onChange(() => b?.remove());
     // Act
     controller.upsert(withOrder(responseRow("late"), "k20"));
     // Assert
-    const record = await forwardedRecord(capture, "feed.insert-anchor-detached");
-    expect({ level: record.level.case, context: record.context, shifts }).toEqual({
+    const record = await forwardedRecord(
+      capture,
+      "feed.insert-anchor-detached",
+    );
+    expect({
+      level: record.level.case,
+      context: record.context,
+      shifts,
+    }).toEqual({
       level: "error",
       context: expect.objectContaining({ feed: "root", row: "b" }) as unknown,
       shifts: [],
@@ -1357,7 +1613,11 @@ describe("createFeedController: following the tail", () => {
  */
 describe("createFeedController: a landed thinking row collapsing", () => {
   /** A thinking response row, landed (settled) or still arriving. */
-  function thinkingRow(id: string, landed: boolean, markdown = "weighing"): FeedRow {
+  function thinkingRow(
+    id: string,
+    landed: boolean,
+    markdown = "weighing",
+  ): FeedRow {
     return create(FeedRowSchema, {
       id: feedId(id),
       order: orderFor(id),
@@ -1368,7 +1628,10 @@ describe("createFeedController: a landed thinking row collapsing", () => {
             case: "response",
             value: {
               thinking: true,
-              result: { case: landed ? "success" : "update", value: { prose: { markdown } } },
+              result: {
+                case: landed ? "success" : "update",
+                value: { prose: { markdown } },
+              },
             },
           },
         },
@@ -1380,7 +1643,8 @@ describe("createFeedController: a landed thinking row collapsing", () => {
   function cappedResponse(u: FeedResponse): HTMLElement {
     const el = document.createElement("div");
     el.setAttribute("data-cap-lines", String(responseCapLines(u)));
-    el.textContent = u.result.case === undefined ? "" : (u.result.value.prose?.markdown ?? "");
+    el.textContent =
+      u.result.case === undefined ? "" : (u.result.value.prose?.markdown ?? "");
     return el;
   }
 
@@ -1390,7 +1654,11 @@ describe("createFeedController: a landed thinking row collapsing", () => {
    * t1 whose bottom edge is BEFORE while at the response cap and AFTER once
    * collapsed to one line.
    */
-  function collapsing(opts: { following: boolean; before: number; after: number }) {
+  function collapsing(opts: {
+    following: boolean;
+    before: number;
+    after: number;
+  }) {
     const h = harness();
     const host = document.createElement("div");
     document.body.replaceChildren(host);
@@ -1409,14 +1677,21 @@ describe("createFeedController: a landed thinking row collapsing", () => {
       body: defaultBubbleBody,
       revealRow: async () => false,
       bubble: (row) => stubBubble(row),
-      bodyContext: { ctx: h.ctx, feed: "root", row: create(FeedRowSchema, {}), revealRow: async () => false },
+      bodyContext: {
+        ctx: h.ctx,
+        feed: "root",
+        row: create(FeedRowSchema, {}),
+        revealRow: async () => false,
+      },
       scroll: { box, tail },
     });
     controller.applyPage(page([thinkingRow("t1", false)]), "replace");
     const row = host.querySelector<HTMLElement>('[data-feed-row="t1"]');
     if (row === null) throw new Error("t1 is not drawn");
     row.getBoundingClientRect = () => {
-      const cap = row.querySelector("[data-cap-lines]")?.getAttribute("data-cap-lines");
+      const cap = row
+        .querySelector("[data-cap-lines]")
+        ?.getAttribute("data-cap-lines");
       return { bottom: cap === "1" ? opts.after : opts.before } as DOMRect;
     };
     if (!opts.following) {
@@ -1467,7 +1742,11 @@ describe("createFeedController: a landed thinking row collapsing", () => {
 
   it("keeps a following feed following", () => {
     // Arrange
-    const { controller, tail } = collapsing({ following: true, before: 90, after: 40 });
+    const { controller, tail } = collapsing({
+      following: true,
+      before: 90,
+      after: 40,
+    });
     // Act
     controller.upsert(thinkingRow("t1", true));
     // Assert
@@ -1476,9 +1755,16 @@ describe("createFeedController: a landed thinking row collapsing", () => {
 
   it("moves nothing for a re-push above the viewport that is not the landing edge", () => {
     // Arrange — a re-push that changes the text, not the flag.
-    const { controller, box, host } = collapsing({ following: false, before: 90, after: 40 });
-    const row = host.querySelector<HTMLElement>('[data-feed-row="t1"]') as HTMLElement;
-    row.getBoundingClientRect = () => ({ bottom: row.textContent?.includes("longer") ? 140 : 90 }) as DOMRect;
+    const { controller, box, host } = collapsing({
+      following: false,
+      before: 90,
+      after: 40,
+    });
+    const row = host.querySelector<HTMLElement>(
+      '[data-feed-row="t1"]',
+    ) as HTMLElement;
+    row.getBoundingClientRect = () =>
+      ({ bottom: row.textContent?.includes("longer") ? 140 : 90 }) as DOMRect;
     // Act
     controller.upsert(thinkingRow("t1", false, "weighing, longer"));
     // Assert
@@ -1488,7 +1774,11 @@ describe("createFeedController: a landed thinking row collapsing", () => {
   it("measures no collapse when an already landed row is re-pushed", async () => {
     // Arrange — t1 lands once; only the records after that are read.
     const capture = captureLogRecords("debug");
-    const { controller } = collapsing({ following: false, before: 90, after: 40 });
+    const { controller } = collapsing({
+      following: false,
+      before: 90,
+      after: 40,
+    });
     controller.upsert(thinkingRow("t1", true));
     capture.logger.flush();
     await Promise.resolve();
@@ -1496,41 +1786,68 @@ describe("createFeedController: a landed thinking row collapsing", () => {
     // Act — the daemon re-pushes the settled row again.
     controller.upsert(thinkingRow("t1", true, "weighing, restated"));
     // Assert
-    await expect(forwardedRecord(capture, "feed.collapse-kept-place")).rejects.toThrow();
+    await expect(
+      forwardedRecord(capture, "feed.collapse-kept-place"),
+    ).rejects.toThrow();
   });
 
   it("collapses on its own landing without waiting for a later response", () => {
     // Arrange
-    const { controller, host } = collapsing({ following: false, before: 90, after: 40 });
+    const { controller, host } = collapsing({
+      following: false,
+      before: 90,
+      after: 40,
+    });
     // Act
     controller.upsert(thinkingRow("t1", true));
     // Assert — t1 is the only row, and it wears the thinking cap.
     expect([
       host.querySelectorAll("[data-feed-row]").length,
-      host.querySelector('[data-feed-row="t1"] [data-cap-lines]')?.getAttribute("data-cap-lines"),
+      host
+        .querySelector('[data-feed-row="t1"] [data-cap-lines]')
+        ?.getAttribute("data-cap-lines"),
     ]).toEqual([1, "1"]);
   });
 
   it("records the collapse it measured at DEBUG", async () => {
     // Arrange
     const capture = captureLogRecords("debug");
-    const { controller } = collapsing({ following: false, before: 90, after: 40 });
+    const { controller } = collapsing({
+      following: false,
+      before: 90,
+      after: 40,
+    });
     // Act
     controller.upsert(thinkingRow("t1", true));
     // Assert
     const record = await forwardedRecord(capture, "feed.collapse-kept-place");
-    expect(record.context).toMatchObject({ feed: "root", row: "t1", box_top: 100, before: 90, after: 40 });
+    expect(record.context).toMatchObject({
+      feed: "root",
+      row: "t1",
+      box_top: 100,
+      before: 90,
+      after: 40,
+    });
   });
 
   it("records a collapsing row its redraw detached as an ERROR and moves nothing", async () => {
     // Arrange — a listener that detaches the row during the redraw.
     const capture = captureLogRecords("debug");
-    const { controller, box, host } = collapsing({ following: false, before: 90, after: 40 });
-    controller.onChange(() => host.querySelector('[data-feed-row="t1"]')?.remove());
+    const { controller, box, host } = collapsing({
+      following: false,
+      before: 90,
+      after: 40,
+    });
+    controller.onChange(() =>
+      host.querySelector('[data-feed-row="t1"]')?.remove(),
+    );
     // Act
     controller.upsert(thinkingRow("t1", true));
     // Assert
-    const record = await forwardedRecord(capture, "feed.collapse-anchor-detached");
+    const record = await forwardedRecord(
+      capture,
+      "feed.collapse-anchor-detached",
+    );
     expect([record.level.case, box.scrollTop]).toEqual(["error", 500]);
   });
 });
@@ -1551,7 +1868,11 @@ describe("createFeedController: the feed selection", () => {
   }) {
     const acts: string[] = [];
     const shifts: number[] = [];
-    const box = { ...geometry, querySelector: () => null, getBoundingClientRect: boxRect };
+    const box = {
+      ...geometry,
+      querySelector: () => null,
+      getBoundingClientRect: boxRect,
+    };
     const tail = {
       isFollowing: () => false,
       follow: () => undefined,
@@ -1573,7 +1894,9 @@ describe("createFeedController: the feed selection", () => {
     const watched: Array<{ element: HTMLElement; id: string } | null> = [];
     const selectionVisibility: SelectionVisibility = {
       watch: (row) => {
-        watched.push(row === null ? null : { element: row.element, id: row.id.value });
+        watched.push(
+          row === null ? null : { element: row.element, id: row.id.value },
+        );
       },
       dispose: () => undefined,
     };
@@ -1595,14 +1918,26 @@ describe("createFeedController: the feed selection", () => {
         row: create(FeedRowSchema, {}),
         revealRow: async () => false,
       },
-      scroll: withScroll ? { box: scroll.box, tail: scroll.tail as never } : undefined,
+      scroll: withScroll
+        ? { box: scroll.box, tail: scroll.tail as never }
+        : undefined,
       selectionVisibility,
     });
-    return { controller, host, acts: scroll.acts, shifts: scroll.shifts, watched };
+    return {
+      controller,
+      host,
+      acts: scroll.acts,
+      shifts: scroll.shifts,
+      watched,
+    };
   }
 
   /** Script a row element's box, which jsdom lays out not at all. */
-  function withRowGeometry(el: HTMLElement, offsetTop: number, offsetHeight: number): void {
+  function withRowGeometry(
+    el: HTMLElement,
+    offsetTop: number,
+    offsetHeight: number,
+  ): void {
     Object.defineProperties(el, {
       offsetTop: { get: () => offsetTop },
       offsetHeight: { get: () => offsetHeight },
@@ -1636,12 +1971,17 @@ describe("createFeedController: the feed selection", () => {
     const { controller, host } = selecting();
     controller.upsert(toolCallRow("t1", "running"));
     controller.applySelection(selectionOf({ response: "t1" }));
-    const before = host.querySelector('[data-feed-row="t1"]')?.firstElementChild;
+    const before = host.querySelector(
+      '[data-feed-row="t1"]',
+    )?.firstElementChild;
     // Act
     controller.upsert(toolCallRow("t1", "returned"));
     // Assert — a different element, still marked.
     const after = host.querySelector('[data-feed-row="t1"]')?.firstElementChild;
-    expect([after === before, after?.classList.contains(SELECTED_ENTRY_CLASS)]).toEqual([false, true]);
+    expect([
+      after === before,
+      after?.classList.contains(SELECTED_ENTRY_CLASS),
+    ]).toEqual([false, true]);
   });
 
   it("marks the selected row's chrome so the feed's own record names it", () => {
@@ -1765,7 +2105,10 @@ describe("createFeedController: the feed selection", () => {
     // Act
     controller.applySelection(selectionOf({ response: "gone" }));
     // Assert
-    const record = await forwardedRecord(capture, "feed.selection-center-absent");
+    const record = await forwardedRecord(
+      capture,
+      "feed.selection-center-absent",
+    );
     expect(record.context).toMatchObject({ feed: "root", row: "gone" });
   });
 
@@ -1818,10 +2161,10 @@ describe("createFeedController: the feed selection", () => {
     controller.applySelection(selectionOf({ prompt: "p1" }));
     // Assert
     const card = host.querySelector('[data-feed-row="p1"]')?.firstElementChild;
-    expect([card?.getAttribute("data-role"), card?.classList.contains(SELECTED_ENTRY_CLASS)]).toEqual([
-      "prompt",
-      true,
-    ]);
+    expect([
+      card?.getAttribute("data-role"),
+      card?.classList.contains(SELECTED_ENTRY_CLASS),
+    ]).toEqual(["prompt", true]);
   });
 
   it("names a selected prompt's kind on its row", () => {
@@ -1929,13 +2272,17 @@ describe("createFeedController: the feed selection", () => {
     // Arrange
     const { controller } = selecting();
     // Act / Assert
-    expect(() => controller.applySelection(create(FeedSelectionSchema, {}))).toThrow(MalformedView);
+    expect(() =>
+      controller.applySelection(create(FeedSelectionSchema, {})),
+    ).toThrow(MalformedView);
   });
 
   it("refuses an empty selection with no viewport set as a malformed view", () => {
     // Arrange
     const { controller } = selecting();
-    const bare = create(FeedSelectionSchema, { selection: { case: "none", value: {} } });
+    const bare = create(FeedSelectionSchema, {
+      selection: { case: "none", value: {} },
+    });
     // Act / Assert
     expect(() => controller.applySelection(bare)).toThrow(MalformedView);
   });
@@ -1974,8 +2321,15 @@ describe("createFeedController: lookups and disposal", () => {
 });
 
 /** A row carrying ARM, built straight onto the generated schema. */
-function rowWith(id: string, arm: MessageInitShape<typeof FeedRowSchema>["row"]): FeedRow {
-  return create(FeedRowSchema, { id: feedId(id), order: orderFor(id), row: arm });
+function rowWith(
+  id: string,
+  arm: MessageInitShape<typeof FeedRowSchema>["row"],
+): FeedRow {
+  return create(FeedRowSchema, {
+    id: feedId(id),
+    order: orderFor(id),
+    row: arm,
+  });
 }
 
 function unknownArmRow(id: string): FeedRow {
@@ -2005,21 +2359,29 @@ describe("createFeedController: every row arm reaches its own drawing", () => {
         case: "agentPrompt",
         value: {
           address: { text: "→ Explore" },
-          body: { blocks: [{ block: { case: "text", value: { text: "go" } } }] },
+          body: {
+            blocks: [{ block: { case: "text", value: { text: "go" } } }],
+          },
         },
       },
       ".prompt-agent",
     ],
     [
       "turnEnded",
-      { case: "turnEnded", value: { endedAtMs: 1n, outcome: { case: "concluded", value: {} } } },
+      {
+        case: "turnEnded",
+        value: { endedAtMs: 1n, outcome: { case: "concluded", value: {} } },
+      },
       "[data-arm='concluded']",
     ],
     [
       "separation",
       {
         case: "separation",
-        value: { label: { text: "context cleared" }, kind: { case: "cleared", value: {} } },
+        value: {
+          label: { text: "context cleared" },
+          kind: { case: "cleared", value: {} },
+        },
       },
       ".sep-label",
     ],
@@ -2032,7 +2394,11 @@ describe("createFeedController: every row arm reaches its own drawing", () => {
     ["question", { case: "question", value: {} }, ".stub-question"],
     ["coldGate", { case: "coldGate", value: {} }, ".stub-coldGate"],
     ["commandPanel", { case: "commandPanel", value: {} }, ".stub-commandPanel"],
-    ["commandRefused", { case: "commandRefused", value: {} }, ".stub-commandRefused"],
+    [
+      "commandRefused",
+      { case: "commandRefused", value: {} },
+      ".stub-commandRefused",
+    ],
   ];
 
   it.each(ARMS)("draws the %s arm", (name, arm, mark) => {
@@ -2040,7 +2406,9 @@ describe("createFeedController: every row arm reaches its own drawing", () => {
     const { controller, host } = fixture();
     controller.applyPage(page([rowWith(name, arm)]), "replace");
     // Assert
-    expect(host.querySelector(`[data-feed-row="${name}"] ${mark}`)).not.toBeNull();
+    expect(
+      host.querySelector(`[data-feed-row="${name}"] ${mark}`),
+    ).not.toBeNull();
   });
 
   it("refuses a row arm this build does not know", () => {
@@ -2052,7 +2420,9 @@ describe("createFeedController: every row arm reaches its own drawing", () => {
   it("names FeedRow.row as the path of an unknown arm's refusal", () => {
     const { controller, host } = fixture();
     controller.applyPage(page([unknownArmRow("x")]), "replace");
-    expect(host.querySelector(".row-malformed")?.textContent).toContain("FeedRow.row");
+    expect(host.querySelector(".row-malformed")?.textContent).toContain(
+      "FeedRow.row",
+    );
   });
 
   it("refuses a detached subagent that reached the ordinary row path", () => {
@@ -2080,13 +2450,19 @@ describe("createFeedController: every activity unit reaches its own renderer", (
     ["artifact", { case: "artifact", value: {} }, ".stub-artifact"],
     ["plan", { case: "plan", value: {} }, ".stub-plan"],
     ["findings", { case: "findings", value: {} }, ".stub-findings"],
-    ["subagentResult", { case: "subagentResult", value: {} }, ".stub-subagentResult"],
+    [
+      "subagentResult",
+      { case: "subagentResult", value: {} },
+      ".stub-subagentResult",
+    ],
   ];
 
   it.each(UNITS)("draws the %s unit", (name, unit, mark) => {
     const { controller, host } = fixture();
     controller.applyPage(page([unitRow(name, unit)]), "replace");
-    expect(host.querySelector(`[data-feed-row="${name}"] ${mark}`)).not.toBeNull();
+    expect(
+      host.querySelector(`[data-feed-row="${name}"] ${mark}`),
+    ).not.toBeNull();
   });
 
   it("refuses an activity unit this build does not know", () => {
@@ -2096,7 +2472,9 @@ describe("createFeedController: every activity unit reaches its own renderer", (
     // what a newer daemon's field number looks like once it is decoded.
     (row.row.value as { unit: unknown }).unit = { case: "surprise", value: {} };
     controller.applyPage(page([row]), "replace");
-    expect(host.querySelector(".row-malformed")?.textContent).toContain("FeedTurnActivity.unit");
+    expect(host.querySelector(".row-malformed")?.textContent).toContain(
+      "FeedTurnActivity.unit",
+    );
   });
 
   it("refuses a subagent unit that reached the ordinary row path", () => {
@@ -2120,18 +2498,28 @@ describe("createFeedController: every activity unit reaches its own renderer", (
   it("stamps no unit on an activity row whose unit is unset", () => {
     const { controller, host } = fixture();
     controller.applyPage(
-      page([create(FeedRowSchema, { id: feedId("x"), order: orderFor("x"), row: { case: "activity", value: {} } })]),
+      page([
+        create(FeedRowSchema, {
+          id: feedId("x"),
+          order: orderFor("x"),
+          row: { case: "activity", value: {} },
+        }),
+      ]),
       "replace",
     );
-    expect(host.querySelector('[data-feed-row="x"]')?.hasAttribute("data-unit")).toBe(false);
+    expect(
+      host.querySelector('[data-feed-row="x"]')?.hasAttribute("data-unit"),
+    ).toBe(false);
   });
 
   it("stamps a row with no arm at all as malformed rather than dropping it", () => {
     const { controller, host } = fixture();
-    controller.upsert(create(FeedRowSchema, { id: feedId("x"), order: orderFor("x") }));
-    expect(host.querySelector('[data-feed-row="x"]')?.getAttribute("data-row-kind")).toBe(
-      "malformed",
+    controller.upsert(
+      create(FeedRowSchema, { id: feedId("x"), order: orderFor("x") }),
     );
+    expect(
+      host.querySelector('[data-feed-row="x"]')?.getAttribute("data-row-kind"),
+    ).toBe("malformed");
   });
 });
 
@@ -2154,7 +2542,10 @@ describe("createFeedController: the page's own arms", () => {
         },
       },
     });
-    (bad.result.value as { kind: unknown }).kind = { case: "surprise", value: {} };
+    (bad.result.value as { kind: unknown }).kind = {
+      case: "surprise",
+      value: {},
+    };
     expect(() => controller.applyPage(bad, "replace")).toThrow(MalformedView);
   });
 });
@@ -2173,15 +2564,27 @@ describe("createFeedController: mirroring the card's state onto the chrome", () 
   }
 
   it("copies the card's state up onto the row chrome", () => {
-    const { controller, host } = fixture(harness(), {}, { renderers: stating("running") });
+    const { controller, host } = fixture(
+      harness(),
+      {},
+      { renderers: stating("running") },
+    );
     controller.applyPage(page([responseRow("a")]), "replace");
-    expect(host.querySelector('[data-feed-row="a"]')?.getAttribute("data-state")).toBe("running");
+    expect(
+      host.querySelector('[data-feed-row="a"]')?.getAttribute("data-state"),
+    ).toBe("running");
   });
 
   it("states nothing on the chrome when the card states nothing", () => {
-    const { controller, host } = fixture(harness(), {}, { renderers: stating(null) });
+    const { controller, host } = fixture(
+      harness(),
+      {},
+      { renderers: stating(null) },
+    );
     controller.applyPage(page([responseRow("a")]), "replace");
-    expect(host.querySelector('[data-feed-row="a"]')?.hasAttribute("data-state")).toBe(false);
+    expect(
+      host.querySelector('[data-feed-row="a"]')?.hasAttribute("data-state"),
+    ).toBe(false);
   });
 });
 
@@ -2199,37 +2602,60 @@ describe("createFeedController: the reader's expansions survive a redraw", () =>
 
   it("keeps a card-level fold the reader opened across a re-push of the row", () => {
     // Arrange: the row is drawn, and the reader opens its fold.
-    const { controller, host } = fixture(harness(), {}, { renderers: foldingCard() });
+    const { controller, host } = fixture(
+      harness(),
+      {},
+      { renderers: foldingCard() },
+    );
     controller.applyPage(page([responseRow("a")]), "replace");
     host.querySelector<HTMLElement>(".tool-fold")?.classList.add("expanded");
     // Act: the daemon re-pushes the SAME row — the upsert path.
     controller.upsert(responseRow("a"));
     // Assert: R2 — a push states the INITIAL fold and never un-toggles.
-    expect(host.querySelector(".tool-fold")?.classList.contains("expanded")).toBe(true);
+    expect(
+      host.querySelector(".tool-fold")?.classList.contains("expanded"),
+    ).toBe(true);
   });
 
   it("leaves a fold the reader never opened collapsed across a re-push", () => {
     // Arrange
-    const { controller, host } = fixture(harness(), {}, { renderers: foldingCard() });
+    const { controller, host } = fixture(
+      harness(),
+      {},
+      { renderers: foldingCard() },
+    );
     controller.applyPage(page([responseRow("a")]), "replace");
     // Act
     controller.upsert(responseRow("a"));
     // Assert
-    expect(host.querySelector(".tool-fold")?.classList.contains("expanded")).toBe(false);
+    expect(
+      host.querySelector(".tool-fold")?.classList.contains("expanded"),
+    ).toBe(false);
   });
 });
 
 describe("createFeedController: a feed that is not the root", () => {
   it("names the feed it draws by its own id", () => {
-    const { host } = fixture(harness(), {}, { feed: create(FeedIdSchema, { value: "b1" }) });
+    const { host } = fixture(
+      harness(),
+      {},
+      { feed: create(FeedIdSchema, { value: "b1" }) },
+    );
     expect(host.getAttribute("data-feed")).toBe("b1");
   });
 
   it("walks THAT feed, addressing the page request to its id", async () => {
     // Arrange
     const h = harness();
-    const { controller, host } = fixture(h, {}, { feed: create(FeedIdSchema, { value: "b1" }) });
-    controller.applyPage(page([responseRow("a")], { hasMore: true }), "replace");
+    const { controller, host } = fixture(
+      h,
+      {},
+      { feed: create(FeedIdSchema, { value: "b1" }) },
+    );
+    controller.applyPage(
+      page([responseRow("a")], { hasMore: true }),
+      "replace",
+    );
     // Act
     host.querySelector<HTMLElement>("[data-load-more]")?.click();
     await settle();
@@ -2241,7 +2667,10 @@ describe("createFeedController: a feed that is not the root", () => {
 describe("createFeedController: the bubbles it holds", () => {
   it("reports the bubbles on this feed, for the reveal walk", () => {
     const { controller, bubbles } = fixture();
-    controller.applyPage(page([subagentRow("b1"), responseRow("r1")]), "replace");
+    controller.applyPage(
+      page([subagentRow("b1"), responseRow("r1")]),
+      "replace",
+    );
     expect(controller.bubbles()).toEqual([bubbles.get("b1")]);
   });
 
@@ -2258,25 +2687,36 @@ describe("createFeedController: what a body renderer reads", () => {
     const { controller } = fixture();
     controller.applyPage(
       page([responseRow("a")], {
-        crumbs: [create(FeedBreadcrumbSchema, { target: feedId("o"), label: "outer" })],
+        crumbs: [
+          create(FeedBreadcrumbSchema, { target: feedId("o"), label: "outer" }),
+        ],
       }),
       "replace",
     );
     // Assert
-    expect(controller.breadcrumbs().map((crumb) => crumb.label)).toEqual(["outer"]);
+    expect(controller.breadcrumbs().map((crumb) => crumb.label)).toEqual([
+      "outer",
+    ]);
   });
 
   it("exposes the view a body renderer draws from", () => {
     const { controller } = fixture();
     controller.applyPage(page([responseRow("a")]), "replace");
-    expect(controller.view().rows().map((row) => row.id?.value)).toEqual(["a"]);
+    expect(
+      controller
+        .view()
+        .rows()
+        .map((row) => row.id?.value),
+    ).toEqual(["a"]);
   });
 });
 
 describe("createFeedController: drawing and disposal edges", () => {
   it("refuses to draw a row it does not hold", () => {
     const { controller } = fixture();
-    expect(() => controller.drawRow(responseRow("nope"))).toThrow(/unheld row nope/);
+    expect(() => controller.drawRow(responseRow("nope"))).toThrow(
+      /unheld row nope/,
+    );
   });
 
   it("disposes each bubble exactly once, however often dispose is called", () => {
@@ -2303,17 +2743,21 @@ describe("createFeedController: a failure that is not a malformed view", () => {
     // Arrange: a renderer that fails for a reason the schema has nothing to do
     // with. Only a MalformedView costs one row; anything else is this build's
     // bug and must not be disguised as bad data.
-    const { controller } = fixture(harness(), {}, {
-      renderers: {
-        response: () => {
-          throw new TypeError("the renderer is broken");
+    const { controller } = fixture(
+      harness(),
+      {},
+      {
+        renderers: {
+          response: () => {
+            throw new TypeError("the renderer is broken");
+          },
         },
       },
-    });
-    // Act / Assert
-    expect(() => controller.applyPage(page([responseRow("a")]), "replace")).toThrow(
-      "the renderer is broken",
     );
+    // Act / Assert
+    expect(() =>
+      controller.applyPage(page([responseRow("a")]), "replace"),
+    ).toThrow("the renderer is broken");
   });
 });
 
@@ -2322,10 +2766,15 @@ describe("createFeedController: the walk's refusal does not accumulate", () => {
     // Arrange: a daemon that refuses every walk.
     const h = harness({
       getFeedPage: () =>
-        create(GetFeedPageResponseSchema, { result: { case: "error", value: {} } }),
+        create(GetFeedPageResponseSchema, {
+          result: { case: "error", value: {} },
+        }),
     });
     const { controller, host } = fixture(h);
-    controller.applyPage(page([responseRow("a")], { hasMore: true }), "replace");
+    controller.applyPage(
+      page([responseRow("a")], { hasMore: true }),
+      "replace",
+    );
     // Act: two refused walks in a row.
     host.querySelector<HTMLElement>("[data-load-more]")?.click();
     await settle();
@@ -2340,7 +2789,11 @@ describe("createFeedController: a card's clocks stop when its unit settles", () 
   /** A fixture drawing REAL tool-call cards on a ticker the test can count. */
   function ticking(): Fixture & { ticker: CountingTicker } {
     const ticker = countingTicker();
-    const f = fixture(harness({ ticker }), {}, { renderers: { simpleToolCall: drawFeedSimpleToolCall } });
+    const f = fixture(
+      harness({ ticker }),
+      {},
+      { renderers: { simpleToolCall: drawFeedSimpleToolCall } },
+    );
     return { ...f, ticker };
   }
 
@@ -2360,7 +2813,8 @@ describe("createFeedController: a card's clocks stop when its unit settles", () 
     const { controller, ticker } = ticking();
     controller.applyPage(page([toolCallRow("t", "running")]), "replace");
     // Act: three more live frames of the same row.
-    for (let i = 0; i < 3; i += 1) controller.upsert(toolCallRow("t", "running"));
+    for (let i = 0; i < 3; i += 1)
+      controller.upsert(toolCallRow("t", "running"));
     // Assert: one card, one clock — not one per push.
     expect(ticker.live()).toBe(1);
   });
@@ -2368,7 +2822,10 @@ describe("createFeedController: a card's clocks stop when its unit settles", () 
   it("stops every remaining clock in a turn when that turn's end lands", () => {
     // Arrange: a call still drawn as running when its turn finishes.
     const { controller, ticker } = ticking();
-    controller.applyPage(page([toolCallRow("t", "running", { turn: "turn-1" })]), "replace");
+    controller.applyPage(
+      page([toolCallRow("t", "running", { turn: "turn-1" })]),
+      "replace",
+    );
     expect(ticker.live()).toBe(1);
     // Act.
     controller.upsert(turnEndedRow("e", "turn-1"));
@@ -2380,15 +2837,28 @@ describe("createFeedController: a card's clocks stop when its unit settles", () 
     // Arrange: a running call; the controller draws the terminal row itself,
     // and an interjection's draws nothing but is still the turn's ending row.
     const ticker = countingTicker();
-    const { controller } = fixture(harness({ ticker }), {}, {
-      renderers: { simpleToolCall: drawFeedSimpleToolCall },
-    });
-    controller.applyPage(page([toolCallRow("t", "running", { turn: "turn-1" })]), "replace");
+    const { controller } = fixture(
+      harness({ ticker }),
+      {},
+      {
+        renderers: { simpleToolCall: drawFeedSimpleToolCall },
+      },
+    );
+    controller.applyPage(
+      page([toolCallRow("t", "running", { turn: "turn-1" })]),
+      "replace",
+    );
     const interjected = turnEndedRow("e", "turn-1", "interrupted");
-    if (interjected.row.case !== "turnEnded" || interjected.row.value.outcome.case !== "interrupted") {
+    if (
+      interjected.row.case !== "turnEnded" ||
+      interjected.row.value.outcome.case !== "interrupted"
+    ) {
       throw new Error("the fixture is not an interrupted ending");
     }
-    interjected.row.value.outcome.value.command = { case: "interjection", value: create(FeedTurnEndedInterruptedInterjectionSchema, {}) };
+    interjected.row.value.outcome.value.command = {
+      case: "interjection",
+      value: create(FeedTurnEndedInterruptedInterjectionSchema, {}),
+    };
     // Act.
     controller.upsert(interjected);
     // Assert.
@@ -2433,16 +2903,23 @@ describe("createFeedController: a card's clocks stop when its unit settles", () 
     // measurer's observer, say), in a turn that is about to end.
     let disposed = 0;
     const ticker = countingTicker();
-    const { controller } = fixture(harness({ ticker }), {}, {
-      renderers: {
-        simpleToolCall: (u, rc) => {
-          const el = drawFeedSimpleToolCall(u, rc);
-          onDiscard(el, () => (disposed += 1));
-          return el;
+    const { controller } = fixture(
+      harness({ ticker }),
+      {},
+      {
+        renderers: {
+          simpleToolCall: (u, rc) => {
+            const el = drawFeedSimpleToolCall(u, rc);
+            onDiscard(el, () => (disposed += 1));
+            return el;
+          },
         },
       },
-    });
-    controller.applyPage(page([toolCallRow("t", "running", { turn: "turn-1" })]), "replace");
+    );
+    controller.applyPage(
+      page([toolCallRow("t", "running", { turn: "turn-1" })]),
+      "replace",
+    );
 
     // Act
     controller.upsert(turnEndedRow("e", "turn-1"));
@@ -2455,16 +2932,23 @@ describe("createFeedController: a card's clocks stop when its unit settles", () 
   it("leaves a present clock counting when its turn ends, since an age stays true", () => {
     // Arrange: a settled card whose only clock is an "ago" reading.
     const ticker = countingTicker();
-    const { controller } = fixture(harness({ ticker }), {}, {
-      renderers: {
-        simpleToolCall: (_u, rc) => {
-          const el = document.createElement("span");
-          tickWhileShown(el, rc.ctx.ticker, () => {});
-          return el;
+    const { controller } = fixture(
+      harness({ ticker }),
+      {},
+      {
+        renderers: {
+          simpleToolCall: (_u, rc) => {
+            const el = document.createElement("span");
+            tickWhileShown(el, rc.ctx.ticker, () => {});
+            return el;
+          },
         },
       },
-    });
-    controller.applyPage(page([toolCallRow("t", "returned", { turn: "turn-1" })]), "replace");
+    );
+    controller.applyPage(
+      page([toolCallRow("t", "returned", { turn: "turn-1" })]),
+      "replace",
+    );
 
     // Act
     controller.upsert(turnEndedRow("e", "turn-1"));
@@ -2477,7 +2961,10 @@ describe("createFeedController: a card's clocks stop when its unit settles", () 
     // Arrange.
     const { controller, ticker } = ticking();
     controller.applyPage(
-      page([toolCallRow("t1", "running"), toolCallRow("t2", "running", { turn: "turn-1" })]),
+      page([
+        toolCallRow("t1", "running"),
+        toolCallRow("t2", "running", { turn: "turn-1" }),
+      ]),
       "replace",
     );
     // Act.
@@ -2495,19 +2982,27 @@ describe("createFeedController: a card's clocks stop when its unit settles", () 
 describe("createFeedController: folds across a page replace", () => {
   /** A fixture whose response rows draw one section of CLASSES apiece. */
   function drawing(className: string): Fixture {
-    return fixture(harness(), {}, {
-      renderers: {
-        response: () => {
-          const el = document.createElement("div");
-          el.className = className;
-          return el;
+    return fixture(
+      harness(),
+      {},
+      {
+        renderers: {
+          response: () => {
+            const el = document.createElement("div");
+            el.className = className;
+            return el;
+          },
         },
       },
-    });
+    );
   }
 
   /** The drawn fold of row ID, or null. */
-  function fold(host: HTMLElement, id: string, cls = "tool-fold"): HTMLElement | null {
+  function fold(
+    host: HTMLElement,
+    id: string,
+    cls = "tool-fold",
+  ): HTMLElement | null {
     return host.querySelector<HTMLElement>(`[data-feed-row="${id}"] .${cls}`);
   }
 
@@ -2552,7 +3047,9 @@ describe("createFeedController: folds across a page replace", () => {
     // Act
     controller.applyPage(page([responseRow("a")]), "replace");
     // Assert
-    expect(fold(host, "a", "bubble-scroll")?.classList.contains("expanded")).toBe(true);
+    expect(
+      fold(host, "a", "bubble-scroll")?.classList.contains("expanded"),
+    ).toBe(true);
   });
 });
 
@@ -2587,17 +3084,36 @@ describe("createFeedController: every row is placed by its order key", () => {
     controller.applyPage(incidentPage(), "replace");
     // Act — two response rows whose keys sort between `early` and `answer`
     // arrive AFTER everything else (the 14:36:58 push).
-    controller.upsert(withOrder(responseRow("late-1", "one", undefined, "t1"), "k0300"));
-    controller.upsert(withOrder(responseRow("late-2", "two", undefined, "t1"), "k0400"));
+    controller.upsert(
+      withOrder(responseRow("late-1", "one", undefined, "t1"), "k0300"),
+    );
+    controller.upsert(
+      withOrder(responseRow("late-2", "two", undefined, "t1"), "k0400"),
+    );
     // Assert
-    expect(drawnIds(host)).toEqual(["prompt", "early", "late-1", "late-2", "answer", "end"]);
+    expect(drawnIds(host)).toEqual([
+      "prompt",
+      "early",
+      "late-1",
+      "late-2",
+      "answer",
+      "end",
+    ]);
   });
 
   it("places a page's rows by their keys, not by the page's sequence", () => {
     // Arrange
     const { controller, host } = fixture();
     // Act
-    controller.applyPage(page(keyed([[responseRow("b"), "k2"], [responseRow("a"), "k1"]])), "replace");
+    controller.applyPage(
+      page(
+        keyed([
+          [responseRow("b"), "k2"],
+          [responseRow("a"), "k1"],
+        ]),
+      ),
+      "replace",
+    );
     // Assert
     expect(drawnIds(host)).toEqual(["a", "b"]);
   });
@@ -2605,7 +3121,15 @@ describe("createFeedController: every row is placed by its order key", () => {
   it("compares keys code unit by code unit, a prefix first", () => {
     // Arrange
     const { controller, host } = fixture();
-    controller.applyPage(page(keyed([[responseRow("ab"), "ab"], [responseRow("b"), "b"]])), "replace");
+    controller.applyPage(
+      page(
+        keyed([
+          [responseRow("ab"), "ab"],
+          [responseRow("b"), "b"],
+        ]),
+      ),
+      "replace",
+    );
     // Act
     controller.upsert(withOrder(responseRow("a"), "a"));
     // Assert
@@ -2617,7 +3141,9 @@ describe("createFeedController: every row is placed by its order key", () => {
     const { controller, host } = fixture();
     controller.applyPage(incidentPage(), "replace");
     // Act
-    controller.upsert(withOrder(userPromptRow("next", "and then", "t2"), "k0700"));
+    controller.upsert(
+      withOrder(userPromptRow("next", "and then", "t2"), "k0700"),
+    );
     // Assert
     expect(drawnIds(host).at(-1)).toBe("next");
   });
@@ -2633,7 +3159,12 @@ describe("createFeedController: every row is placed by its order key", () => {
     const record = await forwardedRecord(capture, "feed.row-placed");
     expect({ level: record.level.case, context: record.context }).toEqual({
       level: "info",
-      context: expect.objectContaining({ row: "late-1", key: "k0300", outcome: "inserted", position: 2 }) as unknown,
+      context: expect.objectContaining({
+        row: "late-1",
+        key: "k0300",
+        outcome: "inserted",
+        position: 2,
+      }) as unknown,
     });
   });
 
@@ -2648,7 +3179,12 @@ describe("createFeedController: every row is placed by its order key", () => {
     const record = await forwardedRecord(capture, "feed.row-placed");
     expect({ level: record.level.case, context: record.context }).toEqual({
       level: "info",
-      context: expect.objectContaining({ row: "next", key: "k0700", outcome: "appended", position: 4 }) as unknown,
+      context: expect.objectContaining({
+        row: "next",
+        key: "k0700",
+        outcome: "appended",
+        position: 4,
+      }) as unknown,
     });
   });
 
@@ -2662,7 +3198,11 @@ describe("createFeedController: every row is placed by its order key", () => {
     const record = await forwardedRecord(capture, "feed.page-placed");
     expect({ level: record.level.case, context: record.context }).toEqual({
       level: "info",
-      context: expect.objectContaining({ rows: 4, first_key: "k0100", last_key: "k0600" }) as unknown,
+      context: expect.objectContaining({
+        rows: 4,
+        first_key: "k0100",
+        last_key: "k0600",
+      }) as unknown,
     });
   });
 
@@ -2687,7 +3227,11 @@ describe("createFeedController: every row is placed by its order key", () => {
     const record = await forwardedRecord(capture, "feed.row-placed");
     expect({ level: record.level.case, context: record.context }).toEqual({
       level: "info",
-      context: expect.objectContaining({ row: "history", key: "k0050", outcome: "unloadedHistory" }) as unknown,
+      context: expect.objectContaining({
+        row: "history",
+        key: "k0050",
+        outcome: "unloadedHistory",
+      }) as unknown,
     });
   });
 
@@ -2698,7 +3242,12 @@ describe("createFeedController: every row is placed by its order key", () => {
         create(GetFeedPageResponseSchema, {
           result: {
             case: "success",
-            value: page(keyed([[responseRow("oldest"), "k0010"], [responseRow("history"), "k0050"]])),
+            value: page(
+              keyed([
+                [responseRow("oldest"), "k0010"],
+                [responseRow("history"), "k0050"],
+              ]),
+            ),
           },
         }),
     });
@@ -2709,7 +3258,14 @@ describe("createFeedController: every row is placed by its order key", () => {
     host.querySelector<HTMLElement>("[data-load-more]")?.click();
     await settle();
     // Assert
-    expect(drawnIds(host)).toEqual(["oldest", "history", "prompt", "early", "answer", "end"]);
+    expect(drawnIds(host)).toEqual([
+      "oldest",
+      "history",
+      "prompt",
+      "early",
+      "answer",
+      "end",
+    ]);
   });
 
   it("inserts a late row older than every held row at the top when the feed is at its start", () => {
@@ -2727,7 +3283,12 @@ describe("createFeedController: every row is placed by its order key", () => {
     const { controller, host } = fixture();
     controller.applyPage(incidentPage(), "replace");
     // Act — the early response grows.
-    controller.upsert(withOrder(responseRow("early", "looking harder", undefined, "t1"), "k0200"));
+    controller.upsert(
+      withOrder(
+        responseRow("early", "looking harder", undefined, "t1"),
+        "k0200",
+      ),
+    );
     // Assert
     expect(drawnIds(host)).toEqual(["prompt", "early", "answer", "end"]);
   });
@@ -2737,7 +3298,9 @@ describe("createFeedController: every row is placed by its order key", () => {
     const { controller, host } = fixture();
     controller.applyPage(incidentPage(), "replace");
     // Act — the daemon breaks the fixed-key invariant.
-    controller.upsert(withOrder(responseRow("early", "moved?", undefined, "t1"), "k0900"));
+    controller.upsert(
+      withOrder(responseRow("early", "moved?", undefined, "t1"), "k0900"),
+    );
     // Assert
     expect(drawnIds(host)).toEqual(["prompt", "early", "answer", "end"]);
   });
@@ -2748,12 +3311,18 @@ describe("createFeedController: every row is placed by its order key", () => {
     const { controller } = fixture();
     controller.applyPage(incidentPage(), "replace");
     // Act
-    controller.upsert(withOrder(responseRow("early", "moved?", undefined, "t1"), "k0900"));
+    controller.upsert(
+      withOrder(responseRow("early", "moved?", undefined, "t1"), "k0900"),
+    );
     // Assert
     const record = await forwardedRecord(capture, "feed.row-order-changed");
     expect({ level: record.level.case, context: record.context }).toEqual({
       level: "error",
-      context: expect.objectContaining({ row: "early", placed_key: "k0200", pushed_key: "k0900" }) as unknown,
+      context: expect.objectContaining({
+        row: "early",
+        placed_key: "k0200",
+        pushed_key: "k0900",
+      }) as unknown,
     });
   });
 
@@ -2780,14 +3349,30 @@ describe("createFeedController: every row is placed by its order key", () => {
     const record = await forwardedRecord(capture, "feed.row-order-duplicate");
     expect({ level: record.level.case, context: record.context }).toEqual({
       level: "error",
-      context: expect.objectContaining({ row: "twin", key: "k0200", holder: "early" }) as unknown,
+      context: expect.objectContaining({
+        row: "twin",
+        key: "k0200",
+        holder: "early",
+      }) as unknown,
     });
   });
 
   it.each([
-    ["a pushed row with no order", () => withoutOrder(responseRow("x")), "FeedRow.order"],
-    ["a pushed row with an empty key", () => withOrder(responseRow("x"), ""), "FeedRow.order.key"],
-    ["a removal with no order", () => withoutOrder(removedRow("x")), "FeedRow.order"],
+    [
+      "a pushed row with no order",
+      () => withoutOrder(responseRow("x")),
+      "FeedRow.order",
+    ],
+    [
+      "a pushed row with an empty key",
+      () => withOrder(responseRow("x"), ""),
+      "FeedRow.order.key",
+    ],
+    [
+      "a removal with no order",
+      () => withoutOrder(removedRow("x")),
+      "FeedRow.order",
+    ],
   ])("refuses %s as a malformed view", (_name, build, path) => {
     // Arrange
     const { controller } = fixture();
@@ -2799,7 +3384,9 @@ describe("createFeedController: every row is placed by its order key", () => {
       refused = err;
     }
     // Assert
-    expect(refused instanceof MalformedView ? refused.path : refused).toBe(path);
+    expect(refused instanceof MalformedView ? refused.path : refused).toBe(
+      path,
+    );
   });
 
   it("refuses a page holding a row with no order and keeps the rows already drawn", () => {
@@ -2809,12 +3396,18 @@ describe("createFeedController: every row is placed by its order key", () => {
     let refused: unknown = null;
     // Act
     try {
-      controller.applyPage(page([responseRow("a"), withoutOrder(responseRow("b"))]), "replace");
+      controller.applyPage(
+        page([responseRow("a"), withoutOrder(responseRow("b"))]),
+        "replace",
+      );
     } catch (err) {
       refused = err;
     }
     // Assert
-    expect({ refused: refused instanceof MalformedView, drawn: drawnIds(host) }).toEqual({
+    expect({
+      refused: refused instanceof MalformedView,
+      drawn: drawnIds(host),
+    }).toEqual({
       refused: true,
       drawn: ["prompt", "early", "answer", "end"],
     });
@@ -2825,7 +3418,10 @@ describe("createFeedController: every row is placed by its order key", () => {
     const h = harness({
       getFeedPage: () =>
         create(GetFeedPageResponseSchema, {
-          result: { case: "success", value: page([withoutOrder(responseRow("older"))]) },
+          result: {
+            case: "success",
+            value: page([withoutOrder(responseRow("older"))]),
+          },
         }),
     });
     const { controller, host } = fixture(h);
@@ -2839,97 +3435,25 @@ describe("createFeedController: every row is placed by its order key", () => {
 
   it("never places a new row by arrival order (source scan)", () => {
     // Arrange — feed-view.ts, comments stripped.
-    const source = codeOf(readFileSync(join(process.cwd(), "src/feed/feed-view.ts"), "utf8"));
+    const source = codeOf(
+      readFileSync(join(process.cwd(), "src/feed/feed-view.ts"), "utf8"),
+    );
     // Act — every insertion into the order, and every arrival-order index.
-    const insertions = [...source.matchAll(/\border\.splice\(([^,)]*),\s*0\b/g)].map((m) => m[1].trim());
+    const insertions = [
+      ...source.matchAll(/\border\.splice\(([^,)]*),\s*0\b/g),
+    ].map((m) => m[1].trim());
     const arrival = [
       ...source.matchAll(/\border\.(?:push|unshift)\(/g),
       ...source.matchAll(/\(\s*[^()]*order\.length[^()]*,\s*0\s*,/g),
-      ...source.matchAll(/(?:adopt|insertAt|adoptPageRow)\([^;]*order\.length/g),
+      ...source.matchAll(
+        /(?:adopt|insertAt|adoptPageRow)\([^;]*order\.length/g,
+      ),
     ].map((m) => m[0]);
     // Assert — one insertion, at the index the key's binary search found.
-    expect({ insertions, arrival }).toEqual({ insertions: ["index"], arrival: [] });
-  });
-});
-
-describe("createFeedController: when a row was painted", () => {
-  beforeEach(() => {
-    vi.useFakeTimers({ toFake: ["requestAnimationFrame", "Date"] });
-    vi.setSystemTime(1_000);
-  });
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
-  /** Run one animation frame's callbacks. */
-  function frame(): void {
-    vi.advanceTimersToNextFrame();
-  }
-
-  it("reports a pushed row only after the frame drawn with it was painted", () => {
-    const painted: [readonly string[], number][] = [];
-    const { controller } = fixture(harness(), {}, { onPainted: (ids, at) => painted.push([ids, at]) });
-
-    controller.upsert(responseRow("r1"));
-    frame();
-    expect(painted).toEqual([]);
-    expect(controller.paintedAt("r1")).toBeNull();
-    frame();
-
-    expect(painted.map(([ids]) => ids)).toEqual([["r1"]]);
-    expect(controller.paintedAt("r1")).toBe(painted[0]?.[1]);
-  });
-
-  it("reports every row a page placed, once", () => {
-    const painted: string[] = [];
-    const { controller } = fixture(harness(), {}, { onPainted: (ids) => painted.push(...ids) });
-
-    controller.applyPage(page([userPromptRow("a", "1"), responseRow("b")]), "replace");
-    frame();
-    frame();
-    controller.upsert(responseRow("c"));
-    frame();
-    frame();
-
-    expect(painted).toEqual(["a", "b", "c"]);
-  });
-
-  it("does not report a re-push of a row already painted", () => {
-    const painted: string[] = [];
-    const { controller } = fixture(harness(), {}, { onPainted: (ids) => painted.push(...ids) });
-    controller.upsert(responseRow("r1"));
-    frame();
-    frame();
-
-    controller.upsert(responseRow("r1", "changed"));
-    frame();
-    frame();
-
-    expect(painted).toEqual(["r1"]);
-  });
-
-  it("answers null for a row it does not hold", () => {
-    const { controller } = fixture(harness(), {}, { onPainted: () => {} });
-    expect(controller.paintedAt("absent")).toBeNull();
-  });
-
-  it("keeps no paint time for a feed nobody asked to report paints", () => {
-    const { controller } = fixture();
-    controller.upsert(responseRow("r1"));
-    frame();
-    frame();
-    expect(controller.paintedAt("r1")).toBeNull();
-  });
-
-  it("records the paint at debug with the rows it painted", async () => {
-    const capture = captureLogRecords("debug");
-    const { controller } = fixture(harness(), {}, { onPainted: () => {} });
-    controller.upsert(responseRow("r1"));
-    frame();
-    frame();
-
-    const record = await forwardedRecord(capture, "feed.rows-painted");
-    expect(record.level.case).toBe("debug");
+    expect({ insertions, arrival }).toEqual({
+      insertions: ["index"],
+      arrival: [],
+    });
   });
 });
 
@@ -2958,9 +3482,18 @@ describe("createFeedController: selected and expanded are one state", () => {
       body: defaultBubbleBody,
       revealRow: async () => false,
       bubble: (row) => stubBubble(row),
-      bodyContext: { ctx: h.ctx, feed, row: create(FeedRowSchema, {}), revealRow: async () => false },
+      bodyContext: {
+        ctx: h.ctx,
+        feed,
+        row: create(FeedRowSchema, {}),
+        revealRow: async () => false,
+      },
       onSelectionExpand: (section, expanded) => {
-        expands.push([section.closest("[data-feed-row]")?.getAttribute("data-feed-row") ?? "", expanded]);
+        expands.push([
+          section.closest("[data-feed-row]")?.getAttribute("data-feed-row") ??
+            "",
+          expanded,
+        ]);
       },
     });
     return { controller, host, expands };
@@ -2971,7 +3504,9 @@ describe("createFeedController: selected and expanded are one state", () => {
 
   /** The box of row ID in HOST. */
   function boxOf(host: HTMLElement, id: string): HTMLElement {
-    const box = host.querySelector<HTMLElement>(`[data-feed-row="${id}"] .bubble > .bubble-scroll`);
+    const box = host.querySelector<HTMLElement>(
+      `[data-feed-row="${id}"] .bubble > .bubble-scroll`,
+    );
     if (box === null) throw new Error(`row ${id} drew no bubble box`);
     return box;
   }
@@ -2981,7 +3516,10 @@ describe("createFeedController: selected and expanded are one state", () => {
     create(FeedSelectionSchema, {
       selection:
         id === undefined
-          ? { case: "none", value: { viewport: { case: "returnToTail", value: {} } } }
+          ? {
+              case: "none",
+              value: { viewport: { case: "returnToTail", value: {} } },
+            }
           : { case: "bubble", value: { row: feedId(id) } },
     });
 
@@ -2992,7 +3530,10 @@ describe("createFeedController: selected and expanded are one state", () => {
     controller.upsert(selectableRow("r1"));
     // Assert
     const el = host.querySelector('[data-feed-row="r1"]');
-    expect([el?.hasAttribute("data-selection-governed"), el?.hasAttribute("data-selectable")]).toEqual([true, true]);
+    expect([
+      el?.hasAttribute("data-selection-governed"),
+      el?.hasAttribute("data-selectable"),
+    ]).toEqual([true, true]);
   });
 
   it("stamps nothing on a sub-feed's rows", () => {
@@ -3001,7 +3542,11 @@ describe("createFeedController: selected and expanded are one state", () => {
     // Act
     controller.upsert(selectableRow("r1"));
     // Assert
-    expect(host.querySelector('[data-feed-row="r1"]')?.hasAttribute("data-selection-governed")).toBe(false);
+    expect(
+      host
+        .querySelector('[data-feed-row="r1"]')
+        ?.hasAttribute("data-selection-governed"),
+    ).toBe(false);
   });
 
   it("marks a bubble-arm selection with the selection mark", () => {
@@ -3011,7 +3556,11 @@ describe("createFeedController: selected and expanded are one state", () => {
     // Act
     controller.applySelection(bubbleSelection("r1"));
     // Assert
-    expect(host.querySelector('[data-feed-row="r1"]')?.getAttribute(SELECTED_ROW_ATTRIBUTE)).toBe("bubble");
+    expect(
+      host
+        .querySelector('[data-feed-row="r1"]')
+        ?.getAttribute(SELECTED_ROW_ATTRIBUTE),
+    ).toBe("bubble");
   });
 
   it("expands the selected bubble", () => {
@@ -3033,10 +3582,11 @@ describe("createFeedController: selected and expanded are one state", () => {
     // Act
     controller.applySelection(bubbleSelection("r2"));
     // Assert
-    expect([boxOf(host, "r1"), boxOf(host, "r2")].map((b) => b.classList.contains(EXPANDED_CLASS))).toEqual([
-      false,
-      true,
-    ]);
+    expect(
+      [boxOf(host, "r1"), boxOf(host, "r2")].map((b) =>
+        b.classList.contains(EXPANDED_CLASS),
+      ),
+    ).toEqual([false, true]);
   });
 
   it("collapses the selected bubble when the selection ends", () => {
@@ -3081,7 +3631,11 @@ describe("createFeedController: selected and expanded are one state", () => {
     const { controller } = governing();
     // Act / Assert
     expect(() =>
-      controller.applySelection(create(FeedSelectionSchema, { selection: { case: "bubble", value: {} } })),
+      controller.applySelection(
+        create(FeedSelectionSchema, {
+          selection: { case: "bubble", value: {} },
+        }),
+      ),
     ).toThrow(MalformedView);
   });
 });

@@ -1,6 +1,11 @@
 package e2e
 
 import (
+	"context"
+	"regexp"
+	"testing"
+
+	"google.golang.org/protobuf/encoding/prototext"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -8,8 +13,8 @@ import (
 
 // THE FOOTER'S ACTIVITY CELL, READ WHICHEVER STATUS ARM STANDS. Every status
 // arm carries its cell under the same shape (footer.proto, the status family's
-// rules): a salient line, or the unpinned tiers — a transient over an optional
-// quiet-stretch line over the one enduring line. The status-independent
+// rules): a salient line, or the unpinned tiers — a transient over the one
+// enduring line. The status-independent
 // salient kinds (update, notification, context_budget) ride every
 // arm's salient oneof under the same field names, so one reader serves every
 // arm and a test never misses a line because the status moved underneath it.
@@ -89,4 +94,67 @@ func footerEnduringUsage(v *frontendv1.FooterView) *frontendv1.FooterActivityEnd
 	}
 	enduring := unpinned.Get(unpinned.Descriptor().Fields().ByName("enduring")).Message()
 	return enduring.Interface().(*frontendv1.FooterActivityEnduring).GetUsage()
+}
+
+// feedItemDerivedLine matches the wording of a line composed from a feed item
+// that landed ("✅ Read finished — handling result...", "❌ Bash failed",
+// "✅ Prompt delivered — awaiting response...", "✅ Moved to background —
+// continuing..."): the retired quiet tier's lines (owner ruling, 2026-10-01).
+var feedItemDerivedLine = regexp.MustCompile(`[✅❌] [^"]* (finished|failed|cancelled|started|delivered)|Moved to background`)
+
+// THE QUIET TIER IS RETIRED: between two feed items the footer composes no line
+// from the item that landed. The `!read` scenario draws two feed items, the
+// Read call and the closing response, and every footer push across the turn
+// is swept for a line worded from a landed item. The pushes are read on their
+// own goroutine as they arrive, so the stream's buffer never decides what the
+// sweep sees.
+func TestNoFooterPushBetweenFeedItemsCarriesAFeedItemDerivedLine(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	w, ws := newFileToolsWorkspace(t)
+	footer := w.WatchFooter(ws)
+	defer footer.Close()
+	type swept struct {
+		working    int
+		violations []string
+	}
+	done := make(chan swept, 1)
+	go func() {
+		var out swept
+		for v := range footer.Stream.C {
+			status := v.GetStrip().GetStatus()
+			if status.GetWorking() != nil {
+				out.working++
+			}
+			if cell := footerActivity(v); cell != nil {
+				if text := prototext.Format(cell.Interface()); feedItemDerivedLine.MatchString(text) {
+					out.violations = append(out.violations, text)
+				}
+			}
+			if out.working > 0 && status.GetIdle() != nil {
+				break
+			}
+		}
+		done <- out
+	}()
+
+	// Act
+	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "read")
+	awaitFeedRow(t, w, ws, "the read call's settled row", toolCallSettled(turn, "Read"))
+	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
+	defer cancel()
+	var got swept
+	select {
+	case got = <-done:
+	case <-ctx.Done():
+		t.Fatalf("waiting for the footer to return to idle after the turn: %v", ctx.Err())
+	}
+
+	// Assert
+	if got.working == 0 {
+		t.Fatal("no working push observed: the sweep saw none of the turn")
+	}
+	if len(got.violations) != 0 {
+		t.Fatalf("footer pushes carried %d feed-item-derived lines, want none:\n%v", len(got.violations), got.violations)
+	}
 }

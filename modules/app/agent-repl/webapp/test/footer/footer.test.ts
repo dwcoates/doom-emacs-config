@@ -1,9 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
-import {
-  WatchFooterResponseSchema,
-} from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_footer_pb";
+import { WatchFooterResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_footer_pb";
 import {
   FooterExpandedFocusSchema,
   FooterStripSchema,
@@ -11,7 +9,6 @@ import {
   type FooterView,
 } from "../../../proto/gen/ts/frontend/v1/footer_pb";
 import { TICKING_ATTRIBUTE } from "../../src/feed/ticking.js";
-import type { PaintWatch } from "../../src/feed/painted.js";
 import { compactionProgress } from "../../src/footer/progress.js";
 import {
   buildWatchFooterRequest,
@@ -67,14 +64,11 @@ async function settle(): Promise<void> {
 function mount(
   h: Harness = harness(),
   selectDetachedWork: () => Promise<boolean> = async () => true,
-  paints: PaintWatch = { paintedAt: () => null, onPainted: () => () => {} },
 ) {
   const host = document.createElement("div");
   document.body.replaceChildren(host);
   const footer = mountFooter(host, h.ctx, {
     selectDetachedWork,
-    paints,
-    followingTail: () => true,
   });
   mounted.push(footer);
   return { host, h, footer };
@@ -88,7 +82,8 @@ const AGENT_ROW = {
   jump: { target: { case: "entry" as const, value: { value: "bubble-1" } } },
   label: { text: "Explore" },
   tokens: { text: "0 tok" },
-  runtime: { startedAtMs: BigInt(NOW) },  state: { case: "running" as const, value: {} },
+  runtime: { startedAtMs: BigInt(NOW) },
+  state: { case: "running" as const, value: {} },
 };
 
 /** A view whose agents chip and expanded panel both carry `count` live agents. */
@@ -96,7 +91,9 @@ function withAgents(count = 1): ReturnType<typeof footerView> {
   const rows = Array.from({ length: count }, (_unused, i) => ({
     ...AGENT_ROW,
     work: { value: `work-${i + 1}` },
-    jump: { target: { case: "entry" as const, value: { value: `bubble-${i + 1}` } } },
+    jump: {
+      target: { case: "entry" as const, value: { value: `bubble-${i + 1}` } },
+    },
   }));
   return footerView({
     strip: strip({ liveWork: { agents: { count } } }),
@@ -119,7 +116,10 @@ function compactingStatus(text: string): FooterStatus["status"] {
       activity: {
         tier: {
           case: "salient",
-          value: { at: { atMs: BigInt(NOW) }, kind: { case: "compaction", value: { text } } },
+          value: {
+            at: { atMs: BigInt(NOW) },
+            kind: { case: "compaction", value: { text } },
+          },
         },
       },
     },
@@ -144,7 +144,11 @@ describe("mountFooter: the compaction line it publishes", () => {
     await settle();
     // Act
     h.tail.push(
-      pushView(footerView({ strip: strip({ status: compactingStatus("compacting · 412 of 900") }) })),
+      pushView(
+        footerView({
+          strip: strip({ status: compactingStatus("compacting · 412 of 900") }),
+        }),
+      ),
     );
     await settle();
     // Assert
@@ -156,7 +160,11 @@ describe("mountFooter: the compaction line it publishes", () => {
     const { h } = mount();
     await settle();
     h.tail.push(
-      pushView(footerView({ strip: strip({ status: compactingStatus("compacting · 412 of 900") }) })),
+      pushView(
+        footerView({
+          strip: strip({ status: compactingStatus("compacting · 412 of 900") }),
+        }),
+      ),
     );
     await settle();
     // Act
@@ -171,7 +179,11 @@ describe("mountFooter: the compaction line it publishes", () => {
     const { h, footer } = mount();
     await settle();
     h.tail.push(
-      pushView(footerView({ strip: strip({ status: compactingStatus("compacting · 412 of 900") }) })),
+      pushView(
+        footerView({
+          strip: strip({ status: compactingStatus("compacting · 412 of 900") }),
+        }),
+      ),
     );
     await settle();
     // Act
@@ -204,7 +216,11 @@ describe("mountFooter: the standing stream", () => {
   it("REPLACES the view whole on a later push", async () => {
     const { host, h } = mount();
     await settle();
-    h.tail.push(pushView(footerView({ strip: strip({ liveWork: { agents: { count: 2 } } }) })));
+    h.tail.push(
+      pushView(
+        footerView({ strip: strip({ liveWork: { agents: { count: 2 } } }) }),
+      ),
+    );
     await settle();
     h.tail.push(pushView(footerView()));
     await settle();
@@ -245,7 +261,12 @@ describe("mountFooter: the standing stream", () => {
     h.tail.push(
       create(WatchFooterResponseSchema, {
         footer: {
-          strip: create(FooterStripSchema, { status: {}, clock: {}, tokens: {}, liveWork: {} }),
+          strip: create(FooterStripSchema, {
+            status: {},
+            clock: {},
+            tokens: {},
+            liveWork: {},
+          }),
           expanded: expanded(),
         },
       }),
@@ -263,8 +284,12 @@ describe("mountFooter: the panel selection", () => {
     await settle();
     h.tail.push(pushView(withAgents()));
     await settle();
-    host.querySelector<HTMLElement>('[data-chip="agents"]')?.dispatchEvent(new MouseEvent("click"));
-    expect(host.querySelector('.footer-expanded[data-panel="agents"]')).not.toBeNull();
+    host
+      .querySelector<HTMLElement>('[data-chip="agents"]')
+      ?.dispatchEvent(new MouseEvent("click"));
+    expect(
+      host.querySelector('.footer-expanded[data-panel="agents"]'),
+    ).not.toBeNull();
     expect(h.calls.watchFooter).toHaveLength(1);
   });
 
@@ -278,7 +303,9 @@ describe("mountFooter: the panel selection", () => {
         .querySelector<HTMLElement>('[data-chip="agents"]')
         ?.dispatchEvent(new MouseEvent("click")) as never;
     click();
-    expect(host.querySelector('.footer-expanded[data-panel="agents"]')).not.toBeNull();
+    expect(
+      host.querySelector('.footer-expanded[data-panel="agents"]'),
+    ).not.toBeNull();
     click();
     expect(host.querySelector(".footer-expanded")).toBeNull();
   });
@@ -289,8 +316,12 @@ describe("mountFooter: the panel selection", () => {
     await settle();
     h.tail.push(pushView(withAgents()));
     await settle();
-    host.querySelector<HTMLElement>('[data-chip="agents"]')?.dispatchEvent(new MouseEvent("click"));
-    expect(host.querySelector('.footer-expanded[data-panel="agents"]')).not.toBeNull();
+    host
+      .querySelector<HTMLElement>('[data-chip="agents"]')
+      ?.dispatchEvent(new MouseEvent("click"));
+    expect(
+      host.querySelector('.footer-expanded[data-panel="agents"]'),
+    ).not.toBeNull();
 
     // Act: every agent resolves — the chip is unset and the rows are empty.
     h.tail.push(pushView(footerView()));
@@ -307,29 +338,45 @@ describe("mountFooter: the panel selection", () => {
     await settle();
     h.tail.push(pushView(withAgents()));
     await settle();
-    host.querySelector<HTMLElement>('[data-chip="agents"]')?.dispatchEvent(new MouseEvent("click"));
+    host
+      .querySelector<HTMLElement>('[data-chip="agents"]')
+      ?.dispatchEvent(new MouseEvent("click"));
     h.tail.push(pushView(withAgents(2)));
     await settle();
-    expect(host.querySelector('.footer-expanded[data-panel="agents"]')).not.toBeNull();
+    expect(
+      host.querySelector('.footer-expanded[data-panel="agents"]'),
+    ).not.toBeNull();
   });
 
   it("remembers the open panel per workspace", async () => {
     const { host, h } = mount();
     await settle();
-    h.tail.push(pushView(footerView({ strip: strip({ liveWork: { shells: { count: 1 } } }) })));
+    h.tail.push(
+      pushView(
+        footerView({ strip: strip({ liveWork: { shells: { count: 1 } } }) }),
+      ),
+    );
     await settle();
-    host.querySelector<HTMLElement>('[data-chip="shells"]')?.dispatchEvent(new MouseEvent("click"));
+    host
+      .querySelector<HTMLElement>('[data-chip="shells"]')
+      ?.dispatchEvent(new MouseEvent("click"));
     expect(window.localStorage.getItem(panelStorageKey("ws-1"))).toBe("shells");
   });
 
   it("forgets the panel when it is closed", async () => {
     const { host, h } = mount();
     await settle();
-    h.tail.push(pushView(footerView({ strip: strip({ liveWork: { shells: { count: 1 } } }) })));
+    h.tail.push(
+      pushView(
+        footerView({ strip: strip({ liveWork: { shells: { count: 1 } } }) }),
+      ),
+    );
     await settle();
     const chip = host.querySelector<HTMLElement>('[data-chip="shells"]');
     chip?.dispatchEvent(new MouseEvent("click"));
-    host.querySelector<HTMLElement>('[data-chip="shells"]')?.dispatchEvent(new MouseEvent("click"));
+    host
+      .querySelector<HTMLElement>('[data-chip="shells"]')
+      ?.dispatchEvent(new MouseEvent("click"));
     expect(window.localStorage.getItem(panelStorageKey("ws-1"))).toBeNull();
   });
 
@@ -339,7 +386,9 @@ describe("mountFooter: the panel selection", () => {
     await settle();
     h.tail.push(pushView(footerView()));
     await settle();
-    expect(host.querySelector('.footer-expanded[data-panel="crons"]')).not.toBeNull();
+    expect(
+      host.querySelector('.footer-expanded[data-panel="crons"]'),
+    ).not.toBeNull();
   });
 
   it("draws the empty panel's line for a remembered panel with nothing in it", async () => {
@@ -348,7 +397,9 @@ describe("mountFooter: the panel selection", () => {
     await settle();
     h.tail.push(pushView(footerView()));
     await settle();
-    expect(host.querySelector("[data-empty]")?.textContent).toBe("nothing scheduled");
+    expect(host.querySelector("[data-empty]")?.textContent).toBe(
+      "nothing scheduled",
+    );
   });
 });
 
@@ -358,20 +409,33 @@ function focused(
   panel: "agents" | "shells" | "monitors" | "mergeTests",
   generation: bigint,
 ): FooterView {
-  view.focus = create(FooterExpandedFocusSchema, { generation, panel: { case: panel, value: {} } });
+  view.focus = create(FooterExpandedFocusSchema, {
+    generation,
+    panel: { case: panel, value: {} },
+  });
   return view;
 }
 
 /** A view with a live agent, shell and monitor, so any focusable panel can be open. */
 function withLiveWork(): FooterView {
   const view = withAgents();
-  view.strip = strip({ liveWork: { agents: { count: 1 }, shells: { count: 1 }, monitors: { count: 1 } } });
+  view.strip = strip({
+    liveWork: {
+      agents: { count: 1 },
+      shells: { count: 1 },
+      monitors: { count: 1 },
+    },
+  });
   return view;
 }
 
 /** Whichever panel the expanded section is drawing, or null when it is closed. */
 function openPanel(host: HTMLElement): string | null {
-  return host.querySelector<HTMLElement>(".footer-expanded")?.getAttribute("data-panel") ?? null;
+  return (
+    host
+      .querySelector<HTMLElement>(".footer-expanded")
+      ?.getAttribute("data-panel") ?? null
+  );
 }
 
 /** A view whose merge is testing: the 🧪 chip set and one suite in the panel. */
@@ -403,7 +467,11 @@ describe("mountFooter: the merge tests panel", () => {
     await settle();
     h.tail.push(pushView(focused(withMergeTests(), "mergeTests", 1n)));
     await settle();
-    expect(host.querySelector('[data-chip="mergeTests"]')?.getAttribute("data-selected")).toBe("true");
+    expect(
+      host
+        .querySelector('[data-chip="mergeTests"]')
+        ?.getAttribute("data-selected"),
+    ).toBe("true");
   });
 
   it("moves an open panel onto the merge tests panel when testing begins", async () => {
@@ -412,7 +480,9 @@ describe("mountFooter: the merge tests panel", () => {
     const view = withLiveWork();
     h.tail.push(pushView(view));
     await settle();
-    host.querySelector<HTMLElement>('[data-chip="agents"]')?.dispatchEvent(new MouseEvent("click"));
+    host
+      .querySelector<HTMLElement>('[data-chip="agents"]')
+      ?.dispatchEvent(new MouseEvent("click"));
     const testing = focused(withMergeTests(), "mergeTests", 1n);
     h.tail.push(pushView(testing));
     await settle();
@@ -444,7 +514,9 @@ describe("mountFooter: the merge tests panel", () => {
     await settle();
     h.tail.push(pushView(focused(withMergeTests(), "mergeTests", 1n)));
     await settle();
-    host.querySelector<HTMLElement>('[data-chip="mergeTests"]')?.dispatchEvent(new MouseEvent("click"));
+    host
+      .querySelector<HTMLElement>('[data-chip="mergeTests"]')
+      ?.dispatchEvent(new MouseEvent("click"));
     h.tail.push(pushView(focused(withMergeTests(2), "mergeTests", 2n)));
     await settle();
     expect(openPanel(host)).toBe("mergeTests");
@@ -455,7 +527,9 @@ describe("mountFooter: the merge tests panel", () => {
     await settle();
     h.tail.push(pushView(focused(withMergeTests(), "mergeTests", 1n)));
     await settle();
-    expect(window.localStorage.getItem(panelStorageKey(WORKSPACE.id))).toBe("mergeTests");
+    expect(window.localStorage.getItem(panelStorageKey(WORKSPACE.id))).toBe(
+      "mergeTests",
+    );
   });
 });
 
@@ -484,7 +558,9 @@ describe("mountFooter: the daemon's focus", () => {
     await settle();
     h.tail.push(pushView(withLiveWork()));
     await settle();
-    host.querySelector<HTMLElement>('[data-chip="shells"]')?.dispatchEvent(new MouseEvent("click"));
+    host
+      .querySelector<HTMLElement>('[data-chip="shells"]')
+      ?.dispatchEvent(new MouseEvent("click"));
 
     // Act
     h.tail.push(pushView(focused(withLiveWork(), "agents", 1n)));
@@ -500,8 +576,12 @@ describe("mountFooter: the daemon's focus", () => {
     await settle();
     h.tail.push(pushView(focused(withLiveWork(), "agents", 1n)));
     await settle();
-    expect(openPanel(host), "the arrangement did not apply the focus").toBe("agents");
-    host.querySelector<HTMLElement>('[data-chip="shells"]')?.dispatchEvent(new MouseEvent("click"));
+    expect(openPanel(host), "the arrangement did not apply the focus").toBe(
+      "agents",
+    );
+    host
+      .querySelector<HTMLElement>('[data-chip="shells"]')
+      ?.dispatchEvent(new MouseEvent("click"));
 
     // Act
     h.tail.push(pushView(focused(withLiveWork(), "agents", 1n)));
@@ -517,8 +597,12 @@ describe("mountFooter: the daemon's focus", () => {
     await settle();
     h.tail.push(pushView(focused(withLiveWork(), "agents", 1n)));
     await settle();
-    expect(openPanel(host), "the arrangement did not apply the focus").toBe("agents");
-    host.querySelector<HTMLElement>('[data-chip="agents"]')?.dispatchEvent(new MouseEvent("click"));
+    expect(openPanel(host), "the arrangement did not apply the focus").toBe(
+      "agents",
+    );
+    host
+      .querySelector<HTMLElement>('[data-chip="agents"]')
+      ?.dispatchEvent(new MouseEvent("click"));
 
     // Act
     h.tail.push(pushView(focused(withLiveWork(), "agents", 1n)));
@@ -534,8 +618,12 @@ describe("mountFooter: the daemon's focus", () => {
     await settle();
     h.tail.push(pushView(focused(withLiveWork(), "agents", 1n)));
     await settle();
-    expect(openPanel(host), "the arrangement did not apply the focus").toBe("agents");
-    host.querySelector<HTMLElement>('[data-chip="shells"]')?.dispatchEvent(new MouseEvent("click"));
+    expect(openPanel(host), "the arrangement did not apply the focus").toBe(
+      "agents",
+    );
+    host
+      .querySelector<HTMLElement>('[data-chip="shells"]')
+      ?.dispatchEvent(new MouseEvent("click"));
 
     // Act
     h.tail.push(pushView(focused(withLiveWork(), "agents", 2n)));
@@ -604,9 +692,11 @@ describe("the persisted selection, read and written behind try/catch", () => {
 
   it("survives a storage that throws on write", () => {
     const { ctx } = harness();
-    const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
-      throw new Error("quota exceeded");
-    });
+    const setItem = vi
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementation(() => {
+        throw new Error("quota exceeded");
+      });
     expect(() => writeSelection(ctx, "tokens")).not.toThrow();
     setItem.mockRestore();
   });
@@ -626,7 +716,10 @@ describe("mountFooter: onStatus", () => {
           strip: strip({
             status: {
               case: "merging",
-              value: { substatus: { case: "merge", value: {} }, activity: quietActivity("merging") },
+              value: {
+                substatus: { case: "merge", value: {} },
+                activity: quietActivity("merging"),
+              },
             } as never,
           }),
         }),
@@ -650,7 +743,10 @@ describe("mountFooter: onStatus", () => {
           strip: strip({
             status: {
               case: "blocked",
-              value: { substatus: { case: "apiRetrying", value: {} }, activity: quietActivity("blocked") },
+              value: {
+                substatus: { case: "apiRetrying", value: {} },
+                activity: quietActivity("blocked"),
+              },
             } as never,
           }),
         }),
@@ -707,7 +803,11 @@ describe("mountFooter: dispose", () => {
   it("drops every clock the footer started", async () => {
     const { host, footer, h } = mount();
     await settle();
-    h.tail.push(pushView(footerView({ strip: strip({ turnStartedAtMs: BigInt(NOW - 1000) }) })));
+    h.tail.push(
+      pushView(
+        footerView({ strip: strip({ turnStartedAtMs: BigInt(NOW - 1000) }) }),
+      ),
+    );
     await settle();
     footer.dispose();
     expect(host.querySelectorAll(`[${TICKING_ATTRIBUTE}]`)).toHaveLength(0);
@@ -744,11 +844,19 @@ describe("mountFooter: a stop's own answer outlives the push it caused", () => {
     // Arrange: a live turn, so the strip mounts the stop.
     const { host, h } = mount();
     await settle();
-    h.tail.push(pushView(footerView({ strip: strip({ turnStartedAtMs: BigInt(NOW - 1000) }) })));
+    h.tail.push(
+      pushView(
+        footerView({ strip: strip({ turnStartedAtMs: BigInt(NOW - 1000) }) }),
+      ),
+    );
     await settle();
     const before = host.querySelector(".footer-stop-turn");
     // Act: another push, which redraws the whole view.
-    h.tail.push(pushView(footerView({ strip: strip({ turnStartedAtMs: BigInt(NOW - 2000) }) })));
+    h.tail.push(
+      pushView(
+        footerView({ strip: strip({ turnStartedAtMs: BigInt(NOW - 2000) }) }),
+      ),
+    );
     await settle();
     // Assert
     expect(host.querySelector(".footer-stop-turn")).toBe(before);
@@ -758,7 +866,11 @@ describe("mountFooter: a stop's own answer outlives the push it caused", () => {
     // Arrange
     const { host, h } = mount();
     await settle();
-    h.tail.push(pushView(footerView({ strip: strip({ turnStartedAtMs: BigInt(NOW - 1000) }) })));
+    h.tail.push(
+      pushView(
+        footerView({ strip: strip({ turnStartedAtMs: BigInt(NOW - 1000) }) }),
+      ),
+    );
     await settle();
     const note = document.createElement("span");
     note.className = "footer-stop-note";
@@ -766,17 +878,27 @@ describe("mountFooter: a stop's own answer outlives the push it caused", () => {
     note.textContent = "stopped 3 agents";
     host.querySelector(".footer-stop-turn")?.appendChild(note);
     // Act
-    h.tail.push(pushView(footerView({ strip: strip({ turnStartedAtMs: BigInt(NOW - 2000) }) })));
+    h.tail.push(
+      pushView(
+        footerView({ strip: strip({ turnStartedAtMs: BigInt(NOW - 2000) }) }),
+      ),
+    );
     await settle();
     // Assert
-    expect(host.querySelector(".footer-stop-note")?.textContent).toBe("stopped 3 agents");
+    expect(host.querySelector(".footer-stop-note")?.textContent).toBe(
+      "stopped 3 agents",
+    );
   });
 
   it("drops the controls with the footer, so nothing outlives the mount", async () => {
     // Arrange
     const { host, footer, h } = mount();
     await settle();
-    h.tail.push(pushView(footerView({ strip: strip({ turnStartedAtMs: BigInt(NOW - 1000) }) })));
+    h.tail.push(
+      pushView(
+        footerView({ strip: strip({ turnStartedAtMs: BigInt(NOW - 1000) }) }),
+      ),
+    );
     await settle();
     // Act
     footer.dispose();
@@ -797,7 +919,9 @@ describe("mountFooter: the strip on top, the expanded section under it", () => {
     await settle();
     h.tail.push(pushView(withAgents()));
     await settle();
-    host.querySelector<HTMLElement>('[data-chip="agents"]')?.dispatchEvent(new MouseEvent("click"));
+    host
+      .querySelector<HTMLElement>('[data-chip="agents"]')
+      ?.dispatchEvent(new MouseEvent("click"));
     return host;
   }
 
@@ -807,7 +931,9 @@ describe("mountFooter: the strip on top, the expanded section under it", () => {
     // Assert
     const dock = host.querySelector(".pfooter");
     const children = [...(dock?.children ?? [])];
-    expect(children.indexOf(host.querySelector(".footer-expanded") as Element)).toBeGreaterThan(
+    expect(
+      children.indexOf(host.querySelector(".footer-expanded") as Element),
+    ).toBeGreaterThan(
       children.indexOf(host.querySelector(".footer-strip") as Element),
     );
   });
@@ -819,7 +945,9 @@ describe("mountFooter: the strip on top, the expanded section under it", () => {
     const dock = host.querySelector(".pfooter");
     const named = [".footer-strip", ".footer-divider", ".footer-expanded"];
     expect(
-      [...(dock?.children ?? [])].map((el) => named.find((sel) => el.matches(sel)) ?? el.className),
+      [...(dock?.children ?? [])].map(
+        (el) => named.find((sel) => el.matches(sel)) ?? el.className,
+      ),
     ).toEqual(named);
   });
 
@@ -838,7 +966,9 @@ describe("mountFooter: the strip on top, the expanded section under it", () => {
     // Arrange / Act
     const host = await openPanel();
     // Assert
-    expect(host.querySelector(".footer-divider")?.parentElement?.className).toBe("pfooter");
+    expect(
+      host.querySelector(".footer-divider")?.parentElement?.className,
+    ).toBe("pfooter");
   });
 
   it("paints the divider one step darker than the rows' own delimiter", async () => {
@@ -848,8 +978,12 @@ describe("mountFooter: the strip on top, the expanded section under it", () => {
     const host = await openPanel();
     // Assert
     try {
-      expect(cascadedValue(host.querySelector(".footer-divider") as Element, "border-top-color"))
-        .toBe("var(--border-strong)");
+      expect(
+        cascadedValue(
+          host.querySelector(".footer-divider") as Element,
+          "border-top-color",
+        ),
+      ).toBe("var(--border-strong)");
     } finally {
       teardown();
     }
@@ -871,8 +1005,8 @@ describe("mountFooter: the strip on top, the expanded section under it", () => {
     const divider = host.querySelector(".footer-divider") as Element;
     try {
       expect(
-        ["margin-left", "margin-right", "padding-left", "padding-right"].map((p) =>
-          cascadedValue(divider, p),
+        ["margin-left", "margin-right", "padding-left", "padding-right"].map(
+          (p) => cascadedValue(divider, p),
         ),
       ).toEqual(["0px", "0px", "0px", "0px"]);
     } finally {
@@ -888,10 +1022,18 @@ describe("mountFooter: the strip on top, the expanded section under it", () => {
     const dock = host.querySelector(".pfooter") as HTMLElement;
     const divider = host.querySelector(".footer-divider") as HTMLElement;
     const DOCK_WIDTH = 640;
-    Object.defineProperty(dock, "clientWidth", { value: DOCK_WIDTH, configurable: true });
+    Object.defineProperty(dock, "clientWidth", {
+      value: DOCK_WIDTH,
+      configurable: true,
+    });
     // Act: the width a no-inset in-flow block takes is its container's, less
     // whatever the cascade insets it by -- which the rule pins at zero.
-    const inset = ["margin-left", "margin-right", "padding-left", "padding-right"]
+    const inset = [
+      "margin-left",
+      "margin-right",
+      "padding-left",
+      "padding-right",
+    ]
       .map((p) => Number.parseFloat(cascadedValue(divider, p)))
       .reduce((a, b) => a + b, 0);
     // Assert
@@ -912,39 +1054,51 @@ describe("mountFooter: the client's own verdict overlays the daemon's view", () 
     const { host } = mount();
     await settle();
     reportClientFailure("unary_transport", "AnswerColdGate: unavailable");
-    expect(host.querySelector(".footer-status")?.textContent).toBe("disconnected");
+    expect(host.querySelector(".footer-status")?.textContent).toBe(
+      "disconnected",
+    );
   });
 
   it("draws the substatus daemon unreachable under a unary transport failure", async () => {
     const { host } = mount();
     await settle();
     reportClientFailure("unary_transport", "AnswerColdGate: unavailable");
-    expect(host.querySelector(".footer-substatus")?.textContent).toBe("daemon unreachable");
+    expect(host.querySelector(".footer-substatus")?.textContent).toBe(
+      "daemon unreachable",
+    );
   });
 
   it("draws the failing call's own line as the activity", async () => {
     const { host } = mount();
     await settle();
     reportClientFailure("unary_transport", "AnswerColdGate: unavailable");
-    expect(host.querySelector(".footer-activity-client-verdict")?.textContent).toBe(
-      "AnswerColdGate: unavailable",
-    );
+    expect(
+      host.querySelector(".footer-activity-client-verdict")?.textContent,
+    ).toBe("AnswerColdGate: unavailable");
   });
 
   it("draws a source_ended subscription's own line as the activity", async () => {
     const { host } = mount();
     await settle();
-    reportClientFailure("subscription_source_ended", "the footer-1 page subscription ended (source_ended)");
-    expect(host.querySelector(".footer-activity-client-verdict")?.textContent).toBe(
+    reportClientFailure(
+      "subscription_source_ended",
       "the footer-1 page subscription ended (source_ended)",
     );
+    expect(
+      host.querySelector(".footer-activity-client-verdict")?.textContent,
+    ).toBe("the footer-1 page subscription ended (source_ended)");
   });
 
   it("names the reporting site on the dock, for the integration suite", async () => {
     const { host } = mount();
     await settle();
-    reportClientFailure("stream_ended", "WatchFooter stream ended (producer_ended)");
-    expect(host.querySelector(".pfooter")?.getAttribute("data-client-verdict")).toBe("stream_ended");
+    reportClientFailure(
+      "stream_ended",
+      "WatchFooter stream ended (producer_ended)",
+    );
+    expect(
+      host.querySelector(".pfooter")?.getAttribute("data-client-verdict"),
+    ).toBe("stream_ended");
   });
 
   it("does NOT let a daemon push override a standing verdict", async () => {
@@ -953,7 +1107,9 @@ describe("mountFooter: the client's own verdict overlays the daemon's view", () 
     reportClientFailure("unary_transport", "AnswerColdGate: unavailable");
     h.tail.push(pushView(footerView()));
     await settle();
-    expect(host.querySelector(".footer-status")?.textContent).toBe("disconnected");
+    expect(host.querySelector(".footer-status")?.textContent).toBe(
+      "disconnected",
+    );
   });
 
   it("restores the daemon's view on the next push once the verdict is cleared", async () => {
@@ -990,10 +1146,18 @@ describe("mountFooter: the client's own verdict overlays the daemon's view", () 
   it("keeps the daemon's last tokens cell beside the client's status cells", async () => {
     const { host, h } = mount();
     await settle();
-    h.tail.push(pushView(footerView({ strip: strip({ tokens: { input: { text: "9.9k in" } } }) })));
+    h.tail.push(
+      pushView(
+        footerView({
+          strip: strip({ tokens: { input: { text: "9.9k in" } } }),
+        }),
+      ),
+    );
     await settle();
     reportClientFailure("unary_transport", "AnswerColdGate: unavailable");
-    expect(host.querySelector(".footer-tokens")?.textContent).toContain("9.9k in");
+    expect(host.querySelector(".footer-tokens")?.textContent).toContain(
+      "9.9k in",
+    );
   });
 
   it("files an unreadable last view rather than throwing at whoever reported", async () => {
@@ -1051,42 +1215,53 @@ describe("mountFooter: a row's click outcome outlives the pushes around it", () 
     await settle();
     h.tail.push(pushView(withAgents()));
     await settle();
-    host.querySelector<HTMLElement>('[data-chip="agents"]')?.dispatchEvent(new MouseEvent("click"));
+    host
+      .querySelector<HTMLElement>('[data-chip="agents"]')
+      ?.dispatchEvent(new MouseEvent("click"));
     return { host, h, answer };
   }
 
   it("draws the notice on the LIVE row when a push landed while the reveal was in flight", async () => {
     // Arrange: the click is in flight.
     const { host, h, answer } = await openWithPendingSelect();
-    host.querySelector<HTMLElement>(".footer-row-jump")?.dispatchEvent(new MouseEvent("click"));
+    host
+      .querySelector<HTMLElement>(".footer-row-jump")
+      ?.dispatchEvent(new MouseEvent("click"));
     // Act: a token update pushes the footer, then the reveal misses.
     h.tail.push(pushView(withAgents()));
     await settle();
     answer(false);
     await settle();
     // Assert
-    expect(host.querySelector(".footer-row-jump .footer-row-unreachable")?.textContent).toBe(
-      "not on screen",
-    );
+    expect(
+      host.querySelector(".footer-row-jump .footer-row-unreachable")
+        ?.textContent,
+    ).toBe("not on screen");
   });
 
   it("keeps the notice standing across the next push", async () => {
     // Arrange
     const { host, h, answer } = await openWithPendingSelect();
-    host.querySelector<HTMLElement>(".footer-row-jump")?.dispatchEvent(new MouseEvent("click"));
+    host
+      .querySelector<HTMLElement>(".footer-row-jump")
+      ?.dispatchEvent(new MouseEvent("click"));
     answer(false);
     await settle();
     // Act
     h.tail.push(pushView(withAgents()));
     await settle();
     // Assert
-    expect(host.querySelector(".footer-row-unreachable")?.textContent).toBe("not on screen");
+    expect(host.querySelector(".footer-row-unreachable")?.textContent).toBe(
+      "not on screen",
+    );
   });
 
   it("drops the notice once the row leaves the view", async () => {
     // Arrange
     const { host, h, answer } = await openWithPendingSelect();
-    host.querySelector<HTMLElement>(".footer-row-jump")?.dispatchEvent(new MouseEvent("click"));
+    host
+      .querySelector<HTMLElement>(".footer-row-jump")
+      ?.dispatchEvent(new MouseEvent("click"));
     answer(false);
     await settle();
     // Act: the row goes, then comes back.
@@ -1094,7 +1269,9 @@ describe("mountFooter: a row's click outcome outlives the pushes around it", () 
     await settle();
     h.tail.push(pushView(withAgents()));
     await settle();
-    host.querySelector<HTMLElement>('[data-chip="agents"]')?.dispatchEvent(new MouseEvent("click"));
+    host
+      .querySelector<HTMLElement>('[data-chip="agents"]')
+      ?.dispatchEvent(new MouseEvent("click"));
     // Assert
     expect(host.querySelector(".footer-row-unreachable")).toBeNull();
   });
@@ -1107,7 +1284,9 @@ describe("mountFooter: the expanded section's scroll is the reader's", () => {
     await settle();
     h.tail.push(pushView(withAgents(6)));
     await settle();
-    host.querySelector<HTMLElement>('[data-chip="agents"]')?.dispatchEvent(new MouseEvent("click"));
+    host
+      .querySelector<HTMLElement>('[data-chip="agents"]')
+      ?.dispatchEvent(new MouseEvent("click"));
     return { host, h };
   }
 
@@ -1162,7 +1341,9 @@ describe("mountFooter: the expanded section's scroll is the reader's", () => {
     if (section === null) throw new Error("no section");
     // Act
     const overflow = cascadedValue(section, "overflow-y");
-    const rows = (section as HTMLElement).style.getPropertyValue("--pfooter-sheet-rows");
+    const rows = (section as HTMLElement).style.getPropertyValue(
+      "--pfooter-sheet-rows",
+    );
     uninstall();
     // Assert
     expect({ overflow, rows }).toEqual({ overflow: "auto", rows: "4" });
@@ -1176,70 +1357,26 @@ describe("mountFooter: the expanded section's scroll is the reader's", () => {
   });
 });
 
-describe("mountFooter: the ended quiet-stretch line", () => {
-  /** A working push whose quiet stretch the drawing of ROW ended. */
-  function endedPush(row: string) {
-    return pushView(
-      footerView({
-        strip: strip({
-          status: {
-            case: "working",
-            value: {
-              substatus: { case: "thinking", value: {} },
-              activity: { tier: { case: "unpinned", value: { enduring: enduringLine() } } },
-              quietStretchEnding: {
-                text: "✅ Bash finished — handling result...",
-                untilPainted: { value: row },
-                at: { atMs: BigInt(NOW) },
-              },
-            },
-          } as FooterStatus["status"],
-        }),
-      }),
-    );
-  }
-
-  it("draws the ended line until its row is painted, then clears it on that paint", async () => {
-    // Arrange
-    const edge: { painted: ((id: string, at: number) => void) | null } = { painted: null };
-    const paints: PaintWatch = {
-      paintedAt: () => null,
-      onPainted: (fn) => {
-        edge.painted = fn;
-        return () => {
-          edge.painted = null;
-        };
-      },
-    };
-    const { host, h } = mount(harness(), async () => true, paints);
-    await settle();
-    h.tail.push(endedPush("row-2"));
-    await settle();
-    expect(host.querySelector(".footer-activity-quiet-stretch")?.textContent).toBe(
-      "✅ Bash finished — handling result...",
-    );
-
-    // Act
-    edge.painted?.("row-2", Date.now());
-
-    // Assert
-    expect(host.querySelector(".footer-activity-quiet-stretch")).toBeNull();
-  });
-});
-
 // ---- the transient's expiry: the one re-render the footer schedules --------
 
-/** An idle view whose cell carries a hook transient lapsing at EXPIRESATMS. */
+/** The status arms whose cell carries the unpinned tiers these tests push. */
+type TransientStatus = "idle" | "working" | "background";
+
+/** A view whose cell, under STATUS, carries a hook transient lapsing at EXPIRESATMS. */
 function transientView(
   name: string,
   expiresAtMs: number,
   enduring: Record<string, unknown> = {},
+  status: TransientStatus = "idle",
 ): ReturnType<typeof footerView> {
   return footerView({
     strip: strip({
       status: {
-        case: "idle",
+        case: status,
         value: {
+          ...(status === "working"
+            ? { substatus: { case: "thinking", value: {} } }
+            : {}),
           activity: {
             tier: {
               case: "unpinned",
@@ -1270,7 +1407,9 @@ describe("mountFooter: the transient's expiry", () => {
     await settle();
     h.tail.push(pushView(transientView("fmt", NOW + 10_000)));
     await settle();
-    expect(host.querySelector(".footer-activity-hook")?.textContent).toBe("fmt");
+    expect(host.querySelector(".footer-activity-hook")?.textContent).toBe(
+      "fmt",
+    );
   });
 
   it("redraws the enduring line at the expiry instant with no push", async () => {
@@ -1284,6 +1423,24 @@ describe("mountFooter: the transient's expiry", () => {
     // Assert
     expect(tierOf(host)).toBe("enduring");
   });
+
+  // THE QUIET TIER IS RETIRED (owner ruling, 2026-10-01): under the statuses
+  // that once carried a quiet-stretch line, a lapsed transient gives way to
+  // the enduring line and nothing else.
+  it.each(["working", "background"] as const)(
+    "redraws the enduring line at the expiry instant under %s",
+    async (status) => {
+      // Arrange
+      const { host, h } = mount();
+      await settle();
+      h.tail.push(pushView(transientView("fmt", NOW + 10_000, {}, status)));
+      await settle();
+      // Act
+      await vi.advanceTimersByTimeAsync(10_000);
+      // Assert
+      expect(tierOf(host)).toBe("enduring");
+    },
+  );
 
   it("keeps the transient drawn until the instant arrives", async () => {
     const { host, h } = mount();
@@ -1306,7 +1463,9 @@ describe("mountFooter: the transient's expiry", () => {
     await settle();
     await vi.advanceTimersByTimeAsync(5_000);
     // Assert: the first instant passed and the newer transient still stands.
-    expect(host.querySelector(".footer-activity-hook")?.textContent).toBe("second");
+    expect(host.querySelector(".footer-activity-hook")?.textContent).toBe(
+      "second",
+    );
   });
 
   it("cancels the pending re-render when a push carries no transient", async () => {
@@ -1342,7 +1501,13 @@ describe("mountFooter: the transient's expiry", () => {
     h.tail.push(
       pushView(
         transientView("fmt", NOW + 10_000, {
-          usage: { session: { newsworthy: false, utilization: 0.1, resetsAtS: 2n ** 62n } },
+          usage: {
+            session: {
+              newsworthy: false,
+              utilization: 0.1,
+              resetsAtS: 2n ** 62n,
+            },
+          },
         }),
       ),
     );

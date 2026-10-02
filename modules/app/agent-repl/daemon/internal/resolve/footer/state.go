@@ -436,11 +436,10 @@ type wsState struct {
 	// which is what moves `submitting` to a working step.
 	sawActivity bool
 	// mainAgent is the session's main agent as the watcher named it, empty
-	// until named. Only its items name the working step and, while a turn
-	// runs, the quiet-stretch line.
+	// until named. Only its items name the working step.
 	mainAgent string
-	// motion is the feed's items as the working step and the quiet stretch
-	// read them (quietstretch.go).
+	// motion is the feed's items as the working step reads them
+	// (workstep.go).
 	motion feedMotion
 	// compacting reports a vendor-initiated auto-compaction in flight.
 	compacting bool
