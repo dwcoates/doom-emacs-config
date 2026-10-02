@@ -45,7 +45,14 @@ import { appliedEffortOf, effortLevelOf, vendorEffortLevel } from "../convert/ef
 import { boundaryChange } from "./boundary-change.js";
 import { promptVendorUuid, subagentId, toolCallActivityId } from "../convert/ids.js";
 import { hookBlockingText } from "../convert/hooks.js";
-import { classifyVendorApiFailure, redactVendorMessage } from "../convert/terminals.js";
+import { redactVendorMessage } from "../convert/terminals.js";
+import {
+  BoundExceededError,
+  openingErrorVerdict,
+  startFailureLabel,
+  VendorStartError,
+  type VendorStartBound,
+} from "./start-failure.js";
 import { terminalUpsertKey } from "../store/keys.js";
 import { PersistenceError } from "../store/persistence.js";
 import { describeVendorTaskAnswer } from "../store/locator.js";
@@ -92,6 +99,7 @@ import {
   transcriptsRead,
   transcriptsRefused,
   titleDigestRefused,
+  type VendorStartRetry,
 } from "../service/failures.js";
 import type { Engine } from "./engine.js";
 import { readTitleDigest } from "./title-digest.js";
@@ -193,8 +201,24 @@ export interface QuerySpec {
    * transports and nothing at all about why its process was gone. Optional:
    * the mocked vendor has no child to end.
    */
-  readonly onChildExit?: (exit: { code: number | null; signal: string | null }) => void;
+  readonly onChildExit?: (exit: VendorEnd) => void;
 }
+
+/**
+ * How the vendor child ended: its exit code, the signal that killed it, or —
+ * for a child that never ran — the errno its spawn failed with.
+ */
+export interface VendorEnd {
+  readonly code: number | null;
+  readonly signal: string | null;
+  readonly spawnErrno?: string;
+}
+
+/**
+ * The spawn errnos that say the binary cannot run at all (missing, or not
+ * executable): a start that met one is REJECTED, never retried.
+ */
+const UNSPAWNABLE_ERRNOS: ReadonlySet<string> = new Set(["ENOENT", "EACCES"]);
 
 /** Build one query. `--fake` swaps the implementation and nothing else. */
 export type CreateQuery = (spec: QuerySpec) => Promise<QueryLike>;
@@ -358,13 +382,14 @@ type BootOutcome =
  *
  * IT IS SIZED AGAINST THE DAEMON'S STAND BOUND, NOT AGAINST ITSELF. The whole
  * teardown runs INSIDE the daemon's `KillSession` call, which
- * `drain.DefaultStandBound` (5s) gives up on; a per-stage budget large enough
+ * `drain.DefaultStandBound` (7s) gives up on; a per-stage budget large enough
  * that the daemon's bound fires first would mean the shim's own last resort
  * can never be reached, and the daemon would report a shim as leaked while it
- * was still legitimately working. The teardown spends at most FOUR of these
- * back to back -- the message loop's end, then, per agent, the book-head read
- * and the tail's own end, then the bash tails -- so the worst case must stay
- * strictly under the daemon's bound: 4 x 1s = 4s, one second inside it.
+ * was still legitimately working. The teardown spends at most FIVE of these
+ * back to back -- the vendor's interrupt and per-task stops, the message
+ * loop's end, then, per agent, the book-head read and the tail's own end, then
+ * the bash tails -- and the daemon's `shimTeardownWorstCase` is that sum:
+ * 5 x 1s = 5s, inside its stand bound.
  *
  * MEASURED: a forced `KillSession` on a session parked at an OPEN permission
  * ask, with a `WatchAgent` tail standing, concluded in 9ms in the shim's own
@@ -791,8 +816,13 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    */
   let keepaliveCount = 0;
   let startResolve: (() => void) | undefined;
-  /** Settles the same pending start as {@link startResolve}, with a named reason. */
-  let startReject: ((reason: Error) => void) | undefined;
+  /**
+   * Settles the same pending start as {@link startResolve}, with a named reason.
+   *
+   * TYPED TO A LABELED ERROR, so every settle site states whether asking again
+   * can help: the label is decided where the failure was seen, never later.
+   */
+  let startReject: ((reason: VendorStartError) => void) | undefined;
   /** The pending start's own bound, cleared by whatever settles the start first. */
   let startTimer: ReturnType<typeof setTimeout> | undefined;
   /**
@@ -839,7 +869,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * death. Absent means the child has not ended — or, for the mocked vendor,
    * that there was never a child to end.
    */
-  let vendorExit: { code: number | null; signal: string | null } | undefined;
+  let vendorExit: VendorEnd | undefined;
   let loop: Promise<void> | undefined;
   /**
    * What the cold gate's own compaction measured, kept for the phases AFTER it.
@@ -2220,10 +2250,14 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   }
 
   /** Remember how the vendor child ended, for the death record. */
-  function noteVendorExit(exit: { code: number | null; signal: string | null }): void {
+  function noteVendorExit(exit: VendorEnd): void {
     vendorExit = exit;
     LOGGER.debug(
-      { vendor_exit_code: exit.code ?? -1, vendor_exit_signal: exit.signal ?? "" },
+      {
+        vendor_exit_code: exit.code ?? -1,
+        vendor_exit_signal: exit.signal ?? "",
+        vendor_spawn_errno: exit.spawnErrno ?? "",
+      },
       "the vendor child ended",
     );
   }
@@ -2245,6 +2279,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       // ended" the same record, and those are opposite diagnoses.
       vendor_exit_code: vendorExit?.code ?? -1,
       vendor_exit_signal: vendorExit?.signal ?? "",
+      vendor_spawn_errno: vendorExit?.spawnErrno ?? "",
       vendor_stderr: vendorStderrTail.trim(),
     };
   }
@@ -2323,7 +2358,8 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       .api_error_status;
     const startHttpStatus = typeof startStatus === "number" ? startStatus : undefined;
     const startText = said ?? "";
-    const startKind = classifyVendorApiFailure(startHttpStatus, undefined, startText);
+    const verdict = openingErrorVerdict(startHttpStatus, startText);
+    const startKind = verdict.kind;
     if (startKind === "shim.vendor.auth_rejected" || startKind === "shim.vendor.model_missing") {
       LOGGER.info(
         {
@@ -2338,12 +2374,19 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       );
     }
     LOGGER.error(
-      { subtype: message.subtype, detail: said },
+      {
+        subtype: message.subtype,
+        detail: said,
+        http_status: startHttpStatus,
+        operation: startKind,
+        retry: verdict.retry,
+      },
       "the vendor answered the session's opening with an error result; the start is refused with its own text",
     );
     reject(
-      new Error(
+      new VendorStartError(
         `the vendor ended the session's opening with an error result (${message.subtype}): ${said}`,
+        verdict.retry,
       ),
     );
   }
@@ -2360,7 +2403,19 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   function settleStartOnQueryEnd(detail: string): void {
     const reject = startReject;
     if (reject === undefined) return;
-    reject(new Error(`the vendor query ended before its init message: ${detail}`));
+    // RETRYABLE: a child that exited or a stream that ended before it was
+    // ready says nothing about whether the next one will.
+    //
+    // ...UNLESS THE CHILD NEVER SPAWNED because its binary is missing or not
+    // executable: that errno is structured, and it will be the same next time.
+    const errno = vendorExit?.spawnErrno;
+    const deterministic = errno !== undefined && UNSPAWNABLE_ERRNOS.has(errno);
+    reject(
+      new VendorStartError(
+        `the vendor query ended before its init message: ${detail}`,
+        deterministic ? "rejected" : "retryable",
+      ),
+    );
   }
 
   /**
@@ -3890,6 +3945,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     preInitKinds = [];
     preInitKindsDropped = 0;
     vendorStderrTail = "";
+    vendorExit = undefined;
     return new Promise<void>((resolve, reject) => {
       const timeout = deps.initTimeoutMs ?? INIT_TIMEOUT_MS;
       startResolve = () => {
@@ -3902,7 +3958,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       };
       if (timeout <= 0) return;
       const handle = setTimeout(() => {
-        startReject?.(new Error(silentStartReason(timeout)));
+        startReject?.(
+          new VendorStartError(silentStartReason(timeout), "retryable", { name: "init_silence", ms: timeout }),
+        );
       }, timeout);
       if (typeof (handle as { unref?: () => void }).unref === "function") {
         (handle as { unref: () => void }).unref();
@@ -3943,7 +4001,12 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err);
       if (startReject !== undefined) {
-        startReject(new Error(`the vendor did not prove itself live: ${detail}`));
+        // RETRYABLE whether the bound tripped or the call failed: a child that
+        // cannot answer one control request yet is the 2026-10-02 shape, and
+        // the next child may well answer it.
+        const bound: VendorStartBound | undefined =
+          err instanceof BoundExceededError ? { name: "live_signal", ms: err.boundMs } : undefined;
+        startReject(new VendorStartError(`the vendor did not prove itself live: ${detail}`, "retryable", bound));
         return;
       }
       if (query !== active) return;
@@ -3964,7 +4027,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     if (boundMs <= 0) return work;
     return new Promise<T>((resolve, reject) => {
       const handle = setTimeout(() => {
-        reject(new Error(`the vendor did not answer ${call} within ${boundMs}ms`));
+        reject(new BoundExceededError(call, boundMs));
       }, boundMs);
       if (typeof (handle as { unref?: () => void }).unref === "function") {
         (handle as { unref: () => void }).unref();
@@ -4019,9 +4082,12 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       },
       "a hook blocked the session's opening; the start is refused with the hook's own reason",
     );
+    // REJECTED: the hook is the user's configuration, and it will block the
+    // next opening exactly as it blocked this one.
     startReject(
-      new Error(
+      new VendorStartError(
         `the vendor's ${message.hook_name} hook blocked the session from opening: ${blockingText}`,
+        "rejected",
       ),
     );
   }
@@ -4039,6 +4105,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     if (source.case === undefined) {
       throw new Error("shim session: StartSession reached the engine with no source");
     }
+    // WHEN THIS ATTEMPT BEGAN, for the failed start's record: how long the
+    // vendor was given before the start was refused is half its diagnosis.
+    const startBeganMs = deps.nowMs();
     let vendorSessionId: string;
     let clearedTo: string | undefined;
     let facts: TranscriptFacts | undefined;
@@ -4103,7 +4172,19 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       }
       const remedy = await applyColdRemediation(remediation, vendorSessionId, facts, requestedModel);
       if (remedy.kind === "failed") {
-        return startSessionRefused({ kind: "vendorStartFailed" }, remedy.detail);
+        // LABELED BY THE REMEDIATION'S OWN CAUSE, carried out of `compact`
+        // rather than guessed here. The compaction's failure is already on the
+        // record at its own layer; this says what the daemon is told.
+        LOGGER.info(
+          {
+            vendor_session_id: vendorSessionId,
+            retry: remedy.retry,
+            elapsed_ms: deps.nowMs() - startBeganMs,
+            cause: remedy.detail,
+          },
+          "refused StartSession: the cold gate's remediation failed",
+        );
+        return startSessionRefused({ kind: "vendorStartFailed", retry: remedy.retry }, remedy.detail);
       }
       // THE HANDOVER FROM THE REMEDIATION TO THE SESSION ITSELF. Said here
       // rather than inside `compact`, because the compaction's own work is
@@ -4210,10 +4291,20 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       // one. This attaches the handler now; `await initialized` below still
       // throws the same reason.
       initialized.catch(() => undefined);
-      const child =
-        brandNew || clearedTo !== undefined
-          ? await startQuery({ kind: "fresh", sessionId: inForce })
-          : await startQuery({ kind: "resume", resumeSessionId: vendorSessionId }, resumeAtLiveEnd(vendorSessionId));
+      let child: QueryLike;
+      try {
+        child =
+          brandNew || clearedTo !== undefined
+            ? await startQuery({ kind: "fresh", sessionId: inForce })
+            : await startQuery({ kind: "resume", resumeSessionId: vendorSessionId }, resumeAtLiveEnd(vendorSessionId));
+      } catch (createErr) {
+        // REJECTED: the query could not even be constructed — the SDK would
+        // not load, the vendor gate forbade it, or the SDK refused the options
+        // — and none of those changes between one attempt and the next. A
+        // child that spawns and then dies is NOT this path: it reaches the
+        // message loop and settles the start as a query that ended.
+        throw new VendorStartError(createErr instanceof Error ? createErr.message : String(createErr), "rejected");
+      }
       // THE PROOF THE START SETTLES ON, issued the moment the child exists.
       // It runs BESIDE the other settlers rather than instead of them: a
       // blocking hook, an error result or a query that ends can still land
@@ -4243,10 +4334,24 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       // info because a start that failed is exactly when the reader needs the
       // kinds: the grounded silent resume had a `SessionStart:resume` hook
       // start and succeed, and nothing said so anywhere.
+      const label = startFailureLabel(err);
       LOGGER.info(
         {
           vendor_session_id: inForce,
           binding: brandNew || clearedTo !== undefined ? "fresh" : "resume",
+          // WHAT THE DAEMON IS TOLD, AND WHY: the retry label this refusal
+          // carries, how long the vendor was given, and the bound that tripped
+          // when one did ("" and -1 when the start failed on an answer).
+          retry: label.retry,
+          elapsed_ms: deps.nowMs() - startBeganMs,
+          bound: label.bound?.name ?? "",
+          bound_ms: label.bound?.ms ?? -1,
+          // THE CHILD AS IT STOOD WHEN THE START FAILED, before the teardown
+          // below closes it: alive means no exit was observed this attempt.
+          vendor_child_alive: vendorExit === undefined,
+          vendor_exit_code: vendorExit?.code ?? -1,
+          vendor_exit_signal: vendorExit?.signal ?? "",
+          vendor_spawn_errno: vendorExit?.spawnErrno ?? "",
           pre_init_messages: preInitKinds.length + preInitKindsDropped,
           pre_init_kinds: preInitKinds.join(","),
           vendor_stderr: vendorStderrTail.trim(),
@@ -4304,8 +4409,8 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       }
       identity = undefined;
       const detail = withVendorStderr(err instanceof Error ? err.message : String(err));
-      LOGGER.error({ cause: detail }, "the vendor query could not be started");
-      return startSessionRefused({ kind: "vendorStartFailed" }, detail);
+      LOGGER.error({ cause: detail, retry: label.retry }, "the vendor query could not be started");
+      return startSessionRefused({ kind: "vendorStartFailed", retry: label.retry }, detail);
     }
     // THE HELD CUTS, NOW KEYABLE AND NOW SAFE TO KEY. Written AFTER the query
     // is up rather than before it: a row landed under a producer the failure
@@ -4409,7 +4514,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   type Remedy =
     | { kind: "none" }
     | { kind: "cleared"; vendorSessionId: string }
-    | { kind: "failed"; detail: string };
+    | { kind: "failed"; detail: string; retry: VendorStartRetry };
 
   async function applyColdRemediation(
     remediation: conversationv1.SessionColdRemediation | undefined,
@@ -4437,7 +4542,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
           remediation.remediation.value.model?.name ?? requestedModel,
           remediation.remediation.value.scope,
         );
-        return outcome.ok ? { kind: "none" } : { kind: "failed", detail: outcome.error };
+        return outcome.ok ? { kind: "none" } : { kind: "failed", detail: outcome.error, retry: outcome.retry };
       }
       default:
         return { kind: "none" };
@@ -4457,7 +4562,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     facts: TranscriptFacts,
     model: string,
     scope: conversationv1.SessionCompactScope,
-  ): Promise<{ ok: true; summary: string } | { ok: false; error: string }> {
+  ): Promise<{ ok: true; summary: string } | { ok: false; error: string; retry: VendorStartRetry }> {
     const transcript = transcriptPath(deps.env.configDir, deps.env.cwd, vendorSessionId);
     const startedAtMs = deps.nowMs();
     const queue = new PromptQueue();
@@ -4481,15 +4586,28 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         said,
       );
     };
-    /** A compaction that did not complete, said once to both surfaces. */
-    const failed = (error: string): { ok: false; error: string } => {
+    /**
+     * A compaction that did not complete, said once to both surfaces, with
+     * whether asking again can help — the start it gates carries that label.
+     */
+    const failed = (error: string, retry: VendorStartRetry): { ok: false; error: string; retry: VendorStartRetry } => {
       phase(
         conversationv1.SessionCompactionPhase.FAILED,
         { tokensBefore: facts.contextTokens, error },
         "the cold gate's compaction did not complete",
       );
-      return { ok: false, error };
+      LOGGER.debug({ vendor_session_id: vendorSessionId, retry }, "labeled the failed compaction");
+      return { ok: false, error, retry };
     };
+    /**
+     * Whether the throwaway query's stream is being read: a throw from INSIDE
+     * it is a child or stream that ended (retryable); a throw outside it is the
+     * query that could not be built or the transcript that could not be
+     * written, which the next attempt meets again (rejected).
+     */
+    let streaming = false;
+    /** Whether the stream answered with a result at all. */
+    let sawResult = false;
     coldCompactionFigures = undefined;
     // BEFORE THE QUERY, NOT AFTER IT. Creating the throwaway query is itself
     // part of the minute the user is waiting through, so a frame that waited
@@ -4518,16 +4636,48 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       });
       let summary = "";
       let outputTokens = 0;
+      streaming = true;
       for await (const message of throwaway) {
         if (message.type !== "result") continue;
-        if (message.subtype !== "success") {
-          return failed(`the summarizing session ended as ${message.subtype}`);
+        sawResult = true;
+        // AN ERROR RESULT IS A FAILURE WHATEVER ITS SUBTYPE. The vendor ends a
+        // turn whose API call failed with `subtype: "success"` and `is_error`,
+        // its `result` the error's own sentence ("API Error: ..."); reading
+        // that as a summary would write the error into the transcript as the
+        // conversation's compacted context.
+        if (message.subtype !== "success" || message.is_error) {
+          // READ EXACTLY AS THE OPENING'S IS: its status and its words decide
+          // whether it can pass. READ DEFENSIVELY: this result is the vendor's,
+          // and one that states no `errors` must still be labeled, not throw.
+          const { api_error_status: status, errors } = message as unknown as {
+            api_error_status?: number | null;
+            errors?: unknown;
+          };
+          const words =
+            message.subtype === "success"
+              ? message.result
+              : Array.isArray(errors)
+                ? errors.map(String).join("; ")
+                : "";
+          const verdict = openingErrorVerdict(typeof status === "number" ? status : undefined, words);
+          return failed(
+            message.subtype === "success"
+              ? `the summarizing session ended with an error result: ${words}`
+              : `the summarizing session ended as ${message.subtype}`,
+            verdict.retry,
+          );
         }
         summary = message.result;
         outputTokens = message.usage.output_tokens;
         break;
       }
-      if (summary === "") return failed("the summarizing session produced no summary");
+      streaming = false;
+      if (summary === "") {
+        // A STREAM THAT ENDED WITHOUT A RESULT is a child that went away
+        // (retryable); a result that summarized nothing is the vendor's answer
+        // to this transcript, and it will give the same one again (rejected).
+        return failed("the summarizing session produced no summary", sawResult ? "rejected" : "retryable");
+      }
       const durationMs = deps.nowMs() - startedAtMs;
       appendCompactionLines(
         transcript,
@@ -4577,7 +4727,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
       writeContextCut(contextCutFailed(error));
-      return failed(error);
+      return failed(error, streaming ? "retryable" : "rejected");
     } finally {
       queue.close();
       controller.abort();
@@ -5846,37 +5996,40 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     }
     const active = query;
     if (active !== undefined) {
-      try {
-        await active.interrupt();
-      } catch (err) {
-        // warn: a defect because teardown continued after the vendor refused its interrupt.
-        LOGGER.warn(
-          { cause: err instanceof Error ? err.message : String(err) },
-          "the vendor refused the interrupt during teardown; continuing",
-        );
-      }
       // SNAPSHOT FIRST. Stopping a task provokes the vendor's own
       // `task_notification`, which retires the entry from the live table — so
       // reading the table again afterwards asks what is STILL live and gets
-      // exactly the items this teardown did not have to close.
-      const stopping = live.all();
-      for (const entry of stopping) {
-        try {
-          await active.stopTask(entry.taskId);
-        } catch (err) {
-          // warn: a defect because teardown continued after a detached item could not be stopped.
-          LOGGER.warn(
-            { task_id: entry.taskId, cause: err instanceof Error ? err.message : String(err) },
-            "could not stop a detached item during teardown; continuing",
-          );
-        }
-      }
-      concludeStoppedRuns(stopping);
+      // exactly the items this teardown did not have to close. It is taken
+      // again once the interrupt has answered, and this first one stands when
+      // the interrupt never does.
+      const snapshot = { stopping: live.all(), abandoned: false };
+      // THE VENDOR'S HALF IS BOUNDED, as one stage. A restart is asked for
+      // because something is stuck, and the vendor is the likeliest thing to be
+      // (2026-10-02: a vendor that never answered its first control request).
+      // Its interrupt and its per-task stops were awaited with no bound, so a
+      // forced `KillSession` on a stuck vendor never answered: the daemon
+      // escalated to the process kill, and the shell runs this teardown owed
+      // a terminal stayed open in the store, for the next shim to re-announce
+      // as live. The stops are asked AT ONCE, so one task the vendor cannot
+      // stop does not keep the others from being asked.
+      //
+      // THE OPEN TURN IS ENDED THE MOMENT THE INTERRUPT ANSWERS, in the same
+      // continuation, exactly as it was before this stage was bounded: the
+      // vendor's own `by_user` result for the interrupt follows it down the
+      // message loop, and a teardown that yielded first let that result end
+      // the turn as a user's stop instead of the host shutdown it is.
+      await withBudget(
+        stopVendorWork(active, snapshot, () => endTurnsForTeardown(reason)),
+        watcherConclusionBudgetMs,
+        "the vendor did not answer the teardown's interrupt and per-task stops within its budget; the stopped shell runs are closed and the stand-down goes on",
+      );
+      // A LATE INTERRUPT ASKS NOTHING MORE: the stand-down has moved on and
+      // the query is about to be closed under it.
+      snapshot.abandoned = true;
+      concludeStoppedRuns(snapshot.stopping);
     }
-    // BEFORE `open` IS CLEARED: the terminal names the turn, and a teardown
-    // that forgot the turn first would have nothing to write it for.
-    writeHostShutdownTerminal(reason);
-    setOpen(undefined);
+    // A no-op when the interrupt answered in time; otherwise the turn ends here.
+    endTurnsForTeardown(reason);
     keepaliveScope.abandon(`the session is being torn down: ${reason}`);
     prompts?.close();
     abort?.abort();
@@ -5918,6 +6071,65 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     releaseLock = undefined;
     await releaseWorkspaceLock?.();
     releaseWorkspaceLock = undefined;
+  }
+
+  /**
+   * End every turn the teardown owes an end, as interrupted by host shutdown,
+   * and clear the turn slot. Idempotent: once the slot is cleared there is no
+   * turn left owed, so a second call writes nothing.
+   *
+   * BEFORE `open` IS CLEARED: the terminal names the turn, and a teardown that
+   * forgot the turn first would have nothing to write it for.
+   */
+  function endTurnsForTeardown(reason: string): void {
+    writeHostShutdownTerminal(reason);
+    setOpen(undefined);
+  }
+
+  /**
+   * The teardown's vendor half: interrupt the query, re-take the snapshot of
+   * what is live, and ask the vendor to stop every item of it at once.
+   *
+   * NOTHING HERE MAY END THE TEARDOWN. A refused interrupt or stop is warned
+   * and the rest goes on; the caller bounds the whole of it, because a vendor
+   * that answers nothing is the case a restart exists for.
+   */
+  async function stopVendorWork(
+    active: QueryLike,
+    snapshot: { stopping: readonly LiveWorkEntry[]; abandoned: boolean },
+    interrupted: () => void,
+  ): Promise<void> {
+    try {
+      await active.interrupt();
+    } catch (err) {
+      // warn: a defect because teardown continued after the vendor refused its interrupt.
+      LOGGER.warn(
+        { cause: err instanceof Error ? err.message : String(err) },
+        "the vendor refused the interrupt during teardown; continuing",
+      );
+    }
+    if (snapshot.abandoned) {
+      LOGGER.debug(
+        { stopping: snapshot.stopping.length },
+        "the vendor answered the teardown's interrupt after its budget; the stops it would have asked are not sent",
+      );
+      return;
+    }
+    interrupted();
+    snapshot.stopping = live.all();
+    await Promise.all(
+      snapshot.stopping.map(async (entry) => {
+        try {
+          await active.stopTask(entry.taskId);
+        } catch (err) {
+          // warn: a defect because teardown continued after a detached item could not be stopped.
+          LOGGER.warn(
+            { task_id: entry.taskId, cause: err instanceof Error ? err.message : String(err) },
+            "could not stop a detached item during teardown; continuing",
+          );
+        }
+      }),
+    );
   }
 
   /**
