@@ -11,12 +11,20 @@
 // that as the topbar's SYNTHESIZED title — the middle precedence, below the
 // vendor's ai-title and above the workspace name.
 //
-// COST IS CONTROLLED BY A DIGEST HASH. Synthesis fires at session start and at
-// the end of every turn, but a call is made only when the digest actually
-// CHANGED since the last synthesis (a new prompt, or a compaction). Two triggers
-// with the same digest cost nothing, so the steady state is at most one cheap
-// call per new prompt. A /clear or /compact resets the hash so the next trigger
-// re-synthesizes, and the vendor stating a title stops synthesis outright.
+// COST IS CONTROLLED BY A CADENCE AND A DIGEST HASH. Synthesis is considered at
+// session start and at the end of every turn, but a model call is made only
+// for the first title of a context (since the last /clear or /compact), and
+// after that once every SynthesizeEvery prompts (owner ruling, 2026-10-02:
+// "every 5 prompts, not every prompt"). A digest unchanged since the last
+// synthesis costs nothing either. A /clear or /compact resets both, so the
+// next trigger re-synthesizes, and the vendor stating a title stops synthesis
+// outright.
+//
+// THE MODEL SEES ONLY THE USER'S PROMPTS since the last /clear or /compact,
+// whole and untruncated, with no response (owner ruling, 2026-10-02), the most
+// recent RecentPrompts set apart so the sentence weighs them most. The
+// compaction summary leads only when fewer than RecentPrompts prompts followed
+// the compaction (TitleDigest).
 //
 // BEST EFFORT, NEVER A FAULT. The synthesized title is an enhancement over the
 // workspace name; a shim that cannot answer, a guard that refuses the vendor
@@ -97,6 +105,13 @@ const (
 	// DefaultSynthesizeTimeout bounds one headless model call. It is a handful
 	// of tokens from a small model, the same shape as the naming call's bound.
 	DefaultSynthesizeTimeout = 15 * time.Second
+	// SynthesizeEvery is the cadence: after a context's first title, the
+	// model is asked again only once this many more prompts have been made.
+	SynthesizeEvery = 5
+	// RecentPrompts is how many of the newest prompts the title digest sets
+	// apart as the ones to weigh most, and the count below which a
+	// compaction's summary leads the digest.
+	RecentPrompts = 10
 	// MaxPrompts caps how many of the most recent prompts ride the model
 	// prompt, so a long conversation's digest cannot grow the call without
 	// bound. The most recent prompts are the ones a title should reflect.
