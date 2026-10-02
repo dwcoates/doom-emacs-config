@@ -255,13 +255,22 @@ type scriptedAnswer struct {
 }
 
 func newServer(rec *Recorder, p Profile, log *logSink) *server {
+	// THE STORE HOLDS THE WORKSPACE'S BOOK BEFORE ANY SESSION IS STARTED. The
+	// real shim serves ReadHistory off its persisted main agent from birth,
+	// whatever StartSession goes on to answer (a cold gate, a vendor start
+	// retried or refused), so the fake's book is seeded at birth too, and
+	// seeded again by a resume exactly as before.
+	b := newBook()
+	if len(p.ResumeHistory) > 0 {
+		b.seed(p.ResumeHistory)
+	}
 	return &server{
 		rec:             rec,
 		profile:         p,
 		log:             log,
 		sessions:        newHub[*conversationv1.SessionUpdate](),
 		agents:          newHub[agentFrame](),
-		book:            newBook(),
+		book:            b,
 		bashes:          newHub[bashFrame](),
 		answers:         map[string][]scriptedAnswer{},
 		bashLog:         map[string][]*conversationv1.AgentBash{},

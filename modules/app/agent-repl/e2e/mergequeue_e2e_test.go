@@ -42,6 +42,7 @@
 package e2e
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -856,10 +857,27 @@ func TestFanWideCancel(t *testing.T) {
 		t.Fatalf("OpenWorkspace = error %v, want a success", err)
 	}
 
+	footer := w.WatchFooter(ws)
+	defer footer.Close()
+
 	// Act: drive the scenario's own setup turn to completion — it launches
 	// three detached items and leaves them live, then concludes normally.
 	turn := SubmitPrompt(t, w, ws, "!cancel-all")
 	AwaitTurnEnded(t, w, ws, turn)
+	// THE STOP ACTS ON THE LIVE SET THE DAEMON HOLDS, which its session
+	// watcher builds from the main watch's live frames. The feed's turn end is
+	// no witness of that set: a reader's open loads the newest store page,
+	// terminal included, and can draw the turn's end before the live watch has
+	// routed the announcements written ahead of it (run of 2026-10-02: two of
+	// three admitted when the interrupt landed). The footer's chips ARE that
+	// set, so the stop is issued once they show all three, as a person's
+	// would be.
+	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
+	defer cancel()
+	harness.AwaitView(t, ctx, footer.Stream, "the footer showing two live agents and a live shell", func(v *frontendv1.FooterView) bool {
+		live := v.GetStrip().GetLiveWork()
+		return live.GetAgents().GetCount() == 2 && live.GetShells().GetCount() == 1
+	})
 
 	// Act: the fan-wide stop — one Interrupt call, target all_agents.
 	resp, err := w.Client().Interrupt(w.Ctx(), connect.NewRequest(&agentreplv1.InterruptRequest{

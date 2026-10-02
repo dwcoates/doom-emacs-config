@@ -2,6 +2,7 @@ package desktopnotify
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -30,9 +31,21 @@ func (h *fakeHeadless) Bin() string { return "fake-claude" }
 type fakeConfigDirs struct {
 	dir string
 	ok  bool
+	// err is what the lookup fails with, before ok is read: the real lookup
+	// reads the state database on the caller's context.
+	err error
 }
 
-func (c fakeConfigDirs) ConfigDirFor(ids.WorkspaceID) (string, bool) { return c.dir, c.ok }
+// ConfigDirFor answers the root, err, or a lookup failure when !ok.
+func (c fakeConfigDirs) ConfigDirFor(_ context.Context, _ ids.WorkspaceID) (string, error) {
+	if c.err != nil {
+		return "", c.err
+	}
+	if !c.ok {
+		return "", errors.New("workspace not found")
+	}
+	return c.dir, nil
+}
 
 // briefDir writes the summary brief into a temp prompts directory.
 func briefDir(t *testing.T, body string) string {
@@ -222,5 +235,40 @@ func TestSummarizeCapsTheAnswerItSends(t *testing.T) {
 	// Assert
 	if strings.Contains(h.req.Prompt, "TAIL") {
 		t.Fatal("the answer past the cap reached the model")
+	}
+}
+
+func TestSummarizeOfAWorkspaceReadAsTheDaemonStandsDownIsNoError(t *testing.T) {
+	// Arrange: the notifier's context ended while the account was being read.
+	h := &fakeHeadless{}
+	s, log := newSummarizer(t, h, fakeConfigDirs{err: context.Canceled}, briefDir(t, validBrief))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act
+	got := s.Summarize(ctx, "ws1", "answer")
+
+	// Assert
+	if got != "Summary unavailable: "+StoodDownCause || h.req != nil {
+		t.Fatalf("summary = %q (called=%v), want the stood-down cause and no call", got, h.req != nil)
+	}
+	if _, ok := hasRecord(log, "error", "no account root for this workspace; the turn was not summarized"); ok {
+		t.Fatal("a stand-down during the account read was recorded at ERROR")
+	}
+}
+
+func TestSummarizeOfAWorkspaceReadAsTheDaemonStandsDownIsRecordedAtInfo(t *testing.T) {
+	// Arrange.
+	h := &fakeHeadless{}
+	s, log := newSummarizer(t, h, fakeConfigDirs{err: context.Canceled}, briefDir(t, validBrief))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act
+	s.Summarize(ctx, "ws1", "answer")
+
+	// Assert
+	if _, ok := hasRecord(log, "info", "the daemon stood down while the workspace's account was read"); !ok {
+		t.Fatal("the stand-down during the account read left no INFO record")
 	}
 }

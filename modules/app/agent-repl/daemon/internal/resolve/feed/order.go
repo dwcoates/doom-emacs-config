@@ -109,6 +109,13 @@ func (r *resolver) mintOrder(s *wsState, f *feedState, id string) (string, strin
 	base := baseOf(r.predecessor(s, f, class))
 	if base == "" {
 		base = r.orderNowBase(s, class)
+	} else if now := r.orderNowBase(s, class); now > base && r.awaitsNewestPage(s, f) {
+		// ROWS THE DAEMON HOLDS ARE NOT THE CONVERSATION'S NEWEST while the
+		// book's newest page is unloaded: a merge row restored from before a
+		// restart is older than the turns run since, and following it would
+		// stand a row made now in the middle of the history a reader's load
+		// then draws. The row follows the moment it was made instead.
+		base = now
 	}
 	n := f.followers[base] + 1
 	f.followers[base] = n
@@ -136,6 +143,16 @@ func (r *resolver) orderNowBase(s *wsState, class byte) string {
 		return string(class)
 	}
 	return entryBase(class, &conversationv1.ConversationPlace{AtMs: r.deps.Now().UnixMilli()})
+}
+
+// awaitsNewestPage reports that F is an agent's book whose newest store page
+// has not been loaded, so what it holds says nothing about where the
+// conversation's newest row stands. Called with r.mu held.
+func (r *resolver) awaitsNewestPage(s *wsState, f *feedState) bool {
+	if _, isBook := bookTarget(s.feedAddrs[f.key]); !isBook || r.deps.History == nil {
+		return false
+	}
+	return !f.book.newestLoaded
 }
 
 // predecessor is the key of the row a row the daemon makes itself follows:

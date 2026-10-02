@@ -48,15 +48,17 @@ type HistorySource interface {
 	// ReadHistory answers TARGET's newest page when AFTER is nil, and otherwise
 	// the page of entries placed strictly before the entry AFTER names. A nil
 	// TARGET is the session's main agent (the shim's prompt thread).
-	// ErrNoHistorySource means no session is up to read from.
+	// ErrNoHistorySource means no shim is up to read from (a session need not
+	// be: the shim serves the workspace's persisted book).
 	ReadHistory(ctx context.Context, ws ids.WorkspaceID, target *conversationv1.AgentId, after *conversationv1.HistoryPointer) (*conversationv1.HistoryPage, error)
 }
 
 var (
-	// ErrNoHistorySource is a HistorySource with no session to read from: a
-	// cold or hibernated workspace. The feed serves what it holds; nothing
-	// older is reachable until a session is up.
-	ErrNoHistorySource = errors.New("feed: no session is up to read history from")
+	// ErrNoHistorySource is a HistorySource with no shim to read from (a
+	// hibernated workspace, a shim not yet up) or no book yet. The feed serves
+	// what it holds; nothing older is reachable until a source comes up
+	// (SourceUp, or a watch opening).
+	ErrNoHistorySource = errors.New("feed: no shim is up to read history from")
 	// ErrHistoryUnavailable wraps every failure to read a page a reader's
 	// request needed: the shim's or the store's refusal, or a transport error.
 	ErrHistoryUnavailable = errors.New("feed: a history page could not be read")
@@ -90,9 +92,10 @@ type bookState struct {
 	// reaches gapFloor. Nil when there is no gap.
 	gapAfter *conversationv1.HistoryPointer
 	gapFloor string
-	// awaitingSource reports that a reader opened this feed while no session
+	// awaitingSource reports that a reader opened this feed while no source
 	// was up to read its history from: the newest page is loaded for it the
-	// moment a watch of the session opens (kickWaitingReaders).
+	// moment one comes up (SourceUp) or a watch of the session opens
+	// (kickWaitingReaders).
 	awaitingSource bool
 	// pending are the entries a load withheld because the turn they belong to
 	// opened on a page not yet loaded (owner ruling 5: a row whose starting
@@ -290,7 +293,7 @@ func (r *resolver) load(ctx context.Context, plan loadPlan) (loaded, error) {
 	page, err := r.deps.History.ReadHistory(ctx, ws, plan.target, plan.after)
 	if errors.Is(err, ErrNoHistorySource) {
 		log.Info("daemon.feed.history_load_no_source",
-			"a reader's page could not be loaded: no session is up to read history from; the feed serves what it holds",
+			"a reader's page could not be loaded: no shim is up to read history from; the feed serves what it holds and loads the page when one comes up",
 			dlog.Context{"agent": plan.target.GetValue(), "newest": plan.newest})
 		return loaded{}, err
 	}
@@ -346,7 +349,10 @@ func (r *resolver) load(ctx context.Context, plan loadPlan) (loaded, error) {
 	// A RE-READ NEWEST PAGE MOVES ONLY THE TOP: the older pages a walk
 	// already loaded stay loaded, and the next older page is still read from
 	// below the oldest of them.
-	reread := plan.newest && f.book.newestLoaded
+	// A newest page over a book no load has bounded yet (a fresh book, known
+	// empty until its first live row) is its FIRST load: it states where the
+	// next older page is read from and whether the start was reached.
+	reread := plan.newest && f.book.newestLoaded && len(f.book.bounds) > 0
 	reachedStart := !reread && page.GetFloor() != nil
 	switch {
 	case plan.gap:
@@ -419,9 +425,7 @@ const historyKickBound = 10 * time.Second
 
 // kickWaitingReaders loads AGENT's newest page for the readers that opened its
 // feed before a session was up to read it from (bookState.awaitingSource). A
-// watch of AGENT just opened, so its session is up now. The load runs OFF the
-// caller's goroutine: the caller is the session watcher, and the read hands
-// the page back to it (HistorySource). Called with r.mu held.
+// watch of AGENT just opened, so its session is up now. Called with r.mu held.
 func (r *resolver) kickWaitingReaders(s *wsState, agent *conversationv1.AgentId) {
 	addr := feedid.Feed{Root: true}
 	if agent.GetValue() != "" && agent.GetValue() != s.mainAgent {
@@ -431,9 +435,78 @@ func (r *resolver) kickWaitingReaders(s *wsState, agent *conversationv1.AgentId)
 	if !ok || !f.book.awaitingSource {
 		return
 	}
+	r.kickWaitingFeed(s, f, addr, "a watch opened for a feed a reader holds without its history; its newest page is loaded for it")
+}
+
+// SourceUp loads the newest page of every feed of WS a reader opened while no
+// source was up to read it from. A SOURCE IS A SHIM, NOT A SESSION: the fleet
+// says so the moment it holds a client it can read history through (a cold
+// gate, a vendor start being retried), so a reader is never left on the rows
+// the daemon made itself while the conversation sits in the store.
+func (r *resolver) SourceUp(ws ids.WorkspaceID) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s, ok := r.workspaces[ws]
+	if !ok {
+		return
+	}
+	waiting := 0
+	for key, f := range s.feeds {
+		if !f.book.awaitingSource {
+			continue
+		}
+		waiting++
+		r.kickWaitingFeed(s, f, s.feedAddrs[key], "a history source came up for a feed a reader holds without its history; its newest page is loaded for it")
+	}
+	r.logger(ws).Debug("daemon.feed.source_up",
+		"a history source came up for the workspace",
+		dlog.Context{"waiting_feeds": waiting})
+}
+
+// KeepNewestPage loads the root feed's newest store page while a source is
+// still up, when the feed does not already hold it: a reader that opens after
+// the source has gone is then served the conversation, never only the rows the
+// daemon made itself. Its rows are pushed (loadPushed).
+func (r *resolver) KeepNewestPage(ctx context.Context, ws ids.WorkspaceID) error {
+	loaded, err := r.loadPushed(ctx, ws, feedid.Feed{Root: true}, true)
+	if err != nil {
+		return err
+	}
+	r.lockedLogger(ws).Info("daemon.feed.newest_page_kept",
+		"the root feed's newest page was secured while its history source was still up",
+		dlog.Context{"loaded_now": loaded})
+	return nil
+}
+
+// NoteFreshBook marks the root feed's book as a NEW conversation's: its newest
+// page is known to hold nothing and to be the conversation's start. A reader
+// waiting for a source is served what the feed holds, and the session's own
+// live entries draw the conversation from its first row; once one has, the
+// next open reads the newest page (liveSince), which by then the store holds.
+func (r *resolver) NoteFreshBook(ws ids.WorkspaceID) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s := r.state(ws)
+	f := r.feed(s, feedid.Feed{Root: true})
+	f.book.newestLoaded = true
+	f.book.liveSince = false
+	f.book.floor = true
+	f.book.after = nil
+	f.book.gapAfter, f.book.gapFloor = nil, ""
 	f.book.awaitingSource = false
-	r.logger(s.id).Info("daemon.feed.history_kick",
-		"a watch opened for a feed a reader holds without its history; its newest page is loaded for it",
+	r.logger(ws).Info("daemon.feed.fresh_book",
+		"the session comes up on a new conversation; its book is known empty, so no reader's open asks the store for it",
+		dlog.Context{"feed": f.key})
+}
+
+// kickWaitingFeed loads F's newest page for the readers waiting on it and
+// pushes it to them. The load runs OFF the caller's goroutine: the caller may
+// be the session watcher or the fleet, and the read reaches back into the
+// fleet (HistorySource). Called with r.mu held.
+func (r *resolver) kickWaitingFeed(s *wsState, f *feedState, addr feedid.Feed, why string) {
+	f.book.awaitingSource = false
+	agent, _ := bookTarget(addr)
+	r.logger(s.id).Info("daemon.feed.history_kick", why,
 		dlog.Context{"feed": f.key, "agent": agent.GetValue()})
 	ws := s.id
 	go func() {
@@ -482,6 +555,11 @@ func (r *resolver) loadPushed(ctx context.Context, ws ids.WorkspaceID, addr feed
 	plan.pushAll = true
 	got, err := r.load(ctx, plan)
 	if errors.Is(err, ErrNoHistorySource) {
+		// THE SOURCE WENT BETWEEN THE ASK AND THE READ: the newest page is
+		// still wanted, and the next source to come up loads it.
+		if plan.newest {
+			r.awaitSource(plan)
+		}
 		return false, nil
 	}
 	if err != nil {

@@ -294,10 +294,10 @@ func (s *Synthesizer) callModel(ctx context.Context, ws ids.WorkspaceID, summary
 		return "", false
 	}
 
-	configDir, ok := s.deps.ConfigDirs.ConfigDirFor(ws)
-	if !ok {
+	configDir, err := s.deps.ConfigDirs.ConfigDirFor(ctx, ws)
+	if err != nil {
 		s.deps.Log.Info(opSynth, "no account root for this workspace; not synthesizing a title", dlog.Context{
-			"workspace": string(ws),
+			"workspace": string(ws), "cause": err.Error(),
 		})
 		return "", false
 	}

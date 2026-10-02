@@ -507,3 +507,32 @@ func indexOfID(ids []string, id string) int {
 	}
 	return -1
 }
+
+func TestADaemonRowMadeAfterAnOlderDaemonRowSortsAtTheMomentItWasMade(t *testing.T) {
+	// Arrange: before the newest page is loaded the daemon made one row
+	// between the book's two entries (a merge, at 150) and one after both (a
+	// cold gate, at 1000). The feed holds only daemon rows, so the first says
+	// nothing about where the conversation's newest row stands.
+	h := newHarness(t)
+	h.mainBook(3, promptsBook(2))
+	h.nowMs = 150
+	h.resolver.UpsertSynthesized(testWorkspace, rootFeed(), &frontendv1.FeedRow{
+		Id:  &frontendv1.FeedId{Value: "row|merge"},
+		Row: &frontendv1.FeedRow_Activity{Activity: &frontendv1.FeedTurnActivity{}},
+	})
+	h.nowMs = 1_000
+	h.resolver.UpsertSynthesized(testWorkspace, rootFeed(), &frontendv1.FeedRow{
+		Id:  &frontendv1.FeedId{Value: "row|cold-gate"},
+		Row: &frontendv1.FeedRow_Activity{Activity: &frontendv1.FeedTurnActivity{}},
+	})
+
+	// Act.
+	page, _ := h.openPage(rootFeed(), "reader-1")
+
+	// Assert: each daemon row stands where it happened among the history.
+	got := strings.Join(rowIDs(pageRows(t, page)), ",")
+	want := h.promptRowID("turn-0") + ",row|merge," + h.promptRowID("turn-1") + ",row|cold-gate"
+	if got != want {
+		t.Fatalf("page rows = %v, want %v", got, want)
+	}
+}

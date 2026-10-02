@@ -5939,6 +5939,74 @@ describe("account usage, pushed on the account-usage interval", () => {
 });
 
 /**
+ * THE VENDOR NEVER GATES SHOWING THE CONVERSATION. ReadHistory serves the
+ * workspace's persisted book whatever state the vendor start is in.
+ */
+describe("ReadHistory serves the workspace's persisted book without a started session", () => {
+  function firstPage(): shimv1.ReadHistoryRequest {
+    return create(shimv1.ReadHistoryRequestSchema, {
+      position: { case: "first", value: create(shimv1.ReadHistoryFirstSchema, {}) },
+    });
+  }
+
+  it("serves it before any StartSession", async () => {
+    // Arrange.
+    const h = harness();
+    persistIdentity(h, "original-1");
+
+    // Act.
+    const response = await h.engine.readHistory(firstPage());
+
+    // Assert.
+    expect(response.result.case).toBe("success");
+    expect(h.persistence.firstPageAgents).toEqual(["original-1"]);
+  });
+
+  it("serves it after a vendor start was refused", async () => {
+    // Arrange.
+    const h = harness({ createQueryFailsFrom: 0 });
+    persistIdentity(h, "original-1");
+    writeTranscript(h.configDir, h.cwd, "resume-1", [smallAssistantLine()]);
+    expect(failureCause(await h.engine.startSession(resumeRequest("resume-1")))).toBe("vendorStartFailed");
+
+    // Act.
+    const response = await h.engine.readHistory(firstPage());
+
+    // Assert.
+    expect(response.result.case).toBe("success");
+    expect(h.persistence.firstPageAgents).toEqual(["original-1"]);
+  });
+
+  it("serves it while the session is parked at its cold gate", async () => {
+    // Arrange.
+    const h = harness({ nowMs: 1_000_000 + 10 * 60 * 1000 });
+    persistIdentity(h, "original-1");
+    writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+    expect(failureCause(await h.engine.startSession(resumeRequest("resume-1")))).toBe("cold");
+
+    // Act.
+    const response = await h.engine.readHistory(firstPage());
+
+    // Assert.
+    expect(response.result.case).toBe("success");
+    expect(h.persistence.firstPageAgents).toEqual(["original-1"]);
+  });
+
+  it("refuses unknown_agent when the workspace never persisted a book", async () => {
+    // Arrange.
+    const h = harness();
+
+    // Act.
+    const response = await h.engine.readHistory(firstPage());
+
+    // Assert.
+    expect(response.result.case === "failure" ? response.result.value.kind.case : undefined).toBe(
+      "unknownAgent",
+    );
+  });
+});
+
+/**
  * reportStoreUnreachable (ReadHistory's store_unavailable path) and
  * concludeStoppedRuns (StopBash's write of the interrupted terminal).
  */

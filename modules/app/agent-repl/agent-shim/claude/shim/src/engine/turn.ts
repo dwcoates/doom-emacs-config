@@ -115,6 +115,14 @@ export interface SessionContext {
   retireUserDetach(toolUseId: string, why: string): void;
   /** The session's identity, or absence before StartSession. */
   identity(): SessionIdentity | undefined;
+  /**
+   * The workspace's PERSISTED main agent (`agent-id.json`), or absence when
+   * this workspace never settled one. It is what ReadHistory serves before a
+   * session is up: the book is the workspace's, not the vendor session's, so a
+   * start that has not run, is retried, was refused or is parked at its cold
+   * gate never hides the conversation already in the store.
+   */
+  persistedAgent(): Promise<conversationv1.AgentId | undefined>;
   /** The one live query, or absence when it is dead or not yet started. */
   query(): QueryLike | undefined;
   readonly nowMs: () => number;
@@ -1615,11 +1623,26 @@ export class TurnEngine {
 
   /** One page of one agent's durable past, newest first. */
   async readHistory(request: shimv1.ReadHistoryRequest): Promise<shimv1.ReadHistoryResponse> {
-    const identity = this.session.identity();
-    if (identity === undefined) {
-      return readHistoryRefused({ kind: "unknownAgent" }, "no session has been started on this shim");
+    // THE BOOK IS THE WORKSPACE'S, NOT THE VENDOR SESSION'S. Before a session
+    // is settled (no StartSession yet, one being retried, one refused, one
+    // parked at its cold gate) the main agent is the identity this workspace
+    // persisted, and its store pages are served exactly as a started session's
+    // are: the vendor's state never gates showing the conversation. A
+    // workspace that never settled an identity has no book to name.
+    const mainAgent = this.session.identity()?.agentId ?? (await this.session.persistedAgent());
+    if (mainAgent === undefined) {
+      return readHistoryRefused(
+        { kind: "unknownAgent" },
+        "no session has been started on this shim and the workspace holds no persisted main agent",
+      );
     }
-    const target = request.target ?? identity.agentId;
+    if (this.session.identity() === undefined) {
+      LOGGER.debug(
+        { agent_id: mainAgent.value, targeted: request.target !== undefined },
+        "ReadHistory before a session is up: serving the workspace's persisted book",
+      );
+    }
+    const target = request.target ?? mainAgent;
     try {
       if (request.position.case === "after") {
         const after = request.position.value;

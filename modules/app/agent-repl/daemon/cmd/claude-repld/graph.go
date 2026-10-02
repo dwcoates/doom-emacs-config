@@ -490,7 +490,16 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	digestRef := &digestForwarder{}
 	// ONE ACCOUNT RESOLUTION FOR THE DAEMON'S OWN HEADLESS CALLS: the title
 	// and the turn summary bill the workspace's own account the same way.
-	configDirs := titleConfigDirs{workspaceDir: workspaceDir, accounts: accounts, log: log}
+	// THE LOOKUP RUNS ON THE CALLER'S CONTEXT, not the graph's: a banner or a
+	// title composed while the daemon stands down sees its own call's end, and
+	// can tell that stand-down apart from a workspace with no record.
+	configDirs := titleConfigDirs{workspaceDir: func(ctx context.Context, ws ids.WorkspaceID) (string, error) {
+		record, err := p.DB.Workspace(ctx, ws)
+		if err != nil {
+			return "", err
+		}
+		return record.Dir, nil
+	}, accounts: accounts}
 	titleSynth := titlesynth.New(titlesynth.Deps{
 		Digester:   digestRef,
 		Headless:   headlessClient,
