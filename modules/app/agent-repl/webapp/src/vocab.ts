@@ -80,8 +80,7 @@ export const TOPBAR_TONES: readonly string[] = renderColors.topbar_tones;
  * rather than a default: the file is the contract, and an unpainted dot that
  * silently picked grey is the drift this whole mechanism exists to catch.
  * The webapp takes NO surface overrides — its rail carries a glyph and a
- * status word beside every dot, so it can spend purple on `vendorBlocked`
- * without the collision the glyph-less tab bar has to resolve.
+ * status word beside every dot.
  */
 export function rosterStatusColor(arm: string): Color {
   return lookup(ROSTER_STATUS, arm, "render-colors.json#roster_status");
@@ -115,9 +114,9 @@ const COMPOSER_OPEN_SUBSTATUSES: Readonly<Record<string, readonly string[]>> =
  * MalformedView, exactly as it is for the color itself.
  *
  * The one way a closing color leaves the composer open is a substatus
- * DECLARED in `render-colors.json#composer_open_substatuses` (owner ruling,
- * 2026-10-01: `blocked · api_retrying`, whose prompt interrupts the vendor's
- * retry). SUBSTATUS is the substatus arm the footer drew, in the generated
+ * DECLARED in `render-colors.json#composer_open_substatuses`; none is today
+ * (the one there was, `blocked · api_retrying`, became the turquoise
+ * `vendor_fault · api_retrying`, open by its color). SUBSTATUS is the substatus arm the footer drew, in the generated
  * spelling, or undefined for an arm with none.
  */
 export function composerClosedFor(arm: string, substatus?: string): boolean {

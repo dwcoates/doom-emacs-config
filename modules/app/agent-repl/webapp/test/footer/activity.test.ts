@@ -477,7 +477,7 @@ describe("the salient kinds", () => {
       { text: "compacting · 412 of 900" },
       "compacting · 412 of 900",
     ],
-    ["blocked", "authenticating", { line: "open the login" }, "open the login"],
+    ["vendorFault", "authenticating", { line: "open the login" }, "open the login"],
     // A dead query is a FAILED TURN (owner ruling, 2026-09-28): its line
     // stands in the idle cell the turn_failed arm shares.
     [
@@ -493,16 +493,22 @@ describe("the salient kinds", () => {
       "a turn is in flight",
     ],
     [
-      "disconnected",
+      "agentReplFault",
       "fault",
       { kind: "resume_failed", detail: "the shim refused" },
       "resume failed · the shim refused",
     ],
     [
-      "blocked",
+      "agentReplFault",
       "fault",
       { kind: "prompts_dir_missing", detail: "no prompts" },
       "prompts dir missing · no prompts",
+    ],
+    [
+      "networkFault",
+      "offline",
+      { text: "cannot reach api.anthropic.com: no route to host" },
+      "cannot reach api.anthropic.com: no route to host",
     ],
     [
       "idle",
@@ -526,7 +532,7 @@ describe("the salient kinds", () => {
     const cell = salientCell(
       "startFailed",
       { detail: "exit 1: no module" },
-      "disconnected",
+      "agentReplFault",
     );
     expect(
       cell.querySelector(".footer-activity-start-failed")?.textContent,
@@ -538,7 +544,7 @@ describe("the salient kinds", () => {
     "Claude SDK refused to start: auth rejected · restart: SPC o C-c",
     "Claude SDK failed to start · restart: SPC o C-c",
   ])("draws the daemon's vendor-start line verbatim: %s", (text) => {
-    const cell = salientCell("vendorStart", { text }, "disconnected");
+    const cell = salientCell("vendorStart", { text }, "vendorFault");
     expect(
       cell.querySelector(".footer-activity-vendor-start")?.textContent,
     ).toBe(text);
@@ -760,7 +766,7 @@ describe("the fault line", () => {
     const cell = salientCell(
       "fault",
       { kind: "watch_open_refused", detail: "handle 7" },
-      "disconnected",
+      "agentReplFault",
     );
     expect(cell.textContent).not.toContain("_");
   });
@@ -769,7 +775,7 @@ describe("the fault line", () => {
     const cell = salientCell(
       "fault",
       { kind: "session_absent", detail: "" },
-      "disconnected",
+      "agentReplFault",
     );
     expect(cell.querySelector(".footer-activity-fault")?.textContent).toBe(
       "session absent",

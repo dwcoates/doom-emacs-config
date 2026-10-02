@@ -43,9 +43,10 @@ import type {
   FooterLiveWorkChips,
   FooterStatus,
   FooterStatusBackground,
-  FooterStatusBlocked,
+  FooterStatusVendorFault,
+  FooterStatusNetworkFault,
   FooterStatusClosing,
-  FooterStatusDisconnected,
+  FooterStatusAgentReplFault,
   FooterStatusIdle,
   FooterStatusInterrupted,
   FooterStatusLoading,
@@ -157,9 +158,12 @@ export function drawClientDisconnectedStrip(
   row.className = "pfooter-cells footer-strip";
 
   const word = document.createElement("div");
-  word.className = `pfooter-cell pfooter-phase footer-status arm-disconnected ${statusArmClass("disconnected")}`;
+  // THE CLIENT'S OWN VERDICT KEEPS ITS OWN WORD, and paints as the daemon's
+  // agent_repl_fault arm: an unreachable daemon is agent-repl's own service
+  // not serving (render-colors.json, blue).
+  word.className = `pfooter-cell pfooter-phase footer-status arm-disconnected ${statusArmClass("agentReplFault")}`;
   word.setAttribute("data-arm", "disconnected");
-  word.textContent = statusWords("disconnected");
+  word.textContent = "disconnected";
   row.appendChild(word);
 
   const step = document.createElement("div");
@@ -198,8 +202,9 @@ type SubStatusOneof =
   | FooterStatusWaiting["substatus"]
   | FooterStatusInterrupted["substatus"]
   | FooterStatusMerging["substatus"]
-  | FooterStatusBlocked["substatus"]
-  | FooterStatusDisconnected["substatus"]
+  | FooterStatusVendorFault["substatus"]
+  | FooterStatusAgentReplFault["substatus"]
+  | FooterStatusNetworkFault["substatus"]
   | FooterStatusClosing["substatus"]
   | FooterStatusLoading["substatus"]
   | FooterStatusMergeFailed["substatus"]
@@ -296,7 +301,7 @@ export function drawFooterStatus(u: FooterStatus, deps: StripDeps): HTMLElement[
  * split letters. Every keyframe stop is opaque and the rest stop is the arm tone,
  * so a stopped letter is always legible and never transparent.
  *
- * A NON-PROGRESS STATUS IS PLAIN TEXT. Waiting, blocked, disconnected, idle,
+ * A NON-PROGRESS STATUS IS PLAIN TEXT. Waiting, the three faults, idle,
  * interrupted and background stand still, and they carry no spans at all rather
  * than spans with a stopped animation: nothing should have to look at a class to
  * know whether the word is moving.
@@ -342,8 +347,9 @@ function statusParts(
     case "working":
     case "interrupted":
     case "merging":
-    case "blocked":
-    case "disconnected":
+    case "vendorFault":
+    case "agentReplFault":
+    case "networkFault":
     case "closing":
     case "degraded":
     case "waiting":

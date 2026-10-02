@@ -22,14 +22,15 @@ describe("FOOTER_STATUS_CASES: the arm set is the schema's", () => {
     expect([...FOOTER_STATUS_CASES].sort()).toEqual([...SCHEMA_ARMS].sort());
   });
 
-  it("names the fourteen arms the contract carries", () => {
+  it("names the fifteen arms the contract carries", () => {
     expect([...FOOTER_STATUS_CASES].sort()).toEqual(
       [
+        "agentReplFault",
         "background",
-        "blocked",
         "closing",
         "degraded",
-        "disconnected",
+        "networkFault",
+        "vendorFault",
         "idle",
         "interrupted",
         "loading",
@@ -85,8 +86,9 @@ describe("statusArmClass", () => {
     // proceed until something outside it changes, which renders the agent
     // unusable — the same claim, and the same color, as the roster's
     // vendor_blocked.
-    ["blocked", "tone-blue"],
-    ["disconnected", "tone-blue"],
+    ["vendorFault", "tone-turquoise"],
+    ["agentReplFault", "tone-blue"],
+    ["networkFault", "tone-blue"],
     ["closing", "tone-blue"],
     ["loading", "tone-red"],
   ])("gives %s the class %s", (arm, expected) => {
