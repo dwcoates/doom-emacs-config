@@ -174,6 +174,8 @@ type storeProcess struct {
 
 	cmd  *exec.Cmd
 	done chan struct{}
+	// startedAt is when cmd started, for the readiness report.
+	startedAt time.Time
 
 	mu      sync.Mutex
 	exitErr error
@@ -251,6 +253,7 @@ func (s *storeProcess) launch() {
 	}
 
 	s.cmd = cmd
+	s.startedAt = time.Now()
 	s.done = make(chan struct{})
 	s.mu.Lock()
 	s.exitErr = nil
@@ -336,9 +339,13 @@ func (s *storeProcess) awaitReady() {
 	ticker := time.NewTicker(2 * time.Millisecond)
 	defer ticker.Stop()
 
+	firstAccept := time.Duration(-1)
 	for {
 		conn, err := net.Dial("unix", s.socket)
 		if err == nil {
+			if firstAccept < 0 {
+				firstAccept = time.Since(s.startedAt)
+			}
 			if err := conn.Close(); err != nil {
 				s.t.Fatalf("closing the readiness probe: %v", err)
 			}
@@ -355,7 +362,11 @@ func (s *storeProcess) awaitReady() {
 		case <-s.done:
 			s.t.Fatalf("the store exited before it was ready: %v\nstderr:\n%s", s.exit(), s.stderrText())
 		case <-ctx.Done():
-			s.t.Fatalf("the store did not accept on %q within %s\nstderr:\n%s", s.socket, readyTimeout, s.stderrText())
+			// WHERE THE TIME WENT is the whole diagnosis of a missed boot: an
+			// exec that never ran, a database open that stalled, or a serve
+			// record that never landed are different faults.
+			s.t.Fatalf("the store did not accept on %q within %s\n%s\nstderr:\n%s",
+				s.socket, readyTimeout, describeStartup(s.startedAt, firstAccept, s.cmd.Process.Pid, s.logRecords()), s.stderrText())
 		case <-ticker.C:
 		}
 	}
@@ -372,6 +383,35 @@ func (s *storeProcess) loggedServe() bool {
 		}
 	}
 	return false
+}
+
+// describeStartup says how far one store process got: when its socket first
+// accepted (a negative firstAccept is never) and each record it logged,
+// timed from its start.
+func describeStartup(startedAt time.Time, firstAccept time.Duration, pid int, records []logRecord) string {
+	var b strings.Builder
+	if firstAccept < 0 {
+		b.WriteString("startup: the socket never accepted")
+	} else {
+		fmt.Fprintf(&b, "startup: the socket first accepted %s after the process started", firstAccept.Round(time.Millisecond))
+	}
+	logged := 0
+	for _, rec := range records {
+		if rec.PID != pid {
+			continue
+		}
+		logged++
+		at, err := time.Parse(time.RFC3339Nano, rec.Timestamp)
+		if err != nil {
+			fmt.Fprintf(&b, "\n  %s at an unreadable timestamp %q", rec.Operation, rec.Timestamp)
+			continue
+		}
+		fmt.Fprintf(&b, "\n  %s at +%s", rec.Operation, at.Sub(startedAt).Round(time.Millisecond))
+	}
+	if logged == 0 {
+		fmt.Fprintf(&b, "\n  pid %d logged nothing", pid)
+	}
+	return b.String()
 }
 
 // signal delivers one signal to the running store.
@@ -2252,4 +2292,48 @@ func assertWatchExhausted(t *testing.T, err error) {
 // connectGetWorkflow builds the GetWorkflow request for one announced handle.
 func connectGetWorkflow(workID string) *connect.Request[storev1.GetWorkflowRequest] {
 	return connect.NewRequest(&storev1.GetWorkflowRequest{Work: detachedWorkID(workID)})
+}
+
+func TestDescribeStartup(t *testing.T) {
+	start := time.Date(2026, 10, 2, 9, 0, 0, 0, time.FixedZone("x", -4*3600))
+	at := func(d time.Duration) string { return start.Add(d).Format("2006-01-02T15:04:05.000000-07:00") }
+	tests := []struct {
+		name        string
+		firstAccept time.Duration
+		records     []logRecord
+		want        string
+	}{
+		{
+			name:        "a process that never accepted nor logged",
+			firstAccept: -1,
+			want:        "startup: the socket never accepted\n  pid 7 logged nothing",
+		},
+		{
+			name:        "a process that accepted, with its own records timed and another's ignored",
+			firstAccept: 1500 * time.Millisecond,
+			records: []logRecord{
+				{PID: 7, Operation: "store.db.open", Timestamp: at(40 * time.Millisecond)},
+				{PID: 8, Operation: "store.serve", Timestamp: at(time.Second)},
+				{PID: 7, Operation: "store.server.new", Timestamp: at(1490 * time.Millisecond)},
+			},
+			want: "startup: the socket first accepted 1.5s after the process started\n  store.db.open at +40ms\n  store.server.new at +1.49s",
+		},
+		{
+			name:        "an unreadable timestamp is named, not dropped",
+			firstAccept: -1,
+			records:     []logRecord{{PID: 7, Operation: "store.serve", Timestamp: "soon"}},
+			want:        "startup: the socket never accepted\n  store.serve at an unreadable timestamp \"soon\"",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := describeStartup(start, tt.firstAccept, 7, tt.records)
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("describeStartup =\n%s\nwant\n%s", got, tt.want)
+			}
+		})
+	}
 }
