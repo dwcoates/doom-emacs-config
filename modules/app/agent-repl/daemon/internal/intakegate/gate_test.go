@@ -71,3 +71,30 @@ func TestAdmitsRecordsTheFirstAnswerAndEveryChangeOnce(t *testing.T) {
 		})
 	}
 }
+
+func TestNewForNamesItsDutyInTheRecords(t *testing.T) {
+	tests := []struct {
+		name   string
+		serves bool
+		want   string
+	}{
+		{name: "serving", serves: true, want: "this daemon serves, so it takes the digest"},
+		{name: "not serving", serves: false, want: "this daemon does not serve (a successor still joining, or a handover in flight), so it leaves the digest for the daemon that does"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			log := dlog.NewTestLogger()
+			g := NewFor(func() bool { return tc.serves }, log, "daemon.test.gate", "the digest")
+
+			// Act
+			g.Admits()
+
+			// Assert
+			records := log.Records()
+			if len(records) != 1 || records[0].Message != tc.want {
+				t.Fatalf("records = %+v, want one saying %q", records, tc.want)
+			}
+		})
+	}
+}

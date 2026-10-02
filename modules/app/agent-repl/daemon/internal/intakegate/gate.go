@@ -35,6 +35,8 @@ type Gate struct {
 	serves func() bool
 	log    dlog.Logger
 	op     string
+	// duty names what the serving daemon takes, in its records.
+	duty string
 
 	mu sync.Mutex
 	// open is the last answer; known is whether there has been one.
@@ -43,7 +45,14 @@ type Gate struct {
 
 // New builds a gate over serves, recording under op on log.
 func New(serves func() bool, log dlog.Logger, op string) *Gate {
-	return &Gate{serves: serves, log: log, op: op}
+	return NewFor(serves, log, op, "the intake")
+}
+
+// NewFor is New for a duty other than the on-disk intakes that only the
+// serving daemon takes (the news digest's scheduled runs): duty names it in
+// the records ("the intake").
+func NewFor(serves func() bool, log dlog.Logger, op, duty string) *Gate {
+	return &Gate{serves: serves, log: log, op: op, duty: duty}
 }
 
 // Admits reports whether this daemon takes intake now. The first answer and
@@ -58,9 +67,9 @@ func (g *Gate) Admits() bool {
 	g.mu.Unlock()
 	if changed {
 		if open {
-			g.log.Info(g.op, "this daemon serves, so it takes the intake", nil)
+			g.log.Info(g.op, "this daemon serves, so it takes "+g.duty, nil)
 		} else {
-			g.log.Info(g.op, "this daemon does not serve (a successor still joining, or a handover in flight), so it leaves the intake for the daemon that does", nil)
+			g.log.Info(g.op, "this daemon does not serve (a successor still joining, or a handover in flight), so it leaves "+g.duty+" for the daemon that does", nil)
 		}
 	}
 	return open
