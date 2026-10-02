@@ -2,7 +2,9 @@ package cli
 
 import (
 	"errors"
+	"flag"
 	"fmt"
+	"io"
 	"slices"
 	"strings"
 
@@ -85,4 +87,34 @@ func parseSuites(spec string) ([]string, error) {
 // Selects reports whether a suite is part of the run.
 func (a Args) Selects(name string) bool {
 	return len(a.Selected) == 0 || slices.Contains(a.Selected, name)
+}
+
+// CoverArgs is a parsed `testrun cover-report` command line.
+type CoverArgs struct {
+	// Name is the Go module's suite name.
+	Name string
+	// Module is the Go module directory.
+	Module string
+	// CovDirs holds one coverage directory per package unit.
+	CovDirs string
+}
+
+// ParseCoverArgs reads `-name N -module DIR -covdirs ROOT`, every one required.
+func ParseCoverArgs(argv []string) (CoverArgs, error) {
+	fs := flag.NewFlagSet("cover-report", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	var a CoverArgs
+	fs.StringVar(&a.Name, "name", "", "the module's suite name")
+	fs.StringVar(&a.Module, "module", "", "the Go module directory")
+	fs.StringVar(&a.CovDirs, "covdirs", "", "the directory holding one coverage directory per package unit")
+	if err := fs.Parse(argv); err != nil {
+		return CoverArgs{}, fmt.Errorf("cover-report: %w", err)
+	}
+	if fs.NArg() > 0 {
+		return CoverArgs{}, fmt.Errorf("cover-report: unexpected arguments %v", fs.Args())
+	}
+	if a.Name == "" || a.Module == "" || a.CovDirs == "" {
+		return CoverArgs{}, errors.New("cover-report needs -name, -module and -covdirs")
+	}
+	return a, nil
 }
