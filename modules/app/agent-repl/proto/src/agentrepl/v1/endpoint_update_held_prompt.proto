@@ -71,6 +71,11 @@ message UpdateHeldPromptError {
     // a prompt that is being edited or queued after one that is
     // (EditHeldPrompt): an edit keeps it and everything after it held.
     UpdateHeldPromptReleaseRefused release_refused = 8;
+    // BEING DELIVERED: the prompt's delivery call to the agent is in flight
+    // right now, so it is neither held nor delivered yet. Refused rather than
+    // raced. Once the call settles the prompt is either delivered, or (if the
+    // call failed) back in the tray and open to this request again.
+    UpdateHeldPromptBeingDelivered being_delivered = 9;
   }
 }
 message UpdateHeldPromptUnknownWorkspace {}
@@ -87,3 +92,6 @@ message UpdateHeldPromptNoSuchHold {}
 message UpdateHeldPromptAlreadyDelivered {}
 message UpdateHeldPromptAcceptNotApplicable {}
 message UpdateHeldPromptReleaseRefused {}
+
+// The prompt's delivery call is in flight. See the `being_delivered` arm.
+message UpdateHeldPromptBeingDelivered {}

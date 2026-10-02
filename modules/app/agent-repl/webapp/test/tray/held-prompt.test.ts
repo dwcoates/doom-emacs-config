@@ -41,6 +41,7 @@ import type { Ticker } from "../../src/clock.js";
 import type { FailureSink } from "../../src/failure/sink.js";
 import {
   DROPPED_EVENT,
+  BEING_DELIVERED,
   EDIT_REQUEST,
   FOLD_ABOVE_LABEL,
   NO_RELEASE_TITLES,
@@ -87,7 +88,10 @@ const WORKSPACE = create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" });
 const NOW = 1_700_000_000_000;
 
 /** A ticker whose subscribers this test drives by hand. */
-function fakeTicker(): Ticker & { tick(nowMs: number): void; subscribers(): number } {
+function fakeTicker(): Ticker & {
+  tick(nowMs: number): void;
+  subscribers(): number;
+} {
   const listeners = new Set<(nowMs: number) => void>();
   return {
     now: () => NOW,
@@ -129,7 +133,9 @@ function trayContext(
 }
 
 const successResponse = () =>
-  create(UpdateHeldPromptResponseSchema, { result: { case: "success", value: {} } });
+  create(UpdateHeldPromptResponseSchema, {
+    result: { case: "success", value: {} },
+  });
 /** What each fact-carrying arm must carry for its sentence to be complete. */
 const CAUSE_FILL: Readonly<Record<string, Record<string, unknown>>> = {
   workspaceRefMismatch: { registryDir: "/w/registry" },
@@ -139,21 +145,32 @@ const CAUSE_FILL: Readonly<Record<string, Record<string, unknown>>> = {
 /** A refusal carrying ARM, with the payload that arm's sentence needs. */
 const refusalResponse = (arm: string) => () =>
   create(UpdateHeldPromptResponseSchema, {
-    result: { case: "error", value: { cause: { case: arm, value: CAUSE_FILL[arm] ?? {} } } },
+    result: {
+      case: "error",
+      value: { cause: { case: arm, value: CAUSE_FILL[arm] ?? {} } },
+    },
   } as never);
 const errorResponse = refusalResponse("noSuchHold");
 
 /** A held prompt with every required field, overridden by OVERRIDES. */
-type HeldPromptInit = Exclude<MessageInitShape<typeof HeldPromptSchema>, HeldPrompt>;
+type HeldPromptInit = Exclude<
+  MessageInitShape<typeof HeldPromptSchema>,
+  HeldPrompt
+>;
 
 function heldPrompt(overrides: Partial<HeldPromptInit> = {}): HeldPrompt {
   const prompt = create(HeldPromptSchema, {
     turn: { value: "turn-1" },
     queuedAt: { atMs: BigInt(NOW - 12_000) },
     said: overrides.said ?? {
-      content: { blocks: [{ block: { case: "text", value: { text: "fix the test" } } }] },
+      content: {
+        blocks: [{ block: { case: "text", value: { text: "fix the test" } } }],
+      },
     },
-    classification: overrides.classification ?? { case: "classifying", value: {} },
+    classification: overrides.classification ?? {
+      case: "classifying",
+      value: {},
+    },
     ...(overrides.hold !== undefined ? { hold: overrides.hold } : {}),
     ...(overrides.badges !== undefined ? { badges: overrides.badges } : {}),
   });
@@ -162,7 +179,10 @@ function heldPrompt(overrides: Partial<HeldPromptInit> = {}): HeldPrompt {
   // assertion on them proves the card drew the wire verbatim.
   if (overrides.badges === undefined) {
     prompt.badges = standingStatuses(prompt).map((status) =>
-      create(HeldPromptBadgeSchema, { label: wireLabel(status), detail: wireDetail(status) }),
+      create(HeldPromptBadgeSchema, {
+        label: wireLabel(status),
+        detail: wireDetail(status),
+      }),
     );
   }
   return prompt;
@@ -172,7 +192,10 @@ function heldPrompt(overrides: Partial<HeldPromptInit> = {}): HeldPrompt {
 function markEditing(u: HeldPrompt): void {
   u.editing = create(HeldPromptEditingSchema, {});
   u.badges = standingStatuses(u).map((status) =>
-    create(HeldPromptBadgeSchema, { label: wireLabel(status), detail: wireDetail(status) }),
+    create(HeldPromptBadgeSchema, {
+      label: wireLabel(status),
+      detail: wireDetail(status),
+    }),
   );
 }
 
@@ -180,14 +203,18 @@ function markEditing(u: HeldPrompt): void {
 function markCoalesced(u: HeldPrompt): void {
   u.coalesced = create(HeldPromptCoalescedSchema, {});
   u.badges = standingStatuses(u).map((status) =>
-    create(HeldPromptBadgeSchema, { label: wireLabel(status), detail: wireDetail(status) }),
+    create(HeldPromptBadgeSchema, {
+      label: wireLabel(status),
+      detail: wireDetail(status),
+    }),
   );
 }
 
 /** The label the test daemon sends for STATUS. */
 const wireLabel = (status: HeldStatus): string => `wire ${status}`;
 /** The detail the test daemon sends for STATUS. */
-const wireDetail = (status: HeldStatus): string => `the daemon's whole sentence for ${status}`;
+const wireDetail = (status: HeldStatus): string =>
+  `the daemon's whole sentence for ${status}`;
 
 /** The facts a prompt's badges stand for, in daemon_hold.proto's order. */
 function standingStatuses(prompt: HeldPrompt): HeldStatus[] {
@@ -195,10 +222,14 @@ function standingStatuses(prompt: HeldPrompt): HeldStatus[] {
   const classification = prompt.classification;
   if (classification.case !== undefined) {
     // daemon_held draws no badge of its own: the hold arm's is the one.
-    if (classification.case !== "daemonHeld") statuses.push(classification.case);
+    if (classification.case !== "daemonHeld")
+      statuses.push(classification.case);
     if (prompt.editing !== undefined) statuses.push("editing");
     if (prompt.coalesced !== undefined) statuses.push("coalesced");
-    if (classification.case === "holdForTurnEnd" && classification.value.accepted?.accepted === true) {
+    if (
+      classification.case === "holdForTurnEnd" &&
+      classification.value.accepted?.accepted === true
+    ) {
       statuses.push("accepted");
     }
   }
@@ -207,7 +238,8 @@ function standingStatuses(prompt: HeldPrompt): HeldStatus[] {
 }
 
 /** Let the click's promise chain settle. */
-const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+const settle = (): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, 0));
 
 describe("drawHeldPrompt identity", () => {
   it("carries the echoed TurnId on the card", () => {
@@ -236,7 +268,9 @@ describe("drawHeldPrompt identity", () => {
     const { tc } = trayContext();
     // Act
     const card = drawHeldPrompt(
-      heldPrompt({ hold: { case: "shutdown", value: { scheduleId: "sched-9" } } }),
+      heldPrompt({
+        hold: { case: "shutdown", value: { scheduleId: "sched-9" } },
+      }),
       tc,
     );
     // Assert
@@ -246,22 +280,34 @@ describe("drawHeldPrompt identity", () => {
   it("draws the words the user typed", () => {
     const { tc } = trayContext();
     const card = drawHeldPrompt(heldPrompt(), tc);
-    expect(card.querySelector(".queued-text")?.textContent).toContain("fix the test");
+    expect(card.querySelector(".queued-text")?.textContent).toContain(
+      "fix the test",
+    );
   });
 });
 
 describe("drawHeldPrompt classification arms", () => {
-  const cases: Array<{ name: string; prompt: HeldPrompt; arm: string; badge: string }> = [
+  const cases: Array<{
+    name: string;
+    prompt: HeldPrompt;
+    arm: string;
+    badge: string;
+  }> = [
     {
       name: "classifying",
-      prompt: heldPrompt({ classification: { case: "classifying", value: {} } }),
+      prompt: heldPrompt({
+        classification: { case: "classifying", value: {} },
+      }),
       arm: "classifying",
       badge: "wire classifying",
     },
     {
       name: "interject",
       prompt: heldPrompt({
-        classification: { case: "interject", value: { rationale: "it stops the wrong work" } },
+        classification: {
+          case: "interject",
+          value: { rationale: "it stops the wrong work" },
+        },
       }),
       arm: "interject",
       badge: "wire interject",
@@ -269,7 +315,10 @@ describe("drawHeldPrompt classification arms", () => {
     {
       name: "after_tool_call",
       prompt: heldPrompt({
-        classification: { case: "afterToolCall", value: { rationale: "it adds to the running work" } },
+        classification: {
+          case: "afterToolCall",
+          value: { rationale: "it adds to the running work" },
+        },
       }),
       arm: "afterToolCall",
       badge: "wire afterToolCall",
@@ -277,7 +326,10 @@ describe("drawHeldPrompt classification arms", () => {
     {
       name: "hold_for_turn_end",
       prompt: heldPrompt({
-        classification: { case: "holdForTurnEnd", value: { rationale: "it can wait" } },
+        classification: {
+          case: "holdForTurnEnd",
+          value: { rationale: "it can wait" },
+        },
       }),
       arm: "holdForTurnEnd",
       badge: "wire holdForTurnEnd",
@@ -296,7 +348,10 @@ describe("drawHeldPrompt classification arms", () => {
     {
       name: "classification_error",
       prompt: heldPrompt({
-        classification: { case: "classificationError", value: { detail: "answered neither" } },
+        classification: {
+          case: "classificationError",
+          value: { detail: "answered neither" },
+        },
       }),
       arm: "classificationError",
       badge: "wire classificationError",
@@ -313,14 +368,18 @@ describe("drawHeldPrompt classification arms", () => {
     it(`badges the ${testCase.name} arm distinctly`, () => {
       const { tc } = trayContext();
       const card = drawHeldPrompt(testCase.prompt, tc);
-      expect(card.querySelector(".queued-head > .held-badge")?.textContent).toBe(testCase.badge);
+      expect(
+        card.querySelector(".queued-head > .held-badge")?.textContent,
+      ).toBe(testCase.badge);
     });
   }
 
   it("draws the classifier's rationale on an interjection", () => {
     const { tc } = trayContext();
     const card = drawHeldPrompt(
-      heldPrompt({ classification: { case: "interject", value: { rationale: "urgent" } } }),
+      heldPrompt({
+        classification: { case: "interject", value: { rationale: "urgent" } },
+      }),
       tc,
     );
     expect(card.querySelector(".queued-reason")?.textContent).toBe("urgent");
@@ -329,16 +388,25 @@ describe("drawHeldPrompt classification arms", () => {
   it("draws the classifier's rationale on a prompt joining the running turn", () => {
     const { tc } = trayContext();
     const card = drawHeldPrompt(
-      heldPrompt({ classification: { case: "afterToolCall", value: { rationale: "it adds to it" } } }),
+      heldPrompt({
+        classification: {
+          case: "afterToolCall",
+          value: { rationale: "it adds to it" },
+        },
+      }),
       tc,
     );
-    expect(card.querySelector(".queued-reason")?.textContent).toBe("it adds to it");
+    expect(card.querySelector(".queued-reason")?.textContent).toBe(
+      "it adds to it",
+    );
   });
 
   it("offers no accept on a prompt joining the running turn", () => {
     const { tc } = trayContext();
     const card = drawHeldPrompt(
-      heldPrompt({ classification: { case: "afterToolCall", value: { rationale: "" } } }),
+      heldPrompt({
+        classification: { case: "afterToolCall", value: { rationale: "" } },
+      }),
       tc,
     );
     expect(card.querySelector("[data-held-action='accept']")).toBeNull();
@@ -347,7 +415,9 @@ describe("drawHeldPrompt classification arms", () => {
   it("draws no rationale element when the classifier gave none", () => {
     const { tc } = trayContext();
     const card = drawHeldPrompt(
-      heldPrompt({ classification: { case: "interject", value: { rationale: "" } } }),
+      heldPrompt({
+        classification: { case: "interject", value: { rationale: "" } },
+      }),
       tc,
     );
     expect(card.querySelector(".queued-reason")).toBeNull();
@@ -357,11 +427,16 @@ describe("drawHeldPrompt classification arms", () => {
     const { tc } = trayContext();
     const card = drawHeldPrompt(
       heldPrompt({
-        classification: { case: "classificationError", value: { detail: "both tokens" } },
+        classification: {
+          case: "classificationError",
+          value: { detail: "both tokens" },
+        },
       }),
       tc,
     );
-    expect(card.querySelector(".queued-unclassified")?.textContent).toBe("both tokens");
+    expect(card.querySelector(".queued-unclassified")?.textContent).toBe(
+      "both tokens",
+    );
   });
 
   it("refuses an entry whose classification oneof is unset", () => {
@@ -379,7 +454,12 @@ describe("drawHeldPrompt accept", () => {
   it("offers accept on hold_for_turn_end", () => {
     const { tc } = trayContext();
     const card = drawHeldPrompt(
-      heldPrompt({ classification: { case: "holdForTurnEnd", value: { rationale: "later" } } }),
+      heldPrompt({
+        classification: {
+          case: "holdForTurnEnd",
+          value: { rationale: "later" },
+        },
+      }),
       tc,
     );
     expect(card.querySelector('[data-held-action="accept"]')).not.toBeNull();
@@ -388,7 +468,9 @@ describe("drawHeldPrompt accept", () => {
   it("offers accept on no other classification arm", () => {
     const { tc } = trayContext();
     const card = drawHeldPrompt(
-      heldPrompt({ classification: { case: "interject", value: { rationale: "now" } } }),
+      heldPrompt({
+        classification: { case: "interject", value: { rationale: "now" } },
+      }),
       tc,
     );
     expect(card.querySelector('[data-held-action="accept"]')).toBeNull();
@@ -406,14 +488,21 @@ describe("drawHeldPrompt accept", () => {
       tc,
     );
     expect(card.querySelector('[data-held-action="accept"]')).toBeNull();
-    expect(card.querySelector("[data-accepted]")?.textContent).toBe("wire accepted");
+    expect(card.querySelector("[data-accepted]")?.textContent).toBe(
+      "wire accepted",
+    );
   });
 
   it("echoes the TurnId on the accept request", async () => {
     const seen: UpdateHeldPromptRequest[] = [];
     const { tc } = trayContext(successResponse, seen);
     const card = drawHeldPrompt(
-      heldPrompt({ classification: { case: "holdForTurnEnd", value: { rationale: "later" } } }),
+      heldPrompt({
+        classification: {
+          case: "holdForTurnEnd",
+          value: { rationale: "later" },
+        },
+      }),
       tc,
     );
     card.querySelector<Control>('[data-held-action="accept"]')?.click();
@@ -424,10 +513,17 @@ describe("drawHeldPrompt accept", () => {
 });
 
 describe("drawHeldPrompt hold arms", () => {
-  const holds: Array<{ name: string; prompt: HeldPrompt; arm: string; line: string }> = [
+  const holds: Array<{
+    name: string;
+    prompt: HeldPrompt;
+    arm: string;
+    line: string;
+  }> = [
     {
       name: "shutdown",
-      prompt: heldPrompt({ hold: { case: "shutdown", value: { scheduleId: "sched-9" } } }),
+      prompt: heldPrompt({
+        hold: { case: "shutdown", value: { scheduleId: "sched-9" } },
+      }),
       arm: "shutdown",
       line: "wire shutdown",
     },
@@ -445,7 +541,10 @@ describe("drawHeldPrompt hold arms", () => {
     },
     {
       name: "merge",
-      prompt: heldPrompt({ classification: { case: "daemonHeld", value: {} }, hold: { case: "merge", value: {} } }),
+      prompt: heldPrompt({
+        classification: { case: "daemonHeld", value: {} },
+        hold: { case: "merge", value: {} },
+      }),
       arm: "merge",
       line: "wire merge",
     },
@@ -461,7 +560,10 @@ describe("drawHeldPrompt hold arms", () => {
     it(`badges the ${hold.name} hold in the daemon's words`, () => {
       const { tc } = trayContext();
       const card = drawHeldPrompt(hold.prompt, tc);
-      expect(card.querySelector(`.queued-head > [data-held-status="${hold.arm}"]`)?.textContent).toBe(hold.line);
+      expect(
+        card.querySelector(`.queued-head > [data-held-status="${hold.arm}"]`)
+          ?.textContent,
+      ).toBe(hold.line);
     });
   }
 
@@ -470,13 +572,18 @@ describe("drawHeldPrompt hold arms", () => {
     const { tc } = trayContext();
     // Act
     const card = drawHeldPrompt(
-      heldPrompt({ classification: { case: "daemonHeld", value: {} }, hold: { case: "merge", value: {} } }),
+      heldPrompt({
+        classification: { case: "daemonHeld", value: {} },
+        hold: { case: "merge", value: {} },
+      }),
       tc,
     );
     // Assert
-    expect([...card.querySelectorAll(".queued-head > [data-held-status]")].map((b) => b.getAttribute("data-held-status"))).toEqual([
-      "merge",
-    ]);
+    expect(
+      [...card.querySelectorAll(".queued-head > [data-held-status]")].map((b) =>
+        b.getAttribute("data-held-status"),
+      ),
+    ).toEqual(["merge"]);
   });
 
   it("marks a daemon-held entry's arm on the card", () => {
@@ -484,7 +591,10 @@ describe("drawHeldPrompt hold arms", () => {
     const { tc } = trayContext();
     // Act
     const card = drawHeldPrompt(
-      heldPrompt({ classification: { case: "daemonHeld", value: {} }, hold: { case: "merge", value: {} } }),
+      heldPrompt({
+        classification: { case: "daemonHeld", value: {} },
+        hold: { case: "merge", value: {} },
+      }),
       tc,
     );
     // Assert
@@ -494,7 +604,10 @@ describe("drawHeldPrompt hold arms", () => {
   it("refuses daemon_held with no hold arm as a malformed view", () => {
     // Arrange
     const { tc } = trayContext();
-    const prompt = heldPrompt({ classification: { case: "daemonHeld", value: {} }, badges: [] });
+    const prompt = heldPrompt({
+      classification: { case: "daemonHeld", value: {} },
+      badges: [],
+    });
     // Act / Assert
     expect(() => drawHeldPrompt(prompt, tc)).toThrow(MalformedView);
   });
@@ -502,12 +615,17 @@ describe("drawHeldPrompt hold arms", () => {
   it("names the schedule holding a shutdown-held entry", () => {
     const { tc } = trayContext();
     const card = drawHeldPrompt(
-      heldPrompt({ hold: { case: "shutdown", value: { scheduleId: "sched-9" } } }),
+      heldPrompt({
+        hold: { case: "shutdown", value: { scheduleId: "sched-9" } },
+      }),
       tc,
     );
-    expect(card.querySelector('[data-held-status="shutdown"]')?.getAttribute("data-schedule-id")).toBe("sched-9");
+    expect(
+      card
+        .querySelector('[data-held-status="shutdown"]')
+        ?.getAttribute("data-schedule-id"),
+    ).toBe("sched-9");
   });
-
 });
 
 describe("drawHeldPrompt release availability", () => {
@@ -520,14 +638,19 @@ describe("drawHeldPrompt release availability", () => {
   it("labels the release control Send now", () => {
     const { tc } = trayContext();
     const card = drawHeldPrompt(heldPrompt(), tc);
-    expect(card.querySelector('[data-held-action="release"]')?.textContent).toBe("Send now");
+    expect(
+      card.querySelector('[data-held-action="release"]')?.textContent,
+    ).toBe("Send now");
   });
 
   it("gives the release control the accessible name Send now", () => {
     const { tc } = trayContext();
     const card = drawHeldPrompt(heldPrompt(), tc);
     const button = card.querySelector<Control>('[data-held-action="release"]');
-    expect([button?.getAttribute("aria-label"), button?.textContent]).toEqual([null, SEND_NOW_LABEL]);
+    expect([button?.getAttribute("aria-label"), button?.textContent]).toEqual([
+      null,
+      SEND_NOW_LABEL,
+    ]);
   });
 
   for (const [arm, title] of Object.entries(NO_RELEASE_TITLES)) {
@@ -540,7 +663,10 @@ describe("drawHeldPrompt release availability", () => {
     {
       name: "uninterruptible_turn",
       prompt: heldPrompt({
-        classification: { case: "uninterruptibleTurn", value: { command: SessionCommand.CLEAR } },
+        classification: {
+          case: "uninterruptibleTurn",
+          value: { command: SessionCommand.CLEAR },
+        },
       }),
     },
     {
@@ -577,18 +703,24 @@ describe("drawHeldPrompt release availability", () => {
     const { tc } = trayContext();
     // Act
     const card = drawHeldPrompt(
-      heldPrompt({ classification: { case: "daemonHeld", value: {} }, hold: { case: "merge", value: {} } }),
+      heldPrompt({
+        classification: { case: "daemonHeld", value: {} },
+        hold: { case: "merge", value: {} },
+      }),
       tc,
     );
     // Assert
-    expect(card.querySelector<HTMLElement>('[data-held-action="release"]')?.title).toContain(
-      "a merge is driving the session",
-    );
+    expect(
+      card.querySelector<HTMLElement>('[data-held-action="release"]')?.title,
+    ).toContain("a merge is driving the session");
   });
 
   it("still offers release under a build refresh, which forbids nothing", () => {
     const { tc } = trayContext();
-    const card = drawHeldPrompt(heldPrompt({ hold: { case: "buildRefresh", value: {} } }), tc);
+    const card = drawHeldPrompt(
+      heldPrompt({ hold: { case: "buildRefresh", value: {} } }),
+      tc,
+    );
     expect(card.querySelector('[data-held-action="release"]')).not.toBeNull();
   });
 });
@@ -618,7 +750,9 @@ describe("drawHeldPrompt actions", () => {
     const card = drawHeldPrompt(heldPrompt(), tc);
     card.querySelector<Control>('[data-held-action="drop"]')?.click();
     await settle();
-    expect(card.querySelector(".queued-refusal")?.getAttribute("data-arm")).toBe("noSuchHold");
+    expect(
+      card.querySelector(".queued-refusal")?.getAttribute("data-arm"),
+    ).toBe("noSuchHold");
   });
 
   it.each(oneofArms(UpdateHeldPromptErrorSchema, "cause"))(
@@ -629,7 +763,10 @@ describe("drawHeldPrompt actions", () => {
       card.querySelector<Control>('[data-held-action="drop"]')?.click();
       await settle();
       const refusal = card.querySelector(".queued-refusal");
-      expect([refusal?.getAttribute("data-arm"), refusal?.textContent === ""]).toEqual([arm, false]);
+      expect([
+        refusal?.getAttribute("data-arm"),
+        refusal?.textContent === "",
+      ]).toEqual([arm, false]);
     },
   );
 
@@ -638,7 +775,9 @@ describe("drawHeldPrompt actions", () => {
     const card = drawHeldPrompt(heldPrompt(), tc);
     card.querySelector<Control>('[data-held-action="drop"]')?.click();
     await settle();
-    expect(card.querySelector(".queued-refusal")?.textContent).toContain("/w/registry");
+    expect(card.querySelector(".queued-refusal")?.textContent).toContain(
+      "/w/registry",
+    );
   });
 
   it("says an already-delivered prompt has been delivered", async () => {
@@ -646,7 +785,22 @@ describe("drawHeldPrompt actions", () => {
     const card = drawHeldPrompt(heldPrompt(), tc);
     card.querySelector<Control>('[data-held-action="drop"]')?.click();
     await settle();
-    expect(card.querySelector(".queued-refusal")?.textContent).toContain("already been delivered");
+    expect(card.querySelector(".queued-refusal")?.textContent).toContain(
+      "already been delivered",
+    );
+  });
+
+  it("says a prompt mid-delivery is being delivered, and may return to the tray", async () => {
+    // Arrange
+    const { tc } = trayContext(refusalResponse("beingDelivered"));
+    const card = drawHeldPrompt(heldPrompt(), tc);
+    // Act
+    card.querySelector<Control>('[data-held-action="drop"]')?.click();
+    await settle();
+    // Assert
+    expect(card.querySelector(".queued-refusal")?.textContent).toContain(
+      BEING_DELIVERED,
+    );
   });
 
   it("says accept applies only to a turn-end hold", async () => {
@@ -654,7 +808,9 @@ describe("drawHeldPrompt actions", () => {
     const card = drawHeldPrompt(heldPrompt(), tc);
     card.querySelector<Control>('[data-held-action="drop"]')?.click();
     await settle();
-    expect(card.querySelector(".queued-refusal")?.textContent).toContain("the turn's end");
+    expect(card.querySelector(".queued-refusal")?.textContent).toContain(
+      "the turn's end",
+    );
   });
 
   it("re-enables the row after a refusal so it can be retried", async () => {
@@ -703,7 +859,9 @@ describe("the queued-at age", () => {
   it("draws the age from the served instant", () => {
     const { tc } = trayContext();
     const card = drawHeldPrompt(heldPrompt(), tc);
-    expect(card.querySelector("[data-queued]")?.textContent).toBe("queued 12s ago");
+    expect(card.querySelector("[data-queued]")?.textContent).toBe(
+      "queued 12s ago",
+    );
   });
 
   it("re-paints on the shared ticker rather than a timer of its own", () => {
@@ -711,7 +869,9 @@ describe("the queued-at age", () => {
     const { tc } = trayContext(successResponse, [], ticker);
     const card = drawHeldPrompt(heldPrompt(), tc);
     ticker.tick(NOW + 48_000);
-    expect(card.querySelector("[data-queued]")?.textContent).toBe("queued 1m ago");
+    expect(card.querySelector("[data-queued]")?.textContent).toBe(
+      "queued 1m ago",
+    );
   });
 
   it("reads the nearest second when a tick samples just short of one", () => {
@@ -722,7 +882,9 @@ describe("the queued-at age", () => {
     // Act: a repaint 80ms before the fifth second of the wait it draws.
     ticker.tick(NOW - 12_000 + 4920);
     // Assert: five real seconds queued reads 5s, not the lagging 4s.
-    expect(card.querySelector("[data-queued]")?.textContent).toBe("queued 5s ago");
+    expect(card.querySelector("[data-queued]")?.textContent).toBe(
+      "queued 5s ago",
+    );
   });
 
   it("registers its unsubscriber with the tray's teardown", () => {
@@ -739,11 +901,17 @@ describe("the said body", () => {
     const { tc } = trayContext();
     const card = drawHeldPrompt(
       heldPrompt({
-        said: { content: { blocks: [{ block: { case: "text", value: { text: "**bold**" } } }] } },
+        said: {
+          content: {
+            blocks: [{ block: { case: "text", value: { text: "**bold**" } } }],
+          },
+        },
       }),
       tc,
     );
-    expect(card.querySelector(".queued-text")?.innerHTML).toContain("<strong>bold</strong>");
+    expect(card.querySelector(".queued-text")?.innerHTML).toContain(
+      "<strong>bold</strong>",
+    );
   });
 
   it("draws a url image as a picture", () => {
@@ -757,7 +925,10 @@ describe("the said body", () => {
                 block: {
                   case: "image",
                   value: {
-                    location: { case: "url", value: { url: "https://example.test/a.png" } },
+                    location: {
+                      case: "url",
+                      value: { url: "https://example.test/a.png" },
+                    },
                     mediaType: "image/png",
                   },
                 },
@@ -795,7 +966,9 @@ describe("the said body", () => {
       }),
       tc,
     );
-    expect(card.querySelector(".queued-image-path")?.textContent).toBe("/tmp/a.png");
+    expect(card.querySelector(".queued-image-path")?.textContent).toBe(
+      "/tmp/a.png",
+    );
   });
 
   it("draws nothing for an unmodeled block", () => {
@@ -814,7 +987,10 @@ describe("the said body", () => {
                 block: {
                   case: "image",
                   value: {
-                    location: { case: "url", value: { url: "https://example.test/a.png" } },
+                    location: {
+                      case: "url",
+                      value: { url: "https://example.test/a.png" },
+                    },
                     mediaType: "image/png",
                   },
                 },
@@ -859,74 +1035,109 @@ describe("the said body", () => {
 
 /** A held prompt whose words are TEXT. */
 const saying = (text: string): HeldPrompt =>
-  heldPrompt({ said: { content: { blocks: [{ block: { case: "text", value: { text } } }] } } });
+  heldPrompt({
+    said: {
+      content: { blocks: [{ block: { case: "text", value: { text } } }] },
+    },
+  });
 
 describe("the held prompt's spec: a prompt bubble on the held fill", () => {
   it("is a prompt-role bubble", () => {
     const { tc } = trayContext();
-    expect(drawHeldPrompt(heldPrompt(), tc).getAttribute(BUBBLE_ROLE_ATTRIBUTE)).toBe("prompt");
+    expect(
+      drawHeldPrompt(heldPrompt(), tc).getAttribute(BUBBLE_ROLE_ATTRIBUTE),
+    ).toBe("prompt");
   });
 
   it("is the held variant, whose fill is the held grey", () => {
     const { tc } = trayContext();
-    expect(drawHeldPrompt(heldPrompt(), tc).getAttribute(BUBBLE_VARIANT_ATTRIBUTE)).toBe("held");
+    expect(
+      drawHeldPrompt(heldPrompt(), tc).getAttribute(BUBBLE_VARIANT_ATTRIBUTE),
+    ).toBe("held");
   });
 
   it("collapses at one line", () => {
     const { tc } = trayContext();
-    expect(drawHeldPrompt(saying("first line\nsecond line\nthird line"), tc).getAttribute(BUBBLE_CAP_ATTRIBUTE)).toBe(
-      "1",
-    );
+    expect(
+      drawHeldPrompt(
+        saying("first line\nsecond line\nthird line"),
+        tc,
+      ).getAttribute(BUBBLE_CAP_ATTRIBUTE),
+    ).toBe("1");
   });
 
   it("signals more with the ellipsis, never the fade", () => {
     const { tc } = trayContext();
-    expect(drawHeldPrompt(saying("first line\nsecond line"), tc).getAttribute(BUBBLE_MORE_ATTRIBUTE)).toBe(
-      BUBBLE_MORE_ELLIPSIS,
-    );
+    expect(
+      drawHeldPrompt(saying("first line\nsecond line"), tc).getAttribute(
+        BUBBLE_MORE_ATTRIBUTE,
+      ),
+    ).toBe(BUBBLE_MORE_ELLIPSIS);
   });
 
   it("never waves: a held prompt has no turn in flight", () => {
     const { tc } = trayContext();
-    expect(drawHeldPrompt(heldPrompt(), tc).hasAttribute(PROMPT_WAVE_ATTRIBUTE)).toBe(false);
+    expect(
+      drawHeldPrompt(heldPrompt(), tc).hasAttribute(PROMPT_WAVE_ATTRIBUTE),
+    ).toBe(false);
   });
 
   it("puts its badges in the header strip", () => {
     const { tc } = trayContext();
     const head = drawHeldPrompt(heldPrompt(), tc).querySelector(".queued-head");
-    expect([head?.classList.contains(BUBBLE_STRIP_CLASS), head?.querySelector(".held-badge") !== null]).toEqual([
-      true,
-      true,
-    ]);
+    expect([
+      head?.classList.contains(BUBBLE_STRIP_CLASS),
+      head?.querySelector(".held-badge") !== null,
+    ]).toEqual([true, true]);
   });
 
   it("puts the whole prompt in the one scroll box, every line of it", () => {
     const { tc } = trayContext();
     const card = drawHeldPrompt(saying("first line\nsecond line"), tc);
-    expect(card.querySelector(".bubble-scroll .queued-text")?.textContent).toContain("second line");
+    expect(
+      card.querySelector(".bubble-scroll .queued-text")?.textContent,
+    ).toContain("second line");
   });
 
   it("keeps its actions after the scroll box, outside the cap", () => {
     const { tc } = trayContext();
     const card = drawHeldPrompt(heldPrompt(), tc);
-    expect(card.lastElementChild?.querySelector(":scope > .queued-actions")).not.toBeNull();
+    expect(
+      card.lastElementChild?.querySelector(":scope > .queued-actions"),
+    ).not.toBeNull();
   });
 
   it("carries no private fold of its own", () => {
     const { tc } = trayContext();
-    expect(drawHeldPrompt(saying("first line\nsecond line"), tc).querySelector(".held-fold, .held-line")).toBeNull();
+    expect(
+      drawHeldPrompt(saying("first line\nsecond line"), tc).querySelector(
+        ".held-fold, .held-line",
+      ),
+    ).toBeNull();
   });
 
   it.each([
     ["no hold", null, []],
-    ["a lease hold", { case: "shutdown", value: { scheduleId: "s" } }, ["lease-card"]],
+    [
+      "a lease hold",
+      { case: "shutdown", value: { scheduleId: "s" } },
+      ["lease-card"],
+    ],
     ["a merge hold", { case: "merge", value: {} }, ["lease-card"]],
     ["a session-starting hold", { case: "sessionStarting", value: {} }, []],
-  ] as const)("names %s by its hook, which selects no border", (_name, hold, frames) => {
-    const { tc } = trayContext();
-    const card = drawHeldPrompt(heldPrompt(hold === null ? {} : { hold: hold as never }), tc);
-    expect(["lease-card"].filter((frame) => card.classList.contains(frame))).toEqual(frames);
-  });
+  ] as const)(
+    "names %s by its hook, which selects no border",
+    (_name, hold, frames) => {
+      const { tc } = trayContext();
+      const card = drawHeldPrompt(
+        heldPrompt(hold === null ? {} : { hold: hold as never }),
+        tc,
+      );
+      expect(
+        ["lease-card"].filter((frame) => card.classList.contains(frame)),
+      ).toEqual(frames);
+    },
+  );
 });
 
 describe("a tree the held prompt carries", () => {
@@ -968,18 +1179,27 @@ describe("a held prompt's redraw", () => {
     // Act
     const again = drawHeldPrompt(heldPrompt(), tc, first);
     // Assert
-    expect([again, again.querySelector(".bubble-scroll")]).toEqual([first, box]);
+    expect([again, again.querySelector(".bubble-scroll")]).toEqual([
+      first,
+      box,
+    ]);
   });
 
   it("drops the acceptance mark when the new arm has none", () => {
     // Arrange
     const { tc } = trayContext();
     const first = drawHeldPrompt(
-      heldPrompt({ classification: { case: "holdForTurnEnd", value: { rationale: "r" } } }),
+      heldPrompt({
+        classification: { case: "holdForTurnEnd", value: { rationale: "r" } },
+      }),
       tc,
     );
     // Act
-    drawHeldPrompt(heldPrompt({ classification: { case: "classifying", value: {} } }), tc, first);
+    drawHeldPrompt(
+      heldPrompt({ classification: { case: "classifying", value: {} } }),
+      tc,
+      first,
+    );
     // Assert
     expect(first.hasAttribute("data-accepted")).toBe(false);
   });
@@ -992,7 +1212,9 @@ describe("the Cancel control", () => {
     // Act
     const card = drawHeldPrompt(heldPrompt(), tc);
     // Assert
-    expect(card.querySelector('[data-held-action="drop"]')?.textContent).toBe("Cancel");
+    expect(card.querySelector('[data-held-action="drop"]')?.textContent).toBe(
+      "Cancel",
+    );
   });
 
   it("still drops the held prompt when Cancel is clicked", async () => {
@@ -1021,11 +1243,15 @@ describe("sessionCommandLiteral", () => {
   });
 
   it("refuses UNSPECIFIED, which names no command", () => {
-    expect(() => sessionCommandLiteral(SessionCommand.UNSPECIFIED, "p")).toThrow(MalformedView);
+    expect(() =>
+      sessionCommandLiteral(SessionCommand.UNSPECIFIED, "p"),
+    ).toThrow(MalformedView);
   });
 
   it("refuses a number no session command carries", () => {
-    expect(() => sessionCommandLiteral(9999 as SessionCommand, "p")).toThrow(MalformedView);
+    expect(() => sessionCommandLiteral(9999 as SessionCommand, "p")).toThrow(
+      MalformedView,
+    );
   });
 });
 
@@ -1037,7 +1263,9 @@ describe("in-flight", () => {
     });
     const card = drawHeldPrompt(heldPrompt(), tc);
     card.querySelector<Control>('[data-held-action="drop"]')?.click();
-    const disabled = [...card.querySelectorAll<Control>("ar-button")].every((b) => b.disabled);
+    const disabled = [...card.querySelectorAll<Control>("ar-button")].every(
+      (b) => b.disabled,
+    );
     expect(disabled).toBe(true);
   });
 });
@@ -1076,23 +1304,82 @@ const EXPECTED_BADGES: Readonly<Record<HeldStatus, string>> = {
 
 describe("the daemon's badge words", () => {
   const byStatus: Array<[HeldStatus, () => HeldPrompt]> = [
-    ["classifying", () => heldPrompt({ classification: { case: "classifying", value: {} } })],
-    ["interject", () => heldPrompt({ classification: { case: "interject", value: { rationale: "" } } })],
-    ["afterToolCall", () => heldPrompt({ classification: { case: "afterToolCall", value: { rationale: "" } } })],
-    ["holdForTurnEnd", () => heldPrompt({ classification: { case: "holdForTurnEnd", value: { rationale: "" } } })],
+    [
+      "classifying",
+      () => heldPrompt({ classification: { case: "classifying", value: {} } }),
+    ],
+    [
+      "interject",
+      () =>
+        heldPrompt({
+          classification: { case: "interject", value: { rationale: "" } },
+        }),
+    ],
+    [
+      "afterToolCall",
+      () =>
+        heldPrompt({
+          classification: { case: "afterToolCall", value: { rationale: "" } },
+        }),
+    ],
+    [
+      "holdForTurnEnd",
+      () =>
+        heldPrompt({
+          classification: { case: "holdForTurnEnd", value: { rationale: "" } },
+        }),
+    ],
     [
       "uninterruptibleTurn",
-      () => heldPrompt({ classification: { case: "uninterruptibleTurn", value: { command: SessionCommand.COMPACT } } }),
+      () =>
+        heldPrompt({
+          classification: {
+            case: "uninterruptibleTurn",
+            value: { command: SessionCommand.COMPACT },
+          },
+        }),
     ],
-    ["classificationError", () => heldPrompt({ classification: { case: "classificationError", value: { detail: "" } } })],
+    [
+      "classificationError",
+      () =>
+        heldPrompt({
+          classification: {
+            case: "classificationError",
+            value: { detail: "" },
+          },
+        }),
+    ],
     [
       "accepted",
-      () => heldPrompt({ classification: { case: "holdForTurnEnd", value: { accepted: { accepted: true } } } }),
+      () =>
+        heldPrompt({
+          classification: {
+            case: "holdForTurnEnd",
+            value: { accepted: { accepted: true } },
+          },
+        }),
     ],
-    ["shutdown", () => heldPrompt({ hold: { case: "shutdown", value: { scheduleId: "s" } } })],
-    ["buildRefresh", () => heldPrompt({ hold: { case: "buildRefresh", value: {} } })],
-    ["sessionStarting", () => heldPrompt({ hold: { case: "sessionStarting", value: {} } })],
-    ["merge", () => heldPrompt({ classification: { case: "daemonHeld", value: {} }, hold: { case: "merge", value: {} } })],
+    [
+      "shutdown",
+      () =>
+        heldPrompt({ hold: { case: "shutdown", value: { scheduleId: "s" } } }),
+    ],
+    [
+      "buildRefresh",
+      () => heldPrompt({ hold: { case: "buildRefresh", value: {} } }),
+    ],
+    [
+      "sessionStarting",
+      () => heldPrompt({ hold: { case: "sessionStarting", value: {} } }),
+    ],
+    [
+      "merge",
+      () =>
+        heldPrompt({
+          classification: { case: "daemonHeld", value: {} },
+          hold: { case: "merge", value: {} },
+        }),
+    ],
     [
       "editing",
       () => {
@@ -1115,30 +1402,44 @@ describe("the daemon's badge words", () => {
     resetLoggingForTests();
   });
 
-  it.each(byStatus)("draws the %s label verbatim on its badge", (status, prompt) => {
-    // Arrange
-    const { tc } = trayContext();
-    // Act
-    const card = drawHeldPrompt(prompt(), tc);
-    // Assert
-    expect(card.querySelector(`.queued-head > [data-held-status="${status}"]`)?.textContent).toBe(wireLabel(status));
-  });
+  it.each(byStatus)(
+    "draws the %s label verbatim on its badge",
+    (status, prompt) => {
+      // Arrange
+      const { tc } = trayContext();
+      // Act
+      const card = drawHeldPrompt(prompt(), tc);
+      // Assert
+      expect(
+        card.querySelector(`.queued-head > [data-held-status="${status}"]`)
+          ?.textContent,
+      ).toBe(wireLabel(status));
+    },
+  );
 
-  it.each(byStatus)("draws the %s detail verbatim in the expand-only details", (status, prompt) => {
-    // Arrange
-    const { tc } = trayContext();
-    // Act
-    const card = drawHeldPrompt(prompt(), tc);
-    // Assert
-    expect(
-      card.querySelector(`.queued-details > .${HELD_BADGE_DETAIL_CLASS}[data-held-status="${status}"]`)?.textContent,
-    ).toBe(wireDetail(status));
-  });
+  it.each(byStatus)(
+    "draws the %s detail verbatim in the expand-only details",
+    (status, prompt) => {
+      // Arrange
+      const { tc } = trayContext();
+      // Act
+      const card = drawHeldPrompt(prompt(), tc);
+      // Assert
+      expect(
+        card.querySelector(
+          `.queued-details > .${HELD_BADGE_DETAIL_CLASS}[data-held-status="${status}"]`,
+        )?.textContent,
+      ).toBe(wireDetail(status));
+    },
+  );
 
   it("draws no detail element for a badge the daemon gave none", () => {
     // Arrange
     const { tc } = trayContext();
-    const prompt = heldPrompt({ badges: [{ label: "after this turn" }], classification: { case: "holdForTurnEnd", value: {} } });
+    const prompt = heldPrompt({
+      badges: [{ label: "after this turn" }],
+      classification: { case: "holdForTurnEnd", value: {} },
+    });
     // Act
     const card = drawHeldPrompt(prompt, tc);
     // Assert
@@ -1158,9 +1459,14 @@ describe("the daemon's badge words", () => {
     const capture = captureLogRecords();
     const { tc } = trayContext();
     // Act
-    expect(() => drawHeldPrompt(heldPrompt({ badges: [{ label: "" }] }), tc)).toThrow(MalformedView);
+    expect(() =>
+      drawHeldPrompt(heldPrompt({ badges: [{ label: "" }] }), tc),
+    ).toThrow(MalformedView);
     // Assert
-    const record = await forwardedRecord(capture, "tray.held-prompt.badge-empty-label");
+    const record = await forwardedRecord(
+      capture,
+      "tray.held-prompt.badge-empty-label",
+    );
     expect(record.level.case).toBe("error");
   });
 
@@ -1179,7 +1485,9 @@ describe("the daemon's badge words", () => {
   it("refuses more badges than the standing facts", () => {
     // Arrange
     const { tc } = trayContext();
-    const prompt = heldPrompt({ badges: [{ label: "classifying" }, { label: "restart hold" }] });
+    const prompt = heldPrompt({
+      badges: [{ label: "classifying" }, { label: "restart hold" }],
+    });
     // Act / Assert
     expect(() => drawHeldPrompt(prompt, tc)).toThrow(MalformedView);
   });
@@ -1189,9 +1497,14 @@ describe("the daemon's badge words", () => {
     const capture = captureLogRecords();
     const { tc } = trayContext();
     // Act
-    expect(() => drawHeldPrompt(heldPrompt({ badges: [] }), tc)).toThrow(MalformedView);
+    expect(() => drawHeldPrompt(heldPrompt({ badges: [] }), tc)).toThrow(
+      MalformedView,
+    );
     // Assert
-    const record = await forwardedRecord(capture, "tray.held-prompt.badges-mismatch");
+    const record = await forwardedRecord(
+      capture,
+      "tray.held-prompt.badges-mismatch",
+    );
     expect(record.level.case).toBe("error");
   });
 
@@ -1212,7 +1525,9 @@ describe("the daemon's badge words", () => {
     // Act
     const source = codeOf(heldPromptSource);
     // Assert
-    expect(composed.filter((sentence) => source.includes(sentence))).toEqual([]);
+    expect(composed.filter((sentence) => source.includes(sentence))).toEqual(
+      [],
+    );
   });
 });
 
@@ -1221,12 +1536,15 @@ describe("the held status badge table", () => {
     resetLoggingForTests();
   });
 
-  it.each(Object.entries(EXPECTED_BADGES))("badges %s in the %s tone", (status, tone) => {
-    // Arrange / Act
-    const classes = heldBadgeClasses(status);
-    // Assert
-    expect(classes).toBe(`badge held-badge ${tone}`);
-  });
+  it.each(Object.entries(EXPECTED_BADGES))(
+    "badges %s in the %s tone",
+    (status, tone) => {
+      // Arrange / Act
+      const classes = heldBadgeClasses(status);
+      // Assert
+      expect(classes).toBe(`badge held-badge ${tone}`);
+    },
+  );
 
   it("names every status the owner's table names, and no other", () => {
     // Arrange / Act
@@ -1240,12 +1558,19 @@ describe("the held status badge table", () => {
     const arms = oneofArms(HeldPromptSchema, "classification");
     const badgeless: readonly string[] = BADGELESS_CLASSIFICATION_ARMS;
     // Assert
-    expect(arms.filter((arm) => !Object.hasOwn(HELD_STATUS_BADGES, arm) && !badgeless.includes(arm))).toEqual([]);
+    expect(
+      arms.filter(
+        (arm) =>
+          !Object.hasOwn(HELD_STATUS_BADGES, arm) && !badgeless.includes(arm),
+      ),
+    ).toEqual([]);
   });
 
   it("gives no badgeless arm a badge tone", () => {
     // Arrange / Act
-    const toned = BADGELESS_CLASSIFICATION_ARMS.filter((arm) => Object.hasOwn(HELD_STATUS_BADGES, arm));
+    const toned = BADGELESS_CLASSIFICATION_ARMS.filter((arm) =>
+      Object.hasOwn(HELD_STATUS_BADGES, arm),
+    );
     // Assert
     expect(toned).toEqual([]);
   });
@@ -1254,7 +1579,9 @@ describe("the held status badge table", () => {
     // Arrange / Act
     const arms = oneofArms(HeldPromptSchema, "hold");
     // Assert
-    expect(arms.filter((arm) => !Object.hasOwn(HELD_STATUS_BADGES, arm))).toEqual([]);
+    expect(
+      arms.filter((arm) => !Object.hasOwn(HELD_STATUS_BADGES, arm)),
+    ).toEqual([]);
   });
 
   it("refuses a status the table does not name", () => {
@@ -1273,36 +1600,98 @@ describe("the held status badge table", () => {
     // Act
     expect(() => heldBadgeClasses("someNewArm")).toThrow(MalformedView);
     // Assert
-    const record = await forwardedRecord(capture, "tray.held-prompt.badge-unknown-status");
-    expect([record.level.case, (record.context as Record<string, unknown>).status]).toEqual(["error", "someNewArm"]);
+    const record = await forwardedRecord(
+      capture,
+      "tray.held-prompt.badge-unknown-status",
+    );
+    expect([
+      record.level.case,
+      (record.context as Record<string, unknown>).status,
+    ]).toEqual(["error", "someNewArm"]);
   });
 });
 
 describe("every status a held card shows is a badge in the table's tone", () => {
   const cards: Array<[HeldStatus, () => HeldPrompt]> = [
-    ["classifying", () => heldPrompt({ classification: { case: "classifying", value: {} } })],
-    ["interject", () => heldPrompt({ classification: { case: "interject", value: { rationale: "now" } } })],
-    ["afterToolCall", () => heldPrompt({ classification: { case: "afterToolCall", value: { rationale: "now" } } })],
-    ["holdForTurnEnd", () => heldPrompt({ classification: { case: "holdForTurnEnd", value: { rationale: "r" } } })],
+    [
+      "classifying",
+      () => heldPrompt({ classification: { case: "classifying", value: {} } }),
+    ],
+    [
+      "interject",
+      () =>
+        heldPrompt({
+          classification: { case: "interject", value: { rationale: "now" } },
+        }),
+    ],
+    [
+      "afterToolCall",
+      () =>
+        heldPrompt({
+          classification: {
+            case: "afterToolCall",
+            value: { rationale: "now" },
+          },
+        }),
+    ],
+    [
+      "holdForTurnEnd",
+      () =>
+        heldPrompt({
+          classification: { case: "holdForTurnEnd", value: { rationale: "r" } },
+        }),
+    ],
     [
       "uninterruptibleTurn",
-      () => heldPrompt({ classification: { case: "uninterruptibleTurn", value: { command: SessionCommand.CLEAR } } }),
+      () =>
+        heldPrompt({
+          classification: {
+            case: "uninterruptibleTurn",
+            value: { command: SessionCommand.CLEAR },
+          },
+        }),
     ],
     [
       "classificationError",
-      () => heldPrompt({ classification: { case: "classificationError", value: { detail: "d" } } }),
+      () =>
+        heldPrompt({
+          classification: {
+            case: "classificationError",
+            value: { detail: "d" },
+          },
+        }),
     ],
     [
       "accepted",
       () =>
         heldPrompt({
-          classification: { case: "holdForTurnEnd", value: { rationale: "r", accepted: { accepted: true } } },
+          classification: {
+            case: "holdForTurnEnd",
+            value: { rationale: "r", accepted: { accepted: true } },
+          },
         }),
     ],
-    ["shutdown", () => heldPrompt({ hold: { case: "shutdown", value: { scheduleId: "s" } } })],
-    ["buildRefresh", () => heldPrompt({ hold: { case: "buildRefresh", value: {} } })],
-    ["sessionStarting", () => heldPrompt({ hold: { case: "sessionStarting", value: {} } })],
-    ["merge", () => heldPrompt({ classification: { case: "daemonHeld", value: {} }, hold: { case: "merge", value: {} } })],
+    [
+      "shutdown",
+      () =>
+        heldPrompt({ hold: { case: "shutdown", value: { scheduleId: "s" } } }),
+    ],
+    [
+      "buildRefresh",
+      () => heldPrompt({ hold: { case: "buildRefresh", value: {} } }),
+    ],
+    [
+      "sessionStarting",
+      () => heldPrompt({ hold: { case: "sessionStarting", value: {} } }),
+    ],
+    [
+      "merge",
+      () =>
+        heldPrompt({
+          classification: { case: "daemonHeld", value: {} },
+          hold: { case: "merge", value: {} },
+        }),
+    ],
     [
       "editing",
       () => {
@@ -1313,23 +1702,29 @@ describe("every status a held card shows is a badge in the table's tone", () => 
     ],
   ];
 
-  it.each(cards)("draws the %s status as a badge in the header strip", (status, prompt) => {
-    // Arrange
-    const { tc } = trayContext();
-    // Act
-    const card = drawHeldPrompt(prompt(), tc);
-    // Assert
-    expect(card.querySelector(`.queued-head > [data-held-status="${status}"]`)?.className).toBe(
-      `badge held-badge ${EXPECTED_BADGES[status]}`,
-    );
-  });
+  it.each(cards)(
+    "draws the %s status as a badge in the header strip",
+    (status, prompt) => {
+      // Arrange
+      const { tc } = trayContext();
+      // Act
+      const card = drawHeldPrompt(prompt(), tc);
+      // Assert
+      expect(
+        card.querySelector(`.queued-head > [data-held-status="${status}"]`)
+          ?.className,
+      ).toBe(`badge held-badge ${EXPECTED_BADGES[status]}`);
+    },
+  );
 
   it("draws no acceptance badge on a hold the user has not confirmed", () => {
     // Arrange
     const { tc } = trayContext();
     // Act
     const card = drawHeldPrompt(
-      heldPrompt({ classification: { case: "holdForTurnEnd", value: { rationale: "r" } } }),
+      heldPrompt({
+        classification: { case: "holdForTurnEnd", value: { rationale: "r" } },
+      }),
       tc,
     );
     // Assert
@@ -1349,7 +1744,10 @@ describe("a held prompt collapsed and expanded", () => {
     const { tc } = trayContext();
     const card = drawHeldPrompt(
       heldPrompt({
-        classification: { case: "holdForTurnEnd", value: { rationale: "it can wait" } },
+        classification: {
+          case: "holdForTurnEnd",
+          value: { rationale: "it can wait" },
+        },
         hold: { case: "shutdown", value: { scheduleId: "sched-9" } },
       }),
       tc,
@@ -1373,26 +1771,31 @@ describe("a held prompt collapsed and expanded", () => {
     // Arrange / Act
     const head = mountedFull().querySelector(".queued-head");
     // Assert
-    expect([...(head?.children ?? [])].map((child) => child.classList.contains("held-badge"))).toEqual([
-      true,
-      true,
-    ]);
+    expect(
+      [...(head?.children ?? [])].map((child) =>
+        child.classList.contains("held-badge"),
+      ),
+    ).toEqual([true, true]);
   });
 
   it("keeps its badges visible while collapsed", () => {
     // Arrange / Act
     const badges = [...mountedFull().querySelectorAll(".held-badge")];
     // Assert
-    expect(badges.map((badge) => badge.closest(HIDDEN_WHILE_COLLAPSED))).toEqual([null, null]);
+    expect(
+      badges.map((badge) => badge.closest(HIDDEN_WHILE_COLLAPSED)),
+    ).toEqual([null, null]);
   });
 
   it("puts the details in the bubble's one expand-only region", () => {
     // Arrange / Act
     const card = mountedFull();
     // Assert
-    expect(card.querySelector(`:scope > .${BUBBLE_EXPAND_ONLY_CLASS}`)?.classList.contains("queued-details")).toBe(
-      true,
-    );
+    expect(
+      card
+        .querySelector(`:scope > .${BUBBLE_EXPAND_ONLY_CLASS}`)
+        ?.classList.contains("queued-details"),
+    ).toBe(true);
   });
 
   it.each(EXPAND_ONLY)("hides %s while collapsed", (_name, selector) => {
@@ -1402,14 +1805,19 @@ describe("a held prompt collapsed and expanded", () => {
     expect(part?.closest(HIDDEN_WHILE_COLLAPSED)).not.toBeNull();
   });
 
-  it.each(EXPAND_ONLY)("shows %s once the bubble is expanded", (_name, selector) => {
-    // Arrange
-    const card = mountedFull();
-    // Act
-    card.querySelector<HTMLElement>(".queued-head")?.click();
-    // Assert
-    expect(card.querySelector(selector)?.closest(HIDDEN_WHILE_COLLAPSED)).toBeNull();
-  });
+  it.each(EXPAND_ONLY)(
+    "shows %s once the bubble is expanded",
+    (_name, selector) => {
+      // Arrange
+      const card = mountedFull();
+      // Act
+      card.querySelector<HTMLElement>(".queued-head")?.click();
+      // Assert
+      expect(
+        card.querySelector(selector)?.closest(HIDDEN_WHILE_COLLAPSED),
+      ).toBeNull();
+    },
+  );
 
   it("hides the details again once the bubble is collapsed", () => {
     // Arrange
@@ -1419,7 +1827,9 @@ describe("a held prompt collapsed and expanded", () => {
     // Act
     head?.click();
     // Assert
-    expect(card.querySelector(".queued-details")?.closest(HIDDEN_WHILE_COLLAPSED)).not.toBeNull();
+    expect(
+      card.querySelector(".queued-details")?.closest(HIDDEN_WHILE_COLLAPSED),
+    ).not.toBeNull();
   });
 
   it("draws a refused action's sentence inside the expand-only region", async () => {
@@ -1430,7 +1840,11 @@ describe("a held prompt collapsed and expanded", () => {
     card.querySelector<Control>('[data-held-action="release"]')?.click();
     await settle();
     // Assert
-    expect(card.querySelector(".queued-refusal")?.parentElement?.classList.contains("queued-details")).toBe(true);
+    expect(
+      card
+        .querySelector(".queued-refusal")
+        ?.parentElement?.classList.contains("queued-details"),
+    ).toBe(true);
   });
 });
 
@@ -1451,7 +1865,10 @@ describe("a tree the held prompt carries, at the held bubble's halved width", ()
     const column = document.createElement("div");
     column.append(card);
     document.body.append(column);
-    return { card, cols: stagedCols({ ...installed.layout, maxWidth: "38.5%" }) };
+    return {
+      card,
+      cols: stagedCols({ ...installed.layout, maxWidth: "38.5%" }),
+    };
   }
 
   it("wraps at half the bubble cap", () => {
@@ -1470,8 +1887,11 @@ describe("a tree the held prompt carries, at the held bubble's halved width", ()
 });
 
 /** A context whose EditHeldPrompt runs ANSWER, recording requests and chip filings. */
-function editContext(answer: () => unknown = () =>
-  create(EditHeldPromptResponseSchema, { result: { case: "success", value: {} } }),
+function editContext(
+  answer: () => unknown = () =>
+    create(EditHeldPromptResponseSchema, {
+      result: { case: "success", value: {} },
+    }),
 ): { tc: TrayContext; seen: EditHeldPromptRequest[]; reported: FailureKind[] } {
   const seen: EditHeldPromptRequest[] = [];
   const reported: FailureKind[] = [];
@@ -1487,17 +1907,22 @@ function editContext(answer: () => unknown = () =>
     client: createAgentReplClient(transport),
     workspace: WORKSPACE,
     ticker: fakeTicker(),
-    failures: { report: (kind) => reported.push(kind), retract: () => undefined },
+    failures: {
+      report: (kind) => reported.push(kind),
+      retract: () => undefined,
+    },
     composerEnabled: false,
   });
   return { tc: { ctx, onDispose: () => undefined }, seen, reported };
 }
 
 /** An EditHeldPrompt refusal carrying ARM and its payload. */
-const editRefusal = (arm: string, value: Record<string, unknown> = {}) => () =>
-  create(EditHeldPromptResponseSchema, {
-    result: { case: "error", value: { cause: { case: arm, value } } },
-  } as never);
+const editRefusal =
+  (arm: string, value: Record<string, unknown> = {}) =>
+  () =>
+    create(EditHeldPromptResponseSchema, {
+      result: { case: "error", value: { cause: { case: arm, value } } },
+    } as never);
 
 /** The chip's filing, read as the request it names and the cause it states. */
 function filed(kind: FailureKind | undefined): [string, string] | undefined {
@@ -1513,7 +1938,9 @@ describe("the Edit control", () => {
     // Act
     const card = drawHeldPrompt(heldPrompt(), tc);
     // Assert
-    const labels = [...card.querySelectorAll<Control>(".queued-actions ar-button")].map((b) => b.textContent);
+    const labels = [
+      ...card.querySelectorAll<Control>(".queued-actions ar-button"),
+    ].map((b) => b.textContent);
     expect(labels.slice(0, 3)).toEqual(["Send now", "Edit", "Cancel"]);
   });
 
@@ -1525,7 +1952,10 @@ describe("the Edit control", () => {
     card.querySelector<Control>('[data-held-action="edit"]')?.click();
     await settle();
     // Assert
-    expect([seen[0]?.turn?.value, seen[0]?.action.case]).toEqual(["turn-1", "begin"]);
+    expect([seen[0]?.turn?.value, seen[0]?.action.case]).toEqual([
+      "turn-1",
+      "begin",
+    ]);
   });
 
   it("files a refused begin on the warning chip", async () => {
@@ -1536,18 +1966,36 @@ describe("the Edit control", () => {
     card.querySelector<Control>('[data-held-action="edit"]')?.click();
     await settle();
     // Assert
-    expect(filed(reported[0])).toEqual([EDIT_REQUEST, "this prompt has already been delivered"]);
+    expect(filed(reported[0])).toEqual([
+      EDIT_REQUEST,
+      "this prompt has already been delivered",
+    ]);
   });
 
-  it("names the prompt already being edited on a being-edited refusal", async () => {
+  it("files a begin refused mid-delivery with the being-delivered sentence", async () => {
     // Arrange
-    const { tc, reported } = editContext(editRefusal("beingEdited", { editingTurn: { value: "turn-0" } }));
+    const { tc, reported } = editContext(editRefusal("beingDelivered"));
     const card = drawHeldPrompt(heldPrompt(), tc);
     // Act
     card.querySelector<Control>('[data-held-action="edit"]')?.click();
     await settle();
     // Assert
-    expect(filed(reported[0])?.[1]).toBe("another held prompt is already being edited (turn turn-0)");
+    expect(filed(reported[0])).toEqual([EDIT_REQUEST, BEING_DELIVERED]);
+  });
+
+  it("names the prompt already being edited on a being-edited refusal", async () => {
+    // Arrange
+    const { tc, reported } = editContext(
+      editRefusal("beingEdited", { editingTurn: { value: "turn-0" } }),
+    );
+    const card = drawHeldPrompt(heldPrompt(), tc);
+    // Act
+    card.querySelector<Control>('[data-held-action="edit"]')?.click();
+    await settle();
+    // Assert
+    expect(filed(reported[0])?.[1]).toBe(
+      "another held prompt is already being edited (turn turn-0)",
+    );
   });
 
   it("draws no refusal at the row: the chip is the one error surface", async () => {
@@ -1570,8 +2018,14 @@ describe("the Edit control", () => {
     card.querySelector<Control>('[data-held-action="edit"]')?.click();
     await settle();
     // Assert
-    const record = await forwardedRecord(capture, "tray.held-prompt.edit-refused");
-    expect([record.level.case, record.context?.arm]).toEqual(["info", "noSuchHold"]);
+    const record = await forwardedRecord(
+      capture,
+      "tray.held-prompt.edit-refused",
+    );
+    expect([record.level.case, record.context?.arm]).toEqual([
+      "info",
+      "noSuchHold",
+    ]);
   });
 
   it("files a begin that failed at the transport on the warning chip", async () => {
@@ -1598,7 +2052,10 @@ describe("the Edit control", () => {
     card.querySelector<Control>('[data-held-action="edit"]')?.click();
     await settle();
     // Assert
-    const record = await forwardedRecord(capture, "tray.held-prompt.edit-failed");
+    const record = await forwardedRecord(
+      capture,
+      "tray.held-prompt.edit-failed",
+    );
     expect(record.level.case).toBe("error");
   });
 
@@ -1610,7 +2067,11 @@ describe("the Edit control", () => {
     card.querySelector<Control>('[data-held-action="edit"]')?.click();
     await settle();
     // Assert
-    expect([...card.querySelectorAll<Control>(".queued-actions ar-button")].some((b) => (b).disabled)).toBe(false);
+    expect(
+      [...card.querySelectorAll<Control>(".queued-actions ar-button")].some(
+        (b) => b.disabled,
+      ),
+    ).toBe(false);
   });
 });
 
@@ -1623,7 +2084,9 @@ describe("the editing badge", () => {
     // Act
     const card = drawHeldPrompt(u, tc);
     // Assert
-    expect(card.querySelector('[data-held-status="editing"]')?.textContent).toBe("wire editing");
+    expect(
+      card.querySelector('[data-held-status="editing"]')?.textContent,
+    ).toBe("wire editing");
   });
 
   it("draws no editing badge when the daemon says nothing", () => {
@@ -1655,7 +2118,10 @@ describe("the editing badge", () => {
     // Act
     const second = drawHeldPrompt(heldPrompt(), tc, first);
     // Assert
-    expect([second.hasAttribute("data-editing"), second.querySelector('[data-held-status="editing"]')]).toEqual([false, null]);
+    expect([
+      second.hasAttribute("data-editing"),
+      second.querySelector('[data-held-status="editing"]'),
+    ]).toEqual([false, null]);
   });
 });
 
@@ -1671,7 +2137,9 @@ describe("the retired Release label", () => {
 
   /** The files among PATHS holding a string literal that is exactly "Release". */
   function holdingTheLabel(paths: string[]): string[] {
-    return paths.filter((path) => /(["'`])Release\1/.test(readFileSync(path, "utf8")));
+    return paths.filter((path) =>
+      /(["'`])Release\1/.test(readFileSync(path, "utf8")),
+    );
   }
 
   it("is drawn by no webapp source", () => {
@@ -1739,10 +2207,16 @@ describe("the retired keep-alive hold", () => {
 });
 
 /** The ellipsis clamp on a collapsed body, as the stylesheet writes it. */
-const CLAMPED_BODY = selectorOf(/([^{}]*\.bubble-body)\s*\{[^{}]*-webkit-line-clamp/, "ellipsis clamp");
+const CLAMPED_BODY = selectorOf(
+  /([^{}]*\.bubble-body)\s*\{[^{}]*-webkit-line-clamp/,
+  "ellipsis clamp",
+);
 
 /** The box whose fade the ellipsis hides, as the stylesheet writes it (the pseudo dropped). */
-const FADE_HIDDEN_ON = selectorOf(/([^{}]*\.bubble-scroll)::after\s*\{\s*display:\s*none;\s*\}/, "hidden fade");
+const FADE_HIDDEN_ON = selectorOf(
+  /([^{}]*\.bubble-scroll)::after\s*\{\s*display:\s*none;\s*\}/,
+  "hidden fade",
+);
 
 /**
  * THE HELD PROMPT'S ONE LINE (owner ruling, 2026-09-27). Collapsed, it shows its
@@ -1755,19 +2229,41 @@ describe("a held prompt's one collapsed line", () => {
   const LINE_PX = 21;
 
   /** A held prompt saying TEXT, laid out as LINES rendered lines, mounted under the one toggle. */
-  function mounted(text: string, lines: number): { card: HTMLElement; box: HTMLElement; body: HTMLElement } {
+  function mounted(
+    text: string,
+    lines: number,
+  ): { card: HTMLElement; box: HTMLElement; body: HTMLElement } {
     const { tc } = trayContext();
     const card = drawHeldPrompt(saying(text), tc);
     const host = document.createElement("div");
-    installClickExpand(host, () => "", (section) => refreshHasMore(section));
+    installClickExpand(
+      host,
+      () => "",
+      (section) => refreshHasMore(section),
+    );
     host.append(card);
     document.body.append(host);
     const box = card.querySelector<HTMLElement>(":scope > .bubble-scroll");
     const body = box?.querySelector<HTMLElement>(":scope > .bubble-body");
-    if (box === null || box === undefined || body === null || body === undefined) throw new Error("fixture: no box");
-    Object.defineProperty(box, "clientHeight", { configurable: true, value: LINE_PX });
-    Object.defineProperty(body, "offsetHeight", { configurable: true, value: LINE_PX });
-    Object.defineProperty(body, "scrollHeight", { configurable: true, value: lines * LINE_PX });
+    if (
+      box === null ||
+      box === undefined ||
+      body === null ||
+      body === undefined
+    )
+      throw new Error("fixture: no box");
+    Object.defineProperty(box, "clientHeight", {
+      configurable: true,
+      value: LINE_PX,
+    });
+    Object.defineProperty(body, "offsetHeight", {
+      configurable: true,
+      value: LINE_PX,
+    });
+    Object.defineProperty(body, "scrollHeight", {
+      configurable: true,
+      value: lines * LINE_PX,
+    });
     refreshHasMore(box);
     return { card, box, body };
   }
@@ -1808,14 +2304,19 @@ describe("a held prompt's one collapsed line", () => {
     // Arrange / Act
     const { box } = mounted("first line\nsecond line", 2);
     // Assert
-    expect([box.classList.contains(HAS_MORE_CLASS), box.matches(FADE_HIDDEN_ON)]).toEqual([true, true]);
+    expect([
+      box.classList.contains(HAS_MORE_CLASS),
+      box.matches(FADE_HIDDEN_ON),
+    ]).toEqual([true, true]);
   });
 
   it("keeps its badges shown beside the one line", () => {
     // Arrange / Act
     const { card } = mounted("first line\nsecond line", 2);
     // Assert
-    expect(card.querySelector(".held-badge")?.closest(HIDDEN_WHILE_COLLAPSED)).toBeNull();
+    expect(
+      card.querySelector(".held-badge")?.closest(HIDDEN_WHILE_COLLAPSED),
+    ).toBeNull();
   });
 
   it("lifts the clamp once expanded, showing everything", () => {
@@ -1838,7 +2339,10 @@ describe("a held prompt's one collapsed line", () => {
 
   it("clamps to the one line again once collapsed", () => {
     // Arrange
-    const { card, box, body } = mounted("first line\nsecond line\nthird line", 3);
+    const { card, box, body } = mounted(
+      "first line\nsecond line\nthird line",
+      3,
+    );
     const head = card.querySelector<HTMLElement>(".queued-head");
     head?.click();
     // Act
@@ -1850,8 +2354,16 @@ describe("a held prompt's one collapsed line", () => {
 
 describe("a held session act", () => {
   it.each([
-    ["model", { case: "model" as const, value: { model: "claude-opus-5-5" } }, "model → claude-opus-5-5"],
-    ["permissionMode", { case: "permissionMode" as const, value: { mode: "plan" } }, "permission mode → plan"],
+    [
+      "model",
+      { case: "model" as const, value: { model: "claude-opus-5-5" } },
+      "model → claude-opus-5-5",
+    ],
+    [
+      "permissionMode",
+      { case: "permissionMode" as const, value: { mode: "plan" } },
+      "permission mode → plan",
+    ],
   ])("draws a %s change as what it does", (arm, act, text) => {
     // Arrange
     const { tc } = trayContext();
@@ -1920,12 +2432,17 @@ function foldContext(
 }
 
 const foldSuccess = () =>
-  create(FoldHeldPromptResponseSchema, { result: { case: "success", value: {} } });
+  create(FoldHeldPromptResponseSchema, {
+    result: { case: "success", value: {} },
+  });
 
 /** A fold refusal carrying ARM. */
 const foldRefusal = (arm: string) => () =>
   create(FoldHeldPromptResponseSchema, {
-    result: { case: "error", value: { cause: { case: arm, value: CAUSE_FILL[arm] ?? {} } } },
+    result: {
+      case: "error",
+      value: { cause: { case: arm, value: CAUSE_FILL[arm] ?? {} } },
+    },
   } as never);
 
 /** A held prompt the daemon offers to fold into the entry under ABOVE. */
@@ -1942,7 +2459,9 @@ describe("the fold above control", () => {
     // Act
     const card = drawHeldPrompt(foldable(), tc);
     // Assert
-    expect(card.querySelector('[data-held-action="fold"]')?.textContent).toBe(FOLD_ABOVE_LABEL);
+    expect(card.querySelector('[data-held-action="fold"]')?.textContent).toBe(
+      FOLD_ABOVE_LABEL,
+    );
   });
 
   it("is not drawn when the daemon offers no fold", () => {
@@ -1961,7 +2480,12 @@ describe("the fold above control", () => {
     const card = drawHeldPrompt(foldable(), tc);
     // Assert
     const button = card.querySelector<Control>('[data-held-action="fold"]');
-    expect([button?.localName, button?.getAttribute("role"), button?.className, button?.parentElement?.lastElementChild === button]).toEqual([
+    expect([
+      button?.localName,
+      button?.getAttribute("role"),
+      button?.className,
+      button?.parentElement?.lastElementChild === button,
+    ]).toEqual([
       "ar-button",
       "button",
       "queued-action queued-action-fold",
@@ -1987,11 +2511,11 @@ describe("the fold above control", () => {
     card.querySelector<Control>('[data-held-action="fold"]')?.click();
     await settle();
     // Assert
-    expect([seen[0]?.turn?.value, seen[0]?.above?.value, seen[0]?.workspace?.id]).toEqual([
-      "turn-1",
-      "turn-ahead",
-      "ws-1",
-    ]);
+    expect([
+      seen[0]?.turn?.value,
+      seen[0]?.above?.value,
+      seen[0]?.workspace?.id,
+    ]).toEqual(["turn-1", "turn-ahead", "ws-1"]);
   });
 
   it("leaves the row alone on success: the tray's push redraws it", async () => {
@@ -2016,9 +2540,25 @@ describe("the fold above control", () => {
       await settle();
       // Assert
       const refusal = card.querySelector(".queued-refusal");
-      expect([refusal?.getAttribute("data-arm"), refusal?.textContent === ""]).toEqual([arm, false]);
+      expect([
+        refusal?.getAttribute("data-arm"),
+        refusal?.textContent === "",
+      ]).toEqual([arm, false]);
     },
   );
+
+  it("says a fold refused mid-delivery is being delivered", async () => {
+    // Arrange
+    const { tc } = foldContext(foldRefusal("beingDelivered"));
+    const card = drawHeldPrompt(foldable(), tc);
+    // Act
+    card.querySelector<Control>('[data-held-action="fold"]')?.click();
+    await settle();
+    // Assert
+    expect(card.querySelector(".queued-refusal")?.textContent).toContain(
+      BEING_DELIVERED,
+    );
+  });
 
   it("names the edited entry on a being-edited refusal", async () => {
     // Arrange
@@ -2026,7 +2566,12 @@ describe("the fold above control", () => {
       create(FoldHeldPromptResponseSchema, {
         result: {
           case: "error",
-          value: { cause: { case: "beingEdited", value: { editingTurn: { value: "turn-0" } } } },
+          value: {
+            cause: {
+              case: "beingEdited",
+              value: { editingTurn: { value: "turn-0" } },
+            },
+          },
         },
       }),
     );
@@ -2035,7 +2580,9 @@ describe("the fold above control", () => {
     card.querySelector<Control>('[data-held-action="fold"]')?.click();
     await settle();
     // Assert
-    expect(card.querySelector(".queued-refusal")?.textContent).toContain("turn-0");
+    expect(card.querySelector(".queued-refusal")?.textContent).toContain(
+      "turn-0",
+    );
   });
 
   it("logs a refusal through the canonical logger", async () => {
@@ -2047,7 +2594,10 @@ describe("the fold above control", () => {
     card.querySelector<Control>('[data-held-action="fold"]')?.click();
     await settle();
     // Assert
-    const record = await forwardedRecord(capture, "tray.held-prompt.action-refused");
+    const record = await forwardedRecord(
+      capture,
+      "tray.held-prompt.action-refused",
+    );
     expect(record.level.case).toBe("warn");
   });
 
@@ -2073,6 +2623,8 @@ describe("the fold above control", () => {
     card.querySelector<Control>('[data-held-action="fold"]')?.click();
     await settle();
     // Assert
-    expect(card.querySelector(".queued-refusal")?.getAttribute("data-arm")).toBe("error");
+    expect(
+      card.querySelector(".queued-refusal")?.getAttribute("data-arm"),
+    ).toBe("error");
   });
 });

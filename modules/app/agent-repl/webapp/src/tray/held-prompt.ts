@@ -111,14 +111,28 @@ import { ConnectError } from "@connectrpc/connect";
 import { controlPlaneFailed } from "../failure/sink.js";
 import { formatTickedAge } from "../duration.js";
 import { markdownSlot } from "../bubble/body.js";
-import { BUBBLE_MORE_ELLIPSIS, ELLIPSIS_CAP_LINES, drawBubble } from "../bubble/draw.js";
+import {
+  BUBBLE_MORE_ELLIPSIS,
+  ELLIPSIS_CAP_LINES,
+  drawBubble,
+} from "../bubble/draw.js";
 import { log } from "../log.js";
 import { MalformedView } from "../rpc/malformed.js";
 import { callUnary } from "../rpc/unary.js";
 import { isMalformedView } from "../rpc/malformed.js";
 import { guardMalformed } from "../rpc/guard.js";
-import { callFailure, crossCuttingSentence, refusalOf, type SentenceTable } from "../rpc/refuse.js";
-import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
+import {
+  callFailure,
+  crossCuttingSentence,
+  refusalOf,
+  type SentenceTable,
+} from "../rpc/refuse.js";
+import {
+  msOf,
+  requireCase,
+  requireMessage,
+  unreachableArm,
+} from "../rpc/strict.js";
 import type { TrayContext } from "./context.js";
 
 /** The event a dropped prompt hands its text back on. */
@@ -150,16 +164,27 @@ export const NO_RELEASE_TITLES: Readonly<Record<string, string>> = {
  * the literal `none` — absence stated rather than left to be inferred from a
  * missing attribute.
  */
-export function drawHeldPrompt(u: HeldPrompt, tc: TrayContext, previous?: HTMLElement): HTMLElement {
+export function drawHeldPrompt(
+  u: HeldPrompt,
+  tc: TrayContext,
+  previous?: HTMLElement,
+): HTMLElement {
   const path = "HeldPrompt";
   const turn = requireMessage(u.turn, `${path}.turn`);
   const said = requireMessage(u.said, `${path}.said`);
-  const classification = requireCase(u.classification, `${path}.classification`);
-  const hold = u.hold.case === undefined ? null : requireCase(u.hold, `${path}.hold`);
+  const classification = requireCase(
+    u.classification,
+    `${path}.classification`,
+  );
+  const hold =
+    u.hold.case === undefined ? null : requireCase(u.hold, `${path}.hold`);
   // `daemon_held` says a daemon condition holds the entry, and the hold arm
   // names it: the one without the other explains nothing.
   if (classification.case === "daemonHeld" && hold === null) {
-    throw new MalformedView(`${path}.classification`, "daemon_held with no hold arm set");
+    throw new MalformedView(
+      `${path}.classification`,
+      "daemon_held with no hold arm set",
+    );
   }
   log.debug("drawing a held prompt", {
     operation: "tray.held-prompt",
@@ -176,8 +201,10 @@ export function drawHeldPrompt(u: HeldPrompt, tc: TrayContext, previous?: HTMLEl
   const head = document.createElement("div");
   head.className = "queued-head";
   const verdict = drawClassification(classification, `${path}.classification`);
-  const holdStatus: HeldStatus | null = hold === null ? null : drawHold(hold, `${path}.hold`);
-  const statuses: HeldStatus[] = verdict.status === null ? [] : [verdict.status];
+  const holdStatus: HeldStatus | null =
+    hold === null ? null : drawHold(hold, `${path}.hold`);
+  const statuses: HeldStatus[] =
+    verdict.status === null ? [] : [verdict.status];
   // DAEMON-STATED: the editing badge stands exactly while the entry carries `editing`.
   if (u.editing !== undefined) statuses.push("editing");
   if (u.coalesced !== undefined) statuses.push("coalesced");
@@ -188,17 +215,27 @@ export function drawHeldPrompt(u: HeldPrompt, tc: TrayContext, previous?: HTMLEl
   if (hold !== null && hold.case === "shutdown") {
     // The schedule id is a HOOK on the hold's badge, not words: it joins this
     // card to the shutdown it should explain.
-    drawn.pills[drawn.pills.length - 1]?.setAttribute("data-schedule-id", hold.value.scheduleId);
+    drawn.pills[drawn.pills.length - 1]?.setAttribute(
+      "data-schedule-id",
+      hold.value.scheduleId,
+    );
   }
   // A HELD SESSION ACT IS DRAWN AS WHAT IT DOES; a prompt, as what was said.
-  const content = u.act === undefined ? drawUserSaid(said, `${path}.said`) : [drawHeldSessionAct(u.act, `${path}.act`)];
+  const content =
+    u.act === undefined
+      ? drawUserSaid(said, `${path}.said`)
+      : [drawHeldSessionAct(u.act, `${path}.act`)];
 
   // EVERYTHING ELSE IS EXPAND-ONLY, in ONE element, so a refusal an action
   // draws beside its row lands inside the region and folds away with it.
   const details = document.createElement("div");
   details.className = "queued-details";
   details.appendChild(
-    drawHeldPromptQueuedAt(requireMessage(u.queuedAt, `${path}.queued_at`), tc, `${path}.queued_at`),
+    drawHeldPromptQueuedAt(
+      requireMessage(u.queuedAt, `${path}.queued_at`),
+      tc,
+      `${path}.queued_at`,
+    ),
   );
   for (const detail of drawn.details) details.appendChild(detail);
   if (verdict.detail !== null) details.appendChild(verdict.detail);
@@ -211,7 +248,9 @@ export function drawHeldPrompt(u: HeldPrompt, tc: TrayContext, previous?: HTMLEl
       hold: hold === null ? null : hold.case,
       accept: verdict.offersAccept,
       foldAbove:
-        u.foldAbove === undefined ? null : requireMessage(u.foldAbove.above, `${path}.fold_above.above`),
+        u.foldAbove === undefined
+          ? null
+          : requireMessage(u.foldAbove.above, `${path}.fold_above.above`),
     }),
   );
 
@@ -239,12 +278,20 @@ export function drawHeldPrompt(u: HeldPrompt, tc: TrayContext, previous?: HTMLEl
   if (u.coalesced === undefined) card.removeAttribute("data-coalesced");
   else card.setAttribute("data-coalesced", "true");
   if (u.act === undefined) card.removeAttribute("data-act");
-  else card.setAttribute("data-act", requireCase(u.act.act, `${path}.act.act`).case);
+  else
+    card.setAttribute(
+      "data-act",
+      requireCase(u.act.act, `${path}.act.act`).case,
+    );
   // The acceptance is STATE OF THE CARD, not of a marker that only exists once
   // it is true: the arm that has an acceptance says which way it stands, and
   // the arms that have none say nothing at all.
   if (verdict.acceptedState === null) card.removeAttribute("data-accepted");
-  else card.setAttribute("data-accepted", verdict.acceptedState ? "true" : "false");
+  else
+    card.setAttribute(
+      "data-accepted",
+      verdict.acceptedState ? "true" : "false",
+    );
   return card;
 }
 
@@ -252,7 +299,10 @@ export function drawHeldPrompt(u: HeldPrompt, tc: TrayContext, previous?: HTMLEl
  * A held session act: the change it makes when what is ahead of it ends,
  * "model → claude-opus-5-5" or "permission mode → plan".
  */
-export function drawHeldSessionAct(u: HeldSessionAct, path: string): HTMLElement {
+export function drawHeldSessionAct(
+  u: HeldSessionAct,
+  path: string,
+): HTMLElement {
   const act = requireCase(u.act, `${path}.act`);
   const line = document.createElement("div");
   line.className = "queued-act";
@@ -336,13 +386,22 @@ function drawClassification(
 ): Verdict {
   switch (classification.case) {
     case "classifying":
-      return drawHeldPromptClassifying(classification.value, `${path}.classifying`);
+      return drawHeldPromptClassifying(
+        classification.value,
+        `${path}.classifying`,
+      );
     case "interject":
       return drawHeldPromptInterject(classification.value, `${path}.interject`);
     case "afterToolCall":
-      return drawHeldPromptAfterToolCall(classification.value, `${path}.after_tool_call`);
+      return drawHeldPromptAfterToolCall(
+        classification.value,
+        `${path}.after_tool_call`,
+      );
     case "holdForTurnEnd":
-      return drawHeldPromptHoldForTurnEnd(classification.value, `${path}.hold_for_turn_end`);
+      return drawHeldPromptHoldForTurnEnd(
+        classification.value,
+        `${path}.hold_for_turn_end`,
+      );
     case "uninterruptibleTurn":
       return drawHeldPromptUninterruptibleTurn(
         classification.value,
@@ -354,7 +413,10 @@ function drawClassification(
         `${path}.classification_error`,
       );
     case "daemonHeld":
-      return drawHeldPromptDaemonHeld(classification.value, `${path}.daemon_held`);
+      return drawHeldPromptDaemonHeld(
+        classification.value,
+        `${path}.daemon_held`,
+      );
     default: {
       const other: { case: string } = classification;
       return unreachableArm(path, other.case);
@@ -368,7 +430,10 @@ function drawClassification(
  * No rationale, because none exists yet, and no accept, because there is no
  * verdict to confirm. The pulse is what says the state is transient.
  */
-export function drawHeldPromptClassifying(_u: HeldPromptClassifying, path: string): Verdict {
+export function drawHeldPromptClassifying(
+  _u: HeldPromptClassifying,
+  path: string,
+): Verdict {
   log.debug("drawing a classifying held prompt", {
     operation: "tray.held-prompt.classifying",
     context: { path },
@@ -382,7 +447,10 @@ export function drawHeldPromptClassifying(_u: HeldPromptClassifying, path: strin
 }
 
 /** Interjects: the green the owner named for a prompt that interrupts. */
-export function drawHeldPromptInterject(u: HeldPromptInterject, path: string): Verdict {
+export function drawHeldPromptInterject(
+  u: HeldPromptInterject,
+  path: string,
+): Verdict {
   log.debug("drawing an interjecting held prompt", {
     operation: "tray.held-prompt.interject",
     context: { path },
@@ -399,7 +467,10 @@ export function drawHeldPromptInterject(u: HeldPromptInterject, path: string): V
  * Joins the running turn after its current tool call: sent now with nothing
  * interrupted, so it wears the green of a prompt that goes to the agent now.
  */
-export function drawHeldPromptAfterToolCall(u: HeldPromptAfterToolCall, path: string): Verdict {
+export function drawHeldPromptAfterToolCall(
+  u: HeldPromptAfterToolCall,
+  path: string,
+): Verdict {
   log.debug("drawing a held prompt joining the running turn", {
     operation: "tray.held-prompt.after-tool-call",
     context: { path },
@@ -420,7 +491,10 @@ export function drawHeldPromptAfterToolCall(u: HeldPromptAfterToolCall, path: st
  * stands in its place rather than a button that would say the same thing
  * twice.
  */
-export function drawHeldPromptHoldForTurnEnd(u: HeldPromptHoldForTurnEnd, path: string): Verdict {
+export function drawHeldPromptHoldForTurnEnd(
+  u: HeldPromptHoldForTurnEnd,
+  path: string,
+): Verdict {
   const confirmed = u.accepted?.accepted === true;
   log.debug("drawing a hold-for-turn-end held prompt", {
     operation: "tray.held-prompt.hold-for-turn-end",
@@ -481,7 +555,10 @@ export function drawHeldPromptClassificationError(
  * draws NO badge — the hold arm's badge is what holds it — and offers no
  * accept, since there is no verdict to confirm.
  */
-export function drawHeldPromptDaemonHeld(_u: HeldPromptDaemonHeld, path: string): Verdict {
+export function drawHeldPromptDaemonHeld(
+  _u: HeldPromptDaemonHeld,
+  path: string,
+): Verdict {
   log.debug("drawing a daemon-held prompt", {
     operation: "tray.held-prompt.daemon-held",
     context: { path },
@@ -500,7 +577,10 @@ export function drawHeldPromptDaemonHeld(_u: HeldPromptDaemonHeld, path: string)
  * UNSPECIFIED carries no spec by design — it names no command — so it is a
  * malformed view here rather than a card explaining nothing.
  */
-export function sessionCommandLiteral(command: SessionCommand, path: string): string {
+export function sessionCommandLiteral(
+  command: SessionCommand,
+  path: string,
+): string {
   if (command === SessionCommand.UNSPECIFIED) {
     throw new MalformedView(path, "the session command is UNSPECIFIED");
   }
@@ -523,9 +603,15 @@ function drawHold(
     case "shutdown":
       return drawHeldPromptShutdownHold(hold.value, `${path}.shutdown`);
     case "sessionStarting":
-      return drawHeldPromptSessionStartingHold(hold.value, `${path}.session_starting`);
+      return drawHeldPromptSessionStartingHold(
+        hold.value,
+        `${path}.session_starting`,
+      );
     case "buildRefresh":
-      return drawHeldPromptBuildRefreshHold(hold.value, `${path}.build_refresh`);
+      return drawHeldPromptBuildRefreshHold(
+        hold.value,
+        `${path}.build_refresh`,
+      );
     case "merge":
       return drawHeldPromptMergeHold(hold.value, `${path}.merge`);
     default: {
@@ -536,7 +622,10 @@ function drawHold(
 }
 
 /** Held for the scheduled restart. */
-export function drawHeldPromptShutdownHold(u: HeldPromptShutdownHold, path: string): HeldStatus {
+export function drawHeldPromptShutdownHold(
+  u: HeldPromptShutdownHold,
+  path: string,
+): HeldStatus {
   log.debug("drawing a shutdown hold", {
     operation: "tray.held-prompt.shutdown-hold",
     context: { path, schedule_id: u.scheduleId },
@@ -569,7 +658,10 @@ export function drawHeldPromptBuildRefreshHold(
 }
 
 /** Held until the merge ends. Empty on the wire: presence is the fact. */
-export function drawHeldPromptMergeHold(_u: HeldPromptMergeHold, path: string): HeldStatus {
+export function drawHeldPromptMergeHold(
+  _u: HeldPromptMergeHold,
+  path: string,
+): HeldStatus {
   log.debug("drawing a merge hold", {
     operation: "tray.held-prompt.merge-hold",
     context: { path },
@@ -601,8 +693,12 @@ export type HeldAction = "release" | "drop" | "accept";
  * release is in flight is a race the user should not be able to start.
  */
 export function drawHeldPromptActions(spec: ActionSpec): HTMLElement {
-  const forbids = spec.classification === "uninterruptibleTurn" ? spec.classification : spec.hold;
-  const noReleaseTitle = forbids === null ? undefined : NO_RELEASE_TITLES[forbids];
+  const forbids =
+    spec.classification === "uninterruptibleTurn"
+      ? spec.classification
+      : spec.hold;
+  const noReleaseTitle =
+    forbids === null ? undefined : NO_RELEASE_TITLES[forbids];
   log.debug("drawing a held prompt's actions", {
     operation: "tray.held-prompt.actions",
     context: {
@@ -639,46 +735,74 @@ export function drawHeldPromptActions(spec: ActionSpec): HTMLElement {
   if (spec.accept) actions.appendChild(actionButton("accept", "Accept", spec));
   // DAEMON-OFFERED: the fold stands exactly while the entry carries
   // `fold_above` (FoldHeldPrompt).
-  if (spec.foldAbove !== null) actions.appendChild(foldAboveButton(spec, spec.foldAbove));
+  if (spec.foldAbove !== null)
+    actions.appendChild(foldAboveButton(spec, spec.foldAbove));
   return actions;
 }
 
 /** One control, with its refusal drawn as this row's next sibling. */
-function actionButton(action: HeldAction, label: string, spec: ActionSpec): Control {
+function actionButton(
+  action: HeldAction,
+  label: string,
+  spec: ActionSpec,
+): Control {
   const button = createControl();
   button.className = `queued-action queued-action-${action}`;
   button.setAttribute("data-held-action", action);
   button.textContent = label;
   button.addEventListener("click", (event: MouseEvent) => {
     event.preventDefault();
-    void guardMalformed(spec.tc.ctx, "tray.held-prompt.action", run(action, spec, button));
+    void guardMalformed(
+      spec.tc.ctx,
+      "tray.held-prompt.action",
+      run(action, spec, button),
+    );
   });
   return button;
 }
 
 /** Issue the action; a refusal is said at the row that made the call. */
-async function run(action: HeldAction, spec: ActionSpec, button: Control): Promise<void> {
-  const succeeded = await rowCall(button, "UpdateHeldPrompt", action, spec.turn.value, async () => {
-    const response = await callUnary(
-      spec.tc.ctx,
-      "UpdateHeldPrompt",
-      (client) =>
-        client.updateHeldPrompt({
-          workspace: spec.tc.ctx.workspace,
-          turn: spec.turn,
-          action: heldAction(action),
-        }),
-      UpdateHeldPromptResponseSchema,
-    );
-    const result = requireCase(response.result, "UpdateHeldPromptResponse.result");
-    if (result.case === "success") return null;
-    const cause = requireCase(result.value.cause, "UpdateHeldPromptError.cause");
-    const say = crossCuttingSentence("UpdateHeldPrompt", cause) ?? updateHeldPromptRefusal(cause, action);
-    return { arm: cause.case, say };
-  });
+async function run(
+  action: HeldAction,
+  spec: ActionSpec,
+  button: Control,
+): Promise<void> {
+  const succeeded = await rowCall(
+    button,
+    "UpdateHeldPrompt",
+    action,
+    spec.turn.value,
+    async () => {
+      const response = await callUnary(
+        spec.tc.ctx,
+        "UpdateHeldPrompt",
+        (client) =>
+          client.updateHeldPrompt({
+            workspace: spec.tc.ctx.workspace,
+            turn: spec.turn,
+            action: heldAction(action),
+          }),
+        UpdateHeldPromptResponseSchema,
+      );
+      const result = requireCase(
+        response.result,
+        "UpdateHeldPromptResponse.result",
+      );
+      if (result.case === "success") return null;
+      const cause = requireCase(
+        result.value.cause,
+        "UpdateHeldPromptError.cause",
+      );
+      const say =
+        crossCuttingSentence("UpdateHeldPrompt", cause) ??
+        updateHeldPromptRefusal(cause, action);
+      return { arm: cause.case, say };
+    },
+  );
   // A drop DISCARDS TEXT THE USER TYPED. It leaves on the next push, so the
   // words are handed back here, on the way out, while they still exist.
-  if (succeeded && action === "drop") handBackDroppedText(button, spec.text, spec.turn.value);
+  if (succeeded && action === "drop")
+    handBackDroppedText(button, spec.text, spec.turn.value);
 }
 
 /** A refusal a row's call answered: the error's arm and the sentence said for it. */
@@ -730,7 +854,10 @@ async function rowCall(
     return false;
   } finally {
     // Only a refusal leaves the row on screen; re-enable so it can be retried.
-    if (row !== null && row.parentElement?.querySelector(".queued-refusal") != null) {
+    if (
+      row !== null &&
+      row.parentElement?.querySelector(".queued-refusal") != null
+    ) {
       setRowDisabled(row, false);
     }
   }
@@ -752,13 +879,21 @@ function foldAboveButton(spec: ActionSpec, above: TurnId): Control {
   button.textContent = FOLD_ABOVE_LABEL;
   button.addEventListener("click", (event: MouseEvent) => {
     event.preventDefault();
-    void guardMalformed(spec.tc.ctx, "tray.held-prompt.fold", fold(spec, above, button));
+    void guardMalformed(
+      spec.tc.ctx,
+      "tray.held-prompt.fold",
+      fold(spec, above, button),
+    );
   });
   return button;
 }
 
 /** Fold this prompt into ABOVE; a refusal is said at the row, as every row action's is. */
-async function fold(spec: ActionSpec, above: TurnId, button: Control): Promise<void> {
+async function fold(
+  spec: ActionSpec,
+  above: TurnId,
+  button: Control,
+): Promise<void> {
   log.info("folding a held prompt into the one ahead", {
     operation: "tray.held-prompt.fold",
     context: { turn: spec.turn.value, above: above.value },
@@ -775,16 +910,23 @@ async function fold(spec: ActionSpec, above: TurnId, button: Control): Promise<v
         }),
       FoldHeldPromptResponseSchema,
     );
-    const result = requireCase(response.result, "FoldHeldPromptResponse.result");
+    const result = requireCase(
+      response.result,
+      "FoldHeldPromptResponse.result",
+    );
     if (result.case === "success") return null;
     const cause = requireCase(result.value.cause, "FoldHeldPromptError.cause");
-    const say = crossCuttingSentence("FoldHeldPrompt", cause) ?? foldHeldPromptRefusal(cause);
+    const say =
+      crossCuttingSentence("FoldHeldPrompt", cause) ??
+      foldHeldPromptRefusal(cause);
     return { arm: cause.case, say };
   });
 }
 
 /** `FoldHeldPromptError`'s cause union, narrowed to a SET arm. */
-type FoldHeldPromptCause = NonNullable<FoldHeldPromptError["cause"]> & { case: string };
+type FoldHeldPromptCause = NonNullable<FoldHeldPromptError["cause"]> & {
+  case: string;
+};
 
 /**
  * What each of FoldHeldPrompt's OWN arms says. Every one means the card is
@@ -804,12 +946,22 @@ export function foldHeldPromptRefusal(cause: FoldHeldPromptCause): string {
       return "the entry above is a session change, which takes no prompt";
     case "beingEdited":
       return `a held prompt being edited cannot be folded (turn ${cause.value.editingTurn?.value ?? ""})`;
+    case "beingDelivered":
+      return BEING_DELIVERED;
     default: {
       const other: { case: string } = cause;
       return unreachableArm("FoldHeldPromptError.cause", other.case);
     }
   }
 }
+
+/**
+ * What every held-prompt endpoint's `being_delivered` arm says: the prompt is
+ * on its way to the agent, so it is neither held nor delivered yet, and a
+ * failed delivery puts it back in the tray.
+ */
+export const BEING_DELIVERED =
+  "this prompt is being delivered right now; if the delivery fails it returns to the tray";
 
 /** What the warning chip names a failed or refused Edit as. */
 export const EDIT_REQUEST = "edit a held prompt";
@@ -826,6 +978,7 @@ export const EDIT_REFUSALS: SentenceTable = {
     `another held prompt is already being edited (turn ${value.editingTurn?.value ?? ""})`,
   notEditing: () => "no edit stands on this prompt",
   noEditor: () => "no editor is attached to edit this prompt in",
+  beingDelivered: () => BEING_DELIVERED,
 };
 
 /** The Edit control: it begins a daemon-owned edit of this prompt. */
@@ -836,7 +989,11 @@ function editButton(spec: ActionSpec): Control {
   button.textContent = "Edit";
   button.addEventListener("click", (event: MouseEvent) => {
     event.preventDefault();
-    void guardMalformed(spec.tc.ctx, "tray.held-prompt.edit", beginEdit(spec, button));
+    void guardMalformed(
+      spec.tc.ctx,
+      "tray.held-prompt.edit",
+      beginEdit(spec, button),
+    );
   });
   return button;
 }
@@ -874,10 +1031,15 @@ async function beginEdit(spec: ActionSpec, button: Control): Promise<void> {
         operation: "tray.held-prompt.edit-failed",
         context: { turn: spec.turn.value, arm: failed.arm },
       });
-      spec.tc.ctx.failures.report(controlPlaneFailed(EDIT_REQUEST, failed.text));
+      spec.tc.ctx.failures.report(
+        controlPlaneFailed(EDIT_REQUEST, failed.text),
+      );
       return;
     }
-    const result = requireCase(response.result, "EditHeldPromptResponse.result");
+    const result = requireCase(
+      response.result,
+      "EditHeldPromptResponse.result",
+    );
     switch (result.case) {
       case "success":
         log.info("the daemon began the edit; its pushes draw it", {
@@ -886,12 +1048,22 @@ async function beginEdit(spec: ActionSpec, button: Control): Promise<void> {
         });
         return;
       case "error": {
-        const said = refusalOf(result.value.cause, EDIT_REFUSALS, "EditHeldPromptError.cause");
+        const said = refusalOf(
+          result.value.cause,
+          EDIT_REFUSALS,
+          "EditHeldPromptError.cause",
+        );
         log.info(`EditHeldPrompt refused a begin: ${said.text}`, {
           operation: "tray.held-prompt.edit-refused",
-          context: { turn: spec.turn.value, arm: said.arm, sentence: said.text },
+          context: {
+            turn: spec.turn.value,
+            arm: said.arm,
+            sentence: said.text,
+          },
         });
-        spec.tc.ctx.failures.report(controlPlaneFailed(EDIT_REQUEST, said.text));
+        spec.tc.ctx.failures.report(
+          controlPlaneFailed(EDIT_REQUEST, said.text),
+        );
         return;
       }
       default: {
@@ -905,7 +1077,9 @@ async function beginEdit(spec: ActionSpec, button: Control): Promise<void> {
 }
 
 /** `UpdateHeldPromptError`'s cause union, narrowed to a SET arm. */
-type UpdateHeldPromptCause = NonNullable<UpdateHeldPromptError["cause"]> & { case: string };
+type UpdateHeldPromptCause = NonNullable<UpdateHeldPromptError["cause"]> & {
+  case: string;
+};
 
 /**
  * What each of this endpoint's OWN arms says.
@@ -928,9 +1102,14 @@ export function updateHeldPromptRefusal(
       return "accept applies only to a prompt held for the turn's end";
     case "releaseRefused":
       return "the session would not take this prompt now";
+    case "beingDelivered":
+      return BEING_DELIVERED;
     default: {
       const other: { case: string } = cause;
-      return unreachableArm(`UpdateHeldPromptError.cause (on a ${action})`, other.case);
+      return unreachableArm(
+        `UpdateHeldPromptError.cause (on a ${action})`,
+        other.case,
+      );
     }
   }
 }
@@ -944,7 +1123,8 @@ export function updateHeldPromptRefusal(
  */
 function heldAction(
   action: HeldAction,
-): { case: "release"; value: Record<string, never> }
+):
+  | { case: "release"; value: Record<string, never> }
   | { case: "drop"; value: Record<string, never> }
   | { case: "accept"; value: Record<string, never> } {
   switch (action) {
@@ -958,21 +1138,32 @@ function heldAction(
 }
 
 /** Hand the dropped words back, bubbling, so a composer can restore them. */
-function handBackDroppedText(button: HTMLElement, text: string, turn: string): void {
+function handBackDroppedText(
+  button: HTMLElement,
+  text: string,
+  turn: string,
+): void {
   log.info("handing a dropped prompt's text back", {
     operation: "tray.held-prompt.dropped",
     context: { turn, length: text.length },
   });
   const detail: HeldPromptDroppedDetail = { text };
-  button.dispatchEvent(new CustomEvent(DROPPED_EVENT, { detail, bubbles: true }));
+  button.dispatchEvent(
+    new CustomEvent(DROPPED_EVENT, { detail, bubbles: true }),
+  );
 }
 
 function setRowDisabled(row: Element | null, disabled: boolean): void {
   if (row === null) return;
-  for (const control of row.querySelectorAll<Control>(CONTROL_SELECTOR)) control.disabled = disabled;
+  for (const control of row.querySelectorAll<Control>(CONTROL_SELECTOR))
+    control.disabled = disabled;
 }
 
-function drawRowRefusal(row: Element | null, arm: string, message: string): void {
+function drawRowRefusal(
+  row: Element | null,
+  arm: string,
+  message: string,
+): void {
   if (row === null) return;
   const refusal = document.createElement("div");
   refusal.className = "refusal queued-refusal";
@@ -982,7 +1173,9 @@ function drawRowRefusal(row: Element | null, arm: string, message: string): void
 }
 
 function clearRowRefusal(row: Element | null): void {
-  row?.parentElement?.querySelectorAll(".queued-refusal").forEach((node) => node.remove());
+  row?.parentElement
+    ?.querySelectorAll(".queued-refusal")
+    .forEach((node) => node.remove());
 }
 
 /**
@@ -1000,7 +1193,10 @@ export const BADGELESS_CLASSIFICATION_ARMS = ["daemonHeld"] as const;
  * own: the daemon returns it to `holdForTurnEnd` (daemon_hold.proto).
  */
 export type HeldStatus =
-  | Exclude<NonNullable<HeldPrompt["classification"]["case"]>, (typeof BADGELESS_CLASSIFICATION_ARMS)[number]>
+  | Exclude<
+      NonNullable<HeldPrompt["classification"]["case"]>,
+      (typeof BADGELESS_CLASSIFICATION_ARMS)[number]
+    >
   | NonNullable<HeldPrompt["hold"]["case"]>
   | "accepted"
   | "editing"
@@ -1057,7 +1253,10 @@ export function heldBadgeClasses(status: string): string {
       operation: "tray.held-prompt.badge-unknown-status",
       context: { status },
     });
-    throw new MalformedView("HeldPrompt.status", `status '${status}' has no badge`);
+    throw new MalformedView(
+      "HeldPrompt.status",
+      `status '${status}' has no badge`,
+    );
   }
   const tone: HeldBadgeTone = HELD_STATUS_BADGES[status as HeldStatus];
   return `badge ${HELD_BADGE_CLASS} ${tone}`;
@@ -1107,7 +1306,10 @@ export function drawHeldPromptBadges(
         operation: "tray.held-prompt.badge-empty-label",
         context: { path: `${path}[${index}]`, status },
       });
-      throw new MalformedView(`${path}[${index}].label`, "the badge label is empty");
+      throw new MalformedView(
+        `${path}[${index}].label`,
+        "the badge label is empty",
+      );
     }
     pills.push(badge(wire.label, status));
     if (wire.detail !== undefined) {
@@ -1150,7 +1352,10 @@ export function drawUserSaid(u: UserSaid, path: string): HTMLElement[] {
 }
 
 /** One block, or nothing where the schema says a block draws nothing. */
-export function drawUserContentBlock(u: UserContentBlock, path: string): HTMLElement | null {
+export function drawUserContentBlock(
+  u: UserContentBlock,
+  path: string,
+): HTMLElement | null {
   const block = requireCase(u.block, `${path}.block`);
   switch (block.case) {
     case "text":

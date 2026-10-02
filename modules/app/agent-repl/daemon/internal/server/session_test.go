@@ -73,6 +73,41 @@ func TestUpdateHeldPromptMapsNoSuchHold(t *testing.T) {
 	}
 }
 
+func dropRequest() *agentreplv1.UpdateHeldPromptRequest {
+	req := releaseRequest()
+	req.Action = &agentreplv1.UpdateHeldPromptRequest_Drop{Drop: &agentreplv1.UpdateHeldPromptDrop{}}
+	return req
+}
+
+func TestUpdateHeldPromptMapsBeingDelivered(t *testing.T) {
+	tests := []struct {
+		name    string
+		request func() *agentreplv1.UpdateHeldPromptRequest
+		arrange func(q *fakeQueue)
+	}{
+		{"a drop", dropRequest, func(q *fakeQueue) { q.dropErr = promptqueue.ErrBeingDelivered }},
+		{"a release", releaseRequest, func(q *fakeQueue) { q.releaseErr = promptqueue.ErrBeingDelivered }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			tt.arrange(h.Queue)
+
+			// Act
+			resp, err := h.Client.UpdateHeldPrompt(context.Background(), connect.NewRequest(tt.request()))
+
+			// Assert
+			if err != nil {
+				t.Fatalf("UpdateHeldPrompt: %v", err)
+			}
+			if resp.Msg.GetError().GetBeingDelivered() == nil {
+				t.Fatalf("result = %v, want being_delivered", resp.Msg.GetResult())
+			}
+		})
+	}
+}
+
 // TestUpdateHeldPromptMapsAcceptNotApplicable pins that `accept` is legal ONLY
 // on a hold_for_turn_end verdict.
 func TestUpdateHeldPromptMapsAcceptNotApplicable(t *testing.T) {
@@ -456,6 +491,12 @@ func TestEditHeldPromptMapsEveryRefusal(t *testing.T) {
 			func(e *agentreplv1.EditHeldPromptError) bool { return e.GetNotHeld() != nil }},
 		{"already delivered", "begin", promptqueue.ErrAlreadyDelivered, func(q *fakeQueue, err error) { q.beginErr = err },
 			func(e *agentreplv1.EditHeldPromptError) bool { return e.GetAlreadyDelivered() != nil }},
+		{"being delivered on begin", "begin", promptqueue.ErrBeingDelivered, func(q *fakeQueue, err error) { q.beginErr = err },
+			func(e *agentreplv1.EditHeldPromptError) bool { return e.GetBeingDelivered() != nil }},
+		{"being delivered on commit", "commit", promptqueue.ErrBeingDelivered, func(q *fakeQueue, err error) { q.commitErr = err },
+			func(e *agentreplv1.EditHeldPromptError) bool { return e.GetBeingDelivered() != nil }},
+		{"being delivered on cancel", "cancel", promptqueue.ErrBeingDelivered, func(q *fakeQueue, err error) { q.cancelErr = err },
+			func(e *agentreplv1.EditHeldPromptError) bool { return e.GetBeingDelivered() != nil }},
 		{"being edited", "begin", &promptqueue.BeingEditedError{Turn: "turn-0"}, func(q *fakeQueue, err error) { q.beginErr = err },
 			func(e *agentreplv1.EditHeldPromptError) bool {
 				return e.GetBeingEdited().GetEditingTurn().GetValue() == "turn-0"
@@ -536,6 +577,8 @@ func TestFoldHeldPromptMapsEveryRefusal(t *testing.T) {
 			func(e *agentreplv1.FoldHeldPromptError) bool { return e.GetNoSuchHold() != nil }},
 		{"not held", promptqueue.ErrNotHeld,
 			func(e *agentreplv1.FoldHeldPromptError) bool { return e.GetNotHeld() != nil }},
+		{"being delivered", promptqueue.ErrBeingDelivered,
+			func(e *agentreplv1.FoldHeldPromptError) bool { return e.GetBeingDelivered() != nil }},
 		{"not a prompt", promptqueue.ErrNotAPrompt,
 			func(e *agentreplv1.FoldHeldPromptError) bool { return e.GetNotAPrompt() != nil }},
 		{"above moved, naming the entry ahead now", &promptqueue.AboveMovedError{Current: "turn-0"},

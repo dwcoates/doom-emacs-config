@@ -284,16 +284,13 @@ func (q *queue) runningTurn(ws ids.WorkspaceID) (ids.TurnID, bool) {
 	return "", false
 }
 
-// errClaimedByCall refuses a step on a hold a shim call in flight is
-// delivering or retiring. To the user the hold has left the queue: it is on
-// its way to the shim, so the refusal is the one a delivered hold earns.
-var errClaimedByCall = fmt.Errorf("the held prompt is being delivered to the shim: %w", ErrAlreadyDelivered)
-
-// unclaimed refuses, with errClaimedByCall, a hold a call in flight claims.
+// unclaimed refuses, with ErrBeingDelivered, a hold a call in flight claims:
+// the call may yet fail and return the hold to the tray, so the hold is
+// neither held nor delivered while it stands.
 func (q *queue) unclaimed(ws ids.WorkspaceID, held wsm.HeldPrompt, log dlog.Logger, op string) error {
 	if !q.claimedByCall(ws, held.Turn) {
 		return nil
 	}
 	log.Info(op, "the step is refused: the held prompt is being delivered to the shim", dlog.Context{"turn": string(held.Turn)})
-	return errClaimedByCall
+	return ErrBeingDelivered
 }

@@ -312,6 +312,18 @@
     (should (agent-repl-test-he--logged-p
              "elisp.held-edit.refused ws=ws-one step=commit arm=:already-delivered"))))
 
+(ert-deftest agent-repl-held-edit-a-refusal-mid-delivery-is-said-as-being-delivered ()
+  "A commit refused while the prompt's delivery is in flight says so."
+  (agent-repl-test-he--with
+    ;; Arrange
+    (agent-repl-held-edit-on-host-update "ws-one" (agent-repl-test-he--edit "w"))
+    (setq agent-repl-test-he--answer (agent-repl-test-he--refusal :being-delivered))
+    ;; Act
+    (agent-repl-held-edit-commit "ws-one" (agent-repl-test-he--said "revised") nil)
+    ;; Assert
+    (should (equal (car agent-repl-test-he--messages)
+                   "agent-repl: editing the held prompt was refused -- being-delivered"))))
+
 (ert-deftest agent-repl-held-edit-a-handover-refusal-goes-to-the-handover-path ()
   "A handover arm is the rollout's, not a refusal to show the user."
   (agent-repl-test-he--with
