@@ -149,6 +149,21 @@ what an implementer must know that the schema does not say.
     runs at, which a settings read alone could not tell it after a pick.
   - The shim never pushes a guessed level: absence means none known.
 
+### 7. A held prompt can be refused as being delivered
+
+- WHAT: a `being_delivered` arm on `agentrepl.v1.EditHeldPromptError`
+  (tag 11), `agentrepl.v1.UpdateHeldPromptError` (tag 9) and
+  `agentrepl.v1.FoldHeldPromptError` (tag 11).
+- WHY: the prompt queue no longer holds its lock across a call to the shim,
+  so a held prompt can be mid-delivery while the user acts on it. Answering
+  `already_delivered` would be false whenever that call fails and the prompt
+  returns to the tray.
+- CONSEQUENCES:
+  - The daemon refuses drop, edit and fold on a prompt whose delivery call
+    stands with this arm. A release in that window stays `release_refused`.
+  - Emacs's wire decoding rejects unknown arms, so the daemon change and
+    the lisp decoding land together.
+
 ## Features that need no protobuf change
 
 - Persistent-wifi click: the webapp calls the existing
