@@ -74,12 +74,11 @@ export function startTurnRequest(): shimv1.StartTurnRequest {
     turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
     said: said(),
     origin: conversationv1.PromptOrigin.USER_SENT,
-    pageSize: 20,
   });
 }
 
 export function watchAgentRequest(): shimv1.WatchAgentRequest {
-  return create(shimv1.WatchAgentRequestSchema, { pageSize: 20 });
+  return create(shimv1.WatchAgentRequestSchema, {});
 }
 
 export function updateAgentRequest(): shimv1.UpdateAgentRequest {
@@ -136,7 +135,6 @@ export function detachForegroundRequest(): shimv1.DetachForegroundRequest {
 
 export function readHistoryRequest(): shimv1.ReadHistoryRequest {
   return create(shimv1.ReadHistoryRequestSchema, {
-    pageSize: 20,
     position: { case: "first", value: create(shimv1.ReadHistoryFirstSchema, {}) },
   });
 }
