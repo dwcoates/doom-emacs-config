@@ -117,7 +117,6 @@ whose calls are the observation."
            (agent-repl-roster--bringup-carry nil)
            (agent-repl-roster--held-id nil)
            (agent-repl-host-last-selected-id nil)
-           (agent-repl-host--select-sent-ids nil)
            (agent-repl-host-reselect-pending nil))
        (cl-letf (((symbol-function 'agent-repl--ws-create)
                   (lambda (ws &optional dir)
@@ -1055,42 +1054,6 @@ Re-selection is idempotent, which is what keeps this from looping."
       :current "b"))
     ;; Assert
     (should (equal agent-repl-test-roster--switched nil))))
-
-(ert-deftest agent-repl-test-roster-unanswered-own-selection-switches-nothing ()
-  "A `current' naming a selection Emacs sent but has no answer for is ours.
-The race: `s-}' twice takes Emacs from one to two to three; the roster
-stamping two is read before two's answer, while the frame is already on
-three.  Following it took the frame back to two."
-  ;; Arrange
-  (agent-repl-test-roster--with-editor
-    (setq agent-repl-test-roster--current-name "three"
-          agent-repl-host--select-sent-ids '("b" "c"))
-    ;; Act
-    (agent-repl-roster-apply
-     (agent-repl-test-roster--roster
-      :sections (list (agent-repl-test-roster--section
-                       "repo" (list (agent-repl-test-roster--row "a" "one" :ready)
-                                    (agent-repl-test-roster--row "b" "two" :ready)
-                                    (agent-repl-test-roster--row "c" "three" :ready))))
-      :current "b"))
-    ;; Assert
-    (should (equal agent-repl-test-roster--switched nil))))
-
-(ert-deftest agent-repl-test-roster-a-current-emacs-never-sent-still-switches ()
-  "A `current' naming no selection Emacs sent is a request, as before."
-  ;; Arrange
-  (agent-repl-test-roster--with-editor
-    (setq agent-repl-test-roster--current-name "one"
-          agent-repl-host--select-sent-ids '("a"))
-    ;; Act
-    (agent-repl-roster-apply
-     (agent-repl-test-roster--roster
-      :sections (list (agent-repl-test-roster--section
-                       "repo" (list (agent-repl-test-roster--row "a" "one" :ready)
-                                    (agent-repl-test-roster--row "b" "two" :ready))))
-      :current "b"))
-    ;; Assert
-    (should (equal agent-repl-test-roster--switched '("two")))))
 
 (ert-deftest agent-repl-test-roster-a-current-during-a-relink-switches-nothing ()
   "A roster push landing mid re-registration must not move the frame.
