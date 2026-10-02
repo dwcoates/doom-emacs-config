@@ -41,6 +41,7 @@
 ;; so the declarations below exist for the byte-compiler alone.
 (declare-function agent-repl--fatal "core")
 (declare-function agent-repl--info "core")
+(declare-function agent-repl--error "core")
 (declare-function agent-repl--kill-cause-str "core")
 (declare-function agent-repl--user-message "core")
 
@@ -373,6 +374,275 @@ other stock xwidget binding still resolves through the parent."
 
 (add-hook 'agent-repl-frontend-webview-adopt-hook
           #'agent-repl--frontend-remap-stock-reload)
+
+;;;; ---- Copying the webview's highlighted text ------------------------------
+;;
+;; WHERE THE KEYS GO.  On the NS port the WKWebView's `keyDown:' override
+;; (src/nsxwidget.m) evaluates the injected `xwHasFocus()' and FORWARDS
+;; every key to Emacs unless an INPUT or TEXTAREA holds DOM focus.  A
+;; reader who drag-selected feed text has focused neither, so `y', `C-c'
+;; and Command-c (`s-c') all arrive HERE, in the webview buffer's keymaps,
+;; and never reach the page.  The page cannot copy for them; Emacs must,
+;; and it writes the system clipboard through `kill-new' (the kill ring's
+;; `interprogram-cut-function' end), the same write every agent-repl copy
+;; command makes.
+;;
+;; THE OWNER'S RULING (2026-10-02).  The three keys copy ONLY when the page
+;; holds a NONEMPTY selection AND has focus (`document.hasFocus()'); in
+;; every other case each key does exactly what it did before this mode
+;; existed.  So all three are bound to ONE command,
+;; `agent-repl-frontend-copy-selection', which asks the page and then
+;; either copies or replays the key with this mode's map out of the way.
+;;
+;; WHY THE ASK BLOCKS.  The page answers asynchronously (a
+;; `javascript-callback' xwidget event), but the fall-through must happen
+;; BEFORE any key the reader types after it: `C-c' is a prefix, and
+;; `C-c C-k' typed quickly must still be `C-c C-k'.  So the command waits
+;; for the answer as a latch, reading events itself: `read-event' runs the
+;; xwidget callback internally (special events are handled inside
+;; `read_char'), and every ordinary event that arrives first is held and
+;; replayed, in order, after the outcome.  No timer and no duration is
+;; involved; the order of the reader's keys is preserved by construction.
+;; `C-g' while waiting abandons the wait loudly.
+
+(defconst agent-repl--frontend-copy-keys '("y" "C-c" "s-c")
+  "The keys that copy the webview's selection: vim's, the terminal's, macOS's.")
+
+(defvar agent-repl-frontend-webview-mode-map
+  (let ((map (make-sparse-keymap)))
+    (dolist (key agent-repl--frontend-copy-keys)
+      (define-key map (kbd key) #'agent-repl-frontend-copy-selection))
+    map)
+  "Keymap of `agent-repl-frontend-webview-mode': the copy chords.")
+
+(define-minor-mode agent-repl-frontend-webview-mode
+  "Give an agent-repl webview its copy chords: `y', `C-c' and `s-c'.
+Enabled on every webview the module adopts, and nowhere else, so plain
+`xwidget-webkit-mode' browsing keeps its own bindings."
+  :lighter nil
+  :keymap agent-repl-frontend-webview-mode-map
+  ;; Evil consults a minor mode's per-state maps only once
+  ;; `evil-normalize-keymaps' has rebuilt the buffer's evil map list, and
+  ;; enabling a minor mode does not trigger that.
+  (when (fboundp 'evil-normalize-keymaps)
+    (evil-normalize-keymaps)))
+
+(defconst agent-repl--frontend-copy-wake-event 'agent-repl-frontend-copy-answered
+  "The event the answer callback queues to end the copy command's wait.
+`read-event' handles the xwidget callback internally and keeps waiting
+for an ordinary event; this one is that event.  It is queued only while a
+wait for the answered request stands, and the wait strips it.")
+
+(defvar agent-repl--frontend-copy-request 0
+  "The id of the most recent selection request, counting up.")
+
+(defvar agent-repl--frontend-copy-waiting nil
+  "The id of the selection request a copy command is waiting on, or nil.")
+
+(defvar agent-repl--frontend-copy-answer nil
+  "The parsed answer to `agent-repl--frontend-copy-waiting', or nil.")
+
+(defun agent-repl--frontend-webview-execute-script-value (xw script callback)
+  "External-boundary wrapper: evaluate SCRIPT in widget XW, value to CALLBACK.
+The raw read injection, and nothing else.  Callers go through
+`agent-repl--frontend-webview-read-script', which owns the liveness and
+callback invariants that keep this call from crashing Emacs; nothing else
+may call this directly.  Body does nothing but the external call; tests
+mock via `cl-letf'.
+Registered in `agent-repl--external-boundary-functions'."
+  (require 'xwidget)
+  (xwidget-webkit-execute-script xw script callback)) ;; ALLOW-EXTERNAL-BOUNDARY
+
+(defun agent-repl--frontend-webview-read-script (buf script callback)
+  "Evaluate SCRIPT in BUF's live webview, handing its value to CALLBACK.
+The ONLY read channel Emacs has into a mounted webview.
+
+CALLBACK MUST BE A SYMBOL NAMING A FUNCTION, AND THAT IS A CRASH
+INVARIANT, NOT A STYLE RULE.  On the NS port
+`xwidget-webkit-execute-script' hands the callback to
+`nsxwidget_webkit_execute_script', which captures it BY VALUE into an
+Objective-C block (src/nsxwidget.m) the garbage collector cannot see, and
+roots it nowhere.  A freshly consed closure is collectable the moment
+this returns, and WebKit's completion handler later resurrects the
+dangling object into an input event: a use-after-free.  An interned
+symbol is permanently rooted, so per-call context travels through SCRIPT
+and comes back in the page's reply, never in a closure.
+
+The widget is resolved through `agent-repl--frontend-webview-live-widget',
+never the session fallback, so a read can reach neither a dead page nor
+another buffer's.  Returns non-nil when the read was injected, and nil,
+injecting nothing, when BUF holds no live webview."
+  (unless (and callback (symbolp callback) (fboundp callback))
+    (agent-repl--error agent-repl--owning-workspace
+                       "elisp.frontend.read-script: refused callback=%S" callback)
+    (error "agent-repl: webview read callback must name a function, got %S"
+           callback))
+  (when-let ((xw (agent-repl--frontend-webview-live-widget buf)))
+    (agent-repl--frontend-webview-execute-script-value xw script callback)
+    t))
+
+(defun agent-repl--frontend-copy-script (id)
+  "Return the JavaScript that answers request ID with the page's selection.
+The answer is ALWAYS a string (a JSON object), never null or undefined:
+the NS port drops a null result without calling back, which would leave
+the waiting command waiting.  `text' is null only when the page has no
+selection object at all, an invariant violation the command reports."
+  (format (concat "(function(){var s=window.getSelection();"
+                  "return JSON.stringify({id:%d,"
+                  "text:s===null?null:s.toString(),"
+                  "focused:document.hasFocus()});})()")
+          id))
+
+(defun agent-repl--frontend-copy-parse (raw)
+  "Parse the page's RAW answer into a plist (:id :text :focused).
+A RAW that is not the JSON object `agent-repl--frontend-copy-script'
+returns is an invariant violation: it is logged and signalled."
+  (condition-case err
+      (let ((answer (json-parse-string raw :object-type 'plist
+                                       :null-object nil :false-object nil)))
+        (unless (integerp (plist-get answer :id))
+          (signal 'json-parse-error (list "no integer id" raw)))
+        answer)
+    ((json-parse-error wrong-type-argument)
+     (agent-repl--error agent-repl--owning-workspace
+                        "elisp.frontend.copy-selection: unreadable answer raw=%S err=%S"
+                        raw err)
+     (error "agent-repl: the webview answered the selection request unreadably: %S"
+            raw))))
+
+(defun agent-repl--frontend-copy-answered (raw)
+  "Receive the page's RAW answer to a selection request.
+The xwidget `javascript-callback' handler calls this, by symbol (see
+`agent-repl--frontend-webview-read-script').  The answer to the request
+a copy command is waiting on is stored and the wait is woken; any other
+answer (one whose wait was abandoned) is dropped, at debug."
+  (let ((answer (agent-repl--frontend-copy-parse raw)))
+    (if (eql (plist-get answer :id) agent-repl--frontend-copy-waiting)
+        (progn
+          (setq agent-repl--frontend-copy-answer answer)
+          (push agent-repl--frontend-copy-wake-event unread-command-events))
+      (agent-repl--log agent-repl--owning-workspace
+                       "elisp.frontend.copy-selection: stale answer id=%s waiting=%s"
+                       (plist-get answer :id) agent-repl--frontend-copy-waiting))))
+
+(defun agent-repl--frontend-read-event ()
+  "Read the next ordinary input event, running special events meanwhile.
+A seam over `read-event' so tests can script the events a wait sees."
+  (read-event))
+
+(defun agent-repl--frontend-await-copy-answer (buf)
+  "Ask BUF's page for its selection and wait for the answer.
+Returns (ANSWER . HELD): the parsed answer plist, or nil when BUF holds
+no live webview to ask, and the ordinary events read while waiting, in
+arrival order, for the caller to replay.  `C-g' read while waiting
+abandons the wait: it is logged and quits."
+  (let ((id (setq agent-repl--frontend-copy-request
+                  (1+ agent-repl--frontend-copy-request)))
+        (held nil))
+    (setq agent-repl--frontend-copy-waiting id
+          agent-repl--frontend-copy-answer nil)
+    (unwind-protect
+        (if (not (agent-repl--frontend-webview-read-script
+                  buf (agent-repl--frontend-copy-script id)
+                  'agent-repl--frontend-copy-answered))
+            (cons nil nil)
+          (while (null agent-repl--frontend-copy-answer)
+            (let ((event (agent-repl--frontend-read-event)))
+              (cond
+               ((eq event agent-repl--frontend-copy-wake-event))
+               ((eql event ?\C-g)
+                (agent-repl--info agent-repl--owning-workspace
+                                  "elisp.frontend.copy-selection: wait abandoned id=%d held=%d"
+                                  id (length held))
+                (signal 'quit nil))
+               (t (push event held)))))
+          (cons agent-repl--frontend-copy-answer (nreverse held)))
+      (setq unread-command-events
+            (delq agent-repl--frontend-copy-wake-event unread-command-events))
+      (setq agent-repl--frontend-copy-waiting nil
+            agent-repl--frontend-copy-answer nil))))
+
+(defun agent-repl--frontend-copy-decision (answer)
+  "Decide what a copy key does given the page's ANSWER.
+Returns `copy' when the page holds a nonempty selection and has focus,
+else `no-webview', `unfocused' or `empty', each a fall-through.  An
+answer whose text is null is an invariant violation: signalled."
+  (cond
+   ((null answer) 'no-webview)
+   ((not (plist-member answer :text))
+    (error "agent-repl: the webview's selection answer carries no text: %S" answer))
+   ((null (plist-get answer :text))
+    (agent-repl--error agent-repl--owning-workspace
+                       "elisp.frontend.copy-selection: the page has no selection object answer=%S"
+                       answer)
+    (error "agent-repl: the webview has no selection object"))
+   ((not (plist-get answer :focused)) 'unfocused)
+   ((string-empty-p (plist-get answer :text)) 'empty)
+   (t 'copy)))
+
+(defun agent-repl--frontend-copy-fall-through (keys held)
+  "Run KEYS as they would run without the copy chords, then HELD.
+KEYS and HELD are queued, in that order and ahead of anything already
+queued, and the key sequence is read and resolved with
+`agent-repl-frontend-webview-mode' bound off, so a prefix such as `C-c'
+completes with the reader's next key exactly as it always did."
+  (setq unread-command-events
+        (append (listify-key-sequence keys) held unread-command-events))
+  (let* ((seq (let ((agent-repl-frontend-webview-mode nil))
+                (read-key-sequence-vector nil)))
+         (cmd (let ((agent-repl-frontend-webview-mode nil))
+                (key-binding seq t))))
+    (agent-repl--log agent-repl--owning-workspace
+                     "elisp.frontend.copy-selection: fall-through keys=%s command=%S"
+                     (key-description seq) cmd)
+    (setq prefix-arg current-prefix-arg
+          this-command (or cmd #'undefined))
+    (command-execute (or cmd #'undefined) nil seq)))
+
+(defun agent-repl-frontend-copy-selection ()
+  "Copy the webview's highlighted text, or do what this key did before.
+Bound to `y', `C-c' and Command-c (`s-c') in every agent-repl webview,
+the ONE copy path for all three.  When the page holds a nonempty
+selection and has focus, the text goes onto the kill ring and the
+system clipboard through `kill-new'; otherwise the key runs as though
+this binding did not exist.  See the commentary above for why the page
+is asked synchronously."
+  (interactive)
+  (let* ((ws agent-repl--owning-workspace)
+         (keys (this-command-keys-vector))
+         (asked (agent-repl--frontend-await-copy-answer (current-buffer)))
+         (answer (car asked))
+         (held (cdr asked))
+         (decision (condition-case err
+                       (agent-repl--frontend-copy-decision answer)
+                     (error
+                      (setq unread-command-events (append held unread-command-events))
+                      (signal (car err) (cdr err))))))
+    (agent-repl--log ws "elisp.frontend.copy-selection: keys=%s decision=%s held=%d"
+                     (key-description keys) decision (length held))
+    (if (eq decision 'copy)
+        (let ((text (plist-get answer :text)))
+          (kill-new text)
+          (agent-repl--user-message ws "copied %d characters from the webview"
+                                    (list (length text)))
+          (setq unread-command-events (append held unread-command-events)))
+      (agent-repl--frontend-copy-fall-through keys held))))
+
+(defun agent-repl--frontend-copy-bind-evil-keys ()
+  "Plant the copy chords in the mode map's Evil state maps.
+Evil's state maps (`y' is `evil-yank' in normal state) outrank a plain
+minor-mode map, so the chords must live in this mode's own state maps."
+  (dolist (state '(normal motion visual insert emacs))
+    (dolist (key agent-repl--frontend-copy-keys)
+      (evil-define-key* state agent-repl-frontend-webview-mode-map
+                        (kbd key) #'agent-repl-frontend-copy-selection))))
+
+(with-eval-after-load 'evil
+  (agent-repl--frontend-copy-bind-evil-keys))
+
+(add-hook 'agent-repl-frontend-webview-adopt-hook
+          #'agent-repl-frontend-webview-mode)
+
 
 (defun agent-repl--frontend-watch-load (ws buf)
   "Report BUF's load-finished events for WS to the open-progress ladder.
