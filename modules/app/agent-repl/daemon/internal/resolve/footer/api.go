@@ -372,11 +372,6 @@ type Resolver interface {
 	// `disconnected · start_failed` step exists to explain, nil to clear it.
 	// The next successful link edge clears it on its own.
 	SetStartFailed(ws ids.WorkspaceID, failure *StartFailed)
-	// AddDroppedPrompts adds to the count of held prompts the STANDING
-	// bring-up failure dropped. The drop is decided by the prompt queue, after
-	// the failure is installed, so the count arrives second and accrues onto
-	// the failure already standing.
-	AddDroppedPrompts(ws ids.WorkspaceID, n uint32)
 	// Prime publishes the workspace's CURRENT footer view at registration, so
 	// the per-workspace footer topic holds a complete view for a
 	// (re)connecting subscriber to replay even before any live session fact

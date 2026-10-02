@@ -123,6 +123,9 @@ type wsState struct {
 	// bringingUp reports a bring-up of this workspace's session under way
 	// (SetBringingUp). It is what holds the row's availability at `pending`.
 	bringingUp bool
+	// vendorStart is where the vendor-start run stands (SetVendorStart): the
+	// link rung draws it ahead of the link's own account.
+	vendorStart VendorStart
 	// lastArm is the status arm last PUBLISHED for this workspace, which is
 	// what a status CHANGE is measured against, and what a viewed report is
 	// judged against: the arm the user was looking at.

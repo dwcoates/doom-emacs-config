@@ -204,8 +204,8 @@ func (h HoldKind) String() string {
 	switch h {
 	case HoldShutdown:
 		return "shutdown"
-	case HoldSessionStarting:
-		return "session_starting"
+	case HoldReconnect:
+		return "reconnect"
 	case HoldBuildRefresh:
 		return "build_refresh"
 	case HoldMerge:

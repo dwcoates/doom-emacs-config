@@ -2,6 +2,7 @@ package promptqueue
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -98,6 +99,9 @@ func (q *queue) deliver(ctx context.Context, d *delivery, sub Submission, sender
 		// turn so no workspace is left showing a `submitting` phase for a turn
 		// that never ran.
 		q.retireOpenedTurn(sub, watcher)
+		if errors.Is(err, ErrShimHasNoSession) {
+			return q.holdForReconnect(ctx, sub, err, log)
+		}
 		log.Error(opDeliver, "the shim refused the turn", dlog.Context{"cause": err.Error()})
 		return Disposition{}, fmt.Errorf("start turn %q on %q: %w", sub.Turn, sub.WS, err)
 	}
@@ -294,4 +298,27 @@ func (q *queue) startTurn(ctx context.Context, sender Sender, sub Submission, lo
 	}
 	log.Info(opDeliver, "the prompt interrupted the running turn; it is delivered with a note telling the agent why", nil)
 	return sender.StartInterjection(ctx, sub.Turn, sub.Said, sub.Origin, interruptionNote)
+}
+
+// holdForReconnect parks a delivery the SHIM refused because it holds no
+// session: the daemon believed the session up, and it was not. The prompt is
+// never lost (2026-10-02: one was drawn in the feed and then refused
+// `no_session`): the row mirrored on acceptance is taken back down, and the
+// prompt waits under the reconnect hold -- its standing hold re-stamped, or a
+// new one recorded -- for the session's coming up to deliver it.
+func (q *queue) holdForReconnect(ctx context.Context, sub Submission, cause error, log dlog.Logger) (Disposition, error) {
+	q.deps.Feed.OnPromptRetired(sub.WS, &conversationv1.AgentPrompt{Id: &conversationv1.TurnId{Value: string(sub.Turn)}})
+	log.Info(opDeliver, "the shim holds no session; the prompt is held until the session reconnects", dlog.Context{"cause": cause.Error()})
+	if !sub.fromHold {
+		return q.hold(ctx, sub, "", &leaseHold{kind: wsm.HoldReconnect}, log)
+	}
+	kind := wsm.HoldReconnect
+	if err := q.deps.DB.UpdateHeldPromptHold(ctx, sub.Turn, &kind, ""); err != nil {
+		log.Error(opDeliver, "could not stamp the refused hold to wait for the session to reconnect", dlog.Context{"cause": err.Error()})
+		return Disposition{}, fmt.Errorf("hold %q on %q for the reconnect: %w", sub.Turn, sub.WS, err)
+	}
+	if err := q.pushTray(ctx, sub.WS, log); err != nil {
+		return Disposition{}, err
+	}
+	return Disposition{Held: &kind}, nil
 }

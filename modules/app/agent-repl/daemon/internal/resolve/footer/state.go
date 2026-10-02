@@ -355,14 +355,12 @@ type cronRow struct {
 	order int
 }
 
-// startFailedState is one standing bring-up failure: why it failed, what it
-// cost, and when it began standing.
+// startFailedState is one standing bring-up failure: why it failed and when
+// it began standing. A failed bring-up drops no held prompt (they stay held
+// under the reconnect hold), so there is no cost to count.
 type startFailedState struct {
 	// detail is the composed cause, drawn verbatim.
 	detail string
-	// dropped counts the held prompts this failure dropped, zero when it
-	// dropped none.
-	dropped uint32
 	// at is when the failure began standing.
 	at time.Time
 	// announced reports that the info record for this failure's line has

@@ -109,6 +109,42 @@ func TestAnAdoptedClientIsInstalled(t *testing.T) {
 	}
 }
 
+// An adopted survivor holding its session is stated to hold it, so the
+// fleet delivers prompts to it rather than holding them for a reconnect.
+func TestAnAdoptedSurvivorIsStatedToHoldItsSession(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	ws := h.register(t, t.TempDir(), sessionlock.StateHeld)
+
+	// Act.
+	if _, err := h.seq.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Assert.
+	if len(h.sessionsAdopted) != 1 || h.sessionsAdopted[0] != ws.ID {
+		t.Fatalf("sessions adopted = %v, want [%v]", h.sessionsAdopted, ws.ID)
+	}
+}
+
+// An adopted session is a session up: once the holds are restored, the prompts
+// a previous daemon held until it reconnected are released to it.
+func TestAnAdoptedSessionsReconnectHoldsAreReleasedAfterTheRestore(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	ws := h.register(t, t.TempDir(), sessionlock.StateHeld)
+
+	// Act.
+	if _, err := h.seq.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Assert.
+	if got := h.queue.reconnects; len(got) != 1 || got[0] != ws.ID {
+		t.Fatalf("reconnect releases = %v, want [%v]", got, ws.ID)
+	}
+}
+
 // TestAFailedAdoptionFailsTheBoot pins the loudness rule: a shim that could not
 // be adopted is not a workspace to carry on without.
 func TestAFailedAdoptionFailsTheBoot(t *testing.T) {
@@ -1832,6 +1868,9 @@ func TestAnAnnouncedStartingShimIsAdoptedAsTheInertSurvivorItIs(t *testing.T) {
 	}
 	if len(report.AdoptedSessions) != 0 {
 		t.Fatalf("report.AdoptedSessions = %+v, want none: a starting shim has no session", report.AdoptedSessions)
+	}
+	if len(h.sessionsAdopted) != 0 {
+		t.Fatalf("sessions adopted = %v, want none: an inert survivor holds no session", h.sessionsAdopted)
 	}
 }
 
