@@ -41,9 +41,6 @@
   "Run the ERT test files CHUNK from DIR, ordered and checked against ROSTER."
   (or noninteractive
       (user-error "This function is only for use in batch mode"))
-  (dolist (file chunk)
-    (unless (member file roster)
-      (error "agent-repl-testrun: %s is not on the roster" file)))
   (let ((eln-dir (and (featurep 'native-compile)
                       (make-temp-file "test-nativecomp-cache-" t))))
     (when eln-dir
@@ -54,6 +51,11 @@
         (let ((ordered (seq-filter (lambda (f) (member f chunk)) roster))
               (load-seconds nil)
               (unexpected 0))
+          ;; Inside the protected run, so a broken chunk exits 2 like any
+          ;; other broken run.
+          (dolist (file chunk)
+            (unless (member file roster)
+              (error "agent-repl-testrun: %s is not on the roster" file)))
           ;; The helpers load first in every chunk, as in the aggregator; they
           ;; are also a roster file, because they define tests of their own.
           (let ((start (float-time)))
