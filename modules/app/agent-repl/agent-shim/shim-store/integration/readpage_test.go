@@ -2,14 +2,15 @@
 //
 // There is no first-page arm: the first page is always OpenAgentSession's
 // answer and this verb only ever walks OLDER, from a pointer the store itself
-// served. page_size rides each request, so a caller may change its budget in
-// the middle of one walk.
+// served. Every page is the store's own size (db.PageSize): no request field
+// carries a budget.
 package integration
 
 import (
 	"testing"
 
 	storev1 "agentrepl/proto/store/v1"
+	"agentrepl/shim-store/internal/db"
 )
 
 // TestReadAgentPageWalksOlderNewestFirst is the ordinary continuation.
@@ -19,36 +20,39 @@ func TestReadAgentPageWalksOlderNewestFirst(t *testing.T) {
 	ctx, cancel := callContext(t)
 	defer cancel()
 	cli := store.client()
-	writeNumberedLines(ctx, t, streamProducer(cli), "main", 5)
-	opened := openSession(ctx, t, cli, "main", 2, nil)
-	assertTexts(t, "the opening page", pageTexts(opened.GetPage()), []string{"L5", "L4"})
+	newest := 2*db.PageSize + 1
+	writeNumberedLines(ctx, t, streamProducer(cli), "main", newest)
+	opened := openSession(ctx, t, cli, "main", nil)
+	assertTexts(t, "the opening page", pageTexts(opened.GetPage()), descendingLabels(newest, newest-db.PageSize+1))
 
 	// Act.
-	next := readPage(ctx, t, cli, "main", 2, assertPageMore(t, opened.GetPage()))
+	next := readPage(ctx, t, cli, "main", assertPageMore(t, opened.GetPage()))
 
 	// Assert.
-	assertTexts(t, "the continuation", readTexts(next), []string{"L3", "L2"})
+	assertTexts(t, "the continuation", readTexts(next), descendingLabels(newest-db.PageSize, 2))
 	store.assertNoErrorRecords()
 }
 
-// TestPageSizeMayVaryAcrossOneWalk: the budget is the caller's, per call.
-func TestPageSizeMayVaryAcrossOneWalk(t *testing.T) {
+// TestEveryPageOfOneWalkIsTheStorePage: no caller picks a budget, so every
+// full page of a walk is the store's page and only the last one runs short.
+func TestEveryPageOfOneWalkIsTheStorePage(t *testing.T) {
 	// Arrange.
 	store := startStore(t, storeOptions{})
 	ctx, cancel := callContext(t)
 	defer cancel()
 	cli := store.client()
-	writeNumberedLines(ctx, t, streamProducer(cli), "main", 6)
-	opened := openSession(ctx, t, cli, "main", 1, nil)
-	assertTexts(t, "the opening page", pageTexts(opened.GetPage()), []string{"L6"})
+	writeNumberedLines(ctx, t, streamProducer(cli), "main", 2*db.PageSize+1)
+	opened := openSession(ctx, t, cli, "main", nil)
 
 	// Act.
-	wide := readPage(ctx, t, cli, "main", 3, assertPageMore(t, opened.GetPage()))
-	narrow := readPage(ctx, t, cli, "main", 2, assertReadMore(t, wide))
+	next := readPage(ctx, t, cli, "main", assertPageMore(t, opened.GetPage()))
+	last := readPage(ctx, t, cli, "main", assertReadMore(t, next))
 
 	// Assert.
-	assertTexts(t, "the wide continuation", readTexts(wide), []string{"L5", "L4", "L3"})
-	assertTexts(t, "the narrow continuation", readTexts(narrow), []string{"L2", "L1"})
+	got := []int{len(opened.GetPage().GetLines()), len(next.GetLines()), len(last.GetLines())}
+	if want := []int{db.PageSize, db.PageSize, 1}; got[0] != want[0] || got[1] != want[1] || got[2] != want[2] {
+		t.Fatalf("page sizes = %v, want %v", got, want)
+	}
 	store.assertNoErrorRecords()
 }
 
@@ -60,11 +64,11 @@ func TestFloorArmMarksTheOldestRetainedLine(t *testing.T) {
 	ctx, cancel := callContext(t)
 	defer cancel()
 	cli := store.client()
-	writeNumberedLines(ctx, t, streamProducer(cli), "main", 3)
-	opened := openSession(ctx, t, cli, "main", 2, nil)
+	writeNumberedLines(ctx, t, streamProducer(cli), "main", db.PageSize+1)
+	opened := openSession(ctx, t, cli, "main", nil)
 
 	// Act.
-	last := readPage(ctx, t, cli, "main", 2, assertPageMore(t, opened.GetPage()))
+	last := readPage(ctx, t, cli, "main", assertPageMore(t, opened.GetPage()))
 
 	// Assert.
 	assertTexts(t, "the final page", readTexts(last), []string{"L1"})
@@ -81,14 +85,14 @@ func TestKnownButUnwrittenBookReadsEmptyAtFloor(t *testing.T) {
 	defer cancel()
 	cli := store.client()
 	shim := streamProducer(cli)
-	writeNumberedLines(ctx, t, shim, "main", 2)
+	writeNumberedLines(ctx, t, shim, "main", db.PageSize+1)
 	registerEmptyBook(ctx, t, shim, "main", "unwritten", "unwritten")
-	opened := openSession(ctx, t, cli, "main", 1, nil)
+	opened := openSession(ctx, t, cli, "main", nil)
 	pointerInMain := assertPageMore(t, opened.GetPage())
 
 	// Act: the same store, a known agent with no rows of its own, read from its
 	// own open.
-	empty := openSession(ctx, t, cli, "unwritten", 5, nil)
+	empty := openSession(ctx, t, cli, "unwritten", nil)
 
 	// Assert.
 	assertTexts(t, "a known but unwritten book's page", pageTexts(empty.GetPage()), nil)
@@ -97,7 +101,6 @@ func TestKnownButUnwrittenBookReadsEmptyAtFloor(t *testing.T) {
 	// And a pointer from ANOTHER book is stale here, never silently accepted.
 	assertReadStalePointer(t, readPageExpectingFailure(ctx, t, cli, &storev1.ReadAgentPageRequest{
 		Book:     agentID("unwritten"),
-		PageSize: 5,
 		Position: &storev1.ReadAgentPageRequest_After{After: pointerInMain},
 	}))
 }
@@ -106,22 +109,27 @@ func TestKnownButUnwrittenBookReadsEmptyAtFloor(t *testing.T) {
 // continuation page's pointers are REAL positions, not placeholders — the same
 // values OpenAgentSession serves for the same rows.
 func TestContinuationLinesCarryTheSamePointersTheOpeningPageWouldHave(t *testing.T) {
-	// Arrange: one book read two ways — a wide open that sees every row, and a
-	// narrow open plus a continuation that walks to them.
+	// Arrange: one page of lines read by an open while the book still fits in
+	// it, then two more lines, so a later open must walk to the oldest two.
 	store := startStore(t, storeOptions{})
 	ctx, cancel := callContext(t)
 	defer cancel()
 	cli := store.client()
-	writeNumberedLines(ctx, t, streamProducer(cli), "main", 4)
-	wide := openSession(ctx, t, cli, "main", 4, nil)
+	shim := streamProducer(cli)
+	writeNumberedLines(ctx, t, shim, "main", db.PageSize)
+	wide := openSession(ctx, t, cli, "main", nil)
 	wantPointers := pagePointers(wide.GetPage())
+	shim.write(ctx, t,
+		shim.agentEntry("w-main-extra-1", "u-main-extra-1", frameLine(agentID("main"), responseFrame("main", "act-extra-1", "extra-1"))),
+		shim.agentEntry("w-main-extra-2", "u-main-extra-2", frameLine(agentID("main"), responseFrame("main", "act-extra-2", "extra-2"))),
+	)
 
 	// Act.
-	narrow := openSession(ctx, t, cli, "main", 2, nil)
-	next := readPage(ctx, t, cli, "main", 2, assertPageMore(t, narrow.GetPage()))
+	narrow := openSession(ctx, t, cli, "main", nil)
+	next := readPage(ctx, t, cli, "main", assertPageMore(t, narrow.GetPage()))
 
 	// Assert.
-	assertTexts(t, "the continuation's pointers", readPointers(next), wantPointers[2:])
+	assertTexts(t, "the continuation's pointers", readPointers(next), wantPointers[db.PageSize-2:])
 	store.assertNoErrorRecords()
 }
 
@@ -133,11 +141,11 @@ func TestContinuationMoreArmEchoesTheLastLinesOwnPointer(t *testing.T) {
 	ctx, cancel := callContext(t)
 	defer cancel()
 	cli := store.client()
-	writeNumberedLines(ctx, t, streamProducer(cli), "main", 5)
-	opened := openSession(ctx, t, cli, "main", 1, nil)
+	writeNumberedLines(ctx, t, streamProducer(cli), "main", 2*db.PageSize+1)
+	opened := openSession(ctx, t, cli, "main", nil)
 
 	// Act.
-	next := readPage(ctx, t, cli, "main", 2, assertPageMore(t, opened.GetPage()))
+	next := readPage(ctx, t, cli, "main", assertPageMore(t, opened.GetPage()))
 
 	// Assert.
 	pointers := readPointers(next)
@@ -155,16 +163,17 @@ func TestAContinuationPointerReopensTheSessionAtThatMark(t *testing.T) {
 	ctx, cancel := callContext(t)
 	defer cancel()
 	cli := store.client()
-	writeNumberedLines(ctx, t, streamProducer(cli), "main", 4)
-	opened := openSession(ctx, t, cli, "main", 2, nil)
-	next := readPage(ctx, t, cli, "main", 1, assertPageMore(t, opened.GetPage()))
+	newest := db.PageSize + 2
+	writeNumberedLines(ctx, t, streamProducer(cli), "main", newest)
+	opened := openSession(ctx, t, cli, "main", nil)
+	next := readPage(ctx, t, cli, "main", assertPageMore(t, opened.GetPage()))
 	mark := &storev1.StoreItemPointer{Value: readPointers(next)[0]}
 
 	// Act.
-	reopened := openSession(ctx, t, cli, "main", 10, mark)
+	reopened := openSession(ctx, t, cli, "main", mark)
 
 	// Assert: only the rows NEWER than the walked-to mark. The walk reached L2,
-	// so L3 and L4 are what the caller does not hold.
-	assertTexts(t, "the page after a continuation mark", pageTexts(reopened.GetPage()), []string{"L4", "L3"})
+	// so L3 and above are what the caller does not hold.
+	assertTexts(t, "the page after a continuation mark", pageTexts(reopened.GetPage()), descendingLabels(newest, 3))
 	store.assertNoErrorRecords()
 }

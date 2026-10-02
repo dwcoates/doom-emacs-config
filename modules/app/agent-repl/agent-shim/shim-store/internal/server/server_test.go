@@ -103,6 +103,8 @@ type fakeStore struct {
 
 	opened  OpenedPage
 	openErr error
+	// openedWith is every Opening the handler passed to OpenPage, in order.
+	openedWith []Opening
 
 	page    *storev1.ReadAgentPageSuccess
 	pageErr error
@@ -204,18 +206,21 @@ func (f *fakeStore) WriteBatch(_ context.Context, producer string, class WriteCl
 	return result, err
 }
 
-func (f *fakeStore) OpenPage(context.Context, string, uint32, *storev1.StoreItemPointer) (OpenedPage, error) {
+func (f *fakeStore) OpenPage(_ context.Context, _ string, opening Opening) (OpenedPage, error) {
+	f.mu.Lock()
+	f.openedWith = append(f.openedWith, opening)
+	f.mu.Unlock()
 	return f.opened, f.openErr
 }
 
-func (f *fakeStore) ReadPage(context.Context, string, uint32, *storev1.StoreItemPointer) (*storev1.ReadAgentPageSuccess, error) {
+func (f *fakeStore) ReadPage(context.Context, string, *storev1.StoreItemPointer) (*storev1.ReadAgentPageSuccess, error) {
 	f.mu.Lock()
 	f.pageReadBy = "after"
 	f.mu.Unlock()
 	return f.page, f.pageErr
 }
 
-func (f *fakeStore) ReadPageThrough(_ context.Context, _ string, _ uint32, throughAtMs int64) (*storev1.ReadAgentPageSuccess, error) {
+func (f *fakeStore) ReadPageThrough(_ context.Context, _ string, throughAtMs int64) (*storev1.ReadAgentPageSuccess, error) {
 	f.mu.Lock()
 	f.pageReadBy = "through"
 	f.throughAtMs = throughAtMs
@@ -417,7 +422,7 @@ func writeOne(t *testing.T, h *harness) {
 func openSession(t *testing.T, h *harness, agent string) string {
 	t.Helper()
 	res, err := h.client.OpenAgentSession(context.Background(), connect.NewRequest(&storev1.OpenAgentSessionRequest{
-		Agent: agentID(agent), PageSize: 10,
+		Agent: agentID(agent),
 	}))
 	if err != nil {
 		t.Fatalf("OpenAgentSession: %v", err)
@@ -764,7 +769,7 @@ func TestOpenAgentSessionAnswersAPageAndAToken(t *testing.T) {
 
 	// Act.
 	res, err := h.client.OpenAgentSession(context.Background(), connect.NewRequest(&storev1.OpenAgentSessionRequest{
-		Agent: agentID("a1"), PageSize: 10,
+		Agent: agentID("a1"),
 	}))
 
 	// Assert.
@@ -777,6 +782,51 @@ func TestOpenAgentSessionAnswersAPageAndAToken(t *testing.T) {
 	}
 }
 
+func TestOpenAgentSessionPassesTheRequestsOpeningToTheStore(t *testing.T) {
+	tests := []struct {
+		name string
+		req  *storev1.OpenAgentSessionRequest
+		want string
+	}{
+		{name: "unset is the repaint", req: &storev1.OpenAgentSessionRequest{Agent: agentID("a1")}, want: "repaint"},
+		{
+			name: "known_through is the catch-up",
+			req: &storev1.OpenAgentSessionRequest{Agent: agentID("a1"),
+				Opening: &storev1.OpenAgentSessionRequest_KnownThrough{KnownThrough: &storev1.StoreItemPointer{Value: "p9"}}},
+			want: "known_through",
+		},
+		{
+			name: "tail_only is the tail-only open",
+			req: &storev1.OpenAgentSessionRequest{Agent: agentID("a1"),
+				Opening: &storev1.OpenAgentSessionRequest_TailOnly{TailOnly: &storev1.AgentSessionTailOnly{}}},
+			want: "tail_only",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Arrange.
+			store := newFakeStore()
+			store.opened = OpenedPage{Page: &storev1.AgentSessionPage{
+				Boundary: &storev1.AgentSessionPage_Floor{Floor: &storev1.ReadAgentPageFloor{}},
+			}, PinSeq: 7}
+			h := newHarness(t, store, 0)
+
+			// Act.
+			_, err := h.client.OpenAgentSession(context.Background(), connect.NewRequest(test.req))
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("OpenAgentSession = %v, want nil", err)
+			}
+			store.mu.Lock()
+			defer store.mu.Unlock()
+			if len(store.openedWith) != 1 || store.openedWith[0].String() != test.want {
+				t.Fatalf("store opened with %v, want one %q", store.openedWith, test.want)
+			}
+		})
+	}
+}
+
 func TestOpenAgentSessionRecordsCarryTheAgentAndBook(t *testing.T) {
 	// Arrange.
 	store := newFakeStore()
@@ -785,7 +835,7 @@ func TestOpenAgentSessionRecordsCarryTheAgentAndBook(t *testing.T) {
 
 	// Act.
 	if _, err := h.client.OpenAgentSession(context.Background(), connect.NewRequest(&storev1.OpenAgentSessionRequest{
-		Agent: agentID("agent-1"), PageSize: 10,
+		Agent: agentID("agent-1"),
 	})); err != nil {
 		t.Fatalf("OpenAgentSession = %v, want nil", err)
 	}
@@ -811,7 +861,7 @@ func TestOpenAgentSessionRecordsCarryTheAgentAndBook(t *testing.T) {
 func openPageOnly(t *testing.T, h *harness, agent string) {
 	t.Helper()
 	res, err := h.client.OpenAgentSession(context.Background(), connect.NewRequest(&storev1.OpenAgentSessionRequest{
-		Agent: agentID(agent), PageSize: 10, PageOnly: true,
+		Agent: agentID(agent), PageOnly: true,
 	}))
 	if err != nil {
 		t.Fatalf("OpenAgentSession: %v", err)
@@ -838,7 +888,7 @@ func TestOpenAgentSessionMintsNoTokenForAPageOnlyRead(t *testing.T) {
 
 	// Act.
 	res, err := h.client.OpenAgentSession(context.Background(), connect.NewRequest(&storev1.OpenAgentSessionRequest{
-		Agent: agentID("a1"), PageSize: 10, PageOnly: true,
+		Agent: agentID("a1"), PageOnly: true,
 	}))
 
 	// Assert. The page is served in full; only the token is withheld.
@@ -916,7 +966,7 @@ func TestOpenAgentSessionRefusesAnAgentIdWithNoValue(t *testing.T) {
 
 	// Act.
 	res, err := h.client.OpenAgentSession(context.Background(), connect.NewRequest(&storev1.OpenAgentSessionRequest{
-		Agent: agentID(""), PageSize: 10,
+		Agent: agentID(""),
 	}))
 
 	// Assert.
@@ -972,7 +1022,7 @@ func TestOpenAgentSessionMapsAStalePointerToTheFailureArm(t *testing.T) {
 
 	// Act.
 	res, err := h.client.OpenAgentSession(context.Background(), connect.NewRequest(&storev1.OpenAgentSessionRequest{
-		Agent: agentID("a1"), PageSize: 10, KnownThrough: &storev1.StoreItemPointer{Value: "p9"},
+		Agent: agentID("a1"), Opening: &storev1.OpenAgentSessionRequest_KnownThrough{KnownThrough: &storev1.StoreItemPointer{Value: "p9"}},
 	}))
 
 	// Assert.
@@ -1007,7 +1057,7 @@ func TestOpenAgentSessionMapsAnUnknownAgentToItsOwnArm(t *testing.T) {
 
 	// Act.
 	res, err := h.client.OpenAgentSession(context.Background(), connect.NewRequest(&storev1.OpenAgentSessionRequest{
-		Agent: agentID("ghost"), PageSize: 10,
+		Agent: agentID("ghost"),
 	}))
 
 	// Assert.
@@ -1033,7 +1083,7 @@ func TestOpenAgentSessionRecordsAnUnknownAgentAtInfoWithBothRefusalKeys(t *testi
 
 	// Act.
 	if _, err := h.client.OpenAgentSession(context.Background(), connect.NewRequest(&storev1.OpenAgentSessionRequest{
-		Agent: agentID("ghost"), PageSize: 10,
+		Agent: agentID("ghost"),
 	})); err != nil {
 		t.Fatalf("OpenAgentSession = %v, want nil", err)
 	}
@@ -1057,7 +1107,7 @@ func TestOpenAgentSessionDoesNotRecordAnUnknownAgentAtWarnOrError(t *testing.T) 
 
 	// Act.
 	if _, err := h.client.OpenAgentSession(context.Background(), connect.NewRequest(&storev1.OpenAgentSessionRequest{
-		Agent: agentID("ghost"), PageSize: 10,
+		Agent: agentID("ghost"),
 	})); err != nil {
 		t.Fatalf("OpenAgentSession = %v, want nil", err)
 	}
@@ -1078,7 +1128,7 @@ func TestOpenAgentSessionServesAnEmptyBookAsALegalPage(t *testing.T) {
 
 	// Act.
 	res, err := h.client.OpenAgentSession(context.Background(), connect.NewRequest(&storev1.OpenAgentSessionRequest{
-		Agent: agentID("fresh"), PageSize: 10,
+		Agent: agentID("fresh"),
 	}))
 
 	// Assert.
@@ -1479,7 +1529,7 @@ func TestReadAgentPageServesAPage(t *testing.T) {
 
 	// Act.
 	res, err := h.client.ReadAgentPage(context.Background(), connect.NewRequest(&storev1.ReadAgentPageRequest{
-		Book: agentID("a1"), PageSize: 10, Position: &storev1.ReadAgentPageRequest_After{After: &storev1.StoreItemPointer{Value: "p9"}},
+		Book: agentID("a1"), Position: &storev1.ReadAgentPageRequest_After{After: &storev1.StoreItemPointer{Value: "p9"}},
 	}))
 
 	// Assert.
@@ -1503,7 +1553,7 @@ func TestReadAgentPageRecordsCarryTheAgentAndBook(t *testing.T) {
 
 	// Act.
 	if _, err := h.client.ReadAgentPage(context.Background(), connect.NewRequest(&storev1.ReadAgentPageRequest{
-		Book: agentID("agent-1"), PageSize: 10, Position: &storev1.ReadAgentPageRequest_After{After: &storev1.StoreItemPointer{Value: "p9"}},
+		Book: agentID("agent-1"), Position: &storev1.ReadAgentPageRequest_After{After: &storev1.StoreItemPointer{Value: "p9"}},
 	})); err != nil {
 		t.Fatalf("ReadAgentPage = %v, want nil", err)
 	}
@@ -1530,7 +1580,7 @@ func TestReadAgentPageRefusesAnUnsetPosition(t *testing.T) {
 
 	// Act.
 	res, err := h.client.ReadAgentPage(context.Background(), connect.NewRequest(&storev1.ReadAgentPageRequest{
-		Book: agentID("a1"), PageSize: 10,
+		Book: agentID("a1"),
 	}))
 
 	// Assert.
@@ -1550,7 +1600,7 @@ func TestReadAgentPageMapsAStalePointerToTheFailureArm(t *testing.T) {
 
 	// Act.
 	res, err := h.client.ReadAgentPage(context.Background(), connect.NewRequest(&storev1.ReadAgentPageRequest{
-		Book: agentID("a1"), PageSize: 10, Position: &storev1.ReadAgentPageRequest_After{After: &storev1.StoreItemPointer{Value: "p9"}},
+		Book: agentID("a1"), Position: &storev1.ReadAgentPageRequest_After{After: &storev1.StoreItemPointer{Value: "p9"}},
 	}))
 
 	// Assert.
@@ -1569,7 +1619,7 @@ func TestReadAgentPageWithAnAfterPointerWalksBeforeIt(t *testing.T) {
 
 	// Act.
 	if _, err := h.client.ReadAgentPage(context.Background(), connect.NewRequest(&storev1.ReadAgentPageRequest{
-		Book: agentID("a1"), PageSize: 10, Position: &storev1.ReadAgentPageRequest_After{After: &storev1.StoreItemPointer{Value: "p9"}},
+		Book: agentID("a1"), Position: &storev1.ReadAgentPageRequest_After{After: &storev1.StoreItemPointer{Value: "p9"}},
 	})); err != nil {
 		t.Fatalf("ReadAgentPage = %v, want nil", err)
 	}
@@ -1589,7 +1639,7 @@ func TestReadAgentPageWithAThroughBoundReadsTheBookAsItStoodThen(t *testing.T) {
 
 	// Act.
 	if _, err := h.client.ReadAgentPage(context.Background(), connect.NewRequest(&storev1.ReadAgentPageRequest{
-		Book: agentID("a1"), PageSize: 10,
+		Book:     agentID("a1"),
 		Position: &storev1.ReadAgentPageRequest_Through{Through: &conversationv1.ConversationThrough{AtMs: 1234}},
 	})); err != nil {
 		t.Fatalf("ReadAgentPage = %v, want nil", err)
@@ -1612,7 +1662,7 @@ func TestReadAgentPageMapsAnUnknownAgentToItsOwnArm(t *testing.T) {
 
 	// Act.
 	res, err := h.client.ReadAgentPage(context.Background(), connect.NewRequest(&storev1.ReadAgentPageRequest{
-		Book: agentID("a1"), PageSize: 10,
+		Book:     agentID("a1"),
 		Position: &storev1.ReadAgentPageRequest_Through{Through: &conversationv1.ConversationThrough{AtMs: 1234}},
 	}))
 

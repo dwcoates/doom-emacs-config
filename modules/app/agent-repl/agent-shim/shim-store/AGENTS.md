@@ -838,6 +838,21 @@ and not something this change touches.
   `known_through` catch-up serves the lines FIRST WRITTEN AFTER the mark
   (`position > mark`, write order, not place), ordered by descending place, so
   a late-written line placed earlier is delivered rather than skipped.
+- **ONE PAGE SIZE, THE STORE'S: `db.PageSize` = 50 lines** (owner ruling,
+  `docs/protobuf-design/feed-paging-on-demand.md` change 1). Every page — the
+  open's, a continuation, a `through` read — holds at most that many lines, and
+  no request field carries a budget (`page_size` is retired on both verbs), so
+  no caller can make a page bigger or smaller. A test that needs a boundary
+  writes `db.PageSize`+N lines; nothing restates the number.
+- **`tail_only` OPENS ON NO LINES.** The page is empty, the token pins the tail
+  at the global `write_seq` read in the same transaction (exactly after the
+  newest line as of the open), and the boundary is **`floor`**: `more` must
+  name the page's oldest line and an empty page has none, while no pointer can
+  name "the top of the book" (`after` reads strictly BEFORE its line). The floor
+  of a tail-only page therefore means "nothing to walk FROM this page", not "the
+  book is empty"; a reader that later wants history starts with a repaint and
+  walks older with `ReadAgentPage` from its `more`. A tail-only open still asks
+  the `agent` register, so an unknown agent is `unknown_agent`.
 - `OpenAgentSession` answers the page plus a store-minted `AgentSessionToken`
   (128 random bits from `crypto/rand`, hex) — **UNLESS THE REQUEST SAID
   `page_only`**, which is the caller stating that no watch follows: nothing is
@@ -959,7 +974,7 @@ arms are derived from, and each one is logged once with `refusal_site`.
 
 `producer_empty`, `batch_missing`, `batch_empty`, `entry_plane_unset`,
 `entry_write_id_empty`, `entry_upsert_key_empty`, `entry_arm_unset`,
-`cursor_file_id_empty`, `agent_id_empty`, `page_size_zero`, `pointer_empty`,
+`cursor_file_id_empty`, `agent_id_empty`, `pointer_empty`,
 `token_empty`, `unknown_watch_token`, `file_id_empty`, `run_empty`,
 `unknown_bash_run`, `store_refused_request`, `upsert_changes_identity`,
 `keepalive_retired`, `bash_tail_over_cap`,
@@ -982,7 +997,7 @@ arms are derived from, and each one is logged once with `refusal_site`.
   the store — `internal/db` for anything inside an entry, `internal/server` for
   the request around it — and every path is walkable from the message the
   producer sent, so a caller never has to guess the top of it. The forms are:
-  request-level (`producer`, `batch`, `agent`, `book`, `session`, `page_size`,
+  request-level (`producer`, `batch`, `agent`, `book`, `session`,
   `known_through`, `after`, `position`, `through.at_ms`, `watch`, `run`, `file_id`, `work`); batch-level
   (`cursor_advance.file_id`); and entry-level, always rooted at
   `entries[i]` — `entries[i].write_id`, `entries[i].upsert_key`,

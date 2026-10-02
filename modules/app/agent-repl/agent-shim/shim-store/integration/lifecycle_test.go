@@ -31,7 +31,7 @@ func TestSigtermEndsAnOpenWatchCleanly(t *testing.T) {
 	shim.write(ctx, t,
 		shim.agentEntry("w-term-1", "u-term-1", frameLine(agentID("main"), responseFrame("main", "act-1", "L1"))),
 	)
-	opened := openSession(ctx, t, cli, "main", 10, nil)
+	opened := openSession(ctx, t, cli, "main", nil)
 	stream := watchStream(ctx, t, cli, opened.GetWatch())
 	defer testclose.OrFail(t, stream)
 	// Prove the stream is really live before taking the store down.

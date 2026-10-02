@@ -27,7 +27,6 @@ const (
 	SiteEntryArmUnset          = "entry_arm_unset"
 	SiteCursorFileIDEmpty      = "cursor_file_id_empty"
 	SiteAgentIDEmpty           = "agent_id_empty"
-	SitePageSizeZero           = "page_size_zero"
 	SitePointerEmpty           = "pointer_empty"
 	SiteTokenEmpty             = "token_empty"
 	SiteUnknownWatchToken      = "unknown_watch_token"
@@ -261,15 +260,6 @@ func validateAgentSessionToken(t *storev1.AgentSessionToken) *refusal {
 	return nil
 }
 
-// validatePageSize is the base validation of a page budget. Zero is not "the
-// server picks": it is an unset required field.
-func validatePageSize(size uint32) *refusal {
-	if size == 0 {
-		return refuse(SitePageSizeZero, "page_size", "page_size: a page budget of zero asks for nothing")
-	}
-	return nil
-}
-
 // validatePlane is the base validation of store.v1.Plane: the oneof arm must
 // be set. An unset oneof is an error — the store never guesses a producer.
 func validatePlane(p *storev1.Plane, what string) *refusal {
@@ -407,24 +397,17 @@ func validateOpenAgentSessionRequest(req *storev1.OpenAgentSessionRequest) *refu
 	if ref := validateAgentID(req.GetAgent(), "agent"); ref != nil {
 		return ref
 	}
-	if ref := validatePageSize(req.GetPageSize()); ref != nil {
-		return ref
-	}
-	// known_through is OPTIONAL: absent means repaint. Present but empty is a
-	// sentinel pretending to be absence, which is the one thing it may not be.
-	if req.KnownThrough != nil {
-		if ref := validateStoreItemPointer(req.GetKnownThrough(), "known_through"); ref != nil {
-			return ref
-		}
+	// THE OPENING IS OPTIONAL: unset means repaint, and tail_only carries
+	// nothing to check. A known_through that is present but empty is a sentinel
+	// pretending to be absence, which is the one thing it may not be.
+	if through, ok := req.GetOpening().(*storev1.OpenAgentSessionRequest_KnownThrough); ok {
+		return validateStoreItemPointer(through.KnownThrough, "known_through")
 	}
 	return nil
 }
 
 func validateReadAgentPageRequest(req *storev1.ReadAgentPageRequest) *refusal {
 	if ref := validateAgentID(req.GetBook(), "book"); ref != nil {
-		return ref
-	}
-	if ref := validatePageSize(req.GetPageSize()); ref != nil {
 		return ref
 	}
 	// THE POSITION IS REQUIRED and THE ARM IS THE POSITION: there is no
