@@ -30,7 +30,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file shim/v1/endpoint_start_session.proto.
  */
 export const file_shim_v1_endpoint_start_session: GenFile = /*@__PURE__*/
-  fileDesc("CiRzaGltL3YxL2VuZHBvaW50X3N0YXJ0X3Nlc3Npb24ucHJvdG8SB3NoaW0udjEiewoTU3RhcnRTZXNzaW9uUmVxdWVzdBIrCgVmcmVzaBgBIAEoCzIaLnNoaW0udjEuU3RhcnRTZXNzaW9uRnJlc2hIABItCgZyZXN1bWUYAiABKAsyGy5zaGltLnYxLlN0YXJ0U2Vzc2lvblJlc3VtZUgAQggKBnNvdXJjZSKNAQoRU3RhcnRTZXNzaW9uRnJlc2gSLwoFbW9kZWwYASABKAsyGy5jb252ZXJzYXRpb24udjEuQWdlbnRNb2RlbEgAiAEBEj0KD3Blcm1pc3Npb25fbW9kZRgCIAEoCzIkLmNvbnZlcnNhdGlvbi52MS5BZ2VudFBlcm1pc3Npb25Nb2RlQggKBl9tb2RlbCL9AQoSU3RhcnRTZXNzaW9uUmVzdW1lEhkKEXZlbmRvcl9zZXNzaW9uX2lkGAEgASgJEkYKEGNvbGRfcmVtZWRpYXRpb24YAiABKAsyJy5jb252ZXJzYXRpb24udjEuU2Vzc2lvbkNvbGRSZW1lZGlhdGlvbkgAiAEBEjAKBnJlYmluZBgDIAEoCzIbLnNoaW0udjEuU3RhcnRTZXNzaW9uUmViaW5kSAGIAQESMgoRcm9sbGVkX2JhY2tfdHVybnMYBCADKAsyFy5jb252ZXJzYXRpb24udjEuVHVybklkQhMKEV9jb2xkX3JlbWVkaWF0aW9uQgkKB19yZWJpbmQiFAoSU3RhcnRTZXNzaW9uUmViaW5kIoIBChRTdGFydFNlc3Npb25SZXNwb25zZRIvCgdzdWNjZXNzGAEgASgLMhwuc2hpbS52MS5TdGFydFNlc3Npb25TdWNjZXNzSAASLwoHZmFpbHVyZRgCIAEoCzIcLnNoaW0udjEuU3RhcnRTZXNzaW9uRmFpbHVyZUgAQggKBnJlc3VsdCJHChNTdGFydFNlc3Npb25TdWNjZXNzEjAKB3Nlc3Npb24YASABKAsyHy5jb252ZXJzYXRpb24udjEuU2Vzc2lvblN0YXJ0ZWQiuAMKE1N0YXJ0U2Vzc2lvbkZhaWx1cmUSLAoEY29sZBgBIAEoCzIcLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uQ29sZEgAEkUKE3ZlbmRvcl9zdGFydF9mYWlsZWQYAyABKAsyJi5zaGltLnYxLlN0YXJ0U2Vzc2lvblZlbmRvclN0YXJ0RmFpbGVkSAASPgoPdW5rbm93bl9zZXNzaW9uGAQgASgLMiMuc2hpbS52MS5TdGFydFNlc3Npb25Vbmtub3duU2Vzc2lvbkgAEj4KD2FscmVhZHlfc3RhcnRlZBgFIAEoCzIjLnNoaW0udjEuU3RhcnRTZXNzaW9uQWxyZWFkeVN0YXJ0ZWRIABJEChJjb252ZXJzYXRpb25fb3duZWQYBiABKAsyJi5zaGltLnYxLlN0YXJ0U2Vzc2lvbkNvbnZlcnNhdGlvbk93bmVkSAASTQoXbG9ja19ob2xkZXJfdW5hdmFpbGFibGUYByABKAsyKi5zaGltLnYxLlN0YXJ0U2Vzc2lvbkxvY2tIb2xkZXJVbmF2YWlsYWJsZUgAEg4KBmRldGFpbBgCIAEoCUIHCgVjYXVzZSKmAQodU3RhcnRTZXNzaW9uVmVuZG9yU3RhcnRGYWlsZWQSPgoJcmV0cnlhYmxlGAEgASgLMikuc2hpbS52MS5TdGFydFNlc3Npb25WZW5kb3JTdGFydFJldHJ5YWJsZUgAEjwKCHJlamVjdGVkGAIgASgLMiguc2hpbS52MS5TdGFydFNlc3Npb25WZW5kb3JTdGFydFJlamVjdGVkSABCBwoFcmV0cnkiIgogU3RhcnRTZXNzaW9uVmVuZG9yU3RhcnRSZXRyeWFibGUiIQofU3RhcnRTZXNzaW9uVmVuZG9yU3RhcnRSZWplY3RlZCIcChpTdGFydFNlc3Npb25Vbmtub3duU2Vzc2lvbiIcChpTdGFydFNlc3Npb25BbHJlYWR5U3RhcnRlZCIfCh1TdGFydFNlc3Npb25Db252ZXJzYXRpb25Pd25lZCJ2CiFTdGFydFNlc3Npb25Mb2NrSG9sZGVyVW5hdmFpbGFibGUSMwoHZmFpbHVyZRgDIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5Mb2NrSG9sZGVyRmFpbHVyZUoECAEQAkoECAIQA1IGYmluYXJ5Ughvc19lcnJvckIgWh5hZ2VudHJlcGwvcHJvdG8vc2hpbS92MTtzaGltdjFiBnByb3RvMw", [file_conversation_v1_api, file_conversation_v1_permission, file_conversation_v1_session, file_conversation_v1_turn]);
+  fileDesc("CiRzaGltL3YxL2VuZHBvaW50X3N0YXJ0X3Nlc3Npb24ucHJvdG8SB3NoaW0udjEiewoTU3RhcnRTZXNzaW9uUmVxdWVzdBIrCgVmcmVzaBgBIAEoCzIaLnNoaW0udjEuU3RhcnRTZXNzaW9uRnJlc2hIABItCgZyZXN1bWUYAiABKAsyGy5zaGltLnYxLlN0YXJ0U2Vzc2lvblJlc3VtZUgAQggKBnNvdXJjZSKNAQoRU3RhcnRTZXNzaW9uRnJlc2gSLwoFbW9kZWwYASABKAsyGy5jb252ZXJzYXRpb24udjEuQWdlbnRNb2RlbEgAiAEBEj0KD3Blcm1pc3Npb25fbW9kZRgCIAEoCzIkLmNvbnZlcnNhdGlvbi52MS5BZ2VudFBlcm1pc3Npb25Nb2RlQggKBl9tb2RlbCL9AQoSU3RhcnRTZXNzaW9uUmVzdW1lEhkKEXZlbmRvcl9zZXNzaW9uX2lkGAEgASgJEkYKEGNvbGRfcmVtZWRpYXRpb24YAiABKAsyJy5jb252ZXJzYXRpb24udjEuU2Vzc2lvbkNvbGRSZW1lZGlhdGlvbkgAiAEBEjAKBnJlYmluZBgDIAEoCzIbLnNoaW0udjEuU3RhcnRTZXNzaW9uUmViaW5kSAGIAQESMgoRcm9sbGVkX2JhY2tfdHVybnMYBCADKAsyFy5jb252ZXJzYXRpb24udjEuVHVybklkQhMKEV9jb2xkX3JlbWVkaWF0aW9uQgkKB19yZWJpbmQiFAoSU3RhcnRTZXNzaW9uUmViaW5kIoIBChRTdGFydFNlc3Npb25SZXNwb25zZRIvCgdzdWNjZXNzGAEgASgLMhwuc2hpbS52MS5TdGFydFNlc3Npb25TdWNjZXNzSAASLwoHZmFpbHVyZRgCIAEoCzIcLnNoaW0udjEuU3RhcnRTZXNzaW9uRmFpbHVyZUgAQggKBnJlc3VsdCJHChNTdGFydFNlc3Npb25TdWNjZXNzEjAKB3Nlc3Npb24YASABKAsyHy5jb252ZXJzYXRpb24udjEuU2Vzc2lvblN0YXJ0ZWQiuAMKE1N0YXJ0U2Vzc2lvbkZhaWx1cmUSLAoEY29sZBgBIAEoCzIcLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uQ29sZEgAEkUKE3ZlbmRvcl9zdGFydF9mYWlsZWQYAyABKAsyJi5zaGltLnYxLlN0YXJ0U2Vzc2lvblZlbmRvclN0YXJ0RmFpbGVkSAASPgoPdW5rbm93bl9zZXNzaW9uGAQgASgLMiMuc2hpbS52MS5TdGFydFNlc3Npb25Vbmtub3duU2Vzc2lvbkgAEj4KD2FscmVhZHlfc3RhcnRlZBgFIAEoCzIjLnNoaW0udjEuU3RhcnRTZXNzaW9uQWxyZWFkeVN0YXJ0ZWRIABJEChJjb252ZXJzYXRpb25fb3duZWQYBiABKAsyJi5zaGltLnYxLlN0YXJ0U2Vzc2lvbkNvbnZlcnNhdGlvbk93bmVkSAASTQoXbG9ja19ob2xkZXJfdW5hdmFpbGFibGUYByABKAsyKi5zaGltLnYxLlN0YXJ0U2Vzc2lvbkxvY2tIb2xkZXJVbmF2YWlsYWJsZUgAEg4KBmRldGFpbBgCIAEoCUIHCgVjYXVzZSKmAQodU3RhcnRTZXNzaW9uVmVuZG9yU3RhcnRGYWlsZWQSPgoJcmV0cnlhYmxlGAEgASgLMikuc2hpbS52MS5TdGFydFNlc3Npb25WZW5kb3JTdGFydFJldHJ5YWJsZUgAEjwKCHJlamVjdGVkGAIgASgLMiguc2hpbS52MS5TdGFydFNlc3Npb25WZW5kb3JTdGFydFJlamVjdGVkSABCBwoFcmV0cnkioQEKIFN0YXJ0U2Vzc2lvblZlbmRvclN0YXJ0UmV0cnlhYmxlEjoKB25ldHdvcmsYASABKAsyJy5zaGltLnYxLlN0YXJ0U2Vzc2lvblZlbmRvclN0YXJ0TmV0d29ya0gAEjgKBnZlbmRvchgCIAEoCzImLnNoaW0udjEuU3RhcnRTZXNzaW9uVmVuZG9yU3RhcnRWZW5kb3JIAEIHCgVjYXVzZSIgCh5TdGFydFNlc3Npb25WZW5kb3JTdGFydE5ldHdvcmsiHwodU3RhcnRTZXNzaW9uVmVuZG9yU3RhcnRWZW5kb3IiIQofU3RhcnRTZXNzaW9uVmVuZG9yU3RhcnRSZWplY3RlZCIcChpTdGFydFNlc3Npb25Vbmtub3duU2Vzc2lvbiIcChpTdGFydFNlc3Npb25BbHJlYWR5U3RhcnRlZCIfCh1TdGFydFNlc3Npb25Db252ZXJzYXRpb25Pd25lZCJ2CiFTdGFydFNlc3Npb25Mb2NrSG9sZGVyVW5hdmFpbGFibGUSMwoHZmFpbHVyZRgDIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5Mb2NrSG9sZGVyRmFpbHVyZUoECAEQAkoECAIQA1IGYmluYXJ5Ughvc19lcnJvckIgWh5hZ2VudHJlcGwvcHJvdG8vc2hpbS92MTtzaGltdjFiBnByb3RvMw", [file_conversation_v1_api, file_conversation_v1_permission, file_conversation_v1_session, file_conversation_v1_turn]);
 
 /**
  * What the daemon wants driven, and how. UNARY: the daemon persists the
@@ -401,6 +401,32 @@ export const StartSessionVendorStartFailedSchema: GenMessage<StartSessionVendorS
  * @generated from message shim.v1.StartSessionVendorStartRetryable
  */
 export type StartSessionVendorStartRetryable = Message<"shim.v1.StartSessionVendorStartRetryable"> & {
+  /**
+   * WHOSE failure it was. Always set; neither arm is malformed and is read as
+   * `vendor`.
+   *
+   * @generated from oneof shim.v1.StartSessionVendorStartRetryable.cause
+   */
+  cause: {
+    /**
+     * This machine could not reach the network (no route, DNS failure,
+     * connection refused or reset before any answer): the daemon draws a
+     * network fault while it retries.
+     *
+     * @generated from field: shim.v1.StartSessionVendorStartNetwork network = 1;
+     */
+    value: StartSessionVendorStartNetwork;
+    case: "network";
+  } | {
+    /**
+     * The vendor itself was silent, ended early, or answered with a
+     * transient error: the daemon draws a vendor fault while it retries.
+     *
+     * @generated from field: shim.v1.StartSessionVendorStartVendor vendor = 2;
+     */
+    value: StartSessionVendorStartVendor;
+    case: "vendor";
+  } | { case: undefined; value?: undefined };
 };
 
 /**
@@ -409,6 +435,36 @@ export type StartSessionVendorStartRetryable = Message<"shim.v1.StartSessionVend
  */
 export const StartSessionVendorStartRetryableSchema: GenMessage<StartSessionVendorStartRetryable> = /*@__PURE__*/
   messageDesc(file_shim_v1_endpoint_start_session, 8);
+
+/**
+ * The network was unreachable.
+ *
+ * @generated from message shim.v1.StartSessionVendorStartNetwork
+ */
+export type StartSessionVendorStartNetwork = Message<"shim.v1.StartSessionVendorStartNetwork"> & {
+};
+
+/**
+ * Describes the message shim.v1.StartSessionVendorStartNetwork.
+ * Use `create(StartSessionVendorStartNetworkSchema)` to create a new message.
+ */
+export const StartSessionVendorStartNetworkSchema: GenMessage<StartSessionVendorStartNetwork> = /*@__PURE__*/
+  messageDesc(file_shim_v1_endpoint_start_session, 9);
+
+/**
+ * The vendor failed transiently.
+ *
+ * @generated from message shim.v1.StartSessionVendorStartVendor
+ */
+export type StartSessionVendorStartVendor = Message<"shim.v1.StartSessionVendorStartVendor"> & {
+};
+
+/**
+ * Describes the message shim.v1.StartSessionVendorStartVendor.
+ * Use `create(StartSessionVendorStartVendorSchema)` to create a new message.
+ */
+export const StartSessionVendorStartVendorSchema: GenMessage<StartSessionVendorStartVendor> = /*@__PURE__*/
+  messageDesc(file_shim_v1_endpoint_start_session, 10);
 
 /**
  * The vendor refused the start for a reason that will not pass on its own: a
@@ -426,7 +482,7 @@ export type StartSessionVendorStartRejected = Message<"shim.v1.StartSessionVendo
  * Use `create(StartSessionVendorStartRejectedSchema)` to create a new message.
  */
 export const StartSessionVendorStartRejectedSchema: GenMessage<StartSessionVendorStartRejected> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_start_session, 9);
+  messageDesc(file_shim_v1_endpoint_start_session, 11);
 
 /**
  * @generated from message shim.v1.StartSessionUnknownSession
@@ -439,7 +495,7 @@ export type StartSessionUnknownSession = Message<"shim.v1.StartSessionUnknownSes
  * Use `create(StartSessionUnknownSessionSchema)` to create a new message.
  */
 export const StartSessionUnknownSessionSchema: GenMessage<StartSessionUnknownSession> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_start_session, 10);
+  messageDesc(file_shim_v1_endpoint_start_session, 12);
 
 /**
  * @generated from message shim.v1.StartSessionAlreadyStarted
@@ -452,7 +508,7 @@ export type StartSessionAlreadyStarted = Message<"shim.v1.StartSessionAlreadySta
  * Use `create(StartSessionAlreadyStartedSchema)` to create a new message.
  */
 export const StartSessionAlreadyStartedSchema: GenMessage<StartSessionAlreadyStarted> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_start_session, 11);
+  messageDesc(file_shim_v1_endpoint_start_session, 13);
 
 /**
  * @generated from message shim.v1.StartSessionConversationOwned
@@ -465,7 +521,7 @@ export type StartSessionConversationOwned = Message<"shim.v1.StartSessionConvers
  * Use `create(StartSessionConversationOwnedSchema)` to create a new message.
  */
 export const StartSessionConversationOwnedSchema: GenMessage<StartSessionConversationOwned> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_start_session, 12);
+  messageDesc(file_shim_v1_endpoint_start_session, 14);
 
 /**
  * @generated from message shim.v1.StartSessionLockHolderUnavailable
@@ -484,5 +540,5 @@ export type StartSessionLockHolderUnavailable = Message<"shim.v1.StartSessionLoc
  * Use `create(StartSessionLockHolderUnavailableSchema)` to create a new message.
  */
 export const StartSessionLockHolderUnavailableSchema: GenMessage<StartSessionLockHolderUnavailable> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_start_session, 13);
+  messageDesc(file_shim_v1_endpoint_start_session, 15);
 

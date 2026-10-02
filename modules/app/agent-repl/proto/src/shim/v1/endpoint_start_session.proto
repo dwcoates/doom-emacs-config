@@ -177,7 +177,23 @@ message StartSessionVendorStartFailed {
 // its liveness bound, its process or stream ended before it was ready, or the
 // API answered with a transient error (overloaded, a server error, a network
 // failure). The caller retries on its own backoff.
-message StartSessionVendorStartRetryable {}
+message StartSessionVendorStartRetryable {
+  // WHOSE failure it was. Always set; neither arm is malformed and is read as
+  // `vendor`.
+  oneof cause {
+    // This machine could not reach the network (no route, DNS failure,
+    // connection refused or reset before any answer): the daemon draws a
+    // network fault while it retries.
+    StartSessionVendorStartNetwork network = 1;
+    // The vendor itself was silent, ended early, or answered with a
+    // transient error: the daemon draws a vendor fault while it retries.
+    StartSessionVendorStartVendor vendor = 2;
+  }
+}
+// The network was unreachable.
+message StartSessionVendorStartNetwork {}
+// The vendor failed transiently.
+message StartSessionVendorStartVendor {}
 // The vendor refused the start for a reason that will not pass on its own: a
 // credential rejection, a missing model, a refused resume, or a hook that
 // blocked the opening. The caller does not retry; the user must change
