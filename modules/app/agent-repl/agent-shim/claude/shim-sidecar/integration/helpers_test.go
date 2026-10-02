@@ -203,14 +203,14 @@ func runSuite(m *testing.M) int {
 				fmt.Fprintf(os.Stderr, "integration: removing temp bin dir %s: %v\n", binDir, err)
 			}
 		}()
+	} else if mode == testenv.BuildInto {
+		binDir, err = testenv.PrebuildDir(shared, sidecarIntegrationSharedSub)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "integration: %v\n", err)
+			return 1
+		}
 	} else {
 		binDir = filepath.Join(shared, sidecarIntegrationSharedSub)
-		if mode == testenv.BuildInto {
-			if err := os.MkdirAll(binDir, 0o755); err != nil {
-				fmt.Fprintf(os.Stderr, "integration: create shared bin dir: %v\n", err)
-				return 1
-			}
-		}
 	}
 
 	sidecarBin = filepath.Join(binDir, "shim-claude-sidecar")

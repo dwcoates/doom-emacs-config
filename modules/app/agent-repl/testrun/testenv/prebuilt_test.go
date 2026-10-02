@@ -89,3 +89,51 @@ func TestSharedBinary(t *testing.T) {
 		})
 	}
 }
+
+func TestPrebuildDir(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(t *testing.T, shared string)
+		wantErr string
+	}{
+		{name: "an absent sub is created", arrange: func(*testing.T, string) {}},
+		{
+			name: "an existing sub is kept",
+			arrange: func(t *testing.T, shared string) {
+				if err := os.MkdirAll(filepath.Join(shared, "harness"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name: "a file in its place is refused",
+			arrange: func(t *testing.T, shared string) {
+				if err := os.WriteFile(filepath.Join(shared, "harness"), nil, 0o644); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantErr: "create the prebuild directory",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			shared := t.TempDir()
+			tt.arrange(t, shared)
+
+			// Act
+			got, err := PrebuildDir(shared, "harness")
+
+			// Assert
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("err = %v, want it to mention %q", err, tt.wantErr)
+				}
+				return
+			}
+			if info, statErr := os.Stat(got); err != nil || got != filepath.Join(shared, "harness") || statErr != nil || !info.IsDir() {
+				t.Fatalf("PrebuildDir = %q, %v (stat %v)", got, err, statErr)
+			}
+		})
+	}
+}

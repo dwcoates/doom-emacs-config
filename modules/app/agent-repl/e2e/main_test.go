@@ -140,8 +140,7 @@ func e2eBinDir() string {
 				e2eBinErr = err
 				return
 			}
-			e2eBinPath = filepath.Join(shared, e2eSharedSub)
-			e2eBinErr = os.MkdirAll(e2eBinPath, 0o755)
+			e2eBinPath, e2eBinErr = testenv.PrebuildDir(shared, e2eSharedSub)
 			return
 		}
 		root := harness.RunRoot()
