@@ -14,6 +14,7 @@ const (
 	RPCWatchSession             = "WatchSession"
 	RPCSetSessionModel          = "SetSessionModel"
 	RPCSetSessionPermissionMode = "SetSessionPermissionMode"
+	RPCSetSessionEffort         = "SetSessionEffort"
 	RPCHibernate                = "Hibernate"
 	RPCKillSession              = "KillSession"
 	RPCStartTurn                = "StartTurn"
@@ -39,6 +40,8 @@ func newResponse(rpc string) proto.Message {
 		return &shimv1.SetSessionModelResponse{}
 	case RPCSetSessionPermissionMode:
 		return &shimv1.SetSessionPermissionModeResponse{}
+	case RPCSetSessionEffort:
+		return &shimv1.SetSessionEffortResponse{}
 	case RPCHibernate:
 		return &shimv1.HibernateResponse{}
 	case RPCKillSession:

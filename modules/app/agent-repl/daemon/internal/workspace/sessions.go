@@ -1163,6 +1163,10 @@ func (f *Fleet) sessionUp(
 		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "err := f.recordFacts(ctx, log, ws, previous, started, configDir, hostSessionID, client.PID()); err != nil"})
 		return err
 	}
+	// A NEW SHIM STARTS AT THE ROOT'S LEVEL, while the reader picked another
+	// for the rest of the session: put it back before the session is called
+	// up. An ADOPTED shim never comes through here; it kept its level.
+	f.reapplyEffort(ctx, log, ws, client)
 	log.Info(opBringUp, "the session is up", dlog.Context{
 		"adopted": false, "vendor_session_id": started.GetVendorSessionId(), "shim_pid": client.PID(),
 	})

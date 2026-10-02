@@ -2,7 +2,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { effortLevelOf } from "../../src/convert/effort.js";
+import { effortLevelOf, vendorEffortLevel } from "../../src/convert/effort.js";
 import { conversationv1 } from "../../src/proto.js";
 
 describe("effortLevelOf", () => {
@@ -39,6 +39,31 @@ describe("effortLevelOf", () => {
   it("is UNSPECIFIED for a level this vocabulary has no value for, rather than a guess", () => {
     // Arrange, Act, Assert.
     expect(effortLevelOf("ultra")).toBe(conversationv1.AgentEffortLevel.UNSPECIFIED);
+  });
+});
+
+describe("vendorEffortLevel", () => {
+  it.each([
+    [conversationv1.AgentEffortLevel.LOW, "low"],
+    [conversationv1.AgentEffortLevel.MEDIUM, "medium"],
+    [conversationv1.AgentEffortLevel.HIGH, "high"],
+    [conversationv1.AgentEffortLevel.XHIGH, "xhigh"],
+    [conversationv1.AgentEffortLevel.MAX, "max"],
+  ] as const)("spells %s as the vendor's %s", (level, spelling) => {
+    // Arrange, Act, Assert.
+    expect(vendorEffortLevel(level)).toBe(spelling);
+  });
+
+  it("round-trips through effortLevelOf", () => {
+    // Arrange, Act, Assert.
+    expect(effortLevelOf(vendorEffortLevel(conversationv1.AgentEffortLevel.XHIGH))).toBe(
+      conversationv1.AgentEffortLevel.XHIGH,
+    );
+  });
+
+  it("throws on UNSPECIFIED, which validation never admits", () => {
+    // Arrange, Act, Assert.
+    expect(() => vendorEffortLevel(conversationv1.AgentEffortLevel.UNSPECIFIED)).toThrow(/no vendor spelling/);
   });
 });
 

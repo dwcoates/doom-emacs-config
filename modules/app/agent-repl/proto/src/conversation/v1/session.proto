@@ -473,6 +473,12 @@ message SessionModelChanged {
   AgentModel effective_model = 1;
 }
 
+// The reasoning effort in effect for subsequent responses.
+message SessionEffortChanged {
+  // The effort level now in effect. Never UNSPECIFIED.
+  AgentEffortLevel effective_effort = 1;
+}
+
 // Fast mode. THE ARM IS THE STATE; off carries the vendor's reason.
 message SessionFastMode {
   oneof state {

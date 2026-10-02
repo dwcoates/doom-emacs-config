@@ -140,6 +140,19 @@ func validateSetSessionModelRequest(req *shimv1.SetSessionModelRequest) error {
 	return validateSessionColdRemediation(m+".cold_remediation", req.GetColdRemediation())
 }
 
+// validateSetSessionEffortRequest is SetSessionEffortRequest's base function.
+// The level is an enum whose zero is unset, so UNSPECIFIED is refused.
+func validateSetSessionEffortRequest(req *shimv1.SetSessionEffortRequest) error {
+	const m = "SetSessionEffortRequest"
+	if req == nil {
+		return invalid(m, m, "request is nil")
+	}
+	if req.GetEffort() == conversationv1.AgentEffortLevel_AGENT_EFFORT_LEVEL_UNSPECIFIED {
+		return invalid(m, m+".effort", "an effort change names its level")
+	}
+	return nil
+}
+
 // validateSetSessionPermissionModeRequest is
 // SetSessionPermissionModeRequest's base function.
 func validateSetSessionPermissionModeRequest(req *shimv1.SetSessionPermissionModeRequest) error {

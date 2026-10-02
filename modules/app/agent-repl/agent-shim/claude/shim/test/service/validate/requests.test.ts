@@ -197,6 +197,25 @@ describe("validateSetSessionPermissionModeRequest", () => {
   });
 });
 
+describe("validateSetSessionEffortRequest", () => {
+  it("accepts a request naming a level", () => {
+    // Arrange, Act, Assert.
+    expect(
+      codeOf(() => validate.validateSetSessionEffortRequest(requests.setSessionEffortRequest())),
+    ).toBeUndefined();
+  });
+
+  it("refuses a request naming no level", () => {
+    // Arrange.
+    const request = create(shimv1.SetSessionEffortRequestSchema, {});
+
+    // Act, Assert.
+    expect(codeOf(() => validate.validateSetSessionEffortRequest(request))).toBe(
+      Code.InvalidArgument,
+    );
+  });
+});
+
 describe("validateHibernateRequest", () => {
   it("accepts the empty request the contract declares", () => {
     // Arrange, Act, Assert.

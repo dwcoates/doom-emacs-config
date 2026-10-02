@@ -27,6 +27,7 @@ landed arm.
 
 | rpc | arm | condition | package |
 | --- | --- | --- | --- |
+| SetEffort | `unspecified` | a `SetSessionEffortFailure` whose `cause` oneof is unset — illegal on the wire, surfaced rather than guessed at | workspace |
 | SetModel | `unspecified` | a `SetSessionModelFailure` whose `cause` oneof is unset — illegal on the wire, surfaced rather than guessed at | workspace |
 | RegisterRepository | `not_a_worktree` | the SHARED registration (`internal/workspace.register`, which RegisterWorkspace runs too) refused the repository's main worktree because it is not a git worktree on disk. `RegisterRepositoryError` carries `not_in_a_repository` and `unreadable_path` only, both of which are about the path the CALLER picked and would say something false about this state. Reached only when git named a main worktree that is gone between the probe and the stat, so it is recorded here rather than landed unasked | workspace |
 

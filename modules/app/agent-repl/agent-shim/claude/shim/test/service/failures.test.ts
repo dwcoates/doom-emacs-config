@@ -157,6 +157,34 @@ describe("setSessionPermissionModeRefused", () => {
   });
 });
 
+describe("setSessionEffortFailure", () => {
+  it.each([["notSupported"], ["noSession"], ["vendorRefused"]] as const)("states the %s arm", (kind) => {
+    // Arrange, Act.
+    const failure = failures.setSessionEffortFailure({ kind }, "why");
+
+    // Assert.
+    expect(failure.cause.case).toBe(kind);
+  });
+
+  it("carries the detail", () => {
+    // Arrange, Act.
+    const failure = failures.setSessionEffortFailure({ kind: "noSession" }, "why");
+
+    // Assert.
+    expect(failure.detail).toBe("why");
+  });
+});
+
+describe("setSessionEffortRefused", () => {
+  it("wraps the failure as the response's failure arm", () => {
+    // Arrange, Act.
+    const response = failures.setSessionEffortRefused({ kind: "vendorRefused" }, "no");
+
+    // Assert.
+    expect(response.result.case).toBe("failure");
+  });
+});
+
 describe("hibernateError", () => {
   it.each([["turnInFlight"], ["noSession"]] as const)("states the %s arm", (kind) => {
     // Arrange, Act.

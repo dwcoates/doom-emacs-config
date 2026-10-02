@@ -465,6 +465,21 @@ func validateSetModelRequest(req *agentreplv1.SetModelRequest) *connect.Error {
 	return validateAgentModel("model", req.GetModel())
 }
 
+// validateSetEffortRequest is SetEffortRequest's base function. The level is
+// an enum whose zero is unset, and a client never invents one.
+func validateSetEffortRequest(req *agentreplv1.SetEffortRequest) *connect.Error {
+	if err := validateWorkspaceRef("workspace", req.GetWorkspace()); err != nil {
+		return err
+	}
+	if req.GetEffort() == conversationv1.AgentEffortLevel_AGENT_EFFORT_LEVEL_UNSPECIFIED {
+		return invalid("effort", "an effort level is required")
+	}
+	if _, known := conversationv1.AgentEffortLevel_name[int32(req.GetEffort())]; !known {
+		return invalid("effort", "the effort level is not one this contract defines")
+	}
+	return nil
+}
+
 // validateSetPermissionModeRequest is SetPermissionModeRequest's base function.
 func validateSetPermissionModeRequest(req *agentreplv1.SetPermissionModeRequest) *connect.Error {
 	if err := validateWorkspaceRef("workspace", req.GetWorkspace()); err != nil {

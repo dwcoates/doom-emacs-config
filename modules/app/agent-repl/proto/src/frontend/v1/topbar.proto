@@ -108,6 +108,11 @@ message TopbarView {
   // strip draws alike, session or no session, and a fact the daemon could not
   // read is stated INSIDE the chip rather than by its absence.
   TopbarPersistentWifi persistent_wifi = 13;
+  // The effort selector, drawn between the model selector and the
+  // permission-mode picker, in the same form as both. OPTIONAL BY PRESENCE,
+  // for the same reason and with the same no-session drawing as the model
+  // selector.
+  optional TopbarEffortSelector effort_selector = 14;
 }
 
 // THE PERSISTENT-WIFI CHIP: one wifi glyph stating two facts about the
@@ -226,6 +231,15 @@ message TopbarContextChip {
   // The hover content: the SESSION's token usage. ALWAYS POPULATED so the
   // hover needs no round-trip.
   TokenBreakdownView breakdown = 2;
+  // How full the model's context window is, 0..1: the context size `text`
+  // states over the window's size. The window's size is the vendor's figure
+  // for the session's model when the vendor states one, and 1,000,000 tokens
+  // when it does not (owner ruling, 2026-10-01 — the one sanctioned assumed
+  // figure). The client colors `text` by this fraction with EXACTLY the rule
+  // the footer's allowance percentages use, so a chip at 40% of its window
+  // wears the color a 40% allowance wears. Never outside [0, 1]; the daemon
+  // clamps.
+  double window_fill = 3;
 }
 
 // Which Claude account the session spends as, resolved by the daemon from
@@ -295,6 +309,43 @@ message TopbarModelSelector {
   // The selectable models, in display order. The selector renders exactly
   // this list.
   repeated conversation.v1.ModelOption options = 2;
+}
+
+// THE EFFORT SELECTOR: the reasoning effort the workspace's session runs at,
+// and the levels it may be switched to. A pick is SetEffort and holds for the
+// rest of the session. THE ARM IS WHETHER THE SELECTED MODEL TAKES AN EFFORT
+// LEVEL AT ALL (conversation.v1.ModelCapabilities.effort_support).
+//
+// THE CURRENT LEVEL IS ALWAYS KNOWN while a session stands: before any pick,
+// it is the default the daemon read from the session's own Claude settings
+// when it initialized the workspace (owner ruling, 2026-10-01), and after a
+// pick it is the level the shim reported in effect.
+message TopbarEffortSelector {
+  oneof support {
+    // The selected model takes an effort level.
+    TopbarEffortSelectorSupported supported = 1;
+    // The selected model takes no effort level: the cell draws its dash and
+    // offers no dropdown.
+    TopbarEffortSelectorUnsupported unsupported = 2;
+  }
+}
+// The effort in effect and the levels the selected model accepts.
+message TopbarEffortSelectorSupported {
+  // The level in effect — the button shows its display_name. ALWAYS one of
+  // `options`; the daemon never serves a current level the model refuses.
+  TopbarEffortOption current = 1;
+  // The levels the selected model accepts, in the vendor's own order. The
+  // dropdown renders exactly this list.
+  repeated TopbarEffortOption options = 2;
+}
+// The selected model takes no effort level.
+message TopbarEffortSelectorUnsupported {}
+// One effort level the selector offers.
+message TopbarEffortOption {
+  // The level — the typed echo token SetEffort takes back. Never UNSPECIFIED.
+  conversation.v1.AgentEffortLevel level = 1;
+  // The name the selector shows for it ("medium").
+  string display_name = 2;
 }
 
 // The connectivity indicator, fully resolved: a literal glyph, a literal

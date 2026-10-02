@@ -43,6 +43,29 @@ func (s *server) SetModel(
 	return connect.NewResponse(resp), nil
 }
 
+// SetEffort switches the session's reasoning effort to the echoed level. It is
+// answered once the shim has the level in effect, which is after the running
+// turn ends; the selector's new state arrives on the topbar stream.
+func (s *server) SetEffort(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.SetEffortRequest],
+) (*connect.Response[agentreplv1.SetEffortResponse], error) {
+	const rpc = "SetEffort"
+	if err := validateSetEffortRequest(req.Msg); err != nil {
+		return nil, err
+	}
+	resp := &agentreplv1.SetEffortResponse{}
+	subject, cerr, done := s.subjectFor(ctx, rpc, req.Msg.GetWorkspace(), resp)
+	if done {
+		return answer(resp, cerr)
+	}
+	if err := s.deps.Verbs.SetEffort(ctx, subject.Record.ID, req.Msg.GetEffort()); err != nil {
+		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
+	}
+	resp.Result = &agentreplv1.SetEffortResponse_Success{Success: &agentreplv1.SetEffortSuccess{}}
+	return connect.NewResponse(resp), nil
+}
+
 // SetPermissionMode switches the permission mode, validated against EXACTLY
 // what the topbar's picker served.
 func (s *server) SetPermissionMode(

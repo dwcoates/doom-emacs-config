@@ -45,6 +45,8 @@ const (
 	ShimWatchSessionProcedure = "/shim.v1.Shim/WatchSession"
 	// ShimSetSessionModelProcedure is the fully-qualified name of the Shim's SetSessionModel RPC.
 	ShimSetSessionModelProcedure = "/shim.v1.Shim/SetSessionModel"
+	// ShimSetSessionEffortProcedure is the fully-qualified name of the Shim's SetSessionEffort RPC.
+	ShimSetSessionEffortProcedure = "/shim.v1.Shim/SetSessionEffort"
 	// ShimSetSessionPermissionModeProcedure is the fully-qualified name of the Shim's
 	// SetSessionPermissionMode RPC.
 	ShimSetSessionPermissionModeProcedure = "/shim.v1.Shim/SetSessionPermissionMode"
@@ -88,6 +90,7 @@ var (
 	shimStartSessionMethodDescriptor             = shimServiceDescriptor.Methods().ByName("StartSession")
 	shimWatchSessionMethodDescriptor             = shimServiceDescriptor.Methods().ByName("WatchSession")
 	shimSetSessionModelMethodDescriptor          = shimServiceDescriptor.Methods().ByName("SetSessionModel")
+	shimSetSessionEffortMethodDescriptor         = shimServiceDescriptor.Methods().ByName("SetSessionEffort")
 	shimSetSessionPermissionModeMethodDescriptor = shimServiceDescriptor.Methods().ByName("SetSessionPermissionMode")
 	shimHibernateMethodDescriptor                = shimServiceDescriptor.Methods().ByName("Hibernate")
 	shimKillSessionMethodDescriptor              = shimServiceDescriptor.Methods().ByName("KillSession")
@@ -124,6 +127,9 @@ type ShimClient interface {
 	// ends; refused IMMEDIATELY with the cold cost when the context exceeds the
 	// request's threshold and no remediation is named.
 	SetSessionModel(context.Context, *connect.Request[v1.SetSessionModelRequest]) (*connect.Response[v1.SetSessionModelResponse], error)
+	// Change the reasoning effort from the next turn on. Resolves after the
+	// current turn ends; never cold-gated.
+	SetSessionEffort(context.Context, *connect.Request[v1.SetSessionEffortRequest]) (*connect.Response[v1.SetSessionEffortResponse], error)
 	// Change the session's permission mode for every gate from now on.
 	SetSessionPermissionMode(context.Context, *connect.Request[v1.SetSessionPermissionModeRequest]) (*connect.Response[v1.SetSessionPermissionModeResponse], error)
 	// The pre-hibernation directive: the shim compacts, then acks; the daemon
@@ -207,6 +213,12 @@ func NewShimClient(httpClient connect.HTTPClient, baseURL string, opts ...connec
 			httpClient,
 			baseURL+ShimSetSessionModelProcedure,
 			connect.WithSchema(shimSetSessionModelMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		setSessionEffort: connect.NewClient[v1.SetSessionEffortRequest, v1.SetSessionEffortResponse](
+			httpClient,
+			baseURL+ShimSetSessionEffortProcedure,
+			connect.WithSchema(shimSetSessionEffortMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
 		setSessionPermissionMode: connect.NewClient[v1.SetSessionPermissionModeRequest, v1.SetSessionPermissionModeResponse](
@@ -319,6 +331,7 @@ type shimClient struct {
 	startSession             *connect.Client[v1.StartSessionRequest, v1.StartSessionResponse]
 	watchSession             *connect.Client[v1.WatchSessionRequest, v1.WatchSessionResponse]
 	setSessionModel          *connect.Client[v1.SetSessionModelRequest, v1.SetSessionModelResponse]
+	setSessionEffort         *connect.Client[v1.SetSessionEffortRequest, v1.SetSessionEffortResponse]
 	setSessionPermissionMode *connect.Client[v1.SetSessionPermissionModeRequest, v1.SetSessionPermissionModeResponse]
 	hibernate                *connect.Client[v1.HibernateRequest, v1.HibernateResponse]
 	killSession              *connect.Client[v1.KillSessionRequest, v1.KillSessionResponse]
@@ -351,6 +364,11 @@ func (c *shimClient) WatchSession(ctx context.Context, req *connect.Request[v1.W
 // SetSessionModel calls shim.v1.Shim.SetSessionModel.
 func (c *shimClient) SetSessionModel(ctx context.Context, req *connect.Request[v1.SetSessionModelRequest]) (*connect.Response[v1.SetSessionModelResponse], error) {
 	return c.setSessionModel.CallUnary(ctx, req)
+}
+
+// SetSessionEffort calls shim.v1.Shim.SetSessionEffort.
+func (c *shimClient) SetSessionEffort(ctx context.Context, req *connect.Request[v1.SetSessionEffortRequest]) (*connect.Response[v1.SetSessionEffortResponse], error) {
+	return c.setSessionEffort.CallUnary(ctx, req)
 }
 
 // SetSessionPermissionMode calls shim.v1.Shim.SetSessionPermissionMode.
@@ -455,6 +473,9 @@ type ShimHandler interface {
 	// ends; refused IMMEDIATELY with the cold cost when the context exceeds the
 	// request's threshold and no remediation is named.
 	SetSessionModel(context.Context, *connect.Request[v1.SetSessionModelRequest]) (*connect.Response[v1.SetSessionModelResponse], error)
+	// Change the reasoning effort from the next turn on. Resolves after the
+	// current turn ends; never cold-gated.
+	SetSessionEffort(context.Context, *connect.Request[v1.SetSessionEffortRequest]) (*connect.Response[v1.SetSessionEffortResponse], error)
 	// Change the session's permission mode for every gate from now on.
 	SetSessionPermissionMode(context.Context, *connect.Request[v1.SetSessionPermissionModeRequest]) (*connect.Response[v1.SetSessionPermissionModeResponse], error)
 	// The pre-hibernation directive: the shim compacts, then acks; the daemon
@@ -534,6 +555,12 @@ func NewShimHandler(svc ShimHandler, opts ...connect.HandlerOption) (string, htt
 		ShimSetSessionModelProcedure,
 		svc.SetSessionModel,
 		connect.WithSchema(shimSetSessionModelMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	shimSetSessionEffortHandler := connect.NewUnaryHandler(
+		ShimSetSessionEffortProcedure,
+		svc.SetSessionEffort,
+		connect.WithSchema(shimSetSessionEffortMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
 	shimSetSessionPermissionModeHandler := connect.NewUnaryHandler(
@@ -646,6 +673,8 @@ func NewShimHandler(svc ShimHandler, opts ...connect.HandlerOption) (string, htt
 			shimWatchSessionHandler.ServeHTTP(w, r)
 		case ShimSetSessionModelProcedure:
 			shimSetSessionModelHandler.ServeHTTP(w, r)
+		case ShimSetSessionEffortProcedure:
+			shimSetSessionEffortHandler.ServeHTTP(w, r)
 		case ShimSetSessionPermissionModeProcedure:
 			shimSetSessionPermissionModeHandler.ServeHTTP(w, r)
 		case ShimHibernateProcedure:
@@ -699,6 +728,10 @@ func (UnimplementedShimHandler) WatchSession(context.Context, *connect.Request[v
 
 func (UnimplementedShimHandler) SetSessionModel(context.Context, *connect.Request[v1.SetSessionModelRequest]) (*connect.Response[v1.SetSessionModelResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("shim.v1.Shim.SetSessionModel is not implemented"))
+}
+
+func (UnimplementedShimHandler) SetSessionEffort(context.Context, *connect.Request[v1.SetSessionEffortRequest]) (*connect.Response[v1.SetSessionEffortResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("shim.v1.Shim.SetSessionEffort is not implemented"))
 }
 
 func (UnimplementedShimHandler) SetSessionPermissionMode(context.Context, *connect.Request[v1.SetSessionPermissionModeRequest]) (*connect.Response[v1.SetSessionPermissionModeResponse], error) {

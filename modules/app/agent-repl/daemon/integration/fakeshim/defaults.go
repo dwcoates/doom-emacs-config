@@ -26,9 +26,30 @@ const (
 // DefaultCatalog is the model catalog a fresh StartSession answers with.
 func DefaultCatalog() []*conversationv1.ModelOption {
 	return []*conversationv1.ModelOption{
-		{Model: &conversationv1.AgentModel{Name: "opus"}, DisplayName: "Opus", Description: "most capable"},
+		{Model: &conversationv1.AgentModel{Name: "opus"}, DisplayName: "Opus", Description: "most capable",
+			Capabilities: effortCapabilities(
+				conversationv1.AgentEffortLevel_AGENT_EFFORT_LEVEL_LOW,
+				conversationv1.AgentEffortLevel_AGENT_EFFORT_LEVEL_MEDIUM,
+				conversationv1.AgentEffortLevel_AGENT_EFFORT_LEVEL_HIGH,
+			)},
 		{Model: &conversationv1.AgentModel{Name: "sonnet"}, DisplayName: "Sonnet", Description: "balanced"},
-		{Model: &conversationv1.AgentModel{Name: "haiku"}, DisplayName: "Haiku", Description: "fastest"},
+		{Model: &conversationv1.AgentModel{Name: "haiku"}, DisplayName: "Haiku", Description: "fastest",
+			Capabilities: &conversationv1.ModelCapabilities{
+				EffortSupport: &conversationv1.ModelCapabilities_EffortUnsupported{
+					EffortUnsupported: &conversationv1.ModelEffortUnsupported{},
+				},
+			}},
+	}
+}
+
+// effortCapabilities states a catalog row that accepts LEVELS, the shape the
+// effort selector is served from. Sonnet states no capability block at all,
+// so the catalog carries each of the three effort standings.
+func effortCapabilities(levels ...conversationv1.AgentEffortLevel) *conversationv1.ModelCapabilities {
+	return &conversationv1.ModelCapabilities{
+		EffortSupport: &conversationv1.ModelCapabilities_EffortSupported{
+			EffortSupported: &conversationv1.ModelEffortSupported{Levels: levels},
+		},
 	}
 }
 

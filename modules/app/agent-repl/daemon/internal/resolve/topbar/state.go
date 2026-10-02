@@ -5,6 +5,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/apiresponses"
+	"claude-repld/internal/claudesettings"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/shimclient"
 )
@@ -180,6 +181,18 @@ type wsState struct {
 	// session has stated one. Standing, like the permission mode beside it:
 	// the state sticks until the vendor states another.
 	fastMode *conversationv1.SessionFastMode
+
+	// effortSettings is what the session's config root persists for the
+	// effort level, read at workspace initialization (claudesettings).
+	effortSettings claudesettings.Effort
+	// pickedEffort is the level the shim confirmed for the last SetEffort,
+	// UNSPECIFIED before any pick. It outranks the settings: it is what the
+	// session runs at.
+	pickedEffort conversationv1.AgentEffortLevel
+	// effortStandingLogged is what the last edge record stated about the
+	// effort selector, so a change is recorded once, when it happens, and not
+	// on every publication.
+	effortStandingLogged string
 
 	// email is the logged-in account, empty when the root is logged out.
 	email string

@@ -511,6 +511,23 @@ func (s *requestLoggingServer) SetModel(
 	return s.server.SetModel(ctx, req)
 }
 
+func (s *requestLoggingServer) SetEffort(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.SetEffortRequest],
+) (resp *connect.Response[agentreplv1.SetEffortResponse], err error) {
+	boundary, err := s.server.beginRequest(ctx, "SetEffort", req.Header().Get(requestIDHeader), requestMessage(req))
+	if err != nil {
+		return nil, boundaryFailure(err)
+	}
+	boundary.log.Debug("daemon.server.set_effort", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
+	defer func() {
+		boundary.log.Debug("daemon.server.set_effort", "completed the rpc handler", boundary.completionContext(err))
+	}()
+	return s.server.SetEffort(ctx, req)
+}
+
 func (s *requestLoggingServer) SetPermissionMode(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.SetPermissionModeRequest],

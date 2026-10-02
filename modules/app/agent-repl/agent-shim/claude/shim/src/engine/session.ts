@@ -41,7 +41,7 @@ import type { LockRelease } from "../locks.js";
 import { workspaceLockKey } from "../locks.js";
 import { recordAgentBinaryVersion, requireSessionRuntime } from "../build-identity.js";
 import { isAgentTaskType } from "../convert/detached.js";
-import { effortLevelOf } from "../convert/effort.js";
+import { effortLevelOf, vendorEffortLevel } from "../convert/effort.js";
 import { promptVendorUuid, subagentId, toolCallActivityId } from "../convert/ids.js";
 import { hookBlockingText } from "../convert/hooks.js";
 import { classifyVendorApiFailure, redactVendorMessage } from "../convert/terminals.js";
@@ -82,6 +82,7 @@ import {
   rollBackSessionRefused,
   rollBackSessionSucceeded,
   sessionFault,
+  setSessionEffortRefused,
   setSessionModelRefused,
   setSessionPermissionModeRefused,
   startSessionRefused,
@@ -775,6 +776,16 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     | {
         readonly model: conversationv1.AgentModel;
         readonly resolve: (response: shimv1.SetSessionModelResponse) => void;
+      }
+    | undefined;
+  /**
+   * An effort change accepted mid-turn, and the call still waiting on it. A
+   * turn runs at ONE effort throughout, exactly as it runs on one model.
+   */
+  let pendingEffort:
+    | {
+        readonly effort: conversationv1.AgentEffortLevel;
+        readonly resolve: (response: shimv1.SetSessionEffortResponse) => void;
       }
     | undefined;
   let accountUsageHandle: unknown;
@@ -2768,6 +2779,10 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // counted after an await, that prompt would build on keep-alive context.
     if (ended.keepalive) rewind.noteKeepaliveTurn();
     await applyPendingModel();
+    // AFTER THE MODEL: the level is judged by the vendor against the model the
+    // next turn runs on, so a model and an effort change queued behind one
+    // turn land in that order.
+    await applyPendingEffort();
     if (identity !== undefined) {
       backupTranscript({
         transcript: transcriptPath(deps.env.configDir, deps.env.cwd, identity.vendorSessionId),
@@ -2828,6 +2843,47 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         ),
       );
     }
+  }
+
+  /** An effort change that waited for the turn to end lands now, and its caller is answered. */
+  async function applyPendingEffort(): Promise<void> {
+    if (pendingEffort === undefined) return;
+    const waiting = pendingEffort;
+    pendingEffort = undefined;
+    waiting.resolve(await effortApplied(waiting.effort));
+  }
+
+  /**
+   * Ask the vendor for `effort` and answer with the outcome. The vendor's
+   * refusal IS the answer: swallowing it would leave the daemon drawing a
+   * level the session does not run at.
+   */
+  async function effortApplied(
+    effort: conversationv1.AgentEffortLevel,
+  ): Promise<shimv1.SetSessionEffortResponse> {
+    const active = query;
+    if (active === undefined) {
+      return setSessionEffortRefused(
+        { kind: "noSession" },
+        "the session's query ended before the effort change could land",
+      );
+    }
+    try {
+      await active.applyFlagSettings({ effortLevel: vendorEffortLevel(effort) });
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      LOGGER.info({ effort: conversationv1.AgentEffortLevel[effort], cause: detail }, "the vendor refused the effort change");
+      return setSessionEffortRefused({ kind: "vendorRefused" }, detail);
+    }
+    LOGGER.info({ effort: conversationv1.AgentEffortLevel[effort] }, "changed the session's reasoning effort");
+    return create(shimv1.SetSessionEffortResponseSchema, {
+      result: {
+        case: "success",
+        value: create(shimv1.SetSessionEffortSuccessSchema, {
+          effortChanged: create(conversationv1.SessionEffortChangedSchema, { effectiveEffort: effort }),
+        }),
+      },
+    });
   }
 
   async function applyModel(model: conversationv1.AgentModel): Promise<void> {
@@ -5245,6 +5301,67 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     });
   }
 
+  /**
+   * Whether the model in effect refuses `effort`, judged from the catalog the
+   * vendor served. UNDEFINED when the catalog states nothing about that model
+   * — no row, or a row with no capability block — because then nothing here
+   * may guess either way, and the vendor's own answer decides.
+   */
+  function effortRefusal(effort: conversationv1.AgentEffortLevel): string | undefined {
+    const option = modelCatalog.find(
+      (candidate) =>
+        candidate.model?.name === effectiveModel ||
+        candidate.capabilities?.resolvedModel?.name === effectiveModel,
+    );
+    const support = option?.capabilities?.effortSupport;
+    switch (support?.case) {
+      case "effortUnsupported":
+        return `${JSON.stringify(effectiveModel)} takes no effort level`;
+      case "effortSupported":
+        return support.value.levels.includes(effort)
+          ? undefined
+          : `${JSON.stringify(effectiveModel)} does not accept effort ${conversationv1.AgentEffortLevel[effort]}`;
+      default:
+        return undefined;
+    }
+  }
+
+  async function setSessionEffort(
+    request: shimv1.SetSessionEffortRequest,
+  ): Promise<shimv1.SetSessionEffortResponse> {
+    if (!started || query === undefined) {
+      return setSessionEffortRefused({ kind: "noSession" }, "no session has been started on this shim");
+    }
+    const effort = request.effort;
+    const refusal = effortRefusal(effort);
+    if (refusal !== undefined) {
+      LOGGER.info({ effort: conversationv1.AgentEffortLevel[effort], model: effectiveModel }, "refused SetSessionEffort because the model in effect does not accept the level");
+      return setSessionEffortRefused({ kind: "notSupported" }, refusal);
+    }
+    const running = open ?? adopted;
+    if (running !== undefined) {
+      // ONE EFFORT PER TURN, and the call resolves only once the boundary that
+      // makes it true has passed — SetSessionModel's rule, for its reason.
+      LOGGER.debug(
+        { effort: conversationv1.AgentEffortLevel[effort], turn_id: running.id.value },
+        "effort change accepted; it resolves at the turn boundary",
+      );
+      return new Promise<shimv1.SetSessionEffortResponse>((resolve) => {
+        // A second SetSessionEffort during one turn REPLACES the first, and the
+        // first caller is told so rather than left holding a promise nothing
+        // will ever settle.
+        pendingEffort?.resolve(
+          setSessionEffortRefused(
+            { kind: "vendorRefused" },
+            "a later SetSessionEffort replaced this one before the turn ended",
+          ),
+        );
+        pendingEffort = { effort, resolve };
+      });
+    }
+    return effortApplied(effort);
+  }
+
   async function setSessionPermissionMode(
     request: shimv1.SetSessionPermissionModeRequest,
   ): Promise<shimv1.SetSessionPermissionModeResponse> {
@@ -5658,6 +5775,16 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         ),
       );
     }
+    if (pendingEffort !== undefined) {
+      const waiting = pendingEffort;
+      pendingEffort = undefined;
+      waiting.resolve(
+        setSessionEffortRefused(
+          { kind: "vendorRefused" },
+          `the session stood down before the turn ended (${reason}); the effort change did not land`,
+        ),
+      );
+    }
     cadence?.stop();
     networkResume.stop(reason);
     if (accountUsageHandle !== undefined) {
@@ -5952,6 +6079,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // the daemon unable to tell "not ready" from "refused".
     watchSession: () => watchSessionFrames(pushes.subscribe(), reannounceStart, () => standingDeath),
     setSessionModel,
+    setSessionEffort,
     setSessionPermissionMode,
     hibernate,
     killSession,

@@ -252,6 +252,7 @@ comma-separated:
 | `start-error-result` | the query answers the opening with an error `result` and ends | `StartSession{vendor_start_failed}` carrying the vendor's own refusal text |
 | `set_model` | `setModel()` rejects | `SetSessionModel{vendor_refused}` |
 | `set_permission_mode` | `setPermissionMode()` rejects | `SetSessionPermissionMode{vendor_refused}` |
+| `apply_flag_settings` | `applyFlagSettings()` rejects | `SetSessionEffort{vendor_refused}` |
 | `rewind_files` | `rewindFiles()` answers `canRewind: false`, dry run or real | `RollBackSession{files_not_restorable}` |
 
 An unrecognized verb is a refusal to start, never a silently ignored knob.

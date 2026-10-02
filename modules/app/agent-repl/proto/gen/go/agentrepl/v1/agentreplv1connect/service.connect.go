@@ -123,6 +123,8 @@ const (
 	AgentReplWatchTopbarProcedure = "/agentrepl.v1.AgentRepl/WatchTopbar"
 	// AgentReplSetModelProcedure is the fully-qualified name of the AgentRepl's SetModel RPC.
 	AgentReplSetModelProcedure = "/agentrepl.v1.AgentRepl/SetModel"
+	// AgentReplSetEffortProcedure is the fully-qualified name of the AgentRepl's SetEffort RPC.
+	AgentReplSetEffortProcedure = "/agentrepl.v1.AgentRepl/SetEffort"
 	// AgentReplSetPermissionModeProcedure is the fully-qualified name of the AgentRepl's
 	// SetPermissionMode RPC.
 	AgentReplSetPermissionModeProcedure = "/agentrepl.v1.AgentRepl/SetPermissionMode"
@@ -246,6 +248,7 @@ var (
 	agentReplAssignWorkspaceTaskMethodDescriptor      = agentReplServiceDescriptor.Methods().ByName("AssignWorkspaceTask")
 	agentReplWatchTopbarMethodDescriptor              = agentReplServiceDescriptor.Methods().ByName("WatchTopbar")
 	agentReplSetModelMethodDescriptor                 = agentReplServiceDescriptor.Methods().ByName("SetModel")
+	agentReplSetEffortMethodDescriptor                = agentReplServiceDescriptor.Methods().ByName("SetEffort")
 	agentReplSetPermissionModeMethodDescriptor        = agentReplServiceDescriptor.Methods().ByName("SetPermissionMode")
 	agentReplSelectAccountMethodDescriptor            = agentReplServiceDescriptor.Methods().ByName("SelectAccount")
 	agentReplWatchFooterMethodDescriptor              = agentReplServiceDescriptor.Methods().ByName("WatchFooter")
@@ -373,6 +376,9 @@ type AgentReplClient interface {
 	// The selector's pick: the typed echo token handed back. See
 	// endpoint_set_model.proto.
 	SetModel(context.Context, *connect.Request[v1.SetModelRequest]) (*connect.Response[v1.SetModelResponse], error)
+	// The effort selector's pick, SetModel's sibling. See
+	// endpoint_set_effort.proto.
+	SetEffort(context.Context, *connect.Request[v1.SetEffortRequest]) (*connect.Response[v1.SetEffortResponse], error)
 	// The permission-mode switch, SetModel's sibling. See
 	// endpoint_set_permission_mode.proto.
 	SetPermissionMode(context.Context, *connect.Request[v1.SetPermissionModeRequest]) (*connect.Response[v1.SetPermissionModeResponse], error)
@@ -678,6 +684,12 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(agentReplSetModelMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		setEffort: connect.NewClient[v1.SetEffortRequest, v1.SetEffortResponse](
+			httpClient,
+			baseURL+AgentReplSetEffortProcedure,
+			connect.WithSchema(agentReplSetEffortMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 		setPermissionMode: connect.NewClient[v1.SetPermissionModeRequest, v1.SetPermissionModeResponse](
 			httpClient,
 			baseURL+AgentReplSetPermissionModeProcedure,
@@ -913,6 +925,7 @@ type agentReplClient struct {
 	assignWorkspaceTask      *connect.Client[v1.AssignWorkspaceTaskRequest, v1.AssignWorkspaceTaskResponse]
 	watchTopbar              *connect.Client[v1.WatchTopbarRequest, v1.WatchTopbarResponse]
 	setModel                 *connect.Client[v1.SetModelRequest, v1.SetModelResponse]
+	setEffort                *connect.Client[v1.SetEffortRequest, v1.SetEffortResponse]
 	setPermissionMode        *connect.Client[v1.SetPermissionModeRequest, v1.SetPermissionModeResponse]
 	selectAccount            *connect.Client[v1.SelectAccountRequest, v1.SelectAccountResponse]
 	watchFooter              *connect.Client[v1.WatchFooterRequest, v1.WatchFooterResponse]
@@ -1106,6 +1119,11 @@ func (c *agentReplClient) WatchTopbar(ctx context.Context, req *connect.Request[
 // SetModel calls agentrepl.v1.AgentRepl.SetModel.
 func (c *agentReplClient) SetModel(ctx context.Context, req *connect.Request[v1.SetModelRequest]) (*connect.Response[v1.SetModelResponse], error) {
 	return c.setModel.CallUnary(ctx, req)
+}
+
+// SetEffort calls agentrepl.v1.AgentRepl.SetEffort.
+func (c *agentReplClient) SetEffort(ctx context.Context, req *connect.Request[v1.SetEffortRequest]) (*connect.Response[v1.SetEffortResponse], error) {
+	return c.setEffort.CallUnary(ctx, req)
 }
 
 // SetPermissionMode calls agentrepl.v1.AgentRepl.SetPermissionMode.
@@ -1365,6 +1383,9 @@ type AgentReplHandler interface {
 	// The selector's pick: the typed echo token handed back. See
 	// endpoint_set_model.proto.
 	SetModel(context.Context, *connect.Request[v1.SetModelRequest]) (*connect.Response[v1.SetModelResponse], error)
+	// The effort selector's pick, SetModel's sibling. See
+	// endpoint_set_effort.proto.
+	SetEffort(context.Context, *connect.Request[v1.SetEffortRequest]) (*connect.Response[v1.SetEffortResponse], error)
 	// The permission-mode switch, SetModel's sibling. See
 	// endpoint_set_permission_mode.proto.
 	SetPermissionMode(context.Context, *connect.Request[v1.SetPermissionModeRequest]) (*connect.Response[v1.SetPermissionModeResponse], error)
@@ -1666,6 +1687,12 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(agentReplSetModelMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
+	agentReplSetEffortHandler := connect.NewUnaryHandler(
+		AgentReplSetEffortProcedure,
+		svc.SetEffort,
+		connect.WithSchema(agentReplSetEffortMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
 	agentReplSetPermissionModeHandler := connect.NewUnaryHandler(
 		AgentReplSetPermissionModeProcedure,
 		svc.SetPermissionMode,
@@ -1930,6 +1957,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplWatchTopbarHandler.ServeHTTP(w, r)
 		case AgentReplSetModelProcedure:
 			agentReplSetModelHandler.ServeHTTP(w, r)
+		case AgentReplSetEffortProcedure:
+			agentReplSetEffortHandler.ServeHTTP(w, r)
 		case AgentReplSetPermissionModeProcedure:
 			agentReplSetPermissionModeHandler.ServeHTTP(w, r)
 		case AgentReplSelectAccountProcedure:
@@ -2131,6 +2160,10 @@ func (UnimplementedAgentReplHandler) WatchTopbar(context.Context, *connect.Reque
 
 func (UnimplementedAgentReplHandler) SetModel(context.Context, *connect.Request[v1.SetModelRequest]) (*connect.Response[v1.SetModelResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.SetModel is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) SetEffort(context.Context, *connect.Request[v1.SetEffortRequest]) (*connect.Response[v1.SetEffortResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.SetEffort is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) SetPermissionMode(context.Context, *connect.Request[v1.SetPermissionModeRequest]) (*connect.Response[v1.SetPermissionModeResponse], error) {

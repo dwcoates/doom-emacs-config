@@ -1094,6 +1094,23 @@ func (s *server) SetSessionModel(ctx context.Context, req *connect.Request[shimv
 	}), nil
 }
 
+// SetSessionEffort answers success carrying the level asked for: the fake has
+// no turn boundary of its own to wait on, and a test that needs a refusal
+// scripts one.
+func (s *server) SetSessionEffort(ctx context.Context, req *connect.Request[shimv1.SetSessionEffortRequest]) (*connect.Response[shimv1.SetSessionEffortResponse], error) {
+	if err := s.enter(ctx, RPCSetSessionEffort, req.Msg); err != nil {
+		return nil, err
+	}
+	if resp, done, err := scripted[shimv1.SetSessionEffortResponse, *shimv1.SetSessionEffortResponse](s, RPCSetSessionEffort); done {
+		return resp, err
+	}
+	return connect.NewResponse(&shimv1.SetSessionEffortResponse{
+		Result: &shimv1.SetSessionEffortResponse_Success{Success: &shimv1.SetSessionEffortSuccess{
+			EffortChanged: &conversationv1.SessionEffortChanged{EffectiveEffort: req.Msg.GetEffort()},
+		}},
+	}), nil
+}
+
 func (s *server) SetSessionPermissionMode(ctx context.Context, req *connect.Request[shimv1.SetSessionPermissionModeRequest]) (*connect.Response[shimv1.SetSessionPermissionModeResponse], error) {
 	if err := s.enter(ctx, RPCSetSessionPermissionMode, req.Msg); err != nil {
 		return nil, err

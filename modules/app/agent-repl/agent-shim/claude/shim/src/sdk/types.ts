@@ -26,6 +26,7 @@ import type {
   AgentInfo,
   BackgroundTaskSummary,
   CanUseTool,
+  EffortLevel,
   McpServerStatus,
   ModelInfo,
   PermissionMode,
@@ -145,6 +146,8 @@ export type PermissionResultLike = PermissionResult;
 export type PermissionUpdateLike = PermissionUpdate;
 /** The vendor's permission-mode vocabulary; the shim maps AgentPermissionMode onto it. */
 export type PermissionModeLike = PermissionMode;
+/** The vendor's effort-level vocabulary; the shim maps AgentEffortLevel onto it. */
+export type EffortLevelLike = EffortLevel;
 
 // ---------------------------------------------------------------------------
 // Control-request answers the shim reads
@@ -200,6 +203,12 @@ export interface QueryLike extends AsyncIterable<SdkMessage> {
   interrupt(): Promise<InterruptReceipt | undefined>;
   /** Change the gate's mode for every subsequent permission request. */
   setPermissionMode(mode: PermissionModeLike): Promise<void>;
+  /**
+   * Merge settings into the session-scoped flag layer. The shim sends ONLY
+   * `effortLevel`: the vendor's one mid-session effort control, which holds
+   * for the rest of the session and applies from the next request on.
+   */
+  applyFlagSettings(settings: { effortLevel: EffortLevelLike }): Promise<void>;
   /** Change the model for subsequent responses; `undefined` restores the default. */
   setModel(model?: string): Promise<void>;
   /** The selectable model catalog, as the worker resolves it. */

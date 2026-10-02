@@ -309,6 +309,30 @@ func TestValidateSetSessionModelRequest(t *testing.T) {
 	assertInvalidField(t, err, "SetSessionModelRequest.model")
 }
 
+// TestValidateSetSessionEffortRequest asserts the level an effort change
+// names is never UNSPECIFIED.
+func TestValidateSetSessionEffortRequest(t *testing.T) {
+	// Arrange, Act.
+	err := validateSetSessionEffortRequest(&shimv1.SetSessionEffortRequest{})
+
+	// Assert.
+	assertInvalidField(t, err, "SetSessionEffortRequest.effort")
+}
+
+// TestValidateSetSessionEffortRequestAcceptsANamedLevel asserts a named level
+// passes.
+func TestValidateSetSessionEffortRequestAcceptsANamedLevel(t *testing.T) {
+	// Arrange, Act.
+	err := validateSetSessionEffortRequest(&shimv1.SetSessionEffortRequest{
+		Effort: conversationv1.AgentEffortLevel_AGENT_EFFORT_LEVEL_HIGH,
+	})
+
+	// Assert.
+	if err != nil {
+		t.Errorf("err = %v, want nil", err)
+	}
+}
+
 // TestValidateSetSessionPermissionModeRequest asserts the mode a switch names
 // is required.
 func TestValidateSetSessionPermissionModeRequest(t *testing.T) {

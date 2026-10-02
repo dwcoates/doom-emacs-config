@@ -17,6 +17,7 @@ import "shim/v1/endpoint_roll_back_session.proto";
 import "shim/v1/endpoint_read_history.proto";
 import "shim/v1/endpoint_read_transcripts.proto";
 import "shim/v1/endpoint_set_session_model.proto";
+import "shim/v1/endpoint_set_session_effort.proto";
 import "shim/v1/endpoint_set_session_permission_mode.proto";
 import "shim/v1/endpoint_start_session.proto";
 import "shim/v1/endpoint_start_turn.proto";
@@ -56,6 +57,9 @@ service Shim {
   // ends; refused IMMEDIATELY with the cold cost when the context exceeds the
   // request's threshold and no remediation is named.
   rpc SetSessionModel(SetSessionModelRequest) returns (SetSessionModelResponse);
+  // Change the reasoning effort from the next turn on. Resolves after the
+  // current turn ends; never cold-gated.
+  rpc SetSessionEffort(SetSessionEffortRequest) returns (SetSessionEffortResponse);
   // Change the session's permission mode for every gate from now on.
   rpc SetSessionPermissionMode(SetSessionPermissionModeRequest) returns (SetSessionPermissionModeResponse);
 

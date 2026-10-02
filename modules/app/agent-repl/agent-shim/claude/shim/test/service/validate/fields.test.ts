@@ -179,6 +179,29 @@ describe("validatePromptOrigin", () => {
   });
 });
 
+describe("validateAgentEffortLevel", () => {
+  it("accepts a named level", () => {
+    // Arrange, Act, Assert.
+    expect(
+      codeOf(() => fields.validateAgentEffortLevel(conversationv1.AgentEffortLevel.HIGH, "p")),
+    ).toBeUndefined();
+  });
+
+  it("refuses UNSPECIFIED, because a guessed level runs every later turn", () => {
+    // Arrange, Act, Assert.
+    expect(
+      codeOf(() => fields.validateAgentEffortLevel(conversationv1.AgentEffortLevel.UNSPECIFIED, "p")),
+    ).toBe(Code.InvalidArgument);
+  });
+
+  it("refuses a number that names no level", () => {
+    // Arrange, Act, Assert.
+    expect(
+      codeOf(() => fields.validateAgentEffortLevel(99 as conversationv1.AgentEffortLevel, "p")),
+    ).toBe(Code.InvalidArgument);
+  });
+});
+
 describe("validateUserContent", () => {
   it("refuses an utterance with NO blocks, which is not a prompt", () => {
     // Arrange.

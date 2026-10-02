@@ -283,6 +283,9 @@ type fakeVerbs struct {
 	setModel    string
 	setModelErr error
 
+	setEffort    conversationv1.AgentEffortLevel
+	setEffortErr error
+
 	answerPermissionErr  error
 	answerQuestionErr    error
 	setPermissionModeErr error
@@ -380,6 +383,11 @@ func (f *fakeVerbs) Create(ctx context.Context, spec workspace.CreateSpec) (wsm.
 		return wsm.Workspace{}, f.createErr
 	}
 	return f.createRec, nil
+}
+
+func (f *fakeVerbs) SetEffort(_ context.Context, _ ids.WorkspaceID, level conversationv1.AgentEffortLevel) error {
+	f.setEffort = level
+	return f.setEffortErr
 }
 
 func (f *fakeVerbs) SetModel(_ context.Context, _ ids.WorkspaceID, model string) error {

@@ -202,6 +202,42 @@ export function setSessionPermissionModeRefused(
 }
 
 // ---------------------------------------------------------------------------
+// SetSessionEffort
+// ---------------------------------------------------------------------------
+
+/** Why the effort level could not be changed. */
+type SetSessionEffortCause =
+  | { readonly kind: "notSupported" }
+  | { readonly kind: "noSession" }
+  | { readonly kind: "vendorRefused" };
+
+/** The base constructor for `shim.v1.SetSessionEffortFailure`. */
+export function setSessionEffortFailure(
+  cause: SetSessionEffortCause,
+  detail: string,
+): shimv1.SetSessionEffortFailure {
+  return create(shimv1.SetSessionEffortFailureSchema, {
+    detail,
+    cause:
+      cause.kind === "notSupported"
+        ? { case: "notSupported", value: create(shimv1.SetSessionEffortNotSupportedSchema, {}) }
+        : cause.kind === "noSession"
+          ? { case: "noSession", value: create(shimv1.SetSessionEffortNoSessionSchema, {}) }
+          : { case: "vendorRefused", value: create(shimv1.SetSessionEffortVendorRefusedSchema, {}) },
+  });
+}
+
+/** The refusal as the whole response the handler returns. */
+export function setSessionEffortRefused(
+  cause: SetSessionEffortCause,
+  detail: string,
+): shimv1.SetSessionEffortResponse {
+  return create(shimv1.SetSessionEffortResponseSchema, {
+    result: { case: "failure", value: setSessionEffortFailure(cause, detail) },
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Hibernate
 // ---------------------------------------------------------------------------
 

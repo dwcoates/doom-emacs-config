@@ -81,3 +81,8 @@ func (c *cards) Models(ws ids.WorkspaceID) ([]string, bool) {
 func (c *cards) PermissionModes(ws ids.WorkspaceID) ([]string, bool) {
 	return c.topbar.PermissionModes(ws)
 }
+
+// EffortLevels answers exactly the levels the topbar's effort selector served.
+func (c *cards) EffortLevels(ws ids.WorkspaceID) ([]conversationv1.AgentEffortLevel, bool) {
+	return c.topbar.EffortLevels(ws)
+}

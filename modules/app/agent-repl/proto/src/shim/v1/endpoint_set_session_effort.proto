@@ -1,0 +1,58 @@
+// endpoint_set_session_effort.proto — SetSessionEffort: change the reasoning
+// effort for every response from the NEXT turn on.
+//
+// RESOLVES AFTER THE CURRENT TURN ENDS, never mid-turn, exactly as
+// SetSessionModel does: a turn runs at one effort throughout, and this call
+// returns only once that boundary has passed. With no turn open it resolves
+// at once.
+//
+// NO COLD GATE. A changed effort costs prompt-cache misses, and the topbar
+// says so on the selector's hover (owner ruling, 2026-10-01); the switch is
+// not refused for its cost the way a model switch is.
+
+syntax = "proto3";
+
+package shim.v1;
+
+import "conversation/v1/api.proto";
+import "conversation/v1/session.proto";
+
+option go_package = "agentrepl/proto/shim/v1;shimv1";
+
+// Which effort level.
+message SetSessionEffortRequest {
+  // The level. Never UNSPECIFIED; a level the session's model does not
+  // accept is a refusal.
+  conversation.v1.AgentEffortLevel effort = 1;
+}
+
+// THE ARM IS THE OUTCOME.
+message SetSessionEffortResponse {
+  oneof result {
+    SetSessionEffortSuccess success = 1;
+    SetSessionEffortFailure failure = 2;
+  }
+}
+
+// Switched, and the turn boundary has passed. Carries the level now in
+// effect.
+message SetSessionEffortSuccess {
+  conversation.v1.SessionEffortChanged effort_changed = 1;
+}
+
+// Not switched. THE ARM IS WHY.
+message SetSessionEffortFailure {
+  oneof cause {
+    // The session's model does not accept this level.
+    SetSessionEffortNotSupported not_supported = 1;
+    // No session is open on this shim.
+    SetSessionEffortNoSession no_session = 3;
+    // The vendor refused the switch; `detail` carries its wording.
+    SetSessionEffortVendorRefused vendor_refused = 4;
+  }
+  // The shim's account, for a human and for logs; never switched on.
+  string detail = 2;
+}
+message SetSessionEffortNotSupported {}
+message SetSessionEffortNoSession {}
+message SetSessionEffortVendorRefused {}

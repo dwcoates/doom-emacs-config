@@ -89,7 +89,7 @@ daemon/
                    build-staleness bounce, asset origin, intent manifest, reload_webapp push
     workspace/     workspace verbs (create standard + one-shot, register, open, close, kill, nuke,
                    forget, restart{force}, select, priority), task verbs, cold gate answer,
-                   SetModel/SetPermissionMode
+                   SetModel/SetPermissionMode/SetEffort
     health/        DaemonHealth / SessionHealth answers (unhealthy is an answer) + fault records
     commandfile/   the command-file ingress ($AGENT_REPL_STATE_DIR/output/workspace_commands_*.json)
                    mapped onto the same internal paths as the rpcs
@@ -246,7 +246,7 @@ type Client interface {
   // verbs (all lease-checked by callers; the client only guards occupancy)
   StartSession(ctx, *shimv1.StartSessionRequest) (*shimv1.StartSessionResponse, error)
   WatchSession(ctx) (Stream[*shimv1.WatchSessionResponse], error)  // frame oneof: update | session_started (re-announced once per watch)
-  SetSessionModel / SetSessionPermissionMode / Hibernate / KillSession / StartTurn / UpdateAgent / KillTurn / StopBash / DetachForeground / ReadHistory
+  SetSessionModel / SetSessionPermissionMode / SetSessionEffort / Hibernate / KillSession / StartTurn / UpdateAgent / KillTurn / StopBash / DetachForeground / ReadHistory
   WatchAgent(ctx, *shimv1.WatchAgentRequest) (Stream[*shimv1.WatchAgentResponse], error)
   WatchBash(ctx, work *conversationv1.DetachedWorkId) (Stream[*conversationv1.AgentBash], error)
   // occupancy: the in-memory guard behind the WSM lease row
@@ -516,6 +516,9 @@ see ERROR-ARMS.md), `Restart`
 owns the reload_webapp push when needed), `Select`, `SetPriority`, tasks,
 `AnswerColdGate`, `SetModel`/`SetPermissionMode` (through the queue's
 session-act path; ungated mode needs consent recorded at creation),
+`SetEffort` (NOT through the queue: straight to the shim's SetSessionEffort,
+which itself waits for the running turn, so no row ever stands for it; a new
+shim is put back at the picked level by `Fleet.sessionUp`),
 `Interrupt` (turn → KillTurn{force:confirm} with the confirm_required
 challenge when detached agents are live; detached → decode FeedId →
 UpdateAgent.stop / StopBash; all_agents → fan-wide), `AnswerPermission`,

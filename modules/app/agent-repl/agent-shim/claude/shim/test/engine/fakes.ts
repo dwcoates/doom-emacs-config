@@ -12,6 +12,7 @@ import type {
   AccountInfoLike,
   AccountUsageLike,
   ContextUsageLike,
+  EffortLevelLike,
   InitializationResultLike,
   InterruptReceipt,
   McpServerStatusLike,
@@ -56,6 +57,7 @@ export class ScriptedQuery implements QueryLike {
   /** When set, `interrupt` rejects with it, as a vendor that refuses the interrupt does. */
   interruptRejects: Error | undefined;
   setModelRejects: Error | undefined;
+  applyFlagSettingsRejects: Error | undefined;
   setPermissionModeRejects: Error | undefined;
   /**
    * `close()` records the call but leaves the stream standing.
@@ -131,6 +133,12 @@ export class ScriptedQuery implements QueryLike {
     return this.setPermissionModeRejects === undefined
       ? Promise.resolve()
       : Promise.reject(this.setPermissionModeRejects);
+  }
+  applyFlagSettings(settings: { effortLevel: EffortLevelLike }): Promise<void> {
+    this.calls.push(`applyFlagSettings:effortLevel=${settings.effortLevel}`);
+    return this.applyFlagSettingsRejects === undefined
+      ? Promise.resolve()
+      : Promise.reject(this.applyFlagSettingsRejects);
   }
   setModel(model?: string): Promise<void> {
     this.calls.push(`setModel:${model ?? ""}`);
