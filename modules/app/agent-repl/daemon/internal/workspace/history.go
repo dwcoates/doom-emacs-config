@@ -31,13 +31,19 @@ func (f *Fleet) ReadHistory(ctx context.Context, ws ids.WorkspaceID, target *con
 	if !ok {
 		return nil, feed.ErrNoHistorySource
 	}
+	// THE SESSION IS NOT UP FOR A READER UNTIL ITS WATCHER IS: the watcher is
+	// what names the main agent a page's rows are placed by, so a page read
+	// before it would be drawn unplaceable. The feed serves what it holds and
+	// loads the page when the watcher's first watch opens.
+	watcher, ok := f.sessionWatcher(ws)
+	if !ok {
+		return nil, feed.ErrNoHistorySource
+	}
 	page, err := readHistory(ctx, client, target, after)
 	if err != nil {
 		return nil, err
 	}
-	if watcher, ok := f.sessionWatcher(ws); ok {
-		watcher.NoteHistoryLoaded(target, page, after == nil)
-	}
+	watcher.NoteHistoryLoaded(target, page, after == nil)
 	return page, nil
 }
 

@@ -347,7 +347,7 @@ func (r *resolver) load(ctx context.Context, plan loadPlan) (loaded, error) {
 	// already loaded stay loaded, and the next older page is still read from
 	// below the oldest of them.
 	reread := plan.newest && f.book.newestLoaded
-	reachedStart := !reread && !plan.gap && page.GetFloor() != nil
+	reachedStart := !reread && page.GetFloor() != nil
 	switch {
 	case plan.gap:
 		f.book.gapAfter = page.GetMore().GetLastEntry()
