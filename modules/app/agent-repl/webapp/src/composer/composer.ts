@@ -25,6 +25,7 @@
  * pressing send again after a failure is the same submission rather than a
  * second turn.
  */
+import { createControl } from "../control.js";
 import { create } from "@bufbuild/protobuf";
 import { PromptOrigin } from "../../../proto/gen/ts/conversation/v1/prompt_origin_pb";
 import type { TurnId } from "../../../proto/gen/ts/conversation/v1/turn_pb";
@@ -149,8 +150,7 @@ export function mountComposer(
   input.rows = 2;
   root.appendChild(input);
 
-  const send = document.createElement("button");
-  send.type = "button";
+  const send = createControl();
   send.className = "composer-send";
   send.setAttribute("data-composer-send", "");
   send.textContent = "Send";

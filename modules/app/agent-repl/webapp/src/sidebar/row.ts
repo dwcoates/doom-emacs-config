@@ -24,6 +24,7 @@
  * "0ms ago". The column reflects last ACTIVITY, never last VIEWING, so it does
  * not jump when the user selects the workspace.
  */
+import { createControl } from "../control.js";
 import type {
   RosterRow,
   RosterRowAttention,
@@ -628,8 +629,7 @@ export function placeOpenRowDetails(root: ParentNode): void {
 
 /** The "…" control that opens the verb menu, and the right-click's twin. */
 function drawMenuControl(ws: HTMLElement, target: VerbTarget): HTMLElement {
-  const more = document.createElement("button");
-  more.type = "button";
+  const more = createControl();
   more.className = "sb-more";
   more.textContent = "⋯";
   more.title = "workspace actions";

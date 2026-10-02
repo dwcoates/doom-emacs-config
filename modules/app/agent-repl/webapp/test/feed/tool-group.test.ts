@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { type Control } from "../../src/control.js";
 import { describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import stylesheet from "../../src/styles.css?raw";
@@ -192,7 +193,7 @@ describe("createToolGroupStore", () => {
     const wrapper = store.arrange(groupKey("tool:Bash", "a"), "tool:Bash", members);
     // Act: click the first tab.
     wrapper
-      .querySelector<HTMLButtonElement>(`[${GROUP_TAB_MEMBER_ATTRIBUTE}="a"]`)
+      .querySelector<Control>(`[${GROUP_TAB_MEMBER_ATTRIBUTE}="a"]`)
       ?.click();
     // Assert: member a is now the shown one.
     expect([members[0].element.hidden, members[2].element.hidden]).toEqual([false, true]);
@@ -218,7 +219,7 @@ describe("createToolGroupStore", () => {
     const b = member("b");
     const key = groupKey("tool:Bash", "a");
     const wrapper = store.arrange(key, "tool:Bash", [a, b]);
-    wrapper.querySelector<HTMLButtonElement>(`[${GROUP_TAB_MEMBER_ATTRIBUTE}="a"]`)?.click();
+    wrapper.querySelector<Control>(`[${GROUP_TAB_MEMBER_ATTRIBUTE}="a"]`)?.click();
     // Act: a third same-kind card streams in and extends the run.
     const c = member("c");
     store.arrange(key, "tool:Bash", [a, b, c]);

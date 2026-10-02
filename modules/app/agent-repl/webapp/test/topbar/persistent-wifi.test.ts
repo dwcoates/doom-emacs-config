@@ -3,6 +3,7 @@
 // The persistent-wifi chip. One test per arm of each oneof, the unassigned
 // (unread) case of each, the tooltip, the arm this bundle cannot name, and the
 // click that turns the mode over through UpdatePersistentWifiMode{toggle}.
+import { type Control } from "../../src/control.js";
 import { describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import {
@@ -118,10 +119,10 @@ const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve,
 async function clickWith(
   answer: (req: UpdatePersistentWifiModeRequest) => UpdatePersistentWifiModeResponse,
   failures = new RecordingSink(),
-): Promise<{ host: HTMLElement; button: HTMLButtonElement; failures: RecordingSink }> {
+): Promise<{ host: HTMLElement; button: Control; failures: RecordingSink }> {
   const { host, tc } = topbarContext(appContext({ updatePersistentWifiMode: answer }, failures));
   host.append(drawTopbarPersistentWifi(chip(joined, off), tc));
-  const button = host.querySelector<HTMLButtonElement>(".topbar-wifi-button")!;
+  const button = host.querySelector<Control>(".topbar-wifi-button")!;
   button.click();
   await settle();
   return { host, button, failures };
@@ -129,7 +130,7 @@ async function clickWith(
 
 describe("clicking the persistent-wifi chip", () => {
   it("draws the glyph inside a button", () => {
-    expect(draw(chip(joined, on)).querySelector("button.topbar-wifi-button > svg.topbar-wifi-glyph")).not.toBeNull();
+    expect(draw(chip(joined, on)).querySelector("ar-button.topbar-wifi-button > svg.topbar-wifi-glyph")).not.toBeNull();
   });
 
   it("sends UpdatePersistentWifiMode with the toggle arm", async () => {
@@ -181,7 +182,7 @@ describe("clicking the persistent-wifi chip", () => {
     // Arrange
     const { host, tc } = topbarContext(appContext({ updatePersistentWifiMode: () => new Promise(() => undefined) }));
     host.append(drawTopbarPersistentWifi(chip(joined, off), tc));
-    const button = host.querySelector<HTMLButtonElement>(".topbar-wifi-button")!;
+    const button = host.querySelector<Control>(".topbar-wifi-button")!;
     // Act
     button.click();
     // Assert

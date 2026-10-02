@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { createControl, type Control } from "../../src/control.js";
 import { describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import {
@@ -185,8 +186,8 @@ describe("the menu", () => {
     const menu = drawRowMenu(target());
     // The choice rides on the button's `value`: `data-priority` inside a row
     // is the row's priority BADGE, and a row served none carries none.
-    const levels = [...menu.querySelectorAll<HTMLButtonElement>("[data-verb='priority']")].map(
-      (el) => el.value,
+    const levels = [...menu.querySelectorAll<Control>("[data-verb='priority']")].map(
+      (el) => el.getAttribute("value"),
     );
     expect(levels).toEqual(["p05", "p1", "p2", "p3", "clear"]);
   });
@@ -224,14 +225,14 @@ describe("the two destructive verbs", () => {
 
   it("keeps the nuke confirmation unarmed until the name is typed back", () => {
     const confirm = drawNukeConfirm(target());
-    const go = confirm.querySelector(".sb-confirm-go") as HTMLButtonElement;
+    const go = confirm.querySelector(".sb-confirm-go") as Control;
     expect(go.classList.contains("armed")).toBe(false);
   });
 
   it("refuses a near-miss of the typed name", () => {
     const confirm = drawNukeConfirm(target());
     const typed = confirm.querySelector(".sb-confirm-name") as HTMLInputElement;
-    const go = confirm.querySelector(".sb-confirm-go") as HTMLButtonElement;
+    const go = confirm.querySelector(".sb-confirm-go") as Control;
     typed.value = "seve";
     typed.dispatchEvent(new Event("input"));
     expect(go.classList.contains("armed")).toBe(false);
@@ -240,7 +241,7 @@ describe("the two destructive verbs", () => {
   it("arms once the name matches exactly", () => {
     const confirm = drawNukeConfirm(target());
     const typed = confirm.querySelector(".sb-confirm-name") as HTMLInputElement;
-    const go = confirm.querySelector(".sb-confirm-go") as HTMLButtonElement;
+    const go = confirm.querySelector(".sb-confirm-go") as Control;
     typed.value = "seven";
     typed.dispatchEvent(new Event("input"));
     expect(go.classList.contains("armed")).toBe(true);
@@ -417,7 +418,7 @@ async function refuseWith(verb: VerbUnderTest, arm: string): Promise<Element | n
       } as never),
   });
   const host = document.createElement("div");
-  const control = document.createElement("button");
+  const control = createControl();
   host.appendChild(control);
   await verb.call(t, control);
   return host.querySelector(".refusal[data-arm]");
@@ -586,7 +587,7 @@ describe("a refusal", () => {
         }),
     });
     const menu = drawRowMenu(t);
-    const button = menu.querySelector("[data-verb='close']") as HTMLButtonElement;
+    const button = menu.querySelector("[data-verb='close']") as Control;
     await click(button);
     expect(button.disabled).toBe(false);
   });
@@ -612,7 +613,7 @@ describe("an error with no cause", () => {
       openWorkspace: () =>
         create(OpenWorkspaceResponseSchema, { result: { case: "error", value: {} } }),
     });
-    const button = document.createElement("button");
+    const button = createControl();
     await expect(
       runVerb(button, {
         sc: t.sc,
@@ -630,7 +631,7 @@ describe("an error with no cause", () => {
           result: { case: "error", value: { cause: { case: "sessionDeleted", value: {} } } },
         }),
     });
-    const button = document.createElement("button");
+    const button = createControl();
     await expect(
       runVerb(button, {
         sc: t.sc,
@@ -650,7 +651,7 @@ describe("fireVerb", () => {
       openWorkspace: () =>
         create(OpenWorkspaceResponseSchema, { result: { case: "success", value: {} } }),
     });
-    const button = document.createElement("button");
+    const button = createControl();
     await expect(
       fireVerb(button, {
         sc: t.sc,
@@ -666,7 +667,7 @@ describe("fireVerb", () => {
       openWorkspace: () =>
         create(OpenWorkspaceResponseSchema, { result: { case: "error", value: {} } }),
     });
-    const button = document.createElement("button");
+    const button = createControl();
     await expect(
       fireVerb(button, {
         sc: t.sc,
@@ -708,7 +709,7 @@ describe("a successful verb", () => {
       openWorkspace: () =>
         create(OpenWorkspaceResponseSchema, { result: { case: "success", value: {} } }),
     });
-    const button = document.createElement("button");
+    const button = createControl();
     const ok = await runVerb(button, {
       sc: t.sc,
       rpc: "OpenWorkspace",
@@ -724,7 +725,7 @@ describe("a response with no outcome arm", () => {
     const t = target({
       openWorkspace: () => create(OpenWorkspaceResponseSchema, {}),
     });
-    const button = document.createElement("button");
+    const button = createControl();
     await expect(
       runVerb(button, {
         sc: t.sc,
@@ -896,8 +897,8 @@ describe("the menu's own controls, clicked", () => {
         },
       });
       const menu = drawRowMenu(t);
-      const entry = [...menu.querySelectorAll<HTMLButtonElement>("[data-verb='priority']")].find(
-        (el) => el.value === choice,
+      const entry = [...menu.querySelectorAll<Control>("[data-verb='priority']")].find(
+        (el) => el.getAttribute("value") === choice,
       ) as HTMLElement;
       await click(entry);
       expect(level).toBe(choice);
@@ -915,8 +916,8 @@ describe("the menu's own controls, clicked", () => {
       },
     });
     const menu = drawRowMenu(t);
-    const entry = [...menu.querySelectorAll<HTMLButtonElement>("[data-verb='priority']")].find(
-      (el) => el.value === "clear",
+    const entry = [...menu.querySelectorAll<Control>("[data-verb='priority']")].find(
+      (el) => el.getAttribute("value") === "clear",
     ) as HTMLElement;
     await click(entry);
     expect(priority).toBeUndefined();

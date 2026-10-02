@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { createControl } from "../../src/control.js";
 import { describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { SelectAccountResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_account_pb";
@@ -68,7 +69,7 @@ describe("drawAccountOptions", () => {
       loggedIn("/Users/dev/.claude-work", "work@example.com"),
     ]);
     // ACT
-    const list = drawAccountOptions(view, tc, document.createElement("button"));
+    const list = drawAccountOptions(view, tc, createControl());
     host.append(list);
     // ASSERT
     const rows = [...list.querySelectorAll(`[${ACCOUNT_OPTION_ATTRIBUTE}]`)];
@@ -86,7 +87,7 @@ describe("drawAccountOptions", () => {
       loggedIn("/Users/dev/.claude-work", "work@example.com"),
     ]);
     // ACT
-    const list = drawAccountOptions(view, tc, document.createElement("button"));
+    const list = drawAccountOptions(view, tc, createControl());
     // ASSERT
     const rows = list.querySelectorAll<HTMLElement>(`[${ACCOUNT_OPTION_ATTRIBUTE}]`);
     expect(rows[0].hasAttribute(CURRENT_OPTION_ATTRIBUTE)).toBe(true);
@@ -98,7 +99,7 @@ describe("drawAccountOptions", () => {
     const { tc } = topbarContext();
     const view = account([loggedOut("/Users/dev/.claude-work")]);
     // ACT
-    const list = drawAccountOptions(view, tc, document.createElement("button"));
+    const list = drawAccountOptions(view, tc, createControl());
     // ASSERT
     expect(list.textContent).toContain(LOGGED_OUT_LABEL);
   });
@@ -108,7 +109,7 @@ describe("drawAccountOptions", () => {
     const { tc } = topbarContext();
     const view = account([loggedIn("/Users/dev/.claude", "dev@example.com", true)]);
     // ACT
-    const list = drawAccountOptions(view, tc, document.createElement("button"));
+    const list = drawAccountOptions(view, tc, createControl());
     // ASSERT
     expect(list.textContent).toContain("/Users/dev/.claude");
   });

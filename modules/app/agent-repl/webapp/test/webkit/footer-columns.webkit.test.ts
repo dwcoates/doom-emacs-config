@@ -33,7 +33,7 @@ function row(tokens: string, clock: string): string {
 /** The panel's header as `drawFooterExpandedAgents` shapes it. */
 const HEADER = `
   <div class="footer-panel-header footer-columns">
-    <span class="footer-stop footer-stop-all"><button class="footer-stop-button" data-interrupt="">stop all</button></span>
+    <span class="footer-stop footer-stop-all"><ar-button role="button" class="footer-stop-button" data-interrupt="">stop all</ar-button></span>
     <span class="footer-column-header" data-column="tokens">tokens</span>
     <span class="footer-column-header" data-column="duration">duration</span>
     <span></span>

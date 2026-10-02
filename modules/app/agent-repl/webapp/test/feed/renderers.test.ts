@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { type Control } from "../../src/control.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { FeedBreadcrumbSchema, FeedRowSchema } from "../../../proto/gen/ts/frontend/v1/feed_pb";
@@ -488,7 +489,7 @@ describe("drawBreadcrumbTrail", () => {
       }),
     );
     // Act
-    host.querySelector("button")?.click();
+    host.querySelector<Control>("ar-button")?.click();
     // Assert: a crumb with nothing to jump to jumps nowhere.
     expect(revealed).toEqual([]);
   });
@@ -507,7 +508,7 @@ describe("drawBreadcrumbTrail", () => {
         },
       }),
     );
-    host.querySelector("button")?.click();
+    host.querySelector<Control>("ar-button")?.click();
     expect(revealed).toEqual(["o"]);
   });
 });
@@ -586,7 +587,7 @@ describe("defaultBubbleBody", () => {
     const rows = [toolCallRow("a", "returned"), toolCallRow("b", "returned")];
     const view = viewOf(rows);
     defaultBubbleBody(mount, view, rowContext(ctx, responseRow("root")));
-    mount.querySelector<HTMLButtonElement>(`[${GROUP_TAB_MEMBER_ATTRIBUTE}="a"]`)?.click();
+    mount.querySelector<Control>(`[${GROUP_TAB_MEMBER_ATTRIBUTE}="a"]`)?.click();
     // Act: a third card arrives.
     rows.push(toolCallRow("c", "returned"));
     view.fire();

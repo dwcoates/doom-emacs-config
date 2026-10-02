@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { createControl } from "../../src/control.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mountRevealLayer, type RevealGeometry } from "../../src/topbar/reveal.js";
 
@@ -17,7 +18,7 @@ beforeEach(() => {
 
 /** An anchor the layer can find by name after a redraw. */
 function anchor(name: string): HTMLElement {
-  const button = document.createElement("button");
+  const button = createControl();
   button.setAttribute("data-reveal-anchor", name);
   host.append(button);
   return button;

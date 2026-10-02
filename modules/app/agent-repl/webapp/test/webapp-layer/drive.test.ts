@@ -16,6 +16,7 @@
  * vitest configs and `e2e/scenariomatrix_test.go` use to mean "the Go world
  * drives this one".
  */
+import { createControl, type Control } from "../../src/control.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { MountedApp } from "../integration/harness";
@@ -28,7 +29,7 @@ const SETTLE_STEP_MS = 250;
 
 interface StubPage {
   readonly app: MountedApp;
-  readonly button: HTMLButtonElement;
+  readonly button: Control;
   readonly input: HTMLTextAreaElement;
   /** How many times `settle()` was awaited. */
   settles(): number;
@@ -47,7 +48,7 @@ function stubPage(options: { text?: string; disabled?: boolean } = {}): StubPage
   root.setAttribute("data-component", "composer");
   const input = document.createElement("textarea");
   input.value = options.text ?? "!scenario";
-  const button = document.createElement("button");
+  const button = createControl();
   button.setAttribute("data-composer-send", "");
   button.disabled = options.disabled ?? false;
   root.append(input, button);
@@ -167,7 +168,7 @@ describe("send", () => {
     bubble.setAttribute("data-component", "bubble-composer");
     const bubbleInput = document.createElement("textarea");
     bubbleInput.value = "!other";
-    const bubbleSend = document.createElement("button");
+    const bubbleSend = createControl();
     bubbleSend.setAttribute("data-composer-send", "");
     bubbleSend.addEventListener("click", () => {
       bubbleSend.disabled = true;

@@ -37,6 +37,7 @@
  * UNSPECIFIED is never offered and never sent, and a resolved trace carrying it
  * is a MALFORMED VIEW rather than a scope this end quietly words as "everything".
  */
+import { createControl, type Control } from "../../control.js";
 import { formatTickedAge } from "../../duration.js";
 import { onCompactionProgress } from "../../footer/progress.js";
 import { formatTokens } from "../../format.js";
@@ -334,7 +335,7 @@ function drawActions(
   progress.setAttribute("data-cold-gate-progress", "");
   progress.hidden = true;
 
-  const buttons: HTMLButtonElement[] = [];
+  const buttons: Control[] = [];
   const pay = actionRow("pay", COLD_GATE_COPY.pay, buttons);
   const clear = actionRow("clear", COLD_GATE_COPY.clear, buttons);
   actions.append(pay.row, clear.row);
@@ -352,8 +353,7 @@ function drawActions(
   // The compact path needs two values before it can be sent, so its row opens a
   // submenu rather than firing on the first click. The opener is not the verb's
   // control — the submenu's send button is — so the two carry different hooks.
-  const opener = document.createElement("button");
-  opener.type = "button";
+  const opener = createControl();
   opener.className = "hibernation-compact";
   opener.setAttribute("data-compact-open", "");
   opener.textContent = COLD_GATE_COPY.compact.label;
@@ -383,13 +383,12 @@ function drawActions(
 function actionRow(
   arm: "pay" | "clear",
   copy: { label: string; hint: string },
-  buttons: HTMLButtonElement[],
-): { row: HTMLElement; button: HTMLButtonElement } {
+  buttons: Control[],
+): { row: HTMLElement; button: Control } {
   const row = document.createElement("div");
   row.className = arm === "clear" ? "hibernation-option warn" : "hibernation-option";
 
-  const button = document.createElement("button");
-  button.type = "button";
+  const button = createControl();
   button.className = arm === "clear" ? "hibernation-clear" : "hibernation-direct";
   button.setAttribute("data-cold-gate", arm);
   button.textContent = copy.label;
@@ -413,7 +412,7 @@ function actionRow(
 function drawCompactSubmenu(
   rc: RowContext,
   menu: FeedColdGateCompactMenu,
-  buttons: HTMLButtonElement[],
+  buttons: Control[],
   actions: HTMLElement,
   progress: HTMLElement,
   path: string,
@@ -475,8 +474,7 @@ function drawCompactSubmenu(
   });
   el.append(scopeLabelEl, scopeList);
 
-  const send = document.createElement("button");
-  send.type = "button";
+  const send = createControl();
   send.className = "hibernation-compact";
   send.setAttribute("data-cold-gate", "compact");
   send.textContent = COLD_GATE_COPY.submenu.send;
@@ -500,7 +498,7 @@ function drawCompactSubmenu(
 async function answer(
   rc: RowContext,
   actions: HTMLElement,
-  buttons: readonly HTMLButtonElement[],
+  buttons: readonly Control[],
   progress: HTMLElement,
   choice: ColdGateChoice,
 ): Promise<void> {
@@ -580,7 +578,7 @@ const OWN_CAUSES = {
 function drawAnswerOutcome(
   response: AnswerColdGateResponse,
   actions: HTMLElement,
-  buttons: readonly HTMLButtonElement[],
+  buttons: readonly Control[],
 ): void {
   const result = requireCase(response.result, "AnswerColdGateResponse.result");
   switch (result.case) {

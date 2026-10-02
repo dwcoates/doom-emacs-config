@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { type Control } from "../../src/control.js";
 import { describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { createRouterTransport } from "@connectrpc/connect";
@@ -114,7 +115,7 @@ describe("answering an offer", () => {
     const seen: AnswerHeldOfferRequest[] = [];
     const { tc } = trayContext(successResponse, seen);
     const card = drawHeldOffer(offer(), tc);
-    card.querySelector<HTMLButtonElement>('[data-offer-decision="keep"]')?.click();
+    card.querySelector<Control>('[data-offer-decision="keep"]')?.click();
     await settle();
     expect(seen[0]?.answer.case).toBe("mergeDequeue");
     expect(seen[0]?.answer.value?.decision.case).toBe("keep");
@@ -124,7 +125,7 @@ describe("answering an offer", () => {
     const seen: AnswerHeldOfferRequest[] = [];
     const { tc } = trayContext(successResponse, seen);
     const card = drawHeldOffer(offer(), tc);
-    card.querySelector<HTMLButtonElement>('[data-offer-decision="release"]')?.click();
+    card.querySelector<Control>('[data-offer-decision="release"]')?.click();
     await settle();
     expect(seen[0]?.answer.value?.decision.case).toBe("release");
   });
@@ -133,7 +134,7 @@ describe("answering an offer", () => {
     const seen: AnswerHeldOfferRequest[] = [];
     const { tc } = trayContext(successResponse, seen);
     const card = drawHeldOffer(offer(), tc);
-    card.querySelector<HTMLButtonElement>('[data-offer-decision="keep"]')?.click();
+    card.querySelector<Control>('[data-offer-decision="keep"]')?.click();
     await settle();
     expect(seen[0]?.workspace?.id).toBe("ws-1");
   });
@@ -141,7 +142,7 @@ describe("answering an offer", () => {
   it("draws the refusal at the card when the daemon refuses", async () => {
     const { tc } = trayContext(errorResponse);
     const card = drawHeldOffer(offer(), tc);
-    card.querySelector<HTMLButtonElement>('[data-offer-decision="release"]')?.click();
+    card.querySelector<Control>('[data-offer-decision="release"]')?.click();
     await settle();
     expect(card.querySelector(".offer-refusal")?.getAttribute("data-arm")).toBe(
       "noOfferStanding",
@@ -153,7 +154,7 @@ describe("answering an offer", () => {
     async (arm) => {
       const { tc } = trayContext(refusalResponse(arm));
       const card = drawHeldOffer(offer(), tc);
-      card.querySelector<HTMLButtonElement>('[data-offer-decision="release"]')?.click();
+      card.querySelector<Control>('[data-offer-decision="release"]')?.click();
       await settle();
       const refusal = card.querySelector(".offer-refusal");
       expect([refusal?.getAttribute("data-arm"), refusal?.textContent === ""]).toEqual([arm, false]);
@@ -163,7 +164,7 @@ describe("answering an offer", () => {
   it("names the successor daemon on a transfer, from the one shared wording", async () => {
     const { tc } = trayContext(refusalResponse("transferringAway"));
     const card = drawHeldOffer(offer(), tc);
-    card.querySelector<HTMLButtonElement>('[data-offer-decision="release"]')?.click();
+    card.querySelector<Control>('[data-offer-decision="release"]')?.click();
     await settle();
     expect(card.querySelector(".offer-refusal")?.textContent).toContain("127.0.0.1:7777");
   });
@@ -171,7 +172,7 @@ describe("answering an offer", () => {
   it("says a superseded offer is superseded", async () => {
     const { tc } = trayContext(refusalResponse("offerSuperseded"));
     const card = drawHeldOffer(offer(), tc);
-    card.querySelector<HTMLButtonElement>('[data-offer-decision="release"]')?.click();
+    card.querySelector<Control>('[data-offer-decision="release"]')?.click();
     await settle();
     expect(card.querySelector(".offer-refusal")?.textContent).toContain("superseded");
   });
@@ -179,7 +180,7 @@ describe("answering an offer", () => {
   it("re-enables the answers after a refusal", async () => {
     const { tc } = trayContext(errorResponse);
     const card = drawHeldOffer(offer(), tc);
-    const keep = card.querySelector<HTMLButtonElement>('[data-offer-decision="keep"]');
+    const keep = card.querySelector<Control>('[data-offer-decision="keep"]');
     keep?.click();
     await settle();
     expect(keep?.disabled).toBe(false);
@@ -188,8 +189,8 @@ describe("answering an offer", () => {
   it("disables both answers while one is in flight", () => {
     const { tc } = trayContext(() => new Promise<never>(() => undefined) as never);
     const card = drawHeldOffer(offer(), tc);
-    card.querySelector<HTMLButtonElement>('[data-offer-decision="keep"]')?.click();
-    const disabled = [...card.querySelectorAll("button")].every((b) => b.disabled);
+    card.querySelector<Control>('[data-offer-decision="keep"]')?.click();
+    const disabled = [...card.querySelectorAll<Control>("ar-button")].every((b) => b.disabled);
     expect(disabled).toBe(true);
   });
 });
@@ -203,7 +204,7 @@ describe("the daemon could not be reached", () => {
     });
     const card = drawHeldOffer(offer(), tc);
     // ACT
-    card.querySelector<HTMLButtonElement>('[data-offer-decision="keep"]')?.click();
+    card.querySelector<Control>('[data-offer-decision="keep"]')?.click();
     await settle();
     // ASSERT
     expect(card.querySelector(".offer-refusal")?.getAttribute("data-arm")).toBe("error");
@@ -216,7 +217,7 @@ describe("the daemon could not be reached", () => {
     });
     const card = drawHeldOffer(offer(), tc);
     // ACT
-    card.querySelector<HTMLButtonElement>('[data-offer-decision="release"]')?.click();
+    card.querySelector<Control>('[data-offer-decision="release"]')?.click();
     await settle();
     // ASSERT
     expect(card.querySelector(".offer-refusal")?.textContent).toBe(
@@ -230,7 +231,7 @@ describe("the daemon could not be reached", () => {
       throw new Error("the socket went away");
     });
     const card = drawHeldOffer(offer(), tc);
-    const keep = card.querySelector<HTMLButtonElement>('[data-offer-decision="keep"]');
+    const keep = card.querySelector<Control>('[data-offer-decision="keep"]');
     // ACT
     keep?.click();
     await settle();

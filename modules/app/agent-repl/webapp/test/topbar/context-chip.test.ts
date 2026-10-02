@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { createControl } from "../../src/control.js";
 import { describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import {
@@ -67,7 +68,7 @@ describe("drawTopbarContextChip", () => {
     // it was narrowed to the controls it was written for.
     // ARRANGE
     const remove = installStylesheet();
-    const button = document.createElement("button");
+    const button = createControl();
     button.className = "topbar-model-button";
     document.body.append(button);
     // ACT / ASSERT

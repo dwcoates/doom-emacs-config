@@ -22,6 +22,7 @@
  * one shows `ended_at_ms - started_at_ms` and stops, through the one
  * elapsed-clock builder every other clock on the page uses.
  */
+import { createControl, type Control } from "../../control.js";
 import type { Ticker } from "../../clock.js";
 import { liveElapsedClock, settledElapsedClock } from "../../elapsed-clock.js";
 import { log } from "../../log.js";
@@ -136,9 +137,8 @@ export function readMergeTab(row: FeedRow, tab: FeedMergeTab): MergeTab {
 export function drawFeedMergeTab(
   tab: MergeTab,
   opts: { active: boolean; ticker: Ticker },
-): HTMLButtonElement {
-  const el = document.createElement("button");
-  el.type = "button";
+): Control {
+  const el = createControl();
   el.className = "merge-tab";
   el.setAttribute("data-merge-tab", tab.kind);
   el.setAttribute("data-tab-state", tab.state);

@@ -25,6 +25,7 @@
  * EVERY OUTCOME DRAWS AT THE CONTROL, per the call-site rule: the user clicked
  * here and is looking here, and no view is pushed to tell them what happened.
  */
+import { createControl } from "../control.js";
 import { create } from "@bufbuild/protobuf";
 import {
   InterruptResponseSchema,
@@ -145,8 +146,7 @@ function interruptControl(ctx: AppContext, spec: ControlSpec): HTMLElement {
   const wrapper = document.createElement("span");
   wrapper.className = spec.className;
 
-  const button = document.createElement("button");
-  button.type = "button";
+  const button = createControl();
   button.className = "footer-stop-button";
   button.setAttribute("data-interrupt", "");
   button.title = spec.title;
@@ -339,8 +339,7 @@ function drawConfirm(
       "InterruptError.kind",
     ),
   );
-  const confirm = document.createElement("button");
-  confirm.type = "button";
+  const confirm = createControl();
   confirm.className = "footer-stop-confirm";
   confirm.setAttribute("data-interrupt-confirm", "");
   confirm.setAttribute("data-live-agent-count", String(liveAgentCount));

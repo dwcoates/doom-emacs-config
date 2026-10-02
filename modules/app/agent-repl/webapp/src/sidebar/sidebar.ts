@@ -18,6 +18,7 @@
  * `localStorage` behind try/catch — a rail that cannot remember a fold must
  * still draw — and nothing else is persisted client-side.
  */
+import { createControl, type Control } from "../control.js";
 import { WatchWorkspaceRosterResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_workspace_roster_pb";
 import { log } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
@@ -257,10 +258,9 @@ export function drawRailHead(prefs: SidebarPrefs, body: HTMLElement): HTMLElemen
 
   const views = document.createElement("div");
   views.className = "sb-views";
-  const buttons = new Map<Grouping, HTMLButtonElement>();
+  const buttons = new Map<Grouping, Control>();
   for (const grouping of ["repository", "task"] as const) {
-    const button = document.createElement("button");
-    button.type = "button";
+    const button = createControl();
     button.className = "sb-view-btn";
     button.setAttribute("data-grouping-pick", grouping);
     button.textContent = grouping === "repository" ? "Repo" : "Task";
@@ -281,7 +281,7 @@ function selectGrouping(
   grouping: Grouping,
   prefs: SidebarPrefs,
   body: HTMLElement,
-  buttons: ReadonlyMap<Grouping, HTMLButtonElement>,
+  buttons: ReadonlyMap<Grouping, Control>,
 ): void {
   log.info("switching the rail's grouping", {
     operation: "sidebar.grouping",
@@ -296,7 +296,7 @@ function selectGrouping(
 
 function paintPicker(
   grouping: Grouping,
-  buttons: ReadonlyMap<Grouping, HTMLButtonElement>,
+  buttons: ReadonlyMap<Grouping, Control>,
 ): void {
   for (const [name, button] of buttons) button.classList.toggle("active", name === grouping);
 }

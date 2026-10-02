@@ -60,6 +60,7 @@
  * listens in production (the composer is host-native) and the event is
  * harmless there — it is the seam, not a promise about who is on the far end.
  */
+import { createControl, CONTROL_SELECTOR, type Control } from "../control.js";
 import { getOption } from "@bufbuild/protobuf";
 import type {
   HeldPrompt,
@@ -643,9 +644,8 @@ export function drawHeldPromptActions(spec: ActionSpec): HTMLElement {
 }
 
 /** One control, with its refusal drawn as this row's next sibling. */
-function actionButton(action: HeldAction, label: string, spec: ActionSpec): HTMLButtonElement {
-  const button = document.createElement("button");
-  button.type = "button";
+function actionButton(action: HeldAction, label: string, spec: ActionSpec): Control {
+  const button = createControl();
   button.className = `queued-action queued-action-${action}`;
   button.setAttribute("data-held-action", action);
   button.textContent = label;
@@ -657,7 +657,7 @@ function actionButton(action: HeldAction, label: string, spec: ActionSpec): HTML
 }
 
 /** Issue the action; a refusal is said at the row that made the call. */
-async function run(action: HeldAction, spec: ActionSpec, button: HTMLButtonElement): Promise<void> {
+async function run(action: HeldAction, spec: ActionSpec, button: Control): Promise<void> {
   const succeeded = await rowCall(button, "UpdateHeldPrompt", action, spec.turn.value, async () => {
     const response = await callUnary(
       spec.tc.ctx,
@@ -699,7 +699,7 @@ interface RowRefusal {
  * flicker.
  */
 async function rowCall(
-  button: HTMLButtonElement,
+  button: Control,
   rpc: string,
   action: string,
   turn: string,
@@ -745,9 +745,8 @@ export const FOLD_ABOVE_LABEL = "fold above";
  * `fold_above`, and it sends back exactly the token that element served, so
  * the daemon folds into the entry the reader saw above this one or refuses.
  */
-function foldAboveButton(spec: ActionSpec, above: TurnId): HTMLButtonElement {
-  const button = document.createElement("button");
-  button.type = "button";
+function foldAboveButton(spec: ActionSpec, above: TurnId): Control {
+  const button = createControl();
   button.className = "queued-action queued-action-fold";
   button.setAttribute("data-held-action", "fold");
   button.textContent = FOLD_ABOVE_LABEL;
@@ -759,7 +758,7 @@ function foldAboveButton(spec: ActionSpec, above: TurnId): HTMLButtonElement {
 }
 
 /** Fold this prompt into ABOVE; a refusal is said at the row, as every row action's is. */
-async function fold(spec: ActionSpec, above: TurnId, button: HTMLButtonElement): Promise<void> {
+async function fold(spec: ActionSpec, above: TurnId, button: Control): Promise<void> {
   log.info("folding a held prompt into the one ahead", {
     operation: "tray.held-prompt.fold",
     context: { turn: spec.turn.value, above: above.value },
@@ -830,9 +829,8 @@ export const EDIT_REFUSALS: SentenceTable = {
 };
 
 /** The Edit control: it begins a daemon-owned edit of this prompt. */
-function editButton(spec: ActionSpec): HTMLButtonElement {
-  const button = document.createElement("button");
-  button.type = "button";
+function editButton(spec: ActionSpec): Control {
+  const button = createControl();
   button.className = "queued-action queued-action-edit";
   button.setAttribute("data-held-action", "edit");
   button.textContent = "Edit";
@@ -848,7 +846,7 @@ function editButton(spec: ActionSpec): HTMLButtonElement {
  * push draws the editing badge, and the host view hands the editor the words.
  * A refusal or a failure is filed on the warning chip and logged.
  */
-async function beginEdit(spec: ActionSpec, button: HTMLButtonElement): Promise<void> {
+async function beginEdit(spec: ActionSpec, button: Control): Promise<void> {
   const row = button.parentElement;
   log.info("beginning an edit of a held prompt", {
     operation: "tray.held-prompt.edit",
@@ -971,7 +969,7 @@ function handBackDroppedText(button: HTMLElement, text: string, turn: string): v
 
 function setRowDisabled(row: Element | null, disabled: boolean): void {
   if (row === null) return;
-  for (const control of row.querySelectorAll("button")) control.disabled = disabled;
+  for (const control of row.querySelectorAll<Control>(CONTROL_SELECTOR)) control.disabled = disabled;
 }
 
 function drawRowRefusal(row: Element | null, arm: string, message: string): void {

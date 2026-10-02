@@ -16,6 +16,7 @@
  * with thousands separators and never abbreviated: the chip is the place for
  * the rounded figure, and the breakdown is the place for the exact one.
  */
+import { createControl } from "../control.js";
 import type {
   TokenBreakdownHeading,
   TokenBreakdownRow,
@@ -54,8 +55,7 @@ export function drawTopbarContextChip(u: TopbarContextChip, tc: TopbarContext): 
   // about the control, not about one span inside it.
   wrap.className = `topbar-context ${toneClass("yellow")}`;
 
-  const button = document.createElement("button");
-  button.type = "button";
+  const button = createControl();
   // YELLOW is the context figure's color across the app.
   button.className = `topbar-context-figure ${toneClass("yellow")}`;
   button.textContent = u.text;

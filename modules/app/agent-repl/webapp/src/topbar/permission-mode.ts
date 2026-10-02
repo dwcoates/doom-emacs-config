@@ -13,12 +13,13 @@
  * more useful — the reader sees the mode in force AND can change it in the same
  * control.
  */
+import { createControl, type Control } from "../control.js";
 import { SetPermissionModeResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_permission_mode_pb";
 import type {
   TopbarPermissionModeOption,
   TopbarPermissionModePicker,
 } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
-import { whileInFlight } from "../feed/cards/controls.js";
+import { release, whileInFlight } from "../feed/cards/controls.js";
 import { log } from "../log.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { callUnary } from "../rpc/unary.js";
@@ -60,8 +61,7 @@ export function drawTopbarPermissionModePicker(
   const wrap = document.createElement("div");
   wrap.className = "topbar-mode";
 
-  const button = document.createElement("button");
-  button.type = "button";
+  const button = createControl();
   button.className = "topbar-mode-button";
   button.textContent = current.displayName;
   button.setAttribute("data-mode", current.mode);
@@ -83,7 +83,7 @@ export function drawPermissionModeOptions(
   u: TopbarPermissionModePicker,
   tc: TopbarContext,
   wrap: HTMLElement,
-  button: HTMLButtonElement,
+  button: Control,
 ): HTMLElement {
   const list = document.createElement("div");
   list.className = "topbar-mode-options list-rows";
@@ -96,10 +96,9 @@ export function drawPermissionModeOption(
   option: TopbarPermissionModeOption,
   tc: TopbarContext,
   wrap: HTMLElement,
-  button: HTMLButtonElement,
+  button: Control,
 ): HTMLElement {
-  const row = document.createElement("button");
-  row.type = "button";
+  const row = createControl();
   row.className = "topbar-mode-option";
   row.setAttribute("data-mode-option", option.mode);
   row.textContent = option.displayName;
@@ -114,8 +113,8 @@ export async function pickPermissionMode(
   option: TopbarPermissionModeOption,
   tc: TopbarContext,
   wrap: HTMLElement,
-  button: HTMLButtonElement,
-  row: HTMLButtonElement,
+  button: Control,
+  row: Control,
 ): Promise<void> {
   log.info(`the reader picked the permission mode ${option.mode}`, {
     operation: "topbar.permission-mode-picked",
@@ -158,7 +157,7 @@ export async function pickPermissionMode(
           result.value.cause,
           SET_PERMISSION_MODE_CAUSES,
         );
-        button.disabled = false;
+        release([row, button]);
         return;
       default: {
         const other: { case: string } = result;
@@ -166,7 +165,7 @@ export async function pickPermissionMode(
       }
     }
   } catch (err) {
-    button.disabled = false;
+    release([row, button]);
     if (!drawUnreadableRefusal(tc.ctx, wrap, "topbar.permission-mode-malformed-refusal", err)) {
       throw err;
     }

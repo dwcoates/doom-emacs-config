@@ -16,6 +16,7 @@
  * UI toggles, which it re-applies from `data-*` attributes on `rc.previous` —
  * the element its own previous draw produced.
  */
+import { createControl } from "../control.js";
 import type { AppContext } from "../rpc/context.js";
 import { drawFeedCommandPanel } from "../panels/panels.js";
 import { drawFeedCommandRefused } from "../panels/refused.js";
@@ -292,8 +293,7 @@ export function drawBreadcrumbTrail(
 
 /** One crumb: the daemon-resolved label, drawn verbatim, as a jump target. */
 export function drawFeedBreadcrumb(crumb: FeedBreadcrumb, rc: RowContext): HTMLElement {
-  const el = document.createElement("button");
-  el.type = "button";
+  const el = createControl();
   el.className = "feed-breadcrumb";
   el.textContent = crumb.label;
   const target = crumb.target;
