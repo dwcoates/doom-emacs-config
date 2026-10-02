@@ -3,6 +3,7 @@ package promptqueue
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -695,5 +696,78 @@ func TestStartedByMergeNamesExactlyTheMergesOwnOrigins(t *testing.T) {
 				t.Fatalf("startedByMerge(%s) = %v, want %v", tc.origin, got, tc.want)
 			}
 		})
+	}
+}
+
+// errShimNoSession is the sender's refusal of a StartTurn by a shim holding
+// no session, as the workspace sender's typed refusal answers it.
+var errShimNoSession = fmt.Errorf("shim StartTurn refused: %w", ErrShimHasNoSession)
+
+// A DELIVERY THE SHIM REFUSES no_session IS HELD, never lost: the daemon
+// believed the session up and it was not.
+func TestANoSessionRefusalHoldsThePromptForTheReconnect(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.sender.startErr = errShimNoSession
+
+	// Act
+	got, err := h.q.Submit(context.Background(), submission("t1", "hello"))
+
+	// Assert
+	if err != nil || got.Held == nil || *got.Held != wsm.HoldReconnect {
+		t.Fatalf("Submit = (%+v, %v), want the prompt held under the reconnect hold", got, err)
+	}
+}
+
+func TestANoSessionRefusalTakesTheMirroredRowDown(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.sender.startErr = errShimNoSession
+
+	// Act
+	_, _ = h.q.Submit(context.Background(), submission("t1", "hello"))
+
+	// Assert
+	if got := h.feed.retiredPrompts(); len(got) != 1 || got[0] != "t1" {
+		t.Fatalf("retired prompt rows = %v, want t1's mirrored row taken down", got)
+	}
+}
+
+// A HELD PROMPT THE SHIM REFUSES no_session STAYS HELD: re-stamped to wait for
+// the reconnect, never retired.
+func TestANoSessionRefusalOfAHeldPromptKeepsItHeld(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.notStarted = true
+	if _, err := h.q.Submit(context.Background(), submission("t1", "hello")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	h.notStarted = false
+	h.sender.startErr = errShimNoSession
+
+	// Act
+	h.q.ReleaseReconnectHolds("ws-1")
+
+	// Assert
+	standing, err := h.db.HeldPrompts(context.Background(), "ws-1")
+	if err != nil {
+		t.Fatalf("HeldPrompts: %v", err)
+	}
+	if len(standing) != 1 || standing[0].Tombstone != nil || standing[0].Hold == nil || *standing[0].Hold != wsm.HoldReconnect {
+		t.Fatalf("standing = %+v, want t1 held under the reconnect hold", standing)
+	}
+}
+
+func TestAnOrdinaryStartTurnRefusalIsStillSurfaced(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.sender.startErr = errors.New("shim StartTurn refused: query_dead")
+
+	// Act
+	_, err := h.q.Submit(context.Background(), submission("t1", "hello"))
+
+	// Assert
+	if err == nil {
+		t.Fatal("Submit = nil error, want a refusal other than no_session surfaced")
 	}
 }

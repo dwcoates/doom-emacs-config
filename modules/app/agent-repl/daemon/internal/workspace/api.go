@@ -259,10 +259,12 @@ type Verbs interface {
 	// record. It refuses an open workspace, a workspace that is not quiet, and
 	// a workspace others were spawned from.
 	Forget(ctx context.Context, ws ids.WorkspaceID) error
-	// Restart bounces the workspace's shim by delegating to
-	// rollout.RelaunchShim. force sends KillSession{force:true} first. It owns
-	// the reload_webapp push when the webapp changed too.
-	Restart(ctx context.Context, ws ids.WorkspaceID, force bool) error
+	// Restart bounces the workspace's shim IMMEDIATELY, always: it ends any
+	// vendor-start retry run, force-ends the running turn with a bounded call,
+	// asks the rollout for a FORCED bounce, and pushes the reload_webapp once
+	// the bounce is done. A workspace with no session is restarted by the
+	// bounce bringing one up.
+	Restart(ctx context.Context, ws ids.WorkspaceID) error
 	// Select records the user's switch to this workspace and clears its
 	// attention marker. Idempotent.
 	Select(ctx context.Context, ws ids.WorkspaceID) error
@@ -475,6 +477,10 @@ type Deps struct {
 	SplicePrompt PromptSplicer
 	// Now supplies the instants the verbs stamp. nil means time.Now.
 	Now func() time.Time
+	// RestartStopBound bounds the restart's forced end of the running turn.
+	// Zero means DefaultRestartStopBound, where the sizing is stated; it is a
+	// field so the overrun is exercised without waiting the real bound out.
+	RestartStopBound time.Duration
 }
 
 // PromptLoader reads one brief by name from a prompts directory at use time.
@@ -696,6 +702,11 @@ type Sessions interface {
 	// answered cold gate uses: the answer is acknowledged at once and the
 	// remediation it starts runs after (see Fleet.ResumeColdDetached).
 	ResumeColdDetached(ws ids.WorkspaceID, resume ColdResume, done func(context.Context, error))
+	// CancelVendorStart ends the vendor-start retry run in flight for the
+	// workspace, if one is, and returns once the start it ran in has left. It
+	// reports whether a run was ended. A restart calls it first so its own
+	// bring-up begins a fresh run with the whole window.
+	CancelVendorStart(ctx context.Context, ws ids.WorkspaceID) bool
 }
 
 // New builds the verbs. Every collaborator a verb reaches is required: a verb
@@ -769,5 +780,9 @@ func New(deps Deps) (Verbs, error) {
 	if deps.ReadEffortSettings == nil {
 		deps.ReadEffortSettings = claudesettings.ReadEffort
 	}
-	return &verbs{deps: deps, load: load, splice: splice, now: now}, nil
+	stopBound := deps.RestartStopBound
+	if stopBound <= 0 {
+		stopBound = DefaultRestartStopBound
+	}
+	return &verbs{deps: deps, load: load, splice: splice, now: now, restartStopBound: stopBound}, nil
 }

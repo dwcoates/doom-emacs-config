@@ -21,6 +21,7 @@ import (
 	"claude-repld/internal/ids"
 	"claude-repld/internal/resolve/feed"
 	"claude-repld/internal/resolve/footer"
+	"claude-repld/internal/resolve/sidebar"
 	"claude-repld/internal/resolve/topbar"
 	"claude-repld/internal/sessionlock"
 	"claude-repld/internal/sessionwatcher"
@@ -101,6 +102,11 @@ type FleetDeps struct {
 	// availability at `pending` between the two until a link connects
 	// (sidebar.Resolver.SetBringingUp).
 	BringUps func(ws ids.WorkspaceID, underWay bool)
+	// VendorStarts is told where a workspace's vendor-start run stands
+	// whenever that changes (sidebar.Resolver.SetVendorStart): the roster
+	// draws a run being retried as the bring-up and a stopped one as
+	// start_failed.
+	VendorStarts func(ws ids.WorkspaceID, state sidebar.VendorStart)
 	// Feed carries the cold gate's row.
 	Feed feed.Resolver
 	// Footer carries the parked-session status a standing cold gate produces.
@@ -166,6 +172,20 @@ type FleetDeps struct {
 	// host surface is wired yet (the boot sequence runs before the server),
 	// which is why every call goes through publishHost.
 	PublishHost func(ids.WorkspaceID)
+	// RetryAfter is the vendor-start run's wait between attempts: it answers
+	// a channel that fires once d has passed. Nil means time.After; it is a
+	// field so the backoff is driven by a test rather than slept through.
+	RetryAfter func(d time.Duration) <-chan time.Time
+	// VendorRetryWindow is how long a run of retryable vendor-start failures
+	// is retried, from its first failure. Zero means DefaultVendorRetryWindow
+	// (owner ruling); it is a field so the exhaustion is exercised without
+	// waiting ten minutes.
+	VendorRetryWindow time.Duration
+	// SessionsUp is told that a session has come up on a workspace, however
+	// it came up -- a start, a retried vendor start, a relaunch's resume, a
+	// cold-gate re-open, an adoption -- so the prompts held until it
+	// reconnected are delivered (promptqueue.Queue.ReleaseReconnectHolds).
+	SessionsUp func(ws ids.WorkspaceID)
 }
 
 // live is one workspace's live session: the client, its watcher, and the facts
@@ -212,6 +232,11 @@ type Fleet struct {
 	adoptBound time.Duration
 	// startBound bounds ONE StartSession; see DefaultStartSessionBound.
 	startBound time.Duration
+	// after is the vendor-start run's wait; see FleetDeps.RetryAfter.
+	after func(time.Duration) <-chan time.Time
+	// vendorWindow is the vendor-start run's window; see
+	// FleetDeps.VendorRetryWindow.
+	vendorWindow time.Duration
 	// starting waits for a predecessor's still-starting shim to announce
 	// itself, so a bring-up never spawns a second shim onto one session
 	// socket. See startingshim.
@@ -251,6 +276,10 @@ type Fleet struct {
 	// be later, so a transcript last written at or before it has no writer
 	// this daemon cannot account for. See noteReap and newestAdoptable.
 	reapedAt map[ids.WorkspaceID]time.Time
+	// vendorRuns is each workspace's vendor-start run: its anchor, its
+	// attempt count, its standing faults and the bring-up asking. Guarded by
+	// mu. See vendorstart.go.
+	vendorRuns map[ids.WorkspaceID]*vendorRun
 
 	// detached counts the session starts running OFF a caller's goroutine, and
 	// detachedCtx is the context every one of them runs under. See
@@ -376,6 +405,10 @@ func NewFleet(deps FleetDeps) (*Fleet, error) {
 		return nil, fmt.Errorf("workspace: the session fleet needs the absolute kernel-lock directory, got %q", deps.LockDir)
 	case deps.BringUps == nil:
 		return nil, fmt.Errorf("workspace: the session fleet needs a bring-up marker; the roster holds a starting workspace unopened by it")
+	case deps.SessionsUp == nil:
+		return nil, fmt.Errorf("workspace: the session fleet needs a session-up hook; prompts held until a session reconnects are delivered by it")
+	case deps.VendorStarts == nil:
+		return nil, fmt.Errorf("workspace: the session fleet needs a vendor-start marker; the roster draws a retried or failed vendor start by it")
 	}
 	probe := deps.Probe
 	if probe == nil {
@@ -401,17 +434,28 @@ func NewFleet(deps FleetDeps) (*Fleet, error) {
 	if startBound <= 0 {
 		startBound = DefaultStartSessionBound
 	}
+	after := deps.RetryAfter
+	if after == nil {
+		after = time.After
+	}
+	vendorWindow := deps.VendorRetryWindow
+	if vendorWindow <= 0 {
+		vendorWindow = DefaultVendorRetryWindow
+	}
 	detachedCtx, endDetached := context.WithCancel(context.Background())
 	return &Fleet{
-		detachedCtx: detachedCtx,
-		endDetached: endDetached,
-		deps:        deps,
-		probe:       probe,
-		socketProbe: socketProbe,
-		watch:       watch,
-		now:         now,
-		adoptBound:  adoptBound,
-		startBound:  startBound,
+		after:        after,
+		vendorWindow: vendorWindow,
+		vendorRuns:   map[ids.WorkspaceID]*vendorRun{},
+		detachedCtx:  detachedCtx,
+		endDetached:  endDetached,
+		deps:         deps,
+		probe:        probe,
+		socketProbe:  socketProbe,
+		watch:        watch,
+		now:          now,
+		adoptBound:   adoptBound,
+		startBound:   startBound,
 
 		starting: startingshim.Waiter{
 			Alive: deps.ShimAlive,
@@ -1062,11 +1106,17 @@ func (f *Fleet) start(ctx context.Context, ws ids.WorkspaceID, rebind bool) erro
 		log.Info(opBringUp, "attached to a surviving shim without starting a session", dlog.Context{
 			"adopted": true, "shim_pid": client.PID(),
 		})
+		f.deps.SessionsUp(ws)
 		return nil
 	}
 
-	started, err := f.startSession(ctx, log, ws, client, src, session, configDir)
+	// THE VENDOR-START RUN IS CANCELLABLE BY A RESTART until this start has
+	// finished with it: its failed start's cleanup below included, so the
+	// restart that cancels it finds the spawned shim already stopped.
+	runCtx, finishRun := f.beginVendorStart(ctx, ws)
+	started, err := f.startSession(runCtx, log, ws, client, src, session, configDir)
 	if err != nil {
+		defer finishRun()
 		// A START THAT FAILED LEAVES NO SHIM OF ITS OWN SERVING. The refusal
 		// returns before anything remembers this client, so nothing else in
 		// the daemon holds it -- while the process is still bound to the
@@ -1080,6 +1130,7 @@ func (f *Fleet) start(ctx context.Context, ws ids.WorkspaceID, rebind bool) erro
 		}
 		return err
 	}
+	finishRun()
 	if started == nil {
 		// The session is parked behind a standing cold gate. The client stays
 		// up: the gate's answer re-opens through it.
@@ -1173,6 +1224,7 @@ func (f *Fleet) sessionUp(
 	// A SESSION NOW EXISTS where none did: the host view's whole session arm
 	// changed, and nothing the server can see says so.
 	f.publishHost(ws)
+	f.deps.SessionsUp(ws)
 	return nil
 }
 
@@ -1241,10 +1293,12 @@ func (f *Fleet) ResumeCold(ctx context.Context, ws ids.WorkspaceID, resume ColdR
 	// StartSession answers, whichever way it answered.
 	configDir := accountRootFor(f.deps.Accounts, record.Dir, previous)
 	stopPhases := f.relayCompactionPhases(ctx, log, ws, session.client, resume.OnPhase)
-	started, err := f.startSession(ctx, log, ws, session.client, source{
+	runCtx, finishRun := f.beginVendorStart(ctx, ws)
+	started, err := f.startSession(runCtx, log, ws, session.client, source{
 		VendorSessionID: resume.VendorSessionID,
 		ColdRemediation: resume.Remediation,
 	}, previous, configDir)
+	finishRun()
 	stopPhases()
 	if err != nil {
 		return err
@@ -1783,32 +1837,11 @@ func freshModel(recorded string) *conversationv1.AgentModel {
 // value is REFUSED, never ignored.
 const DefaultStartSessionBound = 60 * time.Second
 
-// startSession runs StartSession and answers a COLD refusal with the gate. A
-// nil SessionStarted with a nil error means the session is parked behind a
-// standing gate, which is an answer and not a failure.
-// startSession asks the shim to start the workspace's session, and files a
-// fault for every way that can fail.
-//
-// THE FAULT IS FILED HERE, AT THE ONE SITE, rather than in each arm below: the
-// refusals are a growing set, every one of them leaves the workspace with no
-// session, and an arm added later must not be able to go unsurfaced by
-// forgetting a call. The two conditions that are NOT failures — a cold gate,
-// which is a designed product state the user answers, and a stand-down this
-// daemon ordered — are the only ones that pass through unfiled.
-func (f *Fleet) startSession(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, client shimclient.Client, src source, session wsm.Session, configDir string) (*conversationv1.SessionStarted, error) {
-	started, err := f.askToStartSession(ctx, log, ws, client, src, session, configDir)
-	switch {
-	case err != nil && !errors.Is(err, shimclient.ErrStandDownOrdered):
-		f.noteSessionRefused(ctx, log, ws, err)
-	case err == nil && started != nil:
-		// A SESSION THAT IS SERVING is the repair of every fault whose
-		// lifetime ends at a started session: the refusal that preceded it,
-		// a failed cold-gate re-open, an undetermined bounce.
-		f.closeOnEdge(ctx, log, ws, health.EdgeSessionStarted)
-	}
-	return started, err
-}
-
+// askToStartSession sends ONE StartSession and answers its outcome. A nil
+// SessionStarted with a nil error means the session is parked behind a
+// standing cold gate, which is an answer and not a failure. Every refusal is
+// LABELED (startLabel) with the shim's verdict on whether asking again can
+// help; startSession owns what follows from it.
 func (f *Fleet) askToStartSession(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, client shimclient.Client, src source, session wsm.Session, configDir string) (*conversationv1.SessionStarted, error) {
 	req := &shimv1.StartSessionRequest{}
 	if src.Fresh {
@@ -1899,9 +1932,11 @@ func (f *Fleet) askToStartSession(ctx context.Context, log dlog.Logger, ws ids.W
 			// ANOTHER SHIM HOLDS THIS CONVERSATION. It took the workspace
 			// kernel lock first, which is exactly what that lock is for: two
 			// vendor processes on one conversation is the state it prevents.
-			// The refusal is the shim's own verdict, relayed.
-			return nil, refuse(log, "OpenWorkspace", ArmConversationOwned,
-				fmt.Sprintf("another shim holds workspace %q's conversation: %s", ws, failure.GetDetail()), false)
+			// The refusal is the shim's own verdict, relayed. NOT RETRYABLE:
+			// the other shim's ownership is a real conflict.
+			return nil, labeled(refuse(log, "OpenWorkspace", ArmConversationOwned,
+				fmt.Sprintf("another shim holds workspace %q's conversation: %s", ws, failure.GetDetail()), false),
+				false, false, failure.GetDetail())
 		}
 		if unavailable := failure.GetLockHolderUnavailable(); unavailable != nil {
 			log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "failure.GetLockHolderUnavailable() != nil"})
@@ -1916,10 +1951,13 @@ func (f *Fleet) askToStartSession(ctx context.Context, log dlog.Logger, ws ids.W
 				log.Error(opBringUp, "the shim's lock_holder_unavailable refusal states no how; relayed as given",
 					dlog.Context{"binary": holder.GetBinary(), "detail": failure.GetDetail()})
 			}
-			return nil, refuseWith(log, "OpenWorkspace", ArmLockHolderUnavailable,
+			// RETRYABLE (shim.v1): a holder that failed to spawn or answer may
+			// succeed on the next StartSession on the same shim.
+			return nil, labeled(refuseWith(log, "OpenWorkspace", ArmLockHolderUnavailable,
 				fmt.Sprintf("the shim's lock helper %s %s for workspace %q; nobody owns the conversation",
 					holder.GetBinary(), how, ws), false,
-				map[string]any{"failure": holder})
+				map[string]any{"failure": holder}),
+				true, false, fmt.Sprintf("the lock helper %s %s", holder.GetBinary(), how))
 		}
 		if failure.GetUnknownSession() != nil {
 			log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "failure.GetUnknownSession() != nil"})
@@ -1929,10 +1967,12 @@ func (f *Fleet) askToStartSession(ctx context.Context, log dlog.Logger, ws ids.W
 			// gets its NAMED arm rather than a generic sentence, because
 			// "no transcript exists" is remediated differently from every
 			// other StartSession refusal.
-			return nil, refuse(log, "OpenWorkspace", ArmUnknownSession,
-				fmt.Sprintf("the shim has no transcript for conversation %q: %s", src.VendorSessionID, failure.GetDetail()), false)
+			// NOT RETRYABLE: the transcript will not reappear by asking again.
+			return nil, labeled(refuse(log, "OpenWorkspace", ArmUnknownSession,
+				fmt.Sprintf("the shim has no transcript for conversation %q: %s", src.VendorSessionID, failure.GetDetail()), false),
+				false, false, failure.GetDetail())
 		}
-		if failure.GetVendorStartFailed() != nil {
+		if vendor := failure.GetVendorStartFailed(); vendor != nil {
 			log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "failure.GetVendorStartFailed() != nil"})
 			// THE VENDOR FAILED TO START INSIDE A HEALTHY SHIM. The shim
 			// process is up and serving — only its StartSession answer is a
@@ -1941,9 +1981,24 @@ func (f *Fleet) askToStartSession(ctx context.Context, log dlog.Logger, ws ids.W
 			// it its own arm: OpenWorkspaceError.vendor_start_failed carries
 			// the shim's OWN account in `detail`, so the verdict is relayed
 			// typed rather than through the unlanded-arm convention.
-			return nil, refuseWith(log, "OpenWorkspace", ArmVendorStartFailed,
+			refusal := refuseWith(log, "OpenWorkspace", ArmVendorStartFailed,
 				fmt.Sprintf("the vendor failed to start for workspace %q: %s", ws, failure.GetDetail()), false,
 				map[string]any{"detail": failure.GetDetail()})
+			// THE SHIM LABELS WHETHER ASKING AGAIN CAN HELP, and the daemon
+			// never re-derives it from `detail`. A frame with neither arm is
+			// malformed: it is treated as a rejection, loudly.
+			switch vendor.GetRetry().(type) {
+			case *shimv1.StartSessionVendorStartFailed_Retryable:
+				return nil, labeled(refusal, true, true, failure.GetDetail())
+			case *shimv1.StartSessionVendorStartFailed_Rejected:
+				return nil, labeled(refusal, false, true, failure.GetDetail())
+			default:
+				log.Error(opBringUp, "the shim's vendor_start_failed states neither retryable nor rejected; treated as a rejection", dlog.Context{
+					"detail":              failure.GetDetail(),
+					"invariant_violation": "StartSessionVendorStartFailed.retry is always set",
+				})
+				return nil, labeled(refusal, false, true, failure.GetDetail())
+			}
 		}
 		if failure.GetAlreadyStarted() != nil {
 			log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "failure.GetAlreadyStarted() != nil"})

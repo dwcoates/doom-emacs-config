@@ -523,6 +523,14 @@ func (f *Fleet) Adopt(ctx context.Context, ws ids.WorkspaceID) (shimclient.Clien
 	return client, nil
 }
 
+// NoteAdoptedSession states that the shim installed for a workspace by a boot
+// adoption holds its started session (a survivor that is not inert). Install
+// leaves the fact false, because a relaunch installs a shim with none. The
+// boot releases the reconnect holds itself, once the holds are restored.
+func (f *Fleet) NoteAdoptedSession(ws ids.WorkspaceID) {
+	f.noteSessionStarted(ws)
+}
+
 // watchInstalled opens an adopted shim's watches. The durable record is read
 // for ONE decision only — whether there is a conversation here at all — because
 // a workspace with no session record has nothing to watch. Every FACT about the
@@ -618,7 +626,9 @@ func (f *Fleet) Resume(ctx context.Context, ws ids.WorkspaceID, c shimclient.Cli
 		}
 	}
 
-	started, err := f.startSession(ctx, log, ws, c, src, session, configDir)
+	runCtx, finishRun := f.beginVendorStart(ctx, ws)
+	started, err := f.startSession(runCtx, log, ws, c, src, session, configDir)
+	finishRun()
 	if err != nil {
 		return rollout.Resumed{}, err
 	}
@@ -661,6 +671,7 @@ func (f *Fleet) Resume(ctx context.Context, ws ids.WorkspaceID, c shimclient.Cli
 	log.Info(opFleetRollout, "the session is up on the new shim", dlog.Context{
 		"fresh": src.Fresh, "vendor_session_id": started.GetVendorSessionId(), "shim_pid": c.PID(),
 	})
+	f.deps.SessionsUp(ws)
 	return rollout.Resumed{}, nil
 }
 

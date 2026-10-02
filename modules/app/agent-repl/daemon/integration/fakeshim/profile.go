@@ -55,6 +55,15 @@ type Profile struct {
 	// PROFILE rather than a scripted answer because StartSession is the
 	// daemon's very first request, which a control-socket script would race.
 	VendorStartFailed string `json:"vendor_start_failed,omitempty"`
+	// VendorStartRetryable labels the VendorStartFailed refusal RETRYABLE
+	// (shim.v1 StartSessionVendorStartFailed.retry); unset labels it REJECTED.
+	VendorStartRetryable bool `json:"vendor_start_retryable,omitempty"`
+	// VendorStartFailTimes answers the FIRST n StartSessions with a RETRYABLE
+	// `vendor_start_failed` refusal carrying VendorStartFailDetail, and every
+	// one after them normally, as a vendor that was slow to start does. It
+	// drives the daemon's vendor-start retry run end to end.
+	VendorStartFailTimes  int    `json:"vendor_start_fail_times,omitempty"`
+	VendorStartFailDetail string `json:"vendor_start_fail_detail,omitempty"`
 	// NoTranscriptUntilTurn withholds the conversation's transcript until its
 	// FIRST TURN, which is what the real vendor does: StartSession assigns the
 	// vendor session id, and the file only appears once there is something to

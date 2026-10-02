@@ -41,6 +41,12 @@ func disconnectedStep(status *frontendv1.FooterStatus) string {
 		return "dead"
 	case *frontendv1.FooterStatusDisconnected_StartFailed:
 		return "start_failed"
+	case *frontendv1.FooterStatusDisconnected_VendorRetry:
+		return "vendor_retry"
+	case *frontendv1.FooterStatusDisconnected_VendorRejection:
+		return "vendor_rejection"
+	case *frontendv1.FooterStatusDisconnected_VendorFailed:
+		return "vendor_failed"
 	default:
 		return ""
 	}
@@ -62,6 +68,9 @@ func TestEveryFaultKindReachesTheStrip(t *testing.T) {
 		{"the legacy relaunch spelling", health.KindRelaunchResumeFailed, false, "disconnected", "start_failed"},
 		{"an adoption window nobody claimed", health.KindAdoptionWindowExpired, false, "disconnected", "start_failed"},
 		{"a cold gate whose re-open failed", health.KindColdGateReopenFailed, false, "disconnected", "start_failed"},
+		{"a vendor start being retried", health.KindVendorStartRetrying, false, "disconnected", "vendor_retry"},
+		{"a vendor start the vendor refused", health.KindVendorStartRejected, false, "disconnected", "vendor_rejection"},
+		{"a vendor start that failed for the window", health.KindVendorStartFailed, false, "disconnected", "vendor_failed"},
 		{"a shim that exited while serving", health.KindShimDied, false, "disconnected", "dead"},
 		{"a bounce whose replacement died", health.KindBounceDied, false, "disconnected", "dead"},
 		{"a workspace with no live session", health.KindSessionAbsent, false, "disconnected", "dead"},
@@ -347,5 +356,82 @@ func TestADaemonScopedNonEscalatingFaultIsAnnouncedOnEveryStrip(t *testing.T) {
 	}
 	if n := len(h.r.daemonFaults); n != 0 {
 		t.Fatalf("%d daemon faults stand, want none", n)
+	}
+}
+
+// vendorFaultOf is a vendor-start fault as the health package hands it over:
+// the line composed out of its evidence.
+func vendorFaultOf(t *testing.T, id, kind string) Fault {
+	t.Helper()
+	cell, _ := health.FaultFooterCell(kind, false)
+	record := wsm.Fault{Kind: kind, Evidence: map[string]string{
+		health.EvidenceFailedAttempts: "3",
+		health.EvidenceCause:          "supportedModels did not answer in 3s",
+	}}
+	return Fault{
+		ID: id, Kind: kind, Status: string(cell.Status), SubStatus: cell.SubStatus,
+		Detail: health.FaultLineDetail(record), At: instant,
+	}
+}
+
+func TestTheVendorStartLineIsDrawnUnderEachVendorStep(t *testing.T) {
+	tests := []struct {
+		name string
+		kind string
+		want string
+	}{
+		{"retrying", health.KindVendorStartRetrying, "Claude SDK did not start (attempt 3): supportedModels did not answer in 3s · retrying"},
+		{"rejected", health.KindVendorStartRejected, "Claude SDK refused to start: supportedModels did not answer in 3s · restart: SPC o C-c"},
+		{"failed", health.KindVendorStartFailed, "Claude SDK failed to start · restart: SPC o C-c"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+
+			// Act
+			h.r.OpenFault(testWS, vendorFaultOf(t, "fault-1", tt.kind))
+
+			// Assert
+			got := h.view(t).GetStrip().GetStatus().GetDisconnected().GetActivity().GetSalient().GetVendorStart().GetText()
+			if got != tt.want {
+				t.Fatalf("vendor_start text = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// THE VENDOR STEP OUTRANKS A DEAD LINK THAT NEVER CONNECTED: a spawned shim
+// stopped after its vendor failed is not a shim that would not start.
+func TestAVendorFaultOutranksADeadLinkThatNeverConnected(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.r.SetParticipants(testWS, true, true)
+	h.r.OnLink(testWS, shimclient.LinkDead)
+
+	// Act
+	h.r.OpenFault(testWS, vendorFaultOf(t, "fault-1", health.KindVendorStartFailed))
+
+	// Assert
+	if got := disconnectedStep(h.view(t).GetStrip().GetStatus()); got != "vendor_failed" {
+		t.Fatalf("substatus = %q, want vendor_failed", got)
+	}
+}
+
+// A VENDOR FAULT RANKS WITH start_failed: opened after a severed-link fault,
+// it is the one the strip draws.
+func TestAVendorFaultOutranksASeveredLinkFault(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.OpenFault(testWS, faultOf(t, "severed", health.KindLinkSevered, false))
+
+	// Act
+	h.r.OpenFault(testWS, vendorFaultOf(t, "vendor", health.KindVendorStartRetrying))
+
+	// Assert
+	if got := disconnectedStep(h.view(t).GetStrip().GetStatus()); got != "vendor_retry" {
+		t.Fatalf("substatus = %q, want vendor_retry", got)
 	}
 }
