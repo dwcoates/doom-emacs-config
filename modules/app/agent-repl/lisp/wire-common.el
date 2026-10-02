@@ -617,11 +617,13 @@ Values listed in `agent-repl-wire-shim-only-prompt-origins' are ABSENT too:
 no client ever sends them.")
 
 (defconst agent-repl-wire-shim-only-prompt-origins
-  '("PROMPT_ORIGIN_VENDOR_STARTED")
-  "PromptOrigin values only the shim produces, never a client send.
+  '("PROMPT_ORIGIN_VENDOR_STARTED" "PROMPT_ORIGIN_LINK_UNRESOLVED")
+  "PromptOrigin values no client ever sends: only the shim or the daemon does.
 VENDOR_STARTED names a turn the vendor began on its own, which the shim
 adopts; an editor submit carrying it would claim the vendor started a
-turn the user in fact sent, so it has no elisp spelling at all.")
+turn the user in fact sent.  LINK_UNRESOLVED is the daemon's own question
+after a clicked feed link resolved to no file.  Neither has an elisp
+spelling at all.")
 
 (defun agent-repl-wire-encode-prompt-origin (value)
   "Encode the PromptOrigin keyword VALUE as its protojson enum name.
