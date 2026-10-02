@@ -2043,3 +2043,326 @@ sibling built on a clean frame."
       (delete-other-windows)
       (dolist (b (list buf1 buf2 input1 input2 side-buf))
         (when (buffer-live-p b) (kill-buffer b))))))
+
+;;;; ---- Copying the webview's highlighted text -------------------------------
+
+(defvar agent-repl-test--copy-ran nil
+  "The keys the fall-through test commands ran under, newest first.")
+
+(defun agent-repl-test--copy-record-y ()
+  "Stand in for whatever `y' did before the copy chords."
+  (interactive)
+  (push 'y agent-repl-test--copy-ran))
+
+(defun agent-repl-test--copy-record-c-c-c-k ()
+  "Stand in for a `C-c C-k' binding behind the `C-c' prefix."
+  (interactive)
+  (push 'c-c-c-k agent-repl-test--copy-ran))
+
+(defmacro agent-repl-test--with-copy-buffer (&rest body)
+  "Run BODY in a webview-like buffer with the copy chords on.
+Its local map binds `y' and `C-c C-k' to recording commands, standing
+in for the keys' behavior before the chords existed."
+  (declare (indent 0))
+  `(let ((agent-repl-test--copy-ran nil)
+         (unread-command-events nil)
+         (kill-ring nil))
+     (with-temp-buffer
+       (let ((map (make-sparse-keymap)))
+         (define-key map (kbd "y") #'agent-repl-test--copy-record-y)
+         (define-key map (kbd "C-c C-k") #'agent-repl-test--copy-record-c-c-c-k)
+         (use-local-map map))
+       (agent-repl-frontend-webview-mode 1)
+       ,@body)))
+
+(defun agent-repl-test--copy-answer (text focused)
+  "The JSON the page answers the request being waited on with."
+  (json-encode `((id . ,agent-repl--frontend-copy-waiting)
+                 (text . ,text)
+                 (focused . ,(if focused t :json-false)))))
+
+(defmacro agent-repl-test--answering (text focused &rest body)
+  "Run BODY with the page answering TEXT and FOCUSED at once.
+The read channel calls the callback symbol synchronously, as the
+xwidget event handler would once the answer arrives."
+  (declare (indent 2))
+  `(cl-letf (((symbol-function 'agent-repl--frontend-webview-live-widget)
+              (lambda (_buf) 'live-widget))
+             ((symbol-function 'agent-repl--frontend-webview-execute-script-value)
+              (lambda (_xw _script callback)
+                (funcall callback (agent-repl-test--copy-answer ,text ,focused)))))
+     ,@body))
+
+(defun agent-repl-test--press (keys)
+  "Run the copy command as though KEYS (a `kbd' string) invoked it."
+  (cl-letf (((symbol-function 'this-command-keys-vector)
+             (lambda () (kbd keys))))
+    (agent-repl-frontend-copy-selection)))
+
+(ert-deftest agent-repl-test-copy-keys-share-one-command ()
+  "`y', `C-c' and `s-c' are all bound to the ONE copy command."
+  ;; Arrange / Act
+  (let ((bound (mapcar (lambda (key)
+                         (lookup-key agent-repl-frontend-webview-mode-map (kbd key)))
+                       '("y" "C-c" "s-c"))))
+    ;; Assert
+    (should (equal bound (make-list 3 #'agent-repl-frontend-copy-selection)))))
+
+(ert-deftest agent-repl-test-copy-keys-share-one-command-in-every-evil-state ()
+  "Every Evil state map gets the same three keys, all on the one command."
+  ;; Arrange
+  (let ((planted nil))
+    (cl-letf (((symbol-function 'evil-define-key*)
+               (lambda (state _map key def)
+                 (push (list state (key-description key) def) planted))))
+      ;; Act
+      (agent-repl--frontend-copy-bind-evil-keys))
+    ;; Assert
+    (should (equal (seq-uniq (mapcar #'caddr planted))
+                   (list #'agent-repl-frontend-copy-selection)))
+    (should (= (length planted) (* 5 3)))))
+
+(ert-deftest agent-repl-test-copy-mode-arms-on-every-adopted-webview ()
+  "The adoption hook enables the copy chords."
+  (should (memq #'agent-repl-frontend-webview-mode
+                agent-repl-frontend-webview-adopt-hook)))
+
+(ert-deftest agent-repl-test-copy-mode-normalizes-evil-keymaps ()
+  "Enabling the mode rebuilds Evil's keymaps, or its state maps still win."
+  ;; Arrange
+  (let ((normalized 0))
+    (cl-letf (((symbol-function 'evil-normalize-keymaps)
+               (lambda (&optional _state) (cl-incf normalized))))
+      (with-temp-buffer
+        ;; Act
+        (agent-repl-frontend-webview-mode 1)
+        ;; Assert
+        (should (= normalized 1))))))
+
+(ert-deftest agent-repl-test-copy-nonempty-focused-selection-is-killed ()
+  "A nonempty selection on a focused page goes onto the kill ring."
+  (agent-repl-test--with-copy-buffer
+    (agent-repl-test--answering "boot_failed" t
+      ;; Act
+      (agent-repl-test--press "y"))
+    ;; Assert
+    (should (equal (current-kill 0 t) "boot_failed"))))
+
+(ert-deftest agent-repl-test-copy-nonempty-selection-skips-the-old-binding ()
+  "A copy does not also run the key's old binding."
+  (agent-repl-test--with-copy-buffer
+    (agent-repl-test--answering "boot_failed" t
+      ;; Act
+      (agent-repl-test--press "y"))
+    ;; Assert
+    (should (null agent-repl-test--copy-ran))))
+
+(ert-deftest agent-repl-test-copy-command-c-copies-like-y ()
+  "Command-c copies through the same path as `y'."
+  (agent-repl-test--with-copy-buffer
+    (agent-repl-test--answering "frame unreadable" t
+      ;; Act
+      (agent-repl-test--press "s-c"))
+    ;; Assert
+    (should (equal (current-kill 0 t) "frame unreadable"))))
+
+(ert-deftest agent-repl-test-copy-empty-selection-runs-the-old-binding ()
+  "With nothing selected, `y' does what it did before the chords."
+  (agent-repl-test--with-copy-buffer
+    (agent-repl-test--answering "" t
+      ;; Act
+      (agent-repl-test--press "y"))
+    ;; Assert
+    (should (equal agent-repl-test--copy-ran '(y)))))
+
+(ert-deftest agent-repl-test-copy-empty-selection-kills-nothing ()
+  "With nothing selected, the kill ring is left alone."
+  (agent-repl-test--with-copy-buffer
+    (agent-repl-test--answering "" t
+      ;; Act
+      (agent-repl-test--press "y"))
+    ;; Assert
+    (should (null kill-ring))))
+
+(ert-deftest agent-repl-test-copy-unfocused-page-runs-the-old-binding ()
+  "A selection on an unfocused page falls through to the old binding."
+  (agent-repl-test--with-copy-buffer
+    (agent-repl-test--answering "boot_failed" nil
+      ;; Act
+      (agent-repl-test--press "y"))
+    ;; Assert
+    (should (equal (list agent-repl-test--copy-ran kill-ring) '((y) nil)))))
+
+(ert-deftest agent-repl-test-copy-no-live-webview-runs-the-old-binding ()
+  "A buffer with no live page to ask falls through to the old binding."
+  (agent-repl-test--with-copy-buffer
+    (cl-letf (((symbol-function 'agent-repl--frontend-webview-live-widget)
+               (lambda (_buf) nil)))
+      ;; Act
+      (agent-repl-test--press "y"))
+    ;; Assert
+    (should (equal agent-repl-test--copy-ran '(y)))))
+
+(ert-deftest agent-repl-test-copy-c-c-falls-through-as-a-prefix ()
+  "With nothing selected, `C-c' stays the prefix it was: `C-c C-k' still runs."
+  (agent-repl-test--with-copy-buffer
+    (agent-repl-test--answering "" t
+      (setq unread-command-events (listify-key-sequence (kbd "C-k")))
+      ;; Act
+      (agent-repl-test--press "C-c"))
+    ;; Assert
+    (should (equal agent-repl-test--copy-ran '(c-c-c-k)))))
+
+(ert-deftest agent-repl-test-copy-replays-keys-typed-while-waiting ()
+  "Keys read while the page answers are replayed after the copy, in order."
+  (agent-repl-test--with-copy-buffer
+    (let ((script '(?a ?b answer)))
+      (cl-letf (((symbol-function 'agent-repl--frontend-webview-live-widget)
+                 (lambda (_buf) 'live-widget))
+                ((symbol-function 'agent-repl--frontend-webview-execute-script-value)
+                 #'ignore)
+                ((symbol-function 'agent-repl--frontend-read-event)
+                 (lambda ()
+                   (let ((next (pop script)))
+                     (if (not (eq next 'answer))
+                         next
+                       (agent-repl--frontend-copy-answered
+                        (agent-repl-test--copy-answer "x" t))
+                       (pop unread-command-events))))))
+        ;; Act
+        (agent-repl-test--press "y")))
+    ;; Assert
+    (should (equal unread-command-events '(?a ?b)))))
+
+(ert-deftest agent-repl-test-copy-c-g-while-waiting-quits ()
+  "`C-g' read while waiting abandons the wait with a quit."
+  (agent-repl-test--with-copy-buffer
+    (cl-letf (((symbol-function 'agent-repl--frontend-webview-live-widget)
+               (lambda (_buf) 'live-widget))
+              ((symbol-function 'agent-repl--frontend-webview-execute-script-value)
+               #'ignore)
+              ((symbol-function 'agent-repl--frontend-read-event)
+               (lambda () ?\C-g)))
+      ;; Act
+      (let ((outcome (condition-case nil
+                         (progn (agent-repl-test--press "y") 'returned)
+                       (quit 'quit))))
+        ;; Assert
+        (should (eq outcome 'quit))))))
+
+(ert-deftest agent-repl-test-copy-c-g-while-waiting-clears-the-wait ()
+  "An abandoned wait leaves no request standing."
+  (agent-repl-test--with-copy-buffer
+    (cl-letf (((symbol-function 'agent-repl--frontend-webview-live-widget)
+               (lambda (_buf) 'live-widget))
+              ((symbol-function 'agent-repl--frontend-webview-execute-script-value)
+               #'ignore)
+              ((symbol-function 'agent-repl--frontend-read-event)
+               (lambda () ?\C-g)))
+      ;; Act
+      (condition-case nil (agent-repl-test--press "y") (quit nil))
+      ;; Assert
+      (should (null agent-repl--frontend-copy-waiting)))))
+
+(ert-deftest agent-repl-test-copy-wait-leaves-no-wake-event-behind ()
+  "The wake event an answer queues never outlives the wait."
+  (agent-repl-test--with-copy-buffer
+    (agent-repl-test--answering "boot_failed" t
+      ;; Act
+      (agent-repl-test--press "y"))
+    ;; Assert
+    (should-not (memq agent-repl--frontend-copy-wake-event unread-command-events))))
+
+(ert-deftest agent-repl-test-copy-stale-answer-wakes-nothing ()
+  "An answer to a request nobody waits on queues no wake event."
+  ;; Arrange
+  (let ((unread-command-events nil)
+        (agent-repl--frontend-copy-waiting 7))
+    ;; Act
+    (agent-repl--frontend-copy-answered "{\"id\":6,\"text\":\"x\",\"focused\":true}")
+    ;; Assert
+    (should (null unread-command-events))))
+
+(ert-deftest agent-repl-test-copy-unreadable-answer-signals ()
+  "An answer that is not the script's JSON object is an error."
+  (should-error (agent-repl--frontend-copy-parse "not json")))
+
+(ert-deftest agent-repl-test-copy-unreadable-answer-is-logged ()
+  "An unreadable answer reaches the canonical error log."
+  ;; Arrange
+  (let ((errors nil))
+    (cl-letf (((symbol-function 'agent-repl--error)
+               (lambda (_ws fmt &rest args) (push (apply #'format fmt args) errors))))
+      ;; Act
+      (ignore-errors (agent-repl--frontend-copy-parse "not json")))
+    ;; Assert
+    (should (string-match-p "copy-selection: unreadable answer" (car errors)))))
+
+(ert-deftest agent-repl-test-copy-answer-without-id-signals ()
+  "An answer with no integer id is refused."
+  (should-error (agent-repl--frontend-copy-parse "{\"text\":\"x\"}")))
+
+(ert-deftest agent-repl-test-copy-null-selection-object-signals ()
+  "A page with no selection object is an invariant violation."
+  (cl-letf (((symbol-function 'agent-repl--error) #'ignore))
+    (should-error (agent-repl--frontend-copy-decision '(:id 1 :text nil :focused t)))))
+
+(ert-deftest agent-repl-test-copy-null-selection-object-is-logged ()
+  "The missing selection object reaches the canonical error log."
+  ;; Arrange
+  (let ((errors nil))
+    (cl-letf (((symbol-function 'agent-repl--error)
+               (lambda (_ws fmt &rest args) (push (apply #'format fmt args) errors))))
+      ;; Act
+      (ignore-errors (agent-repl--frontend-copy-decision '(:id 1 :text nil :focused t))))
+    ;; Assert
+    (should (string-match-p "no selection object" (car errors)))))
+
+(ert-deftest agent-repl-test-copy-answer-missing-text-signals ()
+  "An answer with no text key at all is refused."
+  (should-error (agent-repl--frontend-copy-decision '(:id 1 :focused t))))
+
+(ert-deftest agent-repl-test-copy-script-answers-its-request-id ()
+  "The script names its request id in the answer it builds."
+  (should (string-match-p "id:42," (agent-repl--frontend-copy-script 42))))
+
+(ert-deftest agent-repl-test-copy-script-reports-focus ()
+  "The script reports whether the page has focus."
+  (should (string-match-p "document\\.hasFocus()" (agent-repl--frontend-copy-script 1))))
+
+(ert-deftest agent-repl-test-webview-read-channel-injects-into-a-live-webview ()
+  "A read into a live webview is injected and answers non-nil."
+  ;; Arrange
+  (let ((injected nil))
+    (cl-letf (((symbol-function 'agent-repl--frontend-webview-live-widget)
+               (lambda (_buf) 'live-widget))
+              ((symbol-function 'agent-repl--frontend-webview-execute-script-value)
+               (lambda (xw script callback) (setq injected (list xw script callback)))))
+      (with-temp-buffer
+        ;; Act
+        (let ((result (agent-repl--frontend-webview-read-script
+                       (current-buffer) "1" 'agent-repl--frontend-copy-answered)))
+          ;; Assert
+          (should (equal (list result injected)
+                         '(t (live-widget "1" agent-repl--frontend-copy-answered)))))))))
+
+(ert-deftest agent-repl-test-webview-read-channel-skips-a-dead-webview ()
+  "A buffer with no live webview injects nothing and answers nil."
+  (cl-letf (((symbol-function 'agent-repl--frontend-webview-live-widget)
+             (lambda (_buf) nil)))
+    (with-temp-buffer
+      (should-not (agent-repl--frontend-webview-read-script
+                   (current-buffer) "1" 'agent-repl--frontend-copy-answered)))))
+
+(ert-deftest agent-repl-test-webview-read-channel-logs-a-refused-callback ()
+  "A refused callback reaches the canonical error log."
+  ;; Arrange
+  (let ((errors nil))
+    (cl-letf (((symbol-function 'agent-repl--error)
+               (lambda (_ws fmt &rest args) (push (apply #'format fmt args) errors))))
+      (with-temp-buffer
+        ;; Act
+        (ignore-errors (agent-repl--frontend-webview-read-script
+                        (current-buffer) "1" (lambda (_raw) nil)))))
+    ;; Assert
+    (should (string-match-p "read-script: refused" (car errors)))))
