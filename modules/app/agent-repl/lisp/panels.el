@@ -560,6 +560,12 @@ now finds a live view."
           (agent-repl--maybe-autoselect-input ws))
       (agent-repl--log ws "elisp.panels.restore-on-view-created: skipped ws=%s reason=not-current" ws))))
 
+(defvar agent-repl--switch-trigger nil
+  "What triggered the newest perspective activation, captured AT the activation.
+A plist: :command (`this-command' then, which a deferred pass can no longer
+read) and :webview-window (the window showing a webview just before the
+switch).  Read by the switch's webview presence record.")
+
 (defun agent-repl--ensure-own-panels-on-persp-switch (ws)
   "Reconcile panel visibility with workspace ownership after a persp switch.
 
@@ -905,12 +911,6 @@ which activation it was."
       (agent-repl--info log-ws "elisp.panels.switch-activation-won ws=%s generation=%d"
                         ws generation)
       (agent-repl--on-workspace-switch ws))))
-
-(defvar agent-repl--switch-trigger nil
-  "What triggered the newest perspective activation, captured AT the activation.
-A plist: :command (`this-command' then, which a deferred pass can no longer
-read) and :webview-window (the window showing a webview just before the
-switch).  Read by the switch's webview presence record.")
 
 (defun agent-repl--capture-switch-trigger ()
   "Record `agent-repl--switch-trigger' for the activation happening now."
