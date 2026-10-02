@@ -408,6 +408,8 @@ ending row, live and on replay.
 | `AGENT_REPL_HANDOVER_FACTS_BOUND` | test only | bounds a successor's wait, on a mid-work adoption, for the adopted shim to re-announce its session facts (a Go duration; the default is 10s). A malformed or non-positive value is a BOOT REFUSAL |
 | `AGENT_REPL_WORKTREE_REAP_IDLE` | operator | the landed-worktree reaper's idle threshold (a Go duration; default `24h`): a worktree with any sign of activity newer than this is never judged. A malformed or non-positive value is a BOOT REFUSAL. See "The landed-worktree reaper" |
 | `AGENT_REPL_WORKTREE_REAP_START_DELAY` / `AGENT_REPL_WORKTREE_REAP_EVERY` | test only | compress the reaper's schedule (defaults `5m` after start, then `24h`). Same refusal rule |
+| `AGENT_REPL_NEWS_DIGEST_SOURCES` | test only | a JSON file of sources (`[{key, name, url, home, format}]`, format one of `atom`, `rss`, `npm`, `changelog`, `page`) that REPLACES the news digest's real sources; they are fetched unguarded, the real ones only when `AGENT_REPL_FORBID_VENDOR_CALLS` is unset. A missing or malformed file is a BOOT REFUSAL. See "The news digest" |
+| `AGENT_REPL_NEWS_DIGEST_START_DELAY` / `AGENT_REPL_NEWS_DIGEST_EVERY` / `AGENT_REPL_NEWS_DIGEST_RECHECK` | test only | compress the news digest's schedule (defaults `2m` after start, `24h` from the previous run's end, a `15m` longest wait). A malformed or non-positive value is a BOOT REFUSAL |
 | `AGENT_REPL_LOCK_DIR` | test only | overrides `~/.cache/agent-repl/run` for the kernel-lock probes (the fake shim honors it too) |
 | `AGENT_REPL_BROWSER_CMD` | operator/test | the external browser launcher command for OpenExternal |
 | `AGENT_REPL_NOTIFIER_CMD` | operator/test | the desktop banner program's binary (`internal/desktopnotify`); the platform's argv is unchanged, only the program it is handed to. Unset: `alerter` (macOS) or `notify-send` (Linux) on PATH, and a missing one is ERROR at boot and on every banner. The integration harness and the Emacs e2e layer point it at a recorder, so no test raises a real banner |
@@ -2034,6 +2036,56 @@ snapshot) once per sweep, and everything else is its own git children. Those
 children are NOT niced: the daemon has no idiom for lowering a child's
 priority (`bin/background.sh` is the test suites'), and git inherits the
 daemon's own.
+
+## The news digest (`internal/newsdigest`)
+
+A daily digest of Claude news (new features, and above all announced changes
+to the Agent SDK and Claude Code this backend runs on), drawn as one overlay
+over the feed in every webview until one of them dismisses it. Contract:
+`frontend.v1.NewsDigestOverlay`, `agentrepl.v1.NewsDigestStanding`
+(`WatchDaemonResponse.news_digest`), `DismissNewsDigest`,
+`RefreshNewsDigest`; design record `docs/protobuf-design/news-digest.md`.
+
+**Sources.** `newsdigest.DefaultSources`, the design record's eleven: Atom
+release feeds, the status RSS, the npm `time` map, the Claude Code
+`CHANGELOG.md` (`## ` headings), and five pages with no feed. A FEED entry is
+new when its id was not read before (on a source's first reading: dated after
+the previous digest's end, or one cadence ago); a PAGE's new text is the
+blocks its stored snapshot did not hold (a first reading is only the
+baseline). Each fetch has its own 20s bound. A source that fails is an INFO
+record and a `failed` source row, and the digest goes on; every source failing
+is ERROR and `no_source_read`. The real sources' fetches ask the vendor guard
+(`news_digest_fetch`), so no test reaches Anthropic.
+
+**Condensing.** Sonnet (`headless.ModelSonnet`, through `internal/headless`,
+billed to `--default-config-dir`), from the brief
+`prompts/news-digest-from-sources.md`. The answer is JSON validated HARD: an
+unknown field or kind, a repeated kind, an empty section, an item without a
+title, summary or link, a blank effective date, or a link that is not one of
+the URLs the sources gave each refuse the whole answer as `model_failed`
+(ERROR `daemon.newsdigest.model`); there is never a guessed digest. Sections
+are ordered backend first; their headings and the title are the daemon's. A
+digest nobody dismissed is handed to the next run's model to keep, and the
+new digest's period starts where it did.
+
+**Cadence and exclusivity.** One run every 24h from the previous run's END,
+read from wsm (`news_digest.last_run_end`) at every look, a look never more
+than 15m away (a sleeping machine does not advance the monotonic clock). A
+run with nothing new, or none worth reporting, stands nothing and is still
+recorded. A model failure or no source read records only the run's end, so
+the cadence moves but the same material is read again. One run at a time:
+`TryLock` in process, and `<lock dir>/news-digest.lock` (`internal/flock`)
+across processes; a scheduled run re-reads the cadence UNDER that lock and
+does not run (republishing the standing instead) when another daemon's run
+just ended. Only the daemon that serves (`rollout.Controller.ServesIntake`,
+through `intakegate.NewFor`) starts a scheduled run, so a handover's two
+daemons never both start one. A `RefreshNewsDigest` runs whatever the cadence
+and moves it.
+
+**Standing.** The standing overlay is stored encoded in wsm until dismissed,
+republished at prime (so it survives restarts and handovers), and pushed on
+WEBVIEW `WatchDaemon` streams only. A dismiss naming the newest digest takes
+it down everywhere (twice is success); any other id is `unknown_digest`.
 
 ## Coverage deliberately not attainable under the no-git-in-tests directive
 
