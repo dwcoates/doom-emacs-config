@@ -67,7 +67,7 @@ func TestSelects(t *testing.T) {
 }
 
 func TestSlotsForHost(t *testing.T) {
-	for cpus, want := range map[int]int{16: 14, 3: 1, 2: 1, 1: 1} {
+	for cpus, want := range map[int]int{16: 14, 3: 1, 2: 0, 1: -1} {
 		if got := SlotsForHost(cpus); got != want {
 			t.Errorf("SlotsForHost(%d) = %d, want %d", cpus, got, want)
 		}
