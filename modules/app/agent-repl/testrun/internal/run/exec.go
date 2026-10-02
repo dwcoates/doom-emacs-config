@@ -22,17 +22,28 @@ const KillGrace = 10 * time.Second
 // block until every descendant holding it closed it, so one leaked grandchild
 // would hang the run. A file lets Wait return when the unit itself exits,
 // exactly as the old serial script's `time cmd` did.
-type OSExec struct{}
+type OSExec struct {
+	// Log records a kill that failed: Kill has no caller to return it to.
+	Log *Log
+	// Grace is how long a killed group has between SIGTERM and SIGKILL.
+	Grace time.Duration
+}
 
 type osProcess struct {
-	cmd  *exec.Cmd
-	file *os.File
-	out  *bytes.Buffer
-	done chan struct{}
+	cmd   *exec.Cmd
+	file  *os.File
+	out   *bytes.Buffer
+	done  chan struct{}
+	log   *Log
+	grace time.Duration
+	id    string
 }
 
 // Start implements Executor.
-func (OSExec) Start(spec Spec, out *bytes.Buffer) (Process, error) {
+func (e OSExec) Start(spec Spec, out *bytes.Buffer) (Process, error) {
+	if e.Log == nil || e.Grace <= 0 {
+		return nil, fmt.Errorf("run: OSExec needs a Log and a positive Grace (log set: %v, grace %v)", e.Log != nil, e.Grace)
+	}
 	if len(spec.Argv) == 0 {
 		return nil, fmt.Errorf("run: unit %s has no command", spec.ID)
 	}
@@ -40,7 +51,10 @@ func (OSExec) Start(spec Spec, out *bytes.Buffer) (Process, error) {
 	if err != nil {
 		return nil, fmt.Errorf("run: create the output file for %s: %w", spec.ID, err)
 	}
-	os.Remove(f.Name())
+	if err := os.Remove(f.Name()); err != nil {
+		f.Close()
+		return nil, fmt.Errorf("run: unlink the output file %s of %s: %w", f.Name(), spec.ID, err)
+	}
 	cmd := exec.Command(spec.Argv[0], spec.Argv[1:]...)
 	cmd.Dir = spec.Dir
 	cmd.Env = append(os.Environ(), spec.Env...)
@@ -50,7 +64,7 @@ func (OSExec) Start(spec Spec, out *bytes.Buffer) (Process, error) {
 		f.Close()
 		return nil, fmt.Errorf("run: start %s (%v in %s): %w", spec.ID, spec.Argv, spec.Dir, err)
 	}
-	return &osProcess{cmd: cmd, file: f, out: out, done: make(chan struct{})}, nil
+	return &osProcess{cmd: cmd, file: f, out: out, done: make(chan struct{}), log: e.Log, grace: e.Grace, id: spec.ID}, nil
 }
 
 // Wait implements Process.
@@ -80,17 +94,26 @@ func (p *osProcess) Wait() (int, float64, error) {
 	}
 }
 
-// Kill implements Process: SIGTERM to the group, SIGKILL after KillGrace.
+// Kill implements Process: SIGTERM to the group, SIGKILL after the grace.
 func (p *osProcess) Kill() {
 	pgid := p.cmd.Process.Pid
-	syscall.Kill(-pgid, syscall.SIGTERM)
+	p.signalGroup(pgid, syscall.SIGTERM)
 	go func() {
 		select {
 		case <-p.done:
-		case <-time.After(KillGrace):
-			syscall.Kill(-pgid, syscall.SIGKILL)
+		case <-time.After(p.grace):
+			p.signalGroup(pgid, syscall.SIGKILL)
 		}
 	}()
+}
+
+// signalGroup signals the unit's process group. A group that is already gone
+// (ESRCH) has nothing left to stop; any other failure is logged, because the
+// unit may then outlive the run.
+func (p *osProcess) signalGroup(pgid int, sig syscall.Signal) {
+	if err := syscall.Kill(-pgid, sig); err != nil && !errors.Is(err, syscall.ESRCH) {
+		p.log.Errorf("unit %s: send %v to its process group %d: %v", p.id, sig, pgid, err)
+	}
 }
 
 // WallClock is the real clock.
