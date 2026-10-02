@@ -853,6 +853,13 @@ and not something this change touches.
   book is empty"; a reader that later wants history starts with a repaint and
   walks older with `ReadAgentPage` from its `more`. A tail-only open still asks
   the `agent` register, so an unknown agent is `unknown_agent`.
+- **EVERY OPEN NAMES THE BOOK'S NEWEST LINE** (`OpenAgentSessionSuccess.newest`,
+  feed-paging change 5), for all three openings and for `page_only`; unset is
+  an empty book. It is the newest line BY PLACE — the line a repaint leads
+  with — read in the same transaction as the page and the pin
+  (`newestLineSQL`). A tail-only caller anchors on it: its teardown head, its
+  lossless re-open mark (a catch-up from it is a superset of what was written
+  since), and whether the book was empty.
 - `OpenAgentSession` answers the page plus a store-minted `AgentSessionToken`
   (128 random bits from `crypto/rand`, hex) — **UNLESS THE REQUEST SAID
   `page_only`**, which is the caller stating that no watch follows: nothing is
