@@ -110,7 +110,15 @@ func (p goPkg) units() (run.Spec, *Split, error) {
 		sp.Display = QuietGoTestOutput
 		return sp
 	}
-	return buildUnit, &Split{Group: p.group(), Suite: p.Suite, Items: tests, Deps: []string{buildUnit.ID}, Chunk: chunk}, nil
+	return buildUnit, &Split{
+		Group: p.group(), Suite: p.Suite, Items: tests, Deps: []string{buildUnit.ID},
+		// Test binaries and every expensive integration binary are already
+		// compiled by the dependency unit. Go's -v timings omit time that
+		// parallel subtests spend paused, so wall-minus-items can otherwise
+		// misclassify that queue time as process startup and suppress splitting.
+		OverheadCap: 1,
+		Chunk:       chunk,
+	}, nil
 }
 
 // GoTopLevelTests lists everything `go test` runs at top level in the package
@@ -185,12 +193,14 @@ func runPattern(tests []string) string {
 	return "^(" + strings.Join(q, "|") + ")$"
 }
 
-var goTestResult = regexp.MustCompile(`^--- (PASS|FAIL|SKIP): (\S+) \(([0-9.]+)s\)$`)
+var goTestResult = regexp.MustCompile(`^\s*--- (PASS|FAIL|SKIP): (\S+) \(([0-9.]+)s\)$`)
 
-// ParseGoTestItems reads `go test -v` output's top-level result lines.
-// Subtests are indented and never match.
+// ParseGoTestItems reads `go test -v` output's result tree. A parent's own
+// duration includes sequential descendants but excludes time that parallel
+// descendants spend paused; max(parent, sum(children)) counts either shape
+// without double-counting the sequential one.
 func ParseGoTestItems(out []byte, want []string) (map[string]float64, error) {
-	got := map[string]float64{}
+	nodes := map[string]float64{}
 	sc := bufio.NewScanner(bytes.NewReader(out))
 	sc.Buffer(make([]byte, 1024*1024), 64*1024*1024)
 	for sc.Scan() {
@@ -202,10 +212,26 @@ func ParseGoTestItems(out []byte, want []string) (map[string]float64, error) {
 		if err != nil {
 			return nil, fmt.Errorf("unreadable seconds in %q: %w", sc.Text(), err)
 		}
-		got[m[2]] = secs
+		nodes[m[2]] = secs
 	}
 	if err := sc.Err(); err != nil {
 		return nil, err
+	}
+	got := make(map[string]float64, len(want))
+	var total func(string) float64
+	total = func(name string) float64 {
+		children := 0.0
+		for child := range nodes {
+			if strings.LastIndex(child, "/") == len(name) && strings.HasPrefix(child, name+"/") {
+				children += total(child)
+			}
+		}
+		return max(nodes[name], children)
+	}
+	for _, name := range want {
+		if _, ok := nodes[name]; ok {
+			got[name] = total(name)
+		}
 	}
 	return got, matchItems(got, want)
 }

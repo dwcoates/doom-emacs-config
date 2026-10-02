@@ -373,12 +373,22 @@ func TestParseGoTestItems(t *testing.T) {
 		name    string
 		out     string
 		want    []string
+		wantA   float64
+		wantB   float64
 		wantErr string
 	}{
 		{
-			name: "top-level results only, whatever the verdict",
-			out:  "=== RUN   TestA\n--- PASS: TestA (1.25s)\n    --- PASS: TestA/sub (9.00s)\n--- SKIP: TestB (0.00s)\n",
-			want: []string{"TestA", "TestB"},
+			name:  "parallel subtest time belongs to its top-level item",
+			out:   "=== RUN   TestA\n--- PASS: TestA (1.25s)\n    --- PASS: TestA/sub (9.00s)\n--- SKIP: TestB (0.00s)\n",
+			want:  []string{"TestA", "TestB"},
+			wantA: 9,
+		},
+		{
+			name:  "a sequential parent's inclusive time is not double counted",
+			out:   "--- PASS: TestA (10.00s)\n    --- PASS: TestA/one (4.00s)\n    --- PASS: TestA/two (5.00s)\n--- PASS: TestB (0.50s)\n",
+			want:  []string{"TestA", "TestB"},
+			wantA: 10,
+			wantB: 0.5,
 		},
 		{name: "a test with no result line fails", out: "--- PASS: TestA (1.00s)\n", want: []string{"TestA", "TestC"}, wantErr: "no timing reported for [TestC]"},
 	}
@@ -394,7 +404,7 @@ func TestParseGoTestItems(t *testing.T) {
 				}
 				return
 			}
-			if err != nil || got["TestA"] != 1.25 || got["TestB"] != 0 {
+			if err != nil || got["TestA"] != tt.wantA || got["TestB"] != tt.wantB {
 				t.Fatalf("ParseGoTestItems = %v, %v", got, err)
 			}
 		})
