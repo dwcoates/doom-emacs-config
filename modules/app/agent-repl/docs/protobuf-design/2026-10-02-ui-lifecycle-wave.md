@@ -120,6 +120,18 @@ what an implementer must know that the schema does not say.
   - A completed `/clear` or compaction is marked read by the daemon itself
     on the push that ends the cut (rule 3), with no editor dwell.
 
+### 5. The compaction summary's fold is retired
+
+- WHAT: `frontend.v1.FeedContextCutCompacted.fold` (tag 2) is reserved, and
+  `frontend.v1.FeedContextCutFold` is deleted.
+- WHY: the owner wants the orange-border summary bubble always drawn under
+  the compaction bar, in its normal collapsed bubble form, with no
+  "Summary" disclosure. A fold state nobody draws is an obviated field.
+- CONSEQUENCES:
+  - The daemon stops setting it (`daemon/internal/resolve/feed/separation.go`).
+  - The webapp stops requiring it in its decoder. The bubble's own expand
+    toggle is the only fold the summary has.
+
 ## Features that need no protobuf change
 
 - Persistent-wifi click: the webapp calls the existing
