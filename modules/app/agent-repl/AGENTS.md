@@ -537,6 +537,22 @@ testing and coverage, and observability-gap reporting. Keep implementation
 mandates in the scoped `AGENTS.md` files and keep diagnostic recipes in the
 skill.
 
+## Runtime operations go through one door and one skill
+
+Building, bouncing, hard bouncing, deploying, hot-reloading, health checks,
+logs and one-off daemon requests all go through `bin/agent-repl-runtime <verb>`
+(`help` lists the verbs; `call METHOD` reaches any unary AgentRepl rpc through
+`claude-repld call`), and agents operate it through `/manage-agent-repl-runtime`
+(`skills/manage-agent-repl-runtime/`), whose terminology table fixes what
+"hard bounce", "bounce", "deploy", "workspace restart" and "hot reload" mean.
+The scripts behind the verbs stay where their other callers reach them, but a
+person or an agent uses the door.
+
+**Any change to build, deploy, bounce or daemon-request infrastructure updates
+`bin/agent-repl-runtime`, its harness (`bin/test-agent-repl-runtime.sh`), the
+`/manage-agent-repl-runtime` skill and this section in the same commit.** Only
+the lead session runs `bounce`, `bounce --hard` or `deploy`; subagents never do.
+
 ## A finished branch lands on master at once, with no question asked
 
 Owner policy, standing (2026-09-27). A branch whose work is done — its
