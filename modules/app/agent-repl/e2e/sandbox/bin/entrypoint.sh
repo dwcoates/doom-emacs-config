@@ -51,11 +51,13 @@ log "materializing a writable working copy: $REPO_SRC/$MODULE_REL -> $REPO/$MODU
 # the copy.
 STAGE_ENTRIES=(
   # Go modules (daemon, e2e, shim-store, shim-sidecar, logging, fakedaemon,
-  # generated protos) and their go.mod/go.sum manifests.
+  # generated protos, and the test runner whose testenv package the e2e and
+  # daemon harnesses import) and their go.mod/go.sum manifests.
   daemon
   e2e
   agent-shim
   proto
+  testrun
   # Elisp sources and suites; also carries lisp/testsupport/fakedaemon.
   lisp
   # The three files Doom's module loader resolves by exact path.
