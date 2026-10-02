@@ -1357,3 +1357,68 @@ func TestRaiseCarriedColdGateRefusesAWorkspaceWithNoShim(t *testing.T) {
 		t.Fatal("a gate was raised over no shim")
 	}
 }
+
+// ---- a prelaunched shim is KNOWN to hold no session until it starts one ----
+
+// installedForResume installs the fixture's client as a relaunch does, ahead
+// of its Resume.
+func installedForResume(t *testing.T, f *fleetFixture) ids.WorkspaceID {
+	t.Helper()
+	ws := f.workspace("w1")
+	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
+	if err := f.fleet.Install(context.Background(), ws.ID, f.client); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	return ws.ID
+}
+
+func TestAnInstalledShimIsNotKnownToHoldNoSession(t *testing.T) {
+	// Arrange, Act: an install alone, as an adoption makes before noting the
+	// adopted shim's started session.
+	f := newFleetFixture(t)
+	ws := installedForResume(t, f)
+
+	// Assert: unknown, never absent.
+	if f.fleet.SessionAbsent(ws) {
+		t.Fatal("SessionAbsent = true for a shim nothing has asked to start")
+	}
+}
+
+func TestAResumeWhoseVendorStartFailedLeavesTheShimKnownToHoldNoSession(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := installedForResume(t, f)
+	f.client.response = &shimv1.StartSessionResponse{
+		Result: &shimv1.StartSessionResponse_Failure{Failure: &shimv1.StartSessionFailure{
+			Cause:  &shimv1.StartSessionFailure_VendorStartFailed{VendorStartFailed: rejectedVendorStart()},
+			Detail: "the vendor binary is missing",
+		}},
+	}
+
+	// Act.
+	_, err := f.fleet.Resume(context.Background(), ws, f.client)
+
+	// Assert.
+	if err == nil {
+		t.Fatal("Resume succeeded, want the vendor-start failure")
+	}
+	if !f.fleet.SessionAbsent(ws) {
+		t.Fatal("SessionAbsent = false after a failed start, want the shim known to hold no session")
+	}
+}
+
+func TestAResumeThatStartsTheSessionClearsTheKnownAbsence(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := installedForResume(t, f)
+
+	// Act.
+	if _, err := f.fleet.Resume(context.Background(), ws, f.client); err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+
+	// Assert.
+	if f.fleet.SessionAbsent(ws) {
+		t.Fatal("SessionAbsent = true after the session started")
+	}
+}

@@ -209,6 +209,8 @@ func newQueue(deps Deps) (*queue, error) {
 		return nil, fmt.Errorf("the prompt queue needs a session watcher resolver")
 	case deps.SessionStarted == nil:
 		return nil, fmt.Errorf("the prompt queue needs to know whether a workspace's session is started")
+	case deps.SessionAbsent == nil:
+		return nil, fmt.Errorf("the prompt queue needs to know whether a workspace's shim is known to hold no session")
 	case deps.ResolveImage == nil:
 		return nil, fmt.Errorf("the prompt queue needs an image resolver for the rows it mirrors")
 	case deps.PublishHost == nil:
