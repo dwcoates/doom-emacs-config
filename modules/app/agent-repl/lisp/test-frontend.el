@@ -2350,3 +2350,73 @@ xwidget event handler would once the answer arrives."
                         (current-buffer) "1" (lambda (_raw) nil)))))
     ;; Assert
     (should (string-match-p "read-script: refused" (car errors)))))
+
+;;;; ---- Webview presence on a switch ------------------------------------
+
+(defmacro agent-repl-test--with-view-presence-stubs (view &rest body)
+  "Run BODY with the xwidget primitives stubbed to display VIEW.
+The current window shows the buffer, the buffer holds one xwidget, and
+`xwidget-view-lookup' answers VIEW (a symbol stands in for a view)."
+  (declare (indent 1))
+  `(let ((agent-repl-frontend--last-view-on-switch (make-hash-table :test #'equal)))
+     (cl-letf (((symbol-function 'get-buffer-xwidgets) (lambda (_b) '(xw)))
+               ((symbol-function 'xwidget-view-lookup) (lambda (_x &optional _w) ,view)))
+       ,@body)))
+
+(ert-deftest agent-repl-test-frontend-view-presence-first-switch-says-first ()
+  ;; Arrange
+  (with-temp-buffer
+    (set-window-buffer (selected-window) (current-buffer))
+    (agent-repl-test--with-view-presence-stubs 'view-a
+      ;; Act
+      (let ((presence (agent-repl-frontend--view-presence "ws" (current-buffer))))
+        ;; Assert
+        (should (eq (plist-get presence :view) 'first))))))
+
+(ert-deftest agent-repl-test-frontend-view-presence-same-view-says-same ()
+  ;; Arrange
+  (with-temp-buffer
+    (set-window-buffer (selected-window) (current-buffer))
+    (agent-repl-test--with-view-presence-stubs 'view-a
+      (agent-repl-frontend--view-presence "ws" (current-buffer))
+      ;; Act
+      (let ((presence (agent-repl-frontend--view-presence "ws" (current-buffer))))
+        ;; Assert
+        (should (eq (plist-get presence :view) 'same))))))
+
+(ert-deftest agent-repl-test-frontend-view-presence-fresh-view-says-new ()
+  ;; Arrange
+  (with-temp-buffer
+    (set-window-buffer (selected-window) (current-buffer))
+    (let ((view 'view-a)
+          (agent-repl-frontend--last-view-on-switch (make-hash-table :test #'equal)))
+      (cl-letf (((symbol-function 'get-buffer-xwidgets) (lambda (_b) '(xw)))
+                ((symbol-function 'xwidget-view-lookup) (lambda (_x &optional _w) view)))
+        (agent-repl-frontend--view-presence "ws" (current-buffer))
+        (setq view 'view-b)
+        ;; Act
+        (let ((presence (agent-repl-frontend--view-presence "ws" (current-buffer))))
+          ;; Assert
+          (should (eq (plist-get presence :view) 'new)))))))
+
+(ert-deftest agent-repl-test-frontend-view-presence-undisplayed-buffer-says-none ()
+  ;; Arrange
+  (let ((buf (generate-new-buffer " *undisplayed-view*")))
+    (unwind-protect
+        (agent-repl-test--with-view-presence-stubs 'view-a
+          ;; Act
+          (let ((presence (agent-repl-frontend--view-presence "ws" buf)))
+            ;; Assert
+            (should (eq (plist-get presence :view) 'none))
+            (should (= (plist-get presence :windows) 0))))
+      (kill-buffer buf))))
+
+(ert-deftest agent-repl-test-frontend-view-presence-dead-buffer-says-none ()
+  ;; Arrange
+  (let ((buf (generate-new-buffer " *dead-view*")))
+    (kill-buffer buf)
+    (agent-repl-test--with-view-presence-stubs 'view-a
+      ;; Act
+      (let ((presence (agent-repl-frontend--view-presence "ws" buf)))
+        ;; Assert
+        (should (eq (plist-get presence :view) 'none))))))
