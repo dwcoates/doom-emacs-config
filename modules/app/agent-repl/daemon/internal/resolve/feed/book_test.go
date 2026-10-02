@@ -889,3 +889,57 @@ func TestAPushedNewestLoadWithNoSourceIsLoadedByTheNextSource(t *testing.T) {
 	// Assert.
 	awaitPushed(t, rows, h.promptRowID("turn-0"), h.promptRowID("turn-1"))
 }
+
+// ---- a fresh conversation's book ----
+
+func TestAFreshBooksOpenReadsNoStorePage(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	store := h.mainBook(3, nil)
+	h.resolver.NoteFreshBook(testWorkspace)
+
+	// Act.
+	h.openPage(rootFeed(), "reader-1")
+
+	// Assert.
+	if got := store.readCount(); got != 0 {
+		t.Fatalf("reads = %d, want none for a book known empty", got)
+	}
+}
+
+func TestAFreshBooksWaitingReaderIsNotKickedByTheWatchOpening(t *testing.T) {
+	// Arrange: a reader opened before any source; then the session came up fresh.
+	h := newHarness(t)
+	store := h.mainBook(3, nil)
+	store.noSource = true
+	h.openPage(rootFeed(), "reader-1")
+	store.mu.Lock()
+	store.noSource = false
+	store.mu.Unlock()
+	h.resolver.NoteFreshBook(testWorkspace)
+
+	// Act.
+	h.resolver.OnHistoryPage(testWorkspace, mainAgent(), &conversationv1.HistoryPage{})
+	h.openPage(rootFeed(), "reader-1")
+
+	// Assert: only the first open's no-source attempt.
+	if got := store.readCount(); got != 1 {
+		t.Fatalf("reads = %d, want the first open's attempt alone", got)
+	}
+}
+
+func TestAFreshBooksFirstLiveEntryMakesTheNextOpenRead(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	store := h.mainBook(3, promptsBook(1))
+	h.resolver.NoteFreshBook(testWorkspace)
+	h.deliverPromptAt("turn-0", "live", 100)
+
+	// Act.
+	h.openPage(rootFeed(), "reader-1")
+
+	// Assert.
+	if got := store.readCount(); got != 1 {
+		t.Fatalf("reads = %d, want the newest page read once the book holds a row", got)
+	}
+}
