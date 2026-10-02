@@ -4,6 +4,9 @@ import (
 	"testing"
 	"time"
 
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
+
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -473,11 +476,6 @@ func TestActivityLineOfNamesTheTierAndKind(t *testing.T) {
 		{"a transient line", func(h *harness) {
 			h.r.OnActivity(testWS, mainAgent, hookFrame("hello", true))
 		}, activityLine{tier: "transient", kind: "hook", text: "name:\"hello\""}},
-		{"the quiet-stretch line", func(h *harness) {
-			h.r.OnMainAgent(testWS, mainAgent)
-			h.r.SetTurn(testWS, &TurnStarted{At: instant})
-			h.r.OnTurnOpened(testWS, testTurnID)
-		}, activityLine{tier: "quiet", text: "✅ Prompt delivered — awaiting response..."}},
 		{"the waiting cell, which has no tier oneof", func(h *harness) {
 			h.r.OnPermission(testWS, mainAgent, permissionStart("p-1", "rm -rf"))
 		}, activityLine{tier: "salient", kind: "gated_call", text: "Bash: rm -rf"}},
@@ -542,34 +540,6 @@ func TestATransientLineChangeIsRecordedAtDebug(t *testing.T) {
 	}
 	if !hasLevel(h.log.Records(), "debug", "daemon.footer.activity_line_changed") {
 		t.Fatalf("no debug activity_line_changed record for the transient")
-	}
-}
-
-func TestCoversEnduringReadsEveryTierAboveTheEnduringLine(t *testing.T) {
-	transient := &frontendv1.FooterActivityTransient{Kind: &frontendv1.FooterActivityTransient_ToolCall{
-		ToolCall: &frontendv1.FooterActivityTransientToolCall{}}}
-	quiet := &frontendv1.FooterActivityQuietStretch{Text: "✅ Bash finished — handling result..."}
-	tests := []struct {
-		name     string
-		salient  bool
-		unpinned *frontendv1.FooterActivityTransientOverQuietOverEnduring
-		want     bool
-	}{
-		{"a salient line", true, nil, true},
-		{"a live transient", false, &frontendv1.FooterActivityTransientOverQuietOverEnduring{Transient: transient}, true},
-		{"the quiet-stretch line", false, &frontendv1.FooterActivityTransientOverQuietOverEnduring{QuietStretch: quiet}, true},
-		{"the enduring line alone", false, &frontendv1.FooterActivityTransientOverQuietOverEnduring{}, false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Act
-			got := coversEnduring(tt.salient, tt.unpinned)
-
-			// Assert
-			if got != tt.want {
-				t.Fatalf("coversEnduring = %v, want %v", got, tt.want)
-			}
-		})
 	}
 }
 
@@ -820,5 +790,94 @@ func TestTheMergeStepsLineStandsWithTheInstantItBegan(t *testing.T) {
 	}
 	if salient.GetAt() == nil {
 		t.Fatalf("salient = %+v, want the instant the line began standing", salient)
+	}
+}
+
+// THE QUIET TIER IS RETIRED (owner ruling, 2026-10-01): no line is composed
+// from a feed item that landed, so a landing leaves the activity cell exactly
+// as it stood before it.
+func TestALandedFeedItemLeavesTheWorkingCellAsItWas(t *testing.T) {
+	tests := []struct {
+		name  string
+		arm   protoreflect.Name
+		phase protoreflect.Name
+	}{
+		{"a read finishing", "read", "success"},
+		{"a shell failing", "bash", "failure"},
+		{"a response finishing", "response", "success"},
+		{"a hook succeeding", "hook", "succeeded"},
+		{"a hook cancelled", "hook", "cancelled"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			inTurn(h)
+			h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-1", tt.arm, "start"))
+			before := working(t, h).GetActivity()
+
+			// Act
+			h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-1", tt.arm, tt.phase))
+
+			// Assert
+			if after := working(t, h).GetActivity(); !proto.Equal(before, after) {
+				t.Fatalf("activity = %v, want it unchanged from %v: a landing composes no line", after, before)
+			}
+		})
+	}
+}
+
+func TestADeliveredPromptComposesNoWorkingLine(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	inTurn(h)
+
+	// Assert
+	if got := activityLineOf(h.view(t).GetStrip().GetStatus()); got.tier != "enduring" {
+		t.Fatalf("activity line = %+v, want the enduring line: a delivery composes no line", got)
+	}
+}
+
+func TestADetachedLandingLeavesTheBackgroundCellAsItWas(t *testing.T) {
+	tests := []struct {
+		name string
+		act  func(t *testing.T, h *harness)
+	}{
+		{"a detached subagent finishing", func(t *testing.T, h *harness) {
+			h.r.OnSubagent(testWS, workID("w-1"), subagentSettled(false))
+		}},
+		{"a detached subagent failing", func(t *testing.T, h *harness) {
+			h.r.OnSubagent(testWS, workID("w-1"), subagentSettled(true))
+		}},
+		{"a detached shell failing", func(t *testing.T, h *harness) {
+			h.r.OnBash(testWS, workID("w-1"), &conversationv1.AgentBash{
+				Result: &conversationv1.AgentBash_Failure{Failure: &conversationv1.AgentBashFailure{}}})
+		}},
+		{"a subagent's own read landing", func(t *testing.T, h *harness) {
+			h.r.OnActivity(testWS, detachedAgent, itemFrame(t, "u-9", "read", "success"))
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+			h.r.OnLiveWorkChanged(testWS, liveSet([]string{"agent-2", "w-2"}, nil, nil))
+			before := h.view(t).GetStrip().GetStatus().GetBackground().GetActivity()
+			if before == nil {
+				t.Fatalf("status = %q, want background", h.status(t))
+			}
+
+			// Act
+			tt.act(t, h)
+
+			// Assert
+			after := h.view(t).GetStrip().GetStatus().GetBackground().GetActivity()
+			if !proto.Equal(before, after) {
+				t.Fatalf("activity = %v, want it unchanged from %v: a landing composes no line", after, before)
+			}
+		})
 	}
 }

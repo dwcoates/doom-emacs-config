@@ -148,8 +148,6 @@ type harness struct {
 	warnings *fakeWarnings
 	// placed are the entry placements Deps.EntryPlaced was told, in order.
 	placed []placedEntry
-	// drawn are the rows Deps.ItemDrawn was told, in order.
-	drawn []drawnEntry
 }
 
 // fakeWarnings records every warning the resolver raised on the topbar.
@@ -174,13 +172,6 @@ func (f *fakeWarnings) keys() []string {
 		out = append(out, strings.SplitN(raised, ": ", 2)[0])
 	}
 	return out
-}
-
-// drawnEntry is one Deps.ItemDrawn call.
-type drawnEntry struct {
-	unit   string
-	row    string
-	onRoot bool
 }
 
 // placedEntry is one Deps.EntryPlaced call.
@@ -260,9 +251,6 @@ func newStoredHarness(t *testing.T, rolledBack RolledBackTurnStore) *harness {
 		PageSize:   3,
 		EntryPlaced: func(_ ids.WorkspaceID, unit string, row *frontendv1.FeedId) {
 			h.placed = append(h.placed, placedEntry{unit: unit, row: row.GetValue()})
-		},
-		ItemDrawn: func(_ ids.WorkspaceID, unit string, row *frontendv1.FeedId, onRoot bool) {
-			h.drawn = append(h.drawn, drawnEntry{unit: unit, row: row.GetValue(), onRoot: onRoot})
 		},
 	})
 	if err != nil {
