@@ -57,6 +57,19 @@ message WatchDaemonEmacs {
   // by ReportEditorFocus, and the daemon forgets the focus when this stream
   // ends (see EditorFocus).
   EditorFocus focus = 2;
+  // THIS EMACS PROCESS'S IDENTITY: minted once when Emacs starts and the same
+  // on every WatchDaemon it opens until it exits, so a RECONNECT (the daemon
+  // restarted, the link dropped) carries the same value and a FULL EMACS
+  // RESTART carries a new one. Opaque; compared byte-wise. REQUIRED — a watch
+  // without it is refused. The daemon uses a new value to redisplay the day's
+  // news digest even if it was dismissed.
+  EditorInstance instance = 3;
+}
+
+// One Emacs process's identity.
+message EditorInstance {
+  // Opaque, minted by Emacs at startup.
+  string value = 1;
 }
 
 // A webview is connecting. Presence is the fact: a webview reports its build
