@@ -631,10 +631,11 @@ so no loop forms."
                                         "the daemon-originated tab switch")
           (should (member "itest-cur" switched)))))))
 
-(ert-deftest agent-repl-itest-roster-own-selection-does-not-re-select ()
-  "A `current' Emacs ITSELF originated causes no second SelectWorkspace.
-Emacs records its own last-selected id precisely so the roster echo of
-its own act is not mistaken for a request."
+(ert-deftest agent-repl-itest-roster-a-current-emacs-once-selected-is-followed ()
+  "A `current' naming a workspace Emacs once selected still moves the frame.
+Regression, 2026-10-02: ids Emacs had selected were taken for its own and
+skipped, so a sidebar click to a visited workspace went nowhere.  The
+follow sends no SelectWorkspace of its own."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-roster--with-subscription daemon
@@ -643,7 +644,7 @@ its own act is not mistaken for a request."
         (agent-repl--ws-put "itest-own" :project-dir (agent-repl-itest--fixture-dir "itest-own"))
         (cl-letf (((symbol-function 'agent-repl--ws-switch)
                    (lambda (ws &rest _) (push ws switched))))
-          ;; Act: the roster echoes back the selection Emacs made.
+          ;; Act: the roster names the workspace Emacs selected before.
           (agent-repl-itest-roster--push
            daemon (agent-repl-itest-roster--roster
                    (list (agent-repl-itest-roster--row
@@ -652,8 +653,8 @@ its own act is not mistaken for a request."
                    `(current . ((workspace . ((id . "itest-own")
                                               (dir . ,(agent-repl-itest--fixture-dir "itest-own"))))))))
           (agent-repl-itest-roster--await-view daemon)
-          ;; Assert: no switch, and no SelectWorkspace of our own.
-          (should (null switched))
+          ;; Assert: the frame followed, and no SelectWorkspace of our own.
+          (should (member "itest-own" switched))
           (should (null (agent-repl-itest--calls daemon "SelectWorkspace"))))))))
 
 (ert-deftest agent-repl-itest-roster-row-rename-keeps-the-same-workspace ()
@@ -871,12 +872,11 @@ of that very selection must not fire a second one."
           ;; Assert.
           (should (equal (length (agent-repl-itest--calls daemon "SelectWorkspace")) 1)))))))
 
-(ert-deftest agent-repl-itest-roster-daemon-originated-switch-does-not-loop-into-a-second-select ()
-  "R8's echo is idempotent for real: one daemon-originated switch, one Select.
-A `current' Emacs did not ask for drives a REAL `agent-repl--ws-switch',
-which (unstubbed) runs host.el's activation hook and sends a REAL
-SelectWorkspace; the daemon's own echo of that selection must not loop
-into a second one."
+(ert-deftest agent-repl-itest-roster-daemon-originated-switch-sends-no-select-back ()
+  "Following the roster's `current' sends NO SelectWorkspace back.
+A `current' drives a REAL `agent-repl--ws-switch', which (unstubbed) runs
+host.el's activation hook; the daemon already holds that selection, and
+an echo would race a newer request and take the frame back to it."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-roster--with-subscription daemon
@@ -897,8 +897,10 @@ into a second one."
                           '(current . ((current . t)))))
                    `(current . ((workspace . ((id . "itest-r8loop")
                                               (dir . ,(agent-repl-itest--fixture-dir "itest-roster-itest-r8loop"))))))))
-          (agent-repl-itest--await-call daemon "SelectWorkspace")
-          ;; The daemon echoes Emacs's own resulting selection back.
+          (agent-repl-itest--wait-until
+           (lambda () (equal agent-repl-itest-roster--current-ws "itest-r8loop"))
+           nil "the frame to follow the roster's current")
+          ;; The daemon pushes the same roster again.
           (agent-repl-itest-roster--push
            daemon (agent-repl-itest-roster--roster
                    (list (agent-repl-itest-roster--row
@@ -908,7 +910,7 @@ into a second one."
                                               (dir . ,(agent-repl-itest--fixture-dir "itest-roster-itest-r8loop"))))))))
           (agent-repl-itest-roster--await-view daemon)
           ;; Assert.
-          (should (equal (length (agent-repl-itest--calls daemon "SelectWorkspace")) 1)))))))
+          (should (null (agent-repl-itest--calls daemon "SelectWorkspace"))))))))
 
 ;;;; ---- Validation: RosterRow and WorkspaceRoster non-optional fields ----
 

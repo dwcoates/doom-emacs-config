@@ -81,7 +81,6 @@
 (declare-function agent-repl-host-subscribe "host" (conn ws ref))
 (declare-function agent-repl-host-rename "host" (old new))
 (declare-function agent-repl-link-primary "daemon-link" ())
-(defvar agent-repl-host-last-selected-id)
 (defvar agent-repl-host-reselect-pending)
 (defvar agent-repl-link-up-functions)
 (defvar agent-repl-link-promote-functions)
@@ -798,56 +797,107 @@ does for every other local paint."
   "Return ROSTER's selected workspace id, or nil when there is none."
   (plist-get (plist-get (plist-get roster :current) :workspace) :id))
 
-(defun agent-repl-roster-react-to-current (roster)
-  "Switch tabs when ROSTER names a `current' Emacs did not originate (R8).
-A sidebar row click or a merge-queue entry click in the webapp calls
-SelectWorkspace, and the roster's new `current' is how that reaches
-Emacs — there is no daemon-to-host command loop.  The resulting
-SelectWorkspace from Emacs's own switch is idempotent, so no loop
-forms.  Returns the workspace switched to, or nil.
+(defvar agent-repl-roster-following nil
+  "Non-nil while the frame is being moved to follow the roster's `current'.
+Bound around the switch `agent-repl-roster-apply-current' makes, so the
+perspective-activation hook (`agent-repl-host--on-workspace-activated')
+knows the daemon already holds this selection and sends nothing back.")
 
-A RE-REGISTRATION IS THE ONE TIME `current' IS NOT A REQUEST.  A daemon
-that just relaunched stamps `current' on whichever workspace Emacs
-re-registered first — a walk order, not a click — and Emacs is at that
-moment re-asserting the selection the user actually made.  Following the
-stamp there took the frame to the other workspace's magit buffer.  So
-while `agent-repl-host-reselect-pending' stands, nothing here moves the
-frame; host.el clears it when its re-select is acknowledged."
-  (let* ((id (agent-repl-roster--current-id roster))
-         (row-ws (and id (agent-repl--ws-by-ref-id id)))
-         (row-scope (if row-ws
-                        row-ws
-                      '(:agent-repl-central
-                        "a selected roster row without a tab has no workspace sink"))))
+(defvar agent-repl-roster--pushed-at nil
+  "When the roster push being applied reached Emacs, as `float-time'.
+The follow record carries it, so a switch read back from the log shows
+both edges of its latency: the daemon's stamp to this arrival, and this
+arrival to the switch.")
+
+(defvar agent-repl-roster--judged-current nil
+  "The `current' id whose \"already shown\" judgment was last recorded at INFO.
+Every roster push carries `current', and nearly every push names the
+workspace already shown; recording that at INFO on each push would bury
+the decisions.  The FIRST judgment of an id is INFO, its repeats DEBUG.")
+
+(declare-function agent-repl-host-pending-selection "host" ())
+(declare-function agent-repl-host-ref "host" (ws))
+(declare-function agent-repl--maybe-autoselect-input "panels" (ws))
+
+(defun agent-repl-roster--current-scope (ws)
+  "Return the log scope for a `current' decision about WS (nil: no tab)."
+  (or ws '(:agent-repl-central
+           "a selected roster row without a tab has no workspace sink")))
+
+(defun agent-repl-roster-apply-current ()
+  "Move the frame to the workspace the roster's `current' names, if needed.
+THE ROSTER IS THE ONE SOURCE OF THE SELECTION.  Every switch -- a key, a
+picker, a notification, a sidebar row, a merge-queue entry -- is a
+SelectWorkspace, and the frame moves here and nowhere else, when the last
+accepted roster (`agent-repl-roster-view') names a workspace other than
+the one shown.  Returns the workspace switched to, or nil.
+
+Takes no argument and reads the roster NOW, so any caller that has just
+made a switch possible may call it: the roster push itself, a selection
+being answered (host.el), a tab opening at startup.
+
+Every decision is recorded at INFO -- an ignored user action must never
+be invisible:
+
+  - relink-pending: a relaunched daemon's arbitrary stamp is not obeyed
+    while Emacs re-asserts the user's selection (host.el clears it);
+  - deferred: Emacs has REQUESTED another workspace that the daemon has
+    not answered yet (`agent-repl-host-pending-selection'); that answer
+    re-applies the roster, so the last push wins once nothing is pending,
+    and rapid presses do not walk the frame through every stop;
+  - no tab yet: the workspace has no tab to land on; the tab's opener
+    calls this again;
+  - already shown;
+  - followed: the switch, landing in the destination's input window.
+
+A roster with no `current' decides nothing and says so at DEBUG."
+  (let* ((roster agent-repl-roster-view)
+         (id (and roster (agent-repl-roster--current-id roster)))
+         (name (and id (agent-repl--ws-by-ref-id id)))
+         (scope (agent-repl-roster--current-scope name))
+         (pending (agent-repl-host-pending-selection))
+         (pending-id (and pending (plist-get (agent-repl-host-ref pending) :id)))
+         (shown (agent-repl--ws-current-name)))
     (cond
      ((null id)
       (agent-repl--log '(:agent-repl-central "the roster names no selected workspace")
                        "elisp.roster.current: none")
       nil)
      ((bound-and-true-p agent-repl-host-reselect-pending)
-      (agent-repl--log row-scope "elisp.roster.current: relink-pending id=%s dir=%s"
-                       id agent-repl-host-reselect-pending)
+      (agent-repl--info scope "elisp.roster.current: relink-pending id=%s dir=%s"
+                        id agent-repl-host-reselect-pending)
       nil)
-     ((equal id (and (boundp 'agent-repl-host-last-selected-id)
-                     agent-repl-host-last-selected-id))
-      (agent-repl--log row-scope "elisp.roster.current: ours id=%s" id)
+     ((and pending (not (equal id pending-id)))
+      (agent-repl--info scope "elisp.roster.current: deferred id=%s ws=%s requested=%s"
+                        id (or name "none") pending)
+      nil)
+     ((null name)
+      (agent-repl--info scope "elisp.roster.current: no tab yet id=%s" id)
+      nil)
+     ((equal name shown)
+      (if (equal id agent-repl-roster--judged-current)
+          (agent-repl--log name "elisp.roster.current: already shown ws=%s" name)
+        (setq agent-repl-roster--judged-current id)
+        (agent-repl--info name "elisp.roster.current: already shown ws=%s" name))
       nil)
      (t
-      (let* ((name (agent-repl--ws-by-ref-id id))
-             (selected (agent-repl--ws-current-name)))
-        (cond
-         ((null name)
-          (agent-repl--log '(:agent-repl-central
-                             "a selected roster row without a tab has no workspace sink")
-                           "elisp.roster.current: no tab id=%s" id)
-          nil)
-         ((equal name selected)
-          (agent-repl--log name "elisp.roster.current: already selected ws=%s" name)
-          nil)
-         (t
-          (agent-repl--info name "elisp.roster.current: switching ws=%s id=%s" name id)
-          (agent-repl--ws-switch name)
-          name)))))))
+      (setq agent-repl-roster--judged-current id)
+      (agent-repl--info name "elisp.roster.current: followed ws=%s id=%s from=%s pushed-at=%s since-push-ms=%s"
+                        name id shown
+                        (if agent-repl-roster--pushed-at
+                            (format-time-string "%T.%3N" agent-repl-roster--pushed-at)
+                          "none")
+                        (if agent-repl-roster--pushed-at
+                            (round (* 1000 (- (float-time) agent-repl-roster--pushed-at)))
+                          "none"))
+      (let ((agent-repl-roster-following t))
+        (agent-repl--ws-switch name))
+      ;; LAND IN THE INPUT WINDOW AT ONCE, before the next redisplay, rather
+      ;; than only on the deferred switch pass: a frame redisplayed with the
+      ;; webview selected hands the page a focus event and a repaint from
+      ;; blank -- the flash keyboard switches showed and sidebar ones did not.
+      (agent-repl--maybe-autoselect-input name)
+      name))))
 
 ;;;; ---- The finish edge --------------------------------------------------
 
@@ -1020,8 +1070,13 @@ dropped."
                              duplicate (length entries))
           nil)
       (agent-repl-roster--index entries)
-      (setq agent-repl-roster-view roster)
+      (setq agent-repl-roster-view roster
+            agent-repl-roster--pushed-at (float-time))
       (let ((order (agent-repl-roster-reconcile roster)))
+        ;; THE SELECTION FIRST, right after the tabs it needs exist: the edge
+        ;; and status hooks below repaint and notify, and a switch the user
+        ;; is waiting on must not queue behind them.
+        (agent-repl-roster-apply-current)
         (agent-repl-roster--run-finish-edges roster)
         ;; BEFORE the statuses are recorded: this compares against the arms
         ;; the LAST push left behind, which the record below replaces.
@@ -1030,7 +1085,6 @@ dropped."
         ;; Same rule for the viewed marker: edge first, then record.
         (agent-repl-roster--run-viewed-clears entries)
         (agent-repl-roster--record-viewed entries)
-        (agent-repl-roster-react-to-current roster)
         (run-hook-with-args 'agent-repl-roster-update-functions roster)
         (agent-repl--log '(:agent-repl-central "a roster push spans every workspace")
                          "elisp.roster.push: applied rows=%d tabs=%d"
