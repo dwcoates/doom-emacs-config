@@ -2416,6 +2416,7 @@ The screen must only demote names that could not be routed at all."
       ;; Act / Assert
       (should (null (agent-repl--assert-mergeable-teardown "alpha"))))))
 
+
 (provide 'test-workspace)
 ;;; test-workspace.el ends here
 
@@ -3635,3 +3636,29 @@ from memory -- is what this now pins, plus the rejoin that follows it."
                  (lambda () '("one" "hidden" "two"))))
         ;; Act / Assert
         (should (equal (agent-repl--ws-tabline-names) '("one" "two")))))))
+
+;;;; ---- Tests: --ws-log-scope ----
+
+(ert-deftest agent-repl-test-ws-log-scope-placeholder-is-central ()
+  "A placeholder perspective's records go to the global scope."
+  (agent-repl-test--with-clean-state
+    (should (eq (agent-repl--ws-log-scope "none") agent-repl--global-log-scope))))
+
+(ert-deftest agent-repl-test-ws-log-scope-workspace-keeps-attribution ()
+  "A real workspace's records stay attributed to that workspace."
+  (agent-repl-test--with-clean-state
+    (let ((project (make-temp-file "agent-repl-ws-log-scope-" t)))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "ws1" :project-dir project)
+            (should (equal (agent-repl--ws-log-scope "ws1") "ws1")))
+        (delete-directory project t)))))
+
+(ert-deftest agent-repl-test-ws-log-scope-is-the-one-perspective-scope-in-panels ()
+  "panels.el's perspective-lifecycle paths share the one scope helper.
+A hand-rolled `log-ws'-or-global scope there would drift from it."
+  (let ((source (with-temp-buffer
+                  (insert-file-contents
+                   (expand-file-name "panels.el" agent-repl-test-ws--lisp-dir))
+                  (buffer-string))))
+    (should-not (string-match-p "(if log-ws log-ws agent-repl--global-log-scope)" source))))
