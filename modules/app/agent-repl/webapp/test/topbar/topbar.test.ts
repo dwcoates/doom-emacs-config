@@ -576,9 +576,34 @@ describe("the strip's layout", () => {
     // ASSERT
     expect([...flanks, row]).toEqual([
       "var(--topbar-chip-gap)",
-      "var(--topbar-chip-gap)",
+      "var(--topbar-right-chip-gap)",
       "var(--topbar-cell-gap)",
     ]);
+  });
+
+  // THE 2026-10-02 REQUEST: the right-hand chips "30% closer". The space a
+  // reader sees between two of them is the gap plus each side's inset and 1px
+  // border, which was 0.3rem + 2 x (0.45rem + 1px) = 21.2px at the 16px root.
+  it("spaces the right-hand chips at least 30% closer than the 21.2px they stood apart", () => {
+    // ARRANGE
+    const root = 16;
+    // ACT
+    const spacing = (token("--topbar-right-chip-gap") + 2 * token("--topbar-right-chip-inset")) * root + 2;
+    // ASSERT
+    expect(spacing).toBeLessThanOrEqual(21.2 * 0.7);
+  });
+
+  it("spaces the right-hand chips no closer than 30%", () => {
+    const spacing = (token("--topbar-right-chip-gap") + 2 * token("--topbar-right-chip-inset")) * 16 + 2;
+    expect(spacing).toBeGreaterThan(21.2 * 0.69);
+  });
+
+  // ONE RULE FOR EVERY RIGHT-HAND CELL, keyed on the group: a button inside a
+  // control's wrap, or a cell that holds no button.
+  it("insets every right-hand cell from the group's one rule", () => {
+    expect(declaration(".topbar-right button,\n.topbar-right > :not(:has(button))", "padding-inline")).toBe(
+      "var(--topbar-right-chip-inset)",
+    );
   });
 
   // THE 2026-09-14 MEASUREMENT: `header#topbar` spanned x 423-2036 while the
@@ -792,15 +817,21 @@ describe("the no-session cells", () => {
   // the cursor nor the hover border that would promise a click.
   it("boxes every no-session cell exactly as the strip's other right-hand cells", () => {
     expect(
-      declaration(
-        ".topbar-fast,\n.topbar-model[data-no-session],\n.topbar-mode[data-no-session]",
-        "padding",
-      ),
+      declaration(".topbar-fast,\n.topbar-model[data-no-session],\n.topbar-mode[data-no-session]", "padding-block"),
     ).toBe(
       declaration(
         ".topbar-model-button,\n.topbar-mode-button,\n.topbar-context-figure,\n.topbar-wifi-button,\n.topbar-warning-chip",
-        "padding",
+        "padding-block",
       ),
     );
+  });
+
+  // The inline inset is the group's, so a cell's own rule setting the
+  // `padding` shorthand would quietly win over it for that one cell.
+  it.each([
+    ".topbar-fast,\n.topbar-model[data-no-session],\n.topbar-mode[data-no-session]",
+    ".topbar-model-button,\n.topbar-mode-button,\n.topbar-context-figure,\n.topbar-wifi-button,\n.topbar-warning-chip",
+  ])("leaves the inline inset of %s to the group", (selector) => {
+    expect(withoutBlockComments(ruleBody(selector))).not.toMatch(/(?:^|[;\s])padding(?:-inline)?(?:-left|-right)?\s*:/);
   });
 });
