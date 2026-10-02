@@ -103,10 +103,10 @@ the module."
       :desc "Agent REPL (simple)" "o c" #'agent-repl-simple
       :desc "Agent REPL (deprio)" "o C" #'agent-repl
       ;; SPC o C-c is RestartWorkspace and nothing else: the DAEMON owns
-      ;; everything the restart entails, the webview bounce included.  A
-      ;; prefix argument makes it forced -- the live turn is interrupted and
-      ;; the agent is NOT resumed afterwards.
-      :desc "Restart workspace session (C-u = force)" "o C-c" #'agent-repl-restart-workspace
+      ;; everything the restart entails.  It is always immediate -- there is
+      ;; no graceful mode and no prefix argument -- and bounces the
+      ;; workspace's shim (session resumed) and webapp page.
+      :desc "Restart workspace (shim + page)" "o C-c" #'agent-repl-restart-workspace
       :desc "Claude input" "o v" #'agent-repl-focus-input
       :desc "Copy file reference" "o r" #'agent-repl-copy-reference
       :desc "Reload webview (rebuilt bundle)" "o l" #'agent-repl-frontend-reload-webview
