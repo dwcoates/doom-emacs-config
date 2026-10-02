@@ -39,6 +39,7 @@
 ;; Cross-file forward declarations.  These sources load in the dependency
 ;; order config.el establishes and resolve each other's calls at call time,
 ;; so the declarations below exist for the byte-compiler alone.
+(declare-function agent-repl-input-hidden-p "window" (ws))
 (declare-function agent-repl--fatal "core")
 (declare-function agent-repl--info "core")
 (declare-function agent-repl--error "core")
@@ -883,6 +884,15 @@ panels — the extra-windows-on-first-switch bug."
                           win (buffer-name (window-buffer win)))
         (set-window-dedicated-p win nil))
       (set-window-buffer win buf)
+      (if (agent-repl-input-hidden-p ws)
+          ;; A STANDING GATE HIDES THE INPUT WINDOW: its answer replaces
+          ;; the composer, and the webview, filling the input's space,
+          ;; docks the gate's banner at the bottom at the input's height.
+          ;; The view is where the user lands.
+          (progn
+            (select-window win)
+            (agent-repl--info ws "display-webview: mounted webview-window=%s input-hidden-by-gate=t"
+                              win))
       ;; Hybrid UI: the classic input panel sits below the webview,
       ;; hardened with the standard panel recipe (dedicated,
       ;; height-locked, delete-protected, mini-window-shrink-proof).
@@ -909,7 +919,7 @@ panels — the extra-windows-on-first-switch bug."
                                    :preserve-size  'height)
         (select-window input-win)
         (agent-repl--log ws "display-webview: mounted webview-window=%s input-window=%s input-height=%s target-height=%s"
-                         win input-win actual-height target-height))))
+                         win input-win actual-height target-height)))))
   buf)
 
 ;;;; ---- Entry point ----------------------------------------------------------------
