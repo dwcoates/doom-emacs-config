@@ -128,6 +128,9 @@ func (r *Runner) Run(ctx context.Context, specs []Spec) ([]Result, []SuiteResult
 		byID[s.ID] = s
 		suiteUnits[s.Suite]++
 	}
+	if err := sched.CheckWidths(units, r.Slots); err != nil {
+		return nil, nil, fmt.Errorf("run: %w", err)
+	}
 	q, err := sched.NewQueue(units)
 	if err != nil {
 		return nil, nil, err
@@ -192,15 +195,16 @@ func (r *Runner) Run(ctx context.Context, specs []Spec) ([]Result, []SuiteResult
 		}()
 	}
 
-	inFlight := 0
+	inFlight, used := 0, 0
 	for {
-		for inFlight < r.Slots && ctx.Err() == nil {
-			u, ok := q.Next()
+		for ctx.Err() == nil {
+			u, ok := q.Next(r.Slots - used)
 			if !ok {
 				break
 			}
 			start(byID[u.ID])
 			inFlight++
+			used += u.Width()
 		}
 		if inFlight == 0 {
 			break
@@ -221,6 +225,7 @@ func (r *Runner) Run(ctx context.Context, specs []Spec) ([]Result, []SuiteResult
 		inFlight--
 		delete(running, c.id)
 		spec := byID[c.id]
+		used -= spec.Width()
 		res := Result{Spec: spec, Exit: c.exit, Start: starts[c.id], End: r.Clock.Now(), CPU: c.cpu}
 		switch {
 		case c.err != nil:
