@@ -1506,3 +1506,31 @@ func TestAResumeEndedByARestartRelaunchesOverTheInstalledShim(t *testing.T) {
 		t.Fatalf("installed pid = %d, want the relaunch's 7002", got)
 	}
 }
+
+// A FORCED STAND-DOWN THE SHIM NEVER ANSWERS is bounded: the call ends at its
+// bound and the shim is killed at once, never after the window.
+func TestAForcedStandDownThatHangsIsKilledAtItsBound(t *testing.T) {
+	// Arrange
+	h := newHarness(t, func(d *Deps) { d.StandDownCallBound = time.Millisecond })
+	ws, _ := h.workspace(t)
+	old := h.fleet.live[ws]
+	old.killHangs = true
+	done := make(chan error, 1)
+
+	// Act
+	if _, err := h.c.BounceShim(context.Background(), ws, ReasonRestartVerb, true, func(err error) { done <- err }); err != nil {
+		t.Fatalf("BounceShim: %v", err)
+	}
+	waitForForceKill(t, old)
+	old.Reap()
+
+	// Assert
+	if err := awaitBounce(t, h, done); err != nil {
+		t.Fatalf("done = %v, want the bounce finished past the hung stand-down", err)
+	}
+	for _, armed := range h.clock.Waits() {
+		if armed == standDownWindow {
+			t.Fatalf("the stand-down window was waited out for a hung forced stand-down")
+		}
+	}
+}
