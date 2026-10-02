@@ -116,9 +116,6 @@ type pageLoad struct {
 	feedKey string
 	// book is that feed's book.
 	book *bookState
-	// root reports that the book is the main agent's: an unstamped entry
-	// before the page's first prompt belongs to a turn older than the page.
-	root bool
 	// cutoff is the oldest bound before this load. A row this load draws NEW
 	// in the feed below it is the reader's page and is delivered by the page,
 	// never pushed (quiet); one at or above it completes rows a reader already
@@ -144,17 +141,21 @@ func (l *pageLoad) noteDrawn(id, key string, fresh bool) bool {
 }
 
 // withholds reports whether one entry of a loaded page waits for an older page:
-// it belongs to a turn whose prompt this feed has not drawn, and older history
+// it NAMES a turn whose prompt this feed has not drawn, and older history
 // remains in which that prompt lies. A prompt opens its own turn and is never
 // withheld; at the conversation's start nothing older can complete anything.
-func (r *resolver) withholds(s *wsState, load *pageLoad, at *conversationv1.HistoryEntryAt) bool {
+//
+// AN UNSTAMPED ENTRY IS NEVER WITHHELD. It names no turn, so nothing says an
+// older page completes it; it is pre-contract data (every current entry is
+// stamped), drawn by position as a replay always drew it and reported once
+// as such (reportUnstampedReplay). Withholding it would also hold back rows
+// the live plane already drew from the same entries.
+func (r *resolver) withholds(s *wsState, at *conversationv1.HistoryEntryAt) bool {
 	if s.replayAtFloor || at.GetEntry().GetUserPrompt() != nil {
 		return false
 	}
-	if turn := at.GetTurn().GetValue(); turn != "" {
-		return !s.knownTurns[ids.TurnID(turn)]
-	}
-	return load.root && !s.replayPromptDrawn
+	turn := at.GetTurn().GetValue()
+	return turn != "" && !s.knownTurns[ids.TurnID(turn)]
 }
 
 // redrawPending draws every entry an earlier load withheld that the page just
@@ -164,7 +165,7 @@ func (r *resolver) redrawPending(s *wsState, agent *conversationv1.AgentId, load
 	var still []*conversationv1.HistoryEntryAt
 	drawn := 0
 	for _, at := range load.book.pending {
-		if r.withholds(s, load, at) {
+		if r.withholds(s, at) {
 			still = append(still, at)
 			continue
 		}
@@ -287,7 +288,6 @@ func (r *resolver) load(ctx context.Context, ws ids.WorkspaceID, addr feedid.Fee
 		state:   plan.state,
 		feedKey: f.key,
 		book:    &f.book,
-		root:    addr.Root,
 		cutoff:  f.book.lowest(),
 		quiet:   map[string]bool{},
 	}

@@ -80,7 +80,7 @@ func (r *resolver) replayPage(ws ids.WorkspaceID, agent *conversationv1.AgentId,
 	}
 	var withheld []*conversationv1.HistoryEntryAt
 	for i := len(entries) - 1; i >= 0; i-- {
-		if load != nil && r.withholds(s, load, entries[i]) {
+		if load != nil && r.withholds(s, entries[i]) {
 			withheld = append(withheld, entries[i])
 			continue
 		}
