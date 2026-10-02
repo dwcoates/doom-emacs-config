@@ -41,6 +41,8 @@ type Layout struct {
 	Work string
 	// Self is the testrun binary, for the units it runs itself.
 	Self string
+	// Coverage adds expensive coverage instrumentation and report units.
+	Coverage bool
 }
 
 // Split is a splittable suite piece before the planner chunks it.

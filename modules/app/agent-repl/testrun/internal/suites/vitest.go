@@ -51,10 +51,8 @@ func vitestFiles(module, dir string) ([]string, error) {
 	return files, nil
 }
 
-// vitestUnits is the typecheck, the test files split into chunks (each
-// leaving a blob report with its coverage), and the merge of those blobs into
-// the package's one coverage report, exactly what `npm run coverage` produced
-// when it ran whole.
+// vitestUnits is the typecheck and the test files split into chunks. Coverage
+// adds chunk blobs and their merged report only when explicitly requested.
 func vitestUnits(l Layout, s roster.Suite) (Units, error) {
 	dir := l.resolve(s.Path)
 	files, err := vitestFiles(l.Module, dir)
@@ -64,9 +62,17 @@ func vitestUnits(l Layout, s roster.Suite) (Units, error) {
 	if len(files) == 0 {
 		return Units{}, fmt.Errorf("suites: %s lists no test files under %s", s.Name, dir)
 	}
+	return vitestUnitsForFiles(l, s, dir, files)
+}
+
+func vitestUnitsForFiles(l Layout, s roster.Suite, dir string, files []string) (Units, error) {
 	work := filepath.Join(l.Work, "vitest", s.Name)
 	blobs := filepath.Join(work, "blobs")
-	for _, d := range []string{blobs, filepath.Join(work, "items")} {
+	dirs := []string{filepath.Join(work, "items")}
+	if l.Coverage {
+		dirs = append(dirs, blobs)
+	}
+	for _, d := range dirs {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			return Units{}, fmt.Errorf("suites: create %s: %w", d, err)
 		}
@@ -77,31 +83,38 @@ func vitestUnits(l Layout, s roster.Suite) (Units, error) {
 		tag := filepath.Base(id)
 		itemsOut := filepath.Join(work, "items", tag+".json")
 		argv := []string{
-			"npm", "run", "coverage", "--",
+			"npx", "vitest", "run",
 			"--maxWorkers=1", "--minWorkers=1",
-			"--coverage.reportsDirectory=" + filepath.Join(work, "chunk-coverage", tag),
-			"--reporter=default", "--reporter=blob", "--reporter=" + reporter,
-			"--outputFile.blob=" + filepath.Join(blobs, tag+".json"),
+			"--reporter=default", "--reporter=" + reporter,
 		}
-		// ONE chunk carries the config's `all: true` pass, which adds every
-		// source file no test loaded (at zero) and is a fixed cost per process;
-		// the merge sums the counts, so the merged report is the one a whole
-		// run makes (measured: same files, same statement counts). The rest skip
-		// that pass and write only the raw json the blob carries.
-		if id != sched.ChunkID(s.Name, 0) {
-			argv = append(argv, "--coverage.all=false", "--coverage.reporter=json")
+		if l.Coverage {
+			argv = append(argv,
+				"--coverage",
+				"--coverage.reportsDirectory="+filepath.Join(work, "chunk-coverage", tag),
+				"--reporter=blob",
+				"--outputFile.blob="+filepath.Join(blobs, tag+".json"),
+			)
+			// ONE chunk carries the config's `all: true` pass. The merge sums
+			// the counts, so every other chunk writes only its loaded files.
+			if id != sched.ChunkID(s.Name, 0) {
+				argv = append(argv, "--coverage.all=false", "--coverage.reporter=json")
+			}
 		}
 		sp := spec(id, s.Name, dir, append(argv, items...), VitestItemsEnv+"="+itemsOut)
 		sp.Items = func([]byte) (map[string]float64, error) { return ParseVitestItems(itemsOut, dir, items) }
 		return sp
 	}
-	merge := spec(s.Name+":coverage", s.Name, dir, []string{
-		"npx", "vitest", "run", "--merge-reports=" + blobs, "--coverage",
-		"--coverage.reportsDirectory=" + filepath.Join(work, "coverage"),
-	})
-	merge.Deps = []string{s.Name}
+	atomic := []run.Spec{typecheck}
+	if l.Coverage {
+		merge := spec(s.Name+":coverage", s.Name, dir, []string{
+			"npx", "vitest", "run", "--merge-reports=" + blobs, "--coverage",
+			"--coverage.reportsDirectory=" + filepath.Join(work, "coverage"),
+		})
+		merge.Deps = []string{s.Name}
+		atomic = append(atomic, merge)
+	}
 	return Units{
-		Atomic: []run.Spec{typecheck, merge},
+		Atomic: atomic,
 		Splits: []Split{{Group: s.Name, Suite: s.Name, Items: files, Chunk: chunk}},
 	}, nil
 }
