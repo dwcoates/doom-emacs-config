@@ -215,6 +215,14 @@ func (c *claim) Publish() error {
 	// it becomes the daemon of this state root. Failing to take it here is a
 	// refusal, never a publish that advertises an address nobody claims.
 	if c.lock == nil {
+		// A WAIT FOR THE CLAIM IS ALREADY QUEUED IN THE KERNEL, and the
+		// claim is ITS to take: a second, single-shot take on another
+		// descriptor would win the claim and leave the wait blocked on this
+		// very process's own lock for the rest of its life. The caller
+		// awaits the claim (AwaitBootClaim) and publishes once it holds it.
+		if c.bootWait != nil {
+			return fmt.Errorf("take the boot claim before advertising %q: %w (a wait for it is under way)", c.addrPath, ErrClaimed)
+		}
 		lock, err := acquireBootLock(LockPath(c.addrPath))
 		if err != nil {
 			return fmt.Errorf("take the boot claim before advertising %q: %w", c.addrPath, err)
