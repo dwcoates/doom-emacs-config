@@ -38,7 +38,7 @@ func TestAnUnownedWriteLandsInTheBookThatHoldsItsUnit(t *testing.T) {
 	shim.write(ctx, t, shim.agentEntry("w-beat", "activity:"+unit, unownedLine(responseFrame("", unit, "progressed"))))
 
 	// Assert.
-	page := openSession(ctx, t, cli, spawner, 10, nil)
+	page := openSession(ctx, t, cli, spawner, nil)
 	assertTexts(t, "the spawner's book after the unowned write", pageTexts(page.GetPage()), []string{"progressed"})
 	store.assertNoErrorRecords()
 }

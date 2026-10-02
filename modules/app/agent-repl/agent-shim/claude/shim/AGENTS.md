@@ -665,6 +665,41 @@ way a refusal does.
      conclusion by observing it on the `AgentPageSession` it registers with the
      session, which is what the teardown concludes through.
 
+## Pages are the store's; openings say only WHICH entries
+
+Owner ruling (`docs/protobuf-design/feed-paging-on-demand.md`, changes 1–2):
+ONE page size for the whole stack, owned by the STORE (`db.PageSize`, 50) and
+stated nowhere else. `page_size` is retired on `WatchAgent`, `ReadHistory`,
+`StartTurn` and on both store verbs; the shim holds no page budget of its own.
+
+- Every open takes an `AgentOpening` (`store/persistence.ts`): `repaint`
+  (unset), `knownThrough`, or `tailOnly`, read off a shim.v1 request by
+  `openingOf` and relayed to the store's own `opening` arm as it stands.
+  `ReadHistory{first}`, the reconciliation walk and the teardown's book head
+  read as `REPAINT`.
+- **A TAIL-ONLY WATCH STANDS ON THE STORE'S `newest`** (feed-paging change
+  5: every `OpenAgentSession` names the book's newest item, unset = empty
+  book). The tail-only page is empty by request, so `newest` is what the
+  session anchors on, and no extra page is read: it is noted as SERVED (a
+  teardown concluding through that head ends at once instead of spending its
+  conclusion budget), it is the mark a refused or unasked-for end re-opens
+  from as `known_through` (never a repaint, which would replay history nobody
+  asked for; a markless re-open happens only for a book that was empty, where
+  everything is news), and `AgentPageSession.foundNothing` is exactly "the
+  store named no newest" — what `watchAgent`'s unannounced-empty-book refusal
+  reads, never the page.
+- **A CATCH-UP WIDER THAN ONE STORE PAGE IS WALKED.** A re-open's page is the
+  store's page; when it answers `more`, the reader walks `ReadAgentPage` down
+  to the caller's own mark (the store's recovery contract) and serves every
+  line above it, oldest first. The old `CATCHUP_PAGE_SIZE` budget and its
+  "entries were skipped" ERROR are gone. A deferred book (no rows at the open)
+  opens its real book as a REPAINT whatever the opening — all of it is news —
+  and walks its backlog the same way. A `more` that leads to an empty page is a
+  loud `store_unavailable`, never walked on.
+- Tests shape page boundaries through the FAKE store's own page size
+  (`startFakeStore(socket, { pageSize })`, `spawnShim({ storePageSize })`),
+  never through a request.
+
 ## A retired line is relayed, never dropped
 
 The store can RETIRE a page line (store.v1 `StoreRetirement`: the sidecar's

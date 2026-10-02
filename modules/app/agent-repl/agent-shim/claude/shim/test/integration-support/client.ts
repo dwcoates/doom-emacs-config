@@ -377,44 +377,57 @@ export function pointer(value: string): conversationv1.HistoryPointer {
   return create(conversationv1.HistoryPointerSchema, { value });
 }
 
-/** A StartTurn request; `pageSize` defaults to a legal, non-zero budget. */
-export function startTurnRequest(init: {
-  readonly turn: string;
-  readonly text: string;
-  readonly pageSize?: number;
-  readonly origin?: conversationv1.PromptOrigin;
+/**
+ * The `opening` arm a builder sets: a `knownThrough` mark, `tailOnly`, or
+ * neither (the repaint). No builder states a page size: a page is the store's.
+ */
+interface OpeningInit {
   readonly knownThrough?: conversationv1.HistoryPointer;
-}): shimv1.StartTurnRequest {
+  readonly tailOnly?: boolean;
+}
+
+function startTurnOpening(init: OpeningInit): shimv1.StartTurnRequest["opening"] {
+  if (init.knownThrough !== undefined) return { case: "knownThrough", value: init.knownThrough };
+  if (init.tailOnly === true) return { case: "tailOnly", value: create(shimv1.StartTurnTailOnlySchema, {}) };
+  return { case: undefined };
+}
+
+function watchAgentOpening(init: OpeningInit): shimv1.WatchAgentRequest["opening"] {
+  if (init.knownThrough !== undefined) return { case: "knownThrough", value: init.knownThrough };
+  if (init.tailOnly === true) return { case: "tailOnly", value: create(shimv1.WatchAgentTailOnlySchema, {}) };
+  return { case: undefined };
+}
+
+/** A StartTurn request. */
+export function startTurnRequest(
+  init: {
+    readonly turn: string;
+    readonly text: string;
+    readonly origin?: conversationv1.PromptOrigin;
+  } & OpeningInit,
+): shimv1.StartTurnRequest {
   return create(shimv1.StartTurnRequestSchema, {
     turn: turnId(init.turn),
     said: said(init.text),
     origin: init.origin ?? conversationv1.PromptOrigin.USER_SENT,
-    pageSize: init.pageSize ?? 50,
-    ...(init.knownThrough === undefined ? {} : { knownThrough: init.knownThrough }),
+    opening: startTurnOpening(init),
   });
 }
 
 /** A WatchAgent request. */
-export function watchAgentRequest(init: {
-  readonly target?: conversationv1.AgentId;
-  readonly pageSize?: number;
-  readonly knownThrough?: conversationv1.HistoryPointer;
-} = {}): shimv1.WatchAgentRequest {
+export function watchAgentRequest(
+  init: { readonly target?: conversationv1.AgentId } & OpeningInit = {},
+): shimv1.WatchAgentRequest {
   return create(shimv1.WatchAgentRequestSchema, {
     ...(init.target === undefined ? {} : { target: init.target }),
-    pageSize: init.pageSize ?? 50,
-    ...(init.knownThrough === undefined ? {} : { knownThrough: init.knownThrough }),
+    opening: watchAgentOpening(init),
   });
 }
 
 /** A ReadHistory request positioned at the newest page. */
-export function readHistoryFirst(init: {
-  readonly target?: conversationv1.AgentId;
-  readonly pageSize?: number;
-} = {}): shimv1.ReadHistoryRequest {
+export function readHistoryFirst(init: { readonly target?: conversationv1.AgentId } = {}): shimv1.ReadHistoryRequest {
   return create(shimv1.ReadHistoryRequestSchema, {
     ...(init.target === undefined ? {} : { target: init.target }),
-    pageSize: init.pageSize ?? 50,
     position: { case: "first", value: create(shimv1.ReadHistoryFirstSchema, {}) },
   });
 }
@@ -422,11 +435,10 @@ export function readHistoryFirst(init: {
 /** A ReadHistory request walking older than `after`. */
 export function readHistoryAfter(
   after: conversationv1.HistoryPointer,
-  init: { readonly target?: conversationv1.AgentId; readonly pageSize?: number } = {},
+  init: { readonly target?: conversationv1.AgentId } = {},
 ): shimv1.ReadHistoryRequest {
   return create(shimv1.ReadHistoryRequestSchema, {
     ...(init.target === undefined ? {} : { target: init.target }),
-    pageSize: init.pageSize ?? 50,
     position: { case: "after", value: after },
   });
 }
@@ -434,11 +446,10 @@ export function readHistoryAfter(
 /** `ReadHistory{through}`: the book as it stood at an instant. */
 export function readHistoryThrough(
   atMs: bigint,
-  init: { readonly target?: conversationv1.AgentId; readonly pageSize?: number } = {},
+  init: { readonly target?: conversationv1.AgentId } = {},
 ): shimv1.ReadHistoryRequest {
   return create(shimv1.ReadHistoryRequestSchema, {
     ...(init.target === undefined ? {} : { target: init.target }),
-    pageSize: init.pageSize ?? 50,
     position: { case: "through", value: create(conversationv1.ConversationThroughSchema, { atMs }) },
   });
 }

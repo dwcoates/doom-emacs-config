@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -24,12 +25,20 @@ type harness struct {
 
 func newHarness(t *testing.T) *harness {
 	t.Helper()
+	return newHarnessFor(t, hotspot)
+}
+
+// newHarnessFor is newHarness configured to join the named hotspot. The
+// interface's saved networks list the fake hotspot unless a test says
+// otherwise.
+func newHarnessFor(t *testing.T, configured string) *harness {
+	t.Helper()
 	h := &harness{
 		r: newFakeRunner(t), log: dlog.NewTestLogger(), clock: newFakeClock(),
 		exists: map[string]bool{tools.WifiUtil: true, tools.Brightness: true},
 	}
 	c, err := New(Deps{
-		Config: Config{Tools: tools, Hotspot: hotspot},
+		Config: Config{Tools: tools, Hotspot: configured},
 		Runner: h.r, Clock: h.clock, Log: h.log,
 		Exists:   func(p string) bool { return h.exists[p] },
 		OnChange: func(s *agentreplv1.PersistentWifiState) { h.changes = append(h.changes, s) },
@@ -38,6 +47,7 @@ func newHarness(t *testing.T) *harness {
 		t.Fatalf("New() error = %v", err)
 	}
 	h.c = c
+	h.r.on(argPreferred, answer{out: preferred(hotspot)})
 	return h
 }
 
@@ -587,5 +597,105 @@ func TestRefreshAbandonedByItsCallerIsRecordedAtInfo(t *testing.T) {
 	// Assert.
 	if infos := h.records("info", opProbe); len(infos) != 1 || infos[0].Context["cause"] != context.Canceled.Error() {
 		t.Fatalf("probe INFO records = %+v, want one naming the cancellation", infos)
+	}
+}
+
+// ---- the hotspot's name is resolved against the saved networks ----
+
+// Two spellings of one hotspot: the ASCII apostrophe a person types, and the
+// right single quotation mark an iPhone names itself with.
+const (
+	straightHotspot = "Dodge's iPhone"
+	curlyHotspot    = "Dodge\u2019s iPhone"
+)
+
+func TestUpdateOnJoinsTheSavedSpellingOfTheHotspot(t *testing.T) {
+	// Arrange: configured straight, saved curly, on another network now.
+	h := newHarnessFor(t, straightHotspot).standing(pmsetOff, summary(true, "Home"))
+	h.r.on(argPreferred, answer{out: preferred("Home", curlyHotspot)})
+	h.r.on("/t/networksetup -setairportnetwork en0 "+curlyHotspot, answer{})
+	scriptPower(h.r, "1")
+	h.r.on(argDim, answer{})
+
+	// Act.
+	resp := h.c.Update(context.Background(), update("on"))
+
+	// Assert: the join named the saved SSID exactly.
+	if got := resp.GetSuccess().GetHotspot().GetJoined().GetNetworkName(); got != curlyHotspot {
+		t.Fatalf("hotspot = %v, want joined to the saved %q", resp.GetSuccess().GetHotspot(), curlyHotspot)
+	}
+}
+
+func TestUpdateOnSeesTheOtherSpellingAsAlreadyJoined(t *testing.T) {
+	// Arrange: configured straight, joined to the curly one.
+	h := newHarnessFor(t, straightHotspot).standing(pmsetOff, summary(true, curlyHotspot))
+	scriptPower(h.r, "1")
+	h.r.on(argDim, answer{})
+
+	// Act.
+	resp := h.c.Update(context.Background(), update("on"))
+
+	// Assert.
+	if resp.GetSuccess().GetHotspot().GetAlreadyJoined() == nil {
+		t.Fatalf("hotspot = %v, want already_joined", resp.GetSuccess().GetHotspot())
+	}
+}
+
+func TestUpdateOnTriesTheConfiguredNameWhenNoSavedNetworkMatches(t *testing.T) {
+	// Arrange: nothing saved matches; the join of the configured name fails.
+	h := newHarnessFor(t, straightHotspot).standing(pmsetOff, summary(true, "Home"))
+	h.r.on(argPreferred, answer{out: preferred("Home")})
+	h.r.on("/t/networksetup -setairportnetwork en0 "+straightHotspot, answer{out: "Could not find network Dodge's iPhone."})
+	scriptPower(h.r, "1")
+	h.r.on(argDim, answer{})
+
+	// Act.
+	resp := h.c.Update(context.Background(), update("on"))
+
+	// Assert: the detail says no saved network matched.
+	failed := resp.GetSuccess().GetHotspot().GetFailed()
+	if failed == nil || !strings.Contains(failed.GetDetail(), "no saved network matches") {
+		t.Fatalf("hotspot = %v, want failed naming the missing saved network", resp.GetSuccess().GetHotspot())
+	}
+}
+
+func TestUpdateOffLeavesAHotspotJoinedUnderTheOtherSpelling(t *testing.T) {
+	// Arrange: configured straight, joined curly; the disconnect takes.
+	h := newHarnessFor(t, straightHotspot)
+	h.r.on(argPmsetRead, answer{out: pmsetOn})
+	h.r.on(argPorts, answer{out: ports})
+	h.r.on(argSummary, answer{out: summary(true, curlyHotspot)}, answer{out: summary(false, "")})
+	h.r.on(argDisconnect, answer{})
+	scriptPower(h.r, "0")
+	h.r.on(argRestore, answer{})
+
+	// Act.
+	resp := h.c.Update(context.Background(), update("off"))
+
+	// Assert.
+	if resp.GetSuccess().GetHotspot().GetLeft() == nil {
+		t.Fatalf("hotspot = %v, want left", resp.GetSuccess().GetHotspot())
+	}
+}
+
+func TestStillOnHotspotReadsTheOtherSpellingAsStillJoined(t *testing.T) {
+	// Arrange: the disconnect is refused, the link still names the curly
+	// spelling, and the radio restart then takes.
+	h := newHarnessFor(t, straightHotspot)
+	h.r.on(argPmsetRead, answer{out: pmsetOn})
+	h.r.on(argPorts, answer{out: ports})
+	h.r.on(argSummary, answer{out: summary(true, curlyHotspot)}, answer{out: summary(true, curlyHotspot)}, answer{out: summary(false, "")})
+	h.r.on(argDisconnect, answer{})
+	h.r.on(argRadioOff, answer{})
+	h.r.on(argRadioOn, answer{})
+	scriptPower(h.r, "0")
+	h.r.on(argRestore, answer{})
+
+	// Act.
+	h.c.Update(context.Background(), update("off"))
+
+	// Assert: still joined was seen, so the radio was restarted.
+	if h.r.count(argRadioOff) != 1 {
+		t.Fatalf("calls = %v, want a radio restart after the refused disconnect", h.r.ran())
 	}
 }

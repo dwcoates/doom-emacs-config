@@ -65,3 +65,40 @@ func TestConfigFromEnv(t *testing.T) {
 		})
 	}
 }
+
+func TestSameNetworkFoldsTheApostropheSpellings(t *testing.T) {
+	cases := []struct {
+		a, b string
+		want bool
+	}{
+		{"Dodge's iPhone", "Dodge’s iPhone", true},
+		{"Dodge‘s iPhone", "Dodge’s iPhone", true},
+		{"Dodge's iPhone", "Dodges iPhone", false},
+		{"", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.a+"|"+tc.b, func(t *testing.T) {
+			// Act, Assert.
+			if got := sameNetwork(tc.a, tc.b); got != tc.want {
+				t.Fatalf("sameNetwork(%q, %q) = %v, want %v", tc.a, tc.b, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestPreferredNetworksParsesTheIndentedSSIDs(t *testing.T) {
+	// Act.
+	got := preferredNetworks("Preferred networks on en0:\n\tHome\n\tDodge’s iPhone\n")
+
+	// Assert.
+	if len(got) != 2 || got[0] != "Home" || got[1] != "Dodge’s iPhone" {
+		t.Fatalf("preferredNetworks = %q, want the two saved SSIDs", got)
+	}
+}
+
+func TestTheDefaultHotspotIsSpelledAsTheIPhoneNamesItself(t *testing.T) {
+	// Assert.
+	if DefaultHotspot != "Dodge’s iPhone" {
+		t.Fatalf("DefaultHotspot = %q, want the curly apostrophe", DefaultHotspot)
+	}
+}

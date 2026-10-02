@@ -5,11 +5,14 @@
 // be seen twice, or jump over the boundary and be missed.
 package integration
 
-import "testing"
+import (
+	"agentrepl/shim-store/internal/db"
+	"testing"
+)
 
 // TestUpsertMidWalkDoesNotTeleportAcrossAContinuation.
 func TestUpsertMidWalkDoesNotTeleportAcrossAContinuation(t *testing.T) {
-	// Arrange: four units, paged two at a time.
+	// Arrange: two units, and a full store page of newer ones above them.
 	store := startStore(t, storeOptions{})
 	ctx, cancel := callContext(t)
 	defer cancel()
@@ -18,20 +21,19 @@ func TestUpsertMidWalkDoesNotTeleportAcrossAContinuation(t *testing.T) {
 	shim.write(ctx, t,
 		shim.agentEntry("w-ord-a", "u-ord-a", frameLine(agentID("main"), responseFrame("main", "act-a", "A"))),
 		shim.agentEntry("w-ord-b", "u-ord-b", frameLine(agentID("main"), responseFrame("main", "act-b", "B"))),
-		shim.agentEntry("w-ord-c", "u-ord-c", frameLine(agentID("main"), responseFrame("main", "act-c", "C"))),
-		shim.agentEntry("w-ord-d", "u-ord-d", frameLine(agentID("main"), responseFrame("main", "act-d", "D"))),
 	)
-	opened := openSession(ctx, t, cli, "main", 2, nil)
-	assertTexts(t, "the opening page", pageTexts(opened.GetPage()), []string{"D", "C"})
+	writeNumberedLines(ctx, t, shim, "main", db.PageSize)
+	opened := openSession(ctx, t, cli, "main", nil)
+	assertTexts(t, "the opening page", pageTexts(opened.GetPage()), descendingLabels(db.PageSize, 1))
 	cursor := assertPageMore(t, opened.GetPage())
 
 	// Act: B settles between the two pages — a new write of an OLD unit.
 	shim.write(ctx, t,
 		shim.agentEntry("w-ord-b2", "u-ord-b", frameLine(agentID("main"), responseFrame("main", "act-b", "B settled"))),
 	)
-	next := readPage(ctx, t, cli, "main", 2, cursor)
+	next := readPage(ctx, t, cli, "main", cursor)
 
-	// Assert: B is still between A and C, carrying its settled content.
+	// Assert: B is still between A and L1, carrying its settled content.
 	assertTexts(t, "the continuation after a mid-walk upsert", readTexts(next), []string{"B settled", "A"})
 	store.assertNoErrorRecords()
 }
