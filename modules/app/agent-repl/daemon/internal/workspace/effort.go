@@ -84,6 +84,10 @@ func (f *Fleet) SetEffort(ctx context.Context, log dlog.Logger, ws ids.Workspace
 // force: the vendor holds the level in the session-scoped flag layer of ONE
 // process, and "for the rest of the session" outlives the process.
 //
+// THE PUSH DOES NOT REPLACE THIS. The shim's effort_changed push states the
+// level a new process RUNS at, which is the vendor's default, not the pick;
+// only this re-applies the pick. The push then states the result.
+//
 // A REFUSAL RETRACTS NOTHING SILENTLY. The selector keeps naming the pick,
 // so the session would run at a level the strip does not show; the failure is
 // logged and stated on the warning strip, the reader's one error surface.
@@ -165,6 +169,8 @@ func (v *verbs) publishEffortSettings(log dlog.Logger, record wsm.Workspace, con
 		"path":                settings.Path,
 		"effort_level":        effortlevel.Word(settings.Default),
 		"model_settings_keys": len(settings.PerModel),
+		"env_effort_level":    effortlevel.Word(settings.Env),
+		"env_effort_unset":    settings.EnvUnset,
 	})
 	v.deps.Topbar.SetEffortSettings(record.ID, settings)
 }
