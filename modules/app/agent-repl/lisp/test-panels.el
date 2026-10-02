@@ -1731,8 +1731,9 @@ when no eager-open is in progress."
                 ((symbol-function 'run-at-time)
                  (lambda (_secs _rep fn &rest args) (setq scheduled (cons fn args)))))
         (agent-repl--after-persp-activated)
-        (should (eq (car scheduled) #'agent-repl--on-workspace-switch))
-        (should (equal (cdr scheduled) '("ws1")))))))
+        (should (eq (car scheduled) #'agent-repl--run-switch-activation))
+        (should (equal (cdr scheduled)
+                       (list "ws1" agent-repl--switch-activation-generation)))))))
 
 (ert-deftest agent-repl-test-panels-after-persp-activated-suppressed-during-eager-open ()
   "after-persp-activated does NOT schedule --on-workspace-switch while
@@ -1778,7 +1779,170 @@ schedules the switch: it is not foreign, merely not committed yet."
                 ((symbol-function 'run-at-time)
                  (lambda (_secs _rep fn &rest args) (setq scheduled (cons fn args)))))
         (agent-repl--after-persp-activated)
-        (should (eq (car scheduled) #'agent-repl--on-workspace-switch))))))
+        (should (eq (car scheduled) #'agent-repl--run-switch-activation))))))
+
+;;;; ---- Tests: switch activation generations ----
+
+(defmacro agent-repl-test--with-switch-activations (&rest body)
+  "Run BODY with fresh switch-activation state and a recording timer queue.
+`run-at-time' records `(FN . ARGS)' onto `scheduled' (newest first) and
+answers a real but never-armed timer, so cancellation is observable;
+`agent-repl--on-workspace-switch' records the workspaces it ran for onto
+`ran'."
+  (declare (indent 0) (debug t))
+  `(let ((agent-repl--switch-activation-generation 0)
+         (agent-repl--switch-activation-timer nil)
+         (agent-repl--eager-open-in-progress nil)
+         (scheduled nil)
+         (cancelled nil)
+         (ran nil))
+     (cl-letf (((symbol-function 'run-at-time)
+                (lambda (_secs _rep fn &rest args)
+                  (push (cons fn args) scheduled)
+                  (timer-create)))
+               ((symbol-function 'cancel-timer)
+                (lambda (timer) (push timer cancelled)))
+               ((symbol-function 'agent-repl--on-workspace-switch)
+                (lambda (&optional ws) (push ws ran))))
+       ,@body)))
+
+(defun agent-repl-test--fire-scheduled (entry)
+  "Run the scheduled ENTRY `(FN . ARGS)' as its timer would."
+  (apply (car entry) (cdr entry)))
+
+(ert-deftest agent-repl-test-panels-switch-activation-newest-runs ()
+  "The pass carrying the newest generation runs the switch for its workspace."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-switch-activations
+      ;; Arrange.
+      (agent-repl--schedule-switch-activation "ws-b")
+      ;; Act.
+      (agent-repl-test--fire-scheduled (car scheduled))
+      ;; Assert.
+      (should (equal ran '("ws-b"))))))
+
+(ert-deftest agent-repl-test-panels-switch-activation-superseded-does-nothing ()
+  "A pass a later activation superseded runs nothing, even if its timer fires.
+This is the stale zero-delay activation that repainted and focused the
+PRIOR workspace under CPU load: the A-to-B pass firing after the user
+had already gone on to C."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-switch-activations
+      ;; Arrange.
+      (agent-repl--schedule-switch-activation "ws-b")
+      (agent-repl--schedule-switch-activation "ws-c")
+      (let ((stale (cadr scheduled)))
+        ;; Act.
+        (agent-repl-test--fire-scheduled stale))
+      ;; Assert.
+      (should (null ran)))))
+
+(ert-deftest agent-repl-test-panels-switch-activation-superseded-is-logged ()
+  "A superseded pass records its generation and the newest at INFO."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-switch-activations
+      ;; Arrange.
+      (let ((records nil))
+        (cl-letf (((symbol-function 'agent-repl--info)
+                   (lambda (_ws fmt &rest args) (push (apply #'format fmt args) records))))
+          (agent-repl--schedule-switch-activation "ws-b")
+          (agent-repl--schedule-switch-activation "ws-c")
+          ;; Act.
+          (agent-repl-test--fire-scheduled (cadr scheduled)))
+        ;; Assert.
+        (should (member "elisp.panels.switch-activation-superseded ws=ws-b generation=1 newest=2"
+                        records))))))
+
+(ert-deftest agent-repl-test-panels-switch-activation-winner-is-logged ()
+  "The pass that runs records the generation that won at INFO."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-switch-activations
+      ;; Arrange.
+      (let ((records nil))
+        (cl-letf (((symbol-function 'agent-repl--info)
+                   (lambda (_ws fmt &rest args) (push (apply #'format fmt args) records))))
+          (agent-repl--schedule-switch-activation "ws-b")
+          (agent-repl--schedule-switch-activation "ws-c")
+          ;; Act.
+          (agent-repl-test--fire-scheduled (car scheduled)))
+        ;; Assert.
+        (should (member "elisp.panels.switch-activation-won ws=ws-c generation=2" records))))))
+
+(ert-deftest agent-repl-test-panels-switch-activation-cancels-the-pending-timer ()
+  "Scheduling a newer pass cancels the pending one's timer."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-switch-activations
+      ;; Arrange.
+      (agent-repl--schedule-switch-activation "ws-b")
+      (let ((pending agent-repl--switch-activation-timer))
+        ;; Act.
+        (agent-repl--schedule-switch-activation "ws-c")
+        ;; Assert.
+        (should (equal cancelled (list pending)))))))
+
+(ert-deftest agent-repl-test-panels-switch-activation-clears-timer-when-run ()
+  "The winning pass forgets its timer, so nothing cancels a fired timer later."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-switch-activations
+      ;; Arrange.
+      (agent-repl--schedule-switch-activation "ws-b")
+      ;; Act.
+      (agent-repl-test--fire-scheduled (car scheduled))
+      ;; Assert.
+      (should (null agent-repl--switch-activation-timer)))))
+
+(ert-deftest agent-repl-test-panels-switch-activation-foreign-activation-supersedes ()
+  "Activating a foreign perspective supersedes the pending pass.
+The user left the workspace that pass is for, so it must not run."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-switch-activations
+      ;; Arrange.
+      (agent-repl--ws-put "ws-b" :project-dir "/tmp/ws-b")
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws-b")))
+        (agent-repl--after-persp-activated))
+      (cl-letf (((symbol-function '+workspace-current-name)
+                 (lambda () "agent-repl-stale-restored-ws")))
+        (agent-repl--after-persp-activated))
+      ;; Act.
+      (agent-repl-test--fire-scheduled (car scheduled))
+      ;; Assert.
+      (should (null ran)))))
+
+(ert-deftest agent-repl-test-panels-switch-activation-eager-open-does-not-supersede ()
+  "An eager-open's transient activation leaves the pending pass the newest.
+The eager-open switches back to the caller's workspace, which is the one
+the pending pass is for, so superseding it would leave that workspace's
+switch never run."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-switch-activations
+      ;; Arrange.
+      (agent-repl--ws-put "ws-b" :project-dir "/tmp/ws-b")
+      (agent-repl--ws-put "ws-bg" :project-dir "/tmp/ws-bg")
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws-b")))
+        (agent-repl--after-persp-activated))
+      (let ((agent-repl--eager-open-in-progress t))
+        (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws-bg")))
+          (agent-repl--after-persp-activated)))
+      ;; Act.
+      (agent-repl-test--fire-scheduled (car scheduled))
+      ;; Assert.
+      (should (equal ran '("ws-b"))))))
+
+(ert-deftest agent-repl-test-panels-switch-activation-log-scope-placeholder-is-central ()
+  "A placeholder perspective's switch pass records under the global scope."
+  (agent-repl-test--with-clean-state
+    (should (eq (agent-repl--switch-activation-log-scope "none")
+                agent-repl--global-log-scope))))
+
+(ert-deftest agent-repl-test-panels-switch-activation-log-scope-workspace-keeps-attribution ()
+  "A real workspace's switch pass records under that workspace."
+  (agent-repl-test--with-clean-state
+    (let ((project (make-temp-file "agent-repl-switch-scope-" t)))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "ws1" :project-dir project)
+            (should (equal (agent-repl--switch-activation-log-scope "ws1") "ws1")))
+        (delete-directory project t)))))
 
 ;;;; ---- Tests: foreign-perspective-p ----
 
