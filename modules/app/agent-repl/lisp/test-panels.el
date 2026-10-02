@@ -1989,6 +1989,55 @@ classified separately and never reach this predicate as an anomaly."
           (ignore-errors (delete-window new-win)))
         (when (buffer-live-p input-buf) (kill-buffer input-buf))))))
 
+(defmacro agent-repl-test-panels--with-visible-input (input-hidden &rest body)
+  "Run BODY with test-ws's input buffer shown in a second window.
+INPUT-HIDDEN is what the gate predicate `agent-repl-input-hidden-p'
+answers.  BODY runs with the other window selected; `input-buf' is bound."
+  (declare (indent 1))
+  `(agent-repl-test--with-clean-state
+     (let ((input-buf (get-buffer-create "*autoselect-gated*"))
+           (new-win nil))
+       (unwind-protect
+           (cl-letf (((symbol-function 'agent-repl-input-hidden-p)
+                      (lambda (_ws) ,input-hidden)))
+             (agent-repl--ws-put "test-ws" :input-buffer input-buf)
+             (setq new-win (split-window))
+             (set-window-buffer new-win input-buf)
+             (select-window (car (window-list)))
+             (let ((agent-repl-autoselect-input-on-workspace-switch t))
+               ,@body))
+         (when (and new-win (window-live-p new-win))
+           (ignore-errors (delete-window new-win)))
+         (when (buffer-live-p input-buf) (kill-buffer input-buf))))))
+
+(ert-deftest agent-repl-test-panels-maybe-autoselect-input-noop-when-a-gate-hides-the-input ()
+  "A gate hiding the input window leaves the landing in the webview."
+  (agent-repl-test-panels--with-visible-input t
+    (let ((orig-win (selected-window)))
+      ;; Act
+      (agent-repl--maybe-autoselect-input "test-ws")
+      ;; Assert
+      (should (eq (selected-window) orig-win)))))
+
+(ert-deftest agent-repl-test-panels-maybe-autoselect-input-selects-when-no-gate-hides-it ()
+  "With the gate predicate answering nil the input window is selected."
+  (agent-repl-test-panels--with-visible-input nil
+    ;; Act
+    (agent-repl--maybe-autoselect-input "test-ws")
+    ;; Assert
+    (should (eq (window-buffer (selected-window)) input-buf))))
+
+(ert-deftest agent-repl-test-panels-maybe-autoselect-input-records-the-gate ()
+  "The gated landing is recorded at INFO."
+  (agent-repl-test-panels--with-visible-input t
+    (let ((infos nil))
+      (cl-letf (((symbol-function 'agent-repl--info)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) infos))))
+        ;; Act
+        (agent-repl--maybe-autoselect-input "test-ws"))
+      ;; Assert
+      (should (member "maybe-autoselect-input: ws=test-ws branch=input-hidden" infos)))))
+
 (ert-deftest agent-repl-test-panels-maybe-autoselect-input-noop-when-disabled ()
   "maybe-autoselect-input does nothing when the defcustom is nil."
   (agent-repl-test--with-clean-state
