@@ -54,6 +54,9 @@ func parseVitestList(dir string, out []byte) ([]string, error) {
 	return files, nil
 }
 
+// TypecheckSlots is a vitest suite's typecheck width.
+const TypecheckSlots = 2
+
 // vitestUnits is the typecheck and the test files split into chunks. Coverage
 // adds chunk blobs and their merged report only when explicitly requested.
 func vitestUnits(l Layout, s roster.Suite) (Units, error) {
@@ -81,6 +84,10 @@ func vitestUnitsForFiles(l Layout, s roster.Suite, dir string, files []string) (
 		}
 	}
 	typecheck := spec(s.Name+":typecheck", s.Name, dir, []string{"npm", "run", "typecheck"})
+	// tsc cannot be pinned to one core: its compiler thread and node's GC and
+	// worker threads measured 1.5-1.75 cores on average across four full
+	// runs (webapp and shim alike), so the unit holds the two slots it uses.
+	typecheck.Slots = TypecheckSlots
 	reporter := filepath.Join(l.Module, "testrun", "vitest", "items-reporter.mjs")
 	chunk := func(id string, items []string) run.Spec {
 		tag := filepath.Base(id)

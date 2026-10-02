@@ -730,6 +730,29 @@ func TestVitestCoverageModes(t *testing.T) {
 	}
 }
 
+func TestVitestTypecheckHoldsTheTwoCoresItUses(t *testing.T) {
+	// Arrange
+	dir := t.TempDir()
+	l := Layout{Module: dir, Work: t.TempDir()}
+
+	// Act
+	u, err := vitestUnitsForFiles(l, roster.Suite{Name: "webapp"}, dir, []string{"src/a.test.ts"})
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, unit := range u.Atomic {
+		if unit.ID == "webapp:typecheck" {
+			if unit.Width() != 2 {
+				t.Fatalf("typecheck width = %d, want 2", unit.Width())
+			}
+			return
+		}
+	}
+	t.Fatalf("no typecheck unit in %v", u.Atomic)
+}
+
 func TestQuietGoTestOutput(t *testing.T) {
 	// Arrange
 	out := []byte("=== RUN   TestA\n=== PAUSE TestA\n=== CONT  TestA\n    a_test.go:3: a log line\n--- PASS: TestA (0.10s)\n    --- PASS: TestA/sub (0.00s)\nPASS\ncoverage: 50.0% of statements\n")
