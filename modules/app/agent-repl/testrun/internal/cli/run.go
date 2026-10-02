@@ -219,11 +219,11 @@ func printUnitSummary(log *run.Log, results []run.Result, slots int, start, end 
 
 func printSuiteSummaries(log *run.Log, passed, declined, failed []run.SuiteResult) {
 	if len(passed) > 0 {
-		log.Infof("timing summary, slowest suite first")
+		log.Infof("timing summary, most unit time first (%s is what --record keeps; the span depends on the interleaving)", RecordedMeasure)
 		sorted := append([]run.SuiteResult(nil), passed...)
-		sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].Seconds() > sorted[j].Seconds() })
+		sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].UnitSeconds > sorted[j].UnitSeconds })
 		for _, s := range sorted {
-			log.Infof("timing: %s %.3fs", s.Name, s.Seconds())
+			log.Infof("timing: %s %.3fs of units over a %.3fs span", s.Name, s.UnitSeconds, s.Seconds())
 		}
 	}
 	if len(declined) > 0 {
@@ -261,7 +261,8 @@ func record(d Deps, repo, csvPath, startBranch, startCommit string, passed []run
 	for _, s := range passed {
 		rows = append(rows, TimingRow{
 			RunID: runID, RecordedAt: now.UTC().Format("2006-01-02T15:04:05Z"),
-			Commit: startCommit, Branch: startBranch, Suite: s.Name, Seconds: s.Seconds(),
+			Commit: startCommit, Branch: startBranch, Suite: s.Name,
+			Seconds: s.UnitSeconds, Measure: RecordedMeasure,
 		})
 	}
 	if err := AppendTimings(csvPath, rows); err != nil {
