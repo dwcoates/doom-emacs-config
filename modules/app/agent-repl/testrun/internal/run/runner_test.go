@@ -29,8 +29,12 @@ type fakeExec struct {
 	started []string
 	running int
 	peak    int
-	killed  []string
-	onStart func(id string)
+	// width and peakWidth count the slots the running units hold.
+	width     int
+	peakWidth int
+	widths    map[string]int
+	killed    []string
+	onStart   func(id string)
 }
 
 type fakeProc struct {
@@ -53,6 +57,12 @@ func (e *fakeExec) Start(spec Spec, out *bytes.Buffer) (Process, error) {
 	if e.running > e.peak {
 		e.peak = e.running
 	}
+	if e.widths == nil {
+		e.widths = map[string]int{}
+	}
+	e.widths[spec.ID] = spec.Width()
+	e.width += spec.Width()
+	e.peakWidth = max(e.peakWidth, e.width)
 	e.mu.Unlock()
 	if e.onStart != nil {
 		e.onStart(spec.ID)
@@ -72,6 +82,7 @@ func (p *fakeProc) Wait() (int, float64, error) {
 	p.out.WriteString(p.s.output)
 	p.e.mu.Lock()
 	p.e.running--
+	p.e.width -= p.e.widths[p.id]
 	p.e.mu.Unlock()
 	return exit, p.s.cpu, p.s.waitErr
 }
@@ -439,6 +450,64 @@ func TestRunKillsEveryRunningUnitWhenCancelled(t *testing.T) {
 	}
 	if len(e.started) != 2 {
 		t.Fatalf("started %v after cancellation, want no new unit", e.started)
+	}
+}
+
+func TestRunHoldsAWideUnitsWholeWidth(t *testing.T) {
+	// Arrange: a two-slot unit and three one-slot units on three slots, every
+	// unit holding until released, so they would all overlap if allowed to.
+	release := make(chan struct{})
+	wide := spec("w", "e2e-emacs")
+	wide.Est, wide.Slots = 10, 2
+	specs := []Spec{wide, spec("a", "s"), spec("b", "s"), spec("c", "s")}
+	scripts := map[string]script{}
+	for _, sp := range specs {
+		scripts[sp.ID] = script{hold: release}
+	}
+	e := &fakeExec{scripts: scripts}
+	starts := make(chan string, len(specs))
+	e.onStart = func(id string) { starts <- id }
+	r, _, _ := newRunner(3, e)
+
+	// Act
+	result := make(chan error)
+	go func() {
+		_, _, err := r.Run(context.Background(), specs)
+		result <- err
+	}()
+	<-starts
+	<-starts
+	close(release)
+	err := <-result
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e.peakWidth != 3 {
+		t.Fatalf("peak slots held = %d, want exactly the 3 the runner has", e.peakWidth)
+	}
+	if len(e.started) != 4 {
+		t.Fatalf("started %v, want all four units", e.started)
+	}
+}
+
+func TestRunRefusesAUnitWiderThanItsSlots(t *testing.T) {
+	// Arrange
+	wide := spec("w", "e2e-emacs")
+	wide.Slots = 3
+	e := &fakeExec{}
+	r, _, _ := newRunner(2, e)
+
+	// Act
+	_, _, err := r.Run(context.Background(), []Spec{wide})
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), `unit "w" needs 3 core slots but this host has only 2`) {
+		t.Fatalf("err = %v, want the width refusal", err)
+	}
+	if len(e.started) != 0 {
+		t.Fatalf("started %v before refusing", e.started)
 	}
 }
 

@@ -18,7 +18,7 @@ func drainOrder(t *testing.T, q *Queue) []string {
 	t.Helper()
 	var order []string
 	for {
-		u, ok := q.Next()
+		u, ok := q.Next(1)
 		if !ok {
 			break
 		}
@@ -37,6 +37,7 @@ func TestNewQueueRefusesAnInvalidDAG(t *testing.T) {
 		{"empty id", []Unit{{Suite: "s"}}, "has no ID"},
 		{"duplicate id", []Unit{{ID: "a"}, {ID: "a"}}, "duplicate unit ID"},
 		{"negative estimate", []Unit{{ID: "a", Est: -1}}, "negative estimate"},
+		{"negative width", []Unit{{ID: "a", Slots: -1}}, "negative width"},
 		{"unknown dependency", []Unit{{ID: "a", Deps: []string{"b"}}}, "unknown unit"},
 		{"cycle", []Unit{{ID: "a", Deps: []string{"b"}}, {ID: "b", Deps: []string{"a"}}}, "cycle"},
 	}
@@ -113,10 +114,10 @@ func TestQueueDependentIsNotReadyUntilItsDependencyFinishes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	q.Next()
+	q.Next(1)
 
 	// Act
-	_, ok := q.Next()
+	_, ok := q.Next(1)
 
 	// Assert
 	if ok {
@@ -135,7 +136,7 @@ func TestQueueFailureCancelsEverythingDownstream(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	u, _ := q.Next()
+	u, _ := q.Next(1)
 
 	// Act
 	cancelled := q.Done(u.ID, false)
@@ -144,7 +145,7 @@ func TestQueueFailureCancelsEverythingDownstream(t *testing.T) {
 	if got, want := ids(cancelled), []string{"chunk", "report"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("cancelled = %v, want %v", got, want)
 	}
-	if next, _ := q.Next(); next.ID != "other" {
+	if next, _ := q.Next(1); next.ID != "other" {
 		t.Fatalf("next = %q, want the unrelated unit", next.ID)
 	}
 	q.Done("other", true)
@@ -182,6 +183,9 @@ func TestSimulate(t *testing.T) {
 		{"LPT packs short units behind long ones", []Unit{{ID: "a", Est: 4}, {ID: "b", Est: 2}, {ID: "c", Est: 2}}, 2, 4},
 		{"a chain is serial whatever the slots", []Unit{{ID: "a", Est: 2}, {ID: "b", Est: 3, Deps: []string{"a"}}}, 8, 5},
 		{"no units is zero", nil, 3, 0},
+		{"a wide unit holds every slot it names", []Unit{{ID: "w", Est: 4, Slots: 2}, {ID: "a", Est: 1}}, 2, 5},
+		{"a narrow unit runs beside a wide one in the slot it leaves", []Unit{{ID: "w", Est: 4, Slots: 2}, {ID: "a", Est: 4}}, 3, 4},
+		{"a narrower unit never overtakes a wide one waiting for its slots", []Unit{{ID: "a", Est: 3}, {ID: "w", Est: 2, Slots: 2}, {ID: "b", Est: 1}}, 2, 6},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -196,6 +200,71 @@ func TestSimulate(t *testing.T) {
 				t.Fatalf("makespan = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestQueueNext(t *testing.T) {
+	tests := []struct {
+		name   string
+		units  []Unit
+		free   int
+		wantID string
+		wantOK bool
+	}{
+		{"a one-slot unit fits one free slot", []Unit{{ID: "a"}}, 1, "a", true},
+		{"a wide unit fits exactly its width", []Unit{{ID: "w", Slots: 3}}, 3, "w", true},
+		{"a wide unit does not fit fewer slots", []Unit{{ID: "w", Slots: 3}}, 2, "", false},
+		{"no free slot starts nothing", []Unit{{ID: "a"}}, 0, "", false},
+		{"a narrow unit behind a wide one that does not fit waits", []Unit{{ID: "w", Est: 5, Slots: 3}, {ID: "a", Est: 1}}, 2, "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			q, err := NewQueue(tt.units)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			// Act
+			u, ok := q.Next(tt.free)
+
+			// Assert
+			if ok != tt.wantOK || u.ID != tt.wantID {
+				t.Fatalf("Next(%d) = %q, %v; want %q, %v", tt.free, u.ID, ok, tt.wantID, tt.wantOK)
+			}
+		})
+	}
+}
+
+func TestCheckWidths(t *testing.T) {
+	tests := []struct {
+		name    string
+		units   []Unit
+		slots   int
+		wantErr string
+	}{
+		{"every width fits", []Unit{{ID: "a"}, {ID: "w", Slots: 4}}, 4, ""},
+		{"a unit wider than the host", []Unit{{ID: "w", Slots: 5}}, 4, `unit "w" needs 5 core slots but this host has only 4`},
+		{"a negative width", []Unit{{ID: "n", Slots: -2}}, 4, `unit "n" has a negative width -2`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			err := CheckWidths(tt.units, tt.slots)
+
+			// Assert
+			if tt.wantErr == "" && err != nil || tt.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tt.wantErr)) {
+				t.Fatalf("CheckWidths = %v, want %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestUnitWidth(t *testing.T) {
+	for slots, want := range map[int]int{0: 1, 1: 1, 4: 4} {
+		if got := (Unit{Slots: slots}).Width(); got != want {
+			t.Errorf("Unit{Slots: %d}.Width() = %d, want %d", slots, got, want)
+		}
 	}
 }
 
