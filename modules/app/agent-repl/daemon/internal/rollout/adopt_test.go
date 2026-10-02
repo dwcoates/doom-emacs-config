@@ -1504,6 +1504,21 @@ func TestAnAdoptionOfAFreeLockRaisesTheMarkerBeforeItPublishes(t *testing.T) {
 	}
 }
 
+func TestAnAdoptionOfAFreeLockRaisesTheMarkerOnceAndLowersIt(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := freeLockAdoption(t, h)
+
+	// Act
+	arm(t, h, ws, Participants{})
+
+	// Assert
+	want := []markerEdge{{ws: ws, up: true}, {ws: ws, up: false}}
+	if got := h.Marker(); !slices.Equal(got, want) {
+		t.Fatalf("marker edges = %v, want one raise and one lower", got)
+	}
+}
+
 func TestAnAdoptionOfAHeldLockStartsNoSession(t *testing.T) {
 	// Arrange
 	h := newHarness(t)

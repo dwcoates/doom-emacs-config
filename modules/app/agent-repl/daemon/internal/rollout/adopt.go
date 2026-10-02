@@ -702,7 +702,7 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 	c.log.Info(opAdopt, "adopted the workspace", fields)
 
 	if sessionless {
-		c.bringUpSessionless([]wsm.Workspace{record}, fields)
+		c.startSessionless([]wsm.Workspace{record}, fields)
 	}
 
 	// A DIALED ADOPTION IS A HEALTHY ATTACH, the recovery edge of every
