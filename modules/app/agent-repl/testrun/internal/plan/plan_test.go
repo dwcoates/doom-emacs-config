@@ -119,6 +119,25 @@ func TestBuildEstimatesAnUnmeasuredItemAtItsGroupsMean(t *testing.T) {
 	}
 }
 
+func TestBuildEstimatesAnUnmeasuredGroupAtItsSuitesMean(t *testing.T) {
+	// Arrange: package "old" of suite "s" is measured at 0.5s a test; package
+	// "new" of the same suite was never run.
+	est := estimates{ItemKey("s:old", "a"): 0.5, OverheadKey("s:new"): 0}
+	old, fresh := split("s:old", "a"), split("s:new", "x", "y")
+	old.Suite, fresh.Suite = "s", "s"
+
+	// Act
+	p, err := Build(est, []suites.Units{{Splits: []suites.Split{old, fresh}}}, 1)
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := specByID(p)["s:new#00"].Est; got != 1.0 {
+		t.Fatalf("new package estimate = %v, want 2 x the suite's 0.5s", got)
+	}
+}
+
 func TestBuildWithNothingMeasuredUsesTheUnknownItemAndOverhead(t *testing.T) {
 	// Act
 	p, err := Build(estimates{}, []suites.Units{{Splits: []suites.Split{split("g", "a", "b")}}}, 1)
