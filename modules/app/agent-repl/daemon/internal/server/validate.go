@@ -698,6 +698,10 @@ func validateOpenInEditorRequest(req *agentreplv1.OpenInEditorRequest) *connect.
 		if target.MergeTestLog.GetValue() == "" {
 			return invalid("merge_test_log.value", "a test log token is required")
 		}
+	case *agentreplv1.OpenInEditorRequest_FeedLink:
+		if target.FeedLink.GetHref() == "" {
+			return invalid("feed_link.href", "an href is required")
+		}
 	default:
 		return invalid("target", "a target arm is required")
 	}

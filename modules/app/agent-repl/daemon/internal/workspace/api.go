@@ -334,6 +334,13 @@ type Verbs interface {
 	// daemon served, which is what stands in for the worktree containment
 	// check.
 	OpenDaemonFileInEditor(ctx context.Context, ws ids.WorkspaceID, path string) error
+	// OpenFeedLink resolves a non-web link clicked in a prompt or response
+	// bubble (OpenInEditorFeedLink's order) and relays the file it names
+	// exactly as OpenInEditor relays a workspace file. A link that names no
+	// existing file raises the transient `unknown_file` footer line and is
+	// answered with the composed follow-up question, for the caller to submit,
+	// beside the `link_unresolved` refusal.
+	OpenFeedLink(ctx context.Context, ws ids.WorkspaceID, href string) (*UnresolvedLink, error)
 	// Notify raises one host notification: it raises the workspace's desktop
 	// banner (the daemon's own, decided on Emacs's focus) and sets the roster's
 	// attention marker, which SelectWorkspace and AsksSettled clear. It is the

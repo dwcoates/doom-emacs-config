@@ -143,6 +143,8 @@ const (
 	ArmNotInCatalog = "not_in_catalog"
 	// ArmPathEscapesWorkspace is an OpenInEditor path outside the workspace.
 	ArmPathEscapesWorkspace = "path_escapes_workspace"
+	// ArmLinkUnresolved is an OpenInEditor feed link that resolved to no file.
+	ArmLinkUnresolved = "link_unresolved"
 	// ArmBlankCommand is a RequestCommandSupport with no command named.
 	ArmBlankCommand = "blank_command"
 	// ArmSpawnFailed is a bring-up whose shim process would not come up.
