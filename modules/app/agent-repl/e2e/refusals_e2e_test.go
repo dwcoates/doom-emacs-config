@@ -419,7 +419,10 @@ func TestStartSessionVendorStartFailed(t *testing.T) {
 	t.Parallel()
 	// Arrange: a world whose every StartSession is refused by the vendor.
 	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{ExtraEnv: []string{"AGENT_REPL_FAKE_REFUSE=start"}}})
-	w.ExpectWarnings(rfVendorStartFaultWarnings...)
+	// The bring-up's own record of the rejection ("nothing retries until a
+	// restart") is the refusal this arrangement asks for, as in the recovering
+	// sibling below.
+	w.ExpectWarnings(append(rfVendorStartFaultWarnings, "daemon.workspace.bring_up")...)
 	repo := harness.NewRepo(t)
 	ws := harness.Register(t, w.Daemon, repo.Dir)
 
