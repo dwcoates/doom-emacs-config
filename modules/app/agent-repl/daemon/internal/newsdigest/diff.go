@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"claude-repld/internal/runecap"
 )
 
 // The bounds on what one source hands the model, so one source that changed
@@ -81,7 +83,7 @@ func diffFeed(r reading, prior string, hadPrior bool, since time.Time) (news, er
 		out.entries = out.entries[:maxEntriesPerSource]
 	}
 	for i := range out.entries {
-		out.entries[i].Body = truncateRunes(out.entries[i].Body, maxEntryRunes)
+		out.entries[i].Body = runecap.Head(out.entries[i].Body, maxEntryRunes)
 	}
 	ids := make([]string, 0, len(seen))
 	for id := range seen {
@@ -121,16 +123,7 @@ func diffPage(src Source, r reading, prior string, hadPrior bool) news {
 		ID:    src.Key,
 		Title: "Changed text on " + src.Name,
 		Link:  src.Home,
-		Body:  truncateRunes(strings.Join(changed, "\n"), maxPageRunes),
+		Body:  runecap.Head(strings.Join(changed, "\n"), maxPageRunes),
 	}}
 	return out
-}
-
-// truncateRunes keeps the first n runes of s.
-func truncateRunes(s string, n int) string {
-	runes := []rune(s)
-	if len(runes) <= n {
-		return s
-	}
-	return string(runes[:n])
 }
