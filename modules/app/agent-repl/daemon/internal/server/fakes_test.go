@@ -1129,8 +1129,10 @@ type harness struct {
 	Focus *desktopnotify.Focus
 	// PersistentWifi is the persistent-wifi controller the rpc delegates to.
 	PersistentWifi *fakePersistentWifi
-	Surfaces       *fakeSurfaces
-	WebappDist     string
+	// NewsDigest is the news digest the two rpcs delegate to.
+	NewsDigest *fakeNewsDigest
+	Surfaces   *fakeSurfaces
+	WebappDist string
 }
 
 // option customizes a harness before it is built.
@@ -1174,6 +1176,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		WebappDist: dist,
 
 		PersistentWifi: &fakePersistentWifi{},
+		NewsDigest:     &fakeNewsDigest{},
 	}
 
 	deps := Deps{
@@ -1198,6 +1201,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		LoudFaults:       &h.LoudFaults,
 		Focus:            h.Focus,
 		PersistentWifi:   h.PersistentWifi,
+		NewsDigest:       h.NewsDigest,
 		WebappDist:       dist,
 		ImageOrigin:      http.NotFoundHandler(),
 		Log:              h.Surfaces,
@@ -1348,5 +1352,36 @@ func (f *fakePersistentWifi) Update(_ context.Context, req *agentreplv1.UpdatePe
 }
 
 func (f *fakePersistentWifi) Topic() *publish.Topic[*agentreplv1.PersistentWifiState] {
+	return &f.topic
+}
+
+// fakeNewsDigest records every dismiss and refresh and answers scripted
+// responses or failures.
+type fakeNewsDigest struct {
+	mu         sync.Mutex
+	topic      publish.Topic[*agentreplv1.NewsDigestStanding]
+	dismissals []*agentreplv1.DismissNewsDigestRequest
+	refreshes  int
+	dismiss    *agentreplv1.DismissNewsDigestResponse
+	dismissErr error
+	refresh    *agentreplv1.RefreshNewsDigestResponse
+	refreshErr error
+}
+
+func (f *fakeNewsDigest) Dismiss(_ context.Context, req *agentreplv1.DismissNewsDigestRequest) (*agentreplv1.DismissNewsDigestResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.dismissals = append(f.dismissals, req)
+	return f.dismiss, f.dismissErr
+}
+
+func (f *fakeNewsDigest) Refresh(context.Context) (*agentreplv1.RefreshNewsDigestResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.refreshes++
+	return f.refresh, f.refreshErr
+}
+
+func (f *fakeNewsDigest) Topic() *publish.Topic[*agentreplv1.NewsDigestStanding] {
 	return &f.topic
 }

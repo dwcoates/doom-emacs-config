@@ -393,9 +393,10 @@ func TestFlushOnAcceptAcrossWatchKinds(t *testing.T) {
 // TestWatchDaemonFlushesHeadersBeforeAnyFrameWhenNoDrainWasEverScheduled is
 // the sub-brief's specific "WatchDaemon with no view yet" case: the
 // daemon-wide announcement topic is published only by a drain schedule or
-// cancellation, never at boot. A WEBVIEW's stream subscribes to nothing else,
-// so a fresh daemon's webview WatchDaemon has genuinely nothing to send (an
-// Emacs stream is also told the boot-read persistent-wifi standing).
+// cancellation, never at boot. A WEBVIEW's stream is told only the boot-read
+// news digest standing besides it (an Emacs stream is told the boot-read
+// persistent-wifi standing instead), so a fresh daemon's webview WatchDaemon
+// sends that one standing and nothing else.
 func TestWatchDaemonFlushesHeadersBeforeAnyFrameWhenNoDrainWasEverScheduled(t *testing.T) {
 	t.Parallel()
 	// Arrange
@@ -404,10 +405,14 @@ func TestWatchDaemonFlushesHeadersBeforeAnyFrameWhenNoDrainWasEverScheduled(t *t
 	// Act
 	s := d.WatchWebviewDaemonStream()
 
-	// Assert: headers arrive even though nothing was ever published, and no
-	// frame follows.
+	// Assert: headers arrive, the boot-read news digest standing (none) is the
+	// one frame, and no other frame follows.
 	s.AwaitHeaders(t, d.Ctx(), "WatchDaemon")
-	harness.ExpectNoPush(t, s, harness.ProbeWindow, "WatchDaemon with no drain ever scheduled carries no frame")
+	first := harness.AwaitNext(t, d.Ctx(), s, "WatchDaemon: the boot-read news digest standing")
+	if first.GetNewsDigest().GetNone() == nil {
+		t.Fatalf("the first frame = %v, want the news digest standing none", first)
+	}
+	harness.ExpectNoPush(t, s, harness.ProbeWindow, "WatchDaemon with no drain ever scheduled carries no other frame")
 }
 
 // TestWatchDaemonHoldsFlushesHeadersThenPushesTheAlreadyEmptyTray is the

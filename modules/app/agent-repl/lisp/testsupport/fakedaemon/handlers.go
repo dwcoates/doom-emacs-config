@@ -356,3 +356,11 @@ func (s *fakeServer) ListWorkspaceTranscripts(ctx context.Context, req *connect.
 func (s *fakeServer) Deploy(ctx context.Context, req *connect.Request[v1.DeployRequest]) (*connect.Response[v1.DeployResponse], error) {
 	return handleUnary[v1.DeployRequest, v1.DeployResponse](ctx, s, "Deploy", req.Msg)
 }
+
+func (s *fakeServer) DismissNewsDigest(ctx context.Context, req *connect.Request[v1.DismissNewsDigestRequest]) (*connect.Response[v1.DismissNewsDigestResponse], error) {
+	return handleUnary[v1.DismissNewsDigestRequest, v1.DismissNewsDigestResponse](ctx, s, "DismissNewsDigest", req.Msg)
+}
+
+func (s *fakeServer) RefreshNewsDigest(ctx context.Context, req *connect.Request[v1.RefreshNewsDigestRequest]) (*connect.Response[v1.RefreshNewsDigestResponse], error) {
+	return handleUnary[v1.RefreshNewsDigestRequest, v1.RefreshNewsDigestResponse](ctx, s, "RefreshNewsDigest", req.Msg)
+}

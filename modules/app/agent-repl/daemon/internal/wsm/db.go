@@ -309,6 +309,17 @@ type DB interface {
 	RecordRolledBackTurns(ctx context.Context, id WorkspaceID, turns []TurnID) error
 	// RolledBackTurns loads every rolled-back turn of a workspace.
 	RolledBackTurns(ctx context.Context, id WorkspaceID) ([]TurnID, error)
+	// NewsDigestState loads the daily news digest's durable state: the
+	// cadence's origin, the next digest's baseline, the newest digest minted
+	// and whether it stands, and every source's snapshot.
+	NewsDigestState(ctx context.Context) (NewsDigestState, error)
+	// RecordNewsDigestRun records one finished news digest run, whole.
+	RecordNewsDigestRun(ctx context.Context, run NewsDigestRun) error
+	// DismissNewsDigest takes the standing digest down when id names the
+	// newest digest minted (true, also when already down); any other id is
+	// false and changes nothing.
+	DismissNewsDigest(ctx context.Context, id string) (bool, error)
+
 	// TurnStartedAt answers when a recorded turn was opened; ErrNotFound for a
 	// turn the workspace never recorded.
 	TurnStartedAt(ctx context.Context, id WorkspaceID, turn TurnID) (time.Time, error)

@@ -1,0 +1,198 @@
+// news_digest.proto — the daily Claude news digest overlay: one large panel,
+// drawn over the feed in EVERY webview at once, until any one of them
+// dismisses it (which takes it down in all of them).
+//
+// THE DAEMON WRITES THE DIGEST. Once a day it reads its watched sources
+// (Anthropic's news page, the docs and support release notes, the model
+// deprecation page, the Claude Code and Agent SDK release feeds and
+// changelog, the Agent SDK's npm releases, and the status history), keeps
+// only what is new since the last digest, and has a model condense it into
+// the sections below. The webview draws the view verbatim and derives
+// nothing; every element is a resolved value.
+//
+//   ┌─ NewsDigestOverlay ─────────────────────────────────────┐
+//   │ ┌ NewsDigestHeader ───────────────────────────────────┐ │
+//   │ │ [NewsDigestTitle]           [NewsDigestPeriod]  [×] │ │
+//   │ └─────────────────────────────────────────────────────┘ │
+//   │ ┌ NewsDigestSection (affects the agent-repl backend) ─┐ │
+//   │ │ [NewsDigestSectionHeading]                          │ │
+//   │ │ ┌ NewsDigestItem ─────────────────────────────────┐ │ │
+//   │ │ │ [title]                                [impact] │ │ │
+//   │ │ │ [summary]                                       │ │ │
+//   │ │ │ [link] [link]                                   │ │ │
+//   │ │ └─────────────────────────────────────────────────┘ │ │
+//   │ └─────────────────────────────────────────────────────┘ │
+//   │ … one section per kind that has items …                 │
+//   │ ┌ NewsDigestSources ──────────────────────────────────┐ │
+//   │ │ source · checked / failed                           │ │
+//   │ └─────────────────────────────────────────────────────┘ │
+//   └─────────────────────────────────────────────────────────┘
+
+syntax = "proto3";
+
+package frontend.v1;
+
+option go_package = "agentrepl/proto/frontend/v1;frontendv1";
+
+// The whole digest overlay. Always complete: a webview replaces whatever it
+// drew with this, never merges.
+message NewsDigestOverlay {
+  // The digest's identity, echoed back unchanged to dismiss it.
+  NewsDigestId id = 1;
+  // The title line and the period the digest covers.
+  NewsDigestHeader header = 2;
+  // The digest's sections, most important first. Only sections with items
+  // are present; a digest with no items is never shown.
+  repeated NewsDigestSection sections = 3;
+  // Every source the digest read, with whether reading it worked.
+  NewsDigestSources sources = 4;
+}
+
+// A digest's identity: minted by the daemon, opaque to the client, echoed
+// verbatim by DismissNewsDigest so a dismiss can only name a digest the
+// daemon served.
+message NewsDigestId {
+  // Opaque; compared byte-wise, never parsed.
+  string value = 1;
+}
+
+// The overlay's header row: the title and the covered period. The dismiss
+// control beside them is the webview's own, wired to DismissNewsDigest.
+message NewsDigestHeader {
+  NewsDigestTitle title = 1;
+  NewsDigestPeriod period = 2;
+}
+
+// The title line, composed by the daemon ("Claude news · Oct 2").
+message NewsDigestTitle {
+  // Drawn verbatim.
+  string text = 1;
+}
+
+// The wall-clock span the digest covers: from the previous digest's run to
+// this one's. The webview formats the two instants in its locale.
+message NewsDigestPeriod {
+  // Start of the covered span, epoch milliseconds.
+  int64 from_ms = 1;
+  // End of the covered span (when this digest was made), epoch milliseconds.
+  int64 to_ms = 2;
+}
+
+// One section: every item of one kind.
+message NewsDigestSection {
+  // The section's heading, composed by the daemon.
+  NewsDigestSectionHeading heading = 1;
+  // Which kind of news the section holds. The arm decides the section's
+  // accent (a backend-affecting section is drawn as a warning); the heading
+  // text is the daemon's and is drawn verbatim.
+  NewsDigestSectionKind kind = 2;
+  // The section's items, most important first. Never empty.
+  repeated NewsDigestItem items = 3;
+}
+
+// A section's heading text.
+message NewsDigestSectionHeading {
+  // Drawn verbatim.
+  string text = 1;
+}
+
+// What kind of news a section holds. THE ARM IS THE KIND; exactly one is set.
+message NewsDigestSectionKind {
+  oneof kind {
+    // Changes that affect agent-repl's own backend: the Claude Agent SDK and
+    // Claude Code (removals, breaking changes, deprecations, changes to how
+    // they may be paid for or used with a subscription). Ranked first and
+    // drawn as a warning.
+    NewsDigestKindBackend backend = 1;
+    // Deprecations, retirements and announced future removals elsewhere
+    // (models, API features, apps).
+    NewsDigestKindDeprecation deprecation = 2;
+    // Pricing, plan, usage-limit, terms and policy changes.
+    NewsDigestKindPolicy policy = 3;
+    // New features, models and products.
+    NewsDigestKindFeature feature = 4;
+    // Releases and changelog entries with no larger story.
+    NewsDigestKindRelease release = 5;
+    // Incidents and outages.
+    NewsDigestKindIncident incident = 6;
+  }
+}
+// Affects agent-repl's backend.
+message NewsDigestKindBackend {}
+// A deprecation or announced removal.
+message NewsDigestKindDeprecation {}
+// A pricing, plan, terms or policy change.
+message NewsDigestKindPolicy {}
+// A new feature, model or product.
+message NewsDigestKindFeature {}
+// A release or changelog entry.
+message NewsDigestKindRelease {}
+// An incident or outage.
+message NewsDigestKindIncident {}
+
+// One piece of news.
+message NewsDigestItem {
+  NewsDigestItemTitle title = 1;
+  NewsDigestItemSummary summary = 2;
+  // When the change takes effect, for an announced future change; UNSET when
+  // the source states no date or the change is already in effect.
+  optional NewsDigestItemEffective effective = 3;
+  // The sources the item is drawn from, most authoritative first. Never
+  // empty: an item always links to where it was read.
+  repeated NewsDigestLink links = 4;
+}
+
+// An item's one-line title, drawn verbatim.
+message NewsDigestItemTitle {
+  string text = 1;
+}
+
+// An item's summary: two or three sentences, drawn verbatim, saying what
+// changed and what it means for a user of Claude Code and the Agent SDK.
+message NewsDigestItemSummary {
+  string text = 1;
+}
+
+// When an announced change takes effect.
+message NewsDigestItemEffective {
+  // The date as the source states it ("2026-11-01", "early November"),
+  // drawn verbatim.
+  string text = 1;
+}
+
+// A hyperlink to a source. Opened in the system browser.
+message NewsDigestLink {
+  // The link's words, drawn verbatim.
+  string label = 1;
+  // An absolute https URL.
+  string url = 2;
+}
+
+// The sources the digest read, in the daemon's order.
+message NewsDigestSources {
+  repeated NewsDigestSource sources = 1;
+}
+
+// One watched source and how reading it went.
+message NewsDigestSource {
+  // The source's display name ("Agent SDK releases").
+  string name = 1;
+  // The source's own URL, drawn as a link.
+  string url = 2;
+  // THE ARM IS THE OUTCOME; exactly one is set.
+  oneof outcome {
+    // Read; this many new entries since the previous digest (zero is legal).
+    NewsDigestSourceRead read = 3;
+    // Could not be read; the digest is made without it.
+    NewsDigestSourceFailed failed = 4;
+  }
+}
+// A source that was read.
+message NewsDigestSourceRead {
+  uint32 new_entries = 1;
+}
+// A source that could not be read.
+message NewsDigestSourceFailed {
+  // Why, in the daemon's words. Drawn verbatim.
+  string reason = 1;
+}
