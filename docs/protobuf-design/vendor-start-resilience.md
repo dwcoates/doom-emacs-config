@@ -35,8 +35,11 @@ The owner wants:
 
 1. Backoff is multiplicative ×1.5 from 200ms, capped at 5000ms, for a ten-minute
    window (200, 300, 450, 675, 1013, 1519, 2278, 3417, 5000, 5000, …).
-2. The ten-minute window is wall time measured from "the most recent failure"
-   — exact anchor under clarification (see open questions).
+2. The ten-minute window is wall time measured from the START of the most
+   recent CONTIGUOUS sequence of failures: the first failure after a success
+   (or after the session was first asked to start) opens the window, every
+   retry inside it leaves the anchor where it is, and a successful start
+   closes the sequence so the next failure opens a fresh window.
 3. Only failures that can be retried are retried; a non-retryable failure
    surfaces as a DIFFERENT footer substatus ("vendor rejection" vs "vendor
    failed").
@@ -62,6 +65,37 @@ The owner wants:
 13. Logging is added for what the vendor was doing when a start times out.
 14. Footer wording: substatus "vendor failed"; activity "Claude SDK failed to
     start · restart: SPC o C-c".
+
+## Scope (settled 2026-10-02)
+
+- Objective: a vendor start that fails transiently is retried on a long capped
+  backoff, the footer says plainly where it stands, prompts are never lost while
+  the session is down, and `SPC o C-c` always restarts a stuck workspace at once.
+- Frontend component: yes — the footer strip and the webapp's expanded footer,
+  so figma→idl governs those views.
+- Systems: shim, daemon, webapp, Emacs lisp; store and sidecar presumed
+  untouched until the stop/liveness stage says otherwise.
+- Non-additive changes known up front: the empty
+  `StartSessionVendorStartFailed` arm is replaced by a cause that separates
+  retryable from rejected; the `disconnected · start_failed` substatus gives way
+  to vendor retry / vendor rejection / vendor failed; the drop-held-prompts-on-
+  bring-up-failure semantics of `FooterStatusActivityStartFailed.dropped_prompts`
+  and `HeldPromptSessionStartingHold` are reversed (prompts stay held);
+  `RestartWorkspaceRequest.force` and the graceful mode are removed, and
+  `RestartWorkspaceSuccess`'s "scheduled" wording with them.
+
+## Iteration sequence (settled 2026-10-02, accepted as proposed)
+
+1. Shim start-failure vocabulary (retryable vs rejection) and the owner of the
+   retry loop.
+2. Footer substatus arms (vendor retry / vendor rejection / vendor failed) and
+   their activity lines.
+3. The "after reconnect" held-prompt hold, replacing drop-on-failure.
+4. RestartWorkspace as a single immediate mode.
+5. Consolidated turn/detached-work stop and liveness surfacing to every client.
+
+A later stage is entered only once the earlier ones are settled; any stage may
+be reopened, which reopens every decision downstream of it.
 
 ## Core design principles
 
