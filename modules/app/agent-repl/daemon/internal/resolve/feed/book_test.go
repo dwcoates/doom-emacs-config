@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -675,5 +676,65 @@ func TestAnUnstampedEntryAtAPagesHeadIsDrawn(t *testing.T) {
 	// Assert: nothing names its turn, so it is drawn by position.
 	if got := rowIDs(pageRows(t, page)); len(got) != 1 || got[0] != h.responseRowID("ans-1") {
 		t.Fatalf("page rows = %v, want the unstamped answer", got)
+	}
+}
+
+// ---- a reader that opened before a session was up ----
+
+func TestAWatchOpeningLoadsTheNewestPageForAReaderThatHadNoSource(t *testing.T) {
+	// Arrange: the feed was opened before a session was up; then one is.
+	h := newHarness(t)
+	store := h.mainBook(3, promptsBook(2))
+	store.noSource = true
+	rows := h.follow(rootFeed(), "reader-1")
+	store.mu.Lock()
+	store.noSource = false
+	store.mu.Unlock()
+
+	// Act: the session's main watch opens (tail_only: an empty page).
+	h.resolver.OnHistoryPage(testWorkspace, mainAgent(), &conversationv1.HistoryPage{})
+
+	// Assert: the newest page reaches the reader's tail.
+	for _, want := range []string{h.promptRowID("turn-0"), h.promptRowID("turn-1")} {
+		select {
+		case row := <-rows:
+			if row.GetId().GetValue() != want {
+				t.Fatalf("pushed %q, want %q", row.GetId().GetValue(), want)
+			}
+		case <-time.After(tailWait):
+			t.Fatalf("the newest page never reached the waiting reader's tail")
+		}
+	}
+}
+
+func TestAWatchOpeningLoadsNothingWithoutAWaitingReader(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	store := h.mainBook(3, promptsBook(2))
+
+	// Act.
+	h.resolver.OnHistoryPage(testWorkspace, mainAgent(), &conversationv1.HistoryPage{})
+	h.openPage(rootFeed(), "reader-1")
+
+	// Assert: only the reader's own open read.
+	if got := store.readCount(); got != 1 {
+		t.Fatalf("reads = %d, want the reader's open alone", got)
+	}
+}
+
+func TestTheOldestPageAtTheStartCarriesRowsKeyedAboveTheHistory(t *testing.T) {
+	// Arrange: a fork's ported question was drawn when its watch opened,
+	// above the history the reader's open then loads.
+	h := newHarness(t)
+	h.mainBook(3, promptsBook(2))
+	h.ported = []PortedPrompt{{Turn: "parent-1", Text: "the parent asked", Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT}}
+	h.resolver.OnHistoryPage(testWorkspace, mainAgent(), &conversationv1.HistoryPage{})
+
+	// Act.
+	page, _ := h.openPage(rootFeed(), "reader-1")
+
+	// Assert: the conversation's start is one page, from the very top.
+	if got := len(pageRows(t, page)); got != 3 {
+		t.Fatalf("page rows = %v, want the ported question and both prompts", rowIDs(pageRows(t, page)))
 	}
 }
