@@ -15,11 +15,13 @@ type Args struct {
 	Module string
 	// Record appends the run's suite timings to test_time.csv.
 	Record bool
+	// Coverage enables the expensive coverage instrumentation and reports.
+	Coverage bool
 	// Selected is the --suites narrowing; EMPTY MEANS EVERY SUITE.
 	Selected []string
 }
 
-// ParseArgs reads `--module DIR [--record] [--suites a,b]`. An unknown suite
+// ParseArgs reads `--module DIR [--record] [--coverage] [--suites a,b]`. An unknown suite
 // is an error, never a silently empty run: a caller that misspells a suite
 // must not be told it passed.
 func ParseArgs(argv []string) (Args, error) {
@@ -29,6 +31,8 @@ func ParseArgs(argv []string) (Args, error) {
 		switch {
 		case arg == "--record":
 			a.Record = true
+		case arg == "--coverage":
+			a.Coverage = true
 		case arg == "--module":
 			if i+1 >= len(argv) {
 				return Args{}, errors.New("--module needs a directory")
@@ -52,7 +56,7 @@ func ParseArgs(argv []string) (Args, error) {
 			}
 			a.Selected = append(a.Selected, sel...)
 		default:
-			return Args{}, fmt.Errorf("unknown argument '%s', expected --record or --suites <list>", arg)
+			return Args{}, fmt.Errorf("unknown argument '%s', expected --record, --coverage, or --suites <list>", arg)
 		}
 	}
 	if a.Module == "" {

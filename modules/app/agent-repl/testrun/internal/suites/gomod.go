@@ -50,9 +50,8 @@ func goPackageArg(rel string) string {
 }
 
 // goModuleUnits is every tested package of the module split the one Go way
-// (goPkg), all writing coverage counters into one directory per package, plus
-// the module's vet unit and one report unit that merges the counters into the
-// module's function report, the shape report-nonlisp-coverage.sh prints.
+// (goPkg), plus the module's vet unit. Coverage adds counters and one report
+// unit only when the caller explicitly asks for it.
 func goModuleUnits(l Layout, s roster.Suite) (Units, error) {
 	dir := l.resolve(s.Path)
 	pkgs, err := goTestedPackages(dir)
@@ -62,15 +61,22 @@ func goModuleUnits(l Layout, s roster.Suite) (Units, error) {
 	if len(pkgs) == 0 {
 		return Units{}, fmt.Errorf("suites: %s has no tested packages under %s", s.Name, dir)
 	}
+	return goModuleUnitsForPackages(l, s, dir, pkgs)
+}
+
+func goModuleUnitsForPackages(l Layout, s roster.Suite, dir string, pkgs []string) (Units, error) {
 	covRoot := filepath.Join(l.Work, "cover", s.Name)
 	vet := spec(s.Name+":vet", s.Name, dir, append(append([]string{"go", "vet"}, goTestVetFlags...), "./..."))
 	u := Units{Atomic: []run.Spec{vet}}
 	var reportDeps []string
+	hasTests := false
 	for i, rel := range pkgs {
 		p := goPkg{
 			Suite: s.Name, Module: dir, Rel: rel,
-			Bin:    filepath.Join(l.Work, "bin", s.Name, fmt.Sprintf("%03d.test", i)),
-			CovDir: filepath.Join(covRoot, fmt.Sprintf("%03d", i)),
+			Bin: filepath.Join(l.Work, "bin", s.Name, fmt.Sprintf("%03d.test", i)),
+		}
+		if l.Coverage {
+			p.CovDir = filepath.Join(covRoot, fmt.Sprintf("%03d", i))
 		}
 		build, split, err := p.units()
 		if err != nil {
@@ -81,14 +87,19 @@ func goModuleUnits(l Layout, s roster.Suite) (Units, error) {
 			continue
 		}
 		u.Splits = append(u.Splits, *split)
-		reportDeps = append(reportDeps, split.Group)
+		hasTests = true
+		if l.Coverage {
+			reportDeps = append(reportDeps, split.Group)
+		}
 	}
-	if len(reportDeps) == 0 {
+	if !hasTests {
 		return Units{}, fmt.Errorf("suites: %s has test files but no test to run under %s", s.Name, dir)
 	}
-	report := spec(s.Name+":coverage", s.Name, dir,
-		[]string{l.Self, "cover-report", "-name", s.Name, "-module", dir, "-covdirs", covRoot})
-	report.Deps = reportDeps
-	u.Atomic = append(u.Atomic, report)
+	if l.Coverage {
+		report := spec(s.Name+":coverage", s.Name, dir,
+			[]string{l.Self, "cover-report", "-name", s.Name, "-module", dir, "-covdirs", covRoot})
+		report.Deps = reportDeps
+		u.Atomic = append(u.Atomic, report)
+	}
 	return u, nil
 }

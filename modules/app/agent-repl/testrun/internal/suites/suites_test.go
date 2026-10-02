@@ -481,6 +481,64 @@ func TestGoPkgUnitsUsesACustomBuild(t *testing.T) {
 	}
 }
 
+func TestGoModuleCoverageModes(t *testing.T) {
+	for _, coverage := range []bool{false, true} {
+		t.Run(map[bool]string{false: "ordinary run", true: "coverage run"}[coverage], func(t *testing.T) {
+			// Arrange
+			module := goPackageFixture(t, "func TestA(t *testing.T) {}\n")
+			l := Layout{Module: module, Work: t.TempDir(), Self: "/testrun", Coverage: coverage}
+			s := roster.Suite{Name: "m"}
+
+			// Act
+			u, err := goModuleUnitsForPackages(l, s, module, []string{"p"})
+
+			// Assert
+			if err != nil {
+				t.Fatal(err)
+			}
+			var build, report bool
+			for _, unit := range u.Atomic {
+				build = build || unit.ID == "m:p:build" && strings.Contains(strings.Join(unit.Argv, " "), "-cover")
+				report = report || unit.ID == "m:coverage"
+			}
+			if build != coverage || report != coverage {
+				t.Fatalf("coverage=%v: instrumented build=%v report=%v", coverage, build, report)
+			}
+		})
+	}
+}
+
+func TestVitestCoverageModes(t *testing.T) {
+	for _, coverage := range []bool{false, true} {
+		t.Run(map[bool]string{false: "ordinary run", true: "coverage run"}[coverage], func(t *testing.T) {
+			// Arrange
+			dir := t.TempDir()
+			l := Layout{Module: dir, Work: t.TempDir(), Coverage: coverage}
+			s := roster.Suite{Name: "webapp"}
+
+			// Act
+			u, err := vitestUnitsForFiles(l, s, dir, []string{"src/a.test.ts"})
+
+			// Assert
+			if err != nil {
+				t.Fatal(err)
+			}
+			chunk := u.Splits[0].Chunk("webapp#00", []string{"src/a.test.ts"})
+			chunkCoverage := false
+			for _, arg := range chunk.Argv {
+				chunkCoverage = chunkCoverage || arg == "--coverage"
+			}
+			report := false
+			for _, unit := range u.Atomic {
+				report = report || unit.ID == "webapp:coverage"
+			}
+			if chunkCoverage != coverage || report != coverage {
+				t.Fatalf("coverage=%v: chunk coverage=%v report=%v argv=%v", coverage, chunkCoverage, report, chunk.Argv)
+			}
+		})
+	}
+}
+
 func TestQuietGoTestOutput(t *testing.T) {
 	// Arrange
 	out := []byte("=== RUN   TestA\n=== PAUSE TestA\n=== CONT  TestA\n    a_test.go:3: a log line\n--- PASS: TestA (0.10s)\n    --- PASS: TestA/sub (0.00s)\nPASS\ncoverage: 50.0% of statements\n")
