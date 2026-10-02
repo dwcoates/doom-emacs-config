@@ -211,10 +211,26 @@ func printUnitSummary(log *run.Log, results []run.Result, slots int, start, end 
 		log.Infof("  %8.3fs  %s [%s] (estimated %.1fs, cpu %.1fs)", r.Wall(), r.Spec.ID, r.Spec.Suite, r.Spec.Est, r.CPU)
 	}
 	for _, r := range results {
-		if w := r.Wall(); w > 1 && r.CPU > 1.5*w {
-			log.Infof("unit %s used %.1f cores on average (%.1fs cpu in %.1fs): it is not pinned to one core", r.Spec.ID, r.CPU/w, r.CPU, w)
+		if line, over := overCores(r); over {
+			log.Infof("%s", line)
 		}
 	}
+}
+
+// overCores reports a unit whose reaped processes used more cores, on
+// average, than the slots it held: half a core past its width, over a run
+// long enough (above one second) for the average to mean something. Only
+// CPU the unit's own process tree reaped is visible here; work done in a VM
+// or by an unreaped descendant is not, which is why such a unit must be
+// capped to its width by its own command line.
+func overCores(r run.Result) (string, bool) {
+	w := r.Wall()
+	width := r.Spec.Width()
+	if w <= 1 || r.CPU <= (float64(width)+0.5)*w {
+		return "", false
+	}
+	return fmt.Sprintf("unit %s used %.1f cores on average (%.1fs cpu in %.1fs) but holds %d core slot(s): it is not pinned to its width",
+		r.Spec.ID, r.CPU/w, r.CPU, w, width), true
 }
 
 func printSuiteSummaries(log *run.Log, passed, declined, failed []run.SuiteResult) {

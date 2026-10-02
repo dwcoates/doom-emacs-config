@@ -295,6 +295,45 @@ func TestCanonicalTimingFileParses(t *testing.T) {
 	}
 }
 
+func TestOverCores(t *testing.T) {
+	at := time.Date(2026, 10, 2, 0, 0, 0, 0, time.UTC)
+	result := func(wall, cpu float64, slots int) run.Result {
+		var sp run.Spec
+		sp.ID, sp.Slots = "u", slots
+		return run.Result{Spec: sp, Start: at, End: at.Add(time.Duration(wall * float64(time.Second))), CPU: cpu}
+	}
+	tests := []struct {
+		name     string
+		res      run.Result
+		wantOver bool
+		wantLine string
+	}{
+		{name: "one core in one slot", res: result(4, 4, 0)},
+		{name: "1.5 cores in one slot is the limit", res: result(4, 6, 0)},
+		{
+			name: "past 1.5 cores in one slot", res: result(4, 7, 0), wantOver: true,
+			wantLine: "unit u used 1.8 cores on average (7.0s cpu in 4.0s) but holds 1 core slot(s): it is not pinned to its width",
+		},
+		{name: "two cores in two slots", res: result(4, 8, 2)},
+		{
+			name: "past 2.5 cores in two slots", res: result(4, 11, 2), wantOver: true,
+			wantLine: "unit u used 2.8 cores on average (11.0s cpu in 4.0s) but holds 2 core slot(s): it is not pinned to its width",
+		},
+		{name: "a unit of a second or less is too short to judge", res: result(1, 5, 0)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			line, over := overCores(tt.res)
+
+			// Assert
+			if over != tt.wantOver || line != tt.wantLine {
+				t.Fatalf("overCores = %q, %v; want %q, %v", line, over, tt.wantLine, tt.wantOver)
+			}
+		})
+	}
+}
+
 func TestRunID(t *testing.T) {
 	// Act
 	got := RunID(time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC), "0123456789abcdef", 42)
