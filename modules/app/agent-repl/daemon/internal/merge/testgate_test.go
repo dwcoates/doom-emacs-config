@@ -55,6 +55,12 @@ func TestParseSuiteStatesReadsTheScriptsOwnLines(t *testing.T) {
 			suite: "webapp",
 			want:  suiteStateSkipped,
 		},
+		{
+			name:  "a declined line",
+			line:  "[agent-repl-tests] e2e-emacs: DECLINED after 0.125s — its precondition is not met (exit 77); see its message above",
+			suite: "e2e-emacs",
+			want:  suiteStateDeclined,
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -75,16 +81,50 @@ func TestParseSuiteStatesReadsTheScriptsOwnLines(t *testing.T) {
 // TestParseSuiteStatesLetsALaterLineWin covers a suite reported skipped and then
 // run: the run is what happened.
 func TestParseSuiteStatesLetsALaterLineWin(t *testing.T) {
-	// Arrange: a skip followed by a pass.
-	output := "[agent-repl-tests] daemon: not selected by --suites, skipping\n" +
-		"[agent-repl-tests] daemon: passed in 3s\n"
+	tests := []struct {
+		name, output string
+		want         suiteState
+	}{
+		{name: "pass after skip", output: "[agent-repl-tests] daemon: not selected by --suites, skipping\n[agent-repl-tests] daemon: passed in 3s\n", want: suiteStatePassed},
+		{name: "skip after pass", output: "[agent-repl-tests] daemon: passed in 3s\n[agent-repl-tests] daemon: not selected by --suites, skipping\n", want: suiteStateSkipped},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			states := parseSuiteStates(tt.output)
 
-	// Act.
-	states := parseSuiteStates(output)
+			// Assert
+			if states["daemon"] != tt.want {
+				t.Fatalf("the suite reads %v, want %v", states["daemon"], tt.want)
+			}
+		})
+	}
+}
 
-	// Assert.
-	if states["daemon"] != suiteStatePassed {
-		t.Fatalf("the suite reads %v, want the later pass to win", states["daemon"])
+func TestDeclinedSuiteSettlesItsTabRow(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	output := "sandbox unavailable\n[agent-repl-tests] e2e-emacs: DECLINED after 0.125s — its precondition is not met (exit 77); see its message above\n"
+
+	// Act
+	rows, err := h.o.paintSuites([]string{"e2e-emacs"}, output)
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("rows = %d, want one", len(rows))
+	}
+	if _, passed := rows[0].GetState().(*frontendv1.FeedMergeTestSuite_Passed); !passed {
+		t.Fatalf("declined suite state = %T, want non-failure terminal", rows[0].GetState())
+	}
+	var painted string
+	for _, span := range rows[0].GetOutput() {
+		painted += span.GetText()
+	}
+	if !strings.Contains(painted, "DECLINED") {
+		t.Fatalf("declined suite output = %q", painted)
 	}
 }
 

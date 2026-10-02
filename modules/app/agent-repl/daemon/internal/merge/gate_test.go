@@ -192,6 +192,7 @@ func TestSuiteEdgeReadsTheScriptsLines(t *testing.T) {
 		{line: "[agent-repl-tests] daemon: starting", name: "daemon", state: suiteStateRunning, ok: true},
 		{line: "[agent-repl-tests] daemon: passed in 3s", name: "daemon", state: suiteStatePassed, ok: true},
 		{line: "[agent-repl-tests] ERROR: webapp failed after 4s with exit code 1", name: "webapp", state: suiteStateFailed, ok: true},
+		{line: "[agent-repl-tests] e2e-emacs: DECLINED after 0.125s — its precondition is not met (exit 77)", name: "e2e-emacs", state: suiteStateDeclined, ok: true},
 		{line: "some output", ok: false},
 	}
 	for _, tt := range tests {
@@ -204,5 +205,25 @@ func TestSuiteEdgeReadsTheScriptsLines(t *testing.T) {
 				t.Fatalf("suiteEdge = (%q, %v, %v), want (%q, %v, %v)", name, state, ok, tt.name, tt.state, tt.ok)
 			}
 		})
+	}
+}
+
+func TestDeclinedSuiteUsesTheNonFailurePresentation(t *testing.T) {
+	// Arrange
+	g := &gateRun{}
+
+	// Act
+	g.setTabSuite("e2e-emacs", suiteStateDeclined)
+	line := suiteLine("e2e-emacs", suiteStateDeclined).GetTesting()
+
+	// Assert
+	if len(g.suites) != 1 {
+		t.Fatalf("tab suites = %d, want one", len(g.suites))
+	}
+	if _, passed := g.suites[0].GetState().(*frontendv1.FeedMergeTestSuite_Passed); !passed {
+		t.Fatalf("tab state = %T, want passed/non-failure", g.suites[0].GetState())
+	}
+	if _, passed := line.GetEdge().(*frontendv1.FooterMergeStepSuite_Passed); !passed {
+		t.Fatalf("footer edge = %T, want passed/non-failure", line.GetEdge())
 	}
 }

@@ -38,6 +38,10 @@ var suitePassed = regexp.MustCompile(`(?m)^.*?([A-Za-z0-9_-]+): passed in ([0-9]
 // suite's exit code.
 var suiteFailed = regexp.MustCompile(`(?m)^.*?([A-Za-z0-9_-]+) failed after ([0-9]+(?:\.[0-9]+)?)s with exit code (-?[0-9]+)\s*$`)
 
+// suiteDeclined matches a selected suite whose precondition was unmet. A
+// decline is terminal and non-failing: the gate continues and may pass.
+var suiteDeclined = regexp.MustCompile(`(?m)^.*?([A-Za-z0-9_-]+): DECLINED after ([0-9]+(?:\.[0-9]+)?)s\b.*$`)
+
 // suiteSkipped matches the line the script prints for a suite `--suites` left
 // out. A skipped suite is not a state the tab draws: it was never selected.
 var suiteSkipped = regexp.MustCompile(`(?m)^.*?([A-Za-z0-9_-]+): not selected by --suites, skipping\s*$`)
@@ -93,7 +97,9 @@ func (o *orchestrator) paintSuites(selected []string, output string) ([]*fronten
 		}
 		row := &frontendv1.FeedMergeTestSuite{Name: name, Output: spans}
 		switch states[name] {
-		case suiteStatePassed:
+		case suiteStatePassed, suiteStateDeclined:
+			// The wire has no declined arm. Preserve the explicit DECLINED line
+			// in Output and use the existing non-failure terminal glyph.
 			row.State = &frontendv1.FeedMergeTestSuite_Passed{Passed: &frontendv1.FeedMergeTestSuitePassed{}}
 		case suiteStateFailed:
 			row.State = &frontendv1.FeedMergeTestSuite_Failed{Failed: &frontendv1.FeedMergeTestSuiteFailed{}}
@@ -134,6 +140,8 @@ const (
 	suiteStatePassed
 	// suiteStateFailed is a suite the script reported failing.
 	suiteStateFailed
+	// suiteStateDeclined is a selected suite whose precondition was unmet.
+	suiteStateDeclined
 	// suiteStateSkipped is a suite --suites left out; it draws no row.
 	suiteStateSkipped
 )
@@ -142,14 +150,14 @@ const (
 // suite that was reported skipped and then run reads as run.
 func parseSuiteStates(output string) map[string]suiteState {
 	states := map[string]suiteState{}
-	for _, m := range suiteSkipped.FindAllStringSubmatch(output, -1) {
-		states[m[1]] = suiteStateSkipped
-	}
-	for _, m := range suitePassed.FindAllStringSubmatch(output, -1) {
-		states[m[1]] = suiteStatePassed
-	}
-	for _, m := range suiteFailed.FindAllStringSubmatch(output, -1) {
-		states[m[1]] = suiteStateFailed
+	for _, line := range strings.Split(output, "\n") {
+		if m := suiteSkipped.FindStringSubmatch(line); m != nil {
+			states[m[1]] = suiteStateSkipped
+			continue
+		}
+		if name, state, settled := settledSuite(line); settled {
+			states[name] = state
+		}
 	}
 	return states
 }
@@ -196,7 +204,7 @@ func splitSuiteOutput(output string, selected []string) map[string]string {
 			lines[m[1]] = append(lines[m[1]], line)
 			continue
 		}
-		name, settled := settledSuite(line)
+		name, _, settled := settledSuite(line)
 		if !settled {
 			pending = append(pending, line)
 			continue
@@ -221,14 +229,17 @@ var unitBegin = regexp.MustCompile(`^.*?unit (\S+) \[([A-Za-z0-9_-]+)\] output:\
 var unitVerdict = regexp.MustCompile(`^.*?unit (\S+) \[([A-Za-z0-9_-]+)\] (?:ok|FAILED|declined|NOT RUN)\b`)
 
 // settledSuite reports the suite one line settles, if it settles one.
-func settledSuite(line string) (string, bool) {
+func settledSuite(line string) (string, suiteState, bool) {
 	if m := suitePassed.FindStringSubmatch(line); m != nil {
-		return m[1], true
+		return m[1], suiteStatePassed, true
 	}
 	if m := suiteFailed.FindStringSubmatch(line); m != nil {
-		return m[1], true
+		return m[1], suiteStateFailed, true
 	}
-	return "", false
+	if m := suiteDeclined.FindStringSubmatch(line); m != nil {
+		return m[1], suiteStateDeclined, true
+	}
+	return "", suiteStateRunning, false
 }
 
 // clampTail keeps the LAST n bytes of the output, on a line boundary, so the

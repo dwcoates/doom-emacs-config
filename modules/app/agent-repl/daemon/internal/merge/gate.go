@@ -212,12 +212,12 @@ func (g *gateRun) edge(line string) {
 	g.mu.Lock()
 	var row *frontendv1.FooterMergeTestRowState
 	switch state {
-	case suiteStatePassed, suiteStateFailed:
+	case suiteStatePassed, suiteStateFailed, suiteStateDeclined:
 		began, known := g.started[name]
 		if !known {
 			began = now
 		}
-		row = settledRowState(state == suiteStatePassed, now.Sub(began))
+		row = settledRowState(state != suiteStateFailed, now.Sub(began))
 	default:
 		g.started[name] = now
 		row = runningRowState(now)
@@ -240,7 +240,7 @@ func (g *gateRun) edge(line string) {
 func (g *gateRun) setTabSuite(name string, state suiteState) {
 	suite := &frontendv1.FeedMergeTestSuite{Name: name}
 	switch state {
-	case suiteStatePassed:
+	case suiteStatePassed, suiteStateDeclined:
 		suite.State = &frontendv1.FeedMergeTestSuite_Passed{Passed: &frontendv1.FeedMergeTestSuitePassed{}}
 	case suiteStateFailed:
 		suite.State = &frontendv1.FeedMergeTestSuite_Failed{Failed: &frontendv1.FeedMergeTestSuiteFailed{}}
@@ -256,17 +256,14 @@ func (g *gateRun) setTabSuite(name string, state suiteState) {
 	g.suites = append(g.suites, suite)
 }
 
-// suiteEdge reads one line of the script as a suite's edge: starting, passed
-// or failed.
+// suiteEdge reads one line of the script as a suite's edge: starting, passed,
+// failed or declined.
 func suiteEdge(line string) (string, suiteState, bool) {
 	if m := suiteStarting.FindStringSubmatch(line); m != nil {
 		return m[1], suiteStateRunning, true
 	}
-	if name, settled := settledSuite(line); settled {
-		if suitePassed.MatchString(line) {
-			return name, suiteStatePassed, true
-		}
-		return name, suiteStateFailed, true
+	if name, state, settled := settledSuite(line); settled {
+		return name, state, true
 	}
 	return "", suiteStateRunning, false
 }
