@@ -239,6 +239,8 @@ type fakeVerbs struct {
 	// feedLinkUnresolved and feedLinkErr are what OpenFeedLink answers.
 	feedLinkUnresolved *workspace.UnresolvedLink
 	feedLinkErr        error
+	// feedLinkReport is each OpenFeedLink call's report flag, in order.
+	feedLinkReport []bool
 
 	interruptOutcome workspace.InterruptOutcome
 	interruptErr     error
@@ -652,8 +654,9 @@ func (v *fakeVerbs) OpenInEditor(_ context.Context, _ ids.WorkspaceID, path stri
 
 // OpenFeedLink records the link and answers the seeded unresolved question
 // and error.
-func (v *fakeVerbs) OpenFeedLink(_ context.Context, _ ids.WorkspaceID, href string) (*workspace.UnresolvedLink, error) {
+func (v *fakeVerbs) OpenFeedLink(_ context.Context, _ ids.WorkspaceID, href string, report bool) (*workspace.UnresolvedLink, error) {
 	v.editorOpens = append(v.editorOpens, "link:"+href)
+	v.feedLinkReport = append(v.feedLinkReport, report)
 	return v.feedLinkUnresolved, v.feedLinkErr
 }
 
