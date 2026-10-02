@@ -991,6 +991,42 @@ type fakeFeed struct {
 	onReset func()
 	// rolledBackTurns records every RollBackTurns call's turns, in order.
 	rolledBackTurns [][]ids.TurnID
+	// mainAgents is every main agent the feed was told, in order.
+	mainAgents []string
+	// freshBooks is every workspace whose session came up fresh, in order.
+	freshBooks []ids.WorkspaceID
+	// sourcesUp is every workspace a history source came up for, in order.
+	sourcesUp []ids.WorkspaceID
+	// kept is every workspace whose newest page a failed start secured, in
+	// order; keptErr is what KeepNewestPage answers.
+	kept    []ids.WorkspaceID
+	keptErr error
+	// onKeep runs AT KeepNewestPage, so a test reads what stood at that moment.
+	onKeep func(ids.WorkspaceID)
+}
+
+// OnMainAgent records the main agent the feed was told.
+func (f *fakeFeed) OnMainAgent(_ ids.WorkspaceID, agent *conversationv1.AgentId) {
+	f.mainAgents = append(f.mainAgents, agent.GetValue())
+}
+
+// NoteFreshBook records a workspace whose session comes up fresh.
+func (f *fakeFeed) NoteFreshBook(ws ids.WorkspaceID) {
+	f.freshBooks = append(f.freshBooks, ws)
+}
+
+// SourceUp records that a history source came up.
+func (f *fakeFeed) SourceUp(ws ids.WorkspaceID) {
+	f.sourcesUp = append(f.sourcesUp, ws)
+}
+
+// KeepNewestPage records the secured page and answers keptErr.
+func (f *fakeFeed) KeepNewestPage(_ context.Context, ws ids.WorkspaceID) error {
+	f.kept = append(f.kept, ws)
+	if f.onKeep != nil {
+		f.onKeep(ws)
+	}
+	return f.keptErr
 }
 
 // RollBackTurns records the turns removed; the real resolver's own durable
@@ -1020,6 +1056,11 @@ func (f *fakeFeed) UpsertSynthesized(_ ids.WorkspaceID, _ feedid.Feed, row *fron
 // fakeFooter is a footer.Resolver.
 type fakeFooter struct {
 	footer.Resolver
+
+	// mainAgents is every main agent the footer was told, and historyPages the
+	// entry count of every page it was handed, in order.
+	mainAgents   []string
+	historyPages []int
 
 	closing      map[ids.WorkspaceID]*footer.CloseBlocked
 	closingSet   int
@@ -1057,6 +1098,16 @@ func (f *fakeFooter) SetParked(_ ids.WorkspaceID, parked bool) {
 // which is what the register wiring test asserts.
 func (f *fakeFooter) Prime(ws ids.WorkspaceID) {
 	f.primed = append(f.primed, ws)
+}
+
+// OnMainAgent records the main agent the footer was told.
+func (f *fakeFooter) OnMainAgent(_ ids.WorkspaceID, agent *conversationv1.AgentId) {
+	f.mainAgents = append(f.mainAgents, agent.GetValue())
+}
+
+// OnHistoryPage records the entries of every page the footer was handed.
+func (f *fakeFooter) OnHistoryPage(_ ids.WorkspaceID, _ *conversationv1.AgentId, page *conversationv1.HistoryPage) {
+	f.historyPages = append(f.historyPages, len(page.GetEntries()))
 }
 
 func newFakeFooter() *fakeFooter {

@@ -9,6 +9,7 @@ import (
 	shimv1 "agentrepl/proto/shim/v1"
 
 	"connectrpc.com/connect"
+	"google.golang.org/protobuf/proto"
 )
 
 // TestRememberPushedBashKeysACreatedAnnouncementsStart covers the WatchBash
@@ -733,5 +734,27 @@ func TestTheFakeModelsAJoinAsTheRealShimDoes(t *testing.T) {
 				t.Fatalf("turn in flight = %q, want %q", got, tt.wantInFlight)
 			}
 		})
+	}
+}
+
+// TestReadHistoryServesTheSeededBookBeforeAnyStartSession covers the store's
+// book being there from birth: a shim at its cold gate, or whose vendor start
+// is retried or refused, still pages the workspace's conversation.
+func TestReadHistoryServesTheSeededBookBeforeAnyStartSession(t *testing.T) {
+	// Arrange
+	raw, err := proto.Marshal(&conversationv1.HistoryEntry{Entry: &conversationv1.HistoryEntry_UserPrompt{UserPrompt: &conversationv1.AgentPrompt{}}})
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	srv := newServer(NewRecorder(), Profile{ResumeHistory: [][]byte{raw}}, nil)
+
+	// Act
+	resp, err := srv.ReadHistory(context.Background(), connect.NewRequest(&shimv1.ReadHistoryRequest{
+		Position: &shimv1.ReadHistoryRequest_First{First: &shimv1.ReadHistoryFirst{}},
+	}))
+
+	// Assert
+	if err != nil || len(resp.Msg.GetSuccess().GetPage().GetEntries()) != 1 {
+		t.Fatalf("ReadHistory = %v, %v; want the seeded entry before any StartSession", resp, err)
 	}
 }

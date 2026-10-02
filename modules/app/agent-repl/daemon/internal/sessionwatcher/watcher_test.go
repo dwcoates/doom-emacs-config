@@ -2201,6 +2201,25 @@ func TestMainKnownThroughIsTheNewestMainEntry(t *testing.T) {
 			},
 			want: "ptr-2",
 		},
+		{
+			name: "an older row re-written after a newer one leaves the mark on the newer",
+			served: func(w *watcher) {
+				w.routeAgentResponseLocked(w.main, entryFrameAt(frameUpdate("main-1", activityUpdate(readActivity("act-1"))), "ptr-1"))
+				w.routeAgentResponseLocked(w.main, entryFrameAt(frameUpdate("main-1", activityUpdate(readActivity("act-2"))), "ptr-2"))
+				w.routeAgentResponseLocked(w.main, entryFrameAt(frameUpdate("main-1", activityUpdate(readActivity("act-1"))), "ptr-1"))
+			},
+			want: "ptr-2",
+		},
+		{
+			name: "a row first served on a page and re-written live leaves the mark",
+			served: func(w *watcher) {
+				w.routeAgentResponseLocked(w.main, &shimv1.WatchAgentResponse{Frame: &shimv1.WatchAgentResponse_Page{Page: &conversationv1.HistoryPage{
+					Entries: []*conversationv1.HistoryEntryAt{{At: &conversationv1.HistoryPointer{Value: "ptr-2"}}, {At: &conversationv1.HistoryPointer{Value: "ptr-1"}}},
+				}}})
+				w.routeAgentResponseLocked(w.main, entryFrameAt(frameUpdate("main-1", activityUpdate(readActivity("act-1"))), "ptr-1"))
+			},
+			want: "ptr-2",
+		},
 	}
 
 	for _, tt := range tests {

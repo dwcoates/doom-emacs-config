@@ -283,6 +283,7 @@ func (o pageOrigin) String() string {
 // its next StartTurn, and the rows that CLOSE AN ACT (routePageClosingsLocked).
 func (w *watcher) routeOpeningPageLocked(a *agentWatch, page *conversationv1.HistoryPage, origin pageOrigin) {
 	w.knowPagePromptsLocked(page)
+	w.noteServedPageLocked(watchKey(a.id), page)
 	if entries := page.GetEntries(); len(entries) > 0 {
 		if ptr := entries[0].GetAt(); ptr != nil {
 			w.adoptPagePointerLocked(a, ptr, origin)
@@ -291,7 +292,7 @@ func (w *watcher) routeOpeningPageLocked(a *agentWatch, page *conversationv1.His
 	if a.id == nil {
 		// THE MAIN WATCH'S OWN ROWS NAME THE MAIN AGENT for the views, before
 		// the page that needs it is replayed. See nameMainForViewsLocked.
-		if named := pageAgent(page); named != nil {
+		if named := PageAgent(page); named != nil {
 			w.nameMainForViewsLocked(named, "main_watch_page", false)
 		}
 		for _, entry := range page.GetEntries() {
@@ -362,6 +363,33 @@ func (w *watcher) adoptPagePointerLocked(a *agentWatch, ptr *conversationv1.Hist
 	w.known[key] = ptr
 }
 
+// noteServedLocked records that KEY's watch was served the entry PTR names,
+// and reports whether it was the FIRST time: a pointer served again names an
+// older entry re-written, which never moves the watch's mark (watcher.served).
+func (w *watcher) noteServedLocked(key string, ptr *conversationv1.HistoryPointer) bool {
+	value := ptr.GetValue()
+	if value == "" {
+		return false
+	}
+	set, ok := w.served[key]
+	if !ok {
+		set = map[string]struct{}{}
+		w.served[key] = set
+	}
+	if _, seen := set[value]; seen {
+		return false
+	}
+	set[value] = struct{}{}
+	return true
+}
+
+// noteServedPageLocked records every entry of a page as served to KEY's watch.
+func (w *watcher) noteServedPageLocked(key string, page *conversationv1.HistoryPage) {
+	for _, at := range page.GetEntries() {
+		w.noteServedLocked(key, at.GetAt())
+	}
+}
+
 // feedPage is the page the FEED is handed. A page's boundary says whether
 // older history remains BELOW it, and no opening page is read from the top of
 // the book any more: every watch and every turn opens tail_only or catches up
@@ -430,7 +458,14 @@ func (w *watcher) routePageCutLocked(a *agentWatch, frame *conversationv1.AgentF
 // routeEntryLocked routes one live history entry.
 func (w *watcher) routeEntryLocked(a *agentWatch, at *conversationv1.HistoryEntryAt) {
 	if ptr := at.GetAt(); ptr != nil {
-		w.known[watchKey(a.id)] = ptr
+		key := watchKey(a.id)
+		if w.noteServedLocked(key, ptr) {
+			w.known[key] = ptr
+		} else {
+			w.log.Debug("daemon.sessionwatcher.mark_kept", "an entry already served was served again (re-written); the watch's mark stays on the newest entry first served", dlog.Context{
+				"agent_id": a.id.GetValue(), "pointer": ptr.GetValue(),
+			})
+		}
 	}
 	entry := at.GetEntry()
 	if prompt := entry.GetUserPrompt(); prompt != nil {
@@ -1879,9 +1914,9 @@ func (w *watcher) isMainAgent(agent *conversationv1.AgentId) bool {
 	return w.mainAgent != nil && agent.GetValue() != "" && agent.GetValue() == w.mainAgent.GetValue()
 }
 
-// pageAgent answers the agent the first row of a page that names one states:
+// PageAgent answers the agent the first row of a page that names one states:
 // a prompt's recipient or a frame's own agent.
-func pageAgent(page *conversationv1.HistoryPage) *conversationv1.AgentId {
+func PageAgent(page *conversationv1.HistoryPage) *conversationv1.AgentId {
 	for _, entry := range page.GetEntries() {
 		if agent := entry.GetEntry().GetUserPrompt().GetAgent(); agent.GetValue() != "" {
 			return agent
