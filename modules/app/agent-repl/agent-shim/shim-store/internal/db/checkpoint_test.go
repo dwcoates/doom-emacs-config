@@ -143,6 +143,27 @@ func TestReadWALIndexReadsTheFrameCountAndTheBackfillMark(t *testing.T) {
 	}
 }
 
+func TestReadWALIndexReadsTheLogsSalt(t *testing.T) {
+	// Arrange: both header copies carry the same salt, as SQLite writes them.
+	content := walIndexBytes(walIndexVersion, 1, 10, 0)
+	for _, at := range []int{0, walIndexHeaderSize} {
+		binary.NativeEndian.PutUint32(content[at+walIndexSalt:], 0xdeadbeef)
+		binary.NativeEndian.PutUint32(content[at+walIndexSalt+4:], 7)
+	}
+	f := openBytes(t, content)
+
+	// Act
+	index, err := readWALIndex(f)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("readWALIndex: %v", err)
+	}
+	if index.salt != [2]uint32{0xdeadbeef, 7} {
+		t.Fatalf("salt = %v, want [0xdeadbeef 7]", index.salt)
+	}
+}
+
 func TestReadWALIndexRefusesAHeaderThatCannotBeTrusted(t *testing.T) {
 	torn := walIndexBytes(walIndexVersion, 1, 10, 0)
 	binary.NativeEndian.PutUint32(torn[walIndexHeaderSize+walIndexMxFrame:], 11)
@@ -929,5 +950,277 @@ func TestTheWALPinWatchTracksAPinOpenedAtTheClocksZeroInstant(t *testing.T) {
 	// Assert
 	if event != walPinOutlasted || held != time.Minute {
 		t.Fatalf("observe = (%v, %v), want the pin reported after 1m", event, held)
+	}
+}
+
+// ---- the checkpoint never holds the writer ----
+
+// stallCheckpoints makes every checkpoint stop inside its pass, after its
+// first WAL-index reading, until the returned release is called. stalled
+// receives once per checkpoint that reached the pass.
+func stallCheckpoints(t *testing.T, d *DB) (stalled <-chan struct{}, release func()) {
+	t.Helper()
+	reached := make(chan struct{}, 1)
+	hold := make(chan struct{})
+	d.runCheckpoint = func(c context.Context) (int, int64, int64, error) {
+		reached <- struct{}{}
+		<-hold
+		return d.passiveCheckpoint(c)
+	}
+	var once sync.Once
+	release = func() { once.Do(func() { close(hold) }) }
+	t.Cleanup(release)
+	return reached, release
+}
+
+// TestAReadAndAWriteCompleteWhileACheckpointIsStalled is the structural
+// assertion behind the checkpoint connection. Each operation runs
+// SYNCHRONOUSLY while a checkpoint is held inside its pass: if the pass ever
+// holds the writer again, a write does not fail slowly, it never returns, and
+// the package timeout says so.
+func TestAReadAndAWriteCompleteWhileACheckpointIsStalled(t *testing.T) {
+	tests := []struct {
+		name string
+		op   func(t *testing.T, d *DB)
+	}{
+		{
+			name: "the sidecar's cursor read",
+			op: func(t *testing.T, d *DB) {
+				if _, err := d.Cursors(ctx(), nil); err != nil {
+					t.Fatalf("Cursors while a checkpoint was stalled: %v", err)
+				}
+			},
+		},
+		{
+			name: "an interactive write",
+			op: func(t *testing.T, d *DB) {
+				entry := pageEntry("w-i", "u-i", "agent-1", frameItem(activityFrame("agent-1", "act-i", prose())))
+				if _, err := d.WriteBatch(ctx(), "test-producer", WriteInteractive, batch(entry), nil); err != nil {
+					t.Fatalf("interactive WriteBatch while a checkpoint was stalled: %v", err)
+				}
+			},
+		},
+		{
+			name: "a bulk write",
+			op: func(t *testing.T, d *DB) {
+				entry := pageEntry("w-b", "u-b", "agent-1", frameItem(activityFrame("agent-1", "act-b", prose())))
+				if _, err := d.WriteBatch(ctx(), "test-producer", WriteBulk, batch(entry), nil); err != nil {
+					t.Fatalf("bulk WriteBatch while a checkpoint was stalled: %v", err)
+				}
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Arrange: a checkpoint stalled inside its pass.
+			d, _ := newStore(t)
+			writeOne(t, d, "a")
+			stalled, release := stallCheckpoints(t, d)
+			done := make(chan error, 1)
+			go func() {
+				_, err := d.Checkpoint(ctx(), TriggerIdle)
+				done <- err
+			}()
+			<-stalled
+
+			// Act
+			test.op(t, d)
+
+			// Assert: the checkpoint was still inside its pass throughout,
+			// and finishes once let go.
+			select {
+			case err := <-done:
+				t.Fatalf("the checkpoint returned (%v) before it was released", err)
+			default:
+			}
+			release()
+			if err := <-done; err != nil {
+				t.Fatalf("Checkpoint: %v", err)
+			}
+		})
+	}
+}
+
+// TestTheCheckpointConnectionCheckpointsBesideAnOpenWriteTransaction pins the
+// SQLite behavior the design rests on: the real PASSIVE checkpoint, on the
+// checkpoint connection, completes while a write transaction holds the WAL
+// write lock with its own uncommitted change.
+func TestTheCheckpointConnectionCheckpointsBesideAnOpenWriteTransaction(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+	writeOne(t, d, "a")
+	tx, release, err := d.beginWrite(ctx(), WriteInteractive)
+	if err != nil {
+		t.Fatalf("beginWrite: %v", err)
+	}
+	defer release()
+	defer tx.Rollback() //nolint:errcheck // the fixture write is never committed
+	if _, err := tx.ExecContext(ctx(), `DELETE FROM cursor`); err != nil {
+		t.Fatalf("the fixture write did not take the write lock: %v", err)
+	}
+
+	// Act
+	busy, frames, checkpointed, err := d.passiveCheckpoint(ctx())
+
+	// Assert
+	if err != nil {
+		t.Fatalf("passiveCheckpoint beside an open write: %v", err)
+	}
+	if busy != 0 || frames == 0 || checkpointed != frames {
+		t.Fatalf("passiveCheckpoint = busy=%d frames=%d checkpointed=%d, want every committed frame copied", busy, frames, checkpointed)
+	}
+}
+
+// TestACheckpointWhoseLogRestartedBeforeItsResultWasReadCountsTheWholeLog
+// reproduces the one race a checkpoint off the writer meets: its pass copies
+// every frame, a producer's commit restarts the log, and the pass then reads
+// the backfill mark of the NEW log.
+func TestACheckpointWhoseLogRestartedBeforeItsResultWasReadCountsTheWholeLog(t *testing.T) {
+	// Arrange
+	d, s := newStore(t)
+	writeOne(t, d, "a")
+	d.runCheckpoint = func(c context.Context) (int, int64, int64, error) {
+		busy, frames, _, err := d.passiveCheckpoint(c)
+		if err != nil {
+			return 0, 0, 0, err
+		}
+		writeOne(t, d, "restarts-the-log")
+		// The new log's backfill mark, as the racing pass would read it.
+		return busy, frames, 0, nil
+	}
+
+	// Act
+	result, err := d.Checkpoint(ctx(), TriggerGrowth)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Checkpoint: %v", err)
+	}
+	if result.WALFrames == 0 || result.Checkpointed != result.WALFrames || result.Copied != result.WALFrames {
+		t.Fatalf("result = %+v, want the whole log counted as copied", result)
+	}
+	if records := checkpointRecords(t, s); len(records) != 1 || records[0]["level"] != "info" {
+		t.Fatalf("records = %v, want the one info record of a checkpoint that copied", records)
+	}
+}
+
+// TestTheSecondWALReadingNoticesARestart pins the premise of the test above:
+// the commit after a whole-log checkpoint really does restart the log, which
+// is what the salt says.
+func TestTheSecondWALReadingNoticesARestart(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+	writeOne(t, d, "a")
+	before, _, err := d.readWALUnderWriter(ctx())
+	if err != nil {
+		t.Fatalf("first reading: %v", err)
+	}
+	if _, _, _, err := d.passiveCheckpoint(ctx()); err != nil {
+		t.Fatalf("passiveCheckpoint: %v", err)
+	}
+	writeOne(t, d, "b")
+
+	// Act
+	after, _, err := d.readWALUnderWriter(ctx())
+
+	// Assert
+	if err != nil {
+		t.Fatalf("second reading: %v", err)
+	}
+	if after.salt == before.salt {
+		t.Fatalf("salt %v did not change across a restart", after.salt)
+	}
+}
+
+func TestCheckpointFailsLoudlyWhenTheSecondWALReadingFails(t *testing.T) {
+	// Arrange: the pass itself breaks the descriptor every reading uses.
+	d, s := newStore(t)
+	writeOne(t, d, "a")
+	d.runCheckpoint = func(c context.Context) (int, int64, int64, error) {
+		busy, frames, checkpointed, err := d.passiveCheckpoint(c)
+		d.wal.shm.Close() //nolint:errcheck // closed on purpose: the next read fails
+		return busy, frames, checkpointed, err
+	}
+	t.Cleanup(func() { d.wal.shm = nil })
+
+	// Act
+	_, err := d.Checkpoint(ctx(), TriggerGrowth)
+
+	// Assert
+	if !errors.Is(err, ErrStorage) {
+		t.Fatalf("Checkpoint = %v, want a storage failure", err)
+	}
+	s.assertLogged(t, "error", "reading the WAL-index after the growth-triggered checkpoint")
+}
+
+func TestACheckpointWhoseCallerHungUpDuringThePassIsRecordedAsAbandoned(t *testing.T) {
+	// Arrange: the caller hangs up while the pass runs, before the second
+	// reading queues.
+	d, s := newStore(t)
+	writeOne(t, d, "a")
+	hungUp, cancel := context.WithCancel(ctx())
+	defer cancel()
+	d.runCheckpoint = func(c context.Context) (int, int64, int64, error) {
+		busy, frames, checkpointed, err := d.passiveCheckpoint(c)
+		cancel()
+		return busy, frames, checkpointed, err
+	}
+
+	// Act
+	_, err := d.Checkpoint(hungUp, TriggerIdle)
+
+	// Assert
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Checkpoint = %v, want the caller's cancellation", err)
+	}
+	s.assertLogged(t, "info", "abandoned")
+	if errorsLogged := recordsAtLevel(t, s, "error"); len(errorsLogged) != 0 {
+		t.Fatalf("a hung-up caller logged errors: %v", errorsLogged)
+	}
+}
+
+func TestAWALReadingTakesTheWriterInTheBulkTierAndReportsItsWait(t *testing.T) {
+	// Arrange: an interactive writer holds the writer, and the clock advances
+	// while the reading waits.
+	clock := &fakeClock{}
+	_, log := newSink(t)
+	d, err := OpenWithOptions(filepath.Join(t.TempDir(), "store.db"), log, Options{Now: func() int64 { return testNow }, Clock: clock.Now})
+	if err != nil {
+		t.Fatalf("OpenWithOptions: %v", err)
+	}
+	t.Cleanup(func() { d.Close() }) //nolint:errcheck // best-effort test teardown
+	writeOne(t, d, "a")
+	queued := make(chan WriteClass, 1)
+	d.queuedForWrite = func(class WriteClass) { queued <- class }
+	release, err := d.acquireWrite(ctx(), WriteInteractive)
+	if err != nil {
+		t.Fatalf("acquireWrite: %v", err)
+	}
+	type reading struct {
+		index  walIndex
+		waited time.Duration
+		err    error
+	}
+	done := make(chan reading, 1)
+	go func() {
+		index, waited, err := d.readWALUnderWriter(ctx())
+		done <- reading{index, waited, err}
+	}()
+	class := <-queued
+
+	// Act
+	clock.advance(40 * time.Millisecond)
+	release()
+	got := <-done
+
+	// Assert
+	if class != WriteBulk {
+		t.Fatalf("the reading queued as %v, want bulk", class)
+	}
+	if got.err != nil || got.index.frames == 0 {
+		t.Fatalf("readWALUnderWriter = %+v, want a reading of the written WAL", got)
+	}
+	if got.waited != 40*time.Millisecond {
+		t.Fatalf("waited = %v, want the 40ms it queued", got.waited)
 	}
 }

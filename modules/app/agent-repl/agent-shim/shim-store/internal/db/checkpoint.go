@@ -20,9 +20,19 @@ import (
 // owner's store that was routinely an INTERACTIVE commit paying for the
 // sidecar's bulk ingestion. The write DSN therefore carries
 // `wal_autocheckpoint(0)`, and the checkpoint is this file's scheduled job
-// instead: it takes the one writer through the BULK tier (writer.go), so an
-// interactive write is always handed the writer ahead of it and never waits on
-// more than the one checkpoint already running.
+// instead.
+//
+// THE CHECKPOINT NEVER HOLDS THE WRITER. It runs on its own connection
+// (DB.ckpt), and a PASSIVE checkpoint takes SQLite's checkpointer lock alone,
+// never the WAL write lock, so producers keep committing while it copies. It
+// used to take the one writer through the bulk tier for its whole pass: on a
+// host at a load average of 33 an idle checkpoint of 114 frames took 3123ms,
+// and the sidecar's batch committing a turn's transcript waited out all of it,
+// past the 5s an e2e test gives a turn's cursor to advance. Only the
+// checkpoint's two readings of the WAL-index header (before and after the
+// pass) take the writer, through the bulk tier, for one 136-byte read each:
+// the header is written by every commit, and read under the writer it is
+// exact (see readWALIndex).
 //
 // WHAT TRIGGERS IT, and neither trigger is a guessed timer.
 //
@@ -135,12 +145,17 @@ type CheckpointResult struct {
 }
 
 // walIndex is the part of the WAL-index header the job reads: how many frames
-// the log holds, how many of them a checkpoint has already copied, and the
-// frame each reader slot's snapshot ends at.
+// the log holds, how many of them a checkpoint has already copied, the frame
+// each reader slot's snapshot ends at, and the log's salt.
 type walIndex struct {
 	frames     uint32
 	backfilled uint32
 	readMarks  [walReadMarks]uint32
+	// salt changes every time the log RESTARTS, and only then: a writer that
+	// begins with every frame copied starts the log again from its first
+	// frame under a new salt. So two readings with the same salt read the
+	// same log.
+	salt [2]uint32
 }
 
 // pending is how many frames are waiting to be checkpointed.
@@ -158,17 +173,21 @@ const (
 	walIndexVersion      = 3007000
 	walIndexIsInitOffset = 12
 	walIndexMxFrame      = 16
+	walIndexSalt         = 32
 	walIndexBackfill     = 2 * walIndexHeaderSize
 	walIndexReadMark     = walIndexBackfill + 4
 )
 
 // readWALIndex reads the WAL-index header from the -shm file.
 //
-// IT IS READ UNDER THE WRITER, and that is what makes it exact. SQLite updates
-// the header when a write commits and when a checkpoint finishes, and both of
-// those only ever happen here while the one writer is held; the two header
-// copies are still compared, as SQLite's own readers do, so an outside writer
-// (a `sqlite3` shell) mid-update is reported rather than misread.
+// IT IS READ UNDER THE WRITER, and that is what makes it exact. SQLite writes
+// the header copies only when a write commits or the log restarts, and both of
+// those only ever happen here while the one writer is held. A PASSIVE
+// checkpoint, which may be running on its own connection at the same time,
+// writes only the backfill mark and the read marks, each one aligned word. The
+// two header copies are still compared, as SQLite's own readers do, so an
+// outside writer (a `sqlite3` shell) mid-update is reported rather than
+// misread.
 func readWALIndex(f *os.File) (walIndex, error) {
 	var buf [walIndexReadSize]byte
 	if _, err := f.ReadAt(buf[:], 0); err != nil {
@@ -188,6 +207,7 @@ func readWALIndex(f *os.File) (walIndex, error) {
 	index := walIndex{
 		frames:     order.Uint32(first[walIndexMxFrame : walIndexMxFrame+4]),
 		backfilled: order.Uint32(buf[walIndexBackfill : walIndexBackfill+4]),
+		salt:       [2]uint32{order.Uint32(first[walIndexSalt : walIndexSalt+4]), order.Uint32(first[walIndexSalt+4 : walIndexSalt+8])},
 	}
 	for i := range index.readMarks {
 		at := walIndexReadMark + 4*i
@@ -209,8 +229,9 @@ type walWatch struct {
 }
 
 // observeWAL reads the WAL-index and hands it to the checkpoint job. It runs
-// in every writer's release, still holding the writer, so no commit or
-// checkpoint can be moving the header underneath it.
+// in every writer's release, still holding the writer, so no commit can be
+// moving the header underneath it (a checkpoint never writes the header; see
+// readWALIndex).
 //
 // It is live only once the database is fully open (finishOpen makes the
 // signal), so the schema creation inside Open never opens the -shm descriptor
@@ -275,29 +296,21 @@ func (d *DB) readWAL() (walIndex, error) {
 	return readWALIndex(d.wal.shm)
 }
 
-// Checkpoint runs one PASSIVE checkpoint as BULK work: it queues for the one
-// writer in the bulk tier, reads the WAL-index under it, and copies whatever is
-// waiting. Nothing waiting is a skip, not a checkpoint. A failure is recorded
-// here, once, at error, and returned; the caller's cancellation is recorded at
-// info, like every other abandoned statement.
+// Checkpoint runs one PASSIVE checkpoint as BULK work, on the checkpoint
+// connection and NEVER holding the writer. It reads the WAL-index under the
+// writer (queued in the bulk tier), releases it, copies whatever was waiting,
+// and reads the WAL-index under the writer again to learn what the pass did.
+// Nothing waiting is a skip, not a checkpoint. A failure is recorded here,
+// once, at error, and returned; the caller's cancellation is recorded at info,
+// like every other abandoned statement.
 func (d *DB) Checkpoint(ctx context.Context, trigger CheckpointTrigger) (result CheckpointResult, err error) {
 	result.Trigger = trigger
 	base := logging.Fields{Operation: CheckpointOperation, DatabasePath: d.path, WriteClass: WriteBulk.String()}
 
 	started := d.mono()
-	err = d.acquireSlot(ctx, WriteBulk)
-	lockWait := d.mono().Sub(started)
+	before, lockWait, err := d.readWALUnderWriter(ctx)
 	if err != nil {
-		return result, d.refuse(base, err)
-	}
-	// THE CHECKPOINT'S OWN RELEASE DOES NOT WAKE THE JOB. The job learns what
-	// this checkpoint did from its result; a wake from here would re-run a
-	// failed checkpoint at once, in a loop, rather than at the next trigger.
-	defer d.writes.release()
-
-	before, err := d.readWAL()
-	if err != nil {
-		return result, d.refuse(base, storagef(err, "reading the WAL-index for the %s-triggered checkpoint", trigger))
+		return result, d.refuse(base, walReadingFailure(err, "reading the WAL-index for the %s-triggered checkpoint", trigger))
 	}
 	if before.pending() <= 0 {
 		result.Skipped = true
@@ -315,9 +328,23 @@ func (d *DB) Checkpoint(ctx context.Context, trigger CheckpointTrigger) (result 
 	if err != nil {
 		return result, d.refuse(base, storagef(err, "running the %s-triggered checkpoint", trigger))
 	}
-	// COPIED IS THIS RUN'S WORK. The log may have restarted since the header
-	// was read only if a checkpoint ran in between, and none can: this one
-	// holds the writer.
+	after, afterWait, err := d.readWALUnderWriter(ctx)
+	lockWait += afterWait
+	if err != nil {
+		return result, d.refuse(base, walReadingFailure(err, "reading the WAL-index after the %s-triggered checkpoint", trigger))
+	}
+	// A LOG THAT RESTARTED WAS COPIED WHOLE. The pass reports the backfill
+	// mark it reads once it is done, and a producer's commit may restart the
+	// log in between, putting the mark back to zero. A restart needs every
+	// frame of the log copied, and nothing but this job checkpoints, so a new
+	// salt means this pass copied every frame it saw. Without a restart the
+	// mark can only have moved by this pass, so it is exact.
+	if after.salt != before.salt {
+		result.Checkpointed = result.WALFrames
+	}
+	// COPIED IS THIS RUN'S WORK. The log cannot have restarted between the
+	// first reading and the pass: a restart needs every frame copied, the
+	// first reading found frames waiting, and only this job copies them.
 	copied := result.Checkpointed - int64(before.backfilled)
 	result.Copied = copied
 	fields := base
@@ -333,13 +360,9 @@ func (d *DB) Checkpoint(ctx context.Context, trigger CheckpointTrigger) (result 
 	if copied <= 0 {
 		// A reader pinned every waiting frame, so nothing moved. One such run
 		// is narration, not an event: the next trigger tries again. The read
-		// marks are taken now, still under the writer, so that if the pin
-		// outlasts DefaultPinWarnAfter the job's record can say which snapshot
-		// holds it (RunCheckpoints, walPinWatch).
-		after, err := d.readWAL()
-		if err != nil {
-			return result, d.refuse(base, storagef(err, "reading the WAL-index after the %s-triggered checkpoint", trigger))
-		}
+		// marks are the second reading's, taken under the writer, so that if
+		// the pin outlasts DefaultPinWarnAfter the job's record can say which
+		// snapshot holds it (RunCheckpoints, walPinWatch).
 		result.ReadMarks = after.readMarks[:]
 		d.log.LogVerbose(fields, message, args...)
 		return result, nil
@@ -348,10 +371,40 @@ func (d *DB) Checkpoint(ctx context.Context, trigger CheckpointTrigger) (result 
 	return result, nil
 }
 
-// passiveCheckpoint is the statement itself, on the write connection the
-// caller holds through the bulk tier.
+// readWALUnderWriter reads the WAL-index holding the writer for the read
+// alone: it queues in the BULK tier, reads, and hands the writer on. It
+// reports how long it queued. The release is the scheduler's own, not
+// releaseWrite, so the checkpoint's readings never wake the checkpoint job: the
+// job learns what a checkpoint did from its result, and a wake from here would
+// re-run a failed checkpoint at once, in a loop, rather than at the next
+// trigger.
+func (d *DB) readWALUnderWriter(ctx context.Context) (walIndex, time.Duration, error) {
+	started := d.mono()
+	err := d.acquireSlot(ctx, WriteBulk)
+	waited := d.mono().Sub(started)
+	if err != nil {
+		return walIndex{}, waited, err
+	}
+	defer d.writes.release()
+	index, err := d.readWAL()
+	return index, waited, err
+}
+
+// walReadingFailure is the error a failed reading of readWALUnderWriter
+// becomes: the caller's own cancellation stays itself, so it is recorded as
+// abandoned, and anything else is a storage failure naming which reading it
+// was.
+func walReadingFailure(err error, format string, args ...any) error {
+	if isContextError(err) {
+		return err
+	}
+	return storagef(err, format, args...)
+}
+
+// passiveCheckpoint is the statement itself, on the checkpoint connection. It
+// holds no lock a writer needs, so it may run however long the copy takes.
 func (d *DB) passiveCheckpoint(ctx context.Context) (busy int, frames, checkpointed int64, err error) {
-	err = d.sql.QueryRowContext(ctx, `PRAGMA wal_checkpoint(PASSIVE)`).Scan(&busy, &frames, &checkpointed)
+	err = d.ckpt.QueryRowContext(ctx, `PRAGMA wal_checkpoint(PASSIVE)`).Scan(&busy, &frames, &checkpointed)
 	return busy, frames, checkpointed, err
 }
 

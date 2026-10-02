@@ -123,6 +123,12 @@ type DB struct {
 	// Reads never queue behind a write, structurally, rather than by every
 	// read path remembering to pass sql.TxOptions{ReadOnly: true}.
 	read *sql.DB
+	// ckpt is the CHECKPOINT connection: one connection, on its own DSN with
+	// `query_only(true)`, that runs nothing but the checkpoint job's PASSIVE
+	// checkpoint (checkpoint.go). A PASSIVE checkpoint takes none of SQLite's
+	// writer locks, so running it here rather than on the write handle means a
+	// slow copy can never hold the one writer, and so never delays a write.
+	ckpt *sql.DB
 	log  *logging.Logger
 	// slowQuery is the duration past which a completed statement is reported
 	// at warn. Non-positive disables the reporting entirely, which only an
@@ -281,7 +287,8 @@ func OpenWithOptions(path string, log *logging.Logger, opts Options) (*DB, error
 
 	// modernc.org/sqlite takes PRAGMAs as _pragma query params. WAL for
 	// concurrent readers during a live tail; NORMAL sync is durable under WAL;
-	// busy_timeout guards the brief window a checkpoint holds the writer.
+	// busy_timeout answers an outside writer (see writer.go), since nothing in
+	// this process ever contends with the one write connection.
 	//
 	// _txlock=immediate makes every Begin() issue BEGIN IMMEDIATE, which is
 	// what the WRITE path needs: WriteBatch reads (MAX(write_seq), the write_id
@@ -349,12 +356,33 @@ func OpenWithOptions(path string, log *logging.Logger, opts Options) (*DB, error
 		},
 	}.Encode()
 
+	// THE CHECKPOINT CONNECTION IS A THIRD DSN, and that is what keeps a slow
+	// checkpoint off the writer. SQLite's PASSIVE checkpoint takes the
+	// checkpointer lock alone, never the WAL write lock, so it runs beside an
+	// open write transaction (TestTheCheckpointConnectionCheckpointsBesideAnOpenWriteTransaction).
+	// Run on the write handle, as it used to be, it could only run while
+	// holding the one writer, and a 3s copy on a loaded host was 3s in which
+	// no producer could commit.
+	//
+	// `query_only(true)` makes it unable to be a second writer: the PRAGMA is
+	// not a write statement, and everything that is one is refused.
+	// `synchronous(NORMAL)` is the write handle's setting, so the checkpoint
+	// syncs exactly as it did when it ran there.
+	checkpointDSN := "file:" + path + "?" + url.Values{
+		"_pragma": {
+			"busy_timeout(5000)",
+			"synchronous(NORMAL)",
+			"query_only(true)",
+		},
+	}.Encode()
+
 	clock := opts.Now
 	if clock == nil {
 		clock = nowMillis
 	}
 
-	d, err := openAt(writeDSN, readDSN, path, log, opts, clock)
+	dsns := poolDSNs{write: writeDSN, read: readDSN, checkpoint: checkpointDSN}
+	d, err := openAt(dsns, path, log, opts, clock)
 	if err == nil {
 		return finishOpen(d, log, path, opts)
 	}
@@ -437,7 +465,7 @@ func OpenWithOptions(path string, log *logging.Logger, opts Options) (*DB, error
 			"removing the superseded database failed: %v", removeErr)
 		return nil, removeErr
 	}
-	d, err = reopenAfterNuke(writeDSN, readDSN, path, log, opts, clock)
+	d, err = reopenAfterNuke(dsns, path, log, opts, clock)
 	if err != nil {
 		// THE RECREATE IS THE LAST RESORT, so its failure is stated here rather
 		// than left to whatever the caller does with the error: at this point
@@ -468,9 +496,15 @@ func finishOpen(d *DB, log *logging.Logger, path string, opts Options) (*DB, err
 	return d, nil
 }
 
+// poolDSNs are the three DSNs a store opens its file on: the one write
+// connection, the read pool, and the checkpoint connection.
+type poolDSNs struct {
+	write, read, checkpoint string
+}
+
 // openAt opens the handle and brings it to SchemaVersion, closing the handle if
 // either step fails so the caller may remove the file underneath it.
-func openAt(writeDSN, readDSN, path string, log *logging.Logger, opts Options, clock func() int64) (*DB, error) {
+func openAt(dsns poolDSNs, path string, log *logging.Logger, opts Options, clock func() int64) (*DB, error) {
 	monotonic := opts.Clock
 	if monotonic == nil {
 		monotonic = time.Now
@@ -479,7 +513,7 @@ func openAt(writeDSN, readDSN, path string, log *logging.Logger, opts Options, c
 	// gate (writer.go) is what a queued caller waits on and what reports its
 	// wait; this is what makes a second write connection unrepresentable, so
 	// nothing that bypassed the gate could quietly recreate the contention.
-	sqldb, err := openPool(writeDSN, 1, fmt.Sprintf("%q", path))
+	sqldb, err := openPool(dsns.write, 1, fmt.Sprintf("%q", path))
 	if err != nil {
 		return nil, err
 	}
@@ -517,12 +551,22 @@ func openAt(writeDSN, readDSN, path string, log *logging.Logger, opts Options, c
 	// refuse the DDL that creates it and because a pool opened against a file
 	// this binary is about to unlink would hold a handle to the discarded
 	// inode.
-	readdb, err := openPool(readDSN, 0, fmt.Sprintf("the read pool on %q", path))
+	readdb, err := openPool(dsns.read, 0, fmt.Sprintf("the read pool on %q", path))
 	if err != nil {
 		sqldb.Close() //nolint:errcheck // the open already failed
 		return nil, err
 	}
+	// THE CHECKPOINT CONNECTION OPENS LAST, for the read pool's reasons: its
+	// `query_only` would refuse nothing here, but a handle opened on a file the
+	// nuke is about to unlink would checkpoint the discarded inode.
+	ckptdb, err := openPool(dsns.checkpoint, 1, fmt.Sprintf("the checkpoint connection on %q", path))
+	if err != nil {
+		readdb.Close() //nolint:errcheck // the open already failed
+		sqldb.Close()  //nolint:errcheck // the open already failed
+		return nil, err
+	}
 	d.read = readdb
+	d.ckpt = ckptdb
 	return d, nil
 }
 
@@ -570,10 +614,10 @@ func removeDatabaseFiles(path string) error {
 }
 
 // Close closes the underlying handle.
-// BOTH POOLS ARE CLOSED, AND NEITHER FAILURE IS SWALLOWED. The read pool is
-// closed first because it holds only snapshots; the write handle is closed
-// even if that fails, so a read-pool fault cannot leave the writer's file
-// handle open, and the first error is the one reported.
+// EVERY POOL IS CLOSED, AND NO FAILURE IS SWALLOWED. The read pool and the
+// checkpoint connection are closed first because neither ever writes; the
+// write handle is closed even if either fails, so their fault cannot leave
+// the writer's file handle open, and the first error is the one reported.
 func (d *DB) Close() error {
 	d.log.LogVerbose(logging.Fields{Operation: "store.db.close"}, "closing SQLite database")
 	var firstErr error
@@ -582,6 +626,15 @@ func (d *DB) Close() error {
 			d.log.Log(logging.Fields{Operation: "store.db.close", Level: "error", ErrorCause: err.Error()},
 				"closing the SQLite read pool failed: %v", err)
 			firstErr = storagef(err, "closing the read pool")
+		}
+	}
+	if d.ckpt != nil {
+		if err := d.ckpt.Close(); err != nil {
+			d.log.Log(logging.Fields{Operation: "store.db.close", Level: "error", ErrorCause: err.Error()},
+				"closing the SQLite checkpoint connection failed: %v", err)
+			if firstErr == nil {
+				firstErr = storagef(err, "closing the checkpoint connection")
+			}
 		}
 	}
 	if err := d.sql.Close(); err != nil {

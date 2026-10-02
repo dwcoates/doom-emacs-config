@@ -466,7 +466,7 @@ caused by a sibling.
   `WriteBatchRequest` carries `write_class` — INTERACTIVE from the shim, BULK
   from the sidecar — and an unset class (message or arm) is REFUSED at
   `write_class_unset`, never defaulted. The store's own writes state theirs in
-  code: the ledger sweep, the WAL checkpoint and schema creation are BULK. `DB.writes`
+  code: the ledger sweep, the WAL checkpoint's two WAL-index readings and schema creation are BULK. `DB.writes`
   (`writeScheduler`, `internal/db/writer.go`) hands a released slot DIRECTLY to
   the next waiter under its lock: the oldest interactive waiter, else the
   oldest bulk one.
@@ -515,7 +515,8 @@ makes those collisions routine. Keep the DSN, and never add a read-then-write
 transaction that begins DEFERRED.
 
 **AND A PURE READ RUNS ON ITS OWN POOL, WHICH THE WRITE LOCK IS NOT REACHABLE
-FROM.** There are TWO `sql.DB` handles on the one file: the WRITE handle, capped
+FROM.** There are TWO `sql.DB` handles for statements on the one file (a third,
+the checkpoint connection, runs nothing but the WAL checkpoint; see below): the WRITE handle, capped
 at `SetMaxOpenConns(1)` and reachable only through `beginWrite`; and the READ
 pool, on a DSN with NO `_txlock` and with `query_only(true)`. `OpenPage`,
 `ReadPage`, `BashRun`, `LiveWork` and every other pure read go through
@@ -555,9 +556,26 @@ checkpoint inline (p50 28ms, p99 ~90ms), paying for bulk pages.
 
 - **`DB.RunCheckpoints` (`internal/db/checkpoint.go`) is the only thing that
   folds the WAL back.** `main.go` runs it beside the ledger sweep and stops it
-  BEFORE the database closes. Each checkpoint takes the one writer through the
-  BULK tier, so a queued interactive write is always handed the writer first,
-  and interactive waits on at most the one checkpoint already running.
+  BEFORE the database closes.
+- **THE CHECKPOINT NEVER HOLDS THE WRITER.** It runs on a THIRD handle, the
+  checkpoint connection (`DB.ckpt`): one connection, `query_only(true)`,
+  `synchronous(NORMAL)`. A PASSIVE checkpoint takes SQLite's checkpointer lock
+  alone and never the WAL write lock, so producers keep committing while it
+  copies (`TestTheCheckpointConnectionCheckpointsBesideAnOpenWriteTransaction`,
+  `TestAReadAndAWriteCompleteWhileACheckpointIsStalled`). It used to run on
+  the write handle holding the one writer for its whole pass: on 2026-10-02,
+  with the host at a load average of 33, an idle checkpoint of 114 frames took
+  3123ms, the sidecar's batch committing a turn's transcript waited out all of
+  it, and `TestPlanModeCoalescesOntoOneBubble` ran out of its 5s for the cursor
+  to advance. Reads were never in the way: they have their own pool.
+- **ONLY THE TWO WAL-INDEX READINGS TAKE THE WRITER.** A checkpoint reads the
+  header before its pass and again after it, each through the BULK tier, for
+  one 136-byte read. The header is written by every commit, so it is exact only
+  under the writer. The second reading's salt answers the one race the
+  separate connection meets: the pass copies the whole log, a producer's commit
+  restarts it, and the pass then reads the NEW log's backfill mark. A changed
+  salt therefore means the pass copied every frame it saw, because a restart
+  needs every frame copied and nothing but this job checkpoints.
 - **GROWTH TRIGGER.** Every writer's release (`releaseWrite`, `writer.go`)
   reads the WAL-index header from `-shm` while it still holds the writer. That
   is SQLite's documented WAL-index format: `mxFrame` and `nBackfill`, with both
@@ -569,10 +587,10 @@ checkpoint inline (p50 28ms, p99 ~90ms), paying for bulk pages.
   `DefaultCheckpointIdle` (2s) with frames still waiting. It is re-armed by
   every release and armed once at start for a WAL left from a previous run.
   Neither trigger is a bare timer.
-- **PASSIVE, always.** FULL, RESTART and TRUNCATE run the busy handler until
-  every reader leaves the WAL, and they would do that while holding the
-  writer. PASSIVE never waits, so the time a checkpoint holds the writer is
-  the copy alone, and the growth trigger bounds that copy.
+- **PASSIVE, always.** FULL, RESTART and TRUNCATE take the WAL write lock and
+  run the busy handler until every reader leaves the WAL, so they would block
+  producers. PASSIVE never waits and never takes the write lock, and the growth
+  trigger bounds its copy.
 - **NO DEADLINE, on purpose.** SQLite advances `nBackfill` only after a whole
   pass has been copied and synced. An interrupted checkpoint therefore keeps
   none of its progress, and a deadline would retry it forever against a WAL
@@ -584,8 +602,8 @@ checkpoint inline (p50 28ms, p99 ~90ms), paying for bulk pages.
   stayed 5.2 MB after PASSIVE and dropped to the limit on the next insert.
 - **LOGGING.** Each checkpoint that copied pages is one `info` record at
   `store.db.wal-checkpoint`. It carries `statement=wal_checkpoint`,
-  `write_class=bulk`, `rows` (pages copied), `duration_ms`, `lock_wait_ms` and
-  `exec_ms`, and its message names the trigger and the mode. A pass that
+  `write_class=bulk`, `rows` (pages copied), `duration_ms`, `lock_wait_ms` (the
+  two readings' bulk-tier queue, summed) and `exec_ms`, and its message names the trigger and the mode. A pass that
   copied nothing because a reader pinned the frames, and a trigger that found
   nothing waiting, are both verbose. A failed checkpoint is one `error` record
   and is retried at the next trigger: its mark does not move, so the next
@@ -597,7 +615,7 @@ checkpoint inline (p50 28ms, p99 ~90ms), paying for bulk pages.
   until it ends. `walPinWatch` follows the run, and the job writes one `warn`
   record when the run outlasts the policy and one `info` record when a
   checkpoint copies again. Both carry `wal_frames`, `wal_backfilled`,
-  `wal_read_marks` (the WAL-index reader slots, read under the writer by the
+  `wal_read_marks` (the WAL-index reader slots, from the second reading of the
   pass that copied nothing), `wal_pinned_for_ms`, and the read pool's
   `read_pool_open`/`read_pool_in_use`/`read_pool_idle`. Read mark 0 held with
   `wal_backfilled` 0 means a reader opened while the WAL was fully folded and
@@ -614,9 +632,9 @@ checkpoint inline (p50 28ms, p99 ~90ms), paying for bulk pages.
   SQLite locks `-shm` with POSIX fcntl locks, and closing any descriptor a
   process holds on a file drops every fcntl lock that process holds on it. The
   store opens the descriptor once, on first use after the database is fully
-  open, and `Close` closes it only after both pools have closed.
-- Test seams: `runCheckpoint` makes a checkpoint fail and then succeed,
-  `checkpointDone` is what a test waits on, and `newCheckpointTimer` fires the
+  open, and `Close` closes it only after all three handles have closed.
+- Test seams: `runCheckpoint` makes a checkpoint fail and then succeed, or
+  holds it inside its pass, `checkpointDone` is what a test waits on, and `newCheckpointTimer` fires the
   idle trigger by hand. None of them sleeps.
 
 ### The page cache and the map are sized, and this is what they cost

@@ -1165,7 +1165,7 @@ func TestOpenStatesTheFailureToRecreateAfterTheSupersededFileIsGone(t *testing.T
 	first.Close() //nolint:errcheck // reopened below
 	previous := reopenAfterNuke
 	t.Cleanup(func() { reopenAfterNuke = previous })
-	reopenAfterNuke = func(string, string, string, *logging.Logger, Options, func() int64) (*DB, error) {
+	reopenAfterNuke = func(poolDSNs, string, *logging.Logger, Options, func() int64) (*DB, error) {
 		return nil, errors.New("no space left on device")
 	}
 	s, reopenLog := newSink(t)
@@ -1437,6 +1437,82 @@ func TestEveryConnectionCarriesTheCacheAndMapSizes(t *testing.T) {
 	}
 }
 
+func TestTheCheckpointConnectionCarriesItsPragmas(t *testing.T) {
+	d, _ := newStore(t)
+	conn, err := d.ckpt.Conn(ctx())
+	if err != nil {
+		t.Fatalf("checkpoint Conn: %v", err)
+	}
+	defer conn.Close() //nolint:errcheck // best-effort test teardown
+
+	tests := []struct {
+		name   string
+		pragma string
+		want   int64
+	}{
+		{"it refuses every write", "query_only", 1},
+		{"it syncs as the write connection does", "synchronous", 1},
+		{"it answers an outside lock as the other connections do", "busy_timeout", 5000},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Act
+			got := pragmaOn(t, conn, test.pragma)
+
+			// Assert
+			if got != test.want {
+				t.Fatalf("PRAGMA %s = %d, want %d", test.pragma, got, test.want)
+			}
+		})
+	}
+}
+
+func TestTheCheckpointConnectionIsOneConnection(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+
+	// Act
+	limit := d.ckpt.Stats().MaxOpenConnections
+
+	// Assert
+	if limit != 1 {
+		t.Fatalf("the checkpoint pool allows %d connections, want 1", limit)
+	}
+}
+
+func TestTheCheckpointConnectionRefusesAWrite(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+
+	// Act
+	_, err := d.ckpt.ExecContext(ctx(), `UPDATE schema_meta SET version = 99`)
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "readonly") {
+		t.Fatalf("the checkpoint connection answered a write with %v, want SQLite's readonly refusal", err)
+	}
+}
+
+func TestCloseClosesTheCheckpointConnection(t *testing.T) {
+	// Arrange
+	_, log := newSink(t)
+	d, err := OpenWithOptions(filepath.Join(t.TempDir(), "store.db"), log, Options{Now: func() int64 { return testNow }})
+	if err != nil {
+		t.Fatalf("OpenWithOptions: %v", err)
+	}
+
+	// Act
+	err = d.Close()
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if pingErr := d.ckpt.Ping(); pingErr == nil || !strings.Contains(pingErr.Error(), "database is closed") {
+		t.Fatalf("the checkpoint connection answered a ping after Close with %v, want it closed", pingErr)
+	}
+}
+
 func TestCloseReleasesTheWALIndexDescriptor(t *testing.T) {
 	// Arrange
 	_, log := newSink(t)
@@ -1677,5 +1753,28 @@ func TestEveryPoolIsOpenedThroughOpenPool(t *testing.T) {
 	// Assert
 	if opens != 1 {
 		t.Fatalf("production source calls sql.Open %d times; only openPool may", opens)
+	}
+}
+
+func TestOpenAtRefusesACheckpointConnectionThatCannotOpen(t *testing.T) {
+	// Arrange: the write and read DSNs name a good file, the checkpoint DSN
+	// one in a directory that does not exist.
+	_, log := newSink(t)
+	path := filepath.Join(t.TempDir(), "store.db")
+	dsns := poolDSNs{
+		write:      "file:" + path,
+		read:       "file:" + path,
+		checkpoint: "file:" + filepath.Join(t.TempDir(), "missing", "store.db"),
+	}
+
+	// Act
+	d, err := openAt(dsns, path, log, Options{}, func() int64 { return testNow })
+
+	// Assert
+	if d != nil || !errors.Is(err, ErrStorage) {
+		t.Fatalf("openAt = %v, %v; want no store and a storage failure", d, err)
+	}
+	if !strings.Contains(err.Error(), "the checkpoint connection on") {
+		t.Fatalf("openAt error = %v, want it to name the checkpoint connection", err)
 	}
 }
