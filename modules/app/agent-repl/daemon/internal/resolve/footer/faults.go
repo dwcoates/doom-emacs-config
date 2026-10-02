@@ -2,6 +2,7 @@ package footer
 
 import (
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/health"
 	"claude-repld/internal/ids"
 )
 
@@ -14,7 +15,7 @@ import (
 // empty workspace) reaches every workspace's strip.
 //
 // THE TWO FAULT FAMILIES LAND IN DIFFERENT TIERS. An ESCALATING fault (one
-// that claims `disconnected` or `blocked`) decides the status and stands as
+// that claims a fault domain's status) decides the status and stands as
 // that arm's salient `fault` line until it is retracted. A NON-ESCALATING
 // fault (no status claimed) blocks neither the turn nor the user, so it is
 // announced ONCE, as the transient `fault` line, and never stands: its
@@ -88,37 +89,37 @@ func removeFault(faults []Fault, id string) []Fault {
 	return faults
 }
 
-// faultRank orders the standing faults by how strong a claim they make on the
-// strip. A workspace with several open faults draws ONE line, and it is the
-// one that says the most about why the session cannot be used.
-//
-// The order is the partition's own: a session that never came up outranks one
-// that died, which outranks a severed link, which outranks a daemon that
-// cannot serve it. Only escalating faults stand, so nothing ranks below.
+// faultRank orders the standing faults of ONE DOMAIN by how strong a claim
+// they make on the strip. A workspace with several open faults in a domain
+// draws ONE line, and it is the one that says the most about why the session
+// cannot be used: a session that never came up outranks one that died, which
+// outranks a severed link, which outranks a daemon that cannot serve it. The
+// domains themselves are ranked by the ladder, never here.
 func faultRank(f Fault) int {
-	switch {
-	// A VENDOR THAT DID NOT START ranks with a session that never came up
-	// (footer.proto: the vendor_start line "ranks with start_failed").
-	case f.Status == "disconnected" && (f.SubStatus == "start_failed" || vendorFault(&f)):
+	switch f.SubStatus {
+	case health.FaultSubStatusStartFailed:
 		return 4
-	case f.Status == "disconnected" && f.SubStatus == "dead":
+	case health.FaultSubStatusDead:
 		return 3
-	case f.Status == "disconnected":
+	case health.FaultSubStatusSevered:
 		return 2
 	default:
 		return 1
 	}
 }
 
-// standingFault is the ONE fault the strip draws for this workspace: the
-// strongest of its own and the daemon-scoped ones, and among equals the one
-// that was opened last, because the newest evidence is the live one. Nil when
-// nothing stands.
-func (r *resolver) standingFault(s *wsState) *Fault {
+// standingFault is the ONE fault of the DOMAIN status the strip draws for this
+// workspace: the strongest of its own and the daemon-scoped ones that claim
+// that status, and among equals the one that was opened last, because the
+// newest evidence is the live one. Nil when none stands.
+func (r *resolver) standingFault(s *wsState, status health.FaultStatus) *Fault {
 	var best *Fault
 	consider := func(faults []Fault) {
 		for i := range faults {
 			f := &faults[i]
+			if f.Status != string(status) {
+				continue
+			}
 			if best == nil || faultRank(*f) > faultRank(*best) ||
 				(faultRank(*f) == faultRank(*best) && f.At.After(best.At)) {
 				best = f
@@ -128,17 +129,4 @@ func (r *resolver) standingFault(s *wsState) *Fault {
 	consider(s.faults)
 	consider(r.daemonFaults)
 	return best
-}
-
-// vendorFault reports whether a standing fault is one of the three vendor-start
-// faults, by the bucket the health partition gave it.
-func vendorFault(f *Fault) bool {
-	if f == nil || f.Status != "disconnected" {
-		return false
-	}
-	switch f.SubStatus {
-	case "vendor_retry", "vendor_rejection", "vendor_failed":
-		return true
-	}
-	return false
 }

@@ -1093,6 +1093,8 @@ func FaultKind(fault *conversationv1.SessionFault) string {
 		return "keepalive_failed"
 	case *conversationv1.SessionFault_VendorQueryFailed:
 		return "vendor_query_failed"
+	case *conversationv1.SessionFault_NetworkUnreachable:
+		return "network_unreachable"
 	default:
 		return "unclassified"
 	}

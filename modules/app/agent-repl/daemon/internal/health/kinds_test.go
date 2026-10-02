@@ -174,6 +174,7 @@ func TestSessionFaultFillsEveryTypedArm(t *testing.T) {
 		{name: "bounce unknown", kind: KindBounceUnknown},
 		{name: "classifier failed", kind: KindClassifierFailed},
 		{name: "shim reported", kind: KindShimReported},
+		{name: "network unreachable, carried as shim reported", kind: KindNetworkUnreachable},
 		{name: "conversation abandoned", kind: KindConversationAbandoned},
 		{name: "session absent", kind: KindSessionAbsent},
 		{name: "watch open refused", kind: KindWatchOpenRefused},

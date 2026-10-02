@@ -37,6 +37,7 @@ var wantStandingEdges = map[string][]Edge{
 	KindColdGateReopenFailed:  {EdgeSessionStarted},
 	KindBounceUnknown:         {EdgeHealthyAttach, EdgeSessionStarted},
 	KindShimReported:          {EdgeShimDiagnostics},
+	KindNetworkUnreachable:    {EdgeShimDiagnostics},
 	KindClassifierFailed:      {EdgeTurnStarted},
 	KindConversationAbandoned: {EdgeTurnStarted},
 	KindFinalAnswerUnresolved: {EdgeAnswerArrived, EdgeTurnStarted, EdgeSuperseded, EdgeFeedReset},

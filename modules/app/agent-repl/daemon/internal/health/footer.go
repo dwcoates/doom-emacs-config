@@ -24,41 +24,47 @@ import (
 // vocabulary without a reviewer meeting the question of what the strip says
 // about it.
 //
-// The ruling's three rules:
+// The rulings' three rules (2026-09-13, the domains of 2026-10-02):
 //
-//  1. STATUS IS REUSED, never invented: `disconnected` for the faults that
-//     mean the session cannot be reached, `blocked` for the faults that mean
-//     the DAEMON cannot serve it.
+//  1. STATUS IS THE FAULT'S DOMAIN: `agent_repl_fault` for the faults that
+//     mean one of agent-repl's own services cannot serve the workspace (the
+//     session cannot be reached, or the daemon cannot serve it);
+//     `network_fault` for this machine being offline; `vendor_fault` for the
+//     vendor that will not start while agent-repl serves. Precedence
+//     agent_repl_fault > network_fault > vendor_fault, which is the ladder's.
 //  2. SUBSTATUS IS A BUCKET, onto the activity values — several kinds per
-//     bucket, no bucket minted to match one kind. Four of the five already
-//     existed; only `daemon_impaired` is new.
+//     bucket, no bucket minted to match one kind.
 //  3. ACTIVITY IS THE LEAST GENERAL: the kind's own name and its detail line.
 //
 // NON-ESCALATING KINDS keep FaultStatusNone: the shim ANSWERED in every one of
 // them, so the status is left exactly as it stands and the fault reaches the
 // footer as the activity line alone. It is not only a wording question:
-// `disconnected` closes the webapp's composer, so escalating a failed
+// `agent_repl_fault` closes the webapp's composer, so escalating a failed
 // classifier run or an abandoned conversation would lock the user out of a
 // session that is serving perfectly.
 
 // FaultStatus is the footer STATUS a standing fault claims.
 type FaultStatus string
 
-// The three claims a fault can make on the status cell.
+// The claims a fault can make on the status cell, one per fault domain.
 const (
 	// FaultStatusNone is a NON-ESCALATING fault: the session is serving, so
 	// the status stands unchanged and only the activity line is the fault's.
 	FaultStatusNone FaultStatus = ""
-	// FaultStatusDisconnected is a fault that means the session cannot be
-	// reached.
-	FaultStatusDisconnected FaultStatus = "disconnected"
-	// FaultStatusBlocked is a fault that means the daemon cannot serve the
-	// session, however healthy its shim is.
-	FaultStatusBlocked FaultStatus = "blocked"
+	// FaultStatusAgentReplFault is a fault that means one of agent-repl's own
+	// services cannot serve the session: it cannot be reached, or the daemon
+	// cannot serve it.
+	FaultStatusAgentReplFault FaultStatus = "agent_repl_fault"
+	// FaultStatusNetworkFault is a fault that means this machine cannot reach
+	// the network.
+	FaultStatusNetworkFault FaultStatus = "network_fault"
+	// FaultStatusVendorFault is a fault that means the vendor will not serve
+	// while agent-repl does.
+	FaultStatusVendorFault FaultStatus = "vendor_fault"
 )
 
-// The substatus buckets. Four are footer.proto's existing
-// FooterStatusDisconnected steps; `daemon_impaired` is the one new arm.
+// The substatus buckets: footer.proto's FooterStatusAgentReplFault,
+// FooterStatusNetworkFault and FooterStatusVendorFault steps.
 const (
 	// FaultSubStatusStartFailed is a session that never came up.
 	FaultSubStatusStartFailed = "start_failed"
@@ -69,6 +75,8 @@ const (
 	// FaultSubStatusDaemonImpaired is the daemon owing the session a service
 	// it cannot give.
 	FaultSubStatusDaemonImpaired = "daemon_impaired"
+	// FaultSubStatusOffline is this machine unable to reach the network.
+	FaultSubStatusOffline = "offline"
 	// FaultSubStatusVendorRetry is a vendor that did not start and is being
 	// retried.
 	FaultSubStatusVendorRetry = "vendor_retry"
@@ -95,27 +103,31 @@ type FaultCell struct {
 
 // sessionFaultCells is the partition for a WORKSPACE-scoped fault.
 var sessionFaultCells = map[string]FaultCell{
-	KindShimStartFailed:       {FaultStatusDisconnected, FaultSubStatusStartFailed},
-	KindResumeFailed:          {FaultStatusDisconnected, FaultSubStatusStartFailed},
-	KindRelaunchResumeFailed:  {FaultStatusDisconnected, FaultSubStatusStartFailed},
-	KindAdoptionWindowExpired: {FaultStatusDisconnected, FaultSubStatusStartFailed},
-	KindColdGateReopenFailed:  {FaultStatusDisconnected, FaultSubStatusStartFailed},
+	KindShimStartFailed:       {FaultStatusAgentReplFault, FaultSubStatusStartFailed},
+	KindResumeFailed:          {FaultStatusAgentReplFault, FaultSubStatusStartFailed},
+	KindRelaunchResumeFailed:  {FaultStatusAgentReplFault, FaultSubStatusStartFailed},
+	KindAdoptionWindowExpired: {FaultStatusAgentReplFault, FaultSubStatusStartFailed},
+	KindColdGateReopenFailed:  {FaultStatusAgentReplFault, FaultSubStatusStartFailed},
 
-	// A VENDOR THAT DID NOT START INSIDE A HEALTHY SHIM is one of the three
-	// vendor steps, never `start_failed`, which names the shim PROCESS
-	// (footer.proto, FooterStatusDisconnected.substatus).
-	KindVendorStartRetrying: {FaultStatusDisconnected, FaultSubStatusVendorRetry},
-	KindVendorStartRejected: {FaultStatusDisconnected, FaultSubStatusVendorRejection},
-	KindVendorStartFailed:   {FaultStatusDisconnected, FaultSubStatusVendorFailed},
+	// A VENDOR THAT DID NOT START INSIDE A HEALTHY SHIM is a VENDOR FAULT,
+	// never `start_failed`, which names the shim PROCESS (footer.proto,
+	// FooterStatusAgentReplFault.substatus).
+	KindVendorStartRetrying: {FaultStatusVendorFault, FaultSubStatusVendorRetry},
+	KindVendorStartRejected: {FaultStatusVendorFault, FaultSubStatusVendorRejection},
+	KindVendorStartFailed:   {FaultStatusVendorFault, FaultSubStatusVendorFailed},
 
-	KindShimDied:      {FaultStatusDisconnected, FaultSubStatusDead},
-	KindBounceDied:    {FaultStatusDisconnected, FaultSubStatusDead},
-	KindSessionAbsent: {FaultStatusDisconnected, FaultSubStatusDead},
+	// THE NETWORK IS UNREACHABLE: the shim told a failure below any answer the
+	// vendor could give apart from one the vendor gave.
+	KindNetworkUnreachable: {FaultStatusNetworkFault, FaultSubStatusOffline},
 
-	KindLinkSevered:      {FaultStatusDisconnected, FaultSubStatusSevered},
-	KindWatchOpenRefused: {FaultStatusDisconnected, FaultSubStatusSevered},
+	KindShimDied:      {FaultStatusAgentReplFault, FaultSubStatusDead},
+	KindBounceDied:    {FaultStatusAgentReplFault, FaultSubStatusDead},
+	KindSessionAbsent: {FaultStatusAgentReplFault, FaultSubStatusDead},
 
-	KindStateUnreadable: {FaultStatusBlocked, FaultSubStatusDaemonImpaired},
+	KindLinkSevered:      {FaultStatusAgentReplFault, FaultSubStatusSevered},
+	KindWatchOpenRefused: {FaultStatusAgentReplFault, FaultSubStatusSevered},
+
+	KindStateUnreadable: {FaultStatusAgentReplFault, FaultSubStatusDaemonImpaired},
 
 	// NON-ESCALATING: the shim answered.
 	KindShimReported:          {FaultStatusNone, ""},
@@ -124,7 +136,7 @@ var sessionFaultCells = map[string]FaultCell{
 	KindConversationAbandoned: {FaultStatusNone, ""},
 	// NON-ESCALATING for the same reason and one more: the session is healthy
 	// and the answer's prose is on screen. What is missing is the workspace's
-	// ability to POINT AT it, and `disconnected` would close the composer over
+	// ability to POINT AT it, and `agent_repl_fault` would close the composer over
 	// a session that is serving perfectly. The three cases are told apart by
 	// the fault's own `why` evidence, which the arm carries.
 	KindFinalAnswerUnresolved: {FaultStatusNone, ""},
@@ -136,15 +148,15 @@ var sessionFaultCells = map[string]FaultCell{
 // different things in each: a session's own bring-up that never happened, or
 // this daemon's handover that nobody claimed.
 var daemonFaultCells = map[string]FaultCell{
-	KindPromptsDirMissing:     {FaultStatusBlocked, FaultSubStatusDaemonImpaired},
-	KindWsmReadOnly:           {FaultStatusBlocked, FaultSubStatusDaemonImpaired},
-	KindLogSinkPoisoned:       {FaultStatusBlocked, FaultSubStatusDaemonImpaired},
-	KindSuccessorSpawnFailed:  {FaultStatusBlocked, FaultSubStatusDaemonImpaired},
-	KindStateUnreadable:       {FaultStatusBlocked, FaultSubStatusDaemonImpaired},
-	KindAdoptionWindowExpired: {FaultStatusBlocked, FaultSubStatusDaemonImpaired},
+	KindPromptsDirMissing:     {FaultStatusAgentReplFault, FaultSubStatusDaemonImpaired},
+	KindWsmReadOnly:           {FaultStatusAgentReplFault, FaultSubStatusDaemonImpaired},
+	KindLogSinkPoisoned:       {FaultStatusAgentReplFault, FaultSubStatusDaemonImpaired},
+	KindSuccessorSpawnFailed:  {FaultStatusAgentReplFault, FaultSubStatusDaemonImpaired},
+	KindStateUnreadable:       {FaultStatusAgentReplFault, FaultSubStatusDaemonImpaired},
+	KindAdoptionWindowExpired: {FaultStatusAgentReplFault, FaultSubStatusDaemonImpaired},
 	// NON-ESCALATING: the daemon that ran the deploy keeps serving on the
 	// build it already runs. A failed build installed nothing and a failed
-	// install restarted nothing, so `blocked` would say the daemon cannot
+	// install restarted nothing, so `agent_repl_fault` would say the daemon cannot
 	// serve a session it is serving.
 	KindDeployFailed: {FaultStatusNone, ""},
 }

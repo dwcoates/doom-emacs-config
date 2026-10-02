@@ -364,7 +364,7 @@ func (s *lifecycleSink) OnSessionDiagnostics(ws ids.WorkspaceID, diagnostics *co
 		for _, fault := range unhealthy.Unhealthy.GetFaults() {
 			if _, err := reporter.OpenFault(ctx, wsm.Fault{
 				Workspace: &scoped,
-				Kind:      health.KindShimReported,
+				Kind:      shimFaultRecordKind(fault),
 				Detail:    fault.GetDetail(),
 				Evidence: map[string]string{
 					"component": fault.GetComponent(),
@@ -382,6 +382,17 @@ func (s *lifecycleSink) OnSessionDiagnostics(ws ids.WorkspaceID, diagnostics *co
 	s.log.Debug("daemon.cmd.lifecycle", "the shim's health verdict was folded into the session faults", dlog.Context{
 		"workspace": string(ws), "unhealthy": isUnhealthy, "opened": opened, "retracted": closed,
 	})
+}
+
+// shimFaultRecordKind is the daemon fault kind one shim-reported fault is
+// recorded under: an UNREACHABLE NETWORK is its own kind, because it claims
+// the footer's and the roster's network_fault (internal/health/footer.go);
+// every other kind the shim reports is shim_reported, which claims nothing.
+func shimFaultRecordKind(fault *conversationv1.SessionFault) string {
+	if fault.GetNetworkUnreachable() != nil {
+		return health.KindNetworkUnreachable
+	}
+	return health.KindShimReported
 }
 
 // shimFaultKind names the SessionFault kind arm the shim set, kept as the

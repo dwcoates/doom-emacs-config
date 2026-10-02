@@ -319,6 +319,7 @@ func TestEveryFaultKindHasItsOwnSentence(t *testing.T) {
 		{Kind: &conversationv1.SessionFault_LogSinkPoisoned{LogSinkPoisoned: &conversationv1.SessionFaultLogSinkPoisoned{}}},
 		{Kind: &conversationv1.SessionFault_KeepaliveFailed{KeepaliveFailed: &conversationv1.SessionFaultKeepaliveFailed{}}},
 		{Kind: &conversationv1.SessionFault_VendorQueryFailed{VendorQueryFailed: &conversationv1.SessionFaultVendorQueryFailed{}}},
+		{Kind: &conversationv1.SessionFault_NetworkUnreachable{NetworkUnreachable: &conversationv1.SessionFaultNetworkUnreachable{}}},
 		{},
 	}
 	seen := map[string]bool{}

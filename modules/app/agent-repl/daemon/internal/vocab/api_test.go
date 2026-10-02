@@ -435,9 +435,9 @@ func TestRosterStatusColorTakesTheSharedAssignmentForASurfaceWithNoOverrides(t *
 	// Arrange.
 	c := loadColors(t)
 
-	// Act: vendor_blocked is blue in the shared assignment and the webapp
+	// Act: network_fault is blue in the shared assignment and the webapp
 	// declares no override, so it inherits blue verbatim.
-	got, err := c.RosterStatusColor("webapp", "vendor_blocked")
+	got, err := c.RosterStatusColor("webapp", "network_fault")
 
 	// Assert.
 	if err != nil {
@@ -693,7 +693,10 @@ func TestTheColorAssignmentsFollowTheOwnersColorMeaningsWithNothingParked(t *tes
 		{name: "a failed turn is turquoise on the roster", table: "roster", arm: "turn_failed", want: "turquoise"},
 		{name: "a failed merge is turquoise on the roster", table: "roster", arm: "merge_failed", want: "turquoise"},
 		{name: "a degraded view is turquoise on the roster", table: "roster", arm: "degraded", want: "turquoise"},
-		{name: "a vendor or account block is blue on the roster", table: "roster", arm: "vendor_blocked", want: "blue"},
+		{name: "a vendor or account block is turquoise on the roster", table: "roster", arm: "vendor_blocked", want: "turquoise"},
+		{name: "a vendor that will not start is turquoise on the roster", table: "roster", arm: "vendor_fault", want: "turquoise"},
+		{name: "a call the vendor retries is turquoise on the roster", table: "roster", arm: "api_retrying", want: "turquoise"},
+		{name: "an unreachable network is blue on the roster", table: "roster", arm: "network_fault", want: "blue"},
 		{name: "a starting route is blue on the roster", table: "roster", arm: "init", want: "blue"},
 		{name: "a queued merge is purple on the roster", table: "roster", arm: "merge_queued", want: "purple"},
 		{name: "a running merge is purple on the roster", table: "roster", arm: "merging", want: "purple"},
@@ -701,7 +704,9 @@ func TestTheColorAssignmentsFollowTheOwnersColorMeaningsWithNothingParked(t *tes
 		{name: "a failed turn is turquoise on the footer", table: "footer", arm: "turn_failed", want: "turquoise"},
 		{name: "a failed merge is turquoise on the footer", table: "footer", arm: "merge_failed", want: "turquoise"},
 		{name: "a degraded view is turquoise on the footer", table: "footer", arm: "degraded", want: "turquoise"},
-		{name: "a vendor or account block is blue on the footer", table: "footer", arm: "blocked", want: "blue"},
+		{name: "a vendor fault is turquoise on the footer", table: "footer", arm: "vendor_fault", want: "turquoise"},
+		{name: "an agent-repl fault is blue on the footer", table: "footer", arm: "agent_repl_fault", want: "blue"},
+		{name: "a network fault is blue on the footer", table: "footer", arm: "network_fault", want: "blue"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -723,16 +728,19 @@ func TestTheColorAssignmentsFollowTheOwnersColorMeaningsWithNothingParked(t *tes
 	}
 }
 
-func TestTheComposerStaysOpenOnBlockedApiRetrying(t *testing.T) {
+// A VENDOR FAULT OPENS THE COMPOSER BY ITS COLOR (owner ruling, 2026-10-02),
+// so the one declared exception there was (`blocked · api_retrying`) is gone
+// and none stands.
+func TestNoComposerOpenSubstatusIsDeclared(t *testing.T) {
 	// Arrange.
 	c := loadColors(t)
 
 	// Act.
-	got := c.ComposerOpenSubstatuses["blocked"]
+	got := c.ComposerOpenSubstatuses
 
 	// Assert.
-	if len(got) != 1 || got[0] != "api_retrying" {
-		t.Fatalf("composer_open_substatuses[blocked] = %v, want [api_retrying] (owner ruling, 2026-10-01)", got)
+	if len(got) != 0 {
+		t.Fatalf("composer_open_substatuses = %v, want none", got)
 	}
 }
 
@@ -758,10 +766,10 @@ func TestComposerOpenSubstatusesNameRealSubstatusArms(t *testing.T) {
 
 func TestAssertComposerOpenSubstatusArmsRefusesAnInventedSubstatus(t *testing.T) {
 	// Arrange.
-	c := RenderColors{ComposerOpenSubstatuses: map[string][]string{"blocked": {"invented"}}}
+	c := RenderColors{ComposerOpenSubstatuses: map[string][]string{"agent_repl_fault": {"invented"}}}
 
 	// Act.
-	err := c.AssertComposerOpenSubstatusArms(func(string) ([]string, error) { return []string{"api_retrying"}, nil })
+	err := c.AssertComposerOpenSubstatusArms(func(string) ([]string, error) { return []string{"starting"}, nil })
 
 	// Assert.
 	if err == nil {
@@ -776,8 +784,8 @@ func TestLoadRenderColorsRefusesABadComposerOpenSubstatuses(t *testing.T) {
 	}{
 		{name: "a status that is not a footer arm", value: map[string]any{"invented": []any{"api_retrying"}}},
 		{name: "a status whose color leaves the composer open", value: map[string]any{"working": []any{"api_retrying"}}},
-		{name: "an empty substatus list", value: map[string]any{"blocked": []any{}}},
-		{name: "the empty substatus", value: map[string]any{"blocked": []any{""}}},
+		{name: "an empty substatus list", value: map[string]any{"agent_repl_fault": []any{}}},
+		{name: "the empty substatus", value: map[string]any{"agent_repl_fault": []any{""}}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
