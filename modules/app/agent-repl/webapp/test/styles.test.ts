@@ -9,12 +9,10 @@
  * `user-select: none` rule. Two of them used to: the workspaces rail's blanket
  * rule and the thinking fold's summary.
  *
- * So the rule is inverted here: `user-select: none` is FORBIDDEN unless its
- * selector is named below with a reason. The allowlist admits pure controls
- * whose glyph is a state, never a sentence — a chevron, a fold triangle, a
- * disclosure marker. Adding a selector to it is a decision someone makes
- * deliberately, in one line, rather than a rule that quietly lands in a 5000
- * line file.
+ * So the rule is absolute here (owner ruling, 2026-10-02: "all text must be
+ * supported, everywhere in the webapp"): `user-select: none` is FORBIDDEN on
+ * every selector, fold glyphs and disclosure markers included. The allowlist
+ * that once admitted those is gone.
  */
 import { describe, expect, it } from "vitest";
 import stylesheet from "../src/styles.css?raw";
@@ -36,16 +34,6 @@ import { THINKING_CAP_LINES } from "../src/feed/cards/response.js";
 import { cascadedValue, installStylesheet, rulesOf, type CssRule } from "./stylesheet.js";
 import { withoutBlockComments } from "./source-text.js";
 
-/**
- * Selectors permitted to suppress selection, each with the one reason that
- * earns it: the element's text is a control's state, not information.
- */
-const ALLOWED: ReadonlyMap<string, string> = new Map([
-  ["#ws-sidebar [data-section-fold]", "the section fold triangle: '▸'/'▾' is the fold's state"],
-  ["#ws-sidebar .repo-head .tri", "the repo header's fold triangle, the same glyph and the same state"],
-  [".thinking summary::marker", "the disclosure marker only; the summary's TEXT stays user-select: text"],
-]);
-
 /** The selectors on which any `user-select`/`-webkit-user-select` is `none`. */
 function selectorsSuppressingSelection(css: string): string[] {
   const suppressing: string[] = [];
@@ -57,13 +45,12 @@ function selectorsSuppressingSelection(css: string): string[] {
 }
 
 describe("the stylesheet's selectability contract", () => {
-  it("suppresses selection only on allowlisted pure controls", () => {
+  it("suppresses selection nowhere", () => {
     // Arrange / Act
     const suppressing = selectorsSuppressingSelection(stylesheet);
 
     // Assert
-    const unexplained = suppressing.filter((selector) => !ALLOWED.has(selector));
-    expect(unexplained).toEqual([]);
+    expect(suppressing).toEqual([]);
   });
 
   it("leaves the thinking fold's summary text selectable", () => {
@@ -82,14 +69,6 @@ describe("the stylesheet's selectability contract", () => {
 
     // Assert
     expect(taskSummary?.declarations).not.toMatch(/pointer-events\s*:\s*none/);
-  });
-
-  it("keeps every allowlisted selector in use, so the allowlist cannot rot", () => {
-    // Arrange / Act
-    const suppressing = new Set(selectorsSuppressingSelection(stylesheet));
-
-    // Assert
-    expect([...ALLOWED.keys()].filter((selector) => !suppressing.has(selector))).toEqual([]);
   });
 });
 
