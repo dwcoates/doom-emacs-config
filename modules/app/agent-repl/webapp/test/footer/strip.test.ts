@@ -554,6 +554,17 @@ describe("drawFooterLiveWorkChips", () => {
     expect(row.querySelector('[data-chip="shells"]')).toBeNull();
   });
 
+  it("selects a chip's panel on Enter, as the button it is", () => {
+    // Arrange
+    const { row, selected } = drawStrip({ liveWork: { agents: { count: 2 } } });
+    // Act
+    row
+      .querySelector<HTMLElement>('[data-chip="agents"]')
+      ?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    // Assert
+    expect(selected).toEqual(["agents"]);
+  });
+
   it("selects a chip's panel when clicked", () => {
     const { row, selected } = drawStrip({ liveWork: { agents: { count: 2 } } });
     row.querySelector<HTMLElement>('[data-chip="agents"]')?.dispatchEvent(new MouseEvent("click"));

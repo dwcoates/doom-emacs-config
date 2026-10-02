@@ -31,6 +31,7 @@
  * runtime and a cron's next fire are all instants on the wire and durations on
  * screen, animated off the shared ticker.
  */
+import { armButtonRole } from "../control.js";
 import type {
   FooterAgentRow,
   FooterAgentRowDescription,
@@ -1014,8 +1015,7 @@ function jumpRow(
   row.setAttribute(WORK_ID_ATTRIBUTE, work);
   if (target.case === "entry") row.setAttribute("data-jump", target.value.value);
   else row.setAttribute(JUMP_UNRESOLVED_ATTRIBUTE, resolution);
-  row.setAttribute("role", "button");
-  row.tabIndex = 0;
+  armButtonRole(row);
   if (deps.notices.standing(key, resolution)) {
     row.setAttribute("data-unreachable", "true");
     row.setAttribute(NOTICE_PENDING, "");

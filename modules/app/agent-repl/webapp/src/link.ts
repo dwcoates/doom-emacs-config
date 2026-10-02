@@ -29,6 +29,7 @@
  * chrome reporting something the user is already looking at. A REFUSAL is
  * drawn, at the link itself, per the call-site rule.
  */
+import { armButtonRole } from "./control.js";
 import { log } from "./log.js";
 import {
   OpenExternalResponseSchema,
@@ -128,8 +129,7 @@ export function renderEditorLink(ctx: AppContext, spec: EditorLinkSpec): HTMLEle
   if (spec.line !== undefined) anchor.setAttribute("data-host-line", String(spec.line));
   // No href: the destination is on the daemon's host, so there is no URL a
   // browser could meaningfully show or copy. The cursor is the stylesheet's.
-  anchor.setAttribute("role", "button");
-  anchor.tabIndex = 0;
+  armButtonRole(anchor);
   anchor.addEventListener("click", (event: MouseEvent) => {
     if (!claimsClick(event)) return;
     event.preventDefault();
@@ -160,8 +160,7 @@ export function renderMergeTestLogLink(
   anchor.setAttribute("data-merge-test-log", "");
   // No href, for the same reason as the editor link: the log is on the
   // daemon's host, and the click is an rpc, never a navigation.
-  anchor.setAttribute("role", "button");
-  anchor.tabIndex = 0;
+  armButtonRole(anchor);
   anchor.addEventListener("click", (event: MouseEvent) => {
     if (!claimsClick(event)) return;
     event.preventDefault();

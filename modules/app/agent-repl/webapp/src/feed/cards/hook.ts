@@ -16,6 +16,7 @@
  * fact would be two things to keep in step, and the reader wants to land on the
  * real card with its output.
  */
+import { armButtonRole } from "../../control.js";
 import type {
   FeedHook,
   FeedId,
@@ -123,9 +124,8 @@ export function drawFeedHookGatedCall(
   });
   const link = document.createElement("a");
   link.className = "hook-gated";
-  link.setAttribute("role", "button");
+  armButtonRole(link);
   link.setAttribute("data-gated-row", row.value);
-  link.tabIndex = 0;
   const caret = document.createElement("span");
   caret.className = "hook-gated-caret";
   caret.setAttribute("aria-hidden", "true");
