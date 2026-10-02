@@ -52,19 +52,23 @@ func runSuite(m *testing.M) int {
 		return 1
 	}
 
-	code := harness.MainAt(m, l.daemonDir)
-	// A PREBUILD process ran no test: the harness built its binaries and
-	// returned, and this suite's own are built here, then the process exits.
-	if mode, _, _ := harness.BinaryMode(os.Getenv); mode == harness.BuildInto {
-		if code != 0 {
-			return code
-		}
+	mode, _, err := harness.BinaryMode(os.Getenv)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "e2e:", err)
+		return 1
+	}
+	// A PREBUILD process runs no test. Build this suite's shared binaries
+	// before MainAt enters its disposable run root: MainAt removes that root
+	// when it returns, so no later Go build may inherit its TMPDIR.
+	if mode == harness.BuildInto {
 		if err := prebuildE2E(); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return 1
 		}
-		return 0
+		return harness.MainAt(m, l.daemonDir)
 	}
+
+	code := harness.MainAt(m, l.daemonDir)
 	// The perf phase's final summary block (PERF-SPEC.md §D4), after every
 	// test has reported. A no-op in the default build, where the perf files
 	// are not compiled at all.
