@@ -252,11 +252,13 @@ func gitProjectRoot(dir string) (string, bool) {
 // and relays the file it names onto the workspace's host stream, exactly as a
 // workspace file's click is relayed.
 //
-// A LINK THAT NAMES NO FILE IS ANSWERED, NEVER DROPPED: the footer draws the
-// transient `unknown_file` line (the status is untouched), and the composed
-// question asking the agent which file it meant is handed back for the caller
-// to submit, beside the `link_unresolved` refusal.
-func (v *verbs) OpenFeedLink(ctx context.Context, ws ids.WorkspaceID, href string) (*UnresolvedLink, error) {
+// A LINK THAT NAMES NO FILE IS ANSWERED, NEVER DROPPED. Under REPORT the
+// footer draws the transient `unknown_file` line (the status is untouched),
+// and the composed question asking the agent which file it meant is handed
+// back for the caller to submit, beside the `link_unresolved` refusal. Without
+// it (the `web_fallback` arm: an ambiguous bare name the client will open as a
+// web URL) the refusal is the whole answer.
+func (v *verbs) OpenFeedLink(ctx context.Context, ws ids.WorkspaceID, href string, report bool) (*UnresolvedLink, error) {
 	record, log, err := v.owned(ctx, "OpenInEditor", ws)
 	if err != nil {
 		return nil, err
@@ -266,6 +268,9 @@ func (v *verbs) OpenFeedLink(ctx context.Context, ws ids.WorkspaceID, href strin
 	}
 	link := resolveFeedLink(record.Dir, href)
 	if link.path == "" {
+		if !report {
+			return nil, v.silentlyUnresolved(log, href, link)
+		}
 		return v.unresolvedLink(ctx, log, record, href, link)
 	}
 	if !within(record.Dir, link.path) {
@@ -277,6 +282,18 @@ func (v *verbs) OpenFeedLink(ctx context.Context, ws ids.WorkspaceID, href strin
 		"href": href, "resolved": link.path, "has_line": link.line != nil,
 	})
 	return nil, nil
+}
+
+// silentlyUnresolved is OpenFeedLink's answer for a `web_fallback` link that
+// named no file: the refusal alone, with no footer line and no question,
+// because the client opens the name on the web instead.
+func (v *verbs) silentlyUnresolved(log dlog.Logger, href string, link feedLink) error {
+	log.Info(opOpenInEditor, "a web-fallback feed link resolved to no file; the client opens it on the web, so nothing is reported", dlog.Context{
+		"href": href, "candidates": link.candidates,
+	})
+	return refuseWith(log, "OpenInEditor", ArmLinkUnresolved,
+		fmt.Sprintf("link %q resolved to no file (looked at %s); the client falls back to the web", href, strings.Join(link.candidates, ", ")),
+		false, map[string]any{"href": href})
 }
 
 // unresolvedLink is OpenFeedLink's answer for a link that named no file: the

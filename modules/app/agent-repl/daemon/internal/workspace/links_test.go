@@ -314,7 +314,7 @@ func TestOpenFeedLinkResolvesABareNameUnderTheAgentReplModuleFirst(t *testing.T)
 	touch(t, filepath.Join(dir, "AGENTS.md"))
 
 	// Act.
-	_, err := f.verbs.OpenFeedLink(context.Background(), "w1", "AGENTS.md")
+	_, err := f.verbs.OpenFeedLink(context.Background(), "w1", "AGENTS.md", true)
 
 	// Assert.
 	if err != nil {
@@ -331,7 +331,7 @@ func TestOpenFeedLinkFallsBackToTheGitProjectRootForABareName(t *testing.T) {
 	touch(t, filepath.Join(dir, "README.md"))
 
 	// Act.
-	_, err := f.verbs.OpenFeedLink(context.Background(), "w1", "README.md")
+	_, err := f.verbs.OpenFeedLink(context.Background(), "w1", "README.md", true)
 
 	// Assert.
 	if err != nil {
@@ -348,7 +348,7 @@ func TestOpenFeedLinkResolvesAPathWithADirectoryPartAgainstTheWorktreeRoot(t *te
 	touch(t, filepath.Join(dir, "lisp/core.el"))
 
 	// Act.
-	_, err := f.verbs.OpenFeedLink(context.Background(), "w1", "lisp/core.el")
+	_, err := f.verbs.OpenFeedLink(context.Background(), "w1", "lisp/core.el", true)
 
 	// Assert.
 	if err != nil {
@@ -366,7 +366,7 @@ func TestOpenFeedLinkResolvesAnAbsolutePathAsGiven(t *testing.T) {
 	touch(t, path)
 
 	// Act.
-	_, err := f.verbs.OpenFeedLink(context.Background(), "w1", path)
+	_, err := f.verbs.OpenFeedLink(context.Background(), "w1", path, true)
 
 	// Assert.
 	if err != nil {
@@ -383,7 +383,7 @@ func TestOpenFeedLinkRelaysALineSuffix(t *testing.T) {
 	touch(t, filepath.Join(dir, "lisp/core.el"))
 
 	// Act.
-	_, err := f.verbs.OpenFeedLink(context.Background(), "w1", "lisp/core.el:42")
+	_, err := f.verbs.OpenFeedLink(context.Background(), "w1", "lisp/core.el:42", true)
 
 	// Assert.
 	if err != nil {
@@ -401,7 +401,7 @@ func TestOpenFeedLinkRefusesAPathThatResolvesOutsideTheWorktree(t *testing.T) {
 	touch(t, outside)
 
 	// Act.
-	_, err := f.verbs.OpenFeedLink(context.Background(), "w1", outside)
+	_, err := f.verbs.OpenFeedLink(context.Background(), "w1", outside, true)
 
 	// Assert.
 	asRefusal(t, err, ArmPathEscapesWorkspace)
@@ -412,7 +412,7 @@ func TestOpenFeedLinkAnswersLinkUnresolvedForAFileNowhere(t *testing.T) {
 	f, _ := linkFixture(t)
 
 	// Act.
-	_, err := f.verbs.OpenFeedLink(context.Background(), "w1", "nowhere.md")
+	_, err := f.verbs.OpenFeedLink(context.Background(), "w1", "nowhere.md", true)
 
 	// Assert.
 	r := asRefusal(t, err, ArmLinkUnresolved)
@@ -426,7 +426,7 @@ func TestOpenFeedLinkRelaysNothingForAFileNowhere(t *testing.T) {
 	f, _ := linkFixture(t)
 
 	// Act.
-	_, _ = f.verbs.OpenFeedLink(context.Background(), "w1", "nowhere.md")
+	_, _ = f.verbs.OpenFeedLink(context.Background(), "w1", "nowhere.md", true)
 
 	// Assert.
 	if len(f.host.editorOpens) != 0 {
@@ -439,7 +439,7 @@ func TestOpenFeedLinkRaisesATransientUnknownFileLine(t *testing.T) {
 	f, _ := linkFixture(t)
 
 	// Act.
-	_, _ = f.verbs.OpenFeedLink(context.Background(), "w1", "nowhere.md:7")
+	_, _ = f.verbs.OpenFeedLink(context.Background(), "w1", "nowhere.md:7", true)
 
 	// Assert: non-escalating (no status claimed), naming the file.
 	if len(f.footer.faults) != 1 {
@@ -456,7 +456,7 @@ func TestOpenFeedLinkComposesTheQuestionFromItsBrief(t *testing.T) {
 	f, dir := linkFixture(t)
 
 	// Act.
-	unresolved, _ := f.verbs.OpenFeedLink(context.Background(), "w1", "nowhere.md")
+	unresolved, _ := f.verbs.OpenFeedLink(context.Background(), "w1", "nowhere.md", true)
 
 	// Assert: the href, every place looked, and where the resolver lives.
 	if unresolved == nil {
@@ -480,11 +480,55 @@ func TestOpenFeedLinkFailsLoudlyWhenItsBriefIsMissing(t *testing.T) {
 	delete(f.briefs, BriefLinkUnresolved)
 
 	// Act.
-	unresolved, err := f.verbs.OpenFeedLink(context.Background(), "w1", "nowhere.md")
+	unresolved, err := f.verbs.OpenFeedLink(context.Background(), "w1", "nowhere.md", true)
 
 	// Assert: an error, never a link_unresolved claiming a question was sent.
 	var refusal *Refusal
 	if err == nil || errors.As(err, &refusal) || unresolved != nil {
 		t.Fatalf("OpenFeedLink = %v, %v; want a plain error and no question", unresolved, err)
+	}
+}
+
+func TestOpenFeedLinkUnderWebFallbackStillAnswersLinkUnresolved(t *testing.T) {
+	// Arrange.
+	f, _ := linkFixture(t)
+
+	// Act.
+	unresolved, err := f.verbs.OpenFeedLink(context.Background(), "w1", "notes.org", false)
+
+	// Assert: the refusal, and no question to send.
+	asRefusal(t, err, ArmLinkUnresolved)
+	if unresolved != nil {
+		t.Fatalf("question = %+v, want none under web_fallback", unresolved)
+	}
+}
+
+func TestOpenFeedLinkUnderWebFallbackRaisesNoFooterLine(t *testing.T) {
+	// Arrange.
+	f, _ := linkFixture(t)
+
+	// Act.
+	_, _ = f.verbs.OpenFeedLink(context.Background(), "w1", "notes.org", false)
+
+	// Assert.
+	if len(f.footer.faults) != 0 {
+		t.Fatalf("footer faults = %+v, want none under web_fallback", f.footer.faults)
+	}
+}
+
+func TestOpenFeedLinkUnderWebFallbackStillOpensAFileThatExists(t *testing.T) {
+	// Arrange: the file is tried first.
+	f, dir := linkFixture(t)
+	touch(t, filepath.Join(dir, "notes.org"))
+
+	// Act.
+	_, err := f.verbs.OpenFeedLink(context.Background(), "w1", "notes.org", false)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("OpenFeedLink: %v", err)
+	}
+	if got, want := relayedPath(t, f), filepath.Join(dir, "notes.org"); got != want {
+		t.Fatalf("relayed %q, want %q", got, want)
 	}
 }

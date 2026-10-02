@@ -63,7 +63,8 @@ Clicking a link to a file (not a web address) in a prompt or response bubble ope
   - A bare file name opens from `modules/app/agent-repl/` in the worktree, then from the worktree's git root.
   - A `:<line>` suffix (`core.el:42`) lands on that line.
 - **A link that leaves the worktree is refused.**
-- **A link that names no file opens nothing.**
+- **A bare name whose ending is also a web domain** (`.org`, `.md`, `.sh`, `.py`, `.rs`) is tried as a file first, and opens as a web address when no file matches, with nothing reported.
+- **Any other link that names no file opens nothing.**
   - The footer shows "unknown file" with the name for a moment, and the status is unchanged.
   - The workspace's agent is asked, after its running turn and never interrupting it, which file it meant.
   - The question quotes the bubble you clicked in, as a reply to a selected bubble does.
