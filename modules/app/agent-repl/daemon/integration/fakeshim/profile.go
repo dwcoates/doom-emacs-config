@@ -39,6 +39,10 @@ type Profile struct {
 	// answer because the opening frame of the daemon's very first stream is
 	// what it governs.
 	OpeningFault string `json:"opening_fault,omitempty"`
+	// OpeningNetworkUnreachable makes the opening diagnostics push of EVERY
+	// session stream UNHEALTHY with one network_unreachable fault carrying
+	// this detail: a shim that saw this machine offline.
+	OpeningNetworkUnreachable string `json:"opening_network_unreachable,omitempty"`
 	// ExitOn kills the process at a named moment: "startup", "start_session"
 	// or "watch_session".
 	ExitOn string `json:"exit_on,omitempty"`

@@ -14,6 +14,7 @@ import (
 
 	"claude-repld/internal/account"
 	"claude-repld/internal/boot"
+	"claude-repld/internal/bringup"
 	"claude-repld/internal/buildid"
 	"claude-repld/internal/checkout"
 	"claude-repld/internal/classifier"
@@ -51,6 +52,7 @@ import (
 	"claude-repld/internal/sessionlock"
 	"claude-repld/internal/sessionwatcher"
 	"claude-repld/internal/shimclient"
+	"claude-repld/internal/startup"
 	"claude-repld/internal/titlesynth"
 	"claude-repld/internal/vocab"
 	"claude-repld/internal/workspace"
@@ -513,6 +515,25 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Log:        log,
 	})
 
+	// THE EDITOR'S STARTUP (internal/startup) is told every bring-up step the
+	// fleet takes, so it is built first; it reaches the fleet only once the
+	// daemon serves, by which time the fleet below exists.
+	startupRuns, err := startup.New(startup.Deps{
+		Order: func() []sidebar.TabEntry {
+			roster, _ := sidebarResolver.Topic().Latest()
+			return sidebar.TabOrder(roster)
+		},
+		Live: func(ws ids.WorkspaceID) bool { return fleet.Live(ws) },
+		BringUp: func(pending []ids.WorkspaceID, done func(ids.WorkspaceID, error)) {
+			editorBringUp(fleet, p.DB, sidebarResolver.SetBringingUp, log, pending, done)
+		},
+		Now: time.Now,
+		Log: log,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("claude-repld: build the editor startup: %w", err)
+	}
+
 	fleet, err = workspace.NewFleet(workspace.FleetDeps{
 		PublishHost: relay.PublishHostWorkspace,
 		DB:          p.DB,
@@ -534,6 +555,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Topbar:       topbarResolver,
 		BringUps:     sidebarResolver.SetBringingUp,
 		VendorStarts: sidebarResolver.SetVendorStart,
+		Steps:        startupRuns.Step,
 		SessionsUp:   lifecycle.SessionUp,
 		SocketPath:   func(ws ids.WorkspaceID) string { return p.Layout.ShimSocket(string(ws)) },
 		StoreSocket:  p.Opts.storeSocket,
@@ -986,6 +1008,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			PersistentWifi:   wifi,
 			NewsDigest:       digest,
 			EditorInstances:  editors,
+			Startup:          startupRuns,
 			WebappDist:       paths.WebappDist,
 			ImageOrigin:      images.Handler(),
 			Log:              p.Surfaces,
@@ -1534,4 +1557,40 @@ func (f *faultSurfaces) FaultClosed(ws ids.WorkspaceID, id ids.FaultID) {
 		f.topbar.RetractDaemonWarning(string(id))
 		f.loud.Closed(id)
 	}
+}
+
+// opEditorBringUp names the editor startup's own bring-up records.
+const opEditorBringUp = "daemon.startup.bring_up"
+
+// editorBringUp starts the named workspaces' sessions for the editor's startup
+// through THE ONE BRING-UP (bringup.Run, and through it Fleet.Start), on the
+// fleet's own detached lifetime so the exit drains and joins it. Each
+// workspace's bring-up marker is raised before any start, as the boot and the
+// takeover raise theirs; a workspace whose record cannot be read is told done
+// with that error at once and never started.
+func editorBringUp(fleet *workspace.Fleet, db wsm.DB, marker func(ids.WorkspaceID, bool), log dlog.Logger,
+	pending []ids.WorkspaceID, done func(ids.WorkspaceID, error)) {
+	records := make([]wsm.Workspace, 0, len(pending))
+	for _, ws := range pending {
+		record, err := db.Workspace(context.Background(), ws)
+		if err != nil {
+			log.Error(opEditorBringUp, "a workspace the editor's startup names could not be read; it is not brought up", dlog.Context{
+				dlog.KeyWorkspaceID: string(ws), "error": err.Error(),
+			})
+			done(ws, fmt.Errorf("read the workspace record of %q: %w", ws, err))
+			continue
+		}
+		marker(ws, true)
+		records = append(records, record)
+	}
+	fleet.Detach(func(ctx context.Context) {
+		bringup.Run(ctx, bringup.Deps{
+			DB:           db,
+			StartSession: fleet.Start,
+			BringingUp:   marker,
+			Log:          log,
+			Operation:    opEditorBringUp,
+			Done:         done,
+		}, records)
+	})
 }

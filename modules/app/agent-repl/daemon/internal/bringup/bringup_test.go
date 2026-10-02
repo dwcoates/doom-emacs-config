@@ -190,16 +190,27 @@ func TestRunRecordsAFailedStartAtError(t *testing.T) {
 }
 
 func TestRunDoesNotRecordAStandDownAsAnError(t *testing.T) {
-	// Arrange
-	f := newFixture()
-	f.startErr["a"] = fmt.Errorf("start: %w", shimclient.ErrStandDownOrdered)
+	tests := []struct {
+		name string
+		err  error
+	}{
+		{name: "a stand-down this daemon ordered", err: shimclient.ErrStandDownOrdered},
+		{name: "a spawn refused because the daemon is standing down", err: shimclient.ErrStandingDown},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture()
+			f.startErr["a"] = fmt.Errorf("start: %w", tt.err)
 
-	// Act
-	Run(context.Background(), f.deps(), workspaces("a"))
+			// Act
+			Run(context.Background(), f.deps(), workspaces("a"))
 
-	// Assert
-	if errs := f.recordsAt(dlog.LevelError); len(errs) != 0 {
-		t.Fatalf("error records = %+v, want none for a stand-down this daemon ordered", errs)
+			// Assert
+			if errs := f.recordsAt(dlog.LevelError); len(errs) != 0 {
+				t.Fatalf("error records = %+v, want none", errs)
+			}
+		})
 	}
 }
 
@@ -321,5 +332,55 @@ func TestDepsValidateAcceptsACompleteDeps(t *testing.T) {
 	// Assert
 	if err != nil {
 		t.Fatalf("Validate() = %v, want nil", err)
+	}
+}
+
+func TestRunTellsDoneHowEachWorkspacesStartEnded(t *testing.T) {
+	// Arrange
+	f := newFixture()
+	f.startErr["bad"] = errors.New("spawn refused")
+	f.sessions.errs["unread"] = errors.New("disk gone")
+	deps := f.deps()
+	var mu sync.Mutex
+	got := map[ids.WorkspaceID]error{}
+	deps.Done = func(ws ids.WorkspaceID, err error) {
+		mu.Lock()
+		defer mu.Unlock()
+		got[ws] = err
+	}
+
+	// Act
+	Run(context.Background(), deps, []wsm.Workspace{{ID: "good"}, {ID: "bad"}, {ID: "unread"}})
+
+	// Assert
+	if len(got) != 3 {
+		t.Fatalf("Done told %d workspaces, want 3: %v", len(got), got)
+	}
+	if got["good"] != nil {
+		t.Fatalf("good ended %v, want nil", got["good"])
+	}
+	if got["bad"] == nil || !strings.Contains(got["bad"].Error(), "spawn refused") {
+		t.Fatalf("bad ended %v, want the start's error", got["bad"])
+	}
+	if got["unread"] == nil || !strings.Contains(got["unread"].Error(), "disk gone") {
+		t.Fatalf("unread ended %v, want the record's read error", got["unread"])
+	}
+}
+
+func TestRunTellsDoneOfAStartNeverBegun(t *testing.T) {
+	// Arrange
+	f := newFixture()
+	deps := f.deps()
+	var told error
+	deps.Done = func(_ ids.WorkspaceID, err error) { told = err }
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act
+	Run(ctx, deps, []wsm.Workspace{{ID: "w1"}})
+
+	// Assert
+	if told == nil || !errors.Is(told, context.Canceled) {
+		t.Fatalf("Done = %v, want the daemon leaving", told)
 	}
 }
