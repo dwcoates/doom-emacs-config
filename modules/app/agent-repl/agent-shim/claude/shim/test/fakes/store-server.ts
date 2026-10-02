@@ -675,6 +675,7 @@ export async function startFakeStore(socketPath: string, options: FakeStoreOptio
           });
         }
         const all = placedRowsOf(bookId);
+        const head = all[all.length - 1];
         const floorPointer =
           request.opening.case === "knownThrough" ? Number(request.opening.value.value) : -1;
         // CATCH-UP IS WRITE ORDER: first written after the mark, in place order.
@@ -720,6 +721,9 @@ export async function startFakeStore(socketPath: string, options: FakeStoreOptio
                 token === undefined
                   ? undefined
                   : create(storev1.AgentSessionTokenSchema, { value: token }),
+              // EVERY OPEN NAMES THE BOOK'S NEWEST LINE BY PLACE, whatever the
+              // opening, exactly as the real store does; unset is an empty book.
+              newest: head === undefined ? undefined : pointerOf(head),
             }),
           },
         });

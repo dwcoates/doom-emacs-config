@@ -576,30 +576,17 @@ export function createReader(options: ReaderOptions): Reader {
     const page = toHistoryPage(opened.page);
     const knownThrough = opening.case === "knownThrough" ? opening.value : undefined;
     /**
-     * THE BOOK AS IT STOOD AT A TAIL-ONLY OPEN, read once and never relayed.
+     * THE BOOK'S NEWEST LINE AS OF THE OPEN, as the store names it on every
+     * open (unset: the book holds none).
      *
-     * A tail-only page is empty by request, so it carries none of the three
-     * things this session stands on: a high-water mark for a lossless re-open,
-     * the pointers a teardown's conclusion may name, and whether the book held
-     * anything at all. Without them a teardown concluding through the book's
-     * head — an old line, when nothing was written since the open — waited out
-     * its whole conclusion budget for a line the tail would never carry, and a
-     * store restart re-opened the book with no mark, replaying history the
-     * consumer said it did not want. So the newest store page is read once,
-     * page-only, AFTER the open (a line written in between is on the tail as
-     * well, and marking it served only ever ends a conclusion that already
-     * holds it), and its lines are noted as served without being yielded.
+     * A tail-only page is empty by request, so this is the only thing such a
+     * session stands on: the pointer a teardown concluding through the book's
+     * head names (already "served", so the tail ends at once instead of
+     * spending its conclusion budget on a line it will never carry), the mark
+     * a lossless re-open passes as `known_through` (never a repaint, which
+     * would replay history nobody asked for), and whether the book was empty.
      */
-    let headLines: storev1.StoreLineAt[] = [];
-    if (opening.case === "tailOnly") {
-      const asOpened = await onReadRetrySchedule("readTailOnlyHead", agent, () =>
-        openSession(agent, REPAINT, true),
-      );
-      if (asOpened.page === undefined) {
-        throw new PersistenceError("store_unavailable", "the store answered a page-only open with no page");
-      }
-      headLines = asOpened.page.lines;
-    }
+    const newest = opened.newest === undefined ? undefined : toHistoryPointer(opened.newest);
     LOGGER.debug(
       { agent: agent.value, opening: opening.case, entries: page.entries.length },
       "opened an agent's book and pinned its tail",
@@ -609,10 +596,9 @@ export function createReader(options: ReaderOptions): Reader {
     // is the LAST pointer served rather than the newest by position, because an
     // upsert of an old row is new information about a line already read past:
     // re-opening from the newer pointer would drop it. A tail-only open's mark
-    // is the book's head as of the open.
-    const head = headLines[0]?.at;
+    // is the book's newest line as of the open.
     let servedThrough: conversationv1.HistoryPointer | undefined =
-      page.entries[0]?.at ?? knownThrough ?? (head === undefined ? undefined : toHistoryPointer(head));
+      page.entries[0]?.at ?? knownThrough ?? (opening.case === "tailOnly" ? newest : undefined);
     /**
      * EVERY pointer this session has handed the consumer.
      *
@@ -632,7 +618,8 @@ export function createReader(options: ReaderOptions): Reader {
      */
     const served = new Map<string, string>();
     if (knownThrough !== undefined) served.set(knownThrough.value, CONTENT_UNKNOWN);
-    for (const line of [...opened.page.lines, ...headLines]) {
+    if (opening.case === "tailOnly" && newest !== undefined) served.set(newest.value, CONTENT_UNKNOWN);
+    for (const line of opened.page.lines) {
       if (line.at !== undefined) served.set(line.at.value, lineFingerprint(line));
     }
     let token: storev1.AgentSessionToken = opened.watch;
@@ -786,8 +773,8 @@ export function createReader(options: ReaderOptions): Reader {
           //
           // WITH NO MARK THE RE-OPEN IS A REPAINT, and that is right only
           // because a mark is missing solely when the book held nothing at
-          // the open: a tail-only open marks the book's head as of the open,
-          // so everything a markless book holds now was written since.
+          // the open: a tail-only open marks the store's `newest` as of the
+          // open, so everything a markless book holds now was written since.
           const mark = servedThrough;
           const reopened = await onReadRetrySchedule("reopenAgentTail", agent, () =>
             openSession(agent, mark === undefined ? REPAINT : { case: "knownThrough", value: mark }),
@@ -851,7 +838,7 @@ export function createReader(options: ReaderOptions): Reader {
 
     return {
       page,
-      foundNothing: page.entries.length === 0 && headLines.length === 0,
+      foundNothing: newest === undefined,
       tail,
       concludeThrough: (through) => {
         if (stopped) return;
