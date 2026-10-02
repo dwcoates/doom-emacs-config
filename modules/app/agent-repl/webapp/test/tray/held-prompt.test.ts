@@ -528,10 +528,10 @@ describe("drawHeldPrompt hold arms", () => {
       line: "wire shutdown",
     },
     {
-      name: "session_starting",
-      prompt: heldPrompt({ hold: { case: "sessionStarting", value: {} } }),
-      arm: "sessionStarting",
-      line: "wire sessionStarting",
+      name: "reconnect",
+      prompt: heldPrompt({ hold: { case: "reconnect", value: {} } }),
+      arm: "reconnect",
+      line: "wire reconnect",
     },
     {
       name: "build_refresh",
@@ -670,8 +670,8 @@ describe("drawHeldPrompt release availability", () => {
       }),
     },
     {
-      name: "session_starting",
-      prompt: heldPrompt({ hold: { case: "sessionStarting", value: {} } }),
+      name: "reconnect",
+      prompt: heldPrompt({ hold: { case: "reconnect", value: {} } }),
     },
   ];
 
@@ -690,12 +690,12 @@ describe("drawHeldPrompt release availability", () => {
   it("warns on the release button why the arm is likely to refuse it", () => {
     const { tc } = trayContext();
     const card = drawHeldPrompt(
-      heldPrompt({ hold: { case: "sessionStarting", value: {} } }),
+      heldPrompt({ hold: { case: "reconnect", value: {} } }),
       tc,
     );
     expect(
       card.querySelector<HTMLElement>('[data-held-action="release"]')?.title,
-    ).toContain("the session is not up yet");
+    ).toContain("the session is not up");
   });
 
   it("warns on the release button that a merge is driving the session", () => {
@@ -1124,7 +1124,7 @@ describe("the held prompt's spec: a prompt bubble on the held fill", () => {
       ["lease-card"],
     ],
     ["a merge hold", { case: "merge", value: {} }, ["lease-card"]],
-    ["a session-starting hold", { case: "sessionStarting", value: {} }, []],
+    ["a session-starting hold", { case: "reconnect", value: {} }, []],
   ] as const)(
     "names %s by its hook, which selects no border",
     (_name, hold, frames) => {
@@ -1297,7 +1297,7 @@ const EXPECTED_BADGES: Readonly<Record<HeldStatus, string>> = {
   shutdown: "amber",
   buildRefresh: "amber",
   merge: "amber",
-  sessionStarting: "teal",
+  reconnect: "teal",
   editing: "run",
   coalesced: "muted",
 };
@@ -1369,8 +1369,8 @@ describe("the daemon's badge words", () => {
       () => heldPrompt({ hold: { case: "buildRefresh", value: {} } }),
     ],
     [
-      "sessionStarting",
-      () => heldPrompt({ hold: { case: "sessionStarting", value: {} } }),
+      "reconnect",
+      () => heldPrompt({ hold: { case: "reconnect", value: {} } }),
     ],
     [
       "merge",
@@ -1519,7 +1519,7 @@ describe("the daemon's badge words", () => {
       '"unclassified"',
       '"confirmed"',
       "held for the scheduled restart",
-      "held until the session is up",
+      "held until the session reconnects",
       "held for the build refresh",
     ];
     // Act
@@ -1681,8 +1681,8 @@ describe("every status a held card shows is a badge in the table's tone", () => 
       () => heldPrompt({ hold: { case: "buildRefresh", value: {} } }),
     ],
     [
-      "sessionStarting",
-      () => heldPrompt({ hold: { case: "sessionStarting", value: {} } }),
+      "reconnect",
+      () => heldPrompt({ hold: { case: "reconnect", value: {} } }),
     ],
     [
       "merge",
