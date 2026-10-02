@@ -3344,3 +3344,34 @@ describe("the expanded-item ceiling", () => {
     expect(declarationsOf(".bubble > .bubble-scroll.expanded")).not.toMatch(/--feed-item-max-h/);
   });
 });
+
+describe("the persistent-wifi chip's paints (owner request, 2026-10-02)", () => {
+  it("paints the joined glyph a brighter green than --ok", () => {
+    // Arrange
+    const root = declarationsOf(":root") ?? "";
+    // Act
+    const [wifi, ok] = [luminance(rgbOf(root, "--wifi-joined")), luminance(rgbOf(root, "--ok"))];
+    // Assert
+    expect(wifi).toBeGreaterThan(ok);
+  });
+
+  it("keeps the joined glyph green", () => {
+    // Arrange / Act
+    const [r, g, b] = rgbOf(declarationsOf(":root") ?? "", "--wifi-joined");
+    // Assert
+    expect(g > r && g > b).toBe(true);
+  });
+
+  it("makes the mode-on disc black", () => {
+    expect(rgbOf(declarationsOf(":root") ?? "", "--wifi-mode-on-disc")).toEqual([0, 0, 0]);
+  });
+
+  it("fills the disc, not the chip, when the mode is on", () => {
+    const rule = declarationsOf('.topbar-wifi[data-mode="on"] .topbar-wifi-disc') ?? "";
+    expect(rule).toMatch(/fill:\s*var\(--wifi-mode-on-disc\)/);
+  });
+
+  it("strokes the glyph's arcs and never the disc", () => {
+    expect(declarationsOf(".topbar-wifi-disc") ?? "").toMatch(/stroke:\s*none/);
+  });
+});
