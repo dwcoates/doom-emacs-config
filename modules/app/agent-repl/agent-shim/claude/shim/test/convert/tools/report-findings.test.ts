@@ -7,7 +7,7 @@
 import { create } from "@bufbuild/protobuf";
 import { describe, expect, it } from "vitest";
 import { conversationv1 } from "../../../src/proto.js";
-import { effortLevelOf, reportFindingsConverter } from "../../../src/convert/tools/report-findings.js";
+import { reportFindingsConverter } from "../../../src/convert/tools/report-findings.js";
 import { toolResultText } from "../../../src/convert/entries.js";
 import type { PendingCall, ToolOutcome } from "../../../src/convert/tool-calls.js";
 
@@ -289,42 +289,5 @@ describe("one finding", () => {
 
     // Act, Assert.
     expect(oneFinding(rest).failureScenario).toBe("");
-  });
-});
-
-describe("effortLevelOf", () => {
-  it("maps low", () => {
-    // Arrange, Act, Assert.
-    expect(effortLevelOf("low")).toBe(conversationv1.AgentEffortLevel.LOW);
-  });
-
-  it("maps medium", () => {
-    // Arrange, Act, Assert.
-    expect(effortLevelOf("medium")).toBe(conversationv1.AgentEffortLevel.MEDIUM);
-  });
-
-  it("maps high", () => {
-    // Arrange, Act, Assert.
-    expect(effortLevelOf("high")).toBe(conversationv1.AgentEffortLevel.HIGH);
-  });
-
-  it("maps xhigh", () => {
-    // Arrange, Act, Assert.
-    expect(effortLevelOf("xhigh")).toBe(conversationv1.AgentEffortLevel.XHIGH);
-  });
-
-  it("maps max", () => {
-    // Arrange, Act, Assert.
-    expect(effortLevelOf("max")).toBe(conversationv1.AgentEffortLevel.MAX);
-  });
-
-  it("is UNSPECIFIED when the tool stated no level", () => {
-    // Arrange, Act, Assert.
-    expect(effortLevelOf(undefined)).toBe(conversationv1.AgentEffortLevel.UNSPECIFIED);
-  });
-
-  it("is UNSPECIFIED for a level this vocabulary has no value for, rather than a guess", () => {
-    // Arrange, Act, Assert.
-    expect(effortLevelOf("ultra")).toBe(conversationv1.AgentEffortLevel.UNSPECIFIED);
   });
 });
