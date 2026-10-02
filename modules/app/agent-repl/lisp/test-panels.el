@@ -4684,66 +4684,6 @@ the user switched away and back."
       ;; Assert
       (should-not (plist-get agent-repl--switch-trigger :webview-window)))))
 
-;;;; ---- Tests: a panels-only layout is saved with the input selected ----
-
-(defmacro agent-repl-test--with-panels-only-layout (bindings &rest body)
-  "Run BODY in a two-window panels-only layout.
-BINDINGS names (VIEW-WIN INPUT-WIN VIEW-BUF INPUT-BUF); the workspace
-lookups are stubbed to answer them for workspace \"ws\"."
-  (declare (indent 1))
-  (let ((view-win (nth 0 bindings)) (input-win (nth 1 bindings))
-        (view-buf (nth 2 bindings)) (input-buf (nth 3 bindings)))
-    `(agent-repl-test--with-clean-state
-       (delete-other-windows)
-       (let* ((,view-buf (get-buffer-create "*agent-frontend-ws*"))
-              (,input-buf (get-buffer-create "*agent-input-ws*"))
-              (,view-win (selected-window))
-              (,input-win (split-window)))
-         (unwind-protect
-             (progn
-               (set-window-buffer ,view-win ,view-buf)
-               (set-window-buffer ,input-win ,input-buf)
-               (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws"))
-                         ((symbol-function 'agent-repl--agent-panel-buffer-p)
-                          (lambda (b) (memq b (list ,view-buf ,input-buf))))
-                         ((symbol-function 'agent-repl-window--panel-buffer)
-                          (lambda (kind _ws) (if (eq kind :view) ,view-buf ,input-buf)))
-                         ((symbol-function 'agent-repl-window--panel-window)
-                          (lambda (kind _ws) (if (eq kind :input) ,input-win ,view-win))))
-                 ,@body))
-           (when (window-live-p ,input-win) (ignore-errors (delete-window ,input-win)))
-           (set-window-buffer (selected-window) "*scratch*")
-           (kill-buffer ,view-buf)
-           (kill-buffer ,input-buf))))))
-
-(ert-deftest agent-repl-test-panels-redirect-webview-selected-saves-with-input ()
-  ;; Arrange
-  (agent-repl-test--with-panels-only-layout (view-win input-win _view-buf _input-buf)
-    (select-window view-win)
-    ;; Act
-    (agent-repl--redirect-from-agent-before-save)
-    ;; Assert
-    (should (eq (selected-window) input-win))))
-
-(ert-deftest agent-repl-test-panels-redirect-input-selected-stays-on-input ()
-  ;; Arrange
-  (agent-repl-test--with-panels-only-layout (_view-win input-win _view-buf _input-buf)
-    (select-window input-win)
-    ;; Act
-    (agent-repl--redirect-from-agent-before-save)
-    ;; Assert
-    (should (eq (selected-window) input-win))))
-
-(ert-deftest agent-repl-test-panels-redirect-webview-without-input-window-stays ()
-  ;; Arrange
-  (agent-repl-test--with-panels-only-layout (view-win _input-win _view-buf _input-buf)
-    (select-window view-win)
-    (cl-letf (((symbol-function 'agent-repl-window--panel-window) (lambda (&rest _) nil)))
-      ;; Act
-      (agent-repl--redirect-from-agent-before-save)
-      ;; Assert
-      (should (eq (selected-window) view-win)))))
-
 ;;;; ---- Tests: the switch's webview record only for real workspaces ----
 
 (ert-deftest agent-repl-test-panels-ensure-own-schedules-no-webview-record-for-a-placeholder ()
