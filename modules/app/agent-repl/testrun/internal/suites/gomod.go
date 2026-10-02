@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"agentrepl/testrun/internal/command"
 	"agentrepl/testrun/internal/run"
 	"agentrepl/testrun/roster"
 )
@@ -18,22 +19,24 @@ func goTestedPackages(dir string) ([]string, error) {
 	cmd := exec.Command("go", "list", "-f", "{{if or .TestGoFiles .XTestGoFiles}}{{.Dir}}{{end}}", "./...")
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), PinnedEnv()...)
-	out, err := cmd.Output()
+	out, err := command.Output(cmd)
 	if err != nil {
-		var stderr string
-		if ee, ok := err.(*exec.ExitError); ok {
-			stderr = string(ee.Stderr)
-		}
-		return nil, fmt.Errorf("suites: go list in %s: %w\n%s", dir, err, stderr)
+		return nil, fmt.Errorf("suites: list the tested packages: %w", err)
 	}
+	return parseGoList(dir, out)
+}
+
+// parseGoList reads goTestedPackages' `go list` output: one absolute package
+// directory per line, answered relative to the module dir and sorted.
+func parseGoList(dir string, out []byte) ([]string, error) {
 	var pkgs []string
 	for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
 		if line == "" {
 			continue
 		}
-		rel, err := filepath.Rel(dir, line)
+		rel, err := under(dir, line)
 		if err != nil {
-			return nil, fmt.Errorf("suites: %s is not under %s: %w", line, dir, err)
+			return nil, err
 		}
 		pkgs = append(pkgs, rel)
 	}
