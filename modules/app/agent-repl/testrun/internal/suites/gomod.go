@@ -49,9 +49,10 @@ func goPackageArg(rel string) string {
 	return "./" + rel
 }
 
-// goModuleUnits is one unit per tested package, each writing its coverage
-// counters into its own directory, and one report unit that merges them into
-// the module's function report, the shape report-nonlisp-coverage.sh prints.
+// goModuleUnits is every tested package of the module split the one Go way
+// (goPkg), all writing coverage counters into one directory per package, plus
+// the module's vet unit and one report unit that merges the counters into the
+// module's function report, the shape report-nonlisp-coverage.sh prints.
 func goModuleUnits(l Layout, s roster.Suite) (Units, error) {
 	dir := l.resolve(s.Path)
 	pkgs, err := goTestedPackages(dir)
@@ -62,22 +63,32 @@ func goModuleUnits(l Layout, s roster.Suite) (Units, error) {
 		return Units{}, fmt.Errorf("suites: %s has no tested packages under %s", s.Name, dir)
 	}
 	covRoot := filepath.Join(l.Work, "cover", s.Name)
-	var units []run.Spec
-	var deps []string
+	vet := spec(s.Name+":vet", s.Name, dir, append(append([]string{"go", "vet"}, goTestVetFlags...), "./..."))
+	u := Units{Atomic: []run.Spec{vet}}
+	var reportDeps []string
 	for i, rel := range pkgs {
-		covDir := filepath.Join(covRoot, fmt.Sprintf("%03d", i))
-		if err := os.MkdirAll(covDir, 0o755); err != nil {
-			return Units{}, fmt.Errorf("suites: create %s: %w", covDir, err)
+		p := goPkg{
+			Suite: s.Name, Module: dir, Rel: rel,
+			Bin:    filepath.Join(l.Work, "bin", s.Name, fmt.Sprintf("%03d.test", i)),
+			CovDir: filepath.Join(covRoot, fmt.Sprintf("%03d", i)),
 		}
-		id := s.Name + ":" + rel
-		units = append(units, spec(id, s.Name, dir, []string{
-			"go", "test", "-count=1", "-parallel=1", "-cover", "-coverpkg=./...",
-			goPackageArg(rel), "-args", "-test.gocoverdir=" + covDir,
-		}))
-		deps = append(deps, id)
+		build, split, err := p.units()
+		if err != nil {
+			return Units{}, err
+		}
+		u.Atomic = append(u.Atomic, build)
+		if split == nil {
+			continue
+		}
+		u.Splits = append(u.Splits, *split)
+		reportDeps = append(reportDeps, split.Group)
+	}
+	if len(reportDeps) == 0 {
+		return Units{}, fmt.Errorf("suites: %s has test files but no test to run under %s", s.Name, dir)
 	}
 	report := spec(s.Name+":coverage", s.Name, dir,
 		[]string{l.Self, "cover-report", "-name", s.Name, "-module", dir, "-covdirs", covRoot})
-	report.Deps = deps
-	return Units{Atomic: append(units, report)}, nil
+	report.Deps = reportDeps
+	u.Atomic = append(u.Atomic, report)
+	return u, nil
 }

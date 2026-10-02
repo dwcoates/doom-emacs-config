@@ -321,11 +321,12 @@ func TestParseGoTestItems(t *testing.T) {
 }
 
 func TestGoTopLevelTests(t *testing.T) {
-	// Arrange: a package with a tagged-out file, helpers, a benchmark, TestMain
-	// and a lowercase "Testing" lookalike.
+	// Arrange: a package with a tagged-out file, helpers, a benchmark, TestMain,
+	// a lowercase "Testing" lookalike, a fuzz target, and two examples of which
+	// only the one with an output comment is run by go test.
 	dir := t.TempDir()
 	write(t, filepath.Join(dir, "go.mod"), "module x\n\ngo 1.24\n", 0o644)
-	write(t, filepath.Join(dir, "x.go"), "package x\n", 0o644)
+	write(t, filepath.Join(dir, "x.go"), "package x\n\nfunc F() {}\n", 0o644)
 	write(t, filepath.Join(dir, "a_test.go"), `package x
 import "testing"
 func TestMain(m *testing.M) {}
@@ -334,8 +335,16 @@ func TestA(t *testing.T) {}
 func Testing(t *testing.T) {}
 func TestHelper(x int) {}
 func BenchmarkX(b *testing.B) {}
+func FuzzParse(f *testing.F) {}
 type s struct{}
 func (s) TestMethod(t *testing.T) {}
+func ExampleF() {
+	F()
+	// Output:
+}
+func ExampleF_quiet() {
+	F()
+}
 `, 0o644)
 	write(t, filepath.Join(dir, "tagged_test.go"), "//go:build perf\n\npackage x\nimport \"testing\"\nfunc TestPerf(t *testing.T) {}\n", 0o644)
 	write(t, filepath.Join(dir, "ext_test.go"), "package x_test\nimport \"testing\"\nfunc TestExternal(t *testing.T) {}\n", 0o644)
@@ -347,8 +356,145 @@ func (s) TestMethod(t *testing.T) {}
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"TestA", "TestB", "TestExternal"}; !reflect.DeepEqual(got, want) {
+	if want := []string{"ExampleF", "FuzzParse", "TestA", "TestB", "TestExternal"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("GoTopLevelTests = %v, want %v", got, want)
+	}
+}
+
+func TestGoTopLevelTestsOfADirectoryWithoutGoIsEmpty(t *testing.T) {
+	// Act
+	got, err := GoTopLevelTests(t.TempDir())
+
+	// Assert
+	if err != nil || len(got) != 0 {
+		t.Fatalf("GoTopLevelTests = %v, %v; want nothing", got, err)
+	}
+}
+
+func goPackageFixture(t *testing.T, tests string) string {
+	t.Helper()
+	module := t.TempDir()
+	write(t, filepath.Join(module, "go.mod"), "module x\n\ngo 1.24\n", 0o644)
+	write(t, filepath.Join(module, "p", "p.go"), "package p\n", 0o644)
+	write(t, filepath.Join(module, "p", "p_test.go"), "package p\nimport \"testing\"\n"+tests, 0o644)
+	return module
+}
+
+func TestGoPkgUnits(t *testing.T) {
+	tests := []struct {
+		name      string
+		covDir    bool
+		wantBuild []string
+		wantChunk []string
+	}{
+		{
+			name:      "a covered package compiles instrumented and writes counters",
+			covDir:    true,
+			wantBuild: []string{"go", "test", "-c", "-o", "BIN", "-cover", "-coverpkg=./...", "./p"},
+			wantChunk: []string{"BIN", "-test.count=1", "-test.v", "-test.parallel=1", "-test.timeout=10m", "-test.run=^(TestA)$", "-test.gocoverdir=COV"},
+		},
+		{
+			name:      "an uncovered package compiles plain",
+			wantBuild: []string{"go", "test", "-c", "-o", "BIN", "./p"},
+			wantChunk: []string{"BIN", "-test.count=1", "-test.v", "-test.parallel=1", "-test.timeout=10m", "-test.run=^(TestA)$"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			module := goPackageFixture(t, "func TestA(t *testing.T) {}\nfunc TestB(t *testing.T) {}\n")
+			bin := filepath.Join(t.TempDir(), "p.test")
+			cov := ""
+			if tt.covDir {
+				cov = filepath.Join(t.TempDir(), "cov")
+			}
+			p := goPkg{Suite: "m", Module: module, Rel: "p", Bin: bin, CovDir: cov}
+
+			// Act
+			build, split, err := p.units()
+
+			// Assert
+			if err != nil {
+				t.Fatal(err)
+			}
+			subst := func(argv []string) []string {
+				out := []string{}
+				for _, a := range argv {
+					a = strings.ReplaceAll(a, bin, "BIN")
+					if cov != "" {
+						a = strings.ReplaceAll(a, cov, "COV")
+					}
+					out = append(out, a)
+				}
+				return out
+			}
+			if build.ID != "m:p:build" || !reflect.DeepEqual(subst(build.Argv), tt.wantBuild) {
+				t.Fatalf("build = %s %v, want m:p:build %v", build.ID, subst(build.Argv), tt.wantBuild)
+			}
+			if split == nil || split.Group != "m:p" || !reflect.DeepEqual(split.Items, []string{"TestA", "TestB"}) || !reflect.DeepEqual(split.Deps, []string{"m:p:build"}) {
+				t.Fatalf("split = %+v", split)
+			}
+			chunk := split.Chunk("m:p#00", []string{"TestA"})
+			if !reflect.DeepEqual(subst(chunk.Argv), tt.wantChunk) || chunk.Dir != filepath.Join(module, "p") {
+				t.Fatalf("chunk = %v in %s, want %v in the package dir", subst(chunk.Argv), chunk.Dir, tt.wantChunk)
+			}
+			if tt.covDir {
+				if info, err := os.Stat(cov); err != nil || !info.IsDir() {
+					t.Fatalf("the coverage directory was not created: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestGoPkgUnitsOfAPackageWithoutTestsIsItsBuildAlone(t *testing.T) {
+	// Arrange: test files with helpers only.
+	module := goPackageFixture(t, "func helper(t *testing.T) {}\n")
+
+	// Act
+	build, split, err := goPkg{Suite: "m", Module: module, Rel: "p", Bin: "/b"}.units()
+
+	// Assert
+	if err != nil || split != nil || build.ID != "m:p:build" {
+		t.Fatalf("units = %s, %+v, %v; want the build alone", build.ID, split, err)
+	}
+}
+
+func TestGoPkgUnitsUsesACustomBuild(t *testing.T) {
+	// Arrange
+	module := goPackageFixture(t, "func TestA(t *testing.T) {}\n")
+	p := goPkg{Suite: "e2e", Module: module, Rel: "p", Bin: "/b", Build: []string{"bash", "-c", "make it"}, ChunkEnv: []string{"K=V"}, Timeout: "45m"}
+
+	// Act
+	build, split, err := p.units()
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(build.Argv, []string{"bash", "-c", "make it"}) {
+		t.Fatalf("build argv = %v", build.Argv)
+	}
+	chunk := split.Chunk("e2e:p#00", []string{"TestA"})
+	if !strings.Contains(strings.Join(chunk.Argv, " "), "-test.timeout=45m") || chunk.Env[len(chunk.Env)-1] != "K=V" {
+		t.Fatalf("chunk argv %v env %v", chunk.Argv, chunk.Env)
+	}
+}
+
+func TestQuietGoTestOutput(t *testing.T) {
+	// Arrange
+	out := []byte("=== RUN   TestA\n=== PAUSE TestA\n=== CONT  TestA\n    a_test.go:3: a log line\n--- PASS: TestA (0.10s)\n    --- PASS: TestA/sub (0.00s)\nPASS\ncoverage: 50.0% of statements\n")
+
+	// Act
+	quiet := QuietGoTestOutput(out, true)
+	loud := QuietGoTestOutput(out, false)
+
+	// Assert
+	if want := "    a_test.go:3: a log line\ncoverage: 50.0% of statements\n"; string(quiet) != want {
+		t.Fatalf("a passing chunk shows %q, want %q", quiet, want)
+	}
+	if string(loud) != string(out) {
+		t.Fatal("a failing chunk's output was trimmed")
 	}
 }
 
