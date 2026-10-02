@@ -298,6 +298,14 @@ type watcher struct {
 	// request loaded (NoteHistoryLoaded). It is what an open passes as
 	// known_through; an agent with no pointer is opened tail_only.
 	known map[string]*conversationv1.HistoryPointer
+	// served is every pointer each watch key was served, live or on a page.
+	// A pointer served AGAIN is an older entry re-written (an upsert, the file
+	// plane re-deriving a turn after its terminal), not a newer one, so it
+	// never moves `known`: a catch-up is FIRST-WRITTEN-AFTER the mark, and a
+	// mark walked back onto a re-written entry re-serves every entry first
+	// written between (a StartTurn opening on the previous turn's terminal).
+	// Pointers are only ever tested for equality, never ordered.
+	served map[string]map[string]struct{}
 
 	// facts is what the watcher learned from the activities it routed, keyed
 	// by AgentActivityId.value: the detachable kind (so a `detached`-origin
@@ -405,6 +413,7 @@ func start(ctx context.Context, ws ids.WorkspaceID, client shimclient.Client, se
 		shells: map[string]*shellWatch{},
 		live:   map[string]*liveItem{},
 		known:  map[string]*conversationv1.HistoryPointer{},
+		served: map[string]map[string]struct{}{},
 
 		turnWaiters: map[ids.TurnID][]chan turnEnd{},
 		closedTurns: map[ids.TurnID]TurnClose{},

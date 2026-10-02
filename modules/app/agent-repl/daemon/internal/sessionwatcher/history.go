@@ -20,6 +20,7 @@ func (w *watcher) NoteHistoryLoaded(agent *conversationv1.AgentId, page *convers
 	defer w.mu.Unlock()
 	key := watchKey(agent)
 	entries := page.GetEntries()
+	w.noteServedPageLocked(key, page)
 	adopted := false
 	if newest && len(entries) > 0 && w.known[key] == nil {
 		// THE NEWEST PAGE'S NEWEST ENTRY IS HELD NOW, so a watch of this agent
