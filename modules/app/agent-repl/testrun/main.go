@@ -1,7 +1,8 @@
 // Command testrun runs the agent-repl test suites spread across the host's
 // cores. bin/test-all.sh is its entry point; see that script and AGENTS.md.
 //
-//	testrun run --module DIR [--suites a,b] [--record]
+//	testrun run --module DIR [--suites a,b] [--record --record-out PATH]
+//	testrun finish-record --module DIR --record-out PATH
 //	testrun cover-report -name N -module DIR -covdirs ROOT
 //	testrun roster
 package main
@@ -12,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"syscall"
@@ -27,12 +29,14 @@ import (
 func main() {
 	log := &run.Log{Out: os.Stdout, Err: os.Stderr}
 	if len(os.Args) < 2 {
-		log.Errorf("usage: testrun run|cover-report|roster ...")
+		log.Errorf("usage: testrun run|finish-record|cover-report|roster ...")
 		os.Exit(2)
 	}
 	switch os.Args[1] {
 	case "run":
 		os.Exit(runCmd(log, os.Args[2:]))
+	case "finish-record":
+		os.Exit(finishRecordCmd(log, os.Args[2:]))
 	case "cover-report":
 		os.Exit(coverCmd(log, os.Args[2:]))
 	case "roster":
@@ -80,6 +84,20 @@ func runCmd(log *run.Log, argv []string) int {
 		Work:        work,
 		Pid:         os.Getpid(),
 	}, args)
+}
+
+func finishRecordCmd(log *run.Log, argv []string) int {
+	a, err := cli.ParseFinishRecordArgs(argv)
+	if err != nil {
+		log.Errorf("%v", err)
+		return 1
+	}
+	moduleRoot, err := filepath.Abs(a.Module)
+	if err != nil {
+		log.Errorf("resolve the module root %s: %v", a.Module, err)
+		return 1
+	}
+	return cli.FinishRecord(cli.Deps{Log: log, Git: gitHead}, moduleRoot, a.RecordOut)
 }
 
 func coverCmd(log *run.Log, argv []string) int {

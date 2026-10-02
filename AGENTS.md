@@ -222,6 +222,17 @@ The command appends timings only after every suite passes and only if the
 branch and commit remain unchanged throughout the run. Commit the resulting
 `test_time.csv` update as a follow-up timing record.
 
+`--record`'s own suite run is wrapped by `.claude/safe-test-run.sh`'s
+git-state net like every other `test-all.sh` run (see above). Appending the
+run's timing row to the tracked `test_time.csv` is therefore never done from
+inside that net: `testrun run --record` only STAGES the row (to a path
+outside the checkout), and `test-all.sh` commits it via a separate
+`testrun finish-record` call made only after the net has already returned
+clean. Without that split, `--record`'s own declared write would show up as
+drift the run itself caused, on every run, forever. A failing suite or any
+other drift still skips `finish-record` and records nothing, exactly as
+before.
+
 Each row's `measure` column names what its `duration_seconds` means. The
 `unit-wall-sum` measure is the one `--record` writes. The
 `serial-wall` measure belongs to the retired serial script, and nothing
