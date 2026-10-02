@@ -43,7 +43,7 @@ import { recordAgentBinaryVersion, requireSessionRuntime } from "../build-identi
 import { isAgentTaskType } from "../convert/detached.js";
 import { appliedEffortOf, effortLevelOf, vendorEffortLevel } from "../convert/effort.js";
 import { boundaryChange } from "./boundary-change.js";
-import { promptVendorUuid, subagentId, toolCallActivityId } from "../convert/ids.js";
+import { mainAgentId, promptVendorUuid, subagentId, toolCallActivityId } from "../convert/ids.js";
 import { hookBlockingText } from "../convert/hooks.js";
 import { redactVendorMessage } from "../convert/terminals.js";
 import {
@@ -5356,6 +5356,10 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     noteUserDetach: (toolUseId) => deps.fold.noteUserDetach(toolUseId),
     retireUserDetach: (toolUseId, why) => deps.fold.retireUserDetach(toolUseId, why),
     identity: () => identity,
+    persistedAgent: async () => {
+      const persisted = await identityStore.read();
+      return persisted === undefined ? undefined : mainAgentId(persisted);
+    },
     query: () => query,
     nowMs: deps.nowMs,
     openTurn: () => open,
