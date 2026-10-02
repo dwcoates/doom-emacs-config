@@ -22,6 +22,7 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/health"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/resolve/sidebar"
 	"claude-repld/internal/resolve/topbar"
 	"claude-repld/internal/sessionlock"
 	"claude-repld/internal/sessionwatcher"
@@ -471,6 +472,8 @@ type fleetFixture struct {
 	// retryAfter, when set, answers the run's wait instead of the default,
 	// which advances `now` by the wait and fires at once.
 	retryAfter func(d time.Duration) <-chan time.Time
+	// vendorStarts is every vendor-start state the roster was told, in order.
+	vendorStarts []sidebar.VendorStart
 	// bringUps records every BringUps edge, in order.
 	bringUps []bringUpEdge
 	// bundle is the installed shim bundle every spawn holds.
@@ -638,6 +641,9 @@ func newFleetFixtureBoundedAt(t *testing.T, adoptBound time.Duration) *fleetFixt
 		BringUps: func(ws ids.WorkspaceID, underWay bool) {
 			f.bringUps = append(f.bringUps, bringUpEdge{ws, underWay})
 		},
+		VendorStarts: func(_ ids.WorkspaceID, state sidebar.VendorStart) {
+			f.vendorStarts = append(f.vendorStarts, state)
+		},
 		Probe: func(string, string) (sessionlock.State, error) { return f.probeState, f.probeErr },
 		SocketProbe: func(path string) (shimsocket.State, error) {
 			if f.onSocketProbe != nil {
@@ -734,6 +740,14 @@ func TestNewFleetRefusesMissingCollaborators(t *testing.T) {
 				DB: newFakeDB(), Instance: fixtureInstance, Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{},
 				SocketPath: func(ids.WorkspaceID) string { return "" }, ShimBundle: &fakeBundle{build: "b"},
 				Log: dlog.NewTestSurfaces(), LockDir: "/run",
+			},
+		},
+		{
+			name: "no vendor-start marker",
+			deps: FleetDeps{
+				DB: newFakeDB(), Instance: fixtureInstance, Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{},
+				SocketPath: func(ids.WorkspaceID) string { return "" }, ShimBundle: &fakeBundle{build: "b"},
+				Log: dlog.NewTestSurfaces(), LockDir: "/run", BringUps: func(ids.WorkspaceID, bool) {},
 			},
 		},
 	}
