@@ -1,9 +1,11 @@
 package sched
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func names(chunk []Item) []string {
@@ -181,5 +183,32 @@ func TestPlanRunRefusesAnInvalidInput(t *testing.T) {
 				t.Fatalf("PlanRun error = %v, want it to mention %q", err, tt.want)
 			}
 		})
+	}
+}
+
+func TestPlanRunLargeIndependentRosterFinishesPromptly(t *testing.T) {
+	// Arrange: this is the shape that exposed quadratic ready-queue sorting
+	// and retention of every complete candidate plan in a full test-all run.
+	items := make([]Item, 1200)
+	for i := range items {
+		items[i] = Item{Name: fmt.Sprintf("test-%04d", i), Est: 1}
+	}
+
+	// Act
+	start := time.Now()
+	p, err := PlanRun(nil, []Chunkable{{Group: "large", Suite: "large", Items: items, Overhead: 0.1}}, 14)
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Units) == 0 {
+		t.Fatal("large roster produced no units")
+	}
+	if got := len(p.Chunks["large"]); got > 14 {
+		t.Fatalf("large roster used %d chunks on 14 slots", got)
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatalf("planning 1200 independent items took %s, want at most 5s", elapsed)
 	}
 }

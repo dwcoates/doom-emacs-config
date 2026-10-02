@@ -173,13 +173,21 @@ func (q *Queue) Done(id string, ok bool) []Unit {
 	}
 	q.finished[id] = true
 	if ok {
+		added := false
 		for _, d := range q.dependent[id] {
 			q.waiting[d]--
 			if q.waiting[d] == 0 && !q.cancelled[d] {
 				q.ready = append(q.ready, d)
+				added = true
 			}
 		}
-		q.sortReady()
+		// Completing an independent unit does not change the ready queue.
+		// Re-sorting it anyway makes a simulation of N independent units
+		// quadratic, and the planner runs that simulation for every chunking
+		// candidate.
+		if added {
+			q.sortReady()
+		}
 		return nil
 	}
 	var cancelled []Unit

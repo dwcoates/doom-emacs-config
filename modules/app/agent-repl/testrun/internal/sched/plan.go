@@ -47,9 +47,6 @@ func Pack(items []Item, k int) [][]Item {
 	if k < 1 {
 		panic(fmt.Sprintf("sched: Pack into %d chunks", k))
 	}
-	if k > len(items) {
-		k = len(items)
-	}
 	sorted := append([]Item(nil), items...)
 	sort.SliceStable(sorted, func(i, j int) bool {
 		if sorted[i].Est != sorted[j].Est {
@@ -57,6 +54,15 @@ func Pack(items []Item, k int) [][]Item {
 		}
 		return sorted[i].Name < sorted[j].Name
 	})
+	return packSorted(sorted, k)
+}
+
+// packSorted is Pack after its invariant-preserving sort. PlanRun prepares
+// each group once and reuses that ordering across every candidate.
+func packSorted(sorted []Item, k int) [][]Item {
+	if k > len(sorted) {
+		k = len(sorted)
+	}
 	chunks := make([][]Item, k)
 	load := make([]float64, k)
 	for _, it := range sorted {
@@ -78,7 +84,8 @@ func Pack(items []Item, k int) [][]Item {
 // Every splittable suite is cut to one common target chunk size: a chunk much
 // longer than its peers is the one the run waits on, and a chunk much shorter
 // pays its overhead for little work. The candidate sizes are every C/k a
-// suite could produce, and each is simulated with the runner's own policy.
+// suite could produce up to the host's slot count, and each is simulated with
+// the runner's own policy. A group cannot run more chunks concurrently.
 //
 // The winner is the plan with the LEAST TOTAL WORK among those whose makespan
 // is within MakespanSlack of the best. Pure makespan would buy a 1% faster run
@@ -93,21 +100,33 @@ func PlanRun(atomic []Unit, chunkables []Chunkable, n int) (Plan, error) {
 			return Plan{}, fmt.Errorf("sched: splittable group %q has no items", c.Group)
 		}
 	}
+	prepared := append([]Chunkable(nil), chunkables...)
+	for i := range prepared {
+		prepared[i].Items = append([]Item(nil), prepared[i].Items...)
+		sort.SliceStable(prepared[i].Items, func(a, b int) bool {
+			if prepared[i].Items[a].Est != prepared[i].Items[b].Est {
+				return prepared[i].Items[a].Est > prepared[i].Items[b].Est
+			}
+			return prepared[i].Items[a].Name < prepared[i].Items[b].Name
+		})
+	}
 	type scored struct {
-		plan Plan
-		work float64
+		counts   []int
+		makespan float64
+		work     float64
+		units    int
 	}
 	var all []scored
 	bestMakespan := math.Inf(1)
 	seen := map[string]bool{}
-	for _, size := range candidateSizes(chunkables) {
-		counts := chunkCounts(chunkables, size)
+	for _, size := range candidateSizes(prepared, n) {
+		counts := chunkCounts(prepared, size, n)
 		key := fmt.Sprint(counts)
 		if seen[key] {
 			continue
 		}
 		seen[key] = true
-		p, err := build(atomic, chunkables, counts)
+		p, err := build(atomic, prepared, counts)
 		if err != nil {
 			return Plan{}, err
 		}
@@ -119,7 +138,11 @@ func PlanRun(atomic []Unit, chunkables []Chunkable, n int) (Plan, error) {
 		for _, u := range p.Units {
 			work += u.Est
 		}
-		all = append(all, scored{p, work})
+		// Retain only the score and the small chunk-count vector. Keeping every
+		// candidate's complete plan makes planning memory proportional to the
+		// product of candidates and roster units; a full roster can otherwise
+		// consume hundreds of megabytes before a single test starts.
+		all = append(all, scored{counts: counts, makespan: p.Makespan, work: work, units: len(p.Units)})
 		bestMakespan = math.Min(bestMakespan, p.Makespan)
 	}
 	// better orders plans by less work, then a shorter makespan, then fewer
@@ -128,38 +151,46 @@ func PlanRun(atomic []Unit, chunkables []Chunkable, n int) (Plan, error) {
 		if math.Abs(a.work-b.work) > 1e-9 {
 			return a.work < b.work
 		}
-		if math.Abs(a.plan.Makespan-b.plan.Makespan) > 1e-9 {
-			return a.plan.Makespan < b.plan.Makespan
+		if math.Abs(a.makespan-b.makespan) > 1e-9 {
+			return a.makespan < b.makespan
 		}
-		return len(a.plan.Units) < len(b.plan.Units)
+		return a.units < b.units
 	}
 	var best *scored
 	for i := range all {
 		s := &all[i]
-		if s.plan.Makespan > bestMakespan*(1+MakespanSlack)+1e-9 {
+		if s.makespan > bestMakespan*(1+MakespanSlack)+1e-9 {
 			continue
 		}
 		if best == nil || better(*s, *best) {
 			best = s
 		}
 	}
-	return best.plan, nil
+	winner, err := build(atomic, prepared, best.counts)
+	if err != nil {
+		return Plan{}, err
+	}
+	winner.Makespan = best.makespan
+	return winner, nil
 }
 
 // MakespanSlack is how much slower than the fastest simulated plan a plan may
 // be and still win on doing less total work.
 const MakespanSlack = 0.02
 
-// candidateSizes is every chunk size some suite's own split would produce,
-// plus "everything in one chunk".
-func candidateSizes(chunkables []Chunkable) []float64 {
+// candidateSizes is every chunk size some suite's own split could use on the
+// available slots, plus "everything in one chunk".
+func candidateSizes(chunkables []Chunkable, slots int) []float64 {
 	var sizes []float64
 	for _, c := range chunkables {
 		total := 0.0
 		for _, it := range c.Items {
 			total += it.Est
 		}
-		for k := 1; k <= len(c.Items); k++ {
+		// More chunks than slots cannot increase this group's concurrency; it
+		// only adds process overhead and candidate simulations. Other suites
+		// still sequence independently through those same slots.
+		for k := 1; k <= min(len(c.Items), slots); k++ {
 			sizes = append(sizes, total/float64(k))
 		}
 	}
@@ -169,7 +200,7 @@ func candidateSizes(chunkables []Chunkable) []float64 {
 }
 
 // chunkCounts is each suite's chunk count for a target chunk size.
-func chunkCounts(chunkables []Chunkable, size float64) []int {
+func chunkCounts(chunkables []Chunkable, size float64, slots int) []int {
 	counts := make([]int, len(chunkables))
 	for i, c := range chunkables {
 		total := 0.0
@@ -180,7 +211,7 @@ func chunkCounts(chunkables []Chunkable, size float64) []int {
 		if !math.IsInf(size, 1) && size > 0 {
 			k = int(math.Ceil(total/size - 1e-9))
 		}
-		k = max(1, min(k, len(c.Items)))
+		k = max(1, min(k, len(c.Items), slots))
 		counts[i] = k
 	}
 	return counts
@@ -194,7 +225,7 @@ func build(atomic []Unit, chunkables []Chunkable, counts []int) (Plan, error) {
 		if _, dup := groups[c.Group]; dup {
 			return Plan{}, fmt.Errorf("sched: duplicate splittable group %q", c.Group)
 		}
-		chunks := Pack(c.Items, counts[i])
+		chunks := packSorted(c.Items, counts[i])
 		p.Chunks[c.Group] = chunks
 		ids := make([]string, len(chunks))
 		for j := range chunks {
