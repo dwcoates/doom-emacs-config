@@ -491,6 +491,11 @@ the selection was sent or queued, nil when it was skipped."
       (agent-repl-host--queue-select ws on-settled)
     (agent-repl-host--send-select ws on-settled)))
 
+(defun agent-repl-host--settle-select (on-settled outcome)
+  "Tell a selection\='s caller its OUTCOME through ON-SETTLED, when it gave one."
+  (when on-settled
+    (funcall on-settled outcome)))
+
 (defun agent-repl-host--queue-select (ws on-settled)
   "Queue WS\='s selection behind the one in flight, superseding any queued one.
 ON-SETTLED rides with it; a superseded selection\='s is called with
@@ -499,8 +504,8 @@ ON-SETTLED rides with it; a superseded selection\='s is called with
     (setq agent-repl-host--select-queued (cons ws on-settled))
     (agent-repl--info ws "elisp.host.select-queued ws=%s behind=%s superseded=%s"
                       ws agent-repl-host--select-in-flight (or (car older) "none"))
-    (when (and older (cdr older))
-      (funcall (cdr older) :superseded))
+    (when older
+      (agent-repl-host--settle-select (cdr older) :superseded))
     t))
 
 (defun agent-repl-host--send-select (ws on-settled)
@@ -511,11 +516,11 @@ ON-SETTLED is as `agent-repl-host-select' documents."
     (cond
      ((null ref)
       (agent-repl--log ws "elisp.host.select-skipped ws=%s reason=no-ref" ws)
-      (when on-settled (funcall on-settled :skipped))
+      (agent-repl-host--settle-select on-settled :skipped)
       nil)
      ((null conn)
       (agent-repl--warn ws "elisp.host.select-skipped ws=%s reason=no-connection" ws)
-      (when on-settled (funcall on-settled :skipped))
+      (agent-repl-host--settle-select on-settled :skipped)
       nil)
      (t
       (let ((id (plist-get ref :id)))
@@ -537,7 +542,7 @@ ON-SETTLED is as `agent-repl-host-select' documents."
                 ws id (lambda ()
                         (agent-repl-host--forget-sent-id id)
                         (agent-repl--error ws "elisp.host.select-failed ws=%s detail=%S" ws detail)
-                        (when on-settled (funcall on-settled :failure))))))
+                        (agent-repl-host--settle-select on-settled :failure)))))
           (error
            ;; The call never went out, so nothing will ever answer it: the
            ;; slot is released here or no later selection is ever sent.
@@ -575,15 +580,15 @@ ON-SETTLED is as `agent-repl-host-select' documents."
      ;; workspace is current.
      (setq agent-repl-host-last-selected-id id)
      (agent-repl--log ws "elisp.host.selected ws=%s id=%S" ws id)
-     (when on-settled (funcall on-settled :success)))
+     (agent-repl-host--settle-select on-settled :success))
     (:error
      (agent-repl-host--forget-sent-id id)
      (agent-repl-host--on-refused ws "select" (plist-get response :value))
-     (when on-settled (funcall on-settled :error)))
+     (agent-repl-host--settle-select on-settled :error))
     (arm
      (agent-repl-host--forget-sent-id id)
      (agent-repl--error ws "elisp.host.select-unknown-arm ws=%s arm=%S" ws arm)
-     (when on-settled (funcall on-settled :error)))))
+     (agent-repl-host--settle-select on-settled :error))))
 
 (defun agent-repl-host--forget-sent-id (id)
   "Drop ID from the sent selections: the daemon stamped nothing for it."
