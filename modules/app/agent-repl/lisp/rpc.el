@@ -49,6 +49,8 @@
 
 ;; The codec.  Defined in wire-*.el; named, never implemented, here.
 (declare-function agent-repl-wire-encode-register-workspace-request "wire-host" (request))
+(declare-function agent-repl-wire-encode-update-persistent-wifi-mode-request "wire-verbs" (request))
+(declare-function agent-repl-wire-decode-update-persistent-wifi-mode-response "wire-verbs" (json))
 (declare-function agent-repl-wire-decode-register-workspace-response "wire-host" (alist))
 (declare-function agent-repl-wire-encode-select-workspace-request "wire-host" (request))
 (declare-function agent-repl-wire-decode-select-workspace-response "wire-host" (alist))
