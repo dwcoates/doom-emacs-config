@@ -83,6 +83,18 @@ const (
 	// KindResumeFailed and renders through the same arm; only records written
 	// before the spelling was unified still carry it.
 	KindRelaunchResumeFailed = "relaunch_resume_failed"
+	// KindVendorStartRetrying is a vendor that did not start for a reason the
+	// shim labeled RETRYABLE, while the daemon retries it on its backoff. It is
+	// REPLACED on every failed attempt, so the standing one names the latest.
+	// Evidence: failed_attempts, cause, failing_since_ms.
+	KindVendorStartRetrying = "vendor_start_retrying"
+	// KindVendorStartRejected is a vendor that refused the start for a reason
+	// the shim labeled a REJECTION: nothing retries. Evidence: cause.
+	KindVendorStartRejected = "vendor_start_rejected"
+	// KindVendorStartFailed is a vendor that kept failing to start for the
+	// whole retry window. Evidence: failed_attempts, cause (the last one),
+	// failing_since_ms.
+	KindVendorStartFailed = "vendor_start_failed"
 	// KindBounceDisposition is an ORDINARY reconciled bounce disposition: a
 	// session the bounce preserved or rolled, recorded and closed in one
 	// breath so the per-session accounting survives without polluting the
@@ -239,10 +251,90 @@ func sessionFault(f wsm.Fault) (*agentreplv1.SessionFault, bool) {
 				Why:  f.Evidence["why"],
 			},
 		}
+	case KindVendorStartRetrying:
+		out.Kind = &agentreplv1.SessionFault_VendorStartRetrying{VendorStartRetrying: VendorStartRetryingArm(f)}
+	case KindVendorStartRejected:
+		out.Kind = &agentreplv1.SessionFault_VendorStartRejected{VendorStartRejected: VendorStartRejectedArm(f)}
+	case KindVendorStartFailed:
+		out.Kind = &agentreplv1.SessionFault_VendorStartFailed{VendorStartFailed: VendorStartFailedArm(f)}
 	default:
 		return nil, false
 	}
 	return out, true
+}
+
+// VendorStartRetryingArm renders a `vendor_start_retrying` fault's evidence as
+// its typed arm. The SessionFault and the host stream's HostFault carry the
+// same message, and both read it here so they cannot disagree.
+func VendorStartRetryingArm(f wsm.Fault) *agentreplv1.SessionFaultVendorStartRetrying {
+	return &agentreplv1.SessionFaultVendorStartRetrying{
+		FailedAttempts: evidenceUint32(f, EvidenceFailedAttempts),
+		Cause:          f.Evidence[EvidenceCause],
+		FailingSinceMs: evidenceInt64(f, EvidenceFailingSinceMs),
+	}
+}
+
+// VendorStartRejectedArm renders a `vendor_start_rejected` fault's evidence.
+func VendorStartRejectedArm(f wsm.Fault) *agentreplv1.SessionFaultVendorStartRejected {
+	return &agentreplv1.SessionFaultVendorStartRejected{Cause: f.Evidence[EvidenceCause]}
+}
+
+// VendorStartFailedArm renders a `vendor_start_failed` fault's evidence. Its
+// `cause` evidence is the LAST attempt's, which the arm names last_cause.
+func VendorStartFailedArm(f wsm.Fault) *agentreplv1.SessionFaultVendorStartFailed {
+	return &agentreplv1.SessionFaultVendorStartFailed{
+		FailedAttempts: evidenceUint32(f, EvidenceFailedAttempts),
+		LastCause:      f.Evidence[EvidenceCause],
+		FailingSinceMs: evidenceInt64(f, EvidenceFailingSinceMs),
+	}
+}
+
+// The evidence keys the vendor-start faults carry.
+const (
+	// EvidenceFailedAttempts is how many attempts of the run have failed.
+	EvidenceFailedAttempts = "failed_attempts"
+	// EvidenceCause is the shim's own account of the (latest) failure.
+	EvidenceCause = "cause"
+	// EvidenceFailingSinceMs is the run's first failure, in epoch ms.
+	EvidenceFailingSinceMs = "failing_since_ms"
+)
+
+// VendorStartLine composes the ONE line the footer's `vendor_start` salient
+// draws for a standing vendor-start fault, out of the fault's own evidence
+// (footer.proto, FooterStatusActivityVendorStart). It answers "" for any other
+// kind.
+func VendorStartLine(f wsm.Fault) string {
+	switch f.Kind {
+	case KindVendorStartRetrying:
+		return fmt.Sprintf("Claude SDK did not start (attempt %d): %s · retrying",
+			evidenceUint32(f, EvidenceFailedAttempts), f.Evidence[EvidenceCause])
+	case KindVendorStartRejected:
+		return fmt.Sprintf("Claude SDK refused to start: %s · restart: SPC o C-c", f.Evidence[EvidenceCause])
+	case KindVendorStartFailed:
+		return "Claude SDK failed to start · restart: SPC o C-c"
+	default:
+		return ""
+	}
+}
+
+// evidenceUint32 reads a recorded count; a missing or unparsable one answers
+// zero, as exitCode does.
+func evidenceUint32(f wsm.Fault, key string) uint32 {
+	n, err := strconv.ParseUint(f.Evidence[key], 10, 32)
+	if err != nil {
+		return 0
+	}
+	return uint32(n)
+}
+
+// evidenceInt64 reads a recorded instant; a missing or unparsable one answers
+// zero.
+func evidenceInt64(f wsm.Fault, key string) int64 {
+	n, err := strconv.ParseInt(f.Evidence[key], 10, 64)
+	if err != nil {
+		return 0
+	}
+	return n
 }
 
 // StartFailedDetail composes the ONE line a bring-up failure explains itself
