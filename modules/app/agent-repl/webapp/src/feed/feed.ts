@@ -125,6 +125,12 @@ export interface FeedHandle extends Handle {
    * so the tail is where the card is.
    */
   readonly promptHeld: (turn: string) => void;
+  /**
+   * This page's workspace was just switched to (`sidebar/selection-edge.ts`):
+   * park the feed at its tail and follow (`workspaceSelected`, one of the
+   * closed set of scroll causes).
+   */
+  readonly workspaceSelected: () => void;
 }
 
 /** Mount the root feed into HOST. */
@@ -301,6 +307,7 @@ export function mountFeed(
   return {
     selectDetachedWork,
     promptHeld,
+    workspaceSelected,
     dispose,
   };
 
@@ -324,6 +331,27 @@ export function mountFeed(
       context: { turn },
     });
     tail.promptHeld();
+  }
+
+  /**
+   * A SWITCH TO THIS WORKSPACE PUTS THE READER AT THE TAIL (owner ruling,
+   * 2026-10-02): the feed lands on its newest row with the follow re-armed,
+   * whichever path made the switch. A fixture feed with no scroll box has no
+   * tail to park.
+   */
+  function workspaceSelected(): void {
+    if (tail === null) {
+      log.debug("a switch to this workspace found no scroll box to park", {
+        operation: "feed.workspace-selected-unparked",
+        context: {},
+      });
+      return;
+    }
+    log.debug("a switch to this workspace parked the feed at its tail", {
+      operation: "feed.workspace-selected-parked",
+      context: {},
+    });
+    tail.workspaceSelected();
   }
 
   /**

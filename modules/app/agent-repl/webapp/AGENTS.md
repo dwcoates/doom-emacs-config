@@ -457,7 +457,10 @@ hand any more:
   re-push or a removal moves nothing), `selectionMoved`, `detachedWorkSelected`,
   `entryJumped` (every other jump: a breadcrumb, a hook's gated-call link,
   centered by the same `revealCenterDelta`), `itemExpanded`, `initialPlacement`,
-  `replaceRestore`, `prependCompensation`, `collapseCompensation` (a thinking
+  `replaceRestore`, `workspaceSelected` (the roster's `current` moved to this
+  page's workspace, by any switch path: `src/sidebar/selection-edge.ts` parks
+  the feed at its tail and follows; returning to Emacs from another
+  application is not a switch), `prependCompensation`, `collapseCompensation` (a thinking
   bubble wholly above the reader collapsing when its own final text lands,
   i.e. the daemon re-pushes it settled; the view shifts by exactly the height it lost), `latestVisible`
   — each a named `TailFollow` cause, each move recorded at DEBUG as

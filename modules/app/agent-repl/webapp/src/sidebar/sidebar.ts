@@ -27,6 +27,7 @@ import { AttentionRegistry, type BlinkTimers } from "./attention.js";
 import type { Grouping, SidebarContext, SidebarPrefs } from "./context.js";
 import { drawWorkspaceRoster } from "./roster.js";
 import { placeOpenRowDetails } from "./row.js";
+import { createSelectionEdge } from "./selection-edge.js";
 
 /** What every mount answers with. */
 export interface Handle {
@@ -49,6 +50,12 @@ export interface SidebarDeps {
   storage?: Storage | null;
   /** The blink timers. Defaults to the page's own. */
   timers?: BlinkTimers;
+  /**
+   * Told when this page's workspace becomes the selected one
+   * (`selection-edge.ts`): the feed returns to its tail. Omitted by a mount
+   * with no feed to move.
+   */
+  workspaceSelected?: () => void;
 }
 
 /**
@@ -142,6 +149,12 @@ export function mountSidebar(host: HTMLElement, ctx: AppContext, deps: SidebarDe
 
   const prefs = createSidebarPrefs(deps.storage === undefined ? pageStorage() : deps.storage);
   const attention = new AttentionRegistry(deps.timers);
+  // THE ROSTER IS WHERE A SWITCH TO THIS WORKSPACE IS STATED, whichever path
+  // made it, so the one edge every switch crosses is watched here.
+  const selectionEdge =
+    deps.workspaceSelected === undefined
+      ? null
+      : createSelectionEdge(ctx.workspace.id, deps.workspaceSelected);
 
   /** Teardowns the CURRENT drawing owns; replaced wholesale on every push. */
   let disposers: Array<() => void> = [];
@@ -181,6 +194,9 @@ export function mountSidebar(host: HTMLElement, ctx: AppContext, deps: SidebarDe
     schema: WatchWorkspaceRosterResponseSchema,
     open: (_client, signal) => ctx.streams.watch("roster", {}, signal),
     plannedEnding: (response) => response.push.case === "ending",
+    // A run that ended forgets what `current` was: the next run's first push
+    // is a baseline, so a reconnect restating it is never taken for a switch.
+    onEnd: () => selectionEdge?.reset(),
     onPush: (response) => {
       const push = requireCase(response.push, "WatchWorkspaceRosterResponse.push");
       if (push.case !== "roster") {
@@ -205,6 +221,7 @@ export function mountSidebar(host: HTMLElement, ctx: AppContext, deps: SidebarDe
       placeOpenRowDetails(body);
       // THE FIRST PUSH REVEALS THE RAIL, and nothing else ever does.
       host.hidden = false;
+      selectionEdge?.observe(roster);
     },
   });
 

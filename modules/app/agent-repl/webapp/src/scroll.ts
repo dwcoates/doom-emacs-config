@@ -93,6 +93,10 @@ export interface ScrollPosition {
  *   a scroll change.
  * - `replaceRestore`: a page REPLACE (re-open after reconnect or handover)
  *   lands at the tail, by the earlier owner ruling of 2026-09-23.
+ * - `workspaceSelected`: the user switched TO this page's workspace, by any
+ *   path (`sidebar/selection-edge.ts`); the feed parks at its tail and
+ *   follows (owner ruling, 2026-10-02). Returning to Emacs from another
+ *   application is not a switch and moves nothing.
  * - `prependCompensation`: content above the reader changed height, and the
  *   view shifts by exactly that, so the content under the reader stays put.
  *   This is THE FEED'S SCROLL ANCHORING (`TailFollow`, "THE FEED OWNS ITS
@@ -120,6 +124,7 @@ export const SCROLL_CAUSES = [
   "itemExpanded",
   "initialPlacement",
   "replaceRestore",
+  "workspaceSelected",
   "prependCompensation",
   "collapseCompensation",
   "latestVisible",
@@ -138,6 +143,7 @@ type ParkCause =
   | "selectionMoved"
   | "initialPlacement"
   | "replaceRestore"
+  | "workspaceSelected"
   | "latestVisible";
 
 /** What asked the latest-visible latch to look: the one re-latch's callers. */
@@ -397,6 +403,11 @@ export class TailFollow {
   /** A page replace (re-open after reconnect or handover): land at the tail and follow. */
   replaceRestore(): void {
     this.park("replaceRestore");
+  }
+
+  /** The user switched to this page's workspace: land at the tail and follow. */
+  workspaceSelected(): void {
+    this.park("workspaceSelected");
   }
 
   /** The reader cleared the selection: return to the tail and follow. */
