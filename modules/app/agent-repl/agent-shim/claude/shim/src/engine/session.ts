@@ -45,7 +45,14 @@ import { appliedEffortOf, effortLevelOf, vendorEffortLevel } from "../convert/ef
 import { boundaryChange } from "./boundary-change.js";
 import { promptVendorUuid, subagentId, toolCallActivityId } from "../convert/ids.js";
 import { hookBlockingText } from "../convert/hooks.js";
-import { classifyVendorApiFailure, redactVendorMessage } from "../convert/terminals.js";
+import { redactVendorMessage } from "../convert/terminals.js";
+import {
+  BoundExceededError,
+  openingErrorVerdict,
+  startFailureLabel,
+  VendorStartError,
+  type VendorStartBound,
+} from "./start-failure.js";
 import { terminalUpsertKey } from "../store/keys.js";
 import { PersistenceError } from "../store/persistence.js";
 import { describeVendorTaskAnswer } from "../store/locator.js";
@@ -92,6 +99,7 @@ import {
   transcriptsRead,
   transcriptsRefused,
   titleDigestRefused,
+  type VendorStartRetry,
 } from "../service/failures.js";
 import type { Engine } from "./engine.js";
 import { readTitleDigest } from "./title-digest.js";
@@ -791,8 +799,13 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    */
   let keepaliveCount = 0;
   let startResolve: (() => void) | undefined;
-  /** Settles the same pending start as {@link startResolve}, with a named reason. */
-  let startReject: ((reason: Error) => void) | undefined;
+  /**
+   * Settles the same pending start as {@link startResolve}, with a named reason.
+   *
+   * TYPED TO A LABELED ERROR, so every settle site states whether asking again
+   * can help: the label is decided where the failure was seen, never later.
+   */
+  let startReject: ((reason: VendorStartError) => void) | undefined;
   /** The pending start's own bound, cleared by whatever settles the start first. */
   let startTimer: ReturnType<typeof setTimeout> | undefined;
   /**
@@ -2323,7 +2336,8 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       .api_error_status;
     const startHttpStatus = typeof startStatus === "number" ? startStatus : undefined;
     const startText = said ?? "";
-    const startKind = classifyVendorApiFailure(startHttpStatus, undefined, startText);
+    const verdict = openingErrorVerdict(startHttpStatus, startText);
+    const startKind = verdict.kind;
     if (startKind === "shim.vendor.auth_rejected" || startKind === "shim.vendor.model_missing") {
       LOGGER.info(
         {
@@ -2338,12 +2352,19 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       );
     }
     LOGGER.error(
-      { subtype: message.subtype, detail: said },
+      {
+        subtype: message.subtype,
+        detail: said,
+        http_status: startHttpStatus,
+        operation: startKind,
+        retry: verdict.retry,
+      },
       "the vendor answered the session's opening with an error result; the start is refused with its own text",
     );
     reject(
-      new Error(
+      new VendorStartError(
         `the vendor ended the session's opening with an error result (${message.subtype}): ${said}`,
+        verdict.retry,
       ),
     );
   }
@@ -2360,7 +2381,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   function settleStartOnQueryEnd(detail: string): void {
     const reject = startReject;
     if (reject === undefined) return;
-    reject(new Error(`the vendor query ended before its init message: ${detail}`));
+    // RETRYABLE: a child that exited or a stream that ended before it was
+    // ready says nothing about whether the next one will.
+    reject(new VendorStartError(`the vendor query ended before its init message: ${detail}`, "retryable"));
   }
 
   /**
@@ -3902,7 +3925,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       };
       if (timeout <= 0) return;
       const handle = setTimeout(() => {
-        startReject?.(new Error(silentStartReason(timeout)));
+        startReject?.(
+          new VendorStartError(silentStartReason(timeout), "retryable", { name: "init_silence", ms: timeout }),
+        );
       }, timeout);
       if (typeof (handle as { unref?: () => void }).unref === "function") {
         (handle as { unref: () => void }).unref();
@@ -3943,7 +3968,12 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err);
       if (startReject !== undefined) {
-        startReject(new Error(`the vendor did not prove itself live: ${detail}`));
+        // RETRYABLE whether the bound tripped or the call failed: a child that
+        // cannot answer one control request yet is the 2026-10-02 shape, and
+        // the next child may well answer it.
+        const bound: VendorStartBound | undefined =
+          err instanceof BoundExceededError ? { name: "live_signal", ms: err.boundMs } : undefined;
+        startReject(new VendorStartError(`the vendor did not prove itself live: ${detail}`, "retryable", bound));
         return;
       }
       if (query !== active) return;
@@ -3964,7 +3994,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     if (boundMs <= 0) return work;
     return new Promise<T>((resolve, reject) => {
       const handle = setTimeout(() => {
-        reject(new Error(`the vendor did not answer ${call} within ${boundMs}ms`));
+        reject(new BoundExceededError(call, boundMs));
       }, boundMs);
       if (typeof (handle as { unref?: () => void }).unref === "function") {
         (handle as { unref: () => void }).unref();
@@ -4019,9 +4049,12 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       },
       "a hook blocked the session's opening; the start is refused with the hook's own reason",
     );
+    // REJECTED: the hook is the user's configuration, and it will block the
+    // next opening exactly as it blocked this one.
     startReject(
-      new Error(
+      new VendorStartError(
         `the vendor's ${message.hook_name} hook blocked the session from opening: ${blockingText}`,
+        "rejected",
       ),
     );
   }
@@ -4103,7 +4136,18 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       }
       const remedy = await applyColdRemediation(remediation, vendorSessionId, facts, requestedModel);
       if (remedy.kind === "failed") {
-        return startSessionRefused({ kind: "vendorStartFailed" }, remedy.detail);
+        // LABELED BY THE REMEDIATION'S OWN CAUSE, carried out of `compact`
+        // rather than guessed here. The compaction's failure is already on the
+        // record at its own layer; this says what the daemon is told.
+        LOGGER.info(
+          {
+            vendor_session_id: vendorSessionId,
+            retry: remedy.retry,
+            cause: remedy.detail,
+          },
+          "refused StartSession: the cold gate's remediation failed",
+        );
+        return startSessionRefused({ kind: "vendorStartFailed", retry: remedy.retry }, remedy.detail);
       }
       // THE HANDOVER FROM THE REMEDIATION TO THE SESSION ITSELF. Said here
       // rather than inside `compact`, because the compaction's own work is
@@ -4210,10 +4254,20 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       // one. This attaches the handler now; `await initialized` below still
       // throws the same reason.
       initialized.catch(() => undefined);
-      const child =
-        brandNew || clearedTo !== undefined
-          ? await startQuery({ kind: "fresh", sessionId: inForce })
-          : await startQuery({ kind: "resume", resumeSessionId: vendorSessionId }, resumeAtLiveEnd(vendorSessionId));
+      let child: QueryLike;
+      try {
+        child =
+          brandNew || clearedTo !== undefined
+            ? await startQuery({ kind: "fresh", sessionId: inForce })
+            : await startQuery({ kind: "resume", resumeSessionId: vendorSessionId }, resumeAtLiveEnd(vendorSessionId));
+      } catch (createErr) {
+        // REJECTED: the query could not even be constructed — the SDK would
+        // not load, the vendor gate forbade it, or the SDK refused the options
+        // — and none of those changes between one attempt and the next. A
+        // child that spawns and then dies is NOT this path: it reaches the
+        // message loop and settles the start as a query that ended.
+        throw new VendorStartError(createErr instanceof Error ? createErr.message : String(createErr), "rejected");
+      }
       // THE PROOF THE START SETTLES ON, issued the moment the child exists.
       // It runs BESIDE the other settlers rather than instead of them: a
       // blocking hook, an error result or a query that ends can still land
@@ -4243,6 +4297,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       // info because a start that failed is exactly when the reader needs the
       // kinds: the grounded silent resume had a `SessionStart:resume` hook
       // start and succeed, and nothing said so anywhere.
+      const label = startFailureLabel(err);
       LOGGER.info(
         {
           vendor_session_id: inForce,
@@ -4304,8 +4359,8 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       }
       identity = undefined;
       const detail = withVendorStderr(err instanceof Error ? err.message : String(err));
-      LOGGER.error({ cause: detail }, "the vendor query could not be started");
-      return startSessionRefused({ kind: "vendorStartFailed" }, detail);
+      LOGGER.error({ cause: detail, retry: label.retry }, "the vendor query could not be started");
+      return startSessionRefused({ kind: "vendorStartFailed", retry: label.retry }, detail);
     }
     // THE HELD CUTS, NOW KEYABLE AND NOW SAFE TO KEY. Written AFTER the query
     // is up rather than before it: a row landed under a producer the failure
@@ -4409,7 +4464,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   type Remedy =
     | { kind: "none" }
     | { kind: "cleared"; vendorSessionId: string }
-    | { kind: "failed"; detail: string };
+    | { kind: "failed"; detail: string; retry: VendorStartRetry };
 
   async function applyColdRemediation(
     remediation: conversationv1.SessionColdRemediation | undefined,
@@ -4437,7 +4492,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
           remediation.remediation.value.model?.name ?? requestedModel,
           remediation.remediation.value.scope,
         );
-        return outcome.ok ? { kind: "none" } : { kind: "failed", detail: outcome.error };
+        return outcome.ok ? { kind: "none" } : { kind: "failed", detail: outcome.error, retry: outcome.retry };
       }
       default:
         return { kind: "none" };
@@ -4457,7 +4512,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     facts: TranscriptFacts,
     model: string,
     scope: conversationv1.SessionCompactScope,
-  ): Promise<{ ok: true; summary: string } | { ok: false; error: string }> {
+  ): Promise<{ ok: true; summary: string } | { ok: false; error: string; retry: VendorStartRetry }> {
     const transcript = transcriptPath(deps.env.configDir, deps.env.cwd, vendorSessionId);
     const startedAtMs = deps.nowMs();
     const queue = new PromptQueue();
@@ -4481,15 +4536,28 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         said,
       );
     };
-    /** A compaction that did not complete, said once to both surfaces. */
-    const failed = (error: string): { ok: false; error: string } => {
+    /**
+     * A compaction that did not complete, said once to both surfaces, with
+     * whether asking again can help — the start it gates carries that label.
+     */
+    const failed = (error: string, retry: VendorStartRetry): { ok: false; error: string; retry: VendorStartRetry } => {
       phase(
         conversationv1.SessionCompactionPhase.FAILED,
         { tokensBefore: facts.contextTokens, error },
         "the cold gate's compaction did not complete",
       );
-      return { ok: false, error };
+      LOGGER.debug({ vendor_session_id: vendorSessionId, retry }, "labeled the failed compaction");
+      return { ok: false, error, retry };
     };
+    /**
+     * Whether the throwaway query's stream is being read: a throw from INSIDE
+     * it is a child or stream that ended (retryable); a throw outside it is the
+     * query that could not be built or the transcript that could not be
+     * written, which the next attempt meets again (rejected).
+     */
+    let streaming = false;
+    /** Whether the stream answered with a result at all. */
+    let sawResult = false;
     coldCompactionFigures = undefined;
     // BEFORE THE QUERY, NOT AFTER IT. Creating the throwaway query is itself
     // part of the minute the user is waiting through, so a frame that waited
@@ -4518,16 +4586,36 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       });
       let summary = "";
       let outputTokens = 0;
+      streaming = true;
       for await (const message of throwaway) {
         if (message.type !== "result") continue;
+        sawResult = true;
         if (message.subtype !== "success") {
-          return failed(`the summarizing session ended as ${message.subtype}`);
+          // AN ERROR RESULT IS READ EXACTLY AS THE OPENING'S IS: its status and
+          // its words decide whether it can pass.
+          // READ DEFENSIVELY: this result is the vendor's, and an error result
+          // that states no `errors` must still be labeled, not throw.
+          const { api_error_status: status, errors } = message as unknown as {
+            api_error_status?: number | null;
+            errors?: unknown;
+          };
+          const verdict = openingErrorVerdict(
+            typeof status === "number" ? status : undefined,
+            Array.isArray(errors) ? errors.map(String).join("; ") : "",
+          );
+          return failed(`the summarizing session ended as ${message.subtype}`, verdict.retry);
         }
         summary = message.result;
         outputTokens = message.usage.output_tokens;
         break;
       }
-      if (summary === "") return failed("the summarizing session produced no summary");
+      streaming = false;
+      if (summary === "") {
+        // A STREAM THAT ENDED WITHOUT A RESULT is a child that went away
+        // (retryable); a result that summarized nothing is the vendor's answer
+        // to this transcript, and it will give the same one again (rejected).
+        return failed("the summarizing session produced no summary", sawResult ? "rejected" : "retryable");
+      }
       const durationMs = deps.nowMs() - startedAtMs;
       appendCompactionLines(
         transcript,
@@ -4577,7 +4665,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
       writeContextCut(contextCutFailed(error));
-      return failed(error);
+      return failed(error, streaming ? "retryable" : "rejected");
     } finally {
       queue.close();
       controller.abort();

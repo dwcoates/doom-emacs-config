@@ -18,7 +18,6 @@ import { TRANSCRIPT_QUIET_AFTER_MS, type TranscriptSummary } from "../../src/eng
 
 describe("startSessionFailure", () => {
   it.each([
-    ["vendorStartFailed"],
     ["unknownSession"],
     ["alreadyStarted"],
     ["conversationOwned"],
@@ -29,6 +28,25 @@ describe("startSessionFailure", () => {
     // Assert.
     expect(failure.cause.case).toBe(kind);
   });
+
+  it("states the vendorStartFailed arm", () => {
+    // Arrange, Act.
+    const failure = failures.startSessionFailure({ kind: "vendorStartFailed", retry: "retryable" }, "why");
+
+    // Assert.
+    expect(failure.cause.case).toBe("vendorStartFailed");
+  });
+
+  it.each([["retryable"], ["rejected"]] as const)(
+    "sets the %s retry label on vendorStartFailed, never leaving the oneof unset",
+    (retry) => {
+      // Arrange, Act.
+      const failure = failures.startSessionFailure({ kind: "vendorStartFailed", retry }, "why");
+
+      // Assert.
+      expect(failure.cause.case === "vendorStartFailed" ? failure.cause.value.retry.case : undefined).toBe(retry);
+    },
+  );
 
   it("carries the cold evidence verbatim so the daemon can offer a remediation", () => {
     // Arrange.
