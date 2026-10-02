@@ -35,7 +35,7 @@ func orphan(t *testing.T, h *harness) ids.WorkspaceID {
 // adoption it started.
 func takeOver(h *harness) {
 	h.c.mu.Lock()
-	h.c.joiningMode = true
+	h.c.enterJoiningLocked()
 	h.c.mu.Unlock()
 	h.c.becomeIncumbent(nil)
 	h.c.stragglerAdoptions.Wait()

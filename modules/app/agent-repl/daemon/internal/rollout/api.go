@@ -635,7 +635,10 @@ func New(deps Deps) (Controller, error) {
 		bouncedStamp:  make(map[ids.WorkspaceID]string),
 		staleInFlight: make(map[ids.WorkspaceID]bool),
 		reported:      make(map[ids.WorkspaceID]string),
+		settled:       make(chan struct{}),
 	}
+	// NO TAKEOVER IS COMING until Join says one is.
+	close(c.settled)
 	c.log.Debug(opNew, "the rollout controller is up", dlog.Context{
 		"adoption_window":    deps.AdoptionWindow.String(),
 		"holdout_warn_every": deps.HoldoutWarnEvery.String(),

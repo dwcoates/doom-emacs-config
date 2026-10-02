@@ -33,7 +33,7 @@ func (c *controller) Join(ctx context.Context) error {
 	// Until then every per-workspace rpc must answer not_yet_adopted rather
 	// than fall through to a read-only state handle.
 	c.mu.Lock()
-	c.joiningMode = true
+	c.enterJoiningLocked()
 	c.mu.Unlock()
 
 	// THE TAKEOVER IS KEYED ON THE INCUMBENT'S EXIT, NOT ON EVERY RENDEZVOUS
@@ -997,6 +997,58 @@ func (c *controller) becomeIncumbent(fields dlog.Context) {
 		c.recoverOrphans(fields)
 	}
 	c.bounceStaleAdopted(fields)
+	c.settleTakeover(fields)
+}
+
+// enterJoiningLocked puts this daemon in joining mode, and with it opens the
+// takeover-settled latch: a takeover is now coming, and nothing it will
+// start has settled. It is the ONE writer of joining mode's start, so the
+// latch becomeIncumbent closes is always the one opened here. The caller
+// holds c.mu.
+func (c *controller) enterJoiningLocked() {
+	if !c.joiningMode {
+		c.settled = make(chan struct{})
+	}
+	c.joiningMode = true
+}
+
+// settleTakeover closes the takeover-settled latch once every adoption and
+// bring-up the takeover started has finished. Every Add to those counts was
+// made above, on this goroutine, before the join below starts, so the join
+// cannot race an Add.
+func (c *controller) settleTakeover(fields dlog.Context) {
+	c.mu.Lock()
+	latch := c.settled
+	c.mu.Unlock()
+	go func() {
+		c.stragglerAdoptions.Wait()
+		c.bringUps.Wait()
+		c.log.Info(opAdopt, "the takeover settled: every adoption and session bring-up it started has finished", fields)
+		close(latch)
+	}()
+}
+
+// awaitTakeoverSettled waits for the takeover-settled latch, or for ctx. A
+// daemon that never joined answers at once. A handover asked while the
+// takeover's own work is in flight waits for it, and says so at INFO.
+func (c *controller) awaitTakeoverSettled(ctx context.Context, fields dlog.Context) error {
+	c.mu.Lock()
+	latch := c.settled
+	c.mu.Unlock()
+	select {
+	case <-latch:
+		return nil
+	default:
+	}
+	c.log.Info(opRollOut, "a handover waits for this daemon's own takeover to settle before it plans anything", fields)
+	select {
+	case <-latch:
+		c.log.Info(opRollOut, "the takeover settled; the handover proceeds", fields)
+		return nil
+	case <-ctx.Done():
+		c.log.Info(opRollOut, "the handover's caller left before this daemon's takeover settled; nothing was started", withCause(fields, ctx.Err()))
+		return fmt.Errorf("rollout: handover: await the takeover: %w", ctx.Err())
+	}
 }
 
 // promoteAtTakeover promotes the state handle to writing, reporting whether it

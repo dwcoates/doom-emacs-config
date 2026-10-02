@@ -32,6 +32,12 @@ func (c *controller) HandOver(ctx context.Context, force bool) (HandoverAcceptan
 		c.log.Info(opRollOut, "refused a handover asked of a successor that is still joining", fields)
 		return HandoverAcceptance{}, ErrJoining
 	}
+	// NOTHING IS PLANNED WHILE THIS DAEMON'S OWN TAKEOVER IS STILL BRINGING
+	// WORKSPACES UP: the plan lists what this daemon serves, and a bring-up
+	// still in flight would claim a workspace after the plan had moved it.
+	if err := c.awaitTakeoverSettled(ctx, fields); err != nil {
+		return HandoverAcceptance{}, err
+	}
 	// THE BOUNDED HALF SURVIVES THE CALLER. A caller that gives up between the
 	// spawn and the manifest must not leave a successor standing with nothing
 	// announced.
