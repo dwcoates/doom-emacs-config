@@ -33,8 +33,10 @@
 # non-zero exit status. A suite that exits 77 DECLINED (its precondition is
 # unmet) and is never called passed.
 #
-# --record appends one row per passing suite to ../test_time.csv and compares
-# the run with recent rows on the same branch. Failed runs never record.
+# --record appends one row per passing suite to ../test_time.csv (its own
+# units' summed wall time, measure unit-wall-sum) and compares the run with
+# recent rows of the same branch and measure. Failed runs never record, and
+# --record refuses --coverage.
 # --coverage adds Go and vitest instrumentation and reports. Ordinary runs do
 # not pay that cost.
 #
