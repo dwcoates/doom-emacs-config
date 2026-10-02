@@ -56,6 +56,7 @@ src/
     engine.ts          the Engine seam + NotImplementedEngine
     session.ts turn.ts identity.ts cold.ts keepalive.ts compaction.ts
     backup.ts detached.ts pushes.ts permission-gate.ts rollback.ts
+    start-failure.ts   the retry label a failed vendor start carries (VendorStartError)
   convert/
     fold.ts            the fold seam and FoldOutput
     ids.ts             the four identifier spaces, minted
@@ -1352,6 +1353,26 @@ serves one on every entry it hands out.
   own degradation).
 - **Workflow is kicked** (ruled 2026-08-29): `GetWorkflow`, `WatchWorkflow` and
   `StopWorkflow` answer `Code.Unimplemented` and have no `Engine` method.
+
+## A failed vendor start is labeled where it failed (2026-10-02)
+
+- `vendor_start_failed` ALWAYS carries `retry` (retryable | rejected); the
+  daemon retries on that label alone and never re-reads `detail`.
+- Every settle site rejects the pending start with a `VendorStartError`
+  (`src/engine/start-failure.ts`) carrying its label; the engine's `startReject` slot
+  is typed to it, so a new settle site cannot forget one.
+- RETRYABLE: the liveness round-trip timing out or failing, the init-silence
+  bound, and a query whose stream ended or threw before the start settled.
+- REJECTED: a blocking hook, a query that could not be created, and an
+  opening error result that `openingErrorVerdict` does not read as transient
+  (a transient status, `shim.vendor.unreachable`, or overloaded / server /
+  rate-limit / network words with no status are the transient ones).
+- A failed cold compaction carries its own cause's label out of `compact`.
+- An unlabeled error reaching the refusal is a logged defect, answered as
+  REJECTED.
+- A retryable start leaves the engine able to take another StartSession on
+  the same process (`a start retried after its liveness probe timed out` in
+  `test/engine/session.test.ts`).
 
 ## What landing 7 settled (2026-09-02)
 
