@@ -3380,8 +3380,6 @@ ladder made a debug line abort `doom-init-ui-hook'."
   (let ((cases
          '(("before-persp-deactivate: entry ws=nil cache=nil"
             . "perspective deactivation can precede workspace selection")
-           ("persp-frame-save-state failed for ws=nil: boom"
-            . "perspective teardown can run without an agent workspace")
            ("on-window-change"
             . "frame-wide window reconciliation can run without an agent workspace")
            ("sync-panels: entry windows=1"
