@@ -21,6 +21,53 @@ type OpenedPage struct {
 	PinSeq uint64
 }
 
+// PageSize IS THE PAGE: the number of lines every page this store serves holds
+// at most — the opening page, a continuation, a bounded `through` read. ONE size
+// for the whole stack (owner ruling, docs/protobuf-design/feed-paging-on-demand.md
+// change 1), owned by the store and stated nowhere else: no request field
+// carries a budget, so no caller can make a page bigger or smaller.
+const PageSize = 50
+
+// Opening is what an open's first page carries — the request's `opening` arm.
+// Its zero value is the repaint. It is built only through Repaint, CatchUp and
+// TailOnly, so "a catch-up and a tail-only at once" cannot be stated.
+type Opening struct {
+	kind         openingKind
+	knownThrough *storev1.StoreItemPointer
+}
+
+type openingKind int
+
+const (
+	openingRepaint openingKind = iota
+	openingCatchUp
+	openingTailOnly
+)
+
+// Repaint opens on the newest page.
+func Repaint() Opening { return Opening{kind: openingRepaint} }
+
+// CatchUp opens on the lines first written after the caller's own mark.
+func CatchUp(knownThrough *storev1.StoreItemPointer) Opening {
+	return Opening{kind: openingCatchUp, knownThrough: knownThrough}
+}
+
+// TailOnly opens on no lines at all: the tail begins after the newest line as
+// of the open, and history is read only when a reader asks for it.
+func TailOnly() Opening { return Opening{kind: openingTailOnly} }
+
+// String names the opening for logs.
+func (o Opening) String() string {
+	switch o.kind {
+	case openingCatchUp:
+		return "known_through"
+	case openingTailOnly:
+		return "tail_only"
+	default:
+		return "repaint"
+	}
+}
+
 // beginRead opens the transaction a PURE READ runs in, ON THE READ POOL.
 //
 // IT IS A DIFFERENT POOL, AND THAT IS THE STRUCTURAL HALF. `_txlock` is a
@@ -78,9 +125,20 @@ func (d *DB) beginRead(ctx context.Context) (*sql.Tx, error) {
 // that had not spoken yet, so the two were indistinguishable and the mistake
 // looked like patience. The `agent` table is the register that separates them:
 // every page-line write ensures a row there, so "no row" is "never heard of".
-func (d *DB) OpenPage(ctx context.Context, agentID string, pageSize uint32, knownThrough *storev1.StoreItemPointer) (OpenedPage, error) {
+//
+// A TAIL-ONLY OPEN SERVES NO LINES AND REPORTS THE FLOOR. The boundary arm
+// describes what lies below THIS page, and `more` must point at the page's
+// oldest line — an empty page has none, and no pointer can name "the top of
+// the book" (`after` reads strictly BEFORE the line it names, so pointing at
+// the newest line would lose it). So the empty page says there is nothing more
+// to walk FROM IT; it is not a claim that the book is empty. A reader that
+// later wants history starts where every reader does — a repaint (the newest
+// page) — and walks older with ReadAgentPage from that page's `more`. The watch
+// pin is still read in the same transaction, so the tail begins exactly after
+// the newest line as of the open.
+func (d *DB) OpenPage(ctx context.Context, agentID string, opening Opening) (OpenedPage, error) {
 	base := logging.Fields{Operation: "store.db.open-page", Table: "entry", BookAgentID: agentID}
-	if err := validateBook(agentID, pageSize); err != nil {
+	if err := validateBook(agentID); err != nil {
 		return OpenedPage{}, d.refuse(base, err)
 	}
 	started := d.mono()
@@ -104,23 +162,28 @@ func (d *DB) OpenPage(ctx context.Context, agentID string, pageSize uint32, know
 	// sits: a row first written after the caller's mark but placed earlier in
 	// the conversation (a transcript read late) is delivered rather than
 	// skipped, and the page is still ordered by descending place.
-	statement, args := pageNewestSQL, []any{agentID, kindPageLine}
-	if knownThrough != nil {
-		position, err := decodePointer(knownThrough, "known_through")
+	var lines []*storev1.StoreLineAt
+	more := false
+	if opening.kind != openingTailOnly {
+		statement, args := pageNewestSQL, []any{agentID, kindPageLine}
+		if opening.kind == openingCatchUp {
+			knownThrough := opening.knownThrough
+			position, err := decodePointer(knownThrough, "known_through")
+			if err != nil {
+				return OpenedPage{}, d.refuse(base, err)
+			}
+			if err := d.pointerInBook(ctx, tx, agentID, position, "known_through", knownThrough.GetValue()); err != nil {
+				fields := base
+				fields.Position = knownThrough.GetValue()
+				return OpenedPage{}, d.refuse(fields, err)
+			}
+			statement, args = pageWrittenAfterSQL, []any{agentID, kindPageLine, position}
+		}
+		var err error
+		lines, more, err = d.pageLines(ctx, tx, agentID, statement, args...)
 		if err != nil {
 			return OpenedPage{}, d.refuse(base, err)
 		}
-		if err := d.pointerInBook(ctx, tx, agentID, position, "known_through", knownThrough.GetValue()); err != nil {
-			fields := base
-			fields.Position = knownThrough.GetValue()
-			return OpenedPage{}, d.refuse(fields, err)
-		}
-		statement, args = pageWrittenAfterSQL, []any{agentID, kindPageLine, position}
-	}
-
-	lines, more, err := d.pageLines(ctx, tx, agentID, pageSize, statement, args...)
-	if err != nil {
-		return OpenedPage{}, d.refuse(base, err)
 	}
 
 	var pinSeq uint64
@@ -140,7 +203,7 @@ func (d *DB) OpenPage(ctx context.Context, agentID string, pageSize uint32, know
 	d.traceStatement(ctx, StatementOpenPage, "entry", base, int64(len(lines)))
 	verbose := base
 	verbose.WriteSeq = pinSeq
-	d.log.LogVerbose(verbose, "page opened lines=%d more=%t known_through=%t", len(lines), more, knownThrough != nil)
+	d.log.LogVerbose(verbose, "page opened lines=%d more=%t opening=%s", len(lines), more, opening)
 	return OpenedPage{Page: page, PinSeq: pinSeq}, nil
 }
 
@@ -151,9 +214,9 @@ func (d *DB) OpenPage(ctx context.Context, agentID string, pageSize uint32, know
 // THE BOUND IS THE NAMED LINE'S CURRENT PLACE, read in this transaction. A
 // pointer names an item, never a place, so a line that gained its recorded
 // place since it was served is walked on from where it sits now.
-func (d *DB) ReadPage(ctx context.Context, agentID string, pageSize uint32, after *storev1.StoreItemPointer) (*storev1.ReadAgentPageSuccess, error) {
+func (d *DB) ReadPage(ctx context.Context, agentID string, after *storev1.StoreItemPointer) (*storev1.ReadAgentPageSuccess, error) {
 	base := logging.Fields{Operation: "store.db.read-page", Table: "entry", BookAgentID: agentID}
-	if err := validateBook(agentID, pageSize); err != nil {
+	if err := validateBook(agentID); err != nil {
 		return nil, d.refuse(base, err)
 	}
 	position, err := decodePointer(after, "after")
@@ -177,7 +240,7 @@ func (d *DB) ReadPage(ctx context.Context, agentID string, pageSize uint32, afte
 	if err != nil {
 		return nil, d.refuse(base, err)
 	}
-	lines, more, err := d.pageLines(ctx, tx, agentID, pageSize, pageBeforeSQL, agentID, kindPageLine, bound.atMs, bound.ordinal, position)
+	lines, more, err := d.pageLines(ctx, tx, agentID, pageBeforeSQL, agentID, kindPageLine, bound.atMs, bound.ordinal, position)
 	if err != nil {
 		return nil, d.refuse(base, err)
 	}
@@ -195,9 +258,9 @@ func (d *DB) ReadPage(ctx context.Context, agentID string, pageSize uint32, afte
 // A BOOK THE STORE HAS NEVER HEARD OF IS REFUSED (ErrUnknownAgent), never
 // served empty: an empty page would tell a caller with a mistyped book exactly
 // what it tells one reading a book that held nothing yet at that instant.
-func (d *DB) ReadPageThrough(ctx context.Context, agentID string, pageSize uint32, throughAtMs int64) (*storev1.ReadAgentPageSuccess, error) {
+func (d *DB) ReadPageThrough(ctx context.Context, agentID string, throughAtMs int64) (*storev1.ReadAgentPageSuccess, error) {
 	base := logging.Fields{Operation: "store.db.read-page", Table: "entry", BookAgentID: agentID}
-	if err := validateBook(agentID, pageSize); err != nil {
+	if err := validateBook(agentID); err != nil {
 		return nil, d.refuse(base, err)
 	}
 	if throughAtMs <= 0 {
@@ -215,7 +278,7 @@ func (d *DB) ReadPageThrough(ctx context.Context, agentID string, pageSize uint3
 	if err := d.agentIsKnown(ctx, tx, agentID); err != nil {
 		return nil, d.refuse(base, err)
 	}
-	lines, more, err := d.pageLines(ctx, tx, agentID, pageSize, pageThroughSQL, agentID, kindPageLine, throughAtMs)
+	lines, more, err := d.pageLines(ctx, tx, agentID, pageThroughSQL, agentID, kindPageLine, throughAtMs)
 	if err != nil {
 		return nil, d.refuse(base, err)
 	}
@@ -322,12 +385,9 @@ func (d *DB) agentIsKnown(ctx context.Context, tx *sql.Tx, agentID string) error
 }
 
 // validateBook is the shared refusal for the two paging verbs.
-func validateBook(agentID string, pageSize uint32) error {
+func validateBook(agentID string) error {
 	if agentID == "" {
 		return invalidFieldf("agent", "agent id value is empty")
-	}
-	if pageSize == 0 {
-		return invalidFieldf("page_size", "page_size is zero — a page with no budget is not a page")
 	}
 	return nil
 }
@@ -405,9 +465,9 @@ const (
 	  ORDER BY p.at_ms DESC, p.ordinal DESC, e.position DESC LIMIT ?`
 )
 
-// pageLines reads one page of a book with one of the page statements above
-// (its binds less the limit in `args`), and reports whether more lines remain
-// below it.
+// pageLines reads one page — PageSize lines at most — of a book with one of the
+// page statements above (its binds less the limit in `args`), and reports
+// whether more lines remain below it.
 //
 // IT ASKS FOR ONE MORE ROW THAN THE PAGE HOLDS. That extra row is how the
 // boundary arm is DECIDED rather than guessed: `more` when the row came back,
@@ -416,8 +476,8 @@ const (
 //
 // `kind = page_line` is the never-served index doing its work: a keep-alive or
 // a residue row carries no book at all, so no page can reach one.
-func (d *DB) pageLines(ctx context.Context, tx *sql.Tx, agentID string, pageSize uint32, statement string, args ...any) ([]*storev1.StoreLineAt, bool, error) {
-	rows, err := tx.QueryContext(ctx, statement, append(args, int64(pageSize)+1)...)
+func (d *DB) pageLines(ctx context.Context, tx *sql.Tx, agentID string, statement string, args ...any) ([]*storev1.StoreLineAt, bool, error) {
+	rows, err := tx.QueryContext(ctx, statement, append(args, PageSize+1)...)
 	if err != nil {
 		return nil, false, storagef(err, "reading a page of book %q", agentID)
 	}
@@ -426,7 +486,7 @@ func (d *DB) pageLines(ctx context.Context, tx *sql.Tx, agentID string, pageSize
 	var lines []*storev1.StoreLineAt
 	more := false
 	for rows.Next() {
-		if uint32(len(lines)) == pageSize {
+		if len(lines) == PageSize {
 			more = true
 			break
 		}

@@ -30,7 +30,7 @@ func TestAnExplicitSocketFlagBeatsTheEnvironment(t *testing.T) {
 	shim := streamProducer(store.client())
 	shim.write(ctx, t, shim.agentEntry("w-flag", "u-flag",
 		frameLine(agentID("main"), responseFrame("main", "act-1", "served on the flag's socket"))))
-	page := openSession(ctx, t, store.client(), "main", 10, nil)
+	page := openSession(ctx, t, store.client(), "main", nil)
 	assertTexts(t, "the book on the flag's socket", pageTexts(page.GetPage()), []string{"served on the flag's socket"})
 
 	// ...and the environment's path was never bound at all.
@@ -60,7 +60,7 @@ func TestTheEnvironmentNamesTheSocketWhenNoFlagDoes(t *testing.T) {
 	shim := streamProducer(store.client())
 	shim.write(ctx, t, shim.agentEntry("w-env", "u-env",
 		frameLine(agentID("main"), responseFrame("main", "act-1", "served on the environment's socket"))))
-	page := openSession(ctx, t, store.client(), "main", 10, nil)
+	page := openSession(ctx, t, store.client(), "main", nil)
 	assertTexts(t, "the book on the environment's socket", pageTexts(page.GetPage()), []string{"served on the environment's socket"})
 	store.assertNoErrorRecords()
 }

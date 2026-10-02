@@ -46,7 +46,7 @@ func TestWriteBatchCommitsRecordsAndCursorInOneTransaction(t *testing.T) {
 		t.Fatalf("cursor carry survived as %q, want %q", got[0].GetCarry(), cursor.GetCarry())
 	}
 
-	page := openSession(after, t, cli, "main", 10, nil)
+	page := openSession(after, t, cli, "main", nil)
 	assertTexts(t, "the main agent's book after restart", pageTexts(page.GetPage()), []string{"first"})
 	store.assertNoErrorRecords()
 }
@@ -69,7 +69,7 @@ func TestWriteBatchReplayIsAbsorbedAsSuccess(t *testing.T) {
 	shim.write(ctx, t, batch...)
 
 	// Assert.
-	page := openSession(ctx, t, store.client(), "main", 10, nil)
+	page := openSession(ctx, t, store.client(), "main", nil)
 	assertTexts(t, "the book after a replayed batch", pageTexts(page.GetPage()), []string{"beta", "alpha"})
 	store.assertNoErrorRecords()
 }

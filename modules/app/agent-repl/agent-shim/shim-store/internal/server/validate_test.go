@@ -51,18 +51,6 @@ func TestValidateAgentIDAcceptsAValue(t *testing.T) {
 	}
 }
 
-func TestValidatePageSizeRefusesZero(t *testing.T) {
-	// Arrange. Zero is an unset required field, never "the server picks".
-
-	// Act.
-	ref := validatePageSize(0)
-
-	// Assert.
-	if siteOf(ref) != SitePageSizeZero {
-		t.Fatalf("site = %q, want %q", siteOf(ref), SitePageSizeZero)
-	}
-}
-
 func TestValidateStoreItemPointerRefusesAPointerWithNoValue(t *testing.T) {
 	// Arrange.
 	tests := []struct {
@@ -288,8 +276,8 @@ func TestValidateWriteBatchRequestRefusesAnUnstatedWriteClass(t *testing.T) {
 func TestValidateOpenAgentSessionRequestRefusesAPresentButEmptyKnownThrough(t *testing.T) {
 	// Arrange. Absence is omission, never an empty value.
 	req := &storev1.OpenAgentSessionRequest{
-		Agent: &conversationv1.AgentId{Value: "a1"}, PageSize: 10,
-		KnownThrough: &storev1.StoreItemPointer{},
+		Agent:   &conversationv1.AgentId{Value: "a1"},
+		Opening: &storev1.OpenAgentSessionRequest_KnownThrough{KnownThrough: &storev1.StoreItemPointer{}},
 	}
 
 	// Act.
@@ -303,7 +291,24 @@ func TestValidateOpenAgentSessionRequestRefusesAPresentButEmptyKnownThrough(t *t
 
 func TestValidateOpenAgentSessionRequestAcceptsAnOmittedKnownThrough(t *testing.T) {
 	// Arrange. UNSET is the full-repaint request.
-	req := &storev1.OpenAgentSessionRequest{Agent: &conversationv1.AgentId{Value: "a1"}, PageSize: 10}
+	req := &storev1.OpenAgentSessionRequest{Agent: &conversationv1.AgentId{Value: "a1"}}
+
+	// Act.
+	ref := validateOpenAgentSessionRequest(req)
+
+	// Assert.
+	if ref != nil {
+		t.Fatalf("refusal = %v, want nil", ref)
+	}
+}
+
+func TestValidateOpenAgentSessionRequestAcceptsTailOnly(t *testing.T) {
+	// Arrange. The arm's presence is the whole instruction; there is nothing
+	// inside it to refuse.
+	req := &storev1.OpenAgentSessionRequest{
+		Agent:   &conversationv1.AgentId{Value: "a1"},
+		Opening: &storev1.OpenAgentSessionRequest_TailOnly{TailOnly: &storev1.AgentSessionTailOnly{}},
+	}
 
 	// Act.
 	ref := validateOpenAgentSessionRequest(req)
@@ -317,7 +322,7 @@ func TestValidateOpenAgentSessionRequestAcceptsAnOmittedKnownThrough(t *testing.
 func TestValidateReadAgentPageRequestRequiresAPosition(t *testing.T) {
 	// Arrange. There is no first-page arm on this verb, so an unset position
 	// asks for nothing.
-	req := &storev1.ReadAgentPageRequest{Book: &conversationv1.AgentId{Value: "a1"}, PageSize: 10}
+	req := &storev1.ReadAgentPageRequest{Book: &conversationv1.AgentId{Value: "a1"}}
 
 	// Act.
 	ref := validateReadAgentPageRequest(req)
@@ -331,7 +336,7 @@ func TestValidateReadAgentPageRequestRequiresAPosition(t *testing.T) {
 func TestValidateReadAgentPageRequestRefusesAnEmptyAfterPointer(t *testing.T) {
 	// Arrange.
 	req := &storev1.ReadAgentPageRequest{
-		Book: &conversationv1.AgentId{Value: "a1"}, PageSize: 10,
+		Book:     &conversationv1.AgentId{Value: "a1"},
 		Position: &storev1.ReadAgentPageRequest_After{After: &storev1.StoreItemPointer{}},
 	}
 
@@ -356,7 +361,7 @@ func TestValidateReadAgentPageRequestRefusesANonPositiveThrough(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			// Arrange.
 			req := &storev1.ReadAgentPageRequest{
-				Book: &conversationv1.AgentId{Value: "a1"}, PageSize: 10,
+				Book:     &conversationv1.AgentId{Value: "a1"},
 				Position: &storev1.ReadAgentPageRequest_Through{Through: &conversationv1.ConversationThrough{AtMs: test.atMs}},
 			}
 
@@ -374,7 +379,7 @@ func TestValidateReadAgentPageRequestRefusesANonPositiveThrough(t *testing.T) {
 func TestValidateReadAgentPageRequestAcceptsAPositiveThrough(t *testing.T) {
 	// Arrange.
 	req := &storev1.ReadAgentPageRequest{
-		Book: &conversationv1.AgentId{Value: "a1"}, PageSize: 10,
+		Book:     &conversationv1.AgentId{Value: "a1"},
 		Position: &storev1.ReadAgentPageRequest_Through{Through: &conversationv1.ConversationThrough{AtMs: 1}},
 	}
 
