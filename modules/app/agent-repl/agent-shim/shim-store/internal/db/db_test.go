@@ -1778,3 +1778,74 @@ func TestOpenAtRefusesACheckpointConnectionThatCannotOpen(t *testing.T) {
 		t.Fatalf("openAt error = %v, want it to name the checkpoint connection", err)
 	}
 }
+
+// ---- closing every handle ----
+
+func TestCloseReportsEveryHandleThatWillNotClose(t *testing.T) {
+	tests := []struct {
+		name    string
+		handle  func(d *DB) *sql.DB
+		logged  string
+		wrapped string
+	}{
+		{"the read pool", func(d *DB) *sql.DB { return d.read }, "closing the SQLite read pool failed", "closing the read pool"},
+		{"the checkpoint connection", func(d *DB) *sql.DB { return d.ckpt }, "closing the SQLite checkpoint connection failed", "closing the checkpoint connection"},
+		{"the write handle", func(d *DB) *sql.DB { return d.sql }, "closing SQLite database failed", "closing the database"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Arrange: the named handle closes but reports a failure.
+			s, log := newSink(t)
+			d, err := OpenWithOptions(filepath.Join(t.TempDir(), "store.db"), log, Options{Now: func() int64 { return testNow }})
+			if err != nil {
+				t.Fatalf("OpenWithOptions: %v", err)
+			}
+			failing := test.handle(d)
+			d.closeHandle = func(pool *sql.DB) error {
+				closeErr := pool.Close()
+				if pool == failing {
+					return errors.New("disk I/O error (10)")
+				}
+				return closeErr
+			}
+
+			// Act
+			err = d.Close()
+
+			// Assert
+			if !errors.Is(err, ErrStorage) || !strings.Contains(err.Error(), test.wrapped) {
+				t.Fatalf("Close = %v, want a storage failure naming %q", err, test.wrapped)
+			}
+			s.assertLogged(t, "error", test.logged)
+			for name, pool := range map[string]*sql.DB{"read": d.read, "checkpoint": d.ckpt, "write": d.sql} {
+				if pingErr := pool.Ping(); pingErr == nil {
+					t.Fatalf("the %s handle is still open after a failed Close", name)
+				}
+			}
+		})
+	}
+}
+
+// TestEveryHandleClosesThroughClosePool holds Close to the helper: a handle
+// closed by hand could drop its failure or skip the record.
+func TestEveryHandleClosesThroughClosePool(t *testing.T) {
+	// Arrange
+	body, err := os.ReadFile("db.go")
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	src := string(body)
+
+	// Act
+	viaHelper := strings.Count(src, "d.closePool(")
+
+	// Assert
+	if viaHelper != 3 {
+		t.Fatalf("Close closes %d handles through closePool, want 3", viaHelper)
+	}
+	for _, direct := range []string{"d.read.Close()", "d.ckpt.Close()", "d.sql.Close()"} {
+		if strings.Contains(src, direct) {
+			t.Fatalf("db.go calls %s directly; only closePool may close a handle", direct)
+		}
+	}
+}
