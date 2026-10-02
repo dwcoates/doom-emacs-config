@@ -50,7 +50,7 @@ func TestAStandingWatchIsToldOfARetiredLine(t *testing.T) {
 	sidecar.writeWithCursor(ctx, t, cursorState("12:34", "/t/a.jsonl", 100, nil),
 		sidecar.agentEntry("w-notify", "prompt:u-notify",
 			promptLine(agentID("main"), promptFact("u-notify", "main", "<task-notification>"))))
-	opened := openSession(ctx, t, cli, "main", 10, nil)
+	opened := openSession(ctx, t, cli, "main", nil)
 	stream := watchStream(ctx, t, cli, opened.GetWatch())
 
 	// Act
@@ -81,7 +81,7 @@ func TestARetiredLineIsServedByNoPage(t *testing.T) {
 	writeHealBatch(ctx, t, sidecar, 200, "prompt:u-notify")
 
 	// Assert
-	page := openSession(ctx, t, cli, "main", 10, nil)
+	page := openSession(ctx, t, cli, "main", nil)
 	assertTexts(t, "the healed book", pageTexts(page.GetPage()), []string{"prompt:a real prompt"})
 	store.assertNoErrorRecords()
 }

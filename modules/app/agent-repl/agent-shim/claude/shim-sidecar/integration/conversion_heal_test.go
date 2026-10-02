@@ -232,7 +232,7 @@ func awaitHealed(ctx context.Context, t *testing.T, fx *healFixture) {
 // included.
 func watchFrames(ctx context.Context, t *testing.T, c storev1connect.ShimStoreClient, agent string) <-chan *storev1.WatchAgentSessionResponse {
 	t.Helper()
-	res, err := c.OpenAgentSession(ctx, connect.NewRequest(&storev1.OpenAgentSessionRequest{Agent: agentID(agent), PageSize: 50}))
+	res, err := c.OpenAgentSession(ctx, connect.NewRequest(&storev1.OpenAgentSessionRequest{Agent: agentID(agent)}))
 	if err != nil {
 		t.Fatalf("OpenAgentSession(%s): %v", agent, err)
 	}
@@ -287,7 +287,7 @@ func TestAHealThroughTheRealStoreTakesTheNotificationsPromptOutOfItsBook(t *test
 	ctx, cancel := testContext(t)
 	defer cancel()
 	fx := seedPreVersioningStore(ctx, t)
-	if _, legacy := promptPointers(bookLines(ctx, t, fx.store.Client, healSession, 50))[healNoticeUUID]; !legacy {
+	if _, legacy := promptPointers(bookLines(ctx, t, fx.store.Client, healSession))[healNoticeUUID]; !legacy {
 		t.Fatal("the fixture's legacy notification prompt is not in the book to begin with")
 	}
 
@@ -296,7 +296,7 @@ func TestAHealThroughTheRealStoreTakesTheNotificationsPromptOutOfItsBook(t *test
 	awaitHealed(ctx, t, fx)
 
 	// Assert.
-	if _, still := promptPointers(bookLines(ctx, t, fx.store.Client, healSession, 50))[healNoticeUUID]; still {
+	if _, still := promptPointers(bookLines(ctx, t, fx.store.Client, healSession))[healNoticeUUID]; still {
 		t.Fatal("the book still serves the prompt the old conversion minted for a task notification")
 	}
 }
@@ -307,14 +307,14 @@ func TestAHealThroughTheRealStoreLeavesAStillValidPromptWhereItWas(t *testing.T)
 	ctx, cancel := testContext(t)
 	defer cancel()
 	fx := seedPreVersioningStore(ctx, t)
-	before := promptPointers(bookLines(ctx, t, fx.store.Client, healSession, 50))[healTypedUUID]
+	before := promptPointers(bookLines(ctx, t, fx.store.Client, healSession))[healTypedUUID]
 
 	// Act.
 	startSidecar(t, defaultSidecarOptions(t, fx.socket, fx.tree))
 	awaitHealed(ctx, t, fx)
 
 	// Assert.
-	after := promptPointers(bookLines(ctx, t, fx.store.Client, healSession, 50))[healTypedUUID]
+	after := promptPointers(bookLines(ctx, t, fx.store.Client, healSession))[healTypedUUID]
 	if before == nil || !proto.Equal(before, after) {
 		t.Fatalf("the typed prompt's pointer moved from %v to %v, want it untouched", before, after)
 	}

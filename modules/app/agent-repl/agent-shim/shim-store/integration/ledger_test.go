@@ -55,7 +55,7 @@ func TestReplayingASupersededWriteLeavesTheSettledLineInThePage(t *testing.T) {
 	shim.write(ctx, t, replayed)
 
 	// Assert
-	page := openSession(ctx, t, cli, "main", 10, nil)
+	page := openSession(ctx, t, cli, "main", nil)
 	assertTexts(t, "the book after a superseded replay", pageTexts(page.GetPage()), []string{"A settled"})
 }
 
@@ -69,7 +69,7 @@ func TestReplayingASupersededWriteDeliversNothingToAWatcher(t *testing.T) {
 	cli := store.client()
 	shim := streamProducer(cli)
 	replayed := supersededPair(ctx, t, shim)
-	opened := openSession(ctx, t, cli, "main", 10, nil)
+	opened := openSession(ctx, t, cli, "main", nil)
 	stream := watchStream(ctx, t, cli, opened.GetWatch())
 	defer testclose.OrFail(t, stream)
 

@@ -9,7 +9,9 @@
 package integration
 
 import (
+	"agentrepl/shim-store/internal/db"
 	"agentrepl/shim-store/internal/testclose"
+	"fmt"
 	"testing"
 
 	storev1 "agentrepl/proto/store/v1"
@@ -34,13 +36,33 @@ func TestAnUnservedRowBetweenTwoRealRowsNeverAppears(t *testing.T) {
 	)
 
 	// Assert: the page is the two real rows, adjacent.
-	opened := openSession(ctx, t, cli, "main", 10, nil)
+	opened := openSession(ctx, t, cli, "main", nil)
 	assertTexts(t, "a book straddling an unserved row", pageTexts(opened.GetPage()), []string{"after", "before"})
 	assertPageFloor(t, opened.GetPage())
+	store.assertNoErrorRecords()
+}
 
-	// And a page sized to exactly the real rows is complete, not short.
-	sized := openSession(ctx, t, cli, "main", 2, nil)
-	assertTexts(t, "a page sized to the real rows", pageTexts(sized.GetPage()), []string{"after", "before"})
+// TestAStorePageOfRealRowsAroundAnUnservedRowIsComplete: an unserved row takes
+// no room in a page, so a book of exactly one page of real rows reaches the
+// floor rather than reporting a short page with more below it.
+func TestAStorePageOfRealRowsAroundAnUnservedRowIsComplete(t *testing.T) {
+	// Arrange.
+	store := startStore(t, storeOptions{})
+	ctx, cancel := callContext(t)
+	defer cancel()
+	cli := store.client()
+	shim := streamProducer(cli)
+	shim.write(ctx, t,
+		shim.agentEntry("w-ka-before", "u-ka-before", frameLine(agentID("main"), responseFrame("main", "act-1", "before"))),
+		shim.agentEntry("w-ka", "u-ka-turn", vendorSpecificLine("vendor_only_thing")),
+	)
+	writeNumberedLines(ctx, t, shim, "main", db.PageSize-1)
+
+	// Act.
+	sized := openSession(ctx, t, cli, "main", nil)
+
+	// Assert.
+	assertTexts(t, "a page of exactly the real rows", pageTexts(sized.GetPage()), append(descendingLabels(db.PageSize-1, 1), "before"))
 	assertPageFloor(t, sized.GetPage())
 	store.assertNoErrorRecords()
 }
@@ -63,16 +85,21 @@ func TestIdentityRotationDoesNotSplitTheBook(t *testing.T) {
 	shim.write(ctx, t,
 		shim.sessionEntry("w-rot-su", "u-rot-session", identityRotated("vendor-first", "vendor-second")),
 	)
-	shim.write(ctx, t,
-		shim.agentEntry("w-rot-3", "u-rot-3", frameLine(agentID("main"), responseFrame("main", "act-3", "L3"))),
-		shim.agentEntry("w-rot-4", "u-rot-4", frameLine(agentID("main"), responseFrame("main", "act-4", "L4"))),
-	)
+	after := make([]*storev1.StoreEntry, 0, db.PageSize)
+	var afterTexts []string
+	for i := db.PageSize; i >= 1; i-- {
+		label := fmt.Sprintf("R%d", i)
+		afterTexts = append(afterTexts, label)
+		after = append([]*storev1.StoreEntry{shim.agentEntry("w-rot-"+label, "u-rot-"+label,
+			frameLine(agentID("main"), responseFrame("main", "act-"+label, label)))}, after...)
+	}
+	shim.write(ctx, t, after...)
 
 	// Assert: one book, walked straight through the rotation.
-	opened := openSession(ctx, t, cli, "main", 2, nil)
-	assertTexts(t, "the page after the rotation", pageTexts(opened.GetPage()), []string{"L4", "L3"})
+	opened := openSession(ctx, t, cli, "main", nil)
+	assertTexts(t, "the page after the rotation", pageTexts(opened.GetPage()), afterTexts)
 
-	across := readPage(ctx, t, cli, "main", 2, assertPageMore(t, opened.GetPage()))
+	across := readPage(ctx, t, cli, "main", assertPageMore(t, opened.GetPage()))
 	assertTexts(t, "the page across the rotation", readTexts(across), []string{"L2", "L1"})
 	assertReadFloor(t, across)
 	store.assertNoErrorRecords()
@@ -90,7 +117,7 @@ func TestRotationDoesNotSplitTheWatchedTail(t *testing.T) {
 	shim.write(ctx, t,
 		shim.agentEntry("w-rotw-1", "u-rotw-1", frameLine(agentID("main"), responseFrame("main", "act-1", "L1"))),
 	)
-	opened := openSession(ctx, t, cli, "main", 10, nil)
+	opened := openSession(ctx, t, cli, "main", nil)
 	stream := watchStream(ctx, t, cli, opened.GetWatch())
 	defer testclose.OrFail(t, stream)
 

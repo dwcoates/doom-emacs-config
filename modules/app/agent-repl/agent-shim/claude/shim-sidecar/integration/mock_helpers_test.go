@@ -601,8 +601,7 @@ func driveMockTurn(
 				},
 			}},
 		}},
-		Origin:   conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT,
-		PageSize: 200,
+		Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT,
 	}))
 	if err != nil {
 		t.Fatalf("StartTurn(%q): %v (log: %s)", prompt, err, tree.LogPath)
@@ -634,8 +633,7 @@ func awaitMockTurnEnd(
 	watchCtx, closeWatch := context.WithCancel(ctx)
 	defer closeWatch()
 	stream, err := c.WatchAgent(watchCtx, connect.NewRequest(&shimv1.WatchAgentRequest{
-		Target:   target,
-		PageSize: 200,
+		Target: target,
 	}))
 	if err != nil {
 		t.Fatalf("WatchAgent for %q: %v (log: %s)", prompt, err, tree.LogPath)
