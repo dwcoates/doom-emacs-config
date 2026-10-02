@@ -773,14 +773,92 @@ its deactivation is a genuinely global-scope event."
          (error (agent-repl--warn log-ws "persp-frame-save-state failed for ws=%s: %S" ws err)
                 (agent-repl--log log-ws "before-persp-deactivate: persp-frame-save-state error ws=%s: %S" ws err)))))))
 
+(defvar agent-repl--switch-activation-generation 0
+  "The generation of the newest perspective activation.
+Every real activation (`agent-repl--after-persp-activated', outside an
+eager-open) takes the next generation, and the deferred switch pass it
+schedules carries the generation it was scheduled under.  Only the pass
+carrying the CURRENT generation may run
+\(`agent-repl--run-switch-activation'); every older one is superseded and
+does nothing.
+
+THIS IS WHAT MAKES A STALE ACTIVATION UNREPRESENTABLE.  The pass is
+deferred to a zero-delay timer, and under CPU load several switches
+\(`s-{' `s-}' held down, a roster-driven switch landing beside a chord)
+can activate before any of their timers fire.  Each pass used to run for
+the workspace captured when ITS activation fired, so the older ones
+repainted and focused a workspace the user had already left -- the
+frame flashed back to it, or stayed there.  A generation the newest
+activation has moved past names a switch nobody is standing in.")
+
+(defvar agent-repl--switch-activation-timer nil
+  "The pending deferred switch pass, or nil.
+Cancelled when a newer activation supersedes it, so the timer list holds
+at most one pass; the generation check is what guarantees a superseded
+pass does nothing even if it was already dequeued to run.")
+
+(defun agent-repl--switch-activation-log-scope (ws)
+  "Return the log scope a switch pass for WS records under.
+WS is whatever perspective persp-mode activated, persp-mode\='s own
+placeholders included, and those own no durable sink, so their records
+are central by explicit request rather than left for the ladder to
+resolve against a sink that does not exist."
+  (or (agent-repl--ws-log-name ws) agent-repl--global-log-scope))
+
+(defun agent-repl--schedule-switch-activation (ws)
+  "Supersede every pending switch pass and schedule WS\='s under a new generation.
+Returns the generation WS\='s pass carries."
+  (let ((generation (setq agent-repl--switch-activation-generation
+                          (1+ agent-repl--switch-activation-generation))))
+    (when (timerp agent-repl--switch-activation-timer)
+      (cancel-timer agent-repl--switch-activation-timer))
+    (setq agent-repl--switch-activation-timer
+          (run-at-time 0 nil #'agent-repl--run-switch-activation ws generation))
+    (agent-repl--log-verbose (agent-repl--switch-activation-log-scope ws)
+                             "elisp.panels.switch-activation-scheduled ws=%s generation=%d"
+                             ws generation)
+    generation))
+
+(defun agent-repl--supersede-switch-activation (ws)
+  "Supersede every pending switch pass without scheduling one, for WS.
+An activation that schedules no pass of its own (a foreign perspective)
+still moves the user off whichever workspace the pending pass is for, so
+that pass must not run either."
+  (setq agent-repl--switch-activation-generation
+        (1+ agent-repl--switch-activation-generation))
+  (when (timerp agent-repl--switch-activation-timer)
+    (cancel-timer agent-repl--switch-activation-timer)
+    (setq agent-repl--switch-activation-timer nil))
+  (agent-repl--log-verbose '(:agent-repl-central "a foreign perspective has no agent workspace")
+                           "elisp.panels.switch-activation-superseded-by-foreign ws=%s generation=%d"
+                           ws agent-repl--switch-activation-generation))
+
+(defun agent-repl--run-switch-activation (ws generation)
+  "Run WS\='s deferred switch pass if GENERATION is still the newest.
+A pass whose GENERATION a later activation has moved past is
+superseded: it records that at INFO and does nothing else, because the
+user is no longer standing in WS.  The pass that runs records the
+generation that won at INFO, so a switch read back from the log says
+which activation it was."
+  (let ((log-ws (agent-repl--switch-activation-log-scope ws))
+        (newest agent-repl--switch-activation-generation))
+    (if (/= generation newest)
+        (agent-repl--info log-ws
+                          "elisp.panels.switch-activation-superseded ws=%s generation=%d newest=%d"
+                          ws generation newest)
+      (setq agent-repl--switch-activation-timer nil)
+      (agent-repl--info log-ws "elisp.panels.switch-activation-won ws=%s generation=%d"
+                        ws generation)
+      (agent-repl--on-workspace-switch ws))))
+
 (defun agent-repl--after-persp-activated (&rest _)
   "Handle perspective activation by scheduling a workspace switch.
 Captures `(agent-repl--ws-current-name)' at hook-fire time and passes it
 to the deferred `--on-workspace-switch' so the call operates on the
-workspace that just activated, not whatever happens to be current
-when the run-at-time-0 timer eventually fires (rapid back-to-back
-switches would otherwise have every deferred call resolve to the
-latest ws, dropping bookkeeping on the intermediate ones).
+workspace that just activated, under a new generation
+\(`agent-repl--switch-activation-generation') so that only the NEWEST
+activation's pass ever runs: a pass scheduled by an activation the user
+has since switched away from is superseded and does nothing.
 
 Logs `persp-names-cache' so cache mutations across persp lifecycle
 events (kill, switch, add) are traceable."
@@ -803,10 +881,10 @@ events (kill, switch, add) are traceable."
     ;; into the logging ladder with no sink it will ever own; see
     ;; `agent-repl--foreign-perspective-p'.
     (agent-repl--log-verbose '(:agent-repl-central "a foreign perspective has no agent workspace") "after-persp-activated: skipped foreign perspective ws=%s"
-                              (agent-repl--ws-current-name)))
+                              (agent-repl--ws-current-name))
+    (agent-repl--supersede-switch-activation (agent-repl--ws-current-name)))
    (t
-    (let ((ws (agent-repl--ws-current-name)))
-      (run-at-time 0 nil #'agent-repl--on-workspace-switch ws)))))
+    (agent-repl--schedule-switch-activation (agent-repl--ws-current-name)))))
 
 (when (modulep! :ui workspaces)
   (agent-repl--ws-add-before-deactivate-hook #'agent-repl--before-persp-deactivate)
