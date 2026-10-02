@@ -31,7 +31,7 @@
 import MarkdownIt from "markdown-it";
 import taskLists from "markdown-it-task-lists";
 import { escapeHtml, highlightCode } from "./highlight.js";
-import { isFileLinkHref, isWebHref } from "./href.js";
+import { FILE_LINK_EXTENSIONS, hasFileExtension, isFileLinkHref, isWebHref } from "./href.js";
 import { isMetapromptTree, renderTreeHtml } from "./metaprompt-tree.js";
 
 /**
@@ -95,6 +95,24 @@ md.renderer.rules.image = (tokens, idx, options, env, self) => {
 };
 
 md.use(taskLists);
+
+// A BARE FILE NAME IS A FILE, NOT A HOST. The fuzzy linkifier must first SEE
+// `foo.ts` (most extensions are no TLD), then the rule below turns every
+// scheme-less autolink ending in a file extension into a file link: its href
+// is the bare label, which the click router sends to the daemon.
+md.linkify.tlds([...FILE_LINK_EXTENSIONS], true);
+md.core.ruler.after("linkify", "file-linkify", (state) => {
+  for (const block of state.tokens) {
+    const children = block.children ?? [];
+    children.forEach((token, index) => {
+      if (token.type !== "link_open" || token.markup !== "linkify") return;
+      const label = children[index + 1]?.content ?? "";
+      if (/^[a-z][a-z0-9+.-]*:/i.test(label) || label.includes("@") || label.includes("/")) return;
+      if (hasFileExtension(label)) token.attrSet("href", label);
+    });
+  }
+  return true;
+});
 
 // Every emitted link opens in a new tab, safely.
 const defaultLinkOpen =
