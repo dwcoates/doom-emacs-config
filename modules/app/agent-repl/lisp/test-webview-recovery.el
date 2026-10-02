@@ -412,6 +412,25 @@ A focused app has no focus to steal, so creating a view must proceed."
   ;; Arrange / Act / Assert
   (should (null (agent-repl--webview-precreate-hold-p))))
 
+(ert-deftest agent-repl-test-wr-the-editor-startup-never-holds ()
+  "During the editor's startup every page is pre-created at once: a tab
+opens only once its page drew, so a focus wait would open no tab."
+  ;; Arrange
+  (let ((noninteractive nil)
+        (agent-repl-startup--phase 'running))
+    (cl-letf (((symbol-function 'agent-repl--emacs-can-foreground-p) (lambda () t)))
+      ;; Act / Assert
+      (should (null (agent-repl--webview-precreate-hold-p))))))
+
+(ert-deftest agent-repl-test-wr-after-the-startup-a-visible-unfocused-emacs-holds ()
+  "Outside the startup the focus hold stands as it always did."
+  ;; Arrange
+  (let ((noninteractive nil)
+        (agent-repl-startup--phase 'done))
+    (cl-letf (((symbol-function 'agent-repl--emacs-can-foreground-p) (lambda () t)))
+      ;; Act / Assert
+      (should (agent-repl--webview-precreate-hold-p)))))
+
 (ert-deftest agent-repl-test-wr-gaining-focus-resumes-a-parked-drain ()
   "The first look is the moment the warm page was for."
   ;; Arrange

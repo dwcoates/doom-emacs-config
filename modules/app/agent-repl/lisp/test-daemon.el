@@ -2144,7 +2144,7 @@ free, and the stale address it left behind is what the boot overwrites."
       (agent-repl-daemon--set-lifecycle 'linking)
       ;; Assert
       (should (equal agent-repl-test-daemon--echoes
-                     '("agent-repl: linking to the daemon…"))))))
+                     '("agent-repl: connecting to the daemon…"))))))
 
 (ert-deftest agent-repl-test-daemon-the-ready-outcome-echoes-once ()
   "A daemon this Emacs started reaching link-up is `ready'."
@@ -2154,7 +2154,7 @@ free, and the stale address it left behind is what the boot overwrites."
       (agent-repl-daemon--set-lifecycle 'ready)
       ;; Assert
       (should (equal agent-repl-test-daemon--echoes
-                     '("agent-repl: daemon ready"))))))
+                     '("agent-repl: connected to the daemon."))))))
 
 (ert-deftest agent-repl-test-daemon-the-adopted-outcome-echoes-once ()
   "A daemon this Emacs attached to is `adopted', and says which it was."
@@ -2164,7 +2164,7 @@ free, and the stale address it left behind is what the boot overwrites."
       (agent-repl-daemon--set-lifecycle 'adopted)
       ;; Assert
       (should (equal agent-repl-test-daemon--echoes
-                     '("agent-repl: daemon adopted"))))))
+                     '("agent-repl: connected to the daemon."))))))
 
 (ert-deftest agent-repl-test-daemon-a-phase-while-the-minibuffer-is-busy-is-not-echoed ()
   "The echo area is the user's prompt; progress must not type over it."
@@ -2211,7 +2211,7 @@ free, and the stale address it left behind is what the boot overwrites."
       (agent-repl-daemon--build nil #'ignore)
       ;; Assert
       (should (equal agent-repl-test-daemon--echoes
-                     '("agent-repl: building the stack…"))))))
+                     '("agent-repl: building the daemon…"))))))
 
 (ert-deftest agent-repl-test-daemon-a-finished-build-echoes-its-outcome ()
   "A build that finished is worth one line and not worth keeping."
@@ -2222,8 +2222,18 @@ free, and the stale address it left behind is what the boot overwrites."
       ;; Act
       (agent-repl-daemon--build nil #'ignore)
       ;; Assert
-      (should (seq-find (lambda (line) (string-match-p "stack built" line))
-                        agent-repl-test-daemon--echoes)))))
+      (should (member "agent-repl: daemon built." agent-repl-test-daemon--echoes)))))
+
+(ert-deftest agent-repl-test-daemon-adopting-a-running-daemon-says-it-was-found ()
+  "A daemon this Emacs did not start is FOUND, and says so before connecting."
+  (agent-repl-test-daemon--with-harness
+    (agent-repl-test-daemon--capturing-echoes
+      ;; Act
+      (agent-repl-daemon--report-provenance "127.0.0.1:9")
+      ;; Assert
+      (should (equal agent-repl-test-daemon--echoes
+                     '("agent-repl: found a running daemon."
+                       "agent-repl: connecting to the daemon…"))))))
 
 (ert-deftest agent-repl-test-daemon-a-build-failure-echoes-through-the-log-function ()
   "A failure the user must act on reaches the echo area as a LOGGED line."
@@ -2256,72 +2266,17 @@ free, and the stale address it left behind is what the boot overwrites."
       (should (equal agent-repl-test-daemon--echoes
                      '("agent-repl: no state root"))))))
 
-;;;; ---- The workspace bring-up count in the minibuffer ----
+;;;; ---- The open-progress feed moves the segment, never a line ----
 
-(ert-deftest agent-repl-test-daemon-the-workspace-count-echoes-when-it-moves ()
-  "One line per workspace that finishes painting, naming how far along it is."
+(ert-deftest agent-repl-test-daemon-an-open-progress-change-echoes-nothing ()
+  "The startup's workspace lines are startup.el's; this feed only repaints."
   (agent-repl-test-daemon--with-harness
     ;; Arrange
     (setq agent-repl-roster--tab-order '("ws-1" "ws-2"))
     (puthash "ws-1" (list :phase :loaded) agent-repl--open-progress)
-    (puthash "ws-2" (list :phase :requested) agent-repl--open-progress)
     (agent-repl-test-daemon--capturing-echoes
       ;; Act
       (agent-repl-daemon-on-open-progress-change)
-      ;; Assert
-      (should (equal agent-repl-test-daemon--echoes
-                     '("agent-repl: loading workspaces (1/2)…"))))))
-
-(ert-deftest agent-repl-test-daemon-an-unmoved-workspace-count-echoes-nothing ()
-  "The change hook fires several times per workspace; only a MOVE is a line."
-  (agent-repl-test-daemon--with-harness
-    ;; Arrange
-    (setq agent-repl-roster--tab-order '("ws-1" "ws-2"))
-    (puthash "ws-1" (list :phase :loaded) agent-repl--open-progress)
-    (puthash "ws-2" (list :phase :requested) agent-repl--open-progress)
-    (agent-repl-daemon-on-open-progress-change)
-    (agent-repl-test-daemon--capturing-echoes
-      ;; Act
-      (agent-repl-daemon-on-open-progress-change)
-      ;; Assert
-      (should (null agent-repl-test-daemon--echoes)))))
-
-(ert-deftest agent-repl-test-daemon-the-workspace-count-is-final-when-it-empties ()
-  "The last line of a cold start says how many workspaces stood up."
-  (agent-repl-test-daemon--with-harness
-    ;; Arrange
-    (setq agent-repl-roster--tab-order '("ws-1" "ws-2"))
-    (puthash "ws-1" (list :phase :requested) agent-repl--open-progress)
-    (agent-repl-daemon-on-open-progress-change)
-    (remhash "ws-1" agent-repl--open-progress)
-    (agent-repl-test-daemon--capturing-echoes
-      ;; Act
-      (agent-repl-daemon-on-open-progress-change)
-      ;; Assert
-      (should (equal agent-repl-test-daemon--echoes
-                     '("agent-repl: 2 workspaces ready"))))))
-
-(ert-deftest agent-repl-test-daemon-an-empty-count-that-never-moved-echoes-nothing ()
-  "A session with no cold start behind it has no bring-up to announce."
-  (agent-repl-test-daemon--with-harness
-    ;; Arrange
-    (setq agent-repl-roster--tab-order '("ws-1"))
-    (agent-repl-test-daemon--capturing-echoes
-      ;; Act
-      (agent-repl-daemon-on-open-progress-change)
-      ;; Assert
-      (should (null agent-repl-test-daemon--echoes)))))
-
-(ert-deftest agent-repl-test-daemon-the-workspace-count-is-quiet-while-the-minibuffer-is-busy ()
-  "Bring-up progress is exactly the chatter a prompt must not be buried under."
-  (agent-repl-test-daemon--with-harness
-    ;; Arrange
-    (setq agent-repl-roster--tab-order '("ws-1" "ws-2"))
-    (puthash "ws-1" (list :phase :requested) agent-repl--open-progress)
-    (agent-repl-test-daemon--capturing-echoes
-      (cl-letf (((symbol-function 'minibuffer-depth) (lambda () 1)))
-        ;; Act
-        (agent-repl-daemon-on-open-progress-change))
       ;; Assert
       (should (null agent-repl-test-daemon--echoes)))))
 
@@ -2488,75 +2443,6 @@ the shutdown schedule exists to avoid."
         (agent-repl-frontend-daemon-stop))
       ;; Assert
       (should (null signalled)))))
-
-;;;; ---- The roster's own bring-up echo (a startup paints nothing) ----
-
-(ert-deftest agent-repl-test-daemon-a-hidden-startup-still-echoes-loading-workspaces ()
-  "Panels park until focus, so a cold start paints nothing at all.
-The painted-count feed cannot move on such a startup, and the phase the
-user was promised went missing entirely; the roster opening the tabs is
-what reports it."
-  (agent-repl-test-daemon--with-harness
-    (agent-repl-test-daemon--capturing-echoes
-      ;; Act
-      (agent-repl-daemon-on-roster-bringup 1 3 nil)
-      ;; Assert
-      (should (equal agent-repl-test-daemon--echoes
-                     '("agent-repl: loading workspaces (1/3)…"))))))
-
-(ert-deftest agent-repl-test-daemon-the-roster-bringup-echo-counts-up ()
-  "One line per tab the reconcile opens, naming how far along it is."
-  (agent-repl-test-daemon--with-harness
-    (agent-repl-test-daemon--capturing-echoes
-      ;; Act
-      (agent-repl-daemon-on-roster-bringup 1 2 nil)
-      (agent-repl-daemon-on-roster-bringup 2 2 nil)
-      ;; Assert
-      (should (equal agent-repl-test-daemon--echoes
-                     '("agent-repl: loading workspaces (1/2)…"
-                       "agent-repl: loading workspaces (2/2)…"))))))
-
-(ert-deftest agent-repl-test-daemon-the-roster-bringup-echo-dedupes ()
-  "A pair already said is not said twice, whichever feed repeats it."
-  (agent-repl-test-daemon--with-harness
-    ;; Arrange
-    (agent-repl-daemon-on-roster-bringup 1 2 nil)
-    (agent-repl-test-daemon--capturing-echoes
-      ;; Act
-      (agent-repl-daemon-on-roster-bringup 1 2 nil)
-      ;; Assert
-      (should (null agent-repl-test-daemon--echoes)))))
-
-(ert-deftest agent-repl-test-daemon-the-roster-bringup-echo-ends-with-the-ready-line ()
-  "The pass closes with the same closing line the painted feed ends on."
-  (agent-repl-test-daemon--with-harness
-    ;; Arrange
-    (agent-repl-daemon-on-roster-bringup 2 2 nil)
-    (agent-repl-test-daemon--capturing-echoes
-      ;; Act
-      (agent-repl-daemon-on-roster-bringup 2 2 t)
-      ;; Assert
-      (should (equal agent-repl-test-daemon--echoes
-                     '("agent-repl: 2 workspaces ready"))))))
-
-(ert-deftest agent-repl-test-daemon-a-roster-pass-that-opened-nothing-says-nothing ()
-  "A steady-state push opens no tab, so it announces no bring-up."
-  (agent-repl-test-daemon--with-harness
-    (agent-repl-test-daemon--capturing-echoes
-      ;; Act
-      (agent-repl-daemon-on-roster-bringup 0 0 t)
-      ;; Assert
-      (should (null agent-repl-test-daemon--echoes)))))
-
-(ert-deftest agent-repl-test-daemon-the-roster-bringup-echo-is-quiet-while-typing ()
-  "The minibuffer guard covers this feed exactly as it covers the other."
-  (agent-repl-test-daemon--with-harness
-    (agent-repl-test-daemon--capturing-echoes
-      (cl-letf (((symbol-function 'minibuffer-depth) (lambda () 1)))
-        ;; Act
-        (agent-repl-daemon-on-roster-bringup 1 2 nil))
-      ;; Assert
-      (should (null agent-repl-test-daemon--echoes)))))
 
 (provide 'test-daemon)
 
