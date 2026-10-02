@@ -1,0 +1,41 @@
+// endpoint_dismiss_news_digest.proto — DismissNewsDigest: take the standing
+// news digest down in EVERY webview. Called by the overlay's close control in
+// any one webview; the daemon pushes NewsDigestStanding.none to all of them.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "frontend/v1/news_digest.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message DismissNewsDigestRequest {
+  // The digest being dismissed, echoed exactly as NewsDigestOverlay.id served
+  // it, so a dismiss can never take down a newer digest than the one the
+  // reader saw.
+  frontend.v1.NewsDigestId id = 1;
+}
+
+// THE ARM IS THE OUTCOME.
+message DismissNewsDigestResponse {
+  oneof result {
+    DismissNewsDigestSuccess success = 1;
+    DismissNewsDigestError error = 2;
+  }
+}
+
+// The digest is down everywhere, or already was (a second webview's dismiss
+// of the same digest is this answer too).
+message DismissNewsDigestSuccess {}
+
+// Why nothing was dismissed.
+message DismissNewsDigestError {
+  oneof cause {
+    // The id names no digest this daemon made, or a digest older than the one
+    // that stands; nothing was taken down.
+    DismissNewsDigestUnknownDigest unknown_digest = 1;
+  }
+}
+// The id names no standing digest.
+message DismissNewsDigestUnknownDigest {}

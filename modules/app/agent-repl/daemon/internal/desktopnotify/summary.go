@@ -9,6 +9,7 @@ import (
 	"claude-repld/internal/headless"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/prompts"
+	"claude-repld/internal/runecap"
 )
 
 // opSummary is the operation the turn summary's records carry.
@@ -84,7 +85,7 @@ func (s Summarizer) summarize(ctx context.Context, ws ids.WorkspaceID, answer st
 		})
 		return "", "the summary brief could not be read"
 	}
-	question, err := brief.Splice(map[string]string{"answer": truncateRunes(answer, MaxAnswerRunes)})
+	question, err := brief.Splice(map[string]string{"answer": runecap.Head(answer, MaxAnswerRunes)})
 	if err != nil {
 		log.Error(opSummary, "the turn-summary brief could not be spliced", dlog.Context{
 			"brief": BriefSummary, "cause": err.Error(),
@@ -148,13 +149,4 @@ func firstLines(text string, n int) string {
 		}
 	}
 	return strings.Join(kept, "\n")
-}
-
-// truncateRunes keeps the first n runes of text.
-func truncateRunes(text string, n int) string {
-	runes := []rune(text)
-	if len(runes) <= n {
-		return text
-	}
-	return string(runes[:n])
 }

@@ -11,6 +11,7 @@ syntax = "proto3";
 
 package agentrepl.v1;
 
+import "frontend/v1/news_digest.proto";
 import "agentrepl/v1/daemon_stream_ending.proto";
 import "agentrepl/v1/endpoint_daemon_health.proto";
 import "agentrepl/v1/drain_reason.proto";
@@ -106,8 +107,26 @@ message WatchDaemonResponse {
     // stands. Sent ONLY on an Emacs stream: a webview draws the same standing
     // as its topbar's persistent-wifi chip, which its topbar view carries.
     PersistentWifiState persistent_wifi = 8;
+    // THE NEWS DIGEST STANDING, whole: the digest every webview draws over its
+    // feed, or none. STATE, not an event: pushed when a digest is made and
+    // when one is dismissed, and replayed to a late subscriber, so a webview
+    // that opens while a digest stands draws it, and a dismiss in any one
+    // webview takes it down in every one. Sent ONLY on a webview stream.
+    NewsDigestStanding news_digest = 9;
   }
 }
+
+// Whether a news digest stands. THE ARM IS THE STANDING; exactly one is set.
+message NewsDigestStanding {
+  oneof standing {
+    // A digest stands until dismissed; draw it over the feed.
+    frontend.v1.NewsDigestOverlay shown = 1;
+    // No digest stands; draw none (and take down any drawn).
+    NewsDigestNone none = 2;
+  }
+}
+// No digest stands.
+message NewsDigestNone {}
 
 // Every standing loud fault, oldest first. An empty list is the daemon
 // saying none stands (the last one closed).

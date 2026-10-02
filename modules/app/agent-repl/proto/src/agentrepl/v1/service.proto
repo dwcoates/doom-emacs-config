@@ -59,12 +59,14 @@ import "agentrepl/v1/endpoint_edit_held_prompt.proto";
 import "agentrepl/v1/endpoint_fold_held_prompt.proto";
 import "agentrepl/v1/endpoint_answer_held_offer.proto";
 import "agentrepl/v1/endpoint_deploy.proto";
+import "agentrepl/v1/endpoint_dismiss_news_digest.proto";
 import "agentrepl/v1/endpoint_update_shutdown_schedule.proto";
 import "agentrepl/v1/endpoint_update_merge_queue.proto";
 import "agentrepl/v1/endpoint_daemon_health.proto";
 import "agentrepl/v1/endpoint_session_health.proto";
 import "agentrepl/v1/endpoint_client_log.proto";
 import "agentrepl/v1/endpoint_update_persistent_wifi_mode.proto";
+import "agentrepl/v1/endpoint_refresh_news_digest.proto";
 import "agentrepl/v1/endpoint_register_workspace.proto";
 import "agentrepl/v1/endpoint_select_account.proto";
 import "agentrepl/v1/endpoint_select_workspace.proto";
@@ -357,4 +359,12 @@ service AgentRepl {
   rpc SubscribePage(SubscribePageRequest) returns (SubscribePageResponse);
   // End one subscription, leaving the page's others alone.
   rpc UnsubscribePage(UnsubscribePageRequest) returns (UnsubscribePageResponse);
+
+  // ---- News digest: the daily Claude news overlay ----
+  // Takes the standing digest down in every webview. See
+  // endpoint_dismiss_news_digest.proto.
+  rpc DismissNewsDigest(DismissNewsDigestRequest) returns (DismissNewsDigestResponse);
+  // Makes a digest now instead of at the daily cadence. See
+  // endpoint_refresh_news_digest.proto.
+  rpc RefreshNewsDigest(RefreshNewsDigestRequest) returns (RefreshNewsDigestResponse);
 }

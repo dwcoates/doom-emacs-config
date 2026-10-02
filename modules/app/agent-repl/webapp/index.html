@@ -60,6 +60,10 @@
     <!-- The full-screen login terminal: the daemon owns the pty, this is where
          it is drawn. Hidden until an account action opens it. -->
     <div id="login-overlay" data-component="login-overlay" hidden></div>
+    <!-- The daily Claude news digest: drawn over the FEED's own box (it
+         follows #feed-scroll's rectangle) in every webview while it stands.
+         Hidden until the daemon pushes a digest. -->
+    <div id="news-digest" data-component="news-digest" hidden></div>
 
     <script type="module" src="/src/main.ts"></script>
   </body>

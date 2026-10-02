@@ -1,0 +1,59 @@
+// endpoint_refresh_news_digest.proto — RefreshNewsDigest: make a news digest
+// NOW instead of at the daily cadence. For a person or an agent who wants
+// today's news without waiting (`agent-repl-runtime call RefreshNewsDigest`).
+// The daily cadence is measured from this run afterwards, exactly as from a
+// scheduled one.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message RefreshNewsDigestRequest {}
+
+// THE ARM IS THE OUTCOME.
+message RefreshNewsDigestResponse {
+  oneof result {
+    RefreshNewsDigestSuccess success = 1;
+    RefreshNewsDigestError error = 2;
+  }
+}
+
+// The run finished.
+message RefreshNewsDigestSuccess {
+  // THE ARM IS WHAT THE RUN PRODUCED; exactly one is set.
+  oneof produced {
+    // A digest was made and now stands in every webview.
+    RefreshNewsDigestShown shown = 1;
+    // Nothing new was found; no digest stands for this run.
+    RefreshNewsDigestNothingNew nothing_new = 2;
+  }
+}
+// A digest now stands.
+message RefreshNewsDigestShown {
+  // How many items it holds.
+  uint32 items = 1;
+}
+// Nothing was new since the previous digest.
+message RefreshNewsDigestNothingNew {}
+
+// Why no run completed.
+message RefreshNewsDigestError {
+  oneof cause {
+    // A digest run is already in progress.
+    RefreshNewsDigestAlreadyRunning already_running = 1;
+    // The model could not condense the news; the reason in its words.
+    RefreshNewsDigestModelFailed model_failed = 2;
+    // Every source failed to read.
+    RefreshNewsDigestNoSourceRead no_source_read = 3;
+  }
+}
+// A run is already in progress.
+message RefreshNewsDigestAlreadyRunning {}
+// The model failed.
+message RefreshNewsDigestModelFailed {
+  string reason = 1;
+}
+// No source could be read.
+message RefreshNewsDigestNoSourceRead {}

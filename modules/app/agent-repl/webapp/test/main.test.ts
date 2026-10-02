@@ -89,6 +89,7 @@ interface BootRecord {
     footer: Mock;
     composer: Mock;
     login: Mock;
+    newsDigest: Mock;
   };
 }
 
@@ -119,6 +120,7 @@ function freshRecord(): BootRecord {
       footer: vi.fn(),
       composer: vi.fn(),
       login: vi.fn(),
+      newsDigest: vi.fn(),
     },
   };
 }
@@ -311,6 +313,12 @@ async function runBoot(rec: BootRecord): Promise<void> {
       return { dispose: vi.fn(), open: rec.loginOpen };
     }),
   }));
+  vi.doMock("../src/news-digest/news-digest.js", () => ({
+    mountNewsDigest: rec.mounts.newsDigest.mockImplementation(() => {
+      rec.order.push("newsDigest");
+      return { dispose: vi.fn(), apply: vi.fn() };
+    }),
+  }));
   vi.doMock("../src/panels/panels.js", () => ({
     drawCommandPanel: vi.fn(() => {
       const el = document.createElement("div");
@@ -422,6 +430,13 @@ describe("the boot", { timeout: BOOT_TIMEOUT_MS }, () => {
     expect(page.mounts.holdTray.mock.calls[0]?.[0]).toBe(document.getElementById("hold-tray"));
     expect(page.mounts.footer.mock.calls[0]?.[0]).toBe(document.getElementById("footer"));
     expect(page.mounts.login.mock.calls[0]?.[0]).toBe(document.getElementById("login-overlay"));
+    expect(page.mounts.newsDigest.mock.calls[0]?.[0]).toBe(document.getElementById("news-digest"));
+  });
+
+  test("mounts the news digest overlay before the lifecycle whose stream feeds it", async () => {
+    await bootMain();
+
+    expect(page.order.indexOf("newsDigest")).toBeLessThan(page.order.indexOf("lifecycle"));
   });
 
   test("has the ClientLog-forwarding logger installed before the first mount", async () => {

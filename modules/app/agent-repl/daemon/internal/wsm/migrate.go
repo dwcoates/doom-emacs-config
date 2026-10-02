@@ -106,6 +106,7 @@ var migrations = []migration{
 	{To: 16, Name: "durable_feed_rows", Kind: MigrationAdditive, DDL: durableFeedRowsDDL},
 	{To: 17, Name: "repositories_folded", Kind: MigrationAdditive, DDL: repositoriesFoldedDDL},
 	{To: 18, Name: "rolled_back_turns", Kind: MigrationAdditive, DDL: rolledBackTurnsDDL},
+	{To: 19, Name: "news_digest", Kind: MigrationAdditive, DDL: newsDigestDDL},
 }
 
 // repositoriesFoldedDDL adds whether a repository's roster section is

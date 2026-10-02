@@ -55,6 +55,7 @@ import { forgetOwnTurns } from "../../src/composer/own-turns";
 import { mountLoginOverlay, type LoginHandle } from "../../src/login/login";
 import type { TerminalFactory } from "../../src/login/terminal";
 import { adoptAtBoot, startLifecycle } from "../../src/lifecycle/lifecycle";
+import { mountNewsDigest } from "../../src/news-digest/news-digest";
 import type { SubmitPromptCommandPanel } from "../../../proto/gen/ts/agentrepl/v1/endpoint_submit_prompt_pb";
 
 import { resetPageState } from "../page-state";
@@ -605,7 +606,9 @@ async function mountApp(
     await closeDispatcher();
     throw err;
   }
-  handles.push(startLifecycle(ctx, { drainBannerHost: shell.drainBanner }));
+  const newsDigest = mountNewsDigest(shell.newsDigest, ctx, { feedScroll: shell.feedScroll });
+  handles.push(newsDigest);
+  handles.push(startLifecycle(ctx, { drainBannerHost: shell.drainBanner, newsDigest }));
 
   const feed = mountFeed(shell.feed, ctx, {
     renderers: createRowRenderers(ctx),

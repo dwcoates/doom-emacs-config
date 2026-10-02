@@ -35,6 +35,8 @@ export interface ShellElements {
   composer: HTMLElement;
   /** The full-screen login terminal overlay. Ships hidden. */
   loginOverlay: HTMLElement;
+  /** The news digest overlay over the feed's box. Ships hidden. */
+  newsDigest: HTMLElement;
 }
 
 /**
@@ -53,6 +55,7 @@ const SHELL_IDS: ReadonlyArray<readonly [keyof ShellElements, string]> = [
   ["footer", "footer"],
   ["composer", "composer"],
   ["loginOverlay", "login-overlay"],
+  ["newsDigest", "news-digest"],
 ];
 
 /**

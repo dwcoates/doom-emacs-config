@@ -2502,6 +2502,9 @@ export const WATCH_DAEMON_PUSHES = [
   // The planned end of the stream: consumed by the stream pipeline itself
   // (`plannedEnding`), which then reopens without filing a failure.
   "ending",
+  // The news digest standing: a WEBVIEW stream's alone, drawn as the overlay
+  // over the feed (news-digest.integration.test.ts).
+  "newsDigest",
 ] as const;
 
 export function shutdownAnnounced(init?: {

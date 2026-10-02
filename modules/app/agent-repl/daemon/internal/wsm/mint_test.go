@@ -18,6 +18,7 @@ func TestMintedIDsHaveTheSocketBudgetLength(t *testing.T) {
 		{name: "turn", got: string(wsm.NewTurnID())},
 		{name: "task", got: string(wsm.NewTaskID())},
 		{name: "fault", got: string(wsm.NewFaultID())},
+		{name: "news digest", got: wsm.NewNewsDigestID()},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

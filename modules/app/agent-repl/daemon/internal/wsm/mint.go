@@ -60,3 +60,7 @@ func NewTaskID() ids.TaskID { return ids.TaskID(mint()) }
 
 // NewFaultID mints a fault identity.
 func NewFaultID() ids.FaultID { return ids.FaultID(mint()) }
+
+// NewNewsDigestID mints a news digest's identity: the opaque echo token a
+// dismiss names (frontend.v1.NewsDigestId).
+func NewNewsDigestID() string { return mint() }
