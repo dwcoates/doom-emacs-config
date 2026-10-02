@@ -12,25 +12,31 @@ func Simulate(units []Unit, n int) (float64, error) {
 	if n < 1 {
 		return 0, fmt.Errorf("sched: simulate needs at least one slot, got %d", n)
 	}
+	if err := CheckWidths(units, n); err != nil {
+		return 0, err
+	}
 	q, err := NewQueue(units)
 	if err != nil {
 		return 0, err
 	}
 	running := &endHeap{}
 	now := 0.0
+	used := 0
 	for {
-		for running.Len() < n {
-			u, ok := q.Next()
+		for {
+			u, ok := q.Next(n - used)
 			if !ok {
 				break
 			}
-			heap.Push(running, ending{at: now + u.Est, id: u.ID})
+			used += u.Width()
+			heap.Push(running, ending{at: now + u.Est, id: u.ID, width: u.Width()})
 		}
 		if running.Len() == 0 {
 			break
 		}
 		e := heap.Pop(running).(ending)
 		now = e.at
+		used -= e.width
 		q.Done(e.id, true)
 	}
 	if p := q.Pending(); p != 0 {
@@ -40,8 +46,9 @@ func Simulate(units []Unit, n int) (float64, error) {
 }
 
 type ending struct {
-	at float64
-	id string
+	at    float64
+	id    string
+	width int
 }
 
 type endHeap []ending

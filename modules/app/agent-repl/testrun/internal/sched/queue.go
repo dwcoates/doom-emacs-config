@@ -2,11 +2,17 @@
 //
 // The model, and every rule the runner obeys, is here:
 //
-//   - A Unit is one process that occupies exactly ONE core slot for its whole
-//     life. Every runner a unit starts is pinned to one core by the suite that
-//     builds it (`go test -p 1 -parallel 1`, vitest `--maxWorkers=1`, a
-//     single-threaded Emacs), so "one unit, one core" is a property of the
-//     command line, not a hope about it.
+//   - A Unit is one process that occupies a fixed number of core slots, its
+//     WIDTH, for its whole life. Almost every unit is one slot wide, pinned to
+//     one core by the suite that builds it (`go test -p 1 -parallel 1`, vitest
+//     `--maxWorkers=1`, a single-threaded Emacs). A unit that cannot be pinned
+//     to one core (a sandbox container) is capped to exactly its width by its
+//     own command line instead. Either way "a unit uses the cores it holds" is
+//     a property of the command line, not a hope about it.
+//   - A unit starts only when its whole width is free. When the
+//     highest-priority ready unit does not fit, nothing narrower overtakes it:
+//     the free slots wait for it, so a wide unit can never be starved by a
+//     stream of narrow ones.
 //   - Units form a DAG through Deps. A unit is READY when every dependency
 //     finished successfully; a unit whose dependency failed is CANCELLED, never
 //     run, because its input is known to be missing.
@@ -35,6 +41,26 @@ type Unit struct {
 	Deps []string
 	// Est is the estimated wall time in seconds.
 	Est float64
+	// Slots is how many core slots the unit holds while it runs. Zero is the
+	// one-slot unit every pinned process is; a negative width is an error.
+	Slots int
+}
+
+// Width is how many slots the unit holds while it runs.
+func (u Unit) Width() int { return max(u.Slots, 1) }
+
+// CheckWidths refuses a unit wider than the n slots a run has: it could
+// never start, and the run would end with it silently unrun.
+func CheckWidths(units []Unit, n int) error {
+	for _, u := range units {
+		if u.Slots < 0 {
+			return fmt.Errorf("sched: unit %q has a negative width %d", u.ID, u.Slots)
+		}
+		if u.Width() > n {
+			return fmt.Errorf("sched: unit %q needs %d core slots but this host has only %d", u.ID, u.Width(), n)
+		}
+	}
+	return nil
 }
 
 // Queue hands out ready units in bottom-level order and tracks completion.
@@ -71,6 +97,9 @@ func NewQueue(units []Unit) (*Queue, error) {
 		}
 		if u.Est < 0 {
 			return nil, fmt.Errorf("sched: unit %q has a negative estimate %v", u.ID, u.Est)
+		}
+		if u.Slots < 0 {
+			return nil, fmt.Errorf("sched: unit %q has a negative width %d", u.ID, u.Slots)
 		}
 		q.units[u.ID] = u
 	}
@@ -153,9 +182,11 @@ func (q *Queue) sortReady() {
 // Priority is a unit's bottom level.
 func (q *Queue) Priority(id string) float64 { return q.priority[id] }
 
-// Next pops the highest-priority ready unit.
-func (q *Queue) Next() (Unit, bool) {
-	if len(q.ready) == 0 {
+// Next pops the highest-priority ready unit if it fits in free slots. It
+// returns false when nothing is ready or when that unit is wider than free:
+// the caller then waits for a unit to finish, never starts a narrower one.
+func (q *Queue) Next(free int) (Unit, bool) {
+	if len(q.ready) == 0 || q.units[q.ready[0]].Width() > free {
 		return Unit{}, false
 	}
 	id := q.ready[0]

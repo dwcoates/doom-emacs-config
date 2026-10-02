@@ -172,6 +172,7 @@ func TestPlanRunRefusesAnInvalidInput(t *testing.T) {
 		{"empty group", nil, []Chunkable{{Group: "g"}}, 2, "no items"},
 		{"duplicate group", nil, []Chunkable{{Group: "g", Items: []Item{{"a", 1}}}, {Group: "g", Items: []Item{{"b", 1}}}}, 2, "duplicate splittable group"},
 		{"hash in an atomic ID", []Unit{{ID: "a#1"}}, nil, 2, "may not contain"},
+		{"a unit wider than the host", []Unit{{ID: "w", Slots: 3}}, nil, 2, `unit "w" needs 3 core slots but this host has only 2`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
