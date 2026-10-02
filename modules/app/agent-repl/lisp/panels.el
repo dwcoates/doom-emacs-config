@@ -17,6 +17,7 @@
 (declare-function agent-repl--create-buffer "core")
 (declare-function agent-repl--foreign-owned-buffer-p "core")
 (declare-function agent-repl--frontend-dispatch-hide "frontends")
+(declare-function agent-repl-frontend--view-presence "frontend" (ws view-buffer))
 (declare-function agent-repl--frontend-dispatch-show "frontends")
 (declare-function agent-repl--frontend-webview-buffer-name "frontend")
 (declare-function agent-repl--history-restore "history")
@@ -639,6 +640,21 @@ unscreened WS while every record uses `agent-repl--ws-log-name'."
       (agent-repl--info log-ws "elisp.panels.restore-decision: ws=%s decision=%s reason=%s"
                         ws (if (eq reason 'default-open-now-missing) "re-show" "no-show")
                         reason)
+      ;; THE WEBVIEW'S PRESENCE ON THIS SWITCH, at INFO: whether the view
+      ;; buffer is shown, at what size, and whether its xwidget view is the
+      ;; SAME one as at the last switch or a fresh one (a fresh WKWebView
+      ;; attachment paints from blank).  THIS-COMMAND tells a keyboard
+      ;; switch from one the sidebar drove.
+      (let ((presence (agent-repl-frontend--view-presence
+                       ws (agent-repl-window--panel-buffer :view ws))))
+        (agent-repl--info log-ws
+                          "elisp.panels.webview-on-switch: ws=%s command=%S windows=%s size=%sx%s xwidgets=%s view=%s selected=%s"
+                          ws this-command
+                          (plist-get presence :windows)
+                          (plist-get presence :width) (plist-get presence :height)
+                          (plist-get presence :xwidgets)
+                          (plist-get presence :view)
+                          (plist-get presence :selected)))
       (agent-repl--panels-note-restore-outcome ws reason)
       (when (eq reason 'default-open-now-missing)
         (agent-repl--frontend-dispatch-show ws)))
