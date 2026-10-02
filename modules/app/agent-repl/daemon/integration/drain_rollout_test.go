@@ -921,7 +921,7 @@ func TestARestartAskedOfAMovedWorkspaceIsAnsweredTransferringAway(t *testing.T) 
 	})
 
 	// Act
-	resp, err := d.Client().RestartWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.RestartWorkspaceRequest{Workspace: f.ws, Force: true}))
+	resp, err := d.Client().RestartWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.RestartWorkspaceRequest{Workspace: f.ws}))
 
 	// Assert
 	if err != nil {
