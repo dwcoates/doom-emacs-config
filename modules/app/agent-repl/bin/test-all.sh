@@ -15,8 +15,8 @@
 # of e2e tests, one harness script — each pinned to ONE core, and runs them on
 # every core but two, longest chain first. How many chunks a suite is cut into
 # is chosen per run by simulating the schedule against this host's measured
-# timings (~/.cache/agent-repl/test-history.json). testrun/AGENTS.md has the
-# whole model.
+# timings (~/.cache/agent-repl/test-history.json). ../AGENTS.md has the whole
+# model.
 #
 # The output contract is unchanged: one "<suite>: starting" line, one
 # "<suite>: passed in Ns" / "<suite> failed after Ns with exit code N" /

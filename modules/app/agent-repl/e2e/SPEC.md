@@ -301,6 +301,14 @@ already how `daemon/integration` behaves; nothing new.
 go test -count=1 -timeout 45m -parallel 8 ./...
 ```
 
+That is the direct, focused invocation. The canonical all-module gate is
+`../bin/test-all.sh`: its generic Go splitter compiles this package once,
+runs one prebuild process for the daemon/store/sidecar/lock/shim artifacts,
+and distributes top-level tests across scheduler chunks. Each chunk carries
+`GOMAXPROCS=2` and `-test.parallel=1`; the scheduler, not `go test`, owns the
+host-wide parallelism and runs on `runtime.NumCPU()-2` slots. Chunk sizing is
+chosen from `~/.cache/agent-repl/test-history.json` rather than fixed here.
+
 `-parallel 8` is not decoration. **Every test in this package declares
 `t.Parallel()`**, so without a bound `go test` would use `GOMAXPROCS` and
 stand that many full worlds — a daemon, a store, a sidecar and a node shim
@@ -319,7 +327,7 @@ had to be made safe for it:
 | state root, config roots, lock dir, prompts, webapp dist | per-daemon, minted by `harness.StartDaemon` under its own `t.TempDir()` |
 | spool root | one `t.TempDir()` per world, handed to the shims AND the sidecar (`assertOneSpoolRoot`) |
 | fake git state | a per-daemon state file, named to each daemon through `fakegit.EnvStateFile` |
-| built binaries | `sync.Once` per binary, one shared temp bin dir per `go test` process; `Once` blocks the racers rather than duplicating the build |
+| built binaries | direct runs use `sync.Once` per binary in one test process; `testrun` adds one prebuild process and every chunk reads the same required artifacts through `AGENT_REPL_TEST_PREBUILT` |
 | stray-reaping exemptions | a package-level map keyed by pid, mutex-guarded, entries removed at each owner's cleanup |
 | process environment | nothing in this package calls `t.Setenv`, `os.Setenv` or `os.Chdir`; every lever travels through `Opts.ExtraEnv` into one daemon's own environment |
 
