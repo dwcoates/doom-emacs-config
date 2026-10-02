@@ -11,12 +11,13 @@ type Kind int
 const (
 	// Script is one shell entry point run whole, as one unit.
 	Script Kind = iota
+	// SplitScript is a shell harness implementing --list and --only.
+	SplitScript
 	// ERT is the Emacs suite, split by test file.
 	ERT
-	// GoModule is a Go module's tests with coverage, one unit per package.
+	// GoModule is a Go module's tests, split by top-level test.
 	GoModule
-	// Vitest is a TypeScript package: a typecheck, its test files split into
-	// chunks, and a coverage merge.
+	// Vitest is a TypeScript package: a typecheck and split test files.
 	Vitest
 	// E2E is the cross-system Go suite: one build, its top-level tests split
 	// into chunks.
@@ -46,12 +47,12 @@ var Suites = []Suite{
 	{Name: "orchestrator-harness", Kind: Script, Path: "bin/test-test-all.sh", Harness: true},
 	{Name: "coverage-harness", Kind: Script, Path: "bin/test-report-nonlisp-coverage.sh", Harness: true},
 	{Name: "logging-density-harness", Kind: Script, Path: "bin/test-report-logging-density.sh", Harness: true},
-	{Name: "build-frontend-harness", Kind: Script, Path: "bin/test-build-frontend.sh", Harness: true},
+	{Name: "build-frontend-harness", Kind: SplitScript, Path: "bin/test-build-frontend.sh", Harness: true},
 	{Name: "suite-slot-harness", Kind: Script, Path: "bin/test-suite-slot.sh", Harness: true},
 	{Name: "background-harness", Kind: Script, Path: "bin/test-background.sh", Harness: true},
 	{Name: "cpu-load-harness", Kind: Script, Path: "bin/test-with-cpu-load.sh", Harness: true},
 	{Name: "store-reset-harness", Kind: Script, Path: "bin/test-store-reset.sh", Harness: true},
-	{Name: "readiness-harness", Kind: Script, Path: "bin/test-readiness-report.sh", Harness: true},
+	{Name: "readiness-harness", Kind: SplitScript, Path: "bin/test-readiness-report.sh", Harness: true},
 	{Name: "logs-harness", Kind: Script, Path: "bin/test-logs.sh", Harness: true},
 	{Name: "go-deps-harness", Kind: Script, Path: "bin/test-check-go-deps.sh", Harness: true},
 	{Name: "doctor-harness", Kind: Script, Path: "scripts/test-agent-shim-doctor.sh"},
