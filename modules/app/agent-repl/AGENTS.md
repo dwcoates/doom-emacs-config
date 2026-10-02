@@ -1333,7 +1333,7 @@ against it), and this table is what it means.
 | Green | Ready for you: idle, or waiting on your input. | Yes | ready, done, interrupted, permission; a merge that landed (`merged`); footer `idle`, `waiting`, `interrupted`; a Stop hook's deliberate stop and a deferred tool read as done |
 | Purple | A merge is in progress; the daemon holds the workspace. | No: the composer is closed. | `merge_queued`, `merging` |
 | Turquoise | Something unexpected went wrong and wants your attention, but the workspace is usable. | Yes | `turn_failed` (a failed, orphaned, agent-died, dead-query or lost turn, or a transient vendor failure such as an overloaded api or a model error); `merge_failed`; `degraded` (a shim component dropping or delaying observations, or a shim taken back after a failed handover that never re-reported its state) |
-| Blue | The workspace is unusable right now. | No: the composer is closed. | `init` (starting or connecting), `severed`, `dead`, `start_failed`; footer `disconnected`, `closing`; `vendor_blocked` / footer `blocked` (a usage limit, auth, a missing permission, billing, an organization the account may not use, a blocking limit, the refill breaker — anything that stops all work until it is resolved); `api_retrying` / footer `blocked · api_retrying` (the vendor is retrying the turn's failed API call — the composer stays open, see below) |
+| Blue | The workspace is unusable right now. | No: the composer is closed. | `init` (starting or connecting), `severed`, `dead`, `start_failed`; footer `disconnected` (including its `vendor_retry`, `vendor_rejection` and `vendor_failed` substatuses), `closing`; `vendor_blocked` / footer `blocked` (a usage limit, auth, a missing permission, billing, an organization the account may not use, a blocking limit, the refill breaker — anything that stops all work until it is resolved); `api_retrying` / footer `blocked · api_retrying` (the vendor is retrying the turn's failed API call — the composer stays open, see below) |
 | Uncolored | There is no lifecycle to report. | — | `none` (never had a session), `inactive` (no open perspective, drawn `?`) |
 
 The rules that keep this true:
@@ -1476,12 +1476,41 @@ raise: that is exactly how three kinds came to have a path and sixteen did not.
 | `disconnected` | `start_failed` | `shim_start_failed`, `resume_failed`, `relaunch_resume_failed`, `adoption_window_expired` (session scope), `cold_gate_reopen_failed` |
 | `disconnected` | `dead` | `shim_died`, `bounce_died`, `session_absent` |
 | `disconnected` | `severed` | `link_severed`, `watch_open_refused` |
+| `disconnected` | `vendor_retry` | `vendor_start_retrying` |
+| `disconnected` | `vendor_rejection` | `vendor_start_rejected` |
+| `disconnected` | `vendor_failed` | `vendor_start_failed` |
 | `blocked` | `daemon_impaired` | `prompts_dir_missing`, `wsm_read_only`, `log_sink_poisoned`, `successor_spawn_failed`, `daemon_state_unreadable`, `adoption_window_expired` (daemon scope) |
 | unchanged | unchanged | `shim_reported`, `classifier_failed`, `bounce_unknown`, `conversation_abandoned`, `deploy_failed` (daemon scope) — NON-ESCALATING |
 
 The activity cell is `FooterStatusActivityFault{kind, detail}` in every case but
-`shim_start_failed`, which keeps `FooterStatusActivityStartFailed` because it
-also counts the held prompts the failure dropped.
+two. `shim_start_failed` keeps `FooterStatusActivityStartFailed`, which now
+carries only the cause: a failed bring-up never drops held prompts any more.
+The three vendor-start kinds use `FooterStatusActivityVendorStart{text}`, a line
+the daemon composes whole and the clients draw verbatim ("Claude SDK did not
+start (attempt N): <cause> · retrying", "Claude SDK refused to start: <cause> ·
+restart: SPC o C-c", "Claude SDK failed to start · restart: SPC o C-c").
+
+**A VENDOR START THAT FAILS IS RETRIED, AND THE FOOTER SAYS WHICH OF THREE
+THINGS STANDS.** `vendor_retry` is a retryable failure on the daemon's capped
+backoff (x1.5 from 200ms, capped at 5s) for ten minutes of wall time from the
+first failure of the run; `vendor_rejection` is a failure the shim labeled
+non-retryable and is never retried; `vendor_failed` is the ten minutes
+exhausted. All three are blue, like `start_failed`: the workspace is unusable.
+A prompt submitted while the session is down is held under the reconnect hold
+(`HeldPromptReconnectHold`, badge "after reconnect") and delivered when a
+session next comes up; it is never drawn and then lost.
+
+**`SPC o C-c` (`RestartWorkspace`) HAS ONE MODE: IMMEDIATE.** It interrupts the
+running turn and stops all detached work with bounded calls, bounces the
+workspace's shim (rebuilt first when stale, session resumed, forced teardown
+hard-killing what did not stop), releases reconnect holds and reloads the
+workspace's webapp page. It never touches the daemon, the store or the sidecar.
+`RestartWorkspaceRequest.force` and the `no_session` error arm are retired; Emacs
+sends the workspace alone and the webapp menu has one "Restart" entry. It is
+for a stuck workspace (a turn that never ends, a vendor that failed to start, a
+stale shim, a page out of sync), not a routine action: a fresh shim or page may
+speak an API the older running daemon does not. The user-facing account is in
+`docs/USER-GUIDE.md`, "Restarting a stuck workspace".
 
 **THE FOUR NON-ESCALATING KINDS LEAVE THE STATUS ALONE** and take the activity
 cell only. The shim ANSWERED in every one of them: a shim that pushed a

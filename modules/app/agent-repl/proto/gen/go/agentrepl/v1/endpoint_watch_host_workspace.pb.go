@@ -1642,6 +1642,9 @@ type HostFault struct {
 	//	*HostFault_DaemonStateUnreadable
 	//	*HostFault_AdoptionWindowExpired
 	//	*HostFault_FinalAnswerUnresolved
+	//	*HostFault_VendorStartRetrying
+	//	*HostFault_VendorStartRejected
+	//	*HostFault_VendorStartFailed
 	Kind          isHostFault_Kind `protobuf_oneof:"kind"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1824,6 +1827,33 @@ func (x *HostFault) GetFinalAnswerUnresolved() *SessionFaultFinalAnswerUnresolve
 	return nil
 }
 
+func (x *HostFault) GetVendorStartRetrying() *SessionFaultVendorStartRetrying {
+	if x != nil {
+		if x, ok := x.Kind.(*HostFault_VendorStartRetrying); ok {
+			return x.VendorStartRetrying
+		}
+	}
+	return nil
+}
+
+func (x *HostFault) GetVendorStartRejected() *SessionFaultVendorStartRejected {
+	if x != nil {
+		if x, ok := x.Kind.(*HostFault_VendorStartRejected); ok {
+			return x.VendorStartRejected
+		}
+	}
+	return nil
+}
+
+func (x *HostFault) GetVendorStartFailed() *SessionFaultVendorStartFailed {
+	if x != nil {
+		if x, ok := x.Kind.(*HostFault_VendorStartFailed); ok {
+			return x.VendorStartFailed
+		}
+	}
+	return nil
+}
+
 type isHostFault_Kind interface {
 	isHostFault_Kind()
 }
@@ -1899,6 +1929,21 @@ type HostFault_FinalAnswerUnresolved struct {
 	FinalAnswerUnresolved *SessionFaultFinalAnswerUnresolved `protobuf:"bytes,16,opt,name=final_answer_unresolved,json=finalAnswerUnresolved,proto3,oneof"`
 }
 
+type HostFault_VendorStartRetrying struct {
+	// The vendor did not start and the daemon is retrying it on its backoff.
+	VendorStartRetrying *SessionFaultVendorStartRetrying `protobuf:"bytes,17,opt,name=vendor_start_retrying,json=vendorStartRetrying,proto3,oneof"`
+}
+
+type HostFault_VendorStartRejected struct {
+	// The vendor refused the start for a reason retrying cannot fix.
+	VendorStartRejected *SessionFaultVendorStartRejected `protobuf:"bytes,18,opt,name=vendor_start_rejected,json=vendorStartRejected,proto3,oneof"`
+}
+
+type HostFault_VendorStartFailed struct {
+	// The vendor kept failing to start for the whole retry window.
+	VendorStartFailed *SessionFaultVendorStartFailed `protobuf:"bytes,19,opt,name=vendor_start_failed,json=vendorStartFailed,proto3,oneof"`
+}
+
 func (*HostFault_ShimStartFailed) isHostFault_Kind() {}
 
 func (*HostFault_ShimDied) isHostFault_Kind() {}
@@ -1926,6 +1971,12 @@ func (*HostFault_DaemonStateUnreadable) isHostFault_Kind() {}
 func (*HostFault_AdoptionWindowExpired) isHostFault_Kind() {}
 
 func (*HostFault_FinalAnswerUnresolved) isHostFault_Kind() {}
+
+func (*HostFault_VendorStartRetrying) isHostFault_Kind() {}
+
+func (*HostFault_VendorStartRejected) isHostFault_Kind() {}
+
+func (*HostFault_VendorStartFailed) isHostFault_Kind() {}
 
 // What the workspace's feed has selected, as Emacs needs it: which kind of
 // row, and the selected bubble's text, never the row, because Emacs never names
@@ -2363,8 +2414,7 @@ const file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDesc = "" +
 	"\x10HostComposerOpen\"\x15\n" +
 	"\x13HostComposerMerging\"\x16\n" +
 	"\x14HostComposerDraining\"\x18\n" +
-	"\x16HostComposerRestarting\"\xa2\n" +
-	"\n" +
+	"\x16HostComposerRestarting\"\xcb\f\n" +
 	"\tHostFault\x12\x16\n" +
 	"\x06detail\x18\x01 \x01(\tR\x06detail\x12 \n" +
 	"\fopened_at_ms\x18\x02 \x01(\x03R\n" +
@@ -2384,7 +2434,10 @@ const file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDesc = "" +
 	"\x12watch_open_refused\x18\r \x01(\v2*.agentrepl.v1.SessionFaultWatchOpenRefusedH\x00R\x10watchOpenRefused\x12i\n" +
 	"\x17daemon_state_unreadable\x18\x0e \x01(\v2/.agentrepl.v1.SessionFaultDaemonStateUnreadableH\x00R\x15daemonStateUnreadable\x12i\n" +
 	"\x17adoption_window_expired\x18\x0f \x01(\v2/.agentrepl.v1.SessionFaultAdoptionWindowExpiredH\x00R\x15adoptionWindowExpired\x12i\n" +
-	"\x17final_answer_unresolved\x18\x10 \x01(\v2/.agentrepl.v1.SessionFaultFinalAnswerUnresolvedH\x00R\x15finalAnswerUnresolvedB\x06\n" +
+	"\x17final_answer_unresolved\x18\x10 \x01(\v2/.agentrepl.v1.SessionFaultFinalAnswerUnresolvedH\x00R\x15finalAnswerUnresolved\x12c\n" +
+	"\x15vendor_start_retrying\x18\x11 \x01(\v2-.agentrepl.v1.SessionFaultVendorStartRetryingH\x00R\x13vendorStartRetrying\x12c\n" +
+	"\x15vendor_start_rejected\x18\x12 \x01(\v2-.agentrepl.v1.SessionFaultVendorStartRejectedH\x00R\x13vendorStartRejected\x12]\n" +
+	"\x13vendor_start_failed\x18\x13 \x01(\v2+.agentrepl.v1.SessionFaultVendorStartFailedH\x00R\x11vendorStartFailedB\x06\n" +
 	"\x04kind\"\xbd\x02\n" +
 	"\x16HostWorkspaceSelection\x12>\n" +
 	"\x04none\x18\x01 \x01(\v2(.agentrepl.v1.HostWorkspaceSelectionNoneH\x00R\x04none\x12J\n" +
@@ -2466,6 +2519,9 @@ var file_agentrepl_v1_endpoint_watch_host_workspace_proto_goTypes = []any{
 	(*SessionFaultDaemonStateUnreadable)(nil), // 47: agentrepl.v1.SessionFaultDaemonStateUnreadable
 	(*SessionFaultAdoptionWindowExpired)(nil), // 48: agentrepl.v1.SessionFaultAdoptionWindowExpired
 	(*SessionFaultFinalAnswerUnresolved)(nil), // 49: agentrepl.v1.SessionFaultFinalAnswerUnresolved
+	(*SessionFaultVendorStartRetrying)(nil),   // 50: agentrepl.v1.SessionFaultVendorStartRetrying
+	(*SessionFaultVendorStartRejected)(nil),   // 51: agentrepl.v1.SessionFaultVendorStartRejected
+	(*SessionFaultVendorStartFailed)(nil),     // 52: agentrepl.v1.SessionFaultVendorStartFailed
 }
 var file_agentrepl_v1_endpoint_watch_host_workspace_proto_depIdxs = []int32{
 	32, // 0: agentrepl.v1.WatchHostWorkspaceRequest.workspace:type_name -> workspace.v1.WorkspaceRef
@@ -2511,18 +2567,21 @@ var file_agentrepl_v1_endpoint_watch_host_workspace_proto_depIdxs = []int32{
 	47, // 40: agentrepl.v1.HostFault.daemon_state_unreadable:type_name -> agentrepl.v1.SessionFaultDaemonStateUnreadable
 	48, // 41: agentrepl.v1.HostFault.adoption_window_expired:type_name -> agentrepl.v1.SessionFaultAdoptionWindowExpired
 	49, // 42: agentrepl.v1.HostFault.final_answer_unresolved:type_name -> agentrepl.v1.SessionFaultFinalAnswerUnresolved
-	27, // 43: agentrepl.v1.HostWorkspaceSelection.none:type_name -> agentrepl.v1.HostWorkspaceSelectionNone
-	28, // 44: agentrepl.v1.HostWorkspaceSelection.response:type_name -> agentrepl.v1.HostWorkspaceSelectionResponse
-	29, // 45: agentrepl.v1.HostWorkspaceSelection.prompt:type_name -> agentrepl.v1.HostWorkspaceSelectionPrompt
-	30, // 46: agentrepl.v1.HostWorkspaceSelection.bubble:type_name -> agentrepl.v1.HostWorkspaceSelectionBubble
-	31, // 47: agentrepl.v1.HostWorkspaceSelectionResponse.markdown:type_name -> agentrepl.v1.HostWorkspaceSelectionMarkdown
-	31, // 48: agentrepl.v1.HostWorkspaceSelectionPrompt.markdown:type_name -> agentrepl.v1.HostWorkspaceSelectionMarkdown
-	31, // 49: agentrepl.v1.HostWorkspaceSelectionBubble.markdown:type_name -> agentrepl.v1.HostWorkspaceSelectionMarkdown
-	50, // [50:50] is the sub-list for method output_type
-	50, // [50:50] is the sub-list for method input_type
-	50, // [50:50] is the sub-list for extension type_name
-	50, // [50:50] is the sub-list for extension extendee
-	0,  // [0:50] is the sub-list for field type_name
+	50, // 43: agentrepl.v1.HostFault.vendor_start_retrying:type_name -> agentrepl.v1.SessionFaultVendorStartRetrying
+	51, // 44: agentrepl.v1.HostFault.vendor_start_rejected:type_name -> agentrepl.v1.SessionFaultVendorStartRejected
+	52, // 45: agentrepl.v1.HostFault.vendor_start_failed:type_name -> agentrepl.v1.SessionFaultVendorStartFailed
+	27, // 46: agentrepl.v1.HostWorkspaceSelection.none:type_name -> agentrepl.v1.HostWorkspaceSelectionNone
+	28, // 47: agentrepl.v1.HostWorkspaceSelection.response:type_name -> agentrepl.v1.HostWorkspaceSelectionResponse
+	29, // 48: agentrepl.v1.HostWorkspaceSelection.prompt:type_name -> agentrepl.v1.HostWorkspaceSelectionPrompt
+	30, // 49: agentrepl.v1.HostWorkspaceSelection.bubble:type_name -> agentrepl.v1.HostWorkspaceSelectionBubble
+	31, // 50: agentrepl.v1.HostWorkspaceSelectionResponse.markdown:type_name -> agentrepl.v1.HostWorkspaceSelectionMarkdown
+	31, // 51: agentrepl.v1.HostWorkspaceSelectionPrompt.markdown:type_name -> agentrepl.v1.HostWorkspaceSelectionMarkdown
+	31, // 52: agentrepl.v1.HostWorkspaceSelectionBubble.markdown:type_name -> agentrepl.v1.HostWorkspaceSelectionMarkdown
+	53, // [53:53] is the sub-list for method output_type
+	53, // [53:53] is the sub-list for method input_type
+	53, // [53:53] is the sub-list for extension type_name
+	53, // [53:53] is the sub-list for extension extendee
+	0,  // [0:53] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_watch_host_workspace_proto_init() }
@@ -2579,6 +2638,9 @@ func file_agentrepl_v1_endpoint_watch_host_workspace_proto_init() {
 		(*HostFault_DaemonStateUnreadable)(nil),
 		(*HostFault_AdoptionWindowExpired)(nil),
 		(*HostFault_FinalAnswerUnresolved)(nil),
+		(*HostFault_VendorStartRetrying)(nil),
+		(*HostFault_VendorStartRejected)(nil),
+		(*HostFault_VendorStartFailed)(nil),
 	}
 	file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[26].OneofWrappers = []any{
 		(*HostWorkspaceSelection_None)(nil),
