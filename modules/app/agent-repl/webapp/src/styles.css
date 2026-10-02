@@ -772,6 +772,15 @@ body::after {
 #ws-sidebar .repo-head .tri { font-size: 1.05rem; line-height: 1; }
 #ws-sidebar .repo-head .n { color: var(--muted); font-weight: 400; text-transform: none; }
 #ws-sidebar .repo.folded .rows { display: none; }
+/* THE FOLDED COUNT "(N)" (frontend.v1.RosterSectionHeader.count): between the
+   label and the add control, a step smaller than the label and in its color,
+   and present only while the section is folded (owner request, 2026-10-02). */
+#ws-sidebar .repo-head .sb-count {
+  display: none;
+  font-size: 0.85em;
+  color: inherit;
+}
+#ws-sidebar .repo.folded > .repo-head .sb-count { display: inline; }
 /* A repository section's header takes its fold's grey rather than the
    --info-ws hue the task and merged headers keep. */
 #ws-sidebar .repo.repo-section > .repo-head { color: var(--repo-head-expanded); }

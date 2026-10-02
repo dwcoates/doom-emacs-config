@@ -104,7 +104,12 @@ export function expandVisibleRows(rows: readonly RosterRow[], basePath: string):
  * A row's CLOSED children are hoisted away by `expandVisibleRows`, so a killed
  * child never draws while its live siblings do.
  */
-export function drawRosterRow(u: RosterRow, sc: SidebarContext, path: string): HTMLElement {
+export function drawRosterRow(
+  u: RosterRow,
+  sc: SidebarContext,
+  path: string,
+  merged = false,
+): HTMLElement {
   const workspace = drawRosterRowWorkspace(
     requireMessage(u.workspace, `${path}.workspace`),
     `${path}.workspace`,
@@ -158,8 +163,15 @@ export function drawRosterRow(u: RosterRow, sc: SidebarContext, path: string): H
     toggleRowMenu(ws, { sc, workspace, name });
   });
 
-  const statusMark = drawStatusMark(status.case, `${path}.status`);
-  line.appendChild(statusMark);
+  // A RECENTLY-MERGED ROW DRAWS PLAIN (owner request, 2026-10-02): no status
+  // dot, and its name in the grey a viewed workspace's wears. The dot is the
+  // detail panel's pointer trigger, so such a row opens that panel by keyboard
+  // focus alone.
+  let statusMark: HTMLElement | null = null;
+  if (!merged) {
+    statusMark = drawStatusMark(status.case, `${path}.status`);
+    line.appendChild(statusMark);
+  }
 
   const label = document.createElement("span");
   label.className = "name";
@@ -175,6 +187,7 @@ export function drawRosterRow(u: RosterRow, sc: SidebarContext, path: string): H
     label.classList.add("viewed");
     ws.setAttribute("data-viewed", "true");
   }
+  if (merged) label.classList.add("viewed");
   // THE REVIVING SHIMMER IS THE NAME'S TOO, and only while the wire carries
   // the marker: the daemon lowers it when the revival ends, whichever way.
   if (u.reviving !== undefined && drawRosterRowReviving(u.reviving, `${path}.reviving`)) {
@@ -219,7 +232,7 @@ export function drawRosterRow(u: RosterRow, sc: SidebarContext, path: string): H
     const kids = document.createElement("div");
     kids.className = "kids";
     for (const child of visibleChildren) {
-      kids.appendChild(drawRosterRow(child.row, sc, child.path));
+      kids.appendChild(drawRosterRow(child.row, sc, child.path, merged));
     }
     ws.appendChild(kids);
   }
@@ -492,7 +505,7 @@ export const HOVER_CLOSE_GRACE_MS = 120;
 function installHoverPanel(
   ws: HTMLElement,
   line: HTMLElement,
-  dot: HTMLElement,
+  dot: HTMLElement | null,
   sc: SidebarContext,
   workspaceId: string,
 ): void {
@@ -543,12 +556,13 @@ function installHoverPanel(
     }, HOVER_CLOSE_GRACE_MS);
   };
 
-  dot.addEventListener("mouseenter", () => {
+  // A row with no dot (a recently-merged one) has no pointer trigger.
+  dot?.addEventListener("mouseenter", () => {
     pointerOverRow = true;
     if (ws.classList.contains("open")) cancelTimers();
     else scheduleOpen();
   });
-  dot.addEventListener("mouseleave", () => {
+  dot?.addEventListener("mouseleave", () => {
     pointerOverRow = false;
     scheduleClose();
   });
