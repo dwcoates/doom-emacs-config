@@ -60,15 +60,18 @@ afterAll(async () => {
  *     answer alone would hang the file.
  */
 async function releaseWorkspace(): Promise<void> {
-  const beforeTurns = rows(app, "turnEnded").length;
   const openPermissions = app.$$(
     '[data-feed-row][data-row-kind="permission"] [data-permission="deny"]',
   );
-  const openQuestions = app.$$('[data-feed-row][data-row-kind="question"] [data-question-submit]');
+  const openQuestions = app.$$(
+    '[data-feed-row][data-row-kind="question"] [data-question-submit]',
+  );
   for (const deny of openPermissions) await app.clickElement(deny);
   for (const submitButton of openQuestions) {
     const card = submitButton.closest("[data-feed-row]");
-    const other = card?.querySelector<HTMLInputElement>("[data-question-other]");
+    const other = card?.querySelector<HTMLInputElement>(
+      "[data-question-other]",
+    );
     if (other) {
       other.value = "teardown answer";
       other.dispatchEvent(new Event("input", { bubbles: true }));
@@ -76,20 +79,38 @@ async function releaseWorkspace(): Promise<void> {
     }
     await app.clickElement(submitButton);
   }
-  if (rows(app, "turnEnded").length > beforeTurns) return;
+  if (everyTurnEnded()) return;
 
-  // The footer's own interrupt. Absent means the footer says nothing is
-  // running, which is the state this teardown wants anyway.
-  const interrupt = app.$(".footer-clock [data-interrupt]");
-  if (!interrupt) return;
-  await app.clickElement(interrupt);
-  const confirm = app.$("[data-interrupt-confirm]");
-  if (confirm) await app.clickElement(confirm);
+  // THE FOOTER'S OWN INTERRUPT, once it says the turn runs: a parked turn
+  // offers it, and a turn that the answer above is ending lets the wait end
+  // without it.
+  await awaitDrawn(
+    app,
+    "the running turn's interrupt control, or its end",
+    () => everyTurnEnded() || app.$(".footer-clock [data-interrupt]") !== null,
+  );
+  if (!everyTurnEnded()) {
+    const interrupt = app.$(".footer-clock [data-interrupt]");
+    if (interrupt) await app.clickElement(interrupt);
+    const confirm = app.$("[data-interrupt-confirm]");
+    if (confirm) await app.clickElement(confirm);
+  }
   await awaitDrawn(
     app,
     "the parked turn to end after the page interrupted it",
-    () => rows(app, "turnEnded").length > beforeTurns,
+    everyTurnEnded,
   );
+}
+
+/**
+ * Whether every turn this file started has ended, read off the FEED alone:
+ * one prompt row and one turn-ended row per turn. It is never read off the
+ * footer, a separate stream that may still be catching up with a turn end
+ * the feed has already drawn -- which once sent this teardown to interrupt a
+ * turn that had already ended, and to wait 5s for an end that had come.
+ */
+function everyTurnEnded(): boolean {
+  return rows(app, "turnEnded").length >= rows(app, "userPrompt").length;
 }
 
 afterEach(async () => {
@@ -102,10 +123,17 @@ afterEach(async () => {
  * The wait is on the card COUNT rising, so a card standing from an earlier
  * test in this file is never mistaken for this scenario's.
  */
-async function ask(scenario: string, kind: "permission" | "question"): Promise<HTMLElement> {
+async function ask(
+  scenario: string,
+  kind: "permission" | "question",
+): Promise<HTMLElement> {
   const before = rows(app, kind).length;
   await submit(app, `!${scenario}`);
-  await awaitDrawn(app, `a new ${kind} card for !${scenario}`, () => rows(app, kind).length > before);
+  await awaitDrawn(
+    app,
+    `a new ${kind} card for !${scenario}`,
+    () => rows(app, kind).length > before,
+  );
   const drawn = rows(app, kind);
   return drawn[drawn.length - 1];
 }
@@ -118,7 +146,9 @@ it(
     const card = await ask("perm-hold", "permission");
 
     // Assert — the card's controls are drawn, and it is waiting.
-    expect(card.querySelectorAll("[data-permission]").length).toBeGreaterThan(0);
+    expect(card.querySelectorAll("[data-permission]").length).toBeGreaterThan(
+      0,
+    );
     expect(card.querySelector("[data-permission-reason]")).not.toBeNull();
     expect(card.querySelector(".perm-waiting")).not.toBeNull();
   },
@@ -135,7 +165,9 @@ it(
 
     // Assert — the button's existence is the whole visible consequence of the
     // offer; no token is anywhere in the card's markup.
-    expect(offered.querySelector('[data-permission="allowStanding"]')).not.toBeNull();
+    expect(
+      offered.querySelector('[data-permission="allowStanding"]'),
+    ).not.toBeNull();
   },
   TURN_TEST_MS,
 );
@@ -148,7 +180,9 @@ it(
     const card = await ask("perm-hold", "permission");
     const id = card.dataset.feedRow;
     expect(id).toBeDefined();
-    const allow = card.querySelector<HTMLElement>('[data-permission="allowOnce"]');
+    const allow = card.querySelector<HTMLElement>(
+      '[data-permission="allowOnce"]',
+    );
     expect(allow, "the open card drew no allow-once button").not.toBeNull();
 
     // Act — the app's own AnswerPermission call.
@@ -202,7 +236,9 @@ it(
     const card = await ask("ask-single", "question");
 
     // Assert
-    expect(card.querySelectorAll("[data-question-option]").length).toBeGreaterThan(0);
+    expect(
+      card.querySelectorAll("[data-question-option]").length,
+    ).toBeGreaterThan(0);
     expect(card.querySelector("[data-question-other]")).not.toBeNull();
     expect(card.querySelector("[data-question-submit]")).not.toBeNull();
   },
@@ -237,7 +273,9 @@ it(
 
     // Act — type into the escape and submit, picking no option at all.
     (other as HTMLInputElement).value = "something else entirely";
-    (other as HTMLInputElement).dispatchEvent(new Event("input", { bubbles: true }));
+    (other as HTMLInputElement).dispatchEvent(
+      new Event("input", { bubbles: true }),
+    );
     await app.settle();
     await app.click(`[data-feed-row="${id}"] [data-question-submit]`);
 
@@ -317,7 +355,9 @@ it(
     const drawn = rows(app, "permission");
     const card = drawn[drawn.length - 1];
     expect(
-      card.querySelector(".perm-verdict")?.getAttribute("data-permission-verdict"),
+      card
+        .querySelector(".perm-verdict")
+        ?.getAttribute("data-permission-verdict"),
     ).toBe("deniedUndecidable");
   },
   TURN_TEST_MS,
