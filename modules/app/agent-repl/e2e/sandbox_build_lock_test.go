@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 )
@@ -67,11 +66,7 @@ case "${1:-}" in
     fi
     # A plain 'image inspect IMAGE' is the existence probe: the tag exists.
     exit 0 ;;
-  build)
-    if [[ -n ${FAKE_DOCKER_BUILD_BLOCK:-} ]]; then
-      while [[ ! -e ${FAKE_DOCKER_BUILD_BLOCK} ]]; do sleep 0.05; done
-    fi
-    exit 0 ;;
+  build) exit 0 ;;
   run) exit 0 ;;
   *) exit 0 ;;
 esac
@@ -291,31 +286,56 @@ func TestSandboxBuildWaitsForALockHeldByALivePid(t *testing.T) {
 		t.Fatalf("write pid: %v", err)
 	}
 
-	stdout := filepath.Join(t.TempDir(), "out")
-	fh, err := os.Create(stdout)
+	reader, writer, err := os.Pipe()
 	if err != nil {
-		t.Fatalf("create out: %v", err)
+		t.Fatalf("create output pipe: %v", err)
 	}
-	defer fh.Close()
+	defer reader.Close()
 
 	cmd := exec.Command("bash", sandboxScript(t), "build")
 	cmd.Env = sandboxEnv(f, lock)
-	cmd.Stdout, cmd.Stderr = fh, fh
+	cmd.Stdout, cmd.Stderr = writer, writer
+	announced := make(chan struct{}, 1)
+	scanned := make(chan struct{})
+	var output strings.Builder
+	go func() {
+		defer close(scanned)
+		scanner := bufio.NewScanner(reader)
+		for scanner.Scan() {
+			line := scanner.Text()
+			output.WriteString(line)
+			output.WriteByte('\n')
+			if strings.Contains(line, "WAITING: another sandbox build holds the host build lock") {
+				select {
+				case announced <- struct{}{}:
+				default:
+				}
+			}
+		}
+	}()
 
 	// Act.
 	if err := cmd.Start(); err != nil {
+		_ = writer.Close()
+		<-scanned
 		t.Fatalf("start: %v", err)
 	}
-	var wg sync.WaitGroup
-	wg.Add(1)
 	waitErr := make(chan error, 1)
-	go func() { defer wg.Done(); waitErr <- cmd.Wait() }()
+	go func() {
+		err := cmd.Wait()
+		_ = writer.Close()
+		waitErr <- err
+	}()
 
 	// Assert: it announces the wait, and it has NOT built anything.
-	waitFor(t, "the build to announce its wait", func() bool {
-		b, _ := os.ReadFile(stdout)
-		return strings.Contains(string(b), "WAITING: another sandbox build holds the host build lock")
-	})
+	select {
+	case <-announced:
+	case <-time.After(20 * time.Second):
+		_ = cmd.Process.Kill()
+		<-waitErr
+		<-scanned
+		t.Fatalf("timed out waiting for the build to announce its wait:\n%s", output.String())
+	}
 	if n := f.buildCount(t); n != 0 {
 		t.Fatalf("a blocked build ran %d build invocation(s)", n)
 	}
@@ -327,13 +347,12 @@ func TestSandboxBuildWaitsForALockHeldByALivePid(t *testing.T) {
 
 	// Assert: it then proceeds and builds.
 	if err := <-waitErr; err != nil {
-		b, _ := os.ReadFile(stdout)
-		t.Fatalf("build exited %v\n%s", err, b)
+		<-scanned
+		t.Fatalf("build exited %v\n%s", err, output.String())
 	}
-	wg.Wait()
+	<-scanned
 	if n := f.buildCount(t); n != 1 {
-		b, _ := os.ReadFile(stdout)
-		t.Fatalf("expected 1 build invocation after release, got %d\n%s", n, b)
+		t.Fatalf("expected 1 build invocation after release, got %d\n%s", n, output.String())
 	}
 }
 
@@ -414,18 +433,4 @@ func reapedPid(t *testing.T) int {
 		t.Fatalf("spawn: %v", err)
 	}
 	return c.Process.Pid
-}
-
-// waitFor polls a condition to a bounded deadline. The bound is a small
-// multiple of the script's own 2s wait-announcement cadence.
-func waitFor(t *testing.T, what string, ok func() bool) {
-	t.Helper()
-	deadline := time.Now().Add(20 * time.Second)
-	for time.Now().Before(deadline) {
-		if ok() {
-			return
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	t.Fatalf("timed out waiting for %s", what)
 }
