@@ -482,6 +482,16 @@ the vendor (`AGENT_REPL_FORBID_VENDOR_CALLS=1` in every process).
   summary naming each one's gate; every other edge case is the
   `internal/worktreereap` unit suite's
 
+### news_digest_test.go
+- the daily news digest against one Atom source served from a loopback
+  fixture (`AGENT_REPL_NEWS_DIGEST_SOURCES`) and a fake claude answering the
+  condensing call (`AGENT_REPL_CLAUDE_BIN`), its schedule held off
+  (`AGENT_REPL_NEWS_DIGEST_START_DELAY=24h`): a `RefreshNewsDigest` stands
+  the digest on every webview `WatchDaemon` stream; a dismiss in one takes it
+  down in every one; an unknown id is `unknown_digest`; the standing digest
+  survives a restart; a second refresh with nothing new is `nothing_new`.
+  Every other edge case is the `internal/newsdigest` unit suite's
+
 ### Coverage the second adversarial audit added
 
 Folded into the suites above rather than listed twice; recorded here so the
