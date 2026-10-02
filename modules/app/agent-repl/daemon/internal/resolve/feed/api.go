@@ -384,7 +384,7 @@ type WarningRaiser interface {
 
 // DefaultPageSize is the page size the daemon picks when Deps names none. The
 // wire carries no cursor and no page size: the daemon owns both.
-const DefaultPageSize = 25
+const DefaultPageSize = 50
 
 // DefaultTailRetention is how many published rows one feed retains, so a token
 // minted at an earlier instant can still replay without a gap.
