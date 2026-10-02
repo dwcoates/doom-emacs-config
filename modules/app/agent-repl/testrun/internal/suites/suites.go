@@ -51,6 +51,9 @@ type Split struct {
 	Suite string
 	Items []string
 	Deps  []string
+	// OverheadCap bounds history's per-process estimate when the suite can
+	// prove a tighter startup bound. Zero leaves the measured value unbounded.
+	OverheadCap float64
 	// Chunk builds the spec of one chunk from its items.
 	Chunk func(id string, items []string) run.Spec
 }
