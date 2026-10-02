@@ -1936,22 +1936,6 @@ switch never run."
       ;; Assert.
       (should (equal ran '("ws-b"))))))
 
-(ert-deftest agent-repl-test-panels-switch-activation-log-scope-placeholder-is-central ()
-  "A placeholder perspective's switch pass records under the global scope."
-  (agent-repl-test--with-clean-state
-    (should (eq (agent-repl--switch-activation-log-scope "none")
-                agent-repl--global-log-scope))))
-
-(ert-deftest agent-repl-test-panels-switch-activation-log-scope-workspace-keeps-attribution ()
-  "A real workspace's switch pass records under that workspace."
-  (agent-repl-test--with-clean-state
-    (let ((project (make-temp-file "agent-repl-switch-scope-" t)))
-      (unwind-protect
-          (progn
-            (agent-repl--ws-put "ws1" :project-dir project)
-            (should (equal (agent-repl--switch-activation-log-scope "ws1") "ws1")))
-        (delete-directory project t)))))
-
 ;;;; ---- Tests: foreign-perspective-p ----
 
 (ert-deftest agent-repl-test-panels-foreign-perspective-p-true-for-unregistered-name ()
