@@ -137,6 +137,8 @@ function smallAssistantLine(): Record<string, unknown> {
 function harness(
   options: {
     nowMs?: number;
+    /** A clock that MOVES, for a suite that measures an elapsed time; wins over `nowMs`. */
+    clock?: () => number;
     lockThrows?: boolean;
     /** Make the WORKSPACE claim refuse, so its own conversation_owned arm shows. */
     workspaceLockThrows?: boolean;
@@ -295,7 +297,7 @@ function harness(
       return uuid;
     },
     env: { stateDir, configDir, cwd },
-    nowMs: () => options.nowMs ?? 1_000_100,
+    nowMs: options.clock ?? (() => options.nowMs ?? 1_000_100),
     probeApiReachable: probe.probe,
     networkResumeScheduler: networkScheduler,
     ...(options.withoutScheduler === true ? {} : { scheduler }),
@@ -7791,6 +7793,144 @@ describe("the retry label a failed vendor start carries", () => {
     expect(retryLabel(response)).toBe("rejected");
   });
 
+  describe("on the failed start's own record", () => {
+    const RECORD = "what the vendor emitted before the start failed";
+
+    it("states the label the refusal carried", async () => {
+      // Arrange.
+      const h = harness({ liveSignalTimeoutMs: 5, holdLiveSignal: true });
+      const before = logSinkMark();
+
+      // Act.
+      await h.engine.startSession(freshRequest());
+
+      // Assert.
+      expect(logContextFor(before, RECORD)?.["retry"]).toBe("retryable");
+    });
+
+    it("states how long the start ran before it failed", async () => {
+      // Arrange: the clock moves 250ms between the start's first and last reads.
+      let now = 1_000_000;
+      const h = harness({
+        clock: () => now,
+        holdLiveSignal: true,
+        initTimeoutMs: AMPLE,
+        liveSignalTimeoutMs: AMPLE,
+      });
+      const before = logSinkMark();
+      const pending = h.engine.startSession(freshRequest());
+      const first = await untilQuery(h, 0);
+
+      // Act.
+      now += 250;
+      first.query.end();
+      await pending;
+
+      // Assert.
+      expect(logContextFor(before, RECORD)?.["elapsed_ms"]).toBe(250);
+    });
+
+    it("names the liveness bound that tripped, and its size", async () => {
+      // Arrange.
+      const h = harness({ liveSignalTimeoutMs: 5, holdLiveSignal: true });
+      const before = logSinkMark();
+
+      // Act.
+      await h.engine.startSession(freshRequest());
+
+      // Assert.
+      const context = logContextFor(before, RECORD);
+      expect({ bound: context?.["bound"], bound_ms: context?.["bound_ms"] }).toEqual({
+        bound: "live_signal",
+        bound_ms: 5,
+      });
+    });
+
+    it("names the init-silence bound that tripped, and its size", async () => {
+      // Arrange.
+      const h = harness({ initTimeoutMs: 5, liveSignalTimeoutMs: AMPLE, holdLiveSignal: true });
+      const before = logSinkMark();
+
+      // Act.
+      await h.engine.startSession(freshRequest());
+
+      // Assert.
+      const context = logContextFor(before, RECORD);
+      expect({ bound: context?.["bound"], bound_ms: context?.["bound_ms"] }).toEqual({
+        bound: "init_silence",
+        bound_ms: 5,
+      });
+    });
+
+    it("names no bound when the start failed on an answer", async () => {
+      // Arrange.
+      const h = harness({ holdLiveSignal: true });
+      const before = logSinkMark();
+      const pending = h.engine.startSession(freshRequest());
+
+      // Act.
+      (await untilQuery(h, 0)).query.emit(hookResponse({ outcome: "error", output: "not today" }));
+      await pending;
+
+      // Assert.
+      const context = logContextFor(before, RECORD);
+      expect({ bound: context?.["bound"], bound_ms: context?.["bound_ms"] }).toEqual({ bound: "", bound_ms: -1 });
+    });
+
+    it("says the child was still alive when no exit was observed", async () => {
+      // Arrange.
+      const h = harness({ liveSignalTimeoutMs: 5, holdLiveSignal: true });
+      const before = logSinkMark();
+
+      // Act.
+      await h.engine.startSession(freshRequest());
+
+      // Assert.
+      expect(logContextFor(before, RECORD)?.["vendor_child_alive"]).toBe(true);
+    });
+
+    it("states the child's exit code and signal when it exited before the start settled", async () => {
+      // Arrange.
+      const h = harness({ initTimeoutMs: AMPLE, liveSignalTimeoutMs: AMPLE, holdLiveSignal: true });
+      const before = logSinkMark();
+      const pending = h.engine.startSession(freshRequest());
+      const first = await untilQuery(h, 0);
+
+      // Act.
+      first.spec.onChildExit?.({ code: null, signal: "SIGKILL" });
+      first.query.end();
+      await pending;
+
+      // Assert.
+      const context = logContextFor(before, RECORD);
+      expect({
+        alive: context?.["vendor_child_alive"],
+        code: context?.["vendor_exit_code"],
+        signal: context?.["vendor_exit_signal"],
+      }).toEqual({ alive: false, code: -1, signal: "SIGKILL" });
+    });
+
+    it("does not carry a previous attempt's child exit into a retry's record", async () => {
+      // Arrange: attempt one's child exits; attempt two's stays up and times out.
+      const h = harness({
+        initTimeoutMs: AMPLE,
+        liveSignalTimeoutMs: 5,
+        holdLiveSignal: true,
+      });
+      const firstAttempt = h.engine.startSession(freshRequest());
+      const first = await untilQuery(h, 0);
+      first.spec.onChildExit?.({ code: 1, signal: null });
+      first.query.end();
+      await firstAttempt;
+      const before = logSinkMark();
+
+      // Act.
+      await h.engine.startSession(freshRequest());
+
+      // Assert.
+      expect(logContextFor(before, RECORD)?.["vendor_child_alive"]).toBe(true);
+    });
+  });
 });
 
 describe("StartSession's remaining refusals", () => {
@@ -8163,6 +8303,26 @@ describe("the cold gate's COMPACT remediation", () => {
 
       // Assert.
       expect(retryLabel(response)).toBe("rejected");
+    });
+
+    it("records the label on the refusal's own line", async () => {
+      // Arrange.
+      const h = harness({
+        nowMs: COLD_NOW,
+        onQueryCreated: (query, _spec, index) => {
+          if (index === 0) query.end();
+        },
+      });
+      writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+      const before = logSinkMark();
+
+      // Act.
+      await h.engine.startSession(resumeRequest("resume-1", compactRemediation()));
+
+      // Assert.
+      expect(logContextFor(before, "refused StartSession: the cold gate's remediation failed")?.["retry"]).toBe(
+        "retryable",
+      );
     });
   });
 
