@@ -91,7 +91,7 @@ func TestConcurrentProducersLandEveryLineExactlyOnce(t *testing.T) {
 	defer cancel()
 
 	// Act
-	page := openSession(ctx, t, store.client(), "main", uint32(concurrentWriters*linesPerWriter*2), nil)
+	page := openSession(ctx, t, store.client(), "main", nil)
 
 	// Assert
 	want := concurrentWriters * linesPerWriter
@@ -109,7 +109,7 @@ func TestConcurrentProducersMintDistinctPointers(t *testing.T) {
 	defer cancel()
 
 	// Act
-	page := openSession(ctx, t, store.client(), "main", uint32(concurrentWriters*linesPerWriter*2), nil)
+	page := openSession(ctx, t, store.client(), "main", nil)
 
 	// Assert
 	seen := map[string]bool{}
@@ -129,7 +129,7 @@ func TestAWatcherReceivesEveryConcurrentlyWrittenLine(t *testing.T) {
 	defer cancel()
 	cli := store.client()
 	seedBook(ctx, t, streamProducer(cli), "main", "concurrent")
-	opened := openSession(ctx, t, cli, "main", 10, nil)
+	opened := openSession(ctx, t, cli, "main", nil)
 	stream := watchStream(ctx, t, cli, opened.GetWatch())
 	defer testclose.OrFail(t, stream)
 
@@ -162,14 +162,14 @@ func TestTwoPlanesWritingOneUnitLeaveOneLineAtOnePointer(t *testing.T) {
 	sidecar := fileProducer(cli)
 	shim.write(ctx, t, shim.agentEntry("w-draft", "unit-x",
 		frameLine(agentID("main"), responseFrame("main", "act-x", "draft"))))
-	before := pagePointers(openSession(ctx, t, cli, "main", 10, nil).GetPage())
+	before := pagePointers(openSession(ctx, t, cli, "main", nil).GetPage())
 
 	// Act
 	sidecar.write(ctx, t, sidecar.agentEntry("w-final", "unit-x",
 		frameLine(agentID("main"), responseFrame("main", "act-x", "final"))))
 
 	// Assert
-	page := openSession(ctx, t, cli, "main", 10, nil)
+	page := openSession(ctx, t, cli, "main", nil)
 	assertTexts(t, "the book after both planes wrote", pageTexts(page.GetPage()), []string{"final"})
 	assertTexts(t, "the pointer after the supersession", pagePointers(page.GetPage()), before)
 }
@@ -187,7 +187,7 @@ func TestReplayingBothPlanesWritesDeliversNothingToAWatcher(t *testing.T) {
 	final := sidecar.agentEntry("w-final", "unit-x", frameLine(agentID("main"), responseFrame("main", "act-x", "final")))
 	shim.write(ctx, t, draft)
 	sidecar.write(ctx, t, final)
-	opened := openSession(ctx, t, cli, "main", 10, nil)
+	opened := openSession(ctx, t, cli, "main", nil)
 	stream := watchStream(ctx, t, cli, opened.GetWatch())
 	defer testclose.OrFail(t, stream)
 
@@ -249,7 +249,7 @@ func TestConcurrentUpsertsOfOneKeyLeaveOneRow(t *testing.T) {
 	// Assert: one row, at one pointer.
 	ctx, cancel := callContext(t)
 	defer cancel()
-	page := openSession(ctx, t, store.client(), "main", uint32(concurrentWriters*2), nil)
+	page := openSession(ctx, t, store.client(), "main", nil)
 	if got := len(page.GetPage().GetLines()); got != 1 {
 		t.Fatalf("the book holds %d lines for one upsert_key, want 1 (%v)", got, pageTexts(page.GetPage()))
 	}

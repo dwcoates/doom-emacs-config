@@ -28,7 +28,7 @@ func TestSlowWatcherExceedingTheBufferIsEndedWithAnError(t *testing.T) {
 	cli := store.client()
 	shim := streamProducer(cli)
 	seedBook(ctx, t, shim, "main", "overrun")
-	opened := openSession(ctx, t, cli, "main", 10, nil)
+	opened := openSession(ctx, t, cli, "main", nil)
 	stream := watchStream(ctx, t, cli, opened.GetWatch())
 	defer testclose.OrFail(t, stream)
 	mark := store.logMark()
@@ -89,7 +89,7 @@ func TestTheDefaultBufferAbsorbsALargeBurstWithoutEndingAWatcher(t *testing.T) {
 	cli := store.client()
 	shim := streamProducer(cli)
 	seedBook(setupCtx, t, shim, "main", "default-buffer")
-	opened := openSession(setupCtx, t, cli, "main", 10, nil)
+	opened := openSession(setupCtx, t, cli, "main", nil)
 	streamCtx, cancelStream := callContextWithin(t, callTimeout+burstCallTimeout+burstStreamTimeout)
 	defer cancelStream()
 	stream := watchStream(streamCtx, t, cli, opened.GetWatch())
@@ -129,7 +129,7 @@ func TestOverrunWatcherRecoversByReopening(t *testing.T) {
 	cli := store.client()
 	shim := streamProducer(cli)
 	seedBook(ctx, t, shim, "main", "reopen")
-	opened := openSession(ctx, t, cli, "main", 10, nil)
+	opened := openSession(ctx, t, cli, "main", nil)
 	stream := watchStream(ctx, t, cli, opened.GetWatch())
 	overrun := smallWatchBuffer * 40
 	entries := make([]*storev1.StoreEntry, 0, overrun)
@@ -147,7 +147,7 @@ func TestOverrunWatcherRecoversByReopening(t *testing.T) {
 	}
 
 	// Act.
-	reopened := openSession(ctx, t, cli, "main", 1, nil)
+	reopened := openSession(ctx, t, cli, "main", nil)
 	recovered := watchStream(ctx, t, cli, reopened.GetWatch())
 	defer testclose.OrFail(t, recovered)
 	shim.write(ctx, t,
@@ -157,7 +157,9 @@ func TestOverrunWatcherRecoversByReopening(t *testing.T) {
 
 	// Assert.
 	assertTexts(t, "the recovered tail", receivedTexts(receiveLines(t, recovered, 1)), []string{"after the overrun"})
-	assertTexts(t, "the re-opened page", pageTexts(reopened.GetPage()), []string{fmt.Sprintf("burst-%d", overrun-1)})
+	if got := pageTexts(reopened.GetPage()); len(got) == 0 || got[0] != fmt.Sprintf("burst-%d", overrun-1) {
+		t.Fatalf("the re-opened page = %v, want it to lead with the newest burst line burst-%d", got, overrun-1)
+	}
 }
 
 // TestASlowBashWatcherIsEndedWithResourceExhausted is the same backpressure

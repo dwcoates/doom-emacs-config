@@ -159,7 +159,7 @@ func TestAStoreBootsOverADbPathThatIsNotADatabase(t *testing.T) {
 	shim := streamProducer(store.client())
 	shim.write(ctx, t, shim.agentEntry("w-nuked", "u-nuked",
 		frameLine(agentID("main"), responseFrame("main", "act-1", "after the nuke"))))
-	page := openSession(ctx, t, store.client(), "main", 10, nil)
+	page := openSession(ctx, t, store.client(), "main", nil)
 	assertTexts(t, "the recreated store", pageTexts(page.GetPage()), []string{"after the nuke"})
 }
 

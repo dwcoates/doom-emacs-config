@@ -24,7 +24,7 @@ func TestADeliveredPromptIsAPageLineOfItsAddresseesBook(t *testing.T) {
 		promptLine(agentID("main"), promptFact("turn-1", "main", "do the thing"))))
 
 	// Assert
-	page := openSession(ctx, t, cli, "main", 10, nil)
+	page := openSession(ctx, t, cli, "main", nil)
 	assertTexts(t, "the addressee's book", pageTexts(page.GetPage()), []string{"prompt:do the thing"})
 	store.assertNoErrorRecords()
 }
@@ -45,7 +45,7 @@ func TestAPromptAndTheAnswerItProvokedSharePageOrder(t *testing.T) {
 	)
 
 	// Assert: newest first.
-	page := openSession(ctx, t, cli, "main", 10, nil)
+	page := openSession(ctx, t, cli, "main", nil)
 	assertTexts(t, "the exchange", pageTexts(page.GetPage()), []string{"answer", "prompt:ask"})
 	store.assertNoErrorRecords()
 }
@@ -66,9 +66,9 @@ func TestAPromptToASubagentLandsInTheSubagentsOwnBook(t *testing.T) {
 	)
 
 	// Assert
-	mainBook := openSession(ctx, t, cli, "main", 10, nil)
+	mainBook := openSession(ctx, t, cli, "main", nil)
 	assertTexts(t, "the main agent's book", pageTexts(mainBook.GetPage()), []string{"prompt:to main"})
-	subBook := openSession(ctx, t, cli, "sub-1", 10, nil)
+	subBook := openSession(ctx, t, cli, "sub-1", nil)
 	assertTexts(t, "the subagent's book", pageTexts(subBook.GetPage()), []string{"prompt:to the subagent"})
 	store.assertNoErrorRecords()
 }
@@ -82,7 +82,7 @@ func TestAPromptIsStreamedToAStandingWatcher(t *testing.T) {
 	cli := store.client()
 	shim := streamProducer(cli)
 	seedBook(ctx, t, shim, "main", "prompt-tail")
-	opened := openSession(ctx, t, cli, "main", 10, nil)
+	opened := openSession(ctx, t, cli, "main", nil)
 	stream := watchStream(ctx, t, cli, opened.GetWatch())
 	defer testclose.OrFail(t, stream)
 
@@ -110,7 +110,7 @@ func TestAPromptSurvivesARestart(t *testing.T) {
 	// Assert
 	after, cancelAfter := callContext(t)
 	defer cancelAfter()
-	page := openSession(after, t, store.client(), "main", 10, nil)
+	page := openSession(after, t, store.client(), "main", nil)
 	assertTexts(t, "the book after a restart", pageTexts(page.GetPage()), []string{"prompt:durable prompt"})
 	store.assertNoErrorRecords()
 }

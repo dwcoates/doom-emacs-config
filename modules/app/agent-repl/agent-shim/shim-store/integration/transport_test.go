@@ -47,7 +47,7 @@ func TestBothHTTPVersionsServeTheSameStore(t *testing.T) {
 			)
 
 			// Assert: writes AND the streaming read both work on this version.
-			opened := openSession(ctx, t, cli, "main", 10, nil)
+			opened := openSession(ctx, t, cli, "main", nil)
 			assertTexts(t, "the page "+tc.label, pageTexts(opened.GetPage()), []string{tc.label})
 
 			stream := watchStream(ctx, t, cli, opened.GetWatch())
