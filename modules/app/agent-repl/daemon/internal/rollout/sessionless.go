@@ -34,15 +34,21 @@ const opBringUp = "daemon.rollout.bring_up"
 
 // bringUpSessionless raises the bring-up marker on each pending workspace AT
 // ONCE -- before the caller publishes its views, so no surface draws it idle
-// and usable -- and starts their sessions off the caller's goroutine. The
-// starts are joined by bringUps; each start's own failure is that workspace's
-// fault, raised by the start and counted by bringup.Run.
+// and usable -- and starts their sessions (startSessionless).
 func (c *controller) bringUpSessionless(pending []wsm.Workspace, fields dlog.Context) {
-	if len(pending) == 0 {
-		return
-	}
 	for _, ws := range pending {
 		c.deps.BringingUp(ws.ID, true)
+	}
+	c.startSessionless(pending, fields)
+}
+
+// startSessionless starts the sessions of pending workspaces whose bring-up
+// marker the caller has ALREADY raised, off the caller's goroutine. The starts
+// are joined by bringUps; each start's own failure is that workspace's fault,
+// raised by the start and counted by bringup.Run, which lowers each marker.
+func (c *controller) startSessionless(pending []wsm.Workspace, fields dlog.Context) {
+	if len(pending) == 0 {
+		return
 	}
 	names := make([]string, len(pending))
 	for i, ws := range pending {
