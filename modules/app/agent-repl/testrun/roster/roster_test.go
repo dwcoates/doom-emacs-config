@@ -61,7 +61,8 @@ func TestEveryHarnessTestsAScriptInTheModulesBin(t *testing.T) {
 	}
 	for _, n := range names {
 		s, _ := Lookup(n)
-		if s.Kind != Script || len(s.Path) < len("bin/test-") || s.Path[:len("bin/test-")] != "bin/test-" {
+		isHarnessKind := s.Kind == Script || s.Kind == SplitScript
+		if !isHarnessKind || len(s.Path) < len("bin/test-") || s.Path[:len("bin/test-")] != "bin/test-" {
 			t.Errorf("%s is marked a bin/ harness but runs %q", n, s.Path)
 		}
 	}

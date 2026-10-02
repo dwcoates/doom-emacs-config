@@ -66,6 +66,8 @@ func Build(l Layout, s roster.Suite) (Units, error) {
 	switch s.Kind {
 	case roster.Script:
 		return scriptUnits(l, s)
+	case roster.SplitScript:
+		return splitScriptUnits(l, s)
 	case roster.ERT:
 		return ertUnits(l, s)
 	case roster.GoModule:
@@ -101,15 +103,23 @@ func (l Layout) resolve(p string) string {
 }
 
 func scriptUnits(l Layout, s roster.Suite) (Units, error) {
-	path := l.resolve(s.Path)
-	info, err := os.Stat(path)
+	path, err := executableScriptPath(l, s)
 	if err != nil {
-		return Units{}, fmt.Errorf("suites: %s's runner %s: %w", s.Name, path, err)
-	}
-	if info.Mode()&0o111 == 0 {
-		return Units{}, fmt.Errorf("suites: %s's runner %s is not executable", s.Name, path)
+		return Units{}, err
 	}
 	u := spec(s.Name, s.Name, filepath.Dir(path), append([]string{path}, s.Args...))
 	u.MayDecline = s.MayDecline
 	return Units{Atomic: []run.Spec{u}}, nil
+}
+
+func executableScriptPath(l Layout, s roster.Suite) (string, error) {
+	path := l.resolve(s.Path)
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", fmt.Errorf("suites: %s's runner %s: %w", s.Name, path, err)
+	}
+	if info.Mode()&0o111 == 0 {
+		return "", fmt.Errorf("suites: %s's runner %s is not executable", s.Name, path)
+	}
+	return path, nil
 }

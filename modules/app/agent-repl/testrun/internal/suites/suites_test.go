@@ -150,6 +150,87 @@ func TestScriptUnitsCarryTheDeclineRight(t *testing.T) {
 	}
 }
 
+func TestParseScriptList(t *testing.T) {
+	tests := []struct {
+		name    string
+		out     string
+		want    []string
+		wantErr string
+	}{
+		{name: "ordered names", out: "core\nstamps\n", want: []string{"core", "stamps"}},
+		{name: "no names", wantErr: "no items listed"},
+		{name: "empty line", out: "core\n\nstamps\n", wantErr: "invalid item name"},
+		{name: "space", out: "not one\n", wantErr: "invalid item name"},
+		{name: "comma", out: "not,one\n", wantErr: "invalid item name"},
+		{name: "duplicate", out: "core\ncore\n", wantErr: "listed twice"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got, err := parseScriptList([]byte(tt.out))
+
+			// Assert
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("err = %v, want it to mention %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil || !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("parseScriptList = %v, %v; want %v", got, err, tt.want)
+			}
+		})
+	}
+}
+
+func TestSplitScriptUnitsChunkSelectedItems(t *testing.T) {
+	// Arrange
+	path := filepath.Join(t.TempDir(), "bin", "harness.sh")
+	suite := roster.Suite{Name: "harness", Kind: roster.SplitScript}
+	units := splitScriptUnitsForItems(path, suite, []string{"core", "stamps"})
+
+	// Act
+	spec := units.Splits[0].Chunk("harness-1", []string{"stamps", "core"})
+	got, err := spec.Items([]byte("noise\nTESTRUN-ITEM stamps 2.5\nTESTRUN-ITEM core 1.25\n"))
+
+	// Assert
+	if want := []string{path, "--only", "stamps,core"}; !reflect.DeepEqual(spec.Argv, want) {
+		t.Fatalf("argv = %v, want %v", spec.Argv, want)
+	}
+	if spec.Dir != filepath.Dir(path) {
+		t.Fatalf("dir = %q, want %q", spec.Dir, filepath.Dir(path))
+	}
+	if err != nil || got["stamps"] != 2.5 || got["core"] != 1.25 {
+		t.Fatalf("Items = %v, %v", got, err)
+	}
+}
+
+func TestParseScriptItemsRejectsInvalidReports(t *testing.T) {
+	tests := []struct {
+		name    string
+		out     string
+		want    []string
+		wantErr string
+	}{
+		{name: "missing", out: "TESTRUN-ITEM core 1\n", want: []string{"core", "stamps"}, wantErr: "no timing reported"},
+		{name: "duplicate", out: "TESTRUN-ITEM core 1\nTESTRUN-ITEM core 2\n", want: []string{"core"}, wantErr: "reported twice"},
+		{name: "not numeric", out: "TESTRUN-ITEM core slow\n", want: []string{"core"}, wantErr: "unreadable item timing"},
+		{name: "negative", out: "TESTRUN-ITEM core -1\n", want: []string{"core"}, wantErr: "unreadable item timing"},
+		{name: "unrequested", out: "TESTRUN-ITEM core 1\nTESTRUN-ITEM extra 2\n", want: []string{"core"}, wantErr: "timings reported for 2 items"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			_, err := ParseScriptItems([]byte(tt.out), tt.want)
+
+			// Assert
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("err = %v, want it to mention %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestERTRoster(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -615,10 +696,10 @@ func TestParseVitestItemsOfAMissingReportFails(t *testing.T) {
 
 func TestEveryRosterSuiteHasAKnownKind(t *testing.T) {
 	// Arrange / Act / Assert: Build panics on an unknown kind, so every roster
-	// kind must be one of the five it switches on.
+	// kind must be one of the six it switches on.
 	for _, s := range roster.Suites {
 		switch s.Kind {
-		case roster.Script, roster.ERT, roster.GoModule, roster.Vitest, roster.E2E:
+		case roster.Script, roster.SplitScript, roster.ERT, roster.GoModule, roster.Vitest, roster.E2E:
 		default:
 			t.Errorf("suite %s has unknown kind %d", s.Name, s.Kind)
 		}
