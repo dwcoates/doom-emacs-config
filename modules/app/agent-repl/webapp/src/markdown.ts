@@ -100,6 +100,13 @@ md.use(taskLists);
 // `foo.ts` (most extensions are no TLD), then the rule below turns every
 // scheme-less autolink ending in a file extension into a file link: its href
 // is the bare label, which the click router sends to the daemon.
+//
+// WHICH EXTENSIONS ARE ALSO WEB DOMAINS is the linkifier's own knowledge, asked
+// BEFORE the file extensions are added to it: if it already links `a.<ext>`,
+// `<ext>` is a real domain ending and a bare name carrying it is ambiguous.
+const DOMAIN_EXTENSIONS: ReadonlySet<string> = new Set(
+  FILE_LINK_EXTENSIONS.filter((ext) => md.linkify.test(`a.${ext}`)),
+);
 md.linkify.tlds([...FILE_LINK_EXTENSIONS], true);
 md.core.ruler.after("linkify", "file-linkify", (state) => {
   for (const block of state.tokens) {
@@ -108,7 +115,13 @@ md.core.ruler.after("linkify", "file-linkify", (state) => {
       if (token.type !== "link_open" || token.markup !== "linkify") return;
       const label = children[index + 1]?.content ?? "";
       if (/^[a-z][a-z0-9+.-]*:/i.test(label) || label.includes("@") || label.includes("/")) return;
-      if (hasFileExtension(label)) token.attrSet("href", label);
+      if (!hasFileExtension(label)) return;
+      token.attrSet("href", label);
+      // An ambiguous name (`wikipedia.org`, `README.md`) falls back to the web
+      // when no file resolves; the click router reads this mark.
+      if (DOMAIN_EXTENSIONS.has(label.slice(label.lastIndexOf(".") + 1).toLowerCase())) {
+        token.attrSet("data-web-fallback", "");
+      }
     });
   }
   return true;

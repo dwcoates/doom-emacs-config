@@ -352,7 +352,7 @@ describe("inline: file links", () => {
 describe("renderMarkdown: bare file names", () => {
   const hrefOf = (md: string): string | null => /<a href="([^"]*)"/.exec(renderMarkdown(md))?.[1] ?? null;
 
-  it.each(["README.md", "foo.ts", "app.tsx", "a.js", "a.mjs", "main.go", "status.el", "x.py", "run.sh", "a.json", "a.yaml", "a.yml", "a.toml", "a.proto", "a.txt", "a.css", "a.html", "lib.rs", "a.c", "a.h", "a.m", "a.swift"])(
+  it.each(["README.md", "foo.ts", "app.tsx", "a.js", "a.mjs", "main.go", "status.el", "x.py", "run.sh", "a.json", "a.yaml", "a.yml", "a.toml", "a.proto", "a.txt", "a.css", "a.html", "lib.rs", "a.c", "a.h", "a.m", "a.swift", "notes.org"])(
     "links %s as a file, href the bare name",
     (name) => {
       expect(hrefOf(`see ${name} now`)).toBe(name);
@@ -363,8 +363,32 @@ describe("renderMarkdown: bare file names", () => {
     expect(hrefOf("see example.com now")).toBe("http://example.com");
   });
 
-  it("keeps wikipedia.org a web link", () => {
-    expect(hrefOf("see wikipedia.org now")).toBe("http://wikipedia.org");
+  it("links wikipedia.org as a file candidate, href the bare name", () => {
+    expect(hrefOf("see wikipedia.org now")).toBe("wikipedia.org");
+  });
+
+  const fallbackOf = (md: string): boolean => /data-web-fallback/.test(renderMarkdown(md));
+
+  it.each(["wikipedia.org", "README.md", "run.sh", "x.py", "lib.rs"])(
+    "marks %s, whose extension is also a domain ending, for web fallback",
+    (name) => {
+      expect(fallbackOf(`see ${name} now`)).toBe(true);
+    },
+  );
+
+  it.each(["foo.ts", "main.go", "status.el", "a.json", "a.proto"])(
+    "does not mark %s, whose extension is no domain ending",
+    (name) => {
+      expect(fallbackOf(`see ${name} now`)).toBe(false);
+    },
+  );
+
+  it("does not mark an explicit [text](README.md) link", () => {
+    expect(fallbackOf("[x](README.md)")).toBe(false);
+  });
+
+  it("does not mark a real domain", () => {
+    expect(fallbackOf("see example.com now")).toBe(false);
   });
 
   it("keeps github.io a web link", () => {
