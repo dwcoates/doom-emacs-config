@@ -1401,7 +1401,6 @@ describe("the vendor's own facts", () => {
 
     const history = await h.engine.readHistory(
       create(shimv1.ReadHistoryRequestSchema, {
-        pageSize: 1,
         position: { case: "first", value: create(shimv1.ReadHistoryFirstSchema, {}) },
       }),
     );
@@ -1419,7 +1418,6 @@ describe("the vendor's own facts", () => {
         turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
         said: textSaid("go"),
         origin: conversationv1.PromptOrigin.USER_SENT,
-        pageSize: 5,
       }),
     );
 
@@ -1558,7 +1556,6 @@ describe("the turn loop", () => {
         turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
         said: textSaid("go"),
         origin: conversationv1.PromptOrigin.USER_SENT,
-        pageSize: 5,
       }),
     );
     h.queries[0]?.query.emit(answering(h, resultMessage()));
@@ -1575,7 +1572,6 @@ describe("the turn loop", () => {
         turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
         said: textSaid("go"),
         origin: conversationv1.PromptOrigin.USER_SENT,
-        pageSize: 5,
       }),
     );
     h.queries[0]?.query.emit(answering(h, resultMessage()));
@@ -1587,7 +1583,6 @@ describe("the turn loop", () => {
         turn: create(conversationv1.TurnIdSchema, { value: "turn-2" }),
         said: textSaid("again"),
         origin: conversationv1.PromptOrigin.USER_SENT,
-        pageSize: 5,
       }),
     );
     expect(second.result.case).toBe("success");
@@ -1602,7 +1597,6 @@ describe("the turn loop", () => {
         turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
         said: textSaid("go"),
         origin: conversationv1.PromptOrigin.USER_SENT,
-        pageSize: 5,
       }),
     );
     h.queries[0]?.query.emit(answering(h, resultMessage()));
@@ -1624,7 +1618,6 @@ describe("the turn loop", () => {
         turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
         said: textSaid("go"),
         origin: conversationv1.PromptOrigin.USER_SENT,
-        pageSize: 5,
       }),
     );
     h.queries[0]?.query.emit(answering(h, resultMessage()));
@@ -1644,7 +1637,6 @@ describe("the turn loop", () => {
         turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
         said: textSaid("go"),
         origin: conversationv1.PromptOrigin.USER_SENT,
-        pageSize: 5,
       }),
     );
     h.queries[0]?.query.emit(answering(h, resultMessage()));
@@ -2011,7 +2003,6 @@ describe("a prompt joining the running turn", () => {
         turn: create(conversationv1.TurnIdSchema, { value: turnId }),
         said: textSaid("also this"),
         origin: conversationv1.PromptOrigin.USER_SENT,
-        pageSize: 5,
         joinRunningTurn: true,
       }),
     );
@@ -2416,7 +2407,6 @@ describe("the keep-alive turn", () => {
         turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
         said: textSaid("go"),
         origin: conversationv1.PromptOrigin.USER_SENT,
-        pageSize: 5,
       }),
     );
     h.persistence.buffered.length = 0;
@@ -3686,7 +3676,6 @@ describe("SetSessionModel", () => {
         turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
         said: textSaid("go"),
         origin: conversationv1.PromptOrigin.USER_SENT,
-        pageSize: 5,
       }),
     );
 
@@ -3713,7 +3702,6 @@ describe("SetSessionModel", () => {
         turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
         said: textSaid("go"),
         origin: conversationv1.PromptOrigin.USER_SENT,
-        pageSize: 5,
       }),
     );
 
@@ -3745,7 +3733,6 @@ describe("SetSessionModel", () => {
         turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
         said: textSaid("go"),
         origin: conversationv1.PromptOrigin.USER_SENT,
-        pageSize: 5,
       }),
     );
     const pending = h.engine.setSessionModel(
@@ -3767,7 +3754,6 @@ describe("SetSessionModel", () => {
         turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
         said: textSaid("go"),
         origin: conversationv1.PromptOrigin.USER_SENT,
-        pageSize: 5,
       }),
     );
     const pending = h.engine.setSessionModel(
@@ -3843,7 +3829,6 @@ describe("SetSessionEffort", () => {
         turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
         said: textSaid("go"),
         origin: conversationv1.PromptOrigin.USER_SENT,
-        pageSize: 5,
       }),
     );
   }
@@ -4161,7 +4146,6 @@ describe("Hibernate", () => {
         turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
         said: textSaid("go"),
         origin: conversationv1.PromptOrigin.USER_SENT,
-        pageSize: 5,
       }),
     );
 
@@ -4245,7 +4229,7 @@ describe("the teardown's waits are bounded", () => {
     await started(h);
     h.persistence.standingTail = true;
     const watching = h.engine.watchAgent(
-      create(shimv1.WatchAgentRequestSchema, { pageSize: 5 }),
+      create(shimv1.WatchAgentRequestSchema, {}),
     )[Symbol.asyncIterator]();
     await watching.next();
     h.persistence.openHangs = true;
@@ -4391,7 +4375,6 @@ describe("the teardown's vendor half is bounded", () => {
         turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
         said: textSaid("go"),
         origin: conversationv1.PromptOrigin.USER_SENT,
-        pageSize: 5,
       }),
     );
 
@@ -4526,7 +4509,6 @@ describe("KillSession", () => {
         turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
         said: textSaid("go"),
         origin: conversationv1.PromptOrigin.USER_SENT,
-        pageSize: 5,
       }),
     );
 
@@ -4543,7 +4525,6 @@ describe("KillSession", () => {
         turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
         said: textSaid("go"),
         origin: conversationv1.PromptOrigin.USER_SENT,
-        pageSize: 5,
       }),
     );
 
@@ -4562,7 +4543,6 @@ describe("KillSession", () => {
         turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
         said: textSaid("go"),
         origin: conversationv1.PromptOrigin.USER_SENT,
-        pageSize: 5,
       }),
     );
 
@@ -4813,7 +4793,6 @@ describe("WatchSession", () => {
         turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
         said: textSaid("go"),
         origin: conversationv1.PromptOrigin.USER_SENT,
-        pageSize: 5,
       }),
     );
 
@@ -5692,7 +5671,7 @@ describe("the per-turn verbs, through the engine's own dispatch surface", () => 
     await expect(
       (async () => {
         for await (const _ of h.engine.watchAgent(
-          create(shimv1.WatchAgentRequestSchema, { pageSize: 10 }),
+          create(shimv1.WatchAgentRequestSchema, {}),
         )) {
           // refused before anything is yielded
         }
@@ -5975,7 +5954,6 @@ describe("ReadHistory reports a store outage", () => {
 
     const response = await h.engine.readHistory(
       create(shimv1.ReadHistoryRequestSchema, {
-        pageSize: 5,
         position: {
           case: "after",
           value: create(conversationv1.HistoryPointerSchema, { value: "p-1" }),
@@ -6905,7 +6883,6 @@ async function realPrompt(h: Harness, turnId: string): Promise<void> {
       turn: create(conversationv1.TurnIdSchema, { value: turnId }),
       said: textSaid("go"),
       origin: conversationv1.PromptOrigin.USER_SENT,
-      pageSize: 5,
     }),
   );
 }
@@ -6950,7 +6927,6 @@ function startDuring(h: Harness, turnId: string, signal?: AbortSignal): Promise<
       turn: create(conversationv1.TurnIdSchema, { value: turnId }),
       said: textSaid("go"),
       origin: conversationv1.PromptOrigin.USER_SENT,
-      pageSize: 5,
     }),
     signal,
   );
@@ -7275,7 +7251,6 @@ describe("what the engine remembers from the fold's own frames", () => {
       .watchAgent(
         create(shimv1.WatchAgentRequestSchema, {
           target: create(conversationv1.AgentIdSchema, { value: "agent-child" }),
-          pageSize: 5,
         }),
       )[Symbol.asyncIterator]();
     const first = await nextPush(iterator);
@@ -7292,7 +7267,6 @@ describe("what the engine remembers from the fold's own frames", () => {
       .watchAgent(
         create(shimv1.WatchAgentRequestSchema, {
           target: create(conversationv1.AgentIdSchema, { value: "agent-nobody-minted" }),
-          pageSize: 5,
         }),
       )[Symbol.asyncIterator]();
 
@@ -8382,7 +8356,6 @@ describe("StartSession's remaining refusals", () => {
         turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
         said: textSaid("go"),
         origin: conversationv1.PromptOrigin.USER_SENT,
-        pageSize: 5,
       }),
     );
     h.queries[0]?.query.emit(resultMessage());
@@ -9133,7 +9106,6 @@ describe("what this session will answer a watch about", () => {
       .watchAgent(
         create(shimv1.WatchAgentRequestSchema, {
           target: create(conversationv1.AgentIdSchema, { value: "" }),
-          pageSize: 5,
         }),
       )[Symbol.asyncIterator]();
 
@@ -9158,7 +9130,6 @@ describe("what this session will answer a watch about", () => {
       .watchAgent(
         create(shimv1.WatchAgentRequestSchema, {
           target: create(conversationv1.AgentIdSchema, { value: "toolu_live_agent" }),
-          pageSize: 5,
         }),
       )[Symbol.asyncIterator]();
     const first = await nextPush(iterator);
@@ -9196,7 +9167,6 @@ describe("what this session will answer a watch about", () => {
       .watchAgent(
         create(shimv1.WatchAgentRequestSchema, {
           target: create(conversationv1.AgentIdSchema, { value: "toolu_retired_agent" }),
-          pageSize: 5,
         }),
       )[Symbol.asyncIterator]();
     const first = await nextPush(iterator);
@@ -9228,7 +9198,7 @@ describe("the teardown's tails", () => {
     h.persistence.page = pageWithHead("p-9");
     h.persistence.standingTail = true;
     const watching = h.engine
-      .watchAgent(create(shimv1.WatchAgentRequestSchema, { pageSize: 5 }))[Symbol.asyncIterator]();
+      .watchAgent(create(shimv1.WatchAgentRequestSchema, {}))[Symbol.asyncIterator]();
     await watching.next();
 
     await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
@@ -9244,7 +9214,7 @@ describe("the teardown's tails", () => {
     await started(h);
     h.persistence.standingTail = true;
     const watching = h.engine
-      .watchAgent(create(shimv1.WatchAgentRequestSchema, { pageSize: 5 }))[Symbol.asyncIterator]();
+      .watchAgent(create(shimv1.WatchAgentRequestSchema, {}))[Symbol.asyncIterator]();
     await watching.next();
 
     // Act.
@@ -9263,7 +9233,7 @@ describe("the teardown's tails", () => {
     h.persistence.page = pageWithHead("p-9");
     h.persistence.standingTail = true;
     const watching = h.engine
-      .watchAgent(create(shimv1.WatchAgentRequestSchema, { pageSize: 5 }))[Symbol.asyncIterator]();
+      .watchAgent(create(shimv1.WatchAgentRequestSchema, {}))[Symbol.asyncIterator]();
     await watching.next();
     const openedBeforeTeardown = h.persistence.pagesOpened;
 
@@ -9283,7 +9253,7 @@ describe("the teardown's tails", () => {
     await started(h);
     h.persistence.page = pageWithHead("p-9");
     const watching = h.engine.watchAgent(
-      create(shimv1.WatchAgentRequestSchema, { pageSize: 5 }),
+      create(shimv1.WatchAgentRequestSchema, {}),
     );
     for await (const _frame of watching) {
       // drained to completion, which is what disposes the watcher
@@ -9391,7 +9361,6 @@ describe("SetSessionModel and SetSessionPermissionMode, refused by the vendor", 
         turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
         said: textSaid("go"),
         origin: conversationv1.PromptOrigin.USER_SENT,
-        pageSize: 5,
       }),
     );
     const query = h.queries[0]?.query;
@@ -9448,7 +9417,6 @@ describe("the prompt stream the engine hands the vendor", () => {
         turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
         said: textSaid("go"),
         origin: conversationv1.PromptOrigin.USER_SENT,
-        pageSize: 5,
       }),
     );
     for (let attempt = 0; attempt < 50 && delivered.length === 0; attempt++) {
@@ -9655,7 +9623,6 @@ describe("a vendor failure that is not an Error", () => {
           turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
           said: textSaid("go"),
           origin: conversationv1.PromptOrigin.USER_SENT,
-          pageSize: 5,
         }),
       );
       h.queries[0]?.query.emit(resultMessage());
@@ -9718,7 +9685,6 @@ describe("a vendor failure that is not an Error", () => {
         turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
         said: textSaid("go"),
         origin: conversationv1.PromptOrigin.USER_SENT,
-        pageSize: 5,
       }),
     );
     const query = h.queries[0]?.query;
@@ -9895,7 +9861,7 @@ describe("a vendor failure that is not an Error", () => {
     await started(h);
     h.persistence.standingTail = true;
     const watching = h.engine
-      .watchAgent(create(shimv1.WatchAgentRequestSchema, { pageSize: 5 }))[Symbol.asyncIterator]();
+      .watchAgent(create(shimv1.WatchAgentRequestSchema, {}))[Symbol.asyncIterator]();
     await watching.next();
     h.persistence.readFirstPage = () => Promise.reject("the store socket went away");
     const before = logSinkMark();
@@ -9954,7 +9920,6 @@ describe("the prompt queue's own buffer", () => {
         turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
         said: textSaid("go"),
         origin: conversationv1.PromptOrigin.USER_SENT,
-        pageSize: 5,
       }),
     );
     const first = await nextPush(prompts);
@@ -10125,7 +10090,6 @@ describe("what the fold is told about a live task", () => {
         turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
         said: textSaid("go"),
         origin: conversationv1.PromptOrigin.USER_SENT,
-        pageSize: 5,
       }),
     );
     const before = logSinkMark();
@@ -10398,7 +10362,6 @@ describe("the fold rows the engine walks past", () => {
       .watchAgent(
         create(shimv1.WatchAgentRequestSchema, {
           target: create(conversationv1.AgentIdSchema, { value: "agent-child" }),
-          pageSize: 5,
         }),
       )[Symbol.asyncIterator]();
 
@@ -10673,7 +10636,6 @@ describe("SetSessionModel's remaining arms", () => {
         turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
         said: textSaid("go"),
         origin: conversationv1.PromptOrigin.USER_SENT,
-        pageSize: 5,
       }),
     );
     const first = h.engine.setSessionModel(
@@ -11043,7 +11005,6 @@ describe("a component that recovers", () => {
         turn: create(conversationv1.TurnIdSchema, { value: turn }),
         said: textSaid("go"),
         origin: conversationv1.PromptOrigin.USER_SENT,
-        pageSize: 5,
       }),
     );
     h.queries[0]?.query.emit(resultMessage());
@@ -11235,7 +11196,6 @@ describe("a component that recovers", () => {
     h.persistence.readError = new PersistenceError("store_unavailable", "the store is down");
     await h.engine.readHistory(
       create(shimv1.ReadHistoryRequestSchema, {
-        pageSize: 5,
         position: {
           case: "after",
           value: create(conversationv1.HistoryPointerSchema, { value: "p-1" }),
@@ -11248,7 +11208,6 @@ describe("a component that recovers", () => {
     h.persistence.readError = undefined;
     await h.engine.readHistory(
       create(shimv1.ReadHistoryRequestSchema, {
-        pageSize: 5,
         position: {
           case: "after",
           value: create(conversationv1.HistoryPointerSchema, { value: "p-1" }),
@@ -12781,7 +12740,6 @@ describe("a prompt's vendor uuid is derived from its turn id", () => {
         turn: create(conversationv1.TurnIdSchema, { value: "turn-2" }),
         said: textSaid("also this"),
         origin: conversationv1.PromptOrigin.USER_SENT,
-        pageSize: 5,
         joinRunningTurn: true,
       }),
     );
@@ -13555,7 +13513,6 @@ describe("the applied effort the vendor states", () => {
           turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
           said: textSaid("go"),
           origin: conversationv1.PromptOrigin.USER_SENT,
-          pageSize: 5,
         }),
       );
       h.queries[0].query.appliedEffort = "low";

@@ -113,6 +113,12 @@ export interface SpawnShimOptions {
   /** Start the fake store. Default true. */
   readonly store?: boolean;
   /**
+   * The fake store's own page size (default: the real store's). A page is the
+   * store's to size and no request states one, so a subject that must cross a
+   * page boundary shrinks the store's page here.
+   */
+  readonly storePageSize?: number;
+  /**
    * Bind fd 3 to a PIPE rather than a file, so the test can close the read end
    * and poison the sink. The log tail is unavailable in that mode.
    */
@@ -195,7 +201,10 @@ export async function spawnShim(options: SpawnShimOptions = {}): Promise<ShimHan
   const store =
     options.store === false || options.reuse !== undefined
       ? null
-      : await startFakeStore(dirs.storeSocket);
+      : await startFakeStore(
+          dirs.storeSocket,
+          options.storePageSize === undefined ? {} : { pageSize: options.storePageSize },
+        );
 
   const argv =
     options.argv !== undefined

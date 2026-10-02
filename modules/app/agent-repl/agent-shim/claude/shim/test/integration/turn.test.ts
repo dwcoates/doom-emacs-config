@@ -726,6 +726,78 @@ describe("WatchAgent", () => {
     second.close();
   });
 
+  test("tail_only opens on an EMPTY page at the floor", async () => {
+    // Opening a watch replays no history: the daemon loads pages only when a
+    // reader asks for them.
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    const first = openStream((options) =>
+      shim.clients.h1.watchAgent(watchAgentRequest(), options),
+    );
+    await first.next();
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!md" }));
+    await untilTerminal(first);
+    first.close();
+
+    const tailOnly = openStream((options) =>
+      shim.clients.h1.watchAgent(watchAgentRequest({ tailOnly: true }), options),
+    );
+    const page = watchAgentPage(await tailOnly.next());
+
+    expect(page.entries).toEqual([]);
+    expect(page.boundary.case).toBe("floor");
+    tailOnly.close();
+  });
+
+  test("a tail_only watch carries only what is written after it opened", async () => {
+    // The tail begins after the newest entry as of the open, so the next turn
+    // reaches it and none of the turn before.
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    const first = openStream((options) =>
+      shim.clients.h1.watchAgent(watchAgentRequest(), options),
+    );
+    await first.next();
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!md" }));
+    await untilTerminal(first);
+    first.close();
+    const earlier = new Set(
+      first
+        .frames()
+        .filter((frame) => frame.frame.case === "entry")
+        .map((frame) => watchAgentEntry(frame).at?.value ?? ""),
+    );
+    const tailOnly = openStream((options) =>
+      shim.clients.h1.watchAgent(watchAgentRequest({ tailOnly: true }), options),
+    );
+    await tailOnly.next();
+
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t2", text: "!md" }));
+    await untilTerminal(tailOnly);
+
+    const tailed = tailOnly
+      .frames()
+      .filter((frame) => frame.frame.case === "entry")
+      .map((frame) => watchAgentEntry(frame).at?.value ?? "");
+    expect(tailed.length).toBeGreaterThan(0);
+    expect(tailed.filter((at) => earlier.has(at))).toEqual([]);
+    tailOnly.close();
+  });
+
+  test("StartTurn with tail_only answers an EMPTY opening page", async () => {
+    // The same opening on the one-call submit-and-paint: the prompt is
+    // delivered, and the page carries none of the book.
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+
+    const response = await shim.clients.h1.startTurn(
+      startTurnRequest({ turn: "t1", text: "!md", tailOnly: true }),
+    );
+
+    if (response.result.case !== "success") throw new Error("StartTurn refused");
+    expect(response.result.value.page?.entries).toEqual([]);
+  });
+
   test("a reattach with known_through misses nothing and doubles nothing", async () => {
     // The daemon restart case: the connection dies mid-turn and the replacement
     // reattaches with its own mark.
@@ -771,13 +843,14 @@ describe("WatchAgent", () => {
     after.close();
   });
 
-  test("a known_through GAP wider than page_size serves a page and `more` INTO the gap", async () => {
+  test("a known_through GAP wider than the store's page serves a page and `more` INTO the gap", async () => {
     // The reattach case where the daemon was away long enough for the book to
     // outgrow one page: the catch-up cannot be served whole, so it is a page
     // plus a boundary that says where to continue. A shim that served only what
     // fit and reported `floor` would have the consumer silently missing the
-    // middle of the conversation.
-    const shim = await spawnShim();
+    // middle of the conversation. The page is the STORE's: shrunk here so two
+    // turns outgrow it.
+    const shim = await spawnShim({ storePageSize: 2 });
     await shim.clients.h1.startSession(freshSession());
     const watch = openStream((options) =>
       shim.clients.h1.watchAgent(watchAgentRequest(), options),
@@ -793,7 +866,7 @@ describe("WatchAgent", () => {
 
     const catchUp = openStream((options) =>
       shim.clients.h1.watchAgent(
-        watchAgentRequest({ knownThrough: pointer(mark), pageSize: 2 }),
+        watchAgentRequest({ knownThrough: pointer(mark) }),
         options,
       ),
     );
@@ -884,7 +957,7 @@ describe("ReadHistory", () => {
   });
 
   test("after(last_entry) walks older until the floor", async () => {
-    const shim = await spawnShim();
+    const shim = await spawnShim({ storePageSize: 2 });
     await shim.clients.h1.startSession(freshSession());
     const watch = openStream((options) =>
       shim.clients.h1.watchAgent(watchAgentRequest(), options),
@@ -893,36 +966,34 @@ describe("ReadHistory", () => {
     await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!read" }));
     await untilTerminal(watch);
     watch.close();
-    const firstPage = historyPage(
-      await shim.clients.h1.readHistory(readHistoryFirst({ pageSize: 2 })),
-    );
+    const firstPage = historyPage(await shim.clients.h1.readHistory(readHistoryFirst()));
     if (firstPage.boundary.case !== "more") {
       throw new Error("the fixture produced too few entries to page over");
     }
-
-    const older = historyPage(
-      await shim.clients.h1.readHistory(
-        readHistoryAfter(firstPage.boundary.value.lastEntry ?? pointer("0"), { pageSize: 50 }),
-      ),
+    let older = historyPage(
+      await shim.clients.h1.readHistory(readHistoryAfter(firstPage.boundary.value.lastEntry ?? pointer("0"))),
     );
+    const walked = [...older.entries];
+    while (older.boundary.case === "more") {
+      older = historyPage(
+        await shim.clients.h1.readHistory(readHistoryAfter(older.boundary.value.lastEntry ?? pointer("0"))),
+      );
+      walked.push(...older.entries);
+    }
 
     expect(older.boundary.case).toBe("floor");
     // "OLDER" WITHOUT READING A POINTER: the walk is disjoint from the page it
     // continued, and it stopped at the floor. Parsing the marks as integers
     // would assert against a store that happens to mint numbers.
     const firstMarks = new Set(firstPage.entries.map((entry) => entry.at?.value ?? ""));
-    expect(older.entries.map((entry) => entry.at?.value ?? "").filter((at) => firstMarks.has(at))).toEqual(
-      [],
-    );
-    expect(older.entries.length).toBeGreaterThan(0);
+    expect(walked.map((entry) => entry.at?.value ?? "").filter((at) => firstMarks.has(at))).toEqual([]);
+    expect(walked.length).toBeGreaterThan(0);
   });
 
-  test("after(last_entry) with a page_size larger than the remainder ends at the FLOOR", async () => {
-    // A budget bigger than what is left is not an error and not a `more`: the
-    // page is however many entries remain, and the boundary says there are no
-    // older ones. A shim that reported `more` here would have a consumer paging
-    // forever against an empty tail.
-    const shim = await spawnShim();
+  test("every page of a walk is the store's page, and only the last runs short", async () => {
+    // No caller picks a budget: first and after both serve the store's page, so
+    // every page but the floor's is exactly the store's size.
+    const shim = await spawnShim({ storePageSize: 2 });
     await shim.clients.h1.startSession(freshSession());
     const watch = openStream((options) =>
       shim.clients.h1.watchAgent(watchAgentRequest(), options),
@@ -931,28 +1002,20 @@ describe("ReadHistory", () => {
     await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!read" }));
     await untilTerminal(watch);
     watch.close();
-    const whole = historyPage(
-      await shim.clients.h1.readHistory(readHistoryFirst({ pageSize: 200 })),
-    );
-    if (whole.boundary.case !== "floor") {
-      throw new Error("the fixture did not fit in one page, so there is no remainder to floor");
-    }
-    const firstPage = historyPage(
-      await shim.clients.h1.readHistory(readHistoryFirst({ pageSize: 2 })),
-    );
-    if (firstPage.boundary.case !== "more") {
-      throw new Error("the fixture produced too few entries to page over");
+    const pages = [historyPage(await shim.clients.h1.readHistory(readHistoryFirst()))];
+    for (let last = pages[0]; last?.boundary.case === "more"; last = pages[pages.length - 1]) {
+      pages.push(
+        historyPage(
+          await shim.clients.h1.readHistory(readHistoryAfter(last.boundary.value.lastEntry ?? pointer("0"))),
+        ),
+      );
     }
 
-    const rest = historyPage(
-      await shim.clients.h1.readHistory(
-        readHistoryAfter(firstPage.boundary.value.lastEntry ?? pointer("0"), { pageSize: 200 }),
-      ),
-    );
+    const sizes = pages.map((page) => page.entries.length);
 
-    expect(rest.boundary.case).toBe("floor");
-    // EXACTLY the remainder: the whole book, less the page already served.
-    expect(rest.entries.length).toBe(whole.entries.length - firstPage.entries.length);
+    expect(pages.length).toBeGreaterThan(1);
+    expect(sizes.slice(0, -1).every((size) => size === 2)).toBe(true);
+    expect(pages[pages.length - 1]?.boundary.case).toBe("floor");
   });
 
   test("every entry it serves carries the place the shim observed it at", async () => {
@@ -968,7 +1031,7 @@ describe("ReadHistory", () => {
     watch.close();
 
     // Act.
-    const page = historyPage(await shim.clients.h1.readHistory(readHistoryFirst({ pageSize: 200 })));
+    const page = historyPage(await shim.clients.h1.readHistory(readHistoryFirst()));
 
     // Assert.
     expect(new Set(page.entries.map((entry) => entry.place.case))).toEqual(new Set(["recordedPlace"]));
@@ -985,12 +1048,12 @@ describe("ReadHistory", () => {
     await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!read" }));
     await untilTerminal(watch);
     watch.close();
-    const whole = historyPage(await shim.clients.h1.readHistory(readHistoryFirst({ pageSize: 200 })));
+    const whole = historyPage(await shim.clients.h1.readHistory(readHistoryFirst()));
     const oldest = whole.entries[whole.entries.length - 1];
     const bound = oldest?.place.value?.atMs ?? 0n;
 
     // Act.
-    const asItStood = historyPage(await shim.clients.h1.readHistory(readHistoryThrough(bound, { pageSize: 200 })));
+    const asItStood = historyPage(await shim.clients.h1.readHistory(readHistoryThrough(bound)));
 
     // Assert.
     const expected = whole.entries.filter((entry) => (entry.place.value?.atMs ?? 0n) <= bound);

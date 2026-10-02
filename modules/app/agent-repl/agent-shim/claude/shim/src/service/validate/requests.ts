@@ -24,7 +24,6 @@ import {
   validateDetachedWorkId,
   validateConversationThrough,
   validateHistoryPointer,
-  validatePageSize,
   validatePromptOrigin,
   validateSessionColdRemediation,
   validateTurnId,
@@ -144,15 +143,19 @@ export function validateKillSessionRequest(_request: shimv1.KillSessionRequest):
   // `force` is a bool: false is a legitimate value, not an absence.
 }
 
-/** `shim.v1.StartTurnRequest` — the turn, what was said, why, and the page budget. */
+/**
+ * `shim.v1.StartTurnRequest` — the turn, what was said, why, and what the
+ * opening page carries. No page size: a page is the store's page.
+ */
 export function validateStartTurnRequest(request: shimv1.StartTurnRequest): void {
   try {
     validateTurnId(request.turn, "start_turn.turn");
     validateUserSaid(request.said, "start_turn.said");
     validatePromptOrigin(request.origin, "start_turn.origin");
-    validatePageSize(request.pageSize, "start_turn.page_size");
-    if (request.knownThrough !== undefined) {
-      validateHistoryPointer(request.knownThrough, "start_turn.known_through");
+    // THE OPENING IS OPTIONAL — unset is the repaint, and tail_only carries
+    // nothing to check — but a known_through mark must be a real pointer.
+    if (request.opening.case === "knownThrough") {
+      validateHistoryPointer(request.opening.value, "start_turn.known_through");
     }
   } catch (err) {
     refuse("StartTurn", err);
@@ -166,9 +169,9 @@ export function validateStartTurnRequest(request: shimv1.StartTurnRequest): void
 export function validateWatchAgentRequest(request: shimv1.WatchAgentRequest): void {
   try {
     if (request.target !== undefined) validateAgentId(request.target, "watch_agent.target");
-    validatePageSize(request.pageSize, "watch_agent.page_size");
-    if (request.knownThrough !== undefined) {
-      validateHistoryPointer(request.knownThrough, "watch_agent.known_through");
+    // As on StartTurn: only a known_through mark has anything to validate.
+    if (request.opening.case === "knownThrough") {
+      validateHistoryPointer(request.opening.value, "watch_agent.known_through");
     }
   } catch (err) {
     refuse("WatchAgent", err);
@@ -262,11 +265,10 @@ export function validateReadTranscriptsRequest(_request: shimv1.ReadTranscriptsR
   // Intentionally empty: an empty message has no illegal shape.
 }
 
-/** `shim.v1.ReadHistoryRequest` — whose history, how much, and from where. */
+/** `shim.v1.ReadHistoryRequest` — whose history, and from where. */
 export function validateReadHistoryRequest(request: shimv1.ReadHistoryRequest): void {
   try {
     if (request.target !== undefined) validateAgentId(request.target, "read_history.target");
-    validatePageSize(request.pageSize, "read_history.page_size");
     switch (request.position.case) {
       case "first":
         return;

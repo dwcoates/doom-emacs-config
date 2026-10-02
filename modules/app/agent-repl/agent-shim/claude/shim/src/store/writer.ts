@@ -92,6 +92,7 @@ import {
   DEFAULT_BATCH_POLICY,
   DEFAULT_RETRY_POLICY,
   PersistenceError,
+  type AgentOpening,
   type AgentPageSession,
   type FlushOutcome,
   type PersistEntry,
@@ -1147,11 +1148,10 @@ export function createPersistence(options: PersistenceOptions): Persistence {
 
     openAgentPage(
       agent: conversationv1.AgentId,
-      pageSize: number,
-      knownThrough?: conversationv1.HistoryPointer,
+      opening: AgentOpening,
       known?: () => boolean,
     ): Promise<AgentPageSession> {
-      return reader.openAgentPage(agent, pageSize, knownThrough, known);
+      return reader.openAgentPage(agent, opening, known);
     },
 
     noteAgentMinted(agentValue: string): void {
@@ -1160,27 +1160,24 @@ export function createPersistence(options: PersistenceOptions): Persistence {
 
     readFirstPage(
       agent: conversationv1.AgentId,
-      pageSize: number,
-      knownThrough?: conversationv1.HistoryPointer,
+      opening: AgentOpening,
       known?: () => boolean,
     ): Promise<conversationv1.HistoryPage> {
-      return reader.readFirstPage(agent, pageSize, knownThrough, known);
+      return reader.readFirstPage(agent, opening, known);
     },
 
     readAgentPage(
       agent: conversationv1.AgentId,
-      pageSize: number,
       after: conversationv1.HistoryPointer,
     ): Promise<conversationv1.HistoryPage> {
-      return reader.readAgentPage(agent, pageSize, after);
+      return reader.readAgentPage(agent, after);
     },
 
     readPageThrough(
       agent: conversationv1.AgentId,
-      pageSize: number,
       through: conversationv1.ConversationThrough,
     ): Promise<conversationv1.HistoryPage> {
-      return reader.readPageThrough(agent, pageSize, through);
+      return reader.readPageThrough(agent, through);
     },
 
     liveWork(session: conversationv1.AgentId): Promise<storev1.GetLiveWorkSuccess> {
