@@ -62,3 +62,16 @@ For merged, level- and time-filtered records across rotation generations, or
 for a realtest warn/error harvest, use the canonical reader documented in
 `../AGENTS.md` and run `../bin/logs.sh`; this directory's discovery script
 remains the focused session/PID/span/gap diagnostic.
+
+## Bouncing every backend by force
+
+`bounce-agent-repl-forcefully.sh` rebuilds every component in place in this
+checkout (protobufs, shim, webapp, daemon, store, sidecar, lock), then stops
+every backend -- the daemon and the shims running this checkout's binaries,
+their lock helpers, the sidecar and the store -- gracefully first (SIGTERM;
+`launchctl bootout` for the services) and by SIGKILL after a grace period, and
+brings the store, then the sidecar, back up. A failed build stops nothing.
+Emacs starts the fresh daemon when it next links, and the daemon its shims.
+It matches processes by this checkout's own paths, so a daemon running from
+another checkout is left alone. `test-bounce-agent-repl-forcefully.sh` covers
+it hermetically: a temporary checkout, stand-in processes and a launchctl stub.
