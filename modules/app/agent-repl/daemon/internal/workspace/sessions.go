@@ -601,6 +601,7 @@ func (f *Fleet) TakeColdGate(ws ids.WorkspaceID, vendorSessionID string) bool {
 	f.mu.Unlock()
 	if taken {
 		f.logTransition(ws, "cold_gate_standing", true, false, dlog.Context{"reason": "answered"})
+		f.publishHost(ws)
 	}
 	return taken
 }
@@ -2170,6 +2171,7 @@ func (f *Fleet) raiseColdGate(ws ids.WorkspaceID, vendorSessionID string, cold *
 		Standing:      true,
 		ContextTokens: int64(cold.GetContextTokens()),
 	})
+	f.publishHost(ws)
 }
 
 // coldCompactMenu is the compact menu a gate serves: the model the cold start
@@ -2199,6 +2201,18 @@ func coldCompactMenu(cold *conversationv1.SessionCold) (*ServedColdGateCompact, 
 // are looking at three problems.
 func coldGateDetail(cold *conversationv1.SessionCold) string {
 	return fmt.Sprintf("the conversation is cold at %d context tokens", cold.GetContextTokens())
+}
+
+// ColdGateShown answers whether a cold gate stands on the workspace UNANSWERED:
+// the gate the user sees and must answer. It is the host view's gate, and the
+// feed's standing gate row holds exactly as long (the row retires the moment an
+// answer takes the gate, and returns when a failed re-open raises it again), so
+// Emacs's hidden input and the webapp's docked banner move together.
+func (f *Fleet) ColdGateShown(ws ids.WorkspaceID) bool {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	held, ok := f.coldGates[ws]
+	return ok && !held.answering
 }
 
 // ColdGateDetail answers the standing gate's account for a workspace, false
@@ -2261,11 +2275,17 @@ func (f *Fleet) recordFacts(ctx context.Context, log dlog.Logger, ws ids.Workspa
 func (f *Fleet) Stop(ctx context.Context, ws ids.WorkspaceID, force bool) error {
 	f.mu.Lock()
 	session, ok := f.sessions[ws]
+	_, gated := f.coldGates[ws]
 	delete(f.sessions, ws)
 	delete(f.coldGates, ws)
 	delete(f.lastCold, ws)
 	f.mu.Unlock()
 	if !ok {
+		// A gate can stand with no session in the map; its retirement still
+		// moves the host view.
+		if gated {
+			f.publishHost(ws)
+		}
 		return nil
 	}
 	f.logTransition(ws, "session_live", true, false, dlog.Context{"force": force})

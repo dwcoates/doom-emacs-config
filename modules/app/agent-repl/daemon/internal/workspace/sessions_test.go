@@ -482,6 +482,9 @@ func vendorRefusal(label *shimv1.StartSessionVendorStartFailed, detail string) *
 }
 
 type fleetFixture struct {
+	// hostPublished is every workspace whose host view the fleet republished,
+	// in order.
+	hostPublished []ids.WorkspaceID
 	// now is the fleet's clock. It moves only when the vendor-start run waits
 	// (retryAfter), so the retry window is crossed without any real wait.
 	now time.Time
@@ -702,6 +705,9 @@ func newFleetFixtureBoundedAt(t *testing.T, adoptBound time.Duration) *fleetFixt
 			return fired
 		},
 		ShimAlive: func(pid int) bool { return f.shimAlive != nil && f.shimAlive(pid) },
+		PublishHost: func(ws ids.WorkspaceID) {
+			f.hostPublished = append(f.hostPublished, ws)
+		},
 	})
 	if err != nil {
 		t.Fatalf("NewFleet: %v", err)
@@ -3892,6 +3898,94 @@ func TestReraiseColdGateStandsTheGateFromItsKeptFacts(t *testing.T) {
 	if len(f.feed.synthesized) != 1 || f.feed.synthesized[0].GetId().GetValue() != want ||
 		f.feed.synthesized[0].GetColdGate().GetStanding() == nil {
 		t.Fatalf("synthesized rows = %v, want the standing gate row %q", f.feed.synthesized, want)
+	}
+}
+
+// ---- the gate the host view carries ----
+
+func TestColdGateShownFollowsTheGatesLife(t *testing.T) {
+	tests := []struct {
+		name string
+		act  func(f *fleetFixture, ws ids.WorkspaceID)
+		want bool
+	}{
+		{"no gate raised is no gate shown", func(*fleetFixture, ids.WorkspaceID) {}, false},
+		{"a raised gate is shown", func(f *fleetFixture, ws ids.WorkspaceID) {
+			f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config")
+		}, true},
+		{"an answered gate is no longer shown", func(f *fleetFixture, ws ids.WorkspaceID) {
+			f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config")
+			f.fleet.TakeColdGate(ws, "vendor-1")
+		}, false},
+		{"a gate stood again after a failed re-open is shown", func(f *fleetFixture, ws ids.WorkspaceID) {
+			f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config")
+			f.fleet.TakeColdGate(ws, "vendor-1")
+			f.fleet.ReraiseColdGate(ws, "vendor-1")
+		}, true},
+		{"a stopped workspace's gate is gone", func(f *fleetFixture, ws ids.WorkspaceID) {
+			f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config")
+			_ = f.fleet.Stop(context.Background(), ws, true)
+		}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFleetFixture(t)
+			ws := f.workspace("ws-shown")
+
+			// Act.
+			tt.act(f, ws.ID)
+
+			// Assert.
+			if got := f.fleet.ColdGateShown(ws.ID); got != tt.want {
+				t.Fatalf("ColdGateShown = %t, want %t", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEveryEdgeOfTheShownGateRepublishesTheHostView(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(f *fleetFixture, ws ids.WorkspaceID)
+		act     func(f *fleetFixture, ws ids.WorkspaceID)
+	}{
+		{"raising the gate", func(*fleetFixture, ids.WorkspaceID) {}, func(f *fleetFixture, ws ids.WorkspaceID) {
+			f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config")
+		}},
+		{"answering the gate", func(f *fleetFixture, ws ids.WorkspaceID) {
+			f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config")
+		}, func(f *fleetFixture, ws ids.WorkspaceID) {
+			f.fleet.TakeColdGate(ws, "vendor-1")
+		}},
+		{"standing it again", func(f *fleetFixture, ws ids.WorkspaceID) {
+			f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config")
+			f.fleet.TakeColdGate(ws, "vendor-1")
+		}, func(f *fleetFixture, ws ids.WorkspaceID) {
+			f.fleet.ReraiseColdGate(ws, "vendor-1")
+		}},
+		{"stopping a gated workspace with no session", func(f *fleetFixture, ws ids.WorkspaceID) {
+			f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config")
+		}, func(f *fleetFixture, ws ids.WorkspaceID) {
+			_ = f.fleet.Stop(context.Background(), ws, true)
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFleetFixture(t)
+			ws := f.workspace("ws-publish")
+			tt.arrange(f, ws.ID)
+			f.hostPublished = nil
+
+			// Act.
+			tt.act(f, ws.ID)
+
+			// Assert.
+			if len(f.hostPublished) == 0 || f.hostPublished[len(f.hostPublished)-1] != ws.ID {
+				t.Fatalf("host views published = %v, want %q republished", f.hostPublished, ws.ID)
+			}
+		})
 	}
 }
 

@@ -1215,3 +1215,71 @@ func TestHostFaultCarriesTheVendorFailedLastCause(t *testing.T) {
 		t.Fatalf("vendor_start_failed = %+v, want the recorded evidence", arm)
 	}
 }
+
+// ---- the standing gate ----------------------------------------------------
+
+// TestTheHostViewCarriesTheStandingGate pins each gate state onto the wire:
+// absent when none stands, the cold-gate arm while the cold gate stands, and
+// an unnamed gate for a kind the wire has no arm for.
+func TestTheHostViewCarriesTheStandingGate(t *testing.T) {
+	tests := []struct {
+		name     string
+		gate     *HostGateKind
+		wantGate bool
+		wantCold bool
+	}{
+		{"no gate standing leaves the field absent", nil, false, false},
+		{"a standing cold gate is the cold-gate arm", ptrTo(HostGateColdGate), true, true},
+		{"a kind with no wire arm is an unnamed gate", ptrTo(HostGateKind(99)), true, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			if tt.gate != nil {
+				h.Facts.gates = map[ids.WorkspaceID]HostGateKind{testWorkspaceID: *tt.gate}
+			}
+
+			// Act.
+			view := composeHost(t, h)
+
+			// Assert.
+			if (view.GetGate() != nil) != tt.wantGate || (view.GetGate().GetColdGate() != nil) != tt.wantCold {
+				t.Fatalf("gate = %v, want present=%t cold=%t", view.GetGate(), tt.wantGate, tt.wantCold)
+			}
+		})
+	}
+}
+
+// TestAGateKindWithNoWireArmIsAnError pins that the unnamed gate is loud.
+func TestAGateKindWithNoWireArmIsAnError(t *testing.T) {
+	// Arrange.
+	log := &recordingLogger{}
+
+	// Act.
+	hostGate(log, HostGateKind(99))
+
+	// Assert.
+	if len(log.at("ERROR")) != 1 {
+		t.Fatalf("errors = %v, want the missing arm recorded once", log.at("ERROR"))
+	}
+}
+
+// TestAGateStandsWithNoSession pins that the gate is workspace-level: a cold
+// gate parks the bring-up before any session starts.
+func TestAGateStandsWithNoSession(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Facts.gates = map[ids.WorkspaceID]HostGateKind{testWorkspaceID: HostGateColdGate}
+
+	// Act.
+	view := composeHost(t, h)
+
+	// Assert.
+	if view.GetNone() == nil || view.GetGate().GetColdGate() == nil {
+		t.Fatalf("view = %v, want the none arm beside the standing cold gate", view)
+	}
+}
+
+// ptrTo answers a pointer to v, for a table's optional arrangement.
+func ptrTo[T any](v T) *T { return &v }
