@@ -1,6 +1,7 @@
 package rollout
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -153,5 +154,20 @@ func TestNewRefusesAMissingBringUpCollaborator(t *testing.T) {
 				t.Fatalf("New accepted a controller that could not start a session-less workspace's session")
 			}
 		})
+	}
+}
+
+func TestNewRefusesADaemonAddrWriterWithNoBootClaimWait(t *testing.T) {
+	// Arrange: the harness's whole deps, less the boot-claim wait.
+	h := newHarness(t)
+	deps := h.c.deps
+	deps.AwaitBootClaim = nil
+
+	// Act
+	_, err := New(deps)
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "boot-claim wait is required") {
+		t.Fatalf("New = %v, want the missing boot-claim wait refused", err)
 	}
 }
