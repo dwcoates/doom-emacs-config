@@ -1198,8 +1198,8 @@ The three axes on a tab are independent, and each says one thing:
 
 The same two words, `full` and `partial`, name a SECOND thing a workspace
 carries, and it is drawn on the Emacs tab-bar and in the webapp sidebar alike.
-A workspace whose panels the user has stood in front of for
-`agent-repl-tab-dwell-demote-seconds` is demoted to **partial**: the tab's name
+A workspace whose panels the user has stood in front of for its DWELL is
+demoted to **partial**: the tab's name
 falls back to the bar's ground (`[N]` keeps the status colour) and the sidebar
 row's name greys to `--muted`. **The status itself never recedes** — the
 bracket and the sidebar dot keep their colour in either mode. The mode says
@@ -1221,9 +1221,22 @@ a turn that finishes while detached work runs shows its green `done` (or
 `idle_async`, full; when the work ends the row returns to its turn-end arm
 PARTIAL, never a fresh full one claiming an unread result.
 
-**Emacs DETECTS and REPORTS; it does not decide.** The 5-second dwell is
-measured in Emacs, because only Emacs knows what the user is standing in front
-of. When it is satisfied, `agent-repl--tab-view-partial` (status.el) reports
+**Emacs DETECTS and REPORTS; it does not decide.** The dwell is measured in
+Emacs, because only Emacs knows what the user is standing in front of, and its
+threshold is chosen in ONE place, `agent-repl--tab-dwell-seconds` (status.el;
+owner ruling, 2026-10-02):
+
+| case | dwell |
+|---|---|
+| a `done` lands while the user is viewing the workspace | 1 s (`agent-repl-tab-dwell-fast-demote-seconds`) |
+| the user walks into a turn end that already stood; any interrupted, failed or vendor-blocked row | 5 s (`agent-repl-tab-dwell-demote-seconds`) |
+| a `/clear` or compaction completes | none: the daemon reads the result in `SetTurnEnded` and the push that ends the cut already carries the marker |
+
+There is ONE pending dwell (`agent-repl--tab-dwell-pending`), and its timer
+carries the generation it was armed under: a timer that fires after a re-arm,
+a drop or its own demotion finds a different generation and does nothing, so
+a superseded timer cannot demote anything. The webapp runs no timer at all.
+When it is satisfied, `agent-repl--tab-view-partial` (status.el) reports
 the workspace (`agent-repl-host-mark-viewed` -> `MarkWorkspaceViewed`) and
 repaints, and latches nothing locally. The tab turns partial when the next
 roster push carries the marker: `agent-repl--tab-dwell-demoted-p` reads only

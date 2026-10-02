@@ -453,13 +453,14 @@ the latch cannot change a closed tab's already-partial extent."
   (should (memq #'agent-repl--repaint-tab-on-panel-change
                 window-configuration-change-hook)))
 
-;;;; ---- Tests: the view-dwell demotion (full -> partial after 5s) ----
+;;;; ---- Tests: the view-dwell demotion (full -> partial after a dwell) ----
 ;;
-;; Owner ruling (2026-09-15): after a workspace's panels have been viewed for
-;; at least `agent-repl-tab-dwell-demote-seconds', its tab demotes from FULL
-;; to PARTIAL even with the panels open, and resets to FULL on the next status
-;; update.  The clock is injected (`agent-repl--tab-dwell-note' takes NOW), so
-;; nothing sleeps.
+;; Owner rulings (2026-09-15, 2026-10-02): after a workspace's panels have
+;; been viewed for the dwell `agent-repl--tab-dwell-seconds' chooses — one
+;; second for a `done' the user watched land, five otherwise — it is reported
+;; viewed and its tab draws PARTIAL once the daemon's row carries the marker.
+;; The clock is injected (`agent-repl--tab-dwell-note' takes NOW) and the
+;; timer is captured rather than run, so nothing sleeps.
 
 (defvar agent-repl-test--viewed-reports nil
   "Workspaces `agent-repl-host-mark-viewed' was called with under the macro.
@@ -469,6 +470,14 @@ connection.")
 
 (defvar agent-repl-test--row-viewed nil
   "Workspace -> the stubbed roster row's decoded `:viewed' marker.")
+
+(defvar agent-repl-test--dwell-timers nil
+  "Every `run-with-timer' call under the dwell macro, newest first.
+Each entry is (SECONDS FUNCTION ARGS...), so a test can read the
+threshold a dwell was armed with and fire any captured timer by hand.")
+
+(defvar agent-repl-test--dwell-logs nil
+  "Every formatted `agent-repl--log' line under the dwell macro, newest first.")
 
 (defmacro agent-repl-test--with-row-viewed (&rest body)
   "Run BODY with `agent-repl-roster-viewed-for-ws' reading a stub table.
@@ -482,40 +491,219 @@ workspace stands in for a roster push whose row carries `RosterRowViewed'."
 
 (defmacro agent-repl-test--with-dwell-state (&rest body)
   "Run BODY with fresh view-dwell state and every side effect stubbed.
-`run-with-timer' is stubbed so arming schedules nothing real, the logging
-sink is silenced, and `agent-repl-host-mark-viewed' records into
-`agent-repl-test--viewed-reports' instead of dialling the daemon."
+`run-with-timer' records into `agent-repl-test--dwell-timers' and
+schedules nothing real, the logging sink records into
+`agent-repl-test--dwell-logs', and `agent-repl-host-mark-viewed' records
+into `agent-repl-test--viewed-reports' instead of dialling the daemon."
   (declare (indent 0))
   `(agent-repl-test--with-row-viewed
-   (let ((agent-repl--tab-dwell-armed-at (make-hash-table :test 'equal))
-         (agent-repl--tab-dwell-timer nil)
-         (agent-repl-test--viewed-reports nil))
-     (cl-letf (((symbol-function 'run-with-timer) (lambda (&rest _) 'stub-timer))
-               ((symbol-function 'agent-repl--log) (lambda (&rest _) nil))
-               ((symbol-function 'agent-repl-host-mark-viewed)
-                (lambda (ws) (push ws agent-repl-test--viewed-reports) t)))
-       ,@body))))
+     (let ((agent-repl--tab-dwell-pending nil)
+           (agent-repl--tab-dwell-generation 0)
+           (agent-repl-test--dwell-timers nil)
+           (agent-repl-test--dwell-logs nil)
+           (agent-repl-test--viewed-reports nil))
+       (cl-letf (((symbol-function 'run-with-timer)
+                  (lambda (secs _repeat fn &rest args)
+                    (push (cons secs (cons fn args)) agent-repl-test--dwell-timers)
+                    'stub-timer))
+                 ((symbol-function 'cancel-timer) #'ignore)
+                 ((symbol-function 'timerp) (lambda (x) (eq x 'stub-timer)))
+                 ((symbol-function 'agent-repl--log)
+                  (lambda (_ws fmt &rest args)
+                    (push (apply #'format fmt args) agent-repl-test--dwell-logs)))
+                 ((symbol-function 'agent-repl-host-mark-viewed)
+                  (lambda (ws) (push ws agent-repl-test--viewed-reports) t)))
+         ,@body))))
+
+(defmacro agent-repl-test--viewing (ws status &rest body)
+  "Run BODY with WS current, its panels open, and its row resolving STATUS."
+  (declare (indent 2))
+  `(cl-letf (((symbol-function 'agent-repl--ws-known-p) (lambda (_ws) t))
+             ((symbol-function 'agent-repl--ws-current-name) (lambda () ,ws))
+             ((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) t))
+             ((symbol-function 'agent-repl--ws-render-status) (lambda (_ws) ,status))
+             ((symbol-function 'agent-repl--force-tab-bar-redraw) #'ignore))
+     ,@body))
+
+(defun agent-repl-test--fire-dwell-timer (entry)
+  "Fire the captured dwell timer ENTRY, as its deadline arriving would."
+  (apply (cadr entry) (cddr entry)))
+
+(defun agent-repl-test--pending-dwell (ws at seconds)
+  "Install a pending dwell for WS armed AT with SECONDS, as an arm would."
+  (setq agent-repl--tab-dwell-pending
+        (list :ws ws :at at :seconds seconds :generation 1 :timer 'stub-timer)))
 
 (ert-deftest agent-repl-test-tab-dwell-demote-seconds-is-five ()
-  "The dwell threshold is the owner-specified five seconds."
+  "The standard dwell threshold is the owner-specified five seconds."
   (should (equal agent-repl-tab-dwell-demote-seconds 5)))
+
+(ert-deftest agent-repl-test-tab-dwell-fast-demote-seconds-is-one ()
+  "The watched-land dwell threshold is the owner-specified one second."
+  (should (equal agent-repl-tab-dwell-fast-demote-seconds 1)))
+
+(ert-deftest agent-repl-test-tab-dwell-seconds-done-landing-while-viewed-is-fast ()
+  "Rule 1: a `done' that lands while the user views the workspace takes 1s."
+  ;; Arrange
+  (agent-repl-test--with-dwell-state
+    (agent-repl-test--viewing "ws1" :done
+      ;; Act / Assert
+      (should (equal (agent-repl--tab-dwell-seconds "ws1" 'status-change) 1)))))
+
+(ert-deftest agent-repl-test-tab-dwell-seconds-done-after-viewed-clear-is-fast ()
+  "A `done' reached on the viewed-cleared edge was also watched landing: 1s.
+The status-change and viewed-cleared reactions to one push must agree."
+  ;; Arrange
+  (agent-repl-test--with-dwell-state
+    (agent-repl-test--viewing "ws1" :done
+      ;; Act / Assert
+      (should (equal (agent-repl--tab-dwell-seconds "ws1" 'viewed-cleared) 1)))))
+
+(ert-deftest agent-repl-test-tab-dwell-seconds-walking-into-done-is-standard ()
+  "Walking INTO a `done' that already stood keeps the standard 5s."
+  ;; Arrange
+  (agent-repl-test--with-dwell-state
+    (agent-repl-test--viewing "ws1" :done
+      ;; Act / Assert
+      (should (equal (agent-repl--tab-dwell-seconds "ws1" 'activation) 5)))))
+
+(ert-deftest agent-repl-test-tab-dwell-seconds-interrupted-landing-is-standard ()
+  "Only the final response is fast: an interrupted turn end keeps 5s."
+  ;; Arrange
+  (agent-repl-test--with-dwell-state
+    (agent-repl-test--viewing "ws1" :interrupted
+      ;; Act / Assert
+      (should (equal (agent-repl--tab-dwell-seconds "ws1" 'status-change) 5)))))
+
+(ert-deftest agent-repl-test-tab-dwell-seconds-logs-the-rule ()
+  "The threshold decision is recorded with the rule that chose it."
+  ;; Arrange
+  (agent-repl-test--with-dwell-state
+    (agent-repl-test--viewing "ws1" :done
+      ;; Act
+      (agent-repl--tab-dwell-seconds "ws1" 'status-change)
+      ;; Assert
+      (should (cl-some (lambda (line)
+                         (string-match-p "dwell threshold ws=ws1 origin=status-change status=:done seconds=1 rule=done-landed-while-viewing" line))
+                       agent-repl-test--dwell-logs)))))
+
+(ert-deftest agent-repl-test-tab-dwell-seconds-rejects-an-unknown-origin ()
+  "An origin outside the three named ones is a caller defect and signals."
+  ;; Arrange
+  (agent-repl-test--with-dwell-state
+    (cl-letf (((symbol-function 'agent-repl--error) #'ignore))
+      (agent-repl-test--viewing "ws1" :done
+        ;; Act / Assert
+        (should-error (agent-repl--tab-dwell-seconds "ws1" 'heartbeat))))))
+
+(ert-deftest agent-repl-test-tab-dwell-arm-schedules-the-chosen-threshold ()
+  "Arming schedules its one timer for the seconds the threshold rule chose."
+  ;; Arrange
+  (agent-repl-test--with-dwell-state
+    (agent-repl-test--viewing "ws1" :done
+      ;; Act
+      (agent-repl--tab-dwell-arm "ws1" (current-time) 'status-change)
+      ;; Assert
+      (should (equal (car (car agent-repl-test--dwell-timers)) 1))
+      (should (equal (plist-get agent-repl--tab-dwell-pending :seconds) 1)))))
+
+(ert-deftest agent-repl-test-tab-dwell-superseded-timer-does-nothing ()
+  "A timer superseded by a re-arm does NOTHING when it fires.
+The race the generation closes: a 5s activation timer whose cancellation
+did not reach it must not demote on the strength of the old arm."
+  ;; Arrange: an activation dwell, then a re-arm that supersedes it.
+  (agent-repl-test--with-dwell-state
+    (agent-repl-test--viewing "ws1" :done
+      (agent-repl--tab-dwell-arm "ws1" (time-subtract (current-time) (seconds-to-time 60))
+                                 'activation)
+      (let ((stale (car agent-repl-test--dwell-timers)))
+        (agent-repl--tab-dwell-arm "ws1" (current-time) 'status-change)
+        ;; Act: the stale timer fires anyway.
+        (agent-repl-test--fire-dwell-timer stale)
+        ;; Assert
+        (should-not agent-repl-test--viewed-reports)
+        (should (cl-some (lambda (line)
+                           (string-match-p "superseded dwell timer ignored ws=ws1 generation=1 pending=3" line))
+                         agent-repl-test--dwell-logs))))))
+
+(ert-deftest agent-repl-test-tab-dwell-current-timer-demotes-when-it-fires ()
+  "The pending dwell's own timer, fired at its deadline, reports the workspace."
+  ;; Arrange
+  (agent-repl-test--with-dwell-state
+    (agent-repl-test--viewing "ws1" :done
+      (agent-repl--tab-dwell-arm "ws1" (time-subtract (current-time) (seconds-to-time 2))
+                                 'status-change)
+      ;; Act
+      (agent-repl-test--fire-dwell-timer (car agent-repl-test--dwell-timers))
+      ;; Assert
+      (should (equal agent-repl-test--viewed-reports '("ws1"))))))
+
+(ert-deftest agent-repl-test-tab-dwell-spent-timer-firing-again-does-nothing ()
+  "A dwell that already demoted is spent: its timer firing again does nothing."
+  ;; Arrange
+  (agent-repl-test--with-dwell-state
+    (agent-repl-test--viewing "ws1" :done
+      (agent-repl--tab-dwell-arm "ws1" (time-subtract (current-time) (seconds-to-time 2))
+                                 'status-change)
+      (let ((entry (car agent-repl-test--dwell-timers)))
+        (agent-repl-test--fire-dwell-timer entry)
+        ;; Act
+        (agent-repl-test--fire-dwell-timer entry)
+        ;; Assert
+        (should (equal agent-repl-test--viewed-reports '("ws1")))))))
+
+(ert-deftest agent-repl-test-tab-dwell-background-arm-leaves-the-viewed-dwell ()
+  "A background workspace's status change does not cancel the viewed one's dwell."
+  ;; Arrange
+  (agent-repl-test--with-dwell-state
+    (agent-repl-test--viewing "ws1" :done
+      (agent-repl--tab-dwell-arm "ws1" (current-time) 'status-change)
+      ;; Act
+      (agent-repl--tab-dwell-arm "ws2" (current-time) 'status-change)
+      ;; Assert
+      (should (equal (plist-get agent-repl--tab-dwell-pending :ws) "ws1"))
+      (should (equal (plist-get agent-repl--tab-dwell-pending :generation) 1)))))
+
+(ert-deftest agent-repl-test-tab-dwell-ineligible-rearm-drops-its-own-dwell ()
+  "Re-arming the pending workspace once it is no longer eligible drops the dwell."
+  ;; Arrange
+  (agent-repl-test--with-dwell-state
+    (agent-repl-test--viewing "ws1" :done
+      (agent-repl--tab-dwell-arm "ws1" (current-time) 'status-change)
+      (cl-letf (((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) nil)))
+        ;; Act
+        (agent-repl--tab-dwell-arm "ws1" (current-time) 'status-change)
+        ;; Assert
+        (should-not agent-repl--tab-dwell-pending)
+        (should (equal agent-repl--tab-dwell-generation 2))))))
 
 (ert-deftest agent-repl-test-tab-dwell-note-holds-full-before-deadline ()
   "A workspace viewed less than the dwell stays undemoted (draws FULL)."
   ;; Arrange
   (agent-repl-test--with-dwell-state
-    (let ((base (current-time)))
-      (puthash "ws1" base agent-repl--tab-dwell-armed-at)
-      (cl-letf (((symbol-function 'agent-repl--ws-known-p) (lambda (_ws) t))
-                ((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
-                ((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) t))
-                ((symbol-function 'agent-repl--force-tab-bar-redraw) #'ignore))
+    (agent-repl-test--viewing "ws1" :done
+      (let ((base (current-time)))
+        (agent-repl-test--pending-dwell "ws1" base 5)
         ;; Act
         (let ((demoted (agent-repl--tab-dwell-note
                         "ws1" (time-add base (seconds-to-time 4)))))
           ;; Assert
           (should-not demoted)
-          (should-not (agent-repl--tab-dwell-demoted-p "ws1")))))))
+          (should-not agent-repl-test--viewed-reports))))))
+
+(ert-deftest agent-repl-test-tab-dwell-note-fast-dwell-reports-after-one-second ()
+  "A 1s dwell reports the workspace one second after it was armed."
+  ;; Arrange
+  (agent-repl-test--with-dwell-state
+    (agent-repl-test--viewing "ws1" :done
+      (let ((base (current-time)))
+        (agent-repl-test--pending-dwell "ws1" base 1)
+        ;; Act
+        (let ((demoted (agent-repl--tab-dwell-note
+                        "ws1" (time-add base (seconds-to-time 1)))))
+          ;; Assert
+          (should demoted)
+          (should (equal agent-repl-test--viewed-reports '("ws1"))))))))
 
 (ert-deftest agent-repl-test-tab-dwell-note-reports-but-tab-stays-full-until-row-viewed ()
   "A satisfied dwell reports mark-viewed, but the tab stays FULL.
@@ -523,74 +711,73 @@ The daemon is the single source: the tab turns PARTIAL only once a roster
 row carrying the viewed marker arrives."
   ;; Arrange
   (agent-repl-test--with-dwell-state
-    (let ((base (current-time))
-          (repainted 0))
-      (puthash "ws1" base agent-repl--tab-dwell-armed-at)
-      (cl-letf (((symbol-function 'agent-repl--ws-known-p) (lambda (_ws) t))
-                ((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
-                ((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) t))
-                ((symbol-function 'agent-repl--force-tab-bar-redraw)
-                 (lambda () (cl-incf repainted))))
-        ;; Act
-        (let ((demoted (agent-repl--tab-dwell-note
-                        "ws1" (time-add base (seconds-to-time 5)))))
-          ;; Assert
-          (should demoted)
-          (should (equal agent-repl-test--viewed-reports '("ws1")))
-          (should-not (agent-repl--tab-dwell-demoted-p "ws1"))
-          (should (equal repainted 1)))))))
+    (agent-repl-test--viewing "ws1" :done
+      (let ((base (current-time))
+            (repainted 0))
+        (agent-repl-test--pending-dwell "ws1" base 5)
+        (cl-letf (((symbol-function 'agent-repl--force-tab-bar-redraw)
+                   (lambda () (cl-incf repainted))))
+          ;; Act
+          (let ((demoted (agent-repl--tab-dwell-note
+                          "ws1" (time-add base (seconds-to-time 5)))))
+            ;; Assert
+            (should demoted)
+            (should (equal agent-repl-test--viewed-reports '("ws1")))
+            (should-not (agent-repl--tab-dwell-demoted-p "ws1"))
+            (should (equal repainted 1))))))))
 
 (ert-deftest agent-repl-test-tab-dwell-note-does-not-demote-when-panels-closed ()
   "Panels closed: the dwell never demotes (a closed tab is PARTIAL already)."
   ;; Arrange
   (agent-repl-test--with-dwell-state
-    (let ((base (current-time)))
-      (puthash "ws1" base agent-repl--tab-dwell-armed-at)
-      (cl-letf (((symbol-function 'agent-repl--ws-known-p) (lambda (_ws) t))
-                ((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
-                ((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) nil))
-                ((symbol-function 'agent-repl--force-tab-bar-redraw) #'ignore))
-        ;; Act / Assert
-        (should-not (agent-repl--tab-dwell-note
-                     "ws1" (time-add base (seconds-to-time 30))))
-        (should-not (agent-repl--tab-dwell-demoted-p "ws1"))))))
+    (agent-repl-test--viewing "ws1" :done
+      (let ((base (current-time)))
+        (agent-repl-test--pending-dwell "ws1" base 5)
+        (cl-letf (((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) nil)))
+          ;; Act / Assert
+          (should-not (agent-repl--tab-dwell-note
+                       "ws1" (time-add base (seconds-to-time 30))))
+          (should-not agent-repl-test--viewed-reports))))))
 
 (ert-deftest agent-repl-test-tab-dwell-note-does-not-demote-a-background-workspace ()
   "Only the currently-viewed workspace dwells: a background one never demotes."
   ;; Arrange
   (agent-repl-test--with-dwell-state
-    (let ((base (current-time)))
-      (puthash "ws1" base agent-repl--tab-dwell-armed-at)
-      (cl-letf (((symbol-function 'agent-repl--ws-known-p) (lambda (_ws) t))
-                ((symbol-function 'agent-repl--ws-current-name) (lambda () "ws2"))
-                ((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) t))
-                ((symbol-function 'agent-repl--force-tab-bar-redraw) #'ignore))
+    (agent-repl-test--viewing "ws2" :done
+      (let ((base (current-time)))
+        (agent-repl-test--pending-dwell "ws1" base 5)
         ;; Act / Assert
         (should-not (agent-repl--tab-dwell-note
                      "ws1" (time-add base (seconds-to-time 30))))
-        (should-not (agent-repl--tab-dwell-demoted-p "ws1"))))))
+        (should-not agent-repl-test--viewed-reports)))))
 
-(ert-deftest agent-repl-test-tab-view-restore-full-rearms-the-dwell ()
-  "A restore restarts the 5s clock; it touches no local mode state."
+(ert-deftest agent-repl-test-tab-dwell-note-ignores-another-workspaces-dwell ()
+  "A note for a workspace that is not the pending dwell's does nothing."
   ;; Arrange
   (agent-repl-test--with-dwell-state
-    (let ((t0 (current-time)))
-      (puthash "ws1" t0 agent-repl--tab-dwell-armed-at)
-      (cl-letf (((symbol-function 'agent-repl--ws-known-p) (lambda (_ws) t))
-                ((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
-                ((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) t))
-                ((symbol-function 'agent-repl--force-tab-bar-redraw) #'ignore))
-        (let ((t1 (time-add t0 (seconds-to-time 100))))
-          ;; Act: status update at t1 resets
-          (agent-repl--tab-view-restore-full "ws1" t1)
-          ;; Assert: the clock re-armed to t1
-          (should (equal (gethash "ws1" agent-repl--tab-dwell-armed-at) t1))
-          ;; A note before the NEW deadline still holds full
-          (should-not (agent-repl--tab-dwell-note
-                       "ws1" (time-add t1 (seconds-to-time 4))))
-          ;; ...and demotes again once the re-armed dwell elapses
-          (should (agent-repl--tab-dwell-note
-                   "ws1" (time-add t1 (seconds-to-time 5)))))))))
+    (agent-repl-test--viewing "ws1" :done
+      (let ((base (current-time)))
+        (agent-repl-test--pending-dwell "ws2" base 5)
+        ;; Act / Assert
+        (should-not (agent-repl--tab-dwell-note
+                     "ws1" (time-add base (seconds-to-time 30))))))))
+
+(ert-deftest agent-repl-test-tab-view-restore-full-rearms-the-dwell ()
+  "A restore restarts the clock from NOW; it touches no local mode state."
+  ;; Arrange
+  (agent-repl-test--with-dwell-state
+    (agent-repl-test--viewing "ws1" :interrupted
+      (let* ((t0 (current-time))
+             (t1 (time-add t0 (seconds-to-time 100))))
+        (agent-repl-test--pending-dwell "ws1" t0 5)
+        ;; Act: status update at t1 resets
+        (agent-repl--tab-view-restore-full "ws1" t1)
+        ;; Assert: the clock re-armed to t1
+        (should (equal (plist-get agent-repl--tab-dwell-pending :at) t1))
+        (should-not (agent-repl--tab-dwell-note
+                     "ws1" (time-add t1 (seconds-to-time 4))))
+        (should (agent-repl--tab-dwell-note
+                 "ws1" (time-add t1 (seconds-to-time 5))))))))
 
 (ert-deftest agent-repl-test-tab-view-partial-repaints-without-latching ()
   "The ONE staleness entry point repaints but latches nothing locally.
@@ -620,21 +807,29 @@ construction."
       (should (equal agent-repl-test--viewed-reports '("ws1"))))))
 
 (ert-deftest agent-repl-test-tab-dwell-status-change-rearms-the-dwell ()
-  "A status change restarts the 5s clock from the moment it arrives.
-The daemon drops a dwell reported on a non-done row, so a turn that ran
-to done under the user's eyes must earn a fresh dwell on the done row."
+  "A status change restarts the clock from the moment it arrives.
+The daemon drops a dwell reported on a non-turn-end row, so a turn that
+ran to done under the user's eyes must earn a fresh dwell on the done row."
   ;; Arrange
   (agent-repl-test--with-dwell-state
-    (let ((t0 (time-subtract (current-time) (seconds-to-time 100))))
-      (puthash "ws1" t0 agent-repl--tab-dwell-armed-at)
-      (cl-letf (((symbol-function 'agent-repl--ws-known-p) (lambda (_ws) t))
-                ((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
-                ((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) t)))
+    (agent-repl-test--viewing "ws1" :done
+      (let ((t0 (time-subtract (current-time) (seconds-to-time 100))))
+        (agent-repl-test--pending-dwell "ws1" t0 5)
         ;; Act
         (agent-repl--tab-dwell-rearm-on-status-change "ws1" :thinking :done)
         ;; Assert: the clock moved off t0 and a demotion timer is pending
-        (should-not (equal (gethash "ws1" agent-repl--tab-dwell-armed-at) t0))
-        (should (eq agent-repl--tab-dwell-timer 'stub-timer))))))
+        (should-not (equal (plist-get agent-repl--tab-dwell-pending :at) t0))
+        (should (eq (plist-get agent-repl--tab-dwell-pending :timer) 'stub-timer))))))
+
+(ert-deftest agent-repl-test-tab-dwell-status-change-to-done-while-viewing-arms-one-second ()
+  "Rule 1 end to end: the final response landing under the user's eyes arms 1s."
+  ;; Arrange
+  (agent-repl-test--with-dwell-state
+    (agent-repl-test--viewing "ws1" :done
+      ;; Act
+      (agent-repl--tab-dwell-rearm-on-status-change "ws1" :thinking :done)
+      ;; Assert
+      (should (equal (car (car agent-repl-test--dwell-timers)) 1)))))
 
 (ert-deftest agent-repl-test-tab-dwell-status-change-reaction-is-registered ()
   "The re-arm hangs off the roster's one status-change announcement."
@@ -647,10 +842,7 @@ to done under the user's eyes must earn a fresh dwell on the done row."
   ;; Arrange
   (agent-repl-test--with-dwell-state
     (puthash "ws1" '(:viewed t) agent-repl-test--row-viewed)
-    (cl-letf (((symbol-function 'agent-repl--ws-known-p) (lambda (_ws) t))
-              ((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
-              ((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) t))
-              ((symbol-function 'agent-repl--force-tab-bar-redraw) #'ignore))
+    (agent-repl-test--viewing "ws1" :done
       ;; Act
       (agent-repl--tab-view-restore-full "ws1" (current-time))
       ;; Assert
@@ -678,14 +870,11 @@ to done under the user's eyes must earn a fresh dwell on the done row."
   "The viewed-cleared reaction re-arms the dwell from the new activity."
   ;; Arrange
   (agent-repl-test--with-dwell-state
-    (cl-letf (((symbol-function 'agent-repl--ws-known-p) (lambda (_ws) t))
-              ((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
-              ((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) t))
-              ((symbol-function 'agent-repl--force-tab-bar-redraw) #'ignore))
+    (agent-repl-test--viewing "ws1" :submitting
       ;; Act
       (agent-repl--tab-view-restore-on-viewed-cleared "ws1")
       ;; Assert
-      (should (gethash "ws1" agent-repl--tab-dwell-armed-at)))))
+      (should (equal (plist-get agent-repl--tab-dwell-pending :ws) "ws1")))))
 
 (ert-deftest agent-repl-test-tab-view-restore-hook-is-registered-on-viewed-clears ()
   "The restore runs on the VIEWED-CLEARED hook, the daemon's clear edge."
@@ -700,16 +889,24 @@ to done under the user's eyes must earn a fresh dwell on the done row."
                     agent-repl-roster-status-change-functions)))
 
 (ert-deftest agent-repl-test-tab-dwell-on-activation-arms-the-clock ()
-  "Activating a workspace stamps its armed-at so its dwell can begin."
+  "Activating a workspace arms its dwell so the clock can begin."
   ;; Arrange
   (agent-repl-test--with-dwell-state
-    (cl-letf (((symbol-function 'agent-repl--ws-known-p) (lambda (_ws) t))
-              ((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
-              ((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) t)))
+    (agent-repl-test--viewing "ws1" :done
       ;; Act
       (agent-repl--tab-dwell-on-activation)
       ;; Assert
-      (should (gethash "ws1" agent-repl--tab-dwell-armed-at)))))
+      (should (equal (plist-get agent-repl--tab-dwell-pending :ws) "ws1")))))
+
+(ert-deftest agent-repl-test-tab-dwell-on-activation-into-done-arms-five-seconds ()
+  "Walking into a `done' that already stood arms the standard 5s dwell."
+  ;; Arrange
+  (agent-repl-test--with-dwell-state
+    (agent-repl-test--viewing "ws1" :done
+      ;; Act
+      (agent-repl--tab-dwell-on-activation)
+      ;; Assert
+      (should (equal (car (car agent-repl-test--dwell-timers)) 5)))))
 
 (ert-deftest agent-repl-test-tab-dwell-on-activation-accepts-the-persp-argument ()
   "The activation hook accepts the argument `persp-activated-functions' passes.
@@ -719,13 +916,11 @@ aborted the hook run.  Calling it with an argument must not error and must
 still arm the clock."
   ;; Arrange
   (agent-repl-test--with-dwell-state
-    (cl-letf (((symbol-function 'agent-repl--ws-known-p) (lambda (_ws) t))
-              ((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
-              ((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) t)))
+    (agent-repl-test--viewing "ws1" :done
       ;; Act -- persp-mode calls the hook with the activation type.
       (agent-repl--tab-dwell-on-activation 'frame)
       ;; Assert
-      (should (gethash "ws1" agent-repl--tab-dwell-armed-at)))))
+      (should (equal (plist-get agent-repl--tab-dwell-pending :ws) "ws1")))))
 
 (ert-deftest agent-repl-test-tab-dwell-on-activation-does-not-undemote ()
   "Switching INTO an already-demoted workspace does not un-demote it.
@@ -733,9 +928,7 @@ Only a status update resets; a plain activation just restarts the clock."
   ;; Arrange
   (agent-repl-test--with-dwell-state
     (puthash "ws1" '(:viewed t) agent-repl-test--row-viewed)
-    (cl-letf (((symbol-function 'agent-repl--ws-known-p) (lambda (_ws) t))
-              ((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
-              ((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) t)))
+    (agent-repl-test--viewing "ws1" :done
       ;; Act
       (agent-repl--tab-dwell-on-activation)
       ;; Assert

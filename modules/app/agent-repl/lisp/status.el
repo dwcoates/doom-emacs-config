@@ -1564,29 +1564,47 @@ went to and which fact decided it."
 ;; function runs on the hottest redisplay path (see
 ;; `agent-repl--note-tab-background-mode'), so it reads a boolean and never
 ;; calls the clock.  The clock lives in `agent-repl--tab-dwell-note', which
-;; the dwell timer (and the repaint heartbeat) call to SET the latch once the
-;; armed-at stamp is old enough.
+;; the dwell timer calls once the pending dwell's deadline arrives; the latch
+;; itself is the daemon's viewed marker.
+;;
+;; THE THRESHOLD IS CHOSEN IN ONE PLACE (`agent-repl--tab-dwell-seconds'),
+;; owner ruling 2026-10-02: one second when a `done' lands while the user is
+;; viewing the workspace, five when the user walks into a turn end that
+;; already stood.  A completed /clear or compaction takes no dwell at all:
+;; the daemon draws it PARTIAL on the push that ends it.
 
 (defconst agent-repl-tab-dwell-demote-seconds 5
   "Seconds a workspace's panels must be VIEWED before its tab demotes.
-After this much continuous viewing of a panels-open, currently-viewed
-workspace, `agent-repl--ws-display-state' draws it PARTIAL (only the
-`[N]' bracket keeps the status color) instead of FULL — the \"you've
-seen it\" demotion.  The next status update for the workspace clears the
-demotion and re-arms this dwell.")
+The STANDARD dwell: after this much continuous viewing of a panels-open,
+currently-viewed workspace, it is reported viewed and draws PARTIAL (only
+the `[N]' bracket keeps the status color) instead of FULL — the \"you've
+seen it\" demotion.  It applies when the user walks INTO a workspace whose
+turn already ended; `agent-repl-tab-dwell-fast-demote-seconds' is the
+exception, and `agent-repl--tab-dwell-seconds' is the one place that
+chooses between them.")
 
-(defvar agent-repl--tab-dwell-armed-at (make-hash-table :test 'equal)
-  "Workspace -> the time its current 5-second view dwell was armed.
-Stamped when the workspace is activated (viewing begins) and re-stamped
-when a status update resets the demotion.  `agent-repl--tab-dwell-note'
-measures the dwell from here.")
+(defconst agent-repl-tab-dwell-fast-demote-seconds 1
+  "Seconds of viewing that demote a `done' row the user WATCHED land.
+Owner ruling (2026-10-02): when the final response arrives while the user
+is already looking at the workspace, it has been seen as it landed, so the
+tab goes PARTIAL after one second rather than
+`agent-repl-tab-dwell-demote-seconds'.")
 
-(defvar agent-repl--tab-dwell-timer nil
-  "The single pending one-shot timer that demotes the current workspace.
-Only the currently-viewed workspace accrues a dwell, so one timer
-suffices: (re)arming cancels the previous one.  It fires at the dwell
-deadline so the demotion repaints then, rather than waiting for the next
-heartbeat tick.")
+(defvar agent-repl--tab-dwell-pending nil
+  "The ONE pending view dwell, or nil when none is armed.
+A plist (:ws WS :at TIME :seconds N :generation G :timer TIMER).  Only the
+currently-viewed workspace accrues a dwell, so one record suffices.
+`:generation' is the value of `agent-repl--tab-dwell-generation' the
+record was armed under; the timer carries it, and a firing whose
+generation is not this record's is a SUPERSEDED timer and does nothing
+\(`agent-repl--tab-dwell-fire').  That is what makes a stale timer
+structurally unable to demote anything, whether or not its cancellation
+reached it in time.")
+
+(defvar agent-repl--tab-dwell-generation 0
+  "Monotonic count of view dwells armed or dropped.
+Every arm and every drop advances it, so a timer scheduled under an older
+value can never match the pending record again.")
 
 (defun agent-repl--tab-dwell-demoted-p (ws)
   "Return non-nil when WS's tab is view-demoted to PARTIAL.
@@ -2929,10 +2947,12 @@ For background workspaces, inspects the saved persp window configuration."
 ;;
 ;; TWO local clocks survive, and neither derives lifecycle: the heartbeat
 ;; below repaints the tab bar on a fixed cadence, and the view-dwell timer
-;; (`agent-repl--tab-dwell-timer', armed in the view-dwell section above)
+;; (`agent-repl--tab-dwell-pending', armed in the view-dwell section above)
 ;; fires once at the demotion deadline to repaint the "you've seen it" flip.
-;; Both are LOCAL PRESENTATION modifiers (blessed as such): they read no
-;; daemon state, fork nothing, and touch no workspace plist.
+;; Both are LOCAL PRESENTATION modifiers (blessed as such): they derive no
+;; lifecycle, fork nothing, and touch no workspace plist.  The dwell READS
+;; the row's resolved status only to choose its threshold
+;; (`agent-repl--tab-dwell-seconds').
 
 ;;; The view-dwell mechanism (timers, arming, reset) ------------------------
 ;;
@@ -2941,11 +2961,21 @@ For background workspaces, inspects the saved persp window configuration."
 ;; view-dwell section next to `agent-repl--ws-display-state', which is the
 ;; one place that reads them.
 
-(defun agent-repl--tab-dwell-cancel-timer ()
-  "Cancel the pending view-dwell demotion timer, if any."
-  (when (timerp agent-repl--tab-dwell-timer)
-    (cancel-timer agent-repl--tab-dwell-timer))
-  (setq agent-repl--tab-dwell-timer nil))
+(defun agent-repl--tab-dwell-drop (reason)
+  "Drop the pending view dwell, if any, recording REASON.
+Cancels its timer AND advances `agent-repl--tab-dwell-generation', so even
+a timer whose cancellation came too late finds no record of its own
+generation and does nothing (`agent-repl--tab-dwell-fire')."
+  (let ((pending agent-repl--tab-dwell-pending))
+    (when pending
+      (let ((timer (plist-get pending :timer)))
+        (when (timerp timer)
+          (cancel-timer timer)))
+      (agent-repl--log (plist-get pending :ws)
+                       "tab-view: dwell dropped ws=%s generation=%s reason=%s"
+                       (plist-get pending :ws) (plist-get pending :generation) reason)
+      (setq agent-repl--tab-dwell-pending nil)
+      (cl-incf agent-repl--tab-dwell-generation))))
 
 (defun agent-repl--tab-dwell-eligible-p (ws)
   "Return non-nil when WS can still accrue a view dwell.
@@ -2959,44 +2989,102 @@ dwells."
        (agent-repl--ws-agent-open-p ws)
        (not (agent-repl--tab-dwell-demoted-p ws))))
 
+(defun agent-repl--tab-dwell-seconds (ws origin)
+  "Return how many seconds WS must be viewed, for a dwell armed by ORIGIN.
+
+THE ONE PLACE THE THRESHOLD IS DECIDED (owner ruling, 2026-10-02).  ORIGIN
+names what armed the dwell:
+
+  `activation'     — the user walked INTO WS;
+  `status-change'  — WS's status changed while it is armed;
+  `viewed-cleared' — the daemon cleared WS's viewed marker.
+
+A `done' row the user was ALREADY viewing when it landed (any origin but
+`activation') takes `agent-repl-tab-dwell-fast-demote-seconds': the final
+response arrived under the user's eyes.  Every other case keeps
+`agent-repl-tab-dwell-demote-seconds' — walking into a turn end that
+already stood, and an interrupted, failed or vendor-blocked row however it
+arrived.  The status is read off the row (`agent-repl--ws-render-status'),
+not off the hook that armed the dwell, so the status-change and
+viewed-cleared reactions to one push can never choose differently.
+
+An ORIGIN outside the three is a caller defect and signals."
+  (unless (memq origin '(activation status-change viewed-cleared))
+    (agent-repl--error ws "tab-view: dwell armed by unknown origin=%S ws=%s" origin ws)
+    (error "agent-repl: view dwell armed by unknown origin %S" origin))
+  (let* ((status (agent-repl--ws-render-status ws))
+         (watched-land (and (not (eq origin 'activation)) (eq status :done)))
+         (seconds (if watched-land
+                      agent-repl-tab-dwell-fast-demote-seconds
+                    agent-repl-tab-dwell-demote-seconds)))
+    (agent-repl--log ws "tab-view: dwell threshold ws=%s origin=%s status=%s seconds=%s rule=%s"
+                     ws origin status seconds
+                     (if watched-land "done-landed-while-viewing" "standard"))
+    seconds))
+
 (defun agent-repl--tab-dwell-note (ws now)
   "Demote WS's tab if its view dwell has elapsed as of NOW.
 NOW is a time value (`current-time' in production; injected in tests).
-This function is the CLOCK and nothing else: it decides whether the dwell
-has elapsed for an eligible workspace (`agent-repl--tab-dwell-eligible-p')
-and hands the verdict to `agent-repl--tab-view-partial', which is what
-applies PARTIAL everywhere it has to be applied.  Returns non-nil when it
-demoted.
+This function is the CLOCK and nothing else: it decides whether the
+pending dwell (`agent-repl--tab-dwell-pending') is WS's and has elapsed
+for an eligible workspace (`agent-repl--tab-dwell-eligible-p'), and hands
+the verdict to `agent-repl--tab-view-partial', which is what applies
+PARTIAL everywhere it has to be applied.  Returns non-nil when it demoted.
 
 It reads the injected clock, never `current-time', so the dwell can be
 exercised without sleeping."
-  (let ((armed-at (gethash ws agent-repl--tab-dwell-armed-at)))
-    (when (and (agent-repl--tab-dwell-eligible-p ws)
-               armed-at
-               (>= (float-time (time-subtract now armed-at))
-                   agent-repl-tab-dwell-demote-seconds))
+  (let ((pending agent-repl--tab-dwell-pending))
+    (when (and pending
+               (equal ws (plist-get pending :ws))
+               (agent-repl--tab-dwell-eligible-p ws)
+               (>= (float-time (time-subtract now (plist-get pending :at)))
+                   (plist-get pending :seconds)))
+      (setq agent-repl--tab-dwell-pending nil)
       (agent-repl--tab-view-partial ws "dwell")
       t)))
 
-(defun agent-repl--tab-dwell-fire (ws)
-  "Timer callback: try to demote WS now that its dwell deadline arrived."
-  (agent-repl--tab-dwell-note ws (current-time)))
+(defun agent-repl--tab-dwell-fire (ws generation)
+  "Timer callback: try to demote WS now that its dwell deadline arrived.
+GENERATION is the generation the timer was armed under.  A timer whose
+GENERATION is not the pending dwell's has been SUPERSEDED — re-armed,
+dropped, or already spent — and does nothing but record that it fired."
+  (let ((pending agent-repl--tab-dwell-pending))
+    (if (and pending
+             (equal ws (plist-get pending :ws))
+             (eql generation (plist-get pending :generation)))
+        (agent-repl--tab-dwell-note ws (current-time))
+      (agent-repl--log ws "tab-view: superseded dwell timer ignored ws=%s generation=%s pending=%s"
+                       ws generation (and pending (plist-get pending :generation)))
+      nil)))
 
-(defun agent-repl--tab-dwell-arm (ws now)
-  "Arm WS's view dwell as of NOW: stamp armed-at and schedule the demotion.
-Stamps `agent-repl--tab-dwell-armed-at' and, when WS is still eligible,
-(re)schedules the single one-shot demotion timer for
-`agent-repl-tab-dwell-demote-seconds' out so the flip repaints at the
-deadline.  Does NOT clear the demotion latch — only a status update does
-that (`agent-repl--tab-view-restore-full').  A workspace already demoted, or
-whose panels are closed, or that is not current, gets its stamp but no
-timer."
-  (puthash ws now agent-repl--tab-dwell-armed-at)
-  (agent-repl--tab-dwell-cancel-timer)
-  (when (agent-repl--tab-dwell-eligible-p ws)
-    (setq agent-repl--tab-dwell-timer
-          (run-with-timer agent-repl-tab-dwell-demote-seconds nil
-                          #'agent-repl--tab-dwell-fire ws))))
+(defun agent-repl--tab-dwell-arm (ws now origin)
+  "Arm WS's view dwell as of NOW, because ORIGIN says viewing (re)starts.
+ORIGIN is one of the symbols `agent-repl--tab-dwell-seconds' names.
+
+When WS is eligible (`agent-repl--tab-dwell-eligible-p'), the pending
+dwell is REPLACED: the old one is dropped (its timer cancelled and its
+generation retired), and a new record with the threshold
+`agent-repl--tab-dwell-seconds' chooses is installed with its one-shot
+timer.  When WS is not eligible, a pending dwell that is WS's own is
+dropped, and one belonging to the workspace the user IS viewing is left
+running: a background workspace's status change says nothing about how
+long the user has looked at another one.
+
+Does NOT clear the demotion — only the daemon does that."
+  (if (not (agent-repl--tab-dwell-eligible-p ws))
+      (progn
+        (agent-repl--log ws "tab-view: dwell not armed ws=%s origin=%s reason=not-eligible" ws origin)
+        (when (equal ws (plist-get agent-repl--tab-dwell-pending :ws))
+          (agent-repl--tab-dwell-drop "not-eligible")))
+    (agent-repl--tab-dwell-drop "re-armed")
+    (let* ((seconds (agent-repl--tab-dwell-seconds ws origin))
+           (generation (cl-incf agent-repl--tab-dwell-generation)))
+      (setq agent-repl--tab-dwell-pending
+            (list :ws ws :at now :seconds seconds :generation generation
+                  :timer (run-with-timer seconds nil #'agent-repl--tab-dwell-fire
+                                         ws generation)))
+      (agent-repl--log ws "tab-view: dwell armed ws=%s origin=%s seconds=%s generation=%s"
+                       ws origin seconds generation))))
 
 (defun agent-repl--tab-view-partial (ws reason)
   "Draw WS PARTIAL everywhere, because REASON says the user has seen it.
@@ -3039,7 +3127,7 @@ a fact the daemon has just told Emacs.
 
 The daemon drops the marker whenever the row leaves a read turn-end state,
 from any origin."
-  (agent-repl--tab-dwell-arm ws now))
+  (agent-repl--tab-dwell-arm ws now 'viewed-cleared))
 
 (defun agent-repl--tab-dwell-on-activation (&rest _)
   "Arm the view dwell for the workspace just activated.
@@ -3056,7 +3144,7 @@ persp switch and aborted the activation hook run.  It mirrors its sibling
 same reason."
   (let ((ws (agent-repl--ws-current-name)))
     (when (and ws (agent-repl--ws-known-p ws))
-      (agent-repl--tab-dwell-arm ws (current-time)))))
+      (agent-repl--tab-dwell-arm ws (current-time) 'activation))))
 
 (agent-repl--ws-add-activated-hook #'agent-repl--tab-dwell-on-activation)
 
@@ -3087,7 +3175,7 @@ report lands on whatever the row has become; whether it takes is the
 daemon's decision, never this one's."
   (agent-repl--log ws "tab-view: dwell re-armed ws=%s reason=status-change from=%s to=%s"
                    ws previous current)
-  (agent-repl--tab-dwell-arm ws (current-time)))
+  (agent-repl--tab-dwell-arm ws (current-time) 'status-change))
 
 (add-hook 'agent-repl-roster-status-change-functions
           #'agent-repl--tab-dwell-rearm-on-status-change)
