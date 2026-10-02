@@ -127,7 +127,10 @@ func (r *resolver) stepPage(ws ids.WorkspaceID, feed feedid.Feed, reader ReaderI
 			dlog.Context{"feed": f.key, "reader": string(reader), "bounded_by_separation": bounded, "no_source": step.noSource})
 		return r.servePage(s, f, w, reader, durable, 0, len(durable), false, step.open), r.openToken(ws, f, step.open), nil, nil
 	}
-	start, found := pageStart(f.book.bounds, f, durable, end)
+	start, bound, found := pageStart(f.book.bounds, f, durable, end)
+	if gap, ok := r.planGap(s, f, durable, end, bound, found); ok && !bounded && !step.noSource {
+		return nil, nil, &gap, nil
+	}
 	if !found {
 		if loadable {
 			return nil, nil, &plan, nil
@@ -183,14 +186,14 @@ func (w *walk) end(f *feedState, order []string) int {
 // bound with a row of ORDER before END at or above it. False when no loaded
 // page reaches below END: the rows there are held without a page of their own
 // (drawn live, or by the daemon) until an older page is loaded.
-func pageStart(bounds []string, f *feedState, order []string, end int) (int, bool) {
+func pageStart(bounds []string, f *feedState, order []string, end int) (int, string, bool) {
 	for i := len(bounds) - 1; i >= 0; i-- {
 		at := sort.Search(len(order), func(j int) bool { return f.rank[order[j]].key >= bounds[i] })
 		if at < end {
-			return at, true
+			return at, bounds[i], true
 		}
 	}
-	return 0, false
+	return 0, "", false
 }
 
 // servedFrom is the walk position after serving ORDER from START: the order
@@ -394,4 +397,20 @@ func (r *resolver) awaitSource(plan loadPlan) {
 		return
 	}
 	r.feed(plan.state, plan.addr).book.awaitingSource = true
+}
+
+// planGap answers the store page a walk must read before serving the page that
+// ends at END and begins at BOUND (none when not FOUND), when that page reaches
+// into the unpaged gap a re-read newest page left (bookState.gapAfter): rows
+// above the gap's floor that no store page bounds. Called with r.mu held.
+func (r *resolver) planGap(s *wsState, f *feedState, order []string, end int, bound string, found bool) (loadPlan, bool) {
+	if f.book.gapAfter == nil || r.deps.History == nil {
+		return loadPlan{}, false
+	}
+	floor := sort.Search(len(order), func(i int) bool { return f.rank[order[i]].key >= f.book.gapFloor })
+	if floor >= end || (found && bound > f.book.gapFloor) {
+		return loadPlan{}, false
+	}
+	target, _ := bookTarget(s.feedAddrs[f.key])
+	return loadPlan{addr: s.feedAddrs[f.key], state: s, target: target, after: f.book.gapAfter, gap: true}, true
 }
