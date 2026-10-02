@@ -206,6 +206,10 @@ type DB struct {
 	// newCheckpointTimer, when set, makes the job's idle timer, so a test
 	// fires the idle trigger by hand. Nil in production, which is time.Timer.
 	newCheckpointTimer func(time.Duration) checkpointTimer
+	// closeHandle, when set, replaces (*sql.DB).Close for every handle Close
+	// closes. It is the seam a test uses to make one handle's close fail,
+	// which a real pool will not do on demand. Nil in production.
+	closeHandle func(*sql.DB) error
 }
 
 // Options are the injectable knobs Open resolves from the environment.
@@ -621,38 +625,25 @@ func removeDatabaseFiles(path string) error {
 func (d *DB) Close() error {
 	d.log.LogVerbose(logging.Fields{Operation: "store.db.close"}, "closing SQLite database")
 	var firstErr error
-	if d.read != nil {
-		if err := d.read.Close(); err != nil {
-			d.log.Log(logging.Fields{Operation: "store.db.close", Level: "error", ErrorCause: err.Error()},
-				"closing the SQLite read pool failed: %v", err)
-			firstErr = storagef(err, "closing the read pool")
+	keep := func(err error) {
+		if firstErr == nil {
+			firstErr = err
 		}
+	}
+	if d.read != nil {
+		keep(d.closePool(d.read, "closing the SQLite read pool", "closing the read pool"))
 	}
 	if d.ckpt != nil {
-		if err := d.ckpt.Close(); err != nil {
-			d.log.Log(logging.Fields{Operation: "store.db.close", Level: "error", ErrorCause: err.Error()},
-				"closing the SQLite checkpoint connection failed: %v", err)
-			if firstErr == nil {
-				firstErr = storagef(err, "closing the checkpoint connection")
-			}
-		}
+		keep(d.closePool(d.ckpt, "closing the SQLite checkpoint connection", "closing the checkpoint connection"))
 	}
-	if err := d.sql.Close(); err != nil {
-		d.log.Log(logging.Fields{Operation: "store.db.close", Level: "error", ErrorCause: err.Error()},
-			"closing SQLite database failed: %v", err)
-		if firstErr == nil {
-			firstErr = storagef(err, "closing the database")
-		}
-	}
+	keep(d.closePool(d.sql, "closing SQLite database", "closing the database"))
 	// THE -shm DESCRIPTOR CLOSES LAST, after every SQLite connection has, so
 	// its close cannot release a lock SQLite still holds (see readWAL).
 	if d.wal.shm != nil {
 		if err := d.wal.shm.Close(); err != nil {
 			d.log.Log(logging.Fields{Operation: "store.db.close", Level: "error", ErrorCause: err.Error()},
 				"closing the WAL-index descriptor failed: %v", err)
-			if firstErr == nil {
-				firstErr = storagef(err, "closing the WAL-index descriptor")
-			}
+			keep(storagef(err, "closing the WAL-index descriptor"))
 		}
 		d.wal.shm = nil
 	}
@@ -660,6 +651,22 @@ func (d *DB) Close() error {
 		return firstErr
 	}
 	d.log.Log(logging.Fields{Operation: "store.db.close"}, "SQLite database closed")
+	return nil
+}
+
+// closePool closes one of the store's handles, recording a failure once at
+// error and returning it as a storage failure. `logged` names the close in the
+// record, `wrapped` in the returned error.
+func (d *DB) closePool(pool *sql.DB, logged, wrapped string) error {
+	closeHandle := d.closeHandle
+	if closeHandle == nil {
+		closeHandle = (*sql.DB).Close
+	}
+	if err := closeHandle(pool); err != nil {
+		d.log.Log(logging.Fields{Operation: "store.db.close", Level: "error", ErrorCause: err.Error()},
+			"%s failed: %v", logged, err)
+		return storagef(err, "%s", wrapped)
+	}
 	return nil
 }
 
