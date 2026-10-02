@@ -141,6 +141,12 @@ export interface VendorChildExit {
   readonly code: number | null;
   /** The signal that ended it, or absence when it exited on its own. */
   readonly signal: string | null;
+  /**
+   * The errno the SPAWN failed with (`ENOENT`, `EACCES`, ...), when the child
+   * never ran at all. Read off the error's structured `code`, never its text.
+   * Absent for a child that spawned.
+   */
+  readonly spawnErrno?: string;
 }
 
 /** How a child is actually spawned. Injected so a suite spawns nothing. */
@@ -177,8 +183,21 @@ export function vendorSpawner(
 ): SpawnChild {
   return (options: SpawnOptions): SpawnedProcess => {
     const child = spawnChild(options);
+    let spawnFailed = false;
     child.once("exit", (code: number | null, signal: NodeJS.Signals | null) => {
+      // ONE END PER CHILD: a spawn that failed has already been reported.
+      if (spawnFailed) return;
       onChildExit({ code, signal });
+    });
+    // A SPAWN THAT FAILED IS AN END TOO, and its errno says whether trying
+    // again can help (a missing or unexecutable binary will not appear by
+    // itself). Only a child with no pid failed to SPAWN: an `error` from a
+    // child that ran (a failed kill, say) is not this, and is the SDK's.
+    child.once("error", (err: Error) => {
+      if ((child as { pid?: number }).pid !== undefined) return;
+      spawnFailed = true;
+      const code = (err as NodeJS.ErrnoException).code;
+      onChildExit({ code: null, signal: null, spawnErrno: typeof code === "string" ? code : "" });
     });
     const errors = (child as { stderr?: NodeJS.ReadableStream | null }).stderr;
     if (onStderr !== undefined && errors != null) {

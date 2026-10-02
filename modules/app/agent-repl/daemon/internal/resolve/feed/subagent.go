@@ -1135,6 +1135,79 @@ func (r *resolver) settleShellsLeftLive(s *wsState, live sessionwatcher.LiveWork
 	}
 }
 
+// settleSubagentsLeftLive settles, as LOST, every detached subagent bubble whose
+// subagent the live set held at its previous publication and no longer holds,
+// while the bubble is still drawn live. It is the subagent's half of
+// settleShellsLeftLive, for the same reason.
+//
+// A SUBAGENT THAT LEFT THE LIVE SET HAS ENDED FOR EVERY READER. Its own
+// terminal settles the bubble BEFORE the set is republished (the watcher routes
+// the frame to the feed, then concludes the item), so a bubble still live here
+// is one no terminal is coming for: its shim was killed by a restart or a
+// close, or died, and the vendor process that ran it went with it. Left alone,
+// the bubble kept its live dot and its stop button over work nobody could see
+// any more, and a files-restoring rollback counted it among the work it had to
+// stop (LiveDetachedIn). No staleness ruling stated WHY it was lost, so the arm
+// carries no cause, exactly as a shell's does.
+//
+// A LATER TERMINAL STILL WINS. A bubble settled lost here is settled again by
+// its spawn's own success or failure if one ever arrives (foldSubagentFrame
+// replaces the state), so this can only ever be overtaken by the truth.
+//
+// ONLY A SUBAGENT THE SET HELD. A bubble the feed drew but the watcher never
+// listed has not left anything.
+func (r *resolver) settleSubagentsLeftLive(s *wsState, live sessionwatcher.LiveWorkSet) {
+	now := make(map[string]struct{}, len(live.Agents))
+	for _, agent := range live.Agents {
+		now[agent.GetValue()] = struct{}{}
+	}
+	for id := range s.liveAgents {
+		if _, still := now[id]; still {
+			continue
+		}
+		delete(s.liveAgents, id)
+		unitID, state, drawn := s.subagentListedAs(id)
+		if !drawn || state.row == nil || state.bubble == nil {
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "settleSubagentsLeftLive", "condition": "!drawn || state.row == nil || state.bubble == nil"})
+			continue
+		}
+		if state.bubble.GetLive() == nil {
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "settleSubagentsLeftLive", "condition": "bubble not live"})
+			continue
+		}
+		state.bubble.State = &frontendv1.FeedSubagent_Settled{Settled: &frontendv1.FeedSubagentSettled{
+			EndedAtMs: r.deps.Now().UnixMilli(),
+			Outcome:   &frontendv1.FeedSubagentSettled_Lost{Lost: &frontendv1.FeedSubagentLost{}},
+		}}
+		r.republishSubagent(s, unitID, state)
+		r.logger(s.id).Info("daemon.feed.detached_subagent_left_live",
+			"a detached subagent left the live set with its bubble live and no terminal; its bubble is settled lost",
+			dlog.Context{"listed_as": id, "unit": unitID, "row": state.row.GetValue()})
+	}
+	for id := range now {
+		s.liveAgents[id] = struct{}{}
+	}
+}
+
+// subagentListedAs answers the bubble the live set's id names. The set lists a
+// subagent by its created agent, or by its handle when it named no agent, and
+// the contract makes the handle, the spawn unit and the created agent one value
+// (DetachedWorkId.value == AgentActivityId.value), so any of the three matches.
+func (s *wsState) subagentListedAs(id string) (string, *subagentState, bool) {
+	if id == "" {
+		return "", nil, false
+	}
+	if state, ok := s.subagents[id]; ok {
+		return id, state, true
+	}
+	for unitID, state := range s.subagents {
+		if state.work == id || state.created.GetValue() == id {
+			return unitID, state, true
+		}
+	}
+	return "", nil, false
+}
+
 // shellStart answers the instant a run's clock counts from. The authoritative
 // start wins whenever one has landed; until then the run's first-observed
 // instant stands in, stamped ONCE here off the daemon clock, so the clock never

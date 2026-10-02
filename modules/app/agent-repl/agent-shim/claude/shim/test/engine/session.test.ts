@@ -7,7 +7,7 @@
  * teardown resolves every pending callback as denied before anything else,
  * because an unresolved `canUseTool` wedges the vendor process outright.
  */
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { nextPush } from "../next-push.js";
 import os from "node:os";
 import path from "node:path";
@@ -17,7 +17,7 @@ import { create } from "@bufbuild/protobuf";
 import { Code } from "@connectrpc/connect";
 import { conversationv1, shimv1, storev1 } from "../../src/proto.js";
 import { recordAgentBinaryVersion, resetAgentBinaryVersionForTest } from "../../src/build-identity.js";
-import { cwdSlug } from "../../src/engine/cold.js";
+import { cwdSlug, transcriptPath } from "../../src/engine/cold.js";
 import { bindLog, clearRequestId } from "../../src/log.js";
 import { createEngine, type QuerySpec, type SessionEngine } from "../../src/engine/session.js";
 import { agentIdPath } from "../../src/engine/identity.js";
@@ -137,6 +137,8 @@ function smallAssistantLine(): Record<string, unknown> {
 function harness(
   options: {
     nowMs?: number;
+    /** A clock that MOVES, for a suite that measures an elapsed time; wins over `nowMs`. */
+    clock?: () => number;
     lockThrows?: boolean;
     /** Make the WORKSPACE claim refuse, so its own conversation_owned arm shows. */
     workspaceLockThrows?: boolean;
@@ -295,7 +297,7 @@ function harness(
       return uuid;
     },
     env: { stateDir, configDir, cwd },
-    nowMs: () => options.nowMs ?? 1_000_100,
+    nowMs: options.clock ?? (() => options.nowMs ?? 1_000_100),
     probeApiReachable: probe.probe,
     networkResumeScheduler: networkScheduler,
     ...(options.withoutScheduler === true ? {} : { scheduler }),
@@ -492,6 +494,13 @@ function exitedHolder(): LockHolderUnavailableError {
 
 function failureCause(response: shimv1.StartSessionResponse): string | undefined {
   return response.result.case === "failure" ? response.result.value.cause.case : undefined;
+}
+
+/** The retry label a `vendor_start_failed` refusal carries, or undefined for any other answer. */
+function retryLabel(response: shimv1.StartSessionResponse): string | undefined {
+  if (response.result.case !== "failure") return undefined;
+  const cause = response.result.value.cause;
+  return cause.case === "vendorStartFailed" ? cause.value.retry.case : undefined;
 }
 
 beforeEach(() => {
@@ -4249,6 +4258,187 @@ describe("the teardown's waits are bounded", () => {
   });
 });
 
+describe("the teardown's vendor half is bounded", () => {
+  /** A detached shell the vendor started, live in the table. */
+  async function liveShell(h: Harness, taskId: string, toolUseId: string): Promise<void> {
+    await h.engine.onSdkMessage({
+      type: "system",
+      subtype: "task_started",
+      task_id: taskId,
+      tool_use_id: toolUseId,
+      task_type: "local_bash",
+      description: "sleep 600",
+      uuid: `00000000-0000-4000-8000-${taskId.padStart(12, "0")}`,
+      session_id: "s",
+    } as never);
+  }
+
+  /** The KillSession's closing arm, or undefined for a refusal. */
+  function closedHow(response: shimv1.KillSessionResponse): string | undefined {
+    return response.result.case === "success" ? response.result.value.closed?.how.case : undefined;
+  }
+
+  it("answers a forced KillSession when the vendor never answers the interrupt", async () => {
+    // Arrange
+    const h = harness({
+      watcherConclusionBudgetMs: 5,
+      onQueryCreated: (query) => {
+        query.interrupt = () => new Promise(() => undefined);
+      },
+    });
+    await started(h);
+    await liveShell(h, "t01", "toolu_hung_interrupt");
+
+    // Act
+    const response = await h.engine.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
+
+    // Assert
+    expect(closedHow(response)).toBe("forced");
+  });
+
+  it("closes a live shell run when the vendor never answers the interrupt", async () => {
+    // Arrange
+    const h = harness({
+      watcherConclusionBudgetMs: 5,
+      onQueryCreated: (query) => {
+        query.interrupt = () => new Promise(() => undefined);
+      },
+    });
+    await started(h);
+    await liveShell(h, "t01", "toolu_hung_interrupt");
+
+    // Act
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
+
+    // Assert
+    expect(
+      h.persistence.buffered.some((entry) => entry.upsertKey === "bash:toolu_hung_interrupt:terminal"),
+    ).toBe(true);
+  });
+
+  it("answers a forced KillSession when the vendor never answers a task's stop", async () => {
+    // Arrange
+    const h = harness({
+      watcherConclusionBudgetMs: 5,
+      onQueryCreated: (query) => {
+        query.stopTask = () => new Promise(() => undefined);
+      },
+    });
+    await started(h);
+    await liveShell(h, "t01", "toolu_hung_stop");
+
+    // Act
+    const response = await h.engine.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
+
+    // Assert
+    expect(closedHow(response)).toBe("forced");
+  });
+
+  it("closes a live shell run whose stop the vendor never answers", async () => {
+    // Arrange
+    const h = harness({
+      watcherConclusionBudgetMs: 5,
+      onQueryCreated: (query) => {
+        query.stopTask = () => new Promise(() => undefined);
+      },
+    });
+    await started(h);
+    await liveShell(h, "t01", "toolu_hung_stop");
+
+    // Act
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
+
+    // Assert
+    expect(
+      h.persistence.buffered.some((entry) => entry.upsertKey === "bash:toolu_hung_stop:terminal"),
+    ).toBe(true);
+  });
+
+  it("asks every task to stop even when the vendor never answers the first", async () => {
+    // Arrange: the first stop hangs; the second must still be asked.
+    const asked: string[] = [];
+    const h = harness({
+      watcherConclusionBudgetMs: 5,
+      onQueryCreated: (query) => {
+        query.stopTask = (taskId: string) => {
+          asked.push(taskId);
+          return taskId === "t01" ? new Promise(() => undefined) : Promise.resolve();
+        };
+      },
+    });
+    await started(h);
+    await liveShell(h, "t01", "toolu_first");
+    await liveShell(h, "t02", "toolu_second");
+
+    // Act
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
+
+    // Assert
+    expect(asked).toEqual(["t01", "t02"]);
+  });
+
+  it("ends the open turn as a host shutdown when the vendor never answers the interrupt", async () => {
+    // Arrange
+    const h = harness({
+      watcherConclusionBudgetMs: 5,
+      onQueryCreated: (query) => {
+        query.interrupt = () => new Promise(() => undefined);
+      },
+    });
+    await started(h);
+    await h.engine.startTurn(
+      create(shimv1.StartTurnRequestSchema, {
+        turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
+        said: textSaid("go"),
+        origin: conversationv1.PromptOrigin.USER_SENT,
+        pageSize: 5,
+      }),
+    );
+
+    // Act
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
+
+    // Assert
+    expect(
+      h.persistence.buffered.some(
+        (entry) =>
+          entry.turn?.value === "turn-1" &&
+          entry.source.discriminator === "agent_frame.success.interrupted.host_shutdown",
+      ),
+    ).toBe(true);
+  });
+
+  it("sends no stops when the vendor answers the interrupt only after the budget", async () => {
+    // Arrange: the interrupt answers when the test says so, after the
+    // stand-down has moved on.
+    let answer: () => void = () => undefined;
+    const asked: string[] = [];
+    const h = harness({
+      watcherConclusionBudgetMs: 5,
+      onQueryCreated: (query) => {
+        query.interrupt = () =>
+          new Promise((resolve) => {
+            answer = () => resolve(undefined);
+          });
+        query.stopTask = (taskId: string) => {
+          asked.push(taskId);
+          return Promise.resolve();
+        };
+      },
+    });
+    await started(h);
+    await liveShell(h, "t01", "toolu_late");
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
+
+    // Act
+    answer();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    // Assert
+    expect(asked).toEqual([]);
+  });
+});
+
 describe("the record plane's faults", () => {
   it("restates the diagnostics as unhealthy when the store raises a fault", async () => {
     // The record plane's faults are the SESSION's: nothing subscribing to them
@@ -7658,6 +7848,379 @@ describe("the proven-live signal a start settles on", () => {
     expect(seen).toContain("22222222-2222-4222-8222-222222222222");
   });
 });
+/**
+ * THE RETRY LABEL EVERY FAILED VENDOR START CARRIES.
+ *
+ * WHAT THIS GUARDS: the daemon retries a `vendor_start_failed` refusal on this
+ * label alone (`endpoint_start_session.proto`), so each way a start can fail is
+ * pinned to its bucket here, one row per settle site. The 2026-10-02 incident —
+ * a relaunched child that did not answer `supportedModels` inside the liveness
+ * bound — is the first row: it was never retried.
+ */
+describe("the retry label a failed vendor start carries", () => {
+  const AMPLE = 60_000;
+
+  /** An error result carrying the API status the SDK reports beside it. */
+  function statusedErrorResult(status: number, words: string): SdkMessage {
+    return {
+      ...(errorResultMessage({ errors: [words] }) as unknown as Record<string, unknown>),
+      api_error_status: status,
+    } as unknown as SdkMessage;
+  }
+
+  it("labels a liveness-bound timeout retryable", async () => {
+    // Arrange.
+    const h = harness({ liveSignalTimeoutMs: 5, holdLiveSignal: true });
+
+    // Act.
+    const response = await h.engine.startSession(freshRequest());
+
+    // Assert.
+    expect(retryLabel(response)).toBe("retryable");
+  });
+
+  it("labels a refused liveness round-trip retryable", async () => {
+    // Arrange.
+    const h = harness({
+      onQueryCreated: (query) => {
+        query.supportedModels = () => Promise.reject(new Error("Query closed before response received"));
+      },
+    });
+
+    // Act.
+    const response = await h.engine.startSession(freshRequest());
+
+    // Assert.
+    expect(retryLabel(response)).toBe("retryable");
+  });
+
+  it("labels the init-silence timeout retryable", async () => {
+    // Arrange.
+    const h = harness({ initTimeoutMs: 5, liveSignalTimeoutMs: AMPLE, holdLiveSignal: true });
+
+    // Act.
+    const response = await h.engine.startSession(freshRequest());
+
+    // Assert.
+    expect(retryLabel(response)).toBe("retryable");
+  });
+
+  it("labels a stream that ENDED before the start settled retryable", async () => {
+    // Arrange.
+    const h = harness({ initTimeoutMs: AMPLE, liveSignalTimeoutMs: AMPLE, holdLiveSignal: true });
+    const pending = h.engine.startSession(freshRequest());
+
+    // Act.
+    (await untilQuery(h, 0)).query.end();
+
+    // Assert.
+    expect(retryLabel(await pending)).toBe("retryable");
+  });
+
+  it("labels a stream that THREW before the start settled retryable", async () => {
+    // Arrange.
+    const h = harness({ initTimeoutMs: AMPLE, liveSignalTimeoutMs: AMPLE, holdLiveSignal: true });
+    const pending = h.engine.startSession(freshRequest());
+    const first = await untilQuery(h, 0);
+
+    // Act: one message unparks the loop, so the failure throws on the next pull.
+    first.query.emit(hookResponse({ outcome: "success", output: "" }));
+    first.query.fail(new Error("Claude Code process exited with code 1"));
+
+    // Assert.
+    expect(retryLabel(await pending)).toBe("retryable");
+  });
+
+  it.each([
+    ["a refused resume", errorResultMessage({ errors: ["No conversation found with session ID: bf5fcae1"] }), "rejected"],
+    ["a rejected credential", statusedErrorResult(401, "invalid x-api-key"), "rejected"],
+    ["a missing model", statusedErrorResult(404, "model: claude-nope"), "rejected"],
+    ["an overloaded API", statusedErrorResult(529, "Overloaded"), "retryable"],
+    ["a server error", statusedErrorResult(500, "Internal server error"), "retryable"],
+    ["a rate limit", statusedErrorResult(429, "Too many requests"), "retryable"],
+    ["a network failure", errorResultMessage({ errors: ["getaddrinfo ENOTFOUND api.anthropic.com"] }), "retryable"],
+  ] as const)("labels an opening error result from %s", async (_case, message, retry) => {
+    // Arrange.
+    const h = harness({ initTimeoutMs: AMPLE, liveSignalTimeoutMs: AMPLE, holdLiveSignal: true });
+    const pending = h.engine.startSession(freshRequest());
+
+    // Act.
+    (await untilQuery(h, 0)).query.emit(message);
+
+    // Assert.
+    expect(retryLabel(await pending)).toBe(retry);
+  });
+
+  it.each([
+    ["ENOENT", "rejected"],
+    ["EACCES", "rejected"],
+    ["EAGAIN", "retryable"],
+  ] as const)("labels a start whose child failed to spawn with %s %s", async (errno, retry) => {
+    // Arrange.
+    const h = harness({ initTimeoutMs: AMPLE, liveSignalTimeoutMs: AMPLE, holdLiveSignal: true });
+    const pending = h.engine.startSession(freshRequest());
+    const first = await untilQuery(h, 0);
+
+    // Act: the spawner reports the errno, then the SDK's iterator throws.
+    first.spec.onChildExit?.({ code: null, signal: null, spawnErrno: errno });
+    first.query.emit(hookResponse({ outcome: "success", output: "" }));
+    first.query.fail(new Error(`Failed to spawn Claude Code process: spawn claude ${errno}`));
+
+    // Assert.
+    expect(retryLabel(await pending)).toBe(retry);
+  });
+
+  it("labels an exit-coded refused resume retryable, reading no stderr text", async () => {
+    // Arrange.
+    const h = harness({ initTimeoutMs: AMPLE, liveSignalTimeoutMs: AMPLE, holdLiveSignal: true });
+    const pending = h.engine.startSession(freshRequest());
+    const first = await untilQuery(h, 0);
+
+    // Act.
+    first.spec.onStderr?.("No conversation found with session ID: bf5fcae1");
+    first.spec.onChildExit?.({ code: 1, signal: null });
+    first.query.end();
+
+    // Assert.
+    expect(retryLabel(await pending)).toBe("retryable");
+  });
+
+  it("labels a hook that blocked the opening rejected", async () => {
+    // Arrange.
+    const h = harness({ holdLiveSignal: true });
+    const pending = h.engine.startSession(freshRequest());
+
+    // Act.
+    (await untilQuery(h, 0)).query.emit(hookResponse({ outcome: "error", output: "not today" }));
+
+    // Assert.
+    expect(retryLabel(await pending)).toBe("rejected");
+  });
+
+  it("labels a query that could not be created rejected", async () => {
+    // Arrange.
+    const h = harness({ createQueryFailsFrom: 0 });
+
+    // Act.
+    const response = await h.engine.startSession(freshRequest());
+
+    // Assert.
+    expect(retryLabel(response)).toBe("rejected");
+  });
+
+  describe("on the failed start's own record", () => {
+    const RECORD = "what the vendor emitted before the start failed";
+
+    it("states the label the refusal carried", async () => {
+      // Arrange.
+      const h = harness({ liveSignalTimeoutMs: 5, holdLiveSignal: true });
+      const before = logSinkMark();
+
+      // Act.
+      await h.engine.startSession(freshRequest());
+
+      // Assert.
+      expect(logContextFor(before, RECORD)?.["retry"]).toBe("retryable");
+    });
+
+    it("states how long the start ran before it failed", async () => {
+      // Arrange: the clock moves 250ms between the start's first and last reads.
+      let now = 1_000_000;
+      const h = harness({
+        clock: () => now,
+        holdLiveSignal: true,
+        initTimeoutMs: AMPLE,
+        liveSignalTimeoutMs: AMPLE,
+      });
+      const before = logSinkMark();
+      const pending = h.engine.startSession(freshRequest());
+      const first = await untilQuery(h, 0);
+
+      // Act.
+      now += 250;
+      first.query.end();
+      await pending;
+
+      // Assert.
+      expect(logContextFor(before, RECORD)?.["elapsed_ms"]).toBe(250);
+    });
+
+    it("names the liveness bound that tripped, and its size", async () => {
+      // Arrange.
+      const h = harness({ liveSignalTimeoutMs: 5, holdLiveSignal: true });
+      const before = logSinkMark();
+
+      // Act.
+      await h.engine.startSession(freshRequest());
+
+      // Assert.
+      const context = logContextFor(before, RECORD);
+      expect({ bound: context?.["bound"], bound_ms: context?.["bound_ms"] }).toEqual({
+        bound: "live_signal",
+        bound_ms: 5,
+      });
+    });
+
+    it("names the init-silence bound that tripped, and its size", async () => {
+      // Arrange.
+      const h = harness({ initTimeoutMs: 5, liveSignalTimeoutMs: AMPLE, holdLiveSignal: true });
+      const before = logSinkMark();
+
+      // Act.
+      await h.engine.startSession(freshRequest());
+
+      // Assert.
+      const context = logContextFor(before, RECORD);
+      expect({ bound: context?.["bound"], bound_ms: context?.["bound_ms"] }).toEqual({
+        bound: "init_silence",
+        bound_ms: 5,
+      });
+    });
+
+    it("names no bound when the start failed on an answer", async () => {
+      // Arrange.
+      const h = harness({ holdLiveSignal: true });
+      const before = logSinkMark();
+      const pending = h.engine.startSession(freshRequest());
+
+      // Act.
+      (await untilQuery(h, 0)).query.emit(hookResponse({ outcome: "error", output: "not today" }));
+      await pending;
+
+      // Assert.
+      const context = logContextFor(before, RECORD);
+      expect({ bound: context?.["bound"], bound_ms: context?.["bound_ms"] }).toEqual({ bound: "", bound_ms: -1 });
+    });
+
+    it("says the child was still alive when no exit was observed", async () => {
+      // Arrange.
+      const h = harness({ liveSignalTimeoutMs: 5, holdLiveSignal: true });
+      const before = logSinkMark();
+
+      // Act.
+      await h.engine.startSession(freshRequest());
+
+      // Assert.
+      expect(logContextFor(before, RECORD)?.["vendor_child_alive"]).toBe(true);
+    });
+
+    it("states the child's exit code and signal when it exited before the start settled", async () => {
+      // Arrange.
+      const h = harness({ initTimeoutMs: AMPLE, liveSignalTimeoutMs: AMPLE, holdLiveSignal: true });
+      const before = logSinkMark();
+      const pending = h.engine.startSession(freshRequest());
+      const first = await untilQuery(h, 0);
+
+      // Act.
+      first.spec.onChildExit?.({ code: null, signal: "SIGKILL" });
+      first.query.end();
+      await pending;
+
+      // Assert.
+      const context = logContextFor(before, RECORD);
+      expect({
+        alive: context?.["vendor_child_alive"],
+        code: context?.["vendor_exit_code"],
+        signal: context?.["vendor_exit_signal"],
+      }).toEqual({ alive: false, code: -1, signal: "SIGKILL" });
+    });
+
+    it("states the errno of a child that failed to spawn", async () => {
+      // Arrange.
+      const h = harness({ initTimeoutMs: AMPLE, liveSignalTimeoutMs: AMPLE, holdLiveSignal: true });
+      const before = logSinkMark();
+      const pending = h.engine.startSession(freshRequest());
+      const first = await untilQuery(h, 0);
+
+      // Act.
+      first.spec.onChildExit?.({ code: null, signal: null, spawnErrno: "ENOENT" });
+      first.query.end();
+      await pending;
+
+      // Assert.
+      expect(logContextFor(before, RECORD)?.["vendor_spawn_errno"]).toBe("ENOENT");
+    });
+
+    it("does not carry a previous attempt's child exit into a retry's record", async () => {
+      // Arrange: attempt one's child exits; attempt two's stays up and times out.
+      const h = harness({
+        initTimeoutMs: AMPLE,
+        liveSignalTimeoutMs: 5,
+        holdLiveSignal: true,
+      });
+      const firstAttempt = h.engine.startSession(freshRequest());
+      const first = await untilQuery(h, 0);
+      first.spec.onChildExit?.({ code: 1, signal: null });
+      first.query.end();
+      await firstAttempt;
+      const before = logSinkMark();
+
+      // Act.
+      await h.engine.startSession(freshRequest());
+
+      // Assert.
+      expect(logContextFor(before, RECORD)?.["vendor_child_alive"]).toBe(true);
+    });
+  });
+});
+
+/**
+ * VETTING ITEM V1: A RETRYABLE START IS RETRIED ON THE SAME SHIM.
+ *
+ * The daemon's retry loop re-asks the SAME process (`StartSessionVendorStart-
+ * Failed`: "A retryable failure leaves the shim able to take another
+ * StartSession for the same session on the SAME process"). These drive the
+ * grounded 2026-10-02 failure — a liveness probe that timed out — and then a
+ * second StartSession whose probe answers, on one engine instance.
+ */
+describe("a start retried after its liveness probe timed out", () => {
+  /** Hold the live signal on the FIRST query only, so the retry's answers. */
+  const holdFirstOnly = {
+    liveSignalTimeoutMs: 5,
+    onQueryCreated: (query: ScriptedQuery, _spec: QuerySpec, index: number): void => {
+      if (index === 0) query.holdModels();
+    },
+  };
+
+  it("succeeds on a fresh start", async () => {
+    // Arrange.
+    const h = harness(holdFirstOnly);
+    expect(retryLabel(await h.engine.startSession(freshRequest()))).toBe("retryable");
+
+    // Act.
+    const retried = await h.engine.startSession(freshRequest());
+
+    // Assert.
+    expect(retried.result.case).toBe("success");
+  });
+
+  it("re-announces the same conversation identity on a resume", async () => {
+    // Arrange: an identity an earlier session established, and its transcript.
+    const h = harness({ nowMs: 1_000_100, ...holdFirstOnly });
+    mkdirSync(path.dirname(agentIdPath(h.stateDir, workspaceLockKey(h.cwd))), { recursive: true });
+    writeFileSync(
+      agentIdPath(h.stateDir, workspaceLockKey(h.cwd)),
+      JSON.stringify({
+        original_vendor_session_id: "established-by-an-earlier-session",
+        workspace_key: workspaceLockKey(h.cwd),
+        minted_at_ms: 1,
+      }),
+      "utf8",
+    );
+    writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+    expect(retryLabel(await h.engine.startSession(resumeRequest("resume-1")))).toBe("retryable");
+
+    // Act.
+    const retried = await h.engine.startSession(resumeRequest("resume-1"));
+
+    // Assert.
+    expect({
+      vendorSessionId:
+        retried.result.case === "success" ? retried.result.value.session?.vendorSessionId : undefined,
+      producer: h.persistence.producer,
+    }).toEqual({ vendorSessionId: "resume-1", producer: "established-by-an-earlier-session" });
+  });
+});
 describe("StartSession's remaining refusals", () => {
   it("refuses vendor_start_failed when the vendor answers nothing at all", async () => {
     // A CHILD THAT ANSWERS NEITHER ITS CONTROL CHANNEL NOR ITS STREAM. Without
@@ -7920,6 +8483,204 @@ describe("the cold gate's COMPACT remediation", () => {
     expect(
       response.result.case === "failure" ? response.result.value.detail : undefined,
     ).toBe("the vendor refused another query");
+  });
+
+  describe("labels the refusal by the compaction's own cause", () => {
+    const COLD_NOW = 1_000_000 + 10 * 60 * 1000;
+
+    it("labels an error result with no transient words rejected", async () => {
+      // Arrange.
+      const h = harness({
+        nowMs: COLD_NOW,
+        onQueryCreated: (query, _spec, index) => {
+          if (index === 0) query.emit(errorResultMessage({ errors: ["the budget is exhausted"] }));
+        },
+      });
+      writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+
+      // Act.
+      const response = await h.engine.startSession(resumeRequest("resume-1", compactRemediation()));
+
+      // Assert.
+      expect(retryLabel(response)).toBe("rejected");
+    });
+
+    it("labels an overloaded error result retryable", async () => {
+      // Arrange.
+      const h = harness({
+        nowMs: COLD_NOW,
+        onQueryCreated: (query, _spec, index) => {
+          if (index !== 0) return;
+          query.emit({
+            ...(errorResultMessage({ errors: ["Overloaded"] }) as unknown as Record<string, unknown>),
+            api_error_status: 529,
+          } as unknown as SdkMessage);
+        },
+      });
+      writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+
+      // Act.
+      const response = await h.engine.startSession(resumeRequest("resume-1", compactRemediation()));
+
+      // Assert.
+      expect(retryLabel(response)).toBe("retryable");
+    });
+
+    /** A success-subtype result that is an error: the vendor's failed API call. */
+    function erroredSuccess(words: string, status?: number): SdkMessage {
+      return {
+        ...(resultMessage("99999999-9999-4999-8999-99999999999e") as unknown as Record<string, unknown>),
+        is_error: true,
+        result: words,
+        ...(status === undefined ? {} : { api_error_status: status }),
+      } as unknown as SdkMessage;
+    }
+
+    it("refuses a success-subtype result that is an error instead of taking it as the summary", async () => {
+      // Arrange.
+      const h = harness({
+        nowMs: COLD_NOW,
+        onQueryCreated: (query, _spec, index) => {
+          if (index === 0) query.emit(erroredSuccess("API Error: 400 prompt is too long"));
+        },
+      });
+      writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+
+      // Act.
+      const response = await h.engine.startSession(resumeRequest("resume-1", compactRemediation()));
+
+      // Assert.
+      expect(response.result.case === "failure" ? response.result.value.detail : undefined).toBe(
+        "the summarizing session ended with an error result: API Error: 400 prompt is too long",
+      );
+    });
+
+    it("writes no compaction to the transcript for an error result", async () => {
+      // Arrange.
+      const h = harness({
+        nowMs: COLD_NOW,
+        onQueryCreated: (query, _spec, index) => {
+          if (index === 0) query.emit(erroredSuccess("API Error: Connection error."));
+        },
+      });
+      writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+      const transcript = transcriptPath(h.configDir, h.cwd, "resume-1");
+      const before = readFileSync(transcript, "utf8");
+
+      // Act.
+      await h.engine.startSession(resumeRequest("resume-1", compactRemediation()));
+
+      // Assert.
+      expect(readFileSync(transcript, "utf8")).toBe(before);
+    });
+
+    it.each([
+      ["a connection error", "API Error: Connection error.", undefined, "retryable"],
+      ["an overloaded API", "API Error: Overloaded", 529, "retryable"],
+      ["a rejected request", "API Error: 400 prompt is too long", 400, "rejected"],
+    ] as const)("labels a success-subtype error result from %s", async (_case, words, status, retry) => {
+      // Arrange.
+      const h = harness({
+        nowMs: COLD_NOW,
+        onQueryCreated: (query, _spec, index) => {
+          if (index === 0) query.emit(erroredSuccess(words, status));
+        },
+      });
+      writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+
+      // Act.
+      const response = await h.engine.startSession(resumeRequest("resume-1", compactRemediation()));
+
+      // Assert.
+      expect(retryLabel(response)).toBe(retry);
+    });
+
+    it("labels a result that summarized nothing rejected", async () => {
+      // Arrange.
+      const h = harness({
+        nowMs: COLD_NOW,
+        onQueryCreated: (query, _spec, index) => {
+          if (index !== 0) return;
+          query.emit({
+            ...(resultMessage("99999999-9999-4999-8999-999999999990") as unknown as Record<string, unknown>),
+            result: "",
+          } as never);
+        },
+      });
+      writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+
+      // Act.
+      const response = await h.engine.startSession(resumeRequest("resume-1", compactRemediation()));
+
+      // Assert.
+      expect(retryLabel(response)).toBe("rejected");
+    });
+
+    it("labels a stream that ended with no result retryable", async () => {
+      // Arrange.
+      const h = harness({
+        nowMs: COLD_NOW,
+        onQueryCreated: (query, _spec, index) => {
+          if (index === 0) query.end();
+        },
+      });
+      writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+
+      // Act.
+      const response = await h.engine.startSession(resumeRequest("resume-1", compactRemediation()));
+
+      // Assert.
+      expect(retryLabel(response)).toBe("retryable");
+    });
+
+    it("labels a stream that threw retryable", async () => {
+      // Arrange.
+      const h = harness({
+        nowMs: COLD_NOW,
+        onQueryCreated: (query, _spec, index) => {
+          if (index === 0) query.fail(new Error("Claude Code process exited with code 1"));
+        },
+      });
+      writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+
+      // Act.
+      const response = await h.engine.startSession(resumeRequest("resume-1", compactRemediation()));
+
+      // Assert.
+      expect(retryLabel(response)).toBe("retryable");
+    });
+
+    it("labels a throwaway query that could not be created rejected", async () => {
+      // Arrange.
+      const h = harness({ nowMs: COLD_NOW, createQueryFailsFrom: 0 });
+      writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+
+      // Act.
+      const response = await h.engine.startSession(resumeRequest("resume-1", compactRemediation()));
+
+      // Assert.
+      expect(retryLabel(response)).toBe("rejected");
+    });
+
+    it("records the label on the refusal's own line", async () => {
+      // Arrange.
+      const h = harness({
+        nowMs: COLD_NOW,
+        onQueryCreated: (query, _spec, index) => {
+          if (index === 0) query.end();
+        },
+      });
+      writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+      const before = logSinkMark();
+
+      // Act.
+      await h.engine.startSession(resumeRequest("resume-1", compactRemediation()));
+
+      // Assert.
+      expect(logContextFor(before, "refused StartSession: the cold gate's remediation failed")?.["retry"]).toBe(
+        "retryable",
+      );
+    });
   });
 
   /** A `pay` remediation: the caller elects to pay for the cold read. */

@@ -8,6 +8,8 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"connectrpc.com/connect"
+
+	"claude-repld/internal/shimclient"
 )
 
 // The live-work ledger's invariant: an item leaves the live set exactly when
@@ -345,4 +347,173 @@ func TestAQueryDeathConcludesAnItemWithNoWatch(t *testing.T) {
 	if got := h.retiredRecord(t, "w-1")["conclusion"]; got != string(concludedQueryDied) {
 		t.Fatalf("conclusion = %v, want %s", got, concludedQueryDied)
 	}
+}
+
+// ---- a departure settles the departed shim's work ----
+
+// departedLive is the live work every departure test starts with: a monitor
+// and a shell the shim announced as already live.
+func departedLive() *conversationv1.SessionStarted {
+	return sessionStarted("", createdWork("act-1", monitorWork()), createdWork("w-1", bashWork()))
+}
+
+// lastLiveWorkTo answers the last live-work set SINK was handed among events.
+func lastLiveWorkTo(events []event, sink string) (LiveWorkSet, bool) {
+	var last *LiveWorkSet
+	for _, e := range events {
+		if e.sink == sink && e.method == "OnLiveWorkChanged" && e.live != nil {
+			last = e.live
+		}
+	}
+	if last == nil {
+		return LiveWorkSet{}, false
+	}
+	return *last, true
+}
+
+// departWith drives one departure edge and answers every view call it made.
+func departWith(t *testing.T, h *harness, edge string) []event {
+	t.Helper()
+	switch edge {
+	case "link_dead":
+		h.client.links <- shimclient.LinkDead
+		h.awaitDeparture(t)
+	case "link_dead_in_stand_down":
+		h.client.StandDown()
+		h.client.links <- shimclient.LinkDead
+		h.awaitDeparture(t)
+	case "close_ending":
+		h.w.SessionEnding("a test ends the session")
+		closeWatcher(t, h)
+	case "close_reaped":
+		h.client.setReaped(shimclient.ExitInfo{PID: 4242, Code: -1, Signal: "killed"})
+		closeWatcher(t, h)
+	default:
+		t.Fatalf("unknown departure edge %q", edge)
+	}
+	return h.rec.drain()
+}
+
+// TestADepartureEmptiesTheLiveSet: whichever edge establishes that the shim is
+// gone, nothing it ran is live any more.
+func TestADepartureEmptiesTheLiveSet(t *testing.T) {
+	for _, edge := range []string{"link_dead", "link_dead_in_stand_down", "close_ending", "close_reaped"} {
+		t.Run(edge, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t, Session{Started: departedLive()})
+			h.quiet()
+
+			// Act.
+			departWith(t, h, edge)
+
+			// Assert.
+			assertLiveWork(t, h.w.LiveWork(), LiveWorkSet{})
+		})
+	}
+}
+
+// TestADepartureTellsEveryViewTheWorkEnded is the owner's report (2026-10-02):
+// work a restart killed stayed listed in the webapp's expanded footer. The
+// footer, the roster and the feed are each handed the emptied set.
+func TestADepartureTellsEveryViewTheWorkEnded(t *testing.T) {
+	for _, sink := range []string{"footer", "sidebar", "feed"} {
+		t.Run(sink, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t, Session{Started: departedLive()})
+			h.quiet()
+
+			// Act.
+			events := departWith(t, h, "link_dead")
+
+			// Assert.
+			got, told := lastLiveWorkTo(events, sink)
+			if !told {
+				t.Fatalf("%s was never handed a live-work set at the departure; saw %v", sink, names(events))
+			}
+			assertLiveWork(t, got, LiveWorkSet{})
+		})
+	}
+}
+
+// TestADepartureRecordsEachItemRetiredAsDeparted names the conclusion, so the
+// log says why each item left the set.
+func TestADepartureRecordsEachItemRetiredAsDeparted(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: departedLive()})
+	h.quiet()
+
+	// Act.
+	departWith(t, h, "close_ending")
+
+	// Assert.
+	if got := h.retiredRecord(t, "w-1")["conclusion"]; got != string(concludedDeparted) {
+		t.Fatalf("the shell's conclusion = %v, want %q", got, concludedDeparted)
+	}
+}
+
+// TestADepartureWithNothingLivePublishesNothing: an idle shim's departure has
+// no work to settle, so no view is told a set it already holds.
+func TestADepartureWithNothingLivePublishesNothing(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act.
+	events := departWith(t, h, "close_ending")
+
+	// Assert.
+	if _, told := lastLiveWorkTo(events, "footer"); told {
+		t.Fatalf("an idle departure republished the live set; saw %v", names(events))
+	}
+}
+
+// TestClosingTheWatchOfARunningShimKeepsItsLiveWork: the daemon's own exit and
+// a handover stop WATCHING a shim that keeps running, so its work is not ended
+// and no view is told it was.
+func TestClosingTheWatchOfARunningShimKeepsItsLiveWork(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: departedLive()})
+	h.quiet()
+
+	// Act.
+	closeWatcher(t, h)
+
+	// Assert.
+	if _, told := lastLiveWorkTo(h.rec.drain(), "footer"); told {
+		t.Fatalf("closing the watch of a running shim republished its live set")
+	}
+}
+
+// TestADisplacedWatchersDepartureRepublishesNothing: a newer watcher of the
+// same workspace already published its own set, and the old one's departure
+// must not overwrite it with the old ledger's emptied one.
+func TestADisplacedWatchersDepartureRepublishesNothing(t *testing.T) {
+	// Arrange: the old watcher holds live work; a newer one starts on the
+	// same workspace before the old one is closed.
+	old := newHarness(t, Session{Started: departedLive()})
+	old.quiet()
+	newHarness(t, Session{Started: sessionStarted("")})
+
+	// Act.
+	events := departWith(t, old, "close_reaped")
+
+	// Assert.
+	if _, told := lastLiveWorkTo(events, "footer"); told {
+		t.Fatalf("a displaced watcher's departure republished over the newer watcher's set; saw %v", names(events))
+	}
+}
+
+// TestADisplacedWatchersDepartureStillEmptiesItsOwnLedger: what the views are
+// told is the newer watcher's business, but the old ledger's work is ended.
+func TestADisplacedWatchersDepartureStillEmptiesItsOwnLedger(t *testing.T) {
+	// Arrange.
+	old := newHarness(t, Session{Started: departedLive()})
+	old.quiet()
+	newHarness(t, Session{Started: sessionStarted("")})
+
+	// Act.
+	departWith(t, old, "close_reaped")
+
+	// Assert.
+	assertLiveWork(t, old.w.LiveWork(), LiveWorkSet{})
 }
