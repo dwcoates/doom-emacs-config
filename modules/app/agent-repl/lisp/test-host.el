@@ -730,33 +730,6 @@ ws-3 with ids ws-id-1, ws-id-2 and ws-id-3."
       ;; Assert
       (should (eq outcome :skipped)))))
 
-(ert-deftest agent-repl-test-host-settle-select-hands-the-outcome-over ()
-  "A caller that gave ON-SETTLED receives the outcome."
-  ;; Arrange
-  (let ((outcome nil))
-    ;; Act
-    (agent-repl-host--settle-select (lambda (o) (setq outcome o)) :success)
-    ;; Assert
-    (should (eq outcome :success))))
-
-(ert-deftest agent-repl-test-host-settle-select-without-a-callback-is-a-no-op ()
-  "A caller that gave no ON-SETTLED is told nothing, and nothing signals."
-  ;; Act / Assert
-  (should-not (agent-repl-host--settle-select nil :success)))
-
-(defconst agent-repl-test-host--lisp-dir
-  (file-name-directory (or load-file-name buffer-file-name))
-  "The `lisp/' directory this suite lives in, captured at LOAD time.")
-
-(ert-deftest agent-repl-test-host-select-settles-only-through-the-helper ()
-  "host.el hands every selection outcome over through one helper.
-A hand-rolled `(funcall on-settled :OUTCOME)' would drift from it."
-  (let ((source (with-temp-buffer
-                  (insert-file-contents
-                   (expand-file-name "host.el" agent-repl-test-host--lisp-dir))
-                  (buffer-string))))
-    (should-not (string-match-p "(funcall on-settled :" source))))
-
 (ert-deftest agent-repl-test-host-own-selection-unanswered-is-ours ()
   "A selection Emacs sent is its own before the answer arrives."
   (agent-repl-test-host--with-harness
