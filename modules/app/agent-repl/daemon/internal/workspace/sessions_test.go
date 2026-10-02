@@ -364,6 +364,9 @@ func (w *fakeWatcher) Pointers() sessionwatcher.Pointers { return w.pointers }
 // MainKnownThrough answers the main watch's pointer the fixture states.
 func (w *fakeWatcher) MainKnownThrough() *conversationv1.HistoryPointer { return w.pointers.Main }
 
+// NoteHistoryLoaded takes nothing up: no fixture here loads history.
+func (w *fakeWatcher) NoteHistoryLoaded(*conversationv1.AgentId, *conversationv1.HistoryPage, bool) {}
+
 func (w *fakeWatcher) SessionEnding(string) {
 	if w.standDown != nil {
 		*w.standDown = append(*w.standDown, "watcher.SessionEnding")
