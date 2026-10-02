@@ -98,6 +98,9 @@
 (declare-function agent-repl-wire-decode-session-fault-daemon-state-unreadable "agent-repl-wire-common" (json))
 (declare-function agent-repl-wire-decode-session-fault-adoption-window-expired "agent-repl-wire-common" (json))
 (declare-function agent-repl-wire-decode-session-fault-final-answer-unresolved "agent-repl-wire-common" (json))
+(declare-function agent-repl-wire-decode-session-fault-vendor-start-retrying "agent-repl-wire-common" (json))
+(declare-function agent-repl-wire-decode-session-fault-vendor-start-rejected "agent-repl-wire-common" (json))
+(declare-function agent-repl-wire-decode-session-fault-vendor-start-failed "agent-repl-wire-common" (json))
 
 ;; core.el's canonical logging ladder.
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
@@ -1740,18 +1743,13 @@ arm this codec does not know is refused as an unknown field."
   (agent-repl-wire-encode-workspace-ref ref))
 
 (defun agent-repl-wire-encode-restart-workspace-request (request)
-  "Encode RestartWorkspaceRequest from plist REQUEST (:workspace REF :force
-BOOL).
-`force' is spelled EXPLICITLY on the wire even when false: a forced
-restart interrupts live work, so the request states the mode rather than
-leaning on an omitted default."
-  (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.verbs-encode-restart-workspace-request force=%S"
-                    (and (plist-get request :force) t))
+  "Encode RestartWorkspaceRequest from plist REQUEST (:workspace REF).
+Every restart is immediate: the request carries no mode."
+  (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.verbs-encode-restart-workspace-request")
   (list (cons 'workspace
               (agent-repl-wire-encode-restart-workspace-request-workspace
                (agent-repl-wire-verbs--require "RestartWorkspaceRequest" "workspace"
-                                                (plist-get request :workspace))))
-        (cons 'force (agent-repl-wire-verbs--encode-bool (plist-get request :force)))))
+                                                (plist-get request :workspace))))))
 
 (defun agent-repl-wire-decode-restart-workspace-success (json)
   "Decode RestartWorkspaceSuccess from JSON.  Empty: the restart is accepted."
@@ -1784,11 +1782,6 @@ This daemon released the workspace to a successor; dial `address'."
 not finished adopting this workspace yet."
   (agent-repl-wire-verbs--decode-empty "RestartWorkspaceNotYetAdopted" json))
 
-(defun agent-repl-wire-decode-restart-workspace-no-session (json)
-  "Decode RestartWorkspaceNoSession from JSON.  Empty: The workspace has no
-session to restart."
-  (agent-repl-wire-verbs--decode-empty "RestartWorkspaceNoSession" json))
-
 (defun agent-repl-wire-decode-restart-workspace-error-unknown-workspace (json)
   "Decode RestartWorkspaceError's `unknown_workspace' cause arm from JSON."
   (agent-repl-wire-decode-restart-workspace-unknown-workspace json))
@@ -1805,10 +1798,6 @@ session to restart."
   "Decode RestartWorkspaceError's `not_yet_adopted' cause arm from JSON."
   (agent-repl-wire-decode-restart-workspace-not-yet-adopted json))
 
-(defun agent-repl-wire-decode-restart-workspace-error-no-session (json)
-  "Decode RestartWorkspaceError's `no_session' cause arm from JSON."
-  (agent-repl-wire-decode-restart-workspace-no-session json))
-
 (defun agent-repl-wire-decode-restart-workspace-error (json)
   "Decode RestartWorkspaceError from JSON into (:cause (:arm ARM :value V)).
 THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
@@ -1821,8 +1810,7 @@ arm this codec does not know is refused as an unknown field."
            (list (list 'unknownWorkspace :unknown-workspace #'agent-repl-wire-decode-restart-workspace-error-unknown-workspace)
          (list 'workspaceRefMismatch :workspace-ref-mismatch #'agent-repl-wire-decode-restart-workspace-error-workspace-ref-mismatch)
          (list 'transferringAway :transferring-away #'agent-repl-wire-decode-restart-workspace-error-transferring-away)
-         (list 'notYetAdopted :not-yet-adopted #'agent-repl-wire-decode-restart-workspace-error-not-yet-adopted)
-         (list 'noSession :no-session #'agent-repl-wire-decode-restart-workspace-error-no-session))))))
+         (list 'notYetAdopted :not-yet-adopted #'agent-repl-wire-decode-restart-workspace-error-not-yet-adopted))))))
 
 (defun agent-repl-wire-decode-restart-workspace-response-success (json)
   "Decode RestartWorkspaceResponse's `success' arm from JSON."
@@ -3442,6 +3430,21 @@ ANSWERED at all."
 `SessionFaultFinalAnswerUnresolved'."
   (agent-repl-wire-decode-session-fault-final-answer-unresolved json))
 
+(defun agent-repl-wire-decode-session-fault-kind-vendor-start-retrying (json)
+  "Decode SessionFault's `vendor_start_retrying' kind arm from JSON as a
+`SessionFaultVendorStartRetrying'."
+  (agent-repl-wire-decode-session-fault-vendor-start-retrying json))
+
+(defun agent-repl-wire-decode-session-fault-kind-vendor-start-rejected (json)
+  "Decode SessionFault's `vendor_start_rejected' kind arm from JSON as a
+`SessionFaultVendorStartRejected'."
+  (agent-repl-wire-decode-session-fault-vendor-start-rejected json))
+
+(defun agent-repl-wire-decode-session-fault-kind-vendor-start-failed (json)
+  "Decode SessionFault's `vendor_start_failed' kind arm from JSON as a
+`SessionFaultVendorStartFailed'."
+  (agent-repl-wire-decode-session-fault-vendor-start-failed json))
+
 (defun agent-repl-wire-decode-session-fault-kind (json)
   "Decode SessionFault's `kind' oneof from JSON into (:arm ARM :value V).
 THE ARM IS THE FAULT CLASS: `detail' supplements it and never replaces
@@ -3461,15 +3464,18 @@ it, so a fault with no kind is a contract breach."
                  (list 'watchOpenRefused :watch-open-refused #'agent-repl-wire-decode-session-fault-kind-watch-open-refused)
                  (list 'daemonStateUnreadable :daemon-state-unreadable #'agent-repl-wire-decode-session-fault-kind-daemon-state-unreadable)
                  (list 'adoptionWindowExpired :adoption-window-expired #'agent-repl-wire-decode-session-fault-kind-adoption-window-expired)
-                 (list 'finalAnswerUnresolved :final-answer-unresolved #'agent-repl-wire-decode-session-fault-kind-final-answer-unresolved))))
+                 (list 'finalAnswerUnresolved :final-answer-unresolved #'agent-repl-wire-decode-session-fault-kind-final-answer-unresolved)
+                 (list 'vendorStartRetrying :vendor-start-retrying #'agent-repl-wire-decode-session-fault-kind-vendor-start-retrying)
+                 (list 'vendorStartRejected :vendor-start-rejected #'agent-repl-wire-decode-session-fault-kind-vendor-start-rejected)
+                 (list 'vendorStartFailed :vendor-start-failed #'agent-repl-wire-decode-session-fault-kind-vendor-start-failed))))
 
 (defun agent-repl-wire-decode-session-fault (json)
   "Decode SessionFault from JSON into (:detail STRING :kind ONEOF).
 Deliberately NOT DaemonFault: a session's fault classes are the session
-controller's own vocabulary — the same fourteen the host stream's HostFault
-carries, decoded through the same shared arm messages."
+controller's own vocabulary — the host stream's HostFault carries the first
+fourteen, decoded through the same shared arm messages."
   (let ((message "SessionFault"))
-    (agent-repl-wire-verbs--check-keys message json '(detail shimStartFailed shimDied linkSevered resumeFailed bounceDied bounceUnknown classifierFailed shimReported conversationAbandoned sessionAbsent watchOpenRefused daemonStateUnreadable adoptionWindowExpired finalAnswerUnresolved))
+    (agent-repl-wire-verbs--check-keys message json '(detail shimStartFailed shimDied linkSevered resumeFailed bounceDied bounceUnknown classifierFailed shimReported conversationAbandoned sessionAbsent watchOpenRefused daemonStateUnreadable adoptionWindowExpired finalAnswerUnresolved vendorStartRetrying vendorStartRejected vendorStartFailed))
     (list :detail (agent-repl-wire-verbs--decode-string message 'detail json)
           :kind (agent-repl-wire-decode-session-fault-kind json))))
 

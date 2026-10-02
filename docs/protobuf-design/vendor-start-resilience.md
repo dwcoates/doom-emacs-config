@@ -171,6 +171,10 @@ be reopened, which reopens every decision downstream of it.
   ladder, and the footer carries the distinction).
 - `FooterStatusActivityStartFailed.dropped_prompts` (tag 2) is RETIRED with
   the drop-on-failure semantics (see 3).
+- `HostFault.kind` (endpoint_watch_host_workspace.proto) gains the same three
+  arms (17–19, reusing the SessionFault arm messages), so Emacs's host stream
+  carries them exactly as SessionHealth does. Gap found by the frontends
+  implementer: the host stream's oneof had been left out of the first landing.
 - Consequences: webapp `footer/activity.ts` gains the `vendorStart` case;
   the webapp strip's substatus words derive from arm names and need no
   table; elisp decodes the three new SessionFault arms wherever it switches

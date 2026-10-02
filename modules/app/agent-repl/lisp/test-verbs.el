@@ -428,43 +428,35 @@ retire the registration: the success does."
                :event (list :arm :open :value (list :stage :starting-session)))))
       (should-not stages))))
 
-(ert-deftest agent-repl-verbs-restart-states-force-false ()
-  "A graceful restart states `force' explicitly rather than omitting it."
+(ert-deftest agent-repl-verbs-restart-request-carries-no-force ()
+  "A restart request is the workspace alone: no `force' key."
   (agent-repl-test-verbs--with nil
-    (agent-repl-verb-restart "ws-one" nil)
-    (should (equal (plist-get (agent-repl-test-verbs--request :restart) :force) nil))))
+    (agent-repl-verb-restart "ws-one")
+    (should-not (plist-member (agent-repl-test-verbs--request :restart) :force))))
 
-(ert-deftest agent-repl-verbs-restart-force-closes-the-composer-on-the-send ()
-  "A forced restart's SEND is what closes the composer, not the later push."
+(ert-deftest agent-repl-verbs-restart-closes-the-composer-on-the-send ()
+  "A restart's SEND is what closes the composer, not the later push."
   (agent-repl-test-verbs--with nil
     ;; Arrange / Act
-    (agent-repl-verb-restart "ws-one" t)
+    (agent-repl-verb-restart "ws-one")
     ;; Assert
     (should (equal agent-repl-test-verbs--restart-holds '("ws-one")))))
 
-(ert-deftest agent-repl-verbs-restart-graceful-leaves-the-composer-open ()
-  "A graceful restart is SCHEDULED, so it takes no hold on the composer."
-  (agent-repl-test-verbs--with nil
-    ;; Arrange / Act
-    (agent-repl-verb-restart "ws-one" nil)
-    ;; Assert
-    (should (null agent-repl-test-verbs--restart-holds))))
-
 (ert-deftest agent-repl-verbs-restart-refused-gives-the-composer-back ()
-  "A refused forced restart bounces nothing, so it holds nothing shut."
+  "A refused restart bounces nothing, so it holds nothing shut."
   (agent-repl-test-verbs--with
       '((:restart . (:response (:arm :error
-                                :value (:arm :no-session :value nil)))))
+                                :value (:cause (:arm :not-yet-adopted :value nil))))))
     ;; Arrange / Act
-    (agent-repl-verb-restart "ws-one" t)
+    (agent-repl-verb-restart "ws-one")
     ;; Assert
     (should (null agent-repl-test-verbs--restart-holds))))
 
-(ert-deftest agent-repl-verbs-restart-force-sets-force-true ()
-  "A forced restart sets `force'."
+(ert-deftest agent-repl-verbs-restart-success-says-it-is-under-way ()
+  "An accepted restart is announced as under way, never as scheduled."
   (agent-repl-test-verbs--with nil
-    (agent-repl-verb-restart "ws-one" t)
-    (should (eq (plist-get (agent-repl-test-verbs--request :restart) :force) t))))
+    (agent-repl-verb-restart "ws-one")
+    (should (agent-repl-test-verbs--messaged-p "agent-repl: restart under way"))))
 
 ;;;; ---- Interrupt -------------------------------------------------------
 
@@ -750,7 +742,7 @@ daemon starts sending it, with no table to update here."
   (agent-repl-test-verbs--with
       '((:restart . (:response (:arm :error
                                 :value (:cause (:arm :some-future-arm :value nil))))))
-    (agent-repl-verb-restart "ws-one" nil)
+    (agent-repl-verb-restart "ws-one")
     (should (agent-repl-test-verbs--messaged-p "restart refused: some-future-arm"))))
 
 (ert-deftest agent-repl-verbs-refusal-carries-the-arms-own-fields ()
@@ -1150,11 +1142,15 @@ to the staged progress the daemon pushes on the WatchDaemon channel."
         (agent-repl-kill-workspace)
         (should (cl-some (lambda (m) (string-prefix-p "elisp.verbs.kill-declined" m)) logged))))))
 
-(ert-deftest agent-repl-verbs-restart-command-prefix-arg-forces ()
-  "A prefix argument makes `agent-repl-restart-workspace' forced."
+(ert-deftest agent-repl-verbs-restart-command-takes-no-prefix-argument ()
+  "`agent-repl-restart-workspace' is not prefix-sensitive: its interactive spec is bare."
+  (should (equal (cadr (interactive-form 'agent-repl-restart-workspace)) nil)))
+
+(ert-deftest agent-repl-verbs-restart-command-sends-the-one-immediate-restart ()
+  "The command sends a restart request with no force key."
   (agent-repl-test-verbs--with nil
-    (agent-repl-restart-workspace t)
-    (should (eq (plist-get (agent-repl-test-verbs--request :restart) :force) t))))
+    (agent-repl-restart-workspace)
+    (should-not (plist-member (agent-repl-test-verbs--request :restart) :force))))
 
 (ert-deftest agent-repl-verbs-open-command-offers-only-closed-rows ()
   "The open picker's candidates are exactly the roster's CLOSED rows."

@@ -65,6 +65,7 @@ import type {
   FooterStatusActivityQuestionLead,
   FooterStatusActivityRetrying,
   FooterStatusActivityStartFailed,
+  FooterStatusActivityVendorStart,
   FooterStatusActivityUpdate,
   FooterStatusActivityUpdateComponent,
   FooterStatusActivityUpdateNote,
@@ -396,6 +397,8 @@ function drawSalientKind(
       return drawFooterStatusActivityFault(kind.value);
     case "startFailed":
       return drawFooterStatusActivityStartFailed(kind.value);
+    case "vendorStart":
+      return drawFooterStatusActivityVendorStart(kind.value);
     case "closeBlocked":
       return drawFooterStatusActivityCloseBlocked(kind.value);
     case "notification":
@@ -940,21 +943,25 @@ export function drawFooterStatusActivityQueryDied(
 }
 
 /**
- * The bring-up failure: the daemon's composed cause, and what the failure cost
- * in held prompts when it dropped any. The count is a fact of the failure the
- * daemon states as a number, so the line says it in words here rather than
- * leaving the user to learn it from an emptied tray.
+ * The bring-up failure: the daemon's composed cause, verbatim. A failed
+ * bring-up never drops held prompts any more (they wait "after reconnect"), so
+ * the line says only what failed.
  */
 export function drawFooterStatusActivityStartFailed(
   u: FooterStatusActivityStartFailed,
 ): HTMLElement {
-  if (u.droppedPrompts === 0)
-    return textLine("footer-activity-start-failed", u.detail);
-  const prompts = u.droppedPrompts === 1 ? "prompt" : "prompts";
-  return textLine(
-    "footer-activity-start-failed",
-    `${u.detail} · ${u.droppedPrompts} held ${prompts} dropped`,
-  );
+  return textLine("footer-activity-start-failed", u.detail);
+}
+
+/**
+ * The vendor's start standing: retrying, refused, or given up. The daemon
+ * composes the whole line (attempt, cause, and the restart binding where one
+ * applies), so it is drawn verbatim.
+ */
+export function drawFooterStatusActivityVendorStart(
+  u: FooterStatusActivityVendorStart,
+): HTMLElement {
+  return textLine("footer-activity-vendor-start", u.text);
 }
 
 /**

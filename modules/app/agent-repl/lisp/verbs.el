@@ -676,33 +676,34 @@ queue onward is WS's own feed merge bubble, footer and roster row."
      :ws ws :op "merge"
      :on-success (lambda (_) (message "merge enqueued")))))
 
-(defun agent-repl-verb-restart (ws force)
-  "Restart WS's session; FORCE interrupts the live turn first.
-The DAEMON owns everything the restart entails, the webview bounce
-included.  Forced restarts do NOT resume the agent afterwards: continuing
-is the user's next prompt.
+(defun agent-repl-verb-restart (ws)
+  "Restart WS's backend and webapp page, immediately.
+There is ONE mode.  The DAEMON owns everything the restart entails: it
+interrupts the running turn and stops all detached work with bounded calls,
+bounces the workspace's shim (hard-killing whatever did not stop), resumes
+the same session with a fresh vendor-start run, releases prompts held
+\"after reconnect\", and reloads the workspace's webapp page.
 
-A FORCED restart CLOSES THE COMPOSER THE MOMENT IT IS SENT, rather than
-waiting for the `restarting' arm to come back over the host stream.  The
-send is async and the bounce is later still, so between the two the gate
-would otherwise read the dying generation's `:open' and take a prompt the
-daemon is about to refuse (`agent-repl-host-take-restart-hold').  A
-REFUSED restart bounces nothing, so its arm releases the hold again; a
-graceful restart is scheduled rather than immediate and takes none."
+THE COMPOSER CLOSES THE MOMENT THE RESTART IS SENT, rather than waiting for
+the `restarting' arm to come back over the host stream.  The send is async
+and the bounce is later still, so between the two the gate would otherwise
+read the dying generation's `:open' and take a prompt the daemon is about
+to refuse (`agent-repl-host-take-restart-hold').  A REFUSED restart
+bounces nothing, so its arm releases the hold again."
   (let ((ref (agent-repl-verbs--ref ws)))
-    (when force (agent-repl-host-take-restart-hold ws))
+    (agent-repl-host-take-restart-hold ws)
     (agent-repl-verbs--send
      #'agent-repl-rpc-restart-workspace (agent-repl-verbs--conn ws)
-     (list :workspace ref :force (and force t))
+     (list :workspace ref)
      :ws ws :op "restart"
      :on-success
-     (lambda (_) (message "agent-repl: restart %s" (if force "under way" "scheduled")))
+     (lambda (_) (message "agent-repl: restart under way"))
      :on-error
      (lambda (_)
        ;; The arm is NOT claimed (nil): the refusal still reports itself
        ;; through the generic path.  All this arm does is give back a hold
        ;; taken for a bounce that will never happen.
-       (when force (agent-repl-host-release-restart-hold ws "restart-refused"))
+       (agent-repl-host-release-restart-hold ws "restart-refused")
        nil))))
 
 (defun agent-repl-verb-interrupt (ws &optional confirm-agents)
@@ -1542,12 +1543,21 @@ landing, so it can go on to further work and further merges."
   (agent-repl-verb-merge (agent-repl-verbs--target-ws ws "Merge workspace: ")
                          (and keep-open t)))
 
-(defun agent-repl-restart-workspace (&optional force ws)
-  "Restart the current workspace's session (`SPC o C-c').
-A prefix argument makes it a FORCED restart: the live turn and every
-background task are interrupted, and the agent is not resumed."
-  (interactive "P")
-  (agent-repl-verb-restart (agent-repl-verbs--target-ws ws "Restart workspace: ") (and force t)))
+(defun agent-repl-restart-workspace (&optional ws)
+  "Restart the current workspace's backend and webapp page (`SPC o C-c').
+IMMEDIATE, with no graceful mode and no prefix argument: the running turn
+and all detached work are hard-stopped, the workspace's shim is relaunched
+(rebuilt first when stale) with the same session resumed, and the
+workspace's webapp page reloads.  Prompts sent meanwhile are held \"after
+reconnect\".  The daemon, the store and the sidecar are never touched.
+
+For a STUCK workspace: a turn that never ends, a Claude SDK that does not
+respond or failed to start, a stale shim build, a page out of sync.  Not
+for a page-only reload (`SPC o l') and not when the daemon itself is down.
+NOT A ROUTINE ACTION: a fresh shim or page may speak an API the older
+running daemon does not."
+  (interactive)
+  (agent-repl-verb-restart (agent-repl-verbs--target-ws ws "Restart workspace: ")))
 
 (defun agent-repl-interrupt-turn (&optional ws)
   "Interrupt the running turn of the current workspace (`C-c C-k').
