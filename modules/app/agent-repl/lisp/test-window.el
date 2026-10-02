@@ -815,15 +815,29 @@ persp-mode activated, and \"main\"/\"none\" own no durable log sink."
   "Debug records the stubbed rung received during a capture.")
 
 (ert-deftest agent-repl-window-test-input-height-is-the-declared-fraction-of-the-main-area ()
-  "The composer height is the declared fraction of the frame's main area."
+  "The composer height is the declared fraction of the main area plus the offset."
   (agent-repl-window-test--with-temp-frame
     (agent-repl-window-test--with-fresh-height-cache
       ;; Act
       (let ((lines (agent-repl-window--input-height)))
         ;; Assert
         (should (= lines
-                   (round (* agent-repl-input-height-fraction
-                             (window-total-height (frame-root-window))))))))))
+                   (+ (round (* agent-repl-input-height-fraction
+                                (window-total-height (frame-root-window))))
+                      agent-repl-input-height-line-offset)))))))
+
+(ert-deftest agent-repl-window-test-input-height-default-is-one-line-under-the-fraction ()
+  "By default the composer is exactly one line shorter than the fraction alone."
+  (agent-repl-window-test--with-temp-frame
+    (agent-repl-window-test--with-fresh-height-cache
+      ;; Arrange
+      (let ((unadjusted (let ((agent-repl-input-height-line-offset 0))
+                          (agent-repl-window--input-height))))
+        (set-frame-parameter nil agent-repl-window--input-height-parameter nil)
+        ;; Act
+        (let ((lines (agent-repl-window--input-height)))
+          ;; Assert
+          (should (= lines (1- unadjusted))))))))
 
 (ert-deftest agent-repl-window-test-input-height-ignores-the-window-being-split ()
   "A smaller host window does not shrink the composer's height.
@@ -864,8 +878,9 @@ workspace mounted while the frame carried something else came out short."
       (let ((lines (agent-repl-window--input-height)))
         ;; Assert
         (should (= lines
-                   (round (* agent-repl-input-height-fraction
-                             (window-total-height (frame-root-window))))))))))
+                   (+ (round (* agent-repl-input-height-fraction
+                                (window-total-height (frame-root-window))))
+                      agent-repl-input-height-line-offset)))))))
 
 (ert-deftest agent-repl-window-test-input-height-floors-at-the-minimum ()
   "A fraction too small to leave a usable composer is floored, not honored."

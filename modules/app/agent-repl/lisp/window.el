@@ -53,6 +53,7 @@
 ;; lexically.
 (defvar agent-repl--eager-open-in-progress)
 (defvar agent-repl-input-height-fraction)
+(defvar agent-repl-input-height-line-offset)
 
 (require 'cl-lib)
 
@@ -293,7 +294,8 @@ derived from, and the height itself.  A mismatch on the car re-derives.")
 
 FRAME defaults to the selected frame; WS names the workspace for
 diagnostics only.  The value is derived once per frame geometry from
-`agent-repl-input-height-fraction' of the frame's main area and cached
+`agent-repl-input-height-fraction' of the frame's main area, adjusted by
+`agent-repl-input-height-line-offset', and cached
 in `agent-repl-window--input-height-parameter', so every mount on the
 frame — including a remount, a layout repair, and a restored workspace
 — receives the same number.  Never smaller than
@@ -310,12 +312,14 @@ frame — including a remount, a layout repair, and a restored workspace
           (cdr cached))
       (let* ((base (window-total-height (frame-root-window frame)))
              (lines (max agent-repl-window--input-height-minimum
-                         (round (* agent-repl-input-height-fraction base)))))
+                         (+ (round (* agent-repl-input-height-fraction base))
+                            agent-repl-input-height-line-offset))))
         (set-frame-parameter frame agent-repl-window--input-height-parameter
                              (cons key lines))
         (agent-repl--log log-ws
-                         "window--input-height: source=computed frame=%S frame-height=%s main-area-height=%s fraction=%S floor=%s lines=%s"
+                         "window--input-height: source=computed frame=%S frame-height=%s main-area-height=%s fraction=%S offset=%s floor=%s lines=%s"
                          frame key base agent-repl-input-height-fraction
+                         agent-repl-input-height-line-offset
                          agent-repl-window--input-height-minimum lines)
         lines))))
 
