@@ -842,6 +842,54 @@ type fakeFeed struct {
 	// records every turns slice handed to it, in order.
 	rollBackTurnsErr   error
 	rollBackTurnsCalls [][]ids.TurnID
+
+	// olderFinals and olderPrompts are what each LoadOlder call loads, in
+	// order: the rows it prepends to finals and prompts. loadOlderErr fails
+	// every call; loadOlderCalls counts them.
+	olderFinals    [][]*frontendv1.FeedId
+	olderPrompts   [][]*frontendv1.FeedId
+	loadOlderErr   error
+	loadOlderCalls int
+
+	// throughPages are the pages LoadThrough hands over, then answers
+	// throughErr or the target; throughReader is the reader it was asked for.
+	throughPages  []*frontendv1.FeedPage
+	throughErr    error
+	throughReader feed.ReaderID
+}
+
+// LoadOlder loads the next scripted older page, false when none is left.
+func (f *fakeFeed) LoadOlder(context.Context, ids.WorkspaceID) (bool, error) {
+	f.loadOlderCalls++
+	if f.loadOlderErr != nil {
+		return false, f.loadOlderErr
+	}
+	if len(f.olderFinals) == 0 && len(f.olderPrompts) == 0 {
+		return false, nil
+	}
+	if len(f.olderFinals) > 0 {
+		f.finals = append(append([]*frontendv1.FeedId{}, f.olderFinals[0]...), f.finals...)
+		f.olderFinals = f.olderFinals[1:]
+	}
+	if len(f.olderPrompts) > 0 {
+		f.prompts = append(append([]*frontendv1.FeedId{}, f.olderPrompts[0]...), f.prompts...)
+		f.olderPrompts = f.olderPrompts[1:]
+	}
+	return true, nil
+}
+
+// LoadThrough hands over the scripted pages, then answers the scripted outcome.
+func (f *fakeFeed) LoadThrough(_ context.Context, _ ids.WorkspaceID, reader feed.ReaderID, target *frontendv1.FeedId, emit func(*frontendv1.FeedPage) error) (*frontendv1.FeedId, error) {
+	f.throughReader = reader
+	for _, page := range f.throughPages {
+		if err := emit(page); err != nil {
+			return nil, err
+		}
+	}
+	if f.throughErr != nil {
+		return nil, f.throughErr
+	}
+	return target, nil
 }
 
 func (f *fakeFeed) FinalResponses(ids.WorkspaceID) []*frontendv1.FeedId {
@@ -924,7 +972,25 @@ type fakeFooter struct {
 	footer.Resolver
 	topic publish.Topic[*frontendv1.FooterView]
 
+	// faults are the faults the server opened on the footer.
+	faultsMu sync.Mutex
+	faults   []footer.Fault
+
 	edges participantRecorder
+}
+
+// OpenFault records a fault the server opened.
+func (f *fakeFooter) OpenFault(_ ids.WorkspaceID, fault footer.Fault) {
+	f.faultsMu.Lock()
+	defer f.faultsMu.Unlock()
+	f.faults = append(f.faults, fault)
+}
+
+// openedFaults answers the faults opened so far.
+func (f *fakeFooter) openedFaults() []footer.Fault {
+	f.faultsMu.Lock()
+	defer f.faultsMu.Unlock()
+	return append([]footer.Fault(nil), f.faults...)
 }
 
 func (f *fakeFooter) Topic(ids.WorkspaceID) *publish.Topic[*frontendv1.FooterView] {
