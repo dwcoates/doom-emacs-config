@@ -84,9 +84,14 @@ type SuiteResult struct {
 	Outcome    Outcome
 	Exit       int
 	Start, End time.Time
+	// UnitSeconds is the sum of the suite's own units' wall times: the slot
+	// time the suite occupied. Unlike the span, it does not grow while the
+	// suite's next unit waits for a slot another suite holds.
+	UnitSeconds float64
 }
 
-// Seconds is the suite's wall span, first unit start to last unit end.
+// Seconds is the suite's wall span, first unit start to last unit end. It
+// depends on how the scheduler interleaved every suite in the run.
 func (s SuiteResult) Seconds() float64 { return s.End.Sub(s.Start).Seconds() }
 
 // Runner runs units.
@@ -154,6 +159,7 @@ func (r *Runner) Run(ctx context.Context, specs []Spec) ([]Result, []SuiteResult
 		if res.End.After(sr.End) {
 			sr.End = res.End
 		}
+		sr.UnitSeconds += res.Wall()
 		switch {
 		case res.Outcome == Failed && sr.Outcome != Failed:
 			sr.Outcome, sr.Exit = Failed, res.Exit
