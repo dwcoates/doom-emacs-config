@@ -110,7 +110,7 @@ func conflictLine(subject string, files int) *frontendv1.FooterStatusActivityMer
 func suiteLine(name string, edge suiteState) *frontendv1.FooterStatusActivityMergeStep {
 	suite := &frontendv1.FooterMergeStepSuite{Name: name}
 	switch edge {
-	case suiteStatePassed:
+	case suiteStatePassed, suiteStateDeclined:
 		suite.Edge = &frontendv1.FooterMergeStepSuite_Passed{Passed: &frontendv1.FooterMergeStepSuitePassed{}}
 	case suiteStateFailed:
 		suite.Edge = &frontendv1.FooterMergeStepSuite_Failed{Failed: &frontendv1.FooterMergeStepSuiteFailed{}}
