@@ -293,6 +293,17 @@ describe("the one control", () => {
     expect(handRolled).toEqual([]);
   });
 
+  it("is the only way src gives an element the button role", () => {
+    // Arrange
+    const files = sources(SRC, [".ts"]).filter((file) => !file.endsWith(`${path.sep}control.ts`));
+    // Act
+    const handRolled = files
+      .filter((file) => /setAttribute\(\s*["'`]role["'`]\s*,\s*["'`]button["'`]\s*\)/.test(codeOf(readFileSync(file, "utf8"))))
+      .map((file) => path.relative(SRC, file));
+    // Assert
+    expect(handRolled).toEqual([]);
+  });
+
   it("styles no native button: the stylesheet names ar-button, never button", () => {
     // Arrange
     const css = withoutBlockComments(readFileSync(path.join(SRC, "styles.css"), "utf8"));

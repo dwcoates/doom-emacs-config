@@ -830,8 +830,12 @@ describe("a detached-work row is one hit target", () => {
     const spy = vi.spyOn(HTMLElement.prototype, "addEventListener");
     // Act
     const { panel } = drawPanel("agents", { agents: [AGENT_ROW] });
-    const clickers = spy.mock.calls.flatMap(([type], i) =>
-      type === "click" ? [spy.mock.contexts[i] as Element] : [],
+    // The capture-phase listener every armed button carries is its disabled
+    // refusal (armButtonRole), not a handler of the click.
+    const clickers = spy.mock.calls.flatMap(([type, , options], i) =>
+      type === "click" && !(typeof options === "object" && options.capture === true)
+        ? [spy.mock.contexts[i] as Element]
+        : [],
     );
     spy.mockRestore();
     // Assert -- the row's own handler; the header's stop control owns its own.
