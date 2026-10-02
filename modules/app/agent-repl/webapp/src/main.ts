@@ -50,6 +50,7 @@ import { installProseLinkRouting } from "./link.js";
 import { bootFailed } from "./failure/sink.js";
 import { createLocalFailures, type LocalFailures } from "./failure/local.js";
 import { ForwardingLogger, bindLogContext, log, setLogger, type ClientLogSink } from "./log.js";
+import { installPagePresenceLog } from "./page-presence.js";
 import { createAgentReplClient, type AgentReplClient } from "./rpc/client.js";
 import { createAppContext, type AppContext } from "./rpc/context.js";
 import { reportClientFailure } from "./rpc/link.js";
@@ -176,6 +177,10 @@ export async function boot(): Promise<void> {
     // warning chip to draw on -- but it is at least LOGGED now rather than
     // thrown past the reporter.
     const shell = shellElements(document);
+
+    // The page's presence — hidden/shown, focused/blurred, resized, and the
+    // repaint after each — is recorded from here on (src/page-presence.ts).
+    installPagePresenceLog();
 
     // THE TOPBAR IS MOUNTED HERE, BEFORE ANY STREAM, because its warning chip
     // is the ONE place this page shows an error -- including the ones that
