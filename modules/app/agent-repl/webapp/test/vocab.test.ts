@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { RosterRowSchema } from "../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { FooterStatusSchema } from "../../proto/gen/ts/frontend/v1/footer_pb";
-import { FooterStatusBlockedSchema } from "../../proto/gen/ts/frontend/v1/footer_pb";
 import {
   FeedShellSchema,
   FeedShellSettledSchema,
@@ -106,10 +105,13 @@ describe("footer_status is the FooterStatus.status arm set, row for row", () => 
 describe("rosterStatusColor", () => {
   const cases: ReadonlyArray<[string, string]> = [
     ["init", "blue"],
-    // vendor_blocked is blue: an auth wall, a usage limit or a persistent
-    // vendor failure renders the agent unusable, which is what blue means,
-    // and it reads the same as the footer's blocked.
-    ["vendorBlocked", "blue"],
+    // A VENDOR FAULT IS TURQUOISE (owner ruling, 2026-10-02): the workspace
+    // stays usable and its prompts are held until the vendor serves.
+    ["vendorBlocked", "turquoise"],
+    ["vendorFault", "turquoise"],
+    ["apiRetrying", "turquoise"],
+    // A NETWORK FAULT IS BLUE: nothing that needs the network can work.
+    ["networkFault", "blue"],
     ["thinking", "red"],
     ["idleAsync", "yellow"],
     ["ready", "green"],
@@ -144,9 +146,19 @@ describe("footerStatusColor", () => {
     expect(rosterStatusColor("degraded")).toBe("turquoise");
   });
 
-  it("paints blocked blue, the same as the roster's vendor_blocked", () => {
-    expect(footerStatusColor("blocked")).toBe("blue");
-    expect(rosterStatusColor("vendorBlocked")).toBe("blue");
+  it("paints a vendor fault turquoise, the same as the roster's vendor_fault", () => {
+    expect(footerStatusColor("vendorFault")).toBe("turquoise");
+    expect(rosterStatusColor("vendorFault")).toBe("turquoise");
+  });
+
+  it("paints a network fault blue, the same as the roster's network_fault", () => {
+    expect(footerStatusColor("networkFault")).toBe("blue");
+    expect(rosterStatusColor("networkFault")).toBe("blue");
+  });
+
+  it("paints an agent-repl fault blue, the same as the roster's link arms", () => {
+    expect(footerStatusColor("agentReplFault")).toBe("blue");
+    expect(rosterStatusColor("severed")).toBe("blue");
   });
 
   it("refuses an arm the vocabulary does not carry", () => {
@@ -332,10 +344,18 @@ describe("feed_subagent_dot and feed_shell_dot are their heads' state arms, row 
 });
 
 describe("composerClosedFor", () => {
+  // THE FAULT DOMAINS (owner ruling, 2026-10-02): an agent-repl fault and a
+  // network fault are blue and close the composer; a vendor fault is
+  // turquoise and leaves it open, its prompts held until the vendor serves.
   it.each([
-    ["a blue status with no substatus", "disconnected", undefined, true],
-    ["a blue block the vendor or account raised", "blocked", "usageLimit", true],
-    ["the declared api-retrying exception", "blocked", "apiRetrying", false],
+    ["an agent-repl fault", "agentReplFault", "severed", true],
+    ["an impaired daemon", "agentReplFault", "daemonImpaired", true],
+    ["a network fault", "networkFault", "offline", true],
+    ["a vendor or account block", "vendorFault", "usageLimit", false],
+    ["a vendor start being retried", "vendorFault", "vendorRetry", false],
+    ["a vendor that refused to start", "vendorFault", "vendorRejection", false],
+    ["a call the vendor retries", "vendorFault", "apiRetrying", false],
+    ["a close under way", "closing", "blocked", true],
     ["a red status", "working", undefined, false],
   ])("%s", (_name, arm, substatus, closed) => {
     // Act
@@ -345,14 +365,8 @@ describe("composerClosedFor", () => {
     expect(got).toBe(closed);
   });
 
-  it("declares only substatus arms the footer protos carry", () => {
-    // Arrange
-    const declared = renderColors.composer_open_substatuses.blocked;
-
-    // Act
-    const arms = oneofArmNames(FooterStatusBlockedSchema, "substatus");
-
+  it("declares no composer-open exception", () => {
     // Assert
-    expect(declared.filter((sub) => !arms.includes(sub))).toEqual([]);
+    expect(renderColors.composer_open_substatuses).toEqual({});
   });
 });

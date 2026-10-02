@@ -212,13 +212,15 @@ describe("drawFooterSubStatus: the word is the arm, lowercase, with spaces", () 
     ["mergeFailed", "conflicts", "conflicts"],
     ["mergeFailed", "tests", "tests"],
     ["mergeFailed", "other", "merge"],
-    ["disconnected", "startFailed", "start failed"],
-    ["disconnected", "vendorRetry", "vendor retry"],
-    ["disconnected", "vendorRejection", "vendor rejection"],
-    ["disconnected", "vendorFailed", "vendor failed"],
+    ["agentReplFault", "startFailed", "start failed"],
+    ["agentReplFault", "daemonImpaired", "daemon impaired"],
+    ["networkFault", "offline", "offline"],
+    ["vendorFault", "vendorRetry", "vendor retry"],
+    ["vendorFault", "vendorRejection", "vendor rejection"],
+    ["vendorFault", "vendorFailed", "vendor failed"],
     ["interrupted", "byUser", "by user"],
     ["interrupted", "hostShutdown", "host shutdown"],
-    ["blocked", "queryDied", "query died"],
+    ["vendorFault", "queryDied", "query died"],
     // Every step of a working turn reads as its own name.
     ["working", "thinking", "thinking"],
     ["working", "executing", "executing"],
@@ -232,7 +234,7 @@ describe("drawFooterSubStatus: the word is the arm, lowercase, with spaces", () 
   });
 
   it("names the arm on the cell", () => {
-    const { row } = drawStrip({ status: withSubStatus("blocked", "auth") });
+    const { row } = drawStrip({ status: withSubStatus("vendorFault", "auth") });
     expect(row.querySelector(".footer-substatus")?.getAttribute("data-arm")).toBe("auth");
   });
 
@@ -636,9 +638,9 @@ describe("drawClientDisconnectedStrip: the one strip this client composes", () =
     expect(row.querySelector(".footer-status")?.getAttribute("data-arm")).toBe("disconnected");
   });
 
-  it("paints the status cell the disconnected tone from the shared vocabulary", () => {
+  it("paints the status cell the agent-repl fault's tone from the shared vocabulary", () => {
     const row = drawClientDisconnectedStrip("daemon unreachable", "AnswerColdGate: unavailable");
-    expect(row.querySelector(".footer-status")?.className).toContain(statusArmClass("disconnected"));
+    expect(row.querySelector(".footer-status")?.className).toContain(statusArmClass("agentReplFault"));
   });
 
   it("draws the substatus it was handed", () => {
