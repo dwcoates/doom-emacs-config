@@ -67,6 +67,14 @@ type EditorInstances interface {
 	Connected(ctx context.Context, instance string) (bool, error)
 }
 
+// Startup brings the editor's workspaces up for a new Emacs process and tells
+// its stream each step (internal/startup).
+type Startup interface {
+	// Run brings every open workspace up and hands emit the events in order
+	// until the last go-ahead and the finish, or until ctx ends.
+	Run(ctx context.Context, emit func(*agentreplv1.DaemonStartupEvent))
+}
+
 // editorConnected judges an Emacs WatchDaemon's instance and does what a NEW
 // Emacs process is owed: the day's digest stands again. A store that cannot
 // record the instance refuses the stream, loudly, rather than serve an Emacs

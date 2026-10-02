@@ -28,6 +28,7 @@ import (
 	"claude-repld/internal/shimclient"
 	"claude-repld/internal/shimsocket"
 	"claude-repld/internal/startingshim"
+	"claude-repld/internal/startup"
 	"claude-repld/internal/wsm"
 )
 
@@ -181,6 +182,10 @@ type FleetDeps struct {
 	// (owner ruling); it is a field so the exhaustion is exercised without
 	// waiting ten minutes.
 	VendorRetryWindow time.Duration
+	// Steps is told every step of every bring-up this fleet runs, whoever
+	// asked for it: the editor's startup (internal/startup) prints them and
+	// gates each tab's go-ahead on them.
+	Steps startup.StepSink
 	// SessionsUp is told that a session has come up on a workspace, however
 	// it came up -- a start, a retried vendor start, a relaunch's resume, a
 	// cold-gate re-open, an adoption -- so the prompts held until it
@@ -350,6 +355,13 @@ func (f *Fleet) ResumeColdDetached(ws ids.WorkspaceID, resume ColdResume, done f
 // joins every piece of it at the exit rather than leaving any writing into a
 // closing state client. `done`, when given, receives the outcome and the
 // context the work ran under.
+// Detach runs work no request waits on under the fleet's own lifetime, joined
+// by DrainStarts at the daemon's exit exactly as StartDetached's starts are.
+// The editor's startup runs its bring-up here.
+func (f *Fleet) Detach(run func(context.Context)) {
+	f.runDetached(func(ctx context.Context) error { run(ctx); return nil }, nil)
+}
+
 func (f *Fleet) runDetached(run func(context.Context) error, done func(context.Context, error)) {
 	f.detached.Add(1)
 	go func() {
@@ -420,6 +432,8 @@ func NewFleet(deps FleetDeps) (*Fleet, error) {
 		return nil, fmt.Errorf("workspace: the session fleet needs a session-up hook; prompts held until a session reconnects are delivered by it")
 	case deps.VendorStarts == nil:
 		return nil, fmt.Errorf("workspace: the session fleet needs a vendor-start marker; the roster draws a retried or failed vendor start by it")
+	case deps.Steps == nil:
+		return nil, fmt.Errorf("workspace: the session fleet needs a bring-up step sink; the editor's startup is told each step by it")
 	}
 	probe := deps.Probe
 	if probe == nil {
@@ -1004,6 +1018,29 @@ func (f *Fleet) start(ctx context.Context, ws ids.WorkspaceID, rebind bool) erro
 	// between for want of either.
 	f.deps.BringUps(ws, true)
 	defer f.deps.BringUps(ws, false)
+	err := f.startUp(ctx, ws, rebind)
+	f.noteStartEnded(ws, err)
+	return err
+}
+
+// noteStartEnded tells the startup a bring-up's service-level failure. A
+// session that came up, a vendor that would not start, a restart that ended
+// the vendor run and a stand-down this daemon ordered have each said so (or
+// are no failure of agent-repl's); every other error is the bring-up failing.
+func (f *Fleet) noteStartEnded(ws ids.WorkspaceID, err error) {
+	if err == nil {
+		return
+	}
+	var label *startLabel
+	if errors.As(err, &label) && (label.vendor || label.network) {
+		return
+	}
+	f.deps.Steps(ws, startup.Step{Kind: startup.StepFailed, Text: err.Error()})
+}
+
+// startUp is start's body, under the start gate, with the bring-up marker
+// raised.
+func (f *Fleet) startUp(ctx context.Context, ws ids.WorkspaceID, rebind bool) error {
 	// A SELECTED TRANSCRIPT IS A DIFFERENT CONVERSATION: the watcher this
 	// start opens replays its first page, and the previous watcher's pointers,
 	// which name another book, are forgotten. See opening.go.
@@ -1024,6 +1061,11 @@ func (f *Fleet) start(ctx context.Context, ws ids.WorkspaceID, rebind bool) erro
 	if err != nil {
 		log.Error(opBringUp, "could not read the session record", dlog.Context{"cause": err.Error()})
 		return fmt.Errorf("start session for %q: read the session record: %w", ws, err)
+	}
+	if exists && session.Hibernated() {
+		f.deps.Steps(ws, startup.Step{Kind: startup.StepWaking})
+	} else {
+		f.deps.Steps(ws, startup.Step{Kind: startup.StepStartingSession})
 	}
 
 	src, err := f.classifySource(ctx, log, ws, record.Dir, session, exists)
@@ -1096,6 +1138,9 @@ func (f *Fleet) start(ctx context.Context, ws ids.WorkspaceID, rebind bool) erro
 	// this moment: the link coming back on a stream the daemon never
 	// re-attached leaves the evidence standing.
 	f.closeOnEdge(ctx, log, ws, health.EdgeHealthyAttach)
+	// AGENT-REPL'S OWN SERVICES SERVE THE WORKSPACE from here, whatever the
+	// vendor goes on to do: this is the moment the editor's tab may open.
+	f.deps.Steps(ws, startup.Step{Kind: startup.StepServing})
 
 	// AN ADOPTED SHIM IS ATTACHED TO, NEVER STARTED. The lock probe selected
 	// the adopt path precisely because a shim is still alive on this
@@ -1122,6 +1167,7 @@ func (f *Fleet) start(ctx context.Context, ws ids.WorkspaceID, rebind bool) erro
 			"adopted": true, "shim_pid": client.PID(),
 		})
 		f.deps.SessionsUp(ws)
+		f.deps.Steps(ws, startup.Step{Kind: startup.StepUp})
 		return nil
 	}
 
@@ -1138,6 +1184,9 @@ func (f *Fleet) start(ctx context.Context, ws ids.WorkspaceID, rebind bool) erro
 		endHistory = f.beginHistoryClient(ws, client)
 	}
 	defer endHistory()
+	if !src.Fresh {
+		f.deps.Steps(ws, startup.Step{Kind: startup.StepResuming})
+	}
 	started, err := f.startSession(runCtx, log, ws, client, src, session, configDir)
 	if err != nil {
 		defer finishRun()
@@ -1189,10 +1238,15 @@ func (f *Fleet) start(ctx context.Context, ws ids.WorkspaceID, rebind bool) erro
 		log.Info(opBringUp, "the session is parked at its cold gate", dlog.Context{
 			"shim_pid": client.PID(), "host_session_id": hostSessionID,
 		})
+		f.deps.Steps(ws, startup.Step{Kind: startup.StepColdGate})
 		return nil
 	}
 
-	return f.sessionUp(ctx, log, ws, client, started, session, configDir, hostSessionID)
+	if err := f.sessionUp(ctx, log, ws, client, started, session, configDir, hostSessionID); err != nil {
+		return err
+	}
+	f.deps.Steps(ws, startup.Step{Kind: startup.StepUp})
+	return nil
 }
 
 // sessionUp is EVERYTHING a started session still needs, and it is the ONE
@@ -1658,6 +1712,16 @@ func (f *Fleet) bringUpClient(ctx context.Context, log dlog.Logger, ws ids.Works
 			Spawned: func(pid int) { f.recordSpawnedShimPID(ctx, log, ws, pid) },
 		})
 		release()
+		if errors.Is(err, shimclient.ErrStandingDown) {
+			// THE SUPERVISOR BEGAN STANDING DOWN between the check above and
+			// this spawn: the supervisor's own refusal is the authoritative
+			// answer, and it is the same refusal, recorded the same way.
+			log.Info(opBringUp, "no shim is brought up: this daemon began standing down as the spawn was asked", dlog.Context{
+				"workspace": string(ws), "socket": udsPath,
+			})
+			return nil, pathNone, fmt.Errorf("%w: %w", shimclient.ErrStandingDown,
+				refuse(log, "OpenWorkspace", ArmSpawnFailed, shimclient.ErrStandingDown.Error(), false))
+		}
 		if err != nil {
 			log.Error(opBringUp, "the shim did not come up", dlog.Context{"cause": err.Error()})
 			// A BRING-UP DEATH IS A WORKSPACE FAULT, not only a failed rpc.

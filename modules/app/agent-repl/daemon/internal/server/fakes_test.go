@@ -1132,6 +1132,7 @@ type harness struct {
 	// NewsDigest is the news digest the two rpcs delegate to.
 	NewsDigest      *fakeNewsDigest
 	EditorInstances *fakeEditorInstances
+	Startup         *fakeStartup
 	Surfaces        *fakeSurfaces
 	WebappDist      string
 }
@@ -1179,6 +1180,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		PersistentWifi:  &fakePersistentWifi{},
 		NewsDigest:      &fakeNewsDigest{},
 		EditorInstances: &fakeEditorInstances{},
+		Startup:         &fakeStartup{},
 	}
 
 	deps := Deps{
@@ -1205,6 +1207,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		PersistentWifi:   h.PersistentWifi,
 		NewsDigest:       h.NewsDigest,
 		EditorInstances:  h.EditorInstances,
+		Startup:          h.Startup,
 		WebappDist:       dist,
 		ImageOrigin:      http.NotFoundHandler(),
 		Log:              h.Surfaces,
@@ -1392,6 +1395,24 @@ func (f *fakeNewsDigest) Redisplay(context.Context) error {
 	defer f.mu.Unlock()
 	f.redisplays++
 	return f.redisplayErr
+}
+
+// fakeStartup emits its scripted events, in order, to every run, and counts
+// the runs.
+type fakeStartup struct {
+	mu     sync.Mutex
+	events []*agentreplv1.DaemonStartupEvent
+	runs   int
+}
+
+func (f *fakeStartup) Run(_ context.Context, emit func(*agentreplv1.DaemonStartupEvent)) {
+	f.mu.Lock()
+	f.runs++
+	events := f.events
+	f.mu.Unlock()
+	for _, e := range events {
+		emit(e)
+	}
 }
 
 // fakeEditorInstances answers a scripted verdict on every Emacs instance and

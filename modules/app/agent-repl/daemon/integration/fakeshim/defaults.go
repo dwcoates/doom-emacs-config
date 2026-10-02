@@ -81,6 +81,24 @@ func UnhealthyDiagnostics(detail string) *conversationv1.SessionUpdate {
 	}
 }
 
+// NetworkUnreachableDiagnostics is the push of a shim that saw this machine
+// unable to reach the network, with what it observed as the detail.
+func NetworkUnreachableDiagnostics(detail string) *conversationv1.SessionUpdate {
+	return &conversationv1.SessionUpdate{
+		Update: &conversationv1.SessionUpdate_Diagnostics{Diagnostics: &conversationv1.SessionDiagnostics{
+			Health: &conversationv1.SessionDiagnostics_Unhealthy{Unhealthy: &conversationv1.SessionUnhealthy{
+				Faults: []*conversationv1.SessionFault{{
+					Component: "vendor",
+					Detail:    detail,
+					Kind: &conversationv1.SessionFault_NetworkUnreachable{
+						NetworkUnreachable: &conversationv1.SessionFaultNetworkUnreachable{},
+					},
+				}},
+			}},
+		}},
+	}
+}
+
 // DefaultContextUsage is the opening context-usage push. The real shim states
 // the session's usage at its own cadence starting at the session's start, and
 // the topbar draws NO view at all until it has one, so the fake states it

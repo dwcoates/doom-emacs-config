@@ -105,3 +105,50 @@ func TestAWebviewStreamIsNeverJudgedAsAnEmacs(t *testing.T) {
 		t.Fatalf("judged %v and redisplayed %d times for a webview", h.EditorInstances.seen, h.NewsDigest.redisplays)
 	}
 }
+
+// startupOpening is a startup event a test can recognize.
+func startupOpening(n uint32) *agentreplv1.DaemonStartupEvent {
+	return &agentreplv1.DaemonStartupEvent{Event: &agentreplv1.DaemonStartupEvent_Opening{
+		Opening: &agentreplv1.DaemonStartupOpening{Workspaces: n}}}
+}
+
+func TestANewEmacsStreamIsToldItsStartup(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.EditorInstances.isNew = true
+	h.Startup.events = []*agentreplv1.DaemonStartupEvent{startupOpening(3), startupOpening(4)}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Act
+	stream := emacsDaemonStream(t, h, ctx, unfocusedEditor())
+
+	// Assert: the events arrive in order, among the standing pushes.
+	var got []uint32
+	for len(got) < 2 && stream.Receive() {
+		if opening := stream.Msg().GetStartup().GetOpening(); opening != nil {
+			got = append(got, opening.GetWorkspaces())
+		}
+	}
+	if len(got) != 2 || got[0] != 3 || got[1] != 4 {
+		t.Fatalf("startup events = %v (stream err %v), want [3 4]", got, stream.Err())
+	}
+}
+
+func TestAReconnectingEmacsRunsNoStartup(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.EditorInstances.isNew = false
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Act
+	emacsDaemonStream(t, h, ctx, unfocusedEditor())
+
+	// Assert
+	h.Startup.mu.Lock()
+	defer h.Startup.mu.Unlock()
+	if h.Startup.runs != 0 {
+		t.Fatalf("startup runs = %d, want none for a reconnect", h.Startup.runs)
+	}
+}

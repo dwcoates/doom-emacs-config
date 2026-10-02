@@ -81,7 +81,7 @@ func footerSettled(v *frontendv1.FooterView) bool {
 
 // footerDisconnected is a strip drawing a lost link.
 func footerDisconnected(v *frontendv1.FooterView) bool {
-	return v.GetStrip().GetStatus().GetDisconnected() != nil
+	return v.GetStrip().GetStatus().GetAgentReplFault() != nil
 }
 
 // rosterLost is the workspace's roster row in a link-loss arm.
@@ -430,7 +430,7 @@ func unpinnedWarning(v *frontendv1.FooterView) *frontendv1.FooterActivityTransie
 	status := v.GetStrip().GetStatus()
 	for _, cell := range []*frontendv1.FooterActivityTransientOverEnduring{
 		status.GetIdle().GetActivity().GetUnpinned(),
-		status.GetDisconnected().GetActivity().GetUnpinned(),
+		status.GetAgentReplFault().GetActivity().GetUnpinned(),
 	} {
 		if w := cell.GetTransient().GetDaemonWarning(); w != nil {
 			return w

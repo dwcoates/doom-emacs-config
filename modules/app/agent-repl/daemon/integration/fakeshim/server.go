@@ -1450,6 +1450,9 @@ func (s *server) openingDiagnostics() *conversationv1.SessionUpdate {
 	if s.profile.OpeningFault != "" {
 		opening = UnhealthyDiagnostics(s.profile.OpeningFault)
 	}
+	if s.profile.OpeningNetworkUnreachable != "" {
+		opening = NetworkUnreachableDiagnostics(s.profile.OpeningNetworkUnreachable)
+	}
 	// The opening frame states the build this process runs, as every real
 	// shim's diagnostics frame does.
 	opening.GetDiagnostics().ShimBuild = s.buildSHA()

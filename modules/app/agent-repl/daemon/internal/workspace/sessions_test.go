@@ -28,6 +28,7 @@ import (
 	"claude-repld/internal/sessionwatcher"
 	"claude-repld/internal/shimclient"
 	"claude-repld/internal/shimsocket"
+	"claude-repld/internal/startup"
 	"claude-repld/internal/wsm"
 )
 
@@ -491,6 +492,8 @@ type fleetFixture struct {
 	retryAfter func(d time.Duration) <-chan time.Time
 	// vendorStarts is every vendor-start state the roster was told, in order.
 	vendorStarts []sidebar.VendorStart
+	// steps are the bring-up steps the fleet reported, in order.
+	steps []startup.Step
 	// sessionsUp is every workspace the session-up hook was told about.
 	sessionsUp []ids.WorkspaceID
 	// bringUps records every BringUps edge, in order.
@@ -663,6 +666,9 @@ func newFleetFixtureBoundedAt(t *testing.T, adoptBound time.Duration) *fleetFixt
 		VendorStarts: func(_ ids.WorkspaceID, state sidebar.VendorStart) {
 			f.vendorStarts = append(f.vendorStarts, state)
 		},
+		Steps: func(ws ids.WorkspaceID, step startup.Step) {
+			f.steps = append(f.steps, step)
+		},
 		SessionsUp: func(ws ids.WorkspaceID) { f.sessionsUp = append(f.sessionsUp, ws) },
 		Probe:      func(string, string) (sessionlock.State, error) { return f.probeState, f.probeErr },
 		SocketProbe: func(path string) (shimsocket.State, error) {
@@ -769,6 +775,15 @@ func TestNewFleetRefusesMissingCollaborators(t *testing.T) {
 				SocketPath: func(ids.WorkspaceID) string { return "" }, ShimBundle: &fakeBundle{build: "b"},
 				Log: dlog.NewTestSurfaces(), LockDir: "/run", BringUps: func(ids.WorkspaceID, bool) {},
 				SessionsUp: func(ids.WorkspaceID) {},
+			},
+		},
+		{
+			name: "no bring-up step sink",
+			deps: FleetDeps{
+				DB: newFakeDB(), Instance: fixtureInstance, Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{},
+				SocketPath: func(ids.WorkspaceID) string { return "" }, ShimBundle: &fakeBundle{build: "b"},
+				Log: dlog.NewTestSurfaces(), LockDir: "/run", BringUps: func(ids.WorkspaceID, bool) {},
+				SessionsUp: func(ids.WorkspaceID) {}, VendorStarts: func(ids.WorkspaceID, sidebar.VendorStart) {},
 			},
 		},
 		{
@@ -4396,5 +4411,31 @@ func TestAResumeIsRefusedWhenTheRolledBackTurnsCannotBeRead(t *testing.T) {
 	}
 	if !recordedAt(f, dlog.LevelError, "daemon.workspace.start_session", "the rolled-back turns could not be read; the session was not resumed") {
 		t.Fatalf("records = %+v, want the failed read at ERROR", f.log.logger.Records())
+	}
+}
+
+// TestDrainStartsJoinsDetachedWork covers Detach: work run under the fleet's
+// lifetime sees it end at the drain and is joined.
+func TestDrainStartsJoinsDetachedWork(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	entered := make(chan struct{})
+	ended := make(chan error, 1)
+	f.fleet.Detach(func(ctx context.Context) {
+		close(entered)
+		<-ctx.Done()
+		ended <- ctx.Err()
+	})
+	<-entered
+
+	// Act.
+	left := f.fleet.DrainStarts(time.Minute)
+
+	// Assert.
+	if !left {
+		t.Fatal("DrainStarts = false, want the detached work ended and joined")
+	}
+	if err := <-ended; !errors.Is(err, context.Canceled) {
+		t.Fatalf("the detached work saw %v, want a cancellation", err)
 	}
 }
