@@ -310,7 +310,7 @@ func TestSubmitRevivesAParkedWorkspaceRatherThanRefusingIt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit onto a parked workspace = %v, want it held pending the revival", err)
 	}
-	if got.Held == nil || *got.Held != wsm.HoldSessionStarting {
+	if got.Held == nil || *got.Held != wsm.HoldReconnect {
 		t.Fatalf("disposition = %+v, want the revival-pending hold", got)
 	}
 	h.waitRevivals()
@@ -409,7 +409,7 @@ func TestSubmitAnswersARevivalAtOnceRatherThanAwaitingTheBringUp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit during a bring-up = %v, want an answer", err)
 	}
-	if got.Held == nil || *got.Held != wsm.HoldSessionStarting {
+	if got.Held == nil || *got.Held != wsm.HoldReconnect {
 		t.Fatalf("disposition = %+v, want the revival-pending hold", got)
 	}
 }
@@ -445,10 +445,10 @@ func TestARevivalPendingHoldRaisesTheRostersTurnAtAcceptance(t *testing.T) {
 	}
 }
 
-// TestAFailedRevivalClearsTheRostersTurn pins the exit: a dropped
-// revival-pending hold takes the roster's turn down with it, so the row falls
-// back to the route's own fault arm rather than standing at `submitting` for a
-// prompt that will never run.
+// TestAFailedRevivalClearsTheRostersTurn pins the exit: a failed revival takes
+// the roster's turn down, so the row falls back to the route's own fault arm
+// rather than standing at `submitting` for a prompt that is waiting, not
+// running.
 func TestAFailedRevivalClearsTheRostersTurn(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
@@ -485,17 +485,15 @@ func TestSubmitSurfacesAFailedRevival(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit = %v, want the submission held pending the revival", err)
 	}
-	if got.Held == nil || *got.Held != wsm.HoldSessionStarting {
+	if got.Held == nil || *got.Held != wsm.HoldReconnect {
 		t.Fatalf("disposition = %+v, want the revival-pending hold", got)
 	}
 }
 
-// TestAFailedRevivalDropsItsPendingHolds pins daemon_hold.proto's settled exit
-// for HeldPromptSessionStartingHold: "a loud drop when the bring-up fails (a
-// session that never comes up can never deliver, so a retained entry would be
-// a leak, not a delay)". The hold has no force-through, so an entry left
-// standing would wait forever on an exit that never arrives.
-func TestAFailedRevivalDropsItsPendingHolds(t *testing.T) {
+// TestAFailedRevivalKeepsItsReconnectHolds pins daemon_hold.proto's settled
+// exit for HeldPromptReconnectHold: "A FAILED BRING-UP NEVER DROPS THESE
+// ENTRIES." The prompt waits for whatever brings a session up next.
+func TestAFailedRevivalKeepsItsReconnectHolds(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	h.noSession = true
@@ -512,41 +510,17 @@ func TestAFailedRevivalDropsItsPendingHolds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading the standing holds: %v", err)
 	}
-	if len(standing) != 0 {
-		t.Fatalf("standing holds = %+v, want none after the failed bring-up", standing)
+	if len(standing) != 1 || standing[0].Hold == nil || *standing[0].Hold != wsm.HoldReconnect {
+		t.Fatalf("standing holds = %+v, want t1 still held under the reconnect hold", standing)
 	}
-	retired := h.db.retired("t1")
-	if retired == nil || retired.Kind != tombstoneDropped {
-		t.Fatalf("tombstone = %+v, want a %q retirement", retired, tombstoneDropped)
-	}
-}
-
-// TestAFailedRevivalRepushesTheTrayWithoutTheDroppedEntry pins that the drop
-// is VISIBLE: a tray still drawing the entry would show a state whose only
-// exit never comes.
-func TestAFailedRevivalRepushesTheTrayWithoutTheDroppedEntry(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	h.noSession = true
-	h.reviveErr = errors.New("the shim would not spawn")
-
-	// Act
-	if _, err := h.q.Submit(context.Background(), submission("t1", "wake up")); err != nil {
-		t.Fatalf("Submit = %v, want the submission held pending the revival", err)
-	}
-	h.waitRevivals()
-
-	// Assert.
-	last := h.holds.last()
-	if len(last) != 0 {
-		t.Fatalf("the last pushed tray = %+v, want it empty after the drop", last)
+	if retired := h.db.retired("t1"); retired != nil {
+		t.Fatalf("tombstone = %+v, want none: a failed bring-up drops nothing", retired)
 	}
 }
 
-// TestAFailedRevivalTellsTheFooterWhatTheDropCost pins the owner's ruling of
-// 2026-09-12 that a bring-up failure is FOOTER-ONLY: the drop writes no feed
-// row, so the count of what it cost has to reach the footer's own line.
-func TestAFailedRevivalTellsTheFooterWhatTheDropCost(t *testing.T) {
+// TestAFailedRevivalRecordsTheHoldsItLeavesStanding pins that the kept holds
+// are LOUD: the record names how many prompts wait and why.
+func TestAFailedRevivalRecordsTheHoldsItLeavesStanding(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	h.noSession = true
@@ -559,31 +533,12 @@ func TestAFailedRevivalTellsTheFooterWhatTheDropCost(t *testing.T) {
 	h.waitRevivals()
 
 	// Assert
-	got := h.footer.droppedPrompts()
-	if len(got) != 1 || got[0] != 1 {
-		t.Fatalf("dropped counts told to the footer = %+v, want exactly one drop of one prompt", got)
+	for _, rec := range h.log.Records() {
+		if rec.Level == dlog.LevelWarn && rec.Operation == opSubmit && rec.Context["held"] == 1 {
+			return
+		}
 	}
-}
-
-// TestARevivalThatSucceedsTellsTheFooterNoDrop is the other edge: the session
-// came up, the hold was released rather than dropped, and there is no cost to
-// put on a line.
-func TestARevivalThatSucceedsTellsTheFooterNoDrop(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	h.noSession = true
-	h.reviveHook = func() { h.noSession = false }
-
-	// Act
-	if _, err := h.q.Submit(context.Background(), submission("t1", "wake up")); err != nil {
-		t.Fatalf("Submit = %v, want the submission held pending the revival", err)
-	}
-	h.waitRevivals()
-
-	// Assert
-	if got := h.footer.droppedPrompts(); len(got) != 0 {
-		t.Fatalf("dropped counts told to the footer = %+v, want none when nothing was dropped", got)
-	}
+	t.Fatalf("records = %+v, want a WARN naming the one prompt the failed revival leaves held", h.log.Records())
 }
 
 // unroutableSurfaces is dlog.Surfaces whose per-workspace sink never opens, so

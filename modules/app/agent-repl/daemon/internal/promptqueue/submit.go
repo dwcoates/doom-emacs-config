@@ -204,7 +204,7 @@ func (q *queue) holdForLease(ctx context.Context, lease wsm.Lease, log dlog.Logg
 		return wsm.HoldBuildRefresh, "", nil
 	case wsm.HolderHibernate:
 		log.Debug("daemon.promptqueue.disposition_decision", "selected a prompt disposition branch", dlog.Context{"function": "queue", "branch": "case wsm.HolderHibernate"})
-		return wsm.HoldSessionStarting, "", nil
+		return wsm.HoldReconnect, "", nil
 	case wsm.HolderMerge:
 		log.Debug("daemon.promptqueue.disposition_decision", "selected a prompt disposition branch", dlog.Context{"function": "queue", "branch": "case wsm.HolderMerge"})
 		return wsm.HoldMerge, "", nil
@@ -293,7 +293,7 @@ func holderName(h wsm.LeaseHolder) string {
 // the turn it minted, and the revival releases the hold when the session is
 // up, delivering it down the ordinary path.
 func (q *queue) holdForRevival(ctx context.Context, sub Submission, log dlog.Logger) (Disposition, error) {
-	disposition, err := q.hold(ctx, sub, "", &leaseHold{kind: wsm.HoldSessionStarting}, log)
+	disposition, err := q.hold(ctx, sub, "", &leaseHold{kind: wsm.HoldReconnect}, log)
 	if err != nil {
 		return Disposition{}, err
 	}
@@ -350,12 +350,11 @@ func (q *queue) reviveInBackground(ctx context.Context, ws ids.WorkspaceID, log 
 		revived, err := q.revive(ctx, ws, log)
 		if err != nil {
 			// THE BRING-UP FAILED, and daemon_hold.proto settles what that
-			// means for the entries waiting on it: "a loud drop when the
-			// bring-up fails (a session that never comes up can never
-			// deliver, so a retained entry would be a leak, not a delay)".
-			// The workspace fault the bring-up already opened is the
-			// operator's record; this is the tray's.
-			q.dropRevivalHolds(ctx, ws, log, err.Error())
+			// means for the entries waiting on it: "A FAILED BRING-UP NEVER
+			// DROPS THESE ENTRIES." They wait under the reconnect hold for
+			// whatever brings a session up next -- a retry, a restart, a
+			// revival -- and that edge delivers them (ReleaseReconnectHolds).
+			q.keepReconnectHolds(ctx, ws, log, err.Error())
 			return
 		}
 		if !revived {
@@ -382,63 +381,46 @@ func (q *queue) reviveInBackground(ctx context.Context, ws ids.WorkspaceID, log 
 				}
 			}
 			log.Error(opSubmit, "the revival reported success but the workspace still has no session", nil)
-			q.dropRevivalHolds(ctx, ws, log, "the revival reported success but no session came up")
+			q.keepReconnectHolds(ctx, ws, log, "the revival reported success but no session came up")
 			return
 		}
 		q.releaseRevivalHolds(ctx, ws, log)
 	}()
 }
 
-// dropRevivalHolds retires every revival-pending hold on a workspace whose
-// bring-up FAILED, loudly.
+// keepReconnectHolds records, loudly, that a FAILED bring-up leaves every
+// reconnect hold on the workspace standing.
 //
-// A session that never came up can never deliver these entries, and the hold
-// has no force-through: left standing they would sit in the tray forever
-// under a state whose only exit never arrives. Dropping them is what makes the
-// failure VISIBLE and actionable — the tray re-pushes without them, and the
-// warning names each turn so nothing vanishes unrecorded.
-func (q *queue) dropRevivalHolds(ctx context.Context, ws ids.WorkspaceID, log dlog.Logger, cause string) {
-	d := q.lockDelivery(ws)
-	defer d.unlock()
-
+// A failed bring-up NEVER drops these entries (daemon_hold.proto,
+// HeldPromptReconnectHold): the prompt waits for the session to reconnect, and
+// whatever brings a session up next delivers it. Before 2026-10-02 the entries
+// were tombstoned here, and a prompt sent to a workspace whose vendor would not
+// start was lost. The bring-up's own fault is the operator's record of WHY the
+// session is down; this record names the prompts that wait on it. The turn the
+// roster took at acceptance is not running, so the row falls back to what the
+// route reports -- the bring-up's own fault arm -- rather than standing at
+// `submitting` for a prompt that waits.
+func (q *queue) keepReconnectHolds(ctx context.Context, ws ids.WorkspaceID, log dlog.Logger, cause string) {
 	standing, err := q.deps.DB.HeldPrompts(ctx, ws)
 	if err != nil {
-		log.Error(opSubmit, "could not read the holds the failed revival should drop",
+		log.Error(opSubmit, "could not read the holds a failed revival leaves standing",
 			dlog.Context{"cause": err.Error()})
 		return
 	}
-	dropped := 0
+	var waiting []string
 	for _, h := range standing {
-		if h.Tombstone != nil || h.Hold == nil || *h.Hold != wsm.HoldSessionStarting {
+		if h.Tombstone != nil || h.Hold == nil || *h.Hold != wsm.HoldReconnect {
 			continue
 		}
-		if err := q.deps.DB.TombstoneHeldPrompt(ctx, h.Turn, wsm.Tombstone{
-			Kind: tombstoneDropped, At: q.deps.Now(),
-		}); err != nil {
-			log.Error(opSubmit, "could not drop a revival-pending hold",
-				dlog.Context{"turn": string(h.Turn), "cause": err.Error()})
-			continue
-		}
-		log.Warn(opSubmit, "dropped a revival-pending hold whose bring-up failed",
-			dlog.Context{"turn": string(h.Turn), "cause": cause})
-		q.retireEditIf(ctx, d, h.Turn, tombstoneDropped, log)
-		dropped++
+		waiting = append(waiting, string(h.Turn))
 	}
-	if dropped == 0 {
-		return
-	}
-	// WHAT THE FAILURE COST GOES ON THE FOOTER'S LINE. The bring-up already
-	// installed the standing failure and its cause; the drop is decided here,
-	// afterwards, so the count joins the line the strip is already drawing
-	// rather than being left to the tray alone.
-	q.deps.Footer.AddDroppedPrompts(ws, uint32(dropped))
-	// The turn the roster took at acceptance is never going to run: the row
-	// falls back to whatever the route reports, which is the bring-up's own
-	// fault arm, rather than standing at `submitting` for a dropped prompt.
 	q.deps.Sidebar.SetTurn(ws, nil)
-	if err := q.pushTray(ctx, ws, log); err != nil {
+	if len(waiting) == 0 {
+		log.Debug(opSubmit, "the failed revival leaves no reconnect hold standing", dlog.Context{"cause": cause})
 		return
 	}
+	log.Warn(opSubmit, "the revival failed; its prompts stay held under the reconnect hold until a session comes up",
+		dlog.Context{"cause": cause, "held": len(waiting), "turns": waiting})
 }
 
 // releaseRevivalHolds un-stamps every revival-pending hold on a workspace whose
@@ -457,7 +439,7 @@ func (q *queue) releaseRevivalHolds(ctx context.Context, ws ids.WorkspaceID, log
 	}
 	released := 0
 	for _, h := range standing {
-		if h.Tombstone != nil || h.Hold == nil || *h.Hold != wsm.HoldSessionStarting {
+		if h.Tombstone != nil || h.Hold == nil || *h.Hold != wsm.HoldReconnect {
 			continue
 		}
 		if err := q.deps.DB.UpdateHeldPromptHold(ctx, h.Turn, nil, ""); err != nil {
