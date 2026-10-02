@@ -402,6 +402,7 @@ describe("SCROLL_CAUSES", () => {
       "itemExpanded",
       "initialPlacement",
       "replaceRestore",
+      "workspaceSelected",
       "prependCompensation",
       "collapseCompensation",
       "latestVisible",
@@ -415,6 +416,7 @@ describe("TailFollow's parking causes", () => {
     ["a newly held prompt", (tail) => tail.promptHeld(), "promptHeld"],
     ["a first placement", (tail) => tail.initialPlacement(), "initialPlacement"],
     ["a replace restore", (tail) => tail.replaceRestore(), "replaceRestore"],
+    ["a switch to this workspace", (tail) => tail.workspaceSelected(), "workspaceSelected"],
     ["a cleared selection", (tail) => tail.selectionCleared(), "selectionMoved"],
   ];
 

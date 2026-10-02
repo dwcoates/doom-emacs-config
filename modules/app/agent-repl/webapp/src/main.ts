@@ -245,7 +245,6 @@ export async function boot(): Promise<void> {
     };
     const login = mountLoginOverlay(shell.loginOverlay, ctx);
 
-    mountSidebar(shell.sidebar, ctx);
     topbar.watch(ctx, { openLogin: (control) => login.open(control) });
 
     const feed = mountFeed(shell.feed, ctx, {
@@ -258,6 +257,11 @@ export async function boot(): Promise<void> {
             mountComposer(host, ctx, { feed: bubble, gate, onPanel: showPanel })
         : undefined,
     });
+
+    // A SWITCH TO THIS WORKSPACE RETURNS THE FEED TO ITS TAIL (owner ruling,
+    // 2026-10-02), whichever path made it: the rail watches the roster's
+    // `current`, the one fact every switch path ends in.
+    mountSidebar(shell.sidebar, ctx, { workspaceSelected: () => feed.workspaceSelected() });
 
     mountHoldTray(shell.holdTray, ctx, { promptHeld: (turn) => feed.promptHeld(turn) });
 

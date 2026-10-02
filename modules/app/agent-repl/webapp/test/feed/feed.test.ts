@@ -417,6 +417,54 @@ describe("mountFeed: promptHeld", () => {
   });
 });
 
+/**
+ * A SWITCH TO THIS WORKSPACE PARKS THE FEED (owner ruling, 2026-10-02): the
+ * rail sees the roster's `current` move to this page's workspace and calls
+ * `workspaceSelected`; the feed parks at its tail and follows.
+ */
+describe("mountFeed: workspaceSelected", () => {
+  afterEach(() => {
+    resetLoggingForTests();
+  });
+
+  it("parks the feed at its tail", async () => {
+    // Arrange
+    const { feed, host } = mount();
+    await settle();
+    const scroll = host.parentElement as HTMLElement;
+    scriptFeedBox(scroll);
+    // Act
+    feed.workspaceSelected();
+    // Assert
+    expect(scroll.scrollTop).toBe(2000);
+  });
+
+  it("records the park under the workspaceSelected cause", async () => {
+    // Arrange
+    const { feed, host } = mount();
+    await settle();
+    scriptFeedBox(host.parentElement as HTMLElement);
+    const capture = captureLogRecords("debug");
+    // Act
+    feed.workspaceSelected();
+    // Assert
+    const record = await forwardedRecord(capture, "scroll.feed-moved");
+    expect((record.context as Record<string, unknown>).cause).toBe("workspaceSelected");
+  });
+
+  it("logs, and moves nothing, when the feed has no scroll box", async () => {
+    // Arrange
+    const host = document.createElement("div");
+    const feed = mountFeed(host, harness().ctx, { renderers: stubRenderers() });
+    await settle();
+    const capture = captureLogRecords("debug");
+    // Act
+    feed.workspaceSelected();
+    // Assert
+    await expect(forwardedRecord(capture, "feed.workspace-selected-unparked")).resolves.toBeDefined();
+  });
+});
+
 describe("mountFeed: selectDetachedWork", () => {
   /** A page whose rows are ROWS, for the root feed only. */
   function rootPage(rows: FeedRow[], crumbs: ReturnType<typeof crumb>[] = []) {
