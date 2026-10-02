@@ -483,26 +483,24 @@ placement is recorded rather than performed."
                 (lambda () nil)))
        ,@body)))
 
-(ert-deftest agent-repl-test-open-progress-a-published-change-echoes-the-count ()
-  "An open that advances is what puts the bring-up count in the minibuffer."
+(ert-deftest agent-repl-test-open-progress-a-published-change-echoes-no-count ()
+  "An open that advances repaints the segment; the startup's lines are startup.el's."
   ;; Arrange
   (agent-repl-test--with-open-progress
     (let ((agent-repl-roster--tab-order '("alpha-ws" "beta-ws"))
-          (agent-repl-daemon--workspace-echo-done nil)
           (agent-repl-open-progress-change-functions
            (list #'agent-repl-daemon-on-open-progress-change)))
       (agent-repl-test--open-progress-capturing-echoes
         ;; Act
         (agent-repl--open-progress-start "alpha-ws")
         ;; Assert
-        (should (equal echoes '("agent-repl: loading workspaces (1/2)…")))))))
+        (should (null echoes))))))
 
 (ert-deftest agent-repl-test-open-progress-a-published-change-is-quiet-in-the-minibuffer ()
   "An open advancing while the user is typing must not take their prompt."
   ;; Arrange
   (agent-repl-test--with-open-progress
     (let ((agent-repl-roster--tab-order '("alpha-ws" "beta-ws"))
-          (agent-repl-daemon--workspace-echo-done nil)
           (agent-repl-open-progress-change-functions
            (list #'agent-repl-daemon-on-open-progress-change)))
       (agent-repl-test--open-progress-capturing-echoes

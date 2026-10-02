@@ -67,6 +67,7 @@
   (load (expand-file-name "test-prompt-summary.el" dir) nil t)
   (load (expand-file-name "test-render-colors.el" dir) nil t)
   (load (expand-file-name "test-roster.el" dir) nil t)
+  (load (expand-file-name "test-startup.el" dir) nil t)
   (load (expand-file-name "test-rpc.el" dir) nil t)
   (load (expand-file-name "test-services.el" dir) nil t)
   (load (expand-file-name "test-session.el" dir) nil t)

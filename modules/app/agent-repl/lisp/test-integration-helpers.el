@@ -976,6 +976,15 @@ signals."
                 ;; perspective switch that scenario never asked for.
                 (agent-repl--panels-arrivals-armed nil)
                 (agent-repl--panels-arrival-reasons (make-hash-table :test 'equal))
+                ;; The editor's startup is process-wide (startup.el): each
+                ;; scenario runs with it over unless it stages one itself.
+                (agent-repl-startup--phase 'done)
+                (agent-repl-startup--go-aheads nil)
+                (agent-repl-startup--next 0)
+                (agent-repl-startup--finished nil)
+                (agent-repl-startup--released (make-hash-table :test 'equal))
+                (agent-repl-startup--loaded (make-hash-table :test 'equal))
+                (agent-repl-startup--loading-said (make-hash-table :test 'equal))
                 (agent-repl-itest--real-ws-put
                  (symbol-function 'agent-repl--ws-put))
                 (process-environment
