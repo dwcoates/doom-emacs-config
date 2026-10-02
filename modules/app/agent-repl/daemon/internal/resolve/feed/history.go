@@ -114,6 +114,9 @@ func (r *resolver) replayPage(ws ids.WorkspaceID, agent *conversationv1.AgentId,
 	// not coming.
 	r.retireHeldSpawns(s, "the history page ended")
 
+	if load == nil {
+		r.kickWaitingReaders(s, agent)
+	}
 	if len(entries) == 0 {
 		// AN EMPTY PAGE DRAWS NOTHING: a tail_only watch opens on one, as does a
 		// fresh session's main watch before its first row names the main
