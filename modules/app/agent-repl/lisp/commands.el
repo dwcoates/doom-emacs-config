@@ -55,7 +55,6 @@
 (declare-function agent-repl--ws-known-p "agent-repl-workspace" (ws))
 (declare-function agent-repl--ws-dir "agent-repl-status" (ws))
 (declare-function agent-repl--live-ws-names "agent-repl-workspace" ())
-(declare-function agent-repl--ws-switch "agent-repl-workspace" (ws &rest args))
 (declare-function agent-repl--ws-switch-project "agent-repl-workspace" (project))
 (declare-function agent-repl--ws-register-project "agent-repl-workspace" (dir))
 (declare-function agent-repl--ws-resolve-persp "agent-repl-workspace" (ws))
@@ -70,6 +69,8 @@
 (declare-function agent-repl--read-input-buffer "agent-repl-input" (ws))
 (declare-function agent-repl-popup-open "agent-repl-popup" (path &optional line))
 (declare-function agent-repl-host-register "agent-repl-host" (conn dir on-done))
+(declare-function agent-repl-host-request-switch "host" (ws trigger))
+(declare-function agent-repl-host-pending-selection "host" ())
 (declare-function agent-repl-link-primary "agent-repl-daemon-link" ())
 (declare-function agent-repl-verbs-select-minted "agent-repl-verbs"
                   (ref &optional lander))
@@ -765,8 +766,9 @@ left alone rather than qualified for the sake of uniformity."
 (defun agent-repl--switch-to-known-workspace ()
   "Pick a known workspace and stand on it, opening it first if it is not here.
 
-AN OPEN WORKSPACE IS AN EDITOR-LOCAL SWITCH and nothing more: its
-perspective is standing, so `agent-repl--ws-switch' activates it.
+AN OPEN WORKSPACE IS A SWITCH REQUEST and nothing more: the daemon is
+asked to select it (`agent-repl-host-request-switch') and the frame
+follows the roster.
 
 ANYTHING ELSE GOES THROUGH `OpenWorkspace', which is the ONE path that
 reopens a workspace -- the same verb `agent-repl-open-workspace' runs,
@@ -796,8 +798,8 @@ daemon-minted and there is no spelling of it Emacs could construct."
            (ref (plist-get entry :ref)))
       (cond
        (ws
-        (agent-repl--log ws "elisp.commands.switch-chosen ws=%s" ws)
-        (agent-repl--ws-switch ws))
+        (agent-repl--info ws "elisp.commands.switch-chosen ws=%s" ws)
+        (agent-repl-host-request-switch ws 'picker))
        (ref
         (agent-repl--info (agent-repl--ws-current-log-name)
                           "elisp.commands.switch-opens-absent name=%s id=%s"
@@ -884,7 +886,7 @@ resets."
           (push target agent-repl--opened-recent-cycle)
           (agent-repl--info (agent-repl--ws-log-name current)
                             "elisp.commands.open-most-recent target=%s" target)
-          (agent-repl--ws-switch target))
+          (agent-repl-host-request-switch target 'most-recent))
       (setq agent-repl--opened-recent-cycle nil)
       (agent-repl--info (agent-repl--ws-log-name current)
                         "elisp.commands.open-most-recent-cycle-reset")
@@ -939,6 +941,12 @@ CURRENT has no tab or nothing is drawn."
   "Switch N places from the current workspace along the DRAWN tab order.
 Wraps at both ends, so `s-{' and `s-}' match the bar in both directions.
 
+THE STEP STARTS FROM THE MOST RECENT REQUEST while one is unanswered
+\(`agent-repl-host-pending-selection'), not from the tab shown: the frame
+moves only when the roster says so, and `s-}' pressed twice before it does
+must land two tabs over, not one.  The target is REQUESTED, never switched
+to here (`agent-repl-host-request-switch').
+
 A bar with no tabs, and a current workspace that is not ON the bar (a
 pseudo perspective, or a workspace whose tab the roster has torn down),
 are LOGGED NO-OPS: there is no slot to count from, and inventing one would
@@ -952,14 +960,16 @@ action is never promoted to `warn' to make it easier to find -- the realtest
 harvest fails a run on every warning."
   (let* ((names (agent-repl--drawn-tab-names))
          (all (and (fboundp 'agent-repl-roster-tab-order) (agent-repl-roster-tab-order)))
-         (current (agent-repl--ws-current-name))
-         (log-ws (agent-repl--ws-log-name current))
+         (shown (agent-repl--ws-current-name))
+         (current (or (agent-repl-host-pending-selection) shown))
+         (log-ws (agent-repl--ws-log-name shown))
          (target (agent-repl--cycle-target all names current n)))
     (if (null target)
-        (agent-repl--info log-ws "elisp.commands.cycle-no-position n=%d tabs=%d"
-                          n (length names))
-      (agent-repl--info log-ws "elisp.commands.cycle n=%d target=%s" n target)
-      (agent-repl--ws-switch target))))
+        (agent-repl--info log-ws "elisp.commands.cycle-no-position n=%d tabs=%d from=%s"
+                          n (length names) current)
+      (agent-repl--info log-ws "elisp.commands.cycle n=%d from=%s target=%s"
+                        n current target)
+      (agent-repl-host-request-switch target 'cycle))))
 
 (defun agent-repl-switch-left ()
   "Switch to the tab LEFT of the current one on the tab bar, wrapping."
@@ -1002,7 +1012,7 @@ afterwards is a logging defect."
      ((null index)
       (let ((choice (completing-read "Switch to workspace: " names nil t)))
         (agent-repl--info log-ws "elisp.commands.switch-to-workspace-chosen ws=%s" choice)
-        (agent-repl--ws-switch choice)))
+        (agent-repl-host-request-switch choice 'picker)))
      ((or (< index 1) (> index (length names)))
       (agent-repl--info log-ws
                         "elisp.commands.switch-to-workspace-out-of-range n=%d tabs=%d"
@@ -1013,7 +1023,7 @@ afterwards is a logging defect."
       (let ((target (nth (1- index) names)))
         (agent-repl--info log-ws "elisp.commands.switch-to-workspace n=%d target=%s"
                           index target)
-        (agent-repl--ws-switch target))))))
+        (agent-repl-host-request-switch target 'slot))))))
 
 (eval-and-compile
   ;; The count is needed at EXPANSION time by the macro below and at RUN time
