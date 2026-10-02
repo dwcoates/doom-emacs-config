@@ -67,9 +67,10 @@ remains the focused session/PID/span/gap diagnostic.
 
 `bounce-agent-repl-forcefully.sh` rebuilds every component in place in this
 checkout (protobufs, shim, webapp, daemon, store, sidecar, lock), then stops
-every backend -- the daemon and the shims running this checkout's binaries,
-their lock helpers, the sidecar and the store -- gracefully first (SIGTERM;
-`launchctl bootout` for the services) and by SIGKILL after a grace period, and
+every backend AT ONCE -- the daemon and the shims running this checkout's
+binaries, their lock helpers, the sidecar and the store -- gracefully first
+(SIGTERM; `launchctl bootout` for the services), killing each on its own the
+moment it outlives the grace period, and
 brings the store, then the sidecar, back up. A failed build stops nothing.
 Emacs starts the fresh daemon when it next links, and the daemon its shims.
 It matches processes by this checkout's own paths, so a daemon running from

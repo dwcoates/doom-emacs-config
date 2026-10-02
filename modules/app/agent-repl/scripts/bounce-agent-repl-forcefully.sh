@@ -10,14 +10,15 @@
 #      checkout's dist, so every webview opened from now on loads the new one.
 #      A FAILED BUILD STOPS HERE, with nothing killed: a bounce onto a build
 #      that does not exist would leave nothing running at all.
-#   2. STOPS every backend, gracefully first and by force after:
-#        - the daemon(s) running this checkout's binary, then the shims running
-#          this checkout's bundle and their lock helpers: SIGTERM (each one's
-#          own orderly shutdown), then SIGKILL for whatever is still alive
-#          after the grace period;
-#        - the sidecar, then the store: `launchctl bootout` (launchd's SIGTERM;
-#          a kept-alive service only stops by leaving the domain), then
-#          SIGKILL for a process that outlives the grace period.
+#   2. STOPS every backend AT ONCE, gracefully first and by force after. Each
+#      of these is asked in parallel, and each is killed on its own the moment
+#      it outlives the grace period, so a bounce costs one grace period at
+#      most, never one per backend:
+#        - the daemon(s) running this checkout's binary, the shims running this
+#          checkout's bundle, and their lock helpers: SIGTERM (each one's own
+#          orderly shutdown), then SIGKILL;
+#        - the sidecar and the store: `launchctl bootout` (launchd's SIGTERM; a
+#          kept-alive service only stops by leaving the domain), then SIGKILL.
 #   3. STARTS the store, waits for its socket, then the sidecar (the recorded
 #      safe order), each from its installed plist.
 #
@@ -99,7 +100,7 @@ log "built"
 pids_of() {
     local pid
     for pid in $(pgrep -f -- "$1" 2>/dev/null || true); do
-        [ "$pid" = "$$" ] || echo "$pid"
+        [ "$pid" = "$$" ] || [ "$pid" = "${BASHPID:-}" ] || echo "$pid"
     done
 }
 
@@ -173,11 +174,18 @@ stop_service() {
     stop_processes "$label (stray)" "$binary"
 }
 
-stop_processes "daemon" "$DAEMON_BIN"
-stop_processes "shims" "$SHIM_MAIN"
-stop_processes "shim locks" "$CACHE_BIN/shim-lock"
-stop_service "$SIDECAR_LABEL" "$CACHE_BIN/shim-claude-sidecar"
-stop_service "$STORE_LABEL" "$CACHE_BIN/shim-store"
+# EVERY STOP RUNS AT ONCE, and this script waits for all of them: each asks
+# its backend to shut down and kills it on its own deadline.
+stoppers=()
+stop_processes "daemon" "$DAEMON_BIN" & stoppers+=("$!")
+stop_processes "shims" "$SHIM_MAIN" & stoppers+=("$!")
+stop_processes "shim locks" "$CACHE_BIN/shim-lock" & stoppers+=("$!")
+stop_service "$SIDECAR_LABEL" "$CACHE_BIN/shim-claude-sidecar" & stoppers+=("$!")
+stop_service "$STORE_LABEL" "$CACHE_BIN/shim-store" & stoppers+=("$!")
+for stopper in "${stoppers[@]}"; do
+    wait "$stopper" || die "a stop failed; the services were NOT restarted"
+done
+log "every backend is stopped"
 
 # ---- 3. start --------------------------------------------------------------
 
