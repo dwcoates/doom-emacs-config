@@ -119,12 +119,11 @@ The DISPLAY MODE marker: present is PARTIAL and absent is FULL.  The
 message is EMPTY and PRESENCE IS THE FACT, exactly as for the attention
 marker above, so the decoded value must be something other than nil.
 
-EMACS DECODES IT AND DRAWS FROM ITS OWN LATCH.  The mode originates here
-— the tab bar demotes on the view dwell and reports it
-\(`agent-repl--tab-view-partial'), which is what put the marker on the
-row in the first place — so reading it back would be Emacs asking the
-daemon what Emacs just said.  It is decoded because the codec refuses
-unknown fields, and refusing this one would drop every roster push."
+EMACS DRAWS FROM IT.  The daemon is the single source of the mode: the
+tab bar reads it back (`agent-repl-roster-viewed-for-ws') exactly as the
+webapp sidebar does, so the two surfaces cannot disagree.  Emacs only
+REPORTS the dwell that raises it (`agent-repl--tab-view-partial'); the
+daemon also raises it by itself when a /clear or compaction completes."
   (agent-repl-wire--decode-empty "RosterRowViewed" value)
   t)
 
@@ -174,7 +173,8 @@ its start failure."
   '((pending :pending agent-repl-wire-decode-roster-row-availability-pending)
     (available :available agent-repl-wire-decode-roster-row-availability-available)
     (unavailable :unavailable agent-repl-wire-decode-roster-row-availability-unavailable))
-  "`RosterRowAvailability.availability''s arm table: (WIRE-KEY ARM-KEYWORD DECODER).")
+  "`RosterRowAvailability.availability''s arm table.
+Each entry is (WIRE-KEY ARM-KEYWORD DECODER).")
 
 (defun agent-repl-wire-decode-roster-row-availability (value)
   "Decode VALUE as `RosterRowAvailability', a plist `(:arm ARM :value nil)'.
