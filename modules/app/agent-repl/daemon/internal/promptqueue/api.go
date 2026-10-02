@@ -77,6 +77,10 @@ var (
 	ErrNoSuchHold = errors.New("promptqueue: no hold stands under that turn")
 	// ErrAlreadyDelivered is an action on a hold that already went to the shim.
 	ErrAlreadyDelivered = errors.New("promptqueue: that hold was already delivered")
+	// ErrBeingDelivered is an action on a hold whose delivery call to the
+	// shim is in flight (call.go): it is neither held nor delivered yet, and
+	// once the call settles it is either delivered or back in the tray.
+	ErrBeingDelivered = errors.New("promptqueue: that hold is being delivered to the shim")
 	// ErrAcceptNotApplicable is an accept on a verdict other than
 	// hold_for_turn_end. The landed contract makes accept legal only there.
 	ErrAcceptNotApplicable = errors.New("promptqueue: accept is legal only on a hold_for_turn_end verdict")

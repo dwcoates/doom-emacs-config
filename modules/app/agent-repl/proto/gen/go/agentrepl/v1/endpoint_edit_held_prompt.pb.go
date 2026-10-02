@@ -429,6 +429,7 @@ type EditHeldPromptError struct {
 	//	*EditHeldPromptError_BeingEdited
 	//	*EditHeldPromptError_NotEditing
 	//	*EditHeldPromptError_NoEditor
+	//	*EditHeldPromptError_BeingDelivered
 	Cause         isEditHeldPromptError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -561,6 +562,15 @@ func (x *EditHeldPromptError) GetNoEditor() *EditHeldPromptNoEditor {
 	return nil
 }
 
+func (x *EditHeldPromptError) GetBeingDelivered() *EditHeldPromptBeingDelivered {
+	if x != nil {
+		if x, ok := x.Cause.(*EditHeldPromptError_BeingDelivered); ok {
+			return x.BeingDelivered
+		}
+	}
+	return nil
+}
+
 type isEditHeldPromptError_Cause interface {
 	isEditHeldPromptError_Cause()
 }
@@ -619,6 +629,14 @@ type EditHeldPromptError_NoEditor struct {
 	NoEditor *EditHeldPromptNoEditor `protobuf:"bytes,10,opt,name=no_editor,json=noEditor,proto3,oneof"`
 }
 
+type EditHeldPromptError_BeingDelivered struct {
+	// BEING DELIVERED: the prompt's delivery call to the agent is in flight
+	// right now, so it is neither held nor delivered yet. Refused rather than
+	// raced. Once the call settles the prompt is either delivered, or (if the
+	// call failed) back in the tray and open to this request again.
+	BeingDelivered *EditHeldPromptBeingDelivered `protobuf:"bytes,11,opt,name=being_delivered,json=beingDelivered,proto3,oneof"`
+}
+
 func (*EditHeldPromptError_UnknownWorkspace) isEditHeldPromptError_Cause() {}
 
 func (*EditHeldPromptError_WorkspaceRefMismatch) isEditHeldPromptError_Cause() {}
@@ -638,6 +656,8 @@ func (*EditHeldPromptError_BeingEdited) isEditHeldPromptError_Cause() {}
 func (*EditHeldPromptError_NotEditing) isEditHeldPromptError_Cause() {}
 
 func (*EditHeldPromptError_NoEditor) isEditHeldPromptError_Cause() {}
+
+func (*EditHeldPromptError_BeingDelivered) isEditHeldPromptError_Cause() {}
 
 type EditHeldPromptUnknownWorkspace struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -1026,6 +1046,43 @@ func (*EditHeldPromptNoEditor) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_edit_held_prompt_proto_rawDescGZIP(), []int{16}
 }
 
+// The prompt's delivery call is in flight. See the `being_delivered` arm.
+type EditHeldPromptBeingDelivered struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EditHeldPromptBeingDelivered) Reset() {
+	*x = EditHeldPromptBeingDelivered{}
+	mi := &file_agentrepl_v1_endpoint_edit_held_prompt_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EditHeldPromptBeingDelivered) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EditHeldPromptBeingDelivered) ProtoMessage() {}
+
+func (x *EditHeldPromptBeingDelivered) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_edit_held_prompt_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EditHeldPromptBeingDelivered.ProtoReflect.Descriptor instead.
+func (*EditHeldPromptBeingDelivered) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_edit_held_prompt_proto_rawDescGZIP(), []int{17}
+}
+
 var File_agentrepl_v1_endpoint_edit_held_prompt_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_edit_held_prompt_proto_rawDesc = "" +
@@ -1046,7 +1103,7 @@ const file_agentrepl_v1_endpoint_edit_held_prompt_proto_rawDesc = "" +
 	"\asuccess\x18\x01 \x01(\v2#.agentrepl.v1.EditHeldPromptSuccessH\x00R\asuccess\x129\n" +
 	"\x05error\x18\x02 \x01(\v2!.agentrepl.v1.EditHeldPromptErrorH\x00R\x05errorB\b\n" +
 	"\x06result\"\x17\n" +
-	"\x15EditHeldPromptSuccess\"\xe0\x06\n" +
+	"\x15EditHeldPromptSuccess\"\xb7\a\n" +
 	"\x13EditHeldPromptError\x12[\n" +
 	"\x11unknown_workspace\x18\x01 \x01(\v2,.agentrepl.v1.EditHeldPromptUnknownWorkspaceH\x00R\x10unknownWorkspace\x12h\n" +
 	"\x16workspace_ref_mismatch\x18\x02 \x01(\v20.agentrepl.v1.EditHeldPromptWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12[\n" +
@@ -1060,7 +1117,8 @@ const file_agentrepl_v1_endpoint_edit_held_prompt_proto_rawDesc = "" +
 	"\vnot_editing\x18\t \x01(\v2&.agentrepl.v1.EditHeldPromptNotEditingH\x00R\n" +
 	"notEditing\x12C\n" +
 	"\tno_editor\x18\n" +
-	" \x01(\v2$.agentrepl.v1.EditHeldPromptNoEditorH\x00R\bnoEditorB\a\n" +
+	" \x01(\v2$.agentrepl.v1.EditHeldPromptNoEditorH\x00R\bnoEditor\x12U\n" +
+	"\x0fbeing_delivered\x18\v \x01(\v2*.agentrepl.v1.EditHeldPromptBeingDeliveredH\x00R\x0ebeingDeliveredB\a\n" +
 	"\x05cause\" \n" +
 	"\x1eEditHeldPromptUnknownWorkspace\"G\n" +
 	"\"EditHeldPromptWorkspaceRefMismatch\x12!\n" +
@@ -1074,7 +1132,8 @@ const file_agentrepl_v1_endpoint_edit_held_prompt_proto_rawDesc = "" +
 	"\x19EditHeldPromptBeingEdited\x12:\n" +
 	"\fediting_turn\x18\x01 \x01(\v2\x17.conversation.v1.TurnIdR\veditingTurn\"\x1a\n" +
 	"\x18EditHeldPromptNotEditing\"\x18\n" +
-	"\x16EditHeldPromptNoEditorB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\x16EditHeldPromptNoEditor\"\x1e\n" +
+	"\x1cEditHeldPromptBeingDeliveredB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_edit_held_prompt_proto_rawDescOnce sync.Once
@@ -1088,7 +1147,7 @@ func file_agentrepl_v1_endpoint_edit_held_prompt_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_edit_held_prompt_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_edit_held_prompt_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
+var file_agentrepl_v1_endpoint_edit_held_prompt_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
 var file_agentrepl_v1_endpoint_edit_held_prompt_proto_goTypes = []any{
 	(*EditHeldPromptRequest)(nil),              // 0: agentrepl.v1.EditHeldPromptRequest
 	(*EditHeldPromptBegin)(nil),                // 1: agentrepl.v1.EditHeldPromptBegin
@@ -1107,17 +1166,18 @@ var file_agentrepl_v1_endpoint_edit_held_prompt_proto_goTypes = []any{
 	(*EditHeldPromptBeingEdited)(nil),          // 14: agentrepl.v1.EditHeldPromptBeingEdited
 	(*EditHeldPromptNotEditing)(nil),           // 15: agentrepl.v1.EditHeldPromptNotEditing
 	(*EditHeldPromptNoEditor)(nil),             // 16: agentrepl.v1.EditHeldPromptNoEditor
-	(*v1.WorkspaceRef)(nil),                    // 17: workspace.v1.WorkspaceRef
-	(*v11.TurnId)(nil),                         // 18: conversation.v1.TurnId
-	(*v11.UserSaid)(nil),                       // 19: conversation.v1.UserSaid
+	(*EditHeldPromptBeingDelivered)(nil),       // 17: agentrepl.v1.EditHeldPromptBeingDelivered
+	(*v1.WorkspaceRef)(nil),                    // 18: workspace.v1.WorkspaceRef
+	(*v11.TurnId)(nil),                         // 19: conversation.v1.TurnId
+	(*v11.UserSaid)(nil),                       // 20: conversation.v1.UserSaid
 }
 var file_agentrepl_v1_endpoint_edit_held_prompt_proto_depIdxs = []int32{
-	17, // 0: agentrepl.v1.EditHeldPromptRequest.workspace:type_name -> workspace.v1.WorkspaceRef
-	18, // 1: agentrepl.v1.EditHeldPromptRequest.turn:type_name -> conversation.v1.TurnId
+	18, // 0: agentrepl.v1.EditHeldPromptRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	19, // 1: agentrepl.v1.EditHeldPromptRequest.turn:type_name -> conversation.v1.TurnId
 	1,  // 2: agentrepl.v1.EditHeldPromptRequest.begin:type_name -> agentrepl.v1.EditHeldPromptBegin
 	2,  // 3: agentrepl.v1.EditHeldPromptRequest.commit:type_name -> agentrepl.v1.EditHeldPromptCommit
 	3,  // 4: agentrepl.v1.EditHeldPromptRequest.cancel:type_name -> agentrepl.v1.EditHeldPromptCancel
-	19, // 5: agentrepl.v1.EditHeldPromptCommit.said:type_name -> conversation.v1.UserSaid
+	20, // 5: agentrepl.v1.EditHeldPromptCommit.said:type_name -> conversation.v1.UserSaid
 	5,  // 6: agentrepl.v1.EditHeldPromptResponse.success:type_name -> agentrepl.v1.EditHeldPromptSuccess
 	6,  // 7: agentrepl.v1.EditHeldPromptResponse.error:type_name -> agentrepl.v1.EditHeldPromptError
 	7,  // 8: agentrepl.v1.EditHeldPromptError.unknown_workspace:type_name -> agentrepl.v1.EditHeldPromptUnknownWorkspace
@@ -1130,12 +1190,13 @@ var file_agentrepl_v1_endpoint_edit_held_prompt_proto_depIdxs = []int32{
 	14, // 15: agentrepl.v1.EditHeldPromptError.being_edited:type_name -> agentrepl.v1.EditHeldPromptBeingEdited
 	15, // 16: agentrepl.v1.EditHeldPromptError.not_editing:type_name -> agentrepl.v1.EditHeldPromptNotEditing
 	16, // 17: agentrepl.v1.EditHeldPromptError.no_editor:type_name -> agentrepl.v1.EditHeldPromptNoEditor
-	18, // 18: agentrepl.v1.EditHeldPromptBeingEdited.editing_turn:type_name -> conversation.v1.TurnId
-	19, // [19:19] is the sub-list for method output_type
-	19, // [19:19] is the sub-list for method input_type
-	19, // [19:19] is the sub-list for extension type_name
-	19, // [19:19] is the sub-list for extension extendee
-	0,  // [0:19] is the sub-list for field type_name
+	17, // 18: agentrepl.v1.EditHeldPromptError.being_delivered:type_name -> agentrepl.v1.EditHeldPromptBeingDelivered
+	19, // 19: agentrepl.v1.EditHeldPromptBeingEdited.editing_turn:type_name -> conversation.v1.TurnId
+	20, // [20:20] is the sub-list for method output_type
+	20, // [20:20] is the sub-list for method input_type
+	20, // [20:20] is the sub-list for extension type_name
+	20, // [20:20] is the sub-list for extension extendee
+	0,  // [0:20] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_edit_held_prompt_proto_init() }
@@ -1163,6 +1224,7 @@ func file_agentrepl_v1_endpoint_edit_held_prompt_proto_init() {
 		(*EditHeldPromptError_BeingEdited)(nil),
 		(*EditHeldPromptError_NotEditing)(nil),
 		(*EditHeldPromptError_NoEditor)(nil),
+		(*EditHeldPromptError_BeingDelivered)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -1170,7 +1232,7 @@ func file_agentrepl_v1_endpoint_edit_held_prompt_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_edit_held_prompt_proto_rawDesc), len(file_agentrepl_v1_endpoint_edit_held_prompt_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   17,
+			NumMessages:   18,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

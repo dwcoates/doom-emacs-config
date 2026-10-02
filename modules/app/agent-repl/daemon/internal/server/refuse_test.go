@@ -128,6 +128,7 @@ func TestAsRefusalNormalizesEveryComponentSentinel(t *testing.T) {
 		{"merging", promptqueue.ErrMerging, "merging"},
 		{"no such hold", promptqueue.ErrNoSuchHold, "no_such_hold"},
 		{"already delivered", promptqueue.ErrAlreadyDelivered, "already_delivered"},
+		{"being delivered", promptqueue.ErrBeingDelivered, "being_delivered"},
 		{"accept not applicable", promptqueue.ErrAcceptNotApplicable, "accept_not_applicable"},
 		{"release refused", promptqueue.ErrReleaseRefused, "release_refused"},
 		{"not held", promptqueue.ErrNotHeld, "not_held"},

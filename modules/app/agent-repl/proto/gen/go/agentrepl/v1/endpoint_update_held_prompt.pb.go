@@ -398,6 +398,7 @@ type UpdateHeldPromptError struct {
 	//	*UpdateHeldPromptError_AlreadyDelivered
 	//	*UpdateHeldPromptError_AcceptNotApplicable
 	//	*UpdateHeldPromptError_ReleaseRefused
+	//	*UpdateHeldPromptError_BeingDelivered
 	Cause         isUpdateHeldPromptError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -512,6 +513,15 @@ func (x *UpdateHeldPromptError) GetReleaseRefused() *UpdateHeldPromptReleaseRefu
 	return nil
 }
 
+func (x *UpdateHeldPromptError) GetBeingDelivered() *UpdateHeldPromptBeingDelivered {
+	if x != nil {
+		if x, ok := x.Cause.(*UpdateHeldPromptError_BeingDelivered); ok {
+			return x.BeingDelivered
+		}
+	}
+	return nil
+}
+
 type isUpdateHeldPromptError_Cause interface {
 	isUpdateHeldPromptError_Cause()
 }
@@ -558,6 +568,14 @@ type UpdateHeldPromptError_ReleaseRefused struct {
 	ReleaseRefused *UpdateHeldPromptReleaseRefused `protobuf:"bytes,8,opt,name=release_refused,json=releaseRefused,proto3,oneof"`
 }
 
+type UpdateHeldPromptError_BeingDelivered struct {
+	// BEING DELIVERED: the prompt's delivery call to the agent is in flight
+	// right now, so it is neither held nor delivered yet. Refused rather than
+	// raced. Once the call settles the prompt is either delivered, or (if the
+	// call failed) back in the tray and open to this request again.
+	BeingDelivered *UpdateHeldPromptBeingDelivered `protobuf:"bytes,9,opt,name=being_delivered,json=beingDelivered,proto3,oneof"`
+}
+
 func (*UpdateHeldPromptError_UnknownWorkspace) isUpdateHeldPromptError_Cause() {}
 
 func (*UpdateHeldPromptError_WorkspaceRefMismatch) isUpdateHeldPromptError_Cause() {}
@@ -573,6 +591,8 @@ func (*UpdateHeldPromptError_AlreadyDelivered) isUpdateHeldPromptError_Cause() {
 func (*UpdateHeldPromptError_AcceptNotApplicable) isUpdateHeldPromptError_Cause() {}
 
 func (*UpdateHeldPromptError_ReleaseRefused) isUpdateHeldPromptError_Cause() {}
+
+func (*UpdateHeldPromptError_BeingDelivered) isUpdateHeldPromptError_Cause() {}
 
 type UpdateHeldPromptUnknownWorkspace struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -880,6 +900,43 @@ func (*UpdateHeldPromptReleaseRefused) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDescGZIP(), []int{14}
 }
 
+// The prompt's delivery call is in flight. See the `being_delivered` arm.
+type UpdateHeldPromptBeingDelivered struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdateHeldPromptBeingDelivered) Reset() {
+	*x = UpdateHeldPromptBeingDelivered{}
+	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateHeldPromptBeingDelivered) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateHeldPromptBeingDelivered) ProtoMessage() {}
+
+func (x *UpdateHeldPromptBeingDelivered) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateHeldPromptBeingDelivered.ProtoReflect.Descriptor instead.
+func (*UpdateHeldPromptBeingDelivered) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDescGZIP(), []int{15}
+}
+
 var File_agentrepl_v1_endpoint_update_held_prompt_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDesc = "" +
@@ -899,7 +956,7 @@ const file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDesc = "" +
 	"\asuccess\x18\x01 \x01(\v2%.agentrepl.v1.UpdateHeldPromptSuccessH\x00R\asuccess\x12;\n" +
 	"\x05error\x18\x02 \x01(\v2#.agentrepl.v1.UpdateHeldPromptErrorH\x00R\x05errorB\b\n" +
 	"\x06result\"\x19\n" +
-	"\x17UpdateHeldPromptSuccess\"\x90\x06\n" +
+	"\x17UpdateHeldPromptSuccess\"\xe9\x06\n" +
 	"\x15UpdateHeldPromptError\x12]\n" +
 	"\x11unknown_workspace\x18\x01 \x01(\v2..agentrepl.v1.UpdateHeldPromptUnknownWorkspaceH\x00R\x10unknownWorkspace\x12j\n" +
 	"\x16workspace_ref_mismatch\x18\x02 \x01(\v22.agentrepl.v1.UpdateHeldPromptWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12]\n" +
@@ -909,7 +966,8 @@ const file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDesc = "" +
 	"noSuchHold\x12]\n" +
 	"\x11already_delivered\x18\x06 \x01(\v2..agentrepl.v1.UpdateHeldPromptAlreadyDeliveredH\x00R\x10alreadyDelivered\x12g\n" +
 	"\x15accept_not_applicable\x18\a \x01(\v21.agentrepl.v1.UpdateHeldPromptAcceptNotApplicableH\x00R\x13acceptNotApplicable\x12W\n" +
-	"\x0frelease_refused\x18\b \x01(\v2,.agentrepl.v1.UpdateHeldPromptReleaseRefusedH\x00R\x0ereleaseRefusedB\a\n" +
+	"\x0frelease_refused\x18\b \x01(\v2,.agentrepl.v1.UpdateHeldPromptReleaseRefusedH\x00R\x0ereleaseRefused\x12W\n" +
+	"\x0fbeing_delivered\x18\t \x01(\v2,.agentrepl.v1.UpdateHeldPromptBeingDeliveredH\x00R\x0ebeingDeliveredB\a\n" +
 	"\x05cause\"\"\n" +
 	" UpdateHeldPromptUnknownWorkspace\"I\n" +
 	"$UpdateHeldPromptWorkspaceRefMismatch\x12!\n" +
@@ -920,7 +978,8 @@ const file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDesc = "" +
 	"\x1aUpdateHeldPromptNoSuchHold\"\"\n" +
 	" UpdateHeldPromptAlreadyDelivered\"%\n" +
 	"#UpdateHeldPromptAcceptNotApplicable\" \n" +
-	"\x1eUpdateHeldPromptReleaseRefusedB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\x1eUpdateHeldPromptReleaseRefused\" \n" +
+	"\x1eUpdateHeldPromptBeingDeliveredB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDescOnce sync.Once
@@ -934,7 +993,7 @@ func file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
+var file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
 var file_agentrepl_v1_endpoint_update_held_prompt_proto_goTypes = []any{
 	(*UpdateHeldPromptRequest)(nil),              // 0: agentrepl.v1.UpdateHeldPromptRequest
 	(*UpdateHeldPromptRelease)(nil),              // 1: agentrepl.v1.UpdateHeldPromptRelease
@@ -951,12 +1010,13 @@ var file_agentrepl_v1_endpoint_update_held_prompt_proto_goTypes = []any{
 	(*UpdateHeldPromptAlreadyDelivered)(nil),     // 12: agentrepl.v1.UpdateHeldPromptAlreadyDelivered
 	(*UpdateHeldPromptAcceptNotApplicable)(nil),  // 13: agentrepl.v1.UpdateHeldPromptAcceptNotApplicable
 	(*UpdateHeldPromptReleaseRefused)(nil),       // 14: agentrepl.v1.UpdateHeldPromptReleaseRefused
-	(*v1.WorkspaceRef)(nil),                      // 15: workspace.v1.WorkspaceRef
-	(*v11.TurnId)(nil),                           // 16: conversation.v1.TurnId
+	(*UpdateHeldPromptBeingDelivered)(nil),       // 15: agentrepl.v1.UpdateHeldPromptBeingDelivered
+	(*v1.WorkspaceRef)(nil),                      // 16: workspace.v1.WorkspaceRef
+	(*v11.TurnId)(nil),                           // 17: conversation.v1.TurnId
 }
 var file_agentrepl_v1_endpoint_update_held_prompt_proto_depIdxs = []int32{
-	15, // 0: agentrepl.v1.UpdateHeldPromptRequest.workspace:type_name -> workspace.v1.WorkspaceRef
-	16, // 1: agentrepl.v1.UpdateHeldPromptRequest.turn:type_name -> conversation.v1.TurnId
+	16, // 0: agentrepl.v1.UpdateHeldPromptRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	17, // 1: agentrepl.v1.UpdateHeldPromptRequest.turn:type_name -> conversation.v1.TurnId
 	1,  // 2: agentrepl.v1.UpdateHeldPromptRequest.release:type_name -> agentrepl.v1.UpdateHeldPromptRelease
 	2,  // 3: agentrepl.v1.UpdateHeldPromptRequest.drop:type_name -> agentrepl.v1.UpdateHeldPromptDrop
 	3,  // 4: agentrepl.v1.UpdateHeldPromptRequest.accept:type_name -> agentrepl.v1.UpdateHeldPromptAccept
@@ -970,11 +1030,12 @@ var file_agentrepl_v1_endpoint_update_held_prompt_proto_depIdxs = []int32{
 	12, // 12: agentrepl.v1.UpdateHeldPromptError.already_delivered:type_name -> agentrepl.v1.UpdateHeldPromptAlreadyDelivered
 	13, // 13: agentrepl.v1.UpdateHeldPromptError.accept_not_applicable:type_name -> agentrepl.v1.UpdateHeldPromptAcceptNotApplicable
 	14, // 14: agentrepl.v1.UpdateHeldPromptError.release_refused:type_name -> agentrepl.v1.UpdateHeldPromptReleaseRefused
-	15, // [15:15] is the sub-list for method output_type
-	15, // [15:15] is the sub-list for method input_type
-	15, // [15:15] is the sub-list for extension type_name
-	15, // [15:15] is the sub-list for extension extendee
-	0,  // [0:15] is the sub-list for field type_name
+	15, // 15: agentrepl.v1.UpdateHeldPromptError.being_delivered:type_name -> agentrepl.v1.UpdateHeldPromptBeingDelivered
+	16, // [16:16] is the sub-list for method output_type
+	16, // [16:16] is the sub-list for method input_type
+	16, // [16:16] is the sub-list for extension type_name
+	16, // [16:16] is the sub-list for extension extendee
+	0,  // [0:16] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_update_held_prompt_proto_init() }
@@ -1000,6 +1061,7 @@ func file_agentrepl_v1_endpoint_update_held_prompt_proto_init() {
 		(*UpdateHeldPromptError_AlreadyDelivered)(nil),
 		(*UpdateHeldPromptError_AcceptNotApplicable)(nil),
 		(*UpdateHeldPromptError_ReleaseRefused)(nil),
+		(*UpdateHeldPromptError_BeingDelivered)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -1007,7 +1069,7 @@ func file_agentrepl_v1_endpoint_update_held_prompt_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDesc), len(file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   15,
+			NumMessages:   16,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

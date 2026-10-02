@@ -101,6 +101,11 @@ message EditHeldPromptError {
     // workspace, so there is no input the content could be put into and no
     // claimant the claim could be scoped to.
     EditHeldPromptNoEditor no_editor = 10;
+    // BEING DELIVERED: the prompt's delivery call to the agent is in flight
+    // right now, so it is neither held nor delivered yet. Refused rather than
+    // raced. Once the call settles the prompt is either delivered, or (if the
+    // call failed) back in the tray and open to this request again.
+    EditHeldPromptBeingDelivered being_delivered = 11;
   }
 }
 message EditHeldPromptUnknownWorkspace {}
@@ -122,3 +127,6 @@ message EditHeldPromptBeingEdited {
 }
 message EditHeldPromptNotEditing {}
 message EditHeldPromptNoEditor {}
+
+// The prompt's delivery call is in flight. See the `being_delivered` arm.
+message EditHeldPromptBeingDelivered {}

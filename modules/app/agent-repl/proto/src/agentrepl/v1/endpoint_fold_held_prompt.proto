@@ -103,6 +103,11 @@ message FoldHeldPromptError {
     // One of the two entries is being edited (EditHeldPrompt): its words are
     // in the editor, and changing them underneath it is refused.
     FoldHeldPromptBeingEdited being_edited = 10;
+    // BEING DELIVERED: the prompt's delivery call to the agent is in flight
+    // right now, so it is neither held nor delivered yet. Refused rather than
+    // raced. Once the call settles the prompt is either delivered, or (if the
+    // call failed) back in the tray and open to this request again.
+    FoldHeldPromptBeingDelivered being_delivered = 11;
   }
 }
 
@@ -157,3 +162,6 @@ message FoldHeldPromptBeingEdited {
   // The entry the standing edit is on: `turn` or `above`.
   conversation.v1.TurnId editing_turn = 1;
 }
+
+// The prompt's delivery call is in flight. See the `being_delivered` arm.
+message FoldHeldPromptBeingDelivered {}
