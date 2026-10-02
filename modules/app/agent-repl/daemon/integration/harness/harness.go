@@ -66,6 +66,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"agentrepl/testrun/testenv"
 )
 
 // Binaries built once per `go test` run by Main.
@@ -142,17 +144,17 @@ func WithRunRoot(body func() int) int {
 func RunRoot() string { return runRoot }
 
 func mainIn(m *testing.M, module, root string) int {
-	mode, shared, err := BinaryMode(os.Getenv)
+	mode, shared, err := testenv.BinaryMode(os.Getenv)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	if mode == UsePrebuilt {
+	if mode == testenv.UsePrebuilt {
 		for _, b := range []struct {
 			path *string
 			name string
 		}{{&daemonBinary, "claude-repld"}, {&fakeshimBinary, "fakeshim"}, {&gitBinary, "git"}} {
-			if *b.path, err = SharedBinary(shared, prebuiltSub, b.name); err != nil {
+			if *b.path, err = testenv.SharedBinary(shared, prebuiltSub, b.name); err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				return 1
 			}
@@ -161,7 +163,7 @@ func mainIn(m *testing.M, module, root string) int {
 		return runPinned(m, module, root)
 	}
 	dir := filepath.Join(shared, prebuiltSub)
-	if mode == BuildHere {
+	if mode == testenv.BuildHere {
 		dir, err = os.MkdirTemp(root, "agent-repl-integration-bin-")
 	} else {
 		err = os.MkdirAll(dir, 0o755)
@@ -210,7 +212,7 @@ func mainIn(m *testing.M, module, root string) int {
 			return 1
 		}
 	}
-	if mode == BuildInto {
+	if mode == testenv.BuildInto {
 		return 0
 	}
 	return runPinned(m, module, dir)

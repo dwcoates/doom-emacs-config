@@ -1,5 +1,17 @@
-// Package testenv owns environment variable names shared by the test runner
-// and the integration harnesses it starts.
+// Package testenv owns the environment contract between the test runner and
+// the integration harnesses it starts: the variable names, and how a test
+// process reads them.
+//
+// BUILD ONCE, RUN IN MANY PROCESSES. The test runner splits a suite's tests
+// across several test processes, one per core. Each process's TestMain would
+// otherwise build every binary again -- the daemon, the fakes, and in the e2e
+// suite the real store, sidecar, lock and shim bundle -- so N chunks would pay
+// N identical builds. Instead ONE process builds them all into a directory and
+// exits (Prebuild), and every chunk reads them from it (Prebuilt).
+//
+// The two are mutually exclusive, and neither may be combined with coverage:
+// a prebuilt binary is uninstrumented, so a coverage run that read one would
+// silently measure nothing.
 package testenv
 
 import (
@@ -46,7 +58,9 @@ func BinaryMode(getenv func(string) string) (BuildMode, string, error) {
 	}
 }
 
-// SharedBinary resolves one required file from a shared prebuilt directory.
+// SharedBinary resolves one required file from a shared prebuilt directory,
+// failing when it is missing: a chunk told to read a binary that was never
+// built is a broken run, never a reason to build one quietly.
 func SharedBinary(dir, sub, name string) (string, error) {
 	p := filepath.Join(dir, sub, name)
 	info, err := os.Stat(p)
