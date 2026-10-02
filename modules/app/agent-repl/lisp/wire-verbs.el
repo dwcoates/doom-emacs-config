@@ -98,6 +98,9 @@
 (declare-function agent-repl-wire-decode-session-fault-daemon-state-unreadable "agent-repl-wire-common" (json))
 (declare-function agent-repl-wire-decode-session-fault-adoption-window-expired "agent-repl-wire-common" (json))
 (declare-function agent-repl-wire-decode-session-fault-final-answer-unresolved "agent-repl-wire-common" (json))
+(declare-function agent-repl-wire-decode-session-fault-vendor-start-retrying "agent-repl-wire-common" (json))
+(declare-function agent-repl-wire-decode-session-fault-vendor-start-rejected "agent-repl-wire-common" (json))
+(declare-function agent-repl-wire-decode-session-fault-vendor-start-failed "agent-repl-wire-common" (json))
 
 ;; core.el's canonical logging ladder.
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
@@ -3442,6 +3445,21 @@ ANSWERED at all."
 `SessionFaultFinalAnswerUnresolved'."
   (agent-repl-wire-decode-session-fault-final-answer-unresolved json))
 
+(defun agent-repl-wire-decode-session-fault-kind-vendor-start-retrying (json)
+  "Decode SessionFault's `vendor_start_retrying' kind arm from JSON as a
+`SessionFaultVendorStartRetrying'."
+  (agent-repl-wire-decode-session-fault-vendor-start-retrying json))
+
+(defun agent-repl-wire-decode-session-fault-kind-vendor-start-rejected (json)
+  "Decode SessionFault's `vendor_start_rejected' kind arm from JSON as a
+`SessionFaultVendorStartRejected'."
+  (agent-repl-wire-decode-session-fault-vendor-start-rejected json))
+
+(defun agent-repl-wire-decode-session-fault-kind-vendor-start-failed (json)
+  "Decode SessionFault's `vendor_start_failed' kind arm from JSON as a
+`SessionFaultVendorStartFailed'."
+  (agent-repl-wire-decode-session-fault-vendor-start-failed json))
+
 (defun agent-repl-wire-decode-session-fault-kind (json)
   "Decode SessionFault's `kind' oneof from JSON into (:arm ARM :value V).
 THE ARM IS THE FAULT CLASS: `detail' supplements it and never replaces
@@ -3461,15 +3479,18 @@ it, so a fault with no kind is a contract breach."
                  (list 'watchOpenRefused :watch-open-refused #'agent-repl-wire-decode-session-fault-kind-watch-open-refused)
                  (list 'daemonStateUnreadable :daemon-state-unreadable #'agent-repl-wire-decode-session-fault-kind-daemon-state-unreadable)
                  (list 'adoptionWindowExpired :adoption-window-expired #'agent-repl-wire-decode-session-fault-kind-adoption-window-expired)
-                 (list 'finalAnswerUnresolved :final-answer-unresolved #'agent-repl-wire-decode-session-fault-kind-final-answer-unresolved))))
+                 (list 'finalAnswerUnresolved :final-answer-unresolved #'agent-repl-wire-decode-session-fault-kind-final-answer-unresolved)
+                 (list 'vendorStartRetrying :vendor-start-retrying #'agent-repl-wire-decode-session-fault-kind-vendor-start-retrying)
+                 (list 'vendorStartRejected :vendor-start-rejected #'agent-repl-wire-decode-session-fault-kind-vendor-start-rejected)
+                 (list 'vendorStartFailed :vendor-start-failed #'agent-repl-wire-decode-session-fault-kind-vendor-start-failed))))
 
 (defun agent-repl-wire-decode-session-fault (json)
   "Decode SessionFault from JSON into (:detail STRING :kind ONEOF).
 Deliberately NOT DaemonFault: a session's fault classes are the session
-controller's own vocabulary — the same fourteen the host stream's HostFault
-carries, decoded through the same shared arm messages."
+controller's own vocabulary — the host stream's HostFault carries the first
+fourteen, decoded through the same shared arm messages."
   (let ((message "SessionFault"))
-    (agent-repl-wire-verbs--check-keys message json '(detail shimStartFailed shimDied linkSevered resumeFailed bounceDied bounceUnknown classifierFailed shimReported conversationAbandoned sessionAbsent watchOpenRefused daemonStateUnreadable adoptionWindowExpired finalAnswerUnresolved))
+    (agent-repl-wire-verbs--check-keys message json '(detail shimStartFailed shimDied linkSevered resumeFailed bounceDied bounceUnknown classifierFailed shimReported conversationAbandoned sessionAbsent watchOpenRefused daemonStateUnreadable adoptionWindowExpired finalAnswerUnresolved vendorStartRetrying vendorStartRejected vendorStartFailed))
     (list :detail (agent-repl-wire-verbs--decode-string message 'detail json)
           :kind (agent-repl-wire-decode-session-fault-kind json))))
 
