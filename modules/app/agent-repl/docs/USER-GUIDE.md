@@ -148,3 +148,22 @@ The footer's `disconnected` status has three vendor substatuses for a Claude SDK
   - The store or the sidecar has a problem.
   - You only want the page reloaded: use `SPC o l`.
 - **It is not a routine action.** A freshly launched shim or page may speak a newer API than the daemon that is still running, so reach for it only when a workspace is stuck.
+
+## The editor popup
+
+Every file or directory agent-repl shows you opens in **the editor popup**.
+
+- **What it looks like:**
+  - A popup on the right side of the frame, 40% of its width, with focus in it.
+  - A file opens at the line given, or at its top when none is.
+  - A directory opens in dired.
+  - `q` in command mode closes it and kills its buffer, saving the file first.
+- **What opens it:**
+  - A plan bubble's edit button, and a findings row's location.
+  - A link in a feed bubble: click it.
+  - The notes file, and the paths in the worktree divider.
+- **How a feed link finds its file:**
+  1. An absolute path opens as it is.
+  2. A relative path is taken from the worktree root.
+  3. A bare name is looked for in `<worktree>/modules/app/agent-repl/<name>`, then in `<git root>/<name>`.
+  4. If none exists, the footer briefly says "unknown file" with the name, and the agent is sent a follow-up question about which file you meant.
