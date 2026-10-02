@@ -197,10 +197,22 @@ func (r *reporter) OpenFault(ctx context.Context, f wsm.Fault) (ids.FaultID, err
 		})
 		return "", fmt.Errorf("health: open fault %q: %w", f.Kind, err)
 	}
-	log.Warn(opOpenFault, "fault opened", dlog.Context{
-		"fault": string(id), "kind": f.Kind, "detail": f.Detail,
-	})
+	fields := dlog.Context{"fault": string(id), "kind": f.Kind, "detail": f.Detail}
+	if EnvironmentKind(f.Kind) {
+		log.Info(opOpenFault, "fault opened: this machine's environment, not agent-repl, is what failed", fields)
+	} else {
+		log.Warn(opOpenFault, "fault opened", fields)
+	}
 	return id, nil
+}
+
+// EnvironmentKind reports a fault kind that records THIS MACHINE'S
+// ENVIRONMENT rather than anything agent-repl or the vendor did wrong: an
+// unreachable network. It is stated loudly where the user reads it (the
+// footer's and the roster's network_fault) and recorded at INFO, because
+// nothing in the system failed and nobody reading the logs has anything to fix.
+func EnvironmentKind(kind string) bool {
+	return kind == KindNetworkUnreachable
 }
 
 // CloseFault stamps a fault's persisted resolved-at.

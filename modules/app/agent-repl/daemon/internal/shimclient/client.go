@@ -1054,9 +1054,18 @@ func (c *client) awaitDiagnostics(ctx context.Context, frames <-chan *shimv1.Wat
 				return nil
 			}
 			faults := diagnostics.GetUnhealthy().GetFaults()
-			c.log.Warn("daemon.shimclient.ready", "shim reported unhealthy", dlog.Context{
-				"workspace_id": string(c.ws), "faults": len(faults),
-			})
+			if onlyNetworkFaults(faults) {
+				// THE NETWORK IS THIS MACHINE'S, NOT THE SHIM'S: a shim that saw
+				// the network down is healthy itself, and the network fault the
+				// footer draws is the record.
+				c.log.Info("daemon.shimclient.ready", "shim reported the network unreachable", dlog.Context{
+					"workspace_id": string(c.ws), "faults": len(faults),
+				})
+			} else {
+				c.log.Warn("daemon.shimclient.ready", "shim reported unhealthy", dlog.Context{
+					"workspace_id": string(c.ws), "faults": len(faults),
+				})
+			}
 			c.log.Info("daemon.shimclient.ready", "adopted an unhealthy shim; faults reported", dlog.Context{
 				"workspace_id": string(c.ws), "uds": c.udsPath,
 				"faults": len(faults), "fault_kinds": FaultKinds(faults),
@@ -1064,6 +1073,17 @@ func (c *client) awaitDiagnostics(ctx context.Context, frames <-chan *shimv1.Wat
 			return nil
 		}
 	}
+}
+
+// onlyNetworkFaults reports a non-empty fault set made of network_unreachable
+// faults alone.
+func onlyNetworkFaults(faults []*conversationv1.SessionFault) bool {
+	for _, fault := range faults {
+		if fault.GetNetworkUnreachable() == nil {
+			return false
+		}
+	}
+	return len(faults) > 0
 }
 
 // FaultKinds names the kind arm of every fault, comma-joined, so a record

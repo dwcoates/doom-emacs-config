@@ -104,9 +104,6 @@ func TestANetworkTheShimCannotReachIsANetworkFaultOnTheFooterAndTheRoster(t *tes
 	f := newOpenedWithProfile(t, harness.Opts{}, harness.ShimProfile{
 		OpeningNetworkUnreachable: "cannot reach api.anthropic.com: no route to host",
 	})
-	// An unreachable network is a condition a person acts on, recorded as
-	// every opened fault and every unhealthy shim are.
-	f.d.ExpectWarnings("daemon.shimclient.ready", "daemon.health.open_fault")
 
 	// Act
 	footer := f.d.WatchFooter(f.ws)
