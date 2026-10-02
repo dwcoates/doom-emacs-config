@@ -568,3 +568,35 @@ func TestAStartedSessionsHoldTellsTheFeedNoSource(t *testing.T) {
 		t.Fatalf("sources up = %v, want the running start's alone", f.feed.sourcesUp)
 	}
 }
+
+func TestAFreshStartTellsTheFeedItsBookIsNew(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+
+	// Act.
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Assert.
+	if len(f.feed.freshBooks) != 1 || f.feed.freshBooks[0] != ws.ID {
+		t.Fatalf("fresh books = %v, want %q", f.feed.freshBooks, ws.ID)
+	}
+}
+
+func TestAResumeTellsTheFeedNoNewBook(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := resumable(f)
+
+	// Act.
+	if err := f.fleet.Start(context.Background(), ws); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Assert.
+	if len(f.feed.freshBooks) != 0 {
+		t.Fatalf("fresh books = %v, want none for a resume", f.feed.freshBooks)
+	}
+}

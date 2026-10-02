@@ -1040,6 +1040,9 @@ func (f *Fleet) start(ctx context.Context, ws ids.WorkspaceID, rebind bool) erro
 	// watcher's pointers name lines of another one. See forgetPointers.
 	if src.Fresh {
 		f.forgetPointers(ws)
+		// AND ITS BOOK IS EMPTY AS A FACT: no reader's open asks the store for
+		// a book that only its first prompt's row will register.
+		f.deps.Feed.NoteFreshBook(ws)
 	}
 	log.Debug(opBringUp, "decided how the session comes up", dlog.Context{
 		"fresh": src.Fresh, "vendor_session_id": src.VendorSessionID, "rebind": src.Rebind,

@@ -475,6 +475,27 @@ func (r *resolver) KeepNewestPage(ctx context.Context, ws ids.WorkspaceID) error
 	return nil
 }
 
+// NoteFreshBook marks the root feed's book as a NEW conversation's: its newest
+// page is known to hold nothing and to be the conversation's start. A reader
+// waiting for a source is served what the feed holds, and the session's own
+// live entries draw the conversation from its first row; once one has, the
+// next open reads the newest page (liveSince), which by then the store holds.
+func (r *resolver) NoteFreshBook(ws ids.WorkspaceID) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s := r.state(ws)
+	f := r.feed(s, feedid.Feed{Root: true})
+	f.book.newestLoaded = true
+	f.book.liveSince = false
+	f.book.floor = true
+	f.book.after = nil
+	f.book.gapAfter, f.book.gapFloor = nil, ""
+	f.book.awaitingSource = false
+	r.logger(ws).Info("daemon.feed.fresh_book",
+		"the session comes up on a new conversation; its book is known empty, so no reader's open asks the store for it",
+		dlog.Context{"feed": f.key})
+}
+
 // kickWaitingFeed loads F's newest page for the readers waiting on it and
 // pushes it to them. The load runs OFF the caller's goroutine: the caller may
 // be the session watcher or the fleet, and the read reaches back into the
