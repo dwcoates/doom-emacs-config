@@ -80,7 +80,6 @@
 (declare-function agent-repl--panels-arm-arrivals "panels" ())
 (declare-function agent-repl-host-subscribe "host" (conn ws ref))
 (declare-function agent-repl-host-rename "host" (old new))
-(declare-function agent-repl-host-own-selection-p "host" (id))
 (declare-function agent-repl-link-primary "daemon-link" ())
 (defvar agent-repl-host-last-selected-id)
 (defvar agent-repl-host-reselect-pending)
@@ -829,15 +828,8 @@ frame; host.el clears it when its re-select is acknowledged."
       (agent-repl--log row-scope "elisp.roster.current: relink-pending id=%s dir=%s"
                        id agent-repl-host-reselect-pending)
       nil)
-     ;; EMACS'S OWN SELECTION, answered or not.  The roster stream and the
-     ;; SelectWorkspace answer travel on different sockets, so the push
-     ;; stamping a selection Emacs just sent can be read BEFORE its answer;
-     ;; comparing against the last ANSWERED id alone mistook it for a
-     ;; request and took the frame back to a workspace the user had already
-     ;; switched past (`s-}' twice under load).
-     ((or (agent-repl-host-own-selection-p id)
-          (equal id (and (boundp 'agent-repl-host-last-selected-id)
-                         agent-repl-host-last-selected-id)))
+     ((equal id (and (boundp 'agent-repl-host-last-selected-id)
+                     agent-repl-host-last-selected-id))
       (agent-repl--log row-scope "elisp.roster.current: ours id=%s" id)
       nil)
      (t
