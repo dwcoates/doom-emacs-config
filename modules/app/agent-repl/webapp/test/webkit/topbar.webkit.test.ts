@@ -12,6 +12,16 @@
  * to whole pixels while it paints the background where layout put it. The
  * test reads the painted pixels at fractional placements and both screen
  * densities, and compares the glyph's horizontal centroid with the disc's.
+ *
+ * THE RIGHT-HAND CHIPS STAND ONE MEASURE APART, and the wifi chip is centered
+ * between its neighbors by being one of them. Measured before the change:
+ * 21.2px between most chips' text, 13px from the context figure to the wifi
+ * disc and 21px from the disc to the warning chip.
+ *
+ * THE RIGHT-HAND TEXT IS THE LEFT-HAND TEXT'S SIZE. Measured: every cell on
+ * both sides computes to 13.6px (0.85rem), the yellow context figure
+ * included, so the owner's "the right looks bigger" was a perception and no
+ * size was changed; these pin the equality.
  */
 import path from "node:path";
 import { readFile } from "node:fs/promises";
@@ -19,7 +29,7 @@ import { fileURLToPath } from "node:url";
 import { webkit, type Browser, type Page } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { bundlePage } from "./bundle";
-import type { TopbarPage } from "./topbar-page";
+import type { StripMeasure, TopbarPage } from "./topbar-page";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -32,6 +42,13 @@ const CENTERING_TOLERANCE_PX = 0.1;
 
 /** Fractional placements of the chip, in CSS px past a whole pixel. */
 const OFFSETS = [0, 0.25, 0.5, 0.75];
+
+/** The space between each right-hand cell's visible content and the next one's. */
+const spacings = (m: StripMeasure): number[] =>
+  m.cells.slice(1).map((cell, i) => Math.round((cell.left - (m.cells[i]?.right ?? Number.NaN)) * 100) / 100);
+
+/** The right group's spacing before the 2026-10-02 change, between text chips. */
+const OLD_SPACING_PX = 21.2;
 
 /** The page and stylesheet one screen density's tests run against. */
 interface Rig {
@@ -111,6 +128,61 @@ describe.each([1, 2])("the topbar in WebKit at %ix", (dpr) => {
 
     // Assert
     expect(Math.abs(c.glyph - c.disc)).toBeLessThanOrEqual(CENTERING_TOLERANCE_PX);
+  });
+
+  it.each([true, false])("stands every right-hand chip the same distance from the next (session %s)", async (session) => {
+    // Arrange / Act
+    const m = await rig.page.evaluate((s) => window.topbarPage.drawStrip(s), session);
+
+    // Assert
+    expect(new Set(spacings(m)).size).toBe(1);
+  });
+
+  it("draws one cell of every right-hand kind", async () => {
+    const m = await rig.page.evaluate(() => window.topbarPage.drawStrip(true));
+    expect(m.cells.map((c) => c.cell)).toEqual([
+      "topbar-model",
+      "topbar-mode",
+      "topbar-fast",
+      "topbar-context",
+      "topbar-wifi",
+      "topbar-warnings",
+    ]);
+  });
+
+  it("stands the right-hand chips 30% closer than before", async () => {
+    // Arrange / Act
+    const m = await rig.page.evaluate(() => window.topbarPage.drawStrip(true));
+
+    // Assert
+    expect(spacings(m)[0]).toBeCloseTo(OLD_SPACING_PX * 0.7, 0);
+  });
+
+  it("centers the wifi chip between the context chip and the warning chip", async () => {
+    // Arrange
+    const m = await rig.page.evaluate(() => window.topbarPage.drawStrip(true));
+    const at = (name: string) => m.cells.find((c) => c.cell === name);
+    const [context, wifi, warnings] = [at("topbar-context"), at("topbar-wifi"), at("topbar-warnings")];
+
+    // Act
+    const before = (wifi?.left ?? Number.NaN) - (context?.right ?? Number.NaN);
+    const after = (warnings?.left ?? Number.NaN) - (wifi?.right ?? Number.NaN);
+
+    // Assert
+    expect(before).toBeCloseTo(after, 2);
+  });
+
+  it("draws every right-hand cell's text at the account label's size", async () => {
+    // Arrange / Act
+    const m = await rig.page.evaluate(() => window.topbarPage.drawStrip(true));
+
+    // Assert
+    expect(new Set([m.accountFontSize, ...m.cells.map((c) => c.fontSize)])).toEqual(new Set([m.accountFontSize]));
+  });
+
+  it("draws the yellow context figure at the account label's size", async () => {
+    const m = await rig.page.evaluate(() => window.topbarPage.drawStrip(true));
+    expect(m.cells.find((c) => c.cell === "topbar-context")?.fontSize).toBe(m.accountFontSize);
   });
 
   it("writes no error while drawing", async () => {
