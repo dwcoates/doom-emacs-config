@@ -66,8 +66,7 @@ func goModuleUnits(l Layout, s roster.Suite) (Units, error) {
 
 func goModuleUnitsForPackages(l Layout, s roster.Suite, dir string, pkgs []string) (Units, error) {
 	covRoot := filepath.Join(l.Work, "cover", s.Name)
-	vet := spec(s.Name+":vet", s.Name, dir, append(append([]string{"go", "vet"}, goTestVetFlags...), "./..."))
-	u := Units{Atomic: []run.Spec{vet}}
+	u := Units{Atomic: []run.Spec{goVet(s.Name, dir)}}
 	var reportDeps []string
 	hasTests := false
 	prebuildConfigured := false

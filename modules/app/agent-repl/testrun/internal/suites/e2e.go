@@ -5,21 +5,27 @@ import (
 	"path/filepath"
 	"strconv"
 
+	"agentrepl/testrun/internal/run"
 	"agentrepl/testrun/roster"
 )
 
 // e2eUnits is the root package split the one Go way (goPkg), with a build
 // that also installs the npm deps and fills the shared prebuilt directory
 // every chunk reads; every other package of the e2e module is an ordinary Go
-// package. The e2e suite runs without coverage, as it always has here.
+// package. The module is vetted like every Go module (goVet). The e2e suite
+// runs without coverage, as it always has here.
 func e2eUnits(l Layout, s roster.Suite) (Units, error) {
 	dir := l.resolve(s.Path)
 	pkgs, err := goTestedPackages(dir)
 	if err != nil {
 		return Units{}, err
 	}
+	return e2eUnitsForPackages(l, s, dir, pkgs)
+}
+
+func e2eUnitsForPackages(l Layout, s roster.Suite, dir string, pkgs []string) (Units, error) {
 	work := filepath.Join(l.Work, "e2e")
-	var u Units
+	u := Units{Atomic: []run.Spec{goVet(s.Name, dir)}}
 	for i, rel := range pkgs {
 		p := goPkg{Suite: s.Name, Module: dir, Rel: rel, Bin: filepath.Join(work, fmt.Sprintf("%03d.test", i))}
 		if rel == "." {
