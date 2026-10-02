@@ -943,3 +943,21 @@ func TestAFreshBooksFirstLiveEntryMakesTheNextOpenRead(t *testing.T) {
 		t.Fatalf("reads = %d, want the newest page read once the book holds a row", got)
 	}
 }
+
+func TestAFreshBooksFirstReadPagesOlderFromItsOwnBoundary(t *testing.T) {
+	// Arrange: the fresh book took live rows; its first read is a page of a
+	// longer book than the page holds.
+	h := newHarness(t)
+	store := h.mainBook(3, promptsBook(5))
+	h.resolver.NoteFreshBook(testWorkspace)
+	h.deliverPromptAt("turn-4", "prompt turn-4", 500)
+	h.openPage(rootFeed(), "reader-1")
+
+	// Act.
+	h.nextPage("reader-1")
+
+	// Assert: the walk reads below the first page.
+	if got := store.lastRead().after; got != "p-2" {
+		t.Fatalf("last read after %q, want p-2", got)
+	}
+}

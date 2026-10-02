@@ -349,7 +349,10 @@ func (r *resolver) load(ctx context.Context, plan loadPlan) (loaded, error) {
 	// A RE-READ NEWEST PAGE MOVES ONLY THE TOP: the older pages a walk
 	// already loaded stay loaded, and the next older page is still read from
 	// below the oldest of them.
-	reread := plan.newest && f.book.newestLoaded
+	// A newest page over a book no load has bounded yet (a fresh book, known
+	// empty until its first live row) is its FIRST load: it states where the
+	// next older page is read from and whether the start was reached.
+	reread := plan.newest && f.book.newestLoaded && len(f.book.bounds) > 0
 	reachedStart := !reread && page.GetFloor() != nil
 	switch {
 	case plan.gap:
