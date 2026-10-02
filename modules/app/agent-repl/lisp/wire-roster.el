@@ -29,6 +29,7 @@
 (declare-function agent-repl-wire--decode-bool "wire-common")
 (declare-function agent-repl-wire--decode-empty "wire-common")
 (declare-function agent-repl-wire--decode-int64 "wire-common")
+(declare-function agent-repl-wire--decode-uint32 "wire-common")
 (declare-function agent-repl-wire--decode-message "wire-common")
 (declare-function agent-repl-wire--decode-oneof "wire-common")
 (declare-function agent-repl-wire--decode-optional-message "wire-common")
@@ -56,6 +57,16 @@ DISPLAY ONLY — the repo key or task id beside the header is the identity."
     (agent-repl-wire--decoded
      "RosterLabel"
      (list :text (agent-repl-wire--decode-string "RosterLabel" 'text object)))))
+
+(defun agent-repl-wire-decode-roster-section-count (value)
+  "Decode VALUE as `RosterSectionCount', a plist `(:workspaces)'.
+How many workspaces the section holds; the webview draws it while folded."
+  (let ((object (agent-repl-wire--object "RosterSectionCount" value)))
+    (agent-repl-wire--check-keys "RosterSectionCount" object '(workspaces))
+    (agent-repl-wire--decoded
+     "RosterSectionCount"
+     (list :workspaces (agent-repl-wire--decode-uint32
+                        "RosterSectionCount" 'workspaces object)))))
 
 (defun agent-repl-wire-decode-roster-task-done (value)
   "Decode VALUE as `RosterTaskDone', a plist `(:done)'."
@@ -558,16 +569,23 @@ the message tree preserved as the contract spells it."
   "Decode `RosterSectionHeader''s `label' field VALUE as a RosterLabel."
   (agent-repl-wire-decode-roster-label value))
 
+(defun agent-repl-wire-decode-roster-section-header-count (value)
+  "Decode `RosterSectionHeader''s `count' field VALUE as a RosterSectionCount."
+  (agent-repl-wire-decode-roster-section-count value))
+
 (defun agent-repl-wire-decode-roster-section-header (value)
-  "Decode VALUE as `RosterSectionHeader', a plist `(:label)'.
+  "Decode VALUE as `RosterSectionHeader', a plist `(:label :count)'.
 Fold state is WEBVIEW-LOCAL and is no element of this view."
   (let ((object (agent-repl-wire--object "RosterSectionHeader" value)))
-    (agent-repl-wire--check-keys "RosterSectionHeader" object '(label))
+    (agent-repl-wire--check-keys "RosterSectionHeader" object '(label count))
     (agent-repl-wire--decoded
      "RosterSectionHeader"
      (list :label (agent-repl-wire--decode-message
                    "RosterSectionHeader" 'label object
-                   #'agent-repl-wire-decode-roster-section-header-label)))))
+                   #'agent-repl-wire-decode-roster-section-header-label)
+           :count (agent-repl-wire--decode-message
+                   "RosterSectionHeader" 'count object
+                   #'agent-repl-wire-decode-roster-section-header-count)))))
 
 (defun agent-repl-wire-decode-roster-task-section-header-label (value)
   "Decode `RosterTaskSectionHeader''s `label' field VALUE."

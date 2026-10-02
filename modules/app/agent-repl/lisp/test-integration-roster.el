@@ -90,11 +90,11 @@ OVERRIDES replaces top-level entries (notably `current')."
       . ((sections
           . [((key . ((repository . ((id . "repo-itest")
                                      (dir . ,agent-repl-itest-roster--repo-dir)))))
-              (header . ((label . ((text . "itest-repo")))))
+              (header . ((label . ((text . "itest-repo"))) (count . ((workspaces . 1)))))
               (rows . ((rows . ,(vconcat rows))))
              (expanded . ()))])))
      (task . ((sections . [])))
-     (recentlyMerged . ((header . ((label . ((text . "recently merged")))))
+     (recentlyMerged . ((header . ((label . ((text . "recently merged"))) (count . ((workspaces . 1)))))
                          (rows . ((rows . []))))))))
 
 (defun agent-repl-itest-roster--push (daemon roster)
@@ -129,15 +129,15 @@ order apart from declaration order."
   `((repository
      . ((sections
          . [((key . ((repository . ((id . "repo-a") (dir . ,(agent-repl-itest--fixture-dir "itest-repo-a"))))))
-             (header . ((label . ((text . "repo-a")))))
+             (header . ((label . ((text . "repo-a"))) (count . ((workspaces . 1)))))
              (rows . ((rows . ,(vconcat rows-a))))
              (expanded . ()))
             ((key . ((repository . ((id . "repo-b") (dir . ,(agent-repl-itest--fixture-dir "itest-repo-b"))))))
-             (header . ((label . ((text . "repo-b")))))
+             (header . ((label . ((text . "repo-b"))) (count . ((workspaces . 1)))))
              (rows . ((rows . ,(vconcat rows-b))))
              (expanded . ()))])))
     (task . ((sections . [])))
-    (recentlyMerged . ((header . ((label . ((text . "recently merged")))))
+    (recentlyMerged . ((header . ((label . ((text . "recently merged"))) (count . ((workspaces . 1)))))
                         (rows . ((rows . [])))))))
 
 (defun agent-repl-itest-roster--row-missing (id name status omit)
@@ -715,7 +715,7 @@ tucked ahead of the repo section would land its tab in the wrong slot."
          daemon (agent-repl-itest-roster--roster
                  (list (agent-repl-itest-roster--row "ws-repo" "ws-repo" 'ready))
                  `(recentlyMerged
-                   . ((header . ((label . ((text . "recently merged")))))
+                   . ((header . ((label . ((text . "recently merged"))) (count . ((workspaces . 1)))))
                       (rows . ((rows . ,(vector merged-row))))))))
         ;; Assert.
         (agent-repl-itest--wait-until
@@ -1580,7 +1580,7 @@ pinned directly."
            . ((sections
                . [((key . ((repository . ((id . "repo-itest")
                                           (dir . ,agent-repl-itest-roster--repo-dir)))))
-                   (header . ((label . ((text . "itest-repo")))))
+                   (header . ((label . ((text . "itest-repo"))) (count . ((workspaces . 1)))))
                    (rows
                     . ((rows
                         . [((workspace . ((workspace . ((id . "ws-x")
@@ -1593,7 +1593,7 @@ pinned directly."
                             (detail . nil)
                             (closed . ((closed . :false))))]))))])))
           (task . ((sections . [])))
-          (recentlyMerged . ((header . ((label . ((text . "recently merged")))))
+          (recentlyMerged . ((header . ((label . ((text . "recently merged"))) (count . ((workspaces . 1)))))
                              (rows . ((rows . [])))))))))
    :type 'agent-repl-wire-error))
 
