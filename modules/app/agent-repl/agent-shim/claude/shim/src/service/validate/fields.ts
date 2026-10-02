@@ -221,15 +221,3 @@ export function validateSessionColdRemediation(
   }
 }
 
-/**
- * A page budget.
- *
- * Zero is refused rather than defaulted: a page of nothing answers no question,
- * and silently substituting a default would let a caller with a bug receive a
- * page it never asked for and treat it as the whole history.
- */
-export function validatePageSize(value: number, path: string): void {
-  if (value === 0) {
-    throw invalidArgument(`${path} is 0; a page budget of nothing is not a request`);
-  }
-}

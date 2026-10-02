@@ -142,7 +142,6 @@ describe("createStoreClient", () => {
     const opened = await client.openAgentSession(
       create(storev1.OpenAgentSessionRequestSchema, {
         agent: create(conversationv1.AgentIdSchema, { value: "a" }),
-        pageSize: 10,
       }),
     );
 

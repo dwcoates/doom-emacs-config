@@ -1150,9 +1150,9 @@ func agentID(value string) *conversationv1.AgentId {
 // agent MUST already name a book: a `unknown_agent` refusal fails the subject
 // here, because a one-shot read that names an unregistered agent is asserting
 // against a book that was never written.
-func openBook(ctx context.Context, t *testing.T, c storev1connect.ShimStoreClient, agent string, pageSize uint32) *storev1.OpenAgentSessionSuccess {
+func openBook(ctx context.Context, t *testing.T, c storev1connect.ShimStoreClient, agent string) *storev1.OpenAgentSessionSuccess {
 	t.Helper()
-	ok, known := openBookIfKnown(ctx, t, c, agent, pageSize)
+	ok, known := openBookIfKnown(ctx, t, c, agent)
 	if !known {
 		t.Fatalf("OpenAgentSession(%s) refused: the agent names no book of this store", agent)
 	}
@@ -1168,11 +1168,10 @@ func openBook(ctx context.Context, t *testing.T, c storev1connect.ShimStoreClien
 // `unknown_agent`. For a POLLING reader that refusal is indistinguishable from
 // "no lines yet" and is the state it is waiting out; every other failure arm is
 // a real defect and fails the subject.
-func openBookIfKnown(ctx context.Context, t *testing.T, c storev1connect.ShimStoreClient, agent string, pageSize uint32) (*storev1.OpenAgentSessionSuccess, bool) {
+func openBookIfKnown(ctx context.Context, t *testing.T, c storev1connect.ShimStoreClient, agent string) (*storev1.OpenAgentSessionSuccess, bool) {
 	t.Helper()
 	res, err := c.OpenAgentSession(ctx, connect.NewRequest(&storev1.OpenAgentSessionRequest{
-		Agent:    agentID(agent),
-		PageSize: pageSize,
+		Agent: agentID(agent),
 	}))
 	if err != nil {
 		t.Fatalf("OpenAgentSession(%s): %v", agent, err)
@@ -1192,18 +1191,18 @@ func openBookIfKnown(ctx context.Context, t *testing.T, c storev1connect.ShimSto
 
 // bookLines walks a whole book, newest first, across as many ReadAgentPage
 // calls as the boundary arm demands.
-func bookLines(ctx context.Context, t *testing.T, c storev1connect.ShimStoreClient, agent string, pageSize uint32) []*storev1.StoreLineAt {
+func bookLines(ctx context.Context, t *testing.T, c storev1connect.ShimStoreClient, agent string) []*storev1.StoreLineAt {
 	t.Helper()
-	lines, _ := bookLinesIfKnown(ctx, t, c, agent, pageSize)
+	lines, _ := bookLinesIfKnown(ctx, t, c, agent)
 	return lines
 }
 
 // bookLinesIfKnown is bookLines for a POLLING reader: an agent the store has
 // never heard of yields no lines and known=false rather than failing, because
 // the register is written by the sidecar's first committed batch.
-func bookLinesIfKnown(ctx context.Context, t *testing.T, c storev1connect.ShimStoreClient, agent string, pageSize uint32) ([]*storev1.StoreLineAt, bool) {
+func bookLinesIfKnown(ctx context.Context, t *testing.T, c storev1connect.ShimStoreClient, agent string) ([]*storev1.StoreLineAt, bool) {
 	t.Helper()
-	opened, known := openBookIfKnown(ctx, t, c, agent, pageSize)
+	opened, known := openBookIfKnown(ctx, t, c, agent)
 	if !known {
 		return nil, false
 	}
@@ -1212,7 +1211,6 @@ func bookLinesIfKnown(ctx context.Context, t *testing.T, c storev1connect.ShimSt
 	for more != nil {
 		res, err := c.ReadAgentPage(ctx, connect.NewRequest(&storev1.ReadAgentPageRequest{
 			Book:     agentID(agent),
-			PageSize: pageSize,
 			Position: &storev1.ReadAgentPageRequest_After{After: more.GetLastItem()},
 		}))
 		if err != nil {
@@ -1242,7 +1240,7 @@ func awaitBookLines(ctx context.Context, t *testing.T, c storev1connect.ShimStor
 	defer tick.Stop()
 	var last []*storev1.StoreLineAt
 	for {
-		last, _ = bookLinesIfKnown(ctx, t, c, agent, 200)
+		last, _ = bookLinesIfKnown(ctx, t, c, agent)
 		if len(last) >= want {
 			return last
 		}
@@ -1267,7 +1265,7 @@ func awaitBookUnits(ctx context.Context, t *testing.T, c storev1connect.ShimStor
 	tick := time.NewTicker(pollTick)
 	defer tick.Stop()
 	for {
-		lines, _ := bookLinesIfKnown(ctx, t, c, agent, 200)
+		lines, _ := bookLinesIfKnown(ctx, t, c, agent)
 		held := map[string]bool{}
 		for _, at := range lines {
 			if a := activityOf(at.GetLine()); a != nil {
@@ -1296,9 +1294,9 @@ func awaitBookUnits(ctx context.Context, t *testing.T, c storev1connect.ShimStor
 // watchBook opens a session and follows its tail. A delivered frame is a
 // legitimate synchronization primitive; the returned channel is closed when the
 // stream ends.
-func watchBook(ctx context.Context, t *testing.T, c storev1connect.ShimStoreClient, agent string, pageSize uint32) (*storev1.OpenAgentSessionSuccess, <-chan *storev1.StoreLineAt) {
+func watchBook(ctx context.Context, t *testing.T, c storev1connect.ShimStoreClient, agent string) (*storev1.OpenAgentSessionSuccess, <-chan *storev1.StoreLineAt) {
 	t.Helper()
-	opened := openBook(ctx, t, c, agent, pageSize)
+	opened := openBook(ctx, t, c, agent)
 	stream, err := c.WatchAgentSession(ctx, connect.NewRequest(&storev1.WatchAgentSessionRequest{
 		Watch: opened.GetWatch(),
 	}))

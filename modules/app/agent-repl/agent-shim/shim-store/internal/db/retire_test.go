@@ -221,7 +221,7 @@ func TestNoPageServesARetiredLine(t *testing.T) {
 	healBatch(t, d, 200, 2, nil, retirement("prompt:u1", 2))
 
 	// Act
-	opened, err := d.OpenPage(ctx(), "agent-1", 10, nil)
+	opened, err := d.OpenPage(ctx(), "agent-1", Repaint())
 
 	// Assert
 	if err != nil {
@@ -236,7 +236,7 @@ func TestAReplayServesARetirementAsARetirement(t *testing.T) {
 	// Arrange: a watch pinned before the retirement must still be told.
 	d, _ := newStore(t)
 	legacyPrompt(t, d, "prompt:u1")
-	opened, err := d.OpenPage(ctx(), "agent-1", 10, nil)
+	opened, err := d.OpenPage(ctx(), "agent-1", Repaint())
 	if err != nil {
 		t.Fatalf("OpenPage: %v", err)
 	}
@@ -258,7 +258,7 @@ func TestARetiredLinesPointerStaysAValidKnownThrough(t *testing.T) {
 	// Arrange
 	d, _ := newStore(t)
 	legacyPrompt(t, d, "prompt:u1")
-	opened, err := d.OpenPage(ctx(), "agent-1", 10, nil)
+	opened, err := d.OpenPage(ctx(), "agent-1", Repaint())
 	if err != nil {
 		t.Fatalf("OpenPage: %v", err)
 	}
@@ -266,7 +266,7 @@ func TestARetiredLinesPointerStaysAValidKnownThrough(t *testing.T) {
 	healBatch(t, d, 200, 2, nil, retirement("prompt:u1", 2))
 
 	// Act
-	_, err = d.OpenPage(ctx(), "agent-1", 10, pointer)
+	_, err = d.OpenPage(ctx(), "agent-1", CatchUp(pointer))
 
 	// Assert
 	if err != nil {

@@ -42,7 +42,7 @@ func TestPagesAndCursorsSurviveASigtermRestart(t *testing.T) {
 	defer cancelAfter()
 	revived := store.client()
 
-	page := openSession(after, t, revived, "main", 10, nil)
+	page := openSession(after, t, revived, "main", nil)
 	assertTexts(t, "the book after a restart", pageTexts(page.GetPage()), []string{"L2", "L1"})
 
 	got := sidecarCursors(after, t, revived, nil)
@@ -63,7 +63,7 @@ func TestWatchTokensDoNotSurviveARestart(t *testing.T) {
 	shim.write(ctx, t,
 		shim.agentEntry("w-token-1", "u-token-1", frameLine(agentID("main"), responseFrame("main", "act-1", "L1"))),
 	)
-	opened := openSession(ctx, t, store.client(), "main", 10, nil)
+	opened := openSession(ctx, t, store.client(), "main", nil)
 	staleToken := opened.GetWatch()
 
 	// Act.
@@ -88,7 +88,7 @@ func TestReopeningAfterARestartRecoversTheTail(t *testing.T) {
 	shim.write(ctx, t,
 		shim.agentEntry("w-reopen-1", "u-reopen-1", frameLine(agentID("main"), responseFrame("main", "act-1", "L1"))),
 	)
-	before := openSession(ctx, t, store.client(), "main", 10, nil)
+	before := openSession(ctx, t, store.client(), "main", nil)
 	highWater := &storev1.StoreItemPointer{Value: pagePointers(before.GetPage())[0]}
 
 	// Act.
@@ -96,7 +96,7 @@ func TestReopeningAfterARestartRecoversTheTail(t *testing.T) {
 	after, cancelAfter := callContext(t)
 	defer cancelAfter()
 	revived := store.client()
-	reopened := openSession(after, t, revived, "main", 10, highWater)
+	reopened := openSession(after, t, revived, "main", highWater)
 	stream := watchStream(after, t, revived, reopened.GetWatch())
 	defer testclose.OrFail(t, stream)
 

@@ -154,9 +154,58 @@ export type AgentTailFrame =
  * only true if the caller never opens the two separately. `close()` releases
  * the tail; it ends nothing on the agent's side.
  */
+/**
+ * What an opening page carries: the `opening` arm every shim.v1 open states.
+ *
+ * NO CALLER PICKS A PAGE SIZE. A page is the store's page — one size for the
+ * whole stack, owned by the store and stated nowhere else — so an opening says
+ * only WHICH entries, never how many.
+ *
+ *   - `repaint`: the newest store page.
+ *   - `knownThrough`: only the entries first written after the caller's own
+ *     high-water mark.
+ *   - `tailOnly`: no entries at all. The tail begins after the newest entry as
+ *     of the open, and history is read only when a reader asks for it.
+ */
+export type AgentOpening =
+  | { readonly case: "repaint" }
+  | { readonly case: "knownThrough"; readonly value: conversationv1.HistoryPointer }
+  | { readonly case: "tailOnly" };
+
+/** The repaint: the newest store page. */
+export const REPAINT: AgentOpening = { case: "repaint" };
+
+/**
+ * A shim.v1 request's `opening` oneof as the persistence layer's arm. UNSET is
+ * the repaint, as every shim.v1 open defines it.
+ */
+export function openingOf(
+  opening:
+    | { readonly case: "knownThrough"; readonly value: conversationv1.HistoryPointer }
+    | { readonly case: "tailOnly"; readonly value: unknown }
+    | { readonly case: undefined; readonly value?: undefined },
+): AgentOpening {
+  switch (opening.case) {
+    case "knownThrough":
+      return { case: "knownThrough", value: opening.value };
+    case "tailOnly":
+      return { case: "tailOnly" };
+    default:
+      return REPAINT;
+  }
+}
+
 export interface AgentPageSession {
   /** The opening page, newest first. */
   readonly page: conversationv1.HistoryPage;
+  /**
+   * Whether the open found NOTHING TO SHOW: the opening page is empty and,
+   * under a `tailOnly` opening (whose page is empty by request), the book
+   * itself held nothing as of the open. A consumer that refuses an empty
+   * unannounced book reads this, never the page alone, because a tail-only
+   * page says nothing about the book.
+   */
+  readonly foundNothing: boolean;
   /**
    * Every entry written after the page, in order, each with its pointer, and
    * every retirement of a line the consumer may have drawn.
@@ -349,8 +398,8 @@ export interface Persistence {
   /**
    * Open one agent's book: a page plus the tail pinned after it.
    *
-   * `knownThrough` is the CALLER'S own high-water mark: unset repaints, set
-   * returns only entries newer than it.
+   * `opening` says which entries the page carries ({@link AgentOpening}); the
+   * page is never bigger than the store's own page.
    *
    * `known` is the CALLER'S belief that the agent exists — the producer's own
    * answer. The store refuses `unknown_agent` for a book it holds no row for,
@@ -362,8 +411,7 @@ export interface Persistence {
    */
   openAgentPage(
     agent: conversationv1.AgentId,
-    pageSize: number,
-    knownThrough?: conversationv1.HistoryPointer,
+    opening: AgentOpening,
     known?: () => boolean,
   ): Promise<AgentPageSession>;
   /**
@@ -395,14 +443,12 @@ export interface Persistence {
    */
   readFirstPage(
     agent: conversationv1.AgentId,
-    pageSize: number,
-    knownThrough?: conversationv1.HistoryPointer,
+    opening: AgentOpening,
     known?: () => boolean,
   ): Promise<conversationv1.HistoryPage>;
   /** An OLDER page of one book, walking down from a pointer already served. */
   readAgentPage(
     agent: conversationv1.AgentId,
-    pageSize: number,
     after: conversationv1.HistoryPointer,
   ): Promise<conversationv1.HistoryPage>;
   /**
@@ -413,7 +459,6 @@ export interface Persistence {
    */
   readPageThrough(
     agent: conversationv1.AgentId,
-    pageSize: number,
     through: conversationv1.ConversationThrough,
   ): Promise<conversationv1.HistoryPage>;
   /**

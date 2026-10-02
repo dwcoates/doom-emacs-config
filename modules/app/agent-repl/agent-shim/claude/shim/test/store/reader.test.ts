@@ -14,6 +14,8 @@ import { conversationv1, storev1 } from "../../src/proto.js";
 import { createStoreClient, type StoreClient } from "../../src/store/client.js";
 import {
   PersistenceError,
+  REPAINT,
+  type AgentOpening,
   type AgentPageSession,
   type AgentTailFrame,
 } from "../../src/store/persistence.js";
@@ -26,7 +28,7 @@ import {
 } from "../../src/store/reader.js";
 import { createPersistence } from "../../src/store/writer.js";
 import { producerId } from "../../src/store/keys.js";
-import { startFakeStore, type FakeStore } from "../fakes/store-server.js";
+import { FAKE_STORE_PAGE_SIZE, startFakeStore, type FakeStore, type FakeStoreOptions } from "../fakes/store-server.js";
 import {
   agent,
   bashTailEntry,
@@ -51,6 +53,16 @@ async function hangGuard(): Promise<string> {
 }
 
 const PRODUCER = producerId("vendor-session-1");
+
+/** A catch-up opening from a pointer the fixture served. */
+function knownThrough(at: conversationv1.HistoryPointer | undefined): AgentOpening {
+  if (at === undefined) throw new Error("the fixture served no pointer to stand a mark on");
+  return { case: "knownThrough", value: at };
+}
+
+/** The tail-only opening: no entries, the tail from now on. */
+const TAIL_ONLY: AgentOpening = { case: "tailOnly" };
+
 const BOOK = agent("book-1");
 
 let store: FakeStore | undefined;
@@ -60,9 +72,12 @@ afterEach(async () => {
   store = undefined;
 });
 
-/** A fake store with `count` rows already in `book-1`, and a live persistence. */
-async function seeded(name: string, count: number) {
-  const started = await startFakeStore(socketPathForTest(name));
+/**
+ * A fake store with `count` rows already in `book-1`, and a live persistence.
+ * `options` shapes the fake — its own page size, never a request's.
+ */
+async function seeded(name: string, count: number, options: FakeStoreOptions = {}) {
+  const started = await startFakeStore(socketPathForTest(name), options);
   store = started;
   const client = createStoreClient(started.socketPath);
   const plane = createPersistence({
@@ -94,7 +109,7 @@ describe("openAgentPage", () => {
   it("serves the newest entries first", async () => {
     const { plane } = await seeded("page-order", 3);
 
-    const session = await plane.openAgentPage(BOOK, 10);
+    const session = await plane.openAgentPage(BOOK, REPAINT);
     session.close();
 
     expect(session.page.entries).toHaveLength(3);
@@ -104,16 +119,16 @@ describe("openAgentPage", () => {
   it("reports a floor when the page reached the oldest retained entry", async () => {
     const { plane } = await seeded("page-floor", 2);
 
-    const session = await plane.openAgentPage(BOOK, 10);
+    const session = await plane.openAgentPage(BOOK, REPAINT);
     session.close();
 
     expect(session.page.boundary.case).toBe("floor");
   });
 
   it("reports more, with the pointer to walk older from, when the page is short", async () => {
-    const { plane } = await seeded("page-more", 3);
+    const { plane } = await seeded("page-more", 3, { pageSize: 2 });
 
-    const session = await plane.openAgentPage(BOOK, 2);
+    const session = await plane.openAgentPage(BOOK, REPAINT);
     session.close();
 
     expect(session.page.boundary.case).toBe("more");
@@ -126,7 +141,7 @@ describe("openAgentPage", () => {
     plane.write([promptEntry(BOOK, "turn-5", "hello")]);
     await plane.flush();
 
-    const session = await plane.openAgentPage(BOOK, 10);
+    const session = await plane.openAgentPage(BOOK, REPAINT);
     session.close();
 
     expect(session.page.entries[0]?.turn?.value).toBe("turn-5");
@@ -135,7 +150,7 @@ describe("openAgentPage", () => {
   it("serves an entry whose row no write stamped with no turn", async () => {
     const { plane } = await seeded("page-no-turn", 1);
 
-    const session = await plane.openAgentPage(BOOK, 10);
+    const session = await plane.openAgentPage(BOOK, REPAINT);
     session.close();
 
     expect(session.page.entries[0]?.turn).toBeUndefined();
@@ -143,11 +158,11 @@ describe("openAgentPage", () => {
 
   it("bounds the page by the caller's own high-water mark", async () => {
     const { plane } = await seeded("page-known-through", 3);
-    const first = await plane.openAgentPage(BOOK, 10);
+    const first = await plane.openAgentPage(BOOK, REPAINT);
     first.close();
     const newest = first.page.entries[0]?.at;
 
-    const second = await plane.openAgentPage(BOOK, 10, newest);
+    const second = await plane.openAgentPage(BOOK, knownThrough(newest));
     second.close();
 
     expect(second.page.entries).toHaveLength(0);
@@ -156,22 +171,30 @@ describe("openAgentPage", () => {
   it("passes the store's pointer through verbatim", async () => {
     const { started, plane } = await seeded("pointer-passthrough", 1);
 
-    const session = await plane.openAgentPage(BOOK, 10);
+    const session = await plane.openAgentPage(BOOK, REPAINT);
     session.close();
 
     expect(session.page.entries[0]?.at?.value).toBe(started.book("book-1")[0]?.at?.value);
   });
 
-  it("serves a page of zero entries when the caller asks for none", async () => {
-    const { plane } = await seeded("page-size-zero", 2);
+  it("serves a tail-only open no entries at all", async () => {
+    const { plane } = await seeded("tail-only-empty", 2);
 
-    const session = await plane.openAgentPage(BOOK, 0);
+    const session = await plane.openAgentPage(BOOK, TAIL_ONLY);
     session.close();
 
     expect(session.page.entries).toHaveLength(0);
+  });
+
+  it("reports the floor for a tail-only open's empty page", async () => {
+    const { plane } = await seeded("tail-only-floor", 2);
+
+    const session = await plane.openAgentPage(BOOK, TAIL_ONLY);
+    session.close();
+
     // A `more` boundary is UNBUILDABLE for an empty page: `HistoryMore.
     // last_entry` is not optional and an empty page names no entry to walk from.
-    // So a page of zero reports the floor, and the caller follows the tail.
+    // So an empty page reports the floor, and the caller follows the tail.
     expect(session.page.boundary.case).toBe("floor");
   });
 
@@ -187,7 +210,7 @@ describe("openAgentPage", () => {
     plane.write([promptEntry(BOOK, "turn-1", "hello")]);
     await plane.flush();
 
-    const session = await plane.openAgentPage(BOOK, 10);
+    const session = await plane.openAgentPage(BOOK, REPAINT);
     session.close();
 
     expect(session.page.entries[0]?.entry?.entry.case).toBe("userPrompt");
@@ -213,7 +236,7 @@ describe("openAgentPage on a book with no rows yet", () => {
     const { plane } = await empty("deferred-empty-page");
 
     // Act.
-    const session = await plane.openAgentPage(BOOK, 10, undefined, () => true);
+    const session = await plane.openAgentPage(BOOK, REPAINT, () => true);
     session.close();
 
     // Assert.
@@ -223,7 +246,7 @@ describe("openAgentPage on a book with no rows yet", () => {
   it("stands the tail on the book's first row", async () => {
     // Arrange.
     const { plane } = await empty("deferred-tail-stands");
-    const session = await plane.openAgentPage(BOOK, 10, undefined, () => true);
+    const session = await plane.openAgentPage(BOOK, REPAINT, () => true);
     const pending = session.tail[Symbol.asyncIterator]().next();
 
     // Act.
@@ -241,7 +264,7 @@ describe("openAgentPage on a book with no rows yet", () => {
     const { plane } = await empty("deferred-unknown");
 
     // Act, Assert.
-    await expect(plane.openAgentPage(BOOK, 10, undefined, () => false)).rejects.toMatchObject({
+    await expect(plane.openAgentPage(BOOK, REPAINT, () => false)).rejects.toMatchObject({
       kind: "unknown_agent",
     });
   });
@@ -251,7 +274,7 @@ describe("openAgentPage on a book with no rows yet", () => {
     const { plane } = await empty("deferred-no-predicate");
 
     // Act, Assert.
-    await expect(plane.openAgentPage(BOOK, 10)).rejects.toMatchObject({
+    await expect(plane.openAgentPage(BOOK, REPAINT)).rejects.toMatchObject({
       kind: "unknown_agent",
     });
   });
@@ -263,7 +286,7 @@ describe("openAgentPage on a book with no rows yet", () => {
     started.failReads("OpenAgentSession", "storage_failure", "sqlite: disk I/O error");
 
     // Act, Assert.
-    await expect(plane.openAgentPage(BOOK, 10, undefined, () => true)).rejects.toMatchObject({
+    await expect(plane.openAgentPage(BOOK, REPAINT, () => true)).rejects.toMatchObject({
       kind: "store_unavailable",
     });
   });
@@ -273,7 +296,7 @@ describe("openAgentPage on a book with no rows yet", () => {
     // absent here holds nothing this consumer is owed.
     // Arrange.
     const { plane } = await empty("deferred-conclude");
-    const session = await plane.openAgentPage(BOOK, 10, undefined, () => true);
+    const session = await plane.openAgentPage(BOOK, REPAINT, () => true);
     const pending = session.tail[Symbol.asyncIterator]().next();
 
     // Act.
@@ -289,7 +312,7 @@ describe("openAgentPage on a book with no rows yet", () => {
     // Arrange.
     const { plane } = await empty("deferred-withdrawn");
     let known = true;
-    const session = await plane.openAgentPage(BOOK, 10, undefined, () => known);
+    const session = await plane.openAgentPage(BOOK, REPAINT, () => known);
     const pending = session.tail[Symbol.asyncIterator]().next();
 
     // Act.
@@ -311,7 +334,7 @@ describe("openAgentPage on a book with no rows yet", () => {
 describe("the tail", () => {
   it("delivers entries written after the page, and never replays the page", async () => {
     const { plane } = await seeded("tail-pin", 1);
-    const session = await plane.openAgentPage(BOOK, 10);
+    const session = await plane.openAgentPage(BOOK, REPAINT);
     const iterator = session.tail[Symbol.asyncIterator]();
     const pending = iterator.next();
 
@@ -325,7 +348,7 @@ describe("the tail", () => {
 
   it("stops promptly when the session is closed, rather than hanging on the drain", async () => {
     const { plane } = await seeded("tail-close", 1);
-    const session = await plane.openAgentPage(BOOK, 10);
+    const session = await plane.openAgentPage(BOOK, REPAINT);
     const iterator = session.tail[Symbol.asyncIterator]();
     const pending = iterator.next();
 
@@ -347,10 +370,10 @@ describe("the tail", () => {
 
   it("can be opened again after a close", async () => {
     const { plane } = await seeded("tail-reopen", 1);
-    const first = await plane.openAgentPage(BOOK, 10);
+    const first = await plane.openAgentPage(BOOK, REPAINT);
     first.close();
 
-    const second = await plane.openAgentPage(BOOK, 10);
+    const second = await plane.openAgentPage(BOOK, REPAINT);
     second.close();
 
     expect(second.page.entries).toHaveLength(1);
@@ -365,11 +388,11 @@ describe("the tail", () => {
     // everything the consumer was owed.
     // Arrange.
     const { plane } = await seeded("tail-conclude-catchup", 4);
-    const walked = await plane.openAgentPage(BOOK, 10);
+    const walked = await plane.openAgentPage(BOOK, REPAINT);
     walked.close();
     const behind = walked.page.entries[2]?.at;
     const head = walked.page.entries[0]?.at;
-    const session = await plane.openAgentPage(BOOK, 10, behind);
+    const session = await plane.openAgentPage(BOOK, knownThrough(behind));
     const iterator = session.tail[Symbol.asyncIterator]();
 
     // Act. The open's page is the catch-up, so the head is already served.
@@ -404,7 +427,7 @@ describe("the tail", () => {
           create(storev1.WatchAgentSessionResponseSchema, { frame: { case: "line", value: storedLine("1", "unit-a") } }),
         ]),
     });
-    const session = await reader.openAgentPage(BOOK, 10, undefined, () => true);
+    const session = await reader.openAgentPage(BOOK, REPAINT, () => true);
     const iterator = session.tail[Symbol.asyncIterator]();
     const upsert = await iterator.next();
     expect(unitOf(entryOf(upsert.value as AgentTailFrame))).toBe("unit-a");
@@ -427,7 +450,7 @@ describe("the tail", () => {
 
   it("concludeThrough(undefined) ends the tail at once, with nothing left to wait for", async () => {
     const { plane } = await seeded("tail-conclude-unbounded", 1);
-    const session = await plane.openAgentPage(BOOK, 10);
+    const session = await plane.openAgentPage(BOOK, REPAINT);
     const iterator = session.tail[Symbol.asyncIterator]();
 
     session.concludeThrough(undefined);
@@ -455,7 +478,7 @@ describe("the refused-open convention", () => {
     const flaky: StoreClient = {
       ...real,
       openAgentSession: async (request) => {
-        reopened.push(request.knownThrough);
+        reopened.push(request.opening.case === "knownThrough" ? request.opening.value : undefined);
         return real.openAgentSession(request);
       },
       watchAgentSession: (request, signal) => {
@@ -479,7 +502,7 @@ describe("the refused-open convention", () => {
     plane.write([readEntry(BOOK, "unit-0", "/tmp/0")]);
     await plane.flush();
 
-    const session = await plane.openAgentPage(BOOK, 10);
+    const session = await plane.openAgentPage(BOOK, REPAINT);
     const iterator = session.tail[Symbol.asyncIterator]();
     const pending = iterator.next();
     plane.write([readEntry(BOOK, "unit-1", "/tmp/1")]);
@@ -496,23 +519,23 @@ describe("the refused-open convention", () => {
 
 describe("readAgentPage", () => {
   it("walks older entries from a served pointer", async () => {
-    const { plane } = await seeded("older-page", 3);
-    const session = await plane.openAgentPage(BOOK, 1);
+    const { plane } = await seeded("older-page", 4, { pageSize: 2 });
+    const session = await plane.openAgentPage(BOOK, REPAINT);
     session.close();
     const more = session.page.boundary.value as conversationv1.HistoryMore;
 
-    const older = await plane.readAgentPage(BOOK, 10, more.lastEntry as conversationv1.HistoryPointer);
+    const older = await plane.readAgentPage(BOOK, more.lastEntry as conversationv1.HistoryPointer);
 
     expect(older.entries).toHaveLength(2);
   });
 
   it("carries the served pointers, so a continuation page is a reconnect mark too", async () => {
-    const { started, plane } = await seeded("older-page-pointers", 2);
-    const session = await plane.openAgentPage(BOOK, 1);
+    const { started, plane } = await seeded("older-page-pointers", 2, { pageSize: 1 });
+    const session = await plane.openAgentPage(BOOK, REPAINT);
     session.close();
     const more = session.page.boundary.value as conversationv1.HistoryMore;
 
-    const older = await plane.readAgentPage(BOOK, 10, more.lastEntry as conversationv1.HistoryPointer);
+    const older = await plane.readAgentPage(BOOK, more.lastEntry as conversationv1.HistoryPointer);
 
     expect(older.entries[0]?.at?.value).toBe(started.book("book-1")[0]?.at?.value);
   });
@@ -914,7 +937,7 @@ describe("a malformed opening page", () => {
     const reader = readerOver({ openAgentSession: async () => opened(page, WATCH) });
 
     // Act, Assert.
-    await expect(reader.openAgentPage(BOOK, 10)).rejects.toMatchObject({
+    await expect(reader.openAgentPage(BOOK, REPAINT)).rejects.toMatchObject({
       kind: "stale_pointer",
     });
   });
@@ -932,7 +955,7 @@ describe("a malformed opening page", () => {
     const reader = readerOver({ openAgentSession: async () => opened(floorPage([line]), WATCH) });
 
     // Act, Assert.
-    await expect(reader.openAgentPage(BOOK, 10)).rejects.toMatchObject({
+    await expect(reader.openAgentPage(BOOK, REPAINT)).rejects.toMatchObject({
       kind: "store_unavailable",
     });
   });
@@ -945,7 +968,7 @@ describe("a malformed opening page", () => {
     const reader = readerOver({ openAgentSession: async () => opened(floorPage([line]), WATCH) });
 
     // Act, Assert.
-    await expect(reader.openAgentPage(BOOK, 10)).rejects.toMatchObject({
+    await expect(reader.openAgentPage(BOOK, REPAINT)).rejects.toMatchObject({
       kind: "store_unavailable",
     });
   });
@@ -959,7 +982,7 @@ describe("a malformed opening page", () => {
     const reader = readerOver({ openAgentSession: async () => opened(page, WATCH) });
 
     // Act, Assert.
-    await expect(reader.openAgentPage(BOOK, 1)).rejects.toMatchObject({
+    await expect(reader.openAgentPage(BOOK, REPAINT)).rejects.toMatchObject({
       kind: "store_unavailable",
     });
   });
@@ -972,7 +995,7 @@ describe("a malformed opening page", () => {
     const reader = readerOver({ openAgentSession: async () => opened(page, WATCH) });
 
     // Act, Assert.
-    await expect(reader.openAgentPage(BOOK, 10)).rejects.toMatchObject({
+    await expect(reader.openAgentPage(BOOK, REPAINT)).rejects.toMatchObject({
       kind: "store_unavailable",
     });
   });
@@ -986,7 +1009,7 @@ describe("a malformed OpenAgentSession answer", () => {
     });
 
     // Act, Assert.
-    await expect(reader.openAgentPage(BOOK, 10)).rejects.toMatchObject({
+    await expect(reader.openAgentPage(BOOK, REPAINT)).rejects.toMatchObject({
       kind: "store_unavailable",
     });
   });
@@ -996,7 +1019,7 @@ describe("a malformed OpenAgentSession answer", () => {
     const reader = readerOver({ openAgentSession: async () => opened(undefined, WATCH) });
 
     // Act, Assert.
-    await expect(reader.openAgentPage(BOOK, 10)).rejects.toMatchObject({
+    await expect(reader.openAgentPage(BOOK, REPAINT)).rejects.toMatchObject({
       kind: "store_unavailable",
     });
   });
@@ -1006,7 +1029,7 @@ describe("a malformed OpenAgentSession answer", () => {
     const reader = readerOver({ openAgentSession: async () => opened(floorPage([]), undefined) });
 
     // Act, Assert.
-    await expect(reader.openAgentPage(BOOK, 10)).rejects.toMatchObject({
+    await expect(reader.openAgentPage(BOOK, REPAINT)).rejects.toMatchObject({
       kind: "store_unavailable",
     });
   });
@@ -1018,7 +1041,7 @@ describe("a malformed OpenAgentSession answer", () => {
     });
 
     // Act, Assert.
-    await expect(reader.openAgentPage(BOOK, 10)).rejects.toMatchObject({
+    await expect(reader.openAgentPage(BOOK, REPAINT)).rejects.toMatchObject({
       kind: "store_unavailable",
       message: "connect ECONNREFUSED",
     });
@@ -1033,7 +1056,7 @@ describe("the tail against a malformed or ending watch", () => {
       watchAgentSession: () =>
         standingWatch([create(storev1.WatchAgentSessionResponseSchema, {})]),
     });
-    const session = await reader.openAgentPage(BOOK, 10);
+    const session = await reader.openAgentPage(BOOK, REPAINT);
 
     // Act, Assert.
     await expect(session.tail[Symbol.asyncIterator]().next()).rejects.toMatchObject({
@@ -1061,7 +1084,7 @@ describe("the tail against a malformed or ending watch", () => {
               create(storev1.WatchAgentSessionResponseSchema, { frame: { case: "line", value: storedLine("1", "unit-a") } }),
             ]),
     });
-    const session = await reader.openAgentPage(BOOK, 10);
+    const session = await reader.openAgentPage(BOOK, REPAINT);
 
     // Act.
     const served: (string | undefined)[] = [];
@@ -1083,7 +1106,7 @@ describe("the tail against a malformed or ending watch", () => {
     let opens = 0;
     const reader = readerOver({
       openAgentSession: async (request) => {
-        reopened.push(request.knownThrough);
+        reopened.push(request.opening.case === "knownThrough" ? request.opening.value : undefined);
         opens += 1;
         return opens === 1 ? opened(floorPage([]), WATCH) : opened(floorPage([]), WATCH_2);
       },
@@ -1098,7 +1121,7 @@ describe("the tail against a malformed or ending watch", () => {
             }
           : standingWatch([]),
     });
-    const session = await reader.openAgentPage(BOOK, 10);
+    const session = await reader.openAgentPage(BOOK, REPAINT);
     const iterator = session.tail[Symbol.asyncIterator]();
 
     // Act. The first entry, then the end that forces the re-open.
@@ -1138,7 +1161,7 @@ describe("the tail against a malformed or ending watch", () => {
             }
           : standingWatch([]),
     });
-    const session = await reader.openAgentPage(BOOK, 10);
+    const session = await reader.openAgentPage(BOOK, REPAINT);
     const iterator = session.tail[Symbol.asyncIterator]();
     await iterator.next();
 
@@ -1173,7 +1196,7 @@ describe("the tail against a malformed or ending watch", () => {
             }
           : standingWatch([]),
     });
-    const session = await reader.openAgentPage(BOOK, 10);
+    const session = await reader.openAgentPage(BOOK, REPAINT);
     const iterator = session.tail[Symbol.asyncIterator]();
     await iterator.next();
 
@@ -1200,7 +1223,7 @@ describe("the tail against a malformed or ending watch", () => {
           ? { async *[Symbol.asyncIterator]() {} }
           : standingWatch([]),
     });
-    const session = await reader.openAgentPage(BOOK, 10);
+    const session = await reader.openAgentPage(BOOK, REPAINT);
     const before = logSinkMark();
 
     // Act.
@@ -1235,7 +1258,7 @@ describe("the tail against a malformed or ending watch", () => {
           ? { async *[Symbol.asyncIterator]() {} }
           : standingWatch([]),
     });
-    const session = await reader.openAgentPage(BOOK, 10);
+    const session = await reader.openAgentPage(BOOK, REPAINT);
     const before = logSinkMark();
 
     // Act.
@@ -1265,7 +1288,7 @@ describe("the tail against a malformed or ending watch", () => {
       },
       watchAgentSession: () => ({ async *[Symbol.asyncIterator]() {} }),
     });
-    const session = await reader.openAgentPage(BOOK, 10);
+    const session = await reader.openAgentPage(BOOK, REPAINT);
 
     // Act, Assert.
     await expect(session.tail[Symbol.asyncIterator]().next()).rejects.toMatchObject({
@@ -1281,7 +1304,7 @@ describe("the tail against a malformed or ending watch", () => {
       openAgentSession: async () => opened(floorPage([]), WATCH),
       watchAgentSession: () => ({ async *[Symbol.asyncIterator]() {} }),
     });
-    const session = await reader.openAgentPage(BOOK, 10);
+    const session = await reader.openAgentPage(BOOK, REPAINT);
     const before = logSinkMark();
 
     // Act.
@@ -1308,7 +1331,7 @@ describe("the tail against a malformed or ending watch", () => {
           create(storev1.WatchAgentSessionResponseSchema, { frame: { case: "line", value: storedLine("7", "unit-last") } }),
         ]),
     });
-    const session = await reader.openAgentPage(BOOK, 10);
+    const session = await reader.openAgentPage(BOOK, REPAINT);
     session.concludeThrough(create(conversationv1.HistoryPointerSchema, { value: "7" }));
 
     // Act.
@@ -1333,7 +1356,7 @@ describe("the tail against a malformed or ending watch", () => {
         },
       }),
     });
-    const session = await reader.openAgentPage(BOOK, 10);
+    const session = await reader.openAgentPage(BOOK, REPAINT);
 
     // Act, Assert.
     await expect(session.tail[Symbol.asyncIterator]().next()).rejects.toMatchObject({
@@ -1366,7 +1389,7 @@ describe("the tail against a malformed or ending watch", () => {
         return standingWatch([]);
       },
     });
-    const session = await reader.openAgentPage(BOOK, 10);
+    const session = await reader.openAgentPage(BOOK, REPAINT);
     const iterator = session.tail[Symbol.asyncIterator]();
 
     // Act.
@@ -1412,7 +1435,7 @@ describe("the deferred book, against a hand-built store", () => {
           create(storev1.WatchAgentSessionResponseSchema, { frame: { case: "line", value: storedLine("2", "unit-b") } }),
         ]),
     });
-    const session = await reader.openAgentPage(BOOK, 10, undefined, () => true);
+    const session = await reader.openAgentPage(BOOK, REPAINT, () => true);
     const iterator = session.tail[Symbol.asyncIterator]();
     const first = iterator.next();
 
@@ -1443,7 +1466,7 @@ describe("the deferred book, against a hand-built store", () => {
       },
       watchAgentSession: () => standingWatch([]),
     });
-    const session = await reader.openAgentPage(BOOK, 10, undefined, () => true);
+    const session = await reader.openAgentPage(BOOK, REPAINT, () => true);
     const iterator = session.tail[Symbol.asyncIterator]();
     const first = iterator.next();
     reader.noteAgentRows(["book-1"]);
@@ -1473,7 +1496,7 @@ describe("the deferred book, against a hand-built store", () => {
       },
       watchAgentSession: () => standingWatch([]),
     });
-    session = await reader.openAgentPage(BOOK, 10, undefined, () => true);
+    session = await reader.openAgentPage(BOOK, REPAINT, () => true);
     const iterator = session.tail[Symbol.asyncIterator]();
     const first = iterator.next();
 
@@ -1496,7 +1519,7 @@ describe("readAgentPage against a store that misbehaves", () => {
     });
 
     // Act, Assert.
-    await expect(reader.readAgentPage(BOOK, 10, AFTER)).rejects.toMatchObject({
+    await expect(reader.readAgentPage(BOOK, AFTER)).rejects.toMatchObject({
       kind: "store_unavailable",
       message: "connect ECONNREFUSED",
     });
@@ -1515,7 +1538,7 @@ describe("readAgentPage against a store that misbehaves", () => {
     started.failReads("ReadAgentPage", "stale_pointer", "that pointer is not in this book");
 
     // Act, Assert.
-    await expect(plane.readAgentPage(BOOK, 10, AFTER)).rejects.toMatchObject({
+    await expect(plane.readAgentPage(BOOK, AFTER)).rejects.toMatchObject({
       kind: "stale_pointer",
     });
   });
@@ -1527,7 +1550,7 @@ describe("readAgentPage against a store that misbehaves", () => {
     });
 
     // Act, Assert.
-    await expect(reader.readAgentPage(BOOK, 10, AFTER)).rejects.toMatchObject({
+    await expect(reader.readAgentPage(BOOK, AFTER)).rejects.toMatchObject({
       kind: "store_unavailable",
     });
   });
@@ -1642,6 +1665,30 @@ function morePage(lines: storev1.StoreLineAt[]): storev1.AgentSessionPage {
   });
 }
 
+/**
+ * A `ReadAgentPage` success holding `lines` newest-first: at the floor, or with
+ * `more` pointing at its oldest line (at an empty page's nothing).
+ */
+function olderPage(lines: storev1.StoreLineAt[], boundary: "more" | "floor"): storev1.ReadAgentPageResponse {
+  return create(storev1.ReadAgentPageResponseSchema, {
+    result: {
+      case: "success",
+      value: create(storev1.ReadAgentPageSuccessSchema, {
+        lines,
+        boundary:
+          boundary === "floor"
+            ? { case: "floor", value: create(storev1.ReadAgentPageFloorSchema, {}) }
+            : {
+                case: "more",
+                value: create(storev1.ReadAgentPageMoreSchema, {
+                  lastItem: lines[lines.length - 1]?.at ?? create(storev1.StoreItemPointerSchema, { value: "0" }),
+                }),
+              },
+      }),
+    },
+  });
+}
+
 /** The second watch token, so a re-open can be told apart from the first open. */
 const WATCH_2 = create(storev1.AgentSessionTokenSchema, { value: "watch-2" });
 
@@ -1662,35 +1709,88 @@ function refusedOnce(
 }
 
 describe("the re-open's catch-up page", () => {
-  it("records that the gap exceeded the catch-up budget when the page says more remain", async () => {
-    // A bounded re-open that still reports older lines means entries between
-    // the last served pointer and this page were skipped -- a loss the record
-    // is the only place to see.
+  it("serves every line of a re-open's gap wider than one store page, oldest first", async () => {
+    // The re-open's page is the store's page; the rest of the gap is WALKED.
     // Arrange.
     let opens = 0;
     const reader = readerOver({
       openAgentSession: async () => {
         opens += 1;
         return opens === 1
-          ? opened(floorPage([]), WATCH)
-          : opened(morePage([storedLine("2", "unit-b")]), WATCH_2);
+          ? opened(floorPage([storedLine("1", "unit-a")]), WATCH)
+          : opened(morePage([storedLine("5", "unit-e"), storedLine("4", "unit-d")]), WATCH_2);
       },
+      readAgentPage: async () => olderPage([storedLine("3", "unit-c"), storedLine("2", "unit-b")], "floor"),
       watchAgentSession: refusedOnce(() => standingWatch([])),
     });
-    const session = await reader.openAgentPage(BOOK, 10);
-    const before = logSinkMark();
+    const session = await reader.openAgentPage(BOOK, REPAINT);
+    const iterator = session.tail[Symbol.asyncIterator]();
 
     // Act.
-    await session.tail[Symbol.asyncIterator]().next();
+    const served: (string | undefined)[] = [];
+    for (let n = 0; n < 4; n++) served.push(unitOf(entryOf((await iterator.next()).value as AgentTailFrame)));
     session.close();
 
     // Assert.
-    expect(logRecordsSince(before)).toContainEqual(
-      expect.objectContaining({
-        level: "error",
-        message: "the gap since the last served pointer exceeds the catch-up budget; entries were skipped",
-      }),
-    );
+    expect(served).toEqual(["unit-b", "unit-c", "unit-d", "unit-e"]);
+  });
+
+  it("stops a re-open's walk at the caller's own mark", async () => {
+    // The walk is by PLACE, so below the mark lies history the consumer
+    // already holds — or never asked for. Nothing at or below it is served.
+    // Arrange.
+    let opens = 0;
+    const reads: string[] = [];
+    const reader = readerOver({
+      openAgentSession: async () => {
+        opens += 1;
+        return opens === 1
+          ? opened(floorPage([storedLine("2", "unit-b")]), WATCH)
+          : opened(morePage([storedLine("4", "unit-d"), storedLine("3", "unit-c")]), WATCH_2);
+      },
+      readAgentPage: async (request) => {
+        reads.push(request.position.case === "after" ? request.position.value.value : "");
+        return olderPage([storedLine("2", "unit-b"), storedLine("1", "unit-a")], "more");
+      },
+      watchAgentSession: refusedOnce(() =>
+        standingWatch([
+          create(storev1.WatchAgentSessionResponseSchema, { frame: { case: "line", value: storedLine("5", "unit-e") } }),
+        ]),
+      ),
+    });
+    const session = await reader.openAgentPage(BOOK, REPAINT);
+    const iterator = session.tail[Symbol.asyncIterator]();
+
+    // Act.
+    const served: (string | undefined)[] = [];
+    for (let n = 0; n < 3; n++) served.push(unitOf(entryOf((await iterator.next()).value as AgentTailFrame)));
+    session.close();
+
+    // Assert.
+    expect([served, reads]).toEqual([["unit-c", "unit-d", "unit-e"], ["3"]]);
+  });
+
+  it("refuses a re-open walk whose `more` leads to an empty page", async () => {
+    // A store contradicting itself is surfaced, never walked on forever.
+    // Arrange.
+    let opens = 0;
+    const reader = readerOver({
+      openAgentSession: async () => {
+        opens += 1;
+        return opens === 1
+          ? opened(floorPage([storedLine("1", "unit-a")]), WATCH)
+          : opened(morePage([storedLine("3", "unit-c")]), WATCH_2);
+      },
+      readAgentPage: async () => olderPage([], "more"),
+      watchAgentSession: refusedOnce(() => standingWatch([])),
+    });
+    const session = await reader.openAgentPage(BOOK, REPAINT);
+
+    // Act, Assert.
+    await expect(session.tail[Symbol.asyncIterator]().next()).rejects.toMatchObject({
+      kind: "store_unavailable",
+    });
+    session.close();
   });
 
   it("serves nothing from a re-open that answers with no page at all", async () => {
@@ -1705,7 +1805,7 @@ describe("the re-open's catch-up page", () => {
       // possible output would be the catch-up page the re-open failed to carry.
       watchAgentSession: refusedOnce(() => standingWatch([])),
     });
-    const session = await reader.openAgentPage(BOOK, 10);
+    const session = await reader.openAgentPage(BOOK, REPAINT);
 
     // Act.
     const raced = await Promise.race([
@@ -1749,7 +1849,7 @@ describe("the re-open's catch-up page", () => {
         ]);
       },
     });
-    const session = await reader.openAgentPage(BOOK, 10);
+    const session = await reader.openAgentPage(BOOK, REPAINT);
     const iterator = session.tail[Symbol.asyncIterator]();
 
     // Act. The catch-up entry first, then the tail continues past it.
@@ -1779,7 +1879,7 @@ describe("a tail closed under a push", () => {
         },
       }),
     });
-    const session = await reader.openAgentPage(BOOK, 10);
+    const session = await reader.openAgentPage(BOOK, REPAINT);
     const iterator = session.tail[Symbol.asyncIterator]();
     const first = await iterator.next();
 
@@ -1838,7 +1938,7 @@ describe("the deferred book's own waiting", () => {
         return refusingOpen();
       },
     });
-    const session = await reader.openAgentPage(BOOK, 10, undefined, () => true);
+    const session = await reader.openAgentPage(BOOK, REPAINT, () => true);
 
     // Act.
     session.close();
@@ -1857,7 +1957,7 @@ describe("the deferred book's own waiting", () => {
         return opens === 1 ? refusingOpen() : brokenOpen();
       },
     });
-    const session = await reader.openAgentPage(BOOK, 10, undefined, () => true);
+    const session = await reader.openAgentPage(BOOK, REPAINT, () => true);
 
     // Act, Assert.
     await expect(session.tail[Symbol.asyncIterator]().next()).rejects.toMatchObject({
@@ -1877,7 +1977,7 @@ describe("the deferred book's own waiting", () => {
         return refusingOpen();
       },
     });
-    session = await reader.openAgentPage(BOOK, 10, undefined, () => true);
+    session = await reader.openAgentPage(BOOK, REPAINT, () => true);
 
     // Act.
     const next = await session.tail[Symbol.asyncIterator]().next();
@@ -1899,7 +1999,7 @@ describe("the deferred book's own waiting", () => {
       },
       watchAgentSession: () => standingWatch([]),
     });
-    session = await reader.openAgentPage(BOOK, 10, undefined, () => true);
+    session = await reader.openAgentPage(BOOK, REPAINT, () => true);
 
     // Act.
     const served: (string | undefined)[] = [];
@@ -1928,7 +2028,7 @@ describe("the deferred book's own waiting", () => {
           create(storev1.WatchAgentSessionResponseSchema, { frame: { case: "line", value: storedLine("1", "unit-a") } }),
         ]),
     });
-    const session = await reader.openAgentPage(BOOK, 10, undefined, () => true);
+    const session = await reader.openAgentPage(BOOK, REPAINT, () => true);
     const iterator = session.tail[Symbol.asyncIterator]();
     await iterator.next();
     await iterator.next();
@@ -1965,7 +2065,7 @@ describe("the deferred book's own waiting", () => {
           create(storev1.WatchAgentSessionResponseSchema, { frame: { case: "line", value: storedLine("2", "unit-b") } }),
         ]),
     });
-    const session = await reader.openAgentPage(BOOK, 10, undefined, () => true);
+    const session = await reader.openAgentPage(BOOK, REPAINT, () => true);
     const iterator = session.tail[Symbol.asyncIterator]();
     const first = await iterator.next();
 
@@ -1994,7 +2094,7 @@ describe("the deferred book's own waiting", () => {
       },
       watchAgentSession: () => standingWatch([]),
     });
-    const session = await reader.openAgentPage(BOOK, 10, undefined, () => true);
+    const session = await reader.openAgentPage(BOOK, REPAINT, () => true);
     const iterator = session.tail[Symbol.asyncIterator]();
     const pending = iterator.next();
 
@@ -2040,7 +2140,7 @@ describe("a book whose id this shim minted", () => {
     reader.noteAgentMinted("book-1");
 
     // Act.
-    await reader.openAgentPage(BOOK, 10, undefined, () => true);
+    await reader.openAgentPage(BOOK, REPAINT, () => true);
 
     // Assert.
     expect(opens).toBe(0);
@@ -2052,7 +2152,7 @@ describe("a book whose id this shim minted", () => {
     reader.noteAgentMinted("book-1");
 
     // Act.
-    const session = await reader.openAgentPage(BOOK, 10, undefined, () => true);
+    const session = await reader.openAgentPage(BOOK, REPAINT, () => true);
     session.close();
 
     // Assert.
@@ -2069,7 +2169,7 @@ describe("a book whose id this shim minted", () => {
       },
     });
     reader.noteAgentMinted("book-1");
-    const session = await reader.openAgentPage(BOOK, 10, undefined, () => true);
+    const session = await reader.openAgentPage(BOOK, REPAINT, () => true);
 
     // Act. The tail is pulled and left standing well past the recheck cadence.
     const outcome = await Promise.race([
@@ -2093,7 +2193,7 @@ describe("a book whose id this shim minted", () => {
       watchAgentSession: () => standingWatch([]),
     });
     reader.noteAgentMinted("book-1");
-    const session = await reader.openAgentPage(BOOK, 10, undefined, () => true);
+    const session = await reader.openAgentPage(BOOK, REPAINT, () => true);
     const first = session.tail[Symbol.asyncIterator]().next();
 
     // Act.
@@ -2117,7 +2217,7 @@ describe("a book whose id this shim minted", () => {
     reader.noteAgentMinted("book-1");
 
     // Act, Assert. A withdrawn announcement is owed the store's own refusal.
-    await expect(reader.openAgentPage(BOOK, 10, undefined, () => false)).rejects.toMatchObject({
+    await expect(reader.openAgentPage(BOOK, REPAINT, () => false)).rejects.toMatchObject({
       kind: "unknown_agent",
     });
     expect(opens).toBe(1);
@@ -2134,7 +2234,7 @@ describe("a book whose id this shim minted", () => {
     });
 
     // Act.
-    const session = await reader.openAgentPage(BOOK, 10, undefined, () => true);
+    const session = await reader.openAgentPage(BOOK, REPAINT, () => true);
     session.close();
 
     // Assert. Nothing declared this book absent, so the store is the authority.
@@ -2153,7 +2253,7 @@ describe("a book whose id this shim minted", () => {
 
     // Act.
     reader.noteAgentMinted("");
-    const session = await reader.openAgentPage(agent(""), 10, undefined, () => true);
+    const session = await reader.openAgentPage(agent(""), REPAINT, () => true);
     session.close();
 
     // Assert. An empty id names no agent, so nothing was declared absent for it
@@ -2172,7 +2272,7 @@ describe("a book whose id this shim minted", () => {
       watchAgentSession: () => standingWatch([]),
     });
     reader.noteAgentMinted("book-1");
-    const first = await reader.openAgentPage(BOOK, 10, undefined, () => true);
+    const first = await reader.openAgentPage(BOOK, REPAINT, () => true);
     // The deferred session only asks once its tail is pulled; the row landing is
     // what lets that ask happen.
     const pulled = first.tail[Symbol.asyncIterator]().next();
@@ -2181,7 +2281,7 @@ describe("a book whose id this shim minted", () => {
     first.close();
 
     // Act.
-    const second = await reader.openAgentPage(BOOK, 10, undefined, () => true);
+    const second = await reader.openAgentPage(BOOK, REPAINT, () => true);
     second.close();
 
     // Assert. The second open went straight to the store rather than deferring.
@@ -2216,7 +2316,7 @@ describe("a read that stands no tail asks for no watch token", () => {
     });
 
     // Act.
-    await reader.readFirstPage(BOOK, 10);
+    await reader.readFirstPage(BOOK, REPAINT);
 
     // Assert.
     expect(requests.map((request) => request.pageOnly)).toEqual([true]);
@@ -2234,7 +2334,7 @@ describe("a read that stands no tail asks for no watch token", () => {
     });
 
     // Act.
-    const page = await reader.readFirstPage(BOOK, 10);
+    const page = await reader.readFirstPage(BOOK, REPAINT);
 
     // Assert.
     expect([page.entries.length, watches]).toEqual([1, 0]);
@@ -2252,7 +2352,7 @@ describe("a read that stands no tail asks for no watch token", () => {
     });
 
     // Act.
-    const session = await reader.openAgentPage(BOOK, 10);
+    const session = await reader.openAgentPage(BOOK, REPAINT);
     session.close();
 
     // Assert.
@@ -2289,7 +2389,7 @@ describe("readFirstPage on a book whose id this shim minted", () => {
     reader.noteAgentMinted("book-1");
 
     // Act.
-    await reader.readFirstPage(BOOK, 10, undefined, () => true);
+    await reader.readFirstPage(BOOK, REPAINT, () => true);
 
     // Assert.
     expect(opens).toBe(1);
@@ -2301,7 +2401,7 @@ describe("readFirstPage on a book whose id this shim minted", () => {
     reader.noteAgentMinted("book-1");
 
     // Act.
-    const page = await reader.readFirstPage(BOOK, 10, undefined, () => true);
+    const page = await reader.readFirstPage(BOOK, REPAINT, () => true);
 
     // Assert.
     expect([page.entries.length, page.boundary.case]).toEqual([0, "floor"]);
@@ -2317,7 +2417,7 @@ describe("readFirstPage on a book whose id this shim minted", () => {
     reader.noteAgentMinted("book-1");
 
     // Act, Assert.
-    await expect(reader.readFirstPage(BOOK, 10, undefined, () => true)).rejects.toMatchObject({
+    await expect(reader.readFirstPage(BOOK, REPAINT, () => true)).rejects.toMatchObject({
       kind: "store_unavailable",
     });
   });
@@ -2348,7 +2448,7 @@ describe("readFirstPage on a book whose id this shim minted", () => {
     });
 
     // Act.
-    const page = await reader.readFirstPage(BOOK, 10);
+    const page = await reader.readFirstPage(BOOK, REPAINT);
 
     // Assert.
     expect(opens).toBe(2);
@@ -2377,7 +2477,7 @@ describe("readFirstPage on a book whose id this shim minted", () => {
     reader.noteAgentMinted("book-1");
 
     // Act, Assert.
-    await expect(reader.readFirstPage(BOOK, 10, undefined, () => true)).rejects.toMatchObject({
+    await expect(reader.readFirstPage(BOOK, REPAINT, () => true)).rejects.toMatchObject({
       kind: "store_unavailable",
     });
   });
@@ -2413,7 +2513,7 @@ describe("an open that meets a restarting store", () => {
     const before = logSinkMark();
 
     // Act.
-    const session = await reader.openAgentPage(BOOK, 10);
+    const session = await reader.openAgentPage(BOOK, REPAINT);
     const records = logRecordsSince(before);
     session.close();
 
@@ -2442,7 +2542,7 @@ describe("an open that meets a restarting store", () => {
     });
 
     // Act.
-    const session = await reader.openAgentPage(BOOK, 10);
+    const session = await reader.openAgentPage(BOOK, REPAINT);
     session.close();
 
     // Assert.
@@ -2454,7 +2554,7 @@ describe("an open that meets a restarting store", () => {
     const reader = readerOver({ openAgentSession: async () => Promise.reject(unreachable()) });
 
     // Act, Assert.
-    await expect(reader.openAgentPage(BOOK, 10)).rejects.toMatchObject({
+    await expect(reader.openAgentPage(BOOK, REPAINT)).rejects.toMatchObject({
       kind: "store_unavailable",
     });
   });
@@ -2465,7 +2565,7 @@ describe("an open that meets a restarting store", () => {
     const before = logSinkMark();
 
     // Act.
-    await expect(reader.openAgentPage(BOOK, 10)).rejects.toBeInstanceOf(PersistenceError);
+    await expect(reader.openAgentPage(BOOK, REPAINT)).rejects.toBeInstanceOf(PersistenceError);
 
     // Assert.
     expect(logRecordsSince(before)).toContainEqual(
@@ -2512,7 +2612,7 @@ describe("a line the store retired", () => {
       openAgentSession: async () => opened(floorPage([]), WATCH),
       watchAgentSession: () => standingWatch([retiredPush(storedLine("4", "unit-gone"))]),
     });
-    const session = await reader.openAgentPage(BOOK, 10);
+    const session = await reader.openAgentPage(BOOK, REPAINT);
 
     // Act.
     const next = await session.tail[Symbol.asyncIterator]().next();
@@ -2533,7 +2633,7 @@ describe("a line the store retired", () => {
       openAgentSession: async () => opened(floorPage([]), WATCH),
       watchAgentSession: () => standingWatch([linePush(storedLine("4", "unit-here"))]),
     });
-    const session = await reader.openAgentPage(BOOK, 10);
+    const session = await reader.openAgentPage(BOOK, REPAINT);
 
     // Act.
     const next = await session.tail[Symbol.asyncIterator]().next();
@@ -2557,7 +2657,7 @@ describe("a line the store retired", () => {
           retiredPush(create(storev1.StoreLineAtSchema, { line: storedLine("4", "unit-gone").line })),
         ]),
     });
-    const session = await reader.openAgentPage(BOOK, 10);
+    const session = await reader.openAgentPage(BOOK, REPAINT);
 
     // Act, Assert.
     await expect(session.tail[Symbol.asyncIterator]().next()).rejects.toMatchObject({
@@ -2573,7 +2673,7 @@ describe("a line the store retired", () => {
       openAgentSession: async () => opened(floorPage([storedLine("1", "unit-a")]), WATCH),
       watchAgentSession: () => standingWatch([retiredPush(storedLine("2", "unit-gone"))]),
     });
-    const session = await reader.openAgentPage(BOOK, 10);
+    const session = await reader.openAgentPage(BOOK, REPAINT);
     const iterator = session.tail[Symbol.asyncIterator]();
     session.concludeThrough(create(conversationv1.HistoryPointerSchema, { value: "2" }));
 
@@ -2595,7 +2695,7 @@ describe("a line the store retired", () => {
       },
       watchAgentSession: () => standingWatch([retiredPush(storedLine("2", "unit-gone"))]),
     });
-    const session = await reader.openAgentPage(BOOK, 10, undefined, () => true);
+    const session = await reader.openAgentPage(BOOK, REPAINT, () => true);
     const iterator = session.tail[Symbol.asyncIterator]();
     const first = iterator.next();
     reader.noteAgentRows(["book-1"]);
@@ -2615,7 +2715,7 @@ describe("a line the store retired", () => {
     let opens = 0;
     const reader = readerOver({
       openAgentSession: async (request) => {
-        reopened.push(request.knownThrough);
+        reopened.push(request.opening.case === "knownThrough" ? request.opening.value : undefined);
         opens += 1;
         return opens === 1 ? opened(floorPage([]), WATCH) : opened(floorPage([]), WATCH_2);
       },
@@ -2628,7 +2728,7 @@ describe("a line the store retired", () => {
             }
           : standingWatch([]),
     });
-    const session = await reader.openAgentPage(BOOK, 10);
+    const session = await reader.openAgentPage(BOOK, REPAINT);
     const iterator = session.tail[Symbol.asyncIterator]();
 
     // Act. The retirement, then the end that forces the re-open.
@@ -2662,7 +2762,7 @@ describe("a line the store retired", () => {
             }
           : standingWatch([]),
     });
-    const session = await reader.openAgentPage(BOOK, 10);
+    const session = await reader.openAgentPage(BOOK, REPAINT);
     const iterator = session.tail[Symbol.asyncIterator]();
     await iterator.next();
 
@@ -2682,7 +2782,7 @@ describe("a line the store retired", () => {
       openAgentSession: async () => opened(floorPage([]), WATCH),
       watchAgentSession: () => standingWatch([retiredPush(storedLine("4", "unit-gone"))]),
     });
-    const session = await reader.openAgentPage(BOOK, 10);
+    const session = await reader.openAgentPage(BOOK, REPAINT);
     const before = logSinkMark();
 
     // Act.
@@ -2730,7 +2830,7 @@ describe("the conversation place", () => {
           },
         }),
     });
-    const page = await reader.readAgentPage(BOOK, 10, create(conversationv1.HistoryPointerSchema, { value: "9" }));
+    const page = await reader.readAgentPage(BOOK, create(conversationv1.HistoryPointerSchema, { value: "9" }));
     return page.entries[0];
   }
 
@@ -2741,7 +2841,7 @@ describe("the conversation place", () => {
     await plane.flush();
 
     // Act.
-    const session = await plane.openAgentPage(BOOK, 10);
+    const session = await plane.openAgentPage(BOOK, REPAINT);
     session.close();
 
     // Assert.
@@ -2788,7 +2888,7 @@ describe("the conversation place", () => {
     await early.flush();
 
     // Act.
-    const session = await early.openAgentPage(BOOK, 10);
+    const session = await early.openAgentPage(BOOK, REPAINT);
     session.close();
 
     // Assert.
@@ -2813,7 +2913,7 @@ describe("the conversation place", () => {
     });
 
     // Act.
-    await reader.readPageThrough(BOOK, 10, create(conversationv1.ConversationThroughSchema, { atMs: 2_500n }));
+    await reader.readPageThrough(BOOK, create(conversationv1.ConversationThroughSchema, { atMs: 2_500n }));
 
     // Assert.
     const position = requests[0]?.position;
@@ -2837,7 +2937,7 @@ describe("the conversation place", () => {
     }
 
     // Act.
-    const page = await plane.readPageThrough(BOOK, 10, create(conversationv1.ConversationThroughSchema, { atMs: 2_000n }));
+    const page = await plane.readPageThrough(BOOK, create(conversationv1.ConversationThroughSchema, { atMs: 2_000n }));
 
     // Assert.
     expect(page.entries.map(unitOf)).toEqual(["unit-2", "unit-1"]);
@@ -2849,7 +2949,207 @@ describe("the conversation place", () => {
 
     // Act, Assert.
     await expect(
-      plane.readPageThrough(agent("nobody"), 10, create(conversationv1.ConversationThroughSchema, { atMs: 2_000n })),
+      plane.readPageThrough(agent("nobody"), create(conversationv1.ConversationThroughSchema, { atMs: 2_000n })),
     ).rejects.toMatchObject({ kind: "unknown_agent" });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tail-only openings, and the store's own page size
+// ---------------------------------------------------------------------------
+
+describe("a tail-only opening", () => {
+  /** Every OpenAgentSession request a stub saw, in order. */
+  function recordingOpens(
+    answers: storev1.OpenAgentSessionResponse[],
+  ): { opens: storev1.OpenAgentSessionRequest[]; openAgentSession: StoreClient["openAgentSession"] } {
+    const opens: storev1.OpenAgentSessionRequest[] = [];
+    return {
+      opens,
+      openAgentSession: async (request) => {
+        opens.push(request);
+        const answer = answers[Math.min(opens.length, answers.length) - 1];
+        if (answer === undefined) throw new Error("recordingOpens was given no answers");
+        return answer;
+      },
+    };
+  }
+
+  it("relays tail_only to the store's own open", async () => {
+    // Arrange.
+    const recorded = recordingOpens([opened(floorPage([]), WATCH), opened(floorPage([]), undefined)]);
+    const reader = readerOver({ openAgentSession: recorded.openAgentSession });
+
+    // Act.
+    const session = await reader.openAgentPage(BOOK, TAIL_ONLY);
+    session.close();
+
+    // Assert.
+    expect(recorded.opens[0]?.opening.case).toBe("tailOnly");
+  });
+
+  it("reads the book's head page-only after the open, minting no second token", async () => {
+    // Arrange.
+    const recorded = recordingOpens([opened(floorPage([]), WATCH), opened(floorPage([]), undefined)]);
+    const reader = readerOver({ openAgentSession: recorded.openAgentSession });
+
+    // Act.
+    const session = await reader.openAgentPage(BOOK, TAIL_ONLY);
+    session.close();
+
+    // Assert.
+    expect([recorded.opens[1]?.opening.case, recorded.opens[1]?.pageOnly]).toEqual([undefined, true]);
+  });
+
+  it("reports it found something when the book held lines behind its empty page", async () => {
+    // Arrange.
+    const recorded = recordingOpens([
+      opened(floorPage([]), WATCH),
+      opened(floorPage([storedLine("7", "unit-g")]), undefined),
+    ]);
+    const reader = readerOver({ openAgentSession: recorded.openAgentSession });
+
+    // Act.
+    const session = await reader.openAgentPage(BOOK, TAIL_ONLY);
+    session.close();
+
+    // Assert.
+    expect([session.page.entries.length, session.foundNothing]).toEqual([0, false]);
+  });
+
+  it("reports it found nothing when the book itself was empty", async () => {
+    // Arrange.
+    const recorded = recordingOpens([opened(floorPage([]), WATCH), opened(floorPage([]), undefined)]);
+    const reader = readerOver({ openAgentSession: recorded.openAgentSession });
+
+    // Act.
+    const session = await reader.openAgentPage(BOOK, TAIL_ONLY);
+    session.close();
+
+    // Assert.
+    expect(session.foundNothing).toBe(true);
+  });
+
+  it("re-opens a refused watch from the book's head as of the open, never as a repaint", async () => {
+    // A repaint would replay history the consumer said it did not want.
+    // Arrange.
+    const recorded = recordingOpens([
+      opened(floorPage([]), WATCH),
+      opened(floorPage([storedLine("7", "unit-g")]), undefined),
+      opened(floorPage([]), WATCH_2),
+    ]);
+    const reader = readerOver({
+      openAgentSession: recorded.openAgentSession,
+      watchAgentSession: refusedOnce(() =>
+        standingWatch([
+          create(storev1.WatchAgentSessionResponseSchema, { frame: { case: "line", value: storedLine("8", "unit-h") } }),
+        ]),
+      ),
+    });
+    const session = await reader.openAgentPage(BOOK, TAIL_ONLY);
+
+    // Act.
+    await session.tail[Symbol.asyncIterator]().next();
+    session.close();
+
+    // Assert.
+    const reopen = recorded.opens[2]?.opening;
+    expect([reopen?.case, reopen?.case === "knownThrough" ? reopen.value.value : undefined]).toEqual([
+      "knownThrough",
+      "7",
+    ]);
+  });
+
+  it("carries only what is written after the open", async () => {
+    // Arrange.
+    const { plane } = await seeded("tail-only-later", 2);
+    const session = await plane.openAgentPage(BOOK, TAIL_ONLY);
+    const pending = session.tail[Symbol.asyncIterator]().next();
+
+    // Act.
+    plane.write([readEntry(BOOK, "unit-later", "/tmp/later")]);
+    await plane.flush();
+    const first = await pending;
+    session.close();
+
+    // Assert.
+    expect(unitOf(entryOf(first.value as AgentTailFrame))).toBe("unit-later");
+  });
+
+  it("ends at once when a teardown concludes through the head as of the open", async () => {
+    // Nothing was written since the open, so the tail owes nothing: standing
+    // on the head would spend the whole conclusion budget for a line the tail
+    // can never carry.
+    // Arrange.
+    const { started, plane } = await seeded("tail-only-conclude-head", 2);
+    const session = await plane.openAgentPage(BOOK, TAIL_ONLY);
+    const iterator = session.tail[Symbol.asyncIterator]();
+    const rows = started.book("book-1");
+    const head = rows[rows.length - 1]?.at;
+
+    // Act.
+    session.concludeThrough(create(conversationv1.HistoryPointerSchema, { value: head?.value ?? "" }));
+
+    // Assert.
+    await expect(
+      Promise.race([iterator.next().then((next) => (next.done === true ? "ended" : "served")), hangGuard()]),
+    ).resolves.toBe("ended");
+  });
+
+  it("serves every row that landed while its book was deferred, across store pages", async () => {
+    // The book did not exist at the open, so all of it is news — and a backlog
+    // wider than one store page is walked rather than cut at the first page.
+    // Arrange.
+    const started = await startFakeStore(socketPathForTest("tail-only-deferred"), { pageSize: 2 });
+    store = started;
+    const plane = createPersistence({
+      client: createStoreClient(started.socketPath),
+      producer: PRODUCER,
+      nowMs: () => 1_000,
+      sleep: async () => undefined,
+    });
+    const session = await plane.openAgentPage(BOOK, TAIL_ONLY, () => true);
+    const iterator = session.tail[Symbol.asyncIterator]();
+    const pending = iterator.next();
+
+    // Act.
+    plane.write([
+      readEntry(BOOK, "unit-0", "/tmp/0"),
+      readEntry(BOOK, "unit-1", "/tmp/1"),
+      readEntry(BOOK, "unit-2", "/tmp/2"),
+    ]);
+    await plane.flush();
+    const served = [unitOf(entryOf((await pending).value as AgentTailFrame))];
+    for (let n = 0; n < 2; n++) served.push(unitOf(entryOf((await iterator.next()).value as AgentTailFrame)));
+    session.close();
+
+    // Assert.
+    expect(served).toEqual(["unit-0", "unit-1", "unit-2"]);
+  });
+
+  it("relays tail_only on a one-shot read, which the store answers with no lines", async () => {
+    // Arrange.
+    const { started, plane } = await seeded("tail-only-first-page", 2);
+
+    // Act.
+    const page = await plane.readFirstPage(BOOK, TAIL_ONLY);
+
+    // Assert.
+    const asked = started.reads().filter((read) => read.rpc === "OpenAgentSession");
+    const request = asked[asked.length - 1]?.request as storev1.OpenAgentSessionRequest | undefined;
+    expect([page.entries.length, request?.opening.case, request?.pageOnly]).toEqual([0, "tailOnly", true]);
+  });
+});
+
+describe("the store's own page size", () => {
+  it("serves a repaint of exactly the store's page, whatever the book holds", async () => {
+    // Arrange: one line more than the fake's default page — the real store's.
+    const { plane } = await seeded("store-page-size", FAKE_STORE_PAGE_SIZE + 1);
+
+    // Act.
+    const page = await plane.readFirstPage(BOOK, REPAINT);
+
+    // Assert.
+    expect([page.entries.length, page.boundary.case]).toEqual([FAKE_STORE_PAGE_SIZE, "more"]);
   });
 });

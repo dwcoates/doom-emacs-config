@@ -248,7 +248,6 @@ describe("validateStartTurnRequest", () => {
     const request = create(shimv1.StartTurnRequestSchema, {
       said: requests.said(),
       origin: conversationv1.PromptOrigin.USER_SENT,
-      pageSize: 5,
     });
 
     // Act, Assert.
@@ -260,7 +259,6 @@ describe("validateStartTurnRequest", () => {
     const request = create(shimv1.StartTurnRequestSchema, {
       turn: create(conversationv1.TurnIdSchema, { value: "t" }),
       said: requests.said(),
-      pageSize: 5,
     });
 
     // Act, Assert.
@@ -273,12 +271,26 @@ describe("validateStartTurnRequest", () => {
       turn: create(conversationv1.TurnIdSchema, { value: "t" }),
       said: requests.said(),
       origin: conversationv1.PromptOrigin.USER_SENT,
-      pageSize: 5,
-      knownThrough: create(conversationv1.HistoryPointerSchema, { value: "" }),
+      opening: { case: "knownThrough", value: create(conversationv1.HistoryPointerSchema, { value: "" }) },
     });
 
     // Act, Assert.
     expect(codeOf(() => validate.validateStartTurnRequest(request))).toBe(Code.InvalidArgument);
+  });
+});
+
+describe("validateStartTurnRequest tail_only", () => {
+  it("accepts a tail_only opening, which carries nothing to check", () => {
+    // Arrange.
+    const request = create(shimv1.StartTurnRequestSchema, {
+      turn: create(conversationv1.TurnIdSchema, { value: "t" }),
+      said: requests.said(),
+      origin: conversationv1.PromptOrigin.USER_SENT,
+      opening: { case: "tailOnly", value: create(shimv1.StartTurnTailOnlySchema, {}) },
+    });
+
+    // Act, Assert.
+    expect(codeOf(() => validate.validateStartTurnRequest(request))).toBeUndefined();
   });
 });
 
@@ -294,19 +306,20 @@ describe("validateWatchAgentRequest", () => {
     // Arrange.
     const request = create(shimv1.WatchAgentRequestSchema, {
       target: create(conversationv1.AgentIdSchema, { value: "" }),
-      pageSize: 5,
     });
 
     // Act, Assert.
     expect(codeOf(() => validate.validateWatchAgentRequest(request))).toBe(Code.InvalidArgument);
   });
 
-  it("refuses a page budget of nothing", () => {
+  it("accepts a tail_only opening, which carries nothing to check", () => {
     // Arrange.
-    const request = create(shimv1.WatchAgentRequestSchema, { pageSize: 0 });
+    const request = create(shimv1.WatchAgentRequestSchema, {
+      opening: { case: "tailOnly", value: create(shimv1.WatchAgentTailOnlySchema, {}) },
+    });
 
     // Act, Assert.
-    expect(codeOf(() => validate.validateWatchAgentRequest(request))).toBe(Code.InvalidArgument);
+    expect(codeOf(() => validate.validateWatchAgentRequest(request))).toBeUndefined();
   });
 });
 
@@ -419,7 +432,6 @@ describe("validateReadHistoryRequest", () => {
   it("accepts a read continuing from a served pointer", () => {
     // Arrange.
     const request = create(shimv1.ReadHistoryRequestSchema, {
-      pageSize: 5,
       position: {
         case: "after",
         value: create(conversationv1.HistoryPointerSchema, { value: "p-1" }),
@@ -432,7 +444,7 @@ describe("validateReadHistoryRequest", () => {
 
   it("refuses a read that states no position", () => {
     // Arrange.
-    const request = create(shimv1.ReadHistoryRequestSchema, { pageSize: 5 });
+    const request = create(shimv1.ReadHistoryRequestSchema, {});
 
     // Act, Assert.
     expect(codeOf(() => validate.validateReadHistoryRequest(request))).toBe(Code.InvalidArgument);
@@ -441,7 +453,6 @@ describe("validateReadHistoryRequest", () => {
   it("accepts a read of the book as it stood at an instant", () => {
     // Arrange.
     const request = create(shimv1.ReadHistoryRequestSchema, {
-      pageSize: 5,
       position: { case: "through", value: create(conversationv1.ConversationThroughSchema, { atMs: 1_000n }) },
     });
 
@@ -452,7 +463,6 @@ describe("validateReadHistoryRequest", () => {
   it("refuses a read through a bound that names no instant", () => {
     // Arrange.
     const request = create(shimv1.ReadHistoryRequestSchema, {
-      pageSize: 5,
       position: { case: "through", value: create(conversationv1.ConversationThroughSchema, { atMs: 0n }) },
     });
 
@@ -522,8 +532,7 @@ describe("validateWatchAgentRequest known_through", () => {
   it("refuses a known_through pointer that is present but empty", () => {
     // Arrange.
     const request = create(shimv1.WatchAgentRequestSchema, {
-      pageSize: 5,
-      knownThrough: create(conversationv1.HistoryPointerSchema, { value: "" }),
+      opening: { case: "knownThrough", value: create(conversationv1.HistoryPointerSchema, { value: "" }) },
     });
 
     // Act, Assert.
@@ -533,8 +542,7 @@ describe("validateWatchAgentRequest known_through", () => {
   it("accepts a known_through pointer the store served", () => {
     // Arrange.
     const request = create(shimv1.WatchAgentRequestSchema, {
-      pageSize: 5,
-      knownThrough: create(conversationv1.HistoryPointerSchema, { value: "p-1" }),
+      opening: { case: "knownThrough", value: create(conversationv1.HistoryPointerSchema, { value: "p-1" }) },
     });
 
     // Act, Assert.
@@ -576,7 +584,6 @@ describe("validateReadHistoryRequest target", () => {
     // Arrange.
     const request = create(shimv1.ReadHistoryRequestSchema, {
       target: create(conversationv1.AgentIdSchema, { value: "" }),
-      pageSize: 5,
       position: { case: "first", value: create(shimv1.ReadHistoryFirstSchema, {}) },
     });
 
@@ -588,7 +595,6 @@ describe("validateReadHistoryRequest target", () => {
     // Arrange.
     const request = create(shimv1.ReadHistoryRequestSchema, {
       target: create(conversationv1.AgentIdSchema, { value: "a-1" }),
-      pageSize: 5,
       position: { case: "first", value: create(shimv1.ReadHistoryFirstSchema, {}) },
     });
 

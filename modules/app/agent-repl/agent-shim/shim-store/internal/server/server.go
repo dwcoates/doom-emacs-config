@@ -403,14 +403,14 @@ func (s *Server) OpenAgentSession(ctx context.Context, req *connect.Request[stor
 	agentID := msg.GetAgent().GetValue()
 	log := s.rpcLogger(storev1connect.ShimStoreOpenAgentSessionProcedure, req.Header()).With(logging.Fields{AgentID: agentID, BookAgentID: agentID})
 	log.LogVerbose(logging.Fields{Operation: "store.rpc.open-agent-session", AgentID: agentID},
-		"open page_size=%d known_through=%t page_only=%t", msg.GetPageSize(), msg.KnownThrough != nil, msg.GetPageOnly())
+		"open opening=%s page_only=%t", openingOf(msg), msg.GetPageOnly())
 
 	if ref := validateOpenAgentSessionRequest(msg); ref != nil {
 		s.logRefusal(log, "store.rpc.open-agent-session", ref, logging.Fields{AgentID: agentID})
 		return openFailure(ref), nil
 	}
 
-	opened, err := s.store.OpenPage(correlated(ctx, req.Header()), agentID, msg.GetPageSize(), msg.GetKnownThrough())
+	opened, err := s.store.OpenPage(correlated(ctx, req.Header()), agentID, openingOf(msg))
 	if err != nil {
 		ref := s.storeFailure(log, "store.rpc.open-agent-session", err, logging.Fields{AgentID: agentID})
 		return openFailure(ref), nil
@@ -451,6 +451,18 @@ func (s *Server) OpenAgentSession(ctx context.Context, req *connect.Request[stor
 			Watch: &storev1.AgentSessionToken{Value: token},
 		}},
 	}), nil
+}
+
+// openingOf reads the request's `opening` arm. UNSET is the repaint.
+func openingOf(msg *storev1.OpenAgentSessionRequest) Opening {
+	switch opening := msg.GetOpening().(type) {
+	case *storev1.OpenAgentSessionRequest_KnownThrough:
+		return db.CatchUp(opening.KnownThrough)
+	case *storev1.OpenAgentSessionRequest_TailOnly:
+		return db.TailOnly()
+	default:
+		return db.Repaint()
+	}
 }
 
 func openFailure(ref *refusal) *connect.Response[storev1.OpenAgentSessionResponse] {
@@ -594,7 +606,7 @@ func (s *Server) ReadAgentPage(ctx context.Context, req *connect.Request[storev1
 	agentID := msg.GetBook().GetValue()
 	log := s.rpcLogger(storev1connect.ShimStoreReadAgentPageProcedure, req.Header()).With(logging.Fields{AgentID: agentID, BookAgentID: agentID})
 	log.LogVerbose(logging.Fields{Operation: "store.rpc.read-agent-page", AgentID: agentID, BookAgentID: agentID, Position: msg.GetAfter().GetValue()},
-		"read page page_size=%d through_at_ms=%d", msg.GetPageSize(), msg.GetThrough().GetAtMs())
+		"read page through_at_ms=%d", msg.GetThrough().GetAtMs())
 
 	if ref := validateReadAgentPageRequest(msg); ref != nil {
 		s.logRefusal(log, "store.rpc.read-agent-page", ref, logging.Fields{AgentID: agentID})
@@ -604,9 +616,9 @@ func (s *Server) ReadAgentPage(ctx context.Context, req *connect.Request[storev1
 	var page *storev1.ReadAgentPageSuccess
 	var err error
 	if through := msg.GetThrough(); through != nil {
-		page, err = s.store.ReadPageThrough(correlated(ctx, req.Header()), agentID, msg.GetPageSize(), through.GetAtMs())
+		page, err = s.store.ReadPageThrough(correlated(ctx, req.Header()), agentID, through.GetAtMs())
 	} else {
-		page, err = s.store.ReadPage(correlated(ctx, req.Header()), agentID, msg.GetPageSize(), msg.GetAfter())
+		page, err = s.store.ReadPage(correlated(ctx, req.Header()), agentID, msg.GetAfter())
 	}
 	if err != nil {
 		ref := s.storeFailure(log, "store.rpc.read-agent-page", err, logging.Fields{AgentID: agentID, Position: msg.GetAfter().GetValue()})

@@ -228,15 +228,13 @@ func TestOpenAgentSessionRefusesUnsetRequiredFields(t *testing.T) {
 		req       *storev1.OpenAgentSessionRequest
 		wantField string
 	}{
-		{name: "missing agent", req: &storev1.OpenAgentSessionRequest{PageSize: 10}, wantField: "agent"},
-		{name: "empty agent value", req: &storev1.OpenAgentSessionRequest{Agent: agentID(""), PageSize: 10}, wantField: "agent"},
-		{name: "zero page_size", req: &storev1.OpenAgentSessionRequest{Agent: agentID("main"), PageSize: 0}, wantField: "page_size"},
+		{name: "missing agent", req: &storev1.OpenAgentSessionRequest{}, wantField: "agent"},
+		{name: "empty agent value", req: &storev1.OpenAgentSessionRequest{Agent: agentID("")}, wantField: "agent"},
 		{
 			name: "empty known_through value",
 			req: &storev1.OpenAgentSessionRequest{
-				Agent:        agentID("main"),
-				PageSize:     10,
-				KnownThrough: &storev1.StoreItemPointer{Value: ""},
+				Agent:   agentID("main"),
+				Opening: &storev1.OpenAgentSessionRequest_KnownThrough{KnownThrough: &storev1.StoreItemPointer{Value: ""}},
 			},
 			wantField: "known_through",
 		},
@@ -270,33 +268,28 @@ func TestReadAgentPageRefusesUnsetRequiredFields(t *testing.T) {
 	}{
 		{
 			name:      "missing book",
-			req:       &storev1.ReadAgentPageRequest{PageSize: 10, Position: &storev1.ReadAgentPageRequest_After{After: &storev1.StoreItemPointer{Value: "p"}}},
+			req:       &storev1.ReadAgentPageRequest{Position: &storev1.ReadAgentPageRequest_After{After: &storev1.StoreItemPointer{Value: "p"}}},
 			wantField: "book",
 		},
 		{
 			name:      "empty book value",
-			req:       &storev1.ReadAgentPageRequest{Book: agentID(""), PageSize: 10, Position: &storev1.ReadAgentPageRequest_After{After: &storev1.StoreItemPointer{Value: "p"}}},
+			req:       &storev1.ReadAgentPageRequest{Book: agentID(""), Position: &storev1.ReadAgentPageRequest_After{After: &storev1.StoreItemPointer{Value: "p"}}},
 			wantField: "book",
 		},
 		{
-			name:      "zero page_size",
-			req:       &storev1.ReadAgentPageRequest{Book: agentID("main"), PageSize: 0, Position: &storev1.ReadAgentPageRequest_After{After: &storev1.StoreItemPointer{Value: "p"}}},
-			wantField: "page_size",
-		},
-		{
 			name:      "unset position",
-			req:       &storev1.ReadAgentPageRequest{Book: agentID("main"), PageSize: 10},
+			req:       &storev1.ReadAgentPageRequest{Book: agentID("main")},
 			wantField: "position",
 		},
 		{
 			name: "non-positive through bound",
-			req: &storev1.ReadAgentPageRequest{Book: agentID("main"), PageSize: 10,
+			req: &storev1.ReadAgentPageRequest{Book: agentID("main"),
 				Position: &storev1.ReadAgentPageRequest_Through{Through: &conversationv1.ConversationThrough{AtMs: 0}}},
 			wantField: "through.at_ms",
 		},
 		{
 			name:      "empty after pointer value",
-			req:       &storev1.ReadAgentPageRequest{Book: agentID("main"), PageSize: 10, Position: &storev1.ReadAgentPageRequest_After{After: &storev1.StoreItemPointer{Value: ""}}},
+			req:       &storev1.ReadAgentPageRequest{Book: agentID("main"), Position: &storev1.ReadAgentPageRequest_After{After: &storev1.StoreItemPointer{Value: ""}}},
 			wantField: "after",
 		},
 	}

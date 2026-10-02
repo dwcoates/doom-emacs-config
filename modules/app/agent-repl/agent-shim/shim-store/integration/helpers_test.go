@@ -1063,8 +1063,7 @@ func assertOpenUnknownAgent(t *testing.T, failure *storev1.OpenAgentSessionFailu
 func openUnknownAgent(ctx context.Context, t *testing.T, cli storev1connect.ShimStoreClient, agent string) {
 	t.Helper()
 	assertOpenUnknownAgent(t, openSessionExpectingFailure(ctx, t, cli, &storev1.OpenAgentSessionRequest{
-		Agent:    agentID(agent),
-		PageSize: 10,
+		Agent: agentID(agent),
 	}))
 }
 
@@ -1602,13 +1601,30 @@ func callContextWithin(t *testing.T, within time.Duration) (context.Context, con
 	return context.WithTimeout(context.Background(), within)
 }
 
-func openSession(ctx context.Context, t *testing.T, cli storev1connect.ShimStoreClient, agent string, pageSize uint32, knownThrough *storev1.StoreItemPointer) *storev1.OpenAgentSessionSuccess {
+// openSession opens a reading session: the repaint when knownThrough is nil,
+// the catch-up from it otherwise.
+func openSession(ctx context.Context, t *testing.T, cli storev1connect.ShimStoreClient, agent string, knownThrough *storev1.StoreItemPointer) *storev1.OpenAgentSessionSuccess {
 	t.Helper()
-	resp, err := cli.OpenAgentSession(ctx, connect.NewRequest(&storev1.OpenAgentSessionRequest{
-		Agent:        agentID(agent),
-		PageSize:     pageSize,
-		KnownThrough: knownThrough,
-	}))
+	req := &storev1.OpenAgentSessionRequest{Agent: agentID(agent)}
+	if knownThrough != nil {
+		req.Opening = &storev1.OpenAgentSessionRequest_KnownThrough{KnownThrough: knownThrough}
+	}
+	return openSessionWith(ctx, t, cli, req)
+}
+
+// openTailOnly opens a reading session that replays no history.
+func openTailOnly(ctx context.Context, t *testing.T, cli storev1connect.ShimStoreClient, agent string) *storev1.OpenAgentSessionSuccess {
+	t.Helper()
+	return openSessionWith(ctx, t, cli, &storev1.OpenAgentSessionRequest{
+		Agent:   agentID(agent),
+		Opening: &storev1.OpenAgentSessionRequest_TailOnly{TailOnly: &storev1.AgentSessionTailOnly{}},
+	})
+}
+
+func openSessionWith(ctx context.Context, t *testing.T, cli storev1connect.ShimStoreClient, req *storev1.OpenAgentSessionRequest) *storev1.OpenAgentSessionSuccess {
+	t.Helper()
+	agent := req.GetAgent().GetValue()
+	resp, err := cli.OpenAgentSession(ctx, connect.NewRequest(req))
 	if err != nil {
 		t.Fatalf("OpenAgentSession(%q) transport error: %v", agent, err)
 	}
@@ -1624,11 +1640,10 @@ func openSession(ctx context.Context, t *testing.T, cli storev1connect.ShimStore
 
 // openPageOnly is the one-shot read: the caller states at the open that no
 // watch follows, so the store mints nothing and the success carries no token.
-func openPageOnly(ctx context.Context, t *testing.T, cli storev1connect.ShimStoreClient, agent string, pageSize uint32) *storev1.OpenAgentSessionSuccess {
+func openPageOnly(ctx context.Context, t *testing.T, cli storev1connect.ShimStoreClient, agent string) *storev1.OpenAgentSessionSuccess {
 	t.Helper()
 	resp, err := cli.OpenAgentSession(ctx, connect.NewRequest(&storev1.OpenAgentSessionRequest{
 		Agent:    agentID(agent),
-		PageSize: pageSize,
 		PageOnly: true,
 	}))
 	if err != nil {
@@ -1683,11 +1698,10 @@ func openSessionExpectingFailure(ctx context.Context, t *testing.T, cli storev1c
 	return failure
 }
 
-func readPage(ctx context.Context, t *testing.T, cli storev1connect.ShimStoreClient, book string, pageSize uint32, after *storev1.StoreItemPointer) *storev1.ReadAgentPageSuccess {
+func readPage(ctx context.Context, t *testing.T, cli storev1connect.ShimStoreClient, book string, after *storev1.StoreItemPointer) *storev1.ReadAgentPageSuccess {
 	t.Helper()
 	resp, err := cli.ReadAgentPage(ctx, connect.NewRequest(&storev1.ReadAgentPageRequest{
 		Book:     agentID(book),
-		PageSize: pageSize,
 		Position: &storev1.ReadAgentPageRequest_After{After: after},
 	}))
 	if err != nil {
