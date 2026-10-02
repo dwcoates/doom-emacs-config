@@ -340,8 +340,9 @@ var salientMessages = []proto.Message{
 	&frontendv1.FooterStatusInterruptedSalient{},
 	&frontendv1.FooterStatusMergingSalient{},
 	&frontendv1.FooterStatusBackgroundSalient{},
-	&frontendv1.FooterStatusBlockedSalient{},
-	&frontendv1.FooterStatusDisconnectedSalient{},
+	&frontendv1.FooterStatusVendorFaultSalient{},
+	&frontendv1.FooterStatusAgentReplFaultSalient{},
+	&frontendv1.FooterStatusNetworkFaultSalient{},
 	&frontendv1.FooterStatusClosingSalient{},
 	&frontendv1.FooterStatusLoadingSalient{},
 }

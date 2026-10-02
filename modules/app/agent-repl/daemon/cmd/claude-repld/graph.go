@@ -392,7 +392,17 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// WatchDaemon stream (owner request, 2026-09-28): the set is built here,
 	// before the hook and the server, so no open can precede it.
 	loudFaults := health.NewLoudFaults(log)
-	p.DB = health.ObserveFaults(p.DB, newFaultSurfaces(footerResolver, topbarResolver, loudFaults), p.Surfaces)
+	// THE ROSTER IS BUILT BEFORE THE HOOK because it is one of the hook's
+	// surfaces: the network fault reaches it through the same door as the
+	// footer. It raises no fault itself, so it needs no decorated client.
+	// THE ROSTER'S LAST TURN RESULT IS DURABLE: a daemon that did not see a
+	// workspace's turn end draws its row as it stood, not `ready`.
+	sidebarResolver, err := sidebar.New(colors, p.Surfaces,
+		sidebar.WithResultSink(rosterResults(p.DB, p.Surfaces.Global())))
+	if err != nil {
+		return nil, fmt.Errorf("claude-repld: build the sidebar resolver: %w", err)
+	}
+	p.DB = health.ObserveFaults(p.DB, newFaultSurfaces(footerResolver, sidebarResolver, topbarResolver, loudFaults), p.Surfaces)
 
 	// THE LOCK STALL WATCHDOG is built before every component whose hot lock
 	// it watches (the feed, the session watchers, the prompt queue), and it
@@ -453,13 +463,6 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		return nil, fmt.Errorf("claude-repld: build the feed resolver: %w", err)
 	}
 
-	// THE ROSTER'S LAST TURN RESULT IS DURABLE: a daemon that did not see a
-	// workspace's turn end draws its row as it stood, not `ready`.
-	sidebarResolver, err := sidebar.New(colors, p.Surfaces,
-		sidebar.WithResultSink(rosterResults(p.DB, p.Surfaces.Global())))
-	if err != nil {
-		return nil, fmt.Errorf("claude-repld: build the sidebar resolver: %w", err)
-	}
 	holdsResolver, err := holds.New(p.Surfaces)
 	if err != nil {
 		return nil, fmt.Errorf("claude-repld: build the hold tray: %w", err)
@@ -1445,9 +1448,10 @@ func resolveFactsBound(value string) (time.Duration, error) {
 // translates the health verdict into each resolver's own vocabulary and adds
 // nothing: the partition and the lines are health's, the drawing theirs.
 type faultSurfaces struct {
-	footer footer.Resolver
-	topbar topbar.Resolver
-	loud   *health.LoudFaults
+	footer  footer.Resolver
+	sidebar sidebar.Resolver
+	topbar  topbar.Resolver
+	loud    *health.LoudFaults
 
 	mu sync.Mutex
 	// onTopbar are the open faults raised on the topbar (and so told to
@@ -1455,8 +1459,8 @@ type faultSurfaces struct {
 	onTopbar map[ids.FaultID]bool
 }
 
-func newFaultSurfaces(f footer.Resolver, t topbar.Resolver, loud *health.LoudFaults) *faultSurfaces {
-	return &faultSurfaces{footer: f, topbar: t, loud: loud, onTopbar: map[ids.FaultID]bool{}}
+func newFaultSurfaces(f footer.Resolver, s sidebar.Resolver, t topbar.Resolver, loud *health.LoudFaults) *faultSurfaces {
+	return &faultSurfaces{footer: f, sidebar: s, topbar: t, loud: loud, onTopbar: map[ids.FaultID]bool{}}
 }
 
 // FaultOpened puts a standing fault on the workspace's strip, or on every
@@ -1471,6 +1475,13 @@ func (f *faultSurfaces) FaultOpened(ws ids.WorkspaceID, line health.FaultLine) {
 		Detail:    line.Detail,
 		At:        line.At,
 	})
+	// THE ROSTER TAKES THE NETWORK FAULT FROM THE SAME DOOR, so the footer's
+	// network_fault and the roster's never stand on different facts. Every
+	// other domain reaches the roster by its own edges (the link, the
+	// vendor-start run).
+	if line.Cell.Status == health.FaultStatusNetworkFault && ws != "" {
+		f.sidebar.NetworkFaultOpened(ws, string(line.ID))
+	}
 	// ONLY A DAEMON-SCOPED FAULT reaches the topbar: health.FaultTopbarLine
 	// states no line for any other.
 	if line.Topbar == "" || ws != "" {
@@ -1502,6 +1513,9 @@ func topbarWarning(line health.FaultLine) topbar.DaemonWarning {
 // there.
 func (f *faultSurfaces) FaultClosed(ws ids.WorkspaceID, id ids.FaultID) {
 	f.footer.CloseFault(ws, string(id))
+	if ws != "" {
+		f.sidebar.FaultClosed(ws, string(id))
+	}
 	f.mu.Lock()
 	raised := f.onTopbar[id]
 	delete(f.onTopbar, id)

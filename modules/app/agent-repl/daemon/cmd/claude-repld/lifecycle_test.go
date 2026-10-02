@@ -164,6 +164,52 @@ func TestAnUnhealthyDiagnosticsPushOpensAShimReportedFault(t *testing.T) {
 	}
 }
 
+func TestAnUnreachableNetworkOnTheDiagnosticsPushOpensANetworkFault(t *testing.T) {
+	// Arrange
+	reporter := &fakeReporter{}
+	sink := newDiagnosticsSink(t, reporter)
+
+	// Act
+	sink.OnSessionDiagnostics("ws-1", unhealthyDiagnostics(&conversationv1.SessionFault{
+		Component: "vendor",
+		Detail:    "cannot reach api.anthropic.com: no route to host",
+		Kind: &conversationv1.SessionFault_NetworkUnreachable{
+			NetworkUnreachable: &conversationv1.SessionFaultNetworkUnreachable{},
+		},
+	}))
+
+	// Assert
+	if len(reporter.opened) != 1 {
+		t.Fatalf("opened %d faults, want exactly 1", len(reporter.opened))
+	}
+	got := reporter.opened[0]
+	if got.Kind != health.KindNetworkUnreachable {
+		t.Fatalf("the opened fault's kind = %q, want %q", got.Kind, health.KindNetworkUnreachable)
+	}
+	if got.Detail != "cannot reach api.anthropic.com: no route to host" || got.Evidence["kind"] != "network_unreachable" {
+		t.Fatalf("the opened fault = %+v, want the shim's observation and kind", got)
+	}
+}
+
+func TestAHealthyDiagnosticsPushRetractsTheStandingNetworkFault(t *testing.T) {
+	// Arrange
+	ws := wsm.WorkspaceID("ws-1")
+	reporter := &fakeReporter{standing: []wsm.Fault{
+		{ID: "f-net", Workspace: &ws, Kind: health.KindNetworkUnreachable},
+	}}
+	sink := newDiagnosticsSink(t, reporter)
+
+	// Act
+	sink.OnSessionDiagnostics("ws-1", &conversationv1.SessionDiagnostics{
+		Health: &conversationv1.SessionDiagnostics_Healthy{Healthy: &conversationv1.SessionHealthy{}},
+	})
+
+	// Assert
+	if len(reporter.closed) != 1 || reporter.closed[0] != "f-net" {
+		t.Fatalf("closed %v, want exactly the standing network fault", reporter.closed)
+	}
+}
+
 func TestAHealthyDiagnosticsPushRetractsTheStandingShimReportedFault(t *testing.T) {
 	// Arrange
 	ws := wsm.WorkspaceID("ws-1")

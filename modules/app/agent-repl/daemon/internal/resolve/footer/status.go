@@ -4,6 +4,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/health"
 	"claude-repld/internal/resolve/ladder"
 	"claude-repld/internal/shimclient"
 )
@@ -14,7 +15,7 @@ import (
 // unpainted, and a table row no arm claims is a state the vocabulary paints and
 // the resolver can never reach.
 var statusArms = []string{
-	"disconnected", "closing", "interrupted", "loading", "blocked", "merging",
+	"agent_repl_fault", "network_fault", "closing", "interrupted", "loading", "vendor_fault", "merging",
 	"merge_failed", "merged", "degraded", "waiting",
 	"working", "background", "turn_failed", "idle",
 }
@@ -67,16 +68,18 @@ func (r *resolver) rung(claim ladder.Claim, s *wsState, log dlog.Logger) *fronte
 	switch claim {
 	case ladder.Merging:
 		return r.merging(s, log)
-	case ladder.Disconnected:
-		return r.disconnected(s, log)
+	case ladder.AgentReplFault:
+		return r.agentReplFault(s, log)
+	case ladder.NetworkFault:
+		return r.networkFault(s, log)
 	case ladder.Closing:
 		return r.closing(s, log)
 	case ladder.MergeFailed:
 		return r.mergeFailed(s, log)
 	case ladder.Merged:
 		return r.merged(s, log)
-	case ladder.Blocked:
-		return r.blocked(s, log)
+	case ladder.VendorFault:
+		return r.vendorFault(s, log)
 	case ladder.Degraded:
 		return r.degraded(s, log)
 	case ladder.Waiting:
@@ -119,24 +122,24 @@ func (r *resolver) idleFamily(s *wsState) *frontendv1.FooterStatus {
 	return r.idle(s)
 }
 
-// disconnected resolves the link's step, or nil while the link serves. A link
-// that serves WITH DEGRADATION is not disconnected: it is usable, and the
-// degraded rung draws it (owner ruling, 2026-09-28).
+// agentReplFault resolves the link's step, or a standing agent-repl fault, or
+// nil while agent-repl's own services serve. A link that serves WITH
+// DEGRADATION is not a fault: it is usable, and the degraded rung draws it
+// (owner ruling, 2026-09-28).
 //
 // A PARKED SESSION NEVER REACHES HERE. The ladder skips the whole rung while
 // the idle sweep's park stands (resolve/ladder): the sweep put the route down
 // itself and a prompt brings it straight back, so there is no fault to report.
-// The webapp makes that more than a wording question: its composer gate IS
-// this word (webapp/src/main.ts — a `disconnected` status closes the
-// composer), so `dead` for a parked session would withhold the very prompt
-// that revives it.
-func (r *resolver) disconnected(s *wsState, log dlog.Logger) *frontendv1.FooterStatus {
+// The webapp makes that more than a wording question: its composer gate is
+// this arm's color (render-colors.json, blue closes it), so `dead` for a
+// parked session would withhold the very prompt that revives it.
+func (r *resolver) agentReplFault(s *wsState, log dlog.Logger) *frontendv1.FooterStatus {
 	if !s.linkSeen {
 		// NO LINK STATE YET IS NOT "SERVING". A standing fault that says the
 		// session cannot be reached is evidence in its own right — a bring-up
 		// that never produced a link edge at all is exactly the case row N1 1
 		// of the footer topology audit was about.
-		if arm := r.disconnectedByFault(s, log); arm != nil {
+		if arm := r.agentReplByFault(s, log); arm != nil {
 			return arm
 		}
 		if !ladder.AwaitingBringUp(s.linkSeen, s.turn != nil, s.sessionStarted) {
@@ -146,103 +149,123 @@ func (r *resolver) disconnected(s *wsState, log dlog.Logger) *frontendv1.FooterS
 		// awaits the bring-up, and the roster draws that window `init`
 		// (resolve/ladder).
 		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "an accepted turn awaits the bring-up"})
-		return &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_Disconnected{
-			Disconnected: &frontendv1.FooterStatusDisconnected{
-				Substatus: &frontendv1.FooterStatusDisconnected_Starting{
-					Starting: &frontendv1.FooterSubStatusDisconnectedStarting{}},
-				Activity: r.disconnectedActivity(s, log),
+		return &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_AgentReplFault{
+			AgentReplFault: &frontendv1.FooterStatusAgentReplFault{
+				Substatus: &frontendv1.FooterStatusAgentReplFault_Starting{
+					Starting: &frontendv1.FooterSubStatusAgentReplFaultStarting{}},
+				Activity: r.agentReplFaultActivity(s, log),
 			}}}
 	}
-	// A VENDOR THAT DID NOT START OUTRANKS THE LINK'S OWN ACCOUNT of a dead
-	// or connected route: a spawned shim stopped after its vendor failed reads
-	// as a dead link that never connected (`start_failed`), which is the shim
-	// PROCESS's word, and a relaunched shim's link reads connected. Only a
-	// route still being dialed or redialed says something newer.
-	if s.link != shimclient.LinkDialing && s.link != shimclient.LinkRedialing && vendorFault(r.standingFault(s)) {
-		return r.disconnectedByFault(s, log)
+	// A VENDOR THAT DID NOT START IS THE VENDOR'S FAULT, NOT THE LINK'S: a
+	// spawned shim stopped after its vendor failed reads as a dead link that
+	// never connected, which is the shim PROCESS's word, and the stop was this
+	// daemon's own doing. So while a vendor-start fault stands, only a route
+	// still being dialed or redialed, or a standing agent-repl fault, claims
+	// this rung; the vendor rung draws the rest (owner ruling, 2026-10-02).
+	if s.link != shimclient.LinkDialing && s.link != shimclient.LinkRedialing && r.standingFault(s, health.FaultStatusVendorFault) != nil {
+		return r.agentReplByFault(s, log)
 	}
-	arm := &frontendv1.FooterStatusDisconnected{}
+	arm := &frontendv1.FooterStatusAgentReplFault{}
 	switch {
 	case s.link == shimclient.LinkDialing:
 		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case s.link == shimclient.LinkDialing"})
-		arm.Substatus = &frontendv1.FooterStatusDisconnected_Starting{
-			Starting: &frontendv1.FooterSubStatusDisconnectedStarting{}}
+		arm.Substatus = &frontendv1.FooterStatusAgentReplFault_Starting{
+			Starting: &frontendv1.FooterSubStatusAgentReplFaultStarting{}}
 	case s.link == shimclient.LinkRedialing:
 		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case s.link == shimclient.LinkRedialing"})
-		arm.Substatus = &frontendv1.FooterStatusDisconnected_Severed{
-			Severed: &frontendv1.FooterSubStatusDisconnectedSevered{}}
+		arm.Substatus = &frontendv1.FooterStatusAgentReplFault_Severed{
+			Severed: &frontendv1.FooterSubStatusAgentReplFaultSevered{}}
 	case s.link == shimclient.LinkDead && s.everConnected:
 		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case s.link == shimclient.LinkDead && s.everConnected"})
-		arm.Substatus = &frontendv1.FooterStatusDisconnected_Dead{
-			Dead: &frontendv1.FooterSubStatusDisconnectedDead{}}
+		arm.Substatus = &frontendv1.FooterStatusAgentReplFault_Dead{
+			Dead: &frontendv1.FooterSubStatusAgentReplFaultDead{}}
 	case s.link == shimclient.LinkDead:
 		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case s.link == shimclient.LinkDead"})
-		arm.Substatus = &frontendv1.FooterStatusDisconnected_StartFailed{
-			StartFailed: &frontendv1.FooterSubStatusDisconnectedStartFailed{}}
+		arm.Substatus = &frontendv1.FooterStatusAgentReplFault_StartFailed{
+			StartFailed: &frontendv1.FooterSubStatusAgentReplFaultStartFailed{}}
 	case !s.hostStream || !s.webStream:
 		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case !s.hostStream || !s.webStream"})
 		// A HOP IS DOWN. The daemon-to-shim link serves, but one of the two
 		// client streams does not, so the workspace is not connected
 		// (daemon.md invariant 11) and the footer says so rather than drawing
 		// a status nobody is receiving.
-		arm.Substatus = &frontendv1.FooterStatusDisconnected_Severed{
-			Severed: &frontendv1.FooterSubStatusDisconnectedSevered{}}
+		arm.Substatus = &frontendv1.FooterStatusAgentReplFault_Severed{
+			Severed: &frontendv1.FooterSubStatusAgentReplFaultSevered{}}
 	default:
 		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "default"})
-		// THE LINK SERVES. Only a standing fault can still claim the status,
-		// and only one that says the session cannot be reached.
-		return r.disconnectedByFault(s, log)
+		// THE LINK SERVES. Only a standing agent-repl fault can still claim
+		// the rung.
+		return r.agentReplByFault(s, log)
 	}
-	arm.Activity = r.disconnectedActivity(s, log)
+	arm.Activity = r.agentReplFaultActivity(s, log)
 	return &frontendv1.FooterStatus{
-		Status: &frontendv1.FooterStatus_Disconnected{Disconnected: arm}}
+		Status: &frontendv1.FooterStatus_AgentReplFault{AgentReplFault: arm}}
 }
 
-// disconnectedByFault resolves the disconnected step a STANDING FAULT claims,
-// where the link state itself claimed none. The bucket is the health package's
+// agentReplByFault resolves the agent-repl step a STANDING FAULT claims, where
+// the link state itself claimed none. The bucket is the health package's
 // verdict (THE FAULT PARTITION, internal/health/footer.go), taken as given: no
 // mapping is derived here.
-//
-// A fault whose bucket is not one of the three disconnected steps claims
-// nothing: the four non-escalating kinds leave the status exactly as it stands
-// and take the activity cell alone, and a `blocked` fault is the blocked
-// arm's.
-func (r *resolver) disconnectedByFault(s *wsState, log dlog.Logger) *frontendv1.FooterStatus {
-	fault := r.standingFault(s)
-	if fault == nil || fault.Status != "disconnected" {
+func (r *resolver) agentReplByFault(s *wsState, log dlog.Logger) *frontendv1.FooterStatus {
+	fault := r.standingFault(s, health.FaultStatusAgentReplFault)
+	if fault == nil {
 		return nil
 	}
-	arm := &frontendv1.FooterStatusDisconnected{}
+	arm := &frontendv1.FooterStatusAgentReplFault{}
 	switch fault.SubStatus {
-	case "start_failed":
-		arm.Substatus = &frontendv1.FooterStatusDisconnected_StartFailed{
-			StartFailed: &frontendv1.FooterSubStatusDisconnectedStartFailed{}}
-	case "dead":
-		arm.Substatus = &frontendv1.FooterStatusDisconnected_Dead{
-			Dead: &frontendv1.FooterSubStatusDisconnectedDead{}}
-	case "severed":
-		arm.Substatus = &frontendv1.FooterStatusDisconnected_Severed{
-			Severed: &frontendv1.FooterSubStatusDisconnectedSevered{}}
-	case "vendor_retry":
-		arm.Substatus = &frontendv1.FooterStatusDisconnected_VendorRetry{
-			VendorRetry: &frontendv1.FooterSubStatusDisconnectedVendorRetry{}}
-	case "vendor_rejection":
-		arm.Substatus = &frontendv1.FooterStatusDisconnected_VendorRejection{
-			VendorRejection: &frontendv1.FooterSubStatusDisconnectedVendorRejection{}}
-	case "vendor_failed":
-		arm.Substatus = &frontendv1.FooterStatusDisconnected_VendorFailed{
-			VendorFailed: &frontendv1.FooterSubStatusDisconnectedVendorFailed{}}
+	case health.FaultSubStatusStartFailed:
+		arm.Substatus = &frontendv1.FooterStatusAgentReplFault_StartFailed{
+			StartFailed: &frontendv1.FooterSubStatusAgentReplFaultStartFailed{}}
+	case health.FaultSubStatusDead:
+		arm.Substatus = &frontendv1.FooterStatusAgentReplFault_Dead{
+			Dead: &frontendv1.FooterSubStatusAgentReplFaultDead{}}
+	case health.FaultSubStatusSevered:
+		arm.Substatus = &frontendv1.FooterStatusAgentReplFault_Severed{
+			Severed: &frontendv1.FooterSubStatusAgentReplFaultSevered{}}
+	case health.FaultSubStatusDaemonImpaired:
+		arm.Substatus = &frontendv1.FooterStatusAgentReplFault_DaemonImpaired{
+			DaemonImpaired: &frontendv1.FooterSubStatusAgentReplFaultDaemonImpaired{}}
 	default:
-		log.Warn("daemon.footer.fault_bucket_unknown",
-			"a standing fault claims the disconnected status with a step this resolver cannot draw",
-			dlog.Context{"kind": fault.Kind, "substatus": fault.SubStatus})
+		log.Error("daemon.footer.fault_bucket_unknown",
+			"a standing fault claims the agent-repl fault status with a step this resolver cannot draw",
+			dlog.Context{
+				"kind": fault.Kind, "substatus": fault.SubStatus,
+				"invariant_violation": "every agent-repl fault bucket has a drawing",
+				"remediation":         "add the bucket to agentReplByFault",
+			})
 		return nil
 	}
 	log.Debug("daemon.footer.status_decision", "selected a footer status branch",
-		dlog.Context{"function": "status", "branch": "disconnected by standing fault", "kind": fault.Kind})
-	arm.Activity = r.disconnectedActivity(s, log)
+		dlog.Context{"function": "status", "branch": "agent-repl fault by standing fault", "kind": fault.Kind})
+	arm.Activity = r.agentReplFaultActivity(s, log)
 	return &frontendv1.FooterStatus{
-		Status: &frontendv1.FooterStatus_Disconnected{Disconnected: arm}}
+		Status: &frontendv1.FooterStatus_AgentReplFault{AgentReplFault: arm}}
+}
+
+// networkFault resolves the network rung: a standing fault that says this
+// machine cannot reach the network, or nil.
+func (r *resolver) networkFault(s *wsState, log dlog.Logger) *frontendv1.FooterStatus {
+	fault := r.standingFault(s, health.FaultStatusNetworkFault)
+	if fault == nil {
+		return nil
+	}
+	if fault.SubStatus != health.FaultSubStatusOffline {
+		log.Error("daemon.footer.fault_bucket_unknown",
+			"a standing fault claims the network fault status with a step this resolver cannot draw",
+			dlog.Context{
+				"kind": fault.Kind, "substatus": fault.SubStatus,
+				"invariant_violation": "every network fault bucket has a drawing",
+				"remediation":         "add the bucket to networkFault",
+			})
+		return nil
+	}
+	log.Debug("daemon.footer.status_decision", "selected a footer status branch",
+		dlog.Context{"function": "status", "branch": "network fault by standing fault", "kind": fault.Kind})
+	return &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_NetworkFault{
+		NetworkFault: &frontendv1.FooterStatusNetworkFault{
+			Substatus: &frontendv1.FooterStatusNetworkFault_Offline{Offline: &frontendv1.FooterSubStatusNetworkFaultOffline{}},
+			Activity:  r.networkFaultActivity(s, fault),
+		}}}
 }
 
 // closing resolves the close step, or nil when no close is blocked.
@@ -306,69 +329,75 @@ func (r *resolver) loading(s *wsState, log dlog.Logger) *frontendv1.FooterStatus
 	return &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_Loading{Loading: arm}}
 }
 
-// blocked resolves the block, or nil when nothing blocks the session.
-func (r *resolver) blocked(s *wsState, log dlog.Logger) *frontendv1.FooterStatus {
-	if s.blocked == nil {
-		if s.retryBlocks() {
-			// A TURN WHOSE CALL THE VENDOR IS RETRYING CANNOT ADVANCE, so it
-			// is blocked until the retried agent is answered (ladder/retry.go).
-			log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "the vendor is retrying the turn's call"})
-			return &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_Blocked{Blocked: &frontendv1.FooterStatusBlocked{
-				Substatus: &frontendv1.FooterStatusBlocked_ApiRetrying{ApiRetrying: &frontendv1.FooterSubStatusBlockedApiRetrying{}},
-				Activity:  r.blockedActivity(s),
-			}}}
+// vendorFault resolves the vendor rung: a vendor that will not start (by its
+// standing fault), else the vendor or account block, else a call the vendor
+// is retrying, else nil. A VENDOR-START FAULT RANKS FIRST: it means no session
+// exists, so whatever a previous session's turn said about the vendor is
+// stale beside it.
+func (r *resolver) vendorFault(s *wsState, log dlog.Logger) *frontendv1.FooterStatus {
+	if fault := r.standingFault(s, health.FaultStatusVendorFault); fault != nil {
+		arm := &frontendv1.FooterStatusVendorFault{}
+		switch fault.SubStatus {
+		case health.FaultSubStatusVendorRetry:
+			arm.Substatus = &frontendv1.FooterStatusVendorFault_VendorRetry{
+				VendorRetry: &frontendv1.FooterSubStatusVendorFaultVendorRetry{}}
+		case health.FaultSubStatusVendorRejection:
+			arm.Substatus = &frontendv1.FooterStatusVendorFault_VendorRejection{
+				VendorRejection: &frontendv1.FooterSubStatusVendorFaultVendorRejection{}}
+		case health.FaultSubStatusVendorFailed:
+			arm.Substatus = &frontendv1.FooterStatusVendorFault_VendorFailed{
+				VendorFailed: &frontendv1.FooterSubStatusVendorFaultVendorFailed{}}
+		default:
+			log.Error("daemon.footer.fault_bucket_unknown",
+				"a standing fault claims the vendor fault status with a step this resolver cannot draw",
+				dlog.Context{
+					"kind": fault.Kind, "substatus": fault.SubStatus,
+					"invariant_violation": "every vendor fault bucket has a drawing",
+					"remediation":         "add the bucket to vendorFault",
+				})
+			return nil
 		}
-		// A DAEMON THAT CANNOT SERVE THIS SESSION BLOCKS IT. The vendor-side
-		// blocks above are the session's own; this one is the daemon's, and
-		// the shim may be perfectly healthy while it stands.
-		return r.blockedByFault(s, log)
+		log.Debug("daemon.footer.status_decision", "selected a footer status branch",
+			dlog.Context{"function": "status", "branch": "vendor fault by standing fault", "kind": fault.Kind})
+		arm.Activity = r.vendorFaultActivity(s)
+		return &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_VendorFault{VendorFault: arm}}
 	}
-	arm := &frontendv1.FooterStatusBlocked{Activity: r.blockedActivity(s)}
+	if s.blocked == nil {
+		if !s.retryBlocks() {
+			return nil
+		}
+		// A TURN WHOSE CALL THE VENDOR IS RETRYING CANNOT ADVANCE, so it is a
+		// vendor fault until the retried agent is answered (ladder/retry.go).
+		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "the vendor is retrying the turn's call"})
+		return &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_VendorFault{VendorFault: &frontendv1.FooterStatusVendorFault{
+			Substatus: &frontendv1.FooterStatusVendorFault_ApiRetrying{ApiRetrying: &frontendv1.FooterSubStatusVendorFaultApiRetrying{}},
+			Activity:  r.vendorFaultActivity(s),
+		}}}
+	}
+	arm := &frontendv1.FooterStatusVendorFault{Activity: r.vendorFaultActivity(s)}
 	switch s.blocked.kind {
 	case blockedAuth:
 		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case blockedAuth"})
-		arm.Substatus = &frontendv1.FooterStatusBlocked_Auth{
-			Auth: &frontendv1.FooterSubStatusBlockedAuth{}}
+		arm.Substatus = &frontendv1.FooterStatusVendorFault_Auth{
+			Auth: &frontendv1.FooterSubStatusVendorFaultAuth{}}
 	case blockedUsageLimit:
 		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case blockedUsageLimit"})
-		arm.Substatus = &frontendv1.FooterStatusBlocked_UsageLimit{
-			UsageLimit: &frontendv1.FooterSubStatusBlockedUsageLimit{}}
+		arm.Substatus = &frontendv1.FooterStatusVendorFault_UsageLimit{
+			UsageLimit: &frontendv1.FooterSubStatusVendorFaultUsageLimit{}}
 	case blockedVendorError:
 		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case blockedVendorError"})
-		arm.Substatus = &frontendv1.FooterStatusBlocked_VendorError{
-			VendorError: &frontendv1.FooterSubStatusBlockedVendorError{}}
+		arm.Substatus = &frontendv1.FooterStatusVendorFault_VendorError{
+			VendorError: &frontendv1.FooterSubStatusVendorFaultVendorError{}}
 	case blockedBilling:
 		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case blockedBilling"})
-		arm.Substatus = &frontendv1.FooterStatusBlocked_Billing{
-			Billing: &frontendv1.FooterSubStatusBlockedBilling{}}
+		arm.Substatus = &frontendv1.FooterStatusVendorFault_Billing{
+			Billing: &frontendv1.FooterSubStatusVendorFaultBilling{}}
 	case blockedQueryDied:
 		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case blockedQueryDied"})
-		arm.Substatus = &frontendv1.FooterStatusBlocked_QueryDied{
-			QueryDied: &frontendv1.FooterSubStatusBlockedQueryDied{}}
+		arm.Substatus = &frontendv1.FooterStatusVendorFault_QueryDied{
+			QueryDied: &frontendv1.FooterSubStatusVendorFaultQueryDied{}}
 	}
-	return &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_Blocked{Blocked: arm}}
-}
-
-// blockedByFault resolves `blocked · daemon_impaired` when a standing fault
-// says the daemon owes this session a service it cannot give — its prompts
-// directory, its state client, its durable log sink, its own redeploy. The
-// bucket is the health package's verdict, taken as given.
-func (r *resolver) blockedByFault(s *wsState, log dlog.Logger) *frontendv1.FooterStatus {
-	fault := r.standingFault(s)
-	if fault == nil || fault.Status != "blocked" {
-		return nil
-	}
-	log.Debug("daemon.footer.status_decision", "selected a footer status branch",
-		dlog.Context{"function": "status", "branch": "blocked by standing fault", "kind": fault.Kind})
-	return &frontendv1.FooterStatus{
-		Status: &frontendv1.FooterStatus_Blocked{
-			Blocked: &frontendv1.FooterStatusBlocked{
-				Substatus: &frontendv1.FooterStatusBlocked_DaemonImpaired{
-					DaemonImpaired: &frontendv1.FooterSubStatusBlockedDaemonImpaired{}},
-				Activity: r.blockedActivity(s),
-			},
-		},
-	}
+	return &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_VendorFault{VendorFault: arm}}
 }
 
 // merging projects a merge IN FLIGHT onto its step. The ladder calls it only
@@ -668,14 +697,16 @@ func statusName(status *frontendv1.FooterStatus) string {
 		return "merging"
 	case *frontendv1.FooterStatus_Background:
 		return "background"
-	case *frontendv1.FooterStatus_Blocked:
-		return "blocked"
+	case *frontendv1.FooterStatus_VendorFault:
+		return "vendor_fault"
+	case *frontendv1.FooterStatus_NetworkFault:
+		return "network_fault"
 	case *frontendv1.FooterStatus_Degraded:
 		return "degraded"
 	case *frontendv1.FooterStatus_TurnFailed:
 		return "turn_failed"
-	case *frontendv1.FooterStatus_Disconnected:
-		return "disconnected"
+	case *frontendv1.FooterStatus_AgentReplFault:
+		return "agent_repl_fault"
 	case *frontendv1.FooterStatus_Closing:
 		return "closing"
 	case *frontendv1.FooterStatus_Loading:

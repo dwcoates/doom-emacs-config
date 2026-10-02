@@ -22,10 +22,10 @@ func updateOf(status *frontendv1.FooterStatus) *frontendv1.FooterStatusActivityU
 		return arm.Waiting.GetActivity().GetSalient().GetUpdate()
 	case *frontendv1.FooterStatus_Background:
 		return arm.Background.GetActivity().GetSalient().GetUpdate()
-	case *frontendv1.FooterStatus_Blocked:
-		return arm.Blocked.GetActivity().GetSalient().GetUpdate()
-	case *frontendv1.FooterStatus_Disconnected:
-		return arm.Disconnected.GetActivity().GetSalient().GetUpdate()
+	case *frontendv1.FooterStatus_VendorFault:
+		return arm.VendorFault.GetActivity().GetSalient().GetUpdate()
+	case *frontendv1.FooterStatus_AgentReplFault:
+		return arm.AgentReplFault.GetActivity().GetSalient().GetUpdate()
 	default:
 		return nil
 	}
