@@ -94,6 +94,19 @@ func (d *Daemon) AwaitLogRecord(path string, what string, pred func(LogRecord) b
 	})
 }
 
+// AwaitLogRecordAfter waits for a record satisfying pred that comes AFTER, in
+// the log's own order, a record satisfying after. The log is read from its
+// start on every poll, so an await keyed on pred alone is satisfied by a
+// matching record written before the event the caller meant to follow; this
+// one only accepts records past the first anchor. Not for the shared run log,
+// whose pid scoping AwaitLogRecord owns.
+func (d *Daemon) AwaitLogRecordAfter(path, what string, after, pred func(LogRecord) bool) LogRecord {
+	d.t.Helper()
+	wait, cancelWait := d.waitCtx()
+	defer cancelWait()
+	return awaitLogRecordAfter(d.t, wait, path, what, after, pred)
+}
+
 // AwaitRunLogRecordFromAnyProcess waits for a run-log record written by ANY
 // process on this daemon's state root -- a handover successor's included,
 // which AwaitLogRecord's own-pid filter skips.
@@ -108,11 +121,25 @@ func (d *Daemon) AwaitRunLogRecordFromAnyProcess(what string, pred func(LogRecor
 // wait ends first.
 func awaitLogRecord(t *testing.T, wait context.Context, path, what string, pred func(LogRecord) bool) LogRecord {
 	t.Helper()
+	return awaitLogRecordAfter(t, wait, path, what, func(LogRecord) bool { return true }, pred)
+}
+
+// awaitLogRecordAfter polls path for the first record pred accepts among the
+// records from the first one after accepts onward (that anchor included, so
+// an anchor that is itself the awaited record is found), failing t when wait
+// ends first. Each poll re-reads the log from its start and re-finds the
+// anchor, so the order judged is always the file's own.
+func awaitLogRecordAfter(t *testing.T, wait context.Context, path, what string, after, pred func(LogRecord) bool) LogRecord {
+	t.Helper()
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 	for {
+		anchored := false
 		for _, r := range readLog(t, path) {
-			if pred(r) {
+			if !anchored && after(r) {
+				anchored = true
+			}
+			if anchored && pred(r) {
 				return r
 			}
 		}

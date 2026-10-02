@@ -447,6 +447,10 @@ func TestKeepAliveNeverAppearsOnWire(t *testing.T) {
 	}
 }
 
+// fakeVendorTurnMessage is the fake vendor's record of running a turn of its
+// own (agent-shim/claude/shim/src/fake/index.ts, runVendorTurn).
+const fakeVendorTurnMessage = "fake vendor runs a turn of its OWN before the next send; nothing in it is stamped"
+
 // TestKeepAliveAnswerAfterVendorTurnNeverServed — the owner's leak of
 // 2026-09-23. The vendor ran a turn of its OWN (a background task's
 // notification) between the shim's keep-alive send and its answer; that
@@ -458,8 +462,13 @@ func TestKeepAliveNeverAppearsOnWire(t *testing.T) {
 // shim's keep-alive. The mock ECHOES a prompt into its reply, so a served row
 // of the keep-alive's answer would carry the keep-alive marker.
 //
-// SYNCHRONIZATION: the shim's own "closed a turn" record with keepalive=true
-// proves the keep-alive was answered; a real prompt submitted AFTER it and
+// SYNCHRONIZATION: the shim's own "closed a turn" record with keepalive=true,
+// written AFTER the fake vendor's record of running its own turn, proves the
+// keep-alive that turn ran ahead of was answered. The await reads the shim log
+// from its start, so a keep-alive the compressed cadence closed BEFORE the
+// queued turn (a slow submit leaves the session idle long enough) must not
+// satisfy it: that one ran ahead of nothing, and the next send would then be
+// the real prompt below. A real prompt submitted AFTER it and
 // seen to end in the feed proves every row the shim wrote before it — the
 // keep-alive's included — reached the store, because the shim writes in
 // order. Only then is absence asserted.
@@ -475,7 +484,9 @@ func TestKeepAliveAnswerAfterVendorTurnNeverServed(t *testing.T) {
 
 	// Act: the keep-alive beats, the vendor runs its own turn first, then
 	// answers the keep-alive.
-	w.Daemon.AwaitLogRecord(harness.WorkspaceLogPath(repo.Dir, "shim"), "a keep-alive turn to close",
+	w.Daemon.AwaitLogRecordAfter(harness.WorkspaceLogPath(repo.Dir, "shim"),
+		"a keep-alive turn to close after the vendor's own turn ran",
+		func(r harness.LogRecord) bool { return r.Message == fakeVendorTurnMessage },
 		func(r harness.LogRecord) bool { return r.Message == "closed a turn" && r.Context["keepalive"] == true })
 	after := SubmitPrompt(t, w, ws, "after the keep-alive")
 	AwaitTurnEnded(t, w, ws, after)

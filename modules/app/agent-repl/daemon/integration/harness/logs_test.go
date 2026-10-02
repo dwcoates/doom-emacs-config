@@ -296,6 +296,52 @@ func TestAwaitLogRecordReturnsTheFirstRecordThePredicateAccepts(t *testing.T) {
 	}
 }
 
+func TestAwaitLogRecordAfterSkipsAMatchWrittenBeforeTheAnchor(t *testing.T) {
+	// Arrange.
+	path := filepath.Join(t.TempDir(), "shim.log")
+	lines := `{"timestamp":"2026-09-24T18:06:04Z","level":"info","pid":1,"operation":"a","message":"closed","context":{"n":1}}
+{"timestamp":"2026-09-24T18:06:05Z","level":"info","pid":1,"operation":"a","message":"anchor"}
+{"timestamp":"2026-09-24T18:06:06Z","level":"info","pid":1,"operation":"a","message":"closed","context":{"n":2}}
+`
+	if err := os.WriteFile(path, []byte(lines), 0o600); err != nil {
+		t.Fatalf("write the log: %v", err)
+	}
+	wait, cancel := context.WithTimeout(context.Background(), DefaultTimeout)
+	defer cancel()
+
+	// Act.
+	got := awaitLogRecordAfter(t, wait, path, "the close after the anchor",
+		func(r LogRecord) bool { return r.Message == "anchor" },
+		func(r LogRecord) bool { return r.Message == "closed" })
+
+	// Assert.
+	if got.Context["n"] != float64(2) {
+		t.Fatalf("record = %+v, want the close written after the anchor", got)
+	}
+}
+
+func TestAwaitLogRecordAfterAcceptsTheAnchorItself(t *testing.T) {
+	// Arrange.
+	path := filepath.Join(t.TempDir(), "shim.log")
+	lines := `{"timestamp":"2026-09-24T18:06:05Z","level":"info","pid":1,"operation":"a","message":"anchor"}
+`
+	if err := os.WriteFile(path, []byte(lines), 0o600); err != nil {
+		t.Fatalf("write the log: %v", err)
+	}
+	wait, cancel := context.WithTimeout(context.Background(), DefaultTimeout)
+	defer cancel()
+
+	// Act.
+	got := awaitLogRecordAfter(t, wait, path, "the anchor",
+		func(r LogRecord) bool { return r.Message == "anchor" },
+		func(r LogRecord) bool { return r.Message == "anchor" })
+
+	// Assert.
+	if got.Message != "anchor" {
+		t.Fatalf("record = %+v, want the anchor", got)
+	}
+}
+
 func TestLogTailOfAnEmptyLogSaysSo(t *testing.T) {
 	// Act
 	got := logTail(nil, 3)
