@@ -6057,3 +6057,22 @@ restores them afterwards."
         (run-hook-with-args 'agent-repl-roster-update-functions '(:pushed t))
         ;; Assert
         (should (equal armed 1))))))
+
+(ert-deftest agent-repl-test-core-every-registered-boundary-is-defined ()
+  "Every external-boundary registry entry names a function some source defines.
+A stale entry guards nothing and hides that the wrapper it named is gone."
+  ;; Arrange
+  (let ((sources (append (agent-repl-test--production-lisp-files)
+                         (list (expand-file-name "../config.el" agent-repl-test--module-dir))))
+        (defined nil))
+    (dolist (file sources)
+      (with-temp-buffer
+        (insert-file-contents file)
+        (goto-char (point-min))
+        (while (re-search-forward "^(defun \\([^ \n]+\\) " nil t)
+          (push (intern (match-string 1)) defined))))
+    ;; Act
+    (let ((stale (seq-remove (lambda (name) (memq name defined))
+                             agent-repl--external-boundary-functions)))
+      ;; Assert
+      (should (equal stale nil)))))
