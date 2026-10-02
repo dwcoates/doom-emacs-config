@@ -94,14 +94,11 @@ func (r *resolver) SetWorkspaceDir(ws ids.WorkspaceID, dir string) error {
 	s.log = log.With(dlog.Context{"workspace_id": string(ws)})
 	s.log.Debug("daemon.holds.bind", "the hold tray bound a workspace to its log sink",
 		dlog.Context{"workspace_dir": dir})
-	view := r.render(s, s.log)
-	topic := r.topicLocked(ws)
-	r.mu.Unlock()
 	// THE EMPTY TRAY IS A COMPLETE ANSWER, and binding is when it can first be
 	// given: a subscriber that opens before any hold exists is otherwise
 	// handed nothing at all, because a Topic replays only what was published.
-	topic.Publish(view)
-	r.mu.Lock()
+	// Published under the lock that rendered it, for the reason mutate states.
+	r.topicLocked(ws).Publish(r.render(s, s.log))
 	return nil
 }
 
@@ -139,7 +136,13 @@ func (r *resolver) mutate(ws ids.WorkspaceID, operation, message string, ctx dlo
 	apply(s)
 	log := r.logOf(ws, s)
 	tray := r.render(s, log)
-	topic := r.topicLocked(ws)
+	// PUBLISHED UNDER THE LOCK THAT RENDERED IT, so views reach the topic in
+	// the order the changes were made. Published after the unlock, a change
+	// rendered first could be published second, and a stale view overwrote a
+	// newer one on the wire (2026-10-02: the roster walked submitting, ready,
+	// thinking for an accepted prompt). Topic.Publish only enqueues, so it
+	// never waits on a subscriber.
+	r.topicLocked(ws).Publish(tray)
 	r.mu.Unlock()
 
 	if ctx == nil {
@@ -147,7 +150,6 @@ func (r *resolver) mutate(ws ids.WorkspaceID, operation, message string, ctx dlo
 	}
 	ctx["items"] = len(tray.GetItems())
 	log.Debug(operation, message, ctx)
-	topic.Publish(tray)
 }
 
 // SetHeldPrompts installs a workspace's standing holds, whole.

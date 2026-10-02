@@ -134,6 +134,15 @@ func (r *resolver) mutate(operation, message string, ctx dlog.Context, log dlog.
 	}
 	changes := r.pendingResults
 	r.pendingResults = nil
+	// PUBLISHED UNDER THE LOCK THAT RENDERED IT, so views reach the topic in
+	// the order the changes were made. Published after the unlock, a change
+	// rendered first could be published second, and a stale view overwrote a
+	// newer one on the wire (2026-10-02: the roster walked submitting, ready,
+	// thinking for an accepted prompt). Topic.Publish only enqueues, so it
+	// never waits on a subscriber.
+	if ready {
+		r.topic.Publish(roster)
+	}
 	r.mu.Unlock()
 	for _, change := range changes {
 		r.results(change.ws, change.result)
@@ -147,7 +156,6 @@ func (r *resolver) mutate(operation, message string, ctx dlog.Context, log dlog.
 		return
 	}
 	log.Debug(operation, message, ctx)
-	r.topic.Publish(roster)
 }
 
 // mutateWorkspace is mutate for a fact about ONE workspace, resolved onto that
