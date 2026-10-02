@@ -368,7 +368,7 @@ export function mountFooter(
   /** Tell every subscriber which status arm this push carried. */
   function publishStatus(): void {
     // THE CLIENT'S VERDICT IS NOT PUBLISHED TO THE COMPOSER GATE, and that is
-    // deliberate. R7 closes the composer on a PUSHED `disconnected` because
+    // deliberate. R7 closes the composer on a PUSHED `agent_repl_fault` because
     // the daemon says the session is gone; a client verdict says the last
     // thing this page sent did not arrive -- and the only thing that lifts it
     // is the user sending something that does. Closing the composer over it

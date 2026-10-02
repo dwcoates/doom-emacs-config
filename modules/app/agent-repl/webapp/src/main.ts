@@ -299,12 +299,13 @@ export async function boot(): Promise<void> {
     });
     // THE GATE IS THE FOOTER'S OWN COLOR (owner ruling, 2026-09-28). A
     // composer is closed exactly when the footer's status arm is blue (the
-    // workspace is unusable: disconnected, closing, blocked) —
+    // workspace is unusable: an agent-repl fault, a network fault, a close) —
     // render-colors.json#composer_closed_colors; a merge in flight holds
     // what is submitted, so purple leaves it open —
     // and the sentence it shows is the footer's status arm rather than a
     // second vocabulary. Every other arm is a usable workspace, turquoise
-    // included, so its composer is open.
+    // included — a vendor fault's prompts are held until the vendor serves
+    // (owner ruling, 2026-10-02) — so its composer is open.
     footer.onStatus((statusCase, substatusCase) => {
       const closed = composerClosedFor(statusCase, substatusCase);
       gate.set(closed ? "closed" : "open", closed ? statusCase : undefined);

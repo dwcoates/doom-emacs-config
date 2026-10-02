@@ -350,10 +350,10 @@ describe("view streams", () => {
     const reader = take(stream, 2);
     await fake.awaitStream("watchFooter");
     // Act
-    fake.setFooter(WORKSPACE_ID, footerView({ status: "blocked", substatus: "auth" }));
+    fake.setFooter(WORKSPACE_ID, footerView({ status: "vendorFault", substatus: "auth" }));
     // Assert
     const pushes = await reader;
-    expect(pushes[1].footer?.strip?.status?.status.case).toBe("blocked");
+    expect(pushes[1].footer?.strip?.status?.status.case).toBe("vendorFault");
   });
 });
 
