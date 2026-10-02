@@ -4,7 +4,6 @@
 package cover
 
 import (
-	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -12,6 +11,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"agentrepl/testrun/internal/command"
 )
 
 // Runner runs one go tool command in dir and returns its stdout.
@@ -21,13 +22,7 @@ type Runner func(dir string, args ...string) ([]byte, error)
 func GoTool(dir string, args ...string) ([]byte, error) {
 	cmd := exec.Command("go", args...)
 	cmd.Dir = dir
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("go %s: %w\n%s", strings.Join(args, " "), err, stderr.String())
-	}
-	return out, nil
+	return command.Output(cmd)
 }
 
 // Report merges every coverage directory under covRoot and writes the
