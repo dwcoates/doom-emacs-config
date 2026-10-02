@@ -442,6 +442,18 @@ gate is the point, so it is exercised here rather than bypassed."
     (should (eq (cdar agent-repl-test-link--timers)
                 #'agent-repl-link--reconnect-tick))))
 
+(ert-deftest agent-repl-test-link-reconnect-tick-without-an-address-starts-a-daemon ()
+  "No `daemon.addr' after the link was up runs the cold start's hook: Emacs brings one up."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (add-hook 'agent-repl-link-no-daemon-functions
+              (agent-repl-test-link--record-hook :no-daemon))
+    (setq agent-repl-test-link--address nil)
+    ;; Act
+    (agent-repl-link--reconnect-tick)
+    ;; Assert
+    (should (assq :no-daemon agent-repl-test-link--hooks))))
+
 (ert-deftest agent-repl-test-link-reconnect-tick-restores-the-link ()
   "An address that appears is dialed and the up hooks run again."
   (agent-repl-test-link--with-harness

@@ -477,8 +477,16 @@ dependence on the scheduler and no sleep anywhere."
                       (agent-repl--warn '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.reconnect-addr-unreadable error=%S" err)
                       nil))))
       (if (null address)
+          ;; NO DAEMON AT ALL, after the link was up: the one that served it
+          ;; stood down with no successor (a backend bounce stops it and
+          ;; starts nothing).  Emacs owns bringing one up, so the cold
+          ;; start's hook runs here exactly as at first connect -- polling
+          ;; alone waited forever for a daemon nobody would start.  The poll
+          ;; stays armed: the ensure links on its own, and the next tick
+          ;; finds the link up and stops.
           (progn
-            (agent-repl--log '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.reconnect-no-address")
+            (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.reconnect-no-daemon")
+            (agent-repl-link--run-hook 'agent-repl-link-no-daemon-functions)
             (agent-repl-link--schedule-reconnect))
         (if (agent-repl-link--open-primary address t)
             (agent-repl--log '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.reconnect-awaiting-acceptance address=%S"
