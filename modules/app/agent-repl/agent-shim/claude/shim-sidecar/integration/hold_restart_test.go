@@ -81,7 +81,7 @@ func TestAHeldBoundaryIsConvertedOnceAfterARestart(t *testing.T) {
 	// parked short of it has been written. A wait for "at least two lines"
 	// would be satisfied by any second line at all.
 	awaitCursorAtLeast(ctx, t, store.Client, fx.File.Path(), fx.BoundaryOffset+1)
-	lines := bookLines(ctx, t, store.Client, fx.Session, 500)
+	lines := bookLines(ctx, t, store.Client, fx.Session)
 
 	// Assert: exactly one context cut, carrying the summary that settled it.
 	var cuts []*storev1.StorePageLine

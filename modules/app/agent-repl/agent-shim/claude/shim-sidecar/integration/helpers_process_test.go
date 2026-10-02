@@ -251,7 +251,7 @@ func awaitCursorForFileID(ctx context.Context, t *testing.T, c storev1connect.Sh
 func unitsInBook(ctx context.Context, t *testing.T, c storev1connect.ShimStoreClient, agent string) map[string]int {
 	t.Helper()
 	seen := map[string]int{}
-	for _, at := range bookLines(ctx, t, c, agent, 200) {
+	for _, at := range bookLines(ctx, t, c, agent) {
 		if a := activityOf(at.GetLine()); a != nil {
 			seen[a.GetActivityId().GetValue()]++
 		}
