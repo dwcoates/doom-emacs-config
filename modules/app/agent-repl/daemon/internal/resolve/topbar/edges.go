@@ -14,13 +14,13 @@ type sourceEdge struct {
 }
 
 // sourceEdges answers the records owed for a PUBLISHED view whose effort
-// selector changed standing, and marks them stated. Taken
+// selector or context window changed source, and marks them stated. Taken
 // under the lock that built VIEW, so a record never disagrees with what was
 // published; nothing is owed for a view that was not published.
 //
-// AT INFO: "why does the selector show this level" is a question a person
-// asks, and each standing is recorded once per change rather than on every
-// publication.
+// AT INFO: "why does the selector show this level" and "what is the chip's
+// color measured against" are questions a person asks, and each source is
+// recorded once per change rather than on every publication.
 func sourceEdges(s *wsState, view *frontendv1.TopbarView) []sourceEdge {
 	if view == nil {
 		return nil
@@ -37,6 +37,15 @@ func sourceEdges(s *wsState, view *frontendv1.TopbarView) []sourceEdge {
 				"model":         s.model,
 				"settings_path": s.effortSettings.Path,
 			},
+		})
+	}
+	window, source := contextWindow(s)
+	if source != s.windowSourceLogged {
+		s.windowSourceLogged = source
+		edges = append(edges, sourceEdge{
+			operation: "daemon.topbar.context_window_source",
+			message:   "the context chip's window size changed source",
+			ctx:       dlog.Context{"source": source, "window_tokens": window},
 		})
 	}
 	return edges
