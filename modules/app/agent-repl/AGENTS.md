@@ -31,6 +31,9 @@ bin/background.sh emacs -batch -Q -l ert -l lisp/test-agent-repl.el -f ert-run-t
 bin/background.sh emacs -batch -Q -l ert -l lisp/test-<module>.el   -f ert-run-tests-batch-and-exit   # one suite
 ```
 
+`bin/test-all.sh` runs without coverage by default; pass `--coverage` only
+when coverage is the question being asked, never for routine verification.
+
 ### Every test runs at background priority: `bin/background.sh`
 
 Test load must never starve the owner's live runtime (shim, daemon, store,

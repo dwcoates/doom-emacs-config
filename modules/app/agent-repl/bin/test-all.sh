@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 #
-# test-all.sh — run every agent-repl test and coverage suite from one command,
+# test-all.sh — run every agent-repl test suite from one command,
 # spread across this host's cores.
 #
 # Usage:
 #   bin/test-all.sh
 #   bin/test-all.sh --record
+#   bin/test-all.sh --coverage
 #   bin/test-all.sh --suites webapp,build-frontend-harness
 #
 # THE WORK IS SCHEDULED, NOT RUN SUITE BY SUITE. testrun (../testrun, a Go
@@ -34,6 +35,8 @@
 #
 # --record appends one row per passing suite to ../test_time.csv and compares
 # the run with recent rows on the same branch. Failed runs never record.
+# --coverage adds Go and vitest instrumentation and reports. Ordinary runs do
+# not pay that cost.
 #
 # The whole run holds this host's suite slot (bin/suite-slot.sh), because it
 # fills the machine by design, and runs inside .claude/safe-test-run.sh's

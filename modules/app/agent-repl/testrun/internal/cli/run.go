@@ -54,10 +54,11 @@ func Run(ctx context.Context, d Deps, a Args) int {
 		return 1
 	}
 	layout := suites.Layout{
-		Repo:   filepath.Clean(filepath.Join(moduleRoot, "..", "..", "..")),
-		Module: moduleRoot,
-		Work:   d.Work,
-		Self:   d.Self,
+		Repo:     filepath.Clean(filepath.Join(moduleRoot, "..", "..", "..")),
+		Module:   moduleRoot,
+		Work:     d.Work,
+		Self:     d.Self,
+		Coverage: a.Coverage,
 	}
 	csvPath := filepath.Join(moduleRoot, "test_time.csv")
 	if err := ValidateCSV(csvPath); err != nil {
@@ -294,7 +295,7 @@ func names(rs []run.SuiteResult) string {
 func printClosing(log *run.Log, a Args, passed, declined []run.SuiteResult) {
 	if len(a.Selected) == 0 {
 		if len(declined) == 0 {
-			log.Infof("all agent-repl tests and coverage suites passed")
+			log.Infof("all agent-repl test suites passed")
 		} else {
 			log.Infof("every agent-repl suite that could run passed; DECLINED: %s", names(declined))
 		}

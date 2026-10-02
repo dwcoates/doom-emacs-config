@@ -27,8 +27,9 @@ func TestParseArgs(t *testing.T) {
 	}{
 		{name: "module only selects every suite", argv: []string{"--module", "/m"}, want: Args{Module: "/m"}},
 		{name: "record and a suite list", argv: []string{"--module", "/m", "--record", "--suites", "ert,daemon"}, want: Args{Module: "/m", Record: true, Selected: []string{"ert", "daemon"}}},
+		{name: "coverage is explicit", argv: []string{"--module", "/m", "--coverage"}, want: Args{Module: "/m", Coverage: true}},
 		{name: "the = spelling", argv: []string{"--module", "/m", "--suites=e2e"}, want: Args{Module: "/m", Selected: []string{"e2e"}}},
-		{name: "an unknown argument", argv: []string{"--module", "/m", "--bogus"}, wantErr: "unknown argument '--bogus', expected --record or --suites <list>"},
+		{name: "an unknown argument", argv: []string{"--module", "/m", "--bogus"}, wantErr: "unknown argument '--bogus', expected --record, --coverage, or --suites <list>"},
 		{name: "an unknown suite", argv: []string{"--module", "/m", "--suites", "nope"}, wantErr: "--suites names an unknown suite 'nope'; known suites: "},
 		{name: "an empty suite list", argv: []string{"--module", "/m", "--suites", ""}, wantErr: "--suites needs at least one suite name"},
 		{name: "an empty name in the list", argv: []string{"--module", "/m", "--suites", "ert,,daemon"}, wantErr: "--suites contains an empty suite name: 'ert,,daemon'"},
@@ -351,7 +352,7 @@ func TestRunEverySuitePassing(t *testing.T) {
 	for _, want := range []string{
 		"[agent-repl-tests] ert: passed in ",
 		"timings were not recorded, pass --record only for a canonical history run",
-		"[agent-repl-tests] all agent-repl tests and coverage suites passed",
+		"[agent-repl-tests] all agent-repl test suites passed",
 		"[agent-repl-tests] distribution: ",
 	} {
 		if !strings.Contains(h.out.String(), want) {
