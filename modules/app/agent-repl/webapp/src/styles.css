@@ -6372,8 +6372,7 @@ bubble-body.bubble-body { display: block; }
 }
 /* EVERY RIGHT-HAND CELL'S INLINE INSET, from the group (owner request,
    2026-10-02). The box a reader sees is the button inside a control's wrap,
-   or the cell itself when it holds no button (the fast-mode label, a
-   no-session dash). Keyed on the group's structure rather than on cell
+   or the cell itself when it holds no button (a no-session dash). Keyed on the group's structure rather than on cell
    names, so the spacing between any two right-hand chips is the one measure
    in `--topbar-right-chip-gap` and `--topbar-right-chip-inset`, and a cell
    added to the group later is spaced the same with no rule of its own. The
@@ -6995,21 +6994,16 @@ bubble-body.bubble-body { display: block; }
   font-style: italic;
 }
 
-/* THE FAST-MODE CELL — the permission picker's read-only sibling. A LABEL,
-   not a control: nothing on the contract sets fast mode, so it takes the
-   button padding for alignment but neither the cursor nor the hover border
-   that would promise a click. */
 /* THE NO-SESSION DASH takes the same declarations, deliberately: it is
    another read-only label in the same strip, and a style of its own would be
    a second answer to a question this rule already answers. It stands in the
-   slot of the control it replaces — the model selector's, the mode picker's
-   or fast mode's — so the strip keeps ONE shape whether or not the workspace
+   slot of the control it replaces — the model selector's or the mode picker's
+   — so the strip keeps ONE shape whether or not the workspace
    has a session (topbar.proto, FIXED SCHEMA AND ORGANIZATION). The box below
    is the right group's treatment minus the two declarations that would
    promise a click, which is the one difference these cells are entitled to.
    (The whole-view `hibernated` and `cold-gate` cells this rule used to cover
    were retired with their proto fields on 2026-09-13.) */
-.topbar-fast,
 .topbar-model[data-no-session],
 .topbar-effort[data-no-session],
 .topbar-effort[data-effort-unsupported],
@@ -7021,18 +7015,6 @@ bubble-body.bubble-body { display: block; }
   color: var(--muted);
   white-space: nowrap;
 }
-/* On is the only state worth any emphasis: it is the one that changes what
-   sending a prompt does. */
-.topbar-fast[data-fast-mode="on"] {
-  color: var(--fg);
-}
-/* Cooldown is drawn AS ITS OWN STATE, never as off — dimmed and italic says
-   "not right now" where off's plain label says "not set". */
-.topbar-fast[data-fast-mode="cooldown"] {
-  font-style: italic;
-  opacity: 0.7;
-}
-
 /* THE PERSISTENT-WIFI CHIP (src/topbar/persistent-wifi.ts). The glyph's color
    is the wifi arm, the disc behind it is the mode arm, each painted on its
    own: green on a network, red on none, muted when the daemon could not

@@ -54,7 +54,6 @@ import type { TopbarContext, WarningChipContext } from "./context.js";
 import { drawTopbarEffortSelector } from "./effort.js";
 import { drawTopbarModelSelector } from "./model.js";
 import { drawTopbarPermissionModePicker } from "./permission-mode.js";
-import { drawTopbarFastMode } from "./fast-mode.js";
 import { drawTopbarPersistentWifi } from "./persistent-wifi.js";
 import { bindAccountReveal } from "./account.js";
 import { mountRevealLayer, type RevealGeometry } from "./reveal.js";
@@ -249,9 +248,6 @@ export function drawTopbarView(u: TopbarView, tc: TopbarContext): HTMLElement {
     drawTopbarModelSelector(u.modelSelector, tc),
     drawTopbarEffortSelector(u.effortSelector, tc),
     drawTopbarPermissionModePicker(u.permissionModePicker, tc),
-    // The fast-mode cell sits directly after the mode picker it is the
-    // sibling of.
-    drawTopbarFastMode(u.fastMode),
     drawTopbarContextChip(requireMessage(u.context, "TopbarView.context"), tc),
     // The machine's persistent-wifi chip sits between the context chip and
     // the warning chip, on every strip alike.
