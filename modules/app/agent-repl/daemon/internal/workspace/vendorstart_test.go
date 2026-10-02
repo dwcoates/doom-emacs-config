@@ -3,6 +3,7 @@ package workspace
 import (
 	"context"
 	"errors"
+	"slices"
 	"strconv"
 	"testing"
 	"time"
@@ -11,6 +12,7 @@ import (
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/health"
+	"claude-repld/internal/resolve/sidebar"
 	"claude-repld/internal/rollout"
 	"claude-repld/internal/wsm"
 )
@@ -434,5 +436,36 @@ func TestCancelVendorStartWithNoRunReportsNone(t *testing.T) {
 	// Assert.
 	if got {
 		t.Fatal("CancelVendorStart = true, want false with no run in flight")
+	}
+}
+
+func TestTheRosterIsToldARunIsBeingRetried(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.client.responses = []*shimv1.StartSessionResponse{vendorRefusal(retryableVendorStart(), "silent")}
+
+	// Act.
+	_ = f.fleet.Start(context.Background(), ws.ID)
+
+	// Assert: retrying, then nothing once the session is up.
+	want := []sidebar.VendorStart{sidebar.VendorStartRetrying, sidebar.VendorStartNone}
+	if !slices.Equal(f.vendorStarts, want) {
+		t.Fatalf("roster vendor states = %v, want %v", f.vendorStarts, want)
+	}
+}
+
+func TestTheRosterIsToldARejectionStopsTheRun(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.client.response = vendorRefusal(rejectedVendorStart(), "invalid api key")
+
+	// Act.
+	_ = f.fleet.Start(context.Background(), ws.ID)
+
+	// Assert.
+	if n := len(f.vendorStarts); n == 0 || f.vendorStarts[n-1] != sidebar.VendorStartStopped {
+		t.Fatalf("roster vendor states = %v, want the run stopped", f.vendorStarts)
 	}
 }

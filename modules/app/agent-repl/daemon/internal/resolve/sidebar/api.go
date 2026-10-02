@@ -13,6 +13,8 @@
 package sidebar
 
 import (
+	"strconv"
+
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/dlog"
@@ -94,6 +96,12 @@ type Resolver interface {
 	// raises it for its own duration. While it stands, and no shim link has
 	// connected yet, the row's availability is `pending`.
 	SetBringingUp(ws ids.WorkspaceID, bringingUp bool)
+	// SetVendorStart installs where the workspace's vendor-start run stands
+	// (the fleet's vendor-start faults). The roster has NO vendor arms: a run
+	// being retried draws as the bring-up (`init`), and a rejection or an
+	// exhausted window as `start_failed` -- the footer carries the
+	// distinction (design record vendor-start-resilience.md, landed change 2).
+	SetVendorStart(ws ids.WorkspaceID, state VendorStart)
 	// SetTurn installs the accepted turn, nil when none is in flight. It is
 	// what raises `submitting` the instant StartTurn is accepted, and what
 	// tells a `/clear` and a compaction apart from an ordinary prompt — the
@@ -141,4 +149,32 @@ type Option func(*resolver)
 // WithResultSink installs the sink the resolver tells its result changes.
 func WithResultSink(sink ResultSink) Option {
 	return func(r *resolver) { r.results = sink }
+}
+
+// VendorStart is where a workspace's vendor-start run stands, as the roster
+// reads it.
+type VendorStart int
+
+const (
+	// VendorStartNone is no vendor-start failure standing.
+	VendorStartNone VendorStart = iota
+	// VendorStartRetrying is a run of retryable failures being retried.
+	VendorStartRetrying
+	// VendorStartStopped is a rejection, or a run whose window ran out:
+	// nothing retries until a restart.
+	VendorStartStopped
+)
+
+// String names the state for a record.
+func (v VendorStart) String() string {
+	switch v {
+	case VendorStartNone:
+		return "none"
+	case VendorStartRetrying:
+		return "retrying"
+	case VendorStartStopped:
+		return "stopped"
+	default:
+		return "vendor_start(" + strconv.Itoa(int(v)) + ")"
+	}
 }

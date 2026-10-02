@@ -21,6 +21,7 @@ import (
 	"claude-repld/internal/ids"
 	"claude-repld/internal/resolve/feed"
 	"claude-repld/internal/resolve/footer"
+	"claude-repld/internal/resolve/sidebar"
 	"claude-repld/internal/resolve/topbar"
 	"claude-repld/internal/sessionlock"
 	"claude-repld/internal/sessionwatcher"
@@ -101,6 +102,11 @@ type FleetDeps struct {
 	// availability at `pending` between the two until a link connects
 	// (sidebar.Resolver.SetBringingUp).
 	BringUps func(ws ids.WorkspaceID, underWay bool)
+	// VendorStarts is told where a workspace's vendor-start run stands
+	// whenever that changes (sidebar.Resolver.SetVendorStart): the roster
+	// draws a run being retried as the bring-up and a stopped one as
+	// start_failed.
+	VendorStarts func(ws ids.WorkspaceID, state sidebar.VendorStart)
 	// Feed carries the cold gate's row.
 	Feed feed.Resolver
 	// Footer carries the parked-session status a standing cold gate produces.
@@ -394,6 +400,8 @@ func NewFleet(deps FleetDeps) (*Fleet, error) {
 		return nil, fmt.Errorf("workspace: the session fleet needs the absolute kernel-lock directory, got %q", deps.LockDir)
 	case deps.BringUps == nil:
 		return nil, fmt.Errorf("workspace: the session fleet needs a bring-up marker; the roster holds a starting workspace unopened by it")
+	case deps.VendorStarts == nil:
+		return nil, fmt.Errorf("workspace: the session fleet needs a vendor-start marker; the roster draws a retried or failed vendor start by it")
 	}
 	probe := deps.Probe
 	if probe == nil {
