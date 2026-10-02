@@ -285,6 +285,12 @@ message HostFault {
     // A concluded turn whose answering response the feed could not stand
     // behind, or an open response that went silent.
     SessionFaultFinalAnswerUnresolved final_answer_unresolved = 16;
+    // The vendor did not start and the daemon is retrying it on its backoff.
+    SessionFaultVendorStartRetrying vendor_start_retrying = 17;
+    // The vendor refused the start for a reason retrying cannot fix.
+    SessionFaultVendorStartRejected vendor_start_rejected = 18;
+    // The vendor kept failing to start for the whole retry window.
+    SessionFaultVendorStartFailed vendor_start_failed = 19;
   }
 }
 
