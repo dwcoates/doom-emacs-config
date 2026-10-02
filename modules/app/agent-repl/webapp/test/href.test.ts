@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isFileLinkHref, isWebHref } from "../src/href.js";
+import { FILE_LINK_EXTENSIONS, hasFileExtension, isFileLinkHref, isWebHref } from "../src/href.js";
 
 describe("isWebHref", () => {
   it.each([
@@ -28,5 +28,23 @@ describe("isFileLinkHref", () => {
     ["", false],
   ])("%s -> %s", (href, want) => {
     expect(isFileLinkHref(href)).toBe(want);
+  });
+});
+
+describe("hasFileExtension", () => {
+  it.each([
+    ["README.md", true],
+    ["FOO.TS", true],
+    ["a.b.go", true],
+    ["example.com", false],
+    ["github.io", false],
+    ["noext", false],
+    [".md", false],
+  ])("%s -> %s", (label, want) => {
+    expect(hasFileExtension(label)).toBe(want);
+  });
+
+  it("names the extensions in one constant", () => {
+    expect(FILE_LINK_EXTENSIONS).toContain("proto");
   });
 });
