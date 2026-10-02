@@ -121,7 +121,7 @@ func ptr(s string) *string { return &s }
 func TestAppendTimings(t *testing.T) {
 	// Arrange
 	path := csvFile(t)
-	rows := []TimingRow{{RunID: "r", RecordedAt: "t", Commit: "c", Branch: "b", Suite: "ert", Seconds: 1.5}}
+	rows := []TimingRow{{RunID: "r", RecordedAt: "t", Commit: "c", Branch: "b", Suite: "ert", Seconds: 1.5, Measure: MeasureUnitWallSum}}
 
 	// Act
 	err := AppendTimings(path, rows)
@@ -131,7 +131,7 @@ func TestAppendTimings(t *testing.T) {
 		t.Fatal(err)
 	}
 	data, _ := os.ReadFile(path)
-	if want := CSVHeader + "\nr,t,c,b,ert,1.500\n"; string(data) != want {
+	if want := CSVHeader + "\nr,t,c,b,ert,1.500,unit-wall-sum\n"; string(data) != want {
 		t.Fatalf("csv = %q, want %q", data, want)
 	}
 	if _, err := os.Stat(path + ".lock"); !os.IsNotExist(err) {
@@ -146,9 +146,11 @@ func TestAppendTimingsRefusals(t *testing.T) {
 		locked  bool
 		wantErr string
 	}{
-		{name: "a comma in a field", row: TimingRow{RunID: "r", RecordedAt: "t", Commit: "c", Branch: "a,b", Suite: "s"}, wantErr: "branch is not CSV-safe"},
-		{name: "an empty field", row: TimingRow{RunID: "r", RecordedAt: "t", Commit: "", Branch: "b", Suite: "s"}, wantErr: "commit is empty"},
-		{name: "a concurrent writer", row: TimingRow{RunID: "r", RecordedAt: "t", Commit: "c", Branch: "b", Suite: "s"}, locked: true, wantErr: "another timing writer holds"},
+		{name: "a comma in a field", row: TimingRow{RunID: "r", RecordedAt: "t", Commit: "c", Branch: "a,b", Suite: "s", Measure: MeasureUnitWallSum}, wantErr: "branch is not CSV-safe"},
+		{name: "an empty field", row: TimingRow{RunID: "r", RecordedAt: "t", Commit: "", Branch: "b", Suite: "s", Measure: MeasureUnitWallSum}, wantErr: "commit is empty"},
+		{name: "a concurrent writer", row: TimingRow{RunID: "r", RecordedAt: "t", Commit: "c", Branch: "b", Suite: "s", Measure: MeasureUnitWallSum}, locked: true, wantErr: "another timing writer holds"},
+		{name: "no measure", row: TimingRow{RunID: "r", RecordedAt: "t", Commit: "c", Branch: "b", Suite: "s"}, wantErr: `suite s has an unknown timing measure ""`},
+		{name: "an unknown measure", row: TimingRow{RunID: "r", RecordedAt: "t", Commit: "c", Branch: "b", Suite: "s", Measure: "span"}, wantErr: `suite s has an unknown timing measure "span"`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -183,28 +185,48 @@ func TestRegressions(t *testing.T) {
 	}{
 		{
 			name: "a big regression is surfaced",
-			rows: []string{"p1,t,c,main,ert,10.000\n", "p2,t,c,main,ert,10.000\n", "p3,t,c,main,ert,10.000\n", "now,t,c,main,ert,20.000\n"},
-			want: []string{"TIMING REGRESSION: ert 20.000s vs 10.000s recent average (+100.0%, +10.000s)"},
+			rows: []string{"p1,t,c,main,ert,10.000,unit-wall-sum\n", "p2,t,c,main,ert,10.000,unit-wall-sum\n", "p3,t,c,main,ert,10.000,unit-wall-sum\n", "now,t,c,main,ert,20.000,unit-wall-sum\n"},
+			want: []string{"TIMING REGRESSION: ert 20.000s vs 10.000s recent average unit-wall-sum (+100.0%, +10.000s)"},
 		},
 		{
 			name: "a small slowdown is not",
-			rows: []string{"p1,t,c,main,ert,10.000\n", "p2,t,c,main,ert,10.000\n", "p3,t,c,main,ert,10.000\n", "now,t,c,main,ert,10.900\n"},
+			rows: []string{"p1,t,c,main,ert,10.000,unit-wall-sum\n", "p2,t,c,main,ert,10.000,unit-wall-sum\n", "p3,t,c,main,ert,10.000,unit-wall-sum\n", "now,t,c,main,ert,10.900,unit-wall-sum\n"},
 			want: []string{"no big timing regressions detected"},
 		},
 		{
 			name: "fewer than three priors is no baseline",
-			rows: []string{"p1,t,c,main,ert,10.000\n", "now,t,c,main,ert,99.000\n"},
-			want: []string{"ert: only 1 prior main timing entries, regression baseline needs 3", "no big timing regressions detected"},
+			rows: []string{"p1,t,c,main,ert,10.000,unit-wall-sum\n", "now,t,c,main,ert,99.000,unit-wall-sum\n"},
+			want: []string{"ert: only 1 prior main unit-wall-sum timing entries, regression baseline needs 3", "no big timing regressions detected"},
+		},
+		{
+			name: "a prior of another measure is never a baseline",
+			rows: []string{
+				"s1,t,c,main,ert,1.000,serial-wall\n", "s2,t,c,main,ert,1.000,serial-wall\n", "s3,t,c,main,ert,1.000,serial-wall\n",
+				"now,t,c,main,ert,20.000,unit-wall-sum\n",
+			},
+			want: []string{
+				"ert: only 0 prior main unit-wall-sum timing entries, regression baseline needs 3 (3 prior entries of another measure are not comparable)",
+				"no big timing regressions detected",
+			},
+		},
+		{
+			name: "a run of the other measure compares with its own priors",
+			rows: []string{
+				"u1,t,c,main,ert,99.000,unit-wall-sum\n",
+				"s1,t,c,main,ert,10.000,serial-wall\n", "s2,t,c,main,ert,10.000,serial-wall\n", "s3,t,c,main,ert,10.000,serial-wall\n",
+				"now,t,c,main,ert,20.000,serial-wall\n",
+			},
+			want: []string{"TIMING REGRESSION: ert 20.000s vs 10.000s recent average serial-wall (+100.0%, +10.000s)"},
 		},
 		{
 			name: "only the same branch counts, and only the last five",
 			rows: []string{
-				"o,t,c,other,ert,1.000\n",
-				"p0,t,c,main,ert,100.000\n", "p1,t,c,main,ert,10.000\n", "p2,t,c,main,ert,10.000\n",
-				"p3,t,c,main,ert,10.000\n", "p4,t,c,main,ert,10.000\n", "p5,t,c,main,ert,10.000\n",
-				"now,t,c,main,ert,20.000\n",
+				"o,t,c,other,ert,1.000,unit-wall-sum\n",
+				"p0,t,c,main,ert,100.000,unit-wall-sum\n", "p1,t,c,main,ert,10.000,unit-wall-sum\n", "p2,t,c,main,ert,10.000,unit-wall-sum\n",
+				"p3,t,c,main,ert,10.000,unit-wall-sum\n", "p4,t,c,main,ert,10.000,unit-wall-sum\n", "p5,t,c,main,ert,10.000,unit-wall-sum\n",
+				"now,t,c,main,ert,20.000,unit-wall-sum\n",
 			},
-			want: []string{"TIMING REGRESSION: ert 20.000s vs 10.000s recent average (+100.0%, +10.000s)"},
+			want: []string{"TIMING REGRESSION: ert 20.000s vs 10.000s recent average unit-wall-sum (+100.0%, +10.000s)"},
 		},
 	}
 	for _, tt := range tests {
@@ -223,16 +245,52 @@ func TestRegressions(t *testing.T) {
 	}
 }
 
-func TestRegressionsRefusesAMalformedRow(t *testing.T) {
+func TestRegressionsRefusals(t *testing.T) {
+	tests := []struct {
+		name    string
+		rows    []string
+		wantErr string
+	}{
+		{name: "a row of the wrong width", rows: []string{"only,three,fields\n"}, wantErr: "line 2 has 3 fields, want 7"},
+		{name: "a legacy six-field row", rows: []string{"p,t,c,main,ert,1.000\n"}, wantErr: "line 2 has 6 fields, want 7"},
+		{name: "unreadable seconds", rows: []string{"p,t,c,main,ert,soon,unit-wall-sum\n"}, wantErr: `line 2: unreadable seconds "soon"`},
+		{name: "an unknown measure", rows: []string{"p,t,c,main,ert,1.000,span\n"}, wantErr: `line 2: unknown timing measure "span"`},
+		{
+			name:    "a run recorded under two measures",
+			rows:    []string{"now,t,c,main,ert,1.000,unit-wall-sum\n", "now,t,c,main,daemon,1.000,serial-wall\n"},
+			wantErr: "line 3: run now recorded both unit-wall-sum and serial-wall rows",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			path := csvFile(t, tt.rows...)
+
+			// Act
+			_, err := Regressions(path, "now", "main")
+
+			// Assert
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("err = %v, want %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// TestCanonicalTimingFileParses holds the committed history to the schema the
+// reader enforces: a row --record could never compare fails here, at commit
+// time, rather than in the post-merge record run.
+func TestCanonicalTimingFileParses(t *testing.T) {
 	// Arrange
-	path := csvFile(t, "only,three,fields\n")
+	path := filepath.Join("..", "..", "..", "test_time.csv")
 
 	// Act
-	_, err := Regressions(path, "now", "main")
+	validateErr := ValidateCSV(path)
+	_, readErr := Regressions(path, "no-such-run", "master")
 
 	// Assert
-	if err == nil || !strings.Contains(err.Error(), "has 3 fields, want 6") {
-		t.Fatalf("err = %v", err)
+	if validateErr != nil || readErr != nil {
+		t.Fatalf("the canonical timing file is unreadable: header %v, rows %v", validateErr, readErr)
 	}
 }
 
@@ -354,6 +412,9 @@ func TestRunEverySuitePassing(t *testing.T) {
 		"timings were not recorded, pass --record only for a canonical history run",
 		"[agent-repl-tests] all agent-repl test suites passed",
 		"[agent-repl-tests] distribution: ",
+		"timing summary, most unit time first (unit-wall-sum is what --record keeps; the span depends on the interleaving)",
+		"[agent-repl-tests] timing: ert ",
+		"s of units over a ",
 	} {
 		if !strings.Contains(h.out.String(), want) {
 			t.Errorf("stdout lacks %q", want)
@@ -453,6 +514,9 @@ func TestRunWithSuitesRunsOnlyThoseAndNamesTheRest(t *testing.T) {
 func TestRunRecordAppendsEveryPassingSuite(t *testing.T) {
 	// Arrange
 	h := newHarness(t, nil, nil)
+	// One slot runs the units one after another, so the tick clock gives
+	// each exactly 1s.
+	h.deps.Slots = 1
 
 	// Act
 	code := h.run(t, "--record", "--suites", "ert,daemon")
@@ -464,7 +528,7 @@ func TestRunRecordAppendsEveryPassingSuite(t *testing.T) {
 	data, _ := os.ReadFile(filepath.Join(h.module, "test_time.csv"))
 	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
 	// Roster order: ert is listed before daemon.
-	if len(lines) != 3 || !strings.Contains(lines[1], ",abc123,main,ert,") || !strings.Contains(lines[2], ",abc123,main,daemon,") {
+	if len(lines) != 3 || !strings.HasSuffix(lines[1], ",abc123,main,ert,1.000,unit-wall-sum") || !strings.HasSuffix(lines[2], ",abc123,main,daemon,1.000,unit-wall-sum") {
 		t.Fatalf("csv = %q", data)
 	}
 	if len(*h.git) != 2 {
