@@ -419,9 +419,7 @@ const historyKickBound = 10 * time.Second
 
 // kickWaitingReaders loads AGENT's newest page for the readers that opened its
 // feed before a session was up to read it from (bookState.awaitingSource). A
-// watch of AGENT just opened, so its session is up now. The load runs OFF the
-// caller's goroutine: the caller is the session watcher, and the read hands
-// the page back to it (HistorySource). Called with r.mu held.
+// watch of AGENT just opened, so its session is up now. Called with r.mu held.
 func (r *resolver) kickWaitingReaders(s *wsState, agent *conversationv1.AgentId) {
 	addr := feedid.Feed{Root: true}
 	if agent.GetValue() != "" && agent.GetValue() != s.mainAgent {
@@ -431,9 +429,57 @@ func (r *resolver) kickWaitingReaders(s *wsState, agent *conversationv1.AgentId)
 	if !ok || !f.book.awaitingSource {
 		return
 	}
+	r.kickWaitingFeed(s, f, addr, "a watch opened for a feed a reader holds without its history; its newest page is loaded for it")
+}
+
+// SourceUp loads the newest page of every feed of WS a reader opened while no
+// source was up to read it from. A SOURCE IS A SHIM, NOT A SESSION: the fleet
+// says so the moment it holds a client it can read history through (a cold
+// gate, a vendor start being retried), so a reader is never left on the rows
+// the daemon made itself while the conversation sits in the store.
+func (r *resolver) SourceUp(ws ids.WorkspaceID) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s, ok := r.workspaces[ws]
+	if !ok {
+		return
+	}
+	waiting := 0
+	for key, f := range s.feeds {
+		if !f.book.awaitingSource {
+			continue
+		}
+		waiting++
+		r.kickWaitingFeed(s, f, s.feedAddrs[key], "a history source came up for a feed a reader holds without its history; its newest page is loaded for it")
+	}
+	r.logger(ws).Debug("daemon.feed.source_up",
+		"a history source came up for the workspace",
+		dlog.Context{"waiting_feeds": waiting})
+}
+
+// KeepNewestPage loads the root feed's newest store page while a source is
+// still up, when the feed does not already hold it: a reader that opens after
+// the source has gone is then served the conversation, never only the rows the
+// daemon made itself. Its rows are pushed (loadPushed).
+func (r *resolver) KeepNewestPage(ctx context.Context, ws ids.WorkspaceID) error {
+	loaded, err := r.loadPushed(ctx, ws, feedid.Feed{Root: true}, true)
+	if err != nil {
+		return err
+	}
+	r.lockedLogger(ws).Info("daemon.feed.newest_page_kept",
+		"the root feed's newest page was secured while its history source was still up",
+		dlog.Context{"loaded_now": loaded})
+	return nil
+}
+
+// kickWaitingFeed loads F's newest page for the readers waiting on it and
+// pushes it to them. The load runs OFF the caller's goroutine: the caller may
+// be the session watcher or the fleet, and the read reaches back into the
+// fleet (HistorySource). Called with r.mu held.
+func (r *resolver) kickWaitingFeed(s *wsState, f *feedState, addr feedid.Feed, why string) {
 	f.book.awaitingSource = false
-	r.logger(s.id).Info("daemon.feed.history_kick",
-		"a watch opened for a feed a reader holds without its history; its newest page is loaded for it",
+	agent, _ := bookTarget(addr)
+	r.logger(s.id).Info("daemon.feed.history_kick", why,
 		dlog.Context{"feed": f.key, "agent": agent.GetValue()})
 	ws := s.id
 	go func() {
@@ -482,6 +528,11 @@ func (r *resolver) loadPushed(ctx context.Context, ws ids.WorkspaceID, addr feed
 	plan.pushAll = true
 	got, err := r.load(ctx, plan)
 	if errors.Is(err, ErrNoHistorySource) {
+		// THE SOURCE WENT BETWEEN THE ASK AND THE READ: the newest page is
+		// still wanted, and the next source to come up loads it.
+		if plan.newest {
+			r.awaitSource(plan)
+		}
 		return false, nil
 	}
 	if err != nil {

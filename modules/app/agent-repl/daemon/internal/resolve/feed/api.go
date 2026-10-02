@@ -104,6 +104,16 @@ type Resolver interface {
 	// that reads held rows past the oldest loaded one, pushing its rows to
 	// every tail; false when nothing older can be loaded (loadthrough.go).
 	LoadOlder(ctx context.Context, ws ids.WorkspaceID) (bool, error)
+	// SourceUp says a history source for the workspace came up (a shim
+	// client the fleet can read history through, whatever the vendor session
+	// is doing): every feed a reader opened while none was up has its newest
+	// page loaded and pushed to that reader (book.go).
+	SourceUp(ws ids.WorkspaceID)
+	// KeepNewestPage loads the root feed's newest store page now, while a
+	// source is still up and only when the feed does not already hold it, so
+	// the conversation stays drawn once the source goes (a failed vendor
+	// start's shim is about to be stopped). Its rows are pushed (book.go).
+	KeepNewestPage(ctx context.Context, ws ids.WorkspaceID) error
 
 	// SetOutputAddress installs the address a lease holder wants the turns
 	// IT starts drawn at; nil withdraws it. It redirects no other turn and

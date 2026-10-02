@@ -767,3 +767,125 @@ func TestAWalkIntoTheLiveGapReadsItsStorePages(t *testing.T) {
 		t.Fatalf("last read after %q, want p-4", got)
 	}
 }
+
+// ---- a history source that is a shim, whatever its session is doing ----
+
+// awaitPushed fails the test unless the tail pushes WANT, in order.
+func awaitPushed(t *testing.T, rows <-chan *frontendv1.FeedRow, want ...string) {
+	t.Helper()
+	for _, id := range want {
+		select {
+		case row := <-rows:
+			if row.GetId().GetValue() != id {
+				t.Fatalf("pushed %q, want %q", row.GetId().GetValue(), id)
+			}
+		case <-time.After(tailWait):
+			t.Fatalf("%q never reached the waiting reader's tail", id)
+		}
+	}
+}
+
+func TestSourceUpLoadsTheNewestPageForAReaderThatHadNoSource(t *testing.T) {
+	// Arrange: the feed was opened before any shim was up; then one is.
+	h := newHarness(t)
+	store := h.mainBook(3, promptsBook(2))
+	store.noSource = true
+	rows := h.follow(rootFeed(), "reader-1")
+	store.mu.Lock()
+	store.noSource = false
+	store.mu.Unlock()
+
+	// Act.
+	h.resolver.SourceUp(testWorkspace)
+
+	// Assert.
+	awaitPushed(t, rows, h.promptRowID("turn-0"), h.promptRowID("turn-1"))
+}
+
+func TestSourceUpLoadsNothingWithoutAWaitingReader(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	store := h.mainBook(3, promptsBook(2))
+	h.openPage(rootFeed(), "reader-1")
+
+	// Act.
+	h.resolver.SourceUp(testWorkspace)
+	h.openPage(rootFeed(), "reader-1")
+
+	// Assert: only the first open read.
+	if got := store.readCount(); got != 1 {
+		t.Fatalf("reads = %d, want the first open's alone", got)
+	}
+}
+
+func TestKeepNewestPageLoadsTheRootsNewestPage(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	store := h.mainBook(3, promptsBook(2))
+
+	// Act.
+	if err := h.resolver.KeepNewestPage(context.Background(), testWorkspace); err != nil {
+		t.Fatalf("KeepNewestPage: %v", err)
+	}
+
+	// Assert: a reader that opens with no source is served the kept page.
+	store.mu.Lock()
+	store.noSource = true
+	store.mu.Unlock()
+	page, _ := h.openPage(rootFeed(), "reader-1")
+	if got := strings.Join(rowIDs(pageRows(t, page)), ","); got != h.promptRowIDs("turn-0", "turn-1") {
+		t.Fatalf("page rows = %v, want the kept newest page", got)
+	}
+}
+
+func TestKeepNewestPageReadsNothingWhenTheNewestPageIsHeld(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	store := h.mainBook(3, promptsBook(2))
+	h.openPage(rootFeed(), "reader-1")
+
+	// Act.
+	if err := h.resolver.KeepNewestPage(context.Background(), testWorkspace); err != nil {
+		t.Fatalf("KeepNewestPage: %v", err)
+	}
+
+	// Assert.
+	if got := store.readCount(); got != 1 {
+		t.Fatalf("reads = %d, want the open's alone", got)
+	}
+}
+
+func TestKeepNewestPageWhoseReadFailsIsHistoryUnavailable(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	store := h.mainBook(3, promptsBook(2))
+	store.failFrom = 1
+
+	// Act.
+	err := h.resolver.KeepNewestPage(context.Background(), testWorkspace)
+
+	// Assert.
+	if !errors.Is(err, ErrHistoryUnavailable) {
+		t.Fatalf("err = %v, want ErrHistoryUnavailable", err)
+	}
+}
+
+func TestAPushedNewestLoadWithNoSourceIsLoadedByTheNextSource(t *testing.T) {
+	// Arrange: the source went between the ask and the read.
+	h := newHarness(t)
+	store := h.mainBook(3, promptsBook(2))
+	store.noSource = true
+	if err := h.resolver.KeepNewestPage(context.Background(), testWorkspace); err != nil {
+		t.Fatalf("KeepNewestPage: %v", err)
+	}
+	rows := h.follow(rootFeed(), "reader-1")
+	store.mu.Lock()
+	store.noSource = false
+	store.mu.Unlock()
+
+	// Act.
+	h.resolver.SourceUp(testWorkspace)
+
+	// Assert.
+	awaitPushed(t, rows, h.promptRowID("turn-0"), h.promptRowID("turn-1"))
+}
