@@ -525,7 +525,7 @@ describe("the salient kinds", () => {
   it("draws the bring-up failure's cause verbatim", () => {
     const cell = salientCell(
       "startFailed",
-      { detail: "exit 1: no module", droppedPrompts: 0 },
+      { detail: "exit 1: no module" },
       "disconnected",
     );
     expect(
@@ -533,22 +533,15 @@ describe("the salient kinds", () => {
     ).toBe("exit 1: no module");
   });
 
-  it("names the ONE held prompt a bring-up failure dropped in the singular", () => {
-    const cell = salientCell(
-      "startFailed",
-      { detail: "exit 1", droppedPrompts: 1 },
-      "disconnected",
-    );
-    expect(cell.textContent).toContain("· 1 held prompt dropped");
-  });
-
-  it("counts the held prompts a bring-up failure dropped in the plural", () => {
-    const cell = salientCell(
-      "startFailed",
-      { detail: "exit 1", droppedPrompts: 3 },
-      "disconnected",
-    );
-    expect(cell.textContent).toContain("· 3 held prompts dropped");
+  it.each([
+    "Claude SDK did not start (attempt 3): timed out · retrying",
+    "Claude SDK refused to start: auth rejected · restart: SPC o C-c",
+    "Claude SDK failed to start · restart: SPC o C-c",
+  ])("draws the daemon's vendor-start line verbatim: %s", (text) => {
+    const cell = salientCell("vendorStart", { text }, "disconnected");
+    expect(
+      cell.querySelector(".footer-activity-vendor-start")?.textContent,
+    ).toBe(text);
   });
 
   it("colours the retry ATTEMPT as its own datum", () => {
