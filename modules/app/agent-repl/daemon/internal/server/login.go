@@ -245,7 +245,8 @@ func (s *server) OpenInEditor(
 			return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
 		}
 	case *agentreplv1.OpenInEditorRequest_FeedLink:
-		unresolved, err := s.deps.Verbs.OpenFeedLink(ctx, subject.Record.ID, target.FeedLink.GetHref())
+		report := target.FeedLink.GetReport() != nil
+		unresolved, err := s.deps.Verbs.OpenFeedLink(ctx, subject.Record.ID, target.FeedLink.GetHref(), report)
 		if unresolved != nil {
 			// THE QUESTION IS SENT BEFORE THE REFUSAL IS ANSWERED: the arm
 			// promises the workspace has already been asked.

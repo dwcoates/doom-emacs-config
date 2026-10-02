@@ -702,6 +702,9 @@ func validateOpenInEditorRequest(req *agentreplv1.OpenInEditorRequest) *connect.
 		if target.FeedLink.GetHref() == "" {
 			return invalid("feed_link.href", "an href is required")
 		}
+		if target.FeedLink.GetOnUnresolved() == nil {
+			return invalid("feed_link.on_unresolved", "an on_unresolved arm is required")
+		}
 	default:
 		return invalid("target", "a target arm is required")
 	}
