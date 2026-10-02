@@ -196,6 +196,9 @@ func bookTarget(addr feedid.Feed) (*conversationv1.AgentId, bool) {
 // loadPlan is what one feed would read next, decided under the lock and read
 // off it.
 type loadPlan struct {
+	// addr is the feed whose book is read: the asking feed's own, or the root
+	// for a merge tab (bookTarget).
+	addr   feedid.Feed
 	state  *wsState
 	target *conversationv1.AgentId
 	after  *conversationv1.HistoryPointer
@@ -210,17 +213,34 @@ type loadPlan struct {
 // source is wired, or the conversation's start was already reached. Called
 // with r.mu held.
 func (r *resolver) planLoad(s *wsState, f *feedState, newest bool) (loadPlan, bool) {
-	target, isBook := bookTarget(s.feedAddrs[f.key])
+	addr := s.feedAddrs[f.key]
+	target, isBook := bookTarget(addr)
 	if !isBook || r.deps.History == nil {
 		return loadPlan{}, false
 	}
 	if newest || !f.book.newestLoaded {
-		return loadPlan{state: s, target: target, newest: true}, true
+		return loadPlan{addr: addr, state: s, target: target, newest: true}, true
 	}
 	if f.book.floor {
 		return loadPlan{}, false
 	}
-	return loadPlan{state: s, target: target, after: f.book.after}, true
+	return loadPlan{addr: addr, state: s, target: target, after: f.book.after}, true
+}
+
+// planOpening decides the newest page an OPENING of FEED reads first: its own
+// book's, unless held and unmoved. A MERGE TAB IS NO BOOK, but every row it
+// draws is the main agent's (its addressed turns), so its opening reads the
+// root's newest page when the root holds none. Called with r.mu held.
+func (r *resolver) planOpening(s *wsState, f *feedState) (loadPlan, bool) {
+	if s.feedAddrs[f.key].Merge != nil {
+		f = r.feed(s, feedid.Feed{Root: true})
+		if f.book.newestLoaded {
+			return loadPlan{}, false
+		}
+	} else if f.book.newestLoaded && !f.book.liveSince {
+		return loadPlan{}, false
+	}
+	return r.planLoad(s, f, true)
 }
 
 // loadMu answers the mutex that serializes one workspace's page loads, so two
@@ -247,9 +267,10 @@ type loaded struct {
 }
 
 // load reads the page PLAN names OFF the resolver's mutex and draws it into
-// FEED's book. ErrNoHistorySource passes through unwrapped; every other
+// its feed's book (plan.addr). ErrNoHistorySource passes through unwrapped; every other
 // failure is ErrHistoryUnavailable.
-func (r *resolver) load(ctx context.Context, ws ids.WorkspaceID, addr feedid.Feed, plan loadPlan) (loaded, error) {
+func (r *resolver) load(ctx context.Context, plan loadPlan) (loaded, error) {
+	ws, addr := plan.state.id, plan.addr
 	log := r.lockedLogger(ws)
 	page, err := r.deps.History.ReadHistory(ctx, ws, plan.target, plan.after)
 	if errors.Is(err, ErrNoHistorySource) {
