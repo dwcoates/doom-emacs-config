@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -15,43 +16,6 @@ import (
 
 // The walk is PER READER and EPHEMERAL. The harness page size is 3, so five
 // rows is two pages and an edge.
-
-func TestOpenPageServesTheNewestPageOldestFirstWithinIt(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-	for i := 1; i <= 5; i++ {
-		h.deliverPrompt(fmt.Sprintf("turn-%d", i), "prompt")
-	}
-
-	// Act.
-	page, _ := h.openPage(rootFeed(), "reader-1")
-
-	// Assert: the NEWEST three, oldest → newest within the page.
-	got := rowIDs(pageRows(t, page))
-	want := []string{h.promptRowID("turn-3"), h.promptRowID("turn-4"), h.promptRowID("turn-5")}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("page rows = %v, want %v", got, want)
-		}
-	}
-}
-
-func TestOpenPageSaysHasMoreWhenOlderRowsExist(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-	for i := 1; i <= 5; i++ {
-		h.deliverPrompt(fmt.Sprintf("turn-%d", i), "prompt")
-	}
-
-	// Act.
-	page, _ := h.openPage(rootFeed(), "reader-1")
-
-	// Assert.
-	success := page.GetResult().(*frontendv1.FeedPage_Success).Success
-	if _, ok := success.GetEdge().(*frontendv1.FeedPageSuccess_HasMore); !ok {
-		t.Fatalf("edge = %T, want has_more", success.GetEdge())
-	}
-}
 
 func TestOpenPageSaysAtStartWhenThePageReachesTheBeginning(t *testing.T) {
 	// Arrange.
@@ -79,33 +43,6 @@ func TestAnEmptyFeedIsAPageAndNotAnError(t *testing.T) {
 	}
 }
 
-func TestNextPageWalksOlderFromWhereTheWalkStands(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-	for i := 1; i <= 5; i++ {
-		h.deliverPrompt(fmt.Sprintf("turn-%d", i), "prompt")
-	}
-	h.openPage(rootFeed(), "reader-1")
-
-	// Act.
-	page, err := h.resolver.NextPage(context.Background(), testWorkspace, rootFeed(), "reader-1")
-	if err != nil {
-		t.Fatalf("NextPage: %v", err)
-	}
-
-	// Assert: the two rows before the first page, and now at the start.
-	got := rowIDs(pageRows(t, page))
-	want := []string{h.promptRowID("turn-1"), h.promptRowID("turn-2")}
-	if len(got) != len(want) {
-		t.Fatalf("page rows = %v, want %v", got, want)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("page rows = %v, want %v", got, want)
-		}
-	}
-}
-
 func TestNextPageWithNoWalkStandingIsARefusal(t *testing.T) {
 	// Arrange: a reader that never opened.
 	h := newHarness(t)
@@ -126,46 +63,33 @@ func TestNextPageWithNoWalkStandingIsARefusal(t *testing.T) {
 func TestWalksArePerReader(t *testing.T) {
 	// Arrange: two readers on the same feed, one of which has paged back.
 	h := newHarness(t)
-	for i := 1; i <= 5; i++ {
-		h.deliverPrompt(fmt.Sprintf("turn-%d", i), "prompt")
-	}
+	h.mainBook(2, promptsBook(6))
 	h.openPage(rootFeed(), "reader-1")
 	h.openPage(rootFeed(), "reader-2")
-	if _, err := h.resolver.NextPage(context.Background(), testWorkspace, rootFeed(), "reader-1"); err != nil {
-		t.Fatalf("NextPage: %v", err)
-	}
+	h.nextPage("reader-1")
 
 	// Act: the second reader's next is still the second page, not the third.
-	page, err := h.resolver.NextPage(context.Background(), testWorkspace, rootFeed(), "reader-2")
-	if err != nil {
-		t.Fatalf("NextPage: %v", err)
-	}
+	page := h.nextPage("reader-2")
 
 	// Assert.
-	got := rowIDs(pageRows(t, page))
-	if len(got) != 2 || got[0] != h.promptRowID("turn-1") {
-		t.Fatalf("reader-2 page = %v, want its own second page", got)
+	if got, want := strings.Join(rowIDs(pageRows(t, page)), ","), h.promptRowIDs("turn-2", "turn-3"); got != want {
+		t.Fatalf("reader-2 page = %v, want its own second page %v", got, want)
 	}
 }
 
 func TestOpeningAgainDropsTheReadersWalk(t *testing.T) {
 	// Arrange: a reader that has paged back once.
 	h := newHarness(t)
-	for i := 1; i <= 5; i++ {
-		h.deliverPrompt(fmt.Sprintf("turn-%d", i), "prompt")
-	}
+	h.mainBook(3, promptsBook(5))
 	h.openPage(rootFeed(), "reader-1")
-	if _, err := h.resolver.NextPage(context.Background(), testWorkspace, rootFeed(), "reader-1"); err != nil {
-		t.Fatalf("NextPage: %v", err)
-	}
+	h.nextPage("reader-1")
 
 	// Act: a fresh open lands at the tail again.
 	page, _ := h.openPage(rootFeed(), "reader-1")
 
 	// Assert.
-	got := rowIDs(pageRows(t, page))
-	if got[0] != h.promptRowID("turn-3") {
-		t.Fatalf("re-opened page = %v, want the newest page", got)
+	if got, want := strings.Join(rowIDs(pageRows(t, page)), ","), h.promptRowIDs("turn-2", "turn-3", "turn-4"); got != want {
+		t.Fatalf("re-opened page = %v, want the newest page %v", got, want)
 	}
 }
 
@@ -345,46 +269,6 @@ func TestBreadcrumbLabelIsTheMergesBranchLine(t *testing.T) {
 	crumbs := page.GetResult().(*frontendv1.FeedPage_Success).Success.GetBreadcrumbs().GetCrumbs()
 	if len(crumbs) != 1 || crumbs[0].GetLabel() != "DWC/fix-flaky → master" {
 		t.Fatalf("crumbs = %+v, want the merge's branch line", crumbs)
-	}
-}
-
-func TestAWalkThatRunsOutWhileHistoryRemainsAnswersTruncated(t *testing.T) {
-	// Arrange: a replay that did not reach the oldest retained entry.
-	h := newHarness(t)
-	h.resolver.OnHistoryPage(testWorkspace, mainAgent(), &conversationv1.HistoryPage{
-		Entries: []*conversationv1.HistoryEntryAt{{
-			At: &conversationv1.HistoryPointer{Value: "p1"},
-			Entry: &conversationv1.HistoryEntry{
-				Entry: &conversationv1.HistoryEntry_UserPrompt{UserPrompt: &conversationv1.AgentPrompt{
-					Id:     &conversationv1.TurnId{Value: "turn-1"},
-					Agent:  mainAgent(),
-					Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT,
-					Said:   &conversationv1.UserSaid{Content: &conversationv1.UserContent{}},
-				}},
-			},
-		}},
-		Boundary: &conversationv1.HistoryPage_More{More: &conversationv1.HistoryMore{
-			LastEntry: &conversationv1.HistoryPointer{Value: "p1"},
-		}},
-	})
-	h.openPage(rootFeed(), "reader-1")
-
-	// Act: the walk is already at the oldest replayed row.
-	page, err := h.resolver.NextPage(context.Background(), testWorkspace, rootFeed(), "reader-1")
-	if err != nil {
-		t.Fatalf("NextPage: %v", err)
-	}
-
-	// Assert: the hole is stated rather than drawn as a beginning.
-	errPage, ok := page.GetResult().(*frontendv1.FeedPage_Error)
-	if !ok {
-		t.Fatalf("page = %T, want the truncated error", page.GetResult())
-	}
-	if errPage.Error.GetHistoryReplayTruncated() == nil {
-		t.Fatalf("page error kind = %T, want history_replay_truncated", errPage.Error.GetKind())
-	}
-	if !h.hasRecord("warn", "daemon.feed.history_replay_truncated") {
-		t.Fatalf("records = %+v, want a WARN daemon.feed.history_replay_truncated", h.records())
 	}
 }
 

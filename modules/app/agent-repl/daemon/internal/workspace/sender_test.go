@@ -77,14 +77,14 @@ func TestSenderStartTurnCarriesTheDaemonsMintedTurn(t *testing.T) {
 }
 
 // TestSenderStartTurnNeverAsksForHistory covers the owner's rule on the turn
-// path: an accepted turn's opening page carries the turn's own prompt row and
-// nothing older. The page budget is that one row, and the main watch's newest
-// pointer bounds it whenever the daemon holds one.
+// path: an accepted turn's opening page replays nothing. It catches up from
+// the newest main pointer the daemon holds, and opens tail_only without one.
 func TestSenderStartTurnNeverAsksForHistory(t *testing.T) {
 	tests := []struct {
 		name      string
 		known     func() *conversationv1.HistoryPointer
 		wantKnown string
+		wantTail  bool
 	}{
 		{
 			name:      "the main watch's pointer bounds the page",
@@ -92,11 +92,13 @@ func TestSenderStartTurnNeverAsksForHistory(t *testing.T) {
 			wantKnown: "ptr-41",
 		},
 		{
-			name:  "a main watch served nothing states no pointer",
-			known: func() *conversationv1.HistoryPointer { return nil },
+			name:     "a main watch served nothing opens tail only",
+			known:    func() *conversationv1.HistoryPointer { return nil },
+			wantTail: true,
 		},
 		{
-			name: "a sender with no watcher states no pointer",
+			name:     "a sender with no watcher opens tail only",
+			wantTail: true,
 		},
 	}
 
@@ -114,8 +116,8 @@ func TestSenderStartTurnNeverAsksForHistory(t *testing.T) {
 			}
 
 			// Assert.
-			if got := client.startTurnReq.GetPageSize(); got != 1 {
-				t.Fatalf("page_size = %d, want 1: the turn's own prompt row", got)
+			if got := client.startTurnReq.GetTailOnly() != nil; got != tt.wantTail {
+				t.Fatalf("tail_only = %v, want %v", got, tt.wantTail)
 			}
 			if got := client.startTurnReq.GetKnownThrough().GetValue(); got != tt.wantKnown {
 				t.Fatalf("known_through = %q, want %q", got, tt.wantKnown)

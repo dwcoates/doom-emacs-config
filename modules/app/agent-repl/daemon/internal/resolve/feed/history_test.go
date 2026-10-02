@@ -595,25 +595,6 @@ func TestAReplayedDetachedWorkDrawsItsBubble(t *testing.T) {
 	}
 }
 
-func TestAFlooredReplayClearsAnyStandingTruncation(t *testing.T) {
-	// Arrange: a page that stopped short.
-	h := newHarness(t)
-	h.replay(historyPage(&conversationv1.HistoryMore{
-		LastEntry: &conversationv1.HistoryPointer{Value: "a"},
-	}, promptEntry("turn-2", "second")))
-
-	// Act: a later page reaches the oldest retained entry.
-	h.replay(historyPage(&conversationv1.HistoryFloor{}, promptEntry("turn-1", "first")))
-
-	// Assert: the hole is gone, so a walk may claim the start.
-	h.resolver.mu.Lock()
-	more := h.resolver.feed(h.resolver.state(testWorkspace), rootFeed()).historyMore
-	h.resolver.mu.Unlock()
-	if more != nil {
-		t.Fatalf("historyMore = %+v, want cleared by the floor", more)
-	}
-}
-
 func TestAReplayRecordsWhatItDelivered(t *testing.T) {
 	// Arrange, Act.
 	h := newHarness(t)

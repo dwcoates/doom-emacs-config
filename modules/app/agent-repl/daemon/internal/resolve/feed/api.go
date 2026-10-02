@@ -45,6 +45,10 @@ type ReaderID string
 //	ErrUnknownToken → WatchFeed's transport refusal (the token names no feed
 //	                  this daemon minted, so no page-level arm applies)
 //	ErrTokenExpired → the same, with the reader expected to re-open the feed
+//	ErrTargetNotFound     → LoadFeedThroughError.not_found
+//	ErrHistoryUnavailable → LoadFeedThroughError.history_unavailable; OpenFeed
+//	                        and GetFeedPage have no arm for it and answer a
+//	                        transport error (book.go)
 //
 // `feed_undecodable` is deliberately NOT produced here: the server decodes a
 // FeedId before it reaches this package, so a value that does not decode never
@@ -90,6 +94,16 @@ type Resolver interface {
 	NextPage(ctx context.Context, ws ids.WorkspaceID, feed feedid.Feed, reader ReaderID) (*frontendv1.FeedPage, error)
 	// CloseReader drops a reader's walk when its connection ends.
 	CloseReader(ws ids.WorkspaceID, reader ReaderID)
+	// LoadThrough answers LoadFeedThrough: the reader's root-feed walk,
+	// advanced page by page — each handed to emit as it is served — until the
+	// target row is served (loadthrough.go). ErrTargetNotFound: the walk
+	// reached the conversation's start without it; ErrHistoryUnavailable
+	// (wrapped): a page could not be read.
+	LoadThrough(ctx context.Context, ws ids.WorkspaceID, reader ReaderID, target *frontendv1.FeedId, emit func(*frontendv1.FeedPage) error) (*frontendv1.FeedId, error)
+	// LoadOlder loads the root feed's next older store page for a feature
+	// that reads held rows past the oldest loaded one, pushing its rows to
+	// every tail; false when nothing older can be loaded (loadthrough.go).
+	LoadOlder(ctx context.Context, ws ids.WorkspaceID) (bool, error)
 
 	// SetOutputAddress installs the address a lease holder wants the turns
 	// IT starts drawn at; nil withdraws it. It redirects no other turn and
@@ -368,8 +382,11 @@ type Deps struct {
 	// records and loads nothing, which is what a test that is not about
 	// surviving a restart wants.
 	RolledBack RolledBackTurnStore
-	// PageSize is how many rows a page carries. Defaults to DefaultPageSize.
-	PageSize int
+	// History reads the store pages a reader's request needs (book.go). nil
+	// pages nothing: every feed serves exactly what it holds, which is what a
+	// test that is not about loading history wants. Production always wires
+	// it.
+	History HistorySource
 	// TailRetention is how many published rows a feed retains for a tail's
 	// replay. Defaults to DefaultTailRetention.
 	TailRetention int
@@ -381,10 +398,6 @@ type WarningRaiser interface {
 	// RaiseWarning puts one keyed line on the warning strip.
 	RaiseWarning(ws ids.WorkspaceID, key, line string)
 }
-
-// DefaultPageSize is the page size the daemon picks when Deps names none. The
-// wire carries no cursor and no page size: the daemon owns both.
-const DefaultPageSize = 50
 
 // DefaultTailRetention is how many published rows one feed retains, so a token
 // minted at an earlier instant can still replay without a gap.

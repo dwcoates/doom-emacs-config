@@ -383,7 +383,7 @@ func TestRefusedStreamOpenIsAnError(t *testing.T) {
 	client := adoptReady(t, f, dir, uds)
 
 	// Act.
-	stream, err := client.WatchAgent(context.Background(), &shimv1.WatchAgentRequest{PageSize: DefaultPageSize})
+	stream, err := client.WatchAgent(context.Background(), tailOnlyWatch())
 
 	// Assert.
 	var refused *StreamOpenError
@@ -405,7 +405,7 @@ func TestStreamRecvEOFOnlyOnProducerEnd(t *testing.T) {
 		Frame: &shimv1.WatchAgentResponse_Page{Page: &conversationv1.HistoryPage{}},
 	}}
 	client := adoptReady(t, f, dir, uds)
-	stream, err := client.WatchAgent(context.Background(), &shimv1.WatchAgentRequest{PageSize: DefaultPageSize})
+	stream, err := client.WatchAgent(context.Background(), tailOnlyWatch())
 	if err != nil {
 		t.Fatalf("WatchAgent() error = %v", err)
 	}

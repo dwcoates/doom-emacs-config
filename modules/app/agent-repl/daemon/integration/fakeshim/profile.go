@@ -104,8 +104,9 @@ type Profile struct {
 	HangStartSession bool `json:"hang_start_session,omitempty"`
 	// ResumeHistory is the conversation a RESUMED session already holds: each
 	// element is one binary-encoded conversation.v1 HistoryEntry, stated
-	// NEWEST FIRST as a producer serves a page, and every WatchAgent stream of
-	// a resumed session opens with them as its floored catch-up page.
+	// NEWEST FIRST as a producer serves a page. They seed the main agent's
+	// book (book.go), which ReadHistory pages; a watch that asks for a repaint
+	// (which the daemon never does) still opens with them.
 	//
 	// It models what the real shim does off the store — a resume serves the
 	// agent's whole book, a fresh start serves an empty floor — and it is a
@@ -113,6 +114,9 @@ type Profile struct {
 	// frame of a stream the daemon opens during bring-up, which a control
 	// socket script would race.
 	ResumeHistory [][]byte `json:"resume_history,omitempty"`
+	// HistoryPageSize is the fake store's page size, DefaultHistoryPageSize
+	// when unset: what ReadHistory pages each agent's book in (book.go).
+	HistoryPageSize int `json:"history_page_size,omitempty"`
 }
 
 // ColdFacts are the shim's stated facts on a cold refusal.
