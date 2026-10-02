@@ -25,10 +25,14 @@
 #
 # Run with:   bash bin/test-readiness-report.sh
 
+set -euo pipefail
+
+# shellcheck source=lib-test-split.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib-test-split.sh"
+test_split_init "${BASH_SOURCE[0]}" "$@"
+
 # Tests run only at background priority: re-exec once through bin/background.sh.
 [[ -n ${AGENT_REPL_BACKGROUND_PRIORITY:-} ]] || exec "$(dirname "${BASH_SOURCE[0]}")/background.sh" bash "${BASH_SOURCE[0]}" "$@"
-
-set -euo pipefail
 
 # A pre-commit hook exports its live index to children. The fake git ignores
 # them, but nothing here should carry a binding to the caller's repository.
@@ -605,26 +609,6 @@ t_required_ready_gate_fails_with_revisions_on_drift() {
     rm -rf "$root"
 }
 
-t_missing_stamp_is_unknown
-t_current_stamp_is_ready
-t_commits_behind_counts_only_own_system
-t_minutes_behind_is_timestamp_delta
-t_dirty_stamp_flagged_and_still_measured
-t_unknown_deployed_revision_errors_per_system
-t_proto_commit_stales_every_system
-t_runner_roster_commit_stales_only_the_daemon
-t_proto_review_artifact_commit_stales_nothing
-t_daemon_binary_newer_than_process_is_stale
-t_daemon_started_after_binary_is_fresh
-t_service_fingerprint_mismatch_is_stale
-t_service_fingerprint_match_is_fresh
-t_processless_systems_report_null_running
-t_elisp_is_not_reported
-t_no_git_checkout_exits_nonzero
-t_unknown_argument_exits_two
-t_required_ready_gate_passes_with_revisions
-t_required_ready_gate_fails_with_revisions_on_drift
-
 # --- the verdict is the BUILD's staleness answer, off the same stamp --------
 #
 # On 2026-09-09 these were two separate computations — the build scanning
@@ -715,11 +699,6 @@ t_missing_source_tree_stamp_is_not_ready() {
     fi
     rm -rf "$root"
 }
-
-t_source_tree_drift_is_not_ready
-t_reverted_change_is_ready_though_commits_behind
-t_dirty_tree_is_flagged_but_still_ready
-t_missing_source_tree_stamp_is_not_ready
 
 # --- service_needs_bounce, straight off the library ---------------------------
 #
@@ -838,12 +817,59 @@ t_bounce_unparseable_report_is_stale_and_warns() {
     rm -rf "$BOUNCE_DIR"
 }
 
-t_bounce_live_matching_report_is_fresh
-t_bounce_missing_binary_is_stale
-t_bounce_missing_report_is_stale
-t_bounce_dead_pid_is_stale
-t_bounce_mismatched_hash_is_stale
-t_bounce_unparseable_report_is_stale_and_warns
+readiness_group_build_distance() {
+    t_missing_stamp_is_unknown
+    t_current_stamp_is_ready
+    t_commits_behind_counts_only_own_system
+    t_minutes_behind_is_timestamp_delta
+    t_dirty_stamp_flagged_and_still_measured
+    t_unknown_deployed_revision_errors_per_system
+}
+
+readiness_group_inputs() {
+    t_proto_commit_stales_every_system
+    t_runner_roster_commit_stales_only_the_daemon
+    t_proto_review_artifact_commit_stales_nothing
+}
+
+readiness_group_processes() {
+    t_daemon_binary_newer_than_process_is_stale
+    t_daemon_started_after_binary_is_fresh
+    t_service_fingerprint_mismatch_is_stale
+    t_service_fingerprint_match_is_fresh
+    t_processless_systems_report_null_running
+    t_elisp_is_not_reported
+}
+
+readiness_group_cli() {
+    t_no_git_checkout_exits_nonzero
+    t_unknown_argument_exits_two
+    t_required_ready_gate_passes_with_revisions
+    t_required_ready_gate_fails_with_revisions_on_drift
+}
+
+readiness_group_source_tree() {
+    t_source_tree_drift_is_not_ready
+    t_reverted_change_is_ready_though_commits_behind
+    t_dirty_tree_is_flagged_but_still_ready
+    t_missing_source_tree_stamp_is_not_ready
+}
+
+readiness_group_bounce() {
+    t_bounce_live_matching_report_is_fresh
+    t_bounce_missing_binary_is_stale
+    t_bounce_missing_report_is_stale
+    t_bounce_dead_pid_is_stale
+    t_bounce_mismatched_hash_is_stale
+    t_bounce_unparseable_report_is_stale_and_warns
+}
+
+test_split_run build-distance readiness_group_build_distance
+test_split_run inputs readiness_group_inputs
+test_split_run processes readiness_group_processes
+test_split_run cli readiness_group_cli
+test_split_run source-tree readiness_group_source_tree
+test_split_run bounce readiness_group_bounce
 
 echo "-----"
 echo "passed: $PASS  failed: $FAIL"

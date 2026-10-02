@@ -24,10 +24,14 @@
 #
 # Run with:   bash bin/test-build-frontend.sh
 
+set -euo pipefail
+
+# shellcheck source=lib-test-split.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib-test-split.sh"
+test_split_init "${BASH_SOURCE[0]}" "$@"
+
 # Tests run only at background priority: re-exec once through bin/background.sh.
 [[ -n ${AGENT_REPL_BACKGROUND_PRIORITY:-} ]] || exec "$(dirname "${BASH_SOURCE[0]}")/background.sh" bash "${BASH_SOURCE[0]}" "$@"
-
-set -euo pipefail
 
 # A pre-commit hook exports its live index to children. The fake git ignores
 # them, but nothing here should carry a binding to the caller's repository.
@@ -414,13 +418,6 @@ t_deps_lockfile_change_rekeys_store() {
     rm -rf "$root" "$store"
 }
 
-t_all_fresh
-t_one_stale
-t_missing_artifact
-t_force
-t_deps_linked_from_store
-t_deps_store_shared_across_worktrees
-
 # --- Test 8: gc collects a stranded entry, keeps the referenced one ----------
 t_gc_collects_stranded_keeps_referenced() {
     local root; root="$(mktemp -d)"
@@ -675,16 +672,6 @@ t_no_git_leaves_no_stamp() {
     rm -rf "$root"
 }
 
-t_deps_lockfile_change_rekeys_store
-t_gc_collects_stranded_keeps_referenced
-t_gc_protects_symlink_target
-t_gc_protects_other_worktrees
-t_gc_skips_when_lock_held
-t_gc_releases_lock
-t_gc_dry_run_deletes_nothing
-t_gc_respects_grace_window
-t_gc_runs_after_minting_an_entry
-
 # --- awkward source filenames still reach the staleness check ---------------
 # The pathspec list is passed to git unquoted (it is a space-separated table),
 # so these pin that a FILENAME's own spaces and glob metacharacters are never
@@ -804,14 +791,6 @@ t_services_missing_shared_source_fails_loudly() {
     rm -rf "$root"
 }
 
-t_gc_not_run_when_nothing_minted
-t_stamp_written_on_build
-t_stamp_marks_a_dirty_tree
-t_stamp_untouched_by_a_skipped_build
-t_no_git_leaves_no_stamp
-t_stale_source_with_space_in_name
-t_stale_source_with_glob_chars
-t_undeterminable_source_set_rebuilds
 # The daemon compiles against the generated proto module, so a regenerated
 # binding must stale daemon/bin/claude-repld even though it lives outside
 # daemon/.
@@ -836,11 +815,6 @@ t_daemon_shared_proto_edit_rebuilds() {
     fi
     rm -rf "$root"
 }
-
-t_services_fresh_then_shared_dependency_stales_both
-t_services_shared_logging_edit_rebuilds_both
-t_services_missing_shared_source_fails_loudly
-t_daemon_shared_proto_edit_rebuilds
 
 # --- the shim bundle carries the SAME revision its stamp records ------------
 # The daemon's stale-shim refresh compares the two, so a build that baked one
@@ -878,7 +852,6 @@ EOF
     fi
     rm -rf "$root"
 }
-t_shim_bundle_and_stamp_share_one_revision
 
 # --- editing build.mjs stales the shim --------------------------------------
 # build.mjs is the build DEFINITION — it is what injects the build identity —
@@ -896,7 +869,6 @@ t_build_mjs_stales_the_shim() {
     fi
     rm -rf "$root"
 }
-t_build_mjs_stales_the_shim
 
 # --- the webapp build id is the entry bundle's own content hash --------------
 # The webview's URL carries this value, so a build that did not record it leaves
@@ -914,7 +886,6 @@ t_webapp_build_id_is_the_entry_hash() {
     fi
     rm -rf "$root"
 }
-t_webapp_build_id_is_the_entry_hash
 
 # A SKIPPED build still owes the id: the artifact standing there is the one the
 # webview must address, and a stamp missing beside it leaves that address
@@ -934,7 +905,6 @@ t_webapp_build_id_written_by_a_skipped_build() {
     fi
     rm -rf "$root"
 }
-t_webapp_build_id_written_by_a_skipped_build
 
 # An index.html with no entry reference is a CORRUPT artifact, not a buildable
 # one. Continuing past it would deploy a webapp whose url addresses nothing.
@@ -954,7 +924,6 @@ t_webapp_build_id_missing_entry_fails_loudly() {
     fi
     rm -rf "$root"
 }
-t_webapp_build_id_missing_entry_fails_loudly
 
 # --- shim-lock -------------------------------------------------------------
 # The shim spawns shim-lock for every kernel claim and refuses to start a
@@ -975,7 +944,6 @@ t_lock_is_in_the_default_target_set() {
     fi
     rm -rf "$root"
 }
-t_lock_is_in_the_default_target_set
 
 t_lock_installs_beside_shim_store() {
     local root; root="$(mktemp -d)"
@@ -989,7 +957,6 @@ t_lock_installs_beside_shim_store() {
     fi
     rm -rf "$root"
 }
-t_lock_installs_beside_shim_store
 
 # --- staleness is a SOURCE REVISION question, not an mtime question ---------
 #
@@ -1132,13 +1099,6 @@ t_build_records_the_source_tree_stamp() {
     rm -rf "$root"
 }
 
-t_committed_change_outside_src_stales_the_shim
-t_committed_change_in_shared_logging_stales_the_webapp
-t_older_mtime_source_change_still_rebuilds
-t_unchanged_tree_skips_even_with_an_older_artifact
-t_dirty_tree_always_rebuilds
-t_change_outside_the_pathspec_leaves_the_system_fresh
-t_build_records_the_source_tree_stamp
 
 # --- -buildvcs=false on every go build ---------------------------------------
 # The deploy decides staleness by each binary's CONTENT HASH, and Go's default
@@ -1167,7 +1127,6 @@ t_in_place_go_builds_pass_buildvcs_false() {
     fi
     rm -rf "$root"
 }
-t_in_place_go_builds_pass_buildvcs_false
 
 # --- staging mode (--out DIR) ------------------------------------------------
 #
@@ -1820,43 +1779,114 @@ NPM
     rm -rf "$root"
 }
 
-t_heal_empty_entry_repaired
-t_heal_partial_entry_repaired
-t_heal_never_installs_through_a_link
-t_heal_repairs_a_tree_it_swapped_in_before
-t_heal_healthy_entry_untouched
-t_heal_waits_for_a_concurrent_repair_then_skips
-t_heal_breaks_a_dead_holders_lock
-t_heal_gives_up_a_wait_that_times_out
-t_heal_failed_repair_fails_the_build_loudly
-t_ensure_deps_repairs_a_broken_entry_keeping_the_link
-t_ensure_deps_falls_back_loudly_when_the_repair_fails
-t_ensure_deps_goes_private_for_a_healthy_entry_on_another_lockfile
+build_group_core() {
+    t_all_fresh
+    t_one_stale
+    t_missing_artifact
+    t_force
+    t_deps_linked_from_store
+    t_deps_store_shared_across_worktrees
+}
 
-t_ensure_deps_leaves_a_satisfied_link_alone
-t_ensure_deps_never_empties_the_store_through_a_link
-t_ensure_deps_installs_privately_in_place_of_an_unsatisfied_link
-t_ensure_deps_installs_an_absent_tree
-t_ensure_deps_fails_when_the_install_fails
+build_group_store_gc() {
+    t_deps_lockfile_change_rekeys_store
+    t_gc_collects_stranded_keeps_referenced
+    t_gc_protects_symlink_target
+    t_gc_protects_other_worktrees
+    t_gc_skips_when_lock_held
+    t_gc_releases_lock
+    t_gc_dry_run_deletes_nothing
+    t_gc_respects_grace_window
+    t_gc_runs_after_minting_an_entry
+    t_gc_not_run_when_nothing_minted
+}
 
-t_ensure_e2e_deps_ensures_every_e2e_package
-t_ensure_e2e_deps_fails_naming_the_package
-t_test_e2e_ensures_deps_before_the_suite
-t_test_e2e_never_runs_the_suite_without_its_deps
-t_e2e_runners_share_ensure_e2e_deps
+build_group_stamps() {
+    t_stamp_written_on_build
+    t_stamp_marks_a_dirty_tree
+    t_stamp_untouched_by_a_skipped_build
+    t_no_git_leaves_no_stamp
+    t_stale_source_with_space_in_name
+    t_stale_source_with_glob_chars
+    t_undeterminable_source_set_rebuilds
+}
 
-t_out_stages_the_shim
-t_out_stages_the_webapp
-t_out_stages_the_daemon
-t_out_stages_a_cache_bin_service store shim-store
-t_out_stages_a_cache_bin_service sidecar shim-claude-sidecar
-t_out_stages_a_cache_bin_service lock shim-lock
-t_out_writes_nothing_live
-t_in_place_fresh_fixture_builds_nothing
-t_out_builds_fresh_targets_unconditionally
-t_out_go_builds_pass_buildvcs_false
-t_out_refuses_a_relative_dir
-t_out_creates_an_absent_dir
+build_group_components() {
+    t_services_fresh_then_shared_dependency_stales_both
+    t_services_shared_logging_edit_rebuilds_both
+    t_services_missing_shared_source_fails_loudly
+    t_daemon_shared_proto_edit_rebuilds
+    t_shim_bundle_and_stamp_share_one_revision
+    t_build_mjs_stales_the_shim
+    t_webapp_build_id_is_the_entry_hash
+    t_webapp_build_id_written_by_a_skipped_build
+    t_webapp_build_id_missing_entry_fails_loudly
+    t_lock_is_in_the_default_target_set
+    t_lock_installs_beside_shim_store
+}
+
+build_group_revision_staleness() {
+    t_committed_change_outside_src_stales_the_shim
+    t_committed_change_in_shared_logging_stales_the_webapp
+    t_older_mtime_source_change_still_rebuilds
+    t_unchanged_tree_skips_even_with_an_older_artifact
+    t_dirty_tree_always_rebuilds
+    t_change_outside_the_pathspec_leaves_the_system_fresh
+    t_build_records_the_source_tree_stamp
+    t_in_place_go_builds_pass_buildvcs_false
+}
+
+build_group_healing() {
+    t_heal_empty_entry_repaired
+    t_heal_partial_entry_repaired
+    t_heal_never_installs_through_a_link
+    t_heal_repairs_a_tree_it_swapped_in_before
+    t_heal_healthy_entry_untouched
+    t_heal_waits_for_a_concurrent_repair_then_skips
+    t_heal_breaks_a_dead_holders_lock
+    t_heal_gives_up_a_wait_that_times_out
+    t_heal_failed_repair_fails_the_build_loudly
+    t_ensure_deps_repairs_a_broken_entry_keeping_the_link
+    t_ensure_deps_falls_back_loudly_when_the_repair_fails
+    t_ensure_deps_goes_private_for_a_healthy_entry_on_another_lockfile
+}
+
+build_group_dependencies() {
+    t_ensure_deps_leaves_a_satisfied_link_alone
+    t_ensure_deps_never_empties_the_store_through_a_link
+    t_ensure_deps_installs_privately_in_place_of_an_unsatisfied_link
+    t_ensure_deps_installs_an_absent_tree
+    t_ensure_deps_fails_when_the_install_fails
+    t_ensure_e2e_deps_ensures_every_e2e_package
+    t_ensure_e2e_deps_fails_naming_the_package
+    t_test_e2e_ensures_deps_before_the_suite
+    t_test_e2e_never_runs_the_suite_without_its_deps
+    t_e2e_runners_share_ensure_e2e_deps
+}
+
+build_group_staging() {
+    t_out_stages_the_shim
+    t_out_stages_the_webapp
+    t_out_stages_the_daemon
+    t_out_stages_a_cache_bin_service store shim-store
+    t_out_stages_a_cache_bin_service sidecar shim-claude-sidecar
+    t_out_stages_a_cache_bin_service lock shim-lock
+    t_out_writes_nothing_live
+    t_in_place_fresh_fixture_builds_nothing
+    t_out_builds_fresh_targets_unconditionally
+    t_out_go_builds_pass_buildvcs_false
+    t_out_refuses_a_relative_dir
+    t_out_creates_an_absent_dir
+}
+
+test_split_run core build_group_core
+test_split_run store-gc build_group_store_gc
+test_split_run stamps build_group_stamps
+test_split_run components build_group_components
+test_split_run revision-staleness build_group_revision_staleness
+test_split_run healing build_group_healing
+test_split_run dependencies build_group_dependencies
+test_split_run staging build_group_staging
 
 echo "-----"
 echo "passed: $PASS  failed: $FAIL"
