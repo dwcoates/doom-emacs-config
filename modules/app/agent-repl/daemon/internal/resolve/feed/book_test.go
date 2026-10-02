@@ -306,8 +306,8 @@ func TestOpenFeedWhoseReadFailsIsHistoryUnavailable(t *testing.T) {
 	}
 }
 
-func TestAFeedThatIsNoAgentsBookReadsNothing(t *testing.T) {
-	// Arrange.
+func TestAMergeTabsOpeningReadsTheRootsNewestPage(t *testing.T) {
+	// Arrange: a merge tab's rows are the main agent's addressed turns.
 	h := newHarness(t)
 	store := h.mainBook(3, promptsBook(5))
 	lease := ids.LeaseID("lease-1")
@@ -316,8 +316,24 @@ func TestAFeedThatIsNoAgentsBookReadsNothing(t *testing.T) {
 	h.openPage(feedid.Feed{Merge: &lease}, "reader-1")
 
 	// Assert.
-	if got := store.readCount(); got != 0 {
-		t.Fatalf("reads = %d, want none for a merge tab", got)
+	if got := store.readCount(); got != 1 || store.lastRead().target != "" || store.lastRead().after != "" {
+		t.Fatalf("reads = %d (last %+v), want the root's newest page once", got, store.lastRead())
+	}
+}
+
+func TestAMergeTabReadsNothingWhenTheRootsNewestPageIsHeld(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	store := h.mainBook(3, promptsBook(5))
+	h.openPage(rootFeed(), "reader-root")
+	lease := ids.LeaseID("lease-1")
+
+	// Act.
+	h.openPage(feedid.Feed{Merge: &lease}, "reader-1")
+
+	// Assert.
+	if got := store.readCount(); got != 1 {
+		t.Fatalf("reads = %d, want none beyond the root's", got)
 	}
 }
 

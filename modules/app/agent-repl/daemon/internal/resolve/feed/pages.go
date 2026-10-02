@@ -53,7 +53,7 @@ func (r *resolver) walkPage(ctx context.Context, ws ids.WorkspaceID, feed feedid
 		if err != nil || plan == nil {
 			return page, token, err
 		}
-		if _, err := r.load(ctx, ws, feed, *plan); err != nil {
+		if _, err := r.load(ctx, *plan); err != nil {
 			if !errors.Is(err, ErrNoHistorySource) {
 				return nil, nil, err
 			}
@@ -85,10 +85,8 @@ func (r *resolver) stepPage(ws ids.WorkspaceID, feed feedid.Feed, reader ReaderI
 	log := r.logger(ws)
 	if step.open && !step.newestRead {
 		step.newestRead = true
-		if !f.book.newestLoaded || f.book.liveSince {
-			if plan, ok := r.planLoad(s, f, true); ok && !step.noSource {
-				return nil, nil, &plan, nil
-			}
+		if plan, ok := r.planOpening(s, f); ok && !step.noSource {
+			return nil, nil, &plan, nil
 		}
 	}
 
