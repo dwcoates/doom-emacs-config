@@ -553,6 +553,14 @@ type Watcher interface {
 	// nil when it was served none. StartTurn states it as known_through, so the
 	// accepted turn's opening page carries only what the turn itself wrote.
 	MainKnownThrough() *conversationv1.HistoryPointer
+	// NoteHistoryLoaded is told every history page a READER'S REQUEST loaded
+	// through ReadHistory for one agent (nil: the main agent), and whether it
+	// was that agent's NEWEST page. Watches replay no history, so a loaded page
+	// is the views' one statement of the conversation before this daemon's
+	// streams: it names the main agent when nothing has, tells the footer a
+	// turn has already run, and — a newest page only — gives an agent the
+	// daemon held no pointer of the pointer its next open catches up from.
+	NoteHistoryLoaded(agent *conversationv1.AgentId, page *conversationv1.HistoryPage, newest bool)
 	// TurnInFlight reports the open turn, nil when none is.
 	TurnInFlight() *ids.TurnID
 	// Free reports freeness: no turn in flight AND an empty live-work set.
