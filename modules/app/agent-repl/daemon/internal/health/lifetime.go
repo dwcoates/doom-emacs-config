@@ -125,6 +125,12 @@ var faultLifetimes = map[string]Lifetime{
 	KindResumeFailed:         standing(EdgeSessionStarted),
 	KindRelaunchResumeFailed: standing(EdgeSessionStarted),
 	KindColdGateReopenFailed: standing(EdgeSessionStarted),
+	// A vendor that did not start ends at the next session the shim serves.
+	// The retrying one is also closed by its own run as each attempt
+	// replaces it, and as the run gives way to a rejection or exhaustion.
+	KindVendorStartRetrying: standing(EdgeSessionStarted),
+	KindVendorStartRejected: standing(EdgeSessionStarted),
+	KindVendorStartFailed:   standing(EdgeSessionStarted),
 	// An undetermined bounce ends when the workspace next attaches or starts
 	// healthy.
 	KindBounceUnknown: standing(EdgeHealthyAttach, EdgeSessionStarted),

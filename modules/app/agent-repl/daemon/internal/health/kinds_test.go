@@ -180,6 +180,9 @@ func TestSessionFaultFillsEveryTypedArm(t *testing.T) {
 		{name: "daemon state unreadable", kind: KindStateUnreadable},
 		{name: "adoption window expired", kind: KindAdoptionWindowExpired},
 		{name: "final answer unresolved", kind: KindFinalAnswerUnresolved},
+		{name: "vendor start retrying", kind: KindVendorStartRetrying},
+		{name: "vendor start rejected", kind: KindVendorStartRejected},
+		{name: "vendor start failed", kind: KindVendorStartFailed},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -611,5 +614,96 @@ func TestDaemonFaultOfIsTheHealthAnswersOwnRendering(t *testing.T) {
 	// Assert
 	if want := daemonFault(fault); !proto.Equal(got, want) {
 		t.Fatalf("DaemonFaultOf = %v, want DaemonHealth's own rendering %v", got, want)
+	}
+}
+
+// vendorEvidence is a vendor-start fault's recorded evidence: the third failed
+// attempt of a run that began at 1700000000000 ms.
+func vendorEvidence(kind string) wsm.Fault {
+	return wsm.Fault{Kind: kind, Evidence: map[string]string{
+		EvidenceFailedAttempts: "3",
+		EvidenceCause:          "supportedModels did not answer in 3s",
+		EvidenceFailingSinceMs: "1700000000000",
+	}}
+}
+
+func TestSessionFaultCarriesTheVendorRetryEvidence(t *testing.T) {
+	// Arrange
+	f := vendorEvidence(KindVendorStartRetrying)
+
+	// Act
+	got, _ := sessionFault(f)
+
+	// Assert
+	arm := got.GetVendorStartRetrying()
+	if arm.GetFailedAttempts() != 3 || arm.GetCause() != "supportedModels did not answer in 3s" || arm.GetFailingSinceMs() != 1700000000000 {
+		t.Fatalf("vendor_start_retrying = %+v, want attempts 3, the cause and the run's anchor", arm)
+	}
+}
+
+func TestSessionFaultCarriesTheVendorRejectionCause(t *testing.T) {
+	// Arrange
+	f := wsm.Fault{Kind: KindVendorStartRejected, Evidence: map[string]string{EvidenceCause: "invalid api key"}}
+
+	// Act
+	got, _ := sessionFault(f)
+
+	// Assert
+	if cause := got.GetVendorStartRejected().GetCause(); cause != "invalid api key" {
+		t.Fatalf("vendor_start_rejected.cause = %q, want the shim's account", cause)
+	}
+}
+
+func TestSessionFaultCarriesTheVendorFailedEvidenceAsTheLastCause(t *testing.T) {
+	// Arrange
+	f := vendorEvidence(KindVendorStartFailed)
+
+	// Act
+	got, _ := sessionFault(f)
+
+	// Assert
+	arm := got.GetVendorStartFailed()
+	if arm.GetFailedAttempts() != 3 || arm.GetLastCause() != "supportedModels did not answer in 3s" || arm.GetFailingSinceMs() != 1700000000000 {
+		t.Fatalf("vendor_start_failed = %+v, want attempts 3, the last cause and the run's anchor", arm)
+	}
+}
+
+func TestVendorStartLineComposesEachSentence(t *testing.T) {
+	tests := []struct {
+		name string
+		kind string
+		want string
+	}{
+		{"retrying", KindVendorStartRetrying, "Claude SDK did not start (attempt 3): supportedModels did not answer in 3s · retrying"},
+		{"rejected", KindVendorStartRejected, "Claude SDK refused to start: supportedModels did not answer in 3s · restart: SPC o C-c"},
+		{"failed", KindVendorStartFailed, "Claude SDK failed to start · restart: SPC o C-c"},
+		{"not a vendor kind", KindResumeFailed, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := vendorEvidence(tt.kind)
+
+			// Act
+			got := VendorStartLine(f)
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("VendorStartLine = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFaultLineDetailIsTheVendorStartLine(t *testing.T) {
+	// Arrange
+	f := vendorEvidence(KindVendorStartFailed)
+
+	// Act
+	got := FaultLineDetail(f)
+
+	// Assert
+	if want := "Claude SDK failed to start · restart: SPC o C-c"; got != want {
+		t.Fatalf("FaultLineDetail = %q, want %q", got, want)
 	}
 }
