@@ -1677,11 +1677,11 @@ rest of this suite already asserts against."
   `((repository
      . ((sections
          . [((key . ((repository . ,agent-repl-itest-verbs--repo-protojson)))
-             (header . ((label . ((text . "itest-repo")))))
+             (header . ((label . ((text . "itest-repo"))) (count . ((workspaces . 1)))))
              (rows . ((rows . ,(vconcat rows))))
              (expanded . ()))])))
     (task . ((sections . [])))
-    (recentlyMerged . ((header . ((label . ((text . "recently merged")))))
+    (recentlyMerged . ((header . ((label . ((text . "recently merged"))) (count . ((workspaces . 1)))))
                         (rows . ((rows . [])))))))
 
 (defmacro agent-repl-itest-verbs--with-roster (daemon rows &rest body)
