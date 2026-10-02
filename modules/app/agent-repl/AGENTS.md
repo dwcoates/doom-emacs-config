@@ -1389,6 +1389,18 @@ elisp reload, persistent Wi-Fi, the daemon's standing faults and the startup's
 - **A new instance also re-stands today's dismissed news digest** without a new
   run.
 
+## A standing gate hides the input window and docks its banner
+
+Owner, 2026-10-02. A gate is a choice whose answer replaces the composer;
+only the cold gate is one today. While it stands the daemon states it twice
+from the one cold-gate standing: `HostWorkspace.gate` on the host stream and
+the root feed's standing `FeedColdGate` row. Emacs reads the first
+(`agent-repl-input-hidden-p`, `lisp/window.el`) and lays the workspace out
+with no input window; the webapp reads the second (`src/feed/gate-dock.ts`)
+and docks the banner at the bottom, at least the input's height. Answering
+or retracting the gate restores both. Never gate either side on a signal the
+other cannot see.
+
 ## What each status color means
 
 Owner ruling, 2026-09-28. A workspace's status color answers ONE question on
