@@ -7770,6 +7770,40 @@ describe("the retry label a failed vendor start carries", () => {
     expect(retryLabel(await pending)).toBe(retry);
   });
 
+  it.each([
+    ["ENOENT", "rejected"],
+    ["EACCES", "rejected"],
+    ["EAGAIN", "retryable"],
+  ] as const)("labels a start whose child failed to spawn with %s %s", async (errno, retry) => {
+    // Arrange.
+    const h = harness({ initTimeoutMs: AMPLE, liveSignalTimeoutMs: AMPLE, holdLiveSignal: true });
+    const pending = h.engine.startSession(freshRequest());
+    const first = await untilQuery(h, 0);
+
+    // Act: the spawner reports the errno, then the SDK's iterator throws.
+    first.spec.onChildExit?.({ code: null, signal: null, spawnErrno: errno });
+    first.query.emit(hookResponse({ outcome: "success", output: "" }));
+    first.query.fail(new Error(`Failed to spawn Claude Code process: spawn claude ${errno}`));
+
+    // Assert.
+    expect(retryLabel(await pending)).toBe(retry);
+  });
+
+  it("labels an exit-coded refused resume retryable, reading no stderr text", async () => {
+    // Arrange.
+    const h = harness({ initTimeoutMs: AMPLE, liveSignalTimeoutMs: AMPLE, holdLiveSignal: true });
+    const pending = h.engine.startSession(freshRequest());
+    const first = await untilQuery(h, 0);
+
+    // Act.
+    first.spec.onStderr?.("No conversation found with session ID: bf5fcae1");
+    first.spec.onChildExit?.({ code: 1, signal: null });
+    first.query.end();
+
+    // Assert.
+    expect(retryLabel(await pending)).toBe("retryable");
+  });
+
   it("labels a hook that blocked the opening rejected", async () => {
     // Arrange.
     const h = harness({ holdLiveSignal: true });
@@ -7908,6 +7942,22 @@ describe("the retry label a failed vendor start carries", () => {
         code: context?.["vendor_exit_code"],
         signal: context?.["vendor_exit_signal"],
       }).toEqual({ alive: false, code: -1, signal: "SIGKILL" });
+    });
+
+    it("states the errno of a child that failed to spawn", async () => {
+      // Arrange.
+      const h = harness({ initTimeoutMs: AMPLE, liveSignalTimeoutMs: AMPLE, holdLiveSignal: true });
+      const before = logSinkMark();
+      const pending = h.engine.startSession(freshRequest());
+      const first = await untilQuery(h, 0);
+
+      // Act.
+      first.spec.onChildExit?.({ code: null, signal: null, spawnErrno: "ENOENT" });
+      first.query.end();
+      await pending;
+
+      // Assert.
+      expect(logContextFor(before, RECORD)?.["vendor_spawn_errno"]).toBe("ENOENT");
     });
 
     it("does not carry a previous attempt's child exit into a retry's record", async () => {

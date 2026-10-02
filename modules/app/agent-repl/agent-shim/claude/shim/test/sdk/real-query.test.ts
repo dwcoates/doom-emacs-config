@@ -406,7 +406,10 @@ describe("createRealQuery", () => {
  * a unit test wait on the operating system.
  */
 class FakeChild {
+  /** Absent until set: a child with no pid is one that never spawned. */
+  pid: number | undefined;
   readonly exitListeners: ((code: number | null, signal: NodeJS.Signals | null) => void)[] = [];
+  readonly errorListeners: ((err: Error) => void)[] = [];
   readonly stderrListeners: ((chunk: string) => void)[] = [];
   encoding = "";
   readonly stderr = {
@@ -417,11 +420,15 @@ class FakeChild {
       this.stderrListeners.push(listener);
     },
   };
-  once(_event: string, listener: (code: number | null, signal: NodeJS.Signals | null) => void): void {
-    this.exitListeners.push(listener);
+  once(event: string, listener: (...args: never[]) => void): void {
+    if (event === "exit") this.exitListeners.push(listener as (code: number | null, signal: NodeJS.Signals | null) => void);
+    if (event === "error") this.errorListeners.push(listener as (err: Error) => void);
   }
   exit(code: number | null, signal: NodeJS.Signals | null): void {
     for (const listener of this.exitListeners) listener(code, signal);
+  }
+  fail(err: Error): void {
+    for (const listener of this.errorListeners) listener(err);
   }
   say(chunk: string): void {
     for (const listener of this.stderrListeners) listener(chunk);
@@ -465,6 +472,65 @@ describe("the vendor spawner", () => {
 
     // Assert.
     expect(seen).toEqual([{ code: null, signal: "SIGKILL" }]);
+  });
+
+  it("reports the structured errno of a spawn that failed", () => {
+    // Arrange.
+    const child = new FakeChild();
+    const seen: VendorChildExit[] = [];
+    const spawner = vendorSpawner((exit) => seen.push(exit), undefined, () => child as never);
+    const err = Object.assign(new Error("spawn claude ENOENT"), { code: "ENOENT" });
+
+    // Act.
+    spawner(spawnOptions());
+    child.fail(err);
+
+    // Assert.
+    expect(seen).toEqual([{ code: null, signal: null, spawnErrno: "ENOENT" }]);
+  });
+
+  it("reports an empty errno for a spawn failure that states no code", () => {
+    // Arrange.
+    const child = new FakeChild();
+    const seen: VendorChildExit[] = [];
+    const spawner = vendorSpawner((exit) => seen.push(exit), undefined, () => child as never);
+
+    // Act.
+    spawner(spawnOptions());
+    child.fail(new Error("spawn failed"));
+
+    // Assert.
+    expect(seen).toEqual([{ code: null, signal: null, spawnErrno: "" }]);
+  });
+
+  it("leaves an error from a child that DID spawn to the SDK", () => {
+    // Arrange.
+    const child = new FakeChild();
+    child.pid = 4242;
+    const seen: VendorChildExit[] = [];
+    const spawner = vendorSpawner((exit) => seen.push(exit), undefined, () => child as never);
+
+    // Act.
+    spawner(spawnOptions());
+    child.fail(Object.assign(new Error("kill EPERM"), { code: "EPERM" }));
+
+    // Assert.
+    expect(seen).toEqual([]);
+  });
+
+  it("reports one end for a child whose failed spawn is followed by an exit", () => {
+    // Arrange.
+    const child = new FakeChild();
+    const seen: VendorChildExit[] = [];
+    const spawner = vendorSpawner((exit) => seen.push(exit), undefined, () => child as never);
+
+    // Act.
+    spawner(spawnOptions());
+    child.fail(Object.assign(new Error("spawn claude EACCES"), { code: "EACCES" }));
+    child.exit(-2, null);
+
+    // Assert.
+    expect(seen).toEqual([{ code: null, signal: null, spawnErrno: "EACCES" }]);
   });
 
   it("keeps feeding the stderr callback the SDK would otherwise feed", () => {
