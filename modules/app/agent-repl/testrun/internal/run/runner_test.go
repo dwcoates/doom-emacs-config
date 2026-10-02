@@ -441,3 +441,24 @@ func TestRunBracketsEachUnitsOutputWithItsSuite(t *testing.T) {
 		t.Fatalf("the block is not bracketed by its unit lines:\n%s", out)
 	}
 }
+
+func TestRunShowsWhatAUnitsDisplayKeeps(t *testing.T) {
+	// Arrange
+	s := spec("g#00", "g")
+	var sawPassed bool
+	s.Display = func(out []byte, passed bool) []byte {
+		sawPassed = passed
+		return []byte("kept\n")
+	}
+	r, out, _ := newRunner(1, &fakeExec{scripts: map[string]script{"g#00": {output: "noise\n"}}})
+
+	// Act
+	if _, _, err := r.Run(context.Background(), []Spec{s}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert
+	if !sawPassed || !strings.Contains(out.String(), "kept\n") || strings.Contains(out.String(), "noise") {
+		t.Fatalf("display was not applied (passed=%v):\n%s", sawPassed, out)
+	}
+}
