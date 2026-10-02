@@ -538,3 +538,54 @@ func TestUpdateReportsTheDisplayStepWithoutFailingTheRequest(t *testing.T) {
 		})
 	}
 }
+
+func TestRefreshAbandonedByItsCallerRecordsNoCause(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.r.on(argPmsetRead, answer{err: context.Canceled})
+	h.r.on(argPorts, answer{err: context.Canceled})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act.
+	h.c.Refresh(ctx)
+
+	// Assert.
+	if errs := h.records("error", opProbe); len(errs) != 0 {
+		t.Fatalf("probe ERROR records = %+v, want none for an abandoned read", errs)
+	}
+}
+
+func TestRefreshAbandonedByItsCallerPublishesNothing(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.r.on(argPmsetRead, answer{err: context.Canceled})
+	h.r.on(argPorts, answer{err: context.Canceled})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act.
+	h.c.Refresh(ctx)
+
+	// Assert.
+	if _, ok := h.c.Topic().Latest(); ok {
+		t.Fatalf("an abandoned read published a standing")
+	}
+}
+
+func TestRefreshAbandonedByItsCallerIsRecordedAtInfo(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.r.on(argPmsetRead, answer{err: context.Canceled})
+	h.r.on(argPorts, answer{err: context.Canceled})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act.
+	h.c.Refresh(ctx)
+
+	// Assert.
+	if infos := h.records("info", opProbe); len(infos) != 1 || infos[0].Context["cause"] != context.Canceled.Error() {
+		t.Fatalf("probe INFO records = %+v, want one naming the cancellation", infos)
+	}
+}

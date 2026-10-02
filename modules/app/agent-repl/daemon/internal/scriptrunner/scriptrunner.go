@@ -143,8 +143,21 @@ func (r *Runner) RunLines(ctx context.Context, dir string, argv []string, onLine
 		return output, code, nil
 	}
 
+	// THE CALLER CANCELLED IT. A context the caller cancelled (a daemon
+	// standing down, a client that hung up) ended the run on purpose; that is
+	// the caller's decision, not a failure of the script, so it is INFO here
+	// and the caller sees the cancellation in the returned error. A DEADLINE
+	// is different: the script ran out of the time it was given, which stays
+	// the error below.
+	if errors.Is(err, context.Canceled) {
+		r.log.Info("daemon.scriptrunner.run", "the caller cancelled the script before it finished", dlog.Context{
+			"script": argv[0], "dir": dir, "cause": err.Error(),
+		})
+		return output, 0, fmt.Errorf("scriptrunner: run %s: %w", argv[0], err)
+	}
+
 	// The process never produced an exit code at all: it could not be
-	// spawned, or the context ended first. Either is a failure to CLASSIFY,
+	// spawned, or its deadline passed first. Either is a failure to CLASSIFY,
 	// not an answer, so it is surfaced as an error rather than folded into a
 	// fabricated exit code.
 	r.log.Error("daemon.scriptrunner.run", "script could not be run", dlog.Context{
