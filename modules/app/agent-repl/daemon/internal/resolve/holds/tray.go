@@ -216,11 +216,11 @@ func setHold(out *frontendv1.HeldPrompt, h wsm.HeldPrompt, log dlog.Logger) {
 		}
 		out.Hold = &frontendv1.HeldPrompt_Shutdown{
 			Shutdown: &frontendv1.HeldPromptShutdownHold{ScheduleId: h.ScheduleID}}
-	case wsm.HoldSessionStarting:
-		ctx["hold"] = "session_starting"
-		log.Debug("daemon.holds.hold", "the hold waits for the session to come up", ctx)
-		out.Hold = &frontendv1.HeldPrompt_SessionStarting{
-			SessionStarting: &frontendv1.HeldPromptSessionStartingHold{}}
+	case wsm.HoldReconnect:
+		ctx["hold"] = "reconnect"
+		log.Debug("daemon.holds.hold", "the hold waits for the session to reconnect", ctx)
+		out.Hold = &frontendv1.HeldPrompt_Reconnect{
+			Reconnect: &frontendv1.HeldPromptReconnectHold{}}
 	case wsm.HoldBuildRefresh:
 		ctx["hold"] = "build_refresh"
 		log.Debug("daemon.holds.hold", "the hold waits for the build refresh", ctx)
@@ -305,8 +305,8 @@ func heldBadges(p *frontendv1.HeldPrompt, log dlog.Logger) []*frontendv1.HeldPro
 		out = append(out, badge("restart hold", sentence))
 	case *frontendv1.HeldPrompt_BuildRefresh:
 		out = append(out, badge("build refresh", "held for the build refresh"))
-	case *frontendv1.HeldPrompt_SessionStarting:
-		out = append(out, badge("starting up", "held until the session is up"))
+	case *frontendv1.HeldPrompt_Reconnect:
+		out = append(out, badge("after reconnect", "held until the session reconnects"))
 	case *frontendv1.HeldPrompt_Merge:
 		out = append(out, badge("after the merge", "held until the merge ends; the workspace stays open for it"))
 	default:

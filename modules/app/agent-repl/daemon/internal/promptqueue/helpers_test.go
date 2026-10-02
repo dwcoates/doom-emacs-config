@@ -835,6 +835,8 @@ type fakeFeed struct {
 	clearReceived   []ids.TurnID
 	compactReceived []ids.TurnID
 	cutAborted      []ids.TurnID
+	// promptsRetired are the turns whose mirrored prompt row was taken down.
+	promptsRetired []ids.TurnID
 	// closed are the door's feed tells, in order.
 	closed []closedTell
 }
@@ -843,6 +845,20 @@ type fakeFeed struct {
 type closedTell struct {
 	turn ids.TurnID
 	how  wsm.TurnClose
+}
+
+// OnPromptRetired records a mirrored prompt row taken back down.
+func (f *fakeFeed) OnPromptRetired(_ ids.WorkspaceID, prompt *conversationv1.AgentPrompt) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.promptsRetired = append(f.promptsRetired, ids.TurnID(prompt.GetId().GetValue()))
+}
+
+// retiredPrompts answers the turns whose mirrored row was taken down.
+func (f *fakeFeed) retiredPrompts() []ids.TurnID {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]ids.TurnID(nil), f.promptsRetired...)
 }
 
 // OnTurnClosed records the door telling the feed a turn closed.
@@ -1018,7 +1034,6 @@ type fakeFooter struct {
 	mu           sync.Mutex
 	interrupting []bool
 	turns        []*footer.TurnStarted
-	dropped      []uint32
 	submissions  []footer.Submission
 	retrying     bool
 }
@@ -1069,21 +1084,6 @@ func (f *fakeFooter) SetInterrupting(_ ids.WorkspaceID, on bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.interrupting = append(f.interrupting, on)
-}
-
-// AddDroppedPrompts records what the queue told the footer a failed bring-up
-// cost in held prompts.
-func (f *fakeFooter) AddDroppedPrompts(_ ids.WorkspaceID, n uint32) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.dropped = append(f.dropped, n)
-}
-
-// droppedPrompts answers the recorded drop counts.
-func (f *fakeFooter) droppedPrompts() []uint32 {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return append([]uint32(nil), f.dropped...)
 }
 
 func (f *fakeFooter) interruptions() []bool {
@@ -1241,6 +1241,9 @@ type harness struct {
 	reviveErr  error
 	reviveHook func()
 	noSession  bool
+	// notStarted keeps the client and the watcher while the shim holds no
+	// started session: a relaunch's installed shim, a vendor start retried.
+	notStarted bool
 	// clientReaped answers no client while the watcher stays: the shim a
 	// revival brought up has since died and been reaped.
 	clientReaped bool
@@ -1302,7 +1305,8 @@ func newHarness(t *testing.T) *harness {
 			}
 			return nil
 		},
-		Watcher: func(ids.WorkspaceID) (Watcher, bool) { return h.watcher, !h.noSession },
+		Watcher:        func(ids.WorkspaceID) (Watcher, bool) { return h.watcher, !h.noSession },
+		SessionStarted: func(ids.WorkspaceID) bool { return !h.noSession && !h.notStarted },
 		ColdGate: func(ids.WorkspaceID) (string, bool) {
 			return h.coldGate, h.coldGate != ""
 		},

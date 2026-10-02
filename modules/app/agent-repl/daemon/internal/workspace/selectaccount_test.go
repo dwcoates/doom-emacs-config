@@ -250,3 +250,24 @@ func TestABounceSpawnsWhereTheSessionLivesWhenNobodyHasChosen(t *testing.T) {
 		t.Fatalf("root = %q, want the root the session is filed under", got)
 	}
 }
+
+// THE ACCOUNT SWITCH BOUNCES AT FREENESS: it is the one unforced shim bounce
+// left, because the user asked to change accounts, not to end the work.
+func TestSelectAccountBouncesUnforced(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	twoRoots(f)
+	f.db.sessions["w1"] = wsm.Session{Workspace: "w1", HostSessionID: "host-1", ConfigDir: "/config"}
+
+	// Act
+	if _, err := f.verbs.SelectAccount(context.Background(), "w1", "/config-work"); err != nil {
+		t.Fatalf("SelectAccount: %v", err)
+	}
+
+	// Assert
+	f.rollout.awaitRelaunch(t)
+	if got := f.rollout.relaunchCalls(); len(got) != 1 || got[0].Force {
+		t.Fatalf("relaunches = %+v, want one unforced bounce", got)
+	}
+}
