@@ -102,17 +102,26 @@ func TestStartOpensTheSessionAndMainWatches(t *testing.T) {
 	if h.mainReq.Target != nil {
 		t.Fatalf("the main watch was addressed to %q, want an unset target", h.mainReq.GetTarget().GetValue())
 	}
-	if h.mainReq.GetPageSize() == 0 {
-		t.Fatal("the main watch was opened with no page budget")
-	}
 	if !h.hasRecord("info", "daemon.sessionwatcher.start") {
 		t.Fatal("the watch-fleet bring-up has no info lifecycle record")
 	}
 }
 
+// TestStartOpensTailOnlyWhenNothingIsHeld covers ruling 2 of feed paging on
+// demand: a watch of an agent the daemon holds nothing of replays no history.
+func TestStartOpensTailOnlyWhenNothingIsHeld(t *testing.T) {
+	// Arrange / Act.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+
+	// Assert.
+	if h.mainReq.GetTailOnly() == nil {
+		t.Fatalf("the main watch opened with %v, want tail_only", h.mainReq.GetOpening())
+	}
+}
+
 // TestStartCatchesUpFromThePersistedPointer covers the caller's persisted
-// mark: passing it is what makes the opening page a catch-up instead of a
-// repaint of history the daemon already holds.
+// mark: passing it is what makes the opening page a catch-up of what was
+// written after what the daemon already holds.
 func TestStartCatchesUpFromThePersistedPointer(t *testing.T) {
 	// Arrange / Act.
 	h := newHarness(t, Session{
@@ -1981,11 +1990,10 @@ func TestASeveringNamesADeadShim(t *testing.T) {
 	}
 }
 
-// TestAReOpenedWatchCatchesUpOnlyAfterItWasServed covers which re-open is a
-// CATCH-UP: one that names a pointer, or one on a watch already paged (its
-// book was empty then, so everything on the new page was written since). A
-// watch never served anything re-opens as a repaint, whose cuts are history.
-func TestAReOpenedWatchCatchesUpOnlyAfterItWasServed(t *testing.T) {
+// TestAReOpenedWatchCatchesUpFromWhatItWasServed covers what a re-open asks
+// for: the pointer it was served, or tail_only when it was served none. Either
+// way nothing on the new page was drawn before, so a cut on it is an edge.
+func TestAReOpenedWatchCatchesUpFromWhatItWasServed(t *testing.T) {
 	tests := []struct {
 		name string
 		// served is what the main watch was served before the link broke.
@@ -2011,10 +2019,10 @@ func TestAReOpenedWatchCatchesUpOnlyAfterItWasServed(t *testing.T) {
 			want:        []string{"feed.OnHistoryPage", "footer.OnHistoryPage", "footer.OnContextCut", "topbar.OnContextCut"},
 		},
 		{
-			name:        "served nothing, so re-opened as a repaint",
+			name:        "served nothing, so re-opened tail_only",
 			served:      func(*watcher) {},
 			wantPointer: "",
-			want:        []string{"feed.OnHistoryPage", "footer.OnHistoryPage"},
+			want:        []string{"feed.OnHistoryPage", "footer.OnHistoryPage", "footer.OnContextCut", "topbar.OnContextCut"},
 		},
 	}
 	for _, tt := range tests {

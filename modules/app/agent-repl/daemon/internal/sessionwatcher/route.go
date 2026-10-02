@@ -307,7 +307,7 @@ func (w *watcher) routeOpeningPageLocked(a *agentWatch, page *conversationv1.His
 	}
 	w.log.Debug("daemon.sessionwatcher.history_page", "opening page routed to the feed", dlog.Context{
 		"agent_id": a.id.GetValue(), "entries": len(page.GetEntries()),
-		"origin": origin.String(), "catch_up": a.catchUp,
+		"origin": origin.String(),
 	})
 	agent := w.watchAgentLocked(a)
 	if agent == nil && a.id == nil {
@@ -315,7 +315,7 @@ func (w *watcher) routeOpeningPageLocked(a *agentWatch, page *conversationv1.His
 		// agent's by construction, and the views were just told who that is.
 		agent = w.viewsMain
 	}
-	w.sinks.Feed.OnHistoryPage(w.ws, agent, feedPage(page, origin, a.catchUp))
+	w.sinks.Feed.OnHistoryPage(w.ws, agent, feedPage(page))
 	// A SPAWN ON THIS PAGE OWES ITS CHILD A WATCH. The page's own frames drew
 	// the commission, but the created agent's conversation lives only on the
 	// child's own book — so every spawn the page carries opens the same watch
@@ -330,7 +330,6 @@ func (w *watcher) routeOpeningPageLocked(a *agentWatch, page *conversationv1.His
 	// AFTER the page is handed over whole, the rows on it that close an act
 	// reach the views that act was standing in.
 	w.routePageClosingsLocked(a, page, origin)
-	a.paged = true
 }
 
 // knowPagePromptsLocked records every turn a page's PROMPTS open as a turn this
@@ -364,18 +363,14 @@ func (w *watcher) adoptPagePointerLocked(a *agentWatch, ptr *conversationv1.Hist
 }
 
 // feedPage is the page the FEED is handed. A page's boundary says whether
-// older history remains BELOW it, and only a watch's first page is read from
-// the top of the book: a catch-up page is bounded by known_through and
-// StartTurn's page by its one-entry budget, so a `floor` on either means "the
-// mark was reached" and a `more` means "the budget ran out" — neither is a
-// statement about the conversation's oldest entry. Handed through, a catch-up
-// `floor` cleared the replay-truncated marker the first page had set, and a
-// turn page's `more` re-set it as a one-entry replay. So those two carry their
-// entries and no boundary.
-func feedPage(page *conversationv1.HistoryPage, origin pageOrigin, catchUp bool) *conversationv1.HistoryPage {
-	if origin != pageTurnAccepted && !catchUp {
-		return page
-	}
+// older history remains BELOW it, and no opening page is read from the top of
+// the book any more: every watch and every turn opens tail_only or catches up
+// from a known_through pointer, so a `floor` means "the mark was reached" and
+// a `more` means "the store's page ran out" — neither is a statement about the
+// conversation's oldest entry, which only a reader's own page load (the feed's
+// ReadHistory) may make. So an opening page carries its entries and no
+// boundary.
+func feedPage(page *conversationv1.HistoryPage) *conversationv1.HistoryPage {
 	return &conversationv1.HistoryPage{Entries: page.GetEntries()}
 }
 
@@ -414,13 +409,11 @@ func (w *watcher) routePageClosingsLocked(a *agentWatch, page *conversationv1.Hi
 //     that page serves the same row live, and counting it served here would
 //     make the live row read as a replay and never reach the views.
 //   - A cut this watch was already served is a REPLAY, dropped whole.
-//   - On a watch's FIRST page — a repaint — it is history, recorded as served
-//     and never routed: it ended an act this daemon never saw begin, and
-//     routing it would drop the context figure the topbar holds now and end
-//     whatever turn the footer is drawing.
-//   - On a CATCH-UP page it was written while no stream stood, so it is an
-//     edge the views missed, and it is routed exactly as a live cut is — bar
-//     the feed, which draws its divider from the page it was just handed.
+//   - On a watch's opening page — always a CATCH-UP, since no watch replays
+//     history (owner ruling, feed paging on demand) — it was written while no
+//     stream stood, so it is an edge the views missed, and it is routed
+//     exactly as a live cut is — bar the feed, which draws its divider from
+//     the page it was just handed.
 func (w *watcher) routePageCutLocked(a *agentWatch, frame *conversationv1.AgentFrame, at *conversationv1.HistoryPointer, place *conversationv1.ConversationPlace, origin pageOrigin) {
 	agent := frame.GetAgentId()
 	ctx := dlog.Context{"agent_id": agent.GetValue(), "pointer": at.GetValue(), "origin": origin.String()}
@@ -429,10 +422,6 @@ func (w *watcher) routePageCutLocked(a *agentWatch, frame *conversationv1.AgentF
 		return
 	}
 	if w.closingReplayedLocked(a, frame, at) {
-		return
-	}
-	if !a.catchUp {
-		w.log.Debug("daemon.sessionwatcher.context_cut_history", "a cut on a watch's first page is history: recorded as served, never routed", ctx)
 		return
 	}
 	w.routeContextCutLocked(agent, frame.GetUpdate().GetContextCut(), at, nil, place, cutCaughtUp)
