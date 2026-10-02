@@ -1498,6 +1498,7 @@ that window is the selected one).  Records the view for the next call."
                         (t 'new))))
     (puthash ws view agent-repl-frontend--last-view-on-switch)
     (list :windows (length windows)
+          :window win
           :width (and win (window-body-width win t))
           :height (and win (window-body-height win t))
           :xwidgets (length xws)
