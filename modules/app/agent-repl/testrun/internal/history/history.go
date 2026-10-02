@@ -2,8 +2,8 @@
 // test runner has run, so the next run can plan from what things actually
 // take on this machine.
 //
-// It is a cache, never a record: it lives under the user cache directory, not
-// in the repository, because every number in it is a property of the machine
+// It is a cache, never a record: it lives in ~/.cache/agent-repl beside the
+// module's other host caches, not in the repository, because every number in it is a property of the machine
 // that measured it. Every worktree on the host shares it, so a test measured
 // by one workspace's run is planned well by every other's.
 //
@@ -48,17 +48,20 @@ type Store struct {
 	entries map[string]Entry
 }
 
-// DefaultPath is where the host's history lives:
-// $AGENT_REPL_TEST_HISTORY when set, else <user cache>/agent-repl/test-history.json.
+// DefaultPath is where the host's history lives: $AGENT_REPL_TEST_HISTORY
+// when set, else ~/.cache/agent-repl/test-history.json -- the module's one
+// host cache directory on every platform (the daemon's binaries, locks and
+// sockets live there too), never the platform's own cache directory, which on
+// macOS is ~/Library/Caches.
 func DefaultPath() (string, error) {
 	if p := os.Getenv("AGENT_REPL_TEST_HISTORY"); p != "" {
 		return p, nil
 	}
-	dir, err := os.UserCacheDir()
+	home, err := os.UserHomeDir()
 	if err != nil {
-		return "", fmt.Errorf("history: resolve the user cache directory: %w", err)
+		return "", fmt.Errorf("history: resolve the home directory: %w", err)
 	}
-	return filepath.Join(dir, "agent-repl", "test-history.json"), nil
+	return filepath.Join(home, ".cache", "agent-repl", "test-history.json"), nil
 }
 
 // Load reads the history at path. A missing file is an empty history: the

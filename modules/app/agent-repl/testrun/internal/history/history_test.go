@@ -171,3 +171,31 @@ func TestDefaultPathHonorsTheOverride(t *testing.T) {
 		t.Fatalf("DefaultPath = %q, %v", got, err)
 	}
 }
+
+func TestDefaultPathIsTheModulesHostCache(t *testing.T) {
+	// Arrange
+	t.Setenv("AGENT_REPL_TEST_HISTORY", "")
+	t.Setenv("HOME", "/home/u")
+
+	// Act
+	got, err := DefaultPath()
+
+	// Assert
+	if err != nil || got != "/home/u/.cache/agent-repl/test-history.json" {
+		t.Fatalf("DefaultPath = %q, %v", got, err)
+	}
+}
+
+func TestDefaultPathWithoutAHomeFails(t *testing.T) {
+	// Arrange
+	t.Setenv("AGENT_REPL_TEST_HISTORY", "")
+	t.Setenv("HOME", "")
+
+	// Act
+	_, err := DefaultPath()
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "resolve the home directory") {
+		t.Fatalf("err = %v", err)
+	}
+}
