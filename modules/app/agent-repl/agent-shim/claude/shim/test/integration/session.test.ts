@@ -327,6 +327,27 @@ describe("SetSessionEffort", () => {
     expect(setEffortAccepted(response)).toBe(conversationv1.AgentEffortLevel.HIGH);
   });
 
+  test("the vendor's applied level is pushed on WatchSession, and moves with a change", async () => {
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    const watch = watchSession(shim);
+    const effortOf = (frame: Parameters<typeof sessionUpdate>[0]): conversationv1.AgentEffortLevel | undefined => {
+      const update = sessionUpdate(frame).update;
+      return update.case === "effortChanged" ? update.value.effectiveEffort : undefined;
+    };
+    await watch.until((frame) => effortOf(frame) === conversationv1.AgentEffortLevel.HIGH);
+
+    setEffortAccepted(
+      await shim.clients.h1.setSessionEffort(
+        create(shimv1.SetSessionEffortRequestSchema, { effort: conversationv1.AgentEffortLevel.LOW }),
+      ),
+    );
+    const moved = await watch.until((frame) => effortOf(frame) === conversationv1.AgentEffortLevel.LOW);
+
+    expect(effortOf(moved)).toBe(conversationv1.AgentEffortLevel.LOW);
+    watch.close();
+  });
+
   test("a model that takes no effort level answers not_supported", async () => {
     const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());

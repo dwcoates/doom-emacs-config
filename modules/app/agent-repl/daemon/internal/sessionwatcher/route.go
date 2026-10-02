@@ -70,7 +70,11 @@ func (w *watcher) routeSessionUpdateLocked(update *conversationv1.SessionUpdate)
 
 	case *conversationv1.SessionUpdate_FastMode,
 		*conversationv1.SessionUpdate_IdentityRotated,
-		*conversationv1.SessionUpdate_Title:
+		*conversationv1.SessionUpdate_Title,
+		// THE EFFORT IN FORCE is the topbar's selector and nothing else's: an
+		// effort change puts nothing in the feed or the footer (owner ruling,
+		// 2026-10-01).
+		*conversationv1.SessionUpdate_EffortChanged:
 		// A ROTATION MOVES THE RESUME HANDLE: the id it names is what a later
 		// resume must name, so the lifecycle sink records it once the lock is
 		// let go.
@@ -217,6 +221,8 @@ func sessionArm(update *conversationv1.SessionUpdate) string {
 		return "network_resume_waits"
 	case *conversationv1.SessionUpdate_NetworkResumeOutcome:
 		return "network_resume_outcome"
+	case *conversationv1.SessionUpdate_EffortChanged:
+		return "effort_changed"
 	default:
 		return "unset"
 	}

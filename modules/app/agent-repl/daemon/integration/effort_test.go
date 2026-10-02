@@ -82,3 +82,25 @@ func TestSetEffortWithALevelTheModelDoesNotAcceptIsRefused(t *testing.T) {
 		t.Fatalf("SetEffort(max) = %v, want error.not_supported", resp.Msg)
 	}
 }
+
+func TestThePushedEffortIsTheSelectorsCurrentLevel(t *testing.T) {
+	t.Parallel()
+	// Arrange: the root names no level, so only the push can.
+	f := newOpened(t, harness.Opts{})
+	topbar := f.d.WatchTopbar(f.ws)
+	awaitTopbar(t, f, topbar, "the session's model selector", func(v *frontendv1.TopbarView) bool {
+		return v.GetModelSelector() != nil
+	})
+
+	// Act.
+	f.shim.PushSessionUpdate(&conversationv1.SessionUpdate{
+		Update: &conversationv1.SessionUpdate_EffortChanged{EffortChanged: &conversationv1.SessionEffortChanged{
+			EffectiveEffort: conversationv1.AgentEffortLevel_AGENT_EFFORT_LEVEL_LOW,
+		}},
+	})
+
+	// Assert.
+	awaitTopbar(t, f, topbar, "the selector at the pushed low", func(v *frontendv1.TopbarView) bool {
+		return v.GetEffortSelector().GetSupported().GetCurrent().GetLevel() == conversationv1.AgentEffortLevel_AGENT_EFFORT_LEVEL_LOW
+	})
+}

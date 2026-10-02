@@ -9,7 +9,7 @@
  */
 import { bindLog } from "../log.js";
 import { conversationv1 } from "../proto.js";
-import type { EffortLevelLike } from "../sdk/types.js";
+import type { AppliedSettingsLike, EffortLevelLike } from "../sdk/types.js";
 
 const LOGGER = bindLog({
   component: "shim-convert-effort",
@@ -61,4 +61,24 @@ export function vendorEffortLevel(level: conversationv1.AgentEffortLevel): Effor
     default:
       throw new Error(`shim effort: AgentEffortLevel ${level} has no vendor spelling; validation admits only named levels`);
   }
+}
+
+/**
+ * The level the vendor states its next request sends, read off its settings
+ * answer, or `undefined` when it states none (`applied.effort: null`). An
+ * answer missing the field, or naming a level this vocabulary has no value
+ * for, is a vendor change and throws: a guessed level is never stated.
+ */
+export function appliedEffortOf(settings: AppliedSettingsLike): conversationv1.AgentEffortLevel | undefined {
+  const applied = (settings as { applied?: { effort?: unknown } }).applied;
+  if (applied === undefined || !("effort" in applied)) {
+    throw new Error("the vendor's settings answer carries no applied.effort");
+  }
+  const effort = applied.effort;
+  if (effort === null) return undefined;
+  const level = typeof effort === "string" ? effortLevelOf(effort) : conversationv1.AgentEffortLevel.UNSPECIFIED;
+  if (level === conversationv1.AgentEffortLevel.UNSPECIFIED) {
+    throw new Error(`the vendor's applied.effort is ${JSON.stringify(effort)}, which names no known level`);
+  }
+  return level;
 }

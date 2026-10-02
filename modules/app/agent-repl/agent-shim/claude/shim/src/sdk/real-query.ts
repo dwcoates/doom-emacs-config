@@ -280,5 +280,22 @@ export async function createRealQuery(
     "constructing the real vendor query",
   );
   const sdk = await importRealSDK("createRealQuery");
-  return sdk.query({ prompt, options: realQueryOptions(spec) });
+  return asQueryLike(sdk.query({ prompt, options: realQueryOptions(spec) }));
+}
+
+/**
+ * The real query as the shim drives it, held to the one member the vendor
+ * provides without declaring (`getSettings`, see types.ts AppliedSettingsLike).
+ * A query lacking it is a vendor change, refused loudly at construction rather
+ * than discovered as a TypeError on the first probe.
+ */
+export function asQueryLike(query: object): QueryLike {
+  if (typeof (query as { getSettings?: unknown }).getSettings !== "function") {
+    LOGGER.error(
+      { cause: "the vendor query's getSettings is not a function" },
+      "the vendor query provides no getSettings(); the shim cannot read the applied effort",
+    );
+    throw new Error("the vendor SDK's query no longer provides getSettings()");
+  }
+  return query as QueryLike;
 }

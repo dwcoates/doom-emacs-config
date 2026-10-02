@@ -15,15 +15,23 @@ import (
 // THE EFFORT SELECTOR (topbar.proto TopbarEffortSelector; design record
 // 2026-10-02 decision 2).
 //
-// THE CURRENT LEVEL IS ALWAYS A KNOWN LEVEL, never a placeholder: the level
-// the shim confirmed for a pick, or else the level the session's own config
-// root persists (claudesettings). When neither states one the selector is
-// ABSENT and the record says why, because the vendor's own default for an
-// unset level is stated nowhere the daemon can read, and drawing a guess as
-// the level in force is exactly what the ruling forbids.
+// THE CURRENT LEVEL IS ALWAYS A KNOWN LEVEL, never a placeholder. THE VENDOR'S
+// PUSH IS THE AUTHORITY (SessionUpdate.effort_changed, owner ruling
+// 2026-10-02): the level its next request sends, its own defaults, clamps and
+// downgrades applied. Before the session's first push the level the shim
+// confirmed for a pick stands, and before that the level the session's config
+// root persists (claudesettings). When none states one the selector is ABSENT
+// and the record says why: drawing a guess as the level in force is exactly
+// what the ruling forbids.
 
-// effortSourcePicked names a level the shim confirmed for a SetEffort pick.
-const effortSourcePicked = "set_effort"
+// The sources a current level is named by in the record, beside the settings
+// read's own (claudesettings.Source).
+const (
+	// effortSourcePushed is the vendor's own statement, pushed by the shim.
+	effortSourcePushed = "vendor_push"
+	// effortSourcePicked is a level the shim confirmed for a SetEffort pick.
+	effortSourcePicked = "set_effort"
+)
 
 // SetEffortSettings installs what the session's config root persists for the
 // effort level, read at workspace initialization and on every account switch.
@@ -104,9 +112,13 @@ func acceptedLevels(option *conversationv1.ModelOption) ([]conversationv1.AgentE
 	return levels, true
 }
 
-// effortCurrent is the level in force and where it was read from: the pick,
-// else the config root's persisted level for the session's model.
+// effortCurrent is the level in force and where it was read from: the
+// vendor's push, else the pick, else the config root's persisted level for the
+// session's model.
 func effortCurrent(s *wsState) (conversationv1.AgentEffortLevel, string) {
+	if s.pushedEffort != conversationv1.AgentEffortLevel_AGENT_EFFORT_LEVEL_UNSPECIFIED {
+		return s.pushedEffort, effortSourcePushed
+	}
 	if s.pickedEffort != conversationv1.AgentEffortLevel_AGENT_EFFORT_LEVEL_UNSPECIFIED {
 		return s.pickedEffort, effortSourcePicked
 	}
