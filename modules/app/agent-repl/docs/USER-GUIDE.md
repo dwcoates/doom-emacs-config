@@ -111,3 +111,40 @@ The top bar's effort selector sits between the model selector and the permission
   - Nothing is added to the feed for the switch.
   - Switching causes token cache misses, as switching the model does; both selectors say so on hover.
 - **A model that takes no effort level shows a dash and offers no list.**
+
+## When Claude does not start
+
+The footer's `disconnected` status has three vendor substatuses for a Claude SDK that did not start. They are blue: the workspace is unusable until it is up.
+
+| Footer shows | What it means | What to do |
+| --- | --- | --- |
+| `disconnected · vendor retry` | The Claude SDK did not start and is being retried on a backoff, for up to 10 minutes. The activity line shows the attempt and the cause. | Nothing. A transient failure usually clears by itself. |
+| `disconnected · vendor rejection` | The Claude SDK refused to start for a reason retrying cannot change, such as a rejected credential or a missing model. It will not be retried. The activity line shows why and names the restart key. | Fix the cause, then `SPC o C-c`. |
+| `disconnected · vendor failed` | Every retry failed for the whole 10 minutes, so the daemon gave up. The activity line reads "Claude SDK failed to start", with the restart key. | `SPC o C-c`. |
+
+- **Prompts you send while the session is down are held, not lost.**
+  - They wait in the tray with the badge "after reconnect".
+  - They are delivered when a session next comes up on the workspace, however it comes up.
+  - A failed start never drops them.
+
+## Restarting a stuck workspace
+
+`SPC o C-c` restarts the current workspace's backend and page. It is the way to unstick one workspace without rebooting everything.
+
+- **What it bounces:**
+  - The workspace's shim, rebuilt first if its build is stale, relaunched with the same session resumed.
+  - The workspace's webapp page, reloaded.
+  - Never the daemon, the store or the sidecar.
+- **It is immediate and takes no prefix argument.**
+  - There is no graceful mode: the running turn and all detached work are hard-stopped, because a workspace needs this when something is stuck.
+  - Prompts sent meanwhile are held "after reconnect" and delivered once the session is back.
+- **When to use it:**
+  - A turn never ends.
+  - The footer reads `vendor rejection` or `vendor failed`, or the Claude SDK is not responding.
+  - The workspace runs a stale shim build.
+  - The page is out of sync with the workspace.
+- **When not to use it:**
+  - The daemon is down: restart is a request to the daemon, so it cannot help.
+  - The store or the sidecar has a problem.
+  - You only want the page reloaded: use `SPC o l`.
+- **It is not a routine action.** A freshly launched shim or page may speak a newer API than the daemon that is still running, so reach for it only when a workspace is stuck.
