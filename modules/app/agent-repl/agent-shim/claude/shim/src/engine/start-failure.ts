@@ -10,6 +10,7 @@
  */
 import { classifyVendorApiFailure, type VendorApiFailureKind } from "../convert/terminals.js";
 import { bindLog } from "../log.js";
+import { classifyAgentFailure } from "./network-resume.js";
 import type { VendorStartRetry } from "../service/failures.js";
 
 const LOGGER = bindLog({ component: "shim-engine-start-failure", operation: "shim.engine.start_failure" });
@@ -70,14 +71,6 @@ function transientStatus(status: number): boolean {
 }
 
 /**
- * The words for a NETWORK failure, read only when the vendor stated NO status:
- * the errno names {@link classifyVendorApiFailure} also reads, and the sentences
- * it does not (`fetch failed`, the API client's `Connection error.`, a timeout).
- */
-const NETWORK_WORDS =
-  /fetch failed|network|connection (?:error|refused|reset|closed)|timed?[\s_-]?out|socket hang up|\b(?:enotfound|eai_again|econnrefused|econnreset|etimedout|enetunreach|ehostunreach)\b/;
-
-/**
  * The words for any OTHER transient failure, read only when the vendor stated
  * no status: an overloaded or rate-limited API, or a server error.
  */
@@ -105,7 +98,7 @@ export function openingErrorVerdict(status: number | undefined, text: string): O
   const kind = classifyVendorApiFailure(status, undefined, text);
   if (status !== undefined && transientStatus(status)) return { kind, retry: "retryable" };
   const said = text.toLowerCase();
-  if (status === undefined && NETWORK_WORDS.test(said)) return { kind, retry: "retryable" };
+  if (status === undefined && classifyAgentFailure({ text }).network) return { kind, retry: "retryable" };
   switch (kind) {
     case "shim.vendor.unreachable":
       return { kind, retry: "retryable" };

@@ -211,6 +211,13 @@ describe("classifyAgentFailure", () => {
     ["the vendor's connection-error sentence", { text: "API Error: Connection error." }],
     ["a structured ENOTFOUND connection code", { errorClass: "server_error", connectionCode: "ENOTFOUND" }],
     ["a structured ECONNREFUSED connection code with no class", { connectionCode: "ECONNREFUSED" }],
+    ["Node's fetch failure", { text: "TypeError: fetch failed" }],
+    ["Node's socket hang up with no code", { text: "socket hang up" }],
+    ["a refused connection in words", { text: "connection refused" }],
+    ["a reset connection in words", { text: "connection reset by peer" }],
+    ["a connect that timed out in words", { text: "the request timed out" }],
+    ["the word network", { text: "a network error occurred" }],
+    ["a lowercase errno", { text: "getaddrinfo enotfound api.anthropic.com" }],
   ];
   it.each(NETWORK)("%s resumes", (_name, evidence) => {
     // Act
