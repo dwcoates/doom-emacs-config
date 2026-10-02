@@ -798,7 +798,7 @@ describe("the no-session cells", () => {
       ),
     ).toBe(
       declaration(
-        ".topbar-model-button,\n.topbar-mode-button,\n.topbar-context-figure,\n.topbar-warning-chip",
+        ".topbar-model-button,\n.topbar-mode-button,\n.topbar-context-figure,\n.topbar-wifi-button,\n.topbar-warning-chip",
         "padding",
       ),
     );
