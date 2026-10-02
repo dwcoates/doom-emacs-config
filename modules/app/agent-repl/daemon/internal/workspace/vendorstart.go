@@ -12,6 +12,7 @@ import (
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/health"
+	"claude-repld/internal/resolve/sidebar"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/rollout"
 	"claude-repld/internal/shimclient"
@@ -282,6 +283,7 @@ func (f *Fleet) noteRetryableFailure(ctx context.Context, log dlog.Logger, ws id
 		if previous != "" {
 			f.closeFault(ctx, log, previous)
 		}
+		f.noteRosterVendor(ws)
 	}
 	// A RETRY IS THE MECHANISM WORKING, not a fault in the daemon: INFO. The
 	// fault is what the user reads; the record is the operator's.
@@ -312,6 +314,7 @@ func (f *Fleet) openTerminal(ctx context.Context, log dlog.Logger, ws ids.Worksp
 	if previous != "" {
 		f.closeFault(ctx, log, previous)
 	}
+	f.noteRosterVendor(ws)
 }
 
 // openVendorFault records one vendor-start fault and republishes the host
@@ -349,6 +352,7 @@ func (f *Fleet) closeRetrying(ctx context.Context, log dlog.Logger, ws ids.Works
 		return
 	}
 	f.closeFault(context.WithoutCancel(ctx), log, id)
+	f.noteRosterVendor(ws)
 	f.publishHost(ws)
 }
 
@@ -370,10 +374,31 @@ func (f *Fleet) endVendorRun(ctx context.Context, log dlog.Logger, ws ids.Worksp
 	run.since, run.failed = time.Time{}, 0
 	// A started session's edge closes the terminal fault (its lifetime);
 	// the fleet forgets it so it is never closed twice.
+	hadTerminal := run.terminal != ""
 	run.terminal = ""
 	f.mu.Unlock()
 	f.closeRetrying(ctx, log, ws)
+	if hadTerminal {
+		f.noteRosterVendor(ws)
+	}
 	if failed > 0 {
 		log.Info(opBringUp, "the vendor started after failed attempts; the retry run is over", dlog.Context{"failed_attempts": failed})
 	}
+}
+
+// noteRosterVendor tells the roster where the run stands, read off the faults
+// the fleet holds standing for it: a retrying fault is a run being retried, a
+// terminal one a stopped run, neither no run at all.
+func (f *Fleet) noteRosterVendor(ws ids.WorkspaceID) {
+	f.mu.Lock()
+	run := f.vendorRunLocked(ws)
+	state := sidebar.VendorStartNone
+	switch {
+	case run.retrying != "":
+		state = sidebar.VendorStartRetrying
+	case run.terminal != "":
+		state = sidebar.VendorStartStopped
+	}
+	f.mu.Unlock()
+	f.deps.VendorStarts(ws, state)
 }

@@ -1517,3 +1517,59 @@ func TestAVendorBlockOutranksApiRetrying(t *testing.T) {
 		t.Fatalf("status = %q, want vendor_blocked over the retry", got)
 	}
 }
+
+// THE ROSTER MAPS THE VENDOR-START RUN ONTO ITS EXISTING ARMS: a run being
+// retried is the bring-up still under way, a stopped one a session that never
+// came up -- even over a link that connected.
+func TestTheVendorStartRunDrawsAsExistingArms(t *testing.T) {
+	tests := []struct {
+		name  string
+		state sidebar.VendorStart
+		want  string
+	}{
+		{"retrying draws the bring-up", sidebar.VendorStartRetrying, "init"},
+		{"stopped draws start_failed", sidebar.VendorStartStopped, "start_failed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			r := live(t, arrange(t))
+
+			// Act.
+			r.SetVendorStart(theWS, tt.state)
+
+			// Assert.
+			if got := statusName(onlyRow(t, r)); got != tt.want {
+				t.Fatalf("status = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAVendorStartRunThatEndsLeavesTheLinkToDraw(t *testing.T) {
+	// Arrange.
+	r := live(t, arrange(t))
+	r.SetVendorStart(theWS, sidebar.VendorStartRetrying)
+
+	// Act.
+	r.SetVendorStart(theWS, sidebar.VendorStartNone)
+
+	// Assert.
+	if got := statusName(onlyRow(t, r)); got == "init" || got == "start_failed" {
+		t.Fatalf("status = %q, want the connected link's own arm once the run ended", got)
+	}
+}
+
+func TestARedialingLinkOutranksTheVendorStartRun(t *testing.T) {
+	// Arrange.
+	r := live(t, arrange(t))
+	r.SetVendorStart(theWS, sidebar.VendorStartStopped)
+
+	// Act.
+	r.OnLink(theWS, shimclient.LinkRedialing)
+
+	// Assert.
+	if got := statusName(onlyRow(t, r)); got != "severed" {
+		t.Fatalf("status = %q, want severed", got)
+	}
+}
