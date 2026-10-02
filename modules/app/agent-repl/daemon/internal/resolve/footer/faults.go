@@ -97,7 +97,9 @@ func removeFault(faults []Fault, id string) []Fault {
 // cannot serve it. Only escalating faults stand, so nothing ranks below.
 func faultRank(f Fault) int {
 	switch {
-	case f.Status == "disconnected" && f.SubStatus == "start_failed":
+	// A VENDOR THAT DID NOT START ranks with a session that never came up
+	// (footer.proto: the vendor_start line "ranks with start_failed").
+	case f.Status == "disconnected" && (f.SubStatus == "start_failed" || vendorFault(&f)):
 		return 4
 	case f.Status == "disconnected" && f.SubStatus == "dead":
 		return 3
@@ -126,4 +128,17 @@ func (r *resolver) standingFault(s *wsState) *Fault {
 	consider(s.faults)
 	consider(r.daemonFaults)
 	return best
+}
+
+// vendorFault reports whether a standing fault is one of the three vendor-start
+// faults, by the bucket the health partition gave it.
+func vendorFault(f *Fault) bool {
+	if f == nil || f.Status != "disconnected" {
+		return false
+	}
+	switch f.SubStatus {
+	case "vendor_retry", "vendor_rejection", "vendor_failed":
+		return true
+	}
+	return false
 }

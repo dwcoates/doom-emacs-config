@@ -153,6 +153,14 @@ func (r *resolver) disconnected(s *wsState, log dlog.Logger) *frontendv1.FooterS
 				Activity: r.disconnectedActivity(s, log),
 			}}}
 	}
+	// A VENDOR THAT DID NOT START OUTRANKS THE LINK'S OWN ACCOUNT of a dead
+	// or connected route: a spawned shim stopped after its vendor failed reads
+	// as a dead link that never connected (`start_failed`), which is the shim
+	// PROCESS's word, and a relaunched shim's link reads connected. Only a
+	// route still being dialed or redialed says something newer.
+	if s.link != shimclient.LinkDialing && s.link != shimclient.LinkRedialing && vendorFault(r.standingFault(s)) {
+		return r.disconnectedByFault(s, log)
+	}
 	arm := &frontendv1.FooterStatusDisconnected{}
 	switch {
 	case s.link == shimclient.LinkDialing:
@@ -215,6 +223,15 @@ func (r *resolver) disconnectedByFault(s *wsState, log dlog.Logger) *frontendv1.
 	case "severed":
 		arm.Substatus = &frontendv1.FooterStatusDisconnected_Severed{
 			Severed: &frontendv1.FooterSubStatusDisconnectedSevered{}}
+	case "vendor_retry":
+		arm.Substatus = &frontendv1.FooterStatusDisconnected_VendorRetry{
+			VendorRetry: &frontendv1.FooterSubStatusDisconnectedVendorRetry{}}
+	case "vendor_rejection":
+		arm.Substatus = &frontendv1.FooterStatusDisconnected_VendorRejection{
+			VendorRejection: &frontendv1.FooterSubStatusDisconnectedVendorRejection{}}
+	case "vendor_failed":
+		arm.Substatus = &frontendv1.FooterStatusDisconnected_VendorFailed{
+			VendorFailed: &frontendv1.FooterSubStatusDisconnectedVendorFailed{}}
 	default:
 		log.Warn("daemon.footer.fault_bucket_unknown",
 			"a standing fault claims the disconnected status with a step this resolver cannot draw",
