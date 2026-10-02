@@ -492,6 +492,7 @@ missing here or there is a broken seam.")
       (cl-letf (((symbol-function 'agent-repl-connect-stream)
                  (lambda (_conn _method _json _on-push _on-close &optional _on-open) nil))
                 ((symbol-function 'agent-repl-elisp-build) (lambda () "b-test"))
+                ((symbol-function 'agent-repl-editor-instance) (lambda () "emacs-1"))
                 ((symbol-function 'agent-repl--emacs-focused-p) (lambda (&optional _ws) t))
                 ((symbol-function 'agent-repl-wire-encode-watch-daemon-request)
                  (lambda (request) (push request requests) nil))
@@ -502,7 +503,8 @@ missing here or there is a broken seam.")
       ;; Assert
       (should (equal requests
                      '((:client (:arm :emacs :value (:elisp-build "b-test"
-                                                     :focus (:arm :focused))))))))))
+                                                     :focus (:arm :focused)
+                                                     :instance "emacs-1")))))))))
 
 (ert-deftest agent-repl-test-rpc-daemon-stream-sends-the-build-and-focus-on-the-wire ()
   "The encoded WatchDaemon body carries `elispBuild' and `focus' under `emacs'."
@@ -513,11 +515,31 @@ missing here or there is a broken seam.")
                  (lambda (_conn _method json _on-push _on-close &optional _on-open)
                    (setq sent json) nil))
                 ((symbol-function 'agent-repl--emacs-focused-p) (lambda (&optional _ws) nil))
+                ((symbol-function 'agent-repl-editor-instance) (lambda () "emacs-1"))
                 ((symbol-function 'agent-repl-elisp-build) (lambda () "b-test")))
         ;; Act
         (agent-repl-rpc-watch-daemon nil #'ignore #'ignore))
       ;; Assert
-      (should (equal sent "{\"emacs\":{\"elispBuild\":\"b-test\",\"focus\":{\"unfocused\":{}}}}")))))
+      (should (equal sent "{\"emacs\":{\"elispBuild\":\"b-test\",\"focus\":{\"unfocused\":{}},\"instance\":{\"value\":\"emacs-1\"}}}")))))
+
+(ert-deftest agent-repl-test-rpc-editor-instance-is-stable-within-a-process ()
+  "The instance is the same on every call: a reconnect carries it unchanged."
+  ;; Act / Assert
+  (should (equal (agent-repl-editor-instance) (agent-repl-editor-instance))))
+
+(ert-deftest agent-repl-test-rpc-editor-instance-names-the-process ()
+  "The instance names this process, so another Emacs process differs."
+  ;; Act / Assert
+  (should (string-prefix-p (format "emacs-%d-" (emacs-pid)) (agent-repl-editor-instance))))
+
+(ert-deftest agent-repl-test-rpc-editor-instance-differs-for-a-later-start ()
+  "A process that began at another instant is another Emacs."
+  ;; Arrange
+  (let ((first (agent-repl-editor-instance)))
+    ;; Act
+    (let ((before-init-time (time-add before-init-time 1)))
+      ;; Assert
+      (should-not (equal first (agent-repl-editor-instance))))))
 
 (ert-deftest agent-repl-test-rpc-report-editor-focus-sends-the-focus ()
   "ReportEditorFocus is a unary call carrying the focus arm on the wire."

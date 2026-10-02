@@ -36,6 +36,9 @@ func validateWatchDaemonRequest(req *v1.WatchDaemonRequest) error {
 	if emacs := req.GetEmacs(); emacs != nil && emacs.GetElispBuild() == "" {
 		return fmt.Errorf("WatchDaemonRequest.emacs.elisp_build: an empty build is illegal")
 	}
+	if emacs := req.GetEmacs(); emacs != nil && emacs.GetInstance().GetValue() == "" {
+		return fmt.Errorf("WatchDaemonRequest.emacs.instance: this Emacs process's identity is required")
+	}
 	return nil
 }
 
