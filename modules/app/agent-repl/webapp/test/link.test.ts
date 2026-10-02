@@ -841,6 +841,51 @@ describe("installProseLinkRouting: a clicked markdown prose link", () => {
     off();
   });
 
+  it("sends report for an anchor with no web-fallback mark", async () => {
+    const { ctx, editor } = harness();
+    const { root, off } = proseInRow(ctx, "row-7", `<a href="a.go">a</a>`);
+    click(root.querySelector("a")!);
+    await settle();
+    expect(editor[0]?.target.case === "feedLink" ? editor[0].target.value.onUnresolved.case : null).toBe("report");
+    off();
+  });
+
+  it("sends web_fallback for an anchor marked ambiguous", async () => {
+    const { ctx, editor } = harness();
+    const { root, off } = proseInRow(ctx, "row-7", `<a href="wikipedia.org" data-web-fallback>w</a>`);
+    click(root.querySelector("a")!);
+    await settle();
+    expect(editor[0]?.target.case === "feedLink" ? editor[0].target.value.onUnresolved.case : null).toBe("webFallback");
+    off();
+  });
+
+  it("opens http://<name> through OpenExternal when a web_fallback link is unresolved", async () => {
+    const { ctx, external } = harness("error", "invalidUrl", "linkUnresolved");
+    const { root, off } = proseInRow(ctx, "row-7", `<a href="wikipedia.org" data-web-fallback>w</a>`);
+    click(root.querySelector("a")!);
+    await settle();
+    expect(external.map((r) => r.url)).toEqual(["http://wikipedia.org"]);
+    off();
+  });
+
+  it("opens nothing on the web when a web_fallback link RESOLVES", async () => {
+    const { ctx, external } = harness();
+    const { root, off } = proseInRow(ctx, "row-7", `<a href="README.md" data-web-fallback>r</a>`);
+    click(root.querySelector("a")!);
+    await settle();
+    expect(external).toHaveLength(0);
+    off();
+  });
+
+  it("opens nothing on the web when a report link is unresolved", async () => {
+    const { ctx, external } = harness("error", "invalidUrl", "linkUnresolved");
+    const { root, off } = proseInRow(ctx, "row-7", `<a href="nope.go">n</a>`);
+    click(root.querySelector("a")!);
+    await settle();
+    expect(external).toHaveLength(0);
+    off();
+  });
+
   it("keeps a web link on OpenExternal inside a feed row", async () => {
     const { ctx, external, editor } = harness();
     const { root, off } = proseInRow(ctx, "row-7", `<a href="https://example.test/x">x</a>`);
