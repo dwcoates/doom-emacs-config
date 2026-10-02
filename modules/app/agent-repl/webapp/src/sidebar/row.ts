@@ -158,7 +158,8 @@ export function drawRosterRow(u: RosterRow, sc: SidebarContext, path: string): H
     toggleRowMenu(ws, { sc, workspace, name });
   });
 
-  line.appendChild(drawStatusMark(status.case, `${path}.status`));
+  const statusMark = drawStatusMark(status.case, `${path}.status`);
+  line.appendChild(statusMark);
 
   const label = document.createElement("span");
   label.className = "name";
@@ -211,7 +212,7 @@ export function drawRosterRow(u: RosterRow, sc: SidebarContext, path: string): H
   );
   // AFTER the panel is in the tree: the hover wiring listens on the panel too,
   // so the pointer can travel from the row into it without it closing.
-  installHoverPanel(ws, line, sc, workspace.id);
+  installHoverPanel(ws, line, statusMark, sc, workspace.id);
 
   const visibleChildren = expandVisibleRows(u.children, `${path}.children`);
   if (visibleChildren.length > 0) {
@@ -478,6 +479,10 @@ export function drawStatusMark(arm: RosterStatusCase, path: string): HTMLElement
  * `prefs`, exactly as the chevron's click left it, so a redraw arriving while
  * the pointer rests on a row keeps that row's panel open.
  *
+ * THE POINTER'S TRIGGER IS THE STATUS DOT ALONE (owner request, 2026-10-02):
+ * hovering the rest of the row opens nothing, and the pointer leaving the dot
+ * for the row closes the panel as it does for anywhere else.
+ *
  * The keyboard gets the same panel through `focusin`/`focusout`, without the
  * intent delay — a focus move is deliberate in a way a pointer's path is not.
  */
@@ -487,6 +492,7 @@ export const HOVER_CLOSE_GRACE_MS = 120;
 function installHoverPanel(
   ws: HTMLElement,
   line: HTMLElement,
+  dot: HTMLElement,
   sc: SidebarContext,
   workspaceId: string,
 ): void {
@@ -537,12 +543,12 @@ function installHoverPanel(
     }, HOVER_CLOSE_GRACE_MS);
   };
 
-  line.addEventListener("mouseenter", () => {
+  dot.addEventListener("mouseenter", () => {
     pointerOverRow = true;
     if (ws.classList.contains("open")) cancelTimers();
     else scheduleOpen();
   });
-  line.addEventListener("mouseleave", () => {
+  dot.addEventListener("mouseleave", () => {
     pointerOverRow = false;
     scheduleClose();
   });
