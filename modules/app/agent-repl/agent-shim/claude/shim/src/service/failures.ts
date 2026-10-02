@@ -51,9 +51,21 @@ import {
  * because "our own lock helper failed" is fixed by fixing THAT binary, and
  * the reader must not have to dig it out of prose.
  */
+/**
+ * Whether asking again can help a failed vendor start.
+ *
+ * THE SHIM IS THE SOURCE OF TRUTH FOR THIS, because only the shim saw what the
+ * vendor said and did before it failed (`StartSessionVendorStartFailed`'s own
+ * comment is normative). `retryable` is transient: silence past a bound, a
+ * process or stream that ended before it was ready, an overloaded / server /
+ * network answer. `rejected` will fail the same way every time: a credential
+ * rejection, a missing model, a refused resume, a blocking hook.
+ */
+export type VendorStartRetry = "retryable" | "rejected";
+
 type StartSessionCause =
   | { readonly kind: "cold"; readonly cold: conversationv1.SessionCold }
-  | { readonly kind: "vendorStartFailed" }
+  | { readonly kind: "vendorStartFailed"; readonly retry: VendorStartRetry }
   | { readonly kind: "unknownSession" }
   | { readonly kind: "alreadyStarted" }
   | { readonly kind: "conversationOwned" }
@@ -70,7 +82,7 @@ export function startSessionFailure(
       cause.kind === "cold"
         ? { case: "cold", value: cause.cold }
         : cause.kind === "vendorStartFailed"
-          ? { case: "vendorStartFailed", value: create(shimv1.StartSessionVendorStartFailedSchema, {}) }
+          ? { case: "vendorStartFailed", value: vendorStartFailed(cause.retry) }
           : cause.kind === "unknownSession"
             ? { case: "unknownSession", value: create(shimv1.StartSessionUnknownSessionSchema, {}) }
             : cause.kind === "alreadyStarted"
@@ -84,6 +96,23 @@ export function startSessionFailure(
                   }
                 : { case: "conversationOwned", value: create(shimv1.StartSessionConversationOwnedSchema, {}) },
   });
+}
+
+/**
+ * The `vendor_start_failed` arm, with its retry label ALWAYS set: a frame with
+ * neither arm is malformed and the daemon treats it as a rejection.
+ */
+function vendorStartFailed(retry: VendorStartRetry): shimv1.StartSessionVendorStartFailed {
+  switch (retry) {
+    case "retryable":
+      return create(shimv1.StartSessionVendorStartFailedSchema, {
+        retry: { case: "retryable", value: create(shimv1.StartSessionVendorStartRetryableSchema, {}) },
+      });
+    case "rejected":
+      return create(shimv1.StartSessionVendorStartFailedSchema, {
+        retry: { case: "rejected", value: create(shimv1.StartSessionVendorStartRejectedSchema, {}) },
+      });
+  }
 }
 
 /** The base constructor for `conversation.v1.LockHolderFailure`. */
