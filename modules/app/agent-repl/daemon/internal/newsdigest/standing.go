@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -62,6 +63,71 @@ func (d *Digester) Dismiss(ctx context.Context, req *agentreplv1.DismissNewsDige
 	return &agentreplv1.DismissNewsDigestResponse{Result: &agentreplv1.DismissNewsDigestResponse_Success{
 		Success: &agentreplv1.DismissNewsDigestSuccess{},
 	}}, nil
+}
+
+// Redisplay answers a FULL EMACS RESTART (a WatchDaemon carrying an Emacs
+// process identity the daemon has not seen last): the day's digest returns
+// even if it was dismissed (owner, 2026-10-02: "not a redigest, just the same
+// digest redisplayed for the day"). It stands the newest digest again only
+// when it was minted TODAY, on the local calendar, and is down; a digest still
+// standing, one from an earlier day, or none at all changes nothing. No run
+// starts and no model is called. An error is the store failing.
+func (d *Digester) Redisplay(ctx context.Context) error {
+	d.standingMu.Lock()
+	defer d.standingMu.Unlock()
+	state, err := d.deps.Store.NewsDigestState(ctx)
+	if err != nil {
+		d.deps.Log.Error(opRestand, "the news digest could not be read to redisplay it", dlog.Context{"cause": err.Error()})
+		return fmt.Errorf("newsdigest: read the digest to redisplay: %w", err)
+	}
+	fields := dlog.Context{"digest": state.LatestID}
+	switch {
+	case state.Standing != nil:
+		d.deps.Log.Debug(opRestand, "the day's digest already stands; an Emacs restart changes nothing", fields)
+		return nil
+	case state.LatestOverlay == nil:
+		d.deps.Log.Debug(opRestand, "no digest is kept to redisplay", fields)
+		return nil
+	case !sameLocalDay(state.LatestMadeAt, d.deps.Clock.Now()):
+		fields["made_at"] = state.LatestMadeAt
+		d.deps.Log.Debug(opRestand, "the newest digest was made on an earlier day; it is not redisplayed", fields)
+		return nil
+	}
+	overlay, err := decodeStanding(state.LatestOverlay)
+	if err != nil {
+		d.deps.Log.Error(opRestand, "the kept news digest did not decode; it is not redisplayed", dlog.Context{
+			"digest": state.LatestID, "cause": err.Error(),
+		})
+		return err
+	}
+	stood, err := d.deps.Store.RestandNewsDigest(ctx, state.LatestID)
+	if err != nil {
+		d.deps.Log.Error(opRestand, "the day's digest could not be stood again", dlog.Context{
+			"digest": state.LatestID, "cause": err.Error(),
+		})
+		return fmt.Errorf("newsdigest: restand %q: %w", state.LatestID, err)
+	}
+	if !stood {
+		d.deps.Log.Error(opRestand, "the store refused to stand the day's digest again", dlog.Context{
+			"digest":              state.LatestID,
+			"invariant_violation": "a dismissed digest read under the standing lock can be stood again",
+		})
+		return fmt.Errorf("newsdigest: the store did not stand %q again", state.LatestID)
+	}
+	d.publishLocked(overlay)
+	d.deps.Log.Info(opRestand, "an Emacs restart stood the day's dismissed digest again in every webview", fields)
+	return nil
+}
+
+// sameLocalDay reports whether two instants fall on one local calendar day. A
+// zero instant (a digest minted before its instant was kept) is never today.
+func sameLocalDay(a, b time.Time) bool {
+	if a.IsZero() {
+		return false
+	}
+	ay, am, ad := a.Local().Date()
+	by, bm, bd := b.Local().Date()
+	return ay == by && am == bm && ad == bd
 }
 
 // publishLocked publishes overlay as the standing, or none when it is nil.

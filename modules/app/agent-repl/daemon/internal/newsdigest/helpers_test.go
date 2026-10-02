@@ -66,6 +66,7 @@ type fakeStore struct {
 	stateErr   error
 	recordErr  error
 	dismissErr error
+	restandErr error
 	// onRecord runs inside RecordNewsDigestRun, before it records.
 	onRecord func()
 	// reads counts NewsDigestState calls; afterRead runs after each one with
@@ -116,6 +117,8 @@ func (s *fakeStore) RecordNewsDigestRun(_ context.Context, run wsm.NewsDigestRun
 	if run.Digest != nil {
 		s.state.LatestID = run.Digest.ID
 		s.state.Standing = run.Digest.Overlay
+		s.state.LatestOverlay = run.Digest.Overlay
+		s.state.LatestMadeAt = run.EndedAt
 	}
 	return nil
 }
@@ -130,6 +133,19 @@ func (s *fakeStore) DismissNewsDigest(_ context.Context, id string) (bool, error
 		return false, nil
 	}
 	s.state.Standing = nil
+	return true, nil
+}
+
+func (s *fakeStore) RestandNewsDigest(_ context.Context, id string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.restandErr != nil {
+		return false, s.restandErr
+	}
+	if id != s.state.LatestID || id == "" || s.state.Standing != nil || s.state.LatestOverlay == nil {
+		return false, nil
+	}
+	s.state.Standing = s.state.LatestOverlay
 	return true, nil
 }
 
