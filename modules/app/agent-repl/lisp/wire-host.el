@@ -444,13 +444,37 @@ that tells a new edit from the one the composer already took."
                   #'agent-repl-wire-decode-host-held-prompt-edit-said)
            :edit (agent-repl-wire--decode-uint64 "HostHeldPromptEdit" 'edit object)))))
 
+(defconst agent-repl-wire-host-gate-arms
+  '((coldGate :cold-gate agent-repl-wire-decode-host-gate-cold-gate))
+  "HostGate's `kind' arms: (WIRE-KEY ARM-KEYWORD DECODER).")
+
+(defun agent-repl-wire-decode-host-gate-cold-gate (value)
+  "Decode VALUE as the empty message `HostGateColdGate'."
+  (agent-repl-wire--decode-empty "HostGateColdGate" value))
+
+(defun agent-repl-wire-decode-host-gate (value)
+  "Decode VALUE as `HostGate', a plist `(:arm :value)'.
+The arm is the gate's kind.  SET-BUT-UNASSIGNED is legal: it is a gate this
+build does not name, decoded as `(:arm nil :value nil)' so the gate's
+presence still stands."
+  (let ((object (agent-repl-wire--object "HostGate" value)))
+    (agent-repl-wire--check-keys "HostGate" object
+                                 (mapcar #'car agent-repl-wire-host-gate-arms))
+    (agent-repl-wire--decoded
+     "HostGate"
+     (or (agent-repl-wire--decode-oneof "HostGate" 'kind object
+                                        agent-repl-wire-host-gate-arms t)
+         (list :arm nil :value nil)))))
+
 (defun agent-repl-wire-decode-host-workspace (value)
-  "Decode VALUE as `HostWorkspace', a plist `(:session :naming :held-prompt-edit)'.
+  "Decode VALUE as `HostWorkspace'.
+The plist is `(:session :naming :held-prompt-edit :gate)'.
 `naming' is a REQUIRED message sitting beside the session oneof; its two
 fields are the optional halves, not the message.  `held_prompt_edit' is
-absent when no held-prompt edit stands, and its absence is that fact."
+absent when no held-prompt edit stands, and its absence is that fact.
+`gate' is absent when no gate stands, likewise."
   (let ((object (agent-repl-wire--object "HostWorkspace" value)))
-    (agent-repl-wire--check-keys "HostWorkspace" object '(none existing naming heldPromptEdit))
+    (agent-repl-wire--check-keys "HostWorkspace" object '(none existing naming heldPromptEdit gate))
     (agent-repl-wire--decoded
      "HostWorkspace"
      (list :session (agent-repl-wire-decode-host-workspace-session object)
@@ -459,7 +483,10 @@ absent when no held-prompt edit stands, and its absence is that fact."
                     #'agent-repl-wire-decode-host-workspace-naming)
            :held-prompt-edit (agent-repl-wire--decode-optional-message
                               "HostWorkspace" 'heldPromptEdit object
-                              #'agent-repl-wire-decode-host-held-prompt-edit)))))
+                              #'agent-repl-wire-decode-host-held-prompt-edit)
+           :gate (agent-repl-wire--decode-optional-message
+                  "HostWorkspace" 'gate object
+                  #'agent-repl-wire-decode-host-gate)))))
 
 ;;;; ---- The notification click push ----
 
