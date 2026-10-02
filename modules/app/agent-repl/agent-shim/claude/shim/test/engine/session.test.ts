@@ -7,7 +7,7 @@
  * teardown resolves every pending callback as denied before anything else,
  * because an unresolved `canUseTool` wedges the vendor process outright.
  */
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { nextPush } from "../next-push.js";
 import os from "node:os";
 import path from "node:path";
@@ -17,7 +17,7 @@ import { create } from "@bufbuild/protobuf";
 import { Code } from "@connectrpc/connect";
 import { conversationv1, shimv1, storev1 } from "../../src/proto.js";
 import { recordAgentBinaryVersion, resetAgentBinaryVersionForTest } from "../../src/build-identity.js";
-import { cwdSlug } from "../../src/engine/cold.js";
+import { cwdSlug, transcriptPath } from "../../src/engine/cold.js";
 import { bindLog, clearRequestId } from "../../src/log.js";
 import { createEngine, type QuerySpec, type SessionEngine } from "../../src/engine/session.js";
 import { agentIdPath } from "../../src/engine/identity.js";
@@ -8343,6 +8343,75 @@ describe("the cold gate's COMPACT remediation", () => {
 
       // Assert.
       expect(retryLabel(response)).toBe("retryable");
+    });
+
+    /** A success-subtype result that is an error: the vendor's failed API call. */
+    function erroredSuccess(words: string, status?: number): SdkMessage {
+      return {
+        ...(resultMessage("99999999-9999-4999-8999-99999999999e") as unknown as Record<string, unknown>),
+        is_error: true,
+        result: words,
+        ...(status === undefined ? {} : { api_error_status: status }),
+      } as unknown as SdkMessage;
+    }
+
+    it("refuses a success-subtype result that is an error instead of taking it as the summary", async () => {
+      // Arrange.
+      const h = harness({
+        nowMs: COLD_NOW,
+        onQueryCreated: (query, _spec, index) => {
+          if (index === 0) query.emit(erroredSuccess("API Error: 400 prompt is too long"));
+        },
+      });
+      writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+
+      // Act.
+      const response = await h.engine.startSession(resumeRequest("resume-1", compactRemediation()));
+
+      // Assert.
+      expect(response.result.case === "failure" ? response.result.value.detail : undefined).toBe(
+        "the summarizing session ended with an error result: API Error: 400 prompt is too long",
+      );
+    });
+
+    it("writes no compaction to the transcript for an error result", async () => {
+      // Arrange.
+      const h = harness({
+        nowMs: COLD_NOW,
+        onQueryCreated: (query, _spec, index) => {
+          if (index === 0) query.emit(erroredSuccess("API Error: Connection error."));
+        },
+      });
+      writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+      const transcript = transcriptPath(h.configDir, h.cwd, "resume-1");
+      const before = readFileSync(transcript, "utf8");
+
+      // Act.
+      await h.engine.startSession(resumeRequest("resume-1", compactRemediation()));
+
+      // Assert.
+      expect(readFileSync(transcript, "utf8")).toBe(before);
+    });
+
+    it.each([
+      ["a connection error", "API Error: Connection error.", undefined, "retryable"],
+      ["an overloaded API", "API Error: Overloaded", 529, "retryable"],
+      ["a rejected request", "API Error: 400 prompt is too long", 400, "rejected"],
+    ] as const)("labels a success-subtype error result from %s", async (_case, words, status, retry) => {
+      // Arrange.
+      const h = harness({
+        nowMs: COLD_NOW,
+        onQueryCreated: (query, _spec, index) => {
+          if (index === 0) query.emit(erroredSuccess(words, status));
+        },
+      });
+      writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+
+      // Act.
+      const response = await h.engine.startSession(resumeRequest("resume-1", compactRemediation()));
+
+      // Assert.
+      expect(retryLabel(response)).toBe(retry);
     });
 
     it("labels a result that summarized nothing rejected", async () => {
