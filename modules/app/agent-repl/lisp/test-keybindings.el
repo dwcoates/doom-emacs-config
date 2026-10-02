@@ -21,6 +21,30 @@
                                            (or load-file-name buffer-file-name)))
       nil t)
 
+;;;; ---- The restart binding says what it does ----
+
+(defconst agent-repl-test-keybindings--file
+  (expand-file-name "keybindings.el" (file-name-directory
+                                      (or load-file-name buffer-file-name)))
+  "The keybindings.el under test, resolved at load time.")
+
+(defun agent-repl-test-keybindings--source ()
+  "Return keybindings.el's text; `map!' is a stub, so the source is what is observable."
+  (with-temp-buffer
+    (insert-file-contents agent-repl-test-keybindings--file)
+    (buffer-string)))
+
+(ert-deftest agent-repl-test-keybindings-restart-description-names-shim-and-page ()
+  "`SPC o C-c' is described as restarting the shim and the page."
+  (should (string-match-p
+           (regexp-quote "\"Restart workspace (shim + page)\" \"o C-c\"")
+           (agent-repl-test-keybindings--source))))
+
+(ert-deftest agent-repl-test-keybindings-restart-description-has-no-force-prefix ()
+  "There is no forced restart, so no description offers `C-u' for one."
+  (should-not (string-match-p (regexp-quote "C-u = force")
+                              (agent-repl-test-keybindings--source))))
+
 ;;;; ---- Every bound command is defined ----
 
 (ert-deftest agent-repl-test-keybindings-workspace-verbs-are-defined ()
