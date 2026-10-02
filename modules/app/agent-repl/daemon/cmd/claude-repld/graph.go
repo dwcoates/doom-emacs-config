@@ -917,6 +917,23 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		return nil, err
 	}
 
+	// THE DAILY NEWS DIGEST runs only on the daemon that serves, one run at a
+	// time across processes, and its condensing call bills the default account.
+	digest, err := buildNewsDigest(newsDigestInputs{
+		Guard:      guard,
+		Headless:   headlessClient,
+		PromptsDir: paths.PromptsDir,
+		ConfigDir:  p.Opts.defaultConfigDir,
+		Store:      p.DB,
+		RunDir:     paths.RunDir,
+		Serves:     rolloutController.ServesIntake,
+		Getenv:     os.Getenv,
+		Log:        log,
+	})
+	if err != nil {
+		return nil, err
+	}
+
 	log.Debug(graphOperation, "the component graph is built", dlog.Context{
 		"joining": p.Opts.joining != "",
 	})
@@ -946,6 +963,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			LoudFaults:       loudFaults.Topic(),
 			Focus:            focus,
 			PersistentWifi:   wifi,
+			NewsDigest:       digest,
 			WebappDist:       paths.WebappDist,
 			ImageOrigin:      images.Handler(),
 			Log:              p.Surfaces,
@@ -995,7 +1013,10 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			// so no topbar chip or Emacs stream is ever drawn from a standing
 			// nobody read.
 			wifi.Refresh(ctx)
-			return nil
+			// THE STANDING NEWS DIGEST COMES BACK the same way: a digest
+			// nobody dismissed before a bounce stands again in every webview,
+			// read before anything is served.
+			return digest.Republish(ctx)
 		},
 		Bind: func(srv server.Server) {
 			pushes.bind(srv)
@@ -1013,6 +1034,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			{Name: "worktree_reaper", Run: reaper.Run},
 			{Name: "lock_watchdog", Run: stalls.Run},
 			{Name: "persistent_wifi", Run: wifi.Run},
+			{Name: "news_digest", Run: digest.Run},
 		},
 		CloseWatchers: fleet.CloseWatchers,
 		CloseBanners:  notifier.Close,
