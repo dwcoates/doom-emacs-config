@@ -409,8 +409,12 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// with no green answer standing, and it must raise it into the SAME state
 	// client every other site raises into — the decorated one — or the fault
 	// would be recorded and reach no footer.
+	history := &historyForwarder{}
 	feedResolver, err := feed.New(feed.Deps{
-		Log:            p.Surfaces,
+		Log: p.Surfaces,
+		// HISTORY IS READ ONLY ON A READER'S REQUEST, from the workspace's
+		// shim, through the fleet built below (forward.go).
+		History:        history,
 		Stalls:         stalls,
 		WorkspaceDir:   workspaceDir,
 		Painter:        painter,
@@ -532,6 +536,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	if err != nil {
 		return nil, fmt.Errorf("claude-repld: build the session fleet: %w", err)
 	}
+	history.bind(fleet)
 	// The synthesizer's digest call reaches the shim through the fleet, now that
 	// it exists.
 	digestRef.bind(fleet)
