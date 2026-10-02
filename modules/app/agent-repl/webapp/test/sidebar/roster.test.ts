@@ -844,3 +844,149 @@ describe("a recently-merged section with no rows box", () => {
     expect(() => drawWorkspaceRoster(malformed, sidebarContext())).toThrow(MalformedView);
   });
 });
+
+describe("a section's folded count", () => {
+  /** The rail with the real stylesheet, around one drawn roster. */
+  function inRail<T>(drawn: HTMLElement, check: (rail: HTMLElement) => T): T {
+    const teardown = installStylesheet();
+    const rail = document.createElement("div");
+    rail.id = "ws-sidebar";
+    rail.appendChild(drawn);
+    document.body.appendChild(rail);
+    try {
+      return check(rail);
+    } finally {
+      rail.remove();
+      teardown();
+    }
+  }
+
+  const countOf = (drawn: HTMLElement, selector: string): HTMLElement =>
+    pane(drawn, "repository").querySelector(`${selector} .sb-count`) as HTMLElement;
+
+  it("draws the daemon's count as (N) in a repository header", () => {
+    const drawn = drawWorkspaceRoster(
+      roster({ repos: [repoSection({ id: "repo-1", count: 7, collapsed: true })] }),
+      sidebarContext(),
+    );
+    expect(countOf(drawn, ".repo-section").textContent).toBe("(7)");
+  });
+
+  it("draws the count the daemon resolved, not the rows it can see", () => {
+    const drawn = drawWorkspaceRoster(
+      roster({ repos: [repoSection({ id: "repo-1", rows: [], count: 4, collapsed: true })] }),
+      sidebarContext(),
+    );
+    expect(countOf(drawn, ".repo-section").textContent).toBe("(4)");
+  });
+
+  it("places the count between the label and the add control", () => {
+    const drawn = drawWorkspaceRoster(
+      roster({ repos: [repoSection({ id: "repo-1", count: 2, collapsed: true })] }),
+      sidebarContext(),
+    );
+    const head = pane(drawn, "repository").querySelector(".repo-section > .repo-head") as HTMLElement;
+    const parts = [...head.children].map((el) =>
+      el.classList.contains("sb-label") ? "label" : el.classList.contains("sb-count") ? "count" : el.classList.contains("sb-add") ? "add" : "other",
+    );
+    expect(parts.slice(parts.indexOf("label"), parts.indexOf("label") + 3)).toEqual(["label", "count", "add"]);
+  });
+
+  it("shows the count while a repository section is folded", () => {
+    const drawn = drawWorkspaceRoster(
+      roster({ repos: [repoSection({ id: "repo-1", count: 2, collapsed: true })] }),
+      sidebarContext(),
+    );
+    expect(inRail(drawn, () => cascadedValue(countOf(drawn, ".repo-section"), "display"))).toBe("inline");
+  });
+
+  it("hides the count while a repository section is unfolded", () => {
+    const drawn = drawWorkspaceRoster(
+      roster({ repos: [repoSection({ id: "repo-1", count: 2, collapsed: false })] }),
+      sidebarContext(),
+    );
+    expect(inRail(drawn, () => cascadedValue(countOf(drawn, ".repo-section"), "display"))).toBe("none");
+  });
+
+  it("draws Recently Merged's count beside its label", () => {
+    const drawn = drawWorkspaceRoster(
+      roster({ merged: mergedSection([row({ id: "ws-9", status: { case: "merged", value: {} } })], 3) }),
+      sidebarContext(),
+    );
+    const head = pane(drawn, "repository").querySelector(".merged-section > .repo-head") as HTMLElement;
+    expect([head.querySelector(".sb-label")?.textContent, head.querySelector(".sb-count")?.textContent]).toEqual([
+      "Recently Merged",
+      "(3)",
+    ]);
+  });
+
+  it("shows Recently Merged's count while it is folded, which is its default", () => {
+    const drawn = drawWorkspaceRoster(
+      roster({ merged: mergedSection([row({ id: "ws-9", status: { case: "merged", value: {} } })], 3) }),
+      sidebarContext(),
+    );
+    expect(inRail(drawn, () => cascadedValue(countOf(drawn, ".merged-section"), "display"))).toBe("inline");
+  });
+
+  it("draws the count a step smaller than the label", () => {
+    const drawn = drawWorkspaceRoster(
+      roster({ repos: [repoSection({ id: "repo-1", count: 2, collapsed: true })] }),
+      sidebarContext(),
+    );
+    expect(inRail(drawn, () => cascadedValue(countOf(drawn, ".repo-section"), "font-size"))).toBe("0.85em");
+  });
+
+  it("draws the count in the label's own color", () => {
+    const drawn = drawWorkspaceRoster(
+      roster({ repos: [repoSection({ id: "repo-1", count: 2, collapsed: true })] }),
+      sidebarContext(),
+    );
+    expect(
+      inRail(drawn, () => [
+        cascadedValue(countOf(drawn, ".repo-section"), "color"),
+        cascadedValue(countOf(drawn, ".repo-section").previousElementSibling!, "color"),
+      ]),
+    ).toEqual(["var(--repo-head-collapsed)", "var(--repo-head-collapsed)"]);
+  });
+
+  it("refuses a header whose count is unset", () => {
+    const section = repoSection({ id: "repo-1" });
+    section.header!.count = undefined;
+    expect(() => drawWorkspaceRoster(roster({ repos: [section] }), sidebarContext())).toThrow(MalformedView);
+  });
+
+  it("draws no count on a task section header", () => {
+    const drawn = drawWorkspaceRoster(roster({ tasks: [taskSection({ id: "t-1" })] }), sidebarContext());
+    expect(pane(drawn, "task").querySelector(".task-head .sb-count")).toBeNull();
+  });
+});
+
+describe("recently merged rows", () => {
+  const drawnMerged = (): HTMLElement =>
+    drawWorkspaceRoster(
+      roster({ merged: mergedSection([row({ id: "ws-9", status: { case: "merged", value: {} } })]) }),
+      sidebarContext(),
+    );
+  const mergedRow = (drawn: HTMLElement): HTMLElement =>
+    pane(drawn, "repository").querySelector(".merged-section [data-roster-row='ws-9']") as HTMLElement;
+
+  it("draws no status dot", () => {
+    expect(mergedRow(drawnMerged()).querySelector(".st")).toBeNull();
+  });
+
+  it("draws the name in the viewed grey", () => {
+    expect(mergedRow(drawnMerged()).querySelector(".name")?.classList.contains("viewed")).toBe(true);
+  });
+
+  it("keeps the merged arm on the row, the hook contract's", () => {
+    expect(mergedRow(drawnMerged()).getAttribute("data-arm")).toBe("merged");
+  });
+
+  it("still draws a status dot on a row in the normal list", () => {
+    const drawn = drawWorkspaceRoster(
+      roster({ repos: [repoSection({ id: "repo-1", rows: [row({ id: "ws-1" })] })] }),
+      sidebarContext(),
+    );
+    expect(pane(drawn, "repository").querySelector(".repo-section [data-roster-row='ws-1'] .st")).not.toBeNull();
+  });
+});

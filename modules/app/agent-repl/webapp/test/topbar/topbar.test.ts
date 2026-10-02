@@ -109,16 +109,15 @@ describe("drawTopbarView", () => {
       row.querySelector(".topbar-title") !== null,
       row.querySelector(".topbar-model") !== null,
       row.querySelector(".topbar-mode") !== null,
-      row.querySelector(".topbar-fast") !== null,
       row.querySelector(".topbar-context") !== null,
-    ]).toEqual([true, true, true, true, true, true, true]);
+    ]).toEqual([true, true, true, true, true, true]);
   });
 
   it("draws each absent control as a dash in its own slot", () => {
     const { tc } = topbarContext();
     const row = drawTopbarView(sessionlessView("hibernated since 14:03"), tc);
     expect([...row.querySelectorAll("[data-no-session]")].map((el) => el.getAttribute("data-no-session")))
-      .toEqual(["model", "effort", "mode", "fast"]);
+      .toEqual(["model", "effort", "mode"]);
   });
 
   it("keeps the cells in one order whether or not there is a session", () => {
@@ -148,29 +147,6 @@ describe("drawTopbarView", () => {
     host.append(drawTopbarView(sessionlessView("cold context, awaiting your answer"), tc));
     host.querySelector(".topbar-warnings")!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     expect(openPanel(host)?.textContent).toBe("cold context, awaiting your answer");
-  });
-
-  it("draws the fast-mode cell as a dash when the vendor has stated no fast mode", () => {
-    const { tc } = topbarContext();
-    expect(
-      drawTopbarView(view(), tc).querySelector(".topbar-fast")?.getAttribute("data-no-session"),
-    ).toBe("fast");
-  });
-
-  it("draws the fast-mode cell beside the permission-mode picker", () => {
-    const { tc } = topbarContext();
-    const row = drawTopbarView(
-      view({
-        fastMode: {
-          $typeName: "frontend.v1.TopbarFastMode",
-          state: { case: "on", value: {} },
-        } as never,
-      }),
-      tc,
-    );
-    const right = row.querySelector(".topbar-right");
-    const cells = [...(right?.children ?? [])].map((el) => el.className);
-    expect(cells.indexOf("topbar-fast")).toBe(cells.indexOf("topbar-mode") + 1);
   });
 
   it("draws no warning chip when the daemon reports nothing wrong", () => {
@@ -877,7 +853,7 @@ describe("the no-session cells", () => {
   // the cursor nor the hover border that would promise a click.
   it("boxes every no-session cell exactly as the strip's other right-hand cells", () => {
     expect(
-      declaration(".topbar-fast,\n.topbar-model[data-no-session],\n.topbar-effort[data-no-session],\n.topbar-effort[data-effort-unsupported],\n.topbar-mode[data-no-session]", "padding-block"),
+      declaration(".topbar-model[data-no-session],\n.topbar-effort[data-no-session],\n.topbar-effort[data-effort-unsupported],\n.topbar-mode[data-no-session]", "padding-block"),
     ).toBe(
       declaration(
         ".topbar-model-button,\n.topbar-effort-button,\n.topbar-mode-button,\n.topbar-context-figure,\n.topbar-wifi-button,\n.topbar-warning-chip",
@@ -889,7 +865,7 @@ describe("the no-session cells", () => {
   // The inline inset is the group's, so a cell's own rule setting the
   // `padding` shorthand would quietly win over it for that one cell.
   it.each([
-    ".topbar-fast,\n.topbar-model[data-no-session],\n.topbar-effort[data-no-session],\n.topbar-effort[data-effort-unsupported],\n.topbar-mode[data-no-session]",
+    ".topbar-model[data-no-session],\n.topbar-effort[data-no-session],\n.topbar-effort[data-effort-unsupported],\n.topbar-mode[data-no-session]",
     ".topbar-model-button,\n.topbar-effort-button,\n.topbar-mode-button,\n.topbar-context-figure,\n.topbar-wifi-button,\n.topbar-warning-chip",
   ])("leaves the inline inset of %s to the group", (selector) => {
     expect(withoutBlockComments(ruleBody(selector))).not.toMatch(/(?:^|[;\s])padding(?:-inline)?(?:-left|-right)?\s*:/);
