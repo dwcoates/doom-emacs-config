@@ -646,3 +646,10 @@ func New(deps Deps) (Controller, error) {
 	})
 	return c, nil
 }
+
+// ErrResumeRestarted is the cause a Shims.Resume answers when a RESTART ended
+// the vendor-start retry run it was in (the workspace fleet's
+// CancelVendorStart). It is not a failed relaunch: the restart wants this
+// workspace's shim relaunched at once, so the bounce engine stands the shim it
+// just installed down and relaunches over it.
+var ErrResumeRestarted = errors.New("rollout: a restart ended the resume's vendor-start run")
