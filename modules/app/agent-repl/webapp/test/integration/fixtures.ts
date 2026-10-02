@@ -2254,13 +2254,13 @@ export function roster(init?: {
     repository: {
       sections: init?.repositorySections?.map((section) => ({
         key: { repository: repositoryRef(section.repositoryId) },
-        header: { label: { text: section.label } },
+        header: { label: { text: section.label }, count: { workspaces: section.rows.length } },
         rows: { rows: section.rows },
         fold: repositoryFold(section.collapsed === true),
       })) ?? [
         {
           key: { repository: repositoryRef() },
-          header: { label: { text: "doom" } },
+          header: { label: { text: "doom" }, count: { workspaces: rows.length } },
           rows: { rows },
           fold: repositoryFold(false),
         },
@@ -2276,7 +2276,10 @@ export function roster(init?: {
       ],
     },
     recentlyMerged: {
-      header: { label: { text: "recently merged" } },
+      header: {
+        label: { text: "recently merged" },
+        count: { workspaces: (init?.merged ?? [0]).length },
+      },
       rows: { rows: init?.merged ?? [rosterRow({ id: "ws-merged", status: "merged", when: "merged" })] },
     },
     current:

@@ -202,10 +202,12 @@ export function repoSection(init: {
   rows?: RosterRow[];
   /** The daemon-held fold; expanded unless said. */
   collapsed?: boolean;
+  /** The daemon-resolved folded count; the row count unless said. */
+  count?: number;
 }): RosterRepoSection {
   return create(RosterRepoSectionSchema, {
     key: { repository: { id: init.id, dir: `/repo/${init.id}` } },
-    header: { label: { text: init.label ?? init.id } },
+    header: { label: { text: init.label ?? init.id }, count: { workspaces: init.count ?? init.rows?.length ?? 0 } },
     rows: { rows: init.rows ?? [] },
     fold: init.collapsed === true ? { case: "collapsed", value: {} } : { case: "expanded", value: {} },
   });
@@ -226,9 +228,9 @@ export function taskSection(init: {
 }
 
 /** The recently-merged band. */
-export function mergedSection(rows: RosterRow[] = []): RosterMergedSection {
+export function mergedSection(rows: RosterRow[] = [], count: number = rows.length): RosterMergedSection {
   return create(RosterMergedSectionSchema, {
-    header: { label: { text: "Recently Merged" } },
+    header: { label: { text: "Recently Merged" }, count: { workspaces: count } },
     rows: { rows },
   });
 }
