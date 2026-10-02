@@ -97,7 +97,8 @@ type wsState struct {
 	// drawn as unread and an unread one never as read.
 	//
 	// SET to unread when a turn COMPLETES, is INTERRUPTED or FAILS
-	// (SetTurnEnded),
+	// (SetTurnEnded) — except a /clear or a compaction that completes, which
+	// leaves nothing to read and is set to read on the spot (contextCut),
 	// set to read when the editor reports the user has seen the row on its
 	// turn-end arm (SetViewed), and reset to none by a new turn (startTurn) —
 	// a new prompt is the user moving on.

@@ -388,6 +388,7 @@ func (r *resolver) AckTurn(ws ids.WorkspaceID) {
 func (r *resolver) SetTurnEnded(ws ids.WorkspaceID, how TurnClose) {
 	r.mutateWorkspaceLogged(ws, "daemon.sidebar.set_turn_ended", "the roster took the turn's close",
 		dlog.Context{"close": int(how)}, func(s *wsState, log dlog.Logger) {
+			cut := contextCut(s.turn)
 			s.turn = nil
 			// THE TURN'S END IS THE RETRY'S END: nothing is left to retry for.
 			s.retrying = ""
@@ -411,6 +412,22 @@ func (r *resolver) SetTurnEnded(ws ids.WorkspaceID, how TurnClose) {
 					})
 				return
 			}
+			// A CONTEXT CUT THAT SUCCEEDED HAS NOTHING TO READ (owner ruling,
+			// 2026-10-02): a /clear or a compaction the user asked for leaves no
+			// response, only the cut, so its `done` is read the moment it lands
+			// and the row is drawn PARTIAL on the very push that ends it — no
+			// dwell, so no editor timer is involved. A cut that was interrupted
+			// or failed is a result like any other turn's and stays unread.
+			if cut != "" && end == ladder.TurnEndDone {
+				s.result = resultRead
+				log.Info("daemon.sidebar.result_read_on_cut",
+					"a context cut completed, so its result is read at once and the row is drawn PARTIAL with no dwell", dlog.Context{
+						"act":        cut,
+						"status":     end.String(),
+						"async_live": s.asyncLive(),
+					})
+				return
+			}
 			s.result = resultUnread
 			log.Info("daemon.sidebar.result_unread",
 				"the turn ended, so its result is unread until the user views the row", dlog.Context{
@@ -418,6 +435,24 @@ func (r *resolver) SetTurnEnded(ws ids.WorkspaceID, how TurnClose) {
 					"async_live": s.asyncLive(),
 				})
 		})
+}
+
+// contextCut names the context cut the turn carries — "clear" or "compact" —
+// and is empty for an ordinary prompt or when no turn stands. A vendor's
+// auto-compaction runs INSIDE an ordinary prompt's turn, so it is not a cut
+// the user asked for and is not named here.
+func contextCut(turn *footer.TurnStarted) string {
+	if turn == nil {
+		return ""
+	}
+	switch turn.Act {
+	case footer.ActClear:
+		return "clear"
+	case footer.ActCompact:
+		return "compact"
+	default:
+		return ""
+	}
 }
 
 // SetSummary installs the row detail's summary line.
