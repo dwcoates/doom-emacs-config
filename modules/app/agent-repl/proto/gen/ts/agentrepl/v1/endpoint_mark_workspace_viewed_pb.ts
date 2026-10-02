@@ -6,6 +6,11 @@
 // user has stood in front of them. The threshold is the editor's own and is
 // no part of this contract; what crosses the wire is only the verdict.
 //
+// THE DAEMON ALSO RAISES THE MARKER ITSELF in one case, with no dwell: a
+// `/clear` or compaction that completes leaves its result READ at once
+// (owner ruling, 2026-10-01), so the row is PARTIAL on the push that ends the
+// cut. This endpoint remains the only way a dwell reads a result.
+//
 // THE VERDICT IS "PARTIAL". The daemon raises the row's
 // `frontend.v1.RosterRowViewed` marker and re-pushes the roster, so the
 // webapp sidebar recedes the row's name at the same moment the Emacs tab-bar
