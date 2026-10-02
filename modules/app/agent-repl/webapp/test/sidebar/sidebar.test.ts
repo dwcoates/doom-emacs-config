@@ -191,6 +191,85 @@ describe("the rail's header", () => {
   });
 });
 
+describe("mounting the rail: a switch to this workspace", () => {
+  it("tells the feed when current moves to this page's workspace", async () => {
+    // Arrange
+    let selected = 0;
+    const host = document.createElement("nav");
+    // Act
+    mountSidebar(host, ctxFor([roster({ current: "ws-other" }), roster({ current: WORKSPACE.id })]), {
+      storage: null,
+      timers: fakeTimers(),
+      workspaceSelected: () => {
+        selected += 1;
+      },
+    });
+    await settle();
+    // Assert
+    expect(selected).toBe(1);
+  });
+
+  it("tells the feed nothing when current only restates this workspace", async () => {
+    // Arrange
+    let selected = 0;
+    const host = document.createElement("nav");
+    // Act
+    mountSidebar(host, ctxFor([roster({ current: WORKSPACE.id }), roster({ current: WORKSPACE.id })]), {
+      storage: null,
+      timers: fakeTimers(),
+      workspaceSelected: () => {
+        selected += 1;
+      },
+    });
+    await settle();
+    // Assert
+    expect(selected).toBe(0);
+  });
+
+  it("treats a reopened run's first push as a baseline", async () => {
+    // Arrange: one run says another workspace is current and ends; the next
+    // run's first push names this one, which restates rather than switches.
+    let selected = 0;
+    let run = 0;
+    const transport = createRouterTransport(({ service }) => {
+      service(AgentRepl, {
+        watchWorkspaceRoster: async function* () {
+          run += 1;
+          yield create(WatchWorkspaceRosterResponseSchema, {
+            push: { case: "roster", value: roster({ current: run === 1 ? "ws-other" : WORKSPACE.id }) },
+          });
+          if (run === 1) return;
+          await new Promise<never>(() => undefined);
+        },
+      });
+    });
+    const ctx = testAppContext({
+      client: createAgentReplClient(transport),
+      workspace: WORKSPACE,
+      ticker: fakeTicker(NOW),
+      failures: SINK,
+      composerEnabled: false,
+    });
+    vi.useFakeTimers();
+    try {
+      const host = document.createElement("nav");
+      mountSidebar(host, ctx, {
+        storage: null,
+        timers: fakeTimers(),
+        workspaceSelected: () => {
+          selected += 1;
+        },
+      });
+      // Act
+      await vi.runAllTimersAsync();
+    } finally {
+      vi.useRealTimers();
+    }
+    // Assert
+    expect([run >= 2, selected]).toEqual([true, 0]);
+  });
+});
+
 describe("mounting the rail", () => {
   it("ships hidden until the daemon pushes a roster", () => {
     const host = document.createElement("nav");
