@@ -764,16 +764,38 @@ side/dedicated/panel window, Doom's `+workspace/kill' fallback
 instead splits a new window showing the doom splash buffer.
 
 Picks the first window that satisfies `agent-repl--save-target-window-p'.
-No-op when no safe target exists (fullscreen-agent or a
-side-window-only frame)."
+
+When no safe target exists (the panels-only layout, or a
+side-window-only frame) and the selected window is the workspace's
+WEBVIEW, the workspace's INPUT window is selected instead.  A switch
+always lands in the input window, so a layout saved with the webview
+selected would restore keyboard focus into the webview on the next
+arrival and take it away again a moment later -- a focus-then-blur that
+lands on the freshly re-attached webview's first paint."
   (let ((sel (selected-window)))
     (when (or (agent-repl--agent-panel-buffer-p (window-buffer sel))
               (window-parameter sel 'window-side)
               (window-dedicated-p sel))
-      (when-let ((target (cl-find-if
-                          #'agent-repl--save-target-window-p
-                          (window-list))))
-        (select-window target)))))
+      (if-let ((target (cl-find-if
+                        #'agent-repl--save-target-window-p
+                        (window-list))))
+          (select-window target)
+        (agent-repl--select-input-over-webview-before-save sel)))))
+
+(defun agent-repl--select-input-over-webview-before-save (sel)
+  "Select the current workspace's input window when SEL shows its webview.
+Recorded at INFO, because which window a layout is saved with decides
+where the next arrival's keyboard focus starts."
+  (let* ((ws (agent-repl--ws-current-name))
+         (view (agent-repl-window--panel-buffer :view ws))
+         (input (agent-repl-window--panel-window :input ws)))
+    (when (and (buffer-live-p view)
+               (eq (window-buffer sel) view)
+               (window-live-p input))
+      (agent-repl--info (agent-repl--ws-log-name ws)
+                        "elisp.panels.save-selects-input: ws=%s from-webview=%S input=%S"
+                        ws sel input)
+      (select-window input 'norecord))))
 
 ;; `agent-repl--clear-done-ack-on-switch-away' is gone: there is no dwell
 ;; countdown left to restart, because there is no decay left to pace.
