@@ -10,6 +10,7 @@ import (
 	"claude-repld/internal/health"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/resolve/footer"
+	"claude-repld/internal/resolve/sidebar"
 	"claude-repld/internal/resolve/topbar"
 	"claude-repld/internal/wsm"
 
@@ -355,6 +356,70 @@ func (f *recordingFooter) CloseFault(_ ids.WorkspaceID, id string) {
 	f.closed = append(f.closed, id)
 }
 
+// recordingSidebar records the network faults the sink stood on the roster
+// and every close it passed on.
+type recordingSidebar struct {
+	sidebar.Resolver
+	opened []string
+	closed []string
+}
+
+func (r *recordingSidebar) NetworkFaultOpened(_ ids.WorkspaceID, id string) {
+	r.opened = append(r.opened, id)
+}
+
+func (r *recordingSidebar) FaultClosed(_ ids.WorkspaceID, id string) {
+	r.closed = append(r.closed, id)
+}
+
+func TestTheFaultSinkStandsOnlyANetworkFaultOnTheRoster(t *testing.T) {
+	tests := []struct {
+		name string
+		ws   ids.WorkspaceID
+		line health.FaultLine
+		want []string
+	}{
+		{"a workspace's network fault stands on the roster", "ws-1",
+			health.FaultLine{ID: "f-1", Kind: health.KindNetworkUnreachable, Cell: health.FaultCell{Status: health.FaultStatusNetworkFault, SubStatus: health.FaultSubStatusOffline}},
+			[]string{"f-1"}},
+		{"an agent-repl fault does not", "ws-1",
+			health.FaultLine{ID: "f-2", Kind: health.KindShimDied, Cell: health.FaultCell{Status: health.FaultStatusAgentReplFault, SubStatus: health.FaultSubStatusDead}},
+			nil},
+		{"a vendor fault does not: the vendor-start run states it", "ws-1",
+			health.FaultLine{ID: "f-3", Kind: health.KindVendorStartRetrying, Cell: health.FaultCell{Status: health.FaultStatusVendorFault, SubStatus: health.FaultSubStatusVendorRetry}},
+			nil},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			roster := &recordingSidebar{}
+			sink := newFaultSurfaces(&recordingFooter{}, roster, &recordingTopbar{raised: map[string]string{}}, health.NewLoudFaults(dlog.NewTestLogger()))
+
+			// Act
+			sink.FaultOpened(tc.ws, tc.line)
+
+			// Assert
+			if !reflect.DeepEqual(roster.opened, tc.want) {
+				t.Fatalf("roster opened = %v, want %v", roster.opened, tc.want)
+			}
+		})
+	}
+}
+
+func TestTheFaultSinkPassesAWorkspaceFaultsCloseToTheRoster(t *testing.T) {
+	// Arrange
+	roster := &recordingSidebar{}
+	sink := newFaultSurfaces(&recordingFooter{}, roster, &recordingTopbar{raised: map[string]string{}}, health.NewLoudFaults(dlog.NewTestLogger()))
+
+	// Act
+	sink.FaultClosed("ws-1", "f-1")
+
+	// Assert
+	if !reflect.DeepEqual(roster.closed, []string{"f-1"}) {
+		t.Fatalf("roster closed = %v, want the one fault", roster.closed)
+	}
+}
+
 // recordingTopbar records the daemon-scoped warnings the sink raised.
 type recordingTopbar struct {
 	topbar.Resolver
@@ -393,7 +458,7 @@ func TestTheFaultSinkDrawsEachFaultWhereHealthSays(t *testing.T) {
 			// Arrange
 			f := &recordingFooter{}
 			tb := &recordingTopbar{raised: map[string]string{}}
-			sink := newFaultSurfaces(f, tb, health.NewLoudFaults(dlog.NewTestLogger()))
+			sink := newFaultSurfaces(f, &recordingSidebar{}, tb, health.NewLoudFaults(dlog.NewTestLogger()))
 
 			// Act
 			sink.FaultOpened(tc.ws, tc.line)
@@ -425,7 +490,7 @@ func TestTheFaultSinkRetractsFromTheTopbarOnlyWhatItRaisedThere(t *testing.T) {
 			// Arrange
 			f := &recordingFooter{}
 			tb := &recordingTopbar{raised: map[string]string{}}
-			sink := newFaultSurfaces(f, tb, health.NewLoudFaults(dlog.NewTestLogger()))
+			sink := newFaultSurfaces(f, &recordingSidebar{}, tb, health.NewLoudFaults(dlog.NewTestLogger()))
 			sink.FaultOpened("", tc.line)
 
 			// Act
@@ -462,7 +527,7 @@ func TestTheFaultSinkGivesAFailedDeploysTopbarRowItsOverlay(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
 			tb := &recordingTopbar{raised: map[string]string{}, warnings: map[string]topbar.DaemonWarning{}}
-			sink := newFaultSurfaces(&recordingFooter{}, tb, health.NewLoudFaults(dlog.NewTestLogger()))
+			sink := newFaultSurfaces(&recordingFooter{}, &recordingSidebar{}, tb, health.NewLoudFaults(dlog.NewTestLogger()))
 
 			// Act
 			sink.FaultOpened("", tc.line)
@@ -512,7 +577,7 @@ func TestTheFaultSinkTellsEmacsExactlyTheTopbarsFaults(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
 			loud := health.NewLoudFaults(dlog.NewTestLogger())
-			sink := newFaultSurfaces(&recordingFooter{}, &recordingTopbar{raised: map[string]string{}}, loud)
+			sink := newFaultSurfaces(&recordingFooter{}, &recordingSidebar{}, &recordingTopbar{raised: map[string]string{}}, loud)
 
 			// Act
 			sink.FaultOpened(tc.ws, tc.line)
@@ -528,7 +593,7 @@ func TestTheFaultSinkTellsEmacsExactlyTheTopbarsFaults(t *testing.T) {
 func TestTheFaultSinkRetractsAClosedFaultFromEmacs(t *testing.T) {
 	// Arrange
 	loud := health.NewLoudFaults(dlog.NewTestLogger())
-	sink := newFaultSurfaces(&recordingFooter{}, &recordingTopbar{raised: map[string]string{}}, loud)
+	sink := newFaultSurfaces(&recordingFooter{}, &recordingSidebar{}, &recordingTopbar{raised: map[string]string{}}, loud)
 	sink.FaultOpened("", failedBuildLine("f-1"))
 
 	// Act

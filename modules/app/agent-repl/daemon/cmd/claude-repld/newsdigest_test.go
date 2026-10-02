@@ -20,6 +20,7 @@ func (noDigestStore) NewsDigestState(context.Context) (wsm.NewsDigestState, erro
 }
 func (noDigestStore) RecordNewsDigestRun(context.Context, wsm.NewsDigestRun) error { return nil }
 func (noDigestStore) DismissNewsDigest(context.Context, string) (bool, error)      { return false, nil }
+func (noDigestStore) RestandNewsDigest(context.Context, string) (bool, error)      { return false, nil }
 
 // noRunner is a headless runner nothing calls: these tests only build.
 type noRunner struct{}

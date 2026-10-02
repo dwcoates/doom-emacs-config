@@ -21,20 +21,21 @@ func TestFaultFooterCellPartitionsEverySessionKind(t *testing.T) {
 		kind string
 		want FaultCell
 	}{
-		{"a shim that would not come up", KindShimStartFailed, FaultCell{FaultStatusDisconnected, FaultSubStatusStartFailed}},
-		{"a resume the shim refused", KindResumeFailed, FaultCell{FaultStatusDisconnected, FaultSubStatusStartFailed}},
-		{"the legacy relaunch spelling of the same class", KindRelaunchResumeFailed, FaultCell{FaultStatusDisconnected, FaultSubStatusStartFailed}},
-		{"an adoption window nobody claimed", KindAdoptionWindowExpired, FaultCell{FaultStatusDisconnected, FaultSubStatusStartFailed}},
-		{"a cold gate whose re-open failed", KindColdGateReopenFailed, FaultCell{FaultStatusDisconnected, FaultSubStatusStartFailed}},
-		{"a vendor start being retried", KindVendorStartRetrying, FaultCell{FaultStatusDisconnected, FaultSubStatusVendorRetry}},
-		{"a vendor start the vendor refused", KindVendorStartRejected, FaultCell{FaultStatusDisconnected, FaultSubStatusVendorRejection}},
-		{"a vendor start that failed for the whole window", KindVendorStartFailed, FaultCell{FaultStatusDisconnected, FaultSubStatusVendorFailed}},
-		{"a shim that exited while serving", KindShimDied, FaultCell{FaultStatusDisconnected, FaultSubStatusDead}},
-		{"a bounce whose replacement died", KindBounceDied, FaultCell{FaultStatusDisconnected, FaultSubStatusDead}},
-		{"a workspace with no live session", KindSessionAbsent, FaultCell{FaultStatusDisconnected, FaultSubStatusDead}},
-		{"a link that stopped serving", KindLinkSevered, FaultCell{FaultStatusDisconnected, FaultSubStatusSevered}},
-		{"a watch open the shim refused", KindWatchOpenRefused, FaultCell{FaultStatusDisconnected, FaultSubStatusSevered}},
-		{"a state client that will not answer", KindStateUnreadable, FaultCell{FaultStatusBlocked, FaultSubStatusDaemonImpaired}},
+		{"a shim that would not come up", KindShimStartFailed, FaultCell{FaultStatusAgentReplFault, FaultSubStatusStartFailed}},
+		{"a resume the shim refused", KindResumeFailed, FaultCell{FaultStatusAgentReplFault, FaultSubStatusStartFailed}},
+		{"the legacy relaunch spelling of the same class", KindRelaunchResumeFailed, FaultCell{FaultStatusAgentReplFault, FaultSubStatusStartFailed}},
+		{"an adoption window nobody claimed", KindAdoptionWindowExpired, FaultCell{FaultStatusAgentReplFault, FaultSubStatusStartFailed}},
+		{"a cold gate whose re-open failed", KindColdGateReopenFailed, FaultCell{FaultStatusAgentReplFault, FaultSubStatusStartFailed}},
+		{"a vendor start being retried", KindVendorStartRetrying, FaultCell{FaultStatusVendorFault, FaultSubStatusVendorRetry}},
+		{"a vendor start the vendor refused", KindVendorStartRejected, FaultCell{FaultStatusVendorFault, FaultSubStatusVendorRejection}},
+		{"a vendor start that failed for the whole window", KindVendorStartFailed, FaultCell{FaultStatusVendorFault, FaultSubStatusVendorFailed}},
+		{"a shim that exited while serving", KindShimDied, FaultCell{FaultStatusAgentReplFault, FaultSubStatusDead}},
+		{"a bounce whose replacement died", KindBounceDied, FaultCell{FaultStatusAgentReplFault, FaultSubStatusDead}},
+		{"a workspace with no live session", KindSessionAbsent, FaultCell{FaultStatusAgentReplFault, FaultSubStatusDead}},
+		{"a link that stopped serving", KindLinkSevered, FaultCell{FaultStatusAgentReplFault, FaultSubStatusSevered}},
+		{"a watch open the shim refused", KindWatchOpenRefused, FaultCell{FaultStatusAgentReplFault, FaultSubStatusSevered}},
+		{"a state client that will not answer", KindStateUnreadable, FaultCell{FaultStatusAgentReplFault, FaultSubStatusDaemonImpaired}},
+		{"the network the shim could not reach", KindNetworkUnreachable, FaultCell{FaultStatusNetworkFault, FaultSubStatusOffline}},
 		{"a fault the shim reported about itself", KindShimReported, FaultCell{FaultStatusNone, ""}},
 		{"a headless classifier run that failed", KindClassifierFailed, FaultCell{FaultStatusNone, ""}},
 		{"a bounce disposition needing a human", KindBounceUnknown, FaultCell{FaultStatusNone, ""}},
@@ -71,7 +72,7 @@ func TestFaultFooterCellPartitionsEveryDaemonKind(t *testing.T) {
 		{"a state client that will not answer", KindStateUnreadable},
 		{"a handover nobody claimed", KindAdoptionWindowExpired},
 	}
-	want := FaultCell{FaultStatusBlocked, FaultSubStatusDaemonImpaired}
+	want := FaultCell{FaultStatusAgentReplFault, FaultSubStatusDaemonImpaired}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange, Act
@@ -221,7 +222,7 @@ func TestObserveFaultsTellsTheSinkWhereAnOpenedFaultLands(t *testing.T) {
 	got := sink.opened[0]
 	want := FaultLine{
 		ID: "fault-1", Kind: KindResumeFailed,
-		Cell:   FaultCell{FaultStatusDisconnected, FaultSubStatusStartFailed},
+		Cell:   FaultCell{FaultStatusAgentReplFault, FaultSubStatusStartFailed},
 		Detail: "the shim refused", At: fixedNow, Record: fault,
 	}
 	if got.ws != ws || !reflect.DeepEqual(got.line, want) {
@@ -246,7 +247,7 @@ func TestObserveFaultsDeliversADaemonScopedFaultWithNoWorkspace(t *testing.T) {
 	if len(sink.opened) != 1 || sink.opened[0].ws != "" {
 		t.Fatalf("sink saw %+v, want one fault with an empty workspace", sink.opened)
 	}
-	if want := (FaultCell{FaultStatusBlocked, FaultSubStatusDaemonImpaired}); sink.opened[0].line.Cell != want {
+	if want := (FaultCell{FaultStatusAgentReplFault, FaultSubStatusDaemonImpaired}); sink.opened[0].line.Cell != want {
 		t.Fatalf("cell = %+v, want %+v", sink.opened[0].line.Cell, want)
 	}
 }

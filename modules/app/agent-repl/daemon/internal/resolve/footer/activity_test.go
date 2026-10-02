@@ -34,7 +34,7 @@ func TestAMidTurnApiFailureDrawsTheRetryLine(t *testing.T) {
 	})
 
 	// Assert
-	retry := h.view(t).GetStrip().GetStatus().GetBlocked().GetActivity().GetSalient().GetRetrying()
+	retry := h.view(t).GetStrip().GetStatus().GetVendorFault().GetActivity().GetSalient().GetRetrying()
 	if retry.GetAttempt() != 2 || retry.GetStatus() != "overloaded" {
 		t.Fatalf("retry = %+v, want attempt 2 with the vendor's summary", retry)
 	}
@@ -52,7 +52,7 @@ func TestASecondApiFailureCountsTheNextAttempt(t *testing.T) {
 	h.r.OnApiError(testWS, mainAgent, failed)
 
 	// Assert
-	retry := h.view(t).GetStrip().GetStatus().GetBlocked().GetActivity().GetSalient().GetRetrying()
+	retry := h.view(t).GetStrip().GetStatus().GetVendorFault().GetActivity().GetSalient().GetRetrying()
 	if retry.GetAttempt() != 3 {
 		t.Fatalf("attempt = %d, want 3 after two recorded failures", retry.GetAttempt())
 	}
@@ -76,7 +76,7 @@ func TestTheWaitingActivityIsAlwaysPresent(t *testing.T) {
 // activity draws something else or nothing.
 func startFailedLine(t *testing.T, h *harness) *frontendv1.FooterStatusActivityStartFailed {
 	t.Helper()
-	return h.view(t).GetStrip().GetStatus().GetDisconnected().GetActivity().GetSalient().GetStartFailed()
+	return h.view(t).GetStrip().GetStatus().GetAgentReplFault().GetActivity().GetSalient().GetStartFailed()
 }
 
 func TestTheBringUpFailureLineDrawsTheCauseItWasGiven(t *testing.T) {
@@ -118,7 +118,7 @@ func TestTheBringUpFailureLineStandsUnderTheStartFailedStep(t *testing.T) {
 	h.r.OnLink(testWS, shimclient.LinkDead)
 
 	// Assert
-	if h.view(t).GetStrip().GetStatus().GetDisconnected().GetStartFailed() == nil {
+	if h.view(t).GetStrip().GetStatus().GetAgentReplFault().GetStartFailed() == nil {
 		t.Fatalf("want the line under disconnected · start_failed, got %+v",
 			h.view(t).GetStrip().GetStatus())
 	}
@@ -264,7 +264,7 @@ func TestTheRetryLineEndsAtTheRetriedAgentsFirstResponse(t *testing.T) {
 			h.r.OnActivity(testWS, mainAgent, tt.act)
 
 			// Assert
-			if got := h.view(t).GetStrip().GetStatus().GetBlocked(); got != nil {
+			if got := h.view(t).GetStrip().GetStatus().GetVendorFault(); got != nil {
 				t.Fatalf("status = blocked %+v, want the retry ended by the response", got)
 			}
 		})
@@ -282,7 +282,7 @@ func TestTheRetryLineSurvivesAToolCallWithNoUsage(t *testing.T) {
 	h.r.OnActivity(testWS, mainAgent, subagentProgress("u-1", 10))
 
 	// Assert
-	if h.view(t).GetStrip().GetStatus().GetBlocked().GetActivity().GetSalient().GetRetrying() == nil {
+	if h.view(t).GetStrip().GetStatus().GetVendorFault().GetActivity().GetSalient().GetRetrying() == nil {
 		t.Fatalf("the retry line ended on a frame that proves no response")
 	}
 }
@@ -298,7 +298,7 @@ func TestAnotherAgentsResponseDoesNotEndTheRetry(t *testing.T) {
 	h.r.OnActivity(testWS, &conversationv1.AgentId{Value: "agent-other"}, thinkingActivity("th-9"))
 
 	// Assert
-	if h.view(t).GetStrip().GetStatus().GetBlocked().GetActivity().GetSalient().GetRetrying() == nil {
+	if h.view(t).GetStrip().GetStatus().GetVendorFault().GetActivity().GetSalient().GetRetrying() == nil {
 		t.Fatalf("another agent's reasoning ended the main agent's retry line")
 	}
 }
@@ -505,7 +505,7 @@ func TestTheRetryLineCountsAttemptsAsTheVendorDoes(t *testing.T) {
 	h.r.OnApiError(testWS, mainAgent, scheduledFailure(8, 10, instant.Add(32*time.Second)))
 
 	// Assert: attempt 9 of 11, as the request's own count runs.
-	retry := h.view(t).GetStrip().GetStatus().GetBlocked().GetActivity().GetSalient().GetRetrying()
+	retry := h.view(t).GetStrip().GetStatus().GetVendorFault().GetActivity().GetSalient().GetRetrying()
 	if retry.GetAttempt() != 9 || retry.GetMaxAttempt() != 11 {
 		t.Fatalf("retry = %+v, want attempt 9 of 11", retry)
 	}
@@ -522,7 +522,7 @@ func TestTheRetryLineCarriesTheNextAttemptsInstant(t *testing.T) {
 	h.r.OnApiError(testWS, mainAgent, scheduledFailure(8, 10, next))
 
 	// Assert
-	retry := h.view(t).GetStrip().GetStatus().GetBlocked().GetActivity().GetSalient().GetRetrying()
+	retry := h.view(t).GetStrip().GetStatus().GetVendorFault().GetActivity().GetSalient().GetRetrying()
 	if retry.GetNextAttempt().GetAtMs() != next.UnixMilli() {
 		t.Fatalf("next attempt = %v, want the vendor's stated instant", retry.GetNextAttempt())
 	}
@@ -540,7 +540,7 @@ func TestAFurtherFailureMovesTheNextAttempt(t *testing.T) {
 	h.r.OnApiError(testWS, mainAgent, scheduledFailure(2, 10, later))
 
 	// Assert
-	retry := h.view(t).GetStrip().GetStatus().GetBlocked().GetActivity().GetSalient().GetRetrying()
+	retry := h.view(t).GetStrip().GetStatus().GetVendorFault().GetActivity().GetSalient().GetRetrying()
 	if retry.GetAttempt() != 3 || retry.GetNextAttempt().GetAtMs() != later.UnixMilli() {
 		t.Fatalf("retry = %+v, want attempt 3 due at the later instant", retry)
 	}
@@ -556,7 +556,7 @@ func TestAnUnscheduledFailureCarriesNoNextAttempt(t *testing.T) {
 	h.r.OnApiError(testWS, mainAgent, &conversationv1.ApiRequestFailed{Message: "overloaded"})
 
 	// Assert
-	retry := h.view(t).GetStrip().GetStatus().GetBlocked().GetActivity().GetSalient().GetRetrying()
+	retry := h.view(t).GetStrip().GetStatus().GetVendorFault().GetActivity().GetSalient().GetRetrying()
 	if retry.NextAttempt != nil || retry.MaxAttempt != nil {
 		t.Fatalf("retry = %+v, want no schedule the vendor never stated", retry)
 	}
@@ -573,7 +573,7 @@ func TestTheRetriedCallsResponseAnnouncesTheRestoredAPI(t *testing.T) {
 	h.r.OnActivity(testWS, mainAgent, thinkingActivity("th-1"))
 
 	// Assert: the salient line ended, and a transient says the API answered.
-	if got := h.view(t).GetStrip().GetStatus().GetBlocked(); got != nil {
+	if got := h.view(t).GetStrip().GetStatus().GetVendorFault(); got != nil {
 		t.Fatalf("status = blocked %+v, want the retry ended", got)
 	}
 	if restored := transientOf(t, h).GetApiRestored(); restored.GetFailedAttempts() != 8 {
@@ -613,12 +613,12 @@ func TestEachArmResolvesItsSalientKindsInPrecedenceThenUnpinnedWithNoStoppedMerg
 			deploying(h)
 			h.r.SetTurn(testWS, &TurnStarted{At: instant})
 			h.r.OnApiError(testWS, mainAgent, &conversationv1.ApiRequestFailed{Message: "overloaded"})
-		}, "blocked", "salient.retrying"},
+		}, "vendor_fault", "salient.retrying"},
 		{"a retry blocks a compacting turn", func(h *harness) {
 			h.r.SetTurn(testWS, &TurnStarted{At: instant})
 			h.r.OnApiError(testWS, mainAgent, &conversationv1.ApiRequestFailed{Message: "overloaded"})
 			h.r.OnSessionUpdate(testWS, vendorCompacting())
-		}, "blocked", "salient.retrying"},
+		}, "vendor_fault", "salient.retrying"},
 		{"interrupted, nothing salient", func(h *harness) {
 			turn := testTurnID
 			h.r.SetTurn(testWS, &TurnStarted{At: instant})
@@ -656,30 +656,38 @@ func TestEachArmResolvesItsSalientKindsInPrecedenceThenUnpinnedWithNoStoppedMerg
 		}, "background", "salient.update"},
 		{"blocked on the account, the enduring usage figures explain it", func(h *harness) {
 			h.r.OnSessionUpdate(testWS, rejectedFiveHour())
-		}, "blocked", "enduring"},
+		}, "vendor_fault", "enduring"},
 		{"blocked on the account under a deploy", func(h *harness) {
 			deploying(h)
 			h.r.OnSessionUpdate(testWS, rejectedFiveHour())
-		}, "blocked", "salient.update"},
-		{"an escalating blocked fault outranks a deploy", func(h *harness) {
+		}, "vendor_fault", "salient.update"},
+		{"an impaired daemon's fault outranks a deploy", func(h *harness) {
 			deploying(h)
 			h.r.OpenFault(testWS, faultOf(t, "f-1", health.KindStateUnreadable, false))
-		}, "blocked", "salient.fault"},
+		}, "agent_repl_fault", "salient.fault"},
+		{"the vendor-start line outranks a deploy", func(h *harness) {
+			deploying(h)
+			h.r.OpenFault(testWS, vendorFaultOf(t, "f-1", health.KindVendorStartRetrying))
+		}, "vendor_fault", "salient.vendor_start"},
+		{"the offline line outranks a deploy", func(h *harness) {
+			deploying(h)
+			h.r.OpenFault(testWS, faultOf(t, "f-1", health.KindNetworkUnreachable, false))
+		}, "network_fault", "salient.offline"},
 		{"a severed link with no fault, nothing salient", func(h *harness) {
 			h.r.OnLink(testWS, shimclient.LinkRedialing)
-		}, "disconnected", "enduring"},
+		}, "agent_repl_fault", "enduring"},
 		{"a severed link under a deploy", func(h *harness) {
 			deploying(h)
 			h.r.OnLink(testWS, shimclient.LinkRedialing)
-		}, "disconnected", "salient.update"},
-		{"an escalating disconnected fault outranks a deploy", func(h *harness) {
+		}, "agent_repl_fault", "salient.update"},
+		{"an escalating agent-repl fault outranks a deploy", func(h *harness) {
 			deploying(h)
 			h.r.OpenFault(testWS, faultOf(t, "f-1", health.KindShimDied, false))
-		}, "disconnected", "salient.fault"},
+		}, "agent_repl_fault", "salient.fault"},
 		{"the bring-up failure outranks a fault", func(h *harness) {
 			h.r.OpenFault(testWS, faultOf(t, "f-1", health.KindShimDied, false))
 			h.r.SetStartFailed(testWS, &StartFailed{Detail: "exit 1"})
-		}, "disconnected", "salient.start_failed"},
+		}, "agent_repl_fault", "salient.start_failed"},
 		{"a refused close outranks a deploy", func(h *harness) {
 			deploying(h)
 			h.r.SetClosing(testWS, &CloseBlocked{Reason: "turn_in_flight", Detail: "a turn is in flight"})

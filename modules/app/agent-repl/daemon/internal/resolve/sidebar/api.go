@@ -97,11 +97,18 @@ type Resolver interface {
 	// connected yet, the row's availability is `pending`.
 	SetBringingUp(ws ids.WorkspaceID, bringingUp bool)
 	// SetVendorStart installs where the workspace's vendor-start run stands
-	// (the fleet's vendor-start faults). The roster has NO vendor arms: a run
-	// being retried draws as the bring-up (`init`), and a rejection or an
-	// exhausted window as `start_failed` -- the footer carries the
-	// distinction (design record vendor-start-resilience.md, landed change 2).
+	// (the fleet's vendor-start faults). Any run standing draws `vendor_fault`
+	// (turquoise); the footer carries which of the three steps it is (owner
+	// ruling, 2026-10-02).
 	SetVendorStart(ws ids.WorkspaceID, state VendorStart)
+	// NetworkFaultOpened installs one standing fault that says this machine
+	// cannot reach the network, by its record id: the `network_fault` arm. It
+	// is driven from the ONE place faults are opened (health.ObserveFaults),
+	// beside the footer's OpenFault, so the two surfaces take the same fact.
+	NetworkFaultOpened(ws ids.WorkspaceID, id string)
+	// FaultClosed retracts a standing fault by its record id. An id the roster
+	// does not hold is a fault it does not draw, and changes nothing.
+	FaultClosed(ws ids.WorkspaceID, id string)
 	// SetTurn installs the accepted turn, nil when none is in flight. It is
 	// what raises `submitting` the instant StartTurn is accepted, and what
 	// tells a `/clear` and a compaction apart from an ordinary prompt — the

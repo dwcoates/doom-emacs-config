@@ -25,7 +25,9 @@ import (
 //
 // WITHIN a rung the order is this surface's detail:
 //   - merging: enqueuing, queued and merging are the one rung;
-//   - disconnected: start_failed, dead, severed, init (linkArm);
+//   - agent_repl_fault: start_failed, dead, severed, init (linkArm);
+//   - vendor_fault: a vendor that will not start, then a vendor or account
+//     block, then a call the vendor is retrying;
 //   - degraded: a taken-back shim's unreported state, or an open observation
 //     window — both drawn `degraded`;
 //   - thinking: clearing, then compacting, then submitting, then thinking;
@@ -79,7 +81,7 @@ func rosterRung(claim ladder.Claim, s *wsState, session *wsm.Session, log dlog.L
 		return "merge_failed"
 	case ladder.Merged:
 		return "merged"
-	case ladder.Disconnected:
+	case ladder.AgentReplFault:
 		if ladder.AwaitingBringUp(s.linkSeen, s.turn != nil, s.started) {
 			log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "an accepted turn awaits the bring-up"})
 			return "init"
@@ -101,7 +103,17 @@ func rosterRung(claim ladder.Claim, s *wsState, session *wsm.Session, log dlog.L
 			return "degraded"
 		}
 		return ""
-	case ladder.Blocked:
+	case ladder.NetworkFault:
+		if len(s.networkFaults) > 0 {
+			log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "a network fault stands"})
+			return "network_fault"
+		}
+		return ""
+	case ladder.VendorFault:
+		if s.vendorStart != VendorStartNone {
+			log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "the vendor will not start", "vendor_start": s.vendorStart.String()})
+			return "vendor_fault"
+		}
 		if s.vendorBlocked {
 			log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case s.vendorBlocked"})
 			return "vendor_blocked"
@@ -186,18 +198,13 @@ func parked(session *wsm.Session) bool {
 // not coming up, there is nothing to wait on, and the lifecycle arms below are
 // what report how it ended.
 func linkArm(s *wsState, session *wsm.Session) string {
-	// A VENDOR THAT DID NOT START is the link rung's DELIBERATE mapping of the
-	// three vendor-start faults onto the roster's existing arms: retrying is
-	// the bring-up still under way (`init`); a rejection or a spent window is
-	// a session that never came up (`start_failed`). Only a route being
-	// redialed says something newer.
-	if s.link != shimclient.LinkRedialing {
-		switch s.vendorStart {
-		case VendorStartRetrying:
-			return "init"
-		case VendorStartStopped:
-			return "start_failed"
-		}
+	// A VENDOR THAT DID NOT START IS THE VENDOR'S FAULT, NOT THE LINK'S
+	// (owner ruling, 2026-10-02): the vendor rung draws it `vendor_fault`, and
+	// the dead route a stopped start leaves behind is this daemon's own doing.
+	// Only a route being dialed or redialed says something newer. The footer
+	// draws the same (resolve/footer agentReplFault).
+	if s.vendorStart != VendorStartNone && s.link != shimclient.LinkDialing && s.link != shimclient.LinkRedialing {
+		return ""
 	}
 	if !s.linkSeen {
 		if session != nil && session.Terminal != nil {
@@ -330,6 +337,12 @@ func setStatus(row *frontendv1.RosterRow, arm string, log dlog.Logger) {
 	case "vendor_blocked":
 		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"vendor_blocked\""})
 		row.Status = &frontendv1.RosterRow_VendorBlocked{VendorBlocked: &frontendv1.RosterRowStatusVendorBlocked{}}
+	case "vendor_fault":
+		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"vendor_fault\""})
+		row.Status = &frontendv1.RosterRow_VendorFault{VendorFault: &frontendv1.RosterRowStatusVendorFault{}}
+	case "network_fault":
+		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"network_fault\""})
+		row.Status = &frontendv1.RosterRow_NetworkFault{NetworkFault: &frontendv1.RosterRowStatusNetworkFault{}}
 	case "api_retrying":
 		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"api_retrying\""})
 		row.Status = &frontendv1.RosterRow_ApiRetrying{ApiRetrying: &frontendv1.RosterRowStatusApiRetrying{}}
