@@ -105,7 +105,8 @@ import type { TransientExpirySchedule } from "./expiry.js";
 import { footerClockSpan } from "./clock-span.js";
 import { drawFooterStatusActivityMergeStep } from "./merge-step.js";
 import { grabber, statusWords, textLine } from "./parts.js";
-import { activityDatumClass, footerPercentColor } from "./tones.js";
+import { pressurePercentColor } from "../pressure-color.js";
+import { activityDatumClass } from "./tones.js";
 
 /**
  * What a clocked piece of the cell needs: the ticker its figure rides.
@@ -837,7 +838,7 @@ export function drawFooterRateSeparator(): HTMLElement {
 
 /**
  * A footer percentage, "42%": a 0..1 figure on the wire drawn as a whole
- * percent, colored by how full it is (`footerPercentColor`). Every percentage
+ * percent, colored by how full it is (`pressurePercentColor`). Every percentage
  * the footer draws goes through here, so none is ever drawn unpainted.
  */
 export function drawFooterPercent(fraction: number): HTMLElement {
@@ -846,7 +847,7 @@ export function drawFooterPercent(fraction: number): HTMLElement {
   percent.className = "footer-percent";
   percent.setAttribute("data-datum", "percent");
   percent.textContent = `${String(figure)}%`;
-  percent.style.color = footerPercentColor(figure);
+  percent.style.color = pressurePercentColor(figure);
   return percent;
 }
 
