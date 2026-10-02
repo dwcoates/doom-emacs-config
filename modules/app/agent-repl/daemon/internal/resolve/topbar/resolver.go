@@ -681,6 +681,9 @@ func (r *resolver) OnSessionStarted(ws ids.WorkspaceID, started *conversationv1.
 			"model":             started.GetEffectiveModel().GetName(),
 		}, func(s *wsState) {
 			s.started = true
+			// A NEW (OR RE-ANNOUNCED) SESSION STATES ITS OWN LEVEL: the level
+			// the last shim pushed is not this one's until it says so.
+			s.pushedEffort = conversationv1.AgentEffortLevel_AGENT_EFFORT_LEVEL_UNSPECIFIED
 			s.vendorSessionID = started.GetVendorSessionId()
 			s.model = started.GetEffectiveModel().GetName()
 			s.permissionMode = permissionModeName(started.GetPermissionMode())
@@ -937,6 +940,12 @@ func (r *resolver) sessionArm(update *conversationv1.SessionUpdate) (string, fun
 			// remains, so it both states the figure and retires the dash.
 			s.contextUsage = u.ContextUsage
 			s.contextCut = false
+		}
+	case *conversationv1.SessionUpdate_EffortChanged:
+		// THE VENDOR'S OWN STATEMENT of the level its next request sends: the
+		// authority for the selector's current level (owner ruling, 2026-10-02).
+		return "effort_changed", func(s *wsState) {
+			s.pushedEffort = u.EffortChanged.GetEffectiveEffort()
 		}
 	case *conversationv1.SessionUpdate_QueryDied:
 		return "query_died", func(*wsState) {}

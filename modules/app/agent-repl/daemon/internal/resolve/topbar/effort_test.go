@@ -355,3 +355,83 @@ func TestAnUnknownLevelIsRecordedWithItsReason(t *testing.T) {
 		t.Errorf("last effort record = %v, want level_unknown:unset, not drawn", last)
 	}
 }
+
+// effortPushed is the shim's push of the vendor's applied level.
+func effortPushed(level conversationv1.AgentEffortLevel) *conversationv1.SessionUpdate {
+	return &conversationv1.SessionUpdate{
+		Update: &conversationv1.SessionUpdate_EffortChanged{
+			EffortChanged: &conversationv1.SessionEffortChanged{EffectiveEffort: level},
+		},
+	}
+}
+
+func TestThePushedLevelOutranksThePickAndTheSettings(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.ready(t)
+	h.r.SetModelCatalog(testWS, []*conversationv1.ModelOption{effortCatalogOption("claude-opus-5", effortLow, effortMedium, effortHigh)})
+	h.r.SetEffortSettings(testWS, settingsDefault(effortMedium))
+	h.r.SetPickedEffort(testWS, effortLow)
+
+	// Act.
+	h.r.OnSessionUpdate(testWS, effortPushed(effortHigh))
+
+	// Assert.
+	if got := supportedSelector(t, h.view(t)).GetCurrent().GetLevel(); got != effortHigh {
+		t.Errorf("current = %v, want the pushed high", got)
+	}
+}
+
+func TestAPushNamesTheLevelWhenTheSettingsNameNone(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.ready(t)
+	h.r.SetEffortSettings(testWS, claudesettings.Effort{Path: "/Users/dev/.claude/settings.json"})
+	h.r.SetModelCatalog(testWS, []*conversationv1.ModelOption{effortCatalogOption("claude-opus-5", effortLow, effortMedium)})
+
+	// Act.
+	h.r.OnSessionUpdate(testWS, effortPushed(effortMedium))
+
+	// Assert.
+	if got := supportedSelector(t, h.view(t)).GetCurrent().GetLevel(); got != effortMedium {
+		t.Errorf("current = %v, want the pushed medium", got)
+	}
+}
+
+func TestANewSessionForgetsTheLastSessionsPush(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.ready(t)
+	h.r.SetModelCatalog(testWS, []*conversationv1.ModelOption{effortCatalogOption("claude-opus-5", effortLow, effortMedium, effortHigh)})
+	h.r.SetEffortSettings(testWS, settingsDefault(effortMedium))
+	h.r.OnSessionUpdate(testWS, effortPushed(effortHigh))
+
+	// Act.
+	h.r.OnSessionStarted(testWS, sessionStarted("vend-2", "claude-opus-5"))
+
+	// Assert.
+	if got := supportedSelector(t, h.view(t)).GetCurrent().GetLevel(); got != effortMedium {
+		t.Errorf("current = %v, want the settings' medium until the new session pushes", got)
+	}
+}
+
+func TestThePushedSourceIsRecorded(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.ready(t)
+	h.r.SetModelCatalog(testWS, []*conversationv1.ModelOption{effortCatalogOption("claude-opus-5", effortLow, effortHigh)})
+
+	// Act.
+	h.r.OnSessionUpdate(testWS, effortPushed(effortHigh))
+
+	// Assert.
+	var last map[string]any
+	for _, record := range h.log.Records() {
+		if record.Operation == "daemon.topbar.effort_source" {
+			last = record.Context
+		}
+	}
+	if last["standing"] != "high:vendor_push" {
+		t.Errorf("last effort record = %v, want high:vendor_push", last)
+	}
+}

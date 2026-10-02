@@ -1194,10 +1194,12 @@ or simply not started yet — states that IN ITS OWN SLOT:
 - `model_selector`, `effort_selector`, `permission_mode_picker` and
   `fast_mode` are ABSENT. Absence is how "no session has stated this" is said,
   and the webapp draws a dash in the slot rather than omitting the cell.
-  `effort_selector` is also absent while a session stands but no level is
-  KNOWN to be in force (no pick, and the config root's `settings.json` names
-  none for the model): the vendor's own default is stated nowhere the daemon
-  can read, and a guessed level is never drawn as the current one.
+  `effort_selector`'s current level is the VENDOR'S OWN, pushed by the shim
+  as `SessionUpdate.effort_changed` (`Query.getSettings()`'s
+  `applied.effort`; owner ruling 2026-10-02). Before the session's first push
+  the confirmed pick stands, and before that the config root's
+  `settings.json` under `CLAUDE_CODE_EFFORT_LEVEL`. With none of them stating
+  a level the selector is absent: a guessed level is never drawn.
 - `context` is ALWAYS SET. A session-less workspace's chip states the context
   the session HELD — a hibernated conversation's size, or what a cold read
   would re-read — and 0 when none is known, never a blank (a blank reads as

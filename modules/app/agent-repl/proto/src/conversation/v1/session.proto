@@ -244,6 +244,16 @@ message SessionUpdate {
     // One wait ENDED, and how. An EVENT, stated once, live: it is what tells a
     // consumer why a wait left the standing set, which the set alone cannot.
     SessionNetworkResumeOutcome network_resume_outcome = 32;
+    // The reasoning effort the vendor will send on the session's NEXT
+    // request, as the vendor itself states it, with its own defaults, clamps
+    // and downgrades applied. PUSHED once the session is up, and again
+    // whenever that level changes (including after SetSessionEffort, whose
+    // success carries the same fact). NEVER pushed while the vendor states
+    // no level (a model that takes none, or a vendor that reports none):
+    // absence is "no level known", never a guessed one. It is the authority
+    // for the effort a session runs at; a level read from settings files is
+    // only what stands before the first push (owner ruling, 2026-10-02).
+    SessionEffortChanged effort_changed = 33;
   }
 }
 

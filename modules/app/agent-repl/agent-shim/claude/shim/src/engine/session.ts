@@ -41,7 +41,7 @@ import type { LockRelease } from "../locks.js";
 import { workspaceLockKey } from "../locks.js";
 import { recordAgentBinaryVersion, requireSessionRuntime } from "../build-identity.js";
 import { isAgentTaskType } from "../convert/detached.js";
-import { effortLevelOf, vendorEffortLevel } from "../convert/effort.js";
+import { appliedEffortOf, effortLevelOf, vendorEffortLevel } from "../convert/effort.js";
 import { boundaryChange } from "./boundary-change.js";
 import { promptVendorUuid, subagentId, toolCallActivityId } from "../convert/ids.js";
 import { hookBlockingText } from "../convert/hooks.js";
@@ -475,6 +475,8 @@ const VENDOR_QUERY_COMPONENT = "vendor-query";
 const CONTEXT_USAGE_COMPONENT = "vendor-context-usage";
 /** The mcp health probe: transient, recovered by the next probe. */
 const MCP_STATUS_COMPONENT = "vendor-mcp-status";
+/** The applied-effort read: transient, recovered by the next read. */
+const EFFORT_COMPONENT = "vendor-applied-effort";
 /** The model catalog read: transient, recovered by a later StartSession's read. */
 const MODEL_CATALOG_COMPONENT = "vendor-model-catalog";
 /** Reading the record's open obligations: transient, recovered by any later read. */
@@ -1764,6 +1766,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // an unhealthy verdict no later success could lift. A re-read is also the
     // honest answer to a catalog that changed under the account.
     await pushModelCatalog();
+    // The level the vendor sends can move under a turn (a vendor-side model
+    // fallback), so it is re-read with the rest.
+    await pushAppliedEffort();
   }
 
   /** Re-read the account's model list, and state the health of that read. */
@@ -2864,15 +2869,85 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       LOGGER.info({ effort: conversationv1.AgentEffortLevel[effort], cause: detail }, "the vendor refused the effort change");
       return setSessionEffortRefused({ kind: "vendorRefused" }, detail);
     }
-    LOGGER.info({ effort: conversationv1.AgentEffortLevel[effort] }, "changed the session's reasoning effort");
+    // THE LEVEL IN EFFECT IS THE VENDOR'S TO STATE, read back rather than
+    // assumed: it downgrades a level the model lacks, and an environment
+    // override (CLAUDE_CODE_EFFORT_LEVEL) keeps the change from applying at
+    // all. The success carries what the vendor says, never what was asked.
+    const applied = await readAppliedEffort();
+    if (applied.kind === "failed") {
+      return setSessionEffortRefused(
+        { kind: "vendorRefused" },
+        `the effort change was sent but the vendor's applied level could not be read: ${applied.detail}`,
+      );
+    }
+    if (applied.kind === "none") {
+      LOGGER.info({ effort: conversationv1.AgentEffortLevel[effort] }, "the vendor states it sends no effort level after the change");
+      return setSessionEffortRefused(
+        { kind: "vendorRefused" },
+        "the vendor states it sends no effort level (an environment override may be in force)",
+      );
+    }
+    pushEffortChanged(applied.level);
+    LOGGER.info(
+      { asked: conversationv1.AgentEffortLevel[effort], effort: conversationv1.AgentEffortLevel[applied.level] },
+      "changed the session's reasoning effort",
+    );
     return create(shimv1.SetSessionEffortResponseSchema, {
       result: {
         case: "success",
         value: create(shimv1.SetSessionEffortSuccessSchema, {
-          effortChanged: create(conversationv1.SessionEffortChangedSchema, { effectiveEffort: effort }),
+          effortChanged: create(conversationv1.SessionEffortChangedSchema, { effectiveEffort: applied.level }),
         }),
       },
     });
+  }
+
+  /**
+   * The level the vendor states its next request sends (`getSettings()`'s
+   * `applied.effort`). A failed read is stated as a fault of its own component
+   * and cleared by the next good one.
+   */
+  async function readAppliedEffort(): Promise<
+    | { readonly kind: "level"; readonly level: conversationv1.AgentEffortLevel }
+    | { readonly kind: "none" }
+    | { readonly kind: "failed"; readonly detail: string }
+  > {
+    const active = query;
+    if (active === undefined) return { kind: "failed", detail: "no vendor query is open" };
+    try {
+      const level = appliedEffortOf(await active.getSettings());
+      pushes.resolveComponent(EFFORT_COMPONENT, 0);
+      return level === undefined ? { kind: "none" } : { kind: "level", level };
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      pushes.fault(sessionFault({ kind: "vendorQueryFailed" }, EFFORT_COMPONENT, `getSettings failed: ${detail}`));
+      return { kind: "failed", detail };
+    }
+  }
+
+  /** State the level in effect on WatchSession; the fan-out drops an unchanged one. */
+  function pushEffortChanged(level: conversationv1.AgentEffortLevel): void {
+    pushes.push(
+      create(conversationv1.SessionUpdateSchema, {
+        update: {
+          case: "effortChanged",
+          value: create(conversationv1.SessionEffortChangedSchema, { effectiveEffort: level }),
+        },
+      }),
+    );
+  }
+
+  /**
+   * Read the vendor's applied level and push it when it names one. NEVER
+   * PUSHED while the vendor states no level: absence is "no level known".
+   */
+  async function pushAppliedEffort(): Promise<void> {
+    const applied = await readAppliedEffort();
+    if (applied.kind === "level") {
+      pushEffortChanged(applied.level);
+      return;
+    }
+    if (applied.kind === "none") LOGGER.debug({}, "the vendor states no effort level; nothing is pushed");
   }
 
   async function applyModel(model: conversationv1.AgentModel): Promise<void> {
@@ -2882,6 +2957,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     await active.setModel(name === "" ? undefined : name);
     effectiveModel = name;
     pushModel();
+    // A NEW MODEL CAN MOVE THE LEVEL: the vendor downgrades a level the model
+    // lacks and sends none for a model that takes none.
+    await pushAppliedEffort();
   }
 
   function runLoop(active: QueryLike): Promise<void> {
@@ -4269,6 +4347,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     );
     pushModel();
     pushPermissionMode();
+    await pushAppliedEffort();
     const contextUsageFrom = deps.nowMs();
     await pushContextUsage();
     const contextUsageMs = deps.nowMs() - contextUsageFrom;

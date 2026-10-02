@@ -155,6 +155,10 @@ export class SessionPushes {
   // replay the topbar would draw the workspace name until some later turn
   // happened to change the title.
   //
+  // `effortChanged` is the level the vendor's next request sends: a LEVEL the
+  // session is in, pushed at the session's start before any daemon watch is
+  // open, so a late subscriber is owed it exactly as it is owed the model.
+  //
   // `networkResumeWaits` is a STANDING SET whose producer obligation is to be
   // stated on every open before any live frame (session.proto): a consumer
   // that (re)connects mid-outage learns the waits from its own stream. Like
@@ -169,6 +173,7 @@ export class SessionPushes {
     "accountUsage",
     "title",
     "networkResumeWaits",
+    "effortChanged",
   ];
 
   /**

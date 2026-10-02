@@ -2,7 +2,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { effortLevelOf, vendorEffortLevel } from "../../src/convert/effort.js";
+import { appliedEffortOf, effortLevelOf, vendorEffortLevel } from "../../src/convert/effort.js";
 import { conversationv1 } from "../../src/proto.js";
 
 describe("effortLevelOf", () => {
@@ -87,5 +87,32 @@ describe("the effort mapping is shared", () => {
     );
     // Assert
     expect(offenders).toEqual([]);
+  });
+});
+
+describe("appliedEffortOf", () => {
+  it("reads a named level", () => {
+    // Arrange, Act, Assert
+    expect(appliedEffortOf({ applied: { effort: "xhigh" } })).toBe(conversationv1.AgentEffortLevel.XHIGH);
+  });
+
+  it("is undefined when the vendor states no level", () => {
+    // Arrange, Act, Assert
+    expect(appliedEffortOf({ applied: { effort: null } })).toBeUndefined();
+  });
+
+  it("throws on a level this vocabulary cannot name", () => {
+    // Arrange, Act, Assert
+    expect(() => appliedEffortOf({ applied: { effort: "ultra" as never } })).toThrow(/"ultra"/);
+  });
+
+  it("throws on an answer carrying no applied.effort", () => {
+    // Arrange, Act, Assert
+    expect(() => appliedEffortOf({ applied: {} } as never)).toThrow(/no applied.effort/);
+  });
+
+  it("throws on an answer carrying no applied block", () => {
+    // Arrange, Act, Assert
+    expect(() => appliedEffortOf({} as never)).toThrow(/no applied.effort/);
   });
 });

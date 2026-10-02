@@ -908,6 +908,12 @@ func TestRouteSessionUpdateArms(t *testing.T) {
 			want:   []string{"topbar.OnSessionUpdate"},
 		},
 		{
+			// An effort change puts nothing in the feed or the footer.
+			name:   "the vendor's effort is the topbar's alone",
+			update: effortChangedUpdate(),
+			want:   []string{"topbar.OnSessionUpdate"},
+		},
+		{
 			name:   "a model change is the topbar's, the roster's and the footer's",
 			update: modelChangedUpdate(),
 			want:   []string{"topbar.OnSessionUpdate", "sidebar.OnSessionUpdate", "footer.OnSessionUpdate"},
@@ -2779,6 +2785,7 @@ func TestSessionArmNamesTheCompactionAndNetworkResumeArms(t *testing.T) {
 		},
 		{name: "the standing network-resume waits", update: networkResumeWaitsUpdate(), want: "network_resume_waits"},
 		{name: "a network-resume outcome", update: networkResumeOutcomeUpdate(), want: "network_resume_outcome"},
+		{name: "the vendor's effort", update: effortChangedUpdate(), want: "effort_changed"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -185,6 +185,11 @@ type wsState struct {
 	// effortSettings is what the session's config root persists for the
 	// effort level, read at workspace initialization (claudesettings).
 	effortSettings claudesettings.Effort
+	// pushedEffort is the level the vendor itself states its next request
+	// sends (SessionUpdate.effort_changed), UNSPECIFIED until the session's
+	// shim pushes one. It is THE AUTHORITY: it outranks the pick and the
+	// settings read, which only stand before it arrives.
+	pushedEffort conversationv1.AgentEffortLevel
 	// pickedEffort is the level the shim confirmed for the last SetEffort,
 	// UNSPECIFIED before any pick. It outranks the settings: it is what the
 	// session runs at.

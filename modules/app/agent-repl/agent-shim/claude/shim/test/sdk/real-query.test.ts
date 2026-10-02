@@ -10,6 +10,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { logRecordsSince } from "../log-records.js";
 import {
+  asQueryLike,
   realQueryOptions,
   vendorSpawner,
   type RealQuerySpec,
@@ -314,7 +315,12 @@ describe("createRealQuery", () => {
   }> {
     const calls: Array<{ prompt: unknown; options: Record<string, unknown> }> = [];
     const sites: string[] = [];
-    const query = { interrupt: async (): Promise<void> => {} };
+    // The runtime query's undeclared getSettings is part of what the SDK
+    // hands back (see asQueryLike), so the stand-in carries it too.
+    const query = {
+      interrupt: async (): Promise<void> => {},
+      getSettings: () => Promise.resolve({ applied: { effort: null } }),
+    };
     vi.resetModules();
     vi.doMock("../../src/vendor-guard.js", () => ({
       importRealSDK: (site: string) => {
@@ -543,5 +549,31 @@ describe("the options' choice between the stderr callback and the spawner", () =
 
     // Assert.
     expect(said).toEqual(["boom"]);
+  });
+});
+
+describe("asQueryLike", () => {
+  it("passes a query that provides getSettings through unchanged", () => {
+    // Arrange
+    const query = { getSettings: () => Promise.resolve({ applied: { effort: null } }) };
+    // Act / Assert
+    expect(asQueryLike(query)).toBe(query);
+  });
+
+  it("refuses a query that lost getSettings, loudly at construction", () => {
+    // Arrange, Act, Assert
+    expect(() => asQueryLike({})).toThrow(/no longer provides getSettings/);
+  });
+
+  it("records the refusal at error with its cause", async () => {
+    // Arrange
+    const log = await import("../../src/log.js");
+    log.configureLog({ fd: 3, cwd: "/ws", workspaceId: "00000000000000ff", agentReplSessionId: "real-query-suite" });
+    vi.mocked(writeSync).mockClear();
+    // Act
+    expect(() => asQueryLike({})).toThrow();
+    // Assert
+    const record = logRecordsSince(0).find((candidate) => candidate.message.includes("provides no getSettings"));
+    expect([record?.level, record?.context.cause]).toEqual(["error", "the vendor query's getSettings is not a function"]);
   });
 });

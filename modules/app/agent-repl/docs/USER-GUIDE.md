@@ -103,9 +103,9 @@ you are replying to. Sending ends the selection.
 
 The top bar's effort selector sits between the model selector and the permission-mode picker.
 
-- **It shows the effort level the session runs at.**
-  - Before you pick one, that is the level your account's Claude `settings.json` persists for the session's model.
-  - When that file names no level, the selector shows a dash, because the vendor's own default is not stated anywhere the editor can read.
+- **It shows the effort level the session runs at, as Claude itself reports it.**
+  - Before the session first reports it, the selector shows the level your account's Claude `settings.json` (or `CLAUDE_CODE_EFFORT_LEVEL`) sets for the model.
+  - It shows a dash only while nothing has stated a level yet.
 - **Clicking it lists the levels the session's model accepts; clicking a level switches to it.**
   - The new level applies from the next turn on and holds for the rest of the session in this workspace, across hibernation.
   - Nothing is added to the feed for the switch.

@@ -161,6 +161,24 @@ export type AccountUsageLike = SDKControlGetUsageResponse;
 export type InitializationResultLike = SDKControlInitializeResponse;
 /** `query.accountInfo()`. */
 export type AccountInfoLike = AccountInfo;
+/**
+ * `query.getSettings()` — the CLI's `get_settings` control answer, as far as
+ * the shim reads it.
+ *
+ * UNDECLARED BY THE VENDOR: `sdk.d.ts` declares the `get_settings` request
+ * (`SDKControlGetSettingsRequest`) but neither the `Query.getSettings()` method
+ * the SDK's runtime provides nor the response's type. The shim reads exactly
+ * one field of the answer — `applied.effort`, "the effort level the session
+ * will send on its next request — after env overrides, session state, org caps
+ * and model-support downgrades" (sdk.d.ts, SDKSystemMessage.effort) — and the
+ * sdk-canary suite fails if the runtime method or that field disappears.
+ * `null` is the vendor stating it will send no level.
+ */
+export interface AppliedSettingsLike {
+  readonly applied: {
+    readonly effort: EffortLevelLike | null;
+  };
+}
 /** `query.supportedModels()` — the SessionStarted model catalog's source. */
 export type ModelInfoLike = ModelInfo;
 /** `query.supportedCommands()`. */
@@ -209,6 +227,12 @@ export interface QueryLike extends AsyncIterable<SdkMessage> {
    * for the rest of the session and applies from the next request on.
    */
   applyFlagSettings(settings: { effortLevel: EffortLevelLike }): Promise<void>;
+  /**
+   * The CLI's effective settings, read for the level its next request sends.
+   * See {@link AppliedSettingsLike}: the SDK provides this at runtime without
+   * declaring it.
+   */
+  getSettings(): Promise<AppliedSettingsLike>;
   /** Change the model for subsequent responses; `undefined` restores the default. */
   setModel(model?: string): Promise<void>;
   /** The selectable model catalog, as the worker resolves it. */
@@ -252,7 +276,11 @@ export interface QueryLike extends AsyncIterable<SdkMessage> {
  * do this: nothing in the shim calls every verb on every path.
  */
 type Assert<T extends true> = T;
-type _QueryStillSatisfiesQueryLike = Assert<Query extends QueryLike ? true : false>;
+//
+// `getSettings` is the one member the vendor does not declare; it is held to
+// the runtime instead (`asQueryLike` in real-query.ts, and the sdk-canary
+// suite), and every other member to the declaration here.
+type _QueryStillSatisfiesQueryLike = Assert<Query extends Omit<QueryLike, "getSettings"> ? true : false>;
 
 /**
  * Describe an interrupt receipt that reports surviving work, or return null

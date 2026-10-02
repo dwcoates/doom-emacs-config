@@ -243,6 +243,29 @@ const QUERY_METHODS: ReadonlyArray<readonly [string, string]> = [
   ["close", "void"],
 ];
 
+/**
+ * THE ONE UNDECLARED MEMBER. `Query.getSettings()` exists only in the SDK's
+ * runtime (`sdk.mjs`), so it is graded there, together with the declared
+ * request it sends and the declared meaning of the one field the shim reads
+ * (`applied.effort`, see src/sdk/types.ts AppliedSettingsLike). A vendor that
+ * drops or renames any of the three fails here, not in a session.
+ */
+describe("the undeclared getSettings the shim relies on", () => {
+  const SDK_MJS = readDeclarations("sdk.mjs");
+
+  it("is provided by the runtime query as the get_settings control request", () => {
+    expect(SDK_MJS).toMatch(/async getSettings\(\)\{return\(await this\.request\(\{subtype:"get_settings"\}\)\)\.response\}/);
+  });
+
+  it("is a request the declarations still name", () => {
+    expect(SDK_DTS).toMatch(/subtype: 'get_settings';/);
+  });
+
+  it("answers applied.effort, the level the next request sends", () => {
+    expect(SDK_DTS).toContain("the same value get_settings reports as applied.effort");
+  });
+});
+
 describe("Query methods the shim relies on", () => {
   for (const [name, returnType] of QUERY_METHODS) {
     it(`declares ${name}`, () => {
