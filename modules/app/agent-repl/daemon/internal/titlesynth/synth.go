@@ -48,6 +48,10 @@ type wsState struct {
 	// haveHash reports whether lastHash has been set (an empty digest hashes to
 	// a real value, so a zero string cannot double as "never synthesized").
 	haveHash bool
+	// lastPrompts and lastBoundary are the prompt count and the boundary the
+	// last synthesis summarized: the cadence counts new prompts from them.
+	lastPrompts  int
+	lastBoundary shimv1.TitleDigestBoundary
 	// inFlight reports that a run goroutine is executing for this workspace.
 	inFlight bool
 	// dirty reports that a trigger arrived while a run was in flight, so one
@@ -96,6 +100,7 @@ func (s *Synthesizer) OnContextReset(ws ids.WorkspaceID) {
 	st := s.stateFor(ws)
 	st.lastHash = ""
 	st.haveHash = false
+	st.lastPrompts = 0
 }
 
 // Wait blocks until every dispatched run has finished. It exists for a clean
@@ -196,6 +201,13 @@ func (s *Synthesizer) synthesizeOnce(ctx context.Context, ws ids.WorkspaceID) {
 		})
 		return
 	}
+	if due, why := cadenceDue(st, digest); !due {
+		s.mu.Unlock()
+		s.deps.Log.Debug(opSynth, "the title is not due for re-synthesis yet; no model call", dlog.Context{
+			"workspace": string(ws), "prompts": len(prompts), "synthesized_at_prompts": st.lastPrompts, "why": why,
+		})
+		return
+	}
 	s.mu.Unlock()
 
 	title, ok := s.callModel(ctx, ws, summary, prompts)
@@ -208,10 +220,37 @@ func (s *Synthesizer) synthesizeOnce(ctx context.Context, ws ids.WorkspaceID) {
 	st = s.stateFor(ws)
 	st.lastHash = hash
 	st.haveHash = true
+	st.lastPrompts = len(prompts)
+	st.lastBoundary = digest.GetBoundary()
 	s.mu.Unlock()
 	s.deps.Log.Info(opSynth, "installed a synthesized workspace title", dlog.Context{
 		"workspace": string(ws), "boundary": digest.GetBoundary().String(), "prompts": len(prompts),
 	})
+}
+
+// cadenceDue reports whether a changed digest is due a model call, and why.
+// The caller holds s.mu.
+//
+// EVERY SynthesizeEvery PROMPTS, NOT EVERY PROMPT (owner ruling, 2026-10-02).
+// A context's FIRST title is due at once, so a workspace is never left on its
+// bare name waiting for its fifth prompt; after it, a new title is due only once
+// SynthesizeEvery more prompts have been made. A digest that is not the
+// continuation of the one last summarized -- another boundary, or fewer prompts
+// than before -- is a new context, and is due at once as well.
+func cadenceDue(st *wsState, digest *shimv1.GatherTitleDigestSuccess) (bool, string) {
+	prompts := len(digest.GetPrompts())
+	switch {
+	case !st.haveHash:
+		return true, "first title of this context"
+	case digest.GetBoundary() != st.lastBoundary:
+		return true, "the boundary moved"
+	case prompts < st.lastPrompts:
+		return true, "the prompt count went back"
+	case prompts-st.lastPrompts >= SynthesizeEvery:
+		return true, "enough new prompts"
+	default:
+		return false, "too few new prompts"
+	}
 }
 
 // gather asks the shim for the digest, returning false on any failure (all of
@@ -246,7 +285,7 @@ func (s *Synthesizer) callModel(ctx context.Context, ws ids.WorkspaceID, summary
 		})
 		return "", false
 	}
-	question, err := brief.Splice(map[string]string{"digest": ComposeDigest(summary, prompts)})
+	question, err := brief.Splice(map[string]string{"digest": TitleDigest(summary, prompts)})
 	if err != nil {
 		s.deps.Log.Error(opSynth, "the synthesized-title brief could not be spliced", dlog.Context{
 			"workspace": string(ws), "brief": BriefTitle, "cause": err.Error(),
@@ -299,6 +338,7 @@ func (s *Synthesizer) retract(ws ids.WorkspaceID) {
 	st := s.stateFor(ws)
 	st.lastHash = ""
 	st.haveHash = false
+	st.lastPrompts = 0
 	s.mu.Unlock()
 	s.deps.Log.Debug(opSynth, "retracted the synthesized title after a clear", dlog.Context{
 		"workspace": string(ws),
@@ -311,13 +351,53 @@ func loadBrief(dir string) (prompts.Prompt, error) {
 	return prompts.Load(dir, BriefTitle)
 }
 
+// TitleDigest renders what the TOPBAR SUMMARY is synthesized from (owner
+// ruling, 2026-10-02): the user's prompts since the last /clear or /compact,
+// whole and untruncated, and no response. The newest RecentPrompts are set
+// apart as the ones the sentence weighs most. A compaction's summary leads only
+// when fewer than RecentPrompts prompts followed the compaction, because past
+// that the prompts alone say what the conversation is about now.
+//
+// It is the title's own composition, deliberately not ComposeDigest's: a fork's
+// naming call still reads the capped composition, which bounds a call that
+// names a workspace in three words.
+func TitleDigest(summary string, all []string) string {
+	var b strings.Builder
+	if summary = strings.TrimSpace(summary); summary != "" && len(all) < RecentPrompts {
+		b.WriteString("A summary of the conversation before the user's requests below:\n")
+		b.WriteString(summary)
+		b.WriteString("\n\n")
+	}
+	split := len(all) - RecentPrompts
+	if split < 0 {
+		split = 0
+	}
+	if split > 0 {
+		b.WriteString("The user's earlier requests, oldest first:\n")
+		writePrompts(&b, all[:split])
+		b.WriteString("\n")
+	}
+	b.WriteString("The user's most recent requests, oldest first. Weigh these most:\n")
+	writePrompts(&b, all[split:])
+	return quoteTemplateBraces(b.String())
+}
+
+// writePrompts renders prompts as a list, each whole.
+func writePrompts(b *strings.Builder, prompts []string) {
+	for _, p := range prompts {
+		b.WriteString("- ")
+		b.WriteString(strings.TrimSpace(p))
+		b.WriteString("\n")
+	}
+}
+
 // ComposeDigest renders the digest material the brief summarizes: the
 // compaction summary when there is one, then the most recent prompts, each
 // bounded so one conversation cannot grow the model prompt without limit.
 //
-// It is the ONE composition of "what this conversation has been about", read
-// by the title synthesizer and by the workspace naming call a fork makes
-// (internal/workspace), so the two cannot drift into two notions of it.
+// It is the composition the workspace naming call a fork makes
+// (internal/workspace) reads. The topbar summary reads TitleDigest, which the
+// owner ruled whole and untruncated (2026-10-02).
 //
 // THE DIGEST IS QUOTED EVIDENCE, NEVER A TEMPLATE. prompts.Prompt.Splice
 // refuses any `{{...}}` token surviving in its output — its guard against a

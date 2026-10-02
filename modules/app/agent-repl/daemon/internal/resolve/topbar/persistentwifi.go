@@ -1,6 +1,8 @@
 package topbar
 
 import (
+	"strings"
+
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -18,36 +20,42 @@ func (r *resolver) SetPersistentWifi(state *agentreplv1.PersistentWifiState) {
 		func(*wsState) {})
 }
 
-// persistentWifiChip projects the standing onto the chip, arm for arm, and
-// composes its tooltip from both facts. A nil standing is two facts nobody
-// read, drawn as unknown.
+// persistentWifiTooltip is the chip's hover text (owner ruling, 2026-10-02).
+const persistentWifiTooltip = "Closing laptop lid disables agents"
+
+// persistentWifiChip projects the standing onto the chip, arm for arm. A nil
+// standing is two facts nobody read, drawn as unknown.
+//
+// THE TOOLTIP IS THE OWNER'S ONE SENTENCE. The joined network and the mode are
+// already drawn by the chip's own arms (the glyph's color and its disc), so
+// the tooltip no longer restates them. A fact the daemon COULD NOT READ is the
+// one thing the arms cannot say -- an unassigned arm draws as muted, which the
+// contract (topbar.proto, TopbarPersistentWifi) promises the tooltip explains
+// -- so only then does a second sentence name what could not be read.
 func persistentWifiChip(state *agentreplv1.PersistentWifiState) *frontendv1.TopbarPersistentWifi {
 	chip := &frontendv1.TopbarPersistentWifi{}
-	var wifi, mode string
+	var unread []string
 	switch {
 	case state.GetJoined() != nil:
 		chip.Wifi = &frontendv1.TopbarPersistentWifi_Joined{Joined: &frontendv1.TopbarPersistentWifiJoined{}}
-		if name := state.GetJoined().NetworkName; name != nil {
-			wifi = "Wi-Fi: joined to " + *name
-		} else {
-			wifi = "Wi-Fi: joined (network name withheld by macOS)"
-		}
 	case state.GetNotJoined() != nil:
 		chip.Wifi = &frontendv1.TopbarPersistentWifi_NotJoined{NotJoined: &frontendv1.TopbarPersistentWifiNotJoined{}}
-		wifi = "Wi-Fi: not joined"
 	default:
-		wifi = "Wi-Fi: could not be read"
+		unread = append(unread, "Wi-Fi")
 	}
 	switch {
 	case state.GetOn() != nil:
 		chip.Mode = &frontendv1.TopbarPersistentWifi_On{On: &frontendv1.TopbarPersistentWifiModeOn{}}
-		mode = "persistent wifi on: the lid can close"
 	case state.GetOff() != nil:
 		chip.Mode = &frontendv1.TopbarPersistentWifi_Off{Off: &frontendv1.TopbarPersistentWifiModeOff{}}
-		mode = "persistent wifi off: closing the lid sleeps"
 	default:
-		mode = "persistent wifi: could not be read"
+		unread = append(unread, "persistent wifi mode")
 	}
-	chip.Tooltip = &frontendv1.TopbarPersistentWifiTooltip{Text: wifi + " · " + mode}
+	text := persistentWifiTooltip
+	if len(unread) > 0 {
+		subject := strings.Join(unread, " and ")
+		text += ". " + strings.ToUpper(subject[:1]) + subject[1:] + " could not be read."
+	}
+	chip.Tooltip = &frontendv1.TopbarPersistentWifiTooltip{Text: text}
 	return chip
 }
