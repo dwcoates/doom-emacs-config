@@ -993,6 +993,8 @@ type fakeFeed struct {
 	rolledBackTurns [][]ids.TurnID
 	// mainAgents is every main agent the feed was told, in order.
 	mainAgents []string
+	// freshBooks is every workspace whose session came up fresh, in order.
+	freshBooks []ids.WorkspaceID
 	// sourcesUp is every workspace a history source came up for, in order.
 	sourcesUp []ids.WorkspaceID
 	// kept is every workspace whose newest page a failed start secured, in
@@ -1006,6 +1008,11 @@ type fakeFeed struct {
 // OnMainAgent records the main agent the feed was told.
 func (f *fakeFeed) OnMainAgent(_ ids.WorkspaceID, agent *conversationv1.AgentId) {
 	f.mainAgents = append(f.mainAgents, agent.GetValue())
+}
+
+// NoteFreshBook records a workspace whose session comes up fresh.
+func (f *fakeFeed) NoteFreshBook(ws ids.WorkspaceID) {
+	f.freshBooks = append(f.freshBooks, ws)
 }
 
 // SourceUp records that a history source came up.
