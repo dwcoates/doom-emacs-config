@@ -4,7 +4,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { CONTROL_SELECTOR, createControl, isControl } from "../src/control.js";
+import { CONTROL_SELECTOR, armButtonRole, createControl, isControl } from "../src/control.js";
 import { captureLogRecords, forwardedRecord } from "./log-capture.js";
 import { codeOf, withoutBlockComments } from "./source-text.js";
 
@@ -194,6 +194,66 @@ describe("createControl", () => {
       "debug",
       expect.objectContaining({ classes: "perm-button" }),
     ]);
+  });
+});
+
+describe("armButtonRole", () => {
+  /** A plain div, armed, counting the clicks that reach it. */
+  function armed(): { el: HTMLElement; clicks: () => number } {
+    const el = document.createElement("div");
+    armButtonRole(el);
+    document.body.append(el);
+    let clicks = 0;
+    el.addEventListener("click", () => clicks++);
+    return { el, clicks: () => clicks };
+  }
+
+  it("gives an element the button role", () => {
+    expect(armed().el.getAttribute("role")).toBe("button");
+  });
+
+  it("makes an element focusable", () => {
+    expect(armed().el.tabIndex).toBe(0);
+  });
+
+  it("leaves an element already aria-disabled out of the tab order", () => {
+    // Arrange
+    const el = document.createElement("div");
+    el.setAttribute("aria-disabled", "true");
+    // Act
+    armButtonRole(el);
+    // Assert
+    expect(el.tabIndex).toBe(-1);
+  });
+
+  it("activates an armed element on Enter", () => {
+    // Arrange
+    const { el, clicks } = armed();
+    // Act
+    el.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    // Assert
+    expect(clicks()).toBe(1);
+  });
+
+  it("leaves a key pressed on something inside the element to that thing", () => {
+    // Arrange
+    const { el, clicks } = armed();
+    const inner = document.createElement("a");
+    el.append(inner);
+    // Act
+    inner.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    // Assert
+    expect(clicks()).toBe(0);
+  });
+
+  it("refuses a click on an armed element while it is aria-disabled", () => {
+    // Arrange
+    const { el, clicks } = armed();
+    el.setAttribute("aria-disabled", "true");
+    // Act
+    el.click();
+    // Assert
+    expect(clicks()).toBe(0);
   });
 });
 

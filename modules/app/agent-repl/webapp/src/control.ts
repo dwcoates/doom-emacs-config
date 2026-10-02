@@ -56,23 +56,21 @@ function setDisabled(control: HTMLElement, disabled: boolean): void {
 }
 
 /**
- * Build one control in DOC: focusable, keyboard-activated, and refusing every
- * click while disabled. The caller gives it its class, label and click handler
- * exactly as it gave a button.
+ * Give EL what a button carries: the `button` role, focusability, Enter
+ * (keydown) and Space (keyup) activation, and the refusal of every click while
+ * `aria-disabled="true"` stands. `createControl` arms every control through
+ * here, and so does every other element that acts as a button (a footer chip,
+ * a bubble's head, an editor link), so none of them hand-rolls its keys.
+ *
+ * Keys pressed while focus sits on something INSIDE EL belong to that thing,
+ * so only a key whose target is EL itself activates it.
  */
-export function createControl(doc: Document = document): Control {
-  const el = doc.createElement(CONTROL_TAG);
+export function armButtonRole(el: HTMLElement): void {
   el.setAttribute("role", "button");
-  el.tabIndex = 0;
-  Object.defineProperty(el, "disabled", {
-    configurable: false,
-    enumerable: true,
-    get: () => disabledOf(el),
-    set: (value: boolean) => setDisabled(el, value),
-  });
+  el.tabIndex = disabledOf(el) ? -1 : 0;
 
   // REFUSAL FIRST: registered before any caller's listener, in the capture
-  // phase, so a disabled control's click reaches no handler on it or above it.
+  // phase, so a disabled element's click reaches no handler on it or above it.
   el.addEventListener(
     "click",
     (event) => {
@@ -104,6 +102,21 @@ export function createControl(doc: Document = document): Control {
     event.preventDefault();
     el.click();
   });
+}
 
+/**
+ * Build one control in DOC: an armed `<ar-button>` with a `disabled`
+ * property. The caller gives it its class, label and click handler exactly as
+ * it gave a button.
+ */
+export function createControl(doc: Document = document): Control {
+  const el = doc.createElement(CONTROL_TAG);
+  armButtonRole(el);
+  Object.defineProperty(el, "disabled", {
+    configurable: false,
+    enumerable: true,
+    get: () => disabledOf(el),
+    set: (value: boolean) => setDisabled(el, value),
+  });
   return el as Control;
 }
