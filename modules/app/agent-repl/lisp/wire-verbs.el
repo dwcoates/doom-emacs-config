@@ -57,6 +57,11 @@
 ;; wire-common.el (concurrent sibling module) owns the shared leaf codecs and
 ;; the `agent-repl-wire-error' definition.
 (declare-function agent-repl-wire--fail "agent-repl-wire-common" (message field reason))
+(declare-function agent-repl-wire--decoded "agent-repl-wire-common" (message-name value))
+(declare-function agent-repl-wire--object "agent-repl-wire-common" (message-name value))
+(declare-function agent-repl-wire--check-keys "agent-repl-wire-common" (message-name object allowed))
+(declare-function agent-repl-wire--decode-oneof "agent-repl-wire-common"
+                  (message-name oneof object arms &optional unset-legal))
 (declare-function agent-repl-wire--encode-empty "agent-repl-wire-common" (message-name value))
 (declare-function agent-repl-wire--decode-bool "agent-repl-wire-common" (message-name field object))
 (declare-function agent-repl-wire--decode-int64 "agent-repl-wire-common" (message-name field object))
@@ -3816,9 +3821,10 @@ it.  An incomplete request errors here rather than reaching the wire."
            (agent-repl-wire-verbs--require message "move" (plist-get request :move))))))
 
 (defun agent-repl-wire-decode-feed-selection-row (message json)
-  "Decode the selected-row MESSAGE (`FeedSelectionResponse',
-`FeedSelectionPrompt' or `FeedSelectionBubble') from JSON into (:row FEEDID).  The row is REQUIRED:
-a selection that names no row is a contract breach."
+  "Decode the selected-row MESSAGE from JSON into (:row FEEDID).
+MESSAGE is `FeedSelectionResponse', `FeedSelectionPrompt' or
+`FeedSelectionBubble'.  The row is REQUIRED: a selection that names no
+row is a contract breach."
   (agent-repl-wire-verbs--check-keys message json '(row))
   (list :row (agent-repl-wire-verbs--decode-required-message
               message 'row json #'agent-repl-wire-decode-feed-id)))

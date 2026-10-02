@@ -50,6 +50,7 @@
 (require 'subr-x)
 
 (declare-function agent-repl--log "core" (ws fmt &rest args))
+(declare-function agent-repl--log-verbose "core" (ws fmt &rest args))
 (declare-function agent-repl--info "core" (ws fmt &rest args))
 (declare-function agent-repl--warn "core" (ws fmt &rest args))
 (declare-function agent-repl--error "core" (ws fmt &rest args))
@@ -553,7 +554,7 @@ ON-SETTLED is as `agent-repl-host-select' documents."
       t))))
 
 (defun agent-repl-host--select-settled (ws id handle)
-  "Release the in-flight slot WS\='s selection (ref ID) held, run HANDLE, then drain.
+  "Release WS\='s in-flight selection slot (ref ID), run HANDLE, then drain.
 The slot is released FIRST, so a selection HANDLE itself starts (a
 handover\='s re-attach selects the current workspace) is sent at once
 rather than queued behind an answer that has already arrived.  The
