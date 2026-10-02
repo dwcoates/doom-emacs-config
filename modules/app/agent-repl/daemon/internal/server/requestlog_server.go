@@ -152,6 +152,24 @@ func (s *requestLoggingServer) WatchFeed(
 	return s.server.WatchFeed(ctx, req, stream)
 }
 
+func (s *requestLoggingServer) LoadFeedThrough(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.LoadFeedThroughRequest],
+	stream *connect.ServerStream[agentreplv1.LoadFeedThroughResponse],
+) (err error) {
+	boundary, err := s.server.beginRequest(ctx, "LoadFeedThrough", req.Header().Get(requestIDHeader), requestMessage(req))
+	if err != nil {
+		return boundaryFailure(err)
+	}
+	boundary.log.Debug("daemon.server.load_feed_through", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
+	defer func() {
+		boundary.log.Debug("daemon.server.load_feed_through", "completed the rpc handler", boundary.completionContext(err))
+	}()
+	return s.server.LoadFeedThrough(ctx, req, stream)
+}
+
 func (s *requestLoggingServer) GetFeedPage(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.GetFeedPageRequest],
