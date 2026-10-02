@@ -159,6 +159,12 @@ func (f *relayForwarder) PublishHostWorkspace(ws ids.WorkspaceID) {
 	}
 }
 
+func (f *relayForwarder) ReturnFeedToTail(ws ids.WorkspaceID) {
+	if target, ok := f.relay(); ok {
+		target.ReturnFeedToTail(ws)
+	}
+}
+
 // verbsForwarder carries a reference to the workspace verbs for the lifecycle
 // hooks the fleet is wired with before the verbs exist.
 type verbsForwarder struct {

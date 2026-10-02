@@ -51,7 +51,14 @@ func (v *verbs) Select(ctx context.Context, ws ids.WorkspaceID) error {
 }
 
 // selectCurrent is Select's selection section: stamp the selection, clear the
-// attention marker, push the roster. It holds the selection lock throughout,
+// attention marker, push the roster, and — on a SWITCH, never a re-selection —
+// return the workspace's feed to its tail (HostRelay.ReturnFeedToTail).
+//
+// A SWITCH RETURNS THE FEED TO ITS TAIL HERE, because every switch path —
+// Emacs's tab chords and pickers, a sidebar row click, a merge-queue entry —
+// is this one verb. A re-selection of the workspace already current changes
+// no view (Emacs re-asserts after a sidebar click, after a reconnect, after a
+// relink), so it ends no selection either. It holds the selection lock throughout,
 // so concurrent selects land WHOLE in the order they took it — a select's
 // read of the current workspace, its stamp and its roster push can never
 // interleave with another's, which would leave WSM naming one workspace and
@@ -95,6 +102,9 @@ func (v *verbs) selectCurrent(ctx context.Context, log dlog.Logger, ws ids.Works
 	// the client would see the switch land twice.
 	v.republishRegistry(ctx, log, opSelect)
 	v.deps.Sidebar.SetSelected(ws)
+	if !reselected {
+		v.deps.Host.ReturnFeedToTail(ws)
+	}
 	return nil
 }
 

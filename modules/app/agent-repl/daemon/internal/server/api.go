@@ -512,6 +512,13 @@ func (r hostRelay) PublishHostWorkspace(ws ids.WorkspaceID) {
 	r.s.PublishHostWorkspace(r.s.life, ws)
 }
 
+// ReturnFeedToTail ends the workspace's feed selection with return_to_tail,
+// because the user switched to it. The lifetime is the SERVER's, as for
+// PublishHostWorkspace: the verb that calls it has no stream of its own.
+func (r hostRelay) ReturnFeedToTail(ws ids.WorkspaceID) {
+	r.s.returnFeedToTail(r.s.life, ws)
+}
+
 // pushOpenInEditor publishes the open_in_editor arm.
 func (s *server) pushOpenInEditor(ws ids.WorkspaceID, path string, line *uint32) {
 	s.log.Debug("daemon.server.open_in_editor", "relayed a link click to the host stream",

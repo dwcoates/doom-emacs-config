@@ -611,3 +611,107 @@ func TestHostSelectionCarriesTheSelectedText(t *testing.T) {
 		})
 	}
 }
+
+// TestReturnFeedToTailEndsAHeldSelectionWithReturnToTail pins that a
+// workspace switch (the verbs' HostRelay.ReturnFeedToTail) ends a standing
+// selection and pushes return_to_tail, which re-arms the webapp's follow.
+func TestReturnFeedToTailEndsAHeldSelectionWithReturnToTail(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Feed.finals = feedIDs("a", "b")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream := openRootWatch(t, h, ctx)
+	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(newer))); err != nil {
+		t.Fatalf("seed a selection: %v", err)
+	}
+	receiveSelection(t, stream)
+
+	// Act.
+	h.Server.Relay().ReturnFeedToTail(testWorkspaceID)
+
+	// Assert.
+	sel := receiveSelection(t, stream)
+	if sel.GetNone().GetReturnToTail() == nil {
+		t.Fatalf("selection = %v, want none{return_to_tail}", sel)
+	}
+}
+
+// TestReturnFeedToTailLeavesNothingSelected pins that the ended selection is
+// absence, so the next send or rollback reads nothing selected.
+func TestReturnFeedToTailLeavesNothingSelected(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Feed.finals = feedIDs("a")
+	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(newer))); err != nil {
+		t.Fatalf("seed a selection: %v", err)
+	}
+
+	// Act.
+	h.Server.Relay().ReturnFeedToTail(testWorkspaceID)
+
+	// Assert.
+	if _, _, held := h.Server.(*server).currentSelection(testWorkspaceID); held {
+		t.Fatal("a selection still stands after the switch returned the feed to its tail")
+	}
+}
+
+// TestReturnFeedToTailWithNothingSelectedPublishesNothing pins that a switch
+// to a workspace with no selection changes no selection state: nothing is
+// published, so no watch receives a restated `none`.
+func TestReturnFeedToTailWithNothingSelectedPublishesNothing(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	s := h.Server.(*server)
+
+	// Act.
+	h.Server.Relay().ReturnFeedToTail(testWorkspaceID)
+
+	// Assert.
+	if latest, ok := s.selectionTopic(testWorkspaceID).Latest(); ok {
+		t.Fatalf("selection topic = %v, want nothing published", latest)
+	}
+}
+
+// TestReturnFeedToTailIsRecordedAtInfo pins that ending a selection on a
+// switch is a visible daemon action in the workspace's own log, naming why.
+func TestReturnFeedToTailIsRecordedAtInfo(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Feed.finals = feedIDs("a")
+	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(newer))); err != nil {
+		t.Fatalf("seed a selection: %v", err)
+	}
+	log := dlog.NewTestLogger()
+	h.Surfaces.workspace = log
+
+	// Act.
+	h.Server.Relay().ReturnFeedToTail(testWorkspaceID)
+
+	// Assert.
+	for _, rec := range log.Records() {
+		if rec.Level == "info" && rec.Operation == opSelectFeedRow && rec.Context["because"] == "workspace_selected" {
+			return
+		}
+	}
+	t.Fatalf("records = %v, want an info end with because=workspace_selected", log.Records())
+}
+
+// TestReturnFeedToTailForAnUnknownWorkspaceIsAnError pins that a switch the
+// registry cannot resolve is surfaced at ERROR and ends nothing.
+func TestReturnFeedToTailForAnUnknownWorkspaceIsAnError(t *testing.T) {
+	// Arrange.
+	log := dlog.NewTestLogger()
+	h := newHarness(t, func(deps *Deps) { deps.Log = &fakeSurfaces{global: log, workspace: log} })
+
+	// Act.
+	h.Server.Relay().ReturnFeedToTail("ws-nope")
+
+	// Assert.
+	for _, rec := range log.Records() {
+		if rec.Level == "error" && rec.Operation == "daemon.server.return_feed_to_tail" {
+			return
+		}
+	}
+	t.Fatalf("records = %v, want an error under daemon.server.return_feed_to_tail", log.Records())
+}
