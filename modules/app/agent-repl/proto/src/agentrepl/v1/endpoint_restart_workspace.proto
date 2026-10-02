@@ -1,6 +1,22 @@
 // endpoint_restart_workspace.proto — RestartWorkspace. SIDEBAR section.
-// Bounces ONLY the workspace's shim: rebuild it if out of date, restart the
-// shim process. Never the webapp, never the daemon.
+// Bounces the workspace-specific pieces of the stack — the workspace's shim
+// (rebuilt first when out of date) and the workspace's webapp page — to
+// unstick ONE workspace without rebooting everything. Never the daemon, the
+// store or the sidecar.
+//
+// A RESTART IS IMMEDIATE, ALWAYS. It exists for a workspace that is stuck — a
+// turn that never ends, a vendor that will not answer or will not start — so
+// it never waits for anything to finish: waiting on a stuck workspace is
+// waiting forever. Whatever stands in the way is stopped first: the running
+// turn is interrupted and every piece of detached work is stopped; because
+// the vendor is usually unreachable when a restart is wanted, those stops are
+// bounded and the shim's own teardown hard-kills whatever did not stop. Then
+// the shim is relaunched, the SAME session is resumed on it (a fresh vendor
+// start run, with the full retry window), every hold waiting on the session
+// is delivered once it is up, and the workspace's webapp page reloads.
+//
+// NOT A ROUTINE ACTION. A relaunched shim or reloaded page runs the build on
+// disk, which may speak a newer API than the daemon that keeps running.
 
 syntax = "proto3";
 
@@ -12,14 +28,10 @@ option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
 message RestartWorkspaceRequest {
   workspace.v1.WorkspaceRef workspace = 1;
-  // FALSE: a GRACEFUL restart — wait until no turn is in flight and the
-  // agent runs no async/background tasks, holding incoming prompts via the
-  // daemon hold (visible in the tray) until the bounce completes.
-  // TRUE: a FORCED restart — interrupt the shim (stop the current turn and
-  // any background tasks), then bounce immediately. The daemon does NOT
-  // resume the agent afterwards; continuing is the user's, with a
-  // subsequent prompt.
-  bool force = 2;
+  // Tag 2 (`force`) is RETIRED: every restart is immediate and stops what is
+  // in the way, so there is no second mode to select.
+  reserved 2;
+  reserved "force";
 }
 
 // THE ARM IS THE OUTCOME.
@@ -30,8 +42,9 @@ message RestartWorkspaceResponse {
   }
 }
 
-// The restart is accepted (graceful: scheduled behind the in-flight work;
-// forced: under way). Every visible effect arrives on the streams.
+// The restart is under way: what stood in the way has been told to stop and
+// the bounce has begun. Every visible effect — the stopped work, the
+// relaunch, the reconnect, the page reload — arrives on the streams.
 message RestartWorkspaceSuccess {}
 
 // Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
@@ -46,9 +59,11 @@ message RestartWorkspaceError {
     RestartWorkspaceTransferringAway transferring_away = 3;
     // A joining daemon has not finished adopting this workspace yet.
     RestartWorkspaceNotYetAdopted not_yet_adopted = 4;
-    // The workspace has no session to restart.
-    RestartWorkspaceNoSession no_session = 5;
   }
+  // Tag 5 (`no_session`) is RETIRED: a workspace with no session is
+  // restarted by bringing one up, never refused.
+  reserved 5;
+  reserved "no_session";
 }
 message RestartWorkspaceUnknownWorkspace {}
 message RestartWorkspaceWorkspaceRefMismatch {
@@ -60,4 +75,3 @@ message RestartWorkspaceTransferringAway {
   string address = 1;
 }
 message RestartWorkspaceNotYetAdopted {}
-message RestartWorkspaceNoSession {}

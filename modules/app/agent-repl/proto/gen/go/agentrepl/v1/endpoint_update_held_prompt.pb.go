@@ -562,11 +562,11 @@ type UpdateHeldPromptError_AcceptNotApplicable struct {
 }
 
 type UpdateHeldPromptError_ReleaseRefused struct {
-	// A force-through on an uninterruptible or session_starting hold, or on
+	// A force-through on an uninterruptible or reconnect hold, or on
 	// a prompt that is being edited or queued after one that is
 	// (EditHeldPrompt): an edit keeps it and everything after it held. Also
 	// refused while the workspace drains for a bounce, a merge drives the
-	// session, the session is still coming up, or another prompt's delivery
+	// session, the session is not up, or another prompt's delivery
 	// to the agent is in flight (ask again once it settles).
 	ReleaseRefused *UpdateHeldPromptReleaseRefused `protobuf:"bytes,8,opt,name=release_refused,json=releaseRefused,proto3,oneof"`
 }

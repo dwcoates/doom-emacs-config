@@ -99,8 +99,127 @@ be reopened, which reopens every decision downstream of it.
 
 ## Core design principles
 
-(none recorded yet)
+1. **The shim is the source of truth for whether a start failure can be
+   retried.** (Owner, 2026-10-02: "shim should label — it's the expert/source
+   of truth".) Consequence: the retry/rejection verdict rides the shim's
+   StartSession failure; the daemon never re-derives it from `detail` text.
+   Does NOT claim the shim runs the retry loop.
+2. **The daemon owns loops on state; it is the orchestrator.** (Owner,
+   2026-10-02.) Consequence: the backoff schedule, attempt count, ten-minute
+   window, footer state and held prompts all live in the daemon. Does NOT
+   claim the daemon decides retryability.
 
 ## Landed changes
 
-(none yet)
+### 1. Shim start-failure label (shim.v1, endpoint_start_session.proto)
+
+- WHAT: `StartSessionVendorStartFailed` gains `oneof retry { retryable;
+  rejected; }` (`StartSessionVendorStartRetryable`,
+  `StartSessionVendorStartRejected`). The other StartSession failure arms
+  state their fixed verdict in their comments: `unknown_session` and
+  `conversation_owned` are not retryable, `lock_holder_unavailable` is
+  retryable, `already_started` is a caller defect (attach, do not start), and
+  `cold` is an answer, not a failure.
+- WHY: owner rulings 3 and principle 1. A failed vendor start is retried only
+  when retrying can help.
+- Shim classification (owner accepted, 2026-10-02): liveness-bound timeout
+  (`supportedModels` not answered in 3s), init-silence timeout (45s), and a
+  process/stream that ended before ready are RETRYABLE; an opening error
+  result is classified by its API status — auth rejection and model missing
+  are REJECTED, overloaded/5xx/network are RETRYABLE, any other error result
+  (including a refused resume) is REJECTED; a blocking hook is REJECTED; a
+  failed cold remediation is labeled by its own underlying cause.
+- Retrying happens on the SAME shim process (existing code keeps the
+  identity across a refused start precisely so a retry re-announces it —
+  `session.ts` around the vendor-start catch). Not yet observed end to end:
+  see the vetting register.
+- Consequences: daemon `askToStartSession` (internal/workspace/sessions.go)
+  branches on the label; the shim's `failures.ts` StartSessionCause gains the
+  label; every fake shim that answers `vendor_start_failed` must set it.
+
+### 2. Vendor-start footer states (frontend.v1 footer.proto; agentrepl.v1 endpoint_session_health.proto)
+
+- WHAT: `FooterStatusDisconnected.substatus` gains `vendor_retry` (7),
+  `vendor_rejection` (8), `vendor_failed` (9). `start_failed` now means the
+  shim PROCESS (or a non-vendor bring-up step) failed. The disconnected
+  salient oneof gains `vendor_start` (8) =
+  `FooterStatusActivityVendorStart { string text }`, composed by the daemon:
+  retry "Claude SDK did not start (attempt N): <cause> · retrying",
+  rejection "Claude SDK refused to start: <cause> · restart: SPC o C-c",
+  failed "Claude SDK failed to start · restart: SPC o C-c".
+  `SessionFault.kind` gains `vendor_start_retrying` (16,
+  failed_attempts/cause/failing_since_ms), `vendor_start_rejected` (17,
+  cause), `vendor_start_failed` (18, failed_attempts/last_cause/
+  failing_since_ms).
+- WHY: owner rulings 3–5 and 14.
+- Daemon mechanism (orchestrator's judgement under "implement everything"):
+  three new fault kinds `vendor_start_retrying` / `vendor_start_rejected` /
+  `vendor_start_failed` in the health package, each partitioned to
+  `disconnected` with the matching new substatus bucket; all three close at
+  `EdgeSessionStarted`. The retrying fault is REPLACED per failed attempt
+  (open the new one, then close the old) so it always carries the latest
+  attempt; the run's anchor (`failing_since_ms`) is held by the fleet in
+  memory and copied into each fault's evidence. The single place is
+  `Fleet.startSession` (internal/workspace/sessions.go), which every bring-up
+  — cold start, rollout relaunch `Resume`, cold-gate re-open — already
+  passes through. Backoff ×1.5 from 200ms capped at 5s; window 10 min of
+  wall time from the run's first failure; a successful start or a restart
+  clears the anchor.
+- Roster (sidebar) keeps its existing arms: no roster arm was added. The
+  retrying state draws as the roster's existing bring-up state, and
+  rejection/exhaustion as `start_failed` (judgement: the roster is a color
+  ladder, and the footer carries the distinction).
+- `FooterStatusActivityStartFailed.dropped_prompts` (tag 2) is RETIRED with
+  the drop-on-failure semantics (see 3).
+- Consequences: webapp `footer/activity.ts` gains the `vendorStart` case;
+  the webapp strip's substatus words derive from arm names and need no
+  table; elisp decodes the three new SessionFault arms wherever it switches
+  on fault arms.
+
+### 3. The reconnect hold (frontend.v1 daemon_hold.proto)
+
+- WHAT: `HeldPromptSessionStartingHold session_starting = 11` is RENAMED
+  `HeldPromptReconnectHold reconnect = 11` (same tag) and its semantics
+  change: a failed bring-up NEVER drops these entries; they are delivered
+  when a session next comes up on the workspace, however it comes up. The
+  card badge reads "after reconnect".
+- WHY: the 2026-10-02 incident drew a prompt in the feed and then lost it to
+  a `no_session` refusal; the owner wants such prompts held with reason
+  "after reconnect".
+- Daemon consequences: (a) `dropRevivalHolds` and `Footer.AddDroppedPrompts`
+  go away; (b) a submission that finds a shim whose session is NOT started
+  (fleet `sessionStarted` false) is held under the reconnect hold instead of
+  delivered; (c) a delivery the shim refuses with `no_session` is converted
+  into a reconnect hold instead of retired; (d) every place a session comes
+  up (`sessionUp`, rollout `Resume`) releases reconnect holds and delivers.
+- The name was changed because "session starting" stops being true once a
+  start has failed and the prompt waits on a restart.
+
+### 4. RestartWorkspace has one mode (agentrepl.v1 endpoint_restart_workspace.proto)
+
+- WHAT: `RestartWorkspaceRequest.force` (tag 2) and
+  `RestartWorkspaceError.no_session` (tag 5) are RETIRED. A restart is
+  always immediate: interrupt the running turn and stop all detached work
+  with BOUNDED calls, then bounce the shim (whose forced teardown hard-kills
+  whatever did not stop), resume the same session with a fresh vendor-start
+  run, release reconnect holds, reload the workspace's webapp page. A
+  workspace with no session is restarted by bringing one up.
+- WHY: owner rulings 6–11. "Restart scheduled" on a stuck workspace is
+  nonsensical; the 2026-10-02 incident deadlocked because a graceful bounce
+  waited on freeness that `sessionwatcher.freeLocked` can never grant when
+  `started` is false.
+- Consequences: `internal/workspace/restart.go` always forces and no longer
+  aborts when the force-end call fails (the failure is logged at ERROR and
+  the bounce proceeds — the bounce is the remedy); a vendor-start retry loop
+  in flight for the workspace is cancelled first; elisp drops the `C-u`
+  prefix and the "(C-u = force)" description; user and agent docs describe
+  what `SPC o C-c` is for.
+
+### 5. Stop and liveness consolidation
+
+- Not yet landed as a contract change. Dispatched as an investigation-and-
+  implementation item: one shared path for stopping turns and detached work,
+  one source of truth for whether detached work is alive, and the webapp's
+  expanded footer never listing work that a kill or a shim death ended. Any
+  proto change it needs comes back to the orchestrator as a question.
+

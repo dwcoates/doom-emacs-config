@@ -590,24 +590,28 @@ type StartSessionFailure_Cold struct {
 
 type StartSessionFailure_VendorStartFailed struct {
 	// The agent binary (or the SDK query) failed to start; `detail` carries
-	// the cause.
+	// the cause, and the arm says whether asking again can help.
 	VendorStartFailed *StartSessionVendorStartFailed `protobuf:"bytes,3,opt,name=vendor_start_failed,json=vendorStartFailed,proto3,oneof"`
 }
 
 type StartSessionFailure_UnknownSession struct {
 	// A resume named a session id with no transcript on disk — refused
 	// BEFORE any process spawns (a vanished file yields no death evidence).
+	// NOT RETRYABLE: the transcript will not reappear by asking again.
 	UnknownSession *StartSessionUnknownSession `protobuf:"bytes,4,opt,name=unknown_session,json=unknownSession,proto3,oneof"`
 }
 
 type StartSessionFailure_AlreadyStarted struct {
-	// A second StartSession on a shim that already holds a session.
+	// A second StartSession on a shim that already holds a session. Neither
+	// retryable nor a rejection: the caller dialed a live shim, which is a
+	// defect in the caller, and it attaches rather than starts.
 	AlreadyStarted *StartSessionAlreadyStarted `protobuf:"bytes,5,opt,name=already_started,json=alreadyStarted,proto3,oneof"`
 }
 
 type StartSessionFailure_ConversationOwned struct {
 	// Another shim holds this conversation's kernel lock: the holder exited
 	// with the code reserved for "already held". Nothing else answers this.
+	// NOT RETRYABLE: the other shim's ownership is a real conflict.
 	ConversationOwned *StartSessionConversationOwned `protobuf:"bytes,6,opt,name=conversation_owned,json=conversationOwned,proto3,oneof"`
 }
 
@@ -618,7 +622,8 @@ type StartSessionFailure_LockHolderUnavailable struct {
 	// conversation. Distinct from conversation_owned, which is a real
 	// ownership conflict: this one is a defect in this shim's deployment, and
 	// naming it as an ownership conflict sends the reader hunting for a second
-	// process that does not exist.
+	// process that does not exist. RETRYABLE: a holder that failed to spawn or
+	// answer may succeed on the next StartSession on the same shim.
 	LockHolderUnavailable *StartSessionLockHolderUnavailable `protobuf:"bytes,7,opt,name=lock_holder_unavailable,json=lockHolderUnavailable,proto3,oneof"`
 }
 
@@ -634,8 +639,29 @@ func (*StartSessionFailure_ConversationOwned) isStartSessionFailure_Cause() {}
 
 func (*StartSessionFailure_LockHolderUnavailable) isStartSessionFailure_Cause() {}
 
+// The vendor (the agent binary or its SDK query) did not come up inside a shim
+// that is itself healthy.
+//
+// THE SHIM LABELS WHETHER ASKING AGAIN CAN HELP, because only the shim sees
+// what the vendor said and did before it failed: a child that went silent or
+// died, or an API answer of overloaded / server error / network failure, is
+// transient; a credential rejection, a missing model, a refused resume or a
+// blocking hook will fail identically every time. The daemon owns the retry
+// loop and its schedule and never re-derives this label from `detail`.
+//
+// A retryable failure leaves the shim able to take another StartSession for
+// the same session on the SAME process: the caller retries without
+// relaunching it.
 type StartSessionVendorStartFailed struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Whether a later StartSession can succeed. Always set; a frame with
+	// neither arm is malformed and the caller treats it as a rejection.
+	//
+	// Types that are valid to be assigned to Retry:
+	//
+	//	*StartSessionVendorStartFailed_Retryable
+	//	*StartSessionVendorStartFailed_Rejected
+	Retry         isStartSessionVendorStartFailed_Retry `protobuf_oneof:"retry"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -670,6 +696,129 @@ func (*StartSessionVendorStartFailed) Descriptor() ([]byte, []int) {
 	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{7}
 }
 
+func (x *StartSessionVendorStartFailed) GetRetry() isStartSessionVendorStartFailed_Retry {
+	if x != nil {
+		return x.Retry
+	}
+	return nil
+}
+
+func (x *StartSessionVendorStartFailed) GetRetryable() *StartSessionVendorStartRetryable {
+	if x != nil {
+		if x, ok := x.Retry.(*StartSessionVendorStartFailed_Retryable); ok {
+			return x.Retryable
+		}
+	}
+	return nil
+}
+
+func (x *StartSessionVendorStartFailed) GetRejected() *StartSessionVendorStartRejected {
+	if x != nil {
+		if x, ok := x.Retry.(*StartSessionVendorStartFailed_Rejected); ok {
+			return x.Rejected
+		}
+	}
+	return nil
+}
+
+type isStartSessionVendorStartFailed_Retry interface {
+	isStartSessionVendorStartFailed_Retry()
+}
+
+type StartSessionVendorStartFailed_Retryable struct {
+	// Transient: the same request may succeed if asked again.
+	Retryable *StartSessionVendorStartRetryable `protobuf:"bytes,1,opt,name=retryable,proto3,oneof"`
+}
+
+type StartSessionVendorStartFailed_Rejected struct {
+	// Deterministic: the same request will fail the same way.
+	Rejected *StartSessionVendorStartRejected `protobuf:"bytes,2,opt,name=rejected,proto3,oneof"`
+}
+
+func (*StartSessionVendorStartFailed_Retryable) isStartSessionVendorStartFailed_Retry() {}
+
+func (*StartSessionVendorStartFailed_Rejected) isStartSessionVendorStartFailed_Retry() {}
+
+// The vendor start failed for a reason that can pass: it stayed silent past
+// its liveness bound, its process or stream ended before it was ready, or the
+// API answered with a transient error (overloaded, a server error, a network
+// failure). The caller retries on its own backoff.
+type StartSessionVendorStartRetryable struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StartSessionVendorStartRetryable) Reset() {
+	*x = StartSessionVendorStartRetryable{}
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StartSessionVendorStartRetryable) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StartSessionVendorStartRetryable) ProtoMessage() {}
+
+func (x *StartSessionVendorStartRetryable) ProtoReflect() protoreflect.Message {
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StartSessionVendorStartRetryable.ProtoReflect.Descriptor instead.
+func (*StartSessionVendorStartRetryable) Descriptor() ([]byte, []int) {
+	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{8}
+}
+
+// The vendor refused the start for a reason that will not pass on its own: a
+// credential rejection, a missing model, a refused resume, or a hook that
+// blocked the opening. The caller does not retry; the user must change
+// something and restart.
+type StartSessionVendorStartRejected struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StartSessionVendorStartRejected) Reset() {
+	*x = StartSessionVendorStartRejected{}
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StartSessionVendorStartRejected) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StartSessionVendorStartRejected) ProtoMessage() {}
+
+func (x *StartSessionVendorStartRejected) ProtoReflect() protoreflect.Message {
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StartSessionVendorStartRejected.ProtoReflect.Descriptor instead.
+func (*StartSessionVendorStartRejected) Descriptor() ([]byte, []int) {
+	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{9}
+}
+
 type StartSessionUnknownSession struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -678,7 +827,7 @@ type StartSessionUnknownSession struct {
 
 func (x *StartSessionUnknownSession) Reset() {
 	*x = StartSessionUnknownSession{}
-	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[8]
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -690,7 +839,7 @@ func (x *StartSessionUnknownSession) String() string {
 func (*StartSessionUnknownSession) ProtoMessage() {}
 
 func (x *StartSessionUnknownSession) ProtoReflect() protoreflect.Message {
-	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[8]
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -703,7 +852,7 @@ func (x *StartSessionUnknownSession) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StartSessionUnknownSession.ProtoReflect.Descriptor instead.
 func (*StartSessionUnknownSession) Descriptor() ([]byte, []int) {
-	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{8}
+	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{10}
 }
 
 type StartSessionAlreadyStarted struct {
@@ -714,7 +863,7 @@ type StartSessionAlreadyStarted struct {
 
 func (x *StartSessionAlreadyStarted) Reset() {
 	*x = StartSessionAlreadyStarted{}
-	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[9]
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -726,7 +875,7 @@ func (x *StartSessionAlreadyStarted) String() string {
 func (*StartSessionAlreadyStarted) ProtoMessage() {}
 
 func (x *StartSessionAlreadyStarted) ProtoReflect() protoreflect.Message {
-	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[9]
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -739,7 +888,7 @@ func (x *StartSessionAlreadyStarted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StartSessionAlreadyStarted.ProtoReflect.Descriptor instead.
 func (*StartSessionAlreadyStarted) Descriptor() ([]byte, []int) {
-	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{9}
+	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{11}
 }
 
 type StartSessionConversationOwned struct {
@@ -750,7 +899,7 @@ type StartSessionConversationOwned struct {
 
 func (x *StartSessionConversationOwned) Reset() {
 	*x = StartSessionConversationOwned{}
-	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[10]
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -762,7 +911,7 @@ func (x *StartSessionConversationOwned) String() string {
 func (*StartSessionConversationOwned) ProtoMessage() {}
 
 func (x *StartSessionConversationOwned) ProtoReflect() protoreflect.Message {
-	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[10]
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -775,7 +924,7 @@ func (x *StartSessionConversationOwned) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StartSessionConversationOwned.ProtoReflect.Descriptor instead.
 func (*StartSessionConversationOwned) Descriptor() ([]byte, []int) {
-	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{10}
+	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{12}
 }
 
 type StartSessionLockHolderUnavailable struct {
@@ -788,7 +937,7 @@ type StartSessionLockHolderUnavailable struct {
 
 func (x *StartSessionLockHolderUnavailable) Reset() {
 	*x = StartSessionLockHolderUnavailable{}
-	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[11]
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -800,7 +949,7 @@ func (x *StartSessionLockHolderUnavailable) String() string {
 func (*StartSessionLockHolderUnavailable) ProtoMessage() {}
 
 func (x *StartSessionLockHolderUnavailable) ProtoReflect() protoreflect.Message {
-	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[11]
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -813,7 +962,7 @@ func (x *StartSessionLockHolderUnavailable) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use StartSessionLockHolderUnavailable.ProtoReflect.Descriptor instead.
 func (*StartSessionLockHolderUnavailable) Descriptor() ([]byte, []int) {
-	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{11}
+	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *StartSessionLockHolderUnavailable) GetFailure() *v1.LockHolderFailure {
@@ -858,8 +1007,13 @@ const file_shim_v1_endpoint_start_session_proto_rawDesc = "" +
 	"\x12conversation_owned\x18\x06 \x01(\v2&.shim.v1.StartSessionConversationOwnedH\x00R\x11conversationOwned\x12d\n" +
 	"\x17lock_holder_unavailable\x18\a \x01(\v2*.shim.v1.StartSessionLockHolderUnavailableH\x00R\x15lockHolderUnavailable\x12\x16\n" +
 	"\x06detail\x18\x02 \x01(\tR\x06detailB\a\n" +
-	"\x05cause\"\x1f\n" +
-	"\x1dStartSessionVendorStartFailed\"\x1c\n" +
+	"\x05cause\"\xbb\x01\n" +
+	"\x1dStartSessionVendorStartFailed\x12I\n" +
+	"\tretryable\x18\x01 \x01(\v2).shim.v1.StartSessionVendorStartRetryableH\x00R\tretryable\x12F\n" +
+	"\brejected\x18\x02 \x01(\v2(.shim.v1.StartSessionVendorStartRejectedH\x00R\brejectedB\a\n" +
+	"\x05retry\"\"\n" +
+	" StartSessionVendorStartRetryable\"!\n" +
+	"\x1fStartSessionVendorStartRejected\"\x1c\n" +
 	"\x1aStartSessionUnknownSession\"\x1c\n" +
 	"\x1aStartSessionAlreadyStarted\"\x1f\n" +
 	"\x1dStartSessionConversationOwned\"\x7f\n" +
@@ -878,7 +1032,7 @@ func file_shim_v1_endpoint_start_session_proto_rawDescGZIP() []byte {
 	return file_shim_v1_endpoint_start_session_proto_rawDescData
 }
 
-var file_shim_v1_endpoint_start_session_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_shim_v1_endpoint_start_session_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
 var file_shim_v1_endpoint_start_session_proto_goTypes = []any{
 	(*StartSessionRequest)(nil),               // 0: shim.v1.StartSessionRequest
 	(*StartSessionFresh)(nil),                 // 1: shim.v1.StartSessionFresh
@@ -888,41 +1042,45 @@ var file_shim_v1_endpoint_start_session_proto_goTypes = []any{
 	(*StartSessionSuccess)(nil),               // 5: shim.v1.StartSessionSuccess
 	(*StartSessionFailure)(nil),               // 6: shim.v1.StartSessionFailure
 	(*StartSessionVendorStartFailed)(nil),     // 7: shim.v1.StartSessionVendorStartFailed
-	(*StartSessionUnknownSession)(nil),        // 8: shim.v1.StartSessionUnknownSession
-	(*StartSessionAlreadyStarted)(nil),        // 9: shim.v1.StartSessionAlreadyStarted
-	(*StartSessionConversationOwned)(nil),     // 10: shim.v1.StartSessionConversationOwned
-	(*StartSessionLockHolderUnavailable)(nil), // 11: shim.v1.StartSessionLockHolderUnavailable
-	(*v1.AgentModel)(nil),                     // 12: conversation.v1.AgentModel
-	(*v1.AgentPermissionMode)(nil),            // 13: conversation.v1.AgentPermissionMode
-	(*v1.SessionColdRemediation)(nil),         // 14: conversation.v1.SessionColdRemediation
-	(*v1.TurnId)(nil),                         // 15: conversation.v1.TurnId
-	(*v1.SessionStarted)(nil),                 // 16: conversation.v1.SessionStarted
-	(*v1.SessionCold)(nil),                    // 17: conversation.v1.SessionCold
-	(*v1.LockHolderFailure)(nil),              // 18: conversation.v1.LockHolderFailure
+	(*StartSessionVendorStartRetryable)(nil),  // 8: shim.v1.StartSessionVendorStartRetryable
+	(*StartSessionVendorStartRejected)(nil),   // 9: shim.v1.StartSessionVendorStartRejected
+	(*StartSessionUnknownSession)(nil),        // 10: shim.v1.StartSessionUnknownSession
+	(*StartSessionAlreadyStarted)(nil),        // 11: shim.v1.StartSessionAlreadyStarted
+	(*StartSessionConversationOwned)(nil),     // 12: shim.v1.StartSessionConversationOwned
+	(*StartSessionLockHolderUnavailable)(nil), // 13: shim.v1.StartSessionLockHolderUnavailable
+	(*v1.AgentModel)(nil),                     // 14: conversation.v1.AgentModel
+	(*v1.AgentPermissionMode)(nil),            // 15: conversation.v1.AgentPermissionMode
+	(*v1.SessionColdRemediation)(nil),         // 16: conversation.v1.SessionColdRemediation
+	(*v1.TurnId)(nil),                         // 17: conversation.v1.TurnId
+	(*v1.SessionStarted)(nil),                 // 18: conversation.v1.SessionStarted
+	(*v1.SessionCold)(nil),                    // 19: conversation.v1.SessionCold
+	(*v1.LockHolderFailure)(nil),              // 20: conversation.v1.LockHolderFailure
 }
 var file_shim_v1_endpoint_start_session_proto_depIdxs = []int32{
 	1,  // 0: shim.v1.StartSessionRequest.fresh:type_name -> shim.v1.StartSessionFresh
 	2,  // 1: shim.v1.StartSessionRequest.resume:type_name -> shim.v1.StartSessionResume
-	12, // 2: shim.v1.StartSessionFresh.model:type_name -> conversation.v1.AgentModel
-	13, // 3: shim.v1.StartSessionFresh.permission_mode:type_name -> conversation.v1.AgentPermissionMode
-	14, // 4: shim.v1.StartSessionResume.cold_remediation:type_name -> conversation.v1.SessionColdRemediation
+	14, // 2: shim.v1.StartSessionFresh.model:type_name -> conversation.v1.AgentModel
+	15, // 3: shim.v1.StartSessionFresh.permission_mode:type_name -> conversation.v1.AgentPermissionMode
+	16, // 4: shim.v1.StartSessionResume.cold_remediation:type_name -> conversation.v1.SessionColdRemediation
 	3,  // 5: shim.v1.StartSessionResume.rebind:type_name -> shim.v1.StartSessionRebind
-	15, // 6: shim.v1.StartSessionResume.rolled_back_turns:type_name -> conversation.v1.TurnId
+	17, // 6: shim.v1.StartSessionResume.rolled_back_turns:type_name -> conversation.v1.TurnId
 	5,  // 7: shim.v1.StartSessionResponse.success:type_name -> shim.v1.StartSessionSuccess
 	6,  // 8: shim.v1.StartSessionResponse.failure:type_name -> shim.v1.StartSessionFailure
-	16, // 9: shim.v1.StartSessionSuccess.session:type_name -> conversation.v1.SessionStarted
-	17, // 10: shim.v1.StartSessionFailure.cold:type_name -> conversation.v1.SessionCold
+	18, // 9: shim.v1.StartSessionSuccess.session:type_name -> conversation.v1.SessionStarted
+	19, // 10: shim.v1.StartSessionFailure.cold:type_name -> conversation.v1.SessionCold
 	7,  // 11: shim.v1.StartSessionFailure.vendor_start_failed:type_name -> shim.v1.StartSessionVendorStartFailed
-	8,  // 12: shim.v1.StartSessionFailure.unknown_session:type_name -> shim.v1.StartSessionUnknownSession
-	9,  // 13: shim.v1.StartSessionFailure.already_started:type_name -> shim.v1.StartSessionAlreadyStarted
-	10, // 14: shim.v1.StartSessionFailure.conversation_owned:type_name -> shim.v1.StartSessionConversationOwned
-	11, // 15: shim.v1.StartSessionFailure.lock_holder_unavailable:type_name -> shim.v1.StartSessionLockHolderUnavailable
-	18, // 16: shim.v1.StartSessionLockHolderUnavailable.failure:type_name -> conversation.v1.LockHolderFailure
-	17, // [17:17] is the sub-list for method output_type
-	17, // [17:17] is the sub-list for method input_type
-	17, // [17:17] is the sub-list for extension type_name
-	17, // [17:17] is the sub-list for extension extendee
-	0,  // [0:17] is the sub-list for field type_name
+	10, // 12: shim.v1.StartSessionFailure.unknown_session:type_name -> shim.v1.StartSessionUnknownSession
+	11, // 13: shim.v1.StartSessionFailure.already_started:type_name -> shim.v1.StartSessionAlreadyStarted
+	12, // 14: shim.v1.StartSessionFailure.conversation_owned:type_name -> shim.v1.StartSessionConversationOwned
+	13, // 15: shim.v1.StartSessionFailure.lock_holder_unavailable:type_name -> shim.v1.StartSessionLockHolderUnavailable
+	8,  // 16: shim.v1.StartSessionVendorStartFailed.retryable:type_name -> shim.v1.StartSessionVendorStartRetryable
+	9,  // 17: shim.v1.StartSessionVendorStartFailed.rejected:type_name -> shim.v1.StartSessionVendorStartRejected
+	20, // 18: shim.v1.StartSessionLockHolderUnavailable.failure:type_name -> conversation.v1.LockHolderFailure
+	19, // [19:19] is the sub-list for method output_type
+	19, // [19:19] is the sub-list for method input_type
+	19, // [19:19] is the sub-list for extension type_name
+	19, // [19:19] is the sub-list for extension extendee
+	0,  // [0:19] is the sub-list for field type_name
 }
 
 func init() { file_shim_v1_endpoint_start_session_proto_init() }
@@ -948,13 +1106,17 @@ func file_shim_v1_endpoint_start_session_proto_init() {
 		(*StartSessionFailure_ConversationOwned)(nil),
 		(*StartSessionFailure_LockHolderUnavailable)(nil),
 	}
+	file_shim_v1_endpoint_start_session_proto_msgTypes[7].OneofWrappers = []any{
+		(*StartSessionVendorStartFailed_Retryable)(nil),
+		(*StartSessionVendorStartFailed_Rejected)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_shim_v1_endpoint_start_session_proto_rawDesc), len(file_shim_v1_endpoint_start_session_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   12,
+			NumMessages:   14,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

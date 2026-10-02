@@ -75,6 +75,12 @@ message SessionFault {
     // A concluded turn whose answering response the feed could not stand
     // behind, or an open response that went silent.
     SessionFaultFinalAnswerUnresolved final_answer_unresolved = 15;
+    // The vendor did not start and the daemon is retrying it on its backoff.
+    SessionFaultVendorStartRetrying vendor_start_retrying = 16;
+    // The vendor refused the start for a reason retrying cannot fix.
+    SessionFaultVendorStartRejected vendor_start_rejected = 17;
+    // The vendor kept failing to start for the whole retry window.
+    SessionFaultVendorStartFailed vendor_start_failed = 18;
   }
 }
 message SessionFaultShimStartFailed {
@@ -210,3 +216,45 @@ message SessionHealthTransferringAway {
   string address = 1;
 }
 message SessionHealthNotYetAdopted {}
+
+// The session's vendor failed to start for a reason the shim labeled
+// RETRYABLE, and the daemon is asking the same shim again on a capped
+// multiplicative backoff (x1.5 from 200ms, capped at 5s). The fault is
+// replaced on every failed attempt, so it always names the latest attempt; it
+// closes when a start succeeds, and gives way to `vendor_start_failed` when
+// the retry window runs out or `vendor_start_rejected` when an attempt is
+// refused outright.
+message SessionFaultVendorStartRetrying {
+  // How many attempts have failed so far in this run of failures, counting
+  // from 1.
+  uint32 failed_attempts = 1;
+  // WHY the latest attempt failed, in the shim's own words. Drawn verbatim.
+  string cause = 2;
+  // When the first failure of this contiguous run happened, in epoch
+  // milliseconds. The retry window is measured from here: a successful start
+  // ends the run, and the next failure after it begins a new one.
+  int64 failing_since_ms = 3;
+}
+
+// The session's vendor refused the start for a reason the shim labeled a
+// REJECTION (a credential rejection, a missing model, a refused resume, a
+// blocking hook): asking again would fail the same way, so nothing retries.
+// It stands until a start succeeds, which only a change by the user and a
+// restart of the workspace can bring about.
+message SessionFaultVendorStartRejected {
+  // WHY the vendor refused, in the shim's own words. Drawn verbatim.
+  string cause = 1;
+}
+
+// The session's vendor failed to start on every attempt for the whole retry
+// window (ten minutes of wall time from the first failure of the run), so the
+// daemon stopped retrying. Prompts sent meanwhile stay held. It stands until a
+// start succeeds; restarting the workspace begins a fresh run.
+message SessionFaultVendorStartFailed {
+  // How many attempts failed before the window ran out.
+  uint32 failed_attempts = 1;
+  // WHY the last attempt failed, in the shim's own words. Drawn verbatim.
+  string last_cause = 2;
+  // When the first failure of the run happened, in epoch milliseconds.
+  int64 failing_since_ms = 3;
+}
