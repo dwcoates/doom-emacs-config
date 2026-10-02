@@ -23,7 +23,7 @@
 
 (require 'seq)
 
-(declare-function agent-repl--ws-switch "workspace" (ws &rest args))
+(declare-function agent-repl-host-request-switch "host" (ws trigger))
 (declare-function agent-repl--log "core" (ws fmt &rest args))
 (declare-function agent-repl--info "core" (ws fmt &rest args))
 (declare-function agent-repl--log-verbose "core" (ws fmt &rest args))
@@ -170,22 +170,18 @@ stream stood) is told here, once the stream stands."
 (defun agent-repl--notification-activate (ws)
   "Raise the Emacs frame and select workspace WS's tab.
 THE CLICK ACTION of the host stream's `notification_clicked' push: the
-daemon posted the banner and read the click back, and selecting the tab
-is the one thing only Emacs can do.  It issues no SelectWorkspace of its
-own — the tab switch that follows is what issues that verb, through
-workspace.el's activation boundary, and the daemon clears the attention
-marker on it.
-
-Switches through `agent-repl--ws-switch', workspace.el's persp-mode
-navigation boundary, then raises and focuses the frame so the click
-brings Emacs forward.  A nil or empty WS still focuses Emacs rather than
+daemon posted the banner and read the click back.  Like every switch
+trigger it REQUESTS the switch (`agent-repl-host-request-switch') and the
+frame follows the roster's `current'; the daemon clears the attention
+marker on the selection.  The frame is raised and focused at once, so the
+click brings Emacs forward.  A nil or empty WS still focuses Emacs rather than
 attempting a bogus jump."
   (agent-repl--log ws "elisp.notifications.activate ws=%s" ws)
   (let ((navigable (and ws (stringp ws) (not (string-empty-p ws)))))
     (if navigable
         (progn
           (agent-repl--log ws "elisp.notifications.activate-navigable ws=%s navigable=t" ws)
-          (agent-repl--ws-switch ws))
+          (agent-repl-host-request-switch ws 'notification))
       ;; An unknown workspace is a WARNING and NO switch: a click that
       ;; cannot name where to go still brings Emacs forward, but guessing a
       ;; destination would move the user somewhere nobody asked for.
