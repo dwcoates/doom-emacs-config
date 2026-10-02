@@ -36,6 +36,76 @@
     (agent-repl--history-push)
     (should (equal agent-repl--input-history '("world" "hello")))))
 
+;;;; ---- Tests: history-push-discard ----
+
+(defmacro agent-repl-test-history--discarding (initial &rest body)
+  "Run BODY in a temp buffer whose history is INITIAL; `discard' pushes TEXT as a discard."
+  (declare (indent 1))
+  `(agent-repl-test--with-temp-buffer " *test-hist-discard*"
+     (setq-local agent-repl--input-history ,initial)
+     (setq-local agent-repl--history-discard-entry nil)
+     (cl-flet ((discard (text)
+                 (erase-buffer) (insert text)
+                 (agent-repl--history-push-discard)))
+       ,@body)))
+
+(ert-deftest agent-repl-test-history-discard-pushes-when-history-is-empty ()
+  "With no history a discard pushes as usual."
+  (agent-repl-test-history--discarding nil
+    (discard "hello, world")
+    (should (equal agent-repl--input-history '("hello, world")))))
+
+(ert-deftest agent-repl-test-history-discard-replaces-its-own-substring-item ()
+  "A discard whose text contains the previous discard's item replaces that item."
+  (agent-repl-test-history--discarding nil
+    (discard "hello, world")
+    (discard "sometime, i really just want to say 'hello, world' from the top of a mountain!")
+    (should (equal agent-repl--input-history
+                   '("sometime, i really just want to say 'hello, world' from the top of a mountain!")))))
+
+(ert-deftest agent-repl-test-history-discard-pushes-when-not-a-substring ()
+  "A discard unrelated to the previous discard's item is a new item."
+  (agent-repl-test-history--discarding nil
+    (discard "hello")
+    (discard "goodbye")
+    (should (equal agent-repl--input-history '("goodbye" "hello")))))
+
+(ert-deftest agent-repl-test-history-discard-never-replaces-an-item-it-did-not-add ()
+  "An item that arrived by another path is never replaced, even when it is a substring."
+  (agent-repl-test-history--discarding (list (copy-sequence "hello"))
+    (discard "hello there")
+    (should (equal agent-repl--input-history '("hello there" "hello")))))
+
+(ert-deftest agent-repl-test-history-discard-never-replaces-after-a-later-push ()
+  "Once another item is on top, the earlier discard's item is not the most recent."
+  (agent-repl-test-history--discarding nil
+    (discard "hello")
+    (agent-repl--history-push "sent prompt")
+    (discard "say hello there")
+    (should (equal agent-repl--input-history '("say hello there" "sent prompt" "hello")))))
+
+(ert-deftest agent-repl-test-history-discard-of-the-same-text-is-a-duplicate ()
+  "Discarding the very same text again adds nothing (a strict subset is required)."
+  (agent-repl-test-history--discarding nil
+    (discard "hello")
+    (discard "hello")
+    (should (equal agent-repl--input-history '("hello")))))
+
+(ert-deftest agent-repl-test-history-discard-replacement-stays-replaceable ()
+  "A replaced item is still the discard's own, so a longer discard replaces it again."
+  (agent-repl-test-history--discarding nil
+    (discard "a")
+    (discard "a b")
+    (discard "a b c")
+    (should (equal agent-repl--input-history '("a b c")))))
+
+(ert-deftest agent-repl-test-history-discard-of-blank-text-changes-nothing ()
+  "A blank discard adds and replaces nothing."
+  (agent-repl-test-history--discarding nil
+    (discard "hello")
+    (discard "   ")
+    (should (equal agent-repl--input-history '("hello")))))
+
 ;;;; ---- Tests: history-prev / history-next ----
 
 (ert-deftest agent-repl-test-history-prev-next ()
