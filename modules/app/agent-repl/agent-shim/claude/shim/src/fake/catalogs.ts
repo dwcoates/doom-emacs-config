@@ -18,6 +18,7 @@ import type {
   AccountUsageLike,
   AgentInfoLike,
   ContextUsageLike,
+  EffortLevelLike,
   InitializationResultLike,
   McpServerStatusLike,
   ModelInfoLike,
@@ -412,4 +413,24 @@ export function fakeAccountUsage(
       // raising, and this is where it raises.
       throw new Error("the local transcript scan that produces `behaviors` failed");
   }
+}
+
+/**
+ * The level the mocked vendor sends when nothing asked for one: the CLI's own
+ * per-model default is internal to it, so the mock names one fixed level for
+ * every model that takes a level.
+ */
+export const FAKE_DEFAULT_EFFORT: EffortLevelLike = "high";
+
+/**
+ * The level the mocked vendor states its next request sends for MODEL, as the
+ * CLI does: none for a model that takes none, the asked-for level where the
+ * model accepts it, and the default otherwise (the CLI runs an unsupported
+ * `max` "as `high`", sdk.d.ts applyFlagSettings).
+ */
+export function fakeAppliedEffort(model: string, asked: EffortLevelLike | undefined): EffortLevelLike | null {
+  const row = FAKE_MODELS.find((candidate) => candidate.value === model);
+  if (row?.supportsEffort !== true) return null;
+  if (asked !== undefined && (row.supportedEffortLevels ?? []).includes(asked)) return asked;
+  return FAKE_DEFAULT_EFFORT;
 }

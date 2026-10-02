@@ -29,6 +29,7 @@ import type { CanUseToolLike, QueryLike, SdkMessage, SdkUserMessage } from "../.
 import { transcriptPath } from "../../src/fake/vendor-files.js";
 import { RESUME_DROPS_TURN_REFUSAL_PREFIX } from "../../src/engine/rollback.js";
 import {
+  FAKE_DEFAULT_EFFORT,
   FAKE_SESSION_WINDOW_RESETS_IN_MS,
   FAKE_WEEKLY_WINDOW_RESETS_IN_MS,
 } from "../../src/fake/catalogs.js";
@@ -418,6 +419,52 @@ describe("interrupt and the per-task stop declaration", () => {
 
     // Assert
     expect(stopped(driven)).not.toContain(started(driven, "local_bash")[0]);
+  });
+});
+
+describe("getSettings", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("states the default level for a model that takes one", async () => {
+    // Arrange
+    const query = createFakeQuery(emptyPrompt, ALLOW, { sessionId: "s", newUuid: () => "u" });
+    // Act
+    const settings = await query.getSettings();
+    // Assert
+    expect(settings.applied.effort).toBe(FAKE_DEFAULT_EFFORT);
+    query.close();
+  });
+
+  it("states the level applyFlagSettings asked for", async () => {
+    // Arrange
+    const query = createFakeQuery(emptyPrompt, ALLOW, { sessionId: "s", newUuid: () => "u" });
+    await query.applyFlagSettings({ effortLevel: "low" });
+    // Act
+    const settings = await query.getSettings();
+    // Assert
+    expect(settings.applied.effort).toBe("low");
+    query.close();
+  });
+
+  it("states no level for a model that takes none", async () => {
+    // Arrange
+    const query = createFakeQuery(emptyPrompt, ALLOW, { sessionId: "s", newUuid: () => "u", model: "fake-haiku-4-5" });
+    // Act
+    const settings = await query.getSettings();
+    // Assert
+    expect(settings.applied.effort).toBeNull();
+    query.close();
+  });
+
+  it("refuses under the get_settings lever", async () => {
+    // Arrange
+    vi.stubEnv("AGENT_REPL_FAKE_REFUSE", "get_settings");
+    const query = createFakeQuery(emptyPrompt, ALLOW, { sessionId: "s", newUuid: () => "u" });
+    // Act / Assert
+    await expect(query.getSettings()).rejects.toThrow(/refused get_settings/);
+    query.close();
   });
 });
 

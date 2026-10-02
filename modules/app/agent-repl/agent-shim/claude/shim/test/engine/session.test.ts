@@ -12741,3 +12741,184 @@ describe("RollBackSession", () => {
     });
   });
 });
+
+/**
+ * THE VENDOR'S APPLIED EFFORT, pushed (SessionUpdate.effort_changed; owner
+ * ruling 2026-10-02): once the session is up, and again whenever the level the
+ * vendor's next request sends changes. Never while the vendor states none.
+ */
+describe("the applied effort the vendor states", () => {
+  /** Every effort_changed level pushed while ACT ran. */
+  function effortPushesWhile(h: Harness, act: () => Promise<void>): Promise<conversationv1.AgentEffortLevel[]> {
+    return pushedUpdates(h, (update) => (update.case === "effortChanged" ? update.value.effectiveEffort : undefined), act);
+  }
+
+  it("is pushed once the session is up", async () => {
+    // Arrange
+    const h = harness({
+      onQueryCreated: (query) => {
+        query.appliedEffort = "medium";
+      },
+    });
+    // Act
+    const pushed = await effortPushesWhile(h, async () => {
+      await started(h);
+    });
+    // Assert
+    expect(pushed).toEqual([conversationv1.AgentEffortLevel.MEDIUM]);
+  });
+
+  it("is never pushed while the vendor states no level", async () => {
+    // Arrange
+    const h = harness();
+    // Act
+    const pushed = await effortPushesWhile(h, async () => {
+      await started(h);
+    });
+    // Assert
+    expect(pushed).toEqual([]);
+  });
+
+  it("is pushed again when a turn's end finds it changed", async () => {
+    // Arrange
+    const h = harness({
+      onQueryCreated: (query) => {
+        query.appliedEffort = "medium";
+      },
+    });
+    // Act
+    const pushed = await effortPushesWhile(h, async () => {
+      await started(h);
+      await h.engine.startTurn(
+        create(shimv1.StartTurnRequestSchema, {
+          turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
+          said: textSaid("go"),
+          origin: conversationv1.PromptOrigin.USER_SENT,
+          pageSize: 5,
+        }),
+      );
+      h.queries[0].query.appliedEffort = "low";
+      h.queries[0]?.query.emit(resultMessage());
+      await new Promise((resolve) => setImmediate(resolve));
+      await new Promise((resolve) => setImmediate(resolve));
+    });
+    // Assert
+    expect(pushed).toEqual([conversationv1.AgentEffortLevel.MEDIUM, conversationv1.AgentEffortLevel.LOW]);
+  });
+
+  it("is re-read after a model change", async () => {
+    // Arrange
+    const h = harness({
+      onQueryCreated: (query) => {
+        query.appliedEffort = "medium";
+      },
+    });
+    // Act
+    const pushed = await effortPushesWhile(h, async () => {
+      await started(h);
+      h.queries[0].query.appliedEffort = "high";
+      await h.engine.setSessionModel(
+        create(shimv1.SetSessionModelRequestSchema, {
+          model: create(conversationv1.AgentModelSchema, { name: "claude-sonnet-5" }),
+        }),
+      );
+    });
+    // Assert
+    expect(pushed).toEqual([conversationv1.AgentEffortLevel.MEDIUM, conversationv1.AgentEffortLevel.HIGH]);
+  });
+
+  it("is pushed by SetSessionEffort as the vendor states it", async () => {
+    // Arrange
+    const h = harness();
+    // Act
+    const pushed = await effortPushesWhile(h, async () => {
+      await started(h);
+      await h.engine.setSessionEffort(
+        create(shimv1.SetSessionEffortRequestSchema, { effort: conversationv1.AgentEffortLevel.LOW }),
+      );
+    });
+    // Assert
+    expect(pushed).toEqual([conversationv1.AgentEffortLevel.LOW]);
+  });
+
+  it("states a failed read as a fault", async () => {
+    // Arrange
+    const h = harness({
+      onQueryCreated: (query) => {
+        query.getSettingsRejects = new Error("settings socket gone");
+      },
+    });
+    // Act
+    const details = await faultDetailsWhile(h, async () => {
+      await started(h);
+    });
+    // Assert
+    expect(details).toContain("getSettings failed: settings socket gone");
+  });
+
+  it("states a level the vocabulary cannot name as a fault, never a guess", async () => {
+    // Arrange
+    const h = harness({
+      onQueryCreated: (query) => {
+        query.appliedEffort = "ultra" as never;
+      },
+    });
+    // Act
+    const details = await faultDetailsWhile(h, async () => {
+      await started(h);
+    });
+    // Assert
+    expect(details.some((detail) => detail.includes('"ultra"'))).toBe(true);
+  });
+});
+
+describe("SetSessionEffort reads the level back from the vendor", () => {
+  /** Start H, then ask for EFFORT with no turn open. */
+  async function ask(h: Harness, effort: conversationv1.AgentEffortLevel): Promise<shimv1.SetSessionEffortResponse> {
+    await started(h);
+    return h.engine.setSessionEffort(create(shimv1.SetSessionEffortRequestSchema, { effort }));
+  }
+
+  it("answers the level the vendor applied, not the one asked for", async () => {
+    // Arrange: the vendor runs `max` as `high` on this model.
+    const h = harness({
+      onQueryCreated: (query) => {
+        query.appliedEffort = "high";
+        query.appliedEffortPinned = true;
+      },
+    });
+    // Act
+    const response = await ask(h, conversationv1.AgentEffortLevel.MAX);
+    // Assert
+    expect(
+      response.result.case === "success" ? response.result.value.effortChanged?.effectiveEffort : undefined,
+    ).toBe(conversationv1.AgentEffortLevel.HIGH);
+  });
+
+  it("refuses when the vendor states no level after the change", async () => {
+    // Arrange: an environment override sends none.
+    const h = harness({
+      onQueryCreated: (query) => {
+        query.appliedEffort = null;
+        query.appliedEffortPinned = true;
+      },
+    });
+    // Act
+    const response = await ask(h, conversationv1.AgentEffortLevel.HIGH);
+    // Assert
+    expect(response.result.case === "failure" ? response.result.value.detail : "").toMatch(/sends no effort level/);
+  });
+
+  it("refuses when the applied level cannot be read", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    h.queries[0].query.getSettingsRejects = new Error("settings socket gone");
+    // Act
+    const response = await h.engine.setSessionEffort(
+      create(shimv1.SetSessionEffortRequestSchema, { effort: conversationv1.AgentEffortLevel.HIGH }),
+    );
+    // Assert
+    expect(response.result.case === "failure" ? response.result.value.detail : "").toMatch(/could not be read: settings socket gone/);
+  });
+});

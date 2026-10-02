@@ -11,6 +11,7 @@ import { conversationv1, storev1 } from "../../src/proto.js";
 import type {
   AccountInfoLike,
   AccountUsageLike,
+  AppliedSettingsLike,
   ContextUsageLike,
   EffortLevelLike,
   InitializationResultLike,
@@ -58,6 +59,12 @@ export class ScriptedQuery implements QueryLike {
   interruptRejects: Error | undefined;
   setModelRejects: Error | undefined;
   applyFlagSettingsRejects: Error | undefined;
+  /** What `getSettings` answers for `applied.effort`; null is "no level". */
+  appliedEffort: EffortLevelLike | null = null;
+  /** When true, `applyFlagSettings` leaves `appliedEffort` as the test set it. */
+  appliedEffortPinned = false;
+  /** When set, `getSettings` rejects with it. */
+  getSettingsRejects: Error | undefined;
   setPermissionModeRejects: Error | undefined;
   /**
    * `close()` records the call but leaves the stream standing.
@@ -136,9 +143,17 @@ export class ScriptedQuery implements QueryLike {
   }
   applyFlagSettings(settings: { effortLevel: EffortLevelLike }): Promise<void> {
     this.calls.push(`applyFlagSettings:effortLevel=${settings.effortLevel}`);
-    return this.applyFlagSettingsRejects === undefined
-      ? Promise.resolve()
-      : Promise.reject(this.applyFlagSettingsRejects);
+    if (this.applyFlagSettingsRejects !== undefined) return Promise.reject(this.applyFlagSettingsRejects);
+    // The vendor then states the level it applied, unless a test pinned what
+    // it states (an override, a downgrade).
+    if (!this.appliedEffortPinned) this.appliedEffort = settings.effortLevel;
+    return Promise.resolve();
+  }
+  getSettings(): Promise<AppliedSettingsLike> {
+    this.calls.push("getSettings");
+    return this.getSettingsRejects === undefined
+      ? Promise.resolve({ applied: { effort: this.appliedEffort } })
+      : Promise.reject(this.getSettingsRejects);
   }
   setModel(model?: string): Promise<void> {
     this.calls.push(`setModel:${model ?? ""}`);

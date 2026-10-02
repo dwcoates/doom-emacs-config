@@ -1824,6 +1824,14 @@ func fastModeUpdate() *conversationv1.SessionUpdate {
 	}}
 }
 
+func effortChangedUpdate() *conversationv1.SessionUpdate {
+	return &conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_EffortChanged{
+		EffortChanged: &conversationv1.SessionEffortChanged{
+			EffectiveEffort: conversationv1.AgentEffortLevel_AGENT_EFFORT_LEVEL_HIGH,
+		},
+	}}
+}
+
 func titleUpdate() *conversationv1.SessionUpdate {
 	return &conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_Title{
 		Title: &conversationv1.SessionTitle{Text: "Add SPC j keybinding support"},

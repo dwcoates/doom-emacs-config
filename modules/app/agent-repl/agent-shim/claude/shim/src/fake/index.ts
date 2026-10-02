@@ -40,6 +40,7 @@ import { bindLog } from "../log.js";
 import type {
   AccountInfoLike,
   AccountUsageLike,
+  AppliedSettingsLike,
   AgentInfoLike,
   CanUseToolLike,
   ContextUsageLike,
@@ -60,6 +61,7 @@ import {
   FAKE_AGENTS,
   FAKE_COMMANDS,
   FAKE_DEFAULT_MODEL,
+  fakeAppliedEffort,
   FAKE_INITIALIZATION_RESULT,
   FAKE_MCP_SERVERS,
   FAKE_MCP_SERVERS_HEALTHY,
@@ -192,6 +194,7 @@ const REFUSABLE = new Set([
   "set_model",
   "set_permission_mode",
   "apply_flag_settings",
+  "get_settings",
   "rewind_files",
 ]);
 
@@ -1748,6 +1751,13 @@ export function createFakeQuery(
       // The vendor announces nothing for a flag-layer change: `sdk.d.ts`
       // declares no message for it, so the mock emits none either.
       effortLevel = settings.effortLevel;
+    },
+
+    getSettings: async (): Promise<AppliedSettingsLike> => {
+      if (refuse.has("get_settings")) {
+        throw new Error("the mocked vendor refused get_settings");
+      }
+      return { applied: { effort: fakeAppliedEffort(model, effortLevel) } };
     },
 
     setModel: async (next?: string): Promise<void> => {
