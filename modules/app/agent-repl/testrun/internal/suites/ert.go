@@ -1,8 +1,6 @@
 package suites
 
 import (
-	"bufio"
-	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -60,7 +58,7 @@ func ertUnits(l Layout, s roster.Suite) (Units, error) {
 		sp := spec(id, s.Name, lispDir,
 			[]string{"emacs", "-batch", "-Q", "-l", "ert", "-l", driver, "--eval", form},
 			"AGENT_REPL_ITEST_FAKEDAEMON="+fake)
-		sp.Items = func(out []byte) (map[string]float64, error) { return ParseERTItems(out, items) }
+		sp.Items = func(out []byte) (map[string]float64, error) { return ParseItemLines(out, items) }
 		return sp
 	}
 	return Units{
@@ -75,49 +73,4 @@ func lispList(items []string) string {
 		q[i] = strconv.Quote(it)
 	}
 	return "'(" + strings.Join(q, " ") + ")"
-}
-
-var ertItemLine = regexp.MustCompile(`^TESTRUN-ITEM (\S+) ([0-9.]+)$`)
-
-// ParseERTItems reads the driver's per-file lines, and insists on exactly one
-// for every file the chunk was given.
-func ParseERTItems(out []byte, want []string) (map[string]float64, error) {
-	got := map[string]float64{}
-	sc := bufio.NewScanner(bytes.NewReader(out))
-	sc.Buffer(make([]byte, 1024*1024), 64*1024*1024)
-	for sc.Scan() {
-		m := ertItemLine.FindStringSubmatch(sc.Text())
-		if m == nil {
-			continue
-		}
-		secs, err := strconv.ParseFloat(m[2], 64)
-		if err != nil {
-			return nil, fmt.Errorf("unreadable seconds in %q: %w", sc.Text(), err)
-		}
-		if _, dup := got[m[1]]; dup {
-			return nil, fmt.Errorf("%s reported twice", m[1])
-		}
-		got[m[1]] = secs
-	}
-	if err := sc.Err(); err != nil {
-		return nil, err
-	}
-	return got, matchItems(got, want)
-}
-
-// matchItems insists the reported items are exactly the wanted ones.
-func matchItems(got map[string]float64, want []string) error {
-	var missing []string
-	for _, w := range want {
-		if _, ok := got[w]; !ok {
-			missing = append(missing, w)
-		}
-	}
-	if len(missing) > 0 {
-		return fmt.Errorf("no timing reported for %v", missing)
-	}
-	if len(got) != len(want) {
-		return fmt.Errorf("timings reported for %d items, but the chunk ran %d", len(got), len(want))
-	}
-	return nil
 }

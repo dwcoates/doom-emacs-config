@@ -205,7 +205,7 @@ func TestSplitScriptUnitsChunkSelectedItems(t *testing.T) {
 	}
 }
 
-func TestParseScriptItemsRejectsInvalidReports(t *testing.T) {
+func TestParseItemLinesRejectsInvalidReports(t *testing.T) {
 	tests := []struct {
 		name    string
 		out     string
@@ -221,7 +221,7 @@ func TestParseScriptItemsRejectsInvalidReports(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Act
-			_, err := ParseScriptItems([]byte(tt.out), tt.want)
+			_, err := ParseItemLines([]byte(tt.out), tt.want)
 
 			// Assert
 			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
@@ -323,7 +323,7 @@ func TestTheRealERTRosterMatchesEveryTestFile(t *testing.T) {
 	}
 }
 
-func TestParseERTItems(t *testing.T) {
+func TestParseItemLines(t *testing.T) {
 	tests := []struct {
 		name    string
 		out     string
@@ -342,7 +342,7 @@ func TestParseERTItems(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Act
-			got, err := ParseERTItems([]byte(tt.out), tt.want)
+			got, err := ParseItemLines([]byte(tt.out), tt.want)
 
 			// Assert
 			if tt.wantErr != "" {
@@ -352,7 +352,7 @@ func TestParseERTItems(t *testing.T) {
 				return
 			}
 			if err != nil || got["test-a.el"] != 1.5 || got["test-b.el"] != 0.25 {
-				t.Fatalf("ParseERTItems = %v, %v", got, err)
+				t.Fatalf("ParseItemLines = %v, %v", got, err)
 			}
 		})
 	}
@@ -771,6 +771,50 @@ func TestEveryRosterSuiteHasAKnownKind(t *testing.T) {
 		case roster.Script, roster.SplitScript, roster.ERT, roster.GoModule, roster.Vitest, roster.E2E:
 		default:
 			t.Errorf("suite %s has unknown kind %d", s.Name, s.Kind)
+		}
+	}
+}
+
+func TestEveryItemChunkReadsTheSharedItemLine(t *testing.T) {
+	// Arrange: an ERT chunk and a split-harness chunk, built by their suites.
+	module := t.TempDir()
+	write(t, filepath.Join(module, "lisp", "test-agent-repl.el"),
+		"(load (expand-file-name \"test-helpers.el\" dir) nil t)\n(load (expand-file-name \"x\" dir) nil t)\n", 0o644)
+	ert, err := ertUnits(Layout{Repo: module, Module: module, Work: t.TempDir()}, roster.Suite{Name: "ert", Kind: roster.ERT, Path: "lisp"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	harness := splitScriptUnitsForItems(filepath.Join(module, "bin", "h.sh"), roster.Suite{Name: "h", Kind: roster.SplitScript}, []string{"x"})
+	chunks := map[string]func([]byte) (map[string]float64, error){
+		"ert":     ert.Splits[0].Chunk("ert#00", []string{"x"}).Items,
+		"harness": harness.Splits[0].Chunk("h#00", []string{"x"}).Items,
+	}
+	tests := []struct {
+		name    string
+		out     string
+		wantErr string
+	}{
+		{name: "a well-formed line is read", out: "TESTRUN-ITEM x 2.5\n"},
+		{name: "a malformed timing is refused", out: "TESTRUN-ITEM x slow\n", wantErr: "unreadable item timing"},
+		{name: "a line with extra fields is refused", out: "TESTRUN-ITEM x 1 2\n", wantErr: "unreadable item timing"},
+	}
+	for _, tt := range tests {
+		for kind, items := range chunks {
+			t.Run(tt.name+"/"+kind, func(t *testing.T) {
+				// Act
+				got, err := items([]byte(tt.out))
+
+				// Assert
+				if tt.wantErr != "" {
+					if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+						t.Fatalf("err = %v, want it to mention %q", err, tt.wantErr)
+					}
+					return
+				}
+				if err != nil || got["x"] != 2.5 {
+					t.Fatalf("Items = %v, %v", got, err)
+				}
+			})
 		}
 	}
 }
