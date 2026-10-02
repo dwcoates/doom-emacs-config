@@ -38,6 +38,7 @@ describe("hasFileExtension", () => {
     ["a.b.go", true],
     ["example.com", false],
     ["github.io", false],
+    ["wikipedia.org", false],
     ["noext", false],
     [".md", false],
   ])("%s -> %s", (label, want) => {
