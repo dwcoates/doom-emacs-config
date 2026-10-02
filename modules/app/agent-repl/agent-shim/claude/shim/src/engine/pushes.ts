@@ -299,7 +299,14 @@ export class SessionPushes {
     this.faultRepeats.set(key, repeats);
     if (index === -1) {
       this.faults.push(fault);
-      LOGGER.error({ component: fault.component, kind, detail: fault.detail }, "recorded a session fault");
+      if (kind === "networkUnreachable") {
+        // THE NETWORK IS THIS MACHINE'S ENVIRONMENT, not a defect in the
+        // shim: the daemon draws it as the network fault, and nobody reading
+        // the log has anything to fix, so it is INFO.
+        LOGGER.info({ component: fault.component, kind, detail: fault.detail }, "recorded the network unreachable");
+      } else {
+        LOGGER.error({ component: fault.component, kind, detail: fault.detail }, "recorded a session fault");
+      }
     } else {
       this.faults[index] = fault;
       LOGGER.debug({ component: fault.component, kind, detail: fault.detail, repeats }, "recorded a session fault");

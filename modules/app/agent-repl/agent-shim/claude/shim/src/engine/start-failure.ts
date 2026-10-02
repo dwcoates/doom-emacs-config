@@ -11,7 +11,7 @@
 import { classifyVendorApiFailure, type VendorApiFailureKind } from "../convert/terminals.js";
 import { bindLog } from "../log.js";
 import { classifyAgentFailure } from "./network-resume.js";
-import type { VendorStartRetry } from "../service/failures.js";
+import type { VendorStartCause, VendorStartRetry } from "../service/failures.js";
 
 const LOGGER = bindLog({ component: "shim-engine-start-failure", operation: "shim.engine.start_failure" });
 
@@ -29,12 +29,18 @@ export interface VendorStartBound {
 export class VendorStartError extends Error {
   readonly retry: VendorStartRetry;
   readonly bound: VendorStartBound | undefined;
+  /**
+   * Whose failure it was. `vendor` unless the settle site SAW the network
+   * fail: silence, an early end and a transient answer are the vendor's.
+   */
+  readonly cause: VendorStartCause;
 
-  constructor(message: string, retry: VendorStartRetry, bound?: VendorStartBound) {
+  constructor(message: string, retry: VendorStartRetry, bound?: VendorStartBound, cause: VendorStartCause = "vendor") {
     super(message);
     this.name = "VendorStartError";
     this.retry = retry;
     this.bound = bound;
+    this.cause = cause;
   }
 }
 
@@ -60,6 +66,7 @@ export class BoundExceededError extends Error {
 export interface OpeningErrorVerdict {
   readonly kind: VendorApiFailureKind;
   readonly retry: VendorStartRetry;
+  readonly cause: VendorStartCause;
 }
 
 /**
@@ -96,17 +103,21 @@ const TRANSIENT_WORDS =
  */
 export function openingErrorVerdict(status: number | undefined, text: string): OpeningErrorVerdict {
   const kind = classifyVendorApiFailure(status, undefined, text);
-  if (status !== undefined && transientStatus(status)) return { kind, retry: "retryable" };
+  if (status !== undefined && transientStatus(status)) return { kind, retry: "retryable", cause: "vendor" };
   const said = text.toLowerCase();
-  if (status === undefined && classifyAgentFailure({ text }).network) return { kind, retry: "retryable" };
+  if (status === undefined && classifyAgentFailure({ text }).network) return { kind, retry: "retryable", cause: "network" };
   switch (kind) {
     case "shim.vendor.unreachable":
-      return { kind, retry: "retryable" };
+      return { kind, retry: "retryable", cause: status === undefined ? "network" : "vendor" };
     case "shim.vendor.auth_rejected":
     case "shim.vendor.model_missing":
-      return { kind, retry: "rejected" };
+      return { kind, retry: "rejected", cause: "vendor" };
     case "shim.vendor.api_error":
-      return { kind, retry: status === undefined && TRANSIENT_WORDS.test(said) ? "retryable" : "rejected" };
+      return {
+        kind,
+        retry: status === undefined && TRANSIENT_WORDS.test(said) ? "retryable" : "rejected",
+        cause: "vendor",
+      };
   }
 }
 
@@ -114,6 +125,7 @@ export function openingErrorVerdict(status: number | undefined, text: string): O
 export interface StartFailureLabel {
   readonly retry: VendorStartRetry;
   readonly bound: VendorStartBound | undefined;
+  readonly cause: VendorStartCause;
 }
 
 /**
@@ -125,11 +137,11 @@ export interface StartFailureLabel {
  * understood is how a deterministic fault becomes a retry storm.
  */
 export function startFailureLabel(err: unknown): StartFailureLabel {
-  if (err instanceof VendorStartError) return { retry: err.retry, bound: err.bound };
+  if (err instanceof VendorStartError) return { retry: err.retry, bound: err.bound, cause: err.cause };
   // warn: a defect because every path that fails a start labels its error, and this one did not
   LOGGER.warn(
     { cause: err instanceof Error ? err.message : String(err) },
     "a failed start reached the refusal with no retry label; answering it as rejected",
   );
-  return { retry: "rejected", bound: undefined };
+  return { retry: "rejected", bound: undefined, cause: "vendor" };
 }

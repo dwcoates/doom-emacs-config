@@ -56,7 +56,10 @@ src/
     engine.ts          the Engine seam + NotImplementedEngine
     session.ts turn.ts identity.ts cold.ts keepalive.ts compaction.ts
     backup.ts detached.ts pushes.ts permission-gate.ts rollback.ts
-    start-failure.ts   the retry label a failed vendor start carries (VendorStartError)
+    start-failure.ts   the retry label (and cause: network | vendor) a failed vendor start carries
+    network-resume.ts  classifyAgentFailure: THE one network classifier, plus the resume of cut-off agents
+    network-reach.ts   what each SDK message says about the network: raises and resolves
+                       the `network_unreachable` session fault (component "network")
   convert/
     fold.ts            the fold seam and FoldOutput
     ids.ts             the four identifier spaces, minted

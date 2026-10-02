@@ -825,7 +825,7 @@ export class NetworkResume {
 }
 
 /** The prose of a vendor error notice, or `undefined` when it has none. */
-function noticeText(message: unknown): string | undefined {
+export function noticeText(message: unknown): string | undefined {
   const content = (message as { content?: unknown } | undefined)?.content;
   const text =
     typeof content === "string"

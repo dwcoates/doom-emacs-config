@@ -25,6 +25,7 @@ import { LockHeldError, LockHolderUnavailableError, workspaceLockKey } from "../
 import { saidText, textSaid } from "../../src/engine/turn.js";
 import { KEEPALIVE_INTERVAL_MS, KEEPALIVE_PROMPT_MARKER } from "../../src/engine/keepalive.js";
 import { toStanding } from "../../src/engine/permission-gate.js";
+import { sessionFault } from "../../src/service/failures.js";
 import { SYNTHETIC_MODEL } from "../../src/model.js";
 import type {
   AccountUsageLike,
@@ -13706,5 +13707,128 @@ describe("SetSessionEffort reads the level back from the vendor", () => {
     );
     // Assert
     expect(response.result.case === "failure" ? response.result.value.detail : "").toMatch(/could not be read: settings socket gone/);
+  });
+});
+
+/**
+ * THE SHIM TELLS AN UNREACHABLE NETWORK APART FROM A VENDOR ANSWER (owner
+ * ruling, 2026-10-02): the retryable refusal says whose failure it was, and the
+ * network fault stands on the session stream from the first request that
+ * failed below an answer until the next one that reaches the vendor.
+ */
+describe("the network fault and the start's cause", () => {
+  const AMPLE = 60_000;
+  const OFFLINE = "getaddrinfo ENOTFOUND api.anthropic.com";
+
+  /** The cause a retryable refusal carries, or undefined. */
+  function retryCause(response: shimv1.StartSessionResponse): string | undefined {
+    if (response.result.case !== "failure") return undefined;
+    const cause = response.result.value.cause;
+    if (cause.case !== "vendorStartFailed") return undefined;
+    return cause.value.retry.case === "retryable" ? cause.value.retry.value.cause.case : undefined;
+  }
+
+  /** Whether the session's diagnostics stand on the network fault, and its detail. */
+  function networkFault(h: ReturnType<typeof harness>): string | undefined {
+    const update = h.engine.pushes.diagnostics().update;
+    if (update.case !== "diagnostics" || update.value.health.case !== "unhealthy") return undefined;
+    return update.value.health.value.faults.find((f) => f.kind.case === "networkUnreachable")?.detail;
+  }
+
+  it("names the network as the cause of a start the network failed", async () => {
+    // Arrange.
+    const h = harness({ initTimeoutMs: AMPLE, liveSignalTimeoutMs: AMPLE, holdLiveSignal: true });
+    const pending = h.engine.startSession(freshRequest());
+
+    // Act.
+    (await untilQuery(h, 0)).query.emit(errorResultMessage({ errors: [OFFLINE] }));
+
+    // Assert.
+    expect(retryCause(await pending)).toBe("network");
+  });
+
+  it("names the vendor as the cause of a start the vendor failed", async () => {
+    // Arrange.
+    const h = harness({ liveSignalTimeoutMs: 5, holdLiveSignal: true });
+
+    // Act.
+    const response = await h.engine.startSession(freshRequest());
+
+    // Assert.
+    expect(retryCause(response)).toBe("vendor");
+  });
+
+  it("stands the network fault for a start the network failed", async () => {
+    // Arrange.
+    const h = harness({ initTimeoutMs: AMPLE, liveSignalTimeoutMs: AMPLE, holdLiveSignal: true });
+    const pending = h.engine.startSession(freshRequest());
+
+    // Act.
+    (await untilQuery(h, 0)).query.emit(errorResultMessage({ errors: [OFFLINE] }));
+    await pending;
+
+    // Assert.
+    expect(networkFault(h)).toContain("ENOTFOUND");
+  });
+
+  it("stands no network fault for a start the vendor failed", async () => {
+    // Arrange.
+    const h = harness({ liveSignalTimeoutMs: 5, holdLiveSignal: true });
+
+    // Act.
+    await h.engine.startSession(freshRequest());
+
+    // Assert.
+    expect(networkFault(h)).toBeUndefined();
+  });
+
+  it("resolves the network fault when a start reaches the vendor", async () => {
+    // Arrange: an earlier attempt saw the network down.
+    const h = harness();
+    h.engine.pushes.fault(sessionFault({ kind: "networkUnreachable" }, "network", OFFLINE));
+
+    // Act.
+    await h.engine.startSession(freshRequest());
+
+    // Assert.
+    expect(networkFault(h)).toBeUndefined();
+  });
+
+  it("resolves the network fault on the next message the vendor produced", async () => {
+    // Arrange.
+    const h = harness();
+    await h.engine.startSession(freshRequest());
+    await h.engine.onSdkMessage(errorResultMessage({ errors: ["TypeError: fetch failed"] }));
+    expect(networkFault(h)).toBeDefined();
+
+    // Act.
+    await h.engine.onSdkMessage({ type: "stream_event" } as unknown as SdkMessage);
+
+    // Assert.
+    expect(networkFault(h)).toBeUndefined();
+  });
+
+  it("stands the network fault for a mid-session request that failed below an answer", async () => {
+    // Arrange.
+    const h = harness();
+    await h.engine.startSession(freshRequest());
+
+    // Act.
+    await h.engine.onSdkMessage(errorResultMessage({ errors: ["TypeError: fetch failed"] }));
+
+    // Assert.
+    expect(networkFault(h)).toBe("TypeError: fetch failed");
+  });
+
+  it("leaves a mid-session failure the vendor answered off the network fault", async () => {
+    // Arrange.
+    const h = harness();
+    await h.engine.startSession(freshRequest());
+
+    // Act.
+    await h.engine.onSdkMessage(errorResultMessage({ errors: ["the budget is exhausted"] }));
+
+    // Assert.
+    expect(networkFault(h)).toBeUndefined();
   });
 });

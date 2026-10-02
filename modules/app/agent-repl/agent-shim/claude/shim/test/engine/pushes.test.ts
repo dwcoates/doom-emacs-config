@@ -314,6 +314,25 @@ describe("faults", () => {
     ).toEqual(["error"]);
   });
 
+  it("logs the first network fault at info, never error", () => {
+    const pushes = new SessionPushes(() => 1, "test-build-sha");
+    const before = logSinkMark();
+
+    pushes.fault(
+      create(conversationv1.SessionFaultSchema, {
+        component: "network",
+        detail: "getaddrinfo ENOTFOUND api.anthropic.com",
+        kind: { case: "networkUnreachable", value: create(conversationv1.SessionFaultNetworkUnreachableSchema, {}) },
+      }),
+    );
+
+    expect(
+      logRecordsSince(before)
+        .filter((record) => record.message === "recorded the network unreachable" || record.message === "recorded a session fault")
+        .map((record) => record.level),
+    ).toEqual(["info"]);
+  });
+
   it("logs a repeat at debug, carrying the repeat count", () => {
     const pushes = new SessionPushes(() => 1, "test-build-sha");
     pushes.fault(fault("one"));
