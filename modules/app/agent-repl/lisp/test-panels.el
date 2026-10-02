@@ -4743,3 +4743,41 @@ lookups are stubbed to answer them for workspace \"ws\"."
       (agent-repl--redirect-from-agent-before-save)
       ;; Assert
       (should (eq (selected-window) view-win)))))
+
+;;;; ---- Tests: the switch's webview record only for real workspaces ----
+
+(ert-deftest agent-repl-test-panels-ensure-own-schedules-no-webview-record-for-a-placeholder ()
+  "A placeholder perspective (no webview, no log sink) schedules no record."
+  (agent-repl-test--with-clean-state
+    (let ((scheduled nil))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "main"))
+                ((symbol-function 'agent-repl--stale-panel-windows) (lambda () nil))
+                ((symbol-function 'agent-repl--panels-visible-p) (lambda () t))
+                ((symbol-function 'agent-repl--ws-log-name) (lambda (_ws) nil))
+                ((symbol-function 'agent-repl-window--panel-buffer) (lambda (&rest _) nil))
+                ((symbol-function 'run-with-idle-timer)
+                 (lambda (&rest _) (setq scheduled t))))
+        ;; Act
+        (agent-repl--ensure-own-panels-on-persp-switch "main")
+        ;; Assert
+        (should-not scheduled)))))
+
+(ert-deftest agent-repl-test-panels-ensure-own-schedules-the-webview-record-for-a-workspace ()
+  "A workspace with a live webview and a log sink schedules its record."
+  (agent-repl-test--with-clean-state
+    (let ((scheduled nil)
+          (view (get-buffer-create "*agent-frontend-my-ws*")))
+      (unwind-protect
+          (cl-letf (((symbol-function '+workspace-current-name) (lambda () "my-ws"))
+                    ((symbol-function 'agent-repl--stale-panel-windows) (lambda () nil))
+                    ((symbol-function 'agent-repl--panels-visible-p) (lambda () t))
+                    ((symbol-function 'agent-repl--ws-log-name) (lambda (ws) ws))
+                    ((symbol-function 'agent-repl-window--panel-buffer)
+                     (lambda (&rest _) view))
+                    ((symbol-function 'run-with-idle-timer)
+                     (lambda (&rest _) (setq scheduled t))))
+            ;; Act
+            (agent-repl--ensure-own-panels-on-persp-switch "my-ws")
+            ;; Assert
+            (should scheduled))
+        (kill-buffer view)))))
