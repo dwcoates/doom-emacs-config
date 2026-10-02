@@ -1244,6 +1244,8 @@ type harness struct {
 	// notStarted keeps the client and the watcher while the shim holds no
 	// started session: a relaunch's installed shim, a vendor start retried.
 	notStarted bool
+	// sessionAbsent states the shim is KNOWN to hold no session.
+	sessionAbsent bool
 	// clientReaped answers no client while the watcher stays: the shim a
 	// revival brought up has since died and been reaped.
 	clientReaped bool
@@ -1307,6 +1309,7 @@ func newHarness(t *testing.T) *harness {
 		},
 		Watcher:        func(ids.WorkspaceID) (Watcher, bool) { return h.watcher, !h.noSession },
 		SessionStarted: func(ids.WorkspaceID) bool { return !h.noSession && !h.notStarted },
+		SessionAbsent:  func(ids.WorkspaceID) bool { return h.sessionAbsent },
 		ColdGate: func(ids.WorkspaceID) (string, bool) {
 			return h.coldGate, h.coldGate != ""
 		},
