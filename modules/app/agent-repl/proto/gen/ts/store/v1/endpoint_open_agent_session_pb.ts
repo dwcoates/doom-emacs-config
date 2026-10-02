@@ -17,7 +17,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file store/v1/endpoint_open_agent_session.proto.
  */
 export const file_store_v1_endpoint_open_agent_session: GenFile = /*@__PURE__*/
-  fileDesc("CipzdG9yZS92MS9lbmRwb2ludF9vcGVuX2FnZW50X3Nlc3Npb24ucHJvdG8SCHN0b3JlLnYxIrIBChdPcGVuQWdlbnRTZXNzaW9uUmVxdWVzdBInCgVhZ2VudBgBIAEoCzIYLmNvbnZlcnNhdGlvbi52MS5BZ2VudElkEhEKCXBhZ2Vfc2l6ZRgCIAEoDRI2Cg1rbm93bl90aHJvdWdoGAMgASgLMhouc3RvcmUudjEuU3RvcmVJdGVtUG9pbnRlckgAiAEBEhEKCXBhZ2Vfb25seRgEIAEoCEIQCg5fa25vd25fdGhyb3VnaCKQAQoYT3BlbkFnZW50U2Vzc2lvblJlc3BvbnNlEjQKB3N1Y2Nlc3MYASABKAsyIS5zdG9yZS52MS5PcGVuQWdlbnRTZXNzaW9uU3VjY2Vzc0gAEjQKB2ZhaWx1cmUYAiABKAsyIS5zdG9yZS52MS5PcGVuQWdlbnRTZXNzaW9uRmFpbHVyZUgAQggKBnJlc3VsdCJvChdPcGVuQWdlbnRTZXNzaW9uU3VjY2VzcxIoCgRwYWdlGAEgASgLMhouc3RvcmUudjEuQWdlbnRTZXNzaW9uUGFnZRIqCgV3YXRjaBgCIAEoCzIbLnN0b3JlLnYxLkFnZW50U2Vzc2lvblRva2VuIr0CChdPcGVuQWdlbnRTZXNzaW9uRmFpbHVyZRIOCgZkZXRhaWwYASABKAkSQwoPaW52YWxpZF9yZXF1ZXN0GAIgASgLMiguc3RvcmUudjEuT3BlbkFnZW50U2Vzc2lvbkludmFsaWRSZXF1ZXN0SAASPwoNc3RhbGVfcG9pbnRlchgDIAEoCzImLnN0b3JlLnYxLk9wZW5BZ2VudFNlc3Npb25TdGFsZVBvaW50ZXJIABJDCg9zdG9yYWdlX2ZhaWx1cmUYBCABKAsyKC5zdG9yZS52MS5PcGVuQWdlbnRTZXNzaW9uU3RvcmFnZUZhaWx1cmVIABI/Cg11bmtub3duX2FnZW50GAUgASgLMiYuc3RvcmUudjEuT3BlbkFnZW50U2Vzc2lvblVua25vd25BZ2VudEgAQgYKBGtpbmQiHgocT3BlbkFnZW50U2Vzc2lvblVua25vd25BZ2VudCIvCh5PcGVuQWdlbnRTZXNzaW9uSW52YWxpZFJlcXVlc3QSDQoFZmllbGQYASABKAkiIAoeT3BlbkFnZW50U2Vzc2lvblN0b3JhZ2VGYWlsdXJlIh4KHE9wZW5BZ2VudFNlc3Npb25TdGFsZVBvaW50ZXJCIlogYWdlbnRyZXBsL3Byb3RvL3N0b3JlL3YxO3N0b3JldjFiBnByb3RvMw", [file_conversation_v1_agent_activity, file_store_v1_store]);
+  fileDesc("CipzdG9yZS92MS9lbmRwb2ludF9vcGVuX2FnZW50X3Nlc3Npb24ucHJvdG8SCHN0b3JlLnYxItsBChdPcGVuQWdlbnRTZXNzaW9uUmVxdWVzdBInCgVhZ2VudBgBIAEoCzIYLmNvbnZlcnNhdGlvbi52MS5BZ2VudElkEjMKDWtub3duX3Rocm91Z2gYAyABKAsyGi5zdG9yZS52MS5TdG9yZUl0ZW1Qb2ludGVySAASMwoJdGFpbF9vbmx5GAUgASgLMh4uc3RvcmUudjEuQWdlbnRTZXNzaW9uVGFpbE9ubHlIABIRCglwYWdlX29ubHkYBCABKAhCCQoHb3BlbmluZ0oECAIQA1IJcGFnZV9zaXplIpABChhPcGVuQWdlbnRTZXNzaW9uUmVzcG9uc2USNAoHc3VjY2VzcxgBIAEoCzIhLnN0b3JlLnYxLk9wZW5BZ2VudFNlc3Npb25TdWNjZXNzSAASNAoHZmFpbHVyZRgCIAEoCzIhLnN0b3JlLnYxLk9wZW5BZ2VudFNlc3Npb25GYWlsdXJlSABCCAoGcmVzdWx0Im8KF09wZW5BZ2VudFNlc3Npb25TdWNjZXNzEigKBHBhZ2UYASABKAsyGi5zdG9yZS52MS5BZ2VudFNlc3Npb25QYWdlEioKBXdhdGNoGAIgASgLMhsuc3RvcmUudjEuQWdlbnRTZXNzaW9uVG9rZW4ivQIKF09wZW5BZ2VudFNlc3Npb25GYWlsdXJlEg4KBmRldGFpbBgBIAEoCRJDCg9pbnZhbGlkX3JlcXVlc3QYAiABKAsyKC5zdG9yZS52MS5PcGVuQWdlbnRTZXNzaW9uSW52YWxpZFJlcXVlc3RIABI/Cg1zdGFsZV9wb2ludGVyGAMgASgLMiYuc3RvcmUudjEuT3BlbkFnZW50U2Vzc2lvblN0YWxlUG9pbnRlckgAEkMKD3N0b3JhZ2VfZmFpbHVyZRgEIAEoCzIoLnN0b3JlLnYxLk9wZW5BZ2VudFNlc3Npb25TdG9yYWdlRmFpbHVyZUgAEj8KDXVua25vd25fYWdlbnQYBSABKAsyJi5zdG9yZS52MS5PcGVuQWdlbnRTZXNzaW9uVW5rbm93bkFnZW50SABCBgoEa2luZCIeChxPcGVuQWdlbnRTZXNzaW9uVW5rbm93bkFnZW50Ii8KHk9wZW5BZ2VudFNlc3Npb25JbnZhbGlkUmVxdWVzdBINCgVmaWVsZBgBIAEoCSIgCh5PcGVuQWdlbnRTZXNzaW9uU3RvcmFnZUZhaWx1cmUiHgocT3BlbkFnZW50U2Vzc2lvblN0YWxlUG9pbnRlciIWChRBZ2VudFNlc3Npb25UYWlsT25seUIiWiBhZ2VudHJlcGwvcHJvdG8vc3RvcmUvdjE7c3RvcmV2MWIGcHJvdG8z", [file_conversation_v1_agent_activity, file_store_v1_store]);
 
 /**
  * Open one agent's reading session: the first page, and the address of the
@@ -34,25 +34,38 @@ export type OpenAgentSessionRequest = Message<"store.v1.OpenAgentSessionRequest"
   agent?: AgentId | undefined;
 
   /**
-   * The opening page's budget.
+   * What the opening page carries. UNSET = repaint: the newest page, in
+   * descending conversation place.
    *
-   * @generated from field: uint32 page_size = 2;
+   * @generated from oneof store.v1.OpenAgentSessionRequest.opening
    */
-  pageSize: number;
-
-  /**
-   * The newest item the caller already holds. UNSET = repaint: a full first
-   * page in descending conversation place. SET = catch-up: the page carries
-   * only items FIRST WRITTEN AFTER this one — catch-up is about what was
-   * written since, never about place, so a late-written item placed earlier in
-   * the conversation is delivered rather than skipped — ordered by descending
-   * place. An item delivered twice is absorbed by its identity. The store
-   * tracks nothing about what it previously served — the caller states its own
-   * high-water mark.
-   *
-   * @generated from field: optional store.v1.StoreItemPointer known_through = 3;
-   */
-  knownThrough?: StoreItemPointer | undefined;
+  opening: {
+    /**
+     * The newest item the caller already holds: catch-up. The page carries
+     * only items FIRST WRITTEN AFTER this one — catch-up is about what was
+     * written since, never about place, so a late-written item placed earlier
+     * in the conversation is delivered rather than skipped — ordered by
+     * descending place. An item delivered twice is absorbed by its identity.
+     * The store tracks nothing about what it previously served — the caller
+     * states its own high-water mark.
+     *
+     * @generated from field: store.v1.StoreItemPointer known_through = 3;
+     */
+    value: StoreItemPointer;
+    case: "knownThrough";
+  } | {
+    /**
+     * No history at all: the opening page carries no items and the tail
+     * begins after the newest item as of this open. For a caller that holds
+     * nothing and loads history only when a reader asks for it (newest page
+     * via a repaint read, older pages via ReadAgentPage). An item the caller
+     * later reads and also receives on the tail is absorbed by its identity.
+     *
+     * @generated from field: store.v1.AgentSessionTailOnly tail_only = 5;
+     */
+    value: AgentSessionTailOnly;
+    case: "tailOnly";
+  } | { case: undefined; value?: undefined };
 
   /**
    * Whether the caller will FOLLOW this open with a watch. UNSET/false = a
@@ -160,7 +173,7 @@ export type OpenAgentSessionFailure = Message<"store.v1.OpenAgentSessionFailure"
    */
   kind: {
     /**
-     * Empty agent id, zero page_size, or a known_through that is empty or
+     * Empty agent id, or a known_through that is empty or
      * not store-minted.
      *
      * @generated from field: store.v1.OpenAgentSessionInvalidRequest invalid_request = 2;
@@ -266,4 +279,20 @@ export type OpenAgentSessionStalePointer = Message<"store.v1.OpenAgentSessionSta
  */
 export const OpenAgentSessionStalePointerSchema: GenMessage<OpenAgentSessionStalePointer> = /*@__PURE__*/
   messageDesc(file_store_v1_endpoint_open_agent_session, 7);
+
+/**
+ * Open the tail only: no opening items. DELIBERATELY EMPTY: the arm's presence
+ * is the whole instruction.
+ *
+ * @generated from message store.v1.AgentSessionTailOnly
+ */
+export type AgentSessionTailOnly = Message<"store.v1.AgentSessionTailOnly"> & {
+};
+
+/**
+ * Describes the message store.v1.AgentSessionTailOnly.
+ * Use `create(AgentSessionTailOnlySchema)` to create a new message.
+ */
+export const AgentSessionTailOnlySchema: GenMessage<AgentSessionTailOnly> = /*@__PURE__*/
+  messageDesc(file_store_v1_endpoint_open_agent_session, 8);
 

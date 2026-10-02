@@ -36,8 +36,6 @@ type ReadHistoryRequest struct {
 	// Any book the store holds may be named — a fork's daemon reads its
 	// parent's book this way; an unknown agent is a refusal.
 	Target *v1.AgentId `protobuf:"bytes,1,opt,name=target,proto3,oneof" json:"target,omitempty"`
-	// This page's budget.
-	PageSize uint32 `protobuf:"varint,2,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
 	// Where this page begins. THE ARM IS THE POSITION.
 	//
 	// Types that are valid to be assigned to Position:
@@ -85,13 +83,6 @@ func (x *ReadHistoryRequest) GetTarget() *v1.AgentId {
 		return x.Target
 	}
 	return nil
-}
-
-func (x *ReadHistoryRequest) GetPageSize() uint32 {
-	if x != nil {
-		return x.PageSize
-	}
-	return 0
 }
 
 func (x *ReadHistoryRequest) GetPosition() isReadHistoryRequest_Position {
@@ -545,16 +536,15 @@ var File_shim_v1_endpoint_read_history_proto protoreflect.FileDescriptor
 
 const file_shim_v1_endpoint_read_history_proto_rawDesc = "" +
 	"\n" +
-	"#shim/v1/endpoint_read_history.proto\x12\ashim.v1\x1a$conversation/v1/agent_activity.proto\x1a\x1dconversation/v1/history.proto\"\xad\x02\n" +
+	"#shim/v1/endpoint_read_history.proto\x12\ashim.v1\x1a$conversation/v1/agent_activity.proto\x1a\x1dconversation/v1/history.proto\"\xa1\x02\n" +
 	"\x12ReadHistoryRequest\x125\n" +
-	"\x06target\x18\x01 \x01(\v2\x18.conversation.v1.AgentIdH\x01R\x06target\x88\x01\x01\x12\x1b\n" +
-	"\tpage_size\x18\x02 \x01(\rR\bpageSize\x121\n" +
+	"\x06target\x18\x01 \x01(\v2\x18.conversation.v1.AgentIdH\x01R\x06target\x88\x01\x01\x121\n" +
 	"\x05first\x18\x03 \x01(\v2\x19.shim.v1.ReadHistoryFirstH\x00R\x05first\x127\n" +
 	"\x05after\x18\x04 \x01(\v2\x1f.conversation.v1.HistoryPointerH\x00R\x05after\x12@\n" +
 	"\athrough\x18\x05 \x01(\v2$.conversation.v1.ConversationThroughH\x00R\athroughB\n" +
 	"\n" +
 	"\bpositionB\t\n" +
-	"\a_target\"\x12\n" +
+	"\a_targetJ\x04\b\x02\x10\x03R\tpage_size\"\x12\n" +
 	"\x10ReadHistoryFirst\"\x91\x01\n" +
 	"\x13ReadHistoryResponse\x127\n" +
 	"\asuccess\x18\x01 \x01(\v2\x1b.shim.v1.ReadHistorySuccessH\x00R\asuccess\x127\n" +

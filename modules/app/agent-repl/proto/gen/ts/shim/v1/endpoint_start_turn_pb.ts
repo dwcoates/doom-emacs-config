@@ -23,7 +23,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file shim/v1/endpoint_start_turn.proto.
  */
 export const file_shim_v1_endpoint_start_turn: GenFile = /*@__PURE__*/
-  fileDesc("CiFzaGltL3YxL2VuZHBvaW50X3N0YXJ0X3R1cm4ucHJvdG8SB3NoaW0udjEiuAIKEFN0YXJ0VHVyblJlcXVlc3QSJQoEdHVybhgBIAEoCzIXLmNvbnZlcnNhdGlvbi52MS5UdXJuSWQSJwoEc2FpZBgCIAEoCzIZLmNvbnZlcnNhdGlvbi52MS5Vc2VyU2FpZBItCgZvcmlnaW4YAyABKA4yHS5jb252ZXJzYXRpb24udjEuUHJvbXB0T3JpZ2luEhEKCXBhZ2Vfc2l6ZRgEIAEoDRI7Cg1rbm93bl90aHJvdWdoGAUgASgLMh8uY29udmVyc2F0aW9uLnYxLkhpc3RvcnlQb2ludGVySACIAQESGQoRam9pbl9ydW5uaW5nX3R1cm4YBiABKAgSGAoLdmVuZG9yX25vdGUYByABKAlIAYgBAUIQCg5fa25vd25fdGhyb3VnaEIOCgxfdmVuZG9yX25vdGUieQoRU3RhcnRUdXJuUmVzcG9uc2USLAoHc3VjY2VzcxgBIAEoCzIZLnNoaW0udjEuU3RhcnRUdXJuU3VjY2Vzc0gAEiwKB2ZhaWx1cmUYAiABKAsyGS5zaGltLnYxLlN0YXJ0VHVybkZhaWx1cmVIAEIICgZyZXN1bHQibAoQU3RhcnRUdXJuU3VjY2VzcxIsCgZwcm9tcHQYASABKAsyHC5jb252ZXJzYXRpb24udjEuQWdlbnRQcm9tcHQSKgoEcGFnZRgCIAEoCzIcLmNvbnZlcnNhdGlvbi52MS5IaXN0b3J5UGFnZSKLAgoQU3RhcnRUdXJuRmFpbHVyZRIOCgZkZXRhaWwYASABKAkSPgoRdHVybl9hbHJlYWR5X29wZW4YAiABKAsyIS5zaGltLnYxLlN0YXJ0VHVyblR1cm5BbHJlYWR5T3BlbkgAEjEKCm5vX3Nlc3Npb24YAyABKAsyGy5zaGltLnYxLlN0YXJ0VHVybk5vU2Vzc2lvbkgAEjkKDnZlbmRvcl9yZWZ1c2VkGAQgASgLMh8uc2hpbS52MS5TdGFydFR1cm5WZW5kb3JSZWZ1c2VkSAASMQoKcXVlcnlfZGVhZBgFIAEoCzIbLnNoaW0udjEuU3RhcnRUdXJuUXVlcnlEZWFkSABCBgoEa2luZCIrChhTdGFydFR1cm5UdXJuQWxyZWFkeU9wZW5KBAgBEAJSCWtlZXBhbGl2ZSIUChJTdGFydFR1cm5Ob1Nlc3Npb24iGAoWU3RhcnRUdXJuVmVuZG9yUmVmdXNlZCIUChJTdGFydFR1cm5RdWVyeURlYWRCIFoeYWdlbnRyZXBsL3Byb3RvL3NoaW0vdjE7c2hpbXYxYgZwcm90bzM", [file_conversation_v1_history, file_conversation_v1_turn, file_conversation_v1_user, file_conversation_v1_prompt_origin]);
+  fileDesc("CiFzaGltL3YxL2VuZHBvaW50X3N0YXJ0X3R1cm4ucHJvdG8SB3NoaW0udjEi3QIKEFN0YXJ0VHVyblJlcXVlc3QSJQoEdHVybhgBIAEoCzIXLmNvbnZlcnNhdGlvbi52MS5UdXJuSWQSJwoEc2FpZBgCIAEoCzIZLmNvbnZlcnNhdGlvbi52MS5Vc2VyU2FpZBItCgZvcmlnaW4YAyABKA4yHS5jb252ZXJzYXRpb24udjEuUHJvbXB0T3JpZ2luEjgKDWtub3duX3Rocm91Z2gYBSABKAsyHy5jb252ZXJzYXRpb24udjEuSGlzdG9yeVBvaW50ZXJIABIvCgl0YWlsX29ubHkYCCABKAsyGi5zaGltLnYxLlN0YXJ0VHVyblRhaWxPbmx5SAASGQoRam9pbl9ydW5uaW5nX3R1cm4YBiABKAgSGAoLdmVuZG9yX25vdGUYByABKAlIAYgBAUIJCgdvcGVuaW5nQg4KDF92ZW5kb3Jfbm90ZUoECAQQBVIJcGFnZV9zaXplInkKEVN0YXJ0VHVyblJlc3BvbnNlEiwKB3N1Y2Nlc3MYASABKAsyGS5zaGltLnYxLlN0YXJ0VHVyblN1Y2Nlc3NIABIsCgdmYWlsdXJlGAIgASgLMhkuc2hpbS52MS5TdGFydFR1cm5GYWlsdXJlSABCCAoGcmVzdWx0ImwKEFN0YXJ0VHVyblN1Y2Nlc3MSLAoGcHJvbXB0GAEgASgLMhwuY29udmVyc2F0aW9uLnYxLkFnZW50UHJvbXB0EioKBHBhZ2UYAiABKAsyHC5jb252ZXJzYXRpb24udjEuSGlzdG9yeVBhZ2UiiwIKEFN0YXJ0VHVybkZhaWx1cmUSDgoGZGV0YWlsGAEgASgJEj4KEXR1cm5fYWxyZWFkeV9vcGVuGAIgASgLMiEuc2hpbS52MS5TdGFydFR1cm5UdXJuQWxyZWFkeU9wZW5IABIxCgpub19zZXNzaW9uGAMgASgLMhsuc2hpbS52MS5TdGFydFR1cm5Ob1Nlc3Npb25IABI5Cg52ZW5kb3JfcmVmdXNlZBgEIAEoCzIfLnNoaW0udjEuU3RhcnRUdXJuVmVuZG9yUmVmdXNlZEgAEjEKCnF1ZXJ5X2RlYWQYBSABKAsyGy5zaGltLnYxLlN0YXJ0VHVyblF1ZXJ5RGVhZEgAQgYKBGtpbmQiKwoYU3RhcnRUdXJuVHVybkFscmVhZHlPcGVuSgQIARACUglrZWVwYWxpdmUiFAoSU3RhcnRUdXJuTm9TZXNzaW9uIhgKFlN0YXJ0VHVyblZlbmRvclJlZnVzZWQiFAoSU3RhcnRUdXJuUXVlcnlEZWFkIhMKEVN0YXJ0VHVyblRhaWxPbmx5QiBaHmFnZW50cmVwbC9wcm90by9zaGltL3YxO3NoaW12MWIGcHJvdG8z", [file_conversation_v1_history, file_conversation_v1_turn, file_conversation_v1_user, file_conversation_v1_prompt_origin]);
 
 /**
  * The prompt the daemon is handing over NOW. Nothing here is a queue entry:
@@ -79,19 +79,31 @@ export type StartTurnRequest = Message<"shim.v1.StartTurnRequest"> & {
   origin: PromptOrigin;
 
   /**
-   * The opening page's budget.
+   * What the opening page carries. UNSET = repaint: the newest page rides the
+   * response.
    *
-   * @generated from field: uint32 page_size = 4;
+   * @generated from oneof shim.v1.StartTurnRequest.opening
    */
-  pageSize: number;
-
-  /**
-   * The newest entry the caller already holds. UNSET = repaint: a full first
-   * page rides the response. SET = catch-up: only entries newer than this.
-   *
-   * @generated from field: optional conversation.v1.HistoryPointer known_through = 5;
-   */
-  knownThrough?: HistoryPointer | undefined;
+  opening: {
+    /**
+     * The newest entry the caller already holds: catch-up, only entries newer
+     * than this.
+     *
+     * @generated from field: conversation.v1.HistoryPointer known_through = 5;
+     */
+    value: HistoryPointer;
+    case: "knownThrough";
+  } | {
+    /**
+     * No history: the opening page carries no entries. For a caller that
+     * holds nothing of this agent's history and loads it only on a reader's
+     * request.
+     *
+     * @generated from field: shim.v1.StartTurnTailOnly tail_only = 8;
+     */
+    value: StartTurnTailOnly;
+    case: "tailOnly";
+  } | { case: undefined; value?: undefined };
 
   /**
    * JOIN THE RUNNING TURN rather than wait for it to end: the daemon's
@@ -172,7 +184,7 @@ export const StartTurnResponseSchema: GenMessage<StartTurnResponse> = /*@__PURE_
 /**
  * The prompt was accepted and the turn is open. The turn's frames are
  * WatchAgent's; what returns here is the prompt as delivered and the OPENING
- * PAGE the request's `page_size` / `known_through` asked for.
+ * PAGE the request's `opening` asked for.
  *
  * @generated from message shim.v1.StartTurnSuccess
  */
@@ -186,8 +198,9 @@ export type StartTurnSuccess = Message<"shim.v1.StartTurnSuccess"> & {
   prompt?: AgentPrompt | undefined;
 
   /**
-   * The opening page: a full first page of `page_size` entries when
-   * `known_through` was UNSET, else only the entries newer than it. Always
+   * The opening page: the newest store page when `opening` was UNSET, only
+   * the entries newer than `known_through` when that was set, and no entries
+   * under `tail_only`. Always
    * set on success; an empty page is a page with no entries, never an
    * absent one.
    *
@@ -328,4 +341,20 @@ export type StartTurnQueryDead = Message<"shim.v1.StartTurnQueryDead"> & {
  */
 export const StartTurnQueryDeadSchema: GenMessage<StartTurnQueryDead> = /*@__PURE__*/
   messageDesc(file_shim_v1_endpoint_start_turn, 7);
+
+/**
+ * Open the turn's page with no history. DELIBERATELY EMPTY: the arm's
+ * presence is the whole instruction.
+ *
+ * @generated from message shim.v1.StartTurnTailOnly
+ */
+export type StartTurnTailOnly = Message<"shim.v1.StartTurnTailOnly"> & {
+};
+
+/**
+ * Describes the message shim.v1.StartTurnTailOnly.
+ * Use `create(StartTurnTailOnlySchema)` to create a new message.
+ */
+export const StartTurnTailOnlySchema: GenMessage<StartTurnTailOnly> = /*@__PURE__*/
+  messageDesc(file_shim_v1_endpoint_start_turn, 8);
 

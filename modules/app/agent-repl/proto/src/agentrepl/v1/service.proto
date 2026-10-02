@@ -28,6 +28,7 @@ import "agentrepl/v1/endpoint_create_workspace.proto";
 import "agentrepl/v1/endpoint_register_repository.proto";
 import "agentrepl/v1/endpoint_bind_workspace_session.proto";
 import "agentrepl/v1/endpoint_list_workspace_transcripts.proto";
+import "agentrepl/v1/endpoint_load_feed_through.proto";
 import "agentrepl/v1/endpoint_open_workspace.proto";
 import "agentrepl/v1/endpoint_close_workspace.proto";
 import "agentrepl/v1/endpoint_kill_workspace.proto";
@@ -111,6 +112,9 @@ service AgentRepl {
   // The feed's history half: a page of rows for one container, "first" or
   // "next" — the daemon holds the walk. See endpoint_get_feed_page.proto.
   rpc GetFeedPage(GetFeedPageRequest) returns (GetFeedPageResponse);
+  // Brings one root-feed row into the reader's loaded pages, streaming every
+  // page between. See endpoint_load_feed_through.proto.
+  rpc LoadFeedThrough(LoadFeedThroughRequest) returns (stream LoadFeedThroughResponse);
 
   // "Stop that": the running turn, or a detached bubble's work — the arm is
   // the target. See endpoint_interrupt.proto.

@@ -17,16 +17,27 @@ option go_package = "agentrepl/proto/shim/v1;shimv1";
 message WatchAgentRequest {
   // WHOM. UNSET = the session's prompt thread, resolved by the shim.
   optional conversation.v1.AgentId target = 1;
-  // The opening page's budget.
-  uint32 page_size = 2;
-  // The newest entry the caller already holds. UNSET = repaint: a full first
-  // page in descending conversation place. SET = catch-up: the opening page
-  // carries only entries FIRST WRITTEN AFTER this one — catch-up is about what
-  // was written since, never about place, so a late-written entry placed
-  // earlier in the conversation is delivered rather than skipped. The shim tracks nothing about what it previously served — the
-  // caller states its own high-water mark. A fresh agent simply yields an
-  // empty page.
-  optional conversation.v1.HistoryPointer known_through = 3;
+  // Tag 2 (`page_size`) is RETIRED: a page is the store's page — ONE size for
+  // the whole stack (50 entries), owned by the store and stated nowhere else.
+  reserved 2;
+  reserved "page_size";
+  // What the opening page carries. UNSET = repaint: the newest page in
+  // descending conversation place.
+  oneof opening {
+    // The newest entry the caller already holds: catch-up. The opening page
+    // carries only entries FIRST WRITTEN AFTER this one — catch-up is about
+    // what was written since, never about place, so a late-written entry
+    // placed earlier in the conversation is delivered rather than skipped. The
+    // shim tracks nothing about what it previously served — the caller states
+    // its own high-water mark. A fresh agent simply yields an empty page.
+    conversation.v1.HistoryPointer known_through = 3;
+    // No history: the opening page carries no entries and the stream carries
+    // only what is written from now on. The daemon opens every watch this way
+    // when it holds nothing of the agent's history, and loads history only
+    // when a reader asks for it (ReadHistory). An entry read that way and also
+    // received on this stream is absorbed by its identity.
+    WatchAgentTailOnly tail_only = 4;
+  }
 }
 
 // A STANDING stream: the opening page, then one frame per entry as written —
@@ -48,3 +59,7 @@ message WatchAgentResponse {
     conversation.v1.HistoryEntryAt retired = 3;
   }
 }
+
+// Open the stream with no history. DELIBERATELY EMPTY: the arm's presence is
+// the whole instruction.
+message WatchAgentTailOnly {}

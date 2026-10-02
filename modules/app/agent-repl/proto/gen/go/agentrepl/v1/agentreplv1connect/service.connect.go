@@ -58,6 +58,9 @@ const (
 	AgentReplWatchFeedProcedure = "/agentrepl.v1.AgentRepl/WatchFeed"
 	// AgentReplGetFeedPageProcedure is the fully-qualified name of the AgentRepl's GetFeedPage RPC.
 	AgentReplGetFeedPageProcedure = "/agentrepl.v1.AgentRepl/GetFeedPage"
+	// AgentReplLoadFeedThroughProcedure is the fully-qualified name of the AgentRepl's LoadFeedThrough
+	// RPC.
+	AgentReplLoadFeedThroughProcedure = "/agentrepl.v1.AgentRepl/LoadFeedThrough"
 	// AgentReplInterruptProcedure is the fully-qualified name of the AgentRepl's Interrupt RPC.
 	AgentReplInterruptProcedure = "/agentrepl.v1.AgentRepl/Interrupt"
 	// AgentReplPlanRollbackProcedure is the fully-qualified name of the AgentRepl's PlanRollback RPC.
@@ -223,6 +226,7 @@ var (
 	agentReplOpenFeedMethodDescriptor                 = agentReplServiceDescriptor.Methods().ByName("OpenFeed")
 	agentReplWatchFeedMethodDescriptor                = agentReplServiceDescriptor.Methods().ByName("WatchFeed")
 	agentReplGetFeedPageMethodDescriptor              = agentReplServiceDescriptor.Methods().ByName("GetFeedPage")
+	agentReplLoadFeedThroughMethodDescriptor          = agentReplServiceDescriptor.Methods().ByName("LoadFeedThrough")
 	agentReplInterruptMethodDescriptor                = agentReplServiceDescriptor.Methods().ByName("Interrupt")
 	agentReplPlanRollbackMethodDescriptor             = agentReplServiceDescriptor.Methods().ByName("PlanRollback")
 	agentReplRollBackMethodDescriptor                 = agentReplServiceDescriptor.Methods().ByName("RollBack")
@@ -311,6 +315,9 @@ type AgentReplClient interface {
 	// The feed's history half: a page of rows for one container, "first" or
 	// "next" — the daemon holds the walk. See endpoint_get_feed_page.proto.
 	GetFeedPage(context.Context, *connect.Request[v1.GetFeedPageRequest]) (*connect.Response[v1.GetFeedPageResponse], error)
+	// Brings one root-feed row into the reader's loaded pages, streaming every
+	// page between. See endpoint_load_feed_through.proto.
+	LoadFeedThrough(context.Context, *connect.Request[v1.LoadFeedThroughRequest]) (*connect.ServerStreamForClient[v1.LoadFeedThroughResponse], error)
 	// "Stop that": the running turn, or a detached bubble's work — the arm is
 	// the target. See endpoint_interrupt.proto.
 	Interrupt(context.Context, *connect.Request[v1.InterruptRequest]) (*connect.Response[v1.InterruptResponse], error)
@@ -532,6 +539,12 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			httpClient,
 			baseURL+AgentReplGetFeedPageProcedure,
 			connect.WithSchema(agentReplGetFeedPageMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		loadFeedThrough: connect.NewClient[v1.LoadFeedThroughRequest, v1.LoadFeedThroughResponse](
+			httpClient,
+			baseURL+AgentReplLoadFeedThroughProcedure,
+			connect.WithSchema(agentReplLoadFeedThroughMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
 		interrupt: connect.NewClient[v1.InterruptRequest, v1.InterruptResponse](
@@ -900,6 +913,7 @@ type agentReplClient struct {
 	openFeed                 *connect.Client[v1.OpenFeedRequest, v1.OpenFeedResponse]
 	watchFeed                *connect.Client[v1.WatchFeedRequest, v1.WatchFeedResponse]
 	getFeedPage              *connect.Client[v1.GetFeedPageRequest, v1.GetFeedPageResponse]
+	loadFeedThrough          *connect.Client[v1.LoadFeedThroughRequest, v1.LoadFeedThroughResponse]
 	interrupt                *connect.Client[v1.InterruptRequest, v1.InterruptResponse]
 	planRollback             *connect.Client[v1.PlanRollbackRequest, v1.PlanRollbackResponse]
 	rollBack                 *connect.Client[v1.RollBackRequest, v1.RollBackResponse]
@@ -994,6 +1008,11 @@ func (c *agentReplClient) WatchFeed(ctx context.Context, req *connect.Request[v1
 // GetFeedPage calls agentrepl.v1.AgentRepl.GetFeedPage.
 func (c *agentReplClient) GetFeedPage(ctx context.Context, req *connect.Request[v1.GetFeedPageRequest]) (*connect.Response[v1.GetFeedPageResponse], error) {
 	return c.getFeedPage.CallUnary(ctx, req)
+}
+
+// LoadFeedThrough calls agentrepl.v1.AgentRepl.LoadFeedThrough.
+func (c *agentReplClient) LoadFeedThrough(ctx context.Context, req *connect.Request[v1.LoadFeedThroughRequest]) (*connect.ServerStreamForClient[v1.LoadFeedThroughResponse], error) {
+	return c.loadFeedThrough.CallServerStream(ctx, req)
 }
 
 // Interrupt calls agentrepl.v1.AgentRepl.Interrupt.
@@ -1318,6 +1337,9 @@ type AgentReplHandler interface {
 	// The feed's history half: a page of rows for one container, "first" or
 	// "next" — the daemon holds the walk. See endpoint_get_feed_page.proto.
 	GetFeedPage(context.Context, *connect.Request[v1.GetFeedPageRequest]) (*connect.Response[v1.GetFeedPageResponse], error)
+	// Brings one root-feed row into the reader's loaded pages, streaming every
+	// page between. See endpoint_load_feed_through.proto.
+	LoadFeedThrough(context.Context, *connect.Request[v1.LoadFeedThroughRequest], *connect.ServerStream[v1.LoadFeedThroughResponse]) error
 	// "Stop that": the running turn, or a detached bubble's work — the arm is
 	// the target. See endpoint_interrupt.proto.
 	Interrupt(context.Context, *connect.Request[v1.InterruptRequest]) (*connect.Response[v1.InterruptResponse], error)
@@ -1535,6 +1557,12 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		AgentReplGetFeedPageProcedure,
 		svc.GetFeedPage,
 		connect.WithSchema(agentReplGetFeedPageMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplLoadFeedThroughHandler := connect.NewServerStreamHandler(
+		AgentReplLoadFeedThroughProcedure,
+		svc.LoadFeedThrough,
+		connect.WithSchema(agentReplLoadFeedThroughMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
 	agentReplInterruptHandler := connect.NewUnaryHandler(
@@ -1907,6 +1935,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplWatchFeedHandler.ServeHTTP(w, r)
 		case AgentReplGetFeedPageProcedure:
 			agentReplGetFeedPageHandler.ServeHTTP(w, r)
+		case AgentReplLoadFeedThroughProcedure:
+			agentReplLoadFeedThroughHandler.ServeHTTP(w, r)
 		case AgentReplInterruptProcedure:
 			agentReplInterruptHandler.ServeHTTP(w, r)
 		case AgentReplPlanRollbackProcedure:
@@ -2060,6 +2090,10 @@ func (UnimplementedAgentReplHandler) WatchFeed(context.Context, *connect.Request
 
 func (UnimplementedAgentReplHandler) GetFeedPage(context.Context, *connect.Request[v1.GetFeedPageRequest]) (*connect.Response[v1.GetFeedPageResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.GetFeedPage is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) LoadFeedThrough(context.Context, *connect.Request[v1.LoadFeedThroughRequest], *connect.ServerStream[v1.LoadFeedThroughResponse]) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.LoadFeedThrough is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) Interrupt(context.Context, *connect.Request[v1.InterruptRequest]) (*connect.Response[v1.InterruptResponse], error) {

@@ -20,8 +20,10 @@ message ReadHistoryRequest {
   // Any book the store holds may be named — a fork's daemon reads its
   // parent's book this way; an unknown agent is a refusal.
   optional conversation.v1.AgentId target = 1;
-  // This page's budget.
-  uint32 page_size = 2;
+  // Tag 2 (`page_size`) is RETIRED: a page is the store's page — ONE size for
+  // the whole stack (50 entries), owned by the store and stated nowhere else.
+  reserved 2;
+  reserved "page_size";
   // Where this page begins. THE ARM IS THE POSITION.
   oneof position {
     // The newest page. The newest entry is the serving side's fact, never a

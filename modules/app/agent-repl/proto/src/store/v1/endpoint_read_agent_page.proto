@@ -17,9 +17,10 @@ option go_package = "agentrepl/proto/store/v1;storev1";
 message ReadAgentPageRequest {
   // The book: the agent whose page lines are wanted.
   conversation.v1.AgentId book = 1;
-  // How many lines this page may hold. The caller's budget per call, so it
-  // can vary across calls of one walk.
-  uint32 page_size = 2;
+  // Tag 2 (`page_size`) is RETIRED: a page is the store's page — ONE size for
+  // the whole stack (50 lines), owned by the store and stated nowhere else.
+  reserved 2;
+  reserved "page_size";
   // Where the page begins. THE ARM IS THE POSITION. There is no newest-page
   // arm: the newest page is OpenAgentSession's answer.
   oneof position {

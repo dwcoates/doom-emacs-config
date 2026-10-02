@@ -48,11 +48,21 @@ message StartTurnRequest {
   // Closed attribution copied onto the turn's durable record so a stored turn
   // can be traced to the exact situation that caused it.
   conversation.v1.PromptOrigin origin = 3;
-  // The opening page's budget.
-  uint32 page_size = 4;
-  // The newest entry the caller already holds. UNSET = repaint: a full first
-  // page rides the response. SET = catch-up: only entries newer than this.
-  optional conversation.v1.HistoryPointer known_through = 5;
+  // Tag 4 (`page_size`) is RETIRED: a page is the store's page — ONE size for
+  // the whole stack (50 entries), owned by the store and stated nowhere else.
+  reserved 4;
+  reserved "page_size";
+  // What the opening page carries. UNSET = repaint: the newest page rides the
+  // response.
+  oneof opening {
+    // The newest entry the caller already holds: catch-up, only entries newer
+    // than this.
+    conversation.v1.HistoryPointer known_through = 5;
+    // No history: the opening page carries no entries. For a caller that
+    // holds nothing of this agent's history and loads it only on a reader's
+    // request.
+    StartTurnTailOnly tail_only = 8;
+  }
   // JOIN THE RUNNING TURN rather than wait for it to end: the daemon's
   // `after_tool_call` verdict (2026-09-30). When a turn of the daemon's is
   // open, the prompt is pushed into the vendor's input at once, with no
@@ -92,13 +102,14 @@ message StartTurnResponse {
 
 // The prompt was accepted and the turn is open. The turn's frames are
 // WatchAgent's; what returns here is the prompt as delivered and the OPENING
-// PAGE the request's `page_size` / `known_through` asked for.
+// PAGE the request's `opening` asked for.
 message StartTurnSuccess {
   // The prompt as delivered: the daemon's id adopted, the recipient resolved,
   // the text as accepted. `prompt.agent` is the address for WatchAgent. The same message history replays.
   conversation.v1.AgentPrompt prompt = 1;
-  // The opening page: a full first page of `page_size` entries when
-  // `known_through` was UNSET, else only the entries newer than it. Always
+  // The opening page: the newest store page when `opening` was UNSET, only
+  // the entries newer than `known_through` when that was set, and no entries
+  // under `tail_only`. Always
   // set on success; an empty page is a page with no entries, never an
   // absent one.
   conversation.v1.HistoryPage page = 2;
@@ -145,3 +156,7 @@ message StartTurnTurnAlreadyOpen {
 message StartTurnNoSession {}
 message StartTurnVendorRefused {}
 message StartTurnQueryDead {}
+
+// Open the turn's page with no history. DELIBERATELY EMPTY: the arm's
+// presence is the whole instruction.
+message StartTurnTailOnly {}
