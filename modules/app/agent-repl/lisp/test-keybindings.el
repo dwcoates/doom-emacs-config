@@ -131,6 +131,26 @@
                  agent-repl-queue-deferred-prompt))
     (should (commandp cmd))))
 
+;;;; ---- Doom's workspace navigation is remapped to the request path ----
+
+(ert-deftest agent-repl-test-keybindings-doom-switch-left-is-remapped ()
+  "Doom's `+workspace/switch-left' runs the drawn-bar request instead."
+  (should (eq (lookup-key agent-repl-workspace-numerals-mode-map
+                          [remap +workspace/switch-left])
+              'agent-repl-switch-left)))
+
+(ert-deftest agent-repl-test-keybindings-doom-switch-right-is-remapped ()
+  "Doom's `+workspace/switch-right' runs the drawn-bar request instead."
+  (should (eq (lookup-key agent-repl-workspace-numerals-mode-map
+                          [remap +workspace/switch-right])
+              'agent-repl-switch-right)))
+
+(ert-deftest agent-repl-test-keybindings-doom-switch-to-n-is-remapped-one-based ()
+  "Doom's 0-based `+workspace/switch-to-N' runs slot N+1 of the drawn bar."
+  (should (eq (lookup-key agent-repl-workspace-numerals-mode-map
+                          [remap +workspace/switch-to-0])
+              'agent-repl-switch-to-workspace-1)))
+
 ;;;; ---- Every retired command is gone ----
 
 (ert-deftest agent-repl-test-keybindings-retired-commands-are-gone ()
