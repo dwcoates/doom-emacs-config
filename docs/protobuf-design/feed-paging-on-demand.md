@@ -111,3 +111,19 @@ and the daemon to hold and pull only the pages a webapp asked for.
   `FailureHistoryReplayTruncated`: with on-demand paging a walk can always
   reach the conversation's start, so the daemon stops emitting it. Still
   referenced by the webapp's page-error rendering.
+
+### 5. The open names the book's newest item (store.v1)
+
+- WHAT: `OpenAgentSessionSuccess.newest` (3, optional `StoreItemPointer`):
+  the book's newest item as of the open, for every opening; unset = empty
+  book.
+- WHY: under `tail_only` the shim had no anchor for teardown, lossless
+  re-open or the unannounced-empty-book check, and paid one extra page read
+  per watch to get one — a page no reader asked for (owner ruling 3). The
+  pointer makes that read unnecessary. A `tail_only` page's `floor` therefore
+  means only "nothing to walk from this page", never "the book is empty".
+- Known limitation (recorded, not fixed): a catch-up whose gap exceeds one
+  page is continued by PLACE (`ReadAgentPage after`), so a line written after
+  the caller's mark but placed before it can be missed. Narrower than the
+  previous 1024-entry catch-up, which logged and skipped. Fix would be a
+  write-order continuation cursor on the store's read.
