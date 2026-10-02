@@ -299,40 +299,21 @@ the roster/footer; Emacs's durable merged memory was REMOVED."
                      (plist-get ref :id)))
       (should (agent-repl--ws-live-p agent-repl-itest-verbs--ws)))))
 
-(ert-deftest agent-repl-itest-verbs-restart-sends-force-false-explicitly ()
-  "A graceful restart sends `force' false, not an absent field.
-`force' is a plain bool, so false is a VALUE the daemon must receive; the
-daemon owns everything the restart entails, webapp bounce included."
+(ert-deftest agent-repl-itest-verbs-restart-sends-no-force-field ()
+  "A restart sends the workspace alone: there is no `force' field.
+The daemon owns everything the restart entails, webapp bounce included, and
+every restart is immediate."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-verbs--with-workspace daemon ref
       (ignore ref)
       ;; Act.
-      (agent-repl-verb-restart agent-repl-itest-verbs--ws nil)
-      (agent-repl-itest--await-call daemon "RestartWorkspace")
-      ;; Assert: protojson omits a false bool, so its absence IS false — and
-      ;; the assertion is that no `true' was sent.
-      (should-not (eq (agent-repl-itest--body-field
-                       (agent-repl-itest-verbs--body daemon "RestartWorkspace")
-                       'force)
-                      t)))))
-
-(ert-deftest agent-repl-itest-verbs-restart-force-sends-force-true ()
-  "A forced restart sends `force' true: interrupt and bounce.
-The agent is NOT resumed afterwards — continuing is the user's next
-prompt."
-  ;; Arrange.
-  (agent-repl-itest--with-fake-daemon daemon
-    (agent-repl-itest-verbs--with-workspace daemon ref
-      (ignore ref)
-      ;; Act.
-      (agent-repl-verb-restart agent-repl-itest-verbs--ws t)
+      (agent-repl-verb-restart agent-repl-itest-verbs--ws)
       (agent-repl-itest--await-call daemon "RestartWorkspace")
       ;; Assert.
-      (should (eq (agent-repl-itest--body-field
-                   (agent-repl-itest-verbs--body daemon "RestartWorkspace")
-                   'force)
-                  t)))))
+      (should-not (string-match-p
+                   "\"force\""
+                   (car (agent-repl-itest--call-raw-bodies daemon "RestartWorkspace")))))))
 
 ;;;; ---- CreateWorkspace: the two forms and the creation facts ----
 
@@ -718,7 +699,7 @@ tell the daemon ever heard the request."
                      (push (apply #'format fmt args) messages)
                      nil)))
           ;; Act.
-          (agent-repl-verb-restart agent-repl-itest-verbs--ws nil)
+          (agent-repl-verb-restart agent-repl-itest-verbs--ws)
           (agent-repl-itest--await-call daemon "RestartWorkspace")
           ;; Assert: "Restart success -> `message'" (elisp-fanout.md §9).
           (agent-repl-itest--wait-until (lambda () messages) nil
@@ -795,22 +776,6 @@ this test loudly rather than hanging a batch run."
           (should (member "close blocked -- see the workspace footer" messages)))))))
 
 ;;;; ---- Raw-wire explicit-false assertions (audit findings 72, 73) ----
-
-(ert-deftest agent-repl-itest-verbs-restart-graceful-sends-force-false-on-the-raw-wire ()
-  "A graceful restart's raw request body spells `force' explicitly false.
-Pins \"`force' ... always encoded explicitly, false included\"
-(elisp-fanout.md §5): the PARSED body drops a zero-valued bool, so only
-the raw wire text can tell an explicit false from an omitted field."
-  ;; Arrange.
-  (agent-repl-itest--with-fake-daemon daemon
-    (agent-repl-itest-verbs--with-workspace daemon ref
-      (ignore ref)
-      ;; Act.
-      (agent-repl-verb-restart agent-repl-itest-verbs--ws nil)
-      (agent-repl-itest--await-call daemon "RestartWorkspace")
-      ;; Assert.
-      (let ((raw (car (agent-repl-itest--call-raw-bodies daemon "RestartWorkspace"))))
-        (should (string-match-p (regexp-quote "\"force\":false") raw))))))
 
 (ert-deftest agent-repl-itest-verbs-merge-sends-own-branch-keep-open-false-on-the-raw-wire ()
   "Emacs's merge names its own branch as the source, `keep_open' spelled false.
@@ -1309,7 +1274,7 @@ by that op."
     (agent-repl-itest-verbs--with-workspace daemon ref
       (ignore ref)
       ;; Act.
-      (agent-repl-verb-restart agent-repl-itest-verbs--ws nil)
+      (agent-repl-verb-restart agent-repl-itest-verbs--ws)
       (agent-repl-itest--await-call daemon "RestartWorkspace")
       ;; Assert.
       (agent-repl-itest--wait-until
@@ -1630,12 +1595,10 @@ pass the declining test on its own."
                        (plist-get ref :id)))))))
 
 ;; audit-2 #30
-(ert-deftest agent-repl-itest-verbs-interactive-restart-with-a-prefix-forces ()
-  "`SPC o C-c' with a PREFIX ARGUMENT is a FORCED restart on the raw wire.
-verbs.el: \"A prefix argument makes it a FORCED restart\".  The
-interactive layer is what a keybinding actually reaches, and `force' is
-\"always encoded explicitly, false included\" — so the raw request is
-where `true' is read."
+(ert-deftest agent-repl-itest-verbs-interactive-restart-ignores-a-prefix ()
+  "`SPC o C-c' with a PREFIX ARGUMENT is the same immediate restart on the raw wire.
+There is no force mode: the prefix argument changes nothing, and the request
+body carries no `force' field."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-verbs--with-workspace daemon ref
@@ -1647,9 +1610,9 @@ where `true' is read."
           (call-interactively #'agent-repl-restart-workspace))
         (agent-repl-itest--await-call daemon "RestartWorkspace")
         ;; Assert.
-        (should (string-match-p
-                 "\"force\"[[:space:]]*:[[:space:]]*true"
-                 (car (agent-repl-itest--call-raw-bodies daemon "RestartWorkspace"))))))))
+        (should-not (string-match-p
+                     "\"force\""
+                     (car (agent-repl-itest--call-raw-bodies daemon "RestartWorkspace"))))))))
 
 ;; audit-2 #31
 (ert-deftest agent-repl-itest-verbs-session-health-error-arm-renders-no-verdict ()
@@ -2210,17 +2173,17 @@ log side, leaving the user-facing text (`--send''s `:on-failure') unpinned."
                       (regexp-quote "merge failed -- the daemon did not answer") m))
                    messages)))))))
 
-;;;; ---- #57: restart success's exact per-force text
+;;;; ---- #57: restart success's exact text
 
 ;; audit-3 #57
-(ert-deftest agent-repl-itest-verbs-restart-graceful-success-messages-the-exact-scheduled-text ()
-  "A graceful Restart success messages EXACTLY \"agent-repl: restart scheduled\".
+(ert-deftest agent-repl-itest-verbs-restart-success-messages-the-exact-under-way-text ()
+  "A Restart success messages EXACTLY \"agent-repl: restart under way\".
 The pre-existing `agent-repl-itest-verbs-restart-success-messages' asserts
 only a \"restart\" substring, which the `elisp.verbs.send op=restart' INFO
 line ALSO satisfies -- that line reaches `message' too, quietly, via
 `agent-repl--emit-message' -- so a success handler that never fired would
-still pass it.  The per-force text is what distinguishes the two, and only
-the exact string proves the SUCCESS branch ran."
+still pass it.  Only the exact string proves the SUCCESS branch ran, and
+that it never says \"scheduled\" for a restart that is immediate."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-verbs--with-workspace daemon ref
@@ -2229,34 +2192,14 @@ the exact string proves the SUCCESS branch ran."
         (cl-letf (((symbol-function 'message)
                    (lambda (fmt &rest args) (push (apply #'format fmt args) messages))))
           ;; Act.
-          (agent-repl-verb-restart agent-repl-itest-verbs--ws nil)
-          (agent-repl-itest--await-call daemon "RestartWorkspace")
-          ;; Assert.
-          (agent-repl-itest--wait-until
-           (lambda () (member "agent-repl: restart scheduled" messages))
-           nil "the exact graceful-restart message")
-          (should (member "agent-repl: restart scheduled" messages)))))))
-
-;; audit-3 #57
-(ert-deftest agent-repl-itest-verbs-restart-forced-success-messages-the-exact-under-way-text ()
-  "A FORCED Restart success messages EXACTLY \"agent-repl: restart under way\".
-The other half of the per-force text: a handler that always said
-\"scheduled\" would pass the graceful case and fail only here."
-  ;; Arrange.
-  (agent-repl-itest--with-fake-daemon daemon
-    (agent-repl-itest-verbs--with-workspace daemon ref
-      (ignore ref)
-      (let (messages)
-        (cl-letf (((symbol-function 'message)
-                   (lambda (fmt &rest args) (push (apply #'format fmt args) messages))))
-          ;; Act.
-          (agent-repl-verb-restart agent-repl-itest-verbs--ws t)
+          (agent-repl-verb-restart agent-repl-itest-verbs--ws)
           (agent-repl-itest--await-call daemon "RestartWorkspace")
           ;; Assert.
           (agent-repl-itest--wait-until
            (lambda () (member "agent-repl: restart under way" messages))
-           nil "the exact forced-restart message")
-          (should (member "agent-repl: restart under way" messages)))))))
+           nil "the exact restart message")
+          (should (member "agent-repl: restart under way" messages))
+          (should-not (member "agent-repl: restart scheduled" messages)))))))
 
 ;;;; ---- #58: admin-verb refusal arms and their op-named slugs
 
