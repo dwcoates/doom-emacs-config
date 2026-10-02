@@ -674,19 +674,32 @@ composer and vendor_info arms together."
         (progn (funcall encoder value) nil)
       (agent-repl-wire-error (cdr err)))))
 
-(ert-deftest agent-repl-test-wire-host-watch-daemon-request-names-emacs-its-build-and-focus ()
-  "Emacs connects as the `emacs' client, stating its elisp build and focus."
+(ert-deftest agent-repl-test-wire-host-watch-daemon-request-names-emacs-its-build-focus-and-instance ()
+  "Emacs connects as the `emacs' client, stating its elisp build, focus and instance."
   (should (equal (agent-repl-test-wire-host--quiet
                    (json-serialize (agent-repl-wire-encode-watch-daemon-request
                                     '(:client (:arm :emacs :value (:elisp-build "abc123"
-                                                                   :focus (:arm :focused)))))))
-                 "{\"emacs\":{\"elispBuild\":\"abc123\",\"focus\":{\"focused\":{}}}}")))
+                                                                   :focus (:arm :focused)
+                                                                   :instance "emacs-7"))))))
+                 "{\"emacs\":{\"elispBuild\":\"abc123\",\"focus\":{\"focused\":{}},\"instance\":{\"value\":\"emacs-7\"}}}")))
 
 (ert-deftest agent-repl-test-wire-host-watch-daemon-emacs-without-focus-is-refused ()
   "The focus is REQUIRED: the daemon decides banners on it from the first instant."
   (should (equal (agent-repl-test-wire-host--encode-breach
-                  #'agent-repl-wire-encode-watch-daemon-emacs '(:elisp-build "abc123"))
+                  #'agent-repl-wire-encode-watch-daemon-emacs '(:elisp-build "abc123" :instance "e"))
                  '("WatchDaemonEmacs" focus "required message field is absent"))))
+
+(ert-deftest agent-repl-test-wire-host-watch-daemon-emacs-without-instance-is-refused ()
+  "The instance is REQUIRED: the daemon tells a restart from a reconnect by it."
+  (should (equal (agent-repl-test-wire-host--encode-breach
+                  #'agent-repl-wire-encode-watch-daemon-emacs '(:elisp-build "abc123" :focus (:arm :focused)))
+                 '("WatchDaemonEmacs" instance "required message field is absent"))))
+
+(ert-deftest agent-repl-test-wire-host-editor-instance-empty-is-refused ()
+  "An empty instance is refused before anything is sent."
+  (should (equal (agent-repl-test-wire-host--encode-breach
+                  #'agent-repl-wire-encode-editor-instance "")
+                 '("EditorInstance" value "required string is empty"))))
 
 ;;;; ---- EditorFocus and ReportEditorFocus ----
 
@@ -781,7 +794,65 @@ as a contract breach."
                        #'string<)
                  (sort (list "shutdownAnnounced" "drainScheduled" "drainCancelled"
                              "mutationProgress" "reloadElisp" "ending" "faultsStanding"
-                             "persistentWifi" "newsDigest")
+                             "persistentWifi" "newsDigest" "startup")
+                       #'string<))))
+
+;;;; ---- DaemonStartupEvent ----
+
+(defconst agent-repl-test-wire-host--ref-json "{\"id\":\"w1\",\"dir\":\"/t/w1\"}"
+  "One workspace ref.")
+
+(ert-deftest agent-repl-test-wire-host-startup-decodes-each-event ()
+  "Every startup event arm decodes to its keyword and payload."
+  (dolist (case
+           `(("{\"opening\":{\"workspaces\":3}}" :opening (:workspaces 3))
+             (,(format "{\"workspaceOpen\":{\"workspace\":%s}}" agent-repl-test-wire-host--ref-json)
+              :workspace-open (:workspace (:id "w1" :dir "/t/w1")))
+             (,(format "{\"finished\":{\"ready\":1,\"total\":2,\"failed\":[{\"workspace\":%s,\"name\":\"one\"}]}}"
+                       agent-repl-test-wire-host--ref-json)
+              :finished (:ready 1 :total 2 :failed ((:workspace (:id "w1" :dir "/t/w1") :name "one"))))))
+    (let ((event (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-watch-daemon-response
+                  (format "{\"startup\":{\"atMs\":\"5\",%s}" (substring (nth 0 case) 1)))))
+      (should (equal (plist-get event :arm) :startup))
+      (should (equal (plist-get (plist-get event :value) :at-ms) 5))
+      (should (equal (plist-get (plist-get event :value) :event)
+                     (list :arm (nth 1 case) :value (nth 2 case)))))))
+
+(ert-deftest agent-repl-test-wire-host-startup-decodes-each-workspace-step ()
+  "Every workspace step arm decodes to its keyword and payload."
+  (dolist (case
+           `(("startingSession" "{}" :starting-session nil)
+             ("waking" "{}" :waking nil)
+             ("resuming" "{}" :resuming nil)
+             ("vendorRetrying" "{\"attempt\":2}" :vendor-retrying (:attempt 2))
+             ("vendorRejected" "{\"cause\":\"bad key\"}" :vendor-rejected (:cause "bad key"))
+             ("vendorFailed" "{}" :vendor-failed nil)
+             ("coldGate" "{}" :cold-gate nil)
+             ("offline" "{}" :offline nil)
+             ("waitingFor" ,(format "{\"ahead\":%s}" agent-repl-test-wire-host--ref-json)
+              :waiting-for (:ahead (:id "w1" :dir "/t/w1")))
+             ("failed" "{\"reason\":\"spawn refused\"}" :failed (:reason "spawn refused"))))
+    (let ((step (agent-repl-test-wire-host--decode
+                 #'agent-repl-wire-decode-daemon-startup-workspace-step
+                 (format "{\"workspace\":%s,\"%s\":%s}"
+                         agent-repl-test-wire-host--ref-json (nth 0 case) (nth 1 case)))))
+      (should (equal (plist-get step :workspace) '(:id "w1" :dir "/t/w1")))
+      (should (equal (plist-get step :step) (list :arm (nth 2 case) :value (nth 3 case)))))))
+
+(ert-deftest agent-repl-test-wire-host-startup-unset-event-is-a-breach ()
+  "A startup event naming no step is a contract breach."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-daemon-startup-event "{\"atMs\":\"5\"}")
+                 '("DaemonStartupEvent" event "oneof is unset"))))
+
+(ert-deftest agent-repl-test-wire-host-startup-step-arms-pinned ()
+  "The workspace step arms are exactly the frozen schema's."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_watch_daemon.pb.go" "DaemonStartupWorkspaceStep")
+                       #'string<)
+                 (sort (mapcar (lambda (arm) (symbol-name (car arm)))
+                               agent-repl-wire-daemon-startup-step-arms)
                        #'string<))))
 
 (defconst agent-repl-test-wire-host--standing-fault-json
