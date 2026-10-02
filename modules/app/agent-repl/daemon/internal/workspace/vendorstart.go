@@ -12,8 +12,8 @@ import (
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/health"
-	"claude-repld/internal/resolve/sidebar"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/resolve/sidebar"
 	"claude-repld/internal/rollout"
 	"claude-repld/internal/shimclient"
 	"claude-repld/internal/wsm"
