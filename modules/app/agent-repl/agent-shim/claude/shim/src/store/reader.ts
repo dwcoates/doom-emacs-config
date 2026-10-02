@@ -1126,7 +1126,10 @@ export function createReader(options: ReaderOptions): Reader {
    *
    * An `unknown_agent` in the store's log on a cold read is the cost, and it is
    * the right one: an empty page invented over an unreachable store tells a
-   * consumer this conversation has no history.
+   * consumer this conversation has no history. The write half spares the
+   * common case: a read of a book whose first row is still queued waits for it
+   * to land before it gets here (writer.ts `readFirstPage`), so only a book
+   * with nothing written or queued is asked for early.
    */
   const readFirstPageOnce = async (
     agent: conversationv1.AgentId,

@@ -6,7 +6,7 @@
  * absorption — are the STORE's semantics, and a hand-rolled double would be
  * asserting our own beliefs about them rather than the contract.
  */
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { logRecordsSince, logSinkMark } from "../log-records.js";
 import { create, toBinary } from "@bufbuild/protobuf";
 import { conversationv1, storev1 } from "../../src/proto.js";
@@ -23,6 +23,7 @@ import {
 import {
   booksRegisteredBy,
   createPersistence,
+  FIRST_ROW_LANDING_BOUND_MS,
   PlaceClock,
   toStoreEntry as toPlacedStoreEntry,
   toWriteBatchRequest as toPlacedWriteBatchRequest,
@@ -2180,5 +2181,99 @@ describe("the conversation place a row is stamped with", () => {
     // Assert.
     const places = fake.writes().map((request) => request.batch?.entries[0]?.place?.atMs);
     expect(new Set(places)).toEqual(new Set([1_000n]));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A one-shot read of a book whose first row is still queued
+// ---------------------------------------------------------------------------
+
+describe("a one-shot read of a book whose first row is still queued", () => {
+  /** A gated store whose OpenAgentSession answers an empty floor page and counts the asks. */
+  function readableGatedStore(): ReturnType<typeof gatedStore> & { asks: () => number } {
+    const gated = gatedStore();
+    let asks = 0;
+    const openAgentSession: StoreClient["openAgentSession"] = () => {
+      asks++;
+      return Promise.resolve(
+        create(storev1.OpenAgentSessionResponseSchema, {
+          result: {
+            case: "success",
+            value: create(storev1.OpenAgentSessionSuccessSchema, {
+              page: create(storev1.AgentSessionPageSchema, {
+                boundary: { case: "floor", value: create(storev1.ReadAgentPageFloorSchema, {}) },
+              }),
+            }),
+          },
+        }),
+      );
+    };
+    return { ...gated, client: { ...gated.client, openAgentSession }, asks: () => asks };
+  }
+
+  it("does not ask the store before the row lands", async () => {
+    // Arrange.
+    const store = readableGatedStore();
+    const plane = boundedPlane(store.client);
+    store.hold();
+    plane.write([promptEntry(MAIN, "turn-1", "hello")]);
+
+    // Act.
+    void plane.readFirstPage(MAIN, REPAINT, () => true);
+    await settle();
+
+    // Assert.
+    expect(store.asks()).toBe(0);
+    store.open();
+  });
+
+  it("asks the store once the row lands", async () => {
+    // Arrange.
+    const store = readableGatedStore();
+    const plane = boundedPlane(store.client);
+    store.hold();
+    plane.write([promptEntry(MAIN, "turn-1", "hello")]);
+    const reading = plane.readFirstPage(MAIN, REPAINT, () => true);
+
+    // Act.
+    store.open();
+    await reading;
+
+    // Assert.
+    expect(store.asks()).toBe(1);
+  });
+
+  it("asks at once when no queued row registers the book", async () => {
+    // Arrange.
+    const store = readableGatedStore();
+    const plane = boundedPlane(store.client);
+
+    // Act.
+    await plane.readFirstPage(MAIN, REPAINT, () => true);
+
+    // Assert.
+    expect(store.asks()).toBe(1);
+  });
+
+  it("asks the store as it stands once the bound passes with the row unlanded", async () => {
+    // Arrange.
+    vi.useFakeTimers();
+    try {
+      const store = readableGatedStore();
+      const plane = boundedPlane(store.client);
+      store.hold();
+      plane.write([promptEntry(MAIN, "turn-1", "hello")]);
+      const reading = plane.readFirstPage(MAIN, REPAINT, () => true);
+
+      // Act.
+      await vi.advanceTimersByTimeAsync(FIRST_ROW_LANDING_BOUND_MS);
+      await reading;
+
+      // Assert.
+      expect(store.asks()).toBe(1);
+      store.open();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
