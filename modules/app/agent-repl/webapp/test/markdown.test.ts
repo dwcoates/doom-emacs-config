@@ -352,7 +352,7 @@ describe("inline: file links", () => {
 describe("renderMarkdown: bare file names", () => {
   const hrefOf = (md: string): string | null => /<a href="([^"]*)"/.exec(renderMarkdown(md))?.[1] ?? null;
 
-  it.each(["README.md", "foo.ts", "app.tsx", "a.js", "a.mjs", "main.go", "status.el", "x.py", "run.sh", "a.json", "a.yaml", "a.yml", "a.toml", "a.proto", "a.txt", "a.css", "a.html", "lib.rs", "a.c", "a.h", "a.m", "a.swift", "notes.org"])(
+  it.each(["README.md", "foo.ts", "app.tsx", "a.js", "a.mjs", "main.go", "status.el", "x.py", "run.sh", "a.json", "a.yaml", "a.yml", "a.toml", "a.proto", "a.txt", "a.css", "a.html", "lib.rs", "a.c", "a.h", "a.m", "a.swift"])(
     "links %s as a file, href the bare name",
     (name) => {
       expect(hrefOf(`see ${name} now`)).toBe(name);
@@ -361,6 +361,10 @@ describe("renderMarkdown: bare file names", () => {
 
   it("keeps a real domain a web link", () => {
     expect(hrefOf("see example.com now")).toBe("http://example.com");
+  });
+
+  it("keeps wikipedia.org a web link", () => {
+    expect(hrefOf("see wikipedia.org now")).toBe("http://wikipedia.org");
   });
 
   it("keeps github.io a web link", () => {
