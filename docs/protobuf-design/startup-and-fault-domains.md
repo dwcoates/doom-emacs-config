@@ -70,3 +70,18 @@
   page drawn, preserving go-ahead order.
 - A service-level failure settles at the shim's start bound (the daemon's
   existing StartSession / spawn bounds), then gets its go-ahead.
+
+## Addendum (owner, 2026-10-02): the day's digest returns on a full Emacs restart
+
+- WHAT: `WatchDaemonEmacs.instance` (3) = `EditorInstance { value }`, minted
+  once per Emacs process start, unchanged across reconnects; required.
+- WHY: owner — "update the day's digest to always appear again if emacs
+  itself is fully restarted ... not a redigest, just the same digest
+  redisplayed for the day."
+- Behavior: when the daemon sees an Emacs WatchDaemon with an instance it has
+  not seen before, and the latest digest was made today (local day) and was
+  dismissed, that same digest stands again (no new run, no model call). A
+  reconnect with the same instance changes nothing.
+- Ordering, restated: tabs open in the daemon REGISTRY order — never in the
+  order workspaces become available. Workspace 3 waits for 1 and 2 even when
+  it is ready first.
