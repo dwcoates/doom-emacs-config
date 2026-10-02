@@ -114,7 +114,12 @@ dependency chain first. Parallelism belongs to this scheduler:
   itself to exactly that many cores. `e2e-emacs` is four slots wide (the VM its
   Emacs parallelism bound was measured on); testrun hands the width over in
   `AGENT_REPL_UNIT_SLOTS`, and the sandbox applies it as `docker run --cpus`
-  and `GOMAXPROCS` inside the container. A unit starts only when its whole
+  and `GOMAXPROCS` inside the container. A vitest suite's typecheck is two
+  slots wide, because `tsc` measured 1.5-1.75 cores and cannot be pinned.
+  The run's "not pinned to its width" line judges reaped CPU against the
+  width. It cannot see CPU spent in a VM or by an unreaped descendant, and
+  the sandbox VM is exactly such a case, so a unit like that must be capped
+  by its own command line. A unit starts only when its whole
   width is free, nothing narrower overtakes it while it waits, and a plan with
   a unit wider than the host's slot count is refused before anything runs.
 
