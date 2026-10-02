@@ -223,9 +223,10 @@ reach-through lives here once instead of at every reader."
   (plist-get (plist-get row :status) :arm))
 
 (defun agent-repl-roster-row-availability (row)
-  "Return ROW's availability arm keyword: `:pending', `:available' or `:unavailable'.
-The daemon resolves it from the workspace's shim link; a tab is opened for
-the row only once it leaves `:pending'."
+  "Return ROW's availability arm keyword.
+One of `:pending', `:available' or `:unavailable'.  The daemon resolves
+it from the workspace's shim link; a tab is opened for the row only once
+it leaves `:pending'."
   (plist-get (plist-get row :availability) :arm))
 
 (defun agent-repl-roster-row-closed-p (row)
