@@ -335,6 +335,18 @@
      of one thing, so they sit TIGHTER than the frame measure above; every
      rem the chips give back falls to the title's own clear space. */
   --topbar-chip-gap: 0.3rem;
+  /* THE RIGHT GROUP'S ONE SPACING (owner request, 2026-10-02: "30% closer and
+     uniform"). What a reader sees between two right-hand chips is the space
+     from one chip's text (or glyph) to the next one's: the flex gap plus each
+     side's inline inset and 1px border. Before, every cell carried its own
+     padding (0.45rem on the controls, none on the wifi chip, a reserved slot
+     before the warning chip), so that space was 21.2px between most chips and
+     13 and 21 either side of the wifi glyph. Now EVERY right-hand cell takes
+     the same inset from one rule keyed on the group, not on the cell's name
+     (see `.topbar-right button` below), so a cell added later inherits it:
+     0.2rem + 2 x (0.3rem + 1px) = 14.8px, 30% under the old 21.2px. */
+  --topbar-right-chip-gap: 0.2rem;
+  --topbar-right-chip-inset: 0.3rem;
   /* THE PERSISTENT-WIFI CHIP'S TWO PAINTS (owner request, 2026-10-02): the
      joined glyph a step brighter than `--ok` (green-500 over green-600), and
      the mode-on disc black. */
@@ -6312,9 +6324,21 @@ bubble-body.bubble-body { display: block; }
 .topbar-right {
   display: flex;
   align-items: center;
-  gap: var(--topbar-chip-gap);
+  gap: var(--topbar-right-chip-gap);
   justify-self: end;
   min-width: 0;
+}
+/* EVERY RIGHT-HAND CELL'S INLINE INSET, from the group (owner request,
+   2026-10-02). The box a reader sees is the button inside a control's wrap,
+   or the cell itself when it holds no button (the fast-mode label, a
+   no-session dash). Keyed on the group's structure rather than on cell
+   names, so the spacing between any two right-hand chips is the one measure
+   in `--topbar-right-chip-gap` and `--topbar-right-chip-inset`, and a cell
+   added to the group later is spaced the same with no rule of its own. The
+   cells' own rules set only `padding-block`, so nothing competes with this. */
+.topbar-right button,
+.topbar-right > :not(:has(button)) {
+  padding-inline: var(--topbar-right-chip-inset);
 }
 /* THE MIDDLE TRACK: THE SPACE BETWEEN THE FLANKS, AND THE TEXT CENTERED IN IT.
    The track is whatever the two `auto` flanks left over, so `text-align:
@@ -6411,7 +6435,9 @@ bubble-body.bubble-body { display: block; }
   background: transparent;
   border: 1px solid transparent;
   border-radius: 3px;
-  padding: 0.15rem 0.45rem;
+  /* Block only: the inline inset is the right group's (`.topbar-right
+     button`). */
+  padding-block: 0.15rem;
   font: inherit;
   cursor: pointer;
   white-space: nowrap;
@@ -6460,7 +6486,11 @@ bubble-body.bubble-body { display: block; }
 
 .topbar-warnings {
   display: inline-flex;
-  justify-content: flex-end;
+  /* THE SLOT'S SLACK FALLS AT THE STRIP'S EDGE, not between chips. The chip
+     used to sit at the slot's right, so the slack stood between it and the
+     wifi chip and that gap read wider than every other (owner request,
+     2026-10-02: the wifi chip centered between its neighbors). */
+  justify-content: flex-start;
   /* min-, not a hard width: a chip that outgrew its slot must overflow rather
      than be clipped, because a half-drawn warning control is worse than a
      shifted one. */
@@ -6934,7 +6964,8 @@ bubble-body.bubble-body { display: block; }
 .topbar-fast,
 .topbar-model[data-no-session],
 .topbar-mode[data-no-session] {
-  padding: 0.15rem 0.45rem;
+  /* Block only: the inline inset is the right group's. */
+  padding-block: 0.15rem;
   border: 1px solid transparent;
   border-radius: 3px;
   color: var(--muted);
