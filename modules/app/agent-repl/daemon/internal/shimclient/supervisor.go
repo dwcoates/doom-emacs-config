@@ -445,9 +445,14 @@ func (c *client) abandonBringUp(ctx context.Context, cause error) {
 	// exit record says the process is gone, and only this one says the
 	// bring-up was given up on because of it.
 	if c.exitedAlready() {
-		c.log.Warn("daemon.shimclient.spawn", "bring-up failed; the spawned shim is already gone", dlog.Context{
-			"pid": c.PID(), "error": cause.Error(),
-		})
+		fields := dlog.Context{"pid": c.PID(), "error": cause.Error()}
+		// THE SUPERVISOR'S OWN STAND-DOWN SWEEP killed it: the daemon is
+		// leaving, and nothing about this shim failed.
+		if errors.Is(cause, ErrStandingDown) {
+			c.log.Info("daemon.shimclient.spawn", "the bring-up ended: this daemon's stand-down swept the spawned shim", fields)
+		} else {
+			c.log.Warn("daemon.shimclient.spawn", "bring-up failed; the spawned shim is already gone", fields)
+		}
 		c.cancelMonitor()
 		return
 	}
