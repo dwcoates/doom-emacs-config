@@ -199,11 +199,10 @@ export interface AgentPageSession {
   /** The opening page, newest first. */
   readonly page: conversationv1.HistoryPage;
   /**
-   * Whether the open found NOTHING TO SHOW: the opening page is empty and,
-   * under a `tailOnly` opening (whose page is empty by request), the book
-   * itself held nothing as of the open. A consumer that refuses an empty
-   * unannounced book reads this, never the page alone, because a tail-only
-   * page says nothing about the book.
+   * Whether the BOOK held nothing as of the open: the store named no newest
+   * item. A consumer that refuses an empty unannounced book reads this, never
+   * the page, because a tail-only page is empty by request and a catch-up
+   * page is empty whenever nothing was written since the mark.
    */
   readonly foundNothing: boolean;
   /**

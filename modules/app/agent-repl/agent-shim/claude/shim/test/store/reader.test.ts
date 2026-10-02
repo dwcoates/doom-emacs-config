@@ -909,11 +909,16 @@ const WATCH = create(storev1.AgentSessionTokenSchema, { value: "watch-1" });
 function opened(
   page: storev1.AgentSessionPage | undefined,
   watch: storev1.AgentSessionToken | undefined,
+  newest?: string,
 ): storev1.OpenAgentSessionResponse {
   return create(storev1.OpenAgentSessionResponseSchema, {
     result: {
       case: "success",
-      value: create(storev1.OpenAgentSessionSuccessSchema, { page, watch }),
+      value: create(storev1.OpenAgentSessionSuccessSchema, {
+        page,
+        watch,
+        ...(newest === undefined ? {} : { newest: create(storev1.StoreItemPointerSchema, { value: newest }) }),
+      }),
     },
   });
 }
@@ -2977,7 +2982,7 @@ describe("a tail-only opening", () => {
 
   it("relays tail_only to the store's own open", async () => {
     // Arrange.
-    const recorded = recordingOpens([opened(floorPage([]), WATCH), opened(floorPage([]), undefined)]);
+    const recorded = recordingOpens([opened(floorPage([]), WATCH)]);
     const reader = readerOver({ openAgentSession: recorded.openAgentSession });
 
     // Act.
@@ -2988,9 +2993,11 @@ describe("a tail-only opening", () => {
     expect(recorded.opens[0]?.opening.case).toBe("tailOnly");
   });
 
-  it("reads the book's head page-only after the open, minting no second token", async () => {
+  it("reads no page beyond the open itself", async () => {
+    // The store names the book's newest item on the open, so nothing a reader
+    // did not ask for is read to anchor the session.
     // Arrange.
-    const recorded = recordingOpens([opened(floorPage([]), WATCH), opened(floorPage([]), undefined)]);
+    const recorded = recordingOpens([opened(floorPage([]), WATCH, "7")]);
     const reader = readerOver({ openAgentSession: recorded.openAgentSession });
 
     // Act.
@@ -2998,15 +3005,12 @@ describe("a tail-only opening", () => {
     session.close();
 
     // Assert.
-    expect([recorded.opens[1]?.opening.case, recorded.opens[1]?.pageOnly]).toEqual([undefined, true]);
+    expect(recorded.opens).toHaveLength(1);
   });
 
-  it("reports it found something when the book held lines behind its empty page", async () => {
+  it("reports it found something when the store names a newest item behind its empty page", async () => {
     // Arrange.
-    const recorded = recordingOpens([
-      opened(floorPage([]), WATCH),
-      opened(floorPage([storedLine("7", "unit-g")]), undefined),
-    ]);
+    const recorded = recordingOpens([opened(floorPage([]), WATCH, "7")]);
     const reader = readerOver({ openAgentSession: recorded.openAgentSession });
 
     // Act.
@@ -3017,9 +3021,9 @@ describe("a tail-only opening", () => {
     expect([session.page.entries.length, session.foundNothing]).toEqual([0, false]);
   });
 
-  it("reports it found nothing when the book itself was empty", async () => {
+  it("reports it found nothing when the store names no newest item", async () => {
     // Arrange.
-    const recorded = recordingOpens([opened(floorPage([]), WATCH), opened(floorPage([]), undefined)]);
+    const recorded = recordingOpens([opened(floorPage([]), WATCH)]);
     const reader = readerOver({ openAgentSession: recorded.openAgentSession });
 
     // Act.
@@ -3030,14 +3034,25 @@ describe("a tail-only opening", () => {
     expect(session.foundNothing).toBe(true);
   });
 
-  it("re-opens a refused watch from the book's head as of the open, never as a repaint", async () => {
+  it("reports it found something for a catch-up that served nothing over a book with lines", async () => {
+    // The page is empty because nothing was written since the mark; the book
+    // is not.
+    // Arrange.
+    const recorded = recordingOpens([opened(floorPage([]), WATCH, "7")]);
+    const reader = readerOver({ openAgentSession: recorded.openAgentSession });
+
+    // Act.
+    const session = await reader.openAgentPage(BOOK, knownThrough(create(conversationv1.HistoryPointerSchema, { value: "7" })));
+    session.close();
+
+    // Assert.
+    expect(session.foundNothing).toBe(false);
+  });
+
+  it("re-opens a refused watch from the newest item as of the open, never as a repaint", async () => {
     // A repaint would replay history the consumer said it did not want.
     // Arrange.
-    const recorded = recordingOpens([
-      opened(floorPage([]), WATCH),
-      opened(floorPage([storedLine("7", "unit-g")]), undefined),
-      opened(floorPage([]), WATCH_2),
-    ]);
+    const recorded = recordingOpens([opened(floorPage([]), WATCH, "7"), opened(floorPage([]), WATCH_2, "8")]);
     const reader = readerOver({
       openAgentSession: recorded.openAgentSession,
       watchAgentSession: refusedOnce(() =>
@@ -3053,11 +3068,32 @@ describe("a tail-only opening", () => {
     session.close();
 
     // Assert.
-    const reopen = recorded.opens[2]?.opening;
+    const reopen = recorded.opens[1]?.opening;
     expect([reopen?.case, reopen?.case === "knownThrough" ? reopen.value.value : undefined]).toEqual([
       "knownThrough",
       "7",
     ]);
+  });
+
+  it("re-opens a refused watch on an empty book as a repaint, since all of it is news", async () => {
+    // Arrange.
+    const recorded = recordingOpens([opened(floorPage([]), WATCH), opened(floorPage([]), WATCH_2)]);
+    const reader = readerOver({
+      openAgentSession: recorded.openAgentSession,
+      watchAgentSession: refusedOnce(() =>
+        standingWatch([
+          create(storev1.WatchAgentSessionResponseSchema, { frame: { case: "line", value: storedLine("1", "unit-a") } }),
+        ]),
+      ),
+    });
+    const session = await reader.openAgentPage(BOOK, TAIL_ONLY);
+
+    // Act.
+    await session.tail[Symbol.asyncIterator]().next();
+    session.close();
+
+    // Assert.
+    expect(recorded.opens[1]?.opening.case).toBeUndefined();
   });
 
   it("carries only what is written after the open", async () => {
