@@ -28,7 +28,7 @@
  * re-push redraws the head and never touches the fold, because a bubble
  * snapping shut under a reader who opened it is the whole failure R2 names.
  */
-import { CONTROL_SELECTOR } from "../control.js";
+import { armButtonRole, CONTROL_SELECTOR } from "../control.js";
 import { log } from "../log.js";
 import { announceItemExpanded } from "../expand.js";
 import { applyFeedTextScale } from "./feed-text-scale.js";
@@ -123,8 +123,7 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
   const headLine = document.createElement("div");
   headLine.className = "tool-head bubble-head";
   headLine.setAttribute("data-expand", id.value);
-  headLine.setAttribute("role", "button");
-  headLine.tabIndex = 0;
+  armButtonRole(headLine);
   headLine.setAttribute("aria-expanded", "false");
 
   const headSlot = document.createElement("span");
@@ -157,17 +156,9 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
     if (isInteractiveTarget(event.target)) return;
     toggleFold();
   });
-  // KEYBOARD PARITY WITH THE REMOVED BUTTON: the head is focusable, so Enter
-  // and Space activate it exactly as they did the chevron `<button>`. A key
+  // KEYBOARD PARITY WITH THE REMOVED BUTTON comes from `armButtonRole`
+  // above: Enter and Space click the head, and the click is the toggle. A key
   // pressed while an inner control holds focus belongs to that control.
-  headLine.addEventListener("keydown", (event) => {
-    if (event.key !== "Enter" && event.key !== " " && event.key !== "Spacebar") return;
-    if (isInteractiveTarget(event.target)) return;
-    // Space would otherwise scroll the page; Enter would submit nothing here,
-    // but both are the toggle's activation now, so the default is suppressed.
-    event.preventDefault();
-    toggleFold();
-  });
 
   // The wire's fold is the INITIAL state, so an unfolded merge bubble opens
   // itself once, here, and never again on a re-push.

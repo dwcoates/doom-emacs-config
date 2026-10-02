@@ -511,9 +511,9 @@ describe("mountBubble: clicking the head is the toggle", () => {
 
   it("toggles on Space while the head is focused", async () => {
     const { bubble } = mount(subagentRow("b1"));
-    headOf(bubble).dispatchEvent(
-      new KeyboardEvent("keydown", { key: " ", bubbles: true }),
-    );
+    // A button activates on Space's keyup, and the head is armed as one.
+    headOf(bubble).dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true }));
+    headOf(bubble).dispatchEvent(new KeyboardEvent("keyup", { key: " ", bubbles: true }));
     await settle();
     expect(bubble.isExpanded()).toBe(true);
   });

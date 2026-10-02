@@ -31,6 +31,7 @@
  * CLOCKS TICK HERE, NOT ON THE WIRE. The turn clock counts up from an instant
  * off the shared ticker, and is never pushed.
  */
+import { armButtonRole } from "../control.js";
 import type {
   FooterChipAgents,
   FooterChipCrons,
@@ -496,8 +497,7 @@ export function drawFooterTokensCell(u: FooterTokensCell, deps: StripDeps): HTML
   const path = "FooterTokensCell";
   const cell = document.createElement("div");
   cell.className = "pfooter-cell pfooter-tokens footer-tokens";
-  cell.setAttribute("role", "button");
-  cell.tabIndex = 0;
+  armButtonRole(cell);
   cell.title = "the turn's token breakdown";
   if (deps.selection === "tokens") cell.setAttribute("data-selected", "true");
   cell.appendChild(drawFooterTokensCellInput(requireMessage(u.input, `${path}.input`)));
@@ -649,8 +649,7 @@ function chip(panel: FooterPanel, glyph: string, count: string, deps: StripDeps)
   const el = document.createElement("span");
   el.className = "footer-chip";
   el.setAttribute("data-chip", panel);
-  el.setAttribute("role", "button");
-  el.tabIndex = 0;
+  armButtonRole(el);
   if (deps.selection === panel) {
     el.setAttribute("data-selected", "true");
     el.classList.add("footer-chip-selected");
