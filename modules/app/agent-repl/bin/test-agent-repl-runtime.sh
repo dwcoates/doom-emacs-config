@@ -1,0 +1,163 @@
+#!/usr/bin/env bash
+# Hermetic fixture tests for bin/agent-repl-runtime.
+#
+# NOTHING REAL RUNS. Every implementation a verb dispatches to, emacsclient and
+# `open` are stubs on the AGENT_REPL_RUNTIME_* environment that append what
+# they were asked to do to one transcript, so a test reads the exact order of
+# the hard bounce's steps. The emacsclient stub keeps "Emacs is running" as a
+# file, so a `(kill-emacs)` makes it stop answering exactly as a real quit does.
+
+# Tests run only at background priority: re-exec once through bin/background.sh.
+[[ -n ${AGENT_REPL_BACKGROUND_PRIORITY:-} ]] || exec "$(dirname "${BASH_SOURCE[0]}")/background.sh" bash "${BASH_SOURCE[0]}" "$@"
+
+set -euo pipefail
+
+THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+RUNTIME="$THIS_DIR/agent-repl-runtime"
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+PASS=0
+FAIL=0
+
+pass() { printf '  PASS: %s\n' "$1"; PASS=$((PASS + 1)); }
+fail() { printf '  FAIL: %s\n' "$1" >&2; FAIL=$((FAIL + 1)); }
+
+TRANSCRIPT="$TMP/transcript"
+STATE="$TMP/state"
+mkdir -p "$STATE"
+
+# An implementation stub: records its name and arguments, exits STUB_EXIT_<NAME>.
+make_impl() {
+    local name="$1"
+    cat >"$TMP/$name" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "$name\${*:+ \$*}" >>"$TRANSCRIPT"
+code_var="STUB_EXIT_${name//-/_}"
+exit "\${!code_var:-0}"
+EOF
+    chmod +x "$TMP/$name"
+}
+for impl in build byte-compile bounce doctor readiness logs claude-repld open; do
+    make_impl "$impl"
+done
+
+cat >"$TMP/emacsclient" <<EOF
+#!/usr/bin/env bash
+# emacsclient stub: answers only while \$STATE/running exists.
+[ -f "$STATE/running" ] || exit 1
+form="\${2:-}"
+case "\$form" in
+    t) exit 0 ;;
+    "(kill-emacs)")
+        printf 'emacsclient kill-emacs\n' >>"$TRANSCRIPT"
+        [ -n "\${STUB_NEVER_EXITS:-}" ] || rm -f "$STATE/running"
+        exit 0 ;;
+    *mapconcat*) printf '"%s"\n' "\${STUB_UNSAVED:-}" ;;
+esac
+EOF
+chmod +x "$TMP/emacsclient"
+
+export AGENT_REPL_RUNTIME_BUILD="$TMP/build"
+export AGENT_REPL_RUNTIME_BYTE_COMPILE="$TMP/byte-compile"
+export AGENT_REPL_RUNTIME_BOUNCE="$TMP/bounce"
+export AGENT_REPL_RUNTIME_DOCTOR="$TMP/doctor"
+export AGENT_REPL_RUNTIME_READINESS="$TMP/readiness"
+export AGENT_REPL_RUNTIME_LOGS="$TMP/logs"
+export AGENT_REPL_RUNTIME_CLAUDE_REPLD="$TMP/claude-repld"
+export AGENT_REPL_RUNTIME_EMACSCLIENT="$TMP/emacsclient"
+export AGENT_REPL_RUNTIME_OPEN="$TMP/open"
+export AGENT_REPL_RUNTIME_EMACS_APP="/Applications/Emacs.app"
+export AGENT_REPL_RUNTIME_QUIT_WAIT=2
+
+# reset puts the fixture back to "Emacs is running, nothing has run yet".
+reset() {
+    : >"$TRANSCRIPT"
+    touch "$STATE/running"
+    unset STUB_UNSAVED STUB_NEVER_EXITS STUB_EXIT_byte_compile STUB_EXIT_bounce
+}
+
+# expect_transcript NAME EXPECTED compares the whole transcript.
+expect_transcript() {
+    local got
+    got="$(cat "$TRANSCRIPT")"
+    if [ "$got" = "$2" ]; then pass "$1"; else fail "$1 (got: $(printf '%s' "$got" | tr '\n' '|'))"; fi
+}
+
+echo "agent-repl-runtime: pass-through verbs"
+for pair in "build:build --force daemon" "byte-compile:byte-compile" "doctor:doctor --json" \
+            "readiness:readiness" "logs:logs --tally" "call:claude-repld call DaemonHealth"; do
+    reset
+    verb="${pair%%:*}"
+    want="${pair#*:}"
+    # shellcheck disable=SC2086
+    args=""
+    [[ "$want" == *" "* ]] && args="${want#* }"
+    [ "$verb" = "call" ] && args="DaemonHealth"
+    # shellcheck disable=SC2086
+    "$RUNTIME" "$verb" $args >/dev/null 2>&1
+    expect_transcript "$verb dispatches to its implementation with its arguments" "$want"
+done
+
+echo "agent-repl-runtime: bounce"
+reset
+"$RUNTIME" bounce >/dev/null 2>&1
+expect_transcript "bounce runs the bounce and touches no Emacs" "bounce"
+
+reset
+if "$RUNTIME" bounce --soft >/dev/null 2>&1; then fail "bounce refuses an unknown argument"; else pass "bounce refuses an unknown argument"; fi
+
+echo "agent-repl-runtime: bounce --hard"
+reset
+"$RUNTIME" bounce --hard >/dev/null 2>&1
+expect_transcript "a hard bounce byte-compiles, bounces, quits Emacs and relaunches it, in order" \
+"byte-compile
+bounce
+emacsclient kill-emacs
+open -a /Applications/Emacs.app"
+
+reset
+export STUB_UNSAVED="notes.org"
+if "$RUNTIME" bounce --hard >/dev/null 2>&1; then fail "a hard bounce refuses while Emacs holds unsaved files"; else pass "a hard bounce refuses while Emacs holds unsaved files"; fi
+expect_transcript "a refused hard bounce runs nothing" ""
+
+reset
+export STUB_EXIT_byte_compile=1
+if "$RUNTIME" bounce --hard >/dev/null 2>&1; then fail "a byte-compile failure fails the hard bounce"; else pass "a byte-compile failure fails the hard bounce"; fi
+expect_transcript "a byte-compile failure stops before the bounce" "byte-compile"
+
+reset
+export STUB_EXIT_bounce=1
+if "$RUNTIME" bounce --hard >/dev/null 2>&1; then fail "a bounce failure fails the hard bounce"; else pass "a bounce failure fails the hard bounce"; fi
+expect_transcript "a bounce failure leaves Emacs running" "byte-compile
+bounce"
+
+reset
+rm -f "$STATE/running"
+"$RUNTIME" bounce --hard >/dev/null 2>&1
+expect_transcript "with no Emacs running, a hard bounce only launches it" "byte-compile
+bounce
+open -a /Applications/Emacs.app"
+
+reset
+export STUB_NEVER_EXITS=1
+if "$RUNTIME" bounce --hard >/dev/null 2>&1; then fail "an Emacs that will not exit fails the hard bounce"; else pass "an Emacs that will not exit fails the hard bounce"; fi
+expect_transcript "an Emacs that will not exit is not relaunched beside itself" "byte-compile
+bounce
+emacsclient kill-emacs"
+
+echo "agent-repl-runtime: refusals"
+reset
+if "$RUNTIME" no-such-verb >/dev/null 2>&1; then fail "an unknown verb is refused"; else pass "an unknown verb is refused"; fi
+
+reset
+if AGENT_REPL_RUNTIME_CLAUDE_REPLD="$TMP/missing" "$RUNTIME" call DaemonHealth >/dev/null 2>&1; then
+    fail "call without a daemon binary is refused"
+else
+    pass "call without a daemon binary is refused"
+fi
+
+reset
+if "$RUNTIME" help | grep -q 'bounce --hard'; then pass "help lists the verbs"; else fail "help lists the verbs"; fi
+
+echo "agent-repl-runtime: $PASS passed, $FAIL failed"
+[ "$FAIL" -eq 0 ]

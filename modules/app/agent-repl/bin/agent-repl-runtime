@@ -1,0 +1,145 @@
+#!/usr/bin/env bash
+# agent-repl-runtime — the ONE front door for building, bouncing, checking and
+# talking to the agent-repl runtime.
+#
+# Usage:
+#   bin/agent-repl-runtime <verb> [args...]
+#
+# Verbs (each a thin layer over the implementation named beside it):
+#   build [--force] [component...]  build what is stale (bin/build-frontend.sh)
+#   byte-compile                    byte-compile the elisp as a warning gate
+#                                   (bin/byte-compile.sh)
+#   bounce                          rebuild everything, stop every backend
+#                                   (daemon, shims, store, sidecar), bring the
+#                                   store and sidecar back; Emacs starts the
+#                                   fresh daemon on its next link
+#                                   (scripts/bounce-agent-repl-forcefully.sh)
+#   bounce --hard                   byte-compile gate, then `bounce`, then
+#                                   restart Emacs.app itself, so the editor,
+#                                   the daemon and every shim run the fresh
+#                                   build ("hard bounce agent-repl")
+#   doctor [args...]                read-only runtime health sweep
+#                                   (scripts/agent-shim-doctor.sh)
+#   readiness [args...]             source vs deployed vs running report
+#                                   (bin/readiness-report.sh)
+#   logs [args...]                  the canonical log reader (bin/logs.sh)
+#   call [args...]                  one unary rpc to the serving daemon
+#                                   (daemon/bin/claude-repld call)
+#   help                            this text
+#
+# The implementations stay where their other callers reach them (Emacs's cold
+# start and the daemon's deploy run build-frontend.sh directly); a person or an
+# agent reaches them through this door. The /manage-agent-repl-runtime skill
+# documents every verb; a new verb, or a change to what one does, updates that
+# skill and agent-repl AGENTS.md in the same commit.
+#
+# THE HARD BOUNCE REFUSES to quit an Emacs holding unsaved file buffers: it
+# lists them and stops before anything is built or stopped.
+#
+# Honored environment (the test harness's isolation; defaults are the host):
+#   AGENT_REPL_RUNTIME_BUILD, _BYTE_COMPILE, _BOUNCE, _DOCTOR, _READINESS,
+#   _LOGS, _CLAUDE_REPLD   the implementation each verb runs
+#   AGENT_REPL_RUNTIME_EMACSCLIENT  emacsclient reaching the running Emacs
+#   AGENT_REPL_RUNTIME_OPEN         the command that launches an app
+#   AGENT_REPL_RUNTIME_EMACS_APP    the Emacs.app bundle to launch
+#   AGENT_REPL_RUNTIME_QUIT_WAIT    seconds to wait for Emacs to exit (30)
+
+set -euo pipefail
+
+MODULE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+
+BUILD="${AGENT_REPL_RUNTIME_BUILD:-$MODULE_DIR/bin/build-frontend.sh}"
+BYTE_COMPILE="${AGENT_REPL_RUNTIME_BYTE_COMPILE:-$MODULE_DIR/bin/byte-compile.sh}"
+BOUNCE="${AGENT_REPL_RUNTIME_BOUNCE:-$MODULE_DIR/scripts/bounce-agent-repl-forcefully.sh}"
+DOCTOR="${AGENT_REPL_RUNTIME_DOCTOR:-$MODULE_DIR/scripts/agent-shim-doctor.sh}"
+READINESS="${AGENT_REPL_RUNTIME_READINESS:-$MODULE_DIR/bin/readiness-report.sh}"
+LOGS="${AGENT_REPL_RUNTIME_LOGS:-$MODULE_DIR/bin/logs.sh}"
+CLAUDE_REPLD="${AGENT_REPL_RUNTIME_CLAUDE_REPLD:-$MODULE_DIR/daemon/bin/claude-repld}"
+EMACSCLIENT="${AGENT_REPL_RUNTIME_EMACSCLIENT:-/Applications/Emacs.app/Contents/MacOS/bin/emacsclient}"
+OPEN="${AGENT_REPL_RUNTIME_OPEN:-open}"
+EMACS_APP="${AGENT_REPL_RUNTIME_EMACS_APP:-/Applications/Emacs.app}"
+QUIT_WAIT="${AGENT_REPL_RUNTIME_QUIT_WAIT:-30}"
+
+say() { printf '[agent-repl-runtime] %s\n' "$*"; }
+die() { printf '[agent-repl-runtime] ERROR: %s\n' "$*" >&2; exit 1; }
+
+usage() { sed -n '2,/^$/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+
+# emacs_running answers whether the running Emacs answers its server.
+emacs_running() {
+    "$EMACSCLIENT" --eval 't' >/dev/null 2>&1
+}
+
+# unsaved_buffers prints the running Emacs's modified file buffers, one per
+# line; nothing when there are none.
+unsaved_buffers() {
+    "$EMACSCLIENT" --eval \
+        '(mapconcat (lambda (b) (buffer-name b)) (seq-filter (lambda (b) (and (buffer-file-name b) (buffer-modified-p b))) (buffer-list)) "\n")' \
+        | sed -e 's/^"//' -e 's/"$//' -e 's/\\n/\n/g' | sed '/^$/d'
+}
+
+# restart_emacs quits the running Emacs (when one answers) and launches the
+# app again.
+restart_emacs() {
+    if emacs_running; then
+        say "emacs: quitting"
+        "$EMACSCLIENT" --eval '(kill-emacs)' >/dev/null 2>&1 || true
+        local waited=0
+        while emacs_running; do
+            if [ "$waited" -ge "$QUIT_WAIT" ]; then
+                die "emacs did not exit within ${QUIT_WAIT}s; it was not relaunched"
+            fi
+            sleep 1
+            waited=$((waited + 1))
+        done
+        say "emacs: exited"
+    else
+        say "emacs: not running"
+    fi
+    say "emacs: launching $EMACS_APP"
+    "$OPEN" -a "$EMACS_APP"
+}
+
+hard_bounce() {
+    if emacs_running; then
+        local unsaved
+        unsaved="$(unsaved_buffers)"
+        if [ -n "$unsaved" ]; then
+            printf '%s\n' "$unsaved" >&2
+            die "emacs holds unsaved file buffers (above); save or revert them, then bounce again"
+        fi
+    fi
+    say "byte-compile: checking"
+    "$BYTE_COMPILE" || die "byte-compile reported warnings or errors; nothing was stopped"
+    say "bounce: rebuilding and restarting every backend"
+    "$BOUNCE" || die "the bounce failed; see its output above"
+    restart_emacs
+    say "hard bounce done: Emacs, the daemon and every shim come up on the fresh build"
+}
+
+verb="${1:-help}"
+[ $# -gt 0 ] && shift
+
+case "$verb" in
+    build)        exec "$BUILD" "$@" ;;
+    byte-compile) exec "$BYTE_COMPILE" "$@" ;;
+    bounce)
+        if [ "${1:-}" = "--hard" ]; then
+            shift
+            [ $# -eq 0 ] || die "bounce --hard takes no further arguments: $*"
+            hard_bounce
+        else
+            [ $# -eq 0 ] || die "bounce takes no arguments (did you mean --hard?): $*"
+            exec "$BOUNCE"
+        fi
+        ;;
+    doctor)       exec "$DOCTOR" "$@" ;;
+    readiness)    exec "$READINESS" "$@" ;;
+    logs)         exec "$LOGS" "$@" ;;
+    call)
+        [ -x "$CLAUDE_REPLD" ] || die "no daemon binary at $CLAUDE_REPLD; run: $0 build"
+        exec "$CLAUDE_REPLD" call "$@"
+        ;;
+    help|-h|--help) usage ;;
+    *)            usage >&2; die "unknown verb: $verb" ;;
+esac
