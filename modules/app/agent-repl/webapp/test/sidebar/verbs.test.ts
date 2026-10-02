@@ -63,7 +63,6 @@ import {
   nukeWorkspaceRefusal,
   lockHolderHowText,
   openWorkspaceRefusal,
-  restartWorkspaceRefusal,
   fireVerb,
   refusalCause,
   refusalDetail,
@@ -121,12 +120,8 @@ describe("the requests each verb is", () => {
     expect(source?.case === "ownBranch" ? source.value.keepOpen : "not own branch").toBe(false);
   });
 
-  it("asks for a graceful restart with force false", () => {
-    expect(buildRestartWorkspaceRequest(TARGET_WS, false).force).toBe(false);
-  });
-
-  it("asks for a forced restart with force true", () => {
-    expect(buildRestartWorkspaceRequest(TARGET_WS, true).force).toBe(true);
+  it("echoes the row's workspace on the one-mode restart request", () => {
+    expect(buildRestartWorkspaceRequest(TARGET_WS).workspace?.id).toBe("ws-7");
   });
 
   it.each(["p05", "p1", "p2", "p3"] as const)("sets the %s priority arm", (choice) => {
@@ -161,7 +156,6 @@ describe("the menu", () => {
       "close",
       "merge",
       "restart",
-      "restartForce",
       "priority",
       "priority",
       "priority",
@@ -357,9 +351,8 @@ const VERBS: readonly VerbUnderTest[] = [
       runVerb(control, {
         sc: t.sc,
         rpc: "RestartWorkspace",
-        call: (client) => client.restartWorkspace(buildRestartWorkspaceRequest(TARGET_WS, false)),
+        call: (client) => client.restartWorkspace(buildRestartWorkspaceRequest(TARGET_WS)),
         schema: RestartWorkspaceResponseSchema,
-        refusalText: (cause) => restartWorkspaceRefusal(cause as never),
       }),
   },
   {
@@ -551,11 +544,6 @@ describe("the per-rpc causes, worded at their own site", () => {
   it("says a merge is already queued", async () => {
     const refusal = await refuseWith(VERBS[4], "alreadyQueued");
     expect(refusal?.textContent).toContain("already in the merge queue");
-  });
-
-  it("says a restart has no session to restart", async () => {
-    const refusal = await refuseWith(VERBS[5], "noSession");
-    expect(refusal?.textContent).toContain("no session to restart");
   });
 
   it("says an assignment names a task the daemon does not know", async () => {
@@ -767,43 +755,32 @@ describe("the menu's own controls, clicked", () => {
     expect(button.nextElementSibling?.textContent).toBe("this workspace is already merging");
   });
 
-  it("restarts gracefully from the plain restart entry", async () => {
-    let force: unknown = null;
+  it("restarts from the one restart entry", async () => {
     const t = target({
-      restartWorkspace: (req: unknown) => {
-        force = (req as { force?: unknown }).force;
-        return create(RestartWorkspaceResponseSchema, { result: { case: "success", value: {} } });
-      },
+      restartWorkspace: () =>
+        create(RestartWorkspaceResponseSchema, { result: { case: "success", value: {} } }),
     });
     const menu = drawRowMenu(t);
     await click(menu.querySelector("[data-verb='restart']") as Element);
-    expect(force).toBe(false);
+    expect(menu.querySelector(".refusal")).toBeNull();
   });
 
-  it("forces the restart from the forced entry", async () => {
-    let force: unknown = null;
-    const t = target({
-      restartWorkspace: (req: unknown) => {
-        force = (req as { force?: unknown }).force;
-        return create(RestartWorkspaceResponseSchema, { result: { case: "success", value: {} } });
-      },
-    });
-    const menu = drawRowMenu(t);
-    await click(menu.querySelector("[data-verb='restartForce']") as Element);
-    expect(force).toBe(true);
+  it("offers no separate forced restart entry", () => {
+    const menu = drawRowMenu(target());
+    expect(menu.querySelector("[data-verb='restartForce']")).toBeNull();
   });
 
   it("draws a restart refusal at the restart control itself", async () => {
     const t = target({
       restartWorkspace: () =>
         create(RestartWorkspaceResponseSchema, {
-          result: { case: "error", value: { cause: { case: "noSession", value: {} } } },
+          result: { case: "error", value: { cause: { case: "notYetAdopted", value: {} } } },
         }),
     });
     const menu = drawRowMenu(t);
     const button = menu.querySelector("[data-verb='restart']") as HTMLElement;
     await click(button);
-    expect(button.nextElementSibling?.textContent).toBe("this workspace has no session to restart");
+    expect(button.nextElementSibling?.getAttribute("data-arm")).toBe("notYetAdopted");
   });
 
   it("keeps the nuke confirmation folded until its entry is opened", () => {
@@ -1003,7 +980,6 @@ describe("an arm no wording table knows", () => {
     ["CloseWorkspaceError.cause", closeWorkspaceRefusal],
     ["NukeWorkspaceError.cause", nukeWorkspaceRefusal],
     ["MergeWorkspaceError.cause", mergeWorkspaceRefusal],
-    ["RestartWorkspaceError.cause", restartWorkspaceRefusal],
     ["AssignWorkspaceTaskError.cause", assignWorkspaceTaskRefusal],
   ];
 

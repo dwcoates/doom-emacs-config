@@ -725,9 +725,9 @@ const REFUSAL_SITES: RefusalSite[] = [
     arrange: (h) => h.fake.pushRow(WORKSPACE_ID, ROOT_FEED, activityRow(planUnit("planned"))),
   },
   {
-    name: "RestartWorkspace (forced)",
+    name: "RestartWorkspace",
     rpc: "restartWorkspace",
-    click: '[data-roster-row="ws-1"] [data-verb="restartForce"]',
+    click: '[data-roster-row="ws-1"] [data-verb="restart"]',
     site: '[data-roster-row="ws-1"]',
     arrange: (h) => h.fake.setRoster(roster({ rows: [rosterRow({ id: WORKSPACE_ID })] })),
   },
