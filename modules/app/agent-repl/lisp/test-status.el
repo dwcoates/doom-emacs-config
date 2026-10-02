@@ -476,6 +476,9 @@ connection.")
 Each entry is (SECONDS FUNCTION ARGS...), so a test can read the
 threshold a dwell was armed with and fire any captured timer by hand.")
 
+(defvar agent-repl-test--detached-live nil
+  "What the stubbed row's detached-work marker answers under `--viewing'.")
+
 (defvar agent-repl-test--dwell-logs nil
   "Every formatted `agent-repl--log' line under the dwell macro, newest first.")
 
@@ -522,6 +525,8 @@ into `agent-repl-test--viewed-reports' instead of dialling the daemon."
              ((symbol-function 'agent-repl--ws-current-name) (lambda () ,ws))
              ((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) t))
              ((symbol-function 'agent-repl--ws-render-status) (lambda (_ws) ,status))
+             ((symbol-function 'agent-repl-roster-detached-live-for-ws)
+              (lambda (_ws) agent-repl-test--detached-live))
              ((symbol-function 'agent-repl--force-tab-bar-redraw) #'ignore))
      ,@body))
 
@@ -567,6 +572,48 @@ The status-change and viewed-cleared reactions to one push must agree."
       ;; Act / Assert
       (should (equal (agent-repl--tab-dwell-seconds "ws1" 'activation) 5)))))
 
+(ert-deftest agent-repl-test-tab-dwell-seconds-walking-into-done-with-detached-work-is-fast ()
+  "Rule 2: walking into a `done' with detached work beside it takes 1s."
+  ;; Arrange
+  (agent-repl-test--with-dwell-state
+    (let ((agent-repl-test--detached-live t))
+      (agent-repl-test--viewing "ws1" :done
+        ;; Act / Assert
+        (should (equal (agent-repl--tab-dwell-seconds "ws1" 'activation) 1))))))
+
+(ert-deftest agent-repl-test-tab-dwell-seconds-walking-into-interrupted-with-detached-work-is-standard ()
+  "Detached work speeds only a `done': an interrupted row keeps 5s."
+  ;; Arrange
+  (agent-repl-test--with-dwell-state
+    (let ((agent-repl-test--detached-live t))
+      (agent-repl-test--viewing "ws1" :interrupted
+        ;; Act / Assert
+        (should (equal (agent-repl--tab-dwell-seconds "ws1" 'activation) 5))))))
+
+(ert-deftest agent-repl-test-tab-dwell-seconds-logs-the-detached-work-rule ()
+  "The detached-work branch is recorded with its own rule name."
+  ;; Arrange
+  (agent-repl-test--with-dwell-state
+    (let ((agent-repl-test--detached-live t))
+      (agent-repl-test--viewing "ws1" :done
+        ;; Act
+        (agent-repl--tab-dwell-seconds "ws1" 'activation)
+        ;; Assert
+        (should (cl-some (lambda (line)
+                           (string-match-p "dwell threshold ws=ws1 origin=activation status=:done detached-live=t seconds=1 rule=done-with-detached-work" line))
+                         agent-repl-test--dwell-logs))))))
+
+(ert-deftest agent-repl-test-tab-dwell-on-activation-into-done-with-detached-work-arms-one-second ()
+  "Rule 2 end to end: switching into a `done' with detached work arms 1s."
+  ;; Arrange
+  (agent-repl-test--with-dwell-state
+    (let ((agent-repl-test--detached-live t))
+      (agent-repl-test--viewing "ws1" :done
+        ;; Act
+        (agent-repl--tab-dwell-on-activation)
+        ;; Assert
+        (should (equal (car (car agent-repl-test--dwell-timers)) 1))))))
+
 (ert-deftest agent-repl-test-tab-dwell-seconds-interrupted-landing-is-standard ()
   "Only the final response is fast: an interrupted turn end keeps 5s."
   ;; Arrange
@@ -584,7 +631,7 @@ The status-change and viewed-cleared reactions to one push must agree."
       (agent-repl--tab-dwell-seconds "ws1" 'status-change)
       ;; Assert
       (should (cl-some (lambda (line)
-                         (string-match-p "dwell threshold ws=ws1 origin=status-change status=:done seconds=1 rule=done-landed-while-viewing" line))
+                         (string-match-p "dwell threshold ws=ws1 origin=status-change status=:done detached-live=nil seconds=1 rule=done-landed-while-viewing" line))
                        agent-repl-test--dwell-logs)))))
 
 (ert-deftest agent-repl-test-tab-dwell-seconds-rejects-an-unknown-origin ()

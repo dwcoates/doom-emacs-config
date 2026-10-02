@@ -251,6 +251,18 @@ the tab-bar's partial/full decision: the daemon owns the mode."
   (let ((row (agent-repl-roster-row-for-ws ws)))
     (and row (plist-get row :viewed))))
 
+(defun agent-repl-roster-row-detached-live-p (row)
+  "Return non-nil when ROW carries the detached-work (live) marker."
+  (and (plist-get row :detached-live) t))
+
+(defun agent-repl-roster-detached-live-for-ws (ws)
+  "Return non-nil when WS's current roster row says detached work runs.
+Nil before any push has carried a row for WS.  The view dwell reads it to
+choose its threshold (`agent-repl--tab-dwell-seconds'): an unread `done'
+outranks `idle_async', so the status alone cannot say it."
+  (let ((row (agent-repl-roster-row-for-ws ws)))
+    (and row (agent-repl-roster-row-detached-live-p row))))
+
 ;;;; ---- The walk ---------------------------------------------------------
 
 (defun agent-repl-roster--walk-rows (rows label acc &optional collapsed)

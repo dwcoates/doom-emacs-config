@@ -43,6 +43,7 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 	viewed := s.viewedOn(armName)
 	current := rc.selected != nil && *rc.selected == rec.ID
 	closed := recedes(rec, session)
+	detachedLive := s.asyncLive()
 
 	rowLog.Debug("daemon.sidebar.row", "the roster resolved a row", dlog.Context{
 		"status":   armName,
@@ -51,6 +52,8 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 		"viewed":   viewed,
 		"result":   s.result.String(),
 		"reviving": s.reviving,
+		// The editor chooses its dwell threshold from this fact.
+		"detached_live": detachedLive,
 	})
 	switch {
 	case wasViewed && !viewed:
@@ -95,6 +98,12 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 	// while the revival is in flight, omitted otherwise.
 	if s.reviving {
 		out.Reviving = &frontendv1.RosterRowReviving{}
+	}
+	// PRESENCE IS THE FACT, as `frontend.v1.RosterRowDetachedLive` states it:
+	// set exactly while detached work counts as live (asyncLive), on any arm.
+	// An unread turn end outranks `idle_async`, so the status cannot say it.
+	if detachedLive {
+		out.DetachedLive = &frontendv1.RosterRowDetachedLive{}
 	}
 	// THE DURABLE SELECTION INSTANT, for ordering only: clients order
 	// most-recently-selected first by it (the landing after a close, the

@@ -37,6 +37,7 @@
 (declare-function agent-repl-roster-row-status "roster")
 (declare-function agent-repl-roster-walk "roster")
 (declare-function agent-repl-roster-viewed-for-ws "roster" (ws))
+(declare-function agent-repl-roster-detached-live-for-ws "roster" (ws))
 
 (defun agent-repl--status-log-scope (central-reason)
   "Return the active workspace or an explicit CENTRAL-REASON marker.
@@ -1569,8 +1570,9 @@ went to and which fact decided it."
 ;;
 ;; THE THRESHOLD IS CHOSEN IN ONE PLACE (`agent-repl--tab-dwell-seconds'),
 ;; owner ruling 2026-10-02: one second when a `done' lands while the user is
-;; viewing the workspace, five when the user walks into a turn end that
-;; already stood.  A completed /clear or compaction takes no dwell at all:
+;; viewing the workspace, or when the user walks into a `done' with detached
+;; work running beside it; five when the user walks into any other turn end
+;; that already stood.  A completed /clear or compaction takes no dwell at all:
 ;; the daemon draws it PARTIAL on the push that ends it.
 
 (defconst agent-repl-tab-dwell-demote-seconds 5
@@ -2999,27 +3001,39 @@ names what armed the dwell:
   `status-change'  — WS's status changed while it is armed;
   `viewed-cleared' — the daemon cleared WS's viewed marker.
 
-A `done' row the user was ALREADY viewing when it landed (any origin but
-`activation') takes `agent-repl-tab-dwell-fast-demote-seconds': the final
-response arrived under the user's eyes.  Every other case keeps
-`agent-repl-tab-dwell-demote-seconds' — walking into a turn end that
-already stood, and an interrupted, failed or vendor-blocked row however it
-arrived.  The status is read off the row (`agent-repl--ws-render-status'),
-not off the hook that armed the dwell, so the status-change and
-viewed-cleared reactions to one push can never choose differently.
+A `done' row takes `agent-repl-tab-dwell-fast-demote-seconds' in two
+cases:
+
+  - the user was ALREADY viewing it when it landed (any origin but
+    `activation'): the final response arrived under the user's eyes;
+  - the user walks INTO it while detached work runs beside it (the
+    row's `RosterRowDetachedLive' marker, read through
+    `agent-repl-roster-detached-live-for-ws'): the result held the row
+    green over that background work, and once read it yields to
+    `idle_async' (yellow).
+
+Every other case keeps `agent-repl-tab-dwell-demote-seconds' — walking
+into a turn end that already stood with nothing running beside it, and an
+interrupted, failed or vendor-blocked row however it arrived.  The status
+is read off the row (`agent-repl--ws-render-status'), not off the hook
+that armed the dwell, so the status-change and viewed-cleared reactions
+to one push can never choose differently.
 
 An ORIGIN outside the three is a caller defect and signals."
   (unless (memq origin '(activation status-change viewed-cleared))
     (agent-repl--error ws "tab-view: dwell armed by unknown origin=%S ws=%s" origin ws)
     (error "agent-repl: view dwell armed by unknown origin %S" origin))
   (let* ((status (agent-repl--ws-render-status ws))
-         (watched-land (and (not (eq origin 'activation)) (eq status :done)))
-         (seconds (if watched-land
-                      agent-repl-tab-dwell-fast-demote-seconds
-                    agent-repl-tab-dwell-demote-seconds)))
-    (agent-repl--log ws "tab-view: dwell threshold ws=%s origin=%s status=%s seconds=%s rule=%s"
-                     ws origin status seconds
-                     (if watched-land "done-landed-while-viewing" "standard"))
+         (detached-live (agent-repl-roster-detached-live-for-ws ws))
+         (rule (cond ((not (eq status :done)) "standard")
+                     ((not (eq origin 'activation)) "done-landed-while-viewing")
+                     (detached-live "done-with-detached-work")
+                     (t "standard")))
+         (seconds (if (equal rule "standard")
+                      agent-repl-tab-dwell-demote-seconds
+                    agent-repl-tab-dwell-fast-demote-seconds)))
+    (agent-repl--log ws "tab-view: dwell threshold ws=%s origin=%s status=%s detached-live=%s seconds=%s rule=%s"
+                     ws origin status (and detached-live t) seconds rule)
     seconds))
 
 (defun agent-repl--tab-dwell-note (ws now)
