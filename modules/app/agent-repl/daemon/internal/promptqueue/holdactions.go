@@ -76,7 +76,7 @@ func (q *queue) Release(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID
 		log.Warn(opRelease, "the running turn is uninterruptible; the release is refused", nil)
 		return ErrReleaseRefused
 	}
-	if held.Hold != nil && *held.Hold == wsm.HoldSessionStarting {
+	if held.Hold != nil && *held.Hold == wsm.HoldReconnect {
 		log.Warn(opRelease, "the session is still coming up; the release is refused", nil)
 		return ErrReleaseRefused
 	}

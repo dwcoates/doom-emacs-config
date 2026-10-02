@@ -146,13 +146,37 @@ func TestLeasePolicyStringNamesEveryArm(t *testing.T) {
 	}
 }
 
+// TestHoldKindStoredValuesAreStable pins the integers held_prompts.hold_kind
+// persists: a hold written by an older build must decode as the same kind, so
+// a rename of an identifier may never move its value.
+func TestHoldKindStoredValuesAreStable(t *testing.T) {
+	tests := []struct {
+		name string
+		hold HoldKind
+		want int
+	}{
+		{name: "shutdown", hold: HoldShutdown, want: 0},
+		{name: "reconnect (stored as session_starting before the rename)", hold: HoldReconnect, want: 1},
+		{name: "build refresh", hold: HoldBuildRefresh, want: 2},
+		{name: "merge", hold: HoldMerge, want: 3},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange / Act / Assert
+			if got := int(tc.hold); got != tc.want {
+				t.Fatalf("stored value = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestHoldKindStringNamesEveryArm(t *testing.T) {
 	tests := []struct {
 		hold HoldKind
 		want string
 	}{
 		{hold: HoldShutdown, want: "shutdown"},
-		{hold: HoldSessionStarting, want: "session_starting"},
+		{hold: HoldReconnect, want: "reconnect"},
 		{hold: HoldBuildRefresh, want: "build_refresh"},
 	}
 	for _, tc := range tests {

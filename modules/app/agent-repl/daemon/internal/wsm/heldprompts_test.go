@@ -342,7 +342,7 @@ func TestUpdateHeldPromptHoldClearsTheCondition(t *testing.T) {
 	s, _ := testStore(t)
 	ws := testWorkspace(t, s)
 	turn := standingHold(t, s, ws.ID)
-	starting := HoldSessionStarting
+	starting := HoldReconnect
 	if err := s.UpdateHeldPromptHold(context.Background(), turn, &starting, ""); err != nil {
 		t.Fatalf("UpdateHeldPromptHold: %v", err)
 	}

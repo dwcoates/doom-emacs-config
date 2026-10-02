@@ -182,7 +182,7 @@ func TestTrayConvertsEachHoldArm(t *testing.T) {
 	}{
 		{name: "no condition leaves the oneof unset", kind: nil, want: ""},
 		{name: "shutdown", kind: kindOf(wsm.HoldShutdown), schedule: "sched-1", want: "shutdown"},
-		{name: "session starting", kind: kindOf(wsm.HoldSessionStarting), want: "session_starting"},
+		{name: "reconnect", kind: kindOf(wsm.HoldReconnect), want: "reconnect"},
 		{name: "build refresh", kind: kindOf(wsm.HoldBuildRefresh), want: "build_refresh"},
 		{name: "merge", kind: kindOf(wsm.HoldMerge), want: "merge"},
 	}
@@ -383,8 +383,8 @@ func holdName(p *frontendv1.HeldPrompt) string {
 	switch p.GetHold().(type) {
 	case *frontendv1.HeldPrompt_Shutdown:
 		return "shutdown"
-	case *frontendv1.HeldPrompt_SessionStarting:
-		return "session_starting"
+	case *frontendv1.HeldPrompt_Reconnect:
+		return "reconnect"
 	case *frontendv1.HeldPrompt_BuildRefresh:
 		return "build_refresh"
 	case *frontendv1.HeldPrompt_Merge:
@@ -494,9 +494,9 @@ func TestHeldBadgesComposeEveryStatus(t *testing.T) {
 			want: []wantBadge{{"after the merge", "held until the merge ends; the workspace stays open for it"}},
 		},
 		{
-			name: "session starting hold",
-			p:    &frontendv1.HeldPrompt{Classification: holdForTurnEnd(false), Hold: &frontendv1.HeldPrompt_SessionStarting{SessionStarting: &frontendv1.HeldPromptSessionStartingHold{}}},
-			want: []wantBadge{{"after this turn", ""}, {"starting up", "held until the session is up"}},
+			name: "reconnect hold",
+			p:    &frontendv1.HeldPrompt{Classification: holdForTurnEnd(false), Hold: &frontendv1.HeldPrompt_Reconnect{Reconnect: &frontendv1.HeldPromptReconnectHold{}}},
+			want: []wantBadge{{"after this turn", ""}, {"after reconnect", "held until the session reconnects"}},
 		},
 	}
 	for _, tc := range tests {
@@ -526,7 +526,7 @@ func TestHeldBadgesLabelsAreOneToThreeWords(t *testing.T) {
 		{Classification: &frontendv1.HeldPrompt_ClassificationError{ClassificationError: &frontendv1.HeldPromptClassificationError{}}},
 		&frontendv1.HeldPrompt{Classification: holdForTurnEnd(false), Hold: &frontendv1.HeldPrompt_Shutdown{Shutdown: &frontendv1.HeldPromptShutdownHold{ScheduleId: "s"}}},
 		&frontendv1.HeldPrompt{Classification: holdForTurnEnd(false), Hold: &frontendv1.HeldPrompt_BuildRefresh{BuildRefresh: &frontendv1.HeldPromptBuildRefreshHold{}}},
-		&frontendv1.HeldPrompt{Classification: holdForTurnEnd(false), Hold: &frontendv1.HeldPrompt_SessionStarting{SessionStarting: &frontendv1.HeldPromptSessionStartingHold{}}},
+		&frontendv1.HeldPrompt{Classification: holdForTurnEnd(false), Hold: &frontendv1.HeldPrompt_Reconnect{Reconnect: &frontendv1.HeldPromptReconnectHold{}}},
 		&frontendv1.HeldPrompt{Classification: &frontendv1.HeldPrompt_DaemonHeld{DaemonHeld: &frontendv1.HeldPromptDaemonHeld{}}, Hold: &frontendv1.HeldPrompt_Merge{Merge: &frontendv1.HeldPromptMergeHold{}}},
 	}
 
