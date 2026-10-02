@@ -1229,7 +1229,8 @@ owner ruling, 2026-10-02):
 | case | dwell |
 |---|---|
 | a `done` lands while the user is viewing the workspace | 1 s (`agent-repl-tab-dwell-fast-demote-seconds`) |
-| the user walks into a turn end that already stood; any interrupted, failed or vendor-blocked row | 5 s (`agent-repl-tab-dwell-demote-seconds`) |
+| the user walks into a `done` whose row carries `RosterRowDetachedLive` (background work runs; once read it shows yellow `idle_async`) | 1 s |
+| the user walks into any other turn end that already stood; any interrupted, failed or vendor-blocked row | 5 s (`agent-repl-tab-dwell-demote-seconds`) |
 | a `/clear` or compaction completes | none: the daemon reads the result in `SetTurnEnded` and the push that ends the cut already carries the marker |
 
 There is ONE pending dwell (`agent-repl--tab-dwell-pending`), and its timer

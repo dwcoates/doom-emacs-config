@@ -141,6 +141,19 @@ unknown fields, and refusing this one would drop every roster push."
   (agent-repl-wire--decode-empty "RosterRowReviving" value)
   t)
 
+(defun agent-repl-wire-decode-roster-row-detached-live (value)
+  "Decode VALUE as `RosterRowDetachedLive' and return t.
+The DETACHED-WORK marker: detached (background) work runs in this
+workspace right now, on whatever status arm the row stands.  EMPTY, and
+PRESENCE IS THE FACT, as for the markers above.
+
+Emacs reads it for ONE decision: the view dwell's threshold
+\(`agent-repl--tab-dwell-seconds'), because an unread `done' outranks
+`idle_async' and so the status alone cannot say that background work runs
+beside it."
+  (agent-repl-wire--decode-empty "RosterRowDetachedLive" value)
+  t)
+
 (defun agent-repl-wire-decode-roster-row-availability-pending (value)
   "Decode VALUE as the empty `RosterRowAvailabilityPending'.
 The daemon is still bringing the session up: the workspace is not opened."
@@ -467,14 +480,14 @@ Nested workspaces — a spawned family under its parent — in render order."
   (agent-repl-wire-decode-roster-row value))
 
 (defconst agent-repl-wire--roster-row-keys
-  (append '(workspace attention priority viewed reviving lastSelected availability name current children when detail closed)
+  (append '(workspace attention priority viewed reviving detachedLive lastSelected availability name current children when detail closed)
           (mapcar #'car agent-repl-wire-roster-row-status-arms))
   "Every key `RosterRow' may carry: its own fields plus the 22 status arms.")
 
 (defun agent-repl-wire-decode-roster-row (value)
   "Decode VALUE as `RosterRow'.
 Returns `(:workspace W :attention A :priority P :viewed V :reviving R
-:last-selected L :availability AV :name N :status
+:detached-live DL :last-selected L :availability AV :name N :status
 S :current C :children ROWS :when WHEN :detail D :closed CLOSED)', with
 the message tree preserved as the contract spells it."
   (let ((object (agent-repl-wire--object "RosterRow" value)))
@@ -496,6 +509,9 @@ the message tree preserved as the contract spells it."
            :reviving (agent-repl-wire--decode-optional-message
                       "RosterRow" 'reviving object
                       #'agent-repl-wire-decode-roster-row-reviving)
+           :detached-live (agent-repl-wire--decode-optional-message
+                           "RosterRow" 'detachedLive object
+                           #'agent-repl-wire-decode-roster-row-detached-live)
            :last-selected (agent-repl-wire--decode-optional-message
                            "RosterRow" 'lastSelected object
                            #'agent-repl-wire-decode-roster-row-last-selected)

@@ -544,6 +544,57 @@ func finished(t *testing.T, r sidebarResolver) sidebarResolver {
 	return r
 }
 
+func TestRowStatesItsLiveDetachedWork(t *testing.T) {
+	cases := []struct {
+		name       string
+		arrange    func(t *testing.T, r sidebarResolver)
+		wantStatus string
+		wantLive   bool
+	}{
+		{name: "an unread done with detached work states it", arrange: func(t *testing.T, r sidebarResolver) {
+			live(t, r)
+			r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
+			r.OnDetachedWork(theWS, agent("a1"), detachedWork("work-1"))
+			r.SetTurnEnded(theWS, wsm.CloseCompleted)
+		}, wantStatus: "done", wantLive: true},
+		{name: "idle_async states it", arrange: func(t *testing.T, r sidebarResolver) {
+			live(t, r)
+			r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
+			r.OnDetachedWork(theWS, agent("a1"), detachedWork("work-1"))
+			r.SetTurnEnded(theWS, wsm.CloseCompleted)
+			r.SetViewed(theWS)
+		}, wantStatus: "idle_async", wantLive: true},
+		{name: "a done with no detached work does not", arrange: func(t *testing.T, r sidebarResolver) {
+			finished(t, r)
+		}, wantStatus: "done", wantLive: false},
+		{name: "an emptied live-work set clears it", arrange: func(t *testing.T, r sidebarResolver) {
+			live(t, r)
+			r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
+			r.OnDetachedWork(theWS, agent("a1"), detachedWork("work-1"))
+			r.SetTurnEnded(theWS, wsm.CloseCompleted)
+			r.OnLiveWorkChanged(theWS, sidebar.LiveWorkSet{})
+		}, wantStatus: "done", wantLive: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			r := arrange(t)
+
+			// Act.
+			tc.arrange(t, r)
+
+			// Assert: presence is the fact, on whatever arm the row stands.
+			row := onlyRow(t, r)
+			if got := statusName(row); got != tc.wantStatus {
+				t.Fatalf("status = %q, want %q", got, tc.wantStatus)
+			}
+			if got := row.GetDetachedLive() != nil; got != tc.wantLive {
+				t.Fatalf("detached_live = %v, want %v", got, tc.wantLive)
+			}
+		})
+	}
+}
+
 func TestAContextCutsEndDrawsTheRowPartialAtOnce(t *testing.T) {
 	cases := []struct {
 		name       string
