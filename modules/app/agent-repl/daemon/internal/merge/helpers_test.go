@@ -876,6 +876,9 @@ type fakeQueue struct {
 	leaseEvents []bool
 }
 
+// ReleaseReconnectHolds is a no-op: no merge scenario brings a session up.
+func (q *fakeQueue) ReleaseReconnectHolds(ids.WorkspaceID) {}
+
 func (q *fakeQueue) Submit(_ context.Context, sub promptqueue.Submission) (promptqueue.Disposition, error) {
 	q.mu.Lock()
 	q.submissions = append(q.submissions, sub)

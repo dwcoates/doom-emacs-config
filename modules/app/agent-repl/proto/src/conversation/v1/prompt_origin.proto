@@ -91,4 +91,9 @@ enum PromptOrigin {
   //
   // Never submitted by a client: only the shim produces it.
   PROMPT_ORIGIN_VENDOR_STARTED = 29;
+  // The daemon's question after a link the user clicked in a bubble resolved
+  // to no file: it quotes the bubble and asks the agent which file it meant
+  // and how agent-repl could avoid or resolve such links. Submitted without
+  // interrupting the running turn.
+  PROMPT_ORIGIN_LINK_UNRESOLVED = 30;
 }

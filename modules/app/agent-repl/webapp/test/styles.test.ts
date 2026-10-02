@@ -3325,24 +3325,31 @@ describe("the expanded-item ceiling", () => {
 });
 
 describe("the persistent-wifi chip's paints (owner request, 2026-10-02)", () => {
-  it("paints the joined glyph a brighter green than --ok", () => {
-    // Arrange
-    const root = declarationsOf(":root") ?? "";
-    // Act
-    const [wifi, ok] = [luminance(rgbOf(root, "--wifi-joined")), luminance(rgbOf(root, "--ok"))];
-    // Assert
-    expect(wifi).toBeGreaterThan(ok);
+  it("makes the glyph black", () => {
+    expect(rgbOf(declarationsOf(":root") ?? "", "--wifi-glyph")).toEqual([0, 0, 0]);
   });
 
-  it("keeps the joined glyph green", () => {
+  it("paints the glyph with the chip's color, whatever the wifi arm", () => {
+    expect(declarationsOf(".topbar-wifi") ?? "").toMatch(/color:\s*var\(--wifi-glyph\)/);
+  });
+
+  it("paints no color off the wifi arm", () => {
+    expect(stylesheet).not.toMatch(/\.topbar-wifi\[data-wifi=/);
+  });
+
+  it("makes the mode-off disc white", () => {
+    expect(rgbOf(declarationsOf(":root") ?? "", "--wifi-mode-off-disc")).toEqual([255, 255, 255]);
+  });
+
+  it("fills the disc white by default", () => {
+    expect(declarationsOf(".topbar-wifi-disc") ?? "").toMatch(/fill:\s*var\(--wifi-mode-off-disc\)/);
+  });
+
+  it("makes the mode-on disc green", () => {
     // Arrange / Act
-    const [r, g, b] = rgbOf(declarationsOf(":root") ?? "", "--wifi-joined");
+    const [r, g, b] = rgbOf(declarationsOf(":root") ?? "", "--wifi-mode-on-disc");
     // Assert
     expect(g > r && g > b).toBe(true);
-  });
-
-  it("makes the mode-on disc black", () => {
-    expect(rgbOf(declarationsOf(":root") ?? "", "--wifi-mode-on-disc")).toEqual([0, 0, 0]);
   });
 
   it("fills the disc, not the chip, when the mode is on", () => {
@@ -3353,10 +3360,20 @@ describe("the persistent-wifi chip's paints (owner request, 2026-10-02)", () => 
   it("strokes the glyph's arcs and never the disc", () => {
     expect(declarationsOf(".topbar-wifi-disc") ?? "").toMatch(/stroke:\s*none/);
   });
+
+  it("pulses a chip whose toggle is settling", () => {
+    expect(declarationsOf(".topbar-wifi[data-settling]") ?? "").toMatch(/animation:\s*topbar-wifi-settling/);
+  });
+
+  it("holds the pulse still under prefers-reduced-motion", () => {
+    expect(stylesheet).toMatch(
+      /@media \(prefers-reduced-motion: reduce\) \{\s*\.topbar-wifi\[data-settling\] \{ animation: none;/,
+    );
+  });
 });
 
 describe("the persistent-wifi glyph button", () => {
-  it("carries the chip's color, which is the wifi arm", () => {
+  it("carries the chip's color, which is the glyph's black", () => {
     // Arrange / Act
     const own = rulesOf(stylesheet).find((rule) => rule.selectors.length === 1 && rule.selectors[0] === ".topbar-wifi-button");
     // Assert

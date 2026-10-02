@@ -57,6 +57,9 @@ type verbs struct {
 	load   PromptLoader
 	splice PromptSplicer
 	now    func() time.Time
+	// restartStopBound bounds the restart's forced end of the running turn;
+	// see DefaultRestartStopBound.
+	restartStopBound time.Duration
 
 	// selection serializes Select's selection section — the read of the
 	// current workspace through the roster push — so two concurrent selects

@@ -134,6 +134,11 @@ type server struct {
 	profile Profile
 	log     *logSink
 
+	// vendorFailuresMu guards vendorFailures, the VendorStartFailTimes
+	// refusals already answered.
+	vendorFailuresMu sync.Mutex
+	vendorFailures   int
+
 	// bashMu serializes a bash push against a WatchBash subscription, which is
 	// what makes a pushed frame IMPOSSIBLE to lose. A test pushes as soon as
 	// the daemon has drawn the shell's head row, but the daemon opens the
@@ -429,14 +434,10 @@ func (s *server) StartSession(ctx context.Context, req *connect.Request[shimv1.S
 		}), nil
 	}
 	if detail := s.profile.VendorStartFailed; detail != "" {
-		return connect.NewResponse(&shimv1.StartSessionResponse{
-			Result: &shimv1.StartSessionResponse_Failure{Failure: &shimv1.StartSessionFailure{
-				Detail: detail,
-				Cause: &shimv1.StartSessionFailure_VendorStartFailed{
-					VendorStartFailed: &shimv1.StartSessionVendorStartFailed{},
-				},
-			}},
-		}), nil
+		return connect.NewResponse(vendorStartFailure(detail, s.profile.VendorStartRetryable)), nil
+	}
+	if s.takeVendorStartFailure() {
+		return connect.NewResponse(vendorStartFailure(s.profile.VendorStartFailDetail, true)), nil
 	}
 	if resp, done, err := scripted[shimv1.StartSessionResponse, *shimv1.StartSessionResponse](s, RPCStartSession); done {
 		if err == nil {
@@ -1430,4 +1431,32 @@ func (s *server) openingDiagnostics() *conversationv1.SessionUpdate {
 	// shim's diagnostics frame does.
 	opening.GetDiagnostics().ShimBuild = s.buildSHA()
 	return opening
+}
+
+// vendorStartFailure is the shim's vendor_start_failed refusal, labeled
+// retryable or rejected (shim.v1 StartSessionVendorStartFailed.retry).
+func vendorStartFailure(detail string, retryable bool) *shimv1.StartSessionResponse {
+	label := &shimv1.StartSessionVendorStartFailed{
+		Retry: &shimv1.StartSessionVendorStartFailed_Rejected{Rejected: &shimv1.StartSessionVendorStartRejected{}}}
+	if retryable {
+		label.Retry = &shimv1.StartSessionVendorStartFailed_Retryable{Retryable: &shimv1.StartSessionVendorStartRetryable{}}
+	}
+	return &shimv1.StartSessionResponse{
+		Result: &shimv1.StartSessionResponse_Failure{Failure: &shimv1.StartSessionFailure{
+			Detail: detail,
+			Cause:  &shimv1.StartSessionFailure_VendorStartFailed{VendorStartFailed: label},
+		}},
+	}
+}
+
+// takeVendorStartFailure reports whether this StartSession is one of the
+// profile's VendorStartFailTimes refusals, counting it when it is.
+func (s *server) takeVendorStartFailure() bool {
+	s.vendorFailuresMu.Lock()
+	defer s.vendorFailuresMu.Unlock()
+	if s.vendorFailures >= s.profile.VendorStartFailTimes {
+		return false
+	}
+	s.vendorFailures++
+	return true
 }

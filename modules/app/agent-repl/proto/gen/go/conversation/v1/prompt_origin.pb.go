@@ -102,6 +102,11 @@ const (
 	//
 	// Never submitted by a client: only the shim produces it.
 	PromptOrigin_PROMPT_ORIGIN_VENDOR_STARTED PromptOrigin = 29
+	// The daemon's question after a link the user clicked in a bubble resolved
+	// to no file: it quotes the bubble and asks the agent which file it meant
+	// and how agent-repl could avoid or resolve such links. Submitted without
+	// interrupting the running turn.
+	PromptOrigin_PROMPT_ORIGIN_LINK_UNRESOLVED PromptOrigin = 30
 )
 
 // Enum value maps for PromptOrigin.
@@ -136,6 +141,7 @@ var (
 		26: "PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME",
 		28: "PROMPT_ORIGIN_RESUME_AFTER_RESTART",
 		29: "PROMPT_ORIGIN_VENDOR_STARTED",
+		30: "PROMPT_ORIGIN_LINK_UNRESOLVED",
 	}
 	PromptOrigin_value = map[string]int32{
 		"PROMPT_ORIGIN_UNSPECIFIED":                 0,
@@ -167,6 +173,7 @@ var (
 		"PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME": 26,
 		"PROMPT_ORIGIN_RESUME_AFTER_RESTART":        28,
 		"PROMPT_ORIGIN_VENDOR_STARTED":              29,
+		"PROMPT_ORIGIN_LINK_UNRESOLVED":             30,
 	}
 )
 
@@ -201,7 +208,7 @@ var File_conversation_v1_prompt_origin_proto protoreflect.FileDescriptor
 
 const file_conversation_v1_prompt_origin_proto_rawDesc = "" +
 	"\n" +
-	"#conversation/v1/prompt_origin.proto\x12\x0fconversation.v1*\xe8\b\n" +
+	"#conversation/v1/prompt_origin.proto\x12\x0fconversation.v1*\x8b\t\n" +
 	"\fPromptOrigin\x12\x1d\n" +
 	"\x19PROMPT_ORIGIN_UNSPECIFIED\x10\x00\x12\x1b\n" +
 	"\x17PROMPT_ORIGIN_USER_SENT\x10\x01\x12$\n" +
@@ -232,7 +239,8 @@ const file_conversation_v1_prompt_origin_proto_rawDesc = "" +
 	" PROMPT_ORIGIN_MERGE_AFTER_ACTION\x10\x19\x12-\n" +
 	")PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME\x10\x1a\x12&\n" +
 	"\"PROMPT_ORIGIN_RESUME_AFTER_RESTART\x10\x1c\x12 \n" +
-	"\x1cPROMPT_ORIGIN_VENDOR_STARTED\x10\x1dB0Z.agentrepl/proto/conversation/v1;conversationv1b\x06proto3"
+	"\x1cPROMPT_ORIGIN_VENDOR_STARTED\x10\x1d\x12!\n" +
+	"\x1dPROMPT_ORIGIN_LINK_UNRESOLVED\x10\x1eB0Z.agentrepl/proto/conversation/v1;conversationv1b\x06proto3"
 
 var (
 	file_conversation_v1_prompt_origin_proto_rawDescOnce sync.Once

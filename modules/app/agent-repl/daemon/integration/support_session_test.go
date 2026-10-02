@@ -13,15 +13,12 @@ import (
 	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
-	conversationv1 "agentrepl/proto/conversation/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"claude-repld/integration/harness"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/rollout"
 	"claude-repld/internal/stateroot"
-
-	"connectrpc.com/connect"
 )
 
 // prelaunchControlSocket names the control socket a relaunch's Nth prelaunch
@@ -32,51 +29,6 @@ import (
 func prelaunchControlSocket(d *harness.Daemon, ws *workspacev1.WorkspaceRef, gen int) string {
 	base := strings.TrimSuffix(d.SocketPath(ws), ".sock")
 	return base + ".n" + strconv.Itoa(gen) + ".sock.ctl"
-}
-
-// restartGracefulInFlight opens a workspace, starts a long-running turn, and
-// issues a graceful RestartWorkspace, answering the fixture once the bounce
-// registry has REGISTERED the bounce behind the running turn. The turn is left
-// running: the caller ends it (or not) to drive the bounce.
-func restartGracefulInFlight(t *testing.T, key string) *fixture {
-	t.Helper()
-	f := newOpened(t, harness.Opts{})
-	f.shim.ExpectStartSession()
-	f.submit("long running work", key, conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
-	f.shim.ExpectStartTurn()
-
-	resp, err := f.d.Client().RestartWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.RestartWorkspaceRequest{Workspace: f.ws, Force: false}))
-	if err != nil {
-		t.Fatalf("RestartWorkspace{force:false} = error %v, want a success", err)
-	}
-	if resp.Msg.GetSuccess() == nil {
-		t.Fatalf("RestartWorkspace = %v, want a success", resp.Msg)
-	}
-	f.d.AwaitLogRecord(harness.WorkspaceLogPath(f.repo.Dir, "daemon"), "the bounce registered behind the running turn", func(r harness.LogRecord) bool {
-		return r.Operation == "daemon.promptqueue.bounce" && r.Message == "the workspace has work in flight; registered the bounce for when it ends"
-	})
-	return f
-}
-
-// expectNoFile asserts a path does not appear within the probe window. It is
-// a negative assertion, so it necessarily waits out a bound rather than
-// synchronizing on an event, mirroring expectNoRPC.
-func expectNoFile(t *testing.T, path string, probe time.Duration) {
-	t.Helper()
-	deadline := time.NewTimer(probe)
-	defer deadline.Stop()
-	ticker := time.NewTicker(5 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		if _, err := os.Stat(path); err == nil {
-			t.Fatalf("%s appeared inside the %s probe window, want it absent", path, probe)
-		}
-		select {
-		case <-ticker.C:
-		case <-deadline.C:
-			return
-		}
-	}
 }
 
 // expectNoRPC asserts a shim received no request for `rpc` within the probe

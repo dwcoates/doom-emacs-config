@@ -410,19 +410,19 @@ func TestAPromptHeldBehindAnUninterruptibleContextCutSkipsClassifyingAndRefusesR
 }
 
 // ---------------------------------------------------------------------------
-// A revival-time held prompt carries hold.session_starting
+// A revival-time held prompt carries hold.reconnect
 // ---------------------------------------------------------------------------
 
-// TestARevivalTimeHeldPromptCarriesTheSessionStartingHoldAndRefusesRelease
+// TestARevivalTimeHeldPromptCarriesTheReconnectHoldAndRefusesRelease
 // covers audit-2 critique 3: the same revival state
 // TestCloseWorkspaceWithAHeldPromptRefuses (session_lifecycle_test.go) builds
 // to exercise CloseWorkspace's blocked answer is read here for the tray's own
 // hold arm and UpdateHeldPrompt's release refusal on it
-// (internal/promptqueue/submit.go's holdForLease projects HoldSessionStarting
+// (internal/promptqueue/submit.go's holdForLease projects HoldReconnect
 // for a hibernate-holder lease; internal/promptqueue/holdactions.go's Release
 // refuses a force-through on it -- there is nothing live to send an interrupt
 // to yet).
-func TestARevivalTimeHeldPromptCarriesTheSessionStartingHoldAndRefusesRelease(t *testing.T) {
+func TestARevivalTimeHeldPromptCarriesTheReconnectHoldAndRefusesRelease(t *testing.T) {
 	t.Parallel()
 	// Arrange: hibernate an idle session, then submit a revival prompt while
 	// the revival's new shim withholds its diagnostics, so the lease is still
@@ -455,14 +455,14 @@ func TestARevivalTimeHeldPromptCarriesTheSessionStartingHoldAndRefusesRelease(t 
 		t.Fatalf("SubmitPrompt during revival = %v, want a minted TurnId even though delivery is held", held)
 	}
 
-	// Assert: the tray carries hold.session_starting, with no classification
+	// Assert: the tray carries hold.reconnect, with no classification
 	// verdict at all -- the lease projects the hold before any turn exists.
-	tray := awaitView(t, f, holds, "the session_starting hold", func(tray *frontendv1.DaemonHoldTray) bool {
-		return promptHeldEntry(tray, turn).GetSessionStarting() != nil
+	tray := awaitView(t, f, holds, "the reconnect hold", func(tray *frontendv1.DaemonHoldTray) bool {
+		return promptHeldEntry(tray, turn).GetReconnect() != nil
 	})
 	p := promptHeldEntry(tray, turn)
-	if p.GetSessionStarting() == nil {
-		t.Fatalf("held entry during revival = %v, want hold.session_starting", p)
+	if p.GetReconnect() == nil {
+		t.Fatalf("held entry during revival = %v, want hold.reconnect", p)
 	}
 
 	// Act: a force-through is attempted.
@@ -474,10 +474,10 @@ func TestARevivalTimeHeldPromptCarriesTheSessionStartingHoldAndRefusesRelease(t 
 
 	// Assert: `release_refused` is a LANDED arm.
 	if err != nil {
-		t.Fatalf("UpdateHeldPrompt{release} on a session_starting hold = error %v, want the typed release_refused answer", err)
+		t.Fatalf("UpdateHeldPrompt{release} on a reconnect hold = error %v, want the typed release_refused answer", err)
 	}
 	if relResp.Msg.GetError().GetReleaseRefused() == nil {
-		t.Fatalf("UpdateHeldPrompt{release} on a session_starting hold = %v, want error.release_refused", relResp.Msg)
+		t.Fatalf("UpdateHeldPrompt{release} on a reconnect hold = %v, want error.release_refused", relResp.Msg)
 	}
 }
 

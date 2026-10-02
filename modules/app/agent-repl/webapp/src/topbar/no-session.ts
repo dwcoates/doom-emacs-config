@@ -10,7 +10,7 @@
  * the exact thing the fixed schema exists to forbid.
  *
  * ONE IMPLEMENTATION FOR FOUR CELLS. The model selector, the effort selector,
- * the permission-mode picker and fast mode all say the same thing in the same
+ * and the permission-mode picker all say the same thing in the same
  * way, and four copies of one dash is how they would come to say it
  * differently.
  *
@@ -24,14 +24,13 @@ import { log } from "../log.js";
 export const NO_SESSION_DASH = "—";
 
 /** Which cell is stating that it has no session fact. */
-export type NoSessionCell = "model" | "effort" | "mode" | "fast";
+export type NoSessionCell = "model" | "effort" | "mode";
 
 /** The class and the tooltip each cell's empty slot carries. */
 const NO_SESSION_CELLS: Record<NoSessionCell, { className: string; title: string }> = {
   model: { className: "topbar-model", title: "no session is running, so no model is in force" },
   effort: { className: "topbar-effort", title: "no effort level is known to be in force" },
   mode: { className: "topbar-mode", title: "no session is running, so no permission mode is in force" },
-  fast: { className: "topbar-fast", title: "no session is running, so the vendor has stated no fast mode" },
 };
 
 /** The dash in CELL's own slot. */

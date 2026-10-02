@@ -236,6 +236,11 @@ type fakeVerbs struct {
 	// editorOpens records every relayed open, a workspace file's path or a
 	// daemon file's.
 	editorOpens []string
+	// feedLinkUnresolved and feedLinkErr are what OpenFeedLink answers.
+	feedLinkUnresolved *workspace.UnresolvedLink
+	feedLinkErr        error
+	// feedLinkReport is each OpenFeedLink call's report flag, in order.
+	feedLinkReport []bool
 
 	interruptOutcome workspace.InterruptOutcome
 	interruptErr     error
@@ -487,11 +492,17 @@ type fakePrompts struct {
 	lastSaid *conversationv1.UserSaid
 	// lastDelivery is the delivery the last submission was handed with.
 	lastDelivery wsm.Delivery
+	// lastOrigin is the origin the last submission was handed with.
+	lastOrigin conversationv1.PromptOrigin
+	// submits counts the submissions.
+	submits int
 }
 
-func (f *fakePrompts) Submit(_ context.Context, _ ids.WorkspaceID, said *conversationv1.UserSaid, _ string, _ conversationv1.PromptOrigin, delivery wsm.Delivery, _ *feedid.Ref) (prompthandler.Outcome, error) {
+func (f *fakePrompts) Submit(_ context.Context, _ ids.WorkspaceID, said *conversationv1.UserSaid, _ string, origin conversationv1.PromptOrigin, delivery wsm.Delivery, _ *feedid.Ref) (prompthandler.Outcome, error) {
 	f.lastSaid = said
 	f.lastDelivery = delivery
+	f.lastOrigin = origin
+	f.submits++
 	return f.outcome, f.err
 }
 
@@ -639,6 +650,14 @@ func (f *fakeMerge) Enqueue(_ context.Context, req merge.Request) error {
 func (v *fakeVerbs) OpenInEditor(_ context.Context, _ ids.WorkspaceID, path string, _ *uint32) error {
 	v.editorOpens = append(v.editorOpens, "file:"+path)
 	return nil
+}
+
+// OpenFeedLink records the link and answers the seeded unresolved question
+// and error.
+func (v *fakeVerbs) OpenFeedLink(_ context.Context, _ ids.WorkspaceID, href string, report bool) (*workspace.UnresolvedLink, error) {
+	v.editorOpens = append(v.editorOpens, "link:"+href)
+	v.feedLinkReport = append(v.feedLinkReport, report)
+	return v.feedLinkUnresolved, v.feedLinkErr
 }
 
 func (v *fakeVerbs) OpenDaemonFileInEditor(_ context.Context, _ ids.WorkspaceID, path string) error {

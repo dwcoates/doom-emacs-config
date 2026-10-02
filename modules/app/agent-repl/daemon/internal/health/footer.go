@@ -69,6 +69,14 @@ const (
 	// FaultSubStatusDaemonImpaired is the daemon owing the session a service
 	// it cannot give.
 	FaultSubStatusDaemonImpaired = "daemon_impaired"
+	// FaultSubStatusVendorRetry is a vendor that did not start and is being
+	// retried.
+	FaultSubStatusVendorRetry = "vendor_retry"
+	// FaultSubStatusVendorRejection is a vendor that refused the start.
+	FaultSubStatusVendorRejection = "vendor_rejection"
+	// FaultSubStatusVendorFailed is a vendor that failed to start for the
+	// whole retry window.
+	FaultSubStatusVendorFailed = "vendor_failed"
 )
 
 // KindColdGateReopenFailed is the cold-gate re-open that failed: the user
@@ -92,6 +100,13 @@ var sessionFaultCells = map[string]FaultCell{
 	KindRelaunchResumeFailed:  {FaultStatusDisconnected, FaultSubStatusStartFailed},
 	KindAdoptionWindowExpired: {FaultStatusDisconnected, FaultSubStatusStartFailed},
 	KindColdGateReopenFailed:  {FaultStatusDisconnected, FaultSubStatusStartFailed},
+
+	// A VENDOR THAT DID NOT START INSIDE A HEALTHY SHIM is one of the three
+	// vendor steps, never `start_failed`, which names the shim PROCESS
+	// (footer.proto, FooterStatusDisconnected.substatus).
+	KindVendorStartRetrying: {FaultStatusDisconnected, FaultSubStatusVendorRetry},
+	KindVendorStartRejected: {FaultStatusDisconnected, FaultSubStatusVendorRejection},
+	KindVendorStartFailed:   {FaultStatusDisconnected, FaultSubStatusVendorFailed},
 
 	KindShimDied:      {FaultStatusDisconnected, FaultSubStatusDead},
 	KindBounceDied:    {FaultStatusDisconnected, FaultSubStatusDead},
@@ -162,6 +177,8 @@ func FaultLineDetail(f wsm.Fault) string {
 		return StartFailedDetail(f)
 	case KindDeployFailed:
 		return DeployFailedDetail(f)
+	case KindVendorStartRetrying, KindVendorStartRejected, KindVendorStartFailed:
+		return VendorStartLine(f)
 	}
 	if cause := f.Evidence["cause"]; cause != "" {
 		return cause

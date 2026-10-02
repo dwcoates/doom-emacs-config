@@ -33,7 +33,7 @@
 // A cell whose SESSION fact is unknown — the workspace is hibernated, or
 // standing at the cold gate, or its session has simply not stated the fact
 // yet — draws its OWN "no session" content in its OWN slot: the model
-// selector, the permission-mode picker and fast mode are ABSENT (presence is
+// selector and the permission-mode picker are ABSENT (presence is
 // how "unknown" is said) and the client draws a dash in the slot rather than
 // omitting it, while the context chip and the warning strip are ALWAYS SET
 // and always drawn. The session-less FACTS are not lost: the chip carries the
@@ -58,7 +58,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file frontend/v1/topbar.proto.
  */
 export const file_frontend_v1_topbar: GenFile = /*@__PURE__*/
-  fileDesc("Chhmcm9udGVuZC92MS90b3BiYXIucHJvdG8SC2Zyb250ZW5kLnYxItQFCgpUb3BiYXJWaWV3EicKBXRpdGxlGAEgASgLMhguZnJvbnRlbmQudjEuVG9wYmFyVGl0bGUSNAoMc2Vzc2lvbl9saW5lGAIgASgLMh4uZnJvbnRlbmQudjEuVG9wYmFyU2Vzc2lvbkxpbmUSPQoObW9kZWxfc2VsZWN0b3IYAyABKAsyIC5mcm9udGVuZC52MS5Ub3BiYXJNb2RlbFNlbGVjdG9ySACIAQESNQoMY29ubmVjdGl2aXR5GAQgASgLMh8uZnJvbnRlbmQudjEuVG9wYmFyQ29ubmVjdGl2aXR5EjEKCHdhcm5pbmdzGAUgASgLMh8uZnJvbnRlbmQudjEuVG9wYmFyV2FybmluZ1N0cmlwEi8KB2NvbnRleHQYByABKAsyHi5mcm9udGVuZC52MS5Ub3BiYXJDb250ZXh0Q2hpcBIrCgdhY2NvdW50GAggASgLMhouZnJvbnRlbmQudjEuVG9wYmFyQWNjb3VudBJMChZwZXJtaXNzaW9uX21vZGVfcGlja2VyGAkgASgLMicuZnJvbnRlbmQudjEuVG9wYmFyUGVybWlzc2lvbk1vZGVQaWNrZXJIAYgBARIzCglmYXN0X21vZGUYCiABKAsyGy5mcm9udGVuZC52MS5Ub3BiYXJGYXN0TW9kZUgCiAEBEjoKD3BlcnNpc3RlbnRfd2lmaRgNIAEoCzIhLmZyb250ZW5kLnYxLlRvcGJhclBlcnNpc3RlbnRXaWZpEj8KD2VmZm9ydF9zZWxlY3RvchgOIAEoCzIhLmZyb250ZW5kLnYxLlRvcGJhckVmZm9ydFNlbGVjdG9ySAOIAQFCEQoPX21vZGVsX3NlbGVjdG9yQhkKF19wZXJtaXNzaW9uX21vZGVfcGlja2VyQgwKCl9mYXN0X21vZGVCEgoQX2VmZm9ydF9zZWxlY3RvckoECAYQB0oECAsQDEoECAwQDSLOAgoUVG9wYmFyUGVyc2lzdGVudFdpZmkSOQoGam9pbmVkGAEgASgLMicuZnJvbnRlbmQudjEuVG9wYmFyUGVyc2lzdGVudFdpZmlKb2luZWRIABJACgpub3Rfam9pbmVkGAIgASgLMiouZnJvbnRlbmQudjEuVG9wYmFyUGVyc2lzdGVudFdpZmlOb3RKb2luZWRIABI1CgJvbhgDIAEoCzInLmZyb250ZW5kLnYxLlRvcGJhclBlcnNpc3RlbnRXaWZpTW9kZU9uSAESNwoDb2ZmGAQgASgLMiguZnJvbnRlbmQudjEuVG9wYmFyUGVyc2lzdGVudFdpZmlNb2RlT2ZmSAESOQoHdG9vbHRpcBgFIAEoCzIoLmZyb250ZW5kLnYxLlRvcGJhclBlcnNpc3RlbnRXaWZpVG9vbHRpcEIGCgR3aWZpQgYKBG1vZGUiHAoaVG9wYmFyUGVyc2lzdGVudFdpZmlKb2luZWQiHwodVG9wYmFyUGVyc2lzdGVudFdpZmlOb3RKb2luZWQiHAoaVG9wYmFyUGVyc2lzdGVudFdpZmlNb2RlT24iHQobVG9wYmFyUGVyc2lzdGVudFdpZmlNb2RlT2ZmIisKG1RvcGJhclBlcnNpc3RlbnRXaWZpVG9vbHRpcBIMCgR0ZXh0GAEgASgJIq4BCg5Ub3BiYXJGYXN0TW9kZRIrCgJvbhgBIAEoCzIdLmZyb250ZW5kLnYxLlRvcGJhckZhc3RNb2RlT25IABItCgNvZmYYAiABKAsyHi5mcm9udGVuZC52MS5Ub3BiYXJGYXN0TW9kZU9mZkgAEjcKCGNvb2xkb3duGAMgASgLMiMuZnJvbnRlbmQudjEuVG9wYmFyRmFzdE1vZGVDb29sZG93bkgAQgcKBXN0YXRlIhIKEFRvcGJhckZhc3RNb2RlT24iIwoRVG9wYmFyRmFzdE1vZGVPZmYSDgoGcmVhc29uGAEgASgJIhgKFlRvcGJhckZhc3RNb2RlQ29vbGRvd24ikAEKGlRvcGJhclBlcm1pc3Npb25Nb2RlUGlja2VyEjgKB2N1cnJlbnQYASABKAsyJy5mcm9udGVuZC52MS5Ub3BiYXJQZXJtaXNzaW9uTW9kZU9wdGlvbhI4CgdvcHRpb25zGAIgAygLMicuZnJvbnRlbmQudjEuVG9wYmFyUGVybWlzc2lvbk1vZGVPcHRpb24iQAoaVG9wYmFyUGVybWlzc2lvbk1vZGVPcHRpb24SDAoEbW9kZRgBIAEoCRIUCgxkaXNwbGF5X25hbWUYAiABKAkiagoRVG9wYmFyQ29udGV4dENoaXASDAoEdGV4dBgBIAEoCRIyCglicmVha2Rvd24YAiABKAsyHy5mcm9udGVuZC52MS5Ub2tlbkJyZWFrZG93blZpZXcSEwoLd2luZG93X2ZpbGwYAyABKAEivwEKDVRvcGJhckFjY291bnQSNwoJbG9nZ2VkX2luGAEgASgLMiIuZnJvbnRlbmQudjEuVG9wYmFyQWNjb3VudExvZ2dlZEluSAASOQoKbG9nZ2VkX291dBgCIAEoCzIjLmZyb250ZW5kLnYxLlRvcGJhckFjY291bnRMb2dnZWRPdXRIABIxCgdvcHRpb25zGAMgAygLMiAuZnJvbnRlbmQudjEuVG9wYmFyQWNjb3VudE9wdGlvbkIHCgVzdGF0ZSImChVUb3BiYXJBY2NvdW50TG9nZ2VkSW4SDQoFZW1haWwYASABKAkiGAoWVG9wYmFyQWNjb3VudExvZ2dlZE91dCK3AQoTVG9wYmFyQWNjb3VudE9wdGlvbhISCgpjb25maWdfZGlyGAEgASgJEjcKCWxvZ2dlZF9pbhgCIAEoCzIiLmZyb250ZW5kLnYxLlRvcGJhckFjY291bnRMb2dnZWRJbkgAEjkKCmxvZ2dlZF9vdXQYAyABKAsyIy5mcm9udGVuZC52MS5Ub3BiYXJBY2NvdW50TG9nZ2VkT3V0SAASDwoHY3VycmVudBgEIAEoCEIHCgVzdGF0ZSIbCgtUb3BiYXJUaXRsZRIMCgR0ZXh0GAEgASgJIiEKEVRvcGJhclNlc3Npb25MaW5lEgwKBHRleHQYASABKAkihgEKE1RvcGJhck1vZGVsU2VsZWN0b3ISMwoIc2VsZWN0ZWQYASABKAsyHC5jb252ZXJzYXRpb24udjEuTW9kZWxPcHRpb25IAIgBARItCgdvcHRpb25zGAIgAygLMhwuY29udmVyc2F0aW9uLnYxLk1vZGVsT3B0aW9uQgsKCV9zZWxlY3RlZCKnAQoUVG9wYmFyRWZmb3J0U2VsZWN0b3ISPwoJc3VwcG9ydGVkGAEgASgLMiouZnJvbnRlbmQudjEuVG9wYmFyRWZmb3J0U2VsZWN0b3JTdXBwb3J0ZWRIABJDCgt1bnN1cHBvcnRlZBgCIAEoCzIsLmZyb250ZW5kLnYxLlRvcGJhckVmZm9ydFNlbGVjdG9yVW5zdXBwb3J0ZWRIAEIJCgdzdXBwb3J0IoMBCh1Ub3BiYXJFZmZvcnRTZWxlY3RvclN1cHBvcnRlZBIwCgdjdXJyZW50GAEgASgLMh8uZnJvbnRlbmQudjEuVG9wYmFyRWZmb3J0T3B0aW9uEjAKB29wdGlvbnMYAiADKAsyHy5mcm9udGVuZC52MS5Ub3BiYXJFZmZvcnRPcHRpb24iIQofVG9wYmFyRWZmb3J0U2VsZWN0b3JVbnN1cHBvcnRlZCJcChJUb3BiYXJFZmZvcnRPcHRpb24SMAoFbGV2ZWwYASABKA4yIS5jb252ZXJzYXRpb24udjEuQWdlbnRFZmZvcnRMZXZlbBIUCgxkaXNwbGF5X25hbWUYAiABKAkiQAoSVG9wYmFyQ29ubmVjdGl2aXR5EgwKBHRvbmUYASABKAkSDQoFZ2x5cGgYAiABKAkSDQoFdGl0bGUYAyABKAkiQgoSVG9wYmFyV2FybmluZ1N0cmlwEiwKCHdhcm5pbmdzGAEgAygLMhouZnJvbnRlbmQudjEuVG9wYmFyV2FybmluZyL8AwoNVG9wYmFyV2FybmluZxIsCgRsaW5lGAEgASgLMh4uZnJvbnRlbmQudjEuVG9wYmFyV2FybmluZ0xpbmUSQAoKYWNjb3VudGluZxgCIAEoCzIqLmZyb250ZW5kLnYxLlRvcGJhckFjY291bnRpbmdXYXJuaW5nRGV0YWlsSAASRwoOdW5tb2RlbGVkX3Rvb2wYAyABKAsyLS5mcm9udGVuZC52MS5Ub3BiYXJVbm1vZGVsZWRUb29sV2FybmluZ0RldGFpbEgAEk8KEmRldGFjaGVkX3VubW9kZWxlZBgEIAEoCzIxLmZyb250ZW5kLnYxLlRvcGJhckRldGFjaGVkVW5tb2RlbGVkV2FybmluZ0RldGFpbEgAEkUKDXNlc3Npb25fZmF1bHQYBSABKAsyLC5mcm9udGVuZC52MS5Ub3BiYXJTZXNzaW9uRmF1bHRXYXJuaW5nRGV0YWlsSAASSQoPZGVncmFkZWRfd2luZG93GAYgASgLMi4uZnJvbnRlbmQudjEuVG9wYmFyRGVncmFkZWRXaW5kb3dXYXJuaW5nRGV0YWlsSAASRQoNZGVwbG95X2ZhaWxlZBgHIAEoCzIsLmZyb250ZW5kLnYxLlRvcGJhckRlcGxveUZhaWxlZFdhcm5pbmdEZXRhaWxIAEIICgZkZXRhaWwiIQoRVG9wYmFyV2FybmluZ0xpbmUSDAoEdGV4dBgBIAEoCSJUCh1Ub3BiYXJBY2NvdW50aW5nV2FybmluZ0RldGFpbBIzCgVsaW5lcxgBIAMoCzIkLmZyb250ZW5kLnYxLlRvcGJhcldhcm5pbmdEZXRhaWxMaW5lIicKF1RvcGJhcldhcm5pbmdEZXRhaWxMaW5lEgwKBHRleHQYASABKAkimQEKIFRvcGJhclVubW9kZWxlZFRvb2xXYXJuaW5nRGV0YWlsEjcKCXRvb2xfbmFtZRgBIAEoCzIkLmZyb250ZW5kLnYxLlRvcGJhclVubW9kZWxlZFRvb2xOYW1lEjwKDmFyZ3VtZW50X2xpbmVzGAIgAygLMiQuZnJvbnRlbmQudjEuVG9wYmFyV2FybmluZ0RldGFpbExpbmUiJwoXVG9wYmFyVW5tb2RlbGVkVG9vbE5hbWUSDAoEdGV4dBgBIAEoCSJ2CiRUb3BiYXJEZXRhY2hlZFVubW9kZWxlZFdhcm5pbmdEZXRhaWwSNwoJdG9vbF9uYW1lGAEgASgLMiQuZnJvbnRlbmQudjEuVG9wYmFyVW5tb2RlbGVkVG9vbE5hbWUSFQoNc3RhcnRlZF9hdF9tcxgCIAEoAyKPAQofVG9wYmFyU2Vzc2lvbkZhdWx0V2FybmluZ0RldGFpbBI2Cgljb21wb25lbnQYASABKAsyIy5mcm9udGVuZC52MS5Ub3BiYXJXYXJuaW5nQ29tcG9uZW50EjQKBmRldGFpbBgCIAEoCzIkLmZyb250ZW5kLnYxLlRvcGJhcldhcm5pbmdEZXRhaWxMaW5lIiYKFlRvcGJhcldhcm5pbmdDb21wb25lbnQSDAoEdGV4dBgBIAEoCSKiAgohVG9wYmFyRGVncmFkZWRXaW5kb3dXYXJuaW5nRGV0YWlsEjYKCWNvbXBvbmVudBgBIAEoCzIjLmZyb250ZW5kLnYxLlRvcGJhcldhcm5pbmdDb21wb25lbnQSNAoGcmVhc29uGAIgASgLMiQuZnJvbnRlbmQudjEuVG9wYmFyV2FybmluZ0RldGFpbExpbmUSEwoLYmVnYW5fYXRfbXMYAyABKAMSNQoEb3BlbhgEIAEoCzIlLmZyb250ZW5kLnYxLlRvcGJhckRlZ3JhZGVkV2luZG93T3BlbkgAEjkKBmNsb3NlZBgFIAEoCzInLmZyb250ZW5kLnYxLlRvcGJhckRlZ3JhZGVkV2luZG93Q2xvc2VkSABCCAoGZXh0ZW50IrsCCh9Ub3BiYXJEZXBsb3lGYWlsZWRXYXJuaW5nRGV0YWlsEjIKBHN0ZXAYASABKAsyJC5mcm9udGVuZC52MS5Ub3BiYXJXYXJuaW5nRGV0YWlsTGluZRI2Cgljb21wb25lbnQYAiABKAsyIy5mcm9udGVuZC52MS5Ub3BiYXJXYXJuaW5nQ29tcG9uZW50EjYKCHJvbGxiYWNrGAMgASgLMiQuZnJvbnRlbmQudjEuVG9wYmFyV2FybmluZ0RldGFpbExpbmUSNAoGZGV0YWlsGAQgASgLMiQuZnJvbnRlbmQudjEuVG9wYmFyV2FybmluZ0RldGFpbExpbmUSNgoDbG9nGAUgASgLMiQuZnJvbnRlbmQudjEuVG9wYmFyV2FybmluZ0RldGFpbExpbmVIAIgBAUIGCgRfbG9nIhoKGFRvcGJhckRlZ3JhZGVkV2luZG93T3BlbiJIChpUb3BiYXJEZWdyYWRlZFdpbmRvd0Nsb3NlZBITCgtlbmRlZF9hdF9tcxgBIAEoAxIVCg1kcm9wcGVkX2NvdW50GAIgASgDIkoKElRva2VuQnJlYWtkb3duVmlldxI0CghzZWN0aW9ucxgBIAMoCzIiLmZyb250ZW5kLnYxLlRva2VuQnJlYWtkb3duU2VjdGlvbiJ6ChVUb2tlbkJyZWFrZG93blNlY3Rpb24SMwoHaGVhZGluZxgBIAEoCzIiLmZyb250ZW5kLnYxLlRva2VuQnJlYWtkb3duSGVhZGluZxIsCgRyb3dzGAIgAygLMh4uZnJvbnRlbmQudjEuVG9rZW5CcmVha2Rvd25Sb3ciJQoVVG9rZW5CcmVha2Rvd25IZWFkaW5nEgwKBHRleHQYASABKAkihQEKEVRva2VuQnJlYWtkb3duUm93Eg0KBWxhYmVsGAEgASgJEg4KBnRva2VucxgCIAEoAxIbCg5zaGFyZV9wZXJtaWxsZRgDIAEoBUgAiAEBEhIKCmVtcGhhc2l6ZWQYBCABKAgSDQoFZGVwdGgYBSABKAVCEQoPX3NoYXJlX3Blcm1pbGxlQihaJmFnZW50cmVwbC9wcm90by9mcm9udGVuZC92MTtmcm9udGVuZHYxYgZwcm90bzM", [file_conversation_v1_api]);
+  fileDesc("Chhmcm9udGVuZC92MS90b3BiYXIucHJvdG8SC2Zyb250ZW5kLnYxIqIFCgpUb3BiYXJWaWV3EicKBXRpdGxlGAEgASgLMhguZnJvbnRlbmQudjEuVG9wYmFyVGl0bGUSNAoMc2Vzc2lvbl9saW5lGAIgASgLMh4uZnJvbnRlbmQudjEuVG9wYmFyU2Vzc2lvbkxpbmUSPQoObW9kZWxfc2VsZWN0b3IYAyABKAsyIC5mcm9udGVuZC52MS5Ub3BiYXJNb2RlbFNlbGVjdG9ySACIAQESNQoMY29ubmVjdGl2aXR5GAQgASgLMh8uZnJvbnRlbmQudjEuVG9wYmFyQ29ubmVjdGl2aXR5EjEKCHdhcm5pbmdzGAUgASgLMh8uZnJvbnRlbmQudjEuVG9wYmFyV2FybmluZ1N0cmlwEi8KB2NvbnRleHQYByABKAsyHi5mcm9udGVuZC52MS5Ub3BiYXJDb250ZXh0Q2hpcBIrCgdhY2NvdW50GAggASgLMhouZnJvbnRlbmQudjEuVG9wYmFyQWNjb3VudBJMChZwZXJtaXNzaW9uX21vZGVfcGlja2VyGAkgASgLMicuZnJvbnRlbmQudjEuVG9wYmFyUGVybWlzc2lvbk1vZGVQaWNrZXJIAYgBARI6Cg9wZXJzaXN0ZW50X3dpZmkYDSABKAsyIS5mcm9udGVuZC52MS5Ub3BiYXJQZXJzaXN0ZW50V2lmaRI/Cg9lZmZvcnRfc2VsZWN0b3IYDiABKAsyIS5mcm9udGVuZC52MS5Ub3BiYXJFZmZvcnRTZWxlY3RvckgCiAEBQhEKD19tb2RlbF9zZWxlY3RvckIZChdfcGVybWlzc2lvbl9tb2RlX3BpY2tlckISChBfZWZmb3J0X3NlbGVjdG9ySgQIBhAHSgQIChALSgQICxAMSgQIDBANUglmYXN0X21vZGUizgIKFFRvcGJhclBlcnNpc3RlbnRXaWZpEjkKBmpvaW5lZBgBIAEoCzInLmZyb250ZW5kLnYxLlRvcGJhclBlcnNpc3RlbnRXaWZpSm9pbmVkSAASQAoKbm90X2pvaW5lZBgCIAEoCzIqLmZyb250ZW5kLnYxLlRvcGJhclBlcnNpc3RlbnRXaWZpTm90Sm9pbmVkSAASNQoCb24YAyABKAsyJy5mcm9udGVuZC52MS5Ub3BiYXJQZXJzaXN0ZW50V2lmaU1vZGVPbkgBEjcKA29mZhgEIAEoCzIoLmZyb250ZW5kLnYxLlRvcGJhclBlcnNpc3RlbnRXaWZpTW9kZU9mZkgBEjkKB3Rvb2x0aXAYBSABKAsyKC5mcm9udGVuZC52MS5Ub3BiYXJQZXJzaXN0ZW50V2lmaVRvb2x0aXBCBgoEd2lmaUIGCgRtb2RlIhwKGlRvcGJhclBlcnNpc3RlbnRXaWZpSm9pbmVkIh8KHVRvcGJhclBlcnNpc3RlbnRXaWZpTm90Sm9pbmVkIhwKGlRvcGJhclBlcnNpc3RlbnRXaWZpTW9kZU9uIh0KG1RvcGJhclBlcnNpc3RlbnRXaWZpTW9kZU9mZiIrChtUb3BiYXJQZXJzaXN0ZW50V2lmaVRvb2x0aXASDAoEdGV4dBgBIAEoCSKQAQoaVG9wYmFyUGVybWlzc2lvbk1vZGVQaWNrZXISOAoHY3VycmVudBgBIAEoCzInLmZyb250ZW5kLnYxLlRvcGJhclBlcm1pc3Npb25Nb2RlT3B0aW9uEjgKB29wdGlvbnMYAiADKAsyJy5mcm9udGVuZC52MS5Ub3BiYXJQZXJtaXNzaW9uTW9kZU9wdGlvbiJAChpUb3BiYXJQZXJtaXNzaW9uTW9kZU9wdGlvbhIMCgRtb2RlGAEgASgJEhQKDGRpc3BsYXlfbmFtZRgCIAEoCSJqChFUb3BiYXJDb250ZXh0Q2hpcBIMCgR0ZXh0GAEgASgJEjIKCWJyZWFrZG93bhgCIAEoCzIfLmZyb250ZW5kLnYxLlRva2VuQnJlYWtkb3duVmlldxITCgt3aW5kb3dfZmlsbBgDIAEoASK/AQoNVG9wYmFyQWNjb3VudBI3Cglsb2dnZWRfaW4YASABKAsyIi5mcm9udGVuZC52MS5Ub3BiYXJBY2NvdW50TG9nZ2VkSW5IABI5Cgpsb2dnZWRfb3V0GAIgASgLMiMuZnJvbnRlbmQudjEuVG9wYmFyQWNjb3VudExvZ2dlZE91dEgAEjEKB29wdGlvbnMYAyADKAsyIC5mcm9udGVuZC52MS5Ub3BiYXJBY2NvdW50T3B0aW9uQgcKBXN0YXRlIiYKFVRvcGJhckFjY291bnRMb2dnZWRJbhINCgVlbWFpbBgBIAEoCSIYChZUb3BiYXJBY2NvdW50TG9nZ2VkT3V0IrcBChNUb3BiYXJBY2NvdW50T3B0aW9uEhIKCmNvbmZpZ19kaXIYASABKAkSNwoJbG9nZ2VkX2luGAIgASgLMiIuZnJvbnRlbmQudjEuVG9wYmFyQWNjb3VudExvZ2dlZEluSAASOQoKbG9nZ2VkX291dBgDIAEoCzIjLmZyb250ZW5kLnYxLlRvcGJhckFjY291bnRMb2dnZWRPdXRIABIPCgdjdXJyZW50GAQgASgIQgcKBXN0YXRlIhsKC1RvcGJhclRpdGxlEgwKBHRleHQYASABKAkiIQoRVG9wYmFyU2Vzc2lvbkxpbmUSDAoEdGV4dBgBIAEoCSKGAQoTVG9wYmFyTW9kZWxTZWxlY3RvchIzCghzZWxlY3RlZBgBIAEoCzIcLmNvbnZlcnNhdGlvbi52MS5Nb2RlbE9wdGlvbkgAiAEBEi0KB29wdGlvbnMYAiADKAsyHC5jb252ZXJzYXRpb24udjEuTW9kZWxPcHRpb25CCwoJX3NlbGVjdGVkIqcBChRUb3BiYXJFZmZvcnRTZWxlY3RvchI/CglzdXBwb3J0ZWQYASABKAsyKi5mcm9udGVuZC52MS5Ub3BiYXJFZmZvcnRTZWxlY3RvclN1cHBvcnRlZEgAEkMKC3Vuc3VwcG9ydGVkGAIgASgLMiwuZnJvbnRlbmQudjEuVG9wYmFyRWZmb3J0U2VsZWN0b3JVbnN1cHBvcnRlZEgAQgkKB3N1cHBvcnQigwEKHVRvcGJhckVmZm9ydFNlbGVjdG9yU3VwcG9ydGVkEjAKB2N1cnJlbnQYASABKAsyHy5mcm9udGVuZC52MS5Ub3BiYXJFZmZvcnRPcHRpb24SMAoHb3B0aW9ucxgCIAMoCzIfLmZyb250ZW5kLnYxLlRvcGJhckVmZm9ydE9wdGlvbiIhCh9Ub3BiYXJFZmZvcnRTZWxlY3RvclVuc3VwcG9ydGVkIlwKElRvcGJhckVmZm9ydE9wdGlvbhIwCgVsZXZlbBgBIAEoDjIhLmNvbnZlcnNhdGlvbi52MS5BZ2VudEVmZm9ydExldmVsEhQKDGRpc3BsYXlfbmFtZRgCIAEoCSJAChJUb3BiYXJDb25uZWN0aXZpdHkSDAoEdG9uZRgBIAEoCRINCgVnbHlwaBgCIAEoCRINCgV0aXRsZRgDIAEoCSJCChJUb3BiYXJXYXJuaW5nU3RyaXASLAoId2FybmluZ3MYASADKAsyGi5mcm9udGVuZC52MS5Ub3BiYXJXYXJuaW5nIvwDCg1Ub3BiYXJXYXJuaW5nEiwKBGxpbmUYASABKAsyHi5mcm9udGVuZC52MS5Ub3BiYXJXYXJuaW5nTGluZRJACgphY2NvdW50aW5nGAIgASgLMiouZnJvbnRlbmQudjEuVG9wYmFyQWNjb3VudGluZ1dhcm5pbmdEZXRhaWxIABJHCg51bm1vZGVsZWRfdG9vbBgDIAEoCzItLmZyb250ZW5kLnYxLlRvcGJhclVubW9kZWxlZFRvb2xXYXJuaW5nRGV0YWlsSAASTwoSZGV0YWNoZWRfdW5tb2RlbGVkGAQgASgLMjEuZnJvbnRlbmQudjEuVG9wYmFyRGV0YWNoZWRVbm1vZGVsZWRXYXJuaW5nRGV0YWlsSAASRQoNc2Vzc2lvbl9mYXVsdBgFIAEoCzIsLmZyb250ZW5kLnYxLlRvcGJhclNlc3Npb25GYXVsdFdhcm5pbmdEZXRhaWxIABJJCg9kZWdyYWRlZF93aW5kb3cYBiABKAsyLi5mcm9udGVuZC52MS5Ub3BiYXJEZWdyYWRlZFdpbmRvd1dhcm5pbmdEZXRhaWxIABJFCg1kZXBsb3lfZmFpbGVkGAcgASgLMiwuZnJvbnRlbmQudjEuVG9wYmFyRGVwbG95RmFpbGVkV2FybmluZ0RldGFpbEgAQggKBmRldGFpbCIhChFUb3BiYXJXYXJuaW5nTGluZRIMCgR0ZXh0GAEgASgJIlQKHVRvcGJhckFjY291bnRpbmdXYXJuaW5nRGV0YWlsEjMKBWxpbmVzGAEgAygLMiQuZnJvbnRlbmQudjEuVG9wYmFyV2FybmluZ0RldGFpbExpbmUiJwoXVG9wYmFyV2FybmluZ0RldGFpbExpbmUSDAoEdGV4dBgBIAEoCSKZAQogVG9wYmFyVW5tb2RlbGVkVG9vbFdhcm5pbmdEZXRhaWwSNwoJdG9vbF9uYW1lGAEgASgLMiQuZnJvbnRlbmQudjEuVG9wYmFyVW5tb2RlbGVkVG9vbE5hbWUSPAoOYXJndW1lbnRfbGluZXMYAiADKAsyJC5mcm9udGVuZC52MS5Ub3BiYXJXYXJuaW5nRGV0YWlsTGluZSInChdUb3BiYXJVbm1vZGVsZWRUb29sTmFtZRIMCgR0ZXh0GAEgASgJInYKJFRvcGJhckRldGFjaGVkVW5tb2RlbGVkV2FybmluZ0RldGFpbBI3Cgl0b29sX25hbWUYASABKAsyJC5mcm9udGVuZC52MS5Ub3BiYXJVbm1vZGVsZWRUb29sTmFtZRIVCg1zdGFydGVkX2F0X21zGAIgASgDIo8BCh9Ub3BiYXJTZXNzaW9uRmF1bHRXYXJuaW5nRGV0YWlsEjYKCWNvbXBvbmVudBgBIAEoCzIjLmZyb250ZW5kLnYxLlRvcGJhcldhcm5pbmdDb21wb25lbnQSNAoGZGV0YWlsGAIgASgLMiQuZnJvbnRlbmQudjEuVG9wYmFyV2FybmluZ0RldGFpbExpbmUiJgoWVG9wYmFyV2FybmluZ0NvbXBvbmVudBIMCgR0ZXh0GAEgASgJIqICCiFUb3BiYXJEZWdyYWRlZFdpbmRvd1dhcm5pbmdEZXRhaWwSNgoJY29tcG9uZW50GAEgASgLMiMuZnJvbnRlbmQudjEuVG9wYmFyV2FybmluZ0NvbXBvbmVudBI0CgZyZWFzb24YAiABKAsyJC5mcm9udGVuZC52MS5Ub3BiYXJXYXJuaW5nRGV0YWlsTGluZRITCgtiZWdhbl9hdF9tcxgDIAEoAxI1CgRvcGVuGAQgASgLMiUuZnJvbnRlbmQudjEuVG9wYmFyRGVncmFkZWRXaW5kb3dPcGVuSAASOQoGY2xvc2VkGAUgASgLMicuZnJvbnRlbmQudjEuVG9wYmFyRGVncmFkZWRXaW5kb3dDbG9zZWRIAEIICgZleHRlbnQiuwIKH1RvcGJhckRlcGxveUZhaWxlZFdhcm5pbmdEZXRhaWwSMgoEc3RlcBgBIAEoCzIkLmZyb250ZW5kLnYxLlRvcGJhcldhcm5pbmdEZXRhaWxMaW5lEjYKCWNvbXBvbmVudBgCIAEoCzIjLmZyb250ZW5kLnYxLlRvcGJhcldhcm5pbmdDb21wb25lbnQSNgoIcm9sbGJhY2sYAyABKAsyJC5mcm9udGVuZC52MS5Ub3BiYXJXYXJuaW5nRGV0YWlsTGluZRI0CgZkZXRhaWwYBCABKAsyJC5mcm9udGVuZC52MS5Ub3BiYXJXYXJuaW5nRGV0YWlsTGluZRI2CgNsb2cYBSABKAsyJC5mcm9udGVuZC52MS5Ub3BiYXJXYXJuaW5nRGV0YWlsTGluZUgAiAEBQgYKBF9sb2ciGgoYVG9wYmFyRGVncmFkZWRXaW5kb3dPcGVuIkgKGlRvcGJhckRlZ3JhZGVkV2luZG93Q2xvc2VkEhMKC2VuZGVkX2F0X21zGAEgASgDEhUKDWRyb3BwZWRfY291bnQYAiABKAMiSgoSVG9rZW5CcmVha2Rvd25WaWV3EjQKCHNlY3Rpb25zGAEgAygLMiIuZnJvbnRlbmQudjEuVG9rZW5CcmVha2Rvd25TZWN0aW9uInoKFVRva2VuQnJlYWtkb3duU2VjdGlvbhIzCgdoZWFkaW5nGAEgASgLMiIuZnJvbnRlbmQudjEuVG9rZW5CcmVha2Rvd25IZWFkaW5nEiwKBHJvd3MYAiADKAsyHi5mcm9udGVuZC52MS5Ub2tlbkJyZWFrZG93blJvdyIlChVUb2tlbkJyZWFrZG93bkhlYWRpbmcSDAoEdGV4dBgBIAEoCSKFAQoRVG9rZW5CcmVha2Rvd25Sb3cSDQoFbGFiZWwYASABKAkSDgoGdG9rZW5zGAIgASgDEhsKDnNoYXJlX3Blcm1pbGxlGAMgASgFSACIAQESEgoKZW1waGFzaXplZBgEIAEoCBINCgVkZXB0aBgFIAEoBUIRCg9fc2hhcmVfcGVybWlsbGVCKFomYWdlbnRyZXBsL3Byb3RvL2Zyb250ZW5kL3YxO2Zyb250ZW5kdjFiBnByb3RvMw", [file_conversation_v1_api]);
 
 /**
  * One workspace's topbar, resolved completely by the daemon. The client
@@ -134,18 +134,6 @@ export type TopbarView = Message<"frontend.v1.TopbarView"> & {
    * @generated from field: optional frontend.v1.TopbarPermissionModePicker permission_mode_picker = 9;
    */
   permissionModePicker?: TopbarPermissionModePicker | undefined;
-
-  /**
-   * The vendor's fast mode, the permission mode's sibling: the other
-   * session-level standing state a reader has to know before sending, and
-   * the only one that can be neither on nor off. OPTIONAL BY PRESENCE: unset
-   * means the vendor has stated no fast mode for this session yet — never a
-   * bool that would have to guess — and the client draws the cell's
-   * no-session dash in its slot.
-   *
-   * @generated from field: optional frontend.v1.TopbarFastMode fast_mode = 10;
-   */
-  fastMode?: TopbarFastMode | undefined;
 
   /**
    * The persistent-wifi chip, between the context chip and the warning chip.
@@ -339,105 +327,6 @@ export const TopbarPersistentWifiTooltipSchema: GenMessage<TopbarPersistentWifiT
   messageDesc(file_frontend_v1_topbar, 6);
 
 /**
- * The vendor's fast mode, as it stands. THE ARM IS THE STATE, carried by
- * name from conversation.v1's SessionFastMode rather than flattened to a
- * bool: cooldown is neither on nor off, and a bool would force the client to
- * draw it as one of them — offering a switch that cannot take effect, or
- * claiming a speed the session does not have.
- *
- * STANDING, not momentary: the state sticks until the vendor states another,
- * so the strip draws it continuously beside the permission mode.
- *
- * @generated from message frontend.v1.TopbarFastMode
- */
-export type TopbarFastMode = Message<"frontend.v1.TopbarFastMode"> & {
-  /**
-   * @generated from oneof frontend.v1.TopbarFastMode.state
-   */
-  state: {
-    /**
-     * @generated from field: frontend.v1.TopbarFastModeOn on = 1;
-     */
-    value: TopbarFastModeOn;
-    case: "on";
-  } | {
-    /**
-     * @generated from field: frontend.v1.TopbarFastModeOff off = 2;
-     */
-    value: TopbarFastModeOff;
-    case: "off";
-  } | {
-    /**
-     * @generated from field: frontend.v1.TopbarFastModeCooldown cooldown = 3;
-     */
-    value: TopbarFastModeCooldown;
-    case: "cooldown";
-  } | { case: undefined; value?: undefined };
-};
-
-/**
- * Describes the message frontend.v1.TopbarFastMode.
- * Use `create(TopbarFastModeSchema)` to create a new message.
- */
-export const TopbarFastModeSchema: GenMessage<TopbarFastMode> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 7);
-
-/**
- * Fast mode is in effect.
- *
- * @generated from message frontend.v1.TopbarFastModeOn
- */
-export type TopbarFastModeOn = Message<"frontend.v1.TopbarFastModeOn"> & {
-};
-
-/**
- * Describes the message frontend.v1.TopbarFastModeOn.
- * Use `create(TopbarFastModeOnSchema)` to create a new message.
- */
-export const TopbarFastModeOnSchema: GenMessage<TopbarFastModeOn> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 8);
-
-/**
- * Fast mode is not in effect.
- *
- * @generated from message frontend.v1.TopbarFastModeOff
- */
-export type TopbarFastModeOff = Message<"frontend.v1.TopbarFastModeOff"> & {
-  /**
-   * The vendor's reason, verbatim — drawn as the cell's tooltip. Empty when
-   * the vendor gave none.
-   *
-   * @generated from field: string reason = 1;
-   */
-  reason: string;
-};
-
-/**
- * Describes the message frontend.v1.TopbarFastModeOff.
- * Use `create(TopbarFastModeOffSchema)` to create a new message.
- */
-export const TopbarFastModeOffSchema: GenMessage<TopbarFastModeOff> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 9);
-
-/**
- * Fast mode is unavailable for now and returns on its own. DISTINCT FROM
- * OFF: nothing needs doing, so the cell draws no affordance to turn it back
- * on. SessionFastModeCooldown carries no reset instant, so neither does
- * this — a countdown would be invented rather than reported.
- *
- * @generated from message frontend.v1.TopbarFastModeCooldown
- */
-export type TopbarFastModeCooldown = Message<"frontend.v1.TopbarFastModeCooldown"> & {
-};
-
-/**
- * Describes the message frontend.v1.TopbarFastModeCooldown.
- * Use `create(TopbarFastModeCooldownSchema)` to create a new message.
- */
-export const TopbarFastModeCooldownSchema: GenMessage<TopbarFastModeCooldown> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 10);
-
-/**
  * The permission-mode picker: the mode in force and the modes this session
  * may switch to (the daemon serves exactly the set SetPermissionMode will
  * accept — an ungated mode only where creation consented to it). Modes are
@@ -468,7 +357,7 @@ export type TopbarPermissionModePicker = Message<"frontend.v1.TopbarPermissionMo
  * Use `create(TopbarPermissionModePickerSchema)` to create a new message.
  */
 export const TopbarPermissionModePickerSchema: GenMessage<TopbarPermissionModePicker> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 11);
+  messageDesc(file_frontend_v1_topbar, 7);
 
 /**
  * One mode the picker offers.
@@ -496,7 +385,7 @@ export type TopbarPermissionModeOption = Message<"frontend.v1.TopbarPermissionMo
  * Use `create(TopbarPermissionModeOptionSchema)` to create a new message.
  */
 export const TopbarPermissionModeOptionSchema: GenMessage<TopbarPermissionModeOption> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 12);
+  messageDesc(file_frontend_v1_topbar, 8);
 
 /**
  * THE CHIP IS THE CURRENT CONTEXT SIZE, rendered YELLOW: the one figure
@@ -543,7 +432,7 @@ export type TopbarContextChip = Message<"frontend.v1.TopbarContextChip"> & {
  * Use `create(TopbarContextChipSchema)` to create a new message.
  */
 export const TopbarContextChipSchema: GenMessage<TopbarContextChip> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 13);
+  messageDesc(file_frontend_v1_topbar, 9);
 
 /**
  * Which Claude account the session spends as, resolved by the daemon from
@@ -596,7 +485,7 @@ export type TopbarAccount = Message<"frontend.v1.TopbarAccount"> & {
  * Use `create(TopbarAccountSchema)` to create a new message.
  */
 export const TopbarAccountSchema: GenMessage<TopbarAccount> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 14);
+  messageDesc(file_frontend_v1_topbar, 10);
 
 /**
  * @generated from message frontend.v1.TopbarAccountLoggedIn
@@ -615,7 +504,7 @@ export type TopbarAccountLoggedIn = Message<"frontend.v1.TopbarAccountLoggedIn">
  * Use `create(TopbarAccountLoggedInSchema)` to create a new message.
  */
 export const TopbarAccountLoggedInSchema: GenMessage<TopbarAccountLoggedIn> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 15);
+  messageDesc(file_frontend_v1_topbar, 11);
 
 /**
  * @generated from message frontend.v1.TopbarAccountLoggedOut
@@ -628,7 +517,7 @@ export type TopbarAccountLoggedOut = Message<"frontend.v1.TopbarAccountLoggedOut
  * Use `create(TopbarAccountLoggedOutSchema)` to create a new message.
  */
 export const TopbarAccountLoggedOutSchema: GenMessage<TopbarAccountLoggedOut> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 16);
+  messageDesc(file_frontend_v1_topbar, 12);
 
 /**
  * One account root the session may spend as. THE ARM IS THE STATE here for
@@ -676,7 +565,7 @@ export type TopbarAccountOption = Message<"frontend.v1.TopbarAccountOption"> & {
  * Use `create(TopbarAccountOptionSchema)` to create a new message.
  */
 export const TopbarAccountOptionSchema: GenMessage<TopbarAccountOption> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 17);
+  messageDesc(file_frontend_v1_topbar, 13);
 
 /**
  * The title line the topbar shows.
@@ -698,7 +587,7 @@ export type TopbarTitle = Message<"frontend.v1.TopbarTitle"> & {
  * Use `create(TopbarTitleSchema)` to create a new message.
  */
 export const TopbarTitleSchema: GenMessage<TopbarTitle> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 18);
+  messageDesc(file_frontend_v1_topbar, 14);
 
 /**
  * The session identity line, shown in the hover/expanded state.
@@ -719,7 +608,7 @@ export type TopbarSessionLine = Message<"frontend.v1.TopbarSessionLine"> & {
  * Use `create(TopbarSessionLineSchema)` to create a new message.
  */
 export const TopbarSessionLineSchema: GenMessage<TopbarSessionLine> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 19);
+  messageDesc(file_frontend_v1_topbar, 15);
 
 /**
  * The model selector: what is selected, and what may be.
@@ -750,7 +639,7 @@ export type TopbarModelSelector = Message<"frontend.v1.TopbarModelSelector"> & {
  * Use `create(TopbarModelSelectorSchema)` to create a new message.
  */
 export const TopbarModelSelectorSchema: GenMessage<TopbarModelSelector> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 20);
+  messageDesc(file_frontend_v1_topbar, 16);
 
 /**
  * THE EFFORT SELECTOR: the reasoning effort the workspace's session runs at,
@@ -794,7 +683,7 @@ export type TopbarEffortSelector = Message<"frontend.v1.TopbarEffortSelector"> &
  * Use `create(TopbarEffortSelectorSchema)` to create a new message.
  */
 export const TopbarEffortSelectorSchema: GenMessage<TopbarEffortSelector> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 21);
+  messageDesc(file_frontend_v1_topbar, 17);
 
 /**
  * The effort in effect and the levels the selected model accepts.
@@ -824,7 +713,7 @@ export type TopbarEffortSelectorSupported = Message<"frontend.v1.TopbarEffortSel
  * Use `create(TopbarEffortSelectorSupportedSchema)` to create a new message.
  */
 export const TopbarEffortSelectorSupportedSchema: GenMessage<TopbarEffortSelectorSupported> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 22);
+  messageDesc(file_frontend_v1_topbar, 18);
 
 /**
  * The selected model takes no effort level.
@@ -839,7 +728,7 @@ export type TopbarEffortSelectorUnsupported = Message<"frontend.v1.TopbarEffortS
  * Use `create(TopbarEffortSelectorUnsupportedSchema)` to create a new message.
  */
 export const TopbarEffortSelectorUnsupportedSchema: GenMessage<TopbarEffortSelectorUnsupported> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 23);
+  messageDesc(file_frontend_v1_topbar, 19);
 
 /**
  * One effort level the selector offers.
@@ -867,7 +756,7 @@ export type TopbarEffortOption = Message<"frontend.v1.TopbarEffortOption"> & {
  * Use `create(TopbarEffortOptionSchema)` to create a new message.
  */
 export const TopbarEffortOptionSchema: GenMessage<TopbarEffortOption> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 24);
+  messageDesc(file_frontend_v1_topbar, 20);
 
 /**
  * The connectivity indicator, fully resolved: a literal glyph, a literal
@@ -909,7 +798,7 @@ export type TopbarConnectivity = Message<"frontend.v1.TopbarConnectivity"> & {
  * Use `create(TopbarConnectivitySchema)` to create a new message.
  */
 export const TopbarConnectivitySchema: GenMessage<TopbarConnectivity> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 25);
+  messageDesc(file_frontend_v1_topbar, 21);
 
 /**
  * The warning strip: everything the topbar has to WARN about right now.
@@ -941,7 +830,7 @@ export type TopbarWarningStrip = Message<"frontend.v1.TopbarWarningStrip"> & {
  * Use `create(TopbarWarningStripSchema)` to create a new message.
  */
 export const TopbarWarningStripSchema: GenMessage<TopbarWarningStrip> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 26);
+  messageDesc(file_frontend_v1_topbar, 22);
 
 /**
  * One warning: its list line, and the overlay behind the click.
@@ -1025,7 +914,7 @@ export type TopbarWarning = Message<"frontend.v1.TopbarWarning"> & {
  * Use `create(TopbarWarningSchema)` to create a new message.
  */
 export const TopbarWarningSchema: GenMessage<TopbarWarning> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 27);
+  messageDesc(file_frontend_v1_topbar, 23);
 
 /**
  * The list-line element.
@@ -1046,7 +935,7 @@ export type TopbarWarningLine = Message<"frontend.v1.TopbarWarningLine"> & {
  * Use `create(TopbarWarningLineSchema)` to create a new message.
  */
 export const TopbarWarningLineSchema: GenMessage<TopbarWarningLine> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 28);
+  messageDesc(file_frontend_v1_topbar, 24);
 
 /**
  * The accounting overlay: the reconciliation's evidence, composed — this
@@ -1071,7 +960,7 @@ export type TopbarAccountingWarningDetail = Message<"frontend.v1.TopbarAccountin
  * Use `create(TopbarAccountingWarningDetailSchema)` to create a new message.
  */
 export const TopbarAccountingWarningDetailSchema: GenMessage<TopbarAccountingWarningDetail> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 29);
+  messageDesc(file_frontend_v1_topbar, 25);
 
 /**
  * A shared detail-line element WITHIN this dropdown family.
@@ -1092,7 +981,7 @@ export type TopbarWarningDetailLine = Message<"frontend.v1.TopbarWarningDetailLi
  * Use `create(TopbarWarningDetailLineSchema)` to create a new message.
  */
 export const TopbarWarningDetailLineSchema: GenMessage<TopbarWarningDetailLine> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 30);
+  messageDesc(file_frontend_v1_topbar, 26);
 
 /**
  * The unmodeled-tool overlay: what ran, in an ABBREVIATED, LEGIBLE form a
@@ -1125,7 +1014,7 @@ export type TopbarUnmodeledToolWarningDetail = Message<"frontend.v1.TopbarUnmode
  * Use `create(TopbarUnmodeledToolWarningDetailSchema)` to create a new message.
  */
 export const TopbarUnmodeledToolWarningDetailSchema: GenMessage<TopbarUnmodeledToolWarningDetail> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 31);
+  messageDesc(file_frontend_v1_topbar, 27);
 
 /**
  * The name element.
@@ -1146,7 +1035,7 @@ export type TopbarUnmodeledToolName = Message<"frontend.v1.TopbarUnmodeledToolNa
  * Use `create(TopbarUnmodeledToolNameSchema)` to create a new message.
  */
 export const TopbarUnmodeledToolNameSchema: GenMessage<TopbarUnmodeledToolName> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 32);
+  messageDesc(file_frontend_v1_topbar, 28);
 
 /**
  * The detached-unmodeled overlay: unmodeled work running DETACHED — the
@@ -1176,7 +1065,7 @@ export type TopbarDetachedUnmodeledWarningDetail = Message<"frontend.v1.TopbarDe
  * Use `create(TopbarDetachedUnmodeledWarningDetailSchema)` to create a new message.
  */
 export const TopbarDetachedUnmodeledWarningDetailSchema: GenMessage<TopbarDetachedUnmodeledWarningDetail> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 33);
+  messageDesc(file_frontend_v1_topbar, 29);
 
 /**
  * The session-fault overlay. The daemon pulls GetSessionDiagnostics at its
@@ -1206,7 +1095,7 @@ export type TopbarSessionFaultWarningDetail = Message<"frontend.v1.TopbarSession
  * Use `create(TopbarSessionFaultWarningDetailSchema)` to create a new message.
  */
 export const TopbarSessionFaultWarningDetailSchema: GenMessage<TopbarSessionFaultWarningDetail> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 34);
+  messageDesc(file_frontend_v1_topbar, 30);
 
 /**
  * A component-name element, shared WITHIN the dropdown family.
@@ -1227,7 +1116,7 @@ export type TopbarWarningComponent = Message<"frontend.v1.TopbarWarningComponent
  * Use `create(TopbarWarningComponentSchema)` to create a new message.
  */
 export const TopbarWarningComponentSchema: GenMessage<TopbarWarningComponent> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 35);
+  messageDesc(file_frontend_v1_topbar, 31);
 
 /**
  * The degraded-window overlay — one warning per window. Data, drawn by the
@@ -1286,7 +1175,7 @@ export type TopbarDegradedWindowWarningDetail = Message<"frontend.v1.TopbarDegra
  * Use `create(TopbarDegradedWindowWarningDetailSchema)` to create a new message.
  */
 export const TopbarDegradedWindowWarningDetailSchema: GenMessage<TopbarDegradedWindowWarningDetail> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 36);
+  messageDesc(file_frontend_v1_topbar, 32);
 
 /**
  * The failed-deploy overlay: what failed, whole. Every line is composed by
@@ -1345,7 +1234,7 @@ export type TopbarDeployFailedWarningDetail = Message<"frontend.v1.TopbarDeployF
  * Use `create(TopbarDeployFailedWarningDetailSchema)` to create a new message.
  */
 export const TopbarDeployFailedWarningDetailSchema: GenMessage<TopbarDeployFailedWarningDetail> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 37);
+  messageDesc(file_frontend_v1_topbar, 33);
 
 /**
  * Still open. Empty: the arm is the fact.
@@ -1360,7 +1249,7 @@ export type TopbarDegradedWindowOpen = Message<"frontend.v1.TopbarDegradedWindow
  * Use `create(TopbarDegradedWindowOpenSchema)` to create a new message.
  */
 export const TopbarDegradedWindowOpenSchema: GenMessage<TopbarDegradedWindowOpen> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 38);
+  messageDesc(file_frontend_v1_topbar, 34);
 
 /**
  * Closed, with its cost.
@@ -1388,7 +1277,7 @@ export type TopbarDegradedWindowClosed = Message<"frontend.v1.TopbarDegradedWind
  * Use `create(TopbarDegradedWindowClosedSchema)` to create a new message.
  */
 export const TopbarDegradedWindowClosedSchema: GenMessage<TopbarDegradedWindowClosed> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 39);
+  messageDesc(file_frontend_v1_topbar, 35);
 
 /**
  * The token-breakdown menu, fully resolved. Sections and rows arrive in
@@ -1413,7 +1302,7 @@ export type TokenBreakdownView = Message<"frontend.v1.TokenBreakdownView"> & {
  * Use `create(TokenBreakdownViewSchema)` to create a new message.
  */
 export const TokenBreakdownViewSchema: GenMessage<TokenBreakdownView> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 40);
+  messageDesc(file_frontend_v1_topbar, 36);
 
 /**
  * One titled section of the breakdown menu.
@@ -1441,7 +1330,7 @@ export type TokenBreakdownSection = Message<"frontend.v1.TokenBreakdownSection">
  * Use `create(TokenBreakdownSectionSchema)` to create a new message.
  */
 export const TokenBreakdownSectionSchema: GenMessage<TokenBreakdownSection> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 41);
+  messageDesc(file_frontend_v1_topbar, 37);
 
 /**
  * A section's heading.
@@ -1462,7 +1351,7 @@ export type TokenBreakdownHeading = Message<"frontend.v1.TokenBreakdownHeading">
  * Use `create(TokenBreakdownHeadingSchema)` to create a new message.
  */
 export const TokenBreakdownHeadingSchema: GenMessage<TokenBreakdownHeading> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 42);
+  messageDesc(file_frontend_v1_topbar, 38);
 
 /**
  * One row of the breakdown menu — the row IS the element, and these are its
@@ -1516,5 +1405,5 @@ export type TokenBreakdownRow = Message<"frontend.v1.TokenBreakdownRow"> & {
  * Use `create(TokenBreakdownRowSchema)` to create a new message.
  */
 export const TokenBreakdownRowSchema: GenMessage<TokenBreakdownRow> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 43);
+  messageDesc(file_frontend_v1_topbar, 39);
 

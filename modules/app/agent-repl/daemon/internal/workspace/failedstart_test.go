@@ -20,7 +20,7 @@ import (
 func vendorStartFailed() *shimv1.StartSessionResponse {
 	return &shimv1.StartSessionResponse{
 		Result: &shimv1.StartSessionResponse_Failure{Failure: &shimv1.StartSessionFailure{
-			Cause:  &shimv1.StartSessionFailure_VendorStartFailed{VendorStartFailed: &shimv1.StartSessionVendorStartFailed{}},
+			Cause:  &shimv1.StartSessionFailure_VendorStartFailed{VendorStartFailed: rejectedVendorStart()},
 			Detail: "the vendor did not answer inside the init bound",
 		}},
 	}

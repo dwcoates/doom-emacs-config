@@ -578,7 +578,11 @@ export function mountFeed(
    * walk that cannot complete leaves the reader where they were rather than
    * moving them somewhere plausible.
    */
-  async function reveal(id: FeedId, cause: JumpCause): Promise<boolean> {
+  async function reveal(
+    id: FeedId,
+    cause: JumpCause,
+    loaded = false,
+  ): Promise<boolean> {
     const here = findAcrossOpenFeeds(root, id);
     if (here !== null) {
       await land(here, id, cause);
@@ -611,6 +615,10 @@ export function mountFeed(
     }
     const result = requireCase(response.result, "OpenFeedResponse.result");
     if (result.case === "error") {
+      // A row older than the loaded pages is not drawn and answers no feed
+      // either: walk the pages in before giving up on it.
+      const through = await loadThenReveal(id, id, cause, loaded);
+      if (through !== null) return through;
       // The target is not a feed of its own — a shell bubble's row is the case
       // the ruling names — so the jump degrades to scroll-if-rendered, which is
       // exactly what the search above already tried.
@@ -638,13 +646,21 @@ export function mountFeed(
       "FeedPageSuccess.breadcrumbs",
     ).crumbs;
     const opened: BubbleLike[] = [];
-    const walked = await walk(crumbs, id, opened);
+    const absent: { target: FeedId | null } = { target: null };
+    const walked = await walk(crumbs, id, opened, absent);
     // A container the walk opened is the jump's expansion too, and is watched
     // like the entry itself, whether or not the walk went on to the end.
     for (const bubble of opened) trackJumpedBubble(bubble);
-    if (!walked) return false;
+    if (!walked) {
+      // A ROOT container the page does not hold sits on an older page: the
+      // walk to THAT row loads it, and the jump then starts over.
+      if (absent.target === null) return false;
+      return (await loadThenReveal(absent.target, id, cause, loaded)) ?? false;
+    }
     const found = findAcrossOpenFeeds(root, id);
     if (found === null) {
+      const through = await loadThenReveal(id, id, cause, loaded);
+      if (through !== null) return through;
       log.warn(
         "the breadcrumb walk finished without the reveal target appearing",
         {
@@ -656,6 +672,29 @@ export function mountFeed(
     }
     await land(found, id, cause);
     return true;
+  }
+
+  /**
+   * The row the jump wants is on a page the reader has not loaded: ask the
+   * daemon to walk every page down to TARGET into the ROOT feed, then jump
+   * again to WANTED (never walking twice: LOADED). Null when the walk does not
+   * apply (already walked, or the root feed holds no older page), so the
+   * caller's own failure path stands. A failed walk answers false and moves
+   * nothing: the daemon words the failure in the footer, not this end.
+   */
+  async function loadThenReveal(
+    target: FeedId,
+    wanted: FeedId,
+    cause: JumpCause,
+    loaded: boolean,
+  ): Promise<boolean | null> {
+    if (loaded || !root.hasMoreHistory()) return null;
+    log.debug("the reveal target is on an unloaded page; walking to it", {
+      operation: "feed.reveal-load-through",
+      context: { target: target.value, row: wanted.value },
+    });
+    if ((await root.loadThrough(target)) !== "reached") return false;
+    return reveal(wanted, cause, true);
   }
 
   /**
@@ -673,6 +712,7 @@ export function mountFeed(
     crumbs: readonly FeedBreadcrumb[],
     id: FeedId,
     opened: BubbleLike[],
+    absent: { target: FeedId | null },
   ): Promise<boolean> {
     let controller: FeedController = root;
     for (const crumb of crumbs) {
@@ -689,6 +729,7 @@ export function mountFeed(
       const target = requireMessage(crumb.target, "FeedBreadcrumb.target");
       const bubble = bubbleOn(controller, target);
       if (bubble === null) {
+        if (controller === root) absent.target = target;
         log.warn("a breadcrumb names a bubble this feed does not hold", {
           operation: "feed.reveal-crumb-absent",
           context: { crumb: target.value },

@@ -47,6 +47,7 @@ type OpenInEditorRequest struct {
 	//
 	//	*OpenInEditorRequest_WorkspaceFile
 	//	*OpenInEditorRequest_MergeTestLog
+	//	*OpenInEditorRequest_FeedLink
 	Target        isOpenInEditorRequest_Target `protobuf_oneof:"target"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -114,6 +115,15 @@ func (x *OpenInEditorRequest) GetMergeTestLog() *v11.FeedMergeTestLogToken {
 	return nil
 }
 
+func (x *OpenInEditorRequest) GetFeedLink() *OpenInEditorFeedLink {
+	if x != nil {
+		if x, ok := x.Target.(*OpenInEditorRequest_FeedLink); ok {
+			return x.FeedLink
+		}
+	}
+	return nil
+}
+
 type isOpenInEditorRequest_Target interface {
 	isOpenInEditorRequest_Target()
 }
@@ -128,9 +138,19 @@ type OpenInEditorRequest_MergeTestLog struct {
 	MergeTestLog *v11.FeedMergeTestLogToken `protobuf:"bytes,5,opt,name=merge_test_log,json=mergeTestLog,proto3,oneof"`
 }
 
+type OpenInEditorRequest_FeedLink struct {
+	// A link the reader clicked inside a prompt or response bubble whose href
+	// is not a web URL: a path or a bare file name. The DAEMON resolves it
+	// (see OpenInEditorFeedLink) and relays the resolved path exactly as a
+	// `workspace_file` click.
+	FeedLink *OpenInEditorFeedLink `protobuf:"bytes,6,opt,name=feed_link,json=feedLink,proto3,oneof"`
+}
+
 func (*OpenInEditorRequest_WorkspaceFile) isOpenInEditorRequest_Target() {}
 
 func (*OpenInEditorRequest_MergeTestLog) isOpenInEditorRequest_Target() {}
+
+func (*OpenInEditorRequest_FeedLink) isOpenInEditorRequest_Target() {}
 
 // A file or directory inside the workspace's worktree.
 type OpenInEditorWorkspaceFile struct {
@@ -320,6 +340,7 @@ type OpenInEditorError struct {
 	//	*OpenInEditorError_NotYetAdopted
 	//	*OpenInEditorError_PathEscapesWorkspace
 	//	*OpenInEditorError_UnknownMergeTestLog
+	//	*OpenInEditorError_LinkUnresolved
 	Cause         isOpenInEditorError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -416,6 +437,15 @@ func (x *OpenInEditorError) GetUnknownMergeTestLog() *OpenInEditorUnknownMergeTe
 	return nil
 }
 
+func (x *OpenInEditorError) GetLinkUnresolved() *OpenInEditorLinkUnresolved {
+	if x != nil {
+		if x, ok := x.Cause.(*OpenInEditorError_LinkUnresolved); ok {
+			return x.LinkUnresolved
+		}
+	}
+	return nil
+}
+
 type isOpenInEditorError_Cause interface {
 	isOpenInEditorError_Cause()
 }
@@ -451,6 +481,13 @@ type OpenInEditorError_UnknownMergeTestLog struct {
 	UnknownMergeTestLog *OpenInEditorUnknownMergeTestLog `protobuf:"bytes,6,opt,name=unknown_merge_test_log,json=unknownMergeTestLog,proto3,oneof"`
 }
 
+type OpenInEditorError_LinkUnresolved struct {
+	// A feed link resolved to no existing file. The daemon has already
+	// published the transient "unknown file" footer line and sent the
+	// workspace its non-interrupting question about the link.
+	LinkUnresolved *OpenInEditorLinkUnresolved `protobuf:"bytes,7,opt,name=link_unresolved,json=linkUnresolved,proto3,oneof"`
+}
+
 func (*OpenInEditorError_UnknownWorkspace) isOpenInEditorError_Cause() {}
 
 func (*OpenInEditorError_WorkspaceRefMismatch) isOpenInEditorError_Cause() {}
@@ -462,6 +499,8 @@ func (*OpenInEditorError_NotYetAdopted) isOpenInEditorError_Cause() {}
 func (*OpenInEditorError_PathEscapesWorkspace) isOpenInEditorError_Cause() {}
 
 func (*OpenInEditorError_UnknownMergeTestLog) isOpenInEditorError_Cause() {}
+
+func (*OpenInEditorError_LinkUnresolved) isOpenInEditorError_Cause() {}
 
 type OpenInEditorUnknownWorkspace struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -697,15 +736,262 @@ func (*OpenInEditorUnknownMergeTestLog) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_open_in_editor_proto_rawDescGZIP(), []int{10}
 }
 
+// A non-web link clicked in a prompt or response bubble.
+//
+// RESOLUTION, in order, first existing file wins:
+//  1. An absolute path: as given.
+//  2. A path with a directory part: relative to the workspace's worktree root.
+//  3. A BARE file name: <worktree root>/modules/app/agent-repl/<name>, then
+//     <git project root of the worktree>/<name>.
+//
+// A link that resolves outside the worktree is refused as for any workspace
+// file. A link that resolves to nothing is `link_unresolved`.
+type OpenInEditorFeedLink struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The link's href exactly as the bubble rendered it, optionally carrying a
+	// `:<line>` suffix the bubble drew.
+	Href string `protobuf:"bytes,1,opt,name=href,proto3" json:"href,omitempty"`
+	// The prompt or response row the link was clicked in, echoed as served: the
+	// row the daemon's follow-up question quotes when the link resolves to
+	// nothing.
+	SourceRow *v11.FeedId `protobuf:"bytes,2,opt,name=source_row,json=sourceRow,proto3" json:"source_row,omitempty"`
+	// What the daemon does when the link resolves to no file. Always set; a
+	// request with neither arm is malformed. Either way the answer is
+	// `link_unresolved`.
+	//
+	// Types that are valid to be assigned to OnUnresolved:
+	//
+	//	*OpenInEditorFeedLink_Report
+	//	*OpenInEditorFeedLink_WebFallback
+	OnUnresolved  isOpenInEditorFeedLink_OnUnresolved `protobuf_oneof:"on_unresolved"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OpenInEditorFeedLink) Reset() {
+	*x = OpenInEditorFeedLink{}
+	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OpenInEditorFeedLink) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OpenInEditorFeedLink) ProtoMessage() {}
+
+func (x *OpenInEditorFeedLink) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OpenInEditorFeedLink.ProtoReflect.Descriptor instead.
+func (*OpenInEditorFeedLink) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_open_in_editor_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *OpenInEditorFeedLink) GetHref() string {
+	if x != nil {
+		return x.Href
+	}
+	return ""
+}
+
+func (x *OpenInEditorFeedLink) GetSourceRow() *v11.FeedId {
+	if x != nil {
+		return x.SourceRow
+	}
+	return nil
+}
+
+func (x *OpenInEditorFeedLink) GetOnUnresolved() isOpenInEditorFeedLink_OnUnresolved {
+	if x != nil {
+		return x.OnUnresolved
+	}
+	return nil
+}
+
+func (x *OpenInEditorFeedLink) GetReport() *OpenInEditorFeedLinkReport {
+	if x != nil {
+		if x, ok := x.OnUnresolved.(*OpenInEditorFeedLink_Report); ok {
+			return x.Report
+		}
+	}
+	return nil
+}
+
+func (x *OpenInEditorFeedLink) GetWebFallback() *OpenInEditorFeedLinkWebFallback {
+	if x != nil {
+		if x, ok := x.OnUnresolved.(*OpenInEditorFeedLink_WebFallback); ok {
+			return x.WebFallback
+		}
+	}
+	return nil
+}
+
+type isOpenInEditorFeedLink_OnUnresolved interface {
+	isOpenInEditorFeedLink_OnUnresolved()
+}
+
+type OpenInEditorFeedLink_Report struct {
+	// The link was unambiguously meant as a file (an explicit link, or a bare
+	// name whose extension is no web domain ending): publish the transient
+	// "unknown file" footer line and send the workspace its follow-up
+	// question.
+	Report *OpenInEditorFeedLinkReport `protobuf:"bytes,3,opt,name=report,proto3,oneof"`
+}
+
+type OpenInEditorFeedLink_WebFallback struct {
+	// The link is AMBIGUOUS: a bare name whose extension is also a web domain
+	// ending (`notes.org` / `wikipedia.org`, `.md`, `.sh`, `.py`, `.rs`). The
+	// file is tried first; when nothing resolves, the daemon stays silent (no
+	// footer line, no follow-up question) and the client opens the name as a
+	// web URL instead.
+	WebFallback *OpenInEditorFeedLinkWebFallback `protobuf:"bytes,4,opt,name=web_fallback,json=webFallback,proto3,oneof"`
+}
+
+func (*OpenInEditorFeedLink_Report) isOpenInEditorFeedLink_OnUnresolved() {}
+
+func (*OpenInEditorFeedLink_WebFallback) isOpenInEditorFeedLink_OnUnresolved() {}
+
+// Report an unresolved link to the user and the agent.
+type OpenInEditorFeedLinkReport struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OpenInEditorFeedLinkReport) Reset() {
+	*x = OpenInEditorFeedLinkReport{}
+	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OpenInEditorFeedLinkReport) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OpenInEditorFeedLinkReport) ProtoMessage() {}
+
+func (x *OpenInEditorFeedLinkReport) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OpenInEditorFeedLinkReport.ProtoReflect.Descriptor instead.
+func (*OpenInEditorFeedLinkReport) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_open_in_editor_proto_rawDescGZIP(), []int{12}
+}
+
+// Resolve silently; the client falls back to the web.
+type OpenInEditorFeedLinkWebFallback struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OpenInEditorFeedLinkWebFallback) Reset() {
+	*x = OpenInEditorFeedLinkWebFallback{}
+	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OpenInEditorFeedLinkWebFallback) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OpenInEditorFeedLinkWebFallback) ProtoMessage() {}
+
+func (x *OpenInEditorFeedLinkWebFallback) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OpenInEditorFeedLinkWebFallback.ProtoReflect.Descriptor instead.
+func (*OpenInEditorFeedLinkWebFallback) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_open_in_editor_proto_rawDescGZIP(), []int{13}
+}
+
+// The feed link resolved to no file.
+type OpenInEditorLinkUnresolved struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The href as clicked.
+	Href          string `protobuf:"bytes,1,opt,name=href,proto3" json:"href,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OpenInEditorLinkUnresolved) Reset() {
+	*x = OpenInEditorLinkUnresolved{}
+	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OpenInEditorLinkUnresolved) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OpenInEditorLinkUnresolved) ProtoMessage() {}
+
+func (x *OpenInEditorLinkUnresolved) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OpenInEditorLinkUnresolved.ProtoReflect.Descriptor instead.
+func (*OpenInEditorLinkUnresolved) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_open_in_editor_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *OpenInEditorLinkUnresolved) GetHref() string {
+	if x != nil {
+		return x.Href
+	}
+	return ""
+}
+
 var File_agentrepl_v1_endpoint_open_in_editor_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_open_in_editor_proto_rawDesc = "" +
 	"\n" +
-	"*agentrepl/v1/endpoint_open_in_editor.proto\x12\fagentrepl.v1\x1a\x16frontend/v1/feed.proto\x1a\x1cworkspace/v1/workspace.proto\"\x8f\x02\n" +
+	"*agentrepl/v1/endpoint_open_in_editor.proto\x12\fagentrepl.v1\x1a\x16frontend/v1/feed.proto\x1a\x1cworkspace/v1/workspace.proto\"\xd2\x02\n" +
 	"\x13OpenInEditorRequest\x128\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12P\n" +
 	"\x0eworkspace_file\x18\x04 \x01(\v2'.agentrepl.v1.OpenInEditorWorkspaceFileH\x00R\rworkspaceFile\x12J\n" +
-	"\x0emerge_test_log\x18\x05 \x01(\v2\".frontend.v1.FeedMergeTestLogTokenH\x00R\fmergeTestLogB\b\n" +
+	"\x0emerge_test_log\x18\x05 \x01(\v2\".frontend.v1.FeedMergeTestLogTokenH\x00R\fmergeTestLog\x12A\n" +
+	"\tfeed_link\x18\x06 \x01(\v2\".agentrepl.v1.OpenInEditorFeedLinkH\x00R\bfeedLinkB\b\n" +
 	"\x06targetJ\x04\b\x02\x10\x03J\x04\b\x03\x10\x04R\x04pathR\x04line\"Q\n" +
 	"\x19OpenInEditorWorkspaceFile\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x17\n" +
@@ -715,14 +1001,15 @@ const file_agentrepl_v1_endpoint_open_in_editor_proto_rawDesc = "" +
 	"\asuccess\x18\x01 \x01(\v2!.agentrepl.v1.OpenInEditorSuccessH\x00R\asuccess\x127\n" +
 	"\x05error\x18\x02 \x01(\v2\x1f.agentrepl.v1.OpenInEditorErrorH\x00R\x05errorB\b\n" +
 	"\x06result\"\x15\n" +
-	"\x13OpenInEditorSuccess\"\xdb\x04\n" +
+	"\x13OpenInEditorSuccess\"\xb0\x05\n" +
 	"\x11OpenInEditorError\x12Y\n" +
 	"\x11unknown_workspace\x18\x01 \x01(\v2*.agentrepl.v1.OpenInEditorUnknownWorkspaceH\x00R\x10unknownWorkspace\x12f\n" +
 	"\x16workspace_ref_mismatch\x18\x02 \x01(\v2..agentrepl.v1.OpenInEditorWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12Y\n" +
 	"\x11transferring_away\x18\x03 \x01(\v2*.agentrepl.v1.OpenInEditorTransferringAwayH\x00R\x10transferringAway\x12Q\n" +
 	"\x0fnot_yet_adopted\x18\x04 \x01(\v2'.agentrepl.v1.OpenInEditorNotYetAdoptedH\x00R\rnotYetAdopted\x12f\n" +
 	"\x16path_escapes_workspace\x18\x05 \x01(\v2..agentrepl.v1.OpenInEditorPathEscapesWorkspaceH\x00R\x14pathEscapesWorkspace\x12d\n" +
-	"\x16unknown_merge_test_log\x18\x06 \x01(\v2-.agentrepl.v1.OpenInEditorUnknownMergeTestLogH\x00R\x13unknownMergeTestLogB\a\n" +
+	"\x16unknown_merge_test_log\x18\x06 \x01(\v2-.agentrepl.v1.OpenInEditorUnknownMergeTestLogH\x00R\x13unknownMergeTestLog\x12S\n" +
+	"\x0flink_unresolved\x18\a \x01(\v2(.agentrepl.v1.OpenInEditorLinkUnresolvedH\x00R\x0elinkUnresolvedB\a\n" +
 	"\x05cause\"\x1e\n" +
 	"\x1cOpenInEditorUnknownWorkspace\"E\n" +
 	" OpenInEditorWorkspaceRefMismatch\x12!\n" +
@@ -731,7 +1018,18 @@ const file_agentrepl_v1_endpoint_open_in_editor_proto_rawDesc = "" +
 	"\aaddress\x18\x01 \x01(\tR\aaddress\"\x1b\n" +
 	"\x19OpenInEditorNotYetAdopted\"\"\n" +
 	" OpenInEditorPathEscapesWorkspace\"!\n" +
-	"\x1fOpenInEditorUnknownMergeTestLogB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\x1fOpenInEditorUnknownMergeTestLog\"\x87\x02\n" +
+	"\x14OpenInEditorFeedLink\x12\x12\n" +
+	"\x04href\x18\x01 \x01(\tR\x04href\x122\n" +
+	"\n" +
+	"source_row\x18\x02 \x01(\v2\x13.frontend.v1.FeedIdR\tsourceRow\x12B\n" +
+	"\x06report\x18\x03 \x01(\v2(.agentrepl.v1.OpenInEditorFeedLinkReportH\x00R\x06report\x12R\n" +
+	"\fweb_fallback\x18\x04 \x01(\v2-.agentrepl.v1.OpenInEditorFeedLinkWebFallbackH\x00R\vwebFallbackB\x0f\n" +
+	"\ron_unresolved\"\x1c\n" +
+	"\x1aOpenInEditorFeedLinkReport\"!\n" +
+	"\x1fOpenInEditorFeedLinkWebFallback\"0\n" +
+	"\x1aOpenInEditorLinkUnresolved\x12\x12\n" +
+	"\x04href\x18\x01 \x01(\tR\x04hrefB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_open_in_editor_proto_rawDescOnce sync.Once
@@ -745,7 +1043,7 @@ func file_agentrepl_v1_endpoint_open_in_editor_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_open_in_editor_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
+var file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_agentrepl_v1_endpoint_open_in_editor_proto_goTypes = []any{
 	(*OpenInEditorRequest)(nil),              // 0: agentrepl.v1.OpenInEditorRequest
 	(*OpenInEditorWorkspaceFile)(nil),        // 1: agentrepl.v1.OpenInEditorWorkspaceFile
@@ -758,26 +1056,36 @@ var file_agentrepl_v1_endpoint_open_in_editor_proto_goTypes = []any{
 	(*OpenInEditorNotYetAdopted)(nil),        // 8: agentrepl.v1.OpenInEditorNotYetAdopted
 	(*OpenInEditorPathEscapesWorkspace)(nil), // 9: agentrepl.v1.OpenInEditorPathEscapesWorkspace
 	(*OpenInEditorUnknownMergeTestLog)(nil),  // 10: agentrepl.v1.OpenInEditorUnknownMergeTestLog
-	(*v1.WorkspaceRef)(nil),                  // 11: workspace.v1.WorkspaceRef
-	(*v11.FeedMergeTestLogToken)(nil),        // 12: frontend.v1.FeedMergeTestLogToken
+	(*OpenInEditorFeedLink)(nil),             // 11: agentrepl.v1.OpenInEditorFeedLink
+	(*OpenInEditorFeedLinkReport)(nil),       // 12: agentrepl.v1.OpenInEditorFeedLinkReport
+	(*OpenInEditorFeedLinkWebFallback)(nil),  // 13: agentrepl.v1.OpenInEditorFeedLinkWebFallback
+	(*OpenInEditorLinkUnresolved)(nil),       // 14: agentrepl.v1.OpenInEditorLinkUnresolved
+	(*v1.WorkspaceRef)(nil),                  // 15: workspace.v1.WorkspaceRef
+	(*v11.FeedMergeTestLogToken)(nil),        // 16: frontend.v1.FeedMergeTestLogToken
+	(*v11.FeedId)(nil),                       // 17: frontend.v1.FeedId
 }
 var file_agentrepl_v1_endpoint_open_in_editor_proto_depIdxs = []int32{
-	11, // 0: agentrepl.v1.OpenInEditorRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	15, // 0: agentrepl.v1.OpenInEditorRequest.workspace:type_name -> workspace.v1.WorkspaceRef
 	1,  // 1: agentrepl.v1.OpenInEditorRequest.workspace_file:type_name -> agentrepl.v1.OpenInEditorWorkspaceFile
-	12, // 2: agentrepl.v1.OpenInEditorRequest.merge_test_log:type_name -> frontend.v1.FeedMergeTestLogToken
-	3,  // 3: agentrepl.v1.OpenInEditorResponse.success:type_name -> agentrepl.v1.OpenInEditorSuccess
-	4,  // 4: agentrepl.v1.OpenInEditorResponse.error:type_name -> agentrepl.v1.OpenInEditorError
-	5,  // 5: agentrepl.v1.OpenInEditorError.unknown_workspace:type_name -> agentrepl.v1.OpenInEditorUnknownWorkspace
-	6,  // 6: agentrepl.v1.OpenInEditorError.workspace_ref_mismatch:type_name -> agentrepl.v1.OpenInEditorWorkspaceRefMismatch
-	7,  // 7: agentrepl.v1.OpenInEditorError.transferring_away:type_name -> agentrepl.v1.OpenInEditorTransferringAway
-	8,  // 8: agentrepl.v1.OpenInEditorError.not_yet_adopted:type_name -> agentrepl.v1.OpenInEditorNotYetAdopted
-	9,  // 9: agentrepl.v1.OpenInEditorError.path_escapes_workspace:type_name -> agentrepl.v1.OpenInEditorPathEscapesWorkspace
-	10, // 10: agentrepl.v1.OpenInEditorError.unknown_merge_test_log:type_name -> agentrepl.v1.OpenInEditorUnknownMergeTestLog
-	11, // [11:11] is the sub-list for method output_type
-	11, // [11:11] is the sub-list for method input_type
-	11, // [11:11] is the sub-list for extension type_name
-	11, // [11:11] is the sub-list for extension extendee
-	0,  // [0:11] is the sub-list for field type_name
+	16, // 2: agentrepl.v1.OpenInEditorRequest.merge_test_log:type_name -> frontend.v1.FeedMergeTestLogToken
+	11, // 3: agentrepl.v1.OpenInEditorRequest.feed_link:type_name -> agentrepl.v1.OpenInEditorFeedLink
+	3,  // 4: agentrepl.v1.OpenInEditorResponse.success:type_name -> agentrepl.v1.OpenInEditorSuccess
+	4,  // 5: agentrepl.v1.OpenInEditorResponse.error:type_name -> agentrepl.v1.OpenInEditorError
+	5,  // 6: agentrepl.v1.OpenInEditorError.unknown_workspace:type_name -> agentrepl.v1.OpenInEditorUnknownWorkspace
+	6,  // 7: agentrepl.v1.OpenInEditorError.workspace_ref_mismatch:type_name -> agentrepl.v1.OpenInEditorWorkspaceRefMismatch
+	7,  // 8: agentrepl.v1.OpenInEditorError.transferring_away:type_name -> agentrepl.v1.OpenInEditorTransferringAway
+	8,  // 9: agentrepl.v1.OpenInEditorError.not_yet_adopted:type_name -> agentrepl.v1.OpenInEditorNotYetAdopted
+	9,  // 10: agentrepl.v1.OpenInEditorError.path_escapes_workspace:type_name -> agentrepl.v1.OpenInEditorPathEscapesWorkspace
+	10, // 11: agentrepl.v1.OpenInEditorError.unknown_merge_test_log:type_name -> agentrepl.v1.OpenInEditorUnknownMergeTestLog
+	14, // 12: agentrepl.v1.OpenInEditorError.link_unresolved:type_name -> agentrepl.v1.OpenInEditorLinkUnresolved
+	17, // 13: agentrepl.v1.OpenInEditorFeedLink.source_row:type_name -> frontend.v1.FeedId
+	12, // 14: agentrepl.v1.OpenInEditorFeedLink.report:type_name -> agentrepl.v1.OpenInEditorFeedLinkReport
+	13, // 15: agentrepl.v1.OpenInEditorFeedLink.web_fallback:type_name -> agentrepl.v1.OpenInEditorFeedLinkWebFallback
+	16, // [16:16] is the sub-list for method output_type
+	16, // [16:16] is the sub-list for method input_type
+	16, // [16:16] is the sub-list for extension type_name
+	16, // [16:16] is the sub-list for extension extendee
+	0,  // [0:16] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_open_in_editor_proto_init() }
@@ -788,6 +1096,7 @@ func file_agentrepl_v1_endpoint_open_in_editor_proto_init() {
 	file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[0].OneofWrappers = []any{
 		(*OpenInEditorRequest_WorkspaceFile)(nil),
 		(*OpenInEditorRequest_MergeTestLog)(nil),
+		(*OpenInEditorRequest_FeedLink)(nil),
 	}
 	file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[1].OneofWrappers = []any{}
 	file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[2].OneofWrappers = []any{
@@ -801,6 +1110,11 @@ func file_agentrepl_v1_endpoint_open_in_editor_proto_init() {
 		(*OpenInEditorError_NotYetAdopted)(nil),
 		(*OpenInEditorError_PathEscapesWorkspace)(nil),
 		(*OpenInEditorError_UnknownMergeTestLog)(nil),
+		(*OpenInEditorError_LinkUnresolved)(nil),
+	}
+	file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[11].OneofWrappers = []any{
+		(*OpenInEditorFeedLink_Report)(nil),
+		(*OpenInEditorFeedLink_WebFallback)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -808,7 +1122,7 @@ func file_agentrepl_v1_endpoint_open_in_editor_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_open_in_editor_proto_rawDesc), len(file_agentrepl_v1_endpoint_open_in_editor_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   11,
+			NumMessages:   15,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

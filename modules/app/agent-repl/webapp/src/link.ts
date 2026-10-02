@@ -29,6 +29,8 @@
  * chrome reporting something the user is already looking at. A REFUSAL is
  * drawn, at the link itself, per the call-site rule.
  */
+import { create } from "@bufbuild/protobuf";
+import { FeedIdSchema } from "../../proto/gen/ts/frontend/v1/feed_pb";
 import { armButtonRole } from "./control.js";
 import { log } from "./log.js";
 import {
@@ -39,7 +41,8 @@ import {
   OpenInEditorResponseSchema,
   type OpenInEditorError,
 } from "../../proto/gen/ts/agentrepl/v1/endpoint_open_in_editor_pb";
-import type { FeedMergeTestLog, FeedMergeTestLogToken } from "../../proto/gen/ts/frontend/v1/feed_pb";
+import { isFileLinkHref } from "./href.js";
+import type { FeedId, FeedMergeTestLog, FeedMergeTestLogToken } from "../../proto/gen/ts/frontend/v1/feed_pb";
 import type { AppContext } from "./rpc/context.js";
 import {
   clearRefusals,
@@ -173,7 +176,20 @@ export function renderMergeTestLogLink(
 /** What an editor link opens: a workspace file, or a merge's test log. */
 export type EditorTarget =
   | { case: "workspaceFile"; value: { path: string; line?: number } }
-  | { case: "mergeTestLog"; value: FeedMergeTestLogToken };
+  | { case: "mergeTestLog"; value: FeedMergeTestLogToken }
+  | {
+      case: "feedLink";
+      value: { href: string; sourceRow: FeedId; onUnresolved: { case: "report" | "webFallback"; value: Record<string, never> } };
+    };
+
+/** A feed link's target: the href as the bubble drew it, and the row it sits in. */
+export function feedLinkTarget(
+  href: string,
+  sourceRow: FeedId,
+  onUnresolved: "report" | "webFallback" = "report",
+): EditorTarget {
+  return { case: "feedLink", value: { href, sourceRow, onUnresolved: { case: onUnresolved, value: {} } } };
+}
 
 /** A workspace file's target, with the line only when the view gave one. */
 export function workspaceFileTarget(spec: { path: string; line?: number }): EditorTarget {
@@ -190,6 +206,8 @@ function editorTargetContext(target: EditorTarget): Record<string, unknown> {
       return { target: target.case, path: target.value.path, line: target.value.line };
     case "mergeTestLog":
       return { target: target.case, token: target.value.value };
+    case "feedLink":
+      return { target: target.case, href: target.value.href, sourceRow: target.value.sourceRow.value };
     default: {
       const other: { case: string } = target;
       return unreachableArm("OpenInEditorRequest.target", other.case);
@@ -247,11 +265,33 @@ function routeProseLinkClick(ctx: AppContext, event: MouseEvent): void {
     void openExternal(ctx, anchor, href);
     return;
   }
-  const path = localFilePath(href);
-  if (path !== null) {
+  if (/^file:\/\//i.test(href)) {
+    const path = localFilePath(href);
+    if (path !== null) {
+      event.preventDefault();
+      event.stopPropagation();
+      void openInEditor(ctx, anchor, workspaceFileTarget({ path }));
+      return;
+    }
+  }
+  if (isFileLinkHref(href)) {
+    // A PATH OR BARE FILE NAME: the daemon resolves it, relative to the
+    // worktree and the module, and needs the row the link sits in so an
+    // unresolved one can quote the bubble. The innermost feed row holds it.
+    const row = anchor.closest("[data-feed-row]")?.getAttribute("data-feed-row") ?? null;
+    if (row === null) {
+      log.warn("a prose link sits in no feed row, so it names no source row; not opened", {
+        operation: "link.feed-link-no-row",
+        context: { href },
+      });
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
     event.preventDefault();
     event.stopPropagation();
-    void openInEditor(ctx, anchor, workspaceFileTarget({ path }));
+    const onUnresolved = anchor.hasAttribute("data-web-fallback") ? "webFallback" : "report";
+    void openInEditor(ctx, anchor, feedLinkTarget(href, create(FeedIdSchema, { value: row }), onUnresolved));
     return;
   }
   // Neither web nor local file. Markdown restricts anchors to http/https, so
@@ -264,22 +304,16 @@ function routeProseLinkClick(ctx: AppContext, event: MouseEvent): void {
 }
 
 /**
- * The filesystem path a prose href names, or null when it is not a local file.
- *
- * A `file://` url's path is its decoded pathname; a bare absolute path (`/…`)
- * or a home path (`~/…`) is itself. Everything else — including a relative
- * fragment or a query — is not a file this can open.
+ * The filesystem path a `file://` href names (its decoded pathname), or null
+ * when it does not parse. Every other path-like href goes to the daemon as a
+ * feed link, unread here.
  */
 function localFilePath(href: string): string | null {
-  if (/^file:\/\//i.test(href)) {
-    try {
-      return decodeURIComponent(new URL(href).pathname);
-    } catch {
-      return null;
-    }
+  try {
+    return decodeURIComponent(new URL(href).pathname);
+  } catch {
+    return null;
   }
-  if (href.startsWith("/") || href.startsWith("~/")) return href;
-  return null;
 }
 
 /**
@@ -343,6 +377,26 @@ async function openInEditor(ctx: AppContext, anchor: HTMLElement, target: Editor
     );
     const result = requireCase(response.result, "OpenInEditorResponse.result");
     if (result.case === "success") return;
+    // A LINK THAT RESOLVED TO NOTHING IS THE DAEMON'S TO SAY: it publishes the
+    // footer line and asks the question in the conversation, so this end draws
+    // nothing beside the link and only records the answer.
+    if (result.value.cause?.case === "linkUnresolved") {
+      // AN AMBIGUOUS NAME (`wikipedia.org`) tried the file first; the daemon
+      // stayed silent, so the click now does what a web link's would.
+      if (target.case === "feedLink" && target.value.onUnresolved.case === "webFallback") {
+        log.info("an ambiguous feed link resolved to no file; opening it as a web URL", {
+          operation: "link.feed-link-web-fallback",
+          context,
+        });
+        await openExternal(ctx, anchor, `http://${target.value.href}`);
+        return;
+      }
+      log.info("the daemon could not resolve a feed link to a file", {
+        operation: "link.feed-link-unresolved",
+        context: { ...context, href: result.value.cause.value.href },
+      });
+      return;
+    }
     const arm = drawTypedRefusal(
       refusalHost(anchor),
       "OpenInEditorError.cause",

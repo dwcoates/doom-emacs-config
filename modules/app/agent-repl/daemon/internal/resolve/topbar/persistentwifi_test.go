@@ -35,15 +35,17 @@ func TestPersistentWifiChipProjectsEachFact(t *testing.T) {
 		wantTooltip       string
 	}{
 		{name: "joined with a name, on", state: wifiState("joined", "on", &home), joined: true, on: true,
-			wantTooltip: "Wi-Fi: joined to Home · persistent wifi on: the lid can close"},
+			wantTooltip: "Closing laptop lid disables agents"},
 		{name: "joined with a withheld name, off", state: wifiState("joined", "off", nil), joined: true, off: true,
-			wantTooltip: "Wi-Fi: joined (network name withheld by macOS) · persistent wifi off: closing the lid sleeps"},
+			wantTooltip: "Closing laptop lid disables agents"},
 		{name: "not joined, on", state: wifiState("not_joined", "on", nil), notJoined: true, on: true,
-			wantTooltip: "Wi-Fi: not joined · persistent wifi on: the lid can close"},
+			wantTooltip: "Closing laptop lid disables agents"},
 		{name: "both unread", state: wifiState("", "", nil),
-			wantTooltip: "Wi-Fi: could not be read · persistent wifi: could not be read"},
+			wantTooltip: "Closing laptop lid disables agents. Wi-Fi and persistent wifi mode could not be read."},
+		{name: "only the mode unread", state: wifiState("joined", "", &home), joined: true,
+			wantTooltip: "Closing laptop lid disables agents. Persistent wifi mode could not be read."},
 		{name: "a standing nobody read", state: nil,
-			wantTooltip: "Wi-Fi: could not be read · persistent wifi: could not be read"},
+			wantTooltip: "Closing laptop lid disables agents. Wi-Fi and persistent wifi mode could not be read."},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

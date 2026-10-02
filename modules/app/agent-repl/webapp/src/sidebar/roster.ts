@@ -26,6 +26,7 @@ import type {
   RosterRepoSection,
   RosterRepositoryView,
   RosterRows,
+  RosterSectionCount,
   RosterSectionHeader,
   RosterTaskDone,
   RosterTaskKey,
@@ -294,7 +295,7 @@ export function drawRosterMergedSection(
   section.appendChild(
     drawRosterSectionHeader(header, section, localFold(sc, MERGED_FOLD_KEY), `${path}.header`),
   );
-  section.appendChild(drawRosterRows(rows, sc, `${path}.rows`));
+  section.appendChild(drawRosterRows(rows, sc, `${path}.rows`, false, true));
   return section;
 }
 
@@ -312,8 +313,23 @@ export function drawRosterSectionHeader(
   label.className = "sb-label";
   label.textContent = drawRosterLabel(requireMessage(u.label, `${path}.label`), `${path}.label`);
   header.appendChild(label);
+  // THE FOLDED COUNT, "(N)", sits between the label and the add control the
+  // repo section appends after this header. The daemon resolves N (nested
+  // family rows included); fold state is this page's, so the stylesheet shows
+  // the count under `.folded` only and nothing here counts or hides it.
+  const count = document.createElement("span");
+  count.className = "sb-count";
+  count.setAttribute("data-section-count", "");
+  count.textContent = `(${drawRosterSectionCount(requireMessage(u.count, `${path}.count`), `${path}.count`)})`;
+  header.appendChild(count);
   header.addEventListener("click", () => gesture(section, header));
   return header;
+}
+
+/** The section's workspace count, exactly as the daemon resolved it. */
+export function drawRosterSectionCount(u: RosterSectionCount, path: string): number {
+  void path;
+  return u.workspaces;
 }
 
 /**
@@ -426,6 +442,7 @@ export function drawRosterRows(
   sc: SidebarContext,
   path: string,
   hideClosed = false,
+  merged = false,
 ): HTMLElement {
   const rows = document.createElement("div");
   rows.className = "rows";
@@ -433,7 +450,7 @@ export function drawRosterRows(
     ? expandVisibleRows(u.rows, `${path}.rows`)
     : u.rows.map((row, index) => ({ row, path: `${path}.rows[${index}]` }));
   for (const entry of drawn) {
-    rows.appendChild(drawRosterRow(entry.row, sc, entry.path));
+    rows.appendChild(drawRosterRow(entry.row, sc, entry.path, merged));
   }
   return rows;
 }

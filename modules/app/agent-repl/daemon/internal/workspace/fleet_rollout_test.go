@@ -618,17 +618,17 @@ func TestResumePropagatesTheUnknownSessionArm(t *testing.T) {
 	asRefusal(t, err, ArmUnknownSession)
 }
 
-// TestResumeDoesNotRetryAHardVendorStartFailure is the RULING GUARD: a hard
-// resume failure that is not unknown_session has no retry machinery, and the
-// relaunch engine's fault is the remediation record.
-func TestResumeDoesNotRetryAHardVendorStartFailure(t *testing.T) {
+// TestResumeDoesNotRetryARejectedVendorStart is the RULING GUARD: a vendor
+// start the shim labels REJECTED fails the same way every time, so nothing
+// retries it.
+func TestResumeDoesNotRetryARejectedVendorStart(t *testing.T) {
 	// Arrange.
 	f := newFleetFixture(t)
 	ws := f.workspace("w1")
 	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
 	f.client.response = &shimv1.StartSessionResponse{
 		Result: &shimv1.StartSessionResponse_Failure{Failure: &shimv1.StartSessionFailure{
-			Cause:  &shimv1.StartSessionFailure_VendorStartFailed{VendorStartFailed: &shimv1.StartSessionVendorStartFailed{}},
+			Cause:  &shimv1.StartSessionFailure_VendorStartFailed{VendorStartFailed: rejectedVendorStart()},
 			Detail: "the vendor binary is missing",
 		}},
 	}
@@ -641,7 +641,7 @@ func TestResumeDoesNotRetryAHardVendorStartFailure(t *testing.T) {
 		t.Fatal("Resume() = nil error, want the vendor-start failure surfaced")
 	}
 	if len(f.client.requests) != 1 {
-		t.Fatalf("StartSession calls = %d, want exactly one; there is no retry machinery", len(f.client.requests))
+		t.Fatalf("StartSession calls = %d, want exactly one; a rejection is never retried", len(f.client.requests))
 	}
 }
 

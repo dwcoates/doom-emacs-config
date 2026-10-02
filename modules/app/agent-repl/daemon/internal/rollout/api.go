@@ -32,6 +32,7 @@ import (
 	"claude-repld/internal/clock"
 	"claude-repld/internal/deployprogress"
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/drain"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/sessionlock"
 	"claude-repld/internal/shimclient"
@@ -312,6 +313,11 @@ type Deps struct {
 	// StandDownWindow is how long a gracefully killed shim has before the
 	// force-kill. Its expiry is a LOUD log, not an invariant.
 	StandDownWindow time.Duration
+	// StandDownCallBound bounds the stand-down's KillSession call itself.
+	// Zero means drain.DefaultStandBound, which contains the shim's own
+	// teardown worst case; it is a field so a hung shim is exercised without
+	// waiting the real bound out.
+	StandDownCallBound time.Duration
 	// ReadyBound bounds the wait for a spawned successor to prove it is
 	// serving (Successor.Ready). Zero means DefaultReadyBound.
 	ReadyBound time.Duration
@@ -622,6 +628,9 @@ func New(deps Deps) (Controller, error) {
 	if deps.StandDownWindow <= 0 {
 		deps.StandDownWindow = DefaultStandDownWindow
 	}
+	if deps.StandDownCallBound <= 0 {
+		deps.StandDownCallBound = drain.DefaultStandBound
+	}
 	if deps.ReadyBound <= 0 {
 		deps.ReadyBound = DefaultReadyBound
 	}
@@ -646,3 +655,10 @@ func New(deps Deps) (Controller, error) {
 	})
 	return c, nil
 }
+
+// ErrResumeRestarted is the cause a Shims.Resume answers when a RESTART ended
+// the vendor-start retry run it was in (the workspace fleet's
+// CancelVendorStart). It is not a failed relaunch: the restart wants this
+// workspace's shim relaunched at once, so the bounce engine stands the shim it
+// just installed down and relaunches over it.
+var ErrResumeRestarted = errors.New("rollout: a restart ended the resume's vendor-start run")

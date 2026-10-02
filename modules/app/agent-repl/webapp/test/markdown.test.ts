@@ -308,3 +308,114 @@ describe("hasFencedTree", () => {
     expect(hasFencedTree(src)).toBe(want);
   });
 });
+
+describe("renderMarkdown: file links", () => {
+  it("anchors a bare file name", () => {
+    expect(renderMarkdown("[a](AGENTS.md)")).toContain('<a href="AGENTS.md"');
+  });
+
+  it("anchors a relative path with a line suffix", () => {
+    expect(renderMarkdown("[a](lisp/status.el:42)")).toContain('<a href="lisp/status.el:42"');
+  });
+
+  it("anchors an absolute path", () => {
+    expect(renderMarkdown("[a](/Users/u/w/a.go)")).toContain('<a href="/Users/u/w/a.go"');
+  });
+
+  it("still refuses a mailto link", () => {
+    expect(renderMarkdown("[a](mailto:x@y.test)")).not.toContain("<a ");
+  });
+
+  it("still refuses a fragment-only link", () => {
+    expect(renderMarkdown("[a](#top)")).not.toContain("<a ");
+  });
+
+  it("draws a relative image as its alt text, never an img", () => {
+    expect(renderMarkdown("![alt text](pic.png)")).not.toContain("<img");
+  });
+
+  it("keeps a web image", () => {
+    expect(renderMarkdown("![alt](https://example.com/p.png)")).toContain("<img");
+  });
+});
+
+describe("inline: file links", () => {
+  it("anchors a bare file name", () => {
+    expect(inline("[a](AGENTS.md)")).toContain('<a href="AGENTS.md"');
+  });
+
+  it("leaves a javascript link as text", () => {
+    expect(inline("[x](javascript:alert(1))")).not.toContain("<a ");
+  });
+});
+
+describe("renderMarkdown: bare file names", () => {
+  const hrefOf = (md: string): string | null => /<a href="([^"]*)"/.exec(renderMarkdown(md))?.[1] ?? null;
+
+  it.each(["README.md", "foo.ts", "app.tsx", "a.js", "a.mjs", "main.go", "status.el", "x.py", "run.sh", "a.json", "a.yaml", "a.yml", "a.toml", "a.proto", "a.txt", "a.css", "a.html", "lib.rs", "a.c", "a.h", "a.m", "a.swift", "notes.org"])(
+    "links %s as a file, href the bare name",
+    (name) => {
+      expect(hrefOf(`see ${name} now`)).toBe(name);
+    },
+  );
+
+  it("keeps a real domain a web link", () => {
+    expect(hrefOf("see example.com now")).toBe("http://example.com");
+  });
+
+  it("links wikipedia.org as a file candidate, href the bare name", () => {
+    expect(hrefOf("see wikipedia.org now")).toBe("wikipedia.org");
+  });
+
+  const fallbackOf = (md: string): boolean => /data-web-fallback/.test(renderMarkdown(md));
+
+  it.each(["wikipedia.org", "README.md", "run.sh", "x.py", "lib.rs"])(
+    "marks %s, whose extension is also a domain ending, for web fallback",
+    (name) => {
+      expect(fallbackOf(`see ${name} now`)).toBe(true);
+    },
+  );
+
+  it.each(["foo.ts", "main.go", "status.el", "a.json", "a.proto"])(
+    "does not mark %s, whose extension is no domain ending",
+    (name) => {
+      expect(fallbackOf(`see ${name} now`)).toBe(false);
+    },
+  );
+
+  it("does not mark an explicit [text](README.md) link", () => {
+    expect(fallbackOf("[x](README.md)")).toBe(false);
+  });
+
+  it("does not mark a real domain", () => {
+    expect(fallbackOf("see example.com now")).toBe(false);
+  });
+
+  it("keeps github.io a web link", () => {
+    expect(hrefOf("see foo.github.io now")).toBe("http://foo.github.io");
+  });
+
+  it("leaves an explicit https URL ending in a file extension a web link", () => {
+    expect(hrefOf("see https://example.com/a/README.md now")).toBe("https://example.com/a/README.md");
+  });
+
+  it("leaves an explicit http URL alone", () => {
+    expect(hrefOf("see http://example.com now")).toBe("http://example.com");
+  });
+
+  it("keeps an email address a mailto-free plain text", () => {
+    expect(renderMarkdown("mail a@b.md now")).not.toContain('href="a@b.md"');
+  });
+
+  it("does not linkify a name with an unlisted extension", () => {
+    expect(renderMarkdown("see foo.xyzzy now")).not.toContain("<a ");
+  });
+
+  it("shows the file name as the anchor text", () => {
+    expect(renderMarkdown("see README.md now")).toContain(">README.md</a>");
+  });
+
+  it("leaves a name inside a code span alone", () => {
+    expect(renderMarkdown("see `README.md` now")).not.toContain("<a ");
+  });
+});
