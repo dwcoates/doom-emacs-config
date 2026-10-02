@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"agentrepl/testrun/internal/command"
 	"agentrepl/testrun/internal/run"
 	"agentrepl/testrun/roster"
 )
@@ -21,7 +22,7 @@ func splitScriptUnits(l Layout, s roster.Suite) (Units, error) {
 	cmd := exec.Command(path, "--list")
 	cmd.Dir = filepath.Dir(path)
 	cmd.Env = append(os.Environ(), PinnedEnv()...)
-	out, err := cmd.Output()
+	out, err := command.Output(cmd)
 	if err != nil {
 		return Units{}, fmt.Errorf("suites: list %s's harness items: %w", s.Name, err)
 	}
