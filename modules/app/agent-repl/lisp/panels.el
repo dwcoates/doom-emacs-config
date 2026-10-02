@@ -139,6 +139,16 @@ a remount."
   :type 'number
   :group 'agent-repl)
 
+(defcustom agent-repl-input-height-line-offset -1
+  "Lines added to the composer height `agent-repl-input-height-fraction' yields.
+Applied by `agent-repl-window--input-height' after the fraction is
+rounded to lines, so the default of -1 makes the composer exactly one
+line shorter than the fraction alone on every frame size (owner, 2026-10-02:
+one line shorter by default).  The minimum
+\(`agent-repl-window--input-height-minimum') still holds."
+  :type 'integer
+  :group 'agent-repl)
+
 (defcustom agent-repl-loading-placeholder-name " *agent-loading*"
   "Buffer name for the loading placeholder shown while the agent starts."
   :type 'string

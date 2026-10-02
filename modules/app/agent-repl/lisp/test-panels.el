@@ -23,6 +23,10 @@
   "The composer defaults to 18.4% of the frame's main area, leaving the webview the rest."
   (should (= (default-value 'agent-repl-input-height-fraction) 0.184)))
 
+(ert-deftest agent-repl-test-panels-input-height-line-offset-default ()
+  "The composer defaults to one line shorter than the fraction alone."
+  (should (= (default-value 'agent-repl-input-height-line-offset) -1)))
+
 ;;;; ---- Tests: Panel visibility predicates ----
 
 (ert-deftest agent-repl-test-panels-input-visible-p-with-visible-buffer ()
