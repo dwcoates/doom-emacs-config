@@ -70,6 +70,14 @@ message OpenAgentSessionSuccess {
   // doubled between page and stream. A caller cannot watch an agent it did
   // not open. UNSET when the request said `page_only`: no token was minted.
   AgentSessionToken watch = 2;
+  // The book's NEWEST item as of this open, whatever the opening asked for.
+  // UNSET = the book holds no items yet. It is what a `tail_only` open
+  // anchors to without reading a page nobody asked for: the tail begins
+  // strictly after it, a later lossless re-open passes it as `known_through`,
+  // and its absence says the book is empty (a `tail_only` page is always
+  // empty, so the page cannot say that itself). A reader that later wants
+  // history still starts with a repaint and walks older from that page.
+  optional StoreItemPointer newest = 3;
 }
 
 // The open could not be served. THE ARM IS WHY.
