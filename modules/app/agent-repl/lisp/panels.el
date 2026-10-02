@@ -645,16 +645,24 @@ unscreened WS while every record uses `agent-repl--ws-log-name'."
       ;; SAME one as at the last switch or a fresh one (a fresh WKWebView
       ;; attachment paints from blank).  THIS-COMMAND tells a keyboard
       ;; switch from one the sidebar drove.
-      (let ((presence (agent-repl-frontend--view-presence
-                       ws (agent-repl-window--panel-buffer :view ws))))
-        (agent-repl--info log-ws
-                          "elisp.panels.webview-on-switch: ws=%s command=%S windows=%s size=%sx%s xwidgets=%s view=%s selected=%s"
-                          ws this-command
-                          (plist-get presence :windows)
-                          (plist-get presence :width) (plist-get presence :height)
-                          (plist-get presence :xwidgets)
-                          (plist-get presence :view)
-                          (plist-get presence :selected)))
+      ;; The view itself is only created by the redisplay that follows, so
+      ;; its identity is read on the next idle turn, after that redisplay.
+      (let ((view-buffer (agent-repl-window--panel-buffer :view ws))
+            (trigger agent-repl--switch-trigger))
+        (run-with-idle-timer
+         0 nil
+         (lambda ()
+           (let ((presence (agent-repl-frontend--view-presence ws view-buffer)))
+             (agent-repl--info log-ws
+                               "elisp.panels.webview-on-switch: ws=%s command=%S from-window=%S window=%S windows=%s size=%sx%s xwidgets=%s view=%s selected=%s"
+                               ws (plist-get trigger :command)
+                               (plist-get trigger :webview-window)
+                               (plist-get presence :window)
+                               (plist-get presence :windows)
+                               (plist-get presence :width) (plist-get presence :height)
+                               (plist-get presence :xwidgets)
+                               (plist-get presence :view)
+                               (plist-get presence :selected))))))
       (agent-repl--panels-note-restore-outcome ws reason)
       (when (eq reason 'default-open-now-missing)
         (agent-repl--frontend-dispatch-show ws)))
@@ -876,6 +884,22 @@ which activation it was."
                         ws generation)
       (agent-repl--on-workspace-switch ws))))
 
+(defvar agent-repl--switch-trigger nil
+  "What triggered the newest perspective activation, captured AT the activation.
+A plist: :command (`this-command' then, which a deferred pass can no longer
+read) and :webview-window (the window showing a webview just before the
+switch).  Read by the switch's webview presence record.")
+
+(defun agent-repl--capture-switch-trigger ()
+  "Record `agent-repl--switch-trigger' for the activation happening now."
+  (setq agent-repl--switch-trigger
+        (list :command this-command
+              :webview-window
+              (cl-find-if (lambda (w)
+                            (string-prefix-p "*agent-frontend-"
+                                             (buffer-name (window-buffer w))))
+                          (window-list nil 'no-minibuf)))))
+
 (defun agent-repl--after-persp-activated (&rest _)
   "Handle perspective activation by scheduling a workspace switch.
 Captures `(agent-repl--ws-current-name)' at hook-fire time and passes it
@@ -887,6 +911,7 @@ has since switched away from is superseded and does nothing.
 
 Logs `persp-names-cache' so cache mutations across persp lifecycle
 events (kill, switch, add) are traceable."
+  (agent-repl--capture-switch-trigger)
   (agent-repl--log '(:agent-repl-context "perspective activation can name no agent workspace")
                    "after-persp-activated: entry cache=%S"
                     (or (agent-repl--ws-names-cache) "(unbound)"))
