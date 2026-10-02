@@ -25,6 +25,13 @@
 #   logs [args...]                  the canonical log reader (bin/logs.sh)
 #   call [args...]                  one unary rpc to the serving daemon
 #                                   (daemon/bin/claude-repld call)
+#   deploy [-force]                 rolling deploy: the serving daemon rebuilds
+#                                   what is stale and moves every workspace
+#                                   onto it without killing turns (-force ends
+#                                   them) (daemon/bin/claude-repld deploy)
+#   hot-reload FILE.el...           load changed elisp into the running Emacs;
+#                                   refuses every test-*.el, which is a
+#                                   batch-only harness
 #   help                            this text
 #
 # The implementations stay where their other callers reach them (Emacs's cold
@@ -139,6 +146,27 @@ case "$verb" in
     call)
         [ -x "$CLAUDE_REPLD" ] || die "no daemon binary at $CLAUDE_REPLD; run: $0 build"
         exec "$CLAUDE_REPLD" call "$@"
+        ;;
+    deploy)
+        [ -x "$CLAUDE_REPLD" ] || die "no daemon binary at $CLAUDE_REPLD; run: $0 build"
+        exec "$CLAUDE_REPLD" deploy "$@"
+        ;;
+    hot-reload)
+        [ $# -gt 0 ] || die "hot-reload needs at least one .el file"
+        for file in "$@"; do
+            case "$(basename "$file")" in
+                test-*.el) die "refusing $file: test files are batch-only and are never loaded into a running Emacs" ;;
+                *.el) ;;
+                *) die "refusing $file: hot-reload loads only .el files" ;;
+            esac
+            [ -f "$file" ] || die "no such file: $file"
+        done
+        emacs_running || die "no running Emacs answers its server"
+        for file in "$@"; do
+            abs="$(cd "$(dirname "$file")" && pwd -P)/$(basename "$file")"
+            "$EMACSCLIENT" --eval "(load \"$abs\" nil t)" >/dev/null || die "loading $abs failed in the running Emacs"
+            say "hot-reload: loaded $abs"
+        done
         ;;
     help|-h|--help) usage ;;
     *)            usage >&2; die "unknown verb: $verb" ;;

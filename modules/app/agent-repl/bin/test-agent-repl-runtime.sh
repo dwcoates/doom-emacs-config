@@ -14,7 +14,7 @@ set -euo pipefail
 
 THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 RUNTIME="$THIS_DIR/agent-repl-runtime"
-TMP="$(mktemp -d)"
+TMP="$(cd "$(mktemp -d)" && pwd -P)"
 trap 'rm -rf "$TMP"' EXIT
 PASS=0
 FAIL=0
@@ -53,6 +53,7 @@ case "\$form" in
         [ -n "\${STUB_NEVER_EXITS:-}" ] || rm -f "$STATE/running"
         exit 0 ;;
     *mapconcat*) printf '"%s"\n' "\${STUB_UNSAVED:-}" ;;
+    "(load "*) printf 'emacsclient %s\n' "\$form" >>"$TRANSCRIPT" ;;
 esac
 EOF
 chmod +x "$TMP/emacsclient"
@@ -144,6 +145,33 @@ if "$RUNTIME" bounce --hard >/dev/null 2>&1; then fail "an Emacs that will not e
 expect_transcript "an Emacs that will not exit is not relaunched beside itself" "byte-compile
 bounce
 emacsclient kill-emacs"
+
+echo "agent-repl-runtime: deploy and hot-reload"
+reset
+"$RUNTIME" deploy -force >/dev/null 2>&1
+expect_transcript "deploy dispatches to the daemon's deploy verb" "claude-repld deploy -force"
+
+reset
+mkdir -p "$TMP/lisp"
+: >"$TMP/lisp/panels.el"
+"$RUNTIME" hot-reload "$TMP/lisp/panels.el" >/dev/null 2>&1
+expect_transcript "hot-reload loads the file into the running Emacs" "emacsclient (load \"$TMP/lisp/panels.el\" nil t)"
+
+reset
+: >"$TMP/lisp/test-panels.el"
+if "$RUNTIME" hot-reload "$TMP/lisp/panels.el" "$TMP/lisp/test-panels.el" >/dev/null 2>&1; then
+    fail "hot-reload refuses a test file"
+else
+    pass "hot-reload refuses a test file"
+fi
+expect_transcript "a refused hot-reload loads nothing, not even the files before the test file" ""
+
+reset
+if "$RUNTIME" hot-reload "$TMP/lisp/missing.el" >/dev/null 2>&1; then fail "hot-reload refuses a missing file"; else pass "hot-reload refuses a missing file"; fi
+
+reset
+rm -f "$STATE/running"
+if "$RUNTIME" hot-reload "$TMP/lisp/panels.el" >/dev/null 2>&1; then fail "hot-reload refuses with no running Emacs"; else pass "hot-reload refuses with no running Emacs"; fi
 
 echo "agent-repl-runtime: refusals"
 reset
