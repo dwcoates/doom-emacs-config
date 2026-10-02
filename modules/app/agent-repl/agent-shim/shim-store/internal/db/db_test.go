@@ -1604,3 +1604,78 @@ func TestOpenLeavesUnbookedRowsUnplacedWhenItBuildsThePlaceIndex(t *testing.T) {
 		t.Fatalf("place rows = %d, want only the booked row's", got)
 	}
 }
+
+// ---- opening a pool ----
+
+func TestOpenPoolCapsThePoolAtTheConnectionsAsked(t *testing.T) {
+	tests := []struct {
+		name    string
+		maxOpen int
+		want    int
+	}{
+		{name: "a pool capped at one connection", maxOpen: 1, want: 1},
+		{name: "an uncapped pool", maxOpen: 0, want: 0},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Arrange
+			dsn := "file:" + filepath.Join(t.TempDir(), "pool.db")
+
+			// Act
+			pool, err := openPool(dsn, test.maxOpen, "the test pool")
+
+			// Assert
+			if err != nil {
+				t.Fatalf("openPool: %v", err)
+			}
+			defer pool.Close() //nolint:errcheck // best-effort test teardown
+			if got := pool.Stats().MaxOpenConnections; got != test.want {
+				t.Fatalf("MaxOpenConnections = %d, want %d", got, test.want)
+			}
+		})
+	}
+}
+
+func TestOpenPoolRefusesAPoolThatCannotBePinged(t *testing.T) {
+	// Arrange: a file inside a directory that does not exist.
+	dsn := "file:" + filepath.Join(t.TempDir(), "missing", "pool.db")
+
+	// Act
+	pool, err := openPool(dsn, 1, "the test pool")
+
+	// Assert
+	if pool != nil || !errors.Is(err, ErrStorage) {
+		t.Fatalf("openPool = %v, %v; want no pool and a storage failure", pool, err)
+	}
+	if !strings.Contains(err.Error(), "pinging the test pool") {
+		t.Fatalf("openPool error = %v, want it to name the ping of the pool", err)
+	}
+}
+
+// TestEveryPoolIsOpenedThroughOpenPool holds the call sites to the helper: a
+// pool opened by hand could skip the Ping or leak its handle on failure.
+func TestEveryPoolIsOpenedThroughOpenPool(t *testing.T) {
+	// Arrange
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatalf("Glob: %v", err)
+	}
+	opens := 0
+	for _, file := range files {
+		if strings.HasSuffix(file, "_test.go") {
+			continue
+		}
+		body, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatalf("ReadFile %s: %v", file, err)
+		}
+
+		// Act
+		opens += strings.Count(string(body), "sql.Open(")
+	}
+
+	// Assert
+	if opens != 1 {
+		t.Fatalf("production source calls sql.Open %d times; only openPool may", opens)
+	}
+}

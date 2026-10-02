@@ -475,18 +475,13 @@ func openAt(writeDSN, readDSN, path string, log *logging.Logger, opts Options, c
 	if monotonic == nil {
 		monotonic = time.Now
 	}
-	sqldb, err := sql.Open("sqlite", writeDSN)
-	if err != nil {
-		return nil, storagef(err, "opening %q", path)
-	}
 	// ONE WRITE CONNECTION, ENFORCED BY THE POOL AS WELL AS BY THE GATE. The
 	// gate (writer.go) is what a queued caller waits on and what reports its
 	// wait; this is what makes a second write connection unrepresentable, so
 	// nothing that bypassed the gate could quietly recreate the contention.
-	sqldb.SetMaxOpenConns(1)
-	if err := sqldb.Ping(); err != nil {
-		sqldb.Close() //nolint:errcheck // the open already failed
-		return nil, storagef(err, "pinging %q", path)
+	sqldb, err := openPool(writeDSN, 1, fmt.Sprintf("%q", path))
+	if err != nil {
+		return nil, err
 	}
 	bulkBase := opts.BulkBase
 	if bulkBase == 0 {
@@ -522,18 +517,33 @@ func openAt(writeDSN, readDSN, path string, log *logging.Logger, opts Options, c
 	// refuse the DDL that creates it and because a pool opened against a file
 	// this binary is about to unlink would hold a handle to the discarded
 	// inode.
-	readdb, err := sql.Open("sqlite", readDSN)
+	readdb, err := openPool(readDSN, 0, fmt.Sprintf("the read pool on %q", path))
 	if err != nil {
 		sqldb.Close() //nolint:errcheck // the open already failed
-		return nil, storagef(err, "opening the read pool on %q", path)
-	}
-	if err := readdb.Ping(); err != nil {
-		readdb.Close() //nolint:errcheck // the open already failed
-		sqldb.Close()  //nolint:errcheck // the open already failed
-		return nil, storagef(err, "pinging the read pool on %q", path)
+		return nil, err
 	}
 	d.read = readdb
 	return d, nil
+}
+
+// openPool is the ONE way a database/sql pool is opened on this store's file:
+// it opens the DSN, caps the pool at maxOpen connections (zero leaves it
+// uncapped), and proves the pool with a Ping, closing it again if the Ping
+// fails so a failed open never leaves a handle behind. `what` names the pool in
+// the error.
+func openPool(dsn string, maxOpen int, what string) (*sql.DB, error) {
+	pool, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return nil, storagef(err, "opening %s", what)
+	}
+	if maxOpen > 0 {
+		pool.SetMaxOpenConns(maxOpen)
+	}
+	if err := pool.Ping(); err != nil {
+		pool.Close() //nolint:errcheck // the open already failed
+		return nil, storagef(err, "pinging %s", what)
+	}
+	return pool, nil
 }
 
 // isRegularFile reports whether the path is an ordinary file this store may
