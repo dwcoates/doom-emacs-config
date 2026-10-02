@@ -420,7 +420,7 @@ func (p *process) apply(line []byte) Reply {
 		p.srv.rememberPushedBash(f)
 		p.srv.rememberPushedPermission(agent, f)
 		p.srv.settleTurn(agent, cmd.Turn, f)
-		p.srv.agents.publish(agentFrame{agent: agent, frame: f, pointer: cmd.Pointer, turn: cmd.Turn, placeMs: cmd.PlaceMs})
+		p.srv.publishAgent(agentFrame{agent: agent, frame: f, pointer: cmd.Pointer, turn: cmd.Turn, placeMs: cmd.PlaceMs})
 		return Reply{OK: true, Count: p.srv.agents.count()}
 
 	case OpPushUserPrompt:
@@ -434,7 +434,7 @@ func (p *process) apply(line []byte) Reply {
 		}
 		p.srv.adoptTurn(agent, prompt)
 		p.srv.foldTurn(agent, prompt)
-		p.srv.agents.publish(agentFrame{agent: agent, prompt: prompt})
+		p.srv.publishAgent(agentFrame{agent: agent, prompt: prompt})
 		return Reply{OK: true, Count: p.srv.agents.count()}
 
 	case OpPushRetired:
@@ -448,7 +448,7 @@ func (p *process) apply(line []byte) Reply {
 			// nothing was ever served at.
 			return Reply{Error: "fakeshim: a retired entry must carry its own pointer"}
 		}
-		p.srv.agents.publish(agentFrame{agent: cmd.Agent, retired: at})
+		p.srv.publishAgent(agentFrame{agent: cmd.Agent, retired: at})
 		return Reply{OK: true, Count: p.srv.agents.count()}
 
 	case OpPushBash:
