@@ -32,6 +32,10 @@ describe("openingErrorVerdict", () => {
     ["an overloaded API that stated no status", undefined, "API Error: Overloaded", "shim.vendor.api_error", "retryable"],
     ["a network failure only the SDK's sentence names", undefined, "TypeError: fetch failed", "shim.vendor.api_error", "retryable"],
     ["the API client's own connection failure", undefined, "API Error: Connection error.", "shim.vendor.api_error", "retryable"],
+    ["a token refresh an outage broke", undefined, "OAuth token refresh failed: fetch failed", "shim.vendor.auth_rejected", "retryable"],
+    ["an authentication the API client could not reach", undefined, "Failed to authenticate. API Error: Connection error.", "shim.vendor.auth_rejected", "retryable"],
+    ["a credential rejected by its words with a network word beside an explicit 401", 401, "invalid api key (network check passed)", "shim.vendor.auth_rejected", "rejected"],
+    ["a forbidden credential by status", 403, "forbidden", "shim.vendor.auth_rejected", "rejected"],
     ["an execution error with no transient words", undefined, "the budget is exhausted", "shim.vendor.api_error", "rejected"],
   ] as const)("labels %s", (_case, status, text, kind, retry) => {
     // Arrange, Act.
