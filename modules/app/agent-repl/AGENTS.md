@@ -1348,43 +1348,20 @@ agents chip opens and closes it rather than dropping a roster of its own, and
 the per-bubble agent strips inside feed cards are a different thing entirely:
 they are scoped to one bubble's own call.
 
-## A QUIET STRETCH always has a footer activity line
+## The working status names the main agent's step, and no line is composed from a landed feed item
 
-A **quiet stretch** is the period between the moment a feed item has FULLY
-LANDED and the moment the next feed item FIRST SURFACES — partially: it need not
-have landed. Through it the footer's one activity line says what just landed
-and what happens next (`✅ Bash finished — handling result...`,
-`❌ Read failed — handling failure...`; never the word "agent"). The stretch
-ENDS THE MOMENT THE FEED DRAWS THE NEXT ITEM: a streaming response ends it at
-its first fragment, not when it finishes. The line itself stays on screen until
-the webapp has PAINTED that item, and clears on that paint (owner ruling,
-2026-09-29), so it never clears before its successor is visible.
+The `working` status's step says what the main agent is doing now, sync only —
+`thinking` (an inference call, no call running), `executing`, `reading`,
+`writing`, `searching`, `fetching`, `delegating`, beside `submitting`,
+`clearing` and `compacting`. The latest of the main agent's running calls names
+it; a subagent's calls and detached work never do. The daemon's footer resolver
+reads it (`daemon/internal/resolve/footer/workstep.go`).
 
-- **Where it is legal.** Under the `working` status and under `background`.
-  While a turn is in flight the status is `working` even if detached work runs,
-  and only the MAIN agent's items count: detached work is not surfaced on the
-  line then.
-- **What outranks it.** A standing fault, a deploy's update, a compaction's
-  progress, a running hook and a retry. A notification outranks it only until
-  the next feed item lands, which replaces the notification with the line.
-- **The invariant.** While a delivered turn runs, either a feed item is
-  surfacing or running, or the line stands. The daemon records a quiet stretch
-  with no line at ERROR (`daemon.footer.quiet_stretch_without_line`).
-- **Who owns it.** The daemon's footer resolver composes it
-  (`daemon/internal/resolve/footer/quietstretch.go`) as
-  `frontend.v1.FooterStatusActivityQuietStretch`; the webapp draws it verbatim.
-- **How it ends.** The feed resolver tells the footer every row it draws
-  (`Deps.ItemDrawn`, with whether it is on the root feed). A root-feed drawing
-  states the ended line as `frontend.v1.FooterStatusQuietStretchEnding`
-  (`until_painted` names the row), unless any activity stands (a newer
-  activity update always wins at once); the webapp holds it until that row is painted
-  (`webapp/src/footer/quiet-hold.ts`). A sub-feed drawing ends the line at once:
-  the webapp paints a sub-feed only when its bubble is open.
-
-The same file names the `working` status's step: what the main agent is doing
-now, sync only — `thinking` (an inference call, no call running), `executing`,
-`reading`, `writing`, `searching`, `fetching`, `delegating`, beside
-`submitting`, `clearing` and `compacting`.
+The activity cell never carries a line composed from the feed item that landed
+last (`✅ Bash finished — handling result...`, `✅ Prompt delivered — awaiting
+response...`). That was the QUIET tier, and it is RETIRED (owner ruling,
+2026-10-01: too chatty, next to no information). Between two feed items the
+cell draws whatever the three tiers below resolve to.
 
 ## "Fresh input" is the one token quantity every spend figure counts
 
@@ -1482,37 +1459,36 @@ and how long it stood. Do NOT list kinds at a call site: add the kind's row to
 the table. `lifetime_test.go` fails a kind with no lifetime and an edge with no
 production caller.
 
-## Footer activity lines are salient, transient, quiet, or enduring
+## Footer activity lines are salient, transient, or enduring
 
-The owner's rulings of 2026-09-28 through 2026-09-30 (the design record is
-`docs/protobuf-design/footer-activity-tiers.md`). The strip's activity cell is
+The owner's rulings of 2026-09-28 through 2026-10-01 (the design records are
+`docs/protobuf-design/footer-activity-tiers.md` and, for the quiet tier's
+retirement, `docs/protobuf-design/2026-10-02-ui-lifecycle-wave.md` decision 1). The strip's activity cell is
 meant to be ACTIVE: continual feedback that the session is doing something,
 never a line that stands for an hour because nothing arrived to clear it, and
 never an empty cell. It is always exactly ONE line, cut off with an ellipsis
-when it would overflow. Every activity kind belongs to exactly ONE of four
+when it would overflow. Every activity kind belongs to exactly ONE of three
 tiers, and the tier is defined by WHAT ENDS the line:
 
 | tier | ends when | examples |
 | --- | --- | --- |
 | **salient** | the condition it describes stops being true — never a timer | escalating faults (a severed link, a failed bring-up, an impaired daemon); anything waiting on the user (a gated call, a question batch, the cold gate, the agent's `PushNotification` message, which ends at the next prompt); an act in progress with its own end signal (a compaction running, an interrupt, a refused close, a deploy, a pending wakeup, a retry until the response lands); the context-budget warning (ends when a cut shrinks the context); the dead-query line (ends at the next prompt) |
 | **transient** | its 10 s display window lapses, or a newer transient replaces it | tool-call starts; task-tracker moves; the `submitting` line with the held-prompt queue and classification progress; a concluded compaction; every non-blocking error or warning (non-escalating faults, daemon Warn/Error records); session changes; a finished deploy; network-resume edges; a detached run finishing while the session is `background` |
-| **quiet** | the next feed item surfaces | the quiet-stretch line: from the moment a feed item has FULLY LANDED until the next feed item FIRST SURFACES, e.g. `✅ Bash finished — handling result...`; a prompt delivered, `✅ Prompt delivered — awaiting response...` |
 | **enduring** | never — it is always true, so the cell is never empty | the 5-hour and weekly usage (`unobserved` until a figure is read), fed by account-usage samples and by the vendor's rate-limit events, which stand no salient line of their own (owner ruling, 2026-10-01) |
 
-**PRECEDENCE IS BY TIER, ALWAYS:** salient, then transient, then quiet, then
-enduring. A transient never covers a salient line; it covers only a quiet or
-enduring line, and when it lapses the line beneath it shows again. Within the
+**PRECEDENCE IS BY TIER, ALWAYS:** salient, then transient, then enduring. A
+transient never covers a salient line; it covers only the enduring line, and
+when it lapses the enduring line shows again. Within the
 salient tier the contract's precedence decides (the kind that explains the
 standing step first, then a fault, then a deploy's progress, and so on);
 within the transient tier the NEWEST wins, so submitting a prompt (which
 raises the `submitting` transient) replaces whatever transient stood.
 
-**QUIET NEVER LEAVES A TURN SILENT.** While a turn is in flight, either a feed
-item is surfacing or running, or the quiet line stands. A quiet stretch with no
-line is an invariant break the daemon records at ERROR. The quiet line is legal
-under the `working` status and under `background`; while a turn is in flight
-the status is `working` even if background work runs, and background items are
-not surfaced on the line then. Quiet lines never say "agent".
+**NO LINE IS COMPOSED FROM A LANDED FEED ITEM.** A fourth, QUIET tier once
+stood a line worded from the feed item that landed last until the next one
+surfaced. It is retired (owner ruling, 2026-10-01), end to end: the contract
+has no shape for it, the daemon composes nothing of the kind, and the webapp
+holds nothing back for it.
 
 **THE ENDURING LINE IS THE USAGE, AND ONLY ITS PERCENTAGES ARE COLORED.**
 The line draws the 5-hour and weekly allowances (and overage when present),
@@ -1522,16 +1498,16 @@ line draws no reading age: it is enduring, so when it was read does not
 matter. The context window's fill is not an enduring line (owner ruling,
 2026-09-30); the topbar's context chip carries it.
 
-**A TIMER MAY END ONLY A TRANSIENT.** A salient or quiet line with no clearing
+**A TIMER MAY END ONLY A TRANSIENT.** A salient line with no clearing
 event is a missing end signal, and the fix is the end signal, not an expiry.
 The transient window is a presentation choice, which is why it alone is timed,
 and it is never shortened or lengthened by what arrives next: the next event
 may never come.
 
 **THE DAEMON DECIDES THE EXPIRY; THE CLIENT APPLIES IT.** Every push carries
-the standing transient WITH its expiry instant, AND the resolved line beneath
-it (the quiet line if one stands, else the enduring line). The client draws the
-transient until its clock passes the expiry, then the line beneath — the same
+the standing transient WITH its expiry instant, AND the enduring line beneath
+it. The client draws the transient until its clock passes the expiry, then the
+enduring line — the same
 client-side ticking from a shipped instant the turn clock already does. The
 daemon runs no expiry timer and pushes nothing when a transient lapses, so
 what is drawn is a pure function of the last push and the client's clock.

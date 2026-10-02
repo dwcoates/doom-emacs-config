@@ -109,7 +109,7 @@ and are contract on the same terms:
 | `.entry-selected` class (with `data-revealed` / `data-selected-row` (valued `response`, `prompt` or `bubble`) on the row) | the CARD of the selected feed entry — the row's first element child (a bubble, a tool card, a detached bubble's fold), never the full-width `.feed-item` | — (the row states WHICH act selected it: `data-revealed` while a footer detached-work jump's landing stands, `data-selected-row` while the reply-to-a-past-response selection names it; `syncSelectedEntry` (src/feed/selected-entry.ts) derives the class from those facts, and the chrome mirror re-derives it after every body draw so a replaced card inherits it. The stylesheet draws an inset `--selected-response` outline, and on a final response turns its own border blue instead; the old `.row-revealed` bar and `.response-selected` class are gone) | selected-mark-on-card, 2026-09-23 |
 | `data-selection-governed` / `data-selectable` on a root-feed row | a root-feed prompt or response row whose bubble the selection owns (`stampSelection`, src/feed/bubble-selection.ts); `data-selectable` while the daemon publishes `FeedRow.selectable` | a click selects it through `SelectFeedRow` `bubble` (or `clear` on the selected one); its box opens only while it is the selection (`expandSelected`, feed-view.ts), neither a click nor the auto-collapse toggles it, and every selected bubble kind wears the blue border (`.bubble.entry-selected`) | bubble selection, 2026-10-01 |
 | `data-phase` + `.footer-activity-update` class | the footer activity line drawing a deploy's salient `FooterStatusActivityUpdate`, or the finished deploy's transient `FooterActivityTransientUpdated` | the phase arm's case name (`building`, `installing`, `restartingServices`, `handingOver`, `waiting`), or `updated` for the transient; the waiting counts wear `data-datum="count"` | deploy-progress-in-footer, 2026-09-27; `updated` a transient since fa-webapp |
-| `data-tier` | the footer's `.footer-activity` cell (src/footer/activity.ts) | `salient` \| `transient` \| `quiet` \| `enduring`: the tier DRAWN — the daemon's salient line, or, in the unpinned tiers, the transient while the client clock is before its `expiry.expires_at_ms`, then the quiet-stretch line when one stands (only under `working` and `background`), then the enduring line. The cell's `data-arm` is then the salient or transient kind's case name, `quietStretch`, or `enduring` | fa-webapp (footer activity tiers); `quiet` since the combined model |
+| `data-tier` | the footer's `.footer-activity` cell (src/footer/activity.ts) | `salient` \| `transient` \| `enduring`: the tier DRAWN — the daemon's salient line, or, in the unpinned tiers, the transient while the client clock is before its `expiry.expires_at_ms`, then the enduring line. The cell's `data-arm` is then the salient or transient kind's case name, or `enduring` | fa-webapp (footer activity tiers); `quiet` retired with the quiet tier, 2026-10-01 |
 | `.footer-activity-transient` + `data-datum="agent"` | a transient raised by a subagent's work: the line's wrapper, and the `.footer-activity-agent` label span in front of it (identity blue, `activityDatumClass("agent")`) | the subagent's label, verbatim; absent for the main agent | fa-webapp |
 | `.footer-activity-enduring` + `data-line` | the enduring line (it inherits the retired `.footer-activity-rate-limited` layout: figures elastic); only each allowance's percentage is colored, by the percent gradient, the `.footer-rate-separator` "|" between allowances is blue (`--footer-rate-separator`), and no reading age is drawn | `data-line`: `usage` \| `unobserved` (drawn empty) | fa-webapp; one line since the combined model |
 | `data-stage` + `.footer-activity-submitting` | the `submitting` transient's line: the stage, then the prompt's first line | the stage's case name: `held` (its "queued 2/3" place wears `data-datum="position"`) \| `classifying` \| `interjecting` \| `afterToolCall` ("after this tool call") \| `coalesced` \| `delivered` | the combined model; `afterToolCall` since the verdict split |
@@ -599,12 +599,12 @@ hand any more:
   footer, barring its expanded section, never grows in height for it. The
   cell's hover title carries the whole line. `test/styles.test.ts` pins both
   declarations.
-- **AN ENDED QUIET-STRETCH LINE STAYS UNTIL ITS SUCCESSOR IS PAINTED.** When
-  a push states `quiet_stretch_ending`, the footer draws that line in place of
-  the activity until the root feed has painted the `until_painted` row
-  (`src/feed/painted.ts`: in the document and a frame painted after its
-  insert), and clears it on that paint (`src/footer/quiet-hold.ts`).
-  A reader off the live tail gets no hold. `test/footer/quiet-hold.test.ts`.
+- **THE FOOTER'S ACTIVITY CELL DRAWS THREE TIERS.** Salient, transient,
+  enduring, under every status. The quiet tier (a line worded from the feed
+  item that landed last, held until the next row was painted) is retired
+  (owner ruling, 2026-10-01), with its hold and the feed's paint tracking.
+  `test/footer/activity.test.ts`, "the unpinned tiers under working and
+  background".
 - **CSS** is appended in a delimited section headed
   `/* ---- <component> (<file>) ---- */`. Existing classes are never renamed or
   restyled.

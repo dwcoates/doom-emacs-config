@@ -1750,17 +1750,22 @@ Owner rulings, 2026-09-30 (`internal/promptqueue/acts.go`, `ahead.go`,
   said and never records it; the prompt row and the feed carry the user's
   words alone.
 
-## The footer's activity cell has four tiers, and the daemon picks the one line
+## The footer's activity cell has three tiers, and the daemon picks the one line
 
 Design record `docs/protobuf-design/footer-activity-tiers.md` ("THE PLAN",
 landed changes 1-5; `internal/resolve/footer`).
 
-- **SALIENT, TRANSIENT, QUIET STRETCH, ENDURING.** A salient line stands while
-  a condition blocks the turn or the user, and only its own end signal clears
-  it (a timer never does); a transient carries its own expiry, which the
-  client applies; the quiet-stretch line stands under `working` and
-  `background` until the next feed item surfaces; the enduring line is the
-  usage allowances, or `unobserved` before any figure is read. The salient kinds are shared across status arms.
+- **SALIENT, TRANSIENT, ENDURING.** A salient line stands while a condition
+  blocks the turn or the user, and only its own end signal clears it (a timer
+  never does); a transient carries its own expiry, which the client applies;
+  the enduring line is the usage allowances, or `unobserved` before any figure
+  is read. The salient kinds are shared across status arms.
+- **NO LINE IS COMPOSED FROM A LANDED FEED ITEM.** The quiet tier, which
+  worded a line from the feed item that landed last, is retired (owner ruling,
+  2026-10-01; `docs/protobuf-design/2026-10-02-ui-lifecycle-wave.md`
+  decision 1). `workstep.go` reads the feed's items for the `working` step
+  alone, and the feed resolver tells the footer nothing about the rows it
+  draws.
 - **A PROMPT'S DELIVERY IS A `submitting` TRANSIENT PER STAGE**: held (its
   place in the queue), classifying, interrupting the turn, after this tool
   call, coalesced, sent.
