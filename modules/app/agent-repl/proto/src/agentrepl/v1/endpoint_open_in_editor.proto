@@ -113,7 +113,29 @@ message OpenInEditorFeedLink {
   // row the daemon's follow-up question quotes when the link resolves to
   // nothing.
   frontend.v1.FeedId source_row = 2;
+  // What the daemon does when the link resolves to no file. Always set; a
+  // request with neither arm is malformed. Either way the answer is
+  // `link_unresolved`.
+  oneof on_unresolved {
+    // The link was unambiguously meant as a file (an explicit link, or a bare
+    // name whose extension is no web domain ending): publish the transient
+    // "unknown file" footer line and send the workspace its follow-up
+    // question.
+    OpenInEditorFeedLinkReport report = 3;
+    // The link is AMBIGUOUS: a bare name whose extension is also a web domain
+    // ending (`notes.org` / `wikipedia.org`, `.md`, `.sh`, `.py`, `.rs`). The
+    // file is tried first; when nothing resolves, the daemon stays silent (no
+    // footer line, no follow-up question) and the client opens the name as a
+    // web URL instead.
+    OpenInEditorFeedLinkWebFallback web_fallback = 4;
+  }
 }
+
+// Report an unresolved link to the user and the agent.
+message OpenInEditorFeedLinkReport {}
+
+// Resolve silently; the client falls back to the web.
+message OpenInEditorFeedLinkWebFallback {}
 
 // The feed link resolved to no file.
 message OpenInEditorLinkUnresolved {
