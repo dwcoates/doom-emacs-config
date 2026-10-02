@@ -263,7 +263,7 @@ describe("arm coverage", () => {
   });
 
   it("covers every OpenInEditor target", () => {
-    assertCoversOneof(OpenInEditorRequestSchema, "target", ["workspaceFile", "mergeTestLog"]);
+    assertCoversOneof(OpenInEditorRequestSchema, "target", ["workspaceFile", "mergeTestLog", "feedLink"]);
   });
 
   it("covers every feed command panel arm", () => {
@@ -2131,6 +2131,40 @@ describe("the editor link on a worktree divider", () => {
 // served draws nothing at all (tabs are conditional: a tab appears BECAUSE
 // that work began).
 // ---------------------------------------------------------------------------
+
+describe("a file link in a response bubble", () => {
+  /** Draw a response whose prose links FILE-LINK and click the link. */
+  const clickLink = async (href: string): Promise<void> => {
+    await drawRow(responseRow("success", `see [the file](${href})`, { id: feedId("resp-1") }));
+    await harness.click('[data-feed-row="resp-1"] a[href]');
+  };
+
+  it("opens a bare file name through feed_link, echoing the href", async () => {
+    // Arrange / Act
+    await clickLink("AGENTS.md");
+    // Assert
+    const [request] = harness.fake.calls<OpenInEditorRequest>("openInEditor");
+    expect(request.target.case === "feedLink" ? request.target.value.href : request.target.case).toBe("AGENTS.md");
+  });
+
+  it("names the bubble's own row as the link's source row", async () => {
+    // Arrange / Act
+    await clickLink("lisp/status.el:42");
+    // Assert
+    const [request] = harness.fake.calls<OpenInEditorRequest>("openInEditor");
+    expect(request.target.case === "feedLink" ? request.target.value.sourceRow?.value : request.target.case).toBe("resp-1");
+  });
+
+  it("keeps a web link on OpenExternal", async () => {
+    // Arrange / Act
+    await clickLink("https://example.test/x");
+    // Assert
+    expect([
+      harness.fake.calls("openExternal").length,
+      harness.fake.calls("openInEditor").length,
+    ]).toEqual([1, 0]);
+  });
+});
 
 describe("an agentic merge tab", () => {
   /** Draw the pre-prompt tab, then push a row parented to it. */

@@ -308,3 +308,43 @@ describe("hasFencedTree", () => {
     expect(hasFencedTree(src)).toBe(want);
   });
 });
+
+describe("renderMarkdown: file links", () => {
+  it("anchors a bare file name", () => {
+    expect(renderMarkdown("[a](AGENTS.md)")).toContain('<a href="AGENTS.md"');
+  });
+
+  it("anchors a relative path with a line suffix", () => {
+    expect(renderMarkdown("[a](lisp/status.el:42)")).toContain('<a href="lisp/status.el:42"');
+  });
+
+  it("anchors an absolute path", () => {
+    expect(renderMarkdown("[a](/Users/u/w/a.go)")).toContain('<a href="/Users/u/w/a.go"');
+  });
+
+  it("still refuses a mailto link", () => {
+    expect(renderMarkdown("[a](mailto:x@y.test)")).not.toContain("<a ");
+  });
+
+  it("still refuses a fragment-only link", () => {
+    expect(renderMarkdown("[a](#top)")).not.toContain("<a ");
+  });
+
+  it("draws a relative image as its alt text, never an img", () => {
+    expect(renderMarkdown("![alt text](pic.png)")).not.toContain("<img");
+  });
+
+  it("keeps a web image", () => {
+    expect(renderMarkdown("![alt](https://example.com/p.png)")).toContain("<img");
+  });
+});
+
+describe("inline: file links", () => {
+  it("anchors a bare file name", () => {
+    expect(inline("[a](AGENTS.md)")).toContain('<a href="AGENTS.md"');
+  });
+
+  it("leaves a javascript link as text", () => {
+    expect(inline("[x](javascript:alert(1))")).not.toContain("<a ");
+  });
+});

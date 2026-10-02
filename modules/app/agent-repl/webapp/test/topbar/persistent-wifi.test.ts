@@ -173,6 +173,36 @@ describe("clicking the persistent-wifi chip", () => {
     expect(host.querySelector(".refusal")).toBeNull();
   });
 
+  it("marks the chip as settling while the toggle is in flight", () => {
+    // Arrange
+    const { host, tc } = topbarContext(appContext({ updatePersistentWifiMode: () => new Promise(() => undefined) }));
+    host.append(drawTopbarPersistentWifi(chip(joined, off), tc));
+    // Act
+    host.querySelector<Control>(".topbar-wifi-button")!.click();
+    // Assert
+    expect(host.querySelector(".topbar-wifi")?.hasAttribute("data-settling")).toBe(true);
+  });
+
+  it("clears the settling mark once the toggle landed", async () => {
+    const { host } = await clickWith(() => success());
+    expect(host.querySelector(".topbar-wifi")?.hasAttribute("data-settling")).toBe(false);
+  });
+
+  it("clears the settling mark when the call failed at the transport", async () => {
+    const { host } = await clickWith(() => {
+      throw new Error("link dropped");
+    });
+    expect(host.querySelector(".topbar-wifi")?.hasAttribute("data-settling")).toBe(false);
+  });
+
+  it("draws no settling mark on a chip nobody clicked", () => {
+    expect(draw(chip(joined, off)).hasAttribute("data-settling")).toBe(false);
+  });
+
+  it("draws the daemon's tooltip verbatim, never one of its own", () => {
+    expect(draw(chip(joined, off)).title).toBe("the daemon's words");
+  });
+
   it("gives the button back once the toggle landed", async () => {
     const { button } = await clickWith(() => success());
     expect(button.disabled).toBe(false);

@@ -609,7 +609,9 @@ describe("renderEditorLink", () => {
     expect(refusalAt(a)?.getAttribute("data-arm")).toBe("pathEscapesWorkspace");
   });
 
-  it.each(oneofArms(OpenInEditorErrorSchema, "cause"))(
+  // `linkUnresolved` is the one arm drawn NOWHERE on this page: the daemon
+  // publishes the footer line and asks the question in the conversation.
+  it.each(oneofArms(OpenInEditorErrorSchema, "cause").filter((arm) => arm !== "linkUnresolved"))(
     "labels the %s arm and says something about it",
     async (arm) => {
       const { ctx } = harness("error", "invalidUrl", arm);
@@ -753,19 +755,103 @@ describe("installProseLinkRouting: a clicked markdown prose link", () => {
     off();
   });
 
-  it("routes a bare absolute-path link through OpenInEditor", async () => {
-    // Arrange.
-    const { ctx, editor } = harness();
-    const { root, off } = prose(ctx, `<a href="/Users/u/w/a.go">a.go</a>`);
+  /** A prose anchor drawn inside a feed row, as a bubble draws it. */
+  function proseInRow(ctx: AppContext, rowId: string, html: string): { root: HTMLElement; off: () => void } {
+    const root = document.createElement("div");
+    const row = document.createElement("div");
+    row.setAttribute("data-feed-row", rowId);
+    row.innerHTML = html;
+    root.appendChild(row);
+    return { root, off: installProseLinkRouting(ctx, root) };
+  }
 
-    // Act.
+  function feedLinkOf(req: OpenInEditorRequest): { href: string; row: string } {
+    if (req.target.case !== "feedLink") throw new Error(`expected a feedLink target, got ${String(req.target.case)}`);
+    return { href: req.target.value.href, row: req.target.value.sourceRow?.value ?? "" };
+  }
+
+  it("routes a bare absolute-path link as a feed_link carrying the source row", async () => {
+    const { ctx, editor } = harness();
+    const { root, off } = proseInRow(ctx, "row-7", `<a href="/Users/u/w/a.go">a.go</a>`);
     click(root.querySelector("a")!);
     await settle();
-
-    // Assert.
-    expect(editor).toHaveLength(1);
-    expect(workspaceFileOf(editor[0]).path).toBe("/Users/u/w/a.go");
+    expect(editor.map(feedLinkOf)).toEqual([{ href: "/Users/u/w/a.go", row: "row-7" }]);
     off();
+  });
+
+  it("routes a bare file name as a feed_link, href verbatim", async () => {
+    const { ctx, editor } = harness();
+    const { root, off } = proseInRow(ctx, "row-7", `<a href="AGENTS.md">AGENTS.md</a>`);
+    click(root.querySelector("a")!);
+    await settle();
+    expect(editor.map(feedLinkOf)).toEqual([{ href: "AGENTS.md", row: "row-7" }]);
+    off();
+  });
+
+  it("sends a `:<line>` suffix inside the href untouched", async () => {
+    const { ctx, editor } = harness();
+    const { root, off } = proseInRow(ctx, "row-7", `<a href="lisp/status.el:42">status</a>`);
+    click(root.querySelector("a")!);
+    await settle();
+    expect(editor.map(feedLinkOf)).toEqual([{ href: "lisp/status.el:42", row: "row-7" }]);
+    off();
+  });
+
+  it("names the innermost row when feed rows nest", async () => {
+    const { ctx, editor } = harness();
+    const { root, off } = proseInRow(
+      ctx,
+      "outer",
+      `<div data-feed-row="inner"><a href="a.go">a</a></div>`,
+    );
+    click(root.querySelector("a")!);
+    await settle();
+    expect(editor.map(feedLinkOf)[0]?.row).toBe("inner");
+    off();
+  });
+
+  it("draws nothing beside the link when the daemon answers link_unresolved", async () => {
+    const { ctx } = harness("error", "invalidUrl", "linkUnresolved");
+    const { root, off } = proseInRow(ctx, "row-7", `<a href="nope.go">nope</a>`);
+    click(root.querySelector("a")!);
+    await settle();
+    expect(root.querySelector(".refusal")).toBeNull();
+    off();
+  });
+
+  it("logs the unresolved answer rather than swallowing it", async () => {
+    const lines: Array<[string, string]> = [];
+    setLogger(new ForwardingLogger(async () => "accepted", (level, line) => lines.push([level, line])));
+    const { ctx } = harness("error", "invalidUrl", "linkUnresolved");
+    const { root, off } = proseInRow(ctx, "row-7", `<a href="nope.go">nope</a>`);
+    click(root.querySelector("a")!);
+    await settle();
+    expect(lines.some(([level, line]) => level === "info" && line.includes("link.feed-link-unresolved"))).toBe(true);
+    off();
+  });
+
+  it("opens no rpc and warns for a path link that sits in no feed row", async () => {
+    const lines: Array<[string, string]> = [];
+    setLogger(new ForwardingLogger(async () => "accepted", (level, line) => lines.push([level, line])));
+    const { ctx, editor } = harness();
+    const { root, off } = prose(ctx, `<a href="a.go">a</a>`);
+    click(root.querySelector("a")!);
+    await settle();
+    expect({ calls: editor.length, warned: lines.some(([l, m]) => l === "warn" && m.includes("link.feed-link-no-row")) }).toEqual({ calls: 0, warned: true });
+    off();
+  });
+
+  it("keeps a web link on OpenExternal inside a feed row", async () => {
+    const { ctx, external, editor } = harness();
+    const { root, off } = proseInRow(ctx, "row-7", `<a href="https://example.test/x">x</a>`);
+    click(root.querySelector("a")!);
+    await settle();
+    expect({ external: external.length, editor: editor.length }).toEqual({ external: 1, editor: 0 });
+    off();
+  });
+
+  it("renders a markdown path link as an anchor the router can take", () => {
+    expect(renderMarkdown("[a](lisp/status.el)")).toContain('<a href="lisp/status.el"');
   });
 
   it("leaves a structured external link to its own handler, opening it once", async () => {

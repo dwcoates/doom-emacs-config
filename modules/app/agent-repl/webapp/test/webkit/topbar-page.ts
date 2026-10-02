@@ -101,7 +101,6 @@ function stripView(session: boolean) {
             selected: { model: { name: "opus" }, displayName: "Opus 4.7" },
           },
           permissionModePicker: { current: { mode: "auto", displayName: "auto" }, options: [] },
-          fastMode: { state: { case: "off", value: { reason: "" } } },
         }
       : {}),
     context: { text: "142.3k", breakdown: { sections: [] } },
