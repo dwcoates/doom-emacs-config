@@ -479,13 +479,16 @@ export class RecordingPersistence implements Persistence {
    * real reader, over the store client: at this seam a refusal is a refusal,
    * which is exactly what the engine's arm mapping is tested against.
    */
+  /** The agent every one-shot first-page read named, in call order. */
+  readonly firstPageAgents: string[] = [];
   readFirstPage(
-    _agent?: conversationv1.AgentId,
+    agent?: conversationv1.AgentId,
     opening?: AgentOpening,
     known?: () => boolean,
   ): Promise<conversationv1.HistoryPage> {
     this.lastKnownAgent = known;
     this.firstPageReads++;
+    this.firstPageAgents.push(agent?.value ?? "");
     this.openings.push(opening ?? REPAINT);
     if (this.openHangs) return new Promise<conversationv1.HistoryPage>(() => undefined);
     if (this.openError !== undefined) return Promise.reject(this.openError);
