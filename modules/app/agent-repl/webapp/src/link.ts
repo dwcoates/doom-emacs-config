@@ -177,11 +177,18 @@ export function renderMergeTestLogLink(
 export type EditorTarget =
   | { case: "workspaceFile"; value: { path: string; line?: number } }
   | { case: "mergeTestLog"; value: FeedMergeTestLogToken }
-  | { case: "feedLink"; value: { href: string; sourceRow: FeedId } };
+  | {
+      case: "feedLink";
+      value: { href: string; sourceRow: FeedId; onUnresolved: { case: "report" | "webFallback"; value: Record<string, never> } };
+    };
 
 /** A feed link's target: the href as the bubble drew it, and the row it sits in. */
-export function feedLinkTarget(href: string, sourceRow: FeedId): EditorTarget {
-  return { case: "feedLink", value: { href, sourceRow } };
+export function feedLinkTarget(
+  href: string,
+  sourceRow: FeedId,
+  onUnresolved: "report" | "webFallback" = "report",
+): EditorTarget {
+  return { case: "feedLink", value: { href, sourceRow, onUnresolved: { case: onUnresolved, value: {} } } };
 }
 
 /** A workspace file's target, with the line only when the view gave one. */
@@ -283,7 +290,8 @@ function routeProseLinkClick(ctx: AppContext, event: MouseEvent): void {
     }
     event.preventDefault();
     event.stopPropagation();
-    void openInEditor(ctx, anchor, feedLinkTarget(href, create(FeedIdSchema, { value: row })));
+    const onUnresolved = anchor.hasAttribute("data-web-fallback") ? "webFallback" : "report";
+    void openInEditor(ctx, anchor, feedLinkTarget(href, create(FeedIdSchema, { value: row }), onUnresolved));
     return;
   }
   // Neither web nor local file. Markdown restricts anchors to http/https, so
@@ -373,6 +381,16 @@ async function openInEditor(ctx: AppContext, anchor: HTMLElement, target: Editor
     // footer line and asks the question in the conversation, so this end draws
     // nothing beside the link and only records the answer.
     if (result.value.cause?.case === "linkUnresolved") {
+      // AN AMBIGUOUS NAME (`wikipedia.org`) tried the file first; the daemon
+      // stayed silent, so the click now does what a web link's would.
+      if (target.case === "feedLink" && target.value.onUnresolved.case === "webFallback") {
+        log.info("an ambiguous feed link resolved to no file; opening it as a web URL", {
+          operation: "link.feed-link-web-fallback",
+          context,
+        });
+        await openExternal(ctx, anchor, `http://${target.value.href}`);
+        return;
+      }
       log.info("the daemon could not resolve a feed link to a file", {
         operation: "link.feed-link-unresolved",
         context: { ...context, href: result.value.cause.value.href },
