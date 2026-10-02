@@ -517,6 +517,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Topbar:       topbarResolver,
 		BringUps:     sidebarResolver.SetBringingUp,
 		VendorStarts: sidebarResolver.SetVendorStart,
+		SessionsUp:   lifecycle.SessionUp,
 		SocketPath:   func(ws ids.WorkspaceID) string { return p.Layout.ShimSocket(string(ws)) },
 		StoreSocket:  p.Opts.storeSocket,
 		NodeBin:      p.Opts.node,
@@ -573,6 +574,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Client:         fleet.Sender,
 		Revive:         fleet.Start,
 		Watcher:        fleet.Watcher,
+		SessionStarted: fleet.Serving,
 		ColdGate:       fleet.ColdGateDetail,
 		DrainRefusals:  refusalNoter{ref: &drainController},
 		// A held-prompt edit is state on the host view; the server exists only

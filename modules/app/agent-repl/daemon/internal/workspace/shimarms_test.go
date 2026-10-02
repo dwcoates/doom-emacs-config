@@ -7,6 +7,8 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	shimv1 "agentrepl/proto/shim/v1"
+
+	"claude-repld/internal/promptqueue"
 )
 
 func TestUpdateAgentArmNamesEveryLandedKind(t *testing.T) {
@@ -335,6 +337,29 @@ func TestGoneFromTheSweep(t *testing.T) {
 			// Assert.
 			if got != tc.want {
 				t.Fatalf("GoneFromTheSweep(%q) = %v, want %v", tc.arm, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAStartTurnNoSessionRefusalMatchesTheQueuesReconnectSentinel(t *testing.T) {
+	tests := []struct {
+		name    string
+		refusal *ShimRefusal
+		want    bool
+	}{
+		{"StartTurn no_session", &ShimRefusal{Verb: "StartTurn", Arm: ArmShimNoSession}, true},
+		{"StartTurn query_dead", &ShimRefusal{Verb: "StartTurn", Arm: "query_dead"}, false},
+		{"SetSessionModel no_session", &ShimRefusal{Verb: "SetSessionModel", Arm: ArmShimNoSession}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange in the table. Act.
+			got := errors.Is(fmt.Errorf("deliver: %w", tt.refusal), promptqueue.ErrShimHasNoSession)
+
+			// Assert.
+			if got != tt.want {
+				t.Fatalf("errors.Is(..., ErrShimHasNoSession) = %v, want %v", got, tt.want)
 			}
 		})
 	}

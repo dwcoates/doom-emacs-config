@@ -663,6 +663,7 @@ func (f *Fleet) Resume(ctx context.Context, ws ids.WorkspaceID, c shimclient.Cli
 	log.Info(opFleetRollout, "the session is up on the new shim", dlog.Context{
 		"fresh": src.Fresh, "vendor_session_id": started.GetVendorSessionId(), "shim_pid": c.PID(),
 	})
+	f.deps.SessionsUp(ws)
 	return rollout.Resumed{}, nil
 }
 
