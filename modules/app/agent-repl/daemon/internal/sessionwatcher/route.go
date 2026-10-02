@@ -291,7 +291,7 @@ func (w *watcher) routeOpeningPageLocked(a *agentWatch, page *conversationv1.His
 	if a.id == nil {
 		// THE MAIN WATCH'S OWN ROWS NAME THE MAIN AGENT for the views, before
 		// the page that needs it is replayed. See nameMainForViewsLocked.
-		if named := pageAgent(page); named != nil {
+		if named := PageAgent(page); named != nil {
 			w.nameMainForViewsLocked(named, "main_watch_page", false)
 		}
 		for _, entry := range page.GetEntries() {
@@ -1879,9 +1879,9 @@ func (w *watcher) isMainAgent(agent *conversationv1.AgentId) bool {
 	return w.mainAgent != nil && agent.GetValue() != "" && agent.GetValue() == w.mainAgent.GetValue()
 }
 
-// pageAgent answers the agent the first row of a page that names one states:
+// PageAgent answers the agent the first row of a page that names one states:
 // a prompt's recipient or a frame's own agent.
-func pageAgent(page *conversationv1.HistoryPage) *conversationv1.AgentId {
+func PageAgent(page *conversationv1.HistoryPage) *conversationv1.AgentId {
 	for _, entry := range page.GetEntries() {
 		if agent := entry.GetEntry().GetUserPrompt().GetAgent(); agent.GetValue() != "" {
 			return agent

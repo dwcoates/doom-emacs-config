@@ -32,7 +32,7 @@ func (w *watcher) NoteHistoryLoaded(agent *conversationv1.AgentId, page *convers
 	}
 	if agent == nil {
 		w.knowPagePromptsLocked(page)
-		if named := pageAgent(page); named != nil {
+		if named := PageAgent(page); named != nil {
 			w.nameMainForViewsLocked(named, "history_load", false)
 		}
 		for _, entry := range entries {
