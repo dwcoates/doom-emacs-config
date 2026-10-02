@@ -27,12 +27,15 @@ import { SetPermissionModeResponseSchema } from "../../../proto/gen/ts/agentrepl
 import { pressurePercentColor } from "../../src/pressure-color.js";
 import { cascadedValue, installStylesheet } from "../stylesheet.js";
 import { bootColdOnce, chipFailureText, startHarness, type Harness } from "./harness";
-import { MODEL_PLACEHOLDER } from "../../src/topbar/model";
+import { MODEL_PLACEHOLDER, MODEL_TOOLTIP } from "../../src/topbar/model";
+import { EFFORT_TOOLTIP } from "../../src/topbar/effort";
+import { AgentEffortLevel } from "../../../proto/gen/ts/conversation/v1/api_pb";
 import { isKnownTone, RENDER_COLORS } from "./vocab";
 import {
   ACCOUNT_CONFIG_DIR,
   OTHER_ACCOUNT_CONFIG_DIR,
   LIVE_DEFAULT_MODE,
+  EFFORT_LEVELS,
   PERMISSION_MODES,
   TOPBAR_ACCOUNT_ARMS,
   TOPBAR_WARNING_ARMS,
@@ -390,6 +393,97 @@ describe("the model selector", () => {
     await harness.click(".topbar-model");
     // Assert
     expect(harness.$('.topbar-reveal[data-reveal="model"]')).not.toBeNull();
+  });
+});
+
+describe("the effort selector", () => {
+  it("is drawn between the model selector and the permission-mode picker", async () => {
+    // Arrange / Act
+    await withTopbar({ effort: "medium" });
+    // Assert
+    const right = [...(harness.$(".topbar-right")?.children ?? [])].map((el) => el.className.split(" ")[0]);
+    const at = right.indexOf("topbar-model");
+    expect(right.slice(at, at + 3)).toEqual(["topbar-model", "topbar-effort", "topbar-mode"]);
+  });
+
+  it("draws the level in force by its display name", async () => {
+    // Arrange / Act
+    await withTopbar({ effort: "medium" });
+    // Assert
+    expect(harness.text(".topbar-effort-button")).toBe("medium");
+  });
+
+  it("lists exactly the levels the view carries", async () => {
+    // Arrange
+    await withTopbar({ effort: "medium" });
+    // Act
+    await harness.click(".topbar-effort");
+    // Assert
+    expect(harness.$$("[data-effort-option]").map((el) => el.textContent)).toEqual(
+      EFFORT_LEVELS.map((option) => option.displayName),
+    );
+  });
+
+  it("calls SetEffort echoing the option's own level", async () => {
+    // Arrange
+    await withTopbar({ effort: "medium" });
+    await harness.click(".topbar-effort");
+    // Act
+    await harness.click('[data-effort-option="HIGH"]');
+    // Assert
+    const [request] = harness.fake.calls<{ effort: AgentEffortLevel }>("setEffort");
+    expect(request.effort).toBe(AgentEffortLevel.HIGH);
+  });
+
+  it("puts no row in the feed for a pick", async () => {
+    // Arrange
+    await withTopbar({ effort: "medium" });
+    const before = harness.$$("[data-feed-row]").length;
+    await harness.click(".topbar-effort");
+    // Act
+    await harness.click('[data-effort-option="HIGH"]');
+    // Assert
+    expect(harness.$$("[data-feed-row]").length).toBe(before);
+  });
+
+  it("carries the refused arm at the selector", async () => {
+    // Arrange
+    await withTopbar({ effort: "medium" });
+    harness.fake.refuse("setEffort", "notSupported");
+    await harness.click(".topbar-effort");
+    // Act
+    await harness.click('[data-effort-option="HIGH"]');
+    // Assert
+    expect(harness.$(".topbar-effort .refusal")?.dataset.arm).toBe("notSupported");
+  });
+
+  it("draws a dash with no dropdown for a model that takes no level", async () => {
+    // Arrange
+    await withTopbar({ effort: "unsupported" });
+    // Act
+    await harness.click(".topbar-effort");
+    // Assert
+    expect([harness.text("[data-effort-unsupported]"), harness.$('.topbar-reveal[data-reveal="effort"]')]).toEqual([
+      "—",
+      null,
+    ]);
+  });
+
+  it("draws the no-session dash when the view carries no selector", async () => {
+    // Arrange / Act
+    await withTopbar({});
+    // Assert
+    expect(harness.$('[data-no-session="effort"]')).not.toBeNull();
+  });
+
+  it("carries the owner's hover copy on both selectors", async () => {
+    // Arrange / Act
+    await withTopbar({ effort: "medium" });
+    // Assert
+    expect([harness.$(".topbar-model")?.title, harness.$(".topbar-effort")?.title]).toEqual([
+      MODEL_TOOLTIP,
+      EFFORT_TOOLTIP,
+    ]);
   });
 });
 

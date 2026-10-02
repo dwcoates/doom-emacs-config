@@ -98,3 +98,16 @@ you are replying to. Sending ends the selection.
   - The first prompt of a conversation cannot be rolled back. `/clear` starts over.
   - If anything changed between planning the rollback and confirming it (a prompt was sent or queued, a turn started or ended), the rollback is refused and nothing happens. Press the key again.
   - If the vendor refuses to cut the conversation, nothing is rolled back and its reason is shown.
+
+## Changing the reasoning effort
+
+The top bar's effort selector sits between the model selector and the permission-mode picker.
+
+- **It shows the effort level the session runs at.**
+  - Before you pick one, that is the level your account's Claude `settings.json` persists for the session's model.
+  - When that file names no level, the selector shows a dash, because the vendor's own default is not stated anywhere the editor can read.
+- **Clicking it lists the levels the session's model accepts; clicking a level switches to it.**
+  - The new level applies from the next turn on and holds for the rest of the session in this workspace, across hibernation.
+  - Nothing is added to the feed for the switch.
+  - Switching causes token cache misses, as switching the model does; both selectors say so on hover.
+- **A model that takes no effort level shows a dash and offers no list.**
