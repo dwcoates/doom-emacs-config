@@ -53,6 +53,10 @@ interface Harness {
   /** What `SessionContext.adoptedTurn()` answers: a turn the vendor started beside the slot. */
   adopted: OpenTurn | undefined;
   identity: SessionIdentity | undefined;
+  /** What `SessionContext.persistedAgent()` answers: the workspace's persisted main agent. */
+  persisted: conversationv1.AgentId | undefined;
+  /** When set, `SessionContext.persistedAgent()` rejects with it, as an unreadable record does. */
+  persistedRejects: Error | undefined;
   submitRejects: Error | undefined;
   /** Every prompt sent to join the running turn, with the turn it joins. */
   readonly joins: { prompt: conversationv1.AgentPrompt; turn: string; into: string }[];
@@ -124,6 +128,8 @@ async function harness(persistence: RecordingPersistence = new RecordingPersiste
     open: undefined,
     adopted: undefined,
     identity,
+    persisted: undefined,
+    persistedRejects: undefined,
     submitRejects: undefined,
     joins: [],
     joining: undefined,
@@ -148,6 +154,8 @@ async function harness(persistence: RecordingPersistence = new RecordingPersiste
     gate,
     live,
     identity: () => state.identity,
+    persistedAgent: () =>
+      state.persistedRejects !== undefined ? Promise.reject(state.persistedRejects) : Promise.resolve(state.persisted),
     query: () => (state.queryDead ? undefined : query),
     nowMs: () => 1,
     openTurn: () => state.open,
@@ -3591,6 +3599,84 @@ describe("WatchAgent's non-persistence failures", () => {
         }
       })(),
     ).rejects.toBe("the store threw a string");
+  });
+});
+
+describe("ReadHistory before a session is up", () => {
+  it("serves the workspace's persisted book's newest page", async () => {
+    // Arrange.
+    const h = await harness();
+    h.identity = undefined;
+    h.persisted = create(conversationv1.AgentIdSchema, { value: "persisted-agent" });
+    h.persistence.page = create(conversationv1.HistoryPageSchema, {
+      entries: [create(conversationv1.HistoryEntryAtSchema, {})],
+      boundary: { case: "floor", value: create(conversationv1.HistoryFloorSchema, {}) },
+    });
+
+    // Act.
+    const response = await h.turns.readHistory(
+      create(shimv1.ReadHistoryRequestSchema, {
+        position: { case: "first", value: create(shimv1.ReadHistoryFirstSchema, {}) },
+      }),
+    );
+
+    // Assert.
+    expect(response.result.case).toBe("success");
+    expect(h.persistence.firstPageAgents).toEqual(["persisted-agent"]);
+  });
+
+  it("reads an older page of the persisted book", async () => {
+    // Arrange.
+    const h = await harness();
+    h.identity = undefined;
+    h.persisted = create(conversationv1.AgentIdSchema, { value: "persisted-agent" });
+
+    // Act.
+    const response = await h.turns.readHistory(
+      create(shimv1.ReadHistoryRequestSchema, {
+        position: {
+          case: "after",
+          value: create(conversationv1.HistoryPointerSchema, { value: "p-1" }),
+        },
+      }),
+    );
+
+    // Assert.
+    expect(response.result.case).toBe("success");
+    expect(h.persistence.olderPageAfter).toEqual(["p-1"]);
+  });
+
+  it("prefers the settled session's identity over the persisted one", async () => {
+    // Arrange.
+    const h = await harness();
+    h.persisted = create(conversationv1.AgentIdSchema, { value: "persisted-agent" });
+
+    // Act.
+    await h.turns.readHistory(
+      create(shimv1.ReadHistoryRequestSchema, {
+        position: { case: "first", value: create(shimv1.ReadHistoryFirstSchema, {}) },
+      }),
+    );
+
+    // Assert.
+    expect(h.persistence.firstPageAgents).toEqual([h.identity?.agentId.value]);
+  });
+
+  it("rejects loudly when the persisted record cannot be read", async () => {
+    // Arrange.
+    const h = await harness();
+    h.identity = undefined;
+    h.persistedRejects = new Error("agent-id.json holds no original_vendor_session_id");
+
+    // Act.
+    const reading = h.turns.readHistory(
+      create(shimv1.ReadHistoryRequestSchema, {
+        position: { case: "first", value: create(shimv1.ReadHistoryFirstSchema, {}) },
+      }),
+    );
+
+    // Assert.
+    await expect(reading).rejects.toThrow("agent-id.json holds no original_vendor_session_id");
   });
 });
 
