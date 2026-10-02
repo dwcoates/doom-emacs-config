@@ -21,10 +21,9 @@ import path from "node:path";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { webkit, type Browser, type Page } from "playwright-core";
-import { build, type Rollup } from "vite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { protobufRuntimeAliases } from "../../protobuf-runtime-aliases";
 import type { AnchoringPage, StepResult } from "./anchoring-page";
+import { bundlePage } from "./bundle";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -41,24 +40,6 @@ interface PassDrift {
   steps: number;
   total: number;
   max: number;
-}
-
-/** Bundle the page into ONE classic script, so it runs from `setContent` with no server. */
-async function bundlePage(): Promise<string> {
-  const out = await build({
-    configFile: false,
-    logLevel: "silent",
-    resolve: { alias: protobufRuntimeAliases },
-    build: {
-      write: false,
-      minify: false,
-      lib: { entry: path.join(here, "anchoring-page.ts"), formats: ["iife"], name: "anchoringPage" },
-    },
-  });
-  const outputs = (Array.isArray(out) ? out : [out]) as Rollup.RollupOutput[];
-  const chunk = outputs.flatMap((o) => o.output).find((o) => o.type === "chunk");
-  if (chunk === undefined || chunk.type !== "chunk") throw new Error("the page bundle has no script chunk");
-  return chunk.code;
 }
 
 /** Scroll the page's feed up STEPS times from its tail, summing what drifted. */
@@ -88,7 +69,7 @@ describe("the feed's scroll anchoring in WebKit", () => {
 
   beforeAll(async () => {
     const [script, css] = await Promise.all([
-      bundlePage(),
+      bundlePage(path.join(here, "anchoring-page.ts"), "anchoringPage"),
       readFile(path.join(here, "../../src/styles.css"), "utf8"),
     ]);
     browser = await webkit.launch();
