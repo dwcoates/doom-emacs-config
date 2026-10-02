@@ -7,8 +7,9 @@
  *     two pushes: `transferred{address}` says this daemon has released the
  *     workspace to a successor, and `session_identity` names the session this
  *     page's forwarded log records belong to.
- *   - `WatchDaemon` is daemon-scoped: the standing drain schedule and the
- *     graceful-rollout shutdown announcement. R3 — every webview holds its
+ *   - `WatchDaemon` is daemon-scoped: the standing drain schedule, the
+ *     graceful-rollout shutdown announcement, and the news digest standing
+ *     (handed to the overlay that draws it). R3 — every webview holds its
  *     OWN subscription, rather than learning about a restart second-hand.
  *
  * THE WEBAPP DOES NOT REDIAL (project lead, final). A successor on a different
@@ -64,6 +65,7 @@ import {
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_web_workspace_pb";
 import type { DrainReason } from "../../../proto/gen/ts/agentrepl/v1/drain_reason_pb";
 import { controlPlaneFailed } from "../failure/sink.js";
+import type { NewsDigestHandle } from "../news-digest/news-digest.js";
 import { formatElapsed } from "../duration.js";
 import { bindLogContext, log } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
@@ -82,6 +84,8 @@ export interface Handle {
 export interface LifecycleDeps {
   /** The page-wide banner host (`[data-component="drain-banner"]`). */
   drainBannerHost: HTMLElement;
+  /** The news digest overlay the daemon stream's `news_digest` standing is drawn on. */
+  newsDigest: Pick<NewsDigestHandle, "apply">;
 }
 
 /** The adoption retry shape, injected by tests running on fake timers. */
@@ -214,6 +218,9 @@ export function startLifecycle(ctx: AppContext, deps: LifecycleDeps): Handle {
           return;
         case "shutdownAnnounced":
           announceShutdown(ctx, banner, push.value);
+          return;
+        case "newsDigest":
+          deps.newsDigest.apply(push.value);
           return;
         default: {
           const other: { case: string } = push;
