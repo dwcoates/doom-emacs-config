@@ -39,7 +39,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file frontend/v1/daemon_hold.proto.
  */
 export const file_frontend_v1_daemon_hold: GenFile = /*@__PURE__*/
-  fileDesc("Ch1mcm9udGVuZC92MS9kYWVtb25faG9sZC5wcm90bxILZnJvbnRlbmQudjEiPAoORGFlbW9uSG9sZFRyYXkSKgoFaXRlbXMYAiADKAsyGy5mcm9udGVuZC52MS5EYWVtb25Ib2xkSXRlbSJsCg5EYWVtb25Ib2xkSXRlbRIpCgZwcm9tcHQYASABKAsyFy5mcm9udGVuZC52MS5IZWxkUHJvbXB0SAASJwoFb2ZmZXIYAiABKAsyFi5mcm9udGVuZC52MS5IZWxkT2ZmZXJIAEIGCgRpdGVtIoMJCgpIZWxkUHJvbXB0EiUKBHR1cm4YASABKAsyFy5jb252ZXJzYXRpb24udjEuVHVybklkEicKBHNhaWQYAiABKAsyGS5jb252ZXJzYXRpb24udjEuVXNlclNhaWQSMgoJcXVldWVkX2F0GAMgASgLMh8uZnJvbnRlbmQudjEuSGVsZFByb21wdFF1ZXVlZEF0EjkKC2NsYXNzaWZ5aW5nGAQgASgLMiIuZnJvbnRlbmQudjEuSGVsZFByb21wdENsYXNzaWZ5aW5nSAASNQoJaW50ZXJqZWN0GAUgASgLMiAuZnJvbnRlbmQudjEuSGVsZFByb21wdEludGVyamVjdEgAEkIKEWhvbGRfZm9yX3R1cm5fZW5kGAYgASgLMiUuZnJvbnRlbmQudjEuSGVsZFByb21wdEhvbGRGb3JUdXJuRW5kSAASPwoPYWZ0ZXJfdG9vbF9jYWxsGBEgASgLMiQuZnJvbnRlbmQudjEuSGVsZFByb21wdEFmdGVyVG9vbENhbGxIABJKChR1bmludGVycnVwdGlibGVfdHVybhgHIAEoCzIqLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRVbmludGVycnVwdGlibGVUdXJuSAASSgoUY2xhc3NpZmljYXRpb25fZXJyb3IYCCABKAsyKi5mcm9udGVuZC52MS5IZWxkUHJvbXB0Q2xhc3NpZmljYXRpb25FcnJvckgAEjgKC2RhZW1vbl9oZWxkGBMgASgLMiEuZnJvbnRlbmQudjEuSGVsZFByb21wdERhZW1vbkhlbGRIABI3CghzaHV0ZG93bhgJIAEoCzIjLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRTaHV0ZG93bkhvbGRIARJGChBzZXNzaW9uX3N0YXJ0aW5nGAsgASgLMiouZnJvbnRlbmQudjEuSGVsZFByb21wdFNlc3Npb25TdGFydGluZ0hvbGRIARJACg1idWlsZF9yZWZyZXNoGAwgASgLMicuZnJvbnRlbmQudjEuSGVsZFByb21wdEJ1aWxkUmVmcmVzaEhvbGRIARIxCgVtZXJnZRgUIAEoCzIgLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRNZXJnZUhvbGRIARIvCgdlZGl0aW5nGA0gASgLMh4uZnJvbnRlbmQudjEuSGVsZFByb21wdEVkaXRpbmcSLAoGYmFkZ2VzGA4gAygLMhwuZnJvbnRlbmQudjEuSGVsZFByb21wdEJhZGdlEjMKCWNvYWxlc2NlZBgPIAEoCzIgLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRDb2FsZXNjZWQSKAoDYWN0GBAgASgLMhsuZnJvbnRlbmQudjEuSGVsZFNlc3Npb25BY3QSOQoKZm9sZF9hYm92ZRgSIAEoCzIgLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRGb2xkQWJvdmVIAogBAUIQCg5jbGFzc2lmaWNhdGlvbkIGCgRob2xkQg0KC19mb2xkX2Fib3ZlSgQIChALUgprZWVwX2FsaXZlIj0KE0hlbGRQcm9tcHRGb2xkQWJvdmUSJgoFYWJvdmUYASABKAsyFy5jb252ZXJzYXRpb24udjEuVHVybklkIhUKE0hlbGRQcm9tcHRDb2FsZXNjZWQikAEKDkhlbGRTZXNzaW9uQWN0EjEKBW1vZGVsGAEgASgLMiAuZnJvbnRlbmQudjEuSGVsZFNlc3Npb25BY3RNb2RlbEgAEkQKD3Blcm1pc3Npb25fbW9kZRgCIAEoCzIpLmZyb250ZW5kLnYxLkhlbGRTZXNzaW9uQWN0UGVybWlzc2lvbk1vZGVIAEIFCgNhY3QiJAoTSGVsZFNlc3Npb25BY3RNb2RlbBINCgVtb2RlbBgBIAEoCSIsChxIZWxkU2Vzc2lvbkFjdFBlcm1pc3Npb25Nb2RlEgwKBG1vZGUYASABKAkiQAoPSGVsZFByb21wdEJhZGdlEg0KBWxhYmVsGAEgASgJEhMKBmRldGFpbBgCIAEoCUgAiAEBQgkKB19kZXRhaWwiEwoRSGVsZFByb21wdEVkaXRpbmciIwoSSGVsZFByb21wdFF1ZXVlZEF0Eg0KBWF0X21zGAEgASgDIhcKFUhlbGRQcm9tcHRDbGFzc2lmeWluZyIoChNIZWxkUHJvbXB0SW50ZXJqZWN0EhEKCXJhdGlvbmFsZRgBIAEoCSIsChdIZWxkUHJvbXB0QWZ0ZXJUb29sQ2FsbBIRCglyYXRpb25hbGUYASABKAkiYAoYSGVsZFByb21wdEhvbGRGb3JUdXJuRW5kEhEKCXJhdGlvbmFsZRgBIAEoCRIxCghhY2NlcHRlZBgCIAEoCzIfLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRBY2NlcHRlZCImChJIZWxkUHJvbXB0QWNjZXB0ZWQSEAoIYWNjZXB0ZWQYASABKAgiUQodSGVsZFByb21wdFVuaW50ZXJydXB0aWJsZVR1cm4SMAoHY29tbWFuZBgBIAEoDjIfLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uQ29tbWFuZCIvCh1IZWxkUHJvbXB0Q2xhc3NpZmljYXRpb25FcnJvchIOCgZkZXRhaWwYASABKAkiLQoWSGVsZFByb21wdFNodXRkb3duSG9sZBITCgtzY2hlZHVsZV9pZBgBIAEoCSIfCh1IZWxkUHJvbXB0U2Vzc2lvblN0YXJ0aW5nSG9sZCIVChNIZWxkUHJvbXB0TWVyZ2VIb2xkIhYKFEhlbGRQcm9tcHREYWVtb25IZWxkIhwKGkhlbGRQcm9tcHRCdWlsZFJlZnJlc2hIb2xkIlEKCUhlbGRPZmZlchI7Cg1tZXJnZV9kZXF1ZXVlGAEgASgLMiIuZnJvbnRlbmQudjEuSGVsZE9mZmVyTWVyZ2VEZXF1ZXVlSABCBwoFb2ZmZXIiSQoVSGVsZE9mZmVyTWVyZ2VEZXF1ZXVlEjAKCGhlYWRsaW5lGAEgASgLMh4uZnJvbnRlbmQudjEuSGVsZE9mZmVySGVhZGxpbmUiIQoRSGVsZE9mZmVySGVhZGxpbmUSDAoEdGV4dBgBIAEoCUIoWiZhZ2VudHJlcGwvcHJvdG8vZnJvbnRlbmQvdjE7ZnJvbnRlbmR2MWIGcHJvdG8z", [file_conversation_v1_slash_command, file_conversation_v1_turn, file_conversation_v1_user]);
+  fileDesc("Ch1mcm9udGVuZC92MS9kYWVtb25faG9sZC5wcm90bxILZnJvbnRlbmQudjEiPAoORGFlbW9uSG9sZFRyYXkSKgoFaXRlbXMYAiADKAsyGy5mcm9udGVuZC52MS5EYWVtb25Ib2xkSXRlbSJsCg5EYWVtb25Ib2xkSXRlbRIpCgZwcm9tcHQYASABKAsyFy5mcm9udGVuZC52MS5IZWxkUHJvbXB0SAASJwoFb2ZmZXIYAiABKAsyFi5mcm9udGVuZC52MS5IZWxkT2ZmZXJIAEIGCgRpdGVtIvYICgpIZWxkUHJvbXB0EiUKBHR1cm4YASABKAsyFy5jb252ZXJzYXRpb24udjEuVHVybklkEicKBHNhaWQYAiABKAsyGS5jb252ZXJzYXRpb24udjEuVXNlclNhaWQSMgoJcXVldWVkX2F0GAMgASgLMh8uZnJvbnRlbmQudjEuSGVsZFByb21wdFF1ZXVlZEF0EjkKC2NsYXNzaWZ5aW5nGAQgASgLMiIuZnJvbnRlbmQudjEuSGVsZFByb21wdENsYXNzaWZ5aW5nSAASNQoJaW50ZXJqZWN0GAUgASgLMiAuZnJvbnRlbmQudjEuSGVsZFByb21wdEludGVyamVjdEgAEkIKEWhvbGRfZm9yX3R1cm5fZW5kGAYgASgLMiUuZnJvbnRlbmQudjEuSGVsZFByb21wdEhvbGRGb3JUdXJuRW5kSAASPwoPYWZ0ZXJfdG9vbF9jYWxsGBEgASgLMiQuZnJvbnRlbmQudjEuSGVsZFByb21wdEFmdGVyVG9vbENhbGxIABJKChR1bmludGVycnVwdGlibGVfdHVybhgHIAEoCzIqLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRVbmludGVycnVwdGlibGVUdXJuSAASSgoUY2xhc3NpZmljYXRpb25fZXJyb3IYCCABKAsyKi5mcm9udGVuZC52MS5IZWxkUHJvbXB0Q2xhc3NpZmljYXRpb25FcnJvckgAEjgKC2RhZW1vbl9oZWxkGBMgASgLMiEuZnJvbnRlbmQudjEuSGVsZFByb21wdERhZW1vbkhlbGRIABI3CghzaHV0ZG93bhgJIAEoCzIjLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRTaHV0ZG93bkhvbGRIARI5CglyZWNvbm5lY3QYCyABKAsyJC5mcm9udGVuZC52MS5IZWxkUHJvbXB0UmVjb25uZWN0SG9sZEgBEkAKDWJ1aWxkX3JlZnJlc2gYDCABKAsyJy5mcm9udGVuZC52MS5IZWxkUHJvbXB0QnVpbGRSZWZyZXNoSG9sZEgBEjEKBW1lcmdlGBQgASgLMiAuZnJvbnRlbmQudjEuSGVsZFByb21wdE1lcmdlSG9sZEgBEi8KB2VkaXRpbmcYDSABKAsyHi5mcm9udGVuZC52MS5IZWxkUHJvbXB0RWRpdGluZxIsCgZiYWRnZXMYDiADKAsyHC5mcm9udGVuZC52MS5IZWxkUHJvbXB0QmFkZ2USMwoJY29hbGVzY2VkGA8gASgLMiAuZnJvbnRlbmQudjEuSGVsZFByb21wdENvYWxlc2NlZBIoCgNhY3QYECABKAsyGy5mcm9udGVuZC52MS5IZWxkU2Vzc2lvbkFjdBI5Cgpmb2xkX2Fib3ZlGBIgASgLMiAuZnJvbnRlbmQudjEuSGVsZFByb21wdEZvbGRBYm92ZUgCiAEBQhAKDmNsYXNzaWZpY2F0aW9uQgYKBGhvbGRCDQoLX2ZvbGRfYWJvdmVKBAgKEAtSCmtlZXBfYWxpdmUiPQoTSGVsZFByb21wdEZvbGRBYm92ZRImCgVhYm92ZRgBIAEoCzIXLmNvbnZlcnNhdGlvbi52MS5UdXJuSWQiFQoTSGVsZFByb21wdENvYWxlc2NlZCKQAQoOSGVsZFNlc3Npb25BY3QSMQoFbW9kZWwYASABKAsyIC5mcm9udGVuZC52MS5IZWxkU2Vzc2lvbkFjdE1vZGVsSAASRAoPcGVybWlzc2lvbl9tb2RlGAIgASgLMikuZnJvbnRlbmQudjEuSGVsZFNlc3Npb25BY3RQZXJtaXNzaW9uTW9kZUgAQgUKA2FjdCIkChNIZWxkU2Vzc2lvbkFjdE1vZGVsEg0KBW1vZGVsGAEgASgJIiwKHEhlbGRTZXNzaW9uQWN0UGVybWlzc2lvbk1vZGUSDAoEbW9kZRgBIAEoCSJACg9IZWxkUHJvbXB0QmFkZ2USDQoFbGFiZWwYASABKAkSEwoGZGV0YWlsGAIgASgJSACIAQFCCQoHX2RldGFpbCITChFIZWxkUHJvbXB0RWRpdGluZyIjChJIZWxkUHJvbXB0UXVldWVkQXQSDQoFYXRfbXMYASABKAMiFwoVSGVsZFByb21wdENsYXNzaWZ5aW5nIigKE0hlbGRQcm9tcHRJbnRlcmplY3QSEQoJcmF0aW9uYWxlGAEgASgJIiwKF0hlbGRQcm9tcHRBZnRlclRvb2xDYWxsEhEKCXJhdGlvbmFsZRgBIAEoCSJgChhIZWxkUHJvbXB0SG9sZEZvclR1cm5FbmQSEQoJcmF0aW9uYWxlGAEgASgJEjEKCGFjY2VwdGVkGAIgASgLMh8uZnJvbnRlbmQudjEuSGVsZFByb21wdEFjY2VwdGVkIiYKEkhlbGRQcm9tcHRBY2NlcHRlZBIQCghhY2NlcHRlZBgBIAEoCCJRCh1IZWxkUHJvbXB0VW5pbnRlcnJ1cHRpYmxlVHVybhIwCgdjb21tYW5kGAEgASgOMh8uY29udmVyc2F0aW9uLnYxLlNlc3Npb25Db21tYW5kIi8KHUhlbGRQcm9tcHRDbGFzc2lmaWNhdGlvbkVycm9yEg4KBmRldGFpbBgBIAEoCSItChZIZWxkUHJvbXB0U2h1dGRvd25Ib2xkEhMKC3NjaGVkdWxlX2lkGAEgASgJIhkKF0hlbGRQcm9tcHRSZWNvbm5lY3RIb2xkIhUKE0hlbGRQcm9tcHRNZXJnZUhvbGQiFgoUSGVsZFByb21wdERhZW1vbkhlbGQiHAoaSGVsZFByb21wdEJ1aWxkUmVmcmVzaEhvbGQiUQoJSGVsZE9mZmVyEjsKDW1lcmdlX2RlcXVldWUYASABKAsyIi5mcm9udGVuZC52MS5IZWxkT2ZmZXJNZXJnZURlcXVldWVIAEIHCgVvZmZlciJJChVIZWxkT2ZmZXJNZXJnZURlcXVldWUSMAoIaGVhZGxpbmUYASABKAsyHi5mcm9udGVuZC52MS5IZWxkT2ZmZXJIZWFkbGluZSIhChFIZWxkT2ZmZXJIZWFkbGluZRIMCgR0ZXh0GAEgASgJQihaJmFnZW50cmVwbC9wcm90by9mcm9udGVuZC92MTtmcm9udGVuZHYxYgZwcm90bzM", [file_conversation_v1_slash_command, file_conversation_v1_turn, file_conversation_v1_user]);
 
 /**
  * The tray, resolved by the daemon and pushed on EVERY change. An empty
@@ -234,7 +234,7 @@ export type HeldPrompt = Message<"frontend.v1.HeldPrompt"> & {
    * WHAT is holding this entry, when something other than a running turn is.
    *
    * An entry is held by at most one thing at a time: a drain lease, a
-   * pending revival, a build refresh and a merge are mutually exclusive
+   * pending reconnect, a build refresh and a merge are mutually exclusive
    * session conditions, and an entry held by two of them at once
    * would have two different sets of exits and two different states to
    * render. Stating them as arms makes that impossible to express rather than
@@ -256,12 +256,13 @@ export type HeldPrompt = Message<"frontend.v1.HeldPrompt"> & {
     case: "shutdown";
   } | {
     /**
-     * The session is starting up and cannot accept a prompt until it is up.
+     * The session is not up — coming up, being retried, or down until a
+     * restart — and the prompt waits for it to reconnect.
      *
-     * @generated from field: frontend.v1.HeldPromptSessionStartingHold session_starting = 11;
+     * @generated from field: frontend.v1.HeldPromptReconnectHold reconnect = 11;
      */
-    value: HeldPromptSessionStartingHold;
-    case: "sessionStarting";
+    value: HeldPromptReconnectHold;
+    case: "reconnect";
   } | {
     /**
      * The session's build is being refreshed onto a newer one before it takes
@@ -751,28 +752,37 @@ export const HeldPromptShutdownHoldSchema: GenMessage<HeldPromptShutdownHold> = 
   messageDesc(file_frontend_v1_daemon_hold, 18);
 
 /**
- * Held because the session is still coming up — a cold resume in progress, a
- * compaction the user chose at the cold gate still landing. The classifier
- * NEVER runs on such an entry and there is NO force-through: the exits are
- * delivery once the session is up, a loud drop when the bring-up fails (a
- * session that never comes up can never deliver, so a retained entry would
- * be a leak, not a delay), or cancel.
+ * Held because the workspace's session is NOT UP and the prompt waits for it to
+ * reconnect: a revival or cold resume in progress, a compaction the user chose
+ * at the cold gate still landing, a vendor start being retried, or a session
+ * whose start failed outright and waits for the user's restart. The card's
+ * badge reads "after reconnect".
+ *
+ * A FAILED BRING-UP NEVER DROPS THESE ENTRIES. The exits are delivery the
+ * moment a session comes up on the workspace (however it comes up — a retry
+ * that succeeds, a restart, a revival), or the user's cancel. The classifier
+ * NEVER runs on such an entry and there is NO force-through: there is no
+ * session to force a prompt into.
+ *
+ * A prompt that reaches a shim holding no session — the daemon believed the
+ * session was up and the shim answered `no_session` — lands here too, rather
+ * than being drawn and lost.
  *
  * DELIBERATELY EMPTY: the arm's presence is the whole fact it carries. The
- * bring-up is a WORKSPACE-level event and the entry already rides its
+ * reconnect is a WORKSPACE-level event and the entry already rides its
  * workspace's tray, so naming a session here would join the entry to nothing
  * the client could not already reach.
  *
- * @generated from message frontend.v1.HeldPromptSessionStartingHold
+ * @generated from message frontend.v1.HeldPromptReconnectHold
  */
-export type HeldPromptSessionStartingHold = Message<"frontend.v1.HeldPromptSessionStartingHold"> & {
+export type HeldPromptReconnectHold = Message<"frontend.v1.HeldPromptReconnectHold"> & {
 };
 
 /**
- * Describes the message frontend.v1.HeldPromptSessionStartingHold.
- * Use `create(HeldPromptSessionStartingHoldSchema)` to create a new message.
+ * Describes the message frontend.v1.HeldPromptReconnectHold.
+ * Use `create(HeldPromptReconnectHoldSchema)` to create a new message.
  */
-export const HeldPromptSessionStartingHoldSchema: GenMessage<HeldPromptSessionStartingHold> = /*@__PURE__*/
+export const HeldPromptReconnectHoldSchema: GenMessage<HeldPromptReconnectHold> = /*@__PURE__*/
   messageDesc(file_frontend_v1_daemon_hold, 19);
 
 /**

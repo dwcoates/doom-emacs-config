@@ -182,6 +182,9 @@ message FooterStrip {
 //   |              |                   | relaunch_resume_failed,            |
 //   |              |                   | adoption_window_expired (session), |
 //   |              |                   | cold_gate_reopen_failed            |
+//   | disconnected | vendor_retry      | vendor_start_retrying              |
+//   | disconnected | vendor_rejection  | vendor_start_rejected              |
+//   | disconnected | vendor_failed     | vendor_start_failed                |
 //   | disconnected | dead              | shim_died, bounce_died,            |
 //   |              |                   | session_absent                     |
 //   | disconnected | severed           | link_severed, watch_open_refused   |
@@ -1140,10 +1143,11 @@ message FooterStatusActivityStartFailed {
   // code and the last line of the stderr tail, or the adoption refusal's own
   // text. Drawn verbatim.
   string detail = 1;
-  // How many held prompts this bring-up failure dropped; ZERO when it dropped
-  // none. A session that never came up can never deliver a held prompt, so the
-  // hold is retired rather than left standing, and the count is what says so.
-  uint32 dropped_prompts = 2;
+  // Tag 2 (`dropped_prompts`) is RETIRED: a failed bring-up no longer drops
+  // the prompts held for it. They stay held, under the reconnect hold, until a
+  // session comes up.
+  reserved 2;
+  reserved "dropped_prompts";
 }
 
 // A STANDING DAEMON FAULT, as one drawn line.
@@ -1283,8 +1287,21 @@ message FooterStatusDisconnected {
     FooterSubStatusDisconnectedSevered severed = 3;
     // The shim process is gone.
     FooterSubStatusDisconnectedDead dead = 4;
-    // The shim failed to start.
+    // The shim PROCESS failed to start, or a bring-up failed for a reason
+    // that is not the vendor's. A vendor that did not start inside a healthy
+    // shim is one of the three vendor arms below, never this one.
     FooterSubStatusDisconnectedStartFailed start_failed = 5;
+    // The vendor did not start and the daemon is retrying it: from the first
+    // failed attempt until the last. The activity line names the latest
+    // attempt's failure.
+    FooterSubStatusDisconnectedVendorRetry vendor_retry = 7;
+    // The vendor refused the start for a reason retrying cannot fix; nothing
+    // retries until the user restarts the workspace.
+    FooterSubStatusDisconnectedVendorRejection vendor_rejection = 8;
+    // The vendor kept failing to start for the whole retry window, so the
+    // daemon stopped retrying; prompts stay held until a restart brings the
+    // session up.
+    FooterSubStatusDisconnectedVendorFailed vendor_failed = 9;
   }
   // The activity cell. ALWAYS SET: the enduring tier guarantees the cell has
   // something to draw under every status.
@@ -1300,6 +1317,12 @@ message FooterSubStatusDisconnectedSevered {}
 message FooterSubStatusDisconnectedDead {}
 // The shim failed to start.
 message FooterSubStatusDisconnectedStartFailed {}
+// The vendor did not start and is being retried.
+message FooterSubStatusDisconnectedVendorRetry {}
+// The vendor refused the start; nothing retries.
+message FooterSubStatusDisconnectedVendorRejection {}
+// The vendor failed to start for the whole retry window.
+message FooterSubStatusDisconnectedVendorFailed {}
 // The activity cell while disconnected: the salient line, or the transient
 // over the enduring line. A step with no line of its own (starting, a
 // severed link being retried with no fault yet) draws unpinned.
@@ -1344,11 +1367,28 @@ message FooterStatusDisconnectedSalient {
     // or a switch to another session. STATUS-INDEPENDENT: every status arm's
     // salient oneof carries it.
     FooterStatusActivityContextBudget context_budget = 7;
+    // WHY THE VENDOR IS NOT UP, standing while one of the three vendor
+    // substatuses stands: the latest retried failure, the rejection, or the
+    // exhausted window with the way out. It ranks with `start_failed`, ahead
+    // of every other salient kind, because it explains the step.
+    FooterStatusActivityVendorStart vendor_start = 8;
   }
   // Tag 5 (`rate_limit`) is RETIRED: the enduring usage line carries
   // the vendor's allowance figures (owner ruling, 2026-10-01).
   reserved 5;
   reserved "rate_limit";
+}
+
+// The vendor-start line, composed by the daemon out of the standing
+// vendor-start fault and drawn verbatim. One leaf serves all three vendor
+// substatuses because each is one sentence the substatus beside it already
+// classifies:
+//   vendor_retry      "Claude SDK did not start (attempt 3): <cause> · retrying"
+//   vendor_rejection  "Claude SDK refused to start: <cause> · restart: SPC o C-c"
+//   vendor_failed     "Claude SDK failed to start · restart: SPC o C-c"
+message FooterStatusActivityVendorStart {
+  // The composed line. Never empty.
+  string text = 1;
 }
 
 // A close was requested and has not completed.

@@ -18,7 +18,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_session_health.proto.
  */
 export const file_agentrepl_v1_endpoint_session_health: GenFile = /*@__PURE__*/
-  fileDesc("CiphZ2VudHJlcGwvdjEvZW5kcG9pbnRfc2Vzc2lvbl9oZWFsdGgucHJvdG8SDGFnZW50cmVwbC52MSJFChRTZXNzaW9uSGVhbHRoUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmIosBChVTZXNzaW9uSGVhbHRoUmVzcG9uc2USNQoHc3VjY2VzcxgBIAEoCzIiLmFnZW50cmVwbC52MS5TZXNzaW9uSGVhbHRoU3VjY2Vzc0gAEjEKBWVycm9yGAIgASgLMiAuYWdlbnRyZXBsLnYxLlNlc3Npb25IZWFsdGhFcnJvckgAQggKBnJlc3VsdCKGAQoUU2Vzc2lvbkhlYWx0aFN1Y2Nlc3MSLwoHaGVhbHRoeRgBIAEoCzIcLmFnZW50cmVwbC52MS5TZXNzaW9uSGVhbHRoeUgAEjMKCXVuaGVhbHRoeRgCIAEoCzIeLmFnZW50cmVwbC52MS5TZXNzaW9uVW5oZWFsdGh5SABCCAoGaGVhbHRoIhAKDlNlc3Npb25IZWFsdGh5Ij4KEFNlc3Npb25VbmhlYWx0aHkSKgoGZmF1bHRzGAEgAygLMhouYWdlbnRyZXBsLnYxLlNlc3Npb25GYXVsdCKNCAoMU2Vzc2lvbkZhdWx0Eg4KBmRldGFpbBgBIAEoCRJGChFzaGltX3N0YXJ0X2ZhaWxlZBgCIAEoCzIpLmFnZW50cmVwbC52MS5TZXNzaW9uRmF1bHRTaGltU3RhcnRGYWlsZWRIABI3CglzaGltX2RpZWQYAyABKAsyIi5hZ2VudHJlcGwudjEuU2Vzc2lvbkZhdWx0U2hpbURpZWRIABI9CgxsaW5rX3NldmVyZWQYBCABKAsyJS5hZ2VudHJlcGwudjEuU2Vzc2lvbkZhdWx0TGlua1NldmVyZWRIABI/Cg1yZXN1bWVfZmFpbGVkGAUgASgLMiYuYWdlbnRyZXBsLnYxLlNlc3Npb25GYXVsdFJlc3VtZUZhaWxlZEgAEjsKC2JvdW5jZV9kaWVkGAYgASgLMiQuYWdlbnRyZXBsLnYxLlNlc3Npb25GYXVsdEJvdW5jZURpZWRIABJBCg5ib3VuY2VfdW5rbm93bhgHIAEoCzInLmFnZW50cmVwbC52MS5TZXNzaW9uRmF1bHRCb3VuY2VVbmtub3duSAASRwoRY2xhc3NpZmllcl9mYWlsZWQYCCABKAsyKi5hZ2VudHJlcGwudjEuU2Vzc2lvbkZhdWx0Q2xhc3NpZmllckZhaWxlZEgAEj8KDXNoaW1fcmVwb3J0ZWQYCSABKAsyJi5hZ2VudHJlcGwudjEuU2Vzc2lvbkZhdWx0U2hpbVJlcG9ydGVkSAASUQoWY29udmVyc2F0aW9uX2FiYW5kb25lZBgKIAEoCzIvLmFnZW50cmVwbC52MS5TZXNzaW9uRmF1bHRDb252ZXJzYXRpb25BYmFuZG9uZWRIABJBCg5zZXNzaW9uX2Fic2VudBgLIAEoCzInLmFnZW50cmVwbC52MS5TZXNzaW9uRmF1bHRTZXNzaW9uQWJzZW50SAASSAoSd2F0Y2hfb3Blbl9yZWZ1c2VkGAwgASgLMiouYWdlbnRyZXBsLnYxLlNlc3Npb25GYXVsdFdhdGNoT3BlblJlZnVzZWRIABJSChdkYWVtb25fc3RhdGVfdW5yZWFkYWJsZRgNIAEoCzIvLmFnZW50cmVwbC52MS5TZXNzaW9uRmF1bHREYWVtb25TdGF0ZVVucmVhZGFibGVIABJSChdhZG9wdGlvbl93aW5kb3dfZXhwaXJlZBgOIAEoCzIvLmFnZW50cmVwbC52MS5TZXNzaW9uRmF1bHRBZG9wdGlvbldpbmRvd0V4cGlyZWRIABJSChdmaW5hbF9hbnN3ZXJfdW5yZXNvbHZlZBgPIAEoCzIvLmFnZW50cmVwbC52MS5TZXNzaW9uRmF1bHRGaW5hbEFuc3dlclVucmVzb2x2ZWRIAEIGCgRraW5kIkUKG1Nlc3Npb25GYXVsdFNoaW1TdGFydEZhaWxlZBIRCglleGl0X2NvZGUYASABKAUSEwoLc3RkZXJyX3RhaWwYAiABKAkiKQoUU2Vzc2lvbkZhdWx0U2hpbURpZWQSEQoJZXhpdF9jb2RlGAEgASgFIhkKF1Nlc3Npb25GYXVsdExpbmtTZXZlcmVkIikKGFNlc3Npb25GYXVsdFJlc3VtZUZhaWxlZBINCgVjYXVzZRgBIAEoCSIYChZTZXNzaW9uRmF1bHRCb3VuY2VEaWVkIhsKGVNlc3Npb25GYXVsdEJvdW5jZVVua25vd24iLgocU2Vzc2lvbkZhdWx0Q2xhc3NpZmllckZhaWxlZBIOCgZkZXRhaWwYASABKAkiOwoYU2Vzc2lvbkZhdWx0U2hpbVJlcG9ydGVkEhEKCWNvbXBvbmVudBgBIAEoCRIMCgRraW5kGAIgASgJIj4KIVNlc3Npb25GYXVsdENvbnZlcnNhdGlvbkFiYW5kb25lZBIZChF2ZW5kb3Jfc2Vzc2lvbl9pZBgBIAEoCSIbChlTZXNzaW9uRmF1bHRTZXNzaW9uQWJzZW50IkEKHFNlc3Npb25GYXVsdFdhdGNoT3BlblJlZnVzZWQSEQoJb3BlcmF0aW9uGAEgASgJEg4KBmhhbmRsZRgCIAEoCSIyCiFTZXNzaW9uRmF1bHREYWVtb25TdGF0ZVVucmVhZGFibGUSDQoFY2F1c2UYASABKAkiPAohU2Vzc2lvbkZhdWx0QWRvcHRpb25XaW5kb3dFeHBpcmVkEhcKD2Fkb3B0aW9uX3dpbmRvdxgBIAEoCSJMCiFTZXNzaW9uRmF1bHRGaW5hbEFuc3dlclVucmVzb2x2ZWQSDAoEdHVybhgBIAEoCRIMCgR1bml0GAIgASgJEgsKA3doeRgDIAEoCSLJAgoSU2Vzc2lvbkhlYWx0aEVycm9yEkgKEXVua25vd25fd29ya3NwYWNlGAEgASgLMisuYWdlbnRyZXBsLnYxLlNlc3Npb25IZWFsdGhVbmtub3duV29ya3NwYWNlSAASUQoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgCIAEoCzIvLmFnZW50cmVwbC52MS5TZXNzaW9uSGVhbHRoV29ya3NwYWNlUmVmTWlzbWF0Y2hIABJIChF0cmFuc2ZlcnJpbmdfYXdheRgDIAEoCzIrLmFnZW50cmVwbC52MS5TZXNzaW9uSGVhbHRoVHJhbnNmZXJyaW5nQXdheUgAEkMKD25vdF95ZXRfYWRvcHRlZBgEIAEoCzIoLmFnZW50cmVwbC52MS5TZXNzaW9uSGVhbHRoTm90WWV0QWRvcHRlZEgAQgcKBWNhdXNlIh8KHVNlc3Npb25IZWFsdGhVbmtub3duV29ya3NwYWNlIjkKIVNlc3Npb25IZWFsdGhXb3Jrc3BhY2VSZWZNaXNtYXRjaBIUCgxyZWdpc3RyeV9kaXIYASABKAkiMAodU2Vzc2lvbkhlYWx0aFRyYW5zZmVycmluZ0F3YXkSDwoHYWRkcmVzcxgBIAEoCSIcChpTZXNzaW9uSGVhbHRoTm90WWV0QWRvcHRlZEIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_workspace_v1_workspace]);
+  fileDesc("CiphZ2VudHJlcGwvdjEvZW5kcG9pbnRfc2Vzc2lvbl9oZWFsdGgucHJvdG8SDGFnZW50cmVwbC52MSJFChRTZXNzaW9uSGVhbHRoUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmIosBChVTZXNzaW9uSGVhbHRoUmVzcG9uc2USNQoHc3VjY2VzcxgBIAEoCzIiLmFnZW50cmVwbC52MS5TZXNzaW9uSGVhbHRoU3VjY2Vzc0gAEjEKBWVycm9yGAIgASgLMiAuYWdlbnRyZXBsLnYxLlNlc3Npb25IZWFsdGhFcnJvckgAQggKBnJlc3VsdCKGAQoUU2Vzc2lvbkhlYWx0aFN1Y2Nlc3MSLwoHaGVhbHRoeRgBIAEoCzIcLmFnZW50cmVwbC52MS5TZXNzaW9uSGVhbHRoeUgAEjMKCXVuaGVhbHRoeRgCIAEoCzIeLmFnZW50cmVwbC52MS5TZXNzaW9uVW5oZWFsdGh5SABCCAoGaGVhbHRoIhAKDlNlc3Npb25IZWFsdGh5Ij4KEFNlc3Npb25VbmhlYWx0aHkSKgoGZmF1bHRzGAEgAygLMhouYWdlbnRyZXBsLnYxLlNlc3Npb25GYXVsdCL5CQoMU2Vzc2lvbkZhdWx0Eg4KBmRldGFpbBgBIAEoCRJGChFzaGltX3N0YXJ0X2ZhaWxlZBgCIAEoCzIpLmFnZW50cmVwbC52MS5TZXNzaW9uRmF1bHRTaGltU3RhcnRGYWlsZWRIABI3CglzaGltX2RpZWQYAyABKAsyIi5hZ2VudHJlcGwudjEuU2Vzc2lvbkZhdWx0U2hpbURpZWRIABI9CgxsaW5rX3NldmVyZWQYBCABKAsyJS5hZ2VudHJlcGwudjEuU2Vzc2lvbkZhdWx0TGlua1NldmVyZWRIABI/Cg1yZXN1bWVfZmFpbGVkGAUgASgLMiYuYWdlbnRyZXBsLnYxLlNlc3Npb25GYXVsdFJlc3VtZUZhaWxlZEgAEjsKC2JvdW5jZV9kaWVkGAYgASgLMiQuYWdlbnRyZXBsLnYxLlNlc3Npb25GYXVsdEJvdW5jZURpZWRIABJBCg5ib3VuY2VfdW5rbm93bhgHIAEoCzInLmFnZW50cmVwbC52MS5TZXNzaW9uRmF1bHRCb3VuY2VVbmtub3duSAASRwoRY2xhc3NpZmllcl9mYWlsZWQYCCABKAsyKi5hZ2VudHJlcGwudjEuU2Vzc2lvbkZhdWx0Q2xhc3NpZmllckZhaWxlZEgAEj8KDXNoaW1fcmVwb3J0ZWQYCSABKAsyJi5hZ2VudHJlcGwudjEuU2Vzc2lvbkZhdWx0U2hpbVJlcG9ydGVkSAASUQoWY29udmVyc2F0aW9uX2FiYW5kb25lZBgKIAEoCzIvLmFnZW50cmVwbC52MS5TZXNzaW9uRmF1bHRDb252ZXJzYXRpb25BYmFuZG9uZWRIABJBCg5zZXNzaW9uX2Fic2VudBgLIAEoCzInLmFnZW50cmVwbC52MS5TZXNzaW9uRmF1bHRTZXNzaW9uQWJzZW50SAASSAoSd2F0Y2hfb3Blbl9yZWZ1c2VkGAwgASgLMiouYWdlbnRyZXBsLnYxLlNlc3Npb25GYXVsdFdhdGNoT3BlblJlZnVzZWRIABJSChdkYWVtb25fc3RhdGVfdW5yZWFkYWJsZRgNIAEoCzIvLmFnZW50cmVwbC52MS5TZXNzaW9uRmF1bHREYWVtb25TdGF0ZVVucmVhZGFibGVIABJSChdhZG9wdGlvbl93aW5kb3dfZXhwaXJlZBgOIAEoCzIvLmFnZW50cmVwbC52MS5TZXNzaW9uRmF1bHRBZG9wdGlvbldpbmRvd0V4cGlyZWRIABJSChdmaW5hbF9hbnN3ZXJfdW5yZXNvbHZlZBgPIAEoCzIvLmFnZW50cmVwbC52MS5TZXNzaW9uRmF1bHRGaW5hbEFuc3dlclVucmVzb2x2ZWRIABJOChV2ZW5kb3Jfc3RhcnRfcmV0cnlpbmcYECABKAsyLS5hZ2VudHJlcGwudjEuU2Vzc2lvbkZhdWx0VmVuZG9yU3RhcnRSZXRyeWluZ0gAEk4KFXZlbmRvcl9zdGFydF9yZWplY3RlZBgRIAEoCzItLmFnZW50cmVwbC52MS5TZXNzaW9uRmF1bHRWZW5kb3JTdGFydFJlamVjdGVkSAASSgoTdmVuZG9yX3N0YXJ0X2ZhaWxlZBgSIAEoCzIrLmFnZW50cmVwbC52MS5TZXNzaW9uRmF1bHRWZW5kb3JTdGFydEZhaWxlZEgAQgYKBGtpbmQiRQobU2Vzc2lvbkZhdWx0U2hpbVN0YXJ0RmFpbGVkEhEKCWV4aXRfY29kZRgBIAEoBRITCgtzdGRlcnJfdGFpbBgCIAEoCSIpChRTZXNzaW9uRmF1bHRTaGltRGllZBIRCglleGl0X2NvZGUYASABKAUiGQoXU2Vzc2lvbkZhdWx0TGlua1NldmVyZWQiKQoYU2Vzc2lvbkZhdWx0UmVzdW1lRmFpbGVkEg0KBWNhdXNlGAEgASgJIhgKFlNlc3Npb25GYXVsdEJvdW5jZURpZWQiGwoZU2Vzc2lvbkZhdWx0Qm91bmNlVW5rbm93biIuChxTZXNzaW9uRmF1bHRDbGFzc2lmaWVyRmFpbGVkEg4KBmRldGFpbBgBIAEoCSI7ChhTZXNzaW9uRmF1bHRTaGltUmVwb3J0ZWQSEQoJY29tcG9uZW50GAEgASgJEgwKBGtpbmQYAiABKAkiPgohU2Vzc2lvbkZhdWx0Q29udmVyc2F0aW9uQWJhbmRvbmVkEhkKEXZlbmRvcl9zZXNzaW9uX2lkGAEgASgJIhsKGVNlc3Npb25GYXVsdFNlc3Npb25BYnNlbnQiQQocU2Vzc2lvbkZhdWx0V2F0Y2hPcGVuUmVmdXNlZBIRCglvcGVyYXRpb24YASABKAkSDgoGaGFuZGxlGAIgASgJIjIKIVNlc3Npb25GYXVsdERhZW1vblN0YXRlVW5yZWFkYWJsZRINCgVjYXVzZRgBIAEoCSI8CiFTZXNzaW9uRmF1bHRBZG9wdGlvbldpbmRvd0V4cGlyZWQSFwoPYWRvcHRpb25fd2luZG93GAEgASgJIkwKIVNlc3Npb25GYXVsdEZpbmFsQW5zd2VyVW5yZXNvbHZlZBIMCgR0dXJuGAEgASgJEgwKBHVuaXQYAiABKAkSCwoDd2h5GAMgASgJIskCChJTZXNzaW9uSGVhbHRoRXJyb3ISSAoRdW5rbm93bl93b3Jrc3BhY2UYASABKAsyKy5hZ2VudHJlcGwudjEuU2Vzc2lvbkhlYWx0aFVua25vd25Xb3Jrc3BhY2VIABJRChZ3b3Jrc3BhY2VfcmVmX21pc21hdGNoGAIgASgLMi8uYWdlbnRyZXBsLnYxLlNlc3Npb25IZWFsdGhXb3Jrc3BhY2VSZWZNaXNtYXRjaEgAEkgKEXRyYW5zZmVycmluZ19hd2F5GAMgASgLMisuYWdlbnRyZXBsLnYxLlNlc3Npb25IZWFsdGhUcmFuc2ZlcnJpbmdBd2F5SAASQwoPbm90X3lldF9hZG9wdGVkGAQgASgLMiguYWdlbnRyZXBsLnYxLlNlc3Npb25IZWFsdGhOb3RZZXRBZG9wdGVkSABCBwoFY2F1c2UiHwodU2Vzc2lvbkhlYWx0aFVua25vd25Xb3Jrc3BhY2UiOQohU2Vzc2lvbkhlYWx0aFdvcmtzcGFjZVJlZk1pc21hdGNoEhQKDHJlZ2lzdHJ5X2RpchgBIAEoCSIwCh1TZXNzaW9uSGVhbHRoVHJhbnNmZXJyaW5nQXdheRIPCgdhZGRyZXNzGAEgASgJIhwKGlNlc3Npb25IZWFsdGhOb3RZZXRBZG9wdGVkImMKH1Nlc3Npb25GYXVsdFZlbmRvclN0YXJ0UmV0cnlpbmcSFwoPZmFpbGVkX2F0dGVtcHRzGAEgASgNEg0KBWNhdXNlGAIgASgJEhgKEGZhaWxpbmdfc2luY2VfbXMYAyABKAMiMAofU2Vzc2lvbkZhdWx0VmVuZG9yU3RhcnRSZWplY3RlZBINCgVjYXVzZRgBIAEoCSJmCh1TZXNzaW9uRmF1bHRWZW5kb3JTdGFydEZhaWxlZBIXCg9mYWlsZWRfYXR0ZW1wdHMYASABKA0SEgoKbGFzdF9jYXVzZRgCIAEoCRIYChBmYWlsaW5nX3NpbmNlX21zGAMgASgDQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.SessionHealthRequest
@@ -263,6 +263,30 @@ export type SessionFault = Message<"agentrepl.v1.SessionFault"> & {
      */
     value: SessionFaultFinalAnswerUnresolved;
     case: "finalAnswerUnresolved";
+  } | {
+    /**
+     * The vendor did not start and the daemon is retrying it on its backoff.
+     *
+     * @generated from field: agentrepl.v1.SessionFaultVendorStartRetrying vendor_start_retrying = 16;
+     */
+    value: SessionFaultVendorStartRetrying;
+    case: "vendorStartRetrying";
+  } | {
+    /**
+     * The vendor refused the start for a reason retrying cannot fix.
+     *
+     * @generated from field: agentrepl.v1.SessionFaultVendorStartRejected vendor_start_rejected = 17;
+     */
+    value: SessionFaultVendorStartRejected;
+    case: "vendorStartRejected";
+  } | {
+    /**
+     * The vendor kept failing to start for the whole retry window.
+     *
+     * @generated from field: agentrepl.v1.SessionFaultVendorStartFailed vendor_start_failed = 18;
+     */
+    value: SessionFaultVendorStartFailed;
+    case: "vendorStartFailed";
   } | { case: undefined; value?: undefined };
 };
 
@@ -719,4 +743,111 @@ export type SessionHealthNotYetAdopted = Message<"agentrepl.v1.SessionHealthNotY
  */
 export const SessionHealthNotYetAdoptedSchema: GenMessage<SessionHealthNotYetAdopted> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_session_health, 24);
+
+/**
+ * The session's vendor failed to start for a reason the shim labeled
+ * RETRYABLE, and the daemon is asking the same shim again on a capped
+ * multiplicative backoff (x1.5 from 200ms, capped at 5s). The fault is
+ * replaced on every failed attempt, so it always names the latest attempt; it
+ * closes when a start succeeds, and gives way to `vendor_start_failed` when
+ * the retry window runs out or `vendor_start_rejected` when an attempt is
+ * refused outright.
+ *
+ * @generated from message agentrepl.v1.SessionFaultVendorStartRetrying
+ */
+export type SessionFaultVendorStartRetrying = Message<"agentrepl.v1.SessionFaultVendorStartRetrying"> & {
+  /**
+   * How many attempts have failed so far in this run of failures, counting
+   * from 1.
+   *
+   * @generated from field: uint32 failed_attempts = 1;
+   */
+  failedAttempts: number;
+
+  /**
+   * WHY the latest attempt failed, in the shim's own words. Drawn verbatim.
+   *
+   * @generated from field: string cause = 2;
+   */
+  cause: string;
+
+  /**
+   * When the first failure of this contiguous run happened, in epoch
+   * milliseconds. The retry window is measured from here: a successful start
+   * ends the run, and the next failure after it begins a new one.
+   *
+   * @generated from field: int64 failing_since_ms = 3;
+   */
+  failingSinceMs: bigint;
+};
+
+/**
+ * Describes the message agentrepl.v1.SessionFaultVendorStartRetrying.
+ * Use `create(SessionFaultVendorStartRetryingSchema)` to create a new message.
+ */
+export const SessionFaultVendorStartRetryingSchema: GenMessage<SessionFaultVendorStartRetrying> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_session_health, 25);
+
+/**
+ * The session's vendor refused the start for a reason the shim labeled a
+ * REJECTION (a credential rejection, a missing model, a refused resume, a
+ * blocking hook): asking again would fail the same way, so nothing retries.
+ * It stands until a start succeeds, which only a change by the user and a
+ * restart of the workspace can bring about.
+ *
+ * @generated from message agentrepl.v1.SessionFaultVendorStartRejected
+ */
+export type SessionFaultVendorStartRejected = Message<"agentrepl.v1.SessionFaultVendorStartRejected"> & {
+  /**
+   * WHY the vendor refused, in the shim's own words. Drawn verbatim.
+   *
+   * @generated from field: string cause = 1;
+   */
+  cause: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.SessionFaultVendorStartRejected.
+ * Use `create(SessionFaultVendorStartRejectedSchema)` to create a new message.
+ */
+export const SessionFaultVendorStartRejectedSchema: GenMessage<SessionFaultVendorStartRejected> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_session_health, 26);
+
+/**
+ * The session's vendor failed to start on every attempt for the whole retry
+ * window (ten minutes of wall time from the first failure of the run), so the
+ * daemon stopped retrying. Prompts sent meanwhile stay held. It stands until a
+ * start succeeds; restarting the workspace begins a fresh run.
+ *
+ * @generated from message agentrepl.v1.SessionFaultVendorStartFailed
+ */
+export type SessionFaultVendorStartFailed = Message<"agentrepl.v1.SessionFaultVendorStartFailed"> & {
+  /**
+   * How many attempts failed before the window ran out.
+   *
+   * @generated from field: uint32 failed_attempts = 1;
+   */
+  failedAttempts: number;
+
+  /**
+   * WHY the last attempt failed, in the shim's own words. Drawn verbatim.
+   *
+   * @generated from field: string last_cause = 2;
+   */
+  lastCause: string;
+
+  /**
+   * When the first failure of the run happened, in epoch milliseconds.
+   *
+   * @generated from field: int64 failing_since_ms = 3;
+   */
+  failingSinceMs: bigint;
+};
+
+/**
+ * Describes the message agentrepl.v1.SessionFaultVendorStartFailed.
+ * Use `create(SessionFaultVendorStartFailedSchema)` to create a new message.
+ */
+export const SessionFaultVendorStartFailedSchema: GenMessage<SessionFaultVendorStartFailed> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_session_health, 27);
 

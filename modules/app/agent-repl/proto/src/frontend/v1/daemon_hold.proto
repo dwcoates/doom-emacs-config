@@ -117,7 +117,7 @@ message HeldPrompt {
   // WHAT is holding this entry, when something other than a running turn is.
   //
   // An entry is held by at most one thing at a time: a drain lease, a
-  // pending revival, a build refresh and a merge are mutually exclusive
+  // pending reconnect, a build refresh and a merge are mutually exclusive
   // session conditions, and an entry held by two of them at once
   // would have two different sets of exits and two different states to
   // render. Stating them as arms makes that impossible to express rather than
@@ -129,8 +129,9 @@ message HeldPrompt {
     // The daemon is draining toward a scheduled shutdown and is not admitting
     // new work.
     HeldPromptShutdownHold shutdown = 9;
-    // The session is starting up and cannot accept a prompt until it is up.
-    HeldPromptSessionStartingHold session_starting = 11;
+    // The session is not up — coming up, being retried, or down until a
+    // restart — and the prompt waits for it to reconnect.
+    HeldPromptReconnectHold reconnect = 11;
     // The session's build is being refreshed onto a newer one before it takes
     // more work.
     HeldPromptBuildRefreshHold build_refresh = 12;
@@ -333,18 +334,27 @@ message HeldPromptShutdownHold {
 // `HeldPromptKeepAliveHold` is RETIRED with the `keep_alive` arm above, and
 // its name must not be reused for a new message.
 
-// Held because the session is still coming up — a cold resume in progress, a
-// compaction the user chose at the cold gate still landing. The classifier
-// NEVER runs on such an entry and there is NO force-through: the exits are
-// delivery once the session is up, a loud drop when the bring-up fails (a
-// session that never comes up can never deliver, so a retained entry would
-// be a leak, not a delay), or cancel.
+// Held because the workspace's session is NOT UP and the prompt waits for it to
+// reconnect: a revival or cold resume in progress, a compaction the user chose
+// at the cold gate still landing, a vendor start being retried, or a session
+// whose start failed outright and waits for the user's restart. The card's
+// badge reads "after reconnect".
+//
+// A FAILED BRING-UP NEVER DROPS THESE ENTRIES. The exits are delivery the
+// moment a session comes up on the workspace (however it comes up — a retry
+// that succeeds, a restart, a revival), or the user's cancel. The classifier
+// NEVER runs on such an entry and there is NO force-through: there is no
+// session to force a prompt into.
+//
+// A prompt that reaches a shim holding no session — the daemon believed the
+// session was up and the shim answered `no_session` — lands here too, rather
+// than being drawn and lost.
 //
 // DELIBERATELY EMPTY: the arm's presence is the whole fact it carries. The
-// bring-up is a WORKSPACE-level event and the entry already rides its
+// reconnect is a WORKSPACE-level event and the entry already rides its
 // workspace's tray, so naming a session here would join the entry to nothing
 // the client could not already reach.
-message HeldPromptSessionStartingHold {}
+message HeldPromptReconnectHold {}
 
 // Held because a merge of this workspace is in flight: the merge drives the
 // session, so nothing the user submits reaches it until the merge ends. The

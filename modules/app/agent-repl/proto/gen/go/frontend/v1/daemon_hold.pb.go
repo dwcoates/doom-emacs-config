@@ -223,7 +223,7 @@ type HeldPrompt struct {
 	// WHAT is holding this entry, when something other than a running turn is.
 	//
 	// An entry is held by at most one thing at a time: a drain lease, a
-	// pending revival, a build refresh and a merge are mutually exclusive
+	// pending reconnect, a build refresh and a merge are mutually exclusive
 	// session conditions, and an entry held by two of them at once
 	// would have two different sets of exits and two different states to
 	// render. Stating them as arms makes that impossible to express rather than
@@ -235,7 +235,7 @@ type HeldPrompt struct {
 	// Types that are valid to be assigned to Hold:
 	//
 	//	*HeldPrompt_Shutdown
-	//	*HeldPrompt_SessionStarting
+	//	*HeldPrompt_Reconnect
 	//	*HeldPrompt_BuildRefresh
 	//	*HeldPrompt_Merge
 	Hold isHeldPrompt_Hold `protobuf_oneof:"hold"`
@@ -427,10 +427,10 @@ func (x *HeldPrompt) GetShutdown() *HeldPromptShutdownHold {
 	return nil
 }
 
-func (x *HeldPrompt) GetSessionStarting() *HeldPromptSessionStartingHold {
+func (x *HeldPrompt) GetReconnect() *HeldPromptReconnectHold {
 	if x != nil {
-		if x, ok := x.Hold.(*HeldPrompt_SessionStarting); ok {
-			return x.SessionStarting
+		if x, ok := x.Hold.(*HeldPrompt_Reconnect); ok {
+			return x.Reconnect
 		}
 	}
 	return nil
@@ -572,9 +572,10 @@ type HeldPrompt_Shutdown struct {
 	Shutdown *HeldPromptShutdownHold `protobuf:"bytes,9,opt,name=shutdown,proto3,oneof"`
 }
 
-type HeldPrompt_SessionStarting struct {
-	// The session is starting up and cannot accept a prompt until it is up.
-	SessionStarting *HeldPromptSessionStartingHold `protobuf:"bytes,11,opt,name=session_starting,json=sessionStarting,proto3,oneof"`
+type HeldPrompt_Reconnect struct {
+	// The session is not up — coming up, being retried, or down until a
+	// restart — and the prompt waits for it to reconnect.
+	Reconnect *HeldPromptReconnectHold `protobuf:"bytes,11,opt,name=reconnect,proto3,oneof"`
 }
 
 type HeldPrompt_BuildRefresh struct {
@@ -590,7 +591,7 @@ type HeldPrompt_Merge struct {
 
 func (*HeldPrompt_Shutdown) isHeldPrompt_Hold() {}
 
-func (*HeldPrompt_SessionStarting) isHeldPrompt_Hold() {}
+func (*HeldPrompt_Reconnect) isHeldPrompt_Hold() {}
 
 func (*HeldPrompt_BuildRefresh) isHeldPrompt_Hold() {}
 
@@ -1405,37 +1406,46 @@ func (x *HeldPromptShutdownHold) GetScheduleId() string {
 	return ""
 }
 
-// Held because the session is still coming up — a cold resume in progress, a
-// compaction the user chose at the cold gate still landing. The classifier
-// NEVER runs on such an entry and there is NO force-through: the exits are
-// delivery once the session is up, a loud drop when the bring-up fails (a
-// session that never comes up can never deliver, so a retained entry would
-// be a leak, not a delay), or cancel.
+// Held because the workspace's session is NOT UP and the prompt waits for it to
+// reconnect: a revival or cold resume in progress, a compaction the user chose
+// at the cold gate still landing, a vendor start being retried, or a session
+// whose start failed outright and waits for the user's restart. The card's
+// badge reads "after reconnect".
+//
+// A FAILED BRING-UP NEVER DROPS THESE ENTRIES. The exits are delivery the
+// moment a session comes up on the workspace (however it comes up — a retry
+// that succeeds, a restart, a revival), or the user's cancel. The classifier
+// NEVER runs on such an entry and there is NO force-through: there is no
+// session to force a prompt into.
+//
+// A prompt that reaches a shim holding no session — the daemon believed the
+// session was up and the shim answered `no_session` — lands here too, rather
+// than being drawn and lost.
 //
 // DELIBERATELY EMPTY: the arm's presence is the whole fact it carries. The
-// bring-up is a WORKSPACE-level event and the entry already rides its
+// reconnect is a WORKSPACE-level event and the entry already rides its
 // workspace's tray, so naming a session here would join the entry to nothing
 // the client could not already reach.
-type HeldPromptSessionStartingHold struct {
+type HeldPromptReconnectHold struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *HeldPromptSessionStartingHold) Reset() {
-	*x = HeldPromptSessionStartingHold{}
+func (x *HeldPromptReconnectHold) Reset() {
+	*x = HeldPromptReconnectHold{}
 	mi := &file_frontend_v1_daemon_hold_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *HeldPromptSessionStartingHold) String() string {
+func (x *HeldPromptReconnectHold) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*HeldPromptSessionStartingHold) ProtoMessage() {}
+func (*HeldPromptReconnectHold) ProtoMessage() {}
 
-func (x *HeldPromptSessionStartingHold) ProtoReflect() protoreflect.Message {
+func (x *HeldPromptReconnectHold) ProtoReflect() protoreflect.Message {
 	mi := &file_frontend_v1_daemon_hold_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -1447,8 +1457,8 @@ func (x *HeldPromptSessionStartingHold) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use HeldPromptSessionStartingHold.ProtoReflect.Descriptor instead.
-func (*HeldPromptSessionStartingHold) Descriptor() ([]byte, []int) {
+// Deprecated: Use HeldPromptReconnectHold.ProtoReflect.Descriptor instead.
+func (*HeldPromptReconnectHold) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_daemon_hold_proto_rawDescGZIP(), []int{19}
 }
 
@@ -1757,7 +1767,7 @@ const file_frontend_v1_daemon_hold_proto_rawDesc = "" +
 	"\x0eDaemonHoldItem\x121\n" +
 	"\x06prompt\x18\x01 \x01(\v2\x17.frontend.v1.HeldPromptH\x00R\x06prompt\x12.\n" +
 	"\x05offer\x18\x02 \x01(\v2\x16.frontend.v1.HeldOfferH\x00R\x05offerB\x06\n" +
-	"\x04item\"\xe2\n" +
+	"\x04item\"\xcf\n" +
 	"\n" +
 	"\n" +
 	"HeldPrompt\x12+\n" +
@@ -1772,8 +1782,8 @@ const file_frontend_v1_daemon_hold_proto_rawDesc = "" +
 	"\x14classification_error\x18\b \x01(\v2*.frontend.v1.HeldPromptClassificationErrorH\x00R\x13classificationError\x12D\n" +
 	"\vdaemon_held\x18\x13 \x01(\v2!.frontend.v1.HeldPromptDaemonHeldH\x00R\n" +
 	"daemonHeld\x12A\n" +
-	"\bshutdown\x18\t \x01(\v2#.frontend.v1.HeldPromptShutdownHoldH\x01R\bshutdown\x12W\n" +
-	"\x10session_starting\x18\v \x01(\v2*.frontend.v1.HeldPromptSessionStartingHoldH\x01R\x0fsessionStarting\x12N\n" +
+	"\bshutdown\x18\t \x01(\v2#.frontend.v1.HeldPromptShutdownHoldH\x01R\bshutdown\x12D\n" +
+	"\treconnect\x18\v \x01(\v2$.frontend.v1.HeldPromptReconnectHoldH\x01R\treconnect\x12N\n" +
 	"\rbuild_refresh\x18\f \x01(\v2'.frontend.v1.HeldPromptBuildRefreshHoldH\x01R\fbuildRefresh\x128\n" +
 	"\x05merge\x18\x14 \x01(\v2 .frontend.v1.HeldPromptMergeHoldH\x01R\x05merge\x128\n" +
 	"\aediting\x18\r \x01(\v2\x1e.frontend.v1.HeldPromptEditingR\aediting\x124\n" +
@@ -1821,8 +1831,8 @@ const file_frontend_v1_daemon_hold_proto_rawDesc = "" +
 	"\x06detail\x18\x01 \x01(\tR\x06detail\"9\n" +
 	"\x16HeldPromptShutdownHold\x12\x1f\n" +
 	"\vschedule_id\x18\x01 \x01(\tR\n" +
-	"scheduleId\"\x1f\n" +
-	"\x1dHeldPromptSessionStartingHold\"\x15\n" +
+	"scheduleId\"\x19\n" +
+	"\x17HeldPromptReconnectHold\"\x15\n" +
 	"\x13HeldPromptMergeHold\"\x16\n" +
 	"\x14HeldPromptDaemonHeld\"\x1c\n" +
 	"\x1aHeldPromptBuildRefreshHold\"_\n" +
@@ -1867,7 +1877,7 @@ var file_frontend_v1_daemon_hold_proto_goTypes = []any{
 	(*HeldPromptUninterruptibleTurn)(nil), // 16: frontend.v1.HeldPromptUninterruptibleTurn
 	(*HeldPromptClassificationError)(nil), // 17: frontend.v1.HeldPromptClassificationError
 	(*HeldPromptShutdownHold)(nil),        // 18: frontend.v1.HeldPromptShutdownHold
-	(*HeldPromptSessionStartingHold)(nil), // 19: frontend.v1.HeldPromptSessionStartingHold
+	(*HeldPromptReconnectHold)(nil),       // 19: frontend.v1.HeldPromptReconnectHold
 	(*HeldPromptMergeHold)(nil),           // 20: frontend.v1.HeldPromptMergeHold
 	(*HeldPromptDaemonHeld)(nil),          // 21: frontend.v1.HeldPromptDaemonHeld
 	(*HeldPromptBuildRefreshHold)(nil),    // 22: frontend.v1.HeldPromptBuildRefreshHold
@@ -1893,7 +1903,7 @@ var file_frontend_v1_daemon_hold_proto_depIdxs = []int32{
 	17, // 11: frontend.v1.HeldPrompt.classification_error:type_name -> frontend.v1.HeldPromptClassificationError
 	21, // 12: frontend.v1.HeldPrompt.daemon_held:type_name -> frontend.v1.HeldPromptDaemonHeld
 	18, // 13: frontend.v1.HeldPrompt.shutdown:type_name -> frontend.v1.HeldPromptShutdownHold
-	19, // 14: frontend.v1.HeldPrompt.session_starting:type_name -> frontend.v1.HeldPromptSessionStartingHold
+	19, // 14: frontend.v1.HeldPrompt.reconnect:type_name -> frontend.v1.HeldPromptReconnectHold
 	22, // 15: frontend.v1.HeldPrompt.build_refresh:type_name -> frontend.v1.HeldPromptBuildRefreshHold
 	20, // 16: frontend.v1.HeldPrompt.merge:type_name -> frontend.v1.HeldPromptMergeHold
 	9,  // 17: frontend.v1.HeldPrompt.editing:type_name -> frontend.v1.HeldPromptEditing
@@ -1933,7 +1943,7 @@ func file_frontend_v1_daemon_hold_proto_init() {
 		(*HeldPrompt_ClassificationError)(nil),
 		(*HeldPrompt_DaemonHeld)(nil),
 		(*HeldPrompt_Shutdown)(nil),
-		(*HeldPrompt_SessionStarting)(nil),
+		(*HeldPrompt_Reconnect)(nil),
 		(*HeldPrompt_BuildRefresh)(nil),
 		(*HeldPrompt_Merge)(nil),
 	}
