@@ -190,6 +190,16 @@ the module."
         (let ((n (1+ i)))
           (define-key map (kbd (format "%s-%d" modifier n))
                       (intern (format "agent-repl-switch-to-workspace-%d" n))))))
+    ;; DOOM'S OWN WORKSPACE NAVIGATION IS REMAPPED, wherever it is bound
+    ;; (`SPC TAB [', `SPC TAB ]', `SPC TAB 1'..`9'): those commands switch the
+    ;; frame locally over persp-mode's list, and every switch trigger must
+    ;; instead REQUEST the switch of the daemon and walk the drawn bar.
+    ;; Doom's `+workspace/switch-to-N' is 0-based, the slot chords 1-based.
+    (define-key map [remap +workspace/switch-left] 'agent-repl-switch-left)
+    (define-key map [remap +workspace/switch-right] 'agent-repl-switch-right)
+    (dotimes (i agent-repl-switch-numeral-count)
+      (define-key map (vector 'remap (intern (format "+workspace/switch-to-%d" i)))
+                  (intern (format "agent-repl-switch-to-workspace-%d" (1+ i)))))
     ;; `evil-make-intercept-map' with no STATE, written as the data it writes.
     (define-key map [intercept-state] 'all)
     map)
