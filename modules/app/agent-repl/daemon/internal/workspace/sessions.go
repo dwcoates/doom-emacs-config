@@ -1128,14 +1128,21 @@ func (f *Fleet) start(ctx context.Context, ws ids.WorkspaceID, rebind bool) erro
 	runCtx, finishRun := f.beginVendorStart(ctx, ws)
 	// THE SHIM READS THE WORKSPACE'S BOOK WHILE ITS START IS ANSWERED OR
 	// RETRIED: the vendor never gates showing the conversation (history.go).
-	endHistory := f.beginHistoryClient(ws, client)
+	// A FRESH start has no history to show: its conversation is new, and the
+	// book the shim persisted names the one it replaces.
+	endHistory := func() {}
+	if !src.Fresh {
+		endHistory = f.beginHistoryClient(ws, client)
+	}
 	defer endHistory()
 	started, err := f.startSession(runCtx, log, ws, client, src, session, configDir)
 	if err != nil {
 		defer finishRun()
 		// The conversation's newest page is secured BEFORE the shim goes, and
 		// the client stops being a history source before it is stopped.
-		f.keepNewestPage(ctx, log, ws)
+		if !src.Fresh {
+			f.keepNewestPage(ctx, log, ws)
+		}
 		endHistory()
 		// A START THAT FAILED LEAVES NO SHIM OF ITS OWN SERVING. The refusal
 		// returns before anything remembers this client, so nothing else in
@@ -2386,9 +2393,15 @@ func (f *Fleet) hold(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, s
 	if err := retireTerminalRecord(ctx, log, f.deps.DB, opBringUp, ws); err != nil {
 		return err
 	}
-	// A HELD CLIENT IS A HISTORY SOURCE, whatever its session is doing: a
-	// reader that opened before it has the newest page pushed (history.go).
-	f.deps.Feed.SourceUp(ws)
+	// A HELD CLIENT WITH NO SESSION STARTED IS A HISTORY SOURCE all the same
+	// (a cold gate, a parked adoption): a reader that opened before it has the
+	// newest page pushed (history.go). A STARTED session's readers are kicked
+	// by its watch opening, as they always were: a fresh book is not written
+	// until its first turn, and reading it before then asks the store for a
+	// book that does not exist yet.
+	if !session.sessionStarted {
+		f.deps.Feed.SourceUp(ws)
+	}
 	return nil
 }
 

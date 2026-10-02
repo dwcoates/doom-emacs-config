@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -43,10 +44,22 @@ func (f *Fleet) ReadHistory(ctx context.Context, ws ids.WorkspaceID, target *con
 		return nil, feed.ErrNoHistorySource
 	}
 	page, err := readHistory(ctx, client, target, after)
+	watcher, watched := f.sessionWatcher(ws)
 	if err != nil {
+		if !watched && target == nil && isUnknownAgent(err) {
+			// NO BOOK YET IS NO SOURCE YET: a shim with no session settled
+			// serves the workspace's persisted book, and a workspace that
+			// never ran one has none. The reader is served what the feed
+			// holds, and its newest page is loaded when the session's watch
+			// opens (the feed's kick), exactly as for a workspace with no shim.
+			f.deps.Log.Global().Info("daemon.workspace.history_no_book",
+				"the workspace's shim holds no book yet and no session is up; the reader waits for the session",
+				dlog.Context{"workspace": string(ws), "cause": err.Error()})
+			return nil, fmt.Errorf("%w: %w", feed.ErrNoHistorySource, err)
+		}
 		return nil, err
 	}
-	if watcher, ok := f.sessionWatcher(ws); ok {
+	if watched {
 		watcher.NoteHistoryLoaded(target, page, after == nil)
 		return page, nil
 	}
@@ -135,6 +148,12 @@ func (f *Fleet) keepNewestPage(ctx context.Context, log dlog.Logger, ws ids.Work
 		log.Error(opBringUp, "the conversation's newest page could not be secured before the failed start's shim was stopped",
 			dlog.Context{"cause": err.Error()})
 	}
+}
+
+// isUnknownAgent reports a ReadHistory the shim refused unknown_agent.
+func isUnknownAgent(err error) bool {
+	var refusal *ShimRefusal
+	return errors.As(err, &refusal) && refusal.Arm == "unknown_agent"
 }
 
 // readHistory makes the one ReadHistory call and unwraps its outcome.
