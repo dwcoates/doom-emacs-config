@@ -29,6 +29,10 @@ import {
   GetFeedPageRequestSchema,
   type GetFeedPageRequest,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_get_feed_page_pb";
+import {
+  LoadFeedThroughRequestSchema,
+  type LoadFeedThroughRequest,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_load_feed_through_pb";
 import type { FeedWatchToken } from "../../../proto/gen/ts/agentrepl/v1/feed_token_pb";
 import {
   InterruptRequestSchema,
@@ -102,4 +106,15 @@ export function buildInterruptDetachedRequest(
     workspace,
     target: { case: "detached", value: detached },
   });
+}
+
+/**
+ * Bring ONE root-feed row into the loaded pages, every page between included.
+ * TARGET is the row's FeedId exactly as the daemon served it.
+ */
+export function buildLoadFeedThroughRequest(
+  workspace: WorkspaceRef,
+  target: FeedId,
+): LoadFeedThroughRequest {
+  return create(LoadFeedThroughRequestSchema, { workspace, target });
 }
