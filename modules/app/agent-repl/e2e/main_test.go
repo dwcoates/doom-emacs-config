@@ -28,6 +28,7 @@ import (
 	"sync"
 	"testing"
 
+	"agentrepl/testrun/testenv"
 	"claude-repld/integration/harness"
 )
 
@@ -52,7 +53,7 @@ func runSuite(m *testing.M) int {
 		return 1
 	}
 
-	mode, _, err := harness.BinaryMode(os.Getenv)
+	mode, _, err := testenv.BinaryMode(os.Getenv)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "e2e:", err)
 		return 1
@@ -60,7 +61,7 @@ func runSuite(m *testing.M) int {
 	// A PREBUILD process runs no test. Build this suite's shared binaries
 	// before MainAt enters its disposable run root: MainAt removes that root
 	// when it returns, so no later Go build may inherit its TMPDIR.
-	if mode == harness.BuildInto {
+	if mode == testenv.BuildInto {
 		if err := prebuildE2E(); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return 1
@@ -134,7 +135,7 @@ func resolveLayout() (layout, error) {
 func e2eBinDir() string {
 	e2eBinOnce.Do(func() {
 		// A PREBUILD process fills the shared directory every chunk reads.
-		if mode, shared, err := harness.BinaryMode(os.Getenv); err != nil || mode == harness.BuildInto {
+		if mode, shared, err := testenv.BinaryMode(os.Getenv); err != nil || mode == testenv.BuildInto {
 			if err != nil {
 				e2eBinErr = err
 				return
@@ -418,7 +419,7 @@ func requireLockBinary(t *testing.T) string {
 }
 
 // e2eSharedSub is this suite's subdirectory of a shared prebuilt directory
-// (harness.PrebuildEnv / harness.PrebuiltEnv); the harness keeps its own
+// (testenv.Prebuild / testenv.Prebuilt); the harness keeps its own
 // binaries beside it.
 const e2eSharedSub = "e2e-bin"
 
@@ -428,12 +429,12 @@ const shimBundleName = "shim-dist/main.js"
 // sharedOr answers a binary from the shared prebuilt directory when this
 // process was told to read one, and builds it otherwise.
 func sharedOr(name string, build func() (string, error)) (string, error) {
-	mode, shared, err := harness.BinaryMode(os.Getenv)
+	mode, shared, err := testenv.BinaryMode(os.Getenv)
 	if err != nil {
 		return "", err
 	}
-	if mode == harness.UsePrebuilt {
-		return harness.SharedBinary(shared, e2eSharedSub, name)
+	if mode == testenv.UsePrebuilt {
+		return testenv.SharedBinary(shared, e2eSharedSub, name)
 	}
 	return build()
 }

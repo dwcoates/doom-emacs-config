@@ -5,6 +5,7 @@ go 1.24.0
 require (
 	agentrepl/logging v0.0.0
 	agentrepl/proto v0.0.0
+	agentrepl/testrun v0.0.0
 	claude-repld v0.0.0-00010101000000-000000000000
 	connectrpc.com/connect v1.17.0
 	golang.org/x/net v0.43.0
@@ -13,7 +14,6 @@ require (
 )
 
 require (
-	agentrepl/testrun v0.0.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
