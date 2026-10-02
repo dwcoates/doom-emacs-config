@@ -11,11 +11,11 @@ import (
 func TestRecordedCallEchoesTheRawRequestBody(t *testing.T) {
 	// Arrange.
 	_, baseURL := newTestServer(t)
-	sent := `{"workspace":{"id":"ws-a","dir":"/tmp/ws-a"},"force":false}`
+	sent := `{"force":false}`
 
 	// Act.
-	if status, body := rawUnary(t, baseURL, "RestartWorkspace", sent); status != 200 {
-		t.Fatalf("RestartWorkspace answered %d: %s", status, body)
+	if status, body := rawUnary(t, baseURL, "Deploy", sent); status != 200 {
+		t.Fatalf("Deploy answered %d: %s", status, body)
 	}
 	_, listing := controlGet(t, baseURL, "/_fake/calls")
 	calls := decodeCalls(t, listing)
@@ -39,9 +39,8 @@ func TestRawBodyDistinguishesAnOmittedBoolFromAnExplicitFalse(t *testing.T) {
 	_, baseURL := newTestServer(t)
 
 	// Act.
-	if status, body := rawUnary(t, baseURL, "RestartWorkspace",
-		`{"workspace":{"id":"ws-a","dir":"/tmp/ws-a"}}`); status != 200 {
-		t.Fatalf("RestartWorkspace answered %d: %s", status, body)
+	if status, body := rawUnary(t, baseURL, "Deploy", `{}`); status != 200 {
+		t.Fatalf("Deploy answered %d: %s", status, body)
 	}
 	_, listing := controlGet(t, baseURL, "/_fake/calls")
 	calls := decodeCalls(t, listing)
