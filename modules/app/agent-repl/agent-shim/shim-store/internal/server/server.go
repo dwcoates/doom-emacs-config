@@ -432,7 +432,8 @@ func (s *Server) OpenAgentSession(ctx context.Context, req *connect.Request[stor
 			"page-only read served; no watch token minted lines=%d", len(opened.Page.GetLines()))
 		return connect.NewResponse(&storev1.OpenAgentSessionResponse{
 			Result: &storev1.OpenAgentSessionResponse_Success{Success: &storev1.OpenAgentSessionSuccess{
-				Page: opened.Page,
+				Page:   opened.Page,
+				Newest: opened.Newest,
 			}},
 		}), nil
 	}
@@ -447,8 +448,9 @@ func (s *Server) OpenAgentSession(ctx context.Context, req *connect.Request[stor
 		"reading session opened lines=%d", len(opened.Page.GetLines()))
 	return connect.NewResponse(&storev1.OpenAgentSessionResponse{
 		Result: &storev1.OpenAgentSessionResponse_Success{Success: &storev1.OpenAgentSessionSuccess{
-			Page:  opened.Page,
-			Watch: &storev1.AgentSessionToken{Value: token},
+			Page:   opened.Page,
+			Watch:  &storev1.AgentSessionToken{Value: token},
+			Newest: opened.Newest,
 		}},
 	}), nil
 }
