@@ -48,14 +48,16 @@ type HistorySource interface {
 	// ReadHistory answers TARGET's newest page when AFTER is nil, and otherwise
 	// the page of entries placed strictly before the entry AFTER names. A nil
 	// TARGET is the session's main agent (the shim's prompt thread).
-	// ErrNoHistorySource means no session is up to read from.
+	// ErrNoHistorySource means no shim is up to read from (a session need not
+	// be: the shim serves the workspace's persisted book).
 	ReadHistory(ctx context.Context, ws ids.WorkspaceID, target *conversationv1.AgentId, after *conversationv1.HistoryPointer) (*conversationv1.HistoryPage, error)
 }
 
 var (
-	// ErrNoHistorySource is a HistorySource with no session to read from: a
-	// cold or hibernated workspace. The feed serves what it holds; nothing
-	// older is reachable until a session is up.
+	// ErrNoHistorySource is a HistorySource with no shim to read from (a
+	// hibernated workspace, a shim not yet up) or no book yet. The feed serves
+	// what it holds; nothing older is reachable until a source comes up
+	// (SourceUp, or a watch opening).
 	ErrNoHistorySource = errors.New("feed: no session is up to read history from")
 	// ErrHistoryUnavailable wraps every failure to read a page a reader's
 	// request needed: the shim's or the store's refusal, or a transport error.
@@ -90,9 +92,10 @@ type bookState struct {
 	// reaches gapFloor. Nil when there is no gap.
 	gapAfter *conversationv1.HistoryPointer
 	gapFloor string
-	// awaitingSource reports that a reader opened this feed while no session
+	// awaitingSource reports that a reader opened this feed while no source
 	// was up to read its history from: the newest page is loaded for it the
-	// moment a watch of the session opens (kickWaitingReaders).
+	// moment one comes up (SourceUp) or a watch of the session opens
+	// (kickWaitingReaders).
 	awaitingSource bool
 	// pending are the entries a load withheld because the turn they belong to
 	// opened on a page not yet loaded (owner ruling 5: a row whose starting
