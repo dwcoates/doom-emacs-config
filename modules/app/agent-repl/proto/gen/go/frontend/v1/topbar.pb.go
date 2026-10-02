@@ -227,14 +227,17 @@ func (x *TopbarView) GetPersistentWifi() *TopbarPersistentWifi {
 //
 //	wifi:  joined → the glyph is green; not_joined → the glyph is red;
 //	       unassigned → the glyph is muted (the daemon could not read it).
-//	mode:  on → the glyph sits on a blue disc it is just inscribed in;
+//	mode:  on → the glyph sits on a black disc it is just inscribed in;
 //	       off, or unassigned → no disc.
 //
-// So a green glyph on blue is "on a network, and closing the lid keeps it",
-// and a red glyph on blue is "no network, but closing the lid would keep one".
+// So a green glyph on the disc is "on a network, and closing the lid keeps
+// it", and a red glyph on the disc is "no network, but closing the lid would
+// keep one".
 //
-// A STATUS, NOT A CONTROL: the chip has no click. The mode is changed from the
-// editor (UpdatePersistentWifiMode), and the chip redraws from the next push.
+// A STATUS AND A CONTROL: clicking the chip toggles the mode through
+// UpdatePersistentWifiMode's `toggle` arm, the same endpoint and arm the
+// editor's toggle command sends (owner ruling, 2026-10-01). The chip draws
+// nothing on success; it redraws from the next push.
 type TopbarPersistentWifi struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Whether the machine is joined to a Wi-Fi network. UNASSIGNED = the daemon
