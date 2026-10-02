@@ -534,3 +534,170 @@ func TestAnAdoptedSessionIsStarted(t *testing.T) {
 		t.Fatal("serving = false, want the adopted session started")
 	}
 }
+
+func TestAnOfflineVendorStartIsRetriedUntilItStarts(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.client.responses = []*shimv1.StartSessionResponse{
+		vendorRefusal(offlineVendorStart(), "getaddrinfo ENOTFOUND api.anthropic.com"),
+		vendorRefusal(offlineVendorStart(), "getaddrinfo ENOTFOUND api.anthropic.com"),
+	}
+
+	// Act.
+	err := f.fleet.Start(context.Background(), ws.ID)
+
+	// Assert.
+	if err != nil || len(f.client.requests) != 3 {
+		t.Fatalf("Start = %v after %d calls, want the session up on the third", err, len(f.client.requests))
+	}
+}
+
+func TestAnOfflineAttemptFilesNoVendorFault(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.client.responses = []*shimv1.StartSessionResponse{
+		vendorRefusal(offlineVendorStart(), "offline"),
+	}
+	var standing []wsm.Fault
+	f.retryAfter = func(time.Duration) <-chan time.Time {
+		standing = append([]wsm.Fault(nil), f.db.dbFaults...)
+		fired := make(chan time.Time, 1)
+		fired <- f.now
+		return fired
+	}
+
+	// Act.
+	_ = f.fleet.Start(context.Background(), ws.ID)
+
+	// Assert: as the wait began.
+	if len(standing) != 0 {
+		t.Fatalf("standing faults = %+v, want none: the network fault is the shim's to report", standing)
+	}
+}
+
+func TestAnOfflineAttemptClosesTheStandingVendorRetry(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.client.responses = []*shimv1.StartSessionResponse{
+		vendorRefusal(retryableVendorStart(), "silent"),
+		vendorRefusal(offlineVendorStart(), "offline"),
+	}
+	var standing [][]wsm.Fault
+	f.retryAfter = func(time.Duration) <-chan time.Time {
+		standing = append(standing, append([]wsm.Fault(nil), f.db.dbFaults...))
+		fired := make(chan time.Time, 1)
+		fired <- f.now
+		return fired
+	}
+
+	// Act.
+	_ = f.fleet.Start(context.Background(), ws.ID)
+
+	// Assert: as the second wait began.
+	if len(standing) != 2 || len(standing[1]) != 0 {
+		t.Fatalf("standing at each wait = %+v, want the vendor retry closed by the offline attempt", standing)
+	}
+}
+
+// THE NETWORK SPENDS NONE OF THE VENDOR'S WINDOW: the offline attempts before
+// the vendor's own failure count as none of its attempts.
+func TestOfflineAttemptsAreNotTheVendorsAttempts(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.client.responses = []*shimv1.StartSessionResponse{
+		vendorRefusal(offlineVendorStart(), "offline"),
+		vendorRefusal(offlineVendorStart(), "offline"),
+		vendorRefusal(retryableVendorStart(), "silent"),
+	}
+	var standing []wsm.Fault
+	f.retryAfter = func(time.Duration) <-chan time.Time {
+		standing = append([]wsm.Fault(nil), f.db.dbFaults...)
+		fired := make(chan time.Time, 1)
+		fired <- f.now
+		return fired
+	}
+
+	// Act.
+	_ = f.fleet.Start(context.Background(), ws.ID)
+
+	// Assert: as the third wait began.
+	if len(standing) != 1 || standing[0].Evidence[health.EvidenceFailedAttempts] != "1" {
+		t.Fatalf("standing = %+v, want one retrying fault naming the vendor's first attempt", standing)
+	}
+}
+
+func TestAnOfflineRunNeverExhaustsTheVendorWindow(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	responses := make([]*shimv1.StartSessionResponse, 0, 400)
+	for range 400 {
+		responses = append(responses, vendorRefusal(offlineVendorStart(), "offline"))
+	}
+	f.client.responses = responses
+
+	// Act.
+	err := f.fleet.Start(context.Background(), ws.ID)
+
+	// Assert: 400 capped waits are far past ten minutes, and the start still
+	// came up on the attempt after them.
+	if err != nil {
+		t.Fatalf("Start = %v, want the session up once the network came back", err)
+	}
+	if got := openKinds(f); got[health.KindVendorStartFailed] != 0 {
+		t.Fatalf("open faults = %v, want no exhausted vendor window", got)
+	}
+}
+
+func TestOfflineAttemptsBackOff(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.client.responses = []*shimv1.StartSessionResponse{
+		vendorRefusal(offlineVendorStart(), "offline"),
+		vendorRefusal(offlineVendorStart(), "offline"),
+	}
+
+	// Act.
+	_ = f.fleet.Start(context.Background(), ws.ID)
+
+	// Assert.
+	if len(f.retryWaits) != 2 || f.retryWaits[0] != 200*time.Millisecond || f.retryWaits[1] != 300*time.Millisecond {
+		t.Fatalf("waits = %v, want [200ms 300ms]", f.retryWaits)
+	}
+}
+
+func TestARetryableVendorStartNamingNoCauseIsTheVendorsAndRecordedAtError(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.client.responses = []*shimv1.StartSessionResponse{
+		vendorRefusal(&shimv1.StartSessionVendorStartFailed{
+			Retry: &shimv1.StartSessionVendorStartFailed_Retryable{Retryable: &shimv1.StartSessionVendorStartRetryable{}}}, "no cause"),
+	}
+	var standing []wsm.Fault
+	f.retryAfter = func(time.Duration) <-chan time.Time {
+		standing = append([]wsm.Fault(nil), f.db.dbFaults...)
+		fired := make(chan time.Time, 1)
+		fired <- f.now
+		return fired
+	}
+
+	// Act.
+	_ = f.fleet.Start(context.Background(), ws.ID)
+
+	// Assert.
+	if len(standing) != 1 || standing[0].Kind != health.KindVendorStartRetrying {
+		t.Fatalf("standing = %+v, want the vendor's retrying fault", standing)
+	}
+	for _, r := range f.log.logger.Records() {
+		if r.Level == dlog.LevelError && r.Context["invariant_violation"] == "StartSessionVendorStartRetryable.cause is always set" {
+			return
+		}
+	}
+	t.Fatalf("records = %+v, want the missing cause at ERROR", f.log.logger.Records())
+}

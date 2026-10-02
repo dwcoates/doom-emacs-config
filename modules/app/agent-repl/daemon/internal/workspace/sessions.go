@@ -2017,8 +2017,21 @@ func (f *Fleet) askToStartSession(ctx context.Context, log dlog.Logger, ws ids.W
 			// THE SHIM LABELS WHETHER ASKING AGAIN CAN HELP, and the daemon
 			// never re-derives it from `detail`. A frame with neither arm is
 			// malformed: it is treated as a rejection, loudly.
-			switch vendor.GetRetry().(type) {
+			switch retry := vendor.GetRetry().(type) {
 			case *shimv1.StartSessionVendorStartFailed_Retryable:
+				// WHOSE FAILURE IT WAS is the shim's to say too: an
+				// unreachable network is not the vendor's fault, and the
+				// daemon draws it as a network fault while it retries.
+				switch retry.Retryable.GetCause().(type) {
+				case *shimv1.StartSessionVendorStartRetryable_Network:
+					return nil, labeledNetwork(refusal, failure.GetDetail())
+				case *shimv1.StartSessionVendorStartRetryable_Vendor:
+				default:
+					log.Error(opBringUp, "the shim's retryable vendor start names no cause; it is read as the vendor's", dlog.Context{
+						"detail":              failure.GetDetail(),
+						"invariant_violation": "StartSessionVendorStartRetryable.cause is always set",
+					})
+				}
 				return nil, labeled(refusal, true, true, failure.GetDetail())
 			case *shimv1.StartSessionVendorStartFailed_Rejected:
 				return nil, labeled(refusal, false, true, failure.GetDetail())
