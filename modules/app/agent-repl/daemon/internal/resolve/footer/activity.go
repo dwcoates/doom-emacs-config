@@ -168,6 +168,7 @@ func (r *resolver) disconnectedActivity(s *wsState, log dlog.Logger) *frontendv1
 		return &frontendv1.FooterStatusDisconnectedSalient{At: stamp(at)}
 	}
 	fault, faultAt := r.salientFault(s, "disconnected")
+	standing := r.standingFault(s)
 	shared, sharedOK := r.sharedSalient(s)
 	var line *frontendv1.FooterStatusDisconnectedSalient
 	switch {
@@ -186,6 +187,12 @@ func (r *resolver) disconnectedActivity(s *wsState, log dlog.Logger) *frontendv1
 			StartFailed: &frontendv1.FooterStatusActivityStartFailed{
 				Detail: s.startFailed.detail,
 			}}
+	case vendorFault(standing):
+		// WHY THE VENDOR IS NOT UP: the sentence the health package composed
+		// out of the standing vendor fault's evidence, drawn verbatim.
+		line = salient(standing.At)
+		line.Kind = &frontendv1.FooterStatusDisconnectedSalient_VendorStart{
+			VendorStart: &frontendv1.FooterStatusActivityVendorStart{Text: standing.Detail}}
 	case fault != nil:
 		line = salient(faultAt)
 		line.Kind = &frontendv1.FooterStatusDisconnectedSalient_Fault{Fault: fault}
