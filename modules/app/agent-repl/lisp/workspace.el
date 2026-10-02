@@ -898,7 +898,10 @@ rendered in their registration order so a pre-roster boot still draws."
   (let ((order (and (fboundp 'agent-repl-roster-drawn-tab-order)
                     (agent-repl-roster-drawn-tab-order)))
         (known (agent-repl--ws-list-names)))
-    (if (null order)
+    ;; ONCE A ROSTER HAS ARRIVED its order is the bar's, even when it is
+    ;; empty: the editor's startup pre-creates workspaces whose tabs it has
+    ;; not opened yet (startup.el), and they must not be drawn.
+    (if (and (null order) (null (bound-and-true-p agent-repl-roster-view)))
         (progn
           (agent-repl--log-verbose
            '(:agent-repl-central "tab rendering spans every workspace")

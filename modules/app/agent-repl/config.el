@@ -311,6 +311,10 @@ returning the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; It loads after host.el so the host accessors and hooks it reacts through
 ;; are defined before its own hook registrations run.
 (agent-repl--load-module "roster")
+;; WHY: startup.el is the editor's half of the startup bring-up: it holds
+;; the tabs roster.el reconciles until the daemon's go-ahead and each page
+;; are in.  roster.el and daemon-link.el call it at runtime only.
+(agent-repl--load-module "startup")
 ;; WHY: frontends.el defines the presentation-frontend registry that
 ;; frontend.el (gui) registers into at load time.
 (agent-repl--load-module "frontends")

@@ -682,7 +682,10 @@ No-op when BUF holds no live widget."
            (when (eq event-type 'load-changed)
              (agent-repl--info ws "elisp.frontend.watch-load: load-changed ws=%s" ws)
              (when (fboundp 'agent-repl-open-progress-note-loaded)
-               (agent-repl-open-progress-note-loaded ws)))
+               (agent-repl-open-progress-note-loaded ws))
+             ;; The editor's startup opens WS's tab only once its page drew.
+             (when (fboundp 'agent-repl-startup-note-page-loaded)
+               (agent-repl-startup-note-page-loaded ws)))
            (when (functionp prior) (funcall prior xwidget event-type))))
         (agent-repl--log ws "elisp.frontend.watch-load: armed ws=%s" ws)))))
 

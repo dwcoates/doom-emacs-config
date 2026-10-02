@@ -1408,6 +1408,29 @@ accessor would not reach the code under test."
             (should (equal noted "alpha")))
         (kill-buffer buf)))))
 
+(ert-deftest agent-repl-test-frontend-a-load-tells-the-editor-startup-the-page-drew ()
+  "The editor's startup opens a tab only once its page drew."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((noted nil)
+          (props nil)
+          (buf (generate-new-buffer "*fake-webview*")))
+      (unwind-protect
+          (cl-letf (((symbol-function 'agent-repl--frontend-webview-live-widget)
+                     (lambda (_buf) 'widget))
+                    ((symbol-function 'xwidget-get) (lambda (_w _p) nil))
+                    ((symbol-function 'xwidget-put)
+                     (lambda (_w _p v) (setq props v)))
+                    ((symbol-function 'agent-repl-open-progress-note-loaded) #'ignore)
+                    ((symbol-function 'agent-repl-startup-note-page-loaded)
+                     (lambda (ws) (setq noted ws))))
+            (agent-repl--frontend-watch-load "alpha" buf)
+            ;; Act
+            (funcall props 'widget 'load-changed)
+            ;; Assert
+            (should (equal noted "alpha")))
+        (kill-buffer buf)))))
+
 (ert-deftest agent-repl-test-frontend-load-watcher-defers-to-the-prior-callback ()
   "The webkit machinery still gets every event it needs."
   ;; Arrange
