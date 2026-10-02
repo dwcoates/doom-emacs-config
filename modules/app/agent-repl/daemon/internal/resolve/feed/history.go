@@ -4,7 +4,6 @@ import (
 	"context"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
-	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
@@ -18,8 +17,19 @@ import (
 // upsert rule a settled frame carries its start's facts, so no `start` is
 // replayed and none is needed.
 
-// OnHistoryPage replays a watch's opening catch-up page.
+// OnHistoryPage replays a watch's opening catch-up page. No watch replays
+// history (feed paging on demand): the page is empty under tail_only, and
+// under known_through carries only what was written after what the daemon
+// holds, so it is drawn as the conversation catching up and never stands as a
+// loaded page of its feed (book.go).
 func (r *resolver) OnHistoryPage(ws ids.WorkspaceID, agent *conversationv1.AgentId, page *conversationv1.HistoryPage) {
+	r.replayPage(ws, agent, page, nil)
+}
+
+// replayPage draws one history page: a watch's catch-up (LOAD nil), or a page a
+// reader's request loaded into its feed (book.go), whose entries a turn older
+// than every loaded page are withheld until that turn's page is loaded.
+func (r *resolver) replayPage(ws ids.WorkspaceID, agent *conversationv1.AgentId, page *conversationv1.HistoryPage, load *pageLoad) {
 	// A FORK'S PORTED CONVERSATION IS READ BEFORE THE LOCK IS TAKEN: it comes
 	// from the daemon's durable record, and no read of a database belongs
 	// inside the resolver's mutex.
@@ -33,6 +43,15 @@ func (r *resolver) OnHistoryPage(ws ids.WorkspaceID, agent *conversationv1.Agent
 	defer r.mu.Unlock()
 	s := r.state(ws)
 	log := r.logger(ws)
+	if load != nil && s != load.state {
+		// A BIND RESET THE FEED while the page was being read: it is a page of
+		// the conversation the workspace no longer runs, and drawing it would
+		// put that conversation back.
+		log.Info("daemon.feed.history_load_discarded",
+			"a loaded history page arrived after the workspace's feed was reset; it was not drawn",
+			dlog.Context{"agent": agent.GetValue(), "entries": len(page.GetEntries())})
+		return
+	}
 	// NOTHING THE PAGE DRAWS IS PUBLISHED UNTIL THE PAGE IS WHOLLY PLACED: the
 	// page's newest cut is established before any row is served, so no reader
 	// is ever handed a row that cut goes on to withhold (holdPushes).
@@ -46,6 +65,7 @@ func (r *resolver) OnHistoryPage(ws ids.WorkspaceID, agent *conversationv1.Agent
 	// above the rows this workspace draws live, whichever arrived first.
 	entries := page.GetEntries()
 	s.plane = planeHistory
+	s.load = load
 	// A REPLAY'S OWN ROWS FOLLOW WHAT THE REPLAY DREW, never what an earlier
 	// replay or the live plane left behind (order.go).
 	clear(s.replayTail)
@@ -58,16 +78,22 @@ func (r *resolver) OnHistoryPage(ws ids.WorkspaceID, agent *conversationv1.Agent
 	for turn, addr := range addresses {
 		s.addressTurn(turn, addr)
 	}
+	var withheld []*conversationv1.HistoryEntryAt
 	for i := len(entries) - 1; i >= 0; i-- {
-		// A FORK'S BOOK HOLDS ITS INHERITED PAST AROUND ITS OWN TURNS (the
-		// book orders by first insert, and the copy was ingested while the
-		// fork ran): each entry is drawn in the plane its lineage names.
-		at := entries[i]
-		if classAgent, turn := entryClass(at, agent); r.inherits(s, classAgent, turn) {
-			r.drawInherited(s, func() { r.replayStamped(s, agent, at) })
+		if load != nil && r.withholds(s, load, entries[i]) {
+			withheld = append(withheld, entries[i])
 			continue
 		}
-		r.replayStamped(s, agent, at)
+		r.replayPageEntry(s, agent, entries[i])
+	}
+	if load != nil {
+		withheld = append(withheld, r.redrawPending(s, agent, load)...)
+		load.book.pending = withheld
+		if len(withheld) > 0 {
+			log.Debug("daemon.feed.history_entries_withheld",
+				"entries of turns whose prompts are on pages not yet loaded are withheld until those pages load",
+				dlog.Context{"agent": agent.GetValue(), "feed": load.feedKey, "withheld": len(withheld)})
+		}
 	}
 	// The page's last turn, when its terminal is not on the page and its
 	// durable row is closed, ends here, still in the history plane.
@@ -75,6 +101,7 @@ func (r *resolver) OnHistoryPage(ws ids.WorkspaceID, agent *conversationv1.Agent
 	s.replayCloses = nil
 	s.replayTurn = nil
 	s.plane = planeLive
+	s.load = nil
 	r.reportUnstampedReplay(s, agent, len(entries))
 
 	// A REPLAY CARRIES NO START — "what history replays is SETTLED frames" —
@@ -84,47 +111,34 @@ func (r *resolver) OnHistoryPage(ws ids.WorkspaceID, agent *conversationv1.Agent
 	// not coming.
 	r.retireHeldSpawns(s, "the history page ended")
 
-	// WHETHER OLDER HISTORY REMAINS decides what a walk that reaches the
-	// oldest replayed row may claim. `floor` means the replay reached the
-	// oldest RETAINED entry, so the walk really is at the start; `more` means
-	// what is on screen has older history behind it that this replay did not
-	// deliver, and a walk that runs out must say so rather than claim a
-	// beginning it never saw.
-	if len(entries) == 0 && agent.GetValue() == "" {
-		// AN EMPTY PAGE OF A WATCH THAT HAS NAMED NO AGENT YET draws nothing and
-		// has nothing older behind it to mark: a fresh session's main watch
-		// opens this way before its first row names the main agent. Placing it
-		// would report an agent that simply has not spoken yet as unplaceable.
+	if len(entries) == 0 {
+		// AN EMPTY PAGE DRAWS NOTHING: a tail_only watch opens on one, as does a
+		// fresh session's main watch before its first row names the main
+		// agent. Nothing on it is placed, so nothing is reported unplaceable.
 		log.Debug("daemon.feed.history_page_empty",
-			"an empty opening page of a watch with no agent named yet was replayed; nothing to place",
-			dlog.Context{"boundary": boundaryName(page)})
+			"an empty history page was replayed; nothing to place",
+			dlog.Context{"agent": agent.GetValue(), "boundary": boundaryName(page), "loaded": load != nil})
 		return
 	}
-	at, placed := r.place(s, agent)
-	if !placed {
-		// place has reported the page's agent as unplaceable; its replay drew
-		// nothing, so there is no feed to mark truncated either.
-		return
-	}
-	f := r.feed(s, at.feed)
-	switch boundary := page.GetBoundary().(type) {
-	case *conversationv1.HistoryPage_Floor:
-		r.logger(ws).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "OnHistoryPage", "branch": "case *conversationv1.HistoryPage_Floor"})
-		f.historyMore = nil
-	case *conversationv1.HistoryPage_More:
-		f.historyMore = &frontendv1.FailureHistoryReplayTruncated{
-			Delivered: int64(len(entries)),
-			Reason:    "the opening history page did not reach the oldest retained entry",
-		}
-		_ = boundary
-	}
-
 	log.Debug("daemon.feed.history_page",
 		"a history page was replayed into the feed",
 		dlog.Context{
-			"agent": agent.GetValue(), "feed": f.key, "entries": len(entries),
-			"more": f.historyMore != nil,
+			"agent": agent.GetValue(), "entries": len(entries),
+			"boundary": boundaryName(page), "loaded": load != nil,
 		})
+}
+
+// replayPageEntry draws one page entry in the plane its lineage names.
+//
+// A FORK'S BOOK HOLDS ITS INHERITED PAST AROUND ITS OWN TURNS (the book orders
+// by first insert, and the copy was ingested while the fork ran): each entry
+// is drawn in the plane its lineage names.
+func (r *resolver) replayPageEntry(s *wsState, agent *conversationv1.AgentId, at *conversationv1.HistoryEntryAt) {
+	if classAgent, turn := entryClass(at, agent); r.inherits(s, classAgent, turn) {
+		r.drawInherited(s, func() { r.replayStamped(s, agent, at) })
+		return
+	}
+	r.replayStamped(s, agent, at)
 }
 
 // portedPrompts reads the conversation a fork carried over from its parent.

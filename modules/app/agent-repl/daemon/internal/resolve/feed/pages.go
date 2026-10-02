@@ -2,6 +2,7 @@ package feed
 
 import (
 	"context"
+	"errors"
 	"sort"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
@@ -15,98 +16,180 @@ import (
 // The page walk is PER READER and EPHEMERAL: keyed to the open connection,
 // dropped at every open and at CloseReader, never persisted. A fresh or
 // re-attached webview lands at the tail and pages back.
+//
+// A PAGE IS THE STORE'S PAGE (book.go): the rows from one loaded page's bound
+// up to the next. What a walk asks for that the daemon does not hold is read
+// on the spot, daemon → shim → store; what it holds (an earlier reader's
+// load) is served from memory.
 
 // OpenPage answers OpenFeed: the newest page of one feed, plus the watch token
-// the tail echoes.
+// the tail echoes. The feed's newest store page is read first unless it is
+// held and no entry has moved it since.
 func (r *resolver) OpenPage(ctx context.Context, ws ids.WorkspaceID, feed feedid.Feed, reader ReaderID) (*frontendv1.FeedPage, *agentreplv1.FeedWatchToken, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	s := r.state(ws)
-	f := r.feed(s, feed)
-	log := r.logger(ws)
-
-	durable, _ := r.deliverable(s, f, "open_page")
-	start := len(durable) - r.deps.PageSize
-	if start < 0 {
-		r.logger(ws).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "start < 0"})
-		start = 0
-	}
-	page := r.composePage(s, f, durable, start)
-	s.readers[reader] = &walk{feedKey: f.key, oldest: servedFrom(f, durable, start), standing: true}
-	token := r.mintToken(ws, f)
-
-	log.Debug("daemon.feed.open_page",
-		"a reader was served a feed's newest page and its tail was pinned",
-		dlog.Context{
-			"feed": f.key, "reader": string(reader), "rows": len(durable) - start,
-			"at_start": start == 0, "pinned_after": f.seq,
-		})
-	return page, token, nil
+	return r.walkPage(ctx, ws, feed, reader, true)
 }
 
 // NextPage answers GetFeedPage's next arm: the page before this reader's
-// current position.
+// current position, read on the spot when the daemon does not hold it.
 func (r *resolver) NextPage(ctx context.Context, ws ids.WorkspaceID, feed feedid.Feed, reader ReaderID) (*frontendv1.FeedPage, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	page, _, err := r.walkPage(ctx, ws, feed, reader, false)
+	return page, err
+}
+
+// walkPage serves one page of a walk — its opening (OPEN) or the next older —
+// loading store pages until the page it owes holds a row or nothing older
+// remains. Loads of one workspace are serialized (loadMu) and read off the
+// resolver's mutex; the page itself is composed, and an opening's token
+// minted, under it, so no row falls between the page and its tail.
+func (r *resolver) walkPage(ctx context.Context, ws ids.WorkspaceID, feed feedid.Feed, reader ReaderID, open bool) (*frontendv1.FeedPage, *agentreplv1.FeedWatchToken, error) {
+	mu := r.loadMu(ws)
+	mu.Lock()
+	defer mu.Unlock()
+	step := pageStep{open: open}
+	for {
+		r.mu.Lock()
+		page, token, plan, err := r.stepPage(ws, feed, reader, &step)
+		r.mu.Unlock()
+		if err != nil || plan == nil {
+			return page, token, err
+		}
+		if _, err := r.load(ctx, ws, feed, *plan); err != nil {
+			if !errors.Is(err, ErrNoHistorySource) {
+				return nil, nil, err
+			}
+			step.noSource = true
+		}
+	}
+}
+
+// pageStep is what one walkPage has done so far across its loads.
+type pageStep struct {
+	// open reports an opening: the walk is begun anew, at the top.
+	open bool
+	// newestRead reports that an opening has already decided whether the
+	// newest page needed reading.
+	newestRead bool
+	// noSource reports that no session was up to read from: what is held is
+	// all there is for now.
+	noSource bool
+	// exhausted is set by a step that found nothing older to serve or load:
+	// the walk stands at the feed's start.
+	exhausted bool
+}
+
+// stepPage composes the page a walk owes, or answers the load it needs first.
+// Called with r.mu held.
+func (r *resolver) stepPage(ws ids.WorkspaceID, feed feedid.Feed, reader ReaderID, step *pageStep) (*frontendv1.FeedPage, *agentreplv1.FeedWatchToken, *loadPlan, error) {
 	s := r.state(ws)
 	f := r.feed(s, feed)
 	log := r.logger(ws)
-
-	w, ok := s.readers[reader]
-	if !ok || !w.standing || w.feedKey != f.key {
-		// A `next` with no walk standing is a REFUSAL, not an empty page: the
-		// reader is asking to continue a walk it never began.
-		log.Warn("daemon.feed.next_without_walk",
-			"a reader asked for the next page with no walk standing on this feed",
-			dlog.Context{"feed": f.key, "reader": string(reader)})
-		return nil, ErrNoWalk
+	if step.open && !step.newestRead {
+		step.newestRead = true
+		if !f.book.newestLoaded || f.book.liveSince {
+			if plan, ok := r.planLoad(s, f, true); ok && !step.noSource {
+				return nil, nil, &plan, nil
+			}
+		}
 	}
 
-	durable, bounded := r.deliverable(s, f, "next_page")
-	// THE WALK STANDS AT A KEY, NOT AN INDEX. Everything keyed before the
-	// oldest row this reader was served is older than what it holds — a row
-	// that arrived late and sorts there included, which is how a late row the
-	// reader skipped as unloaded history reaches it in its place — and a
-	// separation that moved the delivery bound since simply leaves fewer rows
-	// before it.
-	end := olderThan(f, durable, w.oldest)
-	if end <= 0 {
-		if f.historyMore != nil && !bounded {
-			// The walk reached the oldest row the replay delivered, and the
-			// record says older history exists: what is on screen has a HOLE
-			// in it, and saying so is the honest answer.
-			log.Warn("daemon.feed.history_replay_truncated",
-				"a walk reached the oldest replayed row while older history remains",
+	w := &walk{feedKey: f.key, standing: true, top: true}
+	if !step.open {
+		held, ok := s.readers[reader]
+		if !ok || !held.standing || held.feedKey != f.key {
+			// A `next` with no walk standing is a REFUSAL, not an empty page:
+			// the reader is asking to continue a walk it never began.
+			log.Warn("daemon.feed.next_without_walk",
+				"a reader asked for the next page with no walk standing on this feed",
 				dlog.Context{"feed": f.key, "reader": string(reader)})
-			return &frontendv1.FeedPage{Result: &frontendv1.FeedPage_Error{
-				Error: &frontendv1.FeedPageError{
-					Headline: &frontendv1.FeedPageErrorHeadline{
-						Text: "the history replay stopped before it reached the live conversation",
-						Tone: "warning",
-					},
-					Kind: &frontendv1.FeedPageError_HistoryReplayTruncated{HistoryReplayTruncated: f.historyMore},
-				},
-			}}, nil
+			return nil, nil, nil, ErrNoWalk
 		}
+		w = held
+	}
+	action := "next_page"
+	if step.open {
+		action = "open_page"
+	}
+	durable, bounded := r.deliverable(s, f, action)
+	end := w.end(f, durable)
+	// MORE IS LOADABLE while the feed is an agent's book with a source, its
+	// start was not reached, and no separation bounds delivery: a cut withholds
+	// everything before it, so nothing older could ever be served.
+	plan, loadable := r.planLoad(s, f, false)
+	loadable = loadable && !bounded && !step.noSource
+	if end <= 0 {
+		if loadable {
+			return nil, nil, &plan, nil
+		}
+		step.exhausted = true
 		log.Info("daemon.feed.next_page_nothing_older",
 			"a reader asked for an older page and there is nothing older: the walk stands at the feed's start",
-			dlog.Context{"feed": f.key, "reader": string(reader), "bounded_by_separation": bounded})
-		return r.composePage(s, f, durable, 0), nil
+			dlog.Context{"feed": f.key, "reader": string(reader), "bounded_by_separation": bounded, "no_source": step.noSource})
+		return r.servePage(s, f, w, reader, durable, 0, len(durable), false, step.open), r.openToken(ws, f, step.open), nil, nil
 	}
-
-	start := end - r.deps.PageSize
-	if start < 0 {
-		r.logger(ws).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "start < 0"})
+	start, found := pageStart(f.book.bounds, f, durable, end)
+	if !found {
+		if loadable {
+			return nil, nil, &plan, nil
+		}
 		start = 0
 	}
-	page := r.composePageRange(s, f, durable, start, end)
-	w.oldest = servedFrom(f, durable, start)
+	page := r.servePage(s, f, w, reader, durable, start, end, start > 0 || loadable, step.open)
+	return page, r.openToken(ws, f, step.open), nil, nil
+}
 
-	log.Debug("daemon.feed.next_page",
-		"a reader was served the next older page",
-		dlog.Context{"feed": f.key, "reader": string(reader), "rows": end - start, "at_start": start == 0})
-	return page, nil
+// servePage composes the page ORDER[start:end), moves the walk to it, and
+// records it. An opening's walk replaces whatever the reader had.
+func (r *resolver) servePage(s *wsState, f *feedState, w *walk, reader ReaderID, order []string, start, end int, more, open bool) *frontendv1.FeedPage {
+	page := r.composePageRange(s, f, order, start, end, more)
+	if start < end {
+		w.oldest = servedFrom(f, order, start)
+		w.top = false
+	} else if w.top {
+		w.top = false
+	}
+	if open {
+		s.readers[reader] = w
+	}
+	op, sentence := "daemon.feed.next_page", "a reader was served the next older page"
+	if open {
+		op, sentence = "daemon.feed.open_page", "a reader was served a feed's newest page and its tail was pinned"
+	}
+	r.logger(s.id).Debug(op, sentence, dlog.Context{
+		"feed": f.key, "reader": string(reader), "rows": end - start,
+		"at_start": !more, "pinned_after": f.seq, "loaded_pages": len(f.book.bounds),
+	})
+	return page
+}
+
+// openToken mints an opening's watch token, nil for any other step.
+func (r *resolver) openToken(ws ids.WorkspaceID, f *feedState, open bool) *agentreplv1.FeedWatchToken {
+	if !open {
+		return nil
+	}
+	return r.mintToken(ws, f)
+}
+
+// end is where the next page a walk owes ends in ORDER: everything for a walk
+// at the top, everything older than its oldest row otherwise.
+func (w *walk) end(f *feedState, order []string) int {
+	if w.top {
+		return len(order)
+	}
+	return olderThan(f, order, w.oldest)
+}
+
+// pageStart is where the page ending at END begins: the newest loaded page's
+// bound with a row of ORDER before END at or above it. False when no loaded
+// page reaches below END: the rows there are held without a page of their own
+// (drawn live, or by the daemon) until an older page is loaded.
+func pageStart(bounds []string, f *feedState, order []string, end int) (int, bool) {
+	for i := len(bounds) - 1; i >= 0; i-- {
+		at := sort.Search(len(order), func(j int) bool { return f.rank[order[j]].key >= bounds[i] })
+		if at < end {
+			return at, true
+		}
+	}
+	return 0, false
 }
 
 // servedFrom is the walk position after serving ORDER from START: the order
@@ -255,14 +338,9 @@ func durableOrder(f *feedState) []string {
 	return out
 }
 
-// composePage renders the page from start to the newest row.
-func (r *resolver) composePage(s *wsState, f *feedState, order []string, start int) *frontendv1.FeedPage {
-	return r.composePageRange(s, f, order, start, len(order))
-}
-
 // composePageRange renders one page: oldest → newest within the page, the edge
-// arm, and the crumbs above it.
-func (r *resolver) composePageRange(s *wsState, f *feedState, order []string, start, end int) *frontendv1.FeedPage {
+// arm (MORE: older rows remain to be served or loaded), and the crumbs above it.
+func (r *resolver) composePageRange(s *wsState, f *feedState, order []string, start, end int, more bool) *frontendv1.FeedPage {
 	rows := make([]*frontendv1.FeedRow, 0, end-start)
 	for _, id := range order[start:end] {
 		if row, ok := f.rows[id]; ok {
@@ -274,8 +352,8 @@ func (r *resolver) composePageRange(s *wsState, f *feedState, order []string, st
 		Rows:        rows,
 		Breadcrumbs: r.breadcrumbs(s, f.key),
 	}
-	if start > 0 {
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "start > 0"})
+	if more {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "more"})
 		success.Edge = &frontendv1.FeedPageSuccess_HasMore{HasMore: &frontendv1.FeedPageHasMore{}}
 	} else {
 		success.Edge = &frontendv1.FeedPageSuccess_AtStart{AtStart: &frontendv1.FeedPageAtStart{}}
