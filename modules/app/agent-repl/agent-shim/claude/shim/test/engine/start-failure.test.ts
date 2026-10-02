@@ -31,6 +31,7 @@ describe("openingErrorVerdict", () => {
     ["a malformed request", 400, "messages: field required", "shim.vendor.api_error", "rejected"],
     ["an overloaded API that stated no status", undefined, "API Error: Overloaded", "shim.vendor.api_error", "retryable"],
     ["a network failure only the SDK's sentence names", undefined, "TypeError: fetch failed", "shim.vendor.api_error", "retryable"],
+    ["the API client's own connection failure", undefined, "API Error: Connection error.", "shim.vendor.api_error", "retryable"],
     ["an execution error with no transient words", undefined, "the budget is exhausted", "shim.vendor.api_error", "rejected"],
   ] as const)("labels %s", (_case, status, text, kind, retry) => {
     // Arrange, Act.
