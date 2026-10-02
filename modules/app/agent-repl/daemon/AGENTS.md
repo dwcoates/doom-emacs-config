@@ -1094,7 +1094,9 @@ transfer detaches the shim (never kills it) and the successor adopts it
 mid-turn. The layout restart's stand-down asks for the same gate (owner
 ruling, 2026-09-30) and carries the same carry (see "A breaking state layout
 change is rolled out stop-then-start"). Only a shim REPLACEMENT (stale build,
-restart verb, log ceiling) keeps `bounce.GateFreeness`.
+restart verb, log ceiling) keeps `bounce.GateFreeness`; the restart verb
+asks for it FORCED, so the registry takes it at once (see "A restart is
+immediate, and a vendor start is retried").
 
 - **The shim's refusal defers a replacement; it is never forced.** An
   unforced replacement's stand-down (`rollout.standDown`) that the shim
@@ -1141,6 +1143,31 @@ restart verb, log ceiling) keeps `bounce.GateFreeness`.
   successor judges every adopted shim against its own installed build. A move
   that is taken back puts its queue memory back (`UnsealMove`) and asks for the
   carried replacements again here.
+
+## A restart is immediate, and a vendor start is retried
+
+Design record `docs/protobuf-design/vendor-start-resilience.md`.
+
+- **THE SHIM LABELS, THE DAEMON LOOPS.** `Fleet.startSession`
+  (`internal/workspace/vendorstart.go`) retries a StartSession refusal the shim
+  labels retryable (`vendor_start_failed.retryable`,
+  `lock_holder_unavailable`) on the SAME client, x1.5 from 200ms capped at 5s,
+  for `DefaultVendorRetryWindow` (10 min) from the run's first failure; a
+  success or a restart (`CancelVendorStart`) ends the run. A rejection
+  (`rejected`, an unlabeled arm at ERROR, `unknown_session`,
+  `conversation_owned`) stops at once. The faults are `vendor_start_retrying`
+  (replaced per attempt), `vendor_start_rejected` and `vendor_start_failed`.
+- **A PROMPT WAITS FOR THE SESSION.** A submission to a shim with no started
+  session, and a StartTurn the shim refuses `no_session`, are held under the
+  reconnect hold; every session-up edge (`FleetDeps.SessionsUp`, and the boot
+  after it restores the holds) releases them. A failed bring-up drops nothing.
+- **RESTART HAS ONE MODE.** `RestartWorkspace` ends the vendor-start run, force-
+  ends the turn bounded by `DefaultRestartStopBound` (2s; an overrun is ERROR
+  and the restart proceeds), and asks for a FORCED bounce, whose stand-down
+  KillSession is bounded by `drain.DefaultStandBound`; a shim that answers
+  `no_session` or never answers a forced stand-down is killed at once. A
+  resume a restart cancelled relaunches over the shim it installed
+  (`rollout.ErrResumeRestarted`). The account switch keeps an unforced bounce.
 
 ## A coalesced bounce runs every kind it was asked, never one in place of another
 

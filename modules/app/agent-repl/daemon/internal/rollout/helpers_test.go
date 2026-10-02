@@ -416,6 +416,9 @@ type fakeShim struct {
 	// onKillSession, when set, runs as KillSession is asked, so a test acts
 	// at the point of no return.
 	onKillSession func()
+	// killHangs makes KillSession answer only when its context ends, as a
+	// shim whose vendor is unreachable does.
+	killHangs bool
 }
 
 func newFakeShim(pid int, order *steps) *fakeShim {
@@ -442,11 +445,15 @@ func (s *fakeShim) Detached() bool {
 	return s.detached
 }
 
-func (s *fakeShim) KillSession(_ context.Context, req *shimv1.KillSessionRequest) (*shimv1.KillSessionResponse, error) {
+func (s *fakeShim) KillSession(ctx context.Context, req *shimv1.KillSessionRequest) (*shimv1.KillSessionResponse, error) {
 	s.mu.Lock()
 	s.killReq = append(s.killReq, req)
-	answer, err := s.killAnswer, s.killErr
+	answer, err, hangs := s.killAnswer, s.killErr, s.killHangs
 	s.mu.Unlock()
+	if hangs {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
 	s.order.record("kill_session")
 	if s.onKillSession != nil {
 		s.onKillSession()
@@ -548,7 +555,9 @@ type fakeFleet struct {
 	adoptErr     map[ids.WorkspaceID]error
 	installErr   map[ids.WorkspaceID]error
 	resumeErr    map[ids.WorkspaceID]error
-	resumeCold   map[ids.WorkspaceID]*conversationv1.SessionCold
+	// resumeErrOnce is what the NEXT Resume of a workspace answers, once.
+	resumeErrOnce map[ids.WorkspaceID]error
+	resumeCold    map[ids.WorkspaceID]*conversationv1.SessionCold
 	// handOverErr is what HandOver answers for a workspace with a session.
 	handOverErr map[ids.WorkspaceID]error
 	// onAdopt, when set, runs as each Adopt arrives, before it answers.
@@ -575,18 +584,19 @@ type fakeFleet struct {
 
 func newFakeFleet(order *steps) *fakeFleet {
 	return &fakeFleet{
-		live:         make(map[ids.WorkspaceID]*fakeShim),
-		prelaunched:  make(map[ids.WorkspaceID]*fakeShim),
-		adopted:      make(map[ids.WorkspaceID]*fakeShim),
-		prelaunchErr: make(map[ids.WorkspaceID]error),
-		adoptErr:     make(map[ids.WorkspaceID]error),
-		installErr:   make(map[ids.WorkspaceID]error),
-		resumeErr:    make(map[ids.WorkspaceID]error),
-		resumeCold:   make(map[ids.WorkspaceID]*conversationv1.SessionCold),
-		handOverErr:  make(map[ids.WorkspaceID]error),
-		factsErr:     make(map[ids.WorkspaceID]error),
-		coldGates:    make(map[ids.WorkspaceID]*conversationv1.SessionCold),
-		order:        order,
+		live:          make(map[ids.WorkspaceID]*fakeShim),
+		prelaunched:   make(map[ids.WorkspaceID]*fakeShim),
+		adopted:       make(map[ids.WorkspaceID]*fakeShim),
+		prelaunchErr:  make(map[ids.WorkspaceID]error),
+		adoptErr:      make(map[ids.WorkspaceID]error),
+		installErr:    make(map[ids.WorkspaceID]error),
+		resumeErr:     make(map[ids.WorkspaceID]error),
+		resumeErrOnce: make(map[ids.WorkspaceID]error),
+		resumeCold:    make(map[ids.WorkspaceID]*conversationv1.SessionCold),
+		handOverErr:   make(map[ids.WorkspaceID]error),
+		factsErr:      make(map[ids.WorkspaceID]error),
+		coldGates:     make(map[ids.WorkspaceID]*conversationv1.SessionCold),
+		order:         order,
 
 		parkedAdoptions: make(map[ids.WorkspaceID]*conversationv1.SessionCold),
 	}
@@ -740,6 +750,10 @@ func (f *fakeFleet) Resume(_ context.Context, ws ids.WorkspaceID, _ shimclient.C
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if err := f.resumeErr[ws]; err != nil {
+		return Resumed{}, err
+	}
+	if err := f.resumeErrOnce[ws]; err != nil {
+		delete(f.resumeErrOnce, ws)
 		return Resumed{}, err
 	}
 	f.resumes = append(f.resumes, ws)

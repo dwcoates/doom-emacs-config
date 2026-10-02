@@ -552,6 +552,14 @@ func hostFault(f wsm.Fault) (*agentreplv1.HostFault, bool) {
 				Why:  f.Evidence["why"],
 			},
 		}
+	// THE VENDOR-START ARMS carry the very SessionFault* messages, read off
+	// the evidence by health's own renderers so the two surfaces agree.
+	case health.KindVendorStartRetrying:
+		out.Kind = &agentreplv1.HostFault_VendorStartRetrying{VendorStartRetrying: health.VendorStartRetryingArm(f)}
+	case health.KindVendorStartRejected:
+		out.Kind = &agentreplv1.HostFault_VendorStartRejected{VendorStartRejected: health.VendorStartRejectedArm(f)}
+	case health.KindVendorStartFailed:
+		out.Kind = &agentreplv1.HostFault_VendorStartFailed{VendorStartFailed: health.VendorStartFailedArm(f)}
 	default:
 		return nil, false
 	}

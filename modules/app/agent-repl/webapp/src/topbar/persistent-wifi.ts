@@ -2,13 +2,15 @@
  * The persistent-wifi chip: one wifi glyph between the context chip and the
  * warning chip, stating two facts about the MACHINE the daemon runs on.
  *
- * THE TWO ONEOFS ARE PAINTED INDEPENDENTLY, and each arm maps to exactly one
- * paint (topbar.proto, TopbarPersistentWifi):
- *   wifi  joined → green glyph; not_joined → red glyph; unassigned → muted.
- *   mode  on → the glyph sits on a black disc it is just inscribed in; off
- *         or unassigned → no disc.
+ * THE GLYPH IS ALWAYS BLACK AND THE MODE ARM PAINTS THE DISC (owner request,
+ * 2026-10-02): on → a green disc; off or unassigned → a white one. The wifi arm
+ * rides as a data attribute but paints nothing; the daemon's tooltip says it.
  * The arms ride as data attributes and the stylesheet does the painting, so
  * this file decides nothing beyond naming the arm.
+ *
+ * A TOGGLE IN FLIGHT PULSES (`data-settling`) until the daemon answers. The
+ * contract states no "still changing" fact, so the answer is the one signal
+ * of "settled" this end has.
  *
  * A CONTROL AS WELL AS A STATUS (owner request, 2026-10-02): clicking the
  * glyph turns the mode over through `agentrepl.v1.UpdatePersistentWifiMode`'s
@@ -19,7 +21,10 @@
  * the chip redraws from the push the change causes.
  */
 import { createControl, type Control } from "../control.js";
-import { UpdatePersistentWifiModeResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_persistent_wifi_mode_pb";
+import {
+  UpdatePersistentWifiModeResponseSchema,
+  type UpdatePersistentWifiModeResponse,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_persistent_wifi_mode_pb";
 import type { TopbarPersistentWifi } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
 import { whileInFlight } from "../feed/cards/controls.js";
 import { log } from "../log.js";
@@ -179,14 +184,20 @@ export async function togglePersistentWifiMode(
   // CLEARED BEFORE THE CALL: a refusal standing beside the chip the reader just
   // clicked again reads as the answer to the NEW click.
   clearRefusals(chip);
-  const answered = await whileInFlight([button], () =>
-    callUnary(
-      tc.ctx,
-      "UpdatePersistentWifiMode",
-      (client) => client.updatePersistentWifiMode({ action: { case: "toggle", value: {} } }),
-      UpdatePersistentWifiModeResponseSchema,
-    ),
-  );
+  chip.setAttribute("data-settling", "");
+  let answered: Awaited<ReturnType<typeof whileInFlight<UpdatePersistentWifiModeResponse>>>;
+  try {
+    answered = await whileInFlight([button], () =>
+      callUnary(
+        tc.ctx,
+        "UpdatePersistentWifiMode",
+        (client) => client.updatePersistentWifiMode({ action: { case: "toggle", value: {} } }),
+        UpdatePersistentWifiModeResponseSchema,
+      ),
+    );
+  } finally {
+    chip.removeAttribute("data-settling");
+  }
   if ("failed" in answered) {
     if (isMalformedView(answered.failed)) {
       await guardMalformed(tc.ctx, "topbar.persistent-wifi-toggle", Promise.reject(answered.failed));

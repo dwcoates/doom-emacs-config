@@ -1434,3 +1434,103 @@ func TestADeferralToldToTheShimBouncesCompletionIsRecordedAsAContractBreach(t *t
 		t.Fatalf("records = %+v, want the breach at ERROR", records(h.log, opBounce))
 	}
 }
+
+// A SHIM HOLDING NO SESSION -- its vendor never started -- answers the
+// stand-down `no_session` and does not leave; it is stopped at once rather
+// than after the window.
+func TestASessionlessOldShimIsStoppedAtOnceWithoutTheWindow(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	old := h.fleet.live[ws]
+	old.killAnswer = &shimv1.KillSessionResponse{
+		Result: &shimv1.KillSessionResponse_Failure{Failure: &shimv1.KillSessionFailure{
+			Cause: &shimv1.KillSessionFailure_NoSession{NoSession: &shimv1.KillSessionNoSession{}},
+		}},
+	}
+	done := make(chan error, 1)
+
+	// Act
+	if _, err := h.c.BounceShim(context.Background(), ws, ReasonRestartVerb, true, func(err error) { done <- err }); err != nil {
+		t.Fatalf("BounceShim: %v", err)
+	}
+	waitForForceKill(t, old)
+	old.Reap()
+
+	// Assert
+	if err := awaitBounce(t, h, done); err != nil {
+		t.Fatalf("done = %v, want the bounce finished", err)
+	}
+	for _, armed := range h.clock.Waits() {
+		if armed == standDownWindow {
+			t.Fatalf("the stand-down window was armed for a shim that held no session")
+		}
+	}
+}
+
+// A RESTART THAT ENDS THE RESUME'S VENDOR-START RUN relaunches over the shim
+// the bounce had just installed, forced, instead of failing the bounce.
+func TestAResumeEndedByARestartRelaunchesOverTheInstalledShim(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	first := newFakeShim(7001, h.order)
+	h.fleet.prelaunched[ws] = first
+	h.fleet.resumeErrOnce[ws] = ErrResumeRestarted
+	old := h.fleet.live[ws]
+	old.onKillSession = func() {
+		// Past the first prelaunch: the relaunch over `first` prelaunches a
+		// fresh shim.
+		h.fleet.mu.Lock()
+		h.fleet.prelaunched[ws] = newFakeShim(7002, h.order)
+		h.fleet.mu.Unlock()
+	}
+	done := make(chan error, 1)
+	old.Reap()
+	first.Reap()
+
+	// Act
+	if _, err := h.c.BounceShim(context.Background(), ws, ReasonRestartVerb, true, func(err error) { done <- err }); err != nil {
+		t.Fatalf("BounceShim: %v", err)
+	}
+
+	// Assert
+	if err := awaitBounce(t, h, done); err != nil {
+		t.Fatalf("done = %v, want the relaunch over the restarted resume finished", err)
+	}
+	reqs := first.KillRequests()
+	if len(reqs) != 1 || !reqs[0].GetForce() {
+		t.Fatalf("stand-downs of the restarted shim = %+v, want one forced", reqs)
+	}
+	if got := h.fleet.live[ws].PID(); got != 7002 {
+		t.Fatalf("installed pid = %d, want the relaunch's 7002", got)
+	}
+}
+
+// A FORCED STAND-DOWN THE SHIM NEVER ANSWERS is bounded: the call ends at its
+// bound and the shim is killed at once, never after the window.
+func TestAForcedStandDownThatHangsIsKilledAtItsBound(t *testing.T) {
+	// Arrange
+	h := newHarness(t, func(d *Deps) { d.StandDownCallBound = time.Millisecond })
+	ws, _ := h.workspace(t)
+	old := h.fleet.live[ws]
+	old.killHangs = true
+	done := make(chan error, 1)
+
+	// Act
+	if _, err := h.c.BounceShim(context.Background(), ws, ReasonRestartVerb, true, func(err error) { done <- err }); err != nil {
+		t.Fatalf("BounceShim: %v", err)
+	}
+	waitForForceKill(t, old)
+	old.Reap()
+
+	// Assert
+	if err := awaitBounce(t, h, done); err != nil {
+		t.Fatalf("done = %v, want the bounce finished past the hung stand-down", err)
+	}
+	for _, armed := range h.clock.Waits() {
+		if armed == standDownWindow {
+			t.Fatalf("the stand-down window was waited out for a hung forced stand-down")
+		}
+	}
+}

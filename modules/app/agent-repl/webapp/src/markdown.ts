@@ -31,6 +31,7 @@
 import MarkdownIt from "markdown-it";
 import taskLists from "markdown-it-task-lists";
 import { escapeHtml, highlightCode } from "./highlight.js";
+import { FILE_LINK_EXTENSIONS, hasFileExtension, isFileLinkHref, isWebHref } from "./href.js";
 import { isMetapromptTree, renderTreeHtml } from "./metaprompt-tree.js";
 
 /**
@@ -53,11 +54,13 @@ export function inline(escaped: string): string {
     codeSpans.push(code);
     return `\u0000${codeSpans.length - 1}\u0000`;
   });
-  // Links: [text](http…) — scheme-restricted to http/https.
+  // Links: [text](url) — a web URL or a file link (path or bare file name).
   out = out.replace(
-    /\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g,
-    (_m, text: string, url: string) =>
-      `<a href="${url}" target="_blank" rel="noopener noreferrer">${text}</a>`,
+    /\[([^\]]+)\]\(([^)\s]+)\)/g,
+    (whole: string, text: string, url: string) =>
+      isWebHref(url) || isFileLinkHref(url)
+        ? `<a href="${url}" target="_blank" rel="noopener noreferrer">${text}</a>`
+        : whole,
   );
   // Bold before italic so ** is not consumed as two *.
   out = out.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
@@ -74,12 +77,55 @@ export function inline(escaped: string): string {
 // newline as <br>, matching how model prose expects soft breaks to show.
 const md = new MarkdownIt({ html: false, linkify: true, breaks: true });
 
-// Restrict link (and image) targets to http/https only — stricter than
-// markdown-it's default allow-list. A rejected URL renders as literal
-// text with no anchor.
-md.validateLink = (url: string): boolean => /^https?:\/\//i.test(url.trim());
+// Restrict link targets to a web URL or a file link (a path or bare file
+// name, which the daemon resolves on click) — stricter than markdown-it's
+// default allow-list. A rejected URL renders as literal text with no anchor.
+md.validateLink = (url: string): boolean => isWebHref(url) || isFileLinkHref(url);
+
+// AN IMAGE IS NEVER A FILE LINK: validateLink gates images too, and a relative
+// `<img src>` would make the webview request a path from the page's own origin.
+// An image whose source is not a web URL draws its alt text instead.
+const defaultImage =
+  md.renderer.rules.image ??
+  ((tokens, idx, options, _env, self) => self.renderToken(tokens, idx, options));
+md.renderer.rules.image = (tokens, idx, options, env, self) => {
+  const src = tokens[idx].attrGet("src") ?? "";
+  if (!isWebHref(src)) return escapeHtml(tokens[idx].content);
+  return defaultImage(tokens, idx, options, env, self);
+};
 
 md.use(taskLists);
+
+// A BARE FILE NAME IS A FILE, NOT A HOST. The fuzzy linkifier must first SEE
+// `foo.ts` (most extensions are no TLD), then the rule below turns every
+// scheme-less autolink ending in a file extension into a file link: its href
+// is the bare label, which the click router sends to the daemon.
+//
+// WHICH EXTENSIONS ARE ALSO WEB DOMAINS is the linkifier's own knowledge, asked
+// BEFORE the file extensions are added to it: if it already links `a.<ext>`,
+// `<ext>` is a real domain ending and a bare name carrying it is ambiguous.
+const DOMAIN_EXTENSIONS: ReadonlySet<string> = new Set(
+  FILE_LINK_EXTENSIONS.filter((ext) => md.linkify.test(`a.${ext}`)),
+);
+md.linkify.tlds([...FILE_LINK_EXTENSIONS], true);
+md.core.ruler.after("linkify", "file-linkify", (state) => {
+  for (const block of state.tokens) {
+    const children = block.children ?? [];
+    children.forEach((token, index) => {
+      if (token.type !== "link_open" || token.markup !== "linkify") return;
+      const label = children[index + 1]?.content ?? "";
+      if (/^[a-z][a-z0-9+.-]*:/i.test(label) || label.includes("@") || label.includes("/")) return;
+      if (!hasFileExtension(label)) return;
+      token.attrSet("href", label);
+      // An ambiguous name (`wikipedia.org`, `README.md`) falls back to the web
+      // when no file resolves; the click router reads this mark.
+      if (DOMAIN_EXTENSIONS.has(label.slice(label.lastIndexOf(".") + 1).toLowerCase())) {
+        token.attrSet("data-web-fallback", "");
+      }
+    });
+  }
+  return true;
+});
 
 // Every emitted link opens in a new tab, safely.
 const defaultLinkOpen =

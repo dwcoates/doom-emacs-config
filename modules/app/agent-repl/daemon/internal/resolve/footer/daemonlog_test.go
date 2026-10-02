@@ -71,23 +71,23 @@ func TestAFooterRecordNeverFeedsBack(t *testing.T) {
 	connected(h)
 	teed(t, h)
 
-	// Act: the footer itself records a WARN (a drop with no failure to own it).
+	// Act: the footer itself records an ERROR (a submission naming no stage).
 	// The record is written under the resolver's own lock, so a feedback would
 	// DEADLOCK rather than draw a line: the call runs on its own goroutine and
 	// the test fails at a bound instead of hanging.
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		h.r.AddDroppedPrompts(testWS, 1)
+		h.r.OnSubmission(testWS, Submission{Prompt: "p", Stage: SubmissionStage(255)})
 	}()
 	select {
 	case <-done:
 	case <-time.After(feedbackBound):
-		t.Fatalf("AddDroppedPrompts did not return within %s: the footer's own WARN fed back through the record tee and deadlocked on the resolver's lock", feedbackBound)
+		t.Fatalf("OnSubmission did not return within %s: the footer's own ERROR fed back through the record tee and deadlocked on the resolver's lock", feedbackBound)
 	}
 
 	// Assert
-	if !hasLevel(h.log.Records(), "warn", "daemon.footer.dropped_prompts_unattributed") {
+	if !hasLevel(h.log.Records(), "error", "daemon.footer.on_submission") {
 		t.Fatalf("the footer's own warning was not recorded; the test proves nothing")
 	}
 	if got := transientOf(t, h); got != nil {

@@ -491,6 +491,10 @@ func (s *sequence) adopt(ctx context.Context, log dlog.Logger, workspaces []wsm.
 			report.AdoptedInert = append(report.AdoptedInert, sv.ws.ID)
 			continue
 		}
+		// A SURVIVOR THAT IS NOT INERT HOLDS ITS STARTED SESSION: the fleet is
+		// told so, or every prompt to it would wait for a reconnect that has
+		// already happened.
+		s.deps.SessionAdopted(sv.ws.ID)
 		report.AdoptedSessions = append(report.AdoptedSessions, rollout.AdoptedSession{
 			Workspace: sv.ws.ID,
 			ShimPID:   sv.client.PID(),
@@ -598,6 +602,13 @@ func (s *sequence) restoreHolds(ctx context.Context, log dlog.Logger, report *Re
 		"holds": len(held),
 	})
 	report.HoldsRestored = len(held)
+	// AN ADOPTED SESSION IS A SESSION UP: the prompts a previous daemon held
+	// until it reconnected are delivered to it, once the holds are restored
+	// whole (a release that read a corrupt record before the restore would
+	// fail the boot a second way).
+	for _, adopted := range report.AdoptedSessions {
+		s.deps.Queue.ReleaseReconnectHolds(adopted.Workspace)
+	}
 	return nil
 }
 

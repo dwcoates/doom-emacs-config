@@ -208,7 +208,7 @@ func (r *resolver) mutate(ws ids.WorkspaceID, operation, message string, ctx dlo
 // THE STRIP HAS ONE SHAPE (topbar.proto, FIXED SCHEMA AND ORGANIZATION; owner
 // ruling 2026-09-13). Every cell is stated on every publication and in the
 // same slot; there is no branch here that draws a different strip. A cell
-// whose SESSION fact is unknown says so IN ITS OWN SLOT: the three controls by
+// whose SESSION fact is unknown says so IN ITS OWN SLOT: the two controls by
 // absence, which the client draws as a dash, and the context chip and warning
 // strip by their own content — the chip carrying the context the session held
 // with the reason in its hover, the strip carrying the state as one line.
@@ -230,37 +230,8 @@ func (r *resolver) render(s *wsState) (*frontendv1.TopbarView, error) {
 		Context:              r.contextChip(s),
 		Account:              r.account(s),
 		PermissionModePicker: r.permissionModePicker(s),
-		FastMode:             fastMode(s),
 		PersistentWifi:       persistentWifiChip(r.persistentWifi),
 	}, nil
-}
-
-// fastMode projects the vendor's last fast-mode statement onto the strip, arm
-// for arm. Nil until the session has stated one: the field is UNSET rather
-// than defaulted to off, because "the vendor has not said" and "the vendor
-// said no" are different facts and only one of them is a claim.
-func fastMode(s *wsState) *frontendv1.TopbarFastMode {
-	if s.sessionless() {
-		return nil
-	}
-	switch state := s.fastMode.GetState().(type) {
-	case *conversationv1.SessionFastMode_On:
-		return &frontendv1.TopbarFastMode{
-			State: &frontendv1.TopbarFastMode_On{On: &frontendv1.TopbarFastModeOn{}},
-		}
-	case *conversationv1.SessionFastMode_Off:
-		return &frontendv1.TopbarFastMode{
-			State: &frontendv1.TopbarFastMode_Off{
-				Off: &frontendv1.TopbarFastModeOff{Reason: state.Off.GetReason()},
-			},
-		}
-	case *conversationv1.SessionFastMode_Cooldown:
-		return &frontendv1.TopbarFastMode{
-			State: &frontendv1.TopbarFastMode_Cooldown{Cooldown: &frontendv1.TopbarFastModeCooldown{}},
-		}
-	default:
-		return nil
-	}
 }
 
 // title composes the title line: the workspace's name, plus the branch when the
@@ -957,7 +928,9 @@ func (r *resolver) sessionArm(update *conversationv1.SessionUpdate) (string, fun
 	case *conversationv1.SessionUpdate_AccountUsage:
 		return "account_usage", func(*wsState) {}
 	case *conversationv1.SessionUpdate_FastMode:
-		return "fast_mode", func(s *wsState) { s.fastMode = u.FastMode }
+		// THE STRIP NO LONGER DRAWS FAST MODE (TopbarView tag 10 retired,
+		// owner 2026-10-02), so the vendor's statement changes no view.
+		return "fast_mode", func(*wsState) {}
 	case *conversationv1.SessionUpdate_McpServer:
 		return "mcp_server", func(s *wsState) { s.putMcpServer(u.McpServer) }
 	case *conversationv1.SessionUpdate_RateLimitStatus:

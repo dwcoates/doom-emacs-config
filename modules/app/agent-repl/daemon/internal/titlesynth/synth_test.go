@@ -461,3 +461,179 @@ func containsAll(s string, subs ...string) bool {
 	}
 	return true
 }
+
+// ---- the cadence: every SynthesizeEvery prompts, not every prompt ----
+
+// promptsN answers n distinct prompts.
+func promptsN(n int) []string {
+	out := make([]string, n)
+	for i := range out {
+		out[i] = fmt.Sprintf("prompt %d", i)
+	}
+	return out
+}
+
+// synthesizeWith points the digester at a NONE-boundary digest of these
+// prompts and runs one synthesis.
+func (h *harness) synthesizeWith(t *testing.T, prompts []string) {
+	t.Helper()
+	h.digest.resp = digestResponse(shimv1.TitleDigestBoundary_TITLE_DIGEST_BOUNDARY_NONE, "", prompts...)
+	h.synth.synthesizeOnce(context.Background(), testWS)
+}
+
+func TestTheFirstTitleIsSynthesizedAtTheFirstPrompt(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, nil)
+
+	// Act.
+	h.synthesizeWith(t, promptsN(1))
+
+	// Assert.
+	if got := h.model.callCount(); got != 1 {
+		t.Fatalf("model calls = %d, want 1", got)
+	}
+}
+
+func TestFewerThanSynthesizeEveryNewPromptsMakeNoModelCall(t *testing.T) {
+	// Arrange: a title at one prompt.
+	h := newHarness(t, nil)
+	h.synthesizeWith(t, promptsN(1))
+
+	// Act: four more prompts.
+	h.synthesizeWith(t, promptsN(1+SynthesizeEvery-1))
+
+	// Assert.
+	if got := h.model.callCount(); got != 1 {
+		t.Fatalf("model calls = %d, want 1 (not due yet)", got)
+	}
+}
+
+func TestSynthesizeEveryNewPromptsMakeTheNextModelCall(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, nil)
+	h.synthesizeWith(t, promptsN(1))
+
+	// Act.
+	h.synthesizeWith(t, promptsN(1+SynthesizeEvery))
+
+	// Assert.
+	if got := h.model.callCount(); got != 2 {
+		t.Fatalf("model calls = %d, want 2", got)
+	}
+}
+
+func TestTheCadenceCountsFromTheLastSynthesisNotTheLastTrigger(t *testing.T) {
+	// Arrange: a title at one prompt, then a trigger at four that made no call.
+	h := newHarness(t, nil)
+	h.synthesizeWith(t, promptsN(1))
+	h.synthesizeWith(t, promptsN(4))
+
+	// Act: six prompts is five past the last synthesis.
+	h.synthesizeWith(t, promptsN(6))
+
+	// Assert.
+	if got := h.model.callCount(); got != 2 {
+		t.Fatalf("model calls = %d, want 2", got)
+	}
+}
+
+func TestAMovedBoundaryIsDueAtOnce(t *testing.T) {
+	// Arrange: a title of an uncut conversation.
+	h := newHarness(t, nil)
+	h.synthesizeWith(t, promptsN(3))
+
+	// Act: the transcript now opens at a compaction, with one prompt after it.
+	h.digest.resp = digestResponse(shimv1.TitleDigestBoundary_TITLE_DIGEST_BOUNDARY_COMPACT, "the summary", "after")
+	h.synth.synthesizeOnce(context.Background(), testWS)
+
+	// Assert.
+	if got := h.model.callCount(); got != 2 {
+		t.Fatalf("model calls = %d, want 2", got)
+	}
+}
+
+// ---- the title digest: prompts only, whole, the newest weighed most ----
+
+func TestTitleDigestCarriesAPromptWhole(t *testing.T) {
+	// Arrange: a prompt far past the naming digest's per-prompt cap.
+	long := strings.Repeat("x", MaxPromptRunes*3)
+
+	// Act.
+	got := TitleDigest("", []string{long})
+
+	// Assert.
+	if !strings.Contains(got, long) {
+		t.Fatal("TitleDigest truncated a prompt, want it whole")
+	}
+}
+
+func TestTitleDigestCarriesEveryPrompt(t *testing.T) {
+	// Arrange: more prompts than the naming digest keeps.
+	prompts := promptsN(MaxPrompts + 5)
+
+	// Act.
+	got := TitleDigest("", prompts)
+
+	// Assert.
+	if !strings.Contains(got, "prompt 0\n") || !strings.Contains(got, fmt.Sprintf("prompt %d\n", MaxPrompts+4)) {
+		t.Fatalf("TitleDigest = %q, want the oldest and the newest prompt", got)
+	}
+}
+
+func TestTitleDigestSetsTheNewestPromptsApart(t *testing.T) {
+	// Arrange.
+	prompts := promptsN(RecentPrompts + 2)
+
+	// Act.
+	got := TitleDigest("", prompts)
+
+	// Assert: the two oldest come before the recent header, the rest after.
+	recent := strings.Index(got, "most recent requests")
+	if recent < 0 || strings.Index(got, "prompt 1\n") > recent || strings.Index(got, "prompt 2\n") < recent {
+		t.Fatalf("TitleDigest = %q, want the newest %d after the recent header", got, RecentPrompts)
+	}
+}
+
+func TestTitleDigestLeadsWithTheSummaryWhenFewPromptsFollowedIt(t *testing.T) {
+	// Arrange, Act.
+	got := TitleDigest("the compaction summary", promptsN(RecentPrompts-1))
+
+	// Assert.
+	if !strings.HasPrefix(got, "A summary of the conversation") || !strings.Contains(got, "the compaction summary") {
+		t.Fatalf("TitleDigest = %q, want the summary first", got)
+	}
+}
+
+func TestTitleDigestDropsTheSummaryOnceRecentPromptsFollowedIt(t *testing.T) {
+	// Arrange, Act.
+	got := TitleDigest("the compaction summary", promptsN(RecentPrompts))
+
+	// Assert.
+	if strings.Contains(got, "the compaction summary") {
+		t.Fatalf("TitleDigest = %q, want no summary past %d prompts", got, RecentPrompts)
+	}
+}
+
+func TestTitleDigestOpensTemplateDelimitersAUserTyped(t *testing.T) {
+	// Arrange, Act.
+	got := TitleDigest("", []string{"why does {{prompt}} not splice"})
+
+	// Assert.
+	if strings.Contains(got, "{{") || strings.Contains(got, "}}") {
+		t.Fatalf("TitleDigest = %q, want no template delimiter left", got)
+	}
+}
+
+func TestTheModelIsSentTheTitleDigest(t *testing.T) {
+	// Arrange: a prompt the naming digest would have cut.
+	long := strings.Repeat("y", MaxPromptRunes*2)
+	h := newHarness(t, digestResponse(shimv1.TitleDigestBoundary_TITLE_DIGEST_BOUNDARY_NONE, "", long))
+
+	// Act.
+	h.synth.synthesizeOnce(context.Background(), testWS)
+
+	// Assert.
+	if !strings.Contains(h.model.lastRequest().Prompt, long) {
+		t.Fatal("the model call carried a truncated prompt, want it whole")
+	}
+}

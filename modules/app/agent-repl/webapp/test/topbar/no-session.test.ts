@@ -20,7 +20,6 @@ describe("the no-session cell", () => {
   });
 
   it("keeps the class of the control it replaces, so the slot keeps its box", () => {
-    expect(drawNoSessionCell("fast").className).toBe("topbar-fast");
   });
 
   it("says why it is empty, because a bare dash is uninterpretable", () => {

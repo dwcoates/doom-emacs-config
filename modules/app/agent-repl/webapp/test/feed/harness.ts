@@ -35,6 +35,10 @@ import {
   type SelectFeedRowRequest,
   type SelectFeedRowResponse,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_feed_row_pb";
+import {
+  type LoadFeedThroughRequest,
+  type LoadFeedThroughResponse,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_load_feed_through_pb";
 import { FeedWatchTokenSchema } from "../../../proto/gen/ts/agentrepl/v1/feed_token_pb";
 import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { TurnIdSchema } from "../../../proto/gen/ts/conversation/v1/turn_pb";
@@ -167,6 +171,11 @@ export interface FeedScript {
   channels?: Map<string, Channel<WatchFeedResponse>>;
   getFeedPage?: (req: GetFeedPageRequest) => GetFeedPageResponse;
   interrupt?: (req: InterruptRequest) => InterruptResponse;
+  /**
+   * The frames LoadFeedThrough streams, as an async generator the test owns.
+   * Unscripted, the stream ends at once (a contract violation a test can read).
+   */
+  loadFeedThrough?: (req: LoadFeedThroughRequest) => AsyncIterable<LoadFeedThroughResponse>;
   /** Answers SelectFeedRow; a success selecting nothing when unscripted. */
   selectFeedRow?: (req: SelectFeedRowRequest) => SelectFeedRowResponse;
   /** The page's clock. Pass a `countingTicker` to assert on live subscriptions. */
@@ -179,6 +188,7 @@ export interface FeedCalls {
   watchFeed: WatchFeedRequest[];
   getFeedPage: GetFeedPageRequest[];
   interrupt: InterruptRequest[];
+  loadFeedThrough: LoadFeedThroughRequest[];
   selectFeedRow: SelectFeedRowRequest[];
 }
 
@@ -191,7 +201,7 @@ export interface Harness {
 
 /** A context whose client speaks to the scripted daemon. */
 export function harness(script: FeedScript = {}): Harness {
-  const calls: FeedCalls = { openFeed: [], watchFeed: [], getFeedPage: [], interrupt: [], selectFeedRow: [] };
+  const calls: FeedCalls = { openFeed: [], watchFeed: [], getFeedPage: [], interrupt: [], loadFeedThrough: [], selectFeedRow: [] };
   const channels = script.channels ?? new Map<string, Channel<WatchFeedResponse>>();
   const sink = new RecordingSink();
   const transport = createRouterTransport(({ service }) => {
@@ -217,6 +227,10 @@ export function harness(script: FeedScript = {}): Harness {
           script.getFeedPage?.(req) ??
           create(GetFeedPageResponseSchema, { result: { case: "success", value: page([]) } })
         );
+      },
+      loadFeedThrough: async function* (req) {
+        calls.loadFeedThrough.push(req);
+        if (script.loadFeedThrough !== undefined) yield* script.loadFeedThrough(req);
       },
       interrupt: (req) => {
         calls.interrupt.push(req);

@@ -347,11 +347,12 @@
      0.2rem + 2 x (0.3rem + 1px) = 14.8px, 30% under the old 21.2px. */
   --topbar-right-chip-gap: 0.2rem;
   --topbar-right-chip-inset: 0.3rem;
-  /* THE PERSISTENT-WIFI CHIP'S TWO PAINTS (owner request, 2026-10-02): the
-     joined glyph a step brighter than `--ok` (green-500 over green-600), and
-     the mode-on disc black. */
-  --wifi-joined: #22c55e;
-  --wifi-mode-on-disc: #000000;
+  /* THE PERSISTENT-WIFI CHIP'S PAINTS (owner request, 2026-10-02): the glyph
+     is black; the disc behind it is white when the mode is off and green when
+     it is on (green-500, a step brighter than `--ok`). */
+  --wifi-glyph: #000000;
+  --wifi-mode-on-disc: #22c55e;
+  --wifi-mode-off-disc: #ffffff;
   font-family: ui-sans-serif, system-ui, sans-serif;
 }
 
@@ -771,6 +772,15 @@ body::after {
 #ws-sidebar .repo-head .tri { font-size: 1.05rem; line-height: 1; }
 #ws-sidebar .repo-head .n { color: var(--muted); font-weight: 400; text-transform: none; }
 #ws-sidebar .repo.folded .rows { display: none; }
+/* THE FOLDED COUNT "(N)" (frontend.v1.RosterSectionHeader.count): between the
+   label and the add control, a step smaller than the label and in its color,
+   and present only while the section is folded (owner request, 2026-10-02). */
+#ws-sidebar .repo-head .sb-count {
+  display: none;
+  font-size: 0.85em;
+  color: inherit;
+}
+#ws-sidebar .repo.folded > .repo-head .sb-count { display: inline; }
 /* A repository section's header takes its fold's grey rather than the
    --info-ws hue the task and merged headers keep. */
 #ws-sidebar .repo.repo-section > .repo-head { color: var(--repo-head-expanded); }
@@ -6372,8 +6382,7 @@ bubble-body.bubble-body { display: block; }
 }
 /* EVERY RIGHT-HAND CELL'S INLINE INSET, from the group (owner request,
    2026-10-02). The box a reader sees is the button inside a control's wrap,
-   or the cell itself when it holds no button (the fast-mode label, a
-   no-session dash). Keyed on the group's structure rather than on cell
+   or the cell itself when it holds no button (a no-session dash). Keyed on the group's structure rather than on cell
    names, so the spacing between any two right-hand chips is the one measure
    in `--topbar-right-chip-gap` and `--topbar-right-chip-inset`, and a cell
    added to the group later is spaced the same with no rule of its own. The
@@ -6995,21 +7004,16 @@ bubble-body.bubble-body { display: block; }
   font-style: italic;
 }
 
-/* THE FAST-MODE CELL — the permission picker's read-only sibling. A LABEL,
-   not a control: nothing on the contract sets fast mode, so it takes the
-   button padding for alignment but neither the cursor nor the hover border
-   that would promise a click. */
 /* THE NO-SESSION DASH takes the same declarations, deliberately: it is
    another read-only label in the same strip, and a style of its own would be
    a second answer to a question this rule already answers. It stands in the
-   slot of the control it replaces — the model selector's, the mode picker's
-   or fast mode's — so the strip keeps ONE shape whether or not the workspace
+   slot of the control it replaces — the model selector's or the mode picker's
+   — so the strip keeps ONE shape whether or not the workspace
    has a session (topbar.proto, FIXED SCHEMA AND ORGANIZATION). The box below
    is the right group's treatment minus the two declarations that would
    promise a click, which is the one difference these cells are entitled to.
    (The whole-view `hibernated` and `cold-gate` cells this rule used to cover
    were retired with their proto fields on 2026-09-13.) */
-.topbar-fast,
 .topbar-model[data-no-session],
 .topbar-effort[data-no-session],
 .topbar-effort[data-effort-unsupported],
@@ -7021,35 +7025,23 @@ bubble-body.bubble-body { display: block; }
   color: var(--muted);
   white-space: nowrap;
 }
-/* On is the only state worth any emphasis: it is the one that changes what
-   sending a prompt does. */
-.topbar-fast[data-fast-mode="on"] {
-  color: var(--fg);
-}
-/* Cooldown is drawn AS ITS OWN STATE, never as off — dimmed and italic says
-   "not right now" where off's plain label says "not set". */
-.topbar-fast[data-fast-mode="cooldown"] {
-  font-style: italic;
-  opacity: 0.7;
-}
-
-/* THE PERSISTENT-WIFI CHIP (src/topbar/persistent-wifi.ts). The glyph's color
-   is the wifi arm, the disc behind it is the mode arm, each painted on its
-   own: green on a network, red on none, muted when the daemon could not
-   read it; a black disc when the lid can close without losing the network
-   (owner request, 2026-10-02: black rather than blue, and the green a step
-   brighter than `--ok`). The disc is a circle inside the glyph's own svg,
-   whose viewBox is the disc's square, so the svg's 16px box IS the disc and
-   the glyph inside it is centered by geometry rather than by layout. */
+/* THE PERSISTENT-WIFI CHIP (src/topbar/persistent-wifi.ts). The glyph is
+   always black; the disc behind it is the mode arm: white when the mode is off
+   (or the daemon could not read it), green when on (owner request,
+   2026-10-02). The wifi arm is not painted: the tooltip, which the daemon
+   composes from both facts, carries it. The disc is a circle inside the
+   glyph's own svg, whose viewBox is the disc's square, so the svg's 16px box
+   IS the disc and the glyph inside it is centered by geometry rather than by
+   layout. */
 .topbar-wifi {
   display: inline-flex;
   align-items: center;
   flex: none;
-  color: var(--muted);
+  color: var(--wifi-glyph);
 }
 /* THE GLYPH IS THE CONTROL (owner request, 2026-10-02): a click turns the
    mode over. It takes the right group's quiet button box like its siblings,
-   but keeps the chip's color, since the glyph's color IS the wifi arm. */
+   but keeps the chip's color, which is the glyph's black. */
 .topbar-wifi-button {
   display: inline-flex;
   align-items: center;
@@ -7065,10 +7057,19 @@ bubble-body.bubble-body { display: block; }
   stroke-linecap: round;
   stroke-linejoin: round;
 }
-.topbar-wifi-disc { stroke: none; }
-.topbar-wifi[data-wifi="joined"] { color: var(--wifi-joined); }
-.topbar-wifi[data-wifi="not-joined"] { color: var(--err); }
+.topbar-wifi-disc { stroke: none; fill: var(--wifi-mode-off-disc); }
 .topbar-wifi[data-mode="on"] .topbar-wifi-disc { fill: var(--wifi-mode-on-disc); }
+/* A TOGGLE IN FLIGHT PULSES, subtly: turning the mode on runs the whole
+   change (hotspot, power settings, display) before the daemon answers, which
+   takes seconds. The attribute is set while the call stands and removed at
+   its answer. */
+.topbar-wifi[data-settling] {
+  animation: topbar-wifi-settling 1.4s ease-in-out infinite;
+}
+@keyframes topbar-wifi-settling { 50% { opacity: 0.55; } }
+@media (prefers-reduced-motion: reduce) {
+  .topbar-wifi[data-settling] { animation: none; opacity: 0.7; }
+}
 
 /* ---- bubble scrollbars (src/styles.css) --------------------------------- */
 
