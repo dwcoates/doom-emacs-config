@@ -40,6 +40,7 @@ import type { WorkspaceRoster } from "../../../proto/gen/ts/frontend/v1/sidebar_
 import type { DaemonHoldTray } from "../../../proto/gen/ts/frontend/v1/daemon_hold_pb";
 import type { DrainReason } from "../../../proto/gen/ts/agentrepl/v1/drain_reason_pb";
 import {
+  NewsDigestStandingSchema,
   WatchDaemonResponseSchema,
   type WatchDaemonRequest,
   type WatchDaemonResponse,
@@ -113,6 +114,8 @@ import { AdoptHostWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrep
 import { AdoptWebWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_adopt_web_workspace_pb";
 import { OpenLoginResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_login_pb";
 import { CloseLoginResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_close_login_pb";
+import { DismissNewsDigestResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_dismiss_news_digest_pb";
+import { RefreshNewsDigestResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_refresh_news_digest_pb";
 import { OpenExternalResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_external_pb";
 import { RequestCommandSupportResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_request_command_support_pb";
 import { OpenInEditorResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_in_editor_pb";
@@ -290,6 +293,8 @@ export interface FakeDaemon {
   pushFaultsStanding(faultId: string, line: string): void;
   /** Push `persistent_wifi` (joined, mode on), as to an Emacs stream. */
   pushPersistentWifi(): void;
+  /** Push the `news_digest` standing, as to a webview stream. */
+  pushNewsDigest(standing: MessageInitShape<typeof NewsDigestStandingSchema>): void;
   /**
    * Push the planned-ending arm (`DaemonStreamEnding`) on every live stream of
    * RPC: the frame a daemon standing down in a PLANNED exit sends as a
@@ -1628,6 +1633,18 @@ export function createFakeDaemon(): FakeDaemon {
           result: { case: "success", value: {} },
         });
       },
+      dismissNewsDigest(request) {
+        record("dismissNewsDigest", request);
+        return answerFor("dismissNewsDigest", DismissNewsDigestResponseSchema, {
+          result: { case: "success", value: {} },
+        });
+      },
+      refreshNewsDigest(request) {
+        record("refreshNewsDigest", request);
+        return answerFor("refreshNewsDigest", RefreshNewsDigestResponseSchema, {
+          result: { case: "success", value: { produced: { case: "nothingNew", value: {} } } },
+        });
+      },
     });
   };
 
@@ -1809,6 +1826,14 @@ export function createFakeDaemon(): FakeDaemon {
             value: { wifi: { case: "joined", value: {} }, mode: { case: "on", value: {} } },
           },
         }),
+      );
+    },
+    pushNewsDigest(standing) {
+      broadcast(
+        "watchDaemon",
+        undefined,
+        undefined,
+        create(WatchDaemonResponseSchema, { push: { case: "newsDigest", value: standing } }),
       );
     },
     pushReloadElisp(moduleRoot, build) {
