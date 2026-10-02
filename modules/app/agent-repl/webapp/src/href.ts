@@ -37,11 +37,13 @@ export function isFileLinkHref(href: string): boolean {
  * hostname (`.md` is Moldova's TLD) and turns it into a web link; a bare name
  * ending in one of these is a source or doc file, and its anchor opens through
  * the daemon (`OpenInEditorFeedLink`) instead. Real domains (`example.com`,
- * `github.io`) end in none of them and stay web links.
+ * `github.io`, `wikipedia.org`) end in none of them and stay web links;
+ * `org` is deliberately absent, since a false file link costs the daemon's
+ * follow-up prompt.
  */
 export const FILE_LINK_EXTENSIONS: readonly string[] = [
   "md", "ts", "tsx", "js", "mjs", "go", "el", "py", "sh", "json", "yaml", "yml",
-  "toml", "proto", "txt", "css", "html", "rs", "c", "h", "m", "swift", "org",
+  "toml", "proto", "txt", "css", "html", "rs", "c", "h", "m", "swift",
 ];
 
 /** Whether LABEL, a scheme-less autolinked name, ends in a file extension. */
