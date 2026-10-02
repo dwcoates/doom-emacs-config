@@ -4649,3 +4649,37 @@ the user switched away and back."
         (agent-repl-workspace-push-to-back)
         ;; Assert
         (should (equal switched "c"))))))
+
+;;;; ---- Switch trigger capture -------------------------------------------
+
+(ert-deftest agent-repl-test-panels-capture-switch-trigger-records-the-command ()
+  ;; Arrange
+  (let ((this-command 'agent-repl-switch-right)
+        (agent-repl--switch-trigger nil))
+    ;; Act
+    (agent-repl--capture-switch-trigger)
+    ;; Assert
+    (should (eq (plist-get agent-repl--switch-trigger :command) 'agent-repl-switch-right))))
+
+(ert-deftest agent-repl-test-panels-capture-switch-trigger-records-the-webview-window ()
+  ;; Arrange
+  (let ((buf (get-buffer-create "*agent-frontend-capture-test*"))
+        (agent-repl--switch-trigger nil))
+    (unwind-protect
+        (progn
+          (set-window-buffer (selected-window) buf)
+          ;; Act
+          (agent-repl--capture-switch-trigger)
+          ;; Assert
+          (should (eq (plist-get agent-repl--switch-trigger :webview-window) (selected-window))))
+      (kill-buffer buf))))
+
+(ert-deftest agent-repl-test-panels-capture-switch-trigger-no-webview-window-is-nil ()
+  ;; Arrange
+  (let ((agent-repl--switch-trigger nil))
+    (with-temp-buffer
+      (set-window-buffer (selected-window) (current-buffer))
+      ;; Act
+      (agent-repl--capture-switch-trigger)
+      ;; Assert
+      (should-not (plist-get agent-repl--switch-trigger :webview-window)))))

@@ -102,6 +102,8 @@
 (declare-function xwidget-webkit-uri "xwidget.c" (xwidget))
 (declare-function xwidget-at "xwidget" (pos))
 (declare-function xwidget-live-p "xwidget" (xwidget))
+(declare-function get-buffer-xwidgets "xwidget.c" (buffer))
+(declare-function xwidget-view-lookup "xwidget.c" (xwidget &optional window))
 (declare-function evil-define-key* "evil-core" (state keymap key def &rest bindings))
 (declare-function evil-normalize-keymaps "evil-core" (&optional state))
 
@@ -1466,6 +1468,42 @@ Runs pre-tombstone, while `:frontend-buffer' is still readable."
       (agent-repl--log-verbose ws "frontend webview release: skipped=no-live-webview"))))
 
 (add-hook 'agent-repl-ws-del-hook #'agent-repl--frontend-release-workspace-webview)
+
+;;;; ---- Webview presence on a switch -----------------------------------
+
+(defvar agent-repl-frontend--last-view-on-switch (make-hash-table :test #'equal)
+  "WS -> the xwidget view that displayed WS's webview at its last switch.
+Compared by identity on the next switch, so a record can say whether the
+switch DISPLAYED THE SAME VIEW or a fresh one (a fresh view is a
+re-attached WKWebView, which paints from blank).")
+
+(defun agent-repl-frontend--view-presence (ws view-buffer)
+  "Return a plist describing how WS's VIEW-BUFFER is displayed right now.
+Keys: :windows (how many windows show it), :width / :height (the first
+such window's body size in pixels), :xwidgets (xwidgets in the buffer),
+:view (`same', `new', `none' or `first' -- the first window's xwidget view
+against the one recorded at WS's previous switch), :selected (whether
+that window is the selected one).  Records the view for the next call."
+  (let* ((windows (and (buffer-live-p view-buffer)
+                       (get-buffer-window-list view-buffer nil t)))
+         (win (car windows))
+         (xws (and (buffer-live-p view-buffer) (fboundp 'get-buffer-xwidgets)
+                   (get-buffer-xwidgets view-buffer)))
+         (view (and win (car xws) (fboundp 'xwidget-view-lookup)
+                    (xwidget-view-lookup (car xws) win)))
+         (previous (gethash ws agent-repl-frontend--last-view-on-switch :unset))
+         (verdict (cond ((null view) 'none)
+                        ((eq previous :unset) 'first)
+                        ((eq previous view) 'same)
+                        (t 'new))))
+    (puthash ws view agent-repl-frontend--last-view-on-switch)
+    (list :windows (length windows)
+          :window win
+          :width (and win (window-body-width win t))
+          :height (and win (window-body-height win t))
+          :xwidgets (length xws)
+          :view verdict
+          :selected (and win (eq win (selected-window)) t))))
 
 (provide 'frontend)
 
