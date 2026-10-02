@@ -808,3 +808,19 @@ func TestReselectingLeavesTheFeedWhereItIs(t *testing.T) {
 		t.Fatalf("tail returns = %v, want [w1] (the first select only)", f.host.tailReturns)
 	}
 }
+
+func TestSelectStartsAnOpenWorkspaceWithNoSession(t *testing.T) {
+	// Arrange: neither parked nor live, as a workspace a bring-up left down is.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+
+	// Act
+	if err := f.verbs.Select(context.Background(), "w1"); err != nil {
+		t.Fatalf("Select: %v", err)
+	}
+
+	// Assert
+	if len(f.fleet.started) != 1 || f.fleet.started[0] != "w1" {
+		t.Fatalf("started = %v, want [w1]: a looked-at workspace is never session-less", f.fleet.started)
+	}
+}
