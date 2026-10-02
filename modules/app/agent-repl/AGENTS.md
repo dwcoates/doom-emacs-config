@@ -1367,6 +1367,28 @@ per workspace on the marker's present->absent edge (a restated marker is not a
 clear, and neither is a first sighting without it). The reaction only re-arms
 the dwell clock, since the tab already draws full from the row.
 
+## "WatchDaemon", "the daemon watching in Emacs" and "the editor stream" are one thing
+
+All three names mean Emacs's `WatchDaemon` subscription
+(`agentrepl.v1.WatchDaemon` with the `WatchDaemonEmacs` client arm): the one
+long-lived daemon stream an Emacs process holds, carrying the roster, the
+elisp reload, persistent Wi-Fi, the daemon's standing faults and the startup's
+`DaemonStartupEvent`s. Use any of the three; never use them for the per-workspace
+`WatchHostWorkspace` stream, which is "the host stream".
+
+- **`WatchDaemonEmacs.instance` is required.** Emacs mints one `EditorInstance`
+  per process (`agent-repl-editor-instance`), and the daemon refuses a watch
+  without it.
+- **A NEW instance runs the editor's startup; a reconnecting one does not.** The
+  daemon brings every registered workspace up (hibernated ones too) and emits,
+  on that stream only and never replayed, `opening`, each workspace's steps,
+  one `workspace_open` go-ahead per workspace strictly in registry order, and
+  `finished`. Emacs pre-creates every workspace's input buffer and webview,
+  opens a tab only once its go-ahead arrived and its page drew
+  (`lisp/startup.el`), and echoes each step as one minibuffer line.
+- **A new instance also re-stands today's dismissed news digest** without a new
+  run.
+
 ## What each status color means
 
 Owner ruling, 2026-09-28. A workspace's status color answers ONE question on
@@ -1377,13 +1399,47 @@ against it), and this table is what it means.
 
 | Color | Meaning | Usable? | Statuses |
 |---|---|---|---|
-| Red | The agent is working. | Yes: a prompt is held or interjected. | submitting, thinking, clearing, compacting; footer `thinking`, `loading` |
+| Red | The agent is working. | Yes: a prompt is held or interjected. | submitting, thinking, clearing, compacting; footer `working`, `loading` |
 | Yellow | The main thread is idle while detached work (background subagents, shells) runs. | Yes | `idle_async`; footer `background` |
 | Green | Ready for you: idle, or waiting on your input. | Yes | ready, done, interrupted, permission; a merge that landed (`merged`); footer `idle`, `waiting`, `interrupted`; a Stop hook's deliberate stop and a deferred tool read as done |
 | Purple | A merge is in progress; the daemon holds the workspace. | No: the composer is closed. | `merge_queued`, `merging` |
-| Turquoise | Something unexpected went wrong and wants your attention, but the workspace is usable. | Yes | `turn_failed` (a failed, orphaned, agent-died, dead-query or lost turn, or a transient vendor failure such as an overloaded api or a model error); `merge_failed`; `degraded` (a shim component dropping or delaying observations, or a shim taken back after a failed handover that never re-reported its state) |
-| Blue | The workspace is unusable right now. | No: the composer is closed. | `init` (starting or connecting), `severed`, `dead`, `start_failed`; footer `disconnected` (including its `vendor_retry`, `vendor_rejection` and `vendor_failed` substatuses), `closing`; `vendor_blocked` / footer `blocked` (a usage limit, auth, a missing permission, billing, an organization the account may not use, a blocking limit, the refill breaker — anything that stops all work until it is resolved); `api_retrying` / footer `blocked · api_retrying` (the vendor is retrying the turn's failed API call — the composer stays open, see below) |
+| Turquoise | Something unexpected went wrong and wants your attention, but the workspace is usable. | Yes | `turn_failed` (a failed, orphaned, agent-died, dead-query or lost turn, or a transient vendor failure such as an overloaded api or a model error); `merge_failed`; `degraded`; every VENDOR FAULT: roster `vendor_fault` / footer `vendor_fault · vendor_retry`, `vendor_rejection`, `vendor_failed` (the vendor will not start), roster `vendor_blocked` / footer `vendor_fault · auth`, `usage_limit`, `billing`, `vendor_error`, `query_died` (a vendor or account block), roster and footer `api_retrying` (the vendor is retrying the turn's failed API call) |
+| Blue | The workspace is unusable right now. | No: the composer is closed. | every AGENT-REPL FAULT: roster `init`, `severed`, `dead`, `start_failed` / footer `agent_repl_fault · starting`, `degraded`, `severed`, `dead`, `start_failed`, `daemon_impaired`; every NETWORK FAULT: roster `network_fault` / footer `network_fault · offline`; footer `closing` |
 | Uncolored | There is no lifecycle to report. | — | `none` (never had a session), `inactive` (no open perspective, drawn `?`) |
+
+### The three fault domains
+
+Owner ruling, 2026-10-02. Every fault a workspace can stand in belongs to
+exactly ONE of three domains, named for whose services are failing.
+
+| Domain | Whose services fail | Color | Composer | Roster arms | Footer status |
+|---|---|---|---|---|---|
+| `agent_repl_fault` | agent-repl's own: the daemon, the shim, the store, the sidecar, the link between them | Blue | Closed | `init`, `severed`, `dead`, `start_failed` | `agent_repl_fault` |
+| `network_fault` | this machine's network: the vendor cannot be reached at all | Blue | Closed | `network_fault` | `network_fault · offline` |
+| `vendor_fault` | the vendor's or the account's: it will not start, refuses, blocks or retries | Turquoise | Open | `vendor_fault`, `vendor_blocked`, `api_retrying` | `vendor_fault` |
+
+- **Precedence is `agent_repl_fault` > `network_fault` > `vendor_fault`**, on
+  the footer, the roster, the health wire and the ladder alike
+  (`daemon/internal/resolve/ladder`: `AgentReplFault` above `NetworkFault`
+  above `VendorFault`). A vendor that cannot be reached because the machine is
+  offline is a network fault, and a network that cannot be judged because the
+  shim is down is an agent-repl fault.
+- **The shim is the one judge of network versus vendor.** One classifier
+  (`shim/src/engine/failures.ts#classifyAgentFailure`, its `network` verdict)
+  labels every vendor-start failure: `StartSessionVendorStartRetryable.cause`
+  is always set (`network` or `vendor`), and the shim opens the
+  `network_unreachable` session fault on its diagnostics push while it cannot
+  reach the network and resolves it on the first message that proves it can.
+  The daemon opens `KindNetworkUnreachable` from that push and never re-judges.
+- **A network-caused start failure does not spend the vendor's ten-minute
+  window**: it closes the vendor retrying fault, stands as `network_fault`, and
+  retries on its own backoff until the network returns.
+- **A vendor fault leaves the composer open.** A prompt sent while the vendor
+  will not start is held under the reconnect hold and delivered when the
+  session comes up; a prompt sent during a mid-session block is delivered to
+  the vendor as usual.
+- **`network_unreachable` is recorded at INFO**, in the shim and the daemon:
+  the machine being offline is the environment, not an agent-repl defect.
 
 The rules that keep this true:
 
@@ -1395,19 +1451,22 @@ The rules that keep this true:
   (`daemon/internal/resolve/sidebar/onestatus_test.go`) holds the two
   together; a fact only one resolver sees is a defect to close by feeding the
   other.
-- **A turn whose API call the vendor is retrying is blue** (owner ruling,
-  2026-10-01): footer `blocked · api_retrying` with the retry line, roster
+- **A turn whose API call the vendor is retrying is a vendor fault,
+  turquoise** (owner ruling, 2026-10-02, superseding 2026-10-01's blue):
+  footer `vendor_fault · api_retrying` with the retry line, roster
   `api_retrying`. It stands until the retried agent is answered
   (`ladder.RetryAnswered`), the turn ends, or a new turn opens. A prompt sent
   during the retry interrupts the wait and runs as its own turn without asking
   the classifier, so the workspace is red — footer `working` with its step and
   no retry line — until the API fails again.
-- **Blue is only "unusable".** Something that went wrong while the workspace
-  stays usable is turquoise, never blue. An expected state that awaits you (a
+- **Blue is only "unusable", and only an agent-repl or a network fault is
+  blue.** Something that went wrong while the workspace stays usable is
+  turquoise, never blue; a vendor fault is always turquoise. An expected state that awaits you (a
   permission ask) is green, never blue. A merge never parks: one that gives up
   is `merge_failed`, turquoise, and the workspace is back with you.
 - **One classifier decides a failure's color.** `ladder.ClassifyFailure` sorts
-  every turn-ending agent failure into a vendor or account block (blue), the
+  every turn-ending agent failure into a vendor or account block (a vendor
+  fault, turquoise), the
   turn's own failure (turquoise) or an expected stop (green), and both the
   footer and the roster call it.
 - **The status ladder ranks every unusable rung above every usable one**
@@ -1424,8 +1483,8 @@ The rules that keep this true:
   `webapp/src/vocab.ts#composerClosedFor`). The gate is derived from the color,
   never from a list of arm names, with one kind of exception: a substatus
   DECLARED in `render-colors.json#composer_open_substatuses` keeps it open
-  under a closing color (`blocked · api_retrying`, whose prompt interrupts the
-  retry). A merge in flight (purple) leaves it open:
+  under a closing color (none is declared today: `api_retrying` is a vendor
+  fault and turquoise, so its composer is open by color). A merge in flight (purple) leaves it open:
   what is submitted is held until the merge ends, and a prompt held so keeps
   the workspace open past the landing. Emacs's composer is gated by the
   daemon's host composer arm instead (a drain, a restart; a holding merge
@@ -1522,14 +1581,19 @@ raise: that is exactly how three kinds came to have a path and sixteen did not.
 
 | status | substatus | fault kinds |
 | --- | --- | --- |
-| `disconnected` | `start_failed` | `shim_start_failed`, `resume_failed`, `relaunch_resume_failed`, `adoption_window_expired` (session scope), `cold_gate_reopen_failed` |
-| `disconnected` | `dead` | `shim_died`, `bounce_died`, `session_absent` |
-| `disconnected` | `severed` | `link_severed`, `watch_open_refused` |
-| `disconnected` | `vendor_retry` | `vendor_start_retrying` |
-| `disconnected` | `vendor_rejection` | `vendor_start_rejected` |
-| `disconnected` | `vendor_failed` | `vendor_start_failed` |
-| `blocked` | `daemon_impaired` | `prompts_dir_missing`, `wsm_read_only`, `log_sink_poisoned`, `successor_spawn_failed`, `daemon_state_unreadable`, `adoption_window_expired` (daemon scope) |
+| `agent_repl_fault` | `start_failed` | `shim_start_failed`, `resume_failed`, `relaunch_resume_failed`, `adoption_window_expired` (session scope), `cold_gate_reopen_failed` |
+| `agent_repl_fault` | `dead` | `shim_died`, `bounce_died`, `session_absent` |
+| `agent_repl_fault` | `severed` | `link_severed`, `watch_open_refused` |
+| `agent_repl_fault` | `daemon_impaired` | `prompts_dir_missing`, `wsm_read_only`, `log_sink_poisoned`, `successor_spawn_failed`, `daemon_state_unreadable`, `adoption_window_expired` (daemon scope) |
+| `network_fault` | `offline` | `network_unreachable` |
+| `vendor_fault` | `vendor_retry` | `vendor_start_retrying` |
+| `vendor_fault` | `vendor_rejection` | `vendor_start_rejected` |
+| `vendor_fault` | `vendor_failed` | `vendor_start_failed` |
 | unchanged | unchanged | `shim_reported`, `classifier_failed`, `bounce_unknown`, `conversation_abandoned`, `deploy_failed` (daemon scope) — NON-ESCALATING |
+
+The three statuses are the three fault domains ("The three fault domains",
+above): `agent_repl_fault` and `network_fault` are blue, `vendor_fault` is
+turquoise, ranked in that order when several stand.
 
 The activity cell is `FooterStatusActivityFault{kind, detail}` in every case but
 two. `shim_start_failed` keeps `FooterStatusActivityStartFailed`, which now
@@ -1544,8 +1608,11 @@ THINGS STANDS.** `vendor_retry` is a retryable failure on the daemon's capped
 backoff (x1.5 from 200ms, capped at 5s) for ten minutes of wall time from the
 first failure of the run; `vendor_rejection` is a failure the shim labeled
 non-retryable and is never retried; `vendor_failed` is the ten minutes
-exhausted. All three are blue, like `start_failed`: the workspace is unusable.
-A prompt submitted while the session is down is held under the reconnect hold
+exhausted. All three are vendor faults, turquoise, with the composer open: the
+workspace is usable and waits on the vendor. A start that failed because this
+machine is offline is not among them: the shim labels it `network`, and it
+stands as `network_fault · offline` instead. A prompt submitted while the
+session is down is held under the reconnect hold
 (`HeldPromptReconnectHold`, badge "after reconnect") and delivered when a
 session next comes up; it is never drawn and then lost.
 
@@ -1566,14 +1633,14 @@ cell only. The shim ANSWERED in every one of them: a shim that pushed a
 diagnostic is alive, a classifier run is a headless side errand, an undetermined
 bounce disposition is an accounting question for a human, and an abandoned
 conversation is what a SUCCESSFUL fresh bring-up left behind. It is not a
-wording question — `disconnected` closes the webapp's composer
+wording question — `agent_repl_fault` closes the webapp's composer
 (`webapp/src/main.ts`), so escalating any of them would lock the user out of a
 session that is serving perfectly.
 
 **A DAEMON-SCOPED FAULT STANDS ON EVERY WORKSPACE'S STRIP**, because it is every
 workspace that is owed the service the daemon cannot give.
 
-**THE LINK STATE STILL OUTRANKS A FAULT** for the disconnected step: the link
+**THE LINK STATE STILL OUTRANKS A FAULT** for the agent-repl fault step: the link
 state is the live truth about the link, and a fault is the standing record
 beside it.
 
