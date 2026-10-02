@@ -32,8 +32,10 @@ modules/app/agent-repl/bin/test-all.sh --record
 ```
 
 The record mode updates `modules/app/agent-repl/test_time.csv` only after every
-suite passes and the branch and commit remain unchanged. Inspect reported
-timing regressions and the newest rows.
+suite passes and the branch and commit remain unchanged. Each row carries its
+`measure`, and regressions compare only rows of the same measure (see
+`modules/app/agent-repl/AGENTS.md`, "Suite timings: what a row measures").
+Inspect reported timing regressions and the newest rows.
 
 ## Focused non-Lisp coverage
 
