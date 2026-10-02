@@ -818,3 +818,43 @@ func TestEveryItemChunkReadsTheSharedItemLine(t *testing.T) {
 		}
 	}
 }
+
+func TestQuietGoTestOutputKeepsALineLongerThanAnyScanBuffer(t *testing.T) {
+	// Arrange: one test log line past the 64 MiB a scanner would have held.
+	long := strings.Repeat("x", 65*1024*1024)
+	out := []byte("=== RUN   TestA\n" + long + "\n--- PASS: TestA (0.10s)\nPASS\n")
+
+	// Act
+	quiet := QuietGoTestOutput(out, true)
+
+	// Assert
+	if want := long + "\n"; string(quiet) != want {
+		t.Fatalf("a passing chunk shows %d bytes, want exactly the %d-byte log line", len(quiet), len(want))
+	}
+}
+
+func TestQuietGoTestOutputTerminatesAnUnterminatedLastLine(t *testing.T) {
+	// Arrange
+	out := []byte("--- PASS: TestA (0.10s)\nok tail")
+
+	// Act
+	quiet := QuietGoTestOutput(out, true)
+
+	// Assert
+	if string(quiet) != "ok tail\n" {
+		t.Fatalf("quiet = %q", quiet)
+	}
+}
+
+func TestParseGoTestItemsReadsPastALineLongerThanAnyScanBuffer(t *testing.T) {
+	// Arrange
+	out := []byte(strings.Repeat("y", 65*1024*1024) + "\n--- PASS: TestA (1.50s)\n")
+
+	// Act
+	got, err := ParseGoTestItems(out, []string{"TestA"})
+
+	// Assert
+	if err != nil || got["TestA"] != 1.5 {
+		t.Fatalf("ParseGoTestItems = %v, %v", got, err)
+	}
+}
