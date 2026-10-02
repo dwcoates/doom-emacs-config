@@ -67,6 +67,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -647,4 +648,76 @@ func TestRefusalOrderingDuringHandover(t *testing.T) {
 	if err != nil || healed.Msg.GetSuccess() == nil {
 		t.Fatalf("SubmitPrompt on the successor after self-heal = (%v, %v), want a success", healed.Msg, err)
 	}
+}
+
+// ===========================================================================
+// A handed-over workspace with no session draws its feed with no prompt
+// ===========================================================================
+
+// adLeaveSessionDown kills a workspace's shim twice on the incumbent: the
+// first death is brought back by the incumbent itself (reviveAfterDeath), and
+// the second, before any turn has ended, is left down by the revival's loop
+// guard. It returns once the incumbent has said it leaves the session down,
+// so the workspace is SESSION-LESS on a daemon that still serves it. Each
+// step waits on the incumbent's own record of it, never on the killed pid,
+// which the live incumbent reaps on its own schedule.
+func adLeaveSessionDown(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) {
+	t.Helper()
+	first := killShimProcesses(t, w.Daemon)
+	w.Daemon.AwaitWorkspaceLogRecord(ws.GetDir(), "the incumbent's revival of the killed shim", func(r harness.LogRecord) bool {
+		pid, ok := r.Context["shim_pid"].(float64)
+		return r.Operation == "daemon.workspace.bring_up" && r.Message == "the session is up" &&
+			ok && !slices.Contains(first, int(pid))
+	})
+	killShimProcesses(t, w.Daemon)
+	w.Daemon.AwaitWorkspaceLogRecord(ws.GetDir(), "the loop guard leaving the session down", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.promptqueue.revive" && strings.Contains(r.Message, "left down until the next prompt")
+	})
+}
+
+// TestASessionlessWorkspaceHandedOverDrawsItsFeedWithNoPrompt — owner ruling
+// 2026-10-02: "The feed (or rather, the most recent page of the feed) should
+// be automatically rendered when the workspace bounces or its backend(s)
+// bounce, always." A workspace the incumbent serves with NO session is handed
+// over with a free lock; the successor used to adopt it on its WSM facts alone
+// and serve an empty feed until the user's next prompt revived it (ship-gns,
+// 2026-10-01 17:55). The successor now starts its session as it adopts it, so
+// the conversation's turn is drawn on the successor's feed with no prompt.
+func TestASessionlessWorkspaceHandedOverDrawsItsFeedWithNoPrompt(t *testing.T) {
+	t.Parallel()
+	// Arrange: a finished real conversation whose session the incumbent has
+	// left down. The shim deaths are what this test provokes: the link
+	// records, the redials, the fault and the loop guard's own WARN are their
+	// evidence, not defects.
+	w := dpStaleDaemonWorld(t)
+	w.ExpectWarnings("daemon.promptqueue.revive", "daemon.sessionwatcher.link_fault",
+		"daemon.shimclient.redial", "daemon.health.open_fault", "daemon.shimclient.exit",
+		"daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.watch_session")
+	repo := harness.NewRepo(t)
+	ws := harness.Register(t, w.Daemon, repo.Dir)
+	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "prose-streamed")
+	adLeaveSessionDown(t, w, ws)
+	daemonStream := w.WatchDaemonStream()
+	defer daemonStream.Close()
+
+	// Act: an unforced deploy hands the session-less workspace over.
+	resp, err := w.Client().Deploy(w.Ctx(), dpUnforced())
+	if err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+	dpHandingOver(t, resp)
+	addr := dpAwaitAnnounced(t, w, daemonStream).GetAddress()
+	if addr == "" {
+		t.Fatal("shutdown_announced.address is unset, want the successor's address")
+	}
+	if code := w.AwaitExit(); code != 0 {
+		t.Fatalf("the incumbent's exit code = %d, want an orderly 0 after the handover", code)
+	}
+	adAwaitAddrFileChange(t, w.Daemon, addr)
+
+	// Assert: with no prompt sent anywhere, the successor's feed draws the
+	// conversation's turn.
+	awaitFeedRowOn(t, w, adDial(addr), ws, "turn "+turn.GetValue()+" drawn on the successor with no prompt", func(r *frontendv1.FeedRow) bool {
+		return r.GetTurn().GetValue() == turn.GetValue()
+	})
 }
