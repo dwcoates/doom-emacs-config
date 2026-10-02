@@ -239,7 +239,7 @@ export function mountFeed(
   // once (`itemExpanded`, one of the closed set of scroll causes). A capped
   // section this click owner toggles centers here, AFTER the class lands, so
   // the geometry read is the expanded layout; an item that owns its own fold (a
-  // sub-feed bubble, a compaction's summary) announces ITEM_EXPANDED_EVENT and
+  // sub-feed bubble) announces ITEM_EXPANDED_EVENT and
   // centers through the listener below. A collapse never moves the feed.
   //
   // A READER'S TOGGLE MAKES THE ENTRY THEIRS: an entry a jump expanded and the

@@ -1777,38 +1777,26 @@ describe("a merge bubble's fold", () => {
   });
 });
 
-describe("a compaction divider's fold", () => {
-  it("starts folded where the wire said", async () => {
+describe("a compaction divider's summary", () => {
+  it("is drawn under the bar even where the wire said folded", async () => {
     // Arrange / Act
     const row = await drawRow(separationRow("compacted", { id: feedId("cut-1") }));
     // Assert
-    expect(row.querySelector('[data-fold="compaction-summary"]')?.getAttribute("data-folded")).toBe(
-      "true",
-    );
+    expect(row.querySelector<HTMLElement>(".sep-compacted > .bubble.sep-summary")?.hidden).toBe(false);
   });
 
-  it("opens on the reader's toggle", async () => {
-    // Arrange
-    await drawRow(separationRow("compacted", { id: feedId("cut-1") }));
-    // Act
-    await harness.click('[data-feed-row="cut-1"] [data-fold="compaction-summary"]');
+  it("carries no summary disclosure", async () => {
+    // Arrange / Act
+    const row = await drawRow(separationRow("compacted", { id: feedId("cut-1") }));
     // Assert
-    expect(
-      harness.$('[data-feed-row="cut-1"] [data-fold="compaction-summary"]')?.getAttribute("data-folded"),
-    ).toBe("false");
+    expect(row.querySelector(".sep-compacted button, .sep-compacted [data-fold]")).toBeNull();
   });
 
-  it("keeps the reader's toggle across a re-push of the same row", async () => {
-    // Arrange
-    await drawRow(separationRow("compacted", { id: feedId("cut-1") }));
-    await harness.click('[data-feed-row="cut-1"] [data-fold="compaction-summary"]');
-    // Act
-    harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, separationRow("compacted", { id: feedId("cut-1") }));
-    await harness.settle();
+  it("starts in its collapsed bubble form", async () => {
+    // Arrange / Act
+    const row = await drawRow(separationRow("compacted", { id: feedId("cut-1") }));
     // Assert
-    expect(
-      harness.$('[data-feed-row="cut-1"] [data-fold="compaction-summary"]')?.getAttribute("data-folded"),
-    ).toBe("false");
+    expect(row.querySelector(".sep-summary > .bubble-scroll")?.classList.contains("expanded")).toBe(false);
   });
 });
 
