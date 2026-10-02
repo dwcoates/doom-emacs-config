@@ -342,7 +342,7 @@ func TestAStandingDigestIsCarriedIntoTheNextOne(t *testing.T) {
 	}
 }
 
-func TestARunTheDaemonsStandDownEndsRecordsNothing(t *testing.T) {
+func TestARunWhoseContextEndsRecordsNothing(t *testing.T) {
 	// Arrange
 	w := newWorld(t)
 	w.withNewFeedEntry()

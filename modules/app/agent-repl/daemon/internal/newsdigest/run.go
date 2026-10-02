@@ -128,7 +128,7 @@ func (d *Digester) run(ctx context.Context, trigger string, onlyIfDue bool) (out
 
 	results := d.readAll(ctx, state, since, log)
 	if err := ctx.Err(); err != nil {
-		log.Info(opRun, "the news digest run ended with the daemon's stand-down", dlog.Context{"cause": err.Error()})
+		log.Info(opRun, "the news digest run ended with its context (the daemon stood down, or the refresh's caller left); nothing was recorded", dlog.Context{"cause": err.Error()})
 		return outcome{}, err
 	}
 	sources, snapshots, material, newEntries, failed := tally(results)
@@ -156,7 +156,7 @@ func (d *Digester) run(ctx context.Context, trigger string, onlyIfDue bool) (out
 	sections, err := d.condenser.condense(ctx, period, material, carried.GetSections())
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			log.Info(opRun, "the news digest run ended with the daemon's stand-down", dlog.Context{"cause": ctxErr.Error()})
+			log.Info(opRun, "the news digest run ended with its context (the daemon stood down, or the refresh's caller left); nothing was recorded", dlog.Context{"cause": ctxErr.Error()})
 			return outcome{}, ctxErr
 		}
 		log.Error(opModel, "the model could not condense the news digest", dlog.Context{
