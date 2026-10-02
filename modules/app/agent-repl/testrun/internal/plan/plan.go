@@ -7,9 +7,10 @@
 //   - an atomic unit is assumed as long as the longest measured atomic unit
 //     (UnknownUnit when nothing is measured), so it starts early rather than
 //     becoming the tail the whole run waits on;
-//   - an item is assumed to cost its group's mean measured item (UnknownItem
-//     when the group has none), so a new test file joins a chunk at an
-//     ordinary size;
+//   - an item is assumed to cost its group's mean measured item, else its
+//     suite's (a new Go package is costed like the module's other packages'
+//     tests), else UnknownItem, so a new test joins a chunk at an ordinary
+//     size;
 //   - a chunk's overhead is assumed to be UnknownOverhead.
 //
 // After one run every one of them is measured.
@@ -87,20 +88,35 @@ func Build(est Estimates, all []suites.Units, slots int) (Planned, error) {
 		atomic = append(atomic, s.Unit)
 	}
 
+	type mean struct {
+		sum float64
+		n   int
+	}
+	groupMean, suiteMean := map[string]*mean{}, map[string]*mean{}
+	for _, sp := range splits {
+		gm := &mean{}
+		groupMean[sp.Group] = gm
+		sm := suiteMean[sp.Suite]
+		if sm == nil {
+			sm = &mean{}
+			suiteMean[sp.Suite] = sm
+		}
+		for _, it := range sp.Items {
+			if v, ok := est.Get(ItemKey(sp.Group, it)); ok {
+				gm.sum, gm.n = gm.sum+v, gm.n+1
+				sm.sum, sm.n = sm.sum+v, sm.n+1
+			}
+		}
+	}
 	var chunkables []sched.Chunkable
 	splitByGroup := map[string]suites.Split{}
 	for _, sp := range splits {
 		splitByGroup[sp.Group] = sp
-		known, sum := 0, 0.0
-		for _, it := range sp.Items {
-			if v, ok := est.Get(ItemKey(sp.Group, it)); ok {
-				known++
-				sum += v
-			}
-		}
 		unknownItem := UnknownItem
-		if known > 0 {
-			unknownItem = sum / float64(known)
+		if g := groupMean[sp.Group]; g.n > 0 {
+			unknownItem = g.sum / float64(g.n)
+		} else if su := suiteMean[sp.Suite]; su.n > 0 {
+			unknownItem = su.sum / float64(su.n)
 		}
 		items := make([]sched.Item, len(sp.Items))
 		for i, it := range sp.Items {
