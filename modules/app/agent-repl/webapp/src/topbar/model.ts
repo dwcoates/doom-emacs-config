@@ -34,21 +34,12 @@ import {
 } from "../../../proto/gen/ts/conversation/v1/api_pb";
 import { SetModelResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_model_pb";
 import type { TopbarModelSelector } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
-import { release, whileInFlight } from "../feed/cards/controls.js";
 import { log } from "../log.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
-import { callUnary } from "../rpc/unary.js";
 import type { TopbarContext } from "./context.js";
-import { guardMalformed } from "../rpc/guard.js";
-import { isMalformedView } from "../rpc/malformed.js";
-import {
-  clearRefusals,
-  drawTransportRefusal,
-  drawTypedRefusal,
-  drawUnreadableRefusal,
-  type SentenceTable,
-} from "../rpc/refuse.js";
+import type { SentenceTable } from "../rpc/refuse.js";
 import { drawNoSessionCell } from "./no-session.js";
+import { sendPick } from "./pick.js";
 import { asAnchor } from "./strip.js";
 
 /**
@@ -379,58 +370,23 @@ export async function pickModel(
     operation: "topbar.model-picked",
     context: { model: model.name },
   });
-  // CLEARED BEFORE THE CALL, never after: a refusal from the previous pick
-  // standing beside the control the reader just clicked again reads as the
-  // answer to the NEW click.
-  clearRefusals(wrap);
-  const answered = await whileInFlight([row, button], () =>
-    callUnary(
-      tc.ctx,
-      "SetModel",
-      (client) => client.setModel({ workspace: tc.ctx.workspace, model }),
-      SetModelResponseSchema,
-    ),
-  );
-  if ("failed" in answered) {
-    // AN ANSWER THIS BUILD CANNOT READ IS MACHINERY, not the daemon refusing:
-    // it is filed as `frame_undecodable` through the one click guard and
-    // nothing is drawn at the control, because there is no refusal to state.
-    if (isMalformedView(answered.failed)) {
-      await guardMalformed(tc.ctx, "topbar.model-pick", Promise.reject(answered.failed));
-      return;
-    }
-    drawTransportRefusal(wrap);
-    return;
-  }
-  try {
-    const result = requireCase(answered.value.result, "SetModelResponse.result");
-    switch (result.case) {
-      case "success":
-        // Nothing is drawn: the new selection arrives on the topbar stream. The
-        // reveal closes, because the reader's question has been answered.
-        tc.reveals.close();
-        return;
-      case "error": {
-        const arm = drawTypedRefusal(
-          wrap,
-          "SetModelError.cause",
-          "SetModel",
-          result.value.cause,
-          SET_MODEL_CAUSES,
-        );
-        // The cold refusal is the only arm whose remediation lives on ANOTHER
-        // surface, so it is the only one that moves the page.
+  await sendPick(
+    {
+      rpc: "SetModel",
+      send: (client) => client.setModel({ workspace: tc.ctx.workspace, model }),
+      schema: SetModelResponseSchema,
+      causes: SET_MODEL_CAUSES,
+      malformedOperation: "topbar.model-pick",
+      unreadableOperation: "topbar.model-malformed-refusal",
+      // The cold refusal is the only arm whose remediation lives on ANOTHER
+      // surface, so it is the only one that moves the page.
+      onRefused: (arm) => {
         if (arm === "cold") routeToColdGate(wrap.ownerDocument);
-        release([row, button]);
-        return;
-      }
-      default: {
-        const other: { case: string } = result;
-        return unreachableArm("SetModelResponse.result", other.case);
-      }
-    }
-  } catch (err) {
-    release([row, button]);
-    if (!drawUnreadableRefusal(tc.ctx, wrap, "topbar.model-malformed-refusal", err)) throw err;
-  }
+      },
+    },
+    tc,
+    wrap,
+    button,
+    row,
+  );
 }

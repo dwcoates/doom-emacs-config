@@ -15,28 +15,21 @@
  * THE ARM IS WHETHER THE MODEL TAKES A LEVEL. `unsupported` is a dash with no
  * dropdown; ABSENT is the no-session dash every session-scoped cell draws.
  */
-import { SetEffortResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_effort_pb";
+import {
+  SetEffortResponseSchema,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_effort_pb";
 import type {
   TopbarEffortOption,
   TopbarEffortSelector,
   TopbarEffortSelectorSupported,
 } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
 import { AgentEffortLevel } from "../../../proto/gen/ts/conversation/v1/api_pb";
-import { whileInFlight } from "../feed/cards/controls.js";
 import { log } from "../log.js";
-import { guardMalformed } from "../rpc/guard.js";
-import { isMalformedView } from "../rpc/malformed.js";
-import {
-  clearRefusals,
-  drawTransportRefusal,
-  drawTypedRefusal,
-  drawUnreadableRefusal,
-  type SentenceTable,
-} from "../rpc/refuse.js";
+import type { SentenceTable } from "../rpc/refuse.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
-import { callUnary } from "../rpc/unary.js";
 import type { TopbarContext } from "./context.js";
 import { drawNoSessionCell, NO_SESSION_DASH } from "./no-session.js";
+import { sendPick } from "./pick.js";
 import { asAnchor } from "./strip.js";
 
 /**
@@ -182,43 +175,18 @@ export async function pickEffort(
     operation: "topbar.effort-picked",
     context: { level: AgentEffortLevel[option.level] },
   });
-  // CLEARED BEFORE THE CALL; see the permission-mode picker.
-  clearRefusals(wrap);
-  const answered = await whileInFlight([row, button], () =>
-    callUnary(
-      tc.ctx,
-      "SetEffort",
-      (client) => client.setEffort({ workspace: tc.ctx.workspace, effort: option.level }),
-      SetEffortResponseSchema,
-    ),
+  await sendPick(
+    {
+      rpc: "SetEffort",
+      send: (client) => client.setEffort({ workspace: tc.ctx.workspace, effort: option.level }),
+      schema: SetEffortResponseSchema,
+      causes: SET_EFFORT_CAUSES,
+      malformedOperation: "topbar.effort-pick",
+      unreadableOperation: "topbar.effort-malformed-refusal",
+    },
+    tc,
+    wrap,
+    button,
+    row,
   );
-  if ("failed" in answered) {
-    if (isMalformedView(answered.failed)) {
-      await guardMalformed(tc.ctx, "topbar.effort-pick", Promise.reject(answered.failed));
-      return;
-    }
-    drawTransportRefusal(wrap);
-    return;
-  }
-  try {
-    const result = requireCase(answered.value.result, "SetEffortResponse.result");
-    switch (result.case) {
-      case "success":
-        tc.reveals.close();
-        return;
-      case "error":
-        drawTypedRefusal(wrap, "SetEffortError.cause", "SetEffort", result.value.cause, SET_EFFORT_CAUSES);
-        button.disabled = false;
-        return;
-      default: {
-        const other: { case: string } = result;
-        return unreachableArm("SetEffortResponse.result", other.case);
-      }
-    }
-  } catch (err) {
-    button.disabled = false;
-    if (!drawUnreadableRefusal(tc.ctx, wrap, "topbar.effort-malformed-refusal", err)) {
-      throw err;
-    }
-  }
 }
