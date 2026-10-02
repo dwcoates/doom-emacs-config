@@ -26,10 +26,10 @@ func TestParseArgs(t *testing.T) {
 		wantErr string
 	}{
 		{name: "module only selects every suite", argv: []string{"--module", "/m"}, want: Args{Module: "/m"}},
-		{name: "record and a suite list", argv: []string{"--module", "/m", "--record", "--suites", "ert,daemon"}, want: Args{Module: "/m", Record: true, Selected: []string{"ert", "daemon"}}},
+		{name: "record and a suite list", argv: []string{"--module", "/m", "--record", "--record-out", "/r", "--suites", "ert,daemon"}, want: Args{Module: "/m", Record: true, RecordOut: "/r", Selected: []string{"ert", "daemon"}}},
 		{name: "coverage is explicit", argv: []string{"--module", "/m", "--coverage"}, want: Args{Module: "/m", Coverage: true}},
 		{name: "the = spelling", argv: []string{"--module", "/m", "--suites=e2e"}, want: Args{Module: "/m", Selected: []string{"e2e"}}},
-		{name: "an unknown argument", argv: []string{"--module", "/m", "--bogus"}, wantErr: "unknown argument '--bogus', expected --record, --coverage, or --suites <list>"},
+		{name: "an unknown argument", argv: []string{"--module", "/m", "--bogus"}, wantErr: "unknown argument '--bogus', expected --record, --record-out, --coverage, or --suites <list>"},
 		{name: "an unknown suite", argv: []string{"--module", "/m", "--suites", "nope"}, wantErr: "--suites names an unknown suite 'nope'; known suites: "},
 		{name: "an empty suite list", argv: []string{"--module", "/m", "--suites", ""}, wantErr: "--suites needs at least one suite name"},
 		{name: "an empty name in the list", argv: []string{"--module", "/m", "--suites", "ert,,daemon"}, wantErr: "--suites contains an empty suite name: 'ert,,daemon'"},
@@ -37,6 +37,9 @@ func TestParseArgs(t *testing.T) {
 		{name: "--module without a value", argv: []string{"--module"}, wantErr: "--module needs a directory"},
 		{name: "no module", argv: []string{"--record"}, wantErr: "--module is required"},
 		{name: "record with coverage", argv: []string{"--module", "/m", "--record", "--coverage"}, wantErr: "--record and --coverage cannot be combined"},
+		{name: "record without record-out", argv: []string{"--module", "/m", "--record"}, wantErr: "--record needs --record-out"},
+		{name: "record-out without record", argv: []string{"--module", "/m", "--record-out", "/r"}, wantErr: "--record-out needs --record"},
+		{name: "--record-out without a value", argv: []string{"--module", "/m", "--record", "--record-out"}, wantErr: "--record-out needs a path"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -378,12 +381,13 @@ func (c *tick) Now() time.Time {
 }
 
 type harness struct {
-	deps   Deps
-	exec   *fakeExec
-	out    *bytes.Buffer
-	errOut *bytes.Buffer
-	module string
-	git    *[]string
+	deps      Deps
+	exec      *fakeExec
+	out       *bytes.Buffer
+	errOut    *bytes.Buffer
+	module    string
+	recordOut string
+	git       *[]string
 }
 
 // newHarness is a module root with a valid test_time.csv, a history file, and
@@ -421,7 +425,7 @@ func newHarness(t *testing.T, exits map[string]int, buildErr map[string]error) h
 		},
 		Pid: 7,
 	}
-	return harness{deps: d, exec: e, out: out, errOut: errOut, module: module, git: gitCalls}
+	return harness{deps: d, exec: e, out: out, errOut: errOut, module: module, recordOut: filepath.Join(root, "pending-record.json"), git: gitCalls}
 }
 
 func (h harness) run(t *testing.T, argv ...string) int {
@@ -477,7 +481,7 @@ func TestRunWithAFailureContinuesAndExitsNonZero(t *testing.T) {
 	h := newHarness(t, map[string]int{"daemon": 3}, nil)
 
 	// Act
-	code := h.run(t, "--record")
+	code := h.run(t, "--record", "--record-out", h.recordOut)
 
 	// Assert
 	if code != 1 {
@@ -498,6 +502,9 @@ func TestRunWithAFailureContinuesAndExitsNonZero(t *testing.T) {
 	data, _ := os.ReadFile(filepath.Join(h.module, "test_time.csv"))
 	if string(data) != CSVHeader+"\n" {
 		t.Errorf("a failed run recorded timings")
+	}
+	if _, err := os.Stat(h.recordOut); err == nil {
+		t.Errorf("a failed run staged a pending record")
 	}
 }
 
@@ -551,7 +558,7 @@ func TestRunWithSuitesRunsOnlyThoseAndNamesTheRest(t *testing.T) {
 	}
 }
 
-func TestRunRecordAppendsEveryPassingSuite(t *testing.T) {
+func TestRunRecordStagesEveryPassingSuiteWithoutTouchingTheCSV(t *testing.T) {
 	// Arrange
 	h := newHarness(t, nil, nil)
 	// One slot runs the units one after another, so the tick clock gives
@@ -559,27 +566,42 @@ func TestRunRecordAppendsEveryPassingSuite(t *testing.T) {
 	h.deps.Slots = 1
 
 	// Act
-	code := h.run(t, "--record", "--suites", "ert,daemon")
+	code := h.run(t, "--record", "--record-out", h.recordOut, "--suites", "ert,daemon")
 
 	// Assert
 	if code != 0 {
 		t.Fatalf("exit = %d, stderr:\n%s", code, h.errOut)
 	}
+	// `run --record` never writes test_time.csv: see run.go's "testrun run
+	// only STAGES --record". The write is `finish-record`'s alone, so that
+	// it can happen OUTSIDE the git-state net the suite run itself runs
+	// inside, instead of looking like drift the run caused.
 	data, _ := os.ReadFile(filepath.Join(h.module, "test_time.csv"))
-	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if string(data) != CSVHeader+"\n" {
+		t.Fatalf("run --record touched test_time.csv: %q", data)
+	}
+	p, err := ReadPendingRecord(h.recordOut)
+	if err != nil {
+		t.Fatalf("ReadPendingRecord: %v", err)
+	}
+	if p.Branch != "main" || p.Commit != "abc123" || p.RunID == "" {
+		t.Fatalf("staged record identity = %+v", p)
+	}
 	// Roster order: ert is listed before daemon.
-	if len(lines) != 3 || !strings.HasSuffix(lines[1], ",abc123,main,ert,1.000,unit-wall-sum") || !strings.HasSuffix(lines[2], ",abc123,main,daemon,1.000,unit-wall-sum") {
-		t.Fatalf("csv = %q", data)
+	if len(p.Rows) != 2 ||
+		p.Rows[0].Suite != "ert" || p.Rows[0].Seconds != 1.0 || p.Rows[0].Measure != "unit-wall-sum" ||
+		p.Rows[1].Suite != "daemon" || p.Rows[1].Seconds != 1.0 {
+		t.Fatalf("staged rows = %+v", p.Rows)
 	}
 	if len(*h.git) != 2 {
 		t.Fatalf("git was asked %d times, want before and after", len(*h.git))
 	}
-	if !strings.Contains(h.out.String(), "recorded 2 suite timings") {
-		t.Errorf("stdout lacks the record line")
+	if !strings.Contains(h.out.String(), "staged 2 suite timings") {
+		t.Errorf("stdout lacks the staging line")
 	}
 }
 
-func TestRunRecordRefusesAMovedHead(t *testing.T) {
+func TestRunRecordRefusesAMovedHeadAndStagesNothing(t *testing.T) {
 	// Arrange
 	h := newHarness(t, nil, nil)
 	n := 0
@@ -589,10 +611,76 @@ func TestRunRecordRefusesAMovedHead(t *testing.T) {
 	}
 
 	// Act
-	code := h.run(t, "--record", "--suites", "ert")
+	code := h.run(t, "--record", "--record-out", h.recordOut, "--suites", "ert")
 
 	// Assert
 	if code != 1 || !strings.Contains(h.errOut.String(), "git commit changed during tests: old -> new") {
+		t.Fatalf("exit = %d, stderr:\n%s", code, h.errOut)
+	}
+	if _, err := os.Stat(h.recordOut); err == nil {
+		t.Errorf("a moved commit still staged a pending record")
+	}
+}
+
+func TestFinishRecordAppendsStagedRowsAndReportsRegressions(t *testing.T) {
+	// Arrange: run --record stages, then finish-record commits.
+	h := newHarness(t, nil, nil)
+	h.deps.Slots = 1
+	if code := h.run(t, "--record", "--record-out", h.recordOut, "--suites", "ert,daemon"); code != 0 {
+		t.Fatalf("staging run exit = %d, stderr:\n%s", code, h.errOut)
+	}
+
+	// Act
+	code := FinishRecord(h.deps, h.module, h.recordOut)
+
+	// Assert
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr:\n%s", code, h.errOut)
+	}
+	data, _ := os.ReadFile(filepath.Join(h.module, "test_time.csv"))
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) != 3 || !strings.HasSuffix(lines[1], ",abc123,main,ert,1.000,unit-wall-sum") || !strings.HasSuffix(lines[2], ",abc123,main,daemon,1.000,unit-wall-sum") {
+		t.Fatalf("csv = %q", data)
+	}
+	if !strings.Contains(h.out.String(), "recorded 2 suite timings") {
+		t.Errorf("stdout lacks the record line")
+	}
+	if !strings.Contains(h.out.String(), "no big timing regressions detected") {
+		t.Errorf("stdout lacks the regression report")
+	}
+}
+
+func TestFinishRecordRefusesAMovedCommitAndRecordsNothing(t *testing.T) {
+	// Arrange: stage under one commit, then move it before finish-record runs.
+	h := newHarness(t, nil, nil)
+	h.deps.Slots = 1
+	if code := h.run(t, "--record", "--record-out", h.recordOut, "--suites", "ert"); code != 0 {
+		t.Fatalf("staging run exit = %d, stderr:\n%s", code, h.errOut)
+	}
+	h.deps.Git = func(string) (string, string, error) { return "main", "def456", nil }
+
+	// Act
+	code := FinishRecord(h.deps, h.module, h.recordOut)
+
+	// Assert
+	if code != 1 || !strings.Contains(h.errOut.String(), "git branch/commit moved since the staged run finished: main@abc123 -> main@def456; recording nothing") {
+		t.Fatalf("exit = %d, stderr:\n%s", code, h.errOut)
+	}
+	data, _ := os.ReadFile(filepath.Join(h.module, "test_time.csv"))
+	if string(data) != CSVHeader+"\n" {
+		t.Errorf("a moved-commit finish-record recorded timings")
+	}
+}
+
+func TestFinishRecordRefusesAMissingPendingRecord(t *testing.T) {
+	// Arrange
+	h := newHarness(t, nil, nil)
+
+	// Act
+	code := FinishRecord(h.deps, h.module, h.recordOut)
+
+	// Assert
+	if code != 1 || !strings.Contains(h.errOut.String(), "read the staged record") {
 		t.Fatalf("exit = %d, stderr:\n%s", code, h.errOut)
 	}
 }
@@ -614,7 +702,7 @@ func TestRunFailsBeforeRunningAnything(t *testing.T) {
 			arrange: func(h *harness) {
 				h.deps.Git = func(string) (string, string, error) { return "", "", errors.New("not a repository") }
 			},
-			argv:    []string{"--record"},
+			argv:    []string{"--record", "--record-out", "/does-not-matter"},
 			wantErr: "could not resolve the initial git branch and commit: not a repository",
 		},
 		{
@@ -684,6 +772,39 @@ func TestRunInterruptedKillsAndExits130(t *testing.T) {
 	// Assert
 	if code != 130 || !strings.Contains(h.errOut.String(), "the run was interrupted") {
 		t.Fatalf("exit = %d, stderr:\n%s", code, h.errOut)
+	}
+}
+
+func TestParseFinishRecordArgs(t *testing.T) {
+	tests := []struct {
+		name    string
+		argv    []string
+		want    FinishRecordArgs
+		wantErr string
+	}{
+		{name: "both flags", argv: []string{"--module", "/m", "--record-out", "/r"}, want: FinishRecordArgs{Module: "/m", RecordOut: "/r"}},
+		{name: "missing module", argv: []string{"--record-out", "/r"}, wantErr: "--module is required"},
+		{name: "missing record-out", argv: []string{"--module", "/m"}, wantErr: "--record-out is required"},
+		{name: "--module without a value", argv: []string{"--module"}, wantErr: "--module needs a directory"},
+		{name: "--record-out without a value", argv: []string{"--module", "/m", "--record-out"}, wantErr: "--record-out needs a path"},
+		{name: "an unknown argument", argv: []string{"--bogus"}, wantErr: "unknown argument '--bogus', expected --module or --record-out"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got, err := ParseFinishRecordArgs(tt.argv)
+
+			// Assert
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("err = %v, want it to mention %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil || got != tt.want {
+				t.Fatalf("ParseFinishRecordArgs = %+v, %v; want %+v", got, err, tt.want)
+			}
+		})
 	}
 }
 

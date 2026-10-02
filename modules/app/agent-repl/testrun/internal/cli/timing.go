@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -123,6 +124,44 @@ func AppendTimings(path string, rows []TimingRow) error {
 		return fmt.Errorf("replace %s: %w", path, err)
 	}
 	return nil
+}
+
+// PendingRecord is a --record run's staged decision: the rows it would
+// append to test_time.csv, and the branch/commit identity it computed them
+// under. `testrun run --record` writes one once every suite has passed and
+// the branch/commit held steady across the whole suite run; `testrun
+// finish-record` is the only thing that ever turns it into a CSV write,
+// and it does so from OUTSIDE the git-state net the suite run itself runs
+// inside (.claude/safe-test-run.sh) — see run.go's "testrun run only STAGES
+// --record" for why the split exists.
+type PendingRecord struct {
+	RunID, Branch, Commit string
+	Rows                  []TimingRow
+}
+
+// WritePendingRecord stages p at path, for a later ReadPendingRecord.
+func WritePendingRecord(path string, p PendingRecord) error {
+	data, err := json.MarshalIndent(p, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode the staged record: %w", err)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	return nil
+}
+
+// ReadPendingRecord reads back what WritePendingRecord staged.
+func ReadPendingRecord(path string) (PendingRecord, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return PendingRecord{}, fmt.Errorf("read the staged record %s: %w", path, err)
+	}
+	var p PendingRecord
+	if err := json.Unmarshal(data, &p); err != nil {
+		return PendingRecord{}, fmt.Errorf("decode the staged record %s: %w", path, err)
+	}
+	return p, nil
 }
 
 // RunID is a run's identifier in the CSV.

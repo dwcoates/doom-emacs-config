@@ -15,17 +15,23 @@ import (
 type Args struct {
 	// Module is the agent-repl module root.
 	Module string
-	// Record appends the run's suite timings to test_time.csv.
+	// Record stages the run's suite timings for `testrun finish-record` to
+	// commit to test_time.csv. `run` itself never writes the canonical
+	// history file: see RecordOut and "testrun run only STAGES --record" in
+	// run.go.
 	Record bool
+	// RecordOut is where a --record run stages its timing rows (see
+	// PendingRecord). Required together with Record.
+	RecordOut string
 	// Coverage enables the expensive coverage instrumentation and reports.
 	Coverage bool
 	// Selected is the --suites narrowing; EMPTY MEANS EVERY SUITE.
 	Selected []string
 }
 
-// ParseArgs reads `--module DIR [--record] [--coverage] [--suites a,b]`. An unknown suite
-// is an error, never a silently empty run: a caller that misspells a suite
-// must not be told it passed.
+// ParseArgs reads `--module DIR [--record --record-out PATH] [--coverage]
+// [--suites a,b]`. An unknown suite is an error, never a silently empty run:
+// a caller that misspells a suite must not be told it passed.
 func ParseArgs(argv []string) (Args, error) {
 	var a Args
 	for i := 0; i < len(argv); i++ {
@@ -33,6 +39,12 @@ func ParseArgs(argv []string) (Args, error) {
 		switch {
 		case arg == "--record":
 			a.Record = true
+		case arg == "--record-out":
+			if i+1 >= len(argv) {
+				return Args{}, errors.New("--record-out needs a path")
+			}
+			i++
+			a.RecordOut = argv[i]
 		case arg == "--coverage":
 			a.Coverage = true
 		case arg == "--module":
@@ -58,7 +70,7 @@ func ParseArgs(argv []string) (Args, error) {
 			}
 			a.Selected = append(a.Selected, sel...)
 		default:
-			return Args{}, fmt.Errorf("unknown argument '%s', expected --record, --coverage, or --suites <list>", arg)
+			return Args{}, fmt.Errorf("unknown argument '%s', expected --record, --record-out, --coverage, or --suites <list>", arg)
 		}
 	}
 	if a.Module == "" {
@@ -69,6 +81,51 @@ func ParseArgs(argv []string) (Args, error) {
 		// suite's unit time, so a coverage run's figures are not comparable
 		// with the canonical history's.
 		return Args{}, errors.New("--record and --coverage cannot be combined: coverage instrumentation changes the suite timings --record keeps")
+	}
+	if a.Record && a.RecordOut == "" {
+		return Args{}, errors.New("--record needs --record-out: the path `run` stages this run's timing rows at, for a later `testrun finish-record` to commit outside the git-state net")
+	}
+	if a.RecordOut != "" && !a.Record {
+		return Args{}, errors.New("--record-out needs --record")
+	}
+	return a, nil
+}
+
+// FinishRecordArgs is a parsed `testrun finish-record` command line.
+type FinishRecordArgs struct {
+	// Module is the agent-repl module root.
+	Module string
+	// RecordOut is the path a prior `testrun run --record` staged its rows
+	// at.
+	RecordOut string
+}
+
+// ParseFinishRecordArgs reads `--module DIR --record-out PATH`.
+func ParseFinishRecordArgs(argv []string) (FinishRecordArgs, error) {
+	var a FinishRecordArgs
+	for i := 0; i < len(argv); i++ {
+		switch argv[i] {
+		case "--module":
+			if i+1 >= len(argv) {
+				return FinishRecordArgs{}, errors.New("--module needs a directory")
+			}
+			i++
+			a.Module = argv[i]
+		case "--record-out":
+			if i+1 >= len(argv) {
+				return FinishRecordArgs{}, errors.New("--record-out needs a path")
+			}
+			i++
+			a.RecordOut = argv[i]
+		default:
+			return FinishRecordArgs{}, fmt.Errorf("unknown argument '%s', expected --module or --record-out", argv[i])
+		}
+	}
+	if a.Module == "" {
+		return FinishRecordArgs{}, errors.New("--module is required")
+	}
+	if a.RecordOut == "" {
+		return FinishRecordArgs{}, errors.New("--record-out is required")
 	}
 	return a, nil
 }

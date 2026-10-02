@@ -181,7 +181,7 @@ the repository root `AGENTS.md`, "Canonical test timing history"). Its
 | measure | written by | what it is |
 |---|---|---|
 | `serial-wall` | the retired serial `bin/test-all.sh` (rows up to 2026-08-04), never again | `time` of the suite run ALONE on the host, its `go test -count=1 -cover`, vitest-with-coverage or Emacs processes free to use every core |
-| `unit-wall-sum` | `testrun run --record` | the sum of the suite's own units' wall times, each unit on one core slot, prebuild/compile units included |
+| `unit-wall-sum` | `testrun finish-record` (staged by `testrun run --record`) | the sum of the suite's own units' wall times, each unit on one core slot, prebuild/compile units included |
 
 The regression report compares a suite only with prior rows of its own
 measure on its own branch, and says how many rows of another measure it set

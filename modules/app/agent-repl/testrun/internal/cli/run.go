@@ -55,7 +55,7 @@ func Run(ctx context.Context, d Deps, a Args) int {
 		return 1
 	}
 	layout := suites.Layout{
-		Repo:     filepath.Clean(filepath.Join(moduleRoot, "..", "..", "..")),
+		Repo:     repoRoot(moduleRoot),
 		Module:   moduleRoot,
 		Work:     d.Work,
 		Self:     d.Self,
@@ -152,7 +152,17 @@ func Run(ctx context.Context, d Deps, a Args) int {
 	}
 
 	if a.Record {
-		if code := record(d, layout.Repo, csvPath, startBranch, startCommit, passed); code != 0 {
+		// `run` only STAGES --record: it never writes test_time.csv itself.
+		// bin/test-all.sh runs the whole suite schedule inside
+		// .claude/safe-test-run.sh's git-state net, and a run that appended
+		// its own timing row to a tracked file from inside that net left the
+		// append looking exactly like drift the run caused — DRIFT DETECTED,
+		// a preserved checkpoint tag, and a --record run that could never
+		// exit 0. The actual CSV write is `testrun finish-record`'s alone,
+		// and test-all.sh runs it only after the net has already taken its
+		// clean post-run snapshot, so the write never lands inside the
+		// window the net inspects.
+		if code := stageRecord(d, layout.Repo, a.RecordOut, startBranch, startCommit, passed); code != 0 {
 			return code
 		}
 	} else {
@@ -160,6 +170,12 @@ func Run(ctx context.Context, d Deps, a Args) int {
 	}
 	printClosing(log, a, passed, declined)
 	return 0
+}
+
+// repoRoot is the checkout root a module root sits three directories under
+// (modules/app/agent-repl).
+func repoRoot(moduleRoot string) string {
+	return filepath.Clean(filepath.Join(moduleRoot, "..", "..", ".."))
 }
 
 // inRosterOrder sorts verdicts the way the roster lists their suites, so
@@ -256,7 +272,11 @@ func printSuiteSummaries(log *run.Log, passed, declined, failed []run.SuiteResul
 	}
 }
 
-func record(d Deps, repo, csvPath, startBranch, startCommit string, passed []run.SuiteResult) int {
+// stageRecord re-verifies the branch and commit held steady across the
+// suite run, then stages this run's timing rows at recordOut for a later
+// `testrun finish-record` to commit. It never touches test_time.csv: see
+// Run's "testrun run only STAGES --record" above.
+func stageRecord(d Deps, repo, recordOut, startBranch, startCommit string, passed []run.SuiteResult) int {
 	log := d.Log
 	endBranch, endCommit, err := d.Git(repo)
 	if err != nil {
@@ -281,12 +301,48 @@ func record(d Deps, repo, csvPath, startBranch, startCommit string, passed []run
 			Seconds: s.UnitSeconds, Measure: RecordedMeasure,
 		})
 	}
-	if err := AppendTimings(csvPath, rows); err != nil {
+	if err := WritePendingRecord(recordOut, PendingRecord{RunID: runID, Branch: startBranch, Commit: startCommit, Rows: rows}); err != nil {
 		log.Errorf("%v", err)
 		return 1
 	}
-	log.Infof("recorded %d suite timings in %s", len(rows), csvPath)
-	lines, err := Regressions(csvPath, runID, startBranch)
+	log.Infof("staged %d suite timings at %s for `testrun finish-record` to commit", len(rows), recordOut)
+	return 0
+}
+
+// FinishRecord is the second half of a --record run: it commits a prior
+// `testrun run --record`'s staged rows to test_time.csv and prints the
+// regression report, from OUTSIDE the git-state net the suite run itself
+// ran inside. It re-checks the branch and commit against what was staged,
+// so a commit that moved in the (very short) window between the net's
+// clean exit and this call still records nothing rather than mis-attributing
+// a row.
+func FinishRecord(d Deps, moduleRoot, recordOut string) int {
+	log := d.Log
+	p, err := ReadPendingRecord(recordOut)
+	if err != nil {
+		log.Errorf("%v", err)
+		return 1
+	}
+	branch, commit, err := d.Git(repoRoot(moduleRoot))
+	if err != nil {
+		log.Errorf("could not resolve the current git branch and commit: %v", err)
+		return 1
+	}
+	if branch != p.Branch || commit != p.Commit {
+		log.Errorf("git branch/commit moved since the staged run finished: %s@%s -> %s@%s; recording nothing", p.Branch, p.Commit, branch, commit)
+		return 1
+	}
+	csvPath := filepath.Join(moduleRoot, "test_time.csv")
+	if err := ValidateCSV(csvPath); err != nil {
+		log.Errorf("%v", err)
+		return 1
+	}
+	if err := AppendTimings(csvPath, p.Rows); err != nil {
+		log.Errorf("%v", err)
+		return 1
+	}
+	log.Infof("recorded %d suite timings in %s", len(p.Rows), csvPath)
+	lines, err := Regressions(csvPath, p.RunID, p.Branch)
 	if err != nil {
 		log.Errorf("%v", err)
 		return 1
