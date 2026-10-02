@@ -11,7 +11,11 @@
  * WHY A FALLBACK AT ALL. The page's production host is an Emacs xwidget, a
  * WebKit view embedded in an application that owns the keymap. The page itself
  * never intercepts Cmd/Ctrl-C — no keydown handler in `src/` looks at the C
- * key — so the browser's own copy is the first path and stays the first path.
+ * key. On the NS port the xwidget forwards every key to Emacs unless a page
+ * input has focus, so `y`, `C-c` and Cmd-c over highlighted page text are
+ * Emacs's to handle: `agent-repl-frontend-copy-selection` (lisp/frontend.el)
+ * asks this page for its selection and writes it with `kill-new`. A copy the
+ * browser itself performs is the other path, and this module backs it.
  * But the xwidget's native copy is not something this page can verify, and a
  * `copy` event that fires with an empty clipboard payload would silently hand
  * the reader nothing. So: when a `copy` event DOES reach the document and the
