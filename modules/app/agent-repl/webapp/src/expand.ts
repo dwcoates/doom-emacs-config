@@ -20,6 +20,7 @@
  */
 import { ancestorMatching } from "./dom.js";
 import { log } from "./log.js";
+import { selectedText } from "./selection.js";
 import { collapseClicked } from "./scroll.js";
 
 /**
@@ -350,7 +351,7 @@ function requireCapped(section: HTMLElement): void {
  */
 export function installClickExpand(
   feed: HTMLElement,
-  selection: () => string = () => window.getSelection()?.toString() ?? "",
+  selection: () => string = () => selectedText(),
   afterToggle?: AfterToggle,
   owned: OwnedSections = () => false,
 ): () => void {

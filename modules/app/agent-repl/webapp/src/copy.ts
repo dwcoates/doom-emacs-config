@@ -18,7 +18,7 @@
  * event carries a writable `clipboardData`, this writes the current selection's
  * own text onto it, which is exactly what the native path would have written.
  *
- * IT IS NOT A SECOND VOCABULARY. It copies `document.getSelection().toString()`
+ * IT IS NOT A SECOND VOCABULARY. It copies the selection's own text (`selectedText`)
  * and nothing else — no reformatting, no synthesised text, no per-component
  * knowledge. A collapsed or absent selection is left entirely alone, so a copy
  * aimed at a focused input or textarea (whose selection is not the document's)
@@ -27,6 +27,7 @@
  * It adds no visible element. There is no copy button anywhere in this app.
  */
 import { log } from "./log.js";
+import { selectedText } from "./selection.js";
 
 /**
  * Install the document-level `copy` fallback, and answer a teardown that
@@ -37,10 +38,7 @@ export function installCopyFallback(doc: Document): () => void {
     const clipboardData = (event as ClipboardEvent).clipboardData;
     if (clipboardData === null || clipboardData === undefined) return;
 
-    const selection = doc.getSelection();
-    if (selection === null || selection.isCollapsed) return;
-
-    const text = selection.toString();
+    const text = selectedText(doc);
     if (text === "") return;
 
     clipboardData.setData("text/plain", text);
