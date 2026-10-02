@@ -453,6 +453,10 @@ func start(ctx context.Context, ws ids.WorkspaceID, client shimclient.Client, se
 	}
 
 	w.mu.Lock()
+	// THIS WATCHER SPEAKS FOR THE WORKSPACE'S LIVE WORK from now on, before its
+	// first set is published: a predecessor's later departure must not
+	// republish over it (settleDepartedWorkLocked).
+	speakers.speak(ws, w)
 	w.log.Info("daemon.sessionwatcher.start", "opening the session's watch fleet", dlog.Context{
 		"vendor_session_id": session.Started.GetVendorSessionId(),
 		"turn_in_flight":    session.Started.GetTurnInFlight().GetValue(),
@@ -972,6 +976,9 @@ func (w *watcher) Close() error {
 	if w.endingLocked() || reaped {
 		departed = w.departLocked(DepartureClosed)
 	}
+	// A CLOSED WATCHER SPEAKS FOR NOTHING. Silenced only after the departure,
+	// which is the last thing it may publish.
+	speakers.silence(w.ws, w)
 	w.mu.Unlock()
 	w.tellDeparted(departed)
 
@@ -1040,6 +1047,9 @@ func (w *watcher) departLocked(cause DepartureCause) *Departure {
 	w.log.Info("daemon.sessionwatcher.departed", "the watched shim is gone; its in-flight work ended with it", dlog.Context{
 		"cause": string(cause), "ordered": d.Ordered,
 	})
+	// THE DEPARTURE IS THE WORK'S END, and every view is told so here, at the
+	// one door every departure passes through.
+	w.settleDepartedWorkLocked()
 	return &d
 }
 

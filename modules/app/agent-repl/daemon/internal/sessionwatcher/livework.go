@@ -1,9 +1,12 @@
 package sessionwatcher
 
 import (
+	"sync"
+
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/ids"
 )
 
 // THE LIVE-WORK LEDGER.
@@ -75,6 +78,9 @@ const (
 	concludedQueryDied conclusion = "query_died"
 	// concludedReconciled is a re-announcement that no longer names the item.
 	concludedReconciled conclusion = "reconciled"
+	// concludedDeparted is the watched shim's PROCESS being gone: a kill, a
+	// forced bounce, a stand-down or a death. Everything it ran ended with it.
+	concludedDeparted conclusion = "departed"
 )
 
 // admitLocked puts one announced item in the ledger, reporting whether it was
@@ -214,6 +220,44 @@ func (w *watcher) concludeAllLocked(why conclusion) bool {
 	return changed
 }
 
+// settleDepartedWorkLocked concludes every item the departed shim was running
+// and republishes the set, so every view -- the footer's chips and panels, the
+// roster's `idle_async`, the feed's shell heads, monitor cards and subagent
+// bubbles -- shows the work ENDED the moment the shim is known gone. The caller
+// holds mu and has just recorded the departure.
+//
+// THE PROCESS IS THE WORK'S LIFETIME. Detached work runs inside the shim's
+// process group (the vendor's subagents and monitors in the CLI process, its
+// shells as the CLI's children), and a departure is that group's end: a kill
+// this daemon ordered, a forced bounce's escalation, or a death. Before this the
+// ledger outlived the departure. A shim force-killed by a restart, or one that
+// died, wrote no terminals and could not be asked to re-announce anything, so
+// the watcher's last set stood: the webapp's expanded footer listed the dead
+// work, the roster stayed `idle_async`, and a shell head kept its stop button,
+// until a replacement shim's first set happened to overwrite them -- and for
+// good when none came up.
+//
+// ONLY THE WATCHER THAT SPEAKS FOR THE WORKSPACE PUBLISHES. A watcher a newer
+// one already displaced (see speakers) settles its own ledger but publishes
+// nothing: the views already hold the newer watcher's set, and an empty set
+// from the old one would hide work the new shim is running.
+func (w *watcher) settleDepartedWorkLocked() {
+	live := len(w.live)
+	if !w.concludeAllLocked(concludedDeparted) {
+		return
+	}
+	if !speakers.speaksFor(w.ws, w) {
+		w.log.Info("daemon.sessionwatcher.departed_work_settled", "the departed shim's live work was concluded; a newer watcher speaks for the workspace, so nothing was republished", dlog.Context{
+			"concluded": live, "published": false,
+		})
+		return
+	}
+	w.log.Info("daemon.sessionwatcher.departed_work_settled", "the departed shim's live work was concluded and the empty set republished to every view", dlog.Context{
+		"concluded": live, "published": true,
+	})
+	w.publishLiveWorkLocked()
+}
+
 // reconcileLiveWorkLocked holds the ledger to a re-announcement's live
 // membership: the shim's own statement of what is live NOW. It reports whether
 // anything was retired.
@@ -257,4 +301,47 @@ func (w *watcher) reconcileLiveWorkLocked(started *conversationv1.SessionStarted
 		}
 	}
 	return changed
+}
+
+// speakerRegistry records, per workspace, the watcher whose live-work set the
+// views hold now: the newest one started. A watcher stops speaking when it is
+// closed or when a newer watcher of the same workspace starts.
+//
+// IT EXISTS FOR THE DISPLACED CLOSE. The fleet can start a workspace's new
+// watcher before it closes the one it displaced (Fleet.remember), and a close
+// that finds the old shim reaped is a departure. That departure must not
+// republish the old ledger's empty set over the set the new watcher already
+// published. A registry rather than a fleet callback, because every watcher is
+// minted by start in this package and the rule is this package's to keep.
+//
+// THE LOCK IS A LEAF: it is taken under a watcher's mu and takes nothing.
+type speakerRegistry struct {
+	mu      sync.Mutex
+	current map[ids.WorkspaceID]*watcher
+}
+
+// speakers is the daemon's one registry.
+var speakers = &speakerRegistry{current: map[ids.WorkspaceID]*watcher{}}
+
+// speak makes w the watcher that speaks for ws.
+func (r *speakerRegistry) speak(ws ids.WorkspaceID, w *watcher) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.current[ws] = w
+}
+
+// silence retires w from speaking for ws, if it still does.
+func (r *speakerRegistry) silence(ws ids.WorkspaceID, w *watcher) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.current[ws] == w {
+		delete(r.current, ws)
+	}
+}
+
+// speaksFor reports whether w is the watcher that speaks for ws.
+func (r *speakerRegistry) speaksFor(ws ids.WorkspaceID, w *watcher) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.current[ws] == w
 }
