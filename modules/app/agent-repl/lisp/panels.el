@@ -7,6 +7,7 @@
 ;; Cross-file forward declarations.  These sources load in the dependency
 ;; order config.el establishes and resolve each other's calls at call time,
 ;; so the declarations below exist for the byte-compiler alone.
+(declare-function agent-repl-input-hidden-p "window" (ws))
 (declare-function agent-repl--open-progress-placeholder "open-progress" (ws))
 (declare-function agent-repl-held-ingress-refresh "held-ingress" (ws))
 (declare-function agent-repl--agent-panel-buffer-p "core")
@@ -188,8 +189,11 @@ window is selected so the user can start typing immediately."
   (agent-repl--ws-buffer-visible-p :frontend-buffer))
 
 (defun agent-repl--panels-visible-p ()
-  "Return t if both the input panel and the agent view are visible."
-  (let ((result (and (agent-repl--input-visible-p)
+  "Return t if both the input panel and the agent view are visible.
+While a gate hides the current workspace's input window
+\(`agent-repl-input-hidden-p'), the view alone is the whole panel layout."
+  (let ((result (and (or (agent-repl--input-visible-p)
+                         (agent-repl-input-hidden-p (agent-repl--ws-current-name)))
                      (agent-repl--view-visible-p))))
     (agent-repl--log-verbose
      '(:agent-repl-context "panel visibility can be checked outside a workspace")

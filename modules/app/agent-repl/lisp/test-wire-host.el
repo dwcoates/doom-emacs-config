@@ -403,7 +403,8 @@
                                                :kind (:arm :link-severed
                                                       :value nil)))))))
                    :naming (:slug "fix-flaky" :title "Fix the flaky reconnect")
-                   :held-prompt-edit nil))))
+                   :held-prompt-edit nil
+                   :gate nil))))
 
 (ert-deftest agent-repl-test-wire-host-workspace-decodes-the-terminal-standing ()
   "A terminal session states whether reopening can rehydrate it."
@@ -457,6 +458,48 @@
                             #'agent-repl-wire-decode-host-workspace
                             "{\"none\":{},\"naming\":{}}")
                            :held-prompt-edit))))
+
+;;;; ---- The standing gate ----
+
+(ert-deftest agent-repl-test-wire-host-workspace-decodes-a-standing-cold-gate ()
+  "A standing cold gate decodes as its arm."
+  (should (equal (plist-get (agent-repl-test-wire-host--decode
+                             #'agent-repl-wire-decode-host-workspace
+                             "{\"none\":{},\"naming\":{},\"gate\":{\"coldGate\":{}}}")
+                            :gate)
+                 '(:arm :cold-gate :value nil))))
+
+(ert-deftest agent-repl-test-wire-host-workspace-without-a-gate-carries-none ()
+  "An absent gate is the fact that no gate stands."
+  (should (null (plist-get (agent-repl-test-wire-host--decode
+                            #'agent-repl-wire-decode-host-workspace
+                            "{\"none\":{},\"naming\":{}}")
+                           :gate))))
+
+(ert-deftest agent-repl-test-wire-host-an-unassigned-gate-is-still-a-gate ()
+  "Set-but-unassigned is a gate this build does not name: present, no arm."
+  (should (equal (plist-get (agent-repl-test-wire-host--decode
+                             #'agent-repl-wire-decode-host-workspace
+                             "{\"none\":{},\"naming\":{},\"gate\":{}}")
+                            :gate)
+                 '(:arm nil :value nil))))
+
+(ert-deftest agent-repl-test-wire-host-a-cold-gate-carrying-a-field-is-a-breach ()
+  "The cold-gate arm is empty: a field riding it is refused."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-host-gate
+                  "{\"coldGate\":{\"tokens\":1}}")
+                 '("HostGateColdGate" tokens "unknown field"))))
+
+(ert-deftest agent-repl-test-wire-host-gate-arms-pinned ()
+  "The gate's arms are exactly what the frozen schema declares."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_watch_host_workspace.pb.go"
+                        "HostGate")
+                       #'string<)
+                 (sort (mapcar (lambda (arm) (symbol-name (car arm)))
+                               agent-repl-wire-host-gate-arms)
+                       #'string<))))
 
 (ert-deftest agent-repl-test-wire-host-held-prompt-edit-without-a-turn-is-a-breach ()
   "The edit's turn is REQUIRED: a commit and a cancel echo it."
