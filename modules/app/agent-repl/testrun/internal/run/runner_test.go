@@ -286,6 +286,55 @@ func TestRunCancelsTheDependentsOfAFailedUnit(t *testing.T) {
 	}
 }
 
+func TestRunSumsEachSuitesOwnUnitTime(t *testing.T) {
+	tests := []struct {
+		name      string
+		specs     []Spec
+		scripts   map[string]script
+		suite     string
+		wantUnits float64
+		wantSpan  float64
+	}{
+		{
+			// The dependencies force a's units either side of b's on one slot.
+			// Every unit takes one tick, so a holds a slot for 2s of a 5s span.
+			name:      "another suite's unit between two of a suite's units is not the suite's time",
+			specs:     []Spec{spec("a#00", "a"), spec("b", "b", "a#00"), spec("a#01", "a", "b")},
+			scripts:   map[string]script{},
+			suite:     "a",
+			wantUnits: 2,
+			wantSpan:  5,
+		},
+		{
+			name:      "a cancelled unit adds no time",
+			specs:     []Spec{spec("build", "e"), spec("e#00", "e", "build")},
+			scripts:   map[string]script{"build": {exit: 2}},
+			suite:     "e",
+			wantUnits: 1,
+			wantSpan:  2,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			r, _, _ := newRunner(1, &fakeExec{scripts: tt.scripts})
+
+			// Act
+			_, suites, err := r.Run(context.Background(), tt.specs)
+
+			// Assert
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := suiteByName(suites, tt.suite)
+			if got.UnitSeconds != tt.wantUnits || got.Seconds() != tt.wantSpan {
+				t.Fatalf("suite %s: %.0fs of units over a %.0fs span, want %.0fs over %.0fs",
+					tt.suite, got.UnitSeconds, got.Seconds(), tt.wantUnits, tt.wantSpan)
+			}
+		})
+	}
+}
+
 func TestRunPrintsEachUnitsOutputInOnePiece(t *testing.T) {
 	// Arrange: two units run side by side.
 	release := make(chan struct{})
