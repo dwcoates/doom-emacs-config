@@ -33,6 +33,13 @@ const (
 // pagingRows responses into its book, and answers the fixture and the row of
 // the turn's oldest response, as the tail saw it.
 func pagedFeed(t *testing.T) (*fixture, *frontendv1.FeedRow) {
+	f, rows := pagedFeedRows(t)
+	return f, rows["row 0"]
+}
+
+// pagedFeedRows is pagedFeed answering every response row the tail saw, by its
+// markdown.
+func pagedFeedRows(t *testing.T) (*fixture, map[string]*frontendv1.FeedRow) {
 	t.Helper()
 	f := newOpenedWithProfile(t, harness.Opts{}, harness.ShimProfile{HistoryPageSize: pagingStorePage})
 	f.submit("go", "k-paging", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
@@ -40,18 +47,16 @@ func pagedFeed(t *testing.T) (*fixture, *frontendv1.FeedRow) {
 	for i := range pagingRows {
 		f.shim.PushAgentFrame(mainAgent, feedRowLabeledResponse(i))
 	}
-	var oldest *frontendv1.FeedRow
+	rows := map[string]*frontendv1.FeedRow{}
 	awaitRow(t, f, tail, "the last pushed row", func(r *frontendv1.FeedRow) bool {
 		md := r.GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown()
-		if md == "row 0" {
-			oldest = r
-		}
+		rows[md] = r
 		return md == "row "+itoa(pagingRows-1)
 	})
-	if oldest == nil {
+	if rows["row 0"] == nil {
 		t.Fatal("the tail never carried the oldest response row")
 	}
-	return f, oldest
+	return f, rows
 }
 
 // feedPage asks GetFeedPage for the first or next page of the root feed.
@@ -143,11 +148,11 @@ func TestLoadFeedThroughStreamsEveryPageDownToTheTarget(t *testing.T) {
 
 func TestANextAfterLoadFeedThroughContinuesBelowIt(t *testing.T) {
 	t.Parallel()
-	// Arrange.
-	f, oldest := pagedFeed(t)
+	// Arrange: a target in the middle of the book, so older pages remain.
+	f, rows := pagedFeedRows(t)
 	f.feedPage(true)
 	stream, err := f.d.Client().LoadFeedThrough(f.d.Ctx(), connect.NewRequest(&agentreplv1.LoadFeedThroughRequest{
-		Workspace: f.ws, Target: oldest.GetId(),
+		Workspace: f.ws, Target: rows["row 6"].GetId(),
 	}))
 	if err != nil {
 		t.Fatalf("LoadFeedThrough: %v", err)
@@ -165,7 +170,10 @@ func TestANextAfterLoadFeedThroughContinuesBelowIt(t *testing.T) {
 	// Act.
 	page := f.feedPage(false)
 
-	// Assert: nothing the walk already delivered is served again.
+	// Assert: older rows, and nothing the walk already delivered.
+	if len(page.GetSuccess().GetRows()) == 0 {
+		t.Fatal("next after the walk served nothing, want the older page")
+	}
 	for _, row := range page.GetSuccess().GetRows() {
 		if served[row.GetId().GetValue()] {
 			t.Fatalf("next re-served %v, which LoadFeedThrough delivered", row.GetId())
