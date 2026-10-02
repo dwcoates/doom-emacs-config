@@ -14,26 +14,19 @@
  * control.
  */
 import { createControl, type Control } from "../control.js";
-import { SetPermissionModeResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_permission_mode_pb";
+import {
+  SetPermissionModeResponseSchema,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_permission_mode_pb";
 import type {
   TopbarPermissionModeOption,
   TopbarPermissionModePicker,
 } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
-import { release, whileInFlight } from "../feed/cards/controls.js";
 import { log } from "../log.js";
-import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
-import { callUnary } from "../rpc/unary.js";
+import { requireMessage } from "../rpc/strict.js";
 import type { TopbarContext } from "./context.js";
-import { guardMalformed } from "../rpc/guard.js";
-import { isMalformedView } from "../rpc/malformed.js";
-import {
-  clearRefusals,
-  drawTransportRefusal,
-  drawTypedRefusal,
-  drawUnreadableRefusal,
-  type SentenceTable,
-} from "../rpc/refuse.js";
+import type { SentenceTable } from "../rpc/refuse.js";
 import { drawNoSessionCell } from "./no-session.js";
+import { sendPick } from "./pick.js";
 import { asAnchor } from "./strip.js";
 
 /** The causes only SetPermissionMode can answer with. */
@@ -120,54 +113,18 @@ export async function pickPermissionMode(
     operation: "topbar.permission-mode-picked",
     context: { mode: option.mode },
   });
-  // CLEARED BEFORE THE CALL, never after: a refusal from the previous pick
-  // standing beside the control the reader just clicked again reads as the
-  // answer to the NEW click.
-  clearRefusals(wrap);
-  const answered = await whileInFlight([row, button], () =>
-    callUnary(
-      tc.ctx,
-      "SetPermissionMode",
-      (client) => client.setPermissionMode({ workspace: tc.ctx.workspace, mode: option.mode }),
-      SetPermissionModeResponseSchema,
-    ),
+  await sendPick(
+    {
+      rpc: "SetPermissionMode",
+      send: (client) => client.setPermissionMode({ workspace: tc.ctx.workspace, mode: option.mode }),
+      schema: SetPermissionModeResponseSchema,
+      causes: SET_PERMISSION_MODE_CAUSES,
+      malformedOperation: "topbar.permission-mode-pick",
+      unreadableOperation: "topbar.permission-mode-malformed-refusal",
+    },
+    tc,
+    wrap,
+    button,
+    row,
   );
-  if ("failed" in answered) {
-    // AN ANSWER THIS BUILD CANNOT READ IS MACHINERY, not the daemon refusing:
-    // it is filed as `frame_undecodable` through the one click guard and
-    // nothing is drawn at the control, because there is no refusal to state.
-    if (isMalformedView(answered.failed)) {
-      await guardMalformed(tc.ctx, "topbar.permission-mode-pick", Promise.reject(answered.failed));
-      return;
-    }
-    drawTransportRefusal(wrap);
-    return;
-  }
-  try {
-    const result = requireCase(answered.value.result, "SetPermissionModeResponse.result");
-    switch (result.case) {
-      case "success":
-        tc.reveals.close();
-        return;
-      case "error":
-        drawTypedRefusal(
-          wrap,
-          "SetPermissionModeError.cause",
-          "SetPermissionMode",
-          result.value.cause,
-          SET_PERMISSION_MODE_CAUSES,
-        );
-        release([row, button]);
-        return;
-      default: {
-        const other: { case: string } = result;
-        return unreachableArm("SetPermissionModeResponse.result", other.case);
-      }
-    }
-  } catch (err) {
-    release([row, button]);
-    if (!drawUnreadableRefusal(tc.ctx, wrap, "topbar.permission-mode-malformed-refusal", err)) {
-      throw err;
-    }
-  }
 }
