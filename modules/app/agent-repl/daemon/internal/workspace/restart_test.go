@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"claude-repld/internal/bounce"
 	"claude-repld/internal/dlog"
@@ -17,7 +18,7 @@ func TestRestartDelegatesToTheRelaunchEngine(t *testing.T) {
 	f.workspace("w1", t.TempDir())
 
 	// Act.
-	if err := f.verbs.Restart(context.Background(), "w1", false); err != nil {
+	if err := f.verbs.Restart(context.Background(), "w1"); err != nil {
 		t.Fatalf("Restart: %v", err)
 	}
 
@@ -28,34 +29,16 @@ func TestRestartDelegatesToTheRelaunchEngine(t *testing.T) {
 	}
 }
 
-func TestRestartWithoutForceKillsNoTurn(t *testing.T) {
-	// Arrange.
+func TestRestartForceEndsTheRunningTurnFirst(t *testing.T) {
+	// Arrange: a restart is immediate, and the running turn is ended with no
+	// gentleness before the bounce.
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
 	turn := wsm.TurnID("t1")
 	f.running.Turn = &turn
 
 	// Act.
-	if err := f.verbs.Restart(context.Background(), "w1", false); err != nil {
-		t.Fatalf("Restart: %v", err)
-	}
-
-	// Assert.
-	if len(f.shim.killedTurns) != 0 {
-		t.Fatalf("killed turns = %+v, want none without force", f.shim.killedTurns)
-	}
-}
-
-func TestRestartWithForceEndsTheRunningTurnFirst(t *testing.T) {
-	// Arrange: the relaunch engine waits for freeness, so a wedged turn must go
-	// first or the wait never completes.
-	f := newFixture(t)
-	f.workspace("w1", t.TempDir())
-	turn := wsm.TurnID("t1")
-	f.running.Turn = &turn
-
-	// Act.
-	if err := f.verbs.Restart(context.Background(), "w1", true); err != nil {
+	if err := f.verbs.Restart(context.Background(), "w1"); err != nil {
 		t.Fatalf("Restart: %v", err)
 	}
 
@@ -75,7 +58,7 @@ func TestRestartKillStatesNoCommand(t *testing.T) {
 	f.running.Turn = &turn
 
 	// Act.
-	if err := f.verbs.Restart(context.Background(), "w1", true); err != nil {
+	if err := f.verbs.Restart(context.Background(), "w1"); err != nil {
 		t.Fatalf("Restart: %v", err)
 	}
 
@@ -85,13 +68,13 @@ func TestRestartKillStatesNoCommand(t *testing.T) {
 	}
 }
 
-func TestRestartWithForceAndNoTurnKillsNothing(t *testing.T) {
+func TestRestartWithNoTurnKillsNothing(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
 
 	// Act.
-	if err := f.verbs.Restart(context.Background(), "w1", true); err != nil {
+	if err := f.verbs.Restart(context.Background(), "w1"); err != nil {
 		t.Fatalf("Restart: %v", err)
 	}
 
@@ -107,7 +90,7 @@ func TestRestartPushesTheWebappReloadAfterTheRelaunch(t *testing.T) {
 	f.workspace("w1", t.TempDir())
 
 	// Act.
-	if err := f.verbs.Restart(context.Background(), "w1", false); err != nil {
+	if err := f.verbs.Restart(context.Background(), "w1"); err != nil {
 		t.Fatalf("Restart: %v", err)
 	}
 
@@ -129,7 +112,7 @@ func TestRestartRecordsARelaunchFailure(t *testing.T) {
 	f.rollout.relaunchErr = errors.New("the shim would not stand down")
 
 	// Act.
-	if err := f.verbs.Restart(context.Background(), "w1", false); err != nil {
+	if err := f.verbs.Restart(context.Background(), "w1"); err != nil {
 		t.Fatalf("Restart: %v", err)
 	}
 
@@ -154,7 +137,7 @@ func TestAHandedAcrossRestartIsRecordedAsAnOutcome(t *testing.T) {
 	f.rollout.relaunchErr = bounce.ErrHandedAcross
 
 	// Act.
-	if err := f.verbs.Restart(context.Background(), "w1", true); err != nil {
+	if err := f.verbs.Restart(context.Background(), "w1"); err != nil {
 		t.Fatalf("Restart: %v", err)
 	}
 
@@ -185,7 +168,7 @@ func TestARestartOfAWorkspaceWhoseMoveSealedIsRefusedAsMovedAway(t *testing.T) {
 	f.rollout.refuseErr = bounce.ErrMovedAway
 
 	// Act.
-	err := f.verbs.Restart(context.Background(), "w1", false)
+	err := f.verbs.Restart(context.Background(), "w1")
 
 	// Assert: the refusal carries the moved-away cause the transport answers
 	// as transferring_away, and it is not recorded as a failure.
@@ -206,7 +189,7 @@ func TestAnUnregisteredRestartIsRecordedAsAnOutcome(t *testing.T) {
 	f.rollout.relaunchErr = bounce.ErrUnregistered
 
 	// Act.
-	if err := f.verbs.Restart(context.Background(), "w1", false); err != nil {
+	if err := f.verbs.Restart(context.Background(), "w1"); err != nil {
 		t.Fatalf("Restart: %v", err)
 	}
 
@@ -233,7 +216,9 @@ func TestAnUnregisteredRestartIsRecordedAsAnOutcome(t *testing.T) {
 	}
 }
 
-func TestRestartSurfacesAForcedTurnKillFailure(t *testing.T) {
+// A FAILED TURN KILL NEVER STOPS THE RESTART: it is recorded at ERROR and the
+// forced bounce, which ends the turn with the shim, proceeds.
+func TestRestartProceedsPastAFailedTurnKill(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
@@ -242,14 +227,92 @@ func TestRestartSurfacesAForcedTurnKillFailure(t *testing.T) {
 	f.shim.killTurnErr = errors.New("no turn open")
 
 	// Act.
-	err := f.verbs.Restart(context.Background(), "w1", true)
+	err := f.verbs.Restart(context.Background(), "w1")
 
 	// Assert.
-	if err == nil {
-		t.Fatal("Restart(force) = nil error, want the turn-kill failure surfaced")
+	if err != nil {
+		t.Fatalf("Restart = %v, want the restart accepted past the failed kill", err)
 	}
-	if len(f.rollout.relaunches) != 0 {
-		t.Fatalf("relaunches = %+v, want none after a failed force-end", f.rollout.relaunches)
+	f.rollout.awaitRelaunch(t)
+	awaitRecord(t, f, "error", opRestart)
+}
+
+// A TURN KILL THE VENDOR NEVER ANSWERS is bounded: the restart proceeds to its
+// forced bounce once the bound ends the call.
+func TestRestartProceedsPastATurnKillThatHangs(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	turn := wsm.TurnID("t1")
+	f.running.Turn = &turn
+	f.shim.killTurnHangs = true
+	f.verbs.(*verbs).restartStopBound = time.Millisecond
+
+	// Act.
+	err := f.verbs.Restart(context.Background(), "w1")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Restart = %v, want the restart accepted past the hung kill", err)
+	}
+	f.rollout.awaitRelaunch(t)
+	if got := f.rollout.relaunchCalls(); len(got) != 1 {
+		t.Fatalf("relaunches = %+v, want the forced bounce after the bounded kill", got)
+	}
+}
+
+func TestRestartAsksForAForcedBounce(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+
+	// Act.
+	if err := f.verbs.Restart(context.Background(), "w1"); err != nil {
+		t.Fatalf("Restart: %v", err)
+	}
+
+	// Assert.
+	f.rollout.awaitRelaunch(t)
+	if got := f.rollout.relaunchCalls(); len(got) != 1 || !got[0].Force {
+		t.Fatalf("relaunches = %+v, want one forced bounce", got)
+	}
+}
+
+func TestRestartEndsTheVendorStartRunFirst(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.fleet.vendorRunning = true
+
+	// Act.
+	if err := f.verbs.Restart(context.Background(), "w1"); err != nil {
+		t.Fatalf("Restart: %v", err)
+	}
+
+	// Assert.
+	if got := f.fleet.vendorCancels; len(got) != 1 || got[0] != "w1" {
+		t.Fatalf("vendor-start cancellations = %v, want one for w1", got)
+	}
+}
+
+// A WORKSPACE WITH NO SESSION IS RESTARTED BY BRINGING ONE UP: the forced
+// bounce runs (the engine prelaunches and resumes), never a refusal.
+func TestRestartOfAWorkspaceWithNoSessionBouncesItUp(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.hasSession = false
+
+	// Act.
+	err := f.verbs.Restart(context.Background(), "w1")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Restart = %v, want a workspace with no session restarted, never refused", err)
+	}
+	f.rollout.awaitRelaunch(t)
+	if got := f.rollout.relaunchCalls(); len(got) != 1 {
+		t.Fatalf("relaunches = %+v, want the bounce that brings the session up", got)
 	}
 }
 
@@ -263,7 +326,7 @@ func TestRestartEmptiesNoFeed(t *testing.T) {
 	f.workspace("w1", t.TempDir())
 
 	// Act.
-	if err := f.verbs.Restart(context.Background(), "w1", false); err != nil {
+	if err := f.verbs.Restart(context.Background(), "w1"); err != nil {
 		t.Fatalf("Restart: %v", err)
 	}
 	f.rollout.awaitRelaunch(t)
@@ -284,7 +347,7 @@ func TestADeferralToldToTheRestartIsRecordedAsAContractBreach(t *testing.T) {
 	f.rollout.relaunchErr = bounce.ErrDeferred
 
 	// Act.
-	if err := f.verbs.Restart(context.Background(), "w1", false); err != nil {
+	if err := f.verbs.Restart(context.Background(), "w1"); err != nil {
 		t.Fatalf("Restart: %v", err)
 	}
 

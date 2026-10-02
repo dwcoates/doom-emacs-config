@@ -45,11 +45,14 @@ type fakeClient struct {
 	detached int
 
 	requests []*shimv1.StartSessionRequest
-	response *shimv1.StartSessionResponse
-	startErr error
-	pid      int
-	kills    []shimclient.KillAttribution
-	killErr  error
+	// responses, when set, are answered one per StartSession, in order, before
+	// `response` answers every call after them.
+	responses []*shimv1.StartSessionResponse
+	response  *shimv1.StartSessionResponse
+	startErr  error
+	pid       int
+	kills     []shimclient.KillAttribution
+	killErr   error
 	// standDown is the fixture's shared step order, appended to on the shim's
 	// own KillSession.
 	standDown *[]string
@@ -143,6 +146,11 @@ func (c *fakeClient) StartSession(ctx context.Context, req *shimv1.StartSessionR
 	}
 	if c.startErr != nil {
 		return nil, c.startErr
+	}
+	if len(c.responses) > 0 {
+		next := c.responses[0]
+		c.responses = c.responses[1:]
+		return next, nil
 	}
 	return c.response, nil
 }
@@ -431,7 +439,38 @@ type bringUpEdge struct {
 	underWay bool
 }
 
+// rejectedVendorStart is a vendor-start refusal the shim labeled REJECTED.
+func rejectedVendorStart() *shimv1.StartSessionVendorStartFailed {
+	return &shimv1.StartSessionVendorStartFailed{
+		Retry: &shimv1.StartSessionVendorStartFailed_Rejected{Rejected: &shimv1.StartSessionVendorStartRejected{}}}
+}
+
+// retryableVendorStart is a vendor-start refusal the shim labeled RETRYABLE.
+func retryableVendorStart() *shimv1.StartSessionVendorStartFailed {
+	return &shimv1.StartSessionVendorStartFailed{
+		Retry: &shimv1.StartSessionVendorStartFailed_Retryable{Retryable: &shimv1.StartSessionVendorStartRetryable{}}}
+}
+
+// vendorRefusal is a StartSession answer refusing the start with this vendor
+// label and detail.
+func vendorRefusal(label *shimv1.StartSessionVendorStartFailed, detail string) *shimv1.StartSessionResponse {
+	return &shimv1.StartSessionResponse{
+		Result: &shimv1.StartSessionResponse_Failure{Failure: &shimv1.StartSessionFailure{
+			Cause:  &shimv1.StartSessionFailure_VendorStartFailed{VendorStartFailed: label},
+			Detail: detail,
+		}},
+	}
+}
+
 type fleetFixture struct {
+	// now is the fleet's clock. It moves only when the vendor-start run waits
+	// (retryAfter), so the retry window is crossed without any real wait.
+	now time.Time
+	// retryWaits is every wait the vendor-start run asked for, in order.
+	retryWaits []time.Duration
+	// retryAfter, when set, answers the run's wait instead of the default,
+	// which advances `now` by the wait and fires at once.
+	retryAfter func(d time.Duration) <-chan time.Time
 	// bringUps records every BringUps edge, in order.
 	bringUps []bringUpEdge
 	// bundle is the installed shim bundle every spawn holds.
@@ -563,6 +602,7 @@ func newFleetFixtureBoundedAt(t *testing.T, adoptBound time.Duration) *fleetFixt
 	t.Helper()
 	order := &[]string{}
 	f := &fleetFixture{
+		now:        fixedNow,
 		standDown:  order,
 		db:         newFakeDB(),
 		accounts:   &fakeAccounts{configDir: "/config", transcript: account.Transcript{Path: "/transcripts/vendor-1.jsonl", ConfigDir: "/config"}},
@@ -616,10 +656,20 @@ func newFleetFixtureBoundedAt(t *testing.T, adoptBound time.Duration) *fleetFixt
 			}
 			return f.watcher, nil
 		},
-		Now:        func() time.Time { return fixedNow },
+		Now:        func() time.Time { return f.now },
 		AdoptBound: f.adoptBound,
 		Clock:      &fleetStepClock{now: fixedNow},
-		ShimAlive:  func(pid int) bool { return f.shimAlive != nil && f.shimAlive(pid) },
+		RetryAfter: func(d time.Duration) <-chan time.Time {
+			f.retryWaits = append(f.retryWaits, d)
+			if f.retryAfter != nil {
+				return f.retryAfter(d)
+			}
+			f.now = f.now.Add(d)
+			fired := make(chan time.Time, 1)
+			fired <- f.now
+			return fired
+		},
+		ShimAlive: func(pid int) bool { return f.shimAlive != nil && f.shimAlive(pid) },
 	})
 	if err != nil {
 		t.Fatalf("NewFleet: %v", err)
@@ -1566,7 +1616,7 @@ func TestStartSurfacesANonColdStartFailure(t *testing.T) {
 	ws := f.workspace("w1")
 	f.client.response = &shimv1.StartSessionResponse{
 		Result: &shimv1.StartSessionResponse_Failure{Failure: &shimv1.StartSessionFailure{
-			Cause:  &shimv1.StartSessionFailure_VendorStartFailed{VendorStartFailed: &shimv1.StartSessionVendorStartFailed{}},
+			Cause:  &shimv1.StartSessionFailure_VendorStartFailed{VendorStartFailed: rejectedVendorStart()},
 			Detail: "the vendor binary is missing",
 		}},
 	}
@@ -1594,8 +1644,8 @@ func TestStartFilesAFaultWhenTheShimRefusesTheStart(t *testing.T) {
 	ws := f.workspace("w1")
 	f.client.response = &shimv1.StartSessionResponse{
 		Result: &shimv1.StartSessionResponse_Failure{Failure: &shimv1.StartSessionFailure{
-			Cause:  &shimv1.StartSessionFailure_VendorStartFailed{VendorStartFailed: &shimv1.StartSessionVendorStartFailed{}},
-			Detail: "the vendor binary is missing",
+			Cause:  &shimv1.StartSessionFailure_UnknownSession{UnknownSession: &shimv1.StartSessionUnknownSession{}},
+			Detail: "no transcript on disk",
 		}},
 	}
 
@@ -1614,8 +1664,8 @@ func TestTheRefusedStartFaultCarriesTheShimsOwnAccount(t *testing.T) {
 	ws := f.workspace("w1")
 	f.client.response = &shimv1.StartSessionResponse{
 		Result: &shimv1.StartSessionResponse_Failure{Failure: &shimv1.StartSessionFailure{
-			Cause:  &shimv1.StartSessionFailure_VendorStartFailed{VendorStartFailed: &shimv1.StartSessionVendorStartFailed{}},
-			Detail: "the vendor binary is missing",
+			Cause:  &shimv1.StartSessionFailure_UnknownSession{UnknownSession: &shimv1.StartSessionUnknownSession{}},
+			Detail: "no transcript on disk",
 		}},
 	}
 
@@ -1623,7 +1673,7 @@ func TestTheRefusedStartFaultCarriesTheShimsOwnAccount(t *testing.T) {
 	_ = f.fleet.Start(context.Background(), ws.ID)
 
 	// Assert. The cause evidence is what the typed `resume_failed` arm renders.
-	if len(f.db.dbFaults) != 1 || !strings.Contains(f.db.dbFaults[0].Evidence["cause"], "the vendor binary is missing") {
+	if len(f.db.dbFaults) != 1 || !strings.Contains(f.db.dbFaults[0].Evidence["cause"], "no transcript on disk") {
 		t.Fatalf("fault evidence = %+v, want the shim's own detail", f.db.dbFaults)
 	}
 }
@@ -1769,7 +1819,7 @@ func TestARefusedStartClosesOnlyTheHealthyAttachsFaults(t *testing.T) {
 			}
 			f.client.response = &shimv1.StartSessionResponse{
 				Result: &shimv1.StartSessionResponse_Failure{Failure: &shimv1.StartSessionFailure{
-					Cause:  &shimv1.StartSessionFailure_VendorStartFailed{VendorStartFailed: &shimv1.StartSessionVendorStartFailed{}},
+					Cause:  &shimv1.StartSessionFailure_VendorStartFailed{VendorStartFailed: rejectedVendorStart()},
 					Detail: "the vendor binary is missing",
 				}},
 			}
