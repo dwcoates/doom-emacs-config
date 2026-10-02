@@ -96,6 +96,10 @@ type fakeClient struct {
 	killTurnErr error
 	// startTurns records every StartTurn request; each is accepted.
 	startTurns []*shimv1.StartTurnRequest
+	// historyReads counts ReadHistory calls; history is the answer, a floor
+	// page of nothing when unset.
+	historyReads int
+	history      *shimv1.ReadHistoryResponse
 }
 
 func (c *fakeClient) StartTurn(_ context.Context, req *shimv1.StartTurnRequest) (*shimv1.StartTurnResponse, error) {

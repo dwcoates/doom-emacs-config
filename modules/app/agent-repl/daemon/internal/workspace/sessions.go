@@ -286,6 +286,11 @@ type Fleet struct {
 	// attempt count, its standing faults and the bring-up asking. Guarded by
 	// mu. See vendorstart.go.
 	vendorRuns map[ids.WorkspaceID]*vendorRun
+	// startingClients is the shim client of each workspace whose vendor start
+	// is running, before the fleet holds it (history.go): the feed reads
+	// history through it while StartSession is being answered or retried.
+	// Guarded by mu.
+	startingClients map[ids.WorkspaceID]shimclient.Client
 
 	// detached counts the session starts running OFF a caller's goroutine, and
 	// detachedCtx is the context every one of them runs under. See
@@ -478,6 +483,7 @@ func NewFleet(deps FleetDeps) (*Fleet, error) {
 		startGates:      map[ids.WorkspaceID]*sync.Mutex{},
 		watched:         map[ids.WorkspaceID]sessionwatcher.Watcher{},
 		selected:        map[ids.WorkspaceID]bool{},
+		startingClients: map[ids.WorkspaceID]shimclient.Client{},
 	}, nil
 }
 
@@ -1120,9 +1126,17 @@ func (f *Fleet) start(ctx context.Context, ws ids.WorkspaceID, rebind bool) erro
 	// finished with it: its failed start's cleanup below included, so the
 	// restart that cancels it finds the spawned shim already stopped.
 	runCtx, finishRun := f.beginVendorStart(ctx, ws)
+	// THE SHIM READS THE WORKSPACE'S BOOK WHILE ITS START IS ANSWERED OR
+	// RETRIED: the vendor never gates showing the conversation (history.go).
+	endHistory := f.beginHistoryClient(ws, client)
+	defer endHistory()
 	started, err := f.startSession(runCtx, log, ws, client, src, session, configDir)
 	if err != nil {
 		defer finishRun()
+		// The conversation's newest page is secured BEFORE the shim goes, and
+		// the client stops being a history source before it is stopped.
+		f.keepNewestPage(ctx, log, ws)
+		endHistory()
 		// A START THAT FAILED LEAVES NO SHIM OF ITS OWN SERVING. The refusal
 		// returns before anything remembers this client, so nothing else in
 		// the daemon holds it -- while the process is still bound to the
@@ -2369,7 +2383,13 @@ func (f *Fleet) hold(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, s
 	if err := f.claimServing(ctx, log, ws); err != nil {
 		return err
 	}
-	return retireTerminalRecord(ctx, log, f.deps.DB, opBringUp, ws)
+	if err := retireTerminalRecord(ctx, log, f.deps.DB, opBringUp, ws); err != nil {
+		return err
+	}
+	// A HELD CLIENT IS A HISTORY SOURCE, whatever its session is doing: a
+	// reader that opened before it has the newest page pushed (history.go).
+	f.deps.Feed.SourceUp(ws)
+	return nil
 }
 
 func (f *Fleet) remember(ws ids.WorkspaceID, session *live) {
