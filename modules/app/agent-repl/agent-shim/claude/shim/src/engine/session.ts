@@ -54,7 +54,7 @@ import {
   type VendorStartBound,
 } from "./start-failure.js";
 import { terminalUpsertKey } from "../store/keys.js";
-import { PersistenceError } from "../store/persistence.js";
+import { PersistenceError, REPAINT } from "../store/persistence.js";
 import { describeVendorTaskAnswer } from "../store/locator.js";
 import type { AgentPageSession, PersistEntry, Persistence } from "../store/persistence.js";
 import {
@@ -4911,16 +4911,6 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   }
 
   /**
-   * How much of the book a reconciliation reads to describe live work.
-   *
-   * Generous rather than exact: the descriptions it needs are the STARTS of
-   * units that are still open, which are USUALLY near the end of the book, so
-   * one page ordinarily finds them all. It is a page size, not a bound: work
-   * that started earlier is found by walking back (readBookFor).
-   */
-  const RECONCILE_PAGE_SIZE = 512;
-
-  /**
    * The book, read from its newest page back until every unit in `units` has
    * been found or the book's floor is reached.
    *
@@ -4935,7 +4925,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     agentId: conversationv1.AgentId,
     units: readonly string[],
   ): Promise<conversationv1.HistoryEntryAt[]> {
-    const first = await deps.persistence.readFirstPage(agentId, RECONCILE_PAGE_SIZE, undefined, () =>
+    const first = await deps.persistence.readFirstPage(agentId, REPAINT, () =>
       knowsAgent(agentId),
     );
     const book = [...first.entries];
@@ -4952,7 +4942,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     while (missing.size > 0 && boundary.case === "more") {
       const oldest = book[book.length - 1]?.at;
       if (oldest === undefined) break;
-      const older = await deps.persistence.readAgentPage(agentId, RECONCILE_PAGE_SIZE, oldest);
+      const older = await deps.persistence.readAgentPage(agentId, oldest);
       if (older.entries.length === 0) break;
       book.push(...older.entries);
       mark(older.entries);
@@ -6279,7 +6269,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       // has an agent with no book, and asking the store for one earned an
       // `unknown_agent` refusal on every such teardown. The head of a book that
       // does not exist is absence, which is exactly what an empty page answers.
-      deps.persistence.readFirstPage(agent, 1, undefined, () => knowsAgent(agent)),
+      deps.persistence.readFirstPage(agent, REPAINT, () => knowsAgent(agent)),
       watcherConclusionBudgetMs,
       `the store did not answer for ${agent.value}'s book within ${watcherConclusionBudgetMs}ms`,
     );

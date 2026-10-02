@@ -20,7 +20,6 @@ import {
   connectCode,
   freshSession,
   openStream, openSessionUpdates,
-  readHistoryFirst,
   startTurnRequest,
   streamOpenCode,
   watchAgentRequest,
@@ -113,7 +112,7 @@ describe("validation refuses before the engine", () => {
 
     const code = await connectCode(
       shim.clients.h1.readHistory(
-        create(shimv1.ReadHistoryRequestSchema, { pageSize: 10 }),
+        create(shimv1.ReadHistoryRequestSchema, {}),
       ),
     );
 
@@ -126,39 +125,6 @@ describe("validation refuses before the engine", () => {
     const code = await connectCode(
       shim.clients.h1.updateAgent(create(shimv1.UpdateAgentRequestSchema, {})),
     );
-
-    expect(code).toBe(Code.InvalidArgument);
-  });
-});
-
-describe("page_size 0 is REFUSED (presence, never sentinels)", () => {
-  test("StartTurn with page_size 0 is InvalidArgument", async () => {
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
-
-    const code = await connectCode(
-      shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "hello", pageSize: 0 })),
-    );
-
-    expect(code).toBe(Code.InvalidArgument);
-  });
-
-  test("WatchAgent with page_size 0 is InvalidArgument", async () => {
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
-
-    const stream = openStream((options) =>
-      shim.clients.h1.watchAgent(watchAgentRequest({ pageSize: 0 }), options),
-    );
-
-    expect(await streamOpenCode(stream)).toBe(Code.InvalidArgument);
-  });
-
-  test("ReadHistory with page_size 0 is InvalidArgument", async () => {
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
-
-    const code = await connectCode(shim.clients.h1.readHistory(readHistoryFirst({ pageSize: 0 })));
 
     expect(code).toBe(Code.InvalidArgument);
   });

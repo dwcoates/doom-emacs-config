@@ -254,8 +254,7 @@ func rmOpenAgentBook(t *testing.T, w *World, agent *conversationv1.AgentId) *sto
 	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
 	defer cancel()
 	resp, err := w.Store.Client.OpenAgentSession(ctx, connect.NewRequest(&storev1.OpenAgentSessionRequest{
-		Agent:    agent,
-		PageSize: 200,
+		Agent: agent,
 	}))
 	if err != nil {
 		t.Fatalf("OpenAgentSession(%s): %v", agent.GetValue(), err)

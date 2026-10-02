@@ -94,7 +94,7 @@ func TestABackgroundedAgentSeenAsSpoolAndSidechainIsOneBookWithOneTopLevel(t *te
 
 	// And the store holds ONE row per key however many planes wrote it.
 	seen := map[string]int{}
-	for _, at := range bookLines(ctx, t, store.Client, corpusSubagentAgentID, 200) {
+	for _, at := range bookLines(ctx, t, store.Client, corpusSubagentAgentID) {
 		if a := activityOf(at.GetLine()); a != nil {
 			seen[a.GetActivityId().GetValue()]++
 		}

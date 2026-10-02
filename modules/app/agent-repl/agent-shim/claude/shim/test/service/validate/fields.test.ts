@@ -324,18 +324,6 @@ describe("validateSessionColdRemediation", () => {
   });
 });
 
-describe("validatePageSize", () => {
-  it("accepts a real budget", () => {
-    // Arrange, Act, Assert.
-    expect(codeOf(() => fields.validatePageSize(1, "p"))).toBeUndefined();
-  });
-
-  it("refuses a budget of nothing rather than substituting a default", () => {
-    // Arrange, Act, Assert.
-    expect(codeOf(() => fields.validatePageSize(0, "p"))).toBe(Code.InvalidArgument);
-  });
-});
-
 describe("validateHistoryPointer", () => {
   it("refuses an UNSET pointer rather than reading from an unstated place", () => {
     // Arrange, Act, Assert.

@@ -26,13 +26,14 @@ import type {
   RewindFilesResultLike,
 } from "../../src/sdk/types.js";
 import type {
+  AgentOpening,
   AgentPageSession,
   AgentTailFrame,
   FlushOutcome,
   PersistEntry,
   Persistence,
 } from "../../src/store/persistence.js";
-import { PersistenceError } from "../../src/store/persistence.js";
+import { PersistenceError, REPAINT } from "../../src/store/persistence.js";
 import type { VendorTaskAnswer } from "../../src/store/locator.js";
 import type { TaskAgentKnowledge } from "../../src/convert/detached.js";
 import type { EngineFold, EngineFoldOutput, FoldContext } from "../../src/engine/fold-context.js";
@@ -435,20 +436,28 @@ export class RecordingPersistence implements Persistence {
    */
   pagesOpened = 0;
   firstPageReads = 0;
+  /** Every opening an open or a one-shot read was asked for, in call order. */
+  readonly openings: AgentOpening[] = [];
+  /**
+   * What an open reports as `foundNothing`; unset, it is whether `page` is
+   * empty — the answer for every opening but a tail-only one.
+   */
+  foundNothing: boolean | undefined;
   openAgentPage(
     _agent?: conversationv1.AgentId,
-    _pageSize?: number,
-    _knownThrough?: conversationv1.HistoryPointer,
+    opening?: AgentOpening,
     known?: () => boolean,
   ): Promise<AgentPageSession> {
     this.lastKnownAgent = known;
     this.pagesOpened++;
+    this.openings.push(opening ?? REPAINT);
     if (this.openHangs) return new Promise<AgentPageSession>(() => undefined);
     if (this.openError !== undefined) return Promise.reject(this.openError);
     const entries = this.tail;
     const standing = this.standingTail;
     return Promise.resolve({
       page: this.page,
+      foundNothing: this.foundNothing ?? this.page.entries.length === 0,
       tail: {
         async *[Symbol.asyncIterator](): AsyncIterator<AgentTailFrame> {
           for (const entry of entries) yield entry;
@@ -472,12 +481,12 @@ export class RecordingPersistence implements Persistence {
    */
   readFirstPage(
     _agent?: conversationv1.AgentId,
-    _pageSize?: number,
-    _knownThrough?: conversationv1.HistoryPointer,
+    opening?: AgentOpening,
     known?: () => boolean,
   ): Promise<conversationv1.HistoryPage> {
     this.lastKnownAgent = known;
     this.firstPageReads++;
+    this.openings.push(opening ?? REPAINT);
     if (this.openHangs) return new Promise<conversationv1.HistoryPage>(() => undefined);
     if (this.openError !== undefined) return Promise.reject(this.openError);
     this.closedPages++;
@@ -492,7 +501,6 @@ export class RecordingPersistence implements Persistence {
   readonly olderPageAfter: string[] = [];
   readAgentPage(
     _agent?: conversationv1.AgentId,
-    _pageSize?: number,
     after?: conversationv1.HistoryPointer,
   ): Promise<conversationv1.HistoryPage> {
     if (this.readError !== undefined) return Promise.reject(this.readError);
@@ -503,7 +511,6 @@ export class RecordingPersistence implements Persistence {
   readonly throughBounds: bigint[] = [];
   readPageThrough(
     _agent?: conversationv1.AgentId,
-    _pageSize?: number,
     through?: conversationv1.ConversationThrough,
   ): Promise<conversationv1.HistoryPage> {
     if (this.readError !== undefined) return Promise.reject(this.readError);

@@ -10,6 +10,7 @@
 package integration
 
 import (
+	"agentrepl/shim-store/internal/db"
 	"agentrepl/shim-store/internal/testclose"
 	"bytes"
 	"testing"
@@ -30,7 +31,7 @@ func TestJSONCodecRoundTripsAWriteAndItsPage(t *testing.T) {
 		frameLine(agentID("main"), responseFrame("main", "act-1", "over JSON"))))
 
 	// Assert
-	page := openSession(ctx, t, cli, "main", 10, nil)
+	page := openSession(ctx, t, cli, "main", nil)
 	assertTexts(t, "the page over JSON", pageTexts(page.GetPage()), []string{"over JSON"})
 	store.assertNoErrorRecords()
 }
@@ -108,7 +109,7 @@ func TestJSONCodecServesTheAgentSessionWatchStream(t *testing.T) {
 	cli := store.jsonClient()
 	shim := streamProducer(cli)
 	seedBook(ctx, t, shim, "main", "json-tail")
-	opened := openSession(ctx, t, cli, "main", 10, nil)
+	opened := openSession(ctx, t, cli, "main", nil)
 	stream := watchStream(ctx, t, cli, opened.GetWatch())
 	defer testclose.OrFail(t, stream)
 
@@ -127,11 +128,11 @@ func TestJSONCodecRoundTripsAContinuationPage(t *testing.T) {
 	ctx, cancel := callContext(t)
 	defer cancel()
 	cli := store.jsonClient()
-	writeNumberedLines(ctx, t, streamProducer(cli), "main", 4)
-	opened := openSession(ctx, t, cli, "main", 2, nil)
+	writeNumberedLines(ctx, t, streamProducer(cli), "main", db.PageSize+2)
+	opened := openSession(ctx, t, cli, "main", nil)
 
 	// Act
-	next := readPage(ctx, t, cli, "main", 2, assertPageMore(t, opened.GetPage()))
+	next := readPage(ctx, t, cli, "main", assertPageMore(t, opened.GetPage()))
 
 	// Assert
 	assertTexts(t, "the continuation over JSON", readTexts(next), []string{"L2", "L1"})
@@ -149,7 +150,7 @@ func TestJSONCodecCarriesATypedFailureArm(t *testing.T) {
 
 	// Act
 	failure := openSessionExpectingFailure(ctx, t, store.jsonClient(),
-		&storev1.OpenAgentSessionRequest{Agent: agentID(""), PageSize: 10})
+		&storev1.OpenAgentSessionRequest{Agent: agentID("")})
 
 	// Assert
 	assertOpenInvalidRequest(t, failure, "agent")

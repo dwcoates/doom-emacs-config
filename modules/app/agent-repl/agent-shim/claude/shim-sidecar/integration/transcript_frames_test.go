@@ -571,7 +571,7 @@ func TestAPageLineReachesAWatcherAsItIsWritten(t *testing.T) {
 		g.AppendLine(line)
 	}
 	awaitBookLines(ctx, t, store.Client, captured.Session, 1)
-	_, tail := watchBook(ctx, t, store.Client, captured.Session, 200)
+	_, tail := watchBook(ctx, t, store.Client, captured.Session)
 
 	// Act: the rest of the file arrives after the watch was opened.
 	for _, line := range captured.Lines[7:] {

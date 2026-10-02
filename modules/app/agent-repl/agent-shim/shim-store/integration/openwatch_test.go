@@ -27,7 +27,7 @@ func TestOpenAnswersAPageAndAToken(t *testing.T) {
 	)
 
 	// Act.
-	opened := openSession(ctx, t, cli, "main", 10, nil)
+	opened := openSession(ctx, t, cli, "main", nil)
 
 	// Assert.
 	assertTexts(t, "the opening page", pageTexts(opened.GetPage()), []string{"only"})
@@ -54,8 +54,8 @@ func TestPageOnlyOpenServesThePageAndMintsNoToken(t *testing.T) {
 	)
 
 	// Act. The pair one turn performs.
-	opening := openPageOnly(ctx, t, cli, "main", 10)
-	head := openPageOnly(ctx, t, cli, "main", 1)
+	opening := openPageOnly(ctx, t, cli, "main")
+	head := openPageOnly(ctx, t, cli, "main")
 
 	// Assert. The page is served in full; only the token is withheld, and the
 	// registry is exactly as the turn found it.
@@ -78,7 +78,7 @@ func TestWatchIsRefusedAfterAPageOnlyOpen(t *testing.T) {
 	shim.write(ctx, t,
 		shim.agentEntry("w-pageonly-2", "u-pageonly-2", frameLine(agentID("main"), responseFrame("main", "act-1", "only"))),
 	)
-	openPageOnly(ctx, t, cli, "main", 10)
+	openPageOnly(ctx, t, cli, "main")
 
 	// Act.
 	stream := watchStream(ctx, t, cli, &storev1.AgentSessionToken{})
@@ -101,7 +101,7 @@ func TestEmptyBookIsALegalOpen(t *testing.T) {
 	registerEmptyBook(ctx, t, streamProducer(cli), "main", "never-written-to", "empty")
 
 	// Act.
-	opened := openSession(ctx, t, cli, "never-written-to", 10, nil)
+	opened := openSession(ctx, t, cli, "never-written-to", nil)
 
 	// Assert.
 	assertTexts(t, "an empty book's page", pageTexts(opened.GetPage()), nil)
@@ -130,7 +130,7 @@ func TestWatchIsPinnedExactlyAfterThePage(t *testing.T) {
 	)
 
 	// Act.
-	opened := openSession(ctx, t, cli, "main", 10, nil)
+	opened := openSession(ctx, t, cli, "main", nil)
 	stream := watchStream(ctx, t, cli, opened.GetWatch())
 	defer testclose.OrFail(t, stream)
 	shim.write(ctx, t,
@@ -156,7 +156,7 @@ func TestWriteRacingBetweenOpenAndWatchIsDeliveredExactlyOnce(t *testing.T) {
 	shim.write(ctx, t,
 		shim.agentEntry("w-race-a", "u-race-a", frameLine(agentID("main"), responseFrame("main", "act-a", "A"))),
 	)
-	opened := openSession(ctx, t, cli, "main", 10, nil)
+	opened := openSession(ctx, t, cli, "main", nil)
 
 	// Act: the racing write lands while no watcher is attached at all.
 	shim.write(ctx, t,
@@ -186,7 +186,7 @@ func TestUpsertOfAnOldLineStreamsAtItsOriginalPointer(t *testing.T) {
 		shim.agentEntry("w-up-a", "u-unit-a", frameLine(agentID("main"), responseFrame("main", "act-a", "A"))),
 		shim.agentEntry("w-up-b", "u-unit-b", frameLine(agentID("main"), responseFrame("main", "act-b", "B"))),
 	)
-	opened := openSession(ctx, t, cli, "main", 10, nil)
+	opened := openSession(ctx, t, cli, "main", nil)
 	pointers := pagePointers(opened.GetPage())
 	assertTexts(t, "the page before the upsert", pageTexts(opened.GetPage()), []string{"B", "A"})
 	pointerOfA := pointers[1]
@@ -216,7 +216,7 @@ func TestWatchTokenIsSingleUse(t *testing.T) {
 	defer cancel()
 	cli := store.client()
 	seedBook(ctx, t, streamProducer(cli), "main", "single-use")
-	opened := openSession(ctx, t, cli, "main", 10, nil)
+	opened := openSession(ctx, t, cli, "main", nil)
 	first := watchStream(ctx, t, cli, opened.GetWatch())
 	defer testclose.OrFail(t, first)
 
@@ -255,8 +255,7 @@ func TestAnUnknownAgentIsRefusedInExactlyOneRecordNamingBothKeys(t *testing.T) {
 
 	// Act.
 	assertOpenUnknownAgent(t, openSessionExpectingFailure(ctx, t, store.client(), &storev1.OpenAgentSessionRequest{
-		Agent:    agentID("agent-never-existed"),
-		PageSize: 10,
+		Agent: agentID("agent-never-existed"),
 	}))
 
 	// Assert.
@@ -279,8 +278,7 @@ func TestAnUnknownAgentOpenIsNotRecordedLoudly(t *testing.T) {
 
 	// Act.
 	assertOpenUnknownAgent(t, openSessionExpectingFailure(ctx, t, store.client(), &storev1.OpenAgentSessionRequest{
-		Agent:    agentID("agent-never-existed"),
-		PageSize: 10,
+		Agent: agentID("agent-never-existed"),
 	}))
 
 	// Assert.
@@ -304,13 +302,12 @@ func TestAnUnknownAgentIsRefusedBeforeThePointerIsJudged(t *testing.T) {
 	cli := store.client()
 	shim := streamProducer(cli)
 	seedBook(ctx, t, shim, "main", "pointer-order")
-	pointerInMain := openSession(ctx, t, cli, "main", 10, nil).GetPage().GetLines()[0].GetAt()
+	pointerInMain := openSession(ctx, t, cli, "main", nil).GetPage().GetLines()[0].GetAt()
 
 	// Act.
 	failure := openSessionExpectingFailure(ctx, t, cli, &storev1.OpenAgentSessionRequest{
-		Agent:        agentID("agent-never-existed"),
-		PageSize:     10,
-		KnownThrough: pointerInMain,
+		Agent:   agentID("agent-never-existed"),
+		Opening: &storev1.OpenAgentSessionRequest_KnownThrough{KnownThrough: pointerInMain},
 	})
 
 	// Assert.
@@ -351,7 +348,7 @@ func TestAConsumedWatchTokenIsRefusedInExactlyOneRecord(t *testing.T) {
 	defer cancel()
 	cli := store.client()
 	seedBook(ctx, t, streamProducer(cli), "main", "consumed")
-	opened := openSession(ctx, t, cli, "main", 10, nil)
+	opened := openSession(ctx, t, cli, "main", nil)
 	first := watchStream(ctx, t, cli, opened.GetWatch())
 	defer testclose.OrFail(t, first)
 	mark := store.logMark()
@@ -379,7 +376,7 @@ func TestAPostRestartWatchTokenIsRefusedInExactlyOneRecord(t *testing.T) {
 	ctx, cancel := callContext(t)
 	defer cancel()
 	seedBook(ctx, t, streamProducer(store.client()), "main", "post-restart")
-	opened := openSession(ctx, t, store.client(), "main", 10, nil)
+	opened := openSession(ctx, t, store.client(), "main", nil)
 	staleToken := opened.GetWatch()
 	store.restart()
 	mark := store.logMark()
@@ -411,7 +408,7 @@ func TestDroppedWatcherRecoversByReopeningWithKnownThrough(t *testing.T) {
 	shim.write(ctx, t,
 		shim.agentEntry("w-drop-a", "u-drop-a", frameLine(agentID("main"), responseFrame("main", "act-a", "A"))),
 	)
-	opened := openSession(ctx, t, cli, "main", 10, nil)
+	opened := openSession(ctx, t, cli, "main", nil)
 	stream := watchStream(ctx, t, cli, opened.GetWatch())
 	shim.write(ctx, t,
 		shim.agentEntry("w-drop-b", "u-drop-b", frameLine(agentID("main"), responseFrame("main", "act-b", "B"))),
@@ -428,7 +425,7 @@ func TestDroppedWatcherRecoversByReopeningWithKnownThrough(t *testing.T) {
 		shim.agentEntry("w-drop-c", "u-drop-c", frameLine(agentID("main"), responseFrame("main", "act-c", "C"))),
 		shim.agentEntry("w-drop-d", "u-drop-d", frameLine(agentID("main"), responseFrame("main", "act-d", "D"))),
 	)
-	recovered := openSession(ctx, t, cli, "main", 10, highWater)
+	recovered := openSession(ctx, t, cli, "main", highWater)
 
 	// Assert: exactly the gap, nothing it already held.
 	assertTexts(t, "the recovery page", pageTexts(recovered.GetPage()), []string{"D", "C"})

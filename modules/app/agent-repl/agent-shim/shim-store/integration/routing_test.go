@@ -27,7 +27,7 @@ func TestUpdateArmBecomesAPageLine(t *testing.T) {
 	)
 
 	// Assert.
-	page := openSession(ctx, t, store.client(), "main", 10, nil)
+	page := openSession(ctx, t, store.client(), "main", nil)
 	assertTexts(t, "an update arm's book", pageTexts(page.GetPage()), []string{"growing"})
 	store.assertNoErrorRecords()
 }
@@ -50,7 +50,7 @@ func TestContextCutArmPaginatesLikeAnyUpdate(t *testing.T) {
 
 	// Assert.
 	cli := store.client()
-	page := openSession(ctx, t, cli, "main", 10, nil)
+	page := openSession(ctx, t, cli, "main", nil)
 	assertTexts(t, "a book containing a context cut", pageTexts(page.GetPage()), []string{"after", "cut:main", "before"})
 
 	live := liveWork(ctx, t, cli, "main")
@@ -80,7 +80,7 @@ func TestApiErrorArmPaginatesAsEvidenceNotATerminal(t *testing.T) {
 
 	// Assert.
 	cli := store.client()
-	page := openSession(ctx, t, cli, "sub-a", 10, nil)
+	page := openSession(ctx, t, cli, "sub-a", nil)
 	assertTexts(t, "a subagent's book carrying an api error", pageTexts(page.GetPage()), []string{"api_error:overloaded, retried"})
 
 	live := liveWork(ctx, t, cli, "main")
@@ -144,7 +144,7 @@ func TestTerminalArmsWriteAPageLineAndCloseTheAgent(t *testing.T) {
 			shim.write(ctx, t, shim.agentEntry(tc.writeID, tc.upsert, tc.frame(tc.agent)))
 
 			// Assert.
-			page := openSession(ctx, t, cli, tc.agent, 10, nil)
+			page := openSession(ctx, t, cli, tc.agent, nil)
 			assertTexts(t, "the terminal's own book", pageTexts(page.GetPage()), []string{tc.wantLine})
 
 			if got := agentValues(liveWork(ctx, t, cli, "main").GetLiveAgents()); contains(got, tc.agent) {
@@ -173,7 +173,7 @@ func TestDetachedWorkAnnouncementIsAPageLineOfTheAnnouncersBook(t *testing.T) {
 	)
 
 	// Assert.
-	page := openSession(ctx, t, cli, "main", 10, nil)
+	page := openSession(ctx, t, cli, "main", nil)
 	assertTexts(t, "the announcer's book", pageTexts(page.GetPage()), []string{"detached:work-bash-1"})
 	store.assertNoErrorRecords()
 }
@@ -223,7 +223,7 @@ func TestReAnnouncingDetachedWorkNeitherDuplicatesTheLineNorTheObligation(t *tes
 	)
 
 	// Assert.
-	page := openSession(ctx, t, cli, "main", 10, nil)
+	page := openSession(ctx, t, cli, "main", nil)
 	assertTexts(t, "the announcer's book after a re-announcement", pageTexts(page.GetPage()), []string{"detached:work-again"})
 	if got := workValues(liveWork(ctx, t, cli, "main").GetLiveDetached()); len(got) != 1 {
 		t.Errorf("live_detached = %v, want exactly one entry per run", got)
@@ -279,7 +279,7 @@ func TestBashRunFramesNeverPaginate(t *testing.T) {
 	)
 
 	// Assert.
-	page := openSession(ctx, t, cli, "main", 10, nil)
+	page := openSession(ctx, t, cli, "main", nil)
 	assertTexts(t, "a book beside bash run frames", pageTexts(page.GetPage()), []string{"anchor"})
 	store.assertNoErrorRecords()
 }
@@ -303,7 +303,7 @@ func TestSessionUpdateNeverPaginates(t *testing.T) {
 	)
 
 	// Assert.
-	page := openSession(ctx, t, cli, "main", 10, nil)
+	page := openSession(ctx, t, cli, "main", nil)
 	assertTexts(t, "a book beside a session update", pageTexts(page.GetPage()), []string{"anchor"})
 	store.assertNoErrorRecords()
 }
@@ -331,7 +331,7 @@ func TestUnservedArmsNeverAppearAnywhere(t *testing.T) {
 			shim.write(ctx, t,
 				shim.agentEntry("w-anchor-"+tc.name, "u-anchor-"+tc.name, frameLine(agentID("main"), responseFrame("main", "act-1", "anchor"))),
 			)
-			opened := openSession(ctx, t, cli, "main", 10, nil)
+			opened := openSession(ctx, t, cli, "main", nil)
 			stream := watchStream(ctx, t, cli, opened.GetWatch())
 			defer testclose.OrFail(t, stream)
 
@@ -344,11 +344,11 @@ func TestUnservedArmsNeverAppearAnywhere(t *testing.T) {
 			// Assert: the tail skips straight from the pin to the next real line.
 			assertTexts(t, "the watched tail", receivedTexts(receiveLines(t, stream, 1)), []string{"after"})
 
-			repaint := openSession(ctx, t, cli, "main", 10, nil)
+			repaint := openSession(ctx, t, cli, "main", nil)
 			assertTexts(t, "a full repaint", pageTexts(repaint.GetPage()), []string{"after", "anchor"})
 
 			pointer := pagePointers(repaint.GetPage())[0]
-			walked := readPage(ctx, t, cli, "main", 10, &storev1.StoreItemPointer{Value: pointer})
+			walked := readPage(ctx, t, cli, "main", &storev1.StoreItemPointer{Value: pointer})
 			assertTexts(t, "the continuation walk", readTexts(walked), []string{"anchor"})
 			store.assertNoErrorRecords()
 		})

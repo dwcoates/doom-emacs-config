@@ -98,7 +98,7 @@ func TestAStoreReclaimsTheSocketAKilledPredecessorLeftBehind(t *testing.T) {
 	// Assert
 	after, cancelAfter := callContext(t)
 	defer cancelAfter()
-	page := openSession(after, t, store.client(), "main", 10, nil)
+	page := openSession(after, t, store.client(), "main", nil)
 	assertTexts(t, "the book after a killed predecessor", pageTexts(page.GetPage()), []string{"L1"})
 
 	reclaimed := false

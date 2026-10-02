@@ -1648,3 +1648,48 @@ func TestADeferredReplacementWithADispatchQuietMoveBehindItIsCarriedAcross(t *te
 		t.Fatalf("the replacement ran %d times here, want only its deferred run", restart.runs.Load())
 	}
 }
+
+// A SHIM KNOWN TO HOLD NO SESSION NEVER HOLDS A BOUNCE (2026-10-02: a
+// relaunched shim whose vendor start failed got a pure-attach watcher that
+// could never state freeness, and every later unforced bounce waited forever).
+func TestAnUnforcedBounceOfAShimKnownToHoldNoSessionRunsAtOnce(t *testing.T) {
+	// Arrange: the watcher has no facts and never will; the shim is known
+	// to hold no session.
+	h := newHarness(t)
+	h.watcher.mu.Lock()
+	h.watcher.factsPending = true
+	h.watcher.mu.Unlock()
+	h.sessionAbsent = true
+	g := newGate()
+
+	// Act
+	got, err := h.q.RequestBounce(context.Background(), theWorkspace, g.request("build_stale", false))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("RequestBounce: %v", err)
+	}
+	if !got.Now {
+		t.Fatalf("decision = %+v, want the bounce run at once", got)
+	}
+	g.awaitStart(t)
+	g.finish(h, nil)
+}
+
+func TestAnUnforcedBounceOfAStartedSessionWithATurnStillWaits(t *testing.T) {
+	// Arrange: a running turn on a started session.
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	g := newGate()
+
+	// Act
+	got, err := h.q.RequestBounce(context.Background(), theWorkspace, g.request("build_stale", false))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("RequestBounce: %v", err)
+	}
+	if got.Now || g.runs.Load() != 0 {
+		t.Fatalf("decision = %+v, runs = %d: want the bounce registered behind the turn", got, g.runs.Load())
+	}
+}
