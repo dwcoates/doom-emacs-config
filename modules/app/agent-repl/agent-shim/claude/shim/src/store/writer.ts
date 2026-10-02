@@ -352,6 +352,14 @@ interface QueuedRow extends PlacedEntry {
   readonly durable?: DurableGroup;
 }
 
+/**
+ * How long a one-shot read waits for a book's queued first row to land before
+ * asking the store anyway. A healthy batch lands in milliseconds (measured
+ * 5-16ms in the e2e worlds); the bound only matters for a store that is not
+ * taking writes, where the read's own ask then reports the outage.
+ */
+export const FIRST_ROW_LANDING_BOUND_MS = 1_000;
+
 /** The serialized size of what one row SAYS, before the store envelope. */
 function payloadBytes(entry: PersistEntry): number {
   switch (entry.item.kind) {
@@ -857,12 +865,30 @@ export function createPersistence(options: PersistenceOptions): Persistence {
     row.durable?.settle({ kind: "refused", detail });
   };
 
+  /**
+   * One-shot reads waiting for a book's first queued row to land, by agent
+   * value (see `readFirstPage` below). Woken when a batch registering the
+   * book lands; each waiter also carries its own bound.
+   */
+  const bookLandingWaiters = new Map<string, Set<() => void>>();
+
+  /** Whether a row still queued would register AGENT's book on landing. */
+  const bookPendingInQueue = (agent: string): boolean =>
+    queue.some((row) => booksRegisteredBy([row.entry]).has(agent));
+
   /** Everything owed once a batch is durable. */
   const landed = (batch: readonly QueuedRow[], attempts: number, durationMs: number): void => {
     // WOKEN ONLY ONCE THE ROWS ARE DURABLE: a `WatchAgent` that opened before
     // this book existed is blocked on the store holding a row, so waking it on
     // the enqueue would send it back into the same refusal.
-    reader.noteAgentRows(booksRegisteredBy(batch.map((row) => row.entry)));
+    const books = booksRegisteredBy(batch.map((row) => row.entry));
+    reader.noteAgentRows(books);
+    for (const book of books) {
+      const waiting = bookLandingWaiters.get(book);
+      if (waiting === undefined) continue;
+      bookLandingWaiters.delete(book);
+      for (const wake of waiting) wake();
+    }
     closeDegraded();
     if (persistentFailure) {
       persistentFailure = false;
@@ -1158,11 +1184,38 @@ export function createPersistence(options: PersistenceOptions): Persistence {
       reader.noteAgentMinted(agentValue);
     },
 
-    readFirstPage(
+    async readFirstPage(
       agent: conversationv1.AgentId,
       opening: AgentOpening,
       known?: () => boolean,
     ): Promise<conversationv1.HistoryPage> {
+      // A BOOK WHOSE FIRST ROW IS STILL IN THIS WRITER'S QUEUE IS ASKED FOR
+      // ONCE IT LANDS. The one-shot read always asks the store (reader.ts),
+      // and asked a moment early — a reader's page opened while a fresh
+      // session's first prompt is being written — the store refuses a book
+      // that is about to exist, which is a refusal in its log on a bring-up
+      // going exactly as it should. The wait is bounded: a row the store is
+      // not taking leaves the read to ask, and to surface what it is told.
+      if (bookPendingInQueue(agent.value)) {
+        await new Promise<void>((resolve) => {
+          const waiting = bookLandingWaiters.get(agent.value) ?? new Set<() => void>();
+          const finish = (): void => {
+            clearTimeout(timer);
+            waiting.delete(finish);
+            resolve();
+          };
+          const timer = setTimeout(() => {
+            LOGGER.info(
+              { agent: agent.value, bound_ms: FIRST_ROW_LANDING_BOUND_MS },
+              "a book's first row did not land within the bound; the read asks the store as it stands",
+            );
+            finish();
+          }, FIRST_ROW_LANDING_BOUND_MS);
+          timer.unref?.();
+          waiting.add(finish);
+          bookLandingWaiters.set(agent.value, waiting);
+        });
+      }
       return reader.readFirstPage(agent, opening, known);
     },
 
