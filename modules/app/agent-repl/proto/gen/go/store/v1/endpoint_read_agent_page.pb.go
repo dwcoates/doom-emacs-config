@@ -32,9 +32,6 @@ type ReadAgentPageRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The book: the agent whose page lines are wanted.
 	Book *v1.AgentId `protobuf:"bytes,1,opt,name=book,proto3" json:"book,omitempty"`
-	// How many lines this page may hold. The caller's budget per call, so it
-	// can vary across calls of one walk.
-	PageSize uint32 `protobuf:"varint,2,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
 	// Where the page begins. THE ARM IS THE POSITION. There is no newest-page
 	// arm: the newest page is OpenAgentSession's answer.
 	//
@@ -82,13 +79,6 @@ func (x *ReadAgentPageRequest) GetBook() *v1.AgentId {
 		return x.Book
 	}
 	return nil
-}
-
-func (x *ReadAgentPageRequest) GetPageSize() uint32 {
-	if x != nil {
-		return x.PageSize
-	}
-	return 0
 }
 
 func (x *ReadAgentPageRequest) GetPosition() isReadAgentPageRequest_Position {
@@ -609,14 +599,13 @@ var File_store_v1_endpoint_read_agent_page_proto protoreflect.FileDescriptor
 
 const file_store_v1_endpoint_read_agent_page_proto_rawDesc = "" +
 	"\n" +
-	"'store/v1/endpoint_read_agent_page.proto\x12\bstore.v1\x1a$conversation/v1/agent_activity.proto\x1a\x1dconversation/v1/history.proto\x1a\x14store/v1/store.proto\"\xe3\x01\n" +
+	"'store/v1/endpoint_read_agent_page.proto\x12\bstore.v1\x1a$conversation/v1/agent_activity.proto\x1a\x1dconversation/v1/history.proto\x1a\x14store/v1/store.proto\"\xd7\x01\n" +
 	"\x14ReadAgentPageRequest\x12,\n" +
-	"\x04book\x18\x01 \x01(\v2\x18.conversation.v1.AgentIdR\x04book\x12\x1b\n" +
-	"\tpage_size\x18\x02 \x01(\rR\bpageSize\x122\n" +
+	"\x04book\x18\x01 \x01(\v2\x18.conversation.v1.AgentIdR\x04book\x122\n" +
 	"\x05after\x18\x03 \x01(\v2\x1a.store.v1.StoreItemPointerH\x00R\x05after\x12@\n" +
 	"\athrough\x18\x04 \x01(\v2$.conversation.v1.ConversationThroughH\x00R\athroughB\n" +
 	"\n" +
-	"\bposition\"\x99\x01\n" +
+	"\bpositionJ\x04\b\x02\x10\x03R\tpage_size\"\x99\x01\n" +
 	"\x15ReadAgentPageResponse\x12:\n" +
 	"\asuccess\x18\x01 \x01(\v2\x1e.store.v1.ReadAgentPageSuccessH\x00R\asuccess\x12:\n" +
 	"\afailure\x18\x02 \x01(\v2\x1e.store.v1.ReadAgentPageFailureH\x00R\afailureB\b\n" +

@@ -20,7 +20,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file shim/v1/endpoint_watch_agent.proto.
  */
 export const file_shim_v1_endpoint_watch_agent: GenFile = /*@__PURE__*/
-  fileDesc("CiJzaGltL3YxL2VuZHBvaW50X3dhdGNoX2FnZW50LnByb3RvEgdzaGltLnYxIq8BChFXYXRjaEFnZW50UmVxdWVzdBItCgZ0YXJnZXQYASABKAsyGC5jb252ZXJzYXRpb24udjEuQWdlbnRJZEgAiAEBEhEKCXBhZ2Vfc2l6ZRgCIAEoDRI7Cg1rbm93bl90aHJvdWdoGAMgASgLMh8uY29udmVyc2F0aW9uLnYxLkhpc3RvcnlQb2ludGVySAGIAQFCCQoHX3RhcmdldEIQCg5fa25vd25fdGhyb3VnaCKxAQoSV2F0Y2hBZ2VudFJlc3BvbnNlEiwKBHBhZ2UYASABKAsyHC5jb252ZXJzYXRpb24udjEuSGlzdG9yeVBhZ2VIABIwCgVlbnRyeRgCIAEoCzIfLmNvbnZlcnNhdGlvbi52MS5IaXN0b3J5RW50cnlBdEgAEjIKB3JldGlyZWQYAyABKAsyHy5jb252ZXJzYXRpb24udjEuSGlzdG9yeUVudHJ5QXRIAEIHCgVmcmFtZUIgWh5hZ2VudHJlcGwvcHJvdG8vc2hpbS92MTtzaGltdjFiBnByb3RvMw", [file_conversation_v1_agent_activity, file_conversation_v1_history]);
+  fileDesc("CiJzaGltL3YxL2VuZHBvaW50X3dhdGNoX2FnZW50LnByb3RvEgdzaGltLnYxItUBChFXYXRjaEFnZW50UmVxdWVzdBItCgZ0YXJnZXQYASABKAsyGC5jb252ZXJzYXRpb24udjEuQWdlbnRJZEgBiAEBEjgKDWtub3duX3Rocm91Z2gYAyABKAsyHy5jb252ZXJzYXRpb24udjEuSGlzdG9yeVBvaW50ZXJIABIwCgl0YWlsX29ubHkYBCABKAsyGy5zaGltLnYxLldhdGNoQWdlbnRUYWlsT25seUgAQgkKB29wZW5pbmdCCQoHX3RhcmdldEoECAIQA1IJcGFnZV9zaXplIrEBChJXYXRjaEFnZW50UmVzcG9uc2USLAoEcGFnZRgBIAEoCzIcLmNvbnZlcnNhdGlvbi52MS5IaXN0b3J5UGFnZUgAEjAKBWVudHJ5GAIgASgLMh8uY29udmVyc2F0aW9uLnYxLkhpc3RvcnlFbnRyeUF0SAASMgoHcmV0aXJlZBgDIAEoCzIfLmNvbnZlcnNhdGlvbi52MS5IaXN0b3J5RW50cnlBdEgAQgcKBWZyYW1lIhQKEldhdGNoQWdlbnRUYWlsT25seUIgWh5hZ2VudHJlcGwvcHJvdG8vc2hpbS92MTtzaGltdjFiBnByb3RvMw", [file_conversation_v1_agent_activity, file_conversation_v1_history]);
 
 /**
  * Follow one agent.
@@ -36,24 +36,37 @@ export type WatchAgentRequest = Message<"shim.v1.WatchAgentRequest"> & {
   target?: AgentId | undefined;
 
   /**
-   * The opening page's budget.
+   * What the opening page carries. UNSET = repaint: the newest page in
+   * descending conversation place.
    *
-   * @generated from field: uint32 page_size = 2;
+   * @generated from oneof shim.v1.WatchAgentRequest.opening
    */
-  pageSize: number;
-
-  /**
-   * The newest entry the caller already holds. UNSET = repaint: a full first
-   * page in descending conversation place. SET = catch-up: the opening page
-   * carries only entries FIRST WRITTEN AFTER this one — catch-up is about what
-   * was written since, never about place, so a late-written entry placed
-   * earlier in the conversation is delivered rather than skipped. The shim tracks nothing about what it previously served — the
-   * caller states its own high-water mark. A fresh agent simply yields an
-   * empty page.
-   *
-   * @generated from field: optional conversation.v1.HistoryPointer known_through = 3;
-   */
-  knownThrough?: HistoryPointer | undefined;
+  opening: {
+    /**
+     * The newest entry the caller already holds: catch-up. The opening page
+     * carries only entries FIRST WRITTEN AFTER this one — catch-up is about
+     * what was written since, never about place, so a late-written entry
+     * placed earlier in the conversation is delivered rather than skipped. The
+     * shim tracks nothing about what it previously served — the caller states
+     * its own high-water mark. A fresh agent simply yields an empty page.
+     *
+     * @generated from field: conversation.v1.HistoryPointer known_through = 3;
+     */
+    value: HistoryPointer;
+    case: "knownThrough";
+  } | {
+    /**
+     * No history: the opening page carries no entries and the stream carries
+     * only what is written from now on. The daemon opens every watch this way
+     * when it holds nothing of the agent's history, and loads history only
+     * when a reader asks for it (ReadHistory). An entry read that way and also
+     * received on this stream is absorbed by its identity.
+     *
+     * @generated from field: shim.v1.WatchAgentTailOnly tail_only = 4;
+     */
+    value: WatchAgentTailOnly;
+    case: "tailOnly";
+  } | { case: undefined; value?: undefined };
 };
 
 /**
@@ -113,4 +126,20 @@ export type WatchAgentResponse = Message<"shim.v1.WatchAgentResponse"> & {
  */
 export const WatchAgentResponseSchema: GenMessage<WatchAgentResponse> = /*@__PURE__*/
   messageDesc(file_shim_v1_endpoint_watch_agent, 1);
+
+/**
+ * Open the stream with no history. DELIBERATELY EMPTY: the arm's presence is
+ * the whole instruction.
+ *
+ * @generated from message shim.v1.WatchAgentTailOnly
+ */
+export type WatchAgentTailOnly = Message<"shim.v1.WatchAgentTailOnly"> & {
+};
+
+/**
+ * Describes the message shim.v1.WatchAgentTailOnly.
+ * Use `create(WatchAgentTailOnlySchema)` to create a new message.
+ */
+export const WatchAgentTailOnlySchema: GenMessage<WatchAgentTailOnly> = /*@__PURE__*/
+  messageDesc(file_shim_v1_endpoint_watch_agent, 2);
 

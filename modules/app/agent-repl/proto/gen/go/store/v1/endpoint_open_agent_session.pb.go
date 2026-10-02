@@ -31,17 +31,14 @@ type OpenAgentSessionRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The agent whose lines are wanted.
 	Agent *v1.AgentId `protobuf:"bytes,1,opt,name=agent,proto3" json:"agent,omitempty"`
-	// The opening page's budget.
-	PageSize uint32 `protobuf:"varint,2,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
-	// The newest item the caller already holds. UNSET = repaint: a full first
-	// page in descending conversation place. SET = catch-up: the page carries
-	// only items FIRST WRITTEN AFTER this one — catch-up is about what was
-	// written since, never about place, so a late-written item placed earlier in
-	// the conversation is delivered rather than skipped — ordered by descending
-	// place. An item delivered twice is absorbed by its identity. The store
-	// tracks nothing about what it previously served — the caller states its own
-	// high-water mark.
-	KnownThrough *StoreItemPointer `protobuf:"bytes,3,opt,name=known_through,json=knownThrough,proto3,oneof" json:"known_through,omitempty"`
+	// What the opening page carries. UNSET = repaint: the newest page, in
+	// descending conversation place.
+	//
+	// Types that are valid to be assigned to Opening:
+	//
+	//	*OpenAgentSessionRequest_KnownThrough
+	//	*OpenAgentSessionRequest_TailOnly
+	Opening isOpenAgentSessionRequest_Opening `protobuf_oneof:"opening"`
 	// Whether the caller will FOLLOW this open with a watch. UNSET/false = a
 	// watch is coming: the store mints a token and pins the tail (the ordinary
 	// open). SET = a one-shot read: the caller wants the page and nothing more,
@@ -93,16 +90,27 @@ func (x *OpenAgentSessionRequest) GetAgent() *v1.AgentId {
 	return nil
 }
 
-func (x *OpenAgentSessionRequest) GetPageSize() uint32 {
+func (x *OpenAgentSessionRequest) GetOpening() isOpenAgentSessionRequest_Opening {
 	if x != nil {
-		return x.PageSize
+		return x.Opening
 	}
-	return 0
+	return nil
 }
 
 func (x *OpenAgentSessionRequest) GetKnownThrough() *StoreItemPointer {
 	if x != nil {
-		return x.KnownThrough
+		if x, ok := x.Opening.(*OpenAgentSessionRequest_KnownThrough); ok {
+			return x.KnownThrough
+		}
+	}
+	return nil
+}
+
+func (x *OpenAgentSessionRequest) GetTailOnly() *AgentSessionTailOnly {
+	if x != nil {
+		if x, ok := x.Opening.(*OpenAgentSessionRequest_TailOnly); ok {
+			return x.TailOnly
+		}
 	}
 	return nil
 }
@@ -113,6 +121,34 @@ func (x *OpenAgentSessionRequest) GetPageOnly() bool {
 	}
 	return false
 }
+
+type isOpenAgentSessionRequest_Opening interface {
+	isOpenAgentSessionRequest_Opening()
+}
+
+type OpenAgentSessionRequest_KnownThrough struct {
+	// The newest item the caller already holds: catch-up. The page carries
+	// only items FIRST WRITTEN AFTER this one — catch-up is about what was
+	// written since, never about place, so a late-written item placed earlier
+	// in the conversation is delivered rather than skipped — ordered by
+	// descending place. An item delivered twice is absorbed by its identity.
+	// The store tracks nothing about what it previously served — the caller
+	// states its own high-water mark.
+	KnownThrough *StoreItemPointer `protobuf:"bytes,3,opt,name=known_through,json=knownThrough,proto3,oneof"`
+}
+
+type OpenAgentSessionRequest_TailOnly struct {
+	// No history at all: the opening page carries no items and the tail
+	// begins after the newest item as of this open. For a caller that holds
+	// nothing and loads history only when a reader asks for it (newest page
+	// via a repaint read, older pages via ReadAgentPage). An item the caller
+	// later reads and also receives on the tail is absorbed by its identity.
+	TailOnly *AgentSessionTailOnly `protobuf:"bytes,5,opt,name=tail_only,json=tailOnly,proto3,oneof"`
+}
+
+func (*OpenAgentSessionRequest_KnownThrough) isOpenAgentSessionRequest_Opening() {}
+
+func (*OpenAgentSessionRequest_TailOnly) isOpenAgentSessionRequest_Opening() {}
 
 // The page, or why it could not be served.
 type OpenAgentSessionResponse struct {
@@ -359,7 +395,7 @@ type isOpenAgentSessionFailure_Kind interface {
 }
 
 type OpenAgentSessionFailure_InvalidRequest struct {
-	// Empty agent id, zero page_size, or a known_through that is empty or
+	// Empty agent id, or a known_through that is empty or
 	// not store-minted.
 	InvalidRequest *OpenAgentSessionInvalidRequest `protobuf:"bytes,2,opt,name=invalid_request,json=invalidRequest,proto3,oneof"`
 }
@@ -546,17 +582,55 @@ func (*OpenAgentSessionStalePointer) Descriptor() ([]byte, []int) {
 	return file_store_v1_endpoint_open_agent_session_proto_rawDescGZIP(), []int{7}
 }
 
+// Open the tail only: no opening items. DELIBERATELY EMPTY: the arm's presence
+// is the whole instruction.
+type AgentSessionTailOnly struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AgentSessionTailOnly) Reset() {
+	*x = AgentSessionTailOnly{}
+	mi := &file_store_v1_endpoint_open_agent_session_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AgentSessionTailOnly) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AgentSessionTailOnly) ProtoMessage() {}
+
+func (x *AgentSessionTailOnly) ProtoReflect() protoreflect.Message {
+	mi := &file_store_v1_endpoint_open_agent_session_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AgentSessionTailOnly.ProtoReflect.Descriptor instead.
+func (*AgentSessionTailOnly) Descriptor() ([]byte, []int) {
+	return file_store_v1_endpoint_open_agent_session_proto_rawDescGZIP(), []int{8}
+}
+
 var File_store_v1_endpoint_open_agent_session_proto protoreflect.FileDescriptor
 
 const file_store_v1_endpoint_open_agent_session_proto_rawDesc = "" +
 	"\n" +
-	"*store/v1/endpoint_open_agent_session.proto\x12\bstore.v1\x1a$conversation/v1/agent_activity.proto\x1a\x14store/v1/store.proto\"\xdb\x01\n" +
+	"*store/v1/endpoint_open_agent_session.proto\x12\bstore.v1\x1a$conversation/v1/agent_activity.proto\x1a\x14store/v1/store.proto\"\x84\x02\n" +
 	"\x17OpenAgentSessionRequest\x12.\n" +
-	"\x05agent\x18\x01 \x01(\v2\x18.conversation.v1.AgentIdR\x05agent\x12\x1b\n" +
-	"\tpage_size\x18\x02 \x01(\rR\bpageSize\x12D\n" +
-	"\rknown_through\x18\x03 \x01(\v2\x1a.store.v1.StoreItemPointerH\x00R\fknownThrough\x88\x01\x01\x12\x1b\n" +
-	"\tpage_only\x18\x04 \x01(\bR\bpageOnlyB\x10\n" +
-	"\x0e_known_through\"\xa2\x01\n" +
+	"\x05agent\x18\x01 \x01(\v2\x18.conversation.v1.AgentIdR\x05agent\x12A\n" +
+	"\rknown_through\x18\x03 \x01(\v2\x1a.store.v1.StoreItemPointerH\x00R\fknownThrough\x12=\n" +
+	"\ttail_only\x18\x05 \x01(\v2\x1e.store.v1.AgentSessionTailOnlyH\x00R\btailOnly\x12\x1b\n" +
+	"\tpage_only\x18\x04 \x01(\bR\bpageOnlyB\t\n" +
+	"\aopeningJ\x04\b\x02\x10\x03R\tpage_size\"\xa2\x01\n" +
 	"\x18OpenAgentSessionResponse\x12=\n" +
 	"\asuccess\x18\x01 \x01(\v2!.store.v1.OpenAgentSessionSuccessH\x00R\asuccess\x12=\n" +
 	"\afailure\x18\x02 \x01(\v2!.store.v1.OpenAgentSessionFailureH\x00R\afailureB\b\n" +
@@ -575,7 +649,8 @@ const file_store_v1_endpoint_open_agent_session_proto_rawDesc = "" +
 	"\x1eOpenAgentSessionInvalidRequest\x12\x14\n" +
 	"\x05field\x18\x01 \x01(\tR\x05field\" \n" +
 	"\x1eOpenAgentSessionStorageFailure\"\x1e\n" +
-	"\x1cOpenAgentSessionStalePointerB\"Z agentrepl/proto/store/v1;storev1b\x06proto3"
+	"\x1cOpenAgentSessionStalePointer\"\x16\n" +
+	"\x14AgentSessionTailOnlyB\"Z agentrepl/proto/store/v1;storev1b\x06proto3"
 
 var (
 	file_store_v1_endpoint_open_agent_session_proto_rawDescOnce sync.Once
@@ -589,7 +664,7 @@ func file_store_v1_endpoint_open_agent_session_proto_rawDescGZIP() []byte {
 	return file_store_v1_endpoint_open_agent_session_proto_rawDescData
 }
 
-var file_store_v1_endpoint_open_agent_session_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_store_v1_endpoint_open_agent_session_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_store_v1_endpoint_open_agent_session_proto_goTypes = []any{
 	(*OpenAgentSessionRequest)(nil),        // 0: store.v1.OpenAgentSessionRequest
 	(*OpenAgentSessionResponse)(nil),       // 1: store.v1.OpenAgentSessionResponse
@@ -599,27 +674,29 @@ var file_store_v1_endpoint_open_agent_session_proto_goTypes = []any{
 	(*OpenAgentSessionInvalidRequest)(nil), // 5: store.v1.OpenAgentSessionInvalidRequest
 	(*OpenAgentSessionStorageFailure)(nil), // 6: store.v1.OpenAgentSessionStorageFailure
 	(*OpenAgentSessionStalePointer)(nil),   // 7: store.v1.OpenAgentSessionStalePointer
-	(*v1.AgentId)(nil),                     // 8: conversation.v1.AgentId
-	(*StoreItemPointer)(nil),               // 9: store.v1.StoreItemPointer
-	(*AgentSessionPage)(nil),               // 10: store.v1.AgentSessionPage
-	(*AgentSessionToken)(nil),              // 11: store.v1.AgentSessionToken
+	(*AgentSessionTailOnly)(nil),           // 8: store.v1.AgentSessionTailOnly
+	(*v1.AgentId)(nil),                     // 9: conversation.v1.AgentId
+	(*StoreItemPointer)(nil),               // 10: store.v1.StoreItemPointer
+	(*AgentSessionPage)(nil),               // 11: store.v1.AgentSessionPage
+	(*AgentSessionToken)(nil),              // 12: store.v1.AgentSessionToken
 }
 var file_store_v1_endpoint_open_agent_session_proto_depIdxs = []int32{
-	8,  // 0: store.v1.OpenAgentSessionRequest.agent:type_name -> conversation.v1.AgentId
-	9,  // 1: store.v1.OpenAgentSessionRequest.known_through:type_name -> store.v1.StoreItemPointer
-	2,  // 2: store.v1.OpenAgentSessionResponse.success:type_name -> store.v1.OpenAgentSessionSuccess
-	3,  // 3: store.v1.OpenAgentSessionResponse.failure:type_name -> store.v1.OpenAgentSessionFailure
-	10, // 4: store.v1.OpenAgentSessionSuccess.page:type_name -> store.v1.AgentSessionPage
-	11, // 5: store.v1.OpenAgentSessionSuccess.watch:type_name -> store.v1.AgentSessionToken
-	5,  // 6: store.v1.OpenAgentSessionFailure.invalid_request:type_name -> store.v1.OpenAgentSessionInvalidRequest
-	7,  // 7: store.v1.OpenAgentSessionFailure.stale_pointer:type_name -> store.v1.OpenAgentSessionStalePointer
-	6,  // 8: store.v1.OpenAgentSessionFailure.storage_failure:type_name -> store.v1.OpenAgentSessionStorageFailure
-	4,  // 9: store.v1.OpenAgentSessionFailure.unknown_agent:type_name -> store.v1.OpenAgentSessionUnknownAgent
-	10, // [10:10] is the sub-list for method output_type
-	10, // [10:10] is the sub-list for method input_type
-	10, // [10:10] is the sub-list for extension type_name
-	10, // [10:10] is the sub-list for extension extendee
-	0,  // [0:10] is the sub-list for field type_name
+	9,  // 0: store.v1.OpenAgentSessionRequest.agent:type_name -> conversation.v1.AgentId
+	10, // 1: store.v1.OpenAgentSessionRequest.known_through:type_name -> store.v1.StoreItemPointer
+	8,  // 2: store.v1.OpenAgentSessionRequest.tail_only:type_name -> store.v1.AgentSessionTailOnly
+	2,  // 3: store.v1.OpenAgentSessionResponse.success:type_name -> store.v1.OpenAgentSessionSuccess
+	3,  // 4: store.v1.OpenAgentSessionResponse.failure:type_name -> store.v1.OpenAgentSessionFailure
+	11, // 5: store.v1.OpenAgentSessionSuccess.page:type_name -> store.v1.AgentSessionPage
+	12, // 6: store.v1.OpenAgentSessionSuccess.watch:type_name -> store.v1.AgentSessionToken
+	5,  // 7: store.v1.OpenAgentSessionFailure.invalid_request:type_name -> store.v1.OpenAgentSessionInvalidRequest
+	7,  // 8: store.v1.OpenAgentSessionFailure.stale_pointer:type_name -> store.v1.OpenAgentSessionStalePointer
+	6,  // 9: store.v1.OpenAgentSessionFailure.storage_failure:type_name -> store.v1.OpenAgentSessionStorageFailure
+	4,  // 10: store.v1.OpenAgentSessionFailure.unknown_agent:type_name -> store.v1.OpenAgentSessionUnknownAgent
+	11, // [11:11] is the sub-list for method output_type
+	11, // [11:11] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_store_v1_endpoint_open_agent_session_proto_init() }
@@ -628,7 +705,10 @@ func file_store_v1_endpoint_open_agent_session_proto_init() {
 		return
 	}
 	file_store_v1_store_proto_init()
-	file_store_v1_endpoint_open_agent_session_proto_msgTypes[0].OneofWrappers = []any{}
+	file_store_v1_endpoint_open_agent_session_proto_msgTypes[0].OneofWrappers = []any{
+		(*OpenAgentSessionRequest_KnownThrough)(nil),
+		(*OpenAgentSessionRequest_TailOnly)(nil),
+	}
 	file_store_v1_endpoint_open_agent_session_proto_msgTypes[1].OneofWrappers = []any{
 		(*OpenAgentSessionResponse_Success)(nil),
 		(*OpenAgentSessionResponse_Failure)(nil),
@@ -645,7 +725,7 @@ func file_store_v1_endpoint_open_agent_session_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_store_v1_endpoint_open_agent_session_proto_rawDesc), len(file_store_v1_endpoint_open_agent_session_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   8,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
