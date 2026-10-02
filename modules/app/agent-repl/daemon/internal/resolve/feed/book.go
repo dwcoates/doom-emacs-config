@@ -58,7 +58,7 @@ var (
 	// hibernated workspace, a shim not yet up) or no book yet. The feed serves
 	// what it holds; nothing older is reachable until a source comes up
 	// (SourceUp, or a watch opening).
-	ErrNoHistorySource = errors.New("feed: no session is up to read history from")
+	ErrNoHistorySource = errors.New("feed: no shim is up to read history from")
 	// ErrHistoryUnavailable wraps every failure to read a page a reader's
 	// request needed: the shim's or the store's refusal, or a transport error.
 	ErrHistoryUnavailable = errors.New("feed: a history page could not be read")
@@ -293,7 +293,7 @@ func (r *resolver) load(ctx context.Context, plan loadPlan) (loaded, error) {
 	page, err := r.deps.History.ReadHistory(ctx, ws, plan.target, plan.after)
 	if errors.Is(err, ErrNoHistorySource) {
 		log.Info("daemon.feed.history_load_no_source",
-			"a reader's page could not be loaded: no session is up to read history from; the feed serves what it holds",
+			"a reader's page could not be loaded: no shim is up to read history from; the feed serves what it holds and loads the page when one comes up",
 			dlog.Context{"agent": plan.target.GetValue(), "newest": plan.newest})
 		return loaded{}, err
 	}
