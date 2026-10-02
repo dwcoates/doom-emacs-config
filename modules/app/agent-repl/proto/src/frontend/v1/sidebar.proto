@@ -112,7 +112,8 @@ message RosterRowAttention {}
 // same render as the row's `status`, so every push states the two in
 // agreement and a client draws the marker as it arrives, with no rule of its
 // own. A turn that completes, is interrupted or fails leaves its result UNREAD; a
-// dwell on the turn-end row READS it; the next turn resets it. While the
+// dwell on the turn-end row READS it, and so does a completed /clear or
+// compaction, at once (see MarkWorkspaceViewed); the next turn resets it. While the
 // result is unread the row holds its turn-end arm even over live detached
 // work (see the `status` oneof's `idle_async`), FULL. Once read, the marker stands
 // whenever the row is on its turn-end arm, including when it returns there
@@ -139,6 +140,20 @@ message RosterRowViewed {}
 // by it, and the webapp draws it as a subtle shimmer across the row's NAME
 // text while it stands.
 message RosterRowReviving {}
+
+// DETACHED WORK RUNS in this workspace: a subagent, a background shell, or
+// any other work that outlives the main thread's turn. PRESENT exactly while
+// the daemon counts such work as live, on ANY status arm, and absent
+// otherwise; presence is the whole fact.
+//
+// WHY THE ROW STATES IT SEPARATELY: an UNREAD turn end deliberately outranks
+// `idle_async` in the `status` oneof, so a `done` row whose result is unread
+// cannot say through its status that background work runs beside it. The
+// editor needs that fact to pick its dwell threshold (owner ruling,
+// 2026-10-01): a `done` row with live detached work goes PARTIAL after ONE
+// second of viewing, where it then draws `idle_async`. The threshold stays
+// the editor's own; this marker only states the fact it is chosen from.
+message RosterRowDetachedLive {}
 
 // The workspace's AVAILABILITY: whether the daemon has this workspace's
 // session to offer an editor. An editor OPENS a workspace — its tab, its
@@ -353,6 +368,11 @@ message RosterRow {
   // RosterRowAvailability, which carries the field's whole contract. ALWAYS
   // SET; a row without it is a contract breach and is rejected loudly.
   RosterRowAvailability availability = 38;
+
+  // The row's DETACHED-WORK marker: present while detached (background) work
+  // runs in this workspace, absent otherwise. See RosterRowDetachedLive,
+  // which carries the marker's whole contract.
+  optional RosterRowDetachedLive detached_live = 40;
 
   // The row's display name.
   RosterRowName name = 2;
