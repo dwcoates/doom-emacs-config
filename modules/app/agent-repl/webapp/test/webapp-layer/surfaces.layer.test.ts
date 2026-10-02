@@ -59,14 +59,20 @@ it(
 
     // Release the parked turn through the page's own interrupt, so the next
     // test's submission is not held behind it.
+    //
+    // THE STOP IS AWAITED, NEVER LOOKED FOR ONCE. The status leaves idle while
+    // the prompt is still submitting, but the turn stop mounts only once the
+    // clock is live (strip.ts drawFooterClock). A one-shot lookup in that
+    // window found no stop, skipped the release, and left `!hold` parked: every
+    // later test in this file then queued behind it and timed out.
+    await awaitDrawn(app, "the running turn's stop control", () => app.$(".footer-clock [data-interrupt]") !== null);
     const interrupt = app.$(".footer-clock [data-interrupt]");
-    if (interrupt) {
-      const beforeTurns = rows(app, "turnEnded").length;
-      await app.clickElement(interrupt);
-      const confirm = app.$("[data-interrupt-confirm]");
-      if (confirm) await app.clickElement(confirm);
-      await awaitDrawn(app, "the parked turn to end", () => rows(app, "turnEnded").length > beforeTurns);
-    }
+    if (interrupt === null) throw new Error("the turn stop vanished between its wait and its click");
+    const beforeTurns = rows(app, "turnEnded").length;
+    await app.clickElement(interrupt);
+    const confirm = app.$("[data-interrupt-confirm]");
+    if (confirm) await app.clickElement(confirm);
+    await awaitDrawn(app, "the parked turn to end", () => rows(app, "turnEnded").length > beforeTurns);
   },
   TURN_TEST_MS,
 );
