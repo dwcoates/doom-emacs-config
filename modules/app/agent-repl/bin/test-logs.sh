@@ -671,22 +671,31 @@ test_messages_source_fields_and_level() {
     fi
 }
 
-wait_for_pattern() {
-    local pattern="$1" path="$2" pid="$3" started=$SECONDS
-    while ! grep -q "$pattern" "$path" 2>/dev/null; do
-        kill -0 "$pid" 2>/dev/null || return 1
-        [ $((SECONDS - started)) -lt 5 ] || return 1
-        sleep 0.02
+read_follow_pattern() {
+    local pattern="$1" fd="$2" output="$3" line started=$SECONDS remaining
+    while :; do
+        remaining=$((30 - (SECONDS - started)))
+        [ "$remaining" -gt 0 ] || return 1
+        # The pipe is the synchronization signal: read sleeps until the
+        # follower emits a complete record.  -t is only an outer failure
+        # deadline for a reader that never becomes ready under heavy load.
+        IFS= read -r -t "$remaining" line <&"$fd" || return 1
+        printf '%s\n' "$line" >>"$output"
+        [[ "$line" == *"$pattern"* ]] && return 0
     done
 }
 
 test_follow() {
-    local target="$targets/follow.log" workspace="$TMP/workspaces/follow" pid rc=0
+    local target="$targets/follow.log" workspace="$TMP/workspaces/follow" pipe="$TMP/follow.pipe" pid follow_fd rc=0
     mkdir -p "$workspace/.claude/emacs"
     cat >"$target" <<EOF
 {"timestamp":"2026-09-10T11:00:00.000000Z","runtime":"daemon","pid":60,"level":"info","verbosity":"normal","operation":"daemon.follow.initial","message":"initial","context":{},"workspace_dir":"$workspace","workspace_id":"ws-follow"}
 EOF
     ln -s "$target" "$workspace/.claude/emacs/daemon.log"
+    mkfifo "$pipe"
+    # Opening both ends here lets startup itself remain under read's deadline;
+    # a read-only open would block before the follower opened its writer.
+    exec {follow_fd}<>"$pipe"
     PATH="$bin:$PATH" \
         HOME="$home" \
         TMPDIR="$runtime_tmp" \
@@ -698,13 +707,13 @@ EOF
         AGENT_REPL_EMACS_GLOBAL_LOG="${AGENT_REPL_EMACS_GLOBAL_LOG_OVERRIDE-$emacs_global}" \
         TZ=UTC \
         "$LOGS" --workspace "$workspace" --runtime daemon --follow --json \
-        >"$TMP/follow.out" 2>"$TMP/follow.err" &
+        >"$pipe" 2>"$TMP/follow.err" &
     pid=$!
-    if wait_for_pattern 'daemon.follow.initial' "$TMP/follow.out" "$pid"; then
+    if read_follow_pattern 'daemon.follow.initial' "$follow_fd" "$TMP/follow.out"; then
         cat >>"$target" <<EOF
 {"timestamp":"2026-09-10T11:01:00.000000Z","runtime":"daemon","pid":60,"level":"info","verbosity":"normal","operation":"daemon.follow.appended","message":"appended","context":{},"workspace_dir":"$workspace","workspace_id":"ws-follow"}
 EOF
-        wait_for_pattern 'daemon.follow.appended' "$TMP/follow.out" "$pid" || rc=1
+        read_follow_pattern 'daemon.follow.appended' "$follow_fd" "$TMP/follow.out" || rc=1
     else
         rc=1
     fi
@@ -712,6 +721,7 @@ EOF
     if ! wait "$pid"; then
         rc=1
     fi
+    exec {follow_fd}>&-
     if [ "$rc" -eq 0 ]; then
         pass "--follow emits records appended after startup"
     else
