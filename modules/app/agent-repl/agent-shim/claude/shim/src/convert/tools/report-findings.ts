@@ -13,6 +13,7 @@
 import { create } from "@bufbuild/protobuf";
 import { bindLog } from "../../log.js";
 import { conversationv1 } from "../../proto.js";
+import { effortLevelOf } from "../effort.js";
 import { settledAt, startedAt } from "../entries.js";
 import type { PendingCall, ToolConverter, ToolOutcome } from "../tool-calls.js";
 import { arr, asRecord, failureOf, str, uint } from "./support.js";
@@ -30,30 +31,6 @@ function findingsItem(
     case: "reportFindings",
     value: create(conversationv1.AgentReportFindingsSchema, { state }),
   };
-}
-
-/** The effort level the review ran at, in the one canonical vocabulary. */
-export function effortLevelOf(level: string | undefined): conversationv1.AgentEffortLevel {
-  switch (level) {
-    case "low":
-      return conversationv1.AgentEffortLevel.LOW;
-    case "medium":
-      return conversationv1.AgentEffortLevel.MEDIUM;
-    case "high":
-      return conversationv1.AgentEffortLevel.HIGH;
-    case "xhigh":
-      return conversationv1.AgentEffortLevel.XHIGH;
-    case "max":
-      return conversationv1.AgentEffortLevel.MAX;
-    case undefined:
-      return conversationv1.AgentEffortLevel.UNSPECIFIED;
-    default:
-      LOGGER.debug(
-        { effort: level },
-        "a review named an effort level this vocabulary has no value for; the level is left unspecified",
-      );
-      return conversationv1.AgentEffortLevel.UNSPECIFIED;
-  }
 }
 
 /** The verify pass's verdict. UNSET when no verify pass ran. */

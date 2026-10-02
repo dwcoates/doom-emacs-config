@@ -41,6 +41,7 @@ import type { LockRelease } from "../locks.js";
 import { workspaceLockKey } from "../locks.js";
 import { recordAgentBinaryVersion, requireSessionRuntime } from "../build-identity.js";
 import { isAgentTaskType } from "../convert/detached.js";
+import { effortLevelOf } from "../convert/effort.js";
 import { promptVendorUuid, subagentId, toolCallActivityId } from "../convert/ids.js";
 import { hookBlockingText } from "../convert/hooks.js";
 import { classifyVendorApiFailure, redactVendorMessage } from "../convert/terminals.js";
@@ -1860,13 +1861,6 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   }
 
   function modelOptions(models: readonly ModelInfoLike[]): conversationv1.ModelOption[] {
-    const efforts: Record<string, conversationv1.AgentEffortLevel> = {
-      low: conversationv1.AgentEffortLevel.LOW,
-      medium: conversationv1.AgentEffortLevel.MEDIUM,
-      high: conversationv1.AgentEffortLevel.HIGH,
-      xhigh: conversationv1.AgentEffortLevel.XHIGH,
-      max: conversationv1.AgentEffortLevel.MAX,
-    };
     // A CATALOG ROW THAT NAMES NO MODEL IS NOT AN OPTION. The vendor's catalog
     // can carry a row whose `value` is the synthetic marker or empty — the
     // "let the CLI pick" pseudo-entry — and normalizeModel collapses both to
@@ -1913,9 +1907,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
                     ? {
                         case: "effortSupported",
                         value: create(conversationv1.ModelEffortSupportedSchema, {
-                          levels: (model.supportedEffortLevels ?? []).map(
-                            (level) => efforts[level] ?? conversationv1.AgentEffortLevel.UNSPECIFIED,
-                          ),
+                          levels: (model.supportedEffortLevels ?? []).map(effortLevelOf),
                         }),
                       }
                     : {
