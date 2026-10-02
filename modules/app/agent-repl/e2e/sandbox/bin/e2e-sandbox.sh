@@ -513,8 +513,22 @@ SANDBOX_MEM_BUDGET_MB=${AGENT_REPL_SANDBOX_MEM_BUDGET_MB:-2048}
 SANDBOX_MEM_HEADROOM_MB=${AGENT_REPL_SANDBOX_MEM_HEADROOM_MB:-1024}
 
 # SANDBOX_MAX_SLOTS caps the computed answer regardless of memory: past a
-# handful of containers the four CPUs are the binding constraint, not the RAM.
+# handful of containers the CPUs they share are the binding constraint, not
+# the RAM.
 SANDBOX_MAX_SLOTS=${AGENT_REPL_SANDBOX_MAX_SLOTS:-4}
+
+# SANDBOX_CPUS is how many CPUs ONE container may use: `docker run --cpus`,
+# and GOMAXPROCS for every Go process inside (the image's Go predates
+# cgroup-aware GOMAXPROCS, so without it each one sizes itself to the whole
+# VM and is throttled against the quota). The VM itself has as many CPUs as
+# the host gives Docker, which is not a number any bound here was measured
+# on; four is the VM the Emacs layer's parallelism bound of two Emacsen was
+# measured on (e2e/EMACS-LAYER-SPEC.md, "The parallelism bound, measured").
+#
+# Under testrun the container is a unit holding AGENT_REPL_UNIT_SLOTS core
+# slots, and bin/test-e2e-emacs.sh passes that width here, so the cores the
+# container uses are the slots the scheduler reserved for it.
+SANDBOX_CPUS=${AGENT_REPL_SANDBOX_CPUS:-4}
 
 # slot_budget RUNTIME — how many containers this VM can afford right now.
 #
@@ -651,6 +665,20 @@ stage_webapp_dist() {
   "$here/webapp-dist.sh" ensure
 }
 
+# --- the container's CPU cap --------------------------------------------------
+
+# container_cpu_args CPUS -- the `docker run` arguments that cap a container to
+# CPUS CPUs, space separated; anything but a positive whole number is refused
+# (the refusal is printed, for the caller to die with).
+container_cpu_args() {
+  local cpus=$1
+  if [[ ! $cpus =~ ^[1-9][0-9]*$ ]]; then
+    printf "AGENT_REPL_SANDBOX_CPUS must be a positive whole number of CPUs, got '%s'\n" "$cpus"
+    return 1
+  fi
+  printf -- '--cpus %s --env GOMAXPROCS=%s\n' "$cpus" "$cpus"
+}
+
 # --- run -------------------------------------------------------------------
 
 do_run() {
@@ -673,8 +701,14 @@ do_run() {
 
   stage_webapp_dist
 
+  local cpu_out cpu_args
+  cpu_out=$(container_cpu_args "$SANDBOX_CPUS") || die "$cpu_out"
+  read -ra cpu_args <<<"$cpu_out"
+  log "capping the container to $SANDBOX_CPUS CPUs"
+
   local args=(
     run --rm --init
+    "${cpu_args[@]}"
     --network none
     --user 1000:1000
     --read-only

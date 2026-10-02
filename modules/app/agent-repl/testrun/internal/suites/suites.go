@@ -17,6 +17,11 @@
 //   - vitest runs with --maxWorkers=1 --minWorkers=1;
 //   - Emacs is single-threaded.
 //
+// The one exception is a Script suite the roster gives a width (Slots): its
+// unit holds that many slots, is told the number in AGENT_REPL_UNIT_SLOTS,
+// and caps itself to exactly that many cores (e2e-emacs passes it to the
+// sandbox container as docker --cpus and GOMAXPROCS).
+//
 // The parallelism lives in the scheduler, which can see every suite at once,
 // never inside a suite, which can only see itself.
 package suites
@@ -83,6 +88,10 @@ func Build(l Layout, s roster.Suite) (Units, error) {
 	panic(fmt.Sprintf("suites: suite %q has unknown kind %d", s.Name, s.Kind))
 }
 
+// UnitSlotsEnv tells a Script unit how many core slots it holds, which is
+// how many cores it may use.
+const UnitSlotsEnv = "AGENT_REPL_UNIT_SLOTS"
+
 // PinnedEnv is the environment every unit adds to its own: the pins the
 // package comment promises, plus the GOFLAGS the caller already had.
 func PinnedEnv() []string {
@@ -110,8 +119,13 @@ func scriptUnits(l Layout, s roster.Suite) (Units, error) {
 	if err != nil {
 		return Units{}, err
 	}
+	if s.Slots < 0 {
+		return Units{}, fmt.Errorf("suites: %s has a negative width %d", s.Name, s.Slots)
+	}
 	u := spec(s.Name, s.Name, filepath.Dir(path), append([]string{path}, s.Args...))
 	u.MayDecline = s.MayDecline
+	u.Slots = s.Slots
+	u.Env = append(u.Env, fmt.Sprintf("%s=%d", UnitSlotsEnv, u.Width()))
 	return Units{Atomic: []run.Spec{u}}, nil
 }
 
