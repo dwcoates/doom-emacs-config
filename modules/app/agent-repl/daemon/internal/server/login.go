@@ -244,6 +244,18 @@ func (s *server) OpenInEditor(
 		if err := s.deps.Verbs.OpenDaemonFileInEditor(ctx, subject.Record.ID, path); err != nil {
 			return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
 		}
+	case *agentreplv1.OpenInEditorRequest_FeedLink:
+		unresolved, err := s.deps.Verbs.OpenFeedLink(ctx, subject.Record.ID, target.FeedLink.GetHref())
+		if unresolved != nil {
+			// THE QUESTION IS SENT BEFORE THE REFUSAL IS ANSWERED: the arm
+			// promises the workspace has already been asked.
+			if askErr := s.askAboutUnresolvedLink(ctx, subject.Log, subject.Record.ID, target.FeedLink.GetSourceRow(), unresolved); askErr != nil {
+				return nil, fail(subject.Log, rpc, askErr)
+			}
+		}
+		if err != nil {
+			return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
+		}
 	}
 	resp.Result = &agentreplv1.OpenInEditorResponse_Success{
 		Success: &agentreplv1.OpenInEditorSuccess{},

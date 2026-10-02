@@ -1036,6 +1036,13 @@ type fakeFooter struct {
 	// coldEvents is every cold-gate setter call, in order: "gate:standing",
 	// "gate:retired", "answer" or "answer:cleared".
 	coldEvents []string
+	// faults is every fault the verbs opened on the footer, in order.
+	faults []footer.Fault
+}
+
+// OpenFault records a fault the verbs opened on the footer.
+func (f *fakeFooter) OpenFault(_ ids.WorkspaceID, fault footer.Fault) {
+	f.faults = append(f.faults, fault)
 }
 
 func (f *fakeFooter) SetParked(_ ids.WorkspaceID, parked bool) {
