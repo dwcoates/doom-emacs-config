@@ -1524,6 +1524,7 @@ export const FOOTER_SALIENT_KINDS: Record<string, object> = {
   closeBlocked: { text: "a turn is live" },
   notification: { text: "the agent addressed you" },
   contextBudget: { text: "84% of the window" },
+  vendorStart: { text: "Claude SDK did not start (attempt 3): overloaded · retrying" },
 };
 
 /** The salient kinds every status arm carries after its own and `update`. */
@@ -1554,7 +1555,7 @@ export const FOOTER_STATUS_SALIENTS: Record<string, readonly string[]> = {
   merged: ["mergeStep", "update", ...SHARED_SALIENTS],
   background: ["update", ...SHARED_SALIENTS],
   blocked: ["authenticating", "retrying", "fault", "update", ...SHARED_SALIENTS],
-  disconnected: ["startFailed", "fault", "update", ...SHARED_SALIENTS],
+  disconnected: ["startFailed", "vendorStart", "fault", "update", ...SHARED_SALIENTS],
   closing: ["closeBlocked", "update", ...SHARED_SALIENTS],
   loading: ["update", ...SHARED_SALIENTS],
 };
