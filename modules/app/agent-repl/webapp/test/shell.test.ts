@@ -19,6 +19,7 @@ const MOUNTS: ReadonlyArray<readonly [keyof ShellElements, string]> = [
   ["footer", "footer"],
   ["composer", "composer"],
   ["loginOverlay", "login-overlay"],
+  ["newsDigest", "news-digest"],
 ];
 
 /** A document carrying every shell mount point except those in OMIT. */

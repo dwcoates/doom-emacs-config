@@ -41,6 +41,7 @@ import { mountFeed } from "./feed/feed.js";
 import { mountFooter } from "./footer/footer.js";
 import { adoptAtBoot, startLifecycle } from "./lifecycle/lifecycle.js";
 import { mountLoginOverlay } from "./login/login.js";
+import { mountNewsDigest } from "./news-digest/news-digest.js";
 import { drawCommandPanel } from "./panels/panels.js";
 import { createPromptWaveDriver } from "./prompt-wave-driver.js";
 import { mountSidebar } from "./sidebar/sidebar.js";
@@ -232,7 +233,11 @@ export async function boot(): Promise<void> {
     // very first rpc a view makes — so the move hook this module registers has
     // to exist before the first view mount, or that first refusal would find
     // no handler and the page would keep drawing for a workspace it has lost.
-    startLifecycle(ctx, { drainBannerHost: shell.drainBanner });
+    //
+    // THE NEWS DIGEST OVERLAY IS MOUNTED WITH IT, because the lifecycle's
+    // daemon stream is what carries the digest's standing.
+    const newsDigest = mountNewsDigest(shell.newsDigest, ctx, { feedScroll: shell.feedScroll });
+    startLifecycle(ctx, { drainBannerHost: shell.drainBanner, newsDigest });
 
     // The dev-mode composer is the only shell element the boot itself reveals;
     // production runs composer-less, so the host ships hidden.
