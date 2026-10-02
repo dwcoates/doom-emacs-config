@@ -55,6 +55,9 @@
 (declare-function agent-repl-wire-decode-session-fault-bounce-unknown "wire-common")
 (declare-function agent-repl-wire-decode-session-fault-adoption-window-expired "wire-common")
 (declare-function agent-repl-wire-decode-session-fault-final-answer-unresolved "wire-common")
+(declare-function agent-repl-wire-decode-session-fault-vendor-start-retrying "wire-common")
+(declare-function agent-repl-wire-decode-session-fault-vendor-start-rejected "wire-common")
+(declare-function agent-repl-wire-decode-session-fault-vendor-start-failed "wire-common")
 (declare-function agent-repl-wire-decode-session-fault-classifier-failed "wire-common")
 (declare-function agent-repl-wire-decode-session-fault-conversation-abandoned "wire-common")
 (declare-function agent-repl-wire-decode-session-fault-daemon-state-unreadable "wire-common")
@@ -175,6 +178,21 @@ Rotates on restart within one session; fault windows scope to it."
 `SessionFaultFinalAnswerUnresolved'."
   (agent-repl-wire-decode-session-fault-final-answer-unresolved value))
 
+(defun agent-repl-wire-decode-host-fault-vendor-start-retrying (value)
+  "Decode HostFault's `vendor_start_retrying' kind arm from VALUE as a
+`SessionFaultVendorStartRetrying'."
+  (agent-repl-wire-decode-session-fault-vendor-start-retrying value))
+
+(defun agent-repl-wire-decode-host-fault-vendor-start-rejected (value)
+  "Decode HostFault's `vendor_start_rejected' kind arm from VALUE as a
+`SessionFaultVendorStartRejected'."
+  (agent-repl-wire-decode-session-fault-vendor-start-rejected value))
+
+(defun agent-repl-wire-decode-host-fault-vendor-start-failed (value)
+  "Decode HostFault's `vendor_start_failed' kind arm from VALUE as a
+`SessionFaultVendorStartFailed'."
+  (agent-repl-wire-decode-session-fault-vendor-start-failed value))
+
 (defun agent-repl-wire-decode-host-fault-kind (value)
   "Decode HostFault's `kind' oneof from the object VALUE.
 THE ARM IS THE FAULT CLASS: `detail' supplements it and never replaces
@@ -196,16 +214,19 @@ fault the consumer would have to parse."
        (watchOpenRefused :watch-open-refused agent-repl-wire-decode-host-fault-watch-open-refused)
        (daemonStateUnreadable :daemon-state-unreadable agent-repl-wire-decode-host-fault-daemon-state-unreadable)
        (adoptionWindowExpired :adoption-window-expired agent-repl-wire-decode-host-fault-adoption-window-expired)
-       (finalAnswerUnresolved :final-answer-unresolved agent-repl-wire-decode-host-fault-final-answer-unresolved)))))
+       (finalAnswerUnresolved :final-answer-unresolved agent-repl-wire-decode-host-fault-final-answer-unresolved)
+       (vendorStartRetrying :vendor-start-retrying agent-repl-wire-decode-host-fault-vendor-start-retrying)
+       (vendorStartRejected :vendor-start-rejected agent-repl-wire-decode-host-fault-vendor-start-rejected)
+       (vendorStartFailed :vendor-start-failed agent-repl-wire-decode-host-fault-vendor-start-failed)))))
 
 (defun agent-repl-wire-decode-host-fault (value)
   "Decode VALUE as `HostFault', a plist `(:detail :opened-at-ms :kind)'.
-The thirteen kinds are the session controller's own fault vocabulary, shared
+The kinds are the session controller's own fault vocabulary, shared
 verbatim with SessionHealth's `SessionFault' — the stream reporting a
 fault never changes its class."
   (let ((object (agent-repl-wire--object "HostFault" value)))
     (agent-repl-wire--check-keys
-     "HostFault" object '(detail openedAtMs shimStartFailed shimDied linkSevered resumeFailed bounceDied bounceUnknown classifierFailed shimReported conversationAbandoned sessionAbsent watchOpenRefused daemonStateUnreadable adoptionWindowExpired finalAnswerUnresolved))
+     "HostFault" object '(detail openedAtMs shimStartFailed shimDied linkSevered resumeFailed bounceDied bounceUnknown classifierFailed shimReported conversationAbandoned sessionAbsent watchOpenRefused daemonStateUnreadable adoptionWindowExpired finalAnswerUnresolved vendorStartRetrying vendorStartRejected vendorStartFailed))
     (agent-repl-wire--decoded
      "HostFault"
      (list :detail (agent-repl-wire--decode-string "HostFault" 'detail object)
