@@ -125,6 +125,15 @@ type controller struct {
 	// tookOver closes once this daemon stops JOINING and becomes the only
 	// daemon (becomeIncumbent). Made lazily under mu (tookOverSignal).
 	tookOver chan struct{}
+	// settled is the TAKEOVER-SETTLED LATCH: it closes once this daemon has
+	// taken over (becomeIncumbent) AND every adoption and session bring-up
+	// the takeover started has finished. A daemon that never joined has no
+	// takeover, so it is born closed; Join replaces it with an open one.
+	// A handover awaits it before it plans anything (awaitTakeoverSettled):
+	// a takeover's bring-up still claiming a workspace the handover is
+	// transferring left two daemons serving it (2026-10-02,
+	// TestASuccessorThatFinishedJoiningAcceptsADeploy). Guarded by mu.
+	settled chan struct{}
 	// adopting marks the workspaces whose adoption is running right now.
 	adopting map[ids.WorkspaceID]bool
 	// bouncedStamp is the reported shim build each workspace was LAST bounced

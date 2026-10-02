@@ -6,13 +6,14 @@ import (
 	"testing"
 
 	"claude-repld/internal/ids"
+	"claude-repld/internal/sessionlock"
 )
 
 func TestHandOverIsRefusedOnASuccessorThatIsStillJoining(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	h.c.mu.Lock()
-	h.c.joiningMode = true
+	h.c.enterJoiningLocked()
 	h.c.mu.Unlock()
 
 	// Act
@@ -246,5 +247,124 @@ func TestRollingOutNamesWhatTheHandoverInFlightWaitsOn(t *testing.T) {
 	}
 	if !rolling || len(waiting) != 1 || waiting[0] != ws {
 		t.Fatalf("RollingOut = %v, %v; want the busy workspace waited on", waiting, rolling)
+	}
+}
+
+// TestAHandoverWaitsForTheTakeoversOwnBringUp pins the takeover-settled
+// latch: a successor's takeover starts the session of a workspace it serves
+// with no shim, and a handover asked while that bring-up is in flight waits
+// for it, planning nothing, and proceeds once it settles. Planned beside it,
+// the handover moved a workspace the bring-up then claimed, and two daemons
+// served it (2026-10-02, TestASuccessorThatFinishedJoiningAcceptsADeploy).
+func TestAHandoverWaitsForTheTakeoversOwnBringUp(t *testing.T) {
+	// Arrange: the takeover's bring-up of a session-less workspace is held.
+	h := newHarness(t)
+	ws := orphan(t, h)
+	record, err := h.db.Workspace(context.Background(), ws)
+	if err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+	entered, release := make(chan struct{}), make(chan struct{})
+	released := false
+	// THE HELD START IS RELEASED EVEN WHEN THE TEST FAILS, before the
+	// harness's own cleanup joins the bring-ups (registered after it, so it
+	// runs first).
+	t.Cleanup(func() {
+		if !released {
+			close(release)
+		}
+	})
+	h.mu.Lock()
+	h.lockStates[record.Dir] = sessionlock.StateFree
+	h.startHold = func(ids.WorkspaceID) {
+		close(entered)
+		<-release
+	}
+	h.mu.Unlock()
+	h.c.mu.Lock()
+	h.c.enterJoiningLocked()
+	h.c.mu.Unlock()
+	h.c.becomeIncumbent(nil)
+	<-entered
+
+	// Act
+	result := make(chan error, 1)
+	go func() {
+		_, err := h.c.HandOver(context.Background(), false)
+		result <- err
+	}()
+	awaitRecord(t, h, opRollOut, "a handover waits for this daemon's own takeover to settle before it plans anything")
+	spawnedWhileHeld := len(h.spawner.Told())
+	select {
+	case err := <-result:
+		t.Fatalf("HandOver answered %v while the takeover's bring-up was in flight, want it waiting", err)
+	default:
+	}
+	released = true
+	close(release)
+
+	// Assert
+	if err := <-result; err != nil {
+		t.Fatalf("HandOver once the takeover settled = %v, want accepted", err)
+	}
+	if spawnedWhileHeld != 0 {
+		t.Fatalf("successors spawned while the bring-up was held = %d, want none", spawnedWhileHeld)
+	}
+	if got := len(h.spawner.Told()); got != 1 {
+		t.Fatalf("successors spawned once the takeover settled = %d, want 1", got)
+	}
+}
+
+func TestAHandoverWhoseCallerLeavesBeforeTheTakeoverSettlesStartsNothing(t *testing.T) {
+	// Arrange: a takeover whose bring-up never finishes during the test.
+	h := newHarness(t)
+	ws := orphan(t, h)
+	record, err := h.db.Workspace(context.Background(), ws)
+	if err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+	entered, release := make(chan struct{}), make(chan struct{})
+	defer close(release)
+	h.mu.Lock()
+	h.lockStates[record.Dir] = sessionlock.StateFree
+	h.startHold = func(ids.WorkspaceID) {
+		close(entered)
+		<-release
+	}
+	h.mu.Unlock()
+	h.c.mu.Lock()
+	h.c.enterJoiningLocked()
+	h.c.mu.Unlock()
+	h.c.becomeIncumbent(nil)
+	<-entered
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act
+	_, err = h.c.HandOver(ctx, false)
+
+	// Assert
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("HandOver = %v, want the caller's cancellation", err)
+	}
+	if got := len(h.spawner.Told()); got != 0 {
+		t.Fatalf("successors spawned = %d, want none", got)
+	}
+}
+
+func TestADaemonThatNeverJoinedPlansAHandoverAtOnce(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.workspace(t)
+
+	// Act
+	_, err := h.c.HandOver(context.Background(), false)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("HandOver = %v, want accepted at once", err)
+	}
+	if recordWithMessage(h, opRollOut, "info", "a handover waits for this daemon's own takeover to settle before it plans anything") {
+		t.Fatal("a daemon with no takeover waited for one")
 	}
 }

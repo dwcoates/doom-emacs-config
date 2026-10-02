@@ -1023,14 +1023,14 @@ type harness struct {
 	leaseChanged []ids.WorkspaceID
 	published    []ids.WorkspaceID
 	// unreported records every StateUnreported statement, in order.
-	unreported   []stateUnreportedCall
-	addrWrites   int
+	unreported []stateUnreportedCall
+	addrWrites int
 	// claimFree is closed by incumbentExits: until then the boot claim is the
 	// incumbent's, and AwaitBootClaim waits, as the kernel's lock does.
 	// claimErr is what the wait answers once it lands.
-	claimFree chan struct{}
-	claimErr  error
-	exits     chan struct{}
+	claimFree    chan struct{}
+	claimErr     error
+	exits        chan struct{}
 	lockStates   map[string]sessionlock.State
 	lockErr      map[string]error
 	shimBuild    string
@@ -1040,6 +1040,9 @@ type harness struct {
 	// start of the workspaces it names.
 	started  []ids.WorkspaceID
 	startErr map[ids.WorkspaceID]error
+	// startHold, when set, runs inside every session start before it is
+	// recorded, so a test holds a bring-up in flight.
+	startHold func(ws ids.WorkspaceID)
 	// marker records every bring-up marker edge, in order.
 	marker []markerEdge
 }
@@ -1172,6 +1175,12 @@ func newHarness(t *testing.T, adjust ...func(*Deps)) *harness {
 			return h.lockStates[dir], h.lockErr[dir]
 		},
 		StartSession: func(_ context.Context, ws ids.WorkspaceID) error {
+			h.mu.Lock()
+			hold := h.startHold
+			h.mu.Unlock()
+			if hold != nil {
+				hold(ws)
+			}
 			order.record("start_session")
 			h.mu.Lock()
 			defer h.mu.Unlock()
