@@ -653,9 +653,10 @@ unscreened WS while every record uses `agent-repl--ws-log-name'."
   "Handle workspace switch: update all workspace states and reconcile panels.
 WS is the workspace name to operate on; when nil, falls back to
 `(agent-repl--ws-current-name)' at call time.  Callers from
-`--after-persp-activated' pass the ws captured at hook-fire time so
-the deferred call operates on the workspace that was just switched
-to, even if another switch raced ahead before the timer fired.
+`--after-persp-activated' pass the ws captured at hook-fire time, and
+only the pass of the NEWEST activation reaches here
+\(`agent-repl--run-switch-activation'), so WS is always the workspace the
+user is standing in.
 
 Also opens panels for workspaces that were created with a preemptive
 prompt, and auto-selects the input window if visible.
