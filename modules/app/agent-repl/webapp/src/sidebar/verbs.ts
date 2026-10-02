@@ -60,7 +60,6 @@ import {
 import {
   RestartWorkspaceRequestSchema,
   RestartWorkspaceResponseSchema,
-  type RestartWorkspaceError,
   type RestartWorkspaceRequest,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_restart_workspace_pb";
 import {
@@ -91,7 +90,6 @@ export type Verb =
   | "nuke"
   | "merge"
   | "restart"
-  | "restartForce"
   | "priority"
   | "assign";
 
@@ -115,7 +113,6 @@ const VERB_LABELS: Readonly<Record<Verb, string>> = {
   nuke: "Nuke",
   merge: "Merge",
   restart: "Restart",
-  restartForce: "Restart (forced)",
   priority: "Priority",
   assign: "Task",
 };
@@ -148,7 +145,6 @@ export function drawRowMenu(target: VerbTarget): HTMLElement {
   menu.appendChild(simpleVerbItem("close", target));
   menu.appendChild(simpleVerbItem("merge", target));
   menu.appendChild(simpleVerbItem("restart", target));
-  menu.appendChild(simpleVerbItem("restartForce", target));
   menu.appendChild(drawPriorityItem(target));
   menu.appendChild(drawAssignItem(target));
   menu.appendChild(drawKillItem(target));
@@ -158,7 +154,7 @@ export function drawRowMenu(target: VerbTarget): HTMLElement {
 
 /** The verbs whose whole interaction is one click. */
 function simpleVerbItem(
-  verb: "open" | "close" | "merge" | "restart" | "restartForce",
+  verb: "open" | "close" | "merge" | "restart",
   target: VerbTarget,
 ): HTMLElement {
   const row = menuRow();
@@ -178,7 +174,7 @@ function simpleVerbItem(
 
 /** Issue one of the plain verbs and say at the button what came back. */
 async function runSimpleVerb(
-  verb: "open" | "close" | "merge" | "restart" | "restartForce",
+  verb: "open" | "close" | "merge" | "restart",
   target: VerbTarget,
   button: Control,
 ): Promise<void> {
@@ -211,16 +207,12 @@ async function runSimpleVerb(
       });
       return;
     case "restart":
-    case "restartForce":
       await runVerb(button, {
         sc: target.sc,
         rpc: "RestartWorkspace",
         call: (client) =>
-          client.restartWorkspace(
-            buildRestartWorkspaceRequest(target.workspace, verb === "restartForce"),
-          ),
+          client.restartWorkspace(buildRestartWorkspaceRequest(target.workspace)),
         schema: RestartWorkspaceResponseSchema,
-        refusalText: (cause) => restartWorkspaceRefusal(cause as CauseOf<RestartWorkspaceError>),
       });
       return;
   }
@@ -703,16 +695,6 @@ export function mergeWorkspaceRefusal(cause: CauseOf<MergeWorkspaceError>): stri
   }
 }
 
-/** RestartWorkspace's own arm. */
-export function restartWorkspaceRefusal(cause: CauseOf<RestartWorkspaceError>): string {
-  switch (cause.case) {
-    case "noSession":
-      return "this workspace has no session to restart";
-    default:
-      return unreachableArm("RestartWorkspaceError.cause", cause.case);
-  }
-}
-
 /** AssignWorkspaceTask's own arm. */
 export function assignWorkspaceTaskRefusal(cause: CauseOf<AssignWorkspaceTaskError>): string {
   switch (cause.case) {
@@ -809,12 +791,11 @@ export function buildMergeWorkspaceRequest(workspace: WorkspaceRef): MergeWorksp
   });
 }
 
-/** RestartWorkspace: graceful (force false) or forced (force true). */
+/** RestartWorkspace: one mode, always immediate. */
 export function buildRestartWorkspaceRequest(
   workspace: WorkspaceRef,
-  force: boolean,
 ): RestartWorkspaceRequest {
-  return create(RestartWorkspaceRequestSchema, { workspace, force });
+  return create(RestartWorkspaceRequestSchema, { workspace });
 }
 
 /**

@@ -670,47 +670,26 @@ describe("row omission", () => {
 });
 
 // ---------------------------------------------------------------------------
-// THE FORCED RESTART IS THE SAME VERB WITH A FLAG (audit 1, item 9)
+// THE RESTART IS ONE IMMEDIATE MODE
 //
-// `RestartWorkspace{force}` — one rpc, two menu items. The flag is what the
-// two differ by, so it is what the assertions read.
+// `RestartWorkspace` — one rpc, one mode, one menu item.
 // ---------------------------------------------------------------------------
 
-describe("the forced restart", () => {
+describe("the restart", () => {
   it("calls RestartWorkspace", async () => {
-    // Arrange
-    await withRoster({ rows: [rosterRow({ id: "ws-target" })] });
-    // Act
-    await harness.click('[data-roster-row="ws-target"] [data-verb="restartForce"]');
-    // Assert
-    expect(harness.fake.calls("restartWorkspace")).toHaveLength(1);
-  });
-
-  it("sets the force flag", async () => {
-    // Arrange
-    await withRoster({ rows: [rosterRow({ id: "ws-target" })] });
-    // Act
-    await harness.click('[data-roster-row="ws-target"] [data-verb="restartForce"]');
-    // Assert
-    const [request] = harness.fake.calls<{ force: boolean }>("restartWorkspace");
-    expect(request.force).toBe(true);
-  });
-
-  it("leaves the force flag off the plain restart", async () => {
     // Arrange
     await withRoster({ rows: [rosterRow({ id: "ws-target" })] });
     // Act
     await harness.click('[data-roster-row="ws-target"] [data-verb="restart"]');
     // Assert
-    const [request] = harness.fake.calls<{ force: boolean }>("restartWorkspace");
-    expect(request.force).toBe(false);
+    expect(harness.fake.calls("restartWorkspace")).toHaveLength(1);
   });
 
   it("echoes the row's own WorkspaceRef", async () => {
     // Arrange
     await withRoster({ rows: [rosterRow({ id: "ws-target" })] });
     // Act
-    await harness.click('[data-roster-row="ws-target"] [data-verb="restartForce"]');
+    await harness.click('[data-roster-row="ws-target"] [data-verb="restart"]');
     // Assert
     const [request] = harness.fake.calls<{ workspace?: { id: string } }>("restartWorkspace");
     expect(request.workspace?.id).toBe("ws-target");

@@ -474,7 +474,7 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
      "tells the user a kill or nuke they ordered failed after its tab had already closed")
     ("verbs.el" agent-repl-verb-merge "merge enqueued"
      "confirms the user's merge command")
-    ("verbs.el" agent-repl-verb-restart "agent-repl: restart %s"
+    ("verbs.el" agent-repl-verb-restart "agent-repl: restart under way"
      "confirms the user's restart command")
     ("verbs.el" agent-repl-verb-interrupt "agent-repl: turn stopped"
      "confirms the user's interrupt stopped the running turn")

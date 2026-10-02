@@ -610,6 +610,41 @@ failing a send."
                   "{\"exitCode\":3,\"stderrTail\":\"panic\"}")
                  '(:exit-code 3 :stderr-tail "panic"))))
 
+(ert-deftest agent-repl-test-wire-common-session-fault-vendor-start-retrying-decodes ()
+  "The retrying class carries the attempt count, the cause and the window anchor."
+  (should (equal (agent-repl-test-wire-common--decode
+                  #'agent-repl-wire-decode-session-fault-vendor-start-retrying
+                  "{\"failedAttempts\":2,\"cause\":\"timed out\",\"failingSinceMs\":\"1000\"}")
+                 '(:failed-attempts 2 :cause "timed out" :failing-since-ms 1000))))
+
+(ert-deftest agent-repl-test-wire-common-session-fault-vendor-start-retrying-absent-fields-are-defaults ()
+  "An all-default retrying class decodes to zeros and the empty cause."
+  (should (equal (agent-repl-test-wire-common--decode
+                  #'agent-repl-wire-decode-session-fault-vendor-start-retrying "{}")
+                 '(:failed-attempts 0 :cause "" :failing-since-ms 0))))
+
+(ert-deftest agent-repl-test-wire-common-session-fault-vendor-start-retrying-refuses-unknown-field ()
+  "An unknown key inside the retrying class is refused, never dropped."
+  (should (equal (agent-repl-test-wire-common--breach
+                  (lambda ()
+                    (agent-repl-wire-decode-session-fault-vendor-start-retrying
+                     (agent-repl-test-wire-common--parse "{\"why\":\"x\"}"))))
+                 '("SessionFaultVendorStartRetrying" why "unknown field"))))
+
+(ert-deftest agent-repl-test-wire-common-session-fault-vendor-start-rejected-decodes ()
+  "The rejected class carries the vendor's cause."
+  (should (equal (agent-repl-test-wire-common--decode
+                  #'agent-repl-wire-decode-session-fault-vendor-start-rejected
+                  "{\"cause\":\"model missing\"}")
+                 '(:cause "model missing"))))
+
+(ert-deftest agent-repl-test-wire-common-session-fault-vendor-start-failed-decodes ()
+  "The failed class carries the attempts, the last cause and the window anchor."
+  (should (equal (agent-repl-test-wire-common--decode
+                  #'agent-repl-wire-decode-session-fault-vendor-start-failed
+                  "{\"failedAttempts\":90,\"lastCause\":\"overloaded\",\"failingSinceMs\":\"2000\"}")
+                 '(:failed-attempts 90 :last-cause "overloaded" :failing-since-ms 2000))))
+
 (ert-deftest agent-repl-test-wire-common-session-fault-shim-reported-decodes ()
   "A relayed shim-side fault names the component and the shim's own kind."
   (should (equal (agent-repl-test-wire-common--decode
