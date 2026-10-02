@@ -83,7 +83,7 @@ Read `ARCHITECTURE.md` first: the package map, the seams, the conventions.
   | bound | value | where | reason |
   | --- | --- | --- | --- |
   | `harness.DefaultTimeout` | 5s | ONE wait's failure bound: every `Daemon.waitCtx` child, `harness.AwaitView`, and the per-call contexts the e2e suite derives for a single rpc | ~3x run 8's observed 1.7s max. RE-MEASURED at `-parallel 8`: the suite's slowest test is 2.84s and its p99 leaf is under 1s, so 5s is still ~1.8x the observed max under the concurrency the suite now runs at |
-  | the `harness.Daemon` context (`DefaultTimeout * runBudgetWaits`) | 35s | the WHOLE-RUN budget one daemon process's test shares, and the lifetime of every watch stream held across it | **it used to be `DefaultTimeout` itself**, so a test's whole run was as short as its single longest permitted wait, and the LAST call in a test answered `deadline_exceeded` for budget the earlier ones had spent. That is what made `TestHostRequestedStopLeavesNoProcessBehind` fail ~1 in 20 at ~5.09s on the stop -- a step measured at 9ms p50 and 15ms max across 104 runs. Sized as five `DefaultTimeout` waits (25s) plus one `drain.DefaultStandBound` stand-down (6s) = 31s, rounded up to the next whole multiple (7 x 5s = 35s); it is a MULTIPLE so an `Opts.Timeout` override widens the run in the same proportion it widens the wait |
+  | the `harness.Daemon` context (`DefaultTimeout * runBudgetWaits`) | 35s | the WHOLE-RUN budget one daemon process's test shares, and the lifetime of every watch stream held across it | **it used to be `DefaultTimeout` itself**, so a test's whole run was as short as its single longest permitted wait, and the LAST call in a test answered `deadline_exceeded` for budget the earlier ones had spent. That is what made `TestHostRequestedStopLeavesNoProcessBehind` fail ~1 in 20 at ~5.09s on the stop -- a step measured at 9ms p50 and 15ms max across 104 runs. Sized as five `DefaultTimeout` waits (25s) plus one `drain.DefaultStandBound` stand-down (6s, now 7s) = 31s (32s), rounded up to the next whole multiple (7 x 5s = 35s); it is a MULTIPLE so an `Opts.Timeout` override widens the run in the same proportion it widens the wait |
   | `harness.HandoverChainTimeout` (`Opts.Timeout`) | 15s wait bound (3x default), 90s run budget | the handful of tests whose ONE daemon context must span an entire self-reload handover — a merge landing, the rollout trigger, a SECOND real `claude-repld`'s full boot and adoption, and the incumbent's orderly exit, all on the incumbent's own budget rather than a fresh one | structurally two real process lifecycles sharing one budget, not one; run 8 already saw this chain finish inside 1.7s, so 15s is headroom, not a measured need |
   | `harness.ProbeWindow` | 500ms | `harness.ExpectNoPush`, `harness.Daemon.ExpectFileUnchanged` | negative assertions that must wait out a bound rather than an event, so unlike every other row here it is paid IN FULL on a green run, at 27 sites. MEASURED BASIS (`AwaitView` arrival times over the whole suite at `-parallel 8`, 472 samples): p50 0.4ms, p90 5.8ms, p95 47ms, p97 99ms, max 294ms. The 294ms is `commandfile_test.go`'s ingress, which the daemon polls every 250ms and which is itself one of the negative-probe sites; the only slower arrivals in the run were the two gated by the footer's own 1.5s dwell. 500ms is ~1.7x that measured maximum, so it is NOT shrinkable on this evidence — shortening it would make the command-file and handover probes report "nothing came" about a push that was still on its way |
   | `shortTimeout` (integration/support_session_test.go) | 200ms | `TestSessionSurvivesADaemonRestart`-style old-PID-gone probes | a structural "is it already true" check that should fail fast rather than ride the whole test's deadline |
@@ -636,7 +636,19 @@ through `concludeLocked`, at a conclusion the shim states:
 - shell: its run's `AgentBash` terminal on WatchBash;
 - monitor: its activity's terminal arm;
 - every kind: `query_died`, and a WatchSession re-announcement whose
-  `live_work` no longer names it.
+  `live_work` no longer names it;
+- every kind: the shim's DEPARTURE (`settleDepartedWorkLocked`, conclusion
+  `departed`), at the one door every departure passes through
+  (`departLocked`): a link gone dead, or a close on a session this daemon is
+  ending or whose process is reaped. The process group is the work's lifetime,
+  so a killed or dead shim's items are ended for every view at once. Before
+  this, a restart's forced kill left the last set standing in the webapp's
+  expanded footer and the roster's `idle_async` (owner report, 2026-10-02).
+  Only the watcher that SPEAKS for the workspace (`speakers`, the newest one
+  started and not closed) republishes: a displaced watcher's departure settles
+  its own ledger and tells no view, so it cannot hide a newer shim's work. A
+  close that only stops WATCHING a running shim (the daemon's exit, a
+  handover) is no departure and ends nothing.
 
 A watch open that FAILS, is REFUSED or HANGS, and a stream that ENDS, never
 retire an item: a shell stays live with a stream-less entry its next
@@ -1880,7 +1892,7 @@ The graceful stand-down's nesting, outermost first:
 
 | bound | value | contains | derivation |
 | --- | --- | --- | --- |
-| `drain.DefaultStandBound` | 6s | the whole `KillSession(..., false)`: the shim's own teardown inside the rpc, then the process stop | `shimTeardownWorstCase` (4s) + `shimclient.GracefulKillBound` (1.5s) + `standBoundMargin` (0.5s). A SUM of what it contains, never a round number chosen next to them |
+| `drain.DefaultStandBound` | 7s | the whole `KillSession(..., false)`: the shim's own teardown inside the rpc, then the process stop | `shimTeardownWorstCase` (5s: five 1s shim stages, the vendor's interrupt and stops among them) + `shimclient.GracefulKillBound` (1.5s) + `standBoundMargin` (0.5s). A SUM of what it contains, never a round number chosen next to them |
 | `shimclient.GracefulKillBound` | 1.5s | one graceful `Client.Kill`, end to end | `DefaultKillGrace` + `EscalationBound` |
 | `shimclient.DefaultKillGrace` | 1250ms | the shim's SIGTERM stand-down before the SIGKILL | the shim's own single-stage last resort (`WATCHER_CONCLUSION_BUDGET_MS`, 1s) + 250ms. MEASURED: a healthy shim leaves on SIGTERM in 4.24ms p50 / 6.69ms max (real Node shim, 20 spawns) and 0.61ms p50 / 0.71ms max (the integration fake, 30 spawns), so this is ~187x the observed worst case |
 | `shimclient.EscalationBound` | 250ms | the SIGKILL and the exit decode after it | measured sub-millisecond on every kill in the package suite; two orders of magnitude of headroom |
