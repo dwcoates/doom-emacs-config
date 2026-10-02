@@ -126,3 +126,13 @@ func executableScriptPath(l Layout, s roster.Suite) (string, error) {
 	}
 	return path, nil
 }
+
+// under answers path relative to dir, refusing a path that is not inside it:
+// every file a lister reports must belong to the package it listed.
+func under(dir, path string) (string, error) {
+	rel, err := filepath.Rel(dir, path)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, "../") {
+		return "", fmt.Errorf("suites: %s is not under %s", path, dir)
+	}
+	return rel, nil
+}

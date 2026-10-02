@@ -905,3 +905,92 @@ func TestGoVetRunsTheAnalyzersGoTestRuns(t *testing.T) {
 		t.Fatalf("goVet = %+v", v)
 	}
 }
+
+func TestUnder(t *testing.T) {
+	tests := []struct {
+		name, path, want, wantErr string
+	}{
+		{name: "a file inside", path: "/p/test/a.ts", want: "test/a.ts"},
+		{name: "the directory itself", path: "/p", want: "."},
+		{name: "a sibling", path: "/q/a.ts", wantErr: "/q/a.ts is not under /p"},
+		{name: "the parent", path: "/", wantErr: "/ is not under /p"},
+		{name: "a name that only starts with dots", path: "/p/..a", want: "..a"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got, err := under("/p", tt.path)
+
+			// Assert
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("err = %v, want it to mention %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil || got != tt.want {
+				t.Fatalf("under = %q, %v; want %q", got, err, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseGoList(t *testing.T) {
+	tests := []struct {
+		name    string
+		out     string
+		want    []string
+		wantErr string
+	}{
+		{name: "packages relative and sorted", out: "/m/z\n/m\n\n/m/a/b\n", want: []string{".", "a/b", "z"}},
+		{name: "nothing tested", out: "\n", want: nil},
+		{name: "a package outside the module fails", out: "/m/a\n/elsewhere\n", wantErr: "/elsewhere is not under /m"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got, err := parseGoList("/m", []byte(tt.out))
+
+			// Assert
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("err = %v, want it to mention %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil || !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("parseGoList = %v, %v; want %v", got, err, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseVitestList(t *testing.T) {
+	tests := []struct {
+		name    string
+		out     string
+		want    []string
+		wantErr string
+	}{
+		{name: "files relative and sorted", out: `[{"file":"/p/test/b.test.ts"},{"file":"/p/src/a.test.ts"}]`, want: []string{"src/a.test.ts", "test/b.test.ts"}},
+		{name: "not json fails", out: `vitest crashed`, wantErr: "printed no file list"},
+		{name: "a file outside the package fails", out: `[{"file":"/other/a.test.ts"}]`, wantErr: "/other/a.test.ts is not under /p"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got, err := parseVitestList("/p", []byte(tt.out))
+
+			// Assert
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("err = %v, want it to mention %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil || !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("parseVitestList = %v, %v; want %v", got, err, tt.want)
+			}
+		})
+	}
+}
