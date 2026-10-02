@@ -1034,6 +1034,8 @@ func (q *queue) isDraining(ws ids.WorkspaceID) bool {
 // bounce decision defers to a shim call standing (deferToCall) before it
 // reads this, so it can never be judged free past one.
 //
+// A SHIM KNOWN TO HOLD NO SESSION HAS NOTHING IN FLIGHT EITHER (Deps.SessionAbsent).
+//
 // A DEPARTED WATCHER HAS NOTHING IN FLIGHT. The fleet keeps a dead shim's
 // session until the next bring-up retires it, and the turn and live work its
 // watcher last recorded ended with the shim: read as in flight, they would
@@ -1041,6 +1043,16 @@ func (q *queue) isDraining(ws ids.WorkspaceID) bool {
 func (q *queue) inFlight(ws ids.WorkspaceID) (turn bool, detached int, free bool) {
 	if watcher, ok := q.deps.Watcher(ws); ok {
 		if _, departed := watcher.Departed(); departed {
+			return false, 0, true
+		}
+		// A SHIM KNOWN TO HOLD NO SESSION HAS NOTHING IN FLIGHT, and its
+		// watcher can never say so: a pure attach to a shim whose session
+		// never started gets no facts, so its own judgement stays "unknown"
+		// forever and an unforced bounce registered behind it never ran
+		// (2026-10-02: a relaunched shim whose vendor start failed, and every
+		// later stale-build bounce of it). Only a KNOWN absence is free; an
+		// adopted shim awaiting its facts stays unknown and waits below.
+		if q.deps.SessionAbsent(ws) {
 			return false, 0, true
 		}
 		if watcher.TurnInFlight() != nil {
