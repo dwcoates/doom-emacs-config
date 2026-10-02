@@ -430,13 +430,8 @@ func TestModelChanged(t *testing.T) {
 // Scenario: `!fast-on` (session.ts's `fastModeScenario` family) — the
 // fake-registry name behind the `fast-mode` capture golden.
 //
-// LANDING 13 CLOSED THE GAP THIS TEST USED TO RECORD. `fast_mode` used to
-// live only in conversation.v1's `session.proto`, with no frontend.v1 shape
-// and an empty branch in every resolver, so the test could assert nothing but
-// the turn's own completion. `TopbarView.fast_mode`
-// (frontend/v1/topbar.proto) now carries the state BY NAME and the topbar
-// resolver fills it, so SPEC.md test-list entry #8's second half — the
-// fast-mode state, drawn — is asserted below.
+// The strip no longer draws fast mode (owner ruling, 2026-10-02), so the
+// test pins only that the turn concludes on the vendor's own `on` answer.
 func TestFastMode(t *testing.T) {
 	t.Parallel()
 	// Arrange
@@ -465,13 +460,6 @@ func TestFastMode(t *testing.T) {
 		t.Errorf("settled response markdown = %q, want %q (the fast-mode ON state)", got, wantFastAnswer)
 	}
 
-	// Assert: the state reaches the DRAWN strip under its own name, which is
-	// the half of SPEC.md #8 that had no contract to land on before Landing
-	// 13.
-	view := sfAwaitFastMode(t, w, ws, "on")
-	if got := sfFastModeArm(view); got != "on" {
-		t.Fatalf("TopbarView.fast_mode arm = %q, want on", got)
-	}
 }
 
 // ---------------------------------------------------------------------------

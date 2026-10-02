@@ -123,9 +123,9 @@ Two further limits, stated rather than hidden:
 | `!fail-tool-deferred` | ungrounded | failurearms_e2e_test.go | — | — | Go: TestTerminalReasonTurnFailedArms/ToolDeferred asserts TurnFailed.StopReason==tool_deferred, the exact headline "the run ended waiting on a deferred tool call", the exact vendor message, and the fate of the deferred work — the partial answer survives, settled. | covered |
 | `!fail-tool-deferred-unavailable` | ungrounded | failurearms_e2e_test.go | — | — | Go: TestTerminalReasonTurnFailedArms/ToolDeferredUnavailable asserts TurnFailed.StopReason==tool_deferred_unavailable, the exact headline distinguishing it from the plain deferral, the exact vendor message, and the surviving partial answer. | covered |
 | `!fail-turn-setup` | ungrounded | failurearms_e2e_test.go | — | — | Go: TestApiRequestFailedArms/TurnSetupFailed asserts the named arm `FeedTurnEndedErrored.turn_failed`, the exact stop reason `turn_setup_failed`, the exact per-arm headline “the run could not be set up and never reached the model”, the exact vendor message, and that partial work in flight survives the failure. | covered |
-| `!fast-cooldown` | ungrounded | sessionfacts_e2e_test.go | — | — | Go: TestFastModeOffAndCooldownStatesReachTheStrip/cooldown asserts the drawn `TopbarFastMode.cooldown` arm and the exact conclusion prose. TestFastModeCooldownIsNotDrawnAsOff adds the specific negative the contract exists for — the strip does NOT draw cooldown as `off`, which would offer a switch that cannot take effect. | covered |
-| `!fast-off` | ungrounded | sessionfacts_e2e_test.go | — | — | Go: TestFastModeOffAndCooldownStatesReachTheStrip/off asserts the drawn `TopbarFastMode.off` arm and the exact conclusion prose. TestFastModeOffCarriesTheVendorsReason additionally pins `TopbarFastModeOff.reason == "preference"` — the vendor's own word kept verbatim, not a class. | covered |
-| `!fast-on` | grounded | turnlifecycle_e2e_test.go | — | — | Go: TestFastMode asserts the DRAWN arm — `TopbarView.fast_mode` resolves to `TopbarFastMode.on` (topbar.proto:56, tag 10) — beside the exact conclusion prose “Fast mode is on.” that pins which state the vendor reported. Arm equality is also a specific negative: neither `off` nor `cooldown` can satisfy it. | covered |
+| `!fast-cooldown` | ungrounded | — | — | — | No counted e2e layer drives this scenario: the topbar's fast-mode cell was retired (owner ruling, 2026-10-02), so no frontend surface draws the state. | uncovered |
+| `!fast-off` | ungrounded | — | — | — | No counted e2e layer drives this scenario: the topbar's fast-mode cell was retired (owner ruling, 2026-10-02), so no frontend surface draws the state. | uncovered |
+| `!fast-on` | grounded | turnlifecycle_e2e_test.go | — | — | Go: TestFastMode asserts the turn concludes on the exact prose “Fast mode is on.”, which pins which state the vendor reported; the topbar no longer draws fast mode (owner ruling, 2026-10-02). | covered |
 | `!fault-converter` | ungrounded | producerfaults_e2e_test.go | — | — | Go: TestConverterDefectOpensADegradedWindow asserts three things — the turn still CONCLUDES, the malformed hook_started drew NO hook card (it reached no arm), and the diagnostics opened a TopbarDegradedWindowWarningDetail with a stated component, a stated reason and a positive began_at_ms. | covered |
 | `!fault-recover` | ungrounded | producerfaults_e2e_test.go | — | — | Go: TestConverterRecoveryClosesTheDegradedWindow asserts THAT window closed — matched by component plus began_at_ms, not merely "some closed window exists" — with ended_at_ms >= began_at_ms and a dropped_count >= 1 for the one message the converter refused. | covered |
 | `!findings` | grounded | remainder_e2e_test.go | feed-families.layer.test.ts | — | Go: TestReportFindings asserts 3 rows with exact Verdict/Outcome per row. Web: feed-families.layer asserts [data-finding] count>0. | covered |
@@ -231,13 +231,13 @@ a disagreement, so these are not hand tallies (they were, and they were
 wrong: the by-layer lines once read 33 and 5 where the table's columns held
 32 and 3).
 
-- Covered (at least one STRONG, specific-shape assertion in a counted layer): **153**
+- Covered (at least one STRONG, specific-shape assertion in a counted layer): **151**
 - Weak (a counted layer drives the scenario but only asserts turn-completion or a non-specific field, never a named arm/shape): **1**
-- Uncovered (no counted layer drives the scenario at all): **3**
+- Uncovered (no counted layer drives the scenario at all): **5**
 - Total canonical scenarios: 157
 
 By layer, scenarios with at least one hit:
-- Go e2e (non-emacs): 153 scenarios referenced across 27 files
+- Go e2e (non-emacs): 151 scenarios referenced across 27 files
 - Webapp layer: 36 scenarios referenced across 8 files
 - Emacs e2e: 3 scenarios referenced across 3 files
 
@@ -254,6 +254,8 @@ each row's `Strongest assertion` cell, which is where a reader can act on it.
 
 <!-- BEGIN DERIVED: uncovered -->
 
+- `!fast-cooldown`
+- `!fast-off`
 - `!subagent-network-failed`
 - `!subagent-resumed`
 - `<!--agent-repl:network-resume-->` (marker)

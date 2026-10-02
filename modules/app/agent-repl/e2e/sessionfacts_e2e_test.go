@@ -1,6 +1,6 @@
 // sessionfacts_e2e_test.go — the SESSION-SCOPED facts that ride
-// conversation.v1 SessionUpdate and have no turn or unit of their own: fast
-// mode, the MCP catalog narrowing, the vendor's rate-limit windows, and the
+// conversation.v1 SessionUpdate and have no turn or unit of their own: the
+// MCP catalog narrowing, the vendor's rate-limit windows, and the
 // account-usage outcome arms.
 //
 // CONTRACT GROUNDING (read in this worktree):
@@ -25,26 +25,20 @@
 //     src/fake/catalogs.ts — the scenarios driven here and their exact
 //     figures.
 //
-// THREE DISPUTES ARE RECORDED HERE RATHER THAN PAPERED OVER. Each is stated
+// FAST MODE HAS NO FRONTEND SURFACE: the topbar's fast-mode cell was dropped
+// (owner ruling, 2026-10-02), so nothing here asserts on it.
+//
+// TWO DISPUTES ARE RECORDED HERE RATHER THAN PAPERED OVER. Each is stated
 // in full at the test it constrains; in summary:
 //
-//  1. FAST MODE NOW HAS A FRONTEND SURFACE (Landing 13). It used to have
-//     none — `frontend/v1` carried no fast-mode field anywhere and every
-//     resolver's SessionUpdate_FastMode branch was empty — which is what
-//     made these tests weak BY CONTRACT rather than by neglect.
-//     `TopbarView.fast_mode` (frontend/v1/topbar.proto, TopbarFastMode)
-//     carries the state BY NAME and the topbar resolver fills it, so the
-//     assertions below are on the DRAWN ARM and no longer on a daemon log
-//     record.
-//
-//  2. A VENDOR RATE-LIMIT EVENT FEEDS THE ENDURING USAGE LINE (owner
+//  1. A VENDOR RATE-LIMIT EVENT FEEDS THE ENDURING USAGE LINE (owner
 //     ruling, 2026-10-01, superseding the 2026-09-30 ruling that made it
 //     salient): the event's figure and verdict land on the allowance it
 //     names, and no salient line stands. `!rate-limit-five-hour`,
 //     `!rate-limit-seven-day` and `!rate-limit` each send an
 //     `allowed_warning`, so each draws that verdict on its allowance.
 //
-//  3. AN UNREAD SAMPLE DRAWS NO CAVEAT (owner ruling, fc4917be4,
+//  2. AN UNREAD SAMPLE DRAWS NO CAVEAT (owner ruling, fc4917be4,
 //     2026-09-15). An unread sample leaves the read figures standing, and
 //     its outcome — its reason, and a sampling
 //     failure's cause — is recorded on the daemon's `daemon.footer.usage_
@@ -141,127 +135,6 @@ func sfAwaitSessionArmRecords(t *testing.T, w *World, workspaceDir, operation, a
 				want, arm, operation, sfSessionArmRecords(t, w, workspaceDir, operation, arm))
 			return
 		}
-	}
-}
-
-// ===========================================================================
-// Fast mode — `!fast-off` and `!fast-cooldown` (session.ts fastModeScenario).
-//
-// SessionFastMode's arms are on / off (carrying the vendor's reason) /
-// cooldown, and session.proto states why cooldown is its own arm rather than
-// off: "NOT the same as off: nothing needs doing and offering the user a way
-// to turn it on would offer something that cannot take effect."
-//
-// LANDING 13 STRENGTHENED THIS TEST (see the file header's dispute 1). The
-// assertion is now the DRAWN ARM on TopbarView.fast_mode, not a daemon log
-// record: each state reaches the strip under its own name, and `cooldown`
-// specifically is asserted NOT to arrive as `off` — the whole reason the
-// contract keeps it a separate arm. The scenario's exact conclusion prose is
-// still pinned, because it is what says which state the vendor reported.
-//
-// The topbar is the one resolver the arm reaches: sessionwatcher/route.go
-// routes fast_mode to the topbar alone, so the footer never takes it.
-// ===========================================================================
-
-// sfFastModeArm names the topbar's drawn fast-mode state, or "" when the view
-// carries none. The NAME is what the test asserts on, so an arm the contract
-// grows later fails loudly here instead of being read as one of these.
-func sfFastModeArm(v *frontendv1.TopbarView) string {
-	switch v.GetFastMode().GetState().(type) {
-	case *frontendv1.TopbarFastMode_On:
-		return "on"
-	case *frontendv1.TopbarFastMode_Off:
-		return "off"
-	case *frontendv1.TopbarFastMode_Cooldown:
-		return "cooldown"
-	default:
-		return ""
-	}
-}
-
-// sfAwaitFastMode waits for the topbar to draw the named fast-mode arm and
-// answers the view that did. A FRESH stream is served the daemon's current
-// resolved state and then every later push, so this waits for an event and
-// never for a bound.
-func sfAwaitFastMode(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, want string) *frontendv1.TopbarView {
-	t.Helper()
-	topbar := w.WatchTopbar(ws)
-	defer topbar.Close()
-	return harness.AwaitView(t, w.Ctx(), topbar, "the topbar to draw fast mode "+want,
-		func(v *frontendv1.TopbarView) bool { return sfFastModeArm(v) == want })
-}
-
-func TestFastModeOffAndCooldownStatesReachTheStrip(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	w, ws, _ := sfNewWorkspace(t)
-
-	cases := []struct {
-		name       string
-		scenario   string
-		conclusion string
-	}{
-		{name: "off", scenario: "fast-off", conclusion: "Fast mode is off."},
-		{name: "cooldown", scenario: "fast-cooldown", conclusion: "Fast mode is cooldown."},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Act
-			turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, tc.scenario)
-
-			// Assert: the vendor said which state it is, and the strip draws
-			// that state under its own name.
-			sfAwaitConclusion(t, w, ws, turn, tc.conclusion)
-			view := sfAwaitFastMode(t, w, ws, tc.name)
-			if got := sfFastModeArm(view); got != tc.name {
-				t.Fatalf("TopbarView.fast_mode arm = %q, want %q", got, tc.name)
-			}
-		})
-	}
-}
-
-// COOLDOWN IS NOT OFF, asserted as a specific negative on the drawn shape.
-// session.proto states the reason the arms are separate — "NOT the same as
-// off: nothing needs doing and offering the user a way to turn it on would
-// offer something that cannot take effect" — and a resolver that folded the
-// two would pass every assertion above but fail this one.
-func TestFastModeCooldownIsNotDrawnAsOff(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	w, ws, _ := sfNewWorkspace(t)
-
-	// Act
-	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "fast-cooldown")
-	sfAwaitConclusion(t, w, ws, turn, "Fast mode is cooldown.")
-
-	// Assert
-	view := sfAwaitFastMode(t, w, ws, "cooldown")
-	if _, off := view.GetFastMode().GetState().(*frontendv1.TopbarFastMode_Off); off {
-		t.Fatal("the strip drew cooldown as off, which offers a switch that cannot take effect")
-	}
-}
-
-// THE OFF ARM CARRIES THE VENDOR'S REASON VERBATIM. `!fast-off` reports
-// `fast_mode_disabled_reason: "preference"` (session.ts fastModeScenario), and
-// the contract keeps the string rather than a class, so the strip can say why.
-func TestFastModeOffCarriesTheVendorsReason(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	w, ws, _ := sfNewWorkspace(t)
-
-	// Act
-	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "fast-off")
-	sfAwaitConclusion(t, w, ws, turn, "Fast mode is off.")
-
-	// Assert
-	view := sfAwaitFastMode(t, w, ws, "off")
-	off, ok := view.GetFastMode().GetState().(*frontendv1.TopbarFastMode_Off)
-	if !ok {
-		t.Fatalf("TopbarView.fast_mode = %v, want the off arm", view.GetFastMode())
-	}
-	if got := off.Off.GetReason(); got != "preference" {
-		t.Fatalf("TopbarFastModeOff.reason = %q, want the vendor's own %q", got, "preference")
 	}
 }
 
