@@ -120,12 +120,22 @@ const (
 	argPorts      = "/t/networksetup -listallhardwareports"
 	argSummary    = "/t/ipconfig getsummary en0"
 	argJoin       = "/t/networksetup -setairportnetwork en0 " + hotspot
+	argPreferred  = "/t/networksetup -listpreferredwirelessnetworks en0"
 	argDisconnect = "/t/wifi-util disconnect"
 	argRadioOff   = "/t/networksetup -setairportpower en0 off"
 	argRadioOn    = "/t/networksetup -setairportpower en0 on"
 	argDim        = "/t/mac-brightness 0.0625"
 	argRestore    = "/t/mac-brightness 1.0"
 )
+
+// preferred composes a `networksetup -listpreferredwirelessnetworks` answer.
+func preferred(names ...string) string {
+	s := "Preferred networks on en0:\n"
+	for _, n := range names {
+		s += "\t" + n + "\n"
+	}
+	return s
+}
 
 // argPower is one `sudo -n pmset -a <setting> <value>` call.
 func argPower(setting, value string) string {

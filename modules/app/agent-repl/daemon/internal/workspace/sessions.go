@@ -217,6 +217,12 @@ type live struct {
 	// this daemon started, and a shim it adopted, which has already started
 	// its one -- and nowhere else.
 	sessionStarted bool
+	// sessionAbsent reports that this client's shim is KNOWN to hold no
+	// session: the relaunch's prelaunched shim, from the moment its Resume
+	// begins until a StartSession on it succeeds. It is not !sessionStarted:
+	// an adopted shim is installed before its started session is noted, and
+	// in that window its session is UNKNOWN, never absent (SessionAbsent).
+	sessionAbsent bool
 }
 
 // Fleet brings sessions up and down. It is the SPAWN-ON-MOUNT semantics in one
@@ -2391,7 +2397,31 @@ func (f *Fleet) noteSessionStarted(ws ids.WorkspaceID) {
 	defer f.mu.Unlock()
 	if session, ok := f.sessions[ws]; ok {
 		session.sessionStarted = true
+		session.sessionAbsent = false
 	}
+}
+
+// markSessionAbsent records that the workspace's installed client, when it is
+// C, is KNOWN to hold no session. A workspace holding another client is left
+// alone: the fact is about one shim.
+func (f *Fleet) markSessionAbsent(ws ids.WorkspaceID, c shimclient.Client) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if session, ok := f.sessions[ws]; ok && session.client == c {
+		session.sessionAbsent = true
+	}
+}
+
+// SessionAbsent reports whether the workspace's installed shim is KNOWN to
+// hold no session. It is the prompt queue's Deps.SessionAbsent: such a shim
+// runs no turn and holds no live work, so it never holds a bounce, while an
+// adopted shim whose facts have not arrived (neither started nor absent)
+// still does.
+func (f *Fleet) SessionAbsent(ws ids.WorkspaceID) bool {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	session, ok := f.sessions[ws]
+	return ok && session.sessionAbsent
 }
 
 // sessionStarted reports whether the workspace's installed client's shim holds

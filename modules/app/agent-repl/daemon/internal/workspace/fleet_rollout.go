@@ -626,6 +626,11 @@ func (f *Fleet) Resume(ctx context.Context, ws ids.WorkspaceID, c shimclient.Cli
 		}
 	}
 
+	// THE PRELAUNCHED SHIM HOLDS NO SESSION until this StartSession succeeds,
+	// and that is KNOWN here rather than merely unread: a failed or retried
+	// vendor start must not leave a later unforced bounce waiting on a
+	// freeness its watcher can never state (Fleet.SessionAbsent).
+	f.markSessionAbsent(ws, c)
 	runCtx, finishRun := f.beginVendorStart(ctx, ws)
 	started, err := f.startSession(runCtx, log, ws, c, src, session, configDir)
 	finishRun()

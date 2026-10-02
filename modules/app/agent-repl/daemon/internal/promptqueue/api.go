@@ -398,6 +398,14 @@ type Deps struct {
 	// failed) leaves a shim with none. A submission there is held under the
 	// reconnect hold rather than sent to be refused `no_session`.
 	SessionStarted func(ws ids.WorkspaceID) bool
+	// SessionAbsent reports that the workspace's installed shim is KNOWN to
+	// hold no session: this daemon prelaunched it and its StartSession has not
+	// succeeded (being retried, failed, or not yet sent). It is NOT the
+	// negation of SessionStarted: an adopted shim whose facts have not arrived
+	// is neither started nor absent, it is UNKNOWN, and unknown is never free.
+	// A shim known to hold no session runs no turn and holds no live work, so
+	// it never holds a bounce (inFlight).
+	SessionAbsent func(ws ids.WorkspaceID) bool
 	// ColdGate answers the STANDING cold gate's own account for a workspace,
 	// false when no gate stands. A gate is a refusal with a name of its own,
 	// and this is what lets the queue give it rather than reporting a missing
