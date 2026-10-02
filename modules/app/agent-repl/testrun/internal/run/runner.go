@@ -30,6 +30,9 @@ type Spec struct {
 	// Items parses the unit's output into seconds per item, for the history.
 	// Nil for a unit that is not a chunk.
 	Items func(output []byte) (map[string]float64, error)
+	// Display, when set, is what of the unit's output the run log shows,
+	// given whether the unit passed. Nil shows it whole.
+	Display func(output []byte, passed bool) []byte
 }
 
 // Process is one started unit.
@@ -238,7 +241,11 @@ func (r *Runner) Run(ctx context.Context, specs []Spec) ([]Result, []SuiteResult
 		// the unit's verdict line, so a reader of the interleaved run (the
 		// merge gate's tests tab) attributes every line to its suite.
 		r.Log.Infof("unit %s [%s] output:", c.id, spec.Suite)
-		r.Log.Block(c.output.Bytes())
+		shown := c.output.Bytes()
+		if spec.Display != nil {
+			shown = spec.Display(shown, res.Outcome == Passed)
+		}
+		r.Log.Block(shown)
 		r.reportUnit(res)
 		cancelled := q.Done(c.id, res.Outcome == Passed)
 		finishUnit(res)
