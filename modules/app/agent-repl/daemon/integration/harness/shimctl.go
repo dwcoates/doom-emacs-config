@@ -36,6 +36,15 @@ type ShimProfile struct {
 	// `vendor_start_failed` refusal carrying this detail: the shim process is
 	// healthy and only the vendor failed to start inside it.
 	VendorStartFailed string `json:"vendor_start_failed,omitempty"`
+	// VendorStartRetryable labels the VendorStartFailed refusal RETRYABLE
+	// (shim.v1 StartSessionVendorStartFailed.retry); unset labels it REJECTED.
+	VendorStartRetryable bool `json:"vendor_start_retryable,omitempty"`
+	// VendorStartFailTimes answers the FIRST n StartSessions with a RETRYABLE
+	// `vendor_start_failed` refusal carrying VendorStartFailDetail, and every
+	// one after them normally, as a vendor that was slow to start does. It
+	// drives the daemon's vendor-start retry run end to end.
+	VendorStartFailTimes  int    `json:"vendor_start_fail_times,omitempty"`
+	VendorStartFailDetail string `json:"vendor_start_fail_detail,omitempty"`
 	// HibernateFailure makes every Hibernate answer a transport-level error
 	// with this detail; HibernateTurnInFlight makes every one answer the
 	// typed turn_in_flight refusal. Both are in force from the fake's birth,
