@@ -64,6 +64,12 @@ func (h *hub[T]) dropAll() {
 	}
 }
 
+// publishAgent files one agent frame in the book and fans it out at the
+// pointer the book gave it.
+func (s *server) publishAgent(f agentFrame) {
+	s.agents.publish(s.book.record(f))
+}
+
 func (h *hub[T]) count() int {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -168,6 +174,8 @@ type server struct {
 
 	agents *hub[agentFrame]
 	bashes *hub[bashFrame]
+	// book is the fake store's history of every agent (book.go).
+	book *book
 
 	mu      sync.Mutex
 	answers map[string][]scriptedAnswer
@@ -253,6 +261,7 @@ func newServer(rec *Recorder, p Profile, log *logSink) *server {
 		log:             log,
 		sessions:        newHub[*conversationv1.SessionUpdate](),
 		agents:          newHub[agentFrame](),
+		book:            newBook(),
 		bashes:          newHub[bashFrame](),
 		answers:         map[string][]scriptedAnswer{},
 		bashLog:         map[string][]*conversationv1.AgentBash{},
@@ -485,6 +494,7 @@ func (s *server) StartSession(ctx context.Context, req *connect.Request[shimv1.S
 		s.mu.Lock()
 		s.resumed = true
 		s.mu.Unlock()
+		s.book.seed(s.profile.ResumeHistory)
 	}
 	if vendorID == "" {
 		vendorID = mintID()
@@ -800,11 +810,10 @@ func (s *server) WatchAgent(ctx context.Context, req *connect.Request[shimv1.Wat
 	defer s.agents.unsubscribe(id)
 
 	if err := stream.Send(&shimv1.WatchAgentResponse{
-		Frame: &shimv1.WatchAgentResponse_Page{Page: s.openingPage()},
+		Frame: &shimv1.WatchAgentResponse_Page{Page: s.openingPageFor(req.Msg)},
 	}); err != nil {
 		return err
 	}
-	seq := 0
 	for {
 		select {
 		case <-ctx.Done():
@@ -824,14 +833,9 @@ func (s *server) WatchAgent(ctx context.Context, req *connect.Request[shimv1.Wat
 				}
 				continue
 			}
-			seq++
-			at := f.pointer
-			if at == "" {
-				at = pointerAt(target, seq)
-			}
 			if err := stream.Send(&shimv1.WatchAgentResponse{
 				Frame: &shimv1.WatchAgentResponse_Entry{Entry: f.place(&conversationv1.HistoryEntryAt{
-					At:    &conversationv1.HistoryPointer{Value: at},
+					At:    &conversationv1.HistoryPointer{Value: f.pointer},
 					Entry: f.entry(),
 					Turn:  f.stamp(),
 				})},
@@ -966,7 +970,7 @@ func (s *server) KillTurn(ctx context.Context, req *connect.Request[shimv1.KillT
 		}},
 	}
 	s.settleTurn(MainAgentID, req.Msg.GetTurn().GetValue(), terminal)
-	s.agents.publish(agentFrame{agent: MainAgentID, frame: terminal})
+	s.publishAgent(agentFrame{agent: MainAgentID, frame: terminal})
 	return connect.NewResponse(&shimv1.KillTurnResponse{
 		Result: &shimv1.KillTurnResponse_Success{Success: &shimv1.KillTurnSuccess{
 			Killed: &conversationv1.TurnKilled{How: &conversationv1.TurnKilled_AgentOnly{AgentOnly: &conversationv1.TurnKilledAgentOnly{}}},
@@ -1155,8 +1159,18 @@ func (s *server) ReadHistory(ctx context.Context, req *connect.Request[shimv1.Re
 	if resp, done, err := scripted[shimv1.ReadHistoryResponse, *shimv1.ReadHistoryResponse](s, RPCReadHistory); done {
 		return resp, err
 	}
+	after := req.Msg.GetAfter()
+	page, served := s.book.page(req.Msg.GetTarget().GetValue(), after, s.historyPageSize())
+	if !served {
+		return connect.NewResponse(&shimv1.ReadHistoryResponse{
+			Result: &shimv1.ReadHistoryResponse_Failure{Failure: &shimv1.ReadHistoryFailure{
+				Detail: sprintf("fakeshim: the pointer %q names no entry of the book", after.GetValue()),
+				Kind:   &shimv1.ReadHistoryFailure_StalePointer{StalePointer: &shimv1.ReadHistoryStalePointer{}},
+			}},
+		}), nil
+	}
 	return connect.NewResponse(&shimv1.ReadHistoryResponse{
-		Result: &shimv1.ReadHistoryResponse_Success{Success: &shimv1.ReadHistorySuccess{Page: EmptyFloorPage()}},
+		Result: &shimv1.ReadHistoryResponse_Success{Success: &shimv1.ReadHistorySuccess{Page: page}},
 	}), nil
 }
 
@@ -1379,7 +1393,7 @@ func (s *server) settlePermission(decision *conversationv1.AgentPermissionDecisi
 	if agent == "" {
 		agent = MainAgentID
 	}
-	s.agents.publish(agentFrame{agent: agent, frame: &conversationv1.AgentFrame{
+	s.publishAgent(agentFrame{agent: agent, frame: &conversationv1.AgentFrame{
 		AgentId: &conversationv1.AgentId{Value: agent},
 		Result: &conversationv1.AgentFrame_Update{Update: &conversationv1.AgentUpdate{
 			Update: &conversationv1.AgentUpdate_Permission{Permission: &conversationv1.AgentPermission{
