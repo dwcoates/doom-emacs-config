@@ -653,22 +653,27 @@ unscreened WS while every record uses `agent-repl--ws-log-name'."
       ;; switch from one the sidebar drove.
       ;; The view itself is only created by the redisplay that follows, so
       ;; its identity is read on the next idle turn, after that redisplay.
+      ;; ONLY A WORKSPACE WITH A LIVE WEBVIEW AND A LOG SINK is recorded:
+      ;; persp-mode's placeholders ("main", "none") own neither, and the
+      ;; record runs outside the activation's log context, where a nil
+      ;; workspace has nowhere to be written.
       (let ((view-buffer (agent-repl-window--panel-buffer :view ws))
             (trigger agent-repl--switch-trigger))
-        (run-with-idle-timer
-         0 nil
-         (lambda ()
-           (let ((presence (agent-repl-frontend--view-presence ws view-buffer)))
-             (agent-repl--info log-ws
-                               "elisp.panels.webview-on-switch: ws=%s command=%S from-window=%S window=%S windows=%s size=%sx%s xwidgets=%s view=%s selected=%s"
-                               ws (plist-get trigger :command)
-                               (plist-get trigger :webview-window)
-                               (plist-get presence :window)
-                               (plist-get presence :windows)
-                               (plist-get presence :width) (plist-get presence :height)
-                               (plist-get presence :xwidgets)
-                               (plist-get presence :view)
-                               (plist-get presence :selected))))))
+        (when (and log-ws (buffer-live-p view-buffer))
+          (run-with-idle-timer
+           0 nil
+           (lambda ()
+             (let ((presence (agent-repl-frontend--view-presence ws view-buffer)))
+               (agent-repl--info log-ws
+                                 "elisp.panels.webview-on-switch: ws=%s command=%S from-window=%S window=%S windows=%s size=%sx%s xwidgets=%s view=%s selected=%s"
+                                 ws (plist-get trigger :command)
+                                 (plist-get trigger :webview-window)
+                                 (plist-get presence :window)
+                                 (plist-get presence :windows)
+                                 (plist-get presence :width) (plist-get presence :height)
+                                 (plist-get presence :xwidgets)
+                                 (plist-get presence :view)
+                                 (plist-get presence :selected)))))))
       (agent-repl--panels-note-restore-outcome ws reason)
       (when (eq reason 'default-open-now-missing)
         (agent-repl--frontend-dispatch-show ws)))
