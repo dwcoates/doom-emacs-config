@@ -75,7 +75,7 @@ import type {
   HeldPromptInterject,
   HeldPromptMergeHold,
   HeldPromptQueuedAt,
-  HeldPromptSessionStartingHold,
+  HeldPromptReconnectHold,
   HeldPromptShutdownHold,
   HeldPromptUninterruptibleTurn,
 } from "../../../proto/gen/ts/frontend/v1/daemon_hold_pb";
@@ -150,8 +150,8 @@ export const SEND_NOW_LABEL = "Send now";
 export const NO_RELEASE_TITLES: Readonly<Record<string, string>> = {
   uninterruptibleTurn:
     "a context cut is never interrupted for a queued prompt, so it cannot be sent ahead of it — it is delivered the moment that turn ends",
-  sessionStarting:
-    "the session is not up yet, so a prompt sent now would have nowhere to be delivered",
+  reconnect:
+    "the session is not up, so a prompt sent now would have nowhere to be delivered — it is delivered when the session reconnects",
   merge:
     "a merge is driving the session, so a prompt sent now would run inside it — it is delivered the moment the merge ends",
 };
@@ -337,8 +337,8 @@ function holdCardHooks(hold: string | null): string[] {
     case "buildRefresh":
     case "merge":
       return ["held-right", "lease-card"];
-    case "sessionStarting":
-      // The card's `data-hold` names the bring-up; it wears no hook of its own.
+    case "reconnect":
+      // The card's `data-hold` names the reconnect; it wears no hook of its own.
       return ["held-right"];
     default:
       return unreachableArm("HeldPrompt.hold", hold);
@@ -602,10 +602,10 @@ function drawHold(
   switch (hold.case) {
     case "shutdown":
       return drawHeldPromptShutdownHold(hold.value, `${path}.shutdown`);
-    case "sessionStarting":
-      return drawHeldPromptSessionStartingHold(
+    case "reconnect":
+      return drawHeldPromptReconnectHold(
         hold.value,
-        `${path}.session_starting`,
+        `${path}.reconnect`,
       );
     case "buildRefresh":
       return drawHeldPromptBuildRefreshHold(
@@ -633,16 +633,16 @@ export function drawHeldPromptShutdownHold(
   return "shutdown";
 }
 
-/** Held until the session is up. Empty on the wire: presence is the fact. */
-export function drawHeldPromptSessionStartingHold(
-  _u: HeldPromptSessionStartingHold,
+/** Held until the session reconnects. Empty on the wire: presence is the fact. */
+export function drawHeldPromptReconnectHold(
+  _u: HeldPromptReconnectHold,
   path: string,
 ): HeldStatus {
-  log.debug("drawing a session-starting hold", {
-    operation: "tray.held-prompt.session-starting-hold",
+  log.debug("drawing a reconnect hold", {
+    operation: "tray.held-prompt.reconnect-hold",
     context: { path },
   });
-  return "sessionStarting";
+  return "reconnect";
 }
 
 /** Held for the build refresh. Empty on the wire: presence is the fact. */
@@ -1217,7 +1217,7 @@ export type HeldBadgeTone = "ok" | "err" | "run" | "muted" | "amber" | "teal";
  *   - a classification error: a failure, the error red;
  *   - accepted: a quiet acknowledgement that changes nothing about delivery;
  *   - a shutdown, build-refresh or merge hold: coordinated daemon work, amber;
- *   - a session-starting hold: the machinery bringing a session up, the
+ *   - a reconnect hold: the machinery bringing a session up, the
  *     hibernation teal;
  *   - editing (EditHeldPrompt): the prompt is being worked on in the editor,
  *     the in-flight orange;
@@ -1235,7 +1235,7 @@ export const HELD_STATUS_BADGES = {
   shutdown: "amber",
   buildRefresh: "amber",
   merge: "amber",
-  sessionStarting: "teal",
+  reconnect: "teal",
   editing: "run",
   coalesced: "muted",
 } as const satisfies Record<HeldStatus, HeldBadgeTone>;
