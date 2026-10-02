@@ -421,6 +421,37 @@ describe("interrupt and the per-task stop declaration", () => {
   });
 });
 
+describe("applyFlagSettings", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("takes an effort level", async () => {
+    // Arrange
+    const query = createFakeQuery(emptyPrompt, ALLOW, { sessionId: "s", newUuid: () => "u" });
+
+    // Act
+    const applied = query.applyFlagSettings({ effortLevel: "high" });
+
+    // Assert
+    await expect(applied).resolves.toBeUndefined();
+    query.close();
+  });
+
+  it("refuses under the apply_flag_settings lever", async () => {
+    // Arrange
+    vi.stubEnv("AGENT_REPL_FAKE_REFUSE", "apply_flag_settings");
+    const query = createFakeQuery(emptyPrompt, ALLOW, { sessionId: "s", newUuid: () => "u" });
+
+    // Act
+    const applied = query.applyFlagSettings({ effortLevel: "high" });
+
+    // Assert
+    await expect(applied).rejects.toThrow(/refused the flag settings/);
+    query.close();
+  });
+});
+
 describe("setModel", () => {
   it("makes the NEXT assistant message report the new model", async () => {
     // Arrange + Act

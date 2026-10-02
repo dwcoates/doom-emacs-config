@@ -18,6 +18,7 @@ import (
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"claude-repld/internal/account"
+	"claude-repld/internal/claudesettings"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/drain"
 	"claude-repld/internal/externalbrowser"
@@ -292,6 +293,11 @@ type Verbs interface {
 	// SetModel switches the session's model through the QUEUE's session-act
 	// path, so it cannot overtake a queued prompt.
 	SetModel(ctx context.Context, ws ids.WorkspaceID, model string) error
+	// SetEffort switches the session's reasoning effort to a level the
+	// topbar's selector served. It does NOT ride the queue's session-act path:
+	// an effort change never puts a row in front of the reader, and the shim
+	// itself waits for the running turn to end.
+	SetEffort(ctx context.Context, ws ids.WorkspaceID, level conversationv1.AgentEffortLevel) error
 	// SelectAccount makes the workspace's session spend as the named account
 	// root: the choice is recorded on the session row and the session is then
 	// bounced through the restart verb's own engine, which is what carries the
@@ -448,6 +454,10 @@ type Deps struct {
 	// batch or a cold gate. Every answer verb echoes against it: an answer
 	// that does not match what was served is refused, never forwarded.
 	Cards Cards
+	// ReadEffortSettings reads a config root's persisted effort level. It is a
+	// function so the read is faked in tests; nil means
+	// claudesettings.ReadEffort.
+	ReadEffortSettings func(configDir string) (claudesettings.Effort, error)
 	// LoadPrompt reads one brief from the prompts directory at use time. It is
 	// a function so the read is faked in tests; nil means prompts.Load.
 	LoadPrompt PromptLoader
@@ -590,6 +600,10 @@ type Cards interface {
 	// served, false when the workspace has served no picker. SetPermissionMode
 	// validates against it, because the daemon accepts only what it offered.
 	PermissionModes(ws ids.WorkspaceID) ([]string, bool)
+	// EffortLevels answers exactly the levels the topbar's effort selector
+	// served for the selected model, false when it served none. SetEffort
+	// validates against it.
+	EffortLevels(ws ids.WorkspaceID) ([]conversationv1.AgentEffortLevel, bool)
 	// Models answers exactly the model catalog the topbar's selector served,
 	// reporting false when none has been served. SetModel validates against
 	// it: the daemon accepts only the tokens it offered.
@@ -658,6 +672,9 @@ type Sessions interface {
 	StartDetached(ws ids.WorkspaceID, done func(error))
 	// Live reports whether the workspace currently has a live session.
 	Live(ws ids.WorkspaceID) bool
+	// SetEffort asks the workspace's shim for an effort level and, once it
+	// confirms, states the level in effect to the topbar.
+	SetEffort(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, level conversationv1.AgentEffortLevel) error
 	// ResumeCold re-opens a session parked behind a standing cold gate,
 	// carrying the chosen remediation, and completes the SAME bring-up a cold
 	// start does: the session facts recorded, the session watcher installed,
@@ -739,6 +756,9 @@ func New(deps Deps) (Verbs, error) {
 	}
 	if deps.Policy == nil {
 		deps.Policy = prompts.OnDisk{}
+	}
+	if deps.ReadEffortSettings == nil {
+		deps.ReadEffortSettings = claudesettings.ReadEffort
 	}
 	return &verbs{deps: deps, load: load, splice: splice, now: now}, nil
 }

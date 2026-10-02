@@ -144,6 +144,9 @@ type Client interface {
 	WatchSession(ctx context.Context) (Stream[*shimv1.WatchSessionResponse], error)
 	// SetSessionModel switches the session's model; the cold arm is an answer.
 	SetSessionModel(ctx context.Context, req *shimv1.SetSessionModelRequest) (*shimv1.SetSessionModelResponse, error)
+	// SetSessionEffort switches the session's reasoning effort from the next
+	// turn on; it resolves once the current turn has ended.
+	SetSessionEffort(ctx context.Context, req *shimv1.SetSessionEffortRequest) (*shimv1.SetSessionEffortResponse, error)
 	// SetSessionPermissionMode switches the session's permission mode.
 	SetSessionPermissionMode(ctx context.Context, req *shimv1.SetSessionPermissionModeRequest) (*shimv1.SetSessionPermissionModeResponse, error)
 	// Hibernate stands the session down for the idle sweep. It is NOT used by

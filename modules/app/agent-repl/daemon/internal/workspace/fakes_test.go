@@ -17,6 +17,7 @@ import (
 
 	"claude-repld/internal/account"
 	"claude-repld/internal/bounce"
+	"claude-repld/internal/claudesettings"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/feedid"
 	"claude-repld/internal/gitclient"
@@ -1264,11 +1265,25 @@ type fakeSessions struct {
 	// start that follows a bind, and the only one that tells the shim to adopt
 	// the resumed conversation as the workspace's book.
 	rebound []ids.WorkspaceID
+	// efforts is every SetEffort asked of the fleet; effortErr its answer.
+	efforts   []effortCall
+	effortErr error
 }
 
 type stopCall struct {
 	WS    ids.WorkspaceID
 	Force bool
+}
+
+// SetEffort records the level asked for and answers effortErr.
+func (s *fakeSessions) SetEffort(_ context.Context, _ dlog.Logger, ws ids.WorkspaceID, level conversationv1.AgentEffortLevel) error {
+	s.efforts = append(s.efforts, effortCall{WS: ws, Level: level})
+	return s.effortErr
+}
+
+type effortCall struct {
+	WS    ids.WorkspaceID
+	Level conversationv1.AgentEffortLevel
 }
 
 func newFakeSessions() *fakeSessions {
@@ -1573,6 +1588,8 @@ type fakeCards struct {
 	hasModes         bool
 	models           []string
 	hasModels        bool
+	efforts          []conversationv1.AgentEffortLevel
+	hasEfforts       bool
 }
 
 func newFakeCards() *fakeCards {
@@ -1628,6 +1645,10 @@ func (c *fakeCards) PermissionModes(ids.WorkspaceID) ([]string, bool) {
 
 func (c *fakeCards) Models(ids.WorkspaceID) ([]string, bool) {
 	return c.models, c.hasModels
+}
+
+func (c *fakeCards) EffortLevels(ids.WorkspaceID) ([]conversationv1.AgentEffortLevel, bool) {
+	return c.efforts, c.hasEfforts
 }
 
 // fakeSurfaces is a dlog.Surfaces backed by one capturing logger.
@@ -1792,6 +1813,15 @@ type fixture struct {
 	// topbarAccounts is every account cell the topbar seam was handed, in
 	// order.
 	topbarAccounts []topbar.Account
+	// topbarEffortSettings is every effort settings read the topbar seam was
+	// handed; topbarWarnings every warning line it was asked to raise.
+	topbarEffortSettings []claudesettings.Effort
+	topbarWarnings       []string
+	// effortReads is every config root whose settings were read; the read
+	// answers effortSettings and effortErr.
+	effortReads    []string
+	effortSettings claudesettings.Effort
+	effortErr      error
 
 	// running is what the freeness probe answers.
 	running Running
@@ -1841,7 +1871,7 @@ func newFixture(t *testing.T) *fixture {
 
 	verbs, err := New(Deps{
 		DB: f.db, Git: f.git, Accounts: f.account, Queue: f.queue, Merge: f.merge,
-		Rollout: f.rollout, Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{parked: &f.topbarParked, coldGates: &f.topbarColdGates, accounts: &f.topbarAccounts}, Browser: f.browser,
+		Rollout: f.rollout, Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{parked: &f.topbarParked, coldGates: &f.topbarColdGates, accounts: &f.topbarAccounts, effortSettings: &f.topbarEffortSettings, warnings: &f.topbarWarnings}, Browser: f.browser,
 		Sidebar: f.sidebar, Holds: stubHolds{}, Host: f.host, Banners: f.banners, Sessions: f.fleet,
 		Headless:   f.headless,
 		Health:     f.health,
@@ -1861,6 +1891,10 @@ func newFixture(t *testing.T) *fixture {
 		},
 		Ownership: f.owner,
 		Cards:     f.cards,
+		ReadEffortSettings: func(configDir string) (claudesettings.Effort, error) {
+			f.effortReads = append(f.effortReads, configDir)
+			return f.effortSettings, f.effortErr
+		},
 		LoadPrompt: func(_ string, name string) (prompts.Prompt, error) {
 			if f.briefErr != nil {
 				return prompts.Prompt{}, f.briefErr
@@ -1973,6 +2007,12 @@ func (f *fixture) workspace(id ids.WorkspaceID, dir string) wsm.Workspace {
 // call, so a test that does call one nil-panics rather than passing quietly.
 type stubTopbar struct {
 	topbar.Resolver
+	// effortSettings records every effort settings read the verbs installed,
+	// in order; warnings every warning-strip line they raised, by key.
+	effortSettings *[]claudesettings.Effort
+	warnings       *[]string
+	// picked is the level the topbar holds as picked; nil holds none.
+	picked *conversationv1.AgentEffortLevel
 	// parked records every park state the verbs installed or lifted, in order.
 	parked *[]bool
 	// coldGates records every cold-gate state the verbs stated, in order.
@@ -2009,6 +2049,27 @@ func (stubTopbar) SetNaming(ids.WorkspaceID, topbar.Naming)      {}
 func (s stubTopbar) SetAccount(_ ids.WorkspaceID, account topbar.Account) {
 	if s.accounts != nil {
 		*s.accounts = append(*s.accounts, account)
+	}
+}
+func (s stubTopbar) SetEffortSettings(_ ids.WorkspaceID, settings claudesettings.Effort) {
+	if s.effortSettings != nil {
+		*s.effortSettings = append(*s.effortSettings, settings)
+	}
+}
+func (s stubTopbar) PickedEffort(ids.WorkspaceID) (conversationv1.AgentEffortLevel, bool) {
+	if s.picked == nil || *s.picked == conversationv1.AgentEffortLevel_AGENT_EFFORT_LEVEL_UNSPECIFIED {
+		return conversationv1.AgentEffortLevel_AGENT_EFFORT_LEVEL_UNSPECIFIED, false
+	}
+	return *s.picked, true
+}
+func (s stubTopbar) SetPickedEffort(_ ids.WorkspaceID, level conversationv1.AgentEffortLevel) {
+	if s.picked != nil {
+		*s.picked = level
+	}
+}
+func (s stubTopbar) RaiseWarning(_ ids.WorkspaceID, key, line string) {
+	if s.warnings != nil {
+		*s.warnings = append(*s.warnings, key+": "+line)
 	}
 }
 func (stubHolds) SetWorkspaceDir(ids.WorkspaceID, string) error { return nil }

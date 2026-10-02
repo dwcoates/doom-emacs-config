@@ -32,6 +32,7 @@ import {
   validateReadHistoryRequest,
   validateReadTranscriptsRequest,
   validateRollBackSessionRequest,
+  validateSetSessionEffortRequest,
   validateSetSessionModelRequest,
   validateSetSessionPermissionModeRequest,
   validateStartSessionRequest,
@@ -170,6 +171,12 @@ export function shimRoutes(engine: Engine): (router: ConnectRouter) => void {
         entered("SetSessionModel");
         validateSetSessionModelRequest(request);
         return answering("SetSessionModel", () => engine.setSessionModel(request));
+      },
+
+      async setSessionEffort(request) {
+        entered("SetSessionEffort");
+        validateSetSessionEffortRequest(request);
+        return answering("SetSessionEffort", () => engine.setSessionEffort(request));
       },
 
       async setSessionPermissionMode(request) {

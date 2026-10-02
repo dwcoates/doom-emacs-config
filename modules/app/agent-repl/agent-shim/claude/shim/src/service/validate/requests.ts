@@ -19,6 +19,7 @@ import {
   validateAgentId,
   validateAgentInput,
   validateAgentModel,
+  validateAgentEffortLevel,
   validateAgentPermissionMode,
   validateDetachedWorkId,
   validateConversationThrough,
@@ -121,6 +122,15 @@ export function validateSetSessionPermissionModeRequest(
     );
   } catch (err) {
     refuse("SetSessionPermissionMode", err);
+  }
+}
+
+/** `shim.v1.SetSessionEffortRequest` — the level, never UNSPECIFIED. */
+export function validateSetSessionEffortRequest(request: shimv1.SetSessionEffortRequest): void {
+  try {
+    validateAgentEffortLevel(request.effort, "set_session_effort.effort");
+  } catch (err) {
+    refuse("SetSessionEffort", err);
   }
 }
 

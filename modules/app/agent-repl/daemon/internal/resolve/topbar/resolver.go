@@ -156,7 +156,11 @@ func (r *resolver) mutate(ws ids.WorkspaceID, operation, message string, ctx dlo
 	}
 	topic := r.topicLocked(ws)
 	log := r.logOf(ws, s)
+	edges := sourceEdges(s, view)
 	r.mu.Unlock()
+	for _, edge := range edges {
+		log.Info(edge.operation, edge.message, edge.ctx)
+	}
 
 	if ctx == nil {
 		ctx = dlog.Context{}
@@ -215,6 +219,7 @@ func (r *resolver) render(s *wsState) (*frontendv1.TopbarView, error) {
 		Title:                &frontendv1.TopbarTitle{Text: r.title(s)},
 		SessionLine:          &frontendv1.TopbarSessionLine{Text: r.sessionLine(s)},
 		ModelSelector:        r.modelSelector(s),
+		EffortSelector:       effortSelector(s),
 		Connectivity:         connectivity,
 		Warnings:             r.warningStrip(s),
 		Context:              r.contextChip(s),

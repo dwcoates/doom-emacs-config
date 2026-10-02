@@ -143,6 +143,10 @@ func (s *fakeServer) SetModel(ctx context.Context, req *connect.Request[v1.SetMo
 	return handleUnary[v1.SetModelRequest, v1.SetModelResponse](ctx, s, "SetModel", req.Msg)
 }
 
+func (s *fakeServer) SetEffort(ctx context.Context, req *connect.Request[v1.SetEffortRequest]) (*connect.Response[v1.SetEffortResponse], error) {
+	return handleUnary[v1.SetEffortRequest, v1.SetEffortResponse](ctx, s, "SetEffort", req.Msg)
+}
+
 func (s *fakeServer) SetPermissionMode(ctx context.Context, req *connect.Request[v1.SetPermissionModeRequest]) (*connect.Response[v1.SetPermissionModeResponse], error) {
 	return handleUnary[v1.SetPermissionModeRequest, v1.SetPermissionModeResponse](ctx, s, "SetPermissionMode", req.Msg)
 }

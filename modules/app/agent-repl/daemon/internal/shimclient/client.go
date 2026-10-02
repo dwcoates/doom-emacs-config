@@ -1392,6 +1392,12 @@ func (c *client) SetSessionModel(ctx context.Context, req *shimv1.SetSessionMode
 	return unary(ctx, c, "set_session_model", req, validateSetSessionModelRequest, c.rpc.SetSessionModel)
 }
 
+// SetSessionEffort switches the session's reasoning effort from the next turn
+// on.
+func (c *client) SetSessionEffort(ctx context.Context, req *shimv1.SetSessionEffortRequest) (*shimv1.SetSessionEffortResponse, error) {
+	return unary(ctx, c, "set_session_effort", req, validateSetSessionEffortRequest, c.rpc.SetSessionEffort)
+}
+
 // SetSessionPermissionMode switches the session's permission mode.
 func (c *client) SetSessionPermissionMode(ctx context.Context, req *shimv1.SetSessionPermissionModeRequest) (*shimv1.SetSessionPermissionModeResponse, error) {
 	return unary(ctx, c, "set_session_permission_mode", req, validateSetSessionPermissionModeRequest, c.rpc.SetSessionPermissionMode)

@@ -79,6 +79,10 @@ func (v *verbs) SelectAccount(ctx context.Context, ws ids.WorkspaceID, configDir
 		log.Warn(opSelectAccount, "could not republish the topbar's account cell after the switch",
 			dlog.Context{"cause": err.Error()})
 	}
+	// THE ROOT DECIDES WHICH SETTINGS FILE THE VENDOR READS, so the
+	// selector's starting level is re-read from the root the session now
+	// spends as.
+	v.publishEffortSettings(log, record, configDir)
 
 	if err := v.Restart(ctx, ws, false); err != nil {
 		return false, err

@@ -1,0 +1,69 @@
+// endpoint_set_effort.proto — SetEffort: the effort selector's pick. TOPBAR
+// section. SetModel's sibling: the level holds for the rest of the
+// workspace's session, from the next turn on.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+import "conversation/v1/api.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message SetEffortRequest {
+  workspace.v1.WorkspaceRef workspace = 1;
+  // The chosen level — the typed echo token from one of the selector's own
+  // options (frontend.v1.TopbarEffortOption.level), handed back unchanged. A
+  // client never invents one. UNSPECIFIED is Connect InvalidArgument.
+  conversation.v1.AgentEffortLevel effort = 2;
+}
+
+// THE ARM IS THE OUTCOME.
+message SetEffortResponse {
+  oneof result {
+    SetEffortSuccess success = 1;
+    SetEffortError error = 2;
+  }
+}
+
+// Done; the selector's new state arrives on the topbar stream.
+message SetEffortSuccess {}
+
+// Validation failures (unset field, UNSPECIFIED enum) are Connect
+// InvalidArgument, never an arm.
+message SetEffortError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    SetEffortUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    SetEffortWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    SetEffortTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting this workspace yet.
+    SetEffortNotYetAdopted not_yet_adopted = 4;
+    // The workspace has no session to set an effort on.
+    SetEffortNoSession no_session = 5;
+    // The session's model does not accept this level (or takes no effort
+    // level at all).
+    SetEffortNotSupported not_supported = 6;
+    // The vendor refused the change.
+    SetEffortVendorRefused vendor_refused = 7;
+  }
+}
+message SetEffortUnknownWorkspace {}
+message SetEffortWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+message SetEffortTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+message SetEffortNotYetAdopted {}
+message SetEffortNoSession {}
+message SetEffortNotSupported {}
+message SetEffortVendorRefused {
+  // The vendor's own account of the refusal.
+  string detail = 1;
+}

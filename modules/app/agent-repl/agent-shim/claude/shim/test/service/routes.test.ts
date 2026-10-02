@@ -42,6 +42,10 @@ function recordingEngine(): { engine: Engine; calls: Array<{ verb: string; reque
       record("setSessionModel")(request);
       return create(shimv1.SetSessionModelResponseSchema, {});
     },
+    async setSessionEffort(request) {
+      record("setSessionEffort")(request);
+      return create(shimv1.SetSessionEffortResponseSchema, {});
+    },
     async setSessionPermissionMode(request) {
       record("setSessionPermissionMode")(request);
       return create(shimv1.SetSessionPermissionModeResponseSchema, {});
@@ -124,6 +128,7 @@ describe("shimRoutes unary delegation", () => {
   it.each([
     ["startSession", requests.startSessionRequest],
     ["setSessionModel", requests.setSessionModelRequest],
+    ["setSessionEffort", requests.setSessionEffortRequest],
     ["setSessionPermissionMode", requests.setSessionPermissionModeRequest],
     ["hibernate", requests.hibernateRequest],
     ["killSession", requests.killSessionRequest],

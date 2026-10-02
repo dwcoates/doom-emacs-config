@@ -120,6 +120,21 @@ export function validateAgentPermissionMode(
 }
 
 /**
+ * `conversation.v1.AgentEffortLevel` — an ENUM whose zero value means "unset".
+ *
+ * UNSPECIFIED is refused rather than mapped to any level: a guessed effort runs
+ * every later turn at a reasoning budget nobody chose.
+ */
+export function validateAgentEffortLevel(value: conversationv1.AgentEffortLevel, path: string): void {
+  if (value === conversationv1.AgentEffortLevel.UNSPECIFIED) {
+    throw invalidArgument(`${path} is AGENT_EFFORT_LEVEL_UNSPECIFIED; an effort change names its level`);
+  }
+  if (conversationv1.AgentEffortLevel[value] === undefined) {
+    throw invalidArgument(`${path} is ${value}, which is not an AgentEffortLevel value`);
+  }
+}
+
+/**
  * `conversation.v1.PromptOrigin` — an ENUM, and the one place a zero value
  * means "unset".
  *

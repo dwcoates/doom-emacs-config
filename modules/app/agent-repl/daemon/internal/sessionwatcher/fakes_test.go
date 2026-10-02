@@ -492,6 +492,10 @@ func (c *fakeClient) SetSessionModel(context.Context, *shimv1.SetSessionModelReq
 	panic("sessionwatcher must not call SetSessionModel")
 }
 
+func (c *fakeClient) SetSessionEffort(context.Context, *shimv1.SetSessionEffortRequest) (*shimv1.SetSessionEffortResponse, error) {
+	panic("sessionwatcher must not call SetSessionEffort")
+}
+
 func (c *fakeClient) SetSessionPermissionMode(context.Context, *shimv1.SetSessionPermissionModeRequest) (*shimv1.SetSessionPermissionModeResponse, error) {
 	panic("sessionwatcher must not call SetSessionPermissionMode")
 }

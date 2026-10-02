@@ -60,6 +60,9 @@ export interface Engine {
   /** Change the model from the next turn on; resolves after the current turn ends. */
   setSessionModel(request: shimv1.SetSessionModelRequest): Promise<shimv1.SetSessionModelResponse>;
 
+  /** Change the reasoning effort from the next turn on; resolves after the current turn ends. */
+  setSessionEffort(request: shimv1.SetSessionEffortRequest): Promise<shimv1.SetSessionEffortResponse>;
+
   /** Change the mode every subsequent permission gate runs under. */
   setSessionPermissionMode(
     request: shimv1.SetSessionPermissionModeRequest,
@@ -180,6 +183,10 @@ export class NotImplementedEngine implements Engine {
 
   setSessionModel(): Promise<shimv1.SetSessionModelResponse> {
     return Promise.reject(unimplemented("SetSessionModel"));
+  }
+
+  setSessionEffort(): Promise<shimv1.SetSessionEffortResponse> {
+    return Promise.reject(unimplemented("SetSessionEffort"));
   }
 
   setSessionPermissionMode(): Promise<shimv1.SetSessionPermissionModeResponse> {

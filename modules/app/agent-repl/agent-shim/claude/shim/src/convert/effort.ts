@@ -9,6 +9,7 @@
  */
 import { bindLog } from "../log.js";
 import { conversationv1 } from "../proto.js";
+import type { EffortLevelLike } from "../sdk/types.js";
 
 const LOGGER = bindLog({
   component: "shim-convert-effort",
@@ -36,5 +37,28 @@ export function effortLevelOf(level: string | undefined): conversationv1.AgentEf
         "the vendor named an effort level this vocabulary has no value for; the level is left unspecified",
       );
       return conversationv1.AgentEffortLevel.UNSPECIFIED;
+  }
+}
+
+/**
+ * The canonical level in the vendor's spelling — the inverse of
+ * {@link effortLevelOf}, for the one direction the shim ASKS the vendor for a
+ * level. UNSPECIFIED is never asked for: every request carrying one was
+ * refused at validation, so reaching here with it is a defect.
+ */
+export function vendorEffortLevel(level: conversationv1.AgentEffortLevel): EffortLevelLike {
+  switch (level) {
+    case conversationv1.AgentEffortLevel.LOW:
+      return "low";
+    case conversationv1.AgentEffortLevel.MEDIUM:
+      return "medium";
+    case conversationv1.AgentEffortLevel.HIGH:
+      return "high";
+    case conversationv1.AgentEffortLevel.XHIGH:
+      return "xhigh";
+    case conversationv1.AgentEffortLevel.MAX:
+      return "max";
+    default:
+      throw new Error(`shim effort: AgentEffortLevel ${level} has no vendor spelling; validation admits only named levels`);
   }
 }

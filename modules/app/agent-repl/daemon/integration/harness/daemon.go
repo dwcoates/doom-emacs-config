@@ -194,6 +194,10 @@ type Opts struct {
 	// DefaultAccountEmail is written into the default config root's
 	// .claude.json; empty leaves the root logged out.
 	DefaultAccountEmail string
+	// DefaultSettings, when set, is written as the default config root's
+	// settings.json: the file the daemon reads the effort selector's starting
+	// level from.
+	DefaultSettings string
 	// MultiRepoAccountEmail is written into the multi-repo config root.
 	MultiRepoAccountEmail string
 	// NoFake starts the daemon WITHOUT `--fake` and without
@@ -434,6 +438,9 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 		t:                  t,
 		expected:           map[string]bool{},
 		shims:              map[string]*ShimControl{},
+	}
+	if opts.DefaultSettings != "" {
+		writeFile(t, filepath.Join(d.DefaultConfigDir, "settings.json"), opts.DefaultSettings)
 	}
 	if d.ProfileDir == "" {
 		d.ProfileDir = filepath.Join(root, "shim-profiles")

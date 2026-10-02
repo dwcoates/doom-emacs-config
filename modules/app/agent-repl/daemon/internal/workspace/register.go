@@ -336,6 +336,7 @@ func (v *verbs) publishNaming(ctx context.Context, log dlog.Logger, record wsm.W
 	if err := v.publishAccount(ctx, log, record, configDir); err != nil {
 		return err
 	}
+	v.publishEffortSettings(log, record, configDir)
 	v.deps.Topbar.SetNaming(record.ID, topbar.Naming{
 		Slug:          record.Name,
 		Title:         record.Name,
