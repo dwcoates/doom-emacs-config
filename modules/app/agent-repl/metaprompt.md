@@ -11,13 +11,6 @@
     - This includes rebase, pull, merge, reset, checkout, cherry-pick, force-push, and branch deletion.
     - Push with discretion per the rule below, but never wait for permission to run any git command.
 
-### Master moves only through the merge queue
-
-- Merge into master only through the merge-queue skill (`.claude/skills/merge-queue/SKILL.md`, `/merge-queue`).
-  - This covers my own workspace's branch and every subagent's branch alike.
-  - Never merge, commit, cherry-pick, rebase, reset, or push onto master by hand.
-  - On a parked, failed, or refused merge, report the reason and stop rather than landing the work some other way.
-
 ### Before committing
 
 - Review the new or changed code for any similar pattern elsewhere in the codebase eligible for consolidation via helper extraction.
