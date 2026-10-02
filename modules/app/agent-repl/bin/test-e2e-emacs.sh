@@ -56,5 +56,11 @@ printf '%s\n' "$preflight_out"
 # The sandbox entrypoint documents `--dir` for precisely this, and
 # `bin/test-e2e.sh` already `cd`s into `e2e` for the unsandboxed half; this is
 # the sandboxed half saying the same thing the way the container understands.
+# UNDER testrun THIS SUITE HOLDS AGENT_REPL_UNIT_SLOTS CORE SLOTS, and the
+# container must use exactly that many CPUs: the sandbox caps itself to
+# AGENT_REPL_SANDBOX_CPUS. A direct run keeps the sandbox's own default.
+if [ -n "${AGENT_REPL_UNIT_SLOTS:-}" ]; then
+    export AGENT_REPL_SANDBOX_CPUS="$AGENT_REPL_UNIT_SLOTS"
+fi
 printf '[e2e-emacs] running the Emacs client layer inside the sandbox\n'
 exec "$SANDBOX" run --dir e2e go test ./ -run 'TestEmacs' -v "$@"

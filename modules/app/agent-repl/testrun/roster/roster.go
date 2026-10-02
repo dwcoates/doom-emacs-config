@@ -42,6 +42,10 @@ type Suite struct {
 	// Harness marks a suite that tests the module's own shell scripts in bin/,
 	// which is the blast radius the merge gate gives a change under bin/.
 	Harness bool
+	// Slots is a Script suite's width: the core slots its one unit holds.
+	// Zero is one slot. A wider suite is told its width in
+	// AGENT_REPL_UNIT_SLOTS and must cap itself to exactly that many cores.
+	Slots int
 }
 
 // Suites is the roster. Order is report order only; the scheduler decides run
@@ -76,7 +80,11 @@ var Suites = []Suite{
 	{Name: "proto", Kind: Script, Path: "bin/report-nonlisp-coverage.sh", Args: []string{"proto"}},
 	{Name: "logging-density", Kind: Script, Path: "bin/report-logging-density.sh"},
 	{Name: "e2e", Kind: E2E, Path: "e2e"},
-	{Name: "e2e-emacs", Kind: Script, Path: "bin/test-e2e-emacs.sh", MayDecline: true},
+	// Four slots: the sandbox container is capped to the width it is given
+	// (docker --cpus, GOMAXPROCS), and four CPUs is the VM the Emacs layer's
+	// own parallelism bound of two Emacsen was measured on
+	// (e2e/EMACS-LAYER-SPEC.md, "The parallelism bound, measured").
+	{Name: "e2e-emacs", Kind: Script, Path: "bin/test-e2e-emacs.sh", MayDecline: true, Slots: 4},
 }
 
 // Names is the roster's names, in roster order.
