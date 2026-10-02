@@ -186,6 +186,19 @@ func parked(session *wsm.Session) bool {
 // not coming up, there is nothing to wait on, and the lifecycle arms below are
 // what report how it ended.
 func linkArm(s *wsState, session *wsm.Session) string {
+	// A VENDOR THAT DID NOT START is the link rung's DELIBERATE mapping of the
+	// three vendor-start faults onto the roster's existing arms: retrying is
+	// the bring-up still under way (`init`); a rejection or a spent window is
+	// a session that never came up (`start_failed`). Only a route being
+	// redialed says something newer.
+	if s.link != shimclient.LinkRedialing {
+		switch s.vendorStart {
+		case VendorStartRetrying:
+			return "init"
+		case VendorStartStopped:
+			return "start_failed"
+		}
+	}
 	if !s.linkSeen {
 		if session != nil && session.Terminal != nil {
 			return ""

@@ -330,6 +330,13 @@ func (r *resolver) SetBringingUp(ws ids.WorkspaceID, bringingUp bool) {
 		dlog.Context{"bringing_up": bringingUp}, func(s *wsState) { s.bringingUp = bringingUp })
 }
 
+// SetVendorStart installs where the vendor-start run stands.
+func (r *resolver) SetVendorStart(ws ids.WorkspaceID, state VendorStart) {
+	r.mutateWorkspace(ws, "daemon.sidebar.set_vendor_start",
+		"the roster took where the vendor-start run stands",
+		dlog.Context{"vendor_start": state.String()}, func(s *wsState) { s.vendorStart = state })
+}
+
 // SetReviving raises or lowers the workspace's REVIVING marker, which draws a
 // shimmer across the row's name while its parked session comes back up.
 //

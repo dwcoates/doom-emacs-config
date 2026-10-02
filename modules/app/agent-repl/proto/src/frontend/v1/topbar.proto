@@ -33,7 +33,7 @@
 // A cell whose SESSION fact is unknown — the workspace is hibernated, or
 // standing at the cold gate, or its session has simply not stated the fact
 // yet — draws its OWN "no session" content in its OWN slot: the model
-// selector, the permission-mode picker and fast mode are ABSENT (presence is
+// selector and the permission-mode picker are ABSENT (presence is
 // how "unknown" is said) and the client draws a dash in the slot rather than
 // omitting it, while the context chip and the warning strip are ALWAYS SET
 // and always drawn. The session-less FACTS are not lost: the chip carries the
@@ -86,13 +86,10 @@ message TopbarView {
   // The permission-mode picker, the model selector's sibling. OPTIONAL BY
   // PRESENCE, for the same reason and with the same no-session drawing.
   optional TopbarPermissionModePicker permission_mode_picker = 9;
-  // The vendor's fast mode, the permission mode's sibling: the other
-  // session-level standing state a reader has to know before sending, and
-  // the only one that can be neither on nor off. OPTIONAL BY PRESENCE: unset
-  // means the vendor has stated no fast mode for this session yet — never a
-  // bool that would have to guess — and the client draws the cell's
-  // no-session dash in its slot.
-  optional TopbarFastMode fast_mode = 10;
+  // Tag 10 (`fast_mode`) is RETIRED: the strip no longer draws the vendor's
+  // fast mode.
+  reserved 10;
+  reserved "fast_mode";
   // Tag 11 RETIRED (TopbarHibernated hibernated): the whole-view hibernated
   // state, landed and reversed on 2026-09-13 by the FIXED SCHEMA AND
   // ORGANIZATION ruling above. The park now rides the context chip's hover
@@ -167,37 +164,6 @@ message TopbarPersistentWifiTooltip {
   string text = 1;
 }
 
-// The vendor's fast mode, as it stands. THE ARM IS THE STATE, carried by
-// name from conversation.v1's SessionFastMode rather than flattened to a
-// bool: cooldown is neither on nor off, and a bool would force the client to
-// draw it as one of them — offering a switch that cannot take effect, or
-// claiming a speed the session does not have.
-//
-// STANDING, not momentary: the state sticks until the vendor states another,
-// so the strip draws it continuously beside the permission mode.
-message TopbarFastMode {
-  oneof state {
-    TopbarFastModeOn on = 1;
-    TopbarFastModeOff off = 2;
-    TopbarFastModeCooldown cooldown = 3;
-  }
-}
-
-// Fast mode is in effect.
-message TopbarFastModeOn {}
-
-// Fast mode is not in effect.
-message TopbarFastModeOff {
-  // The vendor's reason, verbatim — drawn as the cell's tooltip. Empty when
-  // the vendor gave none.
-  string reason = 1;
-}
-
-// Fast mode is unavailable for now and returns on its own. DISTINCT FROM
-// OFF: nothing needs doing, so the cell draws no affordance to turn it back
-// on. SessionFastModeCooldown carries no reset instant, so neither does
-// this — a countdown would be invented rather than reported.
-message TopbarFastModeCooldown {}
 
 // The permission-mode picker: the mode in force and the modes this session
 // may switch to (the daemon serves exactly the set SetPermissionMode will

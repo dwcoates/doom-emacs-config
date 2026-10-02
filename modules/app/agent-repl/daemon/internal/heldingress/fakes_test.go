@@ -58,7 +58,7 @@ func (h *fakeHandler) Submit(_ context.Context, ws ids.WorkspaceID, said *conver
 	}
 	h.accepted[key] = true
 	h.deliveries[key]++
-	held := wsm.HoldSessionStarting
+	held := wsm.HoldReconnect
 	return prompthandler.Outcome{Turn: ids.TurnID("turn-" + key), Disposition: promptqueue.Disposition{Held: &held}}, nil
 }
 

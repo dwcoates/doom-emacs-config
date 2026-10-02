@@ -5,6 +5,8 @@ import (
 	"fmt"
 
 	shimv1 "agentrepl/proto/shim/v1"
+
+	"claude-repld/internal/promptqueue"
 )
 
 // The shim's own refusal arm names, spelled exactly as the shim.v1 failure
@@ -85,6 +87,13 @@ type ShimRefusal struct {
 	Arm string
 	// Detail is the shim's own sentence, kept as evidence.
 	Detail string
+}
+
+// Is matches promptqueue.ErrShimHasNoSession for a StartTurn the shim refused
+// because it holds no session: the queue holds that prompt under the
+// reconnect hold rather than retiring it.
+func (r *ShimRefusal) Is(target error) bool {
+	return target == promptqueue.ErrShimHasNoSession && r.Verb == "StartTurn" && r.Arm == ArmShimNoSession
 }
 
 // KillRefusedLive reports that this refusal is a KillTurn the shim declined

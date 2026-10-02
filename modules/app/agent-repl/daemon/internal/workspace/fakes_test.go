@@ -135,6 +135,9 @@ type fakeDB struct {
 	// in; dbClosed records the ids CloseFault was called with.
 	dbFaults []wsm.Fault
 	dbClosed []ids.FaultID
+	// dbOpened counts every fault ever opened, so an id is never reused
+	// after a close.
+	dbOpened int
 
 	// spawnedPIDs records every SetSpawnedShimPID in order, nil for a clear,
 	// so a test can pin that the fork's pid was made durable and that a failed
@@ -179,7 +182,8 @@ func (d *fakeDB) SetSpawnedShimPID(_ context.Context, id ids.WorkspaceID, pid *i
 }
 
 func (d *fakeDB) OpenFault(_ context.Context, f wsm.Fault) (ids.FaultID, error) {
-	id := ids.FaultID(fmt.Sprintf("db-fault-%d", len(d.dbFaults)+1))
+	d.dbOpened++
+	id := ids.FaultID(fmt.Sprintf("db-fault-%d", d.dbOpened))
 	f.ID = id
 	d.dbFaults = append(d.dbFaults, f)
 	return id, nil
@@ -1036,6 +1040,13 @@ type fakeFooter struct {
 	// coldEvents is every cold-gate setter call, in order: "gate:standing",
 	// "gate:retired", "answer" or "answer:cleared".
 	coldEvents []string
+	// faults is every fault the verbs opened on the footer, in order.
+	faults []footer.Fault
+}
+
+// OpenFault records a fault the verbs opened on the footer.
+func (f *fakeFooter) OpenFault(_ ids.WorkspaceID, fault footer.Fault) {
+	f.faults = append(f.faults, fault)
 }
 
 func (f *fakeFooter) SetParked(_ ids.WorkspaceID, parked bool) {
@@ -1268,6 +1279,16 @@ type fakeSessions struct {
 	// efforts is every SetEffort asked of the fleet; effortErr its answer.
 	efforts   []effortCall
 	effortErr error
+	// vendorRunning makes CancelVendorStart report a run it ended, and
+	// vendorCancels counts every CancelVendorStart asked.
+	vendorRunning bool
+	vendorCancels []ids.WorkspaceID
+}
+
+// CancelVendorStart records the cancellation and reports vendorRunning.
+func (s *fakeSessions) CancelVendorStart(_ context.Context, ws ids.WorkspaceID) bool {
+	s.vendorCancels = append(s.vendorCancels, ws)
+	return s.vendorRunning
 }
 
 type stopCall struct {
@@ -1409,8 +1430,10 @@ func (s *fakeSessions) ResumeColdDetached(ws ids.WorkspaceID, resume ColdResume,
 
 // fakeShim is the narrow Shim surface.
 type fakeShim struct {
-	killedTurns    []killedTurn
-	killTurnErr    error
+	killedTurns []killedTurn
+	killTurnErr error
+	// killTurnHangs makes KillTurn wait for its context to end.
+	killTurnHangs  bool
 	stoppedAgents  []string
 	stopAgentErr   error
 	stoppedShells  []string
@@ -1479,7 +1502,13 @@ type deliveredAnswer struct {
 	Answer *conversationv1.AgentAnswer
 }
 
-func (s *fakeShim) KillTurn(_ context.Context, turn ids.TurnID, force bool, commandedBy *conversationv1.AgentInterruptedByUser) error {
+func (s *fakeShim) KillTurn(ctx context.Context, turn ids.TurnID, force bool, commandedBy *conversationv1.AgentInterruptedByUser) error {
+	if s.killTurnHangs {
+		// A vendor that will not answer: the kill returns only when its
+		// caller's bound ends it.
+		<-ctx.Done()
+		return ctx.Err()
+	}
 	if s.killTurnErr != nil {
 		return s.killTurnErr
 	}

@@ -277,13 +277,14 @@ The standing notice first, then the held-prompt waiting line."
   (let ((buf (agent-repl--ws-get ws :input-buffer)))
     (and buf (buffer-live-p buf) buf)))
 
-(defun agent-repl--input-save-to-history (ws)
+(defun agent-repl--input-save-to-history (ws &optional discard)
   "Save the current composer's contents to WS's prompt history.
+DISCARD non-nil saves as the discard does (`agent-repl--history-push-discard').
 THE ONE SAVE a composer makes before its contents are replaced, shared by
 the discard (`agent-repl-discard-input') and a rollback's refill
 \(`agent-repl--input-rollback-done'): push the text (a blank or repeated
 one is skipped), stop any history browsing, and persist the ring."
-  (agent-repl--history-push)
+  (if discard (agent-repl--history-push-discard) (agent-repl--history-push))
   (agent-repl--history-reset)
   (agent-repl--history-save ws))
 
@@ -337,7 +338,9 @@ marker drawn, as a pasted image is."
 
 (defun agent-repl-discard-input ()
   "Save current input to history, clear the buffer, and enter insert state.
-While the composer is editing a held prompt this is also the edit's
+When the most recent history item is one an earlier discard added and is a
+substring of this input, it is replaced by this input instead of a new item
+being pushed.  While the composer is editing a held prompt this is also the edit's
 CANCEL: the held prompt keeps its content and the queue resumes
 (`agent-repl-held-edit-cancel')."
   (interactive)
@@ -346,7 +349,7 @@ CANCEL: the held prompt keeps its content and the queue resumes
     (agent-repl--log ws "elisp.input.discard ws=%s input-len=%d" ws input-len)
     (when (agent-repl-held-edit-active-p ws)
       (agent-repl-held-edit-cancel ws))
-    (agent-repl--input-save-to-history ws)
+    (agent-repl--input-save-to-history ws t)
     (erase-buffer)
     (setq agent-repl-input-attachments nil)
     (when (fboundp 'evil-insert-state) (evil-insert-state))))

@@ -58,6 +58,10 @@ import { BUBBLE_CLASS } from "../bubble/draw.js";
 import { MalformedView, isMalformedView } from "../rpc/malformed.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { callUnary } from "../rpc/unary.js";
+import { reportClientFailure } from "../rpc/link.js";
+import { assertNoUnknownFields } from "../rpc/strict.js";
+import { LoadFeedThroughResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_load_feed_through_pb.js";
+import { ConnectError } from "@connectrpc/connect";
 import { guardMalformed } from "../rpc/guard.js";
 import { frameUndecodable } from "../failure/sink.js";
 import { TOPBAR_TONES, toneClass, type Color } from "../vocab.js";
@@ -79,7 +83,7 @@ import {
   GetFeedPageResponseSchema,
   type GetFeedPageResponse,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_get_feed_page_pb";
-import { buildGetFeedPageRequest } from "./requests.js";
+import { buildGetFeedPageRequest, buildLoadFeedThroughRequest } from "./requests.js";
 import { armName } from "./renderers.js";
 import type {
   BubbleBodyRenderer,
@@ -238,10 +242,26 @@ interface RowState {
   dirty: boolean;
 }
 
+/** How a `LoadFeedThrough` walk ended: the target is loaded, or it is not. */
+export type LoadThroughOutcome = "reached" | "failed";
+
 export interface FeedController extends Handle {
   readonly element: HTMLElement;
   /** Paint a page: the newest page from OpenFeed, or an older one prepended. */
   applyPage(page: FeedPage, placement: "replace" | "prepend"): void;
+  /**
+   * Whether older pages remain unloaded above the oldest held row (the last
+   * page's edge). False until a page has landed.
+   */
+  hasMoreHistory(): boolean;
+  /**
+   * Bring TARGET into the loaded pages through `LoadFeedThrough`, prepending
+   * each streamed page as `loadOlder` prepends its `next` page. The "older"
+   * control is disabled for the whole walk. A failure is logged here and
+   * leaves every page already applied in place; the daemon, not this end,
+   * words it in the footer.
+   */
+  loadThrough(target: FeedId): Promise<LoadThroughOutcome>;
   /** One live upsert. */
   upsert(row: FeedRow): void;
   /**
@@ -303,6 +323,10 @@ export function createFeedController(
   // what decides whether a pushed row sorting before every held row is drawn
   // (the feed is at its start) or left to the walk (unloaded history).
   let walkEdge: "hasMore" | "atStart" | null = null;
+  // THE LoadFeedThrough WALKS IN FLIGHT: serialized through `throughTail`, and
+  // the "older" control stays disabled while `throughRunning` is above zero.
+  let throughTail: Promise<unknown> = Promise.resolve();
+  let throughRunning = 0;
 
   opts.host.setAttribute(
     "data-feed",
@@ -329,6 +353,8 @@ export function createFeedController(
   const controller: FeedController = {
     element: opts.host,
     applyPage,
+    hasMoreHistory: () => walkEdge === "hasMore",
+    loadThrough,
     upsert,
     applySelection,
     selectionActive: () => selectedRow !== null,
@@ -1578,6 +1604,121 @@ export function createFeedController(
       default:
         unreachableArm("GetFeedPageResponse.result", armName(result));
     }
+  }
+
+  /**
+   * The walk to ONE row: `LoadFeedThrough` streams every older page between
+   * the oldest loaded page and the page holding TARGET, then ends with
+   * `reached` or `error`. Walks are serialized (a second request waits for the
+   * first), and the "older" control is disabled while one runs so the two
+   * cannot race over the daemon's one walk.
+   */
+  function loadThrough(target: FeedId): Promise<LoadThroughOutcome> {
+    const run = throughTail.then(() => runLoadThrough(target));
+    throughTail = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
+
+  async function runLoadThrough(target: FeedId): Promise<LoadThroughOutcome> {
+    log.info("walking older pages through a target row", {
+      operation: "feed.load-through",
+      context: { feed: feedName(), target: target.value },
+    });
+    clearRefusals();
+    throughRunning += 1;
+    loadMore.disabled = true;
+    try {
+      return await consumeLoadThrough(target);
+    } finally {
+      throughRunning -= 1;
+      if (throughRunning === 0) loadMore.disabled = false;
+    }
+  }
+
+  async function consumeLoadThrough(
+    target: FeedId,
+  ): Promise<LoadThroughOutcome> {
+    if (opts.ctx.isQuiesced()) {
+      log.warn("LoadFeedThrough was not sent: the workspace has moved", {
+        operation: "feed.load-through-quiesced",
+        context: { target: target.value },
+      });
+      reportClientFailure(
+        "unary_transport",
+        "LoadFeedThrough: transferring to the new daemon",
+      );
+      return "failed";
+    }
+    let pages = 0;
+    try {
+      for await (const frame of opts.ctx.client.loadFeedThrough(
+        buildLoadFeedThroughRequest(opts.ctx.workspace, target),
+      )) {
+        assertNoUnknownFields(LoadFeedThroughResponseSchema, frame);
+        const arm = requireCase(
+          frame.frame,
+          "LoadFeedThroughResponse.frame",
+        );
+        switch (arm.case) {
+          case "page":
+            pages += 1;
+            applyPage(arm.value, "prepend");
+            break;
+          case "reached":
+            log.info("the walk reached its target", {
+              operation: "feed.load-through-reached",
+              context: { target: target.value, pages },
+            });
+            return "reached";
+          case "error": {
+            const cause = requireCase(
+              arm.value.cause,
+              "LoadFeedThroughError.cause",
+            );
+            // THE DAEMON PUBLISHES THE FOOTER LINE for a target-scoped error;
+            // this end only records what it was told.
+            log.warn("the daemon could not walk to the target row", {
+              operation: "feed.load-through-refused",
+              context: { target: target.value, pages, arm: cause.case },
+            });
+            return "failed";
+          }
+          default:
+            return unreachableArm(
+              "LoadFeedThroughResponse.frame",
+              armName(arm),
+            );
+        }
+      }
+    } catch (err) {
+      if (isMalformedView(err)) throw err;
+      const connectError = ConnectError.from(err);
+      log.error(
+        `LoadFeedThrough failed at the transport: ${connectError.message}`,
+        {
+          operation: "feed.load-through-transport-failure",
+          context: {
+            target: target.value,
+            pages,
+            code: connectError.code,
+            cause: connectError.rawMessage,
+          },
+        },
+      );
+      reportClientFailure(
+        "unary_transport",
+        `LoadFeedThrough: ${connectError.rawMessage}`,
+      );
+      return "failed";
+    }
+    // The stream ended with no terminal frame: the contract says exactly one.
+    throw new MalformedView(
+      "LoadFeedThroughResponse.frame",
+      "the stream ended without a terminal reached or error frame",
+    );
   }
 
   /** Drop whatever a previous walk's refusal left beside the control. */

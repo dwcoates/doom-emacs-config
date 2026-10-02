@@ -2,6 +2,7 @@ package footer
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"sync"
 	"testing"
@@ -1096,20 +1097,25 @@ func TestRetryStandingEndsWhenTheRetriedCallIsAnswered(t *testing.T) {
 // rendered it, so once concurrent changes are all in, the topic holds the
 // view of the state they left, never a stale one published late.
 func TestConcurrentChangesLeaveTheNewestViewPublished(t *testing.T) {
-	// Arrange
+	// Arrange: every writer opens a fault that claims `disconnected` and then
+	// retracts it, so the state they leave together stands no fault at all.
 	h := newHarness(t)
-	h.r.SetStartFailed(testWS, &StartFailed{Detail: "exit 1: boom"})
-	h.r.OnLink(testWS, shimclient.LinkDead)
+	connected(h)
 	const writers = 64
+	faults := make([]Fault, writers)
+	for i := range faults {
+		faults[i] = faultOf(t, fmt.Sprintf("f-%d", i), health.KindShimDied, false)
+	}
 	start := make(chan struct{})
 	var wg sync.WaitGroup
-	for i := 0; i < writers; i++ {
+	for _, fault := range faults {
 		wg.Add(1)
-		go func() {
+		go func(fault Fault) {
 			defer wg.Done()
 			<-start
-			h.r.AddDroppedPrompts(testWS, 1)
-		}()
+			h.r.OpenFault(testWS, fault)
+			h.r.CloseFault(testWS, fault.ID)
+		}(fault)
 	}
 
 	// Act
@@ -1117,7 +1123,7 @@ func TestConcurrentChangesLeaveTheNewestViewPublished(t *testing.T) {
 	wg.Wait()
 
 	// Assert
-	if got := h.view(t).GetStrip().GetStatus().GetDisconnected().GetActivity().GetSalient().GetStartFailed().GetDroppedPrompts(); got != writers {
-		t.Fatalf("published dropped_prompts = %d, want %d: a stale view was published after a newer one", got, writers)
+	if got := h.view(t).GetStrip().GetStatus().GetDisconnected(); got != nil {
+		t.Fatalf("published status = disconnected %+v, want none: a stale view (a fault still standing) was published after a newer one", got)
 	}
 }

@@ -2,6 +2,7 @@ package rollout
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	shimv1 "agentrepl/proto/shim/v1"
@@ -118,112 +119,153 @@ func (c *controller) shimBounce(reason RelaunchReason, force bool) bounce.Func {
 		fields := dlog.Context{"workspace": string(ws), "reason": string(reason), "force": force}
 
 		old, hasOld := c.deps.Shims.Client(ws)
-
-		// THE PRELAUNCH COEXISTS WITH THE LIVE SHIM. An inert shim holds NEITHER
-		// kernel lock -- by ruling the shim takes both inside StartSession, not
-		// at startup -- so a second process for one workspace comes up beside
-		// the first, costing nothing until the swap.
-		fresh, err := c.deps.Shims.Prelaunch(ctx, ws)
-		if err != nil {
-			c.log.Error(opRelaunch, "the inert prelaunch failed; the old shim is untouched", withCause(fields, err))
-			return fmt.Errorf("rollout: relaunch %q: prelaunch: %w", ws, err)
-		}
-		c.log.Debug(opRelaunch, "prelaunched an inert shim beside the running one", fields)
-
-		lease, err := c.deps.DB.AcquireLease(ctx, ws, wsm.HolderRestart, wsm.PolicyHold)
-		if err != nil {
-			c.log.Error(opRelaunch, "could not take the restart-pending hold", withCause(fields, err))
-			c.retirePrelaunch(ctx, fresh, reason, fields)
-			return fmt.Errorf("rollout: relaunch %q: take the restart hold: %w", ws, err)
-		}
-		fields["lease"] = string(lease.ID)
+		var lease *wsm.Lease
 		// THE HOLD'S LIFETIME IS THIS BOUNCE'S SCOPE: it is released on every
 		// way out of here, success and each failure alike, and on a context the
 		// caller's cancellation cannot reach -- a stand-down that ended with its
 		// context used to release through that same cancelled context, the
 		// write was refused, and the restart hold outlived the bounce.
-		defer c.release(context.WithoutCancel(ctx), ws, lease.ID, fields)
+		defer func() {
+			if lease != nil {
+				c.release(context.WithoutCancel(ctx), ws, lease.ID, fields)
+			}
+		}()
+		for {
+			fresh, resumed, err := c.relaunchOnce(ctx, ws, reason, force, old, hasOld, &lease, fields)
+			if errors.Is(err, ErrResumeRestarted) {
+				// A RESTART ENDED THE RESUME'S VENDOR-START RUN. The restart
+				// wants this workspace relaunched at once, so the shim this
+				// bounce just installed is stood down FORCED and relaunched
+				// over, with a fresh run; the restart's own request joined this
+				// bounce and hears its outcome.
+				c.log.Info(opRelaunch, "a restart ended the resume's vendor-start run; relaunching over the installed shim", fields)
+				old, hasOld, force = fresh, true, true
+				fields["force"] = true
+				continue
+			}
+			if err != nil {
+				return err
+			}
+			return c.settleRelaunch(ctx, ws, fresh, resumed, fields)
+		}
+	}
+}
+
+// relaunchOnce is one pass of the bounce engine: prelaunch, the
+// restart-pending hold (taken once per bounce, into *lease), the stand-down
+// and reap of `old`, the install and the resume. It answers the installed
+// shim and the resume's outcome.
+func (c *controller) relaunchOnce(ctx context.Context, ws ids.WorkspaceID, reason RelaunchReason, force bool, old shimclient.Client, hasOld bool, lease **wsm.Lease, fields dlog.Context) (shimclient.Client, Resumed, error) {
+	// THE PRELAUNCH COEXISTS WITH THE LIVE SHIM. An inert shim holds NEITHER
+	// kernel lock -- by ruling the shim takes both inside StartSession, not
+	// at startup -- so a second process for one workspace comes up beside
+	// the first, costing nothing until the swap.
+	fresh, err := c.deps.Shims.Prelaunch(ctx, ws)
+	if err != nil {
+		c.log.Error(opRelaunch, "the inert prelaunch failed; the old shim is untouched", withCause(fields, err))
+		return nil, Resumed{}, fmt.Errorf("rollout: relaunch %q: prelaunch: %w", ws, err)
+	}
+	c.log.Debug(opRelaunch, "prelaunched an inert shim beside the running one", fields)
+
+	if *lease == nil {
+		taken, err := c.deps.DB.AcquireLease(ctx, ws, wsm.HolderRestart, wsm.PolicyHold)
+		if err != nil {
+			c.log.Error(opRelaunch, "could not take the restart-pending hold", withCause(fields, err))
+			c.retirePrelaunch(ctx, fresh, reason, fields)
+			return nil, Resumed{}, fmt.Errorf("rollout: relaunch %q: take the restart hold: %w", ws, err)
+		}
+		*lease = &taken
+		fields["lease"] = string(taken.ID)
 		c.deps.LeaseChanged(ws)
 		c.publishHost(ws)
 		c.log.Debug(opRelaunch, "took the restart-pending hold; the tray draws it now", fields)
-
-		if hasOld {
-			// THE STAND-DOWN IS THE POINT OF NO RETURN, so a replacement that
-			// is already dead stops the bounce here, with the old shim still
-			// serving.
-			if err := c.replacementAlive(fresh, ws, "before the old shim was stood down; the old shim keeps serving", fields); err != nil {
-				return err
-			}
-			if err := c.standDown(ctx, old, ws, reason, force, fields); err != nil {
-				c.retirePrelaunch(ctx, fresh, reason, fields)
-				if bounce.OutcomeOf(err) == bounce.OutcomeDeferred {
-					c.log.Info(opRelaunch, "the bounce is deferred: the old shim keeps serving untouched, and the registry takes the bounce again at the workspace's next freeness", fields)
-				}
-				return err
-			}
-		} else {
-			c.log.Debug(opRelaunch, "the workspace had no running shim to stand down", fields)
-		}
-		// THE OLD SHIM'S REPORTED BUILD LEAVES WITH IT. The reap gate has
-		// passed, so whatever build is on record was the stood-down shim's;
-		// the replacement's own report is the one judged, whenever it arrives.
-		c.forgetReported(ws)
-
-		// A REPLACEMENT THAT DIED DURING THE STAND-DOWN IS REPLACED, never
-		// installed: the old shim is gone, so the workspace is otherwise left
-		// linked to nothing. One more prelaunch, and a refusal of that one is
-		// the bounce's failure; the workspace then has no live client, which
-		// sends its next prompt down the revival path.
-		if err := c.replacementAlive(fresh, ws, "while the old shim stood down; prelaunching another", fields); err != nil {
-			fresh, err = c.deps.Shims.Prelaunch(ctx, ws)
-			if err != nil {
-				c.log.Error(opRelaunch, "the second prelaunch failed; the workspace has no shim until it is revived", withCause(fields, err))
-				return fmt.Errorf("rollout: relaunch %q: prelaunch after the replacement died: %w", ws, err)
-			}
-		}
-
-		// THE REAP HAS PASSED, so both of the old shim's kernel locks are free
-		// and the prelaunched one takes them at its StartSession.
-		if err := c.deps.Shims.Install(ctx, ws, fresh); err != nil {
-			c.log.Error(opRelaunch, "could not install the prelaunched shim", withCause(fields, err))
-			c.retirePrelaunch(ctx, fresh, reason, fields)
-			return fmt.Errorf("rollout: relaunch %q: install the new shim: %w", ws, err)
-		}
-
-		resumed, err := c.deps.Shims.Resume(ctx, ws, fresh)
-		if err != nil {
-			c.recordRelaunchFault(ctx, ws, err, fields)
-			return fmt.Errorf("rollout: relaunch %q: resume: %w", ws, err)
-		}
-		if resumed.Cold != nil {
-			// THE ORDINARY COLD GATE. A fast swap stays warm because the context
-			// cache is server-side, so this fires only on a genuinely lapsed TTL.
-			c.log.Info(opRelaunch, "the resume answered cold; raising the ordinary cold gate", fields)
-			if err := c.deps.ColdGate(ctx, ws, resumed.Cold); err != nil {
-				c.log.Error(opRelaunch, "could not raise the cold gate", withCause(fields, err))
-				return fmt.Errorf("rollout: relaunch %q: cold gate: %w", ws, err)
-			}
-		}
-
-		if pid := fresh.PID(); pid > 0 {
-			if err := c.deps.DB.SetShimPID(ctx, ws, &pid); err != nil {
-				c.log.Warn(opRelaunch, "could not record the new shim's pid", withCause(fields, err))
-			}
-		}
-
-		// THE INSTALLED REPLACEMENT IS A HEALTHY ATTACH, and a warm resume a
-		// started session: both are recovery edges (health/lifetime.go). A
-		// cold answer started nothing yet; the gate's re-open is its start.
-		workspace := ws
-		scope := health.EdgeScope{Workspace: &workspace}
-		health.CloseOnEdge(ctx, c.deps.DB, c.log.With(fields), health.EdgeHealthyAttach, scope, c.deps.Clock.Now())
-		if resumed.Cold == nil {
-			health.CloseOnEdge(ctx, c.deps.DB, c.log.With(fields), health.EdgeSessionStarted, scope, c.deps.Clock.Now())
-		}
-
-		c.log.Info(opRelaunch, "relaunched the workspace's shim", fields)
-		return nil
 	}
+
+	if hasOld {
+		// THE STAND-DOWN IS THE POINT OF NO RETURN, so a replacement that
+		// is already dead stops the bounce here, with the old shim still
+		// serving.
+		if err := c.replacementAlive(fresh, ws, "before the old shim was stood down; the old shim keeps serving", fields); err != nil {
+			return nil, Resumed{}, err
+		}
+		if err := c.standDown(ctx, old, ws, reason, force, fields); err != nil {
+			c.retirePrelaunch(ctx, fresh, reason, fields)
+			if bounce.OutcomeOf(err) == bounce.OutcomeDeferred {
+				c.log.Info(opRelaunch, "the bounce is deferred: the old shim keeps serving untouched, and the registry takes the bounce again at the workspace's next freeness", fields)
+			}
+			return nil, Resumed{}, err
+		}
+	} else {
+		c.log.Debug(opRelaunch, "the workspace had no running shim to stand down", fields)
+	}
+	// THE OLD SHIM'S REPORTED BUILD LEAVES WITH IT. The reap gate has
+	// passed, so whatever build is on record was the stood-down shim's;
+	// the replacement's own report is the one judged, whenever it arrives.
+	c.forgetReported(ws)
+
+	// A REPLACEMENT THAT DIED DURING THE STAND-DOWN IS REPLACED, never
+	// installed: the old shim is gone, so the workspace is otherwise left
+	// linked to nothing. One more prelaunch, and a refusal of that one is
+	// the bounce's failure; the workspace then has no live client, which
+	// sends its next prompt down the revival path.
+	if err := c.replacementAlive(fresh, ws, "while the old shim stood down; prelaunching another", fields); err != nil {
+		fresh, err = c.deps.Shims.Prelaunch(ctx, ws)
+		if err != nil {
+			c.log.Error(opRelaunch, "the second prelaunch failed; the workspace has no shim until it is revived", withCause(fields, err))
+			return nil, Resumed{}, fmt.Errorf("rollout: relaunch %q: prelaunch after the replacement died: %w", ws, err)
+		}
+	}
+
+	// THE REAP HAS PASSED, so both of the old shim's kernel locks are free
+	// and the prelaunched one takes them at its StartSession.
+	if err := c.deps.Shims.Install(ctx, ws, fresh); err != nil {
+		c.log.Error(opRelaunch, "could not install the prelaunched shim", withCause(fields, err))
+		c.retirePrelaunch(ctx, fresh, reason, fields)
+		return nil, Resumed{}, fmt.Errorf("rollout: relaunch %q: install the new shim: %w", ws, err)
+	}
+
+	resumed, err := c.deps.Shims.Resume(ctx, ws, fresh)
+	if errors.Is(err, ErrResumeRestarted) {
+		return fresh, Resumed{}, err
+	}
+	if err != nil {
+		c.recordRelaunchFault(ctx, ws, err, fields)
+		return nil, Resumed{}, fmt.Errorf("rollout: relaunch %q: resume: %w", ws, err)
+	}
+	return fresh, resumed, nil
+}
+
+// settleRelaunch finishes a bounce whose resume answered: the cold gate when
+// the resume answered cold, the new shim's pid, and the recovery edges.
+func (c *controller) settleRelaunch(ctx context.Context, ws ids.WorkspaceID, fresh shimclient.Client, resumed Resumed, fields dlog.Context) error {
+	if resumed.Cold != nil {
+		// THE ORDINARY COLD GATE. A fast swap stays warm because the context
+		// cache is server-side, so this fires only on a genuinely lapsed TTL.
+		c.log.Info(opRelaunch, "the resume answered cold; raising the ordinary cold gate", fields)
+		if err := c.deps.ColdGate(ctx, ws, resumed.Cold); err != nil {
+			c.log.Error(opRelaunch, "could not raise the cold gate", withCause(fields, err))
+			return fmt.Errorf("rollout: relaunch %q: cold gate: %w", ws, err)
+		}
+	}
+
+	if pid := fresh.PID(); pid > 0 {
+		if err := c.deps.DB.SetShimPID(ctx, ws, &pid); err != nil {
+			c.log.Warn(opRelaunch, "could not record the new shim's pid", withCause(fields, err))
+		}
+	}
+
+	// THE INSTALLED REPLACEMENT IS A HEALTHY ATTACH, and a warm resume a
+	// started session: both are recovery edges (health/lifetime.go). A
+	// cold answer started nothing yet; the gate's re-open is its start.
+	workspace := ws
+	scope := health.EdgeScope{Workspace: &workspace}
+	health.CloseOnEdge(ctx, c.deps.DB, c.log.With(fields), health.EdgeHealthyAttach, scope, c.deps.Clock.Now())
+	if resumed.Cold == nil {
+		health.CloseOnEdge(ctx, c.deps.DB, c.log.With(fields), health.EdgeSessionStarted, scope, c.deps.Clock.Now())
+	}
+
+	c.log.Info(opRelaunch, "relaunched the workspace's shim", fields)
+	return nil
 }
 
 // replacementAlive answers an error when the prelaunched replacement has
@@ -297,7 +339,14 @@ var ErrStandDownUnanswered = fmt.Errorf("rollout: the shim did not answer the un
 func (c *controller) standDown(ctx context.Context, old shimclient.Client, ws ids.WorkspaceID, reason RelaunchReason, force bool, fields dlog.Context) error {
 	exited := old.Exited()
 
-	answer, err := old.KillSession(ctx, &shimv1.KillSessionRequest{Force: force})
+	// THE CALL IS BOUNDED. A shim whose vendor is unreachable can hold the
+	// stand-down rpc forever, and an unbounded call never reaches the window
+	// or the SIGKILL behind it -- the restart that exists for a stuck
+	// workspace would then be stuck itself. The bound contains the shim's own
+	// teardown worst case (drain.DefaultStandBound).
+	callCtx, endCall := context.WithTimeout(ctx, c.deps.StandDownCallBound)
+	answer, err := old.KillSession(callCtx, &shimv1.KillSessionRequest{Force: force})
+	endCall()
 	switch {
 	case err != nil && !force:
 		return c.awaitUnansweredStandDown(ctx, exited, ws, err, fields)
@@ -312,8 +361,27 @@ func (c *controller) standDown(ctx context.Context, old shimclient.Client, ws id
 			}))
 		return fmt.Errorf("rollout: relaunch %q: stand down: %w", ws, ErrStandDownLive)
 	case err != nil:
-		c.log.Warn(opRelaunch, "the stand-down call failed; waiting out the window before forcing",
-			withCause(fields, err))
+		// A FORCED STAND-DOWN THE SHIM DID NOT ANSWER inside a bound that
+		// contains its own teardown is a hung shim: unless it has already
+		// left, it is killed now rather than after the window.
+		select {
+		case info := <-exited:
+			c.log.Warn(opRelaunch, "the forced stand-down call failed, but the shim left; the gate is passed",
+				merge(withCause(fields, err), dlog.Context{"pid": info.PID, "exit_code": info.Code, "signal": info.Signal}))
+			return nil
+		default:
+		}
+		c.log.Warn(opRelaunch, "the forced stand-down call failed; killing the shim now",
+			merge(withCause(fields, err), dlog.Context{"call_bound": c.deps.StandDownCallBound.String()}))
+		return c.killAndReap(ctx, old, exited, ws, reason, "the forced stand-down went unanswered", fields)
+	case answer.GetFailure().GetNoSession() != nil:
+		// A SHIM HOLDING NO SESSION HAS NOTHING TO END: its vendor never
+		// started (a refused or retried start, a restart of a stuck bring-up),
+		// so no transcript or turn is at stake. It does not leave on its own
+		// after this refusal, so waiting the window out would only delay the
+		// restart; it is stopped at once.
+		c.log.Info(opRelaunch, "the old shim holds no session; stopping it at once", fields)
+		return c.killAndReap(ctx, old, exited, ws, reason, "the old shim held no session to stand down", fields)
 	case answer.GetFailure() != nil:
 		c.log.Warn(opRelaunch, "the shim refused the stand-down; waiting out the window before forcing",
 			merge(fields, dlog.Context{"refusal": killRefusal(answer.GetFailure())}))
@@ -335,9 +403,20 @@ func (c *controller) standDown(ctx context.Context, old shimclient.Client, ws id
 	c.log.Error(opRelaunch, "the old shim did not exit inside the stand-down window; force-killing it. "+
 		"The stream-only residue of the window is lost",
 		merge(fields, dlog.Context{"stand_down_window": c.deps.StandDownWindow.String()}))
+	if err := c.killAndReap(ctx, old, exited, ws, reason, "the stand-down window expired", fields); err != nil {
+		return err
+	}
+	c.log.Warn(opRelaunch, "the force-killed shim is reaped; the gate is passed", fields)
+	return nil
+}
+
+// killAndReap force-kills the old shim and waits for the reap gate: the
+// kernel's exit event, so at most one vendor binary ever touches the
+// session's transcript.
+func (c *controller) killAndReap(ctx context.Context, old shimclient.Client, exited <-chan shimclient.ExitInfo, ws ids.WorkspaceID, reason RelaunchReason, why string, fields dlog.Context) error {
 	if err := old.Kill(ctx, shimclient.KillAttribution{
 		Actor:  "rollout.relaunch",
-		Reason: fmt.Sprintf("the stand-down window expired during a %s relaunch", reason),
+		Reason: fmt.Sprintf("%s during a %s relaunch", why, reason),
 		Force:  true,
 	}); err != nil {
 		c.log.Error(opRelaunch, "the force-kill failed", withCause(fields, err))
@@ -345,7 +424,7 @@ func (c *controller) standDown(ctx context.Context, old shimclient.Client, ws id
 	}
 	select {
 	case info := <-exited:
-		c.log.Warn(opRelaunch, "the force-killed shim is reaped; the gate is passed",
+		c.log.Debug(opRelaunch, "the killed shim is reaped; the gate is passed",
 			merge(fields, dlog.Context{"pid": info.PID, "exit_code": info.Code, "signal": info.Signal}))
 		return nil
 	case <-ctx.Done():

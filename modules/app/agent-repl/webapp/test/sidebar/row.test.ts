@@ -39,12 +39,16 @@ const lineOf = (drawn: HTMLElement): HTMLElement =>
 const panelOf = (drawn: HTMLElement): HTMLElement =>
   drawn.querySelector(":scope > .detail") as HTMLElement;
 
+/** The status dot: the panel's one pointer trigger (owner request, 2026-10-02). */
+const dotOf = (drawn: HTMLElement): HTMLElement =>
+  lineOf(drawn).querySelector(".st") as HTMLElement;
+
 function hoverIn(drawn: HTMLElement): void {
-  lineOf(drawn).dispatchEvent(new MouseEvent("mouseenter"));
+  dotOf(drawn).dispatchEvent(new MouseEvent("mouseenter"));
 }
 
 function hoverOut(drawn: HTMLElement): void {
-  lineOf(drawn).dispatchEvent(new MouseEvent("mouseleave"));
+  dotOf(drawn).dispatchEvent(new MouseEvent("mouseleave"));
 }
 
 async function click(control: Element): Promise<void> {
@@ -703,6 +707,36 @@ describe("the detail panel opens on hover", () => {
   it("opens nothing on a resting row", () => {
     const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
     expect(drawn.classList.contains("open")).toBe(false);
+  });
+
+  it("does not open when the pointer rests on the row's name", () => {
+    // ARRANGE
+    const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
+    // ACT
+    (lineOf(drawn).querySelector(".name") as HTMLElement).dispatchEvent(new MouseEvent("mouseenter"));
+    vi.advanceTimersByTime(HOVER_OPEN_DELAY_MS * 10);
+    // ASSERT
+    expect(drawn.classList.contains("open")).toBe(false);
+  });
+
+  it("does not open when the pointer rests on the row line itself", () => {
+    // ARRANGE
+    const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
+    // ACT
+    lineOf(drawn).dispatchEvent(new MouseEvent("mouseenter"));
+    vi.advanceTimersByTime(HOVER_OPEN_DELAY_MS * 10);
+    // ASSERT
+    expect(drawn.classList.contains("open")).toBe(false);
+  });
+
+  it("opens once the pointer has rested on the status dot for the intent delay", () => {
+    // ARRANGE
+    const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
+    // ACT
+    hoverIn(drawn);
+    vi.advanceTimersByTime(HOVER_OPEN_DELAY_MS);
+    // ASSERT
+    expect(drawn.classList.contains("open")).toBe(true);
   });
 
   it("does not open on a pass-through shorter than the intent delay", () => {

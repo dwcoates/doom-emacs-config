@@ -43,9 +43,8 @@ func (r *resolver) repositoryView(live []wsm.Workspace, rc rowContext, log dlog.
 		section := &frontendv1.RosterRepoSection{
 			Key: &frontendv1.RosterRepoKey{
 				Repository: &workspacev1.RepositoryRef{Id: string(repo.ID), Dir: repo.Dir}},
-			Header: &frontendv1.RosterSectionHeader{
-				Label: &frontendv1.RosterLabel{Text: repo.Name}},
-			Rows: rows,
+			Header: sectionHeader(repo.Name, rows),
+			Rows:   rows,
 		}
 		setRepoFold(section, repo.Folded)
 		out.Sections = append(out.Sections, section)
@@ -158,10 +157,30 @@ func (r *resolver) mergedSection(merged []wsm.Workspace, rc rowContext, log dlog
 		rows.Rows = append(rows.Rows, r.row(ws, rc, log))
 	}
 	return &frontendv1.RosterMergedSection{
-		Header: &frontendv1.RosterSectionHeader{
-			Label: &frontendv1.RosterLabel{Text: MergedSectionLabel}},
-		Rows: rows,
+		Header: sectionHeader(MergedSectionLabel, rows),
+		Rows:   rows,
 	}
+}
+
+// sectionHeader composes a repository or Recently Merged header: its label and
+// the count a FOLDED section draws beside it. The count is read off the very
+// rows the section carries, so it can never disagree with them, and no client
+// counts rows for itself.
+func sectionHeader(label string, rows *frontendv1.RosterRows) *frontendv1.RosterSectionHeader {
+	return &frontendv1.RosterSectionHeader{
+		Label: &frontendv1.RosterLabel{Text: label},
+		Count: &frontendv1.RosterSectionCount{Workspaces: countRows(rows.GetRows())},
+	}
+}
+
+// countRows counts every row in a rows region, each nested family row
+// included.
+func countRows(rows []*frontendv1.RosterRow) uint32 {
+	var n uint32
+	for _, row := range rows {
+		n += 1 + countRows(row.GetChildren())
+	}
+	return n
 }
 
 // sectionRows nests one section's workspaces and composes their rows. Nesting

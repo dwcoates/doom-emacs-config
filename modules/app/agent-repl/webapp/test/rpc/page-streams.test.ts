@@ -938,8 +938,23 @@ describe("the page's one standing stream", () => {
  * server-streaming method except the mux's own — and a streaming rpc landed
  * tomorrow is guarded the moment its bindings regenerate.
  */
+/**
+ * THE FINITE STREAMS: server-streaming rpcs that END on their own with a
+ * terminal frame (`LoadFeedThrough`: pages, then `reached` or `error`). They
+ * hold a connection for the length of one walk, as a slow unary call does, not
+ * for the page's life, so they do not spend the standing-stream budget this
+ * guard protects. Named here, one by one: a new streaming rpc is guarded until
+ * someone states in this list that it is finite.
+ */
+const FINITE_STREAMING_RPCS: readonly string[] = ["loadFeedThrough"];
+
 const STREAMING_RPCS: readonly string[] = Object.entries(AgentRepl.method)
-  .filter(([name, method]) => method.methodKind === "server_streaming" && name !== "watchPage")
+  .filter(
+    ([name, method]) =>
+      method.methodKind === "server_streaming" &&
+      name !== "watchPage" &&
+      !FINITE_STREAMING_RPCS.includes(name),
+  )
   .map(([name]) => name);
 
 /** Every .ts file under src/, recursively. */
@@ -997,6 +1012,16 @@ describe("the page's connection budget", () => {
     // stream a page is allowed to hold — is not among them.
     expect(guarded).toEqual([...expected].sort());
     expect(guarded).not.toContain("watchPage");
+  });
+
+  it("exempts only rpcs the service still declares as server-streaming", () => {
+    // Arrange / Act.
+    const stale = FINITE_STREAMING_RPCS.filter(
+      (name) => AgentRepl.method[name as keyof typeof AgentRepl.method]?.methodKind !== "server_streaming",
+    );
+
+    // Assert: an exemption for a dropped or reshaped rpc is noticed, not kept.
+    expect(stale).toEqual([]);
   });
 });
 
