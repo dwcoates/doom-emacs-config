@@ -1789,7 +1789,7 @@ describe("a compaction divider's summary", () => {
     // Arrange / Act
     const row = await drawRow(separationRow("compacted", { id: feedId("cut-1") }));
     // Assert
-    expect(row.querySelector(".sep-compacted button, .sep-compacted [data-fold]")).toBeNull();
+    expect(row.querySelector(".sep-compacted ar-button, .sep-compacted [data-fold]")).toBeNull();
   });
 
   it("starts in its collapsed bubble form", async () => {

@@ -163,7 +163,7 @@ describe("drawFeedSessionSeparation: the compaction", () => {
 
   it("draws no summary disclosure toggle", () => {
     const el = drawFeedSessionSeparation(separation(ARMS[1][1]), ctxFor());
-    expect(el.querySelector("button, [data-fold]")).toBeNull();
+    expect(el.querySelector("ar-button, [data-fold]")).toBeNull();
   });
 
   it("draws the summary bubble in its collapsed form", () => {

@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { createControl, type Control } from "../../src/control.js";
 import { describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import {
@@ -26,7 +27,7 @@ const picker = (
 
 function mountPicker(tc: ReturnType<typeof topbarContext>["tc"], host: HTMLElement, view = picker()) {
   host.append(drawTopbarPermissionModePicker(view, tc));
-  return host.querySelector<HTMLButtonElement>(".topbar-mode-button")!;
+  return host.querySelector<Control>(".topbar-mode-button")!;
 }
 
 describe("drawTopbarPermissionModePicker", () => {
@@ -149,6 +150,26 @@ describe("the pick", () => {
     expect(host.querySelector(".refusal")).toBeNull();
   });
 
+  it("gives the picked option back after a refusal, so it can be picked again", async () => {
+    // ARRANGE: a disabled control refuses every click, so an option left
+    // disabled after a refusal could never be picked again.
+    const { host, tc } = topbarContext(
+      appContext({
+        setPermissionMode: () =>
+          create(SetPermissionModeResponseSchema, {
+            result: { case: "error", value: { cause: { case: "noSession", value: {} } } },
+          }),
+      }),
+    );
+    const button = mountPicker(tc, host);
+    button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    // ACT
+    openPanel(host)!.querySelector<HTMLElement>("[data-mode-option]")!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // ASSERT
+    expect(openPanel(host)!.querySelector("[data-mode-option]")?.getAttribute("aria-disabled")).toBeNull();
+  });
+
   it("clears the previous refusal before the next pick", async () => {
     // ARRANGE
     let answers = 0;
@@ -255,8 +276,8 @@ describe("the pick", () => {
     };
     const wrap = document.createElement("div");
     host.append(wrap);
-    const button = document.createElement("button");
-    const row = document.createElement("button");
+    const button = createControl();
+    const row = createControl();
     const option = create(TopbarPermissionModeOptionSchema, {
       mode: "acceptEdits",
       displayName: "accept edits",
@@ -280,8 +301,8 @@ describe("the pick", () => {
     };
     const wrap = document.createElement("div");
     host.append(wrap);
-    const button = document.createElement("button");
-    const row = document.createElement("button");
+    const button = createControl();
+    const row = createControl();
     const option = create(TopbarPermissionModeOptionSchema, {
       mode: "acceptEdits",
       displayName: "accept edits",

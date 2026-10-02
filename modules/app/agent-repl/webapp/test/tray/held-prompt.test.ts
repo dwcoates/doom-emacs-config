@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { type Control } from "../../src/control.js";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -415,7 +416,7 @@ describe("drawHeldPrompt accept", () => {
       heldPrompt({ classification: { case: "holdForTurnEnd", value: { rationale: "later" } } }),
       tc,
     );
-    card.querySelector<HTMLButtonElement>('[data-held-action="accept"]')?.click();
+    card.querySelector<Control>('[data-held-action="accept"]')?.click();
     await settle();
     expect(seen[0]?.action.case).toBe("accept");
     expect(seen[0]?.turn?.value).toBe("turn-1");
@@ -525,7 +526,7 @@ describe("drawHeldPrompt release availability", () => {
   it("gives the release control the accessible name Send now", () => {
     const { tc } = trayContext();
     const card = drawHeldPrompt(heldPrompt(), tc);
-    const button = card.querySelector<HTMLButtonElement>('[data-held-action="release"]');
+    const button = card.querySelector<Control>('[data-held-action="release"]');
     expect([button?.getAttribute("aria-label"), button?.textContent]).toEqual([null, SEND_NOW_LABEL]);
   });
 
@@ -597,7 +598,7 @@ describe("drawHeldPrompt actions", () => {
     const seen: UpdateHeldPromptRequest[] = [];
     const { tc } = trayContext(successResponse, seen);
     const card = drawHeldPrompt(heldPrompt(), tc);
-    card.querySelector<HTMLButtonElement>('[data-held-action="release"]')?.click();
+    card.querySelector<Control>('[data-held-action="release"]')?.click();
     await settle();
     expect(seen[0]?.action.case).toBe("release");
     expect(seen[0]?.turn?.value).toBe("turn-1");
@@ -607,7 +608,7 @@ describe("drawHeldPrompt actions", () => {
     const seen: UpdateHeldPromptRequest[] = [];
     const { tc } = trayContext(successResponse, seen);
     const card = drawHeldPrompt(heldPrompt(), tc);
-    card.querySelector<HTMLButtonElement>('[data-held-action="drop"]')?.click();
+    card.querySelector<Control>('[data-held-action="drop"]')?.click();
     await settle();
     expect(seen[0]?.workspace?.id).toBe("ws-1");
   });
@@ -615,7 +616,7 @@ describe("drawHeldPrompt actions", () => {
   it("draws the refusal at the row when the daemon refuses", async () => {
     const { tc } = trayContext(errorResponse);
     const card = drawHeldPrompt(heldPrompt(), tc);
-    card.querySelector<HTMLButtonElement>('[data-held-action="drop"]')?.click();
+    card.querySelector<Control>('[data-held-action="drop"]')?.click();
     await settle();
     expect(card.querySelector(".queued-refusal")?.getAttribute("data-arm")).toBe("noSuchHold");
   });
@@ -625,7 +626,7 @@ describe("drawHeldPrompt actions", () => {
     async (arm) => {
       const { tc } = trayContext(refusalResponse(arm));
       const card = drawHeldPrompt(heldPrompt(), tc);
-      card.querySelector<HTMLButtonElement>('[data-held-action="drop"]')?.click();
+      card.querySelector<Control>('[data-held-action="drop"]')?.click();
       await settle();
       const refusal = card.querySelector(".queued-refusal");
       expect([refusal?.getAttribute("data-arm"), refusal?.textContent === ""]).toEqual([arm, false]);
@@ -635,7 +636,7 @@ describe("drawHeldPrompt actions", () => {
   it("names the registry's directory on a mismatch, from the one shared wording", async () => {
     const { tc } = trayContext(refusalResponse("workspaceRefMismatch"));
     const card = drawHeldPrompt(heldPrompt(), tc);
-    card.querySelector<HTMLButtonElement>('[data-held-action="drop"]')?.click();
+    card.querySelector<Control>('[data-held-action="drop"]')?.click();
     await settle();
     expect(card.querySelector(".queued-refusal")?.textContent).toContain("/w/registry");
   });
@@ -643,7 +644,7 @@ describe("drawHeldPrompt actions", () => {
   it("says an already-delivered prompt has been delivered", async () => {
     const { tc } = trayContext(refusalResponse("alreadyDelivered"));
     const card = drawHeldPrompt(heldPrompt(), tc);
-    card.querySelector<HTMLButtonElement>('[data-held-action="drop"]')?.click();
+    card.querySelector<Control>('[data-held-action="drop"]')?.click();
     await settle();
     expect(card.querySelector(".queued-refusal")?.textContent).toContain("already been delivered");
   });
@@ -651,7 +652,7 @@ describe("drawHeldPrompt actions", () => {
   it("says accept applies only to a turn-end hold", async () => {
     const { tc } = trayContext(refusalResponse("acceptNotApplicable"));
     const card = drawHeldPrompt(heldPrompt(), tc);
-    card.querySelector<HTMLButtonElement>('[data-held-action="drop"]')?.click();
+    card.querySelector<Control>('[data-held-action="drop"]')?.click();
     await settle();
     expect(card.querySelector(".queued-refusal")?.textContent).toContain("the turn's end");
   });
@@ -659,7 +660,7 @@ describe("drawHeldPrompt actions", () => {
   it("re-enables the row after a refusal so it can be retried", async () => {
     const { tc } = trayContext(errorResponse);
     const card = drawHeldPrompt(heldPrompt(), tc);
-    const drop = card.querySelector<HTMLButtonElement>('[data-held-action="drop"]');
+    const drop = card.querySelector<Control>('[data-held-action="drop"]');
     drop?.click();
     await settle();
     expect(drop?.disabled).toBe(false);
@@ -674,7 +675,7 @@ describe("drawHeldPrompt actions", () => {
       seen.push((event as CustomEvent<HeldPromptDroppedDetail>).detail.text);
     };
     document.addEventListener(DROPPED_EVENT, listener);
-    card.querySelector<HTMLButtonElement>('[data-held-action="drop"]')?.click();
+    card.querySelector<Control>('[data-held-action="drop"]')?.click();
     await settle();
     document.removeEventListener(DROPPED_EVENT, listener);
     card.remove();
@@ -690,7 +691,7 @@ describe("drawHeldPrompt actions", () => {
       seen.push("dropped");
     };
     document.addEventListener(DROPPED_EVENT, listener);
-    card.querySelector<HTMLButtonElement>('[data-held-action="drop"]')?.click();
+    card.querySelector<Control>('[data-held-action="drop"]')?.click();
     await settle();
     document.removeEventListener(DROPPED_EVENT, listener);
     card.remove();
@@ -831,7 +832,7 @@ describe("the said body", () => {
       seen.push((event as CustomEvent<HeldPromptDroppedDetail>).detail.text);
     };
     document.addEventListener(DROPPED_EVENT, listener);
-    card.querySelector<HTMLButtonElement>('[data-held-action="drop"]')?.click();
+    card.querySelector<Control>('[data-held-action="drop"]')?.click();
     await settle();
     document.removeEventListener(DROPPED_EVENT, listener);
     card.remove();
@@ -999,7 +1000,7 @@ describe("the Cancel control", () => {
     const seen: UpdateHeldPromptRequest[] = [];
     const { tc } = trayContext(successResponse, seen);
     const card = drawHeldPrompt(heldPrompt(), tc);
-    const cancel = [...card.querySelectorAll<HTMLButtonElement>("button")].find(
+    const cancel = [...card.querySelectorAll<Control>("ar-button")].find(
       (button) => button.textContent === "Cancel",
     );
     // Act
@@ -1035,8 +1036,8 @@ describe("in-flight", () => {
       return new Promise<never>(() => undefined) as never;
     });
     const card = drawHeldPrompt(heldPrompt(), tc);
-    card.querySelector<HTMLButtonElement>('[data-held-action="drop"]')?.click();
-    const disabled = [...card.querySelectorAll("button")].every((b) => b.disabled);
+    card.querySelector<Control>('[data-held-action="drop"]')?.click();
+    const disabled = [...card.querySelectorAll<Control>("ar-button")].every((b) => b.disabled);
     expect(disabled).toBe(true);
   });
 });
@@ -1426,7 +1427,7 @@ describe("a held prompt collapsed and expanded", () => {
     const { tc } = trayContext(errorResponse);
     const card = drawHeldPrompt(heldPrompt(), tc);
     // Act
-    card.querySelector<HTMLButtonElement>('[data-held-action="release"]')?.click();
+    card.querySelector<Control>('[data-held-action="release"]')?.click();
     await settle();
     // Assert
     expect(card.querySelector(".queued-refusal")?.parentElement?.classList.contains("queued-details")).toBe(true);
@@ -1512,7 +1513,7 @@ describe("the Edit control", () => {
     // Act
     const card = drawHeldPrompt(heldPrompt(), tc);
     // Assert
-    const labels = [...card.querySelectorAll(".queued-actions button")].map((b) => b.textContent);
+    const labels = [...card.querySelectorAll<Control>(".queued-actions ar-button")].map((b) => b.textContent);
     expect(labels.slice(0, 3)).toEqual(["Send now", "Edit", "Cancel"]);
   });
 
@@ -1521,7 +1522,7 @@ describe("the Edit control", () => {
     const { tc, seen } = editContext();
     const card = drawHeldPrompt(heldPrompt(), tc);
     // Act
-    card.querySelector<HTMLButtonElement>('[data-held-action="edit"]')?.click();
+    card.querySelector<Control>('[data-held-action="edit"]')?.click();
     await settle();
     // Assert
     expect([seen[0]?.turn?.value, seen[0]?.action.case]).toEqual(["turn-1", "begin"]);
@@ -1532,7 +1533,7 @@ describe("the Edit control", () => {
     const { tc, reported } = editContext(editRefusal("alreadyDelivered"));
     const card = drawHeldPrompt(heldPrompt(), tc);
     // Act
-    card.querySelector<HTMLButtonElement>('[data-held-action="edit"]')?.click();
+    card.querySelector<Control>('[data-held-action="edit"]')?.click();
     await settle();
     // Assert
     expect(filed(reported[0])).toEqual([EDIT_REQUEST, "this prompt has already been delivered"]);
@@ -1543,7 +1544,7 @@ describe("the Edit control", () => {
     const { tc, reported } = editContext(editRefusal("beingEdited", { editingTurn: { value: "turn-0" } }));
     const card = drawHeldPrompt(heldPrompt(), tc);
     // Act
-    card.querySelector<HTMLButtonElement>('[data-held-action="edit"]')?.click();
+    card.querySelector<Control>('[data-held-action="edit"]')?.click();
     await settle();
     // Assert
     expect(filed(reported[0])?.[1]).toBe("another held prompt is already being edited (turn turn-0)");
@@ -1554,7 +1555,7 @@ describe("the Edit control", () => {
     const { tc } = editContext(editRefusal("notHeld"));
     const card = drawHeldPrompt(heldPrompt(), tc);
     // Act
-    card.querySelector<HTMLButtonElement>('[data-held-action="edit"]')?.click();
+    card.querySelector<Control>('[data-held-action="edit"]')?.click();
     await settle();
     // Assert
     expect(card.querySelector(".queued-refusal")).toBeNull();
@@ -1566,7 +1567,7 @@ describe("the Edit control", () => {
     const { tc } = editContext(editRefusal("noSuchHold"));
     const card = drawHeldPrompt(heldPrompt(), tc);
     // Act
-    card.querySelector<HTMLButtonElement>('[data-held-action="edit"]')?.click();
+    card.querySelector<Control>('[data-held-action="edit"]')?.click();
     await settle();
     // Assert
     const record = await forwardedRecord(capture, "tray.held-prompt.edit-refused");
@@ -1580,7 +1581,7 @@ describe("the Edit control", () => {
     });
     const card = drawHeldPrompt(heldPrompt(), tc);
     // Act
-    card.querySelector<HTMLButtonElement>('[data-held-action="edit"]')?.click();
+    card.querySelector<Control>('[data-held-action="edit"]')?.click();
     await settle();
     // Assert
     expect(filed(reported[0])?.[0]).toBe(EDIT_REQUEST);
@@ -1594,7 +1595,7 @@ describe("the Edit control", () => {
     });
     const card = drawHeldPrompt(heldPrompt(), tc);
     // Act
-    card.querySelector<HTMLButtonElement>('[data-held-action="edit"]')?.click();
+    card.querySelector<Control>('[data-held-action="edit"]')?.click();
     await settle();
     // Assert
     const record = await forwardedRecord(capture, "tray.held-prompt.edit-failed");
@@ -1606,10 +1607,10 @@ describe("the Edit control", () => {
     const { tc } = editContext(editRefusal("notHeld"));
     const card = drawHeldPrompt(heldPrompt(), tc);
     // Act
-    card.querySelector<HTMLButtonElement>('[data-held-action="edit"]')?.click();
+    card.querySelector<Control>('[data-held-action="edit"]')?.click();
     await settle();
     // Assert
-    expect([...card.querySelectorAll(".queued-actions button")].some((b) => (b as HTMLButtonElement).disabled)).toBe(false);
+    expect([...card.querySelectorAll<Control>(".queued-actions ar-button")].some((b) => (b).disabled)).toBe(false);
   });
 });
 
@@ -1959,9 +1960,9 @@ describe("the fold above control", () => {
     // Act
     const card = drawHeldPrompt(foldable(), tc);
     // Assert
-    const button = card.querySelector<HTMLButtonElement>('[data-held-action="fold"]');
-    expect([button?.tagName, button?.type, button?.className, button?.parentElement?.lastElementChild === button]).toEqual([
-      "BUTTON",
+    const button = card.querySelector<Control>('[data-held-action="fold"]');
+    expect([button?.localName, button?.getAttribute("role"), button?.className, button?.parentElement?.lastElementChild === button]).toEqual([
+      "ar-button",
       "button",
       "queued-action queued-action-fold",
       true,
@@ -1983,7 +1984,7 @@ describe("the fold above control", () => {
     const { tc } = foldContext(foldSuccess, seen);
     const card = drawHeldPrompt(foldable("turn-ahead"), tc);
     // Act
-    card.querySelector<HTMLButtonElement>('[data-held-action="fold"]')?.click();
+    card.querySelector<Control>('[data-held-action="fold"]')?.click();
     await settle();
     // Assert
     expect([seen[0]?.turn?.value, seen[0]?.above?.value, seen[0]?.workspace?.id]).toEqual([
@@ -1998,7 +1999,7 @@ describe("the fold above control", () => {
     const { tc } = foldContext(foldSuccess);
     const card = drawHeldPrompt(foldable(), tc);
     // Act
-    card.querySelector<HTMLButtonElement>('[data-held-action="fold"]')?.click();
+    card.querySelector<Control>('[data-held-action="fold"]')?.click();
     await settle();
     // Assert
     expect(card.querySelector(".queued-refusal")).toBeNull();
@@ -2011,7 +2012,7 @@ describe("the fold above control", () => {
       const { tc } = foldContext(foldRefusal(arm));
       const card = drawHeldPrompt(foldable(), tc);
       // Act
-      card.querySelector<HTMLButtonElement>('[data-held-action="fold"]')?.click();
+      card.querySelector<Control>('[data-held-action="fold"]')?.click();
       await settle();
       // Assert
       const refusal = card.querySelector(".queued-refusal");
@@ -2031,7 +2032,7 @@ describe("the fold above control", () => {
     );
     const card = drawHeldPrompt(foldable(), tc);
     // Act
-    card.querySelector<HTMLButtonElement>('[data-held-action="fold"]')?.click();
+    card.querySelector<Control>('[data-held-action="fold"]')?.click();
     await settle();
     // Assert
     expect(card.querySelector(".queued-refusal")?.textContent).toContain("turn-0");
@@ -2043,7 +2044,7 @@ describe("the fold above control", () => {
     const { tc } = foldContext(foldRefusal("aboveMoved"));
     const card = drawHeldPrompt(foldable(), tc);
     // Act
-    card.querySelector<HTMLButtonElement>('[data-held-action="fold"]')?.click();
+    card.querySelector<Control>('[data-held-action="fold"]')?.click();
     await settle();
     // Assert
     const record = await forwardedRecord(capture, "tray.held-prompt.action-refused");
@@ -2054,7 +2055,7 @@ describe("the fold above control", () => {
     // Arrange
     const { tc } = foldContext(foldRefusal("aboveMoved"));
     const card = drawHeldPrompt(foldable(), tc);
-    const button = card.querySelector<HTMLButtonElement>('[data-held-action="fold"]');
+    const button = card.querySelector<Control>('[data-held-action="fold"]');
     // Act
     button?.click();
     await settle();
@@ -2069,7 +2070,7 @@ describe("the fold above control", () => {
     });
     const card = drawHeldPrompt(foldable(), tc);
     // Act
-    card.querySelector<HTMLButtonElement>('[data-held-action="fold"]')?.click();
+    card.querySelector<Control>('[data-held-action="fold"]')?.click();
     await settle();
     // Assert
     expect(card.querySelector(".queued-refusal")?.getAttribute("data-arm")).toBe("error");

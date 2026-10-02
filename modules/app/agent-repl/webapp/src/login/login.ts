@@ -22,6 +22,7 @@
  * the account chip is a field of the topbar view and updates on the topbar's
  * own push. There is no account state on this end to refresh.
  */
+import { createControl } from "../control.js";
 import { CloseLoginResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_close_login_pb";
 import { OpenLoginResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_login_pb";
 import type { LoginTerminalOutput } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_login_terminal_pb";
@@ -103,8 +104,7 @@ export function mountLoginOverlay(
   // THE ACCOUNT ROOT IS NAMED because the two-account split going wrong is
   // most expensive exactly here: logging the wrong root in is invisible after.
   account.className = "login-account";
-  const close = document.createElement("button");
-  close.type = "button";
+  const close = createControl();
   close.className = "login-close";
   close.setAttribute("data-login-close", "");
   close.textContent = "close";

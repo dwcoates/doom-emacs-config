@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { type Control } from "../../../src/control.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import {
@@ -479,7 +480,7 @@ describe("the stop control", () => {
   it("interrupts the detached target by this row's own id", async () => {
     const { h, rc } = ctxFor();
     const el = drawFeedShellHead(shell(), rc);
-    el.querySelector<HTMLButtonElement>("[data-interrupt]")?.click();
+    el.querySelector<Control>("[data-interrupt]")?.click();
     await settle();
     expect(h.calls.interrupt.map((r) => r.target.value)).toEqual([feedId(ROW)]);
   });
@@ -487,7 +488,7 @@ describe("the stop control", () => {
   it("echoes the workspace on the interrupt", async () => {
     const { h, rc } = ctxFor();
     const el = drawFeedShellHead(shell(), rc);
-    el.querySelector<HTMLButtonElement>("[data-interrupt]")?.click();
+    el.querySelector<Control>("[data-interrupt]")?.click();
     await settle();
     expect(h.calls.interrupt[0]?.workspace).toEqual(WORKSPACE);
   });
@@ -495,7 +496,7 @@ describe("the stop control", () => {
   it("draws the success outcome at the control", async () => {
     const { rc } = ctxFor(interruptedDetached(1n));
     const el = drawFeedShellHead(shell(), rc);
-    el.querySelector<HTMLButtonElement>("[data-interrupt]")?.click();
+    el.querySelector<Control>("[data-interrupt]")?.click();
     await settle();
     expect(el.querySelector(".shell-stop-outcome")?.textContent).toBe("stopped 1");
   });
@@ -507,7 +508,7 @@ describe("the stop control", () => {
       }),
     );
     const el = drawFeedShellHead(shell(), rc);
-    el.querySelector<HTMLButtonElement>("[data-interrupt]")?.click();
+    el.querySelector<Control>("[data-interrupt]")?.click();
     await settle();
     expect(el.querySelector(".refusal")).toBeNull();
   });
@@ -516,7 +517,7 @@ describe("the stop control", () => {
     const { rc } = ctxFor(interruptedDetached(1n));
     const el = drawFeedShellHead(shell(), rc);
     document.body.append(el);
-    el.querySelector<HTMLButtonElement>("[data-interrupt]")?.click();
+    el.querySelector<Control>("[data-interrupt]")?.click();
     await settle();
     await vi.advanceTimersByTimeAsync(STOP_OUTCOME_MS + 1000);
     expect(el.querySelector(".shell-stop-outcome")).toBeNull();
@@ -525,7 +526,7 @@ describe("the stop control", () => {
   it("latches the button inert while the stop is in flight", () => {
     const { rc } = ctxFor();
     const el = drawFeedShellHead(shell(), rc);
-    const button = el.querySelector<HTMLButtonElement>("[data-interrupt]");
+    const button = el.querySelector<Control>("[data-interrupt]");
     button?.click();
     expect(button?.disabled).toBe(true);
   });
@@ -540,7 +541,7 @@ describe("the stop control", () => {
       }),
     );
     const el = drawFeedShellHead(shell(), rc);
-    el.querySelector<HTMLButtonElement>("[data-interrupt]")?.click();
+    el.querySelector<Control>("[data-interrupt]")?.click();
     await settle();
     expect(el.querySelector("[data-interrupt-confirm]")).toBeNull();
   });
@@ -555,7 +556,7 @@ describe("the stop control", () => {
       }),
     );
     const el = drawFeedShellHead(shell(), rc);
-    const button = el.querySelector<HTMLButtonElement>("[data-interrupt]");
+    const button = el.querySelector<Control>("[data-interrupt]");
     button?.click();
     await settle();
     expect(button?.disabled).toBe(false);
@@ -566,7 +567,7 @@ describe("the stop control", () => {
       create(InterruptResponseSchema, { result: { case: "error", value: {} } }),
     );
     const el = drawFeedShellHead(shell(), rc);
-    el.querySelector<HTMLButtonElement>("[data-interrupt]")?.click();
+    el.querySelector<Control>("[data-interrupt]")?.click();
     await settle();
     // An error with no cause set is a frame this build cannot read, not a
     // refusal with no words: it is reported through the failure sink, and no
@@ -623,7 +624,7 @@ describe("the stop's typed refusals", () => {
         }),
       );
       const el = drawFeedShellHead(shell(), rc);
-      el.querySelector<HTMLButtonElement>("[data-interrupt]")?.click();
+      el.querySelector<Control>("[data-interrupt]")?.click();
       await settle();
       const drawn = el.querySelector(".shell-stop .refusal");
       expect([drawn?.getAttribute("data-arm"), drawn?.textContent]).toEqual([c.arm, c.text]);
@@ -731,7 +732,7 @@ describe("the stop's unreadable answers", () => {
     const { rc, reported } = ctxAnswering(answer);
     const el = drawFeedShellHead(shell(), rc);
     // Act
-    el.querySelector<HTMLButtonElement>("[data-interrupt]")?.click();
+    el.querySelector<Control>("[data-interrupt]")?.click();
     await settle();
     // Assert: reported once by path and arm, with no outcome word invented.
     expect([reported, el.querySelector(".shell-stop-outcome")]).toEqual([
@@ -754,7 +755,7 @@ describe("the stop's unreadable answers", () => {
     const { rc, reported } = ctxAnswering(answer);
     const el = drawFeedShellHead(shell(), rc);
     // Act
-    el.querySelector<HTMLButtonElement>("[data-interrupt]")?.click();
+    el.querySelector<Control>("[data-interrupt]")?.click();
     await settle();
     // Assert
     expect(reported).toEqual([

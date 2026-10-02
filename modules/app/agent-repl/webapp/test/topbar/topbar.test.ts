@@ -601,7 +601,7 @@ describe("the strip's layout", () => {
   // ONE RULE FOR EVERY RIGHT-HAND CELL, keyed on the group: a button inside a
   // control's wrap, or a cell that holds no button.
   it("insets every right-hand cell from the group's one rule", () => {
-    expect(declaration(".topbar-right button,\n.topbar-right > :not(:has(button))", "padding-inline")).toBe(
+    expect(declaration(".topbar-right ar-button,\n.topbar-right > :not(:has(ar-button))", "padding-inline")).toBe(
       "var(--topbar-right-chip-inset)",
     );
   });

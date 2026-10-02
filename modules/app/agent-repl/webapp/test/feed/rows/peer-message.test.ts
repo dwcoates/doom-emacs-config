@@ -59,7 +59,7 @@ describe("drawFeedPeerMessage: its spec", () => {
 
   it("carries no private toggle of its own", () => {
     const el = drawFeedPeerMessage(peer("agent Explore", "hi"));
-    expect(el.querySelector("button, .peer-head, .peer-chevron")).toBeNull();
+    expect(el.querySelector("ar-button, .peer-head, .peer-chevron")).toBeNull();
   });
 
   it("renders the markdown body through the one body pipeline", () => {

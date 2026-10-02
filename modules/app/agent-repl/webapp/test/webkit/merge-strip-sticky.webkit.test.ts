@@ -23,9 +23,9 @@ const BUBBLE = `
     <div class="agent-panel bubble-subfeed" data-probe-scroller>
       <div class="feed-body">
         <div class="merge-strip" data-probe-strip>
-          <button class="merge-tab is-active">queue</button>
-          <button class="merge-tab">rebasing</button>
-          <button class="merge-tab">tests</button>
+          <ar-button role="button" class="merge-tab is-active">queue</ar-button>
+          <ar-button role="button" class="merge-tab">rebasing</ar-button>
+          <ar-button role="button" class="merge-tab">tests</ar-button>
         </div>
         <div class="merge-tab-summary"></div>
         <div class="merge-tab-panel"><div style="height: 4000px">content</div></div>

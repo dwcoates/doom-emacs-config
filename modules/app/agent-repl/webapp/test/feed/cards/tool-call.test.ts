@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { type Control } from "../../../src/control.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create, type MessageInitShape } from "@bufbuild/protobuf";
 import { createRouterTransport } from "@connectrpc/connect";
@@ -833,7 +834,7 @@ describe("diagnostics", () => {
 
   it("reveals the overflow in place when the toggle is pressed", () => {
     const el = withLines(DIAGNOSTICS_VISIBLE + 2);
-    el.querySelector<HTMLButtonElement>(".tool-diagnostics-more")?.click();
+    el.querySelector<Control>(".tool-diagnostics-more")?.click();
     const hidden = [...el.querySelectorAll<HTMLElement>(".tool-diagnostic")].filter((r) => r.hidden);
     expect(hidden).toEqual([]);
   });

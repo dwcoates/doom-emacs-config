@@ -22,6 +22,7 @@
  * sends nothing when unchecked; a creation that would produce an ungated
  * session is refused without it, which is the point.
  */
+import { createControl } from "../control.js";
 import { create, type MessageInitShape } from "@bufbuild/protobuf";
 import {
   CreateWorkspaceRequestSchema,
@@ -144,8 +145,7 @@ export function drawCreateWorkspaceControl(
   section: HTMLElement,
   sc: SidebarContext,
 ): HTMLElement {
-  const button = document.createElement("button");
-  button.type = "button";
+  const button = createControl();
   button.className = "sb-add";
   button.textContent = "+";
   button.title = `new workspace in ${repository.dir}`;
@@ -220,8 +220,7 @@ export function drawCreateWorkspaceForm(
     });
   }
 
-  const submit = document.createElement("button");
-  submit.type = "button";
+  const submit = createControl();
   submit.className = "sb-form-go";
   submit.setAttribute("data-create-submit", "");
   submit.textContent = "Create";

@@ -35,11 +35,11 @@ function entry(r: Row): string {
   const stage = r.tab === undefined ? "waiting" : `<span class="merge-tab-label">${r.tab}</span>`;
   return `
     <div class="merge-queue-entry footer-columns" data-queue-place="${r.place}" data-queue-status="${status}">
-      <button type="button" class="merge-queue-line footer-columns" data-select="">
+      <ar-button role="button" class="merge-queue-line footer-columns" data-select="">
         <span class="merge-queue-label">${r.name}</span>
         <span class="merge-queue-stage">${stage}</span>
         <span class="footer-row-clock merge-queue-duration">${r.clock}</span>
-      </button>
+      </ar-button>
     </div>`;
 }
 

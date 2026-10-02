@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { createControl } from "../../src/control.js";
 import { ITEM_EXPANDED_EVENT } from "../../src/expand.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
@@ -489,7 +490,7 @@ describe("mountBubble: clicking the head is the toggle", () => {
     // `data-interrupt` button is.
     const { bubble } = mount(subagentRow("b1"));
     const head = headOf(bubble);
-    const stop = document.createElement("button");
+    const stop = createControl();
     stop.setAttribute("data-interrupt", "b1");
     head.append(stop);
     // Act: the control's own click, which bubbles up to the head listener.
@@ -521,7 +522,7 @@ describe("mountBubble: clicking the head is the toggle", () => {
     // Arrange
     const { bubble } = mount(subagentRow("b1"));
     const head = headOf(bubble);
-    const stop = document.createElement("button");
+    const stop = createControl();
     stop.setAttribute("data-interrupt", "b1");
     head.append(stop);
     // Act: Enter pressed with the inner control as the event's target.

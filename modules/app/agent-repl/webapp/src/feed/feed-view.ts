@@ -34,6 +34,7 @@
  * the rest of the feed goes on working — a feed that blanks itself because one
  * card was unreadable would lose the reader everything, including the evidence.
  */
+import { createControl } from "../control.js";
 import { log } from "../log.js";
 import { SELECTED_ROW_ATTRIBUTE, syncSelectedEntry } from "./selected-entry.js";
 import type { SelectionVisibility } from "./selection-visibility.js";
@@ -308,8 +309,7 @@ export function createFeedController(
     opts.feed === "root" ? "root" : opts.feed.value,
   );
 
-  const loadMore = document.createElement("button");
-  loadMore.type = "button";
+  const loadMore = createControl();
   loadMore.className = "feed-load-more";
   loadMore.setAttribute("data-load-more", "");
   loadMore.textContent = "older";

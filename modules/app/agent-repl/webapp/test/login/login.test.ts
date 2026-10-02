@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { createControl } from "../../src/control.js";
 import { beforeEach, describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError } from "@connectrpc/connect";
@@ -333,7 +334,7 @@ describe("the refusals", () => {
     // ARRANGE: every click's refusal renders AT the clicked control, and the
     // control here belongs to another component (the topbar's account chip),
     // so it is handed in rather than guessed at.
-    const control = document.createElement("button");
+    const control = createControl();
     document.body.append(control);
     const overlay = mountLoginOverlay(
       host,
@@ -356,7 +357,7 @@ describe("the refusals", () => {
 
   it("states it exactly once, at the control rather than also in the header", async () => {
     // ARRANGE
-    const control = document.createElement("button");
+    const control = createControl();
     document.body.append(control);
     const overlay = mountLoginOverlay(
       host,

@@ -20,6 +20,7 @@
  * merge stands — the footer's status and the feed's merge bubble already carry
  * that, and a second account of it would be a second thing to keep in step.
  */
+import { createControl, CONTROL_SELECTOR, type Control } from "../control.js";
 import type {
   HeldOffer,
   HeldOfferHeadline,
@@ -108,9 +109,8 @@ function decisionButton(
   label: string,
   extraClass: string,
   tc: TrayContext,
-): HTMLButtonElement {
-  const button = document.createElement("button");
-  button.type = "button";
+): Control {
+  const button = createControl();
   button.className = extraClass;
   button.setAttribute("data-offer-decision", decision);
   button.textContent = label;
@@ -131,7 +131,7 @@ function decisionButton(
 async function answer(
   decision: MergeDequeueDecision,
   tc: TrayContext,
-  button: HTMLButtonElement,
+  button: Control,
 ): Promise<void> {
   const actions = button.parentElement;
   clearRefusal(actions);
@@ -193,7 +193,7 @@ function mergeDequeueDecision(
 
 function setDisabled(actions: Element | null, disabled: boolean): void {
   if (actions === null) return;
-  for (const control of actions.querySelectorAll("button")) control.disabled = disabled;
+  for (const control of actions.querySelectorAll<Control>(CONTROL_SELECTOR)) control.disabled = disabled;
 }
 
 /** `AnswerHeldOfferError`'s cause union, narrowed to a SET arm. */

@@ -27,6 +27,7 @@ import { Agent } from "undici";
 import { beforeAll, vi } from "vitest";
 import type { FeedId } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 
+import { isControl } from "../../src/control.js";
 import { shellElements, type ShellElements } from "../../src/shell";
 import { createDaemonTransport } from "../../src/rpc/transport";
 import { createAgentReplClient } from "../../src/rpc/client";
@@ -383,7 +384,7 @@ export async function chipFailureText(app: MountedApp, arm: string): Promise<str
   const row = app.$(`#topbar [data-reveal] [data-local][data-arm="${arm}"]`);
   if (row === null) throw new Error(`the warning chip lists no ${arm} failure`);
   const listed = row.textContent ?? "";
-  if (row.tagName !== "BUTTON") return listed;
+  if (!isControl(row)) return listed;
   await app.clickElement(row);
   return `${listed}\n${app.$("#topbar [data-reveal]")?.textContent ?? ""}`;
 }

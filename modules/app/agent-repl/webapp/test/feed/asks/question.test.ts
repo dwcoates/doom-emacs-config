@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { type Control } from "../../../src/control.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create, type MessageInitShape } from "@bufbuild/protobuf";
 import {
@@ -89,13 +90,13 @@ function clickOpt(el: HTMLElement, index: number, label: string): void {
 
 /** Click one question's tab, by index. */
 function clickTab(el: HTMLElement, index: number): void {
-  el.querySelector<HTMLButtonElement>(`[data-question-tab="${index}"]`)?.click();
+  el.querySelector<Control>(`[data-question-tab="${index}"]`)?.click();
 }
 
 /** Press one multi-select question's confirm button, by index. */
 function confirmQ(el: HTMLElement, index: number): void {
   const blocks = el.querySelectorAll<HTMLElement>("[data-question]");
-  blocks[index]?.querySelector<HTMLButtonElement>("[data-question-confirm]")?.click();
+  blocks[index]?.querySelector<Control>("[data-question-confirm]")?.click();
 }
 
 /** The index of the active (shown) tab, or -1 when none is. */
@@ -324,7 +325,7 @@ describe("the tabbed layout", () => {
     const el = drawFeedQuestion(question({ case: "open", value: {} }, singles(2)), askHarness().rc);
     clickOpt(el, 0, "OAuth 2.0"); // answers q0, advances to q1
     clickTab(el, 0); // step back so the active tab is not the missing one
-    el.querySelector<HTMLButtonElement>("[data-question-submit]")?.click();
+    el.querySelector<Control>("[data-question-submit]")?.click();
     await settle();
     expect(activeTab(el)).toBe(1);
   });
@@ -334,7 +335,7 @@ describe("the tabbed layout", () => {
     const el = drawFeedQuestion(question({ case: "open", value: {} }, singles(2)), h.rc);
     clickOpt(el, 0, "OAuth 2.0");
     clickOpt(el, 1, "API key");
-    el.querySelector<HTMLButtonElement>("[data-question-submit]")?.click();
+    el.querySelector<Control>("[data-question-submit]")?.click();
     await settle();
     expect(h.calls.question[0]?.answers.map((a) => a.chosen)).toEqual([
       ["OAuth 2.0"],
@@ -346,7 +347,7 @@ describe("the tabbed layout", () => {
     const h = askHarness();
     const el = drawFeedQuestion(question({ case: "open", value: {} }), h.rc);
     clickOpt(el, 0, "OAuth 2.0");
-    el.querySelector<HTMLButtonElement>("[data-question-submit]")?.click();
+    el.querySelector<Control>("[data-question-submit]")?.click();
     await settle();
     expect(h.calls.question[0]?.answers[0]?.chosen).toEqual(["OAuth 2.0"]);
   });
@@ -392,7 +393,7 @@ describe("toggling a selection off", () => {
     clickOpt(el, 0, "OAuth 2.0"); // select
     clickOpt(el, 0, "OAuth 2.0"); // clear
     type(el, 0, "neither"); // an empty question would block submit, so give text
-    el.querySelector<HTMLButtonElement>("[data-question-submit]")?.click();
+    el.querySelector<Control>("[data-question-submit]")?.click();
     await settle();
     expect(h.calls.question[0]?.answers[0]?.chosen).toEqual([]);
   });
@@ -403,7 +404,7 @@ describe("submitting", () => {
     const h = askHarness();
     const el = drawFeedQuestion(question({ case: "open", value: {} }), h.rc);
     pick(el, "OAuth 2.0");
-    el.querySelector<HTMLButtonElement>("[data-question-submit]")?.click();
+    el.querySelector<Control>("[data-question-submit]")?.click();
     await settle();
     expect(h.calls.question[0]?.question?.value).toBe(ROW_ID);
   });
@@ -412,7 +413,7 @@ describe("submitting", () => {
     const h = askHarness();
     const el = drawFeedQuestion(question({ case: "open", value: {} }), h.rc);
     pick(el, "OAuth 2.0");
-    el.querySelector<HTMLButtonElement>("[data-question-submit]")?.click();
+    el.querySelector<Control>("[data-question-submit]")?.click();
     await settle();
     expect(h.calls.question[0]?.answers[0]?.questionText).toBe("Which auth method?");
   });
@@ -421,7 +422,7 @@ describe("submitting", () => {
     const h = askHarness();
     const el = drawFeedQuestion(question({ case: "open", value: {} }), h.rc);
     pick(el, "API key");
-    el.querySelector<HTMLButtonElement>("[data-question-submit]")?.click();
+    el.querySelector<Control>("[data-question-submit]")?.click();
     await settle();
     expect(h.calls.question[0]?.answers[0]?.chosen).toEqual(["API key"]);
   });
@@ -434,7 +435,7 @@ describe("submitting", () => {
     );
     pick(el, "OAuth 2.0");
     pick(el, "API key");
-    el.querySelector<HTMLButtonElement>("[data-question-submit]")?.click();
+    el.querySelector<Control>("[data-question-submit]")?.click();
     await settle();
     expect(h.calls.question[0]?.answers[0]?.chosen).toEqual(["OAuth 2.0", "API key"]);
   });
@@ -447,7 +448,7 @@ describe("submitting", () => {
     for (const input of el.querySelectorAll<HTMLInputElement>("[data-question-option]")) {
       input.checked = true;
     }
-    el.querySelector<HTMLButtonElement>("[data-question-submit]")?.click();
+    el.querySelector<Control>("[data-question-submit]")?.click();
     await settle();
     expect(h.calls.question[0]?.answers[0]?.chosen.length).toBe(1);
   });
@@ -457,7 +458,7 @@ describe("submitting", () => {
     const el = drawFeedQuestion(question({ case: "open", value: {} }), h.rc);
     pick(el, "OAuth 2.0");
     type(el, 0, "with PKCE");
-    el.querySelector<HTMLButtonElement>("[data-question-submit]")?.click();
+    el.querySelector<Control>("[data-question-submit]")?.click();
     await settle();
     expect(h.calls.question[0]?.answers[0]?.otherText?.text).toBe("with PKCE");
   });
@@ -466,7 +467,7 @@ describe("submitting", () => {
     const h = askHarness();
     const el = drawFeedQuestion(question({ case: "open", value: {} }), h.rc);
     type(el, 0, "neither, use mTLS");
-    el.querySelector<HTMLButtonElement>("[data-question-submit]")?.click();
+    el.querySelector<Control>("[data-question-submit]")?.click();
     await settle();
     expect(h.calls.question[0]?.answers[0]?.chosen).toEqual([]);
   });
@@ -475,7 +476,7 @@ describe("submitting", () => {
     const h = askHarness();
     const el = drawFeedQuestion(question({ case: "open", value: {} }), h.rc);
     pick(el, "OAuth 2.0");
-    el.querySelector<HTMLButtonElement>("[data-question-submit]")?.click();
+    el.querySelector<Control>("[data-question-submit]")?.click();
     await settle();
     expect(h.calls.question[0]?.answers[0]?.otherText).toBeUndefined();
   });
@@ -488,7 +489,7 @@ describe("submitting", () => {
     );
     type(el, 0, "a");
     type(el, 1, "b");
-    el.querySelector<HTMLButtonElement>("[data-question-submit]")?.click();
+    el.querySelector<Control>("[data-question-submit]")?.click();
     await settle();
     expect(h.calls.question[0]?.answers.map((a) => a.questionText)).toEqual(["one?", "two?"]);
   });
@@ -496,7 +497,7 @@ describe("submitting", () => {
   it("latches the submit inert while the batch is in flight", () => {
     const el = drawFeedQuestion(question({ case: "open", value: {} }), askHarness().rc);
     pick(el, "OAuth 2.0");
-    const submit = el.querySelector<HTMLButtonElement>("[data-question-submit]");
+    const submit = el.querySelector<Control>("[data-question-submit]");
     submit?.click();
     expect(submit?.disabled).toBe(true);
   });
@@ -505,7 +506,7 @@ describe("submitting", () => {
     const h = askHarness({ fail: true });
     const el = drawFeedQuestion(question({ case: "open", value: {} }), h.rc);
     pick(el, "OAuth 2.0");
-    el.querySelector<HTMLButtonElement>("[data-question-submit]")?.click();
+    el.querySelector<Control>("[data-question-submit]")?.click();
     await settle();
     expect(el.querySelector(".perm-actions .refusal")?.getAttribute("data-arm")).toBe("transport");
   });
@@ -519,7 +520,7 @@ describe("an incomplete batch", () => {
       h.rc,
     );
     type(el, 0, "a");
-    el.querySelector<HTMLButtonElement>("[data-question-submit]")?.click();
+    el.querySelector<Control>("[data-question-submit]")?.click();
     await settle();
     expect(h.calls.question.length).toBe(0);
   });
@@ -530,7 +531,7 @@ describe("an incomplete batch", () => {
       askHarness().rc,
     );
     type(el, 0, "a");
-    el.querySelector<HTMLButtonElement>("[data-question-submit]")?.click();
+    el.querySelector<Control>("[data-question-submit]")?.click();
     await settle();
     const notes = [...el.querySelectorAll<HTMLElement>(".q-note")].map((n) => n.hidden);
     expect(notes).toEqual([true, false]);
@@ -538,14 +539,14 @@ describe("an incomplete batch", () => {
 
   it("words the note the same way everywhere", async () => {
     const el = drawFeedQuestion(question({ case: "open", value: {} }), askHarness().rc);
-    el.querySelector<HTMLButtonElement>("[data-question-submit]")?.click();
+    el.querySelector<Control>("[data-question-submit]")?.click();
     await settle();
     expect(el.querySelector(".q-note")?.textContent).toBe(UNANSWERED_NOTE);
   });
 
   it("clears the note once the question is answered", async () => {
     const el = drawFeedQuestion(question({ case: "open", value: {} }), askHarness().rc);
-    const submit = el.querySelector<HTMLButtonElement>("[data-question-submit]");
+    const submit = el.querySelector<Control>("[data-question-submit]");
     submit?.click();
     await settle();
     pick(el, "OAuth 2.0");
@@ -600,7 +601,7 @@ describe("a refused batch", () => {
       const h = askHarness({ question: refused(c.cause) });
       const el = drawFeedQuestion(question({ case: "open", value: {} }), h.rc);
       pick(el, "OAuth 2.0");
-      el.querySelector<HTMLButtonElement>("[data-question-submit]")?.click();
+      el.querySelector<Control>("[data-question-submit]")?.click();
       await settle();
       const drawn = el.querySelector(".perm-actions .refusal");
       expect([drawn?.getAttribute("data-arm"), drawn?.textContent]).toEqual([c.arm, c.text]);
@@ -617,7 +618,7 @@ describe("a refused batch", () => {
     const h = askHarness({ question: refused({ case: "noSession", value: {} } as never) });
     const el = drawFeedQuestion(question({ case: "open", value: {} }), h.rc);
     pick(el, "OAuth 2.0");
-    const submit = el.querySelector<HTMLButtonElement>("[data-question-submit]");
+    const submit = el.querySelector<Control>("[data-question-submit]");
     submit?.click();
     await settle();
     expect(submit?.disabled).toBe(false);
@@ -629,7 +630,7 @@ describe("a refused batch", () => {
     });
     const el = drawFeedQuestion(question({ case: "open", value: {} }), h.rc);
     pick(el, "OAuth 2.0");
-    el.querySelector<HTMLButtonElement>("[data-question-submit]")?.click();
+    el.querySelector<Control>("[data-question-submit]")?.click();
     await settle();
     // An error with no cause set is a frame this build cannot read, not a
     // refusal with no words: it is reported through the failure sink, and no
@@ -860,7 +861,7 @@ describe("an answer this build cannot read", () => {
     const el = drawFeedQuestion(question({ case: "open", value: {} }), h.rc);
     pick(el, "OAuth 2.0");
     // Act
-    el.querySelector<HTMLButtonElement>("[data-question-submit]")?.click();
+    el.querySelector<Control>("[data-question-submit]")?.click();
     await settle();
     // Assert
     const kind = h.filed[0]?.kind;

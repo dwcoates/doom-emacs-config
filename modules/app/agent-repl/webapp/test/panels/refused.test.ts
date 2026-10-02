@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { type Control } from "../../src/control.js";
 import { describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { createRouterTransport } from "@connectrpc/connect";
@@ -130,7 +131,7 @@ describe("the add-support offer", () => {
     const seen: RequestCommandSupportRequest[] = [];
     const { rc } = rowContext(successResponse, seen);
     const card = drawFeedCommandRefused(refused(true), rc);
-    card.querySelector<HTMLButtonElement>("[data-add-support]")?.click();
+    card.querySelector<Control>("[data-add-support]")?.click();
     await settle();
     expect(seen[0]?.command).toBe("/agents");
   });
@@ -139,7 +140,7 @@ describe("the add-support offer", () => {
     const seen: RequestCommandSupportRequest[] = [];
     const { rc } = rowContext(successResponse, seen);
     const card = drawFeedCommandRefused(refused(true), rc);
-    card.querySelector<HTMLButtonElement>("[data-add-support]")?.click();
+    card.querySelector<Control>("[data-add-support]")?.click();
     await settle();
     expect(seen[0]?.workspace?.id).toBe("ws-1");
   });
@@ -147,7 +148,7 @@ describe("the add-support offer", () => {
   it("leaves a brief note on success", async () => {
     const { rc } = rowContext();
     const card = drawFeedCommandRefused(refused(true), rc);
-    card.querySelector<HTMLButtonElement>("[data-add-support]")?.click();
+    card.querySelector<Control>("[data-add-support]")?.click();
     await settle();
     expect(card.querySelector("[data-support-note]")?.textContent).toBe(
       "support workspace created",
@@ -157,7 +158,7 @@ describe("the add-support offer", () => {
   it("names no workspace in the note: the roster shows it", async () => {
     const { rc } = rowContext();
     const card = drawFeedCommandRefused(refused(true), rc);
-    card.querySelector<HTMLButtonElement>("[data-add-support]")?.click();
+    card.querySelector<Control>("[data-add-support]")?.click();
     await settle();
     expect(card.textContent).not.toContain("ws-support");
   });
@@ -165,7 +166,7 @@ describe("the add-support offer", () => {
   it("keeps the button disabled after the ask landed", async () => {
     const { rc } = rowContext();
     const card = drawFeedCommandRefused(refused(true), rc);
-    const button = card.querySelector<HTMLButtonElement>("[data-add-support]");
+    const button = card.querySelector<Control>("[data-add-support]");
     button?.click();
     await settle();
     expect(button?.disabled).toBe(true);
@@ -174,7 +175,7 @@ describe("the add-support offer", () => {
   it("draws the refusal at the button", async () => {
     const { rc } = rowContext(errorResponse);
     const card = drawFeedCommandRefused(refused(true), rc);
-    card.querySelector<HTMLButtonElement>("[data-add-support]")?.click();
+    card.querySelector<Control>("[data-add-support]")?.click();
     await settle();
     expect(card.querySelector(".command-refused-refusal")?.getAttribute("data-arm")).toBe(
       "blankCommand",
@@ -186,7 +187,7 @@ describe("the add-support offer", () => {
     async (arm) => {
       const { rc } = rowContext(refusalResponse(arm));
       const card = drawFeedCommandRefused(refused(true), rc);
-      card.querySelector<HTMLButtonElement>("[data-add-support]")?.click();
+      card.querySelector<Control>("[data-add-support]")?.click();
       await settle();
       const refusal = card.querySelector(".command-refused-refusal");
       expect([refusal?.getAttribute("data-arm"), refusal?.textContent === ""]).toEqual([arm, false]);
@@ -196,7 +197,7 @@ describe("the add-support offer", () => {
   it("names the registry's directory on a mismatch, from the one shared wording", async () => {
     const { rc } = rowContext(refusalResponse("workspaceRefMismatch"));
     const card = drawFeedCommandRefused(refused(true), rc);
-    card.querySelector<HTMLButtonElement>("[data-add-support]")?.click();
+    card.querySelector<Control>("[data-add-support]")?.click();
     await settle();
     expect(card.querySelector(".command-refused-refusal")?.textContent).toContain("/w/registry");
   });
@@ -204,7 +205,7 @@ describe("the add-support offer", () => {
   it("names the workspace whose brief the daemon went looking for", async () => {
     const { rc } = rowContext(refusalResponse("briefMissing"));
     const card = drawFeedCommandRefused(refused(true), rc);
-    card.querySelector<HTMLButtonElement>("[data-add-support]")?.click();
+    card.querySelector<Control>("[data-add-support]")?.click();
     await settle();
     expect(card.querySelector(".command-refused-refusal")?.textContent).toContain("ship-the-rail");
   });
@@ -212,7 +213,7 @@ describe("the add-support offer", () => {
   it("re-enables the button after a refusal", async () => {
     const { rc } = rowContext(errorResponse);
     const card = drawFeedCommandRefused(refused(true), rc);
-    const button = card.querySelector<HTMLButtonElement>("[data-add-support]");
+    const button = card.querySelector<Control>("[data-add-support]");
     button?.click();
     await settle();
     expect(button?.disabled).toBe(false);
@@ -221,7 +222,7 @@ describe("the add-support offer", () => {
   it("says the daemon could not be reached on a transport failure", async () => {
     const { rc } = rowContext(successResponse, [], new Error("no daemon"));
     const card = drawFeedCommandRefused(refused(true), rc);
-    card.querySelector<HTMLButtonElement>("[data-add-support]")?.click();
+    card.querySelector<Control>("[data-add-support]")?.click();
     await settle();
     expect(card.querySelector(".command-refused-refusal")?.textContent).toBe(
       "the daemon could not be reached",
@@ -231,7 +232,7 @@ describe("the add-support offer", () => {
   it("disables the button while the ask is in flight", () => {
     const { rc } = rowContext(() => new Promise<never>(() => undefined) as never);
     const card = drawFeedCommandRefused(refused(true), rc);
-    const button = card.querySelector<HTMLButtonElement>("[data-add-support]");
+    const button = card.querySelector<Control>("[data-add-support]");
     button?.click();
     expect(button?.disabled).toBe(true);
   });
@@ -272,7 +273,7 @@ describe("an answer this build cannot read", () => {
     const { rc, reported } = recordingContext(unreadable);
     const card = drawFeedCommandRefused(refused(true), rc);
     // ACT
-    card.querySelector<HTMLButtonElement>("[data-add-support]")?.click();
+    card.querySelector<Control>("[data-add-support]")?.click();
     await settle();
     // ASSERT
     expect(reported).toEqual(["frameUndecodable"]);
@@ -281,7 +282,7 @@ describe("an answer this build cannot read", () => {
   it("draws no transport sentence for an unreadable answer, which is not the link failing", async () => {
     const { rc } = recordingContext(unreadable);
     const card = drawFeedCommandRefused(refused(true), rc);
-    card.querySelector<HTMLButtonElement>("[data-add-support]")?.click();
+    card.querySelector<Control>("[data-add-support]")?.click();
     await settle();
     expect(card.querySelector(".command-refused-refusal")).toBeNull();
   });

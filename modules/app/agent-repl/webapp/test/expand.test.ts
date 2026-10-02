@@ -620,7 +620,7 @@ describe("installClickExpand", () => {
 
   it("leaves a click on a control inside the section to that control", () => {
     // Arrange — a button, one of CLICK_THROUGH_SELECTOR's own.
-    const { feed: el, box } = mountFeed(`<button id="b">run</button>`);
+    const { feed: el, box } = mountFeed(`<ar-button role="button" id="b">run</ar-button>`);
     installClickExpand(el, () => "");
     // Act
     (el.querySelector("#b") as HTMLElement).dispatchEvent(

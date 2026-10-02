@@ -35,7 +35,7 @@ function zone() {
   box.id = "feed-scroll";
   box.innerHTML = `
     <main id="feed" data-feed="root">
-      <button class="load-more">load more</button>
+      <ar-button role="button" class="load-more">load more</ar-button>
       <article class="feed-item" data-feed-row="r1">
         <div class="bubble" data-role="response">
           <div class="bubble-scroll"><div class="bubble-body"><p><span id="prose">words</span></p></div></div>
@@ -43,7 +43,7 @@ function zone() {
         </div>
       </article>
       <article class="feed-item" data-feed-row="t1">
-        <div class="tool-card"><button id="card-control">stop</button></div>
+        <div class="tool-card"><ar-button role="button" id="card-control">stop</ar-button></div>
       </article>
     </main>
     <section id="hold-tray"><div class="hold-tray"><article data-held-turn="h1"></article></div></section>`;

@@ -26,6 +26,7 @@
  * to see it" is not "it failed", and drawing the two the same way would state
  * something the daemon deliberately refused to state.
  */
+import { createControl } from "../../control.js";
 import { formatTickedElapsed } from "../../duration.js";
 import { liveElapsedClock, settledElapsedClock } from "../../elapsed-clock.js";
 import { log } from "../../log.js";
@@ -262,8 +263,7 @@ function drawStopControl(rc: RowContext): HTMLElement {
   const wrap = document.createElement("span");
   wrap.className = "subagent-stop";
 
-  const button = document.createElement("button");
-  button.type = "button";
+  const button = createControl();
   button.className = "subagent-stop-button";
   button.setAttribute("data-interrupt", requireMessage(rc.row.id, "FeedRow.id").value);
   button.textContent = "stop";

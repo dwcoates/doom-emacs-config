@@ -305,6 +305,19 @@ hand any more:
   fire-and-forget click handler goes through it, so a `MalformedView` is logged
   once and filed as `frame_undecodable` instead of escaping as an unhandled
   rejection.
+- **ONE CONTROL, AND IT IS NEVER A `<button>`** (owner ruling, 2026-10-02:
+  WebKit starts no text selection inside a `<button>`, and all text must be
+  selectable). Every clickable control is built by `createControl`
+  (src/control.ts): an `<ar-button>` with the `button` role, `tabindex`, Enter
+  (keydown) and Space (keyup) activation, and a `disabled` property reflected
+  as `aria-disabled="true"` that drops it from the tab order and refuses every
+  click (DEBUG `control.click-refused`). Stylesheet rules name `ar-button`,
+  a type selector like `button` was, and `[aria-disabled="true"]` in place of
+  `:disabled`; the user agent's button look is restated once under
+  `:where(ar-button)`, and the controls macOS drew as native push buttons are
+  drawn to that bezel's geometry. `test/control.test.ts` fails any `<button>`
+  built in `src` or named in the stylesheet, and
+  `test/webkit/control.webkit.test.ts` holds a control's box to a button's.
 - **A CLICK THAT ENDS A DRAG-SELECT IS NOT A CLICK** (owner ruling,
   2026-10-02: all text everywhere is selectable, and selecting it must not
   break the click targets it lies on). `installSelectionClickGuard`

@@ -4,52 +4,30 @@
  *
  * jsdom neither lays out nor turns a press-drag-release into a selection and a
  * click, so this drags the real mouse in headless WebKit, the Emacs webview's
- * engine, over the real stylesheet and the real click guard
- * (src/selection.ts): a control's label a drag crosses is selected, and the
- * click that ends the drag reaches no handler, while a plain click still does.
+ * engine, over the real stylesheet, the real controls (src/control.ts) and the
+ * real click guard (src/selection.ts):
+ *
+ *   - a drag ACROSS a control selects its label, and so does a drag that
+ *     STARTS INSIDE one (which a `<button>` never allowed);
+ *   - the click that ends either drag reaches no handler;
+ *   - a plain click, Enter and Space each activate an enabled control once;
+ *   - a disabled control activates on none of them.
  */
 import path from "node:path";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { webkit, type Browser, type Page } from "playwright-core";
-import { build, type Rollup } from "vite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { protobufRuntimeAliases } from "../../protobuf-runtime-aliases";
+import { bundlePage } from "./bundle";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
-/** The markup every drag runs over: prose with a control inside it. */
-const MARKUP = `
-  <p style="font-size: 20px">
-    <span id="before">alpha alpha</span>
-    <button id="control" type="button">Send now</button>
-    <span id="after">charlie charlie</span>
-  </p>`;
-
-/** Bundle the page into ONE classic script, so it runs from `setContent` with no server. */
-async function bundlePage(): Promise<string> {
-  const out = await build({
-    configFile: false,
-    logLevel: "silent",
-    resolve: { alias: protobufRuntimeAliases },
-    build: {
-      write: false,
-      minify: false,
-      lib: { entry: path.join(here, "selection-page.ts"), formats: ["iife"], name: "selectionPage" },
-    },
-  });
-  const outputs = (Array.isArray(out) ? out : [out]) as Rollup.RollupOutput[];
-  const chunk = outputs.flatMap((o) => o.output).find((o) => o.type === "chunk");
-  if (chunk === undefined || chunk.type !== "chunk") throw new Error("the page bundle has no script chunk");
-  return chunk.code;
-}
-
-/** Drag the mouse from FROM's left edge to TO's right edge, as a reader selects. */
-async function drag(page: Page, from: string, to: string): Promise<void> {
+/** Drag the mouse from FROM's left edge (or INSET into it) to TO's right edge. */
+async function drag(page: Page, from: string, to: string, inset = 2): Promise<void> {
   const start = await page.locator(from).boundingBox();
   const end = await page.locator(to).boundingBox();
   if (start === null || end === null) throw new Error(`cannot drag from ${from} to ${to}: not laid out`);
-  await page.mouse.move(start.x + 2, start.y + start.height / 2);
+  await page.mouse.move(start.x + inset, start.y + start.height / 2);
   await page.mouse.down();
   await page.mouse.move(end.x + end.width - 2, end.y + end.height / 2, { steps: 8 });
   await page.mouse.up();
@@ -61,34 +39,44 @@ interface Gesture {
   clicks: number;
 }
 
-/** Run GESTURE on PAGE and read what it selected and how many clicks got through. */
-async function observe(page: Page, gesture: () => Promise<void>): Promise<Gesture> {
+/** Run GESTURE on PAGE and read what it selected and how many clicks reached control ID. */
+async function observe(page: Page, id: string, gesture: () => Promise<void>): Promise<Gesture> {
   await gesture();
   const selection = await page.evaluate(() => window.selectionPage.takeSelection());
-  const clicks = await page.evaluate(() => window.selectionPage.takeClicks());
+  const clicks = await page.evaluate((target) => window.selectionPage.takeClicks(target), id);
   return { selection, clicks };
+}
+
+/** Focus control ID and press KEY on it. */
+async function key(page: Page, id: string, name: string): Promise<void> {
+  await page.evaluate((target) => window.selectionPage.focus(target), id);
+  await page.keyboard.press(name);
 }
 
 describe("selecting text in WebKit", () => {
   let browser: Browser;
-  let acrossControl: Gesture;
-  let plainClick: Gesture;
+  const seen: Record<string, Gesture> = {};
 
   beforeAll(async () => {
     const [css, script] = await Promise.all([
       readFile(path.join(here, "../../src/styles.css"), "utf8"),
-      bundlePage(),
+      bundlePage(path.join(here, "selection-page.ts"), "selectionPage"),
     ]);
     browser = await webkit.launch();
     const page = await browser.newPage();
     await page.setContent(
-      `<!doctype html><html><head><style>${css}</style></head><body><div id="host">${MARKUP}</div></body></html>`,
+      `<!doctype html><html><head><style>${css}</style></head><body><div id="host"></div></body></html>`,
     );
     await page.addScriptTag({ content: script });
     await page.evaluate(() => window.selectionPage.install());
 
-    acrossControl = await observe(page, () => drag(page, "#before", "#after"));
-    plainClick = await observe(page, () => page.locator("#control").click());
+    seen.across = await observe(page, "control", () => drag(page, "#before", "#after"));
+    seen.fromInside = await observe(page, "control", () => drag(page, "#control", "#after", 6));
+    seen.click = await observe(page, "control", () => page.locator("#control").click());
+    seen.enter = await observe(page, "control", () => key(page, "control", "Enter"));
+    seen.space = await observe(page, "control", () => key(page, "control", "Space"));
+    seen.disabledClick = await observe(page, "off", () => page.locator("#off").click({ force: true }));
+    seen.disabledEnter = await observe(page, "off", () => key(page, "off", "Enter"));
   });
 
   afterAll(async () => {
@@ -96,14 +84,38 @@ describe("selecting text in WebKit", () => {
   });
 
   it("selects a control's label a drag runs across", () => {
-    expect(acrossControl.selection).toContain("Send now");
+    expect(seen.across.selection).toContain("Send now");
   });
 
-  it("activates nothing with the click that ends the drag", () => {
-    expect(acrossControl.clicks).toBe(0);
+  it("activates nothing with the click that ends a drag across a control", () => {
+    expect(seen.across.clicks).toBe(0);
   });
 
-  it("still lets a plain click on the control through", () => {
-    expect(plainClick.clicks).toBe(1);
+  it("selects text from a drag that starts inside a control", () => {
+    expect(seen.fromInside.selection).toContain("charlie charlie");
+  });
+
+  it("activates nothing with the click that ends a drag started inside a control", () => {
+    expect(seen.fromInside.clicks).toBe(0);
+  });
+
+  it("lets a plain click on an enabled control through", () => {
+    expect(seen.click.clicks).toBe(1);
+  });
+
+  it("activates an enabled control on Enter", () => {
+    expect(seen.enter.clicks).toBe(1);
+  });
+
+  it("activates an enabled control on Space", () => {
+    expect(seen.space.clicks).toBe(1);
+  });
+
+  it("refuses a click on a disabled control", () => {
+    expect(seen.disabledClick.clicks).toBe(0);
+  });
+
+  it("refuses Enter on a disabled control", () => {
+    expect(seen.disabledEnter.clicks).toBe(0);
   });
 });

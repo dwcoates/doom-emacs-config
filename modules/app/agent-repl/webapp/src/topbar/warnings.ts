@@ -30,6 +30,7 @@
  * view, or over a stale one while the link is down, the chip still draws them
  * (`drawLocalWarningStrip`).
  */
+import { createControl } from "../control.js";
 import type {
   TopbarAccountingWarningDetail,
   TopbarDegradedWindowWarningDetail,
@@ -100,8 +101,7 @@ function drawWarningChip(
     wrap.setAttribute("data-local-arms", local.map((failure) => failure.arm).join(" "));
   }
 
-  const button = document.createElement("button");
-  button.type = "button";
+  const button = createControl();
   button.className = "topbar-warning-chip";
 
   // A GLYPH, not an emoji: a triangle that inherits the chip's color.
@@ -169,8 +169,7 @@ export function drawLocalFailureRow(
     statement.setAttribute("data-local", "");
     return statement;
   }
-  const row = document.createElement("button");
-  row.type = "button";
+  const row = createControl();
   row.className = "topbar-warning-row";
   row.setAttribute("data-row", "");
   row.setAttribute("data-arm", failure.arm);
@@ -236,8 +235,7 @@ export function drawTopbarWarning(
   if (u.detail.case === undefined) return drawTopbarWarningStatement(line.text);
   const detail = requireCase(u.detail, `${path}.detail`);
 
-  const row = document.createElement("button");
-  row.type = "button";
+  const row = createControl();
   row.className = "topbar-warning-row";
   row.setAttribute("data-row", "");
   row.setAttribute("data-arm", detail.case);
@@ -281,8 +279,7 @@ export function drawWarningDetailOverlay(
 
 /** The detail's way back to the list it was opened from. */
 function drawWarningBack(cc: WarningChipContext, relist: () => HTMLElement): HTMLElement {
-  const back = document.createElement("button");
-  back.type = "button";
+  const back = createControl();
   back.className = "topbar-warning-back";
   back.setAttribute("data-back", "");
   back.textContent = "‹ warnings";

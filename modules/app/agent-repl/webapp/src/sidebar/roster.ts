@@ -17,6 +17,7 @@
  * highlight through `RosterRowCurrent`, deliberately, so no client can compute
  * it differently. The field is validated and logged, and that is all.
  */
+import { createControl, type Control } from "../control.js";
 import type {
   RosterCurrentWorkspace,
   RosterLabel,
@@ -385,8 +386,7 @@ export function drawRosterTaskSectionHeader(
   // control beside it — the same shape the roster row's menu has, for the same
   // reason: what a task IS and what can be DONE to one are two surfaces.
   const menu = drawTaskMenu(taskId, title, sc);
-  const more = document.createElement("button");
-  more.type = "button";
+  const more = createControl();
   more.className = "sb-more";
   more.textContent = "⋯";
   more.title = "task actions";
@@ -493,8 +493,7 @@ function paintTriangle(triangle: HTMLElement, folded: boolean): void {
 
 /** The done check: a fact from the wire and the control that flips it. */
 function drawTaskDoneCheck(taskId: string, done: boolean, sc: SidebarContext): HTMLElement {
-  const check = document.createElement("button");
-  check.type = "button";
+  const check = createControl();
   check.className = done ? "task-check done" : "task-check";
   check.setAttribute("data-task-status", done ? "done" : "open");
   check.setAttribute("data-task-change", done ? "setOpen" : "setDone");
@@ -569,9 +568,8 @@ function taskChangeButton(
   compose: () => TaskChange | null,
   taskId: string,
   sc: SidebarContext,
-): HTMLButtonElement {
-  const button = document.createElement("button");
-  button.type = "button";
+): Control {
+  const button = createControl();
   button.className = "sb-menu-item";
   button.setAttribute("data-task-change", arm);
   button.textContent = label;

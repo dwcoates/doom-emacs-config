@@ -19,6 +19,7 @@
  * with its own dozen call sites and its own refusal handling. Splitting them
  * keeps each file's tests about one thing.
  */
+import { createControl, isControl, type Control } from "../control.js";
 import { create, type Message, type MessageInitShape } from "@bufbuild/protobuf";
 import {
   AssignWorkspaceTaskRequestSchema,
@@ -179,7 +180,7 @@ function simpleVerbItem(
 async function runSimpleVerb(
   verb: "open" | "close" | "merge" | "restart" | "restartForce",
   target: VerbTarget,
-  button: HTMLButtonElement,
+  button: Control,
 ): Promise<void> {
   switch (verb) {
     case "open":
@@ -339,15 +340,14 @@ function drawPriorityItem(target: VerbTarget): HTMLElement {
   submenu.className = "sb-submenu list-rows";
   submenu.hidden = true;
   for (const choice of ["p05", "p1", "p2", "p3", "clear"] as const) {
-    const entry = document.createElement("button");
-    entry.type = "button";
+    const entry = createControl();
     entry.className = "sb-menu-item";
-    // The CHOICE rides on the button's own `value`, not on `data-priority`:
+    // The CHOICE rides on the control's own `value` attribute, not on `data-priority`:
     // that attribute is the roster row's priority BADGE, and the suite asserts
     // a row with no badge served carries no `[data-priority]` at all — so the
     // menu must not plant one inside the row.
     entry.setAttribute("data-verb", "priority");
-    entry.value = choice;
+    entry.setAttribute("value", choice);
     entry.textContent = PRIORITY_LABELS[choice];
     entry.addEventListener("click", (event) => {
       event.preventDefault();
@@ -411,8 +411,7 @@ export function fillAssignSubmenu(submenu: HTMLElement, target: VerbTarget): voi
   });
   submenu.replaceChildren();
   for (const choice of choices) {
-    const entry = document.createElement("button");
-    entry.type = "button";
+    const entry = createControl();
     entry.className = "sb-menu-item";
     entry.setAttribute("data-assign-task", choice.id);
     entry.textContent = choice.label;
@@ -445,17 +444,15 @@ function menuRow(): HTMLElement {
 }
 
 /** A control that only reveals another: no verb, therefore no `data-verb`. */
-function disclosureButton(label: string): HTMLButtonElement {
-  const button = document.createElement("button");
-  button.type = "button";
+function disclosureButton(label: string): Control {
+  const button = createControl();
   button.className = "sb-menu-item";
   button.textContent = label;
   return button;
 }
 
-function verbButton(verb: Verb): HTMLButtonElement {
-  const button = document.createElement("button");
-  button.type = "button";
+function verbButton(verb: Verb): Control {
+  const button = createControl();
   button.className = "sb-menu-item";
   button.setAttribute("data-verb", verb);
   button.textContent = VERB_LABELS[verb];
@@ -570,7 +567,7 @@ export async function fireVerb<Res extends VerbResponse>(
  * `is-busy` class — which turns pointer events off — everywhere.
  */
 function setDisabled(control: HTMLElement, disabled: boolean): void {
-  if (control instanceof HTMLButtonElement) control.disabled = disabled;
+  if (isControl(control)) control.disabled = disabled;
   control.classList.toggle("is-busy", disabled);
 }
 

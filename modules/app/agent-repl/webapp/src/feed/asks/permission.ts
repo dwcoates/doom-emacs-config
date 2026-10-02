@@ -30,6 +30,7 @@
  * row's own concern — so the instant is stamped on the element and carried
  * across re-pushes, which keeps a growing wait from restarting every push.
  */
+import { createControl, type Control } from "../../control.js";
 import { formatTickedAge } from "../../duration.js";
 import { log } from "../../log.js";
 import {
@@ -296,14 +297,13 @@ function drawOpenActions(u: FeedPermission, rc: RowContext): HTMLElement {
   reason.setAttribute("data-permission-reason", "");
   reason.placeholder = "why not (optional)";
 
-  const buttons: HTMLButtonElement[] = [];
+  const buttons: Control[] = [];
   for (const kind of PERMISSION_BUTTONS) {
     // The standing button exists ONLY when the vendor offered a standing form:
     // presence of `standing_offered` is what makes it drawable, and the verb
     // would be refused for a card that never carried one.
     if (kind === "allowStanding" && u.standingOffered === undefined) continue;
-    const button = document.createElement("button");
-    button.type = "button";
+    const button = createControl();
     button.className = `perm-button perm-${kind}`;
     button.setAttribute("data-permission", kind);
     button.textContent = BUTTON_LABELS[kind];
@@ -337,7 +337,7 @@ export function answerFor(
 async function answer(
   rc: RowContext,
   actions: HTMLElement,
-  buttons: readonly HTMLButtonElement[],
+  buttons: readonly Control[],
   chosen: PermissionAnswer,
 ): Promise<void> {
   const id = requireMessage(rc.row.id, "FeedRow.id");
@@ -392,7 +392,7 @@ const OWN_CAUSES = {
 function drawAnswerOutcome(
   response: AnswerPermissionResponse,
   actions: HTMLElement,
-  buttons: readonly HTMLButtonElement[],
+  buttons: readonly Control[],
 ): void {
   const result = requireCase(response.result, "AnswerPermissionResponse.result");
   switch (result.case) {

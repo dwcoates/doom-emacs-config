@@ -10,6 +10,7 @@
  * distinct request shapes rather than one request with a mode field, and the
  * builder below spells each of them out.
  */
+import { createControl } from "../control.js";
 import { create } from "@bufbuild/protobuf";
 import {
   CreateTaskRequestSchema,
@@ -120,8 +121,7 @@ export function drawCreateTaskControl(sc: SidebarContext): HTMLElement {
 
   // The DISCLOSURE carries no hook: `[data-task-create]` is the control that
   // actually issues CreateTask, which is the submit below.
-  const open = document.createElement("button");
-  open.type = "button";
+  const open = createControl();
   open.className = "sb-add";
   open.textContent = "+ new task";
   host.appendChild(open);
@@ -134,8 +134,7 @@ export function drawCreateTaskControl(sc: SidebarContext): HTMLElement {
   input.className = "sb-task-title";
   input.setAttribute("data-task-title", "");
   input.placeholder = "task title";
-  const submit = document.createElement("button");
-  submit.type = "button";
+  const submit = createControl();
   submit.className = "sb-form-go";
   submit.setAttribute("data-task-create", "");
   submit.textContent = "Create";

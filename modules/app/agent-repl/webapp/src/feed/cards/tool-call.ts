@@ -25,6 +25,7 @@
  * computed the other way round: there is no client threshold on quietness and
  * no ticking clock on a settled call.
  */
+import { createControl } from "../../control.js";
 import {
   type FeedCodeSpan,
   type FeedDiffLine,
@@ -828,8 +829,7 @@ export function drawFeedToolCallDiagnostics(
   box.appendChild(list);
   if (hidden === 0) return box;
 
-  const more = document.createElement("button");
-  more.type = "button";
+  const more = createControl();
   more.className = "tool-diagnostics-more";
   more.setAttribute("data-hidden-count", String(hidden));
   let open = false;

@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { createControl, type Control } from "../../../src/control.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   agenticBubble,
@@ -27,9 +28,8 @@ function fold(folded: boolean, previous?: HTMLElement): HTMLElement {
 }
 
 /** A disabled-state reading of BUTTONS, for the in-flight assertions. */
-function button(): HTMLButtonElement {
-  const el = document.createElement("button");
-  el.type = "button";
+function button(): Control {
+  const el = createControl();
   return el;
 }
 
@@ -71,7 +71,7 @@ describe("clearRefusals", () => {
     const host = document.createElement("div");
     host.append(button(), refusal("transport", "no"));
     clearRefusals(host);
-    expect(host.querySelector("button")).not.toBeNull();
+    expect(host.querySelector("ar-button")).not.toBeNull();
   });
 });
 
@@ -98,13 +98,13 @@ describe("foldSection", () => {
 
   it("opens on the reader's click", () => {
     const el = fold(true);
-    el.querySelector<HTMLButtonElement>("[data-fold]")?.click();
+    el.querySelector<Control>("[data-fold]")?.click();
     expect(el.querySelector<HTMLElement>(".the-body")?.hidden).toBe(false);
   });
 
   it("closes again on a second click", () => {
     const el = fold(true);
-    const toggle = el.querySelector<HTMLButtonElement>("[data-fold]");
+    const toggle = el.querySelector<Control>("[data-fold]");
     toggle?.click();
     toggle?.click();
     expect(el.querySelector<HTMLElement>(".the-body")?.hidden).toBe(true);
@@ -128,7 +128,7 @@ describe("initialFold", () => {
       let previous: HTMLElement | undefined;
       if (c.previous !== null) {
         previous = document.createElement("div");
-        const toggle = document.createElement("button");
+        const toggle = createControl();
         toggle.setAttribute("data-fold", "doc");
         toggle.setAttribute("data-folded", c.previous);
         previous.append(toggle);
@@ -139,7 +139,7 @@ describe("initialFold", () => {
 
   it("ignores a previous element that carried some OTHER card's fold", () => {
     const previous = document.createElement("div");
-    const toggle = document.createElement("button");
+    const toggle = createControl();
     toggle.setAttribute("data-fold", "scenario");
     toggle.setAttribute("data-folded", "false");
     previous.append(toggle);

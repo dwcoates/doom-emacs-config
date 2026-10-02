@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { type Control } from "../../../src/control.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create, type MessageInitShape } from "@bufbuild/protobuf";
 import { Code } from "@connectrpc/connect";
@@ -85,7 +86,7 @@ function refused(cause: MessageInitShape<typeof AnswerColdGateErrorSchema>["caus
 
 /** Open the compact submenu, which the compact row's opener reveals. */
 function openSubmenu(el: HTMLElement): void {
-  el.querySelector<HTMLButtonElement>("[data-compact-open]")?.click();
+  el.querySelector<Control>("[data-compact-open]")?.click();
 }
 
 async function settle(): Promise<void> {
@@ -305,7 +306,7 @@ describe("answering the gate", () => {
     it(`sends the ${c.arm} arm`, async () => {
       const h = askHarness();
       const el = drawFeedColdGate(gate(standing()), h.rc);
-      el.querySelector<HTMLButtonElement>(`[data-cold-gate="${c.hook}"]`)?.click();
+      el.querySelector<Control>(`[data-cold-gate="${c.hook}"]`)?.click();
       await settle();
       expect(h.calls.coldGate[0]?.choice.case).toBe(c.arm);
     });
@@ -315,7 +316,7 @@ describe("answering the gate", () => {
     it(`sends the ${c.arm} arm from a gate that offers no compaction`, async () => {
       const h = askHarness();
       const el = drawFeedColdGate(gate(standing({ noCompact: true })), h.rc);
-      el.querySelector<HTMLButtonElement>(`[data-cold-gate="${c.hook}"]`)?.click();
+      el.querySelector<Control>(`[data-cold-gate="${c.hook}"]`)?.click();
       await settle();
       expect(h.calls.coldGate[0]?.choice.case).toBe(c.arm);
     });
@@ -324,7 +325,7 @@ describe("answering the gate", () => {
   it("echoes the gate's own row", async () => {
     const h = askHarness();
     const el = drawFeedColdGate(gate(standing()), h.rc);
-    el.querySelector<HTMLButtonElement>('[data-cold-gate="pay"]')?.click();
+    el.querySelector<Control>('[data-cold-gate="pay"]')?.click();
     await settle();
     expect(h.calls.coldGate[0]?.gate?.value).toBe(ROW_ID);
   });
@@ -335,7 +336,7 @@ describe("answering the gate", () => {
     openSubmenu(el);
     const second = el.querySelectorAll<HTMLInputElement>("[data-compact-model]")[1];
     if (second !== undefined) second.checked = true;
-    el.querySelector<HTMLButtonElement>('[data-cold-gate="compact"]')?.click();
+    el.querySelector<Control>('[data-cold-gate="compact"]')?.click();
     await settle();
     const choice = h.calls.coldGate[0]?.choice;
     expect(choice?.case === "compact" ? choice.value.model?.name : null).toBe(MODEL);
@@ -347,7 +348,7 @@ describe("answering the gate", () => {
     openSubmenu(el);
     const third = el.querySelectorAll<HTMLInputElement>("[data-compact-scope]")[2];
     if (third !== undefined) third.checked = true;
-    el.querySelector<HTMLButtonElement>('[data-cold-gate="compact"]')?.click();
+    el.querySelector<Control>('[data-cold-gate="compact"]')?.click();
     await settle();
     const choice = h.calls.coldGate[0]?.choice;
     expect(choice?.case === "compact" ? choice.value.scope : null).toBe(
@@ -357,8 +358,8 @@ describe("answering the gate", () => {
 
   it("latches every button inert while the answer is in flight", () => {
     const el = drawFeedColdGate(gate(standing()), askHarness().rc);
-    el.querySelector<HTMLButtonElement>('[data-cold-gate="pay"]')?.click();
-    expect([...el.querySelectorAll("button")].every((b) => b.disabled)).toBe(true);
+    el.querySelector<Control>('[data-cold-gate="pay"]')?.click();
+    expect([...el.querySelectorAll<Control>("ar-button")].every((b) => b.disabled)).toBe(true);
   });
 
   // GROUNDED 2026-09-14 (owner's report): "compact and resume" ran a ~60s
@@ -370,7 +371,7 @@ describe("answering the gate", () => {
     const el = drawFeedColdGate(gate(standing()), askHarness().rc);
     publishCompactionProgress("compacting · summarizing 412 messages");
     // Act
-    el.querySelector<HTMLButtonElement>('[data-cold-gate="pay"]')?.click();
+    el.querySelector<Control>('[data-cold-gate="pay"]')?.click();
     // Assert
     expect(progressSlot(el)?.textContent).toBe("compacting · summarizing 412 messages");
   });
@@ -378,7 +379,7 @@ describe("answering the gate", () => {
   it("redraws the slot as the daemon pushes the next phase", () => {
     // Arrange
     const el = drawFeedColdGate(gate(standing()), askHarness().rc);
-    el.querySelector<HTMLButtonElement>('[data-cold-gate="pay"]')?.click();
+    el.querySelector<Control>('[data-cold-gate="pay"]')?.click();
     // Act
     publishCompactionProgress("compacting · writing the summary");
     // Assert
@@ -389,7 +390,7 @@ describe("answering the gate", () => {
     // Arrange
     const el = drawFeedColdGate(gate(standing()), askHarness().rc);
     // Act
-    el.querySelector<HTMLButtonElement>('[data-cold-gate="pay"]')?.click();
+    el.querySelector<Control>('[data-cold-gate="pay"]')?.click();
     publishCompactionProgress("anything at all");
     // Assert: the whole slot IS the daemon's string — no stem, no suffix.
     expect(progressSlot(el)?.textContent).toBe("anything at all");
@@ -399,7 +400,7 @@ describe("answering the gate", () => {
     // Arrange
     const el = drawFeedColdGate(gate(standing()), askHarness().rc);
     // Act
-    el.querySelector<HTMLButtonElement>('[data-cold-gate="pay"]')?.click();
+    el.querySelector<Control>('[data-cold-gate="pay"]')?.click();
     // Assert
     expect(progressSlot(el)?.textContent).toBe("");
   });
@@ -408,7 +409,7 @@ describe("answering the gate", () => {
     // Arrange
     const el = drawFeedColdGate(gate(standing()), askHarness().rc);
     // Act
-    el.querySelector<HTMLButtonElement>('[data-cold-gate="pay"]')?.click();
+    el.querySelector<Control>('[data-cold-gate="pay"]')?.click();
     // Assert
     expect(progressSlot(el)?.hidden).toBe(true);
   });
@@ -416,7 +417,7 @@ describe("answering the gate", () => {
   it("reveals the slot the moment the daemon has a phase to report", () => {
     // Arrange
     const el = drawFeedColdGate(gate(standing()), askHarness().rc);
-    el.querySelector<HTMLButtonElement>('[data-cold-gate="pay"]')?.click();
+    el.querySelector<Control>('[data-cold-gate="pay"]')?.click();
     // Act
     publishCompactionProgress("compacting · reading the transcript");
     // Assert
@@ -426,7 +427,7 @@ describe("answering the gate", () => {
   it("clears the slot once the answer resolves", async () => {
     // Arrange
     const el = drawFeedColdGate(gate(standing()), askHarness().rc);
-    el.querySelector<HTMLButtonElement>('[data-cold-gate="pay"]')?.click();
+    el.querySelector<Control>('[data-cold-gate="pay"]')?.click();
     publishCompactionProgress("compacting · summarizing 412 messages");
     // Act
     await settle();
@@ -437,7 +438,7 @@ describe("answering the gate", () => {
   it("stops following the footer once the answer resolved", async () => {
     // Arrange
     const el = drawFeedColdGate(gate(standing()), askHarness().rc);
-    el.querySelector<HTMLButtonElement>('[data-cold-gate="pay"]')?.click();
+    el.querySelector<Control>('[data-cold-gate="pay"]')?.click();
     await settle();
     // Act
     publishCompactionProgress("compacting · a LATER compaction entirely");
@@ -449,7 +450,7 @@ describe("answering the gate", () => {
     // Arrange
     const h = askHarness({ fail: true });
     const el = drawFeedColdGate(gate(standing()), h.rc);
-    el.querySelector<HTMLButtonElement>('[data-cold-gate="pay"]')?.click();
+    el.querySelector<Control>('[data-cold-gate="pay"]')?.click();
     publishCompactionProgress("compacting · summarizing 412 messages");
     // Act
     await settle();
@@ -459,7 +460,7 @@ describe("answering the gate", () => {
 
   it("draws nothing on success — the resolved trace is the row's re-push", async () => {
     const el = drawFeedColdGate(gate(standing()), askHarness().rc);
-    el.querySelector<HTMLButtonElement>('[data-cold-gate="pay"]')?.click();
+    el.querySelector<Control>('[data-cold-gate="pay"]')?.click();
     await settle();
     expect(el.querySelector(".refusal")).toBeNull();
   });
@@ -470,7 +471,7 @@ describe("answering the gate", () => {
   it("draws a transport failure at the buttons when the daemon was NOT reached", async () => {
     const h = askHarness({ fail: true, failCode: Code.Unavailable });
     const el = drawFeedColdGate(gate(standing()), h.rc);
-    el.querySelector<HTMLButtonElement>('[data-cold-gate="pay"]')?.click();
+    el.querySelector<Control>('[data-cold-gate="pay"]')?.click();
     await settle();
     expect(el.querySelector(".hibernation-actions .refusal")?.getAttribute("data-arm")).toBe(
       "transport",
@@ -483,7 +484,7 @@ describe("answering the gate", () => {
   it("draws the daemon's OWN account when the daemon answered a failure", async () => {
     const h = askHarness({ fail: true, failCode: Code.Internal, failMessage: REFUSED_START });
     const el = drawFeedColdGate(gate(standing()), h.rc);
-    el.querySelector<HTMLButtonElement>('[data-cold-gate="pay"]')?.click();
+    el.querySelector<Control>('[data-cold-gate="pay"]')?.click();
     await settle();
     expect(el.querySelector(".hibernation-actions .refusal")?.textContent).toContain(
       REFUSED_START,
@@ -493,7 +494,7 @@ describe("answering the gate", () => {
   it("does not report an unreachable daemon that answered", async () => {
     const h = askHarness({ fail: true, failCode: Code.Internal, failMessage: REFUSED_START });
     const el = drawFeedColdGate(gate(standing()), h.rc);
-    el.querySelector<HTMLButtonElement>('[data-cold-gate="pay"]')?.click();
+    el.querySelector<Control>('[data-cold-gate="pay"]')?.click();
     await settle();
     expect(el.querySelector(".hibernation-actions .refusal")?.getAttribute("data-arm")).toBe(
       "failed",
@@ -505,9 +506,9 @@ describe("answering the gate", () => {
     // again, and a card latched inert offers no next move at all.
     const h = askHarness({ fail: true });
     const el = drawFeedColdGate(gate(standing()), h.rc);
-    el.querySelector<HTMLButtonElement>('[data-cold-gate="pay"]')?.click();
+    el.querySelector<Control>('[data-cold-gate="pay"]')?.click();
     await settle();
-    expect([...el.querySelectorAll("button")].every((b) => !b.disabled)).toBe(true);
+    expect([...el.querySelectorAll<Control>("ar-button")].every((b) => !b.disabled)).toBe(true);
   });
 });
 
@@ -555,7 +556,7 @@ describe("a refused gate answer", () => {
     it(`says what ${c.arm} means, at the buttons`, async () => {
       const h = askHarness({ coldGate: refused(c.cause) });
       const el = drawFeedColdGate(gate(standing()), h.rc);
-      el.querySelector<HTMLButtonElement>('[data-cold-gate="pay"]')?.click();
+      el.querySelector<Control>('[data-cold-gate="pay"]')?.click();
       await settle();
       const drawn = el.querySelector(".hibernation-actions .refusal");
       expect([drawn?.getAttribute("data-arm"), drawn?.textContent]).toEqual([c.arm, c.text]);
@@ -568,7 +569,7 @@ describe("a refused gate answer", () => {
     // into nothing.
     const h = askHarness({ coldGate: refused({ case: "reopenFailed", value: { detail: "" } }) });
     const el = drawFeedColdGate(gate(standing()), h.rc);
-    el.querySelector<HTMLButtonElement>('[data-cold-gate="pay"]')?.click();
+    el.querySelector<Control>('[data-cold-gate="pay"]')?.click();
     await settle();
     expect(el.querySelector(".hibernation-actions .refusal")?.textContent).toBe(
       "the session did not come back from the re-open",
@@ -582,9 +583,9 @@ describe("a refused gate answer", () => {
       coldGate: refused({ case: "reopenFailed", value: { detail: "the shim refused" } }),
     });
     const el = drawFeedColdGate(gate(standing()), h.rc);
-    el.querySelector<HTMLButtonElement>('[data-cold-gate="pay"]')?.click();
+    el.querySelector<Control>('[data-cold-gate="pay"]')?.click();
     await settle();
-    expect([...el.querySelectorAll("button")].every((b) => !b.disabled)).toBe(true);
+    expect([...el.querySelectorAll<Control>("ar-button")].every((b) => !b.disabled)).toBe(true);
   });
 
   it("words every cause the schema declares", () => {
@@ -596,7 +597,7 @@ describe("a refused gate answer", () => {
   it("gives the buttons back so the reader can act on the cause", async () => {
     const h = askHarness({ coldGate: refused({ case: "noSession", value: {} } as never) });
     const el = drawFeedColdGate(gate(standing()), h.rc);
-    const pay = el.querySelector<HTMLButtonElement>('[data-cold-gate="pay"]');
+    const pay = el.querySelector<Control>('[data-cold-gate="pay"]');
     pay?.click();
     await settle();
     expect(pay?.disabled).toBe(false);
@@ -607,7 +608,7 @@ describe("a refused gate answer", () => {
       coldGate: create(AnswerColdGateResponseSchema, { result: { case: "error", value: {} } }),
     });
     const el = drawFeedColdGate(gate(standing()), h.rc);
-    el.querySelector<HTMLButtonElement>('[data-cold-gate="pay"]')?.click();
+    el.querySelector<Control>('[data-cold-gate="pay"]')?.click();
     await settle();
     // An error with no cause set is a frame this build cannot read, not a
     // refusal with no words: it is reported through the failure sink, and no
@@ -863,7 +864,7 @@ describe("a gate answer this build cannot read", () => {
     const h = unalteredColdGate(answer);
     const el = drawFeedColdGate(gate(standing()), h.rc);
     // Act
-    el.querySelector<HTMLButtonElement>('[data-cold-gate="pay"]')?.click();
+    el.querySelector<Control>('[data-cold-gate="pay"]')?.click();
     await settle();
     // Assert
     const kind = h.filed[0]?.kind;
@@ -882,7 +883,7 @@ describe("a compact menu that cannot be answered", () => {
     openSubmenu(el);
     // Act
     const err = thrownByClick(() =>
-      el.querySelector<HTMLButtonElement>('[data-cold-gate="compact"]')?.click(),
+      el.querySelector<Control>('[data-cold-gate="compact"]')?.click(),
     );
     // Assert
     expect([(err as MalformedView).name, (err as MalformedView).detail]).toEqual([
@@ -897,7 +898,7 @@ describe("a compact menu that cannot be answered", () => {
     openSubmenu(el);
     // Act
     const err = thrownByClick(() =>
-      el.querySelector<HTMLButtonElement>('[data-cold-gate="compact"]')?.click(),
+      el.querySelector<Control>('[data-cold-gate="compact"]')?.click(),
     );
     // Assert
     expect([(err as MalformedView).name, (err as MalformedView).detail]).toEqual([

@@ -26,6 +26,7 @@
  * The unit run is un-isolated: this file installs no fake clock, unstubs every
  * global it stubs, and leaves the page empty.
  */
+import { createControl } from "../src/control.js";
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi, type Mock } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -500,7 +501,7 @@ describe("the boot", { timeout: BOOT_TIMEOUT_MS }, () => {
 
   test("routes the topbar's account control to the login overlay it mounted", async () => {
     await bootMain();
-    const control = document.createElement("button");
+    const control = createControl();
 
     page.openLogin?.(control);
 

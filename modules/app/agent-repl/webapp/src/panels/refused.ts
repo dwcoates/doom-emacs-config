@@ -17,6 +17,7 @@
  * SYNTHESIZED AND NON-DURABLE, like the panel rows: the card is minted when
  * the command was refused and never comes back in a paged history.
  */
+import { createControl, type Control } from "../control.js";
 import {
   RequestCommandSupportResponseSchema,
   type RequestCommandSupportError,
@@ -113,8 +114,7 @@ export function drawFeedCommandAddSupportOffer(
   const row = document.createElement("div");
   row.className = "command-refused-actions";
 
-  const button = document.createElement("button");
-  button.type = "button";
+  const button = createControl();
   button.className = "command-refused-support";
   button.setAttribute("data-add-support", "");
   button.textContent = "Engineer support for it";
@@ -138,7 +138,7 @@ export function drawFeedCommandAddSupportOffer(
 async function requestSupport(
   ctx: AppContext,
   command: string,
-  button: HTMLButtonElement,
+  button: Control,
   row: HTMLElement,
 ): Promise<void> {
   clearNotes(row);

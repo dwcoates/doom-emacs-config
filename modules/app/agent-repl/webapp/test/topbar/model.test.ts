@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { createControl, type Control } from "../../src/control.js";
 import { afterEach, describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import {
@@ -49,7 +50,7 @@ const selector = (init: { selected?: ModelOption; options?: ModelOption[] }) =>
 /** Mount the selector on the host so its anchor is findable. */
 function mountSelector(tc: ReturnType<typeof topbarContext>["tc"], host: HTMLElement, view = selector({ options: [option("opus")] })) {
   host.append(drawTopbarModelSelector(view, tc));
-  return host.querySelector<HTMLButtonElement>(".topbar-model-button")!;
+  return host.querySelector<Control>(".topbar-model-button")!;
 }
 
 describe("syntheticMarkerLiteral", () => {
@@ -417,6 +418,26 @@ describe("the pick", () => {
     expect(host.querySelector(".refusal")).toBeNull();
   });
 
+  it("gives the picked option back after a refusal, so it can be picked again", async () => {
+    // ARRANGE: a disabled control refuses every click, so an option left
+    // disabled after a refusal could never be picked again.
+    const { host, tc } = topbarContext(
+      appContext({
+        setModel: () =>
+          create(SetModelResponseSchema, {
+            result: { case: "error", value: { cause: { case: "noSession", value: {} } } },
+          }),
+      }),
+    );
+    const button = mountSelector(tc, host, selector({ options: [option("opus")] }));
+    button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    // ACT
+    openPanel(host)!.querySelector<HTMLElement>("[data-model-option]")!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // ASSERT
+    expect(openPanel(host)!.querySelector("[data-model-option]")?.getAttribute("aria-disabled")).toBeNull();
+  });
+
   it("clears the previous refusal before the next pick", async () => {
     // ARRANGE: a stale refusal beside a control the reader just clicked again
     // reads as the answer to the NEW click.
@@ -470,8 +491,8 @@ describe("the pick", () => {
     const { host, tc } = topbarContext(ctx);
     const wrap = document.createElement("div");
     host.append(wrap);
-    const button = document.createElement("button");
-    const row = document.createElement("button");
+    const button = createControl();
+    const row = createControl();
     // ACT / ASSERT
     await expect(pickModel(option("opus"), tc, wrap, button, row)).rejects.toThrow(
       "the page has neither a cold gate row nor a footer to notice on",
@@ -489,8 +510,8 @@ describe("the pick", () => {
     const { host, tc } = topbarContext(ctx);
     const wrap = document.createElement("div");
     host.append(wrap);
-    const button = document.createElement("button");
-    const row = document.createElement("button");
+    const button = createControl();
+    const row = createControl();
     // ACT
     await pickModel(option("opus"), tc, wrap, button, row).catch(() => undefined);
     // ASSERT

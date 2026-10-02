@@ -18,6 +18,7 @@
  * this end decides nothing: it sends the arm, states a refusal at the chip, and
  * the chip redraws from the push the change causes.
  */
+import { createControl, type Control } from "../control.js";
 import { UpdatePersistentWifiModeResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_persistent_wifi_mode_pb";
 import type { TopbarPersistentWifi } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
 import { whileInFlight } from "../feed/cards/controls.js";
@@ -141,8 +142,7 @@ export function drawTopbarPersistentWifi(u: TopbarPersistentWifi, tc: TopbarCont
   chip.setAttribute("data-mode", mode);
   chip.title = requireMessage(u.tooltip, "TopbarPersistentWifi.tooltip").text;
 
-  const button = document.createElement("button");
-  button.type = "button";
+  const button = createControl();
   button.className = "topbar-wifi-button";
   button.setAttribute("aria-label", "toggle persistent wifi mode");
   button.append(drawGlyph());
@@ -167,7 +167,7 @@ export function drawTopbarPersistentWifi(u: TopbarPersistentWifi, tc: TopbarCont
 export async function togglePersistentWifiMode(
   tc: TopbarContext,
   chip: HTMLElement,
-  button: HTMLButtonElement,
+  button: Control,
   drawn: { wifi: string; mode: string },
 ): Promise<void> {
   // AT INFO: a person's click on the machine's power settings is exactly the

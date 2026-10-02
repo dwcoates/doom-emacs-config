@@ -18,6 +18,7 @@
  * ones when the reader returns to the feed's tail or leaves the page (see
  * `AutoCollapse`). Both go through the one collapse, `collapseSection`.
  */
+import { CONTROL_SELECTOR } from "./control.js";
 import { ancestorMatching } from "./dom.js";
 import { log } from "./log.js";
 import { selectedText } from "./selection.js";
@@ -93,7 +94,7 @@ export const EXPANDED_CLASS = "expanded";
 export const PANEL_CLASS = "agent-panel";
 
 /** Controls that own their own click, so a click on one never toggles. */
-export const CLICK_THROUGH_SELECTOR = "a, button, summary";
+export const CLICK_THROUGH_SELECTOR = `a, ${CONTROL_SELECTOR}, summary`;
 
 /** The class membership test a section is recognized by. */
 export interface ClassTest {
