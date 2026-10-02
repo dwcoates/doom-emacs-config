@@ -416,6 +416,8 @@ it never forces normal state in an unrelated buffer."
   "Select the agent input window for WS if visible and autoselect is enabled.
 Respects `agent-repl-autoselect-input-on-workspace-switch'.
 Window lookup delegates to `agent-repl-window--panel-window'.
+Selects nothing when a gate has hidden WS\='s input window
+\(`agent-repl-input-hidden-p'): the webview's docked banner is the landing.
 
 After selecting the input window, puts evil in NORMAL (command) state
 via `agent-repl--input-enter-command-state' so a switch lands the cursor
@@ -431,14 +433,20 @@ alone cannot, because a composer that was already selected looks identical.
 On the debug rung it fell below the default durable threshold and never
 reached a sink, so the landing was invisible afterwards."
   (let ((log-ws (agent-repl--ws-log-name ws)))
-    (if agent-repl-autoselect-input-on-workspace-switch
-        (if-let ((win (agent-repl-window--panel-window :input ws)))
-            (progn
-              (agent-repl--info log-ws "maybe-autoselect-input: ws=%s branch=select input-win=%s" ws win)
-              (select-window win)
-              (agent-repl--input-enter-command-state))
-          (agent-repl--info log-ws "maybe-autoselect-input: ws=%s branch=no-input-window" ws))
-      (agent-repl--info log-ws "maybe-autoselect-input: ws=%s branch=disabled" ws))))
+    (cond
+     ((not agent-repl-autoselect-input-on-workspace-switch)
+      (agent-repl--info log-ws "maybe-autoselect-input: ws=%s branch=disabled" ws))
+     ;; A GATE HIDES THE INPUT WINDOW, and then the docked banner in the
+     ;; webview is where the user lands; the predicate is the gate's owner's.
+     ((and (fboundp 'agent-repl-input-hidden-p) (agent-repl-input-hidden-p ws))
+      (agent-repl--info log-ws "maybe-autoselect-input: ws=%s branch=input-hidden" ws))
+     (t
+      (if-let ((win (agent-repl-window--panel-window :input ws)))
+          (progn
+            (agent-repl--info log-ws "maybe-autoselect-input: ws=%s branch=select input-win=%s" ws win)
+            (select-window win)
+            (agent-repl--input-enter-command-state))
+        (agent-repl--info log-ws "maybe-autoselect-input: ws=%s branch=no-input-window" ws))))))
 
 (defun agent-repl--stale-panel-windows ()
   "Return a list of windows showing agent panel buffers from a different workspace.
