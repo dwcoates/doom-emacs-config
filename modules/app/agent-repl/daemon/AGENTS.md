@@ -636,7 +636,19 @@ through `concludeLocked`, at a conclusion the shim states:
 - shell: its run's `AgentBash` terminal on WatchBash;
 - monitor: its activity's terminal arm;
 - every kind: `query_died`, and a WatchSession re-announcement whose
-  `live_work` no longer names it.
+  `live_work` no longer names it;
+- every kind: the shim's DEPARTURE (`settleDepartedWorkLocked`, conclusion
+  `departed`), at the one door every departure passes through
+  (`departLocked`): a link gone dead, or a close on a session this daemon is
+  ending or whose process is reaped. The process group is the work's lifetime,
+  so a killed or dead shim's items are ended for every view at once. Before
+  this, a restart's forced kill left the last set standing in the webapp's
+  expanded footer and the roster's `idle_async` (owner report, 2026-10-02).
+  Only the watcher that SPEAKS for the workspace (`speakers`, the newest one
+  started and not closed) republishes: a displaced watcher's departure settles
+  its own ledger and tells no view, so it cannot hide a newer shim's work. A
+  close that only stops WATCHING a running shim (the daemon's exit, a
+  handover) is no departure and ends nothing.
 
 A watch open that FAILS, is REFUSED or HANGS, and a stream that ENDS, never
 retire an item: a shell stays live with a stream-less entry its next
