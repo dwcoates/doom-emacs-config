@@ -1,7 +1,6 @@
 package suites
 
 import (
-	"bufio"
 	"bytes"
 	"fmt"
 	"go/ast"
@@ -201,21 +200,16 @@ var goTestResult = regexp.MustCompile(`^\s*--- (PASS|FAIL|SKIP): (\S+) \(([0-9.]
 // without double-counting the sequential one.
 func ParseGoTestItems(out []byte, want []string) (map[string]float64, error) {
 	nodes := map[string]float64{}
-	sc := bufio.NewScanner(bytes.NewReader(out))
-	sc.Buffer(make([]byte, 1024*1024), 64*1024*1024)
-	for sc.Scan() {
-		m := goTestResult.FindStringSubmatch(sc.Text())
+	for line := range strings.SplitSeq(string(out), "\n") {
+		m := goTestResult.FindStringSubmatch(line)
 		if m == nil {
 			continue
 		}
 		secs, err := strconv.ParseFloat(m[3], 64)
 		if err != nil {
-			return nil, fmt.Errorf("unreadable seconds in %q: %w", sc.Text(), err)
+			return nil, fmt.Errorf("unreadable seconds in %q: %w", line, err)
 		}
 		nodes[m[2]] = secs
-	}
-	if err := sc.Err(); err != nil {
-		return nil, err
 	}
 	got := make(map[string]float64, len(want))
 	var total func(string) float64
@@ -242,21 +236,17 @@ var goTestNoise = regexp.MustCompile(`^(=== (RUN|PAUSE|CONT|NAME) |\s*--- PASS: 
 // the item timings needed: the run log keeps what a passing `go test` would
 // have printed, and a failing chunk shows everything.
 func QuietGoTestOutput(out []byte, passed bool) []byte {
-	if !passed {
+	if !passed || len(out) == 0 {
 		return out
 	}
+	// Split, never scanned: a line has no length limit here, so there is no
+	// failure to fall back from and no line can be lost.
 	var b bytes.Buffer
-	sc := bufio.NewScanner(bytes.NewReader(out))
-	sc.Buffer(make([]byte, 1024*1024), 64*1024*1024)
-	for sc.Scan() {
-		if !goTestNoise.MatchString(sc.Text()) {
-			b.Write(sc.Bytes())
+	for line := range strings.SplitSeq(strings.TrimSuffix(string(out), "\n"), "\n") {
+		if !goTestNoise.MatchString(line) {
+			b.WriteString(line)
 			b.WriteByte('\n')
 		}
-	}
-	if sc.Err() != nil {
-		// A line too long to scan: show the output whole rather than lose it.
-		return out
 	}
 	return b.Bytes()
 }
