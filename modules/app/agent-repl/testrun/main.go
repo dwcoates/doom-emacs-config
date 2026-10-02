@@ -71,7 +71,7 @@ func runCmd(log *run.Log, argv []string) int {
 	defer stop()
 	return cli.Run(ctx, cli.Deps{
 		Log:         log,
-		Exec:        run.OSExec{},
+		Exec:        run.OSExec{Log: log, Grace: run.KillGrace},
 		Clock:       run.WallClock{},
 		Slots:       slots,
 		HistoryPath: histPath,
