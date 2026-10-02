@@ -318,30 +318,6 @@ func TestARefreshReportsAFailedRecord(t *testing.T) {
 	}
 }
 
-func TestARefreshReportsAFailedMint(t *testing.T) {
-	// Arrange
-	w := newWorld(t)
-	w.withNewFeedEntry()
-	w.runner.text = answerJSON
-	d, err := New(Deps{
-		Sources: w.sources, Fetcher: w.fetcher, Headless: w.runner, PromptsDir: repoPromptsDir,
-		Store: w.store, Clock: w.clock, LockPath: w.lock, Serves: func() bool { return true },
-		MintID: func() (string, error) { return "", errScripted },
-		Every:  DefaultEvery, StartDelay: DefaultStartDelay, Recheck: DefaultRecheck, Log: w.log,
-	})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-
-	// Act
-	_, err = d.Refresh(context.Background())
-
-	// Assert
-	if !errors.Is(err, errScripted) || len(records(w.log, "error", opRun)) != 1 {
-		t.Fatalf("Refresh = %v, records %v, want the mint's failure recorded at ERROR", err, w.log.Records())
-	}
-}
-
 func TestAStandingDigestIsCarriedIntoTheNextOne(t *testing.T) {
 	// Arrange
 	w := newWorld(t)

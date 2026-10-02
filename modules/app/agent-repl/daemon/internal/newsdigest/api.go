@@ -106,8 +106,8 @@ type Deps struct {
 	// Serves answers whether this daemon is the one that serves, and so the
 	// one that starts scheduled runs. REQUIRED.
 	Serves func() bool
-	// MintID mints a digest's opaque id. REQUIRED.
-	MintID func() (string, error)
+	// MintID mints a digest's opaque id (wsm.NewNewsDigestID). REQUIRED.
+	MintID func() string
 	// Every, StartDelay and Recheck are the windows; see the defaults.
 	Every, StartDelay, Recheck time.Duration
 	// ModelTimeout bounds the condensing call; zero is DefaultModelTimeout.
