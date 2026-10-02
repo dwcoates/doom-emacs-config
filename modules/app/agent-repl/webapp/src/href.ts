@@ -30,3 +30,23 @@ export function isFileLinkHref(href: string): boolean {
   if (trimmed === "" || trimmed.startsWith("#") || trimmed.startsWith("//")) return false;
   return !SCHEME.test(trimmed.replace(LINE_SUFFIX, ""));
 }
+
+/**
+ * THE EXTENSIONS A SCHEME-LESS NAME IS READ AS A FILE BY (owner request,
+ * 2026-10-02). Markdown's fuzzy linkifier takes a bare `README.md` for a
+ * hostname (`.md` is Moldova's TLD) and turns it into a web link; a bare name
+ * ending in one of these is a source or doc file, and its anchor opens through
+ * the daemon (`OpenInEditorFeedLink`) instead. Real domains (`example.com`,
+ * `github.io`) end in none of them and stay web links.
+ */
+export const FILE_LINK_EXTENSIONS: readonly string[] = [
+  "md", "ts", "tsx", "js", "mjs", "go", "el", "py", "sh", "json", "yaml", "yml",
+  "toml", "proto", "txt", "css", "html", "rs", "c", "h", "m", "swift", "org",
+];
+
+/** Whether LABEL, a scheme-less autolinked name, ends in a file extension. */
+export function hasFileExtension(label: string): boolean {
+  const dot = label.lastIndexOf(".");
+  if (dot <= 0) return false;
+  return FILE_LINK_EXTENSIONS.includes(label.slice(dot + 1).toLowerCase());
+}
