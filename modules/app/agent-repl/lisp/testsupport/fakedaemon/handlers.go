@@ -51,6 +51,14 @@ func (s *fakeServer) WatchFeed(ctx context.Context, req *connect.Request[v1.Watc
 		fmt.Errorf("fakedaemon mocks only Emacs's streams; WatchFeed is a webapp stream"))
 }
 
+func (s *fakeServer) LoadFeedThrough(ctx context.Context, req *connect.Request[v1.LoadFeedThroughRequest], stream *connect.ServerStream[v1.LoadFeedThroughResponse]) error {
+	s.record(ctx, "LoadFeedThrough", req.Msg)
+	logWarn("fakedaemon.stream.not-mocked", "a stream this fake does not mock was called",
+		map[string]any{"method": "LoadFeedThrough"})
+	return connect.NewError(connect.CodeUnimplemented,
+		fmt.Errorf("fakedaemon mocks only Emacs's streams; LoadFeedThrough is a webapp stream"))
+}
+
 func (s *fakeServer) GetFeedPage(ctx context.Context, req *connect.Request[v1.GetFeedPageRequest]) (*connect.Response[v1.GetFeedPageResponse], error) {
 	return handleUnary[v1.GetFeedPageRequest, v1.GetFeedPageResponse](ctx, s, "GetFeedPage", req.Msg)
 }
