@@ -28,6 +28,7 @@ import { CLICK_THROUGH_SELECTOR } from "../expand.js";
 import { log } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
 import { guardMalformed } from "../rpc/guard.js";
+import { selectedText } from "../selection.js";
 import { unreachableArm } from "../rpc/strict.js";
 import { selectFeedRow } from "./select-feed-row.js";
 
@@ -112,7 +113,7 @@ export function installBubbleSelect(
   host: HTMLElement,
   ctx: AppContext,
   selectedRow: () => string | null,
-  selection: () => string = () => window.getSelection()?.toString() ?? "",
+  selection: () => string = () => selectedText(),
 ): () => void {
   const onClick = (event: MouseEvent): void => {
     const row = governedRowAt(event.target, host);
