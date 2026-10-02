@@ -890,3 +890,97 @@ func watcherlessHarness(t *testing.T) *harness {
 	h.q = q
 	return h
 }
+
+// A SHIM WITH NO STARTED SESSION TAKES NO PROMPT: the submission waits under
+// the reconnect hold (2026-10-02: one was drawn and then refused no_session).
+func TestSubmitHoldsAPromptForASessionThatIsNotStarted(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.notStarted = true
+
+	// Act
+	got, err := h.q.Submit(context.Background(), submission("t1", "hello"))
+
+	// Assert
+	if err != nil || got.Held == nil || *got.Held != wsm.HoldReconnect {
+		t.Fatalf("Submit = (%+v, %v), want the reconnect hold", got, err)
+	}
+}
+
+func TestSubmitToASessionThatIsNotStartedStartsNoTurn(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.notStarted = true
+
+	// Act
+	_, _ = h.q.Submit(context.Background(), submission("t1", "hello"))
+
+	// Assert
+	if got := h.sender.started(); len(got) != 0 {
+		t.Fatalf("started turns = %v, want none before the session is up", got)
+	}
+}
+
+func TestSubmitToASessionThatIsNotStartedRevivesNothing(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.notStarted = true
+
+	// Act
+	_, _ = h.q.Submit(context.Background(), submission("t1", "hello"))
+	h.waitRevivals()
+
+	// Assert: the shim is there; its session coming up is what delivers.
+	if h.revivals != 0 {
+		t.Fatalf("revivals = %d, want none for a workspace whose shim is up", h.revivals)
+	}
+}
+
+func TestASessionComingUpDeliversItsReconnectHolds(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.notStarted = true
+	if _, err := h.q.Submit(context.Background(), submission("t1", "hello")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	h.notStarted = false
+
+	// Act
+	h.q.ReleaseReconnectHolds("ws-1")
+
+	// Assert
+	if got := h.sender.started(); len(got) != 1 || got[0] != "t1" {
+		t.Fatalf("started turns = %v, want t1 delivered once the session is up", got)
+	}
+}
+
+func TestASessionComingUpRetiresTheDeliveredReconnectHold(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.notStarted = true
+	if _, err := h.q.Submit(context.Background(), submission("t1", "hello")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	h.notStarted = false
+
+	// Act
+	h.q.ReleaseReconnectHolds("ws-1")
+
+	// Assert
+	if retired := h.db.retired("t1"); retired == nil || retired.Kind != tombstoneDelivered {
+		t.Fatalf("tombstone = %+v, want the hold retired as delivered", retired)
+	}
+}
+
+func TestASessionComingUpWithNoReconnectHoldDeliversNothing(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	h.q.ReleaseReconnectHolds("ws-1")
+
+	// Assert
+	if got := h.sender.started(); len(got) != 0 {
+		t.Fatalf("started turns = %v, want none", got)
+	}
+}

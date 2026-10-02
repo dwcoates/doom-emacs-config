@@ -95,6 +95,7 @@ func (f *fakeBuildJudge) ShimReported(ws ids.WorkspaceID, build string) {
 // fakeFreeQueue records the freeness edges the lifecycle sink hands on.
 type fakeFreeQueue struct {
 	promptqueue.Queue
+	reconnects []ids.WorkspaceID
 	frees      []ids.WorkspaceID
 	departures []departedAt
 	unobserved map[ids.WorkspaceID][]ids.TurnID
@@ -584,4 +585,40 @@ func TestAResumeHandleThatCannotBeRecordedIsAnError(t *testing.T) {
 		}
 	}
 	t.Fatalf("records = %+v, want the failed record at ERROR with its cause", log.Records())
+}
+
+// ReleaseReconnectHolds records the session-up the sink forwarded.
+func (q *fakeFreeQueue) ReleaseReconnectHolds(ws ids.WorkspaceID) {
+	q.reconnects = append(q.reconnects, ws)
+}
+
+func TestSessionUpReleasesTheQueuesReconnectHolds(t *testing.T) {
+	// Arrange
+	queue := &fakeFreeQueue{}
+	sink := &lifecycleSink{queue: queue, log: dlog.NewTestLogger()}
+
+	// Act
+	sink.SessionUp("ws-1")
+
+	// Assert
+	if len(queue.reconnects) != 1 || queue.reconnects[0] != "ws-1" {
+		t.Fatalf("reconnect releases = %v, want ws-1", queue.reconnects)
+	}
+}
+
+func TestSessionUpBeforeTheQueueIsWiredIsRecordedAtError(t *testing.T) {
+	// Arrange
+	log := dlog.NewTestLogger()
+	sink := &lifecycleSink{log: log}
+
+	// Act
+	sink.SessionUp("ws-1")
+
+	// Assert
+	for _, r := range log.Records() {
+		if r.Level == dlog.LevelError && r.Operation == "daemon.cmd.lifecycle" {
+			return
+		}
+	}
+	t.Fatalf("records = %+v, want the unwired queue at ERROR", log.Records())
 }

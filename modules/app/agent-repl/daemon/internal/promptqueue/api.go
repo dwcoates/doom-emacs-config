@@ -66,6 +66,12 @@ var (
 	ErrHoldsChanged = errors.New("promptqueue: the held prompts changed since the rollback was planned")
 	// ErrNoSession is a submission to a workspace with no live shim.
 	ErrNoSession = errors.New("promptqueue: the workspace has no session to submit to")
+	// ErrShimHasNoSession is the SHIM's own refusal of a delivery because it
+	// holds no session (StartTurnFailure.no_session). The sender's typed
+	// refusal answers errors.Is against it. A delivery refused so is HELD
+	// under the reconnect hold rather than lost (daemon_hold.proto,
+	// HeldPromptReconnectHold).
+	ErrShimHasNoSession = errors.New("promptqueue: the shim holds no session")
 	// ErrColdGate is a submission to a workspace whose session is PARKED AT
 	// ITS COLD GATE. It is deliberately NOT ErrNoSession: a session exists —
 	// the shim is up and serving, which is exactly why the gate could be
@@ -227,6 +233,11 @@ type Queue interface {
 	// policy, the classifier, the hold decision, and the shim call. The
 	// disposition is the answer.
 	Submit(ctx context.Context, sub Submission) (Disposition, error)
+	// ReleaseReconnectHolds is told that a session has come up on the
+	// workspace, however it came up (a start, a retried vendor start, a
+	// relaunch's resume, a cold-gate re-open): it un-stamps every reconnect
+	// hold and delivers the next entry down the ordinary path.
+	ReleaseReconnectHolds(ws ids.WorkspaceID)
 	// Release delivers a held prompt now (UpdateHeldPrompt.release).
 	Release(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID) error
 	// Drop discards a held prompt (UpdateHeldPrompt.drop).
@@ -381,6 +392,12 @@ type Deps struct {
 	// Watcher resolves a workspace's session watcher, which is what answers
 	// the in-flight turn and what an accepted turn is handed over to.
 	Watcher WatcherFunc
+	// SessionStarted reports whether the workspace's installed shim holds a
+	// STARTED session. A client is not a session: a relaunch installs its
+	// shim before the resume, and a vendor start being retried (or one that
+	// failed) leaves a shim with none. A submission there is held under the
+	// reconnect hold rather than sent to be refused `no_session`.
+	SessionStarted func(ws ids.WorkspaceID) bool
 	// ColdGate answers the STANDING cold gate's own account for a workspace,
 	// false when no gate stands. A gate is a refusal with a name of its own,
 	// and this is what lets the queue give it rather than reporting a missing

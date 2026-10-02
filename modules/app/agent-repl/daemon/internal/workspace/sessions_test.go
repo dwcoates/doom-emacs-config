@@ -474,6 +474,8 @@ type fleetFixture struct {
 	retryAfter func(d time.Duration) <-chan time.Time
 	// vendorStarts is every vendor-start state the roster was told, in order.
 	vendorStarts []sidebar.VendorStart
+	// sessionsUp is every workspace the session-up hook was told about.
+	sessionsUp []ids.WorkspaceID
 	// bringUps records every BringUps edge, in order.
 	bringUps []bringUpEdge
 	// bundle is the installed shim bundle every spawn holds.
@@ -644,7 +646,8 @@ func newFleetFixtureBoundedAt(t *testing.T, adoptBound time.Duration) *fleetFixt
 		VendorStarts: func(_ ids.WorkspaceID, state sidebar.VendorStart) {
 			f.vendorStarts = append(f.vendorStarts, state)
 		},
-		Probe: func(string, string) (sessionlock.State, error) { return f.probeState, f.probeErr },
+		SessionsUp: func(ws ids.WorkspaceID) { f.sessionsUp = append(f.sessionsUp, ws) },
+		Probe:      func(string, string) (sessionlock.State, error) { return f.probeState, f.probeErr },
 		SocketProbe: func(path string) (shimsocket.State, error) {
 			if f.onSocketProbe != nil {
 				f.onSocketProbe(path)
@@ -748,6 +751,16 @@ func TestNewFleetRefusesMissingCollaborators(t *testing.T) {
 				DB: newFakeDB(), Instance: fixtureInstance, Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{},
 				SocketPath: func(ids.WorkspaceID) string { return "" }, ShimBundle: &fakeBundle{build: "b"},
 				Log: dlog.NewTestSurfaces(), LockDir: "/run", BringUps: func(ids.WorkspaceID, bool) {},
+				SessionsUp: func(ids.WorkspaceID) {},
+			},
+		},
+		{
+			name: "no session-up hook",
+			deps: FleetDeps{
+				DB: newFakeDB(), Instance: fixtureInstance, Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{},
+				SocketPath: func(ids.WorkspaceID) string { return "" }, ShimBundle: &fakeBundle{build: "b"},
+				Log: dlog.NewTestSurfaces(), LockDir: "/run", BringUps: func(ids.WorkspaceID, bool) {},
+				VendorStarts: func(ids.WorkspaceID, sidebar.VendorStart) {},
 			},
 		},
 	}
