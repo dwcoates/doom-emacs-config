@@ -160,6 +160,50 @@ runs outside `testrun`:
   wrapper: signalling the npm pid alone leaves vitest's worker pool reparented
   to init and burning CPU for the rest of the run.
 
+### Suite timings: what a row measures
+
+`test_time.csv` is the canonical per-suite timing history (recording rules:
+the repository root `AGENTS.md`, "Canonical test timing history"). Its
+`measure` column names what each row's `duration_seconds` is:
+
+| measure | written by | what it is |
+|---|---|---|
+| `serial-wall` | the retired serial `bin/test-all.sh` (rows up to 2026-08-04), never again | `time` of the suite run ALONE on the host, its `go test -count=1 -cover`, vitest-with-coverage or Emacs processes free to use every core |
+| `unit-wall-sum` | `testrun run --record` | the sum of the suite's own units' wall times, each unit on one core slot, prebuild/compile units included |
+
+The regression report compares a suite only with prior rows of its own
+measure on its own branch, and says how many rows of another measure it set
+aside. An unknown measure, a run whose rows disagree on their measure, and a
+row of the wrong width are errors, never skipped rows.
+`TestCanonicalTimingFileParses` holds the committed file to that schema.
+
+Why `unit-wall-sum` and not the alternatives:
+
+- The span, from a suite's first unit start to its last unit end, is a property
+  of the schedule.
+  - It includes every stretch in which the suite's next unit waited for a slot another suite held.
+  - The first `--record` under testrun recorded `store` at 89.7s against a 0.8s history while the whole run halved.
+- CPU time misses everything a test waits on, such as timers, sockets and I/O.
+  - It also misses every process the unit does not reap, such as the Docker VM behind `e2e-emacs` and daemonized children.
+  - A test that starts waiting 5s longer would never register.
+- Summed unit wall time is the slot time the suite itself occupies.
+  - It is what the planner budgets, and it moves when the suite's own tests get slower.
+  - It does not grow while its units queue behind other suites.
+
+What still moves `unit-wall-sum` without the suite changing:
+
+- The planner's chunk count for a Go or vitest suite: each extra chunk pays its process start (and `TestMain`) once more.
+- Contention from the units sharing the host at the same moment.
+
+So a regression is a lead to investigate, not a verdict. Read the unit lines
+(`unit <id> [<suite>] ok, <wall>s wall, <cpu>s cpu`) and the plan line's chunk
+counts before attributing it to the suite.
+
+`--record` refuses `--coverage`: instrumentation and the report units would
+inflate every Go and vitest suite's figure. A future change to what a run
+measures (a different figure, or pinning) gets a NEW measure name, never a
+reuse of an old one, so its first rows start a fresh baseline.
+
 ### Every Go module pins a shared third-party dependency at one version
 
 The store, daemon and e2e modules once each pinned `modernc.org/sqlite`

@@ -222,11 +222,19 @@ The command appends timings only after every suite passes and only if the
 branch and commit remain unchanged throughout the run. Commit the resulting
 `test_time.csv` update as a follow-up timing record.
 
+Each row's `measure` column names what its `duration_seconds` means. The
+`unit-wall-sum` measure is the one `--record` writes. The
+`serial-wall` measure belongs to the retired serial script, and nothing
+writes it any more. The two are different quantities, and
+`modules/app/agent-repl/AGENTS.md` ("Suite timings: what a row measures")
+explains why. `--record` refuses `--coverage`.
+
 Review the command's regression report and the newest CSV rows before
 declaring the master work complete. A big regression means the current suite
 is both at least 25% slower and at least 1.0 second slower than the average of
-its five most recent entries on the same branch. The script prints
-`TIMING REGRESSION` for that condition once at least three prior entries exist.
+its five most recent entries on the same branch AND of the same measure. The
+script prints `TIMING REGRESSION` for that condition once at least three such
+prior entries exist. Rows of another measure are never a baseline.
 Surface every such regression to the user with the current duration, recent
 average, percentage increase, and absolute increase. Investigate and fix it
 unless the correct resolution requires a user decision.
