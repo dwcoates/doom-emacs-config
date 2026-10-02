@@ -132,6 +132,23 @@ what an implementer must know that the schema does not say.
   - The webapp stops requiring it in its decoder. The bubble's own expand
     toggle is the only fold the summary has.
 
+### 6. The session pushes the effort the vendor applies
+
+- WHAT: `conversation.v1.SessionUpdate.effort_changed` (tag 33, the existing
+  `conversation.v1.SessionEffortChanged`).
+- WHY: when the session's `settings.json` names no level, the vendor's
+  default is published nowhere a file read can reach, so the selector could
+  not show "whatever the default is" as the owner asked. The vendor answers
+  its own settings query with the applied level (defaults, clamps and
+  downgrades included), so the shim reports that.
+- CONSEQUENCES:
+  - The pushed level is the authority for the selector's current level.
+    The daemon's `settings.json` read (the owner's named mechanism) stands
+    only until the first push.
+  - A successor daemon after a bounce learns the level the shim actually
+    runs at, which a settings read alone could not tell it after a pick.
+  - The shim never pushes a guessed level: absence means none known.
+
 ## Features that need no protobuf change
 
 - Persistent-wifi click: the webapp calls the existing
