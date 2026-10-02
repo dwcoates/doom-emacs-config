@@ -769,3 +769,42 @@ func TestADetachedRevivalThatFailsIsStillAnError(t *testing.T) {
 		t.Fatalf("errors = %+v, want the failed bring-up at ERROR once", errs)
 	}
 }
+
+func TestSelectReturnsTheFeedToItsTailOnASwitch(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.workspace("w2", t.TempDir())
+	if err := f.verbs.Select(context.Background(), "w1"); err != nil {
+		t.Fatalf("Select w1: %v", err)
+	}
+
+	// Act.
+	if err := f.verbs.Select(context.Background(), "w2"); err != nil {
+		t.Fatalf("Select w2: %v", err)
+	}
+
+	// Assert.
+	if !slices.Equal(f.host.tailReturns, []ids.WorkspaceID{"w1", "w2"}) {
+		t.Fatalf("tail returns = %v, want [w1 w2]", f.host.tailReturns)
+	}
+}
+
+func TestReselectingLeavesTheFeedWhereItIs(t *testing.T) {
+	// Arrange: a re-selection is Emacs re-asserting, never a switch.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	if err := f.verbs.Select(context.Background(), "w1"); err != nil {
+		t.Fatalf("first Select: %v", err)
+	}
+
+	// Act.
+	if err := f.verbs.Select(context.Background(), "w1"); err != nil {
+		t.Fatalf("second Select: %v", err)
+	}
+
+	// Assert.
+	if !slices.Equal(f.host.tailReturns, []ids.WorkspaceID{"w1"}) {
+		t.Fatalf("tail returns = %v, want [w1] (the first select only)", f.host.tailReturns)
+	}
+}

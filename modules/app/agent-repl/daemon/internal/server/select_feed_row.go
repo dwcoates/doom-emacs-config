@@ -246,6 +246,22 @@ func (s *server) endSelection(
 	return true
 }
 
+// returnFeedToTail ends WS's selection, if one stands, with return_to_tail:
+// the user switched to the workspace, and a switch lands on the newest row
+// with the follow re-armed. The end goes through endSelection, so the root
+// feed's watch and Emacs's host watch both receive it, in order with every
+// other selection change.
+func (s *server) returnFeedToTail(ctx context.Context, ws ids.WorkspaceID) {
+	const op = "daemon.server.return_feed_to_tail"
+	log, err := s.workspaceLog(ctx, "SelectWorkspace", ws)
+	if err != nil {
+		s.log.Error(op, "could not resolve the selected workspace; its feed selection was not ended",
+			dlog.Context{"workspace": string(ws), "cause": err.Error()})
+		return
+	}
+	s.endSelection(log, ws, nil, returnToTail(), "workspace_selected")
+}
+
 // currentSelection answers the workspace's selected row and its kind; held is
 // false when nothing is selected. A caller acting on a selection reads it
 // once here and ends only that row (endSelection with `only`).

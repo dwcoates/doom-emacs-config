@@ -1178,6 +1178,12 @@ type fakeHost struct {
 	reloads     []ids.WorkspaceID
 	// hostPublishes records every host-state republish the verbs asked for.
 	hostPublishes []ids.WorkspaceID
+	// tailReturns records every feed return-to-tail the verbs asked for.
+	tailReturns []ids.WorkspaceID
+}
+
+func (h *fakeHost) ReturnFeedToTail(ws ids.WorkspaceID) {
+	h.tailReturns = append(h.tailReturns, ws)
 }
 
 func (h *fakeHost) PublishHostWorkspace(ws ids.WorkspaceID) {
