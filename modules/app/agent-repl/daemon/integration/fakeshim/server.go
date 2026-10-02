@@ -1462,7 +1462,10 @@ func vendorStartFailure(detail string, retryable bool) *shimv1.StartSessionRespo
 	label := &shimv1.StartSessionVendorStartFailed{
 		Retry: &shimv1.StartSessionVendorStartFailed_Rejected{Rejected: &shimv1.StartSessionVendorStartRejected{}}}
 	if retryable {
-		label.Retry = &shimv1.StartSessionVendorStartFailed_Retryable{Retryable: &shimv1.StartSessionVendorStartRetryable{}}
+		// A real shim always says whose failure a retryable one was; the
+		// fake's are the vendor's.
+		label.Retry = &shimv1.StartSessionVendorStartFailed_Retryable{Retryable: &shimv1.StartSessionVendorStartRetryable{
+			Cause: &shimv1.StartSessionVendorStartRetryable_Vendor{Vendor: &shimv1.StartSessionVendorStartVendor{}}}}
 	}
 	return &shimv1.StartSessionResponse{
 		Result: &shimv1.StartSessionResponse_Failure{Failure: &shimv1.StartSessionFailure{

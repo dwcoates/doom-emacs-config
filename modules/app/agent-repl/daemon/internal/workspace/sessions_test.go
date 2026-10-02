@@ -453,10 +453,20 @@ func rejectedVendorStart() *shimv1.StartSessionVendorStartFailed {
 		Retry: &shimv1.StartSessionVendorStartFailed_Rejected{Rejected: &shimv1.StartSessionVendorStartRejected{}}}
 }
 
-// retryableVendorStart is a vendor-start refusal the shim labeled RETRYABLE.
+// retryableVendorStart is a vendor-start refusal the shim labeled RETRYABLE
+// and blamed on the vendor.
 func retryableVendorStart() *shimv1.StartSessionVendorStartFailed {
 	return &shimv1.StartSessionVendorStartFailed{
-		Retry: &shimv1.StartSessionVendorStartFailed_Retryable{Retryable: &shimv1.StartSessionVendorStartRetryable{}}}
+		Retry: &shimv1.StartSessionVendorStartFailed_Retryable{Retryable: &shimv1.StartSessionVendorStartRetryable{
+			Cause: &shimv1.StartSessionVendorStartRetryable_Vendor{Vendor: &shimv1.StartSessionVendorStartVendor{}}}}}
+}
+
+// offlineVendorStart is a RETRYABLE vendor-start refusal the shim blamed on
+// this machine not reaching the network.
+func offlineVendorStart() *shimv1.StartSessionVendorStartFailed {
+	return &shimv1.StartSessionVendorStartFailed{
+		Retry: &shimv1.StartSessionVendorStartFailed_Retryable{Retryable: &shimv1.StartSessionVendorStartRetryable{
+			Cause: &shimv1.StartSessionVendorStartRetryable_Network{Network: &shimv1.StartSessionVendorStartNetwork{}}}}}
 }
 
 // vendorRefusal is a StartSession answer refusing the start with this vendor
