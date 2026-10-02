@@ -2,10 +2,12 @@ package scriptrunner
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"claude-repld/internal/dlog"
 )
@@ -264,5 +266,72 @@ func TestLineWriterHandsOverALineSplitAcrossWrites(t *testing.T) {
 	// Assert.
 	if want := []string{"half", "whole"}; strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("lines = %q, want %q", got, want)
+	}
+}
+
+func TestRunCancelledByItsCallerIsAnError(t *testing.T) {
+	// Arrange.
+	dir := t.TempDir()
+	script := writeScript(t, dir, "ok.sh", "exit 0\n")
+	r := newRunner(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act.
+	_, _, err := r.Run(ctx, dir, []string{script})
+
+	// Assert.
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Run error = %v, want one wrapping context.Canceled", err)
+	}
+}
+
+func TestRunCancelledByItsCallerIsRecordedAtInfo(t *testing.T) {
+	// Arrange.
+	dir := t.TempDir()
+	script := writeScript(t, dir, "ok.sh", "exit 0\n")
+	log := dlog.NewTestLogger()
+	r, err := New(log)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act.
+	_, _, _ = r.Run(ctx, dir, []string{script})
+
+	// Assert.
+	var levels []string
+	for _, rec := range log.Records() {
+		levels = append(levels, rec.Level)
+	}
+	if strings.Join(levels, ",") != "info" {
+		t.Fatalf("record levels = %v, want exactly one info record", levels)
+	}
+}
+
+func TestRunPastItsDeadlineIsRecordedAtError(t *testing.T) {
+	// Arrange.
+	dir := t.TempDir()
+	script := writeScript(t, dir, "ok.sh", "exit 0\n")
+	log := dlog.NewTestLogger()
+	r, err := New(log)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	ctx, cancel := context.WithDeadline(context.Background(), time.Unix(0, 0))
+	defer cancel()
+
+	// Act.
+	_, _, _ = r.Run(ctx, dir, []string{script})
+
+	// Assert.
+	var levels []string
+	for _, rec := range log.Records() {
+		levels = append(levels, rec.Level)
+	}
+	if strings.Join(levels, ",") != "error" {
+		t.Fatalf("record levels = %v, want exactly one error record", levels)
 	}
 }

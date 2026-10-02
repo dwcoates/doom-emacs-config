@@ -131,6 +131,14 @@ func (c *Controller) Run(ctx context.Context) error {
 // publishes. Caller holds mu.
 func (c *Controller) readLocked(ctx context.Context) reading {
 	rd := probe(ctx, c.runner, c.cfg.Tools)
+	if err := ctx.Err(); err != nil {
+		// A read its caller abandoned (the daemon standing down mid-probe)
+		// says nothing about either fact: neither its causes nor its standing
+		// are recorded or published.
+		c.log.Info(opProbe, "the persistent-wifi read was abandoned by its caller; nothing is recorded",
+			dlog.Context{"cause": err.Error()})
+		return rd
+	}
 	c.wifiCause = c.recordCause("wifi", c.wifiCause, rd.wifiErr)
 	c.modeCause = c.recordCause("mode", c.modeCause, rd.modeErr)
 	if c.last == nil || !proto.Equal(c.last, rd.state) {
