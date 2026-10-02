@@ -189,10 +189,11 @@ type wsState struct {
 	// UNSPECIFIED before any pick. It outranks the settings: it is what the
 	// session runs at.
 	pickedEffort conversationv1.AgentEffortLevel
-	// effortStandingLogged is what the last edge record stated about the
-	// effort selector, so a change is recorded once, when it happens, and not
-	// on every publication.
+	// effortStandingLogged and windowSourceLogged are what the last edge
+	// records stated about the effort selector and the chip's window, so a
+	// change is recorded once, when it happens, and not on every publication.
 	effortStandingLogged string
+	windowSourceLogged   string
 
 	// email is the logged-in account, empty when the root is logged out.
 	email string
