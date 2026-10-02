@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -1453,5 +1454,103 @@ func TestADialedAdoptionClosesTheHealthyAttachsFaults(t *testing.T) {
 				t.Fatalf("%s closed = %v, want %v", tt.kind, closed, tt.closes)
 			}
 		})
+	}
+}
+
+// freeLockAdoption arranges a handed-over workspace whose lock reads free: the
+// outgoing daemon's shim had died, or was never spawned.
+func freeLockAdoption(t *testing.T, h *harness) ids.WorkspaceID {
+	t.Helper()
+	ws, dir := h.workspace(t)
+	h.mu.Lock()
+	h.lockStates[dir] = sessionlock.StateFree
+	h.mu.Unlock()
+	h.fleet.mu.Lock()
+	delete(h.fleet.live, ws)
+	h.fleet.mu.Unlock()
+	return ws
+}
+
+func TestAnAdoptionOfAFreeLockStartsTheWorkspacesSession(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := freeLockAdoption(t, h)
+
+	// Act
+	arm(t, h, ws, Participants{})
+
+	// Assert
+	if got := h.Started(); !slices.Equal(got, []ids.WorkspaceID{ws}) {
+		t.Fatalf("started = %v, want the adopted session-less workspace started", got)
+	}
+}
+
+func TestAnAdoptionOfAFreeLockRaisesTheMarkerBeforeItPublishes(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := freeLockAdoption(t, h)
+
+	// Act
+	arm(t, h, ws, Participants{})
+	h.Started()
+
+	// Assert
+	taken := h.order.Taken()
+	raised := slices.Index(taken, "bringing_up:true")
+	published := slices.Index(taken, "publish_views")
+	started := slices.Index(taken, "start_session")
+	if raised < 0 || published < 0 || started < 0 || raised > published || published > started {
+		t.Fatalf("steps = %v, want the marker raised, then the views published, then the session started", taken)
+	}
+}
+
+func TestAnAdoptionOfAHeldLockStartsNoSession(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+
+	// Act
+	arm(t, h, ws, Participants{})
+
+	// Assert
+	if got := h.Started(); len(got) != 0 {
+		t.Fatalf("started = %v, want none: the adopted shim is the session", got)
+	}
+}
+
+func TestAnAdoptionOfAClosedFreeLockStartsNoSession(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := freeLockAdoption(t, h)
+	if err := h.db.SetClosed(context.Background(), ws, true); err != nil {
+		t.Fatalf("SetClosed: %v", err)
+	}
+
+	// Act
+	arm(t, h, ws, Participants{})
+
+	// Assert
+	if got := h.Started(); len(got) != 0 {
+		t.Fatalf("started = %v, want none for a closed workspace", got)
+	}
+}
+
+func TestAnAdoptionWhoseViewsFailLowersTheMarkerAndStartsNothing(t *testing.T) {
+	// Arrange
+	h := newHarness(t, func(d *Deps) {
+		d.PublishViews = func(context.Context, ids.WorkspaceID) error { return errFake }
+	})
+	ws := freeLockAdoption(t, h)
+
+	// Act
+	arm(t, h, ws, Participants{})
+
+	// Assert
+	if got := h.Started(); len(got) != 0 {
+		t.Fatalf("started = %v, want none for an adoption that failed", got)
+	}
+	want := []markerEdge{{ws: ws, up: true}, {ws: ws, up: false}}
+	if got := h.Marker(); !slices.Equal(got, want) {
+		t.Fatalf("marker edges = %v, want the raise taken back", got)
 	}
 }

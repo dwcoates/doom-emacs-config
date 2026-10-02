@@ -130,3 +130,28 @@ func TestSystemClockNowAdvances(t *testing.T) {
 		t.Fatalf("the system clock went backwards: %v then %v", first, second)
 	}
 }
+
+func TestNewRefusesAMissingBringUpCollaborator(t *testing.T) {
+	cases := []struct {
+		name  string
+		strip func(*Deps)
+	}{
+		{"no session starter", func(d *Deps) { d.StartSession = nil }},
+		{"no bring-up marker", func(d *Deps) { d.BringingUp = nil }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			deps := newHarness(t).c.deps
+			tc.strip(&deps)
+
+			// Act
+			_, err := New(deps)
+
+			// Assert
+			if err == nil {
+				t.Fatalf("New accepted a controller that could not start a session-less workspace's session")
+			}
+		})
+	}
+}

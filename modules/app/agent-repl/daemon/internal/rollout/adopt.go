@@ -14,6 +14,7 @@ import (
 	"claude-repld/internal/health"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/sessionlock"
+	"claude-repld/internal/wsm"
 )
 
 // Join is the JOINING daemon's half of the handover.
@@ -655,8 +656,23 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 	if err := errors.Join(dialErr, carryErr, c.consumeCarry(ws, carried)); err != nil {
 		return err
 	}
+	// A WORKSPACE ADOPTED WITH NO SHIM BEHIND IT HAS ITS SESSION STARTED
+	// (sessionless.go). The marker is raised here, before the views are
+	// published, so the roster never draws the adopted row idle and usable
+	// while nothing serves it; the start itself runs once the adoption is
+	// complete and the workspace is this daemon's.
+	sessionless := !dial && !record.Closed
+	if sessionless {
+		c.deps.BringingUp(ws, true)
+	}
 	if err := c.deps.PublishViews(ctx, ws); err != nil {
 		c.log.Error(opAdopt, "could not publish the workspace's fresh views", withCause(fields, err))
+		if sessionless {
+			// The start this marker announced will not run: the adoption
+			// failed, and the straggler pass or the incumbent decides what
+			// serves the workspace next.
+			c.deps.BringingUp(ws, false)
+		}
 		return fmt.Errorf("rollout: adopt %q: publish views: %w", ws, err)
 	}
 
@@ -684,6 +700,10 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 		dlog.Context{"all_joining_owned": complete})
 
 	c.log.Info(opAdopt, "adopted the workspace", fields)
+
+	if sessionless {
+		c.bringUpSessionless([]wsm.Workspace{record}, fields)
+	}
 
 	// A DIALED ADOPTION IS A HEALTHY ATTACH, the recovery edge of every
 	// standing fault whose lifetime ends there (health/lifetime.go) -- the
