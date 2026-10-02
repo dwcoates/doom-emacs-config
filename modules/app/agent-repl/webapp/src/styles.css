@@ -7203,3 +7203,178 @@ bubble-body.bubble-body { display: block; }
 .merge-updating-main { padding: 0.15rem 0; }
 /* The tests tab's log line sits under its suites. */
 .merge-test-log { padding-top: 0.3rem; color: var(--muted); }
+
+/* ---- news digest overlay (src/news-digest/news-digest.ts) ---- */
+
+/* THE DAILY CLAUDE NEWS DIGEST covers the FEED's own box and nothing else:
+   the component keeps this fixed host on #feed-scroll's rectangle, so the
+   topbar, the rail and the footer stay in view and the feed underneath is
+   never moved. The scrim is the feed's own ground, frosted, so the panel
+   reads as lifted over the conversation rather than as a modal over the app.
+   Under the login overlay (z-index 50), which is the one truly modal surface. */
+[data-component="news-digest"] {
+  position: fixed;
+  z-index: 44;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  box-sizing: border-box;
+  padding: 1rem;
+  background: color-mix(in srgb, var(--bg) 78%, transparent);
+  backdrop-filter: blur(6px);
+}
+[data-component="news-digest"][hidden] {
+  display: none;
+}
+
+/* The panel: the reveal's register (the --bg card, the 1px --border, the
+   rounded corner, the soft drop) at the agent column's width cap, so it sits
+   on the very columns the feed's bubbles hug. */
+.news-digest-panel {
+  display: flex;
+  flex-direction: column;
+  width: var(--bubble-max-width);
+  max-width: 100%;
+  min-height: 0;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 6px 18px rgb(0 0 0 / 0.28);
+  overflow: hidden;
+}
+
+.news-digest-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.8rem 1rem 0.7rem;
+  border-bottom: 1px solid var(--border);
+}
+.news-digest-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.news-digest-title {
+  color: var(--fg);
+  font-weight: 600;
+  font-size: 1.05rem;
+}
+.news-digest-period {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+/* The close control and, when a dismiss is refused, its refusal. */
+.news-digest-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.25rem;
+  font-size: 0.8rem;
+}
+/* The login overlay's close, in the same register. */
+.news-digest-close {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 0.15rem 0.5rem;
+  font: inherit;
+  cursor: pointer;
+}
+.news-digest-close:hover {
+  color: var(--fg);
+  border-color: var(--fg);
+}
+
+.news-digest-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0.4rem 1rem 0.8rem;
+}
+
+/* A section: its heading as the token sheet's small muted heading, then its
+   items, each set off by a quiet left rule in the section's accent. */
+.news-digest-section {
+  --news-digest-accent: var(--border-strong);
+  margin-top: 0.6rem;
+}
+.news-digest-section-heading {
+  margin: 0 0 0.35rem;
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+/* THE BACKEND KIND IS A WARNING: what touches the Agent SDK or Claude Code
+   this backend runs on reads in the warning chip's red, heading and rule. */
+.news-digest-section[data-kind="backend"] {
+  --news-digest-accent: var(--err);
+}
+.news-digest-section[data-kind="backend"] .news-digest-section-heading {
+  color: var(--err);
+}
+
+.news-digest-item {
+  padding: 0.45rem 0 0.5rem 0.75rem;
+  border-left: 2px solid var(--news-digest-accent);
+}
+.news-digest-item + .news-digest-item {
+  margin-top: 0.5rem;
+}
+.news-digest-item-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.news-digest-item-title {
+  color: var(--fg);
+  font-weight: 600;
+}
+.news-digest-effective {
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0 0.4rem;
+  font-size: 0.75em;
+  white-space: nowrap;
+}
+.news-digest-summary {
+  margin: 0.2rem 0 0.3rem;
+  color: var(--fg);
+  line-height: 1.45;
+}
+.news-digest-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  font-size: 0.85rem;
+}
+.news-digest-links .external-link,
+.news-digest-source .external-link {
+  color: var(--accent);
+}
+
+/* The sources the digest read: one quiet line, a failed one in red. */
+.news-digest-sources {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 1rem;
+  padding: 0.55rem 1rem;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+.news-digest-source {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35rem;
+}
+.news-digest-source[data-outcome="failed"] .news-digest-source-outcome {
+  color: var(--err);
+}
