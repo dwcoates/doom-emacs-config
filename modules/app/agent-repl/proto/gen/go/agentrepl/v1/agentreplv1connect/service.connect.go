@@ -214,6 +214,12 @@ const (
 	// AgentReplUnsubscribePageProcedure is the fully-qualified name of the AgentRepl's UnsubscribePage
 	// RPC.
 	AgentReplUnsubscribePageProcedure = "/agentrepl.v1.AgentRepl/UnsubscribePage"
+	// AgentReplDismissNewsDigestProcedure is the fully-qualified name of the AgentRepl's
+	// DismissNewsDigest RPC.
+	AgentReplDismissNewsDigestProcedure = "/agentrepl.v1.AgentRepl/DismissNewsDigest"
+	// AgentReplRefreshNewsDigestProcedure is the fully-qualified name of the AgentRepl's
+	// RefreshNewsDigest RPC.
+	AgentReplRefreshNewsDigestProcedure = "/agentrepl.v1.AgentRepl/RefreshNewsDigest"
 )
 
 // These variables are the protoreflect.Descriptor objects for the RPCs defined in this package.
@@ -286,6 +292,8 @@ var (
 	agentReplWatchPageMethodDescriptor                = agentReplServiceDescriptor.Methods().ByName("WatchPage")
 	agentReplSubscribePageMethodDescriptor            = agentReplServiceDescriptor.Methods().ByName("SubscribePage")
 	agentReplUnsubscribePageMethodDescriptor          = agentReplServiceDescriptor.Methods().ByName("UnsubscribePage")
+	agentReplDismissNewsDigestMethodDescriptor        = agentReplServiceDescriptor.Methods().ByName("DismissNewsDigest")
+	agentReplRefreshNewsDigestMethodDescriptor        = agentReplServiceDescriptor.Methods().ByName("RefreshNewsDigest")
 )
 
 // AgentReplClient is a client for the agentrepl.v1.AgentRepl service.
@@ -487,6 +495,13 @@ type AgentReplClient interface {
 	SubscribePage(context.Context, *connect.Request[v1.SubscribePageRequest]) (*connect.Response[v1.SubscribePageResponse], error)
 	// End one subscription, leaving the page's others alone.
 	UnsubscribePage(context.Context, *connect.Request[v1.UnsubscribePageRequest]) (*connect.Response[v1.UnsubscribePageResponse], error)
+	// ---- News digest: the daily Claude news overlay ----
+	// Takes the standing digest down in every webview. See
+	// endpoint_dismiss_news_digest.proto.
+	DismissNewsDigest(context.Context, *connect.Request[v1.DismissNewsDigestRequest]) (*connect.Response[v1.DismissNewsDigestResponse], error)
+	// Makes a digest now instead of at the daily cadence. See
+	// endpoint_refresh_news_digest.proto.
+	RefreshNewsDigest(context.Context, *connect.Request[v1.RefreshNewsDigestRequest]) (*connect.Response[v1.RefreshNewsDigestResponse], error)
 }
 
 // NewAgentReplClient constructs a client for the agentrepl.v1.AgentRepl service. By default, it
@@ -901,6 +916,18 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(agentReplUnsubscribePageMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		dismissNewsDigest: connect.NewClient[v1.DismissNewsDigestRequest, v1.DismissNewsDigestResponse](
+			httpClient,
+			baseURL+AgentReplDismissNewsDigestProcedure,
+			connect.WithSchema(agentReplDismissNewsDigestMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		refreshNewsDigest: connect.NewClient[v1.RefreshNewsDigestRequest, v1.RefreshNewsDigestResponse](
+			httpClient,
+			baseURL+AgentReplRefreshNewsDigestProcedure,
+			connect.WithSchema(agentReplRefreshNewsDigestMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -973,6 +1000,8 @@ type agentReplClient struct {
 	watchPage                *connect.Client[v1.WatchPageRequest, v1.WatchPageResponse]
 	subscribePage            *connect.Client[v1.SubscribePageRequest, v1.SubscribePageResponse]
 	unsubscribePage          *connect.Client[v1.UnsubscribePageRequest, v1.UnsubscribePageResponse]
+	dismissNewsDigest        *connect.Client[v1.DismissNewsDigestRequest, v1.DismissNewsDigestResponse]
+	refreshNewsDigest        *connect.Client[v1.RefreshNewsDigestRequest, v1.RefreshNewsDigestResponse]
 }
 
 // SubmitPrompt calls agentrepl.v1.AgentRepl.SubmitPrompt.
@@ -1310,6 +1339,16 @@ func (c *agentReplClient) UnsubscribePage(ctx context.Context, req *connect.Requ
 	return c.unsubscribePage.CallUnary(ctx, req)
 }
 
+// DismissNewsDigest calls agentrepl.v1.AgentRepl.DismissNewsDigest.
+func (c *agentReplClient) DismissNewsDigest(ctx context.Context, req *connect.Request[v1.DismissNewsDigestRequest]) (*connect.Response[v1.DismissNewsDigestResponse], error) {
+	return c.dismissNewsDigest.CallUnary(ctx, req)
+}
+
+// RefreshNewsDigest calls agentrepl.v1.AgentRepl.RefreshNewsDigest.
+func (c *agentReplClient) RefreshNewsDigest(ctx context.Context, req *connect.Request[v1.RefreshNewsDigestRequest]) (*connect.Response[v1.RefreshNewsDigestResponse], error) {
+	return c.refreshNewsDigest.CallUnary(ctx, req)
+}
+
 // AgentReplHandler is an implementation of the agentrepl.v1.AgentRepl service.
 type AgentReplHandler interface {
 	// The composer's submission, whole; the daemon recognizes programmatically
@@ -1509,6 +1548,13 @@ type AgentReplHandler interface {
 	SubscribePage(context.Context, *connect.Request[v1.SubscribePageRequest]) (*connect.Response[v1.SubscribePageResponse], error)
 	// End one subscription, leaving the page's others alone.
 	UnsubscribePage(context.Context, *connect.Request[v1.UnsubscribePageRequest]) (*connect.Response[v1.UnsubscribePageResponse], error)
+	// ---- News digest: the daily Claude news overlay ----
+	// Takes the standing digest down in every webview. See
+	// endpoint_dismiss_news_digest.proto.
+	DismissNewsDigest(context.Context, *connect.Request[v1.DismissNewsDigestRequest]) (*connect.Response[v1.DismissNewsDigestResponse], error)
+	// Makes a digest now instead of at the daily cadence. See
+	// endpoint_refresh_news_digest.proto.
+	RefreshNewsDigest(context.Context, *connect.Request[v1.RefreshNewsDigestRequest]) (*connect.Response[v1.RefreshNewsDigestResponse], error)
 }
 
 // NewAgentReplHandler builds an HTTP handler from the service implementation. It returns the path
@@ -1919,6 +1965,18 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(agentReplUnsubscribePageMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
+	agentReplDismissNewsDigestHandler := connect.NewUnaryHandler(
+		AgentReplDismissNewsDigestProcedure,
+		svc.DismissNewsDigest,
+		connect.WithSchema(agentReplDismissNewsDigestMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplRefreshNewsDigestHandler := connect.NewUnaryHandler(
+		AgentReplRefreshNewsDigestProcedure,
+		svc.RefreshNewsDigest,
+		connect.WithSchema(agentReplRefreshNewsDigestMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/agentrepl.v1.AgentRepl/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case AgentReplSubmitPromptProcedure:
@@ -2055,6 +2113,10 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplSubscribePageHandler.ServeHTTP(w, r)
 		case AgentReplUnsubscribePageProcedure:
 			agentReplUnsubscribePageHandler.ServeHTTP(w, r)
+		case AgentReplDismissNewsDigestProcedure:
+			agentReplDismissNewsDigestHandler.ServeHTTP(w, r)
+		case AgentReplRefreshNewsDigestProcedure:
+			agentReplRefreshNewsDigestHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -2330,4 +2392,12 @@ func (UnimplementedAgentReplHandler) SubscribePage(context.Context, *connect.Req
 
 func (UnimplementedAgentReplHandler) UnsubscribePage(context.Context, *connect.Request[v1.UnsubscribePageRequest]) (*connect.Response[v1.UnsubscribePageResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.UnsubscribePage is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) DismissNewsDigest(context.Context, *connect.Request[v1.DismissNewsDigestRequest]) (*connect.Response[v1.DismissNewsDigestResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.DismissNewsDigest is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) RefreshNewsDigest(context.Context, *connect.Request[v1.RefreshNewsDigestRequest]) (*connect.Response[v1.RefreshNewsDigestResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.RefreshNewsDigest is not implemented"))
 }
