@@ -40,9 +40,17 @@
 # --coverage adds Go and vitest instrumentation and reports. Ordinary runs do
 # not pay that cost.
 #
-# The whole run holds this host's suite slot (bin/suite-slot.sh), because it
-# fills the machine by design, and runs inside .claude/safe-test-run.sh's
-# git-state net, so a unit that touched the checkout's git state is caught.
+# The whole suite run holds this host's suite slot (bin/suite-slot.sh),
+# because it fills the machine by design, and runs inside
+# .claude/safe-test-run.sh's git-state net, so a unit that touched the
+# checkout's git state is caught.
+#
+# --record ITSELF NEVER RUNS INSIDE THAT NET. `testrun run --record` only
+# STAGES this run's timing rows (to $RUN_TMP, outside the checkout); this
+# script commits them to test_time.csv via `testrun finish-record` only
+# after the net has returned clean, so a canonical history run's own
+# declared write is never mistaken for the drift the net exists to catch.
+# See testrun/internal/cli/run.go's "testrun run only STAGES --record".
 
 # Tests run only at background priority: re-exec once through bin/background.sh.
 [[ -n ${AGENT_REPL_BACKGROUND_PRIORITY:-} ]] || exec "$(dirname "${BASH_SOURCE[0]}")/background.sh" bash "${BASH_SOURCE[0]}" "$@"
@@ -70,6 +78,32 @@ if ! (cd "$MODULE_ROOT/testrun" && go build -o "$TESTRUN" .); then
     exit 1
 fi
 
+# --record is staged, not committed, inside the net: see the header comment.
+# RECORD_ARGS carries --record-out only when --record is actually among "$@",
+# so an ordinary run's testrun invocation is unchanged.
+IS_RECORD=0
+for arg in "$@"; do
+    [ "$arg" = "--record" ] && IS_RECORD=1
+done
+RECORD_OUT="$RUN_TMP/pending-record.json"
+RECORD_ARGS=()
+[ "$IS_RECORD" -eq 1 ] && RECORD_ARGS=(--record-out "$RECORD_OUT")
+
+set +e
 "$THIS_DIR/suite-slot.sh" \
     "$REPO_ROOT/.claude/safe-test-run.sh" -- \
-    "$TESTRUN" run --module "$MODULE_ROOT" "$@"
+    "$TESTRUN" run --module "$MODULE_ROOT" "$@" ${RECORD_ARGS[@]+"${RECORD_ARGS[@]}"}
+RUN_RC=$?
+set -e
+
+# The net has already taken its clean post-run snapshot by the time this
+# runs, so committing the staged rows here can never look like drift the
+# run itself caused. A failed run (RUN_RC != 0, whether from a suite or
+# from real git-state drift the net caught) never reaches this: nothing is
+# recorded, exactly as before the net existed.
+if [ "$IS_RECORD" -eq 1 ] && [ "$RUN_RC" -eq 0 ]; then
+    "$TESTRUN" finish-record --module "$MODULE_ROOT" --record-out "$RECORD_OUT"
+    RUN_RC=$?
+fi
+
+exit "$RUN_RC"
