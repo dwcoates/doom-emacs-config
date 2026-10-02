@@ -270,6 +270,7 @@ type FoldHeldPromptError struct {
 	//	*FoldHeldPromptError_AboveMoved
 	//	*FoldHeldPromptError_AboveNotAPrompt
 	//	*FoldHeldPromptError_BeingEdited
+	//	*FoldHeldPromptError_BeingDelivered
 	Cause         isFoldHeldPromptError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -402,6 +403,15 @@ func (x *FoldHeldPromptError) GetBeingEdited() *FoldHeldPromptBeingEdited {
 	return nil
 }
 
+func (x *FoldHeldPromptError) GetBeingDelivered() *FoldHeldPromptBeingDelivered {
+	if x != nil {
+		if x, ok := x.Cause.(*FoldHeldPromptError_BeingDelivered); ok {
+			return x.BeingDelivered
+		}
+	}
+	return nil
+}
+
 type isFoldHeldPromptError_Cause interface {
 	isFoldHeldPromptError_Cause()
 }
@@ -462,6 +472,14 @@ type FoldHeldPromptError_BeingEdited struct {
 	BeingEdited *FoldHeldPromptBeingEdited `protobuf:"bytes,10,opt,name=being_edited,json=beingEdited,proto3,oneof"`
 }
 
+type FoldHeldPromptError_BeingDelivered struct {
+	// BEING DELIVERED: the prompt's delivery call to the agent is in flight
+	// right now, so it is neither held nor delivered yet. Refused rather than
+	// raced. Once the call settles the prompt is either delivered, or (if the
+	// call failed) back in the tray and open to this request again.
+	BeingDelivered *FoldHeldPromptBeingDelivered `protobuf:"bytes,11,opt,name=being_delivered,json=beingDelivered,proto3,oneof"`
+}
+
 func (*FoldHeldPromptError_UnknownWorkspace) isFoldHeldPromptError_Cause() {}
 
 func (*FoldHeldPromptError_WorkspaceRefMismatch) isFoldHeldPromptError_Cause() {}
@@ -481,6 +499,8 @@ func (*FoldHeldPromptError_AboveMoved) isFoldHeldPromptError_Cause() {}
 func (*FoldHeldPromptError_AboveNotAPrompt) isFoldHeldPromptError_Cause() {}
 
 func (*FoldHeldPromptError_BeingEdited) isFoldHeldPromptError_Cause() {}
+
+func (*FoldHeldPromptError_BeingDelivered) isFoldHeldPromptError_Cause() {}
 
 // The workspace id is not in the daemon's registry. DELIBERATELY EMPTY: the
 // arm's presence is the whole fact.
@@ -898,6 +918,43 @@ func (x *FoldHeldPromptBeingEdited) GetEditingTurn() *v11.TurnId {
 	return nil
 }
 
+// The prompt's delivery call is in flight. See the `being_delivered` arm.
+type FoldHeldPromptBeingDelivered struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FoldHeldPromptBeingDelivered) Reset() {
+	*x = FoldHeldPromptBeingDelivered{}
+	mi := &file_agentrepl_v1_endpoint_fold_held_prompt_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FoldHeldPromptBeingDelivered) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FoldHeldPromptBeingDelivered) ProtoMessage() {}
+
+func (x *FoldHeldPromptBeingDelivered) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_fold_held_prompt_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FoldHeldPromptBeingDelivered.ProtoReflect.Descriptor instead.
+func (*FoldHeldPromptBeingDelivered) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_fold_held_prompt_proto_rawDescGZIP(), []int{14}
+}
+
 var File_agentrepl_v1_endpoint_fold_held_prompt_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_fold_held_prompt_proto_rawDesc = "" +
@@ -911,7 +968,7 @@ const file_agentrepl_v1_endpoint_fold_held_prompt_proto_rawDesc = "" +
 	"\asuccess\x18\x01 \x01(\v2#.agentrepl.v1.FoldHeldPromptSuccessH\x00R\asuccess\x129\n" +
 	"\x05error\x18\x02 \x01(\v2!.agentrepl.v1.FoldHeldPromptErrorH\x00R\x05errorB\b\n" +
 	"\x06result\"\x17\n" +
-	"\x15FoldHeldPromptSuccess\"\xe6\x06\n" +
+	"\x15FoldHeldPromptSuccess\"\xbd\a\n" +
 	"\x13FoldHeldPromptError\x12[\n" +
 	"\x11unknown_workspace\x18\x01 \x01(\v2,.agentrepl.v1.FoldHeldPromptUnknownWorkspaceH\x00R\x10unknownWorkspace\x12h\n" +
 	"\x16workspace_ref_mismatch\x18\x02 \x01(\v20.agentrepl.v1.FoldHeldPromptWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12[\n" +
@@ -926,7 +983,8 @@ const file_agentrepl_v1_endpoint_fold_held_prompt_proto_rawDesc = "" +
 	"aboveMoved\x12Z\n" +
 	"\x12above_not_a_prompt\x18\t \x01(\v2+.agentrepl.v1.FoldHeldPromptAboveNotAPromptH\x00R\x0faboveNotAPrompt\x12L\n" +
 	"\fbeing_edited\x18\n" +
-	" \x01(\v2'.agentrepl.v1.FoldHeldPromptBeingEditedH\x00R\vbeingEditedB\a\n" +
+	" \x01(\v2'.agentrepl.v1.FoldHeldPromptBeingEditedH\x00R\vbeingEdited\x12U\n" +
+	"\x0fbeing_delivered\x18\v \x01(\v2*.agentrepl.v1.FoldHeldPromptBeingDeliveredH\x00R\x0ebeingDeliveredB\a\n" +
 	"\x05cause\" \n" +
 	"\x1eFoldHeldPromptUnknownWorkspace\"G\n" +
 	"\"FoldHeldPromptWorkspaceRefMismatch\x12!\n" +
@@ -942,7 +1000,8 @@ const file_agentrepl_v1_endpoint_fold_held_prompt_proto_rawDesc = "" +
 	"\x0e_current_above\"\x1f\n" +
 	"\x1dFoldHeldPromptAboveNotAPrompt\"W\n" +
 	"\x19FoldHeldPromptBeingEdited\x12:\n" +
-	"\fediting_turn\x18\x01 \x01(\v2\x17.conversation.v1.TurnIdR\veditingTurnB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\fediting_turn\x18\x01 \x01(\v2\x17.conversation.v1.TurnIdR\veditingTurn\"\x1e\n" +
+	"\x1cFoldHeldPromptBeingDeliveredB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_fold_held_prompt_proto_rawDescOnce sync.Once
@@ -956,7 +1015,7 @@ func file_agentrepl_v1_endpoint_fold_held_prompt_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_fold_held_prompt_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_fold_held_prompt_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
+var file_agentrepl_v1_endpoint_fold_held_prompt_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_agentrepl_v1_endpoint_fold_held_prompt_proto_goTypes = []any{
 	(*FoldHeldPromptRequest)(nil),              // 0: agentrepl.v1.FoldHeldPromptRequest
 	(*FoldHeldPromptResponse)(nil),             // 1: agentrepl.v1.FoldHeldPromptResponse
@@ -972,13 +1031,14 @@ var file_agentrepl_v1_endpoint_fold_held_prompt_proto_goTypes = []any{
 	(*FoldHeldPromptAboveMoved)(nil),           // 11: agentrepl.v1.FoldHeldPromptAboveMoved
 	(*FoldHeldPromptAboveNotAPrompt)(nil),      // 12: agentrepl.v1.FoldHeldPromptAboveNotAPrompt
 	(*FoldHeldPromptBeingEdited)(nil),          // 13: agentrepl.v1.FoldHeldPromptBeingEdited
-	(*v1.WorkspaceRef)(nil),                    // 14: workspace.v1.WorkspaceRef
-	(*v11.TurnId)(nil),                         // 15: conversation.v1.TurnId
+	(*FoldHeldPromptBeingDelivered)(nil),       // 14: agentrepl.v1.FoldHeldPromptBeingDelivered
+	(*v1.WorkspaceRef)(nil),                    // 15: workspace.v1.WorkspaceRef
+	(*v11.TurnId)(nil),                         // 16: conversation.v1.TurnId
 }
 var file_agentrepl_v1_endpoint_fold_held_prompt_proto_depIdxs = []int32{
-	14, // 0: agentrepl.v1.FoldHeldPromptRequest.workspace:type_name -> workspace.v1.WorkspaceRef
-	15, // 1: agentrepl.v1.FoldHeldPromptRequest.turn:type_name -> conversation.v1.TurnId
-	15, // 2: agentrepl.v1.FoldHeldPromptRequest.above:type_name -> conversation.v1.TurnId
+	15, // 0: agentrepl.v1.FoldHeldPromptRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	16, // 1: agentrepl.v1.FoldHeldPromptRequest.turn:type_name -> conversation.v1.TurnId
+	16, // 2: agentrepl.v1.FoldHeldPromptRequest.above:type_name -> conversation.v1.TurnId
 	2,  // 3: agentrepl.v1.FoldHeldPromptResponse.success:type_name -> agentrepl.v1.FoldHeldPromptSuccess
 	3,  // 4: agentrepl.v1.FoldHeldPromptResponse.error:type_name -> agentrepl.v1.FoldHeldPromptError
 	4,  // 5: agentrepl.v1.FoldHeldPromptError.unknown_workspace:type_name -> agentrepl.v1.FoldHeldPromptUnknownWorkspace
@@ -991,13 +1051,14 @@ var file_agentrepl_v1_endpoint_fold_held_prompt_proto_depIdxs = []int32{
 	11, // 12: agentrepl.v1.FoldHeldPromptError.above_moved:type_name -> agentrepl.v1.FoldHeldPromptAboveMoved
 	12, // 13: agentrepl.v1.FoldHeldPromptError.above_not_a_prompt:type_name -> agentrepl.v1.FoldHeldPromptAboveNotAPrompt
 	13, // 14: agentrepl.v1.FoldHeldPromptError.being_edited:type_name -> agentrepl.v1.FoldHeldPromptBeingEdited
-	15, // 15: agentrepl.v1.FoldHeldPromptAboveMoved.current_above:type_name -> conversation.v1.TurnId
-	15, // 16: agentrepl.v1.FoldHeldPromptBeingEdited.editing_turn:type_name -> conversation.v1.TurnId
-	17, // [17:17] is the sub-list for method output_type
-	17, // [17:17] is the sub-list for method input_type
-	17, // [17:17] is the sub-list for extension type_name
-	17, // [17:17] is the sub-list for extension extendee
-	0,  // [0:17] is the sub-list for field type_name
+	14, // 15: agentrepl.v1.FoldHeldPromptError.being_delivered:type_name -> agentrepl.v1.FoldHeldPromptBeingDelivered
+	16, // 16: agentrepl.v1.FoldHeldPromptAboveMoved.current_above:type_name -> conversation.v1.TurnId
+	16, // 17: agentrepl.v1.FoldHeldPromptBeingEdited.editing_turn:type_name -> conversation.v1.TurnId
+	18, // [18:18] is the sub-list for method output_type
+	18, // [18:18] is the sub-list for method input_type
+	18, // [18:18] is the sub-list for extension type_name
+	18, // [18:18] is the sub-list for extension extendee
+	0,  // [0:18] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_fold_held_prompt_proto_init() }
@@ -1020,6 +1081,7 @@ func file_agentrepl_v1_endpoint_fold_held_prompt_proto_init() {
 		(*FoldHeldPromptError_AboveMoved)(nil),
 		(*FoldHeldPromptError_AboveNotAPrompt)(nil),
 		(*FoldHeldPromptError_BeingEdited)(nil),
+		(*FoldHeldPromptError_BeingDelivered)(nil),
 	}
 	file_agentrepl_v1_endpoint_fold_held_prompt_proto_msgTypes[11].OneofWrappers = []any{}
 	type x struct{}
@@ -1028,7 +1090,7 @@ func file_agentrepl_v1_endpoint_fold_held_prompt_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_fold_held_prompt_proto_rawDesc), len(file_agentrepl_v1_endpoint_fold_held_prompt_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   14,
+			NumMessages:   15,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

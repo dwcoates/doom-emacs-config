@@ -400,7 +400,7 @@ func TestAReleaseDuringAShimCallIsRefused(t *testing.T) {
 	}
 }
 
-func TestAStepOnTheHoldBeingDeliveredIsRefusedAsDelivered(t *testing.T) {
+func TestAStepOnTheHoldBeingDeliveredIsRefusedAsBeingDelivered(t *testing.T) {
 	tests := []struct {
 		name string
 		step func(h *harness) error
@@ -410,6 +410,7 @@ func TestAStepOnTheHoldBeingDeliveredIsRefusedAsDelivered(t *testing.T) {
 			return h.q.BeginEdit(context.Background(), theWorkspace, "t1", func() bool { return true })
 		}},
 		{"a fold into it", func(h *harness) error { return h.q.Fold(context.Background(), theWorkspace, "t2", "t1") }},
+		{"a release of it", func(h *harness) error { return h.q.Release(context.Background(), theWorkspace, "t1") }},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -430,8 +431,14 @@ func TestAStepOnTheHoldBeingDeliveredIsRefusedAsDelivered(t *testing.T) {
 			h.q.OnTurnEnded(theWorkspace, "running-turn", wsm.CloseCompleted)
 
 			// Assert
-			if !errors.Is(stepErr, ErrAlreadyDelivered) {
-				t.Fatalf("step during the delivery = %v, want it refused as delivered", stepErr)
+			if !errors.Is(stepErr, ErrBeingDelivered) {
+				t.Fatalf("step during the delivery = %v, want it refused as being delivered", stepErr)
+			}
+			if !hasRecord(h, "info", opRelease, "the step is refused: the held prompt is being delivered to the shim") &&
+				!hasRecord(h, "info", opDrop, "the step is refused: the held prompt is being delivered to the shim") &&
+				!hasRecord(h, "info", opEditBegin, "the step is refused: the held prompt is being delivered to the shim") &&
+				!hasRecord(h, "info", opFold, "the step is refused: the held prompt is being delivered to the shim") {
+				t.Fatalf("records = %+v, want the refusal on disk at INFO", h.log.Records())
 			}
 			if held := h.db.hold("t1"); held.Tombstone == nil || held.Tombstone.Kind != tombstoneDelivered {
 				t.Fatalf("hold of t1 = %+v, want it delivered once and retired as such", held)
@@ -456,8 +463,8 @@ func TestARollbackClaimsTheHoldsItDrops(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RollBack: %v", err)
 	}
-	if !errors.Is(dropErr, ErrAlreadyDelivered) {
-		t.Fatalf("drop during the rewind = %v, want the claimed hold refused", dropErr)
+	if !errors.Is(dropErr, ErrBeingDelivered) {
+		t.Fatalf("drop during the rewind = %v, want the claimed hold refused as being delivered", dropErr)
 	}
 	if held := h.db.hold("t1"); held.Tombstone == nil || held.Tombstone.Kind != tombstoneRolledBack {
 		t.Fatalf("hold of t1 = %+v, want it retired by the rollback", held)

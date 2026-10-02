@@ -3659,7 +3659,8 @@ encoder reads: the common codec owns the real encoding.")
                     ("notHeld" . :not-held)
                     ("alreadyDelivered" . :already-delivered)
                     ("notEditing" . :not-editing)
-                    ("noEditor" . :no-editor)))
+                    ("noEditor" . :no-editor)
+                    ("beingDelivered" . :being-delivered)))
       (should (equal (agent-repl-wire-decode-edit-held-prompt-response
                       (agent-repl-test-wire-verbs--parse
                        (format "{\"error\":{\"%s\":{}}}" (car case))))

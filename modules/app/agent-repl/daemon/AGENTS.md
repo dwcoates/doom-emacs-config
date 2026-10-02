@@ -1691,8 +1691,11 @@ workspace (2026-10-02).
   re-taken at its settle (`redrive`, run by `delivery.unlock` of the entry
   point that made the call). A release beside it is refused.
 - **EXACTLY ONCE.** The holds a call delivers or retires (`shimCall.holds`)
-  are refused to a drop, an edit, a fold and a coalescence while it stands,
-  as a delivered hold is (`already_delivered`).
+  are refused to a release, a drop, an edit and a fold while it stands, with
+  `being_delivered` (`promptqueue.ErrBeingDelivered`): the hold is neither
+  held nor delivered yet, and a failed call returns it to the tray. A verdict
+  never coalesces into one; it reads it as started. A release of ANOTHER hold
+  while a call stands is `release_refused`.
 - **INVARIANTS FAIL HARD.** A second call while one stands, or a bounce
   started beside one, is recorded at ERROR and panics.
 - The lock is taken only by `lockDelivery` and released only by

@@ -4280,7 +4280,8 @@ THE ARM IS THE REFUSAL, so an unset cause is a contract breach."
   (let ((message "EditHeldPromptError"))
     (agent-repl-wire-verbs--check-keys
      message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted
-                    noSuchHold notHeld alreadyDelivered beingEdited notEditing noEditor))
+                    noSuchHold notHeld alreadyDelivered beingEdited notEditing noEditor
+                    beingDelivered))
     (list :cause
           (agent-repl-wire-verbs--decode-oneof
            message "cause" json
@@ -4303,7 +4304,11 @@ THE ARM IS THE REFUSAL, so an unset cause is a contract breach."
                  (list 'notEditing :not-editing
                        (agent-repl-wire-decode-edit-held-prompt-empty-cause "EditHeldPromptNotEditing"))
                  (list 'noEditor :no-editor
-                       (agent-repl-wire-decode-edit-held-prompt-empty-cause "EditHeldPromptNoEditor")))))))
+                       (agent-repl-wire-decode-edit-held-prompt-empty-cause "EditHeldPromptNoEditor"))
+                 ;; The prompt's delivery call is in flight: neither held nor
+                 ;; delivered yet, and back in the tray if the call fails.
+                 (list 'beingDelivered :being-delivered
+                       (agent-repl-wire-decode-edit-held-prompt-empty-cause "EditHeldPromptBeingDelivered")))))))
 
 (defun agent-repl-wire-decode-edit-held-prompt-response (json)
   "Decode EditHeldPromptResponse from JSON into (:arm ARM :value V)."
