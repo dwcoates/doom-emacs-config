@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
+	shimv1 "agentrepl/proto/shim/v1"
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
@@ -93,9 +94,9 @@ func behindJoinNeverClassified(log dlog.Logger, held ids.TurnID, joining joining
 // so the running turn's end cannot deliver this prompt a second time while it
 // is being sent to join that turn.
 func (q *queue) settleJoin(ctx context.Context, sub Submission, running ids.TurnID, epoch uint64, c wsm.Classification, log dlog.Logger) {
-	state := q.state(sub.WS)
-	state.drain.Lock()
-	defer state.drain.Unlock()
+	d := q.lockDelivery(sub.WS)
+	defer d.unlock()
+	state := d.state
 	state.verdicts.Lock()
 	if state.verdictStaleLocked(sub.Turn, epoch, c, log) {
 		state.verdicts.Unlock()
@@ -103,13 +104,14 @@ func (q *queue) settleJoin(ctx context.Context, sub Submission, running ids.Turn
 	}
 	q.record(ctx, sub, c, log)
 	state.verdicts.Unlock()
-	q.joinLocked(ctx, sub, running, log)
+	q.joinLocked(ctx, d, sub, running, log)
 }
 
-// joinLocked sends SUB to join RUNNING. The caller holds the delivery lock.
-// Every way the join cannot go leaves the prompt held for the running turn's
-// end, with the reason stamped on its verdict.
-func (q *queue) joinLocked(ctx context.Context, sub Submission, running ids.TurnID, log dlog.Logger) {
+// joinLocked sends SUB to join RUNNING. The caller holds the delivery lock
+// (d), which is released for the call itself (call.go). Every way the join
+// cannot go leaves the prompt held for the running turn's end, with the reason
+// stamped on its verdict.
+func (q *queue) joinLocked(ctx context.Context, d *delivery, sub Submission, running ids.TurnID, log dlog.Logger) {
 	log = log.With(dlog.Context{"turn": string(sub.Turn), "running_turn": string(running)})
 	held, err := q.standingHold(ctx, sub.WS, sub.Turn)
 	switch {
@@ -153,7 +155,10 @@ func (q *queue) joinLocked(ctx context.Context, sub Submission, running ids.Turn
 		return
 	}
 	q.mirrorAccepted(sub.WS, sub.Turn, sub.Said, sub.Origin)
-	success, err := sender.JoinRunningTurn(ctx, sub.Turn, sub.Said, sub.Origin)
+	var success *shimv1.StartTurnSuccess
+	d.outside(shimCall{what: "join", turn: sub.Turn, holds: []ids.TurnID{sub.Turn}}, log, func() {
+		success, err = sender.JoinRunningTurn(ctx, sub.Turn, sub.Said, sub.Origin)
+	})
 	if err != nil {
 		watcher.OnTurnOpenFailed(sub.WS, sub.Turn)
 		log.Error(opJoin, "the shim refused the prompt sent to join the running turn; it waits for it to end", dlog.Context{"cause": err.Error()})
@@ -174,6 +179,11 @@ func (q *queue) joinLocked(ctx context.Context, sub Submission, running ids.Turn
 // pop, in order), another prompt already joins it, the workspace drains for a
 // bounce, or an edit withholds the prompt.
 func (q *queue) joinBlocked(ws ids.WorkspaceID, held wsm.HeldPrompt, running ids.TurnID) (string, bool) {
+	// ONE SHIM CALL AT A TIME (call.go): a delivery in flight is ahead of
+	// the join, and its settle may leave no turn to join.
+	if call, ok := q.standingCall(ws); ok {
+		return "a delivery to the shim (" + call.what + ") is in flight, so the prompt waits for the running turn to end", true
+	}
 	if !q.isRunning(ws, running) {
 		return "the turn it was to join ended before it was sent, so it waits its turn", true
 	}

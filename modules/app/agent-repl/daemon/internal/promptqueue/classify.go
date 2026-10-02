@@ -386,17 +386,22 @@ func (q *queue) settle(ctx context.Context, sub Submission, running ids.TurnID, 
 	interject := route == classifier.RouteInterrupt
 	state := q.state(sub.WS)
 	state.verdicts.Lock()
-	defer state.verdicts.Unlock()
 	if state.verdictStaleLocked(sub.Turn, epoch, c, log) {
+		state.verdicts.Unlock()
 		return
 	}
 	q.record(ctx, sub, c, log)
-	if interject {
-		// A verdict kept from interjecting by a running session act is
-		// re-stamped and recorded by interject itself.
-		if !q.interject(ctx, sub, running, log) {
-			q.reportHeld(ctx, sub, log)
-		}
+	// THE INTERJECTION IS REGISTERED UNDER THE VERDICT LOCK and its interrupt
+	// is SENT OFF IT: the verdict is settled at the epoch it was judged at,
+	// and no queue lock is held across a call to the shim (call.go). An edit
+	// that commits after the registration finds the jump already standing, as
+	// it would have found it after the interrupt was answered.
+	// A verdict kept from interjecting by a running session act is re-stamped
+	// and recorded by registerInterjection itself.
+	registered := interject && q.registerInterjection(ctx, sub, running, log)
+	state.verdicts.Unlock()
+	if registered {
+		q.sendInterrupt(ctx, sub, running, log)
 		return
 	}
 	q.reportHeld(ctx, sub, log)
@@ -521,6 +526,19 @@ func (q *queue) record(ctx context.Context, sub Submission, c wsm.Classification
 //
 // It reports whether the interrupt was registered.
 func (q *queue) interject(ctx context.Context, sub Submission, running ids.TurnID, log dlog.Logger) bool {
+	if !q.registerInterjection(ctx, sub, running, log) {
+		return false
+	}
+	q.sendInterrupt(ctx, sub, running, log)
+	return true
+}
+
+// registerInterjection is the decision half of interject: the prompt moves to
+// the semantic head and the footer's interrupting fires, or a running session
+// act refuses it. It makes no call to the shim, so a caller holding a queue
+// lock sends the interrupt (sendInterrupt) only once it has released it. It
+// reports whether the interjection was registered.
+func (q *queue) registerInterjection(ctx context.Context, sub Submission, running ids.TurnID, log dlog.Logger) bool {
 	head := sub.Turn
 	q.mu.Lock()
 	state, ok := q.states[sub.WS]
@@ -548,21 +566,25 @@ func (q *queue) interject(ctx context.Context, sub Submission, running ids.TurnI
 	q.deps.Footer.OnSubmission(sub.WS, footer.Submission{Prompt: saidText(sub.Said), Stage: footer.StageInterjecting})
 	log.Info(opInterject, "the prompt jumped the queue and the interrupt was registered",
 		dlog.Context{"turn": string(sub.Turn), "interrupted_turn": string(running)})
+	return true
+}
 
+// sendInterrupt is the call half of interject: the interrupt goes to the
+// shim, and a refusal strips the jump. The caller holds no queue lock.
+func (q *queue) sendInterrupt(ctx context.Context, sub Submission, running ids.TurnID, log dlog.Logger) {
 	sender, ok := q.deps.Client(sub.WS)
 	if !ok {
 		q.stripJump(ctx, sub, running, errors.New("the workspace lost its session before the interrupt could be sent"), log)
-		return true
+		return
 	}
 	// THE STOP IS THE PROMPT'S SIDE EFFECT, NOT AN ACT OF ITS OWN, and the
 	// record says so: the feed draws no interruption bubble for it, because
 	// the superseding prompt is the whole account of the stop.
 	if err := sender.KillTurn(ctx, running, false, interjectionCommand()); err != nil {
 		q.stripJump(ctx, sub, running, err, log)
-		return true
+		return
 	}
 	log.Debug(opInterject, "the interrupt was sent; delivery waits for the turn's real end", nil)
-	return true
 }
 
 // keptBehindSessionAct records, at INFO, a held prompt a running session act

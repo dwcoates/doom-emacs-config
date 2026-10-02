@@ -141,6 +141,19 @@ type Submission struct {
 	// interrupted the running turn: its StartTurn carries the interruption
 	// note. Set by the delivery of a hold, never by a caller.
 	interjected bool
+	// fromHold reports a submission delivered from its standing hold, which
+	// the shim call delivering it claims (shimCall.holds). Set by the
+	// delivery of a hold, never by a caller.
+	fromHold bool
+}
+
+// claims answers the standing holds a call delivering SUB claims: its own
+// hold when it is delivered from one, none otherwise.
+func (sub Submission) claims() []ids.TurnID {
+	if !sub.fromHold {
+		return nil
+	}
+	return []ids.TurnID{sub.Turn}
 }
 
 // Disposition is what became of a submission. A hold is an ANSWER, not a

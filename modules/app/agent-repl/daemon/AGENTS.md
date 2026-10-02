@@ -546,10 +546,12 @@ around anything.
   `StartSession` bound, legitimately. A new hot lock on the prompt or feed path
   is a `lockwatch.Mutex` registered the same way.
 - **Threshold** `lockwatch.DefaultThreshold` = 6s, tick `DefaultEvery` = 1s.
-  The slowest legitimate hold found is the delivery lock across an in-line
-  revival (real bring-ups 1.2s to 4.6s, 2026-09-27 logs); a synchronous
-  delivery is 9ms p50 / 143ms max. A stall is recorded by threshold + one
-  tick = 7s, before Emacs's 10s unary timeout.
+  No queue lock is held across a call to the shim or a bring-up
+  (`internal/promptqueue/call.go`, see "No queue lock is held across a call
+  to the shim"), so the delivery lock's holds are local work: a synchronous
+  delivery decision is milliseconds. A stall is recorded by threshold + one
+  tick = 7s, before Emacs's 10s unary timeout, and any stall on a queue lock
+  is a defect.
 - **Reading a report.** ONE `daemon.lockwatch.stall` ERROR per episode, in the
   lock's workspace log (the run log for a daemon-wide lock): `lock`,
   `workspace_id`, `held_for` / `held_for_ms` (measured at `resolution`, one
@@ -1073,7 +1075,8 @@ down at the session's next start.
 
 Owner ruling, 2026-09-27. A handover transfer asks the bounce registry for
 `bounce.GateDispatchQuiet`: it is decided under the per-workspace delivery lock
-(no delivery mid-flight) and does NOT wait for a turn or detached work. The
+with no shim call in flight (a call standing defers the decision to its
+settle) and does NOT wait for a turn or detached work. The
 transfer detaches the shim (never kills it) and the successor adopts it
 mid-turn. The layout restart's stand-down asks for the same gate (owner
 ruling, 2026-09-30) and carries the same carry (see "A breaking state layout
@@ -1674,6 +1677,29 @@ and `TestSelectPublishesARegistryCarryingTheSelectionInstant`.
 - **ONE KEY'S SUBMISSIONS ARE SERIALIZED IN-PROCESS** (`prompthandler/claim.go`): a retry arriving while its original is still inside the queue waits for it (or for its own context), so a hung original is never re-driven beside itself.
 - **THE CRASH WINDOW** (a process death after the shim accepted `StartTurn` for a prompt or a context cut, and before the stamp commits) is closed by the shim: a repeated `StartTurn` of a turn id it already accepted starts nothing and answers success (`proto/src/shim/v1/endpoint_start_turn.proto`, `StartTurnRequest.turn`). Residual gaps: a shim that died with the daemon has no memory of the id; `UpdateAgent.prompt` (a bubble-addressed prompt) carries no turn id at all; and a re-driven turn that ALREADY ENDED on an adopted shim is answered success for a turn no terminal will follow.
 
+## No queue lock is held across a call to the shim
+
+`internal/promptqueue/call.go`. A decision claims its shim call under the
+delivery lock (`wsState.call`), releases the lock, calls, and settles under
+the lock again (`delivery.outside`). It replaced a lock held across StartTurn,
+which a store outage turned into a 9s wedge of every decision on the
+workspace (2026-10-02).
+
+- **ONE CALL AT A TIME.** A decision that finds a call standing defers to it
+  (`deferToCall`): a submission is held behind it (judged against the turn
+  it opens, or parked when it opens none), a pop or a bounce decision is
+  re-taken at its settle (`redrive`, run by `delivery.unlock` of the entry
+  point that made the call). A release beside it is refused.
+- **EXACTLY ONCE.** The holds a call delivers or retires (`shimCall.holds`)
+  are refused to a drop, an edit, a fold and a coalescence while it stands,
+  as a delivered hold is (`already_delivered`).
+- **INVARIANTS FAIL HARD.** A second call while one stands, or a bounce
+  started beside one, is recorded at ERROR and panics.
+- The lock is taken only by `lockDelivery` and released only by
+  `delivery.unlock`; a function that needs it held takes the `*delivery`.
+- An interjection's interrupt is registered under the verdict or delivery
+  lock and sent off it (`registerInterjection`, `sendInterrupt`).
+
 ## A held-prompt edit is a claim the queue owns under its delivery lock
 
 `EditHeldPrompt` (owner spec, 2026-09-23; `internal/promptqueue/edit.go`).
@@ -1731,8 +1757,9 @@ Owner rulings, 2026-09-30 (`internal/promptqueue/acts.go`, `ahead.go`,
   place and is marked `coalesced`, and the new entry is retired. When the
   prompt ahead started while the verdict was reached, the route is applied
   against it as it runs.
-- **AN `after_tool_call` PROMPT JOINS THE RUNNING TURN** (`joinLocked`, under
-  the delivery lock): it is sent at once with
+- **AN `after_tool_call` PROMPT JOINS THE RUNNING TURN** (`joinLocked`,
+  decided under the delivery lock and sent with it released): it is sent at
+  once with
   `shim.v1.StartTurnRequest.join_running_turn`, nothing interrupted, and the
   session watcher stands it BEHIND the running turn (`OnTurnJoining`). The
   vendor decides its fate: FOLDED at the running turn's next tool boundary,

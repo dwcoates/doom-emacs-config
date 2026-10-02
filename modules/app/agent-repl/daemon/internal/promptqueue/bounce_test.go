@@ -573,28 +573,6 @@ func TestARequestWhileDrainingJoinsTheRunningBounce(t *testing.T) {
 	}
 }
 
-// TestASubmissionsDeliveryHoldsTheBounceDecisionOff covers what replaced the
-// keep-alive re-drive's place in the registry: a prompt the shim is holding
-// behind its own keep-alive is a StartTurn still in flight, and the bounce is
-// decided under the delivery lock that call is made under, so no bounce can
-// judge the workspace free while it is being delivered to.
-func TestASubmissionsDeliveryHoldsTheBounceDecisionOff(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	free := true
-	h.sender.startHook = func() { free = h.q.state(theWorkspace).drain.TryLock() }
-
-	// Act
-	if _, err := h.q.Submit(context.Background(), submission("t1", "go")); err != nil {
-		t.Fatalf("Submit: %v", err)
-	}
-
-	// Assert
-	if free {
-		t.Fatal("the delivery lock a bounce decides under was free while a StartTurn was in flight")
-	}
-}
-
 func TestAMalformedBounceRequestIsRefusedLoudly(t *testing.T) {
 	tests := []struct {
 		name string
