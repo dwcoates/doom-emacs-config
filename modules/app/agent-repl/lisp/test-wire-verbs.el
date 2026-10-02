@@ -2630,6 +2630,29 @@ at."
                     (agent-repl-test-wire-verbs--parse "{\"shimStartFailed\":{\"exitCode\":3,\"stderrTail\":\"panic\"}}"))
                    '(:detail "" :kind (:arm :shim-start-failed :value (:exit-code 3 :stderr-tail "panic")))))))
 
+(ert-deftest agent-repl-test-wire-verbs-session-fault-vendor-start-retrying-kind ()
+  "SessionFault's `vendor_start_retrying' kind decodes with everything it carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-session-fault
+                    (agent-repl-test-wire-verbs--parse "{\"vendorStartRetrying\":{\"failedAttempts\":3,\"cause\":\"timed out\",\"failingSinceMs\":\"1000\"}}"))
+                   '(:detail "" :kind (:arm :vendor-start-retrying
+                                       :value (:failed-attempts 3 :cause "timed out" :failing-since-ms 1000)))))))
+
+(ert-deftest agent-repl-test-wire-verbs-session-fault-vendor-start-rejected-kind ()
+  "SessionFault's `vendor_start_rejected' kind decodes with everything it carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-session-fault
+                    (agent-repl-test-wire-verbs--parse "{\"vendorStartRejected\":{\"cause\":\"auth rejected\"}}"))
+                   '(:detail "" :kind (:arm :vendor-start-rejected :value (:cause "auth rejected")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-session-fault-vendor-start-failed-kind ()
+  "SessionFault's `vendor_start_failed' kind decodes with everything it carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-session-fault
+                    (agent-repl-test-wire-verbs--parse "{\"vendorStartFailed\":{\"failedAttempts\":90,\"lastCause\":\"overloaded\",\"failingSinceMs\":\"2000\"}}"))
+                   '(:detail "" :kind (:arm :vendor-start-failed
+                                       :value (:failed-attempts 90 :last-cause "overloaded" :failing-since-ms 2000)))))))
+
 (ert-deftest agent-repl-test-wire-verbs-session-fault-shim-died-kind ()
   "SessionFault's `shim_died' kind decodes with everything it carries."
   (agent-repl-test-wire-verbs--with-common
@@ -2735,11 +2758,11 @@ carries: the turn, the unit, and the `why' that IS this kind's substatus."
                   :type 'agent-repl-wire-error)))
 
 (ert-deftest agent-repl-test-wire-verbs-session-fault-kind-arms-pinned ()
-  "SessionFault's kind oneof has exactly the fourteen arms decoded here."
+  "SessionFault's kind oneof has exactly the seventeen arms decoded here."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_session_health.pb.go" "SessionFault")
                        #'string<)
-                 (sort (list "shimStartFailed" "shimDied" "linkSevered" "resumeFailed" "bounceDied" "bounceUnknown" "classifierFailed" "shimReported" "conversationAbandoned" "sessionAbsent" "watchOpenRefused" "daemonStateUnreadable" "adoptionWindowExpired" "finalAnswerUnresolved")
+                 (sort (list "shimStartFailed" "shimDied" "linkSevered" "resumeFailed" "bounceDied" "bounceUnknown" "classifierFailed" "shimReported" "conversationAbandoned" "sessionAbsent" "watchOpenRefused" "daemonStateUnreadable" "adoptionWindowExpired" "finalAnswerUnresolved" "vendorStartRetrying" "vendorStartRejected" "vendorStartFailed")
                        #'string<))))
 
 ;;;; ---- DaemonFault kinds (landing 4) ------------------------------------

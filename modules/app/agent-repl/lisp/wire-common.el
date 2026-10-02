@@ -734,7 +734,7 @@ rather than sent for the daemon to reject."
 
 ;;;; ---- agentrepl.v1 SessionFault arm messages (shared leaf) ----
 ;;
-;; The thirteen fault classes the session controller mints.  They are declared
+;; The fault classes the session controller mints.  They are declared
 ;; once in the proto and carried by TWO parents — `SessionFault' on the
 ;; SessionHealth response (wire-verbs.el) and `HostFault' on the host stream
 ;; (wire-host.el) — because a session's fault classes do not change with the
@@ -889,6 +889,49 @@ the status cell for exactly that reason."
                     "SessionFaultFinalAnswerUnresolved" 'unit object)
            :why (agent-repl-wire--decode-string
                     "SessionFaultFinalAnswerUnresolved" 'why object)))))
+
+(defun agent-repl-wire-decode-session-fault-vendor-start-retrying (value)
+  "Decode VALUE as `SessionFaultVendorStartRetrying', a plist
+(`:failed-attempts' `:cause' `:failing-since-ms').
+The vendor did not start and the daemon is retrying on its capped backoff;
+`failing-since-ms' anchors the retry window and is epoch milliseconds."
+  (let ((object (agent-repl-wire--object "SessionFaultVendorStartRetrying" value)))
+    (agent-repl-wire--check-keys "SessionFaultVendorStartRetrying" object
+                                 '(failedAttempts cause failingSinceMs))
+    (agent-repl-wire--decoded
+     "SessionFaultVendorStartRetrying"
+     (list :failed-attempts (agent-repl-wire--decode-uint32
+                             "SessionFaultVendorStartRetrying" 'failedAttempts object)
+           :cause (agent-repl-wire--decode-string
+                   "SessionFaultVendorStartRetrying" 'cause object)
+           :failing-since-ms (agent-repl-wire--decode-int64
+                              "SessionFaultVendorStartRetrying" 'failingSinceMs object)))))
+
+(defun agent-repl-wire-decode-session-fault-vendor-start-rejected (value)
+  "Decode VALUE as `SessionFaultVendorStartRejected', a plist (`:cause').
+The vendor refused the start for a reason retrying cannot change."
+  (let ((object (agent-repl-wire--object "SessionFaultVendorStartRejected" value)))
+    (agent-repl-wire--check-keys "SessionFaultVendorStartRejected" object '(cause))
+    (agent-repl-wire--decoded
+     "SessionFaultVendorStartRejected"
+     (list :cause (agent-repl-wire--decode-string
+                   "SessionFaultVendorStartRejected" 'cause object)))))
+
+(defun agent-repl-wire-decode-session-fault-vendor-start-failed (value)
+  "Decode VALUE as `SessionFaultVendorStartFailed', a plist
+(`:failed-attempts' `:last-cause' `:failing-since-ms').
+The vendor failed every attempt for the whole retry window; the daemon gave up."
+  (let ((object (agent-repl-wire--object "SessionFaultVendorStartFailed" value)))
+    (agent-repl-wire--check-keys "SessionFaultVendorStartFailed" object
+                                 '(failedAttempts lastCause failingSinceMs))
+    (agent-repl-wire--decoded
+     "SessionFaultVendorStartFailed"
+     (list :failed-attempts (agent-repl-wire--decode-uint32
+                             "SessionFaultVendorStartFailed" 'failedAttempts object)
+           :last-cause (agent-repl-wire--decode-string
+                        "SessionFaultVendorStartFailed" 'lastCause object)
+           :failing-since-ms (agent-repl-wire--decode-int64
+                              "SessionFaultVendorStartFailed" 'failingSinceMs object)))))
 
 ;;;; ---- conversation.v1.LockHolderFailure ----
 
