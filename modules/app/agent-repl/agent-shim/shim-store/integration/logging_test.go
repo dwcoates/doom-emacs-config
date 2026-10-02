@@ -72,13 +72,13 @@ func TestAStalePointerIsNeverAnErrorRecord(t *testing.T) {
 	shim := streamProducer(cli)
 	writeNumberedLines(ctx, t, shim, "main", 1)
 	writeNumberedLines(ctx, t, shim, "other", 1)
-	otherBook := openSession(ctx, t, cli, "other", 10, nil)
+	otherBook := openSession(ctx, t, cli, "other", nil)
 	foreign := &storev1.StoreItemPointer{Value: pagePointers(otherBook.GetPage())[0]}
 	mark := store.logMark()
 
 	// Act
 	assertOpenStalePointer(t, openSessionExpectingFailure(ctx, t, cli, &storev1.OpenAgentSessionRequest{
-		Agent: agentID("main"), PageSize: 10, KnownThrough: foreign,
+		Agent: agentID("main"), Opening: &storev1.OpenAgentSessionRequest_KnownThrough{KnownThrough: foreign},
 	}))
 
 	// Assert
@@ -99,13 +99,13 @@ func TestAStalePointerProducesExactlyOneNormalLevelRecordOnRead(t *testing.T) {
 	shim := streamProducer(cli)
 	writeNumberedLines(ctx, t, shim, "main", 1)
 	writeNumberedLines(ctx, t, shim, "other", 1)
-	otherBook := openSession(ctx, t, cli, "other", 10, nil)
+	otherBook := openSession(ctx, t, cli, "other", nil)
 	foreign := &storev1.StoreItemPointer{Value: pagePointers(otherBook.GetPage())[0]}
 	mark := store.logMark()
 
 	// Act
 	assertReadStalePointer(t, readPageExpectingFailure(ctx, t, cli, &storev1.ReadAgentPageRequest{
-		Book: agentID("main"), PageSize: 10, Position: &storev1.ReadAgentPageRequest_After{After: foreign},
+		Book: agentID("main"), Position: &storev1.ReadAgentPageRequest_After{After: foreign},
 	}))
 
 	// Assert
@@ -200,7 +200,7 @@ func TestACallersRequestIdReachesTheStoresRecords(t *testing.T) {
 
 	// OpenAgentSession writes its successful request boundary at debug, so this
 	// subject enables the debug threshold and observes that record directly.
-	req := connect.NewRequest(&storev1.OpenAgentSessionRequest{Agent: agentID("main"), PageSize: 10})
+	req := connect.NewRequest(&storev1.OpenAgentSessionRequest{Agent: agentID("main")})
 	req.Header().Set("X-Agent-Repl-Request-Id", requestID)
 
 	// Act
@@ -233,7 +233,7 @@ func TestARefusedCallsRequestIdReachesItsOneRecord(t *testing.T) {
 	mark := store.logMark()
 	const requestID = "req-itest-refused-01"
 
-	req := connect.NewRequest(&storev1.OpenAgentSessionRequest{Agent: agentID(""), PageSize: 10})
+	req := connect.NewRequest(&storev1.OpenAgentSessionRequest{Agent: agentID("")})
 	req.Header().Set("X-Agent-Repl-Request-Id", requestID)
 
 	// Act

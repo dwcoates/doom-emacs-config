@@ -324,7 +324,7 @@ func TestARestartRewindsToTheInProgressTurnsFirstRecord(t *testing.T) {
 	// already true of the book the FIRST reader left behind, so it waited for
 	// nothing at all and read back a book the result had not reached.
 	awaitCursorAtLeast(ctx, t, store.Client, g.Path(), g.Offset())
-	lines := bookLines(ctx, t, store.Client, captured.Session, 500)
+	lines := bookLines(ctx, t, store.Client, captured.Session)
 
 	// Assert: the call's unit is settled in place, and nothing doubled.
 	var calls int

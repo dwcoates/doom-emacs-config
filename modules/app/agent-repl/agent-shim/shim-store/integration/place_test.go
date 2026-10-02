@@ -14,6 +14,7 @@ import (
 	storev1 "agentrepl/proto/store/v1"
 	storev1connect "agentrepl/proto/store/v1/storev1connect"
 	"agentrepl/shim-store/internal/testclose"
+
 	"connectrpc.com/connect"
 )
 
@@ -30,11 +31,10 @@ func writePlacedLine(ctx context.Context, t *testing.T, shim *producer, book, la
 }
 
 // readThrough reads a book as it stood at an instant.
-func readThrough(ctx context.Context, t *testing.T, cli storev1connect.ShimStoreClient, book string, pageSize uint32, atMs int64) *storev1.ReadAgentPageResponse {
+func readThrough(ctx context.Context, t *testing.T, cli storev1connect.ShimStoreClient, book string, atMs int64) *storev1.ReadAgentPageResponse {
 	t.Helper()
 	resp, err := cli.ReadAgentPage(ctx, connect.NewRequest(&storev1.ReadAgentPageRequest{
 		Book:     agentID(book),
-		PageSize: pageSize,
 		Position: &storev1.ReadAgentPageRequest_Through{Through: &conversationv1.ConversationThrough{AtMs: atMs}},
 	}))
 	if err != nil {
@@ -54,7 +54,7 @@ func TestABookIsServedByPlaceNotByArrival(t *testing.T) {
 	writePlacedLine(ctx, t, shim, "main", "earlier", 100, 0)
 
 	// Act.
-	opened := openSession(ctx, t, cli, "main", 10, nil)
+	opened := openSession(ctx, t, cli, "main", nil)
 
 	// Assert.
 	assertTexts(t, "the opening page", pageTexts(opened.GetPage()), []string{"later", "earlier"})
@@ -70,7 +70,7 @@ func TestEveryServedLineCarriesItsPlace(t *testing.T) {
 	writePlacedLine(ctx, t, streamProducer(cli), "main", "L1", 100, 2)
 
 	// Act.
-	opened := openSession(ctx, t, cli, "main", 10, nil)
+	opened := openSession(ctx, t, cli, "main", nil)
 
 	// Assert.
 	if got := placeText(opened.GetPage().GetLines()[0]); got != "recorded:100.2" {
@@ -88,7 +88,7 @@ func TestALineWrittenWithoutAPlaceIsServedAtItsReceiptInstant(t *testing.T) {
 	writeNumberedLines(ctx, t, streamProducer(cli), "main", 1)
 
 	// Act.
-	opened := openSession(ctx, t, cli, "main", 10, nil)
+	opened := openSession(ctx, t, cli, "main", nil)
 
 	// Assert.
 	place := opened.GetPage().GetLines()[0].GetReceivedPlace()
@@ -106,7 +106,7 @@ func TestAWatchedLineCarriesItsPlace(t *testing.T) {
 	cli := store.client()
 	shim := streamProducer(cli)
 	writePlacedLine(ctx, t, shim, "main", "L0", 50, 0)
-	opened := openSession(ctx, t, cli, "main", 10, nil)
+	opened := openSession(ctx, t, cli, "main", nil)
 	stream := watchStream(ctx, t, cli, opened.GetWatch())
 	defer testclose.OrFail(t, stream)
 
@@ -132,7 +132,7 @@ func TestReadAgentPageThroughReadsTheBookAsItStoodThen(t *testing.T) {
 	writePlacedLine(ctx, t, shim, "main", "after", 300, 0)
 
 	// Act.
-	resp := readThrough(ctx, t, cli, "main", 10, 200)
+	resp := readThrough(ctx, t, cli, "main", 200)
 
 	// Assert.
 	assertTexts(t, "the book through 200", readTexts(resp.GetSuccess()), []string{"at", "before"})
@@ -147,7 +147,7 @@ func TestReadAgentPageThroughAnUnknownBookIsRefusedAsUnknown(t *testing.T) {
 	mark := store.logMark()
 
 	// Act.
-	resp := readThrough(ctx, t, store.client(), "nobody", 10, 200)
+	resp := readThrough(ctx, t, store.client(), "nobody", 200)
 
 	// Assert.
 	if resp.GetFailure().GetUnknownAgent() == nil {

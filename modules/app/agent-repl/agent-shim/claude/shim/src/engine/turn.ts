@@ -49,6 +49,9 @@ import { conversationv1, shimv1 } from "../proto.js";
 import { promptUpsertKey } from "../store/keys.js";
 import {
   PersistenceError,
+  REPAINT,
+  openingOf,
+  type AgentOpening,
   type AgentPageSession,
   type PersistEntry,
   type Persistence,
@@ -577,7 +580,7 @@ export class TurnEngine {
       // request without a turn id or a prompt at the wire.
       throw new Error("shim turn: a repeated StartTurn reached the engine without a session, a turn id or a prompt");
     }
-    const page = await this.openingPage(identity.agentId, request.pageSize, request.knownThrough);
+    const page = await this.openingPage(identity.agentId, openingOf(request.opening));
     return startTurnAccepted(buildPrompt(turn, identity.agentId, said, original.origin), page);
   }
 
@@ -680,7 +683,7 @@ export class TurnEngine {
     // millisecond slower painted one. A consumer's first paint still carries
     // the turn it just opened, and everything the turn goes on to produce
     // reaches it on its own WatchAgent.
-    const page = await this.openingPage(identity.agentId, request.pageSize, request.knownThrough);
+    const page = await this.openingPage(identity.agentId, openingOf(request.opening));
     // THE SLOT IS JUDGED AGAIN AFTER THE AWAITS. The vendor can start a turn of
     // its own while this start writes its prompt row and reads its page, and
     // the shim adopts that turn into the slot (engine/session.ts). Opening this
@@ -778,7 +781,7 @@ export class TurnEngine {
       return startTurnRefused({ kind: "vendorRefused" }, detail);
     }
     this.rememberStarted(turn.value, request.origin);
-    const page = await this.openingPage(agentId, request.pageSize, request.knownThrough);
+    const page = await this.openingPage(agentId, openingOf(request.opening));
     LOGGER.info(
       { turn_id: turn.value, running_turn: running.id.value, origin: request.origin },
       "sent a prompt to join the running turn after its current tool call; nothing was interrupted",
@@ -909,14 +912,13 @@ export class TurnEngine {
    */
   private async openingPage(
     agent: conversationv1.AgentId,
-    pageSize: number,
-    knownThrough?: conversationv1.HistoryPointer,
+    opening: AgentOpening,
   ): Promise<conversationv1.HistoryPage> {
     try {
       // READ, NOT WATCH: the one-shot verb, so the store mints no watch token
       // for a tail this call never stands. There is no session to close, which
       // is the point — an abandoned token is one the store can never reclaim.
-      return await this.session.persistence.readFirstPage(agent, pageSize, knownThrough);
+      return await this.session.persistence.readFirstPage(agent, opening);
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err);
       LOGGER.debug(
@@ -1501,11 +1503,8 @@ export class TurnEngine {
     const target = request.target ?? identity.agentId;
     let opened;
     try {
-      opened = await this.session.persistence.openAgentPage(
-        target,
-        request.pageSize,
-        request.knownThrough,
-        () => this.session.knowsAgent(target),
+      opened = await this.session.persistence.openAgentPage(target, openingOf(request.opening), () =>
+        this.session.knowsAgent(target),
       );
     } catch (err) {
       throw err instanceof PersistenceError
@@ -1520,7 +1519,11 @@ export class TurnEngine {
     //
     // A stream has no arm to say "refused" — its response type is the frame it
     // carries — so the refusal closes the stream at the transport.
-    if (opened.page.entries.length === 0 && !this.session.knowsAgent(target)) {
+    //
+    // THE BOOK, NOT THE PAGE, IS WHAT IS JUDGED: a tail-only page is empty by
+    // request and says nothing about the book, so the open reports separately
+    // whether it found anything to show.
+    if (opened.foundNothing && !this.session.knowsAgent(target)) {
       opened.close();
       LOGGER.debug(
         { agent_id: target.value },
@@ -1539,6 +1542,7 @@ export class TurnEngine {
     let concluded = false;
     const watched: AgentPageSession = {
       page: opened.page,
+      foundNothing: opened.foundNothing,
       tail: opened.tail,
       concludeThrough: (through) => {
         concluded = true;
@@ -1623,7 +1627,7 @@ export class TurnEngine {
         // cannot reach the store as a legal-looking cursor.
         storeItemPointerValue(after);
         const older = readHistoryPage(
-          await this.session.persistence.readAgentPage(target, request.pageSize, after),
+          await this.session.persistence.readAgentPage(target, after),
         );
         this.session.reportStoreReadable();
         return older;
@@ -1634,7 +1638,7 @@ export class TurnEngine {
         // holds may be named (a fork reads its parent's this way), and one the
         // store never heard of is the typed unknown-agent refusal.
         const asItStood = readHistoryPage(
-          await this.session.persistence.readPageThrough(target, request.pageSize, request.position.value),
+          await this.session.persistence.readPageThrough(target, request.position.value),
         );
         this.session.reportStoreReadable();
         return asItStood;
@@ -1651,7 +1655,7 @@ export class TurnEngine {
       // only thing that tells an empty book apart from a store that is down or
       // failing reads, and this endpoint owes a typed refusal for both.
       const page = readHistoryPage(
-        await this.session.persistence.readFirstPage(target, request.pageSize, undefined, () =>
+        await this.session.persistence.readFirstPage(target, REPAINT, () =>
           this.session.knowsAgent(target),
         ),
       );
