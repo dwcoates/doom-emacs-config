@@ -6406,6 +6406,7 @@ bubble-body.bubble-body { display: block; }
 .topbar-model-button,
 .topbar-mode-button,
 .topbar-context-figure,
+.topbar-wifi-button,
 .topbar-warning-chip {
   background: transparent;
   border: 1px solid transparent;
@@ -6433,6 +6434,7 @@ bubble-body.bubble-body { display: block; }
 .topbar-model-button:hover,
 .topbar-mode-button:hover,
 .topbar-context-figure:hover,
+.topbar-wifi-button:hover,
 .topbar-warning-chip:hover {
   border-color: var(--border);
 }
@@ -6963,6 +6965,14 @@ bubble-body.bubble-body { display: block; }
   align-items: center;
   flex: none;
   color: var(--muted);
+}
+/* THE GLYPH IS THE CONTROL (owner request, 2026-10-02): a click turns the
+   mode over. It takes the right group's quiet button box like its siblings,
+   but keeps the chip's color, since the glyph's color IS the wifi arm. */
+.topbar-wifi-button {
+  display: inline-flex;
+  align-items: center;
+  color: inherit;
 }
 .topbar-wifi-glyph {
   display: block;

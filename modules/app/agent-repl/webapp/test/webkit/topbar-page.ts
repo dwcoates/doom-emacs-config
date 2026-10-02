@@ -8,7 +8,10 @@
 import { create } from "@bufbuild/protobuf";
 import { TopbarPersistentWifiSchema } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
 import { ForwardingLogger, bindLogContext, setLogger } from "../../src/log.js";
+import type { TopbarContext } from "../../src/topbar/context.js";
 import { drawTopbarPersistentWifi } from "../../src/topbar/persistent-wifi.js";
+import { mountRevealLayer } from "../../src/topbar/reveal.js";
+import { appContext } from "../topbar/fixtures.js";
 
 /** What the test calls, on `window.topbarPage`. */
 export interface TopbarPage {
@@ -56,6 +59,11 @@ setLogger(
 );
 bindLogContext({ connection_id: "webkit-topbar-page" });
 
+/** The context every drawn cell is handed; nothing here clicks, so no rpc is scripted. */
+function topbarContext(): TopbarContext {
+  return { ctx: appContext(), reveals: mountRevealLayer(host()), openLogin: () => undefined, localFailures: () => [] };
+}
+
 window.topbarPage = {
   records: () => [...written],
   drawWifi(offset) {
@@ -65,6 +73,7 @@ window.topbarPage = {
         mode: { case: "on", value: {} },
         tooltip: { text: "persistent wifi on" },
       }),
+      topbarContext(),
     );
     const at = document.createElement("div");
     at.style.paddingLeft = `${20 + offset}px`;

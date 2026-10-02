@@ -253,7 +253,7 @@ export function drawTopbarView(u: TopbarView, tc: TopbarContext): HTMLElement {
     drawTopbarContextChip(requireMessage(u.context, "TopbarView.context"), tc),
     // The machine's persistent-wifi chip sits between the context chip and
     // the warning chip, on every strip alike.
-    drawTopbarPersistentWifi(requireMessage(u.persistentWifi, "TopbarView.persistentWifi")),
+    drawTopbarPersistentWifi(requireMessage(u.persistentWifi, "TopbarView.persistentWifi"), tc),
   );
   // NOTHING IS DRAWN WHEN NOTHING IS WRONG: an empty warning list with no
   // client-local failure standing yields no chip at all, not a quiet one.
