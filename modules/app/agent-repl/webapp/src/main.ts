@@ -31,6 +31,7 @@
  * time: the warning chip if step 5 got that far, and the emergency console path if
  * it did not, which is the documented exception to "no direct console".
  */
+import { installGateDock } from "./feed/gate-dock.js";
 import "./styles.css";
 import { createTicker } from "./clock.js";
 import { installCopyFallback } from "./copy.js";
@@ -278,6 +279,10 @@ export async function boot(): Promise<void> {
     mountSidebar(shell.sidebar, ctx, { workspaceSelected: () => feed.workspaceSelected() });
 
     mountHoldTray(shell.holdTray, ctx, { promptHeld: (turn) => feed.promptHeld(turn) });
+
+    // A STANDING GATE DOCKS AT THE BOTTOM EDGE while Emacs hides the input
+    // window over it; both read the daemon's one cold-gate standing.
+    installGateDock(shell.feed);
 
     // PROSE LINKS ROUTE LIKE STRUCTURED ONES. A markdown anchor in a bubble or
     // the hold tray would otherwise navigate the webview away from the
