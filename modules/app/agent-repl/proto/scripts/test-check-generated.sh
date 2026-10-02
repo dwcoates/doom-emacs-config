@@ -13,6 +13,7 @@ FIXTURE="$TMP/fixture"
 STUBS="$TMP/stubs"
 mkdir -p "$FIXTURE/gen/go" "$FIXTURE/gen/ts" "$FIXTURE/component" "$FIXTURE/src" "$FIXTURE/scripts" "$STUBS"
 cp "$THIS_DIR/../Makefile" "$FIXTURE/Makefile"
+cp "$THIS_DIR/../package.json" "$THIS_DIR/../package-lock.json" "$FIXTURE/"
 printf 'syntax = "proto3";\n' >"$FIXTURE/src/fixture.proto"
 
 # The fixture carries the structural gate too, because `go` and `ts` require it:
@@ -44,18 +45,25 @@ for arg in "$@"; do
 done
 EOF
 
-cat >"$STUBS/npx" <<'EOF'
+cat >"$STUBS/npm" <<'EOF'
 #!/usr/bin/env bash
-case "$*" in
-    *"which protoc-gen-es"*) printf '%s\n' "$PROTO_TEST_PLUGIN" ;;
-esac
+set -euo pipefail
+[ "$1" = ci ]
+mkdir -p node_modules/.bin
+cp "$PROTO_TEST_PLUGIN" node_modules/.bin/protoc-gen-es
+chmod +x node_modules/.bin/protoc-gen-es
+printf '{}\n' >node_modules/.package-lock.json
 EOF
 
 cat >"$STUBS/protoc-gen-es" <<'EOF'
 #!/usr/bin/env bash
 exit 0
 EOF
-chmod +x "$STUBS/protoc" "$STUBS/npx" "$STUBS/protoc-gen-es"
+cat >"$STUBS/node" <<'EOF'
+#!/usr/bin/env bash
+printf '2.14.1\n'
+EOF
+chmod +x "$STUBS/protoc" "$STUBS/npm" "$STUBS/protoc-gen-es" "$STUBS/node"
 
 PATH="$STUBS:/usr/bin:/bin" \
     PROTO_TEST_PLUGIN="$STUBS/protoc-gen-es" \

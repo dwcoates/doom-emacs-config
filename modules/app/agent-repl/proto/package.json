@@ -1,0 +1,7 @@
+{
+  "name": "agent-repl-proto-tooling",
+  "private": true,
+  "devDependencies": {
+    "@bufbuild/protoc-gen-es": "2.14.1"
+  }
+}
