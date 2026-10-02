@@ -56,9 +56,9 @@ type Digester interface {
 // the session spends as, so a workspace on a second account never spends the
 // default account's allowance on its title.
 type ConfigDirSource interface {
-	// ConfigDirFor answers the workspace's account config dir, and false when
-	// the workspace is not one this daemon can resolve a root for.
-	ConfigDirFor(ws ids.WorkspaceID) (string, bool)
+	// ConfigDirFor answers the workspace's account config dir, or the error
+	// that kept the workspace's root from being resolved.
+	ConfigDirFor(ctx context.Context, ws ids.WorkspaceID) (string, error)
 }
 
 // TitleSink installs the synthesized title into the topbar.
