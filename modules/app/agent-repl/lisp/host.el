@@ -79,7 +79,6 @@
 (declare-function agent-repl--ws-current-name "workspace" ())
 (declare-function agent-repl--live-ws-names "workspace" ())
 (declare-function agent-repl--ws-by-ref-id "workspace" (id))
-(declare-function agent-repl--ws-log-name "workspace" (ws))
 (declare-function agent-repl--ws-add-activated-hook "workspace" (fn))
 (defvar agent-repl--eager-open-in-progress)
 (defvar agent-repl--global-log-scope)
@@ -444,168 +443,54 @@ one place the handover walk lives."
 
 ;;;; ---- Select ----
 
-(defvar agent-repl-host--select-in-flight nil
-  "The workspace whose SelectWorkspace awaits its answer, or nil.
-EMACS SENDS ONE SELECTION AT A TIME.  Every unary call rides its own
-socket, so two selects sent back to back -- `s-}' pressed twice -- reach
-the daemon in whatever order its accepts are scheduled, and under load
-the older one could land LAST: the daemon then stamped `current' on the
-workspace the user had already left, and the roster carrying that stamp
-took the frame back to it.  With one in flight, the daemon receives
-Emacs's selections in the order the user made them.")
-
-(defvar agent-repl-host--select-queued nil
-  "The newest selection waiting behind the one in flight, or nil.
-A cons (WS . ON-SETTLED).  Only the newest is kept: a selection the user
-has already moved past is never sent, because the daemon would stamp it
-`current' only for the next one to overwrite it.  The one it replaces is
-settled `:superseded' so its caller is not left waiting.")
-
-(defvar agent-repl-host--select-sent-ids nil
-  "The ref ids of the selections Emacs sent, oldest first.
-`agent-repl-host-own-selection-p' reads it, so a roster push naming a
-selection Emacs made is recognized as Emacs's own even before that
-selection's answer arrives -- the roster stream and the unary answer
-travel on different sockets, and either can be read first.  A roster
-naming one of these ids drops every older one, which the daemon has
-passed; a refused or failed selection is removed, since the daemon
-stamped nothing for it.")
-
 (defun agent-repl-host-select (ws &optional on-settled)
   "Tell the daemon the user switched to workspace WS.
 ON-SETTLED, when given, is called with `:success', `:error' or
 `:failure' once the call has an outcome — the one moment a caller
 holding state on the selection\='s behalf (the link-up re-assertion) may
-let go of it, whichever way it went — with `:skipped' when WS has no ref
-or no connection to send it on, and with `:superseded' when a newer
-selection replaced it before it was sent.
+let go of it, whichever way it went.
 Idempotent by contract — re-selecting the current workspace succeeds —
 and the daemon's own act of stamping `current' also CLEARS the
-workspace's attention marker, which is why no ack verb exists.
-
-While another selection is in flight this one WAITS
-\(`agent-repl-host--select-in-flight'), replacing any older one already
-waiting, and is sent when the one in flight is answered.  Answers t when
-the selection was sent or queued, nil when it was skipped."
-  (if agent-repl-host--select-in-flight
-      (agent-repl-host--queue-select ws on-settled)
-    (agent-repl-host--send-select ws on-settled)))
-
-(defun agent-repl-host--queue-select (ws on-settled)
-  "Queue WS\='s selection behind the one in flight, superseding any queued one.
-ON-SETTLED rides with it; a superseded selection\='s is called with
-`:superseded'.  Answers t."
-  (let ((older agent-repl-host--select-queued))
-    (setq agent-repl-host--select-queued (cons ws on-settled))
-    (agent-repl--info ws "elisp.host.select-queued ws=%s behind=%s superseded=%s"
-                      ws agent-repl-host--select-in-flight (or (car older) "none"))
-    (when (and older (cdr older))
-      (funcall (cdr older) :superseded))
-    t))
-
-(defun agent-repl-host--send-select (ws on-settled)
-  "Send WS\='s SelectWorkspace now, holding the in-flight slot until it answers.
-ON-SETTLED is as `agent-repl-host-select' documents."
+workspace's attention marker, which is why no ack verb exists.  Answers
+nil without calling anything when WS has no ref yet: an unregistered
+workspace has no identity to select."
   (let ((ref (agent-repl-host-ref ws))
         (conn (or (agent-repl-host-conn ws) (agent-repl-link-primary))))
     (cond
      ((null ref)
       (agent-repl--log ws "elisp.host.select-skipped ws=%s reason=no-ref" ws)
-      (when on-settled (funcall on-settled :skipped))
       nil)
      ((null conn)
       (agent-repl--warn ws "elisp.host.select-skipped ws=%s reason=no-connection" ws)
-      (when on-settled (funcall on-settled :skipped))
       nil)
      (t
-      (let ((id (plist-get ref :id)))
-        (agent-repl--info ws "elisp.host.select ws=%s id=%S" ws id)
-        (setq agent-repl-host--select-in-flight ws)
-        (unless (equal id (car (last agent-repl-host--select-sent-ids)))
-          (setq agent-repl-host--select-sent-ids
-                (append agent-repl-host--select-sent-ids (list id))))
-        (condition-case err
-            (agent-repl-rpc-select-workspace
-             conn (list :workspace ref)
-             :on-response
-             (lambda (response)
-               (agent-repl-host--select-settled
-                ws id (lambda () (agent-repl-host--select-answered ws id response on-settled))))
-             :on-failure
-             (lambda (detail)
-               (agent-repl-host--select-settled
-                ws id (lambda ()
-                        (agent-repl-host--forget-sent-id id)
-                        (agent-repl--error ws "elisp.host.select-failed ws=%s detail=%S" ws detail)
-                        (when on-settled (funcall on-settled :failure))))))
-          (error
-           ;; The call never went out, so nothing will ever answer it: the
-           ;; slot is released here or no later selection is ever sent.
-           (setq agent-repl-host--select-in-flight nil)
-           (agent-repl-host--forget-sent-id id)
-           (agent-repl--error ws "elisp.host.select-unsent ws=%s id=%S error=%S" ws id err)
-           (signal (car err) (cdr err)))))
+      (agent-repl--info ws "elisp.host.select ws=%s id=%S" ws (plist-get ref :id))
+      (agent-repl-rpc-select-workspace
+       conn (list :workspace ref)
+       :on-response
+       (lambda (response)
+         (pcase (plist-get response :arm)
+           (:success
+            ;; RECORDED ONLY ON THE ACK.  `agent-repl-host-last-selected-id' is
+            ;; what Emacs believes the daemon stamped as `current'; a refusal is
+            ;; the daemon saying it stamped nothing, and recording the id anyway
+            ;; would leave Emacs disagreeing with the daemon about which
+            ;; workspace is current.
+            (setq agent-repl-host-last-selected-id (plist-get ref :id))
+            (agent-repl--log ws "elisp.host.selected ws=%s id=%S"
+                             ws (plist-get ref :id))
+            (when on-settled (funcall on-settled :success)))
+           (:error
+            (agent-repl-host--on-refused ws "select" (plist-get response :value))
+            (when on-settled (funcall on-settled :error)))
+           (arm
+            (agent-repl--error ws "elisp.host.select-unknown-arm ws=%s arm=%S" ws arm)
+            (when on-settled (funcall on-settled :error)))))
+       :on-failure
+       (lambda (detail)
+         (agent-repl--error ws "elisp.host.select-failed ws=%s detail=%S" ws detail)
+         (when on-settled (funcall on-settled :failure))))
       t))))
-
-(defun agent-repl-host--select-settled (ws id handle)
-  "Release WS\='s in-flight selection slot (ref ID), run HANDLE, then drain.
-The slot is released FIRST, so a selection HANDLE itself starts (a
-handover\='s re-attach selects the current workspace) is sent at once
-rather than queued behind an answer that has already arrived.  The
-queued selection, if any, is sent last."
-  (setq agent-repl-host--select-in-flight nil)
-  (agent-repl--log ws "elisp.host.select-settled ws=%s id=%S queued=%s"
-                   ws id (or (car agent-repl-host--select-queued) "none"))
-  (unwind-protect
-      (funcall handle)
-    (when agent-repl-host--select-queued
-      (let ((next agent-repl-host--select-queued))
-        (setq agent-repl-host--select-queued nil)
-        (agent-repl-host-select (car next) (cdr next))))))
-
-(defun agent-repl-host--select-answered (ws id response on-settled)
-  "Act on the daemon\='s RESPONSE to WS\='s selection of ref ID.
-ON-SETTLED is as `agent-repl-host-select' documents."
-  (pcase (plist-get response :arm)
-    (:success
-     ;; RECORDED ONLY ON THE ACK.  `agent-repl-host-last-selected-id' is
-     ;; what Emacs believes the daemon stamped as `current'; a refusal is
-     ;; the daemon saying it stamped nothing, and recording the id anyway
-     ;; would leave Emacs disagreeing with the daemon about which
-     ;; workspace is current.
-     (setq agent-repl-host-last-selected-id id)
-     (agent-repl--log ws "elisp.host.selected ws=%s id=%S" ws id)
-     (when on-settled (funcall on-settled :success)))
-    (:error
-     (agent-repl-host--forget-sent-id id)
-     (agent-repl-host--on-refused ws "select" (plist-get response :value))
-     (when on-settled (funcall on-settled :error)))
-    (arm
-     (agent-repl-host--forget-sent-id id)
-     (agent-repl--error ws "elisp.host.select-unknown-arm ws=%s arm=%S" ws arm)
-     (when on-settled (funcall on-settled :error)))))
-
-(defun agent-repl-host--forget-sent-id (id)
-  "Drop ID from the sent selections: the daemon stamped nothing for it."
-  (setq agent-repl-host--select-sent-ids
-        (delete id agent-repl-host--select-sent-ids)))
-
-(defun agent-repl-host-own-selection-p (id)
-  "Return non-nil when a roster `current' naming ID is Emacs\='s own selection.
-ID is Emacs\='s own when Emacs sent a selection of it that the daemon has
-not yet passed (`agent-repl-host--select-sent-ids'), answered or not.
-Recognizing it drops every older sent id: the daemon stamps in the order
-it receives, and Emacs sends in order, so a roster naming ID has passed
-every selection Emacs sent before it."
-  (let ((tail (member id agent-repl-host--select-sent-ids)))
-    (when tail
-      (setq agent-repl-host--select-sent-ids tail)
-      (agent-repl--log-verbose (or (agent-repl--ws-log-name (agent-repl--ws-by-ref-id id))
-                                   '(:agent-repl-central
-                                     "a selection whose tab is gone has no workspace sink"))
-                               "elisp.host.own-selection id=%S pending=%d"
-                               id (1- (length tail)))
-      t)))
 
 (defun agent-repl-host-mark-viewed (ws)
   "Tell the daemon the user has now SEEN workspace WS.
