@@ -436,8 +436,19 @@ message RosterRow {
     // that (owner ruling, 2026-09-28): an api request the vendor refused or
     // failed, an account blocking limit, a rapid-refill breaker, a model
     // error, or a rejected rate limit. Every other agent failure is the
-    // failed turn's own `turn_failed` end.
+    // failed turn's own `turn_failed` end. A VENDOR FAULT: TURQUOISE, the
+    // workspace stays usable and prompts are held until the vendor serves.
     RosterRowStatusVendorBlocked vendor_blocked = 12;
+    // The vendor will not START: its start is being retried, was rejected,
+    // or kept failing for the whole retry window, while agent-repl's own
+    // services are up. A VENDOR FAULT: TURQUOISE, the workspace is usable and
+    // prompts are held until the vendor starts. The footer's `vendor_fault`
+    // substatus says which of the three.
+    RosterRowStatusVendorFault vendor_fault = 50;
+    // This machine cannot reach the network, though agent-repl's own services
+    // are up. A NETWORK FAULT: BLUE, the workspace is unusable until the
+    // network returns. The same coarse claim as the footer's `network_fault`.
+    RosterRowStatusNetworkFault network_fault = 51;
     // Starting up; the route is not yet proven.
     RosterRowStatusInit init = 13;
     // The session's backing process is gone but the workspace is recoverable.
@@ -656,6 +667,12 @@ message RosterRowStatusSevered {}
 message RosterRowStatusStartFailed {}
 
 message RosterRowStatusDegraded {}
+
+// The vendor will not start; agent-repl is up.
+message RosterRowStatusVendorFault {}
+
+// The machine is offline; agent-repl is up.
+message RosterRowStatusNetworkFault {}
 
 message RosterRowStatusDead {}
 

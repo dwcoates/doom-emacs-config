@@ -282,39 +282,45 @@ func (x *FooterStrip) GetLiveWork() *FooterLiveWorkChips {
 // The owner's ruling of 2026-09-13: EVERY daemon fault kind reaches the
 // footer. Three rules shape the mapping and are worked out here once.
 //
-//  1. STATUS IS REUSED, never invented. `disconnected` carries the faults that
-//     mean the session cannot be reached; `blocked` carries the faults that
-//     mean the daemon cannot serve it. Nothing else needed a new status.
+//  1. STATUS IS THE FAULT'S DOMAIN. `agent_repl_fault` (BLUE, composer
+//     closed) carries the faults that mean one of agent-repl's own services
+//     cannot serve the workspace; `network_fault` (BLUE) carries this
+//     machine being offline; `vendor_fault` (TURQUOISE, composer open,
+//     prompts held) carries everything the vendor (Claude, the Agent SDK)
+//     cannot do while agent-repl itself is fine. Precedence:
+//     agent_repl_fault > network_fault > vendor_fault.
 //  2. SUBSTATUS IS A BUCKET, onto the activity values: several fault kinds
 //     land in one substatus, and no substatus was minted to match a kind
-//     one-for-one. Four of the five buckets below already existed.
+//     one-for-one.
 //  3. ACTIVITY IS THE LEAST GENERAL: the kind's own name and its detail line,
 //     carried by FooterStatusActivityFault (or, for `shim_start_failed`
-//     alone, by the richer FooterStatusActivityStartFailed).
+//     alone, by the richer FooterStatusActivityStartFailed, and for the three
+//     vendor-start kinds by FooterStatusActivityVendorStart).
 //
 // ESCALATING FAULTS — the fault DECIDES the status, because the session
 // cannot serve while it stands:
 //
-//	| status       | substatus         | fault kinds                        |
-//	|--------------|-------------------|------------------------------------|
-//	| disconnected | start_failed      | shim_start_failed, resume_failed,  |
-//	|              |                   | relaunch_resume_failed,            |
-//	|              |                   | adoption_window_expired (session), |
-//	|              |                   | cold_gate_reopen_failed            |
-//	| disconnected | vendor_retry      | vendor_start_retrying              |
-//	| disconnected | vendor_rejection  | vendor_start_rejected              |
-//	| disconnected | vendor_failed     | vendor_start_failed                |
-//	| disconnected | dead              | shim_died, bounce_died,            |
-//	|              |                   | session_absent                     |
-//	| disconnected | severed           | link_severed, watch_open_refused   |
-//	| blocked      | daemon_impaired   | prompts_dir_missing, wsm_read_only,|
-//	|              |                   | log_sink_poisoned,                 |
-//	|              |                   | successor_spawn_failed,            |
-//	|              |                   | daemon_state_unreadable,           |
-//	|              |                   | adoption_window_expired (daemon)   |
+//	| status           | substatus        | fault kinds                        |
+//	|------------------|------------------|------------------------------------|
+//	| agent_repl_fault | start_failed     | shim_start_failed, resume_failed,  |
+//	|                  |                  | relaunch_resume_failed,            |
+//	|                  |                  | adoption_window_expired (session), |
+//	|                  |                  | cold_gate_reopen_failed            |
+//	| agent_repl_fault | dead             | shim_died, bounce_died,            |
+//	|                  |                  | session_absent                     |
+//	| agent_repl_fault | severed          | link_severed, watch_open_refused   |
+//	| agent_repl_fault | daemon_impaired  | prompts_dir_missing, wsm_read_only,|
+//	|                  |                  | log_sink_poisoned,                 |
+//	|                  |                  | successor_spawn_failed,            |
+//	|                  |                  | daemon_state_unreadable,           |
+//	|                  |                  | adoption_window_expired (daemon)   |
+//	| network_fault    | offline          | network_unreachable                |
+//	| vendor_fault     | vendor_retry     | vendor_start_retrying              |
+//	| vendor_fault     | vendor_rejection | vendor_start_rejected              |
+//	| vendor_fault     | vendor_failed    | vendor_start_failed                |
 //
 // ESCALATING FAULTS ARE SALIENT: their line is the `fault` kind of the
-// disconnected and blocked arms' salient oneofs, standing until the fault is
+// fault arms' salient oneofs, standing until the fault is
 // retracted.
 //
 // NON-ESCALATING FAULTS — the session IS serving, so the status is left
@@ -335,8 +341,8 @@ func (x *FooterStrip) GetLiveWork() *FooterLiveWorkChips {
 // shim that PUSHED a diagnostic is alive; a classifier run is a headless side
 // errand; an undetermined bounce disposition is an accounting question for a
 // human; an abandoned conversation is the record of what a SUCCESSFUL fresh
-// bring-up left behind. Saying `disconnected` of any of them would be false,
-// and it is not only a wording question: `disconnected` CLOSES THE COMPOSER
+// bring-up left behind. Saying `agent_repl_fault` of any of them would be false,
+// and it is not only a wording question: `agent_repl_fault` CLOSES THE COMPOSER
 // (webapp/src/main.ts), so escalating them would lock the user out of a
 // session that is serving perfectly. The fault still reaches the footer —
 // which is what the ruling asked for — as a transient activity line.
@@ -353,7 +359,7 @@ func (x *FooterStrip) GetLiveWork() *FooterLiveWorkChips {
 // `deploy_failed` is daemon-scoped and joins them because the daemon that ran
 // the deploy KEEPS SERVING on the build it already runs: a build that failed
 // installed nothing, an install that failed restarted nothing, and a service
-// that did not come back has its own faults. `blocked` would close no
+// that did not come back has its own faults. `agent_repl_fault` would close no
 // composer, but it would still say the daemon cannot serve a session it is
 // serving. The fault line names the step and its last line of output.
 //
@@ -373,14 +379,15 @@ type FooterStatus struct {
 	//	*FooterStatus_Interrupted
 	//	*FooterStatus_Merging
 	//	*FooterStatus_Background
-	//	*FooterStatus_Blocked
-	//	*FooterStatus_Disconnected
+	//	*FooterStatus_VendorFault
+	//	*FooterStatus_AgentReplFault
 	//	*FooterStatus_Closing
 	//	*FooterStatus_Loading
 	//	*FooterStatus_MergeFailed
 	//	*FooterStatus_Merged
 	//	*FooterStatus_TurnFailed
 	//	*FooterStatus_Degraded
+	//	*FooterStatus_NetworkFault
 	Status        isFooterStatus_Status `protobuf_oneof:"status"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -477,19 +484,19 @@ func (x *FooterStatus) GetBackground() *FooterStatusBackground {
 	return nil
 }
 
-func (x *FooterStatus) GetBlocked() *FooterStatusBlocked {
+func (x *FooterStatus) GetVendorFault() *FooterStatusVendorFault {
 	if x != nil {
-		if x, ok := x.Status.(*FooterStatus_Blocked); ok {
-			return x.Blocked
+		if x, ok := x.Status.(*FooterStatus_VendorFault); ok {
+			return x.VendorFault
 		}
 	}
 	return nil
 }
 
-func (x *FooterStatus) GetDisconnected() *FooterStatusDisconnected {
+func (x *FooterStatus) GetAgentReplFault() *FooterStatusAgentReplFault {
 	if x != nil {
-		if x, ok := x.Status.(*FooterStatus_Disconnected); ok {
-			return x.Disconnected
+		if x, ok := x.Status.(*FooterStatus_AgentReplFault); ok {
+			return x.AgentReplFault
 		}
 	}
 	return nil
@@ -549,6 +556,15 @@ func (x *FooterStatus) GetDegraded() *FooterStatusDegraded {
 	return nil
 }
 
+func (x *FooterStatus) GetNetworkFault() *FooterStatusNetworkFault {
+	if x != nil {
+		if x, ok := x.Status.(*FooterStatus_NetworkFault); ok {
+			return x.NetworkFault
+		}
+	}
+	return nil
+}
+
 type isFooterStatus_Status interface {
 	isFooterStatus_Status()
 }
@@ -587,16 +603,25 @@ type FooterStatus_Background struct {
 	Background *FooterStatusBackground `protobuf:"bytes,6,opt,name=background,proto3,oneof"`
 }
 
-type FooterStatus_Blocked struct {
-	// The session cannot proceed until something outside it changes.
-	Blocked *FooterStatusBlocked `protobuf:"bytes,7,opt,name=blocked,proto3,oneof"`
+type FooterStatus_VendorFault struct {
+	// A VENDOR FAULT: agent-repl's own services serve this workspace, but
+	// the vendor (Claude, the Agent SDK) cannot: an auth prompt, an exhausted
+	// usage limit, a billing refusal, a vendor error, a retried API call, a
+	// dead vendor query, or a vendor start being retried, rejected or given
+	// up on. TURQUOISE: the workspace is USABLE — the composer stays OPEN and
+	// a prompt sent meanwhile is held until the vendor serves again. Outranked
+	// by `agent_repl_fault` and `network_fault`.
+	VendorFault *FooterStatusVendorFault `protobuf:"bytes,7,opt,name=vendor_fault,json=vendorFault,proto3,oneof"`
 }
 
-type FooterStatus_Disconnected struct {
+type FooterStatus_AgentReplFault struct {
 	// Tag 8 is RETIRED: the asleep status died with hibernation leaving
 	// the contract.
-	// The daemon's link to the session's shim is not serving.
-	Disconnected *FooterStatusDisconnected `protobuf:"bytes,9,opt,name=disconnected,proto3,oneof"`
+	// AN AGENT-REPL FAULT: one of agent-repl's own services for this
+	// workspace is not serving — the shim is starting, severed, dead or
+	// failed to start, or the daemon itself is impaired. BLUE: the workspace
+	// is unusable and the composer is CLOSED. It outranks every other fault.
+	AgentReplFault *FooterStatusAgentReplFault `protobuf:"bytes,9,opt,name=agent_repl_fault,json=agentReplFault,proto3,oneof"`
 }
 
 type FooterStatus_Closing struct {
@@ -649,6 +674,15 @@ type FooterStatus_Degraded struct {
 	Degraded *FooterStatusDegraded `protobuf:"bytes,16,opt,name=degraded,proto3,oneof"`
 }
 
+type FooterStatus_NetworkFault struct {
+	// A NETWORK FAULT: this machine cannot reach the network, so nothing
+	// that needs it (the vendor above all) can work, though agent-repl's own
+	// services are up. Told apart from a vendor fault by the shim, which
+	// separates an unreachable network from an answer the vendor gave. BLUE:
+	// the composer is CLOSED. Outranked only by `agent_repl_fault`.
+	NetworkFault *FooterStatusNetworkFault `protobuf:"bytes,17,opt,name=network_fault,json=networkFault,proto3,oneof"`
+}
+
 func (*FooterStatus_Idle) isFooterStatus_Status() {}
 
 func (*FooterStatus_Working) isFooterStatus_Status() {}
@@ -661,9 +695,9 @@ func (*FooterStatus_Merging) isFooterStatus_Status() {}
 
 func (*FooterStatus_Background) isFooterStatus_Status() {}
 
-func (*FooterStatus_Blocked) isFooterStatus_Status() {}
+func (*FooterStatus_VendorFault) isFooterStatus_Status() {}
 
-func (*FooterStatus_Disconnected) isFooterStatus_Status() {}
+func (*FooterStatus_AgentReplFault) isFooterStatus_Status() {}
 
 func (*FooterStatus_Closing) isFooterStatus_Status() {}
 
@@ -676,6 +710,8 @@ func (*FooterStatus_Merged) isFooterStatus_Status() {}
 func (*FooterStatus_TurnFailed) isFooterStatus_Status() {}
 
 func (*FooterStatus_Degraded) isFooterStatus_Status() {}
+
+func (*FooterStatus_NetworkFault) isFooterStatus_Status() {}
 
 // Nothing in flight; the session serves on demand.
 type FooterStatusIdle struct {
@@ -5866,41 +5902,43 @@ func (*FooterStatusBackgroundSalient_Notification) isFooterStatusBackgroundSalie
 func (*FooterStatusBackgroundSalient_ContextBudget) isFooterStatusBackgroundSalient_Kind() {}
 
 // The session cannot proceed until something outside it changes.
-type FooterStatusBlocked struct {
+type FooterStatusVendorFault struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// WHY it is blocked.
 	//
 	// Types that are valid to be assigned to Substatus:
 	//
-	//	*FooterStatusBlocked_Auth
-	//	*FooterStatusBlocked_UsageLimit
-	//	*FooterStatusBlocked_VendorError
-	//	*FooterStatusBlocked_Billing
-	//	*FooterStatusBlocked_QueryDied
-	//	*FooterStatusBlocked_DaemonImpaired
-	//	*FooterStatusBlocked_ApiRetrying
-	Substatus isFooterStatusBlocked_Substatus `protobuf_oneof:"substatus"`
+	//	*FooterStatusVendorFault_Auth
+	//	*FooterStatusVendorFault_UsageLimit
+	//	*FooterStatusVendorFault_VendorError
+	//	*FooterStatusVendorFault_Billing
+	//	*FooterStatusVendorFault_QueryDied
+	//	*FooterStatusVendorFault_VendorRetry
+	//	*FooterStatusVendorFault_VendorRejection
+	//	*FooterStatusVendorFault_VendorFailed
+	//	*FooterStatusVendorFault_ApiRetrying
+	Substatus isFooterStatusVendorFault_Substatus `protobuf_oneof:"substatus"`
 	// The activity cell. ALWAYS SET: the enduring tier guarantees the cell has
 	// something to draw under every status.
-	Activity      *FooterStatusBlockedActivity `protobuf:"bytes,5,opt,name=activity,proto3" json:"activity,omitempty"`
+	Activity      *FooterStatusVendorFaultActivity `protobuf:"bytes,5,opt,name=activity,proto3" json:"activity,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *FooterStatusBlocked) Reset() {
-	*x = FooterStatusBlocked{}
+func (x *FooterStatusVendorFault) Reset() {
+	*x = FooterStatusVendorFault{}
 	mi := &file_frontend_v1_footer_proto_msgTypes[80]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *FooterStatusBlocked) String() string {
+func (x *FooterStatusVendorFault) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*FooterStatusBlocked) ProtoMessage() {}
+func (*FooterStatusVendorFault) ProtoMessage() {}
 
-func (x *FooterStatusBlocked) ProtoReflect() protoreflect.Message {
+func (x *FooterStatusVendorFault) ProtoReflect() protoreflect.Message {
 	mi := &file_frontend_v1_footer_proto_msgTypes[80]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -5912,130 +5950,159 @@ func (x *FooterStatusBlocked) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use FooterStatusBlocked.ProtoReflect.Descriptor instead.
-func (*FooterStatusBlocked) Descriptor() ([]byte, []int) {
+// Deprecated: Use FooterStatusVendorFault.ProtoReflect.Descriptor instead.
+func (*FooterStatusVendorFault) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{80}
 }
 
-func (x *FooterStatusBlocked) GetSubstatus() isFooterStatusBlocked_Substatus {
+func (x *FooterStatusVendorFault) GetSubstatus() isFooterStatusVendorFault_Substatus {
 	if x != nil {
 		return x.Substatus
 	}
 	return nil
 }
 
-func (x *FooterStatusBlocked) GetAuth() *FooterSubStatusBlockedAuth {
+func (x *FooterStatusVendorFault) GetAuth() *FooterSubStatusVendorFaultAuth {
 	if x != nil {
-		if x, ok := x.Substatus.(*FooterStatusBlocked_Auth); ok {
+		if x, ok := x.Substatus.(*FooterStatusVendorFault_Auth); ok {
 			return x.Auth
 		}
 	}
 	return nil
 }
 
-func (x *FooterStatusBlocked) GetUsageLimit() *FooterSubStatusBlockedUsageLimit {
+func (x *FooterStatusVendorFault) GetUsageLimit() *FooterSubStatusVendorFaultUsageLimit {
 	if x != nil {
-		if x, ok := x.Substatus.(*FooterStatusBlocked_UsageLimit); ok {
+		if x, ok := x.Substatus.(*FooterStatusVendorFault_UsageLimit); ok {
 			return x.UsageLimit
 		}
 	}
 	return nil
 }
 
-func (x *FooterStatusBlocked) GetVendorError() *FooterSubStatusBlockedVendorError {
+func (x *FooterStatusVendorFault) GetVendorError() *FooterSubStatusVendorFaultVendorError {
 	if x != nil {
-		if x, ok := x.Substatus.(*FooterStatusBlocked_VendorError); ok {
+		if x, ok := x.Substatus.(*FooterStatusVendorFault_VendorError); ok {
 			return x.VendorError
 		}
 	}
 	return nil
 }
 
-func (x *FooterStatusBlocked) GetBilling() *FooterSubStatusBlockedBilling {
+func (x *FooterStatusVendorFault) GetBilling() *FooterSubStatusVendorFaultBilling {
 	if x != nil {
-		if x, ok := x.Substatus.(*FooterStatusBlocked_Billing); ok {
+		if x, ok := x.Substatus.(*FooterStatusVendorFault_Billing); ok {
 			return x.Billing
 		}
 	}
 	return nil
 }
 
-func (x *FooterStatusBlocked) GetQueryDied() *FooterSubStatusBlockedQueryDied {
+func (x *FooterStatusVendorFault) GetQueryDied() *FooterSubStatusVendorFaultQueryDied {
 	if x != nil {
-		if x, ok := x.Substatus.(*FooterStatusBlocked_QueryDied); ok {
+		if x, ok := x.Substatus.(*FooterStatusVendorFault_QueryDied); ok {
 			return x.QueryDied
 		}
 	}
 	return nil
 }
 
-func (x *FooterStatusBlocked) GetDaemonImpaired() *FooterSubStatusBlockedDaemonImpaired {
+func (x *FooterStatusVendorFault) GetVendorRetry() *FooterSubStatusVendorFaultVendorRetry {
 	if x != nil {
-		if x, ok := x.Substatus.(*FooterStatusBlocked_DaemonImpaired); ok {
-			return x.DaemonImpaired
+		if x, ok := x.Substatus.(*FooterStatusVendorFault_VendorRetry); ok {
+			return x.VendorRetry
 		}
 	}
 	return nil
 }
 
-func (x *FooterStatusBlocked) GetApiRetrying() *FooterSubStatusBlockedApiRetrying {
+func (x *FooterStatusVendorFault) GetVendorRejection() *FooterSubStatusVendorFaultVendorRejection {
 	if x != nil {
-		if x, ok := x.Substatus.(*FooterStatusBlocked_ApiRetrying); ok {
+		if x, ok := x.Substatus.(*FooterStatusVendorFault_VendorRejection); ok {
+			return x.VendorRejection
+		}
+	}
+	return nil
+}
+
+func (x *FooterStatusVendorFault) GetVendorFailed() *FooterSubStatusVendorFaultVendorFailed {
+	if x != nil {
+		if x, ok := x.Substatus.(*FooterStatusVendorFault_VendorFailed); ok {
+			return x.VendorFailed
+		}
+	}
+	return nil
+}
+
+func (x *FooterStatusVendorFault) GetApiRetrying() *FooterSubStatusVendorFaultApiRetrying {
+	if x != nil {
+		if x, ok := x.Substatus.(*FooterStatusVendorFault_ApiRetrying); ok {
 			return x.ApiRetrying
 		}
 	}
 	return nil
 }
 
-func (x *FooterStatusBlocked) GetActivity() *FooterStatusBlockedActivity {
+func (x *FooterStatusVendorFault) GetActivity() *FooterStatusVendorFaultActivity {
 	if x != nil {
 		return x.Activity
 	}
 	return nil
 }
 
-type isFooterStatusBlocked_Substatus interface {
-	isFooterStatusBlocked_Substatus()
+type isFooterStatusVendorFault_Substatus interface {
+	isFooterStatusVendorFault_Substatus()
 }
 
-type FooterStatusBlocked_Auth struct {
+type FooterStatusVendorFault_Auth struct {
 	// An auth prompt is up.
-	Auth *FooterSubStatusBlockedAuth `protobuf:"bytes,1,opt,name=auth,proto3,oneof"`
+	Auth *FooterSubStatusVendorFaultAuth `protobuf:"bytes,1,opt,name=auth,proto3,oneof"`
 }
 
-type FooterStatusBlocked_UsageLimit struct {
+type FooterStatusVendorFault_UsageLimit struct {
 	// The usage allowance is exhausted.
-	UsageLimit *FooterSubStatusBlockedUsageLimit `protobuf:"bytes,2,opt,name=usage_limit,json=usageLimit,proto3,oneof"`
+	UsageLimit *FooterSubStatusVendorFaultUsageLimit `protobuf:"bytes,2,opt,name=usage_limit,json=usageLimit,proto3,oneof"`
 }
 
-type FooterStatusBlocked_VendorError struct {
+type FooterStatusVendorFault_VendorError struct {
 	// The vendor is refusing requests.
-	VendorError *FooterSubStatusBlockedVendorError `protobuf:"bytes,3,opt,name=vendor_error,json=vendorError,proto3,oneof"`
+	VendorError *FooterSubStatusVendorFaultVendorError `protobuf:"bytes,3,opt,name=vendor_error,json=vendorError,proto3,oneof"`
 }
 
-type FooterStatusBlocked_Billing struct {
+type FooterStatusVendorFault_Billing struct {
 	// The account's billing state refuses requests.
-	Billing *FooterSubStatusBlockedBilling `protobuf:"bytes,4,opt,name=billing,proto3,oneof"`
+	Billing *FooterSubStatusVendorFaultBilling `protobuf:"bytes,4,opt,name=billing,proto3,oneof"`
 }
 
-type FooterStatusBlocked_QueryDied struct {
+type FooterStatusVendorFault_QueryDied struct {
 	// NO LONGER EMITTED: a dead vendor query is a FAILED TURN, not a block
 	// (owner ruling, 2026-09-28: `blocked` is only for the vendor or the
 	// account), so it resolves to `idle · turn_failed` with the dead-query
 	// line. Kept only because removing an arm is a breaking change.
-	QueryDied *FooterSubStatusBlockedQueryDied `protobuf:"bytes,6,opt,name=query_died,json=queryDied,proto3,oneof"`
+	QueryDied *FooterSubStatusVendorFaultQueryDied `protobuf:"bytes,6,opt,name=query_died,json=queryDied,proto3,oneof"`
 }
 
-type FooterStatusBlocked_DaemonImpaired struct {
-	// The DAEMON itself is impaired: a fault stands that costs this session
-	// something it needs from the daemon — its prompts directory, its state
-	// client, its durable log sink, its own redeploy. The session's shim may
-	// be perfectly healthy; what it cannot get is the daemon's service. See
-	// THE FAULT PARTITION above.
-	DaemonImpaired *FooterSubStatusBlockedDaemonImpaired `protobuf:"bytes,7,opt,name=daemon_impaired,json=daemonImpaired,proto3,oneof"`
+type FooterStatusVendorFault_VendorRetry struct {
+	// The vendor did not start and the daemon is retrying it: from the first
+	// failed attempt until the last. The activity line names the latest
+	// attempt's failure.
+	VendorRetry *FooterSubStatusVendorFaultVendorRetry `protobuf:"bytes,9,opt,name=vendor_retry,json=vendorRetry,proto3,oneof"`
 }
 
-type FooterStatusBlocked_ApiRetrying struct {
+type FooterStatusVendorFault_VendorRejection struct {
+	// The vendor refused the start for a reason retrying cannot fix; nothing
+	// retries until the user restarts the workspace.
+	VendorRejection *FooterSubStatusVendorFaultVendorRejection `protobuf:"bytes,10,opt,name=vendor_rejection,json=vendorRejection,proto3,oneof"`
+}
+
+type FooterStatusVendorFault_VendorFailed struct {
+	// The vendor kept failing to start for the whole retry window, so the
+	// daemon stopped retrying; prompts stay held until a restart brings the
+	// session up.
+	VendorFailed *FooterSubStatusVendorFaultVendorFailed `protobuf:"bytes,11,opt,name=vendor_failed,json=vendorFailed,proto3,oneof"`
+}
+
+type FooterStatusVendorFault_ApiRetrying struct {
 	// The vendor is retrying a call that failed mid-turn — the API is
 	// unreachable, timing out, or answering with a retryable error — so the
 	// turn cannot advance until a retried call is answered. Distinct from
@@ -6044,44 +6111,48 @@ type FooterStatusBlocked_ApiRetrying struct {
 	// until the first successful response of the retried agent, the turn's
 	// end, or a new turn opening (a prompt sent during the retry opens one,
 	// which resolves `working`). The activity cell carries the retry line.
-	ApiRetrying *FooterSubStatusBlockedApiRetrying `protobuf:"bytes,8,opt,name=api_retrying,json=apiRetrying,proto3,oneof"`
+	ApiRetrying *FooterSubStatusVendorFaultApiRetrying `protobuf:"bytes,8,opt,name=api_retrying,json=apiRetrying,proto3,oneof"`
 }
 
-func (*FooterStatusBlocked_Auth) isFooterStatusBlocked_Substatus() {}
+func (*FooterStatusVendorFault_Auth) isFooterStatusVendorFault_Substatus() {}
 
-func (*FooterStatusBlocked_UsageLimit) isFooterStatusBlocked_Substatus() {}
+func (*FooterStatusVendorFault_UsageLimit) isFooterStatusVendorFault_Substatus() {}
 
-func (*FooterStatusBlocked_VendorError) isFooterStatusBlocked_Substatus() {}
+func (*FooterStatusVendorFault_VendorError) isFooterStatusVendorFault_Substatus() {}
 
-func (*FooterStatusBlocked_Billing) isFooterStatusBlocked_Substatus() {}
+func (*FooterStatusVendorFault_Billing) isFooterStatusVendorFault_Substatus() {}
 
-func (*FooterStatusBlocked_QueryDied) isFooterStatusBlocked_Substatus() {}
+func (*FooterStatusVendorFault_QueryDied) isFooterStatusVendorFault_Substatus() {}
 
-func (*FooterStatusBlocked_DaemonImpaired) isFooterStatusBlocked_Substatus() {}
+func (*FooterStatusVendorFault_VendorRetry) isFooterStatusVendorFault_Substatus() {}
 
-func (*FooterStatusBlocked_ApiRetrying) isFooterStatusBlocked_Substatus() {}
+func (*FooterStatusVendorFault_VendorRejection) isFooterStatusVendorFault_Substatus() {}
+
+func (*FooterStatusVendorFault_VendorFailed) isFooterStatusVendorFault_Substatus() {}
+
+func (*FooterStatusVendorFault_ApiRetrying) isFooterStatusVendorFault_Substatus() {}
 
 // An auth prompt is up.
-type FooterSubStatusBlockedAuth struct {
+type FooterSubStatusVendorFaultAuth struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *FooterSubStatusBlockedAuth) Reset() {
-	*x = FooterSubStatusBlockedAuth{}
+func (x *FooterSubStatusVendorFaultAuth) Reset() {
+	*x = FooterSubStatusVendorFaultAuth{}
 	mi := &file_frontend_v1_footer_proto_msgTypes[81]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *FooterSubStatusBlockedAuth) String() string {
+func (x *FooterSubStatusVendorFaultAuth) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*FooterSubStatusBlockedAuth) ProtoMessage() {}
+func (*FooterSubStatusVendorFaultAuth) ProtoMessage() {}
 
-func (x *FooterSubStatusBlockedAuth) ProtoReflect() protoreflect.Message {
+func (x *FooterSubStatusVendorFaultAuth) ProtoReflect() protoreflect.Message {
 	mi := &file_frontend_v1_footer_proto_msgTypes[81]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -6093,32 +6164,32 @@ func (x *FooterSubStatusBlockedAuth) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use FooterSubStatusBlockedAuth.ProtoReflect.Descriptor instead.
-func (*FooterSubStatusBlockedAuth) Descriptor() ([]byte, []int) {
+// Deprecated: Use FooterSubStatusVendorFaultAuth.ProtoReflect.Descriptor instead.
+func (*FooterSubStatusVendorFaultAuth) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{81}
 }
 
 // The usage allowance is exhausted.
-type FooterSubStatusBlockedUsageLimit struct {
+type FooterSubStatusVendorFaultUsageLimit struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *FooterSubStatusBlockedUsageLimit) Reset() {
-	*x = FooterSubStatusBlockedUsageLimit{}
+func (x *FooterSubStatusVendorFaultUsageLimit) Reset() {
+	*x = FooterSubStatusVendorFaultUsageLimit{}
 	mi := &file_frontend_v1_footer_proto_msgTypes[82]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *FooterSubStatusBlockedUsageLimit) String() string {
+func (x *FooterSubStatusVendorFaultUsageLimit) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*FooterSubStatusBlockedUsageLimit) ProtoMessage() {}
+func (*FooterSubStatusVendorFaultUsageLimit) ProtoMessage() {}
 
-func (x *FooterSubStatusBlockedUsageLimit) ProtoReflect() protoreflect.Message {
+func (x *FooterSubStatusVendorFaultUsageLimit) ProtoReflect() protoreflect.Message {
 	mi := &file_frontend_v1_footer_proto_msgTypes[82]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -6130,32 +6201,32 @@ func (x *FooterSubStatusBlockedUsageLimit) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use FooterSubStatusBlockedUsageLimit.ProtoReflect.Descriptor instead.
-func (*FooterSubStatusBlockedUsageLimit) Descriptor() ([]byte, []int) {
+// Deprecated: Use FooterSubStatusVendorFaultUsageLimit.ProtoReflect.Descriptor instead.
+func (*FooterSubStatusVendorFaultUsageLimit) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{82}
 }
 
 // The vendor is refusing requests.
-type FooterSubStatusBlockedVendorError struct {
+type FooterSubStatusVendorFaultVendorError struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *FooterSubStatusBlockedVendorError) Reset() {
-	*x = FooterSubStatusBlockedVendorError{}
+func (x *FooterSubStatusVendorFaultVendorError) Reset() {
+	*x = FooterSubStatusVendorFaultVendorError{}
 	mi := &file_frontend_v1_footer_proto_msgTypes[83]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *FooterSubStatusBlockedVendorError) String() string {
+func (x *FooterSubStatusVendorFaultVendorError) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*FooterSubStatusBlockedVendorError) ProtoMessage() {}
+func (*FooterSubStatusVendorFaultVendorError) ProtoMessage() {}
 
-func (x *FooterSubStatusBlockedVendorError) ProtoReflect() protoreflect.Message {
+func (x *FooterSubStatusVendorFaultVendorError) ProtoReflect() protoreflect.Message {
 	mi := &file_frontend_v1_footer_proto_msgTypes[83]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -6167,32 +6238,32 @@ func (x *FooterSubStatusBlockedVendorError) ProtoReflect() protoreflect.Message 
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use FooterSubStatusBlockedVendorError.ProtoReflect.Descriptor instead.
-func (*FooterSubStatusBlockedVendorError) Descriptor() ([]byte, []int) {
+// Deprecated: Use FooterSubStatusVendorFaultVendorError.ProtoReflect.Descriptor instead.
+func (*FooterSubStatusVendorFaultVendorError) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{83}
 }
 
 // The account's billing state refuses requests.
-type FooterSubStatusBlockedBilling struct {
+type FooterSubStatusVendorFaultBilling struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *FooterSubStatusBlockedBilling) Reset() {
-	*x = FooterSubStatusBlockedBilling{}
+func (x *FooterSubStatusVendorFaultBilling) Reset() {
+	*x = FooterSubStatusVendorFaultBilling{}
 	mi := &file_frontend_v1_footer_proto_msgTypes[84]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *FooterSubStatusBlockedBilling) String() string {
+func (x *FooterSubStatusVendorFaultBilling) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*FooterSubStatusBlockedBilling) ProtoMessage() {}
+func (*FooterSubStatusVendorFaultBilling) ProtoMessage() {}
 
-func (x *FooterSubStatusBlockedBilling) ProtoReflect() protoreflect.Message {
+func (x *FooterSubStatusVendorFaultBilling) ProtoReflect() protoreflect.Message {
 	mi := &file_frontend_v1_footer_proto_msgTypes[84]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -6204,32 +6275,32 @@ func (x *FooterSubStatusBlockedBilling) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use FooterSubStatusBlockedBilling.ProtoReflect.Descriptor instead.
-func (*FooterSubStatusBlockedBilling) Descriptor() ([]byte, []int) {
+// Deprecated: Use FooterSubStatusVendorFaultBilling.ProtoReflect.Descriptor instead.
+func (*FooterSubStatusVendorFaultBilling) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{84}
 }
 
 // The vendor query died and is not yet restarted.
-type FooterSubStatusBlockedQueryDied struct {
+type FooterSubStatusVendorFaultQueryDied struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *FooterSubStatusBlockedQueryDied) Reset() {
-	*x = FooterSubStatusBlockedQueryDied{}
+func (x *FooterSubStatusVendorFaultQueryDied) Reset() {
+	*x = FooterSubStatusVendorFaultQueryDied{}
 	mi := &file_frontend_v1_footer_proto_msgTypes[85]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *FooterSubStatusBlockedQueryDied) String() string {
+func (x *FooterSubStatusVendorFaultQueryDied) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*FooterSubStatusBlockedQueryDied) ProtoMessage() {}
+func (*FooterSubStatusVendorFaultQueryDied) ProtoMessage() {}
 
-func (x *FooterSubStatusBlockedQueryDied) ProtoReflect() protoreflect.Message {
+func (x *FooterSubStatusVendorFaultQueryDied) ProtoReflect() protoreflect.Message {
 	mi := &file_frontend_v1_footer_proto_msgTypes[85]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -6241,33 +6312,33 @@ func (x *FooterSubStatusBlockedQueryDied) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use FooterSubStatusBlockedQueryDied.ProtoReflect.Descriptor instead.
-func (*FooterSubStatusBlockedQueryDied) Descriptor() ([]byte, []int) {
+// Deprecated: Use FooterSubStatusVendorFaultQueryDied.ProtoReflect.Descriptor instead.
+func (*FooterSubStatusVendorFaultQueryDied) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{85}
 }
 
 // The vendor is retrying a failed mid-turn call; the salient `retrying` line
 // says which attempt is next and when it starts.
-type FooterSubStatusBlockedApiRetrying struct {
+type FooterSubStatusVendorFaultApiRetrying struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *FooterSubStatusBlockedApiRetrying) Reset() {
-	*x = FooterSubStatusBlockedApiRetrying{}
+func (x *FooterSubStatusVendorFaultApiRetrying) Reset() {
+	*x = FooterSubStatusVendorFaultApiRetrying{}
 	mi := &file_frontend_v1_footer_proto_msgTypes[86]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *FooterSubStatusBlockedApiRetrying) String() string {
+func (x *FooterSubStatusVendorFaultApiRetrying) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*FooterSubStatusBlockedApiRetrying) ProtoMessage() {}
+func (*FooterSubStatusVendorFaultApiRetrying) ProtoMessage() {}
 
-func (x *FooterSubStatusBlockedApiRetrying) ProtoReflect() protoreflect.Message {
+func (x *FooterSubStatusVendorFaultApiRetrying) ProtoReflect() protoreflect.Message {
 	mi := &file_frontend_v1_footer_proto_msgTypes[86]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -6279,8 +6350,8 @@ func (x *FooterSubStatusBlockedApiRetrying) ProtoReflect() protoreflect.Message 
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use FooterSubStatusBlockedApiRetrying.ProtoReflect.Descriptor instead.
-func (*FooterSubStatusBlockedApiRetrying) Descriptor() ([]byte, []int) {
+// Deprecated: Use FooterSubStatusVendorFaultApiRetrying.ProtoReflect.Descriptor instead.
+func (*FooterSubStatusVendorFaultApiRetrying) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{86}
 }
 
@@ -6288,34 +6359,34 @@ func (*FooterSubStatusBlockedApiRetrying) Descriptor() ([]byte, []int) {
 // the enduring line. A blocked step with no line of its own (usage limit,
 // billing, a vendor error) draws unpinned, where the enduring usage figures
 // are exactly what explains a usage-limit block.
-type FooterStatusBlockedActivity struct {
+type FooterStatusVendorFaultActivity struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// WHICH TIER the daemon resolved. Exactly one is set, and a push with
 	// neither is malformed.
 	//
 	// Types that are valid to be assigned to Tier:
 	//
-	//	*FooterStatusBlockedActivity_Salient
-	//	*FooterStatusBlockedActivity_Unpinned
-	Tier          isFooterStatusBlockedActivity_Tier `protobuf_oneof:"tier"`
+	//	*FooterStatusVendorFaultActivity_Salient
+	//	*FooterStatusVendorFaultActivity_Unpinned
+	Tier          isFooterStatusVendorFaultActivity_Tier `protobuf_oneof:"tier"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *FooterStatusBlockedActivity) Reset() {
-	*x = FooterStatusBlockedActivity{}
+func (x *FooterStatusVendorFaultActivity) Reset() {
+	*x = FooterStatusVendorFaultActivity{}
 	mi := &file_frontend_v1_footer_proto_msgTypes[87]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *FooterStatusBlockedActivity) String() string {
+func (x *FooterStatusVendorFaultActivity) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*FooterStatusBlockedActivity) ProtoMessage() {}
+func (*FooterStatusVendorFaultActivity) ProtoMessage() {}
 
-func (x *FooterStatusBlockedActivity) ProtoReflect() protoreflect.Message {
+func (x *FooterStatusVendorFaultActivity) ProtoReflect() protoreflect.Message {
 	mi := &file_frontend_v1_footer_proto_msgTypes[87]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -6327,61 +6398,61 @@ func (x *FooterStatusBlockedActivity) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use FooterStatusBlockedActivity.ProtoReflect.Descriptor instead.
-func (*FooterStatusBlockedActivity) Descriptor() ([]byte, []int) {
+// Deprecated: Use FooterStatusVendorFaultActivity.ProtoReflect.Descriptor instead.
+func (*FooterStatusVendorFaultActivity) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{87}
 }
 
-func (x *FooterStatusBlockedActivity) GetTier() isFooterStatusBlockedActivity_Tier {
+func (x *FooterStatusVendorFaultActivity) GetTier() isFooterStatusVendorFaultActivity_Tier {
 	if x != nil {
 		return x.Tier
 	}
 	return nil
 }
 
-func (x *FooterStatusBlockedActivity) GetSalient() *FooterStatusBlockedSalient {
+func (x *FooterStatusVendorFaultActivity) GetSalient() *FooterStatusVendorFaultSalient {
 	if x != nil {
-		if x, ok := x.Tier.(*FooterStatusBlockedActivity_Salient); ok {
+		if x, ok := x.Tier.(*FooterStatusVendorFaultActivity_Salient); ok {
 			return x.Salient
 		}
 	}
 	return nil
 }
 
-func (x *FooterStatusBlockedActivity) GetUnpinned() *FooterActivityTransientOverEnduring {
+func (x *FooterStatusVendorFaultActivity) GetUnpinned() *FooterActivityTransientOverEnduring {
 	if x != nil {
-		if x, ok := x.Tier.(*FooterStatusBlockedActivity_Unpinned); ok {
+		if x, ok := x.Tier.(*FooterStatusVendorFaultActivity_Unpinned); ok {
 			return x.Unpinned
 		}
 	}
 	return nil
 }
 
-type isFooterStatusBlockedActivity_Tier interface {
-	isFooterStatusBlockedActivity_Tier()
+type isFooterStatusVendorFaultActivity_Tier interface {
+	isFooterStatusVendorFaultActivity_Tier()
 }
 
-type FooterStatusBlockedActivity_Salient struct {
+type FooterStatusVendorFaultActivity_Salient struct {
 	// A condition that blocks the turn or the user stands.
-	Salient *FooterStatusBlockedSalient `protobuf:"bytes,1,opt,name=salient,proto3,oneof"`
+	Salient *FooterStatusVendorFaultSalient `protobuf:"bytes,1,opt,name=salient,proto3,oneof"`
 }
 
-type FooterStatusBlockedActivity_Unpinned struct {
+type FooterStatusVendorFaultActivity_Unpinned struct {
 	// Nothing salient stands: the newest transient (if any) over the
 	// enduring line.
 	Unpinned *FooterActivityTransientOverEnduring `protobuf:"bytes,2,opt,name=unpinned,proto3,oneof"`
 }
 
-func (*FooterStatusBlockedActivity_Salient) isFooterStatusBlockedActivity_Tier() {}
+func (*FooterStatusVendorFaultActivity_Salient) isFooterStatusVendorFaultActivity_Tier() {}
 
-func (*FooterStatusBlockedActivity_Unpinned) isFooterStatusBlockedActivity_Tier() {}
+func (*FooterStatusVendorFaultActivity_Unpinned) isFooterStatusVendorFaultActivity_Tier() {}
 
 // The salient kinds legal while blocked. The kind that explains the standing
 // substatus ranks first (the auth prompt; `usage_limit` has no line of its
 // own, since the enduring usage line carries the allowance figures), then a
 // standing fault, then a deploy's progress, then the push notification and
 // the context-budget warning, in that order.
-type FooterStatusBlockedSalient struct {
+type FooterStatusVendorFaultSalient struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// When this line began standing; the client ticks the relative age.
 	At *FooterStatusActivityAt `protobuf:"bytes,1,opt,name=at,proto3" json:"at,omitempty"`
@@ -6389,31 +6460,32 @@ type FooterStatusBlockedSalient struct {
 	//
 	// Types that are valid to be assigned to Kind:
 	//
-	//	*FooterStatusBlockedSalient_Authenticating
-	//	*FooterStatusBlockedSalient_Fault
-	//	*FooterStatusBlockedSalient_Update
-	//	*FooterStatusBlockedSalient_Notification
-	//	*FooterStatusBlockedSalient_ContextBudget
-	//	*FooterStatusBlockedSalient_Retrying
-	Kind          isFooterStatusBlockedSalient_Kind `protobuf_oneof:"kind"`
+	//	*FooterStatusVendorFaultSalient_Authenticating
+	//	*FooterStatusVendorFaultSalient_Fault
+	//	*FooterStatusVendorFaultSalient_Update
+	//	*FooterStatusVendorFaultSalient_Notification
+	//	*FooterStatusVendorFaultSalient_ContextBudget
+	//	*FooterStatusVendorFaultSalient_Retrying
+	//	*FooterStatusVendorFaultSalient_VendorStart
+	Kind          isFooterStatusVendorFaultSalient_Kind `protobuf_oneof:"kind"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *FooterStatusBlockedSalient) Reset() {
-	*x = FooterStatusBlockedSalient{}
+func (x *FooterStatusVendorFaultSalient) Reset() {
+	*x = FooterStatusVendorFaultSalient{}
 	mi := &file_frontend_v1_footer_proto_msgTypes[88]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *FooterStatusBlockedSalient) String() string {
+func (x *FooterStatusVendorFaultSalient) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*FooterStatusBlockedSalient) ProtoMessage() {}
+func (*FooterStatusVendorFaultSalient) ProtoMessage() {}
 
-func (x *FooterStatusBlockedSalient) ProtoReflect() protoreflect.Message {
+func (x *FooterStatusVendorFaultSalient) ProtoReflect() protoreflect.Message {
 	mi := &file_frontend_v1_footer_proto_msgTypes[88]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -6425,111 +6497,120 @@ func (x *FooterStatusBlockedSalient) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use FooterStatusBlockedSalient.ProtoReflect.Descriptor instead.
-func (*FooterStatusBlockedSalient) Descriptor() ([]byte, []int) {
+// Deprecated: Use FooterStatusVendorFaultSalient.ProtoReflect.Descriptor instead.
+func (*FooterStatusVendorFaultSalient) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{88}
 }
 
-func (x *FooterStatusBlockedSalient) GetAt() *FooterStatusActivityAt {
+func (x *FooterStatusVendorFaultSalient) GetAt() *FooterStatusActivityAt {
 	if x != nil {
 		return x.At
 	}
 	return nil
 }
 
-func (x *FooterStatusBlockedSalient) GetKind() isFooterStatusBlockedSalient_Kind {
+func (x *FooterStatusVendorFaultSalient) GetKind() isFooterStatusVendorFaultSalient_Kind {
 	if x != nil {
 		return x.Kind
 	}
 	return nil
 }
 
-func (x *FooterStatusBlockedSalient) GetAuthenticating() *FooterStatusActivityAuthenticating {
+func (x *FooterStatusVendorFaultSalient) GetAuthenticating() *FooterStatusActivityAuthenticating {
 	if x != nil {
-		if x, ok := x.Kind.(*FooterStatusBlockedSalient_Authenticating); ok {
+		if x, ok := x.Kind.(*FooterStatusVendorFaultSalient_Authenticating); ok {
 			return x.Authenticating
 		}
 	}
 	return nil
 }
 
-func (x *FooterStatusBlockedSalient) GetFault() *FooterStatusActivityFault {
+func (x *FooterStatusVendorFaultSalient) GetFault() *FooterStatusActivityFault {
 	if x != nil {
-		if x, ok := x.Kind.(*FooterStatusBlockedSalient_Fault); ok {
+		if x, ok := x.Kind.(*FooterStatusVendorFaultSalient_Fault); ok {
 			return x.Fault
 		}
 	}
 	return nil
 }
 
-func (x *FooterStatusBlockedSalient) GetUpdate() *FooterStatusActivityUpdate {
+func (x *FooterStatusVendorFaultSalient) GetUpdate() *FooterStatusActivityUpdate {
 	if x != nil {
-		if x, ok := x.Kind.(*FooterStatusBlockedSalient_Update); ok {
+		if x, ok := x.Kind.(*FooterStatusVendorFaultSalient_Update); ok {
 			return x.Update
 		}
 	}
 	return nil
 }
 
-func (x *FooterStatusBlockedSalient) GetNotification() *FooterStatusActivityNotification {
+func (x *FooterStatusVendorFaultSalient) GetNotification() *FooterStatusActivityNotification {
 	if x != nil {
-		if x, ok := x.Kind.(*FooterStatusBlockedSalient_Notification); ok {
+		if x, ok := x.Kind.(*FooterStatusVendorFaultSalient_Notification); ok {
 			return x.Notification
 		}
 	}
 	return nil
 }
 
-func (x *FooterStatusBlockedSalient) GetContextBudget() *FooterStatusActivityContextBudget {
+func (x *FooterStatusVendorFaultSalient) GetContextBudget() *FooterStatusActivityContextBudget {
 	if x != nil {
-		if x, ok := x.Kind.(*FooterStatusBlockedSalient_ContextBudget); ok {
+		if x, ok := x.Kind.(*FooterStatusVendorFaultSalient_ContextBudget); ok {
 			return x.ContextBudget
 		}
 	}
 	return nil
 }
 
-func (x *FooterStatusBlockedSalient) GetRetrying() *FooterStatusActivityRetrying {
+func (x *FooterStatusVendorFaultSalient) GetRetrying() *FooterStatusActivityRetrying {
 	if x != nil {
-		if x, ok := x.Kind.(*FooterStatusBlockedSalient_Retrying); ok {
+		if x, ok := x.Kind.(*FooterStatusVendorFaultSalient_Retrying); ok {
 			return x.Retrying
 		}
 	}
 	return nil
 }
 
-type isFooterStatusBlockedSalient_Kind interface {
-	isFooterStatusBlockedSalient_Kind()
+func (x *FooterStatusVendorFaultSalient) GetVendorStart() *FooterStatusActivityVendorStart {
+	if x != nil {
+		if x, ok := x.Kind.(*FooterStatusVendorFaultSalient_VendorStart); ok {
+			return x.VendorStart
+		}
+	}
+	return nil
 }
 
-type FooterStatusBlockedSalient_Authenticating struct {
+type isFooterStatusVendorFaultSalient_Kind interface {
+	isFooterStatusVendorFaultSalient_Kind()
+}
+
+type FooterStatusVendorFaultSalient_Authenticating struct {
 	// The auth prompt line, verbatim, standing while the prompt is up.
 	Authenticating *FooterStatusActivityAuthenticating `protobuf:"bytes,2,opt,name=authenticating,proto3,oneof"`
 }
 
-type FooterStatusBlockedSalient_Fault struct {
+type FooterStatusVendorFaultSalient_Fault struct {
 	// Tag 3 is RETIRED: a dead vendor query is a failed turn, never a
 	// block, and its line stands in the idle cell under `turn_failed`.
-	// An ESCALATING daemon fault that claims `blocked`, standing until it is
-	// retracted. Only faults the partition above maps to `blocked` land here;
+	// An ESCALATING daemon fault that claims `vendor_fault`, standing until it is
+	// retracted. Only faults the partition above maps to `vendor_fault` land here;
 	// a non-escalating fault is a transient, never this arm.
 	Fault *FooterStatusActivityFault `protobuf:"bytes,4,opt,name=fault,proto3,oneof"`
 }
 
-type FooterStatusBlockedSalient_Update struct {
+type FooterStatusVendorFaultSalient_Update struct {
 	// A DEPLOY'S PROGRESS. STATUS-INDEPENDENT: every status arm's salient
 	// oneof carries it. See FooterStatusActivityUpdate.
 	Update *FooterStatusActivityUpdate `protobuf:"bytes,5,opt,name=update,proto3,oneof"`
 }
 
-type FooterStatusBlockedSalient_Notification struct {
+type FooterStatusVendorFaultSalient_Notification struct {
 	// THE AGENT'S PUSH NOTIFICATION, standing until the next prompt is
 	// submitted. STATUS-INDEPENDENT: every status arm's salient oneof carries
 	// it.
 	Notification *FooterStatusActivityNotification `protobuf:"bytes,7,opt,name=notification,proto3,oneof"`
 }
 
-type FooterStatusBlockedSalient_ContextBudget struct {
+type FooterStatusVendorFaultSalient_ContextBudget struct {
 	// THE CONTEXT-BUDGET WARNING: the vendor's warning that the context is
 	// nearly full, or the daemon's "compaction failed — …" line. It stands
 	// until a cut shrinks the context: a compaction that succeeds, a /clear,
@@ -6538,7 +6619,7 @@ type FooterStatusBlockedSalient_ContextBudget struct {
 	ContextBudget *FooterStatusActivityContextBudget `protobuf:"bytes,8,opt,name=context_budget,json=contextBudget,proto3,oneof"`
 }
 
-type FooterStatusBlockedSalient_Retrying struct {
+type FooterStatusVendorFaultSalient_Retrying struct {
 	// THE RETRY LINE while `api_retrying` stands: the next attempt's number,
 	// the vendor's status verbatim, and — when the vendor stated a schedule —
 	// the countdown to the next attempt and the last attempt it will make.
@@ -6546,39 +6627,49 @@ type FooterStatusBlockedSalient_Retrying struct {
 	Retrying *FooterStatusActivityRetrying `protobuf:"bytes,9,opt,name=retrying,proto3,oneof"`
 }
 
-func (*FooterStatusBlockedSalient_Authenticating) isFooterStatusBlockedSalient_Kind() {}
+type FooterStatusVendorFaultSalient_VendorStart struct {
+	// WHY THE VENDOR IS NOT UP, standing while one of the three vendor-start
+	// substatuses stands: the latest retried failure, the rejection, or the
+	// exhausted window with the way out. It ranks first, because it explains
+	// the step.
+	VendorStart *FooterStatusActivityVendorStart `protobuf:"bytes,10,opt,name=vendor_start,json=vendorStart,proto3,oneof"`
+}
 
-func (*FooterStatusBlockedSalient_Fault) isFooterStatusBlockedSalient_Kind() {}
+func (*FooterStatusVendorFaultSalient_Authenticating) isFooterStatusVendorFaultSalient_Kind() {}
 
-func (*FooterStatusBlockedSalient_Update) isFooterStatusBlockedSalient_Kind() {}
+func (*FooterStatusVendorFaultSalient_Fault) isFooterStatusVendorFaultSalient_Kind() {}
 
-func (*FooterStatusBlockedSalient_Notification) isFooterStatusBlockedSalient_Kind() {}
+func (*FooterStatusVendorFaultSalient_Update) isFooterStatusVendorFaultSalient_Kind() {}
 
-func (*FooterStatusBlockedSalient_ContextBudget) isFooterStatusBlockedSalient_Kind() {}
+func (*FooterStatusVendorFaultSalient_Notification) isFooterStatusVendorFaultSalient_Kind() {}
 
-func (*FooterStatusBlockedSalient_Retrying) isFooterStatusBlockedSalient_Kind() {}
+func (*FooterStatusVendorFaultSalient_ContextBudget) isFooterStatusVendorFaultSalient_Kind() {}
+
+func (*FooterStatusVendorFaultSalient_Retrying) isFooterStatusVendorFaultSalient_Kind() {}
+
+func (*FooterStatusVendorFaultSalient_VendorStart) isFooterStatusVendorFaultSalient_Kind() {}
 
 // The daemon itself is impaired; the fault line says how.
-type FooterSubStatusBlockedDaemonImpaired struct {
+type FooterSubStatusAgentReplFaultDaemonImpaired struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *FooterSubStatusBlockedDaemonImpaired) Reset() {
-	*x = FooterSubStatusBlockedDaemonImpaired{}
+func (x *FooterSubStatusAgentReplFaultDaemonImpaired) Reset() {
+	*x = FooterSubStatusAgentReplFaultDaemonImpaired{}
 	mi := &file_frontend_v1_footer_proto_msgTypes[89]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *FooterSubStatusBlockedDaemonImpaired) String() string {
+func (x *FooterSubStatusAgentReplFaultDaemonImpaired) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*FooterSubStatusBlockedDaemonImpaired) ProtoMessage() {}
+func (*FooterSubStatusAgentReplFaultDaemonImpaired) ProtoMessage() {}
 
-func (x *FooterSubStatusBlockedDaemonImpaired) ProtoReflect() protoreflect.Message {
+func (x *FooterSubStatusAgentReplFaultDaemonImpaired) ProtoReflect() protoreflect.Message {
 	mi := &file_frontend_v1_footer_proto_msgTypes[89]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -6590,8 +6681,8 @@ func (x *FooterSubStatusBlockedDaemonImpaired) ProtoReflect() protoreflect.Messa
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use FooterSubStatusBlockedDaemonImpaired.ProtoReflect.Descriptor instead.
-func (*FooterSubStatusBlockedDaemonImpaired) Descriptor() ([]byte, []int) {
+// Deprecated: Use FooterSubStatusAgentReplFaultDaemonImpaired.ProtoReflect.Descriptor instead.
+func (*FooterSubStatusAgentReplFaultDaemonImpaired) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{89}
 }
 
@@ -7581,42 +7672,40 @@ func (*FooterStatusActivityUpdateNoteShimWhenIdle) Descriptor() ([]byte, []int) 
 }
 
 // The daemon's link to the session's shim is not serving.
-type FooterStatusDisconnected struct {
+type FooterStatusAgentReplFault struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The link's step.
 	//
 	// Types that are valid to be assigned to Substatus:
 	//
-	//	*FooterStatusDisconnected_Starting
-	//	*FooterStatusDisconnected_Degraded
-	//	*FooterStatusDisconnected_Severed
-	//	*FooterStatusDisconnected_Dead
-	//	*FooterStatusDisconnected_StartFailed
-	//	*FooterStatusDisconnected_VendorRetry
-	//	*FooterStatusDisconnected_VendorRejection
-	//	*FooterStatusDisconnected_VendorFailed
-	Substatus isFooterStatusDisconnected_Substatus `protobuf_oneof:"substatus"`
+	//	*FooterStatusAgentReplFault_Starting
+	//	*FooterStatusAgentReplFault_Degraded
+	//	*FooterStatusAgentReplFault_Severed
+	//	*FooterStatusAgentReplFault_Dead
+	//	*FooterStatusAgentReplFault_StartFailed
+	//	*FooterStatusAgentReplFault_DaemonImpaired
+	Substatus isFooterStatusAgentReplFault_Substatus `protobuf_oneof:"substatus"`
 	// The activity cell. ALWAYS SET: the enduring tier guarantees the cell has
 	// something to draw under every status.
-	Activity      *FooterStatusDisconnectedActivity `protobuf:"bytes,6,opt,name=activity,proto3" json:"activity,omitempty"`
+	Activity      *FooterStatusAgentReplFaultActivity `protobuf:"bytes,6,opt,name=activity,proto3" json:"activity,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *FooterStatusDisconnected) Reset() {
-	*x = FooterStatusDisconnected{}
+func (x *FooterStatusAgentReplFault) Reset() {
+	*x = FooterStatusAgentReplFault{}
 	mi := &file_frontend_v1_footer_proto_msgTypes[107]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *FooterStatusDisconnected) String() string {
+func (x *FooterStatusAgentReplFault) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*FooterStatusDisconnected) ProtoMessage() {}
+func (*FooterStatusAgentReplFault) ProtoMessage() {}
 
-func (x *FooterStatusDisconnected) ProtoReflect() protoreflect.Message {
+func (x *FooterStatusAgentReplFault) ProtoReflect() protoreflect.Message {
 	mi := &file_frontend_v1_footer_proto_msgTypes[107]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -7628,187 +7717,152 @@ func (x *FooterStatusDisconnected) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use FooterStatusDisconnected.ProtoReflect.Descriptor instead.
-func (*FooterStatusDisconnected) Descriptor() ([]byte, []int) {
+// Deprecated: Use FooterStatusAgentReplFault.ProtoReflect.Descriptor instead.
+func (*FooterStatusAgentReplFault) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{107}
 }
 
-func (x *FooterStatusDisconnected) GetSubstatus() isFooterStatusDisconnected_Substatus {
+func (x *FooterStatusAgentReplFault) GetSubstatus() isFooterStatusAgentReplFault_Substatus {
 	if x != nil {
 		return x.Substatus
 	}
 	return nil
 }
 
-func (x *FooterStatusDisconnected) GetStarting() *FooterSubStatusDisconnectedStarting {
+func (x *FooterStatusAgentReplFault) GetStarting() *FooterSubStatusAgentReplFaultStarting {
 	if x != nil {
-		if x, ok := x.Substatus.(*FooterStatusDisconnected_Starting); ok {
+		if x, ok := x.Substatus.(*FooterStatusAgentReplFault_Starting); ok {
 			return x.Starting
 		}
 	}
 	return nil
 }
 
-func (x *FooterStatusDisconnected) GetDegraded() *FooterSubStatusDisconnectedDegraded {
+func (x *FooterStatusAgentReplFault) GetDegraded() *FooterSubStatusAgentReplFaultDegraded {
 	if x != nil {
-		if x, ok := x.Substatus.(*FooterStatusDisconnected_Degraded); ok {
+		if x, ok := x.Substatus.(*FooterStatusAgentReplFault_Degraded); ok {
 			return x.Degraded
 		}
 	}
 	return nil
 }
 
-func (x *FooterStatusDisconnected) GetSevered() *FooterSubStatusDisconnectedSevered {
+func (x *FooterStatusAgentReplFault) GetSevered() *FooterSubStatusAgentReplFaultSevered {
 	if x != nil {
-		if x, ok := x.Substatus.(*FooterStatusDisconnected_Severed); ok {
+		if x, ok := x.Substatus.(*FooterStatusAgentReplFault_Severed); ok {
 			return x.Severed
 		}
 	}
 	return nil
 }
 
-func (x *FooterStatusDisconnected) GetDead() *FooterSubStatusDisconnectedDead {
+func (x *FooterStatusAgentReplFault) GetDead() *FooterSubStatusAgentReplFaultDead {
 	if x != nil {
-		if x, ok := x.Substatus.(*FooterStatusDisconnected_Dead); ok {
+		if x, ok := x.Substatus.(*FooterStatusAgentReplFault_Dead); ok {
 			return x.Dead
 		}
 	}
 	return nil
 }
 
-func (x *FooterStatusDisconnected) GetStartFailed() *FooterSubStatusDisconnectedStartFailed {
+func (x *FooterStatusAgentReplFault) GetStartFailed() *FooterSubStatusAgentReplFaultStartFailed {
 	if x != nil {
-		if x, ok := x.Substatus.(*FooterStatusDisconnected_StartFailed); ok {
+		if x, ok := x.Substatus.(*FooterStatusAgentReplFault_StartFailed); ok {
 			return x.StartFailed
 		}
 	}
 	return nil
 }
 
-func (x *FooterStatusDisconnected) GetVendorRetry() *FooterSubStatusDisconnectedVendorRetry {
+func (x *FooterStatusAgentReplFault) GetDaemonImpaired() *FooterSubStatusAgentReplFaultDaemonImpaired {
 	if x != nil {
-		if x, ok := x.Substatus.(*FooterStatusDisconnected_VendorRetry); ok {
-			return x.VendorRetry
+		if x, ok := x.Substatus.(*FooterStatusAgentReplFault_DaemonImpaired); ok {
+			return x.DaemonImpaired
 		}
 	}
 	return nil
 }
 
-func (x *FooterStatusDisconnected) GetVendorRejection() *FooterSubStatusDisconnectedVendorRejection {
-	if x != nil {
-		if x, ok := x.Substatus.(*FooterStatusDisconnected_VendorRejection); ok {
-			return x.VendorRejection
-		}
-	}
-	return nil
-}
-
-func (x *FooterStatusDisconnected) GetVendorFailed() *FooterSubStatusDisconnectedVendorFailed {
-	if x != nil {
-		if x, ok := x.Substatus.(*FooterStatusDisconnected_VendorFailed); ok {
-			return x.VendorFailed
-		}
-	}
-	return nil
-}
-
-func (x *FooterStatusDisconnected) GetActivity() *FooterStatusDisconnectedActivity {
+func (x *FooterStatusAgentReplFault) GetActivity() *FooterStatusAgentReplFaultActivity {
 	if x != nil {
 		return x.Activity
 	}
 	return nil
 }
 
-type isFooterStatusDisconnected_Substatus interface {
-	isFooterStatusDisconnected_Substatus()
+type isFooterStatusAgentReplFault_Substatus interface {
+	isFooterStatusAgentReplFault_Substatus()
 }
 
-type FooterStatusDisconnected_Starting struct {
+type FooterStatusAgentReplFault_Starting struct {
 	// The shim is starting.
-	Starting *FooterSubStatusDisconnectedStarting `protobuf:"bytes,1,opt,name=starting,proto3,oneof"`
+	Starting *FooterSubStatusAgentReplFaultStarting `protobuf:"bytes,1,opt,name=starting,proto3,oneof"`
 }
 
-type FooterStatusDisconnected_Degraded struct {
+type FooterStatusAgentReplFault_Degraded struct {
 	// NO LONGER EMITTED: a link that serves with degradation is USABLE, so
 	// it is the `degraded` status arm (owner ruling, 2026-09-28), never
-	// `disconnected`. Kept so an older frame still decodes.
-	Degraded *FooterSubStatusDisconnectedDegraded `protobuf:"bytes,2,opt,name=degraded,proto3,oneof"`
+	// `agent_repl_fault`. Kept so an older frame still decodes.
+	Degraded *FooterSubStatusAgentReplFaultDegraded `protobuf:"bytes,2,opt,name=degraded,proto3,oneof"`
 }
 
-type FooterStatusDisconnected_Severed struct {
+type FooterStatusAgentReplFault_Severed struct {
 	// The link was severed and reconnection is being attempted.
-	Severed *FooterSubStatusDisconnectedSevered `protobuf:"bytes,3,opt,name=severed,proto3,oneof"`
+	Severed *FooterSubStatusAgentReplFaultSevered `protobuf:"bytes,3,opt,name=severed,proto3,oneof"`
 }
 
-type FooterStatusDisconnected_Dead struct {
+type FooterStatusAgentReplFault_Dead struct {
 	// The shim process is gone.
-	Dead *FooterSubStatusDisconnectedDead `protobuf:"bytes,4,opt,name=dead,proto3,oneof"`
+	Dead *FooterSubStatusAgentReplFaultDead `protobuf:"bytes,4,opt,name=dead,proto3,oneof"`
 }
 
-type FooterStatusDisconnected_StartFailed struct {
+type FooterStatusAgentReplFault_StartFailed struct {
 	// The shim PROCESS failed to start, or a bring-up failed for a reason
 	// that is not the vendor's. A vendor that did not start inside a healthy
-	// shim is one of the three vendor arms below, never this one.
-	StartFailed *FooterSubStatusDisconnectedStartFailed `protobuf:"bytes,5,opt,name=start_failed,json=startFailed,proto3,oneof"`
+	// shim is a `vendor_fault`, never this one.
+	StartFailed *FooterSubStatusAgentReplFaultStartFailed `protobuf:"bytes,5,opt,name=start_failed,json=startFailed,proto3,oneof"`
 }
 
-type FooterStatusDisconnected_VendorRetry struct {
-	// The vendor did not start and the daemon is retrying it: from the first
-	// failed attempt until the last. The activity line names the latest
-	// attempt's failure.
-	VendorRetry *FooterSubStatusDisconnectedVendorRetry `protobuf:"bytes,7,opt,name=vendor_retry,json=vendorRetry,proto3,oneof"`
+type FooterStatusAgentReplFault_DaemonImpaired struct {
+	// The DAEMON itself is impaired: a fault stands that costs this session
+	// something it needs from the daemon — its prompts directory, its state
+	// client, its durable log sink, its own redeploy.
+	DaemonImpaired *FooterSubStatusAgentReplFaultDaemonImpaired `protobuf:"bytes,10,opt,name=daemon_impaired,json=daemonImpaired,proto3,oneof"`
 }
 
-type FooterStatusDisconnected_VendorRejection struct {
-	// The vendor refused the start for a reason retrying cannot fix; nothing
-	// retries until the user restarts the workspace.
-	VendorRejection *FooterSubStatusDisconnectedVendorRejection `protobuf:"bytes,8,opt,name=vendor_rejection,json=vendorRejection,proto3,oneof"`
-}
+func (*FooterStatusAgentReplFault_Starting) isFooterStatusAgentReplFault_Substatus() {}
 
-type FooterStatusDisconnected_VendorFailed struct {
-	// The vendor kept failing to start for the whole retry window, so the
-	// daemon stopped retrying; prompts stay held until a restart brings the
-	// session up.
-	VendorFailed *FooterSubStatusDisconnectedVendorFailed `protobuf:"bytes,9,opt,name=vendor_failed,json=vendorFailed,proto3,oneof"`
-}
+func (*FooterStatusAgentReplFault_Degraded) isFooterStatusAgentReplFault_Substatus() {}
 
-func (*FooterStatusDisconnected_Starting) isFooterStatusDisconnected_Substatus() {}
+func (*FooterStatusAgentReplFault_Severed) isFooterStatusAgentReplFault_Substatus() {}
 
-func (*FooterStatusDisconnected_Degraded) isFooterStatusDisconnected_Substatus() {}
+func (*FooterStatusAgentReplFault_Dead) isFooterStatusAgentReplFault_Substatus() {}
 
-func (*FooterStatusDisconnected_Severed) isFooterStatusDisconnected_Substatus() {}
+func (*FooterStatusAgentReplFault_StartFailed) isFooterStatusAgentReplFault_Substatus() {}
 
-func (*FooterStatusDisconnected_Dead) isFooterStatusDisconnected_Substatus() {}
-
-func (*FooterStatusDisconnected_StartFailed) isFooterStatusDisconnected_Substatus() {}
-
-func (*FooterStatusDisconnected_VendorRetry) isFooterStatusDisconnected_Substatus() {}
-
-func (*FooterStatusDisconnected_VendorRejection) isFooterStatusDisconnected_Substatus() {}
-
-func (*FooterStatusDisconnected_VendorFailed) isFooterStatusDisconnected_Substatus() {}
+func (*FooterStatusAgentReplFault_DaemonImpaired) isFooterStatusAgentReplFault_Substatus() {}
 
 // The shim is starting.
-type FooterSubStatusDisconnectedStarting struct {
+type FooterSubStatusAgentReplFaultStarting struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *FooterSubStatusDisconnectedStarting) Reset() {
-	*x = FooterSubStatusDisconnectedStarting{}
+func (x *FooterSubStatusAgentReplFaultStarting) Reset() {
+	*x = FooterSubStatusAgentReplFaultStarting{}
 	mi := &file_frontend_v1_footer_proto_msgTypes[108]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *FooterSubStatusDisconnectedStarting) String() string {
+func (x *FooterSubStatusAgentReplFaultStarting) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*FooterSubStatusDisconnectedStarting) ProtoMessage() {}
+func (*FooterSubStatusAgentReplFaultStarting) ProtoMessage() {}
 
-func (x *FooterSubStatusDisconnectedStarting) ProtoReflect() protoreflect.Message {
+func (x *FooterSubStatusAgentReplFaultStarting) ProtoReflect() protoreflect.Message {
 	mi := &file_frontend_v1_footer_proto_msgTypes[108]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -7820,32 +7874,32 @@ func (x *FooterSubStatusDisconnectedStarting) ProtoReflect() protoreflect.Messag
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use FooterSubStatusDisconnectedStarting.ProtoReflect.Descriptor instead.
-func (*FooterSubStatusDisconnectedStarting) Descriptor() ([]byte, []int) {
+// Deprecated: Use FooterSubStatusAgentReplFaultStarting.ProtoReflect.Descriptor instead.
+func (*FooterSubStatusAgentReplFaultStarting) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{108}
 }
 
 // The link serves with degradation.
-type FooterSubStatusDisconnectedDegraded struct {
+type FooterSubStatusAgentReplFaultDegraded struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *FooterSubStatusDisconnectedDegraded) Reset() {
-	*x = FooterSubStatusDisconnectedDegraded{}
+func (x *FooterSubStatusAgentReplFaultDegraded) Reset() {
+	*x = FooterSubStatusAgentReplFaultDegraded{}
 	mi := &file_frontend_v1_footer_proto_msgTypes[109]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *FooterSubStatusDisconnectedDegraded) String() string {
+func (x *FooterSubStatusAgentReplFaultDegraded) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*FooterSubStatusDisconnectedDegraded) ProtoMessage() {}
+func (*FooterSubStatusAgentReplFaultDegraded) ProtoMessage() {}
 
-func (x *FooterSubStatusDisconnectedDegraded) ProtoReflect() protoreflect.Message {
+func (x *FooterSubStatusAgentReplFaultDegraded) ProtoReflect() protoreflect.Message {
 	mi := &file_frontend_v1_footer_proto_msgTypes[109]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -7857,32 +7911,32 @@ func (x *FooterSubStatusDisconnectedDegraded) ProtoReflect() protoreflect.Messag
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use FooterSubStatusDisconnectedDegraded.ProtoReflect.Descriptor instead.
-func (*FooterSubStatusDisconnectedDegraded) Descriptor() ([]byte, []int) {
+// Deprecated: Use FooterSubStatusAgentReplFaultDegraded.ProtoReflect.Descriptor instead.
+func (*FooterSubStatusAgentReplFaultDegraded) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{109}
 }
 
 // The link was severed and reconnection is being attempted.
-type FooterSubStatusDisconnectedSevered struct {
+type FooterSubStatusAgentReplFaultSevered struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *FooterSubStatusDisconnectedSevered) Reset() {
-	*x = FooterSubStatusDisconnectedSevered{}
+func (x *FooterSubStatusAgentReplFaultSevered) Reset() {
+	*x = FooterSubStatusAgentReplFaultSevered{}
 	mi := &file_frontend_v1_footer_proto_msgTypes[110]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *FooterSubStatusDisconnectedSevered) String() string {
+func (x *FooterSubStatusAgentReplFaultSevered) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*FooterSubStatusDisconnectedSevered) ProtoMessage() {}
+func (*FooterSubStatusAgentReplFaultSevered) ProtoMessage() {}
 
-func (x *FooterSubStatusDisconnectedSevered) ProtoReflect() protoreflect.Message {
+func (x *FooterSubStatusAgentReplFaultSevered) ProtoReflect() protoreflect.Message {
 	mi := &file_frontend_v1_footer_proto_msgTypes[110]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -7894,32 +7948,32 @@ func (x *FooterSubStatusDisconnectedSevered) ProtoReflect() protoreflect.Message
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use FooterSubStatusDisconnectedSevered.ProtoReflect.Descriptor instead.
-func (*FooterSubStatusDisconnectedSevered) Descriptor() ([]byte, []int) {
+// Deprecated: Use FooterSubStatusAgentReplFaultSevered.ProtoReflect.Descriptor instead.
+func (*FooterSubStatusAgentReplFaultSevered) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{110}
 }
 
 // The shim process is gone.
-type FooterSubStatusDisconnectedDead struct {
+type FooterSubStatusAgentReplFaultDead struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *FooterSubStatusDisconnectedDead) Reset() {
-	*x = FooterSubStatusDisconnectedDead{}
+func (x *FooterSubStatusAgentReplFaultDead) Reset() {
+	*x = FooterSubStatusAgentReplFaultDead{}
 	mi := &file_frontend_v1_footer_proto_msgTypes[111]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *FooterSubStatusDisconnectedDead) String() string {
+func (x *FooterSubStatusAgentReplFaultDead) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*FooterSubStatusDisconnectedDead) ProtoMessage() {}
+func (*FooterSubStatusAgentReplFaultDead) ProtoMessage() {}
 
-func (x *FooterSubStatusDisconnectedDead) ProtoReflect() protoreflect.Message {
+func (x *FooterSubStatusAgentReplFaultDead) ProtoReflect() protoreflect.Message {
 	mi := &file_frontend_v1_footer_proto_msgTypes[111]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -7931,32 +7985,32 @@ func (x *FooterSubStatusDisconnectedDead) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use FooterSubStatusDisconnectedDead.ProtoReflect.Descriptor instead.
-func (*FooterSubStatusDisconnectedDead) Descriptor() ([]byte, []int) {
+// Deprecated: Use FooterSubStatusAgentReplFaultDead.ProtoReflect.Descriptor instead.
+func (*FooterSubStatusAgentReplFaultDead) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{111}
 }
 
 // The shim failed to start.
-type FooterSubStatusDisconnectedStartFailed struct {
+type FooterSubStatusAgentReplFaultStartFailed struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *FooterSubStatusDisconnectedStartFailed) Reset() {
-	*x = FooterSubStatusDisconnectedStartFailed{}
+func (x *FooterSubStatusAgentReplFaultStartFailed) Reset() {
+	*x = FooterSubStatusAgentReplFaultStartFailed{}
 	mi := &file_frontend_v1_footer_proto_msgTypes[112]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *FooterSubStatusDisconnectedStartFailed) String() string {
+func (x *FooterSubStatusAgentReplFaultStartFailed) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*FooterSubStatusDisconnectedStartFailed) ProtoMessage() {}
+func (*FooterSubStatusAgentReplFaultStartFailed) ProtoMessage() {}
 
-func (x *FooterSubStatusDisconnectedStartFailed) ProtoReflect() protoreflect.Message {
+func (x *FooterSubStatusAgentReplFaultStartFailed) ProtoReflect() protoreflect.Message {
 	mi := &file_frontend_v1_footer_proto_msgTypes[112]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -7968,32 +8022,32 @@ func (x *FooterSubStatusDisconnectedStartFailed) ProtoReflect() protoreflect.Mes
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use FooterSubStatusDisconnectedStartFailed.ProtoReflect.Descriptor instead.
-func (*FooterSubStatusDisconnectedStartFailed) Descriptor() ([]byte, []int) {
+// Deprecated: Use FooterSubStatusAgentReplFaultStartFailed.ProtoReflect.Descriptor instead.
+func (*FooterSubStatusAgentReplFaultStartFailed) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{112}
 }
 
 // The vendor did not start and is being retried.
-type FooterSubStatusDisconnectedVendorRetry struct {
+type FooterSubStatusVendorFaultVendorRetry struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *FooterSubStatusDisconnectedVendorRetry) Reset() {
-	*x = FooterSubStatusDisconnectedVendorRetry{}
+func (x *FooterSubStatusVendorFaultVendorRetry) Reset() {
+	*x = FooterSubStatusVendorFaultVendorRetry{}
 	mi := &file_frontend_v1_footer_proto_msgTypes[113]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *FooterSubStatusDisconnectedVendorRetry) String() string {
+func (x *FooterSubStatusVendorFaultVendorRetry) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*FooterSubStatusDisconnectedVendorRetry) ProtoMessage() {}
+func (*FooterSubStatusVendorFaultVendorRetry) ProtoMessage() {}
 
-func (x *FooterSubStatusDisconnectedVendorRetry) ProtoReflect() protoreflect.Message {
+func (x *FooterSubStatusVendorFaultVendorRetry) ProtoReflect() protoreflect.Message {
 	mi := &file_frontend_v1_footer_proto_msgTypes[113]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -8005,32 +8059,32 @@ func (x *FooterSubStatusDisconnectedVendorRetry) ProtoReflect() protoreflect.Mes
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use FooterSubStatusDisconnectedVendorRetry.ProtoReflect.Descriptor instead.
-func (*FooterSubStatusDisconnectedVendorRetry) Descriptor() ([]byte, []int) {
+// Deprecated: Use FooterSubStatusVendorFaultVendorRetry.ProtoReflect.Descriptor instead.
+func (*FooterSubStatusVendorFaultVendorRetry) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{113}
 }
 
 // The vendor refused the start; nothing retries.
-type FooterSubStatusDisconnectedVendorRejection struct {
+type FooterSubStatusVendorFaultVendorRejection struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *FooterSubStatusDisconnectedVendorRejection) Reset() {
-	*x = FooterSubStatusDisconnectedVendorRejection{}
+func (x *FooterSubStatusVendorFaultVendorRejection) Reset() {
+	*x = FooterSubStatusVendorFaultVendorRejection{}
 	mi := &file_frontend_v1_footer_proto_msgTypes[114]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *FooterSubStatusDisconnectedVendorRejection) String() string {
+func (x *FooterSubStatusVendorFaultVendorRejection) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*FooterSubStatusDisconnectedVendorRejection) ProtoMessage() {}
+func (*FooterSubStatusVendorFaultVendorRejection) ProtoMessage() {}
 
-func (x *FooterSubStatusDisconnectedVendorRejection) ProtoReflect() protoreflect.Message {
+func (x *FooterSubStatusVendorFaultVendorRejection) ProtoReflect() protoreflect.Message {
 	mi := &file_frontend_v1_footer_proto_msgTypes[114]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -8042,32 +8096,32 @@ func (x *FooterSubStatusDisconnectedVendorRejection) ProtoReflect() protoreflect
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use FooterSubStatusDisconnectedVendorRejection.ProtoReflect.Descriptor instead.
-func (*FooterSubStatusDisconnectedVendorRejection) Descriptor() ([]byte, []int) {
+// Deprecated: Use FooterSubStatusVendorFaultVendorRejection.ProtoReflect.Descriptor instead.
+func (*FooterSubStatusVendorFaultVendorRejection) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{114}
 }
 
 // The vendor failed to start for the whole retry window.
-type FooterSubStatusDisconnectedVendorFailed struct {
+type FooterSubStatusVendorFaultVendorFailed struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *FooterSubStatusDisconnectedVendorFailed) Reset() {
-	*x = FooterSubStatusDisconnectedVendorFailed{}
+func (x *FooterSubStatusVendorFaultVendorFailed) Reset() {
+	*x = FooterSubStatusVendorFaultVendorFailed{}
 	mi := &file_frontend_v1_footer_proto_msgTypes[115]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *FooterSubStatusDisconnectedVendorFailed) String() string {
+func (x *FooterSubStatusVendorFaultVendorFailed) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*FooterSubStatusDisconnectedVendorFailed) ProtoMessage() {}
+func (*FooterSubStatusVendorFaultVendorFailed) ProtoMessage() {}
 
-func (x *FooterSubStatusDisconnectedVendorFailed) ProtoReflect() protoreflect.Message {
+func (x *FooterSubStatusVendorFaultVendorFailed) ProtoReflect() protoreflect.Message {
 	mi := &file_frontend_v1_footer_proto_msgTypes[115]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -8079,42 +8133,42 @@ func (x *FooterSubStatusDisconnectedVendorFailed) ProtoReflect() protoreflect.Me
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use FooterSubStatusDisconnectedVendorFailed.ProtoReflect.Descriptor instead.
-func (*FooterSubStatusDisconnectedVendorFailed) Descriptor() ([]byte, []int) {
+// Deprecated: Use FooterSubStatusVendorFaultVendorFailed.ProtoReflect.Descriptor instead.
+func (*FooterSubStatusVendorFaultVendorFailed) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{115}
 }
 
 // The activity cell while disconnected: the salient line, or the transient
 // over the enduring line. A step with no line of its own (starting, a
 // severed link being retried with no fault yet) draws unpinned.
-type FooterStatusDisconnectedActivity struct {
+type FooterStatusAgentReplFaultActivity struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// WHICH TIER the daemon resolved. Exactly one is set, and a push with
 	// neither is malformed.
 	//
 	// Types that are valid to be assigned to Tier:
 	//
-	//	*FooterStatusDisconnectedActivity_Salient
-	//	*FooterStatusDisconnectedActivity_Unpinned
-	Tier          isFooterStatusDisconnectedActivity_Tier `protobuf_oneof:"tier"`
+	//	*FooterStatusAgentReplFaultActivity_Salient
+	//	*FooterStatusAgentReplFaultActivity_Unpinned
+	Tier          isFooterStatusAgentReplFaultActivity_Tier `protobuf_oneof:"tier"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *FooterStatusDisconnectedActivity) Reset() {
-	*x = FooterStatusDisconnectedActivity{}
+func (x *FooterStatusAgentReplFaultActivity) Reset() {
+	*x = FooterStatusAgentReplFaultActivity{}
 	mi := &file_frontend_v1_footer_proto_msgTypes[116]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *FooterStatusDisconnectedActivity) String() string {
+func (x *FooterStatusAgentReplFaultActivity) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*FooterStatusDisconnectedActivity) ProtoMessage() {}
+func (*FooterStatusAgentReplFaultActivity) ProtoMessage() {}
 
-func (x *FooterStatusDisconnectedActivity) ProtoReflect() protoreflect.Message {
+func (x *FooterStatusAgentReplFaultActivity) ProtoReflect() protoreflect.Message {
 	mi := &file_frontend_v1_footer_proto_msgTypes[116]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -8126,60 +8180,60 @@ func (x *FooterStatusDisconnectedActivity) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use FooterStatusDisconnectedActivity.ProtoReflect.Descriptor instead.
-func (*FooterStatusDisconnectedActivity) Descriptor() ([]byte, []int) {
+// Deprecated: Use FooterStatusAgentReplFaultActivity.ProtoReflect.Descriptor instead.
+func (*FooterStatusAgentReplFaultActivity) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{116}
 }
 
-func (x *FooterStatusDisconnectedActivity) GetTier() isFooterStatusDisconnectedActivity_Tier {
+func (x *FooterStatusAgentReplFaultActivity) GetTier() isFooterStatusAgentReplFaultActivity_Tier {
 	if x != nil {
 		return x.Tier
 	}
 	return nil
 }
 
-func (x *FooterStatusDisconnectedActivity) GetSalient() *FooterStatusDisconnectedSalient {
+func (x *FooterStatusAgentReplFaultActivity) GetSalient() *FooterStatusAgentReplFaultSalient {
 	if x != nil {
-		if x, ok := x.Tier.(*FooterStatusDisconnectedActivity_Salient); ok {
+		if x, ok := x.Tier.(*FooterStatusAgentReplFaultActivity_Salient); ok {
 			return x.Salient
 		}
 	}
 	return nil
 }
 
-func (x *FooterStatusDisconnectedActivity) GetUnpinned() *FooterActivityTransientOverEnduring {
+func (x *FooterStatusAgentReplFaultActivity) GetUnpinned() *FooterActivityTransientOverEnduring {
 	if x != nil {
-		if x, ok := x.Tier.(*FooterStatusDisconnectedActivity_Unpinned); ok {
+		if x, ok := x.Tier.(*FooterStatusAgentReplFaultActivity_Unpinned); ok {
 			return x.Unpinned
 		}
 	}
 	return nil
 }
 
-type isFooterStatusDisconnectedActivity_Tier interface {
-	isFooterStatusDisconnectedActivity_Tier()
+type isFooterStatusAgentReplFaultActivity_Tier interface {
+	isFooterStatusAgentReplFaultActivity_Tier()
 }
 
-type FooterStatusDisconnectedActivity_Salient struct {
+type FooterStatusAgentReplFaultActivity_Salient struct {
 	// A condition that blocks the turn or the user stands.
-	Salient *FooterStatusDisconnectedSalient `protobuf:"bytes,1,opt,name=salient,proto3,oneof"`
+	Salient *FooterStatusAgentReplFaultSalient `protobuf:"bytes,1,opt,name=salient,proto3,oneof"`
 }
 
-type FooterStatusDisconnectedActivity_Unpinned struct {
+type FooterStatusAgentReplFaultActivity_Unpinned struct {
 	// Nothing salient stands: the newest transient (if any) over the
 	// enduring line.
 	Unpinned *FooterActivityTransientOverEnduring `protobuf:"bytes,2,opt,name=unpinned,proto3,oneof"`
 }
 
-func (*FooterStatusDisconnectedActivity_Salient) isFooterStatusDisconnectedActivity_Tier() {}
+func (*FooterStatusAgentReplFaultActivity_Salient) isFooterStatusAgentReplFaultActivity_Tier() {}
 
-func (*FooterStatusDisconnectedActivity_Unpinned) isFooterStatusDisconnectedActivity_Tier() {}
+func (*FooterStatusAgentReplFaultActivity_Unpinned) isFooterStatusAgentReplFaultActivity_Tier() {}
 
 // The salient kinds legal while disconnected. The bring-up failure ranks
 // first, because it explains the `start_failed` step; then a standing fault;
 // then a deploy's progress; then the push notification and the
 // context-budget warning, in that order.
-type FooterStatusDisconnectedSalient struct {
+type FooterStatusAgentReplFaultSalient struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// When this line began standing; the client ticks the relative age.
 	At *FooterStatusActivityAt `protobuf:"bytes,1,opt,name=at,proto3" json:"at,omitempty"`
@@ -8187,31 +8241,30 @@ type FooterStatusDisconnectedSalient struct {
 	//
 	// Types that are valid to be assigned to Kind:
 	//
-	//	*FooterStatusDisconnectedSalient_StartFailed
-	//	*FooterStatusDisconnectedSalient_Fault
-	//	*FooterStatusDisconnectedSalient_Update
-	//	*FooterStatusDisconnectedSalient_Notification
-	//	*FooterStatusDisconnectedSalient_ContextBudget
-	//	*FooterStatusDisconnectedSalient_VendorStart
-	Kind          isFooterStatusDisconnectedSalient_Kind `protobuf_oneof:"kind"`
+	//	*FooterStatusAgentReplFaultSalient_StartFailed
+	//	*FooterStatusAgentReplFaultSalient_Fault
+	//	*FooterStatusAgentReplFaultSalient_Update
+	//	*FooterStatusAgentReplFaultSalient_Notification
+	//	*FooterStatusAgentReplFaultSalient_ContextBudget
+	Kind          isFooterStatusAgentReplFaultSalient_Kind `protobuf_oneof:"kind"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *FooterStatusDisconnectedSalient) Reset() {
-	*x = FooterStatusDisconnectedSalient{}
+func (x *FooterStatusAgentReplFaultSalient) Reset() {
+	*x = FooterStatusAgentReplFaultSalient{}
 	mi := &file_frontend_v1_footer_proto_msgTypes[117]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *FooterStatusDisconnectedSalient) String() string {
+func (x *FooterStatusAgentReplFaultSalient) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*FooterStatusDisconnectedSalient) ProtoMessage() {}
+func (*FooterStatusAgentReplFaultSalient) ProtoMessage() {}
 
-func (x *FooterStatusDisconnectedSalient) ProtoReflect() protoreflect.Message {
+func (x *FooterStatusAgentReplFaultSalient) ProtoReflect() protoreflect.Message {
 	mi := &file_frontend_v1_footer_proto_msgTypes[117]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -8223,111 +8276,102 @@ func (x *FooterStatusDisconnectedSalient) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use FooterStatusDisconnectedSalient.ProtoReflect.Descriptor instead.
-func (*FooterStatusDisconnectedSalient) Descriptor() ([]byte, []int) {
+// Deprecated: Use FooterStatusAgentReplFaultSalient.ProtoReflect.Descriptor instead.
+func (*FooterStatusAgentReplFaultSalient) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{117}
 }
 
-func (x *FooterStatusDisconnectedSalient) GetAt() *FooterStatusActivityAt {
+func (x *FooterStatusAgentReplFaultSalient) GetAt() *FooterStatusActivityAt {
 	if x != nil {
 		return x.At
 	}
 	return nil
 }
 
-func (x *FooterStatusDisconnectedSalient) GetKind() isFooterStatusDisconnectedSalient_Kind {
+func (x *FooterStatusAgentReplFaultSalient) GetKind() isFooterStatusAgentReplFaultSalient_Kind {
 	if x != nil {
 		return x.Kind
 	}
 	return nil
 }
 
-func (x *FooterStatusDisconnectedSalient) GetStartFailed() *FooterStatusActivityStartFailed {
+func (x *FooterStatusAgentReplFaultSalient) GetStartFailed() *FooterStatusActivityStartFailed {
 	if x != nil {
-		if x, ok := x.Kind.(*FooterStatusDisconnectedSalient_StartFailed); ok {
+		if x, ok := x.Kind.(*FooterStatusAgentReplFaultSalient_StartFailed); ok {
 			return x.StartFailed
 		}
 	}
 	return nil
 }
 
-func (x *FooterStatusDisconnectedSalient) GetFault() *FooterStatusActivityFault {
+func (x *FooterStatusAgentReplFaultSalient) GetFault() *FooterStatusActivityFault {
 	if x != nil {
-		if x, ok := x.Kind.(*FooterStatusDisconnectedSalient_Fault); ok {
+		if x, ok := x.Kind.(*FooterStatusAgentReplFaultSalient_Fault); ok {
 			return x.Fault
 		}
 	}
 	return nil
 }
 
-func (x *FooterStatusDisconnectedSalient) GetUpdate() *FooterStatusActivityUpdate {
+func (x *FooterStatusAgentReplFaultSalient) GetUpdate() *FooterStatusActivityUpdate {
 	if x != nil {
-		if x, ok := x.Kind.(*FooterStatusDisconnectedSalient_Update); ok {
+		if x, ok := x.Kind.(*FooterStatusAgentReplFaultSalient_Update); ok {
 			return x.Update
 		}
 	}
 	return nil
 }
 
-func (x *FooterStatusDisconnectedSalient) GetNotification() *FooterStatusActivityNotification {
+func (x *FooterStatusAgentReplFaultSalient) GetNotification() *FooterStatusActivityNotification {
 	if x != nil {
-		if x, ok := x.Kind.(*FooterStatusDisconnectedSalient_Notification); ok {
+		if x, ok := x.Kind.(*FooterStatusAgentReplFaultSalient_Notification); ok {
 			return x.Notification
 		}
 	}
 	return nil
 }
 
-func (x *FooterStatusDisconnectedSalient) GetContextBudget() *FooterStatusActivityContextBudget {
+func (x *FooterStatusAgentReplFaultSalient) GetContextBudget() *FooterStatusActivityContextBudget {
 	if x != nil {
-		if x, ok := x.Kind.(*FooterStatusDisconnectedSalient_ContextBudget); ok {
+		if x, ok := x.Kind.(*FooterStatusAgentReplFaultSalient_ContextBudget); ok {
 			return x.ContextBudget
 		}
 	}
 	return nil
 }
 
-func (x *FooterStatusDisconnectedSalient) GetVendorStart() *FooterStatusActivityVendorStart {
-	if x != nil {
-		if x, ok := x.Kind.(*FooterStatusDisconnectedSalient_VendorStart); ok {
-			return x.VendorStart
-		}
-	}
-	return nil
+type isFooterStatusAgentReplFaultSalient_Kind interface {
+	isFooterStatusAgentReplFaultSalient_Kind()
 }
 
-type isFooterStatusDisconnectedSalient_Kind interface {
-	isFooterStatusDisconnectedSalient_Kind()
-}
-
-type FooterStatusDisconnectedSalient_StartFailed struct {
+type FooterStatusAgentReplFaultSalient_StartFailed struct {
 	// WHY the session's bring-up failed, and what the failure cost, standing
 	// until the next successful link edge clears it.
 	StartFailed *FooterStatusActivityStartFailed `protobuf:"bytes,2,opt,name=start_failed,json=startFailed,proto3,oneof"`
 }
 
-type FooterStatusDisconnectedSalient_Fault struct {
-	// An ESCALATING daemon fault that claims `disconnected`, standing until
+type FooterStatusAgentReplFaultSalient_Fault struct {
+	// An ESCALATING daemon fault that claims `agent_repl_fault`, standing until
 	// it is retracted. Only faults the partition above maps to
-	// `disconnected` land here; a non-escalating fault is a transient, never
+	// `agent_repl_fault` land here; a non-escalating fault is a transient, never
 	// this arm.
 	Fault *FooterStatusActivityFault `protobuf:"bytes,3,opt,name=fault,proto3,oneof"`
 }
 
-type FooterStatusDisconnectedSalient_Update struct {
+type FooterStatusAgentReplFaultSalient_Update struct {
 	// A DEPLOY'S PROGRESS. STATUS-INDEPENDENT: every status arm's salient
 	// oneof carries it. See FooterStatusActivityUpdate.
 	Update *FooterStatusActivityUpdate `protobuf:"bytes,4,opt,name=update,proto3,oneof"`
 }
 
-type FooterStatusDisconnectedSalient_Notification struct {
+type FooterStatusAgentReplFaultSalient_Notification struct {
 	// THE AGENT'S PUSH NOTIFICATION, standing until the next prompt is
 	// submitted. STATUS-INDEPENDENT: every status arm's salient oneof carries
 	// it.
 	Notification *FooterStatusActivityNotification `protobuf:"bytes,6,opt,name=notification,proto3,oneof"`
 }
 
-type FooterStatusDisconnectedSalient_ContextBudget struct {
+type FooterStatusAgentReplFaultSalient_ContextBudget struct {
 	// THE CONTEXT-BUDGET WARNING: the vendor's warning that the context is
 	// nearly full, or the daemon's "compaction failed — …" line. It stands
 	// until a cut shrinks the context: a compaction that succeeds, a /clear,
@@ -8336,25 +8380,15 @@ type FooterStatusDisconnectedSalient_ContextBudget struct {
 	ContextBudget *FooterStatusActivityContextBudget `protobuf:"bytes,7,opt,name=context_budget,json=contextBudget,proto3,oneof"`
 }
 
-type FooterStatusDisconnectedSalient_VendorStart struct {
-	// WHY THE VENDOR IS NOT UP, standing while one of the three vendor
-	// substatuses stands: the latest retried failure, the rejection, or the
-	// exhausted window with the way out. It ranks with `start_failed`, ahead
-	// of every other salient kind, because it explains the step.
-	VendorStart *FooterStatusActivityVendorStart `protobuf:"bytes,8,opt,name=vendor_start,json=vendorStart,proto3,oneof"`
-}
+func (*FooterStatusAgentReplFaultSalient_StartFailed) isFooterStatusAgentReplFaultSalient_Kind() {}
 
-func (*FooterStatusDisconnectedSalient_StartFailed) isFooterStatusDisconnectedSalient_Kind() {}
+func (*FooterStatusAgentReplFaultSalient_Fault) isFooterStatusAgentReplFaultSalient_Kind() {}
 
-func (*FooterStatusDisconnectedSalient_Fault) isFooterStatusDisconnectedSalient_Kind() {}
+func (*FooterStatusAgentReplFaultSalient_Update) isFooterStatusAgentReplFaultSalient_Kind() {}
 
-func (*FooterStatusDisconnectedSalient_Update) isFooterStatusDisconnectedSalient_Kind() {}
+func (*FooterStatusAgentReplFaultSalient_Notification) isFooterStatusAgentReplFaultSalient_Kind() {}
 
-func (*FooterStatusDisconnectedSalient_Notification) isFooterStatusDisconnectedSalient_Kind() {}
-
-func (*FooterStatusDisconnectedSalient_ContextBudget) isFooterStatusDisconnectedSalient_Kind() {}
-
-func (*FooterStatusDisconnectedSalient_VendorStart) isFooterStatusDisconnectedSalient_Kind() {}
+func (*FooterStatusAgentReplFaultSalient_ContextBudget) isFooterStatusAgentReplFaultSalient_Kind() {}
 
 // The vendor-start line, composed by the daemon out of the standing
 // vendor-start fault and drawn verbatim. One leaf serves all three vendor
@@ -8619,7 +8653,7 @@ func (*FooterStatusClosingActivity_Salient) isFooterStatusClosingActivity_Tier()
 func (*FooterStatusClosingActivity_Unpinned) isFooterStatusClosingActivity_Tier() {}
 
 // The salient kinds legal while closing. The refusal ranks first, because it
-// explains the `blocked` step; then a deploy's progress, the push
+// explains the `vendor_fault` step; then a deploy's progress, the push
 // notification and the context-budget warning, in that order.
 type FooterStatusClosingSalient struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -16878,6 +16912,388 @@ func (x *FooterShellRowRuntime) GetStartedAtMs() int64 {
 	return 0
 }
 
+// This machine cannot reach the network.
+type FooterStatusNetworkFault struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// What about the network is wrong.
+	//
+	// Types that are valid to be assigned to Substatus:
+	//
+	//	*FooterStatusNetworkFault_Offline
+	Substatus isFooterStatusNetworkFault_Substatus `protobuf_oneof:"substatus"`
+	// The activity cell. ALWAYS SET.
+	Activity      *FooterStatusNetworkFaultActivity `protobuf:"bytes,2,opt,name=activity,proto3" json:"activity,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FooterStatusNetworkFault) Reset() {
+	*x = FooterStatusNetworkFault{}
+	mi := &file_frontend_v1_footer_proto_msgTypes[259]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FooterStatusNetworkFault) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FooterStatusNetworkFault) ProtoMessage() {}
+
+func (x *FooterStatusNetworkFault) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_footer_proto_msgTypes[259]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FooterStatusNetworkFault.ProtoReflect.Descriptor instead.
+func (*FooterStatusNetworkFault) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{259}
+}
+
+func (x *FooterStatusNetworkFault) GetSubstatus() isFooterStatusNetworkFault_Substatus {
+	if x != nil {
+		return x.Substatus
+	}
+	return nil
+}
+
+func (x *FooterStatusNetworkFault) GetOffline() *FooterSubStatusNetworkFaultOffline {
+	if x != nil {
+		if x, ok := x.Substatus.(*FooterStatusNetworkFault_Offline); ok {
+			return x.Offline
+		}
+	}
+	return nil
+}
+
+func (x *FooterStatusNetworkFault) GetActivity() *FooterStatusNetworkFaultActivity {
+	if x != nil {
+		return x.Activity
+	}
+	return nil
+}
+
+type isFooterStatusNetworkFault_Substatus interface {
+	isFooterStatusNetworkFault_Substatus()
+}
+
+type FooterStatusNetworkFault_Offline struct {
+	// No route to the network at all: offline.
+	Offline *FooterSubStatusNetworkFaultOffline `protobuf:"bytes,1,opt,name=offline,proto3,oneof"`
+}
+
+func (*FooterStatusNetworkFault_Offline) isFooterStatusNetworkFault_Substatus() {}
+
+// The machine is offline.
+type FooterSubStatusNetworkFaultOffline struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FooterSubStatusNetworkFaultOffline) Reset() {
+	*x = FooterSubStatusNetworkFaultOffline{}
+	mi := &file_frontend_v1_footer_proto_msgTypes[260]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FooterSubStatusNetworkFaultOffline) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FooterSubStatusNetworkFaultOffline) ProtoMessage() {}
+
+func (x *FooterSubStatusNetworkFaultOffline) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_footer_proto_msgTypes[260]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FooterSubStatusNetworkFaultOffline.ProtoReflect.Descriptor instead.
+func (*FooterSubStatusNetworkFaultOffline) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{260}
+}
+
+// The activity cell while the network is down: the salient line, or the
+// transient over the enduring line.
+type FooterStatusNetworkFaultActivity struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// WHICH TIER the daemon resolved. Exactly one is set.
+	//
+	// Types that are valid to be assigned to Tier:
+	//
+	//	*FooterStatusNetworkFaultActivity_Salient
+	//	*FooterStatusNetworkFaultActivity_Unpinned
+	Tier          isFooterStatusNetworkFaultActivity_Tier `protobuf_oneof:"tier"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FooterStatusNetworkFaultActivity) Reset() {
+	*x = FooterStatusNetworkFaultActivity{}
+	mi := &file_frontend_v1_footer_proto_msgTypes[261]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FooterStatusNetworkFaultActivity) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FooterStatusNetworkFaultActivity) ProtoMessage() {}
+
+func (x *FooterStatusNetworkFaultActivity) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_footer_proto_msgTypes[261]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FooterStatusNetworkFaultActivity.ProtoReflect.Descriptor instead.
+func (*FooterStatusNetworkFaultActivity) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{261}
+}
+
+func (x *FooterStatusNetworkFaultActivity) GetTier() isFooterStatusNetworkFaultActivity_Tier {
+	if x != nil {
+		return x.Tier
+	}
+	return nil
+}
+
+func (x *FooterStatusNetworkFaultActivity) GetSalient() *FooterStatusNetworkFaultSalient {
+	if x != nil {
+		if x, ok := x.Tier.(*FooterStatusNetworkFaultActivity_Salient); ok {
+			return x.Salient
+		}
+	}
+	return nil
+}
+
+func (x *FooterStatusNetworkFaultActivity) GetUnpinned() *FooterActivityTransientOverEnduring {
+	if x != nil {
+		if x, ok := x.Tier.(*FooterStatusNetworkFaultActivity_Unpinned); ok {
+			return x.Unpinned
+		}
+	}
+	return nil
+}
+
+type isFooterStatusNetworkFaultActivity_Tier interface {
+	isFooterStatusNetworkFaultActivity_Tier()
+}
+
+type FooterStatusNetworkFaultActivity_Salient struct {
+	// A line that explains the fault stands.
+	Salient *FooterStatusNetworkFaultSalient `protobuf:"bytes,1,opt,name=salient,proto3,oneof"`
+}
+
+type FooterStatusNetworkFaultActivity_Unpinned struct {
+	// Nothing salient stands.
+	Unpinned *FooterActivityTransientOverEnduring `protobuf:"bytes,2,opt,name=unpinned,proto3,oneof"`
+}
+
+func (*FooterStatusNetworkFaultActivity_Salient) isFooterStatusNetworkFaultActivity_Tier() {}
+
+func (*FooterStatusNetworkFaultActivity_Unpinned) isFooterStatusNetworkFaultActivity_Tier() {}
+
+// The salient kinds legal while the network is down. The offline line ranks
+// first because it explains the step.
+type FooterStatusNetworkFaultSalient struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// When this line began standing; the client ticks the relative age.
+	At *FooterStatusActivityAt `protobuf:"bytes,1,opt,name=at,proto3" json:"at,omitempty"`
+	// The one salient line.
+	//
+	// Types that are valid to be assigned to Kind:
+	//
+	//	*FooterStatusNetworkFaultSalient_Offline
+	//	*FooterStatusNetworkFaultSalient_Update
+	//	*FooterStatusNetworkFaultSalient_Notification
+	//	*FooterStatusNetworkFaultSalient_ContextBudget
+	Kind          isFooterStatusNetworkFaultSalient_Kind `protobuf_oneof:"kind"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FooterStatusNetworkFaultSalient) Reset() {
+	*x = FooterStatusNetworkFaultSalient{}
+	mi := &file_frontend_v1_footer_proto_msgTypes[262]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FooterStatusNetworkFaultSalient) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FooterStatusNetworkFaultSalient) ProtoMessage() {}
+
+func (x *FooterStatusNetworkFaultSalient) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_footer_proto_msgTypes[262]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FooterStatusNetworkFaultSalient.ProtoReflect.Descriptor instead.
+func (*FooterStatusNetworkFaultSalient) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{262}
+}
+
+func (x *FooterStatusNetworkFaultSalient) GetAt() *FooterStatusActivityAt {
+	if x != nil {
+		return x.At
+	}
+	return nil
+}
+
+func (x *FooterStatusNetworkFaultSalient) GetKind() isFooterStatusNetworkFaultSalient_Kind {
+	if x != nil {
+		return x.Kind
+	}
+	return nil
+}
+
+func (x *FooterStatusNetworkFaultSalient) GetOffline() *FooterStatusActivityNetworkOffline {
+	if x != nil {
+		if x, ok := x.Kind.(*FooterStatusNetworkFaultSalient_Offline); ok {
+			return x.Offline
+		}
+	}
+	return nil
+}
+
+func (x *FooterStatusNetworkFaultSalient) GetUpdate() *FooterStatusActivityUpdate {
+	if x != nil {
+		if x, ok := x.Kind.(*FooterStatusNetworkFaultSalient_Update); ok {
+			return x.Update
+		}
+	}
+	return nil
+}
+
+func (x *FooterStatusNetworkFaultSalient) GetNotification() *FooterStatusActivityNotification {
+	if x != nil {
+		if x, ok := x.Kind.(*FooterStatusNetworkFaultSalient_Notification); ok {
+			return x.Notification
+		}
+	}
+	return nil
+}
+
+func (x *FooterStatusNetworkFaultSalient) GetContextBudget() *FooterStatusActivityContextBudget {
+	if x != nil {
+		if x, ok := x.Kind.(*FooterStatusNetworkFaultSalient_ContextBudget); ok {
+			return x.ContextBudget
+		}
+	}
+	return nil
+}
+
+type isFooterStatusNetworkFaultSalient_Kind interface {
+	isFooterStatusNetworkFaultSalient_Kind()
+}
+
+type FooterStatusNetworkFaultSalient_Offline struct {
+	// WHAT is unreachable, as the shim observed it, drawn verbatim
+	// ("cannot reach api.anthropic.com: no route to host").
+	Offline *FooterStatusActivityNetworkOffline `protobuf:"bytes,2,opt,name=offline,proto3,oneof"`
+}
+
+type FooterStatusNetworkFaultSalient_Update struct {
+	// A DEPLOY'S PROGRESS. STATUS-INDEPENDENT.
+	Update *FooterStatusActivityUpdate `protobuf:"bytes,3,opt,name=update,proto3,oneof"`
+}
+
+type FooterStatusNetworkFaultSalient_Notification struct {
+	// THE AGENT'S PUSH NOTIFICATION. STATUS-INDEPENDENT.
+	Notification *FooterStatusActivityNotification `protobuf:"bytes,4,opt,name=notification,proto3,oneof"`
+}
+
+type FooterStatusNetworkFaultSalient_ContextBudget struct {
+	// THE CONTEXT-BUDGET WARNING. STATUS-INDEPENDENT.
+	ContextBudget *FooterStatusActivityContextBudget `protobuf:"bytes,5,opt,name=context_budget,json=contextBudget,proto3,oneof"`
+}
+
+func (*FooterStatusNetworkFaultSalient_Offline) isFooterStatusNetworkFaultSalient_Kind() {}
+
+func (*FooterStatusNetworkFaultSalient_Update) isFooterStatusNetworkFaultSalient_Kind() {}
+
+func (*FooterStatusNetworkFaultSalient_Notification) isFooterStatusNetworkFaultSalient_Kind() {}
+
+func (*FooterStatusNetworkFaultSalient_ContextBudget) isFooterStatusNetworkFaultSalient_Kind() {}
+
+// The offline line, composed by the daemon from the shim's observation.
+type FooterStatusActivityNetworkOffline struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Drawn verbatim. Never empty.
+	Text          string `protobuf:"bytes,1,opt,name=text,proto3" json:"text,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FooterStatusActivityNetworkOffline) Reset() {
+	*x = FooterStatusActivityNetworkOffline{}
+	mi := &file_frontend_v1_footer_proto_msgTypes[263]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FooterStatusActivityNetworkOffline) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FooterStatusActivityNetworkOffline) ProtoMessage() {}
+
+func (x *FooterStatusActivityNetworkOffline) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_footer_proto_msgTypes[263]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FooterStatusActivityNetworkOffline.ProtoReflect.Descriptor instead.
+func (*FooterStatusActivityNetworkOffline) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{263}
+}
+
+func (x *FooterStatusActivityNetworkOffline) GetText() string {
+	if x != nil {
+		return x.Text
+	}
+	return ""
+}
+
 var File_frontend_v1_footer_proto protoreflect.FileDescriptor
 
 const file_frontend_v1_footer_proto_rawDesc = "" +
@@ -16893,7 +17309,7 @@ const file_frontend_v1_footer_proto_rawDesc = "" +
 	"\x06status\x18\x01 \x01(\v2\x19.frontend.v1.FooterStatusR\x06status\x12.\n" +
 	"\x05clock\x18\x04 \x01(\v2\x18.frontend.v1.FooterClockR\x05clock\x125\n" +
 	"\x06tokens\x18\x05 \x01(\v2\x1d.frontend.v1.FooterTokensCellR\x06tokens\x12=\n" +
-	"\tlive_work\x18\x06 \x01(\v2 .frontend.v1.FooterLiveWorkChipsR\bliveWork\"\xc4\a\n" +
+	"\tlive_work\x18\x06 \x01(\v2 .frontend.v1.FooterLiveWorkChipsR\bliveWork\"\xa7\b\n" +
 	"\fFooterStatus\x123\n" +
 	"\x04idle\x18\x01 \x01(\v2\x1d.frontend.v1.FooterStatusIdleH\x00R\x04idle\x12<\n" +
 	"\aworking\x18\x02 \x01(\v2 .frontend.v1.FooterStatusWorkingH\x00R\aworking\x12<\n" +
@@ -16902,9 +17318,9 @@ const file_frontend_v1_footer_proto_rawDesc = "" +
 	"\amerging\x18\x05 \x01(\v2 .frontend.v1.FooterStatusMergingH\x00R\amerging\x12E\n" +
 	"\n" +
 	"background\x18\x06 \x01(\v2#.frontend.v1.FooterStatusBackgroundH\x00R\n" +
-	"background\x12<\n" +
-	"\ablocked\x18\a \x01(\v2 .frontend.v1.FooterStatusBlockedH\x00R\ablocked\x12K\n" +
-	"\fdisconnected\x18\t \x01(\v2%.frontend.v1.FooterStatusDisconnectedH\x00R\fdisconnected\x12<\n" +
+	"background\x12I\n" +
+	"\fvendor_fault\x18\a \x01(\v2$.frontend.v1.FooterStatusVendorFaultH\x00R\vvendorFault\x12S\n" +
+	"\x10agent_repl_fault\x18\t \x01(\v2'.frontend.v1.FooterStatusAgentReplFaultH\x00R\x0eagentReplFault\x12<\n" +
 	"\aclosing\x18\n" +
 	" \x01(\v2 .frontend.v1.FooterStatusClosingH\x00R\aclosing\x12<\n" +
 	"\aloading\x18\v \x01(\v2 .frontend.v1.FooterStatusLoadingH\x00R\aloading\x12I\n" +
@@ -16912,7 +17328,8 @@ const file_frontend_v1_footer_proto_rawDesc = "" +
 	"\x06merged\x18\x0e \x01(\v2\x1f.frontend.v1.FooterStatusMergedH\x00R\x06merged\x12F\n" +
 	"\vturn_failed\x18\x0f \x01(\v2#.frontend.v1.FooterStatusTurnFailedH\x00R\n" +
 	"turnFailed\x12?\n" +
-	"\bdegraded\x18\x10 \x01(\v2!.frontend.v1.FooterStatusDegradedH\x00R\bdegradedB\b\n" +
+	"\bdegraded\x18\x10 \x01(\v2!.frontend.v1.FooterStatusDegradedH\x00R\bdegraded\x12L\n" +
+	"\rnetwork_fault\x18\x11 \x01(\v2%.frontend.v1.FooterStatusNetworkFaultH\x00R\fnetworkFaultB\b\n" +
 	"\x06statusJ\x04\b\f\x10\rR\x0emerge_conflict\"\xac\x02\n" +
 	"\x10FooterStatusIdle\x12=\n" +
 	"\x05ready\x18\x01 \x01(\v2%.frontend.v1.FooterSubStatusIdleReadyH\x00R\x05ready\x12:\n" +
@@ -17169,40 +17586,45 @@ const file_frontend_v1_footer_proto_rawDesc = "" +
 	"\fnotification\x18\x04 \x01(\v2-.frontend.v1.FooterStatusActivityNotificationH\x00R\fnotification\x12W\n" +
 	"\x0econtext_budget\x18\x05 \x01(\v2..frontend.v1.FooterStatusActivityContextBudgetH\x00R\rcontextBudgetB\x06\n" +
 	"\x04kindJ\x04\b\x03\x10\x04R\n" +
-	"rate_limit\"\x98\x05\n" +
-	"\x13FooterStatusBlocked\x12=\n" +
-	"\x04auth\x18\x01 \x01(\v2'.frontend.v1.FooterSubStatusBlockedAuthH\x00R\x04auth\x12P\n" +
-	"\vusage_limit\x18\x02 \x01(\v2-.frontend.v1.FooterSubStatusBlockedUsageLimitH\x00R\n" +
-	"usageLimit\x12S\n" +
-	"\fvendor_error\x18\x03 \x01(\v2..frontend.v1.FooterSubStatusBlockedVendorErrorH\x00R\vvendorError\x12F\n" +
-	"\abilling\x18\x04 \x01(\v2*.frontend.v1.FooterSubStatusBlockedBillingH\x00R\abilling\x12M\n" +
+	"rate_limit\"\x8b\a\n" +
+	"\x17FooterStatusVendorFault\x12A\n" +
+	"\x04auth\x18\x01 \x01(\v2+.frontend.v1.FooterSubStatusVendorFaultAuthH\x00R\x04auth\x12T\n" +
+	"\vusage_limit\x18\x02 \x01(\v21.frontend.v1.FooterSubStatusVendorFaultUsageLimitH\x00R\n" +
+	"usageLimit\x12W\n" +
+	"\fvendor_error\x18\x03 \x01(\v22.frontend.v1.FooterSubStatusVendorFaultVendorErrorH\x00R\vvendorError\x12J\n" +
+	"\abilling\x18\x04 \x01(\v2..frontend.v1.FooterSubStatusVendorFaultBillingH\x00R\abilling\x12Q\n" +
 	"\n" +
-	"query_died\x18\x06 \x01(\v2,.frontend.v1.FooterSubStatusBlockedQueryDiedH\x00R\tqueryDied\x12\\\n" +
-	"\x0fdaemon_impaired\x18\a \x01(\v21.frontend.v1.FooterSubStatusBlockedDaemonImpairedH\x00R\x0edaemonImpaired\x12S\n" +
-	"\fapi_retrying\x18\b \x01(\v2..frontend.v1.FooterSubStatusBlockedApiRetryingH\x00R\vapiRetrying\x12D\n" +
-	"\bactivity\x18\x05 \x01(\v2(.frontend.v1.FooterStatusBlockedActivityR\bactivityB\v\n" +
-	"\tsubstatus\"\x1c\n" +
-	"\x1aFooterSubStatusBlockedAuth\"\"\n" +
-	" FooterSubStatusBlockedUsageLimit\"#\n" +
-	"!FooterSubStatusBlockedVendorError\"\x1f\n" +
-	"\x1dFooterSubStatusBlockedBilling\"!\n" +
-	"\x1fFooterSubStatusBlockedQueryDied\"#\n" +
-	"!FooterSubStatusBlockedApiRetrying\"\xba\x01\n" +
-	"\x1bFooterStatusBlockedActivity\x12C\n" +
-	"\asalient\x18\x01 \x01(\v2'.frontend.v1.FooterStatusBlockedSalientH\x00R\asalient\x12N\n" +
+	"query_died\x18\x06 \x01(\v20.frontend.v1.FooterSubStatusVendorFaultQueryDiedH\x00R\tqueryDied\x12W\n" +
+	"\fvendor_retry\x18\t \x01(\v22.frontend.v1.FooterSubStatusVendorFaultVendorRetryH\x00R\vvendorRetry\x12c\n" +
+	"\x10vendor_rejection\x18\n" +
+	" \x01(\v26.frontend.v1.FooterSubStatusVendorFaultVendorRejectionH\x00R\x0fvendorRejection\x12Z\n" +
+	"\rvendor_failed\x18\v \x01(\v23.frontend.v1.FooterSubStatusVendorFaultVendorFailedH\x00R\fvendorFailed\x12W\n" +
+	"\fapi_retrying\x18\b \x01(\v22.frontend.v1.FooterSubStatusVendorFaultApiRetryingH\x00R\vapiRetrying\x12H\n" +
+	"\bactivity\x18\x05 \x01(\v2,.frontend.v1.FooterStatusVendorFaultActivityR\bactivityB\v\n" +
+	"\tsubstatusJ\x04\b\a\x10\bR\x0fdaemon_impaired\" \n" +
+	"\x1eFooterSubStatusVendorFaultAuth\"&\n" +
+	"$FooterSubStatusVendorFaultUsageLimit\"'\n" +
+	"%FooterSubStatusVendorFaultVendorError\"#\n" +
+	"!FooterSubStatusVendorFaultBilling\"%\n" +
+	"#FooterSubStatusVendorFaultQueryDied\"'\n" +
+	"%FooterSubStatusVendorFaultApiRetrying\"\xc2\x01\n" +
+	"\x1fFooterStatusVendorFaultActivity\x12G\n" +
+	"\asalient\x18\x01 \x01(\v2+.frontend.v1.FooterStatusVendorFaultSalientH\x00R\asalient\x12N\n" +
 	"\bunpinned\x18\x02 \x01(\v20.frontend.v1.FooterActivityTransientOverEnduringH\x00R\bunpinnedB\x06\n" +
-	"\x04tier\"\xc6\x04\n" +
-	"\x1aFooterStatusBlockedSalient\x123\n" +
+	"\x04tier\"\x9d\x05\n" +
+	"\x1eFooterStatusVendorFaultSalient\x123\n" +
 	"\x02at\x18\x01 \x01(\v2#.frontend.v1.FooterStatusActivityAtR\x02at\x12Y\n" +
 	"\x0eauthenticating\x18\x02 \x01(\v2/.frontend.v1.FooterStatusActivityAuthenticatingH\x00R\x0eauthenticating\x12>\n" +
 	"\x05fault\x18\x04 \x01(\v2&.frontend.v1.FooterStatusActivityFaultH\x00R\x05fault\x12A\n" +
 	"\x06update\x18\x05 \x01(\v2'.frontend.v1.FooterStatusActivityUpdateH\x00R\x06update\x12S\n" +
 	"\fnotification\x18\a \x01(\v2-.frontend.v1.FooterStatusActivityNotificationH\x00R\fnotification\x12W\n" +
 	"\x0econtext_budget\x18\b \x01(\v2..frontend.v1.FooterStatusActivityContextBudgetH\x00R\rcontextBudget\x12G\n" +
-	"\bretrying\x18\t \x01(\v2).frontend.v1.FooterStatusActivityRetryingH\x00R\bretryingB\x06\n" +
+	"\bretrying\x18\t \x01(\v2).frontend.v1.FooterStatusActivityRetryingH\x00R\bretrying\x12Q\n" +
+	"\fvendor_start\x18\n" +
+	" \x01(\v2,.frontend.v1.FooterStatusActivityVendorStartH\x00R\vvendorStartB\x06\n" +
 	"\x04kindJ\x04\b\x06\x10\aJ\x04\b\x03\x10\x04R\n" +
-	"rate_limit\"&\n" +
-	"$FooterSubStatusBlockedDaemonImpaired\"3\n" +
+	"rate_limit\"-\n" +
+	"+FooterSubStatusAgentReplFaultDaemonImpaired\"3\n" +
 	"\x1dFooterStatusActivityQueryDied\x12\x12\n" +
 	"\x04text\x18\x01 \x01(\tR\x04text\"P\n" +
 	"\x1fFooterStatusActivityStartFailed\x12\x16\n" +
@@ -17248,40 +17670,39 @@ const file_frontend_v1_footer_proto_rawDesc = "" +
 	"\x1eFooterStatusActivityUpdateNote\x12_\n" +
 	"\x0eshim_when_idle\x18\x01 \x01(\v27.frontend.v1.FooterStatusActivityUpdateNoteShimWhenIdleH\x00R\fshimWhenIdleB\x06\n" +
 	"\x04note\",\n" +
-	"*FooterStatusActivityUpdateNoteShimWhenIdle\"\x9a\x06\n" +
-	"\x18FooterStatusDisconnected\x12N\n" +
-	"\bstarting\x18\x01 \x01(\v20.frontend.v1.FooterSubStatusDisconnectedStartingH\x00R\bstarting\x12N\n" +
-	"\bdegraded\x18\x02 \x01(\v20.frontend.v1.FooterSubStatusDisconnectedDegradedH\x00R\bdegraded\x12K\n" +
-	"\asevered\x18\x03 \x01(\v2/.frontend.v1.FooterSubStatusDisconnectedSeveredH\x00R\asevered\x12B\n" +
-	"\x04dead\x18\x04 \x01(\v2,.frontend.v1.FooterSubStatusDisconnectedDeadH\x00R\x04dead\x12X\n" +
-	"\fstart_failed\x18\x05 \x01(\v23.frontend.v1.FooterSubStatusDisconnectedStartFailedH\x00R\vstartFailed\x12X\n" +
-	"\fvendor_retry\x18\a \x01(\v23.frontend.v1.FooterSubStatusDisconnectedVendorRetryH\x00R\vvendorRetry\x12d\n" +
-	"\x10vendor_rejection\x18\b \x01(\v27.frontend.v1.FooterSubStatusDisconnectedVendorRejectionH\x00R\x0fvendorRejection\x12[\n" +
-	"\rvendor_failed\x18\t \x01(\v24.frontend.v1.FooterSubStatusDisconnectedVendorFailedH\x00R\fvendorFailed\x12I\n" +
-	"\bactivity\x18\x06 \x01(\v2-.frontend.v1.FooterStatusDisconnectedActivityR\bactivityB\v\n" +
-	"\tsubstatus\"%\n" +
-	"#FooterSubStatusDisconnectedStarting\"%\n" +
-	"#FooterSubStatusDisconnectedDegraded\"$\n" +
-	"\"FooterSubStatusDisconnectedSevered\"!\n" +
-	"\x1fFooterSubStatusDisconnectedDead\"(\n" +
-	"&FooterSubStatusDisconnectedStartFailed\"(\n" +
-	"&FooterSubStatusDisconnectedVendorRetry\",\n" +
-	"*FooterSubStatusDisconnectedVendorRejection\")\n" +
-	"'FooterSubStatusDisconnectedVendorFailed\"\xc4\x01\n" +
-	" FooterStatusDisconnectedActivity\x12H\n" +
-	"\asalient\x18\x01 \x01(\v2,.frontend.v1.FooterStatusDisconnectedSalientH\x00R\asalient\x12N\n" +
+	"*FooterStatusActivityUpdateNoteShimWhenIdle\"\xb1\x05\n" +
+	"\x1aFooterStatusAgentReplFault\x12P\n" +
+	"\bstarting\x18\x01 \x01(\v22.frontend.v1.FooterSubStatusAgentReplFaultStartingH\x00R\bstarting\x12P\n" +
+	"\bdegraded\x18\x02 \x01(\v22.frontend.v1.FooterSubStatusAgentReplFaultDegradedH\x00R\bdegraded\x12M\n" +
+	"\asevered\x18\x03 \x01(\v21.frontend.v1.FooterSubStatusAgentReplFaultSeveredH\x00R\asevered\x12D\n" +
+	"\x04dead\x18\x04 \x01(\v2..frontend.v1.FooterSubStatusAgentReplFaultDeadH\x00R\x04dead\x12Z\n" +
+	"\fstart_failed\x18\x05 \x01(\v25.frontend.v1.FooterSubStatusAgentReplFaultStartFailedH\x00R\vstartFailed\x12c\n" +
+	"\x0fdaemon_impaired\x18\n" +
+	" \x01(\v28.frontend.v1.FooterSubStatusAgentReplFaultDaemonImpairedH\x00R\x0edaemonImpaired\x12K\n" +
+	"\bactivity\x18\x06 \x01(\v2/.frontend.v1.FooterStatusAgentReplFaultActivityR\bactivityB\v\n" +
+	"\tsubstatusJ\x04\b\a\x10\bJ\x04\b\b\x10\tJ\x04\b\t\x10\n" +
+	"R\fvendor_retryR\x10vendor_rejectionR\rvendor_failed\"'\n" +
+	"%FooterSubStatusAgentReplFaultStarting\"'\n" +
+	"%FooterSubStatusAgentReplFaultDegraded\"&\n" +
+	"$FooterSubStatusAgentReplFaultSevered\"#\n" +
+	"!FooterSubStatusAgentReplFaultDead\"*\n" +
+	"(FooterSubStatusAgentReplFaultStartFailed\"'\n" +
+	"%FooterSubStatusVendorFaultVendorRetry\"+\n" +
+	")FooterSubStatusVendorFaultVendorRejection\"(\n" +
+	"&FooterSubStatusVendorFaultVendorFailed\"\xc8\x01\n" +
+	"\"FooterStatusAgentReplFaultActivity\x12J\n" +
+	"\asalient\x18\x01 \x01(\v2..frontend.v1.FooterStatusAgentReplFaultSalientH\x00R\asalient\x12N\n" +
 	"\bunpinned\x18\x02 \x01(\v20.frontend.v1.FooterActivityTransientOverEnduringH\x00R\bunpinnedB\x06\n" +
-	"\x04tier\"\xc7\x04\n" +
-	"\x1fFooterStatusDisconnectedSalient\x123\n" +
+	"\x04tier\"\x8a\x04\n" +
+	"!FooterStatusAgentReplFaultSalient\x123\n" +
 	"\x02at\x18\x01 \x01(\v2#.frontend.v1.FooterStatusActivityAtR\x02at\x12Q\n" +
 	"\fstart_failed\x18\x02 \x01(\v2,.frontend.v1.FooterStatusActivityStartFailedH\x00R\vstartFailed\x12>\n" +
 	"\x05fault\x18\x03 \x01(\v2&.frontend.v1.FooterStatusActivityFaultH\x00R\x05fault\x12A\n" +
 	"\x06update\x18\x04 \x01(\v2'.frontend.v1.FooterStatusActivityUpdateH\x00R\x06update\x12S\n" +
 	"\fnotification\x18\x06 \x01(\v2-.frontend.v1.FooterStatusActivityNotificationH\x00R\fnotification\x12W\n" +
-	"\x0econtext_budget\x18\a \x01(\v2..frontend.v1.FooterStatusActivityContextBudgetH\x00R\rcontextBudget\x12Q\n" +
-	"\fvendor_start\x18\b \x01(\v2,.frontend.v1.FooterStatusActivityVendorStartH\x00R\vvendorStartB\x06\n" +
-	"\x04kindJ\x04\b\x05\x10\x06R\n" +
-	"rate_limit\"5\n" +
+	"\x0econtext_budget\x18\a \x01(\v2..frontend.v1.FooterStatusActivityContextBudgetH\x00R\rcontextBudgetB\x06\n" +
+	"\x04kindJ\x04\b\x05\x10\x06J\x04\b\b\x10\tR\n" +
+	"rate_limitR\fvendor_start\"5\n" +
 	"\x1fFooterStatusActivityVendorStart\x12\x12\n" +
 	"\x04text\x18\x01 \x01(\tR\x04text\"\xae\x01\n" +
 	"\x13FooterStatusClosing\x12D\n" +
@@ -17761,7 +18182,25 @@ const file_frontend_v1_footer_proto_rawDesc = "" +
 	"\x15FooterShellRowCommand\x12\x12\n" +
 	"\x04text\x18\x01 \x01(\tR\x04text\";\n" +
 	"\x15FooterShellRowRuntime\x12\"\n" +
-	"\rstarted_at_ms\x18\x01 \x01(\x03R\vstartedAtMsB(Z&agentrepl/proto/frontend/v1;frontendv1b\x06proto3"
+	"\rstarted_at_ms\x18\x01 \x01(\x03R\vstartedAtMs\"\xbf\x01\n" +
+	"\x18FooterStatusNetworkFault\x12K\n" +
+	"\aoffline\x18\x01 \x01(\v2/.frontend.v1.FooterSubStatusNetworkFaultOfflineH\x00R\aoffline\x12I\n" +
+	"\bactivity\x18\x02 \x01(\v2-.frontend.v1.FooterStatusNetworkFaultActivityR\bactivityB\v\n" +
+	"\tsubstatus\"$\n" +
+	"\"FooterSubStatusNetworkFaultOffline\"\xc4\x01\n" +
+	" FooterStatusNetworkFaultActivity\x12H\n" +
+	"\asalient\x18\x01 \x01(\v2,.frontend.v1.FooterStatusNetworkFaultSalientH\x00R\asalient\x12N\n" +
+	"\bunpinned\x18\x02 \x01(\v20.frontend.v1.FooterActivityTransientOverEnduringH\x00R\bunpinnedB\x06\n" +
+	"\x04tier\"\x9c\x03\n" +
+	"\x1fFooterStatusNetworkFaultSalient\x123\n" +
+	"\x02at\x18\x01 \x01(\v2#.frontend.v1.FooterStatusActivityAtR\x02at\x12K\n" +
+	"\aoffline\x18\x02 \x01(\v2/.frontend.v1.FooterStatusActivityNetworkOfflineH\x00R\aoffline\x12A\n" +
+	"\x06update\x18\x03 \x01(\v2'.frontend.v1.FooterStatusActivityUpdateH\x00R\x06update\x12S\n" +
+	"\fnotification\x18\x04 \x01(\v2-.frontend.v1.FooterStatusActivityNotificationH\x00R\fnotification\x12W\n" +
+	"\x0econtext_budget\x18\x05 \x01(\v2..frontend.v1.FooterStatusActivityContextBudgetH\x00R\rcontextBudgetB\x06\n" +
+	"\x04kind\"8\n" +
+	"\"FooterStatusActivityNetworkOffline\x12\x12\n" +
+	"\x04text\x18\x01 \x01(\tR\x04textB(Z&agentrepl/proto/frontend/v1;frontendv1b\x06proto3"
 
 var (
 	file_frontend_v1_footer_proto_rawDescOnce sync.Once
@@ -17775,7 +18214,7 @@ func file_frontend_v1_footer_proto_rawDescGZIP() []byte {
 	return file_frontend_v1_footer_proto_rawDescData
 }
 
-var file_frontend_v1_footer_proto_msgTypes = make([]protoimpl.MessageInfo, 259)
+var file_frontend_v1_footer_proto_msgTypes = make([]protoimpl.MessageInfo, 264)
 var file_frontend_v1_footer_proto_goTypes = []any{
 	(*FooterView)(nil),                                     // 0: frontend.v1.FooterView
 	(*FooterStrip)(nil),                                    // 1: frontend.v1.FooterStrip
@@ -17857,16 +18296,16 @@ var file_frontend_v1_footer_proto_goTypes = []any{
 	(*FooterStatusBackground)(nil),                         // 77: frontend.v1.FooterStatusBackground
 	(*FooterStatusBackgroundActivity)(nil),                 // 78: frontend.v1.FooterStatusBackgroundActivity
 	(*FooterStatusBackgroundSalient)(nil),                  // 79: frontend.v1.FooterStatusBackgroundSalient
-	(*FooterStatusBlocked)(nil),                            // 80: frontend.v1.FooterStatusBlocked
-	(*FooterSubStatusBlockedAuth)(nil),                     // 81: frontend.v1.FooterSubStatusBlockedAuth
-	(*FooterSubStatusBlockedUsageLimit)(nil),               // 82: frontend.v1.FooterSubStatusBlockedUsageLimit
-	(*FooterSubStatusBlockedVendorError)(nil),              // 83: frontend.v1.FooterSubStatusBlockedVendorError
-	(*FooterSubStatusBlockedBilling)(nil),                  // 84: frontend.v1.FooterSubStatusBlockedBilling
-	(*FooterSubStatusBlockedQueryDied)(nil),                // 85: frontend.v1.FooterSubStatusBlockedQueryDied
-	(*FooterSubStatusBlockedApiRetrying)(nil),              // 86: frontend.v1.FooterSubStatusBlockedApiRetrying
-	(*FooterStatusBlockedActivity)(nil),                    // 87: frontend.v1.FooterStatusBlockedActivity
-	(*FooterStatusBlockedSalient)(nil),                     // 88: frontend.v1.FooterStatusBlockedSalient
-	(*FooterSubStatusBlockedDaemonImpaired)(nil),           // 89: frontend.v1.FooterSubStatusBlockedDaemonImpaired
+	(*FooterStatusVendorFault)(nil),                        // 80: frontend.v1.FooterStatusVendorFault
+	(*FooterSubStatusVendorFaultAuth)(nil),                 // 81: frontend.v1.FooterSubStatusVendorFaultAuth
+	(*FooterSubStatusVendorFaultUsageLimit)(nil),           // 82: frontend.v1.FooterSubStatusVendorFaultUsageLimit
+	(*FooterSubStatusVendorFaultVendorError)(nil),          // 83: frontend.v1.FooterSubStatusVendorFaultVendorError
+	(*FooterSubStatusVendorFaultBilling)(nil),              // 84: frontend.v1.FooterSubStatusVendorFaultBilling
+	(*FooterSubStatusVendorFaultQueryDied)(nil),            // 85: frontend.v1.FooterSubStatusVendorFaultQueryDied
+	(*FooterSubStatusVendorFaultApiRetrying)(nil),          // 86: frontend.v1.FooterSubStatusVendorFaultApiRetrying
+	(*FooterStatusVendorFaultActivity)(nil),                // 87: frontend.v1.FooterStatusVendorFaultActivity
+	(*FooterStatusVendorFaultSalient)(nil),                 // 88: frontend.v1.FooterStatusVendorFaultSalient
+	(*FooterSubStatusAgentReplFaultDaemonImpaired)(nil),    // 89: frontend.v1.FooterSubStatusAgentReplFaultDaemonImpaired
 	(*FooterStatusActivityQueryDied)(nil),                  // 90: frontend.v1.FooterStatusActivityQueryDied
 	(*FooterStatusActivityStartFailed)(nil),                // 91: frontend.v1.FooterStatusActivityStartFailed
 	(*FooterStatusActivityFault)(nil),                      // 92: frontend.v1.FooterStatusActivityFault
@@ -17884,17 +18323,17 @@ var file_frontend_v1_footer_proto_goTypes = []any{
 	(*FooterStatusActivityUpdateComponentWebapp)(nil),      // 104: frontend.v1.FooterStatusActivityUpdateComponentWebapp
 	(*FooterStatusActivityUpdateNote)(nil),                 // 105: frontend.v1.FooterStatusActivityUpdateNote
 	(*FooterStatusActivityUpdateNoteShimWhenIdle)(nil),     // 106: frontend.v1.FooterStatusActivityUpdateNoteShimWhenIdle
-	(*FooterStatusDisconnected)(nil),                       // 107: frontend.v1.FooterStatusDisconnected
-	(*FooterSubStatusDisconnectedStarting)(nil),            // 108: frontend.v1.FooterSubStatusDisconnectedStarting
-	(*FooterSubStatusDisconnectedDegraded)(nil),            // 109: frontend.v1.FooterSubStatusDisconnectedDegraded
-	(*FooterSubStatusDisconnectedSevered)(nil),             // 110: frontend.v1.FooterSubStatusDisconnectedSevered
-	(*FooterSubStatusDisconnectedDead)(nil),                // 111: frontend.v1.FooterSubStatusDisconnectedDead
-	(*FooterSubStatusDisconnectedStartFailed)(nil),         // 112: frontend.v1.FooterSubStatusDisconnectedStartFailed
-	(*FooterSubStatusDisconnectedVendorRetry)(nil),         // 113: frontend.v1.FooterSubStatusDisconnectedVendorRetry
-	(*FooterSubStatusDisconnectedVendorRejection)(nil),     // 114: frontend.v1.FooterSubStatusDisconnectedVendorRejection
-	(*FooterSubStatusDisconnectedVendorFailed)(nil),        // 115: frontend.v1.FooterSubStatusDisconnectedVendorFailed
-	(*FooterStatusDisconnectedActivity)(nil),               // 116: frontend.v1.FooterStatusDisconnectedActivity
-	(*FooterStatusDisconnectedSalient)(nil),                // 117: frontend.v1.FooterStatusDisconnectedSalient
+	(*FooterStatusAgentReplFault)(nil),                     // 107: frontend.v1.FooterStatusAgentReplFault
+	(*FooterSubStatusAgentReplFaultStarting)(nil),          // 108: frontend.v1.FooterSubStatusAgentReplFaultStarting
+	(*FooterSubStatusAgentReplFaultDegraded)(nil),          // 109: frontend.v1.FooterSubStatusAgentReplFaultDegraded
+	(*FooterSubStatusAgentReplFaultSevered)(nil),           // 110: frontend.v1.FooterSubStatusAgentReplFaultSevered
+	(*FooterSubStatusAgentReplFaultDead)(nil),              // 111: frontend.v1.FooterSubStatusAgentReplFaultDead
+	(*FooterSubStatusAgentReplFaultStartFailed)(nil),       // 112: frontend.v1.FooterSubStatusAgentReplFaultStartFailed
+	(*FooterSubStatusVendorFaultVendorRetry)(nil),          // 113: frontend.v1.FooterSubStatusVendorFaultVendorRetry
+	(*FooterSubStatusVendorFaultVendorRejection)(nil),      // 114: frontend.v1.FooterSubStatusVendorFaultVendorRejection
+	(*FooterSubStatusVendorFaultVendorFailed)(nil),         // 115: frontend.v1.FooterSubStatusVendorFaultVendorFailed
+	(*FooterStatusAgentReplFaultActivity)(nil),             // 116: frontend.v1.FooterStatusAgentReplFaultActivity
+	(*FooterStatusAgentReplFaultSalient)(nil),              // 117: frontend.v1.FooterStatusAgentReplFaultSalient
 	(*FooterStatusActivityVendorStart)(nil),                // 118: frontend.v1.FooterStatusActivityVendorStart
 	(*FooterStatusClosing)(nil),                            // 119: frontend.v1.FooterStatusClosing
 	(*FooterSubStatusCloseBlocked)(nil),                    // 120: frontend.v1.FooterSubStatusCloseBlocked
@@ -18036,8 +18475,13 @@ var file_frontend_v1_footer_proto_goTypes = []any{
 	(*FooterJumpNotDrawn)(nil),                             // 256: frontend.v1.FooterJumpNotDrawn
 	(*FooterShellRowCommand)(nil),                          // 257: frontend.v1.FooterShellRowCommand
 	(*FooterShellRowRuntime)(nil),                          // 258: frontend.v1.FooterShellRowRuntime
-	(*TokenHeat)(nil),                                      // 259: frontend.v1.TokenHeat
-	(*FeedId)(nil),                                         // 260: frontend.v1.FeedId
+	(*FooterStatusNetworkFault)(nil),                       // 259: frontend.v1.FooterStatusNetworkFault
+	(*FooterSubStatusNetworkFaultOffline)(nil),             // 260: frontend.v1.FooterSubStatusNetworkFaultOffline
+	(*FooterStatusNetworkFaultActivity)(nil),               // 261: frontend.v1.FooterStatusNetworkFaultActivity
+	(*FooterStatusNetworkFaultSalient)(nil),                // 262: frontend.v1.FooterStatusNetworkFaultSalient
+	(*FooterStatusActivityNetworkOffline)(nil),             // 263: frontend.v1.FooterStatusActivityNetworkOffline
+	(*TokenHeat)(nil),                                      // 264: frontend.v1.TokenHeat
+	(*FeedId)(nil),                                         // 265: frontend.v1.FeedId
 }
 var file_frontend_v1_footer_proto_depIdxs = []int32{
 	1,   // 0: frontend.v1.FooterView.strip:type_name -> frontend.v1.FooterStrip
@@ -18053,324 +18497,334 @@ var file_frontend_v1_footer_proto_depIdxs = []int32{
 	39,  // 10: frontend.v1.FooterStatus.interrupted:type_name -> frontend.v1.FooterStatusInterrupted
 	44,  // 11: frontend.v1.FooterStatus.merging:type_name -> frontend.v1.FooterStatusMerging
 	77,  // 12: frontend.v1.FooterStatus.background:type_name -> frontend.v1.FooterStatusBackground
-	80,  // 13: frontend.v1.FooterStatus.blocked:type_name -> frontend.v1.FooterStatusBlocked
-	107, // 14: frontend.v1.FooterStatus.disconnected:type_name -> frontend.v1.FooterStatusDisconnected
+	80,  // 13: frontend.v1.FooterStatus.vendor_fault:type_name -> frontend.v1.FooterStatusVendorFault
+	107, // 14: frontend.v1.FooterStatus.agent_repl_fault:type_name -> frontend.v1.FooterStatusAgentReplFault
 	119, // 15: frontend.v1.FooterStatus.closing:type_name -> frontend.v1.FooterStatusClosing
 	123, // 16: frontend.v1.FooterStatus.loading:type_name -> frontend.v1.FooterStatusLoading
 	54,  // 17: frontend.v1.FooterStatus.merge_failed:type_name -> frontend.v1.FooterStatusMergeFailed
 	58,  // 18: frontend.v1.FooterStatus.merged:type_name -> frontend.v1.FooterStatusMerged
 	9,   // 19: frontend.v1.FooterStatus.turn_failed:type_name -> frontend.v1.FooterStatusTurnFailed
 	10,  // 20: frontend.v1.FooterStatus.degraded:type_name -> frontend.v1.FooterStatusDegraded
-	6,   // 21: frontend.v1.FooterStatusIdle.ready:type_name -> frontend.v1.FooterSubStatusIdleReady
-	7,   // 22: frontend.v1.FooterStatusIdle.done:type_name -> frontend.v1.FooterSubStatusIdleDone
-	8,   // 23: frontend.v1.FooterStatusIdle.turn_failed:type_name -> frontend.v1.FooterSubStatusIdleTurnFailed
-	4,   // 24: frontend.v1.FooterStatusIdle.activity:type_name -> frontend.v1.FooterStatusIdleActivity
-	5,   // 25: frontend.v1.FooterStatusIdleActivity.salient:type_name -> frontend.v1.FooterStatusIdleSalient
-	140, // 26: frontend.v1.FooterStatusIdleActivity.unpinned:type_name -> frontend.v1.FooterActivityTransientOverEnduring
-	130, // 27: frontend.v1.FooterStatusIdleSalient.at:type_name -> frontend.v1.FooterStatusActivityAt
-	93,  // 28: frontend.v1.FooterStatusIdleSalient.update:type_name -> frontend.v1.FooterStatusActivityUpdate
-	90,  // 29: frontend.v1.FooterStatusIdleSalient.query_died:type_name -> frontend.v1.FooterStatusActivityQueryDied
-	138, // 30: frontend.v1.FooterStatusIdleSalient.notification:type_name -> frontend.v1.FooterStatusActivityNotification
-	139, // 31: frontend.v1.FooterStatusIdleSalient.context_budget:type_name -> frontend.v1.FooterStatusActivityContextBudget
-	4,   // 32: frontend.v1.FooterStatusTurnFailed.activity:type_name -> frontend.v1.FooterStatusIdleActivity
-	11,  // 33: frontend.v1.FooterStatusDegraded.observation:type_name -> frontend.v1.FooterSubStatusDegradedObservation
-	12,  // 34: frontend.v1.FooterStatusDegraded.state_unreported:type_name -> frontend.v1.FooterSubStatusDegradedStateUnreported
-	4,   // 35: frontend.v1.FooterStatusDegraded.activity:type_name -> frontend.v1.FooterStatusIdleActivity
-	17,  // 36: frontend.v1.FooterStatusWorking.submitting:type_name -> frontend.v1.FooterSubStatusWorkingSubmitting
-	18,  // 37: frontend.v1.FooterStatusWorking.thinking:type_name -> frontend.v1.FooterSubStatusWorkingThinking
-	19,  // 38: frontend.v1.FooterStatusWorking.clearing:type_name -> frontend.v1.FooterSubStatusWorkingClearing
-	20,  // 39: frontend.v1.FooterStatusWorking.compacting:type_name -> frontend.v1.FooterSubStatusWorkingCompacting
-	21,  // 40: frontend.v1.FooterStatusWorking.executing:type_name -> frontend.v1.FooterSubStatusWorkingExecuting
-	22,  // 41: frontend.v1.FooterStatusWorking.reading:type_name -> frontend.v1.FooterSubStatusWorkingReading
-	23,  // 42: frontend.v1.FooterStatusWorking.writing:type_name -> frontend.v1.FooterSubStatusWorkingWriting
-	24,  // 43: frontend.v1.FooterStatusWorking.searching:type_name -> frontend.v1.FooterSubStatusWorkingSearching
-	25,  // 44: frontend.v1.FooterStatusWorking.fetching:type_name -> frontend.v1.FooterSubStatusWorkingFetching
-	26,  // 45: frontend.v1.FooterStatusWorking.delegating:type_name -> frontend.v1.FooterSubStatusWorkingDelegating
-	14,  // 46: frontend.v1.FooterStatusWorking.activity:type_name -> frontend.v1.FooterStatusWorkingActivity
-	15,  // 47: frontend.v1.FooterStatusWorkingActivity.salient:type_name -> frontend.v1.FooterStatusWorkingSalient
-	140, // 48: frontend.v1.FooterStatusWorkingActivity.unpinned:type_name -> frontend.v1.FooterActivityTransientOverEnduring
-	130, // 49: frontend.v1.FooterStatusWorkingSalient.at:type_name -> frontend.v1.FooterStatusActivityAt
-	16,  // 50: frontend.v1.FooterStatusWorkingSalient.compaction:type_name -> frontend.v1.FooterStatusActivityCompaction
-	134, // 51: frontend.v1.FooterStatusWorkingSalient.retrying:type_name -> frontend.v1.FooterStatusActivityRetrying
-	93,  // 52: frontend.v1.FooterStatusWorkingSalient.update:type_name -> frontend.v1.FooterStatusActivityUpdate
-	138, // 53: frontend.v1.FooterStatusWorkingSalient.notification:type_name -> frontend.v1.FooterStatusActivityNotification
-	139, // 54: frontend.v1.FooterStatusWorkingSalient.context_budget:type_name -> frontend.v1.FooterStatusActivityContextBudget
-	28,  // 55: frontend.v1.FooterStatusWaiting.wakeup:type_name -> frontend.v1.FooterSubStatusWaitingWakeup
-	29,  // 56: frontend.v1.FooterStatusWaiting.permission:type_name -> frontend.v1.FooterSubStatusWaitingPermission
-	30,  // 57: frontend.v1.FooterStatusWaiting.question:type_name -> frontend.v1.FooterSubStatusWaitingQuestion
-	31,  // 58: frontend.v1.FooterStatusWaiting.cold_gate:type_name -> frontend.v1.FooterSubStatusWaitingColdGate
-	32,  // 59: frontend.v1.FooterStatusWaiting.interrupting:type_name -> frontend.v1.FooterSubStatusWaitingInterrupting
-	33,  // 60: frontend.v1.FooterStatusWaiting.activity:type_name -> frontend.v1.FooterStatusWaitingActivity
-	34,  // 61: frontend.v1.FooterStatusWaitingActivity.salient:type_name -> frontend.v1.FooterStatusWaitingSalient
-	130, // 62: frontend.v1.FooterStatusWaitingSalient.at:type_name -> frontend.v1.FooterStatusActivityAt
-	131, // 63: frontend.v1.FooterStatusWaitingSalient.wakeup:type_name -> frontend.v1.FooterStatusActivityWakeup
-	37,  // 64: frontend.v1.FooterStatusWaitingSalient.gated_call:type_name -> frontend.v1.FooterStatusActivityGatedCall
-	38,  // 65: frontend.v1.FooterStatusWaitingSalient.question_lead:type_name -> frontend.v1.FooterStatusActivityQuestionLead
-	136, // 66: frontend.v1.FooterStatusWaitingSalient.blocked_on_user:type_name -> frontend.v1.FooterStatusActivityBlockedOnUser
-	36,  // 67: frontend.v1.FooterStatusWaitingSalient.cold_gate_cost:type_name -> frontend.v1.FooterStatusActivityColdGateCost
-	35,  // 68: frontend.v1.FooterStatusWaitingSalient.interrupting:type_name -> frontend.v1.FooterStatusActivityInterrupting
-	93,  // 69: frontend.v1.FooterStatusWaitingSalient.update:type_name -> frontend.v1.FooterStatusActivityUpdate
-	138, // 70: frontend.v1.FooterStatusWaitingSalient.notification:type_name -> frontend.v1.FooterStatusActivityNotification
-	139, // 71: frontend.v1.FooterStatusWaitingSalient.context_budget:type_name -> frontend.v1.FooterStatusActivityContextBudget
-	40,  // 72: frontend.v1.FooterStatusInterrupted.by_user:type_name -> frontend.v1.FooterSubStatusInterruptedByUser
-	41,  // 73: frontend.v1.FooterStatusInterrupted.host_shutdown:type_name -> frontend.v1.FooterSubStatusInterruptedByHostShutdown
-	42,  // 74: frontend.v1.FooterStatusInterrupted.activity:type_name -> frontend.v1.FooterStatusInterruptedActivity
-	43,  // 75: frontend.v1.FooterStatusInterruptedActivity.salient:type_name -> frontend.v1.FooterStatusInterruptedSalient
-	140, // 76: frontend.v1.FooterStatusInterruptedActivity.unpinned:type_name -> frontend.v1.FooterActivityTransientOverEnduring
-	130, // 77: frontend.v1.FooterStatusInterruptedSalient.at:type_name -> frontend.v1.FooterStatusActivityAt
-	93,  // 78: frontend.v1.FooterStatusInterruptedSalient.update:type_name -> frontend.v1.FooterStatusActivityUpdate
-	138, // 79: frontend.v1.FooterStatusInterruptedSalient.notification:type_name -> frontend.v1.FooterStatusActivityNotification
-	139, // 80: frontend.v1.FooterStatusInterruptedSalient.context_budget:type_name -> frontend.v1.FooterStatusActivityContextBudget
-	45,  // 81: frontend.v1.FooterStatusMerging.enqueued:type_name -> frontend.v1.FooterSubStatusMergingEnqueued
-	46,  // 82: frontend.v1.FooterStatusMerging.preprocessing:type_name -> frontend.v1.FooterSubStatusMergingPreprocessing
-	47,  // 83: frontend.v1.FooterStatusMerging.rebasing:type_name -> frontend.v1.FooterSubStatusMergingRebasing
-	48,  // 84: frontend.v1.FooterStatusMerging.conflict_resolution:type_name -> frontend.v1.FooterSubStatusMergingConflictResolution
-	49,  // 85: frontend.v1.FooterStatusMerging.testing:type_name -> frontend.v1.FooterSubStatusMergingTesting
-	50,  // 86: frontend.v1.FooterStatusMerging.fixing:type_name -> frontend.v1.FooterSubStatusMergingFixing
-	51,  // 87: frontend.v1.FooterStatusMerging.committing:type_name -> frontend.v1.FooterSubStatusMergingCommitting
-	52,  // 88: frontend.v1.FooterStatusMerging.updating_main:type_name -> frontend.v1.FooterSubStatusMergingUpdatingMain
-	53,  // 89: frontend.v1.FooterStatusMerging.postprocessing:type_name -> frontend.v1.FooterSubStatusMergingPostprocessing
-	59,  // 90: frontend.v1.FooterStatusMerging.activity:type_name -> frontend.v1.FooterStatusMergingActivity
-	55,  // 91: frontend.v1.FooterStatusMergeFailed.conflicts:type_name -> frontend.v1.FooterSubStatusMergeFailedConflicts
-	56,  // 92: frontend.v1.FooterStatusMergeFailed.tests:type_name -> frontend.v1.FooterSubStatusMergeFailedTests
-	57,  // 93: frontend.v1.FooterStatusMergeFailed.other:type_name -> frontend.v1.FooterSubStatusMergeFailedOther
-	59,  // 94: frontend.v1.FooterStatusMergeFailed.activity:type_name -> frontend.v1.FooterStatusMergingActivity
-	59,  // 95: frontend.v1.FooterStatusMerged.activity:type_name -> frontend.v1.FooterStatusMergingActivity
-	60,  // 96: frontend.v1.FooterStatusMergingActivity.salient:type_name -> frontend.v1.FooterStatusMergingSalient
-	140, // 97: frontend.v1.FooterStatusMergingActivity.unpinned:type_name -> frontend.v1.FooterActivityTransientOverEnduring
-	130, // 98: frontend.v1.FooterStatusMergingSalient.at:type_name -> frontend.v1.FooterStatusActivityAt
-	61,  // 99: frontend.v1.FooterStatusMergingSalient.merge_step:type_name -> frontend.v1.FooterStatusActivityMergeStep
-	93,  // 100: frontend.v1.FooterStatusMergingSalient.update:type_name -> frontend.v1.FooterStatusActivityUpdate
-	138, // 101: frontend.v1.FooterStatusMergingSalient.notification:type_name -> frontend.v1.FooterStatusActivityNotification
-	139, // 102: frontend.v1.FooterStatusMergingSalient.context_budget:type_name -> frontend.v1.FooterStatusActivityContextBudget
-	62,  // 103: frontend.v1.FooterStatusActivityMergeStep.enqueued:type_name -> frontend.v1.FooterMergeStepEnqueued
-	63,  // 104: frontend.v1.FooterStatusActivityMergeStep.preprocessing:type_name -> frontend.v1.FooterMergeStepPrompt
-	64,  // 105: frontend.v1.FooterStatusActivityMergeStep.rebasing:type_name -> frontend.v1.FooterMergeStepRebasing
-	67,  // 106: frontend.v1.FooterStatusActivityMergeStep.conflict_resolution:type_name -> frontend.v1.FooterMergeStepConflict
-	68,  // 107: frontend.v1.FooterStatusActivityMergeStep.testing:type_name -> frontend.v1.FooterMergeStepSuite
-	72,  // 108: frontend.v1.FooterStatusActivityMergeStep.fixing:type_name -> frontend.v1.FooterMergeStepFixing
-	73,  // 109: frontend.v1.FooterStatusActivityMergeStep.committing:type_name -> frontend.v1.FooterMergeStepCommitting
-	74,  // 110: frontend.v1.FooterStatusActivityMergeStep.updating_main:type_name -> frontend.v1.FooterMergeStepUpdatingMain
-	63,  // 111: frontend.v1.FooterStatusActivityMergeStep.postprocessing:type_name -> frontend.v1.FooterMergeStepPrompt
-	65,  // 112: frontend.v1.FooterMergeStepRebasing.running:type_name -> frontend.v1.FooterMergeStepRebaseCommand
-	66,  // 113: frontend.v1.FooterMergeStepRebasing.failed:type_name -> frontend.v1.FooterMergeStepRebaseFailure
-	69,  // 114: frontend.v1.FooterMergeStepSuite.started:type_name -> frontend.v1.FooterMergeStepSuiteStarted
-	70,  // 115: frontend.v1.FooterMergeStepSuite.passed:type_name -> frontend.v1.FooterMergeStepSuitePassed
-	71,  // 116: frontend.v1.FooterMergeStepSuite.failed:type_name -> frontend.v1.FooterMergeStepSuiteFailed
-	75,  // 117: frontend.v1.FooterMergeStepUpdatingMain.fetching:type_name -> frontend.v1.FooterMergeStepUpdatingMainFetching
-	76,  // 118: frontend.v1.FooterMergeStepUpdatingMain.fast_forwarding:type_name -> frontend.v1.FooterMergeStepUpdatingMainFastForwarding
-	78,  // 119: frontend.v1.FooterStatusBackground.activity:type_name -> frontend.v1.FooterStatusBackgroundActivity
-	79,  // 120: frontend.v1.FooterStatusBackgroundActivity.salient:type_name -> frontend.v1.FooterStatusBackgroundSalient
-	140, // 121: frontend.v1.FooterStatusBackgroundActivity.unpinned:type_name -> frontend.v1.FooterActivityTransientOverEnduring
-	130, // 122: frontend.v1.FooterStatusBackgroundSalient.at:type_name -> frontend.v1.FooterStatusActivityAt
-	93,  // 123: frontend.v1.FooterStatusBackgroundSalient.update:type_name -> frontend.v1.FooterStatusActivityUpdate
-	138, // 124: frontend.v1.FooterStatusBackgroundSalient.notification:type_name -> frontend.v1.FooterStatusActivityNotification
-	139, // 125: frontend.v1.FooterStatusBackgroundSalient.context_budget:type_name -> frontend.v1.FooterStatusActivityContextBudget
-	81,  // 126: frontend.v1.FooterStatusBlocked.auth:type_name -> frontend.v1.FooterSubStatusBlockedAuth
-	82,  // 127: frontend.v1.FooterStatusBlocked.usage_limit:type_name -> frontend.v1.FooterSubStatusBlockedUsageLimit
-	83,  // 128: frontend.v1.FooterStatusBlocked.vendor_error:type_name -> frontend.v1.FooterSubStatusBlockedVendorError
-	84,  // 129: frontend.v1.FooterStatusBlocked.billing:type_name -> frontend.v1.FooterSubStatusBlockedBilling
-	85,  // 130: frontend.v1.FooterStatusBlocked.query_died:type_name -> frontend.v1.FooterSubStatusBlockedQueryDied
-	89,  // 131: frontend.v1.FooterStatusBlocked.daemon_impaired:type_name -> frontend.v1.FooterSubStatusBlockedDaemonImpaired
-	86,  // 132: frontend.v1.FooterStatusBlocked.api_retrying:type_name -> frontend.v1.FooterSubStatusBlockedApiRetrying
-	87,  // 133: frontend.v1.FooterStatusBlocked.activity:type_name -> frontend.v1.FooterStatusBlockedActivity
-	88,  // 134: frontend.v1.FooterStatusBlockedActivity.salient:type_name -> frontend.v1.FooterStatusBlockedSalient
-	140, // 135: frontend.v1.FooterStatusBlockedActivity.unpinned:type_name -> frontend.v1.FooterActivityTransientOverEnduring
-	130, // 136: frontend.v1.FooterStatusBlockedSalient.at:type_name -> frontend.v1.FooterStatusActivityAt
-	135, // 137: frontend.v1.FooterStatusBlockedSalient.authenticating:type_name -> frontend.v1.FooterStatusActivityAuthenticating
-	92,  // 138: frontend.v1.FooterStatusBlockedSalient.fault:type_name -> frontend.v1.FooterStatusActivityFault
-	93,  // 139: frontend.v1.FooterStatusBlockedSalient.update:type_name -> frontend.v1.FooterStatusActivityUpdate
-	138, // 140: frontend.v1.FooterStatusBlockedSalient.notification:type_name -> frontend.v1.FooterStatusActivityNotification
-	139, // 141: frontend.v1.FooterStatusBlockedSalient.context_budget:type_name -> frontend.v1.FooterStatusActivityContextBudget
-	134, // 142: frontend.v1.FooterStatusBlockedSalient.retrying:type_name -> frontend.v1.FooterStatusActivityRetrying
-	94,  // 143: frontend.v1.FooterStatusActivityUpdate.building:type_name -> frontend.v1.FooterStatusActivityUpdateBuilding
-	95,  // 144: frontend.v1.FooterStatusActivityUpdate.installing:type_name -> frontend.v1.FooterStatusActivityUpdateInstalling
-	96,  // 145: frontend.v1.FooterStatusActivityUpdate.restarting_services:type_name -> frontend.v1.FooterStatusActivityUpdateRestartingServices
-	97,  // 146: frontend.v1.FooterStatusActivityUpdate.handing_over:type_name -> frontend.v1.FooterStatusActivityUpdateHandingOver
-	98,  // 147: frontend.v1.FooterStatusActivityUpdate.waiting:type_name -> frontend.v1.FooterStatusActivityUpdateWaiting
-	105, // 148: frontend.v1.FooterStatusActivityUpdate.notes:type_name -> frontend.v1.FooterStatusActivityUpdateNote
-	99,  // 149: frontend.v1.FooterStatusActivityUpdateBuilding.components:type_name -> frontend.v1.FooterStatusActivityUpdateComponent
-	99,  // 150: frontend.v1.FooterStatusActivityUpdateRestartingServices.services:type_name -> frontend.v1.FooterStatusActivityUpdateComponent
-	100, // 151: frontend.v1.FooterStatusActivityUpdateComponent.store:type_name -> frontend.v1.FooterStatusActivityUpdateComponentStore
-	101, // 152: frontend.v1.FooterStatusActivityUpdateComponent.sidecar:type_name -> frontend.v1.FooterStatusActivityUpdateComponentSidecar
-	102, // 153: frontend.v1.FooterStatusActivityUpdateComponent.daemon:type_name -> frontend.v1.FooterStatusActivityUpdateComponentDaemon
-	103, // 154: frontend.v1.FooterStatusActivityUpdateComponent.shim:type_name -> frontend.v1.FooterStatusActivityUpdateComponentShim
-	104, // 155: frontend.v1.FooterStatusActivityUpdateComponent.webapp:type_name -> frontend.v1.FooterStatusActivityUpdateComponentWebapp
-	106, // 156: frontend.v1.FooterStatusActivityUpdateNote.shim_when_idle:type_name -> frontend.v1.FooterStatusActivityUpdateNoteShimWhenIdle
-	108, // 157: frontend.v1.FooterStatusDisconnected.starting:type_name -> frontend.v1.FooterSubStatusDisconnectedStarting
-	109, // 158: frontend.v1.FooterStatusDisconnected.degraded:type_name -> frontend.v1.FooterSubStatusDisconnectedDegraded
-	110, // 159: frontend.v1.FooterStatusDisconnected.severed:type_name -> frontend.v1.FooterSubStatusDisconnectedSevered
-	111, // 160: frontend.v1.FooterStatusDisconnected.dead:type_name -> frontend.v1.FooterSubStatusDisconnectedDead
-	112, // 161: frontend.v1.FooterStatusDisconnected.start_failed:type_name -> frontend.v1.FooterSubStatusDisconnectedStartFailed
-	113, // 162: frontend.v1.FooterStatusDisconnected.vendor_retry:type_name -> frontend.v1.FooterSubStatusDisconnectedVendorRetry
-	114, // 163: frontend.v1.FooterStatusDisconnected.vendor_rejection:type_name -> frontend.v1.FooterSubStatusDisconnectedVendorRejection
-	115, // 164: frontend.v1.FooterStatusDisconnected.vendor_failed:type_name -> frontend.v1.FooterSubStatusDisconnectedVendorFailed
-	116, // 165: frontend.v1.FooterStatusDisconnected.activity:type_name -> frontend.v1.FooterStatusDisconnectedActivity
-	117, // 166: frontend.v1.FooterStatusDisconnectedActivity.salient:type_name -> frontend.v1.FooterStatusDisconnectedSalient
-	140, // 167: frontend.v1.FooterStatusDisconnectedActivity.unpinned:type_name -> frontend.v1.FooterActivityTransientOverEnduring
-	130, // 168: frontend.v1.FooterStatusDisconnectedSalient.at:type_name -> frontend.v1.FooterStatusActivityAt
-	91,  // 169: frontend.v1.FooterStatusDisconnectedSalient.start_failed:type_name -> frontend.v1.FooterStatusActivityStartFailed
-	92,  // 170: frontend.v1.FooterStatusDisconnectedSalient.fault:type_name -> frontend.v1.FooterStatusActivityFault
-	93,  // 171: frontend.v1.FooterStatusDisconnectedSalient.update:type_name -> frontend.v1.FooterStatusActivityUpdate
-	138, // 172: frontend.v1.FooterStatusDisconnectedSalient.notification:type_name -> frontend.v1.FooterStatusActivityNotification
-	139, // 173: frontend.v1.FooterStatusDisconnectedSalient.context_budget:type_name -> frontend.v1.FooterStatusActivityContextBudget
-	118, // 174: frontend.v1.FooterStatusDisconnectedSalient.vendor_start:type_name -> frontend.v1.FooterStatusActivityVendorStart
-	120, // 175: frontend.v1.FooterStatusClosing.blocked:type_name -> frontend.v1.FooterSubStatusCloseBlocked
-	121, // 176: frontend.v1.FooterStatusClosing.activity:type_name -> frontend.v1.FooterStatusClosingActivity
-	122, // 177: frontend.v1.FooterStatusClosingActivity.salient:type_name -> frontend.v1.FooterStatusClosingSalient
-	140, // 178: frontend.v1.FooterStatusClosingActivity.unpinned:type_name -> frontend.v1.FooterActivityTransientOverEnduring
-	130, // 179: frontend.v1.FooterStatusClosingSalient.at:type_name -> frontend.v1.FooterStatusActivityAt
-	137, // 180: frontend.v1.FooterStatusClosingSalient.close_blocked:type_name -> frontend.v1.FooterStatusActivityCloseBlocked
-	93,  // 181: frontend.v1.FooterStatusClosingSalient.update:type_name -> frontend.v1.FooterStatusActivityUpdate
-	138, // 182: frontend.v1.FooterStatusClosingSalient.notification:type_name -> frontend.v1.FooterStatusActivityNotification
-	139, // 183: frontend.v1.FooterStatusClosingSalient.context_budget:type_name -> frontend.v1.FooterStatusActivityContextBudget
-	124, // 184: frontend.v1.FooterStatusLoading.memory:type_name -> frontend.v1.FooterSubStatusLoadingMemory
-	125, // 185: frontend.v1.FooterStatusLoading.invoked:type_name -> frontend.v1.FooterSubStatusLoadingInvoked
-	126, // 186: frontend.v1.FooterStatusLoading.discovered:type_name -> frontend.v1.FooterSubStatusLoadingDiscovered
-	127, // 187: frontend.v1.FooterStatusLoading.listing:type_name -> frontend.v1.FooterSubStatusLoadingListing
-	128, // 188: frontend.v1.FooterStatusLoading.activity:type_name -> frontend.v1.FooterStatusLoadingActivity
-	129, // 189: frontend.v1.FooterStatusLoadingActivity.salient:type_name -> frontend.v1.FooterStatusLoadingSalient
-	140, // 190: frontend.v1.FooterStatusLoadingActivity.unpinned:type_name -> frontend.v1.FooterActivityTransientOverEnduring
-	130, // 191: frontend.v1.FooterStatusLoadingSalient.at:type_name -> frontend.v1.FooterStatusActivityAt
-	93,  // 192: frontend.v1.FooterStatusLoadingSalient.update:type_name -> frontend.v1.FooterStatusActivityUpdate
-	138, // 193: frontend.v1.FooterStatusLoadingSalient.notification:type_name -> frontend.v1.FooterStatusActivityNotification
-	139, // 194: frontend.v1.FooterStatusLoadingSalient.context_budget:type_name -> frontend.v1.FooterStatusActivityContextBudget
-	132, // 195: frontend.v1.FooterStatusActivityWakeup.reason:type_name -> frontend.v1.FooterStatusActivityWakeupReason
-	130, // 196: frontend.v1.FooterStatusActivityRetrying.next_attempt:type_name -> frontend.v1.FooterStatusActivityAt
-	141, // 197: frontend.v1.FooterActivityTransientOverEnduring.transient:type_name -> frontend.v1.FooterActivityTransient
-	165, // 198: frontend.v1.FooterActivityTransientOverEnduring.enduring:type_name -> frontend.v1.FooterActivityEnduring
-	130, // 199: frontend.v1.FooterActivityTransient.at:type_name -> frontend.v1.FooterStatusActivityAt
-	148, // 200: frontend.v1.FooterActivityTransient.expiry:type_name -> frontend.v1.FooterActivityTransientExpiry
-	149, // 201: frontend.v1.FooterActivityTransient.agent:type_name -> frontend.v1.FooterActivityTransientAgent
-	150, // 202: frontend.v1.FooterActivityTransient.tool_call:type_name -> frontend.v1.FooterActivityTransientToolCall
-	151, // 203: frontend.v1.FooterActivityTransient.task:type_name -> frontend.v1.FooterActivityTransientTask
-	152, // 204: frontend.v1.FooterActivityTransient.submitting:type_name -> frontend.v1.FooterActivityTransientSubmitting
-	159, // 205: frontend.v1.FooterActivityTransient.hook:type_name -> frontend.v1.FooterActivityTransientHook
-	160, // 206: frontend.v1.FooterActivityTransient.context_injected:type_name -> frontend.v1.FooterActivityTransientContextInjected
-	92,  // 207: frontend.v1.FooterActivityTransient.fault:type_name -> frontend.v1.FooterStatusActivityFault
-	161, // 208: frontend.v1.FooterActivityTransient.daemon_warning:type_name -> frontend.v1.FooterActivityTransientDaemonWarning
-	162, // 209: frontend.v1.FooterActivityTransient.daemon_error:type_name -> frontend.v1.FooterActivityTransientDaemonError
-	163, // 210: frontend.v1.FooterActivityTransient.session_change:type_name -> frontend.v1.FooterActivityTransientSessionChange
-	164, // 211: frontend.v1.FooterActivityTransient.updated:type_name -> frontend.v1.FooterActivityTransientUpdated
-	143, // 212: frontend.v1.FooterActivityTransient.network_resume:type_name -> frontend.v1.FooterActivityTransientNetworkResume
-	142, // 213: frontend.v1.FooterActivityTransient.compaction_concluded:type_name -> frontend.v1.FooterActivityTransientCompactionConcluded
-	133, // 214: frontend.v1.FooterActivityTransient.api_restored:type_name -> frontend.v1.FooterActivityTransientApiRestored
-	144, // 215: frontend.v1.FooterActivityTransientNetworkResume.waiting:type_name -> frontend.v1.FooterActivityTransientNetworkResumeWaiting
-	145, // 216: frontend.v1.FooterActivityTransientNetworkResume.resumed:type_name -> frontend.v1.FooterActivityTransientNetworkResumeResumed
-	146, // 217: frontend.v1.FooterActivityTransientNetworkResume.gave_up:type_name -> frontend.v1.FooterActivityTransientNetworkResumeGaveUp
-	147, // 218: frontend.v1.FooterActivityTransientNetworkResume.abandoned:type_name -> frontend.v1.FooterActivityTransientNetworkResumeAbandoned
-	153, // 219: frontend.v1.FooterActivityTransientSubmitting.held:type_name -> frontend.v1.FooterActivityTransientSubmittingHeld
-	154, // 220: frontend.v1.FooterActivityTransientSubmitting.classifying:type_name -> frontend.v1.FooterActivityTransientSubmittingClassifying
-	155, // 221: frontend.v1.FooterActivityTransientSubmitting.interjecting:type_name -> frontend.v1.FooterActivityTransientSubmittingInterjecting
-	156, // 222: frontend.v1.FooterActivityTransientSubmitting.after_tool_call:type_name -> frontend.v1.FooterActivityTransientSubmittingAfterToolCall
-	157, // 223: frontend.v1.FooterActivityTransientSubmitting.coalesced:type_name -> frontend.v1.FooterActivityTransientSubmittingCoalesced
-	158, // 224: frontend.v1.FooterActivityTransientSubmitting.delivered:type_name -> frontend.v1.FooterActivityTransientSubmittingDelivered
-	105, // 225: frontend.v1.FooterActivityTransientUpdated.notes:type_name -> frontend.v1.FooterStatusActivityUpdateNote
-	167, // 226: frontend.v1.FooterActivityEnduring.usage:type_name -> frontend.v1.FooterActivityEnduringUsage
-	166, // 227: frontend.v1.FooterActivityEnduring.unobserved:type_name -> frontend.v1.FooterActivityEnduringUnobserved
-	174, // 228: frontend.v1.FooterActivityEnduringUsage.session:type_name -> frontend.v1.FooterAllowance
-	174, // 229: frontend.v1.FooterActivityEnduringUsage.weekly:type_name -> frontend.v1.FooterAllowance
-	168, // 230: frontend.v1.FooterActivityEnduringUsage.sample:type_name -> frontend.v1.FooterAllowanceSample
-	174, // 231: frontend.v1.FooterActivityEnduringUsage.overage:type_name -> frontend.v1.FooterAllowance
-	169, // 232: frontend.v1.FooterAllowanceSample.available:type_name -> frontend.v1.FooterAllowanceSampleAvailable
-	170, // 233: frontend.v1.FooterAllowanceSample.service_unavailable:type_name -> frontend.v1.FooterAllowanceSampleServiceUnavailable
-	171, // 234: frontend.v1.FooterAllowanceSample.window_unavailable:type_name -> frontend.v1.FooterAllowanceSampleWindowUnavailable
-	172, // 235: frontend.v1.FooterAllowanceSample.utilization_unavailable:type_name -> frontend.v1.FooterAllowanceSampleUtilizationUnavailable
-	173, // 236: frontend.v1.FooterAllowanceSample.sampling_failure:type_name -> frontend.v1.FooterAllowanceSampleSamplingFailure
-	175, // 237: frontend.v1.FooterAllowance.allowed:type_name -> frontend.v1.FooterAllowanceAllowed
-	176, // 238: frontend.v1.FooterAllowance.allowed_warning:type_name -> frontend.v1.FooterAllowanceAllowedWarning
-	177, // 239: frontend.v1.FooterAllowance.rejected:type_name -> frontend.v1.FooterAllowanceRejected
-	180, // 240: frontend.v1.FooterTokensCell.input:type_name -> frontend.v1.FooterTokensCellInput
-	181, // 241: frontend.v1.FooterTokensCell.alarm:type_name -> frontend.v1.FooterTokensCellAlarm
-	182, // 242: frontend.v1.FooterTokensCell.verdict:type_name -> frontend.v1.FooterTokensCellVerdict
-	259, // 243: frontend.v1.FooterTokensCellInput.heat:type_name -> frontend.v1.TokenHeat
-	183, // 244: frontend.v1.FooterTokensCellVerdict.complete:type_name -> frontend.v1.FooterTokensCellVerdictComplete
-	184, // 245: frontend.v1.FooterTokensCellVerdict.incomplete:type_name -> frontend.v1.FooterTokensCellVerdictIncomplete
-	185, // 246: frontend.v1.FooterTokensCellVerdict.invalid:type_name -> frontend.v1.FooterTokensCellVerdictInvalid
-	190, // 247: frontend.v1.FooterLiveWorkChips.agents:type_name -> frontend.v1.FooterChipAgents
-	192, // 248: frontend.v1.FooterLiveWorkChips.tasks:type_name -> frontend.v1.FooterChipTasks
-	193, // 249: frontend.v1.FooterLiveWorkChips.shells:type_name -> frontend.v1.FooterChipShells
-	189, // 250: frontend.v1.FooterLiveWorkChips.monitors:type_name -> frontend.v1.FooterChipMonitors
-	188, // 251: frontend.v1.FooterLiveWorkChips.crons:type_name -> frontend.v1.FooterChipCrons
-	187, // 252: frontend.v1.FooterLiveWorkChips.merge_tests:type_name -> frontend.v1.FooterChipMergeTests
-	191, // 253: frontend.v1.FooterChipAgents.waiting_for_api:type_name -> frontend.v1.FooterChipAgentsWaitingForApi
-	220, // 254: frontend.v1.FooterExpanded.tokens:type_name -> frontend.v1.FooterExpandedTokens
-	235, // 255: frontend.v1.FooterExpanded.agents:type_name -> frontend.v1.FooterExpandedAgents
-	243, // 256: frontend.v1.FooterExpanded.tasks:type_name -> frontend.v1.FooterExpandedTasks
-	251, // 257: frontend.v1.FooterExpanded.shells:type_name -> frontend.v1.FooterExpandedShells
-	215, // 258: frontend.v1.FooterExpanded.monitors:type_name -> frontend.v1.FooterExpandedMonitors
-	208, // 259: frontend.v1.FooterExpanded.crons:type_name -> frontend.v1.FooterExpandedCrons
-	195, // 260: frontend.v1.FooterExpanded.merge_tests:type_name -> frontend.v1.FooterExpandedMergeTests
-	196, // 261: frontend.v1.FooterExpandedMergeTests.rows:type_name -> frontend.v1.FooterMergeTestRow
-	197, // 262: frontend.v1.FooterMergeTestRow.name:type_name -> frontend.v1.FooterMergeTestRowName
-	198, // 263: frontend.v1.FooterMergeTestRow.state:type_name -> frontend.v1.FooterMergeTestRowState
-	199, // 264: frontend.v1.FooterMergeTestRowState.waiting:type_name -> frontend.v1.FooterMergeTestRowWaiting
-	200, // 265: frontend.v1.FooterMergeTestRowState.running:type_name -> frontend.v1.FooterMergeTestRowRunning
-	201, // 266: frontend.v1.FooterMergeTestRowState.passed:type_name -> frontend.v1.FooterMergeTestRowPassed
-	202, // 267: frontend.v1.FooterMergeTestRowState.failed:type_name -> frontend.v1.FooterMergeTestRowFailed
-	204, // 268: frontend.v1.FooterExpandedFocus.agents:type_name -> frontend.v1.FooterFocusAgents
-	205, // 269: frontend.v1.FooterExpandedFocus.shells:type_name -> frontend.v1.FooterFocusShells
-	206, // 270: frontend.v1.FooterExpandedFocus.monitors:type_name -> frontend.v1.FooterFocusMonitors
-	207, // 271: frontend.v1.FooterExpandedFocus.merge_tests:type_name -> frontend.v1.FooterFocusMergeTests
-	209, // 272: frontend.v1.FooterExpandedCrons.rows:type_name -> frontend.v1.FooterCronRow
-	210, // 273: frontend.v1.FooterCronRow.schedule:type_name -> frontend.v1.FooterCronRowSchedule
-	211, // 274: frontend.v1.FooterCronRow.prompt:type_name -> frontend.v1.FooterCronRowPrompt
-	212, // 275: frontend.v1.FooterCronRow.next_fire:type_name -> frontend.v1.FooterCronRowNextFire
-	213, // 276: frontend.v1.FooterCronRow.recurring:type_name -> frontend.v1.FooterCronRowRecurring
-	214, // 277: frontend.v1.FooterCronRow.durable:type_name -> frontend.v1.FooterCronRowDurable
-	216, // 278: frontend.v1.FooterExpandedMonitors.rows:type_name -> frontend.v1.FooterMonitorRow
-	217, // 279: frontend.v1.FooterMonitorRow.description:type_name -> frontend.v1.FooterMonitorRowDescription
-	218, // 280: frontend.v1.FooterMonitorRow.runtime:type_name -> frontend.v1.FooterMonitorRowRuntime
-	219, // 281: frontend.v1.FooterMonitorRow.persistent:type_name -> frontend.v1.FooterMonitorRowPersistent
-	253, // 282: frontend.v1.FooterMonitorRow.work:type_name -> frontend.v1.FooterWorkId
-	254, // 283: frontend.v1.FooterMonitorRow.jump:type_name -> frontend.v1.FooterJump
-	224, // 284: frontend.v1.FooterExpandedTokens.input:type_name -> frontend.v1.FooterTokensLineInput
-	225, // 285: frontend.v1.FooterExpandedTokens.cache_read:type_name -> frontend.v1.FooterTokensLineCacheRead
-	226, // 286: frontend.v1.FooterExpandedTokens.cache_write:type_name -> frontend.v1.FooterTokensLineCacheWrite
-	227, // 287: frontend.v1.FooterExpandedTokens.output:type_name -> frontend.v1.FooterTokensLineOutput
-	228, // 288: frontend.v1.FooterExpandedTokens.thinking:type_name -> frontend.v1.FooterTokensLineThinking
-	229, // 289: frontend.v1.FooterExpandedTokens.first_token:type_name -> frontend.v1.FooterTokensLineFirstToken
-	230, // 290: frontend.v1.FooterExpandedTokens.alarm:type_name -> frontend.v1.FooterTokensLineAlarm
-	231, // 291: frontend.v1.FooterExpandedTokens.verdict:type_name -> frontend.v1.FooterTokensLineVerdict
-	221, // 292: frontend.v1.FooterExpandedTokens.context_growth:type_name -> frontend.v1.FooterTokensLineContextGrowth
-	223, // 293: frontend.v1.FooterExpandedTokens.agents:type_name -> frontend.v1.FooterTokensAgent
-	222, // 294: frontend.v1.FooterTokensLineContextGrowth.since_cut:type_name -> frontend.v1.FooterTokensLineContextGrowthSinceCut
-	224, // 295: frontend.v1.FooterTokensAgent.input:type_name -> frontend.v1.FooterTokensLineInput
-	225, // 296: frontend.v1.FooterTokensAgent.cache_read:type_name -> frontend.v1.FooterTokensLineCacheRead
-	226, // 297: frontend.v1.FooterTokensAgent.cache_write:type_name -> frontend.v1.FooterTokensLineCacheWrite
-	227, // 298: frontend.v1.FooterTokensAgent.output:type_name -> frontend.v1.FooterTokensLineOutput
-	232, // 299: frontend.v1.FooterTokensLineVerdict.complete:type_name -> frontend.v1.FooterTokensLineVerdictComplete
-	233, // 300: frontend.v1.FooterTokensLineVerdict.incomplete:type_name -> frontend.v1.FooterTokensLineVerdictIncomplete
-	234, // 301: frontend.v1.FooterTokensLineVerdict.invalid:type_name -> frontend.v1.FooterTokensLineVerdictInvalid
-	236, // 302: frontend.v1.FooterExpandedAgents.rows:type_name -> frontend.v1.FooterAgentRow
-	239, // 303: frontend.v1.FooterAgentRow.label:type_name -> frontend.v1.FooterAgentRowLabel
-	240, // 304: frontend.v1.FooterAgentRow.description:type_name -> frontend.v1.FooterAgentRowDescription
-	241, // 305: frontend.v1.FooterAgentRow.tokens:type_name -> frontend.v1.FooterAgentRowTokens
-	242, // 306: frontend.v1.FooterAgentRow.runtime:type_name -> frontend.v1.FooterAgentRowRuntime
-	253, // 307: frontend.v1.FooterAgentRow.work:type_name -> frontend.v1.FooterWorkId
-	254, // 308: frontend.v1.FooterAgentRow.jump:type_name -> frontend.v1.FooterJump
-	237, // 309: frontend.v1.FooterAgentRow.running:type_name -> frontend.v1.FooterAgentRowRunning
-	238, // 310: frontend.v1.FooterAgentRow.waiting_for_api:type_name -> frontend.v1.FooterAgentRowWaitingForApi
-	244, // 311: frontend.v1.FooterExpandedTasks.rows:type_name -> frontend.v1.FooterTaskRow
-	246, // 312: frontend.v1.FooterTaskRow.status:type_name -> frontend.v1.FooterTaskRowStatus
-	245, // 313: frontend.v1.FooterTaskRow.subject:type_name -> frontend.v1.FooterTaskRowSubject
-	247, // 314: frontend.v1.FooterTaskRowStatus.pending:type_name -> frontend.v1.FooterTaskRowPending
-	248, // 315: frontend.v1.FooterTaskRowStatus.running:type_name -> frontend.v1.FooterTaskRowRunning
-	250, // 316: frontend.v1.FooterTaskRowStatus.completed:type_name -> frontend.v1.FooterTaskRowCompleted
-	249, // 317: frontend.v1.FooterTaskRowRunning.active_form:type_name -> frontend.v1.FooterTaskRowActiveForm
-	252, // 318: frontend.v1.FooterExpandedShells.rows:type_name -> frontend.v1.FooterShellRow
-	257, // 319: frontend.v1.FooterShellRow.command:type_name -> frontend.v1.FooterShellRowCommand
-	258, // 320: frontend.v1.FooterShellRow.runtime:type_name -> frontend.v1.FooterShellRowRuntime
-	253, // 321: frontend.v1.FooterShellRow.work:type_name -> frontend.v1.FooterWorkId
-	254, // 322: frontend.v1.FooterShellRow.jump:type_name -> frontend.v1.FooterJump
-	260, // 323: frontend.v1.FooterJump.entry:type_name -> frontend.v1.FeedId
-	255, // 324: frontend.v1.FooterJump.unresolved:type_name -> frontend.v1.FooterJumpUnresolved
-	256, // 325: frontend.v1.FooterJumpUnresolved.not_drawn:type_name -> frontend.v1.FooterJumpNotDrawn
-	326, // [326:326] is the sub-list for method output_type
-	326, // [326:326] is the sub-list for method input_type
-	326, // [326:326] is the sub-list for extension type_name
-	326, // [326:326] is the sub-list for extension extendee
-	0,   // [0:326] is the sub-list for field type_name
+	259, // 21: frontend.v1.FooterStatus.network_fault:type_name -> frontend.v1.FooterStatusNetworkFault
+	6,   // 22: frontend.v1.FooterStatusIdle.ready:type_name -> frontend.v1.FooterSubStatusIdleReady
+	7,   // 23: frontend.v1.FooterStatusIdle.done:type_name -> frontend.v1.FooterSubStatusIdleDone
+	8,   // 24: frontend.v1.FooterStatusIdle.turn_failed:type_name -> frontend.v1.FooterSubStatusIdleTurnFailed
+	4,   // 25: frontend.v1.FooterStatusIdle.activity:type_name -> frontend.v1.FooterStatusIdleActivity
+	5,   // 26: frontend.v1.FooterStatusIdleActivity.salient:type_name -> frontend.v1.FooterStatusIdleSalient
+	140, // 27: frontend.v1.FooterStatusIdleActivity.unpinned:type_name -> frontend.v1.FooterActivityTransientOverEnduring
+	130, // 28: frontend.v1.FooterStatusIdleSalient.at:type_name -> frontend.v1.FooterStatusActivityAt
+	93,  // 29: frontend.v1.FooterStatusIdleSalient.update:type_name -> frontend.v1.FooterStatusActivityUpdate
+	90,  // 30: frontend.v1.FooterStatusIdleSalient.query_died:type_name -> frontend.v1.FooterStatusActivityQueryDied
+	138, // 31: frontend.v1.FooterStatusIdleSalient.notification:type_name -> frontend.v1.FooterStatusActivityNotification
+	139, // 32: frontend.v1.FooterStatusIdleSalient.context_budget:type_name -> frontend.v1.FooterStatusActivityContextBudget
+	4,   // 33: frontend.v1.FooterStatusTurnFailed.activity:type_name -> frontend.v1.FooterStatusIdleActivity
+	11,  // 34: frontend.v1.FooterStatusDegraded.observation:type_name -> frontend.v1.FooterSubStatusDegradedObservation
+	12,  // 35: frontend.v1.FooterStatusDegraded.state_unreported:type_name -> frontend.v1.FooterSubStatusDegradedStateUnreported
+	4,   // 36: frontend.v1.FooterStatusDegraded.activity:type_name -> frontend.v1.FooterStatusIdleActivity
+	17,  // 37: frontend.v1.FooterStatusWorking.submitting:type_name -> frontend.v1.FooterSubStatusWorkingSubmitting
+	18,  // 38: frontend.v1.FooterStatusWorking.thinking:type_name -> frontend.v1.FooterSubStatusWorkingThinking
+	19,  // 39: frontend.v1.FooterStatusWorking.clearing:type_name -> frontend.v1.FooterSubStatusWorkingClearing
+	20,  // 40: frontend.v1.FooterStatusWorking.compacting:type_name -> frontend.v1.FooterSubStatusWorkingCompacting
+	21,  // 41: frontend.v1.FooterStatusWorking.executing:type_name -> frontend.v1.FooterSubStatusWorkingExecuting
+	22,  // 42: frontend.v1.FooterStatusWorking.reading:type_name -> frontend.v1.FooterSubStatusWorkingReading
+	23,  // 43: frontend.v1.FooterStatusWorking.writing:type_name -> frontend.v1.FooterSubStatusWorkingWriting
+	24,  // 44: frontend.v1.FooterStatusWorking.searching:type_name -> frontend.v1.FooterSubStatusWorkingSearching
+	25,  // 45: frontend.v1.FooterStatusWorking.fetching:type_name -> frontend.v1.FooterSubStatusWorkingFetching
+	26,  // 46: frontend.v1.FooterStatusWorking.delegating:type_name -> frontend.v1.FooterSubStatusWorkingDelegating
+	14,  // 47: frontend.v1.FooterStatusWorking.activity:type_name -> frontend.v1.FooterStatusWorkingActivity
+	15,  // 48: frontend.v1.FooterStatusWorkingActivity.salient:type_name -> frontend.v1.FooterStatusWorkingSalient
+	140, // 49: frontend.v1.FooterStatusWorkingActivity.unpinned:type_name -> frontend.v1.FooterActivityTransientOverEnduring
+	130, // 50: frontend.v1.FooterStatusWorkingSalient.at:type_name -> frontend.v1.FooterStatusActivityAt
+	16,  // 51: frontend.v1.FooterStatusWorkingSalient.compaction:type_name -> frontend.v1.FooterStatusActivityCompaction
+	134, // 52: frontend.v1.FooterStatusWorkingSalient.retrying:type_name -> frontend.v1.FooterStatusActivityRetrying
+	93,  // 53: frontend.v1.FooterStatusWorkingSalient.update:type_name -> frontend.v1.FooterStatusActivityUpdate
+	138, // 54: frontend.v1.FooterStatusWorkingSalient.notification:type_name -> frontend.v1.FooterStatusActivityNotification
+	139, // 55: frontend.v1.FooterStatusWorkingSalient.context_budget:type_name -> frontend.v1.FooterStatusActivityContextBudget
+	28,  // 56: frontend.v1.FooterStatusWaiting.wakeup:type_name -> frontend.v1.FooterSubStatusWaitingWakeup
+	29,  // 57: frontend.v1.FooterStatusWaiting.permission:type_name -> frontend.v1.FooterSubStatusWaitingPermission
+	30,  // 58: frontend.v1.FooterStatusWaiting.question:type_name -> frontend.v1.FooterSubStatusWaitingQuestion
+	31,  // 59: frontend.v1.FooterStatusWaiting.cold_gate:type_name -> frontend.v1.FooterSubStatusWaitingColdGate
+	32,  // 60: frontend.v1.FooterStatusWaiting.interrupting:type_name -> frontend.v1.FooterSubStatusWaitingInterrupting
+	33,  // 61: frontend.v1.FooterStatusWaiting.activity:type_name -> frontend.v1.FooterStatusWaitingActivity
+	34,  // 62: frontend.v1.FooterStatusWaitingActivity.salient:type_name -> frontend.v1.FooterStatusWaitingSalient
+	130, // 63: frontend.v1.FooterStatusWaitingSalient.at:type_name -> frontend.v1.FooterStatusActivityAt
+	131, // 64: frontend.v1.FooterStatusWaitingSalient.wakeup:type_name -> frontend.v1.FooterStatusActivityWakeup
+	37,  // 65: frontend.v1.FooterStatusWaitingSalient.gated_call:type_name -> frontend.v1.FooterStatusActivityGatedCall
+	38,  // 66: frontend.v1.FooterStatusWaitingSalient.question_lead:type_name -> frontend.v1.FooterStatusActivityQuestionLead
+	136, // 67: frontend.v1.FooterStatusWaitingSalient.blocked_on_user:type_name -> frontend.v1.FooterStatusActivityBlockedOnUser
+	36,  // 68: frontend.v1.FooterStatusWaitingSalient.cold_gate_cost:type_name -> frontend.v1.FooterStatusActivityColdGateCost
+	35,  // 69: frontend.v1.FooterStatusWaitingSalient.interrupting:type_name -> frontend.v1.FooterStatusActivityInterrupting
+	93,  // 70: frontend.v1.FooterStatusWaitingSalient.update:type_name -> frontend.v1.FooterStatusActivityUpdate
+	138, // 71: frontend.v1.FooterStatusWaitingSalient.notification:type_name -> frontend.v1.FooterStatusActivityNotification
+	139, // 72: frontend.v1.FooterStatusWaitingSalient.context_budget:type_name -> frontend.v1.FooterStatusActivityContextBudget
+	40,  // 73: frontend.v1.FooterStatusInterrupted.by_user:type_name -> frontend.v1.FooterSubStatusInterruptedByUser
+	41,  // 74: frontend.v1.FooterStatusInterrupted.host_shutdown:type_name -> frontend.v1.FooterSubStatusInterruptedByHostShutdown
+	42,  // 75: frontend.v1.FooterStatusInterrupted.activity:type_name -> frontend.v1.FooterStatusInterruptedActivity
+	43,  // 76: frontend.v1.FooterStatusInterruptedActivity.salient:type_name -> frontend.v1.FooterStatusInterruptedSalient
+	140, // 77: frontend.v1.FooterStatusInterruptedActivity.unpinned:type_name -> frontend.v1.FooterActivityTransientOverEnduring
+	130, // 78: frontend.v1.FooterStatusInterruptedSalient.at:type_name -> frontend.v1.FooterStatusActivityAt
+	93,  // 79: frontend.v1.FooterStatusInterruptedSalient.update:type_name -> frontend.v1.FooterStatusActivityUpdate
+	138, // 80: frontend.v1.FooterStatusInterruptedSalient.notification:type_name -> frontend.v1.FooterStatusActivityNotification
+	139, // 81: frontend.v1.FooterStatusInterruptedSalient.context_budget:type_name -> frontend.v1.FooterStatusActivityContextBudget
+	45,  // 82: frontend.v1.FooterStatusMerging.enqueued:type_name -> frontend.v1.FooterSubStatusMergingEnqueued
+	46,  // 83: frontend.v1.FooterStatusMerging.preprocessing:type_name -> frontend.v1.FooterSubStatusMergingPreprocessing
+	47,  // 84: frontend.v1.FooterStatusMerging.rebasing:type_name -> frontend.v1.FooterSubStatusMergingRebasing
+	48,  // 85: frontend.v1.FooterStatusMerging.conflict_resolution:type_name -> frontend.v1.FooterSubStatusMergingConflictResolution
+	49,  // 86: frontend.v1.FooterStatusMerging.testing:type_name -> frontend.v1.FooterSubStatusMergingTesting
+	50,  // 87: frontend.v1.FooterStatusMerging.fixing:type_name -> frontend.v1.FooterSubStatusMergingFixing
+	51,  // 88: frontend.v1.FooterStatusMerging.committing:type_name -> frontend.v1.FooterSubStatusMergingCommitting
+	52,  // 89: frontend.v1.FooterStatusMerging.updating_main:type_name -> frontend.v1.FooterSubStatusMergingUpdatingMain
+	53,  // 90: frontend.v1.FooterStatusMerging.postprocessing:type_name -> frontend.v1.FooterSubStatusMergingPostprocessing
+	59,  // 91: frontend.v1.FooterStatusMerging.activity:type_name -> frontend.v1.FooterStatusMergingActivity
+	55,  // 92: frontend.v1.FooterStatusMergeFailed.conflicts:type_name -> frontend.v1.FooterSubStatusMergeFailedConflicts
+	56,  // 93: frontend.v1.FooterStatusMergeFailed.tests:type_name -> frontend.v1.FooterSubStatusMergeFailedTests
+	57,  // 94: frontend.v1.FooterStatusMergeFailed.other:type_name -> frontend.v1.FooterSubStatusMergeFailedOther
+	59,  // 95: frontend.v1.FooterStatusMergeFailed.activity:type_name -> frontend.v1.FooterStatusMergingActivity
+	59,  // 96: frontend.v1.FooterStatusMerged.activity:type_name -> frontend.v1.FooterStatusMergingActivity
+	60,  // 97: frontend.v1.FooterStatusMergingActivity.salient:type_name -> frontend.v1.FooterStatusMergingSalient
+	140, // 98: frontend.v1.FooterStatusMergingActivity.unpinned:type_name -> frontend.v1.FooterActivityTransientOverEnduring
+	130, // 99: frontend.v1.FooterStatusMergingSalient.at:type_name -> frontend.v1.FooterStatusActivityAt
+	61,  // 100: frontend.v1.FooterStatusMergingSalient.merge_step:type_name -> frontend.v1.FooterStatusActivityMergeStep
+	93,  // 101: frontend.v1.FooterStatusMergingSalient.update:type_name -> frontend.v1.FooterStatusActivityUpdate
+	138, // 102: frontend.v1.FooterStatusMergingSalient.notification:type_name -> frontend.v1.FooterStatusActivityNotification
+	139, // 103: frontend.v1.FooterStatusMergingSalient.context_budget:type_name -> frontend.v1.FooterStatusActivityContextBudget
+	62,  // 104: frontend.v1.FooterStatusActivityMergeStep.enqueued:type_name -> frontend.v1.FooterMergeStepEnqueued
+	63,  // 105: frontend.v1.FooterStatusActivityMergeStep.preprocessing:type_name -> frontend.v1.FooterMergeStepPrompt
+	64,  // 106: frontend.v1.FooterStatusActivityMergeStep.rebasing:type_name -> frontend.v1.FooterMergeStepRebasing
+	67,  // 107: frontend.v1.FooterStatusActivityMergeStep.conflict_resolution:type_name -> frontend.v1.FooterMergeStepConflict
+	68,  // 108: frontend.v1.FooterStatusActivityMergeStep.testing:type_name -> frontend.v1.FooterMergeStepSuite
+	72,  // 109: frontend.v1.FooterStatusActivityMergeStep.fixing:type_name -> frontend.v1.FooterMergeStepFixing
+	73,  // 110: frontend.v1.FooterStatusActivityMergeStep.committing:type_name -> frontend.v1.FooterMergeStepCommitting
+	74,  // 111: frontend.v1.FooterStatusActivityMergeStep.updating_main:type_name -> frontend.v1.FooterMergeStepUpdatingMain
+	63,  // 112: frontend.v1.FooterStatusActivityMergeStep.postprocessing:type_name -> frontend.v1.FooterMergeStepPrompt
+	65,  // 113: frontend.v1.FooterMergeStepRebasing.running:type_name -> frontend.v1.FooterMergeStepRebaseCommand
+	66,  // 114: frontend.v1.FooterMergeStepRebasing.failed:type_name -> frontend.v1.FooterMergeStepRebaseFailure
+	69,  // 115: frontend.v1.FooterMergeStepSuite.started:type_name -> frontend.v1.FooterMergeStepSuiteStarted
+	70,  // 116: frontend.v1.FooterMergeStepSuite.passed:type_name -> frontend.v1.FooterMergeStepSuitePassed
+	71,  // 117: frontend.v1.FooterMergeStepSuite.failed:type_name -> frontend.v1.FooterMergeStepSuiteFailed
+	75,  // 118: frontend.v1.FooterMergeStepUpdatingMain.fetching:type_name -> frontend.v1.FooterMergeStepUpdatingMainFetching
+	76,  // 119: frontend.v1.FooterMergeStepUpdatingMain.fast_forwarding:type_name -> frontend.v1.FooterMergeStepUpdatingMainFastForwarding
+	78,  // 120: frontend.v1.FooterStatusBackground.activity:type_name -> frontend.v1.FooterStatusBackgroundActivity
+	79,  // 121: frontend.v1.FooterStatusBackgroundActivity.salient:type_name -> frontend.v1.FooterStatusBackgroundSalient
+	140, // 122: frontend.v1.FooterStatusBackgroundActivity.unpinned:type_name -> frontend.v1.FooterActivityTransientOverEnduring
+	130, // 123: frontend.v1.FooterStatusBackgroundSalient.at:type_name -> frontend.v1.FooterStatusActivityAt
+	93,  // 124: frontend.v1.FooterStatusBackgroundSalient.update:type_name -> frontend.v1.FooterStatusActivityUpdate
+	138, // 125: frontend.v1.FooterStatusBackgroundSalient.notification:type_name -> frontend.v1.FooterStatusActivityNotification
+	139, // 126: frontend.v1.FooterStatusBackgroundSalient.context_budget:type_name -> frontend.v1.FooterStatusActivityContextBudget
+	81,  // 127: frontend.v1.FooterStatusVendorFault.auth:type_name -> frontend.v1.FooterSubStatusVendorFaultAuth
+	82,  // 128: frontend.v1.FooterStatusVendorFault.usage_limit:type_name -> frontend.v1.FooterSubStatusVendorFaultUsageLimit
+	83,  // 129: frontend.v1.FooterStatusVendorFault.vendor_error:type_name -> frontend.v1.FooterSubStatusVendorFaultVendorError
+	84,  // 130: frontend.v1.FooterStatusVendorFault.billing:type_name -> frontend.v1.FooterSubStatusVendorFaultBilling
+	85,  // 131: frontend.v1.FooterStatusVendorFault.query_died:type_name -> frontend.v1.FooterSubStatusVendorFaultQueryDied
+	113, // 132: frontend.v1.FooterStatusVendorFault.vendor_retry:type_name -> frontend.v1.FooterSubStatusVendorFaultVendorRetry
+	114, // 133: frontend.v1.FooterStatusVendorFault.vendor_rejection:type_name -> frontend.v1.FooterSubStatusVendorFaultVendorRejection
+	115, // 134: frontend.v1.FooterStatusVendorFault.vendor_failed:type_name -> frontend.v1.FooterSubStatusVendorFaultVendorFailed
+	86,  // 135: frontend.v1.FooterStatusVendorFault.api_retrying:type_name -> frontend.v1.FooterSubStatusVendorFaultApiRetrying
+	87,  // 136: frontend.v1.FooterStatusVendorFault.activity:type_name -> frontend.v1.FooterStatusVendorFaultActivity
+	88,  // 137: frontend.v1.FooterStatusVendorFaultActivity.salient:type_name -> frontend.v1.FooterStatusVendorFaultSalient
+	140, // 138: frontend.v1.FooterStatusVendorFaultActivity.unpinned:type_name -> frontend.v1.FooterActivityTransientOverEnduring
+	130, // 139: frontend.v1.FooterStatusVendorFaultSalient.at:type_name -> frontend.v1.FooterStatusActivityAt
+	135, // 140: frontend.v1.FooterStatusVendorFaultSalient.authenticating:type_name -> frontend.v1.FooterStatusActivityAuthenticating
+	92,  // 141: frontend.v1.FooterStatusVendorFaultSalient.fault:type_name -> frontend.v1.FooterStatusActivityFault
+	93,  // 142: frontend.v1.FooterStatusVendorFaultSalient.update:type_name -> frontend.v1.FooterStatusActivityUpdate
+	138, // 143: frontend.v1.FooterStatusVendorFaultSalient.notification:type_name -> frontend.v1.FooterStatusActivityNotification
+	139, // 144: frontend.v1.FooterStatusVendorFaultSalient.context_budget:type_name -> frontend.v1.FooterStatusActivityContextBudget
+	134, // 145: frontend.v1.FooterStatusVendorFaultSalient.retrying:type_name -> frontend.v1.FooterStatusActivityRetrying
+	118, // 146: frontend.v1.FooterStatusVendorFaultSalient.vendor_start:type_name -> frontend.v1.FooterStatusActivityVendorStart
+	94,  // 147: frontend.v1.FooterStatusActivityUpdate.building:type_name -> frontend.v1.FooterStatusActivityUpdateBuilding
+	95,  // 148: frontend.v1.FooterStatusActivityUpdate.installing:type_name -> frontend.v1.FooterStatusActivityUpdateInstalling
+	96,  // 149: frontend.v1.FooterStatusActivityUpdate.restarting_services:type_name -> frontend.v1.FooterStatusActivityUpdateRestartingServices
+	97,  // 150: frontend.v1.FooterStatusActivityUpdate.handing_over:type_name -> frontend.v1.FooterStatusActivityUpdateHandingOver
+	98,  // 151: frontend.v1.FooterStatusActivityUpdate.waiting:type_name -> frontend.v1.FooterStatusActivityUpdateWaiting
+	105, // 152: frontend.v1.FooterStatusActivityUpdate.notes:type_name -> frontend.v1.FooterStatusActivityUpdateNote
+	99,  // 153: frontend.v1.FooterStatusActivityUpdateBuilding.components:type_name -> frontend.v1.FooterStatusActivityUpdateComponent
+	99,  // 154: frontend.v1.FooterStatusActivityUpdateRestartingServices.services:type_name -> frontend.v1.FooterStatusActivityUpdateComponent
+	100, // 155: frontend.v1.FooterStatusActivityUpdateComponent.store:type_name -> frontend.v1.FooterStatusActivityUpdateComponentStore
+	101, // 156: frontend.v1.FooterStatusActivityUpdateComponent.sidecar:type_name -> frontend.v1.FooterStatusActivityUpdateComponentSidecar
+	102, // 157: frontend.v1.FooterStatusActivityUpdateComponent.daemon:type_name -> frontend.v1.FooterStatusActivityUpdateComponentDaemon
+	103, // 158: frontend.v1.FooterStatusActivityUpdateComponent.shim:type_name -> frontend.v1.FooterStatusActivityUpdateComponentShim
+	104, // 159: frontend.v1.FooterStatusActivityUpdateComponent.webapp:type_name -> frontend.v1.FooterStatusActivityUpdateComponentWebapp
+	106, // 160: frontend.v1.FooterStatusActivityUpdateNote.shim_when_idle:type_name -> frontend.v1.FooterStatusActivityUpdateNoteShimWhenIdle
+	108, // 161: frontend.v1.FooterStatusAgentReplFault.starting:type_name -> frontend.v1.FooterSubStatusAgentReplFaultStarting
+	109, // 162: frontend.v1.FooterStatusAgentReplFault.degraded:type_name -> frontend.v1.FooterSubStatusAgentReplFaultDegraded
+	110, // 163: frontend.v1.FooterStatusAgentReplFault.severed:type_name -> frontend.v1.FooterSubStatusAgentReplFaultSevered
+	111, // 164: frontend.v1.FooterStatusAgentReplFault.dead:type_name -> frontend.v1.FooterSubStatusAgentReplFaultDead
+	112, // 165: frontend.v1.FooterStatusAgentReplFault.start_failed:type_name -> frontend.v1.FooterSubStatusAgentReplFaultStartFailed
+	89,  // 166: frontend.v1.FooterStatusAgentReplFault.daemon_impaired:type_name -> frontend.v1.FooterSubStatusAgentReplFaultDaemonImpaired
+	116, // 167: frontend.v1.FooterStatusAgentReplFault.activity:type_name -> frontend.v1.FooterStatusAgentReplFaultActivity
+	117, // 168: frontend.v1.FooterStatusAgentReplFaultActivity.salient:type_name -> frontend.v1.FooterStatusAgentReplFaultSalient
+	140, // 169: frontend.v1.FooterStatusAgentReplFaultActivity.unpinned:type_name -> frontend.v1.FooterActivityTransientOverEnduring
+	130, // 170: frontend.v1.FooterStatusAgentReplFaultSalient.at:type_name -> frontend.v1.FooterStatusActivityAt
+	91,  // 171: frontend.v1.FooterStatusAgentReplFaultSalient.start_failed:type_name -> frontend.v1.FooterStatusActivityStartFailed
+	92,  // 172: frontend.v1.FooterStatusAgentReplFaultSalient.fault:type_name -> frontend.v1.FooterStatusActivityFault
+	93,  // 173: frontend.v1.FooterStatusAgentReplFaultSalient.update:type_name -> frontend.v1.FooterStatusActivityUpdate
+	138, // 174: frontend.v1.FooterStatusAgentReplFaultSalient.notification:type_name -> frontend.v1.FooterStatusActivityNotification
+	139, // 175: frontend.v1.FooterStatusAgentReplFaultSalient.context_budget:type_name -> frontend.v1.FooterStatusActivityContextBudget
+	120, // 176: frontend.v1.FooterStatusClosing.blocked:type_name -> frontend.v1.FooterSubStatusCloseBlocked
+	121, // 177: frontend.v1.FooterStatusClosing.activity:type_name -> frontend.v1.FooterStatusClosingActivity
+	122, // 178: frontend.v1.FooterStatusClosingActivity.salient:type_name -> frontend.v1.FooterStatusClosingSalient
+	140, // 179: frontend.v1.FooterStatusClosingActivity.unpinned:type_name -> frontend.v1.FooterActivityTransientOverEnduring
+	130, // 180: frontend.v1.FooterStatusClosingSalient.at:type_name -> frontend.v1.FooterStatusActivityAt
+	137, // 181: frontend.v1.FooterStatusClosingSalient.close_blocked:type_name -> frontend.v1.FooterStatusActivityCloseBlocked
+	93,  // 182: frontend.v1.FooterStatusClosingSalient.update:type_name -> frontend.v1.FooterStatusActivityUpdate
+	138, // 183: frontend.v1.FooterStatusClosingSalient.notification:type_name -> frontend.v1.FooterStatusActivityNotification
+	139, // 184: frontend.v1.FooterStatusClosingSalient.context_budget:type_name -> frontend.v1.FooterStatusActivityContextBudget
+	124, // 185: frontend.v1.FooterStatusLoading.memory:type_name -> frontend.v1.FooterSubStatusLoadingMemory
+	125, // 186: frontend.v1.FooterStatusLoading.invoked:type_name -> frontend.v1.FooterSubStatusLoadingInvoked
+	126, // 187: frontend.v1.FooterStatusLoading.discovered:type_name -> frontend.v1.FooterSubStatusLoadingDiscovered
+	127, // 188: frontend.v1.FooterStatusLoading.listing:type_name -> frontend.v1.FooterSubStatusLoadingListing
+	128, // 189: frontend.v1.FooterStatusLoading.activity:type_name -> frontend.v1.FooterStatusLoadingActivity
+	129, // 190: frontend.v1.FooterStatusLoadingActivity.salient:type_name -> frontend.v1.FooterStatusLoadingSalient
+	140, // 191: frontend.v1.FooterStatusLoadingActivity.unpinned:type_name -> frontend.v1.FooterActivityTransientOverEnduring
+	130, // 192: frontend.v1.FooterStatusLoadingSalient.at:type_name -> frontend.v1.FooterStatusActivityAt
+	93,  // 193: frontend.v1.FooterStatusLoadingSalient.update:type_name -> frontend.v1.FooterStatusActivityUpdate
+	138, // 194: frontend.v1.FooterStatusLoadingSalient.notification:type_name -> frontend.v1.FooterStatusActivityNotification
+	139, // 195: frontend.v1.FooterStatusLoadingSalient.context_budget:type_name -> frontend.v1.FooterStatusActivityContextBudget
+	132, // 196: frontend.v1.FooterStatusActivityWakeup.reason:type_name -> frontend.v1.FooterStatusActivityWakeupReason
+	130, // 197: frontend.v1.FooterStatusActivityRetrying.next_attempt:type_name -> frontend.v1.FooterStatusActivityAt
+	141, // 198: frontend.v1.FooterActivityTransientOverEnduring.transient:type_name -> frontend.v1.FooterActivityTransient
+	165, // 199: frontend.v1.FooterActivityTransientOverEnduring.enduring:type_name -> frontend.v1.FooterActivityEnduring
+	130, // 200: frontend.v1.FooterActivityTransient.at:type_name -> frontend.v1.FooterStatusActivityAt
+	148, // 201: frontend.v1.FooterActivityTransient.expiry:type_name -> frontend.v1.FooterActivityTransientExpiry
+	149, // 202: frontend.v1.FooterActivityTransient.agent:type_name -> frontend.v1.FooterActivityTransientAgent
+	150, // 203: frontend.v1.FooterActivityTransient.tool_call:type_name -> frontend.v1.FooterActivityTransientToolCall
+	151, // 204: frontend.v1.FooterActivityTransient.task:type_name -> frontend.v1.FooterActivityTransientTask
+	152, // 205: frontend.v1.FooterActivityTransient.submitting:type_name -> frontend.v1.FooterActivityTransientSubmitting
+	159, // 206: frontend.v1.FooterActivityTransient.hook:type_name -> frontend.v1.FooterActivityTransientHook
+	160, // 207: frontend.v1.FooterActivityTransient.context_injected:type_name -> frontend.v1.FooterActivityTransientContextInjected
+	92,  // 208: frontend.v1.FooterActivityTransient.fault:type_name -> frontend.v1.FooterStatusActivityFault
+	161, // 209: frontend.v1.FooterActivityTransient.daemon_warning:type_name -> frontend.v1.FooterActivityTransientDaemonWarning
+	162, // 210: frontend.v1.FooterActivityTransient.daemon_error:type_name -> frontend.v1.FooterActivityTransientDaemonError
+	163, // 211: frontend.v1.FooterActivityTransient.session_change:type_name -> frontend.v1.FooterActivityTransientSessionChange
+	164, // 212: frontend.v1.FooterActivityTransient.updated:type_name -> frontend.v1.FooterActivityTransientUpdated
+	143, // 213: frontend.v1.FooterActivityTransient.network_resume:type_name -> frontend.v1.FooterActivityTransientNetworkResume
+	142, // 214: frontend.v1.FooterActivityTransient.compaction_concluded:type_name -> frontend.v1.FooterActivityTransientCompactionConcluded
+	133, // 215: frontend.v1.FooterActivityTransient.api_restored:type_name -> frontend.v1.FooterActivityTransientApiRestored
+	144, // 216: frontend.v1.FooterActivityTransientNetworkResume.waiting:type_name -> frontend.v1.FooterActivityTransientNetworkResumeWaiting
+	145, // 217: frontend.v1.FooterActivityTransientNetworkResume.resumed:type_name -> frontend.v1.FooterActivityTransientNetworkResumeResumed
+	146, // 218: frontend.v1.FooterActivityTransientNetworkResume.gave_up:type_name -> frontend.v1.FooterActivityTransientNetworkResumeGaveUp
+	147, // 219: frontend.v1.FooterActivityTransientNetworkResume.abandoned:type_name -> frontend.v1.FooterActivityTransientNetworkResumeAbandoned
+	153, // 220: frontend.v1.FooterActivityTransientSubmitting.held:type_name -> frontend.v1.FooterActivityTransientSubmittingHeld
+	154, // 221: frontend.v1.FooterActivityTransientSubmitting.classifying:type_name -> frontend.v1.FooterActivityTransientSubmittingClassifying
+	155, // 222: frontend.v1.FooterActivityTransientSubmitting.interjecting:type_name -> frontend.v1.FooterActivityTransientSubmittingInterjecting
+	156, // 223: frontend.v1.FooterActivityTransientSubmitting.after_tool_call:type_name -> frontend.v1.FooterActivityTransientSubmittingAfterToolCall
+	157, // 224: frontend.v1.FooterActivityTransientSubmitting.coalesced:type_name -> frontend.v1.FooterActivityTransientSubmittingCoalesced
+	158, // 225: frontend.v1.FooterActivityTransientSubmitting.delivered:type_name -> frontend.v1.FooterActivityTransientSubmittingDelivered
+	105, // 226: frontend.v1.FooterActivityTransientUpdated.notes:type_name -> frontend.v1.FooterStatusActivityUpdateNote
+	167, // 227: frontend.v1.FooterActivityEnduring.usage:type_name -> frontend.v1.FooterActivityEnduringUsage
+	166, // 228: frontend.v1.FooterActivityEnduring.unobserved:type_name -> frontend.v1.FooterActivityEnduringUnobserved
+	174, // 229: frontend.v1.FooterActivityEnduringUsage.session:type_name -> frontend.v1.FooterAllowance
+	174, // 230: frontend.v1.FooterActivityEnduringUsage.weekly:type_name -> frontend.v1.FooterAllowance
+	168, // 231: frontend.v1.FooterActivityEnduringUsage.sample:type_name -> frontend.v1.FooterAllowanceSample
+	174, // 232: frontend.v1.FooterActivityEnduringUsage.overage:type_name -> frontend.v1.FooterAllowance
+	169, // 233: frontend.v1.FooterAllowanceSample.available:type_name -> frontend.v1.FooterAllowanceSampleAvailable
+	170, // 234: frontend.v1.FooterAllowanceSample.service_unavailable:type_name -> frontend.v1.FooterAllowanceSampleServiceUnavailable
+	171, // 235: frontend.v1.FooterAllowanceSample.window_unavailable:type_name -> frontend.v1.FooterAllowanceSampleWindowUnavailable
+	172, // 236: frontend.v1.FooterAllowanceSample.utilization_unavailable:type_name -> frontend.v1.FooterAllowanceSampleUtilizationUnavailable
+	173, // 237: frontend.v1.FooterAllowanceSample.sampling_failure:type_name -> frontend.v1.FooterAllowanceSampleSamplingFailure
+	175, // 238: frontend.v1.FooterAllowance.allowed:type_name -> frontend.v1.FooterAllowanceAllowed
+	176, // 239: frontend.v1.FooterAllowance.allowed_warning:type_name -> frontend.v1.FooterAllowanceAllowedWarning
+	177, // 240: frontend.v1.FooterAllowance.rejected:type_name -> frontend.v1.FooterAllowanceRejected
+	180, // 241: frontend.v1.FooterTokensCell.input:type_name -> frontend.v1.FooterTokensCellInput
+	181, // 242: frontend.v1.FooterTokensCell.alarm:type_name -> frontend.v1.FooterTokensCellAlarm
+	182, // 243: frontend.v1.FooterTokensCell.verdict:type_name -> frontend.v1.FooterTokensCellVerdict
+	264, // 244: frontend.v1.FooterTokensCellInput.heat:type_name -> frontend.v1.TokenHeat
+	183, // 245: frontend.v1.FooterTokensCellVerdict.complete:type_name -> frontend.v1.FooterTokensCellVerdictComplete
+	184, // 246: frontend.v1.FooterTokensCellVerdict.incomplete:type_name -> frontend.v1.FooterTokensCellVerdictIncomplete
+	185, // 247: frontend.v1.FooterTokensCellVerdict.invalid:type_name -> frontend.v1.FooterTokensCellVerdictInvalid
+	190, // 248: frontend.v1.FooterLiveWorkChips.agents:type_name -> frontend.v1.FooterChipAgents
+	192, // 249: frontend.v1.FooterLiveWorkChips.tasks:type_name -> frontend.v1.FooterChipTasks
+	193, // 250: frontend.v1.FooterLiveWorkChips.shells:type_name -> frontend.v1.FooterChipShells
+	189, // 251: frontend.v1.FooterLiveWorkChips.monitors:type_name -> frontend.v1.FooterChipMonitors
+	188, // 252: frontend.v1.FooterLiveWorkChips.crons:type_name -> frontend.v1.FooterChipCrons
+	187, // 253: frontend.v1.FooterLiveWorkChips.merge_tests:type_name -> frontend.v1.FooterChipMergeTests
+	191, // 254: frontend.v1.FooterChipAgents.waiting_for_api:type_name -> frontend.v1.FooterChipAgentsWaitingForApi
+	220, // 255: frontend.v1.FooterExpanded.tokens:type_name -> frontend.v1.FooterExpandedTokens
+	235, // 256: frontend.v1.FooterExpanded.agents:type_name -> frontend.v1.FooterExpandedAgents
+	243, // 257: frontend.v1.FooterExpanded.tasks:type_name -> frontend.v1.FooterExpandedTasks
+	251, // 258: frontend.v1.FooterExpanded.shells:type_name -> frontend.v1.FooterExpandedShells
+	215, // 259: frontend.v1.FooterExpanded.monitors:type_name -> frontend.v1.FooterExpandedMonitors
+	208, // 260: frontend.v1.FooterExpanded.crons:type_name -> frontend.v1.FooterExpandedCrons
+	195, // 261: frontend.v1.FooterExpanded.merge_tests:type_name -> frontend.v1.FooterExpandedMergeTests
+	196, // 262: frontend.v1.FooterExpandedMergeTests.rows:type_name -> frontend.v1.FooterMergeTestRow
+	197, // 263: frontend.v1.FooterMergeTestRow.name:type_name -> frontend.v1.FooterMergeTestRowName
+	198, // 264: frontend.v1.FooterMergeTestRow.state:type_name -> frontend.v1.FooterMergeTestRowState
+	199, // 265: frontend.v1.FooterMergeTestRowState.waiting:type_name -> frontend.v1.FooterMergeTestRowWaiting
+	200, // 266: frontend.v1.FooterMergeTestRowState.running:type_name -> frontend.v1.FooterMergeTestRowRunning
+	201, // 267: frontend.v1.FooterMergeTestRowState.passed:type_name -> frontend.v1.FooterMergeTestRowPassed
+	202, // 268: frontend.v1.FooterMergeTestRowState.failed:type_name -> frontend.v1.FooterMergeTestRowFailed
+	204, // 269: frontend.v1.FooterExpandedFocus.agents:type_name -> frontend.v1.FooterFocusAgents
+	205, // 270: frontend.v1.FooterExpandedFocus.shells:type_name -> frontend.v1.FooterFocusShells
+	206, // 271: frontend.v1.FooterExpandedFocus.monitors:type_name -> frontend.v1.FooterFocusMonitors
+	207, // 272: frontend.v1.FooterExpandedFocus.merge_tests:type_name -> frontend.v1.FooterFocusMergeTests
+	209, // 273: frontend.v1.FooterExpandedCrons.rows:type_name -> frontend.v1.FooterCronRow
+	210, // 274: frontend.v1.FooterCronRow.schedule:type_name -> frontend.v1.FooterCronRowSchedule
+	211, // 275: frontend.v1.FooterCronRow.prompt:type_name -> frontend.v1.FooterCronRowPrompt
+	212, // 276: frontend.v1.FooterCronRow.next_fire:type_name -> frontend.v1.FooterCronRowNextFire
+	213, // 277: frontend.v1.FooterCronRow.recurring:type_name -> frontend.v1.FooterCronRowRecurring
+	214, // 278: frontend.v1.FooterCronRow.durable:type_name -> frontend.v1.FooterCronRowDurable
+	216, // 279: frontend.v1.FooterExpandedMonitors.rows:type_name -> frontend.v1.FooterMonitorRow
+	217, // 280: frontend.v1.FooterMonitorRow.description:type_name -> frontend.v1.FooterMonitorRowDescription
+	218, // 281: frontend.v1.FooterMonitorRow.runtime:type_name -> frontend.v1.FooterMonitorRowRuntime
+	219, // 282: frontend.v1.FooterMonitorRow.persistent:type_name -> frontend.v1.FooterMonitorRowPersistent
+	253, // 283: frontend.v1.FooterMonitorRow.work:type_name -> frontend.v1.FooterWorkId
+	254, // 284: frontend.v1.FooterMonitorRow.jump:type_name -> frontend.v1.FooterJump
+	224, // 285: frontend.v1.FooterExpandedTokens.input:type_name -> frontend.v1.FooterTokensLineInput
+	225, // 286: frontend.v1.FooterExpandedTokens.cache_read:type_name -> frontend.v1.FooterTokensLineCacheRead
+	226, // 287: frontend.v1.FooterExpandedTokens.cache_write:type_name -> frontend.v1.FooterTokensLineCacheWrite
+	227, // 288: frontend.v1.FooterExpandedTokens.output:type_name -> frontend.v1.FooterTokensLineOutput
+	228, // 289: frontend.v1.FooterExpandedTokens.thinking:type_name -> frontend.v1.FooterTokensLineThinking
+	229, // 290: frontend.v1.FooterExpandedTokens.first_token:type_name -> frontend.v1.FooterTokensLineFirstToken
+	230, // 291: frontend.v1.FooterExpandedTokens.alarm:type_name -> frontend.v1.FooterTokensLineAlarm
+	231, // 292: frontend.v1.FooterExpandedTokens.verdict:type_name -> frontend.v1.FooterTokensLineVerdict
+	221, // 293: frontend.v1.FooterExpandedTokens.context_growth:type_name -> frontend.v1.FooterTokensLineContextGrowth
+	223, // 294: frontend.v1.FooterExpandedTokens.agents:type_name -> frontend.v1.FooterTokensAgent
+	222, // 295: frontend.v1.FooterTokensLineContextGrowth.since_cut:type_name -> frontend.v1.FooterTokensLineContextGrowthSinceCut
+	224, // 296: frontend.v1.FooterTokensAgent.input:type_name -> frontend.v1.FooterTokensLineInput
+	225, // 297: frontend.v1.FooterTokensAgent.cache_read:type_name -> frontend.v1.FooterTokensLineCacheRead
+	226, // 298: frontend.v1.FooterTokensAgent.cache_write:type_name -> frontend.v1.FooterTokensLineCacheWrite
+	227, // 299: frontend.v1.FooterTokensAgent.output:type_name -> frontend.v1.FooterTokensLineOutput
+	232, // 300: frontend.v1.FooterTokensLineVerdict.complete:type_name -> frontend.v1.FooterTokensLineVerdictComplete
+	233, // 301: frontend.v1.FooterTokensLineVerdict.incomplete:type_name -> frontend.v1.FooterTokensLineVerdictIncomplete
+	234, // 302: frontend.v1.FooterTokensLineVerdict.invalid:type_name -> frontend.v1.FooterTokensLineVerdictInvalid
+	236, // 303: frontend.v1.FooterExpandedAgents.rows:type_name -> frontend.v1.FooterAgentRow
+	239, // 304: frontend.v1.FooterAgentRow.label:type_name -> frontend.v1.FooterAgentRowLabel
+	240, // 305: frontend.v1.FooterAgentRow.description:type_name -> frontend.v1.FooterAgentRowDescription
+	241, // 306: frontend.v1.FooterAgentRow.tokens:type_name -> frontend.v1.FooterAgentRowTokens
+	242, // 307: frontend.v1.FooterAgentRow.runtime:type_name -> frontend.v1.FooterAgentRowRuntime
+	253, // 308: frontend.v1.FooterAgentRow.work:type_name -> frontend.v1.FooterWorkId
+	254, // 309: frontend.v1.FooterAgentRow.jump:type_name -> frontend.v1.FooterJump
+	237, // 310: frontend.v1.FooterAgentRow.running:type_name -> frontend.v1.FooterAgentRowRunning
+	238, // 311: frontend.v1.FooterAgentRow.waiting_for_api:type_name -> frontend.v1.FooterAgentRowWaitingForApi
+	244, // 312: frontend.v1.FooterExpandedTasks.rows:type_name -> frontend.v1.FooterTaskRow
+	246, // 313: frontend.v1.FooterTaskRow.status:type_name -> frontend.v1.FooterTaskRowStatus
+	245, // 314: frontend.v1.FooterTaskRow.subject:type_name -> frontend.v1.FooterTaskRowSubject
+	247, // 315: frontend.v1.FooterTaskRowStatus.pending:type_name -> frontend.v1.FooterTaskRowPending
+	248, // 316: frontend.v1.FooterTaskRowStatus.running:type_name -> frontend.v1.FooterTaskRowRunning
+	250, // 317: frontend.v1.FooterTaskRowStatus.completed:type_name -> frontend.v1.FooterTaskRowCompleted
+	249, // 318: frontend.v1.FooterTaskRowRunning.active_form:type_name -> frontend.v1.FooterTaskRowActiveForm
+	252, // 319: frontend.v1.FooterExpandedShells.rows:type_name -> frontend.v1.FooterShellRow
+	257, // 320: frontend.v1.FooterShellRow.command:type_name -> frontend.v1.FooterShellRowCommand
+	258, // 321: frontend.v1.FooterShellRow.runtime:type_name -> frontend.v1.FooterShellRowRuntime
+	253, // 322: frontend.v1.FooterShellRow.work:type_name -> frontend.v1.FooterWorkId
+	254, // 323: frontend.v1.FooterShellRow.jump:type_name -> frontend.v1.FooterJump
+	265, // 324: frontend.v1.FooterJump.entry:type_name -> frontend.v1.FeedId
+	255, // 325: frontend.v1.FooterJump.unresolved:type_name -> frontend.v1.FooterJumpUnresolved
+	256, // 326: frontend.v1.FooterJumpUnresolved.not_drawn:type_name -> frontend.v1.FooterJumpNotDrawn
+	260, // 327: frontend.v1.FooterStatusNetworkFault.offline:type_name -> frontend.v1.FooterSubStatusNetworkFaultOffline
+	261, // 328: frontend.v1.FooterStatusNetworkFault.activity:type_name -> frontend.v1.FooterStatusNetworkFaultActivity
+	262, // 329: frontend.v1.FooterStatusNetworkFaultActivity.salient:type_name -> frontend.v1.FooterStatusNetworkFaultSalient
+	140, // 330: frontend.v1.FooterStatusNetworkFaultActivity.unpinned:type_name -> frontend.v1.FooterActivityTransientOverEnduring
+	130, // 331: frontend.v1.FooterStatusNetworkFaultSalient.at:type_name -> frontend.v1.FooterStatusActivityAt
+	263, // 332: frontend.v1.FooterStatusNetworkFaultSalient.offline:type_name -> frontend.v1.FooterStatusActivityNetworkOffline
+	93,  // 333: frontend.v1.FooterStatusNetworkFaultSalient.update:type_name -> frontend.v1.FooterStatusActivityUpdate
+	138, // 334: frontend.v1.FooterStatusNetworkFaultSalient.notification:type_name -> frontend.v1.FooterStatusActivityNotification
+	139, // 335: frontend.v1.FooterStatusNetworkFaultSalient.context_budget:type_name -> frontend.v1.FooterStatusActivityContextBudget
+	336, // [336:336] is the sub-list for method output_type
+	336, // [336:336] is the sub-list for method input_type
+	336, // [336:336] is the sub-list for extension type_name
+	336, // [336:336] is the sub-list for extension extendee
+	0,   // [0:336] is the sub-list for field type_name
 }
 
 func init() { file_frontend_v1_footer_proto_init() }
@@ -18388,14 +18842,15 @@ func file_frontend_v1_footer_proto_init() {
 		(*FooterStatus_Interrupted)(nil),
 		(*FooterStatus_Merging)(nil),
 		(*FooterStatus_Background)(nil),
-		(*FooterStatus_Blocked)(nil),
-		(*FooterStatus_Disconnected)(nil),
+		(*FooterStatus_VendorFault)(nil),
+		(*FooterStatus_AgentReplFault)(nil),
 		(*FooterStatus_Closing)(nil),
 		(*FooterStatus_Loading)(nil),
 		(*FooterStatus_MergeFailed)(nil),
 		(*FooterStatus_Merged)(nil),
 		(*FooterStatus_TurnFailed)(nil),
 		(*FooterStatus_Degraded)(nil),
+		(*FooterStatus_NetworkFault)(nil),
 	}
 	file_frontend_v1_footer_proto_msgTypes[3].OneofWrappers = []any{
 		(*FooterStatusIdle_Ready)(nil),
@@ -18530,25 +18985,28 @@ func file_frontend_v1_footer_proto_init() {
 		(*FooterStatusBackgroundSalient_ContextBudget)(nil),
 	}
 	file_frontend_v1_footer_proto_msgTypes[80].OneofWrappers = []any{
-		(*FooterStatusBlocked_Auth)(nil),
-		(*FooterStatusBlocked_UsageLimit)(nil),
-		(*FooterStatusBlocked_VendorError)(nil),
-		(*FooterStatusBlocked_Billing)(nil),
-		(*FooterStatusBlocked_QueryDied)(nil),
-		(*FooterStatusBlocked_DaemonImpaired)(nil),
-		(*FooterStatusBlocked_ApiRetrying)(nil),
+		(*FooterStatusVendorFault_Auth)(nil),
+		(*FooterStatusVendorFault_UsageLimit)(nil),
+		(*FooterStatusVendorFault_VendorError)(nil),
+		(*FooterStatusVendorFault_Billing)(nil),
+		(*FooterStatusVendorFault_QueryDied)(nil),
+		(*FooterStatusVendorFault_VendorRetry)(nil),
+		(*FooterStatusVendorFault_VendorRejection)(nil),
+		(*FooterStatusVendorFault_VendorFailed)(nil),
+		(*FooterStatusVendorFault_ApiRetrying)(nil),
 	}
 	file_frontend_v1_footer_proto_msgTypes[87].OneofWrappers = []any{
-		(*FooterStatusBlockedActivity_Salient)(nil),
-		(*FooterStatusBlockedActivity_Unpinned)(nil),
+		(*FooterStatusVendorFaultActivity_Salient)(nil),
+		(*FooterStatusVendorFaultActivity_Unpinned)(nil),
 	}
 	file_frontend_v1_footer_proto_msgTypes[88].OneofWrappers = []any{
-		(*FooterStatusBlockedSalient_Authenticating)(nil),
-		(*FooterStatusBlockedSalient_Fault)(nil),
-		(*FooterStatusBlockedSalient_Update)(nil),
-		(*FooterStatusBlockedSalient_Notification)(nil),
-		(*FooterStatusBlockedSalient_ContextBudget)(nil),
-		(*FooterStatusBlockedSalient_Retrying)(nil),
+		(*FooterStatusVendorFaultSalient_Authenticating)(nil),
+		(*FooterStatusVendorFaultSalient_Fault)(nil),
+		(*FooterStatusVendorFaultSalient_Update)(nil),
+		(*FooterStatusVendorFaultSalient_Notification)(nil),
+		(*FooterStatusVendorFaultSalient_ContextBudget)(nil),
+		(*FooterStatusVendorFaultSalient_Retrying)(nil),
+		(*FooterStatusVendorFaultSalient_VendorStart)(nil),
 	}
 	file_frontend_v1_footer_proto_msgTypes[93].OneofWrappers = []any{
 		(*FooterStatusActivityUpdate_Building)(nil),
@@ -18568,26 +19026,23 @@ func file_frontend_v1_footer_proto_init() {
 		(*FooterStatusActivityUpdateNote_ShimWhenIdle)(nil),
 	}
 	file_frontend_v1_footer_proto_msgTypes[107].OneofWrappers = []any{
-		(*FooterStatusDisconnected_Starting)(nil),
-		(*FooterStatusDisconnected_Degraded)(nil),
-		(*FooterStatusDisconnected_Severed)(nil),
-		(*FooterStatusDisconnected_Dead)(nil),
-		(*FooterStatusDisconnected_StartFailed)(nil),
-		(*FooterStatusDisconnected_VendorRetry)(nil),
-		(*FooterStatusDisconnected_VendorRejection)(nil),
-		(*FooterStatusDisconnected_VendorFailed)(nil),
+		(*FooterStatusAgentReplFault_Starting)(nil),
+		(*FooterStatusAgentReplFault_Degraded)(nil),
+		(*FooterStatusAgentReplFault_Severed)(nil),
+		(*FooterStatusAgentReplFault_Dead)(nil),
+		(*FooterStatusAgentReplFault_StartFailed)(nil),
+		(*FooterStatusAgentReplFault_DaemonImpaired)(nil),
 	}
 	file_frontend_v1_footer_proto_msgTypes[116].OneofWrappers = []any{
-		(*FooterStatusDisconnectedActivity_Salient)(nil),
-		(*FooterStatusDisconnectedActivity_Unpinned)(nil),
+		(*FooterStatusAgentReplFaultActivity_Salient)(nil),
+		(*FooterStatusAgentReplFaultActivity_Unpinned)(nil),
 	}
 	file_frontend_v1_footer_proto_msgTypes[117].OneofWrappers = []any{
-		(*FooterStatusDisconnectedSalient_StartFailed)(nil),
-		(*FooterStatusDisconnectedSalient_Fault)(nil),
-		(*FooterStatusDisconnectedSalient_Update)(nil),
-		(*FooterStatusDisconnectedSalient_Notification)(nil),
-		(*FooterStatusDisconnectedSalient_ContextBudget)(nil),
-		(*FooterStatusDisconnectedSalient_VendorStart)(nil),
+		(*FooterStatusAgentReplFaultSalient_StartFailed)(nil),
+		(*FooterStatusAgentReplFaultSalient_Fault)(nil),
+		(*FooterStatusAgentReplFaultSalient_Update)(nil),
+		(*FooterStatusAgentReplFaultSalient_Notification)(nil),
+		(*FooterStatusAgentReplFaultSalient_ContextBudget)(nil),
 	}
 	file_frontend_v1_footer_proto_msgTypes[119].OneofWrappers = []any{
 		(*FooterStatusClosing_Blocked)(nil),
@@ -18721,13 +19176,26 @@ func file_frontend_v1_footer_proto_init() {
 	file_frontend_v1_footer_proto_msgTypes[255].OneofWrappers = []any{
 		(*FooterJumpUnresolved_NotDrawn)(nil),
 	}
+	file_frontend_v1_footer_proto_msgTypes[259].OneofWrappers = []any{
+		(*FooterStatusNetworkFault_Offline)(nil),
+	}
+	file_frontend_v1_footer_proto_msgTypes[261].OneofWrappers = []any{
+		(*FooterStatusNetworkFaultActivity_Salient)(nil),
+		(*FooterStatusNetworkFaultActivity_Unpinned)(nil),
+	}
+	file_frontend_v1_footer_proto_msgTypes[262].OneofWrappers = []any{
+		(*FooterStatusNetworkFaultSalient_Offline)(nil),
+		(*FooterStatusNetworkFaultSalient_Update)(nil),
+		(*FooterStatusNetworkFaultSalient_Notification)(nil),
+		(*FooterStatusNetworkFaultSalient_ContextBudget)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_frontend_v1_footer_proto_rawDesc), len(file_frontend_v1_footer_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   259,
+			NumMessages:   264,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
