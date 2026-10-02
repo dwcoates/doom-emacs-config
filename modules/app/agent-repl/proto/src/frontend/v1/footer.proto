@@ -123,10 +123,12 @@ message FooterStrip {
 //   STATICALLY TYPED datum in an activity message (a count, an instant, a
 //   sha) is a strong indicator that datum deserves color in the rendered
 //   line.
-// - EVERY ACTIVITY LINE BELONGS TO ONE OF FOUR TIERS, defined by WHAT ENDS
-//   the line (the owner's rulings of 2026-09-28 and 2026-09-30; agent-repl
-//   AGENTS.md "Footer activity lines are salient, transient, quiet, or
-//   enduring"):
+// - EVERY ACTIVITY LINE BELONGS TO ONE OF THREE TIERS, defined by WHAT ENDS
+//   the line (the owner's rulings of 2026-09-28, 2026-09-30 and 2026-10-01;
+//   agent-repl AGENTS.md "Footer activity lines are salient, transient, or
+//   enduring"). A fourth, QUIET tier (the line composed from the feed item
+//   that landed last, standing until the next one surfaced) is RETIRED
+//   (owner ruling, 2026-10-01): it was too chatty and added next to nothing.
 //     SALIENT    ends when the condition it describes stops being true, never
 //                on a timer. STATUS-BOUND: each status arm declares its own
 //                salient kinds, so a salient line illegal under a status is
@@ -139,14 +141,10 @@ message FooterStrip {
 //                instant passes. STATUS-INDEPENDENT (FooterActivityTransient):
 //                an event can land under any status, and the last event may
 //                outlive the status it landed under by its display window.
-//     QUIET      the quiet-stretch line (FooterActivityQuietStretch): ends
-//                when the next feed item surfaces. Legal only under `working`
-//                and `background`, whose work lands in the feed.
 //     ENDURING   never ends: always true, so the cell is never empty
 //                (FooterActivityEnduring). ONE line, chosen by the daemon.
 //                STATUS-INDEPENDENT.
-// - PRECEDENCE IS BY TIER, ALWAYS: salient, then transient, then quiet, then
-//   enduring. A standing salient line outranks every other tier, so a push
+// - PRECEDENCE IS BY TIER, ALWAYS: salient, then transient, then enduring. A standing salient line outranks every other tier, so a push
 //   carries EITHER the salient line OR the unpinned tiers beneath it, never
 //   both. Within the salient tier a kind that explains the standing substatus
 //   ranks first, then a fault, then a deploy's progress (`update`), then the
@@ -155,7 +153,7 @@ message FooterStrip {
 // - THE DAEMON DECIDES A TRANSIENT'S EXPIRY; THE CLIENT APPLIES IT. The
 //   transient ships with its expiry instant beside the lines beneath it, and
 //   the client draws the transient until its clock passes the expiry, then
-//   the quiet-stretch line when one stands, then the enduring line. The
+//   the enduring line. The
 //   daemon runs no expiry timer and pushes nothing when a transient lapses:
 //   what is drawn is a pure function of the last push and the client's clock,
 //   the same client-side ticking the turn clock does.
@@ -445,16 +443,15 @@ message FooterStatusWorking {
   // The activity cell. ALWAYS SET: the enduring tier guarantees the cell has
   // something to draw under every status.
   FooterStatusWorkingActivity activity = 5;
-  // The quiet-stretch line the next feed item just ended, which the client
-  // keeps drawing until it has PAINTED that item. See
-  // FooterStatusQuietStretchEnding.
-  optional FooterStatusQuietStretchEnding quiet_stretch_ending = 12;
+  // Tag 12 (`quiet_stretch_ending`) is RETIRED with the quiet tier (owner
+  // ruling, 2026-10-01: the quiet-stretch lines were too chatty and added
+  // next to nothing).
+  reserved 12;
+  reserved "quiet_stretch_ending";
 }
 // The activity cell while a turn runs: the salient line, or the transient
-// over the quiet-stretch line over the enduring line. Most of a turn is
-// unpinned: the transient tier keeps the cell moving with the turn's tool
-// calls and task moves, and the quiet tier fills the stretches between feed
-// items.
+// over the enduring line. Most of a turn is unpinned: the transient tier keeps
+// the cell moving with the turn's task moves.
 message FooterStatusWorkingActivity {
   // WHICH TIER the daemon resolved. A salient line outranks every transient,
   // so the two branches are exclusive; exactly one is set, and a push with
@@ -463,8 +460,8 @@ message FooterStatusWorkingActivity {
     // A condition that blocks the turn stands.
     FooterStatusWorkingSalient salient = 1;
     // Nothing salient stands: the newest transient (if any) over the
-    // quiet-stretch line (if any) over the enduring line.
-    FooterActivityTransientOverQuietOverEnduring unpinned = 2;
+    // enduring line.
+    FooterActivityTransientOverEnduring unpinned = 2;
   }
 }
 // The salient kinds legal while a turn runs: the acts that hold the turn
@@ -506,52 +503,6 @@ message FooterStatusWorkingSalient {
   // the vendor's allowance figures (owner ruling, 2026-10-01).
   reserved 5;
   reserved "rate_limit";
-}
-// THE QUIET TIER's line, composed by the daemon out of the feed item that
-// landed last ("✅ Bash finished — handling result...", "❌ Read failed —
-// handling failure..."), standing until the next feed item surfaces. Drawn
-// verbatim; a client words nothing.
-message FooterActivityQuietStretch {
-  // When the line began standing; the client ticks the relative age.
-  FooterStatusActivityAt at = 1;
-  // The composed line, drawn verbatim.
-  string text = 2;
-}
-// THE END OF A QUIET STRETCH, held until the user can SEE what ended it
-// (owner ruling, 2026-09-29). The daemon ends a quiet stretch the moment the
-// next feed item is drawn, but the client paints that item later; clearing the
-// line on the daemon's edge left a visible gap with neither the line nor the
-// item on screen. So the daemon states the line that just ended and the row
-// that ended it, and the CLIENT decides when the line goes:
-//
-//   - While this is set, the client draws `text` in the activity cell, in
-//     place of the status's `activity`, until it has painted the row
-//     `until_painted` names (the row is in the page and a frame has been
-//     painted with it), and clears it on that paint. A row already painted
-//     when the ending arrives holds nothing, and a later frame naming the
-//     same row does not hold again.
-//   - A client whose feed is not showing the live tail (the user has scrolled
-//     back through history) will not paint the row where the user is looking,
-//     and draws `activity` at once.
-//   - It is stated only for a row on the ROOT feed, the one feed the client
-//     always shows. An item drawn on a sub-feed (a subagent's own items) is
-//     painted only if the reader has that bubble open, so its drawing ends
-//     the stretch with no ending, and the line clears at once.
-//   - The daemon sets it only while the cell would draw its ENDURING line:
-//     no salient, transient or quiet line stands. Any of those is newer than
-//     the ended line and is drawn at once: the client never flashes a line
-//     that has already been superseded (owner ruling, 2026-09-29). It is
-//     cleared when the next quiet-stretch line stands and when the status
-//     changes.
-message FooterStatusQuietStretchEnding {
-  // The line that just ended, drawn verbatim.
-  string text = 1;
-  // The feed row whose drawing ended the stretch, exactly as the feed served
-  // it. Echoed, never parsed.
-  FeedId until_painted = 2;
-  // When the ended line began standing, so the held line ticks the same age
-  // it ticked while it was the activity.
-  FooterStatusActivityAt at = 3;
 }
 // The running compaction's progress line, composed by the daemon out of the
 // phase the producer last stated ("summarizing the conversation…"). Drawn
@@ -1018,14 +969,14 @@ message FooterStatusBackground {
   // The activity cell. ALWAYS SET: the enduring tier guarantees the cell has
   // something to draw under every status.
   FooterStatusBackgroundActivity activity = 1;
-  // The quiet-stretch line the next feed item just ended, which the client
-  // keeps drawing until it has PAINTED that item. See
-  // FooterStatusQuietStretchEnding.
-  optional FooterStatusQuietStretchEnding quiet_stretch_ending = 2;
+  // Tag 2 (`quiet_stretch_ending`) is RETIRED with the quiet tier (owner
+  // ruling, 2026-10-01: the quiet-stretch lines were too chatty and added
+  // next to nothing).
+  reserved 2;
+  reserved "quiet_stretch_ending";
 }
 // The activity cell while background: the salient line, or the transient
-// over the quiet-stretch line over the enduring line. The quiet tier carries
-// the detached work's feed item that landed last ("✅ Subagent finished").
+// over the enduring line.
 message FooterStatusBackgroundActivity {
   // WHICH TIER the daemon resolved. Exactly one is set, and a push with
   // neither is malformed.
@@ -1033,12 +984,12 @@ message FooterStatusBackgroundActivity {
     // A condition that blocks the user stands.
     FooterStatusBackgroundSalient salient = 1;
     // Nothing salient stands: the newest transient (if any) over the
-    // quiet-stretch line (if any) over the enduring line.
-    FooterActivityTransientOverQuietOverEnduring unpinned = 2;
+    // enduring line.
+    FooterActivityTransientOverEnduring unpinned = 2;
   }
 }
 // The salient kinds legal while background. Detached work has no line of
-// its own here (its landings are the quiet tier's), so only the
+// its own here (its landings are the feed's), so only the
 // status-independent kinds can stand: a deploy's progress, the push
 // notification and the context-budget warning, in that order.
 message FooterStatusBackgroundSalient {
@@ -1615,8 +1566,8 @@ message FooterStatusActivityContextBudget {
 // something. A transient ends when a newer one replaces it or its expiry
 // instant passes; it never stands on a condition.
 
-// The activity cell when no salient line stands, under a status whose work
-// never lands in the feed: the newest transient drawn over the enduring line,
+// The activity cell when no salient line stands, under EVERY status: the
+// newest transient drawn over the enduring line,
 // with the choice between them made by the client's clock against the
 // transient's expiry.
 //
@@ -1636,21 +1587,6 @@ message FooterActivityTransientOverEnduring {
   // The line beneath every transient. ALWAYS SET, so the cell always has
   // something to draw once a transient lapses.
   FooterActivityEnduring enduring = 2;
-}
-// The unpinned tiers of a status whose work lands in the feed (`working`,
-// `background`): the newest transient over the quiet-stretch line over the
-// enduring line. The client draws the transient until its expiry, then the
-// quiet-stretch line if one stands, then the enduring line.
-message FooterActivityTransientOverQuietOverEnduring {
-  // The newest transient, exactly as FooterActivityTransientOverEnduring
-  // carries it.
-  optional FooterActivityTransient transient = 1;
-  // THE QUIET TIER: SET from the moment a feed item has fully landed until
-  // the next one first surfaces, and UNSET outside such a stretch. A live
-  // transient covers it; it shows again when the transient lapses.
-  optional FooterActivityQuietStretch quiet_stretch = 2;
-  // The line beneath every other tier. ALWAYS SET.
-  FooterActivityEnduring enduring = 3;
 }
 
 // One transient line: an event, when it happened, when it stops being drawn,
@@ -1876,8 +1812,8 @@ message FooterActivityTransientUpdated {
 }
 
 // ---- The enduring tier -------------------------------------------------------
-// Facts that are always true, drawn whenever nothing salient stands, no
-// transient is live and no quiet-stretch line stands.
+// Facts that are always true, drawn whenever nothing salient stands and no
+// transient is live.
 
 // The enduring line: the account's usage allowances. It is ENDURING, always
 // true while it stands, so it carries no age: when it was drawn says nothing

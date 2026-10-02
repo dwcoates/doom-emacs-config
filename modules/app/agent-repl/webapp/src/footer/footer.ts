@@ -62,10 +62,12 @@ import {
 import { salientKind } from "./activity.js";
 import { createTransientExpiry } from "./expiry.js";
 import { publishCompactionProgress } from "./progress.js";
-import { drawClientDisconnectedStrip, drawFooterStrip, footerStatusActivity } from "./strip.js";
+import {
+  drawClientDisconnectedStrip,
+  drawFooterStrip,
+  footerStatusActivity,
+} from "./strip.js";
 import { createStopControls } from "./stop.js";
-import { createQuietHold, quietStretchEndingOf, withHeldLine } from "./quiet-hold.js";
-import type { PaintWatch } from "../feed/painted.js";
 
 /** Where the open panel is remembered, per workspace. */
 export function panelStorageKey(workspaceId: string): string {
@@ -75,10 +77,6 @@ export function panelStorageKey(workspaceId: string): string {
 export interface FooterDeps {
   /** The reader picked a detached-work item: scroll to its card (feed.ts). */
   readonly selectDetachedWork: (id: FeedId) => Promise<boolean>;
-  /** When the root feed's rows were painted (feed.ts), for the quiet hold. */
-  readonly paints: PaintWatch;
-  /** Whether the reader follows the feed's live tail (feed.ts). */
-  readonly followingTail: () => boolean;
 }
 
 export interface FooterHandle extends Handle {
@@ -86,7 +84,9 @@ export interface FooterHandle extends Handle {
    * Observe the status ARM on every push, and immediately on subscribe when a
    * push has already landed. Returns its unsubscriber.
    */
-  onStatus(fn: (statusCase: string, substatusCase?: string) => void): () => void;
+  onStatus(
+    fn: (statusCase: string, substatusCase?: string) => void,
+  ): () => void;
 }
 
 /** The stream's request: the workspace, echoed from the page's one ref. */
@@ -95,11 +95,17 @@ export function buildWatchFooterRequest(ctx: AppContext): WatchFooterRequest {
 }
 
 /** Mount the footer into HOST. */
-export function mountFooter(host: HTMLElement, ctx: AppContext, deps: FooterDeps): FooterHandle {
+export function mountFooter(
+  host: HTMLElement,
+  ctx: AppContext,
+  deps: FooterDeps,
+): FooterHandle {
   log.info("mounting the footer", { operation: "footer.mount", context: {} });
   host.setAttribute("data-component", "footer");
 
-  const statusListeners = new Set<(statusCase: string, substatusCase?: string) => void>();
+  const statusListeners = new Set<
+    (statusCase: string, substatusCase?: string) => void
+  >();
   let selection: FooterPanel | null = readSelection(ctx);
   // THE SECOND PIECE OF LOCAL STATE, and for the same reason as the first: it
   // is the reader's, not the daemon's. A stop's answer -- the note, the
@@ -112,15 +118,6 @@ export function mountFooter(host: HTMLElement, ctx: AppContext, deps: FooterDeps
   // A notice drawn onto the clicked element was gone with the next push; held
   // here, every draw paints it (see `JumpNotices`).
   const notices = createJumpNotices();
-  // THE FOURTH: the ended quiet-stretch line, held until the feed has painted
-  // the row that ended it (see `quiet-hold.ts`).
-  const hold = createQuietHold({
-    paints: deps.paints,
-    followingTail: deps.followingTail,
-    redraw: () => {
-      draw();
-    },
-  });
   // THE DOCK AND THE OPEN SECTION ARE KEPT ACROSS PUSHES, so the section's own
   // scroll box — the reader's — is never detached and never reset. Only their
   // children are redrawn.
@@ -153,14 +150,10 @@ export function mountFooter(host: HTMLElement, ctx: AppContext, deps: FooterDeps
   const watch: StreamHandle = watchStream<WatchFooterResponse>(ctx, {
     name: "WatchFooter",
     schema: WatchFooterResponseSchema,
-    open: (_client, signal) => ctx.streams.watch("footer", buildWatchFooterRequest(ctx), signal),
+    open: (_client, signal) =>
+      ctx.streams.watch("footer", buildWatchFooterRequest(ctx), signal),
     onPush: (response) => {
       view = requireMessage(response.footer, "WatchFooterResponse.footer");
-      hold.observe(
-        quietStretchEndingOf(
-          requireMessage(requireMessage(view.strip, "FooterView.strip").status, "FooterStrip.status"),
-        ),
-      );
       applyFocus(view);
       draw();
       publishStatus();
@@ -169,7 +162,9 @@ export function mountFooter(host: HTMLElement, ctx: AppContext, deps: FooterDeps
   });
 
   return {
-    onStatus(fn: (statusCase: string, substatusCase?: string) => void): () => void {
+    onStatus(
+      fn: (statusCase: string, substatusCase?: string) => void,
+    ): () => void {
       statusListeners.add(fn);
       // A composer mounted after the first push must not wait for the next one.
       if (statusCase !== null) fn(statusCase, substatusCase);
@@ -180,11 +175,13 @@ export function mountFooter(host: HTMLElement, ctx: AppContext, deps: FooterDeps
     dispose(): void {
       if (disposed) return;
       disposed = true;
-      log.info("disposing the footer", { operation: "footer.dispose", context: {} });
+      log.info("disposing the footer", {
+        operation: "footer.dispose",
+        context: {},
+      });
       unsubscribeFromVerdict();
       expiry.cancel();
       watch.cancel();
-      hold.dispose();
       // The page's compaction line belongs to the stream that just stopped.
       publishCompactionProgress(null);
       // Every clock this component started hangs off the host's subtree.
@@ -226,16 +223,16 @@ export function mountFooter(host: HTMLElement, ctx: AppContext, deps: FooterDeps
       bare.setAttribute("role", "status");
       bare.setAttribute("aria-live", "polite");
       bare.setAttribute("data-client-verdict", verdict.kind);
-      bare.appendChild(drawClientDisconnectedStrip(verdict.substatus, verdict.activity));
+      bare.appendChild(
+        drawClientDisconnectedStrip(verdict.substatus, verdict.activity),
+      );
       stopTicking(host);
       host.replaceChildren(bare);
       dock = null;
       section = null;
       return;
     }
-    const pushed = requireMessage(view.strip, "FooterView.strip");
-    const held = hold.held();
-    const strip = held === null ? pushed : withHeldLine(pushed, held);
+    const strip = requireMessage(view.strip, "FooterView.strip");
     const expanded = requireMessage(view.expanded, "FooterView.expanded");
 
     // THE SHEET IS HANDED THE STRIP'S OWN ACTIVITY. The tokens sheet expands
@@ -250,7 +247,9 @@ export function mountFooter(host: HTMLElement, ctx: AppContext, deps: FooterDeps
         notices,
         redraw: draw,
         selectDetachedWork: deps.selectDetachedWork,
-        activity: footerStatusActivity(requireMessage(strip.status, `FooterStrip.status`)),
+        activity: footerStatusActivity(
+          requireMessage(strip.status, `FooterStrip.status`),
+        ),
       },
       section,
     );
@@ -266,7 +265,8 @@ export function mountFooter(host: HTMLElement, ctx: AppContext, deps: FooterDeps
           });
 
     const target = dock ?? createDock();
-    if (verdict !== null) target.setAttribute("data-client-verdict", verdict.kind);
+    if (verdict !== null)
+      target.setAttribute("data-client-verdict", verdict.kind);
     else target.removeAttribute("data-client-verdict");
     const next: HTMLElement[] = [stripEl];
     if (panel !== null) {
@@ -308,7 +308,9 @@ export function mountFooter(host: HTMLElement, ctx: AppContext, deps: FooterDeps
         operation,
         context: { path: err.path, cause: err.detail },
       });
-      ctx.failures.report(frameUndecodable(err.detail, `FooterView at ${err.path}`));
+      ctx.failures.report(
+        frameUndecodable(err.detail, `FooterView at ${err.path}`),
+      );
     }
   }
 
@@ -350,7 +352,10 @@ export function mountFooter(host: HTMLElement, ctx: AppContext, deps: FooterDeps
   function applyFocus(pushed: FooterView): void {
     const focus = pushed.focus;
     if (focus === undefined || focus.generation === appliedFocus) return;
-    const panel: FooterPanel = requireCase(focus.panel, "FooterExpandedFocus.panel").case;
+    const panel: FooterPanel = requireCase(
+      focus.panel,
+      "FooterExpandedFocus.panel",
+    ).case;
     appliedFocus = focus.generation;
     selection = panel;
     log.info(`the daemon focused the footer on the ${panel} panel`, {
@@ -394,9 +399,13 @@ export function mountFooter(host: HTMLElement, ctx: AppContext, deps: FooterDeps
   function publishProgress(): void {
     if (view === null) return;
     const strip = requireMessage(view.strip, "FooterView.strip");
-    const activity = footerStatusActivity(requireMessage(strip.status, "FooterStrip.status"));
+    const activity = footerStatusActivity(
+      requireMessage(strip.status, "FooterStrip.status"),
+    );
     const kind = salientKind(activity, "FooterStatus.activity");
-    publishCompactionProgress(kind?.case === "compaction" ? kind.value.text : null);
+    publishCompactionProgress(
+      kind?.case === "compaction" ? kind.value.text : null,
+    );
   }
 }
 
@@ -437,7 +446,9 @@ export function drawFooterDivider(): HTMLElement {
  */
 export function readSelection(ctx: AppContext): FooterPanel | null {
   try {
-    const stored = window.localStorage.getItem(panelStorageKey(ctx.workspace.id));
+    const stored = window.localStorage.getItem(
+      panelStorageKey(ctx.workspace.id),
+    );
     if (stored === null) return null;
     if (!FOOTER_PANELS.includes(stored as FooterPanel)) {
       log.warn(`discarding an unrecognized stored footer panel: ${stored}`, {
@@ -457,7 +468,10 @@ export function readSelection(ctx: AppContext): FooterPanel | null {
 }
 
 /** Remember the panel, or forget it when nothing is open. */
-export function writeSelection(ctx: AppContext, selection: FooterPanel | null): void {
+export function writeSelection(
+  ctx: AppContext,
+  selection: FooterPanel | null,
+): void {
   try {
     const key = panelStorageKey(ctx.workspace.id);
     if (selection === null) {
@@ -478,7 +492,8 @@ export function writeSelection(ctx: AppContext, selection: FooterPanel | null): 
  * or undefined when that arm has no substatus oneof or leaves it unset.
  */
 function substatusOf(value: unknown): string | undefined {
-  if (typeof value !== "object" || value === null || !("substatus" in value)) return undefined;
+  if (typeof value !== "object" || value === null || !("substatus" in value))
+    return undefined;
   const substatus = (value as { substatus?: { case?: string } }).substatus;
   return substatus?.case;
 }

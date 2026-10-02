@@ -113,9 +113,6 @@ type wsState struct {
 	// units is the per-activity accumulation: the start facts a settled frame
 	// is drawn against, and the fold of a growing one.
 	units map[string]*unitState
-	// drawnRows is the FeedId each activity unit's row was last announced at
-	// (Deps.ItemDrawn), so a redraw at the same address announces nothing.
-	drawnRows map[string]string
 	// responses is the prose fold, keyed by activity id.
 	responses map[string]*proseState
 	// thinking is the reasoning fold, keyed by activity id. Kept SEPARATE from
@@ -623,7 +620,6 @@ func newWSState(ws ids.WorkspaceID) *wsState {
 		agentFeeds:           map[string]string{},
 		readers:              map[ReaderID]*walk{},
 		units:                map[string]*unitState{},
-		drawnRows:            map[string]string{},
 		responses:            map[string]*proseState{},
 		thinking:             map[string]*proseState{},
 		plans:                map[string]*planState{},

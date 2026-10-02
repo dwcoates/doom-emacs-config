@@ -15,7 +15,10 @@ import {
   standingClientFailure,
 } from "../../src/rpc/link.js";
 import { latestEntry, mountFeed } from "../../src/feed/feed.js";
-import { SELECTED_ENTRY_CLASS, SELECTED_ROW_ATTRIBUTE } from "../../src/feed/selected-entry.js";
+import {
+  SELECTED_ENTRY_CLASS,
+  SELECTED_ROW_ATTRIBUTE,
+} from "../../src/feed/selected-entry.js";
 import {
   Channel,
   feedId,
@@ -34,7 +37,10 @@ import {
   type Harness,
 } from "./harness.js";
 import { fireResize } from "../resize-observer.js";
-import { fireIntersection, intersectionObservers } from "../intersection-observer.js";
+import {
+  fireIntersection,
+  intersectionObservers,
+} from "../intersection-observer.js";
 import { OVERSCAN_CLASS } from "../../src/feed/overscan.js";
 import { foldTitle } from "../../src/feed/title-fold.js";
 import { HAS_MORE_CLASS } from "../../src/feed/bubble-more.js";
@@ -60,13 +66,25 @@ function mount(h: Harness = harness()) {
   const host = document.createElement("div");
   scroll.append(host);
   document.body.replaceChildren(scroll);
-  const feed = mountFeed(host, h.ctx, { renderers: stubRenderers(), scrollBox: scroll });
+  const feed = mountFeed(host, h.ctx, {
+    renderers: stubRenderers(),
+    scrollBox: scroll,
+  });
   return { feed, host, h };
 }
 
 /** A viewport rect at TOP, HEIGHT tall, since jsdom lays out nothing. */
-const domRect = (top: number, height: number) => (): DOMRect =>
-  ({ top, height, bottom: top + height, left: 0, right: 0, width: 0, x: 0, y: top, toJSON: () => ({}) });
+const domRect = (top: number, height: number) => (): DOMRect => ({
+  top,
+  height,
+  bottom: top + height,
+  left: 0,
+  right: 0,
+  width: 0,
+  x: 0,
+  y: top,
+  toJSON: () => ({}),
+});
 
 /**
  * Script the feed's scroll box as a 300px viewport at the page's top over
@@ -77,7 +95,13 @@ function scriptFeedBox(scroll: HTMLElement): void {
   Object.defineProperties(scroll, {
     scrollHeight: { configurable: true, get: () => 2000 },
     clientHeight: { configurable: true, get: () => 300 },
-    scrollTop: { configurable: true, get: () => top, set: (next: number) => { top = next; } },
+    scrollTop: {
+      configurable: true,
+      get: () => top,
+      set: (next: number) => {
+        top = next;
+      },
+    },
   });
   scroll.getBoundingClientRect = domRect(0, 300);
 }
@@ -97,7 +121,8 @@ describe("mountFeed: opening the root feed", () => {
 
   it("paints the answered page", async () => {
     const h = harness({
-      openFeed: (req) => openSuccess(page([userPromptRow("p1", "hello")]), tokenFor(req)),
+      openFeed: (req) =>
+        openSuccess(page([userPromptRow("p1", "hello")]), tokenFor(req)),
     });
     const { host } = mount(h);
     await settle();
@@ -137,9 +162,11 @@ describe("mountFeed: opening the root feed", () => {
     await settle();
     // Assert — the row wears the selection mark, so the frame reached
     // applySelection rather than being rejected as a malformed row.
-    expect(host.querySelector('[data-feed-row="r1"]')?.getAttribute(SELECTED_ROW_ATTRIBUTE)).toBe(
-      "response",
-    );
+    expect(
+      host
+        .querySelector('[data-feed-row="r1"]')
+        ?.getAttribute(SELECTED_ROW_ATTRIBUTE),
+    ).toBe("response");
   });
 
   it("clears the selection mark when a clear frame arrives", async () => {
@@ -157,14 +184,19 @@ describe("mountFeed: opening the root feed", () => {
     channel.push(pushSelection({ none: "returnToTail" }));
     await settle();
     // Assert
-    expect(host.querySelector('[data-feed-row="r1"]')?.hasAttribute(SELECTED_ROW_ATTRIBUTE)).toBe(
-      false,
-    );
+    expect(
+      host
+        .querySelector('[data-feed-row="r1"]')
+        ?.hasAttribute(SELECTED_ROW_ATTRIBUTE),
+    ).toBe(false);
   });
 
   it("draws nothing but stays alive when the daemon refuses the open", async () => {
     const h = harness({
-      openFeed: () => create(OpenFeedResponseSchema, { result: { case: "error", value: {} } }),
+      openFeed: () =>
+        create(OpenFeedResponseSchema, {
+          result: { case: "error", value: {} },
+        }),
     });
     const { host } = mount(h);
     await settle();
@@ -173,7 +205,10 @@ describe("mountFeed: opening the root feed", () => {
 
   it("opens no tail when the open was refused", async () => {
     const h = harness({
-      openFeed: () => create(OpenFeedResponseSchema, { result: { case: "error", value: {} } }),
+      openFeed: () =>
+        create(OpenFeedResponseSchema, {
+          result: { case: "error", value: {} },
+        }),
     });
     const { h: used } = mount(h);
     await settle();
@@ -311,7 +346,10 @@ describe("mountFeed: the bubble kinds", () => {
     const h = rootOnly([mergeRow("m1", false)]);
     mount(h);
     await settle();
-    expect(h.calls.openFeed.map((req) => req.feed?.value)).toEqual([undefined, "m1"]);
+    expect(h.calls.openFeed.map((req) => req.feed?.value)).toEqual([
+      undefined,
+      "m1",
+    ]);
   });
 });
 
@@ -347,7 +385,9 @@ describe("mountFeed: promptHeld", () => {
     feed.promptHeld("t1");
     // Assert
     const record = await forwardedRecord(capture, "scroll.feed-moved");
-    expect((record.context as Record<string, unknown>).cause).toBe("promptHeld");
+    expect((record.context as Record<string, unknown>).cause).toBe(
+      "promptHeld",
+    );
   });
 
   it("logs the held prompt it parked for", async () => {
@@ -399,7 +439,10 @@ describe("mountFeed: selectDetachedWork", () => {
   });
 
   /** The card drawn in a row: the row's first element child. */
-  function cardIn(host: HTMLElement, rowId: string): Element | null | undefined {
+  function cardIn(
+    host: HTMLElement,
+    rowId: string,
+  ): Element | null | undefined {
     return host.querySelector(`[data-feed-row="${rowId}"]`)?.firstElementChild;
   }
 
@@ -407,16 +450,20 @@ describe("mountFeed: selectDetachedWork", () => {
     const { feed, host } = mount(rootPage([responseRow("r1")]));
     await settle();
     await feed.selectDetachedWork(feedId("r1"));
-    expect(cardIn(host, "r1")?.classList.contains(SELECTED_ENTRY_CLASS)).toBe(true);
+    expect(cardIn(host, "r1")?.classList.contains(SELECTED_ENTRY_CLASS)).toBe(
+      true,
+    );
   });
 
   it("leaves the revealed row's full-width wrapper unmarked", async () => {
     const { feed, host } = mount(rootPage([responseRow("r1")]));
     await settle();
     await feed.selectDetachedWork(feedId("r1"));
-    expect(host.querySelector('[data-feed-row="r1"]')?.classList.contains(SELECTED_ENTRY_CLASS)).toBe(
-      false,
-    );
+    expect(
+      host
+        .querySelector('[data-feed-row="r1"]')
+        ?.classList.contains(SELECTED_ENTRY_CLASS),
+    ).toBe(false);
   });
 
   it("clears the mark once the eye has had time to land", async () => {
@@ -424,11 +471,18 @@ describe("mountFeed: selectDetachedWork", () => {
     await settle();
     await feed.selectDetachedWork(feedId("r1"));
     await vi.advanceTimersByTimeAsync(3000);
-    expect(cardIn(host, "r1")?.classList.contains(SELECTED_ENTRY_CLASS)).toBe(false);
+    expect(cardIn(host, "r1")?.classList.contains(SELECTED_ENTRY_CLASS)).toBe(
+      false,
+    );
   });
 
   /** The feed's scroll box, with rects scripted since jsdom lays out nothing. */
-  function scripted(scroll: HTMLElement, host: HTMLElement, rowId: string, rowTop: number): void {
+  function scripted(
+    scroll: HTMLElement,
+    host: HTMLElement,
+    rowId: string,
+    rowTop: number,
+  ): void {
     scriptFeedBox(scroll);
     const row = host.querySelector<HTMLElement>(`[data-feed-row="${rowId}"]`);
     if (row === null) throw new Error(`row ${rowId} is not drawn`);
@@ -454,7 +508,10 @@ describe("mountFeed: selectDetachedWork", () => {
     // own row.
     const h = harness({
       openFeed: (req) =>
-        openSuccess(page([responseRow("r1")], { crumbs: [crumb("r1", "here")] }), tokenFor(req)),
+        openSuccess(
+          page([responseRow("r1")], { crumbs: [crumb("r1", "here")] }),
+          tokenFor(req),
+        ),
     });
     const { host } = mount(h);
     await settle();
@@ -485,11 +542,15 @@ describe("mountFeed: selectDetachedWork", () => {
     const h = harness({
       channels,
       openFeed: (req) => {
-        if (req.feed === undefined) return openSuccess(page([subagentRow("b1")]), tokenFor(req));
+        if (req.feed === undefined)
+          return openSuccess(page([subagentRow("b1")]), tokenFor(req));
         if (req.feed.value === "b1") {
           return openSuccess(page([responseRow("deep")]), tokenFor(req));
         }
-        return openSuccess(page([], { crumbs: [crumb("b1", "Explore")] }), tokenFor(req));
+        return openSuccess(
+          page([], { crumbs: [crumb("b1", "Explore")] }),
+          tokenFor(req),
+        );
       },
     });
     const { feed } = mount(h);
@@ -506,8 +567,10 @@ describe("mountFeed: selectDetachedWork", () => {
     const h = harness({
       channels,
       openFeed: (req) => {
-        if (req.feed === undefined) return openSuccess(page([subagentRow("b1")]), tokenFor(req));
-        if (req.feed.value === "b1") return openSuccess(page([subagentRow("inner")]), tokenFor(req));
+        if (req.feed === undefined)
+          return openSuccess(page([subagentRow("b1")]), tokenFor(req));
+        if (req.feed.value === "b1")
+          return openSuccess(page([subagentRow("inner")]), tokenFor(req));
         return openSuccess(
           page([], { crumbs: [crumb("b1", "lead"), crumb("inner", "worker")] }),
           tokenFor(req),
@@ -535,7 +598,9 @@ describe("mountFeed: selectDetachedWork", () => {
       openFeed: (req) =>
         req.feed === undefined
           ? openSuccess(page([]), tokenFor(req))
-          : create(OpenFeedResponseSchema, { result: { case: "error", value: {} } }),
+          : create(OpenFeedResponseSchema, {
+              result: { case: "error", value: {} },
+            }),
     });
     const { feed } = mount(h);
     await settle();
@@ -547,7 +612,10 @@ describe("mountFeed: selectDetachedWork", () => {
       openFeed: (req) =>
         req.feed === undefined
           ? openSuccess(page([]), tokenFor(req))
-          : openSuccess(page([], { crumbs: [crumb("ghost", "gone")] }), tokenFor(req)),
+          : openSuccess(
+              page([], { crumbs: [crumb("ghost", "gone")] }),
+              tokenFor(req),
+            ),
     });
     const { feed } = mount(h);
     await settle();
@@ -587,7 +655,8 @@ describe("mountFeed: a jump expands its entry and closes it once wholly out of v
    * BUBBLE answers the bubble's own OpenFeed.
    */
   async function jumping(
-    bubble: () => ReturnType<typeof openSuccess> = () => openSuccess(page([]), "tok:b1"),
+    bubble: () => ReturnType<typeof openSuccess> = () =>
+      openSuccess(page([]), "tok:b1"),
   ) {
     const rows = [
       toolCallRow("t1", "returned"),
@@ -597,9 +666,13 @@ describe("mountFeed: a jump expands its entry and closes it once wholly out of v
       responseRow("r1"),
     ];
     const h = harness({
-      openFeed: (req) => (req.feed === undefined ? openSuccess(page(rows), tokenFor(req)) : bubble()),
+      openFeed: (req) =>
+        req.feed === undefined
+          ? openSuccess(page(rows), tokenFor(req))
+          : bubble(),
     });
-    let revealRow: ((id: ReturnType<typeof feedId>) => Promise<boolean>) | undefined;
+    let revealRow:
+      ((id: ReturnType<typeof feedId>) => Promise<boolean>) | undefined;
     const scroll = document.createElement("div");
     const host = document.createElement("div");
     scroll.append(host);
@@ -626,18 +699,34 @@ describe("mountFeed: a jump expands its entry and closes it once wholly out of v
       if (el === null) throw new Error(`row ${id} holds no card`);
       return el;
     };
-    const open = (el: HTMLElement): boolean => el.classList.contains("expanded");
-    const bubbleOpen = (): boolean => row("b1").getAttribute("data-expanded") === "true";
+    const open = (el: HTMLElement): boolean =>
+      el.classList.contains("expanded");
+    const bubbleOpen = (): boolean =>
+      row("b1").getAttribute("data-expanded") === "true";
     /** The rows the reader scrolls the entry ID into view and wholly out again. */
     const seenThenLeft = (id: string): void => {
       fireIntersection(row(id), true);
       fireIntersection(row(id), false);
     };
-    const cardJump = (): ((id: ReturnType<typeof feedId>) => Promise<boolean>) => {
-      if (revealRow === undefined) throw new Error("no card was handed the row context");
+    const cardJump = (): ((
+      id: ReturnType<typeof feedId>,
+    ) => Promise<boolean>) => {
+      if (revealRow === undefined)
+        throw new Error("no card was handed the row context");
       return revealRow;
     };
-    return { feed, host, scroll, h, row, card, open, bubbleOpen, seenThenLeft, cardJump };
+    return {
+      feed,
+      host,
+      scroll,
+      h,
+      row,
+      card,
+      open,
+      bubbleOpen,
+      seenThenLeft,
+      cardJump,
+    };
   }
 
   it("expands the tool card the footer's jump lands on", async () => {
@@ -747,7 +836,12 @@ describe("mountFeed: a jump expands its entry and closes it once wholly out of v
     j.card("t1").click();
     await j.feed.selectDetachedWork(feedId("t1"));
     // Act -- nothing watches it, so only a fire that can reach it is asserted on.
-    const watched = intersectionObservers().some((r) => r.root === j.scroll && r.targets.has(j.row("t1")) && r.rootMargin === "0px 0px 0px 0px");
+    const watched = intersectionObservers().some(
+      (r) =>
+        r.root === j.scroll &&
+        r.targets.has(j.row("t1")) &&
+        r.rootMargin === "0px 0px 0px 0px",
+    );
     // Assert
     expect([j.open(j.card("t1")), watched]).toEqual([true, false]);
     j.feed.dispose();
@@ -760,7 +854,12 @@ describe("mountFeed: a jump expands its entry and closes it once wholly out of v
     j.card("t1").click();
     j.card("t1").click();
     // Act
-    const watched = intersectionObservers().some((r) => r.root === j.scroll && r.targets.has(j.row("t1")) && r.rootMargin === "0px 0px 0px 0px");
+    const watched = intersectionObservers().some(
+      (r) =>
+        r.root === j.scroll &&
+        r.targets.has(j.row("t1")) &&
+        r.rootMargin === "0px 0px 0px 0px",
+    );
     // Assert
     expect([j.open(j.card("t1")), watched]).toEqual([true, false]);
     j.feed.dispose();
@@ -796,7 +895,9 @@ describe("mountFeed: a jump expands its entry and closes it once wholly out of v
 
   it("files a bubble the daemon would not open for the jump on the warning chip", async () => {
     // Arrange
-    const j = await jumping(() => create(OpenFeedResponseSchema, { result: { case: "error", value: {} } }));
+    const j = await jumping(() =>
+      create(OpenFeedResponseSchema, { result: { case: "error", value: {} } }),
+    );
     // Act
     await j.feed.selectDetachedWork(feedId("b1"));
     // Assert
@@ -806,7 +907,9 @@ describe("mountFeed: a jump expands its entry and closes it once wholly out of v
 
   it("logs a bubble the daemon would not open for the jump at ERROR", async () => {
     // Arrange
-    const j = await jumping(() => create(OpenFeedResponseSchema, { result: { case: "error", value: {} } }));
+    const j = await jumping(() =>
+      create(OpenFeedResponseSchema, { result: { case: "error", value: {} } }),
+    );
     const capture = captureLogRecords();
     // Act
     await j.feed.selectDetachedWork(feedId("b1"));
@@ -818,7 +921,9 @@ describe("mountFeed: a jump expands its entry and closes it once wholly out of v
 
   it("still centers and marks the entry whose bubble would not open", async () => {
     // Arrange
-    const j = await jumping(() => create(OpenFeedResponseSchema, { result: { case: "error", value: {} } }));
+    const j = await jumping(() =>
+      create(OpenFeedResponseSchema, { result: { case: "error", value: {} } }),
+    );
     // Act
     const landed = await j.feed.selectDetachedWork(feedId("b1"));
     // Assert
@@ -830,10 +935,19 @@ describe("mountFeed: a jump expands its entry and closes it once wholly out of v
     // Arrange -- the target sits inside b1's sub-feed; the probe's crumbs name b1.
     const h = harness({
       openFeed: (req) => {
-        if (req.feed === undefined) return openSuccess(page([subagentRow("b1")]), tokenFor(req));
-        if (req.feed.value === "b1") return openSuccess(page([responseRow("deep")]), tokenFor(req));
+        if (req.feed === undefined)
+          return openSuccess(page([subagentRow("b1")]), tokenFor(req));
+        if (req.feed.value === "b1")
+          return openSuccess(page([responseRow("deep")]), tokenFor(req));
         return openSuccess(
-          page([], { crumbs: [create(FeedBreadcrumbSchema, { target: feedId("b1"), label: "Explore" })] }),
+          page([], {
+            crumbs: [
+              create(FeedBreadcrumbSchema, {
+                target: feedId("b1"),
+                label: "Explore",
+              }),
+            ],
+          }),
           tokenFor(req),
         );
       },
@@ -842,7 +956,9 @@ describe("mountFeed: a jump expands its entry and closes it once wholly out of v
     await settle();
     await feed.selectDetachedWork(feedId("deep"));
     await settle();
-    const b1 = host.querySelector<HTMLElement>('[data-feed-row="b1"]') as HTMLElement;
+    const b1 = host.querySelector<HTMLElement>(
+      '[data-feed-row="b1"]',
+    ) as HTMLElement;
     // Act
     fireIntersection(b1, true);
     fireIntersection(b1, false);
@@ -864,10 +980,16 @@ describe("mountFeed: returning to the tail closes every expanded entry", () => {
    * last row out of view.
    */
   async function awayFromTail() {
-    const rows = [toolCallRow("t1", "returned"), subagentRow("b1"), responseRow("r1")];
+    const rows = [
+      toolCallRow("t1", "returned"),
+      subagentRow("b1"),
+      responseRow("r1"),
+    ];
     const h = harness({
       openFeed: (req) =>
-        req.feed === undefined ? openSuccess(page(rows), tokenFor(req)) : openSuccess(page([]), tokenFor(req)),
+        req.feed === undefined
+          ? openSuccess(page(rows), tokenFor(req))
+          : openSuccess(page([]), tokenFor(req)),
     });
     const scroll = document.createElement("div");
     const host = document.createElement("div");
@@ -888,8 +1010,10 @@ describe("mountFeed: returning to the tail closes every expanded entry", () => {
     scroll.dispatchEvent(new Event("wheel"));
     scroll.scrollTop = 100;
     scroll.dispatchEvent(new Event("scroll"));
-    const row = (id: string): HTMLElement => host.querySelector<HTMLElement>(`[data-feed-row="${id}"]`) as HTMLElement;
-    const card = (): HTMLElement => row("t1").querySelector<HTMLElement>(".tool-fold") as HTMLElement;
+    const row = (id: string): HTMLElement =>
+      host.querySelector<HTMLElement>(`[data-feed-row="${id}"]`) as HTMLElement;
+    const card = (): HTMLElement =>
+      row("t1").querySelector<HTMLElement>(".tool-fold") as HTMLElement;
     /** The reader wheels back down until the last row shows. */
     const backToTail = (): void => {
       row("r1").getBoundingClientRect = domRect(250, 50);
@@ -947,9 +1071,14 @@ describe("mountFeed: returning to the tail closes every expanded entry", () => {
     // Assert -- one collapse, and nothing watches the row to close it again.
     capture.logger.flush();
     await Promise.resolve();
-    const collapses = capture.sent.filter((r) => r.operation === "feed.bubble-collapse").length;
+    const collapses = capture.sent.filter(
+      (r) => r.operation === "feed.bubble-collapse",
+    ).length;
     const watched = intersectionObservers().some(
-      (r) => r.root === t.scroll && r.targets.has(t.row("b1")) && r.rootMargin === "0px 0px 0px 0px",
+      (r) =>
+        r.root === t.scroll &&
+        r.targets.has(t.row("b1")) &&
+        r.rootMargin === "0px 0px 0px 0px",
     );
     expect([collapses, watched]).toEqual([1, false]);
     t.feed.dispose();
@@ -999,7 +1128,8 @@ describe("mountFeed: the scroll box", () => {
     // Arrange: a host with no parent and no scrollBox named — there is then no
     // tail to follow, and the feed must still draw.
     const h = harness({
-      openFeed: (req) => openSuccess(page([userPromptRow("p1", "hello")]), tokenFor(req)),
+      openFeed: (req) =>
+        openSuccess(page([userPromptRow("p1", "hello")]), tokenFor(req)),
     });
     const host = document.createElement("div");
     document.body.replaceChildren();
@@ -1018,7 +1148,8 @@ describe("mountFeed: the scroll box", () => {
     scroll.append(host);
     document.body.replaceChildren(scroll);
     const h = harness({
-      openFeed: (req) => openSuccess(page([userPromptRow("p1", "hello")]), tokenFor(req)),
+      openFeed: (req) =>
+        openSuccess(page([userPromptRow("p1", "hello")]), tokenFor(req)),
     });
     // Act
     const feed = mountFeed(host, h.ctx, { renderers: stubRenderers() });
@@ -1044,11 +1175,19 @@ describe("mountFeed: the scroll box", () => {
       scrollTop: {
         get: () => scrollTop,
         set: (next: number) => {
-          scrollTop = Math.max(0, Math.min(next, init.scrollHeight - clientHeight));
+          scrollTop = Math.max(
+            0,
+            Math.min(next, init.scrollHeight - clientHeight),
+          );
         },
       },
     });
-    return { loseHeight: (px: number) => { clientHeight -= px; }, top: () => scrollTop };
+    return {
+      loseHeight: (px: number) => {
+        clientHeight -= px;
+      },
+      top: () => scrollTop,
+    };
   }
 
   it("re-lands the tail when the docked footer takes height after the render", async () => {
@@ -1059,11 +1198,19 @@ describe("mountFeed: the scroll box", () => {
     const host = document.createElement("div");
     scroll.append(host);
     document.body.replaceChildren(scroll);
-    const geometry = withGeometry(scroll, { scrollHeight: 1000, clientHeight: 300, scrollTop: 700 });
-    const h = harness({
-      openFeed: (req) => openSuccess(page([userPromptRow("p1", "hello")]), tokenFor(req)),
+    const geometry = withGeometry(scroll, {
+      scrollHeight: 1000,
+      clientHeight: 300,
+      scrollTop: 700,
     });
-    const feed = mountFeed(host, h.ctx, { renderers: stubRenderers(), scrollBox: scroll });
+    const h = harness({
+      openFeed: (req) =>
+        openSuccess(page([userPromptRow("p1", "hello")]), tokenFor(req)),
+    });
+    const feed = mountFeed(host, h.ctx, {
+      renderers: stubRenderers(),
+      scrollBox: scroll,
+    });
     await settle();
     // Act — the footer appears and eats 48px of the scroll box.
     geometry.loseHeight(48);
@@ -1080,7 +1227,10 @@ describe("mountFeed: the scroll box", () => {
     scroll.append(host);
     document.body.replaceChildren(scroll);
     const h = harness();
-    const feed = mountFeed(host, h.ctx, { renderers: stubRenderers(), scrollBox: scroll });
+    const feed = mountFeed(host, h.ctx, {
+      renderers: stubRenderers(),
+      scrollBox: scroll,
+    });
     await settle();
     // Act
     feed.dispose();
@@ -1110,17 +1260,20 @@ describe("mountFeed: a bubble row re-pushed as another kind", () => {
     ["a merge", mergeRow("b1")],
   ];
 
-  it.each(KINDS)("files %s that stopped being one as an unreadable frame", async (_n, row) => {
-    // Arrange
-    const { h, channel } = withTail(row);
-    mount(h);
-    await settle();
-    // Act: the same id comes back as an ordinary response.
-    channel.push(push(responseRow("b1")));
-    await settle();
-    // Assert
-    expect(h.sink.reported).toEqual(["frameUndecodable"]);
-  });
+  it.each(KINDS)(
+    "files %s that stopped being one as an unreadable frame",
+    async (_n, row) => {
+      // Arrange
+      const { h, channel } = withTail(row);
+      mount(h);
+      await settle();
+      // Act: the same id comes back as an ordinary response.
+      channel.push(push(responseRow("b1")));
+      await settle();
+      // Assert
+      expect(h.sink.reported).toEqual(["frameUndecodable"]);
+    },
+  );
 
   // A PLACEMENT MOVE IS NOT A KIND CHANGE, and the two must not be confused.
   // The daemon announces a background spawn as a SYNCHRONOUS `subagent` unit
@@ -1149,7 +1302,9 @@ describe("mountFeed: a bubble row re-pushed as another kind", () => {
     // Assert: nothing was refused, and the head moved with the row.
     expect(h.sink.reported).toEqual([]);
     expect(
-      host.querySelector('[data-feed-row="b1"] .subagent-head')?.getAttribute("data-state"),
+      host
+        .querySelector('[data-feed-row="b1"] .subagent-head')
+        ?.getAttribute("data-state"),
     ).toBe("succeeded");
   });
 
@@ -1163,20 +1318,27 @@ describe("mountFeed: a bubble row re-pushed as another kind", () => {
     channel.push(push(subagentRow("b1", { detached: true })));
     await settle();
     // Assert: the same element, so an open sub-feed survives the move.
-    expect(host.querySelector('[data-feed-row="b1"] .bubble-fold')).toBe(before);
+    expect(host.querySelector('[data-feed-row="b1"] .bubble-fold')).toBe(
+      before,
+    );
   });
 
-  it.each(KINDS)("keeps %s's drawn head rather than tearing the feed down", async (_n, row) => {
-    // Arrange
-    const { h, channel } = withTail(row);
-    const { host } = mount(h);
-    await settle();
-    // Act
-    channel.push(push(responseRow("b1")));
-    await settle();
-    // Assert: the bubble the reader was looking at is still there.
-    expect(host.querySelector('[data-feed-row="b1"] .bubble-fold')).not.toBeNull();
-  });
+  it.each(KINDS)(
+    "keeps %s's drawn head rather than tearing the feed down",
+    async (_n, row) => {
+      // Arrange
+      const { h, channel } = withTail(row);
+      const { host } = mount(h);
+      await settle();
+      // Act
+      channel.push(push(responseRow("b1")));
+      await settle();
+      // Assert: the bubble the reader was looking at is still there.
+      expect(
+        host.querySelector('[data-feed-row="b1"] .bubble-fold'),
+      ).not.toBeNull();
+    },
+  );
 });
 
 describe("mountFeed: selectDetachedWork's harder answers", () => {
@@ -1230,7 +1392,12 @@ describe("mountFeed: selectDetachedWork's harder answers", () => {
           ? openSuccess(page([responseRow("plain")]), tokenFor(req))
           : openSuccess(
               page([], {
-                crumbs: [create(FeedBreadcrumbSchema, { target: feedId("plain"), label: "p" })],
+                crumbs: [
+                  create(FeedBreadcrumbSchema, {
+                    target: feedId("plain"),
+                    label: "p",
+                  }),
+                ],
               }),
               tokenFor(req),
             ),
@@ -1256,7 +1423,10 @@ describe("mountFeed: selectDetachedWork's harder answers", () => {
     await feed.selectDetachedWork(feedId("deep"));
     await settle();
     // Assert
-    expect(used.calls.openFeed.map((req) => req.feed?.value)).toEqual([undefined, "deep"]);
+    expect(used.calls.openFeed.map((req) => req.feed?.value)).toEqual([
+      undefined,
+      "deep",
+    ]);
   });
 });
 
@@ -1275,7 +1445,10 @@ describe("mountFeed: the root open's harder answers", () => {
     scroll.append(host);
     document.body.replaceChildren(scroll);
     // Act
-    feed = mountFeed(host, h.ctx, { renderers: stubRenderers(), scrollBox: scroll });
+    feed = mountFeed(host, h.ctx, {
+      renderers: stubRenderers(),
+      scrollBox: scroll,
+    });
     await settle();
     // Assert
     expect(host.querySelector('[data-feed-row="p1"]')).toBeNull();
@@ -1304,13 +1477,21 @@ describe("mountFeed: a walk whose container will not open", () => {
     // Arrange: the crumb names a real bubble whose own sub-feed is refused.
     const h = harness({
       openFeed: (req) => {
-        if (req.feed === undefined) return openSuccess(page([subagentRow("b1")]), tokenFor(req));
+        if (req.feed === undefined)
+          return openSuccess(page([subagentRow("b1")]), tokenFor(req));
         if (req.feed.value === "b1") {
-          return create(OpenFeedResponseSchema, { result: { case: "error", value: {} } });
+          return create(OpenFeedResponseSchema, {
+            result: { case: "error", value: {} },
+          });
         }
         return openSuccess(
           page([], {
-            crumbs: [create(FeedBreadcrumbSchema, { target: feedId("b1"), label: "Explore" })],
+            crumbs: [
+              create(FeedBreadcrumbSchema, {
+                target: feedId("b1"),
+                label: "Explore",
+              }),
+            ],
           }),
           tokenFor(req),
         );
@@ -1338,10 +1519,10 @@ describe("mountFeed: disposal is once", () => {
     channel.push(push(responseRow("late")));
     await settle();
     // Assert: the second call is inert and nothing reopened.
-    expect([host.querySelector('[data-feed-row="late"]'), h.calls.watchFeed.length]).toEqual([
-      null,
-      1,
-    ]);
+    expect([
+      host.querySelector('[data-feed-row="late"]'),
+      h.calls.watchFeed.length,
+    ]).toEqual([null, 1]);
   });
 });
 
@@ -1356,11 +1537,16 @@ describe("mountFeed and the client's link verdict", () => {
     const h = harness({
       openFeed: () =>
         create(OpenFeedResponseSchema, {
-          result: { case: "error", value: { cause: { case: "feedUndecodable", value: {} } } },
+          result: {
+            case: "error",
+            value: { cause: { case: "feedUndecodable", value: {} } },
+          },
         }),
     });
     const published: Array<string | null> = [];
-    const stop = onClientVerdict((verdict) => published.push(verdict?.activity ?? null));
+    const stop = onClientVerdict((verdict) =>
+      published.push(verdict?.activity ?? null),
+    );
     // Act
     mount(h);
     await settle();
@@ -1369,7 +1555,9 @@ describe("mountFeed and the client's link verdict", () => {
     // follows it in the same tick, because a generator that returned is an
     // ending the loop cannot tell from a dead link -- see the judgement row
     // "the feed's refusal verdict is superseded by the tail's ending".
-    expect(published).toContain("the daemon refused to open the workspace's root feed");
+    expect(published).toContain(
+      "the daemon refused to open the workspace's root feed",
+    );
   });
 
   it("reports a reveal probe that never reached the daemon as a transport failure", async () => {
@@ -1392,7 +1580,9 @@ describe("mountFeed and the client's link verdict", () => {
       openFeed: (req) =>
         req.feed === undefined
           ? openSuccess(page([]), tokenFor(req))
-          : create(OpenFeedResponseSchema, { result: { case: "error", value: {} } }),
+          : create(OpenFeedResponseSchema, {
+              result: { case: "error", value: {} },
+            }),
     });
     const { feed } = mount(h);
     await settle();
@@ -1416,7 +1606,10 @@ describe("mountFeed: the overscan buffer", () => {
     const host = document.createElement("div");
     scroll.append(host);
     document.body.replaceChildren(scroll);
-    const feed = mountFeed(host, h.ctx, { renderers: stubRenderers(), scrollBox: scroll });
+    const feed = mountFeed(host, h.ctx, {
+      renderers: stubRenderers(),
+      scrollBox: scroll,
+    });
     return { feed, host, scroll, h };
   }
 
@@ -1428,7 +1621,8 @@ describe("mountFeed: the overscan buffer", () => {
 
   it("pre-renders a drawn row when it enters the band", async () => {
     const h = harness({
-      openFeed: (req) => openSuccess(page([userPromptRow("p1", "hello")]), tokenFor(req)),
+      openFeed: (req) =>
+        openSuccess(page([userPromptRow("p1", "hello")]), tokenFor(req)),
     });
     const { host } = mountWithBox(h);
     await settle();
@@ -1447,7 +1641,10 @@ describe("mountFeed: the overscan buffer", () => {
 
 describe("mountFeed: a card toggle re-measures the titles it owns", () => {
   /** A `.tool-fold` card in the mounted feed, holding one overflowing title. */
-  function cardWithTitle(host: HTMLElement): { card: HTMLElement; title: HTMLElement } {
+  function cardWithTitle(host: HTMLElement): {
+    card: HTMLElement;
+    title: HTMLElement;
+  } {
     const card = document.createElement("div");
     card.className = "tool-card tool-fold";
     const title = document.createElement("pre");
@@ -1457,8 +1654,14 @@ describe("mountFeed: a card toggle re-measures the titles it owns", () => {
     row.setAttribute("data-feed-row", "row-1");
     row.append(card);
     host.append(row);
-    Object.defineProperty(title, "clientHeight", { configurable: true, value: 40 });
-    Object.defineProperty(title, "scrollHeight", { configurable: true, value: 120 });
+    Object.defineProperty(title, "clientHeight", {
+      configurable: true,
+      value: 40,
+    });
+    Object.defineProperty(title, "scrollHeight", {
+      configurable: true,
+      value: 120,
+    });
     return { card, title };
   }
 
@@ -1597,7 +1800,9 @@ describe("mountFeed: expanding a feed item centers it in the feed", () => {
     box.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     // Assert
     const record = await forwardedRecord(capture, "scroll.feed-moved");
-    expect((record.context as Record<string, unknown>).cause).toBe("itemExpanded");
+    expect((record.context as Record<string, unknown>).cause).toBe(
+      "itemExpanded",
+    );
     feed.dispose();
   });
 
@@ -1676,7 +1881,9 @@ describe("latestEntry", () => {
 
   it("answers nothing for a zone with nothing drawn", () => {
     // Arrange
-    const box = zone('<main id="feed"></main><section id="hold-tray"></section>');
+    const box = zone(
+      '<main id="feed"></main><section id="hold-tray"></section>',
+    );
     // Act + Assert
     expect(latestEntry(box)).toBeNull();
   });
@@ -1741,19 +1948,28 @@ describe("mountFeed: the latest-visible latch", () => {
     const scroll = document.createElement("div");
     const host = document.createElement("div");
     const tray = document.createElement("section");
-    const cards = Array.from({ length: held }, (_, i) => `<article data-held-turn="t${i}"></article>`);
+    const cards = Array.from(
+      { length: held },
+      (_, i) => `<article data-held-turn="t${i}"></article>`,
+    );
     tray.innerHTML =
-      held === 0 ? "" : `<div class="hold-tray"><div class="hold-tray-items">${cards.join("")}</div></div>`;
+      held === 0
+        ? ""
+        : `<div class="hold-tray"><div class="hold-tray-items">${cards.join("")}</div></div>`;
     scroll.append(host, tray);
     document.body.replaceChildren(scroll);
     scriptFeedBox(scroll);
-    const feed = mountFeed(host, h.ctx, { renderers: stubRenderers(), scrollBox: scroll });
+    const feed = mountFeed(host, h.ctx, {
+      renderers: stubRenderers(),
+      scrollBox: scroll,
+    });
     await settle();
     scroll.dispatchEvent(new Event("wheel"));
     scroll.scrollTop = 100;
     scroll.dispatchEvent(new Event("scroll"));
     const place = (el: Element | null, at: number): void => {
-      if (!(el instanceof HTMLElement)) throw new Error("the entry is not drawn");
+      if (!(el instanceof HTMLElement))
+        throw new Error("the entry is not drawn");
       el.getBoundingClientRect = domRect(at, 100);
     };
     return { feed, host, tray, scroll, channel, place };
@@ -1844,7 +2060,10 @@ describe("mountFeed: a click on the feed background ends the selection", () => {
         },
       },
     });
-    const feed = mountFeed(host, h.ctx, { renderers: stubRenderers(), scrollBox: scroll });
+    const feed = mountFeed(host, h.ctx, {
+      renderers: stubRenderers(),
+      scrollBox: scroll,
+    });
     await settle();
     scroll.dispatchEvent(new Event("wheel"));
     geometry.top = 100;
@@ -1877,9 +2096,12 @@ describe("mountFeed: a click on the feed background ends the selection", () => {
     clickBackground(m.host);
     await settle();
     // Assert
-    expect(
-      [m.host.querySelector('[data-feed-row="r1"]')?.getAttribute(SELECTED_ROW_ATTRIBUTE), m.scroll.scrollTop],
-    ).toEqual(["response", centered]);
+    expect([
+      m.host
+        .querySelector('[data-feed-row="r1"]')
+        ?.getAttribute(SELECTED_ROW_ATTRIBUTE),
+      m.scroll.scrollTop,
+    ]).toEqual(["response", centered]);
     m.feed.dispose();
   });
 
@@ -1945,7 +2167,11 @@ describe("mountFeed: the selected row leaving the viewport ends the selection", 
     channels.set("tok:root", channel);
     const h = harness({
       channels,
-      openFeed: (req) => openSuccess(page([responseRow("r1"), responseRow("r2")]), tokenFor(req)),
+      openFeed: (req) =>
+        openSuccess(
+          page([responseRow("r1"), responseRow("r2")]),
+          tokenFor(req),
+        ),
     });
     const scroll = document.createElement("div");
     const host = document.createElement("div");
@@ -1962,7 +2188,10 @@ describe("mountFeed: the selected row leaving the viewport ends the selection", 
         },
       },
     });
-    const feed = mountFeed(host, h.ctx, { renderers: stubRenderers(), scrollBox: scroll });
+    const feed = mountFeed(host, h.ctx, {
+      renderers: stubRenderers(),
+      scrollBox: scroll,
+    });
     await settle();
     const row = (id: string): HTMLElement => {
       const el = host.querySelector<HTMLElement>(`[data-feed-row="${id}"]`);
@@ -1983,7 +2212,9 @@ describe("mountFeed: the selected row leaving the viewport ends the selection", 
     await settle();
     // Assert
     expect(
-      m.h.calls.selectFeedRow.map((r) => (r.move.case === "leftView" ? r.move.value.row?.value : r.move.case)),
+      m.h.calls.selectFeedRow.map((r) =>
+        r.move.case === "leftView" ? r.move.value.row?.value : r.move.case,
+      ),
     ).toEqual(["r1"]);
     m.feed.dispose();
   });
@@ -1998,45 +2229,10 @@ describe("mountFeed: the selected row leaving the viewport ends the selection", 
     m.channel.push(pushSelection({ none: "stay" }));
     await settle();
     // Assert
-    expect([m.scroll.scrollTop, m.row("r1").hasAttribute(SELECTED_ROW_ATTRIBUTE)]).toEqual([37, false]);
+    expect([
+      m.scroll.scrollTop,
+      m.row("r1").hasAttribute(SELECTED_ROW_ATTRIBUTE),
+    ]).toEqual([37, false]);
     m.feed.dispose();
-  });
-});
-
-describe("mountFeed: the root feed's paints", () => {
-  it("reports a pushed root row as painted once the frame drawn with it was painted", async () => {
-    // Arrange: frames run only when the test runs them.
-    const frames: FrameRequestCallback[] = [];
-    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => frames.push(cb));
-    const runFrame = () => {
-      for (const cb of frames.splice(0)) cb(0);
-    };
-    const channels = new Map<string, Channel<WatchFeedResponse>>();
-    const channel = new Channel<WatchFeedResponse>();
-    channels.set("tok:root", channel);
-    const { feed } = mount(harness({ channels }));
-    await settle();
-    const seen: string[] = [];
-    feed.paints.onPainted((id) => seen.push(id));
-
-    // Act
-    channel.push(push(responseRow("r1")));
-    await settle();
-    runFrame();
-    expect(seen).not.toContain("r1");
-    runFrame();
-
-    // Assert
-    expect(seen).toContain("r1");
-    expect(feed.paints.paintedAt("r1")).not.toBeNull();
-    feed.dispose();
-    vi.unstubAllGlobals();
-  });
-
-  it("answers that a mount with no scroll box follows no tail", () => {
-    const host = document.createElement("div");
-    const feed = mountFeed(host, harness().ctx, { renderers: stubRenderers() });
-    expect(feed.followingTail()).toBe(false);
-    feed.dispose();
   });
 });

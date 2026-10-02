@@ -14,7 +14,7 @@ import (
 
 // THE TRANSIENT TIER (owner rulings, 2026-09-28 and 2026-09-30; footer.proto
 // "The transient tier"; agent-repl AGENTS.md "Footer activity lines are
-// salient, transient, quiet, or enduring").
+// salient, transient, or enduring").
 //
 // A transient is an EVENT: something the session just did or just learned. It
 // ends when a newer transient replaces it or its expiry passes, and nothing
@@ -57,24 +57,12 @@ func (r *resolver) liveTransient(s *wsState) *frontendv1.FooterActivityTransient
 	return s.transient
 }
 
-// unpinned is the activity cell when no salient line stands: the live
-// transient, if any, over the always-set enduring line.
+// unpinned is the activity cell when no salient line stands, under every
+// status: the live transient, if any, over the always-set enduring line.
 func (r *resolver) unpinned(s *wsState) *frontendv1.FooterActivityTransientOverEnduring {
 	return &frontendv1.FooterActivityTransientOverEnduring{
 		Transient: r.liveTransient(s),
 		Enduring:  r.enduring(s),
-	}
-}
-
-// unpinnedQuiet is the activity cell of a status whose work lands in the feed
-// (`working`, `background`) when no salient line stands: the live transient,
-// if any, over the quiet-stretch line, if one stands, over the always-set
-// enduring line.
-func (r *resolver) unpinnedQuiet(s *wsState) *frontendv1.FooterActivityTransientOverQuietOverEnduring {
-	return &frontendv1.FooterActivityTransientOverQuietOverEnduring{
-		Transient:    r.liveTransient(s),
-		QuietStretch: r.quietStretchLine(s),
-		Enduring:     r.enduring(s),
 	}
 }
 
