@@ -54,7 +54,7 @@ func TestASkippedIdentityChangeLeavesTheOriginalLineServed(t *testing.T) {
 		frameLine(agentID("other"), responseFrame("other", "act-1", "moved"))))
 
 	// Assert
-	assertTexts(t, "the original book", pageTexts(openSession(ctx, t, cli, "main", 10, nil).GetPage()), []string{"L1"})
+	assertTexts(t, "the original book", pageTexts(openSession(ctx, t, cli, "main", nil).GetPage()), []string{"L1"})
 	// The book the write tried to move the line INTO was never created at all,
 	// so it is not an empty book: the store has never heard of that agent.
 	openUnknownAgent(ctx, t, cli, "other")

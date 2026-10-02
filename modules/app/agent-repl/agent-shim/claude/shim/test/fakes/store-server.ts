@@ -242,11 +242,30 @@ export interface FakeStoreRead {
   readonly request: unknown;
 }
 
-/** Start the fake store on `socketPath`. Resolves once it is accepting. */
 /** The activity arms the real store's `activityIsTerminal` reads as a unit's end. */
 const TERMINAL_ACTIVITY_ARMS: ReadonlySet<string> = new Set(["success", "failure", "ended", "blocking_error"]);
 
-export async function startFakeStore(socketPath: string): Promise<FakeStore> {
+/**
+ * The fake's page size when a test names none: the real store's (its
+ * `db.PageSize`), so a suite that never thinks about pages sees the pages
+ * production serves.
+ */
+export const FAKE_STORE_PAGE_SIZE = 50;
+
+/** How a test shapes the fake. */
+export interface FakeStoreOptions {
+  /**
+   * The lines one page holds. THE STORE OWNS THE PAGE SIZE and no request can
+   * state one, so this is the fake's own setting, never a request field: a
+   * test that must cross a page boundary shrinks it rather than seeding fifty
+   * rows, and a shim that assumed any particular size breaks against it.
+   */
+  readonly pageSize?: number;
+}
+
+/** Start the fake store on `socketPath`. Resolves once it is accepting. */
+export async function startFakeStore(socketPath: string, options: FakeStoreOptions = {}): Promise<FakeStore> {
+  const pageSize = options.pageSize ?? FAKE_STORE_PAGE_SIZE;
   /** Every agent the fake holds an `agent` row for — the store's `agent` table. */
   const knownAgents = new Set<string>();
   const books = new Map<string, StoredRow[]>();
@@ -657,12 +676,14 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
         }
         const all = placedRowsOf(bookId);
         const floorPointer =
-          request.knownThrough === undefined ? -1 : Number(request.knownThrough.value);
+          request.opening.case === "knownThrough" ? Number(request.opening.value.value) : -1;
         // CATCH-UP IS WRITE ORDER: first written after the mark, in place order.
-        const eligible = all.filter((row) => Number(row.pointer) > floorPointer);
-        const budget = request.pageSize;
+        // TAIL-ONLY serves nothing: the tail (pure here, as always) carries
+        // only what is written from now on, and the empty page is the floor.
+        const eligible =
+          request.opening.case === "tailOnly" ? [] : all.filter((row) => Number(row.pointer) > floorPointer);
         // Newest first: take from the end, then reverse.
-        const window = eligible.slice(Math.max(0, eligible.length - budget));
+        const window = eligible.slice(Math.max(0, eligible.length - pageSize));
         const lines = [...window].reverse().map(lineAt);
         const olderExist = eligible.length > window.length;
         const oldestInPage = window[0];
@@ -873,7 +894,7 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
               value: create(storev1.ReadAgentPageInvalidRequestSchema, { field: "position" }),
             });
         }
-        const window = older.slice(Math.max(0, older.length - request.pageSize));
+        const window = older.slice(Math.max(0, older.length - pageSize));
         // EVERY LINE CARRIES ITS OWN POINTER (landing 3): a continuation page
         // is a reconnect mark like any other.
         const lines = [...window].reverse().map(lineAt);

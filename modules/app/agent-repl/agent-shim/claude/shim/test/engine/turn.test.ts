@@ -200,7 +200,6 @@ function startTurn(
     turn,
     said: textSaid("do the thing"),
     origin,
-    pageSize: 20,
   });
 }
 
@@ -984,7 +983,6 @@ function joinTurn(turn: conversationv1.TurnId = OTHER_TURN): shimv1.StartTurnReq
     turn,
     said: textSaid("also cover the edge case"),
     origin: conversationv1.PromptOrigin.USER_SENT,
-    pageSize: 20,
     joinRunningTurn: true,
   });
 }
@@ -1024,7 +1022,6 @@ describe("the vendor note on a prompt", () => {
         turn: TURN,
         said: textSaid("do it the other way"),
         origin: conversationv1.PromptOrigin.USER_SENT,
-        pageSize: 20,
         vendorNote: "the work was cut for this",
       }),
     );
@@ -1043,7 +1040,6 @@ describe("the vendor note on a prompt", () => {
         turn: TURN,
         said: textSaid("do it the other way"),
         origin: conversationv1.PromptOrigin.USER_SENT,
-        pageSize: 20,
         vendorNote: "the work was cut for this",
       }),
     );
@@ -1469,7 +1465,6 @@ describe("a repeated StartTurn of a turn id the shim already started", () => {
       turn: TURN,
       said: textSaid("/clear"),
       origin: conversationv1.PromptOrigin.USER_SENT,
-      pageSize: 20,
     });
     await h.turns.startTurn(cut);
 
@@ -2319,7 +2314,6 @@ describe("DetachForeground", () => {
 describe("ReadHistory", () => {
   const first = (): shimv1.ReadHistoryRequest =>
     create(shimv1.ReadHistoryRequestSchema, {
-      pageSize: 10,
       position: { case: "first", value: create(shimv1.ReadHistoryFirstSchema, {}) },
     });
 
@@ -2337,6 +2331,17 @@ describe("ReadHistory", () => {
     expect(h.persistence.closedPages).toBe(1);
   });
 
+  it("reads the first page as a repaint: no caller states a page size or an opening", async () => {
+    // Arrange.
+    const h = await harness();
+
+    // Act.
+    await h.turns.readHistory(first());
+
+    // Assert.
+    expect(h.persistence.openings).toEqual([{ case: "repaint" }]);
+  });
+
   it("maps an unknown agent onto the ReadHistory arm for it", async () => {
     const h = await harness();
     h.persistence.openError = new PersistenceError("unknown_agent", "no such book");
@@ -2350,7 +2355,6 @@ describe("ReadHistory", () => {
 
     const response = await h.turns.readHistory(
       create(shimv1.ReadHistoryRequestSchema, {
-        pageSize: 10,
         position: {
           case: "after",
           value: create(conversationv1.HistoryPointerSchema, { value: "p-1" }),
@@ -2375,7 +2379,6 @@ describe("ReadHistory", () => {
     // Act.
     const response = await h.turns.readHistory(
       create(shimv1.ReadHistoryRequestSchema, {
-        pageSize: 10,
         position: { case: "through", value: create(conversationv1.ConversationThroughSchema, { atMs: 2_500n }) },
       }),
     );
@@ -2392,7 +2395,6 @@ describe("ReadHistory", () => {
     // Act.
     const response = await h.turns.readHistory(
       create(shimv1.ReadHistoryRequestSchema, {
-        pageSize: 10,
         position: { case: "through", value: create(conversationv1.ConversationThroughSchema, { atMs: 2_500n }) },
       }),
     );
@@ -2430,12 +2432,105 @@ describe("WatchAgent", () => {
     const frames: string[] = [];
 
     for await (const response of h.turns.watchAgent(
-      create(shimv1.WatchAgentRequestSchema, { pageSize: 10 }),
+      create(shimv1.WatchAgentRequestSchema, {}),
     )) {
       frames.push(response.frame.case ?? "");
     }
 
     expect(frames[0]).toBe("page");
+  });
+
+  it("opens as a repaint when the request states no opening", async () => {
+    // Arrange.
+    const h = await harness();
+
+    // Act.
+    for await (const _ of h.turns.watchAgent(create(shimv1.WatchAgentRequestSchema, {}))) break;
+
+    // Assert.
+    expect(h.persistence.openings).toEqual([{ case: "repaint" }]);
+  });
+
+  it("relays a tail_only opening to the record plane", async () => {
+    // Arrange.
+    const h = await harness();
+
+    // Act.
+    for await (const _ of h.turns.watchAgent(
+      create(shimv1.WatchAgentRequestSchema, {
+        opening: { case: "tailOnly", value: create(shimv1.WatchAgentTailOnlySchema, {}) },
+      }),
+    )) {
+      break;
+    }
+
+    // Assert.
+    expect(h.persistence.openings).toEqual([{ case: "tailOnly" }]);
+  });
+
+  it("relays a known_through opening with the caller's mark", async () => {
+    // Arrange.
+    const h = await harness();
+    const mark = create(conversationv1.HistoryPointerSchema, { value: "p-9" });
+
+    // Act.
+    for await (const _ of h.turns.watchAgent(
+      create(shimv1.WatchAgentRequestSchema, { opening: { case: "knownThrough", value: mark } }),
+    )) {
+      break;
+    }
+
+    // Assert.
+    expect(h.persistence.openings).toEqual([{ case: "knownThrough", value: mark }]);
+  });
+
+  it("serves an unannounced target whose tail-only open found history behind its empty page", async () => {
+    // A tail-only page is empty by request; the book, not the page, decides
+    // whether an unannounced target names anything.
+    // Arrange.
+    const h = await harness();
+    h.knows = false;
+    h.persistence.foundNothing = false;
+    const frames: string[] = [];
+
+    // Act.
+    for await (const response of h.turns.watchAgent(
+      create(shimv1.WatchAgentRequestSchema, {
+        opening: { case: "tailOnly", value: create(shimv1.WatchAgentTailOnlySchema, {}) },
+      }),
+    )) {
+      frames.push(response.frame.case ?? "");
+      break;
+    }
+
+    // Assert.
+    expect(frames).toEqual(["page"]);
+  });
+
+  it("refuses an unannounced target whose open found nothing in the book", async () => {
+    // Arrange.
+    const h = await harness();
+    h.knows = false;
+    h.persistence.foundNothing = true;
+
+    // Act.
+    const error = await (async () => {
+      try {
+        for await (const _ of h.turns.watchAgent(
+          create(shimv1.WatchAgentRequestSchema, {
+            opening: { case: "tailOnly", value: create(shimv1.WatchAgentTailOnlySchema, {}) },
+          }),
+        )) {
+          // the open is refused before anything is yielded
+        }
+        return undefined;
+      } catch (caught) {
+        return caught;
+      }
+    })();
+
+    // Assert.
+    expect(error instanceof ConnectError ? error.code : undefined).toBe(Code.NotFound);
   });
 
   it("then tails one entry per store write", async () => {
@@ -2451,7 +2546,7 @@ describe("WatchAgent", () => {
     const frames: string[] = [];
 
     for await (const response of h.turns.watchAgent(
-      create(shimv1.WatchAgentRequestSchema, { pageSize: 10 }),
+      create(shimv1.WatchAgentRequestSchema, {}),
     )) {
       frames.push(response.frame.case ?? "");
     }
@@ -2474,7 +2569,7 @@ describe("WatchAgent", () => {
 
     // Act.
     for await (const response of h.turns.watchAgent(
-      create(shimv1.WatchAgentRequestSchema, { pageSize: 10 }),
+      create(shimv1.WatchAgentRequestSchema, {}),
     )) {
       if (response.frame.case === "page") continue;
       frames.push({ arm: response.frame.case ?? "", at: response.frame.value?.at?.value });
@@ -2491,7 +2586,7 @@ describe("WatchAgent", () => {
     await expect(
       (async () => {
         for await (const _ of h.turns.watchAgent(
-          create(shimv1.WatchAgentRequestSchema, { pageSize: 10 }),
+          create(shimv1.WatchAgentRequestSchema, {}),
         )) {
           // the open is refused before anything is yielded
         }
@@ -2512,7 +2607,7 @@ describe("WatchAgent", () => {
     await expect(
       (async () => {
         for await (const _ of h.turns.watchAgent(
-          create(shimv1.WatchAgentRequestSchema, { pageSize: 10 }),
+          create(shimv1.WatchAgentRequestSchema, {}),
         )) {
           break;
         }
@@ -2532,7 +2627,7 @@ describe("WatchAgent", () => {
     const error = await (async () => {
       try {
         for await (const _ of h.turns.watchAgent(
-          create(shimv1.WatchAgentRequestSchema, { pageSize: 10 }),
+          create(shimv1.WatchAgentRequestSchema, {}),
         )) {
           // the open is refused before anything is yielded
         }
@@ -2555,7 +2650,7 @@ describe("WatchAgent", () => {
 
     // Act.
     for await (const _ of h.turns.watchAgent(
-      create(shimv1.WatchAgentRequestSchema, { pageSize: 10 }),
+      create(shimv1.WatchAgentRequestSchema, {}),
     )) {
       // every frame, to the end of the tail
     }
@@ -2580,7 +2675,7 @@ describe("WatchAgent", () => {
     // Act. The conclusion arrives while the stream stands, as the teardown's
     // does: the registration the session holds is the only way in.
     for await (const _ of h.turns.watchAgent(
-      create(shimv1.WatchAgentRequestSchema, { pageSize: 10 }),
+      create(shimv1.WatchAgentRequestSchema, {}),
     )) {
       h.watchers[0]?.concludeThrough(undefined);
     }
@@ -2603,7 +2698,7 @@ describe("WatchAgent", () => {
 
     // Act.
     for await (const _ of h.turns.watchAgent(
-      create(shimv1.WatchAgentRequestSchema, { pageSize: 10 }),
+      create(shimv1.WatchAgentRequestSchema, {}),
     )) {
       break;
     }
@@ -2625,7 +2720,7 @@ describe("WatchAgent", () => {
 
     // Act.
     for await (const _ of h.turns.watchAgent(
-      create(shimv1.WatchAgentRequestSchema, { pageSize: 10 }),
+      create(shimv1.WatchAgentRequestSchema, {}),
     )) {
       h.watchers[0]?.concludeThrough(undefined);
     }
@@ -2731,6 +2826,44 @@ describe("the opening page StartTurn paints", () => {
     await h.turns.startTurn(startTurn());
 
     expect([h.persistence.firstPageReads, h.persistence.pagesOpened]).toEqual([1, 0]);
+  });
+
+  it("reads the opening page as a repaint when the request states no opening", async () => {
+    // Arrange.
+    const h = await harness();
+
+    // Act.
+    await h.turns.startTurn(startTurn());
+
+    // Assert.
+    expect(h.persistence.openings).toEqual([{ case: "repaint" }]);
+  });
+
+  it("relays a tail_only opening to the record plane", async () => {
+    // Arrange.
+    const h = await harness();
+    const request = startTurn();
+    request.opening = { case: "tailOnly", value: create(shimv1.StartTurnTailOnlySchema, {}) };
+
+    // Act.
+    await h.turns.startTurn(request);
+
+    // Assert.
+    expect(h.persistence.openings).toEqual([{ case: "tailOnly" }]);
+  });
+
+  it("relays a known_through opening with the caller's mark", async () => {
+    // Arrange.
+    const h = await harness();
+    const mark = create(conversationv1.HistoryPointerSchema, { value: "p-3" });
+    const request = startTurn();
+    request.opening = { case: "knownThrough", value: mark };
+
+    // Act.
+    await h.turns.startTurn(request);
+
+    // Assert.
+    expect(h.persistence.openings).toEqual([{ case: "knownThrough", value: mark }]);
   });
 
   it("answers an EMPTY page with a floor when the store cannot be read, never a failure", async () => {
@@ -3212,14 +3345,14 @@ describe("StartTurn against a dead query", () => {
 
   it("RAISES when a StartTurn reaches the engine with no turn id", async () => {
     const h = await harness();
-    const request = create(shimv1.StartTurnRequestSchema, { said: textSaid("x"), pageSize: 10 });
+    const request = create(shimv1.StartTurnRequestSchema, { said: textSaid("x") });
 
     await expect(h.turns.startTurn(request)).rejects.toThrow(/without a turn id or a prompt/);
   });
 
   it("RAISES when a StartTurn reaches the engine with no prompt", async () => {
     const h = await harness();
-    const request = create(shimv1.StartTurnRequestSchema, { turn: TURN, pageSize: 10 });
+    const request = create(shimv1.StartTurnRequestSchema, { turn: TURN });
 
     await expect(h.turns.startTurn(request)).rejects.toThrow(/without a turn id or a prompt/);
   });
@@ -3229,7 +3362,7 @@ describe("StartTurn against a dead query", () => {
     await h.turns.startTurn(startTurn());
 
     const response = await h.turns.startTurn(
-      create(shimv1.StartTurnRequestSchema, { said: textSaid("again"), pageSize: 10 }),
+      create(shimv1.StartTurnRequestSchema, { said: textSaid("again") }),
     );
 
     expect(failureKind(response)).toBe("turnAlreadyOpen");
@@ -3452,7 +3585,7 @@ describe("WatchAgent's non-persistence failures", () => {
     await expect(
       (async () => {
         for await (const _ of h.turns.watchAgent(
-          create(shimv1.WatchAgentRequestSchema, { pageSize: 10 }),
+          create(shimv1.WatchAgentRequestSchema, {}),
         )) {
           break;
         }
@@ -3468,7 +3601,6 @@ describe("ReadHistory's remaining arms", () => {
 
     const response = await h.turns.readHistory(
       create(shimv1.ReadHistoryRequestSchema, {
-        pageSize: 10,
         position: { case: "first", value: create(shimv1.ReadHistoryFirstSchema, {}) },
       }),
     );
@@ -3484,7 +3616,6 @@ describe("ReadHistory's remaining arms", () => {
 
     const response = await h.turns.readHistory(
       create(shimv1.ReadHistoryRequestSchema, {
-        pageSize: 10,
         position: {
           case: "after",
           value: create(conversationv1.HistoryPointerSchema, { value: "p-1" }),
@@ -3503,7 +3634,6 @@ describe("ReadHistory's remaining arms", () => {
     await expect(
       h.turns.readHistory(
         create(shimv1.ReadHistoryRequestSchema, {
-          pageSize: 10,
           position: { case: "first", value: create(shimv1.ReadHistoryFirstSchema, {}) },
         }),
       ),

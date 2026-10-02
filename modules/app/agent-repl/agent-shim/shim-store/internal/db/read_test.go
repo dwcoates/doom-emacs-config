@@ -42,20 +42,17 @@ func seedUnitID(book string, size, n int) string {
 func TestOpenPageRepaintsTheNewestPageNewestFirst(t *testing.T) {
 	// Arrange
 	d, _ := newStore(t)
-	pointers := seedBook(t, d, "agent-1", 5)
+	pointers := seedBook(t, d, "agent-1", PageSize+2)
 
 	// Act
-	opened, err := d.OpenPage(ctx(), "agent-1", 3, nil)
+	opened, err := d.OpenPage(ctx(), "agent-1", Repaint())
 
 	// Assert
 	if err != nil {
 		t.Fatalf("OpenPage: %v", err)
 	}
-	if got := len(opened.Page.GetLines()); got != 3 {
-		t.Fatalf("lines = %d, want 3", got)
-	}
-	if got := opened.Page.GetLines()[0].GetAt().GetValue(); got != pointers[4].GetValue() {
-		t.Fatalf("first line = %q, want the newest %q", got, pointers[4].GetValue())
+	if got := opened.Page.GetLines()[0].GetAt().GetValue(); got != pointers[PageSize+1].GetValue() {
+		t.Fatalf("first line = %q, want the newest %q", got, pointers[PageSize+1].GetValue())
 	}
 	if opened.Page.GetMore() == nil {
 		t.Fatal("boundary = floor, want more — two older lines remain")
@@ -65,13 +62,45 @@ func TestOpenPageRepaintsTheNewestPageNewestFirst(t *testing.T) {
 	}
 }
 
+func TestOpenPageRepaintServesExactlyTheStorePageSize(t *testing.T) {
+	// Arrange: one line more than a page, so only the store's own size can
+	// stop the page.
+	d, _ := newStore(t)
+	seedBook(t, d, "agent-1", PageSize+1)
+
+	// Act
+	opened, err := d.OpenPage(ctx(), "agent-1", Repaint())
+
+	// Assert
+	if err != nil {
+		t.Fatalf("OpenPage: %v", err)
+	}
+	if got := len(opened.Page.GetLines()); got != PageSize {
+		t.Fatalf("lines = %d, want the store page size %d", got, PageSize)
+	}
+}
+
+func TestTheStorePageSizeIsFifty(t *testing.T) {
+	// Arrange: the owner's ruling names the number, so the constant is pinned
+	// rather than merely used.
+	const want = 50
+
+	// Act
+	got := PageSize
+
+	// Assert
+	if got != want {
+		t.Fatalf("PageSize = %d, want %d", got, want)
+	}
+}
+
 func TestOpenPageReportsTheFloorWhenTheBookFitsInOnePage(t *testing.T) {
 	// Arrange
 	d, _ := newStore(t)
 	seedBook(t, d, "agent-1", 2)
 
 	// Act
-	opened, err := d.OpenPage(ctx(), "agent-1", 10, nil)
+	opened, err := d.OpenPage(ctx(), "agent-1", Repaint())
 
 	// Assert
 	if err != nil {
@@ -91,7 +120,7 @@ func TestOpenPageAnswersAnEmptyBookWithAnEmptyPageAtTheFloor(t *testing.T) {
 		frameItem(activityFrame("agent-1", "act-spawn-empty", subagentStart("agent-never-spoke")))))
 
 	// Act
-	opened, err := d.OpenPage(ctx(), "agent-never-spoke", 10, nil)
+	opened, err := d.OpenPage(ctx(), "agent-never-spoke", Repaint())
 
 	// Assert
 	if err != nil {
@@ -113,7 +142,7 @@ func TestOpenPageRefusesAnAgentTheStoreHasNeverHeardOf(t *testing.T) {
 	d, _ := newStore(t)
 
 	// Act
-	_, err := d.OpenPage(ctx(), "agent-never-existed", 10, nil)
+	_, err := d.OpenPage(ctx(), "agent-never-existed", Repaint())
 
 	// Assert
 	if !errors.Is(err, ErrUnknownAgent) {
@@ -129,7 +158,7 @@ func TestOpenPageRefusalOfAnUnknownAgentNamesItsSite(t *testing.T) {
 	d, _ := newStore(t)
 
 	// Act
-	_, err := d.OpenPage(ctx(), "agent-never-existed", 10, nil)
+	_, err := d.OpenPage(ctx(), "agent-never-existed", Repaint())
 
 	// Assert
 	if got := RefusalSite(err); got != SiteUnknownAgent {
@@ -145,7 +174,7 @@ func TestOpenPageRefusalOfAnUnknownAgentBlamesTheAgentField(t *testing.T) {
 	d, _ := newStore(t)
 
 	// Act
-	_, err := d.OpenPage(ctx(), "agent-never-existed", 10, nil)
+	_, err := d.OpenPage(ctx(), "agent-never-existed", Repaint())
 
 	// Assert
 	if got := RefusalField(err); got != "agent" {
@@ -163,7 +192,7 @@ func TestOpenPageRefusesAnUnknownAgentBeforeItJudgesThePointer(t *testing.T) {
 	pointers := seedBook(t, d, "agent-1", 1)
 
 	// Act
-	_, err := d.OpenPage(ctx(), "agent-never-existed", 10, pointers[0])
+	_, err := d.OpenPage(ctx(), "agent-never-existed", CatchUp(pointers[0]))
 
 	// Assert
 	if !errors.Is(err, ErrUnknownAgent) {
@@ -180,7 +209,7 @@ func TestOpenPageRefusalOfAnUnknownAgentIsNotAnErrorRecord(t *testing.T) {
 	d, sink := newStore(t)
 
 	// Act
-	if _, err := d.OpenPage(ctx(), "agent-never-existed", 10, nil); err == nil {
+	if _, err := d.OpenPage(ctx(), "agent-never-existed", Repaint()); err == nil {
 		t.Fatal("OpenPage served an agent this store never heard of")
 	}
 
@@ -195,7 +224,7 @@ func TestOpenPageCatchesUpFromKnownThrough(t *testing.T) {
 	pointers := seedBook(t, d, "agent-1", 4)
 
 	// Act
-	opened, err := d.OpenPage(ctx(), "agent-1", 10, pointers[1])
+	opened, err := d.OpenPage(ctx(), "agent-1", CatchUp(pointers[1]))
 
 	// Assert
 	if err != nil {
@@ -213,17 +242,17 @@ func TestOpenPageReportsMoreWhenTheGapExceedsThePageSize(t *testing.T) {
 	// Arrange: the caller then walks older via ReadAgentPage until it meets
 	// its own mark.
 	d, _ := newStore(t)
-	pointers := seedBook(t, d, "agent-1", 6)
+	pointers := seedBook(t, d, "agent-1", PageSize+2)
 
 	// Act
-	opened, err := d.OpenPage(ctx(), "agent-1", 2, pointers[0])
+	opened, err := d.OpenPage(ctx(), "agent-1", CatchUp(pointers[0]))
 
 	// Assert
 	if err != nil {
 		t.Fatalf("OpenPage: %v", err)
 	}
-	if got := len(opened.Page.GetLines()); got != 2 {
-		t.Fatalf("lines = %d, want the page budget of 2", got)
+	if got := len(opened.Page.GetLines()); got != PageSize {
+		t.Fatalf("lines = %d, want the store page size %d", got, PageSize)
 	}
 	if opened.Page.GetMore() == nil {
 		t.Fatal("boundary = floor, want more — the gap is wider than the page")
@@ -237,7 +266,7 @@ func TestOpenPageRefusesAPointerFromAnotherBook(t *testing.T) {
 	seedBook(t, d, "agent-1", 1)
 
 	// Act
-	_, err := d.OpenPage(ctx(), "agent-1", 10, other[0])
+	_, err := d.OpenPage(ctx(), "agent-1", CatchUp(other[0]))
 
 	// Assert
 	if !errors.Is(err, ErrStalePointer) {
@@ -252,7 +281,7 @@ func TestOpenPageRefusesAPointerThatNamesNoRow(t *testing.T) {
 	seedBook(t, d, "agent-1", 1)
 
 	// Act
-	_, err := d.OpenPage(ctx(), "agent-1", 10, encodePointer(9999))
+	_, err := d.OpenPage(ctx(), "agent-1", CatchUp(encodePointer(9999)))
 
 	// Assert
 	if !errors.Is(err, ErrStalePointer) {
@@ -265,27 +294,13 @@ func TestOpenPageRefusesAnEmptyAgentValue(t *testing.T) {
 	d, s := newStore(t)
 
 	// Act
-	_, err := d.OpenPage(ctx(), "", 10, nil)
+	_, err := d.OpenPage(ctx(), "", Repaint())
 
 	// Assert
 	if !errors.Is(err, ErrInvalid) {
 		t.Fatalf("error = %v, want ErrInvalid", err)
 	}
 	s.assertTracedRefusal(t, "agent id value is empty")
-}
-
-func TestOpenPageRefusesAZeroPageSize(t *testing.T) {
-	// Arrange
-	d, s := newStore(t)
-
-	// Act
-	_, err := d.OpenPage(ctx(), "agent-1", 0, nil)
-
-	// Assert
-	if !errors.Is(err, ErrInvalid) {
-		t.Fatalf("error = %v, want ErrInvalid", err)
-	}
-	s.assertTracedRefusal(t, "page_size is zero")
 }
 
 func TestOpenPagePinsTheWatchAtTheGlobalWriteOrdinal(t *testing.T) {
@@ -296,7 +311,7 @@ func TestOpenPagePinsTheWatchAtTheGlobalWriteOrdinal(t *testing.T) {
 	want := scalar[uint64](t, d, `SELECT MAX(write_seq) FROM entry`)
 
 	// Act
-	opened, err := d.OpenPage(ctx(), "agent-1", 10, nil)
+	opened, err := d.OpenPage(ctx(), "agent-1", Repaint())
 
 	// Assert
 	if err != nil {
@@ -304,6 +319,98 @@ func TestOpenPagePinsTheWatchAtTheGlobalWriteOrdinal(t *testing.T) {
 	}
 	if opened.PinSeq != want {
 		t.Fatalf("PinSeq = %d, want %d", opened.PinSeq, want)
+	}
+}
+
+// ---- tail_only ----
+
+func TestOpenPageTailOnlyServesNoLines(t *testing.T) {
+	// Arrange: a book with history the caller does not want replayed.
+	d, _ := newStore(t)
+	seedBook(t, d, "agent-1", 3)
+
+	// Act
+	opened, err := d.OpenPage(ctx(), "agent-1", TailOnly())
+
+	// Assert
+	if err != nil {
+		t.Fatalf("OpenPage: %v", err)
+	}
+	if got := len(opened.Page.GetLines()); got != 0 {
+		t.Fatalf("lines = %d, want none — tail_only replays no history", got)
+	}
+}
+
+func TestOpenPageTailOnlyReportsTheFloor(t *testing.T) {
+	// Arrange: an empty page has no oldest line for `more` to point at, so the
+	// boundary says nothing is walkable FROM this page; history is reached by a
+	// repaint.
+	d, _ := newStore(t)
+	seedBook(t, d, "agent-1", PageSize+1)
+
+	// Act
+	opened, err := d.OpenPage(ctx(), "agent-1", TailOnly())
+
+	// Assert
+	if err != nil {
+		t.Fatalf("OpenPage: %v", err)
+	}
+	if opened.Page.GetFloor() == nil {
+		t.Fatalf("boundary = %v, want floor", opened.Page.GetBoundary())
+	}
+}
+
+func TestOpenPageTailOnlyPinsTheWatchAfterTheNewestLine(t *testing.T) {
+	// Arrange: the tail begins exactly after the newest line as of the open.
+	d, _ := newStore(t)
+	seedBook(t, d, "agent-1", 2)
+	want := scalar[uint64](t, d, `SELECT MAX(write_seq) FROM entry`)
+
+	// Act
+	opened, err := d.OpenPage(ctx(), "agent-1", TailOnly())
+
+	// Assert
+	if err != nil {
+		t.Fatalf("OpenPage: %v", err)
+	}
+	if opened.PinSeq != want {
+		t.Fatalf("PinSeq = %d, want %d", opened.PinSeq, want)
+	}
+}
+
+func TestOpenPageTailOnlyReplaysOnlyLinesWrittenAfterTheOpen(t *testing.T) {
+	// Arrange: the watch replay from the tail-only pin carries the later line
+	// and none of the history before the open.
+	d, _ := newStore(t)
+	seedBook(t, d, "agent-1", 2)
+	opened, err := d.OpenPage(ctx(), "agent-1", TailOnly())
+	if err != nil {
+		t.Fatalf("OpenPage: %v", err)
+	}
+	later := seedBook(t, d, "agent-1", 1)
+
+	// Act
+	replayed, err := d.LinesSince(ctx(), "agent-1", opened.PinSeq)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("LinesSince: %v", err)
+	}
+	if len(replayed) != 1 || replayed[0].Line.GetAt().GetValue() != later[0].GetValue() {
+		t.Fatalf("replayed = %v, want only the line written after the open %q", replayed, later[0].GetValue())
+	}
+}
+
+func TestOpenPageTailOnlyRefusesAnAgentTheStoreHasNeverHeardOf(t *testing.T) {
+	// Arrange: tail_only reads no lines but still asks the register.
+	d, _ := newStore(t)
+
+	// Act
+	_, err := d.OpenPage(ctx(), "agent-never-existed", TailOnly())
+
+	// Assert
+	if !errors.Is(err, ErrUnknownAgent) {
+		t.Fatalf("OpenPage error = %v, want ErrUnknownAgent", err)
 	}
 }
 
@@ -322,7 +429,7 @@ func TestAWatchOpenedOneRowBehindTheHeadIsCaughtUpByItsPage(t *testing.T) {
 	pointers := seedBook(t, d, "agent-1", 2)
 
 	// Act
-	opened, err := d.OpenPage(ctx(), "agent-1", 10, pointers[0])
+	opened, err := d.OpenPage(ctx(), "agent-1", CatchUp(pointers[0]))
 	if err != nil {
 		t.Fatalf("OpenPage: %v", err)
 	}
@@ -347,7 +454,7 @@ func TestAWatchOpenedManyRowsBehindTheHeadIsCaughtUpByItsPage(t *testing.T) {
 	pointers := seedBook(t, d, "agent-1", 6)
 
 	// Act
-	opened, err := d.OpenPage(ctx(), "agent-1", 10, pointers[0])
+	opened, err := d.OpenPage(ctx(), "agent-1", CatchUp(pointers[0]))
 	if err != nil {
 		t.Fatalf("OpenPage: %v", err)
 	}
@@ -382,7 +489,7 @@ func TestAWatchOpenedAtTheHeadIsCaughtUpWithNothing(t *testing.T) {
 	pointers := seedBook(t, d, "agent-1", 3)
 
 	// Act
-	opened, err := d.OpenPage(ctx(), "agent-1", 10, pointers[2])
+	opened, err := d.OpenPage(ctx(), "agent-1", CatchUp(pointers[2]))
 	if err != nil {
 		t.Fatalf("OpenPage: %v", err)
 	}
@@ -419,7 +526,7 @@ func TestOpenPageNeverReturnsAnUnservedRow(t *testing.T) {
 	seedBook(t, d, "agent-1", 1)
 
 	// Act
-	opened, err := d.OpenPage(ctx(), "agent-1", 10, nil)
+	opened, err := d.OpenPage(ctx(), "agent-1", Repaint())
 
 	// Assert
 	if err != nil {
@@ -435,17 +542,17 @@ func TestOpenPageNeverReturnsAnUnservedRow(t *testing.T) {
 func TestReadPageWalksOlderThanTheServedPointer(t *testing.T) {
 	// Arrange
 	d, _ := newStore(t)
-	pointers := seedBook(t, d, "agent-1", 5)
+	pointers := seedBook(t, d, "agent-1", PageSize+3)
 
 	// Act
-	page, err := d.ReadPage(ctx(), "agent-1", 2, pointers[4])
+	page, err := d.ReadPage(ctx(), "agent-1", pointers[PageSize+2])
 
 	// Assert
 	if err != nil {
 		t.Fatalf("ReadPage: %v", err)
 	}
-	if got := len(page.GetLines()); got != 2 {
-		t.Fatalf("lines = %d, want 2", got)
+	if got := len(page.GetLines()); got != PageSize {
+		t.Fatalf("lines = %d, want the store page size %d", got, PageSize)
 	}
 	if page.GetMore() == nil {
 		t.Fatal("boundary = floor, want more")
@@ -461,7 +568,7 @@ func TestReadPageReportsTheFloorAtTheOldestRetainedLine(t *testing.T) {
 	pointers := seedBook(t, d, "agent-1", 3)
 
 	// Act
-	page, err := d.ReadPage(ctx(), "agent-1", 10, pointers[2])
+	page, err := d.ReadPage(ctx(), "agent-1", pointers[2])
 
 	// Assert
 	if err != nil {
@@ -482,7 +589,7 @@ func TestReadPageRefusesAnUnsetAfterPointer(t *testing.T) {
 	seedBook(t, d, "agent-1", 1)
 
 	// Act
-	_, err := d.ReadPage(ctx(), "agent-1", 10, nil)
+	_, err := d.ReadPage(ctx(), "agent-1", nil)
 
 	// Assert
 	if !errors.Is(err, ErrInvalid) {
@@ -498,25 +605,11 @@ func TestReadPageRefusesAPointerFromAnotherBook(t *testing.T) {
 	seedBook(t, d, "agent-1", 1)
 
 	// Act
-	_, err := d.ReadPage(ctx(), "agent-1", 10, other[0])
+	_, err := d.ReadPage(ctx(), "agent-1", other[0])
 
 	// Assert
 	if !errors.Is(err, ErrStalePointer) {
 		t.Fatalf("error = %v, want ErrStalePointer", err)
-	}
-}
-
-func TestReadPageRefusesAZeroPageSize(t *testing.T) {
-	// Arrange
-	d, _ := newStore(t)
-	pointers := seedBook(t, d, "agent-1", 1)
-
-	// Act
-	_, err := d.ReadPage(ctx(), "agent-1", 0, pointers[0])
-
-	// Assert
-	if !errors.Is(err, ErrInvalid) {
-		t.Fatalf("error = %v, want ErrInvalid", err)
 	}
 }
 
@@ -659,14 +752,14 @@ func TestAReadIsAnsweredWhileAWriterHoldsTheWriteLock(t *testing.T) {
 		{
 			name: "an opening page",
 			read: func(d *DB, _ []*storev1.StoreItemPointer) error {
-				_, err := d.OpenPage(context.Background(), "reader-book", 10, nil)
+				_, err := d.OpenPage(context.Background(), "reader-book", Repaint())
 				return err
 			},
 		},
 		{
 			name: "a page walk back",
 			read: func(d *DB, seeded []*storev1.StoreItemPointer) error {
-				_, err := d.ReadPage(context.Background(), "reader-book", 10, seeded[len(seeded)-1])
+				_, err := d.ReadPage(context.Background(), "reader-book", seeded[len(seeded)-1])
 				return err
 			},
 		},
@@ -730,7 +823,7 @@ func TestAReadCompletesWhileAWriteTransactionIsHeld(t *testing.T) {
 		{
 			name: "a page open, which begins a read transaction",
 			read: func(t *testing.T, d *DB) {
-				if _, err := d.OpenPage(ctx(), "agent-1", 10, nil); err != nil {
+				if _, err := d.OpenPage(ctx(), "agent-1", Repaint()); err != nil {
 					t.Fatalf("OpenPage while a write was held: %v", err)
 				}
 			},
@@ -829,7 +922,7 @@ func TestASettledResponsesSettleInstantSurvivesReplay(t *testing.T) {
 		frameItem(activityFrame("agent-1", "act-settle", proseSettledAt("done", settled)))))
 
 	// Act: replay the page, exactly as a re-resolved feed reads it back.
-	opened, err := d.OpenPage(ctx(), "agent-1", 1, nil)
+	opened, err := d.OpenPage(ctx(), "agent-1", Repaint())
 	if err != nil {
 		t.Fatalf("OpenPage: %v", err)
 	}
@@ -853,7 +946,7 @@ func TestAResponseWithNoSettleInstantReadsBackUnset(t *testing.T) {
 		frameItem(activityFrame("agent-1", "act-none", proseSettledAt("done", 0)))))
 
 	// Act.
-	opened, err := d.OpenPage(ctx(), "agent-1", 1, nil)
+	opened, err := d.OpenPage(ctx(), "agent-1", Repaint())
 	if err != nil {
 		t.Fatalf("OpenPage: %v", err)
 	}
@@ -871,7 +964,7 @@ func TestOpenPageServesEachLineWithItsTurn(t *testing.T) {
 	writeOK(t, d, stampedTurn(pageEntry("w1", "u1", "agent-1", frameItem(activityFrame("agent-1", "act-1", prose()))), "turn-a"))
 
 	// Act
-	opened, err := d.OpenPage(ctx(), "agent-1", 10, nil)
+	opened, err := d.OpenPage(ctx(), "agent-1", Repaint())
 
 	// Assert
 	if err != nil {
@@ -928,7 +1021,7 @@ func cancelledOpenPages(t *testing.T, d *DB, book string) {
 			for i := 0; i < 60; i++ {
 				deadline := time.Duration((i*37+g*11)%3000) * time.Microsecond
 				c, cancel := context.WithTimeout(context.Background(), deadline)
-				_, _ = d.OpenPage(c, book, 2000, nil)
+				_, _ = d.OpenPage(c, book, Repaint())
 				cancel()
 			}
 		}(g)
@@ -995,7 +1088,7 @@ func TestOpenPageOrdersABookByPlaceNotByArrival(t *testing.T) {
 	early := pointerOf(t, writeOK(t, d, placedLine("w2", "u2", "agent-1", 100, 0)))
 
 	// Act
-	opened, err := d.OpenPage(ctx(), "agent-1", 10, nil)
+	opened, err := d.OpenPage(ctx(), "agent-1", Repaint())
 
 	// Assert
 	if err != nil {
@@ -1013,7 +1106,7 @@ func TestOpenPageRanksLinesOfOneInstantByOrdinal(t *testing.T) {
 	first := pointerOf(t, writeOK(t, d, placedLine("w2", "u2", "agent-1", 100, 0)))
 
 	// Act
-	opened, err := d.OpenPage(ctx(), "agent-1", 10, nil)
+	opened, err := d.OpenPage(ctx(), "agent-1", Repaint())
 
 	// Assert
 	if err != nil {
@@ -1031,7 +1124,7 @@ func TestOpenPageBreaksAnExactPlaceTieByFirstInsert(t *testing.T) {
 	newer := pointerOf(t, writeOK(t, d, placedLine("w2", "u2", "agent-1", 100, 0)))
 
 	// Act
-	opened, err := d.OpenPage(ctx(), "agent-1", 10, nil)
+	opened, err := d.OpenPage(ctx(), "agent-1", Repaint())
 
 	// Assert
 	if err != nil {
@@ -1048,7 +1141,7 @@ func TestOpenPageServesEveryLineWithItsPlace(t *testing.T) {
 	writeOK(t, d, placedLine("w1", "u1", "agent-1", 100, 3))
 
 	// Act
-	opened, err := d.OpenPage(ctx(), "agent-1", 10, nil)
+	opened, err := d.OpenPage(ctx(), "agent-1", Repaint())
 
 	// Assert
 	if err != nil {
@@ -1067,7 +1160,7 @@ func TestOpenPageCatchUpDeliversALineWrittenLaterButPlacedEarlier(t *testing.T) 
 	late := pointerOf(t, writeOK(t, d, placedLine("w2", "u2", "agent-1", 100, 0)))
 
 	// Act
-	opened, err := d.OpenPage(ctx(), "agent-1", 10, &storev1.StoreItemPointer{Value: mark})
+	opened, err := d.OpenPage(ctx(), "agent-1", CatchUp(&storev1.StoreItemPointer{Value: mark}))
 
 	// Assert
 	if err != nil {
@@ -1086,7 +1179,7 @@ func TestOpenPageCatchUpOrdersWhatItDeliversByPlace(t *testing.T) {
 	higher := pointerOf(t, writeOK(t, d, placedLine("w3", "u3", "agent-1", 300, 0)))
 
 	// Act
-	opened, err := d.OpenPage(ctx(), "agent-1", 10, &storev1.StoreItemPointer{Value: mark})
+	opened, err := d.OpenPage(ctx(), "agent-1", CatchUp(&storev1.StoreItemPointer{Value: mark}))
 
 	// Assert
 	if err != nil {
@@ -1105,7 +1198,7 @@ func TestReadPageWalksToTheLinesPlacedBeforeTheNamedLine(t *testing.T) {
 	writeOK(t, d, placedLine("w3", "u3", "agent-1", 300, 0))
 
 	// Act
-	page, err := d.ReadPage(ctx(), "agent-1", 10, &storev1.StoreItemPointer{Value: named})
+	page, err := d.ReadPage(ctx(), "agent-1", &storev1.StoreItemPointer{Value: named})
 
 	// Assert
 	if err != nil {
@@ -1125,7 +1218,7 @@ func TestReadPageBoundsByTheNamedLinesCurrentPlace(t *testing.T) {
 	writeOK(t, d, placed(pageEntry("w3", "u1", "agent-1", frameItem(activityFrame("agent-1", "act-u1", bashSuccess()))), 200, 0))
 
 	// Act
-	page, err := d.ReadPage(ctx(), "agent-1", 10, &storev1.StoreItemPointer{Value: named})
+	page, err := d.ReadPage(ctx(), "agent-1", &storev1.StoreItemPointer{Value: named})
 
 	// Assert
 	if err != nil {
@@ -1144,7 +1237,7 @@ func TestReadPageThroughServesTheLinesPlacedAtOrBeforeTheBound(t *testing.T) {
 	writeOK(t, d, placedLine("w3", "u3", "agent-1", 201, 0))
 
 	// Act
-	page, err := d.ReadPageThrough(ctx(), "agent-1", 10, 200)
+	page, err := d.ReadPageThrough(ctx(), "agent-1", 200)
 
 	// Assert
 	if err != nil {
@@ -1155,21 +1248,24 @@ func TestReadPageThroughServesTheLinesPlacedAtOrBeforeTheBound(t *testing.T) {
 	}
 }
 
-func TestReadPageThroughReportsMoreWhenTheBudgetCutsTheBookShort(t *testing.T) {
+func TestReadPageThroughReportsMoreWhenThePageSizeCutsTheBookShort(t *testing.T) {
 	// Arrange
 	d, _ := newStore(t)
-	writeOK(t, d, placedLine("w1", "u1", "agent-1", 100, 0))
-	newest := pointerOf(t, writeOK(t, d, placedLine("w2", "u2", "agent-1", 150, 0)))
+	var placed []string
+	for i := 0; i <= PageSize; i++ {
+		id := strconv.Itoa(i)
+		placed = append(placed, pointerOf(t, writeOK(t, d, placedLine("w"+id, "u"+id, "agent-1", int64(100+i), 0))))
+	}
 
 	// Act
-	page, err := d.ReadPageThrough(ctx(), "agent-1", 1, 200)
+	page, err := d.ReadPageThrough(ctx(), "agent-1", 200)
 
 	// Assert
 	if err != nil {
 		t.Fatalf("ReadPageThrough: %v", err)
 	}
-	if got := page.GetMore().GetLastItem().GetValue(); got != newest {
-		t.Fatalf("more = %q, want the last served line %q", got, newest)
+	if got := page.GetMore().GetLastItem().GetValue(); got != placed[1] {
+		t.Fatalf("more = %q, want the oldest served line %q", got, placed[1])
 	}
 }
 
@@ -1179,7 +1275,7 @@ func TestReadPageThroughAnEmptyKnownBookIsTheFloor(t *testing.T) {
 	writeOK(t, d, placedLine("w1", "u1", "agent-1", 500, 0))
 
 	// Act
-	page, err := d.ReadPageThrough(ctx(), "agent-1", 10, 100)
+	page, err := d.ReadPageThrough(ctx(), "agent-1", 100)
 
 	// Assert
 	if err != nil {
@@ -1195,7 +1291,7 @@ func TestReadPageThroughRefusesABookTheStoreNeverHeardOf(t *testing.T) {
 	d, _ := newStore(t)
 
 	// Act
-	_, err := d.ReadPageThrough(ctx(), "nobody", 10, 100)
+	_, err := d.ReadPageThrough(ctx(), "nobody", 100)
 
 	// Assert
 	if !errors.Is(err, ErrUnknownAgent) {
@@ -1208,7 +1304,7 @@ func TestReadPageThroughRefusesANonPositiveBound(t *testing.T) {
 	d, _ := newStore(t)
 
 	// Act
-	_, err := d.ReadPageThrough(ctx(), "agent-1", 10, 0)
+	_, err := d.ReadPageThrough(ctx(), "agent-1", 0)
 
 	// Assert
 	if RefusalSite(err) != SiteThroughNotPositive {

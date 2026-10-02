@@ -180,7 +180,7 @@ func TestADetachedRunFrameIsServedAsAPageLineOfTheAnnouncersBook(t *testing.T) {
 		frameLine(agentID("main"), detachedRunFrame("main", itestBashHandle, itestBashRunID))))
 
 	// Assert
-	page := openSession(ctx, t, cli, "main", 10, nil)
+	page := openSession(ctx, t, cli, "main", nil)
 	assertTexts(t, "the announcer's book", pageTexts(page.GetPage()), []string{"detached:" + itestBashHandle})
 	store.assertNoErrorRecords()
 }
