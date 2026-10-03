@@ -3327,6 +3327,52 @@ unattributed teardown is visible in the log rather than silently blank."
     (agent-repl--ws-put "none" :repl-state :inactive)
     (should-not (agent-repl--ws-log-routable-p "none"))))
 
+(ert-deftest agent-repl-test-log-dir-truename-asks-the-filesystem-once ()
+  "A directory's canonical spelling is resolved once, not on every record."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((dir (make-temp-file "agent-repl-log-dir" t))
+          (asks 0))
+      (unwind-protect
+          ;; `file-directory-p' is asked once per resolution (`file-truename'
+          ;; recurses on itself, so it cannot be counted this way).
+          (cl-letf* ((real (symbol-function 'file-directory-p))
+                     ((symbol-function 'file-directory-p)
+                      (lambda (f) (cl-incf asks) (funcall real f))))
+            ;; Act
+            (agent-repl--log-dir-truename dir)
+            (agent-repl--log-dir-truename dir)
+            (agent-repl--log-dir-truename dir)
+            ;; Assert
+            (should (= asks 1)))
+        (delete-directory dir)))))
+
+(ert-deftest agent-repl-test-log-dir-truename-is-canonical ()
+  "The remembered spelling is the directory's canonical one, without a trailing slash."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((dir (make-temp-file "agent-repl-log-dir" t)))
+      (unwind-protect
+          ;; Act / Assert
+          (should (equal (agent-repl--log-dir-truename (file-name-as-directory dir))
+                         (directory-file-name (file-truename dir))))
+        (delete-directory dir)))))
+
+(ert-deftest agent-repl-test-log-dir-truename-does-not-remember-a-missing-directory ()
+  "A directory that does not exist yet is asked again, so it routes once it appears."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let* ((parent (make-temp-file "agent-repl-log-dir" t))
+           (dir (expand-file-name "later" parent)))
+      (unwind-protect
+          (progn
+            (should-not (agent-repl--log-dir-truename dir))
+            ;; Act
+            (make-directory dir)
+            ;; Assert
+            (should (agent-repl--log-dir-truename dir)))
+        (delete-directory parent t)))))
+
 (ert-deftest agent-repl-test-log-routable-rejects-vanished-project-dir ()
   "A registered `:project-dir' that no longer exists owns no sink."
   (agent-repl-test--with-clean-state
