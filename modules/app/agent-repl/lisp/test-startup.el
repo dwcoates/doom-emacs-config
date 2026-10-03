@@ -179,6 +179,19 @@ reaches Emacs first cannot open a tab ahead of its go-ahead."
     ;; Assert
     (should (equal agent-repl-test-startup--switches '(("b" . startup))))))
 
+(ert-deftest agent-repl-test-startup-is-choosing-until-it-selects ()
+  "Running with no selection is choosing; a drawn tab's opening ends the choice."
+  (agent-repl-test-startup--with-run
+    ;; Arrange
+    (setq agent-repl-test-startup--known '("a"))
+    (agent-repl-startup--page-drawn "a")
+    (agent-repl-startup-handle (agent-repl-test-startup--opening 1))
+    (should (agent-repl-startup-choosing-p))
+    ;; Act
+    (agent-repl-startup-handle (agent-repl-test-startup--go-ahead "a"))
+    ;; Assert
+    (should-not (agent-repl-startup-choosing-p))))
+
 (ert-deftest agent-repl-test-startup-a-go-ahead-waits-for-its-page ()
   "A go-ahead whose page has not drawn opens nothing and says it is loading."
   (agent-repl-test-startup--with-run

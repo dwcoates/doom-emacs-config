@@ -2132,7 +2132,22 @@ is moved to a real workspace first so the kill does not strand it."
            (pseudos (cl-remove-if-not #'agent-repl--pseudo-workspace-name-p names)))
       ;; Never delete while no real perspective survives the kill, and
       ;; never consume the one-shot before there is anything to delete.
-      (when (and reals pseudos)
+      (cond
+       ((not (and reals pseudos)) nil)
+       ;; THE STARTUP CHOOSES WHERE THE FRAME GOES (owner request,
+       ;; 2026-10-03: the first DRAWN workspace is selected).  Vacating the
+       ;; placeholder before it has chosen moved the frame to the first
+       ;; workspace that existed -- a collapsed repository's hidden tab --
+       ;; and selected it on the daemon.  The pass after the startup's
+       ;; selection lands deletes the pseudos with the frame already off them.
+       ((and (agent-repl--pseudo-workspace-name-p (agent-repl--ws-current-name))
+             (fboundp 'agent-repl-startup-choosing-p)
+             (agent-repl-startup-choosing-p))
+        (agent-repl--info
+         '(:agent-repl-central "workspace numbering spans the whole session")
+         "elisp.workspace.pseudo-delete-deferred current=%s reason=startup-choosing"
+         (agent-repl--ws-current-name)))
+       (t
         (setq agent-repl--pseudo-perspectives-deleted t)
         (let ((current (agent-repl--ws-current-name)))
           (when (and current (agent-repl--pseudo-workspace-name-p current))
@@ -2151,7 +2166,9 @@ is moved to a real workspace first so the kill does not strand it."
             (agent-repl--info
              '(:agent-repl-central "workspace numbering spans the whole session")
              "elisp.workspace.pseudo-delete-skip-nil ws=%s (persp-nil is not killable)"
-             pseudo)))))))
+             pseudo))))))))
+
+(declare-function agent-repl-startup-choosing-p "startup" ())
 
 (defun agent-repl--delete-pseudos-on-bringup (opened _total finished)
   "Delete the pseudo perspectives once the first roster reconcile settles.
