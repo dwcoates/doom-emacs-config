@@ -497,6 +497,61 @@ Every module in ABSENT is named by config.el but gets no file."
       (should (agent-repl-test-eb--logged-p
                :error "reload-build-mismatch pushed=\"the-deploy-built-something-else\"")))))
 
+;;;; ---- The hard bounce's reload of stale elisp ----
+
+(ert-deftest agent-repl-test-eb-reload-if-stale-loads-nothing-when-current ()
+  "An Emacs already on ROOT's elisp loads nothing."
+  (agent-repl-test-eb--with-harness
+    (agent-repl-test-eb--with-root root
+      ;; Arrange
+      (agent-repl-test-eb--write-root root '("core" "status"))
+      (let ((agent-repl--frontend-root root)
+            (agent-repl--elisp-module-builds (agent-repl-elisp-build-entries root '("core" "status"))))
+        ;; Act
+        (let ((outcome (agent-repl-elisp-reload-if-stale root)))
+          ;; Assert
+          (should (and (equal outcome "current") (null agent-repl-test-eb--loaded))))))))
+
+(ert-deftest agent-repl-test-eb-reload-if-stale-loads-the-set-when-stale ()
+  "An Emacs on older elisp hot-loads ROOT's whole module set."
+  (agent-repl-test-eb--with-harness
+    (agent-repl-test-eb--with-root root
+      ;; Arrange
+      (agent-repl-test-eb--write-root root '("core" "status"))
+      (let ((agent-repl--frontend-root root)
+            (agent-repl--elisp-module-builds '(("core" . "old") ("status" . "old"))))
+        ;; Act
+        (let ((outcome (agent-repl-elisp-reload-if-stale root)))
+          ;; Assert
+          (should (and (equal outcome "reloaded") (= (length agent-repl-test-eb--loaded) 2))))))))
+
+(ert-deftest agent-repl-test-eb-reload-if-stale-reports-a-failed-load ()
+  "A module that fails to load makes the outcome failed."
+  (agent-repl-test-eb--with-harness
+    (agent-repl-test-eb--with-root root
+      ;; Arrange
+      (agent-repl-test-eb--write-root root '("core" "status"))
+      (setq agent-repl-test-eb--failing-loads '("status"))
+      (let ((agent-repl--frontend-root root)
+            (agent-repl--elisp-module-builds '(("core" . "old"))))
+        ;; Act
+        (let ((outcome (agent-repl-elisp-reload-if-stale root)))
+          ;; Assert
+          (should (equal outcome "failed")))))))
+
+(ert-deftest agent-repl-test-eb-reload-if-stale-leaves-another-checkouts-emacs-alone ()
+  "An Emacs running another checkout's elisp loads nothing from ROOT."
+  (agent-repl-test-eb--with-harness
+    (agent-repl-test-eb--with-root root
+      ;; Arrange
+      (agent-repl-test-eb--write-root root '("core"))
+      (let ((agent-repl--frontend-root "/elsewhere/agent-repl/")
+            (agent-repl--elisp-module-builds '(("core" . "old"))))
+        ;; Act
+        (let ((outcome (agent-repl-elisp-reload-if-stale root)))
+          ;; Assert
+          (should (and (equal outcome "other-root") (null agent-repl-test-eb--loaded))))))))
+
 (provide 'test-elisp-build)
 
 ;;; test-elisp-build.el ends here
