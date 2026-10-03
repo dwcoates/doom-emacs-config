@@ -42,7 +42,7 @@ world() {
     w="$(mktemp -d /tmp/bounce-test.XXXXXX)"
     WORLDS+=("$w")
     mkdir -p "$w/checkout/scripts" "$w/checkout/daemon/bin" "$w/checkout/agent-shim/claude/shim/dist" \
-        "$w/cache/agent-repl/bin" "$w/cache/agent-repl/sock" "$w/agents" "$w/launchd"
+        "$w/cache/agent-repl/bin" "$w/cache/agent-repl/sock" "$w/agents" "$w/launchd" "$w/state/sock"
     cp "$SCRIPT" "$w/checkout/scripts/"
     touch "$w/agents/com.agentrepl.shim-store.plist" "$w/agents/com.agentrepl.shim-claude-sidecar.plist"
     # A launchctl stub: a loaded label is a file holding its pid; every call is
@@ -79,9 +79,9 @@ EOF
     W="$w"
 }
 
-# backend PATH TRAPS -- start a stand-in process whose command line names
-# PATH, its pid left in PID; TRAPS "obeys" exits on SIGTERM, "ignores"
-# outlives it. Its output is closed, so the substitution that reads its pid
+# backend PATH TRAPS [ARG...] -- start a stand-in process whose command line
+# names PATH (and ARGs), its pid left in PID; TRAPS "obeys" exits on SIGTERM,
+# "ignores" outlives it. Its output is closed, so the substitution that reads its pid
 # never waits on it.
 #
 # RUN AS `PATH call ...` it is the daemon binary's `call` verb instead: the
@@ -91,6 +91,7 @@ EOF
 PID=""
 backend() {
     local path="$1" mode="$2" trap_line call_line
+    shift 2
     mkdir -p "$(dirname "$path")"
     if [ "$mode" = ignores ]; then
         trap_line='trap "" TERM'
@@ -102,13 +103,13 @@ backend() {
     chmod +x "$path"
     # AN ORPHAN, so a stopped stand-in is reaped at once rather than lingering
     # as this shell's zombie, which `kill -0` would still call alive.
-    PID="$(bash -c '"$0" </dev/null >/dev/null 2>&1 & echo $!' "$path")"
+    PID="$(bash -c '"$0" "$@" </dev/null >/dev/null 2>&1 & echo $!' "$path" "$@")"
     STARTED+=("$PID")
 }
 
 run() { # WORLD -- run the copied script against the world, output to WORLD/out
     local w="$1"
-    AGENT_REPL_TEST_WORLD="$w" \
+    AGENT_REPL_TEST_WORLD="$w" AGENT_REPL_STATE_DIR="$w/state" \
     AGENT_REPL_LAUNCHCTL="$w/launchctl" AGENT_REPL_LAUNCH_AGENTS_DIR="$w/agents" \
         XDG_CACHE_HOME="$w/cache" AGENT_REPL_BOUNCE_BUILDER="${BUILDER:-$w/builder}" \
         AGENT_REPL_BOUNCE_GRACE=2 AGENT_REPL_BOUNCE_SOCK_MAX=2 \
@@ -158,7 +159,7 @@ backend "$w/cache/agent-repl/bin/shim-lock" ignores; lock="$PID"
 on_call "$w" "kill -KILL $shim $lock; kill -KILL $daemon"
 run "$w"; status=$?
 [ "$status" -eq 0 ] && pass "an ordered stand-down bounces" || fail "an ordered stand-down exited $status: $(cat "$w/out")"
-grep -q 'call UpdateShutdownSchedule {"now":{"reason":{"operator":' "$w/daemon-calls" 2>/dev/null &&
+grep -qF "call -state-dir $w/state UpdateShutdownSchedule {\"now\":{\"reason\":{\"operator\":" "$w/daemon-calls" 2>/dev/null &&
     pass "the daemon is asked to stand down now" || fail "the daemon was not asked: $(cat "$w/daemon-calls" 2>/dev/null)"
 gone "$daemon" && gone "$shim" && gone "$lock" &&
     pass "the daemon's own stand-down takes its shims with it" || fail "a backend survived the ordered stand-down"
@@ -230,6 +231,32 @@ world; w="$W"
 backend "$w/elsewhere/daemon/bin/claude-repld" obeys; other="$PID"
 run "$w"
 kill -0 "$other" 2>/dev/null && pass "a daemon from another checkout keeps running" || fail "another checkout's daemon was stopped"
+
+# ---- every shim of the state root goes, whichever build it runs ------------
+
+world; w="$W"
+# A shim a deploy started from ANOTHER checkout, serving this state root.
+backend "$w/deployed/agent-shim/claude/shim/dist/main.js" ignores --listen "$w/state/sock/ws1.sock"; deployed_shim="$PID"
+run "$w"; status=$?
+[ "$status" -eq 0 ] && gone "$deployed_shim" &&
+    pass "a shim serving the state root from another build path is stopped" ||
+    fail "a shim from the installed path survived (exit $status): $(cat "$w/out")"
+
+world; w="$W"
+backend "$w/elsewhere/agent-shim/claude/shim/dist/main.js" obeys --listen "$w/other-state/sock/ws1.sock"; other_shim="$PID"
+run "$w"
+kill -0 "$other_shim" 2>/dev/null && pass "a shim of another checkout serving another state root keeps running" ||
+    fail "another state root's shim was stopped"
+
+# ---- the daemon the state root advertises goes, whichever build it runs ----
+
+world; w="$W"
+backend "$w/deployed/daemon/bin/claude-repld" obeys; advertised="$PID"
+printf '127.0.0.1:9\npid=%s\n' "$advertised" >"$w/state/daemon.addr"
+run "$w"; status=$?
+[ "$status" -eq 0 ] && gone "$advertised" &&
+    pass "the daemon daemon.addr names is stopped from any build path" ||
+    fail "the advertised daemon survived (exit $status): $(cat "$w/out")"
 
 # ---- a service that will not leave is killed --------------------------------
 

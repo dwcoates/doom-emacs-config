@@ -85,7 +85,11 @@ Signalling the daemon, the shims and the services all at once put a
 `shim died` ERROR in the daemon's log for every shim, and a `store could not
 be reached` ERROR in every shim's, on every bounce (2026-10-03). A failed
 build stops nothing. Emacs starts the fresh daemon when it next links, and
-the daemon its shims. It matches processes by this checkout's own paths, so a
-daemon running from another checkout is left alone.
+the daemon its shims. A process is the bounce's by this checkout's own paths
+OR by the state root it serves -- the daemon `daemon.addr` names, any shim
+listening under `<state root>/sock/` -- because a deploy-started daemon and
+its shims run from the checkout the daemon was deployed from (2026-10-03: an
+old-build shim survived a bounce and was adopted). A daemon or shim of
+another checkout serving another state root is left alone.
 `test-bounce-agent-repl-forcefully.sh` covers
 it hermetically: a temporary checkout, stand-in processes and a launchctl stub.

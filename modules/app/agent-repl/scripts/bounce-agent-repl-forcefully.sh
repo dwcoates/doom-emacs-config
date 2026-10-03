@@ -37,9 +37,10 @@
 # boot. The daemon then starts each shim on the fresh bundle as its workspaces
 # are opened.
 #
-# Every process it signals is matched by THIS checkout's own paths (and the
-# services' cache-bin paths), so a daemon or shim running from another
-# checkout is left alone.
+# Every process it signals is matched by THIS checkout's own paths, by the
+# services' cache-bin paths, or by the state root it serves (the daemon its
+# daemon.addr names, a shim listening under its sock/), so a daemon or shim of
+# another checkout serving another state root is left alone.
 #
 # Usage:
 #   scripts/bounce-agent-repl-forcefully.sh
@@ -79,6 +80,10 @@ uid="$(id -u)"
 
 DAEMON_BIN="$ROOT/daemon/bin/claude-repld"
 SHIM_MAIN="$ROOT/agent-shim/claude/shim/dist/main.js"
+# The state root whose daemon is stood down: the daemon's own default, which is
+# the one Emacs runs it with.
+STATE_ROOT="${AGENT_REPL_STATE_DIR:-$HOME/.claude-emacs}"
+STATE_ROOT="${STATE_ROOT%/}"
 
 # ---- 1. build --------------------------------------------------------------
 
@@ -106,13 +111,23 @@ log "built"
 
 # ---- 2. stop ---------------------------------------------------------------
 
-# pids_of PATTERN -- the pids whose command line contains PATTERN, never this
-# script's own.
+# pids_of TEXT -- the pids whose command line contains TEXT, matched as a
+# fixed string (a path is not a pattern), never this script's own.
 pids_of() {
+    # THE TEXT RIDES THE ENVIRONMENT, never awk's own argv, or awk would find
+    # it in its own command line and answer itself.
+    ps -axo pid=,command= 2>/dev/null |
+        PIDS_OF_TEXT="$1" awk -v self="$$" -v sub_="${BASHPID:-}" \
+            'index($0, ENVIRON["PIDS_OF_TEXT"]) { pid = $1; if (pid != self && pid != sub_) print pid }'
+}
+
+# advertised_daemon -- the pid the state root's daemon.addr names, when that
+# process is running.
+advertised_daemon() {
     local pid
-    for pid in $(pgrep -f -- "$1" 2>/dev/null || true); do
-        [ "$pid" = "$$" ] || [ "$pid" = "${BASHPID:-}" ] || echo "$pid"
-    done
+    pid="$(sed -n 's/^pid=\([0-9][0-9]*\)$/\1/p' "$STATE_ROOT/daemon.addr" 2>/dev/null | head -1)"
+    [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && echo "$pid"
+    return 0
 }
 
 # alive PID... -- the given pids that are still running.
@@ -221,10 +236,18 @@ stop_service() {
 # daemon stands down, Emacs relaunches one from the fresh build and it starts
 # fresh shims: those match the same paths, and signalling them would kill the
 # new runtime under the very client that just brought it up.
+#
+# A PROCESS IS AGENT-REPL'S BY WHAT IT SERVES, NOT ONLY BY WHERE IT RUNS FROM.
+# A daemon or shim a deploy started runs from the checkout the DAEMON was
+# deployed from, which need not be this one, so matching this checkout's paths
+# alone left such a shim serving its old build through a bounce, and the fresh
+# daemon adopted it (2026-10-03T14:11:15). So the daemon is also the pid the
+# state root's daemon.addr names, and a shim is also any process listening
+# under the state root's sock/ directory, whichever build it runs.
 # shellcheck disable=SC2207
-daemons=($(pids_of "$DAEMON_BIN"))
+daemons=($( { pids_of "$DAEMON_BIN"; advertised_daemon; } | sort -un))
 # shellcheck disable=SC2207
-shims=($(pids_of "$SHIM_MAIN"))
+shims=($( { pids_of "$SHIM_MAIN"; pids_of "--listen $STATE_ROOT/sock/"; } | sort -un))
 # shellcheck disable=SC2207
 locks=($(pids_of "$CACHE_BIN/shim-lock"))
 
@@ -240,7 +263,7 @@ stand_down_daemon() {
         return 0
     fi
     log "daemon: asking pid(s) ${daemons[*]} to stand down now, its shims with it"
-    if answer="$("$DAEMON_BIN" call UpdateShutdownSchedule \
+    if answer="$("$DAEMON_BIN" call -state-dir "$STATE_ROOT" UpdateShutdownSchedule \
         '{"now":{"reason":{"operator":{"note":"bounce-agent-repl-forcefully"}}}}' 2>&1)"; then
         log "daemon: the stand-down was accepted; waiting for it to leave"
         await_exit "daemon" "${daemons[@]}"
