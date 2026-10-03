@@ -732,7 +732,7 @@ describe("a boot that fails", { timeout: BOOT_TIMEOUT_MS }, () => {
   });
 });
 
-describe("the ClientLog sink and the client's link verdict", () => {
+describe("the ClientLog sink and the client's link verdict", { timeout: BOOT_TIMEOUT_MS }, () => {
   test("reports a ClientLog that could not be forwarded", async () => {
     // ARRANGE: the daemon refuses every record this page tries to file.
     page.clientLogFails = true;
@@ -788,5 +788,16 @@ describe("the harness", { timeout: BOOT_TIMEOUT_MS }, () => {
     expect(straggler.clientLogs.map((call) => call.record.message)).toContain("the sidebar mounted");
     expect(page.clientLogs).toEqual([]);
     expect(page.order).toEqual([]);
+  });
+
+  test("every block in this file runs its tests under the warm-boot bound", () => {
+    // EVERY TEST HERE BOOTS, so every block carries BOOT_TIMEOUT_MS. One block
+    // that left it off ran its warm boots under the 850ms unit global, which
+    // is under the 1.45s warm boot measured on the contended host, and timed
+    // out only when the full suite set loaded the machine.
+    const source = readFileSync(resolve(process.cwd(), "test/main.test.ts"), "utf8");
+    const blocks = source.split("\n").filter((line) => line.startsWith("describe("));
+
+    expect(blocks.filter((line) => !line.includes("{ timeout: BOOT_TIMEOUT_MS }"))).toEqual([]);
   });
 });
