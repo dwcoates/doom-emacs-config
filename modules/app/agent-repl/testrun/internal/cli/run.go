@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -80,6 +81,14 @@ func tmpEntries(dir string) (map[string]bool, error) {
 	return names, nil
 }
 
+// liveEmacsEntry names what the owner's live Emacs makes in the user temp
+// directory whenever it starts: org-babel's two temp directories and the
+// prompt summary's working directory. A hard bounce during a run restarts that
+// Emacs, and its entries are not the run's. Every batch Emacs the suites start
+// makes the same names under its own temp root (lisp/test-helpers.el), so
+// exempting them here hides no test's leak.
+var liveEmacsEntry = regexp.MustCompile(`^(babel-[A-Za-z0-9]{6}|babel-stable-[0-9]+|agent-repl-prompt-summary)$`)
+
 // guardUserTmp reports every entry the user temp directory gained during the
 // run and answers whether it gained none.
 //
@@ -97,9 +106,14 @@ func guardUserTmp(log *run.Log, dir string, before map[string]bool) bool {
 	}
 	var gained []string
 	for name := range after {
-		if !before[name] {
-			gained = append(gained, name)
+		if before[name] {
+			continue
 		}
+		if liveEmacsEntry.MatchString(name) {
+			log.Infof("the user temp directory gained %s during the run; a live Emacs makes it at startup (org-babel, the prompt summary), so it is not counted against the run", name)
+			continue
+		}
+		gained = append(gained, name)
 	}
 	if len(gained) == 0 {
 		return true
