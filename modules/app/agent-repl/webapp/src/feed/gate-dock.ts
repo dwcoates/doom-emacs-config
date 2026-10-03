@@ -57,13 +57,22 @@ interface Docked {
 
 const STANDING = '.cold-gate[data-state="standing"]';
 
-/** The root row (FEED's direct child) holding CARD, null when CARD is not on
- * the root feed itself. */
+/** Every feed row's own wrapper (feed-view.ts). */
+const ROW = ".feed-item";
+
+/**
+ * The root feed's ROW holding CARD: its nearest row wrapper, null when CARD is
+ * not on the root feed itself or sits in no row.
+ *
+ * THE ROW, NEVER AN ANCESTOR OF ROWS. The feed nests its rows inside a body
+ * (`#feed > .feed-body > .feed-item`); walking up to FEED's direct child named
+ * that body as the gate's row, and hiding it hid the whole conversation behind
+ * every standing gate (owner's report, 2026-10-03).
+ */
 function rootRowOf(feed: HTMLElement, card: HTMLElement): HTMLElement | null {
   if (card.closest("[data-feed]") !== feed) return null;
-  let row: HTMLElement = card;
-  while (row.parentElement !== null && row.parentElement !== feed) row = row.parentElement;
-  return row.parentElement === feed ? row : null;
+  const row = card.closest<HTMLElement>(ROW);
+  return row !== null && feed.contains(row) ? row : null;
 }
 
 /** A standing gate card on the root feed itself, with its row; null when none. */
@@ -128,7 +137,7 @@ export function installGateDock(feed: HTMLElement, dock: HTMLElement): GateDock 
       return;
     }
     if (docked === null) return;
-    if (docked.row.parentElement !== feed) {
+    if (!docked.row.isConnected || !feed.contains(docked.row)) {
       undock("retired", false);
       return;
     }
