@@ -423,7 +423,11 @@ func newHarness(t *testing.T, exits map[string]int, buildErr map[string]error) h
 			*gitCalls = append(*gitCalls, "git")
 			return "main", "abc123", nil
 		},
-		Pid: 7,
+		Pid:     7,
+		UserTmp: filepath.Join(root, "user-tmp"),
+	}
+	if err := os.Mkdir(d.UserTmp, 0o755); err != nil {
+		t.Fatal(err)
 	}
 	return harness{deps: d, exec: e, out: out, errOut: errOut, module: module, recordOut: filepath.Join(root, "pending-record.json"), git: gitCalls}
 }
@@ -836,5 +840,78 @@ func TestParseCoverArgs(t *testing.T) {
 				t.Fatalf("ParseCoverArgs = %+v, %v; want %+v", got, err, tt.want)
 			}
 		})
+	}
+}
+
+// leakyExec is a fakeExec whose named unit leaves an entry in dir.
+type leakyExec struct {
+	*fakeExec
+	unit, dir string
+}
+
+func (e leakyExec) Start(s run.Spec, out *bytes.Buffer) (run.Process, error) {
+	if s.ID == e.unit {
+		if err := os.WriteFile(filepath.Join(e.dir, "left-by-"+s.ID), nil, 0o600); err != nil {
+			return nil, err
+		}
+	}
+	return e.fakeExec.Start(s, out)
+}
+
+func TestRunFailsAPassingRunThatLeftAnEntryInTheUserTemp(t *testing.T) {
+	// Arrange
+	h := newHarness(t, nil, nil)
+	h.deps.Exec = leakyExec{fakeExec: h.exec, unit: "ert", dir: h.deps.UserTmp}
+
+	// Act
+	code := h.run(t)
+
+	// Assert
+	if code != 1 || !strings.Contains(h.errOut.String(), "the run left left-by-ert in the user temp directory") {
+		t.Fatalf("exit = %d, stderr:\n%s", code, h.errOut)
+	}
+}
+
+func TestRunIgnoresAnEntryTheUserTempHeldBeforeTheRun(t *testing.T) {
+	// Arrange
+	h := newHarness(t, nil, nil)
+	if err := os.WriteFile(filepath.Join(h.deps.UserTmp, "already-there"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	code := h.run(t)
+
+	// Assert
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr:\n%s", code, h.errOut)
+	}
+}
+
+func TestRunRefusesWithoutAUserTempToGuard(t *testing.T) {
+	// Arrange
+	h := newHarness(t, nil, nil)
+	h.deps.UserTmp = ""
+
+	// Act
+	code := h.run(t)
+
+	// Assert
+	if code != 1 || len(h.exec.ran) != 0 {
+		t.Fatalf("exit = %d after running %v; want 1 before running anything", code, h.exec.ran)
+	}
+}
+
+func TestRunKeepsAFailingRunsExitWhenItAlsoLeaked(t *testing.T) {
+	// Arrange
+	h := newHarness(t, map[string]int{"ert": 3}, nil)
+	h.deps.Exec = leakyExec{fakeExec: h.exec, unit: "ert", dir: h.deps.UserTmp}
+
+	// Act
+	code := h.run(t)
+
+	// Assert
+	if code != 1 || !strings.Contains(h.errOut.String(), "left-by-ert") {
+		t.Fatalf("exit = %d, stderr:\n%s", code, h.errOut)
 	}
 }
