@@ -78,7 +78,7 @@ func TestWatchDaemonAcceptsAWebviewClient(t *testing.T) {
 	}
 
 	// Assert: a webview states no build here, and its watch stands.
-	server.awaitSubscribers(streamDaemon, "", 1)
+	server.mustAwaitSubscribers(t, streamDaemon, "", 1)
 }
 
 func TestPushDeliversAReloadElispToTheDaemonStream(t *testing.T) {

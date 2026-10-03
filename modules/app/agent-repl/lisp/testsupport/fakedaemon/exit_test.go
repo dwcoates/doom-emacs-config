@@ -48,7 +48,7 @@ func TestAbortAllStreamsDrainsTheSubscriberRegistry(t *testing.T) {
 	server.abortAllStreams()
 
 	// Assert.
-	server.awaitSubscribers(streamHost, "ws-a", 0)
+	server.mustAwaitSubscribers(t, streamHost, "ws-a", 0)
 }
 
 func TestAbortAllStreamsWithNoSubscribersDropsNothing(t *testing.T) {
