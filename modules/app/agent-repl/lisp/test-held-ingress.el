@@ -30,16 +30,20 @@ Each has a project directory; ws-one has a live composer buffer."
   (declare (indent 0))
   `(agent-repl-test--with-clean-state
      (let* ((state (make-temp-file "agent-repl-hi-state-" t))
+            (hi--one (make-temp-file "hi-one-" t))
+            (hi--two (make-temp-file "hi-two-" t))
             (process-environment (cons (concat "AGENT_REPL_STATE_DIR=" state)
                                        process-environment))
             (composer (generate-new-buffer " *hi-composer*")))
        (unwind-protect
            (progn
-             (agent-repl--ws-put "ws-one" :project-dir (make-temp-file "hi-one-" t))
-             (agent-repl--ws-put "ws-two" :project-dir (make-temp-file "hi-two-" t))
+             (agent-repl--ws-put "ws-one" :project-dir hi--one)
+             (agent-repl--ws-put "ws-two" :project-dir hi--two)
              (agent-repl--ws-put "ws-one" :input-buffer composer)
              ,@body)
          (when (buffer-live-p composer) (kill-buffer composer))
+         (delete-directory hi--one t)
+         (delete-directory hi--two t)
          (delete-directory state t)))))
 
 (defun agent-repl-test-hi--files ()
@@ -270,6 +274,17 @@ and its line -- and only the files remain."
 (ert-deftest agent-repl-held-ingress-registers-on-the-host-update-hook ()
   "The clearing edge is wired at load time."
   (should (memq #'agent-repl-held-ingress--on-host-update agent-repl-host-update-functions)))
+
+(ert-deftest agent-repl-held-ingress-fixture-removes-its-project-directories ()
+  "The fixture's two project directories are gone once it exits."
+  ;; Arrange
+  (let (dirs)
+    ;; Act
+    (agent-repl-test-hi--with
+      (setq dirs (list (agent-repl--ws-get "ws-one" :project-dir)
+                       (agent-repl--ws-get "ws-two" :project-dir))))
+    ;; Assert
+    (should (equal (mapcar #'file-exists-p dirs) '(nil nil)))))
 
 (provide 'test-held-ingress)
 
