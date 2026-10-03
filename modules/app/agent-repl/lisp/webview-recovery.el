@@ -174,13 +174,6 @@ Under `noninteractive' nothing holds -- a batch process has no
 application to activate, and the suites drive this drain directly.  The
 guard itself is `agent-repl--emacs-can-foreground-p'."
   (and (not noninteractive)
-       ;; THE EDITOR'S STARTUP PRE-CREATES EVERY PAGE AT ONCE (owner
-       ;; requirement 2026-10-02): a workspace's tab opens only once its page
-       ;; has drawn, so a startup that waited for a focus edge would open no
-       ;; tab until the user looked at Emacs.  Its tabs stay out of the bar
-       ;; while the pages load, so nothing is switched to.
-       (not (and (fboundp 'agent-repl-startup-active-p)
-                 (agent-repl-startup-active-p)))
        (agent-repl--emacs-can-foreground-p)))
 
 (defun agent-repl--webview-precreate-allow-reason ()
@@ -192,7 +185,6 @@ created-while-hidden, created-while-focused, or (in batch) driven
 directly by the suites.  Reported as a `reason=' tag on the created log."
   (cond
    (noninteractive "batch")
-   ((and (fboundp 'agent-repl-startup-active-p) (agent-repl-startup-active-p)) "startup")
    ((not (agent-repl--emacs-visible-p)) "hidden")
    ((and (fboundp 'agent-repl--emacs-focused-p)
          (agent-repl--emacs-focused-p))
