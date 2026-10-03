@@ -7299,8 +7299,9 @@ bubble-body.bubble-body { display: block; }
   justify-content: center;
   box-sizing: border-box;
   padding: 1rem;
-  background: color-mix(in srgb, var(--bg) 78%, transparent);
-  backdrop-filter: blur(6px);
+  /* OPAQUE (owner request, 2026-10-03): the feed is not seen through the
+     digest; it returns whole when the digest is dismissed. */
+  background: var(--bg);
 }
 [data-component="news-digest"][hidden] {
   display: none;
