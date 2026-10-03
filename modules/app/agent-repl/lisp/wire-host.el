@@ -28,6 +28,7 @@
 (declare-function agent-repl-wire--decode-int64 "wire-common")
 (declare-function agent-repl-wire--decode-message "wire-common")
 (declare-function agent-repl-wire--decode-oneof "wire-common")
+(declare-function agent-repl-wire--decode-uint32 "wire-common")
 (declare-function agent-repl-wire--decode-optional-message "wire-common")
 (declare-function agent-repl-wire--decode-optional-string "wire-common")
 (declare-function agent-repl-wire--decode-uint64 "wire-common")
@@ -443,13 +444,37 @@ that tells a new edit from the one the composer already took."
                   #'agent-repl-wire-decode-host-held-prompt-edit-said)
            :edit (agent-repl-wire--decode-uint64 "HostHeldPromptEdit" 'edit object)))))
 
+(defconst agent-repl-wire-host-gate-arms
+  '((coldGate :cold-gate agent-repl-wire-decode-host-gate-cold-gate))
+  "HostGate's `kind' arms: (WIRE-KEY ARM-KEYWORD DECODER).")
+
+(defun agent-repl-wire-decode-host-gate-cold-gate (value)
+  "Decode VALUE as the empty message `HostGateColdGate'."
+  (agent-repl-wire--decode-empty "HostGateColdGate" value))
+
+(defun agent-repl-wire-decode-host-gate (value)
+  "Decode VALUE as `HostGate', a plist `(:arm :value)'.
+The arm is the gate's kind.  SET-BUT-UNASSIGNED is legal: it is a gate this
+build does not name, decoded as `(:arm nil :value nil)' so the gate's
+presence still stands."
+  (let ((object (agent-repl-wire--object "HostGate" value)))
+    (agent-repl-wire--check-keys "HostGate" object
+                                 (mapcar #'car agent-repl-wire-host-gate-arms))
+    (agent-repl-wire--decoded
+     "HostGate"
+     (or (agent-repl-wire--decode-oneof "HostGate" 'kind object
+                                        agent-repl-wire-host-gate-arms t)
+         (list :arm nil :value nil)))))
+
 (defun agent-repl-wire-decode-host-workspace (value)
-  "Decode VALUE as `HostWorkspace', a plist `(:session :naming :held-prompt-edit)'.
+  "Decode VALUE as `HostWorkspace'.
+The plist is `(:session :naming :held-prompt-edit :gate)'.
 `naming' is a REQUIRED message sitting beside the session oneof; its two
 fields are the optional halves, not the message.  `held_prompt_edit' is
-absent when no held-prompt edit stands, and its absence is that fact."
+absent when no held-prompt edit stands, and its absence is that fact.
+`gate' is absent when no gate stands, likewise."
   (let ((object (agent-repl-wire--object "HostWorkspace" value)))
-    (agent-repl-wire--check-keys "HostWorkspace" object '(none existing naming heldPromptEdit))
+    (agent-repl-wire--check-keys "HostWorkspace" object '(none existing naming heldPromptEdit gate))
     (agent-repl-wire--decoded
      "HostWorkspace"
      (list :session (agent-repl-wire-decode-host-workspace-session object)
@@ -458,7 +483,10 @@ absent when no held-prompt edit stands, and its absence is that fact."
                     #'agent-repl-wire-decode-host-workspace-naming)
            :held-prompt-edit (agent-repl-wire--decode-optional-message
                               "HostWorkspace" 'heldPromptEdit object
-                              #'agent-repl-wire-decode-host-held-prompt-edit)))))
+                              #'agent-repl-wire-decode-host-held-prompt-edit)
+           :gate (agent-repl-wire--decode-optional-message
+                  "HostWorkspace" 'gate object
+                  #'agent-repl-wire-decode-host-gate)))))
 
 ;;;; ---- The notification click push ----
 
@@ -1092,13 +1120,29 @@ The focus is REQUIRED."
      "ReportEditorFocusResponse"
      (agent-repl-wire-decode-report-editor-focus-response-result object))))
 
+(defun agent-repl-wire-encode-editor-instance (value)
+  "Encode `EditorInstance' from the string VALUE, this Emacs process's identity.
+REQUIRED and never empty: a watch without it is refused, and an empty one
+is refused HERE, before anything is sent."
+  (unless (stringp value)
+    (agent-repl-wire--fail "EditorInstance" 'value "required field is unset"))
+  (when (string-empty-p value)
+    (agent-repl-wire--fail "EditorInstance" 'value "required string is empty"))
+  (agent-repl-wire--encoded
+   "EditorInstance"
+   (list (cons 'value (agent-repl-wire--encode-string "EditorInstance" 'value value)))))
+
 (defun agent-repl-wire-encode-watch-daemon-emacs (value)
-  "Encode `WatchDaemonEmacs' from the plist VALUE `(:elisp-build BUILD :focus F)'.
+  "Encode `WatchDaemonEmacs' from VALUE.
+VALUE is the plist `(:elisp-build BUILD :focus F :instance I)'.
 The build is REQUIRED and never empty: a watch without it is refused,
 because a deploy could not tell whether this Emacs runs the checkout's
 elisp.  An empty one is refused HERE, before anything is sent.  The focus
 is REQUIRED too: the daemon decides every desktop banner on it from the
-stream's first instant (`agent-repl-wire-encode-editor-focus')."
+stream's first instant (`agent-repl-wire-encode-editor-focus').  So is the
+INSTANCE, this Emacs process's identity, the same on every stream it
+opens: a new one is how the daemon tells a full Emacs restart from a
+reconnect (`agent-repl-wire-encode-editor-instance')."
   (let ((build (plist-get value :elisp-build)))
     (unless (stringp build)
       (agent-repl-wire--fail "WatchDaemonEmacs" 'elispBuild "required field is unset"))
@@ -1106,12 +1150,16 @@ stream's first instant (`agent-repl-wire-encode-editor-focus')."
       (agent-repl-wire--fail "WatchDaemonEmacs" 'elispBuild "required string is empty"))
     (unless (plist-member value :focus)
       (agent-repl-wire--fail "WatchDaemonEmacs" 'focus "required message field is absent"))
+    (unless (plist-member value :instance)
+      (agent-repl-wire--fail "WatchDaemonEmacs" 'instance "required message field is absent"))
     (agent-repl-wire--encoded
      "WatchDaemonEmacs"
      (list (cons 'elispBuild (agent-repl-wire--encode-string
                               "WatchDaemonEmacs" 'elispBuild build))
            (cons 'focus (agent-repl-wire-encode-editor-focus
-                         (plist-get value :focus)))))))
+                         (plist-get value :focus)))
+           (cons 'instance (agent-repl-wire-encode-editor-instance
+                            (plist-get value :instance)))))))
 
 (defun agent-repl-wire-encode-watch-daemon-request-emacs (value)
   "Encode `WatchDaemonRequest''s `emacs' client arm from VALUE."
@@ -1528,6 +1576,149 @@ list is the daemon saying none stands."
   "Decode `WatchDaemonResponse''s `faults_standing' push arm VALUE."
   (agent-repl-wire-decode-daemon-faults-standing value))
 
+;;;; ---- DaemonStartupEvent ----
+
+(defun agent-repl-wire--decode-startup-ref (message-name field object)
+  "Decode OBJECT's REQUIRED WorkspaceRef FIELD of MESSAGE-NAME."
+  (agent-repl-wire--decode-message message-name field object
+                                   #'agent-repl-wire-decode-workspace-ref))
+
+(defun agent-repl-wire-decode-daemon-startup-opening (value)
+  "Decode VALUE as `DaemonStartupOpening', a plist `(:workspaces N)'."
+  (let ((object (agent-repl-wire--object "DaemonStartupOpening" value)))
+    (agent-repl-wire--check-keys "DaemonStartupOpening" object '(workspaces))
+    (agent-repl-wire--decoded
+     "DaemonStartupOpening"
+     (list :workspaces (agent-repl-wire--decode-uint32
+                        "DaemonStartupOpening" 'workspaces object)))))
+
+(defun agent-repl-wire-decode-daemon-startup-step-vendor-retrying (value)
+  "Decode VALUE as `DaemonStartupStepVendorRetrying', a plist `(:attempt N)'."
+  (let ((object (agent-repl-wire--object "DaemonStartupStepVendorRetrying" value)))
+    (agent-repl-wire--check-keys "DaemonStartupStepVendorRetrying" object '(attempt))
+    (list :attempt (agent-repl-wire--decode-uint32
+                    "DaemonStartupStepVendorRetrying" 'attempt object))))
+
+(defun agent-repl-wire-decode-daemon-startup-step-vendor-rejected (value)
+  "Decode VALUE as `DaemonStartupStepVendorRejected', a plist `(:cause S)'."
+  (let ((object (agent-repl-wire--object "DaemonStartupStepVendorRejected" value)))
+    (agent-repl-wire--check-keys "DaemonStartupStepVendorRejected" object '(cause))
+    (list :cause (agent-repl-wire--decode-string
+                  "DaemonStartupStepVendorRejected" 'cause object))))
+
+(defun agent-repl-wire-decode-daemon-startup-step-waiting-for (value)
+  "Decode VALUE as `DaemonStartupStepWaitingFor', a plist `(:ahead REF)'."
+  (let ((object (agent-repl-wire--object "DaemonStartupStepWaitingFor" value)))
+    (agent-repl-wire--check-keys "DaemonStartupStepWaitingFor" object '(ahead))
+    (list :ahead (agent-repl-wire--decode-startup-ref
+                  "DaemonStartupStepWaitingFor" 'ahead object))))
+
+(defun agent-repl-wire-decode-daemon-startup-step-failed (value)
+  "Decode VALUE as `DaemonStartupStepFailed', a plist `(:reason S)'."
+  (let ((object (agent-repl-wire--object "DaemonStartupStepFailed" value)))
+    (agent-repl-wire--check-keys "DaemonStartupStepFailed" object '(reason))
+    (list :reason (agent-repl-wire--decode-string
+                   "DaemonStartupStepFailed" 'reason object))))
+
+(defmacro agent-repl-wire--define-empty-startup-step (name message)
+  "Define NAME decoding the empty startup step MESSAGE."
+  `(defun ,name (value)
+     ,(format "Decode VALUE as the empty `%s'." message)
+     (agent-repl-wire--decode-empty ,message value)))
+
+(agent-repl-wire--define-empty-startup-step
+ agent-repl-wire-decode-daemon-startup-step-starting-session "DaemonStartupStepStartingSession")
+(agent-repl-wire--define-empty-startup-step
+ agent-repl-wire-decode-daemon-startup-step-waking "DaemonStartupStepWaking")
+(agent-repl-wire--define-empty-startup-step
+ agent-repl-wire-decode-daemon-startup-step-resuming "DaemonStartupStepResuming")
+(agent-repl-wire--define-empty-startup-step
+ agent-repl-wire-decode-daemon-startup-step-vendor-failed "DaemonStartupStepVendorFailed")
+(agent-repl-wire--define-empty-startup-step
+ agent-repl-wire-decode-daemon-startup-step-cold-gate "DaemonStartupStepColdGate")
+(agent-repl-wire--define-empty-startup-step
+ agent-repl-wire-decode-daemon-startup-step-offline "DaemonStartupStepOffline")
+
+(defconst agent-repl-wire-daemon-startup-step-arms
+  '((startingSession :starting-session agent-repl-wire-decode-daemon-startup-step-starting-session)
+    (waking :waking agent-repl-wire-decode-daemon-startup-step-waking)
+    (resuming :resuming agent-repl-wire-decode-daemon-startup-step-resuming)
+    (vendorRetrying :vendor-retrying agent-repl-wire-decode-daemon-startup-step-vendor-retrying)
+    (vendorRejected :vendor-rejected agent-repl-wire-decode-daemon-startup-step-vendor-rejected)
+    (vendorFailed :vendor-failed agent-repl-wire-decode-daemon-startup-step-vendor-failed)
+    (coldGate :cold-gate agent-repl-wire-decode-daemon-startup-step-cold-gate)
+    (offline :offline agent-repl-wire-decode-daemon-startup-step-offline)
+    (waitingFor :waiting-for agent-repl-wire-decode-daemon-startup-step-waiting-for)
+    (failed :failed agent-repl-wire-decode-daemon-startup-step-failed))
+  "`DaemonStartupWorkspaceStep.step''s arms: (WIRE-KEY ARM-KEYWORD DECODER).")
+
+(defun agent-repl-wire-decode-daemon-startup-workspace-step (value)
+  "Decode VALUE as `DaemonStartupWorkspaceStep'.
+Returns the plist `(:workspace REF :step ONEOF)'."
+  (let ((object (agent-repl-wire--object "DaemonStartupWorkspaceStep" value)))
+    (agent-repl-wire--check-keys
+     "DaemonStartupWorkspaceStep" object
+     (cons 'workspace (mapcar #'car agent-repl-wire-daemon-startup-step-arms)))
+    (agent-repl-wire--decoded
+     "DaemonStartupWorkspaceStep"
+     (list :workspace (agent-repl-wire--decode-startup-ref
+                       "DaemonStartupWorkspaceStep" 'workspace object)
+           :step (agent-repl-wire--decode-oneof
+                  "DaemonStartupWorkspaceStep" 'step object
+                  agent-repl-wire-daemon-startup-step-arms)))))
+
+(defun agent-repl-wire-decode-daemon-startup-workspace-open (value)
+  "Decode VALUE as `DaemonStartupWorkspaceOpen', a plist `(:workspace REF)'."
+  (let ((object (agent-repl-wire--object "DaemonStartupWorkspaceOpen" value)))
+    (agent-repl-wire--check-keys "DaemonStartupWorkspaceOpen" object '(workspace))
+    (agent-repl-wire--decoded
+     "DaemonStartupWorkspaceOpen"
+     (list :workspace (agent-repl-wire--decode-startup-ref
+                       "DaemonStartupWorkspaceOpen" 'workspace object)))))
+
+(defun agent-repl-wire-decode-daemon-startup-failed-workspace (value)
+  "Decode VALUE as `DaemonStartupFailedWorkspace'.
+Returns the plist `(:workspace REF :name S)'."
+  (let ((object (agent-repl-wire--object "DaemonStartupFailedWorkspace" value)))
+    (agent-repl-wire--check-keys "DaemonStartupFailedWorkspace" object '(workspace name))
+    (list :workspace (agent-repl-wire--decode-startup-ref
+                      "DaemonStartupFailedWorkspace" 'workspace object)
+          :name (agent-repl-wire--decode-string "DaemonStartupFailedWorkspace" 'name object))))
+
+(defun agent-repl-wire-decode-daemon-startup-finished (value)
+  "Decode VALUE as `DaemonStartupFinished'.
+Returns the plist `(:ready N :total N :failed LIST)'."
+  (let ((object (agent-repl-wire--object "DaemonStartupFinished" value)))
+    (agent-repl-wire--check-keys "DaemonStartupFinished" object '(ready total failed))
+    (agent-repl-wire--decoded
+     "DaemonStartupFinished"
+     (list :ready (agent-repl-wire--decode-uint32 "DaemonStartupFinished" 'ready object)
+           :total (agent-repl-wire--decode-uint32 "DaemonStartupFinished" 'total object)
+           :failed (agent-repl-wire--decode-repeated
+                    "DaemonStartupFinished" 'failed object
+                    #'agent-repl-wire-decode-daemon-startup-failed-workspace)))))
+
+(defconst agent-repl-wire-daemon-startup-event-arms
+  '((opening :opening agent-repl-wire-decode-daemon-startup-opening)
+    (workspaceStep :workspace-step agent-repl-wire-decode-daemon-startup-workspace-step)
+    (workspaceOpen :workspace-open agent-repl-wire-decode-daemon-startup-workspace-open)
+    (finished :finished agent-repl-wire-decode-daemon-startup-finished))
+  "`DaemonStartupEvent.event''s arms: (WIRE-KEY ARM-KEYWORD DECODER).")
+
+(defun agent-repl-wire-decode-daemon-startup-event (value)
+  "Decode VALUE as `DaemonStartupEvent', a plist `(:at-ms N :event ONEOF)'.
+THE ARM IS THE STEP; an unset one is a contract breach."
+  (let ((object (agent-repl-wire--object "DaemonStartupEvent" value)))
+    (agent-repl-wire--check-keys
+     "DaemonStartupEvent" object
+     (cons 'atMs (mapcar #'car agent-repl-wire-daemon-startup-event-arms)))
+    (agent-repl-wire--decoded
+     "DaemonStartupEvent"
+     (list :at-ms (agent-repl-wire--decode-int64 "DaemonStartupEvent" 'atMs object)
+           :event (agent-repl-wire--decode-oneof
+                   "DaemonStartupEvent" 'event object
+                   agent-repl-wire-daemon-startup-event-arms)))))
+
 (defun agent-repl-wire-decode-watch-daemon-response-push (value)
   "Decode `WatchDaemonResponse''s `push' oneof from the object VALUE."
   (agent-repl-wire--decode-oneof
@@ -1543,7 +1734,8 @@ list is the daemon saying none stands."
      (faultsStanding :faults-standing
                      agent-repl-wire-decode-watch-daemon-response-faults-standing)
      (persistentWifi :persistent-wifi
-                     agent-repl-wire-decode-watch-daemon-response-persistent-wifi))))
+                     agent-repl-wire-decode-watch-daemon-response-persistent-wifi)
+     (startup :startup agent-repl-wire-decode-daemon-startup-event))))
 
 (defun agent-repl-wire-decode-watch-daemon-response-persistent-wifi (value)
   "Decode `WatchDaemonResponse''s `persistent_wifi' push arm VALUE.
@@ -1565,7 +1757,7 @@ UpdatePersistentWifiMode's success)."
     (agent-repl-wire--check-keys
      "WatchDaemonResponse" object
      '(shutdownAnnounced drainScheduled drainCancelled mutationProgress reloadElisp
-       ending faultsStanding persistentWifi))
+       ending faultsStanding persistentWifi startup))
     (agent-repl-wire--decoded
      "WatchDaemonResponse"
      (agent-repl-wire-decode-watch-daemon-response-push object))))

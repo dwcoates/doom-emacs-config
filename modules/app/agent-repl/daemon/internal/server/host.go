@@ -36,6 +36,36 @@ type SessionFacts interface {
 	// HostSessionFacts answers one workspace's live session facts, reporting
 	// false when this daemon is operating no session for it.
 	HostSessionFacts(ws ids.WorkspaceID) (HostFacts, bool)
+	// StandingGate answers the gate standing on one workspace, reporting
+	// false when none stands. A gate stands whether or not a session is
+	// live: a cold gate parks the bring-up before any session starts.
+	StandingGate(ws ids.WorkspaceID) (HostGateKind, bool)
+}
+
+// HostGateKind is HostGate's arm, named rather than spelled as a proto
+// message so the fleet states the fact without importing the wire types.
+type HostGateKind int
+
+// The gate kinds, in HostGate's own order.
+const (
+	// HostGateColdGate is the cold-context gate: resuming would re-read a
+	// large context, and the user picks pay, compact or clear.
+	HostGateColdGate HostGateKind = iota + 1
+)
+
+// hostGate answers the wire gate for KIND. A kind this table does not name is
+// a programming error, surfaced loudly and drawn as an unnamed gate, which
+// Emacs still treats as a gate: hiding the input over an unknown gate is
+// safer than leaving it open over one.
+func hostGate(log dlog.Logger, kind HostGateKind) *agentreplv1.HostGate {
+	switch kind {
+	case HostGateColdGate:
+		return &agentreplv1.HostGate{Kind: &agentreplv1.HostGate_ColdGate{ColdGate: &agentreplv1.HostGateColdGate{}}}
+	default:
+		log.Error("daemon.server.compose_host_workspace", "the standing gate has no wire arm",
+			dlog.Context{"kind": int(kind)})
+		return &agentreplv1.HostGate{}
+	}
 }
 
 // HostFacts is the live half of one workspace's host view.
@@ -166,6 +196,13 @@ func (s *server) composeHostWorkspace(
 		}
 		log.Debug(op, "the host view carries the standing held-prompt edit",
 			dlog.Context{"turn": string(edit.Turn), "edit": edit.ID})
+	}
+
+	// THE STANDING GATE is state, like the held-prompt edit: it rides every
+	// composition, and its absence is what tells the editor the gate is gone.
+	if kind, standing := s.deps.SessionFacts.StandingGate(ws); standing {
+		view.Gate = hostGate(log, kind)
+		log.Debug(op, "the host view carries the standing gate", dlog.Context{"kind": int(kind)})
 	}
 
 	facts, live := s.deps.SessionFacts.HostSessionFacts(ws)

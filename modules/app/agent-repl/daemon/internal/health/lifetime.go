@@ -142,6 +142,9 @@ var faultLifetimes = map[string]Lifetime{
 	KindBounceDisposition: momentary,
 	// A shim-reported fault is replaced by the shim's next verdict.
 	KindShimReported: standing(EdgeShimDiagnostics),
+	// So is the network fault the shim reported: its next verdict says
+	// whether the network is still unreachable.
+	KindNetworkUnreachable: standing(EdgeShimDiagnostics),
 	// A failed classifier run and an abandoned conversation are statements
 	// about the conversation as it stood; the next turn moves past them.
 	KindClassifierFailed:      standing(EdgeTurnStarted),

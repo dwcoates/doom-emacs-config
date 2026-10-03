@@ -502,7 +502,7 @@ func TestAnAuthFailureBlocksOnAuth(t *testing.T) {
 	})
 
 	// Assert
-	if h.view(t).GetStrip().GetStatus().GetBlocked().GetAuth() == nil {
+	if h.view(t).GetStrip().GetStatus().GetVendorFault().GetAuth() == nil {
 		t.Fatalf("want blocked · auth from an authentication failure")
 	}
 }
@@ -526,7 +526,7 @@ func TestABillingFailureBlocksOnBilling(t *testing.T) {
 	})
 
 	// Assert
-	if h.view(t).GetStrip().GetStatus().GetBlocked().GetBilling() == nil {
+	if h.view(t).GetStrip().GetStatus().GetVendorFault().GetBilling() == nil {
 		t.Fatalf("want blocked · billing")
 	}
 }
@@ -546,7 +546,7 @@ func TestABlockingLimitBlocksOnUsage(t *testing.T) {
 	})
 
 	// Assert
-	if h.view(t).GetStrip().GetStatus().GetBlocked().GetUsageLimit() == nil {
+	if h.view(t).GetStrip().GetStatus().GetVendorFault().GetUsageLimit() == nil {
 		t.Fatalf("want blocked · usage_limit")
 	}
 }
@@ -581,10 +581,10 @@ func TestEveryAgentFailureArmTakesItsClassifiedStatus(t *testing.T) {
 		want    string
 	}{
 		{name: "api_request_failed of an unstated kind", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ApiRequestFailed{ApiRequestFailed: &conversationv1.ApiRequestFailed{}}}, want: "turn_failed"},
-		{name: "api_request_failed: authentication", failure: authFailure(), want: "blocked"},
+		{name: "api_request_failed: authentication", failure: authFailure(), want: "vendor_fault"},
 		{name: "api_request_failed: overloaded", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ApiRequestFailed{ApiRequestFailed: &conversationv1.ApiRequestFailed{Kind: &conversationv1.ApiRequestFailed_Overloaded{Overloaded: &conversationv1.ApiOverloaded{}}}}}, want: "turn_failed"},
-		{name: "blocking_limit", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_BlockingLimit{BlockingLimit: &conversationv1.AgentStoppedAtBlockingLimit{}}}, want: "blocked"},
-		{name: "rapid_refill_breaker", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_RapidRefillBreaker{RapidRefillBreaker: &conversationv1.AgentStoppedByRapidRefillBreaker{}}}, want: "blocked"},
+		{name: "blocking_limit", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_BlockingLimit{BlockingLimit: &conversationv1.AgentStoppedAtBlockingLimit{}}}, want: "vendor_fault"},
+		{name: "rapid_refill_breaker", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_RapidRefillBreaker{RapidRefillBreaker: &conversationv1.AgentStoppedByRapidRefillBreaker{}}}, want: "vendor_fault"},
 		{name: "model_error", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ModelError{ModelError: &conversationv1.AgentModelError{}}}, want: "turn_failed"},
 		{name: "prompt_too_long", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_PromptTooLong{PromptTooLong: &conversationv1.AgentPromptTooLong{}}}, want: "turn_failed"},
 		{name: "image_error", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ImageError{ImageError: &conversationv1.AgentImageRejected{}}}, want: "turn_failed"},
@@ -644,7 +644,7 @@ func TestARejectedRateLimitBlocksTheSession(t *testing.T) {
 	h.r.OnSessionUpdate(testWS, update)
 
 	// Assert
-	if h.view(t).GetStrip().GetStatus().GetBlocked().GetUsageLimit() == nil {
+	if h.view(t).GetStrip().GetStatus().GetVendorFault().GetUsageLimit() == nil {
 		t.Fatalf("status = %q, want blocked · usage_limit", h.status(t))
 	}
 }
@@ -711,7 +711,7 @@ func TestADialingLinkIsDisconnectedStarting(t *testing.T) {
 	h.r.OnLink(testWS, shimclient.LinkDialing)
 
 	// Assert
-	if h.view(t).GetStrip().GetStatus().GetDisconnected().GetStarting() == nil {
+	if h.view(t).GetStrip().GetStatus().GetAgentReplFault().GetStarting() == nil {
 		t.Fatalf("want disconnected · starting")
 	}
 }
@@ -724,7 +724,7 @@ func TestARedialingLinkIsSevered(t *testing.T) {
 	h.r.OnLink(testWS, shimclient.LinkRedialing)
 
 	// Assert
-	if h.view(t).GetStrip().GetStatus().GetDisconnected().GetSevered() == nil {
+	if h.view(t).GetStrip().GetStatus().GetAgentReplFault().GetSevered() == nil {
 		t.Fatalf("want disconnected · severed")
 	}
 }
@@ -737,7 +737,7 @@ func TestADeadLinkThatNeverConnectedIsAStartFailure(t *testing.T) {
 	h.r.OnLink(testWS, shimclient.LinkDead)
 
 	// Assert
-	if h.view(t).GetStrip().GetStatus().GetDisconnected().GetStartFailed() == nil {
+	if h.view(t).GetStrip().GetStatus().GetAgentReplFault().GetStartFailed() == nil {
 		t.Fatalf("want disconnected · start_failed for a shim that never served")
 	}
 }
@@ -751,7 +751,7 @@ func TestADeadLinkThatOnceConnectedIsDead(t *testing.T) {
 	h.r.OnLink(testWS, shimclient.LinkDead)
 
 	// Assert
-	if h.view(t).GetStrip().GetStatus().GetDisconnected().GetDead() == nil {
+	if h.view(t).GetStrip().GetStatus().GetAgentReplFault().GetDead() == nil {
 		t.Fatalf("want disconnected · dead for a shim that had served")
 	}
 }
@@ -792,7 +792,7 @@ func TestDisconnectedOutranksATerminalMergeAndATurn(t *testing.T) {
 	h.r.OnLink(testWS, shimclient.LinkDead)
 
 	// Assert
-	if got := h.status(t); got != "disconnected" {
+	if got := h.status(t); got != "agent_repl_fault" {
 		t.Fatalf("status = %q, want disconnected", got)
 	}
 }
@@ -807,7 +807,7 @@ func TestATurnAcceptedBeforeAnyLinkAwaitsTheBringUp(t *testing.T) {
 
 	// Assert: the route is coming up, which the roster draws `init` from the
 	// same two facts (ladder.AwaitingBringUp).
-	if h.view(t).GetStrip().GetStatus().GetDisconnected().GetStarting() == nil {
+	if h.view(t).GetStrip().GetStatus().GetAgentReplFault().GetStarting() == nil {
 		t.Fatalf("status = %q, want disconnected · starting", h.status(t))
 	}
 }
@@ -821,7 +821,7 @@ func TestASessionAnnouncedBeforeAnyLinkAwaitsTheBringUp(t *testing.T) {
 	h.r.OnSessionStarted(testWS, &conversationv1.SessionStarted{VendorSessionId: "vendor-1"})
 
 	// Assert: the roster draws this window `init` from its own started fact.
-	if h.view(t).GetStrip().GetStatus().GetDisconnected().GetStarting() == nil {
+	if h.view(t).GetStrip().GetStatus().GetAgentReplFault().GetStarting() == nil {
 		t.Fatalf("status = %q, want disconnected · starting", h.status(t))
 	}
 }
@@ -936,8 +936,8 @@ func statusArmsFromProto() []string {
 		{Status: &frontendv1.FooterStatus_Interrupted{}},
 		{Status: &frontendv1.FooterStatus_Merging{}},
 		{Status: &frontendv1.FooterStatus_Background{}},
-		{Status: &frontendv1.FooterStatus_Blocked{}},
-		{Status: &frontendv1.FooterStatus_Disconnected{}},
+		{Status: &frontendv1.FooterStatus_VendorFault{}},
+		{Status: &frontendv1.FooterStatus_AgentReplFault{}},
 		{Status: &frontendv1.FooterStatus_Closing{}},
 		{Status: &frontendv1.FooterStatus_Loading{}},
 		{Status: &frontendv1.FooterStatus_MergeFailed{}},
@@ -959,7 +959,7 @@ func TestAServingLinkWithNoWebStreamIsDisconnected(t *testing.T) {
 	h.r.OnLink(testWS, shimclient.LinkConnected)
 
 	// Assert
-	if got := h.status(t); got != "disconnected" {
+	if got := h.status(t); got != "agent_repl_fault" {
 		t.Fatalf("status = %q, want disconnected: the workspace is connected only while all three hops are live", got)
 	}
 }
@@ -973,7 +973,7 @@ func TestAServingLinkWithNoHostStreamIsDisconnected(t *testing.T) {
 	h.r.OnLink(testWS, shimclient.LinkConnected)
 
 	// Assert
-	if got := h.status(t); got != "disconnected" {
+	if got := h.status(t); got != "agent_repl_fault" {
 		t.Fatalf("status = %q, want disconnected: the workspace is connected only while all three hops are live", got)
 	}
 }
@@ -987,7 +987,7 @@ func TestADownPeerHopIsDrawnAsSevered(t *testing.T) {
 	h.r.OnLink(testWS, shimclient.LinkConnected)
 
 	// Assert
-	arm := h.view(t).GetStrip().GetStatus().GetDisconnected()
+	arm := h.view(t).GetStrip().GetStatus().GetAgentReplFault()
 	if arm.GetSevered() == nil {
 		t.Fatalf("substatus = %+v, want severed: the route to a reader is broken", arm.GetSubstatus())
 	}
@@ -1003,7 +1003,7 @@ func TestTheLastPeerHopComingUpMakesTheWorkspaceConnected(t *testing.T) {
 	h.r.SetParticipants(testWS, true, true)
 
 	// Assert
-	if got := h.status(t); got == "disconnected" {
+	if got := h.status(t); got == "agent_repl_fault" {
 		t.Fatal("status = disconnected after every hop came up, want a connected status")
 	}
 }
@@ -1017,7 +1017,7 @@ func TestAPeerHopGoingDownAgainDisconnectsTheWorkspace(t *testing.T) {
 	h.r.SetParticipants(testWS, true, false)
 
 	// Assert
-	if got := h.status(t); got != "disconnected" {
+	if got := h.status(t); got != "agent_repl_fault" {
 		t.Fatalf("status = %q, want disconnected once a hop went back down", got)
 	}
 }
@@ -1031,7 +1031,7 @@ func TestAPeerHopDownDoesNotOutrankTheShimLinksOwnStep(t *testing.T) {
 	h.r.OnLink(testWS, shimclient.LinkDialing)
 
 	// Assert
-	arm := h.view(t).GetStrip().GetStatus().GetDisconnected()
+	arm := h.view(t).GetStrip().GetStatus().GetAgentReplFault()
 	if arm.GetStarting() == nil {
 		t.Fatalf("substatus = %+v, want starting", arm.GetSubstatus())
 	}
@@ -1045,7 +1045,7 @@ func TestAPeerHopDownBeforeAnyLinkIsObservedIsNotDisconnected(t *testing.T) {
 	h.r.SetParticipants(testWS, false, false)
 
 	// Assert
-	if got := h.status(t); got == "disconnected" {
+	if got := h.status(t); got == "agent_repl_fault" {
 		t.Fatal("status = disconnected with no link ever observed, want the no-session statuses")
 	}
 }
@@ -1155,7 +1155,7 @@ func TestAParkThatWasRevivedNoLongerMasksARealDeath(t *testing.T) {
 	h.r.OnLink(testWS, shimclient.LinkDead)
 
 	// Assert
-	if h.view(t).GetStrip().GetStatus().GetDisconnected().GetDead() == nil {
+	if h.view(t).GetStrip().GetStatus().GetAgentReplFault().GetDead() == nil {
 		t.Fatalf("want disconnected · dead: the park was lifted by the revival")
 	}
 }
@@ -1587,7 +1587,7 @@ func TestARetriedCallBlocksTheTurnAsApiRetrying(t *testing.T) {
 	h.r.OnApiError(testWS, mainAgent, enotfound())
 
 	// Assert
-	if h.view(t).GetStrip().GetStatus().GetBlocked().GetApiRetrying() == nil {
+	if h.view(t).GetStrip().GetStatus().GetVendorFault().GetApiRetrying() == nil {
 		t.Fatalf("status = %q, want blocked · api_retrying", h.status(t))
 	}
 }
@@ -1601,7 +1601,7 @@ func TestARetryWithNoTurnInFlightDoesNotBlock(t *testing.T) {
 	h.r.OnApiError(testWS, mainAgent, enotfound())
 
 	// Assert
-	if got := h.status(t); got == "blocked" {
+	if got := h.status(t); got == "vendor_fault" {
 		t.Fatalf("status = blocked with no turn in flight")
 	}
 }
@@ -1644,7 +1644,7 @@ func TestTheTurnsTerminalEndsApiRetrying(t *testing.T) {
 	})
 
 	// Assert
-	if got := h.status(t); got == "blocked" {
+	if got := h.status(t); got == "vendor_fault" {
 		t.Fatalf("status = blocked after the turn's terminal")
 	}
 }
@@ -1664,7 +1664,7 @@ func TestAVendorBlockOutranksApiRetrying(t *testing.T) {
 	h.r.OnSessionUpdate(testWS, update)
 
 	// Assert
-	if h.view(t).GetStrip().GetStatus().GetBlocked().GetUsageLimit() == nil {
+	if h.view(t).GetStrip().GetStatus().GetVendorFault().GetUsageLimit() == nil {
 		t.Fatalf("status = %v, want blocked · usage_limit over the retry", h.view(t).GetStrip().GetStatus())
 	}
 }

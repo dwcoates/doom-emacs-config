@@ -27,11 +27,15 @@ type ShimProfile struct {
 	DelayDiagnostics bool   `json:"delay_diagnostics,omitempty"`
 	// OpeningFault makes the opening diagnostics push of every session stream
 	// unhealthy, carrying one store_unreachable fault with this detail.
-	OpeningFault string         `json:"opening_fault,omitempty"`
-	ExitOn       string         `json:"exit_on,omitempty"`
-	ExitCode     int            `json:"exit_code,omitempty"`
-	Stderr       string         `json:"stderr,omitempty"`
-	ColdOnResume *ShimColdFacts `json:"cold_on_resume,omitempty"`
+	OpeningFault string `json:"opening_fault,omitempty"`
+	// OpeningNetworkUnreachable makes the opening diagnostics push of every
+	// session stream unhealthy with one network_unreachable fault carrying
+	// this detail: the shim saw the network unreachable.
+	OpeningNetworkUnreachable string         `json:"opening_network_unreachable,omitempty"`
+	ExitOn                    string         `json:"exit_on,omitempty"`
+	ExitCode                  int            `json:"exit_code,omitempty"`
+	Stderr                    string         `json:"stderr,omitempty"`
+	ColdOnResume              *ShimColdFacts `json:"cold_on_resume,omitempty"`
 	// VendorStartFailed answers every StartSession with the shim's
 	// `vendor_start_failed` refusal carrying this detail: the shim process is
 	// healthy and only the vendor failed to start inside it.

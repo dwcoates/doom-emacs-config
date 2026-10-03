@@ -386,6 +386,59 @@ show-panels — hiding first sidesteps the whole class."
         (kill-buffer buf)
         (kill-buffer input-buf)))))
 
+(defvar agent-repl-test-frontend--told nil
+  "Workspaces whose page was told its docked gate's height, newest first.")
+
+(defun agent-repl-test-frontend--display-under (gated ws)
+  "Mount WS's webview with GATED naming the workspaces a gate stands on.
+Answers (VIEW-SHOWN INPUT-SHOWN SELECTED-IS-VIEW)."
+  (let ((buf (generate-new-buffer "*fake-webview*"))
+        (input-buf (generate-new-buffer (format "*agent-panel-input-%s*" ws))))
+    (unwind-protect
+        (cl-letf (((symbol-function 'agent-repl--panels-visible-p) (lambda () nil))
+                  ((symbol-function 'agent-repl--ensure-input-buffer) (lambda (_ws) input-buf))
+                  ((symbol-function 'agent-repl-window--harden) (lambda (&rest _) nil))
+                  ((symbol-function 'agent-repl-host-state)
+                   (lambda (w) (and (member w gated) '(:gate (:arm :cold-gate :value nil)))))
+                  ((symbol-function 'agent-repl-window-tell-gate-dock-height)
+                   (lambda (w) (push w agent-repl-test-frontend--told) 100)))
+          (agent-repl--frontend-display-webview ws buf)
+          (list (and (get-buffer-window buf) t)
+                (and (get-buffer-window input-buf) t)
+                (eq (window-buffer (selected-window)) buf)))
+      (delete-other-windows)
+      (kill-buffer buf)
+      (kill-buffer input-buf))))
+
+(ert-deftest agent-repl-test-frontend-display-under-a-gate-mounts-no-input ()
+  "A standing gate hides the input: the webview alone fills the main area
+and is where focus lands, so the docked banner is the landing."
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    ;; Act / Assert
+    (should (equal (agent-repl-test-frontend--display-under '("ws1") "ws1")
+                   '(t nil t)))))
+
+(ert-deftest agent-repl-test-frontend-display-under-a-gate-tells-the-page-the-input-height ()
+  "Mounting under a gate tells the page the input's height for its dock."
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (let ((agent-repl-test-frontend--told nil))
+      ;; Act
+      (agent-repl-test-frontend--display-under '("ws1") "ws1")
+      ;; Assert
+      (should (equal agent-repl-test-frontend--told '("ws1"))))))
+
+(ert-deftest agent-repl-test-frontend-switching-keeps-each-workspaces-own-layout ()
+  "Switching while a gate stands on one workspace: the gated one mounts
+without its input, the other with it."
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (agent-repl--ws-put "ws2" :project-dir "/w2")
+    ;; Act
+    (let ((gated (agent-repl-test-frontend--display-under '("ws1") "ws1"))
+          (open (agent-repl-test-frontend--display-under '("ws1") "ws2")))
+      ;; Assert
+      (should (equal gated '(t nil t)))
+      (should (equal open '(t t nil))))))
+
 (ert-deftest agent-repl-test-frontend-display-clears-other-main-windows ()
   "display-webview wipes pre-existing main-area windows (fullscreen layout).
 Whatever the frame carried before the mount (magit, the dashboard,
@@ -1400,6 +1453,29 @@ accessor would not reach the code under test."
                     ((symbol-function 'xwidget-put)
                      (lambda (_w _p v) (setq props v)))
                     ((symbol-function 'agent-repl-open-progress-note-loaded)
+                     (lambda (ws) (setq noted ws))))
+            (agent-repl--frontend-watch-load "alpha" buf)
+            ;; Act
+            (funcall props 'widget 'load-changed)
+            ;; Assert
+            (should (equal noted "alpha")))
+        (kill-buffer buf)))))
+
+(ert-deftest agent-repl-test-frontend-a-load-tells-the-editor-startup-the-page-drew ()
+  "The editor's startup opens a tab only once its page drew."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((noted nil)
+          (props nil)
+          (buf (generate-new-buffer "*fake-webview*")))
+      (unwind-protect
+          (cl-letf (((symbol-function 'agent-repl--frontend-webview-live-widget)
+                     (lambda (_buf) 'widget))
+                    ((symbol-function 'xwidget-get) (lambda (_w _p) nil))
+                    ((symbol-function 'xwidget-put)
+                     (lambda (_w _p v) (setq props v)))
+                    ((symbol-function 'agent-repl-open-progress-note-loaded) #'ignore)
+                    ((symbol-function 'agent-repl-startup-note-page-loaded)
                      (lambda (ws) (setq noted ws))))
             (agent-repl--frontend-watch-load "alpha" buf)
             ;; Act

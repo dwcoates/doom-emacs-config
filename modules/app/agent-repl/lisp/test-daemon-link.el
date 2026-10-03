@@ -1091,6 +1091,20 @@ as if it were understood."
       ;; Assert
       (should (equal handled '((:wifi nil :mode (:arm :on :value nil))))))))
 
+(ert-deftest agent-repl-test-link-a-startup-push-is-handed-on ()
+  "A `startup' push is handed to startup.el, value intact."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001"))
+          (handled nil))
+      (cl-letf (((symbol-function 'agent-repl-startup-handle)
+                 (lambda (event) (push event handled))))
+        ;; Act
+        (agent-repl-test-link--push
+         conn (list :arm :startup :value '(:at-ms 1 :event (:arm :opening :value (:workspaces 2))))))
+      ;; Assert
+      (should (equal handled '((:at-ms 1 :event (:arm :opening :value (:workspaces 2)))))))))
+
 ;;;; ---- The daemon's standing loud faults ----
 
 (defun agent-repl-test-link--standing (&rest ids)

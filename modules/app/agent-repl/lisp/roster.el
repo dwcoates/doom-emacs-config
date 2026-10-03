@@ -88,6 +88,11 @@
 
 ;;;; ---- The view ---------------------------------------------------------
 
+(declare-function agent-repl-startup-active-p "startup" ())
+(declare-function agent-repl-startup-holds-p "startup" (id))
+(declare-function agent-repl-startup-precreate "startup" (ws))
+(declare-function agent-repl--force-tab-bar-redraw "status" ())
+
 (defvar agent-repl-roster-view nil
   "The last roster the daemon pushed, decoded, or nil before the first push.
 Whole, never a delta — a partially-applied roster is unrepresentable by
@@ -170,6 +175,13 @@ updated only after the edges of a push have been computed.")
   "Ref id -> non-nil when the PREVIOUS accepted push carried the viewed marker.
 The viewed-cleared edge is a comparison against this table, so it is
 replaced only after that edge has been computed.")
+
+(defvar agent-repl-roster--walked nil
+  "The last reconcile's tabs in walk order, as `(NAME . REF-ID)' pairs.
+The tab order is these less the tabs the editor's startup still holds.")
+
+(defvar agent-repl-roster--walked-hidden nil
+  "The last reconcile's collapsed-repository tab names.")
 
 (defvar agent-repl-roster--tab-order nil
   "Workspace names in roster walk order — every workspace with a tab.
@@ -649,7 +661,11 @@ A row that fails to reconcile is contained rather than fatal; see
         ;; `:pending' must not tear down what the user is looking at -- so it
         ;; is reconciled as before.  An `:unavailable' row opens: its status
         ;; arm draws the failure.
+        ;; DURING THE EDITOR'S STARTUP the daemon's go-ahead decides when a
+        ;; tab opens (startup.el), so nothing is held here: every row is
+        ;; pre-created at once and its tab stays out of the bar until then.
         (when (and fresh (not held)
+                   (not (agent-repl-startup-active-p))
                    (eq (plist-get want :availability) :pending))
           (setq held want)
           ;; Stated once per held row, not once per push that still finds it
@@ -663,8 +679,13 @@ A row that fails to reconcile is contained rather than fatal; see
             (puthash (plist-get want :id) t wanted-ids)
           (let ((name (agent-repl-roster--reconcile-row want wanted-ids)))
             (when name
-              (push name names)
-              (when (plist-get want :collapsed) (push name hidden)))
+              (push (cons name (plist-get want :id)) names)
+              (when (plist-get want :collapsed) (push name hidden))
+              ;; A tab the startup holds is PRE-CREATED: its perspective is
+              ;; up, and its input buffer is made now (its page by the
+              ;; drain), while the bar does not draw it.
+              (when (and fresh (agent-repl-startup-holds-p (plist-get want :id)))
+                (agent-repl-startup-precreate name)))
             ;; A row that FAILED opened no tab, so it does not count towards
             ;; the bring-up and the pass ends below `untabbed'.
             (when (and fresh name)
@@ -683,8 +704,9 @@ A row that fails to reconcile is contained rather than fatal; see
              (agent-repl-roster--log-row-failure
               name "elisp.roster.row-teardown-failed: ws=%s error=%s"
               name (error-message-string err)))))))
-    (setq agent-repl-roster--tab-order (nreverse names)
-          agent-repl-roster--hidden-tabs hidden)
+    (setq agent-repl-roster--walked (nreverse names)
+          agent-repl-roster--walked-hidden hidden)
+    (agent-repl-roster--filter-order)
     ;; INFO, not DEBUG.  This is the record that says the roster push became
     ;; a tab bar, and it is the end of the startup's first-roster phase --
     ;; but the DEBUG rung does not clear the durable sink's default `info'
@@ -760,6 +782,28 @@ NAMES is never filtered, only reordered."
             (cl-stable-sort (copy-sequence stamped) #'>
                             :key #'agent-repl-roster-last-selected-ms)
             never)))
+
+(defun agent-repl-roster--filter-order ()
+  "Set the tab order from the last walk, less the tabs the startup holds.
+A held tab is PRE-CREATED -- its workspace exists -- but the bar draws it
+only once the startup opens it (startup.el)."
+  (let ((open (cl-remove-if (lambda (pair) (agent-repl-startup-holds-p (cdr pair)))
+                            agent-repl-roster--walked)))
+    (setq agent-repl-roster--tab-order (mapcar #'car open)
+          agent-repl-roster--hidden-tabs
+          (cl-remove-if-not (lambda (name) (member name agent-repl-roster--tab-order))
+                            agent-repl-roster--walked-hidden))))
+
+(defun agent-repl-roster-refresh-order ()
+  "Re-derive the tab order after the startup opened a tab, and redraw the bar."
+  (agent-repl-roster--filter-order)
+  (agent-repl--info '(:agent-repl-central "roster reconciliation spans every workspace")
+                    "elisp.roster.order-refreshed: order=%S" agent-repl-roster--tab-order)
+  (force-mode-line-update t)
+  (when (and (bound-and-true-p tab-bar-mode)
+             (fboundp 'agent-repl--force-tab-bar-redraw))
+    (agent-repl--force-tab-bar-redraw))
+  agent-repl-roster--tab-order)
 
 (defun agent-repl-roster-tab-order ()
   "Return every tab name in roster walk order, the hidden ones included."
@@ -861,7 +905,10 @@ be invisible:
 A roster with no `current' decides nothing and says so at DEBUG."
   (let* ((roster agent-repl-roster-view)
          (id (and roster (agent-repl-roster--current-id roster)))
-         (name (and id (agent-repl--ws-by-ref-id id)))
+         ;; A workspace the startup still holds has no tab to land on yet;
+         ;; the startup calls this again once it opens one.
+         (name (and id (not (agent-repl-startup-holds-p id))
+                    (agent-repl--ws-by-ref-id id)))
          (scope (agent-repl-roster--current-scope name))
          (pending (agent-repl-host-pending-selection))
          (pending-id (and pending (plist-get (agent-repl-host-ref pending) :id)))

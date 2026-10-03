@@ -9,6 +9,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/health"
 )
 
 // THE ACTIVITY CELL is the strip's finest cell, and every status arm ALWAYS
@@ -40,9 +41,9 @@ func stamp(t time.Time) *frontendv1.FooterStatusActivityAt {
 // salientFault is the standing ESCALATING fault that claims `status`, with the
 // instant it began standing, or nil. A non-escalating fault is never salient:
 // it was announced as a transient when it opened (faults.go).
-func (r *resolver) salientFault(s *wsState, status string) (*frontendv1.FooterStatusActivityFault, time.Time) {
-	fault := r.standingFault(s)
-	if fault == nil || fault.Status != status {
+func (r *resolver) salientFault(s *wsState, status health.FaultStatus) (*frontendv1.FooterStatusActivityFault, time.Time) {
+	fault := r.standingFault(s, status)
+	if fault == nil {
 		return nil, time.Time{}
 	}
 	return &frontendv1.FooterStatusActivityFault{Kind: fault.Kind, Detail: fault.Detail}, fault.At
@@ -127,50 +128,75 @@ func (r *resolver) backgroundActivity(s *wsState) *frontendv1.FooterStatusBackgr
 	return &frontendv1.FooterStatusBackgroundActivity{Tier: &frontendv1.FooterStatusBackgroundActivity_Unpinned{Unpinned: r.unpinned(s)}}
 }
 
-// blockedActivity resolves the cell while blocked: the kind that explains the
-// step first — the auth prompt under `auth` — then an escalating fault that
-// claims `blocked`; then the shared salient lines; then unpinned, where the
+// vendorFaultActivity resolves the cell under a vendor fault: the kind that
+// explains the step first — why the vendor did not start under the three
+// vendor-start steps, the auth prompt under `auth`, the retry line under
+// `api_retrying` — then the shared salient lines; then unpinned, where the
 // enduring usage figures explain a usage-limit block.
-func (r *resolver) blockedActivity(s *wsState) *frontendv1.FooterStatusBlockedActivity {
-	salient := func(at time.Time) *frontendv1.FooterStatusBlockedSalient {
-		return &frontendv1.FooterStatusBlockedSalient{At: stamp(at)}
+func (r *resolver) vendorFaultActivity(s *wsState) *frontendv1.FooterStatusVendorFaultActivity {
+	salient := func(at time.Time) *frontendv1.FooterStatusVendorFaultSalient {
+		return &frontendv1.FooterStatusVendorFaultSalient{At: stamp(at)}
 	}
-	fault, faultAt := r.salientFault(s, "blocked")
+	start := r.standingFault(s, health.FaultStatusVendorFault)
 	shared, sharedOK := r.sharedSalient(s)
-	var line *frontendv1.FooterStatusBlockedSalient
+	var line *frontendv1.FooterStatusVendorFaultSalient
 	switch {
+	case start != nil:
+		// WHY THE VENDOR IS NOT UP: the sentence the health package composed
+		// out of the standing vendor fault's evidence, drawn verbatim.
+		line = salient(start.At)
+		line.Kind = &frontendv1.FooterStatusVendorFaultSalient_VendorStart{
+			VendorStart: &frontendv1.FooterStatusActivityVendorStart{Text: start.Detail}}
 	case s.blocked != nil && s.blocked.kind == blockedAuth && s.authLine != nil:
 		line = salient(s.authLine.at)
-		line.Kind = &frontendv1.FooterStatusBlockedSalient_Authenticating{
+		line.Kind = &frontendv1.FooterStatusVendorFaultSalient_Authenticating{
 			Authenticating: &frontendv1.FooterStatusActivityAuthenticating{Line: s.authLine.text}}
 	case s.blocked == nil && s.retryBlocks():
 		// The `api_retrying` substatus always draws its retry line.
 		line = salient(s.retrying.at)
-		line.Kind = &frontendv1.FooterStatusBlockedSalient_Retrying{Retrying: s.retrying.line()}
-	case fault != nil:
-		line = salient(faultAt)
-		line.Kind = &frontendv1.FooterStatusBlockedSalient_Fault{Fault: fault}
+		line.Kind = &frontendv1.FooterStatusVendorFaultSalient_Retrying{Retrying: s.retrying.line()}
 	case sharedOK:
-		line = fillShared(&frontendv1.FooterStatusBlockedSalient{}, shared)
+		line = fillShared(&frontendv1.FooterStatusVendorFaultSalient{}, shared)
 	default:
-		return &frontendv1.FooterStatusBlockedActivity{Tier: &frontendv1.FooterStatusBlockedActivity_Unpinned{Unpinned: r.unpinned(s)}}
+		return &frontendv1.FooterStatusVendorFaultActivity{Tier: &frontendv1.FooterStatusVendorFaultActivity_Unpinned{Unpinned: r.unpinned(s)}}
 	}
-	return &frontendv1.FooterStatusBlockedActivity{Tier: &frontendv1.FooterStatusBlockedActivity_Salient{Salient: line}}
+	return &frontendv1.FooterStatusVendorFaultActivity{Tier: &frontendv1.FooterStatusVendorFaultActivity_Salient{Salient: line}}
 }
 
-// disconnectedActivity resolves the cell while the link is not serving: the
-// bring-up failure first, because it explains the `start_failed` step; then an
-// escalating fault that claims `disconnected`; then the shared salient lines;
-// then unpinned (a step with no line of its own: starting, a severed link being
-// retried with no fault yet).
-func (r *resolver) disconnectedActivity(s *wsState, log dlog.Logger) *frontendv1.FooterStatusDisconnectedActivity {
-	salient := func(at time.Time) *frontendv1.FooterStatusDisconnectedSalient {
-		return &frontendv1.FooterStatusDisconnectedSalient{At: stamp(at)}
+// networkFaultActivity resolves the cell under a network fault: the offline
+// line the shim observed first, because it explains the step; it always
+// stands while the fault does, so the shared lines never reach this cell.
+func (r *resolver) networkFaultActivity(_ *wsState, fault *Fault) *frontendv1.FooterStatusNetworkFaultActivity {
+	return &frontendv1.FooterStatusNetworkFaultActivity{Tier: &frontendv1.FooterStatusNetworkFaultActivity_Salient{
+		Salient: &frontendv1.FooterStatusNetworkFaultSalient{
+			At: stamp(fault.At),
+			Kind: &frontendv1.FooterStatusNetworkFaultSalient_Offline{
+				Offline: &frontendv1.FooterStatusActivityNetworkOffline{Text: offlineLine(fault.Detail)}},
+		}}}
+}
+
+// offlineLine is the network fault's line: the shim's own observation, or a
+// plain statement when the shim said nothing more (the contract requires the
+// line never be empty).
+func offlineLine(detail string) string {
+	if detail == "" {
+		return "offline: this machine cannot reach the network"
 	}
-	fault, faultAt := r.salientFault(s, "disconnected")
-	standing := r.standingFault(s)
+	return detail
+}
+
+// agentReplFaultActivity resolves the cell under an agent-repl fault: the
+// bring-up failure first, because it explains the `start_failed` step; then
+// an escalating agent-repl fault; then the shared salient lines; then
+// unpinned (a step with no line of its own: starting, a severed link being
+// retried with no fault yet).
+func (r *resolver) agentReplFaultActivity(s *wsState, log dlog.Logger) *frontendv1.FooterStatusAgentReplFaultActivity {
+	salient := func(at time.Time) *frontendv1.FooterStatusAgentReplFaultSalient {
+		return &frontendv1.FooterStatusAgentReplFaultSalient{At: stamp(at)}
+	}
+	fault, faultAt := r.salientFault(s, health.FaultStatusAgentReplFault)
 	shared, sharedOK := r.sharedSalient(s)
-	var line *frontendv1.FooterStatusDisconnectedSalient
+	var line *frontendv1.FooterStatusAgentReplFaultSalient
 	switch {
 	case s.startFailed != nil:
 		if !s.startFailed.announced {
@@ -183,29 +209,23 @@ func (r *resolver) disconnectedActivity(s *wsState, log dlog.Logger) *frontendv1
 				})
 		}
 		line = salient(s.startFailed.at)
-		line.Kind = &frontendv1.FooterStatusDisconnectedSalient_StartFailed{
+		line.Kind = &frontendv1.FooterStatusAgentReplFaultSalient_StartFailed{
 			StartFailed: &frontendv1.FooterStatusActivityStartFailed{
 				Detail: s.startFailed.detail,
 			}}
-	case vendorFault(standing):
-		// WHY THE VENDOR IS NOT UP: the sentence the health package composed
-		// out of the standing vendor fault's evidence, drawn verbatim.
-		line = salient(standing.At)
-		line.Kind = &frontendv1.FooterStatusDisconnectedSalient_VendorStart{
-			VendorStart: &frontendv1.FooterStatusActivityVendorStart{Text: standing.Detail}}
 	case fault != nil:
 		line = salient(faultAt)
-		line.Kind = &frontendv1.FooterStatusDisconnectedSalient_Fault{Fault: fault}
+		line.Kind = &frontendv1.FooterStatusAgentReplFaultSalient_Fault{Fault: fault}
 	case sharedOK:
-		line = fillShared(&frontendv1.FooterStatusDisconnectedSalient{}, shared)
+		line = fillShared(&frontendv1.FooterStatusAgentReplFaultSalient{}, shared)
 	default:
-		return &frontendv1.FooterStatusDisconnectedActivity{Tier: &frontendv1.FooterStatusDisconnectedActivity_Unpinned{Unpinned: r.unpinned(s)}}
+		return &frontendv1.FooterStatusAgentReplFaultActivity{Tier: &frontendv1.FooterStatusAgentReplFaultActivity_Unpinned{Unpinned: r.unpinned(s)}}
 	}
-	return &frontendv1.FooterStatusDisconnectedActivity{Tier: &frontendv1.FooterStatusDisconnectedActivity_Salient{Salient: line}}
+	return &frontendv1.FooterStatusAgentReplFaultActivity{Tier: &frontendv1.FooterStatusAgentReplFaultActivity_Salient{Salient: line}}
 }
 
 // closingActivity resolves the cell while closing: the refusal first, because
-// it explains the `blocked` step; then the shared salient lines; then
+// it explains the `closing · blocked` step; then the shared salient lines; then
 // unpinned.
 func (r *resolver) closingActivity(s *wsState) *frontendv1.FooterStatusClosingActivity {
 	if s.closing != nil {

@@ -69,6 +69,7 @@
 (declare-function agent-repl-connect-connection-alive-p "connect" (conn))
 (declare-function agent-repl-connect-failure-message "connect" (detail))
 (declare-function agent-repl-rpc-watch-daemon "rpc" (conn on-push on-close &optional on-open))
+(declare-function agent-repl-startup-handle "startup" (event))
 (declare-function agent-repl-mutation-progress-handle "mutation-progress" (progress))
 (declare-function agent-repl-elisp-reload-handle "elisp-build" (reload))
 
@@ -618,6 +619,9 @@ live daemon afresh.  The caller has already recorded why."
       ;; The machine's persistent-wifi standing: persistent-wifi.el keeps it
       ;; and echoes a change.
       (:persistent-wifi (agent-repl-persistent-wifi-handle value))
+      ;; One step of this Emacs's startup, or a workspace's go-ahead to open
+      ;; its tab (startup.el).  An EMACS stream's alone, never replayed.
+      (:startup (agent-repl-startup-handle value))
       ;; The daemon is standing down on purpose and this was the stream's
       ;; last frame; `agent-repl-link--handle-close' reads the mark.
       (:ending

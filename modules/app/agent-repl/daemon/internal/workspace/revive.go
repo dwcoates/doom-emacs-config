@@ -260,6 +260,8 @@ func startEndedByDaemon(err error) (string, bool) {
 		return "ended when its context was cancelled", true
 	case errors.Is(err, shimclient.ErrStandingDown):
 		return "stopped because this daemon is standing down", true
+	case errors.Is(err, ErrHandedOver):
+		return "finished after the workspace was handed to a successor, which adopts its shim", true
 	default:
 		return "", false
 	}

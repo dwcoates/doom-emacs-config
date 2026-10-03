@@ -558,6 +558,7 @@ func (c *controller) reclaim(ctx context.Context, ws ids.WorkspaceID, lease ids.
 		return false, nil
 	}
 	c.untransfer(ws)
+	c.deps.Shims.Reclaimed(ws)
 	var failures []error
 	if _, live := c.deps.Shims.Client(ws); reattach && !live {
 		if _, err := c.deps.Shims.Adopt(ctx, ws); err != nil {

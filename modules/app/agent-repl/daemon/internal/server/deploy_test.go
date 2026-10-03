@@ -266,7 +266,10 @@ func TestWatchDaemonRefusesARequestNamingNoBuild(t *testing.T) {
 	}{
 		{name: "no client", req: &agentreplv1.WatchDaemonRequest{}},
 		{name: "an Emacs naming no elisp build", req: &agentreplv1.WatchDaemonRequest{
-			Client: &agentreplv1.WatchDaemonRequest_Emacs{Emacs: &agentreplv1.WatchDaemonEmacs{}},
+			Client: &agentreplv1.WatchDaemonRequest_Emacs{Emacs: &agentreplv1.WatchDaemonEmacs{Focus: unfocusedEditor(), Instance: testEditorInstance()}},
+		}},
+		{name: "an Emacs naming no process identity", req: &agentreplv1.WatchDaemonRequest{
+			Client: &agentreplv1.WatchDaemonRequest_Emacs{Emacs: &agentreplv1.WatchDaemonEmacs{ElispBuild: "elisp-test", Focus: unfocusedEditor()}},
 		}},
 	}
 	for _, tc := range tests {
@@ -332,7 +335,7 @@ func openDaemonWatch(t *testing.T, h *harness, req *agentreplv1.WatchDaemonReque
 }
 
 func emacsWatch(build string) *agentreplv1.WatchDaemonRequest {
-	return &agentreplv1.WatchDaemonRequest{Client: &agentreplv1.WatchDaemonRequest_Emacs{Emacs: &agentreplv1.WatchDaemonEmacs{Focus: unfocusedEditor(), ElispBuild: build}}}
+	return &agentreplv1.WatchDaemonRequest{Client: &agentreplv1.WatchDaemonRequest_Emacs{Emacs: &agentreplv1.WatchDaemonEmacs{Focus: unfocusedEditor(), ElispBuild: build, Instance: testEditorInstance()}}}
 }
 
 func webviewWatch() *agentreplv1.WatchDaemonRequest {

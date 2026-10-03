@@ -28,25 +28,32 @@ func faultOf(t *testing.T, id, kind string, daemonScope bool) Fault {
 	}
 }
 
-// disconnectedStep names the drawn disconnected substatus.
-func disconnectedStep(status *frontendv1.FooterStatus) string {
-	switch status.GetDisconnected().GetSubstatus().(type) {
-	case *frontendv1.FooterStatusDisconnected_Starting:
-		return "starting"
-	case *frontendv1.FooterStatusDisconnected_Degraded:
-		return "degraded"
-	case *frontendv1.FooterStatusDisconnected_Severed:
-		return "severed"
-	case *frontendv1.FooterStatusDisconnected_Dead:
-		return "dead"
-	case *frontendv1.FooterStatusDisconnected_StartFailed:
-		return "start_failed"
-	case *frontendv1.FooterStatusDisconnected_VendorRetry:
+// faultStep names the drawn substatus of whichever fault-domain arm stands.
+func faultStep(status *frontendv1.FooterStatus) string {
+	switch status.GetVendorFault().GetSubstatus().(type) {
+	case *frontendv1.FooterStatusVendorFault_VendorRetry:
 		return "vendor_retry"
-	case *frontendv1.FooterStatusDisconnected_VendorRejection:
+	case *frontendv1.FooterStatusVendorFault_VendorRejection:
 		return "vendor_rejection"
-	case *frontendv1.FooterStatusDisconnected_VendorFailed:
+	case *frontendv1.FooterStatusVendorFault_VendorFailed:
 		return "vendor_failed"
+	}
+	if status.GetNetworkFault().GetOffline() != nil {
+		return "offline"
+	}
+	switch status.GetAgentReplFault().GetSubstatus().(type) {
+	case *frontendv1.FooterStatusAgentReplFault_DaemonImpaired:
+		return "daemon_impaired"
+	case *frontendv1.FooterStatusAgentReplFault_Starting:
+		return "starting"
+	case *frontendv1.FooterStatusAgentReplFault_Degraded:
+		return "degraded"
+	case *frontendv1.FooterStatusAgentReplFault_Severed:
+		return "severed"
+	case *frontendv1.FooterStatusAgentReplFault_Dead:
+		return "dead"
+	case *frontendv1.FooterStatusAgentReplFault_StartFailed:
+		return "start_failed"
 	default:
 		return ""
 	}
@@ -63,24 +70,25 @@ func TestEveryFaultKindReachesTheStrip(t *testing.T) {
 		wantStatus    string
 		wantSubStatus string
 	}{
-		{"a shim that would not come up", health.KindShimStartFailed, false, "disconnected", "start_failed"},
-		{"a resume the shim refused", health.KindResumeFailed, false, "disconnected", "start_failed"},
-		{"the legacy relaunch spelling", health.KindRelaunchResumeFailed, false, "disconnected", "start_failed"},
-		{"an adoption window nobody claimed", health.KindAdoptionWindowExpired, false, "disconnected", "start_failed"},
-		{"a cold gate whose re-open failed", health.KindColdGateReopenFailed, false, "disconnected", "start_failed"},
-		{"a vendor start being retried", health.KindVendorStartRetrying, false, "disconnected", "vendor_retry"},
-		{"a vendor start the vendor refused", health.KindVendorStartRejected, false, "disconnected", "vendor_rejection"},
-		{"a vendor start that failed for the window", health.KindVendorStartFailed, false, "disconnected", "vendor_failed"},
-		{"a shim that exited while serving", health.KindShimDied, false, "disconnected", "dead"},
-		{"a bounce whose replacement died", health.KindBounceDied, false, "disconnected", "dead"},
-		{"a workspace with no live session", health.KindSessionAbsent, false, "disconnected", "dead"},
-		{"a link that stopped serving", health.KindLinkSevered, false, "disconnected", "severed"},
-		{"a watch open the shim refused", health.KindWatchOpenRefused, false, "disconnected", "severed"},
-		{"a state client that will not answer", health.KindStateUnreadable, false, "blocked", "daemon_impaired"},
-		{"an absent prompts directory", health.KindPromptsDirMissing, true, "blocked", "daemon_impaired"},
-		{"a state client that opened read-only", health.KindWsmReadOnly, true, "blocked", "daemon_impaired"},
-		{"a durable sink that cannot be written", health.KindLogSinkPoisoned, true, "blocked", "daemon_impaired"},
-		{"a successor that would not start", health.KindSuccessorSpawnFailed, true, "blocked", "daemon_impaired"},
+		{"a shim that would not come up", health.KindShimStartFailed, false, "agent_repl_fault", "start_failed"},
+		{"a resume the shim refused", health.KindResumeFailed, false, "agent_repl_fault", "start_failed"},
+		{"the legacy relaunch spelling", health.KindRelaunchResumeFailed, false, "agent_repl_fault", "start_failed"},
+		{"an adoption window nobody claimed", health.KindAdoptionWindowExpired, false, "agent_repl_fault", "start_failed"},
+		{"a cold gate whose re-open failed", health.KindColdGateReopenFailed, false, "agent_repl_fault", "start_failed"},
+		{"a vendor start being retried", health.KindVendorStartRetrying, false, "vendor_fault", "vendor_retry"},
+		{"a vendor start the vendor refused", health.KindVendorStartRejected, false, "vendor_fault", "vendor_rejection"},
+		{"a vendor start that failed for the window", health.KindVendorStartFailed, false, "vendor_fault", "vendor_failed"},
+		{"the network the shim could not reach", health.KindNetworkUnreachable, false, "network_fault", "offline"},
+		{"a shim that exited while serving", health.KindShimDied, false, "agent_repl_fault", "dead"},
+		{"a bounce whose replacement died", health.KindBounceDied, false, "agent_repl_fault", "dead"},
+		{"a workspace with no live session", health.KindSessionAbsent, false, "agent_repl_fault", "dead"},
+		{"a link that stopped serving", health.KindLinkSevered, false, "agent_repl_fault", "severed"},
+		{"a watch open the shim refused", health.KindWatchOpenRefused, false, "agent_repl_fault", "severed"},
+		{"a state client that will not answer", health.KindStateUnreadable, false, "agent_repl_fault", "daemon_impaired"},
+		{"an absent prompts directory", health.KindPromptsDirMissing, true, "agent_repl_fault", "daemon_impaired"},
+		{"a state client that opened read-only", health.KindWsmReadOnly, true, "agent_repl_fault", "daemon_impaired"},
+		{"a durable sink that cannot be written", health.KindLogSinkPoisoned, true, "agent_repl_fault", "daemon_impaired"},
+		{"a successor that would not start", health.KindSuccessorSpawnFailed, true, "agent_repl_fault", "daemon_impaired"},
 		{"a fault the shim reported about itself", health.KindShimReported, false, "idle", ""},
 		{"a headless classifier run that failed", health.KindClassifierFailed, false, "idle", ""},
 		{"a bounce disposition needing a human", health.KindBounceUnknown, false, "idle", ""},
@@ -104,16 +112,8 @@ func TestEveryFaultKindReachesTheStrip(t *testing.T) {
 			if got := statusName(view.GetStrip().GetStatus()); got != tt.wantStatus {
 				t.Fatalf("status = %q, want %q", got, tt.wantStatus)
 			}
-			switch tt.wantStatus {
-			case "disconnected":
-				if got := disconnectedStep(view.GetStrip().GetStatus()); got != tt.wantSubStatus {
-					t.Fatalf("substatus = %q, want %q", got, tt.wantSubStatus)
-				}
-			case "blocked":
-				if view.GetStrip().GetStatus().GetBlocked().GetDaemonImpaired() == nil {
-					t.Fatalf("substatus = %+v, want daemon_impaired",
-						view.GetStrip().GetStatus().GetBlocked().GetSubstatus())
-				}
+			if got := faultStep(view.GetStrip().GetStatus()); got != tt.wantSubStatus {
+				t.Fatalf("substatus = %q, want %q", got, tt.wantSubStatus)
 			}
 		})
 	}
@@ -131,15 +131,15 @@ func TestEveryFaultKindDrawsItsActivityLine(t *testing.T) {
 	}{
 		{"a resume the shim refused", health.KindResumeFailed, false,
 			func(s *frontendv1.FooterStatus) *frontendv1.FooterStatusActivityFault {
-				return s.GetDisconnected().GetActivity().GetSalient().GetFault()
+				return s.GetAgentReplFault().GetActivity().GetSalient().GetFault()
 			}},
 		{"a state client that will not answer", health.KindStateUnreadable, false,
 			func(s *frontendv1.FooterStatus) *frontendv1.FooterStatusActivityFault {
-				return s.GetBlocked().GetActivity().GetSalient().GetFault()
+				return s.GetAgentReplFault().GetActivity().GetSalient().GetFault()
 			}},
 		{"an absent prompts directory", health.KindPromptsDirMissing, true,
 			func(s *frontendv1.FooterStatus) *frontendv1.FooterStatusActivityFault {
-				return s.GetBlocked().GetActivity().GetSalient().GetFault()
+				return s.GetAgentReplFault().GetActivity().GetSalient().GetFault()
 			}},
 		{"a conversation a fresh bring-up left behind", health.KindConversationAbandoned, false,
 			func(s *frontendv1.FooterStatus) *frontendv1.FooterStatusActivityFault {
@@ -227,10 +227,10 @@ func TestTheStrongestStandingFaultIsTheOneDrawn(t *testing.T) {
 
 	// Assert
 	view := h.view(t)
-	if got := disconnectedStep(view.GetStrip().GetStatus()); got != "dead" {
+	if got := faultStep(view.GetStrip().GetStatus()); got != "dead" {
 		t.Fatalf("substatus = %q, want dead: the stronger fault claims the strip", got)
 	}
-	if got := view.GetStrip().GetStatus().GetDisconnected().GetActivity().GetSalient().GetFault().GetKind(); got != health.KindShimDied {
+	if got := view.GetStrip().GetStatus().GetAgentReplFault().GetActivity().GetSalient().GetFault().GetKind(); got != health.KindShimDied {
 		t.Fatalf("activity kind = %q, want %q", got, health.KindShimDied)
 	}
 }
@@ -248,7 +248,7 @@ func TestAmongEqualFaultsTheNewestIsDrawn(t *testing.T) {
 	h.r.OpenFault(testWS, newer)
 
 	// Assert
-	got := h.view(t).GetStrip().GetStatus().GetDisconnected().GetActivity().GetSalient().GetFault().GetKind()
+	got := h.view(t).GetStrip().GetStatus().GetAgentReplFault().GetActivity().GetSalient().GetFault().GetKind()
 	if got != health.KindBounceDied {
 		t.Fatalf("activity kind = %q, want %q: the newest evidence is the live one", got, health.KindBounceDied)
 	}
@@ -264,7 +264,7 @@ func TestTheLinkStateOutranksAFaultForTheDisconnectedStep(t *testing.T) {
 	h.r.OnLink(testWS, shimclient.LinkDialing)
 
 	// Assert
-	if got := disconnectedStep(h.view(t).GetStrip().GetStatus()); got != "starting" {
+	if got := faultStep(h.view(t).GetStrip().GetStatus()); got != "starting" {
 		t.Fatalf("substatus = %q, want starting: the link state is the live truth about the link", got)
 	}
 }
@@ -288,8 +288,8 @@ func TestADaemonScopedFaultStandsOnEveryWorkspacesStrip(t *testing.T) {
 		if !ok {
 			t.Fatalf("workspace %q published no view", ws)
 		}
-		if got := statusName(view.GetStrip().GetStatus()); got != "blocked" {
-			t.Fatalf("workspace %q status = %q, want blocked", ws, got)
+		if got := statusName(view.GetStrip().GetStatus()); got != "agent_repl_fault" {
+			t.Fatalf("workspace %q status = %q, want agent_repl_fault", ws, got)
 		}
 	}
 }
@@ -307,7 +307,7 @@ func TestAFaultReopenedUnderTheSameIdRefreshesItsLine(t *testing.T) {
 	h.r.OpenFault(testWS, second)
 
 	// Assert
-	line := h.view(t).GetStrip().GetStatus().GetDisconnected().GetActivity().GetSalient().GetFault()
+	line := h.view(t).GetStrip().GetStatus().GetAgentReplFault().GetActivity().GetSalient().GetFault()
 	if line.GetDetail() != second.Detail {
 		t.Fatalf("detail = %q, want %q", line.GetDetail(), second.Detail)
 	}
@@ -394,7 +394,7 @@ func TestTheVendorStartLineIsDrawnUnderEachVendorStep(t *testing.T) {
 			h.r.OpenFault(testWS, vendorFaultOf(t, "fault-1", tt.kind))
 
 			// Assert
-			got := h.view(t).GetStrip().GetStatus().GetDisconnected().GetActivity().GetSalient().GetVendorStart().GetText()
+			got := h.view(t).GetStrip().GetStatus().GetVendorFault().GetActivity().GetSalient().GetVendorStart().GetText()
 			if got != tt.want {
 				t.Fatalf("vendor_start text = %q, want %q", got, tt.want)
 			}
@@ -414,24 +414,113 @@ func TestAVendorFaultOutranksADeadLinkThatNeverConnected(t *testing.T) {
 	h.r.OpenFault(testWS, vendorFaultOf(t, "fault-1", health.KindVendorStartFailed))
 
 	// Assert
-	if got := disconnectedStep(h.view(t).GetStrip().GetStatus()); got != "vendor_failed" {
+	if got := faultStep(h.view(t).GetStrip().GetStatus()); got != "vendor_failed" {
 		t.Fatalf("substatus = %q, want vendor_failed", got)
 	}
 }
 
-// A VENDOR FAULT RANKS WITH start_failed: opened after a severed-link fault,
-// it is the one the strip draws.
-func TestAVendorFaultOutranksASeveredLinkFault(t *testing.T) {
+// THE FAULT DOMAINS ARE RANKED agent_repl_fault > network_fault >
+// vendor_fault (owner ruling, 2026-10-02): whichever was opened last, the
+// stronger domain is the one the strip draws.
+func TestTheFaultDomainsRankAgentReplThenNetworkThenVendor(t *testing.T) {
+	tests := []struct {
+		name   string
+		faults []Fault
+		want   string
+	}{
+		{name: "an agent-repl fault outranks a vendor fault opened after it",
+			faults: []Fault{faultOf(t, "severed", health.KindLinkSevered, false), vendorFaultOf(t, "vendor", health.KindVendorStartRetrying)},
+			want:   "agent_repl_fault"},
+		{name: "an agent-repl fault outranks a network fault opened after it",
+			faults: []Fault{faultOf(t, "severed", health.KindLinkSevered, false), faultOf(t, "net", health.KindNetworkUnreachable, false)},
+			want:   "agent_repl_fault"},
+		{name: "a network fault outranks a vendor fault opened after it",
+			faults: []Fault{faultOf(t, "net", health.KindNetworkUnreachable, false), vendorFaultOf(t, "vendor", health.KindVendorStartRetrying)},
+			want:   "network_fault"},
+		{name: "a network fault outranks a vendor fault opened before it",
+			faults: []Fault{vendorFaultOf(t, "vendor", health.KindVendorStartFailed), faultOf(t, "net", health.KindNetworkUnreachable, false)},
+			want:   "network_fault"},
+		{name: "a daemon-scoped agent-repl fault outranks a network fault",
+			faults: []Fault{faultOf(t, "net", health.KindNetworkUnreachable, false), faultOf(t, "impaired", health.KindStateUnreadable, false)},
+			want:   "agent_repl_fault"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+
+			// Act
+			for _, f := range tt.faults {
+				h.r.OpenFault(testWS, f)
+			}
+
+			// Assert
+			if got := statusName(h.view(t).GetStrip().GetStatus()); got != tt.want {
+				t.Fatalf("status = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestClosingTheNetworkFaultUncoversTheVendorFault(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	connected(h)
-	h.r.OpenFault(testWS, faultOf(t, "severed", health.KindLinkSevered, false))
+	h.r.OpenFault(testWS, vendorFaultOf(t, "vendor", health.KindVendorStartRetrying))
+	h.r.OpenFault(testWS, faultOf(t, "net", health.KindNetworkUnreachable, false))
 
 	// Act
-	h.r.OpenFault(testWS, vendorFaultOf(t, "vendor", health.KindVendorStartRetrying))
+	h.r.CloseFault(testWS, "net")
 
 	// Assert
-	if got := disconnectedStep(h.view(t).GetStrip().GetStatus()); got != "vendor_retry" {
-		t.Fatalf("substatus = %q, want vendor_retry", got)
+	if got := faultStep(h.view(t).GetStrip().GetStatus()); got != "vendor_retry" {
+		t.Fatalf("substatus = %q, want vendor_retry once the network is back", got)
+	}
+}
+
+func TestTheNetworkFaultDrawsTheShimsObservation(t *testing.T) {
+	tests := []struct {
+		name   string
+		detail string
+		want   string
+	}{
+		{name: "the shim's own words", detail: "cannot reach api.anthropic.com: no route to host", want: "cannot reach api.anthropic.com: no route to host"},
+		{name: "no words at all still draws a line", detail: "", want: "offline: this machine cannot reach the network"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+			f := faultOf(t, "net", health.KindNetworkUnreachable, false)
+			f.Detail = tt.detail
+
+			// Act
+			h.r.OpenFault(testWS, f)
+
+			// Assert
+			got := h.view(t).GetStrip().GetStatus().GetNetworkFault().GetActivity().GetSalient().GetOffline().GetText()
+			if got != tt.want {
+				t.Fatalf("offline line = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// A VENDOR FAULT LEAVES A REDIALING LINK ITS CLAIM: a route being redialed is
+// agent-repl's own fault, newer than any vendor start.
+func TestARedialingLinkOutranksAStandingVendorFault(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.OpenFault(testWS, vendorFaultOf(t, "vendor", health.KindVendorStartRetrying))
+
+	// Act
+	h.r.OnLink(testWS, shimclient.LinkRedialing)
+
+	// Assert
+	if got := faultStep(h.view(t).GetStrip().GetStatus()); got != "severed" {
+		t.Fatalf("substatus = %q, want severed", got)
 	}
 }

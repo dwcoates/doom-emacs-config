@@ -533,8 +533,20 @@ daemon-scoped push for hours."
    (list :client (list :arm :emacs
                        :value (list :elisp-build (agent-repl-elisp-build)
                                     :focus (agent-repl-wire-editor-focus
-                                            (agent-repl--emacs-focused-p)))))
+                                            (agent-repl--emacs-focused-p))
+                                    :instance (agent-repl-editor-instance))))
    on-push on-close on-open))
+
+(defun agent-repl-editor-instance ()
+  "Return THIS Emacs process's identity, as `WatchDaemonEmacs.instance' states it.
+Minted from the process id and the instant the process began
+\(`before-init-time'), so it is the same on every WatchDaemon this Emacs
+opens -- a reconnect, a daemon restart, a hot reload of this file -- and
+different after a full Emacs restart.  Opaque to the daemon, which only
+compares it."
+  (format "emacs-%d-%s" (emacs-pid)
+          (format-time-string "%s.%N" (or before-init-time
+                                          (error "agent-repl: before-init-time is unset")))))
 
 (defun agent-repl-rpc-watch-workspace-roster (conn on-push on-close &optional on-open)
   "Subscribe to the whole workspace roster on CONN.

@@ -21,47 +21,62 @@
 //
 // THE LADDER, strongest claim first:
 //
-//  1. merging        a merge is IN FLIGHT: queued or running a step. It
+//  1. merging           a merge is IN FLIGHT: queued or running a step. It
 //     outranks the link because it is the DAEMON's own fact, knowable
 //     whatever the route to the shim is doing, and "the merge pipeline owns
 //     the row while it runs" (the roster's standing ruling). Nothing parks
 //     (owner ruling, 2026-09-29): a merge that gives up FAILS.
-//  2. disconnected   the route to the session is not serving, or a turn the
-//     daemon accepted awaits the bring-up of a route never seen
-//     (AwaitingBringUp). SKIPPED WHOLE while the session is PARKED: the idle
-//     sweep put the route down itself and a prompt brings it back, so a
-//     parked session is idle, not broken.
-//  3. closing        a close was refused. The roster observes no close
+//  2. agent_repl_fault  one of agent-repl's OWN services does not serve the
+//     workspace: the route to the session is not serving, a turn the daemon
+//     accepted awaits the bring-up of a route never seen (AwaitingBringUp),
+//     or the daemon itself is impaired. SKIPPED WHOLE while the session is
+//     PARKED: the idle sweep put the route down itself and a prompt brings
+//     it back, so a parked session is idle, not broken.
+//  3. network_fault     this machine cannot reach the network, as the shim
+//     tells it apart from an answer the vendor gave. Skipped while PARKED: a
+//     parked session asks nothing of the network.
+//  4. closing           a close was refused. The roster observes no close
 //     refusal, so only the footer ever stands here.
-//  4. blocked        the vendor or the account refuses the session until
-//     something outside it is resolved (ClassifyFailure).
-//  5. merge_failed   the merge failed. TERMINAL: the merge no longer holds the
-//     session, so every claim that the workspace is UNUSABLE (the three
-//     above) outranks it, while it outranks everything the session itself
-//     is doing.
-//  6. merged         the merge landed. Terminal, ranked as merge_failed is.
-//  7. degraded       the session serves, but the daemon's view of it is
+//  5. vendor_fault      agent-repl serves, but the vendor (Claude, the Agent
+//     SDK) does not: a vendor start retried, rejected or given up on, an
+//     account or vendor block (ClassifyFailure), or a call the vendor is
+//     retrying. USABLE: the composer stays open and a prompt is held until
+//     the vendor serves.
+//  6. merge_failed      the merge failed. TERMINAL: the merge no longer holds
+//     the session, so every claim that the workspace is UNUSABLE outranks it,
+//     while it outranks everything the session itself is doing.
+//  7. merged            the merge landed. Terminal, ranked as merge_failed is.
+//  8. degraded          the session serves, but the daemon's view of it is
 //     compromised: a shim component dropping or delaying observations, or a
 //     taken-back shim that never re-reported its session state. USABLE, so
 //     every unusable claim outranks it; SKIPPED while PARKED, as the link is.
-//  8. waiting        the session waits on the user: a permission ask, and on
-//     the footer also an interrupt landing, a question or a cold gate.
-//  9. thinking      a turn is in flight, a context cut included.
-//  10. idle          the foreground is free: a turn end (read or not, a
+//  9. waiting           the session waits on the user: a permission ask, and
+//     on the footer also an interrupt landing, a question or a cold gate.
+//  10. thinking         a turn is in flight, a context cut included.
+//  11. idle             the foreground is free: a turn end (read or not, a
 //     failed one included), detached work running, a wakeup pending, or
 //     nothing at all.
 //
-// THE COLORS FOLLOW THE RUNGS (owner ruling, 2026-09-28): every rung that
-// makes the workspace UNUSABLE — disconnected, closing, blocked — is blue and
-// ranks above every rung on which it is usable; merging is purple; a usable
-// rung with something wrong — merge_failed, degraded, and idle's failed turn
-// — is turquoise.
+// THE FAULT DOMAINS (owner ruling, 2026-10-02; docs/protobuf-design/
+// startup-and-fault-domains.md): agent_repl_fault > network_fault >
+// vendor_fault. The first two are BLUE and close the composer; a vendor fault
+// is TURQUOISE and leaves it open.
+//
+// THE COLORS FOLLOW THE RUNGS (owner rulings, 2026-09-28 and 2026-10-02):
+// every rung that makes the workspace UNUSABLE — agent_repl_fault,
+// network_fault, closing — is blue and ranks above every rung on which it is
+// usable; merging is purple; a usable rung with something wrong —
+// vendor_fault, merge_failed, degraded, and idle's failed turn — is
+// turquoise.
 //
 // Momentary footer statuses sit INSIDE the rung their fact belongs to rather
 // than above it: `loading` is a turn taking on context (thinking) and the
 // momentary `interrupted` is a turn end (idle).
 //
 // WHERE THE TWO RESOLVERS' OLD ORDERS DISAGREED, this is what was chosen:
+//   - (owner ruling, 2026-10-02) `disconnected` became `agent_repl_fault`,
+//     `blocked` became `vendor_fault` and moved below `closing`, and
+//     `network_fault` was minted between them;
 //   - the footer ranked `disconnected` above every merge state; the roster
 //     ranked every merge state above the link. A merge in flight now outranks
 //     the link (the daemon owns it and it is knowable
@@ -81,9 +96,9 @@
 // FACTS ONLY ONE RESOLVER OBSERVES are the limit of the guarantee. The ladder
 // makes the two surfaces agree on every fact both are fed; a fact only one of
 // them is fed can still move that one alone. Today those are:
-//   - the footer's alone: a refused close (closing), a client stream down (a
-//     disconnected hop), a standing daemon fault (disconnected or blocked by
-//     fault), an open question, a cold gate and its answer, a pending wakeup,
+//   - the footer's alone: a refused close (closing), a client stream down (an
+//     agent-repl-fault hop), a standing daemon fault that claims
+//     agent_repl_fault, an open question, a cold gate and its answer, a pending wakeup,
 //     and a momentary loading;
 //   - the roster's alone: a durable session record before any link state has
 //     been seen, which it reads as `init` (a link rung) while the footer, with
@@ -100,16 +115,18 @@ type Claim string
 const (
 	// Merging is a merge in flight.
 	Merging Claim = "merging"
-	// Disconnected is a route to the session that is not serving.
-	Disconnected Claim = "disconnected"
+	// AgentReplFault is one of agent-repl's own services not serving.
+	AgentReplFault Claim = "agent_repl_fault"
+	// NetworkFault is this machine unable to reach the network.
+	NetworkFault Claim = "network_fault"
 	// Closing is a refused close.
 	Closing Claim = "closing"
+	// VendorFault is the vendor unable to serve while agent-repl serves.
+	VendorFault Claim = "vendor_fault"
 	// MergeFailed is a failed merge.
 	MergeFailed Claim = "merge_failed"
 	// Merged is a landed merge.
 	Merged Claim = "merged"
-	// Blocked is the vendor or the account refusing the session.
-	Blocked Claim = "blocked"
 	// Degraded is a serving session whose view is compromised.
 	Degraded Claim = "degraded"
 	// Waiting is the session waiting on the user.
@@ -129,14 +146,14 @@ const Inactive Claim = "inactive"
 // Order is the ladder, strongest claim first. It is the ONE statement of the
 // precedence; the package comment explains every position.
 var Order = []Claim{
-	Merging, Disconnected, Closing, Blocked, MergeFailed,
+	Merging, AgentReplFault, NetworkFault, Closing, VendorFault, MergeFailed,
 	Merged, Degraded, Waiting, Thinking, Idle,
 }
 
 // AwaitingBringUp reports a workspace whose route has never been seen at all
 // while something already says a session is on its way: a turn the daemon
 // ACCEPTED (the prompt is held for a session still to be brought up), or a
-// session that has announced itself. It stands on the DISCONNECTED rung — the
+// session that has announced itself. It stands on the AGENT_REPL_FAULT rung — the
 // route is coming up, and that is the truest claim about it — so both surfaces
 // walk a cold submit monotonically (idle, then the route coming up, then the
 // turn) instead of drawing the turn, then the bring-up, then the turn again.
@@ -178,7 +195,7 @@ func Resolve[T any](merge string, parked bool, probe func(Claim) (T, bool), idle
 			if claim != standing {
 				continue
 			}
-		case Disconnected, Degraded:
+		case AgentReplFault, NetworkFault, Degraded:
 			if parked {
 				continue
 			}

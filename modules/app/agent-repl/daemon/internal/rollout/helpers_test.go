@@ -544,6 +544,8 @@ func (s *steps) Taken() []string {
 // fakeFleet is the shim fleet.
 type fakeFleet struct {
 	mu sync.Mutex
+	// reclaimed is every workspace given back by a reclaim, in order.
+	reclaimed []ids.WorkspaceID
 	// live is the workspace's current client.
 	live map[ids.WorkspaceID]*fakeShim
 	// prelaunched is what Prelaunch answers, per workspace.
@@ -706,6 +708,13 @@ func (f *fakeFleet) Adopt(_ context.Context, ws ids.WorkspaceID) (shimclient.Cli
 		f.adopted[ws] = c
 	}
 	return c, nil
+}
+
+// Reclaimed records the workspace given back.
+func (f *fakeFleet) Reclaimed(ws ids.WorkspaceID) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.reclaimed = append(f.reclaimed, ws)
 }
 
 // HandOver mirrors the real fleet's: the watches close, then the shim is

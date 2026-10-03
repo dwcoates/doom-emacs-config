@@ -88,6 +88,17 @@ func (e *BringUpDeathError) Error() string {
 		e.Exit.PID, e.Exit.Code, e.Exit.Signal, e.Exit.Stderr)
 }
 
+// Unwrap names a death the supervisor's own stand-down sweep caused as
+// ErrStandingDown: a spawn the sweep killed mid bring-up is the same refusal a
+// spawn asked for after the sweep gets, and its caller tells the daemon's
+// departure from a shim that genuinely would not come up by that.
+func (e *BringUpDeathError) Unwrap() error {
+	if e.Exit.Attribution != nil && e.Exit.Attribution.Actor == ActorStandDown {
+		return ErrStandingDown
+	}
+	return nil
+}
+
 // SpecError refuses a spawn whose Spec is incomplete. The spawn contract has
 // no optional parts.
 type SpecError struct {

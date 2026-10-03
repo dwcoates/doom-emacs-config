@@ -14,7 +14,7 @@ import (
 // without a color fails there rather than drawing an unpainted dot.
 var statusArms = []string{
 	"submitting", "thinking", "clearing", "compacting", "permission", "done",
-	"interrupted", "turn_failed", "ready", "idle_async", "vendor_blocked", "api_retrying", "init", "severed",
+	"interrupted", "turn_failed", "ready", "idle_async", "vendor_blocked", "vendor_fault", "network_fault", "api_retrying", "init", "severed",
 	"start_failed", "degraded", "dead", "merging",
 	"merge_queued", "merge_failed", "merged", "none",
 	"inactive",
@@ -124,8 +124,13 @@ type wsState struct {
 	// (SetBringingUp). It is what holds the row's availability at `pending`.
 	bringingUp bool
 	// vendorStart is where the vendor-start run stands (SetVendorStart): the
-	// link rung draws it ahead of the link's own account.
+	// vendor rung draws it, and while it stands the link's own account of a
+	// dead route is not agent-repl's fault.
 	vendorStart VendorStart
+	// networkFaults are the ids of the standing faults that say this machine
+	// cannot reach the network (NetworkFaultOpened): the network rung draws
+	// them.
+	networkFaults map[string]bool
 	// lastArm is the status arm last PUBLISHED for this workspace, which is
 	// what a status CHANGE is measured against, and what a viewed report is
 	// judged against: the arm the user was looking at.

@@ -818,6 +818,10 @@ func (f *Fleet) logNoSessionToKill(ctx context.Context, ws ids.WorkspaceID, forc
 // loudly rather than handing over a shim this daemon is still watching.
 func (f *Fleet) HandOver(ws ids.WorkspaceID) (bool, error) {
 	f.mu.Lock()
+	// FROM HERE THE WORKSPACE IS THE SUCCESSOR'S, whether or not a session is
+	// held: a start still in flight finds it handed over when it would begin
+	// serving, and leaves its shim to the successor (hold).
+	f.handedOver[ws] = true
 	session, ok := f.sessions[ws]
 	var watcher sessionwatcher.Watcher
 	if ok {
@@ -854,6 +858,15 @@ func (f *Fleet) HandOver(ws ids.WorkspaceID) (bool, error) {
 		"workspace": string(ws), "shim_pid": session.client.PID(), "watched": watcher != nil,
 	})
 	return true, nil
+}
+
+// Reclaimed gives a handed-over workspace back to this daemon: a transfer
+// that failed after HandOver is taken back (rollout's reclaim), and a start
+// on it serves it again.
+func (f *Fleet) Reclaimed(ws ids.WorkspaceID) {
+	f.mu.Lock()
+	delete(f.handedOver, ws)
+	f.mu.Unlock()
 }
 
 // AwaitFacts blocks until the workspace's installed watcher has taken up the

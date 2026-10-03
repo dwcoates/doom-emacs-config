@@ -11,6 +11,7 @@ syntax = "proto3";
 
 package agentrepl.v1;
 
+import "workspace/v1/workspace.proto";
 import "frontend/v1/news_digest.proto";
 import "agentrepl/v1/daemon_stream_ending.proto";
 import "agentrepl/v1/endpoint_daemon_health.proto";
@@ -56,6 +57,19 @@ message WatchDaemonEmacs {
   // by ReportEditorFocus, and the daemon forgets the focus when this stream
   // ends (see EditorFocus).
   EditorFocus focus = 2;
+  // THIS EMACS PROCESS'S IDENTITY: minted once when Emacs starts and the same
+  // on every WatchDaemon it opens until it exits, so a RECONNECT (the daemon
+  // restarted, the link dropped) carries the same value and a FULL EMACS
+  // RESTART carries a new one. Opaque; compared byte-wise. REQUIRED — a watch
+  // without it is refused. The daemon uses a new value to redisplay the day's
+  // news digest even if it was dismissed.
+  EditorInstance instance = 3;
+}
+
+// One Emacs process's identity.
+message EditorInstance {
+  // Opaque, minted by Emacs at startup.
+  string value = 1;
 }
 
 // A webview is connecting. Presence is the fact: a webview reports its build
@@ -113,7 +127,136 @@ message WatchDaemonResponse {
     // that opens while a digest stands draws it, and a dismiss in any one
     // webview takes it down in every one. Sent ONLY on a webview stream.
     NewsDigestStanding news_digest = 9;
+    // A STARTUP EVENT: one step of bringing the editor's workspaces up, for
+    // the editor to print as one minibuffer line, and the per-workspace
+    // go-ahead to open its tab. An EVENT, not state: never replayed to a late
+    // subscriber. Sent ONLY on an Emacs stream.
+    DaemonStartupEvent startup = 10;
   }
+}
+
+// One step of the editor's startup, as the daemon sees it. The editor prints
+// each as one line ("agent-repl: doom: resuming the conversation…"); the
+// steps before any stream exists (building, starting and connecting to the
+// daemon) are the editor's own lines.
+message DaemonStartupEvent {
+  // When the step happened, epoch milliseconds.
+  int64 at_ms = 1;
+  // THE ARM IS THE STEP; exactly one is set.
+  oneof event {
+    // The daemon is bringing up this many registered workspaces.
+    DaemonStartupOpening opening = 2;
+    // One workspace moved one step along its bring-up.
+    DaemonStartupWorkspaceStep workspace_step = 3;
+    // THE GO-AHEAD TO OPEN ONE WORKSPACE'S TAB. Sent in the daemon's
+    // registry order, never ahead of an earlier workspace's go-ahead, and
+    // only once the workspace's agent-repl services serve it (daemon, shim,
+    // store, sidecar) or its service-level bring-up has settled as failed.
+    // The vendor's and the network's state never gate it: a workspace whose
+    // vendor is down opens and shows its fault. The editor opens the tab once
+    // its own page for the workspace has drawn, and in go-ahead order.
+    DaemonStartupWorkspaceOpen workspace_open = 4;
+    // Every workspace has had its go-ahead.
+    DaemonStartupFinished finished = 5;
+  }
+}
+
+// The bring-up of the registered workspaces has begun.
+message DaemonStartupOpening {
+  // How many workspaces are being brought up.
+  uint32 workspaces = 1;
+}
+
+// One workspace's step.
+message DaemonStartupWorkspaceStep {
+  // The workspace.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // THE ARM IS THE STEP; exactly one is set.
+  oneof step {
+    // Its shim is being started or adopted ("starting session…").
+    DaemonStartupStepStartingSession starting_session = 2;
+    // It was asleep and is being woken ("waking from sleep…").
+    DaemonStartupStepWaking waking = 3;
+    // Its conversation is being resumed ("resuming the conversation…").
+    DaemonStartupStepResuming resuming = 4;
+    // A vendor start attempt failed and is retried ("Claude did not start,
+    // retrying (attempt N)…").
+    DaemonStartupStepVendorRetrying vendor_retrying = 5;
+    // The vendor refused to start ("Claude refused to start: <cause>.").
+    DaemonStartupStepVendorRejected vendor_rejected = 6;
+    // The vendor kept failing for the whole retry window ("Claude failed to
+    // start after 10 minutes.").
+    DaemonStartupStepVendorFailed vendor_failed = 7;
+    // Resuming waits on the user's answer to the cold gate ("needs your
+    // answer to resume (large context).").
+    DaemonStartupStepColdGate cold_gate = 8;
+    // The network is unreachable, so the vendor cannot start yet ("offline,
+    // waiting for the network…").
+    DaemonStartupStepOffline offline = 9;
+    // Its agent-repl services serve it, but an earlier workspace has not had
+    // its go-ahead yet ("ready, waiting for <ahead> to open first…").
+    DaemonStartupStepWaitingFor waiting_for = 10;
+    // Its service-level bring-up failed ("session failed to start:
+    // <reason>.").
+    DaemonStartupStepFailed failed = 11;
+  }
+}
+// The shim is being started or adopted.
+message DaemonStartupStepStartingSession {}
+// The workspace is being woken from sleep.
+message DaemonStartupStepWaking {}
+// The conversation is being resumed.
+message DaemonStartupStepResuming {}
+// A vendor start attempt failed and is retried.
+message DaemonStartupStepVendorRetrying {
+  // The failed attempt's number, counting from 1.
+  uint32 attempt = 1;
+}
+// The vendor refused to start.
+message DaemonStartupStepVendorRejected {
+  // Why, in the shim's words. Printed verbatim.
+  string cause = 1;
+}
+// The vendor failed for the whole retry window.
+message DaemonStartupStepVendorFailed {}
+// The cold gate awaits the user's answer.
+message DaemonStartupStepColdGate {}
+// The network is unreachable.
+message DaemonStartupStepOffline {}
+// Ready, but waiting for an earlier workspace's go-ahead.
+message DaemonStartupStepWaitingFor {
+  // The earlier workspace being waited on.
+  workspace.v1.WorkspaceRef ahead = 1;
+}
+// The service-level bring-up failed.
+message DaemonStartupStepFailed {
+  // Why, in the daemon's words. Printed verbatim.
+  string reason = 1;
+}
+
+// The go-ahead to open one workspace's tab.
+message DaemonStartupWorkspaceOpen {
+  // The workspace.
+  workspace.v1.WorkspaceRef workspace = 1;
+}
+
+// Every workspace has had its go-ahead.
+message DaemonStartupFinished {
+  // How many workspaces opened with agent-repl serving them.
+  uint32 ready = 1;
+  // How many workspaces there were.
+  uint32 total = 2;
+  // The workspaces that opened with a service-level failure, in registry
+  // order ("4 of 5 workspaces ready; ship-gns failed to start.").
+  repeated DaemonStartupFailedWorkspace failed = 3;
+}
+
+// A workspace that opened with a service-level failure.
+message DaemonStartupFailedWorkspace {
+  // The workspace.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // Its display name, printed verbatim.
+  string name = 2;
 }
 
 // Whether a news digest stands. THE ARM IS THE STANDING; exactly one is set.

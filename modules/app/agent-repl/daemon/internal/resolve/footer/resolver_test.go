@@ -396,8 +396,8 @@ func TestADaemonScopedFaultRecordsTheArmItMoves(t *testing.T) {
 	h.r.OpenFault("", faultOf(t, "fault-1", health.KindPromptsDirMissing, true))
 
 	// Assert
-	if got := armChanges(h.log.Records()); !slices.Equal(got, []string{"idle", "blocked"}) {
-		t.Fatalf("recorded arms = %v, want idle, blocked", got)
+	if got := armChanges(h.log.Records()); !slices.Equal(got, []string{"idle", "agent_repl_fault"}) {
+		t.Fatalf("recorded arms = %v, want idle, agent_repl_fault", got)
 	}
 }
 
@@ -1123,7 +1123,7 @@ func TestConcurrentChangesLeaveTheNewestViewPublished(t *testing.T) {
 	wg.Wait()
 
 	// Assert
-	if got := h.view(t).GetStrip().GetStatus().GetDisconnected(); got != nil {
+	if got := h.view(t).GetStrip().GetStatus().GetAgentReplFault(); got != nil {
 		t.Fatalf("published status = disconnected %+v, want none: a stale view (a fault still standing) was published after a newer one", got)
 	}
 }

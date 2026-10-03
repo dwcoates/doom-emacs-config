@@ -8,6 +8,7 @@ import (
 
 	shimv1 "agentrepl/proto/shim/v1"
 
+	"claude-repld/internal/bringup"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/shimclient"
@@ -171,3 +172,9 @@ func (f *Fleet) awaitSocketGone(ctx context.Context, udsPath string) (shimsocket
 		}
 	}
 }
+
+// ErrHandedOver is a start that finished after a handover took its workspace
+// from this daemon (Fleet.HandOver): its shim was left running for the
+// successor, and this daemon serves nothing. It is bringup.ErrNotServed, so
+// every bring-up counts it as stood down rather than failed.
+var ErrHandedOver = fmt.Errorf("workspace: the workspace was handed to a successor while its start ran: %w", bringup.ErrNotServed)
