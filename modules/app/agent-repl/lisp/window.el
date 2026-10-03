@@ -49,6 +49,7 @@
 (declare-function agent-repl--ws-log-name "workspace")
 (declare-function agent-repl--info "core")
 (declare-function agent-repl-host-state "host")
+(declare-function agent-repl--frontend-webview-read-script "frontend" (buf script callback))
 
 ;; Special variables owned by other sources in this module, declared here
 ;; so the byte-compiler binds and reads them dynamically rather than
@@ -641,6 +642,40 @@ the two move together.  An unnamed gate (set, no arm this build knows)
 hides the input too."
   (and ws (plist-get (agent-repl-host-state ws) :gate) t))
 
+(defun agent-repl-window--gate-dock-pixels (ws)
+  "The pixel height of the space WS's input window takes, for the docked gate.
+The live input window's own total height when it is on screen; otherwise
+the height a mount would give it, its line count on the frame
+\(`agent-repl-window--input-height') at the frame's line height."
+  (let ((win (agent-repl-window--panel-window :input ws)))
+    (if (window-live-p win)
+        (window-pixel-height win)
+      (* (agent-repl-window--input-height nil ws) (frame-char-height)))))
+
+(defun agent-repl-window--gate-dock-script (pixels)
+  "The page script that sizes the docked gate to PIXELS.
+The reply is always a string: a null reply is dropped without a callback."
+  (format "(function(){document.documentElement.style.setProperty('--gate-dock-height','%dpx');return 'ok';})()"
+          pixels))
+
+(defun agent-repl-window--gate-dock-told (_reply)
+  "The page took the docked gate's height; nothing is left to do."
+  nil)
+
+(defun agent-repl-window-tell-gate-dock-height (ws)
+  "Tell WS's page the pixel height its docked gate takes: the input's space.
+Sent before the input window hides, so the banner fills exactly the slot
+the input had."
+  (let ((buf (agent-repl--ws-get ws :frontend-buffer))
+        (pixels (agent-repl-window--gate-dock-pixels ws)))
+    (if (and (buffer-live-p buf)
+             (agent-repl--frontend-webview-read-script
+              buf (agent-repl-window--gate-dock-script pixels)
+              #'agent-repl-window--gate-dock-told))
+        (agent-repl--info ws "elisp.gate.dock-height ws=%s pixels=%d" ws pixels)
+      (agent-repl--info ws "elisp.gate.dock-height-skipped ws=%s reason=no-webview" ws))
+    pixels))
+
 (defvar agent-repl-window--gates-applied (make-hash-table :test 'equal)
   "Workspace name -> the gate whose layout was last applied, absent for none.
 Only the EDGE is read from it: `agent-repl-input-hidden-p' answers from the
@@ -655,6 +690,8 @@ other workspace takes the right layout when it is next shown."
   (let ((gate (plist-get host :gate))
         (applied (gethash ws agent-repl-window--gates-applied)))
     (unless (equal gate applied)
+      ;; THE PAGE LEARNS THE INPUT'S HEIGHT BEFORE THE INPUT HIDES.
+      (when gate (agent-repl-window-tell-gate-dock-height ws))
       (if gate
           (puthash ws gate agent-repl-window--gates-applied)
         (remhash ws agent-repl-window--gates-applied))
