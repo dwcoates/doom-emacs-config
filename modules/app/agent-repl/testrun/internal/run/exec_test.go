@@ -56,6 +56,27 @@ func runHelper(mode string) int {
 		}
 		defer held.Close()
 		blockForever()
+	case "tmpdir":
+		// Say where TMPDIR points, and leave a file there as a leaky test would.
+		dir := os.Getenv("TMPDIR")
+		if err := os.WriteFile(filepath.Join(dir, "left-behind"), []byte("x"), 0o600); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 2
+		}
+		fmt.Fprintf(os.Stdout, "TMPDIR=%s\n", dir)
+		return 0
+	case "unremovable":
+		// Leave a directory nobody can list, which RemoveAll cannot descend.
+		dir := filepath.Join(os.Getenv("TMPDIR"), "locked")
+		if err := os.MkdirAll(filepath.Join(dir, "inner"), 0o700); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 2
+		}
+		if err := os.Chmod(dir, 0); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 2
+		}
+		return 0
 	case "ignore-term":
 		signal.Ignore(syscall.SIGTERM)
 		announce()
@@ -167,7 +188,7 @@ func TestOSExecReportsTheExitStatusAndBothStreams(t *testing.T) {
 			out := &bytes.Buffer{}
 
 			// Act
-			p, err := OSExec{Log: log, Grace: time.Second}.Start(helperSpec([]string{helperEnv + "=exit:" + strconv.Itoa(tt.code)}), out)
+			p, err := OSExec{Log: log, Grace: time.Second, TmpParent: t.TempDir()}.Start(helperSpec([]string{helperEnv + "=exit:" + strconv.Itoa(tt.code)}), out)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -191,7 +212,7 @@ func TestOSExecKillStopsTheUnitsWholeProcessGroup(t *testing.T) {
 	// Arrange: a unit that has started a grandchild holding the held FIFO.
 	f := newFifos(t)
 	log, errs := newExecLog()
-	p, err := OSExec{Log: log, Grace: KillGrace}.Start(helperSpec(f.env("group")), &bytes.Buffer{})
+	p, err := OSExec{Log: log, Grace: KillGrace, TmpParent: t.TempDir()}.Start(helperSpec(f.env("group")), &bytes.Buffer{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,7 +251,7 @@ func TestOSExecKillEscalatesToSIGKILLAfterTheGrace(t *testing.T) {
 	// Arrange: a unit that ignores SIGTERM.
 	f := newFifos(t)
 	log, errs := newExecLog()
-	p, err := OSExec{Log: log, Grace: 10 * time.Millisecond}.Start(helperSpec(f.env("ignore-term")), &bytes.Buffer{})
+	p, err := OSExec{Log: log, Grace: 10 * time.Millisecond, TmpParent: t.TempDir()}.Start(helperSpec(f.env("ignore-term")), &bytes.Buffer{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -252,7 +273,7 @@ func TestOSExecKillEscalatesToSIGKILLAfterTheGrace(t *testing.T) {
 func TestOSExecKillOfAnExitedUnitLogsNothing(t *testing.T) {
 	// Arrange
 	log, errs := newExecLog()
-	p, err := OSExec{Log: log, Grace: time.Second}.Start(helperSpec([]string{helperEnv + "=exit:0"}), &bytes.Buffer{})
+	p, err := OSExec{Log: log, Grace: time.Second, TmpParent: t.TempDir()}.Start(helperSpec([]string{helperEnv + "=exit:0"}), &bytes.Buffer{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -271,16 +292,19 @@ func TestOSExecKillOfAnExitedUnitLogsNothing(t *testing.T) {
 
 func TestOSExecStartRefusals(t *testing.T) {
 	log, _ := newExecLog()
+	parent := t.TempDir()
 	tests := []struct {
 		name    string
 		exec    OSExec
 		argv    []string
 		wantErr string
 	}{
-		{name: "no log", exec: OSExec{Grace: time.Second}, argv: []string{os.Args[0]}, wantErr: "needs a Log and a positive Grace"},
-		{name: "no grace", exec: OSExec{Log: log}, argv: []string{os.Args[0]}, wantErr: "needs a Log and a positive Grace"},
-		{name: "no command", exec: OSExec{Log: log, Grace: time.Second}, wantErr: "unit u#00 has no command"},
-		{name: "a missing program", exec: OSExec{Log: log, Grace: time.Second}, argv: []string{filepath.Join(t.TempDir(), "absent")}, wantErr: "run: start u#00"},
+		{name: "no log", exec: OSExec{Grace: time.Second, TmpParent: parent}, argv: []string{os.Args[0]}, wantErr: "needs a Log, a positive Grace and a TmpParent"},
+		{name: "no grace", exec: OSExec{Log: log, TmpParent: parent}, argv: []string{os.Args[0]}, wantErr: "needs a Log, a positive Grace and a TmpParent"},
+		{name: "no tmp parent", exec: OSExec{Log: log, Grace: time.Second}, argv: []string{os.Args[0]}, wantErr: "needs a Log, a positive Grace and a TmpParent"},
+		{name: "a missing tmp parent", exec: OSExec{Log: log, Grace: time.Second, TmpParent: filepath.Join(parent, "absent")}, argv: []string{os.Args[0]}, wantErr: "make the temp root of u#00"},
+		{name: "no command", exec: OSExec{Log: log, Grace: time.Second, TmpParent: parent}, wantErr: "unit u#00 has no command"},
+		{name: "a missing program", exec: OSExec{Log: log, Grace: time.Second, TmpParent: parent}, argv: []string{filepath.Join(t.TempDir(), "absent")}, wantErr: "run: start u#00"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -296,5 +320,120 @@ func TestOSExecStartRefusals(t *testing.T) {
 				t.Fatalf("err = %v, want it to mention %q", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+// tmpdirOf reads the TMPDIR the "tmpdir" helper reported.
+func tmpdirOf(t *testing.T, out string) string {
+	t.Helper()
+	for _, line := range strings.Split(out, "\n") {
+		if dir, ok := strings.CutPrefix(line, "TMPDIR="); ok {
+			return dir
+		}
+	}
+	t.Fatalf("the helper reported no TMPDIR: %q", out)
+	return ""
+}
+
+func TestOSExecHandsEachUnitAFreshTempRootUnderTheParent(t *testing.T) {
+	// Arrange
+	log, _ := newExecLog()
+	parent := t.TempDir()
+	out := &bytes.Buffer{}
+
+	// Act
+	p, err := OSExec{Log: log, Grace: time.Second, TmpParent: parent}.Start(helperSpec([]string{helperEnv + "=tmpdir"}), out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := waitBounded(t, p); err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert
+	if got := filepath.Dir(tmpdirOf(t, out.String())); got != parent {
+		t.Fatalf("the unit's TMPDIR is under %s, want %s", got, parent)
+	}
+}
+
+func TestOSExecRemovesTheTempRootAndWhatTheUnitLeftInIt(t *testing.T) {
+	// Arrange
+	log, _ := newExecLog()
+	parent := t.TempDir()
+	p, err := OSExec{Log: log, Grace: time.Second, TmpParent: parent}.Start(helperSpec([]string{helperEnv + "=tmpdir"}), &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	exit, err := waitBounded(t, p)
+
+	// Assert
+	entries, readErr := os.ReadDir(parent)
+	if err != nil || exit != 0 || readErr != nil || len(entries) != 0 {
+		t.Fatalf("Wait = %d, %v; parent holds %v (%v), want it empty", exit, err, entries, readErr)
+	}
+}
+
+func TestOSExecFailsAUnitWhoseTempRootCannotBeRemoved(t *testing.T) {
+	// Arrange
+	log, _ := newExecLog()
+	parent := t.TempDir()
+	t.Cleanup(func() {
+		// Give the permission back so the test's own temp dir can go.
+		roots, _ := filepath.Glob(filepath.Join(parent, "tu-*", "locked"))
+		for _, r := range roots {
+			_ = os.Chmod(r, 0o700)
+		}
+	})
+	p, err := OSExec{Log: log, Grace: time.Second, TmpParent: parent}.Start(helperSpec([]string{helperEnv + "=unremovable"}), &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	exit, err := waitBounded(t, p)
+
+	// Assert
+	if err == nil || exit != -1 || !strings.Contains(err.Error(), "remove the temp root") {
+		t.Fatalf("Wait = %d, %v; want -1 and a temp-root removal error", exit, err)
+	}
+}
+
+func TestOSExecLetsAUnitNameItsOwnTMPDIR(t *testing.T) {
+	// Arrange
+	log, _ := newExecLog()
+	own := t.TempDir()
+	out := &bytes.Buffer{}
+
+	// Act
+	p, err := OSExec{Log: log, Grace: time.Second, TmpParent: t.TempDir()}.Start(helperSpec([]string{helperEnv + "=tmpdir", "TMPDIR=" + own}), out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := waitBounded(t, p); err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert
+	if got := tmpdirOf(t, out.String()); got != own {
+		t.Fatalf("TMPDIR = %s, want the unit's own %s", got, own)
+	}
+}
+
+func TestOSExecLeavesNoTempRootForAUnitThatCouldNotStart(t *testing.T) {
+	// Arrange
+	log, _ := newExecLog()
+	parent := t.TempDir()
+	s := helperSpec(nil)
+	s.Argv = []string{filepath.Join(t.TempDir(), "absent")}
+
+	// Act
+	_, err := OSExec{Log: log, Grace: time.Second, TmpParent: parent}.Start(s, &bytes.Buffer{})
+
+	// Assert
+	entries, readErr := os.ReadDir(parent)
+	if err == nil || readErr != nil || len(entries) != 0 {
+		t.Fatalf("Start err = %v; parent holds %v (%v), want it empty", err, entries, readErr)
 	}
 }
