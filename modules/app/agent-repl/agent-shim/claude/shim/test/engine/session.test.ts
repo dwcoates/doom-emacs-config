@@ -1705,6 +1705,69 @@ describe("a turn the vendor started on its own", () => {
     expect(adoptions(h)).toHaveLength(adopts);
   });
 
+  /** The record place the adoption row was written with, if any. */
+  const adoptionPlace = (h: Harness) =>
+    h.persistence.buffered.find(
+      (entry) =>
+        entry.item.kind === "prompt" && entry.item.prompt.origin === conversationv1.PromptOrigin.VENDOR_STARTED,
+    )?.recordPlace;
+
+  /** A main-thread status record stamped at AT: no turn, but a vendor instant. */
+  const stampedStatus = (uuid: string, at: string): SdkMessage =>
+    ({ type: "system", subtype: "status", status: null, uuid, session_id: "s", timestamp: at }) as never;
+
+  it("places the adoption row after the last main-thread record, on its last ordinal", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await h.engine.onSdkMessage(stampedStatus("s-1", "2026-10-03T12:00:00.374Z"));
+
+    // Act
+    await h.engine.onSdkMessage(streamEvent("m-1"));
+
+    // Assert
+    expect(adoptionPlace(h)).toEqual({ atMs: Date.parse("2026-10-03T12:00:00.374Z"), ordinal: 0xffff_ffff });
+  });
+
+  it("does not lift the bound to the adopting message's own instant", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await h.engine.onSdkMessage(stampedStatus("s-1", "2026-10-03T12:00:00.374Z"));
+
+    // Act
+    await h.engine.onSdkMessage({ ...assistantMessage("m-1"), timestamp: "2026-10-03T12:00:00.380Z" } as never);
+
+    // Assert
+    expect(adoptionPlace(h)?.atMs).toBe(Date.parse("2026-10-03T12:00:00.374Z"));
+  });
+
+  it("ignores a subagent's record when bounding the main thread", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await h.engine.onSdkMessage(stampedStatus("s-1", "2026-10-03T12:00:00.374Z"));
+    await h.engine.onSdkMessage({ ...subagentReply("sub-1"), timestamp: "2026-10-03T12:00:09.000Z" } as never);
+
+    // Act
+    await h.engine.onSdkMessage(streamEvent("m-1"));
+
+    // Assert
+    expect(adoptionPlace(h)?.atMs).toBe(Date.parse("2026-10-03T12:00:00.374Z"));
+  });
+
+  it("leaves the adoption row to the observation clock before any main-thread record", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+
+    // Act
+    await h.engine.onSdkMessage(streamEvent("m-1"));
+
+    // Assert
+    expect(adoptionPlace(h)).toBeUndefined();
+  });
+
   it("writes the adoption row ahead of the rows the turn's first message produced", async () => {
     // Arrange
     const h = harness();
@@ -7190,6 +7253,55 @@ describe("the vendor's own compaction, announced through system:status", () => {
     );
 
     expect(arms).toEqual(["compacting"]);
+  });
+
+  it("names the pushed compaction by its first status, through the vendor's re-sends", async () => {
+    const h = harness();
+    await started(h);
+
+    const ids = await pushedUpdates(
+      h,
+      (update) => (update.case === "compacting" ? (update.value.compaction?.value ?? "none") : undefined),
+      async () => {
+        for (const uuid of ["00000000-0000-4000-8000-0000000000c1", "00000000-0000-4000-8000-0000000000c2"]) {
+          await h.engine.onSdkMessage({
+            type: "system",
+            subtype: "status",
+            status: "compacting",
+            uuid,
+            session_id: "s",
+          } as never);
+        }
+      },
+    );
+
+    expect(ids).toEqual(["00000000-0000-4000-8000-0000000000c1", "00000000-0000-4000-8000-0000000000c1"]);
+  });
+
+  it("puts the failed compaction's identity on its cut", async () => {
+    const h = harness();
+    await started(h);
+    await h.engine.onSdkMessage({
+      type: "system",
+      subtype: "status",
+      status: "compacting",
+      uuid: "00000000-0000-4000-8000-0000000000d1",
+      session_id: "s",
+    } as never);
+
+    await h.engine.onSdkMessage({
+      type: "system",
+      subtype: "status",
+      compact_result: "failed",
+      compact_error: "the model refused to summarize",
+      uuid: "00000000-0000-4000-8000-0000000000d2",
+      session_id: "s",
+    } as never);
+
+    const cut = contextCuts(h).at(-1);
+    expect(cut?.cut.case === "compactionFailed" ? cut.cut.value.compaction?.value : undefined).toBe(
+      "00000000-0000-4000-8000-0000000000d1",
+    );
   });
 
   it("writes a compaction_failed page line carrying the vendor's own wording", async () => {

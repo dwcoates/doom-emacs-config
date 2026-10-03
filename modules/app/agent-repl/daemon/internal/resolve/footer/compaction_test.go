@@ -686,3 +686,104 @@ func TestAConclusionUnderAColdGateAnswerStillRaisesItsTransient(t *testing.T) {
 		t.Fatalf("transient = %+v, want the conclusion beneath once the answer cleared", transientOf(t, h))
 	}
 }
+
+// namedCompacting is the vendor's compacting start signal for compaction ID.
+func namedCompacting(id string) *conversationv1.SessionUpdate {
+	return &conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_Compacting{
+		Compacting: &conversationv1.SessionCompacting{Compaction: &conversationv1.CompactionId{Value: id}},
+	}}
+}
+
+// namedCompactedCut is the cut that ends compaction ID.
+func namedCompactedCut(id string) *conversationv1.ContextCut {
+	return &conversationv1.ContextCut{Cut: &conversationv1.ContextCut_Compacted{
+		Compacted: &conversationv1.ContextCompacted{Compaction: &conversationv1.CompactionId{Value: id}},
+	}}
+}
+
+func TestCompactingNamedByItsOwnConcludedCut(t *testing.T) {
+	tests := []struct {
+		name      string
+		cut       *conversationv1.ContextCut
+		start     *conversationv1.SessionUpdate
+		wantLine  string
+		wantStale int
+	}{
+		{
+			name:      "a start signal outrun by its own cut stands nothing",
+			cut:       namedCompactedCut("c-1"),
+			start:     namedCompacting("c-1"),
+			wantLine:  "",
+			wantStale: 1,
+		},
+		{
+			name: "a failed cut concludes its compaction too",
+			cut: &conversationv1.ContextCut{Cut: &conversationv1.ContextCut_CompactionFailed{
+				CompactionFailed: &conversationv1.ContextCompactionFailed{Error: "x", Compaction: &conversationv1.CompactionId{Value: "c-1"}},
+			}},
+			start:     namedCompacting("c-1"),
+			wantLine:  "",
+			wantStale: 1,
+		},
+		{
+			name:      "a new compaction after a cut stands its line",
+			cut:       namedCompactedCut("c-1"),
+			start:     namedCompacting("c-2"),
+			wantLine:  "compacting the context…",
+			wantStale: 0,
+		},
+		{
+			name:      "a cut naming no compaction concludes nothing",
+			cut:       compactedCut(),
+			start:     namedCompacting("c-1"),
+			wantLine:  "compacting the context…",
+			wantStale: 0,
+		},
+		{
+			name:      "a start signal naming no compaction (an older shim) stands its line",
+			cut:       namedCompactedCut("c-1"),
+			start:     vendorCompacting(),
+			wantLine:  "compacting the context…",
+			wantStale: 0,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+			h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActPrompt})
+			h.r.OnContextCut(testWS, mainAgent, tt.cut)
+			h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActPrompt})
+
+			// Act
+			h.r.OnSessionUpdate(testWS, tt.start)
+
+			// Assert
+			if got := compactionText(t, h); got != tt.wantLine {
+				t.Fatalf("activity = %q, want %q", got, tt.wantLine)
+			}
+			if got := len(recordsOf(h.log.Records(), "daemon.footer.compacting_after_its_cut")); got != tt.wantStale {
+				t.Fatalf("stale records = %d, want %d", got, tt.wantStale)
+			}
+		})
+	}
+}
+
+func TestAStaleStartSignalLeavesNoViolationAtTheTerminal(t *testing.T) {
+	// Arrange: the cut lands before its own start signal, on another stream.
+	h := newHarness(t)
+	connected(h)
+	h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActPrompt})
+	h.r.OnContextCut(testWS, mainAgent, namedCompactedCut("c-1"))
+	h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActPrompt})
+	h.r.OnSessionUpdate(testWS, namedCompacting("c-1"))
+
+	// Act
+	endTurn(h, "turn-1")
+
+	// Assert
+	if errs := recordsOf(h.log.Records(), outlivedTurn); len(errs) != 0 {
+		t.Fatalf("records = %+v, want no violation: the compaction had ended", errs)
+	}
+}
