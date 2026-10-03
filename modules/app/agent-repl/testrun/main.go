@@ -64,16 +64,14 @@ func runCmd(log *run.Log, argv []string) int {
 		return 1
 	}
 	// THE RUN LIVES IN ITS OWN TEMP ROOT, and so does each unit under it
-	// (run.OSExec). The user temp directory is read first, because it is what
-	// the run must leave untouched (cli.Deps.UserTmp), and TMPDIR then moves to
-	// the root, so even planning's `go list`/`vitest list` write nothing there.
-	userTmp := os.TempDir()
+	// (run.OSExec). TMPDIR moves to the root, so even planning's
+	// `go list`/`vitest list` write nothing in the user's temp directory.
 	root, err := os.MkdirTemp(run.DefaultTmpParent, "tr-")
 	if err != nil {
 		log.Errorf("create the run's temp root: %v", err)
 		return 1
 	}
-	code := runIn(log, args, self, histPath, userTmp, root)
+	code := runIn(log, args, self, histPath, root)
 	if err := os.RemoveAll(root); err != nil {
 		log.Errorf("remove the run's temp root %s: %v", root, err)
 		return 1
@@ -81,7 +79,7 @@ func runCmd(log *run.Log, argv []string) int {
 	return code
 }
 
-func runIn(log *run.Log, args cli.Args, self, histPath, userTmp, root string) int {
+func runIn(log *run.Log, args cli.Args, self, histPath, root string) int {
 	if err := os.Setenv("TMPDIR", root); err != nil {
 		log.Errorf("point TMPDIR at the run's temp root %s: %v", root, err)
 		return 1
@@ -105,7 +103,6 @@ func runIn(log *run.Log, args cli.Args, self, histPath, userTmp, root string) in
 		Self:        self,
 		Work:        work,
 		Pid:         os.Getpid(),
-		UserTmp:     userTmp,
 	}, args)
 }
 
