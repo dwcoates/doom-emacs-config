@@ -413,3 +413,28 @@ func TestLogTailPassesOverDebugRecordsAndCountsThem(t *testing.T) {
 		t.Fatalf("logTail = %q", got)
 	}
 }
+
+func TestAnchorAccountSaysWhetherTheAnchorWasWritten(t *testing.T) {
+	isAnchor := func(r LogRecord) bool { return r.Message == "anchor" }
+	isAwaited := func(r LogRecord) bool { return r.Message == "awaited" }
+	tests := []struct {
+		name    string
+		records []LogRecord
+		want    string
+	}{
+		{"no anchor", []LogRecord{{Message: "awaited"}}, "the anchor was never written in 1 records; 1 awaited-shape records were (first at indexes [0])"},
+		{"an anchor after the awaited records", []LogRecord{{Message: "awaited"}, {Message: "anchor", Operation: "op", Timestamp: "t"}},
+			`the anchor is record 1 of 2 (t op "anchor"); 1 awaited-shape records, first at indexes [0]`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := anchorAccount(tt.records, isAnchor, isAwaited)
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("anchorAccount = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
