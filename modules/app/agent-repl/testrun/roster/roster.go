@@ -65,6 +65,7 @@ var Suites = []Suite{
 	{Name: "logs-harness", Kind: Script, Path: "bin/test-logs.sh", Harness: true},
 	{Name: "go-deps-harness", Kind: Script, Path: "bin/test-check-go-deps.sh", Harness: true},
 	{Name: "doctor-harness", Kind: Script, Path: "scripts/test-agent-shim-doctor.sh"},
+	{Name: "bounce-harness", Kind: Script, Path: "scripts/test-bounce-agent-repl-forcefully.sh"},
 	{Name: "precommit-harness", Kind: Script, Path: "/.githooks/test-pre-commit.sh"},
 	{Name: "safe-test-run-harness", Kind: Script, Path: "/.claude/test-safe-test-run.sh"},
 	{Name: "merge-queue-hook-harness", Kind: Script, Path: "/.githooks/test-reference-transaction.sh"},
