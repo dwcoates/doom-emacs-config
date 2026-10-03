@@ -840,15 +840,15 @@ they drive the same verbs, and assert Emacs's own state rather than frames.
 
 ### G. Interrupt and restart (3)
 
-35. **ForcedRestartInterruptsTheTurn** -- `agent-repl-restart-workspace` with
-    a prefix argument, mid-turn -- the roster arm settles `:interrupted` and
+35. **ForcedRestartInterruptsTheTurn** -- `agent-repl-restart-workspace`
+    (always immediate and forced since 2026-10-02), mid-turn -- the roster arm settles `:interrupted` and
     the agent is NOT resumed. This is the interrupt path (see above).
-36. **GracefulRestartHoldsPromptsMeanwhile** --
-    `agent-repl-queue-deferred-prompt` then `agent-repl-restart-workspace`
-    without force, mid-turn -- the deferral is submitted at once with
+36. **RestartHoldsPromptsMeanwhile** --
+    `agent-repl-queue-deferred-prompt` then `agent-repl-restart-workspace`,
+    mid-turn -- the deferral is submitted at once with
     `:delivery :deferred`, the composer is cleared, and the daemon answers
-    `:success` (it holds the prompt; it is never refused); once the gate
-    lets the turn finish, the roster settles and
+    `:success` (it holds the prompt; it is never refused); once the restart
+    has hard-stopped the turn, the roster settles and
     `agent-repl-held-ingress-waiting` is 0.
 37. **RestartDoesNotWedgeEmacs** -- forced restart with a live panel and
     webview binding -- heartbeat assertion, same family as 13.
