@@ -2214,6 +2214,32 @@ func TestARetriedVendorStartDeliversThePromptHeldWhileItRetried(t *testing.T) {
 	}
 }
 
+// A FAILED START KEEPS ITS SHIM HELD, AND THE NEXT START REUSES IT: the
+// vendor rejects the first StartSession outright, and the next open starts
+// the session on the SAME shim -- never a second spawn, never an adoption of
+// the shim this daemon already holds.
+func TestTheStartAfterARejectedVendorStartReusesItsShim(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newRegistered(t, harness.Opts{})
+	f.d.ExpectWarnings("daemon.workspace.bring_up", "daemon.workspace.open")
+	f.d.WriteShimProfile(f.repo.Dir, harness.ShimProfile{VendorStartRejectTimes: 1, VendorStartFailDetail: "invalid api key"})
+	if resp, err := f.openRaw(); err != nil || resp.GetError().GetVendorStartFailed() == nil {
+		t.Fatalf("OpenWorkspace = (%v, %v), want the vendor's rejection", resp, err)
+	}
+
+	// Act
+	resp, err := f.openRaw()
+
+	// Assert
+	if err != nil || resp.GetSuccess() == nil {
+		t.Fatalf("the second OpenWorkspace = (%v, %v), want the session up", resp, err)
+	}
+	if got := f.d.Shim(f.ws).Count(harness.RPCStartSession); got != 2 {
+		t.Fatalf("StartSession calls on the one shim = %d, want the rejected one and the one that started", got)
+	}
+}
+
 // A RESTART BRINGS UP A WORKSPACE WHOSE VENDOR NEVER STARTED (the 2026-10-02
 // incident): it is accepted at once -- never registered behind a freeness a
 // session that never started cannot reach -- and the relaunched shim resumes

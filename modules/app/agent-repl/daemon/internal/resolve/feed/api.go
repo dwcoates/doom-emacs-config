@@ -109,11 +109,6 @@ type Resolver interface {
 	// is doing): every feed a reader opened while none was up has its newest
 	// page loaded and pushed to that reader (book.go).
 	SourceUp(ws ids.WorkspaceID)
-	// KeepNewestPage loads the root feed's newest store page now, while a
-	// source is still up and only when the feed does not already hold it, so
-	// the conversation stays drawn once the source goes (a failed vendor
-	// start's shim is about to be stopped). Its rows are pushed (book.go).
-	KeepNewestPage(ctx context.Context, ws ids.WorkspaceID) error
 	// NoteFreshBook says the workspace's session is coming up FRESH: its main
 	// agent's book is new and holds nothing, so the root feed's newest page is
 	// known empty and at its start, and no reader's open asks the store for a
