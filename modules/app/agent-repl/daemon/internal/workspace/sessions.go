@@ -198,6 +198,17 @@ type FleetDeps struct {
 type live struct {
 	client  shimclient.Client
 	watcher sessionwatcher.Watcher
+	// freshStart reports a shim brought up for a FRESH conversation with no
+	// session started on it yet. The book it persisted names the conversation
+	// the fresh one replaces, so it is no history source until its session
+	// starts (history.go): a reader is never served the conversation the user
+	// just left.
+	freshStart bool
+	// configDir is the account root the shim was spawned under, empty for a
+	// shim this daemon did not spawn. A start that reuses a held shim with no
+	// session (a failed start's) reuses it only under the root the start
+	// routes to: a root moved since is a different account.
+	configDir string
 	// hostSessionID is the session's host-facing identity, remembered here so
 	// the host view's live half is answered from what this daemon IS
 	// operating rather than from a durable row that may outlive the session.
@@ -251,19 +262,13 @@ type Fleet struct {
 	// starting waits for a predecessor's still-starting shim to announce
 	// itself, so a bring-up never spawns a second shim onto one session
 	// socket. See startingshim.
-	starting startingshim.Waiter
-	// socketGoneBound bounds the wait for a stopped shim's socket to
-	// disappear; see stopFailedStart. It is shimclient.GracefulKillBound --
-	// the whole of a graceful stop's worst case -- and it is a field only so a
-	// scenario ABOUT the give-up need not wait one out.
-	socketGoneBound time.Duration
-
+	starting  startingshim.Waiter
 	mu        sync.RWMutex
 	sessions  map[ids.WorkspaceID]*live
 	coldGates map[ids.WorkspaceID]coldGate
 	// handedOver names the workspaces a handover has taken from this daemon
-	// (HandOver), until a reclaim gives one back (Reclaimed). A start still in
-	// flight when its workspace was handed over must not serve it: see hold.
+	// (HandOver), until a reclaim gives one back (Reclaimed). A start that
+	// spawns after its workspace was handed over must not serve it: see hold.
 	handedOver map[ids.WorkspaceID]bool
 	// lastCold is the shim's own cold facts for a parked workspace, kept whole
 	// so the relaunch engine's cold arm carries what the shim stated rather
@@ -295,11 +300,6 @@ type Fleet struct {
 	// attempt count, its standing faults and the bring-up asking. Guarded by
 	// mu. See vendorstart.go.
 	vendorRuns map[ids.WorkspaceID]*vendorRun
-	// startingClients is the shim client of each workspace whose vendor start
-	// is running, before the fleet holds it (history.go): the feed reads
-	// history through it while StartSession is being answered or retried.
-	// Guarded by mu.
-	startingClients map[ids.WorkspaceID]shimclient.Client
 
 	// detached counts the session starts running OFF a caller's goroutine, and
 	// detachedCtx is the context every one of them runs under. See
@@ -492,17 +492,15 @@ func NewFleet(deps FleetDeps) (*Fleet, error) {
 			Clock: deps.Clock,
 		},
 
-		socketGoneBound: shimclient.GracefulKillBound,
-		sessions:        map[ids.WorkspaceID]*live{},
-		coldGates:       map[ids.WorkspaceID]coldGate{},
-		handedOver:      map[ids.WorkspaceID]bool{},
-		lastCold:        map[ids.WorkspaceID]*conversationv1.SessionCold{},
-		reapedAt:        map[ids.WorkspaceID]time.Time{},
-		generation:      map[ids.WorkspaceID]int{},
-		startGates:      map[ids.WorkspaceID]*sync.Mutex{},
-		watched:         map[ids.WorkspaceID]sessionwatcher.Watcher{},
-		selected:        map[ids.WorkspaceID]bool{},
-		startingClients: map[ids.WorkspaceID]shimclient.Client{},
+		sessions:   map[ids.WorkspaceID]*live{},
+		coldGates:  map[ids.WorkspaceID]coldGate{},
+		handedOver: map[ids.WorkspaceID]bool{},
+		lastCold:   map[ids.WorkspaceID]*conversationv1.SessionCold{},
+		reapedAt:   map[ids.WorkspaceID]time.Time{},
+		generation: map[ids.WorkspaceID]int{},
+		startGates: map[ids.WorkspaceID]*sync.Mutex{},
+		watched:    map[ids.WorkspaceID]sessionwatcher.Watcher{},
+		selected:   map[ids.WorkspaceID]bool{},
 	}, nil
 }
 
@@ -516,12 +514,50 @@ func (f *Fleet) publishHost(ws ids.WorkspaceID) {
 	f.deps.PublishHost(ws)
 }
 
-// Live reports whether the workspace currently has a live session.
+// Live reports whether the workspace has nothing for a start to do: a session
+// runs on its shim, or its shim is parked at a standing cold gate, which only
+// the gate's answer re-opens. A shim held with NO session and no gate (a
+// failed start's) is not live: the next start reuses it.
+//
+// A SHIM IS NOT A SESSION. The fleet records every shim from the moment it is
+// spawned or adopted (Held), and whether a session runs on it is a separate
+// fact (sessionStarted).
 func (f *Fleet) Live(ws ids.WorkspaceID) bool {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
-	_, ok := f.sessions[ws]
+	session, ok := f.sessions[ws]
+	if !ok {
+		return false
+	}
+	_, gated := f.coldGates[ws]
+	return session.sessionStarted || gated
+}
+
+// Held reports whether the fleet holds a shim for the workspace, a session on
+// it or not. A teardown stands every held shim down; a start reuses one with
+// no session.
+func (f *Fleet) Held(ws ids.WorkspaceID) bool {
+	_, ok := f.Client(ws)
 	return ok
+}
+
+// idleHeld answers the held shim a start may reuse: one this fleet holds with
+// no session on it and no cold gate parking it, whose process is still up.
+func (f *Fleet) idleHeld(ws ids.WorkspaceID) (*live, bool) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	session, ok := f.sessions[ws]
+	if !ok || session.sessionStarted {
+		return nil, false
+	}
+	if _, gated := f.coldGates[ws]; gated {
+		return nil, false
+	}
+	if _, reaped := session.client.Reaped(); reaped {
+		return nil, false
+	}
+	held := *session
+	return &held, true
 }
 
 // Running answers what is in flight, which is the freeness the close verb and
@@ -1034,7 +1070,7 @@ func (f *Fleet) start(ctx context.Context, ws ids.WorkspaceID, rebind bool) erro
 // the vendor run and a stand-down this daemon ordered have each said so (or
 // are no failure of agent-repl's); every other error is the bring-up failing.
 func (f *Fleet) noteStartEnded(ws ids.WorkspaceID, err error) {
-	if err == nil || errors.Is(err, ErrHandedOver) {
+	if err == nil || errors.Is(err, ErrShimTaken) {
 		return
 	}
 	var label *startLabel
@@ -1132,9 +1168,15 @@ func (f *Fleet) startUp(ctx context.Context, ws ids.WorkspaceID, rebind bool) er
 	// restamps and nothing carries a previous session's id forward.
 	log = stampSession(log, hostSessionID)
 
-	client, path, err := f.bringUpClient(ctx, log, ws, record.Dir, udsPath, configDir, hostSessionID, src)
+	// A HELD SHIM WITH NO SESSION IS REUSED, never spawned over and never
+	// adopted a second time: a failed start left it held exactly so a retry,
+	// a revival or the next prompt starts the session on it.
+	client, path, err := f.reuseOrBringUp(ctx, log, ws, record.Dir, udsPath, configDir, hostSessionID, src)
 	if err != nil {
 		return err
+	}
+	if path == pathHeld {
+		hostSessionID = f.heldHostSessionID(ws, hostSessionID)
 	}
 	adopted := path == pathAdopted
 	// THE HEALTHY ATTACH IS A RECOVERY EDGE. Bring-up gates on the shim's
@@ -1178,41 +1220,28 @@ func (f *Fleet) startUp(ctx context.Context, ws ids.WorkspaceID, rebind bool) er
 	}
 
 	// THE VENDOR-START RUN IS CANCELLABLE BY A RESTART until this start has
-	// finished with it: its failed start's cleanup below included, so the
-	// restart that cancels it finds the spawned shim already stopped.
+	// finished with it.
 	runCtx, finishRun := f.beginVendorStart(ctx, ws)
-	// THE SHIM READS THE WORKSPACE'S BOOK WHILE ITS START IS ANSWERED OR
-	// RETRIED: the vendor never gates showing the conversation (history.go).
-	// A FRESH start has no history to show: its conversation is new, and the
-	// book the shim persisted names the one it replaces.
-	endHistory := func() {}
-	if !src.Fresh {
-		endHistory = f.beginHistoryClient(ws, client)
-	}
-	defer endHistory()
 	if !src.Fresh {
 		f.deps.Steps(ws, startup.Step{Kind: startup.StepResuming})
 	}
 	started, err := f.startSession(runCtx, log, ws, client, src, session, configDir)
 	if err != nil {
 		defer finishRun()
-		// The conversation's newest page is secured BEFORE the shim goes, and
-		// the client stops being a history source before it is stopped.
-		if !src.Fresh {
-			f.keepNewestPage(ctx, log, ws)
+		// A FAILED START KEEPS ITS SHIM HELD, with no session on it, exactly
+		// as a cold gate keeps its own: the shim still serves the workspace's
+		// book (the feed reads history through it), and a retry, a revival or
+		// the next prompt starts the session on it (reuseOrBringUp), while a
+		// restart replaces it. Nothing is stopped and nothing is adopted
+		// twice: the held entry is what every later bring-up finds first. A
+		// shim taken from this start meanwhile (a handover's transfer, a
+		// kill) is not this start's to keep.
+		if !f.holds(ws, client) {
+			return fmt.Errorf("start session for %q: %w: %w", ws, ErrShimTaken, err)
 		}
-		endHistory()
-		// A START THAT FAILED LEAVES NO SHIM OF ITS OWN SERVING. The refusal
-		// returns before anything remembers this client, so nothing else in
-		// the daemon holds it -- while the process is still bound to the
-		// workspace socket, still holding ~95 MiB, and still there for the
-		// NEXT bring-up to find as an "inert survivor" and adopt, which is one
-		// process with two clients (2026-09-13T18:17:56 -> 18:18:41, shim pid
-		// 48170). A shim we ADOPTED is not ours to stop: it was serving before
-		// this start and its own daemon-or-none owns it.
-		if path == pathSpawned {
-			f.stopFailedStart(ctx, log, ws, client, udsPath, err)
-		}
+		log.Info(opBringUp, "the failed start's shim stays held with no session; the next start reuses it", dlog.Context{
+			"shim_pid": client.PID(), "cause": err.Error(),
+		})
 		return err
 	}
 	finishRun()
@@ -1237,7 +1266,7 @@ func (f *Fleet) startUp(ctx context.Context, ws ids.WorkspaceID, rebind bool) er
 		// the idle sweep skips the workspace instead of directing a shim that
 		// can only refuse `no_session`, and a teardown stops the process
 		// without asking it to end a session it never began.
-		if err := f.hold(ctx, log, ws, &live{client: client, hostSessionID: hostSessionID}); err != nil {
+		if err := f.restate(ws, &live{client: client, hostSessionID: hostSessionID, configDir: configDir}); err != nil {
 			return err
 		}
 		f.publishHost(ws)
@@ -1288,7 +1317,7 @@ func (f *Fleet) sessionUp(
 	// know the session would answer "no live facts" for a workspace whose
 	// session record already exists, and the host view would be withheld with
 	// an invariant violation for a session that is coming up perfectly well.
-	if err := f.hold(ctx, log, ws, &live{client: client, hostSessionID: hostSessionID, sessionStarted: true}); err != nil {
+	if err := f.restate(ws, &live{client: client, hostSessionID: hostSessionID, configDir: configDir, sessionStarted: true}); err != nil {
 		return err
 	}
 	watcher, err := f.startWatcher(ctx, log, ws, client, sessionwatcher.Session{Started: started})
@@ -1296,7 +1325,10 @@ func (f *Fleet) sessionUp(
 		log.Error(opBringUp, "could not start the session watcher", dlog.Context{"cause": err.Error()})
 		return fmt.Errorf("start session for %q: start the watcher: %w", ws, err)
 	}
-	if err := f.hold(ctx, log, ws, &live{client: client, watcher: watcher, hostSessionID: hostSessionID, sessionStarted: true}); err != nil {
+	if err := f.restate(ws, &live{client: client, watcher: watcher, hostSessionID: hostSessionID, configDir: configDir, sessionStarted: true}); err != nil {
+		// THE WATCHER OPENED FOR A SHIM THIS START NO LONGER HOLDS: it watches
+		// for nobody, so it is closed rather than left streaming.
+		f.closeDisplaced(ws, watcher, "the shim was taken from the start that opened this watcher")
 		return err
 	}
 
@@ -1495,7 +1527,72 @@ const (
 	// pathInert is a surviving shim that is LISTENING while holding no lock:
 	// it has no session yet, so it is attached to and then started.
 	pathInert
+	// pathHeld is a shim this fleet already holds with no session on it (a
+	// failed start's): it is started, never probed, spawned over or adopted.
+	pathHeld
 )
+
+// reuseOrBringUp answers the shim a start starts its session on: the one the
+// fleet holds with no session (pathHeld), else a shim bringUpClient spawns or
+// attaches to. A spawned or attached inert shim is HELD from this moment, with
+// no session, before StartSession is asked: every shim the fleet brings up is
+// recorded the moment it exists, so a handover sees it and a failed start
+// leaves it held rather than untracked. An ADOPTED shim's entry is the
+// caller's to write: it already runs its session.
+func (f *Fleet) reuseOrBringUp(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, dir, udsPath, configDir, hostSessionID string, src source) (shimclient.Client, bringUpPath, error) {
+	if held, ok := f.idleHeld(ws); ok {
+		if held.configDir == "" || held.configDir == configDir {
+			log.Info(opBringUp, "a shim is held with no session; starting the session on it", dlog.Context{
+				"shim_pid": held.client.PID(), "config_dir": configDir, "fresh": src.Fresh,
+			})
+			// WHETHER IT IS A HISTORY SOURCE follows THIS start's source: a
+			// resume's shim reads the book it resumes, a fresh one's does not.
+			held.freshStart, held.sessionAbsent = src.Fresh, true
+			if err := f.restate(ws, held); err != nil {
+				return nil, pathNone, err
+			}
+			if !src.Fresh {
+				f.deps.Feed.SourceUp(ws)
+			}
+			return held.client, pathHeld, nil
+		}
+		// THE ACCOUNT ROUTING MOVED since the held shim was spawned: it runs
+		// the other account, so it is replaced rather than reused.
+		log.Info(opBringUp, "the held shim with no session runs another account's root; replacing it", dlog.Context{
+			"shim_pid": held.client.PID(), "held_config_dir": held.configDir, "config_dir": configDir,
+		})
+		if err := f.Stop(ctx, ws, true); err != nil {
+			log.Error(opBringUp, "the held shim of another account's root could not be stopped", dlog.Context{"cause": err.Error()})
+			return nil, pathNone, fmt.Errorf("start session for %q: stop the held shim of another root: %w", ws, err)
+		}
+	}
+	client, path, err := f.bringUpClient(ctx, log, ws, dir, udsPath, configDir, hostSessionID, src)
+	if err != nil {
+		return nil, pathNone, err
+	}
+	if path == pathSpawned || path == pathInert {
+		heldConfigDir := ""
+		if path == pathSpawned {
+			heldConfigDir = configDir
+		}
+		if err := f.hold(ctx, log, ws, &live{client: client, hostSessionID: hostSessionID, configDir: heldConfigDir, sessionAbsent: true, freshStart: src.Fresh}); err != nil {
+			return nil, pathNone, err
+		}
+	}
+	return client, path, nil
+}
+
+// heldHostSessionID answers the identity of the held shim a start reuses: it
+// was stamped with it at its spawn, and the session it now starts is that
+// shim's. FALLBACK is the start's own, for an entry that names none.
+func (f *Fleet) heldHostSessionID(ws ids.WorkspaceID, fallback string) string {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	if session, ok := f.sessions[ws]; ok && session.hostSessionID != "" {
+		return session.hostSessionID
+	}
+	return fallback
+}
 
 // bringUpClient probes the workspace lock and either ADOPTS the surviving shim
 // that holds it or SPAWNS a new one. A probe that could not tell is never read
@@ -2487,20 +2584,19 @@ func (f *Fleet) hold(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, s
 	handedOver := f.handedOver[ws]
 	f.mu.RUnlock()
 	restated := held && previous != nil && previous.client == session.client
-	// A START THAT FINISHES AFTER ITS WORKSPACE WAS HANDED OVER SERVES NOTHING.
-	// The transfer found no session to detach while this start was in flight
-	// and released the serving row; remembering the client and claiming the
-	// row now would leave the successor waiting for a release that never
-	// comes, its adoption never made (e2e TestEmacsHandoverTransfersAtFreeness,
-	// 2026-10-03). The shim is the successor's: it is detached, never stopped,
-	// and keeps its lock, so the successor adopts it as it adopts any handed
-	// shim.
+	// A SHIM THAT ARRIVES AFTER ITS WORKSPACE WAS HANDED OVER SERVES NOTHING.
+	// The transfer found nothing to detach -- the start had not spawned yet --
+	// and released the serving row; holding the client and claiming the row
+	// now would leave the successor waiting for a release that never comes
+	// (e2e TestEmacsHandoverTransfersAtFreeness, 2026-10-03). The shim is the
+	// successor's: detached, never stopped, it keeps its lock and the
+	// successor adopts it as it adopts any handed shim.
 	if !restated && handedOver {
 		session.client.Detach()
-		log.Info(opBringUp, "a start finished after its workspace was handed to a successor; its shim is left running for the successor to adopt", dlog.Context{
+		log.Info(opBringUp, "a shim arrived after its workspace was handed to a successor; it is left running for the successor to adopt", dlog.Context{
 			"shim_pid": session.client.PID(),
 		})
-		return fmt.Errorf("start session for %q: %w", ws, ErrHandedOver)
+		return fmt.Errorf("start session for %q: %w", ws, ErrShimTaken)
 	}
 	f.remember(ws, session)
 	if restated {
@@ -2520,7 +2616,7 @@ func (f *Fleet) hold(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, s
 	// by its watch opening, as they always were: a fresh book is not written
 	// until its first turn, and reading it before then asks the store for a
 	// book that does not exist yet.
-	if !session.sessionStarted {
+	if !session.sessionStarted && !session.freshStart {
 		f.deps.Feed.SourceUp(ws)
 	}
 	return nil
@@ -2536,6 +2632,36 @@ func (f *Fleet) remember(ws ids.WorkspaceID, session *live) {
 	}
 	f.logTransition(ws, "session_live", stood, true,
 		dlog.Context{"shim_pid": session.client.PID(), "watcher_attached": session.watcher != nil})
+}
+
+// restate rewrites the entry of a client THIS START already holds: the cold
+// gate's park, the session coming up on it. It is never an arrival, so it
+// claims nothing; and a client the entry no longer holds was taken from the
+// start meanwhile (a handover's transfer detached it, a kill stopped it), so
+// the start serves nothing and says so with ErrShimTaken.
+func (f *Fleet) restate(ws ids.WorkspaceID, session *live) error {
+	f.mu.Lock()
+	previous, ok := f.sessions[ws]
+	if !ok || previous.client != session.client {
+		f.mu.Unlock()
+		return fmt.Errorf("start session for %q: %w", ws, ErrShimTaken)
+	}
+	f.sessions[ws] = session
+	f.mu.Unlock()
+	if previous.watcher != nil && previous.watcher != session.watcher {
+		f.closeDisplaced(ws, previous.watcher, "the workspace's session was replaced")
+	}
+	f.logTransition(ws, "session_live", true, true,
+		dlog.Context{"shim_pid": session.client.PID(), "watcher_attached": session.watcher != nil, "session_started": session.sessionStarted})
+	return nil
+}
+
+// holds reports whether the workspace's entry still holds CLIENT.
+func (f *Fleet) holds(ws ids.WorkspaceID, client shimclient.Client) bool {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	session, ok := f.sessions[ws]
+	return ok && session.client == client
 }
 
 // noteSessionStarted marks the workspace's installed client as one whose shim

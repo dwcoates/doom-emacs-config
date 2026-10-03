@@ -134,19 +134,19 @@ func TestARestartedWorkspaceWhoseVendorStartIsRetriedOpensWithItsConversation(t 
 
 func TestARestartedWorkspaceWhoseVendorStartFailedOpensWithItsConversation(t *testing.T) {
 	t.Parallel()
-	// Arrange: the vendor start is rejected, so its shim is stopped; the reader
-	// opens only after the failed start has secured the newest page.
+	// Arrange: the vendor start is rejected; its shim stays held with no
+	// session, and the reader opens once the failure is recorded.
 	f := restartedWith(t, harness.ShimProfile{VendorStartFailed: "invalid api key"})
 	// The sweep covers every test; the declared records are evidence of the rejection the test scripts.
 	f.d.ExpectWarnings("daemon.workspace.bring_up", "daemon.boot.bring_up")
-	f.d.AwaitWorkspaceLogRecord(f.ws.GetDir(), "the newest page secured before the failed start's shim stopped", func(r harness.LogRecord) bool {
-		return r.PID == f.d.PID() && r.Operation == "daemon.feed.newest_page_kept"
+	f.d.AwaitWorkspaceLogRecord(f.ws.GetDir(), "the failed start's shim held with no session", func(r harness.LogRecord) bool {
+		return r.PID == f.d.PID() && r.Message == "the failed start's shim stays held with no session; the next start reuses it"
 	})
 
 	// Act.
 	page, _ := f.openFeed(nil)
 
-	// Assert.
+	// Assert: the conversation is read through the held shim.
 	if !pageCarriesTheConversation(page) {
 		t.Fatalf("the failed workspace's newest page = %v, want the store's prompt and answer", page)
 	}

@@ -68,6 +68,11 @@ type Profile struct {
 	// drives the daemon's vendor-start retry run end to end.
 	VendorStartFailTimes  int    `json:"vendor_start_fail_times,omitempty"`
 	VendorStartFailDetail string `json:"vendor_start_fail_detail,omitempty"`
+	// VendorStartRejectTimes answers the FIRST n StartSessions with a REJECTED
+	// (non-retryable) `vendor_start_failed` refusal carrying
+	// VendorStartFailDetail, and every one after them normally: a start that
+	// fails outright and a later start on the same shim that succeeds.
+	VendorStartRejectTimes int `json:"vendor_start_reject_times,omitempty"`
 	// NoTranscriptUntilTurn withholds the conversation's transcript until its
 	// FIRST TURN, which is what the real vendor does: StartSession assigns the
 	// vendor session id, and the file only appears once there is something to

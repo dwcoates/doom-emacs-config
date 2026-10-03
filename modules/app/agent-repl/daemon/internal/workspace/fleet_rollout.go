@@ -818,9 +818,12 @@ func (f *Fleet) logNoSessionToKill(ctx context.Context, ws ids.WorkspaceID, forc
 // loudly rather than handing over a shim this daemon is still watching.
 func (f *Fleet) HandOver(ws ids.WorkspaceID) (bool, error) {
 	f.mu.Lock()
-	// FROM HERE THE WORKSPACE IS THE SUCCESSOR'S, whether or not a session is
-	// held: a start still in flight finds it handed over when it would begin
-	// serving, and leaves its shim to the successor (hold).
+	// FROM HERE THE WORKSPACE IS THE SUCCESSOR'S, whether or not a shim is
+	// held. A held shim is detached below, and a start whose shim that was
+	// sees it taken (restate). The MARK is for the start that has not spawned
+	// yet -- the window between its probe and its spawn, where the fleet
+	// holds nothing to detach -- so its shim, once spawned, is left to the
+	// successor rather than held and served (hold).
 	f.handedOver[ws] = true
 	session, ok := f.sessions[ws]
 	var watcher sessionwatcher.Watcher

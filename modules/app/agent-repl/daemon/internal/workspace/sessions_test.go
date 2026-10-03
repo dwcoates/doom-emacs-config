@@ -89,6 +89,9 @@ type fakeClient struct {
 	// waiting for it. A nil startHold never waits.
 	entered   chan struct{}
 	startHold chan struct{}
+	// onStart, when set, runs as StartSession is asked, so a test reads what
+	// stood while the start ran.
+	onStart func()
 	// onKill is the supervisor's deregistration, armed by the fake spawn: the
 	// real client releases the supervisor's hold on its exit decode.
 	onKill func()
@@ -128,6 +131,9 @@ func (c *fakeClient) Reaped() (shimclient.ExitInfo, bool) {
 
 func (c *fakeClient) StartSession(ctx context.Context, req *shimv1.StartSessionRequest) (*shimv1.StartSessionResponse, error) {
 	c.requests = append(c.requests, req)
+	if c.onStart != nil {
+		c.onStart()
+	}
 	// THE SHIM PUSHES WHILE StartSession RUNS, which is the whole reason the
 	// phases need a watch opened before the call. The fake does the same: the
 	// sends are UNBUFFERED, so this returns only once the relay has taken

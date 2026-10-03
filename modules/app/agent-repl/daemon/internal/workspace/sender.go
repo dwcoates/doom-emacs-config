@@ -43,6 +43,14 @@ func (f *Fleet) Sender(ws ids.WorkspaceID) (promptqueue.Sender, bool) {
 	if !ok {
 		return nil, false
 	}
+	// A HELD SHIM WITH NO SESSION DELIVERS NOTHING: a turn needs a session.
+	// The queue reads this "no session up" and revives, and the revival
+	// starts the session on the held shim. A shim parked at its cold gate
+	// stays the queue's to address, as it always was: the gate refuses a
+	// submission by its own name before any delivery.
+	if !f.Live(ws) {
+		return nil, false
+	}
 	return &sender{client: client, known: func() *conversationv1.HistoryPointer {
 		// Read AT THE CALL, not here: the queue may hold this sender across a
 		// wait, and the pointer the turn must be bounded by is the newest one
