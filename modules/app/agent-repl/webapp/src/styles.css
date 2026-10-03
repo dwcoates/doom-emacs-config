@@ -522,14 +522,21 @@
   }
 }
 
-/* A flex row of exactly one growing child (#main-col), which fills the
-   viewport. */
+/* A two-row grid filling the viewport. Row one is the rail (#ws-sidebar,
+   column one, sized to its own width and gone when hidden) beside the one
+   growing main column (#main-col, column two). Row two is the docked gate
+   (#gate-dock), spanning BOTH columns, empty and collapsed while no gate
+   stands: a standing gate is a full-width band under the rail and the main
+   column alike, and the rail keeps row one's height rather than reaching down
+   beside it (owner, 2026-10-03). The page-wide overlays are fixed, so they
+   take no cell. */
 body {
   margin: 0;
   background: var(--bg);
   color: var(--fg);
-  display: flex;
-  flex-direction: row;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto;
   height: 100vh;
   /* The xwidget host cedes the pointer to the page (Emacs's
      resetCursorRects abstains over child views), so the UA's `auto`
@@ -560,11 +567,12 @@ body::after {
 /* The main column: topbar over feed over composer. `min-width: 0` lets
    the column shrink below its content width on a horizontal resize. */
 #main-col {
-  flex: 1 1 auto;
+  grid-column: 2;
+  grid-row: 1;
   min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  height: 100vh;
   /* The agent column's width cap, the single source both the centered
      response/tool rule and the prompt's right-edge alignment derive from:
      the prompt's right margin is half the leftover so its right edge lands
@@ -602,8 +610,12 @@ body::after {
    single-column layout. Fixed at a fifth of the window; the main column's
    `flex: 1 1 auto` absorbs the rest. */
 #ws-sidebar {
-  flex: 0 0 20%;
+  grid-column: 1;
+  grid-row: 1;
+  /* A fifth of the window, as the old flex basis gave it. */
+  width: 20vw;
   min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   /* A floating dock, not a flush split pane: inset from the window on every
@@ -6227,15 +6239,17 @@ bubble-body.bubble-body { display: block; }
 .cold-gate-trace { color: var(--fg); }
 /* THE STANDING GATE DOCKS AT THE PAGE'S VERY BOTTOM (src/feed/gate-dock.ts):
    Emacs hides the input window while it stands and this webview grows into
-   that space, so the banner takes the input's exact slot: #gate-dock, below
-   the footer, EXACTLY the input window's height. Emacs tells the page that
+   that space, so the banner takes the input's exact slot: #gate-dock, the
+   body grid's full-width second row under the rail AND the main column (the
+   rail keeps its height), EXACTLY the input window's height. Emacs tells the page that
    height in pixels (--gate-dock-height, set on the root before the input
    hides; lisp/window.el); 18.4vh, `agent-repl-input-height-fraction`, is the
    fallback only for a page Emacs never told, which gate-dock.ts records. The
    banner's row stays in the feed, hidden, so the feed draws no inline gate
    while it is docked. */
 #gate-dock {
-  flex: 0 0 auto;
+  grid-column: 1 / -1;
+  grid-row: 2;
   height: var(--gate-dock-height, 18.4vh);
   overflow-y: auto;
   box-sizing: border-box;
