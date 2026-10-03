@@ -172,6 +172,27 @@ runs outside `testrun`:
   wrapper: signalling the npm pid alone leaves vitest's worker pool reparented
   to init and burning CPU for the rest of the run.
 
+### No test writes to the user's temp directory
+
+Every temp file a test makes lives under a root its runner owns and removes,
+and a run that leaves anything in the user's temp directory fails.
+
+- `testrun` (`bin/test-all.sh`) reads the user temp directory, then moves its
+  own `TMPDIR` to `/tmp/tr-XXXXXX` (planning's `go list`/`vitest list`
+  included), and `run.OSExec` hands every unit a fresh `TMPDIR` root under it,
+  removed when the unit exits. A root that cannot be removed fails the unit.
+- After the run it lists the user temp directory again and fails the run on
+  every entry it gained, by name. A new entry is a test that ignored `TMPDIR`.
+- Batch ERT (`lisp/test-helpers.el`) makes one private root per process,
+  points `temporary-file-directory` and `TMPDIR` at it, and removes it on
+  `kill-emacs-hook`, so a direct `emacs -batch` run leaks nothing either.
+- The shim's vitest runs keep their own `/tmp/sv-*` root
+  (`agent-shim/claude/shim/test/run-tmp-root.ts`).
+- Why: the suites' leaks grew the user temp directory to 856,127 entries, and
+  creates there stalled for seconds and timed tests out.
+- Roots live under `/tmp`, not `os.TempDir()`: a unix socket path is capped at
+  104 bytes on macOS and the user temp directory's own path spends 49.
+
 ### Suite timings: what a row measures
 
 `test_time.csv` is the canonical per-suite timing history (recording rules:
