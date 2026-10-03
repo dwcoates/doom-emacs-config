@@ -1422,3 +1422,40 @@ func TestAResumeThatStartsTheSessionClearsTheKnownAbsence(t *testing.T) {
 		t.Fatal("SessionAbsent = true after the session started")
 	}
 }
+
+// A RESUME IS NEVER FILED UNDER AN EMPTY HOST IDENTITY: a workspace whose
+// session never came up (a restart after a failed first start) has none
+// recorded, which the session record refuses.
+func TestResumeFilesTheSessionUnderAHostIdentity(t *testing.T) {
+	tests := []struct {
+		name     string
+		recorded string
+		carried  string
+		want     func(string) bool
+	}{
+		{"the recorded identity is kept", "recorded-1", "carried-1", func(id string) bool { return id == "recorded-1" }},
+		{"none recorded takes the entry's carried one", "", "carried-1", func(id string) bool { return id == "carried-1" }},
+		{"none at all mints one", "", "", func(id string) bool { return id != "" }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFleetFixture(t)
+			ws := f.workspace("w1")
+			if tt.recorded != "" {
+				f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, HostSessionID: tt.recorded}
+			}
+			f.fleet.sessions[ws.ID] = &live{client: f.client, hostSessionID: tt.carried}
+
+			// Act.
+			if _, err := f.fleet.Resume(context.Background(), ws.ID, f.client); err != nil {
+				t.Fatalf("Resume: %v", err)
+			}
+
+			// Assert.
+			if got := f.db.sessions[ws.ID].HostSessionID; !tt.want(got) {
+				t.Fatalf("recorded host identity = %q", got)
+			}
+		})
+	}
+}
