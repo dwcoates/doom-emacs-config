@@ -243,7 +243,7 @@ func TestASuccessorThatFinishedJoiningAcceptsADeploy(t *testing.T) {
 	defer cancel()
 	// The Emacs states the checkout's own elisp, so the deploy pushes it no
 	// reload and the only thing it is shown is the handover.
-	announcements, err := successor.WatchDaemon(ctx, connect.NewRequest(&agentreplv1.WatchDaemonRequest{Client: &agentreplv1.WatchDaemonRequest_Emacs{Emacs: &agentreplv1.WatchDaemonEmacs{ElispBuild: harness.PinnedElispBuild, Focus: harness.UnfocusedEditor()}}}))
+	announcements, err := successor.WatchDaemon(ctx, connect.NewRequest(&agentreplv1.WatchDaemonRequest{Client: &agentreplv1.WatchDaemonRequest_Emacs{Emacs: &agentreplv1.WatchDaemonEmacs{ElispBuild: harness.PinnedElispBuild, Focus: harness.UnfocusedEditor(), Instance: harness.EditorInstance()}}}))
 	if err != nil {
 		t.Fatalf("WatchDaemon on the successor: %v", err)
 	}
