@@ -96,4 +96,3 @@ func TestAHandoverOfOneWorkspaceLeavesAnothersStartServing(t *testing.T) {
 		t.Fatalf("Start(w2) = %v, live = %t; want it served", err, f.fleet.Live(other.ID))
 	}
 }
-
