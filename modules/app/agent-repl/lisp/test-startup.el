@@ -56,6 +56,7 @@
 (defvar agent-repl-test-startup--refreshes 0 "How often the tab order was re-derived.")
 (defvar agent-repl-test-startup--applied 0 "How often the selection was re-applied.")
 (defvar agent-repl-test-startup--switches nil "Every switch the startup asked of the daemon, as (WS . TRIGGER).")
+(defvar agent-repl-test-startup--hidden nil "Workspaces whose repository is held collapsed: opened, never drawn.")
 (defvar agent-repl-test-startup--known nil "Ref ids the registry holds a workspace for.")
 (defvar agent-repl-test-startup--no-page nil "Workspaces that can have no page.")
 
@@ -72,7 +73,9 @@ is in `agent-repl-test-startup--no-page'."
            (agent-repl-test-startup--applied 0)
            (agent-repl-test-startup--known nil)
            (agent-repl-test-startup--no-page nil)
-           (agent-repl-test-startup--switches nil))
+           (agent-repl-test-startup--switches nil)
+           (agent-repl-test-startup--hidden nil)
+           (agent-repl-startup--selected nil))
        (cl-letf (((symbol-function 'agent-repl--phase-echo)
                   (lambda (_ws fmt &rest args)
                     (setq agent-repl-test-startup--lines
@@ -86,6 +89,9 @@ is in `agent-repl-test-startup--no-page'."
                   (lambda () (cl-incf agent-repl-test-startup--refreshes)))
                  ((symbol-function 'agent-repl-roster-apply-current)
                   (lambda () (cl-incf agent-repl-test-startup--applied) nil))
+                 ((symbol-function 'agent-repl-roster-drawn-tab-order)
+                  (lambda () (cl-remove-if (lambda (n) (member n agent-repl-test-startup--hidden))
+                                           agent-repl-test-startup--known)))
                  ((symbol-function 'agent-repl-host-request-switch)
                   (lambda (ws trigger)
                     (setq agent-repl-test-startup--switches
@@ -157,6 +163,21 @@ reaches Emacs first cannot open a tab ahead of its go-ahead."
     (agent-repl-startup-handle (agent-repl-test-startup--go-ahead "b"))
     ;; Assert
     (should (equal agent-repl-test-startup--switches '(("a" . startup))))))
+
+(ert-deftest agent-repl-test-startup-never-selects-a-tab-it-does-not-draw ()
+  "A first tab of a collapsed repository is opened, but the first DRAWN one is selected."
+  (agent-repl-test-startup--with-run
+    ;; Arrange
+    (setq agent-repl-test-startup--known '("a" "b")
+          agent-repl-test-startup--hidden '("a"))
+    (agent-repl-startup--page-drawn "a")
+    (agent-repl-startup--page-drawn "b")
+    (agent-repl-startup-handle (agent-repl-test-startup--opening 2))
+    (agent-repl-startup-handle (agent-repl-test-startup--go-ahead "a"))
+    ;; Act
+    (agent-repl-startup-handle (agent-repl-test-startup--go-ahead "b"))
+    ;; Assert
+    (should (equal agent-repl-test-startup--switches '(("b" . startup))))))
 
 (ert-deftest agent-repl-test-startup-a-go-ahead-waits-for-its-page ()
   "A go-ahead whose page has not drawn opens nothing and says it is loading."

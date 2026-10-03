@@ -47,6 +47,7 @@
 (declare-function agent-repl-roster-refresh-order "roster" ())
 (declare-function agent-repl-roster-apply-current "roster" ())
 (declare-function agent-repl-host-request-switch "host" (ws trigger))
+(declare-function agent-repl-roster-drawn-tab-order "roster" ())
 (declare-function agent-repl--ensure-input-buffer "panels" (ws))
 (declare-function agent-repl--frontend-precreate-refusal "frontend" (ws))
 (declare-function agent-repl--frontend-webview-read-script "frontend" (buf script callback))
@@ -83,6 +84,9 @@ hot reload of this file keeps the phase the process is in.")
 
 (defvar agent-repl-startup--loading-said (make-hash-table :test 'equal)
   "Ref id -> t once \"loading the page...\" was said for it.")
+
+(defvar agent-repl-startup--selected nil
+  "The workspace the startup selected, once one of its opened tabs is drawn.")
 
 (defvar agent-repl-startup--finished nil
   "The run's `DaemonStartupFinished' plist once it arrived, else nil.")
@@ -202,19 +206,24 @@ the web gui, has no page to wait for."
 
 (defun agent-repl-startup--open (id ws)
   "Open workspace WS's tab (ref ID): its go-ahead and its page are both in.
-THE FIRST TAB OPENED IS SELECTED at once, and stays selected while every
-later tab opens (owner request, 2026-10-03): a startup never shows no
-workspace while the rest are coming up.  The selection is asked of the
-daemon like every other switch, so the frame follows the roster."
-  (let ((first (= (hash-table-count agent-repl-startup--released) 0)))
-    (puthash id t agent-repl-startup--released)
-    (agent-repl--info ws "elisp.startup.tab-opened ws=%s id=%s first=%s" ws id first)
-    (agent-repl-roster-refresh-order)
+THE FIRST DRAWN TAB OPENED IS SELECTED at once, and stays selected while
+every later tab opens (owner request, 2026-10-03): a startup never shows no
+workspace while the rest are coming up.  A tab of a repository held
+collapsed is opened but not drawn, so it is never the one selected.  The
+selection is asked of the daemon like every other switch, so the frame
+follows the roster."
+  (puthash id t agent-repl-startup--released)
+  (agent-repl-roster-refresh-order)
+  (let ((select (and (null agent-repl-startup--selected)
+                     (member ws (agent-repl-roster-drawn-tab-order))
+                     t)))
+    (agent-repl--info ws "elisp.startup.tab-opened ws=%s id=%s selects=%s" ws id select)
     (agent-repl-startup--say "%s: ready." ws)
-    (when first
-      (agent-repl-host-request-switch ws 'startup))
-    ;; The selection may name this workspace, and had no tab to land on.
-    (agent-repl-roster-apply-current)))
+    (when select
+      (setq agent-repl-startup--selected ws)
+      (agent-repl-host-request-switch ws 'startup)))
+  ;; The selection may name this workspace, and had no tab to land on.
+  (agent-repl-roster-apply-current))
 
 (defun agent-repl-startup--finish ()
   "End the startup: say how it went, and stop holding tabs."
