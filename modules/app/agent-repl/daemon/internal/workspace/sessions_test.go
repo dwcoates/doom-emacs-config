@@ -488,8 +488,15 @@ func vendorRefusal(label *shimv1.StartSessionVendorStartFailed, detail string) *
 }
 
 type fleetFixture struct {
+	// probeSequence, when set, is answered by the lock probe in order before
+	// probeState; probes counts every probe.
+	probeSequence []sessionlock.State
+	probes        int
 	// onStartWatcher, when set, runs as a watcher is started.
 	onStartWatcher func()
+	// onStartWatcherSinks, when set, is handed the sinks a watcher is started
+	// with.
+	onStartWatcherSinks func(sessionwatcher.Sinks)
 	// hostPublished is every workspace whose host view the fleet republished,
 	// in order.
 	hostPublished []ids.WorkspaceID
@@ -660,9 +667,10 @@ func newFleetFixtureBoundedAt(t *testing.T, adoptBound time.Duration) *fleetFixt
 		DB: f.db, Instance: fixtureInstance, Accounts: f.accounts, Supervisor: f.supervisor, ShimBundle: f.bundle,
 		Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{coldGates: &f.topbarGates, picked: &f.picked, warnings: &f.topbarWarnings}, Log: f.log,
 		Sinks: sessionwatcher.Sinks{
-			Footer:  footerLinkSink{rec: f.links},
-			Topbar:  topbarLinkSink{rec: f.links},
-			Sidebar: sidebarLinkSink{rec: f.links},
+			Lifecycle: &quietLifecycle{},
+			Footer:    footerLinkSink{rec: f.links},
+			Topbar:    topbarLinkSink{rec: f.links},
+			Sidebar:   sidebarLinkSink{rec: f.links},
 		},
 		SocketPath: func(ws ids.WorkspaceID) string {
 			if f.socketDir != "" {
@@ -681,7 +689,15 @@ func newFleetFixtureBoundedAt(t *testing.T, adoptBound time.Duration) *fleetFixt
 			f.steps = append(f.steps, step)
 		},
 		SessionsUp: func(ws ids.WorkspaceID) { f.sessionsUp = append(f.sessionsUp, ws) },
-		Probe:      func(string, string) (sessionlock.State, error) { return f.probeState, f.probeErr },
+		Probe: func(string, string) (sessionlock.State, error) {
+			f.probes++
+			if len(f.probeSequence) > 0 {
+				next := f.probeSequence[0]
+				f.probeSequence = f.probeSequence[1:]
+				return next, nil
+			}
+			return f.probeState, f.probeErr
+		},
 		SocketProbe: func(path string) (shimsocket.State, error) {
 			if f.onSocketProbe != nil {
 				f.onSocketProbe(path)
@@ -691,9 +707,12 @@ func newFleetFixtureBoundedAt(t *testing.T, adoptBound time.Duration) *fleetFixt
 			}
 			return f.socketState, f.socketErr
 		},
-		StartWatcher: func(_ context.Context, _ ids.WorkspaceID, _ shimclient.Client, session sessionwatcher.Session, _ sessionwatcher.Sinks, _ dlog.Logger) (sessionwatcher.Watcher, error) {
+		StartWatcher: func(_ context.Context, _ ids.WorkspaceID, _ shimclient.Client, session sessionwatcher.Session, sinks sessionwatcher.Sinks, _ dlog.Logger) (sessionwatcher.Watcher, error) {
 			if f.onStartWatcher != nil {
 				f.onStartWatcher()
+			}
+			if f.onStartWatcherSinks != nil {
+				f.onStartWatcherSinks(sinks)
 			}
 			f.openings = append(f.openings, session.Opening)
 			f.openAtAttach = append(f.openAtAttach, session.OpenAtAttach)
@@ -2702,21 +2721,102 @@ func TestStartOpensTheAdoptedSessionsWatches(t *testing.T) {
 	}
 }
 
-func TestStartRefusesAnAlreadyStartedShimUnderItsOwnArm(t *testing.T) {
-	// Arrange: a SPAWNED shim that answers already_started is a named state,
-	// never an untyped internal on a contract path.
+// A START THE SHIM ANSWERS already_started TAKES THE RUNNING SESSION: the
+// shim is the authority on its own session, so the start attaches to it --
+// never a failed start, never a fault.
+func TestAStartTheShimAnswersAlreadyStartedTakesTheRunningSession(t *testing.T) {
+	tests := []struct {
+		name  string
+		check func(t *testing.T, f *fleetFixture, err error)
+	}{
+		{"the start succeeds", func(t *testing.T, _ *fleetFixture, err error) {
+			if err != nil {
+				t.Fatalf("Start = %v, want the running session taken", err)
+			}
+		}},
+		{"the session is live", func(t *testing.T, f *fleetFixture, _ error) {
+			if !f.fleet.Live("w1") || !f.fleet.Serving("w1") {
+				t.Fatalf("live = %t, serving = %t; want the taken session running", f.fleet.Live("w1"), f.fleet.Serving("w1"))
+			}
+		}},
+		{"no fault is filed", func(t *testing.T, f *fleetFixture, _ error) {
+			if got := faultKinds(f.db.dbFaults); len(got) != 0 {
+				t.Fatalf("faults = %v, want none", got)
+			}
+		}},
+		{"its watches are opened", func(t *testing.T, f *fleetFixture, _ error) {
+			if len(f.openings) != 1 {
+				t.Fatalf("watcher openings = %d, want the taken session watched", len(f.openings))
+			}
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: a recorded conversation, so the attach has one to watch.
+			f := newFleetFixture(t)
+			ws := f.workspace("w1")
+			f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
+			f.client.response = alreadyStartedResponse()
+
+			// Act.
+			err := f.fleet.Start(context.Background(), ws.ID)
+
+			// Assert.
+			tt.check(t, f, err)
+		})
+	}
+}
+
+// A SHIM THAT STATES ITS SESSION IN FORCE IS RECORDED RUNNING: an adopted
+// survivor the boot read as inert is installed with no session known, and its
+// watch's re-announcement is what says otherwise. No start then asks it again.
+func TestAShimStatingItsSessionIsRecordedRunning(t *testing.T) {
+	// Arrange: install a survivor with no session known; capture the sinks
+	// its watcher is handed.
 	f := newFleetFixture(t)
 	ws := f.workspace("w1")
-	f.client.response = alreadyStartedResponse()
+	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
+	var lifecycle sessionwatcher.LifecycleSink
+	f.onStartWatcherSinks = func(sinks sessionwatcher.Sinks) { lifecycle = sinks.Lifecycle }
+	if err := f.fleet.Install(context.Background(), ws.ID, f.client); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	if f.fleet.Live(ws.ID) {
+		t.Fatal("the arranged install already reads a session")
+	}
 
-	// Act.
-	err := f.fleet.Start(context.Background(), ws.ID)
+	// Act: the watch's re-announcement states the session in force.
+	lifecycle.OnVendorSessionID(ws.ID, "vendor-1")
+	startErr := f.fleet.Start(context.Background(), ws.ID)
 
 	// Assert.
-	if err == nil {
-		t.Fatal("Start() = nil error, want the already-started refusal surfaced")
+	if !f.fleet.Live(ws.ID) || startErr != nil || len(f.client.requests) != 0 {
+		t.Fatalf("live = %t, Start = %v, StartSession asks = %d; want the session running and no start asked",
+			f.fleet.Live(ws.ID), startErr, len(f.client.requests))
 	}
-	asRefusal(t, err, ArmAlreadyStarted)
+}
+
+// THE SHIM'S WORD IS ABOUT ONE SHIM: a re-announcement from a watcher of a
+// client the entry no longer holds records nothing.
+func TestAStatedSessionOfAReplacedShimRecordsNothing(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
+	var lifecycle sessionwatcher.LifecycleSink
+	f.onStartWatcherSinks = func(sinks sessionwatcher.Sinks) { lifecycle = sinks.Lifecycle }
+	if err := f.fleet.Install(context.Background(), ws.ID, f.client); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	f.fleet.sessions[ws.ID] = &live{client: &fakeClient{}}
+
+	// Act.
+	lifecycle.OnVendorSessionID(ws.ID, "vendor-1")
+
+	// Assert.
+	if f.fleet.Live(ws.ID) {
+		t.Fatal("a replaced shim's statement recorded a session on its successor")
+	}
 }
 
 func TestStartRefusesAnUnsetStartFailureCauseUnderItsOwnArm(t *testing.T) {
@@ -4562,5 +4662,73 @@ func TestTheSessionFactsAreRecordedBeforeTheWatchOpens(t *testing.T) {
 	// Assert.
 	if recordedAtWatch != "vendor-1" {
 		t.Fatalf("session row's vendor id when the watch opened = %q, want vendor-1 recorded first", recordedAtWatch)
+	}
+}
+
+// quietLifecycle is the fleet fixture's lifecycle sink. The fleet's watchers
+// are fakes, so nothing calls it but a test's own OnVendorSessionID; any other
+// call is a fixture defect and panics on the nil embedded sink.
+type quietLifecycle struct{ sessionwatcher.LifecycleSink }
+
+// OnVendorSessionID takes the id and does nothing.
+func (*quietLifecycle) OnVendorSessionID(ids.WorkspaceID, string) {}
+
+// A LOCK WHOSE OWNER IS GOING AWAY IS WAITED OUT: held over a stale socket
+// for a moment after a shim died, it reads free once its holder exits, and the
+// bring-up then spawns instead of refusing.
+func TestABringUpWaitsOutALockWhoseOwnerIsGoingAway(t *testing.T) {
+	tests := []struct {
+		name  string
+		check func(t *testing.T, f *fleetFixture, err error)
+	}{
+		{"the start succeeds on a spawned shim", func(t *testing.T, f *fleetFixture, err error) {
+			if err != nil || len(f.supervisor.spawns) != 1 {
+				t.Fatalf("Start = %v, spawns = %d; want one spawn once the lock went", err, len(f.supervisor.spawns))
+			}
+		}},
+		{"no fault is filed", func(t *testing.T, f *fleetFixture, _ error) {
+			if got := faultKinds(f.db.dbFaults); len(got) != 0 {
+				t.Fatalf("faults = %v, want none", got)
+			}
+		}},
+		{"no ERROR is recorded", func(t *testing.T, f *fleetFixture, _ error) {
+			if got := recordsAt(f.log, opBringUp, "error"); len(got) != 0 {
+				t.Fatalf("errors = %v, want none", got)
+			}
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: the lock reads held over a stale socket, then free.
+			f := newFleetFixture(t)
+			ws := f.workspace("w1")
+			f.socketState = shimsocket.StateStale
+			f.probeSequence = []sessionlock.State{sessionlock.StateHeld, sessionlock.StateHeld, sessionlock.StateFree}
+			f.probeState = sessionlock.StateFree
+
+			// Act.
+			err := f.fleet.Start(context.Background(), ws.ID)
+
+			// Assert.
+			tt.check(t, f, err)
+		})
+	}
+}
+
+// A LOCK THAT NEVER GOES is the unreachable owner, refused once the bound is
+// spent -- the wait is bounded, never forever.
+func TestABringUpRefusesALockThatOutlastsTheBound(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.socketState = shimsocket.StateAbsent
+	f.probeState = sessionlock.StateHeld
+
+	// Act.
+	err := f.fleet.Start(context.Background(), ws.ID)
+
+	// Assert.
+	if err == nil || len(f.supervisor.spawns) != 0 || f.probes < 2 {
+		t.Fatalf("Start = %v, spawns = %d, probes = %d; want a refusal after waiting", err, len(f.supervisor.spawns), f.probes)
 	}
 }

@@ -34,6 +34,12 @@ dies with the process holding it, and only a process can be that holder.
 
 Three rules the protocol rests on, none of them negotiable:
 
+- **Only the shim's end releases the lock.** The holder ignores SIGTERM,
+  SIGINT and SIGHUP: it sits in the shim's process group, and a group stop
+  (SIGTERM) starts the shim's graceful stand-down, during which its session
+  still runs. Released then, the lock read free under a live session and a
+  booting daemon adopted it as inert (2026-10-03). Stdin's EOF -- the shim's
+  exit or deliberate release -- and SIGKILL still release it.
 - **The ready line comes after the flock, never before it.** The shim reads it
   as proof the claim is made; announcing intent would let a session start over
   a lock nobody holds.
