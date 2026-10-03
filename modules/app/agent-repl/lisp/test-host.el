@@ -128,6 +128,9 @@ calls it itself.")
 (defvar agent-repl-test-host--live nil
   "What the stubbed `agent-repl-link-live' answers: the live daemon, or nil.")
 
+(defvar agent-repl-test-host--ending nil
+  "The connection the stubbed `agent-repl-link-ending-p' answers as ending, or nil.")
+
 (defvar agent-repl-test-host--dial-accepts t
   "When non-nil the stubbed dial is ACCEPTED at once and answers a conn.
 Nil models the real gate: the dial stands but is not accepted yet, so
@@ -197,6 +200,8 @@ unary rpc can produce, which the contract never collapses into one."
          (agent-repl-test-host--timers nil)
          (agent-repl-test-host--dial-accepts t)
          (agent-repl-test-host--live nil)
+         (agent-repl-test-host--ending nil)
+         (agent-repl-link-down-planned nil)
          (agent-repl-host--reattach-tokens 0)
          (agent-repl-link-handover-functions nil)
          (agent-repl-test-host--register-answer
@@ -255,6 +260,8 @@ unary rpc can produce, which the contract never collapses into one."
                ((symbol-function 'agent-repl-link-primary) (lambda () nil))
                ((symbol-function 'agent-repl-link-live)
                 (lambda () agent-repl-test-host--live))
+               ((symbol-function 'agent-repl-link-ending-p)
+                (lambda (conn) (and conn (eq conn agent-repl-test-host--ending))))
                ((symbol-function 'agent-repl-link-dial-successor)
                 (lambda (address)
                   (push address agent-repl-test-host--dialled)
@@ -3085,6 +3092,84 @@ Registering on a daemon that is handing over would only fail."
         (should (and (null agent-repl-test-host--calls)
                      (agent-repl-test-host--logged-p
                       :info "elisp.host.reattach-awaiting-promotion ws=ws-1")))))))
+
+;; Regression, 2026-10-03: a bounce's announced stand-down ended every
+;; workspace's host stream before the link's own stream, and each workspace
+;; was registered on the daemon that had just said it was leaving.
+
+(ert-deftest agent-repl-test-host-planned-end-on-the-departing-live-daemon-registers-nothing ()
+  "A planned end while the link still names the departing daemon calls nothing."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-dir
+      ;; Arrange
+      (let ((leaving (agent-repl-connect-open "127.0.0.1:61043")))
+        (agent-repl-test-host--subscribe "ws-1" leaving)
+        (setq agent-repl-test-host--live leaving
+              agent-repl-test-host--calls nil)
+        ;; Act
+        (agent-repl-test-host--end-planned "ws-1")
+        ;; Assert
+        (should (null (agent-repl-test-host--calls-to "RegisterWorkspace" leaving)))))))
+
+(ert-deftest agent-repl-test-host-planned-end-on-the-departing-live-daemon-records-the-wait ()
+  "The wait for the link edge is on the record, at INFO."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-dir
+      ;; Arrange
+      (let ((leaving (agent-repl-connect-open "127.0.0.1:61043")))
+        (agent-repl-test-host--subscribe "ws-1" leaving)
+        (setq agent-repl-test-host--live leaving)
+        ;; Act
+        (agent-repl-test-host--end-planned "ws-1")
+        ;; Assert
+        (should (agent-repl-test-host--logged-p
+                 :info "elisp.host.reattach-awaiting-link-edge ws=ws-1 trigger=planned-ending"))))))
+
+(ert-deftest agent-repl-test-host-planned-end-on-the-departing-live-daemon-reattaches-on-link-up ()
+  "The link-up edge onto the next daemon re-attaches the waiting workspace."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-dir
+      ;; Arrange
+      (let ((leaving (agent-repl-connect-open "127.0.0.1:61043"))
+            (next (agent-repl-connect-open "127.0.0.1:58175")))
+        (agent-repl-test-host--subscribe "ws-1" leaving)
+        (setq agent-repl-test-host--live leaving)
+        (agent-repl-test-host--end-planned "ws-1")
+        (setq agent-repl-test-host--live next)
+        (cl-letf (((symbol-function 'agent-repl--live-ws-names) (lambda () '("ws-1"))))
+          ;; Act
+          (agent-repl-host-on-link-up next))
+        ;; Assert
+        (should (eq (plist-get (agent-repl-host-stream "ws-1") :conn) next))))))
+
+(ert-deftest agent-repl-test-host-stream-lost-on-a-live-daemon-that-announced-its-ending-waits ()
+  "A loss on a daemon whose link carried the ending waits for the link edge too."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-dir
+      ;; Arrange
+      (let ((leaving (agent-repl-connect-open "127.0.0.1:61043")))
+        (agent-repl-test-host--subscribe "ws-1" leaving)
+        (setq agent-repl-test-host--live leaving
+              agent-repl-test-host--ending leaving
+              agent-repl-test-host--calls nil)
+        ;; Act
+        (agent-repl-test-host--lose "ws-1")
+        ;; Assert
+        (should (null (agent-repl-test-host--calls-to "RegisterWorkspace" leaving)))))))
+
+(ert-deftest agent-repl-test-host-stream-lost-on-a-live-daemon-that-said-nothing-still-registers ()
+  "A loss on a live daemon that announced no ending is walked onto it at once."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-dir
+      ;; Arrange
+      (let ((live (agent-repl-connect-open "127.0.0.1:61043")))
+        (agent-repl-test-host--subscribe "ws-1" live)
+        (setq agent-repl-test-host--live live
+              agent-repl-test-host--calls nil)
+        ;; Act
+        (agent-repl-test-host--lose "ws-1")
+        ;; Assert
+        (should (agent-repl-test-host--calls-to "RegisterWorkspace" live))))))
 
 (ert-deftest agent-repl-test-host-stale-stream-close-keeps-the-standing-stream ()
   "A close of a stream the workspace already left does not drop the one standing."
