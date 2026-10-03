@@ -655,6 +655,29 @@ func TestATransferWhoseServingReleaseFailsTakesTheWorkspaceBack(t *testing.T) {
 	}
 }
 
+func TestATransferTakenBackGivesTheFleetItsWorkspaceBack(t *testing.T) {
+	// Arrange: the release fails after HandOver, so the transfer is taken back.
+	fail := &atomic.Bool{}
+	h := newHarness(t, func(d *Deps) { d.DB = releaseFailingDB{DB: d.DB, fail: fail} })
+	ws, _ := h.workspace(t)
+	fail.Store(true)
+
+	// Act
+	if _, err := h.c.HandOver(context.Background(), false); err != nil {
+		t.Fatalf("HandOver: %v", err)
+	}
+	h.registry.wait()
+	h.c.handoverDone.Wait()
+
+	// Assert: a start on it serves it here again.
+	h.fleet.mu.Lock()
+	reclaimed := append([]ids.WorkspaceID(nil), h.fleet.reclaimed...)
+	h.fleet.mu.Unlock()
+	if len(reclaimed) != 1 || reclaimed[0] != ws {
+		t.Fatalf("reclaimed = %v, want the taken-back workspace given back to the fleet", reclaimed)
+	}
+}
+
 // releaseFailingDB refuses ReleaseServing while fail is set.
 type releaseFailingDB struct {
 	wsm.DB
