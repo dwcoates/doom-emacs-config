@@ -140,10 +140,12 @@ type server struct {
 	profile Profile
 	log     *logSink
 
-	// vendorFailuresMu guards vendorFailures, the VendorStartFailTimes
-	// refusals already answered.
+	// vendorFailuresMu guards vendorFailures and vendorRejections, the
+	// VendorStartFailTimes and VendorStartRejectTimes refusals already
+	// answered.
 	vendorFailuresMu sync.Mutex
 	vendorFailures   int
+	vendorRejections int
 
 	// bashMu serializes a bash push against a WatchBash subscription, which is
 	// what makes a pushed frame IMPOSSIBLE to lose. A test pushes as soon as
@@ -456,6 +458,9 @@ func (s *server) StartSession(ctx context.Context, req *connect.Request[shimv1.S
 	}
 	if s.takeVendorStartFailure() {
 		return connect.NewResponse(vendorStartFailure(s.profile.VendorStartFailDetail, true)), nil
+	}
+	if s.takeVendorStartRejection() {
+		return connect.NewResponse(vendorStartFailure(s.profile.VendorStartFailDetail, false)), nil
 	}
 	if resp, done, err := scripted[shimv1.StartSessionResponse, *shimv1.StartSessionResponse](s, RPCStartSession); done {
 		if err == nil {
@@ -1476,6 +1481,18 @@ func vendorStartFailure(detail string, retryable bool) *shimv1.StartSessionRespo
 			Cause:  &shimv1.StartSessionFailure_VendorStartFailed{VendorStartFailed: label},
 		}},
 	}
+}
+
+// takeVendorStartRejection reports whether this StartSession is one of the
+// profile's VendorStartRejectTimes refusals, counting it when it is.
+func (s *server) takeVendorStartRejection() bool {
+	s.vendorFailuresMu.Lock()
+	defer s.vendorFailuresMu.Unlock()
+	if s.vendorRejections >= s.profile.VendorStartRejectTimes {
+		return false
+	}
+	s.vendorRejections++
+	return true
 }
 
 // takeVendorStartFailure reports whether this StartSession is one of the

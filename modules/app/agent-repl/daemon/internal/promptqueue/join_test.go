@@ -239,6 +239,46 @@ func TestAFoldedJoinClosesItsTurnAsFoldedAndRaisesNoBanner(t *testing.T) {
 	}
 }
 
+// A FOLD READ BEFORE THE JOIN'S ANSWER IS TAKEN is the joining prompt's: the
+// shim's answer and the vendor's fold travel on different streams, so the
+// watcher can read the fold while the call is still answering.
+func TestAFoldReadWhileTheJoinIsAnsweredIsTheJoiningPrompts(t *testing.T) {
+	// Arrange: the fold arrives inside the join call.
+	h := newHarness(t)
+	h.sender.callHook = func(what string) {
+		if what == "JoinRunningTurn" {
+			h.q.OnTurnEnded(theWorkspace, "t1", wsm.CloseFolded)
+		}
+	}
+
+	// Act
+	sentToJoin(t, h)
+
+	// Assert
+	if hasRecord(h, dlog.LevelError, opJoin, "a turn closed as folded that was not the prompt joining the running turn") {
+		t.Fatalf("records = %+v, want the fold taken as the joining prompt's", h.log.Records())
+	}
+	if how, ok := h.db.closedTurn("t1"); !ok || how != wsm.CloseFolded {
+		t.Fatalf("close = (%s, %v), want folded", how, ok)
+	}
+}
+
+// A JOIN THE SHIM REFUSES JOINED NOTHING: the record made before the send is
+// withdrawn, so the next prompt is not held behind it.
+func TestAJoinTheShimRefusesLeavesNoJoiningPrompt(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.sender.joinErr = errors.New("turn_already_open")
+
+	// Act
+	sentToJoin(t, h)
+
+	// Assert
+	if joined, ok := h.q.joining(theWorkspace); ok {
+		t.Fatalf("joining = %+v, want none after a refused join", joined)
+	}
+}
+
 func TestAFoldedJoinLeavesTheRunningTurnsInterruptStanding(t *testing.T) {
 	// Arrange
 	h := newHarness(t)

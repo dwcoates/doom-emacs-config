@@ -35,11 +35,10 @@ func TestASpawnRecordsItsPidAtTheFork(t *testing.T) {
 	}
 }
 
-// TestAFailedStartRetractsItsRecordedSpawn pins the clear. The pid was made
-// durable so a successor would WAIT for that shim instead of spawning over it;
-// left behind after this daemon stopped the process, that successor would wait
-// out its whole adoption bound for nothing.
-func TestAFailedStartRetractsItsRecordedSpawn(t *testing.T) {
+// TestAFailedStartKeepsItsRecordedSpawn: a failed start's shim stays held and
+// alive, so the pid made durable at its fork still names it, and a successor
+// WAITS for that shim instead of spawning over it.
+func TestAFailedStartKeepsItsRecordedSpawn(t *testing.T) {
 	// Arrange.
 	f := arrangeFailedStart(t)
 	ws := f.workspace("w1")
@@ -55,8 +54,10 @@ func TestAFailedStartRetractsItsRecordedSpawn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Workspace: %v", err)
 	}
-	if record.SpawnedShimPID != nil {
-		t.Fatalf("recorded spawn pid = %d, want it retracted with the stopped shim", *record.SpawnedShimPID)
+	// The held shim is alive and this daemon's: the record still names it,
+	// so a successor waits for it rather than spawning over it.
+	if record.SpawnedShimPID == nil || *record.SpawnedShimPID != f.client.pid {
+		t.Fatalf("recorded spawn pid = %v, want the held shim's %d", record.SpawnedShimPID, f.client.pid)
 	}
 }
 

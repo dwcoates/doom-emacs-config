@@ -463,21 +463,6 @@ func (r *resolver) SourceUp(ws ids.WorkspaceID) {
 		dlog.Context{"waiting_feeds": waiting})
 }
 
-// KeepNewestPage loads the root feed's newest store page while a source is
-// still up, when the feed does not already hold it: a reader that opens after
-// the source has gone is then served the conversation, never only the rows the
-// daemon made itself. Its rows are pushed (loadPushed).
-func (r *resolver) KeepNewestPage(ctx context.Context, ws ids.WorkspaceID) error {
-	loaded, err := r.loadPushed(ctx, ws, feedid.Feed{Root: true}, true)
-	if err != nil {
-		return err
-	}
-	r.lockedLogger(ws).Info("daemon.feed.newest_page_kept",
-		"the root feed's newest page was secured while its history source was still up",
-		dlog.Context{"loaded_now": loaded})
-	return nil
-}
-
 // NoteFreshBook marks the root feed's book as a NEW conversation's: its newest
 // page is known to hold nothing and to be the conversation's start. A reader
 // waiting for a source is served what the feed holds, and the session's own

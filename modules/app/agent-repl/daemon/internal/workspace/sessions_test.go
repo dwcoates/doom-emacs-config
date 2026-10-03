@@ -89,6 +89,9 @@ type fakeClient struct {
 	// waiting for it. A nil startHold never waits.
 	entered   chan struct{}
 	startHold chan struct{}
+	// onStart, when set, runs as StartSession is asked, so a test reads what
+	// stood while the start ran.
+	onStart func()
 	// onKill is the supervisor's deregistration, armed by the fake spawn: the
 	// real client releases the supervisor's hold on its exit decode.
 	onKill func()
@@ -128,6 +131,9 @@ func (c *fakeClient) Reaped() (shimclient.ExitInfo, bool) {
 
 func (c *fakeClient) StartSession(ctx context.Context, req *shimv1.StartSessionRequest) (*shimv1.StartSessionResponse, error) {
 	c.requests = append(c.requests, req)
+	if c.onStart != nil {
+		c.onStart()
+	}
 	// THE SHIM PUSHES WHILE StartSession RUNS, which is the whole reason the
 	// phases need a watch opened before the call. The fake does the same: the
 	// sends are UNBUFFERED, so this returns only once the relay has taken
@@ -482,6 +488,8 @@ func vendorRefusal(label *shimv1.StartSessionVendorStartFailed, detail string) *
 }
 
 type fleetFixture struct {
+	// onStartWatcher, when set, runs as a watcher is started.
+	onStartWatcher func()
 	// hostPublished is every workspace whose host view the fleet republished,
 	// in order.
 	hostPublished []ids.WorkspaceID
@@ -684,6 +692,9 @@ func newFleetFixtureBoundedAt(t *testing.T, adoptBound time.Duration) *fleetFixt
 			return f.socketState, f.socketErr
 		},
 		StartWatcher: func(_ context.Context, _ ids.WorkspaceID, _ shimclient.Client, session sessionwatcher.Session, _ sessionwatcher.Sinks, _ dlog.Logger) (sessionwatcher.Watcher, error) {
+			if f.onStartWatcher != nil {
+				f.onStartWatcher()
+			}
 			f.openings = append(f.openings, session.Opening)
 			f.openAtAttach = append(f.openAtAttach, session.OpenAtAttach)
 			if f.watchErr != nil {
@@ -4531,5 +4542,25 @@ func TestDrainStartsJoinsDetachedWork(t *testing.T) {
 	}
 	if err := <-ended; !errors.Is(err, context.Canceled) {
 		t.Fatalf("the detached work saw %v, want a cancellation", err)
+	}
+}
+
+// THE SESSION FACTS ARE DURABLE BEFORE THE WATCH OPENS: the watch's
+// re-announcement writes the session row, so the row must exist first.
+func TestTheSessionFactsAreRecordedBeforeTheWatchOpens(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	recordedAtWatch := ""
+	f.onStartWatcher = func() { recordedAtWatch = f.db.sessions[ws.ID].VendorSessionID }
+
+	// Act.
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Assert.
+	if recordedAtWatch != "vendor-1" {
+		t.Fatalf("session row's vendor id when the watch opened = %q, want vendor-1 recorded first", recordedAtWatch)
 	}
 }

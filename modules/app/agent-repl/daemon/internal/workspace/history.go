@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	shimv1 "agentrepl/proto/shim/v1"
@@ -13,7 +12,6 @@ import (
 	"claude-repld/internal/ids"
 	"claude-repld/internal/resolve/feed"
 	"claude-repld/internal/sessionwatcher"
-	"claude-repld/internal/shimclient"
 )
 
 // THE FEED'S HISTORY SOURCE (feed.HistorySource). History is loaded only on a
@@ -35,9 +33,9 @@ type historyReader interface {
 // 2026-10-02: the vendor and its state never gate agent-repl's own functions).
 // The shim serves the workspace's persisted book whether or not a session was
 // started on it, so any shim client the fleet can reach reads history: the one
-// it holds (a started session, a session parked at its cold gate) or the one a
-// running vendor start has not handed over yet (startingClients). Only a
-// workspace with no shim at all answers feed.ErrNoHistorySource.
+// holds -- a started session's, one parked at its cold gate, one whose start is
+// being answered or retried, a failed start's. Only a workspace with no shim at
+// all answers feed.ErrNoHistorySource.
 func (f *Fleet) ReadHistory(ctx context.Context, ws ids.WorkspaceID, target *conversationv1.AgentId, after *conversationv1.HistoryPointer) (*conversationv1.HistoryPage, error) {
 	client, ok := f.historyClient(ws)
 	if !ok {
@@ -87,67 +85,24 @@ func (f *Fleet) noteHistoryWithoutWatcher(ws ids.WorkspaceID, target *conversati
 	f.deps.Footer.OnHistoryPage(ws, agent, page)
 }
 
-// historyClient answers the shim client history is read through: the held
-// one, else the one a running vendor start holds.
+// historyClient answers the shim client history is read through: the one the
+// fleet holds, whatever the vendor session is doing. The fleet holds every shim
+// from its spawn, so a start being answered or retried, a failed start's shim
+// and a cold gate's all serve the workspace's book.
+//
+// A FRESH START'S SHIM IS NO SOURCE until its session starts: the book it
+// persisted names the conversation the fresh one replaces.
 func (f *Fleet) historyClient(ws ids.WorkspaceID) (historyReader, bool) {
-	if client, ok := f.Client(ws); ok {
-		return client, true
-	}
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-	client, ok := f.startingClients[ws]
+	client, ok := f.Client(ws)
 	if !ok {
 		return nil, false
 	}
-	if _, reaped := client.Reaped(); reaped {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	if session, held := f.sessions[ws]; held && session.freshStart {
 		return nil, false
 	}
 	return client, true
-}
-
-// beginHistoryClient makes a running vendor start's CLIENT the workspace's
-// history source until the answer: the fleet holds no client while
-// StartSession is answered or retried, and the shim reads the workspace's book
-// all the same. The feed is told a source is up, so a reader that opened
-// before it has the newest page pushed. The returned func withdraws it.
-func (f *Fleet) beginHistoryClient(ws ids.WorkspaceID, client shimclient.Client) func() {
-	f.mu.Lock()
-	f.startingClients[ws] = client
-	f.mu.Unlock()
-	f.deps.Feed.SourceUp(ws)
-	return func() {
-		f.mu.Lock()
-		defer f.mu.Unlock()
-		if f.startingClients[ws] == client {
-			delete(f.startingClients, ws)
-		}
-	}
-}
-
-// keepNewestPageBound bounds the one newest-page read a failed start makes
-// before its shim is stopped. The shim answers it off the store in
-// milliseconds; it is sized like the feed's own kick bound's half, because the
-// failed start's caller is waiting on it. An overrun is ERROR and the start's
-// own error is returned unchanged.
-const keepNewestPageBound = 5 * time.Second
-
-// keepNewestPage secures the root feed's newest page through a FAILED start's
-// client before that shim is stopped: no other shim will be up to read it from,
-// and a reader that opens next is owed the conversation, not only the rows the
-// daemon made itself. A failure is recorded and never changes the start's own
-// error.
-func (f *Fleet) keepNewestPage(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID) {
-	if ctx.Err() != nil {
-		log.Info(opBringUp, "the conversation's newest page was not secured: the bring-up's context ended with the failed start",
-			dlog.Context{"cause": ctx.Err().Error()})
-		return
-	}
-	readCtx, cancel := context.WithTimeout(ctx, keepNewestPageBound)
-	defer cancel()
-	if err := f.deps.Feed.KeepNewestPage(readCtx, ws); err != nil {
-		log.Error(opBringUp, "the conversation's newest page could not be secured before the failed start's shim was stopped",
-			dlog.Context{"cause": err.Error()})
-	}
 }
 
 // isUnknownAgent reports a ReadHistory the shim refused unknown_agent.

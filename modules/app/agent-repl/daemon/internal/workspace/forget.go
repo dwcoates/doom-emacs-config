@@ -104,7 +104,7 @@ func (v *verbs) Forget(ctx context.Context, ws ids.WorkspaceID) error {
 	// THE SESSION GOES BEFORE THE ROW. `kill` is the same stand-down Nuke
 	// takes before it destroys, and for the same reason: once the row is gone
 	// no verb can name this workspace's shim again.
-	if v.deps.Sessions.Live(ws) {
+	if v.deps.Sessions.Held(ws) {
 		log.Info(opForget, "standing the workspace's live session down before the record goes", dlog.Context{
 			"dir": record.Dir,
 		})

@@ -155,17 +155,26 @@ func (q *queue) joinLocked(ctx context.Context, d *delivery, sub Submission, run
 		return
 	}
 	q.mirrorAccepted(sub.WS, sub.Turn, sub.Said, sub.Origin)
+	// THE JOIN IS RECORDED BEFORE THE PROMPT IS SENT. The shim's answer and
+	// the vendor's fold travel on different streams: the session watcher can
+	// read the prompt folded into the running turn (or the running turn
+	// ending with it standing) before the call's answer is taken here, and a
+	// join recorded only after the answer was then read as "a folded close for
+	// a turn the queue never sent to join" (integration
+	// TestAFoldedJoinRunsNoTurnOfItsOwn under load, 2026-10-03). A refused
+	// send withdraws it.
+	q.setJoining(sub.WS, joiningPrompt{turn: sub.Turn, into: running, prompt: text, said: sub.Said, origin: sub.Origin})
 	var success *shimv1.StartTurnSuccess
 	d.outside(shimCall{what: "join", turn: sub.Turn, holds: []ids.TurnID{sub.Turn}}, log, func() {
 		success, err = sender.JoinRunningTurn(ctx, sub.Turn, sub.Said, sub.Origin)
 	})
 	if err != nil {
+		q.withdrawJoining(sub.WS, sub.Turn)
 		watcher.OnTurnOpenFailed(sub.WS, sub.Turn)
 		log.Error(opJoin, "the shim refused the prompt sent to join the running turn; it waits for it to end", dlog.Context{"cause": err.Error()})
 		q.recordWaiting(ctx, sub, "the session would not take the prompt into the running turn, so it waits for it to end", log)
 		return
 	}
-	q.setJoining(sub.WS, joiningPrompt{turn: sub.Turn, into: running, prompt: text, said: sub.Said, origin: sub.Origin})
 	q.deps.Footer.OnSubmission(sub.WS, footer.Submission{Prompt: text, Stage: footer.StageAfterToolCall})
 	handOver(sub.WS, success, watcher)
 	q.touchEngagement(ctx, sub.WS, log)
@@ -204,6 +213,14 @@ func (q *queue) setJoining(ws ids.WorkspaceID, joined joiningPrompt) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	q.stateLocked(ws).joining = &joined
+}
+
+// withdrawJoining clears the joining prompt when TURN is its own turn: a send
+// the shim refused joined nothing.
+func (q *queue) withdrawJoining(ws ids.WorkspaceID, turn ids.TurnID) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.stateLocked(ws).endJoiningLocked(turn)
 }
 
 // endJoiningLocked clears the joining prompt when TURN is its own turn, and

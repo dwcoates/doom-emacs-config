@@ -249,19 +249,28 @@ func (v *verbs) startSessionless(ctx context.Context, log dlog.Logger, operation
 	})
 }
 
-// startEndedByDaemon reports whether a DETACHED start ended because this
-// daemon is leaving rather than because the session failed to come up, and
-// says which. A detached start runs on the fleet's own lifetime, so its
-// context ending is the daemon's exit, and a standing-down refusal is the
-// same departure reached from the other side.
+// startEndedByDaemon reports whether a DETACHED start ended for a reason that
+// is no agent-repl failure of the session coming up, and says which: this
+// daemon leaving (a detached start runs on the fleet's own lifetime, so its
+// context ending is the daemon's exit, and a standing-down refusal is the same
+// departure reached from the other side), its shim taken by a handover or a
+// kill, or a VENDOR FAULT -- the vendor would not start, or this machine could
+// not reach the network -- which the start itself recorded as that fault, on
+// the footer and the roster (owner rule: vendor faults never gate agent-repl's
+// own functions, and are not agent-repl's errors).
 func startEndedByDaemon(err error) (string, bool) {
+	var label *startLabel
 	switch {
+	case errors.As(err, &label) && label.network:
+		return "met a network this machine cannot reach; its network fault stands", true
+	case errors.As(err, &label) && label.vendor:
+		return "met a vendor that would not start; its vendor fault stands", true
 	case canceled(err):
 		return "ended when its context was cancelled", true
 	case errors.Is(err, shimclient.ErrStandingDown):
 		return "stopped because this daemon is standing down", true
-	case errors.Is(err, ErrHandedOver):
-		return "finished after the workspace was handed to a successor, which adopts its shim", true
+	case errors.Is(err, ErrShimTaken):
+		return "ended when its shim was taken from it (handed to a successor, or stopped)", true
 	default:
 		return "", false
 	}
