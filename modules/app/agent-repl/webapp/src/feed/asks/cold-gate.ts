@@ -365,7 +365,9 @@ function drawActions(
   opener.setAttribute("data-compact-open", "");
   opener.textContent = COLD_GATE_COPY.compact.label;
   opener.title = COLD_GATE_COPY.compact.hint;
-  row.append(opener);
+  // COMPACT LEADS THE ROW (owner request, 2026-10-03): the first button on
+  // the left.
+  row.prepend(opener);
 
   const submenu = drawCompactSubmenu(rc, menu, buttons, actions, progress, path);
   submenu.el.hidden = true;
