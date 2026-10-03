@@ -144,7 +144,46 @@ export function clearedCutEntry(
  * vendor's own sequence, and the turn's terminal releases it regardless (the
  * fold owns that backstop). Bounded to one value, cleared on use.
  */
+/**
+ * The compaction a session is in, by identity: the vendor's uuid of its FIRST
+ * `compacting` status. The vendor re-sends that status about every thirty
+ * seconds while it compacts; every re-send keeps the first one's identity.
+ * `begin` names the compaction a status belongs to (opening it if none is
+ * open); `take` hands the open one to the cut that ends it and closes it.
+ */
+export interface CompactionTracker {
+  begin(statusUuid: string): string;
+  take(): string | undefined;
+}
+
+/** A tracker over one mutable slot: what the fold and the engine each hold. */
+export function compactionTracker(): CompactionTracker {
+  let open: string | undefined;
+  return {
+    begin(statusUuid) {
+      open ??= statusUuid;
+      return open;
+    },
+    take() {
+      const taken = open;
+      open = undefined;
+      return taken;
+    },
+  };
+}
+
+/** A `CompactionId` for `value`, or nothing when there is none. */
+export function compactionIdField(
+  value: string | undefined,
+): { compaction?: conversationv1.CompactionId } {
+  return value === undefined || value === ""
+    ? {}
+    : { compaction: create(conversationv1.CompactionIdSchema, { value }) };
+}
+
 export interface PendingCompaction {
+  /** The compaction this boundary ends (see CompactionTracker), when one opened. */
+  readonly compactionId?: string;
   readonly vendorUuid: string;
   readonly tokensBefore: bigint;
   readonly tokensAfter: bigint;
@@ -201,6 +240,7 @@ export function compactionEntry(
           cut: {
             case: "compacted",
             value: create(conversationv1.ContextCompactedSchema, {
+              ...compactionIdField(pending.compactionId),
               ...(summary === undefined ? {} : { summary: prose(summary) }),
               tokens: create(conversationv1.ContextTokenDeltaSchema, {
                 tokensBefore: pending.tokensBefore,
@@ -441,6 +481,7 @@ export function convertSessionMessage(
   context: FoldContext,
   compactionSink?: (pending: PendingCompaction) => void,
   clearSink?: (pending: PendingClear) => void,
+  compaction?: CompactionTracker,
 ): readonly PersistEntry[] {
   const record = message as unknown as Record<string, unknown>;
   const uuid = typeof record.uuid === "string" ? record.uuid : "";
@@ -535,7 +576,8 @@ export function convertSessionMessage(
       // it. What stays here is the SUCCESS cut, which needs the boundary's real
       // figures and the summary that follows — facts only the fold sees.
       if (status === "compacting") {
-        LOGGER.info({ uuid }, "the vendor began compacting the context");
+        const id = compaction?.begin(uuid) ?? uuid;
+        LOGGER.info({ uuid, compaction_id: id }, "the vendor began compacting the context");
         return [
           sessionEntry(
             context,
@@ -544,11 +586,16 @@ export function convertSessionMessage(
             create(conversationv1.SessionUpdateSchema, {
               update: {
                 case: "compacting",
-                value: create(conversationv1.SessionCompactingSchema, {}),
+                value: create(conversationv1.SessionCompactingSchema, compactionIdField(id)),
               },
             }),
           ),
         ];
+      }
+      // A FAILED compaction's cut is the engine's (it holds the compaction it
+      // asked for), but the compaction it ends is over here too.
+      if (record.compact_result === "failed") {
+        compaction?.take();
       }
       LOGGER.logVerbose({ uuid, status }, "a status message with no conversation fact; consumed");
       return [];
@@ -560,7 +607,9 @@ export function convertSessionMessage(
       const after = metadata?.post_tokens;
       const duration = metadata?.duration_ms;
       const summaryUuid = summaryAnchor(metadata, uuid);
+      const compactionId = compaction?.take();
       const pending: PendingCompaction = {
+        ...(compactionId === undefined ? {} : { compactionId }),
         vendorUuid: uuid,
         tokensBefore: typeof before === "number" ? BigInt(Math.trunc(before)) : 0n,
         tokensAfter: typeof after === "number" ? BigInt(Math.trunc(after)) : 0n,
