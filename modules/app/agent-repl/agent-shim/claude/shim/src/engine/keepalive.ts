@@ -129,7 +129,8 @@ export interface RecordTurn {
  *
  * Deliberately not a history. The rewind needs exactly one anchor — the last
  * record written while a REAL turn was in flight — and the count of keep-alive
- * turns since, which is what makes the obligation reportable.
+ * turns since, which is what makes the obligation reportable. Taking a new
+ * anchor therefore starts the count over.
  */
 export class KeepaliveRewind {
   private anchor: { readonly uuid: string; readonly turnId: string } | undefined;
@@ -154,6 +155,16 @@ export class KeepaliveRewind {
     const uuid = (message as { uuid?: unknown }).uuid;
     if (typeof uuid !== "string" || uuid === "") return;
     this.anchor = { uuid, turnId: turn.turnId };
+    // THE DEBT IS "KEEP-ALIVE TURNS SINCE THE LAST REAL RECORD", so a new
+    // anchor starts it over. A keep-alive counted before this record — one that
+    // ran ahead of the session's first real prompt, or after a cleared anchor,
+    // and was CARRIED by the prompt that followed — lies behind the anchor, and
+    // no rewind to it can discard that turn. Keeping it on the count made the
+    // next keep-alive replace the vendor's query for nothing, and a replaced
+    // query loses whatever the vendor had pending (2026-10-03: the e2e
+    // TestKeepAliveAnswerAfterVendorTurnNeverServed lost its queued vendor turn
+    // this way whenever a keep-alive beat before its first prompt).
+    this.keepaliveTurns = 0;
   }
 
   /**
