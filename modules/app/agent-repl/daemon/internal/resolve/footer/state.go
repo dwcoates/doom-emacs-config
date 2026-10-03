@@ -447,6 +447,12 @@ type wsState struct {
 	// stood and ended through compaction.go's standCompaction/endCompaction,
 	// which bind it to the act it narrates.
 	compaction *standing
+	// concludedCompactions are the identities of the latest compactions whose
+	// cut this footer took, newest last (at most maxConcludedCompactions). A
+	// compaction's start signal and its cut travel on different streams with
+	// no order between them, so a start signal can arrive AFTER its own cut;
+	// one naming a concluded compaction is stale, never a new compaction.
+	concludedCompactions []string
 
 	// interrupting is the registered-interrupt flag SetInterrupting installs.
 	interrupting bool

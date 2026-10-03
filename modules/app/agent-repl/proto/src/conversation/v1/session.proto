@@ -14,6 +14,7 @@ package conversation.v1;
 import "conversation/v1/api.proto";
 import "conversation/v1/detached_work.proto";
 import "conversation/v1/permission.proto";
+import "conversation/v1/slash_command.proto";
 import "conversation/v1/turn.proto";
 
 option go_package = "agentrepl/proto/conversation/v1;conversationv1";
@@ -373,6 +374,12 @@ message SessionTitle {
 
 // Presence is the fact: the vendor is compacting the context right now.
 message SessionCompacting {
+  // WHICH COMPACTION: the vendor's id for this compaction's first `compacting`
+  // status; its periodic re-sends carry the same id. The cut that ends it
+  // carries it too (ContextCompacted/ContextCompactionFailed.compaction), so a
+  // start signal arriving after its own cut is recognized as stale. ABSENT
+  // from an older shim.
+  optional CompactionId compaction = 1;
 }
 
 // The vendor's context-budget warning: its own signal that the context

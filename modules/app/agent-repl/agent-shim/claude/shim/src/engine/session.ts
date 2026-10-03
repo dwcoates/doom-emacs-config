@@ -56,7 +56,7 @@ import {
 import { terminalUpsertKey } from "../store/keys.js";
 import { PersistenceError, REPAINT } from "../store/persistence.js";
 import { describeVendorTaskAnswer } from "../store/locator.js";
-import type { AgentPageSession, PersistEntry, Persistence } from "../store/persistence.js";
+import type { AgentPageSession, PersistEntry, Persistence, RecordPlace } from "../store/persistence.js";
 import {
   announceLiveWork,
   bashUnitsWithoutCommand,
@@ -110,7 +110,8 @@ import { settleable, type Settleable } from "./settleable.js";
 import type { EngineFold, FoldContext, LastChange } from "./fold-context.js";
 import { normalizeModel, SYNTHETIC_MODEL } from "../model.js";
 import { TRUST_KEY, VENDOR_CONFIG_FILE, trustRoot } from "../trust.js";
-import { fastModeUpdate } from "../convert/session-updates.js";
+import { recordTimestampMs } from "../convert/place.js";
+import { compactionIdField, compactionTracker, fastModeUpdate } from "../convert/session-updates.js";
 import { backupTranscript } from "./backup.js";
 import {
   appendCompactionLines,
@@ -627,6 +628,8 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   /** The instant BOTH cold-gate sites judge a transcript at. */
   const coldNowMs = (): number => deps.nowMs() + (deps.coldGateLaterMs ?? 0);
   const pushes = new SessionPushes(deps.nowMs, deps.runtime.shimBuildSha);
+  /** The compaction the live session is in (see CompactionTracker). */
+  const liveCompaction = compactionTracker();
   const live = new LiveWorkTable();
   /** Each detached shell run's start row, for `WatchBash`'s durability barrier. */
   const shellRunStarts = new ShellRunStarts();
@@ -1986,6 +1989,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // ordinary message reaches the fold in the same step it always did.
     if (verdict.absorbed.length > 0) await concludeAbsorbedTurns(verdict);
     if (verdict.openedVendorTurn) await adoptVendorTurn(message, verdict);
+    // AFTER the adoption: the adopting message's own instant is the new
+    // turn's, so it must not lift the bound its prompt is placed at.
+    noteMainRecordInstant(message);
     noteRewindBoundary(message);
     notePreInitMessage(message);
     noteIdentityFacts(message, attribution);
@@ -2126,6 +2132,38 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     writeAdoptedPrompt(turn, "the vendor started a turn with no send of the shim's answering", messageKind(message));
   }
 
+  /**
+   * THE LATEST MAIN-THREAD VENDOR RECORD INSTANT seen, epoch ms (0: none yet).
+   * The main thread's records are emitted in order, so every record of a turn
+   * the vendor starts next is at or after this instant: it is the bound an
+   * adopted turn's prompt is placed at (see {@link adoptedPromptPlace}).
+   */
+  let lastMainRecordMs = 0;
+  /** The last ordinal a place can state (`ConversationPlace.ordinal` is a uint32). */
+  const LAST_ORDINAL = 0xffff_ffff;
+
+  /** Lift the main-thread bound to MESSAGE's own instant, when it states one. */
+  function noteMainRecordInstant(message: SdkMessage): void {
+    const parent = (message as { parent_tool_use_id?: unknown }).parent_tool_use_id;
+    if (parent !== null && parent !== undefined) return;
+    const at = recordTimestampMs(message);
+    if (at !== undefined && at > lastMainRecordMs) lastMainRecordMs = at;
+  }
+
+  /**
+   * WHERE AN ADOPTED TURN'S PROMPT SITS: after every row placed at the last
+   * main-thread record's instant and before every row of the turn it opens.
+   * Its rows are placed by their vendor records' instants (convert/place.ts),
+   * all at or after that bound, so the prompt takes the bound's LAST ordinal.
+   * The observation clock it used to read was later than those records
+   * whenever the shim lagged the vendor, and a replay then walked the turn's
+   * rows before its prompt. With no main record seen yet there is no vendor
+   * bound, and the writer's observation clock places it.
+   */
+  function adoptedPromptPlace(): RecordPlace | undefined {
+    return lastMainRecordMs > 0 ? { atMs: lastMainRecordMs, ordinal: LAST_ORDINAL } : undefined;
+  }
+
   /** A shim-minted id for a turn no StartTurn stands behind. */
   function mintAdoptedTurn(): OpenTurn {
     // NOT `newUuid`: that minter names SENDS, whose uuids the vendor echoes
@@ -2149,10 +2187,13 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       create(conversationv1.UserSaidSchema, { content: create(conversationv1.UserContentSchema, {}) }),
       conversationv1.PromptOrigin.VENDOR_STARTED,
     );
-    deps.persistence.write([promptEntry(prompt, agentId, false)]);
+    const place = adoptedPromptPlace();
+    const entry = promptEntry(prompt, agentId, false);
+    deps.persistence.write([place === undefined ? entry : { ...entry, recordPlace: place }]);
     LOGGER.info(
       {
         turn_id: turn.id.value,
+        place_at_ms: place?.atMs ?? "observed",
         cause,
         first_message: firstMessage,
         vendor_session_id: identity?.vendorSessionId ?? "",
@@ -2531,14 +2572,26 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       noteReportedModel((message as { fallback_model?: unknown }).fallback_model);
       return;
     }
+    if (message.type === "system" && message.subtype === "compact_boundary") {
+      // The boundary is the compaction's end: its cut (the fold's) carries
+      // the identity; the live start signal's tracker closes with it.
+      liveCompaction.take();
+    }
     if (message.type === "system" && message.subtype === "status") {
       if (message.status === "compacting") {
         // The vendor compacts on its own when the window fills. The status
         // message is the START signal so a surface can draw the in-progress
-        // state; the ContextCut page line below is the end.
+        // state; the ContextCut page line below is the end. Both carry the
+        // compaction's identity (its first status's uuid; the vendor's
+        // re-sends keep it), because they travel on different streams and a
+        // consumer must tell a late start signal from a new compaction.
+        const id = liveCompaction.begin(typeof message.uuid === "string" ? message.uuid : "");
         pushes.push(
           create(conversationv1.SessionUpdateSchema, {
-            update: { case: "compacting", value: create(conversationv1.SessionCompactingSchema, {}) },
+            update: {
+              case: "compacting",
+              value: create(conversationv1.SessionCompactingSchema, compactionIdField(id)),
+            },
           }),
         );
       }
@@ -2551,7 +2604,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       // sentinel the contract forbids. A FAILURE has no boundary record at all,
       // so this is its only producer, and its one field is fully stated.
       if (message.compact_result === "failed") {
-        writeContextCut(contextCutFailed(message.compact_error ?? "the vendor's compaction failed"));
+        writeContextCut(
+          contextCutFailed(message.compact_error ?? "the vendor's compaction failed", liveCompaction.take()),
+        );
       }
     }
   }
