@@ -2165,6 +2165,43 @@ than being handed an arbitrary substitute."
       ;; Assert
       (should (null (agent-repl-host-stream "ws-1"))))))
 
+(ert-deftest agent-repl-test-host-planned-link-down-is-recorded-at-info ()
+  "A link the daemon announced the end of goes down at INFO."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-connect-open "127.0.0.1:9001")))
+      (agent-repl-test-host--subscribe "ws-1" conn)
+      ;; Act
+      (let ((agent-repl-link-down-planned t))
+        (agent-repl-host-on-link-down conn))
+      ;; Assert
+      (should (agent-repl-test-host--logged-p
+               :info "elisp.host.link-down workspaces=1 planned=t")))))
+
+(ert-deftest agent-repl-test-host-planned-link-down-writes-no-warning ()
+  "A planned link-down never writes the WARNING of a lost link."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-connect-open "127.0.0.1:9001")))
+      (agent-repl-test-host--subscribe "ws-1" conn)
+      ;; Act
+      (let ((agent-repl-link-down-planned t))
+        (agent-repl-host-on-link-down conn))
+      ;; Assert
+      (should-not (agent-repl-test-host--logged-p :warn "elisp.host.link-down")))))
+
+(ert-deftest agent-repl-test-host-unannounced-link-down-is-a-warning ()
+  "A link that died with no word from its daemon stays a WARNING."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-connect-open "127.0.0.1:9001")))
+      (agent-repl-test-host--subscribe "ws-1" conn)
+      ;; Act
+      (agent-repl-host-on-link-down conn)
+      ;; Assert
+      (should (agent-repl-test-host--logged-p
+               :warn "elisp.host.link-down workspaces=1 planned=nil")))))
+
 (ert-deftest agent-repl-test-host-link-down-keeps-the-last-state ()
   "The pushed state is the newest fact Emacs has; an outage must not blank it."
   (agent-repl-test-host--with-harness
