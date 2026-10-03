@@ -222,9 +222,9 @@ describe("the standing gate", () => {
   it("says what each choice keeps as its button's tooltip", () => {
     const el = drawFeedColdGate(gate(standing()), askHarness().rc);
     expect([...el.querySelectorAll<HTMLElement>(".cold-gate-buttons > *")].map((n) => n.title)).toEqual([
+      COLD_GATE_COPY.compact.hint,
       COLD_GATE_COPY.pay.hint,
       COLD_GATE_COPY.clear.hint,
-      COLD_GATE_COPY.compact.hint,
     ]);
   });
 
@@ -233,13 +233,19 @@ describe("the standing gate", () => {
     expect(el.querySelector(".hibernation-option-text")).toBeNull();
   });
 
-  it("puts every button on the one row, in order", () => {
+  it("puts every button on the one row, compact first", () => {
     const el = drawFeedColdGate(gate(standing()), askHarness().rc);
     expect([...el.querySelectorAll(".cold-gate-buttons > *")].map((n) => n.textContent)).toEqual([
+      COLD_GATE_COPY.compact.label,
       COLD_GATE_COPY.pay.label,
       COLD_GATE_COPY.clear.label,
-      COLD_GATE_COPY.compact.label,
     ]);
+  });
+
+  it("gives compact the pay button's fill and a green border", async () => {
+    const css = (await import("../../../src/styles.css?raw")).default;
+    const rule = /\.cold-gate-buttons > ar-button\.hibernation-compact\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
+    expect([rule.includes("background: var(--bg)"), rule.includes("border-color: var(--ok)")]).toEqual([true, true]);
   });
 
   it("sizes the buttons equal, to the widest label, centred", async () => {

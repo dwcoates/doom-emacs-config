@@ -6237,6 +6237,14 @@ bubble-body.bubble-body { display: block; }
   justify-content: center;
   white-space: nowrap;
 }
+/* ONE FILL FOR EVERY BUTTON (owner request, 2026-10-03): the pay button's
+   page-coloured background; each keeps its own border, and compact -- first
+   on the row -- takes a green one in place of its old fill. */
+.cold-gate-buttons > ar-button.hibernation-compact {
+  background: var(--bg);
+  color: var(--fg);
+  border-color: var(--ok);
+}
 .cold-gate-choice {
   display: block;
   padding: 0.1rem 0;
