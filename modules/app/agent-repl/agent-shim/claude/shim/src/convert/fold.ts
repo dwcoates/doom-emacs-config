@@ -39,7 +39,10 @@
  *     FILE plane can also reach — the session the clear rotated to — and the
  *     `conversation_reset` does not name it; the init that follows does;
  *   - the LAST TOP-LEVEL RESPONSE unit, because `AgentCompleted.answer` names it
- *     and only the fold has seen which one it was — the main stream's alone;
+ *     and only the fold has seen which one it was — the main stream's alone —
+ *     CONSUMED by the terminal that names it (the turn's result, or an
+ *     absorbed turn's conclusion), so a later turn that produced no prose of
+ *     its own names no answer rather than an earlier turn's;
  *   - the LAST VENDOR API ERROR of the turn — the main stream's alone, since
  *     the terminal it feeds is the main turn's — because the result record states
  *     only the HTTP status and the vendor's own error CLASS and retry delay ride
@@ -293,7 +296,7 @@ export function createFold(): Fold {
       state.taskKinds.rememberStoreAnswer(taskId, describeVendorTaskAnswer(answer));
     },
     taskAgent: (taskId) => taskAgentKnowledge(state.taskKinds, taskId),
-    concludeAbsorbedTurn: (context, coordinate) => absorbedTurnTerminal(context, coordinate, state.lastAnswer),
+    concludeAbsorbedTurn: (context, coordinate) => absorbedTurnTerminal(context, coordinate, consumeAnswer(state)),
   };
 }
 
@@ -377,7 +380,7 @@ function dispatch(message: SdkMessage, context: FoldContext, state: FoldState): 
       // compaction undrawn for minutes. It lands before the terminal, which
       // stays the turn's last word.
       const released = releaseCompaction(context, state, "the turn ended");
-      const output = convertResult(message, context, state.lastAnswer, vendorApiError);
+      const output = convertResult(message, context, consumeAnswer(state), vendorApiError);
       // NO CALL OUTLIVES ITS TURN: the registry drains at every terminal. A
       // STOP CUTS WHAT WAS GENUINELY OPEN, and the calls it cut get no
       // `tool_result` of their own — so their terminals are owed here or
@@ -714,6 +717,24 @@ function noticeText(message: unknown): string | undefined {
 function answersWithProse(result: conversationv1.AgentResponse["result"]): boolean {
   if (result.case === "success") return true;
   return result.case === "failure" && (result.value.prose?.markdown ?? "") !== "";
+}
+
+/**
+ * Hand the remembered ANSWER to the terminal that names it, and forget it.
+ *
+ * CONSUMED, NOT KEPT. An answer belongs to the turn that produced it, and the
+ * terminal naming it is that turn's last word. Left behind, it was named again
+ * by the NEXT turn that drew no prose of its own: a vendor-started turn
+ * (a stopped background task's notification, answered with no reply) adopted
+ * after a keep-alive concluded naming the keep-alive's `.`, which no plane
+ * stores, and the daemon raised `final_answer_unresolved` for it on every
+ * replay; one adopted after a turn that ended on a vendor notice named that
+ * EARLIER turn's row as its own answer.
+ */
+function consumeAnswer(state: FoldState): conversationv1.AgentActivityId | undefined {
+  const answer = state.lastAnswer;
+  state.lastAnswer = undefined;
+  return answer;
 }
 
 /**

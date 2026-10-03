@@ -882,6 +882,14 @@ to turns. Arrival order attributes nothing.
   FOLDS it in. A fold (a vendor-started turn whose echo moves onto one of our
   sends) concludes the adopted turn as absorbed (`Fold.concludeAbsorbedTurn`,
   COMPLETED naming its last prose) before the send's rows.
+- **A TURN'S ANSWER IS CONSUMED BY THE TERMINAL THAT NAMES IT** (2026-10-03,
+  `convert/fold.ts` `consumeAnswer`): the result and an absorbed turn's
+  conclusion each take the remembered last prose and leave none behind. A
+  vendor-started turn with no reply of its own (a stopped background task's
+  notification, typically right after a keep-alive rewind) used to conclude
+  naming the PREVIOUS turn's answer — the keep-alive's `.`, which no plane
+  stores — and the daemon raised `final_answer_unresolved` for it live and on
+  every replay. It now names no answer, which is what it produced.
 - **AN ECHO NAMING A UUID WE NEVER SENT** is an invariant violation: ERROR
   (`shim-engine-sends`), attributed to no turn, never guessed.
 - **WHAT NO ID SPEAKS TO.** A turn's preamble (init, a UserPromptSubmit

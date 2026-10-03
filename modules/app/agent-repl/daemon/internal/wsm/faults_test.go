@@ -343,3 +343,107 @@ func TestOpenFaultRefusesAForgottenWorkspaceAsNotFound(t *testing.T) {
 		})
 	}
 }
+
+func TestFaultRecordedMatchesByWhatTheFaultWasRaisedAbout(t *testing.T) {
+	recordedEvidence := map[string]string{"turn": "adopted-1", "unit": "msg-1:0", "why": "answer_row_unresolved"}
+	tests := []struct {
+		name     string
+		resolved bool
+		kind     string
+		evidence map[string]string
+		want     bool
+	}{
+		{name: "an open fault with the same evidence", kind: "final_answer_unresolved", evidence: recordedEvidence, want: true},
+		{name: "a resolved fault with the same evidence", resolved: true, kind: "final_answer_unresolved", evidence: recordedEvidence, want: true},
+		{name: "a subset of the recorded evidence", kind: "final_answer_unresolved", evidence: map[string]string{"turn": "adopted-1"}, want: true},
+		{name: "another turn", kind: "final_answer_unresolved", evidence: map[string]string{"turn": "adopted-2", "unit": "msg-1:0", "why": "answer_row_unresolved"}, want: false},
+		{name: "another kind", kind: "keepalive_failed", evidence: recordedEvidence, want: false},
+		{name: "an evidence key the record does not carry", kind: "final_answer_unresolved", evidence: map[string]string{"turn": "adopted-1", "agent": "main"}, want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			s, _ := testStore(t)
+			ws := testWorkspace(t, s)
+			id, err := s.OpenFault(context.Background(), Fault{
+				Workspace: &ws.ID, Kind: "final_answer_unresolved", Detail: "no drawn row", Evidence: recordedEvidence, OpenedAt: instant,
+			})
+			if err != nil {
+				t.Fatalf("OpenFault: %v", err)
+			}
+			if tt.resolved {
+				if err := s.CloseFault(context.Background(), id, instant.Add(time.Minute)); err != nil {
+					t.Fatalf("CloseFault: %v", err)
+				}
+			}
+
+			// Act.
+			got, err := s.FaultRecorded(context.Background(), FaultMatch{Workspace: ws.ID, Kind: tt.kind, Evidence: tt.evidence})
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("FaultRecorded: %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("FaultRecorded = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFaultRecordedIsScopedToItsWorkspace(t *testing.T) {
+	// Arrange.
+	s, _ := testStore(t)
+	raised := testWorkspaceNamed(t, s, "raised")
+	other := testWorkspaceNamed(t, s, "other")
+	evidence := map[string]string{"turn": "adopted-1"}
+	if _, err := s.OpenFault(context.Background(), Fault{
+		Workspace: &raised.ID, Kind: "final_answer_unresolved", Evidence: evidence, OpenedAt: instant,
+	}); err != nil {
+		t.Fatalf("OpenFault: %v", err)
+	}
+
+	// Act.
+	got, err := s.FaultRecorded(context.Background(), FaultMatch{Workspace: other.ID, Kind: "final_answer_unresolved", Evidence: evidence})
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("FaultRecorded: %v", err)
+	}
+	if got {
+		t.Fatalf("FaultRecorded = true for a workspace that raised nothing")
+	}
+}
+
+func TestFaultRecordedRefusesAnIllFormedMatch(t *testing.T) {
+	tests := []struct {
+		name  string
+		match func(ws WorkspaceID) FaultMatch
+	}{
+		{name: "no kind", match: func(ws WorkspaceID) FaultMatch { return FaultMatch{Workspace: ws} }},
+		{name: "no workspace", match: func(WorkspaceID) FaultMatch { return FaultMatch{Kind: "final_answer_unresolved"} }},
+		{name: "an evidence key that is no field name", match: func(ws WorkspaceID) FaultMatch {
+			return FaultMatch{Workspace: ws, Kind: "final_answer_unresolved", Evidence: map[string]string{"turn') OR 1=1 --": "x"}}
+		}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			s, log := testStore(t)
+			ws := testWorkspace(t, s)
+
+			// Act.
+			_, err := s.FaultRecorded(context.Background(), tt.match(ws.ID))
+
+			// Assert.
+			if err == nil {
+				t.Fatalf("FaultRecorded accepted an ill-formed match")
+			}
+			if !loggedOperation(log, "daemon.wsm.fault_recorded", "error") {
+				t.Fatalf("the refusal was not logged at error: %v", log.Records())
+			}
+		})
+	}
+}
