@@ -142,17 +142,20 @@ describe("classification detail", () => {
 
   // This set assertion boots one real-socket harness per classification.
   it("draws every classification with a distinct rendering", async () => {
-    // Arrange
+    // Arrange: ONE page, each arm pushed live over its open tray stream.
+    // Booting a daemon and a page per arm made this test's cost scale with
+    // the arm count and overran its budget under concurrent load.
+    await withTray({ items: [] });
     const rendered: string[] = [];
     for (const classification of HOLD_CLASSIFICATION_ARMS) {
-      await withTray({ items: [heldPromptItem({ classification })] });
+      // Act
+      harness.fake.setTray(WORKSPACE_ID, holdTray({ items: [heldPromptItem({ classification })] }));
+      await harness.settle();
       rendered.push(harness.$(`[data-held-turn="${HELD_TURN_ID}"]`)?.innerHTML ?? "");
-      await harness.stop();
     }
-    harness = await startHarness();
     // Assert
-    expect(new Set(rendered).size).toBe(HOLD_CLASSIFICATION_ARMS.length);
-  }, 1_500);
+    expect([new Set(rendered).size, rendered.includes("")]).toEqual([HOLD_CLASSIFICATION_ARMS.length, false]);
+  });
 });
 
 describe.each(HOLD_ARMS)("a %s hold reason", (hold) => {
@@ -165,20 +168,19 @@ describe.each(HOLD_ARMS)("a %s hold reason", (hold) => {
 });
 
 describe("hold reasons draw distinctly", () => {
-  // These socket-backed redraws reached 904-908ms under concurrent integration
-  // load, so keep their host-contention budget local to the two affected tests.
   it("gives every hold arm its own rendering", async () => {
-    // Arrange
+    // Arrange: one page, each arm pushed live (see the classification test).
+    await withTray({ items: [] });
     const rendered: string[] = [];
     for (const hold of HOLD_ARMS) {
-      await withTray({ items: [heldPromptItem({ hold })] });
+      // Act
+      harness.fake.setTray(WORKSPACE_ID, holdTray({ items: [heldPromptItem({ hold })] }));
+      await harness.settle();
       rendered.push(harness.$(`[data-held-turn="${HELD_TURN_ID}"]`)?.innerHTML ?? "");
-      await harness.stop();
     }
-    harness = await startHarness();
     // Assert
-    expect(new Set(rendered).size).toBe(HOLD_ARMS.length);
-  }, 1_500);
+    expect([new Set(rendered).size, rendered.includes("")]).toEqual([HOLD_ARMS.length, false]);
+  });
 
   it("draws the shutdown hold's own schedule id", async () => {
     // Arrange / Act
