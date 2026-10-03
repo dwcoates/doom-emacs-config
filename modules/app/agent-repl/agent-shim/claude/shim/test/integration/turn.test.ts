@@ -1667,6 +1667,29 @@ describe("keep-alives", () => {
     expect(storedCarrying(shim, KEEPALIVE_MARKER)).toEqual([]);
   });
 
+  test("a keep-alive the first prompt carried costs the next keep-alive no rewind", async () => {
+    // THE E2E FLAKE OF 2026-10-03. The cadence starts with the session, so a
+    // StartTurn landing after the first beat finds a keep-alive with NO anchor
+    // to rewind to, and the prompt carries it. That keep-alive lies behind the
+    // real turn's anchor; counting it as debt made the next keep-alive replace
+    // the query, and the vendor's turn queued on the replaced query never ran.
+    const shim = await spawnBeating();
+    await shim.clients.h1.startSession(freshSession());
+    await keepaliveTurnClosed(shim);
+    const vendorTurnRan = shim.log.record(
+      (record) => record.message === "fake vendor runs a turn of its OWN before the next send; nothing in it is stamped",
+    );
+
+    turnStarted(await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!queue-vendor-turn" })));
+    await vendorTurnRan;
+
+    const rewoundBeforeAKeepalive = shim.log
+      .records()
+      .filter((record) => record.context.before === "keepalive")
+      .map((record) => record.context);
+    expect(rewoundBeforeAKeepalive).toEqual([]);
+  });
+
   test("the vendor's own turn ahead of a keep-alive is still served", async () => {
     // The fix must not overcorrect: a turn nobody's send started is real
     // conversation, and hiding it with the keep-alive would lose it.
