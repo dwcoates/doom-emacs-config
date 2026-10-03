@@ -71,6 +71,7 @@
 (declare-function agent-repl-link-primary "daemon-link" ())
 (declare-function agent-repl-link-live "daemon-link" ())
 (declare-function agent-repl-link-successor "daemon-link" ())
+(declare-function agent-repl-link-ending-p "daemon-link" (conn))
 (defvar agent-repl-link-promote-functions)
 
 (declare-function agent-repl--ws-get "workspace" (ws key))
@@ -1135,7 +1136,19 @@ the link\='s edges walk every detached workspace:
   - the live daemon IS the one WS lost, and it is handing over: its
     successor\='s promotion re-attaches WS (`agent-repl-host-on-link-promote')
     -- registering on a daemon that is leaving would only fail;
-  - otherwise WS is walked onto the live daemon now."
+  - the live daemon announced its OWN ending -- WS\='s stream on it ended
+    planned, or the link\='s `WatchDaemon' carried the ending
+    (`agent-repl-link-ending-p') -- with no successor standing: the
+    link-down edge that ending is owed, then the link-up edge onto the next
+    daemon, re-attaches WS (`agent-repl-host-on-link-up').  The streams end
+    in no fixed order, so a workspace\='s planned end routinely arrives while
+    the link still names the departing daemon;
+  - otherwise WS is walked onto the live daemon now.
+
+Regression, 2026-10-03: a bounce\='s announced stand-down registered every
+workspace on the daemon that had just said it was leaving, and each one
+failed (`elisp.host.planned-ending-register-failed', with the connect
+and rpc failures under it) a millisecond before the link went down."
   (let ((live (agent-repl-link-live))
         (walk (plist-get (agent-repl-host--entry ws) :reattach)))
     (agent-repl-host--put ws :detached t)
@@ -1148,6 +1161,11 @@ the link\='s edges walk every detached workspace:
      ((and (eq live (agent-repl-host--recorded-conn ws))
            (or (agent-repl-link-successor) (agent-repl-link-successor-pending-p)))
       (agent-repl--info ws "elisp.host.reattach-awaiting-promotion ws=%s trigger=%s address=%S"
+                        ws trigger (agent-repl-connect-connection-address live)))
+     ((or (agent-repl-link-ending-p live)
+          (and (equal trigger "planned-ending")
+               (eq live (agent-repl-host--recorded-conn ws))))
+      (agent-repl--info ws "elisp.host.reattach-awaiting-link-edge ws=%s trigger=%s address=%S"
                         ws trigger (agent-repl-connect-connection-address live)))
      (t
       (agent-repl-host--reattach ws live :register trigger)))))
