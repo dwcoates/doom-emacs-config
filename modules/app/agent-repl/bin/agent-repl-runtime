@@ -9,10 +9,11 @@
 #   build [--force] [component...]  build what is stale (bin/build-frontend.sh)
 #   byte-compile                    byte-compile the elisp as a warning gate
 #                                   (bin/byte-compile.sh)
-#   bounce                          rebuild everything, stop every backend
-#                                   (daemon, shims, store, sidecar), bring the
-#                                   store and sidecar back; Emacs starts the
-#                                   fresh daemon on its next link
+#   bounce                          rebuild everything and stand the daemon
+#                                   and its shims down; Emacs starts the fresh
+#                                   daemon on its next link, and its boot
+#                                   restarts the store and sidecar onto the
+#                                   fresh build before any shim starts
 #                                   (scripts/bounce-agent-repl-forcefully.sh)
 #   bounce --hard                   byte-compile gate, then `bounce`, then
 #                                   restart Emacs.app itself, so the editor,
