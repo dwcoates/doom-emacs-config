@@ -46,6 +46,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -117,6 +118,18 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	// THE READY LINE COMES AFTER THE FLOCK, NEVER BEFORE IT. The shim treats
 	// this line as proof the claim is made; announcing intent would let it
 	// start a session over a lock it does not hold.
+	// THE LOCK OUTLIVES A SIGNAL TO ITS PROCESS GROUP. This process is in the
+	// shim's group (the shim leads one of its own), so a stop the daemon sends
+	// the group -- SIGTERM, which starts the shim's GRACEFUL stand-down -- used
+	// to end this holder at once: the lock was released while the shim went on
+	// serving its session for seconds, and a daemon booting in that window read
+	// "lock free, socket live" and adopted a running session as an inert shim
+	// (live bounce 2026-10-03 14:11, shim pid 26015). The lock is the shim's,
+	// so only the shim's end ends it: stdin's EOF (its exit or its deliberate
+	// release). SIGKILL, which cannot be ignored, still releases it with the
+	// process, as the kernel lock always did.
+	signal.Ignore(syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
+
 	if _, err := fmt.Fprintln(stdout, ReadyLine); err != nil {
 		log.Error("shim-lock.acquire", "the ready line could not be written: "+err.Error(), ctx)
 		return withSinkStatus(log, exitError)
