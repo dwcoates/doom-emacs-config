@@ -245,7 +245,17 @@ describe("the standing gate", () => {
   it("gives compact the pay button's fill and a green border", async () => {
     const css = (await import("../../../src/styles.css?raw")).default;
     const rule = /\.cold-gate-buttons > ar-button\.hibernation-compact\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
-    expect([rule.includes("background: var(--bg)"), rule.includes("border-color: var(--ok)")]).toEqual([true, true]);
+    expect([rule.includes("background: var(--bg)"), rule.includes("border-color: var(--cold-gate-compact-border)")]).toEqual([true, true]);
+  });
+
+  it("draws clear's label in the shared colour, borders half again as thick", async () => {
+    const css = (await import("../../../src/styles.css?raw")).default;
+    expect([
+      css.includes(".cold-gate-buttons > ar-button.hibernation-clear { color: var(--fg); }"),
+      css.includes(".cold-gate-buttons > ar-button { border-width: 1.5px; }"),
+      css.includes("--cold-gate-compact-border: #128a3d;"),
+      css.includes(".cold-gate .hibernation-actions:has(> .cold-gate-buttons) { margin-bottom: 0.45rem; }"),
+    ]).toEqual([true, true, true, true]);
   });
 
   it("sizes the buttons equal, to the widest label, centred", async () => {
