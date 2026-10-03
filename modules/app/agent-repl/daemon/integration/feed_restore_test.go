@@ -8,6 +8,7 @@ import (
 	"connectrpc.com/connect"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
+	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/integration/harness"
@@ -20,14 +21,22 @@ import (
 // refused. Only a workspace with no shim at all serves what it holds, and the
 // newest page reaches its reader the moment a shim comes up.
 
-// restartedWith stops an opened workspace's daemon, writes the shim profile the
-// successor's bring-up spawns its shim under (the store's book is the
-// relaunch fixture's turn: a prompt and its settled answer), and boots the
-// successor on the same state and account roots. It answers the successor's
-// fixture with the workspace announced and both client hops held.
+// restartedWith restarts a freshly opened workspace (restarted) onto a book
+// holding the relaunch fixture's turn: a prompt and its settled answer.
 func restartedWith(t *testing.T, profile harness.ShimProfile) *fixture {
 	t.Helper()
-	f := newOpened(t, harness.Opts{})
+	profile.ResumeHistory = harness.EncodeHistory(t, relaunchAnswerEntry(), relaunchPromptEntry())
+	return restarted(newOpened(t, harness.Opts{}), profile)
+}
+
+// restarted stops a fixture's daemon, writes the shim profile its successor's
+// bring-up spawns the shim under — the book it resumes is the profile's own
+// ResumeHistory — and boots the successor on the same state and account
+// roots, answering the successor's fixture with the workspace announced and
+// both client hops held. A fixture restarted is restartable again.
+func restarted(f *fixture, profile harness.ShimProfile) *fixture {
+	t := f.t
+	t.Helper()
 	expectSessionKillRecords(f.d)
 	if _, err := f.d.Client().UpdateShutdownSchedule(f.d.Ctx(), connect.NewRequest(&agentreplv1.UpdateShutdownScheduleRequest{
 		Action: &agentreplv1.UpdateShutdownScheduleRequest_Now{Now: &agentreplv1.UpdateShutdownScheduleNow{
@@ -39,13 +48,18 @@ func restartedWith(t *testing.T, profile harness.ShimProfile) *fixture {
 	f.d.AwaitExit()
 
 	// WRITTEN BEFORE THE SUCCESSOR STARTS: its boot spawns the shim that reads it.
-	profile.ResumeHistory = harness.EncodeHistory(t, relaunchAnswerEntry(), relaunchPromptEntry())
 	f.d.WriteShimProfile(f.repo.Dir, profile)
 	d2 := harness.StartDaemon(t, harness.Opts{
 		StateDir:   f.d.StateDir,
 		ProfileDir: f.d.ProfileDir,
 		ExtraArgs:  []string{"--default-config-dir", f.d.DefaultConfigDir},
 	})
+	// THE SUCCESSOR RUNS ON ITS PREDECESSOR'S ACCOUNT ROOT — the flag above
+	// overrides the one the harness minted for it — so its fixture names that
+	// root, and a further restart hands the same one on. Naming the minted one
+	// sent the next successor to a root holding no transcript, and it came up
+	// on a FRESH conversation instead of resuming this one.
+	d2.DefaultConfigDir = f.d.DefaultConfigDir
 	f2 := &fixture{d: d2, repo: f.repo, ws: f.ws, t: t}
 	again := harness.Register(t, d2, f.repo.Dir)
 	if again.GetId() != f.ws.GetId() {
@@ -180,4 +194,74 @@ func TestARestartedWorkspacesNewestPageReachesItsReaderWhenTheShimComesUp(t *tes
 	awaitRow(t, f, tail, "the store's answer pushed to the waiting reader", func(r *frontendv1.FeedRow) bool {
 		return r.GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown() == relaunchAnswer
 	})
+}
+
+// THE SHAPE THE OWNER'S WORKSPACE REPLAYED ON EVERY BOOT (2026-10-02): an
+// ADOPTED turn — the vendor started it on its own (a stopped background task's
+// notification, answered with no reply) — whose terminal names an answer no
+// plane stored, because the shim's fold had kept the keep-alive's "." from the
+// turn before and named it again.
+const (
+	adoptedReplayTurn = "adopted-d8d296ab-6fde-45f2-ae82-e0c896b0aaee"
+	unstoredAnswer    = "msg_011CfcgDhgcB7pSBohLKm2Yp:0"
+)
+
+// adoptedTurnBook is the store's book for that turn, newest first: its
+// terminal naming the unstored answer, then its VENDOR_STARTED prompt with no
+// words said.
+func adoptedTurnBook(t *testing.T) [][]byte {
+	t.Helper()
+	return harness.EncodeHistory(t,
+		&conversationv1.HistoryEntry{Entry: &conversationv1.HistoryEntry_AgentFrame{
+			AgentFrame: successFrame(mainAgent, activityID(unstoredAnswer)),
+		}},
+		&conversationv1.HistoryEntry{Entry: &conversationv1.HistoryEntry_UserPrompt{UserPrompt: &conversationv1.AgentPrompt{
+			Id:     &conversationv1.TurnId{Value: adoptedReplayTurn},
+			Agent:  &conversationv1.AgentId{Value: mainAgent},
+			Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_VENDOR_STARTED,
+			Said:   &conversationv1.UserSaid{Content: &conversationv1.UserContent{}},
+		}}},
+	)
+}
+
+// carriesAdoptedTerminal reports whether a page carries the adopted turn's
+// terminal row: the page that replayed it is the one that judged its verdict.
+func carriesAdoptedTerminal(p *frontendv1.FeedPage) bool {
+	return rowIndex(p, func(r *frontendv1.FeedRow) bool {
+		return r.GetTurnEnded() != nil && r.GetTurn().GetValue() == adoptedReplayTurn
+	}) >= 0
+}
+
+// adoptedVerdict matches one of this daemon's records about the adopted turn's
+// verdict under OPERATION.
+func adoptedVerdict(operation string) func(harness.LogRecord) bool {
+	return func(r harness.LogRecord) bool {
+		return r.Operation == operation && r.Context["turn"] == adoptedReplayTurn && r.Context["unit"] == unstoredAnswer
+	}
+}
+
+func TestAnAdoptedTurnsUnresolvedAnswerIsRaisedOnceAcrossRestarts(t *testing.T) {
+	t.Parallel()
+	// Arrange: the first daemon to replay the book — its reader opening the
+	// newest page — judges the turn and raises its verdict.
+	profile := harness.ShimProfile{ResumeHistory: adoptedTurnBook(t)}
+	first := restarted(newOpened(t, harness.Opts{}), profile)
+	first.d.ExpectWarnings("daemon.feed.final_answer_unresolved")
+	first.openFeedOnceCarrying("the adopted turn's terminal", carriesAdoptedTerminal)
+	first.d.AwaitWorkspaceLogRecordInState("the first replay raising the adopted turn's verdict",
+		adoptedVerdict("daemon.feed.final_answer_unresolved"))
+
+	// Act: the next daemon's reader replays the same book.
+	second := restarted(first, profile)
+	second.openFeedOnceCarrying("the adopted turn's terminal", carriesAdoptedTerminal)
+	// Assert: the verdict is found in the record, and raised nowhere again —
+	// the cleanup sweep fails the test on any undeclared ERROR, and this one
+	// is not declared on the second daemon.
+	second.d.AwaitWorkspaceLogRecordInState("the second replay finding the verdict recorded",
+		adoptedVerdict("daemon.feed.final_answer_verdict_recorded"))
+	for _, r := range second.d.WorkspaceLogRecords() {
+		if adoptedVerdict("daemon.feed.final_answer_unresolved")(r) {
+			t.Fatalf("the second daemon raised the recorded verdict again: %s", r.Raw)
+		}
+	}
 }
