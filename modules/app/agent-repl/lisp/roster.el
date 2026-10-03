@@ -59,7 +59,7 @@
                   (conn on-push on-close &optional on-open))
 (declare-function agent-repl-connect-stream-cancel "connect" (stream))
 (declare-function agent-repl-link-live "daemon-link" ())
-(declare-function agent-repl-link-ending-p "daemon-link" (conn))
+(declare-function agent-repl-link-departing-p "daemon-link" (live &optional ended-planned-on))
 (declare-function agent-repl--ws-current-name "workspace" ())
 (declare-function agent-repl--ws-known-p "workspace" (ws))
 (declare-function agent-repl--ws-live-p "workspace" (ws))
@@ -1242,7 +1242,7 @@ the link\='s (`agent-repl-link-live'), never an address this file keeps:
     the link\='s own edge (down then up, or a promotion) re-subscribes;
   - the live daemon announced its OWN ending -- LOST ended planned on it,
     or the link\='s `WatchDaemon' carried the ending
-    (`agent-repl-link-ending-p'): it is leaving, and the link\='s own edge
+    (`agent-repl-link-departing-p'): it is leaving, and the link\='s own edge
     re-subscribes on whatever serves next;
   - otherwise the roster is re-subscribed on the live daemon now.
 
@@ -1259,8 +1259,8 @@ daemon that had just said it was leaving: `elisp.connect.dial-failed',
       (agent-repl--info '(:agent-repl-central "the roster stream spans workspaces")
                         "elisp.roster.resubscribe-awaiting-link-edge reason=never-accepted address=%S"
                         (agent-repl-connect-connection-address live)))
-     ((or (and planned-on (eq planned-on live))
-          (and (fboundp 'agent-repl-link-ending-p) (agent-repl-link-ending-p live)))
+     ((and (fboundp 'agent-repl-link-departing-p)
+           (agent-repl-link-departing-p live planned-on))
       (agent-repl--info '(:agent-repl-central "the roster stream spans workspaces")
                         "elisp.roster.resubscribe-awaiting-link-edge reason=daemon-departing address=%S"
                         (agent-repl-connect-connection-address live)))

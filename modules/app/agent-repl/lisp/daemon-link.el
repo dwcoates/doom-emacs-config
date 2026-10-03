@@ -269,6 +269,20 @@ consumer that lost a stream on CONN waits for that edge rather than
 calling a daemon that has said it is leaving."
   (and conn (eq conn agent-repl-link--ending-conn)))
 
+(defun agent-repl-link-departing-p (live &optional ended-planned-on)
+  "Return non-nil when the LIVE daemon has said it is leaving.
+Either its link carried the planned ending (`agent-repl-link-ending-p'),
+or a consumer\='s own stream ended planned on LIVE -- ENDED-PLANNED-ON is
+the connection that stream rode, nil when it did not end planned.  Every
+stream ends in no fixed order on a stand-down, so a consumer\='s planned
+end routinely arrives while the link still names the departing daemon.
+THE ONE QUESTION host.el and roster.el ask before re-attaching onto the
+live daemon: when it answers non-nil they wait for the link\='s own edge
+\=(down then up, or a promotion) instead of calling a daemon that is
+leaving."
+  (or (agent-repl-link-ending-p live)
+      (and ended-planned-on (eq ended-planned-on live))))
+
 (defun agent-repl-link-successor ()
   "Return the successor daemon's connection during a handover, or nil.
 host.el reads this when a workspace's `transferred' push arrives: the
