@@ -2098,6 +2098,12 @@ destructive no-op.  The caller must therefore SKIP it.  Doom's initial
        (let ((nil-name (and (boundp 'persp-nil-name) persp-nil-name)))
          (not (and (stringp nil-name) (equal name nil-name))))))
 
+(defvar agent-repl--pseudo-perspectives-deferred nil
+  "Non-nil while a pseudo deletion waits for the frame to leave the pseudos.
+Set when `agent-repl--delete-pseudo-perspectives' defers for the startup's
+choice; the activation that lands the frame on a real workspace runs the
+deletion it was waiting for (`agent-repl--delete-pseudos-on-activation').")
+
 (defun agent-repl--delete-pseudo-perspectives ()
   "Delete persp-mode's leading pseudo perspectives now a real one exists.
 
@@ -2143,6 +2149,7 @@ is moved to a real workspace first so the kill does not strand it."
        ((and (agent-repl--pseudo-workspace-name-p (agent-repl--ws-current-name))
              (fboundp 'agent-repl-startup-choosing-p)
              (agent-repl-startup-choosing-p))
+        (setq agent-repl--pseudo-perspectives-deferred t)
         (agent-repl--info
          '(:agent-repl-central "workspace numbering spans the whole session")
          "elisp.workspace.pseudo-delete-deferred current=%s reason=startup-choosing"
@@ -2169,6 +2176,17 @@ is moved to a real workspace first so the kill does not strand it."
              pseudo))))))))
 
 (declare-function agent-repl-startup-choosing-p "startup" ())
+
+(defun agent-repl--delete-pseudos-on-activation (&rest _)
+  "Run a deferred pseudo deletion once the frame stands on a real workspace.
+Scheduled for after the activation, never inside it: killing a perspective
+from within persp-mode's own activation hook would re-enter it."
+  (when (and agent-repl--pseudo-perspectives-deferred
+             (not agent-repl--pseudo-perspectives-deleted)
+             (let ((current (agent-repl--ws-current-name)))
+               (and current (not (agent-repl--pseudo-workspace-name-p current)))))
+    (setq agent-repl--pseudo-perspectives-deferred nil)
+    (run-at-time 0 nil #'agent-repl--delete-pseudo-perspectives)))
 
 (defun agent-repl--delete-pseudos-on-bringup (opened _total finished)
   "Delete the pseudo perspectives once the first roster reconcile settles.
@@ -2359,7 +2377,8 @@ perspective activation funnels through, so the project picker
   ;; workspace as the caller's previous one and stamp a phantom
   ;; `:last-viewed-at'.
   (if agent-repl--eager-open-in-progress
-      (agent-repl--log (agent-repl--ws-current-log-name)
+      (agent-repl--log (or (agent-repl--ws-current-log-name)
+                           '(:agent-repl-context "perspective activation can name no agent workspace"))
                         "record-workspace-history: suppressed (eager-open in progress)")
     (let ((name (agent-repl--ws-current-name)))
       (when name
@@ -2373,6 +2392,10 @@ perspective activation funnels through, so the project picker
                                     :test #'string=)))))))
 
 (agent-repl--ws-add-activated-hook #'agent-repl--record-workspace-history)
+
+;; A pseudo deletion the startup deferred runs once the frame is on a real
+;; workspace (`agent-repl--delete-pseudos-on-activation').
+(agent-repl--ws-add-activated-hook #'agent-repl--delete-pseudos-on-activation)
 
 (provide 'agent-repl-workspace)
 ;;; workspace.el ends here

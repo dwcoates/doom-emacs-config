@@ -3524,6 +3524,62 @@ from memory -- is what this now pins, plus the rejoin that follows it."
         ;; Assert
         (should (equal killed '("main")))))))
 
+(ert-deftest agent-repl-test-a-deferred-pseudo-deletion-runs-once-the-frame-is-on-a-real-workspace ()
+  "The activation onto a real workspace schedules the deletion the startup deferred."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((agent-repl--pseudo-perspectives-deferred t)
+          (agent-repl--pseudo-perspectives-deleted nil)
+          (scheduled nil))
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "doom"))
+                ((symbol-function 'run-at-time) (lambda (_time _repeat fn &rest _) (push fn scheduled) nil)))
+        ;; Act
+        (agent-repl--delete-pseudos-on-activation)
+        ;; Assert
+        (should (equal (list scheduled agent-repl--pseudo-perspectives-deferred)
+                       (list (list #'agent-repl--delete-pseudo-perspectives) nil)))))))
+
+(ert-deftest agent-repl-test-a-deferred-pseudo-deletion-waits-while-the-frame-is-on-a-pseudo ()
+  "An activation that leaves the frame on \"main\" schedules nothing."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((agent-repl--pseudo-perspectives-deferred t)
+          (agent-repl--pseudo-perspectives-deleted nil)
+          (+workspaces-main "main")
+          (scheduled nil))
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "main"))
+                ((symbol-function 'run-at-time) (lambda (&rest args) (push args scheduled) nil)))
+        ;; Act
+        (agent-repl--delete-pseudos-on-activation)
+        ;; Assert
+        (should (equal (list scheduled agent-repl--pseudo-perspectives-deferred) '(nil t)))))))
+
+(ert-deftest agent-repl-test-no-deferred-pseudo-deletion-schedules-nothing ()
+  "An ordinary activation with nothing deferred schedules nothing."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((agent-repl--pseudo-perspectives-deferred nil)
+          (scheduled nil))
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "doom"))
+                ((symbol-function 'run-at-time) (lambda (&rest args) (push args scheduled) nil)))
+        ;; Act
+        (agent-repl--delete-pseudos-on-activation)
+        ;; Assert
+        (should-not scheduled)))))
+
+(ert-deftest agent-repl-test-a-suppressed-history-record-on-a-pseudo-has-a-scope ()
+  "The history record suppressed during an eager open on \"main\" names an explicit scope."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((agent-repl--eager-open-in-progress t)
+          (scopes nil))
+      (cl-letf (((symbol-function 'agent-repl--ws-current-log-name) (lambda () nil))
+                ((symbol-function 'agent-repl--log) (lambda (scope &rest _) (push scope scopes))))
+        ;; Act
+        (agent-repl--record-workspace-history)
+        ;; Assert
+        (should (equal scopes '((:agent-repl-context "perspective activation can name no agent workspace"))))))))
+
 (ert-deftest agent-repl-test-delete-pseudos-never-kills-none ()
   "persp-nil \"none\" is skipped, never handed to the kill wrapper."
   (agent-repl-test--with-clean-state
