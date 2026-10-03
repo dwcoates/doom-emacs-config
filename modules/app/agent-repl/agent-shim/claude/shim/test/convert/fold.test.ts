@@ -2286,6 +2286,89 @@ describe("a compaction's summary record", () => {
   });
 });
 
+/** A `status` message as the stream states it. */
+function statusMessage(uuid: string, fields: Record<string, unknown>): SdkMessage {
+  return { type: "system", subtype: "status", uuid, session_id: "session-1", ...fields } as unknown as SdkMessage;
+}
+
+/** The compaction identity a `compacting` session row carries, or undefined. */
+function compactingIdOf(entry: PersistEntry | undefined): string | undefined {
+  if (entry?.item.kind !== "session_update") return undefined;
+  const update = entry.item.update.update;
+  return update.case === "compacting" ? update.value.compaction?.value : undefined;
+}
+
+describe("a compaction's identity", () => {
+  it("names the compaction by its first compacting status, through the vendor's re-sends", () => {
+    // Arrange.
+    const fold = createFold();
+    const first = fold.onSdkMessage(statusMessage("status-1", { status: "compacting" }), foldContext());
+
+    // Act.
+    const resent = fold.onSdkMessage(statusMessage("status-2", { status: "compacting" }), foldContext());
+
+    // Assert.
+    expect([compactingIdOf(first.entries[0]), compactingIdOf(resent.entries[0])]).toEqual(["status-1", "status-1"]);
+  });
+
+  it("puts the compaction's identity on the cut that ends it", () => {
+    // Arrange.
+    const fold = createFold();
+    fold.onSdkMessage(statusMessage("status-1", { status: "compacting" }), foldContext());
+    fold.onSdkMessage(compactBoundary("uuid-boundary"), foldContext());
+
+    // Act.
+    const output = fold.onSdkMessage(
+      compactSummaryRecord("uuid-boundary-summary", "This session is being continued. Summary: the fold"),
+      foldContext(),
+    );
+
+    // Assert.
+    expect(compactedOf(output.entries[0])?.compaction?.value).toBe("status-1");
+  });
+
+  it("opens a new identity for the next compaction once a cut ended the first", () => {
+    // Arrange.
+    const fold = createFold();
+    fold.onSdkMessage(statusMessage("status-1", { status: "compacting" }), foldContext());
+    fold.onSdkMessage(compactBoundary("uuid-boundary"), foldContext());
+
+    // Act.
+    const next = fold.onSdkMessage(statusMessage("status-9", { status: "compacting" }), foldContext());
+
+    // Assert.
+    expect(compactingIdOf(next.entries[0])).toBe("status-9");
+  });
+
+  it("closes the identity on a failed compaction, so the next one is new", () => {
+    // Arrange.
+    const fold = createFold();
+    fold.onSdkMessage(statusMessage("status-1", { status: "compacting" }), foldContext());
+    fold.onSdkMessage(statusMessage("status-2", { status: null, compact_result: "failed" }), foldContext());
+
+    // Act.
+    const next = fold.onSdkMessage(statusMessage("status-3", { status: "compacting" }), foldContext());
+
+    // Assert.
+    expect(compactingIdOf(next.entries[0])).toBe("status-3");
+  });
+
+  it("leaves a cut no start signal preceded without an identity", () => {
+    // Arrange.
+    const fold = createFold();
+    fold.onSdkMessage(compactBoundary("uuid-boundary"), foldContext());
+
+    // Act.
+    const output = fold.onSdkMessage(
+      compactSummaryRecord("uuid-boundary-summary", "This session is being continued. Summary: the fold"),
+      foldContext(),
+    );
+
+    // Assert.
+    expect(compactedOf(output.entries[0])?.compaction).toBeUndefined();
+  });
+});
+
 describe("a compaction cut still held when its turn ends", () => {
   /** A turn after a boundary whose summary never came: only tool calls, then the result. */
   function toolOnlyTurnAfterBoundary(): { fold: ReturnType<typeof createFold>; terminal: ReturnType<ReturnType<typeof createFold>["onSdkMessage"]> } {

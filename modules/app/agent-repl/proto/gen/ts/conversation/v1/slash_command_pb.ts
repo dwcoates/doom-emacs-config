@@ -34,7 +34,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file conversation/v1/slash_command.proto.
  */
 export const file_conversation_v1_slash_command: GenFile = /*@__PURE__*/
-  fileDesc("CiNjb252ZXJzYXRpb24vdjEvc2xhc2hfY29tbWFuZC5wcm90bxIPY29udmVyc2F0aW9uLnYxIkoKElNlc3Npb25Db21tYW5kU3BlYxIPCgdsaXRlcmFsGAEgASgJEhIKCnRha2VzX2FyZ3MYAiABKAgSDwoHYWxpYXNlcxgDIAMoCSLGAQoKQ29udGV4dEN1dBIyCgdjbGVhcmVkGAEgASgLMh8uY29udmVyc2F0aW9uLnYxLkNvbnRleHRDbGVhcmVkSAASNgoJY29tcGFjdGVkGAIgASgLMiEuY29udmVyc2F0aW9uLnYxLkNvbnRleHRDb21wYWN0ZWRIABJFChFjb21wYWN0aW9uX2ZhaWxlZBgDIAEoCzIoLmNvbnZlcnNhdGlvbi52MS5Db250ZXh0Q29tcGFjdGlvbkZhaWxlZEgAQgUKA2N1dCIoChdDb250ZXh0Q29tcGFjdGlvbkZhaWxlZBINCgVlcnJvchgBIAEoCSJAChFDb250ZXh0VG9rZW5EZWx0YRIVCg10b2tlbnNfYmVmb3JlGAEgASgDEhQKDHRva2Vuc19hZnRlchgCIAEoAyIQCg5Db250ZXh0Q2xlYXJlZCKgAgoQQ29udGV4dENvbXBhY3RlZBI0CgdzdW1tYXJ5GAEgASgLMiMuY29udmVyc2F0aW9uLnYxLkFnZW50UmVzcG9uc2VQcm9zZRIyCgZ0b2tlbnMYAiABKAsyIi5jb252ZXJzYXRpb24udjEuQ29udGV4dFRva2VuRGVsdGESQAoJcmVxdWVzdGVkGAMgASgLMisuY29udmVyc2F0aW9uLnYxLkNvbnRleHRDb21wYWN0aW9uUmVxdWVzdGVkSAASQAoJYXV0b21hdGljGAQgASgLMisuY29udmVyc2F0aW9uLnYxLkNvbnRleHRDb21wYWN0aW9uQXV0b21hdGljSAASEwoLZHVyYXRpb25fbXMYBSABKARCCQoHdHJpZ2dlciIcChpDb250ZXh0Q29tcGFjdGlvblJlcXVlc3RlZCIcChpDb250ZXh0Q29tcGFjdGlvbkF1dG9tYXRpYyqSDAoOU2Vzc2lvbkNvbW1hbmQSHwobU0VTU0lPTl9DT01NQU5EX1VOU1BFQ0lGSUVEEAASNQoVU0VTU0lPTl9DT01NQU5EX0NMRUFSEAEaGpKmHRYKBi9jbGVhchoGL3Jlc2V0GgQvbmV3Ei0KF1NFU1NJT05fQ09NTUFORF9DT01QQUNUEAIaEJKmHQwKCC9jb21wYWN0EAESKQoVU0VTU0lPTl9DT01NQU5EX01PREVMEAMaDpKmHQoKBi9tb2RlbBABEiUKFFNFU1NJT05fQ09NTUFORF9DT1NUEAQaC5KmHQcKBS9jb3N0EicKFVNFU1NJT05fQ09NTUFORF9VU0FHRRAFGgySph0ICgYvdXNhZ2USKQoWU0VTU0lPTl9DT01NQU5EX1NUQVRVUxAGGg2Sph0JCgcvc3RhdHVzEisKF1NFU1NJT05fQ09NTUFORF9DT05URVhUEAcaDpKmHQoKCC9jb250ZXh0EikKFlNFU1NJT05fQ09NTUFORF9DT05GSUcQCBoNkqYdCQoHL2NvbmZpZxIlChRTRVNTSU9OX0NPTU1BTkRfSEVMUBAJGguSph0HCgUvaGVscBIpChZTRVNTSU9OX0NPTU1BTkRfRE9DVE9SEAoaDZKmHQkKBy9kb2N0b3ISJwoVU0VTU0lPTl9DT01NQU5EX0xPR0lOEAsaDJKmHQgKBi9sb2dpbhIpChZTRVNTSU9OX0NPTU1BTkRfTE9HT1VUEAwaDZKmHQkKBy9sb2dvdXQSKQoWU0VTU0lPTl9DT01NQU5EX01FTU9SWRANGg2Sph0JCgcvbWVtb3J5EjMKG1NFU1NJT05fQ09NTUFORF9QRVJNSVNTSU9OUxAOGhKSph0OCgwvcGVybWlzc2lvbnMSKQoWU0VTU0lPTl9DT01NQU5EX0FHRU5UUxAPGg2Sph0JCgcvYWdlbnRzEiMKE1NFU1NJT05fQ09NTUFORF9NQ1AQEBoKkqYdBgoEL21jcBInChVTRVNTSU9OX0NPTU1BTkRfSE9PS1MQERoMkqYdCAoGL2hvb2tzEjcKHFNFU1NJT05fQ09NTUFORF9PVVRQVVRfU1RZTEUQEhoVkqYdEQoNL291dHB1dC1zdHlsZRABEjcKHVNFU1NJT05fQ09NTUFORF9SRUxFQVNFX05PVEVTEBMaFJKmHRAKDi9yZWxlYXNlLW5vdGVzEicKFVNFU1NJT05fQ09NTUFORF9UT0RPUxAUGgySph0ICgYvdG9kb3MSKwoWU0VTU0lPTl9DT01NQU5EX0VYUE9SVBAVGg+Sph0LCgcvZXhwb3J0EAESLQoXU0VTU0lPTl9DT01NQU5EX0FERF9ESVIQFhoQkqYdDAoIL2FkZC1kaXIQARIrChZTRVNTSU9OX0NPTU1BTkRfUkVTVU1FEBcaD5KmHQsKBy9yZXN1bWUQARIlChRTRVNTSU9OX0NPTU1BTkRfRVhJVBAYGguSph0HCgUvZXhpdBI9CiBTRVNTSU9OX0NPTU1BTkRfUFJJVkFDWV9TRVRUSU5HUxAZGheSph0TChEvcHJpdmFjeS1zZXR0aW5ncxIxChpTRVNTSU9OX0NPTU1BTkRfU1RBVFVTTElORRAaGhGSph0NCgsvc3RhdHVzbGluZRI5Ch5TRVNTSU9OX0NPTU1BTkRfVEVSTUlOQUxfU0VUVVAQGxoVkqYdEQoPL3Rlcm1pbmFsLXNldHVwEiMKE1NFU1NJT05fQ09NTUFORF9WSU0QHBoKkqYdBgoEL3ZpbRIpChZTRVNTSU9OX0NPTU1BTkRfUkVXSU5EEB0aDZKmHQkKBy9yZXdpbmQSIwoTU0VTU0lPTl9DT01NQU5EX0JVRxAeGgqSph0GCgQvYnVnEisKFlNFU1NJT05fQ09NTUFORF9FRkZPUlQQHxoPkqYdCwoHL2VmZm9ydBABEisKFlNFU1NJT05fQ09NTUFORF9QTFVHSU4QIBoPkqYdCwoHL3BsdWdpbhABEjUKHFNFU1NJT05fQ09NTUFORF9MT1dfUFJJT1JJVFkQIRoTkqYdDwoNL2xvdy1wcmlvcml0eTp6ChRzZXNzaW9uX2NvbW1hbmRfc3BlYxIhLmdvb2dsZS5wcm90b2J1Zi5FbnVtVmFsdWVPcHRpb25zGOLUAyABKAsyIy5jb252ZXJzYXRpb24udjEuU2Vzc2lvbkNvbW1hbmRTcGVjUhJzZXNzaW9uQ29tbWFuZFNwZWNCMFouYWdlbnRyZXBsL3Byb3RvL2NvbnZlcnNhdGlvbi92MTtjb252ZXJzYXRpb252MWIGcHJvdG8z", [file_conversation_v1_agent_activity, file_google_protobuf_descriptor]);
+  fileDesc("CiNjb252ZXJzYXRpb24vdjEvc2xhc2hfY29tbWFuZC5wcm90bxIPY29udmVyc2F0aW9uLnYxIkoKElNlc3Npb25Db21tYW5kU3BlYxIPCgdsaXRlcmFsGAEgASgJEhIKCnRha2VzX2FyZ3MYAiABKAgSDwoHYWxpYXNlcxgDIAMoCSLGAQoKQ29udGV4dEN1dBIyCgdjbGVhcmVkGAEgASgLMh8uY29udmVyc2F0aW9uLnYxLkNvbnRleHRDbGVhcmVkSAASNgoJY29tcGFjdGVkGAIgASgLMiEuY29udmVyc2F0aW9uLnYxLkNvbnRleHRDb21wYWN0ZWRIABJFChFjb21wYWN0aW9uX2ZhaWxlZBgDIAEoCzIoLmNvbnZlcnNhdGlvbi52MS5Db250ZXh0Q29tcGFjdGlvbkZhaWxlZEgAQgUKA2N1dCJvChdDb250ZXh0Q29tcGFjdGlvbkZhaWxlZBINCgVlcnJvchgBIAEoCRI2Cgpjb21wYWN0aW9uGAIgASgLMh0uY29udmVyc2F0aW9uLnYxLkNvbXBhY3Rpb25JZEgAiAEBQg0KC19jb21wYWN0aW9uIh0KDENvbXBhY3Rpb25JZBINCgV2YWx1ZRgBIAEoCSJAChFDb250ZXh0VG9rZW5EZWx0YRIVCg10b2tlbnNfYmVmb3JlGAEgASgDEhQKDHRva2Vuc19hZnRlchgCIAEoAyIQCg5Db250ZXh0Q2xlYXJlZCLzAgoQQ29udGV4dENvbXBhY3RlZBI0CgdzdW1tYXJ5GAEgASgLMiMuY29udmVyc2F0aW9uLnYxLkFnZW50UmVzcG9uc2VQcm9zZRIyCgZ0b2tlbnMYAiABKAsyIi5jb252ZXJzYXRpb24udjEuQ29udGV4dFRva2VuRGVsdGESQAoJcmVxdWVzdGVkGAMgASgLMisuY29udmVyc2F0aW9uLnYxLkNvbnRleHRDb21wYWN0aW9uUmVxdWVzdGVkSAASQAoJYXV0b21hdGljGAQgASgLMisuY29udmVyc2F0aW9uLnYxLkNvbnRleHRDb21wYWN0aW9uQXV0b21hdGljSAASEwoLZHVyYXRpb25fbXMYBSABKAQSNgoKY29tcGFjdGlvbhgIIAEoCzIdLmNvbnZlcnNhdGlvbi52MS5Db21wYWN0aW9uSWRIAYgBAUIJCgd0cmlnZ2VyQg0KC19jb21wYWN0aW9uSgQIBhAHSgQIBxAIIhwKGkNvbnRleHRDb21wYWN0aW9uUmVxdWVzdGVkIhwKGkNvbnRleHRDb21wYWN0aW9uQXV0b21hdGljKpIMCg5TZXNzaW9uQ29tbWFuZBIfChtTRVNTSU9OX0NPTU1BTkRfVU5TUEVDSUZJRUQQABI1ChVTRVNTSU9OX0NPTU1BTkRfQ0xFQVIQARoakqYdFgoGL2NsZWFyGgYvcmVzZXQaBC9uZXcSLQoXU0VTU0lPTl9DT01NQU5EX0NPTVBBQ1QQAhoQkqYdDAoIL2NvbXBhY3QQARIpChVTRVNTSU9OX0NPTU1BTkRfTU9ERUwQAxoOkqYdCgoGL21vZGVsEAESJQoUU0VTU0lPTl9DT01NQU5EX0NPU1QQBBoLkqYdBwoFL2Nvc3QSJwoVU0VTU0lPTl9DT01NQU5EX1VTQUdFEAUaDJKmHQgKBi91c2FnZRIpChZTRVNTSU9OX0NPTU1BTkRfU1RBVFVTEAYaDZKmHQkKBy9zdGF0dXMSKwoXU0VTU0lPTl9DT01NQU5EX0NPTlRFWFQQBxoOkqYdCgoIL2NvbnRleHQSKQoWU0VTU0lPTl9DT01NQU5EX0NPTkZJRxAIGg2Sph0JCgcvY29uZmlnEiUKFFNFU1NJT05fQ09NTUFORF9IRUxQEAkaC5KmHQcKBS9oZWxwEikKFlNFU1NJT05fQ09NTUFORF9ET0NUT1IQChoNkqYdCQoHL2RvY3RvchInChVTRVNTSU9OX0NPTU1BTkRfTE9HSU4QCxoMkqYdCAoGL2xvZ2luEikKFlNFU1NJT05fQ09NTUFORF9MT0dPVVQQDBoNkqYdCQoHL2xvZ291dBIpChZTRVNTSU9OX0NPTU1BTkRfTUVNT1JZEA0aDZKmHQkKBy9tZW1vcnkSMwobU0VTU0lPTl9DT01NQU5EX1BFUk1JU1NJT05TEA4aEpKmHQ4KDC9wZXJtaXNzaW9ucxIpChZTRVNTSU9OX0NPTU1BTkRfQUdFTlRTEA8aDZKmHQkKBy9hZ2VudHMSIwoTU0VTU0lPTl9DT01NQU5EX01DUBAQGgqSph0GCgQvbWNwEicKFVNFU1NJT05fQ09NTUFORF9IT09LUxARGgySph0ICgYvaG9va3MSNwocU0VTU0lPTl9DT01NQU5EX09VVFBVVF9TVFlMRRASGhWSph0RCg0vb3V0cHV0LXN0eWxlEAESNwodU0VTU0lPTl9DT01NQU5EX1JFTEVBU0VfTk9URVMQExoUkqYdEAoOL3JlbGVhc2Utbm90ZXMSJwoVU0VTU0lPTl9DT01NQU5EX1RPRE9TEBQaDJKmHQgKBi90b2RvcxIrChZTRVNTSU9OX0NPTU1BTkRfRVhQT1JUEBUaD5KmHQsKBy9leHBvcnQQARItChdTRVNTSU9OX0NPTU1BTkRfQUREX0RJUhAWGhCSph0MCggvYWRkLWRpchABEisKFlNFU1NJT05fQ09NTUFORF9SRVNVTUUQFxoPkqYdCwoHL3Jlc3VtZRABEiUKFFNFU1NJT05fQ09NTUFORF9FWElUEBgaC5KmHQcKBS9leGl0Ej0KIFNFU1NJT05fQ09NTUFORF9QUklWQUNZX1NFVFRJTkdTEBkaF5KmHRMKES9wcml2YWN5LXNldHRpbmdzEjEKGlNFU1NJT05fQ09NTUFORF9TVEFUVVNMSU5FEBoaEZKmHQ0KCy9zdGF0dXNsaW5lEjkKHlNFU1NJT05fQ09NTUFORF9URVJNSU5BTF9TRVRVUBAbGhWSph0RCg8vdGVybWluYWwtc2V0dXASIwoTU0VTU0lPTl9DT01NQU5EX1ZJTRAcGgqSph0GCgQvdmltEikKFlNFU1NJT05fQ09NTUFORF9SRVdJTkQQHRoNkqYdCQoHL3Jld2luZBIjChNTRVNTSU9OX0NPTU1BTkRfQlVHEB4aCpKmHQYKBC9idWcSKwoWU0VTU0lPTl9DT01NQU5EX0VGRk9SVBAfGg+Sph0LCgcvZWZmb3J0EAESKwoWU0VTU0lPTl9DT01NQU5EX1BMVUdJThAgGg+Sph0LCgcvcGx1Z2luEAESNQocU0VTU0lPTl9DT01NQU5EX0xPV19QUklPUklUWRAhGhOSph0PCg0vbG93LXByaW9yaXR5OnoKFHNlc3Npb25fY29tbWFuZF9zcGVjEiEuZ29vZ2xlLnByb3RvYnVmLkVudW1WYWx1ZU9wdGlvbnMY4tQDIAEoCzIjLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uQ29tbWFuZFNwZWNSEnNlc3Npb25Db21tYW5kU3BlY0IwWi5hZ2VudHJlcGwvcHJvdG8vY29udmVyc2F0aW9uL3YxO2NvbnZlcnNhdGlvbnYxYgZwcm90bzM", [file_conversation_v1_agent_activity, file_google_protobuf_descriptor]);
 
 /**
  * Everything about a session command that is a FACT rather than an event: how
@@ -155,6 +155,13 @@ export type ContextCompactionFailed = Message<"conversation.v1.ContextCompaction
    * @generated from field: string error = 1;
    */
   error: string;
+
+  /**
+   * Which compaction failed: as on ContextCompacted.compaction.
+   *
+   * @generated from field: optional conversation.v1.CompactionId compaction = 2;
+   */
+  compaction?: CompactionId | undefined;
 };
 
 /**
@@ -163,6 +170,27 @@ export type ContextCompactionFailed = Message<"conversation.v1.ContextCompaction
  */
 export const ContextCompactionFailedSchema: GenMessage<ContextCompactionFailed> = /*@__PURE__*/
   messageDesc(file_conversation_v1_slash_command, 2);
+
+/**
+ * One compaction's identity: the vendor's id for the FIRST `compacting` status
+ * of that compaction (its later re-sends keep it). Opaque; compared
+ * byte-wise. It ties a compaction's start signal to the cut that ends it.
+ *
+ * @generated from message conversation.v1.CompactionId
+ */
+export type CompactionId = Message<"conversation.v1.CompactionId"> & {
+  /**
+   * @generated from field: string value = 1;
+   */
+  value: string;
+};
+
+/**
+ * Describes the message conversation.v1.CompactionId.
+ * Use `create(CompactionIdSchema)` to create a new message.
+ */
+export const CompactionIdSchema: GenMessage<CompactionId> = /*@__PURE__*/
+  messageDesc(file_conversation_v1_slash_command, 3);
 
 /**
  * What the cut did to the context's size: how many tokens it held before,
@@ -199,7 +227,7 @@ export type ContextTokenDelta = Message<"conversation.v1.ContextTokenDelta"> & {
  * Use `create(ContextTokenDeltaSchema)` to create a new message.
  */
 export const ContextTokenDeltaSchema: GenMessage<ContextTokenDelta> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_slash_command, 3);
+  messageDesc(file_conversation_v1_slash_command, 4);
 
 /**
  * History was discarded with nothing left in its place.
@@ -217,7 +245,7 @@ export type ContextCleared = Message<"conversation.v1.ContextCleared"> & {
  * Use `create(ContextClearedSchema)` to create a new message.
  */
 export const ContextClearedSchema: GenMessage<ContextCleared> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_slash_command, 4);
+  messageDesc(file_conversation_v1_slash_command, 5);
 
 /**
  * History was replaced by a summary of itself.
@@ -279,6 +307,18 @@ export type ContextCompacted = Message<"conversation.v1.ContextCompacted"> & {
    * @generated from field: uint64 duration_ms = 5;
    */
   durationMs: bigint;
+
+  /**
+   * WHICH COMPACTION this cut concludes: the identity its `compacting` start
+   * signal carried (SessionCompacting.compaction), so a consumer can tell a
+   * start signal that arrives AFTER its own cut (the two travel on different
+   * streams, which carry no order between them) from a new compaction.
+   * ABSENT when no start signal preceded the cut: a compaction the shim ran
+   * itself, or one read from a transcript.
+   *
+   * @generated from field: optional conversation.v1.CompactionId compaction = 8;
+   */
+  compaction?: CompactionId | undefined;
 };
 
 /**
@@ -286,7 +326,7 @@ export type ContextCompacted = Message<"conversation.v1.ContextCompacted"> & {
  * Use `create(ContextCompactedSchema)` to create a new message.
  */
 export const ContextCompactedSchema: GenMessage<ContextCompacted> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_slash_command, 5);
+  messageDesc(file_conversation_v1_slash_command, 6);
 
 /**
  * The cut was asked for.
@@ -301,7 +341,7 @@ export type ContextCompactionRequested = Message<"conversation.v1.ContextCompact
  * Use `create(ContextCompactionRequestedSchema)` to create a new message.
  */
 export const ContextCompactionRequestedSchema: GenMessage<ContextCompactionRequested> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_slash_command, 6);
+  messageDesc(file_conversation_v1_slash_command, 7);
 
 /**
  * The producer cut on its own because the context was filling.
@@ -316,7 +356,7 @@ export type ContextCompactionAutomatic = Message<"conversation.v1.ContextCompact
  * Use `create(ContextCompactionAutomaticSchema)` to create a new message.
  */
 export const ContextCompactionAutomaticSchema: GenMessage<ContextCompactionAutomatic> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_slash_command, 7);
+  messageDesc(file_conversation_v1_slash_command, 8);
 
 /**
  * A slash command the CLI answers ITSELF, rather than a prompt for the agent.

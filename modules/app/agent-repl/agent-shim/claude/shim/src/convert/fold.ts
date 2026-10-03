@@ -99,7 +99,9 @@ import { residueEntry, residueForMessage } from "./residue.js";
 import {
   clearedCutEntry,
   compactionEntry,
+  compactionTracker,
   convertSessionMessage,
+  type CompactionTracker,
   type PendingClear,
   type PendingCompaction,
 } from "./session-updates.js";
@@ -221,6 +223,8 @@ interface FoldState {
   readonly hooks: HookRegistry;
   readonly taskKinds: TaskKindRegistry;
   pendingCompaction?: PendingCompaction;
+  /** The compaction the session is in, by its first status's identity. */
+  readonly compaction: CompactionTracker;
   pendingClear?: PendingClear;
   lastAnswer?: conversationv1.AgentActivityId;
   vendorApiError?: VendorApiError;
@@ -238,6 +242,7 @@ export function createFold(): Fold {
     calls: createCallRegistry(),
     hooks: createHookRegistry(),
     taskKinds: createTaskKindRegistry(),
+    compaction: compactionTracker(),
   };
 
   return {
@@ -407,7 +412,7 @@ function dispatch(message: SdkMessage, context: FoldContext, state: FoldState): 
       return { entries: convertSystemMessage(message, context, state) };
 
     case "rate_limit_event":
-      return { entries: convertSessionMessage(message, context) };
+      return { entries: convertSessionMessage(message, context, undefined, undefined, state.compaction) };
 
     case "conversation_reset":
       // THE CLEAR'S CUT IS HELD HERE and released by the init that names the
@@ -462,15 +467,21 @@ function convertSystemMessage(
       // vendor's own account of WHICH class failed and HOW LONG it said to
       // wait, and the terminal has no other source for either.
       rememberVendorApiError(message, state);
-      return convertSessionMessage(message, context);
+      return convertSessionMessage(message, context, undefined, undefined, state.compaction);
     default: {
       // A SECOND BOUNDARY NEVER DISCARDS THE FIRST: the first is released,
       // in order, before the second is held.
       const superseded: PersistEntry[] = [];
-      const entries = convertSessionMessage(message, context, (pending) => {
-        superseded.push(...releaseCompaction(context, state, "a later compaction boundary arrived"));
-        state.pendingCompaction = pending;
-      });
+      const entries = convertSessionMessage(
+        message,
+        context,
+        (pending) => {
+          superseded.push(...releaseCompaction(context, state, "a later compaction boundary arrived"));
+          state.pendingCompaction = pending;
+        },
+        undefined,
+        state.compaction,
+      );
       const all = superseded.length === 0 ? entries : [...superseded, ...entries];
       return message.subtype === "init" ? [...all, ...settleClear(message, context, state)] : all;
     }

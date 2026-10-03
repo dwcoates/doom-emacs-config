@@ -39,6 +39,7 @@ import { randomUUID } from "node:crypto";
 import { appendFileSync, readFileSync } from "node:fs";
 import { create } from "@bufbuild/protobuf";
 import { bindLog } from "../log.js";
+import { compactionIdField } from "../convert/session-updates.js";
 import { conversationv1 } from "../proto.js";
 
 const LOGGER = bindLog({ component: "shim-engine-compaction", operation: "shim.engine.compaction" });
@@ -259,12 +260,18 @@ export function contextCutCompacted(options: {
   });
 }
 
-/** The `context_cut` page line for a compaction that failed, with the vendor's wording. */
-export function contextCutFailed(error: string): conversationv1.ContextCut {
+/**
+ * The `context_cut` page line for a compaction that failed, with the vendor's
+ * wording and, when its start signal opened one, the compaction it ends.
+ */
+export function contextCutFailed(error: string, compactionId?: string): conversationv1.ContextCut {
   return create(conversationv1.ContextCutSchema, {
     cut: {
       case: "compactionFailed",
-      value: create(conversationv1.ContextCompactionFailedSchema, { error }),
+      value: create(conversationv1.ContextCompactionFailedSchema, {
+        error,
+        ...compactionIdField(compactionId),
+      }),
     },
   });
 }

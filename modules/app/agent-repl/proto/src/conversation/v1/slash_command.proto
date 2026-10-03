@@ -153,6 +153,15 @@ message ContextCompactionFailed {
   // What the producer said went wrong, verbatim. The only account anyone has,
   // and the thing the user's next action depends on.
   string error = 1;
+  // Which compaction failed: as on ContextCompacted.compaction.
+  optional CompactionId compaction = 2;
+}
+
+// One compaction's identity: the vendor's id for the FIRST `compacting` status
+// of that compaction (its later re-sends keep it). Opaque; compared
+// byte-wise. It ties a compaction's start signal to the cut that ends it.
+message CompactionId {
+  string value = 1;
 }
 
 // What the cut did to the context's size: how many tokens it held before,
@@ -209,6 +218,14 @@ message ContextCompacted {
 
   // Tags 6-7 are RETIRED: the cumulative-drop figure and the pre-cut tool
   // list have no declared producer (vetting item 1).
+  reserved 6, 7;
+  // WHICH COMPACTION this cut concludes: the identity its `compacting` start
+  // signal carried (SessionCompacting.compaction), so a consumer can tell a
+  // start signal that arrives AFTER its own cut (the two travel on different
+  // streams, which carry no order between them) from a new compaction.
+  // ABSENT when no start signal preceded the cut: a compaction the shim ran
+  // itself, or one read from a transcript.
+  optional CompactionId compaction = 8;
 }
 
 // The cut was asked for.
