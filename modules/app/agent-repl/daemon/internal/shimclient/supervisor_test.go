@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -1074,5 +1075,51 @@ func TestTheSpawnGateOpensOnlyOnceThePidIsRecorded(t *testing.T) {
 	}
 	if record.Gate != "opened" {
 		t.Fatalf("the child read the gate as %q, want opened", record.Gate)
+	}
+}
+
+// TestSpawnHeldByUnreadyServicesStartsNoProcess pins the latch's guarantee:
+// no shim starts before the services are current. A spawn whose caller gives
+// up while it waits is refused, and no process was ever started for it.
+func TestSpawnHeldByUnreadyServicesStartsNoProcess(t *testing.T) {
+	// Arrange: a gate nobody opens, and a caller that gives up.
+	dir := shortDir(t)
+	spec, sink := newTestSpec(t, dir, filepath.Join(dir, "never.sock"), helperIdle)
+	sup := newSupervisor(t, WithServicesReady(make(chan struct{})))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act
+	_, err := sup.Spawn(ctx, spec)
+
+	// Assert: refused for the caller's reason, and the child's fd 3 never had
+	// a writer -- closing ours leaves the read end at EOF at once.
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Spawn() error = %v, want context.Canceled", err)
+	}
+	if err := spec.LogSink.Close(); err != nil {
+		t.Fatalf("close the sink's write end: %v", err)
+	}
+	if b, err := io.ReadAll(sink.r); err != nil || len(b) != 0 {
+		t.Fatalf("the sink read %q (%v); a child was started although the services were never ready", b, err)
+	}
+}
+
+// TestSpawnGoesOnOnceTheServicesAreReady pins the other side: the latch
+// opening releases a held spawn into an ordinary bring-up.
+func TestSpawnGoesOnOnceTheServicesAreReady(t *testing.T) {
+	// Arrange
+	dir := shortDir(t)
+	f, uds := startFakeShim(t, dir)
+	spec, _ := newTestSpec(t, dir, uds, helperIdle)
+	ready := make(chan struct{})
+
+	// Act
+	close(ready)
+	c := spawnReady(t, f, spec, WithServicesReady(ready))
+
+	// Assert
+	if c == nil {
+		t.Fatal("Spawn() answered no client once the services were ready")
 	}
 }

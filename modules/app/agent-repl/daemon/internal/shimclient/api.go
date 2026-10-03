@@ -345,6 +345,13 @@ func WithLockProbe(probe func(workspaceDir string) (free bool, err error)) Optio
 	return func(s *supervisor) { s.lockProbe = probe }
 }
 
+// WithServicesReady gates every Spawn on READY closing: the boot closes it once
+// the launchd services are current (deploy.Restarter.EnsureCurrent). Without
+// it nothing is gated.
+func WithServicesReady(ready <-chan struct{}) Option {
+	return func(s *supervisor) { s.servicesReady = ready }
+}
+
 // NewSupervisor builds the supervisor. It is the daemon's only one.
 func NewSupervisor(log dlog.Surfaces, opts ...Option) (Supervisor, error) {
 	if log == nil {

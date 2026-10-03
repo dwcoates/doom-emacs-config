@@ -379,6 +379,28 @@ concluded its own shim for the workspace gone (`Fleet.noteReap`, stamped from
 `shimclient.ExitInfo.At` on a stop, a relaunch's install, or a death found at
 the next bring-up). A never-engaged workspace still comes up fresh quietly.
 
+### The boot makes the services current before any shim starts
+
+An ordinary boot's service step (`boot.Deps.EnsureServices`, the first thing
+the bring-up does) is `deploy.Restarter.EnsureCurrent`: launchd holds the
+store and the sidecar, and a RUNNING one whose build report is not the build
+installed in `~/.cache/agent-repl/bin` is restarted in the recorded safe
+order (a store restart takes the sidecar with it), judged by the one
+staleness check a deploy uses (`serviceStaleness`). A service the step just
+bootstrapped, or one launchd runs no process for, starts from the installed
+build and is left alone. A joining successor only ensures they are loaded:
+the incumbent's shims write into the store throughout a rollout.
+
+NO SHIM STARTS BEFORE THAT STEP HAS RETURNED. Every `Supervisor.Spawn` waits
+on a latch (`serviceGate`, `shimclient.WithServicesReady`) the step opens,
+whether it succeeded or failed, because the editor's startup, OpenWorkspace
+and revivals start sessions concurrently with the boot's own bring-up.
+
+This is what a bounce relies on: `scripts/bounce-agent-repl-forcefully.sh`
+installs the fresh service binaries and stands the daemon down, and never
+touches the services itself. Stopped from outside, they went down under
+whatever the freshly relaunched daemon had already started (2026-10-03).
+
 ### A turn row closes through ONE door
 
 Every close of a `turns` row goes through `promptqueue/turnclose.go`
