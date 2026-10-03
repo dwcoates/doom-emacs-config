@@ -1437,6 +1437,19 @@ placeholder's teardown — arrives from a continuation."
                    (lambda (buf &rest _) (and (eq buf frontend-buf) (selected-window)))))
           (should-not (agent-repl--panels-visible-p)))))))
 
+(ert-deftest agent-repl-test-panels-panels-visible-p-view-alone-under-a-gate ()
+  "While a gate hides the input, the view alone is the whole layout."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-temp-buffer "*test-view-gated*"
+      (let ((frontend-buf (current-buffer)))
+        (agent-repl--ws-put "test-ws" :frontend-buffer frontend-buf)
+        (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                  ((symbol-function 'agent-repl-host-state)
+                   (lambda (_ws) '(:gate (:arm :cold-gate :value nil))))
+                  ((symbol-function 'get-buffer-window)
+                   (lambda (buf &rest _) (and (eq buf frontend-buf) (selected-window)))))
+          (should (agent-repl--panels-visible-p)))))))
+
 (ert-deftest agent-repl-test-panels-panels-visible-p-both-visible ()
   "panels-visible-p returns t when both the input panel and the agent view
 are displayed in windows."

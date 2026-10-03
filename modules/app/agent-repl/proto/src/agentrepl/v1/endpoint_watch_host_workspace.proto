@@ -109,7 +109,31 @@ message HostWorkspace {
   // input when an edit it has not yet taken appears, and leaves its edit mode
   // when the field goes absent (a commit, a cancel, the prompt dropped).
   HostHeldPromptEdit held_prompt_edit = 4;
+  // THE GATE STANDING ON THIS WORKSPACE, absent when none stands. A gate is
+  // a choice the user must answer before the conversation can go on, and
+  // whose answer REPLACES the composer (owner, 2026-10-02). While one
+  // stands, Emacs HIDES the workspace's input window and the webview, grown
+  // into that space, docks the gate's banner at the bottom at the input's
+  // height; the moment it is answered or retracted the field goes absent and
+  // both return. STATE, not an event: a subscriber always reads the gate that
+  // stands now. It is workspace-level, a sibling of the session lifecycle,
+  // because a gate can stand with no session started (a cold gate parks the
+  // bring-up before StartSession). The webapp reads the same daemon state
+  // through its feed (FeedColdGate.standing) and footer.
+  optional HostGate gate = 5;
 }
+
+// One standing gate. THE ARM IS THE KIND; set-but-unassigned is a gate this
+// schema revision does not name, which Emacs treats as a gate (it hides the
+// input) and records.
+message HostGate {
+  oneof kind {
+    // The cold gate: resuming would re-read a large context; the user picks
+    // pay / compact / clear.
+    HostGateColdGate cold_gate = 1;
+  }
+}
+message HostGateColdGate {}
 
 // One standing held-prompt edit.
 message HostHeldPromptEdit {

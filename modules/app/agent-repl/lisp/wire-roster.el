@@ -372,6 +372,16 @@ BOTH the idle and ready render states resolve here."
   "Decode VALUE as the empty `RosterRowStatusVendorBlocked'."
   (agent-repl-wire--decode-empty "RosterRowStatusVendorBlocked" value))
 
+(defun agent-repl-wire-decode-roster-row-status-vendor-fault (value)
+  "Decode VALUE as the empty `RosterRowStatusVendorFault'.
+The vendor will not start while agent-repl serves: a vendor fault."
+  (agent-repl-wire--decode-empty "RosterRowStatusVendorFault" value))
+
+(defun agent-repl-wire-decode-roster-row-status-network-fault (value)
+  "Decode VALUE as the empty `RosterRowStatusNetworkFault'.
+This machine cannot reach the network: a network fault."
+  (agent-repl-wire--decode-empty "RosterRowStatusNetworkFault" value))
+
 (defun agent-repl-wire-decode-roster-row-status-api-retrying (value)
   "Decode VALUE as the empty `RosterRowStatusApiRetrying'."
   (agent-repl-wire--decode-empty "RosterRowStatusApiRetrying" value))
@@ -435,6 +445,10 @@ an assertion, where an unset oneof is the absence of one."
     (idleAsync :idle-async agent-repl-wire-decode-roster-row-status-idle-async)
     (vendorBlocked :vendor-blocked
                    agent-repl-wire-decode-roster-row-status-vendor-blocked)
+    (vendorFault :vendor-fault
+                 agent-repl-wire-decode-roster-row-status-vendor-fault)
+    (networkFault :network-fault
+                  agent-repl-wire-decode-roster-row-status-network-fault)
     (apiRetrying :api-retrying
                  agent-repl-wire-decode-roster-row-status-api-retrying)
     (init :init agent-repl-wire-decode-roster-row-status-init)

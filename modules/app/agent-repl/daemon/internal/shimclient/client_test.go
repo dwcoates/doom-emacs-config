@@ -795,6 +795,7 @@ func TestFaultKindNamesEveryArm(t *testing.T) {
 		{"log sink", &conversationv1.SessionFault{Kind: &conversationv1.SessionFault_LogSinkPoisoned{}}, "log_sink_poisoned"},
 		{"keepalive", &conversationv1.SessionFault{Kind: &conversationv1.SessionFault_KeepaliveFailed{}}, "keepalive_failed"},
 		{"vendor query", &conversationv1.SessionFault{Kind: &conversationv1.SessionFault_VendorQueryFailed{}}, "vendor_query_failed"},
+		{"network unreachable", &conversationv1.SessionFault{Kind: &conversationv1.SessionFault_NetworkUnreachable{}}, "network_unreachable"},
 		{"no arm set", &conversationv1.SessionFault{}, "unclassified"},
 	}
 	for _, tt := range tests {

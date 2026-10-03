@@ -268,6 +268,7 @@ func TestStartEndedByDaemonTellsTheDaemonLeavingFromAFailure(t *testing.T) {
 	}{
 		{name: "the fleet's lifetime ended", err: fmt.Errorf("start: %w", context.Canceled), wantEnded: true},
 		{name: "the daemon is standing down", err: fmt.Errorf("start: %w", shimclient.ErrStandingDown), wantEnded: true},
+		{name: "the workspace was handed to a successor mid-start", err: fmt.Errorf("start: %w", ErrHandedOver), wantEnded: true},
 		{name: "the bring-up failed", err: errFake, wantEnded: false},
 	}
 	for _, tt := range tests {

@@ -279,3 +279,161 @@ func TestTheMigrationAddsTheNewsDigestTables(t *testing.T) {
 		t.Fatalf("news digest tables after the migration = %d, want 2", got)
 	}
 }
+
+func TestAMintedDigestKeepsItsOverlayAndMintInstantAfterADismiss(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	recordRun(t, s, NewsDigestRun{EndedAt: at, Recorded: true, Digest: &NewsDigestMinted{ID: "d1", Overlay: []byte("o")}})
+
+	// Act
+	if _, err := s.DismissNewsDigest(context.Background(), "d1"); err != nil {
+		t.Fatalf("DismissNewsDigest: %v", err)
+	}
+
+	// Assert
+	state := loadState(t, s)
+	if !bytes.Equal(state.LatestOverlay, []byte("o")) || !state.LatestMadeAt.Equal(at) {
+		t.Fatalf("state = %+v, want the overlay and its mint instant kept", state)
+	}
+}
+
+func TestRestandingADismissedDigestStandsItAgain(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	recordRun(t, s, NewsDigestRun{EndedAt: at, Recorded: true, Digest: &NewsDigestMinted{ID: "d1", Overlay: []byte("o")}})
+	if _, err := s.DismissNewsDigest(context.Background(), "d1"); err != nil {
+		t.Fatalf("DismissNewsDigest: %v", err)
+	}
+
+	// Act
+	ok, err := s.RestandNewsDigest(context.Background(), "d1")
+
+	// Assert
+	if err != nil || !ok {
+		t.Fatalf("RestandNewsDigest = (%v, %v), want (true, nil)", ok, err)
+	}
+	if state := loadState(t, s); !bytes.Equal(state.Standing, []byte("o")) {
+		t.Fatalf("standing = %q, want the digest standing again", state.Standing)
+	}
+}
+
+func TestRestandingAStandingDigestIsNoMatch(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	recordRun(t, s, NewsDigestRun{EndedAt: at, Recorded: true, Digest: &NewsDigestMinted{ID: "d1", Overlay: []byte("o")}})
+
+	// Act
+	ok, err := s.RestandNewsDigest(context.Background(), "d1")
+
+	// Assert
+	if err != nil || ok {
+		t.Fatalf("RestandNewsDigest = (%v, %v), want (false, nil)", ok, err)
+	}
+}
+
+func TestRestandingAnOlderDigestChangesNothing(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	recordRun(t, s, NewsDigestRun{EndedAt: at, Recorded: true, Digest: &NewsDigestMinted{ID: "d1", Overlay: []byte("o1")}})
+	recordRun(t, s, NewsDigestRun{EndedAt: at.Add(time.Hour), Recorded: true, Digest: &NewsDigestMinted{ID: "d2", Overlay: []byte("o2")}})
+	if _, err := s.DismissNewsDigest(context.Background(), "d2"); err != nil {
+		t.Fatalf("DismissNewsDigest: %v", err)
+	}
+
+	// Act
+	ok, err := s.RestandNewsDigest(context.Background(), "d1")
+
+	// Assert
+	if err != nil || ok {
+		t.Fatalf("RestandNewsDigest(d1) = (%v, %v), want (false, nil)", ok, err)
+	}
+	if state := loadState(t, s); state.Standing != nil {
+		t.Fatalf("standing = %q, want nothing standing", state.Standing)
+	}
+}
+
+func TestRestandRefusesAnEmptyID(t *testing.T) {
+	// Arrange
+	s, log := testStore(t)
+
+	// Act
+	_, err := s.RestandNewsDigest(context.Background(), "")
+
+	// Assert
+	if err == nil {
+		t.Fatal("RestandNewsDigest(\"\") = nil, want a refusal")
+	}
+	if !loggedOperation(log, "daemon.wsm.restand_news_digest", "error") {
+		t.Fatalf("the refusal was not recorded at ERROR: %v", log.Records())
+	}
+}
+
+func TestNoteEditorInstance(t *testing.T) {
+	tests := []struct {
+		name    string
+		earlier []string
+		note    string
+		want    bool
+	}{
+		{name: "the first instance ever is new", note: "e1", want: true},
+		{name: "the same instance again is a reconnect", earlier: []string{"e1"}, note: "e1", want: false},
+		{name: "a different instance is a restart", earlier: []string{"e1"}, note: "e2", want: true},
+		{name: "an instance seen before the last one is new again", earlier: []string{"e1", "e2"}, note: "e1", want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			for _, e := range tt.earlier {
+				if _, err := s.NoteEditorInstance(context.Background(), e, at); err != nil {
+					t.Fatalf("NoteEditorInstance(%q): %v", e, err)
+				}
+			}
+
+			// Act
+			got, err := s.NoteEditorInstance(context.Background(), tt.note, at)
+
+			// Assert
+			if err != nil || got != tt.want {
+				t.Fatalf("NoteEditorInstance(%q) = (%v, %v), want (%v, nil)", tt.note, got, err, tt.want)
+			}
+		})
+	}
+}
+
+func TestNoteEditorInstanceRefusesAnEmptyInstance(t *testing.T) {
+	// Arrange
+	s, log := testStore(t)
+
+	// Act
+	_, err := s.NoteEditorInstance(context.Background(), "", at)
+
+	// Assert
+	if err == nil {
+		t.Fatal("NoteEditorInstance(\"\") = nil, want a refusal")
+	}
+	if !loggedOperation(log, "daemon.wsm.note_editor_instance", "error") {
+		t.Fatalf("the refusal was not recorded at ERROR: %v", log.Records())
+	}
+}
+
+func TestTheMigrationAddsTheRedisplayColumnsAndTheEditorInstanceTable(t *testing.T) {
+	// Arrange
+	path := fixtureAt(t, 19)
+
+	// Act
+	handle, err := Open(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Open on a layout-19 database: %v", err)
+	}
+	defer handle.Close()
+
+	// Assert
+	s := handle.(*store)
+	if got := scalar[int](t, s, `SELECT count(*) FROM pragma_table_info('news_digest') WHERE name IN ('latest_overlay', 'latest_made_at')`); got != 2 {
+		t.Fatalf("redisplay columns after the migration = %d, want 2", got)
+	}
+	if got := scalar[int](t, s, `SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'editor_instance'`); got != 1 {
+		t.Fatalf("editor_instance tables after the migration = %d, want 1", got)
+	}
+}

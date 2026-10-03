@@ -39,6 +39,24 @@ CREATE TABLE news_digest_sources (
 );
 `
 
+// newsDigestRedisplayDDL is the layout-20 addition (docs/protobuf-design/
+// startup-and-fault-domains.md, Addendum): the newest digest's overlay and the
+// instant it was minted, KEPT after a dismiss so a full Emacs restart can stand
+// the day's digest again, and the last Emacs process identity a WatchDaemon
+// carried, durable so a daemon restart under a live Emacs reads its reconnect
+// as the same Emacs. Like the other column-add steps it is ALTERs, applied
+// after newsDigestDDL on a fresh file and as its own step on a migrated one.
+const newsDigestRedisplayDDL = `
+ALTER TABLE news_digest ADD COLUMN latest_overlay BLOB;
+ALTER TABLE news_digest ADD COLUMN latest_made_at INTEGER;
+
+CREATE TABLE editor_instance (
+  id      INTEGER PRIMARY KEY CHECK (id = 1),
+  value   TEXT NOT NULL,
+  seen_at INTEGER NOT NULL
+);
+`
+
 // NewsDigestState is the news digest's whole durable state.
 type NewsDigestState struct {
 	// LastRunEnd is when the last run ended; zero when no run ever has.
@@ -51,6 +69,12 @@ type NewsDigestState struct {
 	// Standing is the encoded overlay of the digest that stands; nil when
 	// none stands.
 	Standing []byte
+	// LatestOverlay is the encoded overlay of the newest digest minted, kept
+	// whether or not it stands; nil when none was minted since layout 20.
+	LatestOverlay []byte
+	// LatestMadeAt is when the newest digest was minted (its run's end); zero
+	// when unknown.
+	LatestMadeAt time.Time
 	// Snapshots are the sources' recorded snapshots, by source key.
 	Snapshots map[string]string
 }
@@ -91,11 +115,13 @@ func (s *store) NewsDigestState(ctx context.Context) (NewsDigestState, error) {
 			baseline   sql.NullInt64
 			latest     sql.NullString
 			standing   []byte
+			overlay    []byte
+			madeAt     sql.NullInt64
 		)
 		loaded := NewsDigestState{Snapshots: map[string]string{}}
 		err := s.db().QueryRowContext(ctx,
-			`SELECT last_run_end, baseline, latest_digest_id, standing FROM news_digest WHERE id = 1`).
-			Scan(&lastRunEnd, &baseline, &latest, &standing)
+			`SELECT last_run_end, baseline, latest_digest_id, standing, latest_overlay, latest_made_at FROM news_digest WHERE id = 1`).
+			Scan(&lastRunEnd, &baseline, &latest, &standing, &overlay, &madeAt)
 		switch {
 		case errors.Is(err, sql.ErrNoRows):
 		case err != nil:
@@ -111,6 +137,10 @@ func (s *store) NewsDigestState(ctx context.Context) (NewsDigestState, error) {
 					Err: errors.New("a standing digest carries the id it was minted with")}
 			}
 			loaded.Standing = standing
+			loaded.LatestOverlay = overlay
+			if madeAt.Valid {
+				loaded.LatestMadeAt = fromNanos(madeAt.Int64)
+			}
 		}
 		rows, err := s.db().QueryContext(ctx, `SELECT source_key, snapshot FROM news_digest_sources ORDER BY source_key`)
 		if err != nil {
@@ -164,8 +194,8 @@ func (s *store) RecordNewsDigestRun(ctx context.Context, run NewsDigestRun) erro
 		}
 		if run.Digest != nil {
 			if _, err := tx.ExecContext(ctx,
-				`UPDATE news_digest SET latest_digest_id = ?, standing = ? WHERE id = 1`,
-				run.Digest.ID, run.Digest.Overlay); err != nil {
+				`UPDATE news_digest SET latest_digest_id = ?, standing = ?, latest_overlay = ?, latest_made_at = ? WHERE id = 1`,
+				run.Digest.ID, run.Digest.Overlay, run.Digest.Overlay, nanos(run.EndedAt)); err != nil {
 				return err
 			}
 		}
@@ -221,4 +251,64 @@ func (s *store) DismissNewsDigest(ctx context.Context, id string) (bool, error) 
 		return nil
 	})
 	return matched, err
+}
+
+// RestandNewsDigest stands the newest digest minted again from the overlay
+// kept beside it, answering true when id names that digest and it was down. An
+// id naming any other digest, a digest already standing, or one minted before
+// layout 20 kept its overlay answers false and changes nothing.
+func (s *store) RestandNewsDigest(ctx context.Context, id string) (bool, error) {
+	const op = "daemon.wsm.restand_news_digest"
+	fields := dlog.Context{"digest": id}
+	if id == "" {
+		err := errors.New("wsm: a restand names the digest it stands again")
+		s.log.Error(op, "refused a restand naming no digest", withError(fields, err))
+		return false, err
+	}
+	var matched bool
+	err := s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx,
+			`UPDATE news_digest SET standing = latest_overlay
+			 WHERE id = 1 AND latest_digest_id = ? AND standing IS NULL AND latest_overlay IS NOT NULL`, id)
+		if err != nil {
+			return err
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		matched = n == 1
+		return nil
+	})
+	return matched, err
+}
+
+// NoteEditorInstance records the Emacs process identity a WatchDaemon carried
+// and answers whether it is NEW: different from the last one recorded, or the
+// first ever. The compare and the write are one transaction, so two streams of
+// one new Emacs racing each other see it new exactly once.
+func (s *store) NoteEditorInstance(ctx context.Context, instance string, at time.Time) (bool, error) {
+	const op = "daemon.wsm.note_editor_instance"
+	fields := dlog.Context{"instance": instance}
+	if instance == "" {
+		err := errors.New("wsm: an editor instance is never empty")
+		s.log.Error(op, "refused an empty editor instance", withError(fields, err))
+		return false, err
+	}
+	var isNew bool
+	err := s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+		var last string
+		err := tx.QueryRowContext(ctx, `SELECT value FROM editor_instance WHERE id = 1`).Scan(&last)
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+		case err != nil:
+			return err
+		}
+		isNew = last != instance
+		_, err = tx.ExecContext(ctx,
+			`INSERT INTO editor_instance (id, value, seen_at) VALUES (1, ?, ?)
+			 ON CONFLICT(id) DO UPDATE SET value = excluded.value, seen_at = excluded.seen_at`, instance, nanos(at))
+		return err
+	})
+	return isNew, err
 }

@@ -466,7 +466,7 @@ recreates it (`agent-repl--ensure-input-buffer')."
 
 (cl-defun agent-repl-window-test--run-ensure-layout
     (&key show-view show-input (current-ws "cur") kill-view eager
-          in-progress setup after)
+          in-progress setup after gate)
   "Drive `agent-repl-window--ensure-layout' over a real window layout.
 Registers a view and an input buffer for workspace \"cur\", displays
 the view buffer when SHOW-VIEW and the input buffer when SHOW-INPUT
@@ -477,7 +477,8 @@ frontend show dispatch.  SETUP, when non-nil, is a thunk run after the
 layout is built (for fixtures like a side window or another
 workspace's panel); AFTER, when non-nil, is a thunk run after the
 reconcile while the layout is still live (for window-liveness
-assertions the temp-frame restore would otherwise destroy).  Returns
+assertions the temp-frame restore would otherwise destroy).  GATE, when
+non-nil, is the gate the host view states for \"cur\".  Returns
 the list of workspaces a repair was dispatched for."
   (let ((view-buf (generate-new-buffer " *elt-view*"))
         (input-buf (generate-new-buffer " *elt-input*"))
@@ -498,6 +499,8 @@ the list of workspaces a repair was dispatched for."
             (when setup (funcall setup))
             (cl-letf (((symbol-function '+workspace-current-name)
                        (lambda () current-ws))
+                      ((symbol-function 'agent-repl-host-state)
+                       (lambda (ws) (and gate (equal ws "cur") (list :gate gate))))
                       ((symbol-function 'agent-repl--frontend-dispatch-show)
                        (lambda (ws) (push ws dispatched))))
               (let ((agent-repl--eager-open-in-progress eager)
@@ -963,3 +966,166 @@ workspace mounted while the frame carried something else came out short."
       (delete-window win)
       ;; Act / Assert
       (should-error (agent-repl-window--apply-height win 6 nil)))))
+
+;;;; --- The gate hides the input window --------------------------------------
+
+(ert-deftest agent-repl-window-test-a-standing-gate-hides-the-input ()
+  "A gate in the host view hides the workspace's input window."
+  (cl-letf (((symbol-function 'agent-repl-host-state)
+             (lambda (_ws) '(:gate (:arm :cold-gate :value nil)))))
+    ;; Act / Assert
+    (should (agent-repl-input-hidden-p "ws"))))
+
+(ert-deftest agent-repl-window-test-no-gate-hides-nothing ()
+  "Without a gate the input window stands."
+  (cl-letf (((symbol-function 'agent-repl-host-state) (lambda (_ws) '(:gate nil))))
+    ;; Act / Assert
+    (should-not (agent-repl-input-hidden-p "ws"))))
+
+(ert-deftest agent-repl-window-test-an-unnamed-gate-hides-the-input ()
+  "A gate this build has no arm for is still a gate."
+  (cl-letf (((symbol-function 'agent-repl-host-state)
+             (lambda (_ws) '(:gate (:arm nil :value nil)))))
+    ;; Act / Assert
+    (should (agent-repl-input-hidden-p "ws"))))
+
+(ert-deftest agent-repl-window-test-a-gate-going-up-remounts-without-the-input ()
+  "Both windows on screen when a gate stands: the layout is remounted, so
+the input window goes and the webview grows into its space."
+  (should (equal (agent-repl-window-test--run-ensure-layout
+                  :show-view t :show-input t :gate '(:arm :cold-gate :value nil))
+                 '("cur"))))
+
+(ert-deftest agent-repl-window-test-the-view-alone-conforms-under-a-gate ()
+  "The view alone is the whole layout while a gate stands: no repair."
+  (should-not (agent-repl-window-test--run-ensure-layout
+               :show-view t :gate '(:arm :cold-gate :value nil))))
+
+(ert-deftest agent-repl-window-test-a-cleared-gate-restores-the-input ()
+  "With the gate gone the lone view is half a pair, and the input returns."
+  (should (equal (agent-repl-window-test--run-ensure-layout :show-view t)
+                 '("cur"))))
+
+(ert-deftest agent-repl-window-test-a-gate-never-resurrects-hidden-panels ()
+  "A gate on a workspace whose panels are closed lays nothing out."
+  (should-not (agent-repl-window-test--run-ensure-layout
+               :gate '(:arm :cold-gate :value nil))))
+
+(defmacro agent-repl-window-test--with-gate-edges (current &rest body)
+  "Run BODY with CURRENT as the workspace on screen and the reconcile recorded.
+`reconciled' counts the layout reconciles; `said' holds the INFO records;
+`told' holds (WS . RECONCILES-SO-FAR) for each height told to a page."
+  (declare (indent 1))
+  `(agent-repl-test--with-clean-state
+     (let ((agent-repl-window--gates-applied (make-hash-table :test 'equal))
+           (reconciled 0)
+           (said nil)
+           (told nil))
+       (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () ,current))
+                 ((symbol-function 'agent-repl-window-tell-gate-dock-height)
+                  (lambda (ws) (push (cons ws reconciled) told) 100))
+                 ((symbol-function 'agent-repl-window--ensure-layout)
+                  (lambda () (cl-incf reconciled)))
+                 ((symbol-function 'agent-repl--info)
+                  (lambda (_ws fmt &rest args) (push (apply #'format fmt args) said))))
+         ,@body))))
+
+(ert-deftest agent-repl-window-test-a-gate-standing-up-on-screen-reconciles ()
+  "The gate standing on the workspace on screen re-lays it out at once."
+  (agent-repl-window-test--with-gate-edges "a"
+    ;; Act
+    (agent-repl-window-on-host-update "a" '(:gate (:arm :cold-gate :value nil)))
+    ;; Assert
+    (should (= reconciled 1))
+    (should (equal said '("elisp.gate.standing ws=a kind=:cold-gate")))))
+
+(ert-deftest agent-repl-window-test-a-gate-clearing-on-screen-reconciles ()
+  "The gate going away re-lays the workspace on screen out at once."
+  (agent-repl-window-test--with-gate-edges "a"
+    ;; Arrange
+    (agent-repl-window-on-host-update "a" '(:gate (:arm :cold-gate :value nil)))
+    (setq reconciled 0 said nil)
+    ;; Act
+    (agent-repl-window-on-host-update "a" '(:gate nil))
+    ;; Assert
+    (should (= reconciled 1))
+    (should (equal said '("elisp.gate.cleared ws=a kind=:cold-gate")))))
+
+(ert-deftest agent-repl-window-test-a-gate-on-another-workspace-waits-for-its-show ()
+  "A gate edge on a workspace not on screen lays nothing out now; its
+next show reads the gate (`agent-repl--frontend-display-webview')."
+  (agent-repl-window-test--with-gate-edges "a"
+    ;; Act
+    (agent-repl-window-on-host-update "b" '(:gate (:arm :cold-gate :value nil)))
+    ;; Assert
+    (should (= reconciled 0))))
+
+(ert-deftest agent-repl-window-test-a-host-update-that-moves-no-gate-changes-nothing ()
+  "A host push whose gate did not move (any other row or fact) is no edge."
+  (agent-repl-window-test--with-gate-edges "a"
+    ;; Arrange
+    (agent-repl-window-on-host-update "a" '(:gate (:arm :cold-gate :value nil)))
+    (setq reconciled 0 said nil)
+    ;; Act
+    (agent-repl-window-on-host-update "a" '(:gate (:arm :cold-gate :value nil) :naming (:slug "x")))
+    ;; Assert
+    (should (= reconciled 0))
+    (should (null said))))
+
+(ert-deftest agent-repl-window-test-a-gate-standing-up-tells-the-page-the-input-height-first ()
+  "The page learns the input's height before the input hides."
+  (agent-repl-window-test--with-gate-edges "a"
+    ;; Act
+    (agent-repl-window-on-host-update "a" '(:gate (:arm :cold-gate :value nil)))
+    ;; Assert
+    (should (equal told '(("a" . 0))))))
+
+(ert-deftest agent-repl-window-test-a-gate-clearing-tells-the-page-nothing ()
+  "Restoring the input needs no height."
+  (agent-repl-window-test--with-gate-edges "a"
+    ;; Arrange
+    (agent-repl-window-on-host-update "a" '(:gate (:arm :cold-gate :value nil)))
+    (setq told nil)
+    ;; Act
+    (agent-repl-window-on-host-update "a" '(:gate nil))
+    ;; Assert
+    (should (null told))))
+
+(ert-deftest agent-repl-window-test-the-dock-height-is-the-live-input-windows-pixels ()
+  "A live input window's total pixel height is the height sent."
+  (agent-repl-test--with-clean-state
+    (let ((scripts nil))
+      (cl-letf (((symbol-function 'agent-repl-window--panel-window)
+                 (lambda (_kind &optional _ws _frame) (selected-window)))
+                ((symbol-function 'window-pixel-height) (lambda (&optional _w) 137))
+                ((symbol-function 'agent-repl--ws-get)
+                 (lambda (_ws key) (and (eq key :frontend-buffer) (current-buffer))))
+                ((symbol-function 'agent-repl--frontend-webview-read-script)
+                 (lambda (_buf script _cb) (push script scripts) t)))
+        ;; Act
+        (agent-repl-window-tell-gate-dock-height "ws")
+        ;; Assert
+        (should (string-match-p "--gate-dock-height','137px'" (car scripts)))))))
+
+(ert-deftest agent-repl-window-test-the-dock-height-without-an-input-window-is-its-mount-height ()
+  "With no input window on screen, the height a mount gives it is sent."
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'agent-repl-window--panel-window)
+               (lambda (_kind &optional _ws _frame) nil))
+              ((symbol-function 'agent-repl-window--input-height) (lambda (&optional _f _ws) 9))
+              ((symbol-function 'frame-char-height) (lambda (&optional _f) 20)))
+      ;; Act / Assert
+      (should (= 180 (agent-repl-window--gate-dock-pixels "ws"))))))
+
+(ert-deftest agent-repl-window-test-the-dock-height-to-a-page-that-is-not-there-is-recorded ()
+  "No webview to tell is recorded, never an error."
+  (agent-repl-test--with-clean-state
+    (let ((said nil))
+      (cl-letf (((symbol-function 'agent-repl-window--gate-dock-pixels) (lambda (_ws) 10))
+                ((symbol-function 'agent-repl--ws-get) (lambda (_ws _key) nil))
+                ((symbol-function 'agent-repl--info)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) said))))
+        ;; Act
+        (agent-repl-window-tell-gate-dock-height "ws")
+        ;; Assert
+        (should (equal said '("elisp.gate.dock-height-skipped ws=ws reason=no-webview")))))))

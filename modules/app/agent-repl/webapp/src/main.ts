@@ -31,6 +31,7 @@
  * time: the warning chip if step 5 got that far, and the emergency console path if
  * it did not, which is the documented exception to "no direct console".
  */
+import { installGateDock } from "./feed/gate-dock.js";
 import "./styles.css";
 import { createTicker } from "./clock.js";
 import { installCopyFallback } from "./copy.js";
@@ -279,6 +280,10 @@ export async function boot(): Promise<void> {
 
     mountHoldTray(shell.holdTray, ctx, { promptHeld: (turn) => feed.promptHeld(turn) });
 
+    // A STANDING GATE DOCKS AT THE BOTTOM EDGE while Emacs hides the input
+    // window over it; both read the daemon's one cold-gate standing.
+    installGateDock(shell.feed, shell.gateDock);
+
     // PROSE LINKS ROUTE LIKE STRUCTURED ONES. A markdown anchor in a bubble or
     // the hold tray would otherwise navigate the webview away from the
     // conversation; one delegated interceptor over the whole scroll zone (feed
@@ -299,12 +304,13 @@ export async function boot(): Promise<void> {
     });
     // THE GATE IS THE FOOTER'S OWN COLOR (owner ruling, 2026-09-28). A
     // composer is closed exactly when the footer's status arm is blue (the
-    // workspace is unusable: disconnected, closing, blocked) —
+    // workspace is unusable: an agent-repl fault, a network fault, a close) —
     // render-colors.json#composer_closed_colors; a merge in flight holds
     // what is submitted, so purple leaves it open —
     // and the sentence it shows is the footer's status arm rather than a
     // second vocabulary. Every other arm is a usable workspace, turquoise
-    // included, so its composer is open.
+    // included — a vendor fault's prompts are held until the vendor serves
+    // (owner ruling, 2026-10-02) — so its composer is open.
     footer.onStatus((statusCase, substatusCase) => {
       const closed = composerClosedFor(statusCase, substatusCase);
       gate.set(closed ? "closed" : "open", closed ? statusCase : undefined);

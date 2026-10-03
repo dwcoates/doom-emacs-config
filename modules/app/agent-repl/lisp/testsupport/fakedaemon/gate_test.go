@@ -156,7 +156,7 @@ func TestAGatedStreamWithholdsItsAcceptance(t *testing.T) {
 	if out.resp.StatusCode != http.StatusOK {
 		t.Fatalf("released stream answered %d, want 200", out.resp.StatusCode)
 	}
-	server.awaitSubscribers(streamDaemon, "", 1)
+	server.mustAwaitSubscribers(t, streamDaemon, "", 1)
 }
 
 // The gate's method set is closed over the rpcs this fake serves: a stream it

@@ -19,14 +19,24 @@ func TestWatchDaemonRefusesAnIncompleteClient(t *testing.T) {
 	}{
 		{name: "no client named", req: &agentreplv1.WatchDaemonRequest{}},
 		{name: "emacs with an empty build", req: &agentreplv1.WatchDaemonRequest{
-			Client: &agentreplv1.WatchDaemonRequest_Emacs{Emacs: &agentreplv1.WatchDaemonEmacs{Focus: unfocused()}},
+			Client: &agentreplv1.WatchDaemonRequest_Emacs{Emacs: &agentreplv1.WatchDaemonEmacs{Focus: unfocused(), Instance: instance()}},
 		}},
 		{name: "emacs with no focus", req: &agentreplv1.WatchDaemonRequest{
-			Client: &agentreplv1.WatchDaemonRequest_Emacs{Emacs: &agentreplv1.WatchDaemonEmacs{ElispBuild: "fixture-elisp-build"}},
+			Client: &agentreplv1.WatchDaemonRequest_Emacs{Emacs: &agentreplv1.WatchDaemonEmacs{ElispBuild: "fixture-elisp-build", Instance: instance()}},
 		}},
 		{name: "emacs with a focus naming no arm", req: &agentreplv1.WatchDaemonRequest{
 			Client: &agentreplv1.WatchDaemonRequest_Emacs{Emacs: &agentreplv1.WatchDaemonEmacs{
-				ElispBuild: "fixture-elisp-build", Focus: &agentreplv1.EditorFocus{},
+				ElispBuild: "fixture-elisp-build", Focus: &agentreplv1.EditorFocus{}, Instance: instance(),
+			}},
+		}},
+		{name: "emacs with no instance", req: &agentreplv1.WatchDaemonRequest{
+			Client: &agentreplv1.WatchDaemonRequest_Emacs{Emacs: &agentreplv1.WatchDaemonEmacs{
+				ElispBuild: "fixture-elisp-build", Focus: unfocused(),
+			}},
+		}},
+		{name: "emacs with an empty instance", req: &agentreplv1.WatchDaemonRequest{
+			Client: &agentreplv1.WatchDaemonRequest_Emacs{Emacs: &agentreplv1.WatchDaemonEmacs{
+				ElispBuild: "fixture-elisp-build", Focus: unfocused(), Instance: &agentreplv1.EditorInstance{},
 			}},
 		}},
 	}
@@ -68,7 +78,7 @@ func TestWatchDaemonAcceptsAWebviewClient(t *testing.T) {
 	}
 
 	// Assert: a webview states no build here, and its watch stands.
-	server.awaitSubscribers(streamDaemon, "", 1)
+	server.mustAwaitSubscribers(t, streamDaemon, "", 1)
 }
 
 func TestPushDeliversAReloadElispToTheDaemonStream(t *testing.T) {

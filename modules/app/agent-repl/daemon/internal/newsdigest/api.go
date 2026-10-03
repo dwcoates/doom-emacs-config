@@ -51,6 +51,7 @@ const (
 	opSchedule = "daemon.newsdigest.schedule"
 	opDismiss  = "daemon.newsdigest.dismiss"
 	opStanding = "daemon.newsdigest.standing"
+	opRestand  = "daemon.newsdigest.restand"
 )
 
 // Production windows.
@@ -81,6 +82,7 @@ type Store interface {
 	NewsDigestState(ctx context.Context) (wsm.NewsDigestState, error)
 	RecordNewsDigestRun(ctx context.Context, run wsm.NewsDigestRun) error
 	DismissNewsDigest(ctx context.Context, id string) (bool, error)
+	RestandNewsDigest(ctx context.Context, id string) (bool, error)
 }
 
 // Deps are the digest's collaborators and windows.

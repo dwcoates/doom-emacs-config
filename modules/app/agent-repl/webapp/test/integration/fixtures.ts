@@ -1399,8 +1399,19 @@ export const FOOTER_STATUS_SUBSTATUSES: Record<string, readonly string[]> = {
     "postprocessing",
   ],
   background: [],
-  blocked: ["auth", "usageLimit", "vendorError", "billing", "queryDied"],
-  disconnected: ["starting", "degraded", "severed", "dead", "startFailed"],
+  vendorFault: [
+    "auth",
+    "usageLimit",
+    "vendorError",
+    "billing",
+    "queryDied",
+    "vendorRetry",
+    "vendorRejection",
+    "vendorFailed",
+    "apiRetrying",
+  ],
+  agentReplFault: ["starting", "degraded", "severed", "dead", "startFailed", "daemonImpaired"],
+  networkFault: ["offline"],
   closing: ["blocked"],
   loading: ["memory", "invoked", "discovered", "listing"],
   // A merge that STOPPED is its own arm: a failure, whose substatus is the
@@ -1525,6 +1536,7 @@ export const FOOTER_SALIENT_KINDS: Record<string, object> = {
   notification: { text: "the agent addressed you" },
   contextBudget: { text: "84% of the window" },
   vendorStart: { text: "Claude SDK did not start (attempt 3): overloaded · retrying" },
+  offline: { text: "cannot reach api.anthropic.com: no route to host" },
 };
 
 /** The salient kinds every status arm carries after its own and `update`. */
@@ -1554,8 +1566,9 @@ export const FOOTER_STATUS_SALIENTS: Record<string, readonly string[]> = {
   mergeFailed: ["mergeStep", "update", ...SHARED_SALIENTS],
   merged: ["mergeStep", "update", ...SHARED_SALIENTS],
   background: ["update", ...SHARED_SALIENTS],
-  blocked: ["authenticating", "retrying", "fault", "update", ...SHARED_SALIENTS],
-  disconnected: ["startFailed", "vendorStart", "fault", "update", ...SHARED_SALIENTS],
+  vendorFault: ["authenticating", "fault", "update", "retrying", "vendorStart", ...SHARED_SALIENTS],
+  agentReplFault: ["startFailed", "fault", "update", ...SHARED_SALIENTS],
+  networkFault: ["offline", "update", ...SHARED_SALIENTS],
   closing: ["closeBlocked", "update", ...SHARED_SALIENTS],
   loading: ["update", ...SHARED_SALIENTS],
 };
@@ -2162,6 +2175,8 @@ export const ROSTER_STATUS_ARMS = [
   "ready",
   "idleAsync",
   "vendorBlocked",
+  "vendorFault",
+  "networkFault",
   "apiRetrying",
   "init",
   "severed",
@@ -2505,6 +2520,9 @@ export const WATCH_DAEMON_PUSHES = [
   // The news digest standing: a WEBVIEW stream's alone, drawn as the overlay
   // over the feed (news-digest.integration.test.ts).
   "newsDigest",
+  // The editor's startup events: an EMACS stream's alone (a new Emacs
+  // process's bring-up), skipped by a page as the same skew.
+  "startup",
 ] as const;
 
 export function shutdownAnnounced(init?: {

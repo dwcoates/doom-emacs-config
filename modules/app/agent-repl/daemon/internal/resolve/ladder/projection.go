@@ -13,15 +13,17 @@ import (
 var rosterArmClaims = map[string]Claim{
 	"merge_queued":   Merging,
 	"merging":        Merging,
-	"init":           Disconnected,
-	"severed":        Disconnected,
-	"dead":           Disconnected,
-	"start_failed":   Disconnected,
+	"init":           AgentReplFault,
+	"severed":        AgentReplFault,
+	"dead":           AgentReplFault,
+	"start_failed":   AgentReplFault,
+	"network_fault":  NetworkFault,
 	"degraded":       Degraded,
 	"merge_failed":   MergeFailed,
 	"merged":         Merged,
-	"vendor_blocked": Blocked,
-	"api_retrying":   Blocked,
+	"vendor_fault":   VendorFault,
+	"vendor_blocked": VendorFault,
+	"api_retrying":   VendorFault,
 	"permission":     Waiting,
 	"submitting":     Thinking,
 	"thinking":       Thinking,
@@ -64,16 +66,18 @@ func FooterClaim(status *frontendv1.FooterStatus) (Claim, bool) {
 	switch arm := status.GetStatus().(type) {
 	case *frontendv1.FooterStatus_Merging:
 		return Merging, true
-	case *frontendv1.FooterStatus_Disconnected:
-		return Disconnected, true
+	case *frontendv1.FooterStatus_AgentReplFault:
+		return AgentReplFault, true
+	case *frontendv1.FooterStatus_NetworkFault:
+		return NetworkFault, true
 	case *frontendv1.FooterStatus_Closing:
 		return Closing, true
 	case *frontendv1.FooterStatus_MergeFailed:
 		return MergeFailed, true
 	case *frontendv1.FooterStatus_Merged:
 		return Merged, true
-	case *frontendv1.FooterStatus_Blocked:
-		return Blocked, true
+	case *frontendv1.FooterStatus_VendorFault:
+		return VendorFault, true
 	case *frontendv1.FooterStatus_Degraded:
 		return Degraded, true
 	case *frontendv1.FooterStatus_Waiting:

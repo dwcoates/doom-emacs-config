@@ -337,6 +337,29 @@ func (r *resolver) SetVendorStart(ws ids.WorkspaceID, state VendorStart) {
 		dlog.Context{"vendor_start": state.String()}, func(s *wsState) { s.vendorStart = state })
 }
 
+// NetworkFaultOpened installs a standing network fault.
+func (r *resolver) NetworkFaultOpened(ws ids.WorkspaceID, id string) {
+	r.mutateWorkspace(ws, "daemon.sidebar.network_fault_opened",
+		"the roster took a standing network fault",
+		dlog.Context{"fault": id}, func(s *wsState) {
+			if s.networkFaults == nil {
+				s.networkFaults = map[string]bool{}
+			}
+			s.networkFaults[id] = true
+		})
+}
+
+// FaultClosed retracts a standing fault by id; one the roster does not hold
+// changes nothing and publishes nothing.
+func (r *resolver) FaultClosed(ws ids.WorkspaceID, id string) {
+	if !r.holdsNetworkFault(ws, id) {
+		return
+	}
+	r.mutateWorkspace(ws, "daemon.sidebar.fault_closed",
+		"the roster retracted a standing network fault",
+		dlog.Context{"fault": id}, func(s *wsState) { delete(s.networkFaults, id) })
+}
+
 // SetReviving raises or lowers the workspace's REVIVING marker, which draws a
 // shimmer across the row's name while its parked session comes back up.
 //
@@ -725,4 +748,12 @@ func linkName(link sessionwatcher.LinkState) string {
 	default:
 		return "unknown"
 	}
+}
+
+// holdsNetworkFault reports whether the workspace stands on the network fault
+// with this id.
+func (r *resolver) holdsNetworkFault(ws ids.WorkspaceID, id string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.state.workspace(ws).networkFaults[id]
 }

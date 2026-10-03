@@ -32,7 +32,7 @@ func openHost(t *testing.T, server *fakeServer, client agentreplv1connectClient,
 		cancel()
 		t.Fatalf("WatchHostWorkspace(%s): %v", id, err)
 	}
-	server.awaitSubscribers(streamHost, id, 1)
+	server.mustAwaitSubscribers(t, streamHost, id, 1)
 	return stream, cancel
 }
 
@@ -44,7 +44,7 @@ func openDaemon(t *testing.T, server *fakeServer, client agentreplv1connectClien
 		cancel()
 		t.Fatalf("WatchDaemon: %v", err)
 	}
-	server.awaitSubscribers(streamDaemon, "", 1)
+	server.mustAwaitSubscribers(t, streamDaemon, "", 1)
 	return stream, cancel
 }
 

@@ -126,6 +126,12 @@ type Deps struct {
 	// is the `news_digest` state every WEBVIEW WatchDaemon stream subscribes
 	// to (an Emacs stream's never does: only a webview draws the overlay).
 	NewsDigest NewsDigest
+	// EditorInstances judges each Emacs WatchDaemon's process identity, so a
+	// full Emacs restart is told apart from a reconnect.
+	EditorInstances EditorInstances
+	// Startup is the bring-up a new Emacs process is owed, its events told on
+	// that Emacs's WatchDaemon stream alone.
+	Startup Startup
 
 	// WebappDist is the webapp's dist directory, served on the same origin.
 	// Its entry point is re-stat'd per request and answered with
@@ -387,6 +393,10 @@ func New(deps Deps) (Server, error) {
 		return nil, missing("the persistent-wifi controller")
 	case deps.NewsDigest == nil:
 		return nil, missing("the news digest")
+	case deps.EditorInstances == nil:
+		return nil, missing("the editor instance tracker")
+	case deps.Startup == nil:
+		return nil, missing("the editor startup")
 	case deps.WebappDist == "":
 		return nil, missing("the webapp dist directory")
 	case deps.ImageOrigin == nil:

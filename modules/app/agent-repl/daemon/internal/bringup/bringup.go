@@ -18,6 +18,7 @@ package bringup
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 
 	"claude-repld/internal/dlog"
@@ -56,6 +57,11 @@ type Deps struct {
 	// Operation names the records, so a boot's bring-up and a takeover's
 	// are told apart in the log.
 	Operation string
+	// Done, when set, is told how each workspace's start ended (nil for a
+	// session that came up or a workspace already being served), the moment
+	// it ends rather than when the whole bring-up does. The editor's startup
+	// (internal/startup) is the one caller that waits on single workspaces.
+	Done func(ws ids.WorkspaceID, err error)
 }
 
 // Outcome is what one workspace's bring-up came to.
@@ -131,7 +137,11 @@ func Run(ctx context.Context, deps Deps, pending []wsm.Workspace) Report {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			outcomes[i] = one(ctx, deps, ws)
+			var err error
+			outcomes[i], err = one(ctx, deps, ws)
+			if deps.Done != nil {
+				deps.Done(ws.ID, err)
+			}
 		}()
 	}
 	wg.Wait()
@@ -163,9 +173,15 @@ func Run(ctx context.Context, deps Deps, pending []wsm.Workspace) Report {
 	return report
 }
 
+// ErrNotServed marks a start that failed because the workspace stopped being
+// this daemon's while it ran: a handover moved it to a successor, whose own
+// shim then refused this daemon's start. It is the other daemon's workspace,
+// not a failed bring-up, so it is recorded as stood down.
+var ErrNotServed = errors.New("bringup: the workspace is no longer served by this daemon")
+
 // one brings one pending workspace's session up and says what came of it,
 // logging the per-workspace record Run's summary counts.
-func one(ctx context.Context, deps Deps, ws wsm.Workspace) Outcome {
+func one(ctx context.Context, deps Deps, ws wsm.Workspace) (Outcome, error) {
 	log := deps.Log
 	// Raised by the caller when it named the workspace pending; lowered here
 	// whatever this comes to, so a workspace whose start never began is not
@@ -182,7 +198,7 @@ func one(ctx context.Context, deps Deps, ws wsm.Workspace) Outcome {
 			dlog.KeyWorkspaceID: string(ws.ID),
 			"error":             err.Error(),
 		})
-		return NotBegun
+		return NotBegun, fmt.Errorf("bringup: %q not started, the daemon is leaving: %w", ws.ID, err)
 	}
 	startCtx := context.WithoutCancel(ctx)
 	fields := dlog.Context{
@@ -193,7 +209,7 @@ func one(ctx context.Context, deps Deps, ws wsm.Workspace) Outcome {
 	if err != nil {
 		fields["error"] = err.Error()
 		log.Error(deps.Operation, "a workspace's session record could not be read; it is not brought up", fields)
-		return Failed
+		return Failed, fmt.Errorf("bringup: read the session record of %q: %w", ws.ID, err)
 	}
 	hibernated := exists && session.Hibernated()
 	if err := deps.StartSession(startCtx, ws.ID); err != nil {
@@ -201,20 +217,22 @@ func one(ctx context.Context, deps Deps, ws wsm.Workspace) Outcome {
 		// A START THIS DAEMON STOOD THE SHIM DOWN UNDER IS NOT A FAILED
 		// BRING-UP. An exit's drain force-stops every workspace session, and
 		// a start still in flight when it does comes back from a shim the
-		// same process just killed. MEASURED: realtest run
+		// same process just killed; a start that reaches the spawn after the
+		// supervisor began standing down is refused one for the same reason. MEASURED: realtest run
 		// 2026-09-13T16:20:34 recorded it as an ERROR on three consecutive
 		// daemon generations.
-		if errors.Is(err, shimclient.ErrStandDownOrdered) {
+		if errors.Is(err, shimclient.ErrStandDownOrdered) || errors.Is(err, shimclient.ErrStandingDown) ||
+			errors.Is(err, ErrNotServed) {
 			log.Debug(deps.Operation, "an open workspace's start ended in a stand-down this daemon ordered", fields)
-			return StoodDown
+			return StoodDown, err
 		}
 		log.Error(deps.Operation, "an open workspace's session did not come up; the bring-up goes on", fields)
-		return Failed
+		return Failed, err
 	}
 	if hibernated {
 		log.Debug(deps.Operation, "a hibernated workspace was woken", fields)
-		return Woken
+		return Woken, nil
 	}
 	log.Debug(deps.Operation, "an open workspace's session was started", fields)
-	return Started
+	return Started, nil
 }

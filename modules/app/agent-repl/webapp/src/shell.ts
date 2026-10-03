@@ -31,6 +31,8 @@ export interface ShellElements {
   holdTray: HTMLElement;
   /** The status footer, docked below the scroll zone. */
   footer: HTMLElement;
+  /** The docked gate banner's slot, below the footer. Ships hidden. */
+  gateDock: HTMLElement;
   /** The dev-mode composer. Ships hidden; production runs composer-less. */
   composer: HTMLElement;
   /** The full-screen login terminal overlay. Ships hidden. */
@@ -53,6 +55,7 @@ const SHELL_IDS: ReadonlyArray<readonly [keyof ShellElements, string]> = [
   ["feed", "feed"],
   ["holdTray", "hold-tray"],
   ["footer", "footer"],
+  ["gateDock", "gate-dock"],
   ["composer", "composer"],
   ["loginOverlay", "login-overlay"],
   ["newsDigest", "news-digest"],

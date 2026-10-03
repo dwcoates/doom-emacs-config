@@ -99,6 +99,7 @@ import {
   transcriptsRead,
   transcriptsRefused,
   titleDigestRefused,
+  type VendorStartCause,
   type VendorStartRetry,
 } from "../service/failures.js";
 import type { Engine } from "./engine.js";
@@ -149,7 +150,8 @@ import {
   toVendorPermissionMode,
 } from "./permission-gate.js";
 import { SessionPushes } from "./pushes.js";
-import { NetworkResume, type ReachabilityProbe, type ResumeDelivery } from "./network-resume.js";
+import { classifyAgentFailure, NetworkResume, type ReachabilityProbe, type ResumeDelivery } from "./network-resume.js";
+import { networkReach, type NetworkReach } from "./network-reach.js";
 import {
   KEEPALIVE_YIELD_BUDGET_MS,
   TurnEngine,
@@ -518,6 +520,12 @@ const KEEPALIVE_COMPONENT = "shim-engine-keepalive";
  * clear the other's fault.
  */
 const KEEPALIVE_REWIND_COMPONENT = "shim-engine-keepalive-rewind";
+/**
+ * THE NETWORK: unreachable from this machine, raised by any request that
+ * failed below an answer and recovered by the next that reaches the vendor
+ * (engine/network-reach.ts).
+ */
+const NETWORK_COMPONENT = "network";
 
 /**
  * How long a rollback waits for the interrupted turn's own stop result.
@@ -1986,6 +1994,8 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     settleStartOnErrorResult(message);
     noteDetachedWork(message, attribution, verdict.turn);
     networkResume.observe(message);
+    const reach = networkReach(message);
+    if (reach !== undefined) noteNetworkReach(reach);
     // A RESUMED SUBAGENT THIS PROCESS NEVER SAW SPAWN IS NAMED BY THE STORE,
     // before the fold, which cannot await: the pairing of its vendor task
     // locator with its agent is the sidecar's, on record since the agent first
@@ -2387,6 +2397,8 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       new VendorStartError(
         `the vendor ended the session's opening with an error result (${message.subtype}): ${said}`,
         verdict.retry,
+        undefined,
+        verdict.cause,
       ),
     );
   }
@@ -4006,7 +4018,16 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         // the next child may well answer it.
         const bound: VendorStartBound | undefined =
           err instanceof BoundExceededError ? { name: "live_signal", ms: err.boundMs } : undefined;
-        startReject(new VendorStartError(`the vendor did not prove itself live: ${detail}`, "retryable", bound));
+        // THE LIVENESS CALL'S OWN FAILURE SAYS WHOSE IT WAS: one that never
+        // reached the API names an outage, a bound that tripped does not.
+        startReject(
+          new VendorStartError(
+            `the vendor did not prove itself live: ${detail}`,
+            "retryable",
+            bound,
+            classifyAgentFailure({ text: detail }).network ? "network" : "vendor",
+          ),
+        );
         return;
       }
       if (query !== active) return;
@@ -4184,7 +4205,11 @@ export function createEngine(deps: EngineDeps): SessionEngine {
           },
           "refused StartSession: the cold gate's remediation failed",
         );
-        return startSessionRefused({ kind: "vendorStartFailed", retry: remedy.retry }, remedy.detail);
+        return refuseVendorStart(
+          remedy.retry,
+          remedy.retry === "retryable" && classifyAgentFailure({ text: remedy.detail }).network ? "network" : "vendor",
+          remedy.detail,
+        );
       }
       // THE HANDOVER FROM THE REMEDIATION TO THE SESSION ITSELF. Said here
       // rather than inside `compact`, because the compaction's own work is
@@ -4409,8 +4434,8 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       }
       identity = undefined;
       const detail = withVendorStderr(err instanceof Error ? err.message : String(err));
-      LOGGER.error({ cause: detail, retry: label.retry }, "the vendor query could not be started");
-      return startSessionRefused({ kind: "vendorStartFailed", retry: label.retry }, detail);
+      LOGGER.error({ cause: detail, retry: label.retry, failure_cause: label.cause }, "the vendor query could not be started");
+      return refuseVendorStart(label.retry, label.cause, detail);
     }
     // THE HELD CUTS, NOW KEYABLE AND NOW SAFE TO KEY. Written AFTER the query
     // is up rather than before it: a row landed under a producer the failure
@@ -4508,7 +4533,37 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         "the session resumed from the cold gate's compaction is up",
       );
     }
+    // THE START REACHED THE VENDOR, so whatever outage an earlier attempt saw
+    // is over (conversation.v1 SessionFaultNetworkUnreachable).
+    noteNetworkReach({ kind: "reached" });
     return startSessionStarted(started_);
+  }
+
+  /**
+   * The `vendor_start_failed` refusal, and — for a start the NETWORK failed —
+   * the network fault stated FIRST on the session stream, so the daemon reads
+   * the outage from the shim's own diagnostics while it retries
+   * (`StartSessionVendorStartRetryable.cause`).
+   */
+  function refuseVendorStart(
+    retry: VendorStartRetry,
+    cause: VendorStartCause,
+    detail: string,
+  ): shimv1.StartSessionResponse {
+    if (retry === "retryable" && cause === "network") noteNetworkReach({ kind: "unreachable", detail });
+    return startSessionRefused({ kind: "vendorStartFailed", retry, cause }, detail);
+  }
+
+  /**
+   * THE NETWORK FAULT'S ONE DOOR: an outage opens (or restates) it, and the
+   * first request that reaches the vendor resolves it.
+   */
+  function noteNetworkReach(reach: NetworkReach): void {
+    if (reach.kind === "unreachable") {
+      pushes.fault(sessionFault({ kind: "networkUnreachable" }, NETWORK_COMPONENT, reach.detail));
+      return;
+    }
+    pushes.resolveComponent(NETWORK_COMPONENT, 0);
   }
 
   type Remedy =

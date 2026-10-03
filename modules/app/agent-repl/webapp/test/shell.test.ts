@@ -17,6 +17,7 @@ const MOUNTS: ReadonlyArray<readonly [keyof ShellElements, string]> = [
   ["feed", "feed"],
   ["holdTray", "hold-tray"],
   ["footer", "footer"],
+  ["gateDock", "gate-dock"],
   ["composer", "composer"],
   ["loginOverlay", "login-overlay"],
   ["newsDigest", "news-digest"],
