@@ -67,12 +67,25 @@ remains the focused session/PID/span/gap diagnostic.
 
 `bounce-agent-repl-forcefully.sh` rebuilds every component in place in this
 checkout (protobufs, shim, webapp, daemon, store, sidecar, lock), then stops
-every backend AT ONCE -- the daemon and the shims running this checkout's
-binaries, their lock helpers, the sidecar and the store -- gracefully first
-(SIGTERM; `launchctl bootout` for the services), killing each on its own the
-moment it outlives the grace period, and
-brings the store, then the sidecar, back up. A failed build stops nothing.
-Emacs starts the fresh daemon when it next links, and the daemon its shims.
-It matches processes by this checkout's own paths, so a daemon running from
-another checkout is left alone. `test-bounce-agent-repl-forcefully.sh` covers
+every backend IN ORDER, so that every stop is a planned one at its source:
+
+1. the daemon is asked to stand down now (`claude-repld call
+   UpdateShutdownSchedule {"now":...}`), which announces its ending to every
+   client and stands each of its shims down itself before it exits -- so the
+   daemon reads every shim exit as one it ordered, and every shim concludes
+   its session against a store that is still up;
+2. whatever it left (a refused or unanswered request, a daemon past the
+   grace, a straggling shim or lock helper) gets SIGTERM, then SIGKILL after
+   the grace -- only the processes named BEFORE the request, never the fresh
+   daemon Emacs relaunches meanwhile or the shims it starts;
+3. only then the sidecar, then the store (`launchctl bootout`, SIGKILL after
+   the grace), and the store, then the sidecar, come back up.
+
+Signalling the daemon, the shims and the services all at once put a
+`shim died` ERROR in the daemon's log for every shim, and a `store could not
+be reached` ERROR in every shim's, on every bounce (2026-10-03). A failed
+build stops nothing. Emacs starts the fresh daemon when it next links, and
+the daemon its shims. It matches processes by this checkout's own paths, so a
+daemon running from another checkout is left alone.
+`test-bounce-agent-repl-forcefully.sh` covers
 it hermetically: a temporary checkout, stand-in processes and a launchctl stub.
