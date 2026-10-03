@@ -240,7 +240,9 @@ func (s *supervisor) StandDownEverySpawn(ctx context.Context, reason string) err
 // that is about to restart loses it under its first writes. It is a latch,
 // not a wait for a duration: the boot closes it whether its service step
 // succeeded or failed, and a spawn whose caller gives up first is refused.
-func (s *supervisor) awaitServices(ctx context.Context, ws ids.WorkspaceID) error {
+// The waiting is recorded on the workspace's own log, where every other step
+// of its spawn is.
+func (s *supervisor) awaitServices(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID) error {
 	if s.servicesReady == nil {
 		return nil
 	}
@@ -249,11 +251,10 @@ func (s *supervisor) awaitServices(ctx context.Context, ws ids.WorkspaceID) erro
 		return nil
 	default:
 	}
-	log := s.surfaces.Global()
-	log.Debug("daemon.shimclient.spawn", "a spawn waits for the services to be made current", dlog.Context{"workspace_id": string(ws)})
+	log.Debug("daemon.shimclient.spawn", "a spawn waits for the services to be made current", nil)
 	select {
 	case <-s.servicesReady:
-		log.Debug("daemon.shimclient.spawn", "the services are current; the spawn goes on", dlog.Context{"workspace_id": string(ws)})
+		log.Debug("daemon.shimclient.spawn", "the services are current; the spawn goes on", nil)
 		return nil
 	case <-ctx.Done():
 		return fmt.Errorf("shimclient: the spawn for %q was abandoned while it waited for the services to be made current: %w", ws, ctx.Err())
@@ -264,9 +265,6 @@ func (s *supervisor) awaitServices(ctx context.Context, ws ids.WorkspaceID) erro
 // and the shim has pushed its first diagnostics arm, healthy or not.
 func (s *supervisor) Spawn(ctx context.Context, spec Spec) (Client, error) {
 	if err := validateSpec(spec); err != nil {
-		return nil, err
-	}
-	if err := s.awaitServices(ctx, spec.WorkspaceID); err != nil {
 		return nil, err
 	}
 	contracts := envc.Load()
@@ -288,6 +286,9 @@ func (s *supervisor) Spawn(ctx context.Context, spec Spec) (Client, error) {
 		return nil, fmt.Errorf("shimclient: resolve workspace log sink for %q: %w", spec.WorkspaceDir, err)
 	}
 	log = log.With(dlog.Context{"workspace_id": string(spec.WorkspaceID)})
+	if err := s.awaitServices(ctx, log, spec.WorkspaceID); err != nil {
+		return nil, err
+	}
 
 	c := newClient(log, spec.WorkspaceID, spec.UDSPath, s.back, s.workspaceProbe(spec.WorkspaceDir), s.StandingDown)
 	c.grace = s.grace
