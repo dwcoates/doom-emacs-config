@@ -3481,6 +3481,49 @@ from memory -- is what this now pins, plus the rejoin that follows it."
         ;; Assert
         (should (equal killed '("main")))))))
 
+(ert-deftest agent-repl-test-delete-pseudos-waits-while-the-startup-is-choosing ()
+  "Standing in \"main\" while the startup has not chosen: nothing moves, nothing dies, the one-shot stays."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((persp-mode t)
+          (persp-nil-name "none")
+          (+workspaces-main "main")
+          (persp-names-cache '("none" "main" "definitions"))
+          (agent-repl--pseudo-perspectives-deleted nil)
+          (switched nil)
+          (killed nil))
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "main"))
+                ((symbol-function 'agent-repl-startup-choosing-p) (lambda () t))
+                ((symbol-function 'agent-repl--ws-switch) (lambda (ws &rest _) (push ws switched)))
+                ((symbol-function 'agent-repl--ws-persp-kill) (lambda (ws) (push ws killed)))
+                ((symbol-function 'agent-repl--info) (lambda (&rest _) nil)))
+        ;; Act
+        (agent-repl--delete-pseudo-perspectives)
+        ;; Assert
+        (should (equal (list switched killed agent-repl--pseudo-perspectives-deleted)
+                       '(nil nil nil)))))))
+
+(ert-deftest agent-repl-test-delete-pseudos-proceeds-once-the-startup-chose ()
+  "The startup's selection landed: the frame is off \"main\", which is killed without a vacate."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((persp-mode t)
+          (persp-nil-name "none")
+          (+workspaces-main "main")
+          (persp-names-cache '("none" "main" "definitions" "doom"))
+          (agent-repl--pseudo-perspectives-deleted nil)
+          (killed nil))
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "doom"))
+                ((symbol-function 'agent-repl-startup-choosing-p) (lambda () t))
+                ((symbol-function 'agent-repl--ws-switch)
+                 (lambda (&rest _) (error "should not switch: already in a real ws")))
+                ((symbol-function 'agent-repl--ws-persp-kill) (lambda (ws) (push ws killed)))
+                ((symbol-function 'agent-repl--info) (lambda (&rest _) nil)))
+        ;; Act
+        (agent-repl--delete-pseudo-perspectives)
+        ;; Assert
+        (should (equal killed '("main")))))))
+
 (ert-deftest agent-repl-test-delete-pseudos-never-kills-none ()
   "persp-nil \"none\" is skipped, never handed to the kill wrapper."
   (agent-repl-test--with-clean-state

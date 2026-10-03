@@ -95,6 +95,13 @@ hot reload of this file keeps the phase the process is in.")
   "Return non-nil while this process's startup holds tabs."
   (not (eq agent-repl-startup--phase 'done)))
 
+(defun agent-repl-startup-choosing-p ()
+  "Return non-nil while the startup runs and has not yet chosen its selection.
+Until it has, the frame has no workspace of the user's to move to: the
+placeholder perspective stays rather than vacating to an arbitrary
+workspace (workspace.el `agent-repl--delete-pseudo-perspectives')."
+  (and (agent-repl-startup-active-p) (null agent-repl-startup--selected)))
+
 (defun agent-repl-startup-holds-p (id)
   "Return non-nil while the startup keeps workspace ID's tab out of the bar.
 Every workspace is held from process start until the startup opens its
