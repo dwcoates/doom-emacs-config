@@ -313,7 +313,7 @@ export function drawFeedColdGateResolvedCompact(
     .replace("{model}", drawFeedColdGateModel(model, `${path}.model`));
 }
 
-/** The three action rows, plus the compact submenu the third one opens. */
+/** The one row of action buttons, plus the compact submenu the third one opens. */
 function drawActions(
   rc: RowContext,
   menu: FeedColdGateCompactMenu | undefined,
@@ -335,14 +335,21 @@ function drawActions(
   progress.setAttribute("data-cold-gate-progress", "");
   progress.hidden = true;
 
+  // ONE LINE OF EQUAL BUTTONS (owner request, 2026-10-03): side by side, each
+  // as wide as the widest label needs, the label centred. What each choice
+  // keeps is the button's hover tooltip rather than a sentence beside it.
+  const row = document.createElement("div");
+  row.className = "cold-gate-buttons";
+  actions.append(row);
+
   const buttons: Control[] = [];
-  const pay = actionRow("pay", COLD_GATE_COPY.pay, buttons);
-  const clear = actionRow("clear", COLD_GATE_COPY.clear, buttons);
-  actions.append(pay.row, clear.row);
-  pay.button.addEventListener("click", () => {
+  const pay = actionButton("pay", COLD_GATE_COPY.pay, buttons);
+  const clear = actionButton("clear", COLD_GATE_COPY.clear, buttons);
+  row.append(pay, clear);
+  pay.addEventListener("click", () => {
     void answer(rc, actions, buttons, progress, { kind: "pay" });
   });
-  clear.button.addEventListener("click", () => {
+  clear.addEventListener("click", () => {
     void answer(rc, actions, buttons, progress, { kind: "clear" });
   });
   if (menu === undefined) {
@@ -357,13 +364,8 @@ function drawActions(
   opener.className = "hibernation-compact";
   opener.setAttribute("data-compact-open", "");
   opener.textContent = COLD_GATE_COPY.compact.label;
-  const compactRow = document.createElement("div");
-  compactRow.className = "hibernation-option";
-  const compactHint = document.createElement("span");
-  compactHint.className = "hibernation-option-text";
-  compactHint.textContent = COLD_GATE_COPY.compact.hint;
-  compactRow.append(opener, compactHint);
-  actions.append(compactRow);
+  opener.title = COLD_GATE_COPY.compact.hint;
+  row.append(opener);
 
   const submenu = drawCompactSubmenu(rc, menu, buttons, actions, progress, path);
   submenu.el.hidden = true;
@@ -379,27 +381,19 @@ function drawActions(
   return actions;
 }
 
-/** One remediation row: its button, and the sentence saying what it keeps. */
-function actionRow(
+/** One remediation button; what it keeps is its hover tooltip. */
+function actionButton(
   arm: "pay" | "clear",
   copy: { label: string; hint: string },
   buttons: Control[],
-): { row: HTMLElement; button: Control } {
-  const row = document.createElement("div");
-  row.className = arm === "clear" ? "hibernation-option warn" : "hibernation-option";
-
+): Control {
   const button = createControl();
   button.className = arm === "clear" ? "hibernation-clear" : "hibernation-direct";
   button.setAttribute("data-cold-gate", arm);
   button.textContent = copy.label;
-
-  const hint = document.createElement("span");
-  hint.className = "hibernation-option-text";
-  hint.textContent = copy.hint;
-
-  row.append(button, hint);
+  button.title = copy.hint;
   buttons.push(button);
-  return { row, button };
+  return button;
 }
 
 /**

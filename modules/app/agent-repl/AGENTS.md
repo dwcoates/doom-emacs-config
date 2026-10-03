@@ -1398,8 +1398,10 @@ the root feed's standing `FeedColdGate` row. Emacs reads the first
 (`agent-repl-input-hidden-p`, `lisp/window.el`) and lays the workspace out
 with no input window; the webapp reads the second (`src/feed/gate-dock.ts`)
 and moves the banner into `#gate-dock`, a full-width row at the page's very
-bottom spanning the sidebar's column too (the sidebar keeps its height), at
-the input window's height, drawing no inline gate. Answering
+bottom spanning the sidebar's column too (the sidebar keeps its height),
+fit to its content and at most the input window's height, drawing no inline
+gate. Its buttons sit on one line, equal width, each choice's explanation a
+hover tooltip. Answering
 or retracting the gate restores both. Never gate either side on a signal the
 other cannot see.
 

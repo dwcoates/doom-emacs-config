@@ -214,7 +214,7 @@ describe("installGateDock", () => {
     expect(toldDockHeight(document)).toBeNull();
   });
 
-  it("sizes the dock from the told property, the fraction only as fallback", async () => {
+  it("fits the dock to its content, capped by the told property (the fraction only as fallback)", async () => {
     // Arrange
     const css = (await import("../../src/styles.css?raw")).default;
 
@@ -222,6 +222,6 @@ describe("installGateDock", () => {
     const rule = /#gate-dock\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
 
     // Assert
-    expect(rule).toContain("height: var(--gate-dock-height, 18.4vh)");
+    expect(rule).toContain("max-height: var(--gate-dock-height, 18.4vh)");
   });
 });

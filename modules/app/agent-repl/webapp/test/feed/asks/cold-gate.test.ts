@@ -219,13 +219,38 @@ describe("the standing gate", () => {
     expect(el.querySelector<HTMLElement>("[data-cold-gate-progress]")?.hidden).toBe(true);
   });
 
-  it("says what each choice keeps, not only what it costs", () => {
+  it("says what each choice keeps as its button's tooltip", () => {
     const el = drawFeedColdGate(gate(standing()), askHarness().rc);
-    expect([...el.querySelectorAll(".hibernation-option-text")].map((n) => n.textContent)).toEqual([
+    expect([...el.querySelectorAll<HTMLElement>(".cold-gate-buttons > *")].map((n) => n.title)).toEqual([
       COLD_GATE_COPY.pay.hint,
       COLD_GATE_COPY.clear.hint,
       COLD_GATE_COPY.compact.hint,
     ]);
+  });
+
+  it("draws no explanatory sentence beside the buttons", () => {
+    const el = drawFeedColdGate(gate(standing()), askHarness().rc);
+    expect(el.querySelector(".hibernation-option-text")).toBeNull();
+  });
+
+  it("puts every button on the one row, in order", () => {
+    const el = drawFeedColdGate(gate(standing()), askHarness().rc);
+    expect([...el.querySelectorAll(".cold-gate-buttons > *")].map((n) => n.textContent)).toEqual([
+      COLD_GATE_COPY.pay.label,
+      COLD_GATE_COPY.clear.label,
+      COLD_GATE_COPY.compact.label,
+    ]);
+  });
+
+  it("sizes the buttons equal, to the widest label, centred", async () => {
+    const css = (await import("../../../src/styles.css?raw")).default;
+    const rule = /\.cold-gate-buttons\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
+    const label = /\.cold-gate-buttons > ar-button\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
+    expect([
+      rule.includes("grid-auto-columns: 1fr"),
+      rule.includes("width: max-content"),
+      label.includes("text-align: center"),
+    ]).toEqual([true, true, true]);
   });
 
   it("keeps the compact submenu closed until the reader opens it", () => {

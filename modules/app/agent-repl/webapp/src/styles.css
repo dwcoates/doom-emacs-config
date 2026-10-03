@@ -6220,6 +6220,23 @@ bubble-body.bubble-body { display: block; }
   font-weight: 700;
   color: var(--muted);
 }
+/* THE GATE'S BUTTONS SIT ON ONE LINE, EQUAL IN SIZE (owner request,
+   2026-10-03): a grid as wide as its content whose columns are all `1fr`, so
+   every column takes the widest button's width; the label is centred in each.
+   What each choice keeps is the button's tooltip, not a sentence beside it. */
+.cold-gate-buttons {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  width: max-content;
+  max-width: 100%;
+  gap: 0.5rem;
+}
+.cold-gate-buttons > ar-button {
+  text-align: center;
+  justify-content: center;
+  white-space: nowrap;
+}
 .cold-gate-choice {
   display: block;
   padding: 0.1rem 0;
@@ -6244,8 +6261,8 @@ bubble-body.bubble-body { display: block; }
    Emacs hides the input window while it stands and this webview grows into
    that space, so the banner takes the input's exact slot: #gate-dock, the
    body grid's full-width second row under the rail AND the main column (the
-   rail keeps its height), EXACTLY the input window's height. Emacs tells the page that
-   height in pixels (--gate-dock-height, set on the root before the input
+   rail keeps its height), fit to its content and at most the input window's
+   height. Emacs tells the page that height in pixels (--gate-dock-height, set on the root before the input
    hides; lisp/window.el); 18.4vh, `agent-repl-input-height-fraction`, is the
    fallback only for a page Emacs never told, which gate-dock.ts records. The
    banner's row stays in the feed, hidden, so the feed draws no inline gate
@@ -6253,13 +6270,16 @@ bubble-body.bubble-body { display: block; }
 #gate-dock {
   grid-column: 1 / -1;
   grid-row: 2;
-  height: var(--gate-dock-height, 18.4vh);
+  /* THE DOCK FITS ITS CONTENT (owner request, 2026-10-03), capped at the
+     input window's slot: the one-line gate is a little shorter than the
+     input it replaces, and a taller one (the open compact submenu) scrolls
+     inside the slot rather than squeezing the feed further. */
+  max-height: var(--gate-dock-height, 18.4vh);
   overflow-y: auto;
   box-sizing: border-box;
 }
 #gate-dock[hidden] { display: none; }
 #gate-dock > .cold-gate.cold-gate-docked {
-  min-height: 100%;
   box-sizing: border-box;
   border-radius: 0;
   border-width: 1px 0 0;
