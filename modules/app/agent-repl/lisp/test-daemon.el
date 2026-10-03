@@ -96,6 +96,9 @@ proxy for `no dial' the transport records would otherwise prove.")
 (defvar agent-repl-test-daemon--link-conn nil
   "What the stubbed `agent-repl-link-connect' answers.")
 
+(defvar agent-repl-test-daemon--link-live nil
+  "What the stubbed `agent-repl-link-live' answers: the live link\='s connection, or nil.")
+
 (defvar agent-repl-test-daemon--link-up nil
   "What the stubbed `agent-repl-link-up-p' answers.")
 
@@ -164,6 +167,10 @@ a scenario names which pids are alive rather than depending on the host.")
          (agent-repl-test-daemon--health-calls 0)
          (agent-repl-test-daemon--link-conn 'the-connection)
          (agent-repl-test-daemon--link-up nil)
+         (agent-repl-test-daemon--link-live nil)
+         (agent-repl-daemon--parked-exit nil)
+         (agent-repl-daemon--announced-departure nil)
+         (agent-repl-link-down-planned nil)
          (agent-repl-test-daemon--timers nil)
          (agent-repl-test-daemon--logs nil)
          (agent-repl--frontend-daemon-process nil)
@@ -273,6 +280,8 @@ a scenario names which pids are alive rather than depending on the host.")
                ((symbol-function 'agent-repl-link-primary)
                 (lambda () agent-repl-test-daemon--link-conn))
                ((symbol-function 'agent-repl-link-teardown) (lambda () nil))
+               ((symbol-function 'agent-repl-link-live)
+                (lambda () agent-repl-test-daemon--link-live))
                ((symbol-function 'run-with-timer)
                 (lambda (seconds _repeat function &rest _args)
                   (push (cons seconds function) agent-repl-test-daemon--timers)
@@ -1233,6 +1242,129 @@ the spawn, called the daemon booted, and linked to a refused port."
     ;; Assert
     (should (agent-repl-test-daemon--logged-p
              :error "elisp.daemon.exited status=2 event=exited abnormally requested=nil"))))
+
+;;;; ---- An exit the daemon announced is its planned stand-down ----
+;;
+;; Regression, 2026-10-03: a bounce asked the daemon to stand down from
+;; outside this editor; the daemon announced its ending on its `WatchDaemon'
+;; stream and exited, and the exit's sentinel ran BEFORE the stream's ending
+;; was read, so `elisp.daemon.exited ... requested=nil' was a WARN.
+
+(defmacro agent-repl-test-daemon--with-own-linked-daemon (&rest body)
+  "Run BODY with this Emacs's own daemon at 127.0.0.1:9001 serving the link.
+`conn' is bound to the link\='s connection."
+  (declare (indent 0))
+  `(let ((conn (agent-repl-connect-open "127.0.0.1:9001")))
+     (setq agent-repl--frontend-daemon-process 'the-daemon-process
+           agent-repl-daemon--own-address "127.0.0.1:9001"
+           agent-repl-test-daemon--link-live conn)
+     (cl-letf (((symbol-function 'process-live-p) (lambda (_object) nil))
+               ((symbol-function 'process-exit-status) (lambda (_proc) 0)))
+       ,@body)))
+
+(ert-deftest agent-repl-test-daemon-an-exit-ahead-of-its-link-edge-writes-no-warning ()
+  "The exit of the daemon the link still stands on waits for the link's word."
+  (agent-repl-test-daemon--with-harness
+    (agent-repl-test-daemon--with-own-linked-daemon
+      ;; Act
+      (agent-repl-daemon--sentinel 'the-daemon-process "finished\n")
+      ;; Assert
+      (should-not (agent-repl-test-daemon--logged-p :warn "elisp.daemon.exited")))))
+
+(ert-deftest agent-repl-test-daemon-a-parked-exit-whose-link-went-down-planned-is-info ()
+  "A parked exit whose link then carried the planned ending is INFO, announced."
+  (agent-repl-test-daemon--with-harness
+    (agent-repl-test-daemon--with-own-linked-daemon
+      ;; Arrange
+      (agent-repl-daemon--sentinel 'the-daemon-process "finished\n")
+      ;; Act
+      (let ((agent-repl-link-down-planned t))
+        (agent-repl-daemon-on-link-down conn))
+      ;; Assert
+      (should (agent-repl-test-daemon--logged-p
+               :info "elisp.daemon.exited status=0 event=finished requested=announced")))))
+
+(ert-deftest agent-repl-test-daemon-a-parked-exit-whose-link-died-unannounced-is-a-warning ()
+  "A parked exit whose link died with no ending is the unasked departure: WARN."
+  (agent-repl-test-daemon--with-harness
+    (agent-repl-test-daemon--with-own-linked-daemon
+      ;; Arrange
+      (agent-repl-daemon--sentinel 'the-daemon-process "finished\n")
+      ;; Act
+      (agent-repl-daemon-on-link-down conn)
+      ;; Assert
+      (should (agent-repl-test-daemon--logged-p
+               :warn "elisp.daemon.exited status=0 event=finished requested=nil")))))
+
+(ert-deftest agent-repl-test-daemon-an-exit-after-a-planned-link-down-is-info ()
+  "The link went down planned first; the exit that follows is INFO, announced."
+  (agent-repl-test-daemon--with-harness
+    (agent-repl-test-daemon--with-own-linked-daemon
+      ;; Arrange
+      (let ((agent-repl-link-down-planned t))
+        (agent-repl-daemon-on-link-down conn))
+      (setq agent-repl-test-daemon--link-live nil)
+      ;; Act
+      (agent-repl-daemon--sentinel 'the-daemon-process "finished\n")
+      ;; Assert
+      (should (agent-repl-test-daemon--logged-p
+               :info "elisp.daemon.exited status=0 event=finished requested=announced")))))
+
+(ert-deftest agent-repl-test-daemon-an-exit-after-an-unannounced-link-down-is-a-warning ()
+  "The link died with no ending first; the exit that follows stays a WARN."
+  (agent-repl-test-daemon--with-harness
+    (agent-repl-test-daemon--with-own-linked-daemon
+      ;; Arrange
+      (agent-repl-daemon-on-link-down conn)
+      (setq agent-repl-test-daemon--link-live nil)
+      ;; Act
+      (agent-repl-daemon--sentinel 'the-daemon-process "finished\n")
+      ;; Assert
+      (should (agent-repl-test-daemon--logged-p
+               :warn "elisp.daemon.exited status=0 event=finished requested=nil")))))
+
+(ert-deftest agent-repl-test-daemon-an-announced-exit-with-a-failed-status-is-an-error ()
+  "A non-zero status is the daemon's own failure, announced or not."
+  (agent-repl-test-daemon--with-harness
+    (agent-repl-test-daemon--with-own-linked-daemon
+      ;; Arrange
+      (let ((agent-repl-link-down-planned t))
+        (agent-repl-daemon-on-link-down conn))
+      (setq agent-repl-test-daemon--link-live nil)
+      (cl-letf (((symbol-function 'process-exit-status) (lambda (_proc) 2)))
+        ;; Act
+        (agent-repl-daemon--sentinel 'the-daemon-process "exited abnormally\n"))
+      ;; Assert
+      (should (agent-repl-test-daemon--logged-p
+               :error "elisp.daemon.exited status=2 event=exited abnormally requested=nil")))))
+
+(ert-deftest agent-repl-test-daemon-a-planned-link-down-of-another-daemon-excuses-nothing ()
+  "An ending announced on another daemon's link does not excuse this one's exit."
+  (agent-repl-test-daemon--with-harness
+    (agent-repl-test-daemon--with-own-linked-daemon
+      ;; Arrange
+      (let ((agent-repl-link-down-planned t))
+        (agent-repl-daemon-on-link-down (agent-repl-connect-open "127.0.0.1:9002")))
+      (setq agent-repl-test-daemon--link-live nil)
+      ;; Act
+      (agent-repl-daemon--sentinel 'the-daemon-process "finished\n")
+      ;; Assert
+      (should (agent-repl-test-daemon--logged-p
+               :warn "elisp.daemon.exited status=0 event=finished requested=nil")))))
+
+(ert-deftest agent-repl-test-daemon-a-parked-exit-is-recorded-at-the-next-spawn ()
+  "A parked exit that never got its link's word is recorded, never dropped."
+  (agent-repl-test-daemon--with-harness
+    (agent-repl-test-daemon--with-own-linked-daemon
+      ;; Arrange
+      (agent-repl-daemon--sentinel 'the-daemon-process "finished\n")
+      (setq agent-repl-test-daemon--link-live nil
+            agent-repl-test-daemon--address nil)
+      ;; Act
+      (agent-repl-daemon-ensure)
+      ;; Assert
+      (should (agent-repl-test-daemon--logged-p
+               :warn "elisp.daemon.exited status=0 event=finished requested=nil decided-by=next-spawn")))))
 
 (ert-deftest agent-repl-test-daemon-a-request-excuses-only-the-exit-it-ordered ()
   "The order is CONSUMED, so the next departure is heard in full."
