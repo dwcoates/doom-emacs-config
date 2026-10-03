@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # bounce-agent-repl-forcefully.sh -- rebuild every agent-repl component, then
-# stop every running backend and bring the services back on the fresh build.
+# stand every running backend down in order and bring the services back on
+# the fresh build.
 #
 # WHAT IT DOES, IN ORDER:
 #
@@ -10,15 +11,23 @@
 #      checkout's dist, so every webview opened from now on loads the new one.
 #      A FAILED BUILD STOPS HERE, with nothing killed: a bounce onto a build
 #      that does not exist would leave nothing running at all.
-#   2. STOPS every backend AT ONCE, gracefully first and by force after. Each
-#      of these is asked in parallel, and each is killed on its own the moment
-#      it outlives the grace period, so a bounce costs one grace period at
-#      most, never one per backend:
-#        - the daemon(s) running this checkout's binary, the shims running this
-#          checkout's bundle, and their lock helpers: SIGTERM (each one's own
-#          orderly shutdown), then SIGKILL;
-#        - the sidecar and the store: `launchctl bootout` (launchd's SIGTERM; a
-#          kept-alive service only stops by leaving the domain), then SIGKILL.
+#   2. STOPS every backend IN ORDER, each one only once nothing still running
+#      depends on it, so every stop is a planned one at its source:
+#        a. the daemon is ASKED to stand down now (`claude-repld call
+#           UpdateShutdownSchedule {now}`). That is its own ordered stand-down:
+#           it announces its ending to every client, stands each of its shims
+#           down itself (so it reads each exit as one it ordered, and each shim
+#           concludes against a store that is still up), then exits;
+#        b. whatever the daemon left -- a daemon that refused or never
+#           answered the request, or one that outlived the grace, and any shim
+#           or lock helper still running -- gets SIGTERM, then SIGKILL after
+#           the grace. Only the processes running when the stand-down was
+#           asked are ever signalled: the daemon Emacs relaunches meanwhile,
+#           and the shims it starts, are the fresh build and are left alone;
+#        c. only then the sidecar, then the store (the recorded safe order:
+#           the sidecar writes into the store's socket): `launchctl bootout`
+#           (launchd's SIGTERM; a kept-alive service only stops by leaving
+#           the domain), then SIGKILL after the grace.
 #   3. STARTS the store, waits for its socket, then the sidecar (the recorded
 #      safe order), each from its installed plist.
 #
@@ -37,6 +46,8 @@
 #
 # Honored environment (the test's isolation; defaults are the live host):
 #   AGENT_REPL_BOUNCE_GRACE        seconds each graceful stop is given (default 20)
+#   AGENT_REPL_STATE_DIR           the state root whose daemon is asked to stand
+#                                  down (default: the daemon's own, ~/.claude-emacs)
 #   AGENT_REPL_BOUNCE_SOCK_MAX     seconds to wait for the store socket (default 180)
 #   AGENT_REPL_BOUNCE_BUILDER      one executable run in place of the build
 #   AGENT_REPL_LAUNCHCTL           launchctl to drive (default: the one on PATH)
@@ -113,11 +124,31 @@ alive() {
     return 0
 }
 
-# stop_processes NAME PATTERN -- SIGTERM every match, wait up to the grace
-# period, then SIGKILL whatever is left.
-stop_processes() {
-    local name="$1" pattern="$2" waited=0 pids left
-    pids="$(pids_of "$pattern")"
+# await_exit NAME PID... -- wait up to the grace period for every given pid to
+# exit, leaving the ones still running in OUTLIVED.
+OUTLIVED=""
+await_exit() {
+    local name="$1" waited=0
+    shift
+    # shellcheck disable=SC2086
+    while OUTLIVED="$(alive "$@")"; [ -n "$OUTLIVED" ]; do
+        if [ "$waited" -ge "$GRACE" ]; then
+            # shellcheck disable=SC2086
+            log "$name: pid(s) $(echo $OUTLIVED) outlived the ${GRACE}s grace"
+            return 0
+        fi
+        sleep 1
+        waited=$((waited + 1))
+    done
+    return 0
+}
+
+# stop_pids NAME PID... -- SIGTERM every given pid still running, wait up to
+# the grace period, then SIGKILL whatever is left.
+stop_pids() {
+    local name="$1" waited=0 pids left
+    shift
+    pids="$(alive "$@")"
     if [ -z "$pids" ]; then
         log "$name: none running"
         return 0
@@ -139,6 +170,12 @@ stop_processes() {
         waited=$((waited + 1))
     done
     log "$name: stopped"
+}
+
+# stop_processes NAME PATTERN -- stop_pids over every process matching PATTERN.
+stop_processes() {
+    # shellcheck disable=SC2046
+    stop_pids "$1" $(pids_of "$2")
 }
 
 service_known() { "$LAUNCHCTL" print "gui/$uid/$1" >/dev/null 2>&1; }
@@ -174,17 +211,50 @@ stop_service() {
     stop_processes "$label (stray)" "$binary"
 }
 
-# EVERY STOP RUNS AT ONCE, and this script waits for all of them: each asks
-# its backend to shut down and kills it on its own deadline.
-stoppers=()
-stop_processes "daemon" "$DAEMON_BIN" & stoppers+=("$!")
-stop_processes "shims" "$SHIM_MAIN" & stoppers+=("$!")
-stop_processes "shim locks" "$CACHE_BIN/shim-lock" & stoppers+=("$!")
-stop_service "$SIDECAR_LABEL" "$CACHE_BIN/shim-claude-sidecar" & stoppers+=("$!")
-stop_service "$STORE_LABEL" "$CACHE_BIN/shim-store" & stoppers+=("$!")
-for stopper in "${stoppers[@]}"; do
-    wait "$stopper" || die "a stop failed; the services were NOT restarted"
-done
+# THE PROCESSES TO STOP ARE NAMED BEFORE ANYTHING IS ASKED. The moment the
+# daemon stands down, Emacs relaunches one from the fresh build and it starts
+# fresh shims: those match the same paths, and signalling them would kill the
+# new runtime under the very client that just brought it up.
+# shellcheck disable=SC2207
+daemons=($(pids_of "$DAEMON_BIN"))
+# shellcheck disable=SC2207
+shims=($(pids_of "$SHIM_MAIN"))
+# shellcheck disable=SC2207
+locks=($(pids_of "$CACHE_BIN/shim-lock"))
+
+# a. THE DAEMON STANDS ITSELF DOWN, AND ITS SHIMS WITH IT. SIGTERM is the
+# daemon's orderly exit too, but that one leaves its shims running for a
+# successor to adopt; a bounce wants them on the fresh bundle, and a shim
+# killed under a daemon that did not order it is a death in that daemon's
+# log, while one killed after the store is gone cannot conclude its session.
+stand_down_daemon() {
+    local answer
+    if [ "${#daemons[@]}" -eq 0 ]; then
+        log "daemon: none running"
+        return 0
+    fi
+    log "daemon: asking pid(s) ${daemons[*]} to stand down now, its shims with it"
+    if answer="$("$DAEMON_BIN" call UpdateShutdownSchedule \
+        '{"now":{"reason":{"operator":{"note":"bounce-agent-repl-forcefully"}}}}' 2>&1)"; then
+        log "daemon: the stand-down was accepted; waiting for it to leave"
+        await_exit "daemon" "${daemons[@]}"
+        # shellcheck disable=SC2086
+        [ -z "$OUTLIVED" ] || stop_pids "daemon" $OUTLIVED
+    else
+        log "daemon: the stand-down was not accepted (${answer//$'\n'/ }); stopping it by signal"
+        stop_pids "daemon" "${daemons[@]}"
+    fi
+    log "daemon: stopped"
+}
+
+stand_down_daemon
+# b. WHATEVER THE DAEMON LEFT. After an accepted stand-down these are already
+# gone and nothing is signalled.
+stop_pids "shims" ${shims[@]+"${shims[@]}"}
+stop_pids "shim locks" ${locks[@]+"${locks[@]}"}
+# c. THE SERVICES LAST, AND THE SIDECAR BEFORE THE STORE.
+stop_service "$SIDECAR_LABEL" "$CACHE_BIN/shim-claude-sidecar"
+stop_service "$STORE_LABEL" "$CACHE_BIN/shim-store"
 log "every backend is stopped"
 
 # ---- 3. start --------------------------------------------------------------
