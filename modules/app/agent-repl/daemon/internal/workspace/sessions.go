@@ -1320,10 +1320,20 @@ func (f *Fleet) sessionUp(
 	if err := f.restate(ws, &live{client: client, hostSessionID: hostSessionID, configDir: configDir, sessionStarted: true}); err != nil {
 		return err
 	}
+	// THE SESSION FACTS ARE DURABLE BEFORE THE WATCH OPENS. The shim
+	// re-announces its session on every new watch, and the watcher records
+	// the vendor id it states as the resume handle (SetVendorSessionID) --
+	// which writes the session row recordFacts creates. Opened first, the
+	// watch could land that write before the row existed: "wsm: not found",
+	// an ERROR for a session coming up perfectly well (integration
+	// TestABlockedHookDrawsACard under load, 2026-10-03). A failure to record
+	// is still returned, after the watch opens, so the session it started
+	// stays watched and usable.
+	factsErr := f.recordFacts(ctx, log, ws, previous, started, configDir, hostSessionID, client.PID())
 	watcher, err := f.startWatcher(ctx, log, ws, client, sessionwatcher.Session{Started: started})
 	if err != nil {
 		log.Error(opBringUp, "could not start the session watcher", dlog.Context{"cause": err.Error()})
-		return fmt.Errorf("start session for %q: start the watcher: %w", ws, err)
+		return errors.Join(fmt.Errorf("start session for %q: start the watcher: %w", ws, err), factsErr)
 	}
 	if err := f.restate(ws, &live{client: client, watcher: watcher, hostSessionID: hostSessionID, configDir: configDir, sessionStarted: true}); err != nil {
 		// THE WATCHER OPENED FOR A SHIM THIS START NO LONGER HOLDS: it watches
@@ -1331,10 +1341,8 @@ func (f *Fleet) sessionUp(
 		f.closeDisplaced(ws, watcher, "the shim was taken from the start that opened this watcher")
 		return err
 	}
-
-	if err := f.recordFacts(ctx, log, ws, previous, started, configDir, hostSessionID, client.PID()); err != nil {
-		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "err := f.recordFacts(ctx, log, ws, previous, started, configDir, hostSessionID, client.PID()); err != nil"})
-		return err
+	if factsErr != nil {
+		return factsErr
 	}
 	// A NEW SHIM STARTS AT THE ROOT'S LEVEL, while the reader picked another
 	// for the rest of the session: put it back before the session is called
