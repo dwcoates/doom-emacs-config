@@ -31,6 +31,15 @@ import { log } from "../log.js";
 export const DOCKED_CARD_CLASS = "cold-gate-docked";
 /** The class the docked card's (hidden) home row wears. */
 export const DOCKED_ROW_CLASS = "gate-docked-row";
+/** The root custom property Emacs sets to the input window's pixel height. */
+export const DOCK_HEIGHT_PROPERTY = "--gate-dock-height";
+
+/** The height the dock takes: what Emacs said, or null when it said nothing
+ * and the stylesheet's fraction stands in. */
+export function toldDockHeight(doc: Document): string | null {
+  const told = doc.documentElement.style.getPropertyValue(DOCK_HEIGHT_PROPERTY).trim();
+  return told === "" ? null : told;
+}
 
 /** What `installGateDock` hands back. */
 export interface GateDock {
@@ -97,7 +106,18 @@ export function installGateDock(feed: HTMLElement, dock: HTMLElement): GateDock 
     card.classList.add(DOCKED_CARD_CLASS);
     dock.replaceChildren(card);
     dock.hidden = false;
-    log.info("a gate stands; its banner docks below the footer", { operation: "feed.gate-dock.docked" });
+    const height = toldDockHeight(dock.ownerDocument);
+    if (height === null) {
+      // Emacs tells the input's height before it hides the input; a page it
+      // never told sizes the dock by the input-height fraction instead.
+      log.info("a gate stands; Emacs never told the input's height, so the dock takes the input-height fraction", {
+        operation: "feed.gate-dock.height-fallback",
+      });
+    }
+    log.info("a gate stands; its banner docks below the footer", {
+      operation: "feed.gate-dock.docked",
+      context: { height: height ?? "fallback" },
+    });
   };
 
   const sync = (): void => {
