@@ -46,6 +46,7 @@
 (declare-function agent-repl-roster-row-name "roster" (row))
 (declare-function agent-repl-roster-refresh-order "roster" ())
 (declare-function agent-repl-roster-apply-current "roster" ())
+(declare-function agent-repl-host-request-switch "host" (ws trigger))
 (declare-function agent-repl--ensure-input-buffer "panels" (ws))
 (declare-function agent-repl--frontend-precreate-refusal "frontend" (ws))
 (declare-function agent-repl--frontend-webview-read-script "frontend" (buf script callback))
@@ -200,13 +201,20 @@ the web gui, has no page to wait for."
     (agent-repl-startup--finish)))
 
 (defun agent-repl-startup--open (id ws)
-  "Open workspace WS's tab (ref ID): its go-ahead and its page are both in."
-  (puthash id t agent-repl-startup--released)
-  (agent-repl--info ws "elisp.startup.tab-opened ws=%s id=%s" ws id)
-  (agent-repl-roster-refresh-order)
-  (agent-repl-startup--say "%s: ready." ws)
-  ;; The selection may name this workspace, and had no tab to land on.
-  (agent-repl-roster-apply-current))
+  "Open workspace WS's tab (ref ID): its go-ahead and its page are both in.
+THE FIRST TAB OPENED IS SELECTED at once, and stays selected while every
+later tab opens (owner request, 2026-10-03): a startup never shows no
+workspace while the rest are coming up.  The selection is asked of the
+daemon like every other switch, so the frame follows the roster."
+  (let ((first (= (hash-table-count agent-repl-startup--released) 0)))
+    (puthash id t agent-repl-startup--released)
+    (agent-repl--info ws "elisp.startup.tab-opened ws=%s id=%s first=%s" ws id first)
+    (agent-repl-roster-refresh-order)
+    (agent-repl-startup--say "%s: ready." ws)
+    (when first
+      (agent-repl-host-request-switch ws 'startup))
+    ;; The selection may name this workspace, and had no tab to land on.
+    (agent-repl-roster-apply-current)))
 
 (defun agent-repl-startup--finish ()
   "End the startup: say how it went, and stop holding tabs."
