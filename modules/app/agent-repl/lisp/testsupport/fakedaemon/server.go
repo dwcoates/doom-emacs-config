@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"sync"
+	"time"
 
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -94,14 +95,39 @@ func newFakeServer() *fakeServer {
 	return s
 }
 
+// awaitSubscribersBound is how long awaitSubscribers waits. A subscription
+// to this in-process fake lands in milliseconds (the slowest seen across the
+// suite is well under 100ms), so this is a generous multiple of the healthy
+// maximum: a wait that reaches it is a subscription that never came.
+const awaitSubscribersBound = 2 * time.Second
+
 // awaitSubscribers blocks until at least N subscribers of STREAM (and, for
-// the host stream, of WORKSPACEID) are registered.  Real synchronization on
-// the registry's own condition variable, so a caller never has to guess how
-// long a subscription takes to land.
-func (s *fakeServer) awaitSubscribers(stream, workspaceID string, n int) {
+// the host stream, of WORKSPACEID) are registered, or WITHIN has passed, in
+// which case it answers an error naming what it waited for and what it saw.
+// Real synchronization on the registry's own condition variable, so a caller
+// never guesses how long a subscription takes to land; the bound only turns a
+// subscription that never lands into a loud failure instead of a hang.
+func (s *fakeServer) awaitSubscribers(stream, workspaceID string, n int, within time.Duration) error {
+	deadline := time.Now().Add(within)
+	expired := false
+	timer := time.AfterFunc(within, func() {
+		s.mu.Lock()
+		expired = true
+		s.mu.Unlock()
+		s.subChanged.Broadcast()
+	})
+	defer timer.Stop()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for s.countSubscribersLocked(stream, workspaceID) < n {
+	for {
+		have := s.countSubscribersLocked(stream, workspaceID)
+		if have >= n {
+			return nil
+		}
+		if expired || !time.Now().Before(deadline) {
+			return fmt.Errorf("fakedaemon: waited %s for %d subscriber(s) of stream %q (workspace %q); %d registered",
+				within, n, stream, workspaceID, have)
+		}
 		s.subChanged.Wait()
 	}
 }
