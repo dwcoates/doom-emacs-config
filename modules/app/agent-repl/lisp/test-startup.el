@@ -55,6 +55,7 @@
 (defvar agent-repl-test-startup--lines nil "The startup lines said, in order.")
 (defvar agent-repl-test-startup--refreshes 0 "How often the tab order was re-derived.")
 (defvar agent-repl-test-startup--applied 0 "How often the selection was re-applied.")
+(defvar agent-repl-test-startup--switches nil "Every switch the startup asked of the daemon, as (WS . TRIGGER).")
 (defvar agent-repl-test-startup--known nil "Ref ids the registry holds a workspace for.")
 (defvar agent-repl-test-startup--no-page nil "Workspaces that can have no page.")
 
@@ -70,7 +71,8 @@ is in `agent-repl-test-startup--no-page'."
            (agent-repl-test-startup--refreshes 0)
            (agent-repl-test-startup--applied 0)
            (agent-repl-test-startup--known nil)
-           (agent-repl-test-startup--no-page nil))
+           (agent-repl-test-startup--no-page nil)
+           (agent-repl-test-startup--switches nil))
        (cl-letf (((symbol-function 'agent-repl--phase-echo)
                   (lambda (_ws fmt &rest args)
                     (setq agent-repl-test-startup--lines
@@ -83,7 +85,12 @@ is in `agent-repl-test-startup--no-page'."
                  ((symbol-function 'agent-repl-roster-refresh-order)
                   (lambda () (cl-incf agent-repl-test-startup--refreshes)))
                  ((symbol-function 'agent-repl-roster-apply-current)
-                  (lambda () (cl-incf agent-repl-test-startup--applied) nil)))
+                  (lambda () (cl-incf agent-repl-test-startup--applied) nil))
+                 ((symbol-function 'agent-repl-host-request-switch)
+                  (lambda (ws trigger)
+                    (setq agent-repl-test-startup--switches
+                          (append agent-repl-test-startup--switches (list (cons ws trigger))))
+                    t)))
          ,@body))))
 
 (defun agent-repl-test-startup--opened ()
@@ -124,6 +131,32 @@ reaches Emacs first cannot open a tab ahead of its go-ahead."
     (should (equal (agent-repl-test-startup--opened) '("a")))
     (should (member "a: ready." agent-repl-test-startup--lines))
     (should (= 1 agent-repl-test-startup--refreshes))))
+
+(ert-deftest agent-repl-test-startup-selects-the-first-tab-it-opens ()
+  "The first tab opened is asked of the daemon as the selection at once."
+  (agent-repl-test-startup--with-run
+    ;; Arrange
+    (setq agent-repl-test-startup--known '("a" "b"))
+    (agent-repl-startup--page-drawn "a")
+    (agent-repl-startup-handle (agent-repl-test-startup--opening 2))
+    ;; Act
+    (agent-repl-startup-handle (agent-repl-test-startup--go-ahead "a"))
+    ;; Assert
+    (should (equal agent-repl-test-startup--switches '(("a" . startup))))))
+
+(ert-deftest agent-repl-test-startup-keeps-the-first-tab-selected-as-the-rest-open ()
+  "A later tab opening asks for no selection: the first stays selected."
+  (agent-repl-test-startup--with-run
+    ;; Arrange
+    (setq agent-repl-test-startup--known '("a" "b"))
+    (agent-repl-startup--page-drawn "a")
+    (agent-repl-startup--page-drawn "b")
+    (agent-repl-startup-handle (agent-repl-test-startup--opening 2))
+    (agent-repl-startup-handle (agent-repl-test-startup--go-ahead "a"))
+    ;; Act
+    (agent-repl-startup-handle (agent-repl-test-startup--go-ahead "b"))
+    ;; Assert
+    (should (equal agent-repl-test-startup--switches '(("a" . startup))))))
 
 (ert-deftest agent-repl-test-startup-a-go-ahead-waits-for-its-page ()
   "A go-ahead whose page has not drawn opens nothing and says it is loading."
