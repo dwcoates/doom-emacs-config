@@ -51,6 +51,10 @@ type supervisor struct {
 	back      backoff
 	grace     time.Duration
 	lockProbe func(workspaceDir string) (free bool, err error)
+	// servicesReady closes once the launchd services this daemon's shims
+	// write into have been made current (WithServicesReady); nil gates
+	// nothing.
+	servicesReady <-chan struct{}
 
 	// mu guards held and standingDown, and it is held ACROSS a spawn's
 	// cmd.Start so the latch and the registry cannot be raced: see Spawn.
@@ -228,10 +232,41 @@ func (s *supervisor) StandDownEverySpawn(ctx context.Context, reason string) err
 	return errors.Join(errs...)
 }
 
+// awaitServices holds a spawn until the services are current: NO SHIM STARTS
+// BEFORE THE BOOT HAS MADE THE STORE AND THE SIDECAR RUN THE INSTALLED BUILD.
+// The boot restarts a stale store before it brings any session up, but a
+// session can be started by other doors at the same time -- the editor's
+// startup, OpenWorkspace, a revival -- and a shim started against a store
+// that is about to restart loses it under its first writes. It is a latch,
+// not a wait for a duration: the boot closes it whether its service step
+// succeeded or failed, and a spawn whose caller gives up first is refused.
+func (s *supervisor) awaitServices(ctx context.Context, ws ids.WorkspaceID) error {
+	if s.servicesReady == nil {
+		return nil
+	}
+	select {
+	case <-s.servicesReady:
+		return nil
+	default:
+	}
+	log := s.surfaces.Global()
+	log.Debug("daemon.shimclient.spawn", "a spawn waits for the services to be made current", dlog.Context{"workspace_id": string(ws)})
+	select {
+	case <-s.servicesReady:
+		log.Debug("daemon.shimclient.spawn", "the services are current; the spawn goes on", dlog.Context{"workspace_id": string(ws)})
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("shimclient: the spawn for %q was abandoned while it waited for the services to be made current: %w", ws, ctx.Err())
+	}
+}
+
 // Spawn starts a shim, dials it, and returns once WatchSession is connected
 // and the shim has pushed its first diagnostics arm, healthy or not.
 func (s *supervisor) Spawn(ctx context.Context, spec Spec) (Client, error) {
 	if err := validateSpec(spec); err != nil {
+		return nil, err
+	}
+	if err := s.awaitServices(ctx, spec.WorkspaceID); err != nil {
 		return nil, err
 	}
 	contracts := envc.Load()
