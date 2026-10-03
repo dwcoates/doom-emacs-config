@@ -31,17 +31,29 @@ describe("startSessionFailure", () => {
 
   it("states the vendorStartFailed arm", () => {
     // Arrange, Act.
-    const failure = failures.startSessionFailure({ kind: "vendorStartFailed", retry: "retryable" }, "why");
+    const failure = failures.startSessionFailure({ kind: "vendorStartFailed", retry: "retryable", cause: "vendor" }, "why");
 
     // Assert.
     expect(failure.cause.case).toBe("vendorStartFailed");
   });
 
+  it.each([["network"], ["vendor"]] as const)(
+    "sets the %s cause on a retryable vendorStartFailed, never leaving the oneof unset",
+    (cause) => {
+      // Arrange, Act.
+      const failure = failures.startSessionFailure({ kind: "vendorStartFailed", retry: "retryable", cause }, "why");
+
+      // Assert.
+      const retry = failure.cause.case === "vendorStartFailed" ? failure.cause.value.retry : undefined;
+      expect(retry?.case === "retryable" ? retry.value.cause.case : undefined).toBe(cause);
+    },
+  );
+
   it.each([["retryable"], ["rejected"]] as const)(
     "sets the %s retry label on vendorStartFailed, never leaving the oneof unset",
     (retry) => {
       // Arrange, Act.
-      const failure = failures.startSessionFailure({ kind: "vendorStartFailed", retry }, "why");
+      const failure = failures.startSessionFailure({ kind: "vendorStartFailed", retry, cause: "vendor" }, "why");
 
       // Assert.
       expect(failure.cause.case === "vendorStartFailed" ? failure.cause.value.retry.case : undefined).toBe(retry);
@@ -636,6 +648,7 @@ describe("sessionFault", () => {
     ["logSinkPoisoned"],
     ["keepaliveFailed"],
     ["vendorQueryFailed"],
+    ["networkUnreachable"],
   ] as const)("states the %s arm", (kind) => {
     // Arrange, Act.
     const fault = failures.sessionFault({ kind }, "store-client", "why");

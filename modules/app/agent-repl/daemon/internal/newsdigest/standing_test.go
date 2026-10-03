@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -194,5 +195,132 @@ func TestDismissReportsAStoreFailure(t *testing.T) {
 	// Assert
 	if !errors.Is(err, errScripted) || len(records(w.log, "error", opDismiss)) != 1 {
 		t.Fatalf("Dismiss = %v, records %v, want the failure recorded at ERROR", err, w.log.Records())
+	}
+}
+
+// localDay answers an instant on 2026-10-DAY at hour h on the LOCAL calendar,
+// so "today" means the same thing to the test as to sameLocalDay.
+func localDay(day, h int) time.Time {
+	return time.Date(2026, 10, day, h, 0, 0, 0, time.Local)
+}
+
+// dismissedDigest seeds a digest minted at madeAt and dismissed since.
+func dismissedDigest(t *testing.T, w *world, madeAt time.Time) {
+	t.Helper()
+	w.store.state.LatestID = "d1"
+	w.store.state.LatestOverlay = encodedOverlay(t, "d1", 1)
+	w.store.state.LatestMadeAt = madeAt
+}
+
+func TestRedisplayStandsTheDaysDismissedDigestAgain(t *testing.T) {
+	// Arrange
+	w := newWorld(t)
+	w.clock.set(localDay(2, 23))
+	dismissedDigest(t, w, localDay(2, 1))
+	d := w.digester()
+
+	// Act
+	err := d.Redisplay(context.Background())
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Redisplay: %v", err)
+	}
+	if got := latestStanding(t, d).GetShown().GetId().GetValue(); got != "d1" {
+		t.Fatalf("shown id = %q, want d1 standing again", got)
+	}
+	if w.store.state.Standing == nil {
+		t.Fatal("the store does not hold the digest standing again")
+	}
+	if len(records(w.log, "info", opRestand)) != 1 {
+		t.Fatalf("records = %v, want one INFO for the redisplay", w.log.Records())
+	}
+}
+
+func TestRedisplayLeavesADigestFromAnEarlierDayDown(t *testing.T) {
+	// Arrange
+	w := newWorld(t)
+	w.clock.set(localDay(2, 1))
+	dismissedDigest(t, w, localDay(1, 23))
+	d := w.digester()
+
+	// Act
+	err := d.Redisplay(context.Background())
+
+	// Assert
+	if err != nil || w.store.state.Standing != nil {
+		t.Fatalf("Redisplay = %v, standing %q, want nothing stood", err, w.store.state.Standing)
+	}
+	if _, ok := d.Topic().Latest(); ok {
+		t.Fatal("a standing was published for yesterday's digest")
+	}
+}
+
+func TestRedisplayLeavesAStandingDigestUnchanged(t *testing.T) {
+	// Arrange
+	w := newWorld(t)
+	w.clock.set(localDay(2, 23))
+	dismissedDigest(t, w, localDay(2, 1))
+	w.store.state.Standing = w.store.state.LatestOverlay
+	d := w.digester()
+
+	// Act
+	err := d.Redisplay(context.Background())
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Redisplay: %v", err)
+	}
+	if _, ok := d.Topic().Latest(); ok {
+		t.Fatal("a standing digest was republished by an Emacs restart")
+	}
+}
+
+func TestRedisplayWithNoKeptDigestChangesNothing(t *testing.T) {
+	// Arrange
+	w := newWorld(t)
+	d := w.digester()
+
+	// Act
+	err := d.Redisplay(context.Background())
+
+	// Assert
+	if err != nil || w.store.state.Standing != nil {
+		t.Fatalf("Redisplay = %v, standing %q, want nothing", err, w.store.state.Standing)
+	}
+}
+
+func TestRedisplayReportsAnUnreadableStore(t *testing.T) {
+	// Arrange
+	w := newWorld(t)
+	w.store.stateErr = errScripted
+	d := w.digester()
+
+	// Act
+	err := d.Redisplay(context.Background())
+
+	// Assert
+	if !errors.Is(err, errScripted) || len(records(w.log, "error", opRestand)) != 1 {
+		t.Fatalf("Redisplay = %v, records %v, want the store's failure recorded once at ERROR", err, w.log.Records())
+	}
+}
+
+func TestRedisplayReportsAFailedRestand(t *testing.T) {
+	// Arrange
+	w := newWorld(t)
+	w.clock.set(localDay(2, 23))
+	dismissedDigest(t, w, localDay(2, 1))
+	w.store.restandErr = errScripted
+	d := w.digester()
+
+	// Act
+	err := d.Redisplay(context.Background())
+
+	// Assert
+	if !errors.Is(err, errScripted) || len(records(w.log, "error", opRestand)) != 1 {
+		t.Fatalf("Redisplay = %v, records %v, want the failure recorded once at ERROR", err, w.log.Records())
+	}
+	if _, ok := d.Topic().Latest(); ok {
+		t.Fatal("a standing was published although the store refused it")
 	}
 }

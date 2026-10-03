@@ -66,7 +66,7 @@ func TestWatchDaemonFlushesHeadersOnAcceptance(t *testing.T) {
 	}
 	// The subscription is live on the server side, and STAYS live: a standing
 	// stream never ends of its own accord.
-	server.awaitSubscribers(streamDaemon, "", 1)
+	server.mustAwaitSubscribers(t, streamDaemon, "", 1)
 	if len(server.subscriberInfos()) != 1 {
 		t.Fatalf("subscribers = %v, want the accepted stream still open",
 			server.subscriberInfos())
@@ -87,7 +87,7 @@ func TestWatchWorkspaceRosterFlushesHeadersOnAcceptance(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("accepted stream answered %d, want 200", resp.StatusCode)
 	}
-	server.awaitSubscribers(streamRoster, "", 1)
+	server.mustAwaitSubscribers(t, streamRoster, "", 1)
 }
 
 func TestWatchHostWorkspaceFlushesHeadersOnAcceptance(t *testing.T) {
@@ -104,7 +104,7 @@ func TestWatchHostWorkspaceFlushesHeadersOnAcceptance(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("accepted stream answered %d, want 200", resp.StatusCode)
 	}
-	server.awaitSubscribers(streamHost, "ws-test", 1)
+	server.mustAwaitSubscribers(t, streamHost, "ws-test", 1)
 }
 
 func TestAcceptedStreamStillDeliversItsFirstPush(t *testing.T) {
@@ -114,7 +114,7 @@ func TestAcceptedStreamStillDeliversItsFirstPush(t *testing.T) {
 	resp, cancel := openRawStream(t, baseURL, "WatchDaemon", emacsWatchDaemonJSON, 5*time.Second)
 	defer cancel()
 	defer resp.Body.Close()
-	server.awaitSubscribers(streamDaemon, "", 1)
+	server.mustAwaitSubscribers(t, streamDaemon, "", 1)
 
 	// Act.
 	if status, body := controlPost(t, baseURL, "/_fake/push",

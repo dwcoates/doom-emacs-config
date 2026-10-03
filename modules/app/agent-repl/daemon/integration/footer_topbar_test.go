@@ -889,7 +889,7 @@ func TestFooterApiErrorMidTurnDrawsRetryingEvidenceWithoutEndingTheTurn(t *testi
 	// in (owner ruling, 2026-10-01: the turn cannot advance until the retried
 	// call is answered).
 	got := awaitFooter(t, f, footer, "blocked.api_retrying with the retry line mid-turn", func(v *frontendv1.FooterView) bool {
-		blocked := v.GetStrip().GetStatus().GetBlocked()
+		blocked := v.GetStrip().GetStatus().GetVendorFault()
 		return blocked.GetApiRetrying() != nil && blocked.GetActivity().GetSalient().GetRetrying() != nil
 	})
 	if got.GetStrip().GetStatus().GetIdle() != nil {
@@ -929,12 +929,12 @@ func TestFooterScheduledApiRetryCountsLikeTheVendorAndItsResponseAnnouncesTheRes
 	// Assert: the retrying line counts attempts as the vendor does and carries
 	// its schedule.
 	got := awaitFooter(t, f, footer, "the retrying line with the vendor's schedule", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetBlocked().GetActivity().GetSalient().GetRetrying() != nil
+		return v.GetStrip().GetStatus().GetVendorFault().GetActivity().GetSalient().GetRetrying() != nil
 	})
-	if got.GetStrip().GetStatus().GetBlocked().GetApiRetrying() == nil {
+	if got.GetStrip().GetStatus().GetVendorFault().GetApiRetrying() == nil {
 		t.Fatalf("status = %v, want blocked · api_retrying while the vendor retries", got.GetStrip().GetStatus())
 	}
-	retry := got.GetStrip().GetStatus().GetBlocked().GetActivity().GetSalient().GetRetrying()
+	retry := got.GetStrip().GetStatus().GetVendorFault().GetActivity().GetSalient().GetRetrying()
 	if retry.GetAttempt() != 9 || retry.GetMaxAttempt() != 11 || retry.GetNextAttempt().GetAtMs() != nextAt {
 		t.Fatalf("retrying = %v, want attempt 9 of 11 next at %d", retry, nextAt)
 	}
@@ -978,7 +978,7 @@ func TestFooterLinkDeathFlipsToSeveredAndTheDaemonRedials(t *testing.T) {
 
 	// Assert: the footer flips to disconnected.severed and the roster agrees.
 	awaitFooter(t, f, footer, "disconnected.severed after the link dies", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetDisconnected().GetSevered() != nil
+		return v.GetStrip().GetStatus().GetAgentReplFault().GetSevered() != nil
 	})
 	awaitRoster(t, f.d, roster, "the roster's severed status", func(r *frontendv1.WorkspaceRoster) bool {
 		row := rosterRow(r, f.ws.GetId())
@@ -1010,7 +1010,7 @@ func TestFooterShimExitFlipsToDeadAndStopsRedials(t *testing.T) {
 
 	// Assert: the footer flips to disconnected.dead and the roster agrees.
 	awaitFooter(t, f, footer, "disconnected.dead after the shim exits", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetDisconnected().GetDead() != nil
+		return v.GetStrip().GetStatus().GetAgentReplFault().GetDead() != nil
 	})
 	awaitRoster(t, f.d, roster, "the roster's dead status", func(r *frontendv1.WorkspaceRoster) bool {
 		row := rosterRow(r, f.ws.GetId())
@@ -1027,7 +1027,7 @@ func TestFooterShimExitFlipsToDeadAndStopsRedials(t *testing.T) {
 	for waiting := true; waiting; {
 		select {
 		case v, ok := <-footer.C:
-			if ok && v.GetStrip().GetStatus().GetDisconnected().GetDead() == nil {
+			if ok && v.GetStrip().GetStatus().GetAgentReplFault().GetDead() == nil {
 				t.Fatalf("footer push %v, want it still disconnected.dead: no further churn once the shim is dead (redials stop)", v.GetStrip().GetStatus())
 			}
 		case <-probe.C:
@@ -1631,7 +1631,7 @@ func TestFooterIsNotConnectedWhileTheWebHopIsDown(t *testing.T) {
 
 	// Act, Assert: the footer draws disconnected.
 	awaitFooter(t, f, footer, "disconnected while the web hop is down", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetDisconnected() != nil
+		return v.GetStrip().GetStatus().GetAgentReplFault() != nil
 	})
 }
 
@@ -1643,7 +1643,7 @@ func TestFooterBecomesConnectedWhenTheWebHopComesUp(t *testing.T) {
 	f.host = f.d.WatchHost(f.ws)
 	footer := f.d.WatchFooter(f.ws)
 	awaitFooter(t, f, footer, "disconnected while the web hop is down", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetDisconnected() != nil
+		return v.GetStrip().GetStatus().GetAgentReplFault() != nil
 	})
 
 	// Act: the page opens its stream, putting the last hop up.
@@ -1669,7 +1669,7 @@ func TestFooterReturnsToNotConnectedWhenTheWebHopGoesAway(t *testing.T) {
 
 	// Assert
 	awaitFooter(t, f, footer, "disconnected once the web hop is cancelled", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetDisconnected() != nil
+		return v.GetStrip().GetStatus().GetAgentReplFault() != nil
 	})
 }
 

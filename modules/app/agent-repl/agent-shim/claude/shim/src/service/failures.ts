@@ -63,9 +63,18 @@ import {
  */
 export type VendorStartRetry = "retryable" | "rejected";
 
+/**
+ * WHOSE failure a RETRYABLE vendor start was (`StartSessionVendorStartRetryable
+ * .cause`): `network` when this machine could not reach the network at all,
+ * `vendor` when the vendor was silent, ended early or answered with a
+ * transient error. The daemon draws a network fault for the first and a vendor
+ * fault for the second while it retries.
+ */
+export type VendorStartCause = "network" | "vendor";
+
 type StartSessionCause =
   | { readonly kind: "cold"; readonly cold: conversationv1.SessionCold }
-  | { readonly kind: "vendorStartFailed"; readonly retry: VendorStartRetry }
+  | { readonly kind: "vendorStartFailed"; readonly retry: VendorStartRetry; readonly cause: VendorStartCause }
   | { readonly kind: "unknownSession" }
   | { readonly kind: "alreadyStarted" }
   | { readonly kind: "conversationOwned" }
@@ -82,7 +91,7 @@ export function startSessionFailure(
       cause.kind === "cold"
         ? { case: "cold", value: cause.cold }
         : cause.kind === "vendorStartFailed"
-          ? { case: "vendorStartFailed", value: vendorStartFailed(cause.retry) }
+          ? { case: "vendorStartFailed", value: vendorStartFailed(cause.retry, cause.cause) }
           : cause.kind === "unknownSession"
             ? { case: "unknownSession", value: create(shimv1.StartSessionUnknownSessionSchema, {}) }
             : cause.kind === "alreadyStarted"
@@ -99,14 +108,23 @@ export function startSessionFailure(
 }
 
 /**
- * The `vendor_start_failed` arm, with its retry label ALWAYS set: a frame with
- * neither arm is malformed and the daemon treats it as a rejection.
+ * The `vendor_start_failed` arm, with its retry label ALWAYS set (a frame with
+ * neither arm is malformed and the daemon treats it as a rejection), and a
+ * retryable one's cause ALWAYS set too.
  */
-function vendorStartFailed(retry: VendorStartRetry): shimv1.StartSessionVendorStartFailed {
+function vendorStartFailed(retry: VendorStartRetry, cause: VendorStartCause): shimv1.StartSessionVendorStartFailed {
   switch (retry) {
     case "retryable":
       return create(shimv1.StartSessionVendorStartFailedSchema, {
-        retry: { case: "retryable", value: create(shimv1.StartSessionVendorStartRetryableSchema, {}) },
+        retry: {
+          case: "retryable",
+          value: create(shimv1.StartSessionVendorStartRetryableSchema, {
+            cause:
+              cause === "network"
+                ? { case: "network", value: create(shimv1.StartSessionVendorStartNetworkSchema, {}) }
+                : { case: "vendor", value: create(shimv1.StartSessionVendorStartVendorSchema, {}) },
+          }),
+        },
       });
     case "rejected":
       return create(shimv1.StartSessionVendorStartFailedSchema, {
@@ -897,7 +915,8 @@ type SessionFaultKind =
   | { readonly kind: "converterDefect" }
   | { readonly kind: "logSinkPoisoned" }
   | { readonly kind: "keepaliveFailed" }
-  | { readonly kind: "vendorQueryFailed" };
+  | { readonly kind: "vendorQueryFailed" }
+  | { readonly kind: "networkUnreachable" };
 
 /** The base constructor for `conversation.v1.SessionFault`. */
 export function sessionFault(
@@ -917,7 +936,9 @@ export function sessionFault(
             ? { case: "logSinkPoisoned", value: create(conversationv1.SessionFaultLogSinkPoisonedSchema, {}) }
             : cause.kind === "keepaliveFailed"
               ? { case: "keepaliveFailed", value: create(conversationv1.SessionFaultKeepaliveFailedSchema, {}) }
-              : { case: "vendorQueryFailed", value: create(conversationv1.SessionFaultVendorQueryFailedSchema, {}) },
+              : cause.kind === "vendorQueryFailed"
+                ? { case: "vendorQueryFailed", value: create(conversationv1.SessionFaultVendorQueryFailedSchema, {}) }
+                : { case: "networkUnreachable", value: create(conversationv1.SessionFaultNetworkUnreachableSchema, {}) },
   });
 }
 

@@ -696,6 +696,13 @@ message SessionFault {
     // A vendor query failed in a way the stream's own terminals did not
     // carry.
     SessionFaultVendorQueryFailed vendor_query_failed = 7;
+    // THIS MACHINE CANNOT REACH THE NETWORK: a request failed below any
+    // answer the vendor could give (no route, DNS failure, connection
+    // refused or reset before a response), as opposed to an answer the vendor
+    // gave. The shim opens it on the first such failure and resolves it on the
+    // next request that reaches the vendor, so the daemon draws a network
+    // fault, never a vendor fault, while it stands.
+    SessionFaultNetworkUnreachable network_unreachable = 8;
   }
 }
 message SessionFaultStoreUnreachable {}
@@ -703,6 +710,8 @@ message SessionFaultConverterDefect {}
 message SessionFaultLogSinkPoisoned {}
 message SessionFaultKeepaliveFailed {}
 message SessionFaultVendorQueryFailed {}
+// The network is unreachable from this machine.
+message SessionFaultNetworkUnreachable {}
 
 // A window during which one component of the shim was degraded. THE ARM IS
 // WHETHER IT HAS CLOSED, and only a closed window knows what was lost.

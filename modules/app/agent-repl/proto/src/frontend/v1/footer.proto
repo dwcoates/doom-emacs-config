@@ -163,39 +163,45 @@ message FooterStrip {
 // The owner's ruling of 2026-09-13: EVERY daemon fault kind reaches the
 // footer. Three rules shape the mapping and are worked out here once.
 //
-//  1. STATUS IS REUSED, never invented. `disconnected` carries the faults that
-//     mean the session cannot be reached; `blocked` carries the faults that
-//     mean the daemon cannot serve it. Nothing else needed a new status.
+//  1. STATUS IS THE FAULT'S DOMAIN. `agent_repl_fault` (BLUE, composer
+//     closed) carries the faults that mean one of agent-repl's own services
+//     cannot serve the workspace; `network_fault` (BLUE) carries this
+//     machine being offline; `vendor_fault` (TURQUOISE, composer open,
+//     prompts held) carries everything the vendor (Claude, the Agent SDK)
+//     cannot do while agent-repl itself is fine. Precedence:
+//     agent_repl_fault > network_fault > vendor_fault.
 //  2. SUBSTATUS IS A BUCKET, onto the activity values: several fault kinds
 //     land in one substatus, and no substatus was minted to match a kind
-//     one-for-one. Four of the five buckets below already existed.
+//     one-for-one.
 //  3. ACTIVITY IS THE LEAST GENERAL: the kind's own name and its detail line,
 //     carried by FooterStatusActivityFault (or, for `shim_start_failed`
-//     alone, by the richer FooterStatusActivityStartFailed).
+//     alone, by the richer FooterStatusActivityStartFailed, and for the three
+//     vendor-start kinds by FooterStatusActivityVendorStart).
 //
 // ESCALATING FAULTS — the fault DECIDES the status, because the session
 // cannot serve while it stands:
 //
-//   | status       | substatus         | fault kinds                        |
-//   |--------------|-------------------|------------------------------------|
-//   | disconnected | start_failed      | shim_start_failed, resume_failed,  |
-//   |              |                   | relaunch_resume_failed,            |
-//   |              |                   | adoption_window_expired (session), |
-//   |              |                   | cold_gate_reopen_failed            |
-//   | disconnected | vendor_retry      | vendor_start_retrying              |
-//   | disconnected | vendor_rejection  | vendor_start_rejected              |
-//   | disconnected | vendor_failed     | vendor_start_failed                |
-//   | disconnected | dead              | shim_died, bounce_died,            |
-//   |              |                   | session_absent                     |
-//   | disconnected | severed           | link_severed, watch_open_refused   |
-//   | blocked      | daemon_impaired   | prompts_dir_missing, wsm_read_only,|
-//   |              |                   | log_sink_poisoned,                 |
-//   |              |                   | successor_spawn_failed,            |
-//   |              |                   | daemon_state_unreadable,           |
-//   |              |                   | adoption_window_expired (daemon)   |
+//   | status           | substatus        | fault kinds                        |
+//   |------------------|------------------|------------------------------------|
+//   | agent_repl_fault | start_failed     | shim_start_failed, resume_failed,  |
+//   |                  |                  | relaunch_resume_failed,            |
+//   |                  |                  | adoption_window_expired (session), |
+//   |                  |                  | cold_gate_reopen_failed            |
+//   | agent_repl_fault | dead             | shim_died, bounce_died,            |
+//   |                  |                  | session_absent                     |
+//   | agent_repl_fault | severed          | link_severed, watch_open_refused   |
+//   | agent_repl_fault | daemon_impaired  | prompts_dir_missing, wsm_read_only,|
+//   |                  |                  | log_sink_poisoned,                 |
+//   |                  |                  | successor_spawn_failed,            |
+//   |                  |                  | daemon_state_unreadable,           |
+//   |                  |                  | adoption_window_expired (daemon)   |
+//   | network_fault    | offline          | network_unreachable                |
+//   | vendor_fault     | vendor_retry     | vendor_start_retrying              |
+//   | vendor_fault     | vendor_rejection | vendor_start_rejected              |
+//   | vendor_fault     | vendor_failed    | vendor_start_failed                |
 //
 // ESCALATING FAULTS ARE SALIENT: their line is the `fault` kind of the
-// disconnected and blocked arms' salient oneofs, standing until the fault is
+// fault arms' salient oneofs, standing until the fault is
 // retracted.
 //
 // NON-ESCALATING FAULTS — the session IS serving, so the status is left
@@ -216,8 +222,8 @@ message FooterStrip {
 // shim that PUSHED a diagnostic is alive; a classifier run is a headless side
 // errand; an undetermined bounce disposition is an accounting question for a
 // human; an abandoned conversation is the record of what a SUCCESSFUL fresh
-// bring-up left behind. Saying `disconnected` of any of them would be false,
-// and it is not only a wording question: `disconnected` CLOSES THE COMPOSER
+// bring-up left behind. Saying `agent_repl_fault` of any of them would be false,
+// and it is not only a wording question: `agent_repl_fault` CLOSES THE COMPOSER
 // (webapp/src/main.ts), so escalating them would lock the user out of a
 // session that is serving perfectly. The fault still reaches the footer —
 // which is what the ruling asked for — as a transient activity line.
@@ -234,7 +240,7 @@ message FooterStrip {
 // `deploy_failed` is daemon-scoped and joins them because the daemon that ran
 // the deploy KEEPS SERVING on the build it already runs: a build that failed
 // installed nothing, an install that failed restarted nothing, and a service
-// that did not come back has its own faults. `blocked` would close no
+// that did not come back has its own faults. `agent_repl_fault` would close no
 // composer, but it would still say the daemon cannot serve a session it is
 // serving. The fault line names the step and its last line of output.
 //
@@ -261,12 +267,21 @@ message FooterStatus {
     FooterStatusMerging merging = 5;
     // Detached work runs while the main thread is free.
     FooterStatusBackground background = 6;
-    // The session cannot proceed until something outside it changes.
-    FooterStatusBlocked blocked = 7;
+    // A VENDOR FAULT: agent-repl's own services serve this workspace, but
+    // the vendor (Claude, the Agent SDK) cannot: an auth prompt, an exhausted
+    // usage limit, a billing refusal, a vendor error, a retried API call, a
+    // dead vendor query, or a vendor start being retried, rejected or given
+    // up on. TURQUOISE: the workspace is USABLE — the composer stays OPEN and
+    // a prompt sent meanwhile is held until the vendor serves again. Outranked
+    // by `agent_repl_fault` and `network_fault`.
+    FooterStatusVendorFault vendor_fault = 7;
     // Tag 8 is RETIRED: the asleep status died with hibernation leaving
     // the contract.
-    // The daemon's link to the session's shim is not serving.
-    FooterStatusDisconnected disconnected = 9;
+    // AN AGENT-REPL FAULT: one of agent-repl's own services for this
+    // workspace is not serving — the shim is starting, severed, dead or
+    // failed to start, or the daemon itself is impaired. BLUE: the workspace
+    // is unusable and the composer is CLOSED. It outranks every other fault.
+    FooterStatusAgentReplFault agent_repl_fault = 9;
     // A close was requested and has not completed.
     FooterStatusClosing closing = 10;
     // MOMENTARY: context is being injected (memory, skills); falls back on
@@ -299,6 +314,12 @@ message FooterStatus {
     // ruling, 2026-09-28): the workspace is USABLE, so the composer is OPEN.
     // It replaces `disconnected · degraded`, which is no longer emitted.
     FooterStatusDegraded degraded = 16;
+    // A NETWORK FAULT: this machine cannot reach the network, so nothing
+    // that needs it (the vendor above all) can work, though agent-repl's own
+    // services are up. Told apart from a vendor fault by the shim, which
+    // separates an unreachable network from an answer the vendor gave. BLUE:
+    // the composer is CLOSED. Outranked only by `agent_repl_fault`.
+    FooterStatusNetworkFault network_fault = 17;
   }
   // Tag 12 (`merge_conflict`) is retired; see the note in the oneof.
   reserved 12;
@@ -1021,28 +1042,33 @@ message FooterStatusBackgroundSalient {
 }
 
 // The session cannot proceed until something outside it changes.
-message FooterStatusBlocked {
+message FooterStatusVendorFault {
   // WHY it is blocked.
   oneof substatus {
     // An auth prompt is up.
-    FooterSubStatusBlockedAuth auth = 1;
+    FooterSubStatusVendorFaultAuth auth = 1;
     // The usage allowance is exhausted.
-    FooterSubStatusBlockedUsageLimit usage_limit = 2;
+    FooterSubStatusVendorFaultUsageLimit usage_limit = 2;
     // The vendor is refusing requests.
-    FooterSubStatusBlockedVendorError vendor_error = 3;
+    FooterSubStatusVendorFaultVendorError vendor_error = 3;
     // The account's billing state refuses requests.
-    FooterSubStatusBlockedBilling billing = 4;
+    FooterSubStatusVendorFaultBilling billing = 4;
     // NO LONGER EMITTED: a dead vendor query is a FAILED TURN, not a block
     // (owner ruling, 2026-09-28: `blocked` is only for the vendor or the
     // account), so it resolves to `idle · turn_failed` with the dead-query
     // line. Kept only because removing an arm is a breaking change.
-    FooterSubStatusBlockedQueryDied query_died = 6;
-    // The DAEMON itself is impaired: a fault stands that costs this session
-    // something it needs from the daemon — its prompts directory, its state
-    // client, its durable log sink, its own redeploy. The session's shim may
-    // be perfectly healthy; what it cannot get is the daemon's service. See
-    // THE FAULT PARTITION above.
-    FooterSubStatusBlockedDaemonImpaired daemon_impaired = 7;
+    FooterSubStatusVendorFaultQueryDied query_died = 6;
+    // The vendor did not start and the daemon is retrying it: from the first
+    // failed attempt until the last. The activity line names the latest
+    // attempt's failure.
+    FooterSubStatusVendorFaultVendorRetry vendor_retry = 9;
+    // The vendor refused the start for a reason retrying cannot fix; nothing
+    // retries until the user restarts the workspace.
+    FooterSubStatusVendorFaultVendorRejection vendor_rejection = 10;
+    // The vendor kept failing to start for the whole retry window, so the
+    // daemon stopped retrying; prompts stay held until a restart brings the
+    // session up.
+    FooterSubStatusVendorFaultVendorFailed vendor_failed = 11;
     // The vendor is retrying a call that failed mid-turn — the API is
     // unreachable, timing out, or answering with a retryable error — so the
     // turn cannot advance until a retried call is answered. Distinct from
@@ -1051,35 +1077,39 @@ message FooterStatusBlocked {
     // until the first successful response of the retried agent, the turn's
     // end, or a new turn opening (a prompt sent during the retry opens one,
     // which resolves `working`). The activity cell carries the retry line.
-    FooterSubStatusBlockedApiRetrying api_retrying = 8;
+    FooterSubStatusVendorFaultApiRetrying api_retrying = 8;
   }
+  // Tag 7 (`daemon_impaired`) moved to `agent_repl_fault`: an impaired
+  // daemon is agent-repl's fault, never the vendor's.
+  reserved 7;
+  reserved "daemon_impaired";
   // The activity cell. ALWAYS SET: the enduring tier guarantees the cell has
   // something to draw under every status.
-  FooterStatusBlockedActivity activity = 5;
+  FooterStatusVendorFaultActivity activity = 5;
 }
 // An auth prompt is up.
-message FooterSubStatusBlockedAuth {}
+message FooterSubStatusVendorFaultAuth {}
 // The usage allowance is exhausted.
-message FooterSubStatusBlockedUsageLimit {}
+message FooterSubStatusVendorFaultUsageLimit {}
 // The vendor is refusing requests.
-message FooterSubStatusBlockedVendorError {}
+message FooterSubStatusVendorFaultVendorError {}
 // The account's billing state refuses requests.
-message FooterSubStatusBlockedBilling {}
+message FooterSubStatusVendorFaultBilling {}
 // The vendor query died and is not yet restarted.
-message FooterSubStatusBlockedQueryDied {}
+message FooterSubStatusVendorFaultQueryDied {}
 // The vendor is retrying a failed mid-turn call; the salient `retrying` line
 // says which attempt is next and when it starts.
-message FooterSubStatusBlockedApiRetrying {}
+message FooterSubStatusVendorFaultApiRetrying {}
 // The activity cell while blocked: the salient line, or the transient over
 // the enduring line. A blocked step with no line of its own (usage limit,
 // billing, a vendor error) draws unpinned, where the enduring usage figures
 // are exactly what explains a usage-limit block.
-message FooterStatusBlockedActivity {
+message FooterStatusVendorFaultActivity {
   // WHICH TIER the daemon resolved. Exactly one is set, and a push with
   // neither is malformed.
   oneof tier {
     // A condition that blocks the turn or the user stands.
-    FooterStatusBlockedSalient salient = 1;
+    FooterStatusVendorFaultSalient salient = 1;
     // Nothing salient stands: the newest transient (if any) over the
     // enduring line.
     FooterActivityTransientOverEnduring unpinned = 2;
@@ -1090,7 +1120,7 @@ message FooterStatusBlockedActivity {
 // own, since the enduring usage line carries the allowance figures), then a
 // standing fault, then a deploy's progress, then the push notification and
 // the context-budget warning, in that order.
-message FooterStatusBlockedSalient {
+message FooterStatusVendorFaultSalient {
   // When this line began standing; the client ticks the relative age.
   FooterStatusActivityAt at = 1;
   // The one salient line.
@@ -1099,8 +1129,8 @@ message FooterStatusBlockedSalient {
     FooterStatusActivityAuthenticating authenticating = 2;
     // Tag 3 is RETIRED: a dead vendor query is a failed turn, never a
     // block, and its line stands in the idle cell under `turn_failed`.
-    // An ESCALATING daemon fault that claims `blocked`, standing until it is
-    // retracted. Only faults the partition above maps to `blocked` land here;
+    // An ESCALATING daemon fault that claims `vendor_fault`, standing until it is
+    // retracted. Only faults the partition above maps to `vendor_fault` land here;
     // a non-escalating fault is a transient, never this arm.
     FooterStatusActivityFault fault = 4;
     // A DEPLOY'S PROGRESS. STATUS-INDEPENDENT: every status arm's salient
@@ -1121,6 +1151,11 @@ message FooterStatusBlockedSalient {
     // the countdown to the next attempt and the last attempt it will make.
     // Set exactly when the substatus is `api_retrying`.
     FooterStatusActivityRetrying retrying = 9;
+    // WHY THE VENDOR IS NOT UP, standing while one of the three vendor-start
+    // substatuses stands: the latest retried failure, the rejection, or the
+    // exhausted window with the way out. It ranks first, because it explains
+    // the step.
+    FooterStatusActivityVendorStart vendor_start = 10;
   }
   // Tag 6 (`rate_limit`) is RETIRED: the enduring usage line carries
   // the vendor's allowance figures (owner ruling, 2026-10-01).
@@ -1129,7 +1164,7 @@ message FooterStatusBlockedSalient {
   reserved 3;
 }
 // The daemon itself is impaired; the fault line says how.
-message FooterSubStatusBlockedDaemonImpaired {}
+message FooterSubStatusAgentReplFaultDaemonImpaired {}
 // The dead-query line.
 message FooterStatusActivityQueryDied {
   // The composed line, drawn verbatim.
@@ -1274,64 +1309,62 @@ message FooterStatusActivityUpdateNote {
 message FooterStatusActivityUpdateNoteShimWhenIdle {}
 
 // The daemon's link to the session's shim is not serving.
-message FooterStatusDisconnected {
+message FooterStatusAgentReplFault {
   // The link's step.
   oneof substatus {
     // The shim is starting.
-    FooterSubStatusDisconnectedStarting starting = 1;
+    FooterSubStatusAgentReplFaultStarting starting = 1;
     // NO LONGER EMITTED: a link that serves with degradation is USABLE, so
     // it is the `degraded` status arm (owner ruling, 2026-09-28), never
-    // `disconnected`. Kept so an older frame still decodes.
-    FooterSubStatusDisconnectedDegraded degraded = 2;
+    // `agent_repl_fault`. Kept so an older frame still decodes.
+    FooterSubStatusAgentReplFaultDegraded degraded = 2;
     // The link was severed and reconnection is being attempted.
-    FooterSubStatusDisconnectedSevered severed = 3;
+    FooterSubStatusAgentReplFaultSevered severed = 3;
     // The shim process is gone.
-    FooterSubStatusDisconnectedDead dead = 4;
+    FooterSubStatusAgentReplFaultDead dead = 4;
     // The shim PROCESS failed to start, or a bring-up failed for a reason
     // that is not the vendor's. A vendor that did not start inside a healthy
-    // shim is one of the three vendor arms below, never this one.
-    FooterSubStatusDisconnectedStartFailed start_failed = 5;
-    // The vendor did not start and the daemon is retrying it: from the first
-    // failed attempt until the last. The activity line names the latest
-    // attempt's failure.
-    FooterSubStatusDisconnectedVendorRetry vendor_retry = 7;
-    // The vendor refused the start for a reason retrying cannot fix; nothing
-    // retries until the user restarts the workspace.
-    FooterSubStatusDisconnectedVendorRejection vendor_rejection = 8;
-    // The vendor kept failing to start for the whole retry window, so the
-    // daemon stopped retrying; prompts stay held until a restart brings the
-    // session up.
-    FooterSubStatusDisconnectedVendorFailed vendor_failed = 9;
+    // shim is a `vendor_fault`, never this one.
+    FooterSubStatusAgentReplFaultStartFailed start_failed = 5;
+    // The DAEMON itself is impaired: a fault stands that costs this session
+    // something it needs from the daemon — its prompts directory, its state
+    // client, its durable log sink, its own redeploy.
+    FooterSubStatusAgentReplFaultDaemonImpaired daemon_impaired = 10;
   }
+  // Tags 7–9 (`vendor_retry`, `vendor_rejection`, `vendor_failed`) moved to
+  // `vendor_fault`: a vendor that will not start is the vendor's fault.
+  reserved 7, 8, 9;
+  reserved "vendor_retry", "vendor_rejection", "vendor_failed";
+
   // The activity cell. ALWAYS SET: the enduring tier guarantees the cell has
   // something to draw under every status.
-  FooterStatusDisconnectedActivity activity = 6;
+  FooterStatusAgentReplFaultActivity activity = 6;
 }
 // The shim is starting.
-message FooterSubStatusDisconnectedStarting {}
+message FooterSubStatusAgentReplFaultStarting {}
 // The link serves with degradation.
-message FooterSubStatusDisconnectedDegraded {}
+message FooterSubStatusAgentReplFaultDegraded {}
 // The link was severed and reconnection is being attempted.
-message FooterSubStatusDisconnectedSevered {}
+message FooterSubStatusAgentReplFaultSevered {}
 // The shim process is gone.
-message FooterSubStatusDisconnectedDead {}
+message FooterSubStatusAgentReplFaultDead {}
 // The shim failed to start.
-message FooterSubStatusDisconnectedStartFailed {}
+message FooterSubStatusAgentReplFaultStartFailed {}
 // The vendor did not start and is being retried.
-message FooterSubStatusDisconnectedVendorRetry {}
+message FooterSubStatusVendorFaultVendorRetry {}
 // The vendor refused the start; nothing retries.
-message FooterSubStatusDisconnectedVendorRejection {}
+message FooterSubStatusVendorFaultVendorRejection {}
 // The vendor failed to start for the whole retry window.
-message FooterSubStatusDisconnectedVendorFailed {}
+message FooterSubStatusVendorFaultVendorFailed {}
 // The activity cell while disconnected: the salient line, or the transient
 // over the enduring line. A step with no line of its own (starting, a
 // severed link being retried with no fault yet) draws unpinned.
-message FooterStatusDisconnectedActivity {
+message FooterStatusAgentReplFaultActivity {
   // WHICH TIER the daemon resolved. Exactly one is set, and a push with
   // neither is malformed.
   oneof tier {
     // A condition that blocks the turn or the user stands.
-    FooterStatusDisconnectedSalient salient = 1;
+    FooterStatusAgentReplFaultSalient salient = 1;
     // Nothing salient stands: the newest transient (if any) over the
     // enduring line.
     FooterActivityTransientOverEnduring unpinned = 2;
@@ -1341,7 +1374,7 @@ message FooterStatusDisconnectedActivity {
 // first, because it explains the `start_failed` step; then a standing fault;
 // then a deploy's progress; then the push notification and the
 // context-budget warning, in that order.
-message FooterStatusDisconnectedSalient {
+message FooterStatusAgentReplFaultSalient {
   // When this line began standing; the client ticks the relative age.
   FooterStatusActivityAt at = 1;
   // The one salient line.
@@ -1349,9 +1382,9 @@ message FooterStatusDisconnectedSalient {
     // WHY the session's bring-up failed, and what the failure cost, standing
     // until the next successful link edge clears it.
     FooterStatusActivityStartFailed start_failed = 2;
-    // An ESCALATING daemon fault that claims `disconnected`, standing until
+    // An ESCALATING daemon fault that claims `agent_repl_fault`, standing until
     // it is retracted. Only faults the partition above maps to
-    // `disconnected` land here; a non-escalating fault is a transient, never
+    // `agent_repl_fault` land here; a non-escalating fault is a transient, never
     // this arm.
     FooterStatusActivityFault fault = 3;
     // A DEPLOY'S PROGRESS. STATUS-INDEPENDENT: every status arm's salient
@@ -1367,16 +1400,14 @@ message FooterStatusDisconnectedSalient {
     // or a switch to another session. STATUS-INDEPENDENT: every status arm's
     // salient oneof carries it.
     FooterStatusActivityContextBudget context_budget = 7;
-    // WHY THE VENDOR IS NOT UP, standing while one of the three vendor
-    // substatuses stands: the latest retried failure, the rejection, or the
-    // exhausted window with the way out. It ranks with `start_failed`, ahead
-    // of every other salient kind, because it explains the step.
-    FooterStatusActivityVendorStart vendor_start = 8;
   }
   // Tag 5 (`rate_limit`) is RETIRED: the enduring usage line carries
   // the vendor's allowance figures (owner ruling, 2026-10-01).
   reserved 5;
   reserved "rate_limit";
+  // Tag 8 (`vendor_start`) moved to the vendor fault's salient line.
+  reserved 8;
+  reserved "vendor_start";
 }
 
 // The vendor-start line, composed by the daemon out of the standing
@@ -1420,7 +1451,7 @@ message FooterStatusClosingActivity {
   }
 }
 // The salient kinds legal while closing. The refusal ranks first, because it
-// explains the `blocked` step; then a deploy's progress, the push
+// explains the `vendor_fault` step; then a deploy's progress, the push
 // notification and the context-budget warning, in that order.
 message FooterStatusClosingSalient {
   // When this line began standing; the client ticks the relative age.
@@ -2748,4 +2779,53 @@ message FooterShellRowRuntime {
   // When the command began, epoch ms. The ORIGINAL instant — detaching from
   // the turn does not reset it.
   int64 started_at_ms = 1;
+}
+
+// ---- Network fault ----
+
+// This machine cannot reach the network.
+message FooterStatusNetworkFault {
+  // What about the network is wrong.
+  oneof substatus {
+    // No route to the network at all: offline.
+    FooterSubStatusNetworkFaultOffline offline = 1;
+  }
+  // The activity cell. ALWAYS SET.
+  FooterStatusNetworkFaultActivity activity = 2;
+}
+// The machine is offline.
+message FooterSubStatusNetworkFaultOffline {}
+// The activity cell while the network is down: the salient line, or the
+// transient over the enduring line.
+message FooterStatusNetworkFaultActivity {
+  // WHICH TIER the daemon resolved. Exactly one is set.
+  oneof tier {
+    // A line that explains the fault stands.
+    FooterStatusNetworkFaultSalient salient = 1;
+    // Nothing salient stands.
+    FooterActivityTransientOverEnduring unpinned = 2;
+  }
+}
+// The salient kinds legal while the network is down. The offline line ranks
+// first because it explains the step.
+message FooterStatusNetworkFaultSalient {
+  // When this line began standing; the client ticks the relative age.
+  FooterStatusActivityAt at = 1;
+  // The one salient line.
+  oneof kind {
+    // WHAT is unreachable, as the shim observed it, drawn verbatim
+    // ("cannot reach api.anthropic.com: no route to host").
+    FooterStatusActivityNetworkOffline offline = 2;
+    // A DEPLOY'S PROGRESS. STATUS-INDEPENDENT.
+    FooterStatusActivityUpdate update = 3;
+    // THE AGENT'S PUSH NOTIFICATION. STATUS-INDEPENDENT.
+    FooterStatusActivityNotification notification = 4;
+    // THE CONTEXT-BUDGET WARNING. STATUS-INDEPENDENT.
+    FooterStatusActivityContextBudget context_budget = 5;
+  }
+}
+// The offline line, composed by the daemon from the shim's observation.
+message FooterStatusActivityNetworkOffline {
+  // Drawn verbatim. Never empty.
+  string text = 1;
 }

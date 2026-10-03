@@ -598,3 +598,38 @@ func TestOpenFaultLevelsAForgottenWorkspaceAtDebug(t *testing.T) {
 		})
 	}
 }
+
+func TestOpenFaultRecordsAnEnvironmentFaultAtInfoAndEveryOtherAtWarn(t *testing.T) {
+	tests := []struct {
+		name string
+		kind string
+		want string
+	}{
+		{name: "an unreachable network is this machine's environment", kind: KindNetworkUnreachable, want: dlog.LevelInfo},
+		{name: "a shim that died is agent-repl's", kind: KindShimDied, want: dlog.LevelWarn},
+		{name: "a vendor that will not start is the vendor's", kind: KindVendorStartRetrying, want: dlog.LevelWarn},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			log := newStubSurfaces()
+			r := newReporter(t, &stubDB{openedID: "f1"}, alwaysLive, log)
+
+			// Act.
+			if _, err := r.OpenFault(context.Background(), wsm.Fault{Kind: tt.kind}); err != nil {
+				t.Fatalf("OpenFault: %v", err)
+			}
+
+			// Assert.
+			for _, record := range log.logger.Records() {
+				if record.Operation == opOpenFault {
+					if record.Level != tt.want {
+						t.Fatalf("the open was recorded at %s, want %s", record.Level, tt.want)
+					}
+					return
+				}
+			}
+			t.Fatalf("records = %v, want the open recorded", log.logger.Records())
+		})
+	}
+}

@@ -355,7 +355,7 @@ func TestSessionHealthAfterTheShimExitsReportsShimDied(t *testing.T) {
 	// Act: the fake shim process exits outright, mid-session.
 	f.shim.Exit(1, "simulated crash")
 	awaitFooter(t, f, footer, "disconnected.dead once the shim exits", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetDisconnected().GetDead() != nil
+		return v.GetStrip().GetStatus().GetAgentReplFault().GetDead() != nil
 	})
 
 	// Assert
@@ -393,7 +393,7 @@ func TestSessionHealthAfterTheLinkIsSeveredReportsLinkSevered(t *testing.T) {
 	// Act: sever the session stream without killing the shim process.
 	f.shim.DropStream(harness.StreamSession)
 	awaitFooter(t, f, footer, "disconnected.severed once the link dies", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetDisconnected().GetSevered() != nil
+		return v.GetStrip().GetStatus().GetAgentReplFault().GetSevered() != nil
 	})
 
 	// Assert

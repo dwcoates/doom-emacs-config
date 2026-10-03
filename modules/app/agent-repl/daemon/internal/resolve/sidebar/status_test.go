@@ -373,14 +373,14 @@ func TestEveryAgentFailureArmTakesItsClassifiedArmAndColor(t *testing.T) {
 		color   string
 	}{
 		{name: "api_request_failed", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ApiRequestFailed{ApiRequestFailed: &conversationv1.ApiRequestFailed{
-			Kind: &conversationv1.ApiRequestFailed_AuthenticationFailed{AuthenticationFailed: &conversationv1.ApiAuthenticationFailed{}}}}}, arm: "vendor_blocked", color: "blue"},
-		{name: "blocking_limit", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_BlockingLimit{BlockingLimit: &conversationv1.AgentStoppedAtBlockingLimit{}}}, arm: "vendor_blocked", color: "blue"},
-		{name: "rapid_refill_breaker", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_RapidRefillBreaker{RapidRefillBreaker: &conversationv1.AgentStoppedByRapidRefillBreaker{}}}, arm: "vendor_blocked", color: "blue"},
+			Kind: &conversationv1.ApiRequestFailed_AuthenticationFailed{AuthenticationFailed: &conversationv1.ApiAuthenticationFailed{}}}}}, arm: "vendor_blocked", color: "turquoise"},
+		{name: "blocking_limit", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_BlockingLimit{BlockingLimit: &conversationv1.AgentStoppedAtBlockingLimit{}}}, arm: "vendor_blocked", color: "turquoise"},
+		{name: "rapid_refill_breaker", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_RapidRefillBreaker{RapidRefillBreaker: &conversationv1.AgentStoppedByRapidRefillBreaker{}}}, arm: "vendor_blocked", color: "turquoise"},
 		{name: "model_error", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ModelError{ModelError: &conversationv1.AgentModelError{}}}, arm: "turn_failed", color: "turquoise"},
 		{name: "api_request_failed: overloaded", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ApiRequestFailed{ApiRequestFailed: &conversationv1.ApiRequestFailed{
 			Kind: &conversationv1.ApiRequestFailed_Overloaded{Overloaded: &conversationv1.ApiOverloaded{}}}}}, arm: "turn_failed", color: "turquoise"},
 		{name: "api_request_failed: billing", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ApiRequestFailed{ApiRequestFailed: &conversationv1.ApiRequestFailed{
-			Kind: &conversationv1.ApiRequestFailed_BillingError{BillingError: &conversationv1.ApiBillingError{}}}}}, arm: "vendor_blocked", color: "blue"},
+			Kind: &conversationv1.ApiRequestFailed_BillingError{BillingError: &conversationv1.ApiBillingError{}}}}}, arm: "vendor_blocked", color: "turquoise"},
 		{name: "prompt_too_long", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_PromptTooLong{PromptTooLong: &conversationv1.AgentPromptTooLong{}}}, arm: "turn_failed", color: "turquoise"},
 		{name: "image_error", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ImageError{ImageError: &conversationv1.AgentImageRejected{}}}, arm: "turn_failed", color: "turquoise"},
 		{name: "malformed_tool_use_exhausted", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_MalformedToolUseExhausted{MalformedToolUseExhausted: &conversationv1.AgentMalformedToolUseExhausted{}}}, arm: "turn_failed", color: "turquoise"},
@@ -1518,31 +1518,116 @@ func TestAVendorBlockOutranksApiRetrying(t *testing.T) {
 	}
 }
 
-// THE ROSTER MAPS THE VENDOR-START RUN ONTO ITS EXISTING ARMS: a run being
-// retried is the bring-up still under way, a stopped one a session that never
-// came up -- even over a link that connected.
-func TestTheVendorStartRunDrawsAsExistingArms(t *testing.T) {
+// A VENDOR THAT WILL NOT START IS A VENDOR FAULT (owner ruling, 2026-10-02):
+// a run being retried and a stopped one both draw `vendor_fault`, over a
+// connected link and over the dead one a stopped start leaves behind.
+func TestTheVendorStartRunDrawsTheVendorFault(t *testing.T) {
 	tests := []struct {
 		name  string
 		state sidebar.VendorStart
-		want  string
+		link  shimclient.LinkState
 	}{
-		{"retrying draws the bring-up", sidebar.VendorStartRetrying, "init"},
-		{"stopped draws start_failed", sidebar.VendorStartStopped, "start_failed"},
+		{"retrying over a connected link", sidebar.VendorStartRetrying, shimclient.LinkConnected},
+		{"stopped over a connected link", sidebar.VendorStartStopped, shimclient.LinkConnected},
+		{"stopped over the dead link its stop left", sidebar.VendorStartStopped, shimclient.LinkDead},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange.
 			r := live(t, arrange(t))
+			r.OnLink(theWS, tt.link)
 
 			// Act.
 			r.SetVendorStart(theWS, tt.state)
 
 			// Assert.
-			if got := statusName(onlyRow(t, r)); got != tt.want {
-				t.Fatalf("status = %q, want %q", got, tt.want)
+			if got := statusName(onlyRow(t, r)); got != "vendor_fault" {
+				t.Fatalf("status = %q, want vendor_fault", got)
 			}
 		})
+	}
+}
+
+func TestARedialingLinkOutranksARetriedVendorStart(t *testing.T) {
+	// Arrange.
+	r := live(t, arrange(t))
+	r.SetVendorStart(theWS, sidebar.VendorStartRetrying)
+
+	// Act.
+	r.OnLink(theWS, shimclient.LinkRedialing)
+
+	// Assert.
+	if got := statusName(onlyRow(t, r)); got != "severed" {
+		t.Fatalf("status = %q, want severed: agent-repl's own fault outranks the vendor's", got)
+	}
+}
+
+func TestANetworkFaultDrawsTheNetworkArm(t *testing.T) {
+	// Arrange.
+	r := live(t, arrange(t))
+
+	// Act.
+	r.NetworkFaultOpened(theWS, "net-1")
+
+	// Assert.
+	if got := statusName(onlyRow(t, r)); got != "network_fault" {
+		t.Fatalf("status = %q, want network_fault", got)
+	}
+}
+
+func TestANetworkFaultOutranksTheVendorStartRun(t *testing.T) {
+	// Arrange.
+	r := live(t, arrange(t))
+	r.SetVendorStart(theWS, sidebar.VendorStartRetrying)
+
+	// Act.
+	r.NetworkFaultOpened(theWS, "net-1")
+
+	// Assert.
+	if got := statusName(onlyRow(t, r)); got != "network_fault" {
+		t.Fatalf("status = %q, want network_fault over the vendor fault", got)
+	}
+}
+
+func TestADeadLinkOutranksANetworkFault(t *testing.T) {
+	// Arrange.
+	r := live(t, arrange(t))
+	r.NetworkFaultOpened(theWS, "net-1")
+
+	// Act.
+	r.OnLink(theWS, shimclient.LinkDead)
+
+	// Assert.
+	if got := statusName(onlyRow(t, r)); got != "dead" {
+		t.Fatalf("status = %q, want dead: agent-repl's own fault outranks the network's", got)
+	}
+}
+
+func TestClosingTheNetworkFaultRestoresTheRow(t *testing.T) {
+	// Arrange.
+	r := live(t, arrange(t))
+	r.NetworkFaultOpened(theWS, "net-1")
+
+	// Act.
+	r.FaultClosed(theWS, "net-1")
+
+	// Assert.
+	if got := statusName(onlyRow(t, r)); got != "ready" {
+		t.Fatalf("status = %q, want ready once the network is back", got)
+	}
+}
+
+func TestClosingAFaultTheRosterNeverHeldPublishesNothing(t *testing.T) {
+	// Arrange.
+	r := live(t, arrange(t))
+	before, _ := r.Topic().Latest()
+
+	// Act.
+	r.FaultClosed(theWS, "never-opened")
+
+	// Assert.
+	if after, _ := r.Topic().Latest(); after != before {
+		t.Fatal("closing a fault the roster never held republished the roster")
 	}
 }
 
@@ -1555,7 +1640,7 @@ func TestAVendorStartRunThatEndsLeavesTheLinkToDraw(t *testing.T) {
 	r.SetVendorStart(theWS, sidebar.VendorStartNone)
 
 	// Assert.
-	if got := statusName(onlyRow(t, r)); got == "init" || got == "start_failed" {
+	if got := statusName(onlyRow(t, r)); got == "vendor_fault" {
 		t.Fatalf("status = %q, want the connected link's own arm once the run ended", got)
 	}
 }

@@ -213,6 +213,8 @@ unstubbed."
     (ready . :ready)
     (idleAsync . :idle-async)
     (vendorBlocked . :vendor-blocked)
+    (vendorFault . :vendor-fault)
+    (networkFault . :network-fault)
     (apiRetrying . :api-retrying)
     (init . :init)
     (severed . :severed)
@@ -228,17 +230,17 @@ unstubbed."
   "Every RosterRow.status arm frontend/v1/sidebar.proto declares, and the
 keyword §8 pins for it.  The list is EXHAUSTIVE by contract: 22 arms, and
 the roster's vocabulary is the ONE source for tab coloring and the sidebar
-dot.  A 23rd arm appearing on the wire must be a loud failure, not a
+dot.  An undeclared arm appearing on the wire must be a loud failure, not a
 silent default, which is why the suite pins the count as well as the
 mapping.")
 
-(ert-deftest agent-repl-itest-roster-declares-the-twenty-three-status-arms ()
-  "The suite's arm table matches the contract's 23 arms exactly.
+(ert-deftest agent-repl-itest-roster-declares-the-twenty-five-status-arms ()
+  "The suite's arm table matches the contract's 25 arms exactly.
 A drifted table would let a new arm ship untested, and the coloring would
 silently fall through to `none'.  `merge_enqueuing' and `merge_conflict'
 are retired (merge-landing.md, Landed change 1)."
   ;; Arrange / Act / Assert.
-  (should (equal 23 (length agent-repl-itest-roster--status-arms))))
+  (should (equal 25 (length agent-repl-itest-roster--status-arms))))
 
 (ert-deftest agent-repl-itest-roster-every-status-arm-decodes-to-its-keyword ()
   "Each of the 22 status arms resolves to exactly one tab-state keyword.

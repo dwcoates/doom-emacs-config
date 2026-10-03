@@ -29,9 +29,14 @@ func completeSubmit(key string) *agentreplv1.SubmitPromptRequest {
 func emacsWatchDaemon() *agentreplv1.WatchDaemonRequest {
 	return &agentreplv1.WatchDaemonRequest{
 		Client: &agentreplv1.WatchDaemonRequest_Emacs{
-			Emacs: &agentreplv1.WatchDaemonEmacs{ElispBuild: "fixture-elisp-build", Focus: unfocused()},
+			Emacs: &agentreplv1.WatchDaemonEmacs{ElispBuild: "fixture-elisp-build", Focus: unfocused(), Instance: instance()},
 		},
 	}
+}
+
+// instance is the Emacs process identity every fixture Emacs states.
+func instance() *agentreplv1.EditorInstance {
+	return &agentreplv1.EditorInstance{Value: "fixture-emacs"}
 }
 
 // unfocused is the EditorFocus an unfocused Emacs states.
@@ -41,4 +46,4 @@ func unfocused() *agentreplv1.EditorFocus {
 
 // emacsWatchDaemonJSON is emacsWatchDaemon's protojson spelling, for the tests
 // that speak the wire by hand.
-const emacsWatchDaemonJSON = `{"emacs":{"elispBuild":"fixture-elisp-build","focus":{"unfocused":{}}}}`
+const emacsWatchDaemonJSON = `{"emacs":{"elispBuild":"fixture-elisp-build","focus":{"unfocused":{}},"instance":{"value":"fixture-emacs"}}}`

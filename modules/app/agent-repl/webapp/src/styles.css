@@ -6225,6 +6225,29 @@ bubble-body.bubble-body { display: block; }
   color: var(--muted);
 }
 .cold-gate-trace { color: var(--fg); }
+/* THE STANDING GATE DOCKS AT THE PAGE'S VERY BOTTOM (src/feed/gate-dock.ts):
+   Emacs hides the input window while it stands and this webview grows into
+   that space, so the banner takes the input's exact slot: #gate-dock, below
+   the footer, EXACTLY the input window's height. Emacs tells the page that
+   height in pixels (--gate-dock-height, set on the root before the input
+   hides; lisp/window.el); 18.4vh, `agent-repl-input-height-fraction`, is the
+   fallback only for a page Emacs never told, which gate-dock.ts records. The
+   banner's row stays in the feed, hidden, so the feed draws no inline gate
+   while it is docked. */
+#gate-dock {
+  flex: 0 0 auto;
+  height: var(--gate-dock-height, 18.4vh);
+  overflow-y: auto;
+  box-sizing: border-box;
+}
+#gate-dock[hidden] { display: none; }
+#gate-dock > .cold-gate.cold-gate-docked {
+  min-height: 100%;
+  box-sizing: border-box;
+  border-radius: 0;
+  border-width: 1px 0 0;
+}
+#feed > .gate-docked-row { display: none; }
 /* ---- tool card input forms (src/feed/cards/tool-call.ts) ---- */
 /* The daemon names the drawn form of the card's one input line and the client
    applies the treatment that shape of line has always worn: the shell command

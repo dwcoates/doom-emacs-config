@@ -635,8 +635,11 @@ sits flush on the bar with no ground of its own.  See
     (:dead            . "blue")
     (:start-failed    . "blue")
 
-    (:vendor-blocked  . "blue")
-    (:api-retrying    . "blue")
+    (:network-fault   . "blue")
+
+    (:vendor-blocked  . "turquoise")
+    (:vendor-fault    . "turquoise")
+    (:api-retrying    . "turquoise")
 
     (:degraded        . "turquoise")
     (:turn-failed     . "turquoise")
@@ -684,7 +687,11 @@ WHAT EACH COLOR MEANS (owner ruling, 2026-09-28; restated in AGENTS.md,
 detached work runs while the main thread is idle; green, ready for the
 user; purple, a merge in progress; TURQUOISE, something went wrong but
 the workspace is usable (`:turn-failed\=', `:merge-failed\=',
-`:degraded\='); BLUE, the workspace is unusable right now.
+`:degraded\=', and the VENDOR FAULTS `:vendor-blocked\=', `:vendor-fault\='
+and `:api-retrying\='); BLUE, the workspace is unusable right now (an
+agent-repl fault -- `:init\=', `:severed\=', `:dead\=', `:start-failed\=' --
+or the NETWORK FAULT `:network-fault\=').  Owner ruling 2026-10-02:
+agent_repl_fault > network_fault > vendor_fault.
 
 EVERY MERGE ARM IS COLORED AS WELL AS GLYPHED (owner rulings,
 2026-09-28), as the fixture\='s `colored_merge_arms\=' declares: purple in
@@ -902,22 +909,28 @@ in `agent-repl--color-default-bracket'."
                      'agent-repl-tab-idle-async
                      agent-repl--color-idle-async-yellow
                      agent-repl--color-dark))
-    ;; VENDOR-BLOCKED is BLUE on the tab bar and purple everywhere else, which
-    ;; is the one row here that reads its color from the override table rather
-    ;; than the shared assignment.  An auth wall, a usage limit or a persistent
-    ;; vendor failure is a compromised route to a working session, exactly like
-    ;; the three blues below it; purple stays spent on the merge pipeline,
-    ;; which a tab bar with no glyph could not otherwise tell apart from it.
+    ;; THE VENDOR FAULTS are TURQUOISE (owner ruling, 2026-10-02): the
+    ;; vendor or the account refuses, or the vendor will not start, or a call
+    ;; is being retried -- while agent-repl itself serves, so the workspace
+    ;; stays usable and a prompt is held until the vendor answers.
     (:vendor-blocked . ,(agent-repl--tab-palette-row
-                         'agent-repl-tab-init
-                         agent-repl--color-init-blue
+                         'agent-repl-tab-usable-fault
+                         agent-repl--color-usable-fault-turquoise
                          agent-repl--color-light))
-    ;; API-RETRYING is BLUE (owner ruling, 2026-10-01): the vendor is retrying
-    ;; the turn's call, so the turn cannot advance until it is answered.
-    (:api-retrying . ,(agent-repl--tab-palette-row
-                       'agent-repl-tab-init
-                       agent-repl--color-init-blue
+    (:vendor-fault . ,(agent-repl--tab-palette-row
+                       'agent-repl-tab-usable-fault
+                       agent-repl--color-usable-fault-turquoise
                        agent-repl--color-light))
+    (:api-retrying . ,(agent-repl--tab-palette-row
+                       'agent-repl-tab-usable-fault
+                       agent-repl--color-usable-fault-turquoise
+                       agent-repl--color-light))
+    ;; THE NETWORK FAULT is BLUE (owner ruling, 2026-10-02): this machine is
+    ;; offline, so nothing that needs the network can work.
+    (:network-fault . ,(agent-repl--tab-palette-row
+                        'agent-repl-tab-init
+                        agent-repl--color-init-blue
+                        agent-repl--color-light))
     ;; MERGE-FAILED is TURQUOISE and keeps its ✗ (owner ruling, 2026-09-28):
     ;; something went wrong, but the merge no longer holds the workspace, so
     ;; it is usable.
@@ -957,8 +970,7 @@ in `agent-repl--color-default-bracket'."
     ;; running" about a workspace whose turn ended before the merge began.
     ;; Purple says what is true: work is in flight, it is the SYSTEM's rather
     ;; than the agent's, and the user cannot act on the workspace while it
-    ;; runs.  `:vendor-blocked' moved to blue above so purple means this and
-    ;; nothing else here.
+    ;; runs.  Purple means this and nothing else here.
     (:merge-queued . ,(agent-repl--tab-palette-row
                        'agent-repl-tab-merging
                        agent-repl--color-merging-purple
@@ -977,13 +989,9 @@ ONLY what it does not share with the others: its face, its color, and
 its unselected foreground.  The shape itself lives in that one function,
 and an entry is always ONE color end to end.
 
-Two kinds of row answer to `agent-repl-status-tab-bar-color-table'
-rather than to the shared `agent-repl-status-color-table', and both
-divergences are declared in
-`agent-repl-status-tab-bar-color-overrides'.  The two IN-FLIGHT merge
-arms have rows at all because of the override that gives them purple;
-`:vendor-blocked' has a row whose color is BLUE here and purple on every
-badge-bearing surface.
+Every row answers to `agent-repl-status-tab-bar-color-table', which is
+the shared `agent-repl-status-color-table' with
+`agent-repl-status-tab-bar-color-overrides' (empty today) layered over it.
 
 The arms taking `none' have NO entry and fall through to
 `agent-repl--tab-default': `:none' and `:inactive' have no lifecycle

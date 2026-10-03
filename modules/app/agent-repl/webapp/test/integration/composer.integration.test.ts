@@ -414,7 +414,7 @@ describe("the bubble composer's gate", () => {
     ).toBe(false);
   });
 
-  it.each(["merging", "closing", "disconnected"])("closes while the footer is %s", async (status) => {
+  it.each(["closing", "agentReplFault", "networkFault"])("closes while the footer is %s", async (status) => {
     // Arrange / Act
     await withBubble(status);
     // Assert
@@ -423,9 +423,18 @@ describe("the bubble composer's gate", () => {
     ).toBe(true);
   });
 
-  it("re-opens when the footer leaves the merging state", async () => {
+  it.each(["merging", "vendorFault"])("stays open while the footer is %s: its prompts are held", async (status) => {
+    // Arrange / Act
+    await withBubble(status);
+    // Assert
+    expect(
+      (harness.$('[data-feed-row="bubble"] textarea') as HTMLTextAreaElement)?.disabled,
+    ).toBe(false);
+  });
+
+  it("re-opens when the footer leaves an agent-repl fault", async () => {
     // Arrange
-    await withBubble("merging");
+    await withBubble("agentReplFault");
     // Act
     harness.fake.setFooter(WORKSPACE_ID, footerView({ status: "idle", substatus: "ready" }));
     await harness.settle();

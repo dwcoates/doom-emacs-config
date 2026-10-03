@@ -14,6 +14,7 @@ import (
 
 	"claude-repld/internal/account"
 	"claude-repld/internal/boot"
+	"claude-repld/internal/bringup"
 	"claude-repld/internal/buildid"
 	"claude-repld/internal/checkout"
 	"claude-repld/internal/classifier"
@@ -22,6 +23,7 @@ import (
 	"claude-repld/internal/desktopnotify"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/drain"
+	"claude-repld/internal/editorinstance"
 	"claude-repld/internal/envc"
 	"claude-repld/internal/externalbrowser"
 	"claude-repld/internal/gitclient"
@@ -50,6 +52,7 @@ import (
 	"claude-repld/internal/sessionlock"
 	"claude-repld/internal/sessionwatcher"
 	"claude-repld/internal/shimclient"
+	"claude-repld/internal/startup"
 	"claude-repld/internal/titlesynth"
 	"claude-repld/internal/vocab"
 	"claude-repld/internal/workspace"
@@ -301,6 +304,9 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// it needs this supervisor. By the time a shim's link can break, the fleet
 	// exists; before then the witness refuses rather than concluding anything.
 	var fleet *workspace.Fleet
+	// The editor startup's bring-up reads ownership at run time; it is built
+	// with the merge orchestrator, below the startup.
+	var ownership workspace.Ownership
 	supervisor, err := shimclient.NewSupervisor(p.Surfaces,
 		shimclient.WithLockProbe(adoptedDeathWitness(func(workspaceDir string) (sessionlock.State, error) {
 			if fleet == nil {
@@ -392,7 +398,17 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// WatchDaemon stream (owner request, 2026-09-28): the set is built here,
 	// before the hook and the server, so no open can precede it.
 	loudFaults := health.NewLoudFaults(log)
-	p.DB = health.ObserveFaults(p.DB, newFaultSurfaces(footerResolver, topbarResolver, loudFaults), p.Surfaces)
+	// THE ROSTER IS BUILT BEFORE THE HOOK because it is one of the hook's
+	// surfaces: the network fault reaches it through the same door as the
+	// footer. It raises no fault itself, so it needs no decorated client.
+	// THE ROSTER'S LAST TURN RESULT IS DURABLE: a daemon that did not see a
+	// workspace's turn end draws its row as it stood, not `ready`.
+	sidebarResolver, err := sidebar.New(colors, p.Surfaces,
+		sidebar.WithResultSink(rosterResults(p.DB, p.Surfaces.Global())))
+	if err != nil {
+		return nil, fmt.Errorf("claude-repld: build the sidebar resolver: %w", err)
+	}
+	p.DB = health.ObserveFaults(p.DB, newFaultSurfaces(footerResolver, sidebarResolver, topbarResolver, loudFaults), p.Surfaces)
 
 	// THE LOCK STALL WATCHDOG is built before every component whose hot lock
 	// it watches (the feed, the session watchers, the prompt queue), and it
@@ -453,13 +469,6 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		return nil, fmt.Errorf("claude-repld: build the feed resolver: %w", err)
 	}
 
-	// THE ROSTER'S LAST TURN RESULT IS DURABLE: a daemon that did not see a
-	// workspace's turn end draws its row as it stood, not `ready`.
-	sidebarResolver, err := sidebar.New(colors, p.Surfaces,
-		sidebar.WithResultSink(rosterResults(p.DB, p.Surfaces.Global())))
-	if err != nil {
-		return nil, fmt.Errorf("claude-repld: build the sidebar resolver: %w", err)
-	}
 	holdsResolver, err := holds.New(p.Surfaces)
 	if err != nil {
 		return nil, fmt.Errorf("claude-repld: build the hold tray: %w", err)
@@ -509,6 +518,25 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Log:        log,
 	})
 
+	// THE EDITOR'S STARTUP (internal/startup) is told every bring-up step the
+	// fleet takes, so it is built first; it reaches the fleet only once the
+	// daemon serves, by which time the fleet below exists.
+	startupRuns, err := startup.New(startup.Deps{
+		Order: func() []sidebar.TabEntry {
+			roster, _ := sidebarResolver.Topic().Latest()
+			return sidebar.TabOrder(roster)
+		},
+		Live: func(ws ids.WorkspaceID) bool { return fleet.Live(ws) },
+		BringUp: func(pending []ids.WorkspaceID, done func(ids.WorkspaceID, error)) {
+			editorBringUp(fleet, p.DB, ownership, sidebarResolver.SetBringingUp, log, pending, done)
+		},
+		Now: time.Now,
+		Log: log,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("claude-repld: build the editor startup: %w", err)
+	}
+
 	fleet, err = workspace.NewFleet(workspace.FleetDeps{
 		PublishHost: relay.PublishHostWorkspace,
 		DB:          p.DB,
@@ -530,6 +558,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Topbar:       topbarResolver,
 		BringUps:     sidebarResolver.SetBringingUp,
 		VendorStarts: sidebarResolver.SetVendorStart,
+		Steps:        startupRuns.Step,
 		SessionsUp:   lifecycle.SessionUp,
 		SocketPath:   func(ws ids.WorkspaceID) string { return p.Layout.ShimSocket(string(ws)) },
 		StoreSocket:  p.Opts.storeSocket,
@@ -762,7 +791,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 
 	// ---- the merge orchestrator ----
 
-	ownership := workspace.NewOwnership(rolloutController)
+	ownership = workspace.NewOwnership(rolloutController)
 	mergeOrchestrator, err := merge.New(merge.Deps{
 		PublishHost: relay.PublishHostWorkspace,
 		// The verbs own the roster's durable half and are built AFTER the
@@ -943,6 +972,14 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		return nil, err
 	}
 
+	// A FULL EMACS RESTART is told apart from a reconnect by the Emacs
+	// process identity every Emacs WatchDaemon carries, judged only by the
+	// daemon that serves (a joining successor's state client is read-only).
+	editors, err := editorinstance.New(p.DB, rolloutController.ServesIntake, time.Now, log)
+	if err != nil {
+		return nil, fmt.Errorf("claude-repld: build the editor instance tracker: %w", err)
+	}
+
 	log.Debug(graphOperation, "the component graph is built", dlog.Context{
 		"joining": p.Opts.joining != "",
 	})
@@ -973,6 +1010,8 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			Focus:            focus,
 			PersistentWifi:   wifi,
 			NewsDigest:       digest,
+			EditorInstances:  editors,
+			Startup:          startupRuns,
 			WebappDist:       paths.WebappDist,
 			ImageOrigin:      images.Handler(),
 			Log:              p.Surfaces,
@@ -1188,6 +1227,15 @@ func (h hostSessionFacts) HostSessionFacts(ws ids.WorkspaceID) (server.HostFacts
 		ShimAttached: facts.ShimAttached,
 		Backfill:     server.BackfillNone,
 	}, true
+}
+
+// StandingGate answers the gate the user must answer on the workspace: the
+// cold gate while it stands unanswered.
+func (h hostSessionFacts) StandingGate(ws ids.WorkspaceID) (server.HostGateKind, bool) {
+	if h.fleet.ColdGateShown(ws) {
+		return server.HostGateColdGate, true
+	}
+	return 0, false
 }
 
 // sentinelStripper adapts prompts.StripSentinels to the resolvers' drawing
@@ -1445,9 +1493,10 @@ func resolveFactsBound(value string) (time.Duration, error) {
 // translates the health verdict into each resolver's own vocabulary and adds
 // nothing: the partition and the lines are health's, the drawing theirs.
 type faultSurfaces struct {
-	footer footer.Resolver
-	topbar topbar.Resolver
-	loud   *health.LoudFaults
+	footer  footer.Resolver
+	sidebar sidebar.Resolver
+	topbar  topbar.Resolver
+	loud    *health.LoudFaults
 
 	mu sync.Mutex
 	// onTopbar are the open faults raised on the topbar (and so told to
@@ -1455,8 +1504,8 @@ type faultSurfaces struct {
 	onTopbar map[ids.FaultID]bool
 }
 
-func newFaultSurfaces(f footer.Resolver, t topbar.Resolver, loud *health.LoudFaults) *faultSurfaces {
-	return &faultSurfaces{footer: f, topbar: t, loud: loud, onTopbar: map[ids.FaultID]bool{}}
+func newFaultSurfaces(f footer.Resolver, s sidebar.Resolver, t topbar.Resolver, loud *health.LoudFaults) *faultSurfaces {
+	return &faultSurfaces{footer: f, sidebar: s, topbar: t, loud: loud, onTopbar: map[ids.FaultID]bool{}}
 }
 
 // FaultOpened puts a standing fault on the workspace's strip, or on every
@@ -1471,6 +1520,13 @@ func (f *faultSurfaces) FaultOpened(ws ids.WorkspaceID, line health.FaultLine) {
 		Detail:    line.Detail,
 		At:        line.At,
 	})
+	// THE ROSTER TAKES THE NETWORK FAULT FROM THE SAME DOOR, so the footer's
+	// network_fault and the roster's never stand on different facts. Every
+	// other domain reaches the roster by its own edges (the link, the
+	// vendor-start run).
+	if line.Cell.Status == health.FaultStatusNetworkFault && ws != "" {
+		f.sidebar.NetworkFaultOpened(ws, string(line.ID))
+	}
 	// ONLY A DAEMON-SCOPED FAULT reaches the topbar: health.FaultTopbarLine
 	// states no line for any other.
 	if line.Topbar == "" || ws != "" {
@@ -1502,6 +1558,9 @@ func topbarWarning(line health.FaultLine) topbar.DaemonWarning {
 // there.
 func (f *faultSurfaces) FaultClosed(ws ids.WorkspaceID, id ids.FaultID) {
 	f.footer.CloseFault(ws, string(id))
+	if ws != "" {
+		f.sidebar.FaultClosed(ws, string(id))
+	}
 	f.mu.Lock()
 	raised := f.onTopbar[id]
 	delete(f.onTopbar, id)
@@ -1510,4 +1569,90 @@ func (f *faultSurfaces) FaultClosed(ws ids.WorkspaceID, id ids.FaultID) {
 		f.topbar.RetractDaemonWarning(string(id))
 		f.loud.Closed(id)
 	}
+}
+
+// opEditorBringUp names the editor startup's own bring-up records.
+const opEditorBringUp = "daemon.startup.bring_up"
+
+// editorBringUp starts the named workspaces' sessions for the editor's startup
+// through THE ONE BRING-UP (bringup.Run, and through it Fleet.Start), on the
+// fleet's own detached lifetime so the exit drains and joins it. Each
+// workspace's bring-up marker is raised before any start, as the boot and the
+// takeover raise theirs; a workspace whose record cannot be read is told done
+// with that error at once and never started.
+// editorFleet is the slice of the fleet the editor's bring-up drives: the one
+// start path, and the fleet's detached lifetime it runs on.
+type editorFleet interface {
+	Start(ctx context.Context, ws ids.WorkspaceID) error
+	Detach(run func(context.Context))
+}
+
+// editorRecords is what the editor's bring-up reads: each workspace's record,
+// and (through bringup.Run) its session record.
+type editorRecords interface {
+	bringup.SessionReader
+	Workspace(ctx context.Context, ws ids.WorkspaceID) (wsm.Workspace, error)
+}
+
+func editorBringUp(fleet editorFleet, db editorRecords, ownership workspace.Ownership, marker func(ids.WorkspaceID, bool), log dlog.Logger,
+	pending []ids.WorkspaceID, done func(ids.WorkspaceID, error)) {
+	records := make([]wsm.Workspace, 0, len(pending))
+	for _, ws := range pending {
+		// ONLY A WORKSPACE THIS DAEMON SERVES IS STARTED HERE. One handed to a
+		// successor, or not yet adopted by this joining daemon, is the other
+		// daemon's to start: starting it here races that daemon's shim (a
+		// StartSession it answers `already_started`). It is told done, so its
+		// tab is not held behind a start that is not this daemon's.
+		standing, err := ownership.Standing(context.Background(), ws)
+		if err != nil {
+			log.Error(opEditorBringUp, "a workspace's serving standing could not be read; it is not brought up", dlog.Context{
+				dlog.KeyWorkspaceID: string(ws), "error": err.Error(),
+			})
+			done(ws, fmt.Errorf("read the serving standing of %q: %w", ws, err))
+			continue
+		}
+		if standing != workspace.StandingOwned {
+			log.Info(opEditorBringUp, "a workspace another daemon serves is not brought up here", dlog.Context{
+				dlog.KeyWorkspaceID: string(ws), "standing": int(standing),
+			})
+			done(ws, nil)
+			continue
+		}
+		record, err := db.Workspace(context.Background(), ws)
+		if err != nil {
+			log.Error(opEditorBringUp, "a workspace the editor's startup names could not be read; it is not brought up", dlog.Context{
+				dlog.KeyWorkspaceID: string(ws), "error": err.Error(),
+			})
+			done(ws, fmt.Errorf("read the workspace record of %q: %w", ws, err))
+			continue
+		}
+		marker(ws, true)
+		records = append(records, record)
+	}
+	fleet.Detach(func(ctx context.Context) {
+		bringup.Run(ctx, bringup.Deps{
+			DB: db,
+			StartSession: func(ctx context.Context, ws ids.WorkspaceID) error {
+				err := fleet.Start(ctx, ws)
+				if err == nil {
+					return nil
+				}
+				// A HANDOVER CAN TAKE THE WORKSPACE WHILE ITS START RUNS: the
+				// successor's shim then refuses this daemon's start. Re-read
+				// the standing; one no longer this daemon's is stood down.
+				standing, standingErr := ownership.Standing(ctx, ws)
+				if standingErr != nil {
+					return errors.Join(err, fmt.Errorf("read the serving standing of %q: %w", ws, standingErr))
+				}
+				if standing != workspace.StandingOwned {
+					return fmt.Errorf("%w: %w", bringup.ErrNotServed, err)
+				}
+				return err
+			},
+			BringingUp: marker,
+			Log:        log,
+			Operation:  opEditorBringUp,
+			Done:       done,
+		}, records)
+	})
 }

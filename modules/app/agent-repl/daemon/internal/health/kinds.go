@@ -95,6 +95,13 @@ const (
 	// whole retry window. Evidence: failed_attempts, cause (the last one),
 	// failing_since_ms.
 	KindVendorStartFailed = "vendor_start_failed"
+	// KindNetworkUnreachable is this machine unable to reach the network, as
+	// the SHIM reported it (conversation.v1.SessionFaultNetworkUnreachable on
+	// its diagnostics push): a request failed below any answer the vendor
+	// could give. It is opened from the push and closed by the next one, so
+	// it stands exactly as long as the shim says it does. Evidence: the
+	// shim's component and kind, as KindShimReported keeps them.
+	KindNetworkUnreachable = "network_unreachable"
 	// KindBounceDisposition is an ORDINARY reconciled bounce disposition: a
 	// session the bounce preserved or rolled, recorded and closed in one
 	// breath so the per-session accounting survives without polluting the
@@ -209,7 +216,10 @@ func sessionFault(f wsm.Fault) (*agentreplv1.SessionFault, bool) {
 		out.Kind = &agentreplv1.SessionFault_ClassifierFailed{
 			ClassifierFailed: &agentreplv1.SessionFaultClassifierFailed{Detail: evidenceDetail(f)},
 		}
-	case KindShimReported:
+	case KindShimReported, KindNetworkUnreachable:
+		// THE NETWORK FAULT IS A SHIM-REPORTED FAULT on the host and health
+		// wires, which carry it under the shim's own kind; only the footer and
+		// the roster draw it as its own domain.
 		out.Kind = &agentreplv1.SessionFault_ShimReported{
 			ShimReported: &agentreplv1.SessionFaultShimReported{
 				Component: f.Evidence["component"],

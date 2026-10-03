@@ -42,10 +42,10 @@ func unpinnedOf(status *frontendv1.FooterStatus) unpinnedCell {
 		return arm.Merged.GetActivity().GetUnpinned()
 	case *frontendv1.FooterStatus_Background:
 		return arm.Background.GetActivity().GetUnpinned()
-	case *frontendv1.FooterStatus_Blocked:
-		return arm.Blocked.GetActivity().GetUnpinned()
-	case *frontendv1.FooterStatus_Disconnected:
-		return arm.Disconnected.GetActivity().GetUnpinned()
+	case *frontendv1.FooterStatus_VendorFault:
+		return arm.VendorFault.GetActivity().GetUnpinned()
+	case *frontendv1.FooterStatus_AgentReplFault:
+		return arm.AgentReplFault.GetActivity().GetUnpinned()
 	case *frontendv1.FooterStatus_Closing:
 		return arm.Closing.GetActivity().GetUnpinned()
 	case *frontendv1.FooterStatus_Loading:

@@ -156,7 +156,7 @@ func TestResetEndsAStandingStream(t *testing.T) {
 	if err := stream.Err(); err != nil {
 		t.Fatalf("reset ended the stream with an error: %v", err)
 	}
-	server.awaitSubscribers(streamHost, "ws-a", 0)
+	server.mustAwaitSubscribers(t, streamHost, "ws-a", 0)
 }
 
 func TestResetRequiresPost(t *testing.T) {

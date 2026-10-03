@@ -73,12 +73,15 @@ import type {
   FooterStatusActivityWakeup,
   FooterStatusBackgroundActivity,
   FooterStatusBackgroundSalient,
-  FooterStatusBlockedActivity,
-  FooterStatusBlockedSalient,
+  FooterStatusVendorFaultActivity,
+  FooterStatusVendorFaultSalient,
+  FooterStatusNetworkFaultActivity,
+  FooterStatusNetworkFaultSalient,
+  FooterStatusActivityNetworkOffline,
   FooterStatusClosingActivity,
   FooterStatusClosingSalient,
-  FooterStatusDisconnectedActivity,
-  FooterStatusDisconnectedSalient,
+  FooterStatusAgentReplFaultActivity,
+  FooterStatusAgentReplFaultSalient,
   FooterStatusIdleActivity,
   FooterStatusIdleSalient,
   FooterStatusInterruptedActivity,
@@ -136,8 +139,9 @@ export type FooterActivity =
   | FooterStatusInterruptedActivity
   | FooterStatusMergingActivity
   | FooterStatusBackgroundActivity
-  | FooterStatusBlockedActivity
-  | FooterStatusDisconnectedActivity
+  | FooterStatusVendorFaultActivity
+  | FooterStatusAgentReplFaultActivity
+  | FooterStatusNetworkFaultActivity
   | FooterStatusClosingActivity
   | FooterStatusLoadingActivity;
 
@@ -149,8 +153,9 @@ export type FooterSalient =
   | FooterStatusInterruptedSalient
   | FooterStatusMergingSalient
   | FooterStatusBackgroundSalient
-  | FooterStatusBlockedSalient
-  | FooterStatusDisconnectedSalient
+  | FooterStatusVendorFaultSalient
+  | FooterStatusAgentReplFaultSalient
+  | FooterStatusNetworkFaultSalient
   | FooterStatusClosingSalient
   | FooterStatusLoadingSalient;
 
@@ -399,6 +404,8 @@ function drawSalientKind(
       return drawFooterStatusActivityStartFailed(kind.value);
     case "vendorStart":
       return drawFooterStatusActivityVendorStart(kind.value);
+    case "offline":
+      return drawFooterStatusActivityNetworkOffline(kind.value);
     case "closeBlocked":
       return drawFooterStatusActivityCloseBlocked(kind.value);
     case "notification":
@@ -410,6 +417,11 @@ function drawSalientKind(
       return unreachableArm(path, other.case);
     }
   }
+}
+
+/** What the shim observed of the unreachable network, verbatim. */
+export function drawFooterStatusActivityNetworkOffline(u: FooterStatusActivityNetworkOffline): HTMLElement {
+  return textLine("footer-activity-network-offline", u.text);
 }
 
 /** The agent's push notification, verbatim. */

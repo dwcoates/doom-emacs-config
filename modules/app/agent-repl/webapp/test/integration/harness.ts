@@ -27,6 +27,7 @@ import { Agent } from "undici";
 import { beforeAll, vi } from "vitest";
 import type { FeedId } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 
+import { composerClosedFor } from "../../src/vocab.js";
 import { isControl } from "../../src/control.js";
 import { shellElements, type ShellElements } from "../../src/shell";
 import { createDaemonTransport } from "../../src/rpc/transport";
@@ -626,13 +627,10 @@ async function mountApp(
   // delegated interceptor over the feed's scroll zone).
   const removeProseLinkRouting = installProseLinkRouting(ctx, shell.feedScroll);
   handles.push({ dispose: removeProseLinkRouting });
-  // The per-bubble composers close on exactly these statuses (R7).
-  footer.onStatus((statusCase) =>
-    gate.set(
-      statusCase === "merging" || statusCase === "closing" || statusCase === "disconnected"
-        ? "closed"
-        : "open",
-    ),
+  // The per-bubble composers close exactly as the boot's gate does: by the
+  // footer's color (render-colors.json#composer_closed_colors).
+  footer.onStatus((statusCase, substatusCase) =>
+    gate.set(composerClosedFor(statusCase, substatusCase) ? "closed" : "open"),
   );
 
   const login = mountLoginOverlay(shell.loginOverlay, ctx, {

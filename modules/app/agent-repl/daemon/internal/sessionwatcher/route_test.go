@@ -3055,6 +3055,28 @@ func TestARotationTellsTheLifecycleSinkTheNewResumeHandle(t *testing.T) {
 	}
 }
 
+// A CLOSE HANDS OFF WORK A ROUTE RECORDED BUT HAD NOT YET DISPATCHED: the
+// daemon closes the state client once Close returns, so a dispatch after it
+// wrote through a closed database (2026-10-03).
+func TestCloseDispatchesARecordedResumeHandleBeforeItReturns(t *testing.T) {
+	// Arrange: a rotation recorded under the mutex, its dispatch not yet run.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	h.w.mu.Lock()
+	h.w.routeSessionUpdateLocked(identityRotatedUpdate())
+	h.w.mu.Unlock()
+
+	// Act.
+	if err := h.w.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// Assert.
+	if told := vendorSessionIDsTold(h.drainNow()); len(told) != 1 || told[0] != "vendor-2" {
+		t.Fatalf("told %v by the time Close returned, want the recorded id once", told)
+	}
+}
+
 func TestAReannouncedStartTellsTheLifecycleSinkItsResumeHandle(t *testing.T) {
 	// Arrange: the facts are already held, so only the re-announced id is
 	// news -- a rotation that happened while no daemon watched.

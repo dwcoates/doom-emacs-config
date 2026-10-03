@@ -28,6 +28,7 @@ import (
 	"claude-repld/internal/shimclient"
 	"claude-repld/internal/shimsocket"
 	"claude-repld/internal/startingshim"
+	"claude-repld/internal/startup"
 	"claude-repld/internal/wsm"
 )
 
@@ -181,6 +182,10 @@ type FleetDeps struct {
 	// (owner ruling); it is a field so the exhaustion is exercised without
 	// waiting ten minutes.
 	VendorRetryWindow time.Duration
+	// Steps is told every step of every bring-up this fleet runs, whoever
+	// asked for it: the editor's startup (internal/startup) prints them and
+	// gates each tab's go-ahead on them.
+	Steps startup.StepSink
 	// SessionsUp is told that a session has come up on a workspace, however
 	// it came up -- a start, a retried vendor start, a relaunch's resume, a
 	// cold-gate re-open, an adoption -- so the prompts held until it
@@ -256,6 +261,10 @@ type Fleet struct {
 	mu        sync.RWMutex
 	sessions  map[ids.WorkspaceID]*live
 	coldGates map[ids.WorkspaceID]coldGate
+	// handedOver names the workspaces a handover has taken from this daemon
+	// (HandOver), until a reclaim gives one back (Reclaimed). A start still in
+	// flight when its workspace was handed over must not serve it: see hold.
+	handedOver map[ids.WorkspaceID]bool
 	// lastCold is the shim's own cold facts for a parked workspace, kept whole
 	// so the relaunch engine's cold arm carries what the shim stated rather
 	// than a reconstruction of it.
@@ -350,6 +359,13 @@ func (f *Fleet) ResumeColdDetached(ws ids.WorkspaceID, resume ColdResume, done f
 // joins every piece of it at the exit rather than leaving any writing into a
 // closing state client. `done`, when given, receives the outcome and the
 // context the work ran under.
+// Detach runs work no request waits on under the fleet's own lifetime, joined
+// by DrainStarts at the daemon's exit exactly as StartDetached's starts are.
+// The editor's startup runs its bring-up here.
+func (f *Fleet) Detach(run func(context.Context)) {
+	f.runDetached(func(ctx context.Context) error { run(ctx); return nil }, nil)
+}
+
 func (f *Fleet) runDetached(run func(context.Context) error, done func(context.Context, error)) {
 	f.detached.Add(1)
 	go func() {
@@ -420,6 +436,8 @@ func NewFleet(deps FleetDeps) (*Fleet, error) {
 		return nil, fmt.Errorf("workspace: the session fleet needs a session-up hook; prompts held until a session reconnects are delivered by it")
 	case deps.VendorStarts == nil:
 		return nil, fmt.Errorf("workspace: the session fleet needs a vendor-start marker; the roster draws a retried or failed vendor start by it")
+	case deps.Steps == nil:
+		return nil, fmt.Errorf("workspace: the session fleet needs a bring-up step sink; the editor's startup is told each step by it")
 	}
 	probe := deps.Probe
 	if probe == nil {
@@ -477,6 +495,7 @@ func NewFleet(deps FleetDeps) (*Fleet, error) {
 		socketGoneBound: shimclient.GracefulKillBound,
 		sessions:        map[ids.WorkspaceID]*live{},
 		coldGates:       map[ids.WorkspaceID]coldGate{},
+		handedOver:      map[ids.WorkspaceID]bool{},
 		lastCold:        map[ids.WorkspaceID]*conversationv1.SessionCold{},
 		reapedAt:        map[ids.WorkspaceID]time.Time{},
 		generation:      map[ids.WorkspaceID]int{},
@@ -587,6 +606,7 @@ func (f *Fleet) TakeColdGate(ws ids.WorkspaceID, vendorSessionID string) bool {
 	f.mu.Unlock()
 	if taken {
 		f.logTransition(ws, "cold_gate_standing", true, false, dlog.Context{"reason": "answered"})
+		f.publishHost(ws)
 	}
 	return taken
 }
@@ -1004,6 +1024,29 @@ func (f *Fleet) start(ctx context.Context, ws ids.WorkspaceID, rebind bool) erro
 	// between for want of either.
 	f.deps.BringUps(ws, true)
 	defer f.deps.BringUps(ws, false)
+	err := f.startUp(ctx, ws, rebind)
+	f.noteStartEnded(ws, err)
+	return err
+}
+
+// noteStartEnded tells the startup a bring-up's service-level failure. A
+// session that came up, a vendor that would not start, a restart that ended
+// the vendor run and a stand-down this daemon ordered have each said so (or
+// are no failure of agent-repl's); every other error is the bring-up failing.
+func (f *Fleet) noteStartEnded(ws ids.WorkspaceID, err error) {
+	if err == nil || errors.Is(err, ErrHandedOver) {
+		return
+	}
+	var label *startLabel
+	if errors.As(err, &label) && (label.vendor || label.network) {
+		return
+	}
+	f.deps.Steps(ws, startup.Step{Kind: startup.StepFailed, Text: err.Error()})
+}
+
+// startUp is start's body, under the start gate, with the bring-up marker
+// raised.
+func (f *Fleet) startUp(ctx context.Context, ws ids.WorkspaceID, rebind bool) error {
 	// A SELECTED TRANSCRIPT IS A DIFFERENT CONVERSATION: the watcher this
 	// start opens replays its first page, and the previous watcher's pointers,
 	// which name another book, are forgotten. See opening.go.
@@ -1024,6 +1067,11 @@ func (f *Fleet) start(ctx context.Context, ws ids.WorkspaceID, rebind bool) erro
 	if err != nil {
 		log.Error(opBringUp, "could not read the session record", dlog.Context{"cause": err.Error()})
 		return fmt.Errorf("start session for %q: read the session record: %w", ws, err)
+	}
+	if exists && session.Hibernated() {
+		f.deps.Steps(ws, startup.Step{Kind: startup.StepWaking})
+	} else {
+		f.deps.Steps(ws, startup.Step{Kind: startup.StepStartingSession})
 	}
 
 	src, err := f.classifySource(ctx, log, ws, record.Dir, session, exists)
@@ -1096,6 +1144,9 @@ func (f *Fleet) start(ctx context.Context, ws ids.WorkspaceID, rebind bool) erro
 	// this moment: the link coming back on a stream the daemon never
 	// re-attached leaves the evidence standing.
 	f.closeOnEdge(ctx, log, ws, health.EdgeHealthyAttach)
+	// AGENT-REPL'S OWN SERVICES SERVE THE WORKSPACE from here, whatever the
+	// vendor goes on to do: this is the moment the editor's tab may open.
+	f.deps.Steps(ws, startup.Step{Kind: startup.StepServing})
 
 	// AN ADOPTED SHIM IS ATTACHED TO, NEVER STARTED. The lock probe selected
 	// the adopt path precisely because a shim is still alive on this
@@ -1122,6 +1173,7 @@ func (f *Fleet) start(ctx context.Context, ws ids.WorkspaceID, rebind bool) erro
 			"adopted": true, "shim_pid": client.PID(),
 		})
 		f.deps.SessionsUp(ws)
+		f.deps.Steps(ws, startup.Step{Kind: startup.StepUp})
 		return nil
 	}
 
@@ -1138,6 +1190,9 @@ func (f *Fleet) start(ctx context.Context, ws ids.WorkspaceID, rebind bool) erro
 		endHistory = f.beginHistoryClient(ws, client)
 	}
 	defer endHistory()
+	if !src.Fresh {
+		f.deps.Steps(ws, startup.Step{Kind: startup.StepResuming})
+	}
 	started, err := f.startSession(runCtx, log, ws, client, src, session, configDir)
 	if err != nil {
 		defer finishRun()
@@ -1189,10 +1244,15 @@ func (f *Fleet) start(ctx context.Context, ws ids.WorkspaceID, rebind bool) erro
 		log.Info(opBringUp, "the session is parked at its cold gate", dlog.Context{
 			"shim_pid": client.PID(), "host_session_id": hostSessionID,
 		})
+		f.deps.Steps(ws, startup.Step{Kind: startup.StepColdGate})
 		return nil
 	}
 
-	return f.sessionUp(ctx, log, ws, client, started, session, configDir, hostSessionID)
+	if err := f.sessionUp(ctx, log, ws, client, started, session, configDir, hostSessionID); err != nil {
+		return err
+	}
+	f.deps.Steps(ws, startup.Step{Kind: startup.StepUp})
+	return nil
 }
 
 // sessionUp is EVERYTHING a started session still needs, and it is the ONE
@@ -1658,6 +1718,16 @@ func (f *Fleet) bringUpClient(ctx context.Context, log dlog.Logger, ws ids.Works
 			Spawned: func(pid int) { f.recordSpawnedShimPID(ctx, log, ws, pid) },
 		})
 		release()
+		if errors.Is(err, shimclient.ErrStandingDown) {
+			// THE SUPERVISOR BEGAN STANDING DOWN between the check above and
+			// this spawn: the supervisor's own refusal is the authoritative
+			// answer, and it is the same refusal, recorded the same way.
+			log.Info(opBringUp, "no shim is brought up: this daemon began standing down as the spawn was asked", dlog.Context{
+				"workspace": string(ws), "socket": udsPath,
+			})
+			return nil, pathNone, fmt.Errorf("%w: %w", shimclient.ErrStandingDown,
+				refuse(log, "OpenWorkspace", ArmSpawnFailed, shimclient.ErrStandingDown.Error(), false))
+		}
 		if err != nil {
 			log.Error(opBringUp, "the shim did not come up", dlog.Context{"cause": err.Error()})
 			// A BRING-UP DEATH IS A WORKSPACE FAULT, not only a failed rpc.
@@ -2017,8 +2087,21 @@ func (f *Fleet) askToStartSession(ctx context.Context, log dlog.Logger, ws ids.W
 			// THE SHIM LABELS WHETHER ASKING AGAIN CAN HELP, and the daemon
 			// never re-derives it from `detail`. A frame with neither arm is
 			// malformed: it is treated as a rejection, loudly.
-			switch vendor.GetRetry().(type) {
+			switch retry := vendor.GetRetry().(type) {
 			case *shimv1.StartSessionVendorStartFailed_Retryable:
+				// WHOSE FAILURE IT WAS is the shim's to say too: an
+				// unreachable network is not the vendor's fault, and the
+				// daemon draws it as a network fault while it retries.
+				switch retry.Retryable.GetCause().(type) {
+				case *shimv1.StartSessionVendorStartRetryable_Network:
+					return nil, labeledNetwork(refusal, failure.GetDetail())
+				case *shimv1.StartSessionVendorStartRetryable_Vendor:
+				default:
+					log.Error(opBringUp, "the shim's retryable vendor start names no cause; it is read as the vendor's", dlog.Context{
+						"detail":              failure.GetDetail(),
+						"invariant_violation": "StartSessionVendorStartRetryable.cause is always set",
+					})
+				}
 				return nil, labeled(refusal, true, true, failure.GetDetail())
 			case *shimv1.StartSessionVendorStartFailed_Rejected:
 				return nil, labeled(refusal, false, true, failure.GetDetail())
@@ -2093,6 +2176,7 @@ func (f *Fleet) raiseColdGate(ws ids.WorkspaceID, vendorSessionID string, cold *
 		Standing:      true,
 		ContextTokens: int64(cold.GetContextTokens()),
 	})
+	f.publishHost(ws)
 }
 
 // coldCompactMenu is the compact menu a gate serves: the model the cold start
@@ -2122,6 +2206,18 @@ func coldCompactMenu(cold *conversationv1.SessionCold) (*ServedColdGateCompact, 
 // are looking at three problems.
 func coldGateDetail(cold *conversationv1.SessionCold) string {
 	return fmt.Sprintf("the conversation is cold at %d context tokens", cold.GetContextTokens())
+}
+
+// ColdGateShown answers whether a cold gate stands on the workspace UNANSWERED:
+// the gate the user sees and must answer. It is the host view's gate, and the
+// feed's standing gate row holds exactly as long (the row retires the moment an
+// answer takes the gate, and returns when a failed re-open raises it again), so
+// Emacs's hidden input and the webapp's docked banner move together.
+func (f *Fleet) ColdGateShown(ws ids.WorkspaceID) bool {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	held, ok := f.coldGates[ws]
+	return ok && !held.answering
 }
 
 // ColdGateDetail answers the standing gate's account for a workspace, false
@@ -2184,11 +2280,17 @@ func (f *Fleet) recordFacts(ctx context.Context, log dlog.Logger, ws ids.Workspa
 func (f *Fleet) Stop(ctx context.Context, ws ids.WorkspaceID, force bool) error {
 	f.mu.Lock()
 	session, ok := f.sessions[ws]
+	_, gated := f.coldGates[ws]
 	delete(f.sessions, ws)
 	delete(f.coldGates, ws)
 	delete(f.lastCold, ws)
 	f.mu.Unlock()
 	if !ok {
+		// A gate can stand with no session in the map; its retirement still
+		// moves the host view.
+		if gated {
+			f.publishHost(ws)
+		}
 		return nil
 	}
 	f.logTransition(ws, "session_live", true, false, dlog.Context{"force": force})
@@ -2382,8 +2484,24 @@ func (f *Fleet) retireReaped(ws ids.WorkspaceID) {
 func (f *Fleet) hold(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, session *live) error {
 	f.mu.RLock()
 	previous, held := f.sessions[ws]
+	handedOver := f.handedOver[ws]
 	f.mu.RUnlock()
 	restated := held && previous != nil && previous.client == session.client
+	// A START THAT FINISHES AFTER ITS WORKSPACE WAS HANDED OVER SERVES NOTHING.
+	// The transfer found no session to detach while this start was in flight
+	// and released the serving row; remembering the client and claiming the
+	// row now would leave the successor waiting for a release that never
+	// comes, its adoption never made (e2e TestEmacsHandoverTransfersAtFreeness,
+	// 2026-10-03). The shim is the successor's: it is detached, never stopped,
+	// and keeps its lock, so the successor adopts it as it adopts any handed
+	// shim.
+	if !restated && handedOver {
+		session.client.Detach()
+		log.Info(opBringUp, "a start finished after its workspace was handed to a successor; its shim is left running for the successor to adopt", dlog.Context{
+			"shim_pid": session.client.PID(),
+		})
+		return fmt.Errorf("start session for %q: %w", ws, ErrHandedOver)
+	}
 	f.remember(ws, session)
 	if restated {
 		return nil

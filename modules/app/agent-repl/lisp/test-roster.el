@@ -2593,3 +2593,97 @@ saying the roster had been asked for one and declined."
       (funcall push t)
       (funcall push nil)
       (should (equal (agent-repl-roster-drawn-tab-order) '("two"))))))
+
+;;;; ---- The editor's startup holds every fresh tab out of the bar ----
+
+(defmacro agent-repl-test-roster--during-startup (&rest body)
+  "Run BODY inside `agent-repl-test-roster--with-editor' with a startup under way.
+Pre-creating the input buffer is recorded in `precreated' rather than performed."
+  (declare (indent 0))
+  `(agent-repl-test-roster--with-editor
+     (let ((agent-repl-startup--phase 'running)
+           (precreated nil))
+       (ignore precreated)
+       (cl-letf (((symbol-function 'agent-repl--ensure-input-buffer)
+                  (lambda (ws) (push ws precreated))))
+         ,@body))))
+
+(ert-deftest agent-repl-test-roster-a-startup-pre-creates-a-held-row ()
+  "During the startup a fresh row's workspace is created and its input
+buffer made, but its tab is not drawn."
+  (agent-repl-test-roster--during-startup
+    ;; Act
+    (agent-repl-roster-apply
+     (agent-repl-test-roster--one-section (agent-repl-test-roster--row "a" "one" :ready)))
+    ;; Assert
+    (should (equal (agent-repl--ws-by-ref-id "a") "one"))
+    (should (equal precreated '("one")))
+    (should (null agent-repl-roster--tab-order))))
+
+(ert-deftest agent-repl-test-roster-a-startup-does-not-hold-on-a-pending-row ()
+  "During the startup the daemon's go-ahead decides, so a pending row is
+pre-created rather than held untabbed."
+  (agent-repl-test-roster--during-startup
+    ;; Act
+    (agent-repl-roster-apply
+     (agent-repl-test-roster--one-section
+      (agent-repl-test-roster--row "a" "one" :init :availability :pending)
+      (agent-repl-test-roster--row "b" "two" :ready)))
+    ;; Assert
+    (should (agent-repl--ws-by-ref-id "a"))
+    (should (agent-repl--ws-by-ref-id "b"))))
+
+(ert-deftest agent-repl-test-roster-a-tab-the-startup-opened-is-drawn ()
+  "Releasing a held tab and re-deriving the order draws it."
+  (agent-repl-test-roster--during-startup
+    ;; Arrange
+    (agent-repl-roster-apply
+     (agent-repl-test-roster--one-section
+      (agent-repl-test-roster--row "a" "one" :ready)
+      (agent-repl-test-roster--row "b" "two" :ready)))
+    ;; Act
+    (puthash "a" t agent-repl-startup--released)
+    (agent-repl-roster-refresh-order)
+    ;; Assert
+    (should (equal agent-repl-roster--tab-order '("one")))))
+
+(ert-deftest agent-repl-test-roster-the-end-of-a-startup-draws-every-tab-in-order ()
+  "Once the startup is over every tab is drawn, in walk order."
+  (agent-repl-test-roster--during-startup
+    ;; Arrange
+    (agent-repl-roster-apply
+     (agent-repl-test-roster--one-section
+      (agent-repl-test-roster--row "a" "one" :ready)
+      (agent-repl-test-roster--row "b" "two" :ready)))
+    ;; Act
+    (setq agent-repl-startup--phase 'done)
+    (agent-repl-roster-refresh-order)
+    ;; Assert
+    (should (equal agent-repl-roster--tab-order '("one" "two")))))
+
+(ert-deftest agent-repl-test-roster-a-current-naming-a-held-tab-switches-nowhere ()
+  "The selection cannot land on a tab the startup has not opened."
+  (agent-repl-test-roster--during-startup
+    ;; Act
+    (agent-repl-roster-apply
+     (agent-repl-test-roster--roster
+      :sections (list (agent-repl-test-roster--section
+                       "r" (list (agent-repl-test-roster--row "a" "one" :ready))))
+      :current "a"))
+    ;; Assert
+    (should (null agent-repl-test-roster--switched))))
+
+(ert-deftest agent-repl-test-roster-a-current-naming-an-opened-tab-is-followed ()
+  "Once the startup opened it, the same current is followed."
+  (agent-repl-test-roster--during-startup
+    ;; Arrange
+    (agent-repl-roster-apply
+     (agent-repl-test-roster--roster
+      :sections (list (agent-repl-test-roster--section
+                       "r" (list (agent-repl-test-roster--row "a" "one" :ready))))
+      :current "a"))
+    (puthash "a" t agent-repl-startup--released)
+    ;; Act
+    (agent-repl-roster-apply-current)
+    ;; Assert
+    (should (equal agent-repl-test-roster--switched '("one")))))

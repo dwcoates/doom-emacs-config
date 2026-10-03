@@ -170,7 +170,7 @@ func TestFakeShimExitingDuringBringUpEndsBringUpImmediately(t *testing.T) {
 	// workspace has no session record at all (the bring-up died before one was
 	// made), so its host view is the `none` arm, which carries no faults.
 	awaitFooter(t, f, footer, "footer disconnected.start_failed", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetDisconnected().GetStartFailed() != nil
+		return v.GetStrip().GetStatus().GetAgentReplFault().GetStartFailed() != nil
 	})
 
 	// Assert: the fault IS recorded — SessionHealth is the surface that reads
@@ -381,6 +381,7 @@ func TestStartSessionResumeColdStandsAGateBlockingReopenUntilAnswered(t *testing
 	}})
 	feed := f.watchRootFeed()
 	footer := f.d.WatchFooter(f.ws)
+	host := f.d.WatchHost(f.ws)
 
 	// Act
 	if _, err := f.d.Client().OpenWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: f.ws})); err != nil {
@@ -406,6 +407,12 @@ func TestStartSessionResumeColdStandsAGateBlockingReopenUntilAnswered(t *testing
 		return v.GetStrip().GetStatus().GetWaiting().GetColdGate() != nil
 	})
 
+	// Assert: the host view carries the gate, so Emacs hides the input while
+	// the webapp docks the banner.
+	harness.AwaitView(t, f.d.Ctx(), host, "host gate cold_gate", func(r *agentreplv1.WatchHostWorkspaceResponse) bool {
+		return r.GetHost().GetGate().GetColdGate() != nil
+	})
+
 	// Assert: no re-open until AnswerColdGate — the shim receives no second
 	// StartSession within the probe window.
 	if shim.Count(harness.RPCStartSession) != 1 {
@@ -426,6 +433,11 @@ func TestStartSessionResumeColdStandsAGateBlockingReopenUntilAnswered(t *testing
 	if retry.GetResume().GetColdRemediation().GetPay() == nil {
 		t.Fatalf("the retry's cold_remediation = %v, want {pay}", retry.GetResume().GetColdRemediation())
 	}
+
+	// Assert: the answered gate leaves the host view, so the input returns.
+	harness.AwaitView(t, f.d.Ctx(), host, "host gate absent", func(r *agentreplv1.WatchHostWorkspaceResponse) bool {
+		return r.GetHost() != nil && r.GetHost().Gate == nil
+	})
 }
 
 func TestAnswerColdGateCompactEchoesExactly(t *testing.T) {
@@ -2399,7 +2411,7 @@ func TestAParkedWorkspacesFooterIsIdleAndTheIndicatorReportsNoFault(t *testing.T
 	settled := awaitFooter(t, f, footer, "the parked footer settling on an idle status", func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetStatus().GetIdle() != nil
 	})
-	if settled.GetStrip().GetStatus().GetDisconnected() != nil {
+	if settled.GetStrip().GetStatus().GetAgentReplFault() != nil {
 		t.Fatalf("the parked footer status = %v, want an idle status and never disconnected", settled.GetStrip().GetStatus())
 	}
 

@@ -92,7 +92,7 @@ func TestRosterAndFooterAgreeOnBlocked(t *testing.T) {
 			switch tc.class {
 			case "vendor":
 				awaitFooter(t, f, footer, "the footer paints blocked", func(v *frontendv1.FooterView) bool {
-					return v.GetStrip().GetStatus().GetBlocked() != nil
+					return v.GetStrip().GetStatus().GetVendorFault() != nil
 				})
 				awaitRoster(t, f.d, roster, "the roster paints vendor_blocked", func(r *frontendv1.WorkspaceRoster) bool {
 					return rosterRow(r, f.ws.GetId()).GetVendorBlocked() != nil

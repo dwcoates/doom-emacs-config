@@ -28,6 +28,7 @@ import (
 	"claude-repld/internal/sessionwatcher"
 	"claude-repld/internal/shimclient"
 	"claude-repld/internal/shimsocket"
+	"claude-repld/internal/startup"
 	"claude-repld/internal/wsm"
 )
 
@@ -453,10 +454,20 @@ func rejectedVendorStart() *shimv1.StartSessionVendorStartFailed {
 		Retry: &shimv1.StartSessionVendorStartFailed_Rejected{Rejected: &shimv1.StartSessionVendorStartRejected{}}}
 }
 
-// retryableVendorStart is a vendor-start refusal the shim labeled RETRYABLE.
+// retryableVendorStart is a vendor-start refusal the shim labeled RETRYABLE
+// and blamed on the vendor.
 func retryableVendorStart() *shimv1.StartSessionVendorStartFailed {
 	return &shimv1.StartSessionVendorStartFailed{
-		Retry: &shimv1.StartSessionVendorStartFailed_Retryable{Retryable: &shimv1.StartSessionVendorStartRetryable{}}}
+		Retry: &shimv1.StartSessionVendorStartFailed_Retryable{Retryable: &shimv1.StartSessionVendorStartRetryable{
+			Cause: &shimv1.StartSessionVendorStartRetryable_Vendor{Vendor: &shimv1.StartSessionVendorStartVendor{}}}}}
+}
+
+// offlineVendorStart is a RETRYABLE vendor-start refusal the shim blamed on
+// this machine not reaching the network.
+func offlineVendorStart() *shimv1.StartSessionVendorStartFailed {
+	return &shimv1.StartSessionVendorStartFailed{
+		Retry: &shimv1.StartSessionVendorStartFailed_Retryable{Retryable: &shimv1.StartSessionVendorStartRetryable{
+			Cause: &shimv1.StartSessionVendorStartRetryable_Network{Network: &shimv1.StartSessionVendorStartNetwork{}}}}}
 }
 
 // vendorRefusal is a StartSession answer refusing the start with this vendor
@@ -471,6 +482,9 @@ func vendorRefusal(label *shimv1.StartSessionVendorStartFailed, detail string) *
 }
 
 type fleetFixture struct {
+	// hostPublished is every workspace whose host view the fleet republished,
+	// in order.
+	hostPublished []ids.WorkspaceID
 	// now is the fleet's clock. It moves only when the vendor-start run waits
 	// (retryAfter), so the retry window is crossed without any real wait.
 	now time.Time
@@ -481,6 +495,8 @@ type fleetFixture struct {
 	retryAfter func(d time.Duration) <-chan time.Time
 	// vendorStarts is every vendor-start state the roster was told, in order.
 	vendorStarts []sidebar.VendorStart
+	// steps are the bring-up steps the fleet reported, in order.
+	steps []startup.Step
 	// sessionsUp is every workspace the session-up hook was told about.
 	sessionsUp []ids.WorkspaceID
 	// bringUps records every BringUps edge, in order.
@@ -653,6 +669,9 @@ func newFleetFixtureBoundedAt(t *testing.T, adoptBound time.Duration) *fleetFixt
 		VendorStarts: func(_ ids.WorkspaceID, state sidebar.VendorStart) {
 			f.vendorStarts = append(f.vendorStarts, state)
 		},
+		Steps: func(ws ids.WorkspaceID, step startup.Step) {
+			f.steps = append(f.steps, step)
+		},
 		SessionsUp: func(ws ids.WorkspaceID) { f.sessionsUp = append(f.sessionsUp, ws) },
 		Probe:      func(string, string) (sessionlock.State, error) { return f.probeState, f.probeErr },
 		SocketProbe: func(path string) (shimsocket.State, error) {
@@ -686,6 +705,9 @@ func newFleetFixtureBoundedAt(t *testing.T, adoptBound time.Duration) *fleetFixt
 			return fired
 		},
 		ShimAlive: func(pid int) bool { return f.shimAlive != nil && f.shimAlive(pid) },
+		PublishHost: func(ws ids.WorkspaceID) {
+			f.hostPublished = append(f.hostPublished, ws)
+		},
 	})
 	if err != nil {
 		t.Fatalf("NewFleet: %v", err)
@@ -759,6 +781,15 @@ func TestNewFleetRefusesMissingCollaborators(t *testing.T) {
 				SocketPath: func(ids.WorkspaceID) string { return "" }, ShimBundle: &fakeBundle{build: "b"},
 				Log: dlog.NewTestSurfaces(), LockDir: "/run", BringUps: func(ids.WorkspaceID, bool) {},
 				SessionsUp: func(ids.WorkspaceID) {},
+			},
+		},
+		{
+			name: "no bring-up step sink",
+			deps: FleetDeps{
+				DB: newFakeDB(), Instance: fixtureInstance, Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{},
+				SocketPath: func(ids.WorkspaceID) string { return "" }, ShimBundle: &fakeBundle{build: "b"},
+				Log: dlog.NewTestSurfaces(), LockDir: "/run", BringUps: func(ids.WorkspaceID, bool) {},
+				SessionsUp: func(ids.WorkspaceID) {}, VendorStarts: func(ids.WorkspaceID, sidebar.VendorStart) {},
 			},
 		},
 		{
@@ -3870,6 +3901,94 @@ func TestReraiseColdGateStandsTheGateFromItsKeptFacts(t *testing.T) {
 	}
 }
 
+// ---- the gate the host view carries ----
+
+func TestColdGateShownFollowsTheGatesLife(t *testing.T) {
+	tests := []struct {
+		name string
+		act  func(f *fleetFixture, ws ids.WorkspaceID)
+		want bool
+	}{
+		{"no gate raised is no gate shown", func(*fleetFixture, ids.WorkspaceID) {}, false},
+		{"a raised gate is shown", func(f *fleetFixture, ws ids.WorkspaceID) {
+			f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config")
+		}, true},
+		{"an answered gate is no longer shown", func(f *fleetFixture, ws ids.WorkspaceID) {
+			f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config")
+			f.fleet.TakeColdGate(ws, "vendor-1")
+		}, false},
+		{"a gate stood again after a failed re-open is shown", func(f *fleetFixture, ws ids.WorkspaceID) {
+			f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config")
+			f.fleet.TakeColdGate(ws, "vendor-1")
+			f.fleet.ReraiseColdGate(ws, "vendor-1")
+		}, true},
+		{"a stopped workspace's gate is gone", func(f *fleetFixture, ws ids.WorkspaceID) {
+			f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config")
+			_ = f.fleet.Stop(context.Background(), ws, true)
+		}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFleetFixture(t)
+			ws := f.workspace("ws-shown")
+
+			// Act.
+			tt.act(f, ws.ID)
+
+			// Assert.
+			if got := f.fleet.ColdGateShown(ws.ID); got != tt.want {
+				t.Fatalf("ColdGateShown = %t, want %t", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEveryEdgeOfTheShownGateRepublishesTheHostView(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(f *fleetFixture, ws ids.WorkspaceID)
+		act     func(f *fleetFixture, ws ids.WorkspaceID)
+	}{
+		{"raising the gate", func(*fleetFixture, ids.WorkspaceID) {}, func(f *fleetFixture, ws ids.WorkspaceID) {
+			f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config")
+		}},
+		{"answering the gate", func(f *fleetFixture, ws ids.WorkspaceID) {
+			f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config")
+		}, func(f *fleetFixture, ws ids.WorkspaceID) {
+			f.fleet.TakeColdGate(ws, "vendor-1")
+		}},
+		{"standing it again", func(f *fleetFixture, ws ids.WorkspaceID) {
+			f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config")
+			f.fleet.TakeColdGate(ws, "vendor-1")
+		}, func(f *fleetFixture, ws ids.WorkspaceID) {
+			f.fleet.ReraiseColdGate(ws, "vendor-1")
+		}},
+		{"stopping a gated workspace with no session", func(f *fleetFixture, ws ids.WorkspaceID) {
+			f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config")
+		}, func(f *fleetFixture, ws ids.WorkspaceID) {
+			_ = f.fleet.Stop(context.Background(), ws, true)
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFleetFixture(t)
+			ws := f.workspace("ws-publish")
+			tt.arrange(f, ws.ID)
+			f.hostPublished = nil
+
+			// Act.
+			tt.act(f, ws.ID)
+
+			// Assert.
+			if len(f.hostPublished) == 0 || f.hostPublished[len(f.hostPublished)-1] != ws.ID {
+				t.Fatalf("host views published = %v, want %q republished", f.hostPublished, ws.ID)
+			}
+		})
+	}
+}
+
 func TestReraiseColdGateKeepsTheWorkAccountsMenuWithheld(t *testing.T) {
 	// Arrange: a work-account gate was raised, answered, and spent.
 	f := newFleetFixture(t)
@@ -4386,5 +4505,31 @@ func TestAResumeIsRefusedWhenTheRolledBackTurnsCannotBeRead(t *testing.T) {
 	}
 	if !recordedAt(f, dlog.LevelError, "daemon.workspace.start_session", "the rolled-back turns could not be read; the session was not resumed") {
 		t.Fatalf("records = %+v, want the failed read at ERROR", f.log.logger.Records())
+	}
+}
+
+// TestDrainStartsJoinsDetachedWork covers Detach: work run under the fleet's
+// lifetime sees it end at the drain and is joined.
+func TestDrainStartsJoinsDetachedWork(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	entered := make(chan struct{})
+	ended := make(chan error, 1)
+	f.fleet.Detach(func(ctx context.Context) {
+		close(entered)
+		<-ctx.Done()
+		ended <- ctx.Err()
+	})
+	<-entered
+
+	// Act.
+	left := f.fleet.DrainStarts(time.Minute)
+
+	// Assert.
+	if !left {
+		t.Fatal("DrainStarts = false, want the detached work ended and joined")
+	}
+	if err := <-ended; !errors.Is(err, context.Canceled) {
+		t.Fatalf("the detached work saw %v, want a cancellation", err)
 	}
 }

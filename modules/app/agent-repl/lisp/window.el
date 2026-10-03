@@ -47,6 +47,9 @@
 (declare-function agent-repl--ws-current-name "workspace")
 (declare-function agent-repl--ws-get "workspace")
 (declare-function agent-repl--ws-log-name "workspace")
+(declare-function agent-repl--info "core")
+(declare-function agent-repl-host-state "host")
+(declare-function agent-repl--frontend-webview-read-script "frontend" (buf script callback))
 
 ;; Special variables owned by other sources in this module, declared here
 ;; so the byte-compiler binds and reads them dynamically rather than
@@ -54,6 +57,7 @@
 (defvar agent-repl--eager-open-in-progress)
 (defvar agent-repl-input-height-fraction)
 (defvar agent-repl-input-height-line-offset)
+(defvar agent-repl-host-update-functions)
 
 (require 'cl-lib)
 
@@ -626,6 +630,77 @@ eligibility checks cannot drift."
                              ws view-buf restorable)
     restorable))
 
+;;;; --- The gate hides the input window ---------------------------------------
+
+(defun agent-repl-input-hidden-p (ws)
+  "Return non-nil when a gate standing on WS hides its input window.
+The daemon's host view states the gate (`HostWorkspace.gate'); while it
+stands the gate's answer replaces the composer, so the input window is
+not laid out and the webview, grown into its space, docks the gate's
+banner at the bottom.  The webapp docks from the same daemon state, so
+the two move together.  An unnamed gate (set, no arm this build knows)
+hides the input too."
+  (and ws (plist-get (agent-repl-host-state ws) :gate) t))
+
+(defun agent-repl-window--gate-dock-pixels (ws)
+  "The pixel height of the space WS's input window takes, for the docked gate.
+The live input window's own total height when it is on screen; otherwise
+the height a mount would give it, its line count on the frame
+\(`agent-repl-window--input-height') at the frame's line height."
+  (let ((win (agent-repl-window--panel-window :input ws)))
+    (if (window-live-p win)
+        (window-pixel-height win)
+      (* (agent-repl-window--input-height nil ws) (frame-char-height)))))
+
+(defun agent-repl-window--gate-dock-script (pixels)
+  "The page script that sizes the docked gate to PIXELS.
+The reply is always a string: a null reply is dropped without a callback."
+  (format "(function(){document.documentElement.style.setProperty('--gate-dock-height','%dpx');return 'ok';})()"
+          pixels))
+
+(defun agent-repl-window--gate-dock-told (_reply)
+  "The page took the docked gate's height; nothing is left to do."
+  nil)
+
+(defun agent-repl-window-tell-gate-dock-height (ws)
+  "Tell WS's page the pixel height its docked gate takes: the input's space.
+Sent before the input window hides, so the banner fills exactly the slot
+the input had."
+  (let ((buf (agent-repl--ws-get ws :frontend-buffer))
+        (pixels (agent-repl-window--gate-dock-pixels ws)))
+    (if (and (buffer-live-p buf)
+             (agent-repl--frontend-webview-read-script
+              buf (agent-repl-window--gate-dock-script pixels)
+              #'agent-repl-window--gate-dock-told))
+        (agent-repl--info ws "elisp.gate.dock-height ws=%s pixels=%d" ws pixels)
+      (agent-repl--info ws "elisp.gate.dock-height-skipped ws=%s reason=no-webview" ws))
+    pixels))
+
+(defvar agent-repl-window--gates-applied (make-hash-table :test 'equal)
+  "Workspace name -> the gate whose layout was last applied, absent for none.
+Only the EDGE is read from it: `agent-repl-input-hidden-p' answers from the
+host view itself.")
+
+(defun agent-repl-window-on-host-update (ws host)
+  "Apply a gate edge in HOST to WS's layout.
+Registered on `agent-repl-host-update-functions'.  A gate that stood up or
+went away is recorded at INFO; when WS is the workspace on screen its
+layout is reconciled at once (`agent-repl-window--ensure-layout'), and any
+other workspace takes the right layout when it is next shown."
+  (let ((gate (plist-get host :gate))
+        (applied (gethash ws agent-repl-window--gates-applied)))
+    (unless (equal gate applied)
+      ;; THE PAGE LEARNS THE INPUT'S HEIGHT BEFORE THE INPUT HIDES.
+      (when gate (agent-repl-window-tell-gate-dock-height ws))
+      (if gate
+          (puthash ws gate agent-repl-window--gates-applied)
+        (remhash ws agent-repl-window--gates-applied))
+      (agent-repl--info ws "elisp.gate.%s ws=%s kind=%S"
+                        (if gate "standing" "cleared") ws
+                        (plist-get (or gate applied) :arm))
+      (when (equal ws (agent-repl--ws-current-name))
+        (agent-repl-window--ensure-layout)))))
+
 (defvar agent-repl-window--ensure-layout-in-progress nil
   "Non-nil while `agent-repl-window--ensure-layout' dispatches a repair.
 The repair remounts the two-panel layout, which re-fires
@@ -691,14 +766,24 @@ Returns non-nil when a repair was dispatched, nil on every no-op."
                                "window--ensure-layout: noop reason=repair-in-progress")
       nil)
      (t
-      (let ((view-win (agent-repl-window--panel-window :view ws))
-            (input-win (agent-repl-window--panel-window :input ws)))
+      (let* ((view-win (agent-repl-window--panel-window :view ws))
+             (input-win (agent-repl-window--panel-window :input ws))
+             (hidden (agent-repl-input-hidden-p ws)))
         (cond
-         ((not (xor view-win input-win))
+         ((and (not hidden) (not (xor view-win input-win)))
           (agent-repl--log-verbose
            ws
            "window--ensure-layout: noop reason=panel-pair-complete view-window=%S input-window=%S"
            view-win input-win)
+          nil)
+         ;; A STANDING GATE's target is the view alone: the input window is
+         ;; hidden while the webview docks the banner.  Neither window is a
+         ;; hidden layout, left alone as ever.
+         ((and hidden (not input-win))
+          (agent-repl--log-verbose
+           ws
+           "window--ensure-layout: noop reason=gate-layout-complete view-window=%S"
+           view-win)
           nil)
          ((not (agent-repl-window--panels-restorable-p ws))
           (agent-repl--log ws
@@ -707,14 +792,19 @@ Returns non-nil when a repair was dispatched, nil on every no-op."
           nil)
          (t
           (agent-repl--log ws
-                           "window--ensure-layout: ws=%s missing=%s — remounting panels through the frontend"
-                           ws (if view-win "input" "view"))
+                           "window--ensure-layout: ws=%s missing=%s gate-hides-input=%s — remounting panels through the frontend"
+                           ws (cond ((not view-win) "view")
+                                    (hidden "nothing (the input stands over a gate)")
+                                    (t "input"))
+                           hidden)
           (let ((agent-repl-window--ensure-layout-in-progress t))
             (agent-repl--frontend-dispatch-show ws))
           (agent-repl--log ws
                            "window--ensure-layout: repair-dispatched view-window=%S input-window=%S"
                            view-win input-win)
           t)))))))
+
+(add-hook 'agent-repl-host-update-functions #'agent-repl-window-on-host-update)
 
 (provide 'agent-repl-window)
 ;;; window.el ends here

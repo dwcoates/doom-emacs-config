@@ -14,6 +14,12 @@ func unfocusedEditor() *agentreplv1.EditorFocus {
 	return &agentreplv1.EditorFocus{Focus: &agentreplv1.EditorFocus_Unfocused{Unfocused: &agentreplv1.EditorFocusUnfocused{}}}
 }
 
+// testEditorInstance is the Emacs process identity every test Emacs stream
+// carries.
+func testEditorInstance() *agentreplv1.EditorInstance {
+	return &agentreplv1.EditorInstance{Value: "emacs-test"}
+}
+
 // focusedEditor is the focus a focused Emacs reports.
 func focusedEditor() *agentreplv1.EditorFocus {
 	return &agentreplv1.EditorFocus{Focus: &agentreplv1.EditorFocus_Focused{Focused: &agentreplv1.EditorFocusFocused{}}}
@@ -25,7 +31,7 @@ func focusedEditor() *agentreplv1.EditorFocus {
 func emacsDaemonStream(t *testing.T, h *harness, ctx context.Context, focus *agentreplv1.EditorFocus) *connect.ServerStreamForClient[agentreplv1.WatchDaemonResponse] {
 	t.Helper()
 	stream, err := h.Client.WatchDaemon(ctx, connect.NewRequest(&agentreplv1.WatchDaemonRequest{
-		Client: &agentreplv1.WatchDaemonRequest_Emacs{Emacs: &agentreplv1.WatchDaemonEmacs{ElispBuild: "elisp-test", Focus: focus}},
+		Client: &agentreplv1.WatchDaemonRequest_Emacs{Emacs: &agentreplv1.WatchDaemonEmacs{ElispBuild: "elisp-test", Focus: focus, Instance: testEditorInstance()}},
 	}))
 	if err != nil {
 		t.Fatalf("open the daemon stream: %v", err)
@@ -112,7 +118,7 @@ func TestReportEditorFocusWithNoFocusIsInvalid(t *testing.T) {
 func TestAnEmacsStreamWithNoFocusIsInvalid(t *testing.T) {
 	// Act
 	err := validateWatchDaemonRequest(&agentreplv1.WatchDaemonRequest{
-		Client: &agentreplv1.WatchDaemonRequest_Emacs{Emacs: &agentreplv1.WatchDaemonEmacs{ElispBuild: "elisp-test"}},
+		Client: &agentreplv1.WatchDaemonRequest_Emacs{Emacs: &agentreplv1.WatchDaemonEmacs{ElispBuild: "elisp-test", Instance: testEditorInstance()}},
 	})
 
 	// Assert

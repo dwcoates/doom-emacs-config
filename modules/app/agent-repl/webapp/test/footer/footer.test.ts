@@ -742,10 +742,10 @@ describe("mountFooter: onStatus", () => {
         footerView({
           strip: strip({
             status: {
-              case: "blocked",
+              case: "vendorFault",
               value: {
                 substatus: { case: "apiRetrying", value: {} },
-                activity: quietActivity("blocked"),
+                activity: quietActivity("vendorFault"),
               },
             } as never,
           }),
@@ -755,7 +755,7 @@ describe("mountFooter: onStatus", () => {
     await settle();
 
     // Assert
-    expect(seen).toEqual([["blocked", "apiRetrying"]]);
+    expect(seen).toEqual([["vendorFault", "apiRetrying"]]);
   });
 
   it("tells a LATE subscriber the current arm immediately", async () => {

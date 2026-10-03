@@ -2372,6 +2372,18 @@ The screen must only demote names that could not be routed at all."
       ;; Act / Assert
       (should (equal (agent-repl--ws-tabline-names) '("one" "two"))))))
 
+(ert-deftest agent-repl-test-ws-tabline-names-draw-nothing-while-the-startup-holds-every-tab ()
+  "Once a roster has arrived its empty order is the bar's: workspaces the
+startup pre-created but has not opened are not drawn."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl-roster-view '(:repository nil)))
+      (cl-letf (((symbol-function 'agent-repl-roster-drawn-tab-order) (lambda () nil))
+                ((symbol-function 'agent-repl--ws-list-names)
+                 (lambda () '("one" "two"))))
+        ;; Act / Assert
+        (should (null (agent-repl--ws-tabline-names)))))))
+
 ;;;; ---- The merge teardown guard -----------------------------------------
 
 (ert-deftest agent-repl-test-ws-merge-unfinished-p-is-true-while-merging ()

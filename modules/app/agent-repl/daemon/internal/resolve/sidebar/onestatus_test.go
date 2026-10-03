@@ -9,6 +9,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/health"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/resolve/footer"
 	"claude-repld/internal/resolve/ladder"
@@ -124,6 +125,33 @@ var linkCases = []linkCase{
 		s.footer.OnSessionUpdate(theWS, degradedUpdate())
 		s.roster.OnSessionUpdate(theWS, degradedUpdate())
 	}},
+	// THE FAULT DOMAINS (owner ruling, 2026-10-02), each fed to both
+	// surfaces from its one source: the vendor-start run's fault to the footer
+	// with its state to the roster, and the network fault through the one
+	// fault door to both.
+	{name: "a vendor start being retried", session: true, apply: func(s *surfaces) {
+		s.link(shimclient.LinkConnected)
+		s.footer.OpenFault(theWS, domainFault("v-1", health.KindVendorStartRetrying))
+		s.roster.SetVendorStart(theWS, sidebar.VendorStartRetrying)
+	}},
+	{name: "a vendor start that stopped, over the link its stop killed", session: true, apply: func(s *surfaces) {
+		s.link(shimclient.LinkConnected)
+		s.footer.OpenFault(theWS, domainFault("v-1", health.KindVendorStartFailed))
+		s.roster.SetVendorStart(theWS, sidebar.VendorStartStopped)
+		s.link(shimclient.LinkDead)
+	}},
+	{name: "the network unreachable", session: true, apply: func(s *surfaces) {
+		s.link(shimclient.LinkConnected)
+		s.footer.OpenFault(theWS, domainFault("n-1", health.KindNetworkUnreachable))
+		s.roster.NetworkFaultOpened(theWS, "n-1")
+	}},
+	{name: "the network unreachable while a vendor start is retried", session: true, apply: func(s *surfaces) {
+		s.link(shimclient.LinkConnected)
+		s.footer.OpenFault(theWS, domainFault("v-1", health.KindVendorStartRetrying))
+		s.roster.SetVendorStart(theWS, sidebar.VendorStartRetrying)
+		s.footer.OpenFault(theWS, domainFault("n-1", health.KindNetworkUnreachable))
+		s.roster.NetworkFaultOpened(theWS, "n-1")
+	}},
 	// A shim taken back after a failed handover that never re-reported its
 	// session state: the rollout states it to both surfaces at once.
 	{name: "state unreported after a take-back", session: true, apply: func(s *surfaces) {
@@ -131,6 +159,13 @@ var linkCases = []linkCase{
 		s.footer.SetStateUnreported(theWS, true)
 		s.roster.SetStateUnreported(theWS, true)
 	}},
+}
+
+// domainFault is a standing fault of kind as the health partition hands it to
+// the footer.
+func domainFault(id, kind string) footer.Fault {
+	cell, _ := health.FaultFooterCell(kind, false)
+	return footer.Fault{ID: id, Kind: kind, Status: string(cell.Status), SubStatus: cell.SubStatus, Detail: "detail", At: epoch}
 }
 
 // turnCase is one turn state.

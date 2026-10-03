@@ -412,6 +412,17 @@ A focused app has no focus to steal, so creating a view must proceed."
   ;; Arrange / Act / Assert
   (should (null (agent-repl--webview-precreate-hold-p))))
 
+(ert-deftest agent-repl-test-wr-the-editor-startup-still-holds-a-visible-unfocused-emacs ()
+  "The editor's startup never lifts the focus park: a visible but unfocused
+Emacs creates no page until it is looked at, so the startup cannot take
+focus from another application.  Its tabs then open on the focus edge."
+  ;; Arrange
+  (let ((noninteractive nil)
+        (agent-repl-startup--phase 'running))
+    (cl-letf (((symbol-function 'agent-repl--emacs-can-foreground-p) (lambda () t)))
+      ;; Act / Assert
+      (should (agent-repl--webview-precreate-hold-p)))))
+
 (ert-deftest agent-repl-test-wr-gaining-focus-resumes-a-parked-drain ()
   "The first look is the moment the warm page was for."
   ;; Arrange

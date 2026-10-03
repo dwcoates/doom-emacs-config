@@ -319,6 +319,13 @@ type DB interface {
 	// newest digest minted (true, also when already down); any other id is
 	// false and changes nothing.
 	DismissNewsDigest(ctx context.Context, id string) (bool, error)
+	// RestandNewsDigest stands the newest digest minted again, from the
+	// overlay kept beside it, when it is down; it answers whether it stood it.
+	RestandNewsDigest(ctx context.Context, id string) (bool, error)
+	// NoteEditorInstance records the Emacs process identity a WatchDaemon
+	// carried, answering true when it differs from the last one recorded (a
+	// full Emacs restart) and false for the same one (a reconnect).
+	NoteEditorInstance(ctx context.Context, instance string, at time.Time) (bool, error)
 
 	// TurnStartedAt answers when a recorded turn was opened; ErrNotFound for a
 	// turn the workspace never recorded.

@@ -983,6 +983,15 @@ func (w *watcher) Close() error {
 	// what it got. Nothing this watcher started touches the client after
 	// Close returns.
 	w.opens.Wait()
+	// WORK RECORDED BUT NOT YET HANDED OFF IS HANDED OFF HERE. A route records
+	// under the mutex and dispatches after releasing it; a Close that took the
+	// mutex between the two found nothing in flight to join, returned, and the
+	// route's dispatch then wrote through a state client the daemon had
+	// closed ("sql: database is closed" on a failed boot, 2026-10-03). Taking
+	// the pending work here dispatches it before Close returns; a route that
+	// took it first counted its dispatch under the mutex, so the join below
+	// waits for it.
+	w.flushTurnEnds()
 	// The off-lock sink dispatch is JOINED here: a turn end still being handled
 	// reads the state client, and the daemon closes that client once every
 	// watcher is closed.

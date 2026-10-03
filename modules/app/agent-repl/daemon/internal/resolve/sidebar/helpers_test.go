@@ -32,7 +32,7 @@ func testColors() vocab.RenderColors {
 	status := map[string]string{}
 	for _, arm := range []string{
 		"submitting", "thinking", "clearing", "compacting", "permission", "done",
-		"interrupted", "turn_failed", "ready", "idle_async", "vendor_blocked", "api_retrying", "init", "severed",
+		"interrupted", "turn_failed", "ready", "idle_async", "vendor_blocked", "vendor_fault", "network_fault", "api_retrying", "init", "severed",
 		"start_failed", "degraded", "dead", "merging",
 		"merge_queued", "merge_failed", "merged", "none",
 		"inactive",
@@ -162,6 +162,10 @@ func onlyRow(t *testing.T, r sidebar.Resolver) *frontendv1.RosterRow {
 // — which is itself a contract breach a test asserts against.
 func statusName(row *frontendv1.RosterRow) string {
 	switch row.GetStatus().(type) {
+	case *frontendv1.RosterRow_VendorFault:
+		return "vendor_fault"
+	case *frontendv1.RosterRow_NetworkFault:
+		return "network_fault"
 	case *frontendv1.RosterRow_Submitting:
 		return "submitting"
 	case *frontendv1.RosterRow_Thinking:

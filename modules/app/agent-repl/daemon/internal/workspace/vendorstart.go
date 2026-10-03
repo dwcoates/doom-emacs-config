@@ -16,6 +16,7 @@ import (
 	"claude-repld/internal/resolve/sidebar"
 	"claude-repld/internal/rollout"
 	"claude-repld/internal/shimclient"
+	"claude-repld/internal/startup"
 	"claude-repld/internal/wsm"
 )
 
@@ -78,6 +79,9 @@ type startLabel struct {
 	// vendor is true when the vendor (the agent binary or its SDK query) is
 	// what did not start: the three vendor fault kinds describe only that.
 	vendor bool
+	// network is true when the shim said the failure was this machine not
+	// reaching the network: a retryable failure that is not the vendor's.
+	network bool
 	// cause is the shim's own account, drawn verbatim.
 	cause string
 	err   error
@@ -91,6 +95,11 @@ func labeled(err error, retryable, vendor bool, cause string) error {
 	return &startLabel{retryable: retryable, vendor: vendor, cause: cause, err: err}
 }
 
+// labeledNetwork wraps a RETRYABLE refusal the shim blamed on the network.
+func labeledNetwork(err error, cause string) error {
+	return &startLabel{retryable: true, network: true, cause: cause, err: err}
+}
+
 // vendorRun is one workspace's vendor-start run state, held in memory by the
 // fleet (design record: "the run's anchor ... is held by the fleet in
 // memory").
@@ -98,8 +107,11 @@ type vendorRun struct {
 	// since is the run's anchor, the first failure of the contiguous run;
 	// zero while no run of failures stands.
 	since time.Time
-	// failed counts the run's failed attempts.
+	// failed counts the run's failed attempts that were the VENDOR's.
 	failed uint32
+	// offline counts the attempts in a row the network failed, which spend
+	// none of the vendor's window but still back off.
+	offline uint32
 	// retrying is the standing `vendor_start_retrying` fault, "" when none.
 	retrying ids.FaultID
 	// terminal is the standing `vendor_start_rejected` or
@@ -155,7 +167,7 @@ func (f *Fleet) CancelVendorStart(ctx context.Context, ws ids.WorkspaceID) bool 
 	f.mu.Lock()
 	run := f.vendorRunLocked(ws)
 	cancel, done := run.cancel, run.done
-	run.since, run.failed = time.Time{}, 0
+	run.since, run.failed, run.offline = time.Time{}, 0, 0
 	f.mu.Unlock()
 	if cancel == nil {
 		return false
@@ -218,7 +230,13 @@ func (f *Fleet) startSession(ctx context.Context, log dlog.Logger, ws ids.Worksp
 			}
 			return nil, err
 		}
-		delay, retry := f.noteRetryableFailure(ctx, log, ws, label.cause)
+		var delay time.Duration
+		retry := true
+		if label.network {
+			delay = f.noteNetworkFailure(ctx, log, ws, label.cause)
+		} else {
+			delay, retry = f.noteRetryableFailure(ctx, log, ws, label.cause)
+		}
 		if !retry {
 			return nil, err
 		}
@@ -242,6 +260,33 @@ func (f *Fleet) startSession(ctx context.Context, log dlog.Logger, ws ids.Worksp
 	}
 }
 
+// noteNetworkFailure records one attempt that failed because this machine
+// could not reach the network, and answers the wait before the next one.
+//
+// THE NETWORK IS NOT THE VENDOR (owner ruling, 2026-10-02). The attempt spends
+// nothing of the vendor's ten-minute window and counts as none of its
+// attempts: a laptop offline for an hour retries for that hour, and the
+// vendor's window opens only when an attempt reaches the vendor. It still
+// backs off on the vendor's schedule, counted by its own run of offline
+// attempts. The standing vendor-retrying fault is closed, because the latest
+// failure says nothing about the vendor; the network fault the user reads
+// comes from the shim's own diagnostics (conversation.v1
+// SessionFaultNetworkUnreachable), which opens and resolves it.
+func (f *Fleet) noteNetworkFailure(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, cause string) time.Duration {
+	f.mu.Lock()
+	run := f.vendorRunLocked(ws)
+	run.offline++
+	offline := run.offline
+	f.mu.Unlock()
+	f.closeRetrying(ctx, log, ws)
+	f.deps.Steps(ws, startup.Step{Kind: startup.StepOffline})
+	delay := vendorRetryDelay(offline)
+	log.Info(opBringUp, "the network was unreachable, so the vendor could not start; retrying when it may be back", dlog.Context{
+		"offline_attempts": offline, "cause": cause, "retry_in_ms": delay.Milliseconds(),
+	})
+	return delay
+}
+
 // noteRetryableFailure records one retryable failure of the run: it anchors a
 // new run, counts the attempt, and either REPLACES the retrying fault and
 // answers the wait before the next attempt, or -- the window spent -- closes
@@ -254,6 +299,7 @@ func (f *Fleet) noteRetryableFailure(ctx context.Context, log dlog.Logger, ws id
 		run.since = now
 	}
 	run.failed++
+	run.offline = 0
 	since, failed, previous := run.since, run.failed, run.retrying
 	f.mu.Unlock()
 
@@ -268,6 +314,7 @@ func (f *Fleet) noteRetryableFailure(ctx context.Context, log dlog.Logger, ws id
 		log.Error(opBringUp, "the vendor kept failing to start for the whole retry window; nothing retries until a restart", fields)
 		f.openTerminal(ctx, log, ws, health.KindVendorStartFailed,
 			"the vendor failed to start for the whole retry window", evidence)
+		f.deps.Steps(ws, startup.Step{Kind: startup.StepVendorFailed})
 		return 0, false
 	}
 	delay := vendorRetryDelay(failed)
@@ -285,6 +332,7 @@ func (f *Fleet) noteRetryableFailure(ctx context.Context, log dlog.Logger, ws id
 		}
 		f.noteRosterVendor(ws)
 	}
+	f.deps.Steps(ws, startup.Step{Kind: startup.StepVendorRetrying, Attempt: failed})
 	// A RETRY IS THE MECHANISM WORKING, not a fault in the daemon: INFO. The
 	// fault is what the user reads; the record is the operator's.
 	log.Info(opBringUp, "the vendor did not start; retrying on the backoff", fields)
@@ -297,6 +345,7 @@ func (f *Fleet) noteVendorRejected(ctx context.Context, log dlog.Logger, ws ids.
 	log.Error(opBringUp, "the vendor refused to start; nothing retries until a restart", dlog.Context{"cause": cause})
 	f.openTerminal(ctx, log, ws, health.KindVendorStartRejected,
 		"the vendor refused to start", map[string]string{health.EvidenceCause: cause})
+	f.deps.Steps(ws, startup.Step{Kind: startup.StepVendorRejected, Text: cause})
 }
 
 // openTerminal files a terminal vendor-start fault, replacing the one this
@@ -371,7 +420,7 @@ func (f *Fleet) endVendorRun(ctx context.Context, log dlog.Logger, ws ids.Worksp
 	f.mu.Lock()
 	run := f.vendorRunLocked(ws)
 	failed := run.failed
-	run.since, run.failed = time.Time{}, 0
+	run.since, run.failed, run.offline = time.Time{}, 0, 0
 	// A started session's edge closes the terminal fault (its lifetime);
 	// the fleet forgets it so it is never closed twice.
 	hadTerminal := run.terminal != ""

@@ -374,6 +374,8 @@ func faultKindWords(fault *conversationv1.SessionFault) (component, line string)
 		return "keep-alive", "a keep-alive submission failed; the prompt cache may lapse"
 	case *conversationv1.SessionFault_VendorQueryFailed:
 		return "vendor query", "a vendor query failed outside the stream's own terminals"
+	case *conversationv1.SessionFault_NetworkUnreachable:
+		return "network", "this machine cannot reach the network"
 	default:
 		return "the session", "the shim reported a fault it did not classify"
 	}

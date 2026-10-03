@@ -782,7 +782,19 @@ re-routes their frontend resolution instead."
          ;; reconciles a roster or drives a create would otherwise decide
          ;; whether a LATER test's arrival opens panels at all.
          (agent-repl--panels-arrivals-armed nil)
-         (agent-repl--panels-arrival-reasons (make-hash-table :test 'equal)))
+         (agent-repl--panels-arrival-reasons (make-hash-table :test 'equal))
+         ;; The editor's startup (startup.el) is process-wide and holds every
+         ;; tab from process start: a test reconciling a roster runs with the
+         ;; startup OVER unless it stages one itself.
+         (agent-repl-startup--phase 'done)
+         (agent-repl-startup--go-aheads nil)
+         (agent-repl-startup--next 0)
+         (agent-repl-startup--finished nil)
+         (agent-repl-startup--released (make-hash-table :test 'equal))
+         (agent-repl-startup--loaded (make-hash-table :test 'equal))
+         (agent-repl-startup--loading-said (make-hash-table :test 'equal))
+         (agent-repl-roster--walked nil)
+         (agent-repl-roster--walked-hidden nil))
      (unwind-protect
          (progn ,@body)
        (maphash (lambda (_ws entry)

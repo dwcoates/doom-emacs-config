@@ -593,14 +593,16 @@ describe("the boot", { timeout: BOOT_TIMEOUT_MS }, () => {
     },
   );
 
-  // THE COMPOSER INVARIANT (owner rulings, 2026-09-28 and 2026-10-01): the
-  // gate is closed exactly when the footer's color is blue (unusable); purple,
-  // a merge in flight, holds its prompts and leaves it open. One row per arm
+  // THE COMPOSER INVARIANT (owner rulings, 2026-09-28, 2026-10-01 and
+  // 2026-10-02): the gate is closed exactly when the footer's color is blue
+  // (an agent-repl or network fault, a close); purple, a merge in flight, and
+  // turquoise, a vendor fault, hold their prompts and leave it open. One row per arm
   // the rulings place on either side of the line.
   test.each([
-    ["disconnected", "closed"],
+    ["agentReplFault", "closed"],
+    ["networkFault", "closed"],
     ["closing", "closed"],
-    ["blocked", "closed"],
+    ["vendorFault", "open"],
     ["merging", "open"],
     ["turnFailed", "open"],
     ["degraded", "open"],
