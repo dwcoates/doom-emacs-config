@@ -982,6 +982,9 @@ body::after {
    workspace is doing — and the Emacs tab-bar draws the same distinction on the
    same message. `viewed.ts` decides which rows carry the class. */
 #ws-sidebar .row .name.viewed { color: var(--muted); }
+/* A Recently Merged row's NAME is drawn in the repository section headers'
+   colour (owner request, 2026-10-03); the row's timestamp keeps its grey. */
+#ws-sidebar .row .name.merged-name { color: var(--repo-head-expanded); }
 /* REVIVING (frontend.v1.RosterRowReviving): the daemon is bringing this
    parked workspace's session back up. A SUBTLE shimmer on the NAME alone
    (owner ruling, 2026-09-19): the text is painted through a gradient of its

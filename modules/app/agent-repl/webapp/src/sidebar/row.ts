@@ -187,7 +187,9 @@ export function drawRosterRow(
     label.classList.add("viewed");
     ws.setAttribute("data-viewed", "true");
   }
-  if (merged) label.classList.add("viewed");
+  // A MERGED ROW'S NAME TAKES THE REPOSITORY NAMES' COLOUR (owner request,
+  // 2026-10-03); its timestamp keeps the secondary grey.
+  if (merged) label.classList.add("merged-name");
   // THE REVIVING SHIMMER IS THE NAME'S TOO, and only while the wire carries
   // the marker: the daemon lowers it when the revival ends, whichever way.
   if (u.reviving !== undefined && drawRosterRowReviving(u.reviving, `${path}.reviving`)) {

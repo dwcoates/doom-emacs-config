@@ -974,8 +974,14 @@ describe("recently merged rows", () => {
     expect(mergedRow(drawnMerged()).querySelector(".st")).toBeNull();
   });
 
-  it("draws the name in the viewed grey", () => {
-    expect(mergedRow(drawnMerged()).querySelector(".name")?.classList.contains("viewed")).toBe(true);
+  it("draws the name in the repository names' colour, not the viewed grey", () => {
+    const name = mergedRow(drawnMerged()).querySelector(".name");
+    expect([name?.classList.contains("merged-name"), name?.classList.contains("viewed")]).toEqual([true, false]);
+  });
+
+  it("styles a merged name with the repository headers' colour variable", async () => {
+    const css = (await import("../../src/styles.css?raw")).default;
+    expect(css).toContain("#ws-sidebar .row .name.merged-name { color: var(--repo-head-expanded); }");
   });
 
   it("keeps the merged arm on the row, the hook contract's", () => {
