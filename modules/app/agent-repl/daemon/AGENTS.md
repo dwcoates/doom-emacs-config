@@ -761,6 +761,15 @@ relaunch engine already used. Whether a SESSION runs on it is a separate fact
   (`restate`) and answers `ErrShimTaken`, which every bring-up counts as
   stood down. The handed-over MARK (`handedOver`, cleared by `Reclaimed`)
   guards only the window before a start spawns, where nothing is held yet.
+- **The shim is the authority on its own session.** Every path that holds a
+  shim already running one records `sessionStarted` (a handover's adoption,
+  a boot adoption of a lock-held survivor, a relaunch's resume), and a shim
+  held with no session known records it the moment it says so: its watch's
+  re-announced SessionStarted (the watcher's lifecycle sink is wrapped,
+  `sessionNotingLifecycle`) -- a survivor the boot read inert included. A
+  start the shim answers `already_started` TAKES the running session
+  (`takeRunningSession`, its watches opened attach-only): never a failed
+  start, a fault or a relaunch.
 - A start that met a vendor or network fault is no agent-repl failure to
   its callers (`startEndedByDaemon`): the fault itself is the record.
 
