@@ -11,6 +11,7 @@
  * assembled: which head and which body each bubble kind gets, and how a jump
  * target is found across the open ones.
  */
+import { markConversationDrawn } from "./conversation-drawn.js";
 import { log } from "../log.js";
 import { create } from "@bufbuild/protobuf";
 import { reportClientFailure } from "../rpc/link.js";
@@ -439,6 +440,7 @@ export function mountFeed(
           requireMessage(result.value.page, "OpenFeedSuccess.page"),
           "replace",
         );
+        markConversationDrawn("page");
         const token = requireMessage(
           result.value.watch,
           "OpenFeedSuccess.watch",
@@ -447,6 +449,9 @@ export function mountFeed(
         return;
       }
       case "error":
+        // Marked FIRST: a refusal whose cause cannot be read still ends the
+        // wait of a tab held for this page.
+        markConversationDrawn("refused");
         log.error("the daemon refused to open the workspace's root feed", {
           operation: "feed.root-open-refused",
           context: {
