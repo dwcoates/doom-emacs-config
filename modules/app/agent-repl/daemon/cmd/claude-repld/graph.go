@@ -1580,7 +1580,21 @@ const opEditorBringUp = "daemon.startup.bring_up"
 // workspace's bring-up marker is raised before any start, as the boot and the
 // takeover raise theirs; a workspace whose record cannot be read is told done
 // with that error at once and never started.
-func editorBringUp(fleet *workspace.Fleet, db wsm.DB, ownership workspace.Ownership, marker func(ids.WorkspaceID, bool), log dlog.Logger,
+// editorFleet is the slice of the fleet the editor's bring-up drives: the one
+// start path, and the fleet's detached lifetime it runs on.
+type editorFleet interface {
+	Start(ctx context.Context, ws ids.WorkspaceID) error
+	Detach(run func(context.Context))
+}
+
+// editorRecords is what the editor's bring-up reads: each workspace's record,
+// and (through bringup.Run) its session record.
+type editorRecords interface {
+	bringup.SessionReader
+	Workspace(ctx context.Context, ws ids.WorkspaceID) (wsm.Workspace, error)
+}
+
+func editorBringUp(fleet editorFleet, db editorRecords, ownership workspace.Ownership, marker func(ids.WorkspaceID, bool), log dlog.Logger,
 	pending []ids.WorkspaceID, done func(ids.WorkspaceID, error)) {
 	records := make([]wsm.Workspace, 0, len(pending))
 	for _, ws := range pending {
