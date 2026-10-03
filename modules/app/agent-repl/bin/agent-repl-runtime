@@ -50,6 +50,8 @@
 #   AGENT_REPL_RUNTIME_OPEN         the command that launches an app
 #   AGENT_REPL_RUNTIME_EMACS_APP    the Emacs.app bundle to launch
 #   AGENT_REPL_RUNTIME_QUIT_WAIT    seconds to wait for Emacs to exit (30)
+#   AGENT_REPL_RUNTIME_LAUNCH_ATTEMPTS  launches tried before giving up (3)
+#   AGENT_REPL_RUNTIME_PGREP        pgrep, to see whether Emacs's process is up
 
 set -euo pipefail
 
@@ -66,6 +68,8 @@ EMACSCLIENT="${AGENT_REPL_RUNTIME_EMACSCLIENT:-/Applications/Emacs.app/Contents/
 OPEN="${AGENT_REPL_RUNTIME_OPEN:-open}"
 EMACS_APP="${AGENT_REPL_RUNTIME_EMACS_APP:-/Applications/Emacs.app}"
 QUIT_WAIT="${AGENT_REPL_RUNTIME_QUIT_WAIT:-30}"
+LAUNCH_ATTEMPTS="${AGENT_REPL_RUNTIME_LAUNCH_ATTEMPTS:-3}"
+PGREP="${AGENT_REPL_RUNTIME_PGREP:-pgrep}"
 
 say() { printf '[agent-repl-runtime] %s\n' "$*"; }
 die() { printf '[agent-repl-runtime] ERROR: %s\n' "$*" >&2; exit 1; }
@@ -104,7 +108,29 @@ restart_emacs() {
         say "emacs: not running"
     fi
     say "emacs: launching $EMACS_APP"
-    "$OPEN" -a "$EMACS_APP"
+    # LAUNCH SERVICES CAN ANSWER A LAUNCH WITH -600 just after the previous
+    # instance quit, while the launch itself goes through. A failed `open` is
+    # therefore judged by whether Emacs's process came up, and retried a
+    # bounded number of times when it did not.
+    local attempt=1
+    until "$OPEN" -a "$EMACS_APP"; do
+        if emacs_process_up; then
+            say "emacs: the launcher reported a failure, but Emacs is running"
+            return 0
+        fi
+        if [ "$attempt" -ge "$LAUNCH_ATTEMPTS" ]; then
+            die "emacs could not be launched after $attempt attempts"
+        fi
+        attempt=$((attempt + 1))
+        sleep 1
+        say "emacs: launching again (attempt $attempt)"
+    done
+}
+
+# emacs_process_up answers whether an Emacs.app process is running, whether
+# or not its server answers yet.
+emacs_process_up() {
+    "$PGREP" -f "$EMACS_APP/Contents/MacOS/Emacs" >/dev/null 2>&1
 }
 
 hard_bounce() {
