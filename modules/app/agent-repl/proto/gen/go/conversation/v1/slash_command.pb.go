@@ -403,7 +403,9 @@ type ContextCompactionFailed struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// What the producer said went wrong, verbatim. The only account anyone has,
 	// and the thing the user's next action depends on.
-	Error         string `protobuf:"bytes,1,opt,name=error,proto3" json:"error,omitempty"`
+	Error string `protobuf:"bytes,1,opt,name=error,proto3" json:"error,omitempty"`
+	// Which compaction failed: as on ContextCompacted.compaction.
+	Compaction    *CompactionId `protobuf:"bytes,2,opt,name=compaction,proto3,oneof" json:"compaction,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -445,6 +447,60 @@ func (x *ContextCompactionFailed) GetError() string {
 	return ""
 }
 
+func (x *ContextCompactionFailed) GetCompaction() *CompactionId {
+	if x != nil {
+		return x.Compaction
+	}
+	return nil
+}
+
+// One compaction's identity: the vendor's id for the FIRST `compacting` status
+// of that compaction (its later re-sends keep it). Opaque; compared
+// byte-wise. It ties a compaction's start signal to the cut that ends it.
+type CompactionId struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Value         string                 `protobuf:"bytes,1,opt,name=value,proto3" json:"value,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CompactionId) Reset() {
+	*x = CompactionId{}
+	mi := &file_conversation_v1_slash_command_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CompactionId) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CompactionId) ProtoMessage() {}
+
+func (x *CompactionId) ProtoReflect() protoreflect.Message {
+	mi := &file_conversation_v1_slash_command_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CompactionId.ProtoReflect.Descriptor instead.
+func (*CompactionId) Descriptor() ([]byte, []int) {
+	return file_conversation_v1_slash_command_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *CompactionId) GetValue() string {
+	if x != nil {
+		return x.Value
+	}
+	return ""
+}
+
 // What the cut did to the context's size: how many tokens it held before,
 // and how many after. NAMED FOR WHAT IT DESCRIBES — the change a cut made —
 // though it carries the two endpoints rather than a difference, because a
@@ -467,7 +523,7 @@ type ContextTokenDelta struct {
 
 func (x *ContextTokenDelta) Reset() {
 	*x = ContextTokenDelta{}
-	mi := &file_conversation_v1_slash_command_proto_msgTypes[3]
+	mi := &file_conversation_v1_slash_command_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -479,7 +535,7 @@ func (x *ContextTokenDelta) String() string {
 func (*ContextTokenDelta) ProtoMessage() {}
 
 func (x *ContextTokenDelta) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_slash_command_proto_msgTypes[3]
+	mi := &file_conversation_v1_slash_command_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -492,7 +548,7 @@ func (x *ContextTokenDelta) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ContextTokenDelta.ProtoReflect.Descriptor instead.
 func (*ContextTokenDelta) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_slash_command_proto_rawDescGZIP(), []int{3}
+	return file_conversation_v1_slash_command_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *ContextTokenDelta) GetTokensBefore() int64 {
@@ -518,7 +574,7 @@ type ContextCleared struct {
 
 func (x *ContextCleared) Reset() {
 	*x = ContextCleared{}
-	mi := &file_conversation_v1_slash_command_proto_msgTypes[4]
+	mi := &file_conversation_v1_slash_command_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -530,7 +586,7 @@ func (x *ContextCleared) String() string {
 func (*ContextCleared) ProtoMessage() {}
 
 func (x *ContextCleared) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_slash_command_proto_msgTypes[4]
+	mi := &file_conversation_v1_slash_command_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -543,7 +599,7 @@ func (x *ContextCleared) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ContextCleared.ProtoReflect.Descriptor instead.
 func (*ContextCleared) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_slash_command_proto_rawDescGZIP(), []int{4}
+	return file_conversation_v1_slash_command_proto_rawDescGZIP(), []int{5}
 }
 
 // History was replaced by a summary of itself.
@@ -572,14 +628,21 @@ type ContextCompacted struct {
 	// How long the compaction took, in milliseconds. Carried because it is the
 	// slowest thing a session does, and a reader who watched a minute pass with
 	// nothing drawn deserves to be told what it was spent on.
-	DurationMs    uint64 `protobuf:"varint,5,opt,name=duration_ms,json=durationMs,proto3" json:"duration_ms,omitempty"`
+	DurationMs uint64 `protobuf:"varint,5,opt,name=duration_ms,json=durationMs,proto3" json:"duration_ms,omitempty"`
+	// WHICH COMPACTION this cut concludes: the identity its `compacting` start
+	// signal carried (SessionCompacting.compaction), so a consumer can tell a
+	// start signal that arrives AFTER its own cut (the two travel on different
+	// streams, which carry no order between them) from a new compaction.
+	// ABSENT when no start signal preceded the cut: a compaction the shim ran
+	// itself, or one read from a transcript.
+	Compaction    *CompactionId `protobuf:"bytes,8,opt,name=compaction,proto3,oneof" json:"compaction,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ContextCompacted) Reset() {
 	*x = ContextCompacted{}
-	mi := &file_conversation_v1_slash_command_proto_msgTypes[5]
+	mi := &file_conversation_v1_slash_command_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -591,7 +654,7 @@ func (x *ContextCompacted) String() string {
 func (*ContextCompacted) ProtoMessage() {}
 
 func (x *ContextCompacted) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_slash_command_proto_msgTypes[5]
+	mi := &file_conversation_v1_slash_command_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -604,7 +667,7 @@ func (x *ContextCompacted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ContextCompacted.ProtoReflect.Descriptor instead.
 func (*ContextCompacted) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_slash_command_proto_rawDescGZIP(), []int{5}
+	return file_conversation_v1_slash_command_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *ContextCompacted) GetSummary() *AgentResponseProse {
@@ -653,6 +716,13 @@ func (x *ContextCompacted) GetDurationMs() uint64 {
 	return 0
 }
 
+func (x *ContextCompacted) GetCompaction() *CompactionId {
+	if x != nil {
+		return x.Compaction
+	}
+	return nil
+}
+
 type isContextCompacted_Trigger interface {
 	isContextCompacted_Trigger()
 }
@@ -680,7 +750,7 @@ type ContextCompactionRequested struct {
 
 func (x *ContextCompactionRequested) Reset() {
 	*x = ContextCompactionRequested{}
-	mi := &file_conversation_v1_slash_command_proto_msgTypes[6]
+	mi := &file_conversation_v1_slash_command_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -692,7 +762,7 @@ func (x *ContextCompactionRequested) String() string {
 func (*ContextCompactionRequested) ProtoMessage() {}
 
 func (x *ContextCompactionRequested) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_slash_command_proto_msgTypes[6]
+	mi := &file_conversation_v1_slash_command_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -705,7 +775,7 @@ func (x *ContextCompactionRequested) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ContextCompactionRequested.ProtoReflect.Descriptor instead.
 func (*ContextCompactionRequested) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_slash_command_proto_rawDescGZIP(), []int{6}
+	return file_conversation_v1_slash_command_proto_rawDescGZIP(), []int{7}
 }
 
 // The producer cut on its own because the context was filling.
@@ -717,7 +787,7 @@ type ContextCompactionAutomatic struct {
 
 func (x *ContextCompactionAutomatic) Reset() {
 	*x = ContextCompactionAutomatic{}
-	mi := &file_conversation_v1_slash_command_proto_msgTypes[7]
+	mi := &file_conversation_v1_slash_command_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -729,7 +799,7 @@ func (x *ContextCompactionAutomatic) String() string {
 func (*ContextCompactionAutomatic) ProtoMessage() {}
 
 func (x *ContextCompactionAutomatic) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_slash_command_proto_msgTypes[7]
+	mi := &file_conversation_v1_slash_command_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -742,7 +812,7 @@ func (x *ContextCompactionAutomatic) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ContextCompactionAutomatic.ProtoReflect.Descriptor instead.
 func (*ContextCompactionAutomatic) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_slash_command_proto_rawDescGZIP(), []int{7}
+	return file_conversation_v1_slash_command_proto_rawDescGZIP(), []int{8}
 }
 
 var file_conversation_v1_slash_command_proto_extTypes = []protoimpl.ExtensionInfo{
@@ -777,21 +847,31 @@ const file_conversation_v1_slash_command_proto_rawDesc = "" +
 	"\acleared\x18\x01 \x01(\v2\x1f.conversation.v1.ContextClearedH\x00R\acleared\x12A\n" +
 	"\tcompacted\x18\x02 \x01(\v2!.conversation.v1.ContextCompactedH\x00R\tcompacted\x12W\n" +
 	"\x11compaction_failed\x18\x03 \x01(\v2(.conversation.v1.ContextCompactionFailedH\x00R\x10compactionFailedB\x05\n" +
-	"\x03cut\"/\n" +
+	"\x03cut\"\x82\x01\n" +
 	"\x17ContextCompactionFailed\x12\x14\n" +
-	"\x05error\x18\x01 \x01(\tR\x05error\"[\n" +
+	"\x05error\x18\x01 \x01(\tR\x05error\x12B\n" +
+	"\n" +
+	"compaction\x18\x02 \x01(\v2\x1d.conversation.v1.CompactionIdH\x00R\n" +
+	"compaction\x88\x01\x01B\r\n" +
+	"\v_compaction\"$\n" +
+	"\fCompactionId\x12\x14\n" +
+	"\x05value\x18\x01 \x01(\tR\x05value\"[\n" +
 	"\x11ContextTokenDelta\x12#\n" +
 	"\rtokens_before\x18\x01 \x01(\x03R\ftokensBefore\x12!\n" +
 	"\ftokens_after\x18\x02 \x01(\x03R\vtokensAfter\"\x10\n" +
-	"\x0eContextCleared\"\xd3\x02\n" +
+	"\x0eContextCleared\"\xb2\x03\n" +
 	"\x10ContextCompacted\x12=\n" +
 	"\asummary\x18\x01 \x01(\v2#.conversation.v1.AgentResponseProseR\asummary\x12:\n" +
 	"\x06tokens\x18\x02 \x01(\v2\".conversation.v1.ContextTokenDeltaR\x06tokens\x12K\n" +
 	"\trequested\x18\x03 \x01(\v2+.conversation.v1.ContextCompactionRequestedH\x00R\trequested\x12K\n" +
 	"\tautomatic\x18\x04 \x01(\v2+.conversation.v1.ContextCompactionAutomaticH\x00R\tautomatic\x12\x1f\n" +
 	"\vduration_ms\x18\x05 \x01(\x04R\n" +
-	"durationMsB\t\n" +
-	"\atrigger\"\x1c\n" +
+	"durationMs\x12B\n" +
+	"\n" +
+	"compaction\x18\b \x01(\v2\x1d.conversation.v1.CompactionIdH\x01R\n" +
+	"compaction\x88\x01\x01B\t\n" +
+	"\atriggerB\r\n" +
+	"\v_compactionJ\x04\b\x06\x10\aJ\x04\b\a\x10\b\"\x1c\n" +
 	"\x1aContextCompactionRequested\"\x1c\n" +
 	"\x1aContextCompactionAutomatic*\x92\f\n" +
 	"\x0eSessionCommand\x12\x1f\n" +
@@ -883,35 +963,38 @@ func file_conversation_v1_slash_command_proto_rawDescGZIP() []byte {
 }
 
 var file_conversation_v1_slash_command_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_conversation_v1_slash_command_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_conversation_v1_slash_command_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_conversation_v1_slash_command_proto_goTypes = []any{
 	(SessionCommand)(0),                   // 0: conversation.v1.SessionCommand
 	(*SessionCommandSpec)(nil),            // 1: conversation.v1.SessionCommandSpec
 	(*ContextCut)(nil),                    // 2: conversation.v1.ContextCut
 	(*ContextCompactionFailed)(nil),       // 3: conversation.v1.ContextCompactionFailed
-	(*ContextTokenDelta)(nil),             // 4: conversation.v1.ContextTokenDelta
-	(*ContextCleared)(nil),                // 5: conversation.v1.ContextCleared
-	(*ContextCompacted)(nil),              // 6: conversation.v1.ContextCompacted
-	(*ContextCompactionRequested)(nil),    // 7: conversation.v1.ContextCompactionRequested
-	(*ContextCompactionAutomatic)(nil),    // 8: conversation.v1.ContextCompactionAutomatic
-	(*AgentResponseProse)(nil),            // 9: conversation.v1.AgentResponseProse
-	(*descriptorpb.EnumValueOptions)(nil), // 10: google.protobuf.EnumValueOptions
+	(*CompactionId)(nil),                  // 4: conversation.v1.CompactionId
+	(*ContextTokenDelta)(nil),             // 5: conversation.v1.ContextTokenDelta
+	(*ContextCleared)(nil),                // 6: conversation.v1.ContextCleared
+	(*ContextCompacted)(nil),              // 7: conversation.v1.ContextCompacted
+	(*ContextCompactionRequested)(nil),    // 8: conversation.v1.ContextCompactionRequested
+	(*ContextCompactionAutomatic)(nil),    // 9: conversation.v1.ContextCompactionAutomatic
+	(*AgentResponseProse)(nil),            // 10: conversation.v1.AgentResponseProse
+	(*descriptorpb.EnumValueOptions)(nil), // 11: google.protobuf.EnumValueOptions
 }
 var file_conversation_v1_slash_command_proto_depIdxs = []int32{
-	5,  // 0: conversation.v1.ContextCut.cleared:type_name -> conversation.v1.ContextCleared
-	6,  // 1: conversation.v1.ContextCut.compacted:type_name -> conversation.v1.ContextCompacted
+	6,  // 0: conversation.v1.ContextCut.cleared:type_name -> conversation.v1.ContextCleared
+	7,  // 1: conversation.v1.ContextCut.compacted:type_name -> conversation.v1.ContextCompacted
 	3,  // 2: conversation.v1.ContextCut.compaction_failed:type_name -> conversation.v1.ContextCompactionFailed
-	9,  // 3: conversation.v1.ContextCompacted.summary:type_name -> conversation.v1.AgentResponseProse
-	4,  // 4: conversation.v1.ContextCompacted.tokens:type_name -> conversation.v1.ContextTokenDelta
-	7,  // 5: conversation.v1.ContextCompacted.requested:type_name -> conversation.v1.ContextCompactionRequested
-	8,  // 6: conversation.v1.ContextCompacted.automatic:type_name -> conversation.v1.ContextCompactionAutomatic
-	10, // 7: conversation.v1.session_command_spec:extendee -> google.protobuf.EnumValueOptions
-	1,  // 8: conversation.v1.session_command_spec:type_name -> conversation.v1.SessionCommandSpec
-	9,  // [9:9] is the sub-list for method output_type
-	9,  // [9:9] is the sub-list for method input_type
-	8,  // [8:9] is the sub-list for extension type_name
-	7,  // [7:8] is the sub-list for extension extendee
-	0,  // [0:7] is the sub-list for field type_name
+	4,  // 3: conversation.v1.ContextCompactionFailed.compaction:type_name -> conversation.v1.CompactionId
+	10, // 4: conversation.v1.ContextCompacted.summary:type_name -> conversation.v1.AgentResponseProse
+	5,  // 5: conversation.v1.ContextCompacted.tokens:type_name -> conversation.v1.ContextTokenDelta
+	8,  // 6: conversation.v1.ContextCompacted.requested:type_name -> conversation.v1.ContextCompactionRequested
+	9,  // 7: conversation.v1.ContextCompacted.automatic:type_name -> conversation.v1.ContextCompactionAutomatic
+	4,  // 8: conversation.v1.ContextCompacted.compaction:type_name -> conversation.v1.CompactionId
+	11, // 9: conversation.v1.session_command_spec:extendee -> google.protobuf.EnumValueOptions
+	1,  // 10: conversation.v1.session_command_spec:type_name -> conversation.v1.SessionCommandSpec
+	11, // [11:11] is the sub-list for method output_type
+	11, // [11:11] is the sub-list for method input_type
+	10, // [10:11] is the sub-list for extension type_name
+	9,  // [9:10] is the sub-list for extension extendee
+	0,  // [0:9] is the sub-list for field type_name
 }
 
 func init() { file_conversation_v1_slash_command_proto_init() }
@@ -925,7 +1008,8 @@ func file_conversation_v1_slash_command_proto_init() {
 		(*ContextCut_Compacted)(nil),
 		(*ContextCut_CompactionFailed)(nil),
 	}
-	file_conversation_v1_slash_command_proto_msgTypes[5].OneofWrappers = []any{
+	file_conversation_v1_slash_command_proto_msgTypes[2].OneofWrappers = []any{}
+	file_conversation_v1_slash_command_proto_msgTypes[6].OneofWrappers = []any{
 		(*ContextCompacted_Requested)(nil),
 		(*ContextCompacted_Automatic)(nil),
 	}
@@ -935,7 +1019,7 @@ func file_conversation_v1_slash_command_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_conversation_v1_slash_command_proto_rawDesc), len(file_conversation_v1_slash_command_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   8,
+			NumMessages:   9,
 			NumExtensions: 1,
 			NumServices:   0,
 		},
