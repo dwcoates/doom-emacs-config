@@ -6225,26 +6225,28 @@ bubble-body.bubble-body { display: block; }
   color: var(--muted);
 }
 .cold-gate-trace { color: var(--fg); }
-/* THE STANDING GATE DOCKS AT THE BOTTOM (src/feed/gate-dock.ts): Emacs hides
-   the input window while it stands and this webview grows into that space, so
-   the banner takes the input's place at the bottom of the conversation, at
-   least the input's height. 18.4vh is `agent-repl-input-height-fraction`
-   (lisp/panels.el), the input's share of the frame the page now fills. The
-   row is STICKY at the scroll zone's bottom edge rather than lifted out of
-   it: #feed-scroll is a size container, which makes it the containing block
-   of anything positioned inside it, and the row element is the feed view's
-   to place. */
-#feed > .gate-docked-row {
-  position: sticky;
-  bottom: 0;
-  z-index: 2;
-}
-.cold-gate.cold-gate-docked {
+/* THE STANDING GATE DOCKS AT THE PAGE'S VERY BOTTOM (src/feed/gate-dock.ts):
+   Emacs hides the input window while it stands and this webview grows into
+   that space, so the banner takes the input's exact slot: #gate-dock, below
+   the footer, at the input window's height. 18.4vh is
+   `agent-repl-input-height-fraction` (lisp/panels.el), the input's share of
+   the frame the page now fills. The banner's row stays in the feed, hidden,
+   so the feed draws no inline gate while it is docked. */
+#gate-dock {
+  flex: 0 0 auto;
   min-height: 18.4vh;
   max-height: 60vh;
   overflow-y: auto;
   box-sizing: border-box;
 }
+#gate-dock[hidden] { display: none; }
+#gate-dock > .cold-gate.cold-gate-docked {
+  min-height: 18.4vh;
+  box-sizing: border-box;
+  border-radius: 0;
+  border-width: 1px 0 0;
+}
+#feed > .gate-docked-row { display: none; }
 /* ---- tool card input forms (src/feed/cards/tool-call.ts) ---- */
 /* The daemon names the drawn form of the card's one input line and the client
    applies the treatment that shape of line has always worn: the shell command
