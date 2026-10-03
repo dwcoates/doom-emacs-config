@@ -83,7 +83,16 @@ func (f *Fleet) forgetPointers(ws ids.WorkspaceID) {
 func (f *Fleet) startWatcher(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, client shimclient.Client, session sessionwatcher.Session) (sessionwatcher.Watcher, error) {
 	opening := f.openingFor(ws)
 	session.Opening = opening
-	watcher, err := f.watch(context.WithoutCancel(ctx), ws, client, session, f.deps.Sinks, log)
+	sinks := f.deps.Sinks
+	// THE SHIM'S OWN WORD THAT A SESSION RUNS is recorded on the entry: a
+	// shim the fleet holds with no session known (an adopted survivor the
+	// boot read as inert, a pure attach) states its session in force on every
+	// watch (its re-announced SessionStarted), and from then on nothing may
+	// start a second one on it.
+	if sinks.Lifecycle != nil {
+		sinks.Lifecycle = sessionNotingLifecycle{LifecycleSink: sinks.Lifecycle, fleet: f, client: client}
+	}
+	watcher, err := f.watch(context.WithoutCancel(ctx), ws, client, session, sinks, log)
 	if err != nil {
 		return nil, err
 	}
@@ -97,4 +106,20 @@ func (f *Fleet) startWatcher(ctx context.Context, log dlog.Logger, ws ids.Worksp
 		"opening": opening.String(), "replays_history": opening.Replays(),
 	})
 	return watcher, nil
+}
+
+// sessionNotingLifecycle is the lifecycle sink a watcher of CLIENT is handed:
+// the shim stating the vendor session in force (its re-announcement, or a
+// rotation) is the shim saying a session runs on it, and the fleet records
+// that on the entry holding CLIENT before the sink takes the id.
+type sessionNotingLifecycle struct {
+	sessionwatcher.LifecycleSink
+	fleet  *Fleet
+	client shimclient.Client
+}
+
+// OnVendorSessionID records the session running, then hands the id on.
+func (s sessionNotingLifecycle) OnVendorSessionID(ws ids.WorkspaceID, vendorSessionID string) {
+	s.fleet.noteSessionRunningOn(ws, s.client)
+	s.LifecycleSink.OnVendorSessionID(ws, vendorSessionID)
 }

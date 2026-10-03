@@ -210,6 +210,17 @@ func (f *Fleet) startSession(ctx context.Context, log dlog.Logger, ws ids.Worksp
 		if errors.Is(err, shimclient.ErrStandDownOrdered) {
 			return nil, err
 		}
+		// THE SHIM ALREADY RUNS ITS SESSION: a start on a held shim whose
+		// session this daemon had not yet learned of (an adopted survivor the
+		// boot read as inert, its re-announcement still in flight). It is no
+		// failure and files no fault: the session exists, ends any vendor run,
+		// and the caller takes it (takeRunningSession).
+		var refusal *Refusal
+		if errors.As(err, &refusal) && refusal.Arm == ArmAlreadyStarted {
+			f.endVendorRun(ctx, log, ws)
+			f.closeOnEdge(ctx, log, ws, health.EdgeSessionStarted)
+			return nil, fmt.Errorf("%w: %w", errSessionAlreadyRunning, err)
+		}
 		if cause := context.Cause(ctx); errors.Is(cause, ErrVendorStartCancelled) {
 			f.closeRetrying(ctx, log, ws)
 			log.Info(opBringUp, "the vendor-start run was ended by a restart", dlog.Context{"cause": err.Error()})

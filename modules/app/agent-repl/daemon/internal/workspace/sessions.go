@@ -1226,6 +1226,10 @@ func (f *Fleet) startUp(ctx context.Context, ws ids.WorkspaceID, rebind bool) er
 		f.deps.Steps(ws, startup.Step{Kind: startup.StepResuming})
 	}
 	started, err := f.startSession(runCtx, log, ws, client, src, session, configDir)
+	if errors.Is(err, errSessionAlreadyRunning) {
+		finishRun()
+		return f.takeRunningSession(ctx, log, ws, client)
+	}
 	if err != nil {
 		defer finishRun()
 		// A FAILED START KEEPS ITS SHIM HELD, with no session on it, exactly
@@ -1539,6 +1543,58 @@ const (
 	// failed start's): it is started, never probed, spawned over or adopted.
 	pathHeld
 )
+
+// errSessionAlreadyRunning is a StartSession the shim answered
+// `already_started`: the session runs, and the start takes it.
+var errSessionAlreadyRunning = errors.New("workspace: the shim already runs its session")
+
+// takeRunningSession takes the session a held shim already runs, which a
+// start learned of only from the shim's `already_started` answer: the entry
+// records it running, and a shim not yet watched has its watches opened,
+// attach-only, exactly as an adoption's are. It is a session up, not a failed
+// start.
+func (f *Fleet) takeRunningSession(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, client shimclient.Client) error {
+	if !f.noteSessionRunningOn(ws, client) {
+		return fmt.Errorf("start session for %q: %w", ws, ErrShimTaken)
+	}
+	f.mu.RLock()
+	watched := f.sessions[ws] != nil && f.sessions[ws].watcher != nil
+	f.mu.RUnlock()
+	if !watched {
+		openAtAttach, err := f.openTurns(ctx, ws)
+		if err != nil {
+			return fmt.Errorf("start session for %q: %w", ws, err)
+		}
+		if err := f.watchInstalled(ctx, ws, client, openAtAttach); err != nil {
+			return err
+		}
+	}
+	log.Info(opBringUp, "the held shim already runs its session; the start takes it rather than starting one", dlog.Context{
+		"shim_pid": client.PID(), "watched_already": watched,
+	})
+	f.publishHost(ws)
+	f.deps.SessionsUp(ws)
+	f.deps.Steps(ws, startup.Step{Kind: startup.StepUp})
+	return nil
+}
+
+// noteSessionRunningOn records that CLIENT's shim runs a session, when the
+// workspace's entry still holds CLIENT, and answers whether it does.
+func (f *Fleet) noteSessionRunningOn(ws ids.WorkspaceID, client shimclient.Client) bool {
+	f.mu.Lock()
+	session, ok := f.sessions[ws]
+	if !ok || session.client != client {
+		f.mu.Unlock()
+		return false
+	}
+	was := session.sessionStarted
+	session.sessionStarted, session.sessionAbsent, session.freshStart = true, false, false
+	f.mu.Unlock()
+	if !was {
+		f.logTransition(ws, "session_started", false, true, dlog.Context{"shim_pid": client.PID()})
+	}
+	return true
+}
 
 // reuseOrBringUp answers the shim a start starts its session on: the one the
 // fleet holds with no session (pathHeld), else a shim bringUpClient spawns or
