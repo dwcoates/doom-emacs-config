@@ -198,13 +198,15 @@ log "every backend is stopped"
 # one that fails with nothing loaded is a real failure.
 start_service() {
     log "$1: bootstrapping"
-    if "$LAUNCHCTL" bootstrap "gui/$uid" "$LAUNCH_AGENTS_DIR/$1.plist" >/dev/null; then
+    local err
+    if err="$("$LAUNCHCTL" bootstrap "gui/$uid" "$LAUNCH_AGENTS_DIR/$1.plist" 2>&1 >/dev/null)"; then
         return 0
     fi
     if service_known "$1"; then
         log "$1: already loaded (pid $(service_pid "$1")): another client brought it back from the fresh build"
         return 0
     fi
+    [ -n "$err" ] && printf '%s\n' "$err" >&2
     die "$1 could not be bootstrapped from $LAUNCH_AGENTS_DIR/$1.plist"
 }
 
