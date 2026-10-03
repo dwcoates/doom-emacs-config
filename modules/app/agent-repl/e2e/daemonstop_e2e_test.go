@@ -23,6 +23,7 @@ package e2e
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -59,17 +60,10 @@ func TestHostRequestedStopLeavesNoProcessBehind(t *testing.T) {
 	t.Parallel()
 	// Arrange: a live session with a real shim, parked on an open ask.
 	w, ws := pmNewPermissionWorld(t)
-	// Standing a live session down on purpose is what the whole test is
-	// about; these are that act's own trail.
-	w.ExpectWarnings(
-		"daemon.shimclient.exit", "daemon.shimclient.kill_session",
-		"daemon.shimclient.kill", "daemon.shimclient.redial",
-		"daemon.sessionwatcher.link_fault", "daemon.sessionwatcher.watch_session",
-		"daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.reopen",
-		"daemon.shimclient.watch_agent", "daemon.shimclient.watch_session",
-		"daemon.workspace.kill", "daemon.workspace.bring_up",
-		"daemon.health.open_fault", "daemon.health.session",
-	)
+	// THE STOP IS THE DAEMON'S OWN ORDERED STAND-DOWN, so no system writes a
+	// WARN or ERROR for it: the daemon's sweep runs with nothing declared, and
+	// assertNoWarningInAnySystemLog reads the shim's, the store's and the
+	// sidecar's logs too.
 	SubmitPrompt(t, w, ws, "!perm-hold")
 	pmAwaitFeedRow(t, w, ws, "the open permission ask", func(r *frontendv1.FeedRow) bool {
 		return r.GetPermission().GetOpen() != nil
@@ -118,6 +112,38 @@ func TestHostRequestedStopLeavesNoProcessBehind(t *testing.T) {
 	if w.Sidecar.Exited() {
 		t.Errorf("the host's stop took the sidecar down with it; the sidecar is the test's own process, not the daemon's tree")
 	}
+	assertNoWarningInAnySystemLog(t, w)
+}
+
+// assertNoWarningInAnySystemLog fails the test on every WARN or worse in ANY
+// log this world wrote: the daemon's run log and workspace sinks, the shim's,
+// the sidecar's and the store's. The daemon's own sweep reads only the
+// daemon's.
+//
+// It pins what a bounce relies on (2026-10-03): the stand-down
+// `UpdateShutdownSchedule{now}` performs is the daemon's own, so it ends every
+// shim against a store that is still up, every shim concludes its session
+// cleanly, and the daemon reads every exit as one it ordered. A bounce that
+// killed the shims and the store from outside instead put `shim died` in the
+// daemon's log and `the store could not be reached` in every shim's.
+func assertNoWarningInAnySystemLog(t *testing.T, w *World) {
+	t.Helper()
+	pattern := filepath.Join(w.StateDir, "logs", "*.log")
+	paths, err := filepath.Glob(pattern)
+	if err != nil {
+		t.Fatalf("glob %s: %v", pattern, err)
+	}
+	if len(paths) == 0 {
+		t.Fatalf("no log matches %s, so this assertion could pass reading nothing", pattern)
+	}
+	for _, path := range paths {
+		for _, r := range harness.ReadLog(t, path) {
+			switch r.Level {
+			case "warn", "warning", "error", "fatal":
+				t.Errorf("%s: %s %s: %s", filepath.Base(path), r.Level, r.Operation, r.Message)
+			}
+		}
+	}
 }
 
 // stopAfterTurnBound is how long the host's stop may take on a session whose
@@ -151,17 +177,10 @@ func TestAStopAfterACompletedTurnLeavesOnTheStop(t *testing.T) {
 	// parallel world burst so the interval stays attributable to the stop path.
 	// Arrange: a live session whose turn has run and ended.
 	w, ws := pmNewPermissionWorld(t)
-	// Standing a live session down on purpose is what the whole test is
-	// about; these are that act's own trail.
-	w.ExpectWarnings(
-		"daemon.shimclient.exit", "daemon.shimclient.kill_session",
-		"daemon.shimclient.kill", "daemon.shimclient.redial",
-		"daemon.sessionwatcher.link_fault", "daemon.sessionwatcher.watch_session",
-		"daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.reopen",
-		"daemon.shimclient.watch_agent", "daemon.shimclient.watch_session",
-		"daemon.workspace.kill", "daemon.workspace.bring_up",
-		"daemon.health.open_fault", "daemon.health.session",
-	)
+	// THE STOP IS THE DAEMON'S OWN ORDERED STAND-DOWN, so no system writes a
+	// WARN or ERROR for it: the daemon's sweep runs with nothing declared, and
+	// assertNoWarningInAnySystemLog reads the shim's, the store's and the
+	// sidecar's logs too.
 	turn := SubmitPrompt(t, w, ws, "!prose-streamed")
 	AwaitTurnEnded(t, w, ws, turn)
 
@@ -188,6 +207,7 @@ func TestAStopAfterACompletedTurnLeavesOnTheStop(t *testing.T) {
 	}
 	w.AwaitExit()
 	t.Logf("the host's stop after a completed turn took %v", stop)
+	assertNoWarningInAnySystemLog(t, w)
 }
 
 // TestACompletedTurnAndTeardownLeaveNoWatchTokenOutstanding is the store-side

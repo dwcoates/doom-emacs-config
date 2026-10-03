@@ -193,11 +193,10 @@ func TestUpdateShutdownScheduleNowLeavesNoShimBehindEvenAtAPermissionGate(t *tes
 	t.Parallel()
 	// Arrange: a live session parked at a permission gate.
 	f := newOpened(t, harness.Opts{})
-	expectSessionKillRecords(f.d)
-	// Standing the session down on purpose opens the shim_died and
-	// link_severed faults and, because the fake shim exits on the forced kill
-	// rather than answering it, the "session kill did not answer" WARN.
-	f.d.ExpectWarnings("daemon.health.open_fault", "daemon.workspace.bring_up")
+	// THE STAND-DOWN IS THIS DAEMON'S OWN ACT, so it writes no WARN or ERROR:
+	// the supervisor's latch goes up before any shim is ended, and every exit
+	// the walk causes reads as one this daemon ordered. The sweep StartDaemon
+	// armed asserts that with no operation declared.
 	f.shim.ExpectStartSession()
 	feed := f.watchRootFeed()
 	f.submit("do the thing", "k-stop-at-a-gate", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
@@ -249,11 +248,10 @@ func TestUpdateShutdownScheduleNowAfterACompletedTurnExitsWellInsideItsOwnBound(
 	// Arrange: a live session that has run one turn to its terminal, with the
 	// feed watch and the session's own watches still standing.
 	f := newOpened(t, harness.Opts{})
-	expectSessionKillRecords(f.d)
-	// Standing a live session down on purpose opens the shim_died and
-	// link_severed faults, and the fake shim exits on the forced kill rather
-	// than answering it, which is the "session kill did not answer" WARN.
-	f.d.ExpectWarnings("daemon.health.open_fault", "daemon.workspace.bring_up")
+	// THE STAND-DOWN IS THIS DAEMON'S OWN ACT, so it writes no WARN or ERROR:
+	// the supervisor's latch goes up before any shim is ended, and every exit
+	// the walk causes reads as one this daemon ordered. The sweep StartDaemon
+	// armed asserts that with no operation declared.
 	f.shim.ExpectStartSession()
 	feed := f.watchRootFeed()
 	f.submit("do the thing", "k-stop-after-a-turn", origin)
