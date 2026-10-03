@@ -488,6 +488,38 @@ const ROWS: readonly ConformanceRow[] = [
  * read as a scenario that was simply short.
  */
 async function mockRun(prompt: string): Promise<GoldenRun> {
+  let run = mockRuns.get(prompt);
+  if (run === undefined) {
+    run = driveAndFold(prompt);
+    mockRuns.set(prompt, run);
+  }
+  return run;
+}
+
+/**
+ * EACH SIDE IS FOLDED ONCE PER FILE, and every test reads that one result.
+ *
+ * Both sides are deterministic (the drive runs on a fixed clock and a counted
+ * uuid source; a capture is a file), so a second fold of the same input can
+ * only repeat the first. Without the cache every row was driven and folded
+ * five times over, and the session-arm gap test did all sixty rows inside one
+ * 2,500ms test: it measured 3.26s once under the full suite set and passed
+ * only because a synchronous fold left the timeout no turn to fire.
+ */
+const mockRuns = new Map<string, Promise<GoldenRun>>();
+const goldenRuns = new Map<string, GoldenRun>();
+
+/** {@link foldScenario}, once per capture for this file. */
+function goldenRun(capture: string): GoldenRun {
+  let run = goldenRuns.get(capture);
+  if (run === undefined) {
+    run = foldScenario(capture);
+    goldenRuns.set(capture, run);
+  }
+  return run;
+}
+
+async function driveAndFold(prompt: string): Promise<GoldenRun> {
   const driven = expectDroveCleanly(await driveScenario([prompt]));
   const fold = createFold();
   const context = foldContext();
@@ -520,14 +552,14 @@ async function terminalArmsOf(prompt: string): Promise<string[]> {
 
 /** A golden's unit kinds, with the environment's `hook` removed. */
 function goldenKinds(capture: string): string[] {
-  return unitKinds(foldScenario(capture)).filter((kind) => kind !== "hook");
+  return unitKinds(goldenRun(capture)).filter((kind) => kind !== "hook");
 }
 
 describe("the mock, against the real captures", () => {
   it.each(ROWS.map((row) => [row.capture, row] as const))(
     "%s — the golden still folds into the recorded kinds",
     (_name, row) => {
-      expect(unitKinds(foldScenario(row.capture)).filter((kind) => kind !== "hook")).toEqual(
+      expect(unitKinds(goldenRun(row.capture)).filter((kind) => kind !== "hook")).toEqual(
         row.golden,
       );
     },
@@ -557,7 +589,7 @@ describe("the mock, against the real captures", () => {
     // THE SHAPE IS NOT ONLY THE UNIT KINDS. A mock that produced the right
     // units and ended the turn on the wrong arm was invisible here, and the
     // terminal is what a consumer draws the stop notice from.
-    expect(await terminalArmsOf(row.prompt)).toEqual(terminalArms(foldScenario(row.capture)));
+    expect(await terminalArmsOf(row.prompt)).toEqual(terminalArms(goldenRun(row.capture)));
   });
 
   it.each(
@@ -568,7 +600,7 @@ describe("the mock, against the real captures", () => {
     // A named difference is still pinned on both sides, so either changing is
     // a failure that wants a human.
     const mock = await terminalArmsOf(row.prompt);
-    const golden = terminalArms(foldScenario(row.capture));
+    const golden = terminalArms(goldenRun(row.capture));
     expect(mock).not.toEqual(golden);
     expect({ mock, golden }).toEqual({ mock, golden });
   });
@@ -577,7 +609,7 @@ describe("the mock, against the real captures", () => {
     "%s — the mock implies the vendor's own session arms",
     async (_name, row) => {
       expect(comparableSessionArms(await mockRun(row.prompt))).toEqual(
-        comparableSessionArms(foldScenario(row.capture)),
+        comparableSessionArms(goldenRun(row.capture)),
       );
     },
   );
@@ -589,7 +621,7 @@ describe("the mock, against the real captures", () => {
     const extra = new Set<string>();
     for (const row of ROWS) {
       const mock = new Set(sessionUpdateArms(await mockRun(row.prompt)));
-      const golden = new Set(sessionUpdateArms(foldScenario(row.capture)));
+      const golden = new Set(sessionUpdateArms(goldenRun(row.capture)));
       for (const arm of golden) if (!mock.has(arm)) missing.add(arm);
       for (const arm of mock) if (!golden.has(arm)) extra.add(arm);
     }

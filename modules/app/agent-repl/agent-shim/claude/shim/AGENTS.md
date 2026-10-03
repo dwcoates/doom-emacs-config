@@ -1596,6 +1596,28 @@ in atomically, never reinstalled through the link. `webapp/AGENTS.md`
   aid, not semantic coverage: audit critical branches and errors directly even
   when the ratio rises.
 
+### Every run's temp files live under one root the run owns
+
+Both vitest configs run `test/run-tmp-root.ts` as their `globalSetup`: it makes
+`/tmp/sv-XXXXXX`, points `TMPDIR` at it for every worker and every process a
+test spawns, and removes it at teardown. A test making a temp directory just
+calls `os.tmpdir()`; it never has to clean up for the run to leave nothing.
+
+- WHY. Tests here made a fresh temp directory and few removed it, so the user
+  temp directory grew to 856,127 entries (391,496 `shim-session-*`, 232,634
+  `fake-drive-*`). Every suite in `bin/test-all.sh` creates there, and under the
+  full suite set a create in it stalled for seconds: a fake drive whose own CPU
+  time was 4ms took 5.08s, and unit tests timed out on nothing else. Measured
+  beside the e2e suite, a create there was 42ms median against 0.25ms in a small
+  directory.
+- WHY `/tmp`. A unix socket path is capped at 104 bytes on macOS; the user temp
+  directory's path alone is 49, and the longest socket a test builds here
+  already spends 97 under it.
+- A FAILED REMOVAL FAILS THE RUN. A root that cannot be removed holds a file a
+  test made unremovable (a directory left at mode 0) or one a process the run
+  left behind is still writing; give the permission back in the test
+  (`onTestFinished`), or stop the process.
+
 ### Timeout bounds, and why they are this tight
 
 Every wait/timeout bound in these two suites is a small multiple (about 3x)

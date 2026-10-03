@@ -12,7 +12,7 @@
 import { chmodSync, mkdirSync, mkdtempSync, utimesSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, onTestFinished } from "vitest";
 import { cwdSlug } from "../../src/engine/cold.js";
 import {
   TRANSCRIPT_QUIET_AFTER_MS,
@@ -131,7 +131,11 @@ describe("readTranscripts", () => {
   it("reports unreadable when the directory exists and cannot be listed", () => {
     // Arrange: strip every permission from the project directory.
     const configDir = configDirWithProject();
-    chmodSync(path.join(configDir, "projects", cwdSlug(CWD)), 0o000);
+    const project = path.join(configDir, "projects", cwdSlug(CWD));
+    chmodSync(project, 0o000);
+    // Given back afterwards: a directory nobody can list cannot be removed,
+    // and the run's temp root (test/run-tmp-root.ts) fails its teardown on it.
+    onTestFinished(() => chmodSync(project, 0o700));
 
     // Act.
     const read = readTranscripts(configDir, CWD, undefined, NOW_MS);
