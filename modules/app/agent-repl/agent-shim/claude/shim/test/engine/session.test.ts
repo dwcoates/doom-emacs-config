@@ -7192,6 +7192,55 @@ describe("the vendor's own compaction, announced through system:status", () => {
     expect(arms).toEqual(["compacting"]);
   });
 
+  it("names the pushed compaction by its first status, through the vendor's re-sends", async () => {
+    const h = harness();
+    await started(h);
+
+    const ids = await pushedUpdates(
+      h,
+      (update) => (update.case === "compacting" ? (update.value.compaction?.value ?? "none") : undefined),
+      async () => {
+        for (const uuid of ["00000000-0000-4000-8000-0000000000c1", "00000000-0000-4000-8000-0000000000c2"]) {
+          await h.engine.onSdkMessage({
+            type: "system",
+            subtype: "status",
+            status: "compacting",
+            uuid,
+            session_id: "s",
+          } as never);
+        }
+      },
+    );
+
+    expect(ids).toEqual(["00000000-0000-4000-8000-0000000000c1", "00000000-0000-4000-8000-0000000000c1"]);
+  });
+
+  it("puts the failed compaction's identity on its cut", async () => {
+    const h = harness();
+    await started(h);
+    await h.engine.onSdkMessage({
+      type: "system",
+      subtype: "status",
+      status: "compacting",
+      uuid: "00000000-0000-4000-8000-0000000000d1",
+      session_id: "s",
+    } as never);
+
+    await h.engine.onSdkMessage({
+      type: "system",
+      subtype: "status",
+      compact_result: "failed",
+      compact_error: "the model refused to summarize",
+      uuid: "00000000-0000-4000-8000-0000000000d2",
+      session_id: "s",
+    } as never);
+
+    const cut = contextCuts(h).at(-1);
+    expect(cut?.cut.case === "compactionFailed" ? cut.cut.value.compaction?.value : undefined).toBe(
+      "00000000-0000-4000-8000-0000000000d1",
+    );
+  });
+
   it("writes a compaction_failed page line carrying the vendor's own wording", async () => {
     // A failure has no `compact_boundary` record at all, so this is its ONLY
     // producer.

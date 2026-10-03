@@ -110,7 +110,7 @@ import { settleable, type Settleable } from "./settleable.js";
 import type { EngineFold, FoldContext, LastChange } from "./fold-context.js";
 import { normalizeModel, SYNTHETIC_MODEL } from "../model.js";
 import { TRUST_KEY, VENDOR_CONFIG_FILE, trustRoot } from "../trust.js";
-import { fastModeUpdate } from "../convert/session-updates.js";
+import { compactionIdField, compactionTracker, fastModeUpdate } from "../convert/session-updates.js";
 import { backupTranscript } from "./backup.js";
 import {
   appendCompactionLines,
@@ -627,6 +627,8 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   /** The instant BOTH cold-gate sites judge a transcript at. */
   const coldNowMs = (): number => deps.nowMs() + (deps.coldGateLaterMs ?? 0);
   const pushes = new SessionPushes(deps.nowMs, deps.runtime.shimBuildSha);
+  /** The compaction the live session is in (see CompactionTracker). */
+  const liveCompaction = compactionTracker();
   const live = new LiveWorkTable();
   /** Each detached shell run's start row, for `WatchBash`'s durability barrier. */
   const shellRunStarts = new ShellRunStarts();
@@ -2531,14 +2533,26 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       noteReportedModel((message as { fallback_model?: unknown }).fallback_model);
       return;
     }
+    if (message.type === "system" && message.subtype === "compact_boundary") {
+      // The boundary is the compaction's end: its cut (the fold's) carries
+      // the identity; the live start signal's tracker closes with it.
+      liveCompaction.take();
+    }
     if (message.type === "system" && message.subtype === "status") {
       if (message.status === "compacting") {
         // The vendor compacts on its own when the window fills. The status
         // message is the START signal so a surface can draw the in-progress
-        // state; the ContextCut page line below is the end.
+        // state; the ContextCut page line below is the end. Both carry the
+        // compaction's identity (its first status's uuid; the vendor's
+        // re-sends keep it), because they travel on different streams and a
+        // consumer must tell a late start signal from a new compaction.
+        const id = liveCompaction.begin(typeof message.uuid === "string" ? message.uuid : "");
         pushes.push(
           create(conversationv1.SessionUpdateSchema, {
-            update: { case: "compacting", value: create(conversationv1.SessionCompactingSchema, {}) },
+            update: {
+              case: "compacting",
+              value: create(conversationv1.SessionCompactingSchema, compactionIdField(id)),
+            },
           }),
         );
       }
@@ -2551,7 +2565,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       // sentinel the contract forbids. A FAILURE has no boundary record at all,
       // so this is its only producer, and its one field is fully stated.
       if (message.compact_result === "failed") {
-        writeContextCut(contextCutFailed(message.compact_error ?? "the vendor's compaction failed"));
+        writeContextCut(
+          contextCutFailed(message.compact_error ?? "the vendor's compaction failed", liveCompaction.take()),
+        );
       }
     }
   }
