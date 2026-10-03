@@ -22,12 +22,27 @@ const KillGrace = 10 * time.Second
 // block until every descendant holding it closed it, so one leaked grandchild
 // would hang the run. A file lets Wait return when the unit itself exits,
 // exactly as the old serial script's `time cmd` did.
+//
+// EVERY UNIT HAS ITS OWN TEMP ROOT. Start makes a fresh directory under
+// TmpParent and hands it to the unit as TMPDIR, so every temp file the unit and
+// everything it starts makes lands there and nowhere else; Wait removes it
+// after the unit exits. A root that cannot be removed fails the unit: it holds
+// a file the unit made unremovable, or one a process it left behind is still
+// writing. Before this, the suites' temp files went to the user's shared temp
+// directory, which their leaks grew to 856,127 entries.
 type OSExec struct {
 	// Log records a kill that failed: Kill has no caller to return it to.
 	Log *Log
 	// Grace is how long a killed group has between SIGTERM and SIGKILL.
 	Grace time.Duration
+	// TmpParent is where each unit's temp root is made. It is kept short
+	// (DefaultTmpParent): a unix socket path is capped at 104 bytes on macOS,
+	// and the user temp directory's own path spends 49 of them.
+	TmpParent string
 }
+
+// DefaultTmpParent is the parent of every unit's temp root.
+const DefaultTmpParent = "/tmp"
 
 type osProcess struct {
 	cmd   *exec.Cmd
@@ -37,17 +52,33 @@ type osProcess struct {
 	log   *Log
 	grace time.Duration
 	id    string
+	root  string
 }
 
 // Start implements Executor.
 func (e OSExec) Start(spec Spec, out *bytes.Buffer) (Process, error) {
-	if e.Log == nil || e.Grace <= 0 {
-		return nil, fmt.Errorf("run: OSExec needs a Log and a positive Grace (log set: %v, grace %v)", e.Log != nil, e.Grace)
+	if e.Log == nil || e.Grace <= 0 || e.TmpParent == "" {
+		return nil, fmt.Errorf("run: OSExec needs a Log, a positive Grace and a TmpParent (log set: %v, grace %v, tmp parent %q)", e.Log != nil, e.Grace, e.TmpParent)
 	}
 	if len(spec.Argv) == 0 {
 		return nil, fmt.Errorf("run: unit %s has no command", spec.ID)
 	}
-	f, err := os.CreateTemp("", "agent-repl-unit-*")
+	root, err := os.MkdirTemp(e.TmpParent, "tu-")
+	if err != nil {
+		return nil, fmt.Errorf("run: make the temp root of %s: %w", spec.ID, err)
+	}
+	p, err := e.start(spec, out, root)
+	if err != nil {
+		if rmErr := os.RemoveAll(root); rmErr != nil {
+			return nil, fmt.Errorf("%w (and its temp root %s could not be removed: %v)", err, root, rmErr)
+		}
+		return nil, err
+	}
+	return p, nil
+}
+
+func (e OSExec) start(spec Spec, out *bytes.Buffer, root string) (Process, error) {
+	f, err := os.CreateTemp(root, "unit-output-*")
 	if err != nil {
 		return nil, fmt.Errorf("run: create the output file for %s: %w", spec.ID, err)
 	}
@@ -57,18 +88,32 @@ func (e OSExec) Start(spec Spec, out *bytes.Buffer) (Process, error) {
 	}
 	cmd := exec.Command(spec.Argv[0], spec.Argv[1:]...)
 	cmd.Dir = spec.Dir
-	cmd.Env = append(os.Environ(), spec.Env...)
+	// The unit's own Env comes last, so a unit that names its TMPDIR keeps it.
+	cmd.Env = append(append(os.Environ(), "TMPDIR="+root), spec.Env...)
 	cmd.Stdout, cmd.Stderr = f, f
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
 		f.Close()
 		return nil, fmt.Errorf("run: start %s (%v in %s): %w", spec.ID, spec.Argv, spec.Dir, err)
 	}
-	return &osProcess{cmd: cmd, file: f, out: out, done: make(chan struct{}), log: e.Log, grace: e.Grace, id: spec.ID}, nil
+	return &osProcess{cmd: cmd, file: f, out: out, done: make(chan struct{}), log: e.Log, grace: e.Grace, id: spec.ID, root: root}, nil
 }
 
-// Wait implements Process.
+// Wait implements Process. The unit's temp root is removed once it has exited;
+// a root that cannot be removed fails the wait, whatever the unit's status.
 func (p *osProcess) Wait() (int, float64, error) {
+	exit, cpu, err := p.wait()
+	if rmErr := os.RemoveAll(p.root); rmErr != nil {
+		rmErr = fmt.Errorf("run: remove the temp root %s of %s: %w", p.root, p.id, rmErr)
+		if err != nil {
+			return exit, cpu, fmt.Errorf("%w; %w", err, rmErr)
+		}
+		return -1, cpu, rmErr
+	}
+	return exit, cpu, err
+}
+
+func (p *osProcess) wait() (int, float64, error) {
 	defer close(p.done)
 	defer p.file.Close()
 	waitErr := p.cmd.Wait()
