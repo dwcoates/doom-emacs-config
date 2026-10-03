@@ -727,6 +727,20 @@ type FaultScope struct {
 	Kind string
 }
 
+// FaultMatch names a fault by what it was raised ABOUT rather than by its id:
+// one workspace, one kind, and evidence fields that must all be present with
+// exactly these values. It is how a caller asks whether a verdict it is about
+// to raise was already recorded — by this process or by any before it.
+type FaultMatch struct {
+	// Workspace is the faulting workspace.
+	Workspace WorkspaceID
+	// Kind names the fault.
+	Kind string
+	// Evidence holds the fields that identify the occurrence, keyed as
+	// Fault.Evidence is. Every pair must match; fields not named are free.
+	Evidence map[string]string
+}
+
 // Fault is one recorded fault, open until it is explicitly closed. The
 // resolved-at instant is persisted, so a fault's history survives a restart.
 type Fault struct {

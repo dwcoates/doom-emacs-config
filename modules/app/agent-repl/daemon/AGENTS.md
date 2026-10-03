@@ -1488,6 +1488,17 @@ first is silent (`internal/resolve/feed/finalanswer.go`, `turnended.go`).
    raises the `final_answer_unresolved` fault, which STANDS UNTIL THE NEXT TURN
    STARTS. Both turn-start sites retire it, because a prompt replayed from
    history opens a turn without passing `OnTurnOpened`.
+   **A TERMINAL'S VERDICT IS RAISED ONCE PER OCCURRENCE.** Every boot and every
+   scroll back replays the terminal, and another store plane's copy can follow
+   the first; before raising, the resolver asks the fault record
+   (`wsm.DB.FaultRecorded`, open or resolved, any daemon) whether a fault with
+   the same `turn`, `unit` and `why` was ever recorded. One that was is INFO
+   `daemon.feed.final_answer_verdict_recorded` and nothing else; one that was
+   not (the turn concluding now, or one that concluded while no daemon watched)
+   is raised as above. An unreadable record raises the verdict as new, beside
+   ERROR `daemon.feed.final_answer_record_unreadable`. Re-raising was a dozen
+   identical ERRORs and fault churns on every boot of one workspace
+   (2026-10-02). A stall is never looked up: the same fold can stall twice.
 3. **NOT TIMELY.** An open response fold that has received no frame and no
    terminal for `DefaultAnswerStall` (90s) raises the SAME fault kind with
    `why` = `stalled`, cleared the instant a frame arrives ON THAT FOLD — a

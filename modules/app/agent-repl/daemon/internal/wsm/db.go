@@ -281,6 +281,10 @@ type DB interface {
 	// Fault loads one fault by id, open or resolved — the read that proves a
 	// closing edge was persisted rather than reopening on the next boot.
 	Fault(ctx context.Context, id FaultID) (Fault, error)
+	// FaultRecorded reports whether any fault matching m was ever recorded,
+	// open or resolved — the read that keeps a verdict replayed from history
+	// from being raised afresh on every boot.
+	FaultRecorded(ctx context.Context, m FaultMatch) (bool, error)
 
 	// PutDrainSchedule puts a drain schedule in force, replacing any current
 	// one.
