@@ -174,24 +174,31 @@ runs outside `testrun`:
 
 ### No test writes to the user's temp directory
 
-Every temp file a test makes lives under a root its runner owns and removes,
-and a run that leaves anything in the user's temp directory fails.
+Every temp file a test makes lives under a root its runner owns and removes.
 
-- `testrun` (`bin/test-all.sh`) reads the user temp directory, then moves its
-  own `TMPDIR` to `/tmp/tr-XXXXXX` (planning's `go list`/`vitest list`
-  included), and `run.OSExec` hands every unit a fresh `TMPDIR` root under it,
-  removed when the unit exits. A root that cannot be removed fails the unit.
-- After the run it lists the user temp directory again and fails the run on
-  every entry it gained, by name. A new entry is a test that ignored `TMPDIR`.
+- `testrun` (`bin/test-all.sh`) moves its own `TMPDIR` to `/tmp/tr-XXXXXX`
+  (planning's `go list`/`vitest list` included), and `run.OSExec` hands every
+  unit a fresh `TMPDIR` root under it, removed when the unit exits. A root that
+  cannot be removed fails the unit.
 - Batch ERT (`lisp/test-helpers.el`) makes one private root per process,
   points `temporary-file-directory` and `TMPDIR` at it, and removes it on
   `kill-emacs-hook`, so a direct `emacs -batch` run leaks nothing either.
 - The shim's vitest runs keep their own `/tmp/sv-*` root
   (`agent-shim/claude/shim/test/run-tmp-root.ts`).
+- MACOS'S `mktemp` IGNORES `TMPDIR` without a template (and with `-t`): it
+  writes to the user temp directory whatever the root says. Every script names
+  its parent, `mktemp -d "${TMPDIR:-/tmp}/name.XXXXXX"`, and
+  `testrun/internal/run/mktemp_scan_test.go` fails a bare one.
 - Why: the suites' leaks grew the user temp directory to 856,127 entries, and
   creates there stalled for seconds and timed tests out.
 - Roots live under `/tmp`, not `os.TempDir()`: a unix socket path is capped at
   104 bytes on macOS and the user temp directory's own path spends 49.
+- There is NO before/after check of the user temp directory. The whole host
+  writes there (other agents' runs, the owner's Emacs on every bounce), so a
+  listing cannot tell this run's entry from theirs; it failed two runs that
+  leaked nothing. A `sandbox-exec` write denial would attribute exactly, but it
+  also refuses every setuid binary, `/bin/ps` included, which the harnesses'
+  stray reaping needs.
 
 ### Suite timings: what a row measures
 
