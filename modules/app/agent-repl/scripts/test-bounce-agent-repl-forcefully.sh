@@ -56,6 +56,15 @@ case "\$1" in
   bootout) [ -f "$w/launchd/stuck-\$label" ] && [ ! -f "$w/launchd/killed-\$label" ] && { touch "$w/launchd/killed-\$label"; exit 0; }; rm -f "$w/launchd/\$label" ;;
   bootstrap)
     label="\$(basename "\$3" .plist)"
+    # A launchd that refuses outright, with nothing loaded.
+    [ -f "$w/launchd/refuse-\$label" ] && exit 5
+    # Another client (the daemon Emacs relaunched) bootstraps it first: launchd
+    # then refuses this one with error 5, as the real one does.
+    if [ -f "$w/launchd/raced-\$label" ]; then
+      echo 999997 >"$w/launchd/\$label"
+      [ "\$label" = com.agentrepl.shim-store ] && python3 -c 'import socket,sys; s=socket.socket(socket.AF_UNIX); s.bind(sys.argv[1])' "$w/cache/agent-repl/sock/store.sock" </dev/null >/dev/null 2>&1
+      exit 5
+    fi
     echo 999999 >"$w/launchd/\$label"
     if [ "\$label" = com.agentrepl.shim-store ] && [ ! -f "$w/launchd/no-socket" ]; then
       python3 -c 'import socket,sys; s=socket.socket(socket.AF_UNIX); s.bind(sys.argv[1])' "$w/cache/agent-repl/sock/store.sock" </dev/null >/dev/null 2>&1
@@ -183,6 +192,20 @@ touch "$w/launchd/no-socket"
 run "$w"; status=$?
 [ "$status" -eq 1 ] && pass "a store with no socket exits 1" || fail "a store with no socket exited $status"
 grep -q "bootstrap.*shim-claude-sidecar" "$w/launchd/calls" && fail "the sidecar was started without the store's socket" || pass "the sidecar is not started without the store's socket"
+
+# ---- a service another client already brought back -------------------------
+
+world; w="$W"
+touch "$w/launchd/raced-com.agentrepl.shim-store"
+run "$w"; status=$?
+[ "$status" -eq 0 ] && pass "a store another client already bootstrapped is taken as up" || fail "a raced store bootstrap failed the bounce ($status): $(cat "$w/out")"
+grep -q "already loaded" "$w/out" && pass "the raced bootstrap is recorded" || fail "the raced bootstrap left no record: $(cat "$w/out")"
+
+world; w="$W"
+touch "$w/launchd/refuse-com.agentrepl.shim-store"
+run "$w"; status=$?
+[ "$status" -ne 0 ] && pass "a bootstrap that fails with nothing loaded fails the bounce" || fail "a failed bootstrap with nothing loaded passed"
+grep -q "could not be bootstrapped" "$w/out" && pass "the refused bootstrap names the service" || fail "the refused bootstrap said: $(cat "$w/out")"
 
 if [ "$FAILURES" -ne 0 ]; then
     echo "$FAILURES failure(s)"
