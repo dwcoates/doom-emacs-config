@@ -1182,6 +1182,46 @@ the spawn, called the daemon booted, and linked to a refused port."
     (should (agent-repl-test-daemon--logged-p
              :warn "elisp.daemon.exited status=0 event=finished requested=nil"))))
 
+(ert-deftest agent-repl-test-daemon-a-clean-exit-during-a-handover-is-info ()
+  "The outgoing daemon of a rolling deploy exits on its own announcement: INFO."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange: a successor stands.
+    (cl-letf (((symbol-function 'process-live-p) (lambda (_object) nil))
+              ((symbol-function 'process-exit-status) (lambda (_proc) 0))
+              ((symbol-function 'agent-repl-link-successor) (lambda () 'the-successor))
+              ((symbol-function 'agent-repl-link-successor-pending-p) (lambda () nil)))
+      ;; Act
+      (agent-repl-daemon--sentinel 'the-daemon-process "finished\n"))
+    ;; Assert
+    (should (agent-repl-test-daemon--logged-p
+             :info "elisp.daemon.exited status=0 event=finished requested=handover"))))
+
+(ert-deftest agent-repl-test-daemon-a-clean-exit-with-a-successor-pending-is-info ()
+  "A successor dialed but not yet accepted is still an announced handover."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange: a successor is pending.
+    (cl-letf (((symbol-function 'process-live-p) (lambda (_object) nil))
+              ((symbol-function 'process-exit-status) (lambda (_proc) 0))
+              ((symbol-function 'agent-repl-link-successor) (lambda () nil))
+              ((symbol-function 'agent-repl-link-successor-pending-p) (lambda () t)))
+      ;; Act
+      (agent-repl-daemon--sentinel 'the-daemon-process "finished\n"))
+    ;; Assert
+    (should-not (agent-repl-test-daemon--logged-p :warn "elisp.daemon.exited"))))
+
+(ert-deftest agent-repl-test-daemon-a-failed-exit-during-a-handover-is-still-an-error ()
+  "A non-zero exit is the daemon's own failure even mid-handover."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (cl-letf (((symbol-function 'process-live-p) (lambda (_object) nil))
+              ((symbol-function 'process-exit-status) (lambda (_proc) 2))
+              ((symbol-function 'agent-repl-link-successor) (lambda () 'the-successor))
+              ((symbol-function 'agent-repl-link-successor-pending-p) (lambda () nil)))
+      ;; Act
+      (agent-repl-daemon--sentinel 'the-daemon-process "exited abnormally with code 2\n"))
+    ;; Assert
+    (should (agent-repl-test-daemon--logged-p :error "elisp.daemon.exited status=2"))))
+
 (ert-deftest agent-repl-test-daemon-an-unrequested-failed-exit-is-an-error ()
   "A non-zero status is the daemon reporting its own failure."
   (agent-repl-test-daemon--with-harness

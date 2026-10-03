@@ -121,6 +121,8 @@
 (declare-function agent-repl-link-connect "daemon-link" ())
 (declare-function agent-repl-link-primary "daemon-link" ())
 (declare-function agent-repl-link-up-p "daemon-link" ())
+(declare-function agent-repl-link-successor "daemon-link" ())
+(declare-function agent-repl-link-successor-pending-p "daemon-link" ())
 (declare-function agent-repl-link-teardown "daemon-link" ())
 
 ;;;; ---- Paths ----
@@ -1353,6 +1355,15 @@ ordered and the next unrequested departure is heard in full."
   (let* ((status (process-exit-status proc))
          (order agent-repl-daemon--exit-requested)
          (requested (or (eq order t) (eq order proc)))
+         ;; A HANDOVER IS THE DAEMON'S OWN ANNOUNCED DEPARTURE.  A rolling
+         ;; deploy's outgoing daemon announces its successor, transfers every
+         ;; workspace and exits -- routinely BEFORE its stream's end promotes
+         ;; the successor here.  A clean exit while a successor stands or is
+         ;; pending is that planned departure, recorded at INFO; it never
+         ;; consumes an order given for some other daemon.
+         (handover (and (not requested) (eql status 0)
+                        (or (agent-repl-link-successor)
+                            (agent-repl-link-successor-pending-p))))
          (trimmed (string-trim (or event "")))
          (scope '(:agent-repl-central "the resident daemon lifecycle spans workspaces")))
     ;; CONSUMED ONLY BY ITS OWN ADDRESSEE.  An order standing for some other
@@ -1363,6 +1374,9 @@ ordered and the next unrequested departure is heard in full."
      (requested
       (agent-repl--info scope agent-repl-daemon--exit-log-format
                         status trimmed "t"))
+     (handover
+      (agent-repl--info scope agent-repl-daemon--exit-log-format
+                        status trimmed "handover"))
      ((eql status 0)
       (agent-repl--warn scope agent-repl-daemon--exit-log-format
                         status trimmed "nil"))
