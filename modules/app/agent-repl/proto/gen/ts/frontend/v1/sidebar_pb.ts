@@ -1114,8 +1114,9 @@ export type RosterRow = Message<"frontend.v1.RosterRow"> & {
   } | {
     /**
      * The vendor is retrying a call that failed mid-turn, so the session
-     * cannot advance. It sits on the same `blocked` rung as the footer's
-     * `api_retrying` substatus and draws the same blue. It stands from the
+     * cannot advance. It is a VENDOR fault, the same rung as the footer's
+     * `vendor_fault.api_retrying` substatus, and draws the same turquoise
+     * (usable but wrong; owner, 2026-10-02). It stands from the
      * reported failure until the retried agent's first successful response,
      * the turn's end, or a new turn opening.
      *
