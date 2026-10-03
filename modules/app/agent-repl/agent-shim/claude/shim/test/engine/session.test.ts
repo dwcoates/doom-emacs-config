@@ -7,9 +7,9 @@
  * teardown resolves every pending callback as denied before anything else,
  * because an unresolved `canUseTool` wedges the vendor process outright.
  */
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { nextPush } from "../next-push.js";
-import os from "node:os";
+import { testTempDir } from "../temp-dir.js";
 import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { logRecordsDuring, logRecordsSince, logSinkMark } from "../log-records.js";
@@ -75,7 +75,7 @@ interface Harness {
 }
 
 function scratch(): string {
-  return mkdtempSync(path.join(os.tmpdir(), "shim-session-"));
+  return testTempDir("shim-session-");
 }
 
 /** Write a transcript for `sessionId` where the vendor would have written it. */

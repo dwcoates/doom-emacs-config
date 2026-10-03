@@ -10,13 +10,13 @@
  * `newUuid` and `nowMs` are DETERMINISTIC here (`u1`, `u2`, … and a fixed
  * clock) so an assertion can name a uuid instead of matching a pattern.
  */
-import { existsSync, mkdtempSync, readFileSync, readdirSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { createFakeQuery } from "../../src/fake/index.js";
 import type { FakeQueryOpts } from "../../src/fake/index.js";
 import { cwdSlug } from "../../src/fake/vendor-files.js";
+import { testTempDir } from "../temp-dir.js";
 import type { CanUseToolLike, QueryLike, SdkMessage } from "../../src/sdk/types.js";
 
 /**
@@ -148,7 +148,7 @@ export async function driveScenario(
   prompts: readonly string[],
   options: DriveOptions = {},
 ): Promise<Driven> {
-  const root = mkdtempSync(join(tmpdir(), "fake-drive-"));
+  const root = testTempDir("fake-drive-");
   const configDir = join(root, "cfg");
   const spoolRoot = join(root, "spools");
   const cwd = join(root, "workspace");
