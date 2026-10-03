@@ -488,6 +488,10 @@ func vendorRefusal(label *shimv1.StartSessionVendorStartFailed, detail string) *
 }
 
 type fleetFixture struct {
+	// probeSequence, when set, is answered by the lock probe in order before
+	// probeState; probes counts every probe.
+	probeSequence []sessionlock.State
+	probes        int
 	// onStartWatcher, when set, runs as a watcher is started.
 	onStartWatcher func()
 	// onStartWatcherSinks, when set, is handed the sinks a watcher is started
@@ -685,7 +689,15 @@ func newFleetFixtureBoundedAt(t *testing.T, adoptBound time.Duration) *fleetFixt
 			f.steps = append(f.steps, step)
 		},
 		SessionsUp: func(ws ids.WorkspaceID) { f.sessionsUp = append(f.sessionsUp, ws) },
-		Probe:      func(string, string) (sessionlock.State, error) { return f.probeState, f.probeErr },
+		Probe: func(string, string) (sessionlock.State, error) {
+			f.probes++
+			if len(f.probeSequence) > 0 {
+				next := f.probeSequence[0]
+				f.probeSequence = f.probeSequence[1:]
+				return next, nil
+			}
+			return f.probeState, f.probeErr
+		},
 		SocketProbe: func(path string) (shimsocket.State, error) {
 			if f.onSocketProbe != nil {
 				f.onSocketProbe(path)
@@ -4660,3 +4672,63 @@ type quietLifecycle struct{ sessionwatcher.LifecycleSink }
 
 // OnVendorSessionID takes the id and does nothing.
 func (*quietLifecycle) OnVendorSessionID(ids.WorkspaceID, string) {}
+
+// A LOCK WHOSE OWNER IS GOING AWAY IS WAITED OUT: held over a stale socket
+// for a moment after a shim died, it reads free once its holder exits, and the
+// bring-up then spawns instead of refusing.
+func TestABringUpWaitsOutALockWhoseOwnerIsGoingAway(t *testing.T) {
+	tests := []struct {
+		name  string
+		check func(t *testing.T, f *fleetFixture, err error)
+	}{
+		{"the start succeeds on a spawned shim", func(t *testing.T, f *fleetFixture, err error) {
+			if err != nil || len(f.supervisor.spawns) != 1 {
+				t.Fatalf("Start = %v, spawns = %d; want one spawn once the lock went", err, len(f.supervisor.spawns))
+			}
+		}},
+		{"no fault is filed", func(t *testing.T, f *fleetFixture, _ error) {
+			if got := faultKinds(f.db.dbFaults); len(got) != 0 {
+				t.Fatalf("faults = %v, want none", got)
+			}
+		}},
+		{"no ERROR is recorded", func(t *testing.T, f *fleetFixture, _ error) {
+			if got := recordsAt(f.log, opBringUp, "error"); len(got) != 0 {
+				t.Fatalf("errors = %v, want none", got)
+			}
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: the lock reads held over a stale socket, then free.
+			f := newFleetFixture(t)
+			ws := f.workspace("w1")
+			f.socketState = shimsocket.StateStale
+			f.probeSequence = []sessionlock.State{sessionlock.StateHeld, sessionlock.StateHeld, sessionlock.StateFree}
+			f.probeState = sessionlock.StateFree
+
+			// Act.
+			err := f.fleet.Start(context.Background(), ws.ID)
+
+			// Assert.
+			tt.check(t, f, err)
+		})
+	}
+}
+
+// A LOCK THAT NEVER GOES is the unreachable owner, refused once the bound is
+// spent -- the wait is bounded, never forever.
+func TestABringUpRefusesALockThatOutlastsTheBound(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.socketState = shimsocket.StateAbsent
+	f.probeState = sessionlock.StateHeld
+
+	// Act.
+	err := f.fleet.Start(context.Background(), ws.ID)
+
+	// Assert.
+	if err == nil || len(f.supervisor.spawns) != 0 || f.probes < 2 {
+		t.Fatalf("Start = %v, spawns = %d, probes = %d; want a refusal after waiting", err, len(f.supervisor.spawns), f.probes)
+	}
+}
