@@ -1041,12 +1041,90 @@ func (c *wlChild) killTree() {
 	}
 	// The group id IS the child's pid: Setpgid with no Pgid makes the child a
 	// group leader.
-	err := syscall.Kill(-c.cmd.Process.Pid, syscall.SIGKILL)
+	pgid := c.cmd.Process.Pid
+	err := syscall.Kill(-pgid, syscall.SIGKILL)
 	switch {
 	case err == nil, errors.Is(err, syscall.ESRCH):
 		return
+	case errors.Is(err, syscall.EPERM):
+		// DARWIN ANSWERS EPERM FOR A GROUP HOLDING A ZOMBIE: a worker that
+		// exited and launchd has not reaped yet cannot be signalled, and the
+		// group-wide kill then reports the whole group refused (measured in a
+		// loaded e2e run, 2026-10-03: TestWebappLayerQueryDeath's cleanup,
+		// after its vitest child had exited on its own). What matters is that
+		// no LIVING member survives, so each one is killed by pid and any
+		// failure there is reported.
+		live, listErr := wlLiveGroupMembers(pgid)
+		if listErr != nil {
+			c.t.Errorf("killing the vitest process group %d: %v, and its members could not be listed: %v", pgid, err, listErr)
+			return
+		}
+		for _, pid := range live {
+			if killErr := syscall.Kill(pid, syscall.SIGKILL); killErr != nil && !errors.Is(killErr, syscall.ESRCH) {
+				c.t.Errorf("killing vitest process %d of group %d: %v (it may still be running)", pid, pgid, killErr)
+			}
+		}
 	default:
-		c.t.Errorf("killing the vitest process group %d: %v (its worker pool may still be running)", c.cmd.Process.Pid, err)
+		c.t.Errorf("killing the vitest process group %d: %v (its worker pool may still be running)", pgid, err)
+	}
+}
+
+// wlLiveGroupMembers answers the members of process group PGID that are not
+// zombies, read from ps.
+func wlLiveGroupMembers(pgid int) ([]int, error) {
+	out, err := exec.Command("ps", "-A", "-o", "pid=,pgid=,stat=").Output()
+	if err != nil {
+		return nil, fmt.Errorf("ps: %w", err)
+	}
+	return wlParseLiveGroupMembers(string(out), pgid)
+}
+
+// wlParseLiveGroupMembers reads ps's `pid pgid stat` lines and answers the
+// pids in group PGID whose state is not a zombie (Z).
+func wlParseLiveGroupMembers(out string, pgid int) ([]int, error) {
+	var live []int
+	for _, line := range strings.Split(out, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		if len(fields) < 3 {
+			return nil, fmt.Errorf("ps line %q: want pid, pgid and stat", line)
+		}
+		pid, pidErr := strconv.Atoi(fields[0])
+		group, groupErr := strconv.Atoi(fields[1])
+		if pidErr != nil || groupErr != nil {
+			return nil, fmt.Errorf("ps line %q: pid or pgid is not a number", line)
+		}
+		if group == pgid && !strings.HasPrefix(fields[2], "Z") {
+			live = append(live, pid)
+		}
+	}
+	return live, nil
+}
+
+func TestWlParseLiveGroupMembersLeavesOutZombiesAndOtherGroups(t *testing.T) {
+	t.Parallel()
+	// Arrange.
+	out := "  10    10 S\n  11    10 Z\n  12    10 R+\n  13    99 S\n"
+
+	// Act.
+	live, err := wlParseLiveGroupMembers(out, 10)
+
+	// Assert.
+	if err != nil || len(live) != 2 || live[0] != 10 || live[1] != 12 {
+		t.Fatalf("live = %v (%v), want [10 12]", live, err)
+	}
+}
+
+func TestWlParseLiveGroupMembersRefusesAMalformedLine(t *testing.T) {
+	t.Parallel()
+	// Arrange / Act.
+	_, err := wlParseLiveGroupMembers("10 10\n", 10)
+
+	// Assert.
+	if err == nil {
+		t.Fatal("a ps line with no stat was read, want it refused")
 	}
 }
 
