@@ -142,9 +142,16 @@ emacs_process_up() {
 # merged since its last load would not be in force for the very stand-down it
 # fixes. A failed load stops the hard bounce with nothing stopped: the
 # restarted Emacs would load the same broken elisp.
+reload_form() {
+    printf '(progn (unless (fboundp (quote agent-repl-elisp-reload-if-stale)) (load "%s/lisp/elisp-build.el" nil t)) (agent-repl-elisp-reload-if-stale "%s"))' \
+        "$MODULE_DIR" "$MODULE_DIR"
+}
+
 reload_stale_elisp() {
     local outcome
-    outcome="$("$EMACSCLIENT" --eval "(agent-repl-elisp-reload-if-stale \"$MODULE_DIR\")")" ||
+    # AN EMACS OLDER THAN THE FUNCTION is exactly the one that most needs it,
+    # so the form loads its defining file first when it is missing.
+    outcome="$("$EMACSCLIENT" --eval "$(reload_form)")" ||
         die "the running Emacs could not be asked to reload its elisp; nothing was stopped"
     outcome="${outcome//\"/}"
     case "$outcome" in

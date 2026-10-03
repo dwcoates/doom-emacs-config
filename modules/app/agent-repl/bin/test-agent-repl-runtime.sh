@@ -16,7 +16,7 @@ THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 RUNTIME="$THIS_DIR/agent-repl-runtime"
 # The hard bounce asks the running Emacs to hot-load its stale elisp with this form.
 MODULE="$(cd "$THIS_DIR/.." && pwd -P)"
-RELOAD="emacsclient (agent-repl-elisp-reload-if-stale \"$MODULE\")"
+RELOAD="emacsclient (progn (unless (fboundp (quote agent-repl-elisp-reload-if-stale)) (load \"$MODULE/lisp/elisp-build.el\" nil t)) (agent-repl-elisp-reload-if-stale \"$MODULE\"))"
 TMP="$(cd "$(mktemp -d)" && pwd -P)"
 trap 'rm -rf "$TMP"' EXIT
 PASS=0
