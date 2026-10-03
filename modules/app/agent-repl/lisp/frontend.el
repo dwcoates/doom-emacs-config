@@ -40,6 +40,7 @@
 ;; order config.el establishes and resolve each other's calls at call time,
 ;; so the declarations below exist for the byte-compiler alone.
 (declare-function agent-repl-input-hidden-p "window" (ws))
+(declare-function agent-repl-window-tell-gate-dock-height "window" (ws))
 (declare-function agent-repl--fatal "core")
 (declare-function agent-repl--info "core")
 (declare-function agent-repl--error "core")
@@ -887,9 +888,10 @@ panels — the extra-windows-on-first-switch bug."
       (if (agent-repl-input-hidden-p ws)
           ;; A STANDING GATE HIDES THE INPUT WINDOW: its answer replaces
           ;; the composer, and the webview, filling the input's space,
-          ;; docks the gate's banner at the bottom at the input's height.
-          ;; The view is where the user lands.
+          ;; docks the gate's banner at the bottom at the input's height,
+          ;; which the page is told here.  The view is where the user lands.
           (progn
+            (agent-repl-window-tell-gate-dock-height ws)
             (select-window win)
             (agent-repl--info ws "display-webview: mounted webview-window=%s input-hidden-by-gate=t"
                               win))
