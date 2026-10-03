@@ -500,6 +500,15 @@ test-popup.el tests the popup module itself and records one level lower."
   "The removal runs when Emacs exits."
   (should (memq #'agent-repl-test--delete-temp-root kill-emacs-hook)))
 
+(ert-deftest agent-repl-test-helpers-batch-temp-root-survives-a-reload ()
+  "Re-loading test-helpers.el keeps the one root rather than nesting another."
+  ;; Arrange
+  (let ((before temporary-file-directory))
+    ;; Act
+    (load (expand-file-name "test-helpers.el" agent-repl-test-helpers--dir) nil t)
+    ;; Assert
+    (should (equal temporary-file-directory before))))
+
 (provide 'test-test-helpers)
 
 ;;; test-test-helpers.el ends here

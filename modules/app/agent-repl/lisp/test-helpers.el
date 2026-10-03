@@ -383,7 +383,11 @@ file the run made unremovable, which the person reading the run must see."
                       agent-repl-test--temp-root err)
               #'external-debugging-output)))))
 
-(when noninteractive
+;; ONCE PER PROCESS: every test file loads this one, and a second root made
+;; under the first would move `temporary-file-directory' between files, so a
+;; path one file computed at load would no longer match the same path asked
+;; for later.
+(when (and noninteractive (null agent-repl-test--temp-root))
   (setq agent-repl-test--temp-root (make-temp-file "agent-repl-ert-" t))
   (setq temporary-file-directory (file-name-as-directory agent-repl-test--temp-root))
   (setenv "TMPDIR" temporary-file-directory)
