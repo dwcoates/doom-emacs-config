@@ -261,6 +261,10 @@ type Fleet struct {
 	mu        sync.RWMutex
 	sessions  map[ids.WorkspaceID]*live
 	coldGates map[ids.WorkspaceID]coldGate
+	// handedOver names the workspaces a handover has taken from this daemon
+	// (HandOver), until a reclaim gives one back (Reclaimed). A start still in
+	// flight when its workspace was handed over must not serve it: see hold.
+	handedOver map[ids.WorkspaceID]bool
 	// lastCold is the shim's own cold facts for a parked workspace, kept whole
 	// so the relaunch engine's cold arm carries what the shim stated rather
 	// than a reconstruction of it.
@@ -491,6 +495,7 @@ func NewFleet(deps FleetDeps) (*Fleet, error) {
 		socketGoneBound: shimclient.GracefulKillBound,
 		sessions:        map[ids.WorkspaceID]*live{},
 		coldGates:       map[ids.WorkspaceID]coldGate{},
+		handedOver:      map[ids.WorkspaceID]bool{},
 		lastCold:        map[ids.WorkspaceID]*conversationv1.SessionCold{},
 		reapedAt:        map[ids.WorkspaceID]time.Time{},
 		generation:      map[ids.WorkspaceID]int{},
@@ -1029,7 +1034,7 @@ func (f *Fleet) start(ctx context.Context, ws ids.WorkspaceID, rebind bool) erro
 // the vendor run and a stand-down this daemon ordered have each said so (or
 // are no failure of agent-repl's); every other error is the bring-up failing.
 func (f *Fleet) noteStartEnded(ws ids.WorkspaceID, err error) {
-	if err == nil {
+	if err == nil || errors.Is(err, ErrHandedOver) {
 		return
 	}
 	var label *startLabel
@@ -2479,8 +2484,24 @@ func (f *Fleet) retireReaped(ws ids.WorkspaceID) {
 func (f *Fleet) hold(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, session *live) error {
 	f.mu.RLock()
 	previous, held := f.sessions[ws]
+	handedOver := f.handedOver[ws]
 	f.mu.RUnlock()
 	restated := held && previous != nil && previous.client == session.client
+	// A START THAT FINISHES AFTER ITS WORKSPACE WAS HANDED OVER SERVES NOTHING.
+	// The transfer found no session to detach while this start was in flight
+	// and released the serving row; remembering the client and claiming the
+	// row now would leave the successor waiting for a release that never
+	// comes, its adoption never made (e2e TestEmacsHandoverTransfersAtFreeness,
+	// 2026-10-03). The shim is the successor's: it is detached, never stopped,
+	// and keeps its lock, so the successor adopts it as it adopts any handed
+	// shim.
+	if !restated && handedOver {
+		session.client.Detach()
+		log.Info(opBringUp, "a start finished after its workspace was handed to a successor; its shim is left running for the successor to adopt", dlog.Context{
+			"shim_pid": session.client.PID(),
+		})
+		return fmt.Errorf("start session for %q: %w", ws, ErrHandedOver)
+	}
 	f.remember(ws, session)
 	if restated {
 		return nil

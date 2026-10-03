@@ -537,6 +537,9 @@ type ShimFleet interface {
 	// HandOver closes the workspace's watches and detaches its shim, leaving
 	// the process running for the successor; false when there is no session.
 	HandOver(ws ids.WorkspaceID) (bool, error)
+	// Reclaimed gives a handed-over workspace back: after it, a start on the
+	// workspace serves it here again.
+	Reclaimed(ws ids.WorkspaceID)
 	// Resume runs StartSession(resume) on c. A cold context is an ANSWER, not
 	// an error: it comes back on Resumed.Cold for the ordinary cold gate.
 	Resume(ctx context.Context, ws ids.WorkspaceID, c shimclient.Client) (Resumed, error)
