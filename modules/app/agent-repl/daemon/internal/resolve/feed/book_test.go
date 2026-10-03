@@ -33,6 +33,9 @@ type fakeHistory struct {
 	failFrom int
 	// noSource answers every read ErrNoHistorySource.
 	noSource bool
+	// readDone, when set, is sent one value after every read, so a test
+	// knows a read running off its goroutine has been answered.
+	readDone chan struct{}
 }
 
 // historyRead is one read the resolver made.
@@ -49,6 +52,9 @@ func newFakeHistory(pageSize int) *fakeHistory {
 func (f *fakeHistory) ReadHistory(_ context.Context, _ ids.WorkspaceID, target *conversationv1.AgentId, after *conversationv1.HistoryPointer) (*conversationv1.HistoryPage, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.readDone != nil {
+		defer func() { f.readDone <- struct{}{} }()
+	}
 	f.reads = append(f.reads, historyRead{target: target.GetValue(), after: after.GetValue()})
 	if f.noSource {
 		return nil, ErrNoHistorySource
@@ -818,67 +824,22 @@ func TestSourceUpLoadsNothingWithoutAWaitingReader(t *testing.T) {
 	}
 }
 
-func TestKeepNewestPageLoadsTheRootsNewestPage(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-	store := h.mainBook(3, promptsBook(2))
-
-	// Act.
-	if err := h.resolver.KeepNewestPage(context.Background(), testWorkspace); err != nil {
-		t.Fatalf("KeepNewestPage: %v", err)
-	}
-
-	// Assert: a reader that opens with no source is served the kept page.
-	store.mu.Lock()
-	store.noSource = true
-	store.mu.Unlock()
-	page, _ := h.openPage(rootFeed(), "reader-1")
-	if got := strings.Join(rowIDs(pageRows(t, page)), ","); got != h.promptRowIDs("turn-0", "turn-1") {
-		t.Fatalf("page rows = %v, want the kept newest page", got)
-	}
-}
-
-func TestKeepNewestPageReadsNothingWhenTheNewestPageIsHeld(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-	store := h.mainBook(3, promptsBook(2))
-	h.openPage(rootFeed(), "reader-1")
-
-	// Act.
-	if err := h.resolver.KeepNewestPage(context.Background(), testWorkspace); err != nil {
-		t.Fatalf("KeepNewestPage: %v", err)
-	}
-
-	// Assert.
-	if got := store.readCount(); got != 1 {
-		t.Fatalf("reads = %d, want the open's alone", got)
-	}
-}
-
-func TestKeepNewestPageWhoseReadFailsIsHistoryUnavailable(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-	store := h.mainBook(3, promptsBook(2))
-	store.failFrom = 1
-
-	// Act.
-	err := h.resolver.KeepNewestPage(context.Background(), testWorkspace)
-
-	// Assert.
-	if !errors.Is(err, ErrHistoryUnavailable) {
-		t.Fatalf("err = %v, want ErrHistoryUnavailable", err)
-	}
-}
-
-func TestAPushedNewestLoadWithNoSourceIsLoadedByTheNextSource(t *testing.T) {
-	// Arrange: the source went between the ask and the read.
+func TestAKickWhoseSourceWentIsLoadedByTheNextSource(t *testing.T) {
+	// Arrange: a reader opens with no source; one comes up and goes again
+	// before the kick's read reaches it.
 	h := newHarness(t)
 	store := h.mainBook(3, promptsBook(2))
 	store.noSource = true
-	if err := h.resolver.KeepNewestPage(context.Background(), testWorkspace); err != nil {
-		t.Fatalf("KeepNewestPage: %v", err)
-	}
 	rows := h.follow(rootFeed(), "reader-1")
+	store.mu.Lock()
+	store.readDone = make(chan struct{}, 4)
+	store.mu.Unlock()
+	h.resolver.SourceUp(testWorkspace)
+	select {
+	case <-store.readDone:
+	case <-time.After(historyKickBound):
+		t.Fatal("the kick's read never ran")
+	}
 	store.mu.Lock()
 	store.noSource = false
 	store.mu.Unlock()

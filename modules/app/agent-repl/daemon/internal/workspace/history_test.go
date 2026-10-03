@@ -3,7 +3,6 @@ package workspace
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
 	"time"
 
@@ -290,12 +289,11 @@ func TestFleetReadHistoryReadsAStartBeingRetried(t *testing.T) {
 	}
 }
 
-func TestFleetReadHistoryOfAReapedStartingClientHasNoSource(t *testing.T) {
+func TestFleetReadHistoryOfAReapedHeldShimHasNoSource(t *testing.T) {
 	// Arrange.
 	f := newFleetFixture(t)
 	ws := f.workspace("w1")
-	end := f.fleet.beginHistoryClient(ws.ID, &fakeClient{reaped: true})
-	defer end()
+	f.fleet.sessions[ws.ID] = &live{client: &fakeClient{reaped: true}}
 
 	// Act.
 	_, err := f.fleet.ReadHistory(context.Background(), ws.ID, nil, nil)
@@ -306,50 +304,21 @@ func TestFleetReadHistoryOfAReapedStartingClientHasNoSource(t *testing.T) {
 	}
 }
 
-func TestFleetReadHistoryOfAWithdrawnStartingClientHasNoSource(t *testing.T) {
+func TestASpawnedShimTellsTheFeedASourceIsUpBeforeItsStartAnswers(t *testing.T) {
 	// Arrange.
 	f := newFleetFixture(t)
-	ws := f.workspace("w1")
-	f.fleet.beginHistoryClient(ws.ID, &fakeClient{})()
+	ws := resumable(f)
+	var sourcedAtStart []ids.WorkspaceID
+	f.client.onStart = func() { sourcedAtStart = append([]ids.WorkspaceID(nil), f.feed.sourcesUp...) }
 
 	// Act.
-	_, err := f.fleet.ReadHistory(context.Background(), ws.ID, nil, nil)
-
-	// Assert.
-	if !errors.Is(err, feed.ErrNoHistorySource) {
-		t.Fatalf("err = %v, want ErrNoHistorySource", err)
+	if err := f.fleet.Start(context.Background(), ws); err != nil {
+		t.Fatalf("Start: %v", err)
 	}
-}
-
-func TestBeginHistoryClientTellsTheFeedASourceIsUp(t *testing.T) {
-	// Arrange.
-	f := newFleetFixture(t)
-	ws := f.workspace("w1")
-
-	// Act.
-	end := f.fleet.beginHistoryClient(ws.ID, &fakeClient{})
-	defer end()
 
 	// Assert.
-	if len(f.feed.sourcesUp) != 1 || f.feed.sourcesUp[0] != ws.ID {
-		t.Fatalf("sources up = %v, want %q", f.feed.sourcesUp, ws.ID)
-	}
-}
-
-func TestAWithdrawalOfAReplacedStartingClientKeepsTheNewOne(t *testing.T) {
-	// Arrange: a second start's client replaced the first's.
-	f := newFleetFixture(t)
-	ws := f.workspace("w1")
-	endFirst := f.fleet.beginHistoryClient(ws.ID, &fakeClient{})
-	endSecond := f.fleet.beginHistoryClient(ws.ID, &fakeClient{})
-	defer endSecond()
-
-	// Act.
-	endFirst()
-
-	// Assert.
-	if _, ok := f.fleet.historyClient(ws.ID); !ok {
-		t.Fatal("the first start's withdrawal took the second start's client")
+	if len(sourcedAtStart) != 1 || sourcedAtStart[0] != ws {
+		t.Fatalf("sources up while the start ran = %v, want %q", sourcedAtStart, ws)
 	}
 }
 
@@ -360,83 +329,42 @@ func TestAHeldClientTellsTheFeedASourceIsUp(t *testing.T) {
 	// Act.
 	ws := parkAtColdGate(t, f)
 
-	// Assert: once for the running start, once for the held client.
-	if len(f.feed.sourcesUp) != 2 || f.feed.sourcesUp[1] != ws {
-		t.Fatalf("sources up = %v, want the running start's and the held client's", f.feed.sourcesUp)
+	// Assert: once, when the shim was held at its spawn; the park restates it.
+	if len(f.feed.sourcesUp) != 1 || f.feed.sourcesUp[0] != ws {
+		t.Fatalf("sources up = %v, want the held shim's once", f.feed.sourcesUp)
 	}
 }
 
-func TestAFailedStartKeepsTheNewestPageWhileItsShimServes(t *testing.T) {
+func TestAFailedStartIsAHistorySourceThroughItsHeldShim(t *testing.T) {
 	// Arrange.
 	f := newFleetFixture(t)
 	ws := resumable(f)
 	f.client.response = vendorRefusal(rejectedVendorStart(), "invalid api key")
-	var stoppedAtKeep, sourcedAtKeep bool
-	f.feed.onKeep = func(id ids.WorkspaceID) {
-		stoppedAtKeep = f.client.stoodDown
-		_, sourcedAtKeep = f.fleet.historyClient(id)
-	}
-
-	// Act.
 	_ = f.fleet.Start(context.Background(), ws)
 
+	// Act.
+	_, err := f.fleet.ReadHistory(context.Background(), ws, nil, nil)
+
 	// Assert.
-	if len(f.feed.kept) != 1 || stoppedAtKeep || !sourcedAtKeep {
-		t.Fatalf("kept %v (stopped %v, sourced %v), want one keep through the live client", f.feed.kept, stoppedAtKeep, sourcedAtKeep)
+	if err != nil || f.client.historyReads != 1 || f.client.stoodDown {
+		t.Fatalf("read = %v after %d reads (stood down %t), want the held shim's page", err, f.client.historyReads, f.client.stoodDown)
 	}
 }
 
-func TestAFailedStartIsNoHistorySourceOnceItsShimIsStopped(t *testing.T) {
-	// Arrange.
+func TestAFailedFreshStartIsNoHistorySource(t *testing.T) {
+	// Arrange: the held shim's persisted book names the conversation the
+	// fresh one replaces.
 	f := newFleetFixture(t)
 	ws := f.workspace("w1")
 	f.client.response = vendorRefusal(rejectedVendorStart(), "invalid api key")
-
-	// Act.
 	_ = f.fleet.Start(context.Background(), ws.ID)
 
-	// Assert.
-	if _, ok := f.fleet.historyClient(ws.ID); ok {
-		t.Fatal("a failed start's stopped shim is still a history source")
-	}
-}
-
-func TestAFailedKeepIsAnErrorAndTheStartsOwnErrorStands(t *testing.T) {
-	// Arrange.
-	f := newFleetFixture(t)
-	ws := resumable(f)
-	f.client.response = vendorRefusal(rejectedVendorStart(), "invalid api key")
-	f.feed.keptErr = errors.New("store unreachable")
-
 	// Act.
-	err := f.fleet.Start(context.Background(), ws)
+	_, err := f.fleet.ReadHistory(context.Background(), ws.ID, nil, nil)
 
 	// Assert.
-	if err == nil || strings.Contains(err.Error(), "store unreachable") || len(recordsAt(f.log, opBringUp, "error")) == 0 {
-		t.Fatalf("Start = %v with errors %v; want the start's refusal and the keep's ERROR", err, recordsAt(f.log, opBringUp, "error"))
-	}
-}
-
-func TestAFailedStartWhoseContextEndedKeepsNothing(t *testing.T) {
-	// Arrange.
-	f := newFleetFixture(t)
-	ws := resumable(f)
-	ctx, cancel := context.WithCancel(context.Background())
-	f.client.response = vendorRefusal(rejectedVendorStart(), "invalid api key")
-	entered := make(chan struct{})
-	f.client.entered = entered
-	go func() {
-		<-entered
-		cancel()
-	}()
-	f.client.startHold = make(chan struct{})
-
-	// Act.
-	_ = f.fleet.Start(ctx, ws)
-
-	// Assert.
-	if len(f.feed.kept) != 0 {
-		t.Fatalf("kept %v, want nothing read on an ended context", f.feed.kept)
+	if !errors.Is(err, feed.ErrNoHistorySource) || !f.fleet.Held(ws.ID) {
+		t.Fatalf("read = %v, held = %t; want no source from a held fresh start's shim", err, f.fleet.Held(ws.ID))
 	}
 }
 
@@ -535,21 +463,6 @@ func TestAFreshStartIsNoHistorySourceWhileItRuns(t *testing.T) {
 	// Assert.
 	if !errors.Is(readErr, feed.ErrNoHistorySource) {
 		t.Fatalf("read during a fresh start = %v, want ErrNoHistorySource", readErr)
-	}
-}
-
-func TestAFailedFreshStartKeepsNoPage(t *testing.T) {
-	// Arrange.
-	f := newFleetFixture(t)
-	ws := f.workspace("w1")
-	f.client.response = vendorRefusal(rejectedVendorStart(), "invalid api key")
-
-	// Act.
-	_ = f.fleet.Start(context.Background(), ws.ID)
-
-	// Assert.
-	if len(f.feed.kept) != 0 {
-		t.Fatalf("kept %v, want nothing kept for a fresh conversation", f.feed.kept)
 	}
 }
 

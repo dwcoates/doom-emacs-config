@@ -171,7 +171,7 @@ func (v *verbs) BeginNuke(ctx context.Context, ws ids.WorkspaceID) (Teardown, er
 // nuke is Nuke's slow half.
 func (v *verbs) nuke(ctx context.Context, log dlog.Logger, record wsm.Workspace) error {
 	ws := record.ID
-	if v.deps.Sessions.Live(ws) {
+	if v.deps.Sessions.Held(ws) {
 		if err := v.kill(ctx, log, ws); err != nil {
 			return fmt.Errorf("nuke %q: %w", ws, err)
 		}

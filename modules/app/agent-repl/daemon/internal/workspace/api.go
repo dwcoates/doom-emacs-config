@@ -685,8 +685,12 @@ type Sessions interface {
 	// a caller uses when the start is occasioned by its answer rather than
 	// contained in it; see Fleet.StartDetached for why the register uses it.
 	StartDetached(ws ids.WorkspaceID, done func(error))
-	// Live reports whether the workspace currently has a live session.
+	// Live reports whether the workspace has nothing for a start to do: a
+	// session runs on its shim, or a cold gate parks it.
 	Live(ws ids.WorkspaceID) bool
+	// Held reports whether a shim is held for the workspace, a session on it
+	// or not: what a teardown has to stand down.
+	Held(ws ids.WorkspaceID) bool
 	// SetEffort asks the workspace's shim for an effort level and, once it
 	// confirms, states the level in effect to the topbar.
 	SetEffort(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, level conversationv1.AgentEffortLevel) error
