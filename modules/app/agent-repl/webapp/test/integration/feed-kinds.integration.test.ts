@@ -984,20 +984,25 @@ describe("the one separation renderer", () => {
       .map((child) => `${child.tagName}[${[...child.attributes].map((a) => a.name).sort().join(",")}]`)
       .join(">");
 
-  // The socket-backed per-arm redraw loop reached 936ms under concurrent
-  // integration load, so its host-contention budget is local to this test.
   it("draws every arm with identical element structure", async () => {
-    // Arrange
+    // Arrange: ONE page, each arm pushed live as its own row over the open
+    // feed stream. Booting a daemon and a page per arm made this test's cost
+    // scale with the arm count and overran its budget under concurrent load.
+    harness = await startHarness();
+    await harness.fake.awaitStream("watchFeed");
     const shapes: string[] = [];
     for (const arm of SEPARATION_ARMS) {
-      const row = await drawRow(separationRow(arm));
+      // Act
+      const id = `separation-${arm}`;
+      harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, separationRow(arm, { id: feedId(id) }));
+      await harness.settle();
+      const row = harness.row(id);
+      if (!row) throw new Error(`the feed drew no row for ${id}`);
       shapes.push(shapeOf(row));
-      await harness.stop();
     }
-    harness = await startHarness();
     // Assert: a per-arm divider renderer is a defect; only accent and text differ.
-    expect(new Set(shapes).size).toBe(1);
-  }, 1_500);
+    expect([new Set(shapes).size, shapes.length]).toEqual([1, SEPARATION_ARMS.length]);
+  });
 
   it("draws the worktree-removed outcome through the same renderer", async () => {
     // Arrange / Act
