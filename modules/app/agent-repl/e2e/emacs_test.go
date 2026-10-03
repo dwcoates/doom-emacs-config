@@ -281,6 +281,9 @@ type Emacs struct {
 	// Notifier is the recorder the daemon Emacs spawns posts desktop banners
 	// through (AGENT_REPL_NOTIFIER_CMD).
 	Notifier *harness.Recorder
+	// Browser is the recorder the daemon opens external links through
+	// (AGENT_REPL_BROWSER_CMD).
+	Browser *harness.Recorder
 	// EmacsDir is the per-test `~/.emacs.d` this Emacs boots Doom from. It
 	// is staged from the image's own EMACSDIR: see stageEmacsDir.
 	EmacsDir string
@@ -510,10 +513,15 @@ func StartEmacs(t *testing.T, box sandbox, opts EmacsOpts) *Emacs {
 	// no scenario may raise a real banner, and the container carries no
 	// banner program, which a daemon records at ERROR on its boot.
 	fakeNotifier := harness.NewFakeNotifier(t, filepath.Join(root, "fakebin"))
+	// THE EXTERNAL BROWSER is a recorder as well: no scenario may open a real
+	// one, and a daemon with no launcher configured says so at WARN on every
+	// boot, which a healthy world must not.
+	fakeBrowser := harness.NewFakeBrowser(t, filepath.Join(root, "fakebin"))
 	// The persistent-wifi controller's host tools are faked too: the sandbox
 	// has no pmset or networksetup, and no scenario may touch a real one.
 	hostTools := harness.NewFakeHostTools(t, filepath.Join(root, "host-tools"))
 	e.Notifier = fakeNotifier
+	e.Browser = fakeBrowser
 	prewarmTrampolines(t, box)
 	staged := time.Now()
 	e.stageEmacsDir()
@@ -550,6 +558,7 @@ func StartEmacs(t *testing.T, box sandbox, opts EmacsOpts) *Emacs {
 		"AGENT_REPL_FORBID_VENDOR_CALLS=1",
 		"AGENT_REPL_CLAUDE_BIN=" + fakeClaude,
 		"AGENT_REPL_NOTIFIER_CMD=" + fakeNotifier.Path,
+		"AGENT_REPL_BROWSER_CMD=" + fakeBrowser.Path,
 		"AGENT_REPL_PERSISTENT_WIFI_TOOLS_DIR=" + hostTools,
 		"AGENT_REPL_PERSISTENT_WIFI_HOTSPOT=" + harness.FakeHotspot,
 		"MULTI_REPO_ROOT=" + e.MultiRepoRoot,
