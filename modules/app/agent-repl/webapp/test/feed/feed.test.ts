@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { CONVERSATION_DRAWN_ATTRIBUTE } from "../../src/feed/conversation-drawn.js";
 import { announceItemExpanded } from "../../src/expand.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
@@ -219,6 +220,50 @@ describe("mountFeed: opening the root feed", () => {
     const { h: used } = mount(h);
     await settle();
     expect(used.calls.watchFeed).toHaveLength(0);
+  });
+});
+
+describe("mountFeed: telling Emacs the conversation is on screen", () => {
+  /** Run with a hidden document, the state of a held startup page. */
+  function hiddenPage(): () => void {
+    // Another mount in this file may have marked the shared document already.
+    document.documentElement.removeAttribute(CONVERSATION_DRAWN_ATTRIBUTE);
+    Object.defineProperty(document, "hidden", { configurable: true, get: () => true });
+    return () => {
+      document.documentElement.removeAttribute(CONVERSATION_DRAWN_ATTRIBUTE);
+      delete (document as { hidden?: boolean }).hidden;
+    };
+  }
+
+  it("marks the page drawn once the opening page is applied", async () => {
+    // Arrange
+    const restore = hiddenPage();
+    try {
+      // Act
+      mount();
+      await settle();
+      // Assert
+      expect(document.documentElement.getAttribute(CONVERSATION_DRAWN_ATTRIBUTE)).toBe("page");
+    } finally {
+      restore();
+    }
+  });
+
+  it("marks a refused open, so a held tab is not held forever", async () => {
+    // Arrange
+    const restore = hiddenPage();
+    try {
+      const h = harness({
+        openFeed: () => create(OpenFeedResponseSchema, { result: { case: "error", value: {} } }),
+      });
+      // Act
+      mount(h);
+      await settle();
+      // Assert
+      expect(document.documentElement.getAttribute(CONVERSATION_DRAWN_ATTRIBUTE)).toBe("refused");
+    } finally {
+      restore();
+    }
   });
 });
 
