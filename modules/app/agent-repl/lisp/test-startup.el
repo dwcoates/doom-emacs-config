@@ -116,7 +116,7 @@ reaches Emacs first cannot open a tab ahead of its go-ahead."
   (agent-repl-test-startup--with-run
     ;; Arrange
     (setq agent-repl-test-startup--known '("a"))
-    (agent-repl-startup-note-page-loaded "a")
+    (agent-repl-startup--page-drawn "a")
     (agent-repl-startup-handle (agent-repl-test-startup--opening 1))
     ;; Act
     (agent-repl-startup-handle (agent-repl-test-startup--go-ahead "a"))
@@ -145,7 +145,7 @@ reaches Emacs first cannot open a tab ahead of its go-ahead."
     (agent-repl-startup-handle (agent-repl-test-startup--opening 1))
     (agent-repl-startup-handle (agent-repl-test-startup--go-ahead "a"))
     ;; Act
-    (agent-repl-startup-note-page-loaded "a")
+    (agent-repl-startup--page-drawn "a")
     ;; Assert
     (should (equal (agent-repl-test-startup--opened) '("a")))))
 
@@ -156,7 +156,7 @@ reaches Emacs first cannot open a tab ahead of its go-ahead."
     (setq agent-repl-test-startup--known '("a"))
     (agent-repl-startup-handle (agent-repl-test-startup--opening 1))
     ;; Act
-    (agent-repl-startup-note-page-loaded "a")
+    (agent-repl-startup--page-drawn "a")
     ;; Assert
     (should (null (agent-repl-test-startup--opened)))))
 
@@ -169,10 +169,10 @@ waits, and opens right after tab 1 does."
     (agent-repl-startup-handle (agent-repl-test-startup--opening 2))
     (agent-repl-startup-handle (agent-repl-test-startup--go-ahead "one"))
     (agent-repl-startup-handle (agent-repl-test-startup--go-ahead "two"))
-    (agent-repl-startup-note-page-loaded "two")
+    (agent-repl-startup--page-drawn "two")
     (should (null (agent-repl-test-startup--opened)))
     ;; Act
-    (agent-repl-startup-note-page-loaded "one")
+    (agent-repl-startup--page-drawn "one")
     ;; Assert
     (should (equal (agent-repl-test-startup--opened) '("one" "two")))
     (should (equal (seq-filter (lambda (l) (string-suffix-p ": ready." l))
@@ -185,7 +185,7 @@ waits, and opens right after tab 1 does."
     ;; Arrange
     (agent-repl-startup-handle (agent-repl-test-startup--opening 1))
     (agent-repl-startup-handle (agent-repl-test-startup--go-ahead "a"))
-    (agent-repl-startup-note-page-loaded "a")
+    (agent-repl-startup--page-drawn "a")
     (should (null (agent-repl-test-startup--opened)))
     ;; Act
     (setq agent-repl-test-startup--known '("a"))
@@ -243,7 +243,7 @@ waits, and opens right after tab 1 does."
     (agent-repl-startup-handle (agent-repl-test-startup--finished 1 1))
     (should (eq agent-repl-startup--phase 'running))
     ;; Act
-    (agent-repl-startup-note-page-loaded "a")
+    (agent-repl-startup--page-drawn "a")
     ;; Assert
     (should (eq agent-repl-startup--phase 'done))
     (should (equal (last agent-repl-test-startup--lines 2)
@@ -345,6 +345,79 @@ waits, and opens right after tab 1 does."
         (agent-repl-startup-handle (agent-repl-test-startup--event :invented nil)))
       ;; Assert
       (should (string-match-p "elisp.startup.unknown-event" (car errors))))))
+
+;;;; ---- The page drew its conversation ----
+
+(defmacro agent-repl-test-startup--with-page (reply &rest body)
+  "Run BODY with every page read answering REPLY (a string, or nil for no page).
+`reads' collects the scripts asked; `timers' the re-asks scheduled."
+  (declare (indent 1))
+  `(let ((reads nil) (timers nil))
+     (cl-letf (((symbol-function 'agent-repl--ws-get)
+                (lambda (_ws key) (and (eq key :frontend-buffer) (current-buffer))))
+               ((symbol-function 'agent-repl--frontend-webview-read-script)
+                (lambda (_buf script callback)
+                  (push script reads)
+                  (when ,reply (funcall callback ,reply))
+                  (and ,reply t)))
+               ((symbol-function 'run-at-time)
+                (lambda (_secs _repeat fn &rest args) (push (cons fn args) timers) nil)))
+       ,@body)))
+
+(ert-deftest agent-repl-test-startup-a-loaded-page-is-asked-whether-it-drew ()
+  "The HTML loading is not the conversation drawn: the page is asked."
+  (agent-repl-test-startup--with-run
+    (agent-repl-test-startup--with-page nil
+      ;; Act
+      (agent-repl-startup-note-page-loaded "a")
+      ;; Assert
+      (should (string-match-p "data-conversation-drawn" (car reads))))))
+
+(ert-deftest agent-repl-test-startup-a-page-not-yet-drawn-is-asked-again ()
+  "A page whose conversation has not drawn opens nothing and is asked again."
+  (agent-repl-test-startup--with-run
+    (setq agent-repl-test-startup--known '("a"))
+    (agent-repl-startup-handle (agent-repl-test-startup--opening 1))
+    (agent-repl-startup-handle (agent-repl-test-startup--go-ahead "a"))
+    (agent-repl-test-startup--with-page "{\"ws\":\"a\",\"drawn\":false}"
+      ;; Act
+      (agent-repl-startup-note-page-loaded "a")
+      ;; Assert
+      (should (null (agent-repl-test-startup--opened)))
+      (should (equal timers '((agent-repl-startup--probe "a")))))))
+
+(ert-deftest agent-repl-test-startup-a-drawn-page-opens-its-due-tab ()
+  "The page answering drawn is what opens a tab whose go-ahead is in."
+  (agent-repl-test-startup--with-run
+    (setq agent-repl-test-startup--known '("a"))
+    (agent-repl-startup-handle (agent-repl-test-startup--opening 1))
+    (agent-repl-startup-handle (agent-repl-test-startup--go-ahead "a"))
+    (agent-repl-test-startup--with-page "{\"ws\":\"a\",\"drawn\":true}"
+      ;; Act
+      (agent-repl-startup-note-page-loaded "a")
+      ;; Assert
+      (should (equal (agent-repl-test-startup--opened) '("a"))))))
+
+(ert-deftest agent-repl-test-startup-no-page-is-asked-once-the-startup-is-over ()
+  "Outside the startup a load asks the page nothing."
+  (agent-repl-test-startup--with-run
+    (setq agent-repl-startup--phase 'done)
+    (agent-repl-test-startup--with-page nil
+      ;; Act
+      (agent-repl-startup-note-page-loaded "a")
+      ;; Assert
+      (should (null reads)))))
+
+(ert-deftest agent-repl-test-startup-an-unreadable-reply-is-an-error ()
+  "A reply that is not the probe's JSON is recorded at ERROR."
+  (agent-repl-test-startup--with-run
+    (let ((errors nil))
+      (cl-letf (((symbol-function 'agent-repl--error)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) errors))))
+        ;; Act
+        (agent-repl-startup--on-probe "not json"))
+      ;; Assert
+      (should (string-match-p "elisp.startup.probe-unreadable" (car errors))))))
 
 ;;;; ---- Pre-creation ----
 

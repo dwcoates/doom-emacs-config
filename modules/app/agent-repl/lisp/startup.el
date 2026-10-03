@@ -36,6 +36,7 @@
 
 (require 'cl-lib)
 (require 'subr-x)
+(require 'json)
 
 (declare-function agent-repl--phase-echo "core" (ws fmt &rest args))
 (declare-function agent-repl--info "core" (ws fmt &rest args))
@@ -47,6 +48,8 @@
 (declare-function agent-repl-roster-apply-current "roster" ())
 (declare-function agent-repl--ensure-input-buffer "panels" (ws))
 (declare-function agent-repl--frontend-precreate-refusal "frontend" (ws))
+(declare-function agent-repl--frontend-webview-read-script "frontend" (buf script callback))
+(declare-function agent-repl--ws-get "workspace" (ws key))
 
 (defvar agent-repl-roster--rows-by-id)
 (defvar agent-repl-link-down-functions)
@@ -227,18 +230,76 @@ the web gui, has no page to wait for."
 
 ;;;; ---- Edges ------------------------------------------------------------------
 
+(defconst agent-repl-startup--drawn-attribute "data-conversation-drawn"
+  "The attribute the page sets on its root element once its conversation drew.
+The webapp sets it after the root feed's opening page is applied and painted
+\(webapp/src/feed/conversation-drawn.ts).  An HTML load (`load-changed')
+precedes it: the page is up before any of the conversation is.")
+
+(defconst agent-repl-startup--probe-interval 0.25
+  "Seconds between two reads of a loaded page that has not drawn yet.")
+
+(defun agent-repl-startup--probe-script (ws)
+  "The read that answers whether WS's page has drawn its conversation.
+WS rides in the script and comes back in the reply, because the read's
+callback must be a symbol (`agent-repl--frontend-webview-read-script').
+The reply is always a string: a null reply is dropped without a callback."
+  (format "(function(){return JSON.stringify({ws:%s,drawn:document.documentElement.hasAttribute(%s)});})()"
+          (json-encode ws) (json-encode agent-repl-startup--drawn-attribute)))
+
+(defun agent-repl-startup--probe (ws)
+  "Ask WS's page whether its conversation is on screen.
+Nothing is asked once the startup is over or WS's page is known drawn."
+  (when (and (agent-repl-startup-active-p)
+             (not (gethash ws agent-repl-startup--loaded)))
+    (let ((buf (agent-repl--ws-get ws :frontend-buffer)))
+      (unless (and (buffer-live-p buf)
+                   (agent-repl--frontend-webview-read-script
+                    buf (agent-repl-startup--probe-script ws)
+                    #'agent-repl-startup--on-probe))
+        ;; The page went away under the probe; its next load asks again.
+        (agent-repl--info ws "elisp.startup.probe-skipped ws=%s reason=no-webview" ws)))))
+
+(defun agent-repl-startup--on-probe (raw)
+  "Take the page's RAW reply to `agent-repl-startup--probe-script'.
+A drawn page opens its tab when due; an undrawn one is asked again."
+  (let* ((reply (condition-case err
+                    (json-parse-string raw :object-type 'plist)
+                  (error
+                   (agent-repl--error '(:agent-repl-central "a reply naming no workspace cannot be routed")
+                                      "elisp.startup.probe-unreadable raw=%S error=%S" raw err)
+                   nil)))
+         (ws (plist-get reply :ws)))
+    (cond
+     ((null reply) nil)
+     ((not (stringp ws))
+      (agent-repl--error '(:agent-repl-central "a reply naming no workspace cannot be routed")
+                         "elisp.startup.probe-unreadable raw=%S error=no-workspace" raw))
+     ((eq (plist-get reply :drawn) t)
+      (agent-repl-startup--page-drawn ws))
+     (t
+      (agent-repl--log ws "elisp.startup.probe ws=%s drawn=nil" ws)
+      (run-at-time agent-repl-startup--probe-interval nil #'agent-repl-startup--probe ws)))))
+
 (defun agent-repl-startup-note-page-loaded (ws)
-  "Record that WS's page loaded, and open any tab now due."
+  "WS's page finished loading its HTML: ask whether its conversation drew.
+The tab waits for the conversation on screen, not for the HTML."
+  (when (agent-repl-startup-active-p)
+    (agent-repl-startup--probe ws)))
+
+(defun agent-repl-startup--page-drawn (ws)
+  "Record that WS's conversation is on screen, and open any tab now due."
   (unless (gethash ws agent-repl-startup--loaded)
     (puthash ws t agent-repl-startup--loaded)
-    (agent-repl--log ws "elisp.startup.page-loaded ws=%s" ws)
+    (agent-repl--info ws "elisp.startup.page-drawn ws=%s" ws)
     (when (agent-repl-startup-active-p)
       (agent-repl-startup--advance))))
 
 (defun agent-repl-startup-precreate (ws)
   "Pre-create WS's input buffer while the startup holds its tab.
 Its webview is pre-created by the paced drain (webview-recovery.el), which
-does not wait for focus while the startup is active."
+keeps its focus park: a visible but unfocused Emacs creates no page, and
+so opens no tab, until it is looked at."
   (when (agent-repl-startup-active-p)
     (agent-repl--ensure-input-buffer ws)
     (agent-repl--log ws "elisp.startup.precreated ws=%s" ws)))
