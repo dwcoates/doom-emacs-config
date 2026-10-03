@@ -675,7 +675,12 @@ func (p *processExit) awaitWithin(budget time.Duration) bool {
 // benign case — the process left on its own between the probe and the signal
 // — and even then the reap is still confirmed rather than assumed; any other
 // error is a real fault and fails the test.
-func stopProcess(t *testing.T, name string, cmd *exec.Cmd, exit *processExit) {
+//
+// A STOP THAT FAILS CARRIES THE CHILD'S OWN LOG TAIL (2026-10-03): the store
+// twice missed its SIGTERM bound in one full-suite run, and the failure said
+// only that -- the log that timestamps its drain, checkpoint and close was in
+// a temp directory deleted with the test.
+func stopProcess(t *testing.T, name string, cmd *exec.Cmd, exit *processExit, logPath string) {
 	t.Helper()
 	if cmd.Process == nil || exit.exited() {
 		return
@@ -690,10 +695,23 @@ func stopProcess(t *testing.T, name string, cmd *exec.Cmd, exit *processExit) {
 		t.Errorf("e2e: SIGKILL %s: %v", name, err)
 	}
 	if !exit.awaitWithin(reapGrace) {
-		t.Errorf("e2e: %s was still unreaped %s after SIGKILL, itself %s after SIGTERM", name, reapGrace, DefaultTimeout)
+		t.Errorf("e2e: %s was still unreaped %s after SIGKILL, itself %s after SIGTERM; its log ends:\n%s", name, reapGrace, DefaultTimeout, logTailOf(logPath))
 		return
 	}
-	t.Errorf("e2e: %s did not exit within %s of SIGTERM", name, DefaultTimeout)
+	t.Errorf("e2e: %s did not exit within %s of SIGTERM; its log ends:\n%s", name, DefaultTimeout, logTailOf(logPath))
+}
+
+// stopLogTailBytes bounds the log a failed stop prints: enough for the last
+// few dozen records, which span the stop.
+const stopLogTailBytes = 8 << 10
+
+// logTailOf answers the end of a child's log file, or why it cannot.
+func logTailOf(path string) string {
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Sprintf("(cannot read %s: %v)", path, err)
+	}
+	return tailBytes(body, stopLogTailBytes)
 }
 
 // ===========================================================================
@@ -825,7 +843,7 @@ func (s *Store) Stop() {
 		return
 	}
 	s.stopped = true
-	stopProcess(s.t, "store", s.cmd, s.exit)
+	stopProcess(s.t, "store", s.cmd, s.exit, s.LogPath)
 	if err := os.Remove(s.Socket); err != nil && !errors.Is(err, os.ErrNotExist) {
 		s.t.Errorf("e2e: remove store socket %s: %v", s.Socket, err)
 	}
@@ -1130,7 +1148,7 @@ func (s *Sidecar) Stop() {
 		return
 	}
 	s.stopped = true
-	stopProcess(s.t, "sidecar", s.cmd, s.exit)
+	stopProcess(s.t, "sidecar", s.cmd, s.exit, s.LogPath)
 }
 
 // Log reads every structured-log record the sidecar has written so far.
