@@ -602,16 +602,14 @@ func TestReadyGivesUpAtItsBoundOnASuccessorThatNeverAnswers(t *testing.T) {
 
 // TestSpawnReplacementStartsAnOrdinaryDaemonThatReplaces covers the restart's
 // spawn: the replacement is the same binary, told it replaces, never joining.
-// The stand-in reports its last argument through a FIFO, whose open blocks
-// until the stand-in writes, so the read IS the synchronization.
+// The stand-in writes its last argument into a file renamed into place and
+// exits, so its exit is the synchronization (a FIFO read here could come back
+// empty, or block forever, on macOS; see the argv test below).
 func TestSpawnReplacementStartsAnOrdinaryDaemonThatReplaces(t *testing.T) {
 	// Arrange
 	state := t.TempDir()
-	fifo := filepath.Join(state, "argv")
-	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
-		t.Fatalf("mkfifo: %v", err)
-	}
-	body := "for last; do :; done\nprintf '%s' \"$last\" > " + fifo + "\n"
+	report := filepath.Join(state, "last")
+	body := "for last; do :; done\nprintf '%s' \"$last\" > " + report + ".tmp\nmv " + report + ".tmp " + report + "\n"
 	spawner := NewProcessSpawner(spawnScript(t, state, body), state, nil)
 
 	// Act
@@ -621,7 +619,8 @@ func TestSpawnReplacementStartsAnOrdinaryDaemonThatReplaces(t *testing.T) {
 	if err != nil || pid <= 0 {
 		t.Fatalf("SpawnReplacement = (%d, %v), want a started process", pid, err)
 	}
-	last, err := os.ReadFile(fifo)
+	<-pidExited(t, pid)
+	last, err := os.ReadFile(report)
 	if err != nil {
 		t.Fatalf("read the stand-in's report: %v", err)
 	}
@@ -638,7 +637,7 @@ func TestEverySpawnStartsItsProcessOnTheConfigurationArgv(t *testing.T) {
 	tests := []struct {
 		name string
 		// spawn starts the stand-in and answers a channel closed when it has
-		// exited, or nil when this process cannot observe its exit.
+		// exited.
 		spawn func(s *ProcessSpawner) (<-chan struct{}, error)
 		want  []string
 	}{
@@ -657,22 +656,29 @@ func TestEverySpawnStartsItsProcessOnTheConfigurationArgv(t *testing.T) {
 		{
 			name: "replacement",
 			spawn: func(s *ProcessSpawner) (<-chan struct{}, error) {
-				_, err := s.SpawnReplacement(context.Background())
-				return nil, err
+				pid, err := s.SpawnReplacement(context.Background())
+				if err != nil {
+					return nil, err
+				}
+				return pidExited(t, pid), nil
 			},
 			want: append(slices.Clone(config), "--"+ReplacingFlagName),
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Arrange: the stand-in reports an address, then writes its argv
-			// into a FIFO, whose blocking read is this test's synchronization.
+			// Arrange: the stand-in reports an address, writes its argv into a
+			// file renamed into place, and exits. ITS EXIT IS THIS TEST'S
+			// SYNCHRONIZATION: once the process is gone the file is whole.
+			//
+			// It used to report through a FIFO whose blocking read was the
+			// synchronization, and on macOS that read came back EMPTY although
+			// the stand-in's trace showed the write and a clean exit, or, with
+			// no exit to watch, blocked in its open until the 10m timeout
+			// (daemon unit suite, 2026-10-03).
 			state := t.TempDir()
-			fifo := filepath.Join(state, "argv")
-			if err := syscall.Mkfifo(fifo, 0o600); err != nil {
-				t.Fatalf("mkfifo: %v", err)
-			}
-			body := reportingBody(state) + "printf '%s\\n' \"$@\" > " + fifo + "\n"
+			argv := filepath.Join(state, "argv")
+			body := reportingBody(state) + "printf '%s\\n' \"$@\" > " + argv + ".tmp\nmv " + argv + ".tmp " + argv + "\n"
 			spawner := NewProcessSpawner(spawnScript(t, state, body), state, config)
 			spawner.Poll = time.Millisecond
 
@@ -681,10 +687,13 @@ func TestEverySpawnStartsItsProcessOnTheConfigurationArgv(t *testing.T) {
 			if err != nil {
 				t.Fatalf("spawn: %v", err)
 			}
+			<-exited
 
-			// Assert: the argv, or the stand-in's exit if it died before
-			// writing it -- a FIFO read alone would wait for a writer forever.
-			raw := readArgvFIFO(t, fifo, exited)
+			// Assert
+			raw, err := os.ReadFile(argv)
+			if err != nil {
+				t.Fatalf("the stand-in exited without its argv: %v", err)
+			}
 			got := strings.Split(strings.TrimSuffix(string(raw), "\n"), "\n")
 			if !slices.Equal(got, tt.want) {
 				t.Fatalf("argv = %v, want %v", got, tt.want)
@@ -706,40 +715,28 @@ func TestSpawnReplacementRefusesWithNoDaemonBinary(t *testing.T) {
 	}
 }
 
-// readArgvFIFO reads the stand-in's argv from FIFO. When EXITED is known, a
-// stand-in that exits without ever opening the FIFO fails the test with that
-// fact instead of leaving the blocking open to wait for a writer forever.
-func readArgvFIFO(t *testing.T, fifo string, exited <-chan struct{}) []byte {
+// pidExited answers a channel closed once PID, a process this test started
+// and whose reap belongs to someone else, is gone. It polls the kernel on a
+// ticker: a process that is not this goroutine's child announces nothing.
+func pidExited(t *testing.T, pid int) <-chan struct{} {
 	t.Helper()
-	type read struct {
-		raw []byte
-		err error
-	}
-	done := make(chan read, 1)
+	gone := make(chan struct{})
+	stop := make(chan struct{})
+	t.Cleanup(func() { close(stop) })
 	go func() {
-		raw, err := os.ReadFile(fifo)
-		done <- read{raw, err}
+		ticker := time.NewTicker(5 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			if err := syscall.Kill(pid, 0); err != nil {
+				close(gone)
+				return
+			}
+			select {
+			case <-ticker.C:
+			case <-stop:
+				return
+			}
+		}
 	}()
-	select {
-	case r := <-done:
-		if r.err != nil {
-			t.Fatalf("read the stand-in's argv: %v", r.err)
-		}
-		return r.raw
-	case <-exited:
-		// The stand-in is gone, so whatever it wrote is all it ever will.
-		// Opening the write end releases a read still blocked in its open;
-		// the read then ends with what was written, or nothing.
-		if w, err := os.OpenFile(fifo, os.O_WRONLY, 0); err == nil {
-			_ = w.Close()
-		}
-		r := <-done
-		if r.err != nil {
-			t.Fatalf("read the stand-in's argv: %v", r.err)
-		}
-		if len(r.raw) == 0 {
-			t.Fatalf("the stand-in exited without writing its argv to %s", fifo)
-		}
-		return r.raw
-	}
+	return gone
 }
