@@ -71,6 +71,8 @@
 (declare-function agent-repl-link-primary "daemon-link" ())
 (declare-function agent-repl-link-live "daemon-link" ())
 (declare-function agent-repl-link-successor "daemon-link" ())
+(declare-function agent-repl-link-departing-p "daemon-link" (live &optional ended-planned-on))
+(defvar agent-repl-link-down-planned)
 (defvar agent-repl-link-promote-functions)
 
 (declare-function agent-repl--ws-get "workspace" (ws key))
@@ -1135,7 +1137,19 @@ the link\='s edges walk every detached workspace:
   - the live daemon IS the one WS lost, and it is handing over: its
     successor\='s promotion re-attaches WS (`agent-repl-host-on-link-promote')
     -- registering on a daemon that is leaving would only fail;
-  - otherwise WS is walked onto the live daemon now."
+  - the live daemon announced its OWN ending -- WS\='s stream on it ended
+    planned, or the link\='s `WatchDaemon' carried the ending
+    (`agent-repl-link-departing-p') -- with no successor standing: the
+    link-down edge that ending is owed, then the link-up edge onto the next
+    daemon, re-attaches WS (`agent-repl-host-on-link-up').  The streams end
+    in no fixed order, so a workspace\='s planned end routinely arrives while
+    the link still names the departing daemon;
+  - otherwise WS is walked onto the live daemon now.
+
+Regression, 2026-10-03: a bounce\='s announced stand-down registered every
+workspace on the daemon that had just said it was leaving, and each one
+failed (`elisp.host.planned-ending-register-failed', with the connect
+and rpc failures under it) a millisecond before the link went down."
   (let ((live (agent-repl-link-live))
         (walk (plist-get (agent-repl-host--entry ws) :reattach)))
     (agent-repl-host--put ws :detached t)
@@ -1148,6 +1162,10 @@ the link\='s edges walk every detached workspace:
      ((and (eq live (agent-repl-host--recorded-conn ws))
            (or (agent-repl-link-successor) (agent-repl-link-successor-pending-p)))
       (agent-repl--info ws "elisp.host.reattach-awaiting-promotion ws=%s trigger=%s address=%S"
+                        ws trigger (agent-repl-connect-connection-address live)))
+     ((agent-repl-link-departing-p
+       live (and (equal trigger "planned-ending") (agent-repl-host--recorded-conn ws)))
+      (agent-repl--info ws "elisp.host.reattach-awaiting-link-edge ws=%s trigger=%s address=%S"
                         ws trigger (agent-repl-connect-connection-address live)))
      (t
       (agent-repl-host--reattach ws live :register trigger)))))
@@ -1589,7 +1607,13 @@ nothing."
   "Forget the streams CONN carried, keeping every workspace's last state.
 The pushed state is the newest fact Emacs has; discarding it on a link
 death would blank the editor for the length of an outage the reconnect
-covers by itself."
+covers by itself.
+
+THE LEVEL FOLLOWS WHETHER THE DAEMON SAID SO FIRST.  A daemon that
+announced its own ending (`agent-repl-link-down-planned') stood down on
+purpose, and its link going down is that plan arriving: INFO.  A link that
+died with no word from its daemon is a loss the editor has to ride out:
+WARN, as it always was."
   (let ((affected 0))
     (maphash
      (lambda (ws entry)
@@ -1598,8 +1622,11 @@ covers by itself."
          (agent-repl-host--put ws :stream nil)
          (agent-repl-host--put ws :conn nil)))
      agent-repl-host--by-name)
-    (agent-repl--warn '(:agent-repl-central "link loss spans every workspace")
-                      "elisp.host.link-down workspaces=%d" affected)))
+    (if agent-repl-link-down-planned
+        (agent-repl--info '(:agent-repl-central "link loss spans every workspace")
+                          "elisp.host.link-down workspaces=%d planned=t" affected)
+      (agent-repl--warn '(:agent-repl-central "link loss spans every workspace")
+                        "elisp.host.link-down workspaces=%d planned=nil" affected))))
 
 (defun agent-repl-host-on-link-promote (old new)
   "Re-attach onto NEW every workspace the promotion left behind on OLD.
