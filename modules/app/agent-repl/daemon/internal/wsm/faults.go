@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
+	"sort"
 	"time"
 
 	"claude-repld/internal/dlog"
@@ -218,3 +220,49 @@ func (s *store) Fault(ctx context.Context, id FaultID) (Fault, error) {
 	})
 	return out, err
 }
+
+// FaultRecorded reports whether any fault matching m was ever recorded, open or
+// resolved. A match names its kind and workspace, and every evidence pair it
+// names must be present in the record with exactly that value; the evidence
+// column is JSON, so each pair is one json_extract comparison.
+//
+// A match that names no kind or no workspace is refused: it would answer for
+// every fault of a kind, or every kind, and no caller means that.
+func (s *store) FaultRecorded(ctx context.Context, m FaultMatch) (bool, error) {
+	const op = "daemon.wsm.fault_recorded"
+	fields := dlog.Context{"kind": m.Kind, "workspace": string(m.Workspace)}
+	if m.Kind == "" || m.Workspace == "" {
+		err := errors.New("wsm: a fault match must name its kind and workspace")
+		s.log.Error(op, "refused a fault match naming no kind or no workspace", withError(fields, err))
+		return false, err
+	}
+	query := `SELECT EXISTS (SELECT 1 FROM faults WHERE workspace_id = ? AND kind = ?`
+	args := []any{string(m.Workspace), m.Kind}
+	keys := make([]string, 0, len(m.Evidence))
+	for key := range m.Evidence {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		if !evidenceKey.MatchString(key) {
+			err := fmt.Errorf("wsm: evidence key %q is not a plain field name", key)
+			s.log.Error(op, "refused a fault match naming an evidence key no record is written under", withError(fields, err))
+			return false, err
+		}
+		query += ` AND json_extract(evidence, ?) = ?`
+		args = append(args, "$."+key, m.Evidence[key])
+	}
+	query += `)`
+	var recorded bool
+	err := s.read(ctx, op, fields, func(ctx context.Context) error {
+		return s.db().QueryRowContext(ctx, query, args...).Scan(&recorded)
+	})
+	if err != nil {
+		return false, err
+	}
+	return recorded, nil
+}
+
+// evidenceKey is the shape of every evidence key a fault is recorded under: a
+// proto field name. Only such a key can be spliced into a JSON path unquoted.
+var evidenceKey = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
