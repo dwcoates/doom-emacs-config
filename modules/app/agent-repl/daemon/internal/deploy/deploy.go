@@ -691,27 +691,46 @@ func (d *Deployer) services(ctx context.Context, fresh builds, prev *previous) (
 }
 
 // serviceStale reports whether the process launchd runs for a service is not
-// running the fresh build: no report, a report whose process is gone, or a
-// different build are all stale. A report that cannot be read is stale too —
-// and said so loudly — because nothing can prove the service current.
+// running the fresh build (see serviceStaleness.stale).
 func (d *Deployer) serviceStale(component Component, service, fresh string) bool {
+	return serviceStaleness{reportDir: d.deps.ReportDir, alive: d.deps.Alive, log: d.log, op: opDecide}.stale(component, service, fresh)
+}
+
+// serviceStaleness is THE ONE JUDGEMENT of whether a launchd service runs the
+// fresh build. A deploy (Deployer.services) and a boot (Restarter.EnsureCurrent)
+// both ask it, so the two can never disagree about what "stale" means.
+type serviceStaleness struct {
+	// reportDir is where the services write their build reports.
+	reportDir string
+	// alive reports whether a process is running.
+	alive func(pid int) bool
+	log   dlog.Logger
+	// op is the operation the judgement is recorded under.
+	op string
+}
+
+// stale reports whether the service is not running the fresh build: no
+// report, a report whose process is gone, or a different build are all stale.
+// A report that cannot be read is stale too -- and said so loudly -- because
+// nothing can prove the service current.
+func (s serviceStaleness) stale(component Component, service, fresh string) bool {
 	fields := dlog.Context{"component": string(component), "fresh": fresh}
-	report, found, err := buildreport.Read(d.deps.ReportDir, service)
+	report, found, err := buildreport.Read(s.reportDir, service)
 	switch {
 	case err != nil:
-		d.log.Error(opDecide, "the service's build report is unreadable; it cannot be proven current, so it is restarted", withCause(fields, err))
+		s.log.Error(s.op, "the service's build report is unreadable; it cannot be proven current, so it is restarted", withCause(fields, err))
 		return true
 	case !found:
-		d.log.Info(opDecide, "the service reports no build; restarting it", fields)
+		s.log.Info(s.op, "the service reports no build; restarting it", fields)
 		return true
-	case !d.deps.Alive(report.PID):
-		d.log.Info(opDecide, "the process that reported the service's build is gone; restarting it", merge(fields, dlog.Context{"pid": report.PID}))
+	case !s.alive(report.PID):
+		s.log.Info(s.op, "the process that reported the service's build is gone; restarting it", merge(fields, dlog.Context{"pid": report.PID}))
 		return true
 	case report.Build != fresh:
-		d.log.Info(opDecide, "the service runs an older build; restarting it", merge(fields, dlog.Context{"running": report.Build, "pid": report.PID}))
+		s.log.Info(s.op, "the service runs an older build; restarting it", merge(fields, dlog.Context{"running": report.Build, "pid": report.PID}))
 		return true
 	default:
-		d.log.Debug(opDecide, "the service runs the fresh build", fields)
+		s.log.Debug(s.op, "the service runs the fresh build", fields)
 		return false
 	}
 }
