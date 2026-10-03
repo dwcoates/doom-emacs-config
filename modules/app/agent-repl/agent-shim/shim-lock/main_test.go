@@ -244,6 +244,42 @@ func TestHolderReleasesTheLockWhenItIsKilled(t *testing.T) {
 	}
 }
 
+// THE LOCK OUTLIVES A SIGNAL TO THE SHIM'S PROCESS GROUP: a SIGTERM starts the
+// shim's graceful stand-down, during which its session still runs, so the
+// holder keeps the lock until the shim's own end closes its stdin.
+func TestHolderKeepsTheLockThroughATerminationSignal(t *testing.T) {
+	tests := []struct {
+		name   string
+		signal syscall.Signal
+	}{
+		{"SIGTERM", syscall.SIGTERM},
+		{"SIGINT", syscall.SIGINT},
+		{"SIGHUP", syscall.SIGHUP},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			lockPath := filepath.Join(t.TempDir(), "signalled.lock")
+			h := startHolder(t, lockPath)
+			h.awaitReady(t)
+
+			// Act
+			if err := h.cmd.Process.Signal(tt.signal); err != nil {
+				t.Fatalf("signalling the holder: %v", err)
+			}
+			if err := h.stdin.Close(); err != nil {
+				t.Fatalf("closing the holder's stdin: %v", err)
+			}
+			code := h.awaitExit(t)
+
+			// Assert: it was still there to release on EOF, cleanly.
+			if code != exitOK {
+				t.Fatalf("exit = %d, want %d: the signal ended the holder (stderr: %s)", code, exitOK, h.stderr.String())
+			}
+		})
+	}
+}
+
 func TestSecondHolderTakesTheLockTheFirstReleased(t *testing.T) {
 	// Arrange
 	lockPath := filepath.Join(t.TempDir(), "recycled.lock")

@@ -664,12 +664,16 @@ func (f *Fleet) Resume(ctx context.Context, ws ids.WorkspaceID, c shimclient.Cli
 		})
 		return rollout.Resumed{}, fmt.Errorf("workspace: resume %q: start the watcher: %w", ws, err)
 	}
-	if err := f.hold(ctx, log, ws, &live{client: c, watcher: watcher, hostSessionID: session.HostSessionID, sessionStarted: true}); err != nil {
+	// A resume keeps the session's host identity: the process rotated, the
+	// session did not. A workspace whose session never came up before (a
+	// restart after a failed first start) has none recorded: it takes the one
+	// the fleet's entry carried across the install, else a new one -- never an
+	// empty identity, which the session record refuses.
+	hostSessionID := f.resumedHostSessionID(ws, session.HostSessionID)
+	if err := f.hold(ctx, log, ws, &live{client: c, watcher: watcher, hostSessionID: hostSessionID, sessionStarted: true}); err != nil {
 		return rollout.Resumed{}, err
 	}
-	// A resume keeps the session's host identity: the process rotated, the
-	// session did not.
-	if err := f.recordFacts(ctx, log, ws, session, started, configDir, session.HostSessionID, c.PID()); err != nil {
+	if err := f.recordFacts(ctx, log, ws, session, started, configDir, hostSessionID, c.PID()); err != nil {
 		return rollout.Resumed{}, err
 	}
 	f.publishHost(ws)
@@ -678,6 +682,25 @@ func (f *Fleet) Resume(ctx context.Context, ws ids.WorkspaceID, c shimclient.Cli
 	})
 	f.deps.SessionsUp(ws)
 	return rollout.Resumed{}, nil
+}
+
+// resumedHostSessionID answers the host identity a resumed session is filed
+// under: RECORDED when the record names one, else the one the workspace's
+// entry carries, else a newly minted one.
+func (f *Fleet) resumedHostSessionID(ws ids.WorkspaceID, recorded string) string {
+	if recorded != "" {
+		return recorded
+	}
+	f.mu.RLock()
+	carried := ""
+	if entry, ok := f.sessions[ws]; ok {
+		carried = entry.hostSessionID
+	}
+	f.mu.RUnlock()
+	if carried != "" {
+		return carried
+	}
+	return wsm.NewHostSessionID()
 }
 
 // Hibernate stands a workspace's session down for the idle sweep. It is
