@@ -282,7 +282,7 @@ export async function boot(): Promise<void> {
 
     // A STANDING GATE DOCKS AT THE BOTTOM EDGE while Emacs hides the input
     // window over it; both read the daemon's one cold-gate standing.
-    installGateDock(shell.feed);
+    installGateDock(shell.feed, shell.gateDock);
 
     // PROSE LINKS ROUTE LIKE STRUCTURED ONES. A markdown anchor in a bubble or
     // the hold tray would otherwise navigate the webview away from the

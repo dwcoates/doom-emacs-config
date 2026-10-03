@@ -49,6 +49,12 @@
            grows. Outside the scroll zone for exactly that reason. -->
       <footer id="footer" data-component="footer"></footer>
 
+      <!-- The docked gate: while a gate stands (the cold gate), Emacs hides
+           the workspace's input window and this page grows into its space;
+           the gate's banner is drawn HERE, the page's very bottom, below the
+           footer, at the input window's height. Hidden while no gate stands. -->
+      <div id="gate-dock" data-component="gate-dock" hidden></div>
+
       <!-- The composer. Production runs COMPOSER-LESS -- the root composer is
            host-native (Emacs) -- so this ships hidden and is revealed only by
            the dev-mode `&composer=1` boot. Per-bubble composers do not live
