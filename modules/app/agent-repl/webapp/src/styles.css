@@ -84,6 +84,9 @@
      theme's bright prompt blue swallows --accent, so it sets its own. */
   --prompt-link: var(--accent);
   --ok: #16a34a;
+  /* The cold gate's compact border: the success green, a touch darker
+     (owner request, 2026-10-03). */
+  --cold-gate-compact-border: #128a3d;
   --err: #dc2626;
   /* Token figures wear ONE colour wherever a token count is drawn, so a reader
      learns the hue means "tokens" once. Yellow for now, defined here so every
@@ -6243,8 +6246,16 @@ bubble-body.bubble-body { display: block; }
 .cold-gate-buttons > ar-button.hibernation-compact {
   background: var(--bg);
   color: var(--fg);
-  border-color: var(--ok);
+  border-color: var(--cold-gate-compact-border);
 }
+/* Every label in the one colour (owner request, 2026-10-03): clear keeps its
+   red BORDER as the destructive mark, but not red text. */
+.cold-gate-buttons > ar-button.hibernation-clear { color: var(--fg); }
+/* Borders half again as thick as the shared 1px (owner request, 2026-10-03). */
+.cold-gate-buttons > ar-button { border-width: 1.5px; }
+/* A little more room under the buttons, so the gate stands a touch taller
+   (owner request, 2026-10-03). */
+.cold-gate .hibernation-actions:has(> .cold-gate-buttons) { margin-bottom: 0.45rem; }
 .cold-gate-choice {
   display: block;
   padding: 0.1rem 0;
