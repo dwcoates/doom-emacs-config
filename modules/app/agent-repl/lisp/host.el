@@ -71,7 +71,7 @@
 (declare-function agent-repl-link-primary "daemon-link" ())
 (declare-function agent-repl-link-live "daemon-link" ())
 (declare-function agent-repl-link-successor "daemon-link" ())
-(declare-function agent-repl-link-ending-p "daemon-link" (conn))
+(declare-function agent-repl-link-departing-p "daemon-link" (live &optional ended-planned-on))
 (defvar agent-repl-link-down-planned)
 (defvar agent-repl-link-promote-functions)
 
@@ -1139,7 +1139,7 @@ the link\='s edges walk every detached workspace:
     -- registering on a daemon that is leaving would only fail;
   - the live daemon announced its OWN ending -- WS\='s stream on it ended
     planned, or the link\='s `WatchDaemon' carried the ending
-    (`agent-repl-link-ending-p') -- with no successor standing: the
+    (`agent-repl-link-departing-p') -- with no successor standing: the
     link-down edge that ending is owed, then the link-up edge onto the next
     daemon, re-attaches WS (`agent-repl-host-on-link-up').  The streams end
     in no fixed order, so a workspace\='s planned end routinely arrives while
@@ -1163,9 +1163,8 @@ and rpc failures under it) a millisecond before the link went down."
            (or (agent-repl-link-successor) (agent-repl-link-successor-pending-p)))
       (agent-repl--info ws "elisp.host.reattach-awaiting-promotion ws=%s trigger=%s address=%S"
                         ws trigger (agent-repl-connect-connection-address live)))
-     ((or (agent-repl-link-ending-p live)
-          (and (equal trigger "planned-ending")
-               (eq live (agent-repl-host--recorded-conn ws))))
+     ((agent-repl-link-departing-p
+       live (and (equal trigger "planned-ending") (agent-repl-host--recorded-conn ws)))
       (agent-repl--info ws "elisp.host.reattach-awaiting-link-edge ws=%s trigger=%s address=%S"
                         ws trigger (agent-repl-connect-connection-address live)))
      (t
