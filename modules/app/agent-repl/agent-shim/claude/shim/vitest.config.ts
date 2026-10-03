@@ -26,6 +26,11 @@ export default defineConfig({
     // The vendor guard keeps every test offline. The log setup installs a
     // deterministic inherited sink for canonical JSON logging assertions.
     setupFiles: ["./test/setup.ts", "./test/log-setup.ts"],
+    // EVERY TEMP FILE THIS RUN MAKES lives under one root the run owns and
+    // removes (test/run-tmp-root.ts has the measurement): a create in the
+    // shared, leak-bloated user temp directory stalled for seconds under the
+    // full suite set and timed tests out on nothing else.
+    globalSetup: ["./test/run-tmp-root.ts"],
     // The integration suite runs under vitest.integration.config.ts
     // (`npm run test:integration`): it spawns the BUILT bundle, so including it
     // here would make a fresh checkout's `npm test` fail for want of dist/.
