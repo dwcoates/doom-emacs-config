@@ -75,6 +75,11 @@ type FaultRecorder interface {
 	// OpenFaults lists the standing faults in scope, which is what the
 	// turn-started recovery edge reads to close every fault that ends there.
 	OpenFaults(ctx context.Context, scope wsm.FaultScope) ([]wsm.Fault, error)
+	// FaultRecorded answers whether a fault raised about the same occurrence
+	// was ever recorded, open or resolved, by this daemon or any before it.
+	// It is what a turn's terminal verdict reads before it is raised, so a
+	// terminal replayed on every boot raises its verdict once.
+	FaultRecorded(ctx context.Context, m wsm.FaultMatch) (bool, error)
 }
 
 // answerFaultState is the ONE final-answer fault standing for a workspace.
@@ -122,11 +127,32 @@ func (r *resolver) answerFaultLine(why string) string {
 // replays across store planes neither doubles the record nor moves the line's
 // age.
 //
+// A TERMINAL'S VERDICT IS RAISED ONCE, NOT ON EVERY ARRIVAL OF THE TERMINAL.
+// A turn concludes once, but its terminal arrives again and again: every boot
+// and every scroll back replays its page, and another store plane's copy can
+// follow the first. Each arrival carries the same verdict. One the fault
+// record already holds (answerVerdictRecorded) is recorded at INFO and raised
+// no further: re-raising it made every boot of a workspace log the same dozen
+// ERRORs and churn the same dozen faults through the footer. One the record
+// does NOT hold — the turn concluding now, or a turn that concluded while no
+// daemon watched it — is raised, so no unresolved answer is ever silent, and
+// the record that raise leaves is what every later arrival finds.
+//
+// A STALL IS NOT A TERMINAL'S VERDICT. The same fold can go silent, recover
+// and go silent again, and each is a stall of its own, so a stall is never
+// looked up in the record.
+//
 // `message` is the ERROR record's explanatory sentence; the footer's line is
 // composed from `why` by answerFaultLine, so the strip stays terse and the log
 // stays readable without either wording the other.
 func (r *resolver) raiseAnswerFault(s *wsState, turn, unit, why, message string) {
 	log := r.logger(s.id)
+	if why != whyStalled && r.answerVerdictRecorded(s, turn, unit, why) {
+		log.Info("daemon.feed.final_answer_verdict_recorded",
+			"a turn's answer did not land, and the fault record already holds that verdict; its terminal arriving again raises nothing new",
+			dlog.Context{"turn": turn, "unit": unit, "why": why, "plane": s.plane.String()})
+		return
+	}
 	log.Error("daemon.feed.final_answer_unresolved", message,
 		dlog.Context{"turn": turn, "unit": unit, "why": why})
 	if s.answerFault != nil && s.answerFault.why == why && s.answerFault.unit == unit {
@@ -160,6 +186,29 @@ func (r *resolver) raiseAnswerFault(s *wsState, turn, unit, why, message string)
 		return
 	}
 	s.answerFault = &answerFaultState{id: id, why: why, unit: unit, openedAt: openedAt}
+}
+
+// answerVerdictRecorded answers whether the fault record already holds this
+// verdict: a final-answer fault of this workspace raised about the same turn,
+// unit and reason, open or long resolved, by this daemon or any before it. A
+// record that cannot be read answers false, so the verdict is raised rather
+// than dropped on a read that failed; the failure itself is ERROR.
+func (r *resolver) answerVerdictRecorded(s *wsState, turn, unit, why string) bool {
+	if r.deps.Faults == nil {
+		return false
+	}
+	recorded, err := r.deps.Faults.FaultRecorded(context.Background(), wsm.FaultMatch{
+		Workspace: s.id,
+		Kind:      health.KindFinalAnswerUnresolved,
+		Evidence:  map[string]string{"turn": turn, "unit": unit, "why": why},
+	})
+	if err != nil {
+		r.logger(s.id).Error("daemon.feed.final_answer_record_unreadable",
+			"the fault record could not say whether a turn's verdict was already raised; it is raised as new",
+			dlog.Context{"turn": turn, "unit": unit, "why": why, "cause": err.Error()})
+		return false
+	}
+	return recorded
 }
 
 // closeAnswerFault retracts the standing final-answer fault, if one stands,
