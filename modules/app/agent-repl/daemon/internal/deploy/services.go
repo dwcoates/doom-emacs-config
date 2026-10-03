@@ -9,6 +9,9 @@ import (
 	"strings"
 	"time"
 
+	"agentrepl/logging/buildreport"
+
+	"claude-repld/internal/buildid"
 	"claude-repld/internal/dlog"
 )
 
@@ -84,6 +87,13 @@ type Restarter struct {
 	Windows  ServiceWindows
 	Clock    Clock
 	Log      dlog.Logger
+	// CacheBin is where launchd runs the services from: the installed build a
+	// running service is judged against (EnsureCurrent).
+	CacheBin string
+	// ReportDir is where the services write their build reports.
+	ReportDir string
+	// Alive reports whether a process is running; nil is the kernel's answer.
+	Alive func(pid int) bool
 }
 
 // RestartStore restarts the store — and, because its socket is out while it
@@ -135,21 +145,106 @@ func (r *Restarter) RestartStore(ctx context.Context) error {
 // an absent socket is an error storm in its log. A service already loaded is
 // left exactly as it is.
 func (r *Restarter) EnsureLoaded(ctx context.Context) error {
+	_, _, err := r.ensureBothLoaded(ctx)
+	return err
+}
+
+// ensureBothLoaded is EnsureLoaded, answering which of the two it bootstrapped.
+func (r *Restarter) ensureBothLoaded(ctx context.Context) (storeBootstrapped, sidecarBootstrapped bool, err error) {
 	fields := dlog.Context{"store": StoreLabel, "sidecar": SidecarLabel}
-	storeBootstrapped, err := r.ensureLoaded(ctx, StoreLabel, fields)
+	storeBootstrapped, err = r.ensureLoaded(ctx, StoreLabel, fields)
 	if err != nil {
-		return err
+		return false, false, err
 	}
 	if storeBootstrapped {
 		if err := r.awaitStoreSocket(ctx, fields); err != nil {
-			return err
+			return true, false, err
 		}
 	}
-	if _, err := r.ensureLoaded(ctx, SidecarLabel, fields); err != nil {
-		return err
+	sidecarBootstrapped, err = r.ensureLoaded(ctx, SidecarLabel, fields)
+	if err != nil {
+		return storeBootstrapped, false, err
 	}
 	r.Log.Debug(opServices, "launchd holds both services", fields)
+	return storeBootstrapped, sidecarBootstrapped, nil
+}
+
+// EnsureCurrent is the BOOT's service step: launchd holds both services
+// (EnsureLoaded), and neither RUNS an older build than the one installed in
+// CacheBin. A running service whose build report is not the installed build
+// is restarted in the recorded safe order (RestartStore, which takes the
+// sidecar with it, or RestartSidecar alone), judged by the ONE staleness
+// check a deploy uses (serviceStaleness).
+//
+// IT RUNS BEFORE ANY SHIM STARTS, and that is the whole point of it. A bounce
+// rebuilds and installs the services' binaries, stands the daemon down, and
+// leaves the services to the daemon that boots next: restarted here, they are
+// down only while no shim exists to lose them. Stopped from outside instead,
+// they went down under whatever the freshly relaunched daemon had already
+// started (2026-10-03).
+//
+// Only a RUNNING service is judged. One this call just bootstrapped runs the
+// installed build by construction, and one launchd holds with no process
+// starts from the installed build when it next runs; restarting either would
+// buy nothing. An installed build that cannot be read is an error: nothing
+// can then prove the running service current, and nothing could restart it
+// onto a build that is not there.
+func (r *Restarter) EnsureCurrent(ctx context.Context) error {
+	storeBootstrapped, sidecarBootstrapped, err := r.ensureBothLoaded(ctx)
+	if err != nil {
+		return err
+	}
+	storeStale, err := r.runningStale(ctx, storeBootstrapped, ComponentStore, StoreLabel, buildreport.ServiceStore)
+	if err != nil {
+		return err
+	}
+	if storeStale {
+		// A STORE RESTART RESTARTS THE SIDECAR TOO: its socket is out while the
+		// store restarts, and a fresh pair is the known-good state.
+		r.Log.Info(opServices, "the running store is not the installed build; restarting it, and the sidecar with it, before any shim starts", nil)
+		return r.RestartStore(ctx)
+	}
+	sidecarStale, err := r.runningStale(ctx, sidecarBootstrapped, ComponentSidecar, SidecarLabel, buildreport.ServiceSidecar)
+	if err != nil {
+		return err
+	}
+	if sidecarStale {
+		r.Log.Info(opServices, "the running sidecar is not the installed build; restarting it before any shim starts", nil)
+		return r.RestartSidecar(ctx)
+	}
+	r.Log.Debug(opServices, "both services run the installed build", nil)
 	return nil
+}
+
+// runningStale answers whether the service launchd runs under label is
+// running a build other than the one installed for it. BOOTSTRAPPED says this
+// boot just started it, from the installed build.
+func (r *Restarter) runningStale(ctx context.Context, bootstrapped bool, component Component, label, service string) (bool, error) {
+	fields := dlog.Context{"label": label, "service": service}
+	if bootstrapped {
+		r.Log.Debug(opServices, "the service was just bootstrapped from the installed build", fields)
+		return false, nil
+	}
+	_, pid, err := r.Launchd.Print(ctx, label)
+	if err != nil {
+		r.Log.Error(opServices, "could not read a service's launchd state to judge its build", withCause(fields, err))
+		return false, fmt.Errorf("deploy: read %s: %w", label, err)
+	}
+	if pid == 0 {
+		r.Log.Debug(opServices, "launchd runs no process for the service; it starts from the installed build", fields)
+		return false, nil
+	}
+	installed := filepath.Join(r.CacheBin, service)
+	fresh, err := buildid.File(installed)
+	if err != nil {
+		r.Log.Error(opServices, "the service's installed build could not be read; its running build cannot be judged", withCause(merge(fields, dlog.Context{"installed": installed}), err))
+		return false, fmt.Errorf("deploy: read the installed %s %s: %w", service, installed, err)
+	}
+	alive := r.Alive
+	if alive == nil {
+		alive = processAlive
+	}
+	return serviceStaleness{reportDir: r.ReportDir, alive: alive, log: r.Log, op: opServices}.stale(component, service, fresh), nil
 }
 
 // ensureLoaded bootstraps label from its plist when launchd does not hold it,

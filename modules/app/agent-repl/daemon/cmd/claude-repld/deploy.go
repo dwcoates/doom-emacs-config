@@ -128,6 +128,8 @@ func buildDeployer(ctx context.Context, p deployerParams) (*deploy.Deployer, *de
 		Windows:     deploy.DefaultServiceWindows,
 		Clock:       rollout.SystemClock{},
 		Log:         log,
+		CacheBin:    where.cacheBin,
+		ReportDir:   where.reportDir,
 	}
 	deployer, err := deploy.New(deploy.Deps{
 		Live: deploy.Live{

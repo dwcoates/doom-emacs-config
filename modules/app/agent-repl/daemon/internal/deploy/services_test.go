@@ -11,6 +11,8 @@ import (
 	"sync"
 	"testing"
 
+	"agentrepl/logging/buildreport"
+
 	"claude-repld/internal/dlog"
 )
 
@@ -112,6 +114,7 @@ type restarterHarness struct {
 	launchd *fakeLaunchd
 	log     *dlog.TestLogger
 	sock    string
+	alive   map[int]bool
 }
 
 func newRestarter(t *testing.T) *restarterHarness {
@@ -130,8 +133,11 @@ func newRestarter(t *testing.T) *restarterHarness {
 	plists := t.TempDir()
 	writeFile(t, filepath.Join(plists, SidecarLabel+".plist"), "<plist/>")
 	log := dlog.NewTestLogger()
-	h := &restarterHarness{launchd: newFakeLaunchd(), log: log, sock: filepath.Join(sockDir, "store.sock")}
+	h := &restarterHarness{launchd: newFakeLaunchd(), log: log, sock: filepath.Join(sockDir, "store.sock"), alive: map[int]bool{}}
 	h.r = &Restarter{
+		CacheBin:    t.TempDir(),
+		ReportDir:   t.TempDir(),
+		Alive:       func(pid int) bool { return h.alive[pid] },
 		Launchd:     h.launchd,
 		PlistDir:    plists,
 		StoreSocket: h.sock,
@@ -569,5 +575,129 @@ func TestEnsureLoadedSurfacesAnUnreadableLaunchdState(t *testing.T) {
 	// Assert.
 	if err == nil || !errors.Is(err, h.launchd.printErr) {
 		t.Fatalf("EnsureLoaded = %v, want the print failure", err)
+	}
+}
+
+// running states that the service launchd runs as pid reports BUILD, and that
+// the installed build is INSTALLED.
+func (h *restarterHarness) running(t *testing.T, label, service string, pid int, build, installed string) {
+	t.Helper()
+	writeFile(t, filepath.Join(h.r.CacheBin, service), installed)
+	if err := buildreport.Write(h.r.ReportDir, service, buildreport.Report{PID: pid, Build: hashOf(t, build)}); err != nil {
+		t.Fatal(err)
+	}
+	h.alive[pid] = true
+	h.launchd.pid[label] = pid
+}
+
+// acts answers every launchd call other than a look.
+func (h *restarterHarness) acts() []string {
+	var out []string
+	for _, c := range h.launchd.Calls() {
+		if !strings.HasPrefix(c, "print") {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+func TestEnsureCurrentRestartsAStaleStoreAndItsSidecarInTheSafeOrder(t *testing.T) {
+	// Arrange: the running store is an older build than the installed one.
+	h := newRestarter(t)
+	h.running(t, StoreLabel, buildreport.ServiceStore, 10, "old store", "new store")
+	h.running(t, SidecarLabel, buildreport.ServiceSidecar, 20, "new sidecar", "new sidecar")
+	h.launchd.onKickstart = func() { h.bindSocket(t) }
+
+	// Act
+	err := h.r.EnsureCurrent(context.Background())
+
+	// Assert
+	want := []string{"bootout " + SidecarLabel, "kickstart " + StoreLabel, "bootstrap " + SidecarLabel + ".plist"}
+	if err != nil || fmt.Sprint(h.acts()) != fmt.Sprint(want) {
+		t.Fatalf("EnsureCurrent = %v, acts %v; want %v", err, h.acts(), want)
+	}
+}
+
+func TestEnsureCurrentLeavesFreshServicesAlone(t *testing.T) {
+	// Arrange
+	h := newRestarter(t)
+	h.running(t, StoreLabel, buildreport.ServiceStore, 10, "new store", "new store")
+	h.running(t, SidecarLabel, buildreport.ServiceSidecar, 20, "new sidecar", "new sidecar")
+
+	// Act
+	err := h.r.EnsureCurrent(context.Background())
+
+	// Assert
+	if err != nil || len(h.acts()) != 0 {
+		t.Fatalf("EnsureCurrent = %v, acts %v; want nothing touched", err, h.acts())
+	}
+}
+
+func TestEnsureCurrentRestartsAStaleSidecarAlone(t *testing.T) {
+	// Arrange
+	h := newRestarter(t)
+	h.running(t, StoreLabel, buildreport.ServiceStore, 10, "new store", "new store")
+	h.running(t, SidecarLabel, buildreport.ServiceSidecar, 20, "old sidecar", "new sidecar")
+
+	// Act
+	err := h.r.EnsureCurrent(context.Background())
+
+	// Assert
+	if want := []string{"kickstart " + SidecarLabel}; err != nil || fmt.Sprint(h.acts()) != fmt.Sprint(want) {
+		t.Fatalf("EnsureCurrent = %v, acts %v; want %v", err, h.acts(), want)
+	}
+}
+
+func TestEnsureCurrentLeavesAServiceLaunchdRunsNoProcessFor(t *testing.T) {
+	// Arrange: both loaded, neither running, no reports at all.
+	h := newRestarter(t)
+	h.launchd.pid[StoreLabel], h.launchd.pid[SidecarLabel] = 0, 0
+
+	// Act
+	err := h.r.EnsureCurrent(context.Background())
+
+	// Assert
+	if err != nil || len(h.acts()) != 0 {
+		t.Fatalf("EnsureCurrent = %v, acts %v; want nothing touched", err, h.acts())
+	}
+}
+
+func TestEnsureCurrentDoesNotRestartAStoreItJustBootstrapped(t *testing.T) {
+	// Arrange: the store is unloaded and has never reported a build.
+	h := newRestarter(t)
+	h.unload(t, StoreLabel)
+	h.running(t, SidecarLabel, buildreport.ServiceSidecar, 20, "new sidecar", "new sidecar")
+	h.launchd.onBootstrap = func(plist string) {
+		if plist == StoreLabel+".plist" {
+			h.launchd.mu.Lock()
+			h.launchd.loaded[StoreLabel], h.launchd.pid[StoreLabel] = true, 10
+			h.launchd.mu.Unlock()
+			h.bindSocket(t)
+		}
+	}
+
+	// Act
+	err := h.r.EnsureCurrent(context.Background())
+
+	// Assert
+	if want := []string{"bootstrap " + StoreLabel + ".plist"}; err != nil || fmt.Sprint(h.acts()) != fmt.Sprint(want) {
+		t.Fatalf("EnsureCurrent = %v, acts %v; want %v", err, h.acts(), want)
+	}
+}
+
+func TestEnsureCurrentSurfacesAnUnreadableInstalledBuild(t *testing.T) {
+	// Arrange: the store runs, but nothing is installed to judge it against.
+	h := newRestarter(t)
+	h.running(t, StoreLabel, buildreport.ServiceStore, 10, "new store", "new store")
+	if err := os.Remove(filepath.Join(h.r.CacheBin, buildreport.ServiceStore)); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	err := h.r.EnsureCurrent(context.Background())
+
+	// Assert
+	if err == nil || !loggedTo(h.log, "error", "installed build could not be read") || len(h.acts()) != 0 {
+		t.Fatalf("EnsureCurrent = %v, acts %v, records %+v; want the error at ERROR and nothing touched", err, h.acts(), h.log.Records())
 	}
 }
