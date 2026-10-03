@@ -126,19 +126,25 @@ alive() {
 
 # await_exit NAME PID... -- wait up to the grace period for every given pid to
 # exit, leaving the ones still running in OUTLIVED.
+#
+# IT LOOKS EVERY TENTH OF A SECOND, NOT EVERY SECOND, and that is the point of
+# it. The daemon's stand-down exits in tens of milliseconds, and Emacs starts a
+# fresh daemon about a second after the old one's link goes down; that daemon's
+# boot loads the store before it starts any shim. The services are stopped the
+# moment this returns, so a whole second spent noticing the exit is a second in
+# which the fresh daemon can bring shims up against a store about to go down.
 OUTLIVED=""
 await_exit() {
-    local name="$1" waited=0
+    local name="$1" tenths=0
     shift
-    # shellcheck disable=SC2086
     while OUTLIVED="$(alive "$@")"; [ -n "$OUTLIVED" ]; do
-        if [ "$waited" -ge "$GRACE" ]; then
+        if [ "$tenths" -ge "$((GRACE * 10))" ]; then
             # shellcheck disable=SC2086
             log "$name: pid(s) $(echo $OUTLIVED) outlived the ${GRACE}s grace"
             return 0
         fi
-        sleep 1
-        waited=$((waited + 1))
+        sleep 0.1
+        tenths=$((tenths + 1))
     done
     return 0
 }
