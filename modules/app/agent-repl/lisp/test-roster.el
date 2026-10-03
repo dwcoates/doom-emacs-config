@@ -1897,9 +1897,13 @@ Each subscribe answers a fresh stream record `(:conn C :on-push F
   (declare (indent 1))
   `(let ((streams nil)
          (agent-repl-roster--stream nil)
+         (agent-repl-roster--stream-conn nil)
          (agent-repl-roster--accepted nil)
-         (agent-repl-roster--ending-stream nil))
+         (agent-repl-roster--ending-stream nil)
+         (ending-conn nil))
      (cl-letf (((symbol-function 'agent-repl-link-live) (lambda () ,live))
+               ((symbol-function 'agent-repl-link-ending-p)
+                (lambda (conn) (and conn (eq conn ending-conn))))
                ((symbol-function 'agent-repl-connect-stream-cancel) #'ignore)
                ((symbol-function 'agent-repl-rpc-watch-workspace-roster)
                 (lambda (conn on-push on-close &optional on-open)
@@ -2064,6 +2068,66 @@ LEVEL is the logging rung's symbol, e.g. `agent-repl--info'."
         (funcall (plist-get (car streams) :on-open))
         ;; Act
         (agent-repl-test-roster--end-planned (car streams))
+        ;; Assert
+        (should (eq (plist-get agent-repl-roster--stream :conn) live))))))
+
+;; Regression, 2026-10-03: a bounce's announced stand-down ended the roster
+;; stream before the link's own, and the roster re-subscribed on the daemon
+;; that had just said it was leaving.
+
+(ert-deftest agent-repl-test-roster-planned-end-on-the-departing-live-daemon-subscribes-nothing ()
+  "A planned end while the link still names the departing daemon dials nothing."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let ((leaving (agent-repl-connect-open "127.0.0.1:61043")))
+      (agent-repl-test-roster--with-stream leaving
+        (agent-repl-roster-subscribe leaving)
+        (funcall (plist-get (car streams) :on-open))
+        ;; Act
+        (agent-repl-test-roster--end-planned (car streams))
+        ;; Assert
+        (should (and (= (length streams) 1)
+                     (null agent-repl-roster--stream)))))))
+
+(ert-deftest agent-repl-test-roster-planned-end-on-the-departing-live-daemon-records-the-wait ()
+  "The wait for the link edge is on the record, at INFO."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let ((leaving (agent-repl-connect-open "127.0.0.1:61043"))
+          (logs nil))
+      (agent-repl-test-roster--with-stream leaving
+        (agent-repl-roster-subscribe leaving)
+        (funcall (plist-get (car streams) :on-open))
+        (agent-repl-test-roster--capturing 'agent-repl--info
+          ;; Act
+          (agent-repl-test-roster--end-planned (car streams)))
+        ;; Assert
+        (should (member "elisp.roster.resubscribe-awaiting-link-edge reason=daemon-departing address=\"127.0.0.1:61043\"" logs))))))
+
+(ert-deftest agent-repl-test-roster-a-loss-on-a-live-daemon-that-announced-its-ending-waits ()
+  "A loss on a daemon whose link carried the ending waits for the link edge too."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let ((leaving (agent-repl-connect-open "127.0.0.1:61043")))
+      (agent-repl-test-roster--with-stream leaving
+        (agent-repl-roster-subscribe leaving)
+        (funcall (plist-get (car streams) :on-open))
+        (setq ending-conn leaving)
+        ;; Act
+        (funcall (plist-get (car streams) :on-close) '(:error (:kind :transport)))
+        ;; Assert
+        (should (= (length streams) 1))))))
+
+(ert-deftest agent-repl-test-roster-a-loss-on-a-live-daemon-that-said-nothing-resubscribes ()
+  "A loss on the live daemon that announced no ending re-subscribes on it at once."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let ((live (agent-repl-connect-open "127.0.0.1:61043")))
+      (agent-repl-test-roster--with-stream live
+        (agent-repl-roster-subscribe live)
+        (funcall (plist-get (car streams) :on-open))
+        ;; Act
+        (funcall (plist-get (car streams) :on-close) '(:error (:kind :transport)))
         ;; Assert
         (should (eq (plist-get agent-repl-roster--stream :conn) live))))))
 
