@@ -14,6 +14,9 @@ set -euo pipefail
 
 THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 RUNTIME="$THIS_DIR/agent-repl-runtime"
+# The hard bounce asks the running Emacs to hot-load its stale elisp with this form.
+MODULE="$(cd "$THIS_DIR/.." && pwd -P)"
+RELOAD="emacsclient (agent-repl-elisp-reload-if-stale \"$MODULE\")"
 TMP="$(cd "$(mktemp -d)" && pwd -P)"
 trap 'rm -rf "$TMP"' EXIT
 PASS=0
@@ -61,6 +64,9 @@ case "\$form" in
         exit 0 ;;
     *mapconcat*) printf '"%s"\n' "\${STUB_UNSAVED:-}" ;;
     "(load "*) printf 'emacsclient %s\n' "\$form" >>"$TRANSCRIPT" ;;
+    *reload-if-stale*)
+        printf 'emacsclient %s\n' "\$form" >>"$TRANSCRIPT"
+        printf '"%s"\n' "\${STUB_RELOAD:-current}" ;;
 esac
 EOF
 chmod +x "$TMP/emacsclient"
@@ -83,7 +89,7 @@ export AGENT_REPL_RUNTIME_PGREP="$TMP/pgrep"
 reset() {
     : >"$TRANSCRIPT"
     touch "$STATE/running"
-    unset STUB_UNSAVED STUB_NEVER_EXITS STUB_EXIT_byte_compile STUB_EXIT_bounce STUB_EXIT_open STUB_EMACS_PROCESS
+    unset STUB_RELOAD STUB_UNSAVED STUB_NEVER_EXITS STUB_EXIT_byte_compile STUB_EXIT_bounce STUB_EXIT_open STUB_EMACS_PROCESS
 }
 
 # expect_transcript NAME EXPECTED compares the whole transcript.
@@ -119,8 +125,33 @@ if "$RUNTIME" bounce --soft >/dev/null 2>&1; then fail "bounce refuses an unknow
 echo "agent-repl-runtime: bounce --hard"
 reset
 "$RUNTIME" bounce --hard >/dev/null 2>&1
-expect_transcript "a hard bounce byte-compiles, bounces, quits Emacs and relaunches it, in order" \
+expect_transcript "a hard bounce byte-compiles, hot-loads stale elisp, bounces, quits Emacs and relaunches it, in order" \
 "byte-compile
+$RELOAD
+bounce
+emacsclient kill-emacs
+open -a /Applications/Emacs.app"
+
+reset
+export STUB_RELOAD=failed
+if "$RUNTIME" bounce --hard >/dev/null 2>&1; then fail "a failed elisp hot load fails the hard bounce"; else pass "a failed elisp hot load fails the hard bounce"; fi
+expect_transcript "a failed elisp hot load stops before the bounce" "byte-compile
+$RELOAD"
+
+reset
+export STUB_RELOAD=reloaded
+"$RUNTIME" bounce --hard >/dev/null 2>&1
+expect_transcript "a hot-loaded Emacs goes on to the bounce" "byte-compile
+$RELOAD
+bounce
+emacsclient kill-emacs
+open -a /Applications/Emacs.app"
+
+reset
+export STUB_RELOAD=other-root
+"$RUNTIME" bounce --hard >/dev/null 2>&1
+expect_transcript "an Emacs on another checkout's elisp is bounced as it is" "byte-compile
+$RELOAD
 bounce
 emacsclient kill-emacs
 open -a /Applications/Emacs.app"
@@ -139,6 +170,7 @@ reset
 export STUB_EXIT_bounce=1
 if "$RUNTIME" bounce --hard >/dev/null 2>&1; then fail "a bounce failure fails the hard bounce"; else pass "a bounce failure fails the hard bounce"; fi
 expect_transcript "a bounce failure leaves Emacs running" "byte-compile
+$RELOAD
 bounce"
 
 reset
@@ -152,6 +184,7 @@ reset
 export STUB_NEVER_EXITS=1
 if "$RUNTIME" bounce --hard >/dev/null 2>&1; then fail "an Emacs that will not exit fails the hard bounce"; else pass "an Emacs that will not exit fails the hard bounce"; fi
 expect_transcript "an Emacs that will not exit is not relaunched beside itself" "byte-compile
+$RELOAD
 bounce
 emacsclient kill-emacs"
 
@@ -159,6 +192,7 @@ reset
 export STUB_EXIT_open=1 STUB_EMACS_PROCESS=1
 if "$RUNTIME" bounce --hard >/dev/null 2>&1; then pass "a launch the launcher misreports, with Emacs up, is a launch"; else fail "a launch the launcher misreports, with Emacs up, is a launch"; fi
 expect_transcript "a misreported launch is not retried" "byte-compile
+$RELOAD
 bounce
 emacsclient kill-emacs
 open -a /Applications/Emacs.app"
@@ -167,6 +201,7 @@ reset
 export STUB_EXIT_open=1
 if "$RUNTIME" bounce --hard >/dev/null 2>&1; then fail "a launch that never brings Emacs up fails the hard bounce"; else pass "a launch that never brings Emacs up fails the hard bounce"; fi
 expect_transcript "a failed launch is retried up to its bound" "byte-compile
+$RELOAD
 bounce
 emacsclient kill-emacs
 open -a /Applications/Emacs.app
