@@ -14,7 +14,7 @@
 ;;
 ;;   `agent-repl-link-no-daemon-functions'  no daemon.addr — cold start
 ;;   `agent-repl-link-up-functions' (CONN)  a link stands
-;;   `agent-repl-link-down-functions' (CONN) the link died unexpectedly
+;;   `agent-repl-link-down-functions' (CONN) the link went down (planned or not)
 ;;   `agent-repl-link-handover-functions' (OLD NEW)  a successor is up
 ;;   `agent-repl-link-drain-functions' (DRAIN)  the drain schedule moved
 ;;   `agent-repl-link-promote-functions' (OLD NEW)  the successor took over
@@ -107,9 +107,21 @@ fleet's registrations into a void.  It does NOT run for a handover
 promotion: nothing was lost there.")
 
 (defvar agent-repl-link-down-functions nil
-  "Functions run with the CONNECTION when the link dies unexpectedly.
+  "Functions run with the CONNECTION when the link goes down.
 A client-side cancel is not a death and never reaches here, nor does the
-old daemon's stream closing after a handover (that is a promotion).")
+old daemon's stream closing after a handover (that is a promotion).  A
+daemon that announced its own ending first is a PLANNED stand-down, which
+reaches here too: `agent-repl-link-down-planned' says which one a hook is
+running for.")
+
+(defvar agent-repl-link-down-planned nil
+  "Non-nil while `agent-repl-link-down-functions' run for an ANNOUNCED ending.
+Bound around the down hooks only, never set: the `WatchDaemon' stream\='s
+last frame was the daemon\='s planned ending (`agent-repl-link--ending-conn'),
+so a consumer records the departure at INFO.  Nil is a link that died with
+no word from its daemon, which stays the loud record it always was.  A
+dynamic binding rather than a second hook argument, so every consumer
+written against the one-argument hook keeps working unchanged.")
 
 (defvar agent-repl-link-handover-functions nil
   "Functions run with (OLD-CONN NEW-CONN) when a successor daemon is up.
@@ -248,6 +260,14 @@ is recorded at INFO rather than as a link that went down unannounced.")
 (defun agent-repl-link-primary ()
   "Return the connection to the daemon currently serving Emacs, or nil."
   agent-repl-link--primary)
+
+(defun agent-repl-link-ending-p (conn)
+  "Return non-nil when CONN\='s daemon announced its own planned ending.
+Its `WatchDaemon' stream carried the `ending' frame, so the daemon on CONN
+is standing down and the link-down edge that follows is planned.  A
+consumer that lost a stream on CONN waits for that edge rather than
+calling a daemon that has said it is leaving."
+  (and conn (eq conn agent-repl-link--ending-conn)))
 
 (defun agent-repl-link-successor ()
   "Return the successor daemon's connection during a handover, or nil.
@@ -579,20 +599,23 @@ the stream\='s last frame was the planned ending
       ;; the reconnect loop that resolves the live daemon -- recorded at INFO.
       (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.down-planned address=%S"
                         (agent-repl-connect-connection-address conn))
-      (agent-repl-link--primary-down conn))
+      (agent-repl-link--primary-down conn t))
      (t
       (agent-repl--warn '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.down outcome=%S address=%S" outcome
                         (agent-repl-connect-connection-address conn))
       (agent-repl-link--primary-down conn)))))
 
-(defun agent-repl-link--primary-down (conn)
+(defun agent-repl-link--primary-down (conn &optional planned)
   "Take the link down after the primary CONN\='s stream ended.
 The down hooks run, CONN is closed, and the reconnect loop resolves the
-live daemon afresh.  The caller has already recorded why."
+live daemon afresh.  The caller has already recorded why.  PLANNED
+non-nil says the daemon announced the ending first; the hooks read it as
+`agent-repl-link-down-planned'."
   (setq agent-repl-link--primary nil
         agent-repl-link--primary-stream nil
         agent-repl-link--ending-conn nil)
-  (agent-repl-link--run-hook 'agent-repl-link-down-functions conn)
+  (let ((agent-repl-link-down-planned planned))
+    (agent-repl-link--run-hook 'agent-repl-link-down-functions conn))
   (agent-repl-connect-close conn)
   (agent-repl-link--schedule-reconnect))
 

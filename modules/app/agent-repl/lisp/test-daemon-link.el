@@ -385,6 +385,62 @@ gate is the point, so it is exercised here rather than bypassed."
       ;; Assert
       (should (equal (cdr (assq :down agent-repl-test-link--hooks)) (list conn))))))
 
+(ert-deftest agent-repl-test-link-ending-p-answers-the-connection-that-carried-the-ending ()
+  "A connection whose `WatchDaemon' carried the ending reads as ending."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001")))
+      ;; Act
+      (agent-repl-test-link--push conn '(:arm :ending :value nil))
+      ;; Assert
+      (should (agent-repl-link-ending-p conn)))))
+
+(ert-deftest agent-repl-test-link-ending-p-is-nil-without-the-ending ()
+  "A connection whose daemon said nothing of an ending does not read as ending."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001")))
+      ;; Act
+      (let ((ending (agent-repl-link-ending-p conn)))
+        ;; Assert
+        (should-not ending)))))
+
+(ert-deftest agent-repl-test-link-planned-end-tells-the-down-hook-it-was-planned ()
+  "A down hook run for an announced ending reads `agent-repl-link-down-planned' set."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001"))
+          (seen :unset))
+      (add-hook 'agent-repl-link-down-functions
+                (lambda (_conn) (setq seen agent-repl-link-down-planned)))
+      ;; Act
+      (agent-repl-test-link--end-planned conn)
+      ;; Assert
+      (should (eq seen t)))))
+
+(ert-deftest agent-repl-test-link-unannounced-death-tells-the-down-hook-it-was-not-planned ()
+  "A down hook run for a death with no ending frame reads the flag nil."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001"))
+          (seen :unset))
+      (add-hook 'agent-repl-link-down-functions
+                (lambda (_conn) (setq seen agent-repl-link-down-planned)))
+      ;; Act
+      (agent-repl-test-link--close conn '(:error (:kind :transport)))
+      ;; Assert
+      (should (null seen)))))
+
+(ert-deftest agent-repl-test-link-planned-flag-is-unbound-after-the-down-hooks ()
+  "The planned flag is bound around the down hooks only, never left set."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001")))
+      ;; Act
+      (agent-repl-test-link--end-planned conn)
+      ;; Assert
+      (should (null agent-repl-link-down-planned)))))
+
 (ert-deftest agent-repl-test-link-planned-end-schedules-a-reconnect ()
   "A planned end arms the reconnect poll that resolves the live daemon."
   (agent-repl-test-link--with-harness
