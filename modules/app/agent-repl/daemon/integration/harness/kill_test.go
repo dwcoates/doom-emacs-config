@@ -512,3 +512,51 @@ func TestNamesPath(t *testing.T) {
 		})
 	}
 }
+
+// TestAwaitKilledLeaderReportsAStuckExitAndKeepsWaiting pins the stuck-kill
+// report: a SIGKILLed leader still alive past the report bound is reported
+// once, while the wait goes on, and nothing else is ever reported.
+func TestAwaitKilledLeaderReportsAStuckExitAndKeepsWaiting(t *testing.T) {
+	errWait := errors.New("the exit event could not be registered")
+	tests := []struct {
+		name       string
+		exitsAfter bool // the first (bounded) wait reaches its deadline
+		failWith   error
+		wantStalls int
+		wantWaits  int
+		wantErr    error
+	}{
+		{name: "an exit inside the bound reports nothing", wantStalls: 0, wantWaits: 1},
+		{name: "an exit past the bound is reported once and still awaited", exitsAfter: true, wantStalls: 1, wantWaits: 2},
+		{name: "a failed wait is answered, never reported as a stall", failWith: errWait, wantStalls: 0, wantWaits: 1, wantErr: errWait},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			waits, stalls := 0, 0
+			wait := func(ctx context.Context, pid int) error {
+				waits++
+				if tt.failWith != nil {
+					return tt.failWith
+				}
+				if _, bounded := ctx.Deadline(); bounded && tt.exitsAfter {
+					<-ctx.Done()
+					return context.DeadlineExceeded
+				}
+				return nil
+			}
+			stalled := func(int, time.Duration) { stalls++ }
+
+			// Act
+			err := awaitKilledLeader(4242, time.Millisecond, wait, stalled)
+
+			// Assert
+			if !errors.Is(err, tt.wantErr) {
+				t.Errorf("err = %v, want %v", err, tt.wantErr)
+			}
+			if stalls != tt.wantStalls || waits != tt.wantWaits {
+				t.Errorf("stalls = %d, waits = %d, want %d and %d", stalls, waits, tt.wantStalls, tt.wantWaits)
+			}
+		})
+	}
+}

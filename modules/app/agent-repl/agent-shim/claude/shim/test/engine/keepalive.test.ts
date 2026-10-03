@@ -169,6 +169,28 @@ describe("the yield obligation", () => {
     expect(rewind.obligation()?.discardedKeepaliveTurns).toBe(2);
   });
 
+  it("owes nothing for keep-alive turns that PRECEDE the last real record", () => {
+    // A keep-alive that ran before the session's first real prompt (nothing to
+    // rewind TO, so that prompt carried it) lies BEHIND the real turn's anchor:
+    // no rewind can discard it, and counting it made the next keep-alive
+    // replace the vendor's query for nothing (2026-10-03, the e2e flake of
+    // TestKeepAliveAnswerAfterVendorTurnNeverServed).
+    const rewind = new KeepaliveRewind();
+    rewind.noteKeepaliveTurn();
+    rewind.noteRecord(assistant("real-1"), realTurn);
+
+    expect(rewind.obligation()).toBeUndefined();
+  });
+
+  it("counts only the keep-alive turns AFTER the last real record", () => {
+    const rewind = new KeepaliveRewind();
+    rewind.noteKeepaliveTurn();
+    rewind.noteRecord(assistant("real-1"), realTurn);
+    rewind.noteKeepaliveTurn();
+
+    expect(rewind.obligation()?.discardedKeepaliveTurns).toBe(1);
+  });
+
   it("owes nothing when no real record exists to rewind TO", () => {
     // Truncating to nothing would discard the session's own opening.
     const rewind = new KeepaliveRewind();
