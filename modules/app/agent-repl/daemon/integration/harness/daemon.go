@@ -1133,13 +1133,56 @@ func (d *Daemon) killGroup() bool {
 	// it, so the group id stays ours for the group kill below. A wait that
 	// fails is REPORTED and the kill still goes ahead: a group left running is
 	// worse than one whose leader might have seen a member go.
-	if err := WaitProcessExit(context.Background(), pgid); err != nil {
+	//
+	// A LEADER STILL ALIVE PAST leaderExitReportAfter IS REPORTED, WITH ITS
+	// STATE, WHILE IT IS STILL STUCK (2026-10-03): one did, in a full-suite
+	// run, for fifteen minutes -- sleeping, not stopped, its SIGQUIT pending
+	// unread, two fake-launchctl children stopped by the group SIGSTOP -- and
+	// nothing said so until an operator dumped the test binary. The wait goes
+	// on unbounded after the report; the report says what was awaited and
+	// what the kernel showed.
+	if err := awaitKilledLeader(pgid, leaderExitReportAfter, WaitProcessExit, d.leaderStalled); err != nil {
 		d.t.Errorf("harness: await the daemon's exit before killing its group: %v", err)
 	}
 	if d.afterLeaderExit != nil {
 		d.afterLeaderExit()
 	}
 	return d.signalGroup(pgid, syscall.SIGKILL)
+}
+
+// leaderExitReportAfter is how long a SIGKILLed leader may take to exit before
+// the wait reports it. Every observed exit is scheduled in single-digit
+// milliseconds and the slowest under 16 CPU loads within reapGrace; this is
+// fifteen times that, so it reports a stuck process, never a starved one. It
+// does NOT end the wait.
+const leaderExitReportAfter = 15 * reapGrace
+
+// awaitKilledLeader waits, unbounded, for the exit of a leader whose SIGKILL
+// was accepted, and calls stalled once if the exit has not come within
+// reportAfter. It answers the wait's own failure, never the stall.
+func awaitKilledLeader(pid int, reportAfter time.Duration, wait func(context.Context, int) error, stalled func(pid int, waited time.Duration)) error {
+	ctx, cancel := context.WithTimeout(context.Background(), reportAfter)
+	err := wait(ctx, pid)
+	cancel()
+	if !errors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
+	stalled(pid, reportAfter)
+	return wait(context.Background(), pid)
+}
+
+// leaderStalled reports a SIGKILLed leader that has not exited, with the
+// kernel's view of every process in its group: the evidence a stuck kill
+// leaves nowhere else.
+func (d *Daemon) leaderStalled(pid int, waited time.Duration) {
+	d.t.Helper()
+	out, err := exec.Command("ps", "-o", "pid,ppid,pgid,stat,wchan,flags,time,command", "-g", strconv.Itoa(pid)).CombinedOutput()
+	// THE ONE PROBE THE REPORT MAKES: continue the leader ALONE. Its members
+	// stay stopped, so none can see it go before the group kill, and a killed
+	// process runs no code of its own once continued; whether the exit then
+	// comes says whether the group stop was what held the kill.
+	contErr := syscall.Kill(pid, syscall.SIGCONT)
+	d.t.Errorf("harness: the daemon %d has not exited %s after its SIGKILL was accepted; sent it SIGCONT (err %v) and still waiting. Its group (ps err %v):\n%s", pid, waited, contErr, err, out)
 }
 
 // Freeze stops the daemon's process group and waits for the kernel to confirm
