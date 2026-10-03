@@ -16,8 +16,8 @@ Runs agent-repl's build, bounce, deploy, hot-reload, health and daemon-request o
 |---|---|
 | `build [--force] [component...]` | Build every stale component, or every component with `--force`. Starts and stops nothing. |
 | `byte-compile` | Byte-compile the elisp as a warning gate; any warning fails it. |
-| `bounce` | Rebuild everything, stop every backend (daemon, shims, store, sidecar) and bring them back on the fresh build. Emacs stays up and reconnects. |
-| `hard-bounce` | `byte-compile`, then `bounce`, then quit and relaunch Emacs.app, so the editor and every backend run the fresh build. Refuses while Emacs holds unsaved file buffers. |
+| `bounce` | Rebuild everything and stand the daemon and its shims down. Emacs stays up and starts the fresh daemon, whose boot restarts a stale store and sidecar before any shim starts. |
+| `hard-bounce` | `byte-compile`, then hot-load the fresh elisp into the running Emacs when it is stale (a failed load stops with nothing stopped), then `bounce`, then quit and relaunch Emacs.app, so the editor and every backend run the fresh build. Refuses while Emacs holds unsaved file buffers. |
 | `deploy [-force]` | Rolling deploy: the running daemon rebuilds what is stale and moves every workspace onto it without killing turns; `-force` ends them. |
 | `hot-reload FILE.el...` | Load changed elisp files into the running Emacs. Refuses any `test-*.el`. |
 | `call METHOD [-workspace DIR] [JSON]` | Send one unary request to the running daemon and print its answer; `-workspace DIR` fills the request's workspace from that workspace directory. |
@@ -33,7 +33,7 @@ Runs agent-repl's build, bounce, deploy, hot-reload, health and daemon-request o
 
     | The user says | Argument | What happens |
     |---|---|---|
-    | "hard bounce agent-repl" (or "hard bounce", "bounce everything") | `hard-bounce` | Rebuild everything, byte-compile, stop every backend AND restart Emacs.app, unless the user says to leave Emacs running, in which case use `bounce`. |
+    | "hard bounce agent-repl" (or "hard bounce", "bounce everything") | `hard-bounce` | Rebuild everything, byte-compile, hot-load stale elisp, stand the daemon and its shims down AND restart Emacs.app, unless the user says to leave Emacs running, in which case use `bounce`. |
     | "bounce" / "force bounce the backends" | `bounce` | The same without restarting Emacs. |
     | "deploy" / "roll out" | `deploy` | Rolling deploy; running turns continue. |
     | "restart the workspace" / "bounce this workspace" | `call RestartWorkspace -workspace DIR` | Immediate: the workspace's shim is relaunched on the same session and its webapp page reloads. The user's own key is `SPC o C-c`. |
