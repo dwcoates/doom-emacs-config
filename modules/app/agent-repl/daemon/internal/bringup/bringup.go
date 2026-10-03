@@ -173,6 +173,12 @@ func Run(ctx context.Context, deps Deps, pending []wsm.Workspace) Report {
 	return report
 }
 
+// ErrNotServed marks a start that failed because the workspace stopped being
+// this daemon's while it ran: a handover moved it to a successor, whose own
+// shim then refused this daemon's start. It is the other daemon's workspace,
+// not a failed bring-up, so it is recorded as stood down.
+var ErrNotServed = errors.New("bringup: the workspace is no longer served by this daemon")
+
 // one brings one pending workspace's session up and says what came of it,
 // logging the per-workspace record Run's summary counts.
 func one(ctx context.Context, deps Deps, ws wsm.Workspace) (Outcome, error) {
@@ -215,7 +221,8 @@ func one(ctx context.Context, deps Deps, ws wsm.Workspace) (Outcome, error) {
 		// supervisor began standing down is refused one for the same reason. MEASURED: realtest run
 		// 2026-09-13T16:20:34 recorded it as an ERROR on three consecutive
 		// daemon generations.
-		if errors.Is(err, shimclient.ErrStandDownOrdered) || errors.Is(err, shimclient.ErrStandingDown) {
+		if errors.Is(err, shimclient.ErrStandDownOrdered) || errors.Is(err, shimclient.ErrStandingDown) ||
+			errors.Is(err, ErrNotServed) {
 			log.Debug(deps.Operation, "an open workspace's start ended in a stand-down this daemon ordered", fields)
 			return StoodDown, err
 		}

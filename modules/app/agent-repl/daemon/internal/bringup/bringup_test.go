@@ -125,6 +125,13 @@ func TestRunClassifiesEachWorkspacesOutcome(t *testing.T) {
 			want: func(r Report) []ids.WorkspaceID { return r.StoodDown },
 		},
 		{
+			name: "a start lost to a handover is stood down",
+			arrange: func(f *fixture) {
+				f.startErr["a"] = fmt.Errorf("%w: already started", ErrNotServed)
+			},
+			want: func(r Report) []ids.WorkspaceID { return r.StoodDown },
+		},
+		{
 			name: "a start that fails is failed",
 			arrange: func(f *fixture) {
 				f.startErr["a"] = errors.New("arranged: the shim never answered")
