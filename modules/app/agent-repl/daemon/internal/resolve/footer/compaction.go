@@ -191,6 +191,48 @@ func (r *resolver) endCompactionAtTerminal(ws ids.WorkspaceID, s *wsState, turn 
 	r.endCompaction(ws, s, cause)
 }
 
+// maxConcludedCompactions bounds the concluded-compaction memory. A start
+// signal outrun by its cut lands within one stream hop of it, so only the
+// latest few can ever be stale.
+const maxConcludedCompactions = 8
+
+// concludeCompactionID records that a cut ended the compaction named ID.
+func concludeCompactionID(s *wsState, id string) {
+	if id == "" {
+		return
+	}
+	s.concludedCompactions = append(s.concludedCompactions, id)
+	if n := len(s.concludedCompactions); n > maxConcludedCompactions {
+		s.concludedCompactions = s.concludedCompactions[n-maxConcludedCompactions:]
+	}
+}
+
+// compactionConcluded reports whether a cut already ended the compaction
+// named ID: a start signal naming it arrived after its own cut.
+func compactionConcluded(s *wsState, id string) bool {
+	if id == "" {
+		return false
+	}
+	for _, done := range s.concludedCompactions {
+		if done == id {
+			return true
+		}
+	}
+	return false
+}
+
+// cutCompactionID is the identity of the compaction a cut ends, or "" when
+// the cut names none (a clear, or a compaction no start signal preceded).
+func cutCompactionID(cut *conversationv1.ContextCut) string {
+	switch c := cut.GetCut().(type) {
+	case *conversationv1.ContextCut_Compacted:
+		return c.Compacted.GetCompaction().GetValue()
+	case *conversationv1.ContextCut_CompactionFailed:
+		return c.CompactionFailed.GetCompaction().GetValue()
+	}
+	return ""
+}
+
 // compactionAge is how long the standing line has stood.
 func (r *resolver) compactionAge(s *wsState) time.Duration {
 	return r.opts.clock.Now().Sub(s.compaction.at)

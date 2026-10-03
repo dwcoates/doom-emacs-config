@@ -780,6 +780,15 @@ func (r *resolver) sessionArm(ws ids.WorkspaceID, update *conversationv1.Session
 	case *conversationv1.SessionUpdate_Compacting:
 		return "compacting", func(s *wsState) {
 			r.logSessionArm(ws, s, "compacting")
+			// A START SIGNAL OUTRUN BY ITS OWN CUT stands nothing: the start
+			// rides WatchSession and the cut WatchAgent, with no order between
+			// them, so the compaction it announces is already over.
+			if id := u.Compacting.GetCompaction().GetValue(); compactionConcluded(s, id) {
+				r.logOf(ws, s).Info("daemon.footer.compacting_after_its_cut",
+					"a compaction's start signal arrived after the cut that ended it; it stands nothing",
+					dlog.Context{"compaction_id": id})
+				return
+			}
 			s.compacting = true
 			// THE VENDOR'S COMPACTION GETS A LINE TOO. Presence is the whole
 			// fact this arm carries — no phase, no figure — so the line says
@@ -1200,6 +1209,7 @@ func (r *resolver) OnContextCut(ws ids.WorkspaceID, agent *conversationv1.AgentI
 			s.turn = nil
 			s.turnEverRan = true
 			s.compacting = false
+			concludeCompactionID(s, cutCompactionID(cut))
 			// THE LINE GOES WITH THE ACT IT NARRATED. The cut is the
 			// compaction's end signal, so its progress sentence stops standing
 			// here; a failed cut still says what went wrong, through the
