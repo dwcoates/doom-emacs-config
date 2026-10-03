@@ -339,6 +339,23 @@ func (q *queue) verdictFor(ctx context.Context, sub Submission, running ids.Turn
 			At:     q.deps.Now(),
 		}, classifier.RouteQueue
 	}
+	if !found && !q.isRunning(sub.WS, running) {
+		// THE RUNNING TURN ENDED WHILE THE PROMPT WAITED FOR ITS VERDICT. The
+		// judge runs off the submission's goroutine, against the turn that ran
+		// when the prompt was held; its end closed the store's row first, and
+		// the watcher no longer runs it. That is the ordinary race of a short
+		// turn (a vendor-started one, often), not a disagreement: the verdict
+		// is the same safe one, and the turn's end is what delivers the
+		// prompt (integration of the suite run 2026-10-03,
+		// TestKeepAliveAnswerAfterVendorTurnNeverServed).
+		log.Info(opClassify, "the running turn ended while the prompt waited for its verdict; the prompt waits for the turn's end to deliver it",
+			dlog.Context{"running_turn": string(running), "store_open_turns": storeOpen})
+		return wsm.Classification{
+			Arm:    wsm.ArmHoldForTurnEnd,
+			Reason: "the running turn ended while the prompt waited for its verdict, so it is delivered at that end",
+			At:     q.deps.Now(),
+		}, classifier.RouteQueue
+	}
 	if !found {
 		log.Error(opClassify, "the queue's running turn is not open in the store; the prompt waits for the running turn to end",
 			dlog.Context{"running_turn": string(running), "store_open_turns": storeOpen})
