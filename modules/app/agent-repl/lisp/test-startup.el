@@ -286,6 +286,22 @@ waits, and opens right after tab 1 does."
     ;; Assert
     (should (= 0 agent-repl-test-startup--refreshes))))
 
+(ert-deftest agent-repl-test-startup-a-promotion-releases-every-tab ()
+  "A handover's promotion ends the startup; its handler takes the hook's two arguments."
+  (agent-repl-test-startup--with-run
+    ;; Arrange
+    (agent-repl-startup-handle (agent-repl-test-startup--opening 2))
+    ;; Act
+    (agent-repl-startup--on-link-promote 'old-conn 'new-conn)
+    ;; Assert
+    (should-not (agent-repl-startup-holds-p "a"))
+    (should (= 1 agent-repl-test-startup--refreshes))))
+
+(ert-deftest agent-repl-test-startup-the-promote-hook-runs-the-two-argument-handler ()
+  "The promote hook carries the handler that accepts OLD and NEW."
+  (should (memq #'agent-repl-startup--on-link-promote agent-repl-link-promote-functions))
+  (should-not (memq #'agent-repl-startup--on-link-down agent-repl-link-promote-functions)))
+
 ;;;; ---- Lines ----
 
 (ert-deftest agent-repl-test-startup-says-each-step-as-the-design-lists-it ()

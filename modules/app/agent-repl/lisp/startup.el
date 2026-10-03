@@ -318,9 +318,16 @@ opens now in roster order."
 
 (add-hook 'agent-repl-roster-update-functions #'agent-repl-startup--on-roster-update)
 (add-hook 'agent-repl-link-down-functions #'agent-repl-startup--on-link-down)
+(defun agent-repl-startup--on-link-promote (_old _new)
+  "End a startup whose daemon handed the editor over to a successor.
+A PROMOTION moves the editor onto a successor: the run rode the stream of
+the daemon that is leaving, and is over with it.  The promote hook passes
+the OLD and NEW connections, unlike the link-down hook\='s one."
+  (agent-repl-startup--on-link-down))
+
 ;; A PROMOTION moves the editor onto a successor: the run rode the stream of
 ;; the daemon that is leaving, and is over with it.
-(add-hook 'agent-repl-link-promote-functions #'agent-repl-startup--on-link-down)
+(add-hook 'agent-repl-link-promote-functions #'agent-repl-startup--on-link-promote)
 
 (provide 'agent-repl-startup)
 ;;; startup.el ends here
