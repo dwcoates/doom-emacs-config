@@ -41,6 +41,13 @@ for impl in build byte-compile bounce doctor readiness logs claude-repld open; d
     make_impl "$impl"
 done
 
+cat >"$TMP/pgrep" <<EOF
+#!/usr/bin/env bash
+# pgrep stub: Emacs's process is up exactly when STUB_EMACS_PROCESS is set.
+[ -n "\${STUB_EMACS_PROCESS:-}" ]
+EOF
+chmod +x "$TMP/pgrep"
+
 cat >"$TMP/emacsclient" <<EOF
 #!/usr/bin/env bash
 # emacsclient stub: answers only while \$STATE/running exists.
@@ -69,12 +76,14 @@ export AGENT_REPL_RUNTIME_EMACSCLIENT="$TMP/emacsclient"
 export AGENT_REPL_RUNTIME_OPEN="$TMP/open"
 export AGENT_REPL_RUNTIME_EMACS_APP="/Applications/Emacs.app"
 export AGENT_REPL_RUNTIME_QUIT_WAIT=2
+export AGENT_REPL_RUNTIME_LAUNCH_ATTEMPTS=2
+export AGENT_REPL_RUNTIME_PGREP="$TMP/pgrep"
 
 # reset puts the fixture back to "Emacs is running, nothing has run yet".
 reset() {
     : >"$TRANSCRIPT"
     touch "$STATE/running"
-    unset STUB_UNSAVED STUB_NEVER_EXITS STUB_EXIT_byte_compile STUB_EXIT_bounce
+    unset STUB_UNSAVED STUB_NEVER_EXITS STUB_EXIT_byte_compile STUB_EXIT_bounce STUB_EXIT_open STUB_EMACS_PROCESS
 }
 
 # expect_transcript NAME EXPECTED compares the whole transcript.
@@ -145,6 +154,23 @@ if "$RUNTIME" bounce --hard >/dev/null 2>&1; then fail "an Emacs that will not e
 expect_transcript "an Emacs that will not exit is not relaunched beside itself" "byte-compile
 bounce
 emacsclient kill-emacs"
+
+reset
+export STUB_EXIT_open=1 STUB_EMACS_PROCESS=1
+if "$RUNTIME" bounce --hard >/dev/null 2>&1; then pass "a launch the launcher misreports, with Emacs up, is a launch"; else fail "a launch the launcher misreports, with Emacs up, is a launch"; fi
+expect_transcript "a misreported launch is not retried" "byte-compile
+bounce
+emacsclient kill-emacs
+open -a /Applications/Emacs.app"
+
+reset
+export STUB_EXIT_open=1
+if "$RUNTIME" bounce --hard >/dev/null 2>&1; then fail "a launch that never brings Emacs up fails the hard bounce"; else pass "a launch that never brings Emacs up fails the hard bounce"; fi
+expect_transcript "a failed launch is retried up to its bound" "byte-compile
+bounce
+emacsclient kill-emacs
+open -a /Applications/Emacs.app
+open -a /Applications/Emacs.app"
 
 echo "agent-repl-runtime: deploy and hot-reload"
 reset
