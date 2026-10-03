@@ -25,7 +25,7 @@ fail() { printf 'FAIL - %s\n     %s\n' "$1" "$2"; FAILURES=$((FAILURES + 1)); }
 # exits with the status the given snippet prints for the run index in $RUN_INDEX.
 make_root() {
     local root
-    root=$(mktemp -d)
+    root=$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")
     mkdir -p "$root/bin" "$root/e2e/sandbox/bin"
     cp "$SCRIPT_UNDER_TEST" "$root/bin/e2e-repeat.sh"
     cat > "$root/bin/suite-slot.sh" <<'STUB'
@@ -47,7 +47,7 @@ STUB
 
 # --- a passing sweep gives every run its own directory ----------------------
 root=$(make_root 'exit 0')
-out_root=$(mktemp -d)
+out_root=$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")
 "$root/bin/e2e-repeat.sh" --runs 3 --root "$out_root" >/dev/null 2>&1
 status=$?
 if (( status != 0 )); then
@@ -70,7 +70,7 @@ rm -rf "$root" "$out_root"
 
 # --- a red run's evidence survives the rest of the sweep --------------------
 root=$(make_root 'echo "    --- FAIL: TestSomething (0.10s)"; [[ $n == 2 ]] && exit 1; exit 0')
-out_root=$(mktemp -d)
+out_root=$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")
 "$root/bin/e2e-repeat.sh" --runs 3 --root "$out_root" >/dev/null 2>&1
 status=$?
 if (( status == 1 )); then
@@ -93,7 +93,7 @@ rm -rf "$root" "$out_root"
 
 # --- --stop-on-fail halts at the red run, keeping it ------------------------
 root=$(make_root 'echo "    --- FAIL: TestSomething (0.10s)"; [[ $n == 1 ]] && exit 1; exit 0')
-out_root=$(mktemp -d)
+out_root=$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")
 "$root/bin/e2e-repeat.sh" --runs 4 --stop-on-fail --root "$out_root" >/dev/null 2>&1
 dirs=$(find "$out_root" -maxdepth 1 -type d -name 'run-*' | wc -l | tr -d ' ')
 if [[ $dirs == 1 && -s "$out_root/run-001/go-test.log" ]]; then
@@ -105,10 +105,10 @@ rm -rf "$root" "$out_root"
 
 # --- the load gate waits for a quiet box, and records what it started at ----
 root=$(make_root 'exit 0')
-out_root=$(mktemp -d)
+out_root=$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")
 # A stub `uptime` first on PATH: two loaded readings, then a quiet one, so the
 # gate has to actually WAIT rather than take the first value it sees.
-stub_dir=$(mktemp -d)
+stub_dir=$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")
 cat > "$stub_dir/uptime" <<'STUB'
 #!/usr/bin/env bash
 n=$(cat "$AGENT_REPL_TEST_UPTIME_COUNT" 2>/dev/null || echo 0)
@@ -131,8 +131,8 @@ rm -rf "$root" "$out_root" "$stub_dir"
 
 # --- --no-load-gate starts under load, and still records it -----------------
 root=$(make_root 'exit 0')
-out_root=$(mktemp -d)
-stub_dir=$(mktemp -d)
+out_root=$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")
+stub_dir=$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")
 cat > "$stub_dir/uptime" <<'STUB'
 #!/usr/bin/env bash
 echo "12:00  up 1:00, 1 user, load averages: 42.00 40.00 39.00"
@@ -148,8 +148,8 @@ rm -rf "$root" "$out_root" "$stub_dir"
 
 # --- a host with no load average is said, never assumed quiet ---------------
 root=$(make_root 'exit 0')
-out_root=$(mktemp -d)
-stub_dir=$(mktemp -d)
+out_root=$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")
+stub_dir=$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")
 printf '#!/usr/bin/env bash
 echo "no load line here"
 ' > "$stub_dir/uptime"
@@ -165,7 +165,7 @@ rm -rf "$root" "$out_root" "$stub_dir"
 
 # --- a malformed load bound is refused, never defaulted ---------------------
 root=$(make_root 'exit 0')
-out_root=$(mktemp -d)
+out_root=$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")
 "$root/bin/e2e-repeat.sh" --runs 1 --load-max zero --root "$out_root" >/dev/null 2>&1
 status=$?
 if (( status == 2 )); then
@@ -177,7 +177,7 @@ rm -rf "$root" "$out_root"
 
 # --- a malformed run count is refused, never defaulted ----------------------
 root=$(make_root 'exit 0')
-out_root=$(mktemp -d)
+out_root=$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")
 "$root/bin/e2e-repeat.sh" --runs zero --root "$out_root" >/dev/null 2>&1
 status=$?
 if (( status == 2 )); then

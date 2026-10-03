@@ -200,7 +200,7 @@ run_test_all_real_net() {
 
 test_integration_clean_record_run_exits_0_with_no_tag() {
     local tree
-    tree="$(mktemp -d)"
+    tree="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     make_real_net_tree "$tree"
     run_test_all_real_net "$tree" --record
     if [ "$RUN_RC" -eq 0 ] \
@@ -216,7 +216,7 @@ test_integration_clean_record_run_exits_0_with_no_tag() {
 
 test_integration_real_drift_during_record_run_is_still_caught() {
     local tree
-    tree="$(mktemp -d)"
+    tree="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     make_real_net_tree "$tree"
     STUB_MOVE_HEAD=1 run_test_all_real_net "$tree" --record
     if [ "$RUN_RC" -eq 2 ] \
@@ -234,7 +234,7 @@ test_integration_real_drift_during_record_run_is_still_caught() {
 
 test_integration_failed_suite_records_nothing() {
     local tree
-    tree="$(mktemp -d)"
+    tree="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     make_real_net_tree "$tree"
     STUB_RUN_EXIT=1 run_test_all_real_net "$tree" --record
     if [ "$RUN_RC" -eq 1 ] \
@@ -251,7 +251,7 @@ test_integration_failed_suite_records_nothing() {
 
 test_integration_moved_commit_during_record_run_records_nothing() {
     local tree
-    tree="$(mktemp -d)"
+    tree="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     make_real_net_tree "$tree"
     # The commit moves mid-run (simulated by the stub testrun moving the fake
     # git HEAD): the net's own pre/post HEAD comparison catches it, exactly
@@ -270,7 +270,7 @@ test_integration_moved_commit_during_record_run_records_nothing() {
 
 test_runs_testrun_inside_the_slot_and_the_git_net() {
     local tree
-    tree="$(mktemp -d)"
+    tree="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     make_tree "$tree"
     run_test_all "$tree" "$(stub_path "$tree")" --suites ert,daemon
     local module want
@@ -286,7 +286,7 @@ test_runs_testrun_inside_the_slot_and_the_git_net() {
 
 test_record_stages_inside_the_net_then_finishes_outside_it() {
     local tree
-    tree="$(mktemp -d)"
+    tree="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     make_tree "$tree"
     run_test_all "$tree" "$(stub_path "$tree")" --suites ert,daemon --record
     local module
@@ -312,7 +312,7 @@ test_record_stages_inside_the_net_then_finishes_outside_it() {
 
 test_a_failed_record_run_never_finishes() {
     local tree
-    tree="$(mktemp -d)"
+    tree="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     make_tree "$tree"
     STUB_TESTRUN_EXIT=1 run_test_all "$tree" "$(stub_path "$tree")" --record
     if [ "$RUN_RC" -eq 1 ] && ! grep -q '^testrun finish-record ' "$STUB_LOG"; then
@@ -325,7 +325,7 @@ test_a_failed_record_run_never_finishes() {
 
 test_builds_the_runner_from_its_own_tree() {
     local tree
-    tree="$(mktemp -d)"
+    tree="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     make_tree "$tree"
     run_test_all "$tree" "$(stub_path "$tree")"
     if grep -q "^go build -o .*/testrun \. (in $(cd "$tree/modules/app/agent-repl/testrun" && pwd))$" "$STUB_LOG"; then
@@ -338,7 +338,7 @@ test_builds_the_runner_from_its_own_tree() {
 
 test_the_runners_exit_status_is_the_runs() {
     local tree
-    tree="$(mktemp -d)"
+    tree="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     make_tree "$tree"
     STUB_TESTRUN_EXIT=3 run_test_all "$tree" "$(stub_path "$tree")"
     if [ "$RUN_RC" -eq 3 ]; then
@@ -351,7 +351,7 @@ test_the_runners_exit_status_is_the_runs() {
 
 test_a_failed_build_fails_before_anything_runs() {
     local tree
-    tree="$(mktemp -d)"
+    tree="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     make_tree "$tree"
     STUB_GO_FAIL=1 run_test_all "$tree" "$(stub_path "$tree")"
     if [ "$RUN_RC" -eq 1 ] &&
@@ -366,7 +366,7 @@ test_a_failed_build_fails_before_anything_runs() {
 
 test_no_go_toolchain_fails_loudly() {
     local tree
-    tree="$(mktemp -d)"
+    tree="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     make_tree "$tree"
     run_test_all "$tree" "/usr/bin:/bin"
     if [ "$RUN_RC" -eq 1 ] && grep -q 'ERROR: go is not on PATH' "$tree/stderr" && [ ! -s "$STUB_LOG" ]; then
