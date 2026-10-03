@@ -208,7 +208,9 @@ Reads config.el's `agent-repl--load-module' order, loads every source in
 it, then runs the heartbeat assertion.  The recorded module builds are
 recomputed from the bytes just loaded, so the next WatchDaemon reports the
 new build; a recomputed build that differs from BUILD means the files moved
-between the deploy and the load, and is an ERROR."
+between the deploy and the load, and is an ERROR.  Returns non-nil when
+every module loaded and the loaded build is BUILD, nil otherwise; every
+failure is already recorded at ERROR."
   (let ((config (expand-file-name "config.el" root))
         (modules nil))
     (agent-repl--info agent-repl--elisp-build-log-scope
@@ -249,7 +251,41 @@ between the deploy and the load, and is an ERROR."
           (agent-repl--info agent-repl--elisp-build-log-scope
                             "elisp.elisp-build.reload-complete modules=%d recorded=%d failed=%d build=%S"
                             (length modules) (length entries) (length failures)
-                            loaded-build))))))
+                            loaded-build)
+          (and (null failures) (string= loaded-build build)))))))
+
+(defun agent-repl-elisp-reload-if-stale (root)
+  "Hot-load the module set from ROOT when this Emacs runs older elisp.
+The hard bounce asks this BEFORE it stops anything: the outgoing Emacs
+witnesses the stand-down with whatever elisp it had loaded, so an elisp fix
+merged since its last load would otherwise not be in force for the very
+stand-down it fixes.  Returns a string the caller prints:
+
+  \"current\"     the loaded elisp is ROOT\='s already; nothing loaded;
+  \"reloaded\"    the module set was hot-loaded (`agent-repl--elisp-reload-run');
+  \"failed\"      the hot load recorded a failure at ERROR;
+  \"other-root\"  this Emacs runs another checkout\='s elisp, which is not
+                ROOT\='s to replace; nothing loaded."
+  (let ((theirs (agent-repl--elisp-normalize-root root))
+        (ours (agent-repl--elisp-normalize-root agent-repl--frontend-root)))
+    (if (not (string= theirs ours))
+        (progn
+          (agent-repl--info agent-repl--elisp-build-log-scope
+                            "elisp.elisp-build.reload-if-stale outcome=other-root asked-root=%S running-root=%S"
+                            theirs ours)
+          "other-root")
+      (let* ((modules (agent-repl--elisp-config-modules (expand-file-name "config.el" ours)))
+             (fresh (agent-repl-elisp-build-of (agent-repl-elisp-build-entries ours modules))))
+        (cond
+         ((string= fresh (agent-repl-elisp-build))
+          (agent-repl--info agent-repl--elisp-build-log-scope
+                            "elisp.elisp-build.reload-if-stale outcome=current build=%S" fresh)
+          "current")
+         ((agent-repl--elisp-reload-run ours fresh)
+          (agent-repl--info agent-repl--elisp-build-log-scope
+                            "elisp.elisp-build.reload-if-stale outcome=reloaded build=%S" fresh)
+          "reloaded")
+         (t "failed"))))))
 
 (provide 'elisp-build)
 

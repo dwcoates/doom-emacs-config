@@ -12,6 +12,7 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
 	"claude-repld/internal/deployprogress"
+	"claude-repld/internal/dlog"
 	"claude-repld/internal/gitclient"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/rollout"
@@ -1042,6 +1043,51 @@ func TestAComponentIsNamedOnTheWireByItsOwnArm(t *testing.T) {
 			// Assert.
 			if got != tt.want {
 				t.Fatalf("%q.Arm() = %v, want %v", tt.component, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestServiceStalenessJudgesTheReportAgainstTheFreshBuild(t *testing.T) {
+	tests := []struct {
+		name      string
+		report    *buildreport.Report
+		raw       string
+		alive     bool
+		wantStale bool
+		wantLevel string
+	}{
+		{name: "the fresh build, still running, is current", report: &buildreport.Report{PID: 7, Build: "fresh"}, alive: true, wantStale: false, wantLevel: "debug"},
+		{name: "an older build is stale", report: &buildreport.Report{PID: 7, Build: "old"}, alive: true, wantStale: true, wantLevel: "info"},
+		{name: "a report whose process is gone is stale", report: &buildreport.Report{PID: 7, Build: "fresh"}, alive: false, wantStale: true, wantLevel: "info"},
+		{name: "no report is stale", wantStale: true, wantLevel: "info"},
+		{name: "an unreadable report is stale, loudly", raw: "{not json", wantStale: true, wantLevel: "error"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			dir := t.TempDir()
+			if tc.report != nil {
+				if err := buildreport.Write(dir, buildreport.ServiceStore, *tc.report); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.raw != "" {
+				writeFile(t, buildreport.Path(dir, buildreport.ServiceStore), tc.raw)
+			}
+			log := dlog.NewTestLogger()
+			judge := serviceStaleness{reportDir: dir, alive: func(int) bool { return tc.alive }, log: log, op: "test"}
+
+			// Act
+			stale := judge.stale(ComponentStore, buildreport.ServiceStore, "fresh")
+
+			// Assert
+			if stale != tc.wantStale {
+				t.Fatalf("stale = %v, want %v", stale, tc.wantStale)
+			}
+			records := log.Records()
+			if len(records) != 1 || records[0].Level != tc.wantLevel {
+				t.Fatalf("records = %+v, want one at %s", records, tc.wantLevel)
 			}
 		})
 	}

@@ -9,15 +9,18 @@
 #   build [--force] [component...]  build what is stale (bin/build-frontend.sh)
 #   byte-compile                    byte-compile the elisp as a warning gate
 #                                   (bin/byte-compile.sh)
-#   bounce                          rebuild everything, stop every backend
-#                                   (daemon, shims, store, sidecar), bring the
-#                                   store and sidecar back; Emacs starts the
-#                                   fresh daemon on its next link
+#   bounce                          rebuild everything and stand the daemon
+#                                   and its shims down; Emacs starts the fresh
+#                                   daemon on its next link, and its boot
+#                                   restarts the store and sidecar onto the
+#                                   fresh build before any shim starts
 #                                   (scripts/bounce-agent-repl-forcefully.sh)
-#   bounce --hard                   byte-compile gate, then `bounce`, then
-#                                   restart Emacs.app itself, so the editor,
-#                                   the daemon and every shim run the fresh
-#                                   build ("hard bounce agent-repl")
+#   bounce --hard                   byte-compile gate, hot-load the fresh
+#                                   elisp into the running Emacs, then
+#                                   `bounce`, then restart Emacs.app itself,
+#                                   so the editor, the daemon and every shim
+#                                   run the fresh build ("hard bounce
+#                                   agent-repl")
 #   doctor [args...]                read-only runtime health sweep
 #                                   (scripts/agent-shim-doctor.sh)
 #   readiness [args...]             source vs deployed vs running report
@@ -133,6 +136,25 @@ emacs_process_up() {
     "$PGREP" -f "$EMACS_APP/Contents/MacOS/Emacs" >/dev/null 2>&1
 }
 
+# reload_stale_elisp hot-loads the checkout's elisp into the running Emacs
+# when it runs older elisp, BEFORE anything is stopped: the outgoing Emacs
+# witnesses the stand-down with whatever elisp it had loaded, so an elisp fix
+# merged since its last load would not be in force for the very stand-down it
+# fixes. A failed load stops the hard bounce with nothing stopped: the
+# restarted Emacs would load the same broken elisp.
+reload_stale_elisp() {
+    local outcome
+    outcome="$("$EMACSCLIENT" --eval "(agent-repl-elisp-reload-if-stale \"$MODULE_DIR\")")" ||
+        die "the running Emacs could not be asked to reload its elisp; nothing was stopped"
+    outcome="${outcome//\"/}"
+    case "$outcome" in
+        current)    say "emacs: its elisp is the checkout's already" ;;
+        reloaded)   say "emacs: hot-loaded the checkout's elisp before the stand-down" ;;
+        other-root) say "emacs: runs another checkout's elisp; it is left as it is" ;;
+        *)          die "emacs: the elisp hot load answered '$outcome' (see its log); nothing was stopped" ;;
+    esac
+}
+
 hard_bounce() {
     if emacs_running; then
         local unsaved
@@ -144,6 +166,9 @@ hard_bounce() {
     fi
     say "byte-compile: checking"
     "$BYTE_COMPILE" || die "byte-compile reported warnings or errors; nothing was stopped"
+    if emacs_running; then
+        reload_stale_elisp
+    fi
     say "bounce: rebuilding and restarting every backend"
     "$BOUNCE" || die "the bounce failed; see its output above"
     restart_emacs
