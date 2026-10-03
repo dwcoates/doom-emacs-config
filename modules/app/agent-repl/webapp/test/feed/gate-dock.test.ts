@@ -42,6 +42,55 @@ afterEach(() => {
   document.documentElement.style.removeProperty(DOCK_HEIGHT_PROPERTY);
 });
 
+/** The feed as feed-view.ts builds it: every row inside one body. */
+function bodiedFeed(feed: HTMLElement, ...rows: HTMLElement[]): HTMLElement {
+  const body = document.createElement("div");
+  body.className = "feed-body";
+  body.append(...rows);
+  feed.append(body);
+  return body;
+}
+
+describe("installGateDock on the feed's real shape", () => {
+  it("hides only the gate's own row, never the body holding every row", async () => {
+    // Arrange
+    const { feed, dock } = page();
+    const other = document.createElement("div");
+    other.className = "feed-item";
+    other.textContent = "the conversation";
+    const { row } = gateRow("standing");
+    const body = bodiedFeed(feed, other, row);
+    installed = installGateDock(feed, dock);
+
+    // Act
+    await settle();
+
+    // Assert
+    expect([
+      body.classList.contains(DOCKED_ROW_CLASS),
+      other.classList.contains(DOCKED_ROW_CLASS),
+      row.classList.contains(DOCKED_ROW_CLASS),
+      dock.hidden,
+    ]).toEqual([false, false, true, false]);
+  });
+
+  it("undocks when the gate's row leaves the body", async () => {
+    // Arrange
+    const { feed, dock } = page();
+    const { row } = gateRow("standing");
+    bodiedFeed(feed, row);
+    installed = installGateDock(feed, dock);
+    await settle();
+
+    // Act
+    row.remove();
+    await settle();
+
+    // Assert
+    expect(dock.hidden).toBe(true);
+  });
+});
+
 describe("installGateDock", () => {
   it("draws the dock below the footer, outside the main column, beside nothing", () => {
     // Arrange / Act
