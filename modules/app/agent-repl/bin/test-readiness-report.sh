@@ -48,7 +48,7 @@ LIB_UNDER_TEST="$THIS_DIR/lib-deploy-stamp.sh"
 
 # The fake git, first on PATH for the whole run. Every invocation's argv is
 # recorded in FAKE_GIT_LOG.
-FAKE_GIT_BIN="$(mktemp -d)"
+FAKE_GIT_BIN="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
 cp "$THIS_DIR/fake-git.sh" "$FAKE_GIT_BIN/git"
 chmod +x "$FAKE_GIT_BIN/git"
 export PATH="$FAKE_GIT_BIN:$PATH"
@@ -187,7 +187,7 @@ print(eval(sys.argv[2]))
 }
 
 new_root() {
-    local root; root="$(mktemp -d)"
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     make_repo "$root"
     make_stubs "$root/stubs"
     printf '%s' "$root"
@@ -530,7 +530,7 @@ t_elisp_is_not_reported() {
 
 # --- 14. outside a git checkout the report refuses rather than inventing ----
 t_no_git_checkout_exits_nonzero() {
-    local root; root="$(mktemp -d)"
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     mkdir -p "$root/bin" "$root/home"
     cp "$SCRIPT_UNDER_TEST" "$root/bin/readiness-report.sh"
     cp "$LIB_UNDER_TEST" "$root/bin/lib-deploy-stamp.sh"
@@ -711,7 +711,7 @@ t_missing_source_tree_stamp_is_not_ready() {
 # AGENT_REPL_LOCK_DIR pointed at its run dir. Sets BOUNCE_DIR, BOUNCE_BIN,
 # BOUNCE_REPORT, BOUNCE_BUILD.
 bounce_fixture() {
-    BOUNCE_DIR="$(mktemp -d)"
+    BOUNCE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     BOUNCE_BIN="$BOUNCE_DIR/bin"
     mkdir -p "$BOUNCE_BIN" "$BOUNCE_DIR/run"
     printf 'the-installed-store' > "$BOUNCE_BIN/shim-store"

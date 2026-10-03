@@ -505,7 +505,7 @@ gc_store() {
     echo "$$" > "$lock/pid" 2>/dev/null || true
     trap 'rm -rf "$lock"' RETURN
 
-    local keep_file; keep_file="$(mktemp)"
+    local keep_file; keep_file="$(mktemp "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     protected_keys | sort -u > "$keep_file"
     local kept_count; kept_count="$(grep -c . "$keep_file" || true)"
     echo "[build-frontend] gc: $kept_count referenced entr$([ "$kept_count" = 1 ] && echo y || echo ies) protected (grace ${GRACE_MINS}m, dry-run=$DRY_RUN)"

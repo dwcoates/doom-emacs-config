@@ -40,7 +40,7 @@ FAIL=0
 pass() { PASS=$((PASS + 1)); echo "ok   - $1"; }
 fail() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; [ -n "${2:-}" ] && echo "       $2"; return 0; }
 
-SCRATCH="$(mktemp -d)"
+SCRATCH="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
 cleanup() { rm -rf "$SCRATCH"; }
 trap cleanup EXIT
 
