@@ -307,7 +307,11 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// The editor startup's bring-up reads ownership at run time; it is built
 	// with the merge orchestrator, below the startup.
 	var ownership workspace.Ownership
+	// THE SERVICES' LATCH: every spawn waits until the boot's service step
+	// has made the store and the sidecar current (see serviceGate).
+	services := newServiceGate()
 	supervisor, err := shimclient.NewSupervisor(p.Surfaces,
+		shimclient.WithServicesReady(services.Ready()),
 		shimclient.WithLockProbe(adoptedDeathWitness(func(workspaceDir string) (sessionlock.State, error) {
 			if fleet == nil {
 				return sessionlock.StateUnknown, errors.New("the session fleet is not built yet")
@@ -727,7 +731,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// ---- the deploy ----
 
 	clients := &deployClientsForwarder{}
-	deployer, services, err := buildDeployer(ctx, deployerParams{
+	deployer, restarter, err := buildDeployer(ctx, deployerParams{
 		Surfaces:   p.Surfaces,
 		Checkout:   paths.Checkout,
 		ShimMain:   paths.ShimMain,
@@ -1029,7 +1033,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			Adopted:        fleet.Install,
 			SessionAdopted: fleet.NoteAdoptedSession,
 			StartSession:   fleet.Start,
-			EnsureServices: services.EnsureLoaded,
+			EnsureServices: services.step(bootServiceStep(p.Opts.joining != "", restarter.EnsureLoaded, restarter.EnsureCurrent)),
 			Unserved:       fleet.MarkUnserved,
 			BringingUp:     sidebarResolver.SetBringingUp,
 			AdoptBound:     adoptBound,
