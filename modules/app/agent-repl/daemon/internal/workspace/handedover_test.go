@@ -18,8 +18,8 @@ func TestAStartAHandoverLandsUnderLeavesItsShimToTheSuccessor(t *testing.T) {
 		check func(t *testing.T, f *fleetFixture, err error)
 	}{
 		{"the start answers that it was handed over", func(t *testing.T, _ *fleetFixture, err error) {
-			if !errors.Is(err, ErrHandedOver) || !errors.Is(err, bringup.ErrNotServed) {
-				t.Fatalf("Start = %v, want ErrHandedOver (and so bringup.ErrNotServed)", err)
+			if !errors.Is(err, ErrShimTaken) || !errors.Is(err, bringup.ErrNotServed) {
+				t.Fatalf("Start = %v, want ErrShimTaken (and so bringup.ErrNotServed)", err)
 			}
 		}},
 		{"its shim is detached, never stopped", func(t *testing.T, f *fleetFixture, _ error) {
@@ -44,6 +44,54 @@ func TestAStartAHandoverLandsUnderLeavesItsShimToTheSuccessor(t *testing.T) {
 			f := newFleetFixture(t)
 			ws := f.workspace("w1")
 			f.onSocketProbe = func(string) {
+				if _, err := f.fleet.HandOver(ws.ID); err != nil {
+					t.Fatalf("HandOver: %v", err)
+				}
+			}
+
+			// Act.
+			err := f.fleet.Start(context.Background(), ws.ID)
+
+			// Assert.
+			tt.check(t, f, err)
+		})
+	}
+}
+
+// A HANDOVER THAT LANDS WHILE StartSession RUNS takes the held shim: it is
+// detached for the successor, and the start serves nothing.
+func TestAHandoverLandingWhileTheStartRunsTakesItsHeldShim(t *testing.T) {
+	tests := []struct {
+		name  string
+		check func(t *testing.T, f *fleetFixture, err error)
+	}{
+		{"the start answers that its shim was taken", func(t *testing.T, _ *fleetFixture, err error) {
+			if !errors.Is(err, ErrShimTaken) || !errors.Is(err, bringup.ErrNotServed) {
+				t.Fatalf("Start = %v, want ErrShimTaken (and so bringup.ErrNotServed)", err)
+			}
+		}},
+		{"its shim is detached once, never stopped", func(t *testing.T, f *fleetFixture, _ error) {
+			if f.client.detached != 1 || len(f.client.kills) != 0 {
+				t.Fatalf("detached = %d, stops = %d; want one detach and no stop", f.client.detached, len(f.client.kills))
+			}
+		}},
+		{"the serving row is claimed only at the spawn", func(t *testing.T, f *fleetFixture, _ error) {
+			if len(f.db.claims) != 1 {
+				t.Fatalf("serving claims = %v, want the spawn's alone", f.db.claims)
+			}
+		}},
+		{"nothing is held", func(t *testing.T, f *fleetFixture, _ error) {
+			if f.fleet.Held("w1") {
+				t.Fatal("the fleet holds a shim for a workspace it handed over")
+			}
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFleetFixture(t)
+			ws := f.workspace("w1")
+			f.client.onStart = func() {
 				if _, err := f.fleet.HandOver(ws.ID); err != nil {
 					t.Fatalf("HandOver: %v", err)
 				}
