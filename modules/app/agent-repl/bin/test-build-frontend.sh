@@ -40,14 +40,21 @@ unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX
 THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_UNDER_TEST="$THIS_DIR/build-frontend.sh"
 
+# EVERY FIXTURE THIS HARNESS MAKES lives under one root it removes on exit:
+# the cases make a fresh `mktemp -d` per fixture and remove none, so a direct
+# run left one directory per case behind. TMPDIR moves to the root, so every
+# template below and every child lands inside it.
+HARNESS_TMP="$(mktemp -d "${TMPDIR:-/tmp}/test-build-frontend.XXXXXX")"
+trap 'rm -rf "$HARNESS_TMP"' EXIT
+export TMPDIR="$HARNESS_TMP"
+
 # The fake git, first on PATH for the whole run. Every invocation's argv is
 # recorded in FAKE_GIT_LOG.
-FAKE_GIT_BIN="$(mktemp -d)"
+FAKE_GIT_BIN="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
 cp "$THIS_DIR/fake-git.sh" "$FAKE_GIT_BIN/git"
 chmod +x "$FAKE_GIT_BIN/git"
 export PATH="$FAKE_GIT_BIN:$PATH"
 export FAKE_GIT_LOG="$FAKE_GIT_BIN/argv.log"
-trap 'rm -rf "$FAKE_GIT_BIN"' EXIT
 if [ "$(command -v git)" != "$FAKE_GIT_BIN/git" ]; then
     echo "test-build-frontend.sh: the fake git is not the git on PATH; refusing to run real git" >&2
     exit 2
@@ -301,7 +308,7 @@ age_entries() {
 
 # --- Test 1: all fresh -> nothing rebuilt ----------------------------------
 t_all_fresh() {
-    local root; root="$(mktemp -d)"
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
     : > "$root/stub.log"
     run_script "$root" >/dev/null
@@ -315,7 +322,7 @@ t_all_fresh() {
 
 # --- Test 2: one stale source -> only that artifact rebuilt -----------------
 t_one_stale() {
-    local root; root="$(mktemp -d)"
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
     : > "$root/stub.log"
     commit_change "$root" agent-shim/claude/shim/src/main.ts "export const b = 2" "edit shim"
@@ -332,7 +339,7 @@ t_one_stale() {
 
 # --- Test 3: missing artifact -> rebuilt ------------------------------------
 t_missing_artifact() {
-    local root; root="$(mktemp -d)"
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
     : > "$root/stub.log"
     rm -f "$root/daemon/bin/claude-repld"   # daemon artifact gone
@@ -347,7 +354,7 @@ t_missing_artifact() {
 
 # --- Test 4: --force -> rebuild despite fresh -------------------------------
 t_force() {
-    local root; root="$(mktemp -d)"
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
     : > "$root/stub.log"
     run_script "$root" --force daemon >/dev/null
@@ -361,7 +368,7 @@ t_force() {
 
 # --- Test 5: absent node_modules -> store populated once, symlinked in --------
 t_deps_linked_from_store() {
-    local root; root="$(mktemp -d)"
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
     : > "$root/stub.log"
     rm -rf "$root/webapp/node_modules"
@@ -377,9 +384,9 @@ t_deps_linked_from_store() {
 
 # --- Test 6: a second worktree reuses the store without reinstalling ----------
 t_deps_store_shared_across_worktrees() {
-    local store; store="$(mktemp -d)/store"
-    local first; first="$(mktemp -d)"
-    local second; second="$(mktemp -d)"
+    local store; store="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")/store"
+    local first; first="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
+    local second; second="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     make_tree "$first"; make_stubs "$first/stubs"; make_fresh_artifacts "$first"
     make_tree "$second"; make_stubs "$second/stubs"; make_fresh_artifacts "$second"
     rm -rf "$first/webapp/node_modules" "$second/webapp/node_modules"
@@ -399,8 +406,8 @@ t_deps_store_shared_across_worktrees() {
 
 # --- Test 7: a lockfile change keys a fresh store entry -----------------------
 t_deps_lockfile_change_rekeys_store() {
-    local store; store="$(mktemp -d)/store"
-    local root; root="$(mktemp -d)"
+    local store; store="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")/store"
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
     rm -rf "$root/webapp/node_modules"
     echo '{"lockfileVersion":3,"packages":{}}' > "$root/webapp/package-lock.json"
@@ -420,7 +427,7 @@ t_deps_lockfile_change_rekeys_store() {
 
 # --- Test 8: gc collects a stranded entry, keeps the referenced one ----------
 t_gc_collects_stranded_keeps_referenced() {
-    local root; root="$(mktemp -d)"
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     local store="$root/store"
     make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
     echo '{"lockfileVersion":3,"packages":{"live":{}}}' > "$root/webapp/package-lock.json"
@@ -445,7 +452,7 @@ t_gc_collects_stranded_keeps_referenced() {
 # rebuilt is still POINTING at the old entry. Hashing the current lockfile alone
 # would delete the deps out from under it.
 t_gc_protects_symlink_target() {
-    local root; root="$(mktemp -d)"
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     local store="$root/store"
     make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
     # The entry the worktree is actually USING.
@@ -468,9 +475,9 @@ t_gc_protects_symlink_target() {
 
 # --- Test 10: another worktree's lockfile protects an entry -------------------
 t_gc_protects_other_worktrees() {
-    local store; store="$(mktemp -d)/store"
-    local first; first="$(mktemp -d)"
-    local second; second="$(mktemp -d)"
+    local store; store="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")/store"
+    local first; first="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
+    local second; second="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     make_tree "$first"; make_stubs "$first/stubs"; make_fresh_artifacts "$first"
     make_tree "$second"; make_stubs "$second/stubs"; make_fresh_artifacts "$second"
     echo '{"lockfileVersion":3,"packages":{"a":{}}}' > "$first/webapp/package-lock.json"
@@ -496,7 +503,7 @@ t_gc_protects_other_worktrees() {
 
 # --- Test 11: a held lock makes the sweep skip (concurrency guard) ------------
 t_gc_skips_when_lock_held() {
-    local root; root="$(mktemp -d)"
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     local store="$root/store"
     make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
     seed_entry "$store" "webapp-deadbeefdeadbeef" 64
@@ -517,7 +524,7 @@ t_gc_skips_when_lock_held() {
 
 # --- Test 12: the lock is released so a later sweep can run ------------------
 t_gc_releases_lock() {
-    local root; root="$(mktemp -d)"
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     local store="$root/store"
     make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
     seed_entry "$store" "webapp-deadbeefdeadbeef" 64
@@ -538,7 +545,7 @@ t_gc_releases_lock() {
 
 # --- Test 13: --dry-run reports but deletes nothing ---------------------------
 t_gc_dry_run_deletes_nothing() {
-    local root; root="$(mktemp -d)"
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     local store="$root/store"
     make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
     seed_entry "$store" "webapp-deadbeefdeadbeef" 512
@@ -558,7 +565,7 @@ t_gc_dry_run_deletes_nothing() {
 # --- Test 14: an entry inside the grace window survives -----------------------
 # Guards a build in another worktree that is populating this entry right now.
 t_gc_respects_grace_window() {
-    local root; root="$(mktemp -d)"
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     local store="$root/store"
     make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
     seed_entry "$store" "webapp-deadbeefdeadbeef" 64   # freshly created
@@ -575,7 +582,7 @@ t_gc_respects_grace_window() {
 
 # --- Test 15: minting a new entry triggers a sweep ---------------------------
 t_gc_runs_after_minting_an_entry() {
-    local root; root="$(mktemp -d)"
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     local store="$root/store"
     make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
     rm -rf "$root/webapp/node_modules"
@@ -596,7 +603,7 @@ t_gc_runs_after_minting_an_entry() {
 
 # --- Test 16: a run that mints nothing does not sweep ------------------------
 t_gc_not_run_when_nothing_minted() {
-    local root; root="$(mktemp -d)"
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     local store="$root/store"
     make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
     seed_entry "$store" "webapp-deadbeefdeadbeef" 64
@@ -617,7 +624,7 @@ t_gc_not_run_when_nothing_minted() {
 # --- built-sha stamps -------------------------------------------------------
 
 t_stamp_written_on_build() {
-    local root sha; root="$(mktemp -d)"
+    local root sha; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     make_tree "$root"; make_stubs "$root/stubs"
     sha="$(git -C "$root" rev-parse HEAD)"
     run_script "$root" daemon >/dev/null
@@ -631,7 +638,7 @@ t_stamp_written_on_build() {
 }
 
 t_stamp_marks_a_dirty_tree() {
-    local root; root="$(mktemp -d)"
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     make_tree "$root"; make_stubs "$root/stubs"
     echo "package main // edited" > "$root/daemon/cmd/claude-repld/main.go"
     run_script "$root" daemon >/dev/null
@@ -645,7 +652,7 @@ t_stamp_marks_a_dirty_tree() {
 }
 
 t_stamp_untouched_by_a_skipped_build() {
-    local root; root="$(mktemp -d)"
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
     printf 'a-previous-revision\n' > "$root/daemon/bin/.built-sha"
     run_script "$root" daemon >/dev/null
@@ -659,7 +666,7 @@ t_stamp_untouched_by_a_skipped_build() {
 }
 
 t_no_git_leaves_no_stamp() {
-    local root; root="$(mktemp -d)"
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     make_tree "$root" nogit; make_stubs "$root/stubs"
     printf 'a-stale-guess\n' > "$root/daemon/bin/.built-sha"
     run_script "$root" daemon >/dev/null
@@ -678,7 +685,7 @@ t_no_git_leaves_no_stamp() {
 # taken as list separators or expanded against the cwd on the way there.
 
 t_stale_source_with_space_in_name() {
-    local root; root="$(mktemp -d)"
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
     : > "$root/stub.log"
     # A source whose name contains a space.
@@ -693,7 +700,7 @@ t_stale_source_with_space_in_name() {
 }
 
 t_stale_source_with_glob_chars() {
-    local root; root="$(mktemp -d)"
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
     : > "$root/stub.log"
     # Glob metacharacters in a source name must be taken literally, never
@@ -713,7 +720,7 @@ t_stale_source_with_glob_chars() {
 # talks itself out of work it owes — the artifact and its stamp could have come
 # from anywhere.
 t_undeterminable_source_set_rebuilds() {
-    local root; root="$(mktemp -d)"
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     make_tree "$root" nogit; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
     : > "$root/stub.log"
     if run_script "$root" webapp >/dev/null 2>&1; then
@@ -730,7 +737,7 @@ t_undeterminable_source_set_rebuilds() {
 }
 
 t_services_fresh_then_shared_dependency_stales_both() {
-    local root; root="$(mktemp -d)"
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
     : > "$root/stub.log"
     run_script "$root" store sidecar >/dev/null
@@ -752,7 +759,7 @@ t_services_fresh_then_shared_dependency_stales_both() {
 }
 
 t_services_shared_logging_edit_rebuilds_both() {
-    local root; root="$(mktemp -d)"
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
     : > "$root/stub.log"
     run_script "$root" store sidecar >/dev/null
@@ -774,7 +781,7 @@ t_services_shared_logging_edit_rebuilds_both() {
 }
 
 t_services_missing_shared_source_fails_loudly() {
-    local root rc; root="$(mktemp -d)"
+    local root rc; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
     rm -rf "$root/proto/gen/go"
     set +e
@@ -795,7 +802,7 @@ t_services_missing_shared_source_fails_loudly() {
 # binding must stale daemon/bin/claude-repld even though it lives outside
 # daemon/.
 t_daemon_shared_proto_edit_rebuilds() {
-    local root; root="$(mktemp -d)"
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
     : > "$root/stub.log"
     run_script "$root" daemon >/dev/null
@@ -820,7 +827,7 @@ t_daemon_shared_proto_edit_rebuilds() {
 # The daemon's stale-shim refresh compares the two, so a build that baked one
 # value and stamped another would bounce healthy shims forever.
 t_shim_bundle_and_stamp_share_one_revision() {
-    local root sha baked stamped; root="$(mktemp -d)"
+    local root sha baked stamped; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     make_tree "$root"; make_stubs "$root/stubs"
     # An npm stub that records the revision the build handed the bundler.
     cat > "$root/stubs/npm" <<'EOF'
@@ -857,7 +864,7 @@ EOF
 # build.mjs is the build DEFINITION — it is what injects the build identity —
 # so a change to it must rebuild the bundle even though it lives outside src/.
 t_build_mjs_stales_the_shim() {
-    local root; root="$(mktemp -d)"
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
     : > "$root/stub.log"
     commit_change "$root" agent-shim/claude/shim/build.mjs "// bundler tweak" "edit build.mjs"
@@ -874,7 +881,7 @@ t_build_mjs_stales_the_shim() {
 # The webview's URL carries this value, so a build that did not record it leaves
 # the artifact standing beside it unaddressable.
 t_webapp_build_id_is_the_entry_hash() {
-    local root got; root="$(mktemp -d)"
+    local root got; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     make_tree "$root"; make_stubs "$root/stubs"
     WEBAPP_ENTRY_HASH=CafeBabe01 run_script "$root" webapp >/dev/null
     got="$(cat "$root/webapp/dist/.build-id" 2>/dev/null || echo MISSING)"
@@ -891,7 +898,7 @@ t_webapp_build_id_is_the_entry_hash() {
 # webview must address, and a stamp missing beside it leaves that address
 # unbuildable.
 t_webapp_build_id_written_by_a_skipped_build() {
-    local root got; root="$(mktemp -d)"
+    local root got; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
     write_webapp_index "$root/webapp/dist/index.html" FreshHash7
     : > "$root/stub.log"
@@ -909,7 +916,7 @@ t_webapp_build_id_written_by_a_skipped_build() {
 # An index.html with no entry reference is a CORRUPT artifact, not a buildable
 # one. Continuing past it would deploy a webapp whose url addresses nothing.
 t_webapp_build_id_missing_entry_fails_loudly() {
-    local root out rc; root="$(mktemp -d)"
+    local root out rc; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
     echo "no entry bundle here" > "$root/webapp/dist/index.html"
     set +e
@@ -931,7 +938,7 @@ t_webapp_build_id_missing_entry_fails_loudly() {
 # two launchd services are not. Both halves are asserted: that a default run
 # builds it, and that it installs beside shim-store.
 t_lock_is_in_the_default_target_set() {
-    local root; root="$(mktemp -d)"
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
     : > "$root/stub.log"
     commit_change "$root" agent-shim/shim-lock/main.go "// lock tweak" "edit shim-lock"
@@ -946,7 +953,7 @@ t_lock_is_in_the_default_target_set() {
 }
 
 t_lock_installs_beside_shim_store() {
-    local root; root="$(mktemp -d)"
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     make_tree "$root"; make_stubs "$root/stubs"
     run_script "$root" lock >/dev/null
     if [ -f "$root/home/.cache/agent-repl/bin/shim-lock" ]; then
@@ -969,7 +976,7 @@ t_lock_installs_beside_shim_store() {
 # CAUSE 1: the source set was narrower than the one the gate measures. The shim
 # scanned `shim/src` plus a few manifests; the merges touched `shim/test/`.
 t_committed_change_outside_src_stales_the_shim() {
-    local root; root="$(mktemp -d)"
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
     : > "$root/stub.log"
     commit_change "$root" agent-shim/claude/shim/test/main.test.ts \
@@ -987,7 +994,7 @@ t_committed_change_outside_src_stales_the_shim() {
 # The webapp's half of the same cause: the merges touched `webapp/test/` and the
 # shared logging module, neither of which the old scan looked at.
 t_committed_change_in_shared_logging_stales_the_webapp() {
-    local root; root="$(mktemp -d)"
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
     : > "$root/stub.log"
     commit_change "$root" agent-shim/logging/go/timestamp.go \
@@ -1006,7 +1013,7 @@ t_committed_change_in_shared_logging_stales_the_webapp() {
 # or a copy can hand a genuinely changed file an mtime OLDER than the artifact,
 # and the prerequisite-newer-than-target rule then calls it fresh forever.
 t_older_mtime_source_change_still_rebuilds() {
-    local root; root="$(mktemp -d)"
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
     : > "$root/stub.log"
     commit_change "$root" daemon/cmd/claude-repld/main.go \
@@ -1028,7 +1035,7 @@ t_older_mtime_source_change_still_rebuilds() {
 # The converse, and the reason the rule can be trusted to skip: a tree that has
 # not moved is not rebuilt, however the artifact's timestamps look.
 t_unchanged_tree_skips_even_with_an_older_artifact() {
-    local root; root="$(mktemp -d)"
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
     : > "$root/stub.log"
     # An artifact older than every source: stale under the mtime rule, fresh
@@ -1049,7 +1056,7 @@ t_unchanged_tree_skips_even_with_an_older_artifact() {
 # committed content and cannot describe an uncommitted edit, so the only honest
 # answer while one is outstanding is to build.
 t_dirty_tree_always_rebuilds() {
-    local root; root="$(mktemp -d)"
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
     : > "$root/stub.log"
     printf '// uncommitted\n' >> "$root/daemon/cmd/claude-repld/main.go"
@@ -1067,7 +1074,7 @@ t_dirty_tree_always_rebuilds() {
 # this, a shared staleness rule would just rebuild everything on every commit
 # and the skip would be worthless.
 t_change_outside_the_pathspec_leaves_the_system_fresh() {
-    local root; root="$(mktemp -d)"
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
     : > "$root/stub.log"
     commit_change "$root" webapp/src/main.ts "export const w = 2" "feat(webapp): edit"
@@ -1083,7 +1090,7 @@ t_change_outside_the_pathspec_leaves_the_system_fresh() {
 
 # The stamp is what makes the skip possible, so a build must leave one behind.
 t_build_records_the_source_tree_stamp() {
-    local root recorded expected paths; root="$(mktemp -d)"
+    local root recorded expected paths; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     make_tree "$root"; make_stubs "$root/stubs"
     run_script "$root" daemon >/dev/null
     recorded="$(cat "$root/daemon/bin/.source-tree" 2>/dev/null || echo MISSING)"
@@ -1114,7 +1121,7 @@ go_builds_all_pass_buildvcs_false() {
 }
 
 t_in_place_go_builds_pass_buildvcs_false() {
-    local root; root="$(mktemp -d)"
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     make_tree "$root"; make_stubs "$root/stubs"
     : > "$root/stub.log"
     run_script "$root" daemon store sidecar lock >/dev/null
@@ -1138,7 +1145,7 @@ t_in_place_go_builds_pass_buildvcs_false() {
 
 # new_staging_root — a committed fixture with no live artifacts. Echoes the root.
 new_staging_root() {
-    local root; root="$(mktemp -d)"
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     make_tree "$root"
     make_stubs "$root/stubs"
     : > "$root/stub.log"
@@ -1329,7 +1336,7 @@ t_out_creates_an_absent_dir() {
 ENSURE_DEPS="$THIS_DIR/ensure-deps.sh"
 
 ed_fixture() {
-    local root; root="$(mktemp -d)"
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     mkdir -p "$root/bin" "$root/pkg" "$root/store/node_modules"
     echo ok > "$root/store/node_modules/.ok"
     cat > "$root/bin/npm" <<'EOF'
@@ -1426,7 +1433,7 @@ t_ensure_deps_fails_when_the_install_fails() {
 # that logs the package it was handed and exits EED_FAIL_STATUS for the
 # package named by EED_FAIL_PACKAGE.
 eed_fixture() {
-    local root; root="$(mktemp -d)"
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     mkdir -p "$root/bin" "$root/agent-shim/claude/shim" "$root/webapp" "$root/e2e"
     cp "$THIS_DIR/ensure-e2e-deps.sh" "$THIS_DIR/test-e2e.sh" "$root/bin/"
     cat > "$root/bin/ensure-deps.sh" <<'EOF'
@@ -1555,7 +1562,7 @@ NPM
 # the webapp's own manifest, with an EMPTY node_modules. Echoes the root.
 heal_fixture() {
     local root key entry
-    root="$(mktemp -d)"
+    root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     make_tree "$root"; make_stubs "$root/stubs"; make_heal_npm "$root/stubs"
     key="$(store_key_of "$root/webapp/package.json")"
     entry="$root/store/webapp-$key"
