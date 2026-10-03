@@ -280,3 +280,48 @@ func TestTheBootAdoptionKeepsATurnWaitingBehindAVendorStartedTurn(t *testing.T) 
 	}
 	expectNoWorkspaceWarnings(t, f)
 }
+
+// AN ADOPTED SURVIVOR THAT RUNS ITS SESSION IS NEVER STARTED AGAIN, even when
+// the boot reads it inert (its lock not where this daemon probes, as a live
+// bounce did on 2026-10-03): the announcement that follows asks the shim
+// nothing, records no ERROR and relaunches nothing.
+func TestAnAdoptedSurvivorReadInertIsNotStartedAgainByItsAnnouncement(t *testing.T) {
+	t.Parallel()
+	// Arrange: a session up, then the daemon dies and the shim survives it.
+	f := newOpened(t, harness.Opts{})
+	f.shim.ExpectStartSession()
+	info := f.shim.Info()
+	f.d.Kill()
+	writeIntentManifest(t, f.d, rollout.ManifestSession{
+		Workspace: ids.WorkspaceID(f.ws.GetId()), Dir: f.repo.Dir, ShimPID: info.PID,
+		VendorSessionID: info.VendorSessionID, Intent: rollout.IntentPreserve,
+	})
+	// The successor probes a lock directory the survivor's lock is not in, so
+	// it reads the survivor INERT: a listening shim with no lock of its own.
+	successor := harness.StartDaemon(t, harness.Opts{
+		StateDir: f.d.StateDir, ProfileDir: f.d.ProfileDir,
+		ExtraArgs: []string{"--default-config-dir", f.d.DefaultConfigDir},
+		ExtraEnv:  []string{"AGENT_REPL_LOCK_DIR=" + t.TempDir()},
+	})
+	successor.AwaitLogRecord(successor.RunLogPath(), "the boot's adoption of the survivor as inert", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.boot.adopt" && r.Message == "a shim is listening with no session of its own; adopting the inert survivor"
+	})
+	successor.AwaitWorkspaceLogRecord(f.repo.Dir, "the survivor stating its session on the adopted watch", func(r harness.LogRecord) bool {
+		return r.PID == successor.PID() && r.Message == "took the session facts from the shim's re-announcement"
+	})
+
+	// Act: Emacs announces the workspace, which revives a recorded
+	// conversation that has no session up.
+	harness.Register(t, successor, f.repo.Dir)
+
+	// Assert: the register read the session live and revived nothing, and the
+	// survivor started its one session, under the first daemon.
+	successor.AwaitWorkspaceLogRecord(f.repo.Dir, "the register reading the session live", func(r harness.LogRecord) bool {
+		return r.PID == successor.PID() && r.Operation == "daemon.workspace.flow_decision" &&
+			r.Context["condition"] == "v.deps.Sessions.Live(record.ID)"
+	})
+	if got := f.shim.Count(harness.RPCStartSession); got != 1 {
+		t.Fatalf("StartSession calls on the survivor = %d, want the first daemon's alone", got)
+	}
+	expectNoWorkspaceWarnings(t, f)
+}
