@@ -189,10 +189,23 @@ log "every backend is stopped"
 
 # ---- 3. start --------------------------------------------------------------
 
+# A SERVICE SOMEONE ELSE ALREADY BROUGHT BACK IS UP, NOT A FAILURE. Emacs
+# relaunches a daemon the moment the old one is gone, and that daemon's cold
+# start bootstraps the store and the sidecar itself -- from the fresh build,
+# since the build ran before anything was stopped. Its bootstrap can land
+# between this script's stop and its own, and launchd then refuses ours
+# (error 5). A bootstrap that fails while the label is loaded is that race;
+# one that fails with nothing loaded is a real failure.
 start_service() {
     log "$1: bootstrapping"
-    "$LAUNCHCTL" bootstrap "gui/$uid" "$LAUNCH_AGENTS_DIR/$1.plist" >/dev/null ||
-        die "$1 could not be bootstrapped from $LAUNCH_AGENTS_DIR/$1.plist"
+    if "$LAUNCHCTL" bootstrap "gui/$uid" "$LAUNCH_AGENTS_DIR/$1.plist" >/dev/null; then
+        return 0
+    fi
+    if service_known "$1"; then
+        log "$1: already loaded (pid $(service_pid "$1")): another client brought it back from the fresh build"
+        return 0
+    fi
+    die "$1 could not be bootstrapped from $LAUNCH_AGENTS_DIR/$1.plist"
 }
 
 start_service "$STORE_LABEL"
