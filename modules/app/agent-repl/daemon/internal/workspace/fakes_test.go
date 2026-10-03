@@ -997,12 +997,6 @@ type fakeFeed struct {
 	freshBooks []ids.WorkspaceID
 	// sourcesUp is every workspace a history source came up for, in order.
 	sourcesUp []ids.WorkspaceID
-	// kept is every workspace whose newest page a failed start secured, in
-	// order; keptErr is what KeepNewestPage answers.
-	kept    []ids.WorkspaceID
-	keptErr error
-	// onKeep runs AT KeepNewestPage, so a test reads what stood at that moment.
-	onKeep func(ids.WorkspaceID)
 }
 
 // OnMainAgent records the main agent the feed was told.
@@ -1018,15 +1012,6 @@ func (f *fakeFeed) NoteFreshBook(ws ids.WorkspaceID) {
 // SourceUp records that a history source came up.
 func (f *fakeFeed) SourceUp(ws ids.WorkspaceID) {
 	f.sourcesUp = append(f.sourcesUp, ws)
-}
-
-// KeepNewestPage records the secured page and answers keptErr.
-func (f *fakeFeed) KeepNewestPage(_ context.Context, ws ids.WorkspaceID) error {
-	f.kept = append(f.kept, ws)
-	if f.onKeep != nil {
-		f.onKeep(ws)
-	}
-	return f.keptErr
 }
 
 // RollBackTurns records the turns removed; the real resolver's own durable
@@ -1281,6 +1266,8 @@ func (b *fakeBanners) Raise(ws ids.WorkspaceID, kind, text string) {
 
 // fakeSessions is a Sessions fleet.
 type fakeSessions struct {
+	// held marks a workspace whose shim is held with no session on it.
+	held     map[ids.WorkspaceID]bool
 	live     map[ids.WorkspaceID]bool
 	started  []ids.WorkspaceID
 	startErr error
@@ -1435,6 +1422,9 @@ func (s *fakeSessions) Stop(_ context.Context, ws ids.WorkspaceID, force bool) e
 }
 
 func (s *fakeSessions) Live(ws ids.WorkspaceID) bool { return s.live[ws] }
+
+// Held answers a live session's shim, or a shim held with no session (held).
+func (s *fakeSessions) Held(ws ids.WorkspaceID) bool { return s.live[ws] || s.held[ws] }
 
 func (s *fakeSessions) ResumeCold(_ context.Context, ws ids.WorkspaceID, resume ColdResume) error {
 	// The observer runs BEFORE anything else this fake does, which is what

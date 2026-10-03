@@ -40,17 +40,6 @@ func (f *Fleet) recordSpawnedShimPID(ctx context.Context, log dlog.Logger, ws id
 	log.Debug(opBringUp, "recorded the spawned shim's pid", dlog.Context{"shim_pid": pid})
 }
 
-// clearSpawnedShimPID retracts the recorded spawn once this daemon knows the
-// process it named is going away, so no successor waits out its adoption bound
-// on a pid that cannot answer.
-func (f *Fleet) clearSpawnedShimPID(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID) {
-	if err := f.deps.DB.SetSpawnedShimPID(context.WithoutCancel(ctx), ws, nil); err != nil {
-		log.Error(opBringUp, "could not clear the stopped spawn's recorded pid", dlog.Context{
-			"cause": err.Error(),
-		})
-	}
-}
-
 // awaitStartingSurvivor answers whether a shim a PREVIOUS daemon spawned is
 // merely still starting, waiting out the adoption bound for it to bind its
 // socket. It reports whether one announced itself and the path it announced on.
