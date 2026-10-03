@@ -59,6 +59,7 @@
                   (conn on-push on-close &optional on-open))
 (declare-function agent-repl-connect-stream-cancel "connect" (stream))
 (declare-function agent-repl-link-live "daemon-link" ())
+(declare-function agent-repl-link-departing-p "daemon-link" (live &optional ended-planned-on))
 (declare-function agent-repl--ws-current-name "workspace" ())
 (declare-function agent-repl--ws-known-p "workspace" (ws))
 (declare-function agent-repl--ws-live-p "workspace" (ws))
@@ -158,6 +159,12 @@ WITHIN the running set, not out of it.")
 
 (defvar agent-repl-roster--stream nil
   "The standing WatchWorkspaceRoster stream, or nil when unsubscribed.")
+
+(defvar agent-repl-roster--stream-conn nil
+  "The connection the standing roster stream rides, or nil when unsubscribed.
+Read when that stream ends PLANNED: a planned end on the connection the
+link still names is its daemon leaving, and the roster waits for the
+link\='s own edge rather than re-subscribing on it.")
 
 (defvar agent-repl-roster--rows-by-id (make-hash-table :test 'equal)
   "Ref id -> the decoded `RosterRow' the last accepted push carried.
@@ -1199,8 +1206,10 @@ the caller did not name the stream."
     (agent-repl--log '(:agent-repl-central "the roster stream spans workspaces")
                      "elisp.roster.stale-stream-close: reason=%S" reason))
    (t
-    (let ((closing (or stream agent-repl-roster--stream)))
-      (setq agent-repl-roster--stream nil)
+    (let ((closing (or stream agent-repl-roster--stream))
+          (departing agent-repl-roster--stream-conn))
+      (setq agent-repl-roster--stream nil
+            agent-repl-roster--stream-conn nil)
       (pcase (car-safe reason)
         (:cancelled (agent-repl--log '(:agent-repl-central "the roster stream spans workspaces")
                                       "elisp.roster.stream-close: reason=cancelled"))
@@ -1211,7 +1220,7 @@ the caller did not name the stream."
          (setq agent-repl-roster--ending-stream nil)
          (agent-repl--info '(:agent-repl-central "the roster stream spans workspaces")
                            "elisp.roster.stream-close: reason=planned-ending")
-         (agent-repl-roster--follow-live-daemon stream))
+         (agent-repl-roster--follow-live-daemon stream departing))
         (:ended (agent-repl--error '(:agent-repl-central "the roster stream spans workspaces")
                                     "elisp.roster.stream-close: reason=ended-without-cancel — a standing stream the producer ended")
                 (agent-repl-roster--follow-live-daemon stream))
@@ -1219,8 +1228,9 @@ the caller did not name the stream."
                                "elisp.roster.stream-close: reason=%S" reason)
            (agent-repl-roster--follow-live-daemon stream)))))))
 
-(defun agent-repl-roster--follow-live-daemon (lost)
+(defun agent-repl-roster--follow-live-daemon (lost &optional planned-on)
   "Re-subscribe the roster on the LIVE daemon after the stream LOST died.
+PLANNED-ON is the connection LOST rode when it ended PLANNED, else nil.
 Regression, 2026-09-27: a daemon exited under a standing roster stream
 and nothing re-subscribed it unless the link itself went down or was
 promoted -- the roster was left to those edges alone.  The live daemon is
@@ -1230,7 +1240,16 @@ the link\='s (`agent-repl-link-live'), never an address this file keeps:
     (`agent-repl-roster-on-link-up'), and nothing polls meanwhile;
   - LOST was never accepted: the daemon it dialed is not answering, and
     the link\='s own edge (down then up, or a promotion) re-subscribes;
-  - otherwise the roster is re-subscribed on the live daemon now."
+  - the live daemon announced its OWN ending -- LOST ended planned on it,
+    or the link\='s `WatchDaemon' carried the ending
+    (`agent-repl-link-departing-p'): it is leaving, and the link\='s own edge
+    re-subscribes on whatever serves next;
+  - otherwise the roster is re-subscribed on the live daemon now.
+
+Regression, 2026-10-03: a bounce\='s announced stand-down ended the roster
+stream before the link\='s own, and the roster re-subscribed on the very
+daemon that had just said it was leaving: `elisp.connect.dial-failed',
+`elisp.connect.stream-error' and `elisp.roster.stream-close' at ERROR."
   (let ((live (and (fboundp 'agent-repl-link-live) (agent-repl-link-live))))
     (cond
      ((null live)
@@ -1239,6 +1258,11 @@ the link\='s (`agent-repl-link-live'), never an address this file keeps:
      ((not (and lost (eq lost agent-repl-roster--accepted)))
       (agent-repl--info '(:agent-repl-central "the roster stream spans workspaces")
                         "elisp.roster.resubscribe-awaiting-link-edge reason=never-accepted address=%S"
+                        (agent-repl-connect-connection-address live)))
+     ((and (fboundp 'agent-repl-link-departing-p)
+           (agent-repl-link-departing-p live planned-on))
+      (agent-repl--info '(:agent-repl-central "the roster stream spans workspaces")
+                        "elisp.roster.resubscribe-awaiting-link-edge reason=daemon-departing address=%S"
                         (agent-repl-connect-connection-address live)))
      (t
       (agent-repl--info '(:agent-repl-central "the roster stream spans workspaces")
@@ -1272,7 +1296,8 @@ deliver the tabs."
                                "elisp.roster.subscribed method=%S address=%S"
                                "WatchWorkspaceRoster"
                                (agent-repl-connect-connection-address conn)))))
-    (setq agent-repl-roster--stream stream))
+    (setq agent-repl-roster--stream stream
+          agent-repl-roster--stream-conn conn))
   (agent-repl--info '(:agent-repl-central "the roster stream spans workspaces")
                     "elisp.roster.subscribe: opened")
   agent-repl-roster--stream)
@@ -1289,7 +1314,8 @@ link-down/up, so the re-subscription is the same act as the first."
   "Forget the roster stream when the link goes down.
 The last view is KEPT: it is the newest thing anyone knows, and blanking
 the tab bar on a reconnect would be a worse lie than a stale paint."
-  (setq agent-repl-roster--stream nil)
+  (setq agent-repl-roster--stream nil
+        agent-repl-roster--stream-conn nil)
   (agent-repl--info '(:agent-repl-central "the roster stream spans workspaces")
                     "elisp.roster.link-down: stream forgotten view-kept=%s"
                     (if agent-repl-roster-view "t" "nil")))
