@@ -43,15 +43,40 @@ afterEach(() => {
 });
 
 describe("installGateDock", () => {
-  it("draws the dock below the footer, at the page's very bottom", () => {
+  it("draws the dock below the footer, outside the main column, beside nothing", () => {
     // Arrange / Act
     const { dock, footer } = page();
 
-    // Assert
+    // Assert: a child of the page itself, after the main column, so it can
+    // span the rail's column as well as the main one.
     expect([
       footer.compareDocumentPosition(dock) & Node.DOCUMENT_POSITION_FOLLOWING,
-      dock.nextElementSibling?.id ?? null,
-    ]).toEqual([Node.DOCUMENT_POSITION_FOLLOWING, "composer"]);
+      dock.parentElement?.tagName ?? null,
+      dock.previousElementSibling?.id ?? null,
+    ]).toEqual([Node.DOCUMENT_POSITION_FOLLOWING, "BODY", "main-col"]);
+  });
+
+  it("spans every column of the page's second row", async () => {
+    // Arrange
+    const css = (await import("../../src/styles.css?raw")).default;
+
+    // Act
+    const rule = /#gate-dock\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
+
+    // Assert
+    expect([rule.includes("grid-column: 1 / -1"), rule.includes("grid-row: 2")]).toEqual([true, true]);
+  });
+
+  it("keeps the rail in the first row, so it never reaches down beside the dock", async () => {
+    // Arrange
+    const css = (await import("../../src/styles.css?raw")).default;
+
+    // Act
+    const rail = /#ws-sidebar\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
+    const main = /#main-col\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
+
+    // Assert
+    expect([rail.includes("grid-row: 1"), main.includes("grid-row: 1")]).toEqual([true, true]);
   });
 
   it("moves a standing gate's card into the dock and shows it", async () => {
