@@ -1169,6 +1169,20 @@ describe("the terminal of a turn the vendor absorbed", () => {
     expect((success.outcome.value as conversationv1.AgentCompleted).answer?.value).toBe("msg-v:0");
   });
 
+  it("leaves no answer behind for the turn that follows the absorbed one", () => {
+    // Arrange
+    const fold = createFold();
+    fold.onSdkMessage(assistant("msg-v", [{ type: "text", text: "the hand-back is in" }]), foldContext());
+    fold.concludeAbsorbedTurn(foldContext(), "absorbed-adopted-1");
+
+    // Act
+    const output = fold.onSdkMessage(streamMessage("result_success"), foldContext());
+
+    // Assert
+    const success = output.turnEnded?.frame.result.value as conversationv1.AgentSuccess;
+    expect((success.outcome.value as conversationv1.AgentCompleted).answer).toBeUndefined();
+  });
+
   it("keys the terminal row by the coordinate it was given", () => {
     // Arrange
     const fold = createFold();
@@ -1217,6 +1231,21 @@ describe("the turn's terminal", () => {
     const success = output.turnEnded?.frame.result.value as conversationv1.AgentSuccess;
     const completed = success.outcome.value as conversationv1.AgentCompleted;
     expect(completed.answer?.value).toBe("msg-cut:0");
+  });
+
+  it("names no answer for a turn that drew no prose after an earlier turn concluded on its own", () => {
+    // Arrange: the keep-alive's "." concludes its turn, and a vendor-started
+    // turn with no reply (a stopped task's notification) ends next.
+    const fold = createFold();
+    fold.onSdkMessage(assistant("msg-keepalive", [{ type: "text", text: "." }]), foldContext({ keepalive: true }));
+    fold.onSdkMessage(streamMessage("result_success"), foldContext({ keepalive: true }));
+
+    // Act
+    const output = fold.onSdkMessage(streamMessage("result_success"), foldContext());
+
+    // Assert
+    const success = output.turnEnded?.frame.result.value as conversationv1.AgentSuccess;
+    expect((success.outcome.value as conversationv1.AgentCompleted).answer).toBeUndefined();
   });
 
   it("names no answer for a failed block that said nothing", () => {
