@@ -35,6 +35,11 @@ export default defineConfig({
   server: { fs: { allow: [agentReplRoot] } },
   test: {
     include: ["test/integration/**/*.test.ts"],
+    // EVERY TEMP FILE THIS RUN MAKES lives under one root the run owns and
+    // removes (test/run-tmp-root.ts has the measurement): a create in the
+    // shared, leak-bloated user temp directory stalled for seconds under the
+    // full suite set and timed tests out on nothing else.
+    globalSetup: ["./test/run-tmp-root.ts"],
     // Each test spawns and tears down its own shim, so they must not share a
     // process-global; threads are fine, but the per-test budget has to cover a
     // real spawn.
