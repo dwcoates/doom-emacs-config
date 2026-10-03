@@ -2,6 +2,7 @@ package feed
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -27,6 +28,9 @@ type fakeFaults struct {
 	closed []ids.FaultID
 	// openErr fails the next open, so the unrecordable path is provable.
 	openErr error
+	// recordedErr fails every FaultRecorded read, so the unreadable path is
+	// provable.
+	recordedErr error
 }
 
 func (f *fakeFaults) OpenFault(_ context.Context, fault wsm.Fault) (ids.FaultID, error) {
@@ -60,6 +64,31 @@ func (f *fakeFaults) OpenFaults(_ context.Context, scope wsm.FaultScope) ([]wsm.
 		out = append(out, fault)
 	}
 	return out, nil
+}
+
+// FaultRecorded answers from every fault ever opened, closed or not, as the
+// state client answers from its persisted record.
+func (f *fakeFaults) FaultRecorded(_ context.Context, m wsm.FaultMatch) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.recordedErr != nil {
+		return false, f.recordedErr
+	}
+	for _, fault := range f.opened {
+		if fault.Workspace == nil || *fault.Workspace != m.Workspace || fault.Kind != m.Kind {
+			continue
+		}
+		matched := true
+		for key, value := range m.Evidence {
+			if got, ok := fault.Evidence[key]; !ok || got != value {
+				matched = false
+			}
+		}
+		if matched {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // standing answers the faults opened and not since closed, in open order.
@@ -706,5 +735,269 @@ func TestASiblingFoldMovingDoesNotAnswerAnotherFoldsStall(t *testing.T) {
 	}
 	if fault.Evidence["unit"] != "unit-1" {
 		t.Fatalf("unit = %q, want the stalled fold's", fault.Evidence["unit"])
+	}
+}
+
+// ---- RAISED ONCE PER OCCURRENCE ----
+
+// The shape the owner's workspace replayed on every boot (2026-10-02): an
+// ADOPTED turn — one the vendor started on its own, here a stopped background
+// task's notification answered with no reply — whose terminal names an answer
+// no plane stored (the shim's fold named the keep-alive's "." it had kept from
+// the turn before).
+const (
+	adoptedTurn  = "adopted-d8d296ab-6fde-45f2-ae82-e0c896b0aaee"
+	unstoredUnit = "msg_011CfcgDhgcB7pSBohLKm2Yp:0"
+)
+
+// adoptedPromptEntry is an adopted turn's opening row as the store keeps it:
+// a VENDOR_STARTED prompt with no words said.
+func adoptedPromptEntry(turn string) *conversationv1.HistoryEntry {
+	return &conversationv1.HistoryEntry{
+		Entry: &conversationv1.HistoryEntry_UserPrompt{UserPrompt: &conversationv1.AgentPrompt{
+			Id:     &conversationv1.TurnId{Value: turn},
+			Agent:  mainAgent(),
+			Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_VENDOR_STARTED,
+			Said:   &conversationv1.UserSaid{Content: &conversationv1.UserContent{}},
+		}},
+	}
+}
+
+// adoptedHistory is the page that carries the adopted turn: its prompt, then
+// its terminal naming the unstored unit, served newest first.
+func adoptedHistory() *conversationv1.HistoryPage {
+	return historyPage(&conversationv1.HistoryFloor{},
+		frameEntry(mainAgent(), completedWith(unstoredUnit)),
+		adoptedPromptEntry(adoptedTurn))
+}
+
+// concludeAdoptedLive runs the adopted turn as it happens: its prompt, then its
+// terminal naming the unstored unit.
+func (h *harness) concludeAdoptedLive() {
+	h.t.Helper()
+	h.promptWith(adoptedTurn, conversationv1.PromptOrigin_PROMPT_ORIGIN_VENDOR_STARTED)
+	turn := ids.TurnID(adoptedTurn)
+	h.resolver.OnAgentTerminal(testWorkspace, mainAgent(), &turn, completedWith(unstoredUnit), nil, nil)
+}
+
+// recordedByAnEarlierDaemon seeds the fault record with the verdict a daemon
+// before this one raised and that has since been retired.
+func (h *harness) recordedByAnEarlierDaemon(turn, unit, why string) {
+	h.t.Helper()
+	ws := testWorkspace
+	id, err := h.faults.OpenFault(context.Background(), wsm.Fault{
+		Workspace: &ws, Kind: health.KindFinalAnswerUnresolved,
+		Evidence: map[string]string{"turn": turn, "unit": unit, "why": why},
+	})
+	if err != nil {
+		h.t.Fatalf("OpenFault: %v", err)
+	}
+	if err := h.faults.CloseFault(context.Background(), id, time.Time{}); err != nil {
+		h.t.Fatalf("CloseFault: %v", err)
+	}
+}
+
+// recordsAt answers the records logged under one operation at one level.
+func (h *harness) recordsAt(level, operation string) []dlog.Record {
+	h.t.Helper()
+	var out []dlog.Record
+	for _, rec := range h.log.Records() {
+		if rec.Level == level && rec.Operation == operation {
+			out = append(out, rec)
+		}
+	}
+	return out
+}
+
+// TestATerminalVerdictIsRaisedOncePerOccurrence pins that an adopted turn's
+// unresolved answer is raised the first time its terminal is judged — live or
+// replayed — and never again, however often the terminal arrives after.
+func TestATerminalVerdictIsRaisedOncePerOccurrence(t *testing.T) {
+	tests := []struct {
+		name       string
+		arrange    func(h *harness)
+		arrive     func(h *harness)
+		wantErrors int
+		wantInfos  int
+		wantOpened int
+	}{
+		{
+			name:       "the terminal arrives live",
+			arrange:    func(*harness) {},
+			arrive:     func(h *harness) { h.concludeAdoptedLive() },
+			wantErrors: 1, wantInfos: 0, wantOpened: 1,
+		},
+		{
+			name:       "the terminal is replayed and no daemon recorded its verdict",
+			arrange:    func(*harness) {},
+			arrive:     func(h *harness) { h.replay(adoptedHistory()) },
+			wantErrors: 1, wantInfos: 0, wantOpened: 1,
+		},
+		{
+			name: "the terminal is replayed and an earlier daemon recorded its verdict",
+			arrange: func(h *harness) {
+				h.recordedByAnEarlierDaemon(adoptedTurn, unstoredUnit, whyAnswerRowUnresolved)
+			},
+			arrive:     func(h *harness) { h.replay(adoptedHistory()) },
+			wantErrors: 0, wantInfos: 1, wantOpened: 1,
+		},
+		{
+			name:    "the same history is replayed twice",
+			arrange: func(*harness) {},
+			arrive: func(h *harness) {
+				h.replay(adoptedHistory())
+				h.replay(adoptedHistory())
+			},
+			wantErrors: 1, wantInfos: 1, wantOpened: 1,
+		},
+		{
+			name:    "the live terminal's page is replayed after it",
+			arrange: func(*harness) {},
+			arrive: func(h *harness) {
+				h.concludeAdoptedLive()
+				h.replay(adoptedHistory())
+			},
+			wantErrors: 1, wantInfos: 1, wantOpened: 1,
+		},
+		{
+			name:    "the terminal arrives live again from another store plane",
+			arrange: func(*harness) {},
+			arrive: func(h *harness) {
+				h.concludeAdoptedLive()
+				turn := ids.TurnID(adoptedTurn)
+				h.resolver.OnAgentTerminal(testWorkspace, mainAgent(), &turn, completedWith(unstoredUnit), nil, nil)
+			},
+			wantErrors: 1, wantInfos: 1, wantOpened: 1,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			tt.arrange(h)
+
+			// Act.
+			tt.arrive(h)
+
+			// Assert.
+			errs := h.recordsAt("error", "daemon.feed.final_answer_unresolved")
+			infos := h.recordsAt("info", "daemon.feed.final_answer_verdict_recorded")
+			opened := len(h.faults.opened)
+			if len(errs) != tt.wantErrors || len(infos) != tt.wantInfos || opened != tt.wantOpened {
+				t.Fatalf("errors, infos, faults opened = %d, %d, %d; want %d, %d, %d",
+					len(errs), len(infos), opened, tt.wantErrors, tt.wantInfos, tt.wantOpened)
+			}
+		})
+	}
+}
+
+// TestARecordedVerdictNamesTheAdoptedTurnAndItsUnit pins the INFO record's
+// evidence: a reader of the log can still find which turn lost which answer.
+func TestARecordedVerdictNamesTheAdoptedTurnAndItsUnit(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.recordedByAnEarlierDaemon(adoptedTurn, unstoredUnit, whyAnswerRowUnresolved)
+
+	// Act.
+	h.replay(adoptedHistory())
+
+	// Assert.
+	infos := h.recordsAt("info", "daemon.feed.final_answer_verdict_recorded")
+	if len(infos) != 1 {
+		t.Fatalf("recorded-verdict INFO records = %d, want one", len(infos))
+	}
+	ctx := infos[0].Context
+	if ctx["turn"] != adoptedTurn || ctx["unit"] != unstoredUnit || ctx["why"] != whyAnswerRowUnresolved || ctx["plane"] != "history" {
+		t.Fatalf("record context = %v, want the adopted turn, its unit, the why and the history plane", ctx)
+	}
+}
+
+// TestARecordedVerdictLeavesNoFaultStanding pins that a verdict an earlier
+// daemon raised does not come back to the footer on a replay.
+func TestARecordedVerdictLeavesNoFaultStanding(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.recordedByAnEarlierDaemon(adoptedTurn, unstoredUnit, whyAnswerRowUnresolved)
+
+	// Act.
+	h.replay(adoptedHistory())
+
+	// Assert.
+	if fault := h.standingAnswerFault(); fault != nil {
+		t.Fatalf("a recorded verdict stands again after a replay: %v", fault.Evidence)
+	}
+}
+
+// TestAVerdictRecordedForAnotherTurnDoesNotAnswerForThisOne pins the match: a
+// record about a different occurrence leaves this one to be raised.
+func TestAVerdictRecordedForAnotherTurnDoesNotAnswerForThisOne(t *testing.T) {
+	tests := []struct {
+		name string
+		turn string
+		unit string
+		why  string
+	}{
+		{name: "another turn", turn: "adopted-other", unit: unstoredUnit, why: whyAnswerRowUnresolved},
+		{name: "another unit", turn: adoptedTurn, unit: "msg_other:0", why: whyAnswerRowUnresolved},
+		{name: "another why", turn: adoptedTurn, unit: unstoredUnit, why: whyNoAnswerNamed},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.recordedByAnEarlierDaemon(tt.turn, tt.unit, tt.why)
+
+			// Act.
+			h.replay(adoptedHistory())
+
+			// Assert.
+			if got := h.recordsAt("error", "daemon.feed.final_answer_unresolved"); len(got) != 1 {
+				t.Fatalf("unresolved ERROR records = %d, want the verdict raised once", len(got))
+			}
+		})
+	}
+}
+
+// TestAnUnreadableFaultRecordRaisesTheVerdictAsNew pins the failure direction:
+// a record that cannot answer never silences a verdict, and says so at ERROR.
+func TestAnUnreadableFaultRecordRaisesTheVerdictAsNew(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.faults.recordedErr = errors.New("the state database is locked")
+
+	// Act.
+	h.replay(adoptedHistory())
+
+	// Assert.
+	unreadable := h.recordsAt("error", "daemon.feed.final_answer_record_unreadable")
+	raised := h.recordsAt("error", "daemon.feed.final_answer_unresolved")
+	if len(unreadable) != 1 || len(raised) != 1 {
+		t.Fatalf("unreadable, unresolved ERROR records = %d, %d; want one of each", len(unreadable), len(raised))
+	}
+}
+
+// TestAStallThatRecursOnTheSameFoldIsRaisedAgain pins that a stall is never
+// looked up in the record: the same fold going silent a second time is a
+// second stall, and it is raised.
+func TestAStallThatRecursOnTheSameFoldIsRaisedAgain(t *testing.T) {
+	// Arrange: the fold stalls, a frame clears it, and it goes silent again.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "do the thing")
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		responseFrame("unit-1", &conversationv1.AgentResponseUpdate{NewMarkdown: "half an ans"}, nil), nil, nil)
+	h.clock.elapse()
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		responseFrame("unit-1", &conversationv1.AgentResponseUpdate{NewMarkdown: "wer, and then"}, nil), nil, nil)
+
+	// Act.
+	h.clock.elapse()
+
+	// Assert.
+	fault := h.standingAnswerFault()
+	if fault == nil || fault.Evidence["why"] != whyStalled {
+		t.Fatalf("standing fault = %v, want the second stall standing", fault)
+	}
+	if got := len(h.faults.opened); got != 2 {
+		t.Fatalf("faults opened = %d, want one per stall", got)
 	}
 }
