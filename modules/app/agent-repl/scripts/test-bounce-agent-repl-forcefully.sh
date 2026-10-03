@@ -9,8 +9,9 @@
 # NOTHING LIVE IS EVER TOUCHED. Each case copies the script into its own
 # temporary checkout, so every process it matches is matched by a path under
 # that checkout or under the case's own XDG_CACHE_HOME; the "backends" are
-# shell stand-ins started here; launchctl is a stub keeping its state in
-# files; the build is a stand-in executable.
+# shell stand-ins started here; a `launchctl` first on PATH only records that
+# it was called (the bounce must never call it); the build is a stand-in
+# executable.
 
 set -uo pipefail
 
@@ -35,45 +36,19 @@ trap cleanup EXIT
 fail() { echo "FAIL: $*"; FAILURES=$((FAILURES + 1)); }
 pass() { echo "ok:   $*"; }
 
-# world -- a temporary checkout, cache home and launchd, left in W.
+# world -- a temporary checkout, cache home and state root, left in W.
 W=""
 world() {
     local w
     w="$(mktemp -d /tmp/bounce-test.XXXXXX)"
     WORLDS+=("$w")
     mkdir -p "$w/checkout/scripts" "$w/checkout/daemon/bin" "$w/checkout/agent-shim/claude/shim/dist" \
-        "$w/cache/agent-repl/bin" "$w/cache/agent-repl/sock" "$w/agents" "$w/launchd" "$w/state/sock"
+        "$w/cache/agent-repl/bin" "$w/state/sock" "$w/pathbin"
     cp "$SCRIPT" "$w/checkout/scripts/"
-    touch "$w/agents/com.agentrepl.shim-store.plist" "$w/agents/com.agentrepl.shim-claude-sidecar.plist"
-    # A launchctl stub: a loaded label is a file holding its pid; every call is
-    # recorded. `bootstrap` of the store binds its socket unless told not to.
-    cat >"$w/launchctl" <<EOF
-#!/usr/bin/env bash
-echo "\$*" >>"$w/launchd/calls"
-label="\${2##*/}"
-case "\$1" in
-  print) [ -f "$w/launchd/\$label" ] || exit 113; echo "	pid = \$(cat "$w/launchd/\$label")" ;;
-  bootout) [ -f "$w/launchd/stuck-\$label" ] && [ ! -f "$w/launchd/killed-\$label" ] && { touch "$w/launchd/killed-\$label"; exit 0; }; rm -f "$w/launchd/\$label" ;;
-  bootstrap)
-    label="\$(basename "\$3" .plist)"
-    # A launchd that refuses outright, with nothing loaded.
-    [ -f "$w/launchd/refuse-\$label" ] && exit 5
-    # Another client (the daemon Emacs relaunched) bootstraps it first: launchd
-    # then refuses this one with error 5, as the real one does.
-    if [ -f "$w/launchd/raced-\$label" ]; then
-      echo 999997 >"$w/launchd/\$label"
-      [ "\$label" = com.agentrepl.shim-store ] && python3 -c 'import socket,sys; s=socket.socket(socket.AF_UNIX); s.bind(sys.argv[1])' "$w/cache/agent-repl/sock/store.sock" </dev/null >/dev/null 2>&1
-      exit 5
-    fi
-    echo 999999 >"$w/launchd/\$label"
-    if [ "\$label" = com.agentrepl.shim-store ] && [ ! -f "$w/launchd/no-socket" ]; then
-      python3 -c 'import socket,sys; s=socket.socket(socket.AF_UNIX); s.bind(sys.argv[1])' "$w/cache/agent-repl/sock/store.sock" </dev/null >/dev/null 2>&1
-    fi ;;
-esac
-EOF
-    chmod +x "$w/launchctl"
-    echo 999998 >"$w/launchd/com.agentrepl.shim-store"
-    echo 999998 >"$w/launchd/com.agentrepl.shim-claude-sidecar"
+    # THE SERVICES ARE THE NEXT DAEMON'S TO RESTART, so any launchctl call at
+    # all is a failure: this one only records that it happened.
+    printf '#!/bin/sh\necho "$*" >>"%s/launchctl-calls"\n' "$w" >"$w/pathbin/launchctl"
+    chmod +x "$w/pathbin/launchctl"
     printf '#!/bin/sh\nexit 0\n' >"$w/builder"
     chmod +x "$w/builder"
     W="$w"
@@ -109,10 +84,9 @@ backend() {
 
 run() { # WORLD -- run the copied script against the world, output to WORLD/out
     local w="$1"
-    AGENT_REPL_TEST_WORLD="$w" AGENT_REPL_STATE_DIR="$w/state" \
-    AGENT_REPL_LAUNCHCTL="$w/launchctl" AGENT_REPL_LAUNCH_AGENTS_DIR="$w/agents" \
+    AGENT_REPL_TEST_WORLD="$w" AGENT_REPL_STATE_DIR="$w/state" PATH="$w/pathbin:$PATH" \
         XDG_CACHE_HOME="$w/cache" AGENT_REPL_BOUNCE_BUILDER="${BUILDER:-$w/builder}" \
-        AGENT_REPL_BOUNCE_GRACE=2 AGENT_REPL_BOUNCE_SOCK_MAX=2 \
+        AGENT_REPL_BOUNCE_GRACE=2 \
         bash "$w/checkout/scripts/bounce-agent-repl-forcefully.sh" >"$w/out" 2>&1
 }
 
@@ -129,15 +103,19 @@ run "$w"; status=$?
 gone "$daemon" && pass "the daemon is stopped by its SIGTERM" || fail "the daemon survived"
 gone "$shim" && pass "a shim that ignores SIGTERM is killed after the grace" || fail "the shim survived"
 gone "$lock" && pass "the shim locks are stopped" || fail "a shim lock survived"
-calls="$(cat "$w/launchd/calls")"
-last_bootout="$(grep -n bootout <<<"$calls" | tail -1 | cut -d: -f1)"
-store_up="$(grep -n "bootstrap.*shim-store" <<<"$calls" | cut -d: -f1)"
-sidecar_up="$(grep -n "bootstrap.*shim-claude-sidecar" <<<"$calls" | cut -d: -f1)"
-[ "$(grep -c bootout <<<"$calls")" -eq 2 ] && [ -n "$store_up" ] && [ -n "$sidecar_up" ] &&
-    [ "$last_bootout" -lt "$store_up" ] && [ "$store_up" -lt "$sidecar_up" ] &&
-    pass "both services go down before the store, then the sidecar, come up" ||
-    fail "launchctl calls were:
-$calls"
+
+# ---- the services are the next daemon's to restart, never the bounce's -------
+
+world; w="$W"
+backend "$w/checkout/daemon/bin/claude-repld" obeys; daemon="$PID"
+backend "$w/cache/agent-repl/bin/shim-store" ignores; store="$PID"
+backend "$w/cache/agent-repl/bin/shim-claude-sidecar" ignores; sidecar="$PID"
+run "$w"; status=$?
+[ "$status" -eq 0 ] && kill -0 "$store" 2>/dev/null && kill -0 "$sidecar" 2>/dev/null &&
+    pass "the store and the sidecar keep running through a bounce" ||
+    fail "a service was stopped (exit $status): $(cat "$w/out")"
+[ ! -e "$w/launchctl-calls" ] && pass "a bounce never calls launchctl" ||
+    fail "launchctl was called: $(cat "$w/launchctl-calls")"
 
 # on_call WORLD BODY -- the daemon's answer to the stand-down: a script that
 # runs BODY (a stand-in for the daemon standing its shims down and exiting)
@@ -174,18 +152,10 @@ on_call "$w" "kill -KILL $shim; kill -KILL $daemon"
 run "$w"
 daemon_done="$(line_of "$w" "^\[bounce\] daemon: stopped")"
 shims_done="$(line_of "$w" "^\[bounce\] shims: ")"
-first_bootout="$(line_of "$w" "booting out")"
-[ -n "$daemon_done" ] && [ -n "$shims_done" ] && [ -n "$first_bootout" ] &&
-    [ "$daemon_done" -lt "$shims_done" ] && [ "$shims_done" -lt "$first_bootout" ] &&
-    pass "the services stop only after the daemon and its shims are gone" ||
+[ -n "$daemon_done" ] && [ -n "$shims_done" ] && [ "$daemon_done" -lt "$shims_done" ] &&
+    pass "stragglers are looked for only after the daemon has gone" ||
     fail "the stops ran out of order:
 $(cat "$w/out")"
-calls="$(cat "$w/launchd/calls")"
-sidecar_out="$(grep -n "bootout.*shim-claude-sidecar" <<<"$calls" | head -1 | cut -d: -f1)"
-store_out="$(grep -n "bootout.*shim-store" <<<"$calls" | head -1 | cut -d: -f1)"
-[ -n "$sidecar_out" ] && [ -n "$store_out" ] && [ "$sidecar_out" -lt "$store_out" ] &&
-    pass "the sidecar is booted out before the store" || fail "launchctl calls were:
-$calls"
 
 # ---- the fresh runtime Emacs starts meanwhile is left alone ----------------
 
@@ -258,16 +228,6 @@ run "$w"; status=$?
     pass "the daemon daemon.addr names is stopped from any build path" ||
     fail "the advertised daemon survived (exit $status): $(cat "$w/out")"
 
-# ---- a service that will not leave is killed --------------------------------
-
-world; w="$W"
-backend "$w/cache/agent-repl/bin/shim-claude-sidecar" ignores; sidecar="$PID"
-echo "$sidecar" >"$w/launchd/com.agentrepl.shim-claude-sidecar"
-touch "$w/launchd/stuck-com.agentrepl.shim-claude-sidecar"
-run "$w"; status=$?
-[ "$status" -eq 0 ] && pass "a stuck service still bounces" || fail "a stuck service exited $status: $(cat "$w/out")"
-gone "$sidecar" && pass "a service that outlives its bootout is killed" || fail "the stuck sidecar survived"
-
 # ---- a failed build stops nothing ------------------------------------------
 
 world; w="$W"
@@ -276,39 +236,7 @@ printf '#!/bin/sh\nexit 3\n' >"$w/failing-builder"; chmod +x "$w/failing-builder
 BUILDER="$w/failing-builder" run "$w"; status=$?
 [ "$status" -eq 1 ] && pass "a failed build exits 1" || fail "a failed build exited $status"
 kill -0 "$daemon" 2>/dev/null && pass "a failed build leaves the daemon running" || fail "a failed build stopped the daemon"
-grep -q bootout "$w/launchd/calls" 2>/dev/null && fail "a failed build booted a service out" || pass "a failed build boots no service out"
 grep -q "NOTHING WAS STOPPED" "$w/out" && pass "a failed build says nothing was stopped" || fail "output: $(cat "$w/out")"
-
-# ---- a missing plist refuses before anything ---------------------------------
-
-world; w="$W"
-rm "$w/agents/com.agentrepl.shim-claude-sidecar.plist"
-printf '#!/bin/sh\ntouch "%s/built"\n' "$w" >"$w/builder"
-run "$w"; status=$?
-[ "$status" -eq 1 ] && pass "a missing plist exits 1" || fail "a missing plist exited $status"
-[ ! -e "$w/built" ] && pass "a missing plist builds nothing" || fail "a missing plist still built"
-
-# ---- a store whose socket never appears leaves the sidecar down -------------
-
-world; w="$W"
-touch "$w/launchd/no-socket"
-run "$w"; status=$?
-[ "$status" -eq 1 ] && pass "a store with no socket exits 1" || fail "a store with no socket exited $status"
-grep -q "bootstrap.*shim-claude-sidecar" "$w/launchd/calls" && fail "the sidecar was started without the store's socket" || pass "the sidecar is not started without the store's socket"
-
-# ---- a service another client already brought back -------------------------
-
-world; w="$W"
-touch "$w/launchd/raced-com.agentrepl.shim-store"
-run "$w"; status=$?
-[ "$status" -eq 0 ] && pass "a store another client already bootstrapped is taken as up" || fail "a raced store bootstrap failed the bounce ($status): $(cat "$w/out")"
-grep -q "already loaded" "$w/out" && pass "the raced bootstrap is recorded" || fail "the raced bootstrap left no record: $(cat "$w/out")"
-
-world; w="$W"
-touch "$w/launchd/refuse-com.agentrepl.shim-store"
-run "$w"; status=$?
-[ "$status" -ne 0 ] && pass "a bootstrap that fails with nothing loaded fails the bounce" || fail "a failed bootstrap with nothing loaded passed"
-grep -q "could not be bootstrapped" "$w/out" && pass "the refused bootstrap names the service" || fail "the refused bootstrap said: $(cat "$w/out")"
 
 if [ "$FAILURES" -ne 0 ]; then
     echo "$FAILURES failure(s)"
