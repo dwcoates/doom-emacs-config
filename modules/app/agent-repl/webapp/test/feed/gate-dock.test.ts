@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  DOCK_HEIGHT_PROPERTY,
+  toldDockHeight,
   DOCKED_CARD_CLASS,
   DOCKED_ROW_CLASS,
   installGateDock,
@@ -37,6 +39,7 @@ let installed: GateDock | null = null;
 afterEach(() => {
   installed?.dispose();
   installed = null;
+  document.documentElement.style.removeProperty(DOCK_HEIGHT_PROPERTY);
 });
 
 describe("installGateDock", () => {
@@ -171,5 +174,29 @@ describe("installGateDock", () => {
 
     // Assert
     expect([card.parentElement, other.classList.contains(DOCKED_ROW_CLASS)]).toEqual([dock, false]);
+  });
+
+  it("takes the height Emacs told it", () => {
+    // Arrange
+    document.documentElement.style.setProperty(DOCK_HEIGHT_PROPERTY, "137px");
+
+    // Act / Assert
+    expect(toldDockHeight(document)).toBe("137px");
+  });
+
+  it("falls back when Emacs never told a height", () => {
+    // Arrange / Act / Assert
+    expect(toldDockHeight(document)).toBeNull();
+  });
+
+  it("sizes the dock from the told property, the fraction only as fallback", async () => {
+    // Arrange
+    const css = (await import("../../src/styles.css?raw")).default;
+
+    // Act
+    const rule = /#gate-dock\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
+
+    // Assert
+    expect(rule).toContain("height: var(--gate-dock-height, 18.4vh)");
   });
 });

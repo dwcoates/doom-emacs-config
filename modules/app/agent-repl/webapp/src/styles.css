@@ -6228,20 +6228,21 @@ bubble-body.bubble-body { display: block; }
 /* THE STANDING GATE DOCKS AT THE PAGE'S VERY BOTTOM (src/feed/gate-dock.ts):
    Emacs hides the input window while it stands and this webview grows into
    that space, so the banner takes the input's exact slot: #gate-dock, below
-   the footer, at the input window's height. 18.4vh is
-   `agent-repl-input-height-fraction` (lisp/panels.el), the input's share of
-   the frame the page now fills. The banner's row stays in the feed, hidden,
-   so the feed draws no inline gate while it is docked. */
+   the footer, EXACTLY the input window's height. Emacs tells the page that
+   height in pixels (--gate-dock-height, set on the root before the input
+   hides; lisp/window.el); 18.4vh, `agent-repl-input-height-fraction`, is the
+   fallback only for a page Emacs never told, which gate-dock.ts records. The
+   banner's row stays in the feed, hidden, so the feed draws no inline gate
+   while it is docked. */
 #gate-dock {
   flex: 0 0 auto;
-  min-height: 18.4vh;
-  max-height: 60vh;
+  height: var(--gate-dock-height, 18.4vh);
   overflow-y: auto;
   box-sizing: border-box;
 }
 #gate-dock[hidden] { display: none; }
 #gate-dock > .cold-gate.cold-gate-docked {
-  min-height: 18.4vh;
+  min-height: 100%;
   box-sizing: border-box;
   border-radius: 0;
   border-width: 1px 0 0;
