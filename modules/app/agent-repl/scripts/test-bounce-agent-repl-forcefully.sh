@@ -83,15 +83,22 @@ EOF
 # PATH, its pid left in PID; TRAPS "obeys" exits on SIGTERM, "ignores"
 # outlives it. Its output is closed, so the substitution that reads its pid
 # never waits on it.
+#
+# RUN AS `PATH call ...` it is the daemon binary's `call` verb instead: the
+# call is recorded in $AGENT_REPL_TEST_WORLD/daemon-calls and answered by
+# $AGENT_REPL_TEST_WORLD/on-call when that exists (a stand-in for the
+# daemon's ordered stand-down), and refused with no daemon serving otherwise.
 PID=""
 backend() {
-    local path="$1" mode="$2"
+    local path="$1" mode="$2" trap_line call_line
     mkdir -p "$(dirname "$path")"
     if [ "$mode" = ignores ]; then
-        printf '#!/bin/sh\ntrap "" TERM\nwhile :; do sleep 1; done\n' >"$path"
+        trap_line='trap "" TERM'
     else
-        printf '#!/bin/sh\ntrap "exit 0" TERM\nwhile :; do sleep 1; done\n' >"$path"
+        trap_line='trap "exit 0" TERM'
     fi
+    call_line='if [ "$1" = call ]; then echo "$*" >>"$AGENT_REPL_TEST_WORLD/daemon-calls"; [ -x "$AGENT_REPL_TEST_WORLD/on-call" ] && exec "$AGENT_REPL_TEST_WORLD/on-call"; echo "no daemon is serving" >&2; exit 1; fi'
+    printf '#!/bin/sh\n%s\n%s\nwhile :; do sleep 1; done\n' "$call_line" "$trap_line" >"$path"
     chmod +x "$path"
     # AN ORPHAN, so a stopped stand-in is reaped at once rather than lingering
     # as this shell's zombie, which `kill -0` would still call alive.
@@ -101,6 +108,7 @@ backend() {
 
 run() { # WORLD -- run the copied script against the world, output to WORLD/out
     local w="$1"
+    AGENT_REPL_TEST_WORLD="$w" \
     AGENT_REPL_LAUNCHCTL="$w/launchctl" AGENT_REPL_LAUNCH_AGENTS_DIR="$w/agents" \
         XDG_CACHE_HOME="$w/cache" AGENT_REPL_BOUNCE_BUILDER="${BUILDER:-$w/builder}" \
         AGENT_REPL_BOUNCE_GRACE=2 AGENT_REPL_BOUNCE_SOCK_MAX=2 \
@@ -130,23 +138,91 @@ sidecar_up="$(grep -n "bootstrap.*shim-claude-sidecar" <<<"$calls" | cut -d: -f1
     fail "launchctl calls were:
 $calls"
 
-# ---- every stop is asked at once -------------------------------------------
+# on_call WORLD BODY -- the daemon's answer to the stand-down: a script that
+# runs BODY (a stand-in for the daemon standing its shims down and exiting)
+# and accepts the call.
+on_call() {
+    printf '#!/bin/sh\n%s\nexit 0\n' "$2" >"$1/on-call"
+    chmod +x "$1/on-call"
+}
+
+# line_of WORLD PATTERN -- the first output line matching PATTERN, or empty.
+line_of() { grep -nE -- "$2" "$1/out" | head -1 | cut -d: -f1; }
+
+# ---- the daemon stands itself and its shims down first ----------------------
 
 world; w="$W"
 backend "$w/checkout/daemon/bin/claude-repld" ignores; daemon="$PID"
 backend "$w/checkout/agent-shim/claude/shim/dist/main.js" ignores; shim="$PID"
-backend "$w/cache/agent-repl/bin/shim-claude-sidecar" ignores; sidecar="$PID"
-echo "$sidecar" >"$w/launchd/com.agentrepl.shim-claude-sidecar"
-touch "$w/launchd/stuck-com.agentrepl.shim-claude-sidecar"
+backend "$w/cache/agent-repl/bin/shim-lock" ignores; lock="$PID"
+on_call "$w" "kill -KILL $shim $lock; kill -KILL $daemon"
 run "$w"; status=$?
-first_kill="$(grep -n "killing" "$w/out" | head -1 | cut -d: -f1)"
-last_ask="$(grep -nE "asking pid|booting out" "$w/out" | tail -1 | cut -d: -f1)"
-[ "$status" -eq 0 ] && [ -n "$first_kill" ] && [ -n "$last_ask" ] && [ "$last_ask" -lt "$first_kill" ] &&
-    pass "every backend is asked to stop before any is killed" ||
-    fail "the stops ran one after another (exit $status):
+[ "$status" -eq 0 ] && pass "an ordered stand-down bounces" || fail "an ordered stand-down exited $status: $(cat "$w/out")"
+grep -q 'call UpdateShutdownSchedule {"now":{"reason":{"operator":' "$w/daemon-calls" 2>/dev/null &&
+    pass "the daemon is asked to stand down now" || fail "the daemon was not asked: $(cat "$w/daemon-calls" 2>/dev/null)"
+gone "$daemon" && gone "$shim" && gone "$lock" &&
+    pass "the daemon's own stand-down takes its shims with it" || fail "a backend survived the ordered stand-down"
+grep -qE "(daemon|shims|shim locks): asking pid.* to shut down" "$w/out" &&
+    fail "a backend the daemon stood down was signalled too: $(cat "$w/out")" ||
+    pass "nothing the daemon stood down is signalled"
+
+world; w="$W"
+backend "$w/checkout/daemon/bin/claude-repld" obeys; daemon="$PID"
+backend "$w/checkout/agent-shim/claude/shim/dist/main.js" ignores; shim="$PID"
+on_call "$w" "kill -KILL $shim; kill -KILL $daemon"
+run "$w"
+daemon_done="$(line_of "$w" "^\[bounce\] daemon: stopped")"
+shims_done="$(line_of "$w" "^\[bounce\] shims: ")"
+first_bootout="$(line_of "$w" "booting out")"
+[ -n "$daemon_done" ] && [ -n "$shims_done" ] && [ -n "$first_bootout" ] &&
+    [ "$daemon_done" -lt "$shims_done" ] && [ "$shims_done" -lt "$first_bootout" ] &&
+    pass "the services stop only after the daemon and its shims are gone" ||
+    fail "the stops ran out of order:
 $(cat "$w/out")"
-gone "$daemon" && gone "$shim" && gone "$sidecar" &&
-    pass "every backend that ignores its graceful stop is killed" || fail "a backend survived"
+calls="$(cat "$w/launchd/calls")"
+sidecar_out="$(grep -n "bootout.*shim-claude-sidecar" <<<"$calls" | head -1 | cut -d: -f1)"
+store_out="$(grep -n "bootout.*shim-store" <<<"$calls" | head -1 | cut -d: -f1)"
+[ -n "$sidecar_out" ] && [ -n "$store_out" ] && [ "$sidecar_out" -lt "$store_out" ] &&
+    pass "the sidecar is booted out before the store" || fail "launchctl calls were:
+$calls"
+
+# ---- the fresh runtime Emacs starts meanwhile is left alone ----------------
+
+world; w="$W"
+backend "$w/checkout/daemon/bin/claude-repld" ignores; daemon="$PID"
+backend "$w/checkout/agent-shim/claude/shim/dist/main.js" ignores; shim="$PID"
+# The stand-down's answer also starts what Emacs's relaunched daemon would:
+# a fresh daemon and a fresh shim on the same paths.
+on_call "$w" "kill -KILL $shim $daemon
+bash -c '\"\$0\" </dev/null >/dev/null 2>&1 & echo \$! >\"\$1\"' $w/checkout/daemon/bin/claude-repld $w/fresh-daemon
+bash -c '\"\$0\" </dev/null >/dev/null 2>&1 & echo \$! >\"\$1\"' $w/checkout/agent-shim/claude/shim/dist/main.js $w/fresh-shim"
+run "$w"; status=$?
+fresh_daemon="$(cat "$w/fresh-daemon" 2>/dev/null)"; STARTED+=("$fresh_daemon")
+fresh_shim="$(cat "$w/fresh-shim" 2>/dev/null)"; STARTED+=("$fresh_shim")
+[ "$status" -eq 0 ] && [ -n "$fresh_daemon" ] && kill -0 "$fresh_daemon" 2>/dev/null &&
+    pass "a daemon started after the stand-down keeps running" || fail "the fresh daemon was stopped (exit $status): $(cat "$w/out")"
+[ -n "$fresh_shim" ] && kill -0 "$fresh_shim" 2>/dev/null &&
+    pass "a shim started after the stand-down keeps running" || fail "the fresh shim was stopped: $(cat "$w/out")"
+
+# ---- a stand-down the daemon refuses falls back to its signal --------------
+
+world; w="$W"
+backend "$w/checkout/daemon/bin/claude-repld" obeys; daemon="$PID"
+run "$w"; status=$?
+[ "$status" -eq 0 ] && gone "$daemon" &&
+    pass "a daemon that refuses the stand-down is stopped by its SIGTERM" || fail "a refusing daemon survived (exit $status): $(cat "$w/out")"
+grep -q "the stand-down was not accepted" "$w/out" &&
+    pass "the refused stand-down is recorded" || fail "the refused stand-down left no record: $(cat "$w/out")"
+
+# ---- a stand-down accepted and never carried out is enforced ---------------
+
+world; w="$W"
+backend "$w/checkout/daemon/bin/claude-repld" ignores; daemon="$PID"
+on_call "$w" ":"
+run "$w"; status=$?
+[ "$status" -eq 0 ] && gone "$daemon" &&
+    pass "a daemon that outlives its accepted stand-down is killed after the grace" ||
+    fail "a daemon that never left survived (exit $status): $(cat "$w/out")"
 
 # ---- another checkout's processes are left alone ---------------------------
 
