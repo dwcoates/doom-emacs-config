@@ -915,3 +915,51 @@ func TestRunKeepsAFailingRunsExitWhenItAlsoLeaked(t *testing.T) {
 		t.Fatalf("exit = %d, stderr:\n%s", code, h.errOut)
 	}
 }
+
+func TestRunDoesNotCountWhatALiveEmacsMakesAtStartup(t *testing.T) {
+	tests := []string{"babel-YoPPDF", "babel-stable-361", "agent-repl-prompt-summary"}
+	for _, name := range tests {
+		t.Run(name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t, nil, nil)
+			h.deps.Exec = namedLeakExec{fakeExec: h.exec, unit: "ert", path: filepath.Join(h.deps.UserTmp, name)}
+
+			// Act
+			code := h.run(t)
+
+			// Assert
+			if code != 0 || !strings.Contains(h.out.String(), "a live Emacs makes it at startup") {
+				t.Fatalf("exit = %d, stdout:\n%s\nstderr:\n%s", code, h.out, h.errOut)
+			}
+		})
+	}
+}
+
+func TestRunStillCountsANameThatOnlyResemblesALiveEmacsEntry(t *testing.T) {
+	// Arrange
+	h := newHarness(t, nil, nil)
+	h.deps.Exec = namedLeakExec{fakeExec: h.exec, unit: "ert", path: filepath.Join(h.deps.UserTmp, "babel-not-org")}
+
+	// Act
+	code := h.run(t)
+
+	// Assert
+	if code != 1 || !strings.Contains(h.errOut.String(), "the run left babel-not-org") {
+		t.Fatalf("exit = %d, stderr:\n%s", code, h.errOut)
+	}
+}
+
+// namedLeakExec is a fakeExec whose named unit makes one directory at path.
+type namedLeakExec struct {
+	*fakeExec
+	unit, path string
+}
+
+func (e namedLeakExec) Start(s run.Spec, out *bytes.Buffer) (run.Process, error) {
+	if s.ID == e.unit {
+		if err := os.Mkdir(e.path, 0o700); err != nil {
+			return nil, err
+		}
+	}
+	return e.fakeExec.Start(s, out)
+}
