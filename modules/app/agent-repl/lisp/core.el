@@ -901,6 +901,25 @@ Runtime values in ARGS never participate in the operation name."
                                 "log"
                               normalized))))
 
+(defvar agent-repl--log-dir-truenames (make-hash-table :test #'equal)
+  "Each workspace directory's canonical spelling, keyed by the registered spelling.
+Logging asks for it on EVERY record, and asking the filesystem each time
+\(`file-directory-p' then `file-truename', which walks every path
+component) was two-thirds of Emacs's CPU while workspaces were switched
+\(profiled 2026-10-03).  A directory's canonical spelling does not change
+while it exists, so it is resolved once.  Only an EXISTING directory is
+remembered: one that does not exist yet is asked again, so it routes the
+moment it appears.  A workspace that leaves the registry stops routing at
+the registry lookup, before this is consulted.")
+
+(defun agent-repl--log-dir-truename (dir)
+  "Return DIR's canonical spelling when it is an existing directory, else nil.
+Resolved once per DIR (`agent-repl--log-dir-truenames')."
+  (or (gethash dir agent-repl--log-dir-truenames)
+      (and (file-directory-p dir)
+           (puthash dir (directory-file-name (file-truename dir))
+                    agent-repl--log-dir-truenames))))
+
 (defun agent-repl--ws-log-routable-p (ws)
   "Return non-nil when WS can be resolved to a durable workspace log sink.
 This is the predicate form of `agent-repl--workspace-log-identity''s
@@ -941,7 +960,7 @@ cannot be confused with a workspace-owned record."
        (fboundp 'agent-repl--ws-get)
        (let ((dir (agent-repl--ws-get ws :project-dir)))
          (and (stringp dir)
-              (file-directory-p dir)
+              (agent-repl--log-dir-truename dir)
               (agent-repl--ws-dir-hash-cached ws)
               t))))
 
@@ -1459,11 +1478,12 @@ state because a non-nil WS must identify one specific workspace sink.
 
 Callers that cannot guarantee WS names a registered workspace must screen it
 through `agent-repl--ws-log-routable-p' first and pass nil when it does not."
-  (let ((dir (and (fboundp 'agent-repl--ws-get)
-                  (agent-repl--ws-get ws :project-dir))))
-    (unless (and (stringp dir) (file-directory-p dir))
+  (let* ((dir (and (fboundp 'agent-repl--ws-get)
+                   (agent-repl--ws-get ws :project-dir)))
+         (canonical (and (stringp dir) (agent-repl--log-dir-truename dir))))
+    (unless canonical
       (error "agent-repl log routing invariant violated: workspace %S has no registered project directory" ws))
-    (list :project-dir (directory-file-name (file-truename dir))
+    (list :project-dir canonical
           ;; The directory hash is what this runtime can always derive, so it
           ;; is what the sink is keyed and named by.  `:workspace-id' is the
           ;; daemon's, so it is nil until the roster push carries it here.

@@ -737,6 +737,9 @@ class: leaking a scratch frontend name makes later tests ERROR
 re-routes their frontend resolution instead."
   (declare (indent 0))
   `(let ((agent-repl--workspaces (make-hash-table :test 'equal))
+         ;; Logging's per-directory canonical spellings: a directory a test
+         ;; created and removed must not stay resolved into the next test.
+         (agent-repl--log-dir-truenames (make-hash-table :test 'equal))
          ;; Repo-fold set: global UI state, so a test that folds a repo
          ;; would otherwise leak that fold into every later test's
          ;; tab-bar render.
