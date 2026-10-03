@@ -123,6 +123,9 @@
 (declare-function agent-repl-link-successor "daemon-link" ())
 (declare-function agent-repl-link-successor-pending-p "daemon-link" ())
 (declare-function agent-repl-link-teardown "daemon-link" ())
+(declare-function agent-repl-link-live "daemon-link" ())
+(declare-function agent-repl-connect-connection-address "connect" (conn))
+(defvar agent-repl-link-down-planned)
 
 ;;;; ---- Paths ----
 
@@ -1263,6 +1266,27 @@ replaced) were logged as unrequested exits at WARN (2026-09-13).  A t is
 still cleared on spawn: it names nobody, so it could otherwise excuse the
 new daemon.")
 
+(defvar agent-repl-daemon--announced-departure nil
+  "The daemon process whose link carried its own planned ending, or nil.
+Set by `agent-repl-daemon-on-link-down' when the daemon THIS Emacs
+spawned announced its ending and its link went down planned, and read by
+`agent-repl-daemon--record-exit': the clean exit that follows is that
+announced stand-down arriving.  It names the PROCESS, so it can excuse
+that daemon\='s exit and nothing else.")
+
+(defvar agent-repl-daemon--parked-exit nil
+  "A clean, unasked exit whose level waits on the link\='s verdict, or nil.
+Shape: `(:proc PROC :status STATUS :event EVENT :address ADDRESS)'.
+
+THE SENTINEL CAN OUTRUN THE ANNOUNCEMENT.  The daemon writes its planned
+ending on its `WatchDaemon' stream before it exits, but Emacs reads its
+processes in no fixed order, and the exit\='s sentinel routinely runs
+first (measured 2026-10-03T13:36:34: the exit at .071, the stream\='s
+ending at .076).  An exit of the daemon the link still stands on is
+therefore PARKED, and the link\='s down edge -- which that dead daemon\='s
+connection is structurally owed, after every byte it wrote -- decides it:
+INFO when the ending was announced, WARN when it was not.")
+
 (defconst agent-repl-daemon--exit-log-format
   "elisp.daemon.exited status=%S event=%s requested=%s"
   "The one format every daemon exit is recorded with, whatever its level.
@@ -1287,10 +1311,19 @@ THE LEVEL FOLLOWS WHO ASKED.  A daemon exit is not one fact:
     *Messages* twice in one morning for two orderly restarts, which is the
     log crying wolf about its own instruction being obeyed.
 
-  - AN EXIT NOBODY ASKED FOR is the daemon leaving on its own.  A clean
-    status still means work this editor believed was being served has
-    stopped, so it stays a WARN; a non-zero status is the daemon reporting
-    its own failure, and that is an ERROR.
+  - AN EXIT THE DAEMON ANNOUNCED is its own planned stand-down arriving:
+    its `WatchDaemon' stream carried the ending (a bounce, an operator\='s
+    `UpdateShutdownSchedule{now}' from outside this editor) -- INFO,
+    `requested=announced'.  The announcement and the exit reach Emacs in
+    no fixed order, so an exit of the daemon the link still stands on is
+    PARKED (`agent-repl-daemon--parked-exit') until the link\='s down edge
+    says which it was.
+
+  - AN EXIT NOBODY ASKED FOR AND NOBODY ANNOUNCED is the daemon leaving on
+    its own.  A clean status still means work this editor believed was
+    being served has stopped, so it stays a WARN; a non-zero status is the
+    daemon reporting its own failure, and that is an ERROR, announced or
+    not.
 
 The request is CONSUMED here, so it excuses exactly the one exit it
 ordered and the next unrequested departure is heard in full."
@@ -1306,12 +1339,19 @@ ordered and the next unrequested departure is heard in full."
          (handover (and (not requested) (eql status 0)
                         (or (agent-repl-link-successor)
                             (agent-repl-link-successor-pending-p))))
+         (announced (and (not requested) (not handover) (eql status 0)
+                         (eq agent-repl-daemon--announced-departure proc)))
+         (linked-address (and (not requested) (not handover) (not announced)
+                              (eql status 0)
+                              (agent-repl-daemon--link-address-of proc)))
          (trimmed (string-trim (or event "")))
          (scope '(:agent-repl-central "the resident daemon lifecycle spans workspaces")))
     ;; CONSUMED ONLY BY ITS OWN ADDRESSEE.  An order standing for some other
     ;; daemon outlives this exit, so the departure it was given for is still
     ;; heard as requested when it arrives.
     (when requested (setq agent-repl-daemon--exit-requested nil))
+    (when (eq agent-repl-daemon--announced-departure proc)
+      (setq agent-repl-daemon--announced-departure nil))
     (cond
      (requested
       (agent-repl--info scope agent-repl-daemon--exit-log-format
@@ -1319,6 +1359,17 @@ ordered and the next unrequested departure is heard in full."
      (handover
       (agent-repl--info scope agent-repl-daemon--exit-log-format
                         status trimmed "handover"))
+     (announced
+      (agent-repl--info scope agent-repl-daemon--exit-log-format
+                        status trimmed "announced"))
+     (linked-address
+      ;; A PARKED EXIT SUPERSEDES NONE: one already standing is decided
+      ;; now, unannounced, rather than overwritten unheard.
+      (agent-repl-daemon--flush-parked-exit "superseded")
+      (setq agent-repl-daemon--parked-exit
+            (list :proc proc :status status :event trimmed :address linked-address))
+      (agent-repl--log scope "elisp.daemon.exit-awaiting-link status=%S event=%s address=%S"
+                       status trimmed linked-address))
      ((eql status 0)
       (agent-repl--warn scope agent-repl-daemon--exit-log-format
                         status trimmed "nil"))
@@ -1328,6 +1379,54 @@ ordered and the next unrequested departure is heard in full."
   (when (eq proc agent-repl--frontend-daemon-process)
     (agent-repl-daemon--retire-own-addr)
     (setq agent-repl--frontend-daemon-process nil)))
+
+(defun agent-repl-daemon--link-address-of (proc)
+  "Return the address the live link stands on when it is PROC\='s, else nil.
+Only the daemon this Emacs spawned has an address on record
+\=(`agent-repl-daemon--own-address'), so only its exit can be matched to
+the link that is about to tell how it ended."
+  (let ((own agent-repl-daemon--own-address)
+        (live (agent-repl-link-live)))
+    (and own live
+         (eq proc agent-repl--frontend-daemon-process)
+         (equal (agent-repl-connect-connection-address live) own)
+         own)))
+
+(defun agent-repl-daemon--flush-parked-exit (why)
+  "Record the parked exit, if any, as UNANNOUNCED, and forget it.
+WHY names the edge that decided it without the link\='s word.  A parked
+exit is never dropped: whatever ends its wait records it."
+  (let ((parked agent-repl-daemon--parked-exit))
+    (when parked
+      (setq agent-repl-daemon--parked-exit nil)
+      (agent-repl--warn '(:agent-repl-central "the resident daemon lifecycle spans workspaces")
+                        (concat agent-repl-daemon--exit-log-format " decided-by=%s")
+                        (plist-get parked :status) (plist-get parked :event) "nil" why))))
+
+(defun agent-repl-daemon-on-link-down (conn)
+  "Decide a daemon exit by how the link on CONN went down.
+Registered on `agent-repl-link-down-functions'.  A parked exit of the
+daemon on CONN is recorded now: INFO when that daemon announced its
+ending (`agent-repl-link-down-planned'), WARN when it did not.  With no
+exit parked, an announced ending of the daemon THIS Emacs spawned is
+remembered (`agent-repl-daemon--announced-departure'), so the exit its
+sentinel reports later is heard as the plan it was."
+  (let ((address (agent-repl-connect-connection-address conn))
+        (parked agent-repl-daemon--parked-exit)
+        (scope '(:agent-repl-central "the resident daemon lifecycle spans workspaces")))
+    (cond
+     ((and parked (equal address (plist-get parked :address)))
+      (setq agent-repl-daemon--parked-exit nil)
+      (if agent-repl-link-down-planned
+          (agent-repl--info scope agent-repl-daemon--exit-log-format
+                            (plist-get parked :status) (plist-get parked :event) "announced")
+        (agent-repl--warn scope agent-repl-daemon--exit-log-format
+                          (plist-get parked :status) (plist-get parked :event) "nil")))
+     ((and agent-repl-link-down-planned
+           agent-repl--frontend-daemon-process
+           (equal address agent-repl-daemon--own-address))
+      (setq agent-repl-daemon--announced-departure agent-repl--frontend-daemon-process)
+      (agent-repl--log scope "elisp.daemon.departure-announced address=%S" address)))))
 
 (defun agent-repl-daemon--retire-own-addr ()
   "Remove `daemon.addr' when it still names the daemon THIS Emacs spawned.
@@ -1493,6 +1592,10 @@ is stated on the spawn rather than assumed."
       (let* ((argv (agent-repl-daemon--spawn-argv))
              (proc (agent-repl--frontend-spawn-daemon
                     argv (agent-repl-daemon--environment))))
+        ;; A PARKED EXIT WAITS FOR NO DAEMON BUT ITS OWN.  Its link edge
+        ;; comes before any reconnect can spawn, so one still standing here
+        ;; never got its word, and is recorded now rather than lost.
+        (agent-repl-daemon--flush-parked-exit "next-spawn")
         (setq agent-repl--frontend-daemon-process proc)
         ;; A NEW DAEMON INHERITS NO ORDERS.  An order that names no process
         ;; could otherwise excuse this daemon's unasked-for death, so it is
@@ -1823,6 +1926,7 @@ the ensure."
 
 (add-hook 'agent-repl-link-no-daemon-functions #'agent-repl-daemon-ensure)
 (add-hook 'agent-repl-link-up-functions #'agent-repl-daemon-on-link-up)
+(add-hook 'agent-repl-link-down-functions #'agent-repl-daemon-on-link-down)
 (add-hook 'agent-repl-open-progress-change-functions
           #'agent-repl-daemon-on-open-progress-change)
 
