@@ -10,6 +10,9 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/text/language"
+	"golang.org/x/text/message"
+
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 	shimv1 "agentrepl/proto/shim/v1"
@@ -2422,13 +2425,16 @@ func coldCompactMenu(cold *conversationv1.SessionCold) (*ServedColdGateCompact, 
 	return served, &frontendv1.FeedColdGateCompactMenu{Models: options, Scopes: served.Scopes}
 }
 
+// englishPrinter groups digits ("409,051") in counts a user reads.
+var englishPrinter = message.NewPrinter(language.English)
+
 // coldGateDetail is the ONE sentence a standing gate is accounted for by. The
 // footer's cold-gate line, the served gate the verbs read, and the `cold_gate`
 // arm a prompt to a parked workspace is refused with all take it from here:
 // three surfaces wording one gate three ways is how a user comes to think they
 // are looking at three problems.
 func coldGateDetail(cold *conversationv1.SessionCold) string {
-	return fmt.Sprintf("the conversation is cold at %d context tokens", cold.GetContextTokens())
+	return englishPrinter.Sprintf("the conversation is cold at %d context tokens", cold.GetContextTokens())
 }
 
 // ColdGateShown answers whether a cold gate stands on the workspace UNANSWERED:
