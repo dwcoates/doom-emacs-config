@@ -11,9 +11,10 @@
 //
 // EMACS-LAYER-SPEC.md's "Two brief items the contract does not have" is
 // explicit: no `agent-repl-interrupt*` symbol exists, and the interrupting
-// act is `agent-repl-restart-workspace` with a prefix argument (`SPC o C-c`,
-// `C-u` = force) — "Forced: interrupt and bounce; the agent is NOT resumed
-// afterwards." These tests therefore drive that command and nothing else.
+// act is `agent-repl-restart-workspace` (`SPC o C-c`). Since 2026-10-02 the
+// restart is ALWAYS immediate and forced (owner ruling): it takes no prefix
+// argument and has no graceful mode, so every test here drives
+// `(agent-repl-restart-workspace WS)` and nothing else.
 //
 // This file also holds the helpers area G, H and I share. They are
 // area-local by design: EMACS-LAYER-SPEC.md's shared harness
@@ -24,7 +25,6 @@ package e2e
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"testing"
 
@@ -48,10 +48,8 @@ const emGHIParkedPrompt = "!interrupt"
 // emGHIGatedPrompt is the prompt scenario 36 parks on the fake's TURN GATE
 // (hibernation_e2e_test.go's turnGatePathEnv/turnGateTextEnv, implemented in
 // agent-shim/claude/shim/src/fake/index.ts's `awaitTurnGate`). It carries no
-// scenario marker, so the fake answers it ordinarily once the gate opens —
-// which is exactly what a GRACEFUL restart needs and what
-// `emGHIParkedPrompt` cannot give: `!interrupt` leaves its park only on an
-// interrupt, so a graceful restart would wait on it forever.
+// scenario marker, so the fake answers it ordinarily once the gate opens; a
+// restart hard-stops it like any other turn.
 const emGHIGatedPrompt = "hold here until the gate opens"
 
 // emGHIWorld brings up the Emacs world and has EMACS spawn the daemon,
@@ -241,11 +239,10 @@ func TestEmacsForcedRestartInterruptsTheTurn(t *testing.T) {
 	emGHISubmit(t, e, ws, emGHIParkedPrompt)
 	emGHIAwaitStatus(t, e, ws, "the turn to be running before the interrupt", emGHIRunningArms...)
 
-	// Act: `SPC o C-c` with `C-u`. The command takes FORCE as its first
-	// documented argument, so the prefix is supplied the way the command
-	// itself reads it rather than by faking a key press that would then also
-	// have to satisfy the picker.
-	e.Eval(`(agent-repl-restart-workspace t ` + elispString(ws) + `)`)
+	// Act: `SPC o C-c`. The workspace is passed as the command's documented
+	// argument rather than by faking a key press that would then also have to
+	// satisfy the picker.
+	e.Eval(`(agent-repl-restart-workspace ` + elispString(ws) + `)`)
 
 	// Assert: the arm settles on `:interrupted` specifically. Any other
 	// settled arm would say the turn ENDED rather than that it was stopped.
@@ -283,7 +280,7 @@ func TestEmacsForcedRestartClosesTheComposerOnItsSend(t *testing.T) {
 	emGHIAwaitStatus(t, e, ws, "the turn to be running before the interrupt", emGHIRunningArms...)
 
 	// Act.
-	e.Eval(`(agent-repl-restart-workspace t ` + elispString(ws) + `)`)
+	e.Eval(`(agent-repl-restart-workspace ` + elispString(ws) + `)`)
 
 	// Assert: read with no wait at all — a wait would hide the race by giving
 	// the daemon's own push time to land.
@@ -292,7 +289,7 @@ func TestEmacsForcedRestartClosesTheComposerOnItsSend(t *testing.T) {
 	}
 }
 
-// TestEmacsGracefulRestartHoldsPromptsMeanwhile is scenario 36.
+// TestEmacsRestartHoldsPromptsMeanwhile is scenario 36.
 //
 // The claim under test is that a prompt written around a restart is HELD
 // rather than refused: undelivered user intent may never be silently
@@ -306,7 +303,7 @@ func TestEmacsForcedRestartClosesTheComposerOnItsSend(t *testing.T) {
 // daemon's `:success' answer to the deferral is read at the RPC boundary.
 // The daemon's tray itself is not read here: this Emacs-layer world exposes
 // no daemon client.
-func TestEmacsGracefulRestartHoldsPromptsMeanwhile(t *testing.T) {
+func TestEmacsRestartHoldsPromptsMeanwhile(t *testing.T) {
 	t.Parallel()
 	// Arrange. The parked turn here is the fake's TURN GATE, not
 	// `emGHIParkedPrompt`: a GRACEFUL restart waits for the turn to finish,
@@ -356,22 +353,17 @@ func TestEmacsGracefulRestartHoldsPromptsMeanwhile(t *testing.T) {
 		t.Fatalf("the daemon answered the mid-turn deferral %s, want :success: a deferral is held, never refused", arm)
 	}
 
-	e.Eval(`(agent-repl-restart-workspace nil ` + elispString(ws) + `)`)
+	e.Eval(`(agent-repl-restart-workspace ` + elispString(ws) + `)`)
 
-	// The graceful restart WAITS for the turn; nothing else will end it, so
-	// the gate is opened here. This is the act that lets the restart reach
-	// its finish edge, and it is deliberately after the restart is issued —
-	// the restart has to be in flight while the turn still is.
-	if err := os.WriteFile(gatePath, nil, 0o644); err != nil {
-		t.Fatalf("e2e: open the turn gate: %v", err)
-	}
+	// The restart is immediate: it hard-stops the gated turn itself, so the
+	// gate is never opened. The held deferral must survive that stop.
 
 	// Assert: the turn settles on the finish edge the restart produces, and
 	// nothing was left waiting on disk: had the daemon refused the deferral
 	// or the transport dropped it, Emacs would have written it to the
 	// ingress. An empty ingress is the daemon having taken it.
-	emGHIAwaitStatus(t, e, ws, "the turn to settle after the graceful restart", emGHISettledArms...)
-	emGHIAssertIngressEmpty(t, e, ws, "once the graceful restart has settled")
+	emGHIAwaitStatus(t, e, ws, "the turn to settle after the restart", emGHISettledArms...)
+	emGHIAssertIngressEmpty(t, e, ws, "once the restart has settled")
 }
 
 // TestEmacsRestartDoesNotWedgeEmacs is scenario 37, and the HEARTBEAT is the
@@ -395,7 +387,7 @@ func TestEmacsRestartDoesNotWedgeEmacs(t *testing.T) {
 	emGHIAwaitStatus(t, e, ws, "the turn to be running before the restart", emGHIRunningArms...)
 
 	// Act
-	e.Eval(`(agent-repl-restart-workspace t ` + elispString(ws) + `)`)
+	e.Eval(`(agent-repl-restart-workspace ` + elispString(ws) + `)`)
 
 	// Assert: Emacs is still answering. The heartbeat runs on its own
 	// goroutine against the same socket for the whole life of the process,
