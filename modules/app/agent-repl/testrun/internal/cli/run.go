@@ -5,6 +5,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -37,6 +38,9 @@ type Deps struct {
 	Work string
 	// Pid names the run in the CSV.
 	Pid int
+	// UserTmp is the user's shared temp directory, which the run must leave
+	// exactly as it found it (see guardUserTmp).
+	UserTmp string
 }
 
 // SlotsForHost is the core budget: every core but two, which stay free for
@@ -48,6 +52,66 @@ func SlotsForHost(numCPU int) int {
 
 // Run executes `testrun run` and returns the process exit status.
 func Run(ctx context.Context, d Deps, a Args) int {
+	before, err := tmpEntries(d.UserTmp)
+	if err != nil {
+		d.Log.Errorf("%v", err)
+		return 1
+	}
+	code := runSuites(ctx, d, a)
+	if !guardUserTmp(d.Log, d.UserTmp, before) && code == 0 {
+		code = 1
+	}
+	return code
+}
+
+// tmpEntries names the user temp directory's entries.
+func tmpEntries(dir string) (map[string]bool, error) {
+	if dir == "" {
+		return nil, fmt.Errorf("the run needs the user temp directory to guard (Deps.UserTmp is empty)")
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, fmt.Errorf("list the user temp directory %s: %w", dir, err)
+	}
+	names := make(map[string]bool, len(entries))
+	for _, e := range entries {
+		names[e.Name()] = true
+	}
+	return names, nil
+}
+
+// guardUserTmp reports every entry the user temp directory gained during the
+// run and answers whether it gained none.
+//
+// EVERY UNIT RUNS WITH TMPDIR AT ITS OWN ROOT (run.OSExec), and testrun itself
+// runs in one, so nothing a test makes belongs in the user's shared temp
+// directory. Its leaks once grew that directory to 856,127 entries, where a
+// create stalled for seconds and timed tests out. A new entry is a test that
+// ignored TMPDIR (a hard-coded path, a platform temp-directory lookup), and the
+// run fails naming it.
+func guardUserTmp(log *run.Log, dir string, before map[string]bool) bool {
+	after, err := tmpEntries(dir)
+	if err != nil {
+		log.Errorf("%v", err)
+		return false
+	}
+	var gained []string
+	for name := range after {
+		if !before[name] {
+			gained = append(gained, name)
+		}
+	}
+	if len(gained) == 0 {
+		return true
+	}
+	sort.Strings(gained)
+	for _, name := range gained {
+		log.Errorf("the run left %s in the user temp directory %s: every test file belongs under TMPDIR, which the run points at its own root", name, dir)
+	}
+	return false
+}
+
+func runSuites(ctx context.Context, d Deps, a Args) int {
 	log := d.Log
 	moduleRoot, err := filepath.Abs(a.Module)
 	if err != nil {
