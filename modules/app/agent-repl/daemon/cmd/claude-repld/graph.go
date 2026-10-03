@@ -304,6 +304,9 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// it needs this supervisor. By the time a shim's link can break, the fleet
 	// exists; before then the witness refuses rather than concluding anything.
 	var fleet *workspace.Fleet
+	// The editor startup's bring-up reads ownership at run time; it is built
+	// with the merge orchestrator, below the startup.
+	var ownership workspace.Ownership
 	supervisor, err := shimclient.NewSupervisor(p.Surfaces,
 		shimclient.WithLockProbe(adoptedDeathWitness(func(workspaceDir string) (sessionlock.State, error) {
 			if fleet == nil {
@@ -525,7 +528,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		},
 		Live: func(ws ids.WorkspaceID) bool { return fleet.Live(ws) },
 		BringUp: func(pending []ids.WorkspaceID, done func(ids.WorkspaceID, error)) {
-			editorBringUp(fleet, p.DB, sidebarResolver.SetBringingUp, log, pending, done)
+			editorBringUp(fleet, p.DB, ownership, sidebarResolver.SetBringingUp, log, pending, done)
 		},
 		Now: time.Now,
 		Log: log,
@@ -788,7 +791,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 
 	// ---- the merge orchestrator ----
 
-	ownership := workspace.NewOwnership(rolloutController)
+	ownership = workspace.NewOwnership(rolloutController)
 	mergeOrchestrator, err := merge.New(merge.Deps{
 		PublishHost: relay.PublishHostWorkspace,
 		// The verbs own the roster's durable half and are built AFTER the
@@ -1577,10 +1580,30 @@ const opEditorBringUp = "daemon.startup.bring_up"
 // workspace's bring-up marker is raised before any start, as the boot and the
 // takeover raise theirs; a workspace whose record cannot be read is told done
 // with that error at once and never started.
-func editorBringUp(fleet *workspace.Fleet, db wsm.DB, marker func(ids.WorkspaceID, bool), log dlog.Logger,
+func editorBringUp(fleet *workspace.Fleet, db wsm.DB, ownership workspace.Ownership, marker func(ids.WorkspaceID, bool), log dlog.Logger,
 	pending []ids.WorkspaceID, done func(ids.WorkspaceID, error)) {
 	records := make([]wsm.Workspace, 0, len(pending))
 	for _, ws := range pending {
+		// ONLY A WORKSPACE THIS DAEMON SERVES IS STARTED HERE. One handed to a
+		// successor, or not yet adopted by this joining daemon, is the other
+		// daemon's to start: starting it here races that daemon's shim (a
+		// StartSession it answers `already_started`). It is told done, so its
+		// tab is not held behind a start that is not this daemon's.
+		standing, err := ownership.Standing(context.Background(), ws)
+		if err != nil {
+			log.Error(opEditorBringUp, "a workspace's serving standing could not be read; it is not brought up", dlog.Context{
+				dlog.KeyWorkspaceID: string(ws), "error": err.Error(),
+			})
+			done(ws, fmt.Errorf("read the serving standing of %q: %w", ws, err))
+			continue
+		}
+		if standing != workspace.StandingOwned {
+			log.Info(opEditorBringUp, "a workspace another daemon serves is not brought up here", dlog.Context{
+				dlog.KeyWorkspaceID: string(ws), "standing": int(standing),
+			})
+			done(ws, nil)
+			continue
+		}
 		record, err := db.Workspace(context.Background(), ws)
 		if err != nil {
 			log.Error(opEditorBringUp, "a workspace the editor's startup names could not be read; it is not brought up", dlog.Context{
@@ -1594,12 +1617,28 @@ func editorBringUp(fleet *workspace.Fleet, db wsm.DB, marker func(ids.WorkspaceI
 	}
 	fleet.Detach(func(ctx context.Context) {
 		bringup.Run(ctx, bringup.Deps{
-			DB:           db,
-			StartSession: fleet.Start,
-			BringingUp:   marker,
-			Log:          log,
-			Operation:    opEditorBringUp,
-			Done:         done,
+			DB: db,
+			StartSession: func(ctx context.Context, ws ids.WorkspaceID) error {
+				err := fleet.Start(ctx, ws)
+				if err == nil {
+					return nil
+				}
+				// A HANDOVER CAN TAKE THE WORKSPACE WHILE ITS START RUNS: the
+				// successor's shim then refuses this daemon's start. Re-read
+				// the standing; one no longer this daemon's is stood down.
+				standing, standingErr := ownership.Standing(ctx, ws)
+				if standingErr != nil {
+					return errors.Join(err, fmt.Errorf("read the serving standing of %q: %w", ws, standingErr))
+				}
+				if standing != workspace.StandingOwned {
+					return fmt.Errorf("%w: %w", bringup.ErrNotServed, err)
+				}
+				return err
+			},
+			BringingUp: marker,
+			Log:        log,
+			Operation:  opEditorBringUp,
+			Done:       done,
 		}, records)
 	})
 }
