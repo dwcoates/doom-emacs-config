@@ -1311,3 +1311,42 @@ func TestAPromptDuringAnApiRetryInterruptsTheWaitingTurn(t *testing.T) {
 		t.Fatalf("killed = %v, want the turn waiting on the API interrupted", killed)
 	}
 }
+
+// THE RUNNING TURN ENDING WHILE THE PROMPT WAITED FOR ITS VERDICT is the
+// ordinary race of a short turn, not a store disagreement: no ERROR, and the
+// prompt waits for that end to deliver it.
+func TestARunningTurnThatEndedBeforeTheVerdictIsNoDisagreement(t *testing.T) {
+	tests := []struct {
+		name      string
+		stillRuns bool
+		wantError bool
+	}{
+		{"the turn ended: recorded at INFO", false, false},
+		{"the watcher still runs it: a real disagreement at ERROR", true, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: the store holds no open row for the running turn.
+			h := newHarness(t)
+			if tt.stillRuns {
+				h.watcher.running(idsTurn("running-turn"))
+			}
+			log := dlog.NewTestLogger()
+
+			// Act
+			verdict, route := h.q.verdictFor(context.Background(), submission("t1", "and also this"), "running-turn", log)
+
+			// Assert
+			gotError := false
+			for _, r := range log.Records() {
+				if r.Level == dlog.LevelError {
+					gotError = true
+				}
+			}
+			if route != classifier.RouteQueue || verdict.Arm != wsm.ArmHoldForTurnEnd || gotError != tt.wantError || askedCount(h) != 0 {
+				t.Fatalf("verdictFor = (%+v, %s), error records = %t, asks = %d; want hold_for_turn_end, error=%t, the model never asked",
+					verdict, route, gotError, askedCount(h), tt.wantError)
+			}
+		})
+	}
+}

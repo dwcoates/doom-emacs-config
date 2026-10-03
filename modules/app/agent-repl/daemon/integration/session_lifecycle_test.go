@@ -2268,6 +2268,11 @@ func TestARestartBringsUpAWorkspaceWhoseVendorWasRejected(t *testing.T) {
 	if started.GetSource() == nil {
 		t.Fatalf("StartSession on the relaunched shim = %v, want the session brought up", started)
 	}
+	// AND THE RESUME LANDS: a workspace whose session never came up before
+	// has no host identity recorded, and the resume files one.
+	f.d.AwaitWorkspaceLogRecord(f.repo.Dir, "the session up on the relaunched shim", func(r harness.LogRecord) bool {
+		return r.Message == "the session is up on the new shim"
+	})
 }
 
 // TestAParkedRowIsIdleOnEveryRosterResolvedAfterTheHibernationRecord is the

@@ -1226,6 +1226,10 @@ func (f *Fleet) startUp(ctx context.Context, ws ids.WorkspaceID, rebind bool) er
 		f.deps.Steps(ws, startup.Step{Kind: startup.StepResuming})
 	}
 	started, err := f.startSession(runCtx, log, ws, client, src, session, configDir)
+	if errors.Is(err, errSessionAlreadyRunning) {
+		finishRun()
+		return f.takeRunningSession(ctx, log, ws, client)
+	}
 	if err != nil {
 		defer finishRun()
 		// A FAILED START KEEPS ITS SHIM HELD, with no session on it, exactly
@@ -1540,6 +1544,58 @@ const (
 	pathHeld
 )
 
+// errSessionAlreadyRunning is a StartSession the shim answered
+// `already_started`: the session runs, and the start takes it.
+var errSessionAlreadyRunning = errors.New("workspace: the shim already runs its session")
+
+// takeRunningSession takes the session a held shim already runs, which a
+// start learned of only from the shim's `already_started` answer: the entry
+// records it running, and a shim not yet watched has its watches opened,
+// attach-only, exactly as an adoption's are. It is a session up, not a failed
+// start.
+func (f *Fleet) takeRunningSession(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, client shimclient.Client) error {
+	if !f.noteSessionRunningOn(ws, client) {
+		return fmt.Errorf("start session for %q: %w", ws, ErrShimTaken)
+	}
+	f.mu.RLock()
+	watched := f.sessions[ws] != nil && f.sessions[ws].watcher != nil
+	f.mu.RUnlock()
+	if !watched {
+		openAtAttach, err := f.openTurns(ctx, ws)
+		if err != nil {
+			return fmt.Errorf("start session for %q: %w", ws, err)
+		}
+		if err := f.watchInstalled(ctx, ws, client, openAtAttach); err != nil {
+			return err
+		}
+	}
+	log.Info(opBringUp, "the held shim already runs its session; the start takes it rather than starting one", dlog.Context{
+		"shim_pid": client.PID(), "watched_already": watched,
+	})
+	f.publishHost(ws)
+	f.deps.SessionsUp(ws)
+	f.deps.Steps(ws, startup.Step{Kind: startup.StepUp})
+	return nil
+}
+
+// noteSessionRunningOn records that CLIENT's shim runs a session, when the
+// workspace's entry still holds CLIENT, and answers whether it does.
+func (f *Fleet) noteSessionRunningOn(ws ids.WorkspaceID, client shimclient.Client) bool {
+	f.mu.Lock()
+	session, ok := f.sessions[ws]
+	if !ok || session.client != client {
+		f.mu.Unlock()
+		return false
+	}
+	was := session.sessionStarted
+	session.sessionStarted, session.sessionAbsent, session.freshStart = true, false, false
+	f.mu.Unlock()
+	if !was {
+		f.logTransition(ws, "session_started", false, true, dlog.Context{"shim_pid": client.PID()})
+	}
+	return true
+}
+
 // reuseOrBringUp answers the shim a start starts its session on: the one the
 // fleet holds with no session (pathHeld), else a shim bringUpClient spawns or
 // attaches to. A spawned or attached inert shim is HELD from this moment, with
@@ -1726,6 +1782,30 @@ func (f *Fleet) bringUpClient(ctx context.Context, log dlog.Logger, ws ids.Works
 		}
 		return client, pathInert, nil
 	}
+	// A HELD LOCK WITH NOTHING LISTENING IS, FIRST, AN OWNER GOING AWAY. A
+	// shim that has just died leaves its socket behind before its lock holder
+	// (shim-lock, a child that releases on its stdin's EOF) has finished
+	// exiting: for that window the lock reads held over a stale socket. A
+	// revival that refused in it -- two ERRORs, "the lock's owner is
+	// unreachable" -- refused a workspace about to be free (e2e
+	// TestASessionlessWorkspaceHandedOverDrawsItsFeedWithNoPrompt under load,
+	// 2026-10-03). So the bring-up waits, bounded, for the lock to go; one
+	// that never goes is the unreachable owner below.
+	if state == sessionlock.StateHeld && (socket == shimsocket.StateAbsent || socket == shimsocket.StateStale) {
+		state, err = f.awaitLockReleased(ctx, log, lockPath, dir)
+		if state == sessionlock.StateFree {
+			socketPath, socket, socketErr = shimsocket.NewestLive(f.socketProbe, udsPath)
+			if socket == shimsocket.StateLive || socket == shimsocket.StateUndetermined {
+				// A LISTENER APPEARED while the lock went: the kernel facts
+				// moved under the wait, so the bring-up is decided again
+				// from the start rather than spawned onto a live path.
+				log.Info(opBringUp, "a shim began listening while the workspace lock was released; deciding the bring-up again", dlog.Context{
+					"socket": socketPath, "socket_state": socket.String(), "cause": errText(socketErr),
+				})
+				return f.bringUpClient(ctx, log, ws, dir, udsPath, configDir, hostSessionID, src)
+			}
+		}
+	}
 	switch state {
 	case sessionlock.StateHeld:
 		// A HELD LOCK WITH NO LISTENER IS NOT AN ADOPTABLE SHIM. The lock is
@@ -1849,6 +1929,44 @@ func (f *Fleet) bringUpClient(ctx context.Context, log dlog.Logger, ws ids.Works
 			"lock": lockPath, "cause": errText(err),
 		})
 		return nil, pathNone, fmt.Errorf("start session for %q: the workspace lock at %q could not be probed: %w", ws, lockPath, err)
+	}
+}
+
+// lockReleasePoll is how often a bring-up re-probes a workspace lock whose
+// owner is going away; lockReleaseBound bounds the whole wait. A dying shim's
+// lock holder exits within milliseconds of its stdin's EOF on a quiet host;
+// the bound is a generous multiple of that for a loaded one.
+const (
+	lockReleasePoll  = 20 * time.Millisecond
+	lockReleaseBound = 3 * time.Second
+)
+
+// awaitLockReleased waits, bounded, for the workspace lock to read free,
+// answering the last state read and the probe's error. Polled, because a
+// kernel lock cannot announce its release.
+func (f *Fleet) awaitLockReleased(ctx context.Context, log dlog.Logger, lockDir, dir string) (sessionlock.State, error) {
+	clk := f.deps.Clock
+	if clk == nil {
+		clk = startingshim.SystemClock{}
+	}
+	log.Info(opBringUp, "the workspace lock is held with no shim listening; waiting for its owner to finish going away", dlog.Context{
+		"lock_dir": lockDir, "bound_ms": lockReleaseBound.Milliseconds(),
+	})
+	deadline := clk.Now().Add(lockReleaseBound)
+	for {
+		state, err := f.probe(lockDir, dir)
+		if state != sessionlock.StateHeld {
+			log.Info(opBringUp, "the workspace lock's owner went away", dlog.Context{"lock_state": state.String(), "cause": errText(err)})
+			return state, err
+		}
+		if !clk.Now().Before(deadline) {
+			return state, err
+		}
+		select {
+		case <-clk.After(lockReleasePoll):
+		case <-ctx.Done():
+			return state, err
+		}
 	}
 }
 

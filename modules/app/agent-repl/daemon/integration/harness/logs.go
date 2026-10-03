@@ -146,10 +146,39 @@ func awaitLogRecordAfter(t *testing.T, wait context.Context, path, what string, 
 		select {
 		case <-ticker.C:
 		case <-wait.Done():
-			t.Fatalf("waiting for %s in %s: %v\n%s", what, path, wait.Err(), logTail(readLog(t, path), failureTailRecords))
+			records := readLog(t, path)
+			t.Fatalf("waiting for %s in %s: %v\n%s\n%s", what, path, wait.Err(), anchorAccount(records, after, pred), logTail(records, failureTailRecords))
 			return LogRecord{}
 		}
 	}
+}
+
+// anchorAccount says, for a failed ordered wait, whether its anchor was ever
+// written and where the awaited records stood relative to it: an anchor
+// written early scrolls out of the tail a failure prints, and without this a
+// wait that never saw its anchor reads the same as one whose awaited record
+// never came.
+func anchorAccount(records []LogRecord, after, pred func(LogRecord) bool) string {
+	anchor := -1
+	var matches []int
+	for i, r := range records {
+		if anchor < 0 && after(r) {
+			anchor = i
+		}
+		if pred(r) {
+			matches = append(matches, i)
+		}
+	}
+	first := matches
+	if len(first) > 5 {
+		first = first[:5]
+	}
+	if anchor < 0 {
+		return fmt.Sprintf("the anchor was never written in %d records; %d awaited-shape records were (first at indexes %v)", len(records), len(matches), first)
+	}
+	at := records[anchor]
+	return fmt.Sprintf("the anchor is record %d of %d (%s %s %q); %d awaited-shape records, first at indexes %v",
+		anchor, len(records), at.Timestamp, at.Operation, at.Message, len(matches), first)
 }
 
 // failureTailRecords is how many of the awaited log's last records a failed
