@@ -815,17 +815,18 @@ disk, so a switch the user made could not be read back."
 
 (ert-deftest agent-repl-test-commands-cycle-attributes-the-screened-log-name ()
   "The cycle record is attributed through `agent-repl--ws-log-name'.
-The current workspace reaches the ladder from persp-mode, so a
-placeholder that owns no sink must be screened to nil rather than
-routed to a sink that does not exist."
+The current workspace reaches the ladder from persp-mode, so a placeholder
+that owns no sink is screened -- and then named by an explicit context
+scope, never nil: a nil scope is refused by the ladder as a routing error
+\(2026-10-03, a cycle pressed during startup)."
   ;; Arrange / Act
   (agent-repl-test-commands--capturing-info
     (cl-letf (((symbol-function 'agent-repl--ws-log-name) (lambda (_ws) nil)))
       (agent-repl-test-commands--with-bar '("first" "second") "first"
         (agent-repl-switch-right)))
     ;; Assert
-    (should (equal '(nil) (delete-dups
-                           (mapcar #'car agent-repl-test-commands--info))))))
+    (should (equal '((:agent-repl-context "a cycle from a placeholder names no workspace"))
+                   (delete-dups (mapcar #'car agent-repl-test-commands--info))))))
 
 (ert-deftest agent-repl-test-commands-open-most-recent-records-its-target ()
   "The recent-workspace route records its target durably too."
