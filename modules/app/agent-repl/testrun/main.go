@@ -63,18 +63,38 @@ func runCmd(log *run.Log, argv []string) int {
 		log.Errorf("%v", err)
 		return 1
 	}
-	work, err := os.MkdirTemp("", "agent-repl-testrun-")
+	// THE RUN LIVES IN ITS OWN TEMP ROOT, and so does each unit under it
+	// (run.OSExec). TMPDIR moves to the root, so even planning's
+	// `go list`/`vitest list` write nothing in the user's temp directory.
+	root, err := os.MkdirTemp(run.DefaultTmpParent, "tr-")
+	if err != nil {
+		log.Errorf("create the run's temp root: %v", err)
+		return 1
+	}
+	code := runIn(log, args, self, histPath, root)
+	if err := os.RemoveAll(root); err != nil {
+		log.Errorf("remove the run's temp root %s: %v", root, err)
+		return 1
+	}
+	return code
+}
+
+func runIn(log *run.Log, args cli.Args, self, histPath, root string) int {
+	if err := os.Setenv("TMPDIR", root); err != nil {
+		log.Errorf("point TMPDIR at the run's temp root %s: %v", root, err)
+		return 1
+	}
+	work, err := os.MkdirTemp(root, "work-")
 	if err != nil {
 		log.Errorf("create the run's scratch directory: %v", err)
 		return 1
 	}
-	defer os.RemoveAll(work)
 	slots := cli.SlotsForHost(runtime.NumCPU())
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	return cli.Run(ctx, cli.Deps{
 		Log:         log,
-		Exec:        run.OSExec{Log: log, Grace: run.KillGrace},
+		Exec:        run.OSExec{Log: log, Grace: run.KillGrace, TmpParent: root},
 		Clock:       run.WallClock{},
 		Slots:       slots,
 		HistoryPath: histPath,

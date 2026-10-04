@@ -24,7 +24,7 @@ LIB_UNDER_TEST="$THIS_DIR/lib-test-split.sh"
 
 PASS=0
 FAIL=0
-TMP="$(mktemp -d)"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
 pass() { PASS=$((PASS + 1)); echo "ok   - $1"; }

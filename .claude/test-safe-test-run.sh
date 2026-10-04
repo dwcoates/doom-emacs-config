@@ -18,7 +18,7 @@ SCRIPT_UNDER_TEST="$THIS_DIR/safe-test-run.sh"
 
 PASS=0
 FAIL=0
-TMP="$(mktemp -d)"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
 pass() { PASS=$((PASS + 1)); echo "ok   - $1"; }
