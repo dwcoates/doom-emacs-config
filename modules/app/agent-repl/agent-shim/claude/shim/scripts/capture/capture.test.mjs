@@ -20,7 +20,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { TOKEN_ENV_VARS } from "./auth.mjs";
 import { isPromptDriven } from "./worlds.mjs";
@@ -270,14 +270,28 @@ describe("runCwdInit — the setup file that used to be written and never run", 
     expect(existsSync(path.join(dir, "marker-from-init"))).toBe(true);
   });
 
-  it("initializes a real git repository, which the worktree scenario needs", () => {
+  it("runs the worktree scenario's git setup, every call in order", () => {
+    // NO TEST RUNS REAL GIT. The command runs under `bash -lc`, whose login
+    // profile rebuilds PATH ahead of anything a test prepends, so the fake
+    // (bin/fake-git.sh) is handed in as an EXPORTED bash function, which a
+    // login shell still imports and which wins over every PATH entry.
     const dir = mkdtempSync(path.join(tmpdir(), "capture-cwdinit-git-"));
+    const log = path.join(dir, "git-calls.log");
+    const fakeGit = path.join(HERE, "..", "..", "..", "..", "..", "bin", "fake-git.sh");
     writeFileSync(path.join(dir, "README.md"), "# fixture\n", "utf8");
-    runCwdInit(
-      dir,
-      "git init -q . && git add -A && git -c user.email=c@e.invalid -c user.name=c commit -qm init",
+    vi.stubEnv("BASH_FUNC_git%%", `() { "${fakeGit}" "$@"; }`);
+    vi.stubEnv("FAKE_GIT_LOG", log);
+    try {
+      runCwdInit(
+        dir,
+        "git init -q . && git add -A && git -c user.email=c@e.invalid -c user.name=c commit -qm init",
+      );
+    } finally {
+      vi.unstubAllEnvs();
+    }
+    expect(readFileSync(log, "utf8")).toBe(
+      "git init -q .\ngit add -A\ngit -c user.email=c@e.invalid -c user.name=c commit -qm init\n",
     );
-    expect(existsSync(path.join(dir, ".git"))).toBe(true);
   });
 
   it("THROWS on a non-zero exit rather than capturing a golden of the wrong situation", () => {

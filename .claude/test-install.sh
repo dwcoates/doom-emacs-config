@@ -36,7 +36,7 @@ LOCAL_SKILL_NAMES=( profile runtime-eval-code workspace-close emit-workspace-com
 # impl dir is created under the repo so install succeeds; pass a
 # nonexistent path to exercise the FAIL-HARD branch.
 mkfake_repo() {
-  local root; root="$(mktemp -d)"
+  local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
   local impl_path="${1:-$root/impl/foo}"
   mkdir -p "$root/.claude" \
            "$root/.githooks" \
@@ -64,7 +64,7 @@ EOF
 }
 
 mkfake_home() {
-  local home; home="$(mktemp -d)"
+  local home; home="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
   mkdir -p "$home/.claude/skills"
   echo "$home"
 }

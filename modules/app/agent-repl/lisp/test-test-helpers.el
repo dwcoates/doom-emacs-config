@@ -457,6 +457,58 @@ test-popup.el tests the popup module itself and records one level lower."
     ;; Assert
     (should-not offenders)))
 
+;;;; ---- The batch temp root ----
+
+(ert-deftest agent-repl-test-helpers-batch-temp-files-land-in-the-private-root ()
+  "In batch, `temporary-file-directory' is this process's private root."
+  (should (equal temporary-file-directory
+                 (file-name-as-directory agent-repl-test--temp-root))))
+
+(ert-deftest agent-repl-test-helpers-batch-subprocesses-inherit-the-private-root ()
+  "In batch, TMPDIR names the same private root, for every child process."
+  (should (equal (getenv "TMPDIR") temporary-file-directory)))
+
+(ert-deftest agent-repl-test-helpers-batch-temp-root-is-removed-with-its-contents ()
+  "The exit hook removes the root and whatever a test left in it."
+  ;; Arrange
+  (let* ((root (make-temp-file "temp-root-test-" t))
+         (agent-repl-test--temp-root root))
+    (make-directory (expand-file-name "left/behind" root) t)
+    ;; Act
+    (agent-repl-test--delete-temp-root)
+    ;; Assert
+    (should-not (file-exists-p root))))
+
+(ert-deftest agent-repl-test-helpers-batch-temp-root-removal-failure-is-printed ()
+  "A root that cannot be removed is reported on stderr, not swallowed."
+  ;; Arrange
+  (let* ((root (make-temp-file "temp-root-test-" t))
+         (agent-repl-test--temp-root root)
+         (printed ""))
+    (unwind-protect
+        (cl-letf (((symbol-function 'delete-directory)
+                   (lambda (&rest _) (signal 'file-error (list "Removing directory" "Permission denied" root))))
+                  ((symbol-function 'princ)
+                   (lambda (object &optional _stream) (setq printed (concat printed object)))))
+          ;; Act
+          (agent-repl-test--delete-temp-root))
+      (delete-directory root t))
+    ;; Assert
+    (should (string-match-p "ERROR: could not remove the batch temp root" printed))))
+
+(ert-deftest agent-repl-test-helpers-batch-temp-root-removal-is-hooked-on-exit ()
+  "The removal runs when Emacs exits."
+  (should (memq #'agent-repl-test--delete-temp-root kill-emacs-hook)))
+
+(ert-deftest agent-repl-test-helpers-batch-temp-root-survives-a-reload ()
+  "Re-loading test-helpers.el keeps the one root rather than nesting another."
+  ;; Arrange
+  (let ((before temporary-file-directory))
+    ;; Act
+    (load (expand-file-name "test-helpers.el" agent-repl-test-helpers--dir) nil t)
+    ;; Assert
+    (should (equal temporary-file-directory before))))
+
 (provide 'test-test-helpers)
 
 ;;; test-test-helpers.el ends here

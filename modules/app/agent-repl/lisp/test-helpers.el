@@ -359,6 +359,40 @@ while the module loads, so load-time arming produces a REAL timer object
 work in the batch process.  Ignores every argument by design."
   (timer-create))
 
+;; EVERY TEMP FILE THIS BATCH PROCESS MAKES lives under one private root,
+;; removed when Emacs exits.  `temporary-file-directory' and TMPDIR both move
+;; to it, so a `make-temp-file' a test never deletes, a production path that
+;; makes its own directory under the temp root (the prompt summary's), and
+;; org-babel's own temp directories all land inside it rather than in the
+;; user's shared temp directory, which leaked test directories once grew to
+;; 856,127 entries and made every create in it stall for seconds.  Under
+;; `bin/test-all.sh' the unit's own TMPDIR root holds this one in turn.
+;; Batch-gated like everything below: a live session's temp files are its own.
+(defvar agent-repl-test--temp-root nil
+  "This batch process's private temp root, or nil outside batch.")
+
+(defun agent-repl-test--delete-temp-root ()
+  "Delete this process's private temp root.  Runs on `kill-emacs-hook'.
+A failure is printed to stderr rather than swallowed: the root then holds a
+file the run made unremovable, which the person reading the run must see."
+  (when (and agent-repl-test--temp-root (file-directory-p agent-repl-test--temp-root))
+    (condition-case err
+        (delete-directory agent-repl-test--temp-root t)
+      (error
+       (princ (format "agent-repl-tests: ERROR: could not remove the batch temp root %s: %S\n"
+                      agent-repl-test--temp-root err)
+              #'external-debugging-output)))))
+
+;; ONCE PER PROCESS: every test file loads this one, and a second root made
+;; under the first would move `temporary-file-directory' between files, so a
+;; path one file computed at load would no longer match the same path asked
+;; for later.
+(when (and noninteractive (null agent-repl-test--temp-root))
+  (setq agent-repl-test--temp-root (make-temp-file "agent-repl-ert-" t))
+  (setq temporary-file-directory (file-name-as-directory agent-repl-test--temp-root))
+  (setenv "TMPDIR" temporary-file-directory)
+  (add-hook 'kill-emacs-hook #'agent-repl-test--delete-temp-root))
+
 ;; Isolate agent-repl's canonical state dir to a throwaway temp location
 ;; for the ENTIRE test session, BEFORE the module loads.  `core.el'
 ;; resolves `agent-repl--global-state-dir' from the
