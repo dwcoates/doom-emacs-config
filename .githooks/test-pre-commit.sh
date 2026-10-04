@@ -40,7 +40,7 @@ fail() {
 mkrepo() {
   local module="${1:-agent-repl}"
   local repo
-  repo="$(mktemp -d)"
+  repo="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
   git -C "$repo" init -q
   git -C "$repo" config user.email "test@example.com"
   git -C "$repo" config user.name "Test"
@@ -216,7 +216,7 @@ test_unrelated_docs_skip_the_gate() {
 test_foreign_repo_skips_shared_hook() {
   local owner foreign
   owner="$(mkrepo)"
-  foreign="$(mktemp -d)"
+  foreign="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
   git -C "$foreign" init -q
   git -C "$foreign" config user.email "test@example.com"
   git -C "$foreign" config user.name "Test"
