@@ -40,7 +40,7 @@ import type { SelectionVisibility } from "../../src/feed/selection-visibility.js
 import type { Overscan } from "../../src/feed/overscan.js";
 import { drawFeedSimpleToolCall } from "../../src/feed/cards/tool-call.js";
 import { onDiscard, tickWhileShown } from "../../src/feed/ticking.js";
-import {
+import { FIXTURE_WALK,
   agentPromptRow,
   countingTicker,
   feedId,
@@ -812,6 +812,21 @@ describe("createFeedController: the walk", () => {
     host.querySelector<HTMLElement>("[data-load-more]")?.click();
     await settle();
     expect(h.calls.getFeedPage[0]?.page.case).toBe("next");
+  });
+
+  it("names the walk the last page with more named", async () => {
+    const h = harness({
+      getFeedPage: () =>
+        create(GetFeedPageResponseSchema, {
+          result: { case: "success", value: page([withOrder(responseRow("older"), "a")]) },
+        }),
+    });
+    const { controller, host } = fixture(h);
+    controller.applyPage(page([responseRow("a")], { hasMore: true }), "replace");
+    host.querySelector<HTMLElement>("[data-load-more]")?.click();
+    await settle();
+    const ask = h.calls.getFeedPage[0]?.page;
+    expect(ask?.case === "next" ? ask.value.walk?.value : undefined).toBe(FIXTURE_WALK);
   });
 
   it("prepends the older page above what is already drawn", async () => {

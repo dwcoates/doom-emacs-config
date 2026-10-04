@@ -1,3 +1,4 @@
+import { FeedWalkIdSchema } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import { describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { FeedWatchTokenSchema } from "../../../proto/gen/ts/agentrepl/v1/feed_token_pb";
@@ -72,5 +73,20 @@ describe("buildLoadFeedThroughRequest", () => {
 
   it("echoes the target's id verbatim", () => {
     expect(buildLoadFeedThroughRequest(WORKSPACE, feedId("r-1")).target?.value).toBe("r-1");
+  });
+
+  it("names the reader's walk when it has one", () => {
+    expect(buildLoadFeedThroughRequest(WORKSPACE, feedId("r-1"), create(FeedWalkIdSchema, { value: "w-1" })).walk?.value).toBe("w-1");
+  });
+
+  it("names no walk when the reader has none", () => {
+    expect(buildLoadFeedThroughRequest(WORKSPACE, feedId("r-1")).walk).toBeUndefined();
+  });
+});
+
+describe("buildGetFeedPageRequest's walk", () => {
+  it("names the walk a next continues", () => {
+    const ask = buildGetFeedPageRequest(WORKSPACE, undefined, "next", create(FeedWalkIdSchema, { value: "w-2" })).page;
+    expect(ask.case === "next" ? ask.value.walk?.value : undefined).toBe("w-2");
   });
 });

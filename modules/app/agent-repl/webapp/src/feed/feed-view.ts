@@ -78,6 +78,7 @@ import {
   type FeedSelection,
   type FeedTurnActivity,
   type FeedRow,
+  type FeedWalkId,
 } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import {
   GetFeedPageResponseSchema,
@@ -323,6 +324,10 @@ export function createFeedController(
   // what decides whether a pushed row sorting before every held row is drawn
   // (the feed is at its start) or left to the walk (unloaded history).
   let walkEdge: "hasMore" | "atStart" | null = null;
+  // THE WALK the last page with more named (FeedPageHasMore.walk): what
+  // "older" and a LoadFeedThrough continue. Kept across an at-start page, so a
+  // further ask still names the walk it belongs to.
+  let walk: FeedWalkId | undefined;
   // THE LoadFeedThrough WALKS IN FLIGHT: serialized through `throughTail`, and
   // the "older" control stays disabled while `throughRunning` is above zero.
   let throughTail: Promise<unknown> = Promise.resolve();
@@ -497,8 +502,10 @@ export function createFeedController(
         const keys = incoming.map(orderKeyOf);
         replaceTicking(errorSlot);
         const edge = requireCase(result.value.edge, "FeedPageSuccess.edge");
-        if (edge.case === "hasMore") opts.host.prepend(loadMore);
-        else loadMore.remove();
+        if (edge.case === "hasMore") {
+          walk = requireMessage(edge.value.walk, "FeedPageHasMore.walk");
+          opts.host.prepend(loadMore);
+        } else loadMore.remove();
         walkEdge = edge.case;
         crumbs = requireMessage(
           result.value.breadcrumbs,
@@ -1583,7 +1590,7 @@ export function createFeedController(
         "GetFeedPage",
         (client) =>
           client.getFeedPage(
-            buildGetFeedPageRequest(opts.ctx.workspace, feedId(), "next"),
+            buildGetFeedPageRequest(opts.ctx.workspace, feedId(), "next", walk),
           ),
         GetFeedPageResponseSchema,
       );
@@ -1655,7 +1662,7 @@ export function createFeedController(
     let pages = 0;
     try {
       for await (const frame of opts.ctx.client.loadFeedThrough(
-        buildLoadFeedThroughRequest(opts.ctx.workspace, target),
+        buildLoadFeedThroughRequest(opts.ctx.workspace, target, walk),
       )) {
         assertNoUnknownFields(LoadFeedThroughResponseSchema, frame);
         const arm = requireCase(
