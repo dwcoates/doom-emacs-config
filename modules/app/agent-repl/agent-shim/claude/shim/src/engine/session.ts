@@ -1988,7 +1988,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // Awaited ONLY when there is something to conclude or adopt, so an
     // ordinary message reaches the fold in the same step it always did.
     if (verdict.absorbed.length > 0) await concludeAbsorbedTurns(verdict);
-    if (verdict.openedVendorTurn) await adoptVendorTurn(message, verdict);
+    // A turn the keep-alive's own rewind set off is the keep-alive's: tagged,
+    // never adopted (engine/keepalive.ts `attribute`).
+    if (verdict.openedVendorTurn && !attribution.keepalive) await adoptVendorTurn(message, verdict);
     // AFTER the adoption: the adopting message's own instant is the new
     // turn's, so it must not lift the bound its prompt is placed at.
     noteMainRecordInstant(message);
@@ -2081,7 +2083,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   function recordTurn(attribution: KeepaliveAttribution, running: VendorTurn): RecordTurn | undefined {
     if (attribution.keepalive) return open?.keepalive === true ? { turnId: open.id.value, keepalive: true } : undefined;
     const turn = turnFor(false, running);
-    return turn === undefined ? undefined : { turnId: turn.value, keepalive: false };
+    return turn === undefined ? undefined : { turnId: turn.value, keepalive: false, adopted: running.kind === "vendor" };
   }
 
   /**
