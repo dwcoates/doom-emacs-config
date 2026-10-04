@@ -89,6 +89,15 @@ describe("the yield obligation", () => {
     expect(rewind.obligation()).toBeUndefined();
   });
 
+  it("never anchors on a turn the vendor started on its own", () => {
+    const rewind = new KeepaliveRewind();
+    rewind.noteRecord(assistant("real-1"), realTurn);
+    rewind.noteRecord(assistant("adopted-1"), { turnId: "adopted-1", keepalive: false, adopted: true });
+    rewind.noteKeepaliveTurn();
+
+    expect(rewind.obligation()?.resumeSessionAt).toBe("real-1");
+  });
+
   it("names the last REAL assistant record as the resume anchor", () => {
     const rewind = new KeepaliveRewind();
     rewind.noteRecord(assistant("real-1"), realTurn);
@@ -702,6 +711,58 @@ describe("the keep-alive turn scope", () => {
   it("does not tag a turn whose first reply names no send", () => {
     // Arrange: the vendor's own task-notification turn, while the keep-alive waits.
     const scope = pendingScope();
+
+    // Act
+    const tagged = scope.attribute(reply());
+
+    // Assert
+    expect(tagged.keepalive).toBe(false);
+  });
+
+  it("tags the turn the vendor runs to answer a stop the keep-alive's rewind caused", () => {
+    // Arrange: the rewind replaced the query; the vendor reports the old
+    // query's background shell as stopped, then answers that in a turn.
+    const scope = pendingScope();
+    scope.attribute({ ...other("system", "notif-1", "task_notification"), task_id: "t-1", status: "stopped" } as SdkMessage);
+
+    // Act
+    const tagged = scope.attribute(reply());
+
+    // Assert
+    expect(tagged.keepalive).toBe(true);
+  });
+
+  it("ends that turn as the keep-alive's without ending the keep-alive", () => {
+    // Arrange
+    const scope = pendingScope();
+    scope.attribute({ ...other("system", "notif-1", "task_notification"), task_id: "t-1", status: "stopped" } as SdkMessage);
+    scope.attribute(reply());
+
+    // Act
+    const tagged = scope.attribute(result());
+
+    // Assert
+    expect([tagged, scope.pendingUuid()]).toEqual([{ keepalive: true, endsKeepalive: false }, KEEPALIVE_SEND]);
+  });
+
+  it("serves a turn answering a genuine completion beside the keep-alive", () => {
+    // Arrange: a completed background task, not a stop.
+    const scope = pendingScope();
+    scope.attribute({ ...other("system", "notif-1", "task_notification"), task_id: "t-1", status: "completed" } as SdkMessage);
+
+    // Act
+    const tagged = scope.attribute(reply());
+
+    // Assert
+    expect(tagged.keepalive).toBe(false);
+  });
+
+  it("claims no later vendor turn once the stop's turn ended", () => {
+    // Arrange
+    const scope = pendingScope();
+    scope.attribute({ ...other("system", "notif-1", "task_notification"), task_id: "t-1", status: "stopped" } as SdkMessage);
+    scope.attribute(reply());
+    scope.attribute(result());
 
     // Act
     const tagged = scope.attribute(reply());
