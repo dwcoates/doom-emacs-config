@@ -114,8 +114,12 @@ type wsState struct {
 	// (book.go): what its feed's book is told of every row it draws.
 	load *pageLoad
 
-	// readers are the standing page walks, one per open connection.
+	// readers are the standing page walks, keyed by the walk each opening
+	// minted (server/feed.go readerFor), at most maxStandingWalks of them.
 	readers map[ReaderID]*walk
+	// walkSeq stamps each walk's latest use, so the least recently used one
+	// is the one a full set drops.
+	walkSeq uint64
 
 	// units is the per-activity accumulation: the start facts a settled frame
 	// is drawn against, and the fold of a growing one.
@@ -487,10 +491,13 @@ type loggedRow struct {
 }
 
 // walk is one reader's page position: the order key of the OLDEST row it has
-// been served. Ephemeral, dropped on every open and on CloseReader.
+// been served. Ephemeral: minted by every opening, dropped on CloseReader or as
+// the least recently used of a full set.
 type walk struct {
 	// feedKey is the feed this walk is of.
 	feedKey string
+	// used is the walkSeq of the walk's latest use.
+	used uint64
 	// oldest is the order key of the oldest row served so far; nil when the
 	// walk has been served nothing, which stands it at the feed's start —
 	// unless top is set.

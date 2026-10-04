@@ -121,8 +121,9 @@ func (r *resolver) ResetWorkspace(ws ids.WorkspaceID, because string) {
 		fresh.feedAddrs[key] = old.feedAddrs[key]
 	}
 	for reader, w := range old.readers {
-		fresh.readers[reader] = &walk{feedKey: w.feedKey, standing: w.standing}
+		fresh.readers[reader] = &walk{feedKey: w.feedKey, standing: w.standing, used: w.used}
 	}
+	fresh.walkSeq = old.walkSeq
 	fresh.synthSeq = old.synthSeq
 	fresh.stallSeq = old.stallSeq
 	r.workspaces[ws] = fresh

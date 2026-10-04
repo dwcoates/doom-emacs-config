@@ -59,16 +59,20 @@ func pagedFeedRows(t *testing.T) (*fixture, map[string]*frontendv1.FeedRow) {
 	return f, rows
 }
 
-// feedPage asks GetFeedPage for the first or next page of the root feed.
+// feedPage asks GetFeedPage for the first or next page of the root feed; a
+// next continues the walk the fixture's last page named (f.walk).
 func (f *fixture) feedPage(first bool) *frontendv1.FeedPage {
 	f.t.Helper()
-	req := &agentreplv1.GetFeedPageRequest{Workspace: f.ws, Page: &agentreplv1.GetFeedPageRequest_Next{Next: &agentreplv1.GetFeedPageNext{}}}
+	req := &agentreplv1.GetFeedPageRequest{Workspace: f.ws, Page: &agentreplv1.GetFeedPageRequest_Next{Next: &agentreplv1.GetFeedPageNext{Walk: f.walk}}}
 	if first {
 		req.Page = &agentreplv1.GetFeedPageRequest_First{First: &agentreplv1.GetFeedPageFirst{}}
 	}
 	resp, err := f.d.Client().GetFeedPage(f.d.Ctx(), connect.NewRequest(req))
 	if err != nil || resp.Msg.GetSuccess().GetSuccess() == nil {
 		f.t.Fatalf("GetFeedPage = %v, %v; want a page", resp, err)
+	}
+	if more := resp.Msg.GetSuccess().GetSuccess().GetHasMore(); more != nil {
+		f.walk = more.GetWalk()
 	}
 	return resp.Msg.GetSuccess()
 }
@@ -117,7 +121,7 @@ func TestLoadFeedThroughStreamsEveryPageDownToTheTarget(t *testing.T) {
 
 	// Act.
 	stream, err := f.d.Client().LoadFeedThrough(f.d.Ctx(), connect.NewRequest(&agentreplv1.LoadFeedThroughRequest{
-		Workspace: f.ws, Target: oldest.GetId(),
+		Workspace: f.ws, Walk: f.walk, Target: oldest.GetId(),
 	}))
 	if err != nil {
 		t.Fatalf("LoadFeedThrough: %v", err)
@@ -152,7 +156,7 @@ func TestANextAfterLoadFeedThroughContinuesBelowIt(t *testing.T) {
 	f, rows := pagedFeedRows(t)
 	f.feedPage(true)
 	stream, err := f.d.Client().LoadFeedThrough(f.d.Ctx(), connect.NewRequest(&agentreplv1.LoadFeedThroughRequest{
-		Workspace: f.ws, Target: rows["row 6"].GetId(),
+		Workspace: f.ws, Walk: f.walk, Target: rows["row 6"].GetId(),
 	}))
 	if err != nil {
 		t.Fatalf("LoadFeedThrough: %v", err)
@@ -194,7 +198,7 @@ func TestLoadFeedThroughATargetTheConversationNeverHadIsNotFound(t *testing.T) {
 
 	// Act.
 	stream, err := f.d.Client().LoadFeedThrough(f.d.Ctx(), connect.NewRequest(&agentreplv1.LoadFeedThroughRequest{
-		Workspace: f.ws, Target: ghost,
+		Workspace: f.ws, Walk: f.walk, Target: ghost,
 	}))
 	if err != nil {
 		t.Fatalf("LoadFeedThrough: %v", err)

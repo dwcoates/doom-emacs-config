@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -106,6 +107,39 @@ func TestCloseReaderDropsTheWalk(t *testing.T) {
 	// Assert.
 	if !errors.Is(err, ErrNoWalk) {
 		t.Fatalf("NextPage err = %v, want ErrNoWalk once the reader closed", err)
+	}
+}
+
+func TestAFullSetOfWalksDropsTheLeastRecentlyUsed(t *testing.T) {
+	tests := []struct {
+		name     string
+		touched  bool // reader-0 continued its walk after the others opened
+		wantWalk bool // reader-0 still holds its walk after one more opening
+	}{
+		{name: "the oldest unused walk is dropped", touched: false, wantWalk: false},
+		{name: "a walk used since is kept", touched: true, wantWalk: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: a full set of walks, reader-0's opened first.
+			h := newHarness(t)
+			h.mainBook(2, promptsBook(6))
+			for i := 0; i < maxStandingWalks; i++ {
+				h.openPage(rootFeed(), ReaderID("reader-"+strconv.Itoa(i)))
+			}
+			if tt.touched {
+				h.nextPage("reader-0")
+			}
+
+			// Act: one more opening overfills the set.
+			h.openPage(rootFeed(), "reader-new")
+
+			// Assert.
+			_, err := h.resolver.NextPage(context.Background(), testWorkspace, rootFeed(), "reader-0")
+			if held := !errors.Is(err, ErrNoWalk); held != tt.wantWalk {
+				t.Fatalf("reader-0 holds its walk = %v (err %v), want %v", held, err, tt.wantWalk)
+			}
+		})
 	}
 }
 

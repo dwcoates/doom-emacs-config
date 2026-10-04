@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 
@@ -22,11 +24,36 @@ import (
 // ephemeral and per-reader, never persisted, so a `next` with no walk standing
 // is a refusal rather than a silent restart from the top.
 
-// readerFor derives the per-connection reader identity a page walk is keyed by.
-// The walk belongs to the CONNECTION, so two webviews paging the same feed
-// never consume each other's pages.
-func readerFor(peer string, ws ids.WorkspaceID, id *frontendv1.FeedId) feed.ReaderID {
-	return feed.ReaderID(fmt.Sprintf("%s|%s|%s", peer, ws, id.GetValue()))
+// readerFor derives the reader identity a page walk is keyed by: the WALK the
+// client names (FeedPageHasMore.walk), scoped to its workspace and feed. Each
+// opening mints its own walk, so two webviews paging the same feed never
+// consume each other's pages, and a request finds its walk whichever
+// connection carries it. (It was the connection's peer address, and a webview
+// spreads its requests over several connections: an `older` click on another
+// connection found no walk -- owner's report, 2026-10-03.)
+func readerFor(walk string, ws ids.WorkspaceID, id *frontendv1.FeedId) feed.ReaderID {
+	return feed.ReaderID(fmt.Sprintf("%s|%s|%s", walk, ws, id.GetValue()))
+}
+
+// mintWalk mints a fresh walk identity for an opening.
+func mintWalk() string {
+	var b [12]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		// crypto/rand does not fail on the platforms the daemon runs on; a
+		// failure is a broken host, and a walk without an identity would key
+		// every reader together.
+		panic(fmt.Sprintf("feed: minting a walk identity: %v", err))
+	}
+	return "w" + hex.EncodeToString(b[:])
+}
+
+// stampWalk names WALK on a page that has more to walk, so the client can
+// continue it.
+func stampWalk(page *frontendv1.FeedPage, walk string) *frontendv1.FeedPage {
+	if more := page.GetSuccess().GetHasMore(); more != nil {
+		more.Walk = &frontendv1.FeedWalkId{Value: walk}
+	}
+	return page
 }
 
 // feedOf resolves an optional FeedId onto the feed it addresses, refusing an
@@ -77,7 +104,8 @@ func (s *server) OpenFeed(
 		return answer(resp, s.refuse(subject.Log, rpc, resp, s.fill(*feedRefusal)))
 	}
 
-	reader := readerFor(req.Peer().Addr, subject.Record.ID, req.Msg.GetFeed())
+	walk := mintWalk()
+	reader := readerFor(walk, subject.Record.ID, req.Msg.GetFeed())
 	page, token, err := s.deps.Feed.OpenPage(ctx, subject.Record.ID, target, reader)
 	if err != nil {
 		if refused, ok := s.asRefusal(err); ok {
@@ -89,7 +117,7 @@ func (s *server) OpenFeed(
 	subject.Log.Debug("daemon.server.open_feed", "opened a feed and minted its watch token",
 		dlog.Context{"token": token.GetValue(), "rows": len(page.GetSuccess().GetRows())})
 	resp.Result = &agentreplv1.OpenFeedResponse_Success{
-		Success: &agentreplv1.OpenFeedSuccess{Page: page, Watch: token},
+		Success: &agentreplv1.OpenFeedSuccess{Page: stampWalk(page, walk), Watch: token},
 	}
 	return connect.NewResponse(resp), nil
 }
@@ -257,7 +285,11 @@ func (s *server) GetFeedPage(
 		return answer(resp, s.refuse(subject.Log, rpc, resp, s.fill(*feedRefusal)))
 	}
 
-	reader := readerFor(req.Peer().Addr, subject.Record.ID, req.Msg.GetFeed())
+	walk := req.Msg.GetNext().GetWalk().GetValue()
+	if req.Msg.GetFirst() != nil {
+		walk = mintWalk()
+	}
+	reader := readerFor(walk, subject.Record.ID, req.Msg.GetFeed())
 	var page *frontendv1.FeedPage
 	if req.Msg.GetFirst() != nil {
 		page, _, err = s.deps.Feed.OpenPage(ctx, subject.Record.ID, target, reader)
@@ -272,6 +304,6 @@ func (s *server) GetFeedPage(
 	}
 	subject.Log.Debug("daemon.server.get_feed_page", "answered a history page",
 		dlog.Context{"rows": len(page.GetSuccess().GetRows())})
-	resp.Result = &agentreplv1.GetFeedPageResponse_Success{Success: page}
+	resp.Result = &agentreplv1.GetFeedPageResponse_Success{Success: stampWalk(page, walk)}
 	return connect.NewResponse(resp), nil
 }
