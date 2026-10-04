@@ -443,10 +443,22 @@ message FeedPageErrorHeadline {
   string tone = 2;
 }
 
-// Older rows exist — ask for the next page. NO CURSOR: the daemon holds each
-// feed's walk position; this arm is purely the fact that the walk has not
-// reached the start.
-message FeedPageHasMore {}
+// Older rows exist — ask for the next page, NAMING THIS WALK. The daemon
+// holds the walk's position; the client holds only its identity and echoes
+// it on GetFeedPage `next` (and LoadFeedThrough). A walk is minted by every
+// opening (OpenFeed, GetFeedPage `first`), so two webviews paging one feed
+// never share a walk, and a request is matched to its walk whichever
+// connection carries it.
+message FeedPageHasMore {
+  // The walk this page belongs to. Always set.
+  FeedWalkId walk = 1;
+}
+
+// One reader's walk through a feed's history: minted by the daemon, opaque
+// to the client, echoed verbatim; compared byte-wise.
+message FeedWalkId {
+  string value = 1;
+}
 
 // This page reaches the beginning of the feed.
 message FeedPageAtStart {}
