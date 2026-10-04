@@ -104,6 +104,8 @@ func (r *resolver) stepPage(ws ids.WorkspaceID, feed feedid.Feed, reader ReaderI
 				dlog.Context{"feed": f.key, "reader": string(reader)})
 			return nil, nil, nil, ErrNoWalk
 		}
+		s.walkSeq++
+		held.used = s.walkSeq
 		w = held
 	}
 	action := "next_page"
@@ -152,7 +154,7 @@ func (r *resolver) servePage(s *wsState, f *feedState, w *walk, reader ReaderID,
 		w.top = false
 	}
 	if open {
-		s.readers[reader] = w
+		r.storeWalk(s, reader, w)
 	}
 	op, sentence := "daemon.feed.next_page", "a reader was served the next older page"
 	if open {
@@ -214,6 +216,34 @@ func olderThan(f *feedState, order []string, oldest *string) int {
 		return 0
 	}
 	return sort.Search(len(order), func(i int) bool { return f.rank[order[i]].key >= *oldest })
+}
+
+// maxStandingWalks bounds the walks a workspace holds. Every opening mints a
+// walk and a webview opens a feed on every load, so walks are dropped by
+// recency rather than kept forever; a reader whose walk was dropped is refused
+// `no_walk_standing` and re-opens.
+const maxStandingWalks = 64
+
+// storeWalk stands W as READER's walk, dropping the least recently used walk
+// of a full set. Called with r.mu held.
+func (r *resolver) storeWalk(s *wsState, reader ReaderID, w *walk) {
+	s.walkSeq++
+	w.used = s.walkSeq
+	s.readers[reader] = w
+	if len(s.readers) <= maxStandingWalks {
+		return
+	}
+	var oldest ReaderID
+	first := true
+	for id, held := range s.readers {
+		if first || held.used < s.readers[oldest].used {
+			oldest, first = id, false
+		}
+	}
+	delete(s.readers, oldest)
+	r.logger(s.id).Info("daemon.feed.walk_dropped",
+		"a full set of page walks dropped its least recently used one; its reader re-opens to page again",
+		dlog.Context{"reader": string(oldest), "held": len(s.readers)})
 }
 
 // CloseReader drops a reader's walk when its connection ends.

@@ -44,7 +44,12 @@ type LoadFeedThroughRequest struct {
 	Workspace *v1.WorkspaceRef       `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
 	// The row to bring into the loaded pages: the root-feed row the selected
 	// footer item names, echoed exactly as the daemon served it.
-	Target        *v11.FeedId `protobuf:"bytes,2,opt,name=target,proto3" json:"target,omitempty"`
+	Target *v11.FeedId `protobuf:"bytes,2,opt,name=target,proto3" json:"target,omitempty"`
+	// The walk to advance: the reader's current walk (the `has_more.walk` of the
+	// last page it holds), so a later `next` continues below what this streamed.
+	// UNSET begins a new walk at the newest page; every page this streams names
+	// the walk on its `has_more`.
+	Walk          *v11.FeedWalkId `protobuf:"bytes,3,opt,name=walk,proto3,oneof" json:"walk,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -89,6 +94,13 @@ func (x *LoadFeedThroughRequest) GetWorkspace() *v1.WorkspaceRef {
 func (x *LoadFeedThroughRequest) GetTarget() *v11.FeedId {
 	if x != nil {
 		return x.Target
+	}
+	return nil
+}
+
+func (x *LoadFeedThroughRequest) GetWalk() *v11.FeedWalkId {
+	if x != nil {
+		return x.Walk
 	}
 	return nil
 }
@@ -703,10 +715,12 @@ var File_agentrepl_v1_endpoint_load_feed_through_proto protoreflect.FileDescript
 
 const file_agentrepl_v1_endpoint_load_feed_through_proto_rawDesc = "" +
 	"\n" +
-	"-agentrepl/v1/endpoint_load_feed_through.proto\x12\fagentrepl.v1\x1a\x1cworkspace/v1/workspace.proto\x1a\x16frontend/v1/feed.proto\"\x7f\n" +
+	"-agentrepl/v1/endpoint_load_feed_through.proto\x12\fagentrepl.v1\x1a\x1cworkspace/v1/workspace.proto\x1a\x16frontend/v1/feed.proto\"\xba\x01\n" +
 	"\x16LoadFeedThroughRequest\x128\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12+\n" +
-	"\x06target\x18\x02 \x01(\v2\x13.frontend.v1.FeedIdR\x06target\"\xcd\x01\n" +
+	"\x06target\x18\x02 \x01(\v2\x13.frontend.v1.FeedIdR\x06target\x120\n" +
+	"\x04walk\x18\x03 \x01(\v2\x17.frontend.v1.FeedWalkIdH\x00R\x04walk\x88\x01\x01B\a\n" +
+	"\x05_walk\"\xcd\x01\n" +
 	"\x17LoadFeedThroughResponse\x12+\n" +
 	"\x04page\x18\x01 \x01(\v2\x15.frontend.v1.FeedPageH\x00R\x04page\x12@\n" +
 	"\areached\x18\x02 \x01(\v2$.agentrepl.v1.LoadFeedThroughReachedH\x00R\areached\x12:\n" +
@@ -761,27 +775,29 @@ var file_agentrepl_v1_endpoint_load_feed_through_proto_goTypes = []any{
 	(*LoadFeedThroughHistoryUnavailable)(nil),   // 10: agentrepl.v1.LoadFeedThroughHistoryUnavailable
 	(*v1.WorkspaceRef)(nil),                     // 11: workspace.v1.WorkspaceRef
 	(*v11.FeedId)(nil),                          // 12: frontend.v1.FeedId
-	(*v11.FeedPage)(nil),                        // 13: frontend.v1.FeedPage
+	(*v11.FeedWalkId)(nil),                      // 13: frontend.v1.FeedWalkId
+	(*v11.FeedPage)(nil),                        // 14: frontend.v1.FeedPage
 }
 var file_agentrepl_v1_endpoint_load_feed_through_proto_depIdxs = []int32{
 	11, // 0: agentrepl.v1.LoadFeedThroughRequest.workspace:type_name -> workspace.v1.WorkspaceRef
 	12, // 1: agentrepl.v1.LoadFeedThroughRequest.target:type_name -> frontend.v1.FeedId
-	13, // 2: agentrepl.v1.LoadFeedThroughResponse.page:type_name -> frontend.v1.FeedPage
-	2,  // 3: agentrepl.v1.LoadFeedThroughResponse.reached:type_name -> agentrepl.v1.LoadFeedThroughReached
-	3,  // 4: agentrepl.v1.LoadFeedThroughResponse.error:type_name -> agentrepl.v1.LoadFeedThroughError
-	12, // 5: agentrepl.v1.LoadFeedThroughReached.target:type_name -> frontend.v1.FeedId
-	4,  // 6: agentrepl.v1.LoadFeedThroughError.unknown_workspace:type_name -> agentrepl.v1.LoadFeedThroughUnknownWorkspace
-	5,  // 7: agentrepl.v1.LoadFeedThroughError.workspace_ref_mismatch:type_name -> agentrepl.v1.LoadFeedThroughWorkspaceRefMismatch
-	6,  // 8: agentrepl.v1.LoadFeedThroughError.transferring_away:type_name -> agentrepl.v1.LoadFeedThroughTransferringAway
-	7,  // 9: agentrepl.v1.LoadFeedThroughError.not_yet_adopted:type_name -> agentrepl.v1.LoadFeedThroughNotYetAdopted
-	8,  // 10: agentrepl.v1.LoadFeedThroughError.target_undecodable:type_name -> agentrepl.v1.LoadFeedThroughTargetUndecodable
-	9,  // 11: agentrepl.v1.LoadFeedThroughError.not_found:type_name -> agentrepl.v1.LoadFeedThroughNotFound
-	10, // 12: agentrepl.v1.LoadFeedThroughError.history_unavailable:type_name -> agentrepl.v1.LoadFeedThroughHistoryUnavailable
-	13, // [13:13] is the sub-list for method output_type
-	13, // [13:13] is the sub-list for method input_type
-	13, // [13:13] is the sub-list for extension type_name
-	13, // [13:13] is the sub-list for extension extendee
-	0,  // [0:13] is the sub-list for field type_name
+	13, // 2: agentrepl.v1.LoadFeedThroughRequest.walk:type_name -> frontend.v1.FeedWalkId
+	14, // 3: agentrepl.v1.LoadFeedThroughResponse.page:type_name -> frontend.v1.FeedPage
+	2,  // 4: agentrepl.v1.LoadFeedThroughResponse.reached:type_name -> agentrepl.v1.LoadFeedThroughReached
+	3,  // 5: agentrepl.v1.LoadFeedThroughResponse.error:type_name -> agentrepl.v1.LoadFeedThroughError
+	12, // 6: agentrepl.v1.LoadFeedThroughReached.target:type_name -> frontend.v1.FeedId
+	4,  // 7: agentrepl.v1.LoadFeedThroughError.unknown_workspace:type_name -> agentrepl.v1.LoadFeedThroughUnknownWorkspace
+	5,  // 8: agentrepl.v1.LoadFeedThroughError.workspace_ref_mismatch:type_name -> agentrepl.v1.LoadFeedThroughWorkspaceRefMismatch
+	6,  // 9: agentrepl.v1.LoadFeedThroughError.transferring_away:type_name -> agentrepl.v1.LoadFeedThroughTransferringAway
+	7,  // 10: agentrepl.v1.LoadFeedThroughError.not_yet_adopted:type_name -> agentrepl.v1.LoadFeedThroughNotYetAdopted
+	8,  // 11: agentrepl.v1.LoadFeedThroughError.target_undecodable:type_name -> agentrepl.v1.LoadFeedThroughTargetUndecodable
+	9,  // 12: agentrepl.v1.LoadFeedThroughError.not_found:type_name -> agentrepl.v1.LoadFeedThroughNotFound
+	10, // 13: agentrepl.v1.LoadFeedThroughError.history_unavailable:type_name -> agentrepl.v1.LoadFeedThroughHistoryUnavailable
+	14, // [14:14] is the sub-list for method output_type
+	14, // [14:14] is the sub-list for method input_type
+	14, // [14:14] is the sub-list for extension type_name
+	14, // [14:14] is the sub-list for extension extendee
+	0,  // [0:14] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_load_feed_through_proto_init() }
@@ -789,6 +805,7 @@ func file_agentrepl_v1_endpoint_load_feed_through_proto_init() {
 	if File_agentrepl_v1_endpoint_load_feed_through_proto != nil {
 		return
 	}
+	file_agentrepl_v1_endpoint_load_feed_through_proto_msgTypes[0].OneofWrappers = []any{}
 	file_agentrepl_v1_endpoint_load_feed_through_proto_msgTypes[1].OneofWrappers = []any{
 		(*LoadFeedThroughResponse_Page)(nil),
 		(*LoadFeedThroughResponse_Reached)(nil),

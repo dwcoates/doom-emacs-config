@@ -69,6 +69,9 @@ import { testAppContext } from "../rpc/app-context.js";
 import { orderFor } from "../feed-order.js";
 import type { RowContext, RowRenderers } from "../../src/feed/renderers.js";
 
+/** The walk every fixture page with more names (FeedPageHasMore.walk). */
+export const FIXTURE_WALK = "w-fixture";
+
 export const WORKSPACE = create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" });
 
 /** A ticker that reports how many subscriptions are LIVE right now. */
@@ -292,7 +295,7 @@ export function page(
         rows: [...rows],
         edge:
           opts.hasMore === true
-            ? { case: "hasMore", value: {} }
+            ? { case: "hasMore", value: { walk: { value: FIXTURE_WALK } } }
             : { case: "atStart", value: {} },
         breadcrumbs: create(FeedBreadcrumbsSchema, { crumbs: [...(opts.crumbs ?? [])] }),
       },
