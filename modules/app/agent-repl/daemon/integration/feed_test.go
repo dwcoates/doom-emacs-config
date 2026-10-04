@@ -229,7 +229,7 @@ func TestGetFeedPageFirstThenNextWalksOlderPages(t *testing.T) {
 	}
 	next, err := f.d.Client().GetFeedPage(f.d.Ctx(), connect.NewRequest(&agentreplv1.GetFeedPageRequest{
 		Workspace: f.ws,
-		Page:      &agentreplv1.GetFeedPageRequest_Next{Next: &agentreplv1.GetFeedPageNext{}},
+		Page:      nextAfter(first.Msg.GetSuccess()),
 	}))
 
 	// Assert: the older page exists and does not repeat the newest page's rows.
@@ -303,7 +303,7 @@ func TestGetFeedPageWalkOnASubagentBubbleFeedIdPagesTheSubFeedNotTheRoot(t *test
 	// Assert: {next} on the SAME (sub-feed) walk, still never the root's row.
 	next, err := f.d.Client().GetFeedPage(f.d.Ctx(), connect.NewRequest(&agentreplv1.GetFeedPageRequest{
 		Workspace: f.ws, Feed: bubble.GetId(),
-		Page: &agentreplv1.GetFeedPageRequest_Next{Next: &agentreplv1.GetFeedPageNext{}},
+		Page: nextAfter(first.Msg.GetSuccess()),
 	}))
 	if err != nil || next.Msg.GetSuccess().GetError() != nil {
 		t.Fatalf("GetFeedPage{next} on the subagent's FeedId = %v, %v, want the sub-feed's older page", next.Msg, err)
@@ -397,10 +397,13 @@ func TestGetFeedPageAtStartAndAFurtherNextRepeatsTheWholeFeed(t *testing.T) {
 		t.Fatalf("GetFeedPage{first} = %v, %v, want the newest page", first.Msg, err)
 	}
 	current := first.Msg
+	// The walk the first page named; an at-start page names none, so the
+	// walk's identity is carried from the page that last had more.
+	walk := first.Msg.GetSuccess().GetSuccess().GetHasMore().GetWalk()
 	var oldest *agentreplv1.GetFeedPageResponse
 	for current.GetSuccess().GetSuccess().GetAtStart() == nil {
 		resp, err := f.d.Client().GetFeedPage(f.d.Ctx(), connect.NewRequest(&agentreplv1.GetFeedPageRequest{
-			Workspace: f.ws, Page: &agentreplv1.GetFeedPageRequest_Next{Next: &agentreplv1.GetFeedPageNext{}},
+			Workspace: f.ws, Page: &agentreplv1.GetFeedPageRequest_Next{Next: &agentreplv1.GetFeedPageNext{Walk: walk}},
 		}))
 		if err != nil {
 			t.Fatalf("GetFeedPage{next} while walking to the start = error %v", err)
@@ -409,12 +412,15 @@ func TestGetFeedPageAtStartAndAFurtherNextRepeatsTheWholeFeed(t *testing.T) {
 			t.Fatalf("GetFeedPage{next} while walking to the start = %v, want a clean page", resp.Msg)
 		}
 		current = resp.Msg
+		if more := current.GetSuccess().GetSuccess().GetHasMore(); more != nil {
+			walk = more.GetWalk()
+		}
 	}
 	oldest = current
 
 	// Act: a FURTHER {next} past the page that already set at_start.
 	further, err := f.d.Client().GetFeedPage(f.d.Ctx(), connect.NewRequest(&agentreplv1.GetFeedPageRequest{
-		Workspace: f.ws, Page: &agentreplv1.GetFeedPageRequest_Next{Next: &agentreplv1.GetFeedPageNext{}},
+		Workspace: f.ws, Page: &agentreplv1.GetFeedPageRequest_Next{Next: &agentreplv1.GetFeedPageNext{Walk: walk}},
 	}))
 
 	// Assert: per pages.go's NextPage, a walk already at the start (with no
@@ -481,7 +487,7 @@ func TestGetFeedPageFirstAfterNextReservesTheNewestPage(t *testing.T) {
 		t.Fatalf("GetFeedPage{first} = %v, %v, want the newest page", first.Msg, err)
 	}
 	if _, err := f.d.Client().GetFeedPage(f.d.Ctx(), connect.NewRequest(&agentreplv1.GetFeedPageRequest{
-		Workspace: f.ws, Page: &agentreplv1.GetFeedPageRequest_Next{Next: &agentreplv1.GetFeedPageNext{}},
+		Workspace: f.ws, Page: nextAfter(first.Msg.GetSuccess()),
 	})); err != nil {
 		t.Fatalf("GetFeedPage{next} = error %v", err)
 	}
@@ -496,86 +502,113 @@ func TestGetFeedPageFirstAfterNextReservesTheNewestPage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetFeedPage{first} after a {next} = error %v, want the newest page again", err)
 	}
-	if !proto.Equal(second.Msg, first.Msg) {
+	// Each {first} mints its own walk, so the pages are compared without it.
+	if !proto.Equal(withoutWalk(second.Msg), withoutWalk(first.Msg)) {
 		t.Fatalf("GetFeedPage{first} after a {next} = %v, want the same newest page as the original {first} = %v", second.Msg, first.Msg)
 	}
 }
 
-func TestGetFeedPageWalkIsPerConnection(t *testing.T) {
+func TestAWalkContinuesOnAnyConnection(t *testing.T) {
 	t.Parallel()
-	// Arrange: enough rows for at least one older page, and a walk
-	// established on connection A.
+	// Arrange: a walk begun on connection A (owner's report, 2026-10-03: a
+	// webview spreads its requests over several connections, so an `older`
+	// click arrived on a connection the walk was not keyed by and was refused).
 	f := newOpened(t, harness.Opts{})
-	// The sweep covers every test; the declared records are evidence of a refusal the test provokes.
-	f.d.ExpectWarnings("daemon.feed.next_without_walk")
-	f.submit("go", "k-perconn", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
-	for i := 0; i < harness.FeedPageSize+walkPageMargin; i++ {
+	f.submit("go", "k-anyconn", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	tail := f.watchRootFeed()
+	const n = harness.FeedPageSize + walkPageMargin
+	for i := 0; i < n; i++ {
 		f.shim.PushAgentFrame(mainAgent, feedRowLabeledResponse(i))
 	}
-	clientA := f.d.Client()
-	first, err := clientA.GetFeedPage(f.d.Ctx(), connect.NewRequest(&agentreplv1.GetFeedPageRequest{
+	awaitRow(t, f, tail, "the last padded row", func(r *frontendv1.FeedRow) bool {
+		return r.GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown() == "row "+itoa(n-1)
+	})
+	first, err := f.d.Client().GetFeedPage(f.d.Ctx(), connect.NewRequest(&agentreplv1.GetFeedPageRequest{
 		Workspace: f.ws, Page: &agentreplv1.GetFeedPageRequest_First{First: &agentreplv1.GetFeedPageFirst{}},
 	}))
-	if err != nil || first.Msg.GetSuccess().GetError() != nil {
-		t.Fatalf("GetFeedPage{first} on connection A = %v, %v, want a page", first.Msg, err)
-	}
-	if _, err := clientA.GetFeedPage(f.d.Ctx(), connect.NewRequest(&agentreplv1.GetFeedPageRequest{
-		Workspace: f.ws, Page: &agentreplv1.GetFeedPageRequest_Next{Next: &agentreplv1.GetFeedPageNext{}},
-	})); err != nil {
-		t.Fatalf("GetFeedPage{next} on connection A = error %v", err)
+	if err != nil || first.Msg.GetSuccess().GetSuccess().GetHasMore().GetWalk().GetValue() == "" {
+		t.Fatalf("GetFeedPage{first} = %v, %v, want a page naming its walk", first.Msg, err)
 	}
 
-	// Act: a second, independent connection's {next} with no walk of its own.
-	clientB := f.d.Dial()
-	resp, err := clientB.GetFeedPage(f.d.Ctx(), connect.NewRequest(&agentreplv1.GetFeedPageRequest{
-		Workspace: f.ws, Page: &agentreplv1.GetFeedPageRequest_Next{Next: &agentreplv1.GetFeedPageNext{}},
+	// Act: {next} naming that walk, on a second, independent connection.
+	resp, err := f.d.Dial().GetFeedPage(f.d.Ctx(), connect.NewRequest(&agentreplv1.GetFeedPageRequest{
+		Workspace: f.ws, Page: nextAfter(first.Msg.GetSuccess()),
 	}))
 
-	// Assert: connection B has never walked, so it is refused regardless of
-	// what connection A has done.
-	if err != nil {
-		t.Fatalf("GetFeedPage{next} on a fresh connection = error %v, want a typed refusal", err)
-	}
-	if resp.Msg.GetError().GetNoWalkStanding() == nil {
-		t.Fatalf("GetFeedPage{next} on a connection that never walked = %v, want no_walk_standing", resp.Msg)
+	// Assert: the older page, served on whichever connection asked.
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("GetFeedPage{next} on another connection = %v, %v, want the walk's older page", resp.Msg, err)
 	}
 }
 
-func TestGetFeedPageWalkIsNotPersistedAcrossAReconnect(t *testing.T) {
+func TestTwoOpeningsWalkIndependently(t *testing.T) {
 	t.Parallel()
-	// Arrange: establish a walk on one connection, then abandon it.
+	// Arrange: two readers (two webviews) each open the feed.
+	f := newOpened(t, harness.Opts{})
+	f.submit("go", "k-twowalks", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	tail := f.watchRootFeed()
+	const n = harness.FeedPageSize + walkPageMargin
+	for i := 0; i < n; i++ {
+		f.shim.PushAgentFrame(mainAgent, feedRowLabeledResponse(i))
+	}
+	awaitRow(t, f, tail, "the last padded row", func(r *frontendv1.FeedRow) bool {
+		return r.GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown() == "row "+itoa(n-1)
+	})
+	firstPage := func() *frontendv1.FeedPage {
+		resp, err := f.d.Client().GetFeedPage(f.d.Ctx(), connect.NewRequest(&agentreplv1.GetFeedPageRequest{
+			Workspace: f.ws, Page: &agentreplv1.GetFeedPageRequest_First{First: &agentreplv1.GetFeedPageFirst{}},
+		}))
+		if err != nil || resp.Msg.GetSuccess() == nil {
+			t.Fatalf("GetFeedPage{first} = %v, %v", resp.Msg, err)
+		}
+		return resp.Msg.GetSuccess()
+	}
+	a, b := firstPage(), firstPage()
+	nextOf := func(page *frontendv1.FeedPage) *frontendv1.FeedPage {
+		resp, err := f.d.Client().GetFeedPage(f.d.Ctx(), connect.NewRequest(&agentreplv1.GetFeedPageRequest{
+			Workspace: f.ws, Page: nextAfter(page),
+		}))
+		if err != nil || resp.Msg.GetSuccess() == nil {
+			t.Fatalf("GetFeedPage{next} = %v, %v", resp.Msg, err)
+		}
+		return resp.Msg.GetSuccess()
+	}
+
+	// Act: A walks one page older, then B does.
+	aNext := nextOf(a)
+	bNext := nextOf(b)
+
+	// Assert: distinct walks, and B's walk was not consumed by A's: both got
+	// the same older page.
+	if a.GetSuccess().GetHasMore().GetWalk().GetValue() == b.GetSuccess().GetHasMore().GetWalk().GetValue() {
+		t.Fatal("two openings named the same walk, want one walk each")
+	}
+	if !proto.Equal(withoutWalk(&agentreplv1.GetFeedPageResponse{Result: &agentreplv1.GetFeedPageResponse_Success{Success: aNext}}),
+		withoutWalk(&agentreplv1.GetFeedPageResponse{Result: &agentreplv1.GetFeedPageResponse_Success{Success: bNext}})) {
+		t.Fatalf("B's older page %v differs from A's %v: a walk consumed another's", bNext, aNext)
+	}
+}
+
+func TestANextNamingAWalkNeverMintedIsRefused(t *testing.T) {
+	t.Parallel()
+	// Arrange
 	f := newOpened(t, harness.Opts{})
 	// The sweep covers every test; the declared records are evidence of a refusal the test provokes.
 	f.d.ExpectWarnings("daemon.feed.next_without_walk")
-	f.submit("go", "k-noreplay", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
-	for i := 0; i < harness.FeedPageSize+walkPageMargin; i++ {
-		f.shim.PushAgentFrame(mainAgent, feedRowLabeledResponse(i))
-	}
-	if _, err := f.d.Client().GetFeedPage(f.d.Ctx(), connect.NewRequest(&agentreplv1.GetFeedPageRequest{
-		Workspace: f.ws, Page: &agentreplv1.GetFeedPageRequest_First{First: &agentreplv1.GetFeedPageFirst{}},
-	})); err != nil {
-		t.Fatalf("GetFeedPage{first} = error %v", err)
-	}
 
-	// Act: reconnect (a fresh connection stands in for a client restart) and
-	// go straight to {next}.
-	reconnected := f.d.Dial()
-	resp, err := reconnected.GetFeedPage(f.d.Ctx(), connect.NewRequest(&agentreplv1.GetFeedPageRequest{
-		Workspace: f.ws, Page: &agentreplv1.GetFeedPageRequest_Next{Next: &agentreplv1.GetFeedPageNext{}},
+	// Act
+	resp, err := f.d.Client().GetFeedPage(f.d.Ctx(), connect.NewRequest(&agentreplv1.GetFeedPageRequest{
+		Workspace: f.ws,
+		Page: &agentreplv1.GetFeedPageRequest_Next{Next: &agentreplv1.GetFeedPageNext{
+			Walk: &frontendv1.FeedWalkId{Value: "w-never-minted"},
+		}},
 	}))
 
 	// Assert
-	if err != nil {
-		t.Fatalf("GetFeedPage{next} after a reconnect = error %v, want a typed refusal", err)
-	}
-	if resp.Msg.GetError().GetNoWalkStanding() == nil {
-		t.Fatalf("GetFeedPage{next} after a reconnect = %v, want no_walk_standing: the walk must not survive the connection", resp.Msg)
+	if err != nil || resp.Msg.GetError().GetNoWalkStanding() == nil {
+		t.Fatalf("GetFeedPage{next} naming an unknown walk = %v, %v, want error.no_walk_standing", resp.Msg, err)
 	}
 }
-
-// ==========================================================================
-// The response bubble: growth, and self-correction on the terminal.
-// ==========================================================================
 
 func TestAGrowingResponseRepushesTheSameFeedIdThenSettlesWhole(t *testing.T) {
 	t.Parallel()
@@ -3392,4 +3425,21 @@ func TestADetachedBashTailPastTheCapIsRefusedAndLogged(t *testing.T) {
 	harness.ExpectNoPush(t, tail, harness.ProbeWindow, "an over-cap tail must not upsert the shell's head")
 	// subagent.go logs daemon.feed.spool_over_cap at ERROR on the refusal.
 	f.d.ExpectWarnings("daemon.feed.spool_over_cap")
+}
+
+// nextAfter is the {next} that continues the walk PAGE named.
+func nextAfter(page *frontendv1.FeedPage) *agentreplv1.GetFeedPageRequest_Next {
+	return &agentreplv1.GetFeedPageRequest_Next{Next: &agentreplv1.GetFeedPageNext{
+		Walk: page.GetSuccess().GetHasMore().GetWalk(),
+	}}
+}
+
+// withoutWalk is RESP with its page's walk identity cleared, for comparing
+// two pages that differ only in which walk served them.
+func withoutWalk(resp *agentreplv1.GetFeedPageResponse) *agentreplv1.GetFeedPageResponse {
+	clone := proto.Clone(resp).(*agentreplv1.GetFeedPageResponse)
+	if more := clone.GetSuccess().GetSuccess().GetHasMore(); more != nil {
+		more.Walk = nil
+	}
+	return clone
 }
