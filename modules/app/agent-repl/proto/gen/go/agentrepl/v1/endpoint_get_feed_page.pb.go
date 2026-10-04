@@ -2,11 +2,14 @@
 // feed. FEED section. The first page of a feed is OpenFeed's answer; this
 // verb walks the pages beyond it into the past.
 //
-// NO CURSOR EXISTS ON THE WIRE. The client speaks only "first" and "next";
-// the DAEMON holds each feed's walk position (one webview per workspace, so
-// one reader per feed). `first` resets the walk to the newest page; `next`
-// continues older from where the walk stands, and a `next` with no walk
-// standing is a refusal, not an empty page.
+// THE WALK IS NAMED, ITS POSITION IS THE DAEMON'S. Every opening (OpenFeed,
+// GetFeedPage `first`) mints a walk and answers its identity on the page's
+// `has_more`; `next` echoes that identity and continues older from where the
+// walk stands. A `next` naming a walk the daemon does not hold is a refusal,
+// not an empty page. The walk was once keyed by the CONNECTION, but a webview
+// spreads its requests over several connections, so an `older` click often
+// arrived on a connection with no walk and was refused (owner's report,
+// 2026-10-03).
 //
 // A PAGE IS THE STORE'S PAGE (50 entries, the one size for the whole stack),
 // drawn as however many rows those entries make. The daemon holds only the
@@ -181,7 +184,10 @@ func (*GetFeedPageFirst) Descriptor() ([]byte, []int) {
 }
 
 type GetFeedPageNext struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The walk to continue: the `has_more.walk` of the page it last served.
+	// REQUIRED; unset or unknown is `no_walk_standing`.
+	Walk          *v11.FeedWalkId `protobuf:"bytes,1,opt,name=walk,proto3" json:"walk,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -214,6 +220,13 @@ func (x *GetFeedPageNext) ProtoReflect() protoreflect.Message {
 // Deprecated: Use GetFeedPageNext.ProtoReflect.Descriptor instead.
 func (*GetFeedPageNext) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_get_feed_page_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *GetFeedPageNext) GetWalk() *v11.FeedWalkId {
+	if x != nil {
+		return x.Walk
+	}
+	return nil
 }
 
 // THE ARM IS THE OUTCOME. Two error layers exist ON PURPOSE: this response's
@@ -447,7 +460,8 @@ type GetFeedPageError_NotYetAdopted struct {
 }
 
 type GetFeedPageError_NoWalkStanding struct {
-	// A next page was asked for with no walk standing.
+	// A next page named a walk the daemon does not hold (never minted, or
+	// dropped as one of the feed's least recently used walks).
 	NoWalkStanding *GetFeedPageNoWalkStanding `protobuf:"bytes,5,opt,name=no_walk_standing,json=noWalkStanding,proto3,oneof"`
 }
 
@@ -757,8 +771,9 @@ const file_agentrepl_v1_endpoint_get_feed_page_proto_rawDesc = "" +
 	"\x04next\x18\x04 \x01(\v2\x1d.agentrepl.v1.GetFeedPageNextH\x00R\x04nextB\x06\n" +
 	"\x04pageB\a\n" +
 	"\x05_feed\"\x12\n" +
-	"\x10GetFeedPageFirst\"\x11\n" +
-	"\x0fGetFeedPageNext\"\x8a\x01\n" +
+	"\x10GetFeedPageFirst\">\n" +
+	"\x0fGetFeedPageNext\x12+\n" +
+	"\x04walk\x18\x01 \x01(\v2\x17.frontend.v1.FeedWalkIdR\x04walk\"\x8a\x01\n" +
 	"\x13GetFeedPageResponse\x121\n" +
 	"\asuccess\x18\x01 \x01(\v2\x15.frontend.v1.FeedPageH\x00R\asuccess\x126\n" +
 	"\x05error\x18\x02 \x01(\v2\x1e.agentrepl.v1.GetFeedPageErrorH\x00R\x05errorB\b\n" +
@@ -810,27 +825,29 @@ var file_agentrepl_v1_endpoint_get_feed_page_proto_goTypes = []any{
 	(*GetFeedPageFeedNotInWorkspace)(nil),   // 11: agentrepl.v1.GetFeedPageFeedNotInWorkspace
 	(*v1.WorkspaceRef)(nil),                 // 12: workspace.v1.WorkspaceRef
 	(*v11.FeedId)(nil),                      // 13: frontend.v1.FeedId
-	(*v11.FeedPage)(nil),                    // 14: frontend.v1.FeedPage
+	(*v11.FeedWalkId)(nil),                  // 14: frontend.v1.FeedWalkId
+	(*v11.FeedPage)(nil),                    // 15: frontend.v1.FeedPage
 }
 var file_agentrepl_v1_endpoint_get_feed_page_proto_depIdxs = []int32{
 	12, // 0: agentrepl.v1.GetFeedPageRequest.workspace:type_name -> workspace.v1.WorkspaceRef
 	13, // 1: agentrepl.v1.GetFeedPageRequest.feed:type_name -> frontend.v1.FeedId
 	1,  // 2: agentrepl.v1.GetFeedPageRequest.first:type_name -> agentrepl.v1.GetFeedPageFirst
 	2,  // 3: agentrepl.v1.GetFeedPageRequest.next:type_name -> agentrepl.v1.GetFeedPageNext
-	14, // 4: agentrepl.v1.GetFeedPageResponse.success:type_name -> frontend.v1.FeedPage
-	4,  // 5: agentrepl.v1.GetFeedPageResponse.error:type_name -> agentrepl.v1.GetFeedPageError
-	5,  // 6: agentrepl.v1.GetFeedPageError.unknown_workspace:type_name -> agentrepl.v1.GetFeedPageUnknownWorkspace
-	6,  // 7: agentrepl.v1.GetFeedPageError.workspace_ref_mismatch:type_name -> agentrepl.v1.GetFeedPageWorkspaceRefMismatch
-	7,  // 8: agentrepl.v1.GetFeedPageError.transferring_away:type_name -> agentrepl.v1.GetFeedPageTransferringAway
-	8,  // 9: agentrepl.v1.GetFeedPageError.not_yet_adopted:type_name -> agentrepl.v1.GetFeedPageNotYetAdopted
-	9,  // 10: agentrepl.v1.GetFeedPageError.no_walk_standing:type_name -> agentrepl.v1.GetFeedPageNoWalkStanding
-	10, // 11: agentrepl.v1.GetFeedPageError.feed_undecodable:type_name -> agentrepl.v1.GetFeedPageFeedUndecodable
-	11, // 12: agentrepl.v1.GetFeedPageError.feed_not_in_workspace:type_name -> agentrepl.v1.GetFeedPageFeedNotInWorkspace
-	13, // [13:13] is the sub-list for method output_type
-	13, // [13:13] is the sub-list for method input_type
-	13, // [13:13] is the sub-list for extension type_name
-	13, // [13:13] is the sub-list for extension extendee
-	0,  // [0:13] is the sub-list for field type_name
+	14, // 4: agentrepl.v1.GetFeedPageNext.walk:type_name -> frontend.v1.FeedWalkId
+	15, // 5: agentrepl.v1.GetFeedPageResponse.success:type_name -> frontend.v1.FeedPage
+	4,  // 6: agentrepl.v1.GetFeedPageResponse.error:type_name -> agentrepl.v1.GetFeedPageError
+	5,  // 7: agentrepl.v1.GetFeedPageError.unknown_workspace:type_name -> agentrepl.v1.GetFeedPageUnknownWorkspace
+	6,  // 8: agentrepl.v1.GetFeedPageError.workspace_ref_mismatch:type_name -> agentrepl.v1.GetFeedPageWorkspaceRefMismatch
+	7,  // 9: agentrepl.v1.GetFeedPageError.transferring_away:type_name -> agentrepl.v1.GetFeedPageTransferringAway
+	8,  // 10: agentrepl.v1.GetFeedPageError.not_yet_adopted:type_name -> agentrepl.v1.GetFeedPageNotYetAdopted
+	9,  // 11: agentrepl.v1.GetFeedPageError.no_walk_standing:type_name -> agentrepl.v1.GetFeedPageNoWalkStanding
+	10, // 12: agentrepl.v1.GetFeedPageError.feed_undecodable:type_name -> agentrepl.v1.GetFeedPageFeedUndecodable
+	11, // 13: agentrepl.v1.GetFeedPageError.feed_not_in_workspace:type_name -> agentrepl.v1.GetFeedPageFeedNotInWorkspace
+	14, // [14:14] is the sub-list for method output_type
+	14, // [14:14] is the sub-list for method input_type
+	14, // [14:14] is the sub-list for extension type_name
+	14, // [14:14] is the sub-list for extension extendee
+	0,  // [0:14] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_get_feed_page_proto_init() }

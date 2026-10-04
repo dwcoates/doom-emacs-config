@@ -28,6 +28,11 @@ message LoadFeedThroughRequest {
   // The row to bring into the loaded pages: the root-feed row the selected
   // footer item names, echoed exactly as the daemon served it.
   frontend.v1.FeedId target = 2;
+  // The walk to advance: the reader's current walk (the `has_more.walk` of the
+  // last page it holds), so a later `next` continues below what this streamed.
+  // UNSET begins a new walk at the newest page; every page this streams names
+  // the walk on its `has_more`.
+  optional frontend.v1.FeedWalkId walk = 3;
 }
 
 // One frame of the walk. THE ARM IS THE FRAME. Zero or more `page` frames,

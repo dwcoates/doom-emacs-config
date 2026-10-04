@@ -2,11 +2,14 @@
 // feed. FEED section. The first page of a feed is OpenFeed's answer; this
 // verb walks the pages beyond it into the past.
 //
-// NO CURSOR EXISTS ON THE WIRE. The client speaks only "first" and "next";
-// the DAEMON holds each feed's walk position (one webview per workspace, so
-// one reader per feed). `first` resets the walk to the newest page; `next`
-// continues older from where the walk stands, and a `next` with no walk
-// standing is a refusal, not an empty page.
+// THE WALK IS NAMED, ITS POSITION IS THE DAEMON'S. Every opening (OpenFeed,
+// GetFeedPage `first`) mints a walk and answers its identity on the page's
+// `has_more`; `next` echoes that identity and continues older from where the
+// walk stands. A `next` naming a walk the daemon does not hold is a refusal,
+// not an empty page. The walk was once keyed by the CONNECTION, but a webview
+// spreads its requests over several connections, so an `older` click often
+// arrived on a connection with no walk and was refused (owner's report,
+// 2026-10-03).
 //
 // A PAGE IS THE STORE'S PAGE (50 entries, the one size for the whole stack),
 // drawn as however many rows those entries make. The daemon holds only the
@@ -38,7 +41,11 @@ message GetFeedPageRequest {
   }
 }
 message GetFeedPageFirst {}
-message GetFeedPageNext {}
+message GetFeedPageNext {
+  // The walk to continue: the `has_more.walk` of the page it last served.
+  // REQUIRED; unset or unknown is `no_walk_standing`.
+  frontend.v1.FeedWalkId walk = 1;
+}
 
 // THE ARM IS THE OUTCOME. Two error layers exist ON PURPOSE: this response's
 // error = the request could not be served (unknown workspace or container, a
@@ -65,7 +72,8 @@ message GetFeedPageError {
     GetFeedPageTransferringAway transferring_away = 3;
     // A joining daemon has not finished adopting this workspace yet.
     GetFeedPageNotYetAdopted not_yet_adopted = 4;
-    // A next page was asked for with no walk standing.
+    // A next page named a walk the daemon does not hold (never minted, or
+    // dropped as one of the feed's least recently used walks).
     GetFeedPageNoWalkStanding no_walk_standing = 5;
     // The FeedId does not decode.
     GetFeedPageFeedUndecodable feed_undecodable = 6;
