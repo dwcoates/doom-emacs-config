@@ -2,11 +2,14 @@
 // feed. FEED section. The first page of a feed is OpenFeed's answer; this
 // verb walks the pages beyond it into the past.
 //
-// NO CURSOR EXISTS ON THE WIRE. The client speaks only "first" and "next";
-// the DAEMON holds each feed's walk position (one webview per workspace, so
-// one reader per feed). `first` resets the walk to the newest page; `next`
-// continues older from where the walk stands, and a `next` with no walk
-// standing is a refusal, not an empty page.
+// THE WALK IS NAMED, ITS POSITION IS THE DAEMON'S. Every opening (OpenFeed,
+// GetFeedPage `first`) mints a walk and answers its identity on the page's
+// `has_more`; `next` echoes that identity and continues older from where the
+// walk stands. A `next` naming a walk the daemon does not hold is a refusal,
+// not an empty page. The walk was once keyed by the CONNECTION, but a webview
+// spreads its requests over several connections, so an `older` click often
+// arrived on a connection with no walk and was refused (owner's report,
+// 2026-10-03).
 //
 // A PAGE IS THE STORE'S PAGE (50 entries, the one size for the whole stack),
 // drawn as however many rows those entries make. The daemon holds only the
@@ -23,7 +26,7 @@ import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
 import type { WorkspaceRef } from "../../workspace/v1/workspace_pb";
 import { file_workspace_v1_workspace } from "../../workspace/v1/workspace_pb";
-import type { FeedId, FeedPage } from "../../frontend/v1/feed_pb";
+import type { FeedId, FeedPage, FeedWalkId } from "../../frontend/v1/feed_pb";
 import { file_frontend_v1_feed } from "../../frontend/v1/feed_pb";
 import type { Message } from "@bufbuild/protobuf";
 
@@ -31,7 +34,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_get_feed_page.proto.
  */
 export const file_agentrepl_v1_endpoint_get_feed_page: GenFile = /*@__PURE__*/
-  fileDesc("CilhZ2VudHJlcGwvdjEvZW5kcG9pbnRfZ2V0X2ZlZWRfcGFnZS5wcm90bxIMYWdlbnRyZXBsLnYxItwBChJHZXRGZWVkUGFnZVJlcXVlc3QSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhImCgRmZWVkGAIgASgLMhMuZnJvbnRlbmQudjEuRmVlZElkSAGIAQESLwoFZmlyc3QYAyABKAsyHi5hZ2VudHJlcGwudjEuR2V0RmVlZFBhZ2VGaXJzdEgAEi0KBG5leHQYBCABKAsyHS5hZ2VudHJlcGwudjEuR2V0RmVlZFBhZ2VOZXh0SABCBgoEcGFnZUIHCgVfZmVlZCISChBHZXRGZWVkUGFnZUZpcnN0IhEKD0dldEZlZWRQYWdlTmV4dCJ6ChNHZXRGZWVkUGFnZVJlc3BvbnNlEigKB3N1Y2Nlc3MYASABKAsyFS5mcm9udGVuZC52MS5GZWVkUGFnZUgAEi8KBWVycm9yGAIgASgLMh4uYWdlbnRyZXBsLnYxLkdldEZlZWRQYWdlRXJyb3JIAEIICgZyZXN1bHQimAQKEEdldEZlZWRQYWdlRXJyb3ISRgoRdW5rbm93bl93b3Jrc3BhY2UYASABKAsyKS5hZ2VudHJlcGwudjEuR2V0RmVlZFBhZ2VVbmtub3duV29ya3NwYWNlSAASTwoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgCIAEoCzItLmFnZW50cmVwbC52MS5HZXRGZWVkUGFnZVdvcmtzcGFjZVJlZk1pc21hdGNoSAASRgoRdHJhbnNmZXJyaW5nX2F3YXkYAyABKAsyKS5hZ2VudHJlcGwudjEuR2V0RmVlZFBhZ2VUcmFuc2ZlcnJpbmdBd2F5SAASQQoPbm90X3lldF9hZG9wdGVkGAQgASgLMiYuYWdlbnRyZXBsLnYxLkdldEZlZWRQYWdlTm90WWV0QWRvcHRlZEgAEkMKEG5vX3dhbGtfc3RhbmRpbmcYBSABKAsyJy5hZ2VudHJlcGwudjEuR2V0RmVlZFBhZ2VOb1dhbGtTdGFuZGluZ0gAEkQKEGZlZWRfdW5kZWNvZGFibGUYBiABKAsyKC5hZ2VudHJlcGwudjEuR2V0RmVlZFBhZ2VGZWVkVW5kZWNvZGFibGVIABJMChVmZWVkX25vdF9pbl93b3Jrc3BhY2UYByABKAsyKy5hZ2VudHJlcGwudjEuR2V0RmVlZFBhZ2VGZWVkTm90SW5Xb3Jrc3BhY2VIAEIHCgVjYXVzZSIdChtHZXRGZWVkUGFnZVVua25vd25Xb3Jrc3BhY2UiNwofR2V0RmVlZFBhZ2VXb3Jrc3BhY2VSZWZNaXNtYXRjaBIUCgxyZWdpc3RyeV9kaXIYASABKAkiLgobR2V0RmVlZFBhZ2VUcmFuc2ZlcnJpbmdBd2F5Eg8KB2FkZHJlc3MYASABKAkiGgoYR2V0RmVlZFBhZ2VOb3RZZXRBZG9wdGVkIhsKGUdldEZlZWRQYWdlTm9XYWxrU3RhbmRpbmciHAoaR2V0RmVlZFBhZ2VGZWVkVW5kZWNvZGFibGUiHwodR2V0RmVlZFBhZ2VGZWVkTm90SW5Xb3Jrc3BhY2VCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_workspace_v1_workspace, file_frontend_v1_feed]);
+  fileDesc("CilhZ2VudHJlcGwvdjEvZW5kcG9pbnRfZ2V0X2ZlZWRfcGFnZS5wcm90bxIMYWdlbnRyZXBsLnYxItwBChJHZXRGZWVkUGFnZVJlcXVlc3QSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhImCgRmZWVkGAIgASgLMhMuZnJvbnRlbmQudjEuRmVlZElkSAGIAQESLwoFZmlyc3QYAyABKAsyHi5hZ2VudHJlcGwudjEuR2V0RmVlZFBhZ2VGaXJzdEgAEi0KBG5leHQYBCABKAsyHS5hZ2VudHJlcGwudjEuR2V0RmVlZFBhZ2VOZXh0SABCBgoEcGFnZUIHCgVfZmVlZCISChBHZXRGZWVkUGFnZUZpcnN0IjgKD0dldEZlZWRQYWdlTmV4dBIlCgR3YWxrGAEgASgLMhcuZnJvbnRlbmQudjEuRmVlZFdhbGtJZCJ6ChNHZXRGZWVkUGFnZVJlc3BvbnNlEigKB3N1Y2Nlc3MYASABKAsyFS5mcm9udGVuZC52MS5GZWVkUGFnZUgAEi8KBWVycm9yGAIgASgLMh4uYWdlbnRyZXBsLnYxLkdldEZlZWRQYWdlRXJyb3JIAEIICgZyZXN1bHQimAQKEEdldEZlZWRQYWdlRXJyb3ISRgoRdW5rbm93bl93b3Jrc3BhY2UYASABKAsyKS5hZ2VudHJlcGwudjEuR2V0RmVlZFBhZ2VVbmtub3duV29ya3NwYWNlSAASTwoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgCIAEoCzItLmFnZW50cmVwbC52MS5HZXRGZWVkUGFnZVdvcmtzcGFjZVJlZk1pc21hdGNoSAASRgoRdHJhbnNmZXJyaW5nX2F3YXkYAyABKAsyKS5hZ2VudHJlcGwudjEuR2V0RmVlZFBhZ2VUcmFuc2ZlcnJpbmdBd2F5SAASQQoPbm90X3lldF9hZG9wdGVkGAQgASgLMiYuYWdlbnRyZXBsLnYxLkdldEZlZWRQYWdlTm90WWV0QWRvcHRlZEgAEkMKEG5vX3dhbGtfc3RhbmRpbmcYBSABKAsyJy5hZ2VudHJlcGwudjEuR2V0RmVlZFBhZ2VOb1dhbGtTdGFuZGluZ0gAEkQKEGZlZWRfdW5kZWNvZGFibGUYBiABKAsyKC5hZ2VudHJlcGwudjEuR2V0RmVlZFBhZ2VGZWVkVW5kZWNvZGFibGVIABJMChVmZWVkX25vdF9pbl93b3Jrc3BhY2UYByABKAsyKy5hZ2VudHJlcGwudjEuR2V0RmVlZFBhZ2VGZWVkTm90SW5Xb3Jrc3BhY2VIAEIHCgVjYXVzZSIdChtHZXRGZWVkUGFnZVVua25vd25Xb3Jrc3BhY2UiNwofR2V0RmVlZFBhZ2VXb3Jrc3BhY2VSZWZNaXNtYXRjaBIUCgxyZWdpc3RyeV9kaXIYASABKAkiLgobR2V0RmVlZFBhZ2VUcmFuc2ZlcnJpbmdBd2F5Eg8KB2FkZHJlc3MYASABKAkiGgoYR2V0RmVlZFBhZ2VOb3RZZXRBZG9wdGVkIhsKGUdldEZlZWRQYWdlTm9XYWxrU3RhbmRpbmciHAoaR2V0RmVlZFBhZ2VGZWVkVW5kZWNvZGFibGUiHwodR2V0RmVlZFBhZ2VGZWVkTm90SW5Xb3Jrc3BhY2VCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_workspace_v1_workspace, file_frontend_v1_feed]);
 
 /**
  * @generated from message agentrepl.v1.GetFeedPageRequest
@@ -98,6 +101,13 @@ export const GetFeedPageFirstSchema: GenMessage<GetFeedPageFirst> = /*@__PURE__*
  * @generated from message agentrepl.v1.GetFeedPageNext
  */
 export type GetFeedPageNext = Message<"agentrepl.v1.GetFeedPageNext"> & {
+  /**
+   * The walk to continue: the `has_more.walk` of the page it last served.
+   * REQUIRED; unset or unknown is `no_walk_standing`.
+   *
+   * @generated from field: frontend.v1.FeedWalkId walk = 1;
+   */
+  walk?: FeedWalkId | undefined;
 };
 
 /**
@@ -188,7 +198,8 @@ export type GetFeedPageError = Message<"agentrepl.v1.GetFeedPageError"> & {
     case: "notYetAdopted";
   } | {
     /**
-     * A next page was asked for with no walk standing.
+     * A next page named a walk the daemon does not hold (never minted, or
+     * dropped as one of the feed's least recently used walks).
      *
      * @generated from field: agentrepl.v1.GetFeedPageNoWalkStanding no_walk_standing = 5;
      */
