@@ -332,12 +332,17 @@ describe("renderExternalLink: what it renders", () => {
     });
   }
 
-  it("warns when it refuses to link a destination", () => {
+  it("records a refused destination at INFO: the agent's content, not a defect", () => {
     const lines: Array<[string, string]> = [];
     setLogger(new ForwardingLogger(async () => "accepted", (level, line) => lines.push([level, line])));
     const { ctx } = harness();
     renderExternalLink(ctx, { text: "x", url: "mailto:a@b.test" });
-    expect(lines.some(([level, line]) => level === "warn" && line.includes("link.unlinkable-scheme"))).toBe(true);
+    expect(lines.filter(([, line]) => line.includes("link.unlinkable-scheme")).map(([level]) => level)).toEqual(["info"]);
+  });
+
+  it("renders an empty destination as plain text", () => {
+    const { ctx } = harness();
+    expect(renderExternalLink(ctx, { text: "x", url: "" }).tagName).toBe("SPAN");
   });
 });
 
