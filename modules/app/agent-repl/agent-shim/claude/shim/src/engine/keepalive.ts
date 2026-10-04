@@ -122,6 +122,11 @@ export interface RecordTurn {
   readonly turnId: string;
   /** True when the shim opened this turn for its own keep-alive. */
   readonly keepalive: boolean;
+  /**
+   * True when the VENDOR started this turn on its own (an adopted turn): a
+   * replayed task notification, a background hand-back. Never an anchor.
+   */
+  readonly adopted?: boolean;
 }
 
 /**
@@ -152,6 +157,13 @@ export class KeepaliveRewind {
     // is exactly the material the rewind exists to discard, and a record with
     // no open turn belongs to no turn this shim asked for.
     if (turn === undefined || turn.keepalive) return;
+    // Only a turn the SHIM started. A turn the vendor started on its own is
+    // not the user's conversation's last word: anchoring on one made the next
+    // rewind resume at a replayed task notification, which the vendor ran
+    // again as a fresh turn, which became the next anchor -- a loop that
+    // filled a workspace's newest page with empty turns every keep-alive
+    // (ship-gns, from 2026-10-02 01:45).
+    if (turn.adopted === true) return;
     const uuid = (message as { uuid?: unknown }).uuid;
     if (typeof uuid !== "string" || uuid === "") return;
     this.anchor = { uuid, turnId: turn.turnId };
@@ -247,6 +259,12 @@ interface PendingKeepalive {
   readonly turnId: string;
 }
 
+/** True when MESSAGE is the vendor's notification that a task was stopped. */
+function isStoppedTaskNotification(message: SdkMessage): boolean {
+  if (message.type !== "system" || message.subtype !== "task_notification") return false;
+  return (message as { status?: unknown }).status === "stopped";
+}
+
 /** The attribution of every message the keep-alive did not produce. */
 const NOT_KEEPALIVE: KeepaliveAttribution = { keepalive: false, endsKeepalive: false };
 
@@ -307,6 +325,15 @@ const NOT_KEEPALIVE: KeepaliveAttribution = { keepalive: false, endsKeepalive: f
  */
 export class KeepaliveScope {
   private send: PendingKeepalive | undefined;
+  /**
+   * Set when a `stopped` task notification arrives while a keep-alive is
+   * outstanding, until the next result. A keep-alive's rewind replaces the
+   * vendor's query, which stops the old query's background work, and the
+   * vendor reports each stop as a notification it then answers in a turn of
+   * its own. That turn is the keep-alive's consequence; a genuine notification
+   * (a completion, a hand-back) is not a stop and is served as ever.
+   */
+  private stoppedByRewind = false;
   /** Whether the vendor turn now running is the pending keep-alive's own, as the ledger stated it. */
   private running = false;
   /**
@@ -383,6 +410,13 @@ export class KeepaliveScope {
     const held = this.send;
     const turn = verdict.turn;
     const ownTurn = held !== undefined && turn.kind === "send" && turn.send.uuid === held.uuid;
+    // A TURN THE VENDOR STARTS TO ANSWER THE STOP A KEEP-ALIVE'S REWIND CAUSED
+    // IS THE KEEP-ALIVE'S (see `stoppedByRewind`): tagged, so nothing of it is
+    // stored or adopted, and the next rewind discards it from the vendor's
+    // context like the keep-alive's own answer. Any other turn the vendor
+    // starts beside a keep-alive is real work and served.
+    if (held !== undefined && isStoppedTaskNotification(message)) this.stoppedByRewind = true;
+    const spanned = held !== undefined && turn.kind === "vendor" && this.stoppedByRewind;
     if (ownTurn !== this.running && !verdict.ended) {
       LOGGER.debug(
         { keepalive_pending: held !== undefined, attributed: ownTurn ? "keepalive" : "other" },
@@ -392,12 +426,20 @@ export class KeepaliveScope {
     if (message.type !== "result") {
       this.running = ownTurn;
       const work = workOf(message);
-      const keepalive = work === undefined ? ownTurn : this.ownsWork(work);
+      const keepalive = work === undefined ? ownTurn || spanned : this.ownsWork(work) || spanned;
       if (keepalive) this.noteSpawns(message);
       return keepalive ? { keepalive: true, endsKeepalive: false } : NOT_KEEPALIVE;
     }
     // A RESULT ENDS THE VENDOR TURN, whoever's it was.
     this.running = false;
+    this.stoppedByRewind = false;
+    if (!ownTurn && spanned) {
+      LOGGER.info(
+        { keepalive_turn: held.turnId },
+        "a vendor turn the keep-alive's rewind set off ended; it is the keep-alive's, never stored, and the keep-alive's own turn stays open",
+      );
+      return { keepalive: true, endsKeepalive: false };
+    }
     if (!ownTurn) {
       if (held !== undefined) {
         LOGGER.info(

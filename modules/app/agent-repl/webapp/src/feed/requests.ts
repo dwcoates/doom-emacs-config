@@ -16,7 +16,7 @@
  */
 import { create } from "@bufbuild/protobuf";
 import type { WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
-import type { FeedId } from "../../../proto/gen/ts/frontend/v1/feed_pb";
+import type { FeedId, FeedWalkId } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import {
   OpenFeedRequestSchema,
   type OpenFeedRequest,
@@ -26,6 +26,8 @@ import {
   type WatchFeedRequest,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_feed_pb";
 import {
+  GetFeedPageFirstSchema,
+  GetFeedPageNextSchema,
   GetFeedPageRequestSchema,
   type GetFeedPageRequest,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_get_feed_page_pb";
@@ -80,15 +82,16 @@ export function buildGetFeedPageRequest(
   workspace: WorkspaceRef,
   feed: FeedId | undefined,
   ask: FeedPageAsk,
+  walk?: FeedWalkId,
 ): GetFeedPageRequest {
-  const page =
+  // A `next` NAMES ITS WALK (the `has_more.walk` of the page it continues), so
+  // the daemon finds it whichever connection carries the request.
+  const request = create(GetFeedPageRequestSchema, feed === undefined ? { workspace } : { workspace, feed });
+  request.page =
     ask === "first"
-      ? ({ case: "first", value: {} } as const)
-      : ({ case: "next", value: {} } as const);
-  return create(
-    GetFeedPageRequestSchema,
-    feed === undefined ? { workspace, page } : { workspace, feed, page },
-  );
+      ? { case: "first", value: create(GetFeedPageFirstSchema) }
+      : { case: "next", value: create(GetFeedPageNextSchema, walk === undefined ? {} : { walk }) };
+  return request;
 }
 
 /**
@@ -115,6 +118,11 @@ export function buildInterruptDetachedRequest(
 export function buildLoadFeedThroughRequest(
   workspace: WorkspaceRef,
   target: FeedId,
+  walk?: FeedWalkId,
 ): LoadFeedThroughRequest {
-  return create(LoadFeedThroughRequestSchema, { workspace, target });
+  // The reader's own walk, advanced; unnamed, the daemon begins one at the top.
+  return create(
+    LoadFeedThroughRequestSchema,
+    walk === undefined ? { workspace, target } : { workspace, target, walk },
+  );
 }

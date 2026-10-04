@@ -86,7 +86,7 @@ func (r *resolver) beginWalkAtTop(ws ids.WorkspaceID, feed feedid.Feed, reader R
 	if w, ok := s.readers[reader]; ok && w.standing && w.feedKey == f.key {
 		return
 	}
-	s.readers[reader] = &walk{feedKey: f.key, standing: true, top: true}
+	r.storeWalk(s, reader, &walk{feedKey: f.key, standing: true, top: true})
 	r.logger(ws).Info("daemon.feed.load_through_walk_begun",
 		"a walk to a target row began with no walk standing; it starts at the newest page",
 		dlog.Context{"feed": f.key, "reader": string(reader)})

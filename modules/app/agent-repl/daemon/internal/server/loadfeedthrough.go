@@ -60,12 +60,17 @@ func (s *server) LoadFeedThrough(
 		}))
 	}
 
-	reader := readerFor(req.Peer().Addr, ws, nil)
+	// THE READER'S OWN WALK, advanced; an unnamed one begins at the newest page.
+	walk := req.Msg.GetWalk().GetValue()
+	if walk == "" {
+		walk = mintWalk()
+	}
+	reader := readerFor(walk, ws, nil)
 	pages := 0
 	reached, err := s.deps.Feed.LoadThrough(ctx, ws, reader, target, func(page *frontendv1.FeedPage) error {
 		pages++
 		return out.Send(&agentreplv1.LoadFeedThroughResponse{
-			Frame: &agentreplv1.LoadFeedThroughResponse_Page{Page: page},
+			Frame: &agentreplv1.LoadFeedThroughResponse_Page{Page: stampWalk(page, walk)},
 		})
 	})
 	switch {
