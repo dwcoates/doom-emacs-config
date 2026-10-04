@@ -77,15 +77,18 @@ export interface EditorLinkSpec {
  * A link to somewhere outside this page.
  *
  * ONLY http(s) IS LINKABLE. Anything else — a `mailto:`, a bare path, a
- * `javascript:` — renders as PLAIN TEXT with a warning rather than as a link
- * that would do nothing when clicked or, worse, something unintended. The
+ * `javascript:`, an empty destination — renders as PLAIN TEXT rather than as
+ * a link that would do nothing when clicked or, worse, something unintended.
+ * It is recorded at INFO: the destination is what the agent wrote, content
+ * rather than a defect of this page (2026-10-03: an empty `[text]()` in a
+ * replayed response raised a WARN). The
  * `href` is still set on the linkable case so the destination shows in a
  * hover and a copy-link gesture works; the click never follows it.
  */
 export function renderExternalLink(ctx: AppContext, spec: ExternalLinkSpec): HTMLElement {
   const label = spec.text === "" ? spec.url : spec.text;
   if (!LINKABLE_SCHEME.test(spec.url)) {
-    log.warn(`refusing to link a non-http(s) destination; drawing it as text`, {
+    log.info(`refusing to link a non-http(s) destination; drawing it as text`, {
       operation: "link.unlinkable-scheme",
       context: { url: spec.url },
     });
