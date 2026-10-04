@@ -962,7 +962,10 @@ harvest fails a run on every warning."
          (all (and (fboundp 'agent-repl-roster-tab-order) (agent-repl-roster-tab-order)))
          (shown (agent-repl--ws-current-name))
          (current (or (agent-repl-host-pending-selection) shown))
-         (log-ws (agent-repl--ws-log-name shown))
+         ;; Standing on a placeholder (a startup before its first tab
+         ;; opened) names no workspace sink: the record takes an explicit one.
+         (log-ws (or (agent-repl--ws-log-name shown)
+                     '(:agent-repl-context "a cycle from a placeholder names no workspace")))
          (target (agent-repl--cycle-target all names current n)))
     (if (null target)
         (agent-repl--info log-ws "elisp.commands.cycle-no-position n=%d tabs=%d from=%s"

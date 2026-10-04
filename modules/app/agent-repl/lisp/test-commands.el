@@ -1268,6 +1268,24 @@ order, which is why commands.el still defines no tab ordering of its own."
                  agent-repl-paste-clipboard))
     (should-not (fboundp sym))))
 
+
+
+(ert-deftest agent-repl-test-commands-a-cycle-from-a-placeholder-names-a-scope ()
+  "A cycle with no position, from a placeholder, records under an explicit scope."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((scopes nil))
+      (cl-letf (((symbol-function 'agent-repl--drawn-tab-names) (lambda () nil))
+                ((symbol-function 'agent-repl-roster-tab-order) (lambda () nil))
+                ((symbol-function 'agent-repl--ws-current-name) (lambda () "main"))
+                ((symbol-function 'agent-repl-host-pending-selection) (lambda () nil))
+                ((symbol-function 'agent-repl--ws-log-name) (lambda (_) nil))
+                ((symbol-function 'agent-repl--info) (lambda (scope &rest _) (push scope scopes))))
+        ;; Act
+        (agent-repl--workspace-cycle 1)
+        ;; Assert
+        (should (equal scopes '((:agent-repl-context "a cycle from a placeholder names no workspace"))))))))
+
 (provide 'test-commands)
 
 ;;; test-commands.el ends here
