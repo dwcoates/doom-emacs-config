@@ -2019,6 +2019,29 @@ describe("a turn the vendor started on its own", () => {
     expect(row?.keepalive).toBe(false);
   });
 
+  it("never adopts the turn the vendor runs to answer a stop the keep-alive's rewind caused", async () => {
+    // Arrange: a keep-alive outstanding, then the old query's background
+    // shell reported stopped (the ship-gns loop, 2026-10-02).
+    const h = harness();
+    await started(h);
+    h.scheduler.fire(0);
+    await new Promise((resolve) => setImmediate(resolve));
+    await h.engine.onSdkMessage({
+      type: "system",
+      subtype: "task_notification",
+      task_id: "bujbjom65",
+      status: "stopped",
+      uuid: "notif-stop",
+      session_id: "s",
+    } as never);
+
+    // Act
+    await h.engine.onSdkMessage(assistantMessage("stop-reply"));
+
+    // Assert
+    expect(adoptions(h)).toHaveLength(0);
+  });
+
   it("names the turn adopted beside the keep-alive to the fold for that turn's terminal", async () => {
     // Arrange
     const h = harness();
