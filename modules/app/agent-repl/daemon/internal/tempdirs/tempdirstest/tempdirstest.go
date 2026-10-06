@@ -3,8 +3,9 @@
 //
 // A package whose tests register directories in a real registry runs its tests
 // through Main: TMPDIR is pointed at a short directory made under /tmp, so
-// every t.TempDir and os.MkdirTemp("") of the run lands inside it, and Guard answers the production roots exempting that directory
-// and nothing else. Every other temporary folder is still refused.
+// every t.TempDir and os.MkdirTemp("") of the run lands inside it, and Guard
+// answers the production roots exempting that directory and nothing else.
+// Every other temporary folder is still refused.
 //
 // It is a test package: nothing the daemon links imports it, so no running
 // daemon can reach the exemption through it.
