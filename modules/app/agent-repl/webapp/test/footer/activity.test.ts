@@ -19,7 +19,7 @@ import { footerStatusActivity } from "../../src/footer/strip.js";
 import ACTIVITY_SOURCE from "../../src/footer/activity.ts?raw";
 import { cascadedValue, installStylesheet } from "../stylesheet.js";
 import { FOOTER_STATUS_CASES, activityDatumClass } from "../../src/footer/tones.js";
-import { pressurePercentColor } from "../../src/pressure-color.js";
+import { coldGatePercentColor, pressurePercentColor } from "../../src/pressure-color.js";
 
 /**
  * Every `FooterAllowance.status` arm, read off the generated schema.
@@ -464,7 +464,12 @@ describe("the salient kinds", () => {
       { detail: "requires action" },
       "requires action",
     ],
-    ["waiting", "coldGateCost", { text: "182k to re-read" }, "182k to re-read"],
+    [
+      "waiting",
+      "coldGateCost",
+      { text: "cold at 182k tokens", lead: "cold at ", figure: { text: "182k", windowFill: 0.2 }, tail: " tokens" },
+      "cold at 182k tokens",
+    ],
     [
       "waiting",
       "interrupting",
@@ -1555,5 +1560,42 @@ describe("orderedAllowances", () => {
       "weekly",
       "overage",
     ]);
+  });
+});
+
+describe("the cold gate's cost line", () => {
+  const cost = {
+    text: "the conversation is cold at 409,051 context tokens",
+    lead: "the conversation is cold at ",
+    figure: { text: "409,051", windowFill: 0.41 },
+    tail: " context tokens",
+  };
+
+  /** The color PERCENT paints on the cold-gate gradient, as the DOM normalizes it. */
+  function painted(percent: number): string {
+    const probe = document.createElement("span");
+    probe.style.color = coldGatePercentColor(percent);
+    return probe.style.color;
+  }
+
+  it("draws the figure in its own span between the lead and the tail", () => {
+    // Act
+    const cell = salientCell("coldGateCost", cost, "waiting");
+    // Assert
+    expect(cell.querySelector(".footer-cold-gate-figure")?.textContent).toBe("409,051");
+  });
+
+  it("colors the figure by its window fill on the cold-gate gradient", () => {
+    // Act
+    const cell = salientCell("coldGateCost", cost, "waiting");
+    // Assert
+    expect(cell.querySelector<HTMLElement>(".footer-cold-gate-figure")?.style.color).toBe(painted(41));
+  });
+
+  it("refuses parts that do not make the composed line", () => {
+    // Arrange
+    const broken = { ...cost, tail: " tokens" };
+    // Act / Assert
+    expect(() => salientCell("coldGateCost", broken, "waiting")).toThrow(MalformedView);
   });
 });
