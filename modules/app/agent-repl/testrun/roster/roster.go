@@ -84,8 +84,6 @@ var Suites = []Suite{
 	{Name: "go-deps-harness", Kind: Script, Path: "bin/test-check-go-deps.sh", Harness: true},
 	{Name: "realtest-harness", Kind: Script, Path: "bin/test-realtest.sh", Harness: true},
 	{Name: "e2e-coverage-harness", Kind: Script, Path: "bin/test-e2e-coverage.sh", Harness: true},
-	// Its load-gate case waits out e2e-repeat.sh's own 5s poll on a real
-	// clock, which is most of its ~55s.
 	{Name: "e2e-repeat-harness", Kind: Script, Path: "bin/test-e2e-repeat.sh", Harness: true},
 	{Name: "doctor-harness", Kind: Script, Path: "scripts/test-agent-shim-doctor.sh"},
 	{Name: "bounce-harness", Kind: Script, Path: "scripts/test-bounce-agent-repl-forcefully.sh"},
