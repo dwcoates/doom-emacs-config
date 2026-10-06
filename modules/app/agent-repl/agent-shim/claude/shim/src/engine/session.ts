@@ -2085,9 +2085,11 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // A keep-alive-tagged record of a VENDOR turn is one the keep-alive's own
     // rewind set off: keep-alive material, though its send did not start it.
     if (attribution.keepalive) {
-      return open?.keepalive === true
-        ? { turnId: open.id.value, keepalive: true, consequence: running.kind === "vendor" }
-        : undefined;
+      // A tagged VENDOR turn is a rewind's consequence, whichever send the
+      // rewind was performed for: the keep-alive's turn when one is open, else
+      // the real turn waiting on it.
+      if (running.kind === "vendor") return { turnId: open?.id.value ?? "", keepalive: true, consequence: true };
+      return open?.keepalive === true ? { turnId: open.id.value, keepalive: true } : undefined;
     }
     const turn = turnFor(false, running);
     return turn === undefined ? undefined : { turnId: turn.value, keepalive: false, adopted: running.kind === "vendor" };
@@ -4012,6 +4014,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // A NEW QUERY RUNS NO VENDOR TURN YET: whatever the last one was midway
     // through ended with it.
     keepaliveScope.queryBound();
+    // BEFORE THE LOOP READS ANYTHING: the stop a rewind causes may be the new
+    // query's first word.
+    if (options.keepsAnchor === true) keepaliveScope.rewound();
     beforeLoop?.(created);
     loop = runLoop(created);
     return created;

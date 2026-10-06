@@ -511,6 +511,16 @@ export class KeepaliveScope {
    * (a completion, a hand-back) is not a stop and is served as ever.
    */
   private stoppedByRewind = false;
+  /**
+   * Set when a keep-alive REWIND binds a new query, until the vendor starts a
+   * send's turn on it. The rewind stops the old query's background work
+   * whatever send it was performed for -- the next keep-alive, or a real
+   * prompt -- and the vendor answers that stop AHEAD of the send, so a stop
+   * in this window is the rewind's consequence even with no keep-alive
+   * outstanding (the ship-gns replay: a real prompt's rewind otherwise stored
+   * and served the stop's answer as a vendor-started turn).
+   */
+  private afterRewind = false;
   /** Whether the vendor turn now running is the pending keep-alive's own, as the ledger stated it. */
   private running = false;
   /**
@@ -565,6 +575,12 @@ export class KeepaliveScope {
     this.running = false;
   }
 
+  /** The query just bound is a keep-alive rewind's: watch for the stop it causes. */
+  rewound(): void {
+    this.afterRewind = true;
+    LOGGER.debug({}, "a keep-alive rewind bound a new query; a stop reported before its send's turn is the rewind's");
+  }
+
   /** Whether the vendor turn now running is the keep-alive's. For callbacks between messages. */
   producing(): boolean {
     return this.running;
@@ -587,13 +603,17 @@ export class KeepaliveScope {
     const held = this.send;
     const turn = verdict.turn;
     const ownTurn = held !== undefined && turn.kind === "send" && turn.send.uuid === held.uuid;
+    // THE SEND THE REWIND WAS PERFORMED FOR HAS BEGUN: whatever the vendor
+    // reports from here was not set off before it.
+    if (turn.kind === "send") this.afterRewind = false;
+    const watching = held !== undefined || this.afterRewind;
     // A TURN THE VENDOR STARTS TO ANSWER THE STOP A KEEP-ALIVE'S REWIND CAUSED
     // IS THE KEEP-ALIVE'S (see `stoppedByRewind`): tagged, so nothing of it is
     // stored or adopted, and the next rewind discards it from the vendor's
     // context like the keep-alive's own answer. Any other turn the vendor
     // starts beside a keep-alive is real work and served.
-    if (held !== undefined && isStoppedTaskNotification(message)) this.stoppedByRewind = true;
-    const spanned = held !== undefined && turn.kind === "vendor" && this.stoppedByRewind;
+    if (watching && isStoppedTaskNotification(message)) this.stoppedByRewind = true;
+    const spanned = watching && turn.kind === "vendor" && this.stoppedByRewind;
     if (ownTurn !== this.running && !verdict.ended) {
       LOGGER.debug(
         { keepalive_pending: held !== undefined, attributed: ownTurn ? "keepalive" : "other" },
@@ -612,7 +632,7 @@ export class KeepaliveScope {
     this.stoppedByRewind = false;
     if (!ownTurn && spanned) {
       LOGGER.info(
-        { keepalive_turn: held.turnId },
+        { keepalive_turn: held?.turnId ?? "", keepalive_pending: held !== undefined },
         "a vendor turn the keep-alive's rewind set off ended; it is the keep-alive's, never stored, and the keep-alive's own turn stays open",
       );
       return { keepalive: true, endsKeepalive: false };

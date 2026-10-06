@@ -663,6 +663,16 @@ class LedgeredScope {
     return this.scope.pendingUuid();
   }
 
+  /** A real send pushed onto the query, as the session registers it. */
+  sent(uuid: string, turnId: string): void {
+    this.ledger.sent({ uuid, turnId, keepalive: false });
+  }
+
+  rewound(): void {
+    this.queryBound();
+    this.scope.rewound();
+  }
+
   producing(): boolean {
     return this.scope.producing();
   }
@@ -964,6 +974,50 @@ describe("the keep-alive turn scope", () => {
     // Arrange: a completed background task, not a stop.
     const scope = pendingScope();
     scope.attribute({ ...other("system", "notif-1", "task_notification"), task_id: "t-1", status: "completed" } as SdkMessage);
+
+    // Act
+    const tagged = scope.attribute(reply());
+
+    // Assert
+    expect(tagged.keepalive).toBe(false);
+  });
+
+  it("tags the turn answering a stop a REAL prompt's rewind caused, with no keep-alive pending", () => {
+    // Arrange: the rewind ran for a real prompt; the stop is reported ahead
+    // of that prompt's own turn (the ship-gns replay).
+    const scope = idleScope();
+    scope.rewound();
+    scope.sent("real-send-1", "turn-1");
+    scope.attribute({ ...other("system", "notif-1", "task_notification"), task_id: "t-1", status: "stopped" } as SdkMessage);
+
+    // Act
+    const tagged = scope.attribute(reply());
+
+    // Assert
+    expect(tagged.keepalive).toBe(true);
+  });
+
+  it("stops watching for the rewind's stop once the send's own turn began", () => {
+    // Arrange
+    const scope = idleScope();
+    scope.rewound();
+    scope.sent("real-send-1", "turn-1");
+    scope.attribute(reply(stampedWith("real-send-1")));
+    scope.attribute(result(stampedWith("real-send-1")));
+    scope.attribute({ ...other("system", "notif-1", "task_notification"), task_id: "t-1", status: "stopped" } as SdkMessage);
+
+    // Act
+    const tagged = scope.attribute(reply());
+
+    // Assert
+    expect(tagged.keepalive).toBe(false);
+  });
+
+  it("serves a stop's answer after a query binding that was no rewind", () => {
+    // Arrange: a user's own stop of a task, on an ordinary query.
+    const scope = idleScope();
+    scope.queryBound();
+    scope.attribute({ ...other("system", "notif-1", "task_notification"), task_id: "t-1", status: "stopped" } as SdkMessage);
 
     // Act
     const tagged = scope.attribute(reply());

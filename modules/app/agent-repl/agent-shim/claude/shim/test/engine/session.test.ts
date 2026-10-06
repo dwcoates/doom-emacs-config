@@ -3622,6 +3622,24 @@ describe("the keep-alive rewind's span invariant", () => {
     ]);
   });
 
+  it("never adopts the turn answering a stop a REAL prompt's rewind caused", async () => {
+    // Arrange: the prompt's rewind replaced the query; the vendor reports the
+    // old query's task stopped ahead of the prompt's own turn.
+    const h = harness();
+    await started(h);
+    await realTurn(h, "turn-0", [assistantMessage("real-uuid")]);
+    await keepaliveTurn(h, []);
+    await realPrompt(h, "turn-1");
+
+    // Act
+    await h.engine.onSdkMessage(notification("notif-1", "stopped"));
+    await h.engine.onSdkMessage(assistantMessage("stop-reply"));
+    await h.engine.onSdkMessage(resultMessage("stop-result"));
+
+    // Assert
+    expect(adoptions(h)).toBe(0);
+  });
+
   it("REFUSES a rewind past a real prompt the vendor never answered, keeping it", async () => {
     // Arrange: turn-1 ended with no reply (an interrupt before any answer),
     // so its prompt record lies past turn-0's anchor.
