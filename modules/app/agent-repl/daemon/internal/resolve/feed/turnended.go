@@ -9,6 +9,7 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/feedid"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/resolve/turnfault"
 )
 
 // THE TURN'S TERMINAL — a row, so history replays how every turn ended and
@@ -381,9 +382,10 @@ func evidenceBesides(lines []turnEvidenceLine, endedOn *conversationv1.ApiReques
 	return texts, dropped
 }
 
-// apiErrorArm maps the vendor's own error taxonomy onto the feed's, and words
-// each arm. THE ARM IS THE CAUSE and the sentence is ours: the client holds no
-// per-arm table.
+// apiErrorArm maps the vendor's own error taxonomy onto the feed's drawn arm,
+// and answers the per-cause sentence, which is turnfault's (the footer's
+// turn-fault line is the same sentence). THE ARM IS THE CAUSE and the sentence
+// is ours: the client holds no per-arm table.
 func apiErrorArm(errored *frontendv1.FeedTurnEndedErrored, failed *conversationv1.ApiRequestFailed) string {
 	switch kind := failed.GetKind().(type) {
 	case *conversationv1.ApiRequestFailed_RateLimited:
@@ -393,7 +395,6 @@ func apiErrorArm(errored *frontendv1.FeedTurnEndedErrored, failed *conversationv
 			arm.RetryAfterMs = &ms
 		}
 		errored.Error = &frontendv1.FeedTurnEndedErrored_RateLimited{RateLimited: arm}
-		return "rate limited by the vendor"
 	case *conversationv1.ApiRequestFailed_Overloaded:
 		arm := &frontendv1.FeedTurnErrorOverloaded{}
 		if kind.Overloaded.RetryAfterMs != nil {
@@ -401,96 +402,68 @@ func apiErrorArm(errored *frontendv1.FeedTurnEndedErrored, failed *conversationv
 			arm.RetryAfterMs = &ms
 		}
 		errored.Error = &frontendv1.FeedTurnEndedErrored_Overloaded{Overloaded: arm}
-		return "the vendor API is overloaded"
 	case *conversationv1.ApiRequestFailed_AuthenticationFailed:
 		errored.Error = &frontendv1.FeedTurnEndedErrored_AuthenticationFailed{
 			AuthenticationFailed: &frontendv1.FeedTurnErrorAuthenticationFailed{},
 		}
-		return "the credential was rejected — sign in again"
 	case *conversationv1.ApiRequestFailed_PermissionDenied:
 		errored.Error = &frontendv1.FeedTurnEndedErrored_PermissionDenied{
 			PermissionDenied: &frontendv1.FeedTurnErrorPermissionDenied{},
 		}
-		return "the credential lacks permission for this request"
 	case *conversationv1.ApiRequestFailed_InvalidRequest:
 		errored.Error = &frontendv1.FeedTurnEndedErrored_InvalidRequest{
 			InvalidRequest: &frontendv1.FeedTurnErrorInvalidRequest{},
 		}
-		return "the vendor refused the request as malformed"
 	case *conversationv1.ApiRequestFailed_RequestTooLarge:
 		errored.Error = &frontendv1.FeedTurnEndedErrored_RequestTooLarge{
 			RequestTooLarge: &frontendv1.FeedTurnErrorRequestTooLarge{},
 		}
-		return "the request exceeded the vendor's size limit"
 	case *conversationv1.ApiRequestFailed_NotFound:
 		errored.Error = &frontendv1.FeedTurnEndedErrored_NotFound{
 			NotFound: &frontendv1.FeedTurnErrorNotFound{},
 		}
-		return "the model or resource does not exist"
 	case *conversationv1.ApiRequestFailed_Internal:
 		errored.Error = &frontendv1.FeedTurnEndedErrored_Internal{
 			Internal: &frontendv1.FeedTurnErrorInternal{},
 		}
-		return "the vendor API hit its own internal error"
 	case *conversationv1.ApiRequestFailed_BillingError:
 		errored.Error = &frontendv1.FeedTurnEndedErrored_BillingError{
 			BillingError: &frontendv1.FeedTurnErrorBillingError{},
 		}
-		return "the account could not be charged — check your billing"
 	case *conversationv1.ApiRequestFailed_OauthOrgNotAllowed:
 		errored.Error = &frontendv1.FeedTurnEndedErrored_OauthOrgNotAllowed{
 			OauthOrgNotAllowed: &frontendv1.FeedTurnErrorOauthOrgNotAllowed{},
 		}
-		return "your organization does not allow this OAuth access"
 	case *conversationv1.ApiRequestFailed_MaxOutputTokens:
 		errored.Error = &frontendv1.FeedTurnEndedErrored_MaxOutputTokens{
 			MaxOutputTokens: &frontendv1.FeedTurnErrorMaxOutputTokens{},
 		}
-		return "the request asked for more output than the model will produce"
 	case *conversationv1.ApiRequestFailed_Unmodeled:
 		errored.Error = &frontendv1.FeedTurnEndedErrored_VendorUnmodeled{
 			VendorUnmodeled: &frontendv1.FeedTurnErrorVendorUnmodeled{Type: kind.Unmodeled.GetType()},
 		}
-		return "the vendor reported an error class we do not model yet"
+	default:
+		errored.Error = &frontendv1.FeedTurnEndedErrored_VendorUnmodeled{
+			VendorUnmodeled: &frontendv1.FeedTurnErrorVendorUnmodeled{Type: "unset"},
+		}
 	}
-	errored.Error = &frontendv1.FeedTurnEndedErrored_VendorUnmodeled{
-		VendorUnmodeled: &frontendv1.FeedTurnErrorVendorUnmodeled{Type: "unset"},
-	}
-	return "the vendor reported a failure with no stated class"
+	return turnfault.OfApiFailure(failed).Sentence
 }
 
-// producerErrorArm respells the PRODUCER's own turn-ending vocabulary. Each
-// arm leads somewhere different, which is why the headline is per-arm: some
-// are waited out, some are the user's to raise, some are a fault to report.
+// producerErrorArm respells the PRODUCER's own turn-ending vocabulary onto the
+// feed's drawn arm, and answers the per-cause sentence, which is turnfault's.
+// Each cause leads somewhere different, which is why the headline is per-cause:
+// some are waited out, some are the user's to raise, some are a fault to report.
 //
 // A PRODUCER TERMINAL WITH NO DRAWN COUNTERPART IS `turn_failed`, never
 // `vendor_unmodeled`: feed.proto confines vendor_unmodeled to "an API error
 // class this schema does not model", while turn_failed carries "every other
-// unclassified abnormal end" with `stop_reason` naming the vendor's own word.
-// The reader still learns which of these happened — from the stop reason.
+// unclassified abnormal end" with `stop_reason` naming the vendor's own word —
+// turnfault's cause word, so the reader still learns which of these happened.
+// A LOST RUN lands there too, with its cause as the stop reason.
 func producerErrorArm(errored *frontendv1.FeedTurnEndedErrored, failure *conversationv1.AgentFailure, refused bool) string {
-	if cause := lostCauseOfAgentFailure(failure); cause != lostNone {
-		// A LOST RUN IS NOT AN UNMODELED API ERROR CLASS: vendor_unmodeled is
-		// confined to those, so the producer's own "lost" vocabulary lands
-		// under turn_failed with the cause as the stop reason.
-		errored.Error = turnFailedArm("lost:" + cause.String())
-		return lostSentence(cause)
-	}
+	words := turnfault.OfAgentFailure(failure, refused)
 	switch failure.GetFailure().(type) {
-	case *conversationv1.AgentFailure_PromptTooLong:
-		// NOT request_too_large: that arm is the vendor's 413, an API status
-		// this producer terminal never carried.
-		errored.Error = turnFailedArm("prompt_too_long")
-		return "the prompt was too long to send — the context must be cut first"
-	case *conversationv1.AgentFailure_BlockingLimit:
-		errored.Error = turnFailedArm("blocking_limit")
-		return "an account-level block stopped the run"
-	case *conversationv1.AgentFailure_RapidRefillBreaker:
-		errored.Error = turnFailedArm("rapid_refill_breaker")
-		return "the account's refill-rate breaker tripped — this is a wait, not a fault"
-	case *conversationv1.AgentFailure_ImageError:
-		errored.Error = turnFailedArm("image_error")
-		return "an image in the request could not be processed"
 	case *conversationv1.AgentFailure_ModelError:
 		// THE REFUSAL'S ONLY WITNESS is the response frame this turn already
 		// drew: AgentModelError is empty, so a refusal and an unclassified
@@ -499,54 +472,29 @@ func producerErrorArm(errored *frontendv1.FeedTurnEndedErrored, failure *convers
 			errored.Error = &frontendv1.FeedTurnEndedErrored_Refusal{
 				Refusal: &frontendv1.FeedTurnErrorRefusal{},
 			}
-			return "the model refused to continue — there is no answer"
+		} else {
+			errored.Error = turnFailedArm(words.Cause)
 		}
-		errored.Error = turnFailedArm("model_error")
-		return "the model errored in a way the API did not classify"
-	case *conversationv1.AgentFailure_MalformedToolUseExhausted:
-		errored.Error = turnFailedArm("malformed_tool_use_exhausted")
-		return "the model's tool calls could not be parsed and the attempts ran out"
 	case *conversationv1.AgentFailure_StopHookPrevented:
 		errored.Error = &frontendv1.FeedTurnEndedErrored_StopHookPrevented{
 			StopHookPrevented: &frontendv1.FeedTurnErrorStopHookPrevented{},
 		}
-		return "a Stop hook ended the run"
-	case *conversationv1.AgentFailure_HookStopped:
-		errored.Error = turnFailedArm("hook_stopped")
-		return "a hook ended the run"
-	case *conversationv1.AgentFailure_ToolDeferred:
-		errored.Error = turnFailedArm("tool_deferred")
-		return "the run ended waiting on a deferred tool call"
-	case *conversationv1.AgentFailure_ToolDeferredUnavailable:
-		errored.Error = turnFailedArm("tool_deferred_unavailable")
-		return "the run ended on a tool call deferred to something unavailable"
 	case *conversationv1.AgentFailure_MaxTurns:
 		errored.Error = &frontendv1.FeedTurnEndedErrored_MaxTurns{
 			MaxTurns: &frontendv1.FailureVendorMaxTurns{Vendor: vendorFailureContext()},
 		}
-		return "stopped at the turn limit"
 	case *conversationv1.AgentFailure_BudgetExhausted:
 		errored.Error = &frontendv1.FeedTurnEndedErrored_MaxBudget{
 			MaxBudget: &frontendv1.FailureVendorMaxBudget{Vendor: vendorFailureContext()},
 		}
-		return "stopped at the budget"
-	case *conversationv1.AgentFailure_StructuredOutputRetryExhausted:
-		errored.Error = turnFailedArm("structured_output_retry_exhausted")
-		return "the run ended: structured_output_retry_exhausted"
-	case *conversationv1.AgentFailure_TurnSetupFailed:
-		errored.Error = turnFailedArm("turn_setup_failed")
-		return "the run could not be set up and never reached the model"
 	case *conversationv1.AgentFailure_ExecutionError:
 		errored.Error = &frontendv1.FeedTurnEndedErrored_ExecutionError{
 			ExecutionError: &frontendv1.FailureVendorExecutionError{Vendor: vendorFailureContext()},
 		}
-		return "the run broke while executing"
-	case *conversationv1.AgentFailure_ContinuationPrevented:
-		errored.Error = turnFailedArm("continuation_prevented")
-		return "a producer notice ended the run"
+	default:
+		errored.Error = turnFailedArm(words.Cause)
 	}
-	errored.Error = turnFailedArm("unset")
-	return "the run ended on a failure with no stated cause"
+	return words.Sentence
 }
 
 // turnFailedArm keeps an unclassified producer terminal BY ITS VENDOR WORD
@@ -610,7 +558,7 @@ func (r *resolver) drawQueryDied(s *wsState, died *conversationv1.SessionQueryDi
 // of them reached the resolver first.
 func queryDiedErrored(died *conversationv1.SessionQueryDied) *frontendv1.FeedTurnEndedErrored {
 	errored := &frontendv1.FeedTurnEndedErrored{Error: queryDiedArm(died)}
-	applyHeadline(errored, headline{Text: queryDeathSentence(died)}, queryDeathDetail(died))
+	applyHeadline(errored, headline{Text: turnfault.OfQueryDeath(died).Sentence}, turnfault.QueryDeathThrown(died))
 	return errored
 }
 
@@ -641,26 +589,6 @@ func queryDiedArm(died *conversationv1.SessionQueryDied) *frontendv1.FeedTurnEnd
 	// oneof unset, which is the honest reading -- inventing one would claim
 	// the producer said something it did not.
 	return &frontendv1.FeedTurnEndedErrored_QueryDied{QueryDied: arm}
-}
-
-// queryDeathSentence words a query death for the headline.
-func queryDeathSentence(died *conversationv1.SessionQueryDied) string {
-	switch died.GetCause().(type) {
-	case *conversationv1.SessionQueryDied_UnexpectedEof:
-		return "the query died — the agent binary's stream ended without closing"
-	case *conversationv1.SessionQueryDied_IteratorFailure:
-		return "the query died — the SDK's iterator threw"
-	}
-	return "the query died out from under the turn"
-}
-
-// queryDeathDetail is the thrown cause, when the producer gave one. A query
-// death otherwise carries NO vendor wording, and the arm still names it.
-func queryDeathDetail(died *conversationv1.SessionQueryDied) string {
-	if iterator, ok := died.GetCause().(*conversationv1.SessionQueryDied_IteratorFailure); ok {
-		return iterator.IteratorFailure.GetCause()
-	}
-	return ""
 }
 
 // queryDeathWord names the cause for a log record.

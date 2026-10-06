@@ -148,30 +148,6 @@ func lostCauseOfBash(interrupted *conversationv1.AgentBashInterrupted) detachedL
 	return lostCauseOf(lost.Lost)
 }
 
-// lostCauseOfAgentFailure reads an agent terminal's lost cause, on the same
-// terms.
-func lostCauseOfAgentFailure(failure *conversationv1.AgentFailure) detachedLostCause {
-	lost, ok := failure.GetFailure().(*conversationv1.AgentFailure_Lost)
-	if !ok {
-		return lostNone
-	}
-	return lostCauseOf(lost.Lost)
-}
-
-// lostSentence words a lost ending for a headline. WE STOPPED BEING ABLE TO
-// SEE IT is the whole claim; nothing here says the work failed.
-func lostSentence(cause detachedLostCause) string {
-	switch cause {
-	case lostFileVanished:
-		return "we lost sight of this work — its transcript disappeared from disk"
-	case lostWentSilent:
-		return "we lost sight of this work — it went silent past the reader's ruling"
-	case lostSweptUp:
-		return "we lost sight of this work — a boot sweep found it open with no living producer"
-	}
-	return "we lost sight of this work"
-}
-
 // applySubagentLostHow relays a DetachedLost arm by name onto a subagent's
 // lost row. It reports false when the cause names no arm this build carries:
 // AN UNLANDED ARM IS NEVER SILENTLY DEFAULTED — the caller says so in the log
