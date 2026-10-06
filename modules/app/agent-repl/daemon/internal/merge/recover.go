@@ -65,31 +65,7 @@ func (o *orchestrator) Recover(ctx context.Context) error {
 
 	for _, repo := range repos {
 		for _, entry := range queues[repo] {
-			if entry.State == wsm.MergeRequested {
-				// A REQUEST STILL WAITING FOR ITS TURN'S END is re-armed: it
-				// is put in line once the requester's turn in flight -- if one
-				// survived the restart -- has ended.
-				o.mu.Lock()
-				o.repoOf[entry.Workspace] = repo
-				o.mu.Unlock()
-				o.deps.Log.Global().Info(op, "re-armed a merge request still waiting for its turn to end", dlog.Context{
-					"workspace": string(entry.Workspace), "repo": string(repo)})
-				o.awaitRequestingTurn(entry.Workspace, repo)
-				continue
-			}
-			if entry.State != wsm.MergeAdmitted {
-				requeued, err := o.recoverWaiting(ctx, repo, entry)
-				if err != nil {
-					return err
-				}
-				if !requeued {
-					continue
-				}
-				o.deps.Log.Global().Debug(op, "re-enqueued a waiting merge", dlog.Context{
-					"workspace": string(entry.Workspace), "repo": string(repo), "position": entry.Position})
-				continue
-			}
-			if err := o.recoverAdmitted(ctx, repo, entry); err != nil {
+			if err := o.recoverEntry(ctx, repo, entry); err != nil {
 				return err
 			}
 		}
@@ -100,6 +76,36 @@ func (o *orchestrator) Recover(ctx context.Context) error {
 		}
 		o.kick(repo)
 	}
+	return nil
+}
+
+// recoverEntry takes one durable queue entry back into this daemon: a request
+// still waiting for its turn's end is re-armed, a waiting merge is put back
+// in line, and an admitted one resumes (recoverAdmitted). It is the boot's
+// per-entry recovery and a handover adoption's alike.
+func (o *orchestrator) recoverEntry(ctx context.Context, repo wsm.RepoKey, entry wsm.MergeQueueEntry) error {
+	const op = "daemon.merge.recover"
+	switch entry.State {
+	case wsm.MergeRequested:
+		// A REQUEST STILL WAITING FOR ITS TURN'S END is re-armed: it is put in
+		// line once the requester's turn in flight -- if one survived the
+		// restart -- has ended.
+		o.mu.Lock()
+		o.repoOf[entry.Workspace] = repo
+		o.mu.Unlock()
+		o.deps.Log.Global().Info(op, "re-armed a merge request still waiting for its turn to end", dlog.Context{
+			"workspace": string(entry.Workspace), "repo": string(repo)})
+		o.awaitRequestingTurn(entry.Workspace, repo)
+		return nil
+	case wsm.MergeAdmitted:
+		return o.recoverAdmitted(ctx, repo, entry)
+	}
+	requeued, err := o.recoverWaiting(ctx, repo, entry)
+	if err != nil || !requeued {
+		return err
+	}
+	o.deps.Log.Global().Debug(op, "re-enqueued a waiting merge", dlog.Context{
+		"workspace": string(entry.Workspace), "repo": string(repo), "position": entry.Position})
 	return nil
 }
 
