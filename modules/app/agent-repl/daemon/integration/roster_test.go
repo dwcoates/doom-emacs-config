@@ -774,13 +774,14 @@ func TestRosterRowIsDegradedWhileASessionDiagnosticsWindowIsOpen(t *testing.T) {
 	}
 }
 
-// TestRosterRowIsTurnFailedWhenTheQueryDiesUnderATurn covers a dead query as
-// what the owner ruled it (2026-09-28): a FAILED TURN, drawn `turn_failed`,
-// never `vendor_blocked` — nothing about the vendor or the account refuses the
-// session, and the next prompt restarts the query. The watcher closes the
+// TestRosterRowIsTurnDiedWhenTheQueryDiesUnderATurn covers a dead query as
+// what the owner ruled it (2026-09-28, 2026-10-06): agent-repl's fault,
+// drawn `turn_died` until the next turn, never `vendor_blocked` — nothing
+// about the vendor or the account refuses the session, and the next prompt
+// restarts the query. The watcher closes the
 // turn the death cut as failed (internal/resolve/sidebar/status_test.go's
 // TestAQueryDeathDoesNotBlockTheRow is the unit-level half).
-func TestRosterRowIsTurnFailedWhenTheQueryDiesUnderATurn(t *testing.T) {
+func TestRosterRowIsTurnDiedWhenTheQueryDiesUnderATurn(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
@@ -800,12 +801,12 @@ func TestRosterRowIsTurnFailedWhenTheQueryDiesUnderATurn(t *testing.T) {
 	})
 
 	// Assert
-	got := awaitRoster(t, f.d, roster, "turn_failed after the query died", func(r *frontendv1.WorkspaceRoster) bool {
+	got := awaitRoster(t, f.d, roster, "turn_died after the query died", func(r *frontendv1.WorkspaceRoster) bool {
 		row := rosterRow(r, f.ws.GetId())
-		return row != nil && row.GetTurnFailed() != nil
+		return row != nil && row.GetTurnDied() != nil
 	})
-	if row := rosterRow(got, f.ws.GetId()); row.GetTurnFailed() == nil {
-		t.Fatalf("the roster row's status = %T after the query died, want turn_failed", row.GetStatus())
+	if row := rosterRow(got, f.ws.GetId()); row.GetTurnDied() == nil {
+		t.Fatalf("the roster row's status = %T after the query died, want turn_died", row.GetStatus())
 	}
 }
 
