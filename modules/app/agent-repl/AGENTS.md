@@ -132,6 +132,10 @@ is how broad a run is at each moment.
   The store's and the sidecar's `integration` packages are untagged and were
   always in their suites; the webapp-layer and the Emacs layer run in `e2e`
   and `e2e-emacs`. `test:webkit` is the one suite outside the roster.
+- The repository's own harnesses are suites too: `install-harness`
+  (`.claude/test-install.sh`) and `workspace-cli-harness` /
+  `workspace-open-cli-harness` (`bin/test-agent_repl_workspace{,_open}.sh` at
+  the repository root).
 
 ### One scheduled run at a time: `bin/test-all.sh` and `bin/suite-slot.sh`
 
