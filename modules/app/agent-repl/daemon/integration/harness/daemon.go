@@ -516,6 +516,20 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 	// still gets the assertion. ExpectWarnings only widens this set.
 	t.Cleanup(d.assertNoUnexpectedWarnings)
 	t.Cleanup(d.assertNoUnproducedRequiredWarnings)
+	// A FAILED TEST KEEPS ITS LOGS. Registered after the sweeps, so it runs
+	// before them and its t.Failed() is the test body's verdict; the state
+	// root it reads is a temp dir the testing package removes only after
+	// every cleanup.
+	t.Cleanup(func() {
+		if !t.Failed() {
+			return
+		}
+		dest := ""
+		if root := os.Getenv(ArtifactsEnv); root != "" {
+			dest = filepath.Join(root, artifactDirName(t.Name()))
+		}
+		preserveFailureLogs(t.Logf, filepath.Join(d.StateDir, "logs"), dest)
+	})
 	// THE LOCK DIRECTORY IS A CROSS-DAEMON RENDEZVOUS, not a per-start temp
 	// dir, so it is keyed to the STATE ROOT and settled only now that the root
 	// is known.

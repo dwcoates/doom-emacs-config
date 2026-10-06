@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	"claude-repld/internal/dlog"
 )
 
 // fullUsage is an account with every window figured.
@@ -203,5 +205,106 @@ func TestTheMigrationAddsTheAccountUsage(t *testing.T) {
 	s := handle.(*store)
 	if got := scalar[int](t, s, `SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'account_usage'`); got != 1 {
 		t.Fatalf("account_usage tables after the migration = %d, want 1", got)
+	}
+}
+
+// readOnlyUsageStore opens a READ-ONLY handle on a fresh file, as a joining
+// successor does, with a logger the test reads.
+func readOnlyUsageStore(t *testing.T) (DB, *dlog.TestLogger) {
+	t.Helper()
+	log := dlog.NewTestLogger()
+	ro, err := OpenReadOnly(context.Background(), writableStore(t), WithUnsyncedWrites(), WithLogger(log))
+	if err != nil {
+		t.Fatalf("OpenReadOnly: %v", err)
+	}
+	t.Cleanup(func() { ro.Close() })
+	return ro, log
+}
+
+func TestAccountUsageOnAReadOnlyHandleIsHeldNotRefused(t *testing.T) {
+	// Arrange
+	ro, log := readOnlyUsageStore(t)
+
+	// Act
+	err := ro.SetAccountUsage(context.Background(), fullUsage("/home/a/.claude"))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("SetAccountUsage on a read-only handle = %v, want nil: the joining successor's usage is held, not refused", err)
+	}
+	for _, r := range log.Records() {
+		if r.Level == "error" {
+			t.Fatalf("a held usage write recorded an ERROR: %+v", r)
+		}
+	}
+}
+
+func TestAccountUsageHeldOnAReadOnlyHandleIsWrittenAtThePromotion(t *testing.T) {
+	// Arrange
+	ro, _ := readOnlyUsageStore(t)
+	want := fullUsage("/home/a/.claude")
+	if err := ro.SetAccountUsage(context.Background(), want); err != nil {
+		t.Fatalf("SetAccountUsage: %v", err)
+	}
+
+	// Act
+	if err := ro.Promote(context.Background()); err != nil {
+		t.Fatalf("Promote: %v", err)
+	}
+
+	// Assert
+	got, err := ro.AccountUsages(context.Background())
+	if err != nil {
+		t.Fatalf("AccountUsages: %v", err)
+	}
+	if len(got) != 1 || !reflect.DeepEqual(got[0], want) {
+		t.Fatalf("AccountUsages after the promotion = %+v, want [%+v]", got, want)
+	}
+}
+
+func TestAccountUsageHeldTwiceForOneRootWritesTheLatest(t *testing.T) {
+	// Arrange
+	ro, _ := readOnlyUsageStore(t)
+	older := fullUsage("/home/a/.claude")
+	newer := fullUsage("/home/a/.claude")
+	newer.ObservedAt = older.ObservedAt.Add(time.Minute)
+	newer.Session.Utilization = 0.61
+	for _, u := range []AccountUsage{older, newer} {
+		if err := ro.SetAccountUsage(context.Background(), u); err != nil {
+			t.Fatalf("SetAccountUsage: %v", err)
+		}
+	}
+
+	// Act
+	if err := ro.Promote(context.Background()); err != nil {
+		t.Fatalf("Promote: %v", err)
+	}
+
+	// Assert
+	got, err := ro.AccountUsages(context.Background())
+	if err != nil {
+		t.Fatalf("AccountUsages: %v", err)
+	}
+	if len(got) != 1 || !reflect.DeepEqual(got[0], newer) {
+		t.Fatalf("AccountUsages after the promotion = %+v, want the latest held [%+v]", got, newer)
+	}
+}
+
+func TestAccountUsageIsNotReadBackBeforeThePromotion(t *testing.T) {
+	// Arrange
+	ro, _ := readOnlyUsageStore(t)
+
+	// Act
+	if err := ro.SetAccountUsage(context.Background(), fullUsage("/home/a/.claude")); err != nil {
+		t.Fatalf("SetAccountUsage: %v", err)
+	}
+
+	// Assert: the read-only handle changed nothing.
+	got, err := ro.AccountUsages(context.Background())
+	if err != nil {
+		t.Fatalf("AccountUsages: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("AccountUsages before the promotion = %+v, want none: a read-only handle changes nothing", got)
 	}
 }
