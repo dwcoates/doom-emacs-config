@@ -662,10 +662,10 @@ func (s *sequence) closeOrphans(ctx context.Context, log dlog.Logger, clientless
 	return nil
 }
 
-// recoverMerges resumes the merges that were in flight or waiting. The
-// orchestrator re-queues an in-flight merge at the FRONT of its repository's
-// queue and re-runs it from the queue tab (the recorded override): the git
-// state after a crash is only trustworthy from a clean re-run.
+// recoverMerges resumes the merges that were in flight or waiting. An
+// in-flight merge resumes from the step its progress record names, under the
+// lease it already held (adopted by this process) and in the bubble it
+// already had; one that never took a step runs again from the queue.
 func (s *sequence) recoverMerges(ctx context.Context, log dlog.Logger, workspaces []wsm.Workspace, report *Report) error {
 	inFlight, err := s.mergeLeases(ctx, log, workspaces)
 	if err != nil {
@@ -696,9 +696,9 @@ func (s *sequence) recoverMerges(ctx context.Context, log dlog.Logger, workspace
 // workspaces kept the handover's quiesce leases through a later fresh boot,
 // the composer drew `restarting` from them, and Emacs refused every prompt.
 //
-// IT RUNS AFTER THE MERGE RECOVERY, which reads and releases the merge
-// leases a crash left (and re-admits each merge under a lease of its own,
-// which this handle owns and so is not foreign). Whatever is still foreign
+// IT RUNS AFTER THE MERGE RECOVERY, which reads the merge leases a crash
+// left: it ADOPTS the lease of every merge it resumes (this handle then owns
+// it, so it is not foreign) and releases the rest. Whatever is still foreign
 // after it is an orphan of any holder.
 //
 // EACH RELEASE IS AN INVARIANT VIOLATION REPAIRED, stated once at ERROR with

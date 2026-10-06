@@ -105,19 +105,22 @@ type Orchestrator interface {
 	// that workspace. A token that names no log this daemon holds for the
 	// workspace is REFUSED (unknown_merge_test_log).
 	TestLogPath(ctx context.Context, ws ids.WorkspaceID, token string) (string, error)
-	// Drain stops admitting merges and waits, WITHIN A BOUND
-	// (TerminalDrainBound), for every run that has already reached its
-	// TERMINAL to finish its durable stamps and its teardown. The daemon's
-	// orderly exit calls it with the state client STILL OPEN: without it a
-	// SIGTERM landing mid-terminal closed the store under those writes, and
-	// merged_at, closed and the lease release were lost to failed
-	// transactions. A merge still in a long step is announced at INFO and
-	// left to the boot recovery, never waited for.
+	// Drain stops admitting merges, SUSPENDS every merge still mid-step at a
+	// stopping point -- its git command in flight waited out
+	// (MergeGitStopBound), no git started after, its turn and test-gate waits
+	// cut -- and waits, WITHIN A BOUND (TerminalDrainBound), for every run
+	// that has already reached its TERMINAL to finish its durable stamps and
+	// its teardown. The daemon's orderly exit calls it with the state client
+	// STILL OPEN: without it a SIGTERM landing mid-terminal closed the store
+	// under those writes, and merged_at, closed and the lease release were
+	// lost to failed transactions.
 	Drain(ctx context.Context)
-	// Recover resumes or LOUDLY FAILS every in-flight merge at boot, re-arms
-	// every request still waiting for its turn to end, and re-enqueues every
-	// merge that was queued but not started, in the order it was waiting in.
-	// It never silently abandons one.
+	// Recover RESUMES every in-flight merge at boot from its progress record
+	// (the step it stood on, under the same lease and in the same bubble),
+	// runs again from the queue an admitted merge that never took a step,
+	// re-arms every request still waiting for its turn to end, and re-enqueues
+	// every merge that was queued but not started, in the order it was
+	// waiting in. It never silently abandons one.
 	Recover(ctx context.Context) error
 }
 
