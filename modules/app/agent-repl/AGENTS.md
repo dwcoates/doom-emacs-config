@@ -1894,7 +1894,7 @@ tiers, and the tier is defined by WHAT ENDS the line:
 | --- | --- | --- |
 | **salient** | the condition it describes stops being true — never a timer | escalating faults (a severed link, a failed bring-up, an impaired daemon); anything waiting on the user (a gated call, a question batch, the cold gate, the agent's `PushNotification` message, which ends at the next prompt); an act in progress with its own end signal (a compaction running, an interrupt, a refused close, a deploy, a pending wakeup, a retry until the response lands); the dead-query line (ends at the next prompt) |
 | **transient** | its 10 s display window lapses, or a newer transient replaces it | task-tracker moves; hook starts; injected context; a concluded compaction; every non-blocking error or warning (non-escalating faults, daemon Warn/Error records); session changes; a finished deploy; network-resume edges; a detached run finishing while the session is `background` |
-| **enduring** | never — it is always true, so the cell is never empty | the 5-hour and weekly usage (`unobserved` until a figure is read), fed by account-usage samples and by the vendor's rate-limit events, which stand no salient line of their own (owner ruling, 2026-10-01) |
+| **enduring** | never — it is always true, so the cell is never empty | the ACCOUNT's 5-hour and weekly usage (`no_allowance` for an account whose usage service reports no window, `unobserved` until anything is read — both drawn in words), fed by account-usage samples and by the vendor's rate-limit events, which stand no salient line of their own (owner rulings, 2026-10-01 and 2026-10-06) |
 
 **PRECEDENCE IS BY TIER, ALWAYS:** salient, then transient, then enduring. A
 transient never covers a salient line; it covers only the enduring line, and
@@ -1927,12 +1927,28 @@ has no shape for it, the daemon composes nothing of the kind, and the webapp
 holds nothing back for it.
 
 **THE ENDURING LINE IS THE USAGE, AND ONLY ITS PERCENTAGES ARE COLORED.**
-The line draws the 5-hour and weekly allowances (and overage when present),
-or reads `unobserved` before any figure is read. Only each `<number>%` wears
+The line draws the 5-hour and weekly allowances (and overage when present);
+an account whose usage service answers with no five-hour window (an
+enterprise seat billed by spend) reads "no session or weekly allowance on
+this account", and an account never observed reads "usage not yet seen for
+this account". The line is never empty (owner ruling, 2026-10-06). An
+allowance whose reset the client's clock has passed reads "<label> reset
+since last seen", with no percentage. Only each `<number>%` wears
 the percent gradient; labels and reset countdowns stay the line's color. The
 line draws no reading age: it is enduring, so when it was read does not
 matter. The context window's fill is not an enduring line (owner ruling,
 2026-09-30); the topbar's context chip carries it.
+
+**THE USAGE IS THE ACCOUNT'S, AND IT OUTLIVES THE DAEMON** (owner ruling,
+2026-10-06). The footer keeps one usage record per account root (Claude
+config dir), and every workspace bound to the root (`footer.SetAccount`, from
+`publishAccount`) draws it, so the figures one workspace's shim samples are
+drawn by every workspace on the account at once. Each change is kept in the
+state store's `account_usage` table (layout 24) and read back at boot, so a
+restarted daemon draws the last figures before any session speaks. The shim
+samples the account's usage (`usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET`,
+the data behind the CLI's `/usage`) at every session start and every five
+minutes; no billed turn is needed.
 
 **A TIMER MAY END ONLY A TRANSIENT.** A salient line with no clearing
 event is a missing end signal, and the fix is the end signal, not an expiry.
