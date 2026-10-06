@@ -284,6 +284,18 @@ type DB interface {
 	RecordTabInterval(ctx context.Context, lease LeaseID, interval TabInterval) error
 	// MergeLedger loads a workspace's ledger entries, all-or-nothing.
 	MergeLedger(ctx context.Context, id WorkspaceID) ([]MergeLedgerEntry, error)
+	// PutMergeProgress records an admitted merge's progress, replacing the
+	// workspace's record.
+	PutMergeProgress(ctx context.Context, p MergeProgress) error
+	// MergeProgressOf loads a workspace's merge progress record; the bool is
+	// false when none stands.
+	MergeProgressOf(ctx context.Context, id WorkspaceID) (MergeProgress, bool, error)
+	// DropMergeProgress deletes one merge lease's progress record and
+	// reports whether one stood.
+	DropMergeProgress(ctx context.Context, lease LeaseID) (bool, error)
+	// AdoptMergeLease takes ownership of the merge lease a previous process
+	// left held, for the merge this process resumes under it.
+	AdoptMergeLease(ctx context.Context, id WorkspaceID, lease LeaseID) (Lease, error)
 
 	// RequestMerge RECORDS a workspace's merge request in its target
 	// repository's durable queue, in the requested state (in nobody's line),
