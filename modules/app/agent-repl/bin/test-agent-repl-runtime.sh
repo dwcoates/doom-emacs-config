@@ -40,7 +40,7 @@ exit "\${!code_var:-0}"
 EOF
     chmod +x "$TMP/$name"
 }
-for impl in build byte-compile bounce doctor readiness logs claude-repld open; do
+for impl in build byte-compile bounce doctor readiness logs claude-repld open contract-check; do
     make_impl "$impl"
 done
 
@@ -76,6 +76,7 @@ export AGENT_REPL_RUNTIME_BYTE_COMPILE="$TMP/byte-compile"
 export AGENT_REPL_RUNTIME_BOUNCE="$TMP/bounce"
 export AGENT_REPL_RUNTIME_DOCTOR="$TMP/doctor"
 export AGENT_REPL_RUNTIME_READINESS="$TMP/readiness"
+export AGENT_REPL_RUNTIME_CONTRACT_CHECK="$TMP/contract-check"
 export AGENT_REPL_RUNTIME_LOGS="$TMP/logs"
 export AGENT_REPL_RUNTIME_CLAUDE_REPLD="$TMP/claude-repld"
 export AGENT_REPL_RUNTIME_EMACSCLIENT="$TMP/emacsclient"
@@ -89,7 +90,7 @@ export AGENT_REPL_RUNTIME_PGREP="$TMP/pgrep"
 reset() {
     : >"$TRANSCRIPT"
     touch "$STATE/running"
-    unset STUB_RELOAD STUB_UNSAVED STUB_NEVER_EXITS STUB_EXIT_byte_compile STUB_EXIT_bounce STUB_EXIT_open STUB_EMACS_PROCESS
+    unset STUB_RELOAD STUB_UNSAVED STUB_NEVER_EXITS STUB_EXIT_byte_compile STUB_EXIT_bounce STUB_EXIT_open STUB_EMACS_PROCESS STUB_EXIT_contract_check
 }
 
 # expect_transcript NAME EXPECTED compares the whole transcript.
@@ -127,6 +128,7 @@ reset
 "$RUNTIME" bounce --hard >/dev/null 2>&1
 expect_transcript "a hard bounce byte-compiles, hot-loads stale elisp, bounces, quits Emacs and relaunches it, in order" \
 "byte-compile
+contract-check
 $RELOAD
 bounce
 emacsclient kill-emacs
@@ -136,12 +138,14 @@ reset
 export STUB_RELOAD=failed
 if "$RUNTIME" bounce --hard >/dev/null 2>&1; then fail "a failed elisp hot load fails the hard bounce"; else pass "a failed elisp hot load fails the hard bounce"; fi
 expect_transcript "a failed elisp hot load stops before the bounce" "byte-compile
+contract-check
 $RELOAD"
 
 reset
 export STUB_RELOAD=reloaded
 "$RUNTIME" bounce --hard >/dev/null 2>&1
 expect_transcript "a hot-loaded Emacs goes on to the bounce" "byte-compile
+contract-check
 $RELOAD
 bounce
 emacsclient kill-emacs
@@ -151,7 +155,26 @@ reset
 export STUB_RELOAD=other-root
 "$RUNTIME" bounce --hard >/dev/null 2>&1
 expect_transcript "an Emacs on another checkout's elisp is bounced as it is" "byte-compile
+contract-check
 $RELOAD
+bounce
+emacsclient kill-emacs
+open -a /Applications/Emacs.app"
+
+reset
+export STUB_EXIT_contract_check=1
+"$RUNTIME" bounce --hard >/dev/null 2>&1
+expect_transcript "a moved wire contract skips the early hot load and still bounces" "byte-compile
+contract-check
+bounce
+emacsclient kill-emacs
+open -a /Applications/Emacs.app"
+
+reset
+export STUB_EXIT_contract_check=2
+"$RUNTIME" bounce --hard >/dev/null 2>&1
+expect_transcript "an unknown contract is treated as moved" "byte-compile
+contract-check
 bounce
 emacsclient kill-emacs
 open -a /Applications/Emacs.app"
@@ -170,6 +193,7 @@ reset
 export STUB_EXIT_bounce=1
 if "$RUNTIME" bounce --hard >/dev/null 2>&1; then fail "a bounce failure fails the hard bounce"; else pass "a bounce failure fails the hard bounce"; fi
 expect_transcript "a bounce failure leaves Emacs running" "byte-compile
+contract-check
 $RELOAD
 bounce"
 
@@ -184,6 +208,7 @@ reset
 export STUB_NEVER_EXITS=1
 if "$RUNTIME" bounce --hard >/dev/null 2>&1; then fail "an Emacs that will not exit fails the hard bounce"; else pass "an Emacs that will not exit fails the hard bounce"; fi
 expect_transcript "an Emacs that will not exit is not relaunched beside itself" "byte-compile
+contract-check
 $RELOAD
 bounce
 emacsclient kill-emacs"
@@ -192,6 +217,7 @@ reset
 export STUB_EXIT_open=1 STUB_EMACS_PROCESS=1
 if "$RUNTIME" bounce --hard >/dev/null 2>&1; then pass "a launch the launcher misreports, with Emacs up, is a launch"; else fail "a launch the launcher misreports, with Emacs up, is a launch"; fi
 expect_transcript "a misreported launch is not retried" "byte-compile
+contract-check
 $RELOAD
 bounce
 emacsclient kill-emacs
@@ -201,6 +227,7 @@ reset
 export STUB_EXIT_open=1
 if "$RUNTIME" bounce --hard >/dev/null 2>&1; then fail "a launch that never brings Emacs up fails the hard bounce"; else pass "a launch that never brings Emacs up fails the hard bounce"; fi
 expect_transcript "a failed launch is retried up to its bound" "byte-compile
+contract-check
 $RELOAD
 bounce
 emacsclient kill-emacs
