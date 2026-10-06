@@ -20,7 +20,8 @@
 - When a complete set of changes is finished (a feature fully added, a bug fixed, a prescribed change made), run the full unit and integration suites of the systems it touched, once.
   - Add the e2e suite only with a stated reason: the change could have systemic knock-on effects.
   - A failure there goes back to targeted runs, and the set finishes with one more full run.
-- After merging a branch into master, or otherwise applying changes to it, run the full suite: unit, integration and e2e.
+- After a git merge you made yourself, onto any branch, run the full suite: unit, integration and e2e.
+  - Never after a merge routed through the merge queue: the queue already runs the full suite as its gate.
 
 ### Before committing
 
