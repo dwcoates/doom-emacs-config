@@ -847,8 +847,9 @@ message FeedResponseSuccess {
 // (prose and thinking are kept apart), in a rolling window of the most recent
 // gaps that survives a restart, and states their recency-weighted average
 // here. The client spreads EVERYTHING it has not yet shown (this push's new
-// text plus anything still unrevealed from the previous one) evenly across
-// the window, starting at the moment the push is drawn. Only the client knows
+// text plus anything still unrevealed from the previous one) across the
+// window, starting at the moment the push is drawn and finishing as it ends.
+// Only the client knows
 // how much is on screen, which is why the daemon states a duration rather
 // than a rate: a rate would assume the previous push had finished revealing.
 message FeedResponseRevealWindow {
