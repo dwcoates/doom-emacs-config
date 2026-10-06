@@ -19,6 +19,7 @@ import (
 	"claude-repld/internal/rollout"
 	"claude-repld/internal/server"
 	"claude-repld/internal/stateroot"
+	"claude-repld/internal/tempdirs"
 	"claude-repld/internal/wsm"
 )
 
@@ -283,7 +284,22 @@ func run(ctx context.Context, opts options, h hooks) error {
 	withdrawal := &addrWithdrawal{claim: claim, log: log}
 	defer withdrawal.finish()
 
-	db, err := openState(ctx, layout, log, joining)
+	// THE REGISTRY REFUSES TEMPORARY FOLDERS (owner ruling, 2026-10-06), and
+	// the guard is built from the environment ONCE, here: its test-run seam
+	// (tempdirs.EnvTestRoot) is honored only under the vendor guard, so a
+	// stray one on a live daemon refuses the boot rather than exempting.
+	temporary, err := tempdirs.FromEnv(contracts, os.TempDir(), os.Getenv)
+	if err != nil {
+		log.Error("daemon.cmd.state", "the temporary-directory guard could not be built", dlog.Context{
+			"error": err.Error(),
+		})
+		return fmt.Errorf("claude-repld: build the temporary-directory guard: %w", err)
+	}
+	log.Debug("daemon.cmd.state", "the registry refuses directories inside these temporary roots", dlog.Context{
+		"roots": temporary.Roots(), "test_root": os.Getenv(tempdirs.EnvTestRoot),
+	})
+
+	db, err := openState(ctx, layout, log, joining, temporary)
 	if err != nil {
 		return err
 	}
@@ -579,12 +595,12 @@ func reconcile(ctx context.Context, log dlog.Logger, sequence boot.Sequence, bou
 // exists to prevent. Its one write is carrying an older file forward by
 // ADDITIVE steps, which leave the incumbent's statements working
 // (wsm.OpenJoining).
-func openState(ctx context.Context, layout stateroot.Layout, log dlog.Logger, joining bool) (wsm.DB, error) {
+func openState(ctx context.Context, layout stateroot.Layout, log dlog.Logger, joining bool, temporary tempdirs.Guard) (wsm.DB, error) {
 	open := wsm.Open
 	if joining {
 		open = wsm.OpenJoining
 	}
-	db, err := open(ctx, layout.DB(), wsm.WithLogger(log))
+	db, err := open(ctx, layout.DB(), wsm.WithLogger(log), wsm.WithTemporaryGuard(temporary))
 	if err != nil {
 		log.Error("daemon.cmd.state", "the state client could not be opened", dlog.Context{
 			"path":    layout.DB(),
