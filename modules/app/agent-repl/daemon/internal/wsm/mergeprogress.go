@@ -22,7 +22,15 @@ import (
 // keeps it whole and never reads inside it, and the orchestrator decodes it
 // (refusing the boot on one that will not decode, as for every corrupt row).
 //
-// A new table, so the step is additive: the build before it never names it.
+// THE SAME STEP GIVES A QUEUED MERGE ITS BUBBLE'S IDENTITY ON ITS ROW
+// (`merge_queue.ledger_id`), written with its place in line (QueueMerge): a
+// merge that is only waiting is redrawn in the same bubble by the next daemon
+// to serve its workspace, as an admitted one is through its lease. A row an
+// earlier build queued carries NULL, and is given an identity when it is
+// recovered.
+//
+// A new table and a new nullable column, so the step is additive: the build
+// before it never names either.
 const mergeProgressDDL = `
 CREATE TABLE merge_progress (
   workspace_id TEXT PRIMARY KEY REFERENCES workspaces(id) ON DELETE CASCADE,
@@ -30,6 +38,7 @@ CREATE TABLE merge_progress (
   updated_at   INTEGER NOT NULL,
   document     TEXT NOT NULL
 );
+ALTER TABLE merge_queue ADD COLUMN ledger_id TEXT;
 `
 
 // MergeProgress is one admitted merge's durable progress record.
