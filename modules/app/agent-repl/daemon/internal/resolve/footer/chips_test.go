@@ -1940,3 +1940,23 @@ func TestTakeCommissionDescribesTheRow(t *testing.T) {
 		t.Fatalf("row = {label %q, description %q}, want the commission's", row.label, row.description)
 	}
 }
+
+// A tool call draws no activity line: the `tool_call` transient is RETIRED
+// (owner ruling, 2026-10-06), and the substatus states the step.
+func TestAToolCallStartRaisesNoTransient(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	inTurn(h)
+
+	// Act
+	h.r.OnActivity(testWS, mainAgent, &conversationv1.AgentActivity{
+		ActivityId: &conversationv1.AgentActivityId{Value: "u-1"},
+		Item: &conversationv1.AgentActivity_Read{Read: &conversationv1.AgentRead{Result: &conversationv1.AgentRead_Start{
+			Start: &conversationv1.AgentReadStart{Path: &conversationv1.ReadPath{Path: "a/b.go"}}}}},
+	})
+
+	// Assert
+	if got := transientOf(t, h); got != nil {
+		t.Fatalf("transient = %+v, want none for a tool call's start", got)
+	}
+}

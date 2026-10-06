@@ -72,10 +72,10 @@ func TestTheNextPromptEndsThePushNotification(t *testing.T) {
 		act  func(h *harness)
 	}{
 		{"a prompt delivered", func(h *harness) {
-			h.r.SetTurn(testWS, &TurnStarted{At: instant, Prompt: "next"})
+			h.r.SetTurn(testWS, &TurnStarted{At: instant})
 		}},
 		{"a prompt held in the queue", func(h *harness) {
-			h.r.OnSubmission(testWS, Submission{Prompt: "next", Stage: StageHeld, Position: 1, Queued: 1})
+			h.r.OnSubmission(testWS, Submission{Stage: StageHeld, Position: 1, Queued: 1})
 		}},
 	}
 	for _, tt := range tests {
@@ -398,24 +398,18 @@ func TestFillSharedPanicsOnAMessageWithoutTheSharedKind(t *testing.T) {
 
 // ---- the submitting stages -------------------------------------------------
 
-func TestEachSubmissionStageRaisesItsSubmittingLine(t *testing.T) {
+// A prompt's delivery draws no activity line: the `submitting` transient is
+// RETIRED (owner ruling, 2026-10-06), and the substatus states the step.
+func TestASubmissionStageRaisesNoTransient(t *testing.T) {
 	tests := []struct {
-		name  string
-		sub   Submission
-		check func(*frontendv1.FooterActivityTransientSubmitting) bool
+		name string
+		sub  Submission
 	}{
-		{"held, with its place and the queue's size", Submission{Prompt: "fix it", Stage: StageHeld, Position: 2, Queued: 3},
-			func(s *frontendv1.FooterActivityTransientSubmitting) bool {
-				return s.GetHeld().GetPosition() == 2 && s.GetHeld().GetQueued() == 3
-			}},
-		{"classifying", Submission{Prompt: "fix it", Stage: StageClassifying},
-			func(s *frontendv1.FooterActivityTransientSubmitting) bool { return s.GetClassifying() != nil }},
-		{"interjecting", Submission{Prompt: "fix it", Stage: StageInterjecting},
-			func(s *frontendv1.FooterActivityTransientSubmitting) bool { return s.GetInterjecting() != nil }},
-		{"coalesced", Submission{Prompt: "fix it", Stage: StageCoalesced},
-			func(s *frontendv1.FooterActivityTransientSubmitting) bool { return s.GetCoalesced() != nil }},
-		{"after this tool call", Submission{Prompt: "fix it", Stage: StageAfterToolCall},
-			func(s *frontendv1.FooterActivityTransientSubmitting) bool { return s.GetAfterToolCall() != nil }},
+		{"held", Submission{Stage: StageHeld, Position: 2, Queued: 3}},
+		{"classifying", Submission{Stage: StageClassifying}},
+		{"interjecting", Submission{Stage: StageInterjecting}},
+		{"coalesced", Submission{Stage: StageCoalesced}},
+		{"after this tool call", Submission{Stage: StageAfterToolCall}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -427,25 +421,45 @@ func TestEachSubmissionStageRaisesItsSubmittingLine(t *testing.T) {
 			h.r.OnSubmission(testWS, tt.sub)
 
 			// Assert
-			got := transientOf(t, h).GetSubmitting()
-			if got.GetPromptLead() != "fix it" || !tt.check(got) {
-				t.Fatalf("submitting = %+v, want the %s stage for the prompt", got, tt.name)
+			if got := transientOf(t, h); got != nil {
+				t.Fatalf("transient = %+v, want none for the %s stage", got, tt.name)
 			}
 		})
 	}
 }
 
-func TestADeliveredPromptRaisesTheDeliveredStage(t *testing.T) {
+func TestASubmissionStageIsRecordedWithItsName(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	connected(h)
 
 	// Act
-	h.r.SetTurn(testWS, &TurnStarted{At: instant, Prompt: "fix it"})
+	h.r.OnSubmission(testWS, Submission{Stage: StageHeld, Position: 2, Queued: 3})
 
 	// Assert
-	if got := transientOf(t, h).GetSubmitting(); got.GetDelivered() == nil || got.GetPromptLead() != "fix it" {
-		t.Fatalf("submitting = %+v, want the delivered stage", got)
+	recs := recordsOf(h.log.Records(), "daemon.footer.on_submission")
+	var named bool
+	for _, rec := range recs {
+		if rec.Context["stage"] == "held" && rec.Context["position"] == uint32(2) && rec.Context["queued"] == uint32(3) {
+			named = true
+		}
+	}
+	if !named {
+		t.Fatalf("records = %+v, want the held stage recorded with its place and the queue's size", recs)
+	}
+}
+
+func TestADeliveredPromptRaisesNoTransient(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+
+	// Act
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+
+	// Assert
+	if got := transientOf(t, h); got != nil {
+		t.Fatalf("transient = %+v, want none for a delivered prompt", got)
 	}
 }
 
@@ -455,7 +469,7 @@ func TestAnUndeclaredSubmissionStageIsRecordedAtErrorAndRaisesNothing(t *testing
 	connected(h)
 
 	// Act
-	h.r.OnSubmission(testWS, Submission{Prompt: "fix it", Stage: SubmissionStage(99)})
+	h.r.OnSubmission(testWS, Submission{Stage: SubmissionStage(99)})
 
 	// Assert
 	if transientOf(t, h) != nil {
