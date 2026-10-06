@@ -92,6 +92,10 @@ type Report struct {
 	// whose worktree this boot RECREATED from their surviving branch instead
 	// of closing them (owner ruling, 2026-10-06).
 	MissingDirRestored []ids.WorkspaceID
+	// RetiredRepositories are the repositories this boot RETIRED because
+	// their directory no longer exists and every workspace under them was
+	// closed; their workspace records went with them.
+	RetiredRepositories []ids.RepoID
 	// ClosedServingReleased are the CLOSED workspaces whose row still named a
 	// serving instance (or a spawned shim pid), which this boot released: a
 	// closed workspace is served by no daemon.
