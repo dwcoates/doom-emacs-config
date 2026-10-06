@@ -670,7 +670,10 @@ export function drawGivesUpCountdown(
  * 2h 5m | weekly 12% · resets in 3d". It is always true while it stands, so it
  * carries no age.
  *
- * An unobserved line is an empty line, which the grow cell still holds open.
+ * IT IS NEVER EMPTY (owner ruling, 2026-10-06): an account never observed
+ * reads "usage not yet seen for this account", and one whose usage service
+ * reports no allowance window reads "no session or weekly allowance on this
+ * account".
  * The figures ellipsize (newsworthy window first) inside an inline flex box no
  * wider than the cell.
  */
@@ -694,6 +697,10 @@ export function drawFooterActivityEnduring(
       }
       break;
     case "unobserved":
+      line.textContent = ENDURING_UNOBSERVED_TEXT;
+      break;
+    case "noAllowance":
+      line.textContent = ENDURING_NO_ALLOWANCE_TEXT;
       break;
     default: {
       const other: { case: string } = chosen;
@@ -702,6 +709,12 @@ export function drawFooterActivityEnduring(
   }
   return line;
 }
+
+/** The enduring line before anything is known of the account's usage. */
+export const ENDURING_UNOBSERVED_TEXT = "usage not yet seen for this account";
+
+/** The enduring line of an account whose usage service reports no allowance window. */
+export const ENDURING_NO_ALLOWANCE_TEXT = "no session or weekly allowance on this account";
 
 /**
  * The usage line: EVERY window the vendor figured, newsworthy first.
@@ -1180,6 +1193,12 @@ export function drawFooterStatusActivityWakeup(
  * from the account's usage before the vendor's own rate-limit event arrives,
  * so an allowance with no arm draws untitled, and gains the title and the
  * `data-arm` on the push that carries one.
+ *
+ * A FIGURE IS TRUE ONLY UNTIL ITS RESET (footer.proto `resets_at_s`). The
+ * figures are the last ones read, possibly before a daemon restart, so once
+ * the clock passes the reset the allowance draws "session reset since last
+ * seen" with NO percentage and no verdict, marked `data-lapsed`, until a newer
+ * push carries a fresh figure.
  */
 export function drawFooterAllowance(
   u: FooterAllowance,
@@ -1212,33 +1231,38 @@ export function drawFooterAllowance(
     },
   );
 
-  span.appendChild(document.createTextNode(`${label} `));
-  span.appendChild(drawFooterPercent(u.utilization));
-
+  const labelNode = document.createTextNode(`${label} `);
+  const percent = drawFooterPercent(u.utilization);
+  span.append(labelNode, percent);
+  const resetsAtMs = msOf(u.resetsAtS, `${path}.resets_at_s`) * 1000;
   span.appendChild(
-    drawResetsCountdown(u.resetsAtS, deps, `${path}.resets_at_s`),
+    footerClockSpan(deps.ctx.ticker, "countdown", undefined, (countdown, nowMs) => {
+      const remaining = resetsAtMs - nowMs;
+      if (remaining > 0) {
+        countdown.textContent = ` · resets in ${formatCountdown(remaining)}`;
+        return;
+      }
+      lapseAllowance(span, labelNode, percent);
+      countdown.textContent = `${label} reset since last seen`;
+    }),
   );
   return span;
 }
 
 /**
- * " · resets in 1h 5m", ticking down to an allowance's reset at minute
- * resolution. RESETS_AT_S is the vendor's own SECONDS, converted once here.
+ * Turn a drawn allowance whose reset has passed into the lapsed one: the
+ * percentage and the verdict describe a window that no longer exists, so both
+ * leave, and only the reset sentence the countdown draws stays.
  */
-export function drawResetsCountdown(
-  resetsAtS: bigint,
-  deps: AllowanceDeps,
-  path: string,
-): HTMLElement {
-  const resetsAtMs = msOf(resetsAtS, path) * 1000;
-  return footerClockSpan(
-    deps.ctx.ticker,
-    "countdown",
-    undefined,
-    (span, nowMs) => {
-      span.textContent = ` · resets in ${formatCountdown(resetsAtMs - nowMs)}`;
-    },
-  );
+function lapseAllowance(span: HTMLElement, labelNode: Text, percent: HTMLElement): void {
+  if (span.hasAttribute("data-lapsed")) return;
+  span.setAttribute("data-lapsed", "true");
+  labelNode.remove();
+  percent.remove();
+  span.className = "footer-allowance";
+  span.removeAttribute("data-arm");
+  span.removeAttribute("data-newsworthy");
+  span.removeAttribute("title");
 }
 
 /**

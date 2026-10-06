@@ -970,3 +970,4 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - 2026-10-06 e2e-repeat.sh gates only on the host suite slot; the load-average wait and its 5s poll are gone(bin/e2e-repeat.sh).
 - 2026-10-06 no script pipes into a reader that can stop early (head, awk exit, sed q, grep -q/-m), the doctor reads launchctl whole, and the roster scan skips nested checkouts(scripts, testrun scans).
 - 2026-10-06 no footer line warns that the context is nearly full: the salient context_budget kind and AgentUpdate.context_budget_warning are retired, and a failed compaction is the feed's outcome marker alone(footer.proto, agent.proto, daemon footer, shim, sidecar, webapp).
+- 2026-10-06 the footer's usage line is the account root's, shared by every workspace on it and kept in wsm account_usage (layout 24); an enterprise seat reads no_allowance, a never-seen account reads words, and a passed reset reads 'reset since last seen'(footer resolver, webapp activity).

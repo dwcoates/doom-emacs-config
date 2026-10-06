@@ -36,6 +36,14 @@ type resolver struct {
 	deploy *deployState
 	states map[ids.WorkspaceID]*wsState
 	topics map[ids.WorkspaceID]*publish.Topic[*frontendv1.FooterView]
+	// accounts is every account root's usage evidence, keyed by the root's
+	// path and shared by the workspaces bound to it (account.go).
+	accounts map[string]*accountUsage
+
+	// persistMu orders the usage writes, which run outside mu; persisted is
+	// the generation each root last wrote.
+	persistMu sync.Mutex
+	persisted map[string]uint64
 }
 
 // newResolver builds the resolver with the injectable knobs resolved.
@@ -62,11 +70,20 @@ func newResolver(colors vocab.RenderColors, log dlog.Surfaces, opts ...Option) (
 	if o.transientWindow <= 0 {
 		return nil, fmt.Errorf("footer resolver needs a positive transient window, got %s", o.transientWindow)
 	}
+	accounts := map[string]*accountUsage{}
+	for _, rec := range o.usages {
+		if rec.ConfigDir == "" {
+			return nil, fmt.Errorf("footer resolver handed stored account usage for no account root")
+		}
+		accounts[rec.ConfigDir] = usageFromRecord(rec)
+	}
 	return &resolver{
-		log:    log,
-		opts:   o,
-		states: map[ids.WorkspaceID]*wsState{},
-		topics: map[ids.WorkspaceID]*publish.Topic[*frontendv1.FooterView]{},
+		log:       log,
+		opts:      o,
+		states:    map[ids.WorkspaceID]*wsState{},
+		topics:    map[ids.WorkspaceID]*publish.Topic[*frontendv1.FooterView]{},
+		accounts:  accounts,
+		persisted: map[string]uint64{},
 	}, nil
 }
 
@@ -185,11 +202,8 @@ func (r *resolver) mutate(ws ids.WorkspaceID, operation, message string, ctx dlo
 	s := r.stateLocked(ws)
 	s.seen = true
 	blockBefore := s.vendorBlock()
+	usageBefore, generationBefore, armBefore := s.usage, s.usage.generation, s.usage.arm()
 	apply(s)
-	view := r.render(ws, s)
-	arm, armChanged, previousArm := s.observeArm(view)
-	line, lineChanged, previousLine := s.observeLine(view)
-	jumps := s.drainJumpNotes()
 	log := r.logOf(ws, s)
 	served, servedNow := servedEdge(ws, blockBefore, s, log)
 	// PUBLISHED UNDER THE LOCK THAT RENDERED IT, so views reach the topic in
@@ -198,19 +212,80 @@ func (r *resolver) mutate(ws ids.WorkspaceID, operation, message string, ctx dlo
 	// newer one on the wire (2026-10-02: the roster walked submitting, ready,
 	// thinking for an accepted prompt). Topic.Publish only enqueues, so it
 	// never waits on a subscriber.
-	r.topicLocked(ws).Publish(view)
+	own := r.publishLocked(ws, s)
+	// THE ACCOUNT'S USAGE MOVED: every other workspace on the same root draws
+	// it now, and the root's evidence is kept durable.
+	var (
+		peers []publication
+		write *usageWrite
+	)
+	usageMoved := s.usage != usageBefore || s.usage.generation != generationBefore
+	if usageMoved {
+		for _, peer := range r.peersLocked(ws, s.account) {
+			peers = append(peers, r.publishLocked(peer, r.states[peer]))
+		}
+		if s.account != "" && s.usage.observed() {
+			write = &usageWrite{generation: s.usage.generation, record: s.usage.record(s.account)}
+		}
+	}
+	armAfter := s.usage.arm()
 	r.mu.Unlock()
 
 	if ctx == nil {
 		ctx = dlog.Context{}
 	}
-	log.Debug(operation, message, ctx)
-	logArmChange(log, operation, arm, armChanged, previousArm)
-	logLineChange(log, operation, arm, line, lineChanged, previousLine)
-	logJumpNotes(log, jumps)
+	own.log(operation, message, ctx)
+	for _, peer := range peers {
+		peer.log(operation, "the footer redrew the account's usage another workspace on the root learned", ctx)
+	}
+	if usageMoved {
+		record := log.Debug
+		if armAfter != armBefore {
+			record = log.Info
+		}
+		record("daemon.footer.account_usage", "the account's usage evidence changed", dlog.Context{
+			"config_dir": s.account, "arm": armAfter, "previous_arm": armBefore,
+			"peers": len(peers), "cause": operation,
+		})
+	}
+	if write != nil {
+		r.persistUsage(*write)
+	}
 	if servedNow {
 		r.tellVendorServes(operation, []vendorServed{served})
 	}
+}
+
+// publication is one workspace's view as published under the lock, with what
+// its records need once the lock is released.
+type publication struct {
+	logger       dlog.Logger
+	arm          string
+	armChanged   bool
+	previousArm  string
+	line         activityLine
+	lineChanged  bool
+	previousLine activityLine
+	jumps        []dlog.Context
+}
+
+// publishLocked renders the workspace's view, notes what moved, and publishes
+// it. The caller holds the lock.
+func (r *resolver) publishLocked(ws ids.WorkspaceID, s *wsState) publication {
+	view := r.render(ws, s)
+	p := publication{logger: r.logOf(ws, s), jumps: s.drainJumpNotes()}
+	p.arm, p.armChanged, p.previousArm = s.observeArm(view)
+	p.line, p.lineChanged, p.previousLine = s.observeLine(view)
+	r.topicLocked(ws).Publish(view)
+	return p
+}
+
+// log writes the publication's records, after the lock is released.
+func (p publication) log(operation, message string, ctx dlog.Context) {
+	p.logger.Debug(operation, message, ctx)
+	logArmChange(p.logger, operation, p.arm, p.armChanged, p.previousArm)
+	logLineChange(p.logger, operation, p.arm, p.line, p.lineChanged, p.previousLine)
+	logJumpNotes(p.logger, p.jumps)
 }
 
 // logArmChange records the PUBLISHED status arm whenever it changes, and only
@@ -260,18 +335,6 @@ func logLineChange(log dlog.Logger, operation, arm string, line activityLine, ch
 // published at all until its first fact, and a daemon fault is not the fact
 // that makes a workspace's strip exist.
 func (r *resolver) mutateAll(operation, message string, ctx dlog.Context, apply func(*wsState), global func()) {
-	type publication struct {
-		topic        *publish.Topic[*frontendv1.FooterView]
-		view         *frontendv1.FooterView
-		log          dlog.Logger
-		arm          string
-		armChanged   bool
-		previousArm  string
-		line         activityLine
-		lineChanged  bool
-		previousLine activityLine
-		jumps        []dlog.Context
-	}
 	r.mu.Lock()
 	global()
 	out := make([]publication, 0, len(r.states))
@@ -285,20 +348,9 @@ func (r *resolver) mutateAll(operation, message string, ctx dlog.Context, apply 
 		if edge, ok := servedEdge(ws, blockBefore, s, r.logOf(ws, s)); ok {
 			served = append(served, edge)
 		}
-		view := r.render(ws, s)
-		arm, armChanged, previousArm := s.observeArm(view)
-		line, lineChanged, previousLine := s.observeLine(view)
-		out = append(out, publication{
-			topic: r.topicLocked(ws), view: view, log: r.logOf(ws, s),
-			arm: arm, armChanged: armChanged, previousArm: previousArm,
-			line: line, lineChanged: lineChanged, previousLine: previousLine,
-			jumps: s.drainJumpNotes(),
-		})
-	}
-	// Published under the lock that rendered them, for the reason mutate
-	// states.
-	for _, p := range out {
-		p.topic.Publish(p.view)
+		// Published under the lock that rendered them, for the reason mutate
+		// states.
+		out = append(out, r.publishLocked(ws, s))
 	}
 	r.mu.Unlock()
 
@@ -307,10 +359,7 @@ func (r *resolver) mutateAll(operation, message string, ctx dlog.Context, apply 
 	}
 	r.log.Global().Debug(operation, message, ctx)
 	for _, p := range out {
-		p.log.Debug(operation, message, ctx)
-		logArmChange(p.log, operation, p.arm, p.armChanged, p.previousArm)
-		logLineChange(p.log, operation, p.arm, p.line, p.lineChanged, p.previousLine)
-		logJumpNotes(p.log, p.jumps)
+		p.log(operation, message, ctx)
 	}
 	r.tellVendorServes(operation, served)
 }
@@ -867,11 +916,18 @@ func anyWindowOpen(d *conversationv1.SessionDiagnostics) bool {
 	return false
 }
 
-// observeAccountUsage takes one usage sample and files BOTH windows' figures:
-// five_hour is the session allowance, seven_day the weekly one. A sample that
-// could read no figure (the unavailable arm) leaves the figures on hand
-// standing, and a sample whose seven_day window the vendor omitted leaves the
-// weekly allowance unfigured, which draws it absent rather than invented.
+// observeAccountUsage takes one usage sample and files BOTH windows' figures
+// on the ACCOUNT's evidence (account.go): five_hour is the session allowance,
+// seven_day the weekly one. A sample that could read no figure (the
+// unavailable arm) leaves the figures on hand standing, and a sample whose
+// seven_day window the vendor omitted leaves the weekly allowance unfigured,
+// which draws it absent rather than invented.
+//
+// A SAMPLE THE SERVICE ANSWERED WITHOUT A FIVE-HOUR WINDOW is a fact about the
+// account, not a failure: an account billed by spend has no allowance window
+// to report (live, 2026-10-06: the enterprise seat's usage answer carries
+// five_hour null). It marks the account `noAllowance`, which the enduring line
+// draws in words until any figure arrives.
 //
 // The strip renders the figures LAST READ; an unreadable attempt leaves the
 // figures standing. The strip no longer draws a "usage unread" line (owner
@@ -881,22 +937,31 @@ func (r *resolver) observeAccountUsage(ws ids.WorkspaceID, s *wsState, usage *co
 	if usage == nil {
 		return
 	}
+	account := s.usage
 	available, ok := usage.GetOutcome().(*conversationv1.SessionAccountUsage_Available)
 	if !ok {
 		r.logUnreadableSample(ws, s, usage)
+		if usage.GetUnavailable().GetWindowUnavailable() != nil {
+			account.noAllowance = true
+			account.touch(r.opts.clock.Now())
+		}
 		return
 	}
+	// EVERY SAMPLE THE ACCOUNT'S SESSIONS TAKE IS COMPARED BY ITS SHIM STAMP.
+	// The account's workspaces run separate shims, but on one machine: their
+	// stamps are one wall clock, so an older sample is refused whichever
+	// workspace took it.
 	at := usage.GetObservedAtMs()
 	moved := false
 	if five := available.Available.GetFiveHour(); five != nil {
-		moved = s.rate.session.observeSampledFigures(five.GetUtilizationPercent(), five.GetResetsAtMs(), at) || moved
+		moved = account.rate.session.observeSampledFigures(five.GetUtilizationPercent(), five.GetResetsAtMs(), at) || moved
 	}
 	if seven := available.Available.GetSevenDay(); seven != nil {
-		moved = s.rate.weekly.observeSampledFigures(seven.GetUtilizationPercent(), seven.GetResetsAtMs(), at) || moved
+		moved = account.rate.weekly.observeSampledFigures(seven.GetUtilizationPercent(), seven.GetResetsAtMs(), at) || moved
 	}
 	if moved {
-		now := r.opts.clock.Now()
-		s.rate.at = now
+		account.noAllowance = false
+		account.touch(r.opts.clock.Now())
 	}
 }
 
@@ -954,25 +1019,27 @@ func (r *resolver) observeRateLimitStatus(s *wsState, status *conversationv1.Ses
 	if status == nil {
 		return
 	}
+	account := s.usage
 	var window *allowanceWindow
 	switch status.GetRateLimitType().GetWindow().(type) {
 	case *conversationv1.SessionRateLimitType_FiveHour:
-		window = &s.rate.session
+		window = &account.rate.session
 	case *conversationv1.SessionRateLimitType_SevenDay,
 		*conversationv1.SessionRateLimitType_SevenDayOpus,
 		*conversationv1.SessionRateLimitType_SevenDaySonnet,
 		*conversationv1.SessionRateLimitType_SevenDayOverageIncluded:
-		window = &s.rate.weekly
+		window = &account.rate.weekly
 	case *conversationv1.SessionRateLimitType_Overage:
-		window = &s.rate.overage
+		window = &account.rate.overage
 	default:
 		return
 	}
-	window.verdict = status
+	window.verdict = verdictOf(status)
 	if status.UtilizationPercent != nil {
 		window.observeEventFigures(status.GetUtilizationPercent(), status.GetResetsAtMs())
+		account.noAllowance = false
 	}
-	s.rate.at = r.opts.clock.Now()
+	account.touch(r.opts.clock.Now())
 }
 
 // OnQuestion moves the footer to waiting.

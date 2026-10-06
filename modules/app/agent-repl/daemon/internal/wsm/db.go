@@ -263,6 +263,12 @@ type DB interface {
 	// SidebarView loads the sidebar's view state that belongs to no row, or
 	// DefaultSidebarView when nobody has changed it.
 	SidebarView(ctx context.Context) (SidebarView, error)
+	// SetAccountUsage records an account root's last usage evidence,
+	// replacing what the root had.
+	SetAccountUsage(ctx context.Context, usage AccountUsage) error
+	// AccountUsages loads every account root's last usage evidence,
+	// all-or-nothing.
+	AccountUsages(ctx context.Context) ([]AccountUsage, error)
 	// AssignWorkspaceTask assigns a workspace to a task, or unassigns it when
 	// task is nil.
 	AssignWorkspaceTask(ctx context.Context, id WorkspaceID, task *TaskID) error
