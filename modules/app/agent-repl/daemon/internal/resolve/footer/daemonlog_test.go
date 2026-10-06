@@ -78,7 +78,7 @@ func TestAFooterRecordNeverFeedsBack(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		h.r.OnSubmission(testWS, Submission{Prompt: "p", Stage: SubmissionStage(255)})
+		h.r.OnSubmission(testWS, Submission{Stage: SubmissionStage(255)})
 	}()
 	select {
 	case <-done:

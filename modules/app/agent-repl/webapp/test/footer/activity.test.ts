@@ -417,7 +417,7 @@ describe("the unpinned tiers under working and background", () => {
     (statusCase) => {
       const { cell } = drawCell(
         statusCase,
-        unpinnedInit(transientInit("toolCall", { tool: "Read" })),
+        unpinnedInit(transientInit("hook", { name: "fmt" })),
       );
       expect(cell.getAttribute("data-tier")).toBe("transient");
     },
@@ -430,8 +430,8 @@ describe("the unpinned tiers under working and background", () => {
         statusCase,
         unpinnedInit(
           transientInit(
-            "toolCall",
-            { tool: "Read" },
+            "hook",
+            { name: "fmt" },
             { expiresAtMs: BigInt(NOW) },
           ),
         ),
@@ -968,70 +968,10 @@ describe("the update line: a deploy's progress", () => {
 describe("the transient kinds", () => {
   it.each([
     [
-      "toolCall",
-      { tool: "Bash", summary: "npm test" },
-      ".footer-activity-tool-call",
-      "Bash: npm test",
-    ],
-    [
-      "toolCall",
-      { tool: "TodoWrite" },
-      ".footer-activity-tool-call",
-      "TodoWrite",
-    ],
-    [
       "task",
       { subject: "port the footer", completed: 3, total: 7 },
       ".footer-activity-task",
       "port the footer · 3/7",
-    ],
-    [
-      "submitting",
-      {
-        promptLead: "fix the footer",
-        stage: { case: "held", value: { position: 2, queued: 3 } },
-      },
-      ".footer-activity-submitting",
-      "queued 2/3 · fix the footer",
-    ],
-    [
-      "submitting",
-      {
-        promptLead: "fix the footer",
-        stage: { case: "classifying", value: {} },
-      },
-      ".footer-activity-submitting",
-      "classifying · fix the footer",
-    ],
-    [
-      "submitting",
-      {
-        promptLead: "fix the footer",
-        stage: { case: "interjecting", value: {} },
-      },
-      ".footer-activity-submitting",
-      "interrupting the turn · fix the footer",
-    ],
-    [
-      "submitting",
-      { promptLead: "fix the footer", stage: { case: "coalesced", value: {} } },
-      ".footer-activity-submitting",
-      "coalesced · fix the footer",
-    ],
-    [
-      "submitting",
-      {
-        promptLead: "fix the footer",
-        stage: { case: "afterToolCall", value: {} },
-      },
-      ".footer-activity-submitting",
-      "after this tool call · fix the footer",
-    ],
-    [
-      "submitting",
-      { promptLead: "fix the footer", stage: { case: "delivered", value: {} } },
-      ".footer-activity-submitting",
-      "sent · fix the footer",
     ],
     [
       "hook",
@@ -1117,34 +1057,6 @@ describe("the transient kinds", () => {
     expect(cell.getAttribute("data-arm")).toBe("compactionConcluded");
   });
 
-  it("refuses a submitting transient whose stage sets no arm", () => {
-    expect(() => transientCell("submitting", { promptLead: "x" })).toThrow(
-      MalformedView,
-    );
-  });
-
-  it("colours a held prompt's place in the queue as a figure", () => {
-    const cell = transientCell("submitting", {
-      promptLead: "x",
-      stage: { case: "held", value: { position: 1, queued: 2 } },
-    });
-    expect(cell.querySelector('[data-datum="position"]')?.className).toBe(
-      activityDatumClass("position"),
-    );
-  });
-
-  it("stamps the submitting line with its stage", () => {
-    const cell = transientCell("submitting", {
-      promptLead: "x",
-      stage: { case: "classifying", value: {} },
-    });
-    expect(
-      cell
-        .querySelector(".footer-activity-submitting")
-        ?.getAttribute("data-stage"),
-    ).toBe("classifying");
-  });
-
   it("colours the task tracker's progress as a figure", () => {
     const cell = transientCell("task", {
       subject: "port",
@@ -1219,19 +1131,19 @@ describe("the transient kinds", () => {
 
   it("prefixes the subagent's label when the transient came from one", () => {
     const cell = transientCell(
-      "toolCall",
-      { tool: "Bash", summary: "ls" },
+      "hook",
+      { name: "fmt" },
       { agent: "Explore" },
     );
     expect(cell.querySelector(".footer-activity-transient")?.textContent).toBe(
-      "Explore · Bash: ls",
+      "Explore · fmt",
     );
   });
 
   it("colours the subagent's label as an identity", () => {
     const cell = transientCell(
-      "toolCall",
-      { tool: "Bash" },
+      "hook",
+      { name: "fmt" },
       { agent: "Explore" },
     );
     expect(cell.querySelector('[data-datum="agent"]')?.className).toContain(
@@ -1240,7 +1152,7 @@ describe("the transient kinds", () => {
   });
 
   it("draws no prefix for the main agent's work", () => {
-    const cell = transientCell("toolCall", { tool: "Bash" });
+    const cell = transientCell("hook", { name: "fmt" });
     expect(cell.querySelector('[data-datum="agent"]')).toBeNull();
   });
 

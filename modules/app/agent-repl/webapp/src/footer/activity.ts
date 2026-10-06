@@ -44,10 +44,7 @@ import type {
   FooterActivityTransientNetworkResume,
   FooterActivityTransientOverEnduring,
   FooterActivityTransientSessionChange,
-  FooterActivityTransientSubmitting,
-  FooterActivityTransientSubmittingHeld,
   FooterActivityTransientTask,
-  FooterActivityTransientToolCall,
   FooterActivityTransientUpdated,
   FooterAllowance,
   FooterStatusActivityAt,
@@ -446,7 +443,7 @@ export function drawFooterStatusActivityContextBudget(
 
 /**
  * One transient line, with the subagent it came from in front when it came
- * from one: "Explore · Bash: npm test". The label is an identity, so it wears
+ * from one: "Explore · write the tests · 3/7". The label is an identity, so it wears
  * the identity colour; the main agent's work carries no prefix.
  */
 export function drawFooterActivityTransient(
@@ -476,12 +473,8 @@ function drawTransientKind(
   path: string,
 ): HTMLElement {
   switch (kind.case) {
-    case "toolCall":
-      return drawFooterActivityTransientToolCall(kind.value);
     case "task":
       return drawFooterActivityTransientTask(kind.value);
-    case "submitting":
-      return drawFooterActivityTransientSubmitting(kind.value, path);
     case "hook":
       return drawFooterActivityTransientHook(kind.value);
     case "contextInjected":
@@ -510,18 +503,6 @@ function drawTransientKind(
 }
 
 /**
- * A tool call starting: "Bash: npm test", the tool's name then the daemon's
- * gist — the gated call's shape — and the name alone when the call carried
- * nothing worth a line.
- */
-export function drawFooterActivityTransientToolCall(
-  u: FooterActivityTransientToolCall,
-): HTMLElement {
-  const text = u.summary === undefined ? u.tool : `${u.tool}: ${u.summary}`;
-  return textLine("footer-activity-tool-call", text);
-}
-
-/**
  * The task tracker moving: the task's subject, then the tracker's progress
  * "3/7" as the figure it is — the tasks chip's own fraction.
  */
@@ -537,60 +518,6 @@ export function drawFooterActivityTransientTask(
   progress.textContent = `${u.completed}/${u.total}`;
   line.appendChild(progress);
   return line;
-}
-
-/**
- * A prompt's delivery moving: the stage it reached, then the prompt's first
- * line, "queued 2/3 · fix the flaky test". The stage leads, because it is what
- * changed and the line ellipsizes from its end.
- */
-export function drawFooterActivityTransientSubmitting(
-  u: FooterActivityTransientSubmitting,
-  path: string,
-): HTMLElement {
-  const stage = requireCase(u.stage, `${path}.stage`);
-  const line = document.createElement("span");
-  line.className = "footer-activity-submitting";
-  line.setAttribute("data-stage", stage.case);
-  switch (stage.case) {
-    case "held":
-      appendHeldPlace(line, stage.value);
-      break;
-    case "classifying":
-      line.appendChild(document.createTextNode("classifying"));
-      break;
-    case "interjecting":
-      line.appendChild(document.createTextNode("interrupting the turn"));
-      break;
-    case "afterToolCall":
-      line.appendChild(document.createTextNode("after this tool call"));
-      break;
-    case "coalesced":
-      line.appendChild(document.createTextNode("coalesced"));
-      break;
-    case "delivered":
-      line.appendChild(document.createTextNode("sent"));
-      break;
-    default: {
-      const other: { case: string } = stage;
-      return unreachableArm(`${path}.stage`, other.case);
-    }
-  }
-  line.appendChild(document.createTextNode(` · ${u.promptLead}`));
-  return line;
-}
-
-/** "queued 2/3": the prompt's place in the queue, as the figure it is. */
-function appendHeldPlace(
-  line: HTMLElement,
-  held: FooterActivityTransientSubmittingHeld,
-): void {
-  line.appendChild(document.createTextNode("queued "));
-  const place = document.createElement("span");
-  place.className = activityDatumClass("position");
-  place.setAttribute("data-datum", "position");
-  place.textContent = `${held.position}/${held.queued}`;
-  line.appendChild(place);
 }
 
 /** The running hook's name. */

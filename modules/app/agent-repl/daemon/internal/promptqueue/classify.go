@@ -103,7 +103,7 @@ func (q *queue) hold(ctx context.Context, sub Submission, running ids.TurnID, le
 		q.reportHeld(ctx, sub, log)
 		return disposition, nil
 	}
-	q.deps.Footer.OnSubmission(sub.WS, footer.Submission{Prompt: saidText(sub.Said), Stage: footer.StageClassifying})
+	q.deps.Footer.OnSubmission(sub.WS, footer.Submission{Stage: footer.StageClassifying})
 
 	// THE VERDICT IS ASYNCHRONOUS. The tray's `classifying` arm exists exactly
 	// so the submission is answered now and the judge's round trip does not sit
@@ -441,7 +441,7 @@ func (q *queue) reportHeld(ctx context.Context, sub Submission, log dlog.Logger)
 		return
 	}
 	q.deps.Footer.OnSubmission(sub.WS, footer.Submission{
-		Prompt: saidText(sub.Said), Stage: footer.StageHeld, Position: position, Queued: queued,
+		Stage: footer.StageHeld, Position: position, Queued: queued,
 	})
 }
 
@@ -580,7 +580,7 @@ func (q *queue) registerInterjection(ctx context.Context, sub Submission, runnin
 	state.interrupting = true
 	q.mu.Unlock()
 	q.deps.Footer.SetInterrupting(sub.WS, true)
-	q.deps.Footer.OnSubmission(sub.WS, footer.Submission{Prompt: saidText(sub.Said), Stage: footer.StageInterjecting})
+	q.deps.Footer.OnSubmission(sub.WS, footer.Submission{Stage: footer.StageInterjecting})
 	log.Info(opInterject, "the prompt jumped the queue and the interrupt was registered",
 		dlog.Context{"turn": string(sub.Turn), "interrupted_turn": string(running)})
 	return true
