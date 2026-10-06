@@ -108,6 +108,7 @@
 (declare-function get-buffer-xwidgets "xwidget.c" (buffer))
 (declare-function xwidget-view-lookup "xwidget.c" (xwidget &optional window))
 (declare-function evil-define-key* "evil-core" (state keymap key def &rest bindings))
+(declare-function agent-repl-bind-feed-zoom-keys "core" (map))
 (declare-function evil-normalize-keymaps "evil-core" (&optional state))
 
 (defvar xwidget-webkit-buffer-name-format)
