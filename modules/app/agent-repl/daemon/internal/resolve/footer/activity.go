@@ -151,6 +151,11 @@ func (r *resolver) vendorFaultActivity(s *wsState) *frontendv1.FooterStatusVendo
 		line = salient(s.authLine.at)
 		line.Kind = &frontendv1.FooterStatusVendorFaultSalient_Authenticating{
 			Authenticating: &frontendv1.FooterStatusActivityAuthenticating{Line: s.authLine.text}}
+	case s.vendorTurnFault():
+		// HOW THE VENDOR ENDED THE LAST TURN: the per-cause sentence, with
+		// the vendor's wait counted down when it stated one.
+		line = salient(s.turnFault.at)
+		line.Kind = &frontendv1.FooterStatusVendorFaultSalient_TurnEnded{TurnEnded: s.turnEndedLine()}
 	case s.blocked == nil && s.retryBlocks():
 		// The `api_retrying` substatus always draws its retry line.
 		line = salient(s.retrying.at)
@@ -216,6 +221,11 @@ func (r *resolver) agentReplFaultActivity(s *wsState, log dlog.Logger) *frontend
 	case fault != nil:
 		line = salient(faultAt)
 		line.Kind = &frontendv1.FooterStatusAgentReplFaultSalient_Fault{Fault: fault}
+	case s.agentReplTurnFault():
+		// HOW AGENT-REPL'S MACHINERY ENDED THE LAST TURN: the query died, or
+		// the agent process did.
+		line = salient(s.turnFault.at)
+		line.Kind = &frontendv1.FooterStatusAgentReplFaultSalient_TurnEnded{TurnEnded: s.turnEndedLine()}
 	case sharedOK:
 		line = fillShared(&frontendv1.FooterStatusAgentReplFaultSalient{}, shared)
 	default:

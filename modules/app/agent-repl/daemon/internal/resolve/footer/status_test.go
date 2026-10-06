@@ -11,8 +11,10 @@ import (
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/resolve/turnfault"
 	"claude-repld/internal/shimclient"
 	"claude-repld/internal/vocab"
+	"claude-repld/internal/wsm"
 )
 
 // connected puts a serving link under the workspace so the disconnected arm —
@@ -332,26 +334,53 @@ func TestATurnOutranksBackground(t *testing.T) {
 	}
 }
 
-// A DEAD QUERY IS A FAILED TURN, NOT A BLOCK (owner ruling, 2026-09-28):
-// `blocked` is only for the vendor or the account, and the next prompt
-// restarts a dead query.
+// A DEAD QUERY IS AGENT-REPL'S FAULT, NOT A BLOCK (owner rulings, 2026-09-28
+// and 2026-10-06): the turn it cut raises `agent_repl_fault · turn_died` from
+// its close, and the next prompt restarts a dead query.
 
-func TestAQueryDeathFailsTheTurnItCut(t *testing.T) {
+// queryDied is the session's query_died push.
+func queryDied() *conversationv1.SessionUpdate {
+	return &conversationv1.SessionUpdate{
+		Update: &conversationv1.SessionUpdate_QueryDied{QueryDied: &conversationv1.SessionQueryDied{}},
+	}
+}
+
+// failTurn ends the turn in flight with its terminal's failure, then with the
+// close the prompt queue's door reports for it.
+func failTurn(h *harness, failure *conversationv1.AgentFailure) {
+	turn := testTurnID
+	h.r.OnAgentTerminal(testWS, mainAgent, &turn, nil, failure)
+	h.r.SetTurnEnded(testWS, wsm.CloseFailed)
+}
+
+func TestAQueryDeathRaisesTheTurnDiedFaultFromItsClose(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+	h.r.OnSessionUpdate(testWS, queryDied())
+
+	// Act
+	h.r.SetTurnEnded(testWS, wsm.CloseFailed)
+
+	// Assert
+	if h.view(t).GetStrip().GetStatus().GetAgentReplFault().GetTurnDied() == nil {
+		t.Fatalf("status = %q, want agent_repl_fault · turn_died", h.status(t))
+	}
+}
+
+func TestAQueryDeathRaisesNoFaultBeforeTheTurnsClose(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	connected(h)
 	h.r.SetTurn(testWS, &TurnStarted{At: instant})
 
 	// Act
-	h.r.OnSessionUpdate(testWS, &conversationv1.SessionUpdate{
-		Update: &conversationv1.SessionUpdate_QueryDied{
-			QueryDied: &conversationv1.SessionQueryDied{},
-		},
-	})
+	h.r.OnSessionUpdate(testWS, queryDied())
 
 	// Assert
-	if h.view(t).GetStrip().GetStatus().GetTurnFailed() == nil {
-		t.Fatalf("status = %q, want turn_failed", h.status(t))
+	if h.view(t).GetStrip().GetStatus().GetAgentReplFault() != nil {
+		t.Fatalf("status = %q, want no fault until the close raises it", h.status(t))
 	}
 }
 
@@ -361,11 +390,7 @@ func TestAQueryDeathWithNoTurnDoesNotBlock(t *testing.T) {
 	connected(h)
 
 	// Act
-	h.r.OnSessionUpdate(testWS, &conversationv1.SessionUpdate{
-		Update: &conversationv1.SessionUpdate_QueryDied{
-			QueryDied: &conversationv1.SessionQueryDied{},
-		},
-	})
+	h.r.OnSessionUpdate(testWS, queryDied())
 
 	// Assert
 	if got := h.status(t); got != "idle" {
@@ -373,46 +398,34 @@ func TestAQueryDeathWithNoTurnDoesNotBlock(t *testing.T) {
 	}
 }
 
-func TestAQueryDeathStandsItsLineUnderTheFailedTurn(t *testing.T) {
+func TestAQueryDeathWithNoTurnStandsTheDeadQueryLine(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	connected(h)
-	h.r.SetTurn(testWS, &TurnStarted{At: instant})
 
 	// Act
-	h.r.OnSessionUpdate(testWS, &conversationv1.SessionUpdate{
-		Update: &conversationv1.SessionUpdate_QueryDied{
-			QueryDied: &conversationv1.SessionQueryDied{},
-		},
-	})
+	h.r.OnSessionUpdate(testWS, queryDied())
 
 	// Assert
-	if h.view(t).GetStrip().GetStatus().GetTurnFailed().GetActivity().GetSalient().GetQueryDied().GetText() == "" {
+	if h.view(t).GetStrip().GetStatus().GetIdle().GetActivity().GetSalient().GetQueryDied().GetText() == "" {
 		t.Fatalf("the dead-query line is missing")
 	}
 }
 
-func TestAQueryDeathKeepsItsLineUnderTheTurnsFailure(t *testing.T) {
+func TestATurnDiedFaultCarriesTheQueryDeathsSentence(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	connected(h)
-	turn := testTurnID
 	h.r.SetTurn(testWS, &TurnStarted{At: instant})
-	h.r.OnSessionUpdate(testWS, &conversationv1.SessionUpdate{
-		Update: &conversationv1.SessionUpdate_QueryDied{QueryDied: &conversationv1.SessionQueryDied{}},
-	})
+	h.r.OnSessionUpdate(testWS, queryDied())
 
 	// Act
-	h.r.OnAgentTerminal(testWS, mainAgent, &turn, nil, &conversationv1.AgentFailure{
-		Failure: &conversationv1.AgentFailure_ExecutionError{
-			ExecutionError: &conversationv1.AgentExecutionError{},
-		},
-	})
+	h.r.SetTurnEnded(testWS, wsm.CloseFailed)
 
 	// Assert
-	failed := h.view(t).GetStrip().GetStatus().GetTurnFailed()
-	if failed.GetActivity().GetSalient().GetQueryDied().GetText() == "" {
-		t.Fatalf("the dead-query line is missing: activity = %+v", failed.GetActivity())
+	got := h.view(t).GetStrip().GetStatus().GetAgentReplFault().GetActivity().GetSalient().GetTurnEnded().GetText()
+	if want := turnfault.OfQueryDeath(&conversationv1.SessionQueryDied{}).Sentence; got != want {
+		t.Fatalf("turn_ended line = %q, want %q", got, want)
 	}
 }
 
@@ -424,23 +437,20 @@ func queryDiedFailure() *conversationv1.AgentFailure {
 	}
 }
 
-// TestAQueryDeathFailsTheTurnWhicheverStatementArrivesFirst: the session's
+// TestAQueryDeathRaisesTurnDiedWhicheverStatementArrivesFirst: the session's
 // query_died push and the turn's query_died terminal travel by independent
-// channels, so the turn reads failed in either order.
-func TestAQueryDeathFailsTheTurnWhicheverStatementArrivesFirst(t *testing.T) {
-	died := &conversationv1.SessionUpdate{
-		Update: &conversationv1.SessionUpdate_QueryDied{QueryDied: &conversationv1.SessionQueryDied{}},
-	}
+// channels, so the turn's close raises the same fault in either order.
+func TestAQueryDeathRaisesTurnDiedWhicheverStatementArrivesFirst(t *testing.T) {
 	cases := []struct {
 		name string
 		act  func(h *harness, turn *ids.TurnID)
 	}{
 		{name: "the terminal first, then the push", act: func(h *harness, turn *ids.TurnID) {
 			h.r.OnAgentTerminal(testWS, mainAgent, turn, nil, queryDiedFailure())
-			h.r.OnSessionUpdate(testWS, died)
+			h.r.OnSessionUpdate(testWS, queryDied())
 		}},
 		{name: "the push first, then the terminal", act: func(h *harness, turn *ids.TurnID) {
-			h.r.OnSessionUpdate(testWS, died)
+			h.r.OnSessionUpdate(testWS, queryDied())
 			h.r.OnAgentTerminal(testWS, mainAgent, turn, nil, queryDiedFailure())
 		}},
 	}
@@ -451,34 +461,16 @@ func TestAQueryDeathFailsTheTurnWhicheverStatementArrivesFirst(t *testing.T) {
 			connected(h)
 			turn := testTurnID
 			h.r.SetTurn(testWS, &TurnStarted{At: instant})
-
-			// Act
 			tc.act(h, &turn)
 
+			// Act
+			h.r.SetTurnEnded(testWS, wsm.CloseFailed)
+
 			// Assert
-			if h.view(t).GetStrip().GetStatus().GetTurnFailed() == nil {
-				t.Fatalf("status = %q, want turn_failed", h.status(t))
+			if h.view(t).GetStrip().GetStatus().GetAgentReplFault().GetTurnDied() == nil {
+				t.Fatalf("status = %q, want agent_repl_fault · turn_died", h.status(t))
 			}
 		})
-	}
-}
-
-// TestAQueryDiedTerminalStandsTheDeadQueryLine: the terminal is the death too,
-// so the strip carries the dead-query line before the push lands.
-func TestAQueryDiedTerminalStandsTheDeadQueryLine(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	connected(h)
-	turn := testTurnID
-	h.r.SetTurn(testWS, &TurnStarted{At: instant})
-
-	// Act
-	h.r.OnAgentTerminal(testWS, mainAgent, &turn, nil, queryDiedFailure())
-
-	// Assert
-	failed := h.view(t).GetStrip().GetStatus().GetTurnFailed()
-	if failed.GetActivity().GetSalient().GetQueryDied().GetText() == "" {
-		t.Fatalf("the dead-query line is missing: activity = %+v", failed.GetActivity())
 	}
 }
 
@@ -552,82 +544,102 @@ func TestABlockingLimitBlocksOnUsage(t *testing.T) {
 }
 
 // A model error is TRANSIENT (owner ruling, 2026-09-28): the workspace stays
-// usable, so it fails the turn rather than blocking the session.
-func TestAModelErrorFailsTheTurn(t *testing.T) {
+// usable, so it raises no block, only the vendor turn fault (owner ruling,
+// 2026-10-06).
+func TestAModelErrorRaisesTheVendorErrorTurnFault(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	connected(h)
-	turn := testTurnID
 	h.r.SetTurn(testWS, &TurnStarted{At: instant})
 
 	// Act
-	h.r.OnAgentTerminal(testWS, mainAgent, &turn, nil, &conversationv1.AgentFailure{
+	failTurn(h, &conversationv1.AgentFailure{
 		Failure: &conversationv1.AgentFailure_ModelError{ModelError: &conversationv1.AgentModelError{}},
 	})
 
 	// Assert
-	if h.view(t).GetStrip().GetStatus().GetTurnFailed() == nil {
-		t.Fatalf("status = %q, want turn_failed", h.status(t))
+	if h.view(t).GetStrip().GetStatus().GetVendorFault().GetVendorError() == nil {
+		t.Fatalf("status = %q, want vendor_fault · vendor_error", h.status(t))
 	}
 }
 
-// TestEveryAgentFailureArmTakesItsClassifiedStatus walks every AgentFailure
-// arm (owner ruling, 2026-09-28): the vendor's or the account's block, the
-// turn's own failure, or an expected stop that reads as a completion.
-func TestEveryAgentFailureArmTakesItsClassifiedStatus(t *testing.T) {
+// TestEveryAgentFailureArmTakesItsFaultsStatus walks every AgentFailure arm
+// through the turn's close (owner ruling, 2026-10-06): every cause the vendor
+// ended or refused is a vendor fault (its own block's step when it blocks the
+// session, `vendor_error` otherwise), the query dying is `agent_repl_fault ·
+// turn_died`, and an expected stop reads as a completion.
+func TestEveryAgentFailureArmTakesItsFaultsStatus(t *testing.T) {
+	api := func(kind any) *conversationv1.AgentFailure {
+		failed := &conversationv1.ApiRequestFailed{}
+		switch k := kind.(type) {
+		case *conversationv1.ApiRequestFailed_Overloaded:
+			failed.Kind = k
+		}
+		return &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ApiRequestFailed{ApiRequestFailed: failed}}
+	}
 	cases := []struct {
 		name    string
 		failure *conversationv1.AgentFailure
 		want    string
 	}{
-		{name: "api_request_failed of an unstated kind", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ApiRequestFailed{ApiRequestFailed: &conversationv1.ApiRequestFailed{}}}, want: "turn_failed"},
-		{name: "api_request_failed: authentication", failure: authFailure(), want: "vendor_fault"},
-		{name: "api_request_failed: overloaded", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ApiRequestFailed{ApiRequestFailed: &conversationv1.ApiRequestFailed{Kind: &conversationv1.ApiRequestFailed_Overloaded{Overloaded: &conversationv1.ApiOverloaded{}}}}}, want: "turn_failed"},
-		{name: "blocking_limit", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_BlockingLimit{BlockingLimit: &conversationv1.AgentStoppedAtBlockingLimit{}}}, want: "vendor_fault"},
-		{name: "rapid_refill_breaker", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_RapidRefillBreaker{RapidRefillBreaker: &conversationv1.AgentStoppedByRapidRefillBreaker{}}}, want: "vendor_fault"},
-		{name: "model_error", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ModelError{ModelError: &conversationv1.AgentModelError{}}}, want: "turn_failed"},
-		{name: "prompt_too_long", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_PromptTooLong{PromptTooLong: &conversationv1.AgentPromptTooLong{}}}, want: "turn_failed"},
-		{name: "image_error", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ImageError{ImageError: &conversationv1.AgentImageRejected{}}}, want: "turn_failed"},
-		{name: "malformed_tool_use_exhausted", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_MalformedToolUseExhausted{MalformedToolUseExhausted: &conversationv1.AgentMalformedToolUseExhausted{}}}, want: "turn_failed"},
-		{name: "stop_hook_prevented", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_StopHookPrevented{StopHookPrevented: &conversationv1.AgentStoppedByStopHook{}}}, want: "done"},
-		{name: "hook_stopped", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_HookStopped{HookStopped: &conversationv1.AgentStoppedByHook{}}}, want: "turn_failed"},
-		{name: "tool_deferred", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ToolDeferred{ToolDeferred: &conversationv1.AgentToolDeferred{}}}, want: "done"},
-		{name: "tool_deferred_unavailable", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ToolDeferredUnavailable{ToolDeferredUnavailable: &conversationv1.AgentToolDeferredUnavailable{}}}, want: "turn_failed"},
-		{name: "max_turns", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_MaxTurns{MaxTurns: &conversationv1.AgentMaxTurnsReached{}}}, want: "turn_failed"},
-		{name: "budget_exhausted", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_BudgetExhausted{BudgetExhausted: &conversationv1.AgentBudgetExhausted{}}}, want: "turn_failed"},
-		{name: "structured_output_retry_exhausted", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_StructuredOutputRetryExhausted{StructuredOutputRetryExhausted: &conversationv1.AgentStructuredOutputRetriesExhausted{}}}, want: "turn_failed"},
-		{name: "turn_setup_failed", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_TurnSetupFailed{TurnSetupFailed: &conversationv1.AgentTurnSetupFailed{}}}, want: "turn_failed"},
-		{name: "execution_error", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ExecutionError{ExecutionError: &conversationv1.AgentExecutionError{}}}, want: "turn_failed"},
-		{name: "continuation_prevented", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ContinuationPrevented{ContinuationPrevented: &conversationv1.AgentContinuationPrevented{}}}, want: "turn_failed"},
-		{name: "lost", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_Lost{Lost: &conversationv1.DetachedLost{}}}, want: "turn_failed"},
-		{name: "query_died", failure: queryDiedFailure(), want: "turn_failed"},
-		{name: "an unset arm", failure: &conversationv1.AgentFailure{}, want: "turn_failed"},
+		{name: "api_request_failed of an unstated kind", failure: api(nil), want: "vendor_fault·vendor_error"},
+		{name: "api_request_failed: authentication", failure: authFailure(), want: "vendor_fault·auth"},
+		{name: "api_request_failed: overloaded", failure: api(&conversationv1.ApiRequestFailed_Overloaded{Overloaded: &conversationv1.ApiOverloaded{}}), want: "vendor_fault·vendor_error"},
+		{name: "blocking_limit", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_BlockingLimit{BlockingLimit: &conversationv1.AgentStoppedAtBlockingLimit{}}}, want: "vendor_fault·usage_limit"},
+		{name: "rapid_refill_breaker", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_RapidRefillBreaker{RapidRefillBreaker: &conversationv1.AgentStoppedByRapidRefillBreaker{}}}, want: "vendor_fault·usage_limit"},
+		{name: "model_error", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ModelError{ModelError: &conversationv1.AgentModelError{}}}, want: "vendor_fault·vendor_error"},
+		{name: "prompt_too_long", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_PromptTooLong{PromptTooLong: &conversationv1.AgentPromptTooLong{}}}, want: "vendor_fault·vendor_error"},
+		{name: "image_error", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ImageError{ImageError: &conversationv1.AgentImageRejected{}}}, want: "vendor_fault·vendor_error"},
+		{name: "malformed_tool_use_exhausted", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_MalformedToolUseExhausted{MalformedToolUseExhausted: &conversationv1.AgentMalformedToolUseExhausted{}}}, want: "vendor_fault·vendor_error"},
+		{name: "stop_hook_prevented", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_StopHookPrevented{StopHookPrevented: &conversationv1.AgentStoppedByStopHook{}}}, want: "idle·done"},
+		{name: "hook_stopped", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_HookStopped{HookStopped: &conversationv1.AgentStoppedByHook{}}}, want: "vendor_fault·vendor_error"},
+		{name: "tool_deferred", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ToolDeferred{ToolDeferred: &conversationv1.AgentToolDeferred{}}}, want: "idle·done"},
+		{name: "tool_deferred_unavailable", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ToolDeferredUnavailable{ToolDeferredUnavailable: &conversationv1.AgentToolDeferredUnavailable{}}}, want: "vendor_fault·vendor_error"},
+		{name: "max_turns", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_MaxTurns{MaxTurns: &conversationv1.AgentMaxTurnsReached{}}}, want: "vendor_fault·vendor_error"},
+		{name: "budget_exhausted", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_BudgetExhausted{BudgetExhausted: &conversationv1.AgentBudgetExhausted{}}}, want: "vendor_fault·vendor_error"},
+		{name: "structured_output_retry_exhausted", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_StructuredOutputRetryExhausted{StructuredOutputRetryExhausted: &conversationv1.AgentStructuredOutputRetriesExhausted{}}}, want: "vendor_fault·vendor_error"},
+		{name: "turn_setup_failed", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_TurnSetupFailed{TurnSetupFailed: &conversationv1.AgentTurnSetupFailed{}}}, want: "vendor_fault·vendor_error"},
+		{name: "execution_error", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ExecutionError{ExecutionError: &conversationv1.AgentExecutionError{}}}, want: "vendor_fault·vendor_error"},
+		{name: "continuation_prevented", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ContinuationPrevented{ContinuationPrevented: &conversationv1.AgentContinuationPrevented{}}}, want: "vendor_fault·vendor_error"},
+		{name: "lost", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_Lost{Lost: &conversationv1.DetachedLost{}}}, want: "vendor_fault·vendor_error"},
+		{name: "query_died", failure: queryDiedFailure(), want: "agent_repl_fault·turn_died"},
+		{name: "an unset arm", failure: &conversationv1.AgentFailure{}, want: "vendor_fault·vendor_error"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
 			h := newHarness(t)
 			connected(h)
-			turn := testTurnID
 			h.r.SetTurn(testWS, &TurnStarted{At: instant})
 
 			// Act
-			h.r.OnAgentTerminal(testWS, mainAgent, &turn, nil, tc.failure)
+			failTurn(h, tc.failure)
 
 			// Assert
-			status := h.view(t).GetStrip().GetStatus()
-			got := h.status(t)
-			switch {
-			case status.GetTurnFailed() != nil:
-				got = "turn_failed"
-			case status.GetIdle().GetDone() != nil:
-				got = "done"
-			}
-			if got != tc.want {
+			if got := statusAndStep(h.view(t).GetStrip().GetStatus()); got != tc.want {
 				t.Fatalf("status = %q, want %q", got, tc.want)
 			}
 		})
 	}
+}
+
+// statusAndStep names a status arm and its substatus arm, "status·step".
+func statusAndStep(status *frontendv1.FooterStatus) string {
+	m := status.ProtoReflect()
+	arm := m.WhichOneof(m.Descriptor().Oneofs().ByName("status"))
+	if arm == nil {
+		return "unset"
+	}
+	inner := m.Get(arm).Message()
+	sub := inner.Descriptor().Oneofs().ByName("substatus")
+	if sub == nil {
+		return string(arm.Name())
+	}
+	step := inner.WhichOneof(sub)
+	if step == nil {
+		return string(arm.Name())
+	}
+	return string(arm.Name()) + "·" + string(step.Name())
 }
 
 func TestARejectedRateLimitBlocksTheSession(t *testing.T) {
@@ -675,14 +687,15 @@ func TestASessionStartLiftsAVendorBlock(t *testing.T) {
 	turn := testTurnID
 	h.r.SetTurn(testWS, &TurnStarted{At: instant})
 	h.r.OnAgentTerminal(testWS, mainAgent, &turn, nil, authFailure())
+	h.r.SetTurnEnded(testWS, wsm.CloseFailed)
 
 	// Act
 	h.r.OnSessionStarted(testWS, &conversationv1.SessionStarted{VendorSessionId: "vendor-2"})
 
-	// Assert: the block lifts, and the failed turn it ended still stands, as
-	// the roster's turn_failed does.
-	if got := h.status(t); got != "turn_failed" {
-		t.Fatalf("status = %q, want turn_failed", got)
+	// Assert: the block lifts, and the vendor turn fault the failed turn
+	// raised still stands until the next turn, as the roster's does.
+	if got := statusAndStep(h.view(t).GetStrip().GetStatus()); got != "vendor_fault·vendor_error" {
+		t.Fatalf("status = %q, want vendor_fault·vendor_error", got)
 	}
 }
 

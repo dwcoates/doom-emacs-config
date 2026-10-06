@@ -442,7 +442,10 @@ func (r *resolver) applyTurnStarted(s *wsState, turn *TurnStarted) {
 		return
 	}
 	s.turnEverRan = true
-	s.turnFailed = false
+	// A NEW TURN ENDS THE LAST ONE'S FAULT (owner ruling, 2026-10-06).
+	s.turnFault = nil
+	s.pendingEnding = nil
+	s.turnRefused = false
 	s.sawActivity = false
 	s.blocked = nil
 	s.queryDied = nil
@@ -749,13 +752,14 @@ func (r *resolver) sessionArm(ws ids.WorkspaceID, update *conversationv1.Session
 			r.logSessionArm(ws, s, "query_died")
 			now := r.opts.clock.Now()
 			s.queryDied = &standing{text: deadQueryLine, at: now}
-			// A DEAD QUERY IS A FAILED TURN, NOT A BLOCK (owner ruling,
-			// 2026-09-28): the daemon restarts it, and nothing about the
-			// vendor or the account refuses the session. A turn the death cut
-			// is a failed one; with no turn in flight, the last turn's end
+			// A DEAD QUERY IS AGENT-REPL'S FAULT, NOT A BLOCK (owner rulings,
+			// 2026-09-28 and 2026-10-06): the daemon restarts it, and nothing
+			// about the vendor or the account refuses the session. A turn the
+			// death cut is recorded as dying of it, and its close raises the
+			// `turn_died` fault; with no turn in flight, the last turn's end
 			// stands as it was, under the dead-query line.
 			if s.turn != nil {
-				s.turnFailed = true
+				s.recordQueryDeath(u.QueryDied)
 			}
 			s.turn = nil
 			// NO RETRY SURVIVES THE QUERY EITHER.

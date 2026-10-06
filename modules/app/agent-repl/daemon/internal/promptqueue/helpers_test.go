@@ -1039,6 +1039,22 @@ type fakeFooter struct {
 	// vendorBlock is the standing mid-session vendor block the test stood
 	// with standVendorBlock, empty when none stands.
 	vendorBlock string
+	// ends are the turn closes the footer was told, in order.
+	ends []wsm.TurnClose
+}
+
+// SetTurnEnded records the turn close the footer was told.
+func (f *fakeFooter) SetTurnEnded(_ ids.WorkspaceID, how wsm.TurnClose) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.ends = append(f.ends, how)
+}
+
+// turnEnds answers the turn closes the footer was told.
+func (f *fakeFooter) turnEnds() []wsm.TurnClose {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]wsm.TurnClose(nil), f.ends...)
 }
 
 // VendorBlock answers the block the test stood with standVendorBlock.
