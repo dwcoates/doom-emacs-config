@@ -34,6 +34,7 @@ import (
 	"path/filepath"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"agentrepl/shim-store/internal/logging"
@@ -113,6 +114,10 @@ func nowMillis() int64 { return time.Now().UnixMilli() }
 
 // DB wraps the SQLite handle plus the store's logger.
 type DB struct {
+	// hookSweptThrough is the highest entry position the hook sweep has judged
+	// (hooksweep.go). Only the sweep reads or writes it; it is atomic so a
+	// test calling the sweep beside the resident loop cannot race it.
+	hookSweptThrough atomic.Int64
 	// sql is the WRITE handle, and it is capped at ONE connection: the store
 	// is the single writer process, so a second write connection could only
 	// ever contend with the first. Every statement on it goes through

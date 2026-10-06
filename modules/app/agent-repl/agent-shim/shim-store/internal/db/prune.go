@@ -373,20 +373,21 @@ func (d *DB) readSweepPage(ctx context.Context, tx *sql.Tx, after string) ([]swe
 //
 // IT SWEEPS ONCE AT START. A store that has just come up may be carrying the
 // backlog of a long previous run, and waiting a whole interval to look at it
-// serves nobody. The once-per-boot hook sweep (SweepHookLines) runs before it.
+// serves nobody. The hook sweep (SweepHookLines) runs before it on every pass.
 func (d *DB) SweepWriteLedger(ctx context.Context, interval time.Duration) {
 	if interval <= 0 {
 		interval = DefaultLedgerSweepInterval
 	}
-	// THE HOOK RECORDS STORED BEFORE THE RULE ARE DROPPED FIRST, once per boot
-	// (hooksweep.go). A failure is recorded by the store at the failing
-	// statement; only a shutdown ends the sweeps early.
-	if _, err := d.SweepHookLines(ctx); err != nil && isContextError(err) {
-		return
-	}
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
+		// THE HOOK ROWS THAT DRAW NOTHING ARE DROPPED FIRST (hooksweep.go): all
+		// of them on the first pass, then only what was written since. A
+		// failure is recorded by the store at the failing statement; only a
+		// shutdown ends the sweeps early.
+		if _, err := d.SweepHookLines(ctx); err != nil && isContextError(err) {
+			return
+		}
 		if _, err := d.PruneWriteLedger(ctx); err != nil && isContextError(err) {
 			return
 		}

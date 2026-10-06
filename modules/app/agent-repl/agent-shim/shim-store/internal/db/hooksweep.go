@@ -1,32 +1,33 @@
 package db
 
-// hooksweep.go — THE HOOK RECORDS STORED BEFORE THE STORE STOPPED KEEPING THEM
-// ARE DROPPED BY THE STORE ITSELF, never by a hand-run statement.
+// hooksweep.go — THE STORE DROPS THE HOOK RECORDS THAT DRAW NOTHING ITSELF,
+// never by a hand-run statement.
 //
 // Owner ruling 2026-10-06: "we should stop storing hook records, they are just
-// bloat." A write that carries a hook line keeps only its identity from then
-// on (kindHookDropped). The rows written before the rule are page lines, and a
-// SessionStart:resume firing per resume filled history pages with rows that
-// drew nothing (the feed's `history_loaded drew_rows=false`). This sweep turns
-// each into the row the rule would have written: kind hook_dropped, frame
-// reduced to its stamps.
+// bloat." The shim stopped writing a hook's start, success and cancellation;
+// the rows written before that — and the ones a shim still running a pre-rule
+// build writes until it is replaced — are page lines that draw nothing, and a
+// SessionStart:resume firing per resume filled whole history pages with them
+// (the feed's `history_loaded drew_rows=false`). This sweep turns each into
+// the row the rule implies: kind hook_dropped, frame reduced to its stamps.
+//
+// A FAILED OR BLOCKED FIRING IS NOT DROPPED HERE. Its card is drawn, and the
+// ruling that it be drawn live and never replayed needs a carrier for a line
+// that is delivered but not kept, which is an open contract question; until it
+// is settled the row stays a page line.
 //
 // NO WRITE_SEQ IS BUMPED, so no standing watch is told and no replay reads
-// the row: every hook line stored before the rule was a succeeded firing or a
-// start, which draws nothing, so nothing drawn has to be withdrawn. The
-// position stays a valid pointer (pointerInBookSQL), so a reader whose mark
-// was one of these rows walks on from it.
+// the row: a dropped row drew nothing, so nothing drawn has to be withdrawn.
+// The position stays a valid pointer (pointerInBookSQL).
 //
 // ONLY STREAM-PLANE ACTIVITY ROWS ARE READ. The stream plane is the one that
 // ever wrote a hook line (the file plane's hook attachments are residue, which
 // the sidecar never persists), and every hook line is keyed `activity:<id>`.
 // OPTIMIZATION: that predicate keeps the sweep from decoding the file plane's
-// tens of thousands of activity frames (80 MB on the owner's store, 2026-10-06)
-// at every boot; the stream plane held 776 activity rows.
-//
-// IT RUNS ONCE PER STORE BOOT. Once the rows are dropped the sweep finds
-// nothing, and nothing writes a hook page line again, because classify gives
-// every hook line its own kind whichever producer build wrote it.
+// tens of thousands of activity frames (80 MB on the owner's store, 2026-10-06);
+// the stream plane held 776 activity rows. And each sweep reads only past the
+// highest position an earlier sweep of this process judged, so after the first
+// one per boot a sweep reads only the rows written since.
 
 import (
 	"context"
@@ -65,14 +66,15 @@ type HookSweepResult struct {
 	Batches int
 }
 
-// SweepHookLines drops every hook record stored as a page line, in bounded
-// batches, and reports what it dropped. A sweep cut short by shutdown keeps
-// what it committed and returns the caller's cancellation.
+// SweepHookLines drops every stored hook page line that draws nothing, past
+// the highest position an earlier sweep judged, in bounded batches, and
+// reports what it dropped. A sweep cut short by shutdown keeps what it
+// committed and returns the caller's cancellation.
 func (d *DB) SweepHookLines(ctx context.Context) (HookSweepResult, error) {
 	var result HookSweepResult
 	base := logging.Fields{Operation: "store.db.hook-sweep", Table: "entry"}
 	started := d.mono()
-	after := int64(0)
+	after := d.hookSweptThrough.Load()
 	for {
 		if err := ctx.Err(); err != nil {
 			return result, d.refuse(base, err)
@@ -90,6 +92,9 @@ func (d *DB) SweepHookLines(ctx context.Context) (HookSweepResult, error) {
 			result.Dropped += dropped
 			result.Batches++
 		}
+		// JUDGED IS JUDGED ONLY ONCE COMMITTED: the mark moves after the batch's
+		// drops landed, so a failed batch is read again by the next sweep.
+		d.hookSweptThrough.Store(last)
 		if scanned < hookSweepBatch {
 			break
 		}
@@ -146,7 +151,7 @@ func (d *DB) readHookCandidates(ctx context.Context, base logging.Fields, after 
 		if err := proto.Unmarshal(frame, entry); err != nil {
 			return nil, 0, 0, d.refuse(base, storagef(err, "the stored frame at position %d cannot be decoded to judge whether it is a hook", position))
 		}
-		if !isHookFrame(entry.GetAgentUpdate().GetServeableFrame().GetAgentItem().GetAgentFrame()) {
+		if !hookDrawsNothing(entry.GetAgentUpdate().GetServeableFrame().GetAgentItem().GetAgentFrame()) {
 			continue
 		}
 		stamps, err := hookStampsFrame(entry)
