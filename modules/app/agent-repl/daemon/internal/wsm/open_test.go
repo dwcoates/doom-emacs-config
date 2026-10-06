@@ -117,6 +117,61 @@ func TestPromoteKeepsTheUnsyncedSeam(t *testing.T) {
 	}
 }
 
+// TestAReadThatTookTheHandleBeforeAPromotionStillReads pins the read side of
+// a promotion: a reader answered the read-only handle by db() just before
+// Promote swapped it must still be able to query it afterward. Promote used
+// to close that handle at the swap, and the successor's registry read for an
+// adopting page met `sql: database is closed` (2026-10-06 handover,
+// daemon.wsm.workspace ERROR, then a false unknown_workspace refusal).
+func TestAReadThatTookTheHandleBeforeAPromotionStillReads(t *testing.T) {
+	// Arrange
+	path := writableStore(t)
+	ro, err := OpenReadOnly(context.Background(), path, WithUnsyncedWrites())
+	if err != nil {
+		t.Fatalf("OpenReadOnly: %v", err)
+	}
+	t.Cleanup(func() { ro.Close() })
+	taken := ro.(*store).db()
+
+	// Act
+	if err := ro.Promote(context.Background()); err != nil {
+		t.Fatalf("Promote: %v", err)
+	}
+	var tasks int
+	err = taken.QueryRowContext(context.Background(), `SELECT count(*) FROM tasks`).Scan(&tasks)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("a read on the handle taken before the promotion = %v, want it served", err)
+	}
+}
+
+// TestCloseClosesTheHandleAPromotionRetired pins the other half: the
+// read-only handle a promotion retires lives exactly as long as the store,
+// so Close ends it.
+func TestCloseClosesTheHandleAPromotionRetired(t *testing.T) {
+	// Arrange
+	path := writableStore(t)
+	ro, err := OpenReadOnly(context.Background(), path, WithUnsyncedWrites())
+	if err != nil {
+		t.Fatalf("OpenReadOnly: %v", err)
+	}
+	retired := ro.(*store).db()
+	if err := ro.Promote(context.Background()); err != nil {
+		t.Fatalf("Promote: %v", err)
+	}
+
+	// Act
+	if err := ro.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// Assert
+	if err := retired.PingContext(context.Background()); err == nil || !strings.Contains(err.Error(), "database is closed") {
+		t.Fatalf("the retired handle after Close answers %v, want sql: database is closed", err)
+	}
+}
+
 func TestOpenUsesASingleConnection(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)
