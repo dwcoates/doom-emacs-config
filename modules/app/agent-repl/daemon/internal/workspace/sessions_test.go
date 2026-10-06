@@ -416,13 +416,16 @@ func (w *fakeWatcher) OnTurnOpened(ids.WorkspaceID, *conversationv1.AgentPrompt,
 
 func (w *fakeWatcher) LiveWork() sessionwatcher.LiveWorkSet { return sessionwatcher.LiveWorkSet{} }
 
+// fixtureSDKVersion is the Agent SDK version the fixture shim reports.
+const fixtureSDKVersion = "0.2.97"
+
 // startedResponse is the success answer a healthy bring-up gets back.
 func startedResponse(vendorSessionID string) *shimv1.StartSessionResponse {
 	return &shimv1.StartSessionResponse{
 		Result: &shimv1.StartSessionResponse_Success{Success: &shimv1.StartSessionSuccess{
 			Session: &conversationv1.SessionStarted{
 				VendorSessionId: vendorSessionID,
-				Runtime:         &conversationv1.SessionRuntime{ShimBuildSha: "sha-1"},
+				Runtime:         &conversationv1.SessionRuntime{ShimBuildSha: "sha-1", SdkVersion: fixtureSDKVersion},
 				EffectiveModel:  &conversationv1.AgentModel{Name: "opus"},
 				PermissionMode:  permissionMode("plan"),
 			},

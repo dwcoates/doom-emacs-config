@@ -42,6 +42,8 @@ type newsDigestInputs struct {
 	RunDir string
 	// Serves answers whether this daemon serves.
 	Serves func() bool
+	// SDKVersion answers the Agent SDK version agent-repl runs.
+	SDKVersion func() (string, bool)
 	// Getenv reads the knobs.
 	Getenv func(string) string
 	// Log is the global logger.
@@ -85,6 +87,7 @@ func buildNewsDigest(in newsDigestInputs) (*newsdigest.Digester, error) {
 		Clock:      clock.System{},
 		LockPath:   filepath.Join(in.RunDir, newsDigestLockName),
 		Serves:     in.Serves,
+		SDKVersion: in.SDKVersion,
 		MintID:     wsm.NewNewsDigestID,
 		Every:      every,
 		StartDelay: start,
