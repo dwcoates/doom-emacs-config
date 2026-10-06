@@ -27,6 +27,11 @@ func TestMain(m *testing.M) {
 	if err := os.Unsetenv(EnvSlowQueryMs); err != nil {
 		panic(err)
 	}
+	// Every database this package's tests open on a FILE through Open skips
+	// SQLite's forced flushes: it is thrown away with the test.
+	if err := os.Setenv(EnvTestUnsyncedWrites, "1"); err != nil {
+		panic(err)
+	}
 	os.Exit(m.Run())
 }
 
@@ -123,9 +128,33 @@ func newSink(t *testing.T) (*sink, *logging.Logger) {
 	return s, logging.New(&s.file, &s.stderr, true)
 }
 
-// newStore opens a fresh on-disk store with a frozen clock, so a test can
-// assert an exact instant without waiting for one.
+// newStore opens a fresh IN-MEMORY store (openInMemory) with a frozen clock,
+// so a test can assert an exact instant without waiting for one. A test whose
+// subject is the file -- the WAL, the checkpoint, a reader overlapping a
+// writer, the connections' pragmas -- uses newFileStore.
 func newStore(t *testing.T) (*DB, *sink) {
+	t.Helper()
+	s, log := newSink(t)
+	return memoryStore(t, log, Options{Now: func() int64 { return testNow }}), s
+}
+
+// newFileStore opens a fresh store on a real FILE in the test's temp dir,
+// with a frozen clock and SQLite's forced flushes off.
+func newFileStore(t *testing.T) (*DB, *sink) {
+	t.Helper()
+	s, log := newSink(t)
+	path := filepath.Join(t.TempDir(), "store.db")
+	d, err := OpenWithOptions(path, log, Options{Now: func() int64 { return testNow }, unsynced: true})
+	if err != nil {
+		t.Fatalf("OpenWithOptions: %v", err)
+	}
+	t.Cleanup(func() { d.Close() }) //nolint:errcheck // best-effort test teardown
+	return d, s
+}
+
+// newDurableFileStore is newFileStore with SQLite's forced flushes left at
+// the production setting, for a test whose subject is the connections' pragmas.
+func newDurableFileStore(t *testing.T) (*DB, *sink) {
 	t.Helper()
 	s, log := newSink(t)
 	path := filepath.Join(t.TempDir(), "store.db")
@@ -137,21 +166,27 @@ func newStore(t *testing.T) (*DB, *sink) {
 	return d, s
 }
 
+// memoryStore opens a fresh in-memory store with the caller's options and
+// closes it at the end of the test.
+func memoryStore(t *testing.T, log *logging.Logger, opts Options) *DB {
+	t.Helper()
+	d, err := openInMemory(log, opts)
+	if err != nil {
+		t.Fatalf("openInMemory: %v", err)
+	}
+	t.Cleanup(func() { d.Close() }) //nolint:errcheck // best-effort test teardown
+	return d
+}
+
 const testNow int64 = 1_700_000_000_000
 
-// newStoreWithClock opens a fresh on-disk store whose clock is the caller's, so
+// newStoreWithClock opens a fresh in-memory store whose clock is the caller's, so
 // a test can advance it between writes and assert an ORDER rather than an
 // instant.
 func newStoreWithClock(t *testing.T, now func() int64) *DB {
 	t.Helper()
 	_, log := newSink(t)
-	path := filepath.Join(t.TempDir(), "store.db")
-	d, err := OpenWithOptions(path, log, Options{Now: now})
-	if err != nil {
-		t.Fatalf("OpenWithOptions: %v", err)
-	}
-	t.Cleanup(func() { d.Close() }) //nolint:errcheck // best-effort test teardown
-	return d
+	return memoryStore(t, log, Options{Now: now})
 }
 
 func ctx() context.Context { return context.Background() }
@@ -376,7 +411,7 @@ func TestOpenCreatesTheSchemaOnAFreshDatabase(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "store.db")
 
 	// Act
-	d, err := OpenWithOptions(path, log, Options{})
+	d, err := OpenWithOptions(path, log, Options{unsynced: true})
 	if err != nil {
 		t.Fatalf("OpenWithOptions: %v", err)
 	}
@@ -402,7 +437,7 @@ func TestOpenCreatesTheDirectoryItsDatabaseLivesIn(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "store", "events.db")
 
 	// Act
-	d, err := OpenWithOptions(path, log, Options{})
+	d, err := OpenWithOptions(path, log, Options{unsynced: true})
 	if err != nil {
 		t.Fatalf("OpenWithOptions: %v", err)
 	}
@@ -423,7 +458,7 @@ func TestOpenRefusesADatabaseDirectoryItCannotCreate(t *testing.T) {
 	}
 
 	// Act
-	d, err := OpenWithOptions(filepath.Join(blocker, "events.db"), log, Options{})
+	d, err := OpenWithOptions(filepath.Join(blocker, "events.db"), log, Options{unsynced: true})
 
 	// Assert
 	if err == nil {
@@ -442,7 +477,7 @@ func TestOpenRecordsAFirstCreateWithoutWarning(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "store.db")
 
 	// Act
-	d, err := OpenWithOptions(path, log, Options{})
+	d, err := OpenWithOptions(path, log, Options{unsynced: true})
 	if err != nil {
 		t.Fatalf("OpenWithOptions: %v", err)
 	}
@@ -461,7 +496,7 @@ func TestOpenNukesADatabaseStampedAtAnotherVersion(t *testing.T) {
 	// binary's — a database only a newer store could have written.
 	path := filepath.Join(t.TempDir(), "store.db")
 	_, log := newSink(t)
-	first, err := OpenWithOptions(path, log, Options{})
+	first, err := OpenWithOptions(path, log, Options{unsynced: true})
 	if err != nil {
 		t.Fatalf("first open: %v", err)
 	}
@@ -473,7 +508,7 @@ func TestOpenNukesADatabaseStampedAtAnotherVersion(t *testing.T) {
 
 	// Act
 	s, reopenLog := newSink(t)
-	second, err := OpenWithOptions(path, reopenLog, Options{})
+	second, err := OpenWithOptions(path, reopenLog, Options{unsynced: true})
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
@@ -496,7 +531,7 @@ func TestOpenRecordsASupersededSchemaVersionAtInfo(t *testing.T) {
 	// carries the fact and not a fault.
 	path := filepath.Join(t.TempDir(), "store.db")
 	_, log := newSink(t)
-	first, err := OpenWithOptions(path, log, Options{})
+	first, err := OpenWithOptions(path, log, Options{unsynced: true})
 	if err != nil {
 		t.Fatalf("first open: %v", err)
 	}
@@ -507,7 +542,7 @@ func TestOpenRecordsASupersededSchemaVersionAtInfo(t *testing.T) {
 
 	// Act
 	s, reopenLog := newSink(t)
-	second, err := OpenWithOptions(path, reopenLog, Options{})
+	second, err := OpenWithOptions(path, reopenLog, Options{unsynced: true})
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
@@ -526,7 +561,7 @@ func TestOpenRecreatesAVersionSevenDatabaseWithTheVendorTaskTable(t *testing.T) 
 	// nuked and recreated rather than altered.
 	path := filepath.Join(t.TempDir(), "store.db")
 	_, log := newSink(t)
-	first, err := OpenWithOptions(path, log, Options{})
+	first, err := OpenWithOptions(path, log, Options{unsynced: true})
 	if err != nil {
 		t.Fatalf("first open: %v", err)
 	}
@@ -537,7 +572,7 @@ func TestOpenRecreatesAVersionSevenDatabaseWithTheVendorTaskTable(t *testing.T) 
 
 	// Act
 	s, reopenLog := newSink(t)
-	second, err := OpenWithOptions(path, reopenLog, Options{})
+	second, err := OpenWithOptions(path, reopenLog, Options{unsynced: true})
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
@@ -555,7 +590,7 @@ func TestOpenNamesBothVersionsWhenItReplacesASupersededSchema(t *testing.T) {
 	// live record said neither until it did (found version=5, want version=6).
 	path := filepath.Join(t.TempDir(), "store.db")
 	_, log := newSink(t)
-	first, err := OpenWithOptions(path, log, Options{})
+	first, err := OpenWithOptions(path, log, Options{unsynced: true})
 	if err != nil {
 		t.Fatalf("first open: %v", err)
 	}
@@ -566,7 +601,7 @@ func TestOpenNamesBothVersionsWhenItReplacesASupersededSchema(t *testing.T) {
 
 	// Act
 	s, reopenLog := newSink(t)
-	second, err := OpenWithOptions(path, reopenLog, Options{})
+	second, err := OpenWithOptions(path, reopenLog, Options{unsynced: true})
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
@@ -593,7 +628,7 @@ func TestOpenReportsADatabaseCarryingNoSchemaStampAsAnError(t *testing.T) {
 	s, log := newSink(t)
 
 	// Act
-	d, err := OpenWithOptions(path, log, Options{})
+	d, err := OpenWithOptions(path, log, Options{unsynced: true})
 	if err != nil {
 		t.Fatalf("OpenWithOptions: %v", err)
 	}
@@ -610,7 +645,7 @@ func TestOpenRemovesTheFileOfADatabaseStampedAtAnotherVersion(t *testing.T) {
 	// deploy waiting on the socket gives up and leaves the stack half-bounced.
 	path := filepath.Join(t.TempDir(), "store.db")
 	_, log := newSink(t)
-	first, err := OpenWithOptions(path, log, Options{})
+	first, err := OpenWithOptions(path, log, Options{unsynced: true})
 	if err != nil {
 		t.Fatalf("first open: %v", err)
 	}
@@ -622,7 +657,7 @@ func TestOpenRemovesTheFileOfADatabaseStampedAtAnotherVersion(t *testing.T) {
 
 	// Act
 	_, reopenLog := newSink(t)
-	second, err := OpenWithOptions(path, reopenLog, Options{})
+	second, err := OpenWithOptions(path, reopenLog, Options{unsynced: true})
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
@@ -641,7 +676,7 @@ func TestOpenRemovesTheWalSiblingsOfADatabaseStampedAtAnotherVersion(t *testing.
 	dir := t.TempDir()
 	path := filepath.Join(dir, "store.db")
 	_, log := newSink(t)
-	first, err := OpenWithOptions(path, log, Options{})
+	first, err := OpenWithOptions(path, log, Options{unsynced: true})
 	if err != nil {
 		t.Fatalf("first open: %v", err)
 	}
@@ -657,7 +692,7 @@ func TestOpenRemovesTheWalSiblingsOfADatabaseStampedAtAnotherVersion(t *testing.
 
 	// Act
 	_, reopenLog := newSink(t)
-	second, err := OpenWithOptions(path, reopenLog, Options{})
+	second, err := OpenWithOptions(path, reopenLog, Options{unsynced: true})
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
@@ -698,7 +733,7 @@ func TestOpenSurfacesAFailureToRemoveTheDatabaseItMustDiscard(t *testing.T) {
 	s, log := newSink(t)
 
 	// Act
-	d, err := OpenWithOptions(path, log, Options{})
+	d, err := OpenWithOptions(path, log, Options{unsynced: true})
 
 	// Assert
 	if err == nil {
@@ -715,7 +750,7 @@ func TestOpenNukesADatabaseWhoseTableSetDiffers(t *testing.T) {
 	// Arrange: the right stamp on a shape this binary did not create.
 	path := filepath.Join(t.TempDir(), "store.db")
 	_, log := newSink(t)
-	first, err := OpenWithOptions(path, log, Options{})
+	first, err := OpenWithOptions(path, log, Options{unsynced: true})
 	if err != nil {
 		t.Fatalf("first open: %v", err)
 	}
@@ -726,7 +761,7 @@ func TestOpenNukesADatabaseWhoseTableSetDiffers(t *testing.T) {
 
 	// Act
 	s, reopenLog := newSink(t)
-	second, err := OpenWithOptions(path, reopenLog, Options{})
+	second, err := OpenWithOptions(path, reopenLog, Options{unsynced: true})
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
@@ -747,7 +782,7 @@ func TestOpenLeavesAMatchingDatabaseUntouched(t *testing.T) {
 	// Arrange
 	path := filepath.Join(t.TempDir(), "store.db")
 	_, log := newSink(t)
-	first, err := OpenWithOptions(path, log, Options{Now: func() int64 { return testNow }})
+	first, err := OpenWithOptions(path, log, Options{unsynced: true, Now: func() int64 { return testNow }})
 	if err != nil {
 		t.Fatalf("first open: %v", err)
 	}
@@ -756,7 +791,7 @@ func TestOpenLeavesAMatchingDatabaseUntouched(t *testing.T) {
 
 	// Act
 	_, reopenLog := newSink(t)
-	second, err := OpenWithOptions(path, reopenLog, Options{})
+	second, err := OpenWithOptions(path, reopenLog, Options{unsynced: true})
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
@@ -773,7 +808,7 @@ func TestOpenLeavesTheFileOfAMatchingDatabaseInPlace(t *testing.T) {
 	// meet it, so the file a matching reopen serves is the same file.
 	path := filepath.Join(t.TempDir(), "store.db")
 	_, log := newSink(t)
-	first, err := OpenWithOptions(path, log, Options{})
+	first, err := OpenWithOptions(path, log, Options{unsynced: true})
 	if err != nil {
 		t.Fatalf("first open: %v", err)
 	}
@@ -782,7 +817,7 @@ func TestOpenLeavesTheFileOfAMatchingDatabaseInPlace(t *testing.T) {
 
 	// Act
 	_, reopenLog := newSink(t)
-	second, err := OpenWithOptions(path, reopenLog, Options{})
+	second, err := OpenWithOptions(path, reopenLog, Options{unsynced: true})
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
@@ -828,7 +863,7 @@ func preIndexDatabase(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "store.db")
 	_, log := newSink(t)
-	d, err := OpenWithOptions(path, log, Options{Now: func() int64 { return testNow }})
+	d, err := OpenWithOptions(path, log, Options{unsynced: true, Now: func() int64 { return testNow }})
 	if err != nil {
 		t.Fatalf("first open: %v", err)
 	}
@@ -850,7 +885,7 @@ func TestOpenCreatesTheLineageIndexesOnAFreshDatabase(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "store.db")
 
 	// Act
-	d, err := OpenWithOptions(path, log, Options{})
+	d, err := OpenWithOptions(path, log, Options{unsynced: true})
 	if err != nil {
 		t.Fatalf("OpenWithOptions: %v", err)
 	}
@@ -868,7 +903,7 @@ func TestOpenBuildsTheMissingLineageIndexesOnAPreExistingDatabase(t *testing.T) 
 	_, log := newSink(t)
 
 	// Act
-	d, err := OpenWithOptions(path, log, Options{})
+	d, err := OpenWithOptions(path, log, Options{unsynced: true})
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
@@ -887,7 +922,7 @@ func TestOpenKeepsTheRowsOfADatabaseItBuildsIndexesOn(t *testing.T) {
 	_, log := newSink(t)
 
 	// Act
-	d, err := OpenWithOptions(path, log, Options{})
+	d, err := OpenWithOptions(path, log, Options{unsynced: true})
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
@@ -907,7 +942,7 @@ func TestOpenKeepsTheFileOfADatabaseItBuildsIndexesOn(t *testing.T) {
 	_, log := newSink(t)
 
 	// Act
-	d, err := OpenWithOptions(path, log, Options{})
+	d, err := OpenWithOptions(path, log, Options{unsynced: true})
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
@@ -925,7 +960,7 @@ func TestOpenRecordsTheLineageIndexesItBuiltInPlace(t *testing.T) {
 	s, log := newSink(t)
 
 	// Act
-	d, err := OpenWithOptions(path, log, Options{})
+	d, err := OpenWithOptions(path, log, Options{unsynced: true})
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
@@ -940,7 +975,7 @@ func TestOpenBuildsNothingOnADatabaseThatAlreadyCarriesTheLineageIndexes(t *test
 	// first open already indexed builds nothing.
 	path := preIndexDatabase(t)
 	_, firstLog := newSink(t)
-	first, err := OpenWithOptions(path, firstLog, Options{})
+	first, err := OpenWithOptions(path, firstLog, Options{unsynced: true})
 	if err != nil {
 		t.Fatalf("first reopen: %v", err)
 	}
@@ -950,7 +985,7 @@ func TestOpenBuildsNothingOnADatabaseThatAlreadyCarriesTheLineageIndexes(t *test
 	s, log := newSink(t)
 
 	// Act
-	d, err := OpenWithOptions(path, log, Options{})
+	d, err := OpenWithOptions(path, log, Options{unsynced: true})
 	if err != nil {
 		t.Fatalf("second reopen: %v", err)
 	}
@@ -989,7 +1024,7 @@ func TestOpenRecordsAFailedLineageIndexBuildThroughItsLogger(t *testing.T) {
 	s, log := newSink(t)
 
 	// Act
-	d, err := OpenWithOptions(path, log, Options{})
+	d, err := OpenWithOptions(path, log, Options{unsynced: true})
 
 	// Assert
 	if err == nil {
@@ -1005,7 +1040,7 @@ func TestOpenReportsAFailedLineageIndexBuildAsAStorageFailure(t *testing.T) {
 	_, log := newSink(t)
 
 	// Act
-	d, err := OpenWithOptions(path, log, Options{})
+	d, err := OpenWithOptions(path, log, Options{unsynced: true})
 
 	// Assert
 	if err == nil {
@@ -1025,7 +1060,7 @@ func TestOpenNeverNukesADatabaseWhoseLineageIndexBuildFailed(t *testing.T) {
 	_, log := newSink(t)
 
 	// Act
-	d, err := OpenWithOptions(path, log, Options{})
+	d, err := OpenWithOptions(path, log, Options{unsynced: true})
 
 	// Assert
 	if err == nil {
@@ -1081,7 +1116,7 @@ func TestOpenNukesAFileThatIsNotADatabaseAtAll(t *testing.T) {
 	s, log := newSink(t)
 
 	// Act
-	d, err := OpenWithOptions(path, log, Options{})
+	d, err := OpenWithOptions(path, log, Options{unsynced: true})
 
 	// Assert
 	if err != nil {
@@ -1107,7 +1142,7 @@ func TestOpenRemovesTheWalSiblingsOfAnUnreadableDatabase(t *testing.T) {
 	_, log := newSink(t)
 
 	// Act
-	d, err := OpenWithOptions(path, log, Options{})
+	d, err := OpenWithOptions(path, log, Options{unsynced: true})
 	if err != nil {
 		t.Fatalf("OpenWithOptions: %v", err)
 	}
@@ -1139,7 +1174,7 @@ func TestOpenStillFailsWhenTheRecreateItselfCannotSucceed(t *testing.T) {
 	_, log := newSink(t)
 
 	// Act
-	d, err := OpenWithOptions(path, log, Options{})
+	d, err := OpenWithOptions(path, log, Options{unsynced: true})
 
 	// Assert
 	if err == nil {
@@ -1155,7 +1190,7 @@ func TestOpenStatesTheFailureToRecreateAfterTheSupersededFileIsGone(t *testing.T
 	// with the error.
 	path := filepath.Join(t.TempDir(), "store.db")
 	_, log := newSink(t)
-	first, err := OpenWithOptions(path, log, Options{})
+	first, err := OpenWithOptions(path, log, Options{unsynced: true})
 	if err != nil {
 		t.Fatalf("first open: %v", err)
 	}
@@ -1171,7 +1206,7 @@ func TestOpenStatesTheFailureToRecreateAfterTheSupersededFileIsGone(t *testing.T
 	s, reopenLog := newSink(t)
 
 	// Act
-	d, err := OpenWithOptions(path, reopenLog, Options{})
+	d, err := OpenWithOptions(path, reopenLog, Options{unsynced: true})
 
 	// Assert
 	if err == nil {
@@ -1356,7 +1391,7 @@ func pragmaOn(t *testing.T, conn *sql.Conn, name string) int64 {
 
 func TestTheWriteConnectionRunsNoAutocheckpoint(t *testing.T) {
 	// Arrange
-	d, _ := newStore(t)
+	d, _ := newDurableFileStore(t)
 	conn, err := d.sql.Conn(ctx())
 	if err != nil {
 		t.Fatalf("Conn: %v", err)
@@ -1374,7 +1409,7 @@ func TestTheWriteConnectionRunsNoAutocheckpoint(t *testing.T) {
 
 func TestTheWriteConnectionLimitsTheWALFileItLeavesBehind(t *testing.T) {
 	// Arrange
-	d, _ := newStore(t)
+	d, _ := newDurableFileStore(t)
 	conn, err := d.sql.Conn(ctx())
 	if err != nil {
 		t.Fatalf("Conn: %v", err)
@@ -1394,7 +1429,7 @@ func TestTheWriteConnectionLimitsTheWALFileItLeavesBehind(t *testing.T) {
 // at once, so the second is a genuinely new connection of the pool rather than
 // the first one handed back.
 func TestEveryConnectionCarriesTheCacheAndMapSizes(t *testing.T) {
-	d, _ := newStore(t)
+	d, _ := newDurableFileStore(t)
 	firstRead, err := d.read.Conn(ctx())
 	if err != nil {
 		t.Fatalf("read Conn: %v", err)
@@ -1438,7 +1473,7 @@ func TestEveryConnectionCarriesTheCacheAndMapSizes(t *testing.T) {
 }
 
 func TestTheCheckpointConnectionCarriesItsPragmas(t *testing.T) {
-	d, _ := newStore(t)
+	d, _ := newDurableFileStore(t)
 	conn, err := d.ckpt.Conn(ctx())
 	if err != nil {
 		t.Fatalf("checkpoint Conn: %v", err)
@@ -1464,6 +1499,57 @@ func TestTheCheckpointConnectionCarriesItsPragmas(t *testing.T) {
 				t.Fatalf("PRAGMA %s = %d, want %d", test.pragma, got, test.want)
 			}
 		})
+	}
+}
+
+// TestTheTestRunSeamTurnsForcedFlushesOff pins that a store opened with the
+// test run's seam syncs nothing on either connection that writes pages.
+func TestTheTestRunSeamTurnsForcedFlushesOff(t *testing.T) {
+	d, _ := newFileStore(t)
+	tests := []struct {
+		name string
+		pool *sql.DB
+	}{
+		{"the write connection", d.sql},
+		{"the checkpoint connection", d.ckpt},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Arrange
+			conn, err := test.pool.Conn(ctx())
+			if err != nil {
+				t.Fatalf("Conn: %v", err)
+			}
+			defer conn.Close() //nolint:errcheck // best-effort test teardown
+
+			// Act
+			got := pragmaOn(t, conn, "synchronous")
+
+			// Assert
+			if got != 0 {
+				t.Fatalf("PRAGMA synchronous = %d, want 0 (OFF)", got)
+			}
+		})
+	}
+}
+
+// TestTheWriteConnectionSyncsNormallyInProduction pins the production sync
+// level the test run's seam departs from.
+func TestTheWriteConnectionSyncsNormallyInProduction(t *testing.T) {
+	// Arrange
+	d, _ := newDurableFileStore(t)
+	conn, err := d.sql.Conn(ctx())
+	if err != nil {
+		t.Fatalf("Conn: %v", err)
+	}
+	defer conn.Close() //nolint:errcheck // best-effort test teardown
+
+	// Act
+	got := pragmaOn(t, conn, "synchronous")
+
+	// Assert
+	if got != 1 {
+		t.Fatalf("PRAGMA synchronous = %d, want 1 (NORMAL)", got)
 	}
 }
 
@@ -1496,7 +1582,7 @@ func TestTheCheckpointConnectionRefusesAWrite(t *testing.T) {
 func TestCloseClosesTheCheckpointConnection(t *testing.T) {
 	// Arrange
 	_, log := newSink(t)
-	d, err := OpenWithOptions(filepath.Join(t.TempDir(), "store.db"), log, Options{Now: func() int64 { return testNow }})
+	d, err := OpenWithOptions(filepath.Join(t.TempDir(), "store.db"), log, Options{unsynced: true, Now: func() int64 { return testNow }})
 	if err != nil {
 		t.Fatalf("OpenWithOptions: %v", err)
 	}
@@ -1516,7 +1602,7 @@ func TestCloseClosesTheCheckpointConnection(t *testing.T) {
 func TestCloseReleasesTheWALIndexDescriptor(t *testing.T) {
 	// Arrange
 	_, log := newSink(t)
-	d, err := OpenWithOptions(filepath.Join(t.TempDir(), "store.db"), log, Options{Now: func() int64 { return testNow }})
+	d, err := OpenWithOptions(filepath.Join(t.TempDir(), "store.db"), log, Options{unsynced: true, Now: func() int64 { return testNow }})
 	if err != nil {
 		t.Fatalf("OpenWithOptions: %v", err)
 	}
@@ -1541,7 +1627,7 @@ func TestCloseReleasesTheWALIndexDescriptor(t *testing.T) {
 func TestCloseReportsAWALIndexDescriptorThatWillNotClose(t *testing.T) {
 	// Arrange: a descriptor already closed, so closing it again fails.
 	s, log := newSink(t)
-	d, err := OpenWithOptions(filepath.Join(t.TempDir(), "store.db"), log, Options{Now: func() int64 { return testNow }})
+	d, err := OpenWithOptions(filepath.Join(t.TempDir(), "store.db"), log, Options{unsynced: true, Now: func() int64 { return testNow }})
 	if err != nil {
 		t.Fatalf("OpenWithOptions: %v", err)
 	}
@@ -1567,7 +1653,7 @@ func preConversionDatabase(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "store.db")
 	_, log := newSink(t)
-	d, err := OpenWithOptions(path, log, Options{Now: func() int64 { return testNow }})
+	d, err := OpenWithOptions(path, log, Options{unsynced: true, Now: func() int64 { return testNow }})
 	if err != nil {
 		t.Fatalf("first open: %v", err)
 	}
@@ -1587,7 +1673,7 @@ func TestOpenBuildsAMissingInPlaceTableOnAPreExistingDatabase(t *testing.T) {
 	_, log := newSink(t)
 
 	// Act
-	d, err := OpenWithOptions(path, log, Options{})
+	d, err := OpenWithOptions(path, log, Options{unsynced: true})
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
@@ -1606,7 +1692,7 @@ func TestOpenKeepsTheRowsOfADatabaseItBuildsAnInPlaceTableOn(t *testing.T) {
 	_, log := newSink(t)
 
 	// Act
-	d, err := OpenWithOptions(path, log, Options{})
+	d, err := OpenWithOptions(path, log, Options{unsynced: true})
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
@@ -1626,7 +1712,7 @@ func prePlaceDatabase(t *testing.T, receivedAt int64) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "store.db")
 	_, log := newSink(t)
-	d, err := OpenWithOptions(path, log, Options{Now: func() int64 { return receivedAt }})
+	d, err := OpenWithOptions(path, log, Options{unsynced: true, Now: func() int64 { return receivedAt }})
 	if err != nil {
 		t.Fatalf("first open: %v", err)
 	}
@@ -1647,7 +1733,7 @@ func TestOpenPlacesEveryBookedRowAtItsReceiptInstantWhenItBuildsThePlaceIndex(t 
 	_, log := newSink(t)
 
 	// Act
-	d, err := OpenWithOptions(path, log, Options{})
+	d, err := OpenWithOptions(path, log, Options{unsynced: true})
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
@@ -1669,7 +1755,7 @@ func TestOpenLeavesUnbookedRowsUnplacedWhenItBuildsThePlaceIndex(t *testing.T) {
 	_, log := newSink(t)
 
 	// Act
-	d, err := OpenWithOptions(path, log, Options{})
+	d, err := OpenWithOptions(path, log, Options{unsynced: true})
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
@@ -1796,7 +1882,7 @@ func TestCloseReportsEveryHandleThatWillNotClose(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			// Arrange: the named handle closes but reports a failure.
 			s, log := newSink(t)
-			d, err := OpenWithOptions(filepath.Join(t.TempDir(), "store.db"), log, Options{Now: func() int64 { return testNow }})
+			d, err := OpenWithOptions(filepath.Join(t.TempDir(), "store.db"), log, Options{unsynced: true, Now: func() int64 { return testNow }})
 			if err != nil {
 				t.Fatalf("OpenWithOptions: %v", err)
 			}

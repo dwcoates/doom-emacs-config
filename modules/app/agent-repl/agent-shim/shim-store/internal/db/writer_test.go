@@ -274,19 +274,13 @@ func (c *fakeClock) advance(d time.Duration) {
 func newReportingStore(t *testing.T, clock *fakeClock) (*DB, *sink) {
 	t.Helper()
 	s, log := newSink(t)
-	path := filepath.Join(t.TempDir(), "store.db")
-	d, err := OpenWithOptions(path, log, Options{
+	return memoryStore(t, log, Options{
 		Now:        func() int64 { return testNow },
 		Clock:      clock.Now,
 		SlowQuery:  time.Nanosecond,
 		BulkBase:   time.Nanosecond,
 		BulkPerRow: time.Nanosecond,
-	})
-	if err != nil {
-		t.Fatalf("OpenWithOptions: %v", err)
-	}
-	t.Cleanup(func() { d.Close() }) //nolint:errcheck // best-effort test teardown
-	return d, s
+	}), s
 }
 
 // ---- the two-tier queue ----
