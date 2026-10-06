@@ -808,3 +808,89 @@ func TestBoundHides(t *testing.T) {
 		})
 	}
 }
+
+// ---- no source is not the feed's start ----
+
+func TestAPageServedWithNoSourceNeverClaimsTheStart(t *testing.T) {
+	tests := []struct {
+		name string
+		// wired reports whether a history source is wired at all.
+		wired bool
+		// live is a prompt drawn live before the reader opens; "" none.
+		live string
+		// next asks the walk's next page after the opening.
+		next     bool
+		wantEdge string
+		wantRows int
+	}{
+		{name: "an opening of an empty feed", wired: true, wantEdge: "has_more", wantRows: 0},
+		{name: "an opening holding a live row", wired: true, live: "turn-9", wantEdge: "has_more", wantRows: 1},
+		{name: "the next page below the held rows", wired: true, live: "turn-9", next: true, wantEdge: "has_more", wantRows: 0},
+		{name: "a feed with no history source wired", wired: false, wantEdge: "at_start", wantRows: 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			if tt.wired {
+				h.mainBook(3, promptsBook(4)).noSource = true
+			}
+			if tt.live != "" {
+				h.deliverPromptAt(tt.live, "live", 900)
+			}
+
+			// Act.
+			page, _ := h.openPage(rootFeed(), "reader-1")
+			if tt.next {
+				page = h.nextPage("reader-1")
+			}
+
+			// Assert.
+			if got := edgeOf(t, page); got != tt.wantEdge {
+				t.Fatalf("edge = %s, want %s", got, tt.wantEdge)
+			}
+			if got := len(pageRows(t, page)); got != tt.wantRows {
+				t.Fatalf("rows = %v, want %d", rowIDs(pageRows(t, page)), tt.wantRows)
+			}
+		})
+	}
+}
+
+func TestAnOlderPageAskedWithNoSourceIsRecordedAsUnknownNotAsTheStart(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.mainBook(3, promptsBook(4)).noSource = true
+
+	// Act.
+	h.openPage(rootFeed(), "reader-1")
+
+	// Assert.
+	if !h.hasRecord("info", "daemon.feed.next_page_no_source") {
+		t.Fatalf("records = %+v, want an INFO daemon.feed.next_page_no_source", h.records())
+	}
+	if h.hasRecord("info", "daemon.feed.next_page_nothing_older") {
+		t.Fatal("a page served with no source was recorded as the feed's start")
+	}
+}
+
+func TestAWalkOpenedWithNoSourceIsServedTheNewestPageOnceOneIsUp(t *testing.T) {
+	// Arrange: the reader opened an empty feed before any shim was up.
+	h := newHarness(t)
+	store := h.mainBook(2, promptsBook(4))
+	store.noSource = true
+	h.openPage(rootFeed(), "reader-1")
+	store.mu.Lock()
+	store.noSource = false
+	store.mu.Unlock()
+
+	// Act.
+	page := h.nextPage("reader-1")
+
+	// Assert: the walk was left open, at the top, so its next page is the newest.
+	if got, want := strings.Join(rowIDs(pageRows(t, page)), ","), h.promptRowIDs("turn-2", "turn-3"); got != want {
+		t.Fatalf("next page = %v, want the newest store page %v", got, want)
+	}
+	if got := edgeOf(t, page); got != "has_more" {
+		t.Fatalf("edge = %s, want has_more", got)
+	}
+}

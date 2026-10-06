@@ -922,3 +922,248 @@ func TestAFreshBooksFirstReadPagesOlderFromItsOwnBoundary(t *testing.T) {
 		t.Fatalf("last read after %q, want p-2", got)
 	}
 }
+
+// ---- what a load did with each entry ----
+
+// loadedOutcomes answers the outcomes tally of every history_loaded record,
+// oldest first.
+func (h *harness) loadedOutcomes() []string {
+	var out []string
+	for _, record := range h.records() {
+		if record.Operation == "daemon.feed.history_loaded" {
+			out = append(out, fmt.Sprint(record.Context["outcomes"]))
+		}
+	}
+	return out
+}
+
+func TestAHistoryLoadRecordsWhatBecameOfEachEntry(t *testing.T) {
+	hook := "agent_frame.update.activity.hook.succeeded"
+	answer := "agent_frame.update.activity.response.success"
+	tests := []struct {
+		name string
+		book []bookEntry
+		page int
+		next bool
+		// load is which history_loaded record, oldest first, is asserted.
+		load int
+		want string
+	}{
+		{
+			name: "entries that draw no row",
+			book: []bookEntry{{entry: promptEntry("turn-0", "first")}, {entry: succeededHookEntry("h-1")}, {entry: succeededHookEntry("h-2")}},
+			page: 2, want: hook + "=no_row:2",
+		},
+		{
+			name: "entries withheld for an older page",
+			book: splitTurnBook(), page: 1, want: answer + "=withheld:1",
+		},
+		{
+			name: "withheld entries completed by the older page",
+			book: splitTurnBook(), page: 3, next: true, load: 1, want: answer + "=completed:1 user_prompt=drew:1",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.mainBook(tt.page, tt.book)
+
+			// Act.
+			h.openPage(rootFeed(), "reader-1")
+			if tt.next {
+				h.nextPage("reader-1")
+			}
+
+			// Assert.
+			got := h.loadedOutcomes()
+			if len(got) <= tt.load || got[tt.load] != tt.want {
+				t.Fatalf("outcomes = %q, want load %d's %q", got, tt.load, tt.want)
+			}
+		})
+	}
+}
+
+// ---- a pushed load whose page draws nothing ----
+
+// answerEntry is one answer of TURN, its own row.
+func answerEntry(turn, unit string) bookEntry {
+	return bookEntry{turn: turn, entry: frameEntry(mainAgent(), &conversationv1.AgentUpdate{Update: &conversationv1.AgentUpdate_Activity{Activity: responseSuccessActivity(unit, "answer "+unit)}})}
+}
+
+// hookEntry is a succeeded hook of TURN: an entry that draws no row.
+func hookEntry(turn, unit string) bookEntry {
+	return bookEntry{turn: turn, entry: succeededHookEntry(unit)}
+}
+
+// longTurnBook is turn-0's prompt, then turn-1's prompt and ANSWERS answers:
+// at a store page of two the last turn spans several pages above its prompt.
+func longTurnBook(answers int) []bookEntry {
+	book := []bookEntry{{entry: promptEntry("turn-0", "first")}, {entry: promptEntry("turn-1", "long")}}
+	for i := 1; i <= answers; i++ {
+		book = append(book, answerEntry("turn-1", fmt.Sprintf("ans-%d", i)))
+	}
+	return book
+}
+
+// answerRowIDs is the answer row of each named unit.
+func (h *harness) answerRowIDs(units ...string) []string {
+	out := make([]string, 0, len(units))
+	for _, unit := range units {
+		out = append(out, h.responseRowID(unit))
+	}
+	return out
+}
+
+func TestAPushedLoadChainsOlderPages(t *testing.T) {
+	tests := []struct {
+		name      string
+		book      []bookEntry
+		pageSize  int
+		wantReads int
+		wantDrew  bool
+	}{
+		{
+			// [ans-5 ans-4] [ans-3 ans-2] [ans-1 prompt-1] [prompt-0].
+			name: "a fully withheld newest page reads on until the prompt's page draws the turn",
+			book: longTurnBook(5), pageSize: 2, wantReads: 3, wantDrew: true,
+		},
+		{
+			// [hook hook] [hook] — the start draws nothing either.
+			name:     "the start reached with nothing drawable ends the chain",
+			book:     []bookEntry{hookEntry("turn-x", "h-1"), hookEntry("turn-x", "h-2"), hookEntry("turn-x", "h-3")},
+			pageSize: 2, wantReads: 2, wantDrew: false,
+		},
+		{
+			// [hook hook] [prompt-0]: the newest page withholds nothing yet
+			// draws nothing (a restart's succeeded SessionStart hooks).
+			name:     "a page of entries that draw no row reads on to the page that draws",
+			book:     []bookEntry{{entry: promptEntry("turn-0", "first")}, {entry: succeededHookEntry("h-1")}, {entry: succeededHookEntry("h-2")}},
+			pageSize: 2, wantReads: 2, wantDrew: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			store := h.mainBook(tt.pageSize, tt.book)
+
+			// Act.
+			drew, err := h.resolver.loadPushed(context.Background(), testWorkspace, rootFeed(), true)
+
+			// Assert.
+			if err != nil || !drew {
+				t.Fatalf("loadPushed = (%v, %v), want a load", drew, err)
+			}
+			if got := store.readCount(); got != tt.wantReads {
+				t.Fatalf("reads = %d, want %d", got, tt.wantReads)
+			}
+			if got := len(h.rows(rootFeed())) > 0; got != tt.wantDrew {
+				t.Fatalf("rows = %v, want drawn = %v", rowIDs(h.rows(rootFeed())), tt.wantDrew)
+			}
+		})
+	}
+}
+
+func TestAKickedLoadOfAFullyWithheldNewestPagePushesTheWholeLastTurn(t *testing.T) {
+	// Arrange: a reader opened with no source; the last turn is longer than
+	// a store page, so the newest page withholds everything on it.
+	h := newHarness(t)
+	store := h.mainBook(2, longTurnBook(5))
+	store.noSource = true
+	rows := h.follow(rootFeed(), "reader-1")
+	store.mu.Lock()
+	store.noSource = false
+	store.mu.Unlock()
+
+	// Act.
+	h.resolver.SourceUp(testWorkspace)
+
+	// Assert: the turn reaches the tail, prompt first, oldest answer to newest.
+	awaitPushed(t, rows, append([]string{h.promptRowID("turn-1")}, h.answerRowIDs("ans-1", "ans-2", "ans-3", "ans-4", "ans-5")...)...)
+}
+
+func TestAWalkServedNothingContinuesBelowAChainedPushedLoad(t *testing.T) {
+	// Arrange: the reader's opening was served nothing; a pushed load then
+	// chained down to turn-1's prompt.
+	h := newHarness(t)
+	store := h.mainBook(2, longTurnBook(5))
+	store.noSource = true
+	h.openPage(rootFeed(), "reader-1")
+	store.mu.Lock()
+	store.noSource = false
+	store.mu.Unlock()
+	if _, err := h.resolver.loadPushed(context.Background(), testWorkspace, rootFeed(), true); err != nil {
+		t.Fatalf("loadPushed: %v", err)
+	}
+
+	// Act.
+	page := h.nextPage("reader-1")
+
+	// Assert: the next page is the one below everything pushed.
+	if got, want := strings.Join(rowIDs(pageRows(t, page)), ","), h.promptRowID("turn-0"); got != want {
+		t.Fatalf("next page = %v, want %v", got, want)
+	}
+}
+
+func TestAWithheldChainStopsAtItsCapAndSaysSo(t *testing.T) {
+	// Arrange: a last turn longer than the cap's worth of store pages.
+	h := newHarness(t)
+	store := h.mainBook(1, longTurnBook(maxUndrawnChain+5))
+
+	// Act.
+	if _, err := h.resolver.loadPushed(context.Background(), testWorkspace, rootFeed(), true); err != nil {
+		t.Fatalf("loadPushed: %v", err)
+	}
+
+	// Assert.
+	if got, want := store.readCount(), 1+maxUndrawnChain; got != want {
+		t.Fatalf("reads = %d, want the newest page and %d chained", got, maxUndrawnChain)
+	}
+	if !h.hasRecord("info", "daemon.feed.undrawn_chain_capped") {
+		t.Fatalf("records = %+v, want an INFO daemon.feed.undrawn_chain_capped", h.records())
+	}
+}
+
+func TestARestartWhoseNewestPageDrawsNothingEndsWithANonEmptyFeed(t *testing.T) {
+	tests := []struct {
+		name string
+		book []bookEntry
+		want func(h *harness) []string
+	}{
+		{
+			// agent-repl-streaming, 2026-10-06: the last turn is longer than
+			// the newest page, which withholds every entry on it.
+			name: "a last turn longer than a page",
+			book: longTurnBook(5),
+			want: func(h *harness) []string {
+				return append([]string{h.promptRowID("turn-1")}, h.answerRowIDs("ans-1", "ans-2", "ans-3", "ans-4", "ans-5")...)
+			},
+		},
+		{
+			// definitions, 2026-10-06: the newest page is the succeeded
+			// SessionStart hooks each restart writes, none of which draws.
+			name: "a newest page of succeeded hooks",
+			book: []bookEntry{{entry: promptEntry("turn-0", "first")}, {entry: succeededHookEntry("h-1")}, {entry: succeededHookEntry("h-2")}, {entry: succeededHookEntry("h-3")}},
+			want: func(h *harness) []string { return []string{h.promptRowID("turn-0")} },
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: the reader opens before any shim is up, as after a restart.
+			h := newHarness(t)
+			store := h.mainBook(2, tt.book)
+			store.noSource = true
+			rows := h.follow(rootFeed(), "reader-1")
+			store.mu.Lock()
+			store.noSource = false
+			store.mu.Unlock()
+
+			// Act.
+			h.resolver.SourceUp(testWorkspace)
+
+			// Assert.
+			awaitPushed(t, rows, tt.want(h)...)
+		})
+	}
+}
