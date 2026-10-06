@@ -367,10 +367,41 @@ func (s *storeProcess) awaitReady() {
 			// WHERE THE TIME WENT is the whole diagnosis of a missed boot: an
 			// exec that never ran, a database open that stalled, or a serve
 			// record that never landed are different faults.
-			s.t.Fatalf("the store did not accept on %q within %s\n%s\nstderr:\n%s",
-				s.socket, readyTimeout, describeStartup(s.startedAt, firstAccept, s.cmd.Process.Pid, s.logRecords()), s.stderrText())
+			//
+			// AND A LIVE STORE IS ASKED WHERE IT IS. Seen 2026-10-06 in a
+			// full-suite run, here and in two e2e stores at once: the log
+			// ends at store.buildreport and the schema record a quiet boot
+			// writes 3ms later never comes. The Go runtime's SIGQUIT dump of
+			// every goroutine lands in the stderr quoted below.
+			startup := describeStartup(s.startedAt, firstAccept, s.cmd.Process.Pid, s.logRecords())
+			dump := s.dumpOnStall(dumpBound)
+			s.t.Fatalf("the store did not accept on %q within %s\n%s\n%s\nstderr:\n%s",
+				s.socket, readyTimeout, startup, dump, s.stderrText())
 		case <-ticker.C:
 		}
+	}
+}
+
+// dumpBound is how long a store asked for its goroutines has to write them and
+// exit. The Go runtime's own SIGQUIT handler does both at once, so this covers
+// only the scheduling of a decided exit.
+const dumpBound = 2 * time.Second
+
+// dumpOnStall asks a live store to dump every goroutine to its stderr and exit
+// (the Go runtime's own SIGQUIT handling), and waits up to bound for it to go.
+// It answers a line for the failure message saying what happened.
+func (s *storeProcess) dumpOnStall(bound time.Duration) string {
+	if err := s.cmd.Process.Signal(syscall.SIGQUIT); err != nil {
+		if errors.Is(err, os.ErrProcessDone) {
+			return "the store was already gone; no goroutine dump"
+		}
+		return fmt.Sprintf("could not ask the store for a goroutine dump: %v", err)
+	}
+	select {
+	case <-s.done:
+		return "SIGQUIT sent; the Go runtime's goroutine dump is in the stderr below"
+	case <-time.After(bound):
+		return fmt.Sprintf("SIGQUIT sent for a goroutine dump, but the store did not exit within %s", bound)
 	}
 }
 
