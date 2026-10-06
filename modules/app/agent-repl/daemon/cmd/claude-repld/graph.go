@@ -369,7 +369,12 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// Zero leaves the resolver's own DefaultMomentaryDwell in force; the flag
 	// and its environment knob are what let a caller compress a window whose
 	// whole purpose is to be long enough for a person to read.
-	footerOpts := []footer.Option{}
+	// THE VENDOR SERVING AGAIN RELEASES THE PROMPTS a mid-session vendor block
+	// held after reconnect (promptqueue/vendorblock.go). The footer is the one
+	// accumulation that edge is read from, and the queue it tells is built
+	// later, so the edge rides a forwarder bound once the queue exists.
+	vendorServes := &vendorServesForwarder{log: log}
+	footerOpts := []footer.Option{footer.WithVendorServes(vendorServes.VendorServes)}
 	if p.Opts.footerMomentaryDwell > 0 {
 		footerOpts = append(footerOpts, footer.WithMomentaryDwell(p.Opts.footerMomentaryDwell))
 	}
@@ -635,6 +640,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		return nil, fmt.Errorf("claude-repld: build the prompt queue: %w", err)
 	}
 	lifecycle.queue = queue
+	vendorServes.bind(queue)
 
 	// ---- the handover halves ----
 
