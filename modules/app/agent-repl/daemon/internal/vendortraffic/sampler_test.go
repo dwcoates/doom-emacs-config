@@ -125,6 +125,7 @@ type fixture struct {
 	sink    *fakeSink
 	log     *dlog.TestLogger
 	shims   []int
+	serving bool
 	conns   []*fakeConn
 	dialErr error
 	// nextWriteErr is handed to the next dialed conn.
@@ -133,9 +134,10 @@ type fixture struct {
 
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
-	f := &fixture{procs: &fakeProcs{groups: map[int][]Proc{}, err: map[int]error{}}, sink: newFakeSink(), log: dlog.NewTestLogger()}
+	f := &fixture{procs: &fakeProcs{groups: map[int][]Proc{}, err: map[int]error{}}, sink: newFakeSink(), log: dlog.NewTestLogger(), serving: true}
 	s, err := New(Config{
 		ShimPIDs:  func() []int { return f.shims },
+		Serves:    func() bool { return f.serving },
 		Processes: f.procs,
 		Dial: func() (Conn, error) {
 			if f.dialErr != nil {
@@ -219,6 +221,7 @@ func TestNewRefusesAMissingCollaborator(t *testing.T) {
 	full := func() Config {
 		return Config{
 			ShimPIDs:  func() []int { return nil },
+			Serves:    func() bool { return true },
 			Processes: &fakeProcs{},
 			Dial:      func() (Conn, error) { return newFakeConn(), nil },
 			Sink:      newFakeSink(),
@@ -231,6 +234,7 @@ func TestNewRefusesAMissingCollaborator(t *testing.T) {
 		want  string
 	}{
 		{"shim pids", func(c *Config) { c.ShimPIDs = nil }, "pids are required"},
+		{"serving test", func(c *Config) { c.Serves = nil }, "serving test is required"},
 		{"process table", func(c *Config) { c.Processes = nil }, "process table is required"},
 		{"dialer", func(c *Config) { c.Dial = nil }, "dialer is required"},
 		{"sink", func(c *Config) { c.Sink = nil }, "sink is required"},
@@ -251,6 +255,60 @@ func TestNewRefusesAMissingCollaborator(t *testing.T) {
 				t.Fatalf("New error = %v, want %q", err, tc.want)
 			}
 		})
+	}
+}
+
+func TestADaemonThatDoesNotServeMeasuresNothing(t *testing.T) {
+	// Arrange: a joining successor, while its incumbent still serves.
+	f := newFixture(t)
+	f.shim(500)
+	f.serving = false
+
+	// Act.
+	f.sampler.round()
+
+	// Assert.
+	if len(f.conns) != 0 {
+		t.Fatalf("dialed %d sockets, want none before serving", len(f.conns))
+	}
+	if _, flushes := f.sink.totals(); flushes != 0 {
+		t.Fatalf("flushed %d times, want none before serving", flushes)
+	}
+}
+
+func TestADaemonThatStopsServingClosesItsSubscriptions(t *testing.T) {
+	// Arrange: an incumbent whose successor has taken over.
+	f := newFixture(t)
+	f.shim(500)
+	f.sampler.round()
+	f.serving = false
+
+	// Act.
+	f.sampler.round()
+
+	// Assert.
+	if !f.conns[0].isClosed() || len(f.sampler.watches) != 0 {
+		t.Fatal("the incumbent kept measuring after its successor took over")
+	}
+}
+
+func TestTheEpochIsTheFirstRoundTheDaemonServes(t *testing.T) {
+	// Arrange: a successor built at the epoch serves an hour later; a vendor
+	// process started between the two was the incumbent's to measure.
+	f := newFixture(t)
+	f.shim(500, Proc{PID: 501, PPID: 500, Started: epoch.Add(30 * time.Minute)})
+	f.serving = false
+	f.sampler.round()
+	f.serving = true
+	f.sampler.cfg.Now = func() time.Time { return epoch.Add(time.Hour) }
+
+	// Act.
+	f.sampler.round()
+
+	// Assert.
+	w := f.sampler.watches[procKey{pid: 501, started: epoch.Add(30 * time.Minute)}]
+	if w == nil || !w.baseline {
+		t.Fatalf("watch = %+v, want the process baselined against the serving epoch", w)
 	}
 }
 

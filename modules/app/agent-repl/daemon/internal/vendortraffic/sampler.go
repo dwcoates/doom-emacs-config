@@ -28,6 +28,10 @@ const readBufferSize = 64 << 10
 type Config struct {
 	// ShimPIDs answers the live shims' pids (workspace.Fleet.ShimPIDs).
 	ShimPIDs func() []int
+	// Serves answers whether this daemon serves. ONLY THE SERVING DAEMON
+	// MEASURES: during a handover the incumbent and its successor both run,
+	// and two samplers over the same processes would count every byte twice.
+	Serves func() bool
 	// Processes lists a shim's process group.
 	Processes ProcessTable
 	// Dial opens a statistics control socket.
@@ -39,7 +43,7 @@ type Config struct {
 	// After is the round timer; time.After when nil.
 	After func(time.Duration) <-chan time.Time
 	// Now is the clock; time.Now when nil. The sampler's EPOCH is read from
-	// it at construction.
+	// it at the first round this daemon serves.
 	Now func() time.Time
 	// Log is the daemon's run log.
 	Log dlog.Logger
@@ -54,10 +58,11 @@ type procKey struct {
 // Sampler measures the vendor processes' traffic.
 type Sampler struct {
 	cfg Config
-	// epoch is when this sampler began. A process that started before it may
-	// have been measured by the daemon before this one, so the sockets it
-	// already held when this sampler subscribed are BASELINED rather than
-	// counted again (ledger.observe).
+	// epoch is when this sampler began measuring: the first round its daemon
+	// served. A process that started before it may have been measured by the
+	// daemon before this one, so the sockets it already held when this
+	// sampler subscribed are BASELINED rather than counted again
+	// (ledger.observe). Zero until then.
 	epoch time.Time
 
 	// watches are the live subscriptions, by process. refused are processes
@@ -77,6 +82,8 @@ func New(cfg Config) (*Sampler, error) {
 	switch {
 	case cfg.ShimPIDs == nil:
 		return nil, errors.New("vendortraffic: the live shims' pids are required")
+	case cfg.Serves == nil:
+		return nil, errors.New("vendortraffic: a serving test is required")
 	case cfg.Processes == nil:
 		return nil, errors.New("vendortraffic: a process table is required")
 	case cfg.Dial == nil:
@@ -99,7 +106,6 @@ func New(cfg Config) (*Sampler, error) {
 	}
 	return &Sampler{
 		cfg:     cfg,
-		epoch:   cfg.Now(),
 		watches: map[procKey]*watch{},
 		refused: map[procKey]bool{},
 		retired: map[*watch]bool{},
@@ -121,8 +127,23 @@ func (s *Sampler) Run(ctx context.Context) {
 	}
 }
 
-// round is one sampling round.
+// round is one sampling round. A daemon that does not serve measures
+// nothing: before it serves its incumbent is measuring, and once it has
+// stopped (a handover took its place) its successor is, so whatever it still
+// held is closed.
 func (s *Sampler) round() {
+	if !s.cfg.Serves() {
+		if len(s.watches) > 0 || len(s.retired) > 0 {
+			s.cfg.Log.Info("daemon.vendortraffic.run", "this daemon no longer serves; its successor measures from here", nil)
+			s.closeAll()
+		}
+		return
+	}
+	if s.epoch.IsZero() {
+		s.epoch = s.cfg.Now()
+		s.cfg.Log.Info("daemon.vendortraffic.run", "this daemon serves; measuring from now",
+			dlog.Context{"epoch": s.epoch.UTC().Format(time.RFC3339Nano)})
+	}
 	want := s.vendorProcesses()
 
 	// A live subscription whose reader ended has failed, at ERROR, and its
@@ -230,7 +251,7 @@ func (s *Sampler) closeAll() {
 	}
 	s.watches = map[procKey]*watch{}
 	s.retired = map[*watch]bool{}
-	s.cfg.Log.Info("daemon.vendortraffic.run", "stopped measuring the vendor processes' network traffic", nil)
+	s.cfg.Log.Info("daemon.vendortraffic.run", "closed every subscription", nil)
 }
 
 // sortedKeys orders process keys by pid, so a round's work is deterministic.
