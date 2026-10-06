@@ -325,6 +325,26 @@ the detector shadows every access, which makes the number about the detector.
 There is no `--` flag: the window is `Options.LedgerRetentionBytes`, which only
 a test sets, and a NEGATIVE value disables the sweep entirely.
 
+### A hook line is delivered live and never kept
+
+Owner ruling 2026-10-06: "we should stop storing hook records, they are just
+bloat." An agent frame whose update is an `AgentHook` activity is classified
+`hook_dropped` (`db/route.go`), whichever producer build wrote it:
+
+- The write PUBLISHES the whole line to every standing watch of its book, so a
+  failed or blocked hook's card is drawn while the session runs.
+- The row keeps only its identity: key, book, position, ledger row, and a frame
+  reduced to the envelope's turn and place (`hookStampsFrame`).
+- No page and no `LinesSince` replay reads it, so a reader opened after the
+  write (a restarted daemon) never sees it; its pointer stays a valid
+  `known_through` / `after`.
+
+Rows a pre-rule shim stored as page lines are dropped by `SweepHookLines`
+(`db/hooksweep.go`), run once per boot before the ledger sweep: stream-plane
+`activity:` rows only, bounded batches through the bulk write slot, no
+`write_seq` bump (they drew nothing, so no watcher has anything to withdraw),
+one INFO record with the count when it dropped any.
+
 ### The store is NUKED, never migrated
 
 `db.Open` checks `schema_meta.version`; any mismatch, or any pre-existing table
