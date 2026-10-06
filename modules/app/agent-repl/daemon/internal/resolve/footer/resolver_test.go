@@ -397,6 +397,59 @@ func TestAnUnchangedStatusArmIsNotRecordedAgain(t *testing.T) {
 	}
 }
 
+// TestTheSubstatusIsRecordedWhenItChanges — a step can stand for milliseconds
+// and the footer's stream hands a slow reader only its newest view, so every
+// MOVE of the published substatus is recorded, the vendor's compaction among
+// them.
+func TestTheSubstatusIsRecordedWhenItChanges(t *testing.T) {
+	// Arrange: a prompt's turn is in flight.
+	h := newHarness(t)
+	connected(h)
+	h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActPrompt})
+
+	// Act: the vendor starts compacting inside it.
+	h.r.OnSessionUpdate(testWS, &conversationv1.SessionUpdate{
+		Update: &conversationv1.SessionUpdate_Compacting{Compacting: &conversationv1.SessionCompacting{}},
+	})
+
+	// Assert
+	got := substatusChanges(h.log.Records())
+	if len(got) == 0 || got[len(got)-1] != "working.compacting" {
+		t.Fatalf("recorded substatuses = %v, want the last to be working.compacting", got)
+	}
+}
+
+// TestAnUnchangedSubstatusIsNotRecordedAgain keeps the record a record of
+// CHANGES: a push that leaves the step where it stands writes nothing.
+func TestAnUnchangedSubstatusIsNotRecordedAgain(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	before := len(substatusChanges(h.log.Records()))
+
+	// Act: a second fact that leaves the strip's step where it was.
+	h.r.SetParked(testWS, false)
+
+	// Assert
+	if got := len(substatusChanges(h.log.Records())); got != before {
+		t.Fatalf("substatus records = %d, want %d: nothing moved", got, before)
+	}
+}
+
+// substatusChanges is every recorded arm.substatus, in publication order.
+func substatusChanges(records []dlog.Record) []string {
+	var out []string
+	for _, rec := range records {
+		if rec.Operation != "daemon.footer.substatus_changed" {
+			continue
+		}
+		arm, _ := rec.Context["arm"].(string)
+		sub, _ := rec.Context["substatus"].(string)
+		out = append(out, arm+"."+sub)
+	}
+	return out
+}
+
 // armChanges is every recorded arm, in the order the footer published them.
 func armChanges(records []dlog.Record) []string {
 	var out []string
