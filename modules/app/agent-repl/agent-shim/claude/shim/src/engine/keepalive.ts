@@ -153,6 +153,10 @@ export class KeepaliveRewind {
     // events, hooks and control messages all carry uuids the vendor will not
     // resume at.
     if (message.type !== "assistant") return;
+    // Only a MAIN-THREAD record. A subagent's assistant message carries a
+    // `parent_tool_use_id` and lives in that subagent's own transcript, so the
+    // main conversation holds no record under its uuid to resume at.
+    if (!isMainThread(message)) return;
     // Only a REAL turn, and only while one is open. A keep-alive's own answer
     // is exactly the material the rewind exists to discard, and a record with
     // no open turn belongs to no turn this shim asked for.
@@ -263,6 +267,11 @@ interface PendingKeepalive {
 function isStoppedTaskNotification(message: SdkMessage): boolean {
   if (message.type !== "system" || message.subtype !== "task_notification") return false;
   return (message as { status?: unknown }).status === "stopped";
+}
+
+/** True when MESSAGE belongs to the main conversation, not to a subagent's own transcript. */
+function isMainThread(message: SdkMessage): boolean {
+  return (message as { parent_tool_use_id?: unknown }).parent_tool_use_id == null;
 }
 
 /** The attribution of every message the keep-alive did not produce. */
