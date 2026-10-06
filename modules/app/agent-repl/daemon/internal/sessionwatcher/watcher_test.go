@@ -3,6 +3,7 @@ package sessionwatcher
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"slices"
 	"sync"
@@ -1969,7 +1970,9 @@ func TestASeveringNamesALivingShim(t *testing.T) {
 
 // TestASeveringNamesADeadShim is the other half of the same distinction: when
 // the peer HAS been reaped, the record says so and carries the exit, because
-// that is a session to bring back rather than a watch the shim dropped.
+// that is a session to bring back rather than a watch the shim dropped. It is
+// the death's effect, so it is INFO: the death's one ERROR is
+// daemon.shimclient.exit's.
 func TestASeveringNamesADeadShim(t *testing.T) {
 	// Arrange.
 	h := newHarness(t, Session{Started: sessionStarted("")})
@@ -1980,10 +1983,10 @@ func TestASeveringNamesADeadShim(t *testing.T) {
 	h.main.Close()
 
 	// Assert.
-	h.awaitRecord(t, "error", "daemon.sessionwatcher.watch_agent")
-	got := h.recordContext(t, "error", "daemon.sessionwatcher.watch_agent")
-	if got["shim_reaped"] != true {
-		t.Fatalf("shim_reaped = %v, want true: the shim was reaped", got["shim_reaped"])
+	h.awaitRecord(t, "info", "daemon.sessionwatcher.watch_agent")
+	got := h.recordContext(t, "info", "daemon.sessionwatcher.watch_agent")
+	if got["cause"] != "the shim died" {
+		t.Fatalf("cause = %v, want the death named", got["cause"])
 	}
 	if got["shim_exit_code"] != 9 {
 		t.Fatalf("shim_exit_code = %v, want 9", got["shim_exit_code"])
@@ -3387,4 +3390,150 @@ func TestATurnThisWatcherOpenedIsNotStoodAsFoundAtAttach(t *testing.T) {
 	if hasEvent(seen, "footer.OnTurnRunningAtAttach") || hasEvent(seen, "sidebar.OnTurnRunningAtAttach") {
 		t.Fatalf("events = %v, want no running-at-attach for the watcher's own turn", names(seen))
 	}
+}
+
+// ---- one death, one error: what the death takes down attributes to it ----
+
+// deathStaging says when, relative to a stream's end, the client decides its
+// shim died.
+type deathStaging int
+
+const (
+	// diedBefore: the exit was decided before the stream ended.
+	diedBefore deathStaging = iota
+	// diedWhileWaiting: the stream ended first and the verdict landed while
+	// its consumer waited, the order a SIGKILL's EOF and its reap race in.
+	diedWhileWaiting
+)
+
+// stage arranges the fake client's death verdict per staging.
+func (s deathStaging) stage(c *fakeClient) {
+	exit := shimclient.ExitInfo{PID: 4242, Code: 9}
+	switch s {
+	case diedBefore:
+		c.setReaped(exit)
+	case diedWhileWaiting:
+		c.mu.Lock()
+		c.verdictLands = &exit
+		c.mu.Unlock()
+	}
+}
+
+// TestAStandingStreamTheShimsDeathEndedIsAttributedToIt pins the consumer half
+// of ONE DEATH, ONE ERROR: a standing stream that ended because its shim died
+// is recorded at INFO with the death as its cause -- whether the verdict was in
+// when the stream ended or landed while it waited -- and never at ERROR.
+//
+// MEASURED, live logs 2026-10-03 (workspace `definitions`): six shim deaths
+// each wrote `watch_session` AND `watch_agent` ERROR "a standing stream ended
+// without the session ending" within 2ms of `daemon.shimclient.exit`'s own.
+func TestAStandingStreamTheShimsDeathEndedIsAttributedToIt(t *testing.T) {
+	tests := []struct {
+		name      string
+		staging   deathStaging
+		operation string
+		end       func(h *harness)
+	}{
+		{name: "the agent stream, death decided first", staging: diedBefore, operation: "daemon.sessionwatcher.watch_agent", end: func(h *harness) { h.main.Close() }},
+		{name: "the agent stream, death decided in the wait", staging: diedWhileWaiting, operation: "daemon.sessionwatcher.watch_agent", end: func(h *harness) { h.main.Close() }},
+		{name: "the session stream, death decided first", staging: diedBefore, operation: "daemon.sessionwatcher.watch_session", end: func(h *harness) { h.session.Close() }},
+		{name: "the session stream, death decided in the wait", staging: diedWhileWaiting, operation: "daemon.sessionwatcher.watch_session", end: func(h *harness) { h.session.Close() }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t, Session{Started: sessionStarted("")})
+			h.quiet()
+			tt.staging.stage(h.client)
+
+			// Act.
+			tt.end(h)
+
+			// Assert.
+			h.awaitRecord(t, "info", tt.operation)
+			if got := h.recordContext(t, "info", tt.operation)["cause"]; got != "the shim died" {
+				t.Fatalf("cause = %v, want the death named: %+v", got, h.log.Records())
+			}
+			if h.hasRecord("error", tt.operation) {
+				t.Fatalf("the death's effect was ALSO recorded at error: %+v", h.log.Records())
+			}
+		})
+	}
+}
+
+// TestAShellStreamTheShimsDeathEndedIsNotReopened pins the shell half: the
+// stream is the death's effect, recorded at INFO, and is not re-opened onto a
+// shim that is gone.
+func TestAShellStreamTheShimsDeathEndedIsNotReopened(t *testing.T) {
+	tests := []struct {
+		name    string
+		staging deathStaging
+	}{
+		{name: "death decided first", staging: diedBefore},
+		{name: "death decided in the wait", staging: diedWhileWaiting},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: a live detached shell, its watch open.
+			h := newHarness(t, Session{Started: sessionStarted("")})
+			h.quiet()
+			h.route(h.main, entryFrame(frameDetached("main-1", createdWork("w-1", bashWork()))))
+			open := h.client.nextBashOpen(t)
+			h.client.settleOpens()
+			tt.staging.stage(h.client)
+
+			// Act.
+			open.stream.Close()
+
+			// Assert.
+			h.awaitRecord(t, "info", "daemon.sessionwatcher.watch_bash")
+			if got := h.recordContext(t, "info", "daemon.sessionwatcher.watch_bash")["cause"]; got != "the shim died" {
+				t.Fatalf("cause = %v, want the death named: %+v", got, h.log.Records())
+			}
+			if h.hasRecord("warn", "daemon.sessionwatcher.watch_bash") {
+				t.Fatalf("the dead shim's shell watch was re-opened: %+v", h.log.Records())
+			}
+		})
+	}
+}
+
+// TestAWatchOpenTheShimsDeathCutIsAttributedToIt pins the open half: an open
+// the client already attributed to the death (shimclient.ErrShimDied) is the
+// death's effect, INFO, never a severing.
+func TestAWatchOpenTheShimsDeathCutIsAttributedToIt(t *testing.T) {
+	// Arrange.
+	cut := fmt.Errorf("%w: %w", shimclient.ErrShimDied,
+		connect.NewError(connect.CodeUnavailable, errors.New("unexpected EOF")))
+	h := startHarness(t, Session{Started: sessionStarted("")}, func(c *fakeClient) {
+		c.setReaped(shimclient.ExitInfo{PID: 4242, Code: 9})
+		c.setAgentErr(cut)
+	})
+
+	// Act: the start's own main-agent open is the one the death cut.
+	h.client.nextSessionOpen(t)
+
+	// Assert.
+	h.awaitRecord(t, "info", "daemon.sessionwatcher.watch_agent")
+	if h.hasRecord("error", "daemon.sessionwatcher.watch_agent") {
+		t.Fatalf("the open the death cut was recorded at error: %+v", h.log.Records())
+	}
+}
+
+// TestADeadLinksFaultIsRecordedAsTheDeathsEffect pins the link fault a dead
+// link raises: the session still stands on it, and its record is INFO, since
+// LinkDead is published only by the death `daemon.shimclient.exit` records.
+func TestADeadLinksFaultIsRecordedAsTheDeathsEffect(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act.
+	h.client.links <- shimclient.LinkDead
+
+	// Assert.
+	h.awaitRecord(t, "info", "daemon.sessionwatcher.link_fault")
+	if h.hasRecord("warn", "daemon.sessionwatcher.link_fault") {
+		t.Fatalf("the dead link's fault was recorded at warn: %+v", h.log.Records())
+	}
+	h.rec.until(t, "lifecycle.OnLinkFault")
 }
