@@ -15,7 +15,9 @@
 #
 #   fixture construction: init, add -A | add PATH..., commit -m, revert HEAD
 #   what the scripts ask: rev-parse HEAD | --show-toplevel |
-#                         --is-inside-work-tree, status --porcelain,
+#                         --is-inside-work-tree | --git-dir |
+#                         --git-common-dir, diff --cached --name-only,
+#                         status --porcelain,
 #                         ls-files -s, log -1 --format, show -s --format=%ct,
 #                         rev-list --count A..B, worktree list --porcelain
 #
@@ -287,6 +289,15 @@ case "$CMD $*" in
         ;;
     "rev-parse --show-toplevel") printf '%s\n' "$TOP" ;;
     "rev-parse --is-inside-work-tree") printf 'true\n' ;;
+    # The repository's own directory is .fakegit, and there is one worktree,
+    # so the common dir is the same directory.
+    "rev-parse --git-dir" | "rev-parse --git-common-dir") printf '%s\n' "$G" ;;
+    "diff --cached --name-only"*)
+        [ "${OPTS[*]}" = "--cached --name-only" ] || EXIT=2 die "unmodelled diff form: $*"
+        changed_paths "$HEAD_TREE" "$G/index" | while IFS= read -r path; do
+            if path_matches "$path"; then printf '%s\n' "$path"; fi
+        done
+        ;;
     "worktree list --porcelain") printf 'worktree %s\n\n' "$TOP" ;;
     "add -A")
         set_specs
