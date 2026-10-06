@@ -17,6 +17,7 @@ import (
 	"agentrepl/proto/agentrepl/v1/agentreplv1connect"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"claude-repld/integration/harness"
 	"claude-repld/internal/rollout"
@@ -815,6 +816,149 @@ func TestHandoverTransfersAFreeWorkspaceThroughTheAdoptionRendezvous(t *testing.
 		t.Fatalf("the incumbent's exit code = %d, want an orderly 0 after the last transfer", code)
 	}
 	drainAwaitAddrFileChange(t, d, addr)
+}
+
+// TestRegistryReadsAcrossTheSuccessorsPromotionAreServed pins the 2026-10-06
+// rolling-deploy handover: the successor PROMOTES its read-only state handle
+// at its first adoption, and other requests read the registry at that same
+// moment. A read that took the read-only handle just before the promotion
+// closed it met `sql: database is closed` (daemon.wsm.workspace, ERROR); for
+// queen-model's adopting page the resolver then answered that as
+// `unknown_workspace`, the page failed its boot, and the host's adopt waited
+// 10s for a web participant that never came.
+//
+// Registry reads run without pause on the other workspaces from the
+// announcement until the first workspace is adopted, so they straddle the
+// promotion; then every other workspace's participants adopt. The harness's
+// warning sweep holds the run to no ERROR, and every read and every adoption
+// must be served.
+//
+// THIS IS THE END-TO-END GUARD, NOT THE REPRODUCTION. The race's window is a
+// read's few microseconds between taking the handle and starting its query,
+// and twelve runs of this test under bin/with-cpu-load.sh 8 against the
+// unfixed store stayed green. The reproductions are deterministic and one
+// layer down: wsm's TestAReadThatTookTheHandleBeforeAPromotionStillReads
+// (the closed handle) and server's
+// TestAnAdoptionWhoseRegistryReadBreaksFailsRatherThanAnsweringUnknown (the
+// false unknown_workspace).
+func TestRegistryReadsAcrossTheSuccessorsPromotionAreServed(t *testing.T) {
+	t.Parallel()
+	// Arrange: several idle workspaces, each with its host and web streams
+	// open at the announcement, so each is an expected two-party rendezvous.
+	const workspaces = 6
+	selfRepo, d := drainSelfRepoDaemon(t)
+	d.ExpectWarnings("daemon.refusal.unlanded_arm.standing")
+	fixtures := make([]*fixture, workspaces)
+	webs := make([]*harness.Stream[*agentreplv1.WatchWebWorkspaceResponse], workspaces)
+	for i := range fixtures {
+		f := drainOpenWorkspace(t, d)
+		f.shim.ExpectStartSession()
+		f.shim.ExpectWatchSession()
+		fixtures[i] = f
+		host := d.WatchHost(f.ws)
+		webs[i] = d.WatchWeb(f.ws)
+		harness.AwaitNext(t, d.Ctx(), host, "the fresh host push")
+	}
+	daemonStream := d.WatchDaemonStream()
+	drainTriggerDeploy(t, d, selfRepo, harness.DeployStaleDaemon)
+	addr := harness.AwaitView(t, d.Ctx(), daemonStream, "shutdown_announced", func(r *agentreplv1.WatchDaemonResponse) bool {
+		return r.GetShutdownAnnounced() != nil
+	}).GetShutdownAnnounced().GetAddress()
+	successor := drainDial(addr)
+
+	// Act: registry reads on every workspace but the first run from the
+	// announcement -- before anything has been adopted, so before the
+	// promotion -- until the first workspace's two participants have adopted
+	// it, by which point the handle has been promoted.
+	stop := make(chan struct{})
+	readErrs := make(chan error, workspaces)
+	var readers sync.WaitGroup
+	for _, f := range fixtures[1:] {
+		readers.Add(1)
+		go func() {
+			defer readers.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				if _, err := successor.ClientLog(d.Ctx(), connect.NewRequest(&agentreplv1.ClientLogRequest{
+					Workspace: f.ws,
+					Record: &agentreplv1.ClientLogRecord{
+						Level:     &agentreplv1.ClientLogRecord_Debug{Debug: &agentreplv1.ClientLogLevelDebug{}},
+						Operation: "integration.promotion-read",
+						Message:   "a registry read across the promotion",
+					},
+				})); err != nil {
+					readErrs <- err
+					return
+				}
+			}
+		}()
+	}
+	for i := range fixtures {
+		harness.AwaitView(t, d.Ctx(), webs[i], "transferred", func(r *agentreplv1.WatchWebWorkspaceResponse) bool {
+			return r.GetTransferred() != nil
+		})
+	}
+	first := adoptBothParticipants(d, successor, fixtures[0].ws)
+	close(stop)
+	readers.Wait()
+	close(readErrs)
+	rest := make([]adoptOutcome, workspaces-1)
+	var wg sync.WaitGroup
+	for i, f := range fixtures[1:] {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			rest[i] = adoptBothParticipants(d, successor, f.ws)
+		}()
+	}
+	wg.Wait()
+
+	// Assert: every read was served, every participant adopted, and the
+	// incumbent exits once the last of them has.
+	for err := range readErrs {
+		t.Errorf("a registry read across the promotion = %v, want it served", err)
+	}
+	for i, o := range append([]adoptOutcome{first}, rest...) {
+		if o.webErr != nil || o.web.Msg.GetSuccess() == nil {
+			t.Errorf("workspace %d: AdoptWebWorkspace = (%v, %v), want a success", i, o.web, o.webErr)
+		}
+		if o.hostErr != nil || o.host.Msg.GetSuccess() == nil {
+			t.Errorf("workspace %d: AdoptHostWorkspace = (%v, %v), want a success", i, o.host, o.hostErr)
+		}
+	}
+	if code := d.AwaitExit(); code != 0 {
+		t.Fatalf("the incumbent's exit code = %d, want an orderly 0 after the last transfer", code)
+	}
+}
+
+// adoptOutcome is one workspace's two adoption answers.
+type adoptOutcome struct {
+	host    *connect.Response[agentreplv1.AdoptHostWorkspaceResponse]
+	web     *connect.Response[agentreplv1.AdoptWebWorkspaceResponse]
+	hostErr error
+	webErr  error
+}
+
+// adoptBothParticipants makes a workspace's host and web adopt calls on the
+// successor together, as Emacs and the reloaded page do, and answers both.
+func adoptBothParticipants(d *harness.Daemon, successor agentreplv1connect.AgentReplClient, ws *workspacev1.WorkspaceRef) adoptOutcome {
+	var o adoptOutcome
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		o.host, o.hostErr = successor.AdoptHostWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.AdoptHostWorkspaceRequest{Workspace: ws}))
+	}()
+	go func() {
+		defer wg.Done()
+		o.web, o.webErr = successor.AdoptWebWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.AdoptWebWorkspaceRequest{Workspace: ws}))
+	}()
+	wg.Wait()
+	return o
 }
 
 // TestABusyWorkspaceIsTransferredMidTurnAndItsHeldIntakeDrainsInOrderOnTheSuccessor
