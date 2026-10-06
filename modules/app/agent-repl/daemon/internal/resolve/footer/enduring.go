@@ -1,8 +1,9 @@
 package footer
 
 import (
-	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+
+	"claude-repld/internal/wsm"
 )
 
 // THE ENDURING TIER: facts that are always true, drawn beneath every other
@@ -10,15 +11,23 @@ import (
 // It is ONE line: the account's usage allowances. Being always true, it
 // carries no age (owner ruling, 2026-09-30).
 
-// enduring composes the enduring line: the usage allowances, or the
-// unobserved arm before any figure has been observed.
+// enduring composes the enduring line: the usage allowances, the account's
+// having none, or the unobserved arm before anything has been observed.
+//
+// THE LINE IS THE ACCOUNT'S (account.go), and it is NEVER EMPTY: the figures
+// when any window is figured, else the account's having no allowance window
+// when its usage service said so, else the account never having been
+// observed — each arm drawn in words.
 func (r *resolver) enduring(s *wsState) *frontendv1.FooterActivityEnduring {
-	usage := r.enduringUsage(s)
-	if usage == nil {
-		return &frontendv1.FooterActivityEnduring{Line: &frontendv1.FooterActivityEnduring_Unobserved{
-			Unobserved: &frontendv1.FooterActivityEnduringUnobserved{}}}
+	if usage := r.enduringUsage(s); usage != nil {
+		return &frontendv1.FooterActivityEnduring{Line: &frontendv1.FooterActivityEnduring_Usage{Usage: usage}}
 	}
-	return &frontendv1.FooterActivityEnduring{Line: &frontendv1.FooterActivityEnduring_Usage{Usage: usage}}
+	if s.usage.noAllowance {
+		return &frontendv1.FooterActivityEnduring{Line: &frontendv1.FooterActivityEnduring_NoAllowance{
+			NoAllowance: &frontendv1.FooterActivityEnduringNoAllowance{}}}
+	}
+	return &frontendv1.FooterActivityEnduring{Line: &frontendv1.FooterActivityEnduring_Unobserved{
+		Unobserved: &frontendv1.FooterActivityEnduringUnobserved{}}}
 }
 
 // enduringUsage is the account's usage allowances, or nil before any figure
@@ -33,9 +42,9 @@ func (r *resolver) enduring(s *wsState) *frontendv1.FooterActivityEnduring {
 // never opens the line by itself; its outcome stays visible in the logs
 // (`logUnreadableSample`).
 func (r *resolver) enduringUsage(s *wsState) *frontendv1.FooterActivityEnduringUsage {
-	session := r.allowance(&s.rate.session)
-	weekly := r.allowance(&s.rate.weekly)
-	overage := r.allowance(&s.rate.overage)
+	session := r.allowance(&s.usage.rate.session)
+	weekly := r.allowance(&s.usage.rate.weekly)
+	overage := r.allowance(&s.usage.rate.overage)
 	if session == nil && weekly == nil && overage == nil {
 		return nil
 	}
@@ -59,12 +68,12 @@ func (r *resolver) allowance(w *allowanceWindow) *frontendv1.FooterAllowance {
 		ResetsAtS:   w.resetsAtS,
 		Utilization: w.utilization,
 	}
-	switch w.verdict.GetStatus().(type) {
-	case *conversationv1.SessionRateLimitStatus_Allowed:
+	switch w.verdict {
+	case wsm.VerdictAllowed:
 		allowance.Status = &frontendv1.FooterAllowance_Allowed{Allowed: &frontendv1.FooterAllowanceAllowed{}}
-	case *conversationv1.SessionRateLimitStatus_AllowedWarning:
+	case wsm.VerdictAllowedWarning:
 		allowance.Status = &frontendv1.FooterAllowance_AllowedWarning{AllowedWarning: &frontendv1.FooterAllowanceAllowedWarning{}}
-	case *conversationv1.SessionRateLimitStatus_Rejected:
+	case wsm.VerdictRejected:
 		allowance.Status = &frontendv1.FooterAllowance_Rejected{Rejected: &frontendv1.FooterAllowanceRejected{}}
 	}
 	return allowance

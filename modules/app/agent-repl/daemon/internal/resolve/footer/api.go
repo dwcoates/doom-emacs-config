@@ -336,6 +336,10 @@ type Resolver interface {
 	// violation the resolver records loudly rather than writing globally by
 	// default.
 	SetWorkspaceDir(ws ids.WorkspaceID, dir string) error
+	// SetAccount binds the workspace to the account root (Claude config dir)
+	// its session spends from. The usage line is the ACCOUNT'S: every
+	// workspace bound to one root draws that root's newest figures.
+	SetAccount(ws ids.WorkspaceID, root string)
 	// SetTurn installs the accepted turn, nil when no turn is in flight. It is
 	// what raises `thinking · submitting` the instant StartTurn is accepted
 	// and what starts the strip's clock.
@@ -441,6 +445,26 @@ type options struct {
 	// vendorServes is told when a mid-session vendor block stops standing
 	// (WithVendorServes); nil tells no one.
 	vendorServes func(ws ids.WorkspaceID, was string)
+	// usages are the account roots' stored usage evidence, drawn from the
+	// first view (WithAccountUsages).
+	usages []wsm.AccountUsage
+	// usageSink keeps an account root's evidence durable (WithAccountUsageSink);
+	// nil keeps nothing.
+	usageSink func(wsm.AccountUsage) error
+}
+
+// WithAccountUsages hands the resolver the usage evidence the state store kept
+// per account root, so a restarted daemon draws every workspace's usage line
+// at once instead of an empty one until a session speaks.
+func WithAccountUsages(usages []wsm.AccountUsage) Option {
+	return func(o *options) { o.usages = usages }
+}
+
+// WithAccountUsageSink sets where an account root's usage evidence is kept
+// durable each time it changes. A sink error is recorded by the resolver and
+// leaves the drawn evidence unaffected.
+func WithAccountUsageSink(sink func(wsm.AccountUsage) error) Option {
+	return func(o *options) { o.usageSink = sink }
 }
 
 // WithClock injects the clock the dwell and every `at` stamp are taken from.
