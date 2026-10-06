@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  DOCK_BACKGROUND_PROPERTY,
   DOCK_HEIGHT_PROPERTY,
+  toldDockBackground,
   toldDockHeight,
   DOCKED_CARD_CLASS,
   DOCKED_ROW_CLASS,
@@ -10,6 +12,7 @@ import {
 } from "../../src/feed/gate-dock.js";
 import { shellElements } from "../../src/shell.js";
 import { shellHTML } from "../shell-html.js";
+import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 
 /** MutationObserver delivers on a microtask; this lets it run. */
 async function settle(): Promise<void> {
@@ -40,6 +43,7 @@ afterEach(() => {
   installed?.dispose();
   installed = null;
   document.documentElement.style.removeProperty(DOCK_HEIGHT_PROPERTY);
+  document.documentElement.style.removeProperty(DOCK_BACKGROUND_PROPERTY);
 });
 
 /** The feed as feed-view.ts builds it: every row inside one body. */
@@ -272,5 +276,62 @@ describe("installGateDock", () => {
 
     // Assert
     expect(rule).toContain("max-height: var(--gate-dock-height, 18.4vh)");
+  });
+});
+
+describe("the docked gate's background", () => {
+  it("takes the background Emacs told it", () => {
+    // Arrange
+    document.documentElement.style.setProperty(DOCK_BACKGROUND_PROPERTY, "#1d1f21");
+
+    // Act / Assert
+    expect(toldDockBackground(document)).toBe("#1d1f21");
+  });
+
+  it("is untold when Emacs never told a background", () => {
+    // Arrange / Act / Assert
+    expect(toldDockBackground(document)).toBeNull();
+  });
+
+  it("paints the docked card from the told property, the card's own background only as fallback", async () => {
+    // Arrange
+    const css = (await import("../../src/styles.css?raw")).default;
+
+    // Act
+    const rule = /#gate-dock > \.cold-gate\.cold-gate-docked\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
+
+    // Assert
+    expect(rule).toContain("background: var(--gate-dock-bg, var(--revival-gate-bg))");
+  });
+
+  it("records at INFO a dock Emacs never told its background", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const { feed, dock } = page();
+    const { row } = gateRow("standing");
+    feed.append(row);
+
+    // Act
+    installed = installGateDock(feed, dock);
+
+    // Assert
+    expect((await forwardedRecord(capture, "feed.gate-dock.background-fallback")).level.case).toBe("info");
+  });
+
+  it("records the told background on the docking record", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    document.documentElement.style.setProperty(DOCK_BACKGROUND_PROPERTY, "#1d1f21");
+    const { feed, dock } = page();
+    const { row } = gateRow("standing");
+    feed.append(row);
+
+    // Act
+    installed = installGateDock(feed, dock);
+
+    // Assert
+    expect((await forwardedRecord(capture, "feed.gate-dock.docked")).context).toMatchObject({
+      background: "#1d1f21",
+    });
   });
 });
