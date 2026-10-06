@@ -7,6 +7,23 @@
  * a refusal the user must be able to understand, which is why the refusal text
  * is the whole point of that arm.
  *
+ * # No hook record is stored (owner ruling 2026-10-06)
+ *
+ * "We should stop storing hook records, they are just bloat." A hook firing that
+ * draws nothing — its start, a success, a cancellation, the vendor's
+ * `hook_progress` — produces NO entry at all: it is logged at DEBUG with the
+ * session's running count and counted into the INFO summary
+ * {@link HookRegistry.reportDropped} writes when the query ends. Before the
+ * ruling every `SessionStart:resume` firing filled a history page with a row
+ * that drew nothing.
+ *
+ * A FAILED or BLOCKED firing still draws its card LIVE, so it is still handed
+ * to the record plane — its start (named from the registry, so the live card
+ * keeps its `name (event)` headline) and its outcome, together at the response.
+ * The store delivers a hook line to the standing watches and never keeps it
+ * (shim-store `kindHookDropped`): the card is drawn while the session runs, and
+ * a daemon that restarts never replays it.
+ *
  * # A hook NEVER ends a turn
  *
  * Stop hooks fire AFTER a turn's stop and never determine how it ended. The
@@ -38,19 +55,38 @@ const HOOK_REGISTRY_CAPACITY = 128;
 /** One hook firing, remembered until its response arrives. */
 export interface PendingHook {
   readonly hookId: string;
+  /** The firing's activity identity, minted once from its id (ids.ts). */
+  readonly activityId: conversationv1.AgentActivityId;
+  /** The `hook_started` record's own uuid: the start frame's write identity. */
+  readonly startUuid: string;
   readonly hookName: string;
   readonly event: conversationv1.AgentHookEvent;
   readonly startedAtMs: number;
 }
 
-/** The hook firings in flight. */
+/** The hook firings in flight, and the hook records this query dropped. */
 export interface HookRegistry {
   remember(hook: PendingHook): void;
   take(hookId: string): PendingHook | undefined;
+  /**
+   * Count one hook record that was not stored, by its kind; answers the
+   * query's running total across every kind.
+   */
+  noteDropped(kind: DroppedHookKind): number;
+  /**
+   * Write the INFO summary of what this query dropped, and start counting
+   * afresh. Writes nothing when nothing was dropped.
+   */
+  reportDropped(why: string): void;
 }
+
+/** The hook records that draw nothing, and so are never stored. */
+export type DroppedHookKind = "start" | "succeeded" | "cancelled" | "progress";
 
 export function createHookRegistry(): HookRegistry {
   const hooks = new Map<string, PendingHook>();
+  let dropped = new Map<DroppedHookKind, number>();
+  let droppedTotal = 0;
   return {
     remember(hook) {
       if (hooks.size >= HOOK_REGISTRY_CAPACITY) {
@@ -71,7 +107,35 @@ export function createHookRegistry(): HookRegistry {
       if (hook !== undefined) hooks.delete(hookId);
       return hook;
     },
+    noteDropped(kind) {
+      dropped.set(kind, (dropped.get(kind) ?? 0) + 1);
+      droppedTotal += 1;
+      return droppedTotal;
+    },
+    reportDropped(why) {
+      if (droppedTotal === 0) return;
+      LOGGER.info(
+        { dropped_total: droppedTotal, dropped_by_kind: Object.fromEntries(dropped), why },
+        "hook records this query produced that draw nothing were not stored",
+      );
+      dropped = new Map();
+      droppedTotal = 0;
+    },
   };
+}
+
+/** Drop one hook record that draws nothing: DEBUG, with the running count. */
+function dropHookRecord(
+  registry: HookRegistry,
+  kind: DroppedHookKind,
+  fields: { readonly hook_id: string; readonly hook: string; readonly event: string },
+): readonly PersistEntry[] {
+  const total = registry.noteDropped(kind);
+  LOGGER.debug(
+    { ...fields, hook_record: kind, dropped_total: total },
+    "a hook record that draws nothing is not stored",
+  );
+  return [];
 }
 
 /**
@@ -135,49 +199,79 @@ function hookOutput(stdout: string, stderr: string): conversationv1.AgentHookOut
   return create(conversationv1.AgentHookOutputSchema, { stdout, stderr });
 }
 
-/** `hook_started` — which hook, on which event. */
+/**
+ * `hook_started` — which hook, on which event. Remembered, and NOT stored: a
+ * start draws nothing on its own, and a firing that goes on to fail or block
+ * has its start written beside its outcome ({@link convertHookResponse}).
+ */
 export function convertHookStarted(
   message: Extract<SdkMessage, { type: "system"; subtype: "hook_started" }>,
   context: FoldContext,
   registry: HookRegistry,
 ): readonly PersistEntry[] {
-  const startedAtMs = context.nowMs();
-  const event = hookEvent(message.hook_event);
+  // THE FIRING ID IS ITS IDENTITY, read through ids.ts before anything is
+  // remembered: an empty one names no firing its outcome could join, and is the
+  // converter defect it always was, though nothing of the start is stored.
+  const activityId = hookActivityId(message.hook_id);
   registry.remember({
     hookId: message.hook_id,
+    activityId,
+    startUuid: message.uuid,
     hookName: message.hook_name,
-    event,
-    startedAtMs,
+    event: hookEvent(message.hook_event),
+    startedAtMs: context.nowMs(),
   });
   LOGGER.logVerbose(
     { hook_id: message.hook_id, hook: message.hook_name, event: message.hook_event },
     "a hook fired",
   );
-  return [
-    activityEntry(
-      context,
-      {
-        agentId: context.mainAgentId,
-        vendorUuid: message.uuid,
-        discriminator: "activity.hook.start",
-      },
-      agentActivity(hookActivityId(message.hook_id), {
-        case: "hook",
-        value: create(conversationv1.AgentHookSchema, {
-          result: {
-            case: "start",
-            value: create(conversationv1.AgentHookStartSchema, {
-              hookName: message.hook_name,
-              event,
-              // The vendor's hook_started names no gated call, so the join to
-              // the call this firing gates has no producer and stays UNSET.
-              startedAt: startedAt(startedAtMs),
-            }),
-          },
-        }),
+  return dropHookRecord(registry, "start", {
+    hook_id: message.hook_id,
+    hook: message.hook_name,
+    event: message.hook_event,
+  });
+}
+
+/**
+ * `hook_progress` — a running hook's partial output. Draws nothing, so it is
+ * not stored; before the ruling it landed as vendor-specific residue.
+ */
+export function convertHookProgress(
+  message: Extract<SdkMessage, { type: "system"; subtype: "hook_progress" }>,
+  registry: HookRegistry,
+): readonly PersistEntry[] {
+  return dropHookRecord(registry, "progress", {
+    hook_id: message.hook_id,
+    hook: message.hook_name,
+    event: message.hook_event,
+  });
+}
+
+/** The start frame of a firing that went on to fail or block. */
+function startEntry(context: FoldContext, pending: PendingHook): PersistEntry {
+  return activityEntry(
+    context,
+    {
+      agentId: context.mainAgentId,
+      vendorUuid: pending.startUuid,
+      discriminator: "activity.hook.start",
+    },
+    agentActivity(pending.activityId, {
+      case: "hook",
+      value: create(conversationv1.AgentHookSchema, {
+        result: {
+          case: "start",
+          value: create(conversationv1.AgentHookStartSchema, {
+            hookName: pending.hookName,
+            event: pending.event,
+            // The vendor's hook_started names no gated call, so the join to
+            // the call this firing gates has no producer and stays UNSET.
+            startedAt: startedAt(pending.startedAtMs),
+          }),
+        },
       }),
-    ),
-  ];
+    }),
+  );
 }
 
 /** `hook_response` — how the firing went. */
@@ -186,6 +280,8 @@ export function convertHookResponse(
   context: FoldContext,
   registry: HookRegistry,
 ): readonly PersistEntry[] {
+  // Read first, for the same reason as the start's: an empty id is a defect.
+  const activityId = hookActivityId(message.hook_id);
   const pending = registry.take(message.hook_id);
   const settledAtMs = context.nowMs();
   const durationMs = pending === undefined ? undefined : settledAtMs - pending.startedAtMs;
@@ -193,13 +289,11 @@ export function convertHookResponse(
   const output = hookOutput(message.stdout, message.stderr);
   const exitCode = message.exit_code ?? 0;
 
+  const dropped = { hook_id: message.hook_id, hook: message.hook_name, event: message.hook_event };
   let result: conversationv1.AgentHook["result"];
   if (message.outcome === "cancelled") {
     LOGGER.info({ hook_id: message.hook_id }, "a hook was cancelled before it finished");
-    result = {
-      case: "cancelled",
-      value: create(conversationv1.AgentHookCancelledSchema, {}),
-    };
+    return dropHookRecord(registry, "cancelled", dropped);
   } else if (message.outcome === "error") {
     // Blocking or merely failing is {@link hookBlockingText}'s single reading,
     // shared with the engine's start gate.
@@ -235,18 +329,14 @@ export function convertHookResponse(
     }
   } else {
     LOGGER.logVerbose({ hook_id: message.hook_id, hook: message.hook_name }, "a hook succeeded");
-    result = {
-      case: "succeeded",
-      value: create(conversationv1.AgentHookSucceededSchema, {
-        command,
-        exitCode,
-        durationMs: BigInt(Math.max(0, durationMs ?? 0)),
-        output,
-      }),
-    };
+    return dropHookRecord(registry, "succeeded", dropped);
   }
 
+  // THE START RIDES WITH THE OUTCOME, so the live card is headlined by the
+  // hook's name and event exactly as when every start was written as it fired.
+  // A firing whose start this shim never saw has only its outcome.
   return [
+    ...(pending === undefined ? [] : [startEntry(context, pending)]),
     activityEntry(
       context,
       {
@@ -254,7 +344,7 @@ export function convertHookResponse(
         vendorUuid: message.uuid,
         discriminator: `activity.hook.${String(result.case)}`,
       },
-      agentActivity(hookActivityId(message.hook_id), {
+      agentActivity(activityId, {
         case: "hook",
         value: create(conversationv1.AgentHookSchema, { result }),
       }),

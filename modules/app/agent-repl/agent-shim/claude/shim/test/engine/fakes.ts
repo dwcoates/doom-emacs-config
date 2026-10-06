@@ -674,6 +674,13 @@ export class RecordingFold implements EngineFold {
     this.queryEnds.push(why);
   }
 
+  /** Every `reportDroppedHooks` the engine called, by its stated reason. */
+  readonly droppedHookReports: string[] = [];
+
+  reportDroppedHooks(why: string): void {
+    this.droppedHookReports.push(why);
+  }
+
   /** Every absorbed turn the engine concluded, by the turn its context named and its coordinate. */
   readonly absorbed: { turn: string; coordinate: string }[] = [];
 
