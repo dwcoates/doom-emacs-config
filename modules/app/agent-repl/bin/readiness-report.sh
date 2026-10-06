@@ -377,7 +377,7 @@ emit_system() { # NAME
     # 4. running process, where one exists.
     match="$(system_process_match "$name")"
     if [ -n "$match" ]; then
-        pid="$(pgrep -f "$match" 2>/dev/null | head -n1 || true)"
+        pid="$(pgrep -f "$match" 2>/dev/null | sed -n 1p || true)"
         if [ -n "$pid" ]; then
             started_epoch="$(proc_start_epoch "$pid")"
             if [ -n "$started_epoch" ]; then started_at="$(iso8601 "$started_epoch")"; fi

@@ -100,7 +100,7 @@ print_top() {
     read -r total _ _ _ < <(classify_file "$f")
     rel="${f#$MODULE_DIR/}"
     printf '%d %s\n' "$total" "$rel"
-  done | sort -rn | head -10 | awk '{ printf "  %6d  %s\n", $1, $2 }'
+  done | sort -rn | sed -n 1,10p | awk '{ printf "  %6d  %s\n", $1, $2 }'
 }
 
 print_section "src" "${src_files[@]}"

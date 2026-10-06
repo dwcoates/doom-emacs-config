@@ -69,7 +69,7 @@ _canonpath() {
 # `worktree` line; every entry after it is a linked (non-main) worktree.
 _main_worktree_root() {
   git -C "$SCRIPT_DIR" worktree list --porcelain 2>/dev/null \
-    | awk '/^worktree /{print $2; exit}'
+    | awk '/^worktree / && !found {print $2; found = 1}'
 }
 
 # Roots of all NON-main worktrees (every entry after the first).
