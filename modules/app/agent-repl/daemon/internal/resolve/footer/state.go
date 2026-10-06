@@ -3,12 +3,12 @@ package footer
 import (
 	"time"
 
-	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/sessionwatcher"
+	"claude-repld/internal/wsm"
 )
 
 // standing is one composed line plus the instant it began standing. Every
@@ -47,9 +47,9 @@ type allowanceWindow struct {
 	// compared with another sample's, because only samples carry it and only
 	// samples are stamped by the shim's clock.
 	sampledAtMs int64
-	// verdict is the last rate-limit event for this window, nil until one has
-	// been seen. Only its status arm is read.
-	verdict *conversationv1.SessionRateLimitStatus
+	// verdict is the status arm of the last rate-limit event for this window,
+	// VerdictNone until one with a status has been seen.
+	verdict wsm.AllowanceVerdict
 }
 
 // observeSampledFigures files a figure sighting read off a usage SAMPLE,
@@ -117,7 +117,7 @@ type rateState struct {
 	// stays unfigured — and so draws absent — on the accounts that never
 	// report an overage window at all.
 	overage allowanceWindow
-	// at is when the newest evidence for either window was observed.
+	// at is when the newest evidence for any window was observed.
 	at time.Time
 }
 
@@ -521,8 +521,13 @@ type wsState struct {
 	// event instant and expiry, and nothing ever clears it — the client's
 	// clock retires it at its expiry. Nil until the first transient.
 	transient *frontendv1.FooterActivityTransient
-	// rate is the vendor's last rate-limit status per window.
-	rate rateState
+	// account is the account root (Claude config dir) the workspace's
+	// session spends from, empty until SetAccount binds it.
+	account string
+	// usage is the ACCOUNT'S usage evidence, shared by every workspace bound
+	// to the same root (account.go). Never nil: an unbound workspace holds a
+	// private one until SetAccount binds it.
+	usage *accountUsage
 	// notification is the agent's standing push notification, nil when none
 	// stands. It stands until the next prompt (salient.go).
 	notification *standing
@@ -638,6 +643,7 @@ type wsState struct {
 // newWSState builds an empty accumulation.
 func newWSState() *wsState {
 	return &wsState{
+		usage:           &accountUsage{},
 		permissions:     map[string]standing{},
 		questions:       map[string]standing{},
 		retiredRows:     map[string]*agentRow{},
