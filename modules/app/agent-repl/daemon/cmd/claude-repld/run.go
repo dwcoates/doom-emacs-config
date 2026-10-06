@@ -75,7 +75,7 @@ type hooks struct {
 	// standing stream the surface serves (the server's Close); the shutdown
 	// runs it once the answers owed have left, and waits for every stream's
 	// end frame before the process can exit.
-	Serve func(ctx context.Context, l net.Listener, h http.Handler, onShuttingDown, endStreams func()) error
+	Serve func(ctx context.Context, l net.Listener, h http.Handler, onShuttingDown, endStreams func(), mark func(step string, start time.Time)) error
 	// BootStall bounds the whole boot reconciliation; zero means
 	// bootStallBound. It is a seam because the behavior under test is a
 	// reconciliation that never finishes, and a test must not wait out a
@@ -157,6 +157,8 @@ func run(ctx context.Context, opts options, h hooks) error {
 		"joining":    joining,
 		"state_root": layout.Dir(),
 	})
+	teardown := newTeardownClock(log)
+	defer teardown.report()
 
 	// SIGQUIT IS TAKEN OVER BEFORE ANYTHING CAN WEDGE. Emacs launches the
 	// daemon with its stderr discarded, so the runtime's own SIGQUIT dump goes
@@ -204,7 +206,9 @@ func run(ctx context.Context, opts options, h hooks) error {
 	if joining {
 		bindClaim = daemonaddr.BindJoining
 	}
+	claimStart := time.Now()
 	claim, err := bindClaim(layout.DaemonAddr(), 0)
+	claimWaited := time.Since(claimStart)
 	if err != nil {
 		if errors.Is(err, daemonaddr.ErrClaimed) {
 			// THE MECHANISM WORKING. Emacs spawns a daemon whenever it cannot
@@ -224,7 +228,13 @@ func run(ctx context.Context, opts options, h hooks) error {
 		})
 		return fmt.Errorf("claude-repld: claim the daemon address: %w", err)
 	}
-	defer claim.Close()
+	defer teardown.step("claim_close", func() { claim.Close() })
+	// THE WAIT IS SAID. A held claim is an outgoing daemon still exiting, and
+	// a replacement waiting it out was a silent gap in the run log.
+	log.Info("daemon.cmd.claim", "took the boot claim", dlog.Context{
+		"joining":   joining,
+		"waited_ms": claimWaited.Milliseconds(),
+	})
 
 	if joining {
 		// A JOINING DAEMON DOES NOT ADVERTISE. It reports its address where the
@@ -283,7 +293,7 @@ func run(ctx context.Context, opts options, h hooks) error {
 	// records that the early call already took the file down so the no-op is not
 	// mistaken for a successor having taken over.
 	withdrawal := &addrWithdrawal{claim: claim, log: log}
-	defer withdrawal.finish()
+	defer teardown.step("addr_withdraw", withdrawal.finish)
 
 	// THE REGISTRY REFUSES TEMPORARY FOLDERS (owner ruling, 2026-10-06), and
 	// the guard is built from the environment ONCE, here: its test-run seam
@@ -322,14 +332,14 @@ func run(ctx context.Context, opts options, h hooks) error {
 	}
 	// THE CLOSE RELEASES EVERY LEASE THIS PROCESS STILL OWNS (wsm Close), so
 	// its failure is a lease left behind and is said at ERROR, never dropped.
-	defer func() {
+	defer teardown.step("state_close", func() {
 		if err := db.Close(); err != nil {
 			log.Error("daemon.cmd.state", "the state client did not close cleanly; a lease this process held may be left behind", dlog.Context{
 				"path":  layout.DB(),
 				"error": err.Error(),
 			})
 		}
-	}()
+	})
 
 	// THE LOG SURFACES LEARN THE MINTED WORKSPACE IDS HERE, the moment the
 	// roster is readable and before any workspace-owned record can be
@@ -344,6 +354,10 @@ func run(ctx context.Context, opts options, h hooks) error {
 	// the handover's last transfer both end the process through it.
 	serving, stopServing := context.WithCancel(ctx)
 	defer stopServing()
+	go func() {
+		<-serving.Done()
+		teardown.begin(time.Now())
+	}()
 	// WHY IT ENDED is recorded by whoever ends it, as a typed reason: only a
 	// state-root loss stops the shims on the way out (see standDownShims).
 	var ended standDownRecord
@@ -388,10 +402,10 @@ func run(ctx context.Context, opts options, h hooks) error {
 	// THE BANNERS CLOSE AFTER THE WATCHERS and before the state client:
 	// deferred here, BEFORE CloseWatchers is, so it runs after it.
 	if built.CloseBanners != nil {
-		defer built.CloseBanners()
+		defer teardown.step("close_banners", built.CloseBanners)
 	}
 	if built.CloseWatchers != nil {
-		defer built.CloseWatchers()
+		defer teardown.step("close_watchers", built.CloseWatchers)
 	}
 
 	// THE MERGE DRAIN RUNS FIRST OF ALL THE TEARDOWNS. Deferred after the
@@ -402,7 +416,7 @@ func run(ctx context.Context, opts options, h hooks) error {
 	// (merge.TerminalDrainBound) and takes its own context, because the
 	// process's signal context is already cancelled by the time it runs.
 	if built.DrainMerges != nil {
-		defer built.DrainMerges(context.Background())
+		defer teardown.step("drain_merges", func() { built.DrainMerges(context.Background()) })
 	}
 
 	sequence, err := boot.New(built.Boot)
@@ -428,7 +442,7 @@ func run(ctx context.Context, opts options, h hooks) error {
 	if err != nil {
 		return fmt.Errorf("claude-repld: build the server: %w", err)
 	}
-	defer srv.Close()
+	defer teardown.step("server_close", func() { srv.Close() })
 
 	// THE LATE BINDINGS ARE COMPLETED BEFORE ANYTHING IS SERVED: the rollout's
 	// and the drain's pushes, and the workspace verbs' host relay, all reach
@@ -437,12 +451,18 @@ func run(ctx context.Context, opts options, h hooks) error {
 		built.Bind(srv)
 	}
 	if built.Prime != nil {
+		primeStart := time.Now()
 		if err := built.Prime(serving); err != nil {
 			log.Error("daemon.cmd.serve", "the opening views could not be published", dlog.Context{
 				"error": err.Error(),
 			})
 			return fmt.Errorf("claude-repld: publish the opening views: %w", err)
 		}
+		// TIMED, because it stands between the boot's reconciliation and
+		// serving: whatever it costs, every client waits.
+		log.Info("daemon.cmd.serve", "published the opening views", dlog.Context{
+			"took_ms": time.Since(primeStart).Milliseconds(),
+		})
 	}
 	// The background loops start only now, for the same reason: each of them
 	// can push, and pushing into a surface that does not exist is a drop.
@@ -491,12 +511,12 @@ func run(ctx context.Context, opts options, h hooks) error {
 			},
 		}.run(serving)
 	})
-	defer joinBackgroundLoops(&loops, loopJoinBound, log)
+	defer teardown.step("join_loops", func() { joinBackgroundLoops(&loops, loopJoinBound, log) })
 	// AND THE QUEUE'S OWN GOROUTINES, for the same reason and on the same
 	// bound: a classification verdict and a background revival each read and
 	// write the state client off their own goroutine.
 	if built.DrainQueue != nil {
-		defer joinQueueWork(built.DrainQueue, loopJoinBound, log)
+		defer teardown.step("join_queue", func() { joinQueueWork(built.DrainQueue, loopJoinBound, log) })
 	}
 	// AND THE DETACHED SESSION STARTS, on the same bound and for the same
 	// reason: the register's revival brings a session up off the answer's
@@ -505,7 +525,7 @@ func run(ctx context.Context, opts options, h hooks) error {
 	// inside a start costs the shim call's cancellation rather than the whole
 	// bound.
 	if built.DrainStarts != nil {
-		defer joinDetachedStarts(built.DrainStarts, loopJoinBound, log)
+		defer teardown.step("join_starts", func() { joinDetachedStarts(built.DrainStarts, loopJoinBound, log) })
 	}
 
 	log.Info("daemon.cmd.serve", "serving", dlog.Context{
@@ -530,7 +550,9 @@ func run(ctx context.Context, opts options, h hooks) error {
 			})
 		}
 	}
-	if err := h.Serve(serving, server.RetryAccept(claim.Listener(), log), server.H2C(srv, log), withdrawal.begin, endStreams); err != nil {
+	serveErr := h.Serve(serving, server.RetryAccept(claim.Listener(), log), server.H2C(srv, log), withdrawal.begin, endStreams, teardown.mark)
+	teardown.markSinceBegin("serve_stop")
+	if err := serveErr; err != nil {
 		log.Error("daemon.cmd.serve", "the daemon stopped serving its listener", dlog.Context{
 			"address": claim.Address(),
 			"error":   err.Error(),
@@ -538,7 +560,7 @@ func run(ctx context.Context, opts options, h hooks) error {
 		return err
 	}
 	reason, cause := ended.get()
-	standDownShims(ctx, reason, built.StopShims, log)
+	teardown.step("stand_down_shims", func() { standDownShims(ctx, reason, built.StopShims, log) })
 	if cause != nil {
 		return fmt.Errorf("claude-repld: stood down: %w", cause)
 	}
@@ -643,7 +665,14 @@ func workspaceIDLookup(ctx context.Context, db wsm.DB) dlog.WorkspaceIDLookup {
 
 // serve runs the http server on the claimed listener until ctx ends, then shuts
 // it down gracefully.
-func serve(ctx context.Context, l net.Listener, h http.Handler, onShuttingDown, endStreams func()) error {
+//
+// MARK, when non-nil, is told each step of the shutdown and when it began, so
+// the teardown record (teardownClock) names which step an exit spent its time
+// in.
+func serve(ctx context.Context, l net.Listener, h http.Handler, onShuttingDown, endStreams func(), mark func(step string, start time.Time)) error {
+	if mark == nil {
+		mark = func(string, time.Time) {}
+	}
 	// THE GRACE HAS TO BE OURS, so the handler must carry the gate that counts
 	// the calls being answered. `Server.Shutdown` cannot do it: every client
 	// dials h2c, `h2c.NewHandler` serves such a connection by HIJACKING it,
@@ -654,7 +683,20 @@ func serve(ctx context.Context, l net.Listener, h http.Handler, onShuttingDown, 
 	if !ok {
 		return fmt.Errorf("claude-repld: the serving handler carries no in-flight request gate; an orderly exit would cut every call it is still answering")
 	}
-	srv := &http.Server{Handler: h}
+	conns := &connStates{byConn: map[net.Conn]http.ConnState{}}
+	srv := &http.Server{Handler: h, ConnState: conns.track}
+	// A CONNECTION THAT HAS DELIVERED NO REQUEST OWES NOTHING, and
+	// `Server.Shutdown` waits for it anyway: it polls, on an interval that
+	// doubles to 500ms, until every connection it tracks is idle, and a
+	// connection still in StateNew is not idle until it is 5s old. A webview
+	// holds exactly such a spare socket open, so every exit sat in that poll
+	// (measured 2026-10-06: one StateNew connection on every exit, the poll
+	// 140-1100ms under load, and a replacement daemon waiting on the boot
+	// claim behind it until an e2e reconnect bound expired). Shutdown closes
+	// the listeners before it runs this hook, so no new connection can
+	// arrive; the ones that never sent a request are closed as a closed
+	// listener would have refused them.
+	srv.RegisterOnShutdown(conns.closeRequestless)
 	done := make(chan error, 1)
 	// SERVED THROUGH THE GATE'S OWN LISTENER, so the calls it counts are held
 	// open until their bytes are on the socket. A handler returning is not its
@@ -690,7 +732,9 @@ func serve(ctx context.Context, l net.Listener, h http.Handler, onShuttingDown, 
 		// microseconds later, so the caller read `unexpected EOF` from a stop
 		// the daemon had performed. AwaitQuiet says so loudly when its own
 		// bound expires; nothing is swallowed.
+		start := time.Now()
 		gate.AwaitQuiet(shutdownGrace)
+		mark("serve_await_quiet", start)
 		// AND THEN THE STANDING STREAMS' OWN LAST WORDS. The gate counts
 		// unary calls only — a Watch* handler does not return until its
 		// client goes away, so counting one would make every exit wait out
@@ -708,7 +752,9 @@ func serve(ctx context.Context, l net.Listener, h http.Handler, onShuttingDown, 
 		// treated as an error: one h2 connection multiplexes the pushes with
 		// everything else, so a genuinely busy link never falls silent and is
 		// not a lost announcement.
+		start = time.Now()
 		gate.AwaitWritesQuiet(writesQuietBound)
+		mark("serve_writes_quiet", start)
 		// EVERY STANDING STREAM ENDS WITH ITS END FRAME, BEFORE THE PROCESS
 		// CAN EXIT. `Shutdown` below cannot do it: it neither closes nor waits
 		// for a hijacked h2c connection, and the surface's own Close used to
@@ -720,8 +766,10 @@ func serve(ctx context.Context, l net.Listener, h http.Handler, onShuttingDown, 
 		// a handover's last transfer, a restart's stand-down, a drain, a
 		// signal, a state-root loss.
 		if endStreams != nil {
+			start = time.Now()
 			gate.EndStreams(endStreams)
 			gate.AwaitStreamsEnded(streamsEndBound)
+			mark("serve_end_streams", start)
 		}
 		// THE GRACE IS BOUNDED. Graceful shutdown waits for every in-flight
 		// request, and this daemon's Watch* handlers are STANDING STREAMS that
@@ -731,12 +779,71 @@ func serve(ctx context.Context, l net.Listener, h http.Handler, onShuttingDown, 
 		// still open when it expires is closed.
 		shutdown, cancel := context.WithTimeout(context.Background(), shutdownGrace)
 		defer cancel()
+		start = time.Now()
+		held := conns.summary()
 		err := srv.Shutdown(shutdown)
+		mark("serve_http_shutdown(held "+held+"; after "+conns.summary()+")", start)
 		if errors.Is(err, context.DeadlineExceeded) {
 			return srv.Close()
 		}
 		return err
 	}
+}
+
+// connStates tracks every connection net/http still holds, by state, so the
+// teardown record can say what `Server.Shutdown` was waiting on: it polls,
+// with a growing interval, until every connection it tracks is idle.
+type connStates struct {
+	mu     sync.Mutex
+	byConn map[net.Conn]http.ConnState
+	// closeFailures are the errors closing a requestless connection met,
+	// reported through summary rather than dropped.
+	closeFailures []string
+}
+
+func (c *connStates) track(conn net.Conn, state http.ConnState) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	switch state {
+	case http.StateClosed, http.StateHijacked:
+		delete(c.byConn, conn)
+	default:
+		c.byConn[conn] = state
+	}
+}
+
+// closeRequestless closes every connection that has not delivered a request.
+func (c *connStates) closeRequestless() {
+	c.mu.Lock()
+	var requestless []net.Conn
+	for conn, state := range c.byConn {
+		if state == http.StateNew {
+			requestless = append(requestless, conn)
+		}
+	}
+	c.mu.Unlock()
+	for _, conn := range requestless {
+		if err := conn.Close(); err != nil {
+			c.mu.Lock()
+			c.closeFailures = append(c.closeFailures, err.Error())
+			c.mu.Unlock()
+		}
+	}
+}
+
+// summary answers the held connections counted by state, as "new=N active=N idle=N".
+func (c *connStates) summary() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	counts := map[http.ConnState]int{}
+	for _, state := range c.byConn {
+		counts[state]++
+	}
+	out := fmt.Sprintf("new=%d active=%d idle=%d", counts[http.StateNew], counts[http.StateActive], counts[http.StateIdle])
+	if len(c.closeFailures) > 0 {
+		out += fmt.Sprintf(" close_failed=%q", c.closeFailures)
+	}
+	return out
 }
 
 // shutdownGrace is how long in-flight requests have to finish before the

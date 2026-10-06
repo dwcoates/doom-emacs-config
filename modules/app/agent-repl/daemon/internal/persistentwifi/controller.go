@@ -130,7 +130,12 @@ func (c *Controller) Run(ctx context.Context) error {
 // readLocked reads, records a CHANGE in either fact's readability, and
 // publishes. Caller holds mu.
 func (c *Controller) readLocked(ctx context.Context) reading {
+	start := c.clock.Now()
 	rd := probe(ctx, c.runner, c.cfg.Tools)
+	// THE READ IS TIMED: it runs three host tools in sequence, and the boot
+	// reads it before serving, so its cost is the boot's (an e2e boot under
+	// load spent 1.74s between its reconciliation and serving with nothing said).
+	took := c.clock.Now().Sub(start)
 	if err := ctx.Err(); err != nil {
 		// A read its caller abandoned (the daemon standing down mid-probe)
 		// says nothing about either fact: neither its causes nor its standing
@@ -145,6 +150,7 @@ func (c *Controller) readLocked(ctx context.Context) reading {
 		c.log.Info(opProbe, "the persistent-wifi standing changed", dlog.Context{
 			"wifi": wifiArm(rd.state), "mode": modeArm(rd.state),
 			"network_name": rd.state.GetJoined().GetNetworkName(), "device": rd.device,
+			"took_ms": took.Milliseconds(),
 		})
 		c.last = rd.state
 		c.topic.Publish(rd.state)
