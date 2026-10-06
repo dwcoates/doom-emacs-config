@@ -450,12 +450,18 @@ func run(ctx context.Context, opts options, h hooks) error {
 		built.Bind(srv)
 	}
 	if built.Prime != nil {
+		primeStart := time.Now()
 		if err := built.Prime(serving); err != nil {
 			log.Error("daemon.cmd.serve", "the opening views could not be published", dlog.Context{
 				"error": err.Error(),
 			})
 			return fmt.Errorf("claude-repld: publish the opening views: %w", err)
 		}
+		// TIMED, because it stands between the boot's reconciliation and
+		// serving: whatever it costs, every client waits.
+		log.Info("daemon.cmd.serve", "published the opening views", dlog.Context{
+			"took_ms": time.Since(primeStart).Milliseconds(),
+		})
 	}
 	// The background loops start only now, for the same reason: each of them
 	// can push, and pushing into a surface that does not exist is a drop.
