@@ -969,3 +969,4 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - 2026-10-06 every test-named harness script is rostered or listed in roster.NotSuites with a reason, and a roster test holds it(testrun/roster).
 - 2026-10-06 e2e-repeat.sh gates only on the host suite slot; the load-average wait and its 5s poll are gone(bin/e2e-repeat.sh).
 - 2026-10-06 no script pipes into a reader that can stop early (head, awk exit, sed q, grep -q/-m), the doctor reads launchctl whole, and the roster scan skips nested checkouts(scripts, testrun scans).
+- 2026-10-06 no footer line warns that the context is nearly full: the salient context_budget kind and AgentUpdate.context_budget_warning are retired, and a failed compaction is the feed's outcome marker alone(footer.proto, agent.proto, daemon footer, shim, sidecar, webapp).
