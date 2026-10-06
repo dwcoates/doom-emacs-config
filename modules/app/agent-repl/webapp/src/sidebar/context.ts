@@ -1,16 +1,18 @@
 /**
  * context — what every part of the rail is handed while it draws.
  *
- * The rail is a stateless renderer of the roster like every other component,
- * so the only state here is the WEBVIEW-LOCAL preference set the contract
- * explicitly leaves to the client (R14): which grouping is shown, which
- * sections are folded, which rows have their detail panel open. None of it is
- * wire state, and none of it is ever inferred from the roster.
+ * The rail is a stateless renderer of the roster like every other component.
+ * Its VIEW STATE — folds and the grouping shown — is the daemon's, carried on
+ * the roster push so the sidebar looks the same in every workspace's page
+ * (owner rulings, 2026-10-06); `view.ts` holds only this page's asks still in
+ * flight. A dropdown open mid-gesture (a row's menu or detail popover) is NOT
+ * view state: it is transient to the page that opened it.
  */
 import type { AppContext } from "../rpc/context.js";
 import type { AttentionRegistry } from "./attention.js";
+import type { SidebarView } from "./view.js";
 
-/** The two resolved groupings; which one is drawn is local preference. */
+/** The two resolved groupings; which one is drawn is the daemon's view state. */
 export type Grouping = "repository" | "task";
 
 /** A task the assign menu can offer, taken from the task view's sections. */
@@ -21,37 +23,18 @@ export interface TaskChoice {
   label: string;
 }
 
-/**
- * The webview-local preferences, persisted behind try/catch.
- *
- * Reading and writing `localStorage` throws outright in some embeddings (a
- * private window, a webview with site data disabled), and a rail that cannot
- * remember a fold must still draw, so every access here is guarded and a
- * failure costs the preference and nothing else.
- */
-export interface SidebarPrefs {
-  grouping(): Grouping;
-  setGrouping(grouping: Grouping): void;
-  /**
-   * Whether the section under KEY is folded.
-   *
-   * DEFAULTFOLDED is what an unremembered section does — open for the live
-   * groupings, folded for recently-merged, which is settled history the rail
-   * should not spend height on until it is asked for.
-   */
-  isFolded(key: string, defaultFolded?: boolean): boolean;
-  setFolded(key: string, folded: boolean): void;
-  /** Whether the row for `WorkspaceRef.id` has its detail panel open. */
-  isExpanded(id: string): boolean;
-  setExpanded(id: string, expanded: boolean): void;
-}
-
 /** What a draw of the rail carries with it. */
 export interface SidebarContext {
   /** The app-wide capabilities: client, workspace, ticker, failures. */
   ctx: AppContext;
-  /** The webview-local preference set. */
-  prefs: SidebarPrefs;
+  /** The daemon-held view state, with this page's asks still in flight. */
+  view: SidebarView;
+  /**
+   * The rows whose detail popover is open on THIS page, by `WorkspaceRef.id`.
+   * A popover is a dropdown, transient to its page and never the daemon's
+   * view state; it is kept here only so a redraw does not snap it shut.
+   */
+  openDetails: Set<string>;
   /** The blink registry the attention markers are driven from. */
   attention: AttentionRegistry;
   /**
@@ -64,12 +47,12 @@ export interface SidebarContext {
   onDispose(fn: () => void): void;
 }
 
-/** The fold key a repository section is remembered under. */
+/** The key a repository section is identified by on this page. */
 export function repoFoldKey(repositoryId: string): string {
   return `repo:${repositoryId}`;
 }
 
-/** The fold key a task section is remembered under. */
+/** The key a task section is identified by on this page (`view.ts`). */
 export function taskFoldKey(taskId: string): string {
   return `task:${taskId}`;
 }

@@ -2,19 +2,22 @@
 import { describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { UpdateTaskResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_task_pb";
-import { FoldRepositoryResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_fold_repository_pb";
+import {
+  UpdateSidebarViewResponseSchema,
+  type UpdateSidebarViewRequest,
+  type UpdateSidebarViewResponse,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_sidebar_view_pb";
 import {
   RosterRepoSectionSchema,
   RosterTaskSectionSchema,
   WorkspaceRosterSchema,
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { MalformedView } from "../../src/rpc/malformed.js";
-import { MERGED_FOLD_KEY, repoFoldKey, taskFoldKey } from "../../src/sidebar/context.js";
-import { drawWorkspaceRoster } from "../../src/sidebar/roster.js";
+import { repoFoldKey } from "../../src/sidebar/context.js";
+import { drawRosterSectionFold, drawWorkspaceRoster } from "../../src/sidebar/roster.js";
 import { cascadedValue, installStylesheet } from "../stylesheet.js";
 import {
   appContext,
-  memoryPrefs,
   mergedSection,
   repoSection,
   roster,
@@ -24,6 +27,12 @@ import {
 } from "./harness.js";
 
 const UPDATE_OK = create(UpdateTaskResponseSchema, { result: { case: "success", value: {} } });
+const VIEW_OK = create(UpdateSidebarViewResponseSchema, { result: { case: "success", value: {} } });
+const VIEW_UNKNOWN_TASK = create(UpdateSidebarViewResponseSchema, {
+  result: { case: "error", value: { cause: { case: "unknownTask", value: {} } } },
+});
+/** One settled merge, so the merged band draws. */
+const MERGED_ROW = row({ id: "ws-9", closed: true, status: { case: "merged", value: {} } });
 
 async function click(control: Element): Promise<void> {
   (control as HTMLElement).dispatchEvent(new MouseEvent("click", { bubbles: true }));
@@ -39,6 +48,19 @@ function pane(drawn: HTMLElement, grouping: string): HTMLElement {
 function taskHead(drawn: HTMLElement): HTMLElement {
   return pane(drawn, "task").querySelector(".task-head") as HTMLElement;
 }
+
+describe("drawRosterSectionFold", () => {
+  it.each([
+    ["expanded", false],
+    ["collapsed", true],
+  ] as const)("reads the %s arm as folded=%s", (arm, folded) => {
+    expect(drawRosterSectionFold({ case: arm, value: {} }, "fold")).toBe(folded);
+  });
+
+  it("refuses an unset fold as a malformed view", () => {
+    expect(() => drawRosterSectionFold({ case: undefined }, "fold")).toThrow(MalformedView);
+  });
+});
 
 describe("the two groupings", () => {
   it("draws both, because both arrive resolved", () => {
@@ -56,9 +78,8 @@ describe("the two groupings", () => {
     expect(pane(drawn, "task").hidden).toBe(true);
   });
 
-  it("honors a remembered preference for the task grouping", () => {
-    const sc = sidebarContext(appContext(), memoryPrefs({ grouping: "task" }));
-    const drawn = drawWorkspaceRoster(roster(), sc);
+  it("shows the task grouping when the daemon says every page shows it", () => {
+    const drawn = drawWorkspaceRoster(roster({ shown: "task" }), sidebarContext());
     expect([pane(drawn, "task").hidden, pane(drawn, "repository").hidden]).toEqual([false, true]);
   });
 
@@ -148,59 +169,6 @@ describe("the sections", () => {
   });
 
   it.each([
-    [false, "collapse"],
-    [true, "expand"],
-  ])("asks the daemon for the other fold on the toggle (collapsed=%s asks %s)", async (collapsed, want) => {
-    const asked: Array<{ repository: string | undefined; fold: string | undefined }> = [];
-    const sc = sidebarContext(
-      appContext({
-        foldRepository: (request) => {
-          asked.push({ repository: request.repository?.id, fold: request.fold.case });
-          return create(FoldRepositoryResponseSchema, { result: { case: "success", value: {} } });
-        },
-      }),
-    );
-    const drawn = drawWorkspaceRoster(roster({ repos: [repoSection({ id: "repo-1", collapsed })] }), sc);
-    await click(pane(drawn, "repository").querySelector("[data-section-fold]") as Element);
-    expect(asked).toEqual([{ repository: "repo-1", fold: want }]);
-  });
-
-  it("leaves the section as the daemon drew it until the push that answers the toggle", async () => {
-    const sc = sidebarContext(
-      appContext({
-        foldRepository: () => create(FoldRepositoryResponseSchema, { result: { case: "success", value: {} } }),
-      }),
-    );
-    const drawn = drawWorkspaceRoster(roster({ repos: [repoSection({ id: "repo-1" })] }), sc);
-    const section = pane(drawn, "repository").querySelector(".repo") as HTMLElement;
-    await click(section.querySelector("[data-section-fold]") as Element);
-    expect(section.classList.contains("folded")).toBe(false);
-  });
-
-  it("draws the daemon's refusal of a fold beside the toggle", async () => {
-    const sc = sidebarContext(
-      appContext({
-        foldRepository: () =>
-          create(FoldRepositoryResponseSchema, {
-            result: { case: "error", value: { cause: { case: "unknownRepository", value: {} } } },
-          }),
-      }),
-    );
-    const drawn = drawWorkspaceRoster(roster({ repos: [repoSection({ id: "repo-1" })] }), sc);
-    await click(pane(drawn, "repository").querySelector("[data-section-fold]") as Element);
-    expect(pane(drawn, "repository").textContent).toContain("the daemon no longer has that repository");
-  });
-
-  it("never folds a repository section from a remembered local fold", () => {
-    const prefs = memoryPrefs({ folded: { [repoFoldKey("repo-1")]: true } });
-    const drawn = drawWorkspaceRoster(
-      roster({ repos: [repoSection({ id: "repo-1" })] }),
-      sidebarContext(appContext(), prefs),
-    );
-    expect(pane(drawn, "repository").querySelector(".repo")?.classList.contains("folded")).toBe(false);
-  });
-
-  it.each([
     [false, "var(--repo-head-expanded)"],
     [true, "var(--repo-head-collapsed)"],
   ])("colors a repository header collapsed=%s with %s", (collapsed, want) => {
@@ -223,23 +191,162 @@ describe("the sections", () => {
     expect(pane(drawn, "repository").querySelector(".repo")?.classList.contains("repo-section")).toBe(true);
   });
 
-  it("remembers a task's fold under the task's id, not its title", async () => {
-    const prefs = memoryPrefs({ grouping: "task" });
-    const drawn = drawWorkspaceRoster(
-      roster({ tasks: [taskSection({ id: "task-1", label: "ship" })] }),
-      sidebarContext(appContext(), prefs),
-    );
-    await click(pane(drawn, "task").querySelector("[data-section-fold]") as Element);
-    expect(prefs.state.folded[taskFoldKey("task-1")]).toBe(true);
+  it.each([
+    [false, false],
+    [true, true],
+  ])("draws a task section collapsed=%s folded=%s, as the daemon says", (collapsed, folded) => {
+    const drawn = drawWorkspaceRoster(roster({ tasks: [taskSection({ id: "task-1", collapsed })] }), sidebarContext());
+    expect(pane(drawn, "task").querySelector(".task-section")?.classList.contains("folded")).toBe(folded);
+  });
+});
+
+/** A daemon that records every UpdateSidebarView and answers ANSWER. */
+function viewDaemon(answer: UpdateSidebarViewResponse = VIEW_OK): {
+  asked: UpdateSidebarViewRequest[];
+  sc: ReturnType<typeof sidebarContext>;
+} {
+  const asked: UpdateSidebarViewRequest[] = [];
+  const sc = sidebarContext(
+    appContext({
+      updateSidebarView: (request) => {
+        asked.push(request);
+        return answer;
+      },
+    }),
+  );
+  return { asked, sc };
+}
+
+/** The section and fold one recorded fold change named. */
+function foldAsked(request: UpdateSidebarViewRequest): { section: string | undefined; id: string; fold: string | undefined } {
+  if (request.change.case !== "foldSection") return { section: request.change.case, id: "", fold: undefined };
+  const section = request.change.value.section;
+  const id = section.case === "repository" || section.case === "task" ? section.value.id : "";
+  return { section: section.case, id, fold: request.change.value.fold.case };
+}
+
+const FOLDING_SECTIONS = [
+  {
+    kind: "repository",
+    roster: (collapsed: boolean) => roster({ repos: [repoSection({ id: "repo-1", collapsed })] }),
+    selector: ".repo-section",
+    id: "repo-1",
+  },
+  {
+    kind: "task",
+    roster: (collapsed: boolean) => roster({ tasks: [taskSection({ id: "task-1", collapsed })] }),
+    selector: ".task-section",
+    id: "task-1",
+  },
+  {
+    kind: "recentlyMerged",
+    roster: (collapsed: boolean) => roster({ merged: mergedSection([MERGED_ROW], 1, collapsed) }),
+    selector: ".merged-section",
+    id: "",
+  },
+] as const;
+
+describe("folding a section is the daemon's view, shared by every page", () => {
+  it.each(FOLDING_SECTIONS.flatMap((s) => [
+    { ...s, collapsed: false, want: "collapse" },
+    { ...s, collapsed: true, want: "expand" },
+  ]))("asks for the other fold of a $kind section (collapsed=$collapsed asks $want)", async ({ roster: make, selector, kind, id, collapsed, want }) => {
+    const { asked, sc } = viewDaemon();
+    const drawn = drawWorkspaceRoster(make(collapsed), sc);
+    await click(drawn.querySelector(`${selector} [data-section-fold]`) as Element);
+    expect(asked.map(foldAsked)).toEqual([{ section: kind, id, fold: want }]);
   });
 
-  it("draws a remembered task fold folded on the next push", () => {
-    const prefs = memoryPrefs({ grouping: "task", folded: { [taskFoldKey("task-1")]: true } });
-    const drawn = drawWorkspaceRoster(
-      roster({ tasks: [taskSection({ id: "task-1" })] }),
-      sidebarContext(appContext(), prefs),
+  it.each(FOLDING_SECTIONS)("folds a $kind section on this page at once, before any push", async ({ roster: make, selector }) => {
+    const { sc } = viewDaemon();
+    const drawn = drawWorkspaceRoster(make(false), sc);
+    const section = drawn.querySelector(selector) as HTMLElement;
+    await click(section.querySelector("[data-section-fold]") as Element);
+    expect(section.classList.contains("folded")).toBe(true);
+  });
+
+  it("folds every copy of the merged band, one per grouping", async () => {
+    const { sc } = viewDaemon();
+    const drawn = drawWorkspaceRoster(roster({ merged: mergedSection([MERGED_ROW], 1, false) }), sc);
+    await click(pane(drawn, "repository").querySelector(".merged-section [data-section-fold]") as Element);
+    expect([...drawn.querySelectorAll(".merged-section")].map((m) => m.classList.contains("folded"))).toEqual([true, true]);
+  });
+
+  it("keeps the asked fold over a push still carrying the old one", async () => {
+    const { sc } = viewDaemon();
+    const drawn = drawWorkspaceRoster(roster({ tasks: [taskSection({ id: "task-1" })] }), sc);
+    await click(drawn.querySelector(".task-section [data-section-fold]") as Element);
+    const redrawn = drawWorkspaceRoster(roster({ tasks: [taskSection({ id: "task-1" })] }), sc);
+    expect(redrawn.querySelector(".task-section")?.classList.contains("folded")).toBe(true);
+  });
+
+  it("follows the wire again once a push has carried the asked fold", async () => {
+    const { sc } = viewDaemon();
+    const drawn = drawWorkspaceRoster(roster({ tasks: [taskSection({ id: "task-1" })] }), sc);
+    await click(drawn.querySelector(".task-section [data-section-fold]") as Element);
+    drawWorkspaceRoster(roster({ tasks: [taskSection({ id: "task-1", collapsed: true })] }), sc);
+    const later = drawWorkspaceRoster(roster({ tasks: [taskSection({ id: "task-1" })] }), sc);
+    expect(later.querySelector(".task-section")?.classList.contains("folded")).toBe(false);
+  });
+
+  it("draws a fold another page asked for, from the push alone", () => {
+    const sc = sidebarContext();
+    drawWorkspaceRoster(roster({ merged: mergedSection([MERGED_ROW], 1, true) }), sc);
+    const pushed = drawWorkspaceRoster(roster({ merged: mergedSection([MERGED_ROW], 1, false) }), sc);
+    expect(pane(pushed, "repository").querySelector(".merged-section")?.classList.contains("folded")).toBe(false);
+  });
+
+  it("draws the daemon's refusal of a fold beside the toggle", async () => {
+    const { sc } = viewDaemon(VIEW_UNKNOWN_TASK);
+    const drawn = drawWorkspaceRoster(roster({ tasks: [taskSection({ id: "task-1" })] }), sc);
+    await click(drawn.querySelector(".task-section [data-section-fold]") as Element);
+    expect(pane(drawn, "task").textContent).toContain("the daemon no longer has that task");
+  });
+
+  it("puts a refused fold back as the wire drew it", async () => {
+    const { sc } = viewDaemon(VIEW_UNKNOWN_TASK);
+    const drawn = drawWorkspaceRoster(roster({ tasks: [taskSection({ id: "task-1" })] }), sc);
+    const section = drawn.querySelector(".task-section") as HTMLElement;
+    await click(section.querySelector("[data-section-fold]") as Element);
+    expect(section.classList.contains("folded")).toBe(false);
+  });
+
+  it("words an unknown repository from the view verb's own table", async () => {
+    const { sc } = viewDaemon(
+      create(UpdateSidebarViewResponseSchema, {
+        result: { case: "error", value: { cause: { case: "unknownRepository", value: {} } } },
+      }),
     );
-    expect(pane(drawn, "task").querySelector(".repo")?.classList.contains("folded")).toBe(true);
+    const drawn = drawWorkspaceRoster(roster({ repos: [repoSection({ id: "repo-1" })] }), sc);
+    await click(drawn.querySelector(".repo-section [data-section-fold]") as Element);
+    expect(pane(drawn, "repository").textContent).toContain("the daemon no longer has that repository");
+  });
+
+  it("refuses an unset task fold as a malformed view", () => {
+    const section = create(RosterTaskSectionSchema, {
+      key: { taskId: "task-1" },
+      header: { label: { text: "t" }, done: { done: false } },
+      rows: { rows: [] },
+    });
+    expect(() => drawWorkspaceRoster(roster({ tasks: [section] }), sidebarContext())).toThrow(MalformedView);
+  });
+});
+
+describe("the grouping shown is the daemon's view, shared by every page", () => {
+  it("refuses an unset grouping as a malformed view", () => {
+    const bare = create(WorkspaceRosterSchema, {
+      repository: { sections: [] },
+      task: { sections: [] },
+      recentlyMerged: mergedSection(),
+    });
+    expect(() => drawWorkspaceRoster(bare, sidebarContext())).toThrow(MalformedView);
+  });
+
+  it("draws the grouping another page chose, from the push alone", () => {
+    const sc = sidebarContext();
+    drawWorkspaceRoster(roster(), sc);
+    const pushed = drawWorkspaceRoster(roster({ shown: "task" }), sc);
+    expect(pane(pushed, "task").hidden).toBe(false);
   });
 });
 
@@ -379,12 +486,9 @@ describe("recently merged", () => {
     }
   });
 
-  it("remembers its fold under the one fixed key", async () => {
-    const prefs = memoryPrefs();
-    const drawn = drawWorkspaceRoster(landed(), sidebarContext(appContext(), prefs));
-    const section = pane(drawn, "repository").querySelector(".merged-section") as HTMLElement;
-    await click(section.querySelector("[data-section-fold]") as Element);
-    expect(prefs.state.folded[MERGED_FOLD_KEY]).toBe(false);
+  it("draws unfolded when the daemon says every page has it unfolded", () => {
+    const drawn = drawWorkspaceRoster(roster({ merged: mergedSection([MERGED_ROW], 1, false) }), sidebarContext());
+    expect(pane(drawn, "repository").querySelector(".merged-section")?.classList.contains("folded")).toBe(false);
   });
 
   it("draws its rows", () => {
@@ -418,7 +522,7 @@ describe("the task section's header", () => {
   it("draws the done check from the wire", () => {
     const drawn = drawWorkspaceRoster(
       roster({ tasks: [taskSection({ id: "task-1", done: true })] }),
-      sidebarContext(appContext(), memoryPrefs({ grouping: "task" })),
+      sidebarContext(appContext()),
     );
     expect(pane(drawn, "task").querySelector("[data-task-status]")?.getAttribute("data-task-status")).toBe(
       "done",
@@ -433,8 +537,7 @@ describe("the task section's header", () => {
           arms.push(request.change.case ?? "unset");
           return UPDATE_OK;
         },
-      }),
-      memoryPrefs({ grouping: "task" }),
+      })
     );
     const drawn = drawWorkspaceRoster(
       roster({ tasks: [taskSection({ id: "task-1", done: false })] }),
@@ -452,8 +555,7 @@ describe("the task section's header", () => {
           arms.push(request.change.case ?? "unset");
           return UPDATE_OK;
         },
-      }),
-      memoryPrefs({ grouping: "task" }),
+      })
     );
     const drawn = drawWorkspaceRoster(
       roster({ tasks: [taskSection({ id: "task-1", done: true })] }),
@@ -471,8 +573,7 @@ describe("the task section's header", () => {
           id = request.task?.id ?? "";
           return UPDATE_OK;
         },
-      }),
-      memoryPrefs({ grouping: "task" }),
+      })
     );
     const drawn = drawWorkspaceRoster(roster({ tasks: [taskSection({ id: "task-1" })] }), sc);
     await click(pane(drawn, "task").querySelector("[data-task-status]") as Element);
@@ -480,7 +581,7 @@ describe("the task section's header", () => {
   });
 
   it("does not fold the section when the check is clicked", async () => {
-    const sc = sidebarContext(appContext({ updateTask: () => UPDATE_OK }), memoryPrefs({ grouping: "task" }));
+    const sc = sidebarContext(appContext({ updateTask: () => UPDATE_OK }));
     const drawn = drawWorkspaceRoster(roster({ tasks: [taskSection({ id: "task-1" })] }), sc);
     const section = pane(drawn, "task").querySelector(".task-section") as HTMLElement;
     await click(section.querySelector("[data-task-status]") as Element);
@@ -490,7 +591,7 @@ describe("the task section's header", () => {
   it("offers a rename on the label", () => {
     const drawn = drawWorkspaceRoster(
       roster({ tasks: [taskSection({ id: "task-1" })] }),
-      sidebarContext(appContext(), memoryPrefs({ grouping: "task" })),
+      sidebarContext(appContext()),
     );
     expect(
       pane(drawn, "task").querySelector("[data-task-rename]")?.getAttribute("data-task-rename"),
@@ -500,7 +601,7 @@ describe("the task section's header", () => {
   it("holds the current title in the rename field", () => {
     const drawn = drawWorkspaceRoster(
       roster({ tasks: [taskSection({ id: "task-1", label: "ship" })] }),
-      sidebarContext(appContext(), memoryPrefs({ grouping: "task" })),
+      sidebarContext(appContext()),
     );
     expect(
       (taskHead(drawn).querySelector("[data-task-rename]") as HTMLInputElement).value,
@@ -515,8 +616,7 @@ describe("the task section's header", () => {
           title = request.change.case === "setTitle" ? request.change.value.title : "";
           return UPDATE_OK;
         },
-      }),
-      memoryPrefs({ grouping: "task" }),
+      })
     );
     const drawn = drawWorkspaceRoster(roster({ tasks: [taskSection({ id: "task-1" })] }), sc);
     (taskHead(drawn).querySelector("[data-task-rename]") as HTMLInputElement).value = "renamed";
@@ -532,8 +632,7 @@ describe("the task section's header", () => {
           calls += 1;
           return UPDATE_OK;
         },
-      }),
-      memoryPrefs({ grouping: "task" }),
+      })
     );
     const drawn = drawWorkspaceRoster(roster({ tasks: [taskSection({ id: "task-1" })] }), sc);
     (taskHead(drawn).querySelector("[data-task-rename]") as HTMLInputElement).value = "   ";
@@ -548,8 +647,7 @@ describe("the task section's header", () => {
           create(UpdateTaskResponseSchema, {
             result: { case: "error", value: { cause: { case: "unknownTask", value: {} } } },
           }),
-      }),
-      memoryPrefs({ grouping: "task" }),
+      })
     );
     const drawn = drawWorkspaceRoster(roster({ tasks: [taskSection({ id: "task-1" })] }), sc);
     await click(taskHead(drawn).querySelector("[data-task-status]") as Element);
@@ -565,8 +663,7 @@ describe("the task section's header", () => {
           create(UpdateTaskResponseSchema, {
             result: { case: "error", value: { cause: { case: "noChange", value: {} } } },
           }),
-      }),
-      memoryPrefs({ grouping: "task" }),
+      })
     );
     const drawn = drawWorkspaceRoster(roster({ tasks: [taskSection({ id: "task-1" })] }), sc);
     await click(taskHead(drawn).querySelector("[data-task-status]") as Element);
@@ -736,7 +833,7 @@ describe("a malformed roster", () => {
 describe("a task section's verb menu", () => {
   /** A roster in the task grouping, drawn over IMPL. */
   function drawn(impl = {}): HTMLElement {
-    const sc = sidebarContext(appContext(impl), memoryPrefs({ grouping: "task" }));
+    const sc = sidebarContext(appContext(impl));
     return drawWorkspaceRoster(roster({ tasks: [taskSection({ id: "task-1", label: "ship" })] }), sc);
   }
 

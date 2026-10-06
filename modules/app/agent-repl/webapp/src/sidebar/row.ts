@@ -148,8 +148,9 @@ export function drawRosterRow(
   if (closed) ws.setAttribute("data-closed", "true");
   if (current) ws.classList.add("current");
   if (closed) ws.classList.add("gone");
-  const expanded = sc.prefs.isExpanded(workspace.id);
-  if (expanded) ws.classList.add("open");
+  // THE DETAIL IS A DROPDOWN, transient to this page (owner ruling,
+  // 2026-10-06), so its openness is the page's own and survives a redraw.
+  if (sc.openDetails.has(workspace.id)) ws.classList.add("open");
 
   const line = document.createElement("div");
   line.className = "row";
@@ -490,9 +491,11 @@ export function drawStatusMark(arm: RosterStatusCase, path: string): HTMLElement
  * briefly over neither on its way in, and a close on the bare `mouseleave`
  * would snatch the panel away as it is being reached for.
  *
- * Openness is still the row's `.open` class and still persisted through
- * `prefs`, exactly as the chevron's click left it, so a redraw arriving while
- * the pointer rests on a row keeps that row's panel open.
+ * Openness is the row's `.open` class, remembered by THIS page
+ * (`SidebarContext.openDetails`), so a redraw arriving while the pointer rests
+ * on a row keeps that row's panel open. It is a dropdown, transient to the
+ * page that opened it, never the daemon's view state (owner ruling,
+ * 2026-10-06).
  *
  * THE POINTER'S TRIGGER IS THE STATUS DOT ALONE (owner request, 2026-10-02):
  * hovering the rest of the row opens nothing, and the pointer leaving the dot
@@ -530,15 +533,13 @@ function installHoverPanel(
 
   const setOpen = (open: boolean, via: string): void => {
     if (ws.classList.contains("open") === open) return;
-    ws.classList.toggle("open", open);
-    sc.prefs.setExpanded(workspaceId, open);
     log.debug("toggling a row's detail panel", {
       operation: "sidebar.row.detail-toggle",
       context: { workspace: workspaceId, open, via },
     });
-    // The panel is fixed-positioned, so it is placed the moment it is shown,
-    // measured where it now stands rather than where the last draw left it.
-    if (open) placeRowDetail(ws);
+    if (open) sc.openDetails.add(workspaceId);
+    else sc.openDetails.delete(workspaceId);
+    paintRowDetail(ws, open);
   };
 
   const scheduleOpen = (): void => {
@@ -593,6 +594,16 @@ function installHoverPanel(
     focusWithin = next instanceof Node && line.contains(next);
     if (!focusWithin) scheduleClose();
   });
+}
+
+/**
+ * Show or hide a row's detail panel. The panel is fixed-positioned, so it is
+ * placed the moment it is shown, measured where it now stands rather than
+ * where the last draw left it.
+ */
+export function paintRowDetail(ws: HTMLElement, open: boolean): void {
+  ws.classList.toggle("open", open);
+  if (open) placeRowDetail(ws);
 }
 
 /**
