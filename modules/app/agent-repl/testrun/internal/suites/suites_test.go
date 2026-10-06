@@ -1212,3 +1212,22 @@ func TestVitestIntegrationBuildIsAbsentWhenTheRosterNamesNone(t *testing.T) {
 	}
 }
 
+func TestTheRosterRunsTheRepositoryHarnesses(t *testing.T) {
+	// These three ran only by hand until 2026-10-06, so no full run covered
+	// the install script or the repository's workspace CLIs.
+	for _, tc := range []struct{ name, path string }{
+		{"install-harness", "/.claude/test-install.sh"},
+		{"workspace-cli-harness", "/bin/test-agent_repl_workspace.sh"},
+		{"workspace-open-cli-harness", "/bin/test-agent_repl_workspace_open.sh"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			s, ok := roster.Lookup(tc.name)
+
+			// Assert
+			if !ok || s.Kind != roster.Script || s.Path != tc.path {
+				t.Fatalf("roster entry %+v, want a Script suite at %s", s, tc.path)
+			}
+		})
+	}
+}
