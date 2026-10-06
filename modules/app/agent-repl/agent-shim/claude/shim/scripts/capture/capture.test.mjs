@@ -25,6 +25,7 @@ import { describe, expect, it, vi } from "vitest";
 import { TOKEN_ENV_VARS } from "./auth.mjs";
 import { isPromptDriven } from "./worlds.mjs";
 import {
+  AGENT_REPL_STATE_ENV_VARS,
   CAPTURE_FLAG,
   CaptureRefusedError,
   EXIT_REFUSED,
@@ -33,6 +34,7 @@ import {
   answersFor,
   assertCaptureAuthorized,
   assertNoCaptureResidue,
+  childEnvFor,
   createInputChannel,
   controlMatches,
   createQuerySession,
@@ -43,6 +45,8 @@ import {
   findCaptureResidue,
   fireTriggers,
   lateReclaimSlug,
+  liveAgentReplStateDir,
+  liveDispatchesNaming,
   loadPrompts,
   mergeTreeAnonymized,
   messageMatches,
@@ -442,6 +446,139 @@ describe("createWorld", () => {
     const world = createWorld({ mode: "inherited_token", tokenVar: "ANTHROPIC_API_KEY" }, "slug-test");
     expect(world.cwd).toBe(realpathSync(world.cwd));
     expect(world.scratch).toBe(realpathSync(world.scratch));
+  });
+});
+
+describe("childEnvFor — a capture never reaches the live agent-repl state root", () => {
+  const TOKEN_AUTH = { mode: "inherited_token", tokenVar: "ANTHROPIC_API_KEY" };
+  const WORLD = { configDir: "/scratch/config", agentReplStateDir: "/scratch/agent-repl-state" };
+
+  it.each(AGENT_REPL_STATE_ENV_VARS)("points %s at the world's scratch state root", (name) => {
+    // Arrange
+    const env = { HOME: "/home/op" };
+
+    // Act
+    const out = childEnvFor(TOKEN_AUTH, WORLD, env);
+
+    // Assert
+    expect(out[name]).toBe("/scratch/agent-repl-state");
+  });
+
+  it("overrides an inherited AGENT_REPL_STATE_DIR naming the live root", () => {
+    // Arrange
+    const env = { AGENT_REPL_STATE_DIR: "/home/op/.claude-emacs" };
+
+    // Act
+    const out = childEnvFor(TOKEN_AUTH, WORLD, env);
+
+    // Assert
+    expect(out.AGENT_REPL_STATE_DIR).toBe("/scratch/agent-repl-state");
+  });
+
+  it("keeps the daemon's ownership mark", () => {
+    // Act
+    const out = childEnvFor(TOKEN_AUTH, WORLD, {});
+
+    // Assert
+    expect(out.AGENT_REPL_OWNED).toBe("1");
+  });
+
+  it("keeps the account root the auth mode names", () => {
+    // Act
+    const out = childEnvFor(TOKEN_AUTH, WORLD, {});
+
+    // Assert
+    expect(out.CLAUDE_CONFIG_DIR).toBe("/scratch/config");
+  });
+});
+
+describe("createWorld's agent-repl state root", () => {
+  it("lives inside the world's scratch", () => {
+    // Act
+    const world = createWorld({ mode: "inherited_token", tokenVar: "ANTHROPIC_API_KEY" }, "state-root");
+
+    // Assert
+    expect(world.agentReplStateDir).toBe(path.join(world.scratch, "agent-repl-state"));
+  });
+
+  it("exists before the vendor starts", () => {
+    // Act
+    const world = createWorld({ mode: "inherited_token", tokenVar: "ANTHROPIC_API_KEY" }, "state-root");
+
+    // Assert
+    expect(existsSync(world.agentReplStateDir)).toBe(true);
+  });
+});
+
+describe("liveAgentReplStateDir", () => {
+  it("is ~/.claude-emacs when nothing relocates it", () => {
+    expect(liveAgentReplStateDir({}, "/home/op")).toBe("/home/op/.claude-emacs");
+  });
+
+  it("follows AGENT_REPL_STATE_DIR when the operator set one", () => {
+    expect(liveAgentReplStateDir({ AGENT_REPL_STATE_DIR: "/elsewhere" }, "/home/op")).toBe("/elsewhere");
+  });
+
+  it("treats an empty AGENT_REPL_STATE_DIR as unset", () => {
+    expect(liveAgentReplStateDir({ AGENT_REPL_STATE_DIR: "" }, "/home/op")).toBe("/home/op/.claude-emacs");
+  });
+});
+
+describe("liveDispatchesNaming — the live-registry tripwire", () => {
+  const NEEDLE = "/tmp/agent-repl-capture-x-abc";
+
+  function stateRoot(files) {
+    const root = mkdtempSync(path.join(tmpdir(), "capture-tripwire-"));
+    for (const [rel, text] of Object.entries(files)) {
+      const file = path.join(root, "output", rel);
+      mkdirSync(path.dirname(file), { recursive: true });
+      writeFileSync(file, text, "utf8");
+    }
+    return root;
+  }
+
+  it.each([".", "claimed", "applied", "quarantine"])("finds a command file in %s naming the scratch", (sub) => {
+    // Arrange
+    const root = stateRoot({ [path.join(sub, "workspace_commands_1.json")]: `[{"git_root":"${NEEDLE}/cwd"}]` });
+
+    // Act
+    const hits = liveDispatchesNaming(root, NEEDLE);
+
+    // Assert
+    expect(hits).toEqual([path.join(root, "output", sub, "workspace_commands_1.json")]);
+  });
+
+  it("ignores a command file that names some other directory", () => {
+    // Arrange
+    const root = stateRoot({ "workspace_commands_1.json": '[{"git_root":"/Users/op/repo"}]' });
+
+    // Act / Assert
+    expect(liveDispatchesNaming(root, NEEDLE)).toEqual([]);
+  });
+
+  it("ignores a producer's dot-prefixed staging file", () => {
+    // Arrange
+    const root = stateRoot({ ".workspace_commands_tmp": NEEDLE });
+
+    // Act / Assert
+    expect(liveDispatchesNaming(root, NEEDLE)).toEqual([]);
+  });
+
+  it("finds nothing in a state root that has no output directory", () => {
+    // Arrange
+    const root = mkdtempSync(path.join(tmpdir(), "capture-tripwire-"));
+
+    // Act / Assert
+    expect(liveDispatchesNaming(root, NEEDLE)).toEqual([]);
+  });
+
+  it("throws when the ingress cannot be read, rather than reporting it clean", () => {
+    // Arrange: `output` is a FILE, so listing beneath it fails with ENOTDIR.
+    const root = mkdtempSync(path.join(tmpdir(), "capture-tripwire-"));
+    writeFileSync(path.join(root, "output"), "", "utf8");
+
+    // Act / Assert
+    expect(() => liveDispatchesNaming(root, NEEDLE)).toThrow(/ENOTDIR/);
   });
 });
 

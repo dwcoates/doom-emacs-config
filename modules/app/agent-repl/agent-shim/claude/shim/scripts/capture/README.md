@@ -85,6 +85,26 @@ never reach a committed fixture. Only allowlisted account fields are seeded in
 the first place — never the operator's project history, MCP connections, or
 telemetry.
 
+### A capture never reaches the live agent-repl
+
+Under `--config-root` the vendor runs the operator's user-level skills and
+hooks. On 2026-09-01 the worktree scenario's model reached for the
+`create-or-update-workspace` skill, whose `run.sh` wrote a `create` dispatch
+into the LIVE `~/.claude-emacs/output/`; the running daemon's command-file
+ingress applied it and registered the scratch repository and a
+`DWC/first-kept-fdp` workspace in the owner's `wsm.db`.
+
+- Every world carries its own `agent-repl-state/` root, and the vendor child's
+  `AGENT_REPL_STATE_DIR` and `CLAUDE_REPL_STATE_DIR` name it, overriding any
+  inherited value (`childEnvFor`). Every in-repo producer honors
+  `AGENT_REPL_STATE_DIR` first.
+- That workspace skill lives outside this repository and prefers
+  `~/.claude-emacs` over either variable whenever the directory exists, so the
+  harness also runs a tripwire after each scenario: any command file in the
+  live ingress (pending, claimed, applied or quarantined) that names the
+  world's scratch quarantines the scenario with an `isolation` error
+  (`liveDispatchesNaming`, read-only).
+
 ## Running it (the project lead)
 
 ```

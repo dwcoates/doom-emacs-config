@@ -938,6 +938,82 @@ export function seedResumableSession(auth, accountRoot, seed) {
 }
 
 /**
+ * The environment variables that name agent-repl's state root.
+ *
+ * `AGENT_REPL_STATE_DIR` is the daemon's own contract (daemon/internal/envc)
+ * and what every in-repo producer of the command-file ingress honors;
+ * `CLAUDE_REPL_STATE_DIR` is the older spelling the user-level workspace skill
+ * still reads.
+ */
+export const AGENT_REPL_STATE_ENV_VARS = ["AGENT_REPL_STATE_DIR", "CLAUDE_REPL_STATE_DIR"];
+
+/** The operator's live state root when nothing relocates it. */
+export const LIVE_STATE_DIR_NAME = ".claude-emacs";
+
+/**
+ * The environment of the vendor child: the operator's environment, the
+ * account root, the daemon's ownership mark, the inherited token, and LAST the
+ * world's own agent-repl state root.
+ *
+ * Last, because a capture must never reach the live daemon or its registry:
+ * the vendor runs the operator's user-level skills and hooks under
+ * `--config-root`, and a skill that dispatches a workspace command (the
+ * worktree scenario's model reached for create-or-update-workspace) writes it
+ * into whichever state root its environment names. An inherited
+ * AGENT_REPL_STATE_DIR pointing at the live root must lose to the scratch one.
+ */
+export function childEnvFor(auth, world, env) {
+  const out = {
+    ...accountRootEnvFor(auth, world.configDir, env),
+    AGENT_REPL_OWNED: "1",
+    ...sdkEnvFor(auth, env),
+  };
+  for (const name of AGENT_REPL_STATE_ENV_VARS) out[name] = world.agentReplStateDir;
+  return out;
+}
+
+/**
+ * The operator's live agent-repl state root, resolved the way the daemon
+ * resolves it: AGENT_REPL_STATE_DIR when set, else ~/.claude-emacs.
+ */
+export function liveAgentReplStateDir(env, home = homedir()) {
+  const named = env.AGENT_REPL_STATE_DIR;
+  if (typeof named === "string" && named !== "") return path.resolve(named);
+  return path.join(home, LIVE_STATE_DIR_NAME);
+}
+
+/** The command-file ingress glob, as daemon/internal/commandfile spells it. */
+const DISPATCH_FILE = /^workspace_commands_.*\.json$/;
+
+/**
+ * Every command file in a live ingress -- pending, claimed, applied or
+ * quarantined -- whose text names `needle` (a world's scratch path). READ
+ * ONLY: the live directory is inspected, never written. An absent directory
+ * holds nothing; any other read failure throws, because a tripwire that
+ * cannot look must not report "clean".
+ */
+export function liveDispatchesNaming(stateDir, needle) {
+  const output = path.join(stateDir, "output");
+  const hits = [];
+  for (const sub of [".", "claimed", "applied", "quarantine"]) {
+    const dir = path.join(output, sub);
+    let names;
+    try {
+      names = readdirSync(dir);
+    } catch (err) {
+      if (err && err.code === "ENOENT") continue;
+      throw err;
+    }
+    for (const name of names) {
+      if (!DISPATCH_FILE.test(name)) continue;
+      const file = path.join(dir, name);
+      if (readFileSync(file, "utf8").includes(needle)) hits.push(file);
+    }
+  }
+  return hits.sort();
+}
+
+/**
  * Create the scratch world a group of scenarios shares.
  *
  * The CWD IS ALWAYS SCRATCH, in every authentication mode — a capture must
@@ -957,14 +1033,17 @@ export function createWorld(auth, label, seedCwd = null) {
   const cwd = seedCwd === null ? path.join(scratch, "cwd") : seedCwd;
   const scratchConfigDir = path.join(scratch, "config");
   const spoolRoot = path.join(scratch, "spool");
+  const agentReplStateDir = path.join(scratch, "agent-repl-state");
   mkdirSync(cwd, { recursive: true });
   mkdirSync(spoolRoot, { recursive: true });
+  mkdirSync(agentReplStateDir, { recursive: true });
   return {
     world: label,
     scratch,
     cwd,
     scratchConfigDir,
     spoolRoot,
+    agentReplStateDir,
     configDir: prepareAccountRoot(auth, scratchConfigDir),
   };
 }
@@ -1066,11 +1145,7 @@ async function runScenario(sdk, scenario, opts, auth, world) {
     settingSources: ["user", "project", "local"],
     persistSession: true,
     systemPrompt: { type: "preset", preset: "claude_code" },
-    env: {
-      ...accountRootEnvFor(auth, configDir, process.env),
-      AGENT_REPL_OWNED: "1",
-      ...sdkEnvFor(auth, process.env),
-    },
+    env: childEnvFor(auth, world, process.env),
     ...resolveTokens(scenario.options ?? {}),
   };
   if (typeof scenario.model === "string") options.model = scenario.model;
@@ -1200,6 +1275,18 @@ async function runScenario(sdk, scenario, opts, auth, world) {
   // comment for why). Bounded and loud — a wedged child fails the scenario
   // rather than let the reclaim below race it.
   await waitForVendorChildExit();
+
+  // THE LIVE-REGISTRY TRIPWIRE. childEnvFor points every agent-repl state
+  // variable at this world's scratch root, but a producer that prefers
+  // ~/.claude-emacs over an explicit override (the out-of-repo
+  // create-or-update-workspace skill does) still reaches the operator's live
+  // ingress. Such a leak quarantines the scenario, loudly, by name.
+  for (const file of liveDispatchesNaming(liveAgentReplStateDir(process.env), world.scratch)) {
+    report.errors.push({
+      stage: "isolation",
+      error: `the capture reached the LIVE agent-repl ingress: ${file} names this world's scratch ${world.scratch}`,
+    });
+  }
 
   // The vendor's own files are half the capture: the transcript, the subagent
   // sidechains and their .meta.json, and the spool the sidecar tails. A stream
