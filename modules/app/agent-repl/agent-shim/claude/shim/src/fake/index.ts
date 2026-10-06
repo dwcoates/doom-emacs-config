@@ -219,6 +219,16 @@ const REFUSABLE = new Set([
 const START_ONCE_MARK = ".agent-repl-fake-start-once";
 
 /**
+ * The `!stop-on-rewind` lever's mark, one per vendor session, under the
+ * account root: a FILE for the reason {@link START_ONCE_MARK} is one -- the
+ * behavior it arms belongs to the NEXT query (a rewind opens a new one), and
+ * module state would not reach it.
+ */
+function stopOnRewindMark(configDir: string, sessionId: string): string {
+  return `${configDir}/.agent-repl-fake-stop-on-rewind-${sessionId}`;
+}
+
+/**
  * Spend `start-once`'s single refusal, or report it already spent.
  *
  * A mark that cannot be written is a HARD failure rather than a second
@@ -607,6 +617,17 @@ export function createFakeQuery(
    * (`queueVendorTurn`), spent before the next send's own turn.
    */
   let vendorTurnQueued = false;
+  /**
+   * THE SHIP-GNS REPLAY (2026-10-02), armed by `!stop-on-rewind`: every
+   * truncating resume of the session reports a background task STOPPED, and
+   * the vendor answers that stop in a turn of its own ahead of the next send.
+   * Not a claim about every CLI: a lever modelling the owner's live loop, where
+   * each keep-alive rewind replaced the query and the stop replayed.
+   */
+  let stopReplayQueued =
+    truncating?.kind === "booted" &&
+    opts.resume !== undefined &&
+    existsSync(stopOnRewindMark(configDir, opts.resume));
 
   /** The echo a reply frame carries, once per frame kind, per turn. */
   const echo = (kind: "stream" | "assistant" | "result"): Record<string, unknown> => {
@@ -1408,6 +1429,15 @@ export function createFakeQuery(
       // it rather than carrying a stale explanation.
       fastModeDisabledReason = state === "on" ? undefined : reason;
     },
+    armStopOnRewind: () => {
+      const mark = stopOnRewindMark(configDir, sessionUuid);
+      mkdirSync(configDir, { recursive: true });
+      writeFileSync(mark, "armed\n", "utf8");
+      LOGGER.debug(
+        { claude_session_id: sessionUuid, mark },
+        "fake vendor ARMED the stop replay: every truncating resume of this session replays a stopped task",
+      );
+    },
     queueVendorTurn: () => {
       LOGGER.debug(
         { claude_session_id: sessionUuid },
@@ -1440,6 +1470,27 @@ export function createFakeQuery(
     );
     assistant([{ type: "text", text: "A background task finished." }], { stopReason: "end_turn" });
     result({ subtype: "success", result: "A background task finished.", origin: { kind: "task-notification" } });
+  };
+
+  /**
+   * The stop a rewind replays: the task's `stopped` notification, then the
+   * vendor's own unstamped turn answering it.
+   */
+  const runStopReplay = (): void => {
+    turn++;
+    resultEmitted = false;
+    answering = undefined;
+    LOGGER.info(
+      { claude_session_id: sessionUuid, turn },
+      "fake vendor replays a task STOPPED by the rewind and answers it in a turn of its OWN before the next send",
+    );
+    systemMessage("task_notification", {
+      task_id: "bstop0001",
+      status: "stopped",
+      summary: "Background command stopped",
+    });
+    assistant([{ type: "text", text: "The background task was stopped." }], { stopReason: "end_turn" });
+    result({ subtype: "success", result: "The background task was stopped.", origin: { kind: "task-notification" } });
   };
 
   const promptTextOf = (message: SdkUserMessage): string => {
@@ -1560,6 +1611,10 @@ export function createFakeQuery(
           "the mocked vendor announces its init NOW, with the first user message, as the real vendor does",
         );
         emitInit();
+      }
+      if (stopReplayQueued) {
+        stopReplayQueued = false;
+        runStopReplay();
       }
       if (vendorTurnQueued) {
         vendorTurnQueued = false;
