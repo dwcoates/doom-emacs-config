@@ -7,15 +7,18 @@
  * gated call has to be told apart from one that merely failed: only the first
  * produces text the model reads, and stderr is written by both.
  */
+import { create } from "@bufbuild/protobuf";
 import { describe, expect, it } from "vitest";
 import { conversationv1 } from "../../src/proto.js";
 import {
+  convertHookProgress,
   convertHookResponse,
   convertHookStarted,
   createHookRegistry,
   hookBlockingText,
 } from "../../src/convert/hooks.js";
 import type { SdkMessage } from "../../src/sdk/types.js";
+import { logRecordsDuring } from "../log-records.js";
 import { activityOf, foldContext } from "./fold-harness.js";
 
 /** A `hook_started` for one event. */
@@ -52,49 +55,70 @@ function response(
   };
 }
 
-/** The hook arm one converted response carries. */
-function armOf(message: Extract<SdkMessage, { type: "system"; subtype: "hook_response" }>): string | undefined {
-  const registry = createHookRegistry();
-  const entries = convertHookResponse(message, foldContext(), registry);
-  const item = activityOf(entries[0])?.item;
-  expect(item?.case).toBe("hook");
-  return (item?.value as conversationv1.AgentHook).result.case;
+/** A `hook_response` that FAILED without blocking: the outcome that is drawn. */
+function failed(hookId = "hook-1"): Extract<SdkMessage, { type: "system"; subtype: "hook_response" }> {
+  return response({ hook_id: hookId, outcome: "error", output: "", stderr: "boom", exit_code: 1 });
 }
 
-/** The event one converted `hook_started` carries. */
+/** A `hook_progress` as the vendor spells one. */
+function progress(): Extract<SdkMessage, { type: "system"; subtype: "hook_progress" }> {
+  return {
+    type: "system",
+    subtype: "hook_progress",
+    hook_id: "hook-1",
+    hook_name: "PreToolUse:one",
+    hook_event: "PreToolUse",
+    stdout: "working",
+    stderr: "",
+    output: "",
+    uuid: "00000000-0000-0000-0000-000000000003",
+    session_id: "session-1",
+  };
+}
+
+/** The hook arms one converted response carries, in order. */
+function armsOf(message: Extract<SdkMessage, { type: "system"; subtype: "hook_response" }>): (string | undefined)[] {
+  const registry = createHookRegistry();
+  const entries = convertHookResponse(message, foldContext(), registry);
+  return entries.map((entry) => (activityOf(entry)?.item.value as conversationv1.AgentHook).result.case);
+}
+
+/** The event the start frame of one FAILED firing of `hookEvent` carries. */
 function eventOf(hookEvent: string): conversationv1.AgentHookEvent | undefined {
   const registry = createHookRegistry();
-  const entries = convertHookStarted(started(hookEvent), foldContext(), registry);
-  const item = activityOf(entries[0])?.item;
-  const hook = item?.value as conversationv1.AgentHook;
+  convertHookStarted(started(hookEvent), foldContext(), registry);
+  const entries = convertHookResponse(failed(), foldContext(), registry);
+  const hook = activityOf(entries[0])?.item.value as conversationv1.AgentHook;
   return (hook.result.value as conversationv1.AgentHookStart).event;
 }
 
-describe("the row a hook firing owns", () => {
+describe("the row a drawn hook firing owns", () => {
   // THE STREAM PLANE OWNS THE SERVED HOOK ROW (ruling 2026-09-04). The vendor
   // hands the two planes disjoint identity material — a `hook_id` here, a
   // `toolUseID` in the transcript attachment the sidecar reads, and differing
   // record uuids — so nothing can join them and only one plane may serve the
   // row. This key IS that decision, so it is asserted as a literal.
-  it("is keyed by the vendor's own hook_id, on the START", () => {
+  it("is keyed by the vendor's own hook_id", () => {
     const registry = createHookRegistry();
-    const entries = convertHookStarted(started("PreToolUse", "hook-abc"), foldContext(), registry);
-    expect(entries[0]?.upsertKey).toBe("activity:hook-abc");
+    convertHookStarted(started("PreToolUse", "hook-abc"), foldContext(), registry);
+    const entries = convertHookResponse(failed("hook-abc"), foldContext(), registry);
+    expect(entries[1]?.upsertKey).toBe("activity:hook-abc");
   });
 
-  it("is the SAME key on the response, so a firing is one row and not two", () => {
+  it("files the start under the SAME key as the outcome, so a firing is one row and not two", () => {
     const registry = createHookRegistry();
-    const start = convertHookStarted(started("PreToolUse", "hook-abc"), foldContext(), registry);
-    const end = convertHookResponse(response({ hook_id: "hook-abc" }), foldContext(), registry);
-    expect(end[0]?.upsertKey).toBe("activity:hook-abc");
-    expect(end[0]?.upsertKey).toBe(start[0]?.upsertKey);
+    convertHookStarted(started("PreToolUse", "hook-abc"), foldContext(), registry);
+    const entries = convertHookResponse(failed("hook-abc"), foldContext(), registry);
+    expect(entries[0]?.upsertKey).toBe(entries[1]?.upsertKey);
   });
 
   it("keeps two firings of one hook on two rows", () => {
     const registry = createHookRegistry();
-    const first = convertHookStarted(started("PreToolUse", "hook-1"), foldContext(), registry);
-    const second = convertHookStarted(started("PreToolUse", "hook-2"), foldContext(), registry);
-    expect(first[0]?.upsertKey).not.toBe(second[0]?.upsertKey);
+    convertHookStarted(started("PreToolUse", "hook-1"), foldContext(), registry);
+    convertHookStarted(started("PreToolUse", "hook-2"), foldContext(), registry);
+    const first = convertHookResponse(failed("hook-1"), foldContext(), registry);
+    const second = convertHookResponse(failed("hook-2"), foldContext(), registry);
+    expect(first[1]?.upsertKey).not.toBe(second[1]?.upsertKey);
   });
 });
 
@@ -140,13 +164,9 @@ describe("the vendor's hook event, in this contract's enum", () => {
 });
 
 describe("how a hook firing went", () => {
-  it("is SUCCEEDED when the vendor reports success", () => {
-    expect(armOf(response({ outcome: "success", stdout: "{}\n" }))).toBe("succeeded");
-  });
-
   it("is BLOCKING when the hook produced text the gated call is answered with", () => {
     expect(
-      armOf(
+      armsOf(
         response({
           outcome: "error",
           output: "the suite failed after the edit",
@@ -154,14 +174,14 @@ describe("how a hook firing went", () => {
           exit_code: 2,
         }),
       ),
-    ).toBe("blockingError");
+    ).toEqual(["blockingError"]);
   });
 
   it("is NON-BLOCKING when the hook only failed, whatever it wrote on stderr", () => {
     // A SessionStart hook gates nothing; its stderr is a crash report, not a
     // refusal the model ever reads.
     expect(
-      armOf(
+      armsOf(
         response({
           hook_event: "SessionStart",
           outcome: "error",
@@ -170,11 +190,116 @@ describe("how a hook firing went", () => {
           exit_code: 1,
         }),
       ),
-    ).toBe("nonBlockingError");
+    ).toEqual(["nonBlockingError"]);
+  });
+});
+
+/**
+ * NO HOOK RECORD THAT DRAWS NOTHING IS STORED (owner ruling 2026-10-06): a
+ * start, a success, a cancellation and a progress report produce no entry, and
+ * a drawn outcome brings its start with it.
+ */
+describe("the hook records that are not stored", () => {
+  it("stores nothing for a hook's start", () => {
+    const entries = convertHookStarted(started("SessionStart"), foldContext(), createHookRegistry());
+
+    expect(entries).toEqual([]);
   });
 
-  it("is CANCELLED when the firing never finished", () => {
-    expect(armOf(response({ outcome: "cancelled" }))).toBe("cancelled");
+  it("stores nothing for a hook that succeeded", () => {
+    expect(armsOf(response({ outcome: "success", stdout: "{}\n" }))).toEqual([]);
+  });
+
+  it("stores nothing for a hook that was cancelled", () => {
+    expect(armsOf(response({ outcome: "cancelled" }))).toEqual([]);
+  });
+
+  it("stores nothing for a hook's progress report", () => {
+    expect(convertHookProgress(progress(), createHookRegistry())).toEqual([]);
+  });
+
+  it("records each dropped record at DEBUG with the query's running count", () => {
+    // Arrange
+    const registry = createHookRegistry();
+    convertHookStarted(started("SessionStart"), foldContext(), registry);
+
+    // Act
+    const records = logRecordsDuring(() => convertHookResponse(response({ outcome: "success" }), foldContext(), registry));
+
+    // Assert
+    const dropped = records.find((record) => record.message === "a hook record that draws nothing is not stored");
+    expect([dropped?.level, dropped?.context.hook_record, dropped?.context.dropped_total]).toEqual(["debug", "succeeded", 2]);
+  });
+
+  it("writes the start of a FAILED firing beside its outcome, start first", () => {
+    const registry = createHookRegistry();
+    convertHookStarted(started("SessionStart"), foldContext(), registry);
+
+    const entries = convertHookResponse(failed(), foldContext(), registry);
+
+    expect(entries.map((entry) => (activityOf(entry)?.item.value as conversationv1.AgentHook).result.case)).toEqual([
+      "start",
+      "nonBlockingError",
+    ]);
+  });
+
+  it("names the started hook on the start it writes beside a failure", () => {
+    const registry = createHookRegistry();
+    convertHookStarted(started("SessionStart"), foldContext(), registry);
+
+    const entries = convertHookResponse(failed(), foldContext(), registry);
+
+    const hook = activityOf(entries[0])?.item.value as conversationv1.AgentHook;
+    expect((hook.result.value as conversationv1.AgentHookStart).hookName).toBe("SessionStart:one");
+  });
+
+  it("refuses a start with no firing id as a converter defect", () => {
+    expect(() => convertHookStarted(started("PreToolUse", ""), foldContext(), createHookRegistry())).toThrow();
+  });
+
+  it("refuses a response with no firing id as a converter defect", () => {
+    expect(() => convertHookResponse(response({ hook_id: "" }), foldContext(), createHookRegistry())).toThrow();
+  });
+
+  it("writes only the outcome of a failed firing whose start this shim never saw", () => {
+    expect(armsOf(failed())).toEqual(["nonBlockingError"]);
+  });
+});
+
+describe("the per-query summary of dropped hook records", () => {
+  it("is one INFO record counting each kind", () => {
+    // Arrange
+    const registry = createHookRegistry();
+    convertHookStarted(started("SessionStart"), foldContext(), registry);
+    convertHookResponse(response({ outcome: "success" }), foldContext(), registry);
+    convertHookProgress(progress(), registry);
+
+    // Act
+    const records = logRecordsDuring(() => registry.reportDropped("the query was replaced"));
+
+    // Assert
+    expect(records.map((record) => [record.level, record.context.dropped_total, record.context.dropped_by_kind])).toEqual([
+      ["info", 3, { start: 1, succeeded: 1, progress: 1 }],
+    ]);
+  });
+
+  it("writes nothing when the query dropped nothing", () => {
+    const records = logRecordsDuring(() => createHookRegistry().reportDropped("the query was replaced"));
+
+    expect(records).toEqual([]);
+  });
+
+  it("starts counting afresh after a summary", () => {
+    // Arrange
+    const registry = createHookRegistry();
+    convertHookStarted(started("SessionStart"), foldContext(), registry);
+    registry.reportDropped("the query was replaced");
+
+    // Act
+    const total = registry.noteDropped("succeeded");
+
+    // Assert
+    expect(total).toBe(1);
   });
 });
 
@@ -188,6 +313,8 @@ describe("the registry of hook firings in flight", () => {
   function pending(hookId: string) {
     return {
       hookId,
+      activityId: create(conversationv1.AgentActivityIdSchema, { value: hookId }),
+      startUuid: "00000000-0000-0000-0000-000000000001",
       hookName: "PreToolUse:one",
       event: conversationv1.AgentHookEvent.PRE_TOOL_USE,
       startedAtMs: 1,

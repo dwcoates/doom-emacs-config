@@ -6301,6 +6301,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     if (standingDown) return;
     standingDown = true;
     gate.standDown(reason);
+    deps.fold.reportDroppedHooks(`the session stood down: ${reason}`);
     // A CALL WAITING ON A TURN BOUNDARY THAT WILL NEVER COME still gets an
     // answer: leaving the daemon holding a promise nothing can settle is worse
     // than telling it the change did not land.
