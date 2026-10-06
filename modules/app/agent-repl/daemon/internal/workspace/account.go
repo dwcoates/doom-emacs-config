@@ -43,4 +43,3 @@ func spawnRootFor(accounts account.Resolver, dir string, session wsm.Session) st
 	}
 	return accounts.ConfigDirFor(dir)
 }
-
