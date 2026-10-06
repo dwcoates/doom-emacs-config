@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { SELECT_WORKSPACE_EXPECTED_ARMS } from "../../../src/rpc/refusal.js";
+import { captureLogRecords, forwardedRecord } from "../../log-capture.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError, createRouterTransport } from "@connectrpc/connect";
@@ -299,9 +301,26 @@ describe("every SelectWorkspaceError arm draws at the clicked entry", () => {
   });
 
   it("holds to the schema: every cause arm of SelectWorkspaceError is covered", () => {
-    expect(arms.map((a) => a.arm).sort()).toEqual(
+    // A refusal arm is drawn above; an expected answer is pinned below.
+    expect([...arms.map((a) => a.arm), ...Object.keys(SELECT_WORKSPACE_EXPECTED_ARMS)].sort()).toEqual(
       [...oneofArms(SelectWorkspaceErrorSchema, "cause")].sort(),
     );
+  });
+
+  it("draws nothing at the entry for a select a daemon standing down answered", async () => {
+    const { el } = draw(refusedWith({ case: "standingDown", value: {} }));
+    el.querySelector<HTMLElement>('[data-queue-place="ahead"] [data-select]')?.click();
+    await settle();
+    expect(el.querySelector('[data-queue-place="ahead"] .refusal')).toBeNull();
+  });
+
+  it("records a select a daemon standing down answered at INFO", async () => {
+    const capture = captureLogRecords();
+    const { el } = draw(refusedWith({ case: "standingDown", value: {} }));
+    el.querySelector<HTMLElement>('[data-queue-place="ahead"] [data-select]')?.click();
+    await settle();
+    const record = await forwardedRecord(capture, "merge.queue-select-expected-answer");
+    expect(record.level.case).toBe("info");
   });
 
   it("refuses an error whose cause oneof is unset — a refusal must say why", async () => {
