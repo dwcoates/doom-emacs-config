@@ -1258,7 +1258,7 @@ otherwise the record is a routing invariant violation.")
        :error))))
 
 (defconst agent-repl--central-log-fallback-format
-  "elisp.core.log-central-fallback workspace=%S reason=%s"
+  "elisp.core.log-central-fallback workspace=%S class=%s reason=%s"
   "Format of the once-per-workspace record announcing a central fallback.")
 
 (defvar agent-repl--departed-log-workspaces (make-hash-table :test #'equal)
@@ -1317,10 +1317,37 @@ announcement, and the same popup, as any other."
        (gethash ws agent-repl--departed-log-workspaces)
        t))
 
+(declare-function agent-repl-roster-row-for-ws "agent-repl-roster" (ws))
+(declare-function agent-repl-roster-row-status "agent-repl-roster" (row))
+(declare-function agent-repl-roster-row-closed-p "agent-repl-roster" (row))
+(declare-function agent-repl-host--live-composer-arm "agent-repl-host" (ws))
+
+(defun agent-repl--log-workspace-merge-departing-p (ws)
+  "Return non-nil when the daemon has told this editor a merge is taking WS.
+A merge that lands closes its workspace and removes its worktree, and it
+may have been asked for anywhere -- this editor, the webapp's sidebar, an
+agent's command file.  Its removal therefore reaches this editor as a
+directory that is simply gone, ahead of the roster push that closes the
+row (measured 2026-10-06: worktree removed at .325, a record at .340 found
+it gone, the closed row arrived at .383).  What the daemon HAS already
+said by then is that the merge is under way: WS's roster row is `:merging'
+or `:merged' from the merge's admission on, its host composer is
+`:merging', and the closed row follows.  Any of those makes the missing
+directory the merge's own work.  Read through roster.el and host.el only
+when they are loaded; core.el is below both."
+  (or (and (fboundp 'agent-repl-roster-row-for-ws)
+           (let ((row (agent-repl-roster-row-for-ws ws)))
+             (and row
+                  (or (memq (agent-repl-roster-row-status row) '(:merging :merged))
+                      (agent-repl-roster-row-closed-p row))
+                  t)))
+      (and (fboundp 'agent-repl-host--live-composer-arm)
+           (eq (agent-repl-host--live-composer-arm ws) :merging))))
+
 (defun agent-repl--central-log-fallback-class (ws)
   "Classify WHY WS's records fall back to the central sink.
 
-THREE DIFFERENT FACTS ARRIVE HERE, and conflating them is what put a popup in
+FOUR DIFFERENT FACTS ARRIVE HERE, and conflating them is what put a popup in
 front of the user for a condition that is not a defect:
 
   - `no-durable-home' — WS names no registered directory at all, or names a
@@ -1335,6 +1362,11 @@ front of the user for a condition that is not a defect:
     are the ordinary sound of that departure finishing; see
     `agent-repl--departed-log-workspaces'.  ORDINARY.
 
+  - `merge-departure' — a merge the daemon reported as under way for WS
+    (`agent-repl--log-workspace-merge-departing-p') removed its worktree.
+    The merge is a departure the user asked for, from wherever they asked.
+    ORDINARY.
+
   - `stale-registration' — WS IS registered, the directory it is registered
     AT IS GONE, and NOTHING ASKED FOR IT TO GO.  That is a registry row that
     outlived its worktree: a real inconsistency in durable state, which
@@ -1348,6 +1380,7 @@ rather than about whichever record happened to meet it."
                   (agent-repl--ws-get ws :project-dir))))
     (cond
      ((agent-repl--log-workspace-departing-p ws) 'ordered-departure)
+     ((agent-repl--log-workspace-merge-departing-p ws) 'merge-departure)
      ((and (stringp dir) (not (file-directory-p dir))) 'stale-registration)
      (t 'no-durable-home))))
 
@@ -2283,7 +2316,7 @@ differently:
              (agent-repl--do-log-to-file
               (agent-repl--log-record nil fallback-level "normal"
                                       agent-repl--central-log-fallback-format
-                                      (list unroutable reason)
+                                      (list unroutable class reason)
                                       nil nil unroutable)
               nil)))))
     (let* ((routing (agent-repl--resolve-log-workspace ws (or operation-fmt fmt)))

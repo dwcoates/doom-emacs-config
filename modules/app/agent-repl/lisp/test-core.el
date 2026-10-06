@@ -3669,6 +3669,86 @@ another process removes is."
       (should (eq (agent-repl--central-log-fallback-class "class-stale-ws")
                   'stale-registration)))))
 
+(defmacro agent-repl-test--with-gone-workspace (ws &rest body)
+  "Run BODY with WS registered at a directory that is already gone."
+  (declare (indent 1))
+  `(let ((project (make-temp-file "agent-repl-class-gone-" t)))
+     (agent-repl--ws-put ,ws :project-dir project)
+     (delete-directory project t)
+     ,@body))
+
+(ert-deftest agent-repl-test-a-gone-directory-of-a-merging-row-is-a-merge-departure ()
+  "A worktree gone while the roster says a merge is taking it is the merge's work."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-gone-workspace "class-merging-ws"
+      (cl-letf (((symbol-function 'agent-repl-roster-row-for-ws)
+                 (lambda (_ws) (list :status (list :arm :merging :value nil)))))
+        ;; Act / Assert
+        (should (eq (agent-repl--central-log-fallback-class "class-merging-ws")
+                    'merge-departure))))))
+
+(ert-deftest agent-repl-test-a-gone-directory-of-a-merged-row-is-a-merge-departure ()
+  "A worktree gone after the roster said the merge landed is the merge's work."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-gone-workspace "class-merged-ws"
+      (cl-letf (((symbol-function 'agent-repl-roster-row-for-ws)
+                 (lambda (_ws) (list :status (list :arm :merged :value nil)))))
+        ;; Act / Assert
+        (should (eq (agent-repl--central-log-fallback-class "class-merged-ws")
+                    'merge-departure))))))
+
+(ert-deftest agent-repl-test-a-gone-directory-of-a-closed-row-is-a-merge-departure ()
+  "A worktree gone with a row the daemon closed is that departure finishing."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-gone-workspace "class-closed-ws"
+      (cl-letf (((symbol-function 'agent-repl-roster-row-for-ws)
+                 (lambda (_ws) (list :status (list :arm :ready :value nil)
+                                     :closed (list :closed t)))))
+        ;; Act / Assert
+        (should (eq (agent-repl--central-log-fallback-class "class-closed-ws")
+                    'merge-departure))))))
+
+(ert-deftest agent-repl-test-a-gone-directory-under-a-merging-composer-is-a-merge-departure ()
+  "The workspace's own host composer saying merging is the same report."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-gone-workspace "class-composer-ws"
+      (cl-letf (((symbol-function 'agent-repl-roster-row-for-ws) (lambda (_ws) nil))
+                ((symbol-function 'agent-repl-host--live-composer-arm)
+                 (lambda (_ws) :merging)))
+        ;; Act / Assert
+        (should (eq (agent-repl--central-log-fallback-class "class-composer-ws")
+                    'merge-departure))))))
+
+(ert-deftest agent-repl-test-a-gone-directory-of-an-idle-open-row-is-still-stale ()
+  "No merge reported, row open: the missing directory is still a stale registry row."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-gone-workspace "class-idle-ws"
+      (cl-letf (((symbol-function 'agent-repl-roster-row-for-ws)
+                 (lambda (_ws) (list :status (list :arm :ready :value nil)
+                                     :closed (list :closed nil))))
+                ((symbol-function 'agent-repl-host--live-composer-arm)
+                 (lambda (_ws) :open)))
+        ;; Act / Assert
+        (should (eq (agent-repl--central-log-fallback-class "class-idle-ws")
+                    'stale-registration))))))
+
+(ert-deftest agent-repl-test-a-merge-departure-fallback-is-info-without-a-popup ()
+  "The merge's own removal is announced at INFO, and raises no popup."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-temp-logfile path
+      (let ((agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal))
+            (popups 0))
+        (agent-repl-test--with-gone-workspace "class-merge-info-ws"
+          (cl-letf (((symbol-function 'agent-repl-roster-row-for-ws)
+                     (lambda (_ws) (list :status (list :arm :merging :value nil))))
+                    ((symbol-function 'display-warning)
+                     (lambda (&rest _) (cl-incf popups))))
+            ;; Act
+            (agent-repl--log "class-merge-info-ws" "line after the merge removed the worktree")))
+        ;; Assert
+        (let ((record (agent-repl-test--log-record-for path "log-central-fallback")))
+          (should (equal (list (alist-get 'level record) popups) '("info" 0))))))))
+
 (ert-deftest agent-repl-test-unregistered-workspace-is-classified-as-homeless ()
   "A name with no registration at all owns no durable home, and that is all."
   (agent-repl-test--with-clean-state

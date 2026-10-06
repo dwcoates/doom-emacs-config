@@ -1274,6 +1274,15 @@ spawned announced its ending and its link went down planned, and read by
 announced stand-down arriving.  It names the PROCESS, so it can excuse
 that daemon\='s exit and nothing else.")
 
+(defvar agent-repl-daemon--handed-over nil
+  "The daemon process THIS Emacs spawned whose handover completed, or nil.
+Set by `agent-repl-daemon-on-link-promote' when the link promotes the
+successor off that daemon's connection, and read by
+`agent-repl-daemon--record-exit'.  The promotion clears the successor slot
+BEFORE the outgoing daemon's sentinel runs (measured 2026-10-06: promoted
+at .174, exited at .177), so the slot no longer says the exit is the
+handover's; this does.  It names the PROCESS, so it excuses that one exit.")
+
 (defvar agent-repl-daemon--parked-exit nil
   "A clean, unasked exit whose level waits on the link\='s verdict, or nil.
 Shape: `(:proc PROC :status STATUS :event EVENT :address ADDRESS)'.
@@ -1338,7 +1347,8 @@ ordered and the next unrequested departure is heard in full."
          ;; consumes an order given for some other daemon.
          (handover (and (not requested) (eql status 0)
                         (or (agent-repl-link-successor)
-                            (agent-repl-link-successor-pending-p))))
+                            (agent-repl-link-successor-pending-p)
+                            (eq agent-repl-daemon--handed-over proc))))
          (announced (and (not requested) (not handover) (eql status 0)
                          (eq agent-repl-daemon--announced-departure proc)))
          (linked-address (and (not requested) (not handover) (not announced)
@@ -1352,6 +1362,8 @@ ordered and the next unrequested departure is heard in full."
     (when requested (setq agent-repl-daemon--exit-requested nil))
     (when (eq agent-repl-daemon--announced-departure proc)
       (setq agent-repl-daemon--announced-departure nil))
+    (when (eq agent-repl-daemon--handed-over proc)
+      (setq agent-repl-daemon--handed-over nil))
     (cond
      (requested
       (agent-repl--info scope agent-repl-daemon--exit-log-format
@@ -1427,6 +1439,26 @@ sentinel reports later is heard as the plan it was."
            (equal address agent-repl-daemon--own-address))
       (setq agent-repl-daemon--announced-departure agent-repl--frontend-daemon-process)
       (agent-repl--log scope "elisp.daemon.departure-announced address=%S" address)))))
+
+(defun agent-repl-daemon-on-link-promote (old _new)
+  "Note that the daemon on OLD handed over, when it is the one THIS Emacs spawned.
+Registered on `agent-repl-link-promote-functions'.  A promotion is the
+handover completing: the outgoing daemon transferred everything and ended
+its stream, so its exit is the plan.  An exit already PARKED on OLD's
+address is decided now, at INFO; otherwise the process is remembered
+\(`agent-repl-daemon--handed-over') for the sentinel that reports it."
+  (let ((address (and old (agent-repl-connect-connection-address old)))
+        (parked agent-repl-daemon--parked-exit)
+        (scope '(:agent-repl-central "the resident daemon lifecycle spans workspaces")))
+    (cond
+     ((and parked address (equal address (plist-get parked :address)))
+      (setq agent-repl-daemon--parked-exit nil)
+      (agent-repl--info scope agent-repl-daemon--exit-log-format
+                        (plist-get parked :status) (plist-get parked :event) "handover"))
+     ((and address agent-repl--frontend-daemon-process
+           (equal address agent-repl-daemon--own-address))
+      (setq agent-repl-daemon--handed-over agent-repl--frontend-daemon-process)
+      (agent-repl--info scope "elisp.daemon.handed-over address=%S" address)))))
 
 (defun agent-repl-daemon--retire-own-addr ()
   "Remove `daemon.addr' when it still names the daemon THIS Emacs spawned.
@@ -1927,6 +1959,7 @@ the ensure."
 (add-hook 'agent-repl-link-no-daemon-functions #'agent-repl-daemon-ensure)
 (add-hook 'agent-repl-link-up-functions #'agent-repl-daemon-on-link-up)
 (add-hook 'agent-repl-link-down-functions #'agent-repl-daemon-on-link-down)
+(add-hook 'agent-repl-link-promote-functions #'agent-repl-daemon-on-link-promote)
 (add-hook 'agent-repl-open-progress-change-functions
           #'agent-repl-daemon-on-open-progress-change)
 
