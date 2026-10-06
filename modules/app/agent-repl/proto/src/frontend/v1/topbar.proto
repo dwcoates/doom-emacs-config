@@ -329,7 +329,35 @@ message TopbarConnectivity {
   string glyph = 2;
   // Tooltip text, verbatim.
   string title = 3;
+  // THE SESSION, shown in the dropdown clicking the indicator opens (owner,
+  // 2026-10-06). ABSENT before any session has begun (no agent-repl login and
+  // no editor start this daemon has seen).
+  optional TopbarAgentReplSession session = 4;
 }
+
+// agent-repl's session: since the LATER of the last login made through
+// agent-repl and the start of this Emacs. ONE SOURCE OF TRUTH: the dropdown's
+// duration and its traffic both count from `started_at_ms`.
+message TopbarAgentReplSession {
+  // When the session began, epoch milliseconds. The client ticks the
+  // duration ("1h 12m") from it locally; the daemon never pushes a tick.
+  int64 started_at_ms = 1;
+  // What began it. THE ARM IS THE CAUSE.
+  oneof began {
+    TopbarSessionBeganLogin login = 2;
+    TopbarSessionBeganEditorStart editor_start = 3;
+  }
+  // The vendor network traffic of every agent-repl workspace since
+  // `started_at_ms`, as the operating system counted it for agent-repl's own
+  // vendor processes: bytes actually received and sent, across restarts of
+  // those processes. The client formats ("412 MB ↓ · 38 MB ↑").
+  uint64 bytes_received = 4;
+  uint64 bytes_sent = 5;
+}
+// A login made through agent-repl began the session.
+message TopbarSessionBeganLogin {}
+// This Emacs starting began the session.
+message TopbarSessionBeganEditorStart {}
 
 // The warning strip: everything the topbar has to WARN about right now.
 //

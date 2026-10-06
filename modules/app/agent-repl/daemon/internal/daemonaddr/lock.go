@@ -121,9 +121,15 @@ func acquireBootLockWithin(path string, wait time.Duration, onRefused func()) (*
 		lock *bootLock
 		err  error
 	}
+	// OPENED HERE, on the caller's goroutine, so nothing this wait does
+	// touches the directory after it has answered (blockOnBootLock).
+	f, err := openBootLock(path)
+	if err != nil {
+		return nil, err
+	}
 	settled := make(chan outcome, 1)
 	go func() {
-		l, e := blockForBootLock(path)
+		l, e := blockOnBootLock(f, path)
 		settled <- outcome{lock: l, err: e}
 	}()
 	timer := time.NewTimer(wait)
@@ -144,13 +150,16 @@ func acquireBootLockWithin(path string, wait time.Duration, onRefused func()) (*
 	}
 }
 
-// blockForBootLock waits in the kernel for the claim. It returns only when
-// the lock is taken or the attempt fails outright.
-func blockForBootLock(path string) (*bootLock, error) {
-	f, err := openBootLock(path)
-	if err != nil {
-		return nil, err
-	}
+// blockOnBootLock waits in the kernel for the claim on a lock file the caller
+// already opened. It returns only when the lock is taken or the attempt fails
+// outright, closing the file on a failure.
+//
+// THE OPEN IS THE CALLER'S, never the waiting goroutine's. The open creates the
+// lock file, and a goroutine scheduled late would create it after its caller
+// had answered and moved on — under a state directory being removed, that is a
+// file recreated inside it ("directory not empty"). Waiting on an already-open
+// descriptor touches nothing on disk however late it runs.
+func blockOnBootLock(f *os.File, path string) (*bootLock, error) {
 	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
 		f.Close()
 		return nil, fmt.Errorf("wait for the boot lock %q: %w", path, err)

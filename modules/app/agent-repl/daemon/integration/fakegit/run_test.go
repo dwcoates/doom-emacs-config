@@ -323,6 +323,79 @@ func TestWorktreePruneDropsARegistrationWhoseTreeIsGone(t *testing.T) {
 	}
 }
 
+// rmWorktree arranges a worktree deleted with a plain `rm`: its directory is
+// gone and git still registers it.
+func rmWorktree(t *testing.T, s *State, dir, target string) {
+	t.Helper()
+	Run(s, "/", []string{"-C", dir, "worktree", "add", "-b", "feature", target, "main"})
+	if err := os.RemoveAll(target); err != nil {
+		t.Fatalf("removing the tree: %v", err)
+	}
+}
+
+func TestWorktreeAddRefusesAMissingButRegisteredPathAsGitDoes(t *testing.T) {
+	// Arrange.
+	s, _, dir := world(t)
+	target := filepath.Join(filepath.Dir(dir), "wt")
+	rmWorktree(t, s, dir, target)
+
+	// Act.
+	got := Run(s, "/", []string{"-C", dir, "worktree", "add", target, "feature"})
+
+	// Assert: git's check_candidate_path, word for word, and die's exit code.
+	want := "fatal: '" + target + "' is a missing but already registered worktree;\nuse 'add -f' to override, or 'prune' or 'remove' to clear\n"
+	if got.Exit != 128 || got.Stderr != want {
+		t.Fatalf("worktree add over a missing registration = %+v, want exit 128 and %q", got, want)
+	}
+}
+
+func TestWorktreeAddRefusesAMissingButLockedPathAsGitDoes(t *testing.T) {
+	// Arrange.
+	s, repo, dir := world(t)
+	target := filepath.Join(filepath.Dir(dir), "wt")
+	rmWorktree(t, s, dir, target)
+	repo.Worktree(target).Locked = true
+
+	// Act.
+	got := Run(s, "/", []string{"-C", dir, "worktree", "add", target, "feature"})
+
+	// Assert.
+	if got.Exit != 128 || !strings.Contains(got.Stderr, "is a missing but locked worktree") {
+		t.Fatalf("worktree add over a locked missing registration = %+v, want git's locked refusal", got)
+	}
+}
+
+func TestWorktreeRemoveRetiresAMissingRegistration(t *testing.T) {
+	// Arrange.
+	s, repo, dir := world(t)
+	target := filepath.Join(filepath.Dir(dir), "wt")
+	rmWorktree(t, s, dir, target)
+
+	// Act.
+	got := Run(s, "/", []string{"-C", dir, "worktree", "remove", target})
+
+	// Assert.
+	if got.Exit != 0 || repo.Worktree(target) != nil {
+		t.Fatalf("worktree remove of a missing tree = %+v, registrations %v, want it retired", got, repo.Worktrees)
+	}
+}
+
+func TestWorktreeRemoveRefusesALockedTreeUnlessForcedTwice(t *testing.T) {
+	// Arrange.
+	s, repo, dir := world(t)
+	target := filepath.Join(filepath.Dir(dir), "wt")
+	rmWorktree(t, s, dir, target)
+	repo.Worktree(target).Locked = true
+
+	// Act.
+	got := Run(s, "/", []string{"-C", dir, "worktree", "remove", target})
+
+	// Assert.
+	if got.Exit != 128 || !strings.Contains(got.Stderr, "cannot remove a locked working tree") {
+		t.Fatalf("worktree remove of a locked tree = %+v, want git's refusal", got)
+	}
+}
+
 func TestBranchDeleteRemovesTheBranch(t *testing.T) {
 	// Arrange.
 	s, repo, dir := world(t)

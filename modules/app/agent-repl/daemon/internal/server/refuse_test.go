@@ -827,3 +827,20 @@ func TestDetachedFailuresMapTheirRefusalOnlyThroughRefuseOnto(t *testing.T) {
 		t.Fatalf("hand-rolled typed-refusal mapping, use refuseOnto: %v", offenders)
 	}
 }
+
+// TestSetResponseErrorFillsTheOpenWorktreeUnrestorableEvidence pins that the
+// verb's own dir and branch reach the arm's fields, not only its sentence.
+func TestSetResponseErrorFillsTheOpenWorktreeUnrestorableEvidence(t *testing.T) {
+	// Arrange.
+	resp := &agentreplv1.OpenWorkspaceResponse{}
+
+	// Act.
+	ok := setResponseError(resp, workspace.ArmWorktreeUnrestorable,
+		map[string]any{"dir": "/w/gone", "branch": "feature/gone", "detail": "both gone"})
+
+	// Assert.
+	got := resp.GetError().GetWorktreeUnrestorable()
+	if !ok || got.GetDir() != "/w/gone" || got.GetBranch() != "feature/gone" || got.GetDetail() != "both gone" {
+		t.Fatalf("setResponseError = %v, resp = %v, want worktree_unrestorable carrying dir, branch and detail", ok, resp)
+	}
+}

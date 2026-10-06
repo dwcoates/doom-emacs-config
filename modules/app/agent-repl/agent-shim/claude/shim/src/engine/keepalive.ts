@@ -48,17 +48,35 @@
  * the real-prompt rollback — same declared `resumeSessionAt` surface, same
  * uuid, no file rewrite — so nothing about the transcript's safety changes.
  *
- * THE ANCHOR IS AN ASSISTANT RECORD OF A REAL TURN (ruled 2026-09-14). The SDK
- * states the type of the uuid it will accept: "The message ID should be from
- * `SDKAssistantMessage.uuid`". Every OTHER message the vendor emits carries a
- * `uuid` too — `system:init` and `result` both declare one as a REQUIRED field —
- * and those uuids name no transcript record, so a query opened at one is
- * refused by the vendor with `No message found with message.uuid of: <uuid>`
- * and the session dies with the prompt it was carrying. It killed two of the
- * owner's real sessions on 2026-09-14. So {@link KeepaliveRewind.noteRecord}
- * takes the MESSAGE, not a uuid, and refuses everything that is not an
- * `assistant` message of a REAL (non-keep-alive) open turn — the filter cannot
- * be got wrong by a caller, because the caller never extracts the uuid.
+ * THE ANCHOR IS A CONVERSATION RECORD OF A REAL TURN (ruled 2026-09-14,
+ * widened 2026-10-06). The SDK says of the uuid it will accept: "The message
+ * ID should be from `SDKAssistantMessage.uuid`". Every message the vendor
+ * emits carries a `uuid` — `system:init` and `result` both declare one as a
+ * REQUIRED field — and theirs name no transcript record, so a query opened at
+ * one is refused by the vendor with `No message found with message.uuid of:
+ * <uuid>` and the session dies with the prompt it was carrying. It killed two
+ * of the owner's real sessions on 2026-09-14. A main-thread `user` message
+ * (a tool result) names its transcript record exactly as an assistant does,
+ * and an interrupted turn's tool result is the turn's last record, so both
+ * anchor. {@link KeepaliveRewind.noteRecord} takes the MESSAGE, not a uuid,
+ * and refuses everything that is not a main-thread `assistant` or `user`
+ * message of a turn of real conversation — the filter cannot be got wrong by a
+ * caller, because the caller never extracts the uuid.
+ *
+ * THE SPAN INVARIANT (owner requirement, 2026-10-06). A rewind discards
+ * everything the vendor's conversation holds after the anchor, so before one
+ * is performed {@link KeepaliveRewind.obligation} asserts that every turn in
+ * that SPAN is keep-alive material: the keep-alive's own turn, or a vendor turn
+ * the keep-alive's own rewind set off (a `stopped` task notification's answer,
+ * see {@link KeepaliveScope}). A real prompt, a real reply, a genuine
+ * vendor-started turn or a record no turn owns fails it, and the rewind is
+ * REFUSED: the content is kept, the anchor is dropped (the next real record
+ * takes a fresh one), and an ERROR names every offending turn and record. The
+ * span is precise and cheap: it is fed the transcript records (main-thread
+ * `assistant` and `user` messages, by uuid) and the sends (each a `user`
+ * record under its client uuid) that land after the anchor, and every new
+ * anchor, settled rewind or cleared anchor empties it, so it never holds more
+ * than what lies between one anchor and now.
  *
  * AND THE ANCHOR DOES NOT CROSS A BOUNDARY. A uuid from before a compaction, a
  * conversation reset, or a fresh query binding may no longer be resumable, so
@@ -114,6 +132,49 @@ export interface RewindObligation {
   readonly anchorTurnId: string;
   /** How many keep-alive turns are being discarded. */
   readonly discardedKeepaliveTurns: number;
+  /** Every turn the rewind discards, each already proven keep-alive material. */
+  readonly span: readonly SpanTurn[];
+}
+
+/**
+ * What one turn in the span is, as the invariant judges it.
+ *
+ * - `keepalive`: the shim's own keep-alive turn.
+ * - `keepalive_consequence`: a vendor turn the keep-alive's rewind set off.
+ * - `real`: a turn a real send started (a user's prompt, the network-resume
+ *   prompt, a join).
+ * - `vendor_started`: a genuine turn the vendor started on its own.
+ * - `unattributed`: a record no turn of this shim owns.
+ *
+ * Only the first two are keep-alive material.
+ */
+export type SpanTurnKind = "keepalive" | "keepalive_consequence" | "real" | "vendor_started" | "unattributed";
+
+/** One turn in the span: its id, its kind, and the vendor records it left there. */
+export interface SpanTurn {
+  readonly turnId: string;
+  readonly kind: SpanTurnKind;
+  /** The record uuids, in arrival order, at most {@link SPAN_UUIDS_PER_TURN}. */
+  readonly uuids: readonly string[];
+  /** How many records the turn left in the span, the unlisted included. */
+  readonly records: number;
+}
+
+/**
+ * The most record uuids one span turn lists. A keep-alive turn leaves two or
+ * three; the cap only bounds a pathological turn, whose count stays exact.
+ */
+export const SPAN_UUIDS_PER_TURN = 16;
+
+/** The kinds a rewind may discard. */
+const KEEPALIVE_MATERIAL: ReadonlySet<SpanTurnKind> = new Set(["keepalive", "keepalive_consequence"]);
+
+/** A span turn under construction. */
+interface MutableSpanTurn {
+  readonly turnId: string;
+  readonly kind: SpanTurnKind;
+  readonly uuids: string[];
+  records: number;
 }
 
 /** The turn a record arrived under, as the rewind needs to see it. */
@@ -124,9 +185,48 @@ export interface RecordTurn {
   readonly keepalive: boolean;
   /**
    * True when the VENDOR started this turn on its own (an adopted turn): a
-   * replayed task notification, a background hand-back. Never an anchor.
+   * background task's completion, a hand-back. Real conversation, so its
+   * assistant records anchor like any real turn's; a turn answering a stop
+   * the rewind caused is never adopted (it is the keep-alive's, tagged).
    */
   readonly adopted?: boolean;
+  /**
+   * True when the turn is a VENDOR turn the keep-alive's own rewind set off
+   * (with `keepalive`): keep-alive material, though the keep-alive's send did
+   * not start it.
+   */
+  readonly consequence?: boolean;
+}
+
+/**
+ * Whether a record of `turn` may anchor a rewind: a turn of REAL conversation.
+ *
+ * Not a keep-alive's: its answer is exactly the material the rewind exists to
+ * discard. Not one with no turn: it belongs to no turn this shim asked for.
+ *
+ * A GENUINE ADOPTED TURN ANCHORS (ruled 2026-10-06). Adopted turns once never
+ * anchored, because a turn answering a task the rewind itself had STOPPED
+ * anchored the next rewind, which replayed the stop, whose answer anchored the
+ * next -- the ship-gns loop of 2026-10-02. Those answers are now tagged as the
+ * keep-alive's (see {@link KeepaliveScope}) and never reach here as adopted, so
+ * the rule is no longer needed, and it cost real content: a completed task's
+ * turn after the anchor was discarded by the next rewind (or, under the span
+ * invariant, refused it at ERROR every time a task finished while idle).
+ */
+function anchors(turn: RecordTurn | undefined): turn is RecordTurn {
+  return turn !== undefined && !turn.keepalive;
+}
+
+/** The span kind of a record that arrived under `turn`. */
+function spanKind(turn: RecordTurn | undefined): SpanTurnKind {
+  if (turn === undefined) return "unattributed";
+  if (turn.keepalive) return turn.consequence === true ? "keepalive_consequence" : "keepalive";
+  return turn.adopted === true ? "vendor_started" : "real";
+}
+
+/** A span turn as the log states it. */
+function spanContext(turn: SpanTurn): Record<string, unknown> {
+  return { turn_id: turn.turnId, kind: turn.kind, records: turn.records, uuids: [...turn.uuids] };
 }
 
 /**
@@ -140,6 +240,14 @@ export interface RecordTurn {
 export class KeepaliveRewind {
   private anchor: { readonly uuid: string; readonly turnId: string } | undefined;
   private keepaliveTurns = 0;
+  /** Every turn with a record after the anchor, in first-arrival order. Empty with no anchor. */
+  private readonly spanTurns: MutableSpanTurn[] = [];
+  /**
+   * The keep-alive send pushed and not yet ended. A vendor turn may run AHEAD
+   * of it (a task's completion queued before the send), and its anchor lies
+   * before the keep-alive's prompt record, so a new anchor keeps this entry.
+   */
+  private outstandingKeepalive: { readonly uuid: string; readonly turnId: string } | undefined;
 
   /**
    * A message arrived under `turn`; it becomes the anchor only if it qualifies.
@@ -149,24 +257,75 @@ export class KeepaliveRewind {
    * then enforced here rather than trusted to every call site.
    */
   noteRecord(message: SdkMessage, turn: RecordTurn | undefined): void {
-    // Only an assistant record. `system:init`, `result`, the user echo, stream
-    // events, hooks and control messages all carry uuids the vendor will not
-    // resume at.
-    if (message.type !== "assistant") return;
-    // Only a REAL turn, and only while one is open. A keep-alive's own answer
-    // is exactly the material the rewind exists to discard, and a record with
-    // no open turn belongs to no turn this shim asked for.
-    if (turn === undefined || turn.keepalive) return;
-    // Only a turn the SHIM started. A turn the vendor started on its own is
-    // not the user's conversation's last word: anchoring on one made the next
-    // rewind resume at a replayed task notification, which the vendor ran
-    // again as a fresh turn, which became the next anchor -- a loop that
-    // filled a workspace's newest page with empty turns every keep-alive
-    // (ship-gns, from 2026-10-02 01:45).
-    if (turn.adopted === true) return;
+    // Only a conversation record: an `assistant` or `user` message. The
+    // `system:init`, `result`, stream events, hooks and control messages all
+    // carry uuids that name no transcript record -- the vendor will not resume
+    // at one, and a rewind discards none of them.
+    if (message.type !== "assistant" && message.type !== "user") return;
+    // Only a MAIN-THREAD record. A subagent's message carries a
+    // `parent_tool_use_id` and lives in that subagent's own transcript, so the
+    // main conversation holds no record under its uuid to resume at, and a
+    // rewind of the main conversation discards nothing of it.
+    if (!isMainThread(message)) return;
     const uuid = (message as { uuid?: unknown }).uuid;
     if (typeof uuid !== "string" || uuid === "") return;
-    this.anchor = { uuid, turnId: turn.turnId };
+    // A RECORD OF REAL CONVERSATION ADVANCES THE ANCHOR, a `user` record as
+    // much as an assistant one (ruled 2026-10-06). An interrupted turn's own
+    // tool result lands after its last assistant record; anchoring only on
+    // assistants left that result past the anchor, where the next rewind would
+    // drop it (or, under the span invariant, refused at ERROR on ordinary
+    // interrupts). A main-thread `user` message's uuid names its transcript
+    // record exactly as an assistant's does (172 of 174 in the corpus
+    // captures; the two others are the same class as the 21 of 520 assistants
+    // that miss), so it is resumable through the same declared surface.
+    if (anchors(turn)) {
+      this.takeAnchor(uuid, turn.turnId);
+      return;
+    }
+    this.noteSpan(uuid, turn);
+  }
+
+  /**
+   * A send was pushed: the vendor files it as a `user` record under its client
+   * `uuid`, so once an anchor stands it is in the span like any other record.
+   * The caller names the send's turn exactly as {@link noteRecord} takes it.
+   */
+  noteSend(uuid: string, turn: RecordTurn): void {
+    if (turn.keepalive) this.outstandingKeepalive = { uuid, turnId: turn.turnId };
+    this.noteSpan(uuid, turn);
+  }
+
+  /** The span as it stands: every turn a rewind now would discard. */
+  span(): readonly SpanTurn[] {
+    return this.spanTurns.map((turn) => ({ ...turn, uuids: [...turn.uuids] }));
+  }
+
+  /** The keep-alive turns since the anchor, for a caller that must assert none is owed. */
+  debt(): number {
+    return this.keepaliveTurns;
+  }
+
+  /** Book one record into the span, under the turn it arrived with. */
+  private noteSpan(uuid: string, turn: RecordTurn | undefined): void {
+    // NO ANCHOR, NO SPAN: nothing can be rewound, so nothing can be discarded.
+    if (this.anchor === undefined) return;
+    const kind = spanKind(turn);
+    const turnId = turn?.turnId ?? "";
+    let entry = this.spanTurns.find((held) => held.turnId === turnId && held.kind === kind);
+    if (entry === undefined) {
+      entry = { turnId, kind, uuids: [], records: 0 };
+      this.spanTurns.push(entry);
+    }
+    entry.records++;
+    if (entry.uuids.length < SPAN_UUIDS_PER_TURN && !entry.uuids.includes(uuid)) entry.uuids.push(uuid);
+  }
+
+  /** A qualifying record is the new anchor: everything before it is kept by any rewind to it. */
+  private takeAnchor(uuid: string, turnId: string): void {
+    this.anchor = { uuid, turnId };
+    this.spanTurns.length = 0;
+    const pending = this.outstandingKeepalive;
+    if (pending !== undefined) this.noteSpan(pending.uuid, { turnId: pending.turnId, keepalive: true });
     // THE DEBT IS "KEEP-ALIVE TURNS SINCE THE LAST REAL RECORD", so a new
     // anchor starts it over. A keep-alive counted before this record — one that
     // ran ahead of the session's first real prompt, or after a cleared anchor,
@@ -190,6 +349,7 @@ export class KeepaliveRewind {
     const held = this.anchor;
     if (held === undefined) return;
     this.anchor = undefined;
+    this.spanTurns.length = 0;
     LOGGER.info(
       { reason, anchor_uuid: held.uuid, anchor_turn_id: held.turnId },
       "the keep-alive rewind anchor is CLEARED: a uuid from before this boundary may not be resumable",
@@ -204,6 +364,7 @@ export class KeepaliveRewind {
   /** A keep-alive turn ended; the context now carries material a real prompt must not see. */
   noteKeepaliveTurn(): void {
     this.keepaliveTurns++;
+    this.outstandingKeepalive = undefined;
   }
 
   /**
@@ -227,16 +388,58 @@ export class KeepaliveRewind {
       );
       return undefined;
     }
+    // THE SPAN INVARIANT, asserted before anything is discarded: every turn
+    // between the anchor and now is keep-alive material. One that is not would
+    // be lost from the vendor's context by this rewind, so the rewind is
+    // REFUSED and the content kept.
+    const offending = this.spanTurns.filter((turn) => !KEEPALIVE_MATERIAL.has(turn.kind));
+    if (offending.length > 0) {
+      this.refuse(this.anchor, offending);
+      return undefined;
+    }
     return {
       resumeSessionAt: this.anchor.uuid,
       anchorTurnId: this.anchor.turnId,
       discardedKeepaliveTurns: this.keepaliveTurns,
+      span: this.span(),
     };
   }
 
-  /** The rewind happened (or was found unnecessary); the debt is cleared. */
+  /**
+   * The span holds real content: refuse the rewind, loudly, and stop owing it.
+   *
+   * THE ANCHOR IS DROPPED AND THE DEBT SETTLED, not kept: the content after the
+   * anchor stays in the vendor's context for good, so every later rewind to the
+   * same anchor would discard it too and be refused again. Dropping it makes
+   * the refusal ONE event; the next real record takes a fresh anchor, and the
+   * keep-alive material in between is carried, as it is after any boundary.
+   */
+  private refuse(held: { readonly uuid: string; readonly turnId: string }, offending: readonly SpanTurn[]): void {
+    LOGGER.error(
+      {
+        resume_session_at: held.uuid,
+        anchor_turn_id: held.turnId,
+        keepalive_turns: this.keepaliveTurns,
+        offending: offending.map(spanContext),
+        span: this.spanTurns.map(spanContext),
+        detail: offending
+          .map((turn) => `${turn.kind} turn ${turn.turnId === "" ? "(none)" : turn.turnId}: ${turn.uuids.join(", ")}`)
+          .join("; "),
+      },
+      "the keep-alive rewind is REFUSED: the span since its anchor holds material that is not the keep-alive's, and the rewind would discard it; the content is kept and the anchor dropped",
+    );
+    this.anchor = undefined;
+    this.spanTurns.length = 0;
+    this.keepaliveTurns = 0;
+  }
+
+  /**
+   * The rewind happened (or was found unnecessary); the debt is cleared. A
+   * rewind that happened discarded the span with it.
+   */
   settled(): void {
     this.keepaliveTurns = 0;
+    this.spanTurns.length = 0;
   }
 }
 
@@ -263,6 +466,11 @@ interface PendingKeepalive {
 function isStoppedTaskNotification(message: SdkMessage): boolean {
   if (message.type !== "system" || message.subtype !== "task_notification") return false;
   return (message as { status?: unknown }).status === "stopped";
+}
+
+/** True when MESSAGE belongs to the main conversation, not to a subagent's own transcript. */
+function isMainThread(message: SdkMessage): boolean {
+  return (message as { parent_tool_use_id?: unknown }).parent_tool_use_id == null;
 }
 
 /** The attribution of every message the keep-alive did not produce. */
@@ -334,6 +542,16 @@ export class KeepaliveScope {
    * (a completion, a hand-back) is not a stop and is served as ever.
    */
   private stoppedByRewind = false;
+  /**
+   * Set when a keep-alive REWIND binds a new query, until the vendor starts a
+   * send's turn on it. The rewind stops the old query's background work
+   * whatever send it was performed for -- the next keep-alive, or a real
+   * prompt -- and the vendor answers that stop AHEAD of the send, so a stop
+   * in this window is the rewind's consequence even with no keep-alive
+   * outstanding (the ship-gns replay: a real prompt's rewind otherwise stored
+   * and served the stop's answer as a vendor-started turn).
+   */
+  private afterRewind = false;
   /** Whether the vendor turn now running is the pending keep-alive's own, as the ledger stated it. */
   private running = false;
   /**
@@ -388,6 +606,12 @@ export class KeepaliveScope {
     this.running = false;
   }
 
+  /** The query just bound is a keep-alive rewind's: watch for the stop it causes. */
+  rewound(): void {
+    this.afterRewind = true;
+    LOGGER.debug({}, "a keep-alive rewind bound a new query; a stop reported before its send's turn is the rewind's");
+  }
+
   /** Whether the vendor turn now running is the keep-alive's. For callbacks between messages. */
   producing(): boolean {
     return this.running;
@@ -410,13 +634,17 @@ export class KeepaliveScope {
     const held = this.send;
     const turn = verdict.turn;
     const ownTurn = held !== undefined && turn.kind === "send" && turn.send.uuid === held.uuid;
+    // THE SEND THE REWIND WAS PERFORMED FOR HAS BEGUN: whatever the vendor
+    // reports from here was not set off before it.
+    if (turn.kind === "send") this.afterRewind = false;
+    const watching = held !== undefined || this.afterRewind;
     // A TURN THE VENDOR STARTS TO ANSWER THE STOP A KEEP-ALIVE'S REWIND CAUSED
     // IS THE KEEP-ALIVE'S (see `stoppedByRewind`): tagged, so nothing of it is
     // stored or adopted, and the next rewind discards it from the vendor's
     // context like the keep-alive's own answer. Any other turn the vendor
     // starts beside a keep-alive is real work and served.
-    if (held !== undefined && isStoppedTaskNotification(message)) this.stoppedByRewind = true;
-    const spanned = held !== undefined && turn.kind === "vendor" && this.stoppedByRewind;
+    if (watching && isStoppedTaskNotification(message)) this.stoppedByRewind = true;
+    const spanned = watching && turn.kind === "vendor" && this.stoppedByRewind;
     if (ownTurn !== this.running && !verdict.ended) {
       LOGGER.debug(
         { keepalive_pending: held !== undefined, attributed: ownTurn ? "keepalive" : "other" },
@@ -435,7 +663,7 @@ export class KeepaliveScope {
     this.stoppedByRewind = false;
     if (!ownTurn && spanned) {
       LOGGER.info(
-        { keepalive_turn: held.turnId },
+        { keepalive_turn: held?.turnId ?? "", keepalive_pending: held !== undefined },
         "a vendor turn the keep-alive's rewind set off ended; it is the keep-alive's, never stored, and the keep-alive's own turn stays open",
       );
       return { keepalive: true, endsKeepalive: false };

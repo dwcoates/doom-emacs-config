@@ -624,12 +624,12 @@ func TestAMarkedRowWithABlankReasonIsADecodeError(t *testing.T) {
 
 func TestTheMigrationAddsTheNewsDigestHistory(t *testing.T) {
 	// Arrange
-	path := fixtureAt(t, 20)
+	path := fixtureAt(t, 21)
 
 	// Act
 	handle, err := Open(context.Background(), path)
 	if err != nil {
-		t.Fatalf("Open on a layout-20 database: %v", err)
+		t.Fatalf("Open on a layout-21 database: %v", err)
 	}
 	defer handle.Close()
 

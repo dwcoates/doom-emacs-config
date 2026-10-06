@@ -35,6 +35,14 @@ type Git interface {
 	// CreateWorktree creates branch at baseRef and checks it out at
 	// worktreeDir.
 	CreateWorktree(ctx context.Context, repoDir, branch, baseRef, worktreeDir string) error
+	// RestoreWorktree checks an EXISTING branch out at worktreeDir: a deleted
+	// workspace directory brought back from the branch that survived it. It
+	// creates no branch.
+	RestoreWorktree(ctx context.Context, repoDir, worktreeDir, branch string) error
+	// UnregisterMissingWorktree retires the one registration git still holds
+	// for a worktree whose directory is gone, leaving every other
+	// registration alone. Git refuses a locked one.
+	UnregisterMissingWorktree(ctx context.Context, repoDir, worktreeDir string) error
 	// RemoveWorktree removes a worktree, leaving its branch.
 	RemoveWorktree(ctx context.Context, repoDir, worktreeDir string) error
 	// AddDetachedWorktree checks commit out at worktreeDir on a DETACHED HEAD,

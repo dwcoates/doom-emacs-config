@@ -88,6 +88,10 @@ type Report struct {
 	// because closing a row is a registry decision about the workspace, while
 	// an orphan close is about one workspace's unterminated turns.
 	MissingDirClosed []ids.WorkspaceID
+	// MissingDirRestored are the OPEN workspaces whose directory was gone and
+	// whose worktree this boot RECREATED from their surviving branch instead
+	// of closing them (owner ruling, 2026-10-06).
+	MissingDirRestored []ids.WorkspaceID
 	// ClosedServingReleased are the CLOSED workspaces whose row still named a
 	// serving instance (or a spawned shim pid), which this boot released: a
 	// closed workspace is served by no daemon.
@@ -204,6 +208,12 @@ type Deps struct {
 	// the footer, and a footer record for an unbound workspace is an invariant
 	// violation. Required.
 	BindViews func(ctx context.Context) error
+	// RestoreMissingWorktree recreates an open workspace's deleted worktree
+	// from its recorded branch (workspace.Verbs.RestoreMissingWorktree). It
+	// answers true when it restored the tree, false with a nil error when
+	// there is nothing to restore from (the branch is gone, or the workspace
+	// was merged), and an error when git could not act. Required.
+	RestoreMissingWorktree func(ctx context.Context, ws wsm.Workspace) (bool, error)
 	// RunDir is the kernel-lock directory the workspace locks are probed in.
 	RunDir string
 	// JoiningAddress is the incumbent's address when this daemon is a joining
@@ -346,6 +356,8 @@ func New(deps Deps) (Sequence, error) {
 		return nil, missing("a bring-up marker")
 	case deps.BindViews == nil:
 		return nil, missing("a view binder")
+	case deps.RestoreMissingWorktree == nil:
+		return nil, missing("a missing-worktree restorer")
 	case deps.RunDir == "":
 		return nil, missing("a kernel-lock run directory")
 	case deps.Log == nil:

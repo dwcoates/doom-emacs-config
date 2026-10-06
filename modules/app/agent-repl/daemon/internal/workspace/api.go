@@ -125,8 +125,9 @@ type OpenStage int
 
 const (
 	// OpenStageCheckingWorktree: the daemon is confirming the workspace's
-	// directory is still on disk. An open whose directory is gone is refused
-	// at this stage.
+	// directory is still on disk. An open whose directory is gone goes on to
+	// OpenStageRestoringWorktree when its branch survives, and is refused at
+	// this stage when there is nothing to restore it from.
 	OpenStageCheckingWorktree OpenStage = iota
 	// OpenStageStartingSession: the daemon is bringing the session up —
 	// spawning the shim and resuming the vendor conversation. THE SLOW STAGE,
@@ -142,6 +143,11 @@ const (
 	// OpenStageCheckingBuild: the daemon is checking the shim against the
 	// deployed build and bouncing it when stale.
 	OpenStageCheckingBuild
+	// OpenStageRestoringWorktree: the workspace's directory was gone and its
+	// branch still exists, so the daemon is checking the branch out at the
+	// recorded directory again. Reported only by such an open, right after
+	// OpenStageCheckingWorktree.
+	OpenStageRestoringWorktree
 )
 
 // OpenProgress receives an Open's stage transitions in order. The terminal
@@ -223,6 +229,12 @@ type Verbs interface {
 	// workspace is an invariant violation. PublishRegistry binds again, later,
 	// once it has closed the rows whose directory is gone.
 	BindViews(ctx context.Context) error
+	// RestoreMissingWorktree recreates a workspace's deleted worktree from its
+	// recorded branch, as an open of it does, for the boot's missing-directory
+	// step. It answers true when it restored the tree, false with a nil error
+	// when there is nothing to restore from, and an error when git could not
+	// act (already recorded at ERROR).
+	RestoreMissingWorktree(ctx context.Context, ws wsm.Workspace) (bool, error)
 	// Create materializes a new workspace: slug from the initial prompt by the
 	// naming rule, branch, worktree, layout facts recorded, and REGISTRATION
 	// ONLY AFTER MATERIALIZATION.

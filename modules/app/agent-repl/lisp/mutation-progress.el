@@ -54,6 +54,7 @@
     (:open
      (:requested . "opening workspace %s…")
      (:checking-worktree . "checking the workspace's worktree…")
+     (:restoring-worktree . "restoring the workspace's deleted worktree from its branch…")
      (:starting-session . "starting the workspace's session…")
      (:reviving . "reviving the hibernated workspace…")
      (:clearing-closed . "clearing the workspace's closed flag…")

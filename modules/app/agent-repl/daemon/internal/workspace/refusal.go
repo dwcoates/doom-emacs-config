@@ -149,6 +149,11 @@ const (
 	ArmBlankCommand = "blank_command"
 	// ArmSpawnFailed is a bring-up whose shim process would not come up.
 	ArmSpawnFailed = "spawn_failed"
+	// ArmWorktreeUnrestorable is an open of a workspace whose directory is
+	// gone with nothing left to restore it from: its branch no longer exists
+	// (or none was recorded), or its repository is gone too. A gone directory
+	// whose branch survives is never refused; the open restores it.
+	ArmWorktreeUnrestorable = "worktree_unrestorable"
 	// ArmBriefMissing is a composed brief the prompts directory does not hold.
 	ArmBriefMissing = "brief_missing"
 	// ArmOneShotPolicyMissing is a one-shot create in a repository that states

@@ -58,7 +58,7 @@ CREATE TABLE editor_instance (
 );
 `
 
-// newsDigestHistoryDDL is the layout-21 addition (docs/protobuf-design/
+// newsDigestHistoryDDL is the layout-22 addition (docs/protobuf-design/
 // news-digest.md, Addendum "Since last week"): every item of every digest a
 // run made, kept with its run's end and its regression-risk mark, so each run
 // can recompute the week's risks. news_digest_items holds the encoded

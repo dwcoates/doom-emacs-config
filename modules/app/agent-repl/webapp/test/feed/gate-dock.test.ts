@@ -301,7 +301,16 @@ describe("the docked gate's background", () => {
     const rule = /#gate-dock > \.cold-gate\.cold-gate-docked\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
 
     // Assert
-    expect(rule).toContain("background: var(--gate-dock-bg, var(--revival-gate-bg))");
+    expect(rule).toContain("background: var(--input-bg, var(--bg))");
+  });
+
+  it("paints the undocked card the input window's color too, never the revival yellow", async () => {
+    // Arrange
+    const css = (await import("../../src/styles.css?raw")).default;
+    // Act
+    const rule = /\n\.cold-gate\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
+    // Assert
+    expect([rule.includes("background: var(--input-bg, var(--bg))"), rule.includes("revival-gate-bg")]).toEqual([true, false]);
   });
 
   it("records at INFO a dock Emacs never told its background", async () => {

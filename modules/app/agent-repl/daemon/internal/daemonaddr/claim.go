@@ -372,7 +372,16 @@ func (c *claim) AwaitBootClaim(ctx context.Context) error {
 	}
 	if c.bootWait == nil {
 		c.bootWait = make(chan struct{})
-		go c.waitForBootClaim(c.bootWait)
+		// OPENED HERE, under the caller, so nothing the wait does touches
+		// the state directory after this call has answered (blockOnBootLock).
+		path := LockPath(c.addrPath)
+		f, err := openBootLock(path)
+		if err != nil {
+			c.bootWaitErr = err
+			close(c.bootWait)
+		} else {
+			go c.waitForBootClaim(c.bootWait, f, path)
+		}
 	}
 	settled, taken := c.bootWait, c.taken
 	c.mu.Unlock()
@@ -395,8 +404,8 @@ func (c *claim) AwaitBootClaim(ctx context.Context) error {
 // this claim's, then closes SETTLED. A claim taken some other way meanwhile
 // (Publish's own single-shot attempt) or closed meanwhile releases the one
 // this wait took.
-func (c *claim) waitForBootClaim(settled chan struct{}) {
-	lock, err := blockForBootLock(LockPath(c.addrPath))
+func (c *claim) waitForBootClaim(settled chan struct{}, f *os.File, path string) {
+	lock, err := blockOnBootLock(f, path)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	defer close(settled)

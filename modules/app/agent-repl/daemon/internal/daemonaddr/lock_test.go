@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -193,11 +194,33 @@ func TestAcquireBootLockWithinReleasesAClaimItWonAfterTheBound(t *testing.T) {
 	// Assert: a blocking attempt returns, which it can only do once the late
 	// winner has handed the claim back. This waits in the kernel rather than
 	// polling, so nothing here depends on timing.
-	after, err := blockForBootLock(path)
+	f, err := openBootLock(path)
+	if err != nil {
+		t.Fatalf("openBootLock: %v", err)
+	}
+	after, err := blockOnBootLock(f, path)
 	if err != nil {
 		t.Fatalf("the claim was never handed back: %v", err)
 	}
 	after.release()
+}
+
+func TestBlockOnBootLockRefusesADescriptorItCannotLock(t *testing.T) {
+	// Arrange: a lock file whose descriptor is already closed.
+	path := filepath.Join(t.TempDir(), LockName)
+	f, err := openBootLock(path)
+	if err != nil {
+		t.Fatalf("openBootLock: %v", err)
+	}
+	f.Close()
+
+	// Act.
+	_, err = blockOnBootLock(f, path)
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "wait for the boot lock") {
+		t.Fatalf("blockOnBootLock = %v, want the failed wait named", err)
+	}
 }
 
 func TestProbeBootClaimReportsAFreeClaim(t *testing.T) {
