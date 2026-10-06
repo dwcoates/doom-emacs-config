@@ -120,7 +120,17 @@ func TemporaryRegistrationEnv(t testing.TB) []string {
 	if err := os.MkdirAll(daemonTmp, 0o755); err != nil {
 		t.Fatalf("harness: make the daemon's temporary directory %s: %v", daemonTmp, err)
 	}
-	return []string{"TMPDIR=" + daemonTmp, tempdirs.EnvTestRoot + "=" + runRoot}
+	return []string{"TMPDIR=" + daemonTmp, TemporaryRegistrationRootEnv(runRoot)}
+}
+
+// TemporaryRegistrationRootEnv is the ONE spelling of the seam's environment
+// entry, for a launcher whose registered directories live under a root of its
+// own rather than under the run root -- the Emacs layer's per-test sandbox
+// scratch. root must lie strictly beneath a temporary root and must not be
+// the daemon's own TMPDIR (tempdirs.New refuses both); a launcher whose root
+// IS its TMPDIR moves TMPDIR as TemporaryRegistrationEnv does.
+func TemporaryRegistrationRootEnv(root string) string {
+	return tempdirs.EnvTestRoot + "=" + root
 }
 
 // BuildIdentityEnv is the build-identity environment EVERY daemon this suite
