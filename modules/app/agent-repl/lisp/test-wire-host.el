@@ -1198,6 +1198,14 @@ carries."
                   "{\"notYetAdopted\":{}}")
                  '(:cause (:arm :not-yet-adopted :value nil)))))
 
+(ert-deftest agent-repl-test-wire-host-select-error-standing-down-arm ()
+  "SelectWorkspaceError's `standing_down' arm decodes with everything it
+carries."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-select-workspace-error
+                  "{\"standingDown\":{}}")
+                 '(:cause (:arm :standing-down :value nil)))))
+
 (ert-deftest agent-repl-test-wire-host-select-error-unset-cause-is-a-breach ()
   "SelectWorkspaceError with no arm set says nothing actionable, so it is a
 breach."
@@ -1216,7 +1224,7 @@ at."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_select_workspace.pb.go" "SelectWorkspaceError")
                        #'string<)
-                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted")
+                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "standingDown")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-host-adopt-error-unknown-workspace-arm ()
