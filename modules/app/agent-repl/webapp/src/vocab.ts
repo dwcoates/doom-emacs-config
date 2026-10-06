@@ -59,11 +59,19 @@ const MERGE_GLYPHS: Readonly<Record<string, string>> = renderColors.merge_glyphs
 const FAILURE_SIDES: Readonly<Record<string, Color>> = renderColors.failure_sides as Record<string, Color>;
 const FEED_SUBAGENT_DOT: Readonly<Record<string, Color>> = renderColors.feed_subagent_dot as Record<string, Color>;
 const FEED_SHELL_DOT: Readonly<Record<string, Color>> = renderColors.feed_shell_dot as Record<string, Color>;
+const FEED_OUTCOME_MARKER: Readonly<Record<string, Color>> =
+  renderColors.feed_outcome_marker as Record<string, Color>;
+const FEED_OUTCOME_MARKER_GLYPHS: Readonly<Record<string, string>> = renderColors.feed_outcome_marker_glyphs;
 
 /** Every `feed_subagent_dot` key, for the row-for-row assertion. */
 export const FEED_SUBAGENT_DOT_KEYS: readonly string[] = Object.keys(FEED_SUBAGENT_DOT);
 /** Every `feed_shell_dot` key, for the row-for-row assertion. */
 export const FEED_SHELL_DOT_KEYS: readonly string[] = Object.keys(FEED_SHELL_DOT);
+
+/** Every `feed_outcome_marker` key, for the row-for-row assertion. */
+export const FEED_OUTCOME_MARKER_KEYS: readonly string[] = Object.keys(FEED_OUTCOME_MARKER);
+/** Every `feed_outcome_marker_glyphs` key, for the same assertion. */
+export const FEED_OUTCOME_MARKER_GLYPH_KEYS: readonly string[] = Object.keys(FEED_OUTCOME_MARKER_GLYPHS);
 
 /** The glyph NAME the feed's merge bubble head takes. */
 export const FEED_MERGE_HEAD_GLYPH: string = renderColors.feed_merge_head_glyph;
@@ -114,9 +122,9 @@ const COMPOSER_OPEN_SUBSTATUSES: Readonly<Record<string, readonly string[]>> =
  * MalformedView, exactly as it is for the color itself.
  *
  * The one way a closing color leaves the composer open is a substatus
- * DECLARED in `render-colors.json#composer_open_substatuses`; none is today
- * (the one there was, `blocked · api_retrying`, became the turquoise
- * `vendor_fault · api_retrying`, open by its color). SUBSTATUS is the substatus arm the footer drew, in the generated
+ * DECLARED in `render-colors.json#composer_open_substatuses`: today
+ * `agent_repl_fault · turn_died` alone (owner ruling, 2026-10-06), whose fault
+ * the next prompt ends. SUBSTATUS is the substatus arm the footer drew, in the generated
  * spelling, or undefined for an arm with none.
  */
 export function composerClosedFor(arm: string, substatus?: string): boolean {
@@ -194,6 +202,30 @@ export function feedSubagentDotColor(state: string): Color {
 /** The same for a detached shell bubble's head dot. */
 export function feedShellDotColor(state: string): Color {
   return lookup(FEED_SHELL_DOT, state, "render-colors.json#feed_shell_dot");
+}
+
+/**
+ * The color an outcome marker's FAMILY paints its glyph and left edge with
+ * (`frontend.v1.FeedOutcomeMarker.family`, generated spelling): `none` for
+ * the neutral family, which the stylesheet draws grey.
+ */
+export function feedOutcomeMarkerColor(family: string): Color {
+  return lookup(FEED_OUTCOME_MARKER, family, "render-colors.json#feed_outcome_marker");
+}
+
+/**
+ * The glyph NAME an outcome marker's family draws ("stop", "diamond",
+ * "cross"); which character draws it is the surface's own business.
+ */
+export function feedOutcomeMarkerGlyph(family: string): string {
+  const name = FEED_OUTCOME_MARKER_GLYPHS[protoArmName(family)];
+  if (name === undefined) {
+    throw new MalformedView(
+      "render-colors.json#feed_outcome_marker_glyphs",
+      `family '${family}' has no glyph; a marker without one cannot report itself`,
+    );
+  }
+  return name;
 }
 
 const PAINT_SYNTAX: readonly string[] = paintClasses.syntax;

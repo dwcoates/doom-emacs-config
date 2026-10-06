@@ -41,7 +41,7 @@ func TestTurnEndArmReadsTheLadder(t *testing.T) {
 	}{
 		{name: "a completion is done", close: wsm.CloseCompleted, failure: ladder.NoFailure, want: armDone},
 		{name: "an interrupt is interrupted", close: wsm.CloseKilled, failure: ladder.NoFailure, want: armInterrupted},
-		{name: "a failure is turn_failed", close: wsm.CloseFailed, failure: ladder.TurnFailed, want: armTurnFailed},
+		{name: "a failure is turn_failed", close: wsm.CloseFailed, failure: ladder.VendorFailed, want: armTurnFailed},
 		{name: "an expected stop is done", close: wsm.CloseFailed, failure: ladder.ExpectedStop, want: armDone},
 		{name: "an unknown close keeps done", close: wsm.TurnClose(99), failure: ladder.NoFailure, want: armDone},
 	}

@@ -227,20 +227,18 @@ func (r *resolver) drawContextCut(s *wsState, agent *conversationv1.AgentId, cut
 		}
 	case *conversationv1.ContextCut_CompactionFailed:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawContextCut", "branch": "case *conversationv1.ContextCut_CompactionFailed"})
-		// NOTHING WAS CUT, and the divider says so IN THE SLOT the compacted
-		// divider would have taken (landing 8): a compaction was offered and
-		// did not happen, which is neither a compaction nor silence. `tokens`
-		// stays UNSET — no size changed. It is still a WARNING, and it still
-		// rides the turn's evidence, because the terminal is where a reader
-		// looks when they ask what went wrong.
+		// NOTHING WAS CUT, and the row says so as its OUTCOME MARKER ALONE
+		// (owner ruling, 2026-10-06): no divider, which would read as a cut,
+		// and no rider on the turn's headline. `tokens` stays UNSET — no size
+		// changed. It is still a WARNING; the footer's context-budget line
+		// says the context is as it was.
 		reason := arm.CompactionFailed.GetError()
-		r.addEvidence(s, turnEvidenceLine{text: "a compaction failed and nothing was cut: " + reason})
 		log.Warn("daemon.feed.compaction_failed",
-			"a compaction failed, so the divider says nothing was cut; it also rides the turn's evidence",
+			"a compaction failed and nothing was cut; the feed draws its outcome marker",
 			dlog.Context{"agent": agent.GetValue(), "error": reason})
-		separation.Label = &frontendv1.FeedSessionSeparationLabel{Text: "compaction failed"}
+		separation.Label = &frontendv1.FeedSessionSeparationLabel{Text: markerLabelCompactionFailed}
 		separation.Kind = &frontendv1.FeedSessionSeparation_CompactionFailed{
-			CompactionFailed: &frontendv1.FeedContextCutCompactionFailed{Error: reason},
+			CompactionFailed: &frontendv1.FeedContextCutCompactionFailed{Error: reason, Marker: r.compactionFailedMarker(s, reason)},
 		}
 	default:
 		log.Warn("daemon.feed.context_cut_unset",

@@ -3571,11 +3571,17 @@ test can assert the re-assertion left an already-correct frame alone."
 
 (ert-deftest agent-repl-test-status-the-blue-band-is-the-unusable-workspace ()
   "Blue is every way the workspace is UNUSABLE right now (owner ruling,
-2026-10-02): an agent-repl fault and a network fault."
+2026-10-02): an agent-repl fault and a network fault.  A turn that died
+with agent-repl's machinery is one (owner ruling, 2026-10-06)."
   ;; Act / Assert
   (should (equal (sort (agent-repl-test-status--arms-taking "blue") #'string<)
-                 (sort (list :init :severed :dead :start-failed :network-fault)
+                 (sort (list :init :severed :dead :start-failed :turn-died :network-fault)
                        #'string<))))
+
+(ert-deftest agent-repl-test-tab-spec-turn-died-is-blue ()
+  "A turn-died tab paints BLUE on the tab bar, unselected."
+  (should (equal (plist-get (agent-repl--tab-spec :turn-died nil) :bg)
+                 agent-repl--color-init-blue)))
 
 (ert-deftest agent-repl-test-status-the-turquoise-band-is-the-usable-fault ()
   "Turquoise is every way something went wrong while the workspace stays

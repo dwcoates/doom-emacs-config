@@ -536,7 +536,7 @@ async function died(scenario: string): Promise<HTMLElement> {
  * gives a world of its own.
  */
 it(
-  "names an unexpected eof on the turn-error line",
+  "names an unexpected eof on the turn's agent-repl outcome marker",
   async () => {
     // Arrange / Act — `!query-eof` ends the agent's stream without a close.
     const row = await died("query-eof");
@@ -545,9 +545,15 @@ it(
     expect(row.querySelector("[data-turn-error]")?.getAttribute("data-turn-error")).toBe(
       "queryDied",
     );
-    expect(row.querySelector("[data-query-cause]")?.getAttribute("data-query-cause")).toBe(
-      "unexpectedEof",
+    // The ending is agent-repl's outcome marker (owner ruling, 2026-10-06),
+    // its expansion naming the query's death by the stream's end; an eof
+    // throws nothing.
+    const marker = row.querySelector(".outcome-marker");
+    expect(marker?.getAttribute("data-family")).toBe("agentReplFault");
+    expect(marker?.querySelector('[data-line="what-died"] .outcome-marker-value')?.textContent).toContain(
+      "stream ended without closing",
     );
+    expect(marker?.querySelector('[data-line="thrown"]')).toBeNull();
   },
   TURN_TEST_MS,
 );

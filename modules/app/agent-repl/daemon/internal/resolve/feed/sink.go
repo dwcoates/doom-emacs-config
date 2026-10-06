@@ -341,13 +341,13 @@ func (r *resolver) OnApiError(ws ids.WorkspaceID, agent *conversationv1.AgentId,
 		// A FAILURE OF THE FORK'S INHERITED PAST happened in the parent, long
 		// ago: it is that turn's evidence, replayed as a page replays it, and
 		// nothing is failing now.
-		r.drawInherited(s, func() { r.addEvidence(s, apiErrorEvidence(failed.GetMessage())) })
+		r.drawInherited(s, func() { r.addEvidence(s, apiErrorEvidence(failed)) })
 		r.logger(ws).Debug("daemon.feed.inherited_api_error",
 			"a vendor request failure of a fork's inherited past was recorded as that turn's evidence",
 			dlog.Context{"agent": agent.GetValue(), "turn": string(stamp)})
 		return
 	}
-	r.addEvidence(s, apiErrorEvidence(failed.GetMessage()))
+	r.addEvidence(s, apiErrorEvidence(failed))
 	// DEBUG, NOT WARN: the failure is OWNED by the session watcher, which
 	// states it once at WARN as it routes it here (daemon.sessionwatcher.
 	// api_error). This record is the feed's own branch outcome — the line it
@@ -373,6 +373,9 @@ type turnEvidenceLine struct {
 	// apiMessage is that failure's own vendor sentence, which may be empty
 	// when the vendor stated none.
 	apiMessage string
+	// retryAttempt is the retry the vendor announced it makes next for that
+	// failure (conversationv1.ApiRetry.attempt), 0 when it announced none.
+	retryAttempt uint32
 }
 
 // apiErrorEvidence words a mid-turn vendor failure as evidence.
@@ -381,12 +384,13 @@ type turnEvidenceLine struct {
 // both record this line, and two copies of the sentence would be two contracts
 // that could drift apart between a turn watched live and the same turn read
 // back.
-func apiErrorEvidence(message string) turnEvidenceLine {
+func apiErrorEvidence(failed *conversationv1.ApiRequestFailed) turnEvidenceLine {
+	message := failed.GetMessage()
 	line := "a vendor request failed mid-turn and the turn went on"
 	if message != "" {
 		line = line + ": " + message
 	}
-	return turnEvidenceLine{text: line, apiFailure: true, apiMessage: message}
+	return turnEvidenceLine{text: line, apiFailure: true, apiMessage: message, retryAttempt: failed.GetRetry().GetAttempt()}
 }
 
 // addEvidence attaches a line to the turn in flight, if one is.
@@ -501,6 +505,11 @@ func (r *resolver) OnSessionUpdate(ws ids.WorkspaceID, update *conversationv1.Se
 	s := r.state(ws)
 	log := r.logger(ws)
 	switch update.GetUpdate().(type) {
+	case *conversationv1.SessionUpdate_ModelChanged:
+		// THE MODEL A LIVE ENDING'S MARKER NAMES (marker.go); no row changes.
+		s.modelOf(update)
+		log.Debug("daemon.feed.session_update_model", "the feed took the session's model change",
+			dlog.Context{"model": s.model})
 	case *conversationv1.SessionUpdate_QueryDied:
 		r.logger(ws).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "OnSessionUpdate", "branch": "case *conversationv1.SessionUpdate_QueryDied"})
 		// The query died out from under the turn. A consumer with no stream

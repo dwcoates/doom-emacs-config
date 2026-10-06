@@ -166,6 +166,25 @@ The footer's `disconnected` status has three vendor substatuses for a Claude SDK
   - You only want the page reloaded: use `SPC o l`.
 - **It is not a routine action.** A freshly launched shim or page may speak a newer API than the daemon that is still running, so reach for it only when a workspace is stuck.
 
+## Outcome markers in the feed
+
+An event that is not a message is drawn in the feed as an **outcome marker**: a small pill, placed where the event happened. A turn's ending sits after that turn's last output.
+
+- **What a marker says:**
+  - A glyph, a short label, and sometimes a detail: `◼ interrupted`, `◆ vendor error · rate limited`, `✕ agent-repl · process died`.
+  - The glyph and the thin left edge carry the color: grey for your own acts and hooks, turquoise when the vendor ended or refused the work, blue when agent-repl's own machinery died.
+  - The same marker stands for an interrupted turn, a Stop hook that ended the run, a permission you denied, a plan episode that broke, and a compaction that failed.
+- **Opening a fault marker:**
+  - Click a turquoise or blue marker (it draws a `›` chevron) to open its details in place; click it again to close them.
+  - A grey marker has no chevron and does not open.
+  - A vendor fault shows when it happened, the vendor's error type and message, the retries the vendor made, a countdown to its stated wait, and the model and account the turn ran on, each only when known.
+  - An agent-repl fault shows when it happened, what died (the query or the agent process), what the query threw, and whether the session started again afterwards.
+- **Its actions:**
+  - **sign in** appears when the vendor rejected the credential or the organization; it opens the same login flow as the topbar's account cell.
+  - **resend this prompt** appears when the turn produced nothing; it sends the same prompt again as a new turn.
+  - A refused resend says why beside the button.
+- **The workspace status carries the fault too.** Until the next turn starts, the footer reads `vendor fault · vendor error` (or the account block's own step) or `agent repl fault · turn died`, with the cause on its activity line, and the sidebar dot and the tab take the same color. The composer stays open, so the next prompt is what clears it.
+
 ## The editor popup
 
 Every file or directory agent-repl shows you opens in **the editor popup**.

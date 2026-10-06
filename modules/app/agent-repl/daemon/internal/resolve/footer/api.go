@@ -26,6 +26,7 @@ import (
 	"claude-repld/internal/publish"
 	"claude-repld/internal/sessionwatcher"
 	"claude-repld/internal/vocab"
+	"claude-repld/internal/wsm"
 )
 
 // MergeFacts is what the merge orchestrator tells the footer and the sidebar
@@ -384,6 +385,12 @@ type Resolver interface {
 	// SetInterrupting fires the waiting-interrupting status the MOMENT an
 	// interrupt registers, before the real turn end arrives.
 	SetInterrupting(ws ids.WorkspaceID, on bool)
+	// SetTurnEnded takes the close the prompt queue's door recorded for the
+	// last turn, beside the roster's own SetTurnEnded, and raises the TURN
+	// FAULT that close and the turn's recorded failure resolve to
+	// (ladder.ResolveTurnFault): `vendor_fault · vendor_error` or
+	// `agent_repl_fault · turn_died`, standing until the next turn starts.
+	SetTurnEnded(ws ids.WorkspaceID, how wsm.TurnClose)
 	// OpenFault installs one standing daemon fault. An EMPTY workspace is a
 	// DAEMON-SCOPED fault, which stands on every workspace's strip because it
 	// is every workspace that is owed the service the daemon cannot give.
