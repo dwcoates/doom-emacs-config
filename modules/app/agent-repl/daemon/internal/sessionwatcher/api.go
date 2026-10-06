@@ -244,11 +244,6 @@ type FooterSink interface {
 	// stream carried the frame, and the spawning call's stream is never read
 	// as a statement about a run that has already left the turn.
 	OnSubagent(ws ids.WorkspaceID, work *conversationv1.DetachedWorkId, sub *conversationv1.AgentSubagent)
-	// OnContextBudgetWarning is the vendor's own context-budget warning. It
-	// is an AGENT-PLANE fact (a page line of the agent's book, sidecar-
-	// produced), never a session-stream event, so it arrives addressed to the
-	// agent whose transcript carried it.
-	OnContextBudgetWarning(ws ids.WorkspaceID, agent *conversationv1.AgentId, w *conversationv1.ContextBudgetWarning)
 	// OnSessionUpdate carries context usage, the rate-limit status and the
 	// terminals the footer reflects.
 	OnSessionUpdate(ws ids.WorkspaceID, update *conversationv1.SessionUpdate)
