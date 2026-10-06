@@ -309,11 +309,16 @@ func (s *sidecar) resolveTarget(target discover.Target, now time.Time) (discover
 // cannot be attributed, which is the one an operator must look at.
 const reasonTranscriptVanished = "transcript_vanished"
 
+// reasonFirstCWDFallback is the `resolve-transcript-workspace` record's
+// discriminator for a transcript attributed to its FIRST cwd because none of
+// its cwds encodes to the project folder the file lives in.
+const reasonFirstCWDFallback = "first_cwd_fallback"
+
 func (s *sidecar) resolveTranscriptWorkspace(target discover.Target) (discover.Target, bool) {
 	key := target.ConfigRoot + "\x00" + target.ProjectKey + "\x00" + target.SessionID
 	workspace, ok := s.workspaceBySession[key]
 	if !ok {
-		dir, id, err := discover.ResolveWorkspace(target)
+		attribution, err := discover.ResolveWorkspace(target)
 		if err != nil {
 			detail := err.Error()
 			ctx := logging.Context{
@@ -364,13 +369,24 @@ func (s *sidecar) resolveTranscriptWorkspace(target discover.Target) (discover.T
 			s.log.With(ctx).Log("transcript held: workspace attribution is required before any bytes are read: %v", err)
 			return discover.Target{}, false
 		}
+		dir, id := attribution.Dir, attribution.ID
 		workspace = workspaceAttribution{dir: dir, id: id}
 		s.workspaceBySession[key] = workspace
 		delete(s.workspaceFailures, key)
-		s.log.With(logging.Context{
-			Operation: "resolve-transcript-workspace", Path: target.Path,
-			WorkspaceDir: dir, WorkspaceID: id, ClaudeSessionID: target.SessionID,
-		}).LogVerbose("workspace attribution resolved from the main transcript")
+		if attribution.FirstCWDFallback {
+			// Stated ONCE PER FILE: the attribution is cached under the
+			// session key just above, so no rescan resolves this file again.
+			s.log.With(logging.Context{
+				Operation: "resolve-transcript-workspace", Path: target.Path,
+				WorkspaceDir: dir, WorkspaceID: id, ClaudeSessionID: target.SessionID,
+				Reason: reasonFirstCWDFallback, Level: "info",
+			}).Log("no cwd in the transcript encodes to the project folder it lives in, so it is attributed to its first cwd")
+		} else {
+			s.log.With(logging.Context{
+				Operation: "resolve-transcript-workspace", Path: target.Path,
+				WorkspaceDir: dir, WorkspaceID: id, ClaudeSessionID: target.SessionID,
+			}).LogVerbose("workspace attribution resolved from the main transcript")
+		}
 	}
 	if workspace.dir == "" || workspace.id == "" {
 		panic(fmt.Sprintf("sidecar: cached workspace attribution for %q is incomplete", key))
