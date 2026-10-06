@@ -770,6 +770,16 @@ This daemon released the workspace to a successor; dial `address'."
 A joining daemon has not finished adopting this workspace yet."
   (agent-repl-wire--decode-empty "SelectWorkspaceNotYetAdopted" value))
 
+(defun agent-repl-wire-decode-select-workspace-standing-down (value)
+  "Decode VALUE as the empty message `SelectWorkspaceStandingDown'.
+This daemon is standing down and starts no session; the selection is
+recorded and the client re-asserts it on the daemon that serves next."
+  (agent-repl-wire--decode-empty "SelectWorkspaceStandingDown" value))
+
+(defun agent-repl-wire-decode-select-workspace-error-standing-down (value)
+  "Decode SelectWorkspaceError's `standing_down' cause arm from VALUE."
+  (agent-repl-wire-decode-select-workspace-standing-down value))
+
 (defun agent-repl-wire-decode-select-workspace-error-unknown-workspace (value)
   "Decode SelectWorkspaceError's `unknown_workspace' cause arm from VALUE."
   (agent-repl-wire-decode-select-workspace-unknown-workspace value))
@@ -791,13 +801,14 @@ A joining daemon has not finished adopting this workspace yet."
 THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
 arm this codec does not know is refused as an unknown field."
   (let ((object (agent-repl-wire--object "SelectWorkspaceError" value)))
-    (agent-repl-wire--check-keys "SelectWorkspaceError" object '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted))
+    (agent-repl-wire--check-keys "SelectWorkspaceError" object '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted standingDown))
     (agent-repl-wire--decode-oneof
      "SelectWorkspaceError" 'cause object
      '((unknownWorkspace :unknown-workspace agent-repl-wire-decode-select-workspace-error-unknown-workspace)
        (workspaceRefMismatch :workspace-ref-mismatch agent-repl-wire-decode-select-workspace-error-workspace-ref-mismatch)
        (transferringAway :transferring-away agent-repl-wire-decode-select-workspace-error-transferring-away)
-       (notYetAdopted :not-yet-adopted agent-repl-wire-decode-select-workspace-error-not-yet-adopted)))))
+       (notYetAdopted :not-yet-adopted agent-repl-wire-decode-select-workspace-error-not-yet-adopted)
+       (standingDown :standing-down agent-repl-wire-decode-select-workspace-error-standing-down)))))
 
 (defun agent-repl-wire-decode-select-workspace-error (value)
   "Decode VALUE as `SelectWorkspaceError', a plist (:cause ONEOF)."

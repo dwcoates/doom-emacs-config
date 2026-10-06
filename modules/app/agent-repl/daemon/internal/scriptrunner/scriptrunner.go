@@ -58,9 +58,23 @@ func cleanEnv(env []string) []string {
 
 // killGroup SIGKILLs the process group the script leads. A group already gone
 // is the state the kill was asked to reach.
-func killGroup(pid int) error {
-	if err := syscall.Kill(-pid, syscall.SIGKILL); err != nil {
-		if errors.Is(err, syscall.ESRCH) {
+func killGroup(pid int) error { return killGroupWith(syscall.Kill, pid) }
+
+// killGroupWith is killGroup over an injected kill, so the answers a kernel
+// gives for a finished group can be driven in a test.
+//
+// TWO ANSWERS MEAN THE GROUP HAS FINISHED. ESRCH is a group with no members at
+// all. EPERM is what darwin answers for a group whose members have all exited
+// and wait to be reaped: the script finished just as its caller cancelled it.
+// The group is this daemon's own child's, created with Setpgid and running as
+// this user, so EPERM cannot mean a live member this process may not signal.
+// Returning either as an error made exec report "canceling Cmd: operation not
+// permitted" for a run that had in fact ended, logged at ERROR as a script that
+// could not be run (2026-10-06, a daemon exiting during its boot's service
+// check).
+func killGroupWith(kill func(int, syscall.Signal) error, pid int) error {
+	if err := kill(-pid, syscall.SIGKILL); err != nil {
+		if errors.Is(err, syscall.ESRCH) || errors.Is(err, syscall.EPERM) {
 			return os.ErrProcessDone
 		}
 		return err

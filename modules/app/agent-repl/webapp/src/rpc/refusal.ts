@@ -34,6 +34,16 @@ export const CROSS_CUTTING_REFUSAL_ARMS: readonly string[] = [
 ];
 
 /**
+ * SelectWorkspace's EXPECTED ANSWER, which is not a refusal: a daemon that is
+ * standing down stamps the selection and starts no session for it, and the
+ * daemon that serves next takes the selection over. Every SelectWorkspace call
+ * site logs it at INFO with this sentence and draws nothing.
+ */
+export const SELECT_WORKSPACE_EXPECTED_ARMS: Readonly<Record<string, string>> = {
+  standingDown: "the daemon is standing down; the daemon that serves next takes the selection",
+};
+
+/**
  * A set arm of some `<Rpc>Error`'s cause oneof, as narrowly as this file can
  * type it: every endpoint's cause is a different union, so the shared helper
  * takes the shape they all have and validates the payload it reads.
