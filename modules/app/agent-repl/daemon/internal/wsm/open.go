@@ -97,6 +97,13 @@ type store struct {
 	// opens, the promotion's included, carries synchronous=OFF.
 	unsynced bool
 
+	// heldMu guards heldUsage: the account usage a READ-ONLY handle was
+	// asked to record, latest per account root, written at the promotion
+	// (SetAccountUsage). Holders also hold mu's read side, so the promotion,
+	// which holds mu exclusively while it writes them, sees every one.
+	heldMu    sync.Mutex
+	heldUsage map[string]AccountUsage
+
 	// leaseMu guards owned.
 	leaseMu sync.Mutex
 	// owned is every lease THIS HANDLE acquired and has not released. One
@@ -482,6 +489,9 @@ func (s *store) Promote(ctx context.Context) error {
 		})
 	}
 	s.log.Info(op, "promoted the state handle to writing", dlog.Context{"path": s.path})
+	// STILL UNDER THE EXCLUSIVE LOCK, so a usage write that arrives now
+	// waits and lands after the held one it supersedes, never before it.
+	s.writeHeldUsageLocked(ctx)
 	return nil
 }
 
