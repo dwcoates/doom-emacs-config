@@ -37,11 +37,11 @@ func (c *Converter) attachmentLine(record map[string]any, at Attribution) []*sto
 		return []*storev1.StoreEntry{c.injectedMemory(attachment, at, env, agent)}
 	case "dynamic_skill", "invoked_skills", "skill_listing":
 		return []*storev1.StoreEntry{c.injectedSkills(kind, attachment, at, env, agent)}
-	case contextBudgetAttachment:
-		return []*storev1.StoreEntry{c.contextBudgetWarning(attachment, at, env, agent)}
 	default:
 		// Context-cut exclusions and CLI machinery: understood, and deliberately
-		// not carried into a vendor-agnostic feed.
+		// not carried into a vendor-agnostic feed. A `context_budget_warning`
+		// lands here too: no footer line warns that the context is nearly full
+		// (owner ruling, 2026-10-06), and the real CLI never writes one.
 		c.log.With(at.ctxFor("withhold")).
 			LogVerbose("attachment/%s withheld as vendor_specific", kind)
 		return []*storev1.StoreEntry{VendorSpecificEntry(at, "attachment/"+kind, record)}
@@ -218,64 +218,6 @@ func (c *Converter) injectedMemory(attachment map[string]any, at Attribution, en
 	}})
 	activity.ActivityId = activityID(unitID)
 	return c.landFrame(at, agent, ActivityKey(unitID), "context_injected", activityFrame(agent, activity))
-}
-
-// ---------------------------------------------------------------------------
-// the context-budget warning
-// ---------------------------------------------------------------------------
-
-// contextBudgetAttachment is the vendor's attachment type for the warning it
-// injects into the prompt as the context window fills.
-//
-// SYNTHETIC, AND SAID SO. No capture in testdata/corpus or in the checked-in
-// transcript carries this record, so the spelling is taken from the proto's
-// description of it (a prompt-injected attachment whose text is the warning)
-// rather than from an observed line. Checked against the real CLI (2.1.289 and
-// the SDK's bundled build) and every transcript under the owner's config
-// roots on 2026-10-06: neither contains this type, nor any other
-// budget-warning attachment. It is the one conversion here not grounded
-// in a real fixture, and it is a CONCERN for the next capture run: if the vendor
-// names the type differently, this converter withholds the record as
-// vendor_specific like any other unmodeled attachment, which is a visible
-// residue entry rather than a silent loss.
-const contextBudgetAttachment = "context_budget_warning"
-
-// contextBudgetWarning converts the vendor's context-budget warning.
-//
-// A FILE-PLANE FACT WITH NO STREAM PRODUCER: it exists only as an attachment
-// line in the agent's transcript, so the sidecar is its ONLY producer (landing 4
-// moved it off SessionUpdate, which had no producer on the live session stream).
-// It is a page line of the agent's own book, instantaneous, with no lifecycle:
-// the footer's activity line draws it and nothing settles it later.
-func (c *Converter) contextBudgetWarning(attachment map[string]any, at Attribution, env envelope, agent string) *storev1.StoreEntry {
-	// The vendor composes the sentence; no structured figure rides the record,
-	// so the text is carried verbatim and nothing is parsed out of it.
-	//
-	// ONE READING, SHARED WITH THE SHIM: `content`, else `text`, exactly as the
-	// shim's convertContextBudgetWarning reads it and as the mocked vendor
-	// writes it. The real CLI writes no budget-warning record under any
-	// spelling (its low-context warning is a terminal status line, never a
-	// transcript record), so no observed shape outranks this one; two readers
-	// guessing different fields was what left the warning undrawn.
-	text := firstNonEmpty(
-		str(attachment["content"]),
-		str(attachment["text"]),
-	)
-	key := SessionKey(contextBudgetAttachment, env.uuid)
-	if text == "" {
-		// The record's whole content IS the sentence, so one without it carries
-		// nothing to draw. Stored whole rather than landed as an empty warning.
-		c.log.With(at.ctxWarn("context-budget-warning")).With(logging.Context{UpsertKey: key}).
-			Log("context-budget warning carries no text; there is nothing to draw and the record is stored as vendor_specific")
-		return VendorSpecificEntry(at, "attachment/"+contextBudgetAttachment, attachment)
-	}
-	c.log.With(at.ctxFor("context-budget-warning")).With(logging.Context{UpsertKey: key}).
-		LogVerbose("context-budget warning injected chars=%d", len(text))
-	return c.landFrame(at, agent, key, "context_budget_warning", updateFrame(agent, &conversationv1.AgentUpdate{
-		Update: &conversationv1.AgentUpdate_ContextBudgetWarning{
-			ContextBudgetWarning: &conversationv1.ContextBudgetWarning{Text: text},
-		},
-	}))
 }
 
 // injectedSkills carries skills discovered or invoked WITHOUT a tool call.

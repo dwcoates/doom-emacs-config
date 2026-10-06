@@ -54,9 +54,6 @@ type mockScenario struct {
 	// APIError — the scenario writes a `system:api_error` record, so an
 	// `AgentUpdate.api_error` page line must land as MID-TURN evidence.
 	APIError bool
-	// BudgetWarning — the scenario writes the vendor's context-budget warning,
-	// so an `AgentUpdate.context_budget_warning` carrying its text must land.
-	BudgetWarning bool
 	// KeepAlive — the prompt carries the keep-alive marker, so no record of the
 	// turn is stored and NO page line appears.
 	KeepAlive bool
@@ -147,9 +144,6 @@ func TestMockScenarios(t *testing.T) {
 			}
 			if tc.APIError {
 				requireAPIErrorPageLine(t, tc.Prompt, entries)
-			}
-			if tc.BudgetWarning {
-				requireContextBudgetWarning(t, tc.Prompt, entries)
 			}
 			if tc.KeepAlive {
 				requireKeepAliveStoresNothing(t, tc.Prompt, entries)
@@ -256,9 +250,6 @@ var mockScenarios = []mockScenario{
 	{Prompt: "!usage-utilization-unavailable", Wait: waitTerminal},
 	{Prompt: "!usage-sampling-failure", Wait: waitTerminal},
 	{Prompt: "!rate-limit", Wait: waitTerminal},
-	{
-		Prompt: "!context-budget-warning", Wait: waitTerminal, BudgetWarning: true,
-	},
 	{Prompt: "!compact", Wait: waitTerminal, ContextCut: true},
 	{Prompt: "!compact-auto", Wait: waitTerminal, ContextCut: true},
 	{Prompt: "!compact-failed", Wait: waitTerminal},

@@ -14,50 +14,11 @@ import (
 //
 // The pinned SDK stream carries no attachment records at all, so these facts
 // exist on the file plane or nowhere: AgentContextInjected (the memory files and
-// skills the vendor silently pulled in), the write/edit `diagnostics`
-// consequence, and AgentUpdate.context_budget_warning. If the sidecar stops
+// skills the vendor silently pulled in) and the write/edit `diagnostics`
+// consequence. If the sidecar stops
 // producing one, nothing else starts — and no error is raised anywhere, because
 // a withheld attachment is an ordinary outcome. These subjects are what break
 // that silence end to end, against the real binary and the real store.
-
-// TestTheContextBudgetWarningReachesTheAgentsBook drives the vendor's
-// context-budget attachment through the sidecar and reads it back out of the
-// store as a page line of the agent's own book.
-func TestTheContextBudgetWarningReachesTheAgentsBook(t *testing.T) {
-	t.Parallel()
-	// Arrange.
-	ctx, cancel := testContext(t)
-	defer cancel()
-	store := startRealStore(t)
-	tree := newVendorTree(t)
-	captured := loadCapturedSession(t)
-	cwd := "/Users/dodgecoates/context-budget-probe"
-	slug := cwdSlug(cwd)
-	session := "c0b0c0b0-c0b0-4c0b-8c0b-c0b0c0b0c0b0"
-	warning := retargetSession(t,
-		decodeRecord(t, corpusLine(t, "attachments/context_budget_warning.jsonl", 0)), session, cwd)
-
-	// Act: a real prompt so the book exists, then the warning.
-	startSidecar(t, defaultSidecarOptions(t, store.Socket, tree))
-	g := newGrowingFile(t, tree.sessionPath(slug, session))
-	for _, line := range captured.Lines[:8] {
-		g.AppendLine(encodeRecord(t, retargetSession(t, decodeRecord(t, line), session, cwd)))
-	}
-	g.AppendLine(encodeRecord(t, warning))
-
-	// Assert.
-	lines := awaitBookLine(ctx, t, store.Client, session, func(line *storev1.StorePageLine) bool {
-		return frameOf(line).GetUpdate().GetContextBudgetWarning() != nil
-	})
-	got := frameOf(lines).GetUpdate().GetContextBudgetWarning()
-	if !strings.Contains(got.GetText(), "Context low") {
-		t.Errorf("the warning carries text %q, wanted the vendor's sentence verbatim", got.GetText())
-	}
-	if lines.GetPageAgentId().GetValue() != session {
-		t.Errorf("the warning landed in book %q, wanted the agent's own book %q",
-			lines.GetPageAgentId().GetValue(), session)
-	}
-}
 
 // TestInjectedContextReachesTheAgentsBook asserts the other two sole-producer
 // facts arrive as page lines: the memory files and skills the vendor pulled in

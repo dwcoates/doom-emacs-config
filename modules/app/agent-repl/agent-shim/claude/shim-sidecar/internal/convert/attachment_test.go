@@ -288,11 +288,10 @@ func TestDiagnosticsWithNoObservedChangeAreRecordedAtDebug(t *testing.T) {
 	}
 }
 
-func TestTheContextBudgetWarningLandsAsAPageLineOfTheAgentsBook(t *testing.T) {
-	// Arrange. A FILE-PLANE FACT WITH NO STREAM PRODUCER: it exists only as an
-	// attachment line in the agent's transcript, so the sidecar is its only
-	// producer (landing 4 moved it off SessionUpdate, which nothing on the live
-	// session stream ever wrote).
+func TestAContextBudgetWarningIsWithheldAsVendorSpecific(t *testing.T) {
+	// Arrange. RETIRED (owner ruling, 2026-10-06): no footer line warns that
+	// the context is nearly full, and the real CLI never writes this record, so
+	// it is withheld like any other unmodeled attachment rather than served.
 	c := newTestConverter(t)
 	body := `{"type":"context_budget_warning","text":"Context low (23% remaining)"}`
 
@@ -303,94 +302,11 @@ func TestTheContextBudgetWarningLandsAsAPageLineOfTheAgentsBook(t *testing.T) {
 	if len(entries) != 1 {
 		t.Fatalf("entries = %d, want 1: keys=%v", len(entries), allKeys(entries))
 	}
-	line := entries[0].GetAgentUpdate().GetServeableFrame()
-	if line == nil {
-		t.Fatalf("the warning must be a PAGE LINE of the agent's book: %v", entries[0])
-	}
-	warning := line.GetAgentItem().GetAgentFrame().GetUpdate().GetContextBudgetWarning()
-	if warning == nil {
-		t.Fatalf("the warning did not land on AgentUpdate.context_budget_warning: %v", line.GetAgentItem())
-	}
-	if got := warning.GetText(); got != "Context low (23% remaining)" {
-		t.Fatalf("text = %q, want the vendor's sentence verbatim", got)
-	}
-}
-
-func TestTheContextBudgetWarningReadsTheSameFieldsAsTheShim(t *testing.T) {
-	// The shim reads `content`, else `text`, and the mocked vendor writes
-	// `content`; a reader that skipped either would leave the warning undrawn.
-	tests := []struct {
-		name string
-		body string
-		want string
-	}{
-		{name: "content", body: `{"type":"context_budget_warning","content":"Context low (9% remaining)"}`, want: "Context low (9% remaining)"},
-		{name: "text", body: `{"type":"context_budget_warning","text":"Context low (9% remaining)"}`, want: "Context low (9% remaining)"},
-		{name: "content wins over text", body: `{"type":"context_budget_warning","content":"from content","text":"from text"}`, want: "from content"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			// Arrange.
-			c := newTestConverter(t)
-
-			// Act.
-			entries := convertLines(t, c, attachmentLineOf("cb1", tc.body))
-
-			// Assert.
-			if len(entries) != 1 {
-				t.Fatalf("entries = %d, want 1: keys=%v", len(entries), allKeys(entries))
-			}
-			warning := entries[0].GetAgentUpdate().GetServeableFrame().GetAgentItem().GetAgentFrame().GetUpdate().GetContextBudgetWarning()
-			if got := warning.GetText(); got != tc.want {
-				t.Fatalf("text = %q, want %q", got, tc.want)
-			}
-		})
-	}
-}
-
-func TestTheContextBudgetWarningIsKeyedByItsOwnRecord(t *testing.T) {
-	// Arrange. It is INSTANTANEOUS with no lifecycle: two warnings in one session
-	// are two facts, and collapsing them onto one key would leave only the last.
-	c := newTestConverter(t)
-	body := `{"type":"context_budget_warning","text":"Context low"}`
-
-	// Act.
-	entries := convertLines(t, c,
-		attachmentLineOf("cb1", body),
-		attachmentLineOf("cb2", body),
-	)
-
-	// Assert.
-	if len(entries) != 2 {
-		t.Fatalf("entries = %d, want one per record", len(entries))
-	}
-	if entries[0].GetUpsertKey() == entries[1].GetUpsertKey() {
-		t.Fatalf("two warnings share the key %q; the later would erase the earlier", entries[0].GetUpsertKey())
-	}
-	if got := entries[0].GetUpsertKey(); got != SessionKey("context_budget_warning", "cb1") {
-		t.Fatalf("upsert_key = %q, want the record's own session key", got)
-	}
-}
-
-func TestAContextBudgetWarningWithNoTextIsStoredRatherThanDrawnEmpty(t *testing.T) {
-	// Arrange. The record's whole content IS the sentence, so one without it has
-	// nothing to draw — and landing an empty warning would put a blank line in
-	// the footer rather than reporting the gap.
-	c := newTestConverter(t)
-	body := `{"type":"context_budget_warning"}`
-
-	// Act.
-	entries := convertLines(t, c, attachmentLineOf("cb1", body))
-
-	// Assert.
-	if len(entries) != 1 {
-		t.Fatalf("entries = %d, want 1", len(entries))
-	}
 	if entries[0].GetAgentUpdate().GetServeableFrame() != nil {
-		t.Fatal("a warning with no text must not reach a page")
+		t.Fatalf("a context-budget warning must not reach a page: %v", entries[0])
 	}
 	if got := entries[0].GetAgentUpdate().GetUnservedItem().GetVendorSpecific().GetKind(); got != "attachment/context_budget_warning" {
-		t.Fatalf("kind = %q, want the record stored whole", got)
+		t.Fatalf("kind = %q, want the record withheld as vendor_specific", got)
 	}
 }
 
