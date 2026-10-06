@@ -164,7 +164,57 @@ describe("mountNewsDigest: drawing the standing", () => {
     // ASSERT
     const item = w.host.querySelector(".news-digest-item");
     expect(item?.querySelector(".news-digest-item-title")?.textContent).toBe("SDK drops subscription billing");
-    expect(item?.querySelector(".news-digest-summary")?.textContent).toBe("The SDK now needs an API key.");
+    // The summary is rendered markdown now (owner, 2026-10-06): a paragraph,
+    // whose text carries the renderer's trailing newline.
+    expect(item?.querySelector(".news-digest-summary")?.textContent?.trim()).toBe("The SDK now needs an API key.");
+  });
+
+  /** A shown digest whose first item carries TITLE and SUMMARY. */
+  function shownWith(title: string, summary: string): ReturnType<typeof shown> {
+    const init = overlayInit();
+    const item = init.sections?.[0]?.items?.[0];
+    if (item === undefined) throw new Error("the fixture has a first item");
+    item.title = { text: title };
+    item.summary = { text: summary };
+    return shown(init);
+  }
+
+  it("renders a summary's inline code as code, not literal backticks", () => {
+    // ACT
+    w.digest.apply(shownWith("t", "Set `apiKey` before use."));
+    // ASSERT
+    const code = w.host.querySelector(".news-digest-summary code");
+    expect(code?.textContent).toBe("apiKey");
+    expect(w.host.querySelector(".news-digest-summary")?.textContent).not.toContain("`");
+  });
+
+  it("renders a summary with the response bubble's markdown class", () => {
+    // ACT
+    w.digest.apply(shownWith("t", "s"));
+    // ASSERT
+    expect(w.host.querySelector(".news-digest-summary")?.classList.contains("md")).toBe(true);
+  });
+
+  it("renders a summary's block markdown: a list is a list", () => {
+    // ACT
+    w.digest.apply(shownWith("t", "- one\n- two"));
+    // ASSERT
+    expect([...w.host.querySelectorAll(".news-digest-summary li")].map((li) => li.textContent)).toEqual(["one", "two"]);
+  });
+
+  it("renders a title's inline code as code", () => {
+    // ACT
+    w.digest.apply(shownWith("The `query()` call changed", "s"));
+    // ASSERT
+    expect(w.host.querySelector(".news-digest-item-title code")?.textContent).toBe("query()");
+  });
+
+  it("escapes markup in a title rather than drawing it", () => {
+    // ACT
+    w.digest.apply(shownWith("<b>bold</b>", "s"));
+    // ASSERT
+    expect(w.host.querySelector(".news-digest-item-title b")).toBeNull();
+    expect(w.host.querySelector(".news-digest-item-title")?.textContent).toBe("<b>bold</b>");
   });
 
   it("draws the period in the reader's locale", () => {

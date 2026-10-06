@@ -33,7 +33,9 @@ import type {
   NewsDigestSource,
 } from "../../../proto/gen/ts/frontend/v1/news_digest_pb";
 import { createControl } from "../control.js";
-import { renderExternalLink } from "../link.js";
+import { escapeHtml } from "../highlight.js";
+import { installProseLinkRouting, renderExternalLink } from "../link.js";
+import { inline, renderMarkdown } from "../markdown.js";
 import { log } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
 import { guardMalformed } from "../rpc/guard.js";
@@ -93,6 +95,9 @@ export function mountNewsDigest(
     host.style.width = `${rect.width}px`;
     host.style.height = `${rect.height}px`;
   };
+  // A LINK IN A SUMMARY ROUTES AS ONE IN A RESPONSE BUBBLE: the digest's
+  // markdown is drawn by the same renderer, so its anchors take the same route.
+  const unrouteLinks = installProseLinkRouting(ctx, host);
   const observer = new ResizeObserver(follow);
   observer.observe(deps.feedScroll);
   window.addEventListener("resize", follow);
@@ -150,6 +155,7 @@ export function mountNewsDigest(
     },
     dispose(): void {
       log.debug("disposing the news digest overlay", { operation: "news-digest.dispose" });
+      unrouteLinks();
       observer.disconnect();
       window.removeEventListener("resize", follow);
       document.removeEventListener("keydown", onKeydown);
@@ -313,7 +319,9 @@ export function drawItem(ctx: AppContext, item: NewsDigestItem, path: string): H
   head.className = "news-digest-item-head";
   const titleElement = document.createElement("span");
   titleElement.className = "news-digest-item-title";
-  titleElement.textContent = title.text;
+  // MARKDOWN, as a response bubble draws it (owner, 2026-10-06): the title
+  // takes inline markup only, the summary the full block renderer.
+  titleElement.innerHTML = inline(escapeHtml(title.text));
   head.append(titleElement);
   if (item.effective !== undefined) {
     const effective = document.createElement("span");
@@ -322,9 +330,9 @@ export function drawItem(ctx: AppContext, item: NewsDigestItem, path: string): H
     effective.textContent = `effective ${item.effective.text}`;
     head.append(effective);
   }
-  const summaryElement = document.createElement("p");
-  summaryElement.className = "news-digest-summary";
-  summaryElement.textContent = summary.text;
+  const summaryElement = document.createElement("div");
+  summaryElement.className = "news-digest-summary md";
+  summaryElement.innerHTML = renderMarkdown(summary.text);
   const links = document.createElement("div");
   links.className = "news-digest-links";
   for (const link of item.links) links.append(renderExternalLink(ctx, { text: link.label, url: link.url }));
