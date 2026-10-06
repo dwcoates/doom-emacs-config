@@ -1367,7 +1367,15 @@ generations. Workspace-bound daemon records go to
 inherited descriptor, and forwarded webapp and sidecar records go to
 `webapp.log` and `sidecar.log`. Each canonical workspace path is a symlink to
 a daemon-owned target under `<state>/logs/`. Failing to resolve a workspace is
-an invariant violation, never a global write.
+an invariant violation, never a global write -- with ONE exception: a
+forwarded client record (`ClientLog`) about a registered workspace whose
+DIRECTORY IS GONE lands in the run log with `workspace_id`, `workspace_dir`
+and `unroutable_workspace` naming it, the rpc succeeds, and the condition is
+stated once per workspace at INFO (`daemon.dlog.client_central_fallback`).
+Only a stat that says "does not exist" qualifies; any other stat failure stays
+a failure. A NEW sink of a workspace is never opened once its directory is
+gone, because the open's `MkdirAll` would resurrect the deleted worktree as a
+bare `.claude/emacs` tree; sinks already open keep writing to their targets.
 
 THE WORKSPACE ID ON A RECORD AND IN A SINK NAME IS THE DAEMON-MINTED
 `ids.WorkspaceID` (16 hex characters, `wsm.IDLength`) -- the same id the shim,
