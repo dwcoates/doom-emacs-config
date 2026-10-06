@@ -295,6 +295,7 @@ type RegisterRepositoryError struct {
 	//
 	//	*RegisterRepositoryError_NotInARepository
 	//	*RegisterRepositoryError_UnreadablePath
+	//	*RegisterRepositoryError_InsideTemporaryDirectory
 	Cause         isRegisterRepositoryError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -355,6 +356,15 @@ func (x *RegisterRepositoryError) GetUnreadablePath() *RegisterRepositoryUnreada
 	return nil
 }
 
+func (x *RegisterRepositoryError) GetInsideTemporaryDirectory() *RegisterRepositoryInsideTemporaryDirectory {
+	if x != nil {
+		if x, ok := x.Cause.(*RegisterRepositoryError_InsideTemporaryDirectory); ok {
+			return x.InsideTemporaryDirectory
+		}
+	}
+	return nil
+}
+
 type isRegisterRepositoryError_Cause interface {
 	isRegisterRepositoryError_Cause()
 }
@@ -371,9 +381,16 @@ type RegisterRepositoryError_UnreadablePath struct {
 	UnreadablePath *RegisterRepositoryUnreadablePath `protobuf:"bytes,2,opt,name=unreadable_path,json=unreadablePath,proto3,oneof"`
 }
 
+type RegisterRepositoryError_InsideTemporaryDirectory struct {
+	// The repository's main worktree lies inside a temporary directory.
+	InsideTemporaryDirectory *RegisterRepositoryInsideTemporaryDirectory `protobuf:"bytes,3,opt,name=inside_temporary_directory,json=insideTemporaryDirectory,proto3,oneof"`
+}
+
 func (*RegisterRepositoryError_NotInARepository) isRegisterRepositoryError_Cause() {}
 
 func (*RegisterRepositoryError_UnreadablePath) isRegisterRepositoryError_Cause() {}
+
+func (*RegisterRepositoryError_InsideTemporaryDirectory) isRegisterRepositoryError_Cause() {}
 
 type RegisterRepositoryNotInARepository struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -447,6 +464,65 @@ func (*RegisterRepositoryUnreadablePath) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_register_repository_proto_rawDescGZIP(), []int{5}
 }
 
+// The directory lies inside a temporary directory (owner ruling,
+// 2026-10-06): agent-repl does not register temporary folders. A temporary
+// folder is scratch space the OS or a test run purges, so a roster row for
+// it names a directory about to vanish.
+type RegisterRepositoryInsideTemporaryDirectory struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The refused directory, canonical (symlinks resolved, on-disk case).
+	Dir string `protobuf:"bytes,1,opt,name=dir,proto3" json:"dir,omitempty"`
+	// The canonical temporary root `dir` lies inside: the process's own
+	// temporary directory, `/tmp`, `/var/tmp` or `/var/folders`.
+	TemporaryRoot string `protobuf:"bytes,2,opt,name=temporary_root,json=temporaryRoot,proto3" json:"temporary_root,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RegisterRepositoryInsideTemporaryDirectory) Reset() {
+	*x = RegisterRepositoryInsideTemporaryDirectory{}
+	mi := &file_agentrepl_v1_endpoint_register_repository_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RegisterRepositoryInsideTemporaryDirectory) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RegisterRepositoryInsideTemporaryDirectory) ProtoMessage() {}
+
+func (x *RegisterRepositoryInsideTemporaryDirectory) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_register_repository_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RegisterRepositoryInsideTemporaryDirectory.ProtoReflect.Descriptor instead.
+func (*RegisterRepositoryInsideTemporaryDirectory) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_register_repository_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *RegisterRepositoryInsideTemporaryDirectory) GetDir() string {
+	if x != nil {
+		return x.Dir
+	}
+	return ""
+}
+
+func (x *RegisterRepositoryInsideTemporaryDirectory) GetTemporaryRoot() string {
+	if x != nil {
+		return x.TemporaryRoot
+	}
+	return ""
+}
+
 var File_agentrepl_v1_endpoint_register_repository_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_register_repository_proto_rawDesc = "" +
@@ -464,13 +540,17 @@ const file_agentrepl_v1_endpoint_register_repository_proto_rawDesc = "" +
 	"repository\x12#\n" +
 	"\ralready_known\x18\x02 \x01(\bR\falreadyKnown\x128\n" +
 	"\tworkspace\x18\x03 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x126\n" +
-	"\x17workspace_already_known\x18\x04 \x01(\bR\x15workspaceAlreadyKnown\"\xe0\x01\n" +
+	"\x17workspace_already_known\x18\x04 \x01(\bR\x15workspaceAlreadyKnown\"\xda\x02\n" +
 	"\x17RegisterRepositoryError\x12a\n" +
 	"\x13not_in_a_repository\x18\x01 \x01(\v20.agentrepl.v1.RegisterRepositoryNotInARepositoryH\x00R\x10notInARepository\x12Y\n" +
-	"\x0funreadable_path\x18\x02 \x01(\v2..agentrepl.v1.RegisterRepositoryUnreadablePathH\x00R\x0eunreadablePathB\a\n" +
+	"\x0funreadable_path\x18\x02 \x01(\v2..agentrepl.v1.RegisterRepositoryUnreadablePathH\x00R\x0eunreadablePath\x12x\n" +
+	"\x1ainside_temporary_directory\x18\x03 \x01(\v28.agentrepl.v1.RegisterRepositoryInsideTemporaryDirectoryH\x00R\x18insideTemporaryDirectoryB\a\n" +
 	"\x05cause\"$\n" +
 	"\"RegisterRepositoryNotInARepository\"\"\n" +
-	" RegisterRepositoryUnreadablePathB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	" RegisterRepositoryUnreadablePath\"e\n" +
+	"*RegisterRepositoryInsideTemporaryDirectory\x12\x10\n" +
+	"\x03dir\x18\x01 \x01(\tR\x03dir\x12%\n" +
+	"\x0etemporary_root\x18\x02 \x01(\tR\rtemporaryRootB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_register_repository_proto_rawDescOnce sync.Once
@@ -484,29 +564,31 @@ func file_agentrepl_v1_endpoint_register_repository_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_register_repository_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_register_repository_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
+var file_agentrepl_v1_endpoint_register_repository_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_agentrepl_v1_endpoint_register_repository_proto_goTypes = []any{
-	(*RegisterRepositoryRequest)(nil),          // 0: agentrepl.v1.RegisterRepositoryRequest
-	(*RegisterRepositoryResponse)(nil),         // 1: agentrepl.v1.RegisterRepositoryResponse
-	(*RegisterRepositorySuccess)(nil),          // 2: agentrepl.v1.RegisterRepositorySuccess
-	(*RegisterRepositoryError)(nil),            // 3: agentrepl.v1.RegisterRepositoryError
-	(*RegisterRepositoryNotInARepository)(nil), // 4: agentrepl.v1.RegisterRepositoryNotInARepository
-	(*RegisterRepositoryUnreadablePath)(nil),   // 5: agentrepl.v1.RegisterRepositoryUnreadablePath
-	(*v1.RepositoryRef)(nil),                   // 6: workspace.v1.RepositoryRef
-	(*v1.WorkspaceRef)(nil),                    // 7: workspace.v1.WorkspaceRef
+	(*RegisterRepositoryRequest)(nil),                  // 0: agentrepl.v1.RegisterRepositoryRequest
+	(*RegisterRepositoryResponse)(nil),                 // 1: agentrepl.v1.RegisterRepositoryResponse
+	(*RegisterRepositorySuccess)(nil),                  // 2: agentrepl.v1.RegisterRepositorySuccess
+	(*RegisterRepositoryError)(nil),                    // 3: agentrepl.v1.RegisterRepositoryError
+	(*RegisterRepositoryNotInARepository)(nil),         // 4: agentrepl.v1.RegisterRepositoryNotInARepository
+	(*RegisterRepositoryUnreadablePath)(nil),           // 5: agentrepl.v1.RegisterRepositoryUnreadablePath
+	(*RegisterRepositoryInsideTemporaryDirectory)(nil), // 6: agentrepl.v1.RegisterRepositoryInsideTemporaryDirectory
+	(*v1.RepositoryRef)(nil),                           // 7: workspace.v1.RepositoryRef
+	(*v1.WorkspaceRef)(nil),                            // 8: workspace.v1.WorkspaceRef
 }
 var file_agentrepl_v1_endpoint_register_repository_proto_depIdxs = []int32{
 	2, // 0: agentrepl.v1.RegisterRepositoryResponse.success:type_name -> agentrepl.v1.RegisterRepositorySuccess
 	3, // 1: agentrepl.v1.RegisterRepositoryResponse.error:type_name -> agentrepl.v1.RegisterRepositoryError
-	6, // 2: agentrepl.v1.RegisterRepositorySuccess.repository:type_name -> workspace.v1.RepositoryRef
-	7, // 3: agentrepl.v1.RegisterRepositorySuccess.workspace:type_name -> workspace.v1.WorkspaceRef
+	7, // 2: agentrepl.v1.RegisterRepositorySuccess.repository:type_name -> workspace.v1.RepositoryRef
+	8, // 3: agentrepl.v1.RegisterRepositorySuccess.workspace:type_name -> workspace.v1.WorkspaceRef
 	4, // 4: agentrepl.v1.RegisterRepositoryError.not_in_a_repository:type_name -> agentrepl.v1.RegisterRepositoryNotInARepository
 	5, // 5: agentrepl.v1.RegisterRepositoryError.unreadable_path:type_name -> agentrepl.v1.RegisterRepositoryUnreadablePath
-	6, // [6:6] is the sub-list for method output_type
-	6, // [6:6] is the sub-list for method input_type
-	6, // [6:6] is the sub-list for extension type_name
-	6, // [6:6] is the sub-list for extension extendee
-	0, // [0:6] is the sub-list for field type_name
+	6, // 6: agentrepl.v1.RegisterRepositoryError.inside_temporary_directory:type_name -> agentrepl.v1.RegisterRepositoryInsideTemporaryDirectory
+	7, // [7:7] is the sub-list for method output_type
+	7, // [7:7] is the sub-list for method input_type
+	7, // [7:7] is the sub-list for extension type_name
+	7, // [7:7] is the sub-list for extension extendee
+	0, // [0:7] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_register_repository_proto_init() }
@@ -521,6 +603,7 @@ func file_agentrepl_v1_endpoint_register_repository_proto_init() {
 	file_agentrepl_v1_endpoint_register_repository_proto_msgTypes[3].OneofWrappers = []any{
 		(*RegisterRepositoryError_NotInARepository)(nil),
 		(*RegisterRepositoryError_UnreadablePath)(nil),
+		(*RegisterRepositoryError_InsideTemporaryDirectory)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -528,7 +611,7 @@ func file_agentrepl_v1_endpoint_register_repository_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_register_repository_proto_rawDesc), len(file_agentrepl_v1_endpoint_register_repository_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   6,
+			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
