@@ -102,6 +102,7 @@ import { UpdateHeldPromptResponseSchema } from "../../../proto/gen/ts/agentrepl/
 import { EditHeldPromptResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_edit_held_prompt_pb";
 import { FoldHeldPromptResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_fold_held_prompt_pb";
 import { FoldRepositoryResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_fold_repository_pb";
+import { UpdateSidebarViewResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_sidebar_view_pb";
 import { AnswerHeldOfferResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_answer_held_offer_pb";
 import { UpdateShutdownScheduleResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_shutdown_schedule_pb";
 import { UpdateMergeQueueResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_merge_queue_pb";
@@ -1262,6 +1263,14 @@ export function createFakeDaemon(): FakeDaemon {
       foldRepository(request) {
         record("foldRepository", request);
         return answerFor("foldRepository", FoldRepositoryResponseSchema, {
+          result: { case: "success", value: {} },
+        });
+      },
+      // A view change lands on the NEXT roster push, as the daemon's does; a
+      // test states that push with `setRoster`.
+      updateSidebarView(request) {
+        record("updateSidebarView", request);
+        return answerFor("updateSidebarView", UpdateSidebarViewResponseSchema, {
           result: { case: "success", value: {} },
         });
       },

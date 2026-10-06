@@ -2283,6 +2283,12 @@ export function roster(init?: {
   taskDone?: boolean;
   /** Replace the repository grouping's sections, IN WIRE ORDER; a section is expanded unless `collapsed`. */
   repositorySections?: { repositoryId: string; label: string; rows: RosterRow[]; collapsed?: boolean }[];
+  /** The daemon-held grouping every page shows; the repository's unless said. */
+  shown?: "repository" | "task";
+  /** The task section's daemon-held fold; expanded unless said. */
+  taskCollapsed?: boolean;
+  /** The merged band's daemon-held fold; collapsed unless said, as the daemon's default is. */
+  mergedCollapsed?: boolean;
 }): WorkspaceRoster {
   const rows = init?.rows ?? [rosterRow()];
   return create(WorkspaceRosterSchema, {
@@ -2307,6 +2313,7 @@ export function roster(init?: {
           key: { taskId: "task-1" },
           header: { label: { text: "the overhaul" }, done: { done: init?.taskDone ?? false } },
           rows: { rows: init?.taskRows ?? rows },
+          fold: init?.taskCollapsed === true ? { case: "collapsed", value: {} } : { case: "expanded", value: {} },
         },
       ],
     },
@@ -2316,7 +2323,9 @@ export function roster(init?: {
         count: { workspaces: (init?.merged ?? [0]).length },
       },
       rows: { rows: init?.merged ?? [rosterRow({ id: "ws-merged", status: "merged", when: "merged" })] },
+      fold: init?.mergedCollapsed === false ? { case: "expanded", value: {} } : { case: "collapsed", value: {} },
     },
+    shown: init?.shown === "task" ? { case: "shownTask", value: {} } : { case: "shownRepository", value: {} },
     current:
       init?.currentUnset === true
         ? undefined

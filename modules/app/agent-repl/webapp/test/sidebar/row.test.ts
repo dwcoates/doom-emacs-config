@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { SelectWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_workspace_pb";
+import { UpdateSidebarViewResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_sidebar_view_pb";
 import { RosterRowSchema } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import {
@@ -22,10 +23,11 @@ import {
   NOW,
   appContext,
   fakeTicker,
-  memoryPrefs,
+  fakeTimers,
   row,
   sidebarContext,
 } from "./harness.js";
+import { createSidebarView } from "../../src/sidebar/view.js";
 
 const SELECT_OK = create(SelectWorkspaceResponseSchema, {
   result: { case: "success", value: {} },
@@ -318,26 +320,50 @@ describe("the detail panel", () => {
     }
   });
 
-  it("remembers the expansion, keyed by the workspace id", () => {
+  it("remembers the expansion on this page, keyed by the workspace id", () => {
     // ARRANGE
     vi.useFakeTimers();
     try {
-      const prefs = memoryPrefs();
-      const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(appContext(), prefs), "R");
+      const sc = sidebarContext();
+      const drawn = drawRosterRow(row({ id: "ws-1" }), sc, "R");
       // ACT
       hoverIn(drawn);
       vi.advanceTimersByTime(HOVER_OPEN_DELAY_MS);
       // ASSERT
-      expect(prefs.state.expanded["ws-1"]).toBe(true);
+      expect([...sc.openDetails]).toEqual(["ws-1"]);
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it("draws a remembered expansion open on the next push", () => {
-    const prefs = memoryPrefs({ expanded: { "ws-1": true } });
-    const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(appContext(), prefs), "R");
+  it("draws an expansion this page remembers open on the next push", () => {
+    const sc = sidebarContext(appContext(), fakeTimers(), createSidebarView(), new Set(["ws-1"]));
+    const drawn = drawRosterRow(row({ id: "ws-1" }), sc, "R");
     expect(drawn.classList.contains("open")).toBe(true);
+  });
+
+  it("never asks the daemon about a detail, which is this page's own", () => {
+    // ARRANGE
+    vi.useFakeTimers();
+    const asked: string[] = [];
+    try {
+      const sc = sidebarContext(
+        appContext({
+          updateSidebarView: (request) => {
+            asked.push(request.change.case ?? "unset");
+            return create(UpdateSidebarViewResponseSchema, { result: { case: "success", value: {} } });
+          },
+        }),
+      );
+      const drawn = drawRosterRow(row({ id: "ws-1" }), sc, "R");
+      // ACT
+      hoverIn(drawn);
+      vi.advanceTimersByTime(HOVER_OPEN_DELAY_MS);
+      // ASSERT
+      expect(asked).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("carries no chevron at all", () => {
@@ -897,10 +923,9 @@ describe("the detail panel leaves the rail and stays inside the window", () => {
 
   /** An expanded row whose line and panel have the staged rects given. */
   function expandedRow(line: DOMRect, panel: DOMRect): HTMLElement {
-    const prefs = memoryPrefs({ expanded: { "ws-1": true } });
     const drawn = drawRosterRow(
       row({ id: "ws-1", detail: { branch: { name: "feat/rail" } } }),
-      sidebarContext(appContext(), prefs),
+      sidebarContext(appContext(), fakeTimers(), createSidebarView(), new Set(["ws-1"])),
       "R",
     );
     rects.set(drawn.querySelector(":scope > .row") as Element, line);
