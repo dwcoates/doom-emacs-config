@@ -226,6 +226,66 @@ func TestAnAdoptCallerThatGivesUpFirstAnswersNotYetAdopted(t *testing.T) {
 	}
 }
 
+// TestAWaitingParticipantIsRecordedAtInfo pins the visibility of a
+// participant waiting on the other: on 2026-10-06 queen-model's host adopt
+// waited 10s for a page whose own adopt had been refused, and nothing above
+// DEBUG on the successor said the host was waiting or on whom.
+func TestAWaitingParticipantIsRecordedAtInfo(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	arm(t, h, ws, Participants{Host: true, Web: true})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Act: the host calls, and the call waits on the web participant.
+	done := make(chan error, 1)
+	go func() { done <- h.c.AdoptHost(ctx, ws) }()
+	cancel()
+	<-done
+
+	// Assert
+	var waiting bool
+	for _, rec := range levelRecords(records(h.log, opAdoptHost), "info") {
+		if rec.Message == "an expected participant has not called yet; waiting for the rendezvous" &&
+			rec.Context["web_called"] == false {
+			waiting = true
+		}
+	}
+	if !waiting {
+		t.Fatalf("records = %+v, want an INFO saying the host waits on the web participant", records(h.log, opAdoptHost))
+	}
+}
+
+// TestACallerThatGivesUpNamesTheParticipantItWaitedOn pins the other edge: a
+// caller whose context ends first says so at INFO, naming who never called.
+func TestACallerThatGivesUpNamesTheParticipantItWaitedOn(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	arm(t, h, ws, Participants{Host: true, Web: true})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Act
+	done := make(chan error, 1)
+	go func() { done <- h.c.AdoptHost(ctx, ws) }()
+	cancel()
+	<-done
+
+	// Assert
+	var gaveUp bool
+	for _, rec := range levelRecords(records(h.log, opAdoptHost), "info") {
+		if rec.Message == "the caller gave up before the rendezvous completed" &&
+			rec.Context["host_called"] == true && rec.Context["web_called"] == false {
+			gaveUp = true
+		}
+	}
+	if !gaveUp {
+		t.Fatalf("records = %+v, want an INFO naming the web participant that never called", records(h.log, opAdoptHost))
+	}
+}
+
 func TestAdoptWebAnswersNoTransferAnnouncedOnAnOrdinaryPageBoot(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
