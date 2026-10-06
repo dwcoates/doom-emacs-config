@@ -19,7 +19,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_register_workspace.proto.
  */
 export const file_agentrepl_v1_endpoint_register_workspace: GenFile = /*@__PURE__*/
-  fileDesc("Ci5hZ2VudHJlcGwvdjEvZW5kcG9pbnRfcmVnaXN0ZXJfd29ya3NwYWNlLnByb3RvEgxhZ2VudHJlcGwudjEiJwoYUmVnaXN0ZXJXb3Jrc3BhY2VSZXF1ZXN0EgsKA2RpchgBIAEoCSKXAQoZUmVnaXN0ZXJXb3Jrc3BhY2VSZXNwb25zZRI5CgdzdWNjZXNzGAEgASgLMiYuYWdlbnRyZXBsLnYxLlJlZ2lzdGVyV29ya3NwYWNlU3VjY2Vzc0gAEjUKBWVycm9yGAIgASgLMiQuYWdlbnRyZXBsLnYxLlJlZ2lzdGVyV29ya3NwYWNlRXJyb3JIAEIICgZyZXN1bHQiSQoYUmVnaXN0ZXJXb3Jrc3BhY2VTdWNjZXNzEi0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYiaAoWUmVnaXN0ZXJXb3Jrc3BhY2VFcnJvchJFCg5ub3RfYV93b3JrdHJlZRgBIAEoCzIrLmFnZW50cmVwbC52MS5SZWdpc3RlcldvcmtzcGFjZU5vdEFXb3JrdHJlZUgAQgcKBWNhdXNlIh8KHVJlZ2lzdGVyV29ya3NwYWNlTm90QVdvcmt0cmVlQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_workspace_v1_workspace]);
+  fileDesc("Ci5hZ2VudHJlcGwvdjEvZW5kcG9pbnRfcmVnaXN0ZXJfd29ya3NwYWNlLnByb3RvEgxhZ2VudHJlcGwudjEiJwoYUmVnaXN0ZXJXb3Jrc3BhY2VSZXF1ZXN0EgsKA2RpchgBIAEoCSKXAQoZUmVnaXN0ZXJXb3Jrc3BhY2VSZXNwb25zZRI5CgdzdWNjZXNzGAEgASgLMiYuYWdlbnRyZXBsLnYxLlJlZ2lzdGVyV29ya3NwYWNlU3VjY2Vzc0gAEjUKBWVycm9yGAIgASgLMiQuYWdlbnRyZXBsLnYxLlJlZ2lzdGVyV29ya3NwYWNlRXJyb3JIAEIICgZyZXN1bHQiSQoYUmVnaXN0ZXJXb3Jrc3BhY2VTdWNjZXNzEi0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYixwEKFlJlZ2lzdGVyV29ya3NwYWNlRXJyb3ISRQoObm90X2Ffd29ya3RyZWUYASABKAsyKy5hZ2VudHJlcGwudjEuUmVnaXN0ZXJXb3Jrc3BhY2VOb3RBV29ya3RyZWVIABJdChppbnNpZGVfdGVtcG9yYXJ5X2RpcmVjdG9yeRgCIAEoCzI3LmFnZW50cmVwbC52MS5SZWdpc3RlcldvcmtzcGFjZUluc2lkZVRlbXBvcmFyeURpcmVjdG9yeUgAQgcKBWNhdXNlIh8KHVJlZ2lzdGVyV29ya3NwYWNlTm90QVdvcmt0cmVlIlAKKVJlZ2lzdGVyV29ya3NwYWNlSW5zaWRlVGVtcG9yYXJ5RGlyZWN0b3J5EgsKA2RpchgBIAEoCRIWCg50ZW1wb3Jhcnlfcm9vdBgCIAEoCUIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.RegisterWorkspaceRequest
@@ -113,6 +113,14 @@ export type RegisterWorkspaceError = Message<"agentrepl.v1.RegisterWorkspaceErro
      */
     value: RegisterWorkspaceNotAWorktree;
     case: "notAWorktree";
+  } | {
+    /**
+     * The dir lies inside a temporary directory.
+     *
+     * @generated from field: agentrepl.v1.RegisterWorkspaceInsideTemporaryDirectory inside_temporary_directory = 2;
+     */
+    value: RegisterWorkspaceInsideTemporaryDirectory;
+    case: "insideTemporaryDirectory";
   } | { case: undefined; value?: undefined };
 };
 
@@ -135,4 +143,36 @@ export type RegisterWorkspaceNotAWorktree = Message<"agentrepl.v1.RegisterWorksp
  */
 export const RegisterWorkspaceNotAWorktreeSchema: GenMessage<RegisterWorkspaceNotAWorktree> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_register_workspace, 4);
+
+/**
+ * The directory lies inside a temporary directory (owner ruling,
+ * 2026-10-06): agent-repl does not register temporary folders. A temporary
+ * folder is scratch space the OS or a test run purges, so a roster row for
+ * it names a directory about to vanish.
+ *
+ * @generated from message agentrepl.v1.RegisterWorkspaceInsideTemporaryDirectory
+ */
+export type RegisterWorkspaceInsideTemporaryDirectory = Message<"agentrepl.v1.RegisterWorkspaceInsideTemporaryDirectory"> & {
+  /**
+   * The refused directory, canonical (symlinks resolved, on-disk case).
+   *
+   * @generated from field: string dir = 1;
+   */
+  dir: string;
+
+  /**
+   * The canonical temporary root `dir` lies inside: the process's own
+   * temporary directory, `/tmp`, `/var/tmp` or `/var/folders`.
+   *
+   * @generated from field: string temporary_root = 2;
+   */
+  temporaryRoot: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.RegisterWorkspaceInsideTemporaryDirectory.
+ * Use `create(RegisterWorkspaceInsideTemporaryDirectorySchema)` to create a new message.
+ */
+export const RegisterWorkspaceInsideTemporaryDirectorySchema: GenMessage<RegisterWorkspaceInsideTemporaryDirectory> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_register_workspace, 5);
 

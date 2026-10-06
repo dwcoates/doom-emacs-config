@@ -39,6 +39,19 @@ message RegisterWorkspaceError {
   oneof cause {
     // The dir exists but is not a git worktree the daemon can adopt.
     RegisterWorkspaceNotAWorktree not_a_worktree = 1;
+    // The dir lies inside a temporary directory.
+    RegisterWorkspaceInsideTemporaryDirectory inside_temporary_directory = 2;
   }
 }
 message RegisterWorkspaceNotAWorktree {}
+// The directory lies inside a temporary directory (owner ruling,
+// 2026-10-06): agent-repl does not register temporary folders. A temporary
+// folder is scratch space the OS or a test run purges, so a roster row for
+// it names a directory about to vanish.
+message RegisterWorkspaceInsideTemporaryDirectory {
+  // The refused directory, canonical (symlinks resolved, on-disk case).
+  string dir = 1;
+  // The canonical temporary root `dir` lies inside: the process's own
+  // temporary directory, `/tmp`, `/var/tmp` or `/var/folders`.
+  string temporary_root = 2;
+}

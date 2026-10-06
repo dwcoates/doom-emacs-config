@@ -989,10 +989,40 @@ arm is named by its keyword and its own fields."
       (agent-repl-verbs--create-naming-refusal-sentence (plist-get refusal :value)))
      ((eq keyword :one-shot-policy-missing)
       (agent-repl-verbs--create-policy-refusal-sentence (plist-get refusal :value)))
+     ((eq keyword :inside-temporary-directory)
+      (agent-repl-verbs-temporary-directory-sentence (plist-get refusal :value)))
      (t
       (format "the daemon refused it: %s%s"
               (if keyword (substring (symbol-name keyword) 1) "unstated")
               (agent-repl-verbs--refusal-fields refusal))))))
+
+;; A TEMPORARY FOLDER IS NEVER REGISTERED (owner ruling, 2026-10-06): the
+;; daemon refuses a repository or workspace whose directory lies inside a
+;; temporary root, on the `inside_temporary_directory' arm of
+;; RegisterWorkspaceError, RegisterRepositoryError and CreateWorkspaceError.
+;; All three carry the same two fields, and all three are worded HERE.
+
+(defun agent-repl-verbs-temporary-directory-sentence (fields)
+  "Word an `inside_temporary_directory\=' refusal whose fields are FIELDS.
+FIELDS is the decoded (:dir DIR :temporary-root ROOT); the sentence names
+both, because the directory and why it was refused are the whole answer."
+  (format "%s is inside the temporary directory %s; agent-repl does not register temporary folders"
+          (plist-get fields :dir) (plist-get fields :temporary-root)))
+
+(defun agent-repl-verbs-register-refusal-sentence (dir value)
+  "Word the daemon\='s refusal VALUE of registering DIR as a workspace.
+VALUE is a decoded `RegisterWorkspaceError\='.  Every arm the contract
+declares has its own sentence; an arm this function has not been taught
+is named by its keyword and fields rather than dropped."
+  (let* ((arm (agent-repl-verbs--refusal-arm value))
+         (keyword (plist-get arm :arm)))
+    (pcase keyword
+      (:inside-temporary-directory
+       (agent-repl-verbs-temporary-directory-sentence (plist-get arm :value)))
+      (:not-a-worktree (format "%s is not a git worktree" dir))
+      (_ (format "the daemon refused %s: %s%s" dir
+                 (if keyword (substring (symbol-name keyword) 1) "unstated")
+                 (agent-repl-verbs--refusal-fields arm))))))
 
 (defun agent-repl-verbs--create-naming-refusal-sentence (failed)
   "Word a `naming_failed\=' refusal whose fields are FAILED.
@@ -1664,16 +1694,25 @@ and the path is added by the caller that knows it.")
   "Claim a `RegisterRepositoryError' refusal of PATH from VALUE, else nil.
 An arm this command has a sentence for is reported as that sentence; any
 other arm answers nil and falls through to the arm-generic reporting, so a
-refusal the daemon adds later still reaches the user correctly."
+refusal the daemon adds later still reaches the user correctly.
+
+A REFUSAL IS AN ANSWER, NOT A FAULT, so it is recorded at INFO: the daemon
+did what it was asked and said no, and the user is told why.  The failure
+the user reads is the progress report's own."
   (let* ((arm (agent-repl-verbs--refusal-arm value))
-         (sentence (cdr (assq (plist-get arm :arm)
-                              agent-repl-verbs--register-repository-sentences))))
+         (keyword (plist-get arm :arm))
+         (sentence
+          (if (eq keyword :inside-temporary-directory)
+              ;; THE ARM NAMES ITS OWN DIRECTORY: the main worktree the
+              ;; path resolved to, which is what was refused.
+              (agent-repl-verbs-temporary-directory-sentence (plist-get arm :value))
+            (when-let ((said (cdr (assq keyword agent-repl-verbs--register-repository-sentences))))
+              (format "%s: %s" said path)))))
     (when sentence
-      (agent-repl--warn agent-repl--global-log-scope
+      (agent-repl--info agent-repl--global-log-scope
                         "elisp.verbs.register-repository-refused path=%S arm=%S"
-                        path (plist-get arm :arm))
-      (agent-repl-workspace-progress-report
-       :register-repository :failed (format "%s: %s" sentence path))
+                        path keyword)
+      (agent-repl-workspace-progress-report :register-repository :failed sentence)
       t)))
 
 (defun agent-repl-verbs--workspace-display-name (ref)

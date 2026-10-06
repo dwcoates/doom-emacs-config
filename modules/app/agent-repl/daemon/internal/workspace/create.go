@@ -124,6 +124,19 @@ func (v *verbs) Create(ctx context.Context, spec CreateSpec) (wsm.Workspace, err
 	// It is a REFUSAL and not a mint because the roster's repository sections
 	// are the create targets: a repository nothing has registered is not one
 	// the user chose, and registering the directory is what puts it there.
+	// A TEMPORARY REPOSITORY IS REFUSED BY NAME, ahead of the registry miss
+	// it would otherwise be: the registry refuses every temporary directory
+	// (owner ruling, 2026-10-06), so no such repository is registered, and a
+	// command-file create naming a scratch folder is told WHY rather than
+	// that nothing is registered there. The check is the registry's own.
+	if err := v.deps.DB.RefuseTemporary(repoDir); err != nil {
+		if refused := temporaryRefusal(global, "CreateWorkspace", err); refused != nil {
+			return wsm.Workspace{}, refused
+		}
+		global.Error(opCreate, "could not judge whether the repository directory is temporary", dlog.Context{"cause": err.Error()})
+		return wsm.Workspace{}, fmt.Errorf("create: repository %q: %w", repoDir, err)
+	}
+
 	registered, err := v.repositoryRegisteredAt(ctx, repoDir)
 	if err != nil {
 		global.Error(opCreate, "could not read the repository registry", dlog.Context{"cause": err.Error()})

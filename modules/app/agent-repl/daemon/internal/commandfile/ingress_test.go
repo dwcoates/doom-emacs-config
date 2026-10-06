@@ -1079,7 +1079,8 @@ func TestApplyFileQuarantinesAPauseTheOrchestratorRefuses(t *testing.T) {
 			if !errors.Is(err, ErrQuarantined) {
 				t.Fatalf("ApplyFile = %v, want the file quarantined", err)
 			}
-			record := f.record(t, opEntry, "warn")
+			// The orchestrator's typed refusal is an ANSWER, recorded at INFO.
+			record := f.record(t, opEntry, "info")
 			if cause, _ := record.Context["cause"].(string); !strings.Contains(cause, tt.arm) {
 				t.Fatalf("record cause %q, want the %s arm named", cause, tt.arm)
 			}

@@ -382,9 +382,9 @@ func TestAFileRouteMergeOnAnUnmergeableWorkspaceIsQuarantined(t *testing.T) {
 	f.d.AwaitFileExists(quarantined)
 	f.d.AwaitRunLogOperation("daemon.commandfile.quarantine")
 	// The refusal is RECORDED on the way to quarantine: the orchestrator's own
-	// refusal, the entry that carried it, and the file's retirement.
-	f.d.ExpectWarnings("daemon.commandfile.quarantine", "daemon.commandfile.entry",
-		"daemon.merge.enqueue")
+	// refusal warns, while the entry that carried it and the file's retirement
+	// are the ingress's ANSWER and are recorded at INFO.
+	f.d.ExpectWarnings("daemon.merge.enqueue")
 }
 
 func TestAMalformedCommandFileIsQuarantinedAndLoggedNeverIngested(t *testing.T) {
@@ -504,7 +504,6 @@ func TestAForgetEntryOnAnOpenWorkspaceIsQuarantined(t *testing.T) {
 	quarantined := filepath.Join(f.d.StateDir, "output", "quarantine", "workspace_commands_forget_open.json")
 	f.d.AwaitFileExists(quarantined)
 	f.d.AwaitRunLogOperation("daemon.commandfile.quarantine")
-	f.d.ExpectWarnings("daemon.commandfile.quarantine", "daemon.commandfile.entry")
 }
 
 func TestAQuarantinedForgetLeavesTheWorkspaceOnTheRoster(t *testing.T) {
@@ -525,7 +524,6 @@ func TestAQuarantinedForgetLeavesTheWorkspaceOnTheRoster(t *testing.T) {
 	// Assert: the refusal republished nothing, so the row the roster already
 	// carries is still the registry's answer.
 	harness.ExpectNoPush(t, roster, harness.ProbeWindow, "a refused forget changes no registry fact")
-	f.d.ExpectWarnings("daemon.commandfile.quarantine", "daemon.commandfile.entry")
 }
 
 // TestForgettingAWorkspaceWithALiveSessionRecordsNoFault covers the realtest
@@ -579,7 +577,6 @@ func TestACreateEntryNamingAnUnregisteredRepositoryIsRefused(t *testing.T) {
 	d.AwaitFileGone(path)
 	d.AwaitFileExists(filepath.Join(d.StateDir, "output", "quarantine", "workspace_commands_unregistered.json"))
 	d.AwaitRunLogOperation("daemon.commandfile.quarantine")
-	d.ExpectWarnings("daemon.commandfile.quarantine", "daemon.commandfile.entry")
 	if repo.HasBranch("stray-ws") {
 		t.Fatalf("branches = %v, want nothing materialized for the refused create", repo.Branches())
 	}

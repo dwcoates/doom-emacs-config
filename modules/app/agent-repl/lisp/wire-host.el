@@ -23,6 +23,7 @@
 ;; order config.el establishes and resolve each other's calls at call time,
 ;; so the declarations below exist for the byte-compiler alone.
 (declare-function agent-repl-wire--check-keys "wire-common")
+(declare-function agent-repl-wire-decode-inside-temporary-directory "wire-common")
 (declare-function agent-repl-wire--decode-bool "wire-common")
 (declare-function agent-repl-wire--decode-empty "wire-common")
 (declare-function agent-repl-wire--decode-int64 "wire-common")
@@ -677,15 +678,24 @@ The dir exists but is not a git worktree the daemon can adopt."
   "Decode RegisterWorkspaceError's `not_a_worktree' cause arm from VALUE."
   (agent-repl-wire-decode-register-workspace-not-a-worktree value))
 
+(defun agent-repl-wire-decode-register-workspace-error-inside-temporary-directory (value)
+  "Decode RegisterWorkspaceError's `inside_temporary_directory' cause arm.
+The dir lies inside a temporary directory, which agent-repl does not
+register; VALUE carries the canonical `dir' and `temporary_root'."
+  (agent-repl-wire-decode-inside-temporary-directory
+   "RegisterWorkspaceInsideTemporaryDirectory" value))
+
 (defun agent-repl-wire-decode-register-workspace-error-cause (value)
   "Decode RegisterWorkspaceError's `cause' oneof from the object VALUE.
 THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
 arm this codec does not know is refused as an unknown field."
   (let ((object (agent-repl-wire--object "RegisterWorkspaceError" value)))
-    (agent-repl-wire--check-keys "RegisterWorkspaceError" object '(notAWorktree))
+    (agent-repl-wire--check-keys "RegisterWorkspaceError" object '(notAWorktree insideTemporaryDirectory))
     (agent-repl-wire--decode-oneof
      "RegisterWorkspaceError" 'cause object
-     '((notAWorktree :not-a-worktree agent-repl-wire-decode-register-workspace-error-not-a-worktree)))))
+     '((notAWorktree :not-a-worktree agent-repl-wire-decode-register-workspace-error-not-a-worktree)
+       (insideTemporaryDirectory :inside-temporary-directory
+                                 agent-repl-wire-decode-register-workspace-error-inside-temporary-directory)))))
 
 (defun agent-repl-wire-decode-register-workspace-error (value)
   "Decode VALUE as `RegisterWorkspaceError', a plist (:cause ONEOF)."

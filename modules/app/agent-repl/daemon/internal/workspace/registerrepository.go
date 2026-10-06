@@ -115,6 +115,9 @@ func (v *verbs) RegisterRepository(ctx context.Context, path string) (Registered
 	// says nothing about which it did, and that bool is half of what the user
 	// is told.
 	record, created, err := v.deps.DB.RegisterRepository(ctx, normalized, defaultBranch)
+	if refused := temporaryRefusal(global, "RegisterRepository", err); refused != nil {
+		return RegisteredRepository{}, refused
+	}
 	if err != nil {
 		global.Error(opRegisterRepository, "could not record the repository", dlog.Context{
 			"dir": normalized, "cause": err.Error(),

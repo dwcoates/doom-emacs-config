@@ -112,6 +112,10 @@ func (v *verbs) register(ctx context.Context, dir string, facts wsm.RegisterFact
 	}
 
 	record, created, err := v.deps.DB.RegisterWorkspace(ctx, normalized, facts)
+	if refused := temporaryRefusal(global, "", err); refused != nil {
+		// THE RPC IS THE CALLER'S TO NAME, as for not_a_worktree above.
+		return wsm.Workspace{}, false, refused
+	}
 	if err != nil {
 		global.Error(opRegister, "could not record the workspace", dlog.Context{"cause": err.Error()})
 		return wsm.Workspace{}, false, fmt.Errorf("register %q: %w", normalized, err)

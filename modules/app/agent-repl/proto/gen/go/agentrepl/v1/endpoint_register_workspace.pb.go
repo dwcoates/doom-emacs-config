@@ -213,6 +213,7 @@ type RegisterWorkspaceError struct {
 	// Types that are valid to be assigned to Cause:
 	//
 	//	*RegisterWorkspaceError_NotAWorktree
+	//	*RegisterWorkspaceError_InsideTemporaryDirectory
 	Cause         isRegisterWorkspaceError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -264,6 +265,15 @@ func (x *RegisterWorkspaceError) GetNotAWorktree() *RegisterWorkspaceNotAWorktre
 	return nil
 }
 
+func (x *RegisterWorkspaceError) GetInsideTemporaryDirectory() *RegisterWorkspaceInsideTemporaryDirectory {
+	if x != nil {
+		if x, ok := x.Cause.(*RegisterWorkspaceError_InsideTemporaryDirectory); ok {
+			return x.InsideTemporaryDirectory
+		}
+	}
+	return nil
+}
+
 type isRegisterWorkspaceError_Cause interface {
 	isRegisterWorkspaceError_Cause()
 }
@@ -273,7 +283,14 @@ type RegisterWorkspaceError_NotAWorktree struct {
 	NotAWorktree *RegisterWorkspaceNotAWorktree `protobuf:"bytes,1,opt,name=not_a_worktree,json=notAWorktree,proto3,oneof"`
 }
 
+type RegisterWorkspaceError_InsideTemporaryDirectory struct {
+	// The dir lies inside a temporary directory.
+	InsideTemporaryDirectory *RegisterWorkspaceInsideTemporaryDirectory `protobuf:"bytes,2,opt,name=inside_temporary_directory,json=insideTemporaryDirectory,proto3,oneof"`
+}
+
 func (*RegisterWorkspaceError_NotAWorktree) isRegisterWorkspaceError_Cause() {}
+
+func (*RegisterWorkspaceError_InsideTemporaryDirectory) isRegisterWorkspaceError_Cause() {}
 
 type RegisterWorkspaceNotAWorktree struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -311,6 +328,65 @@ func (*RegisterWorkspaceNotAWorktree) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_register_workspace_proto_rawDescGZIP(), []int{4}
 }
 
+// The directory lies inside a temporary directory (owner ruling,
+// 2026-10-06): agent-repl does not register temporary folders. A temporary
+// folder is scratch space the OS or a test run purges, so a roster row for
+// it names a directory about to vanish.
+type RegisterWorkspaceInsideTemporaryDirectory struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The refused directory, canonical (symlinks resolved, on-disk case).
+	Dir string `protobuf:"bytes,1,opt,name=dir,proto3" json:"dir,omitempty"`
+	// The canonical temporary root `dir` lies inside: the process's own
+	// temporary directory, `/tmp`, `/var/tmp` or `/var/folders`.
+	TemporaryRoot string `protobuf:"bytes,2,opt,name=temporary_root,json=temporaryRoot,proto3" json:"temporary_root,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RegisterWorkspaceInsideTemporaryDirectory) Reset() {
+	*x = RegisterWorkspaceInsideTemporaryDirectory{}
+	mi := &file_agentrepl_v1_endpoint_register_workspace_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RegisterWorkspaceInsideTemporaryDirectory) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RegisterWorkspaceInsideTemporaryDirectory) ProtoMessage() {}
+
+func (x *RegisterWorkspaceInsideTemporaryDirectory) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_register_workspace_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RegisterWorkspaceInsideTemporaryDirectory.ProtoReflect.Descriptor instead.
+func (*RegisterWorkspaceInsideTemporaryDirectory) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_register_workspace_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *RegisterWorkspaceInsideTemporaryDirectory) GetDir() string {
+	if x != nil {
+		return x.Dir
+	}
+	return ""
+}
+
+func (x *RegisterWorkspaceInsideTemporaryDirectory) GetTemporaryRoot() string {
+	if x != nil {
+		return x.TemporaryRoot
+	}
+	return ""
+}
+
 var File_agentrepl_v1_endpoint_register_workspace_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_register_workspace_proto_rawDesc = "" +
@@ -323,11 +399,15 @@ const file_agentrepl_v1_endpoint_register_workspace_proto_rawDesc = "" +
 	"\x05error\x18\x02 \x01(\v2$.agentrepl.v1.RegisterWorkspaceErrorH\x00R\x05errorB\b\n" +
 	"\x06result\"T\n" +
 	"\x18RegisterWorkspaceSuccess\x128\n" +
-	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\"v\n" +
+	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\"\xef\x01\n" +
 	"\x16RegisterWorkspaceError\x12S\n" +
-	"\x0enot_a_worktree\x18\x01 \x01(\v2+.agentrepl.v1.RegisterWorkspaceNotAWorktreeH\x00R\fnotAWorktreeB\a\n" +
+	"\x0enot_a_worktree\x18\x01 \x01(\v2+.agentrepl.v1.RegisterWorkspaceNotAWorktreeH\x00R\fnotAWorktree\x12w\n" +
+	"\x1ainside_temporary_directory\x18\x02 \x01(\v27.agentrepl.v1.RegisterWorkspaceInsideTemporaryDirectoryH\x00R\x18insideTemporaryDirectoryB\a\n" +
 	"\x05cause\"\x1f\n" +
-	"\x1dRegisterWorkspaceNotAWorktreeB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\x1dRegisterWorkspaceNotAWorktree\"d\n" +
+	")RegisterWorkspaceInsideTemporaryDirectory\x12\x10\n" +
+	"\x03dir\x18\x01 \x01(\tR\x03dir\x12%\n" +
+	"\x0etemporary_root\x18\x02 \x01(\tR\rtemporaryRootB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_register_workspace_proto_rawDescOnce sync.Once
@@ -341,25 +421,27 @@ func file_agentrepl_v1_endpoint_register_workspace_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_register_workspace_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_register_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_agentrepl_v1_endpoint_register_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_agentrepl_v1_endpoint_register_workspace_proto_goTypes = []any{
-	(*RegisterWorkspaceRequest)(nil),      // 0: agentrepl.v1.RegisterWorkspaceRequest
-	(*RegisterWorkspaceResponse)(nil),     // 1: agentrepl.v1.RegisterWorkspaceResponse
-	(*RegisterWorkspaceSuccess)(nil),      // 2: agentrepl.v1.RegisterWorkspaceSuccess
-	(*RegisterWorkspaceError)(nil),        // 3: agentrepl.v1.RegisterWorkspaceError
-	(*RegisterWorkspaceNotAWorktree)(nil), // 4: agentrepl.v1.RegisterWorkspaceNotAWorktree
-	(*v1.WorkspaceRef)(nil),               // 5: workspace.v1.WorkspaceRef
+	(*RegisterWorkspaceRequest)(nil),                  // 0: agentrepl.v1.RegisterWorkspaceRequest
+	(*RegisterWorkspaceResponse)(nil),                 // 1: agentrepl.v1.RegisterWorkspaceResponse
+	(*RegisterWorkspaceSuccess)(nil),                  // 2: agentrepl.v1.RegisterWorkspaceSuccess
+	(*RegisterWorkspaceError)(nil),                    // 3: agentrepl.v1.RegisterWorkspaceError
+	(*RegisterWorkspaceNotAWorktree)(nil),             // 4: agentrepl.v1.RegisterWorkspaceNotAWorktree
+	(*RegisterWorkspaceInsideTemporaryDirectory)(nil), // 5: agentrepl.v1.RegisterWorkspaceInsideTemporaryDirectory
+	(*v1.WorkspaceRef)(nil),                           // 6: workspace.v1.WorkspaceRef
 }
 var file_agentrepl_v1_endpoint_register_workspace_proto_depIdxs = []int32{
 	2, // 0: agentrepl.v1.RegisterWorkspaceResponse.success:type_name -> agentrepl.v1.RegisterWorkspaceSuccess
 	3, // 1: agentrepl.v1.RegisterWorkspaceResponse.error:type_name -> agentrepl.v1.RegisterWorkspaceError
-	5, // 2: agentrepl.v1.RegisterWorkspaceSuccess.workspace:type_name -> workspace.v1.WorkspaceRef
+	6, // 2: agentrepl.v1.RegisterWorkspaceSuccess.workspace:type_name -> workspace.v1.WorkspaceRef
 	4, // 3: agentrepl.v1.RegisterWorkspaceError.not_a_worktree:type_name -> agentrepl.v1.RegisterWorkspaceNotAWorktree
-	4, // [4:4] is the sub-list for method output_type
-	4, // [4:4] is the sub-list for method input_type
-	4, // [4:4] is the sub-list for extension type_name
-	4, // [4:4] is the sub-list for extension extendee
-	0, // [0:4] is the sub-list for field type_name
+	5, // 4: agentrepl.v1.RegisterWorkspaceError.inside_temporary_directory:type_name -> agentrepl.v1.RegisterWorkspaceInsideTemporaryDirectory
+	5, // [5:5] is the sub-list for method output_type
+	5, // [5:5] is the sub-list for method input_type
+	5, // [5:5] is the sub-list for extension type_name
+	5, // [5:5] is the sub-list for extension extendee
+	0, // [0:5] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_register_workspace_proto_init() }
@@ -373,6 +455,7 @@ func file_agentrepl_v1_endpoint_register_workspace_proto_init() {
 	}
 	file_agentrepl_v1_endpoint_register_workspace_proto_msgTypes[3].OneofWrappers = []any{
 		(*RegisterWorkspaceError_NotAWorktree)(nil),
+		(*RegisterWorkspaceError_InsideTemporaryDirectory)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -380,7 +463,7 @@ func file_agentrepl_v1_endpoint_register_workspace_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_register_workspace_proto_rawDesc), len(file_agentrepl_v1_endpoint_register_workspace_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   5,
+			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

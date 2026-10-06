@@ -373,14 +373,20 @@ early state and not a failure."
 
 ;;;; ---- Register ----
 
-(defun agent-repl-host-register (conn dir on-done &optional workspace)
+(defun agent-repl-host-register (conn dir on-done &optional workspace on-refused)
   "Register DIR with the daemon on CONN; call ON-DONE with the minted ref.
 IDEMPOTENT BY DIR — re-registering after a reconnect or a daemon restart
 is the normal path, never an error.  A daemon-authored error arm and a
 transport failure are different facts and are logged as such; both answer
 ON-DONE with nil so the caller never waits on a callback that will not come.
 WORKSPACE names an existing workspace being re-registered.  Its absence means
-DIR is being registered before any workspace identity exists."
+DIR is being registered before any workspace identity exists.
+
+ON-REFUSED, when given, OWNS a daemon-authored refusal: it is called with
+the decoded `RegisterWorkspaceError' INSTEAD of ON-DONE, to tell the user
+why, and the refusal is recorded at INFO -- an answer the caller reports,
+not a fault.  Without it a refusal is recorded at ERROR, since nobody is
+there to say it."
   (let ((log-scope (if workspace
                        workspace
                      '(:agent-repl-central
@@ -397,9 +403,14 @@ DIR is being registered before any workspace identity exists."
                               (plist-get ref :id))
             (funcall on-done ref)))
          (:error
-          (agent-repl--error log-scope "elisp.host.register-refused dir=%S error=%S"
-                             dir (plist-get response :value))
-          (funcall on-done nil))
+          (if on-refused
+              (progn
+                (agent-repl--info log-scope "elisp.host.register-refused dir=%S error=%S"
+                                  dir (plist-get response :value))
+                (funcall on-refused (plist-get response :value)))
+            (agent-repl--error log-scope "elisp.host.register-refused dir=%S error=%S"
+                               dir (plist-get response :value))
+            (funcall on-done nil)))
          (arm
           (agent-repl--error log-scope "elisp.host.register-unknown-arm dir=%S arm=%S" dir arm)
           (funcall on-done nil))))

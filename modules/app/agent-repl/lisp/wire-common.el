@@ -1003,6 +1003,23 @@ an unset `how' is a contract breach."
                        (list 'misanswered :misanswered #'agent-repl-wire-decode-lock-holder-misanswered)
                        (list 'silent :silent #'agent-repl-wire-decode-lock-holder-silent)))))))
 
+;;;; ---- Shared refusal arms ----
+
+(defun agent-repl-wire-decode-inside-temporary-directory (message-name value)
+  "Decode VALUE as MESSAGE-NAME, an `inside_temporary_directory' refusal arm.
+RegisterWorkspaceError, RegisterRepositoryError and CreateWorkspaceError
+each declare their own `<Rpc>InsideTemporaryDirectory' message, and all
+three are the SAME two fields: the refused directory and the temporary
+root it lies inside, both canonical (owner ruling, 2026-10-06: agent-repl
+does not register temporary folders).  One decoder serves the three so
+their shape cannot drift.  Answers the plist (:dir DIR :temporary-root ROOT)."
+  (let ((object (agent-repl-wire--object message-name value)))
+    (agent-repl-wire--check-keys message-name object '(dir temporaryRoot))
+    (agent-repl-wire--decoded
+     message-name
+     (list :dir (agent-repl-wire--decode-string message-name 'dir object)
+           :temporary-root (agent-repl-wire--decode-string message-name 'temporaryRoot object)))))
+
 (provide 'wire-common)
 
 ;;; wire-common.el ends here
