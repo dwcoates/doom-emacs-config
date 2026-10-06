@@ -13,7 +13,7 @@ import { logRecordsSince, logSinkMark } from "../log-records.js";
 import type { Engine } from "../../src/engine/engine.js";
 import { conversationv1, shimv1 } from "../../src/proto.js";
 import * as failures from "../../src/service/failures.js";
-import { shimRoutes } from "../../src/service/routes.js";
+import { peerStreamGone, shimRoutes } from "../../src/service/routes.js";
 import * as requests from "./requests.js";
 
 function requestBoundariesSince(before: number, rpc: string): Array<{ level: unknown; boundary: unknown }> {
@@ -634,5 +634,55 @@ describe("shimRoutes unanticipated exceptions", () => {
 
     // Assert.
     expect(rejection?.code).toBe(Code.Internal);
+  });
+});
+
+describe("peerStreamGone", () => {
+  /** A Node error carrying `code`. */
+  const nodeError = (message: string, code: string): Error => Object.assign(new Error(message), { code });
+  /** A signal in the given state. */
+  const signal = (aborted: boolean): AbortSignal => {
+    const controller = new AbortController();
+    if (aborted) controller.abort();
+    return controller.signal;
+  };
+
+  it.each([
+    {
+      name: "an h2 write onto a reset stream, whatever the signal says",
+      error: nodeError("The stream has been destroyed", "ERR_HTTP2_INVALID_STREAM"),
+      aborted: false,
+      want: true,
+    },
+    {
+      name: "an HTTP/1.1 write onto a destroyed response once the call closed",
+      error: nodeError("Cannot call write after a stream was destroyed", "ERR_STREAM_DESTROYED"),
+      aborted: true,
+      want: true,
+    },
+    {
+      name: "an HTTP/1.1 write after the response ended once the call closed",
+      error: nodeError("write after end", "ERR_STREAM_WRITE_AFTER_END"),
+      aborted: true,
+      want: true,
+    },
+    {
+      name: "a destroyed stream while the call still stands, which names no departure",
+      error: nodeError("Cannot call write after a stream was destroyed", "ERR_STREAM_DESTROYED"),
+      aborted: false,
+      want: false,
+    },
+    {
+      name: "an unrelated failure after the call closed",
+      error: new Error("the fold came apart"),
+      aborted: true,
+      want: false,
+    },
+  ])("$name", ({ error, aborted, want }) => {
+    // Arrange + Act.
+    const gone = peerStreamGone(error, signal(aborted));
+
+    // Assert.
+    expect(gone).toBe(want);
   });
 });

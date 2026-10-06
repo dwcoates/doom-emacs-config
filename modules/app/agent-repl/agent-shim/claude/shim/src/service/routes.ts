@@ -76,12 +76,16 @@ async function answering<T>(rpc: string, act: () => Promise<T>): Promise<T> {
  * or not — can only reach the caller as the stream's error. Letting an
  * unanticipated one through unmapped closes the stream with no detail at all.
  */
-async function* streaming<T>(rpc: string, frames: () => AsyncIterable<T>): AsyncIterable<T> {
+async function* streaming<T>(
+  rpc: string,
+  frames: () => AsyncIterable<T>,
+  signal: AbortSignal,
+): AsyncIterable<T> {
   try {
     yield* frames();
     LOGGER.debug({ rpc, boundary: "completed" }, `completed shim.v1.${rpc} stream`);
   } catch (error) {
-    throw reportUnhandled(rpc, error);
+    throw reportUnhandled(rpc, error, signal);
   }
 }
 
@@ -98,11 +102,24 @@ async function* streaming<T>(rpc: string, frames: () => AsyncIterable<T>): Async
  * Matched on the code first, which is the contract Node states, and on the
  * message only as the fallback for a wrapper that carried the text without the
  * code.
+ *
+ * Exported so the classification is testable for the races no suite can time
+ * from a real peer.
  */
-function peerStreamGone(error: unknown): boolean {
+export function peerStreamGone(error: unknown, signal: AbortSignal | undefined): boolean {
   if (!(error instanceof Error)) return false;
-  if ((error as NodeJS.ErrnoException).code === "ERR_HTTP2_INVALID_STREAM") return true;
-  return error.message.includes("The stream has been destroyed");
+  const code = (error as NodeJS.ErrnoException).code;
+  if (code === "ERR_HTTP2_INVALID_STREAM") return true;
+  if (error.message.includes("The stream has been destroyed")) return true;
+  // THE HTTP/1.1 HALF OF THE SAME RACE. A consumer that cancels a stream over
+  // HTTP/1.1 closes the response, and a frame already produced for it is
+  // written onto the destroyed response: Node answers `ERR_STREAM_DESTROYED`
+  // (or `ERR_STREAM_WRITE_AFTER_END`). These codes name only that a stream is
+  // gone, not who ended it, so they count as a departure ONLY when the call's
+  // own signal has aborted — the transport's statement that the call closed.
+  return (
+    signal?.aborted === true && (code === "ERR_STREAM_DESTROYED" || code === "ERR_STREAM_WRITE_AFTER_END")
+  );
 }
 
 /**
@@ -117,10 +134,10 @@ function peerStreamGone(error: unknown): boolean {
  * place to learn it, and the error still travels to the caller unchanged: the
  * mapping below is untouched, so nothing that DOES have a listener is silenced.
  */
-function reportUnhandled(rpc: string, error: unknown): unknown {
+function reportUnhandled(rpc: string, error: unknown, signal?: AbortSignal): unknown {
   const mapped = internalFromUnknown(rpc, error);
   if (mapped !== error) {
-    if (peerStreamGone(error)) {
+    if (peerStreamGone(error, signal)) {
       LOGGER.info(
         {
           rpc,
@@ -161,10 +178,10 @@ export function shimRoutes(engine: Engine): (router: ConnectRouter) => void {
         return answering("StartSession", () => engine.startSession(request));
       },
 
-      async *watchSession(request) {
+      async *watchSession(request, context) {
         entered("WatchSession");
         validateWatchSessionRequest(request);
-        yield* streaming("WatchSession", () => engine.watchSession(request));
+        yield* streaming("WatchSession", () => engine.watchSession(request), context.signal);
       },
 
       async setSessionModel(request) {
@@ -211,7 +228,7 @@ export function shimRoutes(engine: Engine): (router: ConnectRouter) => void {
       async *watchAgent(request, context) {
         entered("WatchAgent");
         validateWatchAgentRequest(request);
-        yield* streaming("WatchAgent", () => engine.watchAgent(request, context.signal));
+        yield* streaming("WatchAgent", () => engine.watchAgent(request, context.signal), context.signal);
       },
 
       async updateAgent(request) {
@@ -234,10 +251,10 @@ export function shimRoutes(engine: Engine): (router: ConnectRouter) => void {
 
       // ---- Detached work ----
 
-      async *watchBash(request) {
+      async *watchBash(request, context) {
         entered("WatchBash");
         validateWatchBashRequest(request);
-        yield* streaming("WatchBash", () => engine.watchBash(request));
+        yield* streaming("WatchBash", () => engine.watchBash(request), context.signal);
       },
 
       async stopBash(request) {
