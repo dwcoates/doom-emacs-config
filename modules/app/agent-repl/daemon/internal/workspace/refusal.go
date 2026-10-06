@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/tempdirs"
 )
 
 // opRefusal is the operation a verb's typed refusal is logged under. A refusal
@@ -30,6 +31,11 @@ const (
 	ArmNotYetAdopted = "not_yet_adopted"
 	// ArmNotAWorktree is a registration whose directory is not a git worktree.
 	ArmNotAWorktree = "not_a_worktree"
+	// ArmInsideTemporaryDirectory is a registration -- RegisterWorkspace,
+	// RegisterRepository, or the repository a CreateWorkspace names -- whose
+	// directory lies inside a temporary root (owner ruling, 2026-10-06). The
+	// arm carries `dir` and `temporary_root`.
+	ArmInsideTemporaryDirectory = "inside_temporary_directory"
 	// ArmNotInARepository is a RegisterRepository whose path is readable but
 	// lies inside no git repository with a main worktree. It is DISTINCT from
 	// ArmNotAWorktree, which is about the announced directory being a worktree
@@ -286,6 +292,21 @@ func namedRefusal(err error, rpc string) error {
 		return r.WithRpc(rpc)
 	}
 	return err
+}
+
+// temporaryRefusal answers the typed refusal for the registry's
+// temporary-directory refusal (tempdirs.InsideError), recorded at INFO like
+// every refusal, and nil for any other error. It is how every verb that
+// reaches the registry's guard answers it, so the arm and its two fields are
+// spelled once.
+func temporaryRefusal(log dlog.Logger, rpc string, err error) *Refusal {
+	inside, ok := tempdirs.AsInside(err)
+	if !ok {
+		return nil
+	}
+	return refuseWith(log, rpc, ArmInsideTemporaryDirectory, inside.Error(), false, map[string]any{
+		"dir": inside.Dir, "temporary_root": inside.Root,
+	})
 }
 
 // refuse records the refusal at INFO and returns it. Every refusal site in this
