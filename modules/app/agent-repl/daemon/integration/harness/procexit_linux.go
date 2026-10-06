@@ -12,6 +12,9 @@ import (
 // WaitProcessExit waits for pid's exit on a pidfd becoming readable, bounded
 // by ctx's deadline. A pid already gone when the pidfd is opened (ESRCH) has
 // exited.
+//
+// The pidfd needs no close-on-exec mark of its own: pidfd_open(2) always sets
+// O_CLOEXEC on the descriptor it answers, so it never leaks into a child.
 func WaitProcessExit(ctx context.Context, pid int) error {
 	fd, err := unix.PidfdOpen(pid, 0)
 	if err != nil {
