@@ -8,6 +8,8 @@
 [[ -n ${AGENT_REPL_BACKGROUND_PRIORITY:-} ]] || exec "$(dirname "${BASH_SOURCE[0]}")/../../../modules/app/agent-repl/bin/background.sh" bash "${BASH_SOURCE[0]}" "$@"
 
 set -euo pipefail
+# shellcheck source=/dev/null
+. "$(dirname "${BASH_SOURCE[0]}")/../../../modules/app/agent-repl/bin/lib-grep-in.sh"
 
 THIS_DIR="$(cd "$(dirname "$0")" && pwd)"
 RUN="$THIS_DIR/run.sh"
@@ -128,7 +130,7 @@ test_enqueue_own_refuses_uncommitted_work() {
 test_enqueue_own_refuses_the_main_worktree() {
   mkfixture
   TOP="$FX/main" invoke --enqueue-own
-  if [ "$RUN_RC" -eq 2 ] && printf '%s' "$RUN_OUT" | grep -q "main worktree"; then
+  if [ "$RUN_RC" -eq 2 ] && grep_in "$RUN_OUT" -q "main worktree"; then
     pass "--enqueue-own refuses the repository's main worktree"
   else
     fail "--enqueue-own refuses the repository's main worktree" "exit=$RUN_RC" "$RUN_OUT"
@@ -188,7 +190,7 @@ test_remove_branch_without_a_worktree_deletes_the_branch() {
 test_remove_branch_refuses_an_unlanded_branch() {
   mkfixture
   BRANCH_D_EXIT=1 invoke --remove-branch feat/x
-  if [ "$RUN_RC" -eq 2 ] && printf '%s' "$RUN_OUT" | grep -q "may not have landed"; then
+  if [ "$RUN_RC" -eq 2 ] && grep_in "$RUN_OUT" -q "may not have landed"; then
     pass "--remove-branch fails on a branch master lacks"
   else
     fail "--remove-branch fails on a branch master lacks" "exit=$RUN_RC" "$RUN_OUT"
@@ -213,7 +215,7 @@ test_each_outcome_maps_to_its_exit() {
 test_passes_the_verbs_output_through() {
   mkfixture
   invoke --enqueue-own
-  if printf '%s' "$RUN_OUT" | grep -q "merge-queue: ws asked to merge x"; then
+  if grep_in "$RUN_OUT" -q "merge-queue: ws asked to merge x"; then
     pass "the verb's own lines reach the caller"
   else
     fail "the verb's own lines reach the caller" "$RUN_OUT"
@@ -224,7 +226,7 @@ test_missing_daemon_binary_is_an_error() {
   mkfixture
   rm "$FX/daemon"
   invoke --enqueue-own
-  if [ "$RUN_RC" -eq 2 ] && printf '%s' "$RUN_OUT" | grep -q "missing or not executable"; then
+  if [ "$RUN_RC" -eq 2 ] && grep_in "$RUN_OUT" -q "missing or not executable"; then
     pass "a missing daemon binary is an error"
   else
     fail "a missing daemon binary is an error" "exit=$RUN_RC" "$RUN_OUT"
@@ -234,7 +236,7 @@ test_missing_daemon_binary_is_an_error() {
 test_unknown_verb_prints_usage() {
   mkfixture
   invoke --bogus
-  if [ "$RUN_RC" -eq 1 ] && printf '%s' "$RUN_OUT" | grep -q "usage:"; then
+  if [ "$RUN_RC" -eq 1 ] && grep_in "$RUN_OUT" -q "usage:"; then
     pass "an unknown verb prints usage"
   else
     fail "an unknown verb prints usage" "exit=$RUN_RC" "$RUN_OUT"

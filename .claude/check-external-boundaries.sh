@@ -44,6 +44,8 @@
 #   1 — violations found; offending sites printed to stderr
 
 set -euo pipefail
+# shellcheck source=/dev/null
+. "$(dirname "${BASH_SOURCE[0]}")/../modules/app/agent-repl/bin/lib-grep-in.sh"
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 MODULE_DIR="$REPO_ROOT/modules/app/agent-repl"
@@ -115,12 +117,12 @@ while IFS= read -r file; do
     window=$(awk -v s="$line_num" -v e="$end_num" 'NR>=s && NR<=e' "$file")
 
     # If ANY line in the window carries the ALLOW tag, exempt the form.
-    if printf '%s\n' "$window" | grep -q 'ALLOW-EXTERNAL-BOUNDARY'; then
+    if grep_in "$window" -q 'ALLOW-EXTERNAL-BOUNDARY'; then
       continue
     fi
 
     # Check the window for a binary literal.
-    if printf '%s\n' "$window" | grep -qE "$BINARY_RE"; then
+    if grep_in "$window" -qE "$BINARY_RE"; then
       emit_header
       echo "  $file:$line_num:$line_text" >&2
       violations=$((violations + 1))
