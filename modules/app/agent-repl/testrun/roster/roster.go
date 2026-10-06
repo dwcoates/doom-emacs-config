@@ -42,6 +42,20 @@ type Suite struct {
 	// Harness marks a suite that tests the module's own shell scripts in bin/,
 	// which is the blast radius the merge gate gives a change under bin/.
 	Harness bool
+	// IntegrationTags, with IntegrationPackages, adds a GoModule suite's
+	// build-tagged integration package to the suite: its tests compile only
+	// under these tags, so the module's ordinary pass never sees them.
+	IntegrationTags string
+	// IntegrationPackages is the `go list` pattern (relative to Path) the
+	// integration pass covers.
+	IntegrationPackages string
+	// IntegrationPrebuildPackage is the integration package whose TestMain
+	// fills and consumes shared binaries, as PrebuildPackage is for the
+	// ordinary pass. Empty means no prebuild.
+	IntegrationPrebuildPackage string
+	// IntegrationConfig adds a Vitest suite's integration config (relative to
+	// Path) to the suite: its files are a second split run under that config.
+	IntegrationConfig string
 	// Slots is a Script suite's width: the core slots its one unit holds.
 	// Zero is one slot. A wider suite is told its width in
 	// AGENT_REPL_UNIT_SLOTS and must cap itself to exactly that many cores.
@@ -72,13 +86,20 @@ var Suites = []Suite{
 	{Name: "merge-queue-skill-harness", Kind: Script, Path: "/.claude/skills/merge-queue/test-run.sh"},
 	{Name: "ert", Kind: ERT, Path: "lisp"},
 	{Name: "testrun", Kind: GoModule, Path: "testrun"},
-	{Name: "daemon", Kind: GoModule, Path: "daemon"},
+	// THE INTEGRATION SUITES RIDE THEIR SYSTEM'S SUITE, so a full run and
+	// `--suites daemon` (or webapp, shim) run unit and integration together,
+	// as the owner's test policy asks of one complete change set (AGENTS.md,
+	// "When to run which tests"). They used to be outside the roster entirely
+	// (`make integration`, `npm run test:integration`), and so outside the
+	// host slot too.
+	{Name: "daemon", Kind: GoModule, Path: "daemon",
+		IntegrationTags: "integration", IntegrationPackages: "./integration", IntegrationPrebuildPackage: "integration"},
 	{Name: "sidecar", Kind: GoModule, Path: "agent-shim/claude/shim-sidecar", PrebuildPackage: "integration"},
 	{Name: "store", Kind: GoModule, Path: "agent-shim/shim-store"},
 	{Name: "lock", Kind: GoModule, Path: "agent-shim/shim-lock"},
 	{Name: "logging", Kind: GoModule, Path: "agent-shim/logging/go"},
-	{Name: "webapp", Kind: Vitest, Path: "webapp"},
-	{Name: "shim", Kind: Vitest, Path: "agent-shim/claude/shim"},
+	{Name: "webapp", Kind: Vitest, Path: "webapp", IntegrationConfig: "vitest.integration.config.ts"},
+	{Name: "shim", Kind: Vitest, Path: "agent-shim/claude/shim", IntegrationConfig: "vitest.integration.config.ts"},
 	{Name: "proto", Kind: Script, Path: "bin/report-nonlisp-coverage.sh", Args: []string{"proto"}},
 	{Name: "logging-density", Kind: Script, Path: "bin/report-logging-density.sh"},
 	{Name: "e2e", Kind: E2E, Path: "e2e"},
