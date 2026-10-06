@@ -157,7 +157,9 @@ func (s *server) SessionHealth(
 
 // ClientLog persists a console-less client's diagnostic record into the OWNING
 // WORKSPACE's durable log. A record whose workspace cannot be resolved is an
-// invariant violation, never a global write.
+// invariant violation, never a global write -- EXCEPT a registered workspace
+// whose directory is gone, which has no sink left to open: dlog files that
+// record centrally, naming the workspace, and the rpc succeeds.
 func (s *server) ClientLog(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.ClientLogRequest],

@@ -1619,6 +1619,14 @@ carries."
                     (agent-repl-test-wire-verbs--parse "{\"spawnFailed\":{\"detail\":\"exec format error\"}}"))
                    '(:cause (:arm :spawn-failed :value (:detail "exec format error")))))))
 
+(ert-deftest agent-repl-test-wire-verbs-open-error-worktree-unrestorable-arm ()
+  "OpenWorkspaceError's `worktree_unrestorable' arm decodes with everything it
+carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-open-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"worktreeUnrestorable\":{\"dir\":\"/w/gone\",\"branch\":\"b\",\"detail\":\"gone\"}}"))
+                   '(:cause (:arm :worktree-unrestorable :value (:dir "/w/gone" :branch "b" :detail "gone")))))))
+
 (ert-deftest agent-repl-test-wire-verbs-open-error-vendor-start-failed-arm ()
   "OpenWorkspaceError's `vendor_start_failed' arm decodes with everything it
 carries."
@@ -1679,7 +1687,7 @@ at."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_open_workspace.pb.go" "OpenWorkspaceError")
                        #'string<)
-                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "sessionDeleted" "transcriptMissing" "spawnFailed" "vendorStartFailed" "lockHolderUnavailable")
+                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "sessionDeleted" "transcriptMissing" "spawnFailed" "vendorStartFailed" "lockHolderUnavailable" "worktreeUnrestorable")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-close-error-blocked-arm ()

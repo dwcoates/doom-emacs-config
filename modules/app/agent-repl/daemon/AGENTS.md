@@ -265,7 +265,9 @@ environment. Every flag is optional.
    directory is gone opens no fault at all, only an INFO record; CLOSE every open workspace
    whose directory is gone (a row naming a path that is not there is a tab
    Emacs cannot serve; counted as `missing_dir_closed`, and a stat that does
-   not say "not exist" is never read as gone), adopt the shims whose
+   not say "not exist" is never read as gone; an open row whose BRANCH
+   SURVIVES is recreated instead of closed, see "A deleted worktree is
+   recreated from its branch"), adopt the shims whose
    workspace lock is still held (never kill-and-restart, and EVERY survivor is
    dialled concurrently so one adoption bound covers the whole boot), reconcile the intent
    manifest (all four dispositions persisted as faults; a manifest is CONSUMED
@@ -1367,7 +1369,15 @@ generations. Workspace-bound daemon records go to
 inherited descriptor, and forwarded webapp and sidecar records go to
 `webapp.log` and `sidecar.log`. Each canonical workspace path is a symlink to
 a daemon-owned target under `<state>/logs/`. Failing to resolve a workspace is
-an invariant violation, never a global write.
+an invariant violation, never a global write -- with ONE exception: a
+forwarded client record (`ClientLog`) about a registered workspace whose
+DIRECTORY IS GONE lands in the run log with `workspace_id`, `workspace_dir`
+and `unroutable_workspace` naming it, the rpc succeeds, and the condition is
+stated once per workspace at INFO (`daemon.dlog.client_central_fallback`).
+Only a stat that says "does not exist" qualifies; any other stat failure stays
+a failure. A NEW sink of a workspace is never opened once its directory is
+gone, because the open's `MkdirAll` would resurrect the deleted worktree as a
+bare `.claude/emacs` tree; sinks already open keep writing to their targets.
 
 THE WORKSPACE ID ON A RECORD AND IN A SINK NAME IS THE DAEMON-MINTED
 `ids.WorkspaceID` (16 hex characters, `wsm.IDLength`) -- the same id the shim,
@@ -1483,6 +1493,48 @@ It ends at the terminal step -- `succeeded` once the session is up and any
 initial prompt is accepted, or `failed` for anything that went wrong inside
 it. A create that fails at the worktree never enters it. Adding a stage is a
 proto change (a new `WorkspaceCreateStage` arm).
+
+## A deleted worktree is recreated from its branch
+
+Owner rulings 2026-10-06. A workspace whose directory was deleted underneath
+it -- by a plain `rm`, or by a landing outside the daemon's merge flow -- is
+still the user's, so its worktree is RECREATED from its recorded branch
+(`workspace.restoreWorktree`) in two places:
+
+- **Boot** (`closeMissingDirs`): an OPEN row whose directory is gone is
+  recreated instead of closed (`Report.MissingDirRestored`, INFO
+  `daemon.boot.close_missing_dir` "recreated"). It is still CLOSED when there
+  is nothing to restore from, and when git could not act (the restorer's own
+  ERROR; the boot finishes, and an explicit open retries and surfaces it). A
+  CLOSED row is never touched by the boot.
+- **Open** (`OpenWorkspace` on a closed row): the same restore, entered as
+  `WorkspaceOpenStage.restoring_worktree` between `checking_worktree` and
+  `starting_session`, then the ordinary open (session and history come back
+  from the store).
+
+The restore, in order: refuse when the workspace carries `merged_at` (a merged
+tree was removed ON PURPOSE; the queue stamps `merged_at` before it closes the
+row, so the stamp alone decides, even on a row a crash left open; a nuked
+workspace has no row at all), when no branch was recorded, when the repository
+is gone, or when the branch no longer exists; then retire a STALE GIT
+REGISTRATION for that one path (a plain `rm` leaves `.git/worktrees/<name>`,
+and `git worktree add` refuses "'<dir>' is a missing but already registered
+worktree"): `gitclient.UnregisterMissingWorktree` runs `git worktree remove
+<dir>`, which git accepts for a missing tree and which retires only that
+entry. NOT `git worktree prune` (it retires every missing registration in the
+repository, others' included) and NOT `worktree add -f` (it also overrides
+git's refusal to check out a branch another live worktree holds). A LOCKED
+registration is never forced: the restore fails at ERROR naming the lock.
+Then `git worktree add <dir> <branch>` (`gitclient.RestoreWorktree`, which
+re-attaches the directory to its log sinks), INFO with the directory and
+branch, and the views boot passed over are bound (`bindResolvers`,
+`publishNaming`).
+
+Nothing to restore from is the typed refusal
+`OpenWorkspaceError.worktree_unrestorable` (dir, branch, detail), recorded at
+INFO: a user picking such a row is an ordinary answer, not a fault. A git that
+cannot answer or act is an ERROR and a returned failure, never a refusal and
+never a bring-up in a directory that is not there.
 
 ## Workspace naming: one call, and a fork brings its conversation
 

@@ -362,6 +362,15 @@ func (r *Repo) AddBranch(name string) string {
 	return sha
 }
 
+// RemoveBranch deletes a branch from the repository, as a branch deleted
+// after it was landed outside the daemon's own merge flow is.
+func (r *Repo) RemoveBranch(name string) {
+	r.t.Helper()
+	r.edit(func(s *fakegit.State) {
+		r.state(s).RemoveBranch(name)
+	})
+}
+
 // ScriptFailure makes the NEXT git command matching this prefix fail.
 func (r *Repo) ScriptFailure(dir string, exit int, stderr string, match ...string) {
 	r.t.Helper()
