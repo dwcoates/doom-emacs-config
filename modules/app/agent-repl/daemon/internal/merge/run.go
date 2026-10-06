@@ -381,21 +381,9 @@ func (r *run) admit(ctx context.Context) error {
 	r.emacsRepo = same
 	r.selfCheckout = same && sameDir(subject.targetDir, o.deps.SelfRepoDir)
 
-	// THE REPOSITORY MAY STATE ITS OWN MERGE ACTIONS. Which directory those
-	// come from is a fact about the requester's repository, so it is resolved
-	// once here rather than re-derived by each step.
-	policy, err := o.policyFor(ctx, ws)
-	if err != nil {
-		r.end(ctx, fmt.Errorf("could not resolve the repository's merge policy: %w", err))
+	if err := r.takeSession(ctx); err != nil {
+		r.end(ctx, err)
 		return err
-	}
-	r.policy = policy
-
-	if release, ok, err := o.deps.Occupy(ws, holderMerge); err != nil {
-		r.end(ctx, fmt.Errorf("could not take the session's occupancy: %w", err))
-		return err
-	} else if ok {
-		r.releaseOccupancy = release
 	}
 	if err := o.deps.DB.OpenMergeLedger(ctx, ws, r.lease.ID); err != nil {
 		r.end(ctx, fmt.Errorf("could not open the merge ledger: %w", err))
@@ -441,17 +429,47 @@ func (r *run) admit(ctx context.Context) error {
 		"source": r.source.Kind.String(), "branch": subject.branch, "worktree": subject.dir, "target": subject.targetDir,
 		"method": methodName(r.emacsRepo, r.source), "self_checkout": r.selfCheckout, "displaces": r.displaces,
 	})
-	if err := r.awaitFree(ctx, ws); err != nil {
+	if err := r.awaitWorkspacesFree(ctx); err != nil {
 		r.end(ctx, err)
 		return err
 	}
-	if r.subject.other != "" {
-		if err := r.awaitFree(ctx, r.subject.other); err != nil {
-			r.end(ctx, err)
-			return err
-		}
-	}
 	return r.execute(ctx)
+}
+
+// takeSession resolves where the requester's repository states its merge
+// policy and takes the session's occupancy guard: what a run holds of its
+// workspace before its first step, whether admitted fresh or resumed.
+//
+// THE REPOSITORY MAY STATE ITS OWN MERGE ACTIONS. Which directory those come
+// from is a fact about the requester's repository, so it is resolved once
+// here rather than re-derived by each step.
+func (r *run) takeSession(ctx context.Context) error {
+	policy, err := r.o.policyFor(ctx, r.ws)
+	if err != nil {
+		return fmt.Errorf("could not resolve the repository's merge policy: %w", err)
+	}
+	r.policy = policy
+	release, ok, err := r.o.deps.Occupy(r.ws, holderMerge)
+	if err != nil {
+		return fmt.Errorf("could not take the session's occupancy: %w", err)
+	}
+	if ok {
+		r.releaseOccupancy = release
+	}
+	return nil
+}
+
+// awaitWorkspacesFree holds a merge leaving its queue until every workspace it
+// drives is free: the requester, and another workspace whose worktree it
+// rebases in.
+func (r *run) awaitWorkspacesFree(ctx context.Context) error {
+	if err := r.awaitFree(ctx, r.ws); err != nil {
+		return err
+	}
+	if r.subject.other != "" {
+		return r.awaitFree(ctx, r.subject.other)
+	}
+	return nil
 }
 
 // awaitFree holds an admitted merge until one workspace is free: no turn in
@@ -754,16 +772,12 @@ func (r *run) configuredPrompt(ctx context.Context, kind string, step footer.Mer
 		}
 		r.doneResuming()
 		round := r.activeRound()
-		r.address(round)
-		r.setStep(ctx, step, func(f *footer.MergeFacts) { f.Line = promptLine(step, text) })
-		r.upsert(round, promptTab(kind, round.live()))
+		r.drawLive(ctx, round, step, promptLine(step, text), nil, promptTab(kind, round.live()))
 		close, err := r.reattachTurn(ctx, ids.TurnID(res.Turn), text, origin)
 		return round, close, err
 	}
 	round := r.openTab(ctx, kind)
-	r.address(round)
-	r.setStep(ctx, step, func(f *footer.MergeFacts) { f.Line = promptLine(step, text) })
-	r.upsert(round, promptTab(kind, round.live()))
+	r.drawLive(ctx, round, step, promptLine(step, text), nil, promptTab(kind, round.live()))
 	turn := wsm.NewTurnID()
 	if err := r.checkpoint(ctx, kind, func(d *progressDoc) {
 		d.PromptIndex, d.Turn, d.Outcome = i, string(turn), landed
@@ -814,6 +828,23 @@ func (r *run) submit(ctx context.Context, turn ids.TurnID, text string, origin c
 		return wsm.CloseFailed, fmt.Errorf("merge: the queue refused a merge prompt: %s", disposition.RefusedArm)
 	}
 	return r.o.deps.AwaitTurnEnd(ctx, r.ws, turn)
+}
+
+// drawLive stands an AGENTIC step's round live: the merge's own turns are
+// addressed to it, the footer moves onto the step with its line (and apply's
+// own facts), and the tab is drawn. It is the one shape every agentic round
+// -- a configured prompt, a conflict resolution, a fixing attempt -- opens
+// with, fresh or resumed.
+func (r *run) drawLive(ctx context.Context, round tabRound, step footer.MergeStep,
+	line *frontendv1.FooterStatusActivityMergeStep, apply func(*footer.MergeFacts), tab *frontendv1.FeedMergeTab) {
+	r.address(round)
+	r.setStep(ctx, step, func(f *footer.MergeFacts) {
+		if apply != nil {
+			apply(f)
+		}
+		f.Line = line
+	})
+	r.upsert(round, tab)
 }
 
 // promptTab builds an agentic prompt tab's kind arm.
