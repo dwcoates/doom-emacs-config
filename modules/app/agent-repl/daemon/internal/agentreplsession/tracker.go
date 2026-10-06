@@ -54,14 +54,18 @@ type Publisher interface {
 }
 
 // Tracker is agent-repl's session.
+//
+// THE STORE IS THE ONE SOURCE OF TRUTH; the tracker holds only the traffic
+// counted since its last flush. Every begin and every flush reads the stored
+// session, applies its change and writes it back, so a successor daemon that
+// took over mid-session continues from what the incumbent last wrote rather
+// than from what it read when it was built.
 type Tracker struct {
 	store   Store
 	publish Publisher
 	log     dlog.Logger
 
 	mu sync.Mutex
-	// current is the standing session; nil before any began.
-	current *wsm.AgentReplSession
 	// pending is traffic counted since the last flush.
 	pending vendortraffic.Counts
 }
@@ -88,7 +92,6 @@ func New(ctx context.Context, store Store, publish Publisher, log dlog.Logger) (
 		log.Info("daemon.agentreplsession.load", "no session has begun yet; none is stated until a login or an editor start", nil)
 		return t, nil
 	}
-	t.current = &loaded
 	log.Info("daemon.agentreplsession.load", "carried the persisted session forward", fields(loaded))
 	publish.SetAgentReplSession(view(loaded))
 	return t, nil
@@ -109,61 +112,78 @@ func (t *Tracker) LoginCompleted(ctx context.Context, at time.Time) {
 func (t *Tracker) begin(ctx context.Context, at time.Time, began wsm.SessionBegan) {
 	const op = "daemon.agentreplsession.begin"
 	t.mu.Lock()
-	if t.current != nil && !at.After(t.current.StartedAt) {
-		standing := *t.current
-		t.mu.Unlock()
+	defer t.mu.Unlock()
+	event := dlog.Context{"event": string(began), "event_at": at.UTC().Format(time.RFC3339Nano)}
+	standing, found, err := t.store.AgentReplSession(ctx)
+	if err != nil {
+		event["cause"] = err.Error()
+		t.log.Error(op, "the standing session could not be read; no session was begun", event)
+		return
+	}
+	if found && !at.After(standing.StartedAt) {
 		ctxFields := fields(standing)
-		ctxFields["event"] = string(began)
-		ctxFields["event_at"] = at.UTC().Format(time.RFC3339Nano)
+		for k, v := range event {
+			ctxFields[k] = v
+		}
 		t.log.Info(op, "the standing session began later than this event; it stays", ctxFields)
 		return
 	}
 	next := wsm.AgentReplSession{StartedAt: at, Began: began}
-	t.current = &next
-	// Traffic counted before this instant belongs to the session it replaces.
+	if err := t.store.PutAgentReplSession(ctx, next); err != nil {
+		ctxFields := fields(next)
+		ctxFields["cause"] = err.Error()
+		t.log.Error(op, "the new session could not be persisted; it was not begun", ctxFields)
+		return
+	}
+	// Traffic counted before this instant belongs to the session it replaced.
 	t.pending = vendortraffic.Counts{}
-	t.persistAndPublishLocked(ctx, op, next)
-	t.mu.Unlock()
+	t.publish.SetAgentReplSession(view(next))
 	t.log.Info(op, "a new session began", fields(next))
 }
 
-// AddTraffic accumulates traffic the sampler counted. With no session standing
-// there is nothing to count it toward.
+// AddTraffic accumulates traffic the sampler counted, for the next flush.
 func (t *Tracker) AddTraffic(c vendortraffic.Counts) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if t.current == nil {
-		return
-	}
 	t.pending = t.pending.Plus(c)
 }
 
-// FlushTraffic states the accumulated traffic: persisted and pushed, once,
-// when anything was counted since the last flush.
+// FlushTraffic states the accumulated traffic: added to the stored session,
+// persisted and pushed, once, when anything was counted since the last flush.
+// With no session standing there is nothing to count it toward, and it is
+// dropped. A store that cannot be read or written keeps the traffic pending
+// for the next flush, at ERROR.
 func (t *Tracker) FlushTraffic() {
+	const op = "daemon.agentreplsession.flush"
+	ctx := context.Background()
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if t.current == nil || t.pending.IsZero() {
+	if t.pending.IsZero() {
 		return
 	}
-	next := *t.current
+	pendingFields := dlog.Context{"pending_received": t.pending.Received, "pending_sent": t.pending.Sent}
+	standing, found, err := t.store.AgentReplSession(ctx)
+	if err != nil {
+		pendingFields["cause"] = err.Error()
+		t.log.Error(op, "the standing session could not be read; the traffic stays pending", pendingFields)
+		return
+	}
+	if !found {
+		t.pending = vendortraffic.Counts{}
+		t.log.Debug(op, "traffic was counted with no session standing; it counts toward none", pendingFields)
+		return
+	}
+	next := standing
 	next.BytesReceived += t.pending.Received
 	next.BytesSent += t.pending.Sent
-	t.current = &next
-	t.pending = vendortraffic.Counts{}
-	t.persistAndPublishLocked(context.Background(), "daemon.agentreplsession.flush", next)
-}
-
-// persistAndPublishLocked writes the session and pushes it. A write that fails
-// is recorded at ERROR — the session stands in this process and is pushed, but
-// a daemon restart would not find it — and never withholds the push.
-func (t *Tracker) persistAndPublishLocked(ctx context.Context, op string, session wsm.AgentReplSession) {
-	if err := t.store.PutAgentReplSession(ctx, session); err != nil {
-		ctxFields := fields(session)
+	if err := t.store.PutAgentReplSession(ctx, next); err != nil {
+		ctxFields := fields(next)
 		ctxFields["cause"] = err.Error()
-		t.log.Error(op, "the session could not be persisted; a daemon restart would not carry it", ctxFields)
+		t.log.Error(op, "the session's traffic could not be persisted; it stays pending", ctxFields)
+		return
 	}
-	t.publish.SetAgentReplSession(view(session))
+	t.pending = vendortraffic.Counts{}
+	t.publish.SetAgentReplSession(view(next))
 }
 
 // view is the session as the topbar states it.

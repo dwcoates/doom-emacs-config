@@ -343,9 +343,10 @@ func TestTrafficWithNoSessionIsNotCounted(t *testing.T) {
 	}
 }
 
-func TestASessionThatCannotBePersistedIsRecordedAndStillStated(t *testing.T) {
+func TestASessionThatCannotBePersistedIsNotBegun(t *testing.T) {
 	// Arrange.
-	tr, pub, log := newTracker(t, &fakeStore{putErr: errors.New("read-only")})
+	store := &fakeStore{putErr: errors.New("read-only")}
+	tr, pub, log := newTracker(t, store)
 
 	// Act.
 	tr.EditorStarted(context.Background(), t0)
@@ -354,25 +355,92 @@ func TestASessionThatCannotBePersistedIsRecordedAndStillStated(t *testing.T) {
 	if !logged(log, "error", "daemon.agentreplsession.begin") {
 		t.Fatalf("the failed write was not recorded at ERROR: %v", log.Records())
 	}
-	if got := pub.last(t); got.GetStartedAtMs() != t0.UnixMilli() {
-		t.Fatalf("stated %v, want the session stated regardless", got)
+	if len(pub.views) != 0 || store.session != nil {
+		t.Fatalf("stated %v and stored %+v, want nothing begun", pub.views, store.session)
 	}
 }
 
-func TestTrafficThatCannotBePersistedIsRecorded(t *testing.T) {
+func TestASessionIsNotBegunWhenTheStandingOneCannotBeRead(t *testing.T) {
 	// Arrange.
 	store := &fakeStore{}
-	tr, _, log := newTracker(t, store)
-	tr.EditorStarted(context.Background(), t0)
-	store.putErr = errors.New("read-only")
+	tr, pub, log := newTracker(t, store)
+	store.readErr = errors.New("disk gone")
 
 	// Act.
-	tr.AddTraffic(vendortraffic.Counts{Received: 1})
+	tr.LoginCompleted(context.Background(), t0)
+
+	// Assert.
+	if !logged(log, "error", "daemon.agentreplsession.begin") {
+		t.Fatalf("the failed read was not recorded at ERROR: %v", log.Records())
+	}
+	if len(pub.views) != 0 || store.puts != 0 {
+		t.Fatalf("stated %d and wrote %d times, want nothing", len(pub.views), store.puts)
+	}
+}
+
+func TestTrafficThatCannotBePersistedStaysPendingForTheNextFlush(t *testing.T) {
+	// Arrange.
+	store := &fakeStore{}
+	tr, pub, log := newTracker(t, store)
+	tr.EditorStarted(context.Background(), t0)
+	store.putErr = errors.New("read-only")
+	tr.AddTraffic(vendortraffic.Counts{Received: 100, Sent: 10})
+	tr.FlushTraffic()
+	store.putErr = nil
+
+	// Act.
 	tr.FlushTraffic()
 
 	// Assert.
 	if !logged(log, "error", "daemon.agentreplsession.flush") {
 		t.Fatalf("the failed write was not recorded at ERROR: %v", log.Records())
+	}
+	if got := pub.last(t); got.GetBytesReceived() != 100 || got.GetBytesSent() != 10 {
+		t.Fatalf("stated %v, want the pending traffic stated by the next flush", got)
+	}
+}
+
+func TestTrafficStaysPendingWhenTheSessionCannotBeRead(t *testing.T) {
+	// Arrange.
+	store := &fakeStore{}
+	tr, _, log := newTracker(t, store)
+	tr.EditorStarted(context.Background(), t0)
+	store.readErr = errors.New("disk gone")
+	tr.AddTraffic(vendortraffic.Counts{Received: 7})
+
+	// Act.
+	tr.FlushTraffic()
+
+	// Assert.
+	if !logged(log, "error", "daemon.agentreplsession.flush") {
+		t.Fatalf("the failed read was not recorded at ERROR: %v", log.Records())
+	}
+	if store.session.BytesReceived != 0 {
+		t.Fatalf("stored %+v, want nothing written", store.session)
+	}
+	store.readErr = nil
+	tr.FlushTraffic()
+	if store.session.BytesReceived != 7 {
+		t.Fatalf("stored %+v after the store recovered, want the pending 7 bytes", store.session)
+	}
+}
+
+func TestASuccessorContinuesFromWhatTheIncumbentLastWrote(t *testing.T) {
+	// Arrange: the successor is built from the store while the incumbent
+	// still serves and keeps counting.
+	store := &fakeStore{session: &wsm.AgentReplSession{StartedAt: t0, Began: wsm.SessionBeganEditorStart}}
+	incumbent, _, _ := newTracker(t, store)
+	successor, pub, _ := newTracker(t, store)
+	incumbent.AddTraffic(vendortraffic.Counts{Received: 100, Sent: 10})
+	incumbent.FlushTraffic()
+
+	// Act.
+	successor.AddTraffic(vendortraffic.Counts{Received: 50, Sent: 5})
+	successor.FlushTraffic()
+
+	// Assert.
+	if got := pub.last(t); got.GetBytesReceived() != 150 || got.GetBytesSent() != 15 {
+		t.Fatalf("stated %v, want the incumbent's 100 plus the successor's 50", got)
 	}
 }
 
