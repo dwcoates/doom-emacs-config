@@ -569,6 +569,9 @@ func StartEmacs(t *testing.T, box sandbox, opts EmacsOpts) *Emacs {
 		"AGENT_REPL_E2E_SETTINGS=" + e.settingsPath(),
 		"AGENT_REPL_STATE_DIR=" + e.StateDir,
 		"AGENT_REPL_FORBID_VENDOR_CALLS=1",
+		// The daemon and store this Emacs starts inherit it: their databases
+		// are thrown away with the sandbox, so no forced flushes.
+		"AGENT_REPL_TEST_SQLITE_UNSYNCED=1",
 		"AGENT_REPL_CLAUDE_BIN=" + fakeClaude,
 		"AGENT_REPL_NOTIFIER_CMD=" + fakeNotifier.Path,
 		"AGENT_REPL_BROWSER_CMD=" + fakeBrowser.Path,

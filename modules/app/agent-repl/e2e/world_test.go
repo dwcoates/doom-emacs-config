@@ -755,6 +755,8 @@ func startStore(t *testing.T, socket, dbPath, logPath, lockDir string) *Store {
 	cmd.Env = append(os.Environ(),
 		"AGENT_REPL_STORE_SOCKET="+socket,
 		"AGENT_REPL_FORBID_VENDOR_CALLS=1",
+		// The store's database is thrown away with the world: no forced flushes.
+		"AGENT_REPL_TEST_SQLITE_UNSYNCED=1",
 		// The world's lock dir keeps the boot's build-report write
 		// (agentrepl/logging/buildreport) out of the owner's real
 		// ~/.cache/agent-repl/run, and in the one the daemon's deploy reads.
@@ -889,6 +891,7 @@ func (s *Store) StartSameDB(t *testing.T) {
 	cmd.Env = append(os.Environ(),
 		"AGENT_REPL_STORE_SOCKET="+s.Socket,
 		"AGENT_REPL_FORBID_VENDOR_CALLS=1",
+		"AGENT_REPL_TEST_SQLITE_UNSYNCED=1",
 		"AGENT_REPL_LOCK_DIR="+s.lockDir,
 	)
 	cmd.Env = append(cmd.Env, coverageEnv(t, "shim-store")...)
