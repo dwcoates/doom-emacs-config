@@ -967,3 +967,4 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - 2026-10-06 the logs harness greps reader output from a here-string, never a pipe, so pipefail+SIGPIPE cannot fail a correct check(bin/test-logs.sh grep_in).
 - 2026-10-06 every harness asks grep through the shared grep_in (bin/lib-grep-in.sh), never a pipe into grep -q, and a testrun scan holds it(SIGPIPE under pipefail).
 - 2026-10-06 every test-named harness script is rostered or listed in roster.NotSuites with a reason, and a roster test holds it(testrun/roster).
+- 2026-10-06 e2e-repeat.sh gates only on the host suite slot; the load-average wait and its 5s poll are gone(bin/e2e-repeat.sh).
