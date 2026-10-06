@@ -118,7 +118,7 @@ func (s *store) SetAccountUsage(ctx context.Context, usage AccountUsage) error {
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	if s.readOnly {
+	if s.ReadOnly() {
 		s.holdUsageLocked(usage)
 		s.log.Info(op, "held the account's usage until this handle writes; the incumbent is still the writer", fields)
 		return nil

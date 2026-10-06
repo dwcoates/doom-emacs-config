@@ -99,7 +99,7 @@ func TestPutAgentReplSessionRefusesASessionTheTableCannotHold(t *testing.T) {
 func TestPutAgentReplSessionRefusesAReadOnlyHandle(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)
-	s.readOnly = true
+	s.current.Store(&handleState{db: s.db(), readOnly: true})
 
 	// Act
 	err := s.PutAgentReplSession(context.Background(), AgentReplSession{StartedAt: sessionAt, Began: SessionBeganLogin})
