@@ -1444,3 +1444,40 @@ func bringUpSummary(d *harness.Daemon) (harness.LogRecord, bool) {
 	}
 	return harness.LogRecord{}, false
 }
+
+// TestBootRecordsHowLongTheOpeningViewsTook pins the record that names the
+// one step between the boot's reconciliation and serving: an e2e boot under
+// load spent 1.74s there with nothing said (2026-10-06).
+func TestBootRecordsHowLongTheOpeningViewsTook(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	d := newDaemon(t, harness.Opts{})
+
+	// Act
+	record := d.AwaitLogRecord(d.RunLogPath(), "the opening views' record", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.cmd.serve" && r.Message == "published the opening views"
+	})
+
+	// Assert
+	if _, ok := record.Context["took_ms"]; !ok {
+		t.Fatalf("the opening views' record %+v carries no took_ms", record.Context)
+	}
+}
+
+// TestBootRecordsHowLongItWaitedForTheClaim pins the record that says a
+// replacement waited out its predecessor's exit for the boot claim.
+func TestBootRecordsHowLongItWaitedForTheClaim(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	d := newDaemon(t, harness.Opts{})
+
+	// Act
+	record := d.AwaitLogRecord(d.RunLogPath(), "the claim's record", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.cmd.claim" && r.Message == "took the boot claim"
+	})
+
+	// Assert
+	if _, ok := record.Context["waited_ms"]; !ok {
+		t.Fatalf("the claim record %+v carries no waited_ms", record.Context)
+	}
+}

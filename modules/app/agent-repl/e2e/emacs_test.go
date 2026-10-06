@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -1284,6 +1285,7 @@ func (e *Emacs) armHeartbeat() {
 			}
 			probe, probeCancel := context.WithTimeout(ctx, HeartbeatBound)
 			started := time.Now()
+			cpuBefore, cpuBeforeErr := readCgroupCPUStat(cgroupCPUStatPath)
 			out, err := e.box.Exec(probe, "emacsclient", "--socket-name", e.ServerSocket, "--eval", heartbeatProbe)
 			probeCancel()
 			if err == nil {
@@ -1303,10 +1305,55 @@ func (e *Emacs) armHeartbeat() {
 			if ctx.Err() != nil || e.proc.Exited() {
 				return
 			}
-			e.declareWedged(fmt.Sprintf("emacs did not answer a heartbeat probe within %s: %v", HeartbeatBound, err))
+			e.declareWedged(fmt.Sprintf("emacs did not answer a heartbeat probe within %s: %v%s",
+				HeartbeatBound, err, cpuOverProbe(cpuBefore, cpuBeforeErr, time.Since(started))))
 			return
 		}
 	}()
+}
+
+// cgroupCPUStatPath is the sandbox container's own CPU accounting (cgroup
+// v2): the container is CPU-limited, and a probe that went unanswered while
+// Emacs sat idle in select is told apart from a wedge by whether the
+// container was being throttled across it.
+const cgroupCPUStatPath = "/sys/fs/cgroup/cpu.stat"
+
+// readCgroupCPUStat reads a cgroup v2 cpu.stat file into its counters.
+func readCgroupCPUStat(path string) (map[string]int64, error) {
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]int64{}
+	for _, line := range strings.Split(strings.TrimSpace(string(body)), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) != 2 {
+			continue
+		}
+		n, perr := strconv.ParseInt(fields[1], 10, 64)
+		if perr != nil {
+			return nil, fmt.Errorf("%s: %q: %w", path, line, perr)
+		}
+		out[fields[0]] = n
+	}
+	return out, nil
+}
+
+// cpuOverProbe says what the container's CPU did across an unanswered probe
+// that began with BEFORE and lasted TOOK: how much CPU the container used
+// against what its quota allowed, and how often and how long it was
+// throttled. Every way it cannot be said is said instead.
+func cpuOverProbe(before map[string]int64, beforeErr error, took time.Duration) string {
+	if beforeErr != nil {
+		return fmt.Sprintf("\n  (the container's CPU accounting could not be read before the probe: %v)", beforeErr)
+	}
+	after, err := readCgroupCPUStat(cgroupCPUStatPath)
+	if err != nil {
+		return fmt.Sprintf("\n  (the container's CPU accounting could not be read after the probe: %v)", err)
+	}
+	delta := func(key string) int64 { return after[key] - before[key] }
+	return fmt.Sprintf("\n  the container's CPU across the %s probe: used %dms, throttled in %d of %d periods for %dms",
+		took.Round(time.Millisecond), delta("usage_usec")/1000, delta("nr_throttled"), delta("nr_periods"), delta("throttled_usec")/1000)
 }
 
 // heartbeatPrompt reads the probe's answer, which emacsclient prints as an
@@ -1349,12 +1396,31 @@ func (e *Emacs) declareWedged(cause string) {
 // dumpArtifacts preserves what a wedge diagnosis needs. The state root is a
 // scratch directory the sandbox sweeps, so a failure that left nothing
 // behind used to have to be reproduced with instrumentation added.
+//
+// WITH NO ARTIFACTS DIRECTORY THE SAME SET IS COLLECTED AND PRINTED, as a
+// bounded tail of each log (tailArtifacts), and the scratch copy is removed.
+// It used to print the pty output alone -- routinely empty for a GUI frame --
+// so a red in a full run (where nobody sets the variable) left nothing: two
+// `TestEmacsDaemonDownSurfacesAndReconnects` reds on 2026-10-06 could only be
+// put down to load by inference.
 func (e *Emacs) dumpArtifacts() {
 	dir := os.Getenv(ArtifactsEnv)
 	if dir == "" {
-		e.t.Logf("emacs pty output (set %s to preserve full artifacts):\n%s",
-			ArtifactsEnv, tailBytes([]byte(e.proc.Output()), artifactTailBytes))
-		return
+		scratch, err := os.MkdirTemp("", "emacs-e2e-artifacts-")
+		if err != nil {
+			e.t.Logf("emacs artifacts: no scratch to collect them in (%v); emacs pty output (set %s to preserve full artifacts):\n%s",
+				err, ArtifactsEnv, tailBytes([]byte(e.proc.Output()), artifactTailBytes))
+			return
+		}
+		defer func() {
+			if root := e.artifactRoot; root != "" {
+				tailArtifacts(e.t.Logf, root)
+			}
+			if err := os.RemoveAll(scratch); err != nil {
+				e.t.Logf("emacs artifacts: remove the scratch copy %s: %v", scratch, err)
+			}
+		}()
+		dir = scratch
 	}
 	out := e.artifactDir(dir)
 	if out == "" {
@@ -1552,6 +1618,75 @@ func (e *Emacs) artifactDir(root string) string {
 		}
 	})
 	return e.artifactRoot
+}
+
+// artifactTailFileBytes bounds one log's tail when the artifacts are printed
+// rather than kept, and artifactTailBudget bounds them all together: enough
+// for the last few hundred records of every sink a scenario writes, never an
+// unbounded dump into a full run's transcript. A log past the budget is still
+// NAMED, with its size, so its absence from the output is never silent.
+const (
+	artifactTailFileBytes = 16 << 10
+	artifactTailBudget    = 512 << 10
+)
+
+// tailArtifacts prints a bounded tail of every log collected under root:
+// Emacs's *Messages* and pty output first, then every other `.log` and the
+// native backtrace, in path order.
+func tailArtifacts(logf func(format string, args ...any), root string) {
+	var files []string
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			logf("emacs artifacts: walk %s: %v", path, err)
+			return nil
+		}
+		if entry.Type().IsRegular() && (filepath.Ext(path) == ".log" || filepath.Base(path) == nativeBacktraceFile) {
+			files = append(files, path)
+		}
+		return nil
+	})
+	if err != nil {
+		logf("emacs artifacts: walk %s: %v", root, err)
+	}
+	sort.SliceStable(files, func(i, j int) bool {
+		return artifactTailRank(files[i]) < artifactTailRank(files[j])
+	})
+	budget := artifactTailBudget
+	for _, path := range files {
+		rel, relErr := filepath.Rel(root, path)
+		if relErr != nil {
+			rel = path
+		}
+		body, readErr := os.ReadFile(path)
+		if readErr != nil {
+			logf("emacs artifacts: read %s: %v", rel, readErr)
+			continue
+		}
+		// A WHOLE TAIL OR NONE: a remainder smaller than one tail would print
+		// a sliver cut forward to the next record, which may be nothing.
+		if budget < artifactTailFileBytes {
+			logf("emacs artifacts: %s (%d bytes) not printed: the tail budget of %d bytes is spent (set %s to keep every log whole)",
+				rel, len(body), artifactTailBudget, ArtifactsEnv)
+			continue
+		}
+		tail := tailBytes(body, artifactTailFileBytes)
+		budget -= len(tail)
+		logf("emacs artifacts: %s (last %d bytes of %d):\n%s", rel, len(tail), len(body), tail)
+	}
+	logf("emacs artifacts: printed tails of %d log(s); set %s to keep them whole", len(files), ArtifactsEnv)
+}
+
+// artifactTailRank orders the printed tails: Emacs's own words first.
+func artifactTailRank(path string) int {
+	switch filepath.Base(path) {
+	case messagesFile:
+		return 0
+	case "emacs.pty.log":
+		return 1
+	case nativeBacktraceFile:
+		return 2
+	}
+	return 3
 }
 
 // copyTree copies a file or a directory tree; a missing source is not an
