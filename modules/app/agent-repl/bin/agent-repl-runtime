@@ -49,6 +49,8 @@
 # Honored environment (the test harness's isolation; defaults are the host):
 #   AGENT_REPL_RUNTIME_BUILD, _BYTE_COMPILE, _BOUNCE, _DOCTOR, _READINESS,
 #   _LOGS, _CLAUDE_REPLD   the implementation each verb runs
+#   AGENT_REPL_RUNTIME_CONTRACT_CHECK  answers whether the running daemon speaks
+#                                      the checkout's wire contract
 #   AGENT_REPL_RUNTIME_EMACSCLIENT  emacsclient reaching the running Emacs
 #   AGENT_REPL_RUNTIME_OPEN         the command that launches an app
 #   AGENT_REPL_RUNTIME_EMACS_APP    the Emacs.app bundle to launch
@@ -65,6 +67,7 @@ BYTE_COMPILE="${AGENT_REPL_RUNTIME_BYTE_COMPILE:-$MODULE_DIR/bin/byte-compile.sh
 BOUNCE="${AGENT_REPL_RUNTIME_BOUNCE:-$MODULE_DIR/scripts/bounce-agent-repl-forcefully.sh}"
 DOCTOR="${AGENT_REPL_RUNTIME_DOCTOR:-$MODULE_DIR/scripts/agent-shim-doctor.sh}"
 READINESS="${AGENT_REPL_RUNTIME_READINESS:-$MODULE_DIR/bin/readiness-report.sh}"
+CONTRACT_CHECK="${AGENT_REPL_RUNTIME_CONTRACT_CHECK:-$MODULE_DIR/bin/daemon-contract-current.sh}"
 LOGS="${AGENT_REPL_RUNTIME_LOGS:-$MODULE_DIR/bin/logs.sh}"
 CLAUDE_REPLD="${AGENT_REPL_RUNTIME_CLAUDE_REPLD:-$MODULE_DIR/daemon/bin/claude-repld}"
 EMACSCLIENT="${AGENT_REPL_RUNTIME_EMACSCLIENT:-/Applications/Emacs.app/Contents/MacOS/bin/emacsclient}"
@@ -173,8 +176,18 @@ hard_bounce() {
     fi
     say "byte-compile: checking"
     "$BYTE_COMPILE" || die "byte-compile reported warnings or errors; nothing was stopped"
+    # THE EARLY HOT LOAD NEEDS ONE CONTRACT ON BOTH ENDS. The outgoing Emacs
+    # still decodes the outgoing daemon's last pushes; a decoder newer than that
+    # daemon refuses them as contract breaches (2026-10-06). So when the wire
+    # contract moved -- or nothing can say it did not -- the outgoing Emacs keeps
+    # its elisp, and the restarted Emacs loads the checkout's.
     if emacs_running; then
-        reload_stale_elisp
+        local contract
+        if contract="$("$CONTRACT_CHECK")"; then
+            reload_stale_elisp
+        else
+            say "emacs: keeps its elisp through the stand-down; ${contract:-the contract check failed}"
+        fi
     fi
     say "bounce: rebuilding and restarting every backend"
     "$BOUNCE" || die "the bounce failed; see its output above"
