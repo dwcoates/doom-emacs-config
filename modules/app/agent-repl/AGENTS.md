@@ -147,6 +147,22 @@ is how broad a run is at each moment.
   `workspace-open-cli-harness` (`bin/test-agent_repl_workspace{,_open}.sh` at
   the repository root).
 
+### Read the run's own log, never a file you redirected it into
+
+Every `bin/test-all.sh` run writes its whole output to its own file and prints
+the path as its FIRST line and again, with the exit status, as its LAST:
+`[agent-repl-tests] this run's full log: <path>`.
+
+- The path is `/tmp/agent-repl-test-runs/<UTC timestamp>-<pid>/test-all.log`
+  (`AGENT_REPL_TEST_LOG_ROOT` moves the root); the newest 100 runs are kept.
+- Read that file for a run's results. Never redirect a run into a path of your
+  own choosing, and never into a scratchpad file: scratchpad directories are
+  shared between sessions, and on 2026-10-06 two agents that both wrote
+  `<scratchpad>/testall.log` read each other's runs (a report that named suites
+  the caller never selected).
+- The run's stderr is merged into the same stream and the same file.
+- `bin/test-test-all.sh` (`orchestrator-harness`) holds the contract.
+
 ### One scheduled run at a time: `bin/test-all.sh` and `bin/suite-slot.sh`
 
 `bin/test-all.sh` builds `testrun`, which turns the whole roster into one DAG
@@ -320,8 +336,12 @@ unreachable from a live process.
     non-SSD device), and a whole run under it took twice as long and missed
     timing bounds. Utility still yields to the live runtime's normal-tier I/O
     on the SSD. A run that fell back to `/tmp` keeps the throttle tier.
+  - MOUNTED NOBROWSE, which keeps Spotlight off it: mounted plainly, mds
+    opened an index store on every run's volume and took part in its
+    unmount (macOS 26.2); a `.metadata_never_index` did not stop it.
   - Always detached when the run ends; a refused detach is forced and
-    reported. A run killed outright leaves an flock'd record in
+    reported, naming what held it (`lsof +f -- <mount>`, read before the
+    force). A run killed outright leaves an flock'd record in
     `/tmp/agent-repl-test-ramdisks`, and the next run reclaims the disk.
   - A RAM disk that cannot be made falls back to `/tmp` with an ERROR line.
 

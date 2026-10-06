@@ -182,12 +182,14 @@ func (m Manager) Acquire(sizeMiB int) (_ *Volume, err error) {
 	if err := os.MkdirAll(v.Mount, 0o755); err != nil {
 		return v, fmt.Errorf("make the RAM disk's mount point %s: %w", v.Mount, err)
 	}
-	if _, err := m.Run("diskutil", "mount", "-mountPoint", v.Mount, volume); err != nil {
+	// NOBROWSE KEEPS SPOTLIGHT OFF THE VOLUME. Mounted plainly under /tmp, mds
+	// opened an index store on every run's RAM disk (`open stores complete
+	// success:1`, macOS 26.2, 2026-10-06) and took part in its unmount; a
+	// `.metadata_never_index` written after the mount did not stop it. Mounted
+	// nobrowse, mds declines the volume (`MDSDisk ... whyFail:-22`) and opens
+	// no store at all, measured on the same host.
+	if _, err := m.Run("diskutil", "mount", "nobrowse", "-mountPoint", v.Mount, volume); err != nil {
 		return v, fmt.Errorf("mount the RAM disk's volume %s at %s: %w", volume, v.Mount, err)
-	}
-	// Spotlight indexing a scratch volume would only add the work it removes.
-	if err := os.WriteFile(filepath.Join(v.Mount, ".metadata_never_index"), nil, 0o644); err != nil {
-		return v, fmt.Errorf("mark the RAM disk unindexed: %w", err)
 	}
 	return v, nil
 }
@@ -199,10 +201,13 @@ func (v *Volume) Release() error {
 	var errs []error
 	if v.Device != "" {
 		if _, err := v.m.Run("hdiutil", "detach", v.Device); err != nil {
+			// WHO HELD IT IS READ BEFORE THE FORCE, which would close every
+			// holder's files and leave nothing to name.
+			holders := v.holders()
 			if _, forceErr := v.m.Run("hdiutil", "detach", "-force", v.Device); forceErr != nil {
-				errs = append(errs, fmt.Errorf("detach the RAM disk %s: %w; forced: %w", v.Device, err, forceErr))
+				errs = append(errs, fmt.Errorf("detach the RAM disk %s (held by: %s): %w; forced: %w", v.Device, holders, err, forceErr))
 			} else {
-				errs = append(errs, fmt.Errorf("the RAM disk %s detached only when forced, so something still held it: %w", v.Device, err))
+				errs = append(errs, fmt.Errorf("the RAM disk %s detached only when forced, so something still held it (held by: %s): %w", v.Device, holders, err))
 			}
 		}
 	}
@@ -219,6 +224,50 @@ func (v *Volume) Release() error {
 		v.lock = nil
 	}
 	return errors.Join(errs...)
+}
+
+// holders names the processes with a file open on the volume, as
+// `lsof +f -- <mount>` lists them: "command[pid]" per process, in lsof's order.
+// lsof answers exit 1 and no output when nothing is open there, which is said
+// as such; any other failure of lsof is named in place of the holders, never
+// dropped.
+func (v *Volume) holders() string {
+	out, err := v.m.Run("lsof", "-n", "-P", "+f", "--", v.Mount)
+	names := holderNames(out)
+	switch {
+	case len(names) > 0:
+		return strings.Join(names, ", ")
+	case err != nil && strings.TrimSpace(out) == "":
+		return "no process lsof could see"
+	case err != nil:
+		return fmt.Sprintf("unknown, lsof failed: %v", err)
+	default:
+		return "no process lsof could see"
+	}
+}
+
+// holderNames reads `lsof` output into "command[pid]" names, one per process.
+func holderNames(out string) []string {
+	var names []string
+	seen := map[string]bool{}
+	for i, line := range strings.Split(out, "\n") {
+		fields := strings.Fields(line)
+		if i == 0 && len(fields) > 0 && fields[0] == "COMMAND" {
+			continue
+		}
+		if len(fields) < 2 {
+			continue
+		}
+		if _, err := strconv.Atoi(fields[1]); err != nil {
+			continue
+		}
+		name := fields[0] + "[" + fields[1] + "]"
+		if !seen[name] {
+			seen[name] = true
+			names = append(names, name)
+		}
+	}
+	return names
 }
 
 // Reclaimed is one dead run's RAM disk that Reclaim took down.
