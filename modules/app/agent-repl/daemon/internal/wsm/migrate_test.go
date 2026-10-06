@@ -793,22 +793,39 @@ func TestEveryMigrationDeclaresItsKind(t *testing.T) {
 	}
 }
 
-// markLastStepAdditive re-marks this build's last migration step additive for
-// the test's duration.
+// markBreakingStepsAdditive re-marks every breaking migration step additive for
+// the test's duration, found by kind rather than position, so a step appended
+// after them does not move what the swap reaches.
 //
-// THE LAST STEP IS BREAKING (layout 26 drops the session's traffic), so no
-// chain in the real list reaches this build's layout by additive steps alone.
-// The join of an additive chain is still a path the daemon takes the moment
-// an additive step is appended, so its tests run it over the real steps with
-// only the last one's kind changed. The package's tests are not parallel, so
-// the swap is not raced.
-func markLastStepAdditive(t *testing.T) {
+// THE REAL LIST HOLDS BREAKING STEPS (layout 26 drops the session's traffic),
+// so no long chain in it is additive end to end. ChainKind's additive answer
+// for such a chain is still the join the daemon takes once those steps are
+// behind every file, so its test runs it over the real steps with only the
+// breaking ones' kind changed. The package's tests are not parallel, so the
+// swap is not raced.
+func markBreakingStepsAdditive(t *testing.T) {
 	t.Helper()
 	real := migrations
 	swapped := slices.Clone(real)
-	swapped[len(swapped)-1].Kind = MigrationAdditive
+	for i := range swapped {
+		if swapped[i].Kind == MigrationBreaking {
+			swapped[i].Kind = MigrationAdditive
+		}
+	}
 	migrations = swapped
 	t.Cleanup(func() { migrations = real })
+}
+
+// stepNamed answers the layout the migration step NAME migrates to.
+func stepNamed(t *testing.T, name string) int {
+	t.Helper()
+	for _, m := range migrations {
+		if m.Name == name {
+			return m.To
+		}
+	}
+	t.Fatalf("no migration step is named %q", name)
+	return 0
 }
 
 func TestChainKind(t *testing.T) {
@@ -817,21 +834,22 @@ func TestChainKind(t *testing.T) {
 		from    int
 		want    MigrationKind
 		wantErr bool
-		// additiveLast runs the case under markLastStepAdditive.
-		additiveLast bool
+		// additiveOnly runs the case under markBreakingStepsAdditive.
+		additiveOnly bool
 	}{
-		{name: "the last step alone is breaking", from: LayoutVersion - 1, want: MigrationBreaking},
+		{name: "the dropped traffic step alone is breaking", from: stepNamed(t, "agent_repl_session_drop_traffic") - 1, want: MigrationBreaking},
+		{name: "the additive step after the dropped traffic is additive", from: stepNamed(t, "agent_repl_session_drop_traffic"), want: MigrationAdditive},
 		{name: "a chain through the dropped column is breaking", from: 5, want: MigrationBreaking},
 		{name: "a chain past the dropped column still crosses the dropped traffic", from: 6, want: MigrationBreaking},
-		{name: "a chain of additive steps alone is additive", from: 6, want: MigrationAdditive, additiveLast: true},
+		{name: "a chain of additive steps alone is additive", from: 6, want: MigrationAdditive, additiveOnly: true},
 		{name: "this build's own layout needs no chain", from: LayoutVersion, wantErr: true},
 		{name: "a layout no chain reaches is refused", from: 2, wantErr: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
-			if tt.additiveLast {
-				markLastStepAdditive(t)
+			if tt.additiveOnly {
+				markBreakingStepsAdditive(t)
 			}
 
 			// Act
@@ -865,7 +883,6 @@ func TestMigrationKindString(t *testing.T) {
 
 func TestOpenJoiningCarriesAnAdditiveChainForward(t *testing.T) {
 	// Arrange
-	markLastStepAdditive(t)
 	path := fixtureAt(t, LayoutVersion-1)
 
 	// Act
@@ -987,7 +1004,6 @@ func TestOpenJoiningRefusesAMissingFile(t *testing.T) {
 // statements after the joining successor carried the file forward.
 func TestAnIncumbentHandleKeepsWritingAcrossTheJoiningMigration(t *testing.T) {
 	// Arrange
-	markLastStepAdditive(t)
 	path := fixtureAt(t, LayoutVersion-1)
 	incumbent, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(OFF)")
 	if err != nil {
