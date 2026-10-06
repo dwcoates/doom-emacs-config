@@ -48,17 +48,20 @@
  * the real-prompt rollback — same declared `resumeSessionAt` surface, same
  * uuid, no file rewrite — so nothing about the transcript's safety changes.
  *
- * THE ANCHOR IS AN ASSISTANT RECORD OF A REAL TURN (ruled 2026-09-14). The SDK
- * states the type of the uuid it will accept: "The message ID should be from
- * `SDKAssistantMessage.uuid`". Every OTHER message the vendor emits carries a
- * `uuid` too — `system:init` and `result` both declare one as a REQUIRED field —
- * and those uuids name no transcript record, so a query opened at one is
- * refused by the vendor with `No message found with message.uuid of: <uuid>`
- * and the session dies with the prompt it was carrying. It killed two of the
- * owner's real sessions on 2026-09-14. So {@link KeepaliveRewind.noteRecord}
- * takes the MESSAGE, not a uuid, and refuses everything that is not an
- * `assistant` message of a REAL (non-keep-alive) open turn — the filter cannot
- * be got wrong by a caller, because the caller never extracts the uuid.
+ * THE ANCHOR IS A CONVERSATION RECORD OF A REAL TURN (ruled 2026-09-14,
+ * widened 2026-10-06). The SDK says of the uuid it will accept: "The message
+ * ID should be from `SDKAssistantMessage.uuid`". Every message the vendor
+ * emits carries a `uuid` — `system:init` and `result` both declare one as a
+ * REQUIRED field — and theirs name no transcript record, so a query opened at
+ * one is refused by the vendor with `No message found with message.uuid of:
+ * <uuid>` and the session dies with the prompt it was carrying. It killed two
+ * of the owner's real sessions on 2026-09-14. A main-thread `user` message
+ * (a tool result) names its transcript record exactly as an assistant does,
+ * and an interrupted turn's tool result is the turn's last record, so both
+ * anchor. {@link KeepaliveRewind.noteRecord} takes the MESSAGE, not a uuid,
+ * and refuses everything that is not a main-thread `assistant` or `user`
+ * message of a turn of real conversation — the filter cannot be got wrong by a
+ * caller, because the caller never extracts the uuid.
  *
  * THE SPAN INVARIANT (owner requirement, 2026-10-06). A rewind discards
  * everything the vendor's conversation holds after the anchor, so before one
@@ -266,7 +269,16 @@ export class KeepaliveRewind {
     if (!isMainThread(message)) return;
     const uuid = (message as { uuid?: unknown }).uuid;
     if (typeof uuid !== "string" || uuid === "") return;
-    if (message.type === "assistant" && anchors(turn)) {
+    // A RECORD OF REAL CONVERSATION ADVANCES THE ANCHOR, a `user` record as
+    // much as an assistant one (ruled 2026-10-06). An interrupted turn's own
+    // tool result lands after its last assistant record; anchoring only on
+    // assistants left that result past the anchor, where the next rewind would
+    // drop it (or, under the span invariant, refused at ERROR on ordinary
+    // interrupts). A main-thread `user` message's uuid names its transcript
+    // record exactly as an assistant's does (172 of 174 in the corpus
+    // captures; the two others are the same class as the 21 of 520 assistants
+    // that miss), so it is resumable through the same declared surface.
+    if (anchors(turn)) {
       this.takeAnchor(uuid, turn.turnId);
       return;
     }
