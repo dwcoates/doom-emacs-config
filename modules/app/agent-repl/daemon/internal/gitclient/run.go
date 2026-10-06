@@ -19,6 +19,7 @@ import (
 	"os/exec"
 	"strings"
 	"syscall"
+	"time"
 
 	"claude-repld/internal/dlog"
 )
@@ -139,6 +140,10 @@ type invocation struct {
 	// record to whoever sent the signal: a killer can name the pids it
 	// signalled, never the daemon operation it interrupted.
 	pid int
+	// duration is how long git ran, from its start to its exit; zero when it
+	// never started. A merge is a chain of dozens of git calls, so this is
+	// what tells a slow call from a slow chain of ordinary ones.
+	duration time.Duration
 }
 
 // fail shapes the invocation as the leaf's evidence-carrying error.
@@ -177,6 +182,7 @@ func (in invocation) logContext() dlog.Context {
 	}
 	if in.pid != 0 {
 		fields["pid"] = in.pid
+		fields["duration_ms"] = in.duration.Milliseconds()
 	}
 	return fields
 }
@@ -198,10 +204,12 @@ func (c *client) invoke(ctx context.Context, dir string, extra []string, args ..
 	cmd.Stderr = &stderr
 
 	in := invocation{args: args, dir: dir}
+	started := time.Now()
 	err := cmd.Start()
 	if err == nil {
 		in.pid = cmd.Process.Pid
 		err = cmd.Wait()
+		in.duration = time.Since(started)
 	}
 	in.stdout = stdout.String()
 	in.stderr = stderr.String()
