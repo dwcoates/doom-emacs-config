@@ -305,7 +305,7 @@ this site has no display logic of its own to test."
                 ((symbol-function 'agent-repl--ws-register-project) (lambda (_d) nil))
                 ((symbol-function 'agent-repl-link-primary) (lambda () 'conn))
                 ((symbol-function 'agent-repl-host-register)
-                 (lambda (conn dir on-done)
+                 (lambda (conn dir on-done &optional _workspace _on-refused)
                    (setq registered (list conn dir))
                    (funcall on-done '(:id "new-id" :dir "/tmp/proj/"))))
                 ((symbol-function 'agent-repl-switch-to-project) (lambda (_p) nil)))
@@ -337,7 +337,8 @@ for a register the daemon refused."
                ((symbol-function 'run-at-time) (lambda (&rest _) nil))
                ((symbol-function 'message) (lambda (&rest _) nil))
                ((symbol-function 'agent-repl-host-register)
-                (lambda (_conn _dir on-done) (funcall on-done ,answer))))
+                (lambda (_conn _dir on-done &optional _workspace _on-refused)
+                  (funcall on-done ,answer))))
        ,@body)))
 
 (defun agent-repl-test-commands--tab-arrives (id name)
@@ -463,6 +464,42 @@ is indistinguishable from a success that did not move the user."
   (let ((phases (agent-repl-test-commands--registering-phases nil)))
     ;; Assert.
     (should (member '(:register . :failed) phases))))
+
+(defun agent-repl-test-commands--refused-sentence (refusal)
+  "Return the :failed sentence `agent-repl-add-project-workspace' reported
+when the daemon answered the register with REFUSAL, a decoded error."
+  (let (sentence)
+    (agent-repl-test--with-clean-state
+      (cl-letf (((symbol-function 'file-directory-p) (lambda (_d) t))
+                ((symbol-function 'agent-repl--ws-register-project) (lambda (_d) nil))
+                ((symbol-function 'agent-repl-link-primary) (lambda () 'conn))
+                ((symbol-function 'message) (lambda (&rest _) nil))
+                ((symbol-function 'agent-repl-workspace-progress-report)
+                 (lambda (kind phase &optional detail)
+                   (when (and (eq kind :register) (eq phase :failed))
+                     (setq sentence detail))))
+                ((symbol-function 'agent-repl-host-register)
+                 (lambda (_conn _dir _on-done &optional _workspace on-refused)
+                   (funcall on-refused refusal))))
+        (agent-repl-add-project-workspace "/tmp/proj")))
+    sentence))
+
+(ert-deftest agent-repl-test-commands-add-project-says-a-temporary-folder-refusal ()
+  "A register refused for a temporary folder says which folder and why."
+  ;; Arrange / Act.
+  (let ((sentence (agent-repl-test-commands--refused-sentence
+                   '(:cause (:arm :inside-temporary-directory
+                             :value (:dir "/private/tmp/proj" :temporary-root "/private/tmp"))))))
+    ;; Assert.
+    (should (equal sentence "/private/tmp/proj is inside the temporary directory /private/tmp; agent-repl does not register temporary folders"))))
+
+(ert-deftest agent-repl-test-commands-add-project-says-a-not-a-worktree-refusal ()
+  "A register refused because the directory is no worktree says so."
+  ;; Arrange / Act.
+  (let ((sentence (agent-repl-test-commands--refused-sentence
+                   '(:cause (:arm :not-a-worktree :value nil)))))
+    ;; Assert.
+    (should (equal sentence "/tmp/proj/ is not a git worktree"))))
 
 (ert-deftest agent-repl-test-commands-add-project-claims-no-completion-on-a-refusal ()
   "A refused register never claims the workspace was registered."

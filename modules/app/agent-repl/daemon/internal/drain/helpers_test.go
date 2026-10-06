@@ -1,6 +1,7 @@
 package drain
 
 import (
+	"claude-repld/internal/tempdirs/tempdirstest"
 	"context"
 	"errors"
 	"path/filepath"
@@ -491,7 +492,7 @@ func newHarness(t *testing.T, adjust ...func(*Deps)) *harness {
 	t.Helper()
 	t.Setenv(IdleCutoffEnv, "")
 	log := dlog.NewTestSurfaces()
-	db, err := wsm.Open(context.Background(), filepath.Join(t.TempDir(), "wsm.db"), wsm.WithLogger(log.Global()))
+	db, err := wsm.Open(context.Background(), filepath.Join(t.TempDir(), "wsm.db"), wsm.WithLogger(log.Global()), wsm.WithTemporaryGuard(tempdirstest.Guard(t)))
 	if err != nil {
 		t.Fatalf("wsm.Open: %v", err)
 	}

@@ -1545,12 +1545,20 @@ carries."
                     :answer)
                    ""))))
 
+(ert-deftest agent-repl-test-wire-verbs-create-error-inside-temporary-directory-arm ()
+  "CreateWorkspaceError's `inside_temporary_directory' arm decodes with the dir
+and the temporary root it carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-create-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"insideTemporaryDirectory\":{\"dir\":\"/private/tmp/scratch\",\"temporaryRoot\":\"/private/tmp\"}}"))
+                   '(:cause (:arm :inside-temporary-directory :value (:dir "/private/tmp/scratch" :temporary-root "/private/tmp")))))))
+
 (ert-deftest agent-repl-test-wire-verbs-create-error-arms-pinned ()
   "CreateWorkspaceError's arm set is exactly what the frozen schema declares."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_create_workspace.pb.go" "CreateWorkspaceError")
                        #'string<)
-                 (sort (list "ungatedWithoutConsent" "noSlug" "forkParentHasNoConversation" "briefMissing" "unknownRepository" "unknownParent" "baseRefUnresolved" "worktreeCreationFailed" "spawnFailed" "oneShotPolicyMissing" "namingFailed")
+                 (sort (list "ungatedWithoutConsent" "noSlug" "forkParentHasNoConversation" "briefMissing" "unknownRepository" "unknownParent" "baseRefUnresolved" "worktreeCreationFailed" "spawnFailed" "oneShotPolicyMissing" "namingFailed" "insideTemporaryDirectory")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-create-error-spawn-failed-arm ()
@@ -3825,6 +3833,14 @@ always registers the main worktree, so an answer without it is not one."
                     (agent-repl-test-wire-verbs--parse "{\"unreadablePath\":{}}"))
                    '(:cause (:arm :unreadable-path :value nil))))))
 
+(ert-deftest agent-repl-test-wire-verbs-register-repository-error-inside-temporary-directory-arm ()
+  "RegisterRepositoryError's `inside_temporary_directory' arm decodes with the
+dir and the temporary root it carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-register-repository-error
+                    (agent-repl-test-wire-verbs--parse "{\"insideTemporaryDirectory\":{\"dir\":\"/private/tmp/scratch\",\"temporaryRoot\":\"/private/tmp\"}}"))
+                   '(:cause (:arm :inside-temporary-directory :value (:dir "/private/tmp/scratch" :temporary-root "/private/tmp")))))))
+
 (ert-deftest agent-repl-test-wire-verbs-register-repository-error-unset-cause-is-a-breach ()
   "An error with no arm set says nothing actionable, so it is a breach."
   (agent-repl-test-wire-verbs--with-common
@@ -3863,7 +3879,7 @@ always registers the main worktree, so an answer without it is not one."
                         "agentrepl/v1/endpoint_register_repository.pb.go"
                         "RegisterRepositoryError")
                        #'string<)
-                 '("notInARepository" "unreadablePath"))))
+                 '("insideTemporaryDirectory" "notInARepository" "unreadablePath"))))
 
 ;;;; ---- AdjustFeedTextScale ---------------------------------------------
 
