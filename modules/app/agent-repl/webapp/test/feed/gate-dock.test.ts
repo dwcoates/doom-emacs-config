@@ -304,6 +304,15 @@ describe("the docked gate's background", () => {
     expect(rule).toContain("background: var(--input-bg, var(--bg))");
   });
 
+  it("frames the docked gate on every side, not only above it", async () => {
+    // Arrange
+    const css = (await import("../../src/styles.css?raw")).default;
+    // Act
+    const rule = /#gate-dock > \.cold-gate\.cold-gate-docked\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
+    // Assert
+    expect([rule.includes("border-width: 1px;"), rule.includes("border-width: 1px 0 0")]).toEqual([true, false]);
+  });
+
   it("paints the undocked card the input window's color too, never the revival yellow", async () => {
     // Arrange
     const css = (await import("../../src/styles.css?raw")).default;
