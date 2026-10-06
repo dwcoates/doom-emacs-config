@@ -245,6 +245,8 @@ func startVendorStore() (string, func(), error) {
 	cmd.Env = append(os.Environ(),
 		"AGENT_REPL_STORE_SOCKET="+socket,
 		"AGENT_REPL_FORBID_VENDOR_CALLS=1",
+		// The store's database is thrown away with the test: no forced flushes.
+		"AGENT_REPL_TEST_SQLITE_UNSYNCED=1",
 		// A private lock dir keeps the boot's build-report write
 		// (agentrepl/logging/buildreport) out of the owner's real
 		// ~/.cache/agent-repl/run.

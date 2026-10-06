@@ -577,6 +577,9 @@ func StartEmacs(t *testing.T, box sandbox, opts EmacsOpts) *Emacs {
 		// root: the scratch is a sibling of it, never the daemon's own
 		// temporary directory, so the exemption is not a root itself.
 		harness.TemporaryRegistrationRootEnv(box.Scratch()),
+		// The daemon and store this Emacs starts inherit it: their databases
+		// are thrown away with the sandbox, so no forced flushes.
+		"AGENT_REPL_TEST_SQLITE_UNSYNCED=1",
 		"AGENT_REPL_CLAUDE_BIN=" + fakeClaude,
 		"AGENT_REPL_NOTIFIER_CMD=" + fakeNotifier.Path,
 		"AGENT_REPL_BROWSER_CMD=" + fakeBrowser.Path,

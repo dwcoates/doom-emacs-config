@@ -2,6 +2,7 @@ package shimclient
 
 import (
 	"bufio"
+	"claude-repld/internal/tempdirs/tempdirstest"
 	"context"
 	"encoding/json"
 	"errors"
@@ -164,7 +165,11 @@ func testBackoff() Option { return WithBackoff(time.Millisecond, 5*time.Millisec
 func shortDir(t *testing.T) string {
 	t.Helper()
 
-	dir, err := os.MkdirTemp("/tmp", "sc")
+	base, err := tempdirstest.ShortBase(os.Getenv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir, err := os.MkdirTemp(base, "sc")
 	if err != nil {
 		t.Fatalf("MkdirTemp: %v", err)
 	}

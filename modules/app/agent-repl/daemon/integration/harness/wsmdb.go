@@ -20,7 +20,7 @@ func (d *Daemon) DBPath() string { return filepath.Join(d.StateDir, "wsm.db") }
 // watch the daemon refuse it.
 func (d *Daemon) WithDB(body func(*sql.DB)) {
 	d.t.Helper()
-	db, err := sql.Open("sqlite", d.DBPath())
+	db, err := sql.Open("sqlite", d.DBPath()+"?_pragma=synchronous(OFF)")
 	if err != nil {
 		d.t.Fatalf("harness: open %s: %v", d.DBPath(), err)
 	}

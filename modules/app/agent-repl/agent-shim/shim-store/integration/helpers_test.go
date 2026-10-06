@@ -287,6 +287,7 @@ func storeEnv(socket, lockDir string, verbose bool) []string {
 		if strings.HasPrefix(kv, "AGENT_REPL_LOG_LEVEL=") ||
 			strings.HasPrefix(kv, "AGENT_REPL_STORE_SOCKET=") ||
 			strings.HasPrefix(kv, "AGENT_REPL_FORBID_VENDOR_CALLS=") ||
+			strings.HasPrefix(kv, "AGENT_REPL_TEST_SQLITE_UNSYNCED=") ||
 			strings.HasPrefix(kv, "AGENT_REPL_LOCK_DIR=") {
 			continue
 		}
@@ -295,6 +296,8 @@ func storeEnv(socket, lockDir string, verbose bool) []string {
 	env = append(env,
 		"AGENT_REPL_STORE_SOCKET="+socket,
 		"AGENT_REPL_FORBID_VENDOR_CALLS=1",
+		// The store's database is thrown away with the test: no forced flushes.
+		"AGENT_REPL_TEST_SQLITE_UNSYNCED=1",
 		"AGENT_REPL_LOCK_DIR="+lockDir,
 		"AGENT_REPL_LOG_LEVEL=info",
 	)

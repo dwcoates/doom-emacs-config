@@ -318,16 +318,10 @@ func TestANonPositiveRetentionWindowSweepsNothing(t *testing.T) {
 func newPruningStore(t *testing.T, window int64) (*DB, *sink) {
 	t.Helper()
 	s, log := newSink(t)
-	path := filepath.Join(t.TempDir(), "store.db")
-	d, err := OpenWithOptions(path, log, Options{
+	return memoryStore(t, log, Options{
 		Now:                  func() int64 { return testNow },
 		LedgerRetentionBytes: window,
-	})
-	if err != nil {
-		t.Fatalf("OpenWithOptions: %v", err)
-	}
-	t.Cleanup(func() { d.Close() }) //nolint:errcheck // best-effort test teardown
-	return d, s
+	}), s
 }
 
 // writeFileBatch writes one FILE-plane page line whose batch advances `fileID`
@@ -425,7 +419,7 @@ func TestASweepBatchAndAProducersBatchTogetherStayWithinTheProducersBudget(t *te
 	// rows in ONE batch and took 1464ms).
 	s, log := newSink(t)
 	path := filepath.Join(t.TempDir(), "store.db")
-	d, err := OpenWithOptions(path, log, Options{Now: func() int64 { return testNow }})
+	d, err := OpenWithOptions(path, log, Options{Now: func() int64 { return testNow }, unsynced: true})
 	if err != nil {
 		t.Fatalf("OpenWithOptions: %v", err)
 	}
@@ -645,16 +639,12 @@ func TestASweepBatchIsTimedAsABulkWrite(t *testing.T) {
 			// Arrange
 			clock := &fakeClock{now: time.Unix(0, 0)}
 			s, log := newSink(t)
-			d, err := OpenWithOptions(filepath.Join(t.TempDir(), "store.db"), log, Options{
+			d := memoryStore(t, log, Options{
 				Now:                  func() int64 { return testNow },
 				Clock:                clock.Now,
 				SlowQuery:            time.Nanosecond,
 				LedgerRetentionBytes: 1000,
 			})
-			if err != nil {
-				t.Fatalf("OpenWithOptions: %v", err)
-			}
-			t.Cleanup(func() { d.Close() }) //nolint:errcheck // best-effort test teardown
 			seedCursorFiles(t, d, 1)
 			queued := make(chan struct{})
 			d.queuedForWrite = func(WriteClass) {

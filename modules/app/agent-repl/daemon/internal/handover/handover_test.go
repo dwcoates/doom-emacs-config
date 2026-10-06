@@ -46,9 +46,9 @@ func (q *fakeQueue) calls() []ids.WorkspaceID {
 func newIntake(t *testing.T) (*Intake, *fakeQueue, wsm.DB, ids.WorkspaceID) {
 	t.Helper()
 	log := dlog.NewTestSurfaces()
-	db, err := wsm.Open(context.Background(), filepath.Join(t.TempDir(), "wsm.db"), wsm.WithLogger(log.Global()), wsm.WithTemporaryGuard(tempdirstest.Guard(t)))
+	db, err := wsm.OpenInMemory(context.Background(), wsm.WithLogger(log.Global()), wsm.WithTemporaryGuard(tempdirstest.Guard(t)))
 	if err != nil {
-		t.Fatalf("wsm.Open: %v", err)
+		t.Fatalf("wsm.OpenInMemory: %v", err)
 	}
 	t.Cleanup(func() { db.Close() })
 	dir := t.TempDir()
