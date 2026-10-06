@@ -836,10 +836,25 @@ func (s *sequence) BringUp(ctx context.Context, pending []wsm.Workspace) BringUp
 	// THE STORE BEFORE ANY SHIM. A service that will not come back is stated
 	// at ERROR and the bring-up still goes on: each shim then raises its own
 	// store fault, which is what puts the dead store on every surface.
-	if err := s.deps.EnsureServices(context.WithoutCancel(ctx)); err != nil {
-		log.Error("daemon.boot.bring_up", "the store and sidecar services could not be ensured; sessions are started without them", dlog.Context{
-			"error": err.Error(),
-		})
+	//
+	// THE STEP RUNS UNDER THE SERVING LIFETIME, so the daemon's exit cuts it.
+	// It ran detached from it, and a SIGTERM landing at boot then waited out
+	// every `launchctl print` of the step after every other loop had left:
+	// past the exit's 2s join under load, an ERROR on an orderly exit (the
+	// integration suite's TestTheWithdrawalIsRecordedOnAnOrderlyExit, the
+	// goroutine dump naming bring_up in Restarter.EnsureCurrent). A step cut
+	// short leaves nothing the next boot's own step does not complete: a
+	// service left unloaded is bootstrapped by it, and a stale one restarted.
+	if err := s.deps.EnsureServices(ctx); err != nil {
+		if ctx.Err() != nil {
+			log.Info("daemon.boot.bring_up", "the daemon's exit cut the service step short; the next boot's service step completes it", dlog.Context{
+				"error": err.Error(),
+			})
+		} else {
+			log.Error("daemon.boot.bring_up", "the store and sidecar services could not be ensured; sessions are started without them", dlog.Context{
+				"error": err.Error(),
+			})
+		}
 	}
 	brought := bringup.Run(ctx, bringup.Deps{
 		DB:           s.deps.DB,
