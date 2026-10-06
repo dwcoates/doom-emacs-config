@@ -40,12 +40,17 @@ type gateVerdict struct {
 	broken string
 }
 
-// gate runs the test gate on the rebased branch at head, rebased onto tip.
-func (r *run) gate(ctx context.Context, tip, head string) (gateVerdict, error) {
+// gate runs the test gate on the rebased branch at head, rebased onto tip, in
+// the tests round the caller opened (or, on a resume, the round the restart
+// left live: the gate runs again from its start in it).
+func (r *run) gate(ctx context.Context, round tabRound, tip, head string) (gateVerdict, error) {
 	const op = "daemon.merge.tests"
 	dir := r.subject.dir
 	rangeSpec := tip + ".." + head
-	paths, err := r.o.deps.Git.ChangedPaths(ctx, dir, rangeSpec)
+	paths, err := r.git.ChangedPaths(ctx, dir, rangeSpec)
+	if err != nil && r.stopping(err) {
+		return gateVerdict{}, err
+	}
 	if err != nil {
 		r.o.log(ctx, r.ws).Warn(op, "could not read the rebased branch's paths; every suite runs",
 			dlog.Context{"workspace": string(r.ws), "range": rangeSpec, "error": err.Error()})
@@ -56,7 +61,6 @@ func (r *run) gate(ctx context.Context, tip, head string) (gateVerdict, error) {
 		"workspace": string(r.ws), "suites": strings.Join(selection.Suites, ","),
 		"full": selection.Full, "reason": selection.Reason})
 
-	round := r.openTab(ctx, TabTests)
 	g := &gateRun{r: r, round: round, log: r.o.testLog(r.lease.ID, round.n), started: map[string]time.Time{}}
 	rows := make([]*frontendv1.FooterMergeTestRow, 0, len(selection.Suites))
 	for _, suite := range selection.Suites {

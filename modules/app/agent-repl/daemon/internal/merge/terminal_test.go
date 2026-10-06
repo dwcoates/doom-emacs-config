@@ -723,11 +723,10 @@ func TestTheDrainLetsATerminalFinishItsDurableStamps(t *testing.T) {
 	}
 }
 
-// TestTheDrainAnnouncesAMidPhaseMergeInsteadOfWaitingForIt covers what is NOT
-// drained: a merge in its long phases is abandoned to the boot recovery, and
-// the record of that is an INFO naming the phase rather than a pile of failed
-// writes.
-func TestTheDrainAnnouncesAMidPhaseMergeInsteadOfWaitingForIt(t *testing.T) {
+// TestTheDrainCutsAMergesTestGateAndSaysItRunsAgain covers the one long
+// phase the exit does not wait out: the test gate is cut, and the record says
+// the resumed merge runs it again from its start.
+func TestTheDrainCutsAMergesTestGateAndSaysItRunsAgain(t *testing.T) {
 	// Arrange: a merge held inside its test gate, which is a long phase.
 	h := newHarness(t)
 	h.emacsRepo()
@@ -735,6 +734,7 @@ func TestTheDrainAnnouncesAMidPhaseMergeInsteadOfWaitingForIt(t *testing.T) {
 	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
 	h.gatePasses("daemon")
 	inGate, release := make(chan struct{}), make(chan struct{})
+	t.Cleanup(func() { close(release) })
 	h.runner.before = func() {
 		close(inGate)
 		<-release
@@ -745,24 +745,129 @@ func TestTheDrainAnnouncesAMidPhaseMergeInsteadOfWaitingForIt(t *testing.T) {
 
 	// Act.
 	h.o.Drain(context.Background())
+	<-done
 
-	// Assert: one INFO naming the phase, and no error record at all.
+	// Assert: one INFO naming the cut gate, and no error record at all.
 	record, found := recordWith(h, "info", "daemon.merge.drain")
-	if !found {
-		t.Fatal("the drain wrote no INFO record for the mid-phase merge")
+	if !found || !strings.Contains(record.Message, "runs it again from its start") {
+		t.Fatalf("the drain's record is %+v (found %v), want the test gate's cut", record, found)
 	}
-	if record.Context["phase"] != TabTests {
-		t.Fatalf("the mid-phase record names phase %v, want %q", record.Context["phase"], TabTests)
-	}
-	if record.Context["workspace"] != string(theWorkspace) {
-		t.Fatalf("the mid-phase record names workspace %v, want %q", record.Context["workspace"], theWorkspace)
+	if record.Context["tab"] != TabTests || record.Context["workspace"] != string(theWorkspace) {
+		t.Fatalf("the drain's record names %v / %v, want %q / %q", record.Context["tab"], record.Context["workspace"], TabTests, theWorkspace)
 	}
 	if failures := recordsAtLevel(h, "error"); len(failures) > 0 {
-		t.Fatalf("the abandoned mid-phase merge produced %d error records, want none: %v", len(failures), failures)
+		t.Fatalf("the suspended merge produced %d error records, want none: %v", len(failures), failures)
 	}
+}
+
+// TestASuspendedMergeKeepsItsLeaseQueueEntryAndRecord covers what the drain
+// leaves for the next boot: the merge is suspended, not ended, so everything
+// the resume needs stays where it is.
+func TestASuspendedMergeKeepsItsLeaseQueueEntryAndRecord(t *testing.T) {
+	// Arrange: a merge held inside its test gate.
+	h := newHarness(t)
+	h.emacsRepo()
+	h.landsCleanly("abc123def4567")
+	h.gatePasses("daemon")
+	inGate, release := make(chan struct{}), make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	h.runner.before = func() {
+		close(inGate)
+		<-release
+	}
+	enqueue(t, h)
+	done := admitAsync(h, context.Background())
+	<-inGate
+
+	// Act.
+	h.o.Drain(context.Background())
+	<-done
+
+	// Assert.
+	if _, held, _ := h.db.Lease(context.Background(), theWorkspace); !held {
+		t.Fatal("the suspended merge released its lease, want it left for the resume")
+	}
+	entries, _ := h.db.MergeQueue(context.Background(), h.repoKey())
+	if len(entries) != 1 || entries[0].State != wsm.MergeAdmitted {
+		t.Fatalf("queue = %+v, want the merge still admitted", entries)
+	}
+	if step := recordedStep(t, h); step != TabTests {
+		t.Fatalf("the progress record stands at %q, want %q", step, TabTests)
+	}
+}
+
+// heldAtTheLanding runs a clean landing up to its fast-forward and holds that
+// git command in flight, answering its release.
+func heldAtTheLanding(t *testing.T, h *harness) (chan struct{}, <-chan error) {
+	t.Helper()
+	h.emacsRepo()
+	h.landsCleanly("abc123def4567")
+	h.gatePasses("daemon")
+	entered, release := h.git.hold("fast_forward")
+	enqueue(t, h)
+	done := admitAsync(h, context.Background())
+	<-entered
+	return release, done
+}
+
+// TestTheDrainWaitsForTheMergesGitCommandInFlight covers the stopping point:
+// the exit never kills a merge's git halfway, it lets the command end.
+func TestTheDrainWaitsForTheMergesGitCommandInFlight(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	release, done := heldAtTheLanding(t, h)
+	h.o.onGitStopWait = func() { close(release) }
+
+	// Act.
+	h.o.Drain(context.Background())
+	<-done
+
+	// Assert.
+	record, found := recordWith(h, "info", "daemon.merge.drain")
+	if !found || record.Context["git"] != "FastForward" {
+		t.Fatalf("the drain's record is %+v (found %v), want the FastForward it waited for", record, found)
+	}
+	if len(h.git.fastForwards) != 1 {
+		t.Fatalf("fast-forwards = %v, want the one in flight finished", h.git.fastForwards)
+	}
+}
+
+// TestTheDrainStartsNoGitAfterTheCommandInFlight covers the other half: once
+// the gate stops, the run's next git is never started.
+func TestTheDrainStartsNoGitAfterTheCommandInFlight(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	release, done := heldAtTheLanding(t, h)
+	h.o.onGitStopWait = func() { close(release) }
+
+	// Act.
+	h.o.Drain(context.Background())
+	<-done
+
+	// Assert.
+	if last := h.git.calls[len(h.git.calls)-1]; last != "fast_forward" {
+		t.Fatalf("calls end %v, want nothing after the fast-forward in flight", h.git.calls)
+	}
+}
+
+// TestTheDrainNamesAGitCommandThatOutlivesItsBound covers the bound: the exit
+// goes on, and says which command it left running.
+func TestTheDrainNamesAGitCommandThatOutlivesItsBound(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	release, done := heldAtTheLanding(t, h)
+	h.o.gitBound = time.Millisecond
+	h.o.drainBound = time.Millisecond
+
+	// Act.
+	h.o.Drain(context.Background())
+
+	// Assert.
 	close(release)
-	if err := <-done; err != nil {
-		t.Fatalf("the merge failed: %v", err)
+	<-done
+	record, found := recordWith(h, "error", "daemon.merge.drain")
+	if !found || record.Context["git"] != "FastForward" {
+		t.Fatalf("the drain's error record is %+v (found %v), want the FastForward named", record, found)
 	}
 }
 
@@ -935,10 +1040,10 @@ func TestAMergeEndingAfterTheDrainWritesNothingToTheClosedStore(t *testing.T) {
 	}
 }
 
-// TestAMergeEndingAfterTheDrainNamesWhatItLeftToTheRecovery is the record that
-// replaces those failures: the give-back is not silent, it is stated once, at
-// INFO, naming the durable work the next boot's recovery owns.
-func TestAMergeEndingAfterTheDrainNamesWhatItLeftToTheRecovery(t *testing.T) {
+// TestASuspendedMergeNamesTheStepTheBootResumesAt is the record that replaces
+// those failures: the suspension is stated once, at INFO, naming the step the
+// next boot resumes the merge at.
+func TestASuspendedMergeNamesTheStepTheBootResumesAt(t *testing.T) {
 	// Arrange: as above — a merge held mid-gate across the drain.
 	h := newHarness(t)
 	h.emacsRepo()
@@ -963,12 +1068,12 @@ func TestAMergeEndingAfterTheDrainNamesWhatItLeftToTheRecovery(t *testing.T) {
 	<-done
 
 	// Assert.
-	record, found := recordWith(h, "info", "daemon.merge.teardown")
+	record, found := recordWith(h, "info", "daemon.merge.suspend")
 	if !found {
-		t.Fatal("the merge that ended after the drain wrote no INFO teardown record")
+		t.Fatal("the suspended merge wrote no INFO suspend record")
 	}
-	if record.Context["unstamped"] != terminalOwedLanded {
-		t.Fatalf("the teardown record names %v as unstamped, want %q", record.Context["unstamped"], terminalOwedLanded)
+	if record.Context["step"] != TabTests {
+		t.Fatalf("the suspend record names step %v, want %q", record.Context["step"], TabTests)
 	}
 }
 
@@ -1037,12 +1142,12 @@ func TestAMergeAbortingAfterTheDrainIsNotRecordedAsAFailure(t *testing.T) {
 	close(release)
 	<-done
 
-	// Assert: no abort record, and the stop record names the daemon's exit.
+	// Assert: no abort record, and the suspend record names the daemon's exit.
 	if _, found := recordWith(h, "info", "daemon.merge.abort"); found {
 		t.Fatal("a merge that ended because the daemon exited was recorded as an abort, want no fault")
 	}
-	if _, found := recordWith(h, "info", "daemon.merge.stop"); !found {
-		t.Fatal("the merge that ended when the daemon exited wrote no INFO stop record")
+	if _, found := recordWith(h, "info", "daemon.merge.suspend"); !found {
+		t.Fatal("the merge that ended when the daemon exited wrote no INFO suspend record")
 	}
 }
 

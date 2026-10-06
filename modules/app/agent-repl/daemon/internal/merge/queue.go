@@ -620,17 +620,31 @@ func (o *orchestrator) admitFront(ctx context.Context, repo wsm.RepoKey) (ids.Wo
 		return "", nil, false, nil
 	}
 	defer o.leaveAdmission()
+	o.mu.Lock()
+	busy := o.running[repo] != nil
+	o.mu.Unlock()
+	if busy {
+		return "", nil, false, nil
+	}
+	// A MERGE A RESTART INTERRUPTED GOES FIRST, paused queue or not: it was
+	// already running, and a pause stops only new admissions. Its entry is
+	// admitted already.
+	if ws, resuming := o.resumeIn(repo); resuming {
+		lock, taken, err := acquireRepoLock(o.lockDir, string(repo))
+		if err != nil {
+			return "", nil, false, err
+		}
+		if !taken {
+			o.deps.Log.Global().Warn(op, "another daemon holds this repository's merge queue", dlog.Context{"repo": string(repo)})
+			return "", nil, false, nil
+		}
+		return ws, lock, true, nil
+	}
 	paused, err := o.deps.DB.MergeQueuePaused(ctx, repo)
 	if err != nil {
 		return "", nil, false, err
 	}
 	if paused {
-		return "", nil, false, nil
-	}
-	o.mu.Lock()
-	busy := o.running[repo] != nil
-	o.mu.Unlock()
-	if busy {
 		return "", nil, false, nil
 	}
 	entries, err := o.deps.DB.MergeQueue(ctx, repo)
@@ -654,6 +668,19 @@ func (o *orchestrator) admitFront(ctx context.Context, repo wsm.RepoKey) (ids.Wo
 		return "", nil, false, err
 	}
 	return front.Workspace, lock, true, nil
+}
+
+// resumeIn answers the merge of one repository the boot recovery handed the
+// pump to resume, if any.
+func (o *orchestrator) resumeIn(repo wsm.RepoKey) (ids.WorkspaceID, bool) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	for ws, doc := range o.resumes {
+		if doc.Repo == string(repo) {
+			return ws, true
+		}
+	}
+	return "", false
 }
 
 // nextInLine answers the first entry of a queue that is waiting in line: a

@@ -25,6 +25,9 @@ import (
 // changed step is told to every merge waiting behind this one, whose
 // "enqueued" line names it.
 func (r *run) setStep(ctx context.Context, step footer.MergeStep, apply func(*footer.MergeFacts)) {
+	if r.exiting() {
+		return
+	}
 	now := r.o.deps.Now()
 	r.mu.Lock()
 	changed := r.facts.Step != step
@@ -50,6 +53,9 @@ func (r *run) setStep(ctx context.Context, step footer.MergeStep, apply func(*fo
 // progress, a suite's edge -- and publishes them. The step, and so the waiting
 // merges' "enqueued" line, is unchanged.
 func (r *run) updateFacts(apply func(*footer.MergeFacts)) {
+	if r.exiting() {
+		return
+	}
 	now := r.o.deps.Now()
 	r.mu.Lock()
 	facts := r.facts

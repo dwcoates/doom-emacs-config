@@ -105,6 +105,10 @@ type orchestrator struct {
 	// later acquired under, so the queued bubble and the admitted one are one
 	// bubble.
 	ledgerOf map[ids.WorkspaceID]ids.LeaseID
+	// resumes are the merges the boot recovery found a progress record for,
+	// keyed by workspace: the admission pump runs each from its record, ahead
+	// of anything waiting in its repository's line (Recover, startResumed).
+	resumes map[ids.WorkspaceID]progressDoc
 	// pumping guards one admission pump per repository.
 	pumping map[wsm.RepoKey]bool
 	// admissions counts the admission steps in flight -- the store reads and
@@ -142,6 +146,12 @@ type orchestrator struct {
 	// asserting what the bound does when it EXPIRES must not wait the
 	// production bound to see it, and zero means the production value.
 	drainBound time.Duration
+	// gitBound overrides MergeGitStopBound, TEST-ONLY as drainBound is.
+	gitBound time.Duration
+	// onGitStopWait, when set, is called once the drain has stopped every
+	// suspended run's git gate, immediately before it waits for the commands
+	// in flight: a test releases a held command from inside that wait.
+	onGitStopWait func()
 	// onDrainWait, when set, is called once the drain has stopped admitting
 	// and snapshotted the terminal work, immediately before it begins waiting.
 	// It exists so a test releases a held terminal from inside the drain's own
@@ -192,6 +202,7 @@ func newOrchestrator(deps Deps) (*orchestrator, error) {
 		runsByWorkspace: map[ids.WorkspaceID]*run{},
 		requested:       map[ids.WorkspaceID]*requestWait{},
 		ledgerOf:        map[ids.WorkspaceID]ids.LeaseID{},
+		resumes:         map[ids.WorkspaceID]progressDoc{},
 		offers:          map[ids.WorkspaceID]bool{},
 		repoOf:          map[ids.WorkspaceID]wsm.RepoKey{},
 		pumping:         map[wsm.RepoKey]bool{},

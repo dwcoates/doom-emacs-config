@@ -2,6 +2,7 @@ package merge
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -89,6 +90,15 @@ type fakeDB struct {
 	beforeRelease func(f *fakeDB)
 	// queueReadErr, when set, fails every MergeQueue read.
 	queueReadErr error
+	// progress is each workspace's merge progress record, and progressSteps
+	// every step a record was written at, in order. adopted records the merge
+	// leases adopted for a resume; held stands for the prompt queue's held
+	// prompts, by turn.
+	progress      map[ids.WorkspaceID]wsm.MergeProgress
+	progressSteps []string
+	progressErr   error
+	adopted       []wsm.LeaseID
+	held          map[wsm.TurnID]wsm.HeldPrompt
 }
 
 // bindHeldPrompt stands for wsm.bindMergeHold: a prompt held under the
@@ -118,7 +128,97 @@ func newFakeDB() *fakeDB {
 		mergedAt:      map[ids.WorkspaceID]time.Time{},
 		closed:        map[ids.WorkspaceID]bool{},
 		policies:      map[wsm.LeaseID]wsm.LeasePolicy{},
+		progress:      map[ids.WorkspaceID]wsm.MergeProgress{},
+		held:          map[wsm.TurnID]wsm.HeldPrompt{},
 	}
+}
+
+func (f *fakeDB) PutMergeProgress(_ context.Context, p wsm.MergeProgress) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.shut {
+		return errStateClientClosed
+	}
+	if f.progressErr != nil {
+		return f.progressErr
+	}
+	var doc struct {
+		Step string `json:"step"`
+	}
+	if err := json.Unmarshal(p.Document, &doc); err != nil {
+		return err
+	}
+	f.progress[p.Workspace] = p
+	f.progressSteps = append(f.progressSteps, doc.Step)
+	return nil
+}
+
+func (f *fakeDB) MergeProgressOf(_ context.Context, id ids.WorkspaceID) (wsm.MergeProgress, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	p, ok := f.progress[id]
+	return p, ok, nil
+}
+
+func (f *fakeDB) DropMergeProgress(_ context.Context, lease wsm.LeaseID) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.shut {
+		return false, errStateClientClosed
+	}
+	for id, p := range f.progress {
+		if p.Lease == lease {
+			delete(f.progress, id)
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (f *fakeDB) AdoptMergeLease(_ context.Context, id ids.WorkspaceID, lease wsm.LeaseID) (wsm.Lease, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	held, ok := f.leases[id]
+	if !ok || held.ID != lease || held.Holder != wsm.HolderMerge {
+		return wsm.Lease{}, fmt.Errorf("no merge lease %s is held on %s", lease, id)
+	}
+	f.adopted = append(f.adopted, lease)
+	return held, nil
+}
+
+func (f *fakeDB) TurnCloses(_ context.Context, id ids.WorkspaceID, turns []wsm.TurnID) (map[wsm.TurnID]wsm.RecordedClose, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := map[wsm.TurnID]wsm.RecordedClose{}
+	for _, want := range turns {
+		for _, t := range f.turns[id] {
+			if t.ID == want && t.Close != nil {
+				out[want] = wsm.RecordedClose{How: *t.Close, At: *t.ClosedAt}
+			}
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeDB) RecordedTurns(_ context.Context, id ids.WorkspaceID, turns []wsm.TurnID) (map[wsm.TurnID]bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := map[wsm.TurnID]bool{}
+	for _, want := range turns {
+		for _, t := range f.turns[id] {
+			if t.ID == want {
+				out[want] = true
+			}
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeDB) HeldPromptByTurn(_ context.Context, turn wsm.TurnID) (wsm.HeldPrompt, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	h, ok := f.held[turn]
+	return h, ok, nil
 }
 
 func (f *fakeDB) Workspace(_ context.Context, id ids.WorkspaceID) (wsm.Workspace, error) {
@@ -434,6 +534,14 @@ func (f *fakeDB) MergeQueuePaused(_ context.Context, repo wsm.RepoKey) (bool, er
 // error rather than a surprise at run time.
 type fakeGit struct {
 	mu sync.Mutex
+	// standing answers RebaseInProgress: a rebase stands in the worktree.
+	standing bool
+	// onTip answers CommitsBetween(_, _, "HEAD"): what a standing rebase has
+	// replayed onto its tip.
+	onTip []gitclient.Commit
+	// holds parks one named call until its release closes, announcing the
+	// call on entered: a git command still running when the daemon exits.
+	holds map[string]gitHold
 	// seq stamps every call with the harness's shared sequence, so an ordering
 	// between a git call and a feed push is asserted on the real order rather
 	// than inferred.
@@ -539,7 +647,32 @@ func (g *fakeGit) record(call string) {
 	if _, seen := g.at[call]; !seen {
 		g.at[call] = at
 	}
+	hold, held := g.holds[call]
+	delete(g.holds, call)
 	g.mu.Unlock()
+	if held {
+		close(hold.entered)
+		<-hold.release
+	}
+}
+
+// gitHold is one parked git call.
+type gitHold struct {
+	entered chan struct{}
+	release chan struct{}
+}
+
+// hold parks the next call of one name until release closes; entered closes
+// once the call is in flight.
+func (g *fakeGit) hold(call string) (entered, release chan struct{}) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.holds == nil {
+		g.holds = map[string]gitHold{}
+	}
+	h := gitHold{entered: make(chan struct{}), release: make(chan struct{})}
+	g.holds[call] = h
+	return h.entered, h.release
 }
 
 func (g *fakeGit) DefaultBranch(context.Context, string) (string, error) {
@@ -747,10 +880,13 @@ func (g *fakeGit) CurrentBranch(_ context.Context, dir string) (string, error) {
 	return "master", nil
 }
 
-func (g *fakeGit) CommitsBetween(context.Context, string, string, string) ([]gitclient.Commit, error) {
+func (g *fakeGit) CommitsBetween(_ context.Context, _, _, tip string) ([]gitclient.Commit, error) {
 	g.record("commits_between")
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	if tip == "HEAD" {
+		return g.onTip, nil
+	}
 	if g.between == nil {
 		return []gitclient.Commit{{SHA: "c0ffee0000001", Subject: "the work"}}, g.betweenErr
 	}
@@ -792,7 +928,9 @@ func (g *fakeGit) replayLocked() (gitclient.RebaseStep, error) {
 
 func (g *fakeGit) RebaseInProgress(context.Context, string) (bool, error) {
 	g.record("rebase_in_progress")
-	return false, nil
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.standing, nil
 }
 
 func (g *fakeGit) AddWorktree(_ context.Context, _, worktreeDir, branch string) error {
@@ -1286,12 +1424,24 @@ type scriptedRun struct {
 	Err    error
 }
 
-func (r *fakeRunner) RunLines(_ context.Context, dir string, argv []string, onLine func(string)) (string, int, error) {
+func (r *fakeRunner) RunLines(ctx context.Context, dir string, argv []string, onLine func(string)) (string, int, error) {
 	r.mu.Lock()
 	before := r.before
 	r.mu.Unlock()
 	if before != nil {
-		before()
+		// THE FAKE IS CUT BY ITS CONTEXT, as the real runner is (it kills the
+		// script's process group): a test holding a run inside its gate sees
+		// the drain cut it.
+		held := make(chan struct{})
+		go func() {
+			before()
+			close(held)
+		}()
+		select {
+		case <-held:
+		case <-ctx.Done():
+			return "", 0, fmt.Errorf("fake script: %w", ctx.Err())
+		}
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()

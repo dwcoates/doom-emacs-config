@@ -388,6 +388,7 @@ func ledgeredRun(t *testing.T, h *harness) *run {
 		startedMS:  h.clock().UnixMilli(),
 		rounds:     map[string]int{},
 		openRounds: map[string]tabRound{},
+		git:        newGatedGit(h.o.deps.Git, h.o.deps.Now),
 	}
 }
 
