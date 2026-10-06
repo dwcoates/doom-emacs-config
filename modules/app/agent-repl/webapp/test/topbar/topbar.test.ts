@@ -798,7 +798,7 @@ describe("the connectivity glyph's session dropdown", () => {
           tone: "green",
           glyph: "●",
           title: "connected",
-          session: { startedAtMs: 1n, began: { case: "editorStart", value: {} }, bytesReceived: 5n, bytesSent: 6n },
+          session: { startedAtMs: 1n, began: { case: "editorStart", value: {} } },
         },
       }).connectivity,
     });
