@@ -608,7 +608,9 @@ describe("account usage", () => {
         case: "accountUsage",
         value: create(conversationv1.SessionAccountUsageSchema, {
           observedAtMs,
-          subscriptionType: "max",
+          subscriptionType: create(conversationv1.SessionSubscriptionTypeSchema, {
+            plan: { case: "max", value: create(conversationv1.SessionSubscriptionTypeMaxSchema, {}) },
+          }),
           outcome: {
             case: "available",
             value: create(conversationv1.SessionAccountUsageAvailableSchema, {
