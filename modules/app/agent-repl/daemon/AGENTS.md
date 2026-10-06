@@ -1086,6 +1086,17 @@ Owner rulings, 2026-09-30 (`internal/merge`; the contract is
   start on resume). A suspended run publishes, records and releases nothing
   durable (INFO `daemon.merge.suspend`); `daemonaddr.ClaimWaitBound` outlasts
   both drain bounds so a replacement still replaces.
+- **A MERGE MOVES WITH ITS WORKSPACE ACROSS A HANDOVER** (`transfer.go`). A
+  merge drives its requester's own session, so a rolling deploy's transfer
+  suspends it (`SuspendForTransfer`, the drain's stopping point) after the
+  quiesce and before the shim is detached, and the daemon that adopts the
+  workspace -- the successor, or the incumbent taking a failed transfer back
+  -- takes every merge of it from the durable rows (`AdoptWorkspace`, the
+  boot's own per-entry recovery): the suspended merge resumes at its step, in
+  the same bubble. A daemon admits nothing behind a merge admitted elsewhere,
+  and nothing of a workspace it handed away. Holding the handover until the
+  merge ended was rejected: a handover never waits on work, and a merge's
+  tests and repairs are unbounded.
 - The integration fake: a branch with no commits is already on its target, so
   a test that exercises a merge's steps commits work first
   (`harness.CommitWork`); a rebase conflict is scripted per commit
