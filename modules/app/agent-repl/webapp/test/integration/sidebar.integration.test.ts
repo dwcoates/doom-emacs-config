@@ -2,11 +2,10 @@
  * SIDEBAR — the roster, its two groupings, and every workspace verb.
  *
  * The roster is the ONE global stream, and both groupings arrive resolved as
- * siblings: which one renders is a webview-local preference, not wire state,
- * and so are a task section's folds. A REPOSITORY section's fold is the
- * daemon's (FoldRepository), because the Emacs tab bar hides a collapsed
- * repository's workspaces off the same pushed arm. That split is what most of
- * this file asserts.
+ * siblings. Which one renders, every section's fold and every row's open
+ * detail are the DAEMON'S view state, carried on the push so the sidebar looks
+ * the same in every workspace's page (owner rulings, 2026-10-06): a gesture
+ * paints its page at once and asks UpdateSidebarView, and the push reconciles.
  *
  * The blink cadence gets its own section because it is specified exactly once,
  * on `RosterRowAttention` — two blinks at 500 ms on/off, then steady — and
@@ -20,6 +19,7 @@ import { RosterRowSchema, RosterRowWhenSchema } from "../../../proto/gen/ts/fron
 
 import { bootColdOnce, startHarness, type Harness } from "./harness";
 import { PREFS_KEY } from "../../src/sidebar/sidebar";
+import type { UpdateSidebarViewRequest } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_sidebar_view_pb";
 import {
   assertVocabCoversArms,
   isColoredMergeArm,
@@ -102,14 +102,21 @@ describe("the groupings", () => {
     expect(harness.$('[data-grouping="repository"]')?.hidden).toBe(false);
   });
 
-  it("hides the grouping the preference does not pick", async () => {
+  it("hides the grouping the daemon does not show", async () => {
     // Arrange / Act
     await withRoster({});
     // Assert
     expect(harness.$('[data-grouping="task"]')?.hidden).toBe(true);
   });
 
-  it("switches which grouping renders on the local preference", async () => {
+  it("shows the grouping the daemon says every page shows", async () => {
+    // Arrange / Act
+    await withRoster({ shown: "task" });
+    // Assert
+    expect(harness.$('[data-grouping="task"]')?.hidden).toBe(false);
+  });
+
+  it("switches which grouping renders at once on a pick", async () => {
     // Arrange
     await withRoster({});
     // Act
@@ -118,14 +125,15 @@ describe("the groupings", () => {
     expect(harness.$('[data-grouping="task"]')?.hidden).toBe(false);
   });
 
-  it("makes no rpc call to switch grouping", async () => {
+  it("asks the daemon to show the picked grouping in every page", async () => {
     // Arrange
     await withRoster({});
     harness.fake.clearCalls();
     // Act
     await harness.click('[data-grouping-pick="task"]');
-    // Assert: grouping is webview-local, never wire state.
-    expect(harness.fake.log()).toEqual([]);
+    // Assert
+    const [request] = harness.fake.calls<UpdateSidebarViewRequest>("updateSidebarView");
+    expect(request?.change.case === "showGrouping" ? request.change.value.grouping.case : "none").toBe("task");
   });
 
   it("draws the repository section header verbatim", async () => {
@@ -145,41 +153,55 @@ describe("the groupings", () => {
   });
 });
 
-/** A task section's fold triangle; task folds are the webview's own. */
+/** A task section's fold triangle. */
 const TASK_FOLD = '[data-grouping="task"] [data-section-fold]';
 
-/** A repository section's fold triangle; repository folds are the daemon's. */
+/** A repository section's fold triangle. */
 const REPOSITORY_FOLD = '[data-grouping="repository"] [data-section-fold]';
 
+/** The fold the one recorded UpdateSidebarView asked for, and of which section. */
+function askedFold(): { section: string | undefined; fold: string | undefined } {
+  const [request] = harness.fake.calls<UpdateSidebarViewRequest>("updateSidebarView");
+  if (request?.change.case !== "foldSection") return { section: undefined, fold: undefined };
+  return { section: request.change.value.section.case, fold: request.change.value.fold.case };
+}
+
 describe("task folds", () => {
-  it("folds a task section on click", async () => {
+  it("folds a task section at once on click", async () => {
     // Arrange
-    await withRoster({});
-    await harness.click('[data-grouping-pick="task"]');
+    await withRoster({ shown: "task" });
     // Act
     await harness.click(TASK_FOLD);
     // Assert
     expect(harness.$(TASK_FOLD)?.dataset.folded).toBe("true");
   });
 
-  it("makes no rpc call to fold a task section", async () => {
+  it("asks the daemon to fold the task section in every page", async () => {
     // Arrange
-    await withRoster({});
-    await harness.click('[data-grouping-pick="task"]');
+    await withRoster({ shown: "task" });
     harness.fake.clearCalls();
     // Act
     await harness.click(TASK_FOLD);
     // Assert
-    expect(harness.fake.log()).toEqual([]);
+    expect(askedFold()).toEqual({ section: "task", fold: "collapse" });
   });
 
-  it("keeps a task fold across a re-push", async () => {
+  it("keeps the asked fold across a push that does not carry it yet", async () => {
     // Arrange
-    await withRoster({});
-    await harness.click('[data-grouping-pick="task"]');
+    await withRoster({ shown: "task" });
     await harness.click(TASK_FOLD);
-    // Act: R2 — the user's toggle wins after the first draw.
-    harness.fake.setRoster(roster({}));
+    // Act
+    harness.fake.setRoster(roster({ shown: "task" }));
+    await harness.settle();
+    // Assert
+    expect(harness.$(TASK_FOLD)?.dataset.folded).toBe("true");
+  });
+
+  it("draws the fold another page asked for, from the push", async () => {
+    // Arrange
+    await withRoster({ shown: "task" });
+    // Act
+    harness.fake.setRoster(roster({ shown: "task", taskCollapsed: true }));
     await harness.settle();
     // Assert
     expect(harness.$(TASK_FOLD)?.dataset.folded).toBe("true");
@@ -197,8 +219,7 @@ describe("repository folds", () => {
     // Act
     await harness.click(REPOSITORY_FOLD);
     // Assert
-    const [request] = harness.fake.calls<{ fold: { case?: string } }>("foldRepository");
-    expect(request?.fold.case).toBe("collapse");
+    expect(askedFold()).toEqual({ section: "repository", fold: "collapse" });
   });
 
   it("asks the daemon to expand a collapsed repository on click", async () => {
@@ -208,17 +229,16 @@ describe("repository folds", () => {
     // Act
     await harness.click(REPOSITORY_FOLD);
     // Assert
-    const [request] = harness.fake.calls<{ fold: { case?: string } }>("foldRepository");
-    expect(request?.fold.case).toBe("expand");
+    expect(askedFold()).toEqual({ section: "repository", fold: "expand" });
   });
 
-  it("never folds the section itself ahead of the daemon's push", async () => {
+  it("folds the section at once, ahead of the daemon's push", async () => {
     // Arrange
     await withRoster({});
     // Act
     await harness.click(REPOSITORY_FOLD);
     // Assert
-    expect(harness.$(REPOSITORY_FOLD)?.dataset.folded).toBe("false");
+    expect(harness.$(REPOSITORY_FOLD)?.dataset.folded).toBe("true");
   });
 
   it("draws the fold the daemon pushes", async () => {
@@ -229,6 +249,38 @@ describe("repository folds", () => {
     await harness.settle();
     // Assert
     expect(harness.$(REPOSITORY_FOLD)?.dataset.folded).toBe("true");
+  });
+});
+
+/** The merged band's fold triangle, in the repository grouping's copy. */
+const MERGED_FOLD = '[data-grouping="repository"] .merged-section [data-section-fold]';
+
+describe("the recently-merged band's fold", () => {
+  it("starts folded, as the daemon's default is", async () => {
+    // Arrange / Act
+    await withRoster({});
+    // Assert
+    expect(harness.$(MERGED_FOLD)?.dataset.folded).toBe("true");
+  });
+
+  it("asks the daemon to unfold it in every page", async () => {
+    // Arrange
+    await withRoster({});
+    harness.fake.clearCalls();
+    // Act
+    await harness.click(MERGED_FOLD);
+    // Assert
+    expect(askedFold()).toEqual({ section: "recentlyMerged", fold: "expand" });
+  });
+
+  it("draws it unfolded when another page unfolded it", async () => {
+    // Arrange
+    await withRoster({});
+    // Act
+    harness.fake.setRoster(roster({ mergedCollapsed: false }));
+    await harness.settle();
+    // Assert
+    expect(harness.$(MERGED_FOLD)?.dataset.folded).toBe("false");
   });
 });
 
@@ -697,82 +749,38 @@ describe("the restart", () => {
 });
 
 // ---------------------------------------------------------------------------
-// R14: THE RAIL'S PREFERENCES SURVIVE A RELOAD (audit 1, item 16)
+// THE PREFERENCES A PAGE ONCE STORED ARE RETIRED
 //
-// "Nothing is persisted client-side except webview-local preferences
-// (grouping, folds, panel selection) in `localStorage` behind try/catch." A
-// fresh mount with a seeded store is what a reload looks like; a store that
-// throws costs the memory and nothing else.
+// The view is the daemon's now (owner rulings, 2026-10-06). A page that still
+// carries what it once stored in `localStorage` draws the daemon's view and
+// drops what it stored; nothing is migrated.
 // ---------------------------------------------------------------------------
 
-describe("the remembered preferences", () => {
+describe("the preferences a page once stored", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    window.localStorage.removeItem(PREFS_KEY);
   });
 
-  /** What the rail has written to its own key. */
-  const stored = (): Record<string, unknown> =>
-    JSON.parse(window.localStorage.getItem(PREFS_KEY) ?? "{}") as Record<string, unknown>;
-
-  it("stores the grouping the reader picked", async () => {
-    // Arrange
-    await withRoster({});
-    // Act
-    await harness.click('[data-grouping-pick="task"]');
-    // Assert
-    expect(stored().grouping).toBe("task");
-  });
-
-  it("renders the stored grouping on a fresh mount", async () => {
-    // Arrange: what a reload looks like.
+  it("never pick the grouping: the daemon's is drawn", async () => {
+    // Arrange: what a reload of an old page looks like.
     window.localStorage.setItem(PREFS_KEY, JSON.stringify({ grouping: "task" }));
     // Act
     await withRoster({});
     // Assert
-    expect(harness.$('[data-grouping="task"]')?.hidden).toBe(false);
-  });
-
-  it("stores the task fold the reader closed", async () => {
-    // Arrange
-    await withRoster({});
-    await harness.click('[data-grouping-pick="task"]');
-    // Act
-    await harness.click(TASK_FOLD);
-    // Assert
-    expect(Object.values(stored().folded ?? {})).toContain(true);
-  });
-
-  it("draws a stored task fold closed on a fresh mount", async () => {
-    // Arrange
-    await withRoster({});
-    await harness.click('[data-grouping-pick="task"]');
-    await harness.click(TASK_FOLD);
-    const folded = stored().folded;
-    await harness.stop();
-    window.localStorage.setItem(PREFS_KEY, JSON.stringify({ grouping: "task", folded }));
-    // Act
-    await withRoster({});
-    // Assert
-    expect(harness.$(TASK_FOLD)?.dataset.folded).toBe("true");
-  });
-
-  it("takes the default grouping when nothing is stored", async () => {
-    // Arrange / Act
-    await withRoster({});
-    // Assert
     expect(harness.$('[data-grouping="repository"]')?.hidden).toBe(false);
   });
 
-  it("takes the default grouping when the stored value is not JSON", async () => {
+  it("are dropped from storage", async () => {
     // Arrange
-    window.localStorage.setItem(PREFS_KEY, "{not json");
+    window.localStorage.setItem(PREFS_KEY, JSON.stringify({ grouping: "task", folded: { "task:task-1": true } }));
     // Act
     await withRoster({});
     // Assert
-    expect(harness.$('[data-grouping="repository"]')?.hidden).toBe(false);
+    expect(window.localStorage.getItem(PREFS_KEY)).toBeNull();
   });
 
-  it("still draws the rail when reading storage throws", async () => {
+  it("still let the rail draw when reading storage throws", async () => {
     // Arrange
     vi.spyOn(window.localStorage, "getItem").mockImplementation(() => {
       throw new Error("site data is disabled");
@@ -781,31 +789,6 @@ describe("the remembered preferences", () => {
     await withRoster({});
     // Assert
     expect(harness.$(`[data-roster-row="${WORKSPACE_ID}"]`)).not.toBeNull();
-  });
-
-  it("still switches grouping when writing storage throws", async () => {
-    // Arrange
-    vi.spyOn(window.localStorage, "setItem").mockImplementation(() => {
-      throw new Error("site data is disabled");
-    });
-    await withRoster({});
-    // Act
-    await harness.click('[data-grouping-pick="task"]');
-    // Assert: the memory is lost, the rail is not.
-    expect(harness.$('[data-grouping="task"]')?.hidden).toBe(false);
-  });
-
-  it("still folds a task section when writing storage throws", async () => {
-    // Arrange
-    vi.spyOn(window.localStorage, "setItem").mockImplementation(() => {
-      throw new Error("site data is disabled");
-    });
-    await withRoster({});
-    await harness.click('[data-grouping-pick="task"]');
-    // Act
-    await harness.click(TASK_FOLD);
-    // Assert
-    expect(harness.$(TASK_FOLD)?.dataset.folded).toBe("true");
   });
 });
 
