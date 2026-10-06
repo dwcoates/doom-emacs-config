@@ -17,12 +17,13 @@
  * ruling every `SessionStart:resume` firing filled a history page with a row
  * that drew nothing.
  *
- * A FAILED or BLOCKED firing still draws its card LIVE, so it is still handed
- * to the record plane — its start (named from the registry, so the live card
- * keeps its `name (event)` headline) and its outcome, together at the response.
- * The store delivers a hook line to the standing watches and never keeps it
- * (shim-store `kindHookDropped`): the card is drawn while the session runs, and
- * a daemon that restarts never replays it.
+ * A FAILED or BLOCKED firing draws a card, so it is still written — its start
+ * (named from the registry, so the card keeps its `name (event)` headline) and
+ * its outcome, together at the response. The owner's ruling that this card be
+ * drawn live and never replayed waits on a carrier for a line that is
+ * delivered but not kept (an open contract question); until then the row is
+ * stored as before. The shim-store's hook sweep drops any stored hook row that
+ * draws nothing.
  *
  * # A hook NEVER ends a turn
  *

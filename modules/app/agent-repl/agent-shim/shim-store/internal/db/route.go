@@ -39,46 +39,36 @@ const (
 	// serving it. A real page line under the same key takes it back
 	// (applyIdentityPolicy).
 	kindRetired = "retired"
-	// kindHookDropped is a HOOK LINE: an agent frame whose update is an
-	// AgentHook activity. No hook record is kept (owner ruling 2026-10-06, "we
-	// should stop storing hook records, they are just bloat"), so the row holds
-	// only its identity — its key, book, position, write ledger and the
-	// envelope's turn and place stamps (hookStampsFrame) — never the record.
-	//
-	// A HOOK LINE IS STILL DELIVERED LIVE. The write that carries it publishes
-	// the whole line to every standing watch of its book (a failed or blocked
-	// hook's card is drawn while the session runs), and then nothing serves it
-	// again: no page reads it, no replay by write_seq reads it, so a reader
-	// that opens after the write — a restarted daemon — never sees it. Its
-	// position stays a valid pointer (pointerInBookSQL), because a live
-	// reader's high-water mark may be exactly that line.
-	//
-	// Rows stored as page lines before the rule are turned into this kind by
-	// SweepHookLines, without a write_seq bump: they drew nothing, so no
-	// watcher has anything to withdraw.
+	// kindHookDropped is a HOOK ROW THAT DRAWS NOTHING — a hook's start, a
+	// success or a cancellation — dropped by SweepHookLines (owner ruling
+	// 2026-10-06, "we should stop storing hook records, they are just
+	// bloat"). The row keeps only its identity: its key, book, position, write
+	// ledger and the envelope's turn and place stamps (hookStampsFrame), never
+	// the record. No page and no replay reads it; its position stays a valid
+	// pointer (pointerInBookSQL), because a reader's mark may be exactly that
+	// line. A page line under the same key in the same book takes it back
+	// (applyIdentityPolicy): a pre-rule shim's failed outcome landing after its
+	// start was swept.
 	kindHookDropped = "hook_dropped"
 )
 
-// isHookFrame reports whether an agent frame carries a hook firing — the one
-// piece of conversation vocabulary the store reads to decide a row's kind,
-// because a hook line is the one line it delivers and does not keep.
-func isHookFrame(frame *conversationv1.AgentFrame) bool {
-	return frame.GetUpdate().GetActivity().GetHook() != nil
-}
-
-// frameLineKind is the kind of a page line carrying `frame`: a hook line is
-// delivered and not kept (kindHookDropped); every other frame is a page line.
-func frameLineKind(frame *conversationv1.AgentFrame) string {
-	if isHookFrame(frame) {
-		return kindHookDropped
+// hookDrawsNothing reports whether an agent frame carries a hook firing that
+// draws nothing in the feed: its start, a success, or a cancellation. A failed
+// or blocked firing draws a card and is not one of them. It is the one piece of
+// conversation vocabulary the hook sweep reads.
+func hookDrawsNothing(frame *conversationv1.AgentFrame) bool {
+	switch frame.GetUpdate().GetActivity().GetHook().GetResult().(type) {
+	case *conversationv1.AgentHook_Start, *conversationv1.AgentHook_Succeeded, *conversationv1.AgentHook_Cancelled:
+		return true
+	default:
+		return false
 	}
-	return kindPageLine
 }
 
-// hookStampsFrame is what a hook row keeps of its write: the envelope's
-// identity and stamps, and no agent_update. The turn and place stay because
+// hookStampsFrame is what a dropped hook row keeps: the envelope's identity
+// and stamps, and no agent_update. The turn and place stay because
 // carryStoredStamps reads them back on any later write of the same key (a
-// failed hook's outcome superseding its start), exactly as for any row.
+// failed hook's outcome superseding its swept start), exactly as for any row.
 func hookStampsFrame(entry *storev1.StoreEntry) ([]byte, error) {
 	return proto.Marshal(&storev1.StoreEntry{
 		Plane:     entry.GetPlane(),
@@ -166,8 +156,7 @@ type routed struct {
 	// frame is the whole serialized StoreEntry, exactly as written.
 	frame []byte
 	// pageLine is the line a page or a watcher serves. Non-nil exactly when
-	// kind == kindPageLine, or kind == kindHookDropped (a hook line, which a
-	// standing watcher is handed live and nothing serves again).
+	// kind == kindPageLine.
 	pageLine *storev1.StorePageLine
 	// bashRow is the row a WatchBashRun watcher serves. Non-nil exactly when
 	// kind == kindBash.
@@ -473,7 +462,7 @@ func classifyAgentFrame(r routed, line *storev1.StorePageLine, frame *conversati
 		return routed{}, err
 	}
 	r.workflowNotImplemented = r.workflowNotImplemented || workflow
-	r.kind = frameLineKind(frame)
+	r.kind = kindPageLine
 	r.book = sql.NullString{String: book, Valid: true}
 	r.pageLine = line
 	return r, nil
@@ -504,7 +493,7 @@ func classifyUnownedLine(r routed, line *storev1.StorePageLine, index int) (rout
 		return routed{}, err
 	}
 	r.workflowNotImplemented = r.workflowNotImplemented || workflow
-	r.kind = frameLineKind(frame)
+	r.kind = kindPageLine
 	r.ownerUnknown = true
 	r.pageLine = line
 	return r, nil
