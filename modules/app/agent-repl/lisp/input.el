@@ -113,6 +113,7 @@
 (declare-function agent-repl--kickoff-prompt-summary "agent-repl-prompt-summary" (ws raw))
 (declare-function evil-insert-state "evil" (&optional arg))
 (declare-function evil-define-key* "evil-core" (state keymap key def &rest bindings))
+(declare-function agent-repl-bind-feed-zoom-keys "core" (map))
 (declare-function evil-normalize-keymaps "evil-core" (&optional state))
 (declare-function evil-ex-search-forward "evil-commands" (&optional count))
 (declare-function evil-ex-search-backward "evil-commands" (&optional count))
