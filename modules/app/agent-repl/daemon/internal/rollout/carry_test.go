@@ -755,6 +755,24 @@ func TestAForcedHandoverFallsBackToAnUnforcedTransferAtFreeness(t *testing.T) {
 	}
 }
 
+// awaitOnlyTheFreenessHoldoutArmed brings a refused workspace's wait for
+// freeness to the point where its holdout cadence is the ONE live window of
+// that duration, so a Fire of it reaches exactly that wait.
+//
+// TWO LOOPS ARM THE HOLDOUT CADENCE. The handover's follower arms it on every
+// pass of its select, and takes the refused workspace's first transfer
+// outcome on its only pass, so it leaves exactly one dead arm standing; the
+// fallback's wait at freeness arms the live one. Both arms land in any order,
+// so a single awaitArmed could return on the follower's dead one, the Fire
+// would precede the live arm, and the wait was never released: a full run
+// logged no holdout warning. Awaiting the follower's record of the outcome
+// (its loop is over) and then BOTH arms standing leaves nothing to race.
+func awaitOnlyTheFreenessHoldoutArmed(t *testing.T, h *harness) {
+	t.Helper()
+	awaitRecord(t, h, opTransfer, transferFinishedMessage)
+	h.clock.awaitArmedCount(t, holdoutCadence, 2)
+}
+
 func TestARefusedWorkspaceIsNamedOnTheHoldoutCadenceWhileItWaitsForFreeness(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
@@ -765,9 +783,11 @@ func TestARefusedWorkspaceIsNamedOnTheHoldoutCadenceWhileItWaitsForFreeness(t *t
 	h.registry.awaitRequest(t, isFreenessTransfer)
 
 	// Act
-	h.clock.awaitArmed(t, holdoutCadence)
+	awaitOnlyTheFreenessHoldoutArmed(t, h)
 	h.clock.Fire(holdoutCadence)
-	h.clock.awaitArmed(t, holdoutCadence)
+	// The Fire cleared every standing arm, so one standing again is the
+	// wait's re-arm, which follows its warning.
+	h.clock.awaitArmedCount(t, holdoutCadence, 1)
 
 	// Assert
 	warns := levelRecords(records(h.log, opHandover), "warn")
@@ -790,9 +810,11 @@ func TestARefusedWorkspaceIsNeverInterruptedWhileItWaitsForFreeness(t *testing.T
 	h.registry.awaitRequest(t, isFreenessTransfer)
 
 	// Act
-	h.clock.awaitArmed(t, holdoutCadence)
+	awaitOnlyTheFreenessHoldoutArmed(t, h)
 	h.clock.Fire(holdoutCadence)
-	h.clock.awaitArmed(t, holdoutCadence)
+	// The Fire cleared every standing arm, so one standing again is the
+	// wait's re-arm, which follows its warning.
+	h.clock.awaitArmedCount(t, holdoutCadence, 1)
 
 	// Assert
 	h.fleet.mu.Lock()
