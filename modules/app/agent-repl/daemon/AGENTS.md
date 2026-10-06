@@ -2196,7 +2196,22 @@ the URLs the sources gave each refuse the whole answer as `model_failed`
 (ERROR `daemon.newsdigest.model`); there is never a guessed digest. Sections
 are ordered backend first; their headings and the title are the daemon's. A
 digest nobody dismissed is handed to the next run's model to keep, and the
-new digest's period starts where it did.
+new digest's period starts where it did. The same answer marks every item that
+could REGRESS agent-repl with a one-line `risk` (blank or multi-line refuses
+the answer); the per-run sections on the wire carry no mark.
+
+**Since last week** (`week.go`, `NewsDigestOverlay.week`). Every digest-making
+run keeps all its items in wsm `news_digest_items` (layout 21) with their run's
+end and mark, pruning rows older than 14 days in the same transaction. The
+weekly section is the marked items of the runs that ended in the past 7 days
+plus this run's. Items of ONE run come from one answer that already merged
+them, so they are told as is; items spanning runs go to a second Sonnet call
+(`prompts/news-digest-week-risks.md`, site `news_digest_week`) that groups
+them by story: every item in exactly one group, a dated member's date kept
+verbatim, links composed by the daemon as the members' union, all validated
+HARD as `model_failed`. No marked item is the `quiet` arm, whose text names
+the history's start (`news_digest.history_since`) when it began inside the
+week. A failed merge fails the run as a condensing failure does.
 
 **Cadence and exclusivity.** One run every 24h from the previous run's END,
 read from wsm (`news_digest.last_run_end`) at every look, a look never more

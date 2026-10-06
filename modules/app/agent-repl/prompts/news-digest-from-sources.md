@@ -32,12 +32,35 @@ future change with a date, written as the source states it ("2026-11-01",
 authoritative first, each with a short "label". EVERY LINK URL MUST BE ONE OF
 THE URLS GIVEN BELOW, copied exactly. Never invent, shorten or alter a URL.
 
+Then judge EVERY item, whatever its kind, on one more question: could it
+REGRESS agent-repl? agent-repl is an editor tool that drives Claude
+unattended: its shim runs sessions through the Claude Agent SDK (TypeScript),
+its daemon makes headless `claude -p` calls to the Claude Code CLI, both reach
+the Messages API through them, and it signs in with a Claude subscription
+account. Give an item a "risk" when it changed, or announces it will change,
+something agent-repl relies on in a way that could break or degrade it:
+
+- a breaking change, deprecation or removal, or a changed default or
+  behavior, of the Agent SDK, the Claude Code CLI (its flags, output formats,
+  hooks, permissions, settings or session files) or the Messages API;
+- a pricing, billing, plan, usage-limit or rate-limit change;
+- an auth, login or account change;
+- a model retirement or rename;
+- a policy or terms change touching automated, headless or programmatic use.
+
+Give NO "risk" to bug fixes, performance improvements, or new features that
+change no existing behavior. The "risk" is ONE line saying how it could
+regress agent-repl and naming what in agent-repl it touches ("The shim's
+Agent SDK sessions lose the `resume` option it passes."). An item announced
+for a future date keeps that date in "effective". Omit "risk" from every
+item that could not regress agent-repl.
+
 {{carried}}
 
 Answer with ONE JSON object and nothing else: no prose, no markdown, no code
 fence. Its exact shape:
 
-{"sections":[{"kind":"backend","items":[{"title":"...","summary":"...","effective":"...","links":[{"label":"...","url":"https://..."}]}]}]}
+{"sections":[{"kind":"backend","items":[{"title":"...","summary":"...","effective":"...","risk":"...","links":[{"label":"...","url":"https://..."}]}]}]}
 
 Use each kind at most once, list only kinds that have items, and order items
 most important first. If nothing below matters to the reader, answer

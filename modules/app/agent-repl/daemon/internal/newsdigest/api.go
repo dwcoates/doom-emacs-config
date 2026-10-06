@@ -52,6 +52,7 @@ const (
 	opDismiss  = "daemon.newsdigest.dismiss"
 	opStanding = "daemon.newsdigest.standing"
 	opRestand  = "daemon.newsdigest.restand"
+	opWeek     = "daemon.newsdigest.week"
 )
 
 // Production windows.
@@ -81,6 +82,7 @@ var ErrNoSourceRead = errors.New("newsdigest: no source could be read")
 type Store interface {
 	NewsDigestState(ctx context.Context) (wsm.NewsDigestState, error)
 	RecordNewsDigestRun(ctx context.Context, run wsm.NewsDigestRun) error
+	NewsDigestRisksSince(ctx context.Context, since time.Time) ([]wsm.NewsDigestRisk, error)
 	DismissNewsDigest(ctx context.Context, id string) (bool, error)
 	RestandNewsDigest(ctx context.Context, id string) (bool, error)
 }
