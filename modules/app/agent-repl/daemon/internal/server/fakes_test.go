@@ -113,7 +113,9 @@ type fakeDB struct {
 	wsm.DB
 	workspaces   map[ids.WorkspaceID]wsm.Workspace
 	repositories []wsm.Repository
-	drainPut     []wsm.DrainSchedule
+	// listRepositoriesErr fails the repository read, which the slice cannot.
+	listRepositoriesErr error
+	drainPut            []wsm.DrainSchedule
 	// feedScalePut records every persisted feed text zoom; feedScalePutErr
 	// fails the write; feedScaleRead is what FeedTextScale answers (0 means the
 	// default).
@@ -178,6 +180,9 @@ func (f *fakeDB) Workspace(_ context.Context, id ids.WorkspaceID) (wsm.Workspace
 }
 
 func (f *fakeDB) ListRepositories(context.Context) ([]wsm.Repository, error) {
+	if f.listRepositoriesErr != nil {
+		return nil, f.listRepositoriesErr
+	}
 	return f.repositories, nil
 }
 

@@ -72,6 +72,30 @@ func (s *server) repositoryFor(ctx context.Context, ref *workspacev1.RepositoryR
 	return wsm.Repository{}, nil, false
 }
 
+// resolveRepository resolves REF for RPC, or says the caller must answer at
+// once: `done` is true with the unknown_repository refusal already on RESP
+// (cerr nil), or with the read's failure as cerr. It is the one spelling of
+// that refusal for every rpc that names a repository.
+func (s *server) resolveRepository(
+	ctx context.Context,
+	rpc string,
+	resp proto.Message,
+	ref *workspacev1.RepositoryRef,
+) (wsm.Repository, *connect.Error, bool) {
+	repository, err, known := s.repositoryFor(ctx, ref)
+	if err != nil {
+		return wsm.Repository{}, fail(s.log, rpc, err), true
+	}
+	if !known {
+		return wsm.Repository{}, s.refuse(s.log, rpc, resp, s.fill(refusal{
+			Arm:      "unknown_repository",
+			Reason:   fmt.Sprintf("no repository matches the ref %q", ref.GetId()),
+			NotFound: true,
+		})), true
+	}
+	return repository, nil, false
+}
+
 // CreateWorkspace materializes a new workspace, standard or one-shot. The
 // daemon names, branches and creates everything; registration happens only
 // AFTER materialization.
@@ -84,18 +108,11 @@ func (s *server) CreateWorkspace(
 		return nil, err
 	}
 	resp := &agentreplv1.CreateWorkspaceResponse{}
-	repository, err, known := s.repositoryFor(ctx, req.Msg.GetRepository())
-	if err != nil {
-		return nil, fail(s.log, rpc, err)
+	repository, cerr, done := s.resolveRepository(ctx, rpc, resp, req.Msg.GetRepository())
+	if done {
+		return answer(resp, cerr)
 	}
 	dir := repository.Dir
-	if !known {
-		return answer(resp, s.refuse(s.log, rpc, resp, s.fill(refusal{
-			Arm:      "unknown_repository",
-			Reason:   fmt.Sprintf("no repository matches the ref %q", req.Msg.GetRepository().GetId()),
-			NotFound: true,
-		})))
-	}
 
 	spec := workspace.CreateSpec{RepoDir: dir}
 	if standard := req.Msg.GetStandard(); standard != nil {
@@ -797,16 +814,9 @@ func (s *server) FoldRepository(
 		return nil, err
 	}
 	resp := &agentreplv1.FoldRepositoryResponse{}
-	repository, err, known := s.repositoryFor(ctx, req.Msg.GetRepository())
-	if err != nil {
-		return nil, fail(s.log, rpc, err)
-	}
-	if !known {
-		return answer(resp, s.refuse(s.log, rpc, resp, s.fill(refusal{
-			Arm:      "unknown_repository",
-			Reason:   fmt.Sprintf("no repository matches the ref %q", req.Msg.GetRepository().GetId()),
-			NotFound: true,
-		})))
+	repository, cerr, done := s.resolveRepository(ctx, rpc, resp, req.Msg.GetRepository())
+	if done {
+		return answer(resp, cerr)
 	}
 	folded := req.Msg.GetCollapse() != nil
 	if err := s.deps.Verbs.FoldRepository(ctx, repository.ID, folded); err != nil {
