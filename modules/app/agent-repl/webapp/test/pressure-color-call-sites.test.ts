@@ -44,6 +44,19 @@ describe("the pressure color's call sites", () => {
     },
   );
 
+  it.each(["src/footer/activity.ts", "src/feed/asks/cold-gate.ts"])(
+    "%s colors the cold gate's figure through coldGateFigureColor and interpolates nothing itself",
+    (file) => {
+      // Arrange
+      const source = readFileSync(path.join(here, "..", file), "utf8");
+      // Act / Assert
+      expect([source.includes("coldGateFigureColor("), source.includes("percentGradientColor(")]).toEqual([
+        true,
+        false,
+      ]);
+    },
+  );
+
   it("paints the footer's 42% and the topbar's 42%-full window alike", () => {
     // Arrange
     const { tc } = topbarContext();
