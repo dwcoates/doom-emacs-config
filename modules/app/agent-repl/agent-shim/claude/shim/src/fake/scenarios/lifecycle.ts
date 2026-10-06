@@ -143,6 +143,27 @@ const QUEUE_VENDOR_TURN = scenario({
   },
 });
 
+const STOP_ON_REWIND = scenario({
+  name: "stop-on-rewind",
+  prompt: "!stop-on-rewind",
+  emits:
+    "an ordinary short turn, and it ARMS the session: from then on every truncating resume (a keep-alive " +
+    "rewind's `resumeSessionAt`) emits, ahead of that query's first send, a `task_notification{status:" +
+    "\"stopped\"}` and a turn the vendor runs ON ITS OWN answering it (an assistant answer and a result with " +
+    "`origin: {kind: \"task-notification\"}`, nothing stamped)",
+  writes:
+    "the assistant line, the prompt line and the turn record, a per-session mark under the account root, and " +
+    "on each replay the vendor turn's assistant line and record",
+  arms:
+    "AgentResponse.from_model, AgentSuccess.completed — and on each rewind a turn answering nobody. Grounded in " +
+    "the ship-gns loop of 2026-10-02, where every keep-alive rewind replayed a stopped task",
+  run(ctx) {
+    ctx.log.debug({ turn: ctx.turn, branch: "stop-on-rewind" }, "fake turn that arms the stop replay on every rewind");
+    ctx.armStopOnRewind();
+    conclude(ctx, "ok");
+  },
+});
+
 export const LIFECYCLE_SCENARIOS = [
   HOLD,
   INTERRUPT_MID_TOOL,
@@ -151,4 +172,5 @@ export const LIFECYCLE_SCENARIOS = [
   QUERY_FAIL,
   KEEPALIVE_ECHO,
   QUEUE_VENDOR_TURN,
+  STOP_ON_REWIND,
 ];

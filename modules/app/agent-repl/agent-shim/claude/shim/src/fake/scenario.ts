@@ -393,6 +393,12 @@ export interface ScenarioContext {
    * send, so nothing in it is stamped with a `user_message_uuid`.
    */
   queueVendorTurn(): void;
+  /**
+   * Arm the ship-gns replay for this session: every later TRUNCATING resume
+   * (a `resumeSessionAt` rewind) reports a background task `stopped` and runs
+   * a vendor turn answering it, ahead of that query's first send.
+   */
+  armStopOnRewind(): void;
 
   // -- logging -------------------------------------------------------------
   /** Log through `src/log.ts`. Every branch of every scenario logs. */
