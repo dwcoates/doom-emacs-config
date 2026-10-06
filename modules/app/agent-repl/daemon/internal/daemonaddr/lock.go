@@ -41,9 +41,18 @@ var ErrClaimed = errors.New("another daemon holds the boot claim")
 // 2.000s + 4*80ms. A daemon still holding the claim after that is not
 // shutting down, it is serving, and ErrClaimed is the right answer for it.
 //
-// It is checked against merge.TerminalDrainBound by a test in the daemon
-// command, which is the one package that may see both.
-const ClaimWaitBound = 2*time.Second + 320*time.Millisecond
+// THE EXIT CAN ALSO WAIT OUT A MERGE'S GIT (merge.MergeGitStopBound, 10s):
+// the drain never kills a merge's git command halfway, so a shutdown that
+// lands while one runs waits for it to end (2026-10-06, a merge always
+// resumes where it left off). That wait is paid only when a command is in
+// flight -- sub-second on a healthy machine -- but a replacement must outlast
+// its bound too, or the restart that met it would destroy the daemon. The
+// wait costs nothing when no daemon holds the claim.
+//
+// It is checked against merge.TerminalDrainBound and merge.MergeGitStopBound
+// by a test in the daemon command, which is the one package that may see all
+// three.
+const ClaimWaitBound = 2*time.Second + 10*time.Second + 320*time.Millisecond
 
 // LockPath is the boot lock's path for a given daemon.addr path. The lock
 // lives beside the advertisement because they are the same claim: the file

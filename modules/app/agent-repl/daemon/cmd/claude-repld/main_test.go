@@ -476,17 +476,18 @@ func TestTheFooterMomentaryDwellDefaultsToTheResolversOwn(t *testing.T) {
 
 // TestTheClaimWaitOutlastsTheMergeDrain is the drift guard on
 // daemonaddr.ClaimWaitBound. This is the one package that may see both the
-// claim bound and the term that dominates a healthy shutdown, and the bound is
-// only meaningful while it outlasts that term: a replacement that gives up
-// before the outgoing daemon's merge drain has even finished is the
-// 2026-09-12 restart that destroyed the daemon.
+// claim bound and the terms that bound a shutdown's merge drain -- its
+// terminal wait and its wait for a merge's git in flight -- and the bound is
+// only meaningful while it outlasts both: a replacement that gives up before
+// the outgoing daemon's merge drain has even finished is the 2026-09-12
+// restart that destroyed the daemon.
 func TestTheClaimWaitOutlastsTheMergeDrain(t *testing.T) {
 	// Arrange, Act.
 	got := daemonaddr.ClaimWaitBound
 
 	// Assert.
-	if got <= merge.TerminalDrainBound {
-		t.Fatalf("ClaimWaitBound = %s, want more than the merge drain bound %s", got, merge.TerminalDrainBound)
+	if want := merge.TerminalDrainBound + merge.MergeGitStopBound; got <= want {
+		t.Fatalf("ClaimWaitBound = %s, want more than the merge drain's bounds together, %s", got, want)
 	}
 }
 
