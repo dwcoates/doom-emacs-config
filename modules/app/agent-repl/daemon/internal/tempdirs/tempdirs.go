@@ -188,6 +188,10 @@ func (g Guard) Check(dir string) error {
 	return &InsideError{Dir: canonical, Root: root}
 }
 
+// Built reports whether the guard was built by New or FromEnv. The zero Guard
+// is not, and a holder that finds one builds the production guard instead.
+func (g Guard) Built() bool { return len(g.roots) > 0 }
+
 // Roots answers the guard's canonical roots, for a record that names them.
 func (g Guard) Roots() []string { return append([]string(nil), g.roots...) }
 
