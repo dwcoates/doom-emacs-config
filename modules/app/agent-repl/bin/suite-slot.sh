@@ -130,7 +130,7 @@ acquire_slot() {
       fi
     done
     if (( announced == 0 )); then
-      holder=$(cat "$SLOT_DIR"/slot-*/cmd 2>/dev/null | head -1)
+      holder=$(cat "$SLOT_DIR"/slot-*/cmd 2>/dev/null | sed -n 1p)
       log "WAITING: all $SUITE_SLOTS suite slot(s) are in use${holder:+ (running: $holder)}."
       log "  This is the host concurrency gate, not a hang: $SLOT_DIR holds a directory per running suite."
       log "  A suite already fills this box; running two makes both slower and makes timing bounds lie."

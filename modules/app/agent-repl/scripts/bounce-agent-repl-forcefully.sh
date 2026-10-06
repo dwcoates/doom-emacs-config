@@ -104,7 +104,7 @@ pids_of() {
 # process is running.
 advertised_daemon() {
     local pid
-    pid="$(sed -n 's/^pid=\([0-9][0-9]*\)$/\1/p' "$STATE_ROOT/daemon.addr" 2>/dev/null | head -1)"
+    pid="$(sed -n 's/^pid=\([0-9][0-9]*\)$/\1/p' "$STATE_ROOT/daemon.addr" 2>/dev/null | sed -n 1p)"
     [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && echo "$pid"
     return 0
 }
