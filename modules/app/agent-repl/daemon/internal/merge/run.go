@@ -94,10 +94,20 @@ type run struct {
 	// displaced is the user turn this merge displaced, captured at admission
 	// with the text it carried.
 	displaced *Displaced
-	// afterDrain reports that this run reached its terminal AFTER the shutdown
-	// drain had already taken its snapshot. Set once, under the orchestrator's
-	// mutex, by enterTerminal.
-	afterDrain bool
+	// suspending reports that the daemon's exit took this run away before its
+	// terminal: from then on the run publishes nothing, records nothing,
+	// starts no git, and leaves its lease, queue entry and progress record to
+	// the next boot, which resumes it where the record says it stood. Set once,
+	// under the orchestrator's mutex: by the drain, or by a registration or a
+	// terminal that arrives after the drain began.
+	suspending bool
+	// git is the run's gate in front of the daemon's git (gatedgit.go): the
+	// drain stops it, and waits for the command in flight, before the exit.
+	git *gatedGit
+	// prog is the progress record as last written (progress.go); resume is the
+	// record a resumed run was rebuilt from, consumed by the step it resumes.
+	prog   progressDoc
+	resume *progressDoc
 	// queueRound is the ledger round of the QUEUE tab, opened at admission and
 	// closed when the run leaves the queue for its first step.
 	queueRound tabRound
@@ -177,6 +187,9 @@ func (r *run) openTab(ctx context.Context, kind string) tabRound {
 	r.active = round
 	r.openRounds[round.key()] = round
 	r.mu.Unlock()
+	if r.exiting() {
+		return round
+	}
 	if err := r.o.deps.DB.RecordTabInterval(ctx, r.lease.ID, wsm.TabInterval{
 		Round: round.n, Kind: kind, StartedAt: started,
 	}); err != nil {
@@ -192,6 +205,11 @@ func (r *run) openTab(ctx context.Context, kind string) tabRound {
 // intervals and NOTHING of the content: step history is feed content the
 // daemon synthesizes, never a WSM column.
 func (r *run) closeTab(ctx context.Context, round tabRound, outcome string) {
+	// A SUSPENDED RUN CLOSES NOTHING: the round is still the one the resume
+	// continues in.
+	if r.exiting() {
+		return
+	}
 	ended := r.o.deps.Now()
 	r.mu.Lock()
 	delete(r.openRounds, round.key())
@@ -211,17 +229,31 @@ func (r *run) closeTab(ctx context.Context, round tabRound, outcome string) {
 // merge runs is not the merge's and draws on the main feed. The feed resolver
 // is merge-agnostic and applies the address without knowing what a merge is.
 func (r *run) address(round tabRound) {
+	if r.exiting() {
+		return
+	}
 	ref := tabRef(r.ws, r.lease.ID, round.kind, round.n)
 	r.o.deps.Feed.SetOutputAddress(r.ws, &wsm.OutputAddress{Feed: mergeFeed(r.lease.ID), Parent: &ref})
 }
 
 // upsert publishes one tab row.
+//
+// A SUSPENDED RUN DRAWS NOTHING. Whatever its step does on the way out -- a
+// git the gate refused, a wait the exit cut -- is no outcome of the merge, so
+// the bubble stays exactly as it stood at the run's last stopping point, and
+// the resumed run carries on drawing it from there.
 func (r *run) upsert(round tabRound, tab *frontendv1.FeedMergeTab) {
+	if r.exiting() {
+		return
+	}
 	r.o.deps.Feed.UpsertDurable(r.ws, mergeFeed(r.lease.ID), tabRow(r.ws, r.lease.ID, round.kind, round.n, tab))
 }
 
 // head publishes the bubble's head row with the state arm in force.
 func (r *run) head(result any) {
+	if r.exiting() {
+		return
+	}
 	r.o.deps.Feed.UpsertDurable(r.ws, feedid.Feed{Root: true}, headRow(r.ws, r.lease.ID, r.label(), r.queuedMS, result))
 }
 
@@ -232,10 +264,17 @@ func (r *run) label() string {
 
 // runAdmitted is one admitted merge, from its start to its end: the run, then
 // the release of everything it held. It answers the error the run ended on.
+//
+// A RUN THE DAEMON'S EXIT SUSPENDED DID NOT FAIL: its step's error is the exit
+// taking it away, which its suspension already recorded, so the pump is told
+// nothing went wrong.
 func (o *orchestrator) runAdmitted(ctx context.Context, repo wsm.RepoKey, ws ids.WorkspaceID, lock *repoLock) error {
 	r, err := o.start(ctx, repo, ws, lock)
 	if r == nil {
 		return err
+	}
+	if r.exiting() {
+		err = nil
 	}
 	close(r.finished)
 	return err
@@ -247,6 +286,13 @@ func (o *orchestrator) runAdmitted(ctx context.Context, repo wsm.RepoKey, ws ids
 // answers the run, nil when it failed before one existed.
 func (o *orchestrator) start(ctx context.Context, repo wsm.RepoKey, ws ids.WorkspaceID, lock *repoLock) (*run, error) {
 	const op = "daemon.merge.start"
+	o.mu.Lock()
+	doc, resuming := o.resumes[ws]
+	delete(o.resumes, ws)
+	o.mu.Unlock()
+	if resuming {
+		return o.startResumed(ctx, repo, ws, lock, doc)
+	}
 	log := o.log(ctx, ws)
 	entry, err := o.entryOf(ctx, repo, ws)
 	if err == nil {
@@ -300,6 +346,7 @@ func (o *orchestrator) start(ctx context.Context, repo wsm.RepoKey, ws ids.Works
 		queuedMS:   entry.EnqueuedAt.UnixMilli(),
 		rounds:     map[string]int{},
 		openRounds: map[string]tabRound{},
+		git:        newGatedGit(o.deps.Git, o.deps.Now),
 	}
 	return r, r.admit(runCtx)
 }
@@ -325,10 +372,7 @@ func (r *run) admit(ctx context.Context) error {
 	const op = "daemon.merge.start"
 	o, ws := r.o, r.ws
 	log := o.log(ctx, ws)
-	o.mu.Lock()
-	o.running[r.repo] = r
-	o.runsByWorkspace[ws] = r
-	o.mu.Unlock()
+	o.register(r)
 
 	subject, err := o.resolveSubject(ctx, r)
 	if err != nil {
@@ -336,7 +380,7 @@ func (r *run) admit(ctx context.Context) error {
 		return err
 	}
 	r.subject = subject
-	same, err := o.deps.Git.SameRepo(ctx, subject.targetDir, o.deps.SelfRepoDir)
+	same, err := r.git.SameRepo(ctx, subject.targetDir, o.deps.SelfRepoDir)
 	if err != nil {
 		r.end(ctx, fmt.Errorf("could not identify the target repository: %w", err))
 		return err
@@ -344,21 +388,9 @@ func (r *run) admit(ctx context.Context) error {
 	r.emacsRepo = same
 	r.selfCheckout = same && sameDir(subject.targetDir, o.deps.SelfRepoDir)
 
-	// THE REPOSITORY MAY STATE ITS OWN MERGE ACTIONS. Which directory those
-	// come from is a fact about the requester's repository, so it is resolved
-	// once here rather than re-derived by each step.
-	policy, err := o.policyFor(ctx, ws)
-	if err != nil {
-		r.end(ctx, fmt.Errorf("could not resolve the repository's merge policy: %w", err))
+	if err := r.takeSession(ctx); err != nil {
+		r.end(ctx, err)
 		return err
-	}
-	r.policy = policy
-
-	if release, ok, err := o.deps.Occupy(ws, holderMerge); err != nil {
-		r.end(ctx, fmt.Errorf("could not take the session's occupancy: %w", err))
-		return err
-	} else if ok {
-		r.releaseOccupancy = release
 	}
 	if err := o.deps.DB.OpenMergeLedger(ctx, ws, r.lease.ID); err != nil {
 		r.end(ctx, fmt.Errorf("could not open the merge ledger: %w", err))
@@ -388,6 +420,13 @@ func (r *run) admit(ctx context.Context) error {
 	// step begins.
 	r.queueRound = r.openTab(ctx, TabQueue)
 	r.setStep(ctx, footer.StepEnqueued, func(f *footer.MergeFacts) { f.QueuePlace, f.QueueWaiting = 1, 1 })
+	// THE FIRST RECORD IS WRITTEN BEFORE ANY STEP ACTS: from here on a
+	// restart resumes this merge rather than starting it again. It follows
+	// the step's facts, so a resume draws the footer on the step it names.
+	if err := r.checkpoint(ctx, TabQueue, nil); err != nil {
+		r.end(ctx, err)
+		return err
+	}
 	r.head(nil)
 	if err := o.republishQueue(ctx, r.repo); err != nil {
 		r.end(ctx, fmt.Errorf("could not publish the queue: %w", err))
@@ -398,17 +437,47 @@ func (r *run) admit(ctx context.Context) error {
 		"source": r.source.Kind.String(), "branch": subject.branch, "worktree": subject.dir, "target": subject.targetDir,
 		"method": methodName(r.emacsRepo, r.source), "self_checkout": r.selfCheckout, "displaces": r.displaces,
 	})
-	if err := r.awaitFree(ctx, ws); err != nil {
+	if err := r.awaitWorkspacesFree(ctx); err != nil {
 		r.end(ctx, err)
 		return err
 	}
-	if r.subject.other != "" {
-		if err := r.awaitFree(ctx, r.subject.other); err != nil {
-			r.end(ctx, err)
-			return err
-		}
-	}
 	return r.execute(ctx)
+}
+
+// takeSession resolves where the requester's repository states its merge
+// policy and takes the session's occupancy guard: what a run holds of its
+// workspace before its first step, whether admitted fresh or resumed.
+//
+// THE REPOSITORY MAY STATE ITS OWN MERGE ACTIONS. Which directory those come
+// from is a fact about the requester's repository, so it is resolved once
+// here rather than re-derived by each step.
+func (r *run) takeSession(ctx context.Context) error {
+	policy, err := r.o.policyFor(ctx, r.ws)
+	if err != nil {
+		return fmt.Errorf("could not resolve the repository's merge policy: %w", err)
+	}
+	r.policy = policy
+	release, ok, err := r.o.deps.Occupy(r.ws, holderMerge)
+	if err != nil {
+		return fmt.Errorf("could not take the session's occupancy: %w", err)
+	}
+	if ok {
+		r.releaseOccupancy = release
+	}
+	return nil
+}
+
+// awaitWorkspacesFree holds a merge leaving its queue until every workspace it
+// drives is free: the requester, and another workspace whose worktree it
+// rebases in.
+func (r *run) awaitWorkspacesFree(ctx context.Context) error {
+	if err := r.awaitFree(ctx, r.ws); err != nil {
+		return err
+	}
+	if r.subject.other != "" {
+		return r.awaitFree(ctx, r.subject.other)
+	}
+	return nil
 }
 
 // awaitFree holds an admitted merge until one workspace is free: no turn in
@@ -472,8 +541,12 @@ func sameDir(a, b string) bool {
 // whatever end it reaches on the one terminal path.
 func (r *run) execute(ctx context.Context) error {
 	// The run leaves the queue here: the wait is over and the first step
-	// begins, so the queue interval ends.
-	r.closeTab(ctx, r.queueRound, "succeeded")
+	// begins, so the queue interval ends. A run resumed past its queue left it
+	// before the restart.
+	if !r.resumingPast(TabQueue) {
+		r.doneResumingAt(TabQueue)
+		r.closeTab(ctx, r.queueRound, "succeeded")
+	}
 	outcome, err := r.method(ctx)
 	if err != nil {
 		r.end(ctx, err)
@@ -492,6 +565,13 @@ func (r *run) execute(ctx context.Context) error {
 // teardown, on a context the stop itself cannot cancel.
 func (r *run) end(ctx context.Context, err error) {
 	settle := context.WithoutCancel(ctx)
+	// THE DAEMON'S EXIT ENDS NOTHING. A run the exit took away -- its gate
+	// refused the next git, or its wait was cut -- is suspended for the next
+	// boot to resume, whatever error its step returned on the way out.
+	if r.exiting() {
+		r.suspend(settle, err)
+		return
+	}
 	if cause, abandoned := abandonCauseOf(ctx); abandoned {
 		r.abandonTerminal(settle, cause)
 		return
@@ -527,31 +607,55 @@ func failedIn(area footer.MergeFailedArea, summary string) outcome {
 }
 
 // method dispatches to the run's method.
+//
+// A RESUMED RUN SKIPS WHAT THE DEAD RUN FINISHED: a step before the recorded
+// one is not run again, and the outcome a landing recorded is carried into the
+// post-merge prompts that follow it.
 func (r *run) method(ctx context.Context) (outcome, error) {
 	if r.source.Kind == wsm.MergeSourceMergedUpstream {
 		// A BRANCH ALREADY MERGED UPSTREAM: updating main, then the after-merge
 		// prompts. There is nothing to prepare, rebase or gate.
-		out, err := r.updateMain(ctx)
-		if err != nil || out.failed != "" {
-			return out, err
+		var out outcome
+		if r.resumingPast(TabUpdatingMain) {
+			out = r.resume.Outcome.outcome()
+		} else {
+			var err error
+			out, err = r.updateMain(ctx)
+			if err != nil || out.failed != "" {
+				return out, err
+			}
 		}
-		r.afterAction(ctx)
+		if err := r.afterAction(ctx, out); err != nil {
+			return outcome{}, err
+		}
 		return out, nil
 	}
-	if out, gaveUp, err := r.prePrompt(ctx); err != nil || gaveUp {
-		return out, err
+	if !r.resumingPast(TabPrePrompt) {
+		if out, gaveUp, err := r.prePrompt(ctx); err != nil || gaveUp {
+			return out, err
+		}
 	}
 	if !r.emacsRepo {
 		// EVERY OTHER REPO: nothing between the two prompts. Landing, tests and
 		// PR work belong to the prompts there.
-		r.afterAction(ctx)
+		if err := r.afterAction(ctx, outcome{}); err != nil {
+			return outcome{}, err
+		}
 		return outcome{}, nil
 	}
-	out, err := r.process(ctx)
-	if err != nil || out.failed != "" {
-		return out, err
+	var out outcome
+	if r.resumingPast(TabCommitting) {
+		out = r.resume.Outcome.outcome()
+	} else {
+		var err error
+		out, err = r.process(ctx)
+		if err != nil || out.failed != "" {
+			return out, err
+		}
 	}
-	r.afterAction(ctx)
+	if err := r.afterAction(ctx, out); err != nil {
+		return outcome{}, err
+	}
 	return out, nil
 }
 
@@ -559,11 +663,18 @@ func (r *run) method(ctx context.Context) (outcome, error) {
 // fails the run -- every commit has landed by now -- it is surfaced as this
 // WARN, with the failure's own text, and the post-prompt tab has already
 // settled failed with its composed summary.
-func (r *run) afterAction(ctx context.Context) {
-	if err := r.postPrompt(ctx); err != nil {
+//
+// THE DAEMON'S EXIT IS NOT A FAILED PROMPT: a run the exit took away answers
+// the error, so it suspends rather than concluding with the prompts unrun.
+func (r *run) afterAction(ctx context.Context, out outcome) error {
+	if err := r.postPrompt(ctx, out); err != nil {
+		if r.exiting() {
+			return err
+		}
 		r.o.log(ctx, r.ws).Warn("daemon.merge.post_prompt", "the post-merge prompt failed; the merge still landed",
 			dlog.Context{"workspace": string(r.ws), "error": err.Error()})
 	}
+	return nil
 }
 
 // actions answers the prompts one merge step submits: the ones the CREATION
@@ -601,12 +712,12 @@ func (r *run) prePrompt(ctx context.Context) (outcome, bool, error) {
 	if err != nil {
 		return outcome{}, false, err
 	}
-	for _, text := range actions {
-		round := r.openTab(ctx, TabPrePrompt)
-		r.address(round)
-		r.setStep(ctx, footer.StepPreprocessing, func(f *footer.MergeFacts) { f.Line = promptLine(footer.StepPreprocessing, text) })
-		r.upsert(round, promptTab(TabPrePrompt, round.live()))
-		close, err := r.runConfiguredPrompt(ctx, text, conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_BEFORE_ACTION)
+	for i, text := range actions {
+		round, close, err := r.configuredPrompt(ctx, TabPrePrompt, footer.StepPreprocessing, i, text,
+			conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_BEFORE_ACTION, nil)
+		if round.kind == "" {
+			continue
+		}
 		if err != nil || close.Failed() {
 			summary := "the before-merge prompt did not complete"
 			r.upsert(round, promptTab(TabPrePrompt, round.settled(r.o.nowMS(), summary)))
@@ -626,17 +737,18 @@ func (r *run) prePrompt(ctx context.Context) (outcome, bool, error) {
 
 // postPrompt runs the configured after-merge prompts: the "postprocessing"
 // step. THEIR FAILURE NEVER FAILS THE RUN -- every commit has landed by now.
-func (r *run) postPrompt(ctx context.Context) error {
+func (r *run) postPrompt(ctx context.Context, out outcome) error {
 	actions, err := r.actions(r.job.Actions.After, prompts.PolicyMergeAfter)
 	if err != nil {
 		return err
 	}
-	for _, text := range actions {
-		round := r.openTab(ctx, TabPostPrompt)
-		r.address(round)
-		r.setStep(ctx, footer.StepPostprocessing, func(f *footer.MergeFacts) { f.Line = promptLine(footer.StepPostprocessing, text) })
-		r.upsert(round, promptTab(TabPostPrompt, round.live()))
-		close, err := r.runConfiguredPrompt(ctx, text, conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_AFTER_ACTION)
+	landed := toOutcomeDoc(out)
+	for i, text := range actions {
+		round, close, err := r.configuredPrompt(ctx, TabPostPrompt, footer.StepPostprocessing, i, text,
+			conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_AFTER_ACTION, landed)
+		if round.kind == "" {
+			continue
+		}
 		if err != nil || close.Failed() {
 			summary := "the after-merge prompt did not complete"
 			r.upsert(round, promptTab(TabPostPrompt, round.settled(r.o.nowMS(), summary)))
@@ -652,15 +764,47 @@ func (r *run) postPrompt(ctx context.Context) error {
 	return nil
 }
 
+// configuredPrompt runs configured prompt i of a pre or post step in its own
+// tab round, and answers the round and how its turn ended. A round with no
+// kind means the prompt was finished before the restart this run resumes
+// from, and nothing was run.
+//
+// A RESUME AT THIS PROMPT REATTACHES TO ITS TURN. The turn lives in the shim,
+// which outlived the daemon: the round it drew in is drawn live again and the
+// run waits for that same turn's end.
+func (r *run) configuredPrompt(ctx context.Context, kind string, step footer.MergeStep, i int, text string,
+	origin conversationv1.PromptOrigin, landed *outcomeDoc) (tabRound, wsm.TurnClose, error) {
+	if res, ok := r.resumingAt(kind); ok {
+		if i < res.PromptIndex {
+			return tabRound{}, 0, nil
+		}
+		r.doneResuming()
+		round := r.activeRound()
+		r.drawLive(ctx, round, step, promptLine(step, text), nil, promptTab(kind, round.live()))
+		close, err := r.reattachTurn(ctx, ids.TurnID(res.Turn), text, origin)
+		return round, close, err
+	}
+	round := r.openTab(ctx, kind)
+	r.drawLive(ctx, round, step, promptLine(step, text), nil, promptTab(kind, round.live()))
+	turn := wsm.NewTurnID()
+	if err := r.checkpoint(ctx, kind, func(d *progressDoc) {
+		d.PromptIndex, d.Turn, d.Outcome = i, string(turn), landed
+	}); err != nil {
+		return round, wsm.CloseFailed, err
+	}
+	close, err := r.runConfiguredPrompt(ctx, turn, text, origin)
+	return round, close, err
+}
+
 // runConfiguredPrompt starts a session if the workspace has none -- a
 // configured prompt is what revives it -- then submits the prompt and waits
 // for its turn to end. THE ACTION IS THE PROMPT, NOT A PROMPT'S NAME: the
 // recorded text is submitted verbatim.
-func (r *run) runConfiguredPrompt(ctx context.Context, prompt string, origin conversationv1.PromptOrigin) (wsm.TurnClose, error) {
+func (r *run) runConfiguredPrompt(ctx context.Context, turn ids.TurnID, prompt string, origin conversationv1.PromptOrigin) (wsm.TurnClose, error) {
 	if err := r.ensureSession(ctx); err != nil {
 		return wsm.CloseFailed, fmt.Errorf("merge: starting a session for a configured prompt: %w", err)
 	}
-	return r.submit(ctx, prompt, origin)
+	return r.submit(ctx, turn, prompt, origin)
 }
 
 // ensureSession starts the requester's session when it has none, under the
@@ -678,8 +822,10 @@ func (r *run) ensureSession(ctx context.Context) error {
 // REQUESTER's own session, and waits for its turn to end. The merge's prompts
 // are ordinary submissions with a merge origin; nothing about them bypasses
 // the queue.
-func (r *run) submit(ctx context.Context, text string, origin conversationv1.PromptOrigin) (wsm.TurnClose, error) {
-	turn := wsm.NewTurnID()
+//
+// THE TURN IS MINTED BY THE CALLER, which records it in the merge's progress
+// before submitting: a restart then reattaches to the same turn.
+func (r *run) submit(ctx context.Context, turn ids.TurnID, text string, origin conversationv1.PromptOrigin) (wsm.TurnClose, error) {
 	disposition, err := r.o.deps.Queue.Submit(ctx, promptqueue.Submission{
 		WS: r.ws, Turn: turn, Said: saidText(text), Origin: origin,
 	})
@@ -690,6 +836,23 @@ func (r *run) submit(ctx context.Context, text string, origin conversationv1.Pro
 		return wsm.CloseFailed, fmt.Errorf("merge: the queue refused a merge prompt: %s", disposition.RefusedArm)
 	}
 	return r.o.deps.AwaitTurnEnd(ctx, r.ws, turn)
+}
+
+// drawLive stands an AGENTIC step's round live: the merge's own turns are
+// addressed to it, the footer moves onto the step with its line (and apply's
+// own facts), and the tab is drawn. It is the one shape every agentic round
+// -- a configured prompt, a conflict resolution, a fixing attempt -- opens
+// with, fresh or resumed.
+func (r *run) drawLive(ctx context.Context, round tabRound, step footer.MergeStep,
+	line *frontendv1.FooterStatusActivityMergeStep, apply func(*footer.MergeFacts), tab *frontendv1.FeedMergeTab) {
+	r.address(round)
+	r.setStep(ctx, step, func(f *footer.MergeFacts) {
+		if apply != nil {
+			apply(f)
+		}
+		f.Line = line
+	})
+	r.upsert(round, tab)
 }
 
 // promptTab builds an agentic prompt tab's kind arm.

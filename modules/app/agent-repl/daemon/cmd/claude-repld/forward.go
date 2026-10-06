@@ -265,3 +265,49 @@ func (f *vendorServesForwarder) VendorServes(ws ids.WorkspaceID, was string) {
 	}
 	queue.OnVendorServes(ws)
 }
+
+// mergeMoverForwarder carries a handover's merge moves to the merge
+// orchestrator, which is built after the rollout controller (it is told of a
+// landing through it). Nothing transfers or adopts before the graph is whole;
+// a move asked of an unbound forwarder is a wiring defect, answered as the
+// error it is rather than as a move that happened.
+type mergeMoverForwarder struct {
+	mu     sync.RWMutex
+	target rollout.MergeMover
+}
+
+var _ rollout.MergeMover = (*mergeMoverForwarder)(nil)
+
+func (f *mergeMoverForwarder) bind(target rollout.MergeMover) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.target = target
+}
+
+func (f *mergeMoverForwarder) mover() (rollout.MergeMover, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	if f.target == nil {
+		return nil, errMergeMoverUnbound
+	}
+	return f.target, nil
+}
+
+func (f *mergeMoverForwarder) SuspendForTransfer(ctx context.Context, ws ids.WorkspaceID) error {
+	m, err := f.mover()
+	if err != nil {
+		return err
+	}
+	return m.SuspendForTransfer(ctx, ws)
+}
+
+func (f *mergeMoverForwarder) AdoptWorkspace(ctx context.Context, ws ids.WorkspaceID) error {
+	m, err := f.mover()
+	if err != nil {
+		return err
+	}
+	return m.AdoptWorkspace(ctx, ws)
+}
+
+// errMergeMoverUnbound is a merge move asked before the orchestrator exists.
+var errMergeMoverUnbound = errors.New("claude-repld: the merge orchestrator is not bound; a workspace's merges cannot be moved")

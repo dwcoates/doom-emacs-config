@@ -224,6 +224,12 @@ func (r *run) teardown(ctx context.Context, out outcome, terminal func()) {
 		log.Error(op, "could not release the merge lease", dlog.Context{
 			"workspace": string(r.ws), "lease": string(r.lease.ID), "error": err.Error()})
 	}
+	// THE PROGRESS RECORD GOES WITH THE LEASE: the merge is over, and nothing
+	// is left to resume.
+	if _, err := r.o.deps.DB.DropMergeProgress(ctx, r.lease.ID); err != nil {
+		log.Error(op, "could not drop the finished merge's progress record", dlog.Context{
+			"workspace": string(r.ws), "lease": string(r.lease.ID), "error": err.Error()})
+	}
 	r.keepOpenForHeldPrompts(ctx, log)
 	r.o.deps.Queue.OnLeaseChanged(r.ws)
 	if terminal != nil {
@@ -265,7 +271,7 @@ func (r *run) teardown(ctx context.Context, out outcome, terminal func()) {
 	// when its conflict resolution gave up, which leaves the rebase in
 	// progress in it for the user to carry on.
 	if r.subject.made && out.area != footer.FailedConflicts {
-		if err := r.o.deps.Git.RemoveWorktree(ctx, r.subject.targetDir, r.subject.dir); err != nil {
+		if err := r.git.RemoveWorktree(ctx, r.subject.targetDir, r.subject.dir); err != nil {
 			log.Error(op, "could not remove the worktree the merge made for the branch", dlog.Context{
 				"workspace": string(r.ws), "worktree": r.subject.dir, "error": err.Error()})
 		}
@@ -328,7 +334,7 @@ func (r *run) closeLanded(ctx context.Context, log dlog.Logger) {
 			"workspace": string(closes), "worktree": dir, "force": true, "error": err.Error()})
 		return
 	}
-	if err := r.o.deps.Git.RemoveWorktree(ctx, string(r.repo), dir); err != nil {
+	if err := r.git.RemoveWorktree(ctx, string(r.repo), dir); err != nil {
 		log.Error(op, "could not remove the merged worktree", dlog.Context{
 			"workspace": string(closes), "worktree": dir, "error": err.Error()})
 		return
@@ -401,14 +407,19 @@ func (r *run) enterTerminal(owed string) {
 	// registration that gets in while draining is false is IN the drain's
 	// snapshot and will be waited for, so its durable work is safe; one that
 	// arrives after is not, and nothing holds the state client open for it.
-	r.afterDrain = o.draining
+	r.suspending = r.suspending || o.draining
 	o.terminals[r.ws] = &terminal{ws: r.ws, done: make(chan struct{}), owed: owed, lease: r.lease.ID}
 }
 
-// exiting reports that this run reached its terminal after the shutdown drain
-// had closed its snapshot: the daemon is on its way out, the state client is
-// closing, and the boot recovery owns everything this run still holds.
-func (r *run) exiting() bool { return r.afterDrain }
+// exiting reports that the daemon's exit took this run away: the drain marked
+// it mid-step, or it reached its terminal after the drain had closed its
+// snapshot. The state client is closing, and the next boot owns -- and
+// resumes -- everything this run still holds.
+func (r *run) exiting() bool {
+	r.o.mu.Lock()
+	defer r.o.mu.Unlock()
+	return r.suspending
+}
 
 // abandonToRecovery is the terminal a run takes when the daemon exited out
 // from under it. It gives back everything that lives in THIS process -- the
@@ -421,6 +432,21 @@ func (r *run) exiting() bool { return r.afterDrain }
 // an error; but the record names exactly what was left undone and who owns it,
 // which is the same account the drain writes for a merge left mid-phase.
 func (r *run) abandonToRecovery(ctx context.Context, owed string) {
+	r.releaseInProcess(ctx)
+	r.o.deps.Log.Global().Info("daemon.merge.teardown",
+		"the daemon exited before this merge's terminal could be written; the boot recovery owns what it left",
+		dlog.Context{
+			"workspace": string(r.ws),
+			"lease":     string(r.lease.ID),
+			"unstamped": owed,
+		})
+}
+
+// releaseInProcess gives back what a run holds IN THIS PROCESS -- the output
+// address, the occupancy guard, the orchestrator's maps, the slot and the
+// queue lock -- and touches the state client, the git and the shim not at
+// all.
+func (r *run) releaseInProcess(ctx context.Context) {
 	r.o.deps.Feed.SetOutputAddress(r.ws, nil)
 	if r.releaseOccupancy != nil {
 		r.releaseOccupancy()
@@ -433,13 +459,6 @@ func (r *run) abandonToRecovery(ctx context.Context, owed string) {
 	r.o.mu.Unlock()
 	r.o.clearOffer(r.ws)
 	r.o.releaseSlot(ctx, r)
-	r.o.deps.Log.Global().Info("daemon.merge.teardown",
-		"the daemon exited before this merge's terminal could be written; the boot recovery owns what it left",
-		dlog.Context{
-			"workspace": string(r.ws),
-			"lease":     string(r.lease.ID),
-			"unstamped": owed,
-		})
 }
 
 // leaveTerminal retires the registration and releases whatever is waiting on
@@ -456,14 +475,21 @@ func (r *run) leaveTerminal() {
 	}
 }
 
-// Drain stops admitting merges and waits, WITHIN A BOUND, for every run that
-// has already reached its terminal to finish its durable stamps and teardown.
+// Drain stops admitting merges, brings every merge still mid-step to a
+// STOPPING POINT, and waits, WITHIN A BOUND, for every run that has already
+// reached its terminal to finish its durable stamps and teardown.
 //
-// It is the daemon's orderly exit calling, with the state client still open. A
-// merge still in a LONG PHASE — its tests, its agent turn — is NOT waited for:
-// it is abandoned to the boot recovery exactly as it was before, but recorded
-// at INFO with the phase it was left in, rather than discovered later through
-// writes that failed against a closed store.
+// It is the daemon's orderly exit calling, with the state client still open.
+//
+// A MID-STEP MERGE IS SUSPENDED, NEVER INTERRUPTED (owner ruling, 2026-10-06).
+// Its git gate is stopped -- no git starts after this -- and the command
+// already running is waited for to its end (MergeGitStopBound), because a git
+// killed mid-command leaves a tree the resume could not read. Only then are
+// its waits cut: an agent turn (which lives on in the shim, and the resumed
+// merge reattaches to it) and a test gate run (cut here, and run again from
+// its start on resume -- the tests are idempotent). The run then lets go of
+// what it holds in this process and leaves its lease, its queue entry and its
+// progress record to the next boot, which resumes it at the step it recorded.
 func (o *orchestrator) Drain(ctx context.Context) {
 	const op = "daemon.merge.drain"
 	log := o.deps.Log.Global()
@@ -486,26 +512,34 @@ func (o *orchestrator) Drain(ctx context.Context) {
 	for _, mark := range o.terminals {
 		waits = append(waits, mark)
 	}
-	type midPhase struct {
-		ws    ids.WorkspaceID
-		lease ids.LeaseID
-		phase string
-	}
-	mid := make([]midPhase, 0, len(o.runsByWorkspace))
+	// EVERY RUN NOT IN ITS TERMINAL IS SUSPENDED, under the lock its terminal
+	// registers under: a run is either waited for as a terminal or suspended,
+	// never neither.
+	var suspended []*run
 	for ws, r := range o.runsByWorkspace {
 		if _, terminal := o.terminals[ws]; terminal {
 			continue
 		}
-		mid = append(mid, midPhase{ws: ws, lease: r.lease.ID, phase: r.activeTab()})
+		r.suspending = true
+		suspended = append(suspended, r)
 	}
 	o.mu.Unlock()
 
-	// A MID-PHASE MERGE IS ANNOUNCED, NOT WAITED FOR. Its phase is the whole
-	// point of the record: what the boot recovery will find, and where.
-	for _, m := range mid {
-		log.Info(op, "a merge was left mid-phase by the daemon's exit; the boot recovery owns it",
-			dlog.Context{"workspace": string(m.ws), "lease": string(m.lease), "phase": m.phase})
+	// THE GIT IN FLIGHT FINISHES FIRST. Every suspended run's gate is stopped
+	// before any is waited for, so no run starts a command while another's is
+	// being waited out.
+	o.awaitStoppingPoints(op, suspended)
+	for _, r := range suspended {
+		step := r.progressStep()
+		fields := dlog.Context{"workspace": string(r.ws), "lease": string(r.lease.ID), "step": step, "tab": r.activeTab()}
+		if r.activeTab() == TabTests {
+			log.Info(op, "the merge's test gate is cut by the daemon's exit; the resumed merge runs it again from its start", fields)
+		} else {
+			log.Info(op, "a merge is suspended at a stopping point by the daemon's exit; the next boot resumes it at the step it recorded", fields)
+		}
+		r.cancel(errDaemonExiting)
 	}
+
 	bound := o.terminalDrainBound()
 	expired := time.NewTimer(bound)
 	defer expired.Stop()
@@ -525,9 +559,24 @@ func (o *orchestrator) Drain(ctx context.Context) {
 			return
 		}
 	}
+	// THE SUSPENDED RUNS LET GO NEXT: a cut wait answers at once, and what a
+	// run does on its way out is in-process only.
+	for _, r := range suspended {
+		select {
+		case <-r.finished:
+		case <-expired.C:
+			log.Error(op, "a suspended merge did not let go before the drain's bound; the state client closes under it",
+				dlog.Context{"workspace": string(r.ws), "lease": string(r.lease.ID), "bound": bound.String()})
+			return
+		case <-ctx.Done():
+			log.Error(op, "the drain was cancelled while a suspended merge was letting go; the state client closes under it",
+				dlog.Context{"workspace": string(r.ws), "lease": string(r.lease.ID), "bound": bound.String()})
+			return
+		}
+	}
 	if len(waits) == 0 {
 		log.Debug(op, "the merge drain had no terminal work to wait for",
-			dlog.Context{"mid_phase": len(mid)})
+			dlog.Context{"suspended": len(suspended)})
 		return
 	}
 	// THE TEST SEAM, NIL IN PRODUCTION. See orchestrator.onDrainWait: it is
@@ -548,7 +597,65 @@ func (o *orchestrator) Drain(ctx context.Context) {
 		}
 	}
 	log.Debug(op, "the merge drain finished every terminal it was holding",
-		dlog.Context{"terminals": len(waits), "mid_phase": len(mid), "bound": bound.String()})
+		dlog.Context{"terminals": len(waits), "suspended": len(suspended), "bound": bound.String()})
+}
+
+// errDaemonExiting is the cause the drain cuts a suspended run's waits with.
+var errDaemonExiting = errors.New("merge: the daemon is exiting; the merge is suspended for the next boot to resume")
+
+// awaitStoppingPoints stops every suspended run's git gate and waits, within
+// MergeGitStopBound, for the commands they had in flight to end. Each wait is
+// MEASURED and recorded; a command still running at the bound is an ERROR
+// naming it, and the exit goes on.
+func (o *orchestrator) awaitStoppingPoints(op string, suspended []*run) {
+	log := o.deps.Log.Global()
+	type standing struct {
+		r       *run
+		idle    <-chan struct{}
+		running gitInFlight
+	}
+	all := make([]standing, 0, len(suspended))
+	for _, r := range suspended {
+		idle, running := r.git.stop()
+		all = append(all, standing{r: r, idle: idle, running: running})
+	}
+	bound := o.gitStopBound()
+	expired := time.NewTimer(bound)
+	defer expired.Stop()
+	began := o.deps.Now()
+	// THE TEST SEAM, NIL IN PRODUCTION: called with every gate stopped,
+	// immediately before the wait for the commands in flight begins.
+	if o.onGitStopWait != nil {
+		o.onGitStopWait()
+	}
+	for _, st := range all {
+		fields := dlog.Context{"workspace": string(st.r.ws), "lease": string(st.r.lease.ID)}
+		if st.running.name == "" {
+			log.Debug(op, "the merge had no git in flight; it stops here", fields)
+			continue
+		}
+		fields["git"] = st.running.name
+		select {
+		case <-st.idle:
+			fields["waited_ms"] = o.deps.Now().Sub(began).Milliseconds()
+			fields["ran_ms"] = o.deps.Now().Sub(st.running.since).Milliseconds()
+			log.Info(op, "waited for the merge's git command to finish before the exit", fields)
+		case <-expired.C:
+			fields["bound"] = bound.String()
+			fields["ran_ms"] = o.deps.Now().Sub(st.running.since).Milliseconds()
+			log.Error(op, "the merge's git command outlived the exit's bound; the exit goes on without it, and the resume reads the tree it leaves", fields)
+			return
+		}
+	}
+}
+
+// gitStopBound answers the bound in force: the test override when one is set,
+// else MergeGitStopBound.
+func (o *orchestrator) gitStopBound() time.Duration {
+	if o.gitBound > 0 {
+		return o.gitBound
+	}
+	return MergeGitStopBound
 }
 
 // warnUndrained names EVERY merge whose terminal work the drain gave up on and

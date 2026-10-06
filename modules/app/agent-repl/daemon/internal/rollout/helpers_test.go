@@ -1053,7 +1053,10 @@ func (r *fakeRegistry) Pending(ws ids.WorkspaceID) bool {
 
 // harness is one controller under test with every fake reachable.
 type harness struct {
-	c            *controller
+	c *controller
+	// merges records the merge mover's calls, in order, as "suspend <ws>" and
+	// "adopt <ws>"; suspendErr and adoptErr fail them.
+	merges       *fakeMerges
 	progress     *fakeProgress
 	db           wsm.DB
 	clock        *fakeClock
@@ -1172,8 +1175,10 @@ func newHarness(t *testing.T, adjust ...func(*Deps)) *harness {
 		shimBuild:    "installed-build",
 		progress:     &fakeProgress{},
 		startErr:     make(map[ids.WorkspaceID]error),
+		merges:       &fakeMerges{order: order},
 	}
 	deps := Deps{
+		Merges:         h.merges,
 		SelfExe:        filepath.Join(state, "claude-repld"),
 		SelfAddress:    "127.0.0.1:7777",
 		Instance:       selfInstance,
@@ -1488,4 +1493,37 @@ func (h *harness) Unreported() []stateUnreportedCall {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return append([]stateUnreportedCall(nil), h.unreported...)
+}
+
+// fakeMerges is the merge mover: it records each call on the harness's shared
+// order, so a test asserts a merge stops before its shim moves.
+type fakeMerges struct {
+	order      *steps
+	mu         sync.Mutex
+	calls      []string
+	suspendErr error
+	adoptErr   error
+}
+
+func (f *fakeMerges) SuspendForTransfer(_ context.Context, ws ids.WorkspaceID) error {
+	f.order.record("suspend_merge")
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, "suspend "+string(ws))
+	return f.suspendErr
+}
+
+func (f *fakeMerges) AdoptWorkspace(_ context.Context, ws ids.WorkspaceID) error {
+	f.order.record("adopt_merges")
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, "adopt "+string(ws))
+	return f.adoptErr
+}
+
+// called reports the merge mover's calls.
+func (f *fakeMerges) called() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.calls...)
 }
