@@ -6205,7 +6205,9 @@ bubble-body.bubble-body { display: block; }
    background, never to yellow. */
 .cold-gate {
   background: var(--input-bg, var(--bg));
-  border: 1px solid var(--revival-gate-border);
+  /* The frame -- the separator line when docked -- wears the token figure's
+     heat (--cold-gate-heat, set on the card by cold-gate.ts). */
+  border: 1px solid var(--cold-gate-heat, var(--revival-gate-border));
   border-radius: 8px;
   padding: 0.6rem 0.85rem;
   font-size: 0.85rem;
@@ -6217,7 +6219,7 @@ bubble-body.bubble-body { display: block; }
 .cold-gate-submenu {
   margin-top: 0.4rem;
   padding: 0.4rem 0 0.2rem 0.9rem;
-  border-top: 1px solid var(--revival-gate-border);
+  border-top: 1px solid var(--cold-gate-heat, var(--revival-gate-border));
 }
 .cold-gate-submenu-label {
   margin-top: 0.3rem;

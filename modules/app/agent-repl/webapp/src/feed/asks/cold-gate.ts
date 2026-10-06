@@ -170,16 +170,20 @@ export function drawFeedColdGateStanding(
   head.append(heading, drawFeedColdGateLastRequest(lastRequest, rc, `${path}.last_request`));
   card.append(head);
 
-  card.append(
-    drawLead(
-      drawFeedColdGateContextTokens(tokens, `${path}.context_tokens`),
-      drawFeedColdGateModel(model, `${path}.model`),
-    ),
-  );
+  const figure = drawFeedColdGateContextTokens(tokens, `${path}.context_tokens`);
+  // THE CARD'S RULES TAKE THE FIGURE'S HEAT (owner, 2026-10-06): its frame --
+  // the separator line when docked -- and the submenu's divider wear the very
+  // color the token figure was given, read off the figure rather than computed
+  // twice, so the two can never disagree.
+  card.style.setProperty(COLD_GATE_HEAT_PROPERTY, figure.style.color);
+  card.append(drawLead(figure, drawFeedColdGateModel(model, `${path}.model`)));
 
   card.append(drawActions(rc, menu, `${path}.compact`));
   return card;
 }
+
+/** The card property its frame and dividers read the token figure's color from. */
+export const COLD_GATE_HEAT_PROPERTY = "--cold-gate-heat";
 
 /**
  * The lead sentence, with the token figure as an element of its own.
