@@ -278,14 +278,20 @@ type harness struct {
 	// asked about, in order.
 	restore      func(wsm.Workspace) (bool, error)
 	restoreAsked []ids.WorkspaceID
-	seq          Sequence
-	deps         Deps
-	db           wsm.DB
-	supervisor   *fakeSupervisor
-	queue        *fakeQueue
-	merge        *fakeMerge
-	rollout      *fakeRollout
-	log          *dlog.TestSurfaces
+	// repoDir is the repository every registered workspace belongs to. It is
+	// a directory of its own that outlives every workspace directory a test
+	// removes: a worktree's removal is not its repository's, and a
+	// repository whose directory is gone is retired at boot
+	// (retireGoneRepositories).
+	repoDir    string
+	seq        Sequence
+	deps       Deps
+	db         wsm.DB
+	supervisor *fakeSupervisor
+	queue      *fakeQueue
+	merge      *fakeMerge
+	rollout    *fakeRollout
+	log        *dlog.TestSurfaces
 	// installed records every workspace whose adopted client was installed.
 	installed []ids.WorkspaceID
 	// sessionsAdopted records every adopted survivor stated to hold a session.
@@ -351,6 +357,7 @@ func newHarness(t *testing.T, adjust ...func(*Deps, *harness)) *harness {
 
 	h := &harness{
 		db:         db,
+		repoDir:    t.TempDir(),
 		supervisor: &fakeSupervisor{},
 		queue:      &fakeQueue{},
 		merge:      &fakeMerge{},
@@ -442,7 +449,7 @@ func newHarness(t *testing.T, adjust ...func(*Deps, *harness)) *harness {
 // register puts one workspace in the registry and scripts its lock state.
 func (h *harness) register(t *testing.T, dir string, state sessionlock.State) wsm.Workspace {
 	t.Helper()
-	ws, _, err := h.db.RegisterWorkspace(context.Background(), dir, wsm.RegisterFacts{Branch: "feature", ParentBranch: "master", RepoDir: dir, DefaultBranch: "master"})
+	ws, _, err := h.db.RegisterWorkspace(context.Background(), dir, wsm.RegisterFacts{Branch: "feature", ParentBranch: "master", RepoDir: h.repoDir, DefaultBranch: "master"})
 	if err != nil {
 		t.Fatalf("RegisterWorkspace(%s): %v", dir, err)
 	}
