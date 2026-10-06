@@ -333,6 +333,14 @@ interface Reader {
     opening: AgentOpening,
     known?: () => boolean,
   ): Promise<conversationv1.HistoryPage>;
+  /**
+   * The book's head, read without a page: absence when the book is empty, or
+   * when the store does not know it and the producer vouches for the agent.
+   */
+  readBookHead(
+    agent: conversationv1.AgentId,
+    known?: () => boolean,
+  ): Promise<conversationv1.HistoryPointer | undefined>;
   readAgentPage(
     agent: conversationv1.AgentId,
     after: conversationv1.HistoryPointer,
@@ -1185,6 +1193,43 @@ export function createReader(options: ReaderOptions): Reader {
     onReadRetrySchedule("readFirstPage", agent, () => readFirstPageOnce(agent, opening, known));
 
   /**
+   * One book's HEAD -- the pointer a repaint would serve first -- as the store
+   * answered it, without reading a single line.
+   *
+   * A TAIL-ONLY, PAGE-ONLY OPEN. The store answers it from the place index
+   * alone (`newest`, the same seek a repaint's first line comes from) and
+   * mints no watch token. Reading the head off a repaint instead scanned a
+   * whole page of stored frames for one pointer, and under disk contention
+   * that scan is what kept a stand-down's head read past its budget
+   * (2026-10-06: the store abandoned a 50-line page scan of the very book
+   * 6 s after the shim's teardown had given up on it).
+   *
+   * `known` is the producer's vouching, exactly as on {@link readFirstPage}:
+   * with it holding, the store's `unknown_agent` is the empty book a session
+   * killed before its first write has, and absence is its head. Every other
+   * refusal is surfaced as it stands.
+   */
+  const readBookHeadOnce = async (
+    agent: conversationv1.AgentId,
+    known?: () => boolean,
+  ): Promise<conversationv1.HistoryPointer | undefined> => {
+    let opened: storev1.OpenAgentSessionSuccess;
+    try {
+      opened = await openSession(agent, { case: "tailOnly" }, true);
+    } catch (error) {
+      if (known === undefined || !(error instanceof PersistenceError)) throw error;
+      if (error.kind !== "unknown_agent" || !known()) throw error;
+      LOGGER.debug(
+        { agent: agent.value },
+        "the store holds no rows for this announced agent yet; its book has no head",
+      );
+      return undefined;
+    }
+    booksMinted.delete(agent.value);
+    return opened.newest === undefined ? undefined : toHistoryPointer(opened.newest);
+  };
+
+  /**
    * One older page, as the store answered it.
    *
    * Wrapped by the retried entry point below: an older page is as much a
@@ -1350,6 +1395,10 @@ export function createReader(options: ReaderOptions): Reader {
 
     readFirstPage(agent, opening, known) {
       return readFirstPage(agent, opening, known);
+    },
+
+    readBookHead(agent, known) {
+      return onReadRetrySchedule("readBookHead", agent, () => readBookHeadOnce(agent, known));
     },
 
     readAgentPage(agent, after) {
