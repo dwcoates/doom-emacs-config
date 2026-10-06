@@ -336,7 +336,7 @@ func OpenWithOptions(path string, log *logging.Logger, opts Options) (*DB, error
 	// cache_size and mmap_size: WriteCacheKiB and MmapSizeBytes, at the top of
 	// this file, say what they cost and why.
 	writeDSN := "file:" + path + "?" + url.Values{
-		"_pragma": {
+		"_pragma": syncFirstWhenUnsynced(opts, []string{
 			"journal_mode(WAL)",
 			"busy_timeout(5000)",
 			synchronousPragma(opts),
@@ -345,7 +345,7 @@ func OpenWithOptions(path string, log *logging.Logger, opts Options) (*DB, error
 			fmt.Sprintf("journal_size_limit(%d)", JournalSizeLimitBytes),
 			fmt.Sprintf("cache_size(-%d)", WriteCacheKiB),
 			fmt.Sprintf("mmap_size(%d)", MmapSizeBytes),
-		},
+		}),
 		"_txlock": {"immediate"},
 	}.Encode()
 
@@ -506,6 +506,24 @@ func synchronousPragma(opts Options) string {
 		return "synchronous(OFF)"
 	}
 	return "synchronous(NORMAL)"
+}
+
+// syncFirstWhenUnsynced moves the sync level to the FRONT of an unsynced
+// connection's pragmas: the driver applies them in order, and the WAL
+// conversion journal_mode(WAL) commits would otherwise still run at SQLite's
+// default FULL, an F_FULLFSYNC that once stalled a test store's open for
+// seconds. A durable connection's pragmas keep their production order.
+func syncFirstWhenUnsynced(opts Options, pragmas []string) []string {
+	if !opts.unsynced {
+		return pragmas
+	}
+	out := []string{synchronousPragma(opts)}
+	for _, p := range pragmas {
+		if p != synchronousPragma(opts) {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // reopenAfterNuke is openAt, reached through a variable so a test can construct

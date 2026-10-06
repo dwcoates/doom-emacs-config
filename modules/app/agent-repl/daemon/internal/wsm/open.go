@@ -136,7 +136,7 @@ func Open(ctx context.Context, path string, opts ...Option) (DB, error) {
 const writingPragmas = "_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_txlock=immediate&_pragma=foreign_keys(1)"
 
 // unsyncedPragma is what WithUnsyncedWrites adds to a writing connection.
-const unsyncedPragma = "&_pragma=synchronous(OFF)"
+const unsyncedPragma = "_pragma=synchronous(OFF)"
 
 // writingDSN is the DSN of a writing connection on path, under the options the
 // open was given.
@@ -144,12 +144,14 @@ func writingDSN(path string, opts []Option) string {
 	return writingDSNFor(path, resolveOptions(opts).unsynced)
 }
 
+// The unsynced pragma goes FIRST: the driver applies pragmas in order, and
+// behind journal_mode(WAL) the conversion's commit would still run at SQLite's
+// default FULL, an F_FULLFSYNC.
 func writingDSNFor(path string, unsynced bool) string {
-	dsn := path + "?" + writingPragmas
 	if unsynced {
-		dsn += unsyncedPragma
+		return path + "?" + unsyncedPragma + "&" + writingPragmas
 	}
-	return dsn
+	return path + "?" + writingPragmas
 }
 
 // resolveOptions applies opts to a bare store, so a DSN can be built from them

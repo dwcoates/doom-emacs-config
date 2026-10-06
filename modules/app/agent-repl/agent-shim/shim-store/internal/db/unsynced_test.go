@@ -3,6 +3,7 @@ package db
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -75,4 +76,29 @@ func TestOpenRecordsAnUnsyncedDatabaseAtInfo(t *testing.T) {
 	}
 	t.Cleanup(func() { d.Close() }) //nolint:errcheck // best-effort test teardown
 	s.assertLogged(t, "info", "skips SQLite's forced flushes")
+}
+
+func TestSyncFirstWhenUnsynced(t *testing.T) {
+	pragmas := func(opts Options) []string {
+		return []string{"journal_mode(WAL)", synchronousPragma(opts), "foreign_keys(ON)"}
+	}
+	tests := []struct {
+		name string
+		opts Options
+		want string
+	}{
+		{name: "an unsynced connection turns sync off before the WAL conversion", opts: Options{unsynced: true}, want: "synchronous(OFF) journal_mode(WAL) foreign_keys(ON)"},
+		{name: "a durable connection keeps the production order", opts: Options{}, want: "journal_mode(WAL) synchronous(NORMAL) foreign_keys(ON)"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := strings.Join(syncFirstWhenUnsynced(tc.opts, pragmas(tc.opts)), " ")
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("pragmas = %q, want %q", got, tc.want)
+			}
+		})
+	}
 }
