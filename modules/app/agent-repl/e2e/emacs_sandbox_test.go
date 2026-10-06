@@ -242,10 +242,24 @@ func unescapeMountPath(s string) string {
 // is an ordinary child of the test binary, which is itself containerized.
 type localSandbox struct {
 	t *testing.T
-
-	scratchOnce sync.Once
-	scratchDir  string
 }
+
+// scratchEntry is one test's scratch directory, made once.
+type scratchEntry struct {
+	once sync.Once
+	dir  string
+}
+
+// scratchByTest holds each running test's scratch, keyed by its *testing.T.
+//
+// THE SCRATCH IS THE TEST'S, NOT THE SANDBOX VALUE'S. A scenario helper
+// (newEmacsScenario) and the test that called it each call requireSandbox,
+// and with the directory held on the value each got its OWN scratch: the
+// world's Emacs root in one, the test's second repository in another. The
+// daemon exempts exactly one directory from its temporary-folder refusal --
+// the scratch the world states (StartEmacs) -- so the second repository was
+// refused and the scenario never saw its workspace (2026-10-06).
+var scratchByTest sync.Map
 
 // Available reports readiness, and is deliberately three-way.
 //
@@ -429,19 +443,25 @@ func majorVersion(line string) (int, bool) {
 	return 0, false
 }
 
-// Scratch is a per-test directory under /tmp, which the sandbox mounts as a
+// Scratch is a per-TEST directory under /tmp (every sandbox value one test
+// holds answers the same one), which the sandbox mounts as a
 // writable exec tmpfs and which dies with the container. It is removed on
 // cleanup as well, so a `-count=N` run does not accumulate.
 func (s *localSandbox) Scratch() string {
-	s.scratchOnce.Do(func() {
+	held, _ := scratchByTest.LoadOrStore(s.t, &scratchEntry{})
+	entry := held.(*scratchEntry)
+	entry.once.Do(func() {
 		dir, err := os.MkdirTemp("/tmp", "emacs-e2e-")
 		if err != nil {
 			s.t.Fatalf("e2e: create the sandbox scratch directory: %v", err)
 		}
-		s.scratchDir = dir
-		s.t.Cleanup(func() { _ = os.RemoveAll(dir) })
+		entry.dir = dir
+		s.t.Cleanup(func() {
+			_ = os.RemoveAll(dir)
+			scratchByTest.Delete(s.t)
+		})
 	})
-	return s.scratchDir
+	return entry.dir
 }
 
 func (s *localSandbox) Exec(ctx context.Context, argv ...string) (string, error) {
