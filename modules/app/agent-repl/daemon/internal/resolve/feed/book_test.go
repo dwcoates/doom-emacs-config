@@ -991,9 +991,9 @@ func answerEntry(turn, unit string) bookEntry {
 	return bookEntry{turn: turn, entry: frameEntry(mainAgent(), &conversationv1.AgentUpdate{Update: &conversationv1.AgentUpdate_Activity{Activity: responseSuccessActivity(unit, "answer "+unit)}})}
 }
 
-// budgetEntry is a context-budget warning of TURN: an entry that draws no row.
-func budgetEntry(turn string) bookEntry {
-	return bookEntry{turn: turn, entry: frameEntry(mainAgent(), &conversationv1.AgentUpdate{Update: &conversationv1.AgentUpdate_ContextBudgetWarning{ContextBudgetWarning: &conversationv1.ContextBudgetWarning{Text: "filling"}}})}
+// hookEntry is a succeeded hook of TURN: an entry that draws no row.
+func hookEntry(turn, unit string) bookEntry {
+	return bookEntry{turn: turn, entry: succeededHookEntry(unit)}
 }
 
 // longTurnBook is turn-0's prompt, then turn-1's prompt and ANSWERS answers:
@@ -1029,9 +1029,9 @@ func TestAPushedLoadChainsOlderPages(t *testing.T) {
 			book: longTurnBook(5), pageSize: 2, wantReads: 3, wantDrew: true,
 		},
 		{
-			// [budget budget] [budget] — the start draws nothing either.
+			// [hook hook] [hook] — the start draws nothing either.
 			name:     "the start reached with nothing drawable ends the chain",
-			book:     []bookEntry{budgetEntry("turn-x"), budgetEntry("turn-x"), budgetEntry("turn-x")},
+			book:     []bookEntry{hookEntry("turn-x", "h-1"), hookEntry("turn-x", "h-2"), hookEntry("turn-x", "h-3")},
 			pageSize: 2, wantReads: 2, wantDrew: false,
 		},
 		{
