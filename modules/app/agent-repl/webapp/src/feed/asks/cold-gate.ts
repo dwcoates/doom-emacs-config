@@ -41,6 +41,7 @@ import { createControl, type Control } from "../../control.js";
 import { formatTickedAge } from "../../duration.js";
 import { onCompactionProgress } from "../../footer/progress.js";
 import { formatTokens } from "../../format.js";
+import { coldGateFigureColor } from "../../pressure-color.js";
 import { log } from "../../log.js";
 import {
   AnswerColdGateResponseSchema,
@@ -188,14 +189,10 @@ export function drawFeedColdGateStanding(
  * was formatted, and a test can hold that one figure to the ruled table without
  * reading the sentence around it.
  */
-function drawLead(tokens: string, model: string): HTMLElement {
+function drawLead(figure: HTMLElement, model: string): HTMLElement {
   const lead = document.createElement("div");
   lead.className = "hibernation-context";
   const [before, rest] = COLD_GATE_COPY.lead.split("{tokens}");
-  const figure = document.createElement("span");
-  figure.className = "cold-gate-tokens";
-  figure.setAttribute("data-context-tokens", "");
-  figure.textContent = tokens;
   lead.append(
     document.createTextNode(before),
     figure,
@@ -204,16 +201,26 @@ function drawLead(tokens: string, model: string): HTMLElement {
   return lead;
 }
 
-/** The token figure, formatted client-side from the raw count. */
+/**
+ * The token figure, formatted client-side from the raw count, colored by its
+ * window fill on the cold-gate gradient (`coldGateFigureColor`, the same call
+ * the footer's cold-gate line makes): how dear paying to pass the gate is.
+ */
 export function drawFeedColdGateContextTokens(
   u: FeedColdGateContextTokens,
   path: string,
-): string {
+): HTMLElement {
   log.debug("reading a cold gate's context size", {
     operation: "feed.asks.cold-gate.tokens",
-    context: { path },
+    context: { path, window_fill: u.windowFill },
   });
-  return formatTokens(tokenCountOf(u.tokens, `${path}.tokens`));
+  const figure = document.createElement("span");
+  figure.className = "cold-gate-tokens";
+  figure.setAttribute("data-context-tokens", "");
+  figure.textContent = formatTokens(tokenCountOf(u.tokens, `${path}.tokens`));
+  // INLINE: the figure's color IS its reading (as the context chip's).
+  figure.style.color = coldGateFigureColor(u.windowFill, `${path}.window_fill`);
+  return figure;
 }
 
 /** The session's model NAME, drawn verbatim. */
