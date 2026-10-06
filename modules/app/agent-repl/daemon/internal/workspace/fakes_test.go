@@ -1138,6 +1138,17 @@ type fakeFooter struct {
 	coldEvents []string
 	// faults is every fault the verbs opened on the footer, in order.
 	faults []footer.Fault
+	// accounts is every account root the verbs bound each workspace to, in
+	// order.
+	accounts map[ids.WorkspaceID][]string
+}
+
+// SetAccount records the account root a workspace was bound to.
+func (f *fakeFooter) SetAccount(ws ids.WorkspaceID, root string) {
+	if f.accounts == nil {
+		f.accounts = map[ids.WorkspaceID][]string{}
+	}
+	f.accounts[ws] = append(f.accounts[ws], root)
 }
 
 // OpenFault records a fault the verbs opened on the footer.

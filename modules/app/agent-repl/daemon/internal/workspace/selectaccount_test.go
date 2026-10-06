@@ -173,6 +173,25 @@ func TestSelectAccountRepublishesTheAccountCellWithTheNewRootMarked(t *testing.T
 	}
 }
 
+func TestSelectAccountRebindsTheFooterToTheNewRoot(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	twoRoots(f)
+	f.db.sessions["w1"] = wsm.Session{Workspace: "w1", HostSessionID: "host-1", ConfigDir: "/config"}
+
+	// Act
+	if _, err := f.verbs.SelectAccount(context.Background(), "w1", "/config-work"); err != nil {
+		t.Fatalf("SelectAccount: %v", err)
+	}
+
+	// Assert
+	roots := f.footer.accounts["w1"]
+	if len(roots) == 0 || roots[len(roots)-1] != "/config-work" {
+		t.Fatalf("footer account roots = %v, want the chosen root last", roots)
+	}
+}
+
 func TestSelectAccountFilesASessionRowForAWorkspaceThatHasNone(t *testing.T) {
 	// Arrange — a workspace registered but never brought up. The choice still
 	// has to survive to its first start.

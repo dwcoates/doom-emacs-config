@@ -7,6 +7,8 @@ import {
 } from "../../../proto/gen/ts/frontend/v1/footer_pb";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import {
+  ENDURING_NO_ALLOWANCE_TEXT,
+  ENDURING_UNOBSERVED_TEXT,
   FOOTER_RATE_SEPARATOR_GAP,
   drawFooterRateDivider,
   drawFooterStatusActivity,
@@ -1171,10 +1173,77 @@ describe("the transient kinds", () => {
 // ---- the enduring tier ------------------------------------------------------------
 
 describe("the enduring line", () => {
-  it("draws an empty line when neither figure has been observed", () => {
+  // THE CELL IS NEVER EMPTY (owner ruling, 2026-10-06): the unobserved arm
+  // once drew an empty line, and the ruling replaced that with words.
+  it("draws words when nothing is known of the account's usage", () => {
     expect(
       enduringCell({}).querySelector(".footer-activity-enduring")?.textContent,
-    ).toBe("");
+    ).toBe(ENDURING_UNOBSERVED_TEXT);
+  });
+
+  it("draws words for an account with no allowance window", () => {
+    expect(
+      enduringCell({ noAllowance: true }).querySelector(".footer-activity-enduring")
+        ?.textContent,
+    ).toBe(ENDURING_NO_ALLOWANCE_TEXT);
+  });
+
+  it.each(UNPINNED_ARMS)(
+    "never draws an empty %s cell on an account never observed",
+    (arm) => {
+      expect(drawCell(arm, unpinnedInit()).cell.textContent).not.toBe("");
+    },
+  );
+
+  it.each(UNPINNED_ARMS)(
+    "never draws an empty %s cell on an account with no allowance window",
+    (arm) => {
+      expect(
+        drawCell(arm, unpinnedInit(undefined, { noAllowance: true })).cell.textContent,
+      ).not.toBe("");
+    },
+  );
+
+  it("draws an allowance whose reset has passed as reset since last seen", () => {
+    const cell = enduringCell({
+      usage: { session: allowance(0.97, true, -60_000, "rejected") },
+    });
+    expect(cell.querySelector('[data-allowance="session"]')?.textContent).toBe(
+      "session reset since last seen",
+    );
+  });
+
+  it("draws no percentage for an allowance whose reset has passed", () => {
+    const cell = enduringCell({
+      usage: { session: allowance(0.97, true, -60_000) },
+    });
+    expect(
+      cell.querySelector('[data-allowance="session"] [data-datum="percent"]'),
+    ).toBeNull();
+  });
+
+  it("drops the verdict of an allowance whose reset has passed", () => {
+    const cell = enduringCell({
+      usage: { session: allowance(0.97, true, -60_000, "rejected") },
+    });
+    const session = cell.querySelector<HTMLElement>('[data-allowance="session"]');
+    expect([session?.className, session?.hasAttribute("data-arm"), session?.title]).toEqual([
+      "footer-allowance",
+      false,
+      "",
+    ]);
+  });
+
+  it("lapses an allowance when the clock passes its reset", () => {
+    const cell = enduringCell({
+      usage: { session: allowance(0.4, false, 60_000) },
+    });
+    vi.advanceTimersByTime(60_000);
+    const session = cell.querySelector('[data-allowance="session"]');
+    expect([session?.getAttribute("data-lapsed"), session?.textContent]).toEqual([
+      "true",
+      "session reset since last seen",
+    ]);
   });
 
   it("draws the session and weekly allowances as percentages", () => {
@@ -1365,6 +1434,7 @@ describe("the enduring line", () => {
   it.each([
     ["usage", { usage: { session: allowance(0.2, false, 60_000) } }],
     ["unobserved", {}],
+    ["noAllowance", { noAllowance: true }],
   ] as const)("stamps the %s line on the enduring line", (line, figures) => {
     expect(
       enduringCell(figures)
