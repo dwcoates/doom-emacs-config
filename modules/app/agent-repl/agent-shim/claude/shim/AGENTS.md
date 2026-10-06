@@ -737,10 +737,42 @@ last served, at its own pointer; no page serves it again.
 - Each relayed retirement is one `logVerbose` record with `agent` and
   `pointer`; nothing on this path logs at warn.
 
+## The keep-alive cadence: anchored to the conversation's last request
+
+The next beat is always `last request + KEEPALIVE_INTERVAL_MS` (52 minutes),
+never `process start + 52 minutes` (`KeepaliveCadence`, 2026-10-06). A
+restarted shim used to restart the interval, so deploy bounces inside the hour
+pushed the first beat past a one-hour cache's expiry and the next bring-up
+parked at the cold gate.
+
+- **THE ANCHOR AT A START** is the transcript's last request and its cache
+  tier, the same `readTranscriptFacts` reading the cold gate judges, on the
+  cold gate's clock. A fresh conversation, a cold-gate clear or a cold-gate
+  compaction states no request and anchors at the start, tier unstated.
+- **EVERY MAIN-THREAD API RESPONSE RE-ANCHORS**, a keep-alive's own answer
+  included (`noteCacheRequest` in `session.ts`, the tier read by `cold.ts`
+  `cacheRequestOf`). A subagent's response does not: it is another
+  transcript's cache. A response that wrote no cache keeps the tier the last
+  write bought.
+- **A PASSED BEAT ON A WARM CACHE FIRES AT ONCE. A LAPSED CACHE GETS NO BEAT**:
+  the cold gate owns the next request, and a keep-alive would buy the
+  full-price read the gate exists to ask about. The cache is judged again when
+  the timer fires, so a host that slept past the expiry buys nothing.
+- **A 5-MINUTE CACHE GETS NO BEAT.** A 52-minute cadence cannot keep it warm;
+  the keep-alive is a CLI request like any other and buys the tier the CLI is
+  buying.
+- **PAUSED WITH NO TIMER** while a turn holds the slot; the turn's end
+  schedules from the anchor its own responses moved.
+- **EVERY (RE)SCHEDULE IS INFO**: `keep-alive scheduled from the
+  conversation's last request` with `anchor_at`, `cache_ttl_ms`,
+  `next_beat_at` and the reason, or `no keep-alive is scheduled: <why>` with
+  `cache_expires_at`. An unchanged schedule is not restated.
+
 ## The keep-alive rewind: what may anchor it, and what happens when it fails
 
-The shim submits its own keep-alive prompt every four minutes to keep the
-vendor's five-minute prompt cache warm (`src/engine/keepalive.ts`). A real
+The shim submits its own keep-alive prompt 52 minutes after the
+conversation's last request to keep the vendor's one-hour prompt cache warm
+(`src/engine/keepalive.ts`). A real
 prompt must never build on that housekeeping, so before one is delivered the
 vendor context is ROLLED BACK: the query is closed and reopened with `resume`
 plus `resumeSessionAt: <uuid>`, the SDK's one declared surface for truncating a

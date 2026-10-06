@@ -22,9 +22,11 @@
  *     the three parts of what that request actually sent.
  *   - the request instant: that same line's `timestamp`.
  *   - the cache tier: `message.usage.cache_creation.ephemeral_1h_input_tokens`
- *     — non-zero means the 1-hour tier was bought, zero means the 5-minute one.
- *     Both keys are present on every cached request in the corpus (7,310 of
- *     each across the sampled transcripts).
+ *     — non-zero means the 1-hour tier was bought, a non-zero
+ *     `ephemeral_5m_input_tokens` the 5-minute one, and neither (a request that
+ *     only read the cache) keeps the tier the last write bought
+ *     ({@link cacheRequestOf}). Both keys are present on every cached request
+ *     in the corpus (7,310 of each across the sampled transcripts).
  *   - the model: that line's `message.model`.
  *   - the permission mode: the last `user` line's `permissionMode` (the vendor
  *     records it per user record and the SDK does not restore it on resume).
@@ -124,7 +126,7 @@ interface TranscriptUsage {
   cache_creation?: { ephemeral_1h_input_tokens?: number; ephemeral_5m_input_tokens?: number };
 }
 
-interface TranscriptLine {
+export interface TranscriptLine {
   type?: string;
   timestamp?: string;
   permissionMode?: string;
@@ -146,6 +148,47 @@ interface TranscriptLine {
  */
 function isCliSynthesized(record: TranscriptLine): boolean {
   return record.isApiErrorMessage === true || record.message?.model?.trim() === SYNTHETIC_MODEL;
+}
+
+/**
+ * What one assistant message states about the API request behind it: the
+ * cache tier that request WROTE, or absence when it wrote none.
+ *
+ * ONE READING FOR THE TRANSCRIPT AND THE LIVE STREAM. The vendor's transcript
+ * records and the SDK's streamed assistant messages are the same objects (the
+ * captures' `stream.jsonl` carries the same `message.usage.cache_creation`
+ * split the transcript does), so the cold gate reading a transcript and the
+ * keep-alive cadence watching a live session judge a request by this one rule.
+ *
+ * Answers absence -- NOT A REQUEST -- for a record the CLI wrote itself
+ * ({@link isCliSynthesized}) and for one that states no usage.
+ *
+ * A REQUEST THAT WROTE NOTHING STATES NO TIER (`writtenTtlMs` absent). It read
+ * the whole prompt back from a cache an EARLIER request wrote, so the tier that
+ * governs it is that earlier write's, and the caller carries it forward. Read
+ * as the 5-minute tier, such a record (121 of ~48,700 assistant records in the
+ * owner's transcripts on 2026-10-06, every one a cache read) judged
+ * a 1-hour cache lapsed after five minutes. A usage that states cache writes
+ * without the per-tier split is the 5-minute tier, the API's only tier before
+ * the split existed.
+ */
+export interface CacheRequest {
+  readonly writtenTtlMs: number | undefined;
+}
+
+export function cacheRequestOf(record: TranscriptLine): CacheRequest | undefined {
+  if (isCliSynthesized(record)) return undefined;
+  const usage = record.message?.usage;
+  if (usage === undefined) return undefined;
+  return { writtenTtlMs: writtenCacheTtlMs(usage) };
+}
+
+function writtenCacheTtlMs(usage: TranscriptUsage): number | undefined {
+  const split = usage.cache_creation;
+  if (split === undefined) return (usage.cache_creation_input_tokens ?? 0) > 0 ? CACHE_TTL_5M_MS : undefined;
+  if ((split.ephemeral_1h_input_tokens ?? 0) > 0) return CACHE_TTL_1H_MS;
+  if ((split.ephemeral_5m_input_tokens ?? 0) > 0) return CACHE_TTL_5M_MS;
+  return undefined;
 }
 
 /**
@@ -215,18 +258,16 @@ export function readTranscriptFacts(file: string): TranscriptFacts | undefined {
       opening ??= prompt.slice(0, TRANSCRIPT_OPENING_MAX_CHARS);
     }
     if (record.type !== "assistant") continue;
-    if (isCliSynthesized(record)) continue;
-    const usage = record.message?.usage;
-    if (usage === undefined) continue;
+    const request = cacheRequestOf(record);
+    if (request === undefined) continue;
+    const usage = record.message?.usage ?? {};
     sawUsage = true;
     contextTokens =
       (usage.cache_read_input_tokens ?? 0) +
       (usage.cache_creation_input_tokens ?? 0) +
       (usage.input_tokens ?? 0);
-    cacheTtlMs =
-      (usage.cache_creation?.ephemeral_1h_input_tokens ?? 0) > 0
-        ? CACHE_TTL_1H_MS
-        : CACHE_TTL_5M_MS;
+    // A request that wrote nothing keeps the tier the last write bought.
+    cacheTtlMs = request.writtenTtlMs ?? cacheTtlMs;
     if (typeof record.message?.model === "string") lastModel = record.message.model;
     if (typeof record.timestamp === "string") {
       const at = Date.parse(record.timestamp);

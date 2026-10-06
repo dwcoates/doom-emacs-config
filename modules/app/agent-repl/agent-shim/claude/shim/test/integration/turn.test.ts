@@ -1578,6 +1578,37 @@ describe("keep-alives", () => {
       return toJsonString(conversationv1.AgentFrameSchema, item.item.value).includes(needle);
     }) ?? Promise.reject(new Error("this shim has no store"));
 
+  test("a restarted shim schedules its keep-alive from the transcript's last request, not its own start", async () => {
+    // THE 2026-10-06 CHAIN: deploy bounces restarted the cadence each time, and
+    // the first beat fell after the 1-hour cache's expiry. A restarted shim
+    // reads the last request off the vendor's transcript and schedules from it.
+    const first = await spawnShim();
+    const started = sessionStarted(await first.clients.h1.startSession(freshSession()));
+    turnStarted(await first.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "hello" })));
+    await first.log.record((record) => record.message === "closed a turn" && record.context.keepalive === false);
+    await first.clients.h1.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
+    await first.exited;
+    // The transcript's last API request: its last assistant record with usage.
+    const lastRequestAtMs = Date.parse(
+      (readTranscript(first.dirs, started.vendorSessionId) as { type?: string; timestamp?: string; message?: { usage?: unknown } }[])
+        .filter((record) => record.type === "assistant" && record.message?.usage !== undefined)
+        .at(-1)?.timestamp ?? "",
+    );
+
+    const second = await spawnShim({ reuse: first.dirs, env: { AGENT_REPL_FAKE_KEEPALIVE_INTERVAL_MS: "1800000" } });
+    // THIS shim's record: the reused directories replay the first shim's log.
+    const scheduled = second.log.record(
+      (record) => record.message === "keep-alive scheduled from the conversation's last request" && record.pid === second.child.pid,
+    );
+    sessionStarted(await second.clients.h1.startSession(resumeSession(started.vendorSessionId)));
+
+    const context = (await scheduled).context;
+    expect([context.anchor_at, context.next_beat_at]).toEqual([
+      new Date(lastRequestAtMs).toISOString(),
+      new Date(lastRequestAtMs + 1_800_000).toISOString(),
+    ]);
+  });
+
   test("a keep-alive turn works end to end and stores nothing", async () => {
     const shim = await spawnBeating();
     await shim.clients.h1.startSession(freshSession());

@@ -122,7 +122,16 @@ import {
   contextCutFailed,
   readAmbient,
 } from "./compaction.js";
-import { judgeCold, readTranscriptFacts, sessionCold, transcriptPath, underColdGateFloor, type TranscriptFacts } from "./cold.js";
+import {
+  cacheRequestOf,
+  judgeCold,
+  readTranscriptFacts,
+  sessionCold,
+  transcriptPath,
+  underColdGateFloor,
+  type TranscriptFacts,
+  type TranscriptLine,
+} from "./cold.js";
 import { TranscriptTitleTail } from "./title.js";
 import { sessionTitleUpdate } from "../convert/session-title.js";
 import { ForegroundUnitTable } from "./foreground.js";
@@ -139,6 +148,7 @@ import {
   KeepaliveScope,
   keepalivePromptText,
   REAL_SCHEDULER,
+  type CacheAnchor,
   type KeepaliveAttribution,
   type KeepaliveScheduler,
   type RecordTurn,
@@ -1999,6 +2009,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     notePreInitMessage(message);
     noteIdentityFacts(message, attribution);
     noteMainApiResponse(message, attribution, verdict.turn);
+    noteCacheRequest(message);
     settleStartOnBlockingHook(message);
     settleStartOnErrorResult(message);
     noteDetachedWork(message, attribution, verdict.turn);
@@ -4555,13 +4566,20 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     const mcpStatusMs = liveWorkFrom - mcpStatusFrom;
     const liveWorkMs = deps.nowMs() - liveWorkFrom;
     // THE CADENCE BEGINS BEFORE SUCCESS RETURNS: a session that is never
-    // prompted still has a cache worth keeping warm.
+    // prompted still has a cache worth keeping warm. IT IS ANCHORED TO THE
+    // CONVERSATION'S LAST REQUEST, read off the transcript by the same reading
+    // the cold gate judged, never to this process's start: a restart must not
+    // push the next beat past the cache's expiry (engine/keepalive.ts).
+    // Judged on the cold gate's clock, because it is the transcript's instants
+    // it judges.
     cadence = new KeepaliveCadence(
       () => void keepaliveBeat(),
+      coldNowMs,
       deps.keepaliveIntervalMs,
       deps.scheduler ?? REAL_SCHEDULER,
     );
-    cadence.start();
+    const cacheAnchor = startingCacheAnchor(facts, clearedTo, coldCompacted);
+    cadence.start(cacheAnchor.anchor, cacheAnchor.reason);
     accountUsageHandle = (deps.scheduler ?? REAL_SCHEDULER).setInterval(
       () => void pushAccountUsage(),
       ACCOUNT_USAGE_INTERVAL_MS,
@@ -5391,6 +5409,40 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   }
 
   // -- keep-alive -----------------------------------------------------------
+
+  /**
+   * The cache a starting session's cadence keeps warm: the transcript's last
+   * request, or absence when no request stands behind the context the session
+   * opens on -- a fresh conversation, a cold-gate clear (a fresh vendor id),
+   * or a cold-gate compaction (the context is now its summary, which no
+   * transcript request has cached yet).
+   */
+  function startingCacheAnchor(
+    facts: TranscriptFacts | undefined,
+    clearedTo: string | undefined,
+    compacted: boolean,
+  ): { readonly anchor: CacheAnchor | undefined; readonly reason: string } {
+    if (facts === undefined) return { anchor: undefined, reason: "a fresh conversation" };
+    if (clearedTo !== undefined) return { anchor: undefined, reason: "the cold gate cleared the conversation" };
+    if (compacted) return { anchor: undefined, reason: "the cold gate compacted the conversation" };
+    if (facts.lastRequestAtMs === 0) return { anchor: undefined, reason: "the transcript states no request instant" };
+    return {
+      anchor: { atMs: facts.lastRequestAtMs, ttlMs: facts.cacheTtlMs },
+      reason: "a resumed conversation, anchored at the transcript's last request",
+    };
+  }
+
+  /**
+   * A main-thread API response moves the cache's clock: the request behind it
+   * read or wrote the cache now. A keep-alive's answer counts as much as a real
+   * one's -- refreshing the cache is what it is for.
+   */
+  function noteCacheRequest(message: SdkMessage): void {
+    if (message.type !== "assistant" || message.parent_tool_use_id !== null) return;
+    const request = cacheRequestOf(message as TranscriptLine);
+    if (request === undefined) return;
+    cadence?.noteRequest(request.writtenTtlMs);
+  }
 
   async function keepaliveBeat(): Promise<void> {
     if (open !== undefined || query === undefined || identity === undefined) return;
