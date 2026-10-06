@@ -77,6 +77,8 @@ type fakeDB struct {
 	dropped        []string
 	// enqueueErr, when set, fails the next EnqueueMerge.
 	enqueueErr error
+	// queueErr, when set, fails every QueueMerge.
+	queueErr error
 	// shut stands for the state client the daemon's orderly exit has already
 	// closed: every write refuses, exactly as a write against a closed
 	// handle does. A test sets it after the drain, so any durable work a run
@@ -428,9 +430,12 @@ func (f *fakeDB) RequestMerge(_ context.Context, repo wsm.RepoKey, id ids.Worksp
 
 // QueueMerge moves a requested entry to the back of the line, exactly as the
 // durable queue re-sequences it.
-func (f *fakeDB) QueueMerge(_ context.Context, repo wsm.RepoKey, id ids.WorkspaceID) (int, error) {
+func (f *fakeDB) QueueMerge(_ context.Context, repo wsm.RepoKey, id ids.WorkspaceID, ledger wsm.LeaseID) (int, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.queueErr != nil {
+		return 0, f.queueErr
+	}
 	for i, entry := range f.queues[repo] {
 		if entry.Workspace != id {
 			continue
@@ -440,6 +445,7 @@ func (f *fakeDB) QueueMerge(_ context.Context, repo wsm.RepoKey, id ids.Workspac
 		}
 		f.queues[repo] = append(f.queues[repo][:i], f.queues[repo][i+1:]...)
 		entry.State = wsm.MergeQueued
+		entry.Ledger = ledger
 		f.queues[repo] = append(f.queues[repo], entry)
 		f.renumber(repo)
 		place := 0

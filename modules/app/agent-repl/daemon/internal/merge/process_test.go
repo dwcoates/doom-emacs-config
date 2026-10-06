@@ -1102,7 +1102,7 @@ func TestARequestRecordedWithNoBranchMergesTheBranchCheckedOutAtAdmission(t *tes
 	if err := h.db.RequestMerge(context.Background(), h.repoKey(), theWorkspace, ownBranch, h.clock()); err != nil {
 		t.Fatalf("RequestMerge: %v", err)
 	}
-	if _, err := h.db.QueueMerge(context.Background(), h.repoKey(), theWorkspace); err != nil {
+	if _, err := h.db.QueueMerge(context.Background(), h.repoKey(), theWorkspace, "lease-queued"); err != nil {
 		t.Fatalf("QueueMerge: %v", err)
 	}
 
