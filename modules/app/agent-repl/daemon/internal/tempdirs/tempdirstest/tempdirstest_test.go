@@ -42,3 +42,37 @@ func TestGuardExemptsOnlyTheRunsOwnTemporaryRoot(t *testing.T) {
 		})
 	}
 }
+
+func TestShortBase(t *testing.T) {
+	existing, err := os.MkdirTemp("/tmp", "arbase")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(existing) })
+	tests := []struct {
+		name    string
+		set     string
+		want    string
+		wantErr bool
+	}{
+		{name: "unset is /tmp", set: "", want: DefaultShortBase},
+		{name: "a directory beneath /tmp is honored", set: existing, want: existing},
+		{name: "a directory outside /tmp is refused", set: "/usr", wantErr: true},
+		{name: "an absent directory is refused", set: existing + "/absent", wantErr: true},
+		{name: "an unclean spelling is refused", set: existing + "/", wantErr: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			getenv := func(string) string { return tc.set }
+
+			// Act
+			got, err := ShortBase(getenv)
+
+			// Assert
+			if (err != nil) != tc.wantErr || got != tc.want {
+				t.Fatalf("ShortBase = %q, %v; want %q (error %v)", got, err, tc.want, tc.wantErr)
+			}
+		})
+	}
+}
