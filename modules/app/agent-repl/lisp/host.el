@@ -503,8 +503,9 @@ naming another workspace until it is answered."
 ON-SETTLED, when given, is called with `:success', `:error',
 `:standing-down' (the daemon is leaving: it stamped the selection, the
 next daemon is asked again) or `:failure' once the call has an outcome
-— the one moment a caller holding state on the selection\='s behalf (the link-up re-assertion) may
-let go of it, whichever way it went — and with `:superseded' when a
+— the one moment a caller holding state on the selection\='s behalf
+\(the link-up re-assertion) may let go of it, whichever way it went —
+and with `:superseded' when a
 newer selection replaced it before it was sent.
 Idempotent by contract — re-selecting the current workspace succeeds —
 and the daemon's own act of stamping `current' also CLEARS the
