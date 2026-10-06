@@ -153,13 +153,29 @@ describe("the yield obligation", () => {
     expect(rewind.obligation()?.resumeSessionAt).toBe("real-1");
   });
 
-  it("never anchors on the user echo", () => {
+  it("advances the anchor to a real turn's user record, an interrupted turn's tool result", () => {
+    // Ruled 2026-10-06: the turn's own last record anchors, so the next rewind
+    // keeps the result an interrupt left after the turn's last answer.
     const rewind = new KeepaliveRewind();
     rewind.noteRecord(assistant("real-1"), realTurn);
-    rewind.noteRecord(other("user", "echo-1"), realTurn);
+    rewind.noteRecord(userRecord("tool-result-1"), realTurn);
 
-    // Read off the anchor itself: a rewind past a REAL turn's user record is
-    // refused by the span invariant (see "the span invariant" below).
+    expect(rewind.anchorUuid()).toBe("tool-result-1");
+  });
+
+  it("advances the anchor to a genuine vendor-started turn's user record", () => {
+    const rewind = new KeepaliveRewind();
+    rewind.noteRecord(assistant("real-1"), realTurn);
+    rewind.noteRecord(userRecord("vendor-result-1"), vendorTurn);
+
+    expect(rewind.anchorUuid()).toBe("vendor-result-1");
+  });
+
+  it("never anchors on a keep-alive's own user record", () => {
+    const rewind = new KeepaliveRewind();
+    rewind.noteRecord(assistant("real-1"), realTurn);
+    rewind.noteRecord(userRecord("keepalive-tool-result-1"), keepaliveTurn);
+
     expect(rewind.anchorUuid()).toBe("real-1");
   });
 
@@ -327,22 +343,6 @@ describe("the span invariant", () => {
     expect(rewind.obligation()).toBeUndefined();
   });
 
-  it("refuses a rewind whose span holds a real turn's record", () => {
-    // A real turn interrupted after its tool result: the result lies past the
-    // turn's last assistant record, and a rewind would drop it.
-    const rewind = anchoredWithKeepalive();
-    rewind.noteRecord(userRecord("tool-result-1"), realTurn);
-
-    expect(rewind.obligation()).toBeUndefined();
-  });
-
-  it("refuses a rewind whose span holds a genuine vendor-started turn's record past its last answer", () => {
-    const rewind = anchoredWithKeepalive();
-    rewind.noteRecord(userRecord("vendor-answer-1"), vendorTurn);
-
-    expect(rewind.obligation()).toBeUndefined();
-  });
-
   it("refuses a rewind whose span holds a record no turn owns", () => {
     const rewind = anchoredWithKeepalive();
     rewind.noteRecord(assistant("orphan-1"), undefined);
@@ -352,7 +352,7 @@ describe("the span invariant", () => {
 
   it("records a refusal at ERROR, naming each offending turn, its kind and its records", () => {
     const rewind = anchoredWithKeepalive();
-    rewind.noteRecord(userRecord("vendor-answer-1"), vendorTurn);
+    rewind.noteSend("real-send-2", { turnId: "turn-2", keepalive: false });
     const mark = logSinkMark();
 
     rewind.obligation();
@@ -360,24 +360,24 @@ describe("the span invariant", () => {
     const record = logRecordsSince(mark).find((entry) => entry.message.startsWith("the keep-alive rewind is REFUSED"));
     expect({ level: record?.level, offending: record?.context.offending }).toEqual({
       level: "error",
-      offending: [{ turn_id: "adopted-1", kind: "vendor_started", records: 1, uuids: ["vendor-answer-1"] }],
+      offending: [{ turn_id: "turn-2", kind: "real", records: 1, uuids: ["real-send-2"] }],
     });
   });
 
   it("states the offending turns in the refusal's detail text", () => {
     const rewind = anchoredWithKeepalive();
-    rewind.noteRecord(userRecord("vendor-answer-1"), vendorTurn);
+    rewind.noteSend("real-send-2", { turnId: "turn-2", keepalive: false });
     const mark = logSinkMark();
 
     rewind.obligation();
 
     const record = logRecordsSince(mark).find((entry) => entry.message.startsWith("the keep-alive rewind is REFUSED"));
-    expect(record?.context.detail).toBe("vendor_started turn adopted-1: vendor-answer-1");
+    expect(record?.context.detail).toBe("real turn turn-2: real-send-2");
   });
 
   it("names the anchor the refused rewind would have resumed at", () => {
     const rewind = anchoredWithKeepalive();
-    rewind.noteRecord(userRecord("vendor-answer-1"), vendorTurn);
+    rewind.noteSend("real-send-2", { turnId: "turn-2", keepalive: false });
     const mark = logSinkMark();
 
     rewind.obligation();
@@ -388,7 +388,7 @@ describe("the span invariant", () => {
 
   it("drops the anchor on a refusal, so the content stays for good", () => {
     const rewind = anchoredWithKeepalive();
-    rewind.noteRecord(userRecord("vendor-answer-1"), vendorTurn);
+    rewind.noteSend("real-send-2", { turnId: "turn-2", keepalive: false });
 
     rewind.obligation();
 
@@ -397,7 +397,7 @@ describe("the span invariant", () => {
 
   it("settles the debt on a refusal, so it is refused once, not every beat", () => {
     const rewind = anchoredWithKeepalive();
-    rewind.noteRecord(userRecord("vendor-answer-1"), vendorTurn);
+    rewind.noteSend("real-send-2", { turnId: "turn-2", keepalive: false });
 
     rewind.obligation();
 
