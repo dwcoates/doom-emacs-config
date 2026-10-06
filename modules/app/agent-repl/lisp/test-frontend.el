@@ -400,7 +400,7 @@ Answers (VIEW-SHOWN INPUT-SHOWN SELECTED-IS-VIEW)."
                   ((symbol-function 'agent-repl-window--harden) (lambda (&rest _) nil))
                   ((symbol-function 'agent-repl-host-state)
                    (lambda (w) (and (member w gated) '(:gate (:arm :cold-gate :value nil)))))
-                  ((symbol-function 'agent-repl-window-tell-gate-dock-height)
+                  ((symbol-function 'agent-repl-window-tell-gate-dock)
                    (lambda (w) (push w agent-repl-test-frontend--told) 100)))
           (agent-repl--frontend-display-webview ws buf)
           (list (and (get-buffer-window buf) t)
