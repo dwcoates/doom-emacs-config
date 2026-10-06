@@ -108,7 +108,7 @@ func (r *resolver) drawActivity(s *wsState, agent *conversationv1.AgentId, act *
 		row, err = r.drawResponse(s, at, agent, act, item.Response)
 	case *conversationv1.AgentActivity_Thinking:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawActivity", "branch": "case *conversationv1.AgentActivity_Thinking"})
-		row, err = r.drawThinking(s, at, act, item.Thinking)
+		row, err = r.drawThinking(s, at, agent, act, item.Thinking)
 	case *conversationv1.AgentActivity_Read:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawActivity", "branch": "case *conversationv1.AgentActivity_Read"})
 		row, err = r.drawRead(s, at, act, item.Read)

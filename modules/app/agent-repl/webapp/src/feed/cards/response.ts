@@ -54,13 +54,21 @@
  * `drawFeedResponse`). If the reveal restarted there, a steadily growing
  * response would re-type itself from the top several times a second. So the
  * shown length is carried on that element (`data-revealed`) and the new draw
- * resumes from it.
+ * resumes from it, together with the speed the reveal was moving at
+ * (`data-reveal-speed`), which the next paced window eases from.
+ *
+ * THE TYPE-OUT CUTS THE RENDERED TEXT, NOT THE MARKDOWN. Each push renders its
+ * whole prose once, and the reveal hides the rendered characters it has not
+ * reached (`revealSlot`, src/bubble/text-reveal.ts), so no frame re-parses
+ * markdown and a half-typed construct (`**`, an opening fence) is never drawn
+ * as its raw syntax. Both attributes count rendered characters.
  */
 import type {
   FeedResponse,
   FeedResponseError,
   FeedResponseNotice,
   FeedResponseProse,
+  FeedResponseRevealWindow,
   FeedResponseSuccess,
   FeedResponseUsageStamp,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
@@ -75,9 +83,17 @@ import {
   type BubbleCapSpec,
 } from "../../bubble/draw.js";
 import { formatAge } from "../../duration.js";
-import { markdownSlot, paintGeneration, repaintSlot, type BubbleBody } from "../../bubble/body.js";
+import {
+  markdownSlot,
+  paintGeneration,
+  revealSlot,
+  slotText,
+  whenSlotPainted,
+  type BubbleBody,
+} from "../../bubble/body.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
-import { SmoothReveal } from "../../smooth.js";
+import { SmoothReveal, windowedReveal } from "../../smooth.js";
+import { MalformedView } from "../../rpc/malformed.js";
 import { tickWhileShown } from "../ticking.js";
 import { tokenHeatColor } from "../../token-heat.js";
 import type { RowContext } from "./context.js";
@@ -85,6 +101,9 @@ import { FINAL_RESPONSE_CLASS } from "../rows/turn-ended.js";
 
 /** The attribute the shown length is carried on across a redraw. */
 export const REVEALED_ATTRIBUTE = "data-revealed";
+
+/** The attribute the reveal's current speed is carried on across a redraw. */
+export const REVEAL_SPEED_ATTRIBUTE = "data-reveal-speed";
 
 /**
  * The class a THINKING bubble wears: the agent's intermediate reasoning, drawn
@@ -177,29 +196,39 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
     }
   }
 
-  // The prose is ONE markdown slot, painted by the one body pipeline: the whole
-  // prose once settled, and — while arriving — only what the previous draw of
-  // this row had already shown, from which the type-out resumes.
+  // The prose is ONE markdown slot, painted whole by the one body pipeline.
+  // While arriving, only what the previous draw of this row had already shown
+  // is revealed, and the type-out resumes from there.
+  //
+  // THE SETTLED WHOLE TYPES OUT TOO when the daemon paced it: the last
+  // fragment's text is spread across the reveal window like any other push's,
+  // rather than appearing at once. Unpaced, it is drawn whole as before.
   let markdown: string;
-  let shown: number;
+  let typesOut: boolean;
+  let windowMs: number | undefined;
   switch (result.case) {
     case "update":
       markdown = drawFeedResponseProse(
         requireMessage(result.value.prose, `${path}.update.prose`),
         `${path}.update.prose`,
       );
-      shown = revealedSoFar(rc.previous, markdown.length);
+      windowMs = revealWindowMs(result.value.revealWindow, `${path}.update.reveal_window`);
+      typesOut = true;
       break;
     case "success":
       markdown = drawFeedResponseSuccess(result.value, `${path}.success`);
-      shown = markdown.length;
+      windowMs = revealWindowMs(result.value.revealWindow, `${path}.success.reveal_window`);
+      typesOut = windowMs !== undefined;
       break;
     case "error":
       markdown = drawFeedResponseError(result.value, `${path}.error`);
-      shown = markdown.length;
+      typesOut = false;
       break;
   }
-  const prose = markdownSlot(RESPONSE_PROSE_CLASS, markdown.slice(0, shown));
+  // Read off the previous draw BEFORE the in-place redraw below reuses it.
+  const resumed = revealedSoFar(rc.previous);
+  const startSpeed = revealSpeedSoFar(rc.previous);
+  const prose = markdownSlot(RESPONSE_PROSE_CLASS, markdown);
 
   // A RE-PUSH UPDATES THE BUBBLE IN PLACE (owner rule, 2026-09-23: the user
   // owns the scroll). The daemon re-pushes the whole row on every fragment of an
@@ -229,13 +258,25 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
   else bubble.style.setProperty(USAGE_RESERVE_LABELS_PROPERTY, usageReserveLabelsCss());
   bubble.toggleAttribute("data-thinking", u.thinking);
   bubble.toggleAttribute("data-notice", u.notice !== undefined);
-  markRevealed(bubble, shown);
   if (result.case === "update") {
     log.debug("drawing an arriving response", {
       operation: "feed.cards.response.update",
-      context: { path: `${path}.update`, length: markdown.length, resumed: shown, in_place: bubble === rc.previous },
+      context: {
+        path: `${path}.update`,
+        length: markdown.length,
+        resumed,
+        in_place: bubble === rc.previous,
+        reveal_window_ms: windowMs ?? null,
+      },
     });
-    animate(bubble, body, content[0] as HTMLElement, markdown, shown, rc);
+  }
+  const slot = content[0] as HTMLElement;
+  if (typesOut) {
+    revealSlot(body, slot, resumed);
+    markRevealed(bubble, resumed);
+    animate(bubble, body, slot, resumed, windowMs, startSpeed, rc);
+  } else {
+    showWhole(bubble, body, slot);
   }
   const characters = markdown.length;
   recordDraw(u, rc, result.case, characters);
@@ -563,27 +604,85 @@ export function drawFeedResponseUsageStamp(
   return corner;
 }
 
+/**
+ * The daemon's reveal window in milliseconds, or undefined when it sent none
+ * (no full record of the model's fragment cadence yet, a subagent, a replay),
+ * which leaves the pacing to `SmoothReveal`. A window of zero breaks the
+ * contract (`expected_gap_ms` is always > 0) and is refused as malformed.
+ */
+export function revealWindowMs(window: FeedResponseRevealWindow | undefined, path: string): number | undefined {
+  if (window === undefined) return undefined;
+  if (window.expectedGapMs === 0) {
+    throw new MalformedView(`${path}.expected_gap_ms`, "a reveal window is always longer than zero");
+  }
+  return window.expectedGapMs;
+}
+
 /** Record the shown length, so the next draw of this row resumes from it. */
 function markRevealed(bubble: HTMLElement, length: number): void {
   bubble.setAttribute(REVEALED_ATTRIBUTE, String(length));
 }
 
 /**
- * The shown length the previous draw of this row reached, clamped to the prose
- * that has actually arrived.
- *
- * A missing, unparseable or over-long value is treated as "nothing shown yet"
- * respectively "everything shown": both are bounds, not defaults for a value
- * the wire was supposed to carry — the attribute is this renderer's own
- * bookkeeping, never contract data.
+ * Record how fast the reveal is moving, in rendered characters per
+ * millisecond, so the next paced window eases from it; undefined clears it (an
+ * unpaced reveal, whose speed is not a window's to carry).
  */
-export function revealedSoFar(previous: HTMLElement | undefined, length: number): number {
-  if (previous === undefined) return 0;
-  const raw = previous.getAttribute(REVEALED_ATTRIBUTE);
-  if (raw === null) return 0;
-  const parsed = Number.parseInt(raw, 10);
-  if (!Number.isFinite(parsed) || parsed <= 0) return 0;
-  return Math.min(parsed, length);
+function markRevealSpeed(bubble: HTMLElement, speed: number | undefined): void {
+  if (speed === undefined) bubble.removeAttribute(REVEAL_SPEED_ATTRIBUTE);
+  else bubble.setAttribute(REVEAL_SPEED_ATTRIBUTE, String(speed));
+}
+
+/**
+ * The shown length, in rendered characters, the previous draw of this row
+ * reached. The reveal itself clamps it to the text that has arrived.
+ *
+ * A missing or unparseable value is treated as "nothing shown yet": the
+ * attribute is this renderer's own bookkeeping, never contract data.
+ */
+export function revealedSoFar(previous: HTMLElement | undefined): number {
+  return Math.floor(carriedNumber(previous, REVEALED_ATTRIBUTE) ?? 0);
+}
+
+/**
+ * The speed the previous draw's reveal was moving at, or undefined when it
+ * carried none (a first draw, or an unpaced reveal).
+ */
+export function revealSpeedSoFar(previous: HTMLElement | undefined): number | undefined {
+  return carriedNumber(previous, REVEAL_SPEED_ATTRIBUTE);
+}
+
+/**
+ * A non-negative number the previous draw of this row carried on ATTRIBUTE, or
+ * undefined when there is no previous draw, no attribute, or a value that is
+ * not a non-negative number. Every reveal fact carried across a redraw is read
+ * through here, so they share one parse.
+ */
+export function carriedNumber(previous: HTMLElement | undefined, attribute: string): number | undefined {
+  const raw = previous?.getAttribute(attribute);
+  if (raw === undefined || raw === null) return undefined;
+  const parsed = Number.parseFloat(raw);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
+}
+
+/**
+ * Draw the prose whole at once: a settled or broken bubble the daemon did not
+ * pace. The shown length is recorded once the slot has painted, since only the
+ * render knows how many characters it holds.
+ */
+function showWhole(bubble: HTMLElement, body: BubbleBody, slot: HTMLElement): void {
+  revealSlot(body, slot, undefined);
+  markRevealSpeed(bubble, undefined);
+  whenSlotPainted(slot, () => markRevealed(bubble, renderedText(slot).length));
+}
+
+/** SLOT's whole rendered text; only asked once it has painted. */
+function renderedText(slot: HTMLElement): string {
+  const text = slotText(slot);
+  if (text === undefined) {
+    throw new Error("response prose: a slot's text was read before it painted");
+  }
+  return text;
 }
 
 /** The broken bubble's marker. The WHY is the turn's terminal row. */
@@ -595,79 +694,110 @@ function cutShortMarker(): HTMLElement {
 }
 
 /**
- * Pace the visible growth from RESUMED up to the whole arrived prose.
+ * Pace the visible growth from RESUMED up to the whole rendered prose.
+ *
+ * TWO PACINGS, chosen by whether the daemon sent a reveal window. With one,
+ * everything not yet shown is spread across WINDOWMS from this draw
+ * (`windowedReveal`), easing from START SPEED, the speed the previous push's
+ * reveal was moving at, so the type-out runs at the stream's own cadence and
+ * finishes as the next push is expected. Without one, `SmoothReveal` chases
+ * the frontier at a rate proportional to the backlog, as every bubble did
+ * before the daemon measured anything.
  *
  * THE FRAME IS AN ANIMATION FRAME, not the app ticker: the shared ticker steps
  * once a second, which is the right cadence for a clock and useless for a
  * type-out. The loop is self-limiting — it stops as soon as the shown prefix
- * reaches the frontier, and on the first frame that finds the element detached
- * (a re-push replaced it) — so no response leaves a running animation behind.
- * A host with no `requestAnimationFrame` (a test, an unusual embedder) draws
- * the prose whole rather than not at all.
+ * reaches the end of the rendered text, and on the first frame that finds the
+ * element detached (a re-push replaced it) — so no response leaves a running
+ * animation behind. A slot not yet painted (prose holding a tree waits for a
+ * layout) has no text to pace, so the loop waits for its paint rather than
+ * spinning. A host with no `requestAnimationFrame` (a test, an unusual
+ * embedder) draws the prose whole rather than not at all.
  */
 function animate(
   bubble: HTMLElement,
   body: BubbleBody,
-  prose: HTMLElement,
-  markdown: string,
+  slot: HTMLElement,
   resumed: number,
+  windowMs: number | undefined,
+  startSpeed: number | undefined,
   rc: RowContext,
 ): void {
-  // The arriving prose wraps through the SAME body pipeline as the settled
-  // whole, at the same measured width, so nothing shrinks or re-wraps when the
-  // final lands. A width change repaints the slice already shown.
-  const paint = (shown: number): void => {
-    // REGRESSION WATCH (per-frame reveal flicker, 2026-09-15): this once did
-    // `body.replaceChildren(...proseHtml(slice).childNodes, freshIndicator())`
-    // on EVERY animation frame — a full teardown and rebuild of the whole prose
-    // subtree ~60 times a second, so every settled line was destroyed and
-    // recreated under the reader and the bubble flickered. `repaintSlot`
-    // RECONCILES the live slot against the authoritative render
-    // (reconcileChildren): unchanged leading nodes — stable prose paragraphs,
-    // final tree lines — keep their identity and are never touched, and only
-    // the growing tail is patched or appended. The reconciled result is
-    // byte-identical to a fresh settled paint of the same text, so the reveal
-    // never diverges from the oracle. Do NOT reintroduce a whole-subtree
-    // rebuild per frame. This is a watch flag, not a lock.
-    repaintSlot(body, prose, markdown.slice(0, shown));
-    markRevealed(bubble, shown);
-  };
   const frame = globalThis.requestAnimationFrame?.bind(globalThis);
   if (frame === undefined) {
     log.debug("no animation frame host; drawing the arriving prose whole", {
       operation: "feed.cards.response.no-frames",
-      context: { length: markdown.length },
+      context: { resumed },
     });
-    paint(markdown.length);
+    showWhole(bubble, body, slot);
     return;
   }
 
-  const reveal = new SmoothReveal({ now: () => rc.ctx.ticker.now() });
-  const blockId = "response";
-  // Seeding through the module's own "already shown" entry point rather than
-  // reaching into its cursor map: this is exactly a restored render, which is
-  // what `markShown` exists for. The resumed slice itself was painted with the
-  // bubble.
-  reveal.markShown({ items: [{ kind: "text", blockId, text: markdown.slice(0, resumed), done: false }] });
-
+  // A paced window is measured from the push's draw, not from its first frame.
+  const drawnAt = rc.ctx.ticker.now();
+  let pace: Pace | undefined;
   // A bubble that WAS in the document and no longer is has been replaced by a
   // re-push, and its animation is over. One that was never mounted (a test, a
   // draw into a detached fragment) keeps animating: absence of a document is
   // not the same fact as removal from one.
   let mounted = bubble.isConnected;
   // A later paint of this same body (an in-place update) owns it from then on,
-  // so this loop never paints the previous push's prose over it.
+  // so this loop never reveals the previous push's prose over it.
   const generation = paintGeneration(body);
   const step = (): void => {
     if (paintGeneration(body) !== generation) return;
     if (bubble.isConnected) mounted = true;
     else if (mounted) return;
-    const shown = reveal.reveal({
-      items: [{ kind: "text", blockId, text: markdown, done: false }],
-    });
-    const item = shown.state.items[0] as { text: string };
-    paint(item.text.length);
-    if (shown.pending) frame(step);
+    const text = slotText(slot);
+    if (text === undefined) {
+      whenSlotPainted(slot, () => frame(step));
+      return;
+    }
+    pace ??=
+      windowMs === undefined
+        ? smoothPace(text, resumed, rc)
+        : windowedPace(text.length, resumed, windowMs, startSpeed, drawnAt, rc);
+    const { shown, speed } = pace();
+    const done = shown >= text.length;
+    revealSlot(body, slot, done ? undefined : shown);
+    markRevealed(bubble, Math.min(shown, text.length));
+    markRevealSpeed(bubble, speed);
+    if (!done) frame(step);
   };
   frame(step);
+}
+
+/** A pacing: each call answers the length to show on this frame and, for a
+ * paced window, the speed the reveal is moving at. */
+type Pace = () => { shown: number; speed: number | undefined };
+
+/** The daemon-paced reveal: RESUMED to TOTAL across WINDOWMS, eased. */
+function windowedPace(
+  total: number,
+  resumed: number,
+  windowMs: number,
+  startSpeed: number | undefined,
+  drawnAt: number,
+  rc: RowContext,
+): Pace {
+  const from = Math.min(resumed, total);
+  return () => {
+    const point = windowedReveal(from, total, rc.ctx.ticker.now() - drawnAt, windowMs, startSpeed);
+    return { shown: Math.floor(point.at), speed: point.speed };
+  };
+}
+
+/** The unpaced reveal: `SmoothReveal` chasing the end of the rendered TEXT. */
+function smoothPace(text: string, resumed: number, rc: RowContext): Pace {
+  const reveal = new SmoothReveal({ now: () => rc.ctx.ticker.now() });
+  const blockId = "response";
+  // Seeding through the module's own "already shown" entry point rather than
+  // reaching into its cursor map: this is exactly a restored render, which is
+  // what `markShown` exists for. The resumed slice itself was revealed with the
+  // bubble.
+  reveal.markShown({ items: [{ kind: "text", blockId, text: text.slice(0, resumed), done: false }] });
+  return () => {
+    const shown = reveal.reveal({ items: [{ kind: "text", blockId, text, done: false }] });
+    return { shown: (shown.state.items[0] as { text: string }).text.length, speed: undefined };
+  };
 }

@@ -17,6 +17,7 @@ import { inline, hasFencedTree, renderMarkdown, type TreeCols } from "../markdow
 import { findTreeRegion, renderTreeHtml, type TreeIssue } from "../metaprompt-tree.js";
 import { placeChildren, scrollbarWidthPx } from "../dom.js";
 import { onDiscard, stopTicking } from "../feed/ticking.js";
+import { applyTextReveal, clearTextReveal, fullTextOf } from "./text-reveal.js";
 
 /** The webapp surfaces a wrap issue through the client logger. */
 const logTreeIssue: TreeIssue = (message, context) => {
@@ -356,19 +357,53 @@ export function isBubbleBody(el: Element | null | undefined): el is BubbleBody {
   return el !== null && el !== undefined && painters.has(el);
 }
 
+/** Each revealing slot's shown length in rendered characters; absent = whole. */
+const slotReveals = new WeakMap<HTMLElement, number>();
+
+/** The slots the painter has drawn at least once. */
+const paintedSlots = new WeakSet<HTMLElement>();
+
+/** Callbacks waiting for a slot's first paint. */
+const paintWaiters = new WeakMap<HTMLElement, (() => void)[]>();
+
 /**
- * Point SLOT, already in BODY, at MARKDOWN and repaint it IN PLACE: the arriving
- * response's type-out paints every frame through here, reconciled, so settled
- * nodes keep their identity (see `reconcileChildren`).
+ * Show only the first SHOWN rendered characters of SLOT, already in BODY, or
+ * the whole of it for undefined: the arriving response's type-out reveals
+ * through here every frame (src/bubble/text-reveal.ts). The slot is rendered
+ * once per push and only its text is cut, so no frame re-parses markdown and
+ * no half-typed syntax is ever drawn. The painter re-applies the reveal after
+ * every paint (a push, a re-wrap), so a repaint never flashes the whole text.
  */
-export function repaintSlot(body: BubbleBody, slot: HTMLElement, markdown: string): void {
+export function revealSlot(body: BubbleBody, slot: HTMLElement, shown: number | undefined): void {
   if (!slotSources.has(slot) || !body.contains(slot)) {
-    invariant("a repaint named an element that is not a markdown slot of this body", {
+    invariant("a reveal named an element that is not a markdown slot of this body", {
       slot: slot.className,
     });
   }
-  slotSources.set(slot, markdown);
-  painterOf(body).paint(slot);
+  if (shown === undefined) {
+    slotReveals.delete(slot);
+    clearTextReveal(slot);
+    return;
+  }
+  slotReveals.set(slot, shown);
+  if (paintedSlots.has(slot)) applyTextReveal(slot, shown);
+}
+
+/**
+ * SLOT's whole rendered text, or undefined while the painter has not drawn it
+ * yet (prose holding a tree waits for a layout, see `armPainter`).
+ */
+export function slotText(slot: HTMLElement): string | undefined {
+  return paintedSlots.has(slot) ? fullTextOf(slot) : undefined;
+}
+
+/** Run FN once, right after SLOT's first paint. */
+export function whenSlotPainted(slot: HTMLElement, fn: () => void): void {
+  if (paintedSlots.has(slot)) {
+    fn();
+    return;
+  }
+  paintWaiters.set(slot, [...(paintWaiters.get(slot) ?? []), fn]);
 }
 
 /** The source SLOT paints, which every slot has from its making. */
@@ -435,7 +470,16 @@ function armPainter(body: BubbleBody): Painter {
     for (const slot of targets) {
       const target = document.createElement("div");
       target.innerHTML = proseHtml(sourceOf(slot), budget);
+      // The reconcile compares whole text with whole text, so a revealing slot
+      // is restored first and cut again after (`revealSlot`).
+      clearTextReveal(slot);
       reconcileChildren(slot, target, null);
+      paintedSlots.add(slot);
+      const shown = slotReveals.get(slot);
+      if (shown !== undefined) applyTextReveal(slot, shown);
+      const waiters = paintWaiters.get(slot);
+      paintWaiters.delete(slot);
+      for (const fn of waiters ?? []) fn();
     }
   };
   const drawsTree = (): boolean => body.querySelector(".mp-tree") !== null;
