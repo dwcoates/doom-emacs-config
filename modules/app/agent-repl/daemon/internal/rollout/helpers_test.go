@@ -502,6 +502,12 @@ func (s *fakeShim) ForceKills() []shimclient.KillAttribution {
 
 func (s *fakeShim) Exited() <-chan shimclient.ExitInfo { return s.exited }
 
+// AwaitDeath answers the exit Die recorded, at once: this suite stages no race.
+func (s *fakeShim) AwaitDeath(context.Context) (shimclient.ExitInfo, time.Duration, bool) {
+	info, ok := s.Reaped()
+	return info, 0, ok
+}
+
 // Reaped answers the exit Die recorded.
 func (s *fakeShim) Reaped() (shimclient.ExitInfo, bool) {
 	s.mu.Lock()

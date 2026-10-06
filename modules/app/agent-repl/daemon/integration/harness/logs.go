@@ -329,6 +329,57 @@ func (d *Daemon) ExpectWarnings(operations ...string) {
 	d.mu.Unlock()
 }
 
+// RequireWarnings declares operations exactly as ExpectWarnings does AND
+// requires each to have produced at least one WARN or ERROR record by the end
+// of the test. A declaration nothing produces fails the sweep.
+//
+// IT IS WHAT KEEPS A DECLARATION FROM ROTTING. ExpectWarnings only widens the
+// sweep, so a list written for records the daemon later stopped writing kept
+// licensing them silently: the dead-shim tests still declared six
+// operations whose records the death no longer writes at WARN or ERROR (one
+// death, one error: 2026-10-06). An operation a test may or may not produce,
+// by design, is declared with ExpectWarnings and its reason.
+func (d *Daemon) RequireWarnings(operations ...string) {
+	d.t.Helper()
+	d.mu.Lock()
+	for _, op := range operations {
+		d.expected[op] = true
+		d.required[op] = true
+	}
+	d.mu.Unlock()
+}
+
+// UnproducedRequiredWarnings answers every operation RequireWarnings declared
+// that no WARN or worse record of this daemon carries, sorted.
+func (d *Daemon) UnproducedRequiredWarnings() []string {
+	d.mu.Lock()
+	required := make([]string, 0, len(d.required))
+	for op := range d.required {
+		required = append(required, op)
+	}
+	d.mu.Unlock()
+	produced := map[string]bool{}
+	for _, r := range append(d.RunLog(), d.WorkspaceLogRecords()...) {
+		if warningLevels[strings.ToLower(r.Level)] {
+			produced[r.Operation] = true
+		}
+	}
+	var out []string
+	for _, op := range required {
+		if !produced[op] {
+			out = append(out, op)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func (d *Daemon) assertNoUnproducedRequiredWarnings() {
+	if stale := d.UnproducedRequiredWarnings(); len(stale) > 0 {
+		d.t.Errorf("RequireWarnings declared %d operations that produced no warning record; trim the declaration: %v", len(stale), stale)
+	}
+}
+
 // UnexpectedWarnings is the sweep's own material: every WARN or worse this
 // daemon recorded whose operation no ExpectWarnings declared. The cleanup sweep
 // fails the test on it; a test ABOUT the sweep reads it.

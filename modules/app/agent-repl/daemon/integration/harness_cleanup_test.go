@@ -112,11 +112,12 @@ func TestAWarningLoggedAfterTheWorktreeIsGoneIsStillSwept(t *testing.T) {
 		t.Fatalf("UnexpectedWarnings() = %v, want the post-removal shim exit among them", f.d.UnexpectedWarnings())
 	}
 	// Declared LAST, so the assertion above reads the undeclared sweep and the
-	// cleanup sweep reads the declared one.
-	f.d.ExpectWarnings("daemon.shimclient.exit", "daemon.shimclient.redial",
-		"daemon.sessionwatcher.reopen", "daemon.sessionwatcher.watch_session",
-		"daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.link_fault",
-		"daemon.health.open_fault", "daemon.health.session")
+	// cleanup sweep reads the declared one. The death's one ERROR is awaited
+	// above, so it is required; the health fault it opens is written on its
+	// own goroutine and may land after the test body ends, so it is only
+	// allowed.
+	f.d.RequireWarnings("daemon.shimclient.exit")
+	f.d.ExpectWarnings("daemon.health.open_fault")
 }
 
 // holdsOperation reports whether a swept record set names that operation.
@@ -127,4 +128,32 @@ func holdsOperation(records []harness.LogRecord, operation string) bool {
 		}
 	}
 	return false
+}
+
+// TestARequiredWarningCountsAsStaleUntilItIsProduced pins RequireWarnings'
+// half of the sweep: a declaration nothing has produced is named as stale, and
+// stops being named the moment its record is written -- which is what fails a
+// test whose list outlived the records it licensed.
+func TestARequiredWarningCountsAsStaleUntilItIsProduced(t *testing.T) {
+	t.Parallel()
+	// Arrange.
+	f := newOpened(t, harness.Opts{})
+	f.shim.ExpectStartSession()
+	f.d.RequireWarnings("daemon.shimclient.exit")
+	f.d.ExpectWarnings("daemon.health.open_fault")
+	before := f.d.UnproducedRequiredWarnings()
+
+	// Act: the shim dies, which writes the death's one ERROR.
+	f.shim.Exit(1, "simulated crash")
+	f.d.AwaitWorkspaceLogRecord(f.repo.Dir, "the death's error", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.shimclient.exit" && r.Level == "error"
+	})
+
+	// Assert.
+	if len(before) != 1 || before[0] != "daemon.shimclient.exit" {
+		t.Fatalf("UnproducedRequiredWarnings() before the death = %v, want the exit named", before)
+	}
+	if after := f.d.UnproducedRequiredWarnings(); len(after) != 0 {
+		t.Fatalf("UnproducedRequiredWarnings() after the death = %v, want none", after)
+	}
 }

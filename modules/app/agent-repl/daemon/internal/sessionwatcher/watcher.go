@@ -1292,7 +1292,11 @@ func (w *watcher) raiseLinkFaultLocked(state LinkState) {
 			fault.ExitCode = &code
 			fault.Detail = "the shim process exited"
 		}
-		w.log.Warn("daemon.sessionwatcher.link_fault", "the shim process is gone", dlog.Context{
+		// The fault is the session's to stand on; the death itself is
+		// recorded once, by daemon.shimclient.exit, which is the only
+		// publisher of LinkDead -- so this record attributes, it does not
+		// report a second failure.
+		w.log.Info("daemon.sessionwatcher.link_fault", "the shim process is gone; the session stands on its link fault, and the death is recorded by daemon.shimclient.exit", dlog.Context{
 			"has_exit_code": fault.ExitCode != nil,
 		})
 		w.sinks.Lifecycle.OnLinkFault(w.ws, fault)
@@ -1560,7 +1564,8 @@ func (w *watcher) openSession(t *openTicket) {
 	}
 	w.sessionOpening = nil
 	if err != nil {
-		if !w.openEndedByTeardownLocked("session", "", err) {
+		if !w.openEndedByTeardownLocked("session", "", err) &&
+			!w.openEndedByDeathLocked("watch_session", "WatchSession could not be opened because the shim died", err) {
 			w.severedLocked("watch_session", "WatchSession could not be opened", err)
 		}
 		w.mu.Unlock()
@@ -1666,6 +1671,7 @@ func (w *watcher) openAgent(t *openTicket, a *agentWatch, req *shimv1.WatchAgent
 		a.stream = nil
 		switch {
 		case w.openEndedByTeardownLocked("agent", watchKey(a.id), err):
+		case w.openEndedByDeathLocked("watch_agent", "WatchAgent could not be opened because the shim died", err):
 		case refusedOpen(err):
 			w.openRefusedLocked("watch_agent", watchKey(a.id), w.agentExpectedLocked(a), &a.refusals, err)
 		default:
@@ -1723,6 +1729,7 @@ func (w *watcher) openShell(t *openTicket, s *shellWatch) {
 		s.stream = nil
 		switch {
 		case w.openEndedByTeardownLocked("shell", key, err):
+		case w.openEndedByDeathLocked("watch_bash", "WatchBash could not be opened because the shim died", err):
 		case refusedOpen(err):
 			w.openRefusedLocked("watch_bash", key, w.shells[key] == s, &s.refusals, err)
 		default:
@@ -2230,24 +2237,96 @@ func (w *watcher) openEndedByTeardownLocked(kind, key string, err error) bool {
 // producer-side end is legal when the fleet tore the stream down or the
 // session is over, and is a transport failure otherwise.
 func (w *watcher) streamEnded(gen uint64, kind, operation, key string, reaped func() bool, err error) {
+	// The ordinary ends are judged first, so a teardown never waits on a
+	// death verdict it has no use for.
 	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	if w.stale(gen) || (reaped != nil && reaped()) {
-		w.log.Debug("daemon.sessionwatcher.stream_closed", "a torn-down stream ended", dlog.Context{
-			"stream": kind, "key": key,
-		})
+	if w.endedOrdinarilyLocked(gen, kind, key, reaped) {
+		w.mu.Unlock()
 		return
 	}
-	if w.endingLocked() {
-		w.log.Debug("daemon.sessionwatcher.stream_closed", "a stream ended with its session", dlog.Context{
-			"stream": kind, "key": key, "stand_down_asked": w.client.StandingDown(),
+	w.mu.Unlock()
+	// OFF THE LOCK: the verdict may be waited for (see diedUnder).
+	info, waited, died := w.client.AwaitDeath(w.ctx)
+
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.endedOrdinarilyLocked(gen, kind, key, reaped) {
+		return
+	}
+	if died {
+		w.endedByDeathLocked(operation, kind+" stream ended because the shim died", err, info, waited, dlog.Context{
+			"stream": kind, "key": key,
 		})
 		return
 	}
 	w.severedLocked(operation, kind+" stream ended while the session was live", err, dlog.Context{
 		"stream": kind, "key": key,
 	})
+}
+
+// endedOrdinarilyLocked records and answers a stream end that is no news: a
+// stream the fleet tore down, or one that ended with its session.
+func (w *watcher) endedOrdinarilyLocked(gen uint64, kind, key string, reaped func() bool) bool {
+	if w.stale(gen) || (reaped != nil && reaped()) {
+		w.log.Debug("daemon.sessionwatcher.stream_closed", "a torn-down stream ended", dlog.Context{
+			"stream": kind, "key": key,
+		})
+		return true
+	}
+	if w.endingLocked() {
+		w.log.Debug("daemon.sessionwatcher.stream_closed", "a stream ended with its session", dlog.Context{
+			"stream": kind, "key": key, "stand_down_asked": w.client.StandingDown(),
+		})
+		return true
+	}
+	return false
+}
+
+// endedByDeathLocked records a standing stream, or a watch open, that the
+// shim's death took down.
+//
+// ONE DEATH IS ONE ERROR, and it is `daemon.shimclient.exit`'s. Everything
+// the death takes down is its effect, recorded here at INFO with the exit as
+// the cause. MEASURED, live logs 2026-10-03 (workspace `definitions`): each
+// of six shim deaths wrote `daemon.sessionwatcher.watch_session` AND
+// `watch_agent` ERROR "a standing stream ended without the session ending"
+// within 2ms of the exit's own ERROR.
+//
+// THE FLEET IS STILL DOWN, so it is marked degraded exactly as a severing
+// marks it. The link is NOT walked to redialing: a dead shim's link goes to
+// dead on the client's own feed, and a redialing written after that walks it
+// backwards and raises a `link_severed` fault the death does not warrant.
+func (w *watcher) endedByDeathLocked(operation, detail string, err error, info shimclient.ExitInfo, waited time.Duration, extra ...dlog.Context) {
+	ctx := dlog.Context{
+		"detail":           detail,
+		"cause":            "the shim died",
+		"shim_pid":         info.PID,
+		"shim_exit_code":   info.Code,
+		"shim_exit_signal": info.Signal,
+		"verdict_wait_ms":  float64(waited.Microseconds()) / 1000,
+	}
+	if err != nil {
+		ctx["error"] = err.Error()
+	}
+	for _, more := range extra {
+		for k, v := range more {
+			ctx[k] = v
+		}
+	}
+	w.log.Info("daemon.sessionwatcher."+operation, "a standing stream ended because the shim died; the death is recorded by daemon.shimclient.exit", ctx)
+	w.degraded = true
+}
+
+// openEndedByDeathLocked records a watch open the shim's death cut, which the
+// client has already attributed (shimclient.ErrShimDied), and answers whether
+// it was one.
+func (w *watcher) openEndedByDeathLocked(operation, detail string, err error) bool {
+	if !errors.Is(err, shimclient.ErrShimDied) {
+		return false
+	}
+	info, _ := w.client.Reaped()
+	w.endedByDeathLocked(operation, detail, err, info, 0)
+	return true
 }
 
 // shellStreamEnded handles one detached shell's stream ending. A shell whose
@@ -2257,19 +2336,27 @@ func (w *watcher) streamEnded(gen uint64, kind, operation, key string, reaped fu
 // until the link happens to be redialed. The re-open is bounded, and a
 // re-open that cannot be made severs exactly as before.
 func (w *watcher) shellStreamEnded(gen uint64, s *shellWatch, err error) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
 	key := s.work.GetValue()
-	if w.stale(gen) || s.done {
-		w.log.Debug("daemon.sessionwatcher.stream_closed", "a torn-down stream ended", dlog.Context{
-			"stream": "shell", "key": key,
-		})
+	done := func() bool { return s.done }
+	w.mu.Lock()
+	if w.endedOrdinarilyLocked(gen, "shell", key, done) {
+		w.mu.Unlock()
 		return
 	}
-	if w.endingLocked() {
-		w.log.Debug("daemon.sessionwatcher.stream_closed", "a stream ended with its session", dlog.Context{
-			"stream": "shell", "key": key, "stand_down_asked": w.client.StandingDown(),
+	w.mu.Unlock()
+	// OFF THE LOCK, as streamEnded: a dead shim's shell stream is the death's
+	// effect, and re-opening it would only reach the dead socket.
+	info, waited, died := w.client.AwaitDeath(w.ctx)
+
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.endedOrdinarilyLocked(gen, "shell", key, done) {
+		return
+	}
+	if died {
+		s.stream = nil
+		w.endedByDeathLocked("watch_bash", "a detached shell's stream ended because the shim died", err, info, waited, dlog.Context{
+			"stream": "shell", "key": key,
 		})
 		return
 	}
