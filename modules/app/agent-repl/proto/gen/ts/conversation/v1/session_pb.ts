@@ -461,7 +461,8 @@ export type SessionUpdate = Message<"conversation.v1.SessionUpdate"> & {
      * and worktree state, tool-set churn, settings faults) are deferred.
      * Tag 24 (context_budget_warning) is RETIRED: the warning is a transcript
      * attachment with no live-stream producer, so it lives on the agent plane
-     * as AgentUpdate.context_budget_warning (ruled 2026-08-29).
+     * as AgentUpdate.context_budget_warning (ruled 2026-08-29), itself since
+     * retired (owner ruling, 2026-10-06).
      * The vendor's RATE-LIMIT STATUS, a STREAM-ONLY event (never written to
      * the transcript, so the shim is its only producer). Session-scoped;
      * the footer's allowance cell draws it.
@@ -858,8 +859,6 @@ export const SessionCompactingSchema: GenMessage<SessionCompacting> = /*@__PURE_
   messageDesc(file_conversation_v1_session, 18);
 
 /**
- * The vendor's context-budget warning: its own signal that the context
- * window is filling, injected into the prompt as an attachment record.
  * The vendor's rate-limit status as its stream event carries it (SDK
  * `rate_limit_event`). Every optional field is ABSENT when the vendor omitted
  * it — presence, never a sentinel.
