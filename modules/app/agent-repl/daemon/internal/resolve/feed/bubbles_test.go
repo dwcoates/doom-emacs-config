@@ -1,6 +1,7 @@
 package feed
 
 import (
+	"context"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -908,5 +909,75 @@ func TestACancelledHookDrawsNothing(t *testing.T) {
 	// Assert.
 	if rows := h.rows(rootFeed()); len(rows) != 0 {
 		t.Fatalf("rows = %d, want none for a cancelled hook", len(rows))
+	}
+}
+
+// ---- A HOOK CARD IS LIVE ONLY ----
+//
+// No hook record is stored (owner ruling 2026-10-06): the store hands a failed
+// or blocked firing to the standing watch and keeps nothing, so its card is a
+// row this daemon holds, never one a history page carries.
+
+// failHookLive draws a failed hook's card from the live stream, as the shim
+// sends it: the start and the outcome together.
+func (h *harness) failHookLive(unit string) {
+	h.t.Helper()
+	h.hookStart(unit, "SessionStart:startup", conversationv1.AgentHookEvent_AGENT_HOOK_EVENT_SESSION_START, "")
+	h.send(&conversationv1.AgentActivity{
+		ActivityId: &conversationv1.AgentActivityId{Value: unit},
+		Item: &conversationv1.AgentActivity_Hook{Hook: &conversationv1.AgentHook{
+			Result: &conversationv1.AgentHook_NonBlockingError{
+				NonBlockingError: &conversationv1.AgentHookNonBlockingError{Command: "SessionStart:startup", ExitCode: 1},
+			},
+		}},
+	})
+}
+
+// hookCardsOn counts the hook cards one served page carries.
+func hookCardsOn(t *testing.T, page *frontendv1.FeedPage) int {
+	t.Helper()
+	n := 0
+	for _, row := range pageRows(t, page) {
+		if row.GetActivity().GetHook() != nil {
+			n++
+		}
+	}
+	return n
+}
+
+func TestALiveHookCardIsServedToAReaderThatOpensAfterIt(t *testing.T) {
+	// Arrange: the store holds the conversation's prompts and no hook record;
+	// the card was drawn live. A page reload is a new reader's open.
+	h := newHarness(t)
+	h.mainBook(3, promptsBook(2))
+	h.failHookLive("hook-1")
+
+	// Act.
+	page, _, err := h.resolver.OpenPage(context.Background(), testWorkspace, rootFeed(), "reader-1")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("OpenPage: %v", err)
+	}
+	if n := hookCardsOn(t, page); n != 1 {
+		t.Fatalf("hook cards on the reloaded page = %d, want the live one", n)
+	}
+}
+
+func TestARestartedDaemonDrawsNoHookCardFromHistory(t *testing.T) {
+	// Arrange: a fresh resolver over a store that, by the ruling, holds no
+	// hook record — what a daemon restart reads.
+	h := newHarness(t)
+	h.mainBook(3, promptsBook(2))
+
+	// Act.
+	page, _, err := h.resolver.OpenPage(context.Background(), testWorkspace, rootFeed(), "reader-1")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("OpenPage: %v", err)
+	}
+	if n := hookCardsOn(t, page); n != 0 {
+		t.Fatalf("hook cards = %d, want none after a restart", n)
 	}
 }
