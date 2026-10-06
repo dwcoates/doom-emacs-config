@@ -980,6 +980,12 @@ func (c *client) diedUnder(ctx context.Context, err error) (ExitInfo, time.Durat
 	if connect.CodeOf(err) != connect.CodeUnavailable {
 		return ExitInfo{}, 0, false
 	}
+	return c.AwaitDeath(ctx)
+}
+
+// AwaitDeath answers whether the shim died, waiting for this client's own
+// verdict when it is not in yet. See Client.AwaitDeath.
+func (c *client) AwaitDeath(ctx context.Context) (ExitInfo, time.Duration, bool) {
 	if info, ok := c.Reaped(); ok {
 		return info, 0, true
 	}
@@ -991,12 +997,13 @@ func (c *client) diedUnder(ctx context.Context, err error) (ExitInfo, time.Durat
 	defer budget.Stop()
 	select {
 	case <-c.dead:
-		info, ok := c.Reaped()
-		return info, time.Since(began), ok
 	case <-budget.C:
 	case <-ctx.Done():
 	}
-	return ExitInfo{}, time.Since(began), false
+	// Read the verdict whichever case won: the death itself ends the
+	// client's supervision context, so its two signals land together.
+	info, ok := c.Reaped()
+	return info, time.Since(began), ok
 }
 
 // deathFields states the exit a failure is attributed to.
@@ -1007,6 +1014,14 @@ func deathFields(fields dlog.Context, info ExitInfo, waited time.Duration) dlog.
 	fields["signal"] = info.Signal
 	fields["verdict_wait_ms"] = float64(waited.Microseconds()) / 1000
 	return fields
+}
+
+// spawned reports whether this client's shim is its own child, whose death
+// its reap decides.
+func (c *client) spawned() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.cmd != nil
 }
 
 // exitedAlready reports whether death has already been decided.
@@ -1224,6 +1239,23 @@ func (c *client) monitor(stream Stream[*shimv1.WatchSessionResponse], frames <-c
 		if c.exitedAlready() || ctx.Err() != nil {
 			return
 		}
+		// A SPAWNED SHIM'S DEATH IS DECIDED BY ITS REAP, which a SIGKILL's
+		// EOF routinely outruns. The break is that death's effect, and the
+		// death is recorded once, by daemon.shimclient.exit: so the reap is
+		// waited for before the break is called a severed link. An ADOPTED
+		// shim's death is decided by the redial below, so it is not waited
+		// for here.
+		if c.spawned() {
+			if info, waited, died := c.AwaitDeath(ctx); died {
+				c.log.Info("daemon.shimclient.redial", "the liveness stream ended because the shim died; the death is recorded by daemon.shimclient.exit", deathFields(dlog.Context{
+					"uds": c.udsPath, "error": errText(broke),
+				}, info, waited))
+				return
+			}
+			if ctx.Err() != nil {
+				return
+			}
+		}
 		if c.StandingDown() {
 			// THE DAEMON ASKED FOR THIS. A stand-down was requested of this
 			// shim, so the liveness stream ending is the answer to it and not
@@ -1252,6 +1284,16 @@ func (c *client) monitor(stream Stream[*shimv1.WatchSessionResponse], frames <-c
 					"uds": c.udsPath, "error": err.Error(),
 				}))
 				c.awaitAdoptedExit(ctx)
+				return
+			}
+			// THE LADDER THE DEATH ENDED: an adopted shim's death is decided on
+			// this ladder (witnessAdoptedDeath), and a spawned one's reap can
+			// land while it climbs. The death is recorded once, by
+			// daemon.shimclient.exit.
+			if info, ok := c.Reaped(); ok {
+				c.log.Info("daemon.shimclient.redial", "the redial ladder ended because the shim died; the death is recorded by daemon.shimclient.exit", deathFields(dlog.Context{
+					"uds": c.udsPath, "error": err.Error(),
+				}, info, 0))
 				return
 			}
 			c.log.Warn("daemon.shimclient.redial", "redial stopped", c.standDownFields(dlog.Context{
@@ -1357,10 +1399,13 @@ func (c *client) witnessAdoptedDeath(dialErr error) bool {
 	evidence := c.standDownFields(dlog.Context{
 		"workspace_id": string(c.ws), "uds": c.udsPath, "error": dialErr.Error(),
 	})
+	// THE EVIDENCE, NOT A SECOND DEATH. publishExit below records the death
+	// itself -- at ERROR outside a stand-down -- with this same evidence in
+	// its stderr; recorded at ERROR here as well, every adopted death was two.
 	if c.StandingDown() {
 		c.log.Debug("daemon.shimclient.exit", "the adopted shim's socket is gone after the stand-down it was asked for", evidence)
 	} else {
-		c.log.Error("daemon.shimclient.exit", "adopted shim is gone: socket refused and workspace lock free", evidence)
+		c.log.Info("daemon.shimclient.exit", "adopted shim is gone: socket refused and workspace lock free; deciding its death", evidence)
 	}
 	c.publishExit(ExitInfo{
 		PID:      c.PID(),
