@@ -7,7 +7,7 @@ catalogue of every response vector from the daemon to the webapp, and of the
 ones that reach neither.
 
 The incident behind it: a failed `AnswerColdGate` at 17:37:03 and 17:55:21. The
-owner answered a cold gate with "clear and start fresh", the shim's
+owner answered a cold gate with "clear context" (then labeled "clear and start fresh"), the shim's
 `StartSession` failed, the daemon logged it four times at ERROR, the webapp
 logged `rpc.unary-transport-failure`, and nothing durable was drawn. The full
 trace is §4; the log records are §7.
