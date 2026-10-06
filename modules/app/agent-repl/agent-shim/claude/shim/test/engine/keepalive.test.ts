@@ -161,6 +161,15 @@ describe("the yield obligation", () => {
     expect(rewind.obligation()?.resumeSessionAt).toBe("real-1");
   });
 
+  it("never anchors on a subagent's assistant record, which lives in the subagent's own transcript", () => {
+    const rewind = new KeepaliveRewind();
+    rewind.noteRecord(assistant("real-1"), realTurn);
+    rewind.noteRecord({ ...assistant("subagent-1"), parent_tool_use_id: "toolu_spawn" } as SdkMessage, realTurn);
+    rewind.noteKeepaliveTurn();
+
+    expect(rewind.obligation()?.resumeSessionAt).toBe("real-1");
+  });
+
   it("never anchors on an assistant record that belongs to no open turn", () => {
     const rewind = new KeepaliveRewind();
     rewind.noteRecord(assistant("idle-1"), undefined);
