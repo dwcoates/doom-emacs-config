@@ -47,6 +47,7 @@ import (
 	"claude-repld/internal/resolve/holds"
 	"claude-repld/internal/resolve/sidebar"
 	"claude-repld/internal/resolve/topbar"
+	"claude-repld/internal/revealpace"
 	"claude-repld/internal/rollout"
 	"claude-repld/internal/scriptrunner"
 	"claude-repld/internal/server"
@@ -446,6 +447,14 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// with no green answer standing, and it must raise it into the SAME state
 	// client every other site raises into — the decorated one — or the fault
 	// would be recorded and reach no footer.
+	// THE REVEAL PACER is loaded before the feed it paces, from the windows
+	// of streamed-fragment gaps an earlier daemon recorded, so a restart keeps
+	// pacing a model's type-out from its first response.
+	pacer, err := revealpace.Load(ctx, p.DB, log)
+	if err != nil {
+		return nil, fmt.Errorf("claude-repld: load the reveal pacer: %w", err)
+	}
+
 	history := &historyForwarder{}
 	feedResolver, err := feed.New(feed.Deps{
 		Log: p.Surfaces,
@@ -485,6 +494,9 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		// footer never calls back into the feed (the fault path above already
 		// takes the same feed-then-footer order).
 		EntryPlaced: footerResolver.OnEntryPlaced,
+		// THE REVEAL WINDOW on the main agent's live bubbles, measured from the
+		// gaps between their streamed fragments.
+		Pacing: pacer,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("claude-repld: build the feed resolver: %w", err)

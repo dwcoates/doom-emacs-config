@@ -60,14 +60,14 @@ each update how long to spread the not-yet-shown text over.
   recent result counts more toward the average than the 25th most recent".
 - **What is a sample.** Only the gap between two consecutive text-bearing
   fragments of the SAME block (prose or thinking), measured at the daemon's
-  receipt, drawn on the LIVE plane, on the ROOT feed. Excluded: the wait
+  receipt, drawn on the LIVE plane, of the MAIN agent. Excluded: the wait
   before a block's first fragment (time to first token), pauses for tool
   calls (they fall between blocks), history replays (their frames arrive in
   one burst), and subagent blocks (the daemon knows only the session's
   model, `wsState.model`, so it cannot key a subagent's gaps).
   - Accepted cost: a subagent's bubble never carries a window and keeps the
     default pacing.
-- **Window served.** Only on the live plane and the root feed, for the
+- **Window served.** Only on the live plane and for the main agent, for the
   same reason samples are only taken there. A replayed draw carries no
   window (it is drawn whole anyway).
 - **Persistence.** `wsm` table `reveal_gaps` (layout 24, additive). The
