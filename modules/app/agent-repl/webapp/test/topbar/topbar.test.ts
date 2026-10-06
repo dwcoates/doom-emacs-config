@@ -789,6 +789,56 @@ describe("the account cell", () => {
   });
 });
 
+describe("the connectivity glyph's session dropdown", () => {
+  /** The view with agent-repl's session on its connectivity indicator. */
+  const withSession = (): TopbarView =>
+    view({
+      connectivity: create(TopbarViewSchema, {
+        connectivity: {
+          tone: "green",
+          glyph: "●",
+          title: "connected",
+          session: { startedAtMs: 1n, began: { case: "editorStart", value: {} }, bytesReceived: 5n, bytesSent: 6n },
+        },
+      }).connectivity,
+    });
+
+  it("opens agent-repl's session from the glyph, not the account options", () => {
+    // ARRANGE
+    const { host, tc } = topbarContext();
+    host.append(drawTopbarView(withSession(), tc));
+    // ACT
+    host.querySelector(".topbar-connectivity")!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    // ASSERT
+    expect(openPanel(host)?.getAttribute("data-reveal")).toBe("agent-repl-session");
+  });
+
+  it("still opens the account options from the label beside it", () => {
+    // ARRANGE
+    const { host, tc } = topbarContext();
+    host.append(drawTopbarView(withSession(), tc));
+    // ACT
+    host.querySelector(".topbar-account")!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    // ASSERT
+    expect(openPanel(host)?.getAttribute("data-reveal")).toBe("account");
+  });
+
+  // NO SESSION, NO DROPDOWN: the glyph is the account cell's, as it was.
+  it("leaves a session-less glyph's click to the account options", () => {
+    // ARRANGE
+    const { host, tc } = topbarContext();
+    host.append(drawTopbarView(view(), tc));
+    // ACT
+    host.querySelector(".topbar-connectivity")!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    // ASSERT
+    expect(openPanel(host)?.getAttribute("data-reveal")).toBe("account");
+  });
+
+  it("wears a pointer only while it opens something", () => {
+    expect(declaration(".topbar-connectivity[data-reveal-anchor]", "cursor")).toBe("pointer");
+  });
+});
+
 describe("the effort selector's place and form", () => {
   it("is drawn between the model selector and the permission-mode picker", () => {
     // Arrange

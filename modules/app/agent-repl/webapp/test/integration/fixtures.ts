@@ -2026,6 +2026,8 @@ type TopbarInit = {
   email?: string;
   tone?: string;
   glyph?: string;
+  /** agent-repl's session on the connectivity indicator; omitted, none. */
+  agentReplSession?: { startedAtMs: bigint; began: "login" | "editorStart"; bytesReceived: bigint; bytesSent: bigint };
   connectivityTitle?: string;
   models?: { name: string; displayName: string; description: string }[];
   selected?: string;
@@ -2108,6 +2110,15 @@ export function topbarView(init?: TopbarInit): TopbarView {
       tone: init?.tone ?? "green",
       glyph: init?.glyph ?? "dot",
       title: init?.connectivityTitle ?? "connected to claude-repld",
+      session:
+        init?.agentReplSession === undefined
+          ? undefined
+          : {
+              startedAtMs: init.agentReplSession.startedAtMs,
+              began: { case: init.agentReplSession.began, value: {} },
+              bytesReceived: init.agentReplSession.bytesReceived,
+              bytesSent: init.agentReplSession.bytesSent,
+            },
     },
     warnings: { warnings: init?.warnings ?? [] },
     persistentWifi: {
