@@ -155,6 +155,12 @@ type fakeStore struct {
 	claimsFor   []string
 	claimsAsked bool
 
+	// the detached-work lookup's answer, and what the last lookup asked for
+	detachedWork      *storev1.GetDetachedWorkSuccess
+	detachedWorkErr   error
+	detachedWorkFor   string
+	detachedWorkAsked bool
+
 	settled      []db.SettledRun
 	settledErr   error
 	settledFor   []string
@@ -287,6 +293,14 @@ func (f *fakeStore) ShellRunClaims(_ context.Context, vendorTaskIDs []string) ([
 	f.claimsAsked = true
 	f.claimsFor = vendorTaskIDs
 	return f.claims, f.claimsErr
+}
+
+func (f *fakeStore) DetachedWorkByUnit(_ context.Context, unit string) (*storev1.GetDetachedWorkSuccess, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.detachedWorkAsked = true
+	f.detachedWorkFor = unit
+	return f.detachedWork, f.detachedWork != nil, f.detachedWorkErr
 }
 
 func (f *fakeStore) RunSettlements(_ context.Context, runIDs []string) ([]db.SettledRun, error) {
@@ -2124,6 +2138,127 @@ func TestGetRunSettlementsRefusesAnIncompleteRequest(t *testing.T) {
 			}
 			store.mu.Lock()
 			asked := store.settledAsked
+			store.mu.Unlock()
+			if asked {
+				t.Fatalf("the store was read for a request the server refuses")
+			}
+		})
+	}
+}
+
+// ---- GetDetachedWork ----
+
+// detachedWorkOf is a lookup naming one unit.
+func detachedWorkOf(unit string) *storev1.GetDetachedWorkRequest {
+	return &storev1.GetDetachedWorkRequest{Unit: &conversationv1.AgentActivityId{Value: unit}}
+}
+
+func TestGetDetachedWorkServesTheRecordedWork(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	store.detachedWork = &storev1.GetDetachedWorkSuccess{
+		Kind:  &storev1.GetDetachedWorkKind{Kind: &storev1.GetDetachedWorkKind_Bash{Bash: &storev1.GetDetachedWorkKindBash{}}},
+		State: &storev1.GetDetachedWorkSuccess_Ended{Ended: &storev1.GetDetachedWorkEnded{EndedAtMs: 42}},
+	}
+	h := newHarness(t, store, 0)
+
+	// Act.
+	res, err := h.client.GetDetachedWork(context.Background(), connect.NewRequest(detachedWorkOf("toolu_1")))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("GetDetachedWork = %v, want nil", err)
+	}
+	success := res.Msg.GetSuccess()
+	if success.GetKind().GetBash() == nil || success.GetEnded().GetEndedAtMs() != 42 {
+		t.Fatalf("result = %v, want the success arm with a bash run ended at 42", res.Msg.GetResult())
+	}
+}
+
+func TestGetDetachedWorkReadsTheStoreForTheAskedUnit(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	h := newHarness(t, store, 0)
+
+	// Act.
+	if _, err := h.client.GetDetachedWork(context.Background(), connect.NewRequest(detachedWorkOf("toolu_1"))); err != nil {
+		t.Fatalf("GetDetachedWork = %v, want nil", err)
+	}
+
+	// Assert.
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if store.detachedWorkFor != "toolu_1" {
+		t.Fatalf("store read %q, want toolu_1", store.detachedWorkFor)
+	}
+}
+
+func TestGetDetachedWorkAnswersNotFoundWhenNoRowIsLocated(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	h := newHarness(t, store, 0)
+
+	// Act.
+	res, err := h.client.GetDetachedWork(context.Background(), connect.NewRequest(detachedWorkOf("toolu_1")))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("GetDetachedWork = %v, want nil", err)
+	}
+	if res.Msg.GetNotFound() == nil {
+		t.Fatalf("result = %v, want the not_found arm", res.Msg.GetResult())
+	}
+}
+
+func TestGetDetachedWorkMapsAStorageFailureToTheStorageFailureArm(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	store.detachedWorkErr = fmt.Errorf("%w: scan failed", ErrStorage)
+	h := newHarness(t, store, 0)
+
+	// Act.
+	res, err := h.client.GetDetachedWork(context.Background(), connect.NewRequest(detachedWorkOf("toolu_1")))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("GetDetachedWork = %v, want nil", err)
+	}
+	if res.Msg.GetFailure().GetStorageFailure() == nil {
+		t.Fatalf("result = %v, want the storage_failure arm", res.Msg.GetResult())
+	}
+}
+
+func TestGetDetachedWorkRefusesAnIncompleteRequest(t *testing.T) {
+	tests := []struct {
+		name    string
+		request *storev1.GetDetachedWorkRequest
+	}{
+		{name: "unit unset", request: &storev1.GetDetachedWorkRequest{}},
+		{name: "unit with an empty value", request: detachedWorkOf("")},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Arrange.
+			store := newFakeStore()
+			h := newHarness(t, store, 0)
+
+			// Act.
+			res, err := h.client.GetDetachedWork(context.Background(), connect.NewRequest(test.request))
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("GetDetachedWork = %v, want nil", err)
+			}
+			invalid := res.Msg.GetFailure().GetInvalidRequest()
+			if invalid == nil || invalid.GetField() != "unit" {
+				t.Fatalf("result = %v, want invalid_request naming unit", res.Msg.GetResult())
+			}
+			rec, ok := findRecord(t, h.logs, "store.rpc.get-detached-work", "warn")
+			if !ok || rec.Context["refusal_site"] != SiteUnitEmpty {
+				t.Fatalf("records = %+v, want one warn refusal at site %q", records(t, h.logs), SiteUnitEmpty)
+			}
+			store.mu.Lock()
+			asked := store.detachedWorkAsked
 			store.mu.Unlock()
 			if asked {
 				t.Fatalf("the store was read for a request the server refuses")

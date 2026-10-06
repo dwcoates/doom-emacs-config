@@ -71,6 +71,9 @@ const (
 	// ShimStoreGetRunSettlementsProcedure is the fully-qualified name of the ShimStore's
 	// GetRunSettlements RPC.
 	ShimStoreGetRunSettlementsProcedure = "/store.v1.ShimStore/GetRunSettlements"
+	// ShimStoreGetDetachedWorkProcedure is the fully-qualified name of the ShimStore's GetDetachedWork
+	// RPC.
+	ShimStoreGetDetachedWorkProcedure = "/store.v1.ShimStore/GetDetachedWork"
 	// ShimStoreWriteBatchProcedure is the fully-qualified name of the ShimStore's WriteBatch RPC.
 	ShimStoreWriteBatchProcedure = "/store.v1.ShimStore/WriteBatch"
 )
@@ -89,6 +92,7 @@ var (
 	shimStoreGetAgentByVendorTaskMethodDescriptor = shimStoreServiceDescriptor.Methods().ByName("GetAgentByVendorTask")
 	shimStoreGetShellRunClaimsMethodDescriptor    = shimStoreServiceDescriptor.Methods().ByName("GetShellRunClaims")
 	shimStoreGetRunSettlementsMethodDescriptor    = shimStoreServiceDescriptor.Methods().ByName("GetRunSettlements")
+	shimStoreGetDetachedWorkMethodDescriptor      = shimStoreServiceDescriptor.Methods().ByName("GetDetachedWork")
 	shimStoreWriteBatchMethodDescriptor           = shimStoreServiceDescriptor.Methods().ByName("WriteBatch")
 )
 
@@ -136,6 +140,12 @@ type ShimStoreClient interface {
 	// a run's file, so a run that settled before this process started is never
 	// tracked again and never concluded LOST. Absent from the answer = not settled.
 	GetRunSettlements(context.Context, *connect.Request[v1.GetRunSettlementsRequest]) (*connect.Response[v1.GetRunSettlementsResponse], error)
+	// WHAT KIND of detached work one unit left as, and whether the record holds
+	// it as ENDED, by the spawning call's activity id. The shim asks before
+	// folding a task message whose kind it does not hold (a task_notification
+	// never states one): a re-report of an ended run is recognized as such, and
+	// a live run is typed by the record rather than refused.
+	GetDetachedWork(context.Context, *connect.Request[v1.GetDetachedWorkRequest]) (*connect.Response[v1.GetDetachedWorkResponse], error)
 	// One batch, durable or nothing, cursor advance in the same transaction.
 	WriteBatch(context.Context, *connect.Request[v1.WriteBatchRequest]) (*connect.Response[v1.WriteBatchResponse], error)
 }
@@ -216,6 +226,12 @@ func NewShimStoreClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(shimStoreGetRunSettlementsMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		getDetachedWork: connect.NewClient[v1.GetDetachedWorkRequest, v1.GetDetachedWorkResponse](
+			httpClient,
+			baseURL+ShimStoreGetDetachedWorkProcedure,
+			connect.WithSchema(shimStoreGetDetachedWorkMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 		writeBatch: connect.NewClient[v1.WriteBatchRequest, v1.WriteBatchResponse](
 			httpClient,
 			baseURL+ShimStoreWriteBatchProcedure,
@@ -238,6 +254,7 @@ type shimStoreClient struct {
 	getAgentByVendorTask *connect.Client[v1.GetAgentByVendorTaskRequest, v1.GetAgentByVendorTaskResponse]
 	getShellRunClaims    *connect.Client[v1.GetShellRunClaimsRequest, v1.GetShellRunClaimsResponse]
 	getRunSettlements    *connect.Client[v1.GetRunSettlementsRequest, v1.GetRunSettlementsResponse]
+	getDetachedWork      *connect.Client[v1.GetDetachedWorkRequest, v1.GetDetachedWorkResponse]
 	writeBatch           *connect.Client[v1.WriteBatchRequest, v1.WriteBatchResponse]
 }
 
@@ -296,6 +313,11 @@ func (c *shimStoreClient) GetRunSettlements(ctx context.Context, req *connect.Re
 	return c.getRunSettlements.CallUnary(ctx, req)
 }
 
+// GetDetachedWork calls store.v1.ShimStore.GetDetachedWork.
+func (c *shimStoreClient) GetDetachedWork(ctx context.Context, req *connect.Request[v1.GetDetachedWorkRequest]) (*connect.Response[v1.GetDetachedWorkResponse], error) {
+	return c.getDetachedWork.CallUnary(ctx, req)
+}
+
 // WriteBatch calls store.v1.ShimStore.WriteBatch.
 func (c *shimStoreClient) WriteBatch(ctx context.Context, req *connect.Request[v1.WriteBatchRequest]) (*connect.Response[v1.WriteBatchResponse], error) {
 	return c.writeBatch.CallUnary(ctx, req)
@@ -345,6 +367,12 @@ type ShimStoreHandler interface {
 	// a run's file, so a run that settled before this process started is never
 	// tracked again and never concluded LOST. Absent from the answer = not settled.
 	GetRunSettlements(context.Context, *connect.Request[v1.GetRunSettlementsRequest]) (*connect.Response[v1.GetRunSettlementsResponse], error)
+	// WHAT KIND of detached work one unit left as, and whether the record holds
+	// it as ENDED, by the spawning call's activity id. The shim asks before
+	// folding a task message whose kind it does not hold (a task_notification
+	// never states one): a re-report of an ended run is recognized as such, and
+	// a live run is typed by the record rather than refused.
+	GetDetachedWork(context.Context, *connect.Request[v1.GetDetachedWorkRequest]) (*connect.Response[v1.GetDetachedWorkResponse], error)
 	// One batch, durable or nothing, cursor advance in the same transaction.
 	WriteBatch(context.Context, *connect.Request[v1.WriteBatchRequest]) (*connect.Response[v1.WriteBatchResponse], error)
 }
@@ -421,6 +449,12 @@ func NewShimStoreHandler(svc ShimStoreHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(shimStoreGetRunSettlementsMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
+	shimStoreGetDetachedWorkHandler := connect.NewUnaryHandler(
+		ShimStoreGetDetachedWorkProcedure,
+		svc.GetDetachedWork,
+		connect.WithSchema(shimStoreGetDetachedWorkMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
 	shimStoreWriteBatchHandler := connect.NewUnaryHandler(
 		ShimStoreWriteBatchProcedure,
 		svc.WriteBatch,
@@ -451,6 +485,8 @@ func NewShimStoreHandler(svc ShimStoreHandler, opts ...connect.HandlerOption) (s
 			shimStoreGetShellRunClaimsHandler.ServeHTTP(w, r)
 		case ShimStoreGetRunSettlementsProcedure:
 			shimStoreGetRunSettlementsHandler.ServeHTTP(w, r)
+		case ShimStoreGetDetachedWorkProcedure:
+			shimStoreGetDetachedWorkHandler.ServeHTTP(w, r)
 		case ShimStoreWriteBatchProcedure:
 			shimStoreWriteBatchHandler.ServeHTTP(w, r)
 		default:
@@ -504,6 +540,10 @@ func (UnimplementedShimStoreHandler) GetShellRunClaims(context.Context, *connect
 
 func (UnimplementedShimStoreHandler) GetRunSettlements(context.Context, *connect.Request[v1.GetRunSettlementsRequest]) (*connect.Response[v1.GetRunSettlementsResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("store.v1.ShimStore.GetRunSettlements is not implemented"))
+}
+
+func (UnimplementedShimStoreHandler) GetDetachedWork(context.Context, *connect.Request[v1.GetDetachedWorkRequest]) (*connect.Response[v1.GetDetachedWorkResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("store.v1.ShimStore.GetDetachedWork is not implemented"))
 }
 
 func (UnimplementedShimStoreHandler) WriteBatch(context.Context, *connect.Request[v1.WriteBatchRequest]) (*connect.Response[v1.WriteBatchResponse], error) {

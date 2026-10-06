@@ -786,6 +786,57 @@ func agentByVendorTaskFailure(ref *refusal) *connect.Response[storev1.GetAgentBy
 	})
 }
 
+// ---- GetDetachedWork ----
+
+// GetDetachedWork answers the kind and end of the detached work that left one
+// unit. NOT-FOUND IS AN ANSWER, not a refusal: the storage layer read the
+// record and recorded the outcome at info, found or not, so this layer adds
+// only a verbose trace for either.
+func (s *Server) GetDetachedWork(ctx context.Context, req *connect.Request[storev1.GetDetachedWorkRequest]) (*connect.Response[storev1.GetDetachedWorkResponse], error) {
+	unit := req.Msg.GetUnit().GetValue()
+	fields := logging.Fields{ActivityID: unit}
+	log := s.rpcLogger(storev1connect.ShimStoreGetDetachedWorkProcedure, req.Header()).With(fields)
+	log.LogVerbose(logging.Fields{Operation: "store.rpc.get-detached-work"}, "reading the detached work a unit left")
+
+	if ref := validateGetDetachedWorkRequest(req.Msg); ref != nil {
+		s.logRefusal(log, "store.rpc.get-detached-work", ref, logging.Fields{})
+		return detachedWorkFailure(ref), nil
+	}
+
+	work, found, err := s.store.DetachedWorkByUnit(correlated(ctx, req.Header()), unit)
+	if err != nil {
+		ref := s.storeFailure(log, "store.rpc.get-detached-work", err, fields)
+		return detachedWorkFailure(ref), nil
+	}
+	if !found {
+		log.LogVerbose(logging.Fields{Operation: "store.rpc.get-detached-work"}, "answering not_found")
+		return connect.NewResponse(&storev1.GetDetachedWorkResponse{
+			Result: &storev1.GetDetachedWorkResponse_NotFound{NotFound: &storev1.GetDetachedWorkNotFound{}},
+		}), nil
+	}
+	log.LogVerbose(logging.Fields{Operation: "store.rpc.get-detached-work"}, "answering the recorded work")
+	return connect.NewResponse(&storev1.GetDetachedWorkResponse{
+		Result: &storev1.GetDetachedWorkResponse_Success{Success: work},
+	}), nil
+}
+
+// detachedWorkFailure has TWO arms: the request was malformed (no unit), or
+// the storage layer failed — which includes a record that breaks the table's
+// invariant.
+func detachedWorkFailure(ref *refusal) *connect.Response[storev1.GetDetachedWorkResponse] {
+	failure := &storev1.GetDetachedWorkFailure{Detail: ref.detail}
+	if ref.class == classInvalid {
+		failure.Kind = &storev1.GetDetachedWorkFailure_InvalidRequest{
+			InvalidRequest: &storev1.GetDetachedWorkInvalidRequest{Field: ref.field},
+		}
+	} else {
+		failure.Kind = &storev1.GetDetachedWorkFailure_StorageFailure{StorageFailure: &storev1.GetDetachedWorkStorageFailure{}}
+	}
+	return connect.NewResponse(&storev1.GetDetachedWorkResponse{
+		Result: &storev1.GetDetachedWorkResponse_Failure{Failure: failure},
+	})
+}
+
 // ---- GetRunSettlements ----
 
 // GetRunSettlements answers which of the asked runs the record holds as ended.

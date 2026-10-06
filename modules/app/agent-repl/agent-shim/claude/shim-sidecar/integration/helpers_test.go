@@ -1997,6 +1997,10 @@ func (f *fakeStore) GetAgentByVendorTask(context.Context, *connect.Request[store
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("the fake store serves only the sidecar's two verbs"))
 }
 
+func (f *fakeStore) GetDetachedWork(context.Context, *connect.Request[storev1.GetDetachedWorkRequest]) (*connect.Response[storev1.GetDetachedWorkResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("the fake store serves only the sidecar's two verbs"))
+}
+
 func (f *fakeStore) ListResidueShapes(context.Context, *connect.Request[storev1.ListResidueShapesRequest]) (*connect.Response[storev1.ListResidueShapesResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("the fake store serves only the sidecar's two verbs"))
 }
