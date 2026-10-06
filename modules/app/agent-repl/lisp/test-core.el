@@ -3329,24 +3329,55 @@ unattributed teardown is visible in the log rather than silently blank."
     (agent-repl--ws-put "none" :repl-state :inactive)
     (should-not (agent-repl--ws-log-routable-p "none"))))
 
-(ert-deftest agent-repl-test-log-dir-truename-asks-the-filesystem-once ()
+(ert-deftest agent-repl-test-log-dir-truename-walks-the-path-once ()
   "A directory's canonical spelling is resolved once, not on every record."
   (agent-repl-test--with-clean-state
     ;; Arrange
     (let ((dir (make-temp-file "agent-repl-log-dir" t))
-          (asks 0))
+          (walks 0)
+          (after-first nil))
       (unwind-protect
-          ;; `file-directory-p' is asked once per resolution (`file-truename'
-          ;; recurses on itself, so it cannot be counted this way).
-          (cl-letf* ((real (symbol-function 'file-directory-p))
-                     ((symbol-function 'file-directory-p)
-                      (lambda (f) (cl-incf asks) (funcall real f))))
+          ;; `file-truename' recurses through its own symbol, so one
+          ;; resolution counts several calls; what is pinned is that later
+          ;; lookups add none.
+          (cl-letf* ((real (symbol-function 'file-truename))
+                     ((symbol-function 'file-truename)
+                      (lambda (&rest args) (cl-incf walks) (apply real args))))
+            (agent-repl--log-dir-truename dir)
+            (setq after-first walks)
             ;; Act
             (agent-repl--log-dir-truename dir)
             (agent-repl--log-dir-truename dir)
-            (agent-repl--log-dir-truename dir)
             ;; Assert
-            (should (= asks 1)))
+            (should (> after-first 0))
+            (should (= walks after-first)))
+        (delete-directory dir)))))
+
+(ert-deftest agent-repl-test-log-dir-truename-forgets-a-directory-that-vanished ()
+  "A remembered directory that has since gone answers nil, not its old spelling."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((dir (make-temp-file "agent-repl-log-dir" t)))
+      (should (agent-repl--log-dir-truename dir))
+      ;; Act
+      (delete-directory dir)
+      ;; Assert
+      (should-not (agent-repl--log-dir-truename dir)))))
+
+(ert-deftest agent-repl-test-log-dir-truename-routes-a-recreated-directory-again ()
+  "A directory that vanished and came back is answered again."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((dir (make-temp-file "agent-repl-log-dir" t)))
+      (unwind-protect
+          (progn
+            (agent-repl--log-dir-truename dir)
+            (delete-directory dir)
+            (agent-repl--log-dir-truename dir)
+            ;; Act
+            (make-directory dir)
+            ;; Assert
+            (should (agent-repl--log-dir-truename dir)))
         (delete-directory dir)))))
 
 (ert-deftest agent-repl-test-log-dir-truename-is-canonical ()
@@ -3382,6 +3413,18 @@ unattributed teardown is visible in the log rather than silently blank."
       (agent-repl--ws-put "gone-ws" :project-dir project)
       (delete-directory project t)
       (should-not (agent-repl--ws-log-routable-p "gone-ws")))))
+
+(ert-deftest agent-repl-test-log-routable-rejects-a-project-dir-that-vanished-after-routing ()
+  "A workspace that routed once and whose directory then went owns no sink."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((project (make-temp-file "agent-repl-routable-went-" t)))
+      (agent-repl--ws-put "went-ws" :project-dir project)
+      (should (agent-repl--ws-log-routable-p "went-ws"))
+      ;; Act
+      (delete-directory project t)
+      ;; Assert
+      (should-not (agent-repl--ws-log-routable-p "went-ws")))))
 
 (ert-deftest agent-repl-test-log-routable-accepts-registered-workspace ()
   "A registered workspace with an existing project directory owns a sink."
