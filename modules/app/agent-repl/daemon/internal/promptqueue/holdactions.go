@@ -77,7 +77,7 @@ func (q *queue) Release(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID
 		return ErrReleaseRefused
 	}
 	if held.Hold != nil && *held.Hold == wsm.HoldReconnect {
-		log.Warn(opRelease, "the session is not up; the release is refused until it reconnects", nil)
+		log.Warn(opRelease, "the session is not up or its vendor does not serve it; the release is refused until it reconnects", nil)
 		return ErrReleaseRefused
 	}
 	// A MERGE DRIVES THE SESSION: a prompt forced into it would run inside the
