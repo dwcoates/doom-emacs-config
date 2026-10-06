@@ -529,6 +529,9 @@ type fleetFixture struct {
 	// cold-gated workspace starts no session, so the topbar's own state is
 	// the only thing standing between the reader and a blank strip.
 	topbarGates []topbar.ColdGate
+	// topbarWindow is the context window the STRIP answers the gate's figure
+	// is measured against; the fixture starts it at the assumed 1,000,000.
+	topbarWindow int64
 	// picked is the effort level the topbar holds as picked, and
 	// topbarWarnings every warning line the fleet raised on the strip.
 	picked         conversationv1.AgentEffortLevel
@@ -645,18 +648,19 @@ func newFleetFixtureBoundedAt(t *testing.T, adoptBound time.Duration) *fleetFixt
 	t.Helper()
 	order := &[]string{}
 	f := &fleetFixture{
-		now:        fixedNow,
-		standDown:  order,
-		db:         newFakeDB(),
-		accounts:   &fakeAccounts{configDir: "/config", transcript: account.Transcript{Path: "/transcripts/vendor-1.jsonl", ConfigDir: "/config"}},
-		client:     &fakeClient{response: startedResponse("vendor-1"), pid: 4242, standDown: order},
-		feed:       &fakeFeed{},
-		footer:     newFakeFooter(),
-		log:        newFakeSurfaces(),
-		watcher:    &fakeWatcher{standDown: order},
-		links:      &recordingLinkSink{},
-		probeState: sessionlock.StateFree,
-		adoptBound: adoptBound,
+		topbarWindow: 1_000_000,
+		now:          fixedNow,
+		standDown:    order,
+		db:           newFakeDB(),
+		accounts:     &fakeAccounts{configDir: "/config", transcript: account.Transcript{Path: "/transcripts/vendor-1.jsonl", ConfigDir: "/config"}},
+		client:       &fakeClient{response: startedResponse("vendor-1"), pid: 4242, standDown: order},
+		feed:         &fakeFeed{},
+		footer:       newFakeFooter(),
+		log:          newFakeSurfaces(),
+		watcher:      &fakeWatcher{standDown: order},
+		links:        &recordingLinkSink{},
+		probeState:   sessionlock.StateFree,
+		adoptBound:   adoptBound,
 
 		socketState: shimsocket.StateAbsent,
 	}
@@ -665,7 +669,7 @@ func newFleetFixtureBoundedAt(t *testing.T, adoptBound time.Duration) *fleetFixt
 
 	fleet, err := NewFleet(FleetDeps{
 		DB: f.db, Instance: fixtureInstance, Accounts: f.accounts, Supervisor: f.supervisor, ShimBundle: f.bundle,
-		Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{coldGates: &f.topbarGates, picked: &f.picked, warnings: &f.topbarWarnings}, Log: f.log,
+		Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{coldGates: &f.topbarGates, picked: &f.picked, warnings: &f.topbarWarnings, window: &f.topbarWindow}, Log: f.log,
 		Sinks: sessionwatcher.Sinks{
 			Lifecycle: &quietLifecycle{},
 			Footer:    footerLinkSink{rec: f.links},
@@ -1577,6 +1581,46 @@ func TestStartAnswersAColdRefusalWithTheGate(t *testing.T) {
 	}
 	if len(f.feed.synthesized) != 1 || f.feed.synthesized[0].GetColdGate().GetStanding() == nil {
 		t.Fatalf("synthesized rows = %v, want one standing gate row", f.feed.synthesized)
+	}
+}
+
+func TestTheRaisedGatesFigureIsFilledAgainstTheTopbarsWindow(t *testing.T) {
+	// Arrange: 120,000 tokens against a 200,000-token window is 60% full.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
+	f.client.response = coldResponse()
+	f.topbarWindow = 200_000
+
+	// Act.
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Assert.
+	got := f.feed.synthesized[0].GetColdGate().GetStanding().GetContextTokens().GetWindowFill()
+	if got != 0.6 {
+		t.Fatalf("feed figure window_fill = %v, want 0.6", got)
+	}
+}
+
+func TestTheRaisedGatesFooterLineSharesTheFeedFiguresFill(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
+	f.client.response = coldResponse()
+	f.topbarWindow = 200_000
+
+	// Act.
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Assert.
+	cost := f.footer.coldGates[ws.ID].Cost
+	if cost.Figure != "120,000" || cost.WindowFill != 0.6 {
+		t.Fatalf("footer cost = %+v, want figure 120,000 at fill 0.6", cost)
 	}
 }
 

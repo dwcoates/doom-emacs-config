@@ -2089,6 +2089,9 @@ type stubTopbar struct {
 	coldGates *[]topbar.ColdGate
 	// accounts records every account cell the verbs installed, in order.
 	accounts *[]topbar.Account
+	// window is the context window the strip answers; nil answers none and
+	// nil-panics, as every seam a test did not wire does.
+	window *int64
 }
 type stubHolds struct{ holds.Resolver }
 
@@ -2096,6 +2099,10 @@ func (s stubTopbar) SetColdGate(_ ids.WorkspaceID, gate topbar.ColdGate) {
 	if s.coldGates != nil {
 		*s.coldGates = append(*s.coldGates, gate)
 	}
+}
+
+func (s stubTopbar) ContextWindow(ids.WorkspaceID) int64 {
+	return *s.window
 }
 
 func (s stubTopbar) SetParked(_ ids.WorkspaceID, parked bool) {
