@@ -10,7 +10,6 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/dlog"
-	"claude-repld/internal/vendortraffic"
 	"claude-repld/internal/wsm"
 )
 
@@ -121,33 +120,15 @@ func TestNewStatesNothingBeforeAnySessionBegan(t *testing.T) {
 
 func TestNewCarriesThePersistedSessionAcrossADaemonRestart(t *testing.T) {
 	// Arrange: the session a daemon before this one persisted.
-	store := &fakeStore{session: &wsm.AgentReplSession{StartedAt: t0, Began: wsm.SessionBeganLogin, BytesReceived: 900, BytesSent: 90}}
+	store := &fakeStore{session: &wsm.AgentReplSession{StartedAt: t0, Began: wsm.SessionBeganLogin}}
 
 	// Act.
 	_, pub, _ := newTracker(t, store)
 
 	// Assert.
 	got := pub.last(t)
-	if got.GetStartedAtMs() != t0.UnixMilli() || got.GetLogin() == nil || got.GetBytesReceived() != 900 || got.GetBytesSent() != 90 {
-		t.Fatalf("stated %v, want the persisted login session with its traffic", got)
-	}
-}
-
-func TestTrafficAfterADaemonRestartAddsToThePersistedCounts(t *testing.T) {
-	// Arrange.
-	store := &fakeStore{session: &wsm.AgentReplSession{StartedAt: t0, Began: wsm.SessionBeganEditorStart, BytesReceived: 900, BytesSent: 90}}
-	tr, pub, _ := newTracker(t, store)
-
-	// Act.
-	tr.AddTraffic(vendortraffic.Counts{Received: 100, Sent: 10})
-	tr.FlushTraffic()
-
-	// Assert.
-	if got := pub.last(t); got.GetBytesReceived() != 1000 || got.GetBytesSent() != 100 {
-		t.Fatalf("stated %v, want 1000 received / 100 sent", got)
-	}
-	if store.session.BytesReceived != 1000 || store.session.BytesSent != 100 {
-		t.Fatalf("persisted %+v, want the summed counts", store.session)
+	if got.GetStartedAtMs() != t0.UnixMilli() || got.GetLogin() == nil {
+		t.Fatalf("stated %v, want the persisted login session", got)
 	}
 }
 
@@ -177,8 +158,8 @@ func TestAnEditorStartBeginsASession(t *testing.T) {
 
 	// Assert.
 	got := pub.last(t)
-	if got.GetStartedAtMs() != t0.UnixMilli() || got.GetEditorStart() == nil || got.GetBytesReceived() != 0 {
-		t.Fatalf("stated %v, want an editor-start session at t0 with no traffic", got)
+	if got.GetStartedAtMs() != t0.UnixMilli() || got.GetEditorStart() == nil {
+		t.Fatalf("stated %v, want an editor-start session at t0", got)
 	}
 	if store.session == nil || store.session.Began != wsm.SessionBeganEditorStart {
 		t.Fatalf("persisted %+v, want the editor-start session", store.session)
@@ -260,89 +241,6 @@ func TestAnEventTheStandingSessionOutlivesIsRecorded(t *testing.T) {
 	t.Fatalf("the outlived login was not recorded: %v", log.Records())
 }
 
-func TestANewSessionStartsItsTrafficAtZero(t *testing.T) {
-	// Arrange.
-	tr, pub, _ := newTracker(t, &fakeStore{})
-	tr.EditorStarted(context.Background(), t0)
-	tr.AddTraffic(vendortraffic.Counts{Received: 500, Sent: 50})
-	tr.FlushTraffic()
-
-	// Act.
-	tr.LoginCompleted(context.Background(), t0.Add(time.Hour))
-
-	// Assert.
-	if got := pub.last(t); got.GetBytesReceived() != 0 || got.GetBytesSent() != 0 {
-		t.Fatalf("stated %v, want the new session's traffic at zero", got)
-	}
-}
-
-func TestTrafficCountedBeforeANewSessionIsNotCarriedIntoIt(t *testing.T) {
-	// Arrange.
-	tr, pub, _ := newTracker(t, &fakeStore{})
-	tr.EditorStarted(context.Background(), t0)
-	tr.AddTraffic(vendortraffic.Counts{Received: 500, Sent: 50})
-
-	// Act.
-	tr.LoginCompleted(context.Background(), t0.Add(time.Hour))
-	tr.FlushTraffic()
-
-	// Assert.
-	if got := pub.last(t); got.GetBytesReceived() != 0 {
-		t.Fatalf("stated %v, want the unflushed traffic left with the old session", got)
-	}
-}
-
-func TestTrafficIsPushedOncePerFlush(t *testing.T) {
-	// Arrange.
-	tr, pub, _ := newTracker(t, &fakeStore{})
-	tr.EditorStarted(context.Background(), t0)
-	before := len(pub.views)
-
-	// Act.
-	tr.AddTraffic(vendortraffic.Counts{Received: 100, Sent: 1})
-	tr.AddTraffic(vendortraffic.Counts{Received: 200, Sent: 2})
-	tr.AddTraffic(vendortraffic.Counts{Received: 300, Sent: 3})
-	tr.FlushTraffic()
-
-	// Assert.
-	if pushed := len(pub.views) - before; pushed != 1 {
-		t.Fatalf("pushed %d times for one flush, want 1", pushed)
-	}
-	if got := pub.last(t); got.GetBytesReceived() != 600 || got.GetBytesSent() != 6 {
-		t.Fatalf("stated %v, want 600 received / 6 sent", got)
-	}
-}
-
-func TestAFlushWithNothingCountedPushesNothing(t *testing.T) {
-	// Arrange.
-	store := &fakeStore{}
-	tr, pub, _ := newTracker(t, store)
-	tr.EditorStarted(context.Background(), t0)
-	before, puts := len(pub.views), store.puts
-
-	// Act.
-	tr.FlushTraffic()
-
-	// Assert.
-	if len(pub.views) != before || store.puts != puts {
-		t.Fatalf("an empty flush pushed %d and persisted %d times, want neither", len(pub.views)-before, store.puts-puts)
-	}
-}
-
-func TestTrafficWithNoSessionIsNotCounted(t *testing.T) {
-	// Arrange.
-	tr, pub, _ := newTracker(t, &fakeStore{})
-
-	// Act.
-	tr.AddTraffic(vendortraffic.Counts{Received: 100})
-	tr.FlushTraffic()
-
-	// Assert.
-	if len(pub.views) != 0 {
-		t.Fatalf("stated %v with no session, want nothing", pub.views)
-	}
-}
-
 func TestASessionThatCannotBePersistedIsNotBegun(t *testing.T) {
 	// Arrange.
 	store := &fakeStore{putErr: errors.New("read-only")}
@@ -375,72 +273,6 @@ func TestASessionIsNotBegunWhenTheStandingOneCannotBeRead(t *testing.T) {
 	}
 	if len(pub.views) != 0 || store.puts != 0 {
 		t.Fatalf("stated %d and wrote %d times, want nothing", len(pub.views), store.puts)
-	}
-}
-
-func TestTrafficThatCannotBePersistedStaysPendingForTheNextFlush(t *testing.T) {
-	// Arrange.
-	store := &fakeStore{}
-	tr, pub, log := newTracker(t, store)
-	tr.EditorStarted(context.Background(), t0)
-	store.putErr = errors.New("read-only")
-	tr.AddTraffic(vendortraffic.Counts{Received: 100, Sent: 10})
-	tr.FlushTraffic()
-	store.putErr = nil
-
-	// Act.
-	tr.FlushTraffic()
-
-	// Assert.
-	if !logged(log, "error", "daemon.agentreplsession.flush") {
-		t.Fatalf("the failed write was not recorded at ERROR: %v", log.Records())
-	}
-	if got := pub.last(t); got.GetBytesReceived() != 100 || got.GetBytesSent() != 10 {
-		t.Fatalf("stated %v, want the pending traffic stated by the next flush", got)
-	}
-}
-
-func TestTrafficStaysPendingWhenTheSessionCannotBeRead(t *testing.T) {
-	// Arrange.
-	store := &fakeStore{}
-	tr, _, log := newTracker(t, store)
-	tr.EditorStarted(context.Background(), t0)
-	store.readErr = errors.New("disk gone")
-	tr.AddTraffic(vendortraffic.Counts{Received: 7})
-
-	// Act.
-	tr.FlushTraffic()
-
-	// Assert.
-	if !logged(log, "error", "daemon.agentreplsession.flush") {
-		t.Fatalf("the failed read was not recorded at ERROR: %v", log.Records())
-	}
-	if store.session.BytesReceived != 0 {
-		t.Fatalf("stored %+v, want nothing written", store.session)
-	}
-	store.readErr = nil
-	tr.FlushTraffic()
-	if store.session.BytesReceived != 7 {
-		t.Fatalf("stored %+v after the store recovered, want the pending 7 bytes", store.session)
-	}
-}
-
-func TestASuccessorContinuesFromWhatTheIncumbentLastWrote(t *testing.T) {
-	// Arrange: the successor is built from the store while the incumbent
-	// still serves and keeps counting.
-	store := &fakeStore{session: &wsm.AgentReplSession{StartedAt: t0, Began: wsm.SessionBeganEditorStart}}
-	incumbent, _, _ := newTracker(t, store)
-	successor, pub, _ := newTracker(t, store)
-	incumbent.AddTraffic(vendortraffic.Counts{Received: 100, Sent: 10})
-	incumbent.FlushTraffic()
-
-	// Act.
-	successor.AddTraffic(vendortraffic.Counts{Received: 50, Sent: 5})
-	successor.FlushTraffic()
-
-	// Assert.
-	if got := pub.last(t); got.GetBytesReceived() != 150 || got.GetBytesSent() != 15 {
-		t.Fatalf("stated %v, want the incumbent's 100 plus the successor's 50", got)
 	}
 }
 
@@ -480,4 +312,21 @@ func TestRecordsCarryTheSessionsSharedContext(t *testing.T) {
 		return
 	}
 	t.Fatalf("no begin record: %v", log.Records())
+}
+
+func TestASuccessorBeginsAgainstWhatTheIncumbentLastWrote(t *testing.T) {
+	// Arrange: the successor is built from the store before the incumbent,
+	// still serving, begins a later session.
+	store := &fakeStore{}
+	incumbent, _, _ := newTracker(t, store)
+	successor, pub, _ := newTracker(t, store)
+	incumbent.LoginCompleted(context.Background(), t0.Add(time.Hour))
+
+	// Act.
+	successor.EditorStarted(context.Background(), t0)
+
+	// Assert.
+	if len(pub.views) != 0 || store.session.Began != wsm.SessionBeganLogin {
+		t.Fatalf("successor stated %v and the store holds %+v, want the incumbent's later login standing", pub.views, store.session)
+	}
 }
