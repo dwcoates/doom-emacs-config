@@ -193,8 +193,9 @@ func (d *Digester) run(ctx context.Context, trigger string, onlyIfDue bool) (out
 	overlay := &frontendv1.NewsDigestOverlay{
 		Id: &frontendv1.NewsDigestId{Value: id},
 		Header: &frontendv1.NewsDigestHeader{
-			Title:  &frontendv1.NewsDigestTitle{Text: "Claude news · " + ended.Local().Format("Jan 2")},
-			Period: &frontendv1.NewsDigestPeriod{FromMs: from.UnixMilli(), ToMs: ended.UnixMilli()},
+			Title:      &frontendv1.NewsDigestTitle{Text: "Claude news · " + ended.Local().Format("Jan 2")},
+			Period:     &frontendv1.NewsDigestPeriod{FromMs: from.UnixMilli(), ToMs: ended.UnixMilli()},
+			SdkVersion: d.sdkVersion(),
 		},
 		Sections: sections,
 		Sources:  &frontendv1.NewsDigestSources{Sources: sources},
@@ -218,6 +219,20 @@ func (d *Digester) run(ctx context.Context, trigger string, onlyIfDue bool) (out
 		"sources_failed": failed, "carried": carried != nil, "marked": len(marked), "duration_ms": ended.Sub(started).Milliseconds(),
 	})
 	return outcome{items: items}, nil
+}
+
+// sdkVersion is the header's Agent SDK version: the one the shim last
+// reported, or the unknown arm when none has.
+func (d *Digester) sdkVersion() *frontendv1.NewsDigestSdkVersion {
+	version, known := d.deps.SDKVersion()
+	if !known {
+		return &frontendv1.NewsDigestSdkVersion{Answer: &frontendv1.NewsDigestSdkVersion_Unknown{
+			Unknown: &frontendv1.NewsDigestSdkVersionUnknown{},
+		}}
+	}
+	return &frontendv1.NewsDigestSdkVersion{Answer: &frontendv1.NewsDigestSdkVersion_Known{
+		Known: &frontendv1.NewsDigestSdkVersionKnown{Version: version},
+	}}
 }
 
 // modelFailed records a run whose model call failed: only its end is kept,

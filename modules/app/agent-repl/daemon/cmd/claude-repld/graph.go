@@ -975,6 +975,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Store:      p.DB,
 		RunDir:     paths.RunDir,
 		Serves:     rolloutController.ServesIntake,
+		SDKVersion: fleet.SDKVersion,
 		Getenv:     os.Getenv,
 		Log:        log,
 	})

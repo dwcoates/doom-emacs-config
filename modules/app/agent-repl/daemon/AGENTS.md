@@ -2213,6 +2213,12 @@ HARD as `model_failed`. No marked item is the `quiet` arm, whose text names
 the history's start (`news_digest.history_since`) when it began inside the
 week. A failed merge fails the run as a condensing failure does.
 
+**SDK version.** The header's `sdk_version` is `workspace.Fleet.SDKVersion`:
+the `SessionRuntime.sdk_version` the last session start reported (an empty
+report is ERROR `daemon.workspace.bring_up` and is not kept). A daemon that has
+started no session since it came up answers the `unknown` arm; adopted shims
+do not re-announce it.
+
 **Cadence and exclusivity.** One run every 24h from the previous run's END,
 read from wsm (`news_digest.last_run_end`) at every look, a look never more
 than 15m away (a sleeping machine does not advance the monotonic clock). A
