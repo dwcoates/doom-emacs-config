@@ -22,16 +22,14 @@ import (
 // the same vendor session, with no fault left on the footer or the topbar and
 // a prompt sent into the gap delivered.
 
-// deadShimRecords are the records a shim's own death writes on the way to its
-// recovery. Each is evidence of the kill the test performs: the streams break
-// (redial, reopen, the watches), the link loss is recorded as the session's
-// fault (link_fault, open_fault) and the exit is decoded (exit). A title
-// gather in flight at the kill answers `unexpected EOF` at ERROR.
-var deadShimRecords = []string{
-	"daemon.shimclient.redial", "daemon.sessionwatcher.reopen", "daemon.health.open_fault",
-	"daemon.sessionwatcher.link_fault", "daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.watch_session",
-	"daemon.shimclient.exit", "daemon.shimclient.gather_title_digest",
-}
+// deadShimRecords are the WARN-or-worse records a shim's own death writes on
+// the way to its recovery, and they are REQUIRED (RequireWarnings), so the
+// list cannot outlive the records. ONE DEATH IS ONE ERROR: the exit is decoded
+// and recorded (exit), and the session's health opens its fault (open_fault).
+// Everything else the death takes down -- the liveness stream and its redial,
+// the standing watches, the link fault, a call in flight -- attributes to it at
+// INFO (2026-10-06).
+var deadShimRecords = []string{"daemon.shimclient.exit", "daemon.health.open_fault"}
 
 // deadShimRecoveryBound is how long a live death may take, from the SIGKILL to
 // a footer serving idle with no fault. MEASURED: 122-196ms across eight runs
@@ -117,7 +115,7 @@ func TestAShimThatDiesOnItsOwnIsBroughtBackUnasked(t *testing.T) {
 	t.Parallel()
 	// Arrange: a session with one finished turn.
 	f := newOpened(t, harness.Opts{})
-	f.d.ExpectWarnings(deadShimRecords...)
+	f.d.RequireWarnings(deadShimRecords...)
 	start := f.shim.ExpectStartSession()
 	concludeFirstTurn(t, f)
 	vendor := f.shim.Info().VendorSessionID
@@ -160,7 +158,7 @@ func TestAPromptSentRightAfterAShimDiesIsDelivered(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
-	f.d.ExpectWarnings(deadShimRecords...)
+	f.d.RequireWarnings(deadShimRecords...)
 	f.shim.ExpectStartSession()
 	concludeFirstTurn(t, f)
 	killShim(t, f, f.shim)
@@ -185,7 +183,7 @@ func TestAShimThatDiesMidTurnEndsThatTurnTruthfully(t *testing.T) {
 	t.Parallel()
 	// Arrange: a turn running when the shim dies.
 	f := newOpened(t, harness.Opts{})
-	f.d.ExpectWarnings(deadShimRecords...)
+	f.d.RequireWarnings(deadShimRecords...)
 	f.shim.ExpectStartSession()
 	resp := f.submit("the turn the death cuts", "k-dead-shim-cut", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	cut := resp.GetSuccess().GetTurn().GetTurn().GetValue()
@@ -226,7 +224,7 @@ func TestAShimThatDiesMidTurnLeavesTheRevivedRowOnTurnDied(t *testing.T) {
 	t.Parallel()
 	// Arrange: a turn running when the shim dies.
 	f := newOpened(t, harness.Opts{})
-	f.d.ExpectWarnings(deadShimRecords...)
+	f.d.RequireWarnings(deadShimRecords...)
 	f.shim.ExpectStartSession()
 	f.submit("the turn the death cuts", "k-dead-shim-failed", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	f.shim.ExpectStartTurn()
@@ -252,7 +250,7 @@ func TestAShimThatDiesAgainBeforeAnyTurnEndsIsLeftDownUntilTheNextPrompt(t *test
 	// Arrange: the first death was brought back, and nothing has run since.
 	f := newOpened(t, harness.Opts{})
 	// The second death is a shim that cannot hold a session: loud by design.
-	f.d.ExpectWarnings(append([]string{"daemon.promptqueue.revive"}, deadShimRecords...)...)
+	f.d.RequireWarnings(append([]string{"daemon.promptqueue.revive"}, deadShimRecords...)...)
 	f.shim.ExpectStartSession()
 	concludeFirstTurn(t, f)
 	killShim(t, f, f.shim)
@@ -409,24 +407,22 @@ func TestATurnCutBeforeABootReplaysAsEnded(t *testing.T) {
 	})
 }
 
-// THE DAEMON'S OWN WARNING ABOUT A WORKSPACE REACHES ITS STRIP, through the one
-// record tee at dlog's workspace-logger emit point: the watcher's warning that
-// the shim is gone is taken by the footer as the `daemon_warning` transient.
+// THE DAEMON'S OWN RECORD ABOUT A WORKSPACE REACHES ITS STRIP, through the one
+// record tee at dlog's workspace-logger emit point: the death's own error --
+// `daemon.shimclient.exit`, the one ERROR a death writes (2026-10-06) -- is
+// taken by the footer as a daemon transient.
 //
 // WHICH TRANSIENT IS ON SCREEN AFTERWARDS IS NOT THIS TEST'S TO PIN. A kill
-// writes several daemon records from different goroutines -- the exit's
-// error, the link warning, a standing stream's error -- and the newest
-// transient wins (owner ruling, 2026-09-28). The link warning was the one
-// drawn only when it happened to be written last; 3 runs in 30 it was not,
-// and this test failed waiting for a strip that had already moved on
-// (2026-10-06). So the tee is asserted where it lands (the footer's own
-// record of taking the warning), and the strip is asserted to announce the
+// writes more than one daemon record from different goroutines (the exit's
+// error, the health fault's warning) and the newest transient wins (owner
+// ruling, 2026-09-28). So the tee is asserted where it lands (the footer's
+// own record of taking the error), and the strip is asserted to announce the
 // kill's daemon records at all.
 func TestADaemonWarningAboutTheWorkspaceIsAnnouncedOnItsFooter(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
-	f.d.ExpectWarnings(deadShimRecords...)
+	f.d.RequireWarnings(deadShimRecords...)
 	f.shim.ExpectStartSession()
 	concludeFirstTurn(t, f)
 	footer := f.d.WatchFooter(f.ws)
@@ -434,10 +430,10 @@ func TestADaemonWarningAboutTheWorkspaceIsAnnouncedOnItsFooter(t *testing.T) {
 	// Act
 	killShim(t, f, f.shim)
 
-	// Assert: the footer took the link warning as a daemon warning.
-	f.d.AwaitWorkspaceLogRecord(f.repo.Dir, "the footer taking the link warning", func(r harness.LogRecord) bool {
+	// Assert: the footer took the death's error as a daemon record.
+	f.d.AwaitWorkspaceLogRecord(f.repo.Dir, "the footer taking the death's error", func(r harness.LogRecord) bool {
 		return r.Operation == "daemon.footer.daemon_record" &&
-			r.Context["operation"] == "daemon.sessionwatcher.link_fault" && r.Context["level"] == "warn"
+			r.Context["operation"] == "daemon.shimclient.exit" && r.Context["level"] == "error"
 	})
 	// Assert: the strip announces the kill's daemon records.
 	awaitFooter(t, f, footer, "a daemon record about the kill announced", func(v *frontendv1.FooterView) bool {
