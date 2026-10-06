@@ -1323,3 +1323,17 @@ Per-site exception, deliberately NOT tightened by this pass:
 `modernc.org/sqlite`. Both pins are project rulings: keep them, keep the module
 at `go 1.23.0` with no `toolchain` line so the host toolchain builds it without
 a switch, and never edit `proto/gen/go/go.mod`.
+
+## Tests open in-memory databases unless the FILE is the subject
+
+`newStore`/`newStoreWithClock` open `db.openInMemory` (refused outside a test
+binary): one shared memdb database per handle, copied from a schema template
+built once per test process. It has no WAL, so readers and a committing writer
+take turns, and no `-shm` for the checkpoint job. Tests of the WAL, the
+checkpoint, a reader overlapping a held write lock, the full-size-corpus
+budgets and the connections' pragmas open real files (`newFileStore`, and
+`newDurableFileStore` for the pragma pins). File-backed test stores skip
+SQLite's forced flushes; a spawned store does so only with
+`AGENT_REPL_TEST_SQLITE_UNSYNCED=1` beside `AGENT_REPL_FORBID_VENDOR_CALLS`,
+and refuses to open its database with the flag alone. The module's
+`AGENTS.md` ("Test databases stay off the SSD") has the whole rule.
