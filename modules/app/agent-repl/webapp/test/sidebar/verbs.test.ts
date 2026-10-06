@@ -11,6 +11,7 @@ import {
   OpenWorkspaceResponseSchema,
   OpenWorkspaceLockHolderUnavailableSchema,
   OpenWorkspaceVendorStartFailedSchema,
+  OpenWorkspaceWorktreeUnrestorableSchema,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_workspace_pb";
 import {
   AssignWorkspaceTaskErrorSchema,
@@ -257,6 +258,7 @@ const CAUSE_FILL: Readonly<Record<string, Record<string, unknown>>> = {
   transcriptMissing: { vendorSessionId: "vs-1", searchedPaths: ["/a", "/b"] },
   spawnFailed: { detail: "exec format error" },
   vendorStartFailed: { detail: "the sdk threw before its first message" },
+  worktreeUnrestorable: { dir: "/w/gone", branch: "feature/gone", detail: "gone" },
   lockHolderUnavailable: {
     failure: { binary: "/b/shim-lock", how: { case: "exited", value: { code: 1, stderr: "EACCES" } } },
   },
@@ -491,6 +493,23 @@ describe("the per-rpc causes, worded at their own site", () => {
     } as never);
     // Assert
     expect(text).toBe("the vendor failed to start the session");
+  });
+
+  it("says an unrestorable workspace's directory and branch are both gone", async () => {
+    const refusal = await refuseWith(VERBS[0], "worktreeUnrestorable");
+    expect(refusal?.textContent).toContain(
+      "its directory /w/gone is gone and its branch feature/gone no longer exists, so there is nothing to restore it from",
+    );
+  });
+
+  it("says no branch was recorded when an unrestorable workspace names none", () => {
+    // Arrange / Act: the arm worded directly, since the sweep's fill names a branch.
+    const text = openWorkspaceRefusal({
+      case: "worktreeUnrestorable",
+      value: create(OpenWorkspaceWorktreeUnrestorableSchema, { dir: "/w/gone", branch: "" }),
+    } as never);
+    // Assert
+    expect(text).toBe("its directory /w/gone is gone and no branch was recorded to restore it from");
   });
 
   it("says the shim's lock helper failed and how, naming the binary", async () => {
