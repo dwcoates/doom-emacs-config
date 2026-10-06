@@ -90,6 +90,16 @@ func (q *queue) Submit(ctx context.Context, sub Submission) (Disposition, error)
 		return q.hold(ctx, sub, "", &leaseHold{kind: wsm.HoldReconnect}, log)
 	}
 
+	// A MID-SESSION VENDOR BLOCK HOLDS THE PROMPT AFTER RECONNECT, UNCLASSIFIED
+	// (owner ruling, 2026-10-06; vendorblock.go), and a vendor that serves
+	// again delivers the prompts it held before this one.
+	if sub.Target == nil {
+		if block, blocked := q.vendorBlocked(sub.WS); blocked {
+			return q.holdForVendorBlock(ctx, sub, block, log)
+		}
+		q.releaseBeforeSubmit(ctx, d, log)
+	}
+
 	// A BUBBLE-ADDRESSED prompt goes to THAT agent through UpdateAgent.prompt.
 	// It is not the session's turn, so it is neither classified nor held: the
 	// main turn's queue has no say over a subagent's own composer.
@@ -445,12 +455,27 @@ func (q *queue) ReleaseReconnectHolds(ws ids.WorkspaceID) {
 }
 
 // releaseReconnectHolds un-stamps every reconnect hold on a workspace whose
-// session is now up and delivers the next one down the ordinary path.
+// session is now up and whose vendor serves it, and classifies and delivers
+// what it released (classifyReleased).
 func (q *queue) releaseReconnectHolds(ctx context.Context, ws ids.WorkspaceID, log dlog.Logger) {
 	// SERIALIZED AGAINST A TURN END AND A LEASE CHANGE, for the reason
 	// OnTurnEnded states: all three deliver from the same standing holds.
 	d := q.lockDelivery(ws)
 	defer d.unlock()
+	q.releaseReconnectHoldsLocked(ctx, d, log)
+}
+
+// releaseReconnectHoldsLocked is releaseReconnectHolds under the delivery
+// lock the caller holds (d).
+func (q *queue) releaseReconnectHoldsLocked(ctx context.Context, d *delivery, log dlog.Logger) {
+	ws := d.ws
+	// A VENDOR THAT STILL REFUSES THE SESSION SERVES NOTHING: the holds stand
+	// until the edge on which the block stops standing (OnVendorServes).
+	if block, blocked := q.vendorBlocked(ws); blocked {
+		log.Info(opSubmit, "the vendor still does not serve the session; the after-reconnect holds stay standing",
+			dlog.Context{"vendor_block": block})
+		return
+	}
 
 	standing, err := q.deps.DB.HeldPrompts(ctx, ws)
 	if err != nil {
@@ -458,7 +483,7 @@ func (q *queue) releaseReconnectHolds(ctx context.Context, ws ids.WorkspaceID, l
 			dlog.Context{"cause": err.Error()})
 		return
 	}
-	released := 0
+	var released []wsm.HeldPrompt
 	for _, h := range standing {
 		if h.Tombstone != nil || h.Hold == nil || *h.Hold != wsm.HoldReconnect {
 			continue
@@ -468,23 +493,17 @@ func (q *queue) releaseReconnectHolds(ctx context.Context, ws ids.WorkspaceID, l
 				dlog.Context{"turn": string(h.Turn), "cause": err.Error()})
 			continue
 		}
-		released++
+		released = append(released, h)
 	}
-	if released == 0 {
+	if len(released) == 0 {
 		log.Debug(opSubmit, "the session's coming up released no reconnect hold", dlog.Context{"holds": len(standing)})
 		return
 	}
-	log.Info(opSubmit, "the session is up; released the prompts held until it reconnected", dlog.Context{"released": released})
+	log.Info(opSubmit, "the session is up and the vendor serves it; released the prompts held after reconnect", dlog.Context{"released": len(released)})
 	if err := q.pushTray(ctx, ws, log); err != nil {
 		return
 	}
-	if watcher, ok := q.deps.Watcher(ws); ok && watcher.TurnInFlight() != nil {
-		log.Debug(opSubmit, "a turn is already in flight on the session that came up; the released prompts wait for its end", nil)
-		return
-	}
-	if _, err := q.popAndDeliver(ctx, d, log); err != nil {
-		log.Error(opSubmit, "a prompt held until the session reconnected was not delivered", dlog.Context{"cause": err.Error()})
-	}
+	q.classifyReleased(ctx, d, released, log)
 }
 
 // revive brings a parked session back up for a submission that found none.
