@@ -29,6 +29,7 @@ import type { NewsDigestStanding } from "../../../proto/gen/ts/agentrepl/v1/endp
 import type {
   NewsDigestItem,
   NewsDigestOverlay,
+  NewsDigestSdkVersion,
   NewsDigestSection,
   NewsDigestSource,
   NewsDigestWeek,
@@ -260,7 +261,10 @@ export function drawOverlay(
   close.textContent = CLOSE_LABEL;
   close.addEventListener("click", dismiss);
   actions.append(close);
-  head.append(heading, actions);
+  // THE SDK VERSION SITS IN THE MIDDLE of the row. A digest made before the
+  // header carried it draws none.
+  if (header.sdkVersion === undefined) head.append(heading, actions);
+  else head.append(heading, drawSdkVersion(header.sdkVersion, "NewsDigestHeader.sdk_version"), actions);
 
   const body = document.createElement("div");
   body.className = "news-digest-body";
@@ -277,6 +281,34 @@ export function drawOverlay(
 
   panel.append(head, body, footer);
   return { panel, id, actions };
+}
+
+/** The words for an unknown SDK version: no shim has reported one. */
+export const SDK_VERSION_UNKNOWN = "unknown";
+
+/**
+ * "SDK Version: <version>", the Agent SDK agent-repl runs as the daemon knows
+ * it; the unknown arm is said, never left blank. The arm is `data-sdk-version`.
+ */
+export function drawSdkVersion(sdk: NewsDigestSdkVersion, path: string): HTMLElement {
+  const answer = requireCase(sdk.answer, `${path}.answer`);
+  const element = document.createElement("div");
+  element.className = "news-digest-sdk-version";
+  element.setAttribute("data-sdk-version", answer.case);
+  switch (answer.case) {
+    case "known":
+      if (answer.value.version === "") throw new MalformedView(`${path}.answer.known.version`, "a known version is never empty");
+      element.textContent = `SDK Version: ${answer.value.version}`;
+      break;
+    case "unknown":
+      element.textContent = `SDK Version: ${SDK_VERSION_UNKNOWN}`;
+      break;
+    default: {
+      const other: { case: string } = answer;
+      return unreachableArm(`${path}.answer`, other.case);
+    }
+  }
+  return element;
 }
 
 /**
