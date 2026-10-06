@@ -10,6 +10,7 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/feedid"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/resolve/ladder"
 	"claude-repld/internal/resolve/turnfault"
 	"claude-repld/internal/wsm"
 )
@@ -81,6 +82,7 @@ func (r *resolver) endClosedTurn(s *wsState, turn ids.TurnID, close wsm.Recorded
 		"a turn closed with no terminal of its own; its ending row was drawn from its recorded close",
 		dlog.Context{"turn": string(turn), "close": close.How.String(), "outcome": terminalArm(ended), "plane": s.plane.String()})
 	r.upsert(s, at, row, true)
+	s.awaitRestart(at, row)
 	r.fileLiveEnding(s, turn, ended, nil)
 	r.settleTurnPrompts(s, turn)
 
@@ -131,6 +133,13 @@ func (r *resolver) closedEnding(s *wsState, turn ids.TurnID, close wsm.RecordedC
 		e.Error = turnFailedArm(words.Cause)
 	}
 	applyHeadline(e, headline{Text: words.Sentence}, "")
+	fault, _ := ladder.ResolveTurnFault(close.How, ladder.NoFailure)
+	if !failed {
+		// AN UNDECLARED CLOSE is an unexplained end: a vendor turn fault, as
+		// the turn_failed stop reasons are.
+		fault = ladder.VendorTurnFault
+	}
+	e.Marker = r.endingMarker(s, ending{turn: turn, fault: fault, words: words, endedAtMs: ended.GetEndedAtMs()})
 	ended.Outcome = &frontendv1.FeedTurnEnded_Errored{Errored: e}
 	return ended
 }

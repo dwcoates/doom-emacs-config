@@ -51,7 +51,7 @@ func (r *resolver) drawTerminal(s *wsState, agent *conversationv1.AgentId, turn 
 		r.concludedOutcome(s, string(*turn), success)(ended)
 	case failure != nil:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawTerminal", "branch": "case failure != nil"})
-		ended.Outcome = &frontendv1.FeedTurnEnded_Errored{Errored: r.erroredOutcome(s, string(*turn), failure)}
+		ended.Outcome = &frontendv1.FeedTurnEnded_Errored{Errored: r.erroredOutcome(s, string(*turn), ended.GetEndedAtMs(), failure)}
 	default:
 		log.Error("daemon.feed.terminal_without_outcome",
 			"an agent terminal carried neither success nor failure",
@@ -112,6 +112,7 @@ func (r *resolver) drawTerminal(s *wsState, agent *conversationv1.AgentId, turn 
 			"a turn's terminal row was upserted",
 			dlog.Context{"turn": string(*turn), "outcome": terminalArm(ended)})
 		r.upsert(s, at, row, true)
+		s.awaitRestart(at, row)
 	}
 
 	// A LIVE ENDING IS FILED FOR THE DESKTOP BANNER — unless a confirmed /clear
@@ -295,6 +296,12 @@ func interruptedArm(byUser *conversationv1.AgentInterruptedByUser) turnOutcome {
 	case *conversationv1.AgentInterruptedByUser_Interjection:
 		interrupted.Command = &frontendv1.FeedTurnEndedInterrupted_Interjection{Interjection: &frontendv1.FeedTurnEndedInterruptedInterjection{}}
 	}
+	// THE NEUTRAL "interrupted" MARKER, for every stop but an interjection,
+	// whose superseding prompt is its whole account (owner ruling,
+	// 2026-10-06: an interrupt is the user's own act, never an error).
+	if interrupted.GetInterjection() == nil {
+		interrupted.Marker = interruptedMarker()
+	}
 	return func(ended *frontendv1.FeedTurnEnded) {
 		ended.Outcome = &frontendv1.FeedTurnEnded_Interrupted{Interrupted: interrupted}
 	}
@@ -302,7 +309,7 @@ func interruptedArm(byUser *conversationv1.AgentInterruptedByUser) turnOutcome {
 
 // erroredOutcome respells an agent failure into the feed's drawn taxonomy, and
 // composes the headline the client draws verbatim.
-func (r *resolver) erroredOutcome(s *wsState, turn string, failure *conversationv1.AgentFailure) *frontendv1.FeedTurnEndedErrored {
+func (r *resolver) erroredOutcome(s *wsState, turn string, endedAtMs int64, failure *conversationv1.AgentFailure) *frontendv1.FeedTurnEndedErrored {
 	errored := &frontendv1.FeedTurnEndedErrored{}
 	var (
 		vendorMessage string
@@ -316,7 +323,7 @@ func (r *resolver) erroredOutcome(s *wsState, turn string, failure *conversation
 	// them drew it -- live in either order, and on replay.
 	if died, ok := failure.GetFailure().(*conversationv1.AgentFailure_QueryDied); ok {
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "died, ok := failure.GetFailure().(*conversationv1.AgentFailure_QueryDied); ok"})
-		return queryDiedErrored(died.QueryDied)
+		return r.queryDiedErrored(s, ids.TurnID(turn), endedAtMs, died.QueryDied)
 	}
 
 	var endedOn *conversationv1.ApiRequestFailed
@@ -359,6 +366,10 @@ func (r *resolver) erroredOutcome(s *wsState, turn string, failure *conversation
 		sentence = sentence + " (" + strings.Join(evidence, "; ") + ")"
 	}
 	applyHeadline(errored, headline{Text: sentence}, vendorMessage)
+	// THE MARKER the client draws for this ending, worded by the cause alone:
+	// the evidence riders above are the headline's, not the marker's.
+	errored.Marker = r.endingMarker(s, endingOfFailure(ids.TurnID(turn), endedAtMs,
+		failure, turnfault.OfAgentFailure(failure, s.turnRefusals[turn]), vendorMessage))
 	return errored
 }
 
@@ -533,13 +544,14 @@ func (r *resolver) drawQueryDied(s *wsState, died *conversationv1.SessionQueryDi
 	turn := string(*s.turnInFlight)
 	at := r.outputPlacement(s, s.turnInFlight)
 
-	errored := queryDiedErrored(died)
+	endedAt := r.deps.Now().UnixMilli()
+	errored := r.queryDiedErrored(s, ids.TurnID(turn), endedAt, died)
 
 	row := &frontendv1.FeedRow{
 		Id:   r.rowID(s.id, at.feed, feedid.RowKey{Kind: feedid.KindTurnEnded, ID: turn}),
 		Turn: &conversationv1.TurnId{Value: turn},
 		Row: &frontendv1.FeedRow_TurnEnded{TurnEnded: &frontendv1.FeedTurnEnded{
-			EndedAtMs: r.deps.Now().UnixMilli(),
+			EndedAtMs: endedAt,
 			Outcome:   &frontendv1.FeedTurnEnded_Errored{Errored: errored},
 		}},
 	}
@@ -547,6 +559,7 @@ func (r *resolver) drawQueryDied(s *wsState, died *conversationv1.SessionQueryDi
 		"the query died out from under the turn; the turn's terminal row was drawn",
 		dlog.Context{"turn": turn, "cause": queryDeathWord(died)})
 	r.upsert(s, at, row, true)
+	s.awaitRestart(at, row)
 	r.settleTurnPrompts(s, ids.TurnID(turn))
 	r.breakPlanEpisodes(s, "the query died while plan mode was still open")
 	s.turnInFlight = nil
@@ -556,9 +569,10 @@ func (r *resolver) drawQueryDied(s *wsState, died *conversationv1.SessionQueryDi
 // statements: the session's query_died push and the turn terminal's own
 // query_died arm. One builder is what makes the drawn row independent of which
 // of them reached the resolver first.
-func queryDiedErrored(died *conversationv1.SessionQueryDied) *frontendv1.FeedTurnEndedErrored {
+func (r *resolver) queryDiedErrored(s *wsState, turn ids.TurnID, endedAtMs int64, died *conversationv1.SessionQueryDied) *frontendv1.FeedTurnEndedErrored {
 	errored := &frontendv1.FeedTurnEndedErrored{Error: queryDiedArm(died)}
 	applyHeadline(errored, headline{Text: turnfault.OfQueryDeath(died).Sentence}, turnfault.QueryDeathThrown(died))
+	errored.Marker = r.endingMarker(s, endingOfQueryDeath(turn, endedAtMs, died))
 	return errored
 }
 

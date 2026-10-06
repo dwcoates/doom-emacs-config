@@ -261,7 +261,7 @@ func allowedStandingAnswer() permissionAnswer {
 func deniedByUserAnswer() permissionAnswer {
 	return func(a *frontendv1.FeedPermissionAnswered) {
 		a.Answer = &frontendv1.FeedPermissionAnswered_DeniedByUser{
-			DeniedByUser: &frontendv1.FeedPermissionDeniedByUser{},
+			DeniedByUser: &frontendv1.FeedPermissionDeniedByUser{Marker: deniedByYouMarker()},
 		}
 	}
 }

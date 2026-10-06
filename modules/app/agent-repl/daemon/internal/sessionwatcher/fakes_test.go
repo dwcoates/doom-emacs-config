@@ -785,6 +785,10 @@ func (s *feedSink) OnHistoryPage(_ ids.WorkspaceID, agent *conversationv1.AgentI
 	s.rec.emit(event{sink: "feed", method: "OnHistoryPage", agent: agent.GetValue(), detail: itoa(len(page.GetEntries())), boundary: boundary})
 }
 
+func (s *feedSink) OnSessionStarted(_ ids.WorkspaceID, started *conversationv1.SessionStarted) {
+	s.rec.emit(event{sink: "feed", method: "OnSessionStarted", detail: started.GetVendorSessionId()})
+}
+
 type footerSink struct{ rec *recorder }
 
 func (s *footerSink) OnTurnRunningAtAttach(_ ids.WorkspaceID, turn ids.TurnID, startedAt *time.Time) {
