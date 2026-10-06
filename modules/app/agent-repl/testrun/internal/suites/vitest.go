@@ -92,8 +92,21 @@ func vitestUnits(l Layout, s roster.Suite) (Units, error) {
 	if err != nil {
 		return Units{}, err
 	}
+	if build, ok := vitestIntegrationBuild(s, dir); ok {
+		u.Atomic = append(u.Atomic, build)
+		split.Deps = append(split.Deps, build.ID)
+	}
 	u.Splits = append(u.Splits, split)
 	return u, nil
+}
+
+// vitestIntegrationBuild is the unit that builds what the suite's integration
+// files spawn, when the roster names one.
+func vitestIntegrationBuild(s roster.Suite, dir string) (run.Spec, bool) {
+	if len(s.IntegrationBuild) == 0 {
+		return run.Spec{}, false
+	}
+	return spec(s.Name+":integration-build", s.Name, dir, s.IntegrationBuild), true
 }
 
 // vitestIntegrationSplit is the suite's integration files, run under its

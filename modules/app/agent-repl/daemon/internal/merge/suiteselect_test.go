@@ -149,14 +149,15 @@ func TestSelectSuitesRunnerScriptSelectsEverything(t *testing.T) {
 }
 
 // TestSelectSuitesMapsAModuleToItsOwnSuiteAndTheWorldItRunsIn covers the
-// shim-lock module: its own suite, plus e2e, which runs the real lock.
+// shim-lock module: its own suite, plus the shim's (whose integration files
+// spawn the real lock helper) and e2e, which runs the real lock.
 func TestSelectSuitesMapsAModuleToItsOwnSuiteAndTheWorldItRunsIn(t *testing.T) {
 	// Act.
 	got := SelectSuites([]string{"modules/app/agent-repl/agent-shim/shim-lock/main.go"})
 
 	// Assert.
-	if got.Full || strings.Join(got.Suites, ",") != "lock,e2e" {
-		t.Fatalf("shim-lock selected %v (full=%v), want lock and e2e", got.Suites, got.Full)
+	if got.Full || strings.Join(got.Suites, ",") != "lock,shim,e2e" {
+		t.Fatalf("shim-lock selected %v (full=%v), want lock, shim and e2e", got.Suites, got.Full)
 	}
 }
 

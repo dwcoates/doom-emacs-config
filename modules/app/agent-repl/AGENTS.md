@@ -126,7 +126,9 @@ is how broad a run is at each moment.
   the daemon's packages and its `-tags integration` package
   (`daemon/integration`, formerly only `make integration`), and `webapp` and
   `shim` run their default vitest config and their
-  `vitest.integration.config.ts` (formerly only `npm run test:integration`).
+  `vitest.integration.config.ts` (formerly only `npm run test:integration`;
+  the shim's builds the bundle and lock helper its files spawn first, as its
+  `pretest:integration` always did).
   The store's and the sidecar's `integration` packages are untagged and were
   always in their suites; the webapp-layer and the Emacs layer run in `e2e`
   and `e2e-emacs`. `test:webkit` is the one suite outside the roster.
