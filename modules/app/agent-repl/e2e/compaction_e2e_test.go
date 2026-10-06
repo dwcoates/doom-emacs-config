@@ -128,14 +128,21 @@ func cpFindCompactionFailedSeparation(rows []*frontendv1.FeedRow) *frontendv1.Fe
 	return nil
 }
 
-// cpDriveObservingInProgress submits prompt, awaits the footer's
-// `compacting` sub-status WHILE the turn is still running (SPEC.md #22-25 all
-// name the `status{compacting}` signal explicitly — driveScenarioToCompletion
-// alone would race past it, since it does not return until the turn is fully
-// concluded and durable), then waits for the turn's terminal and the
-// sidecar's durable cursor advance exactly as driveScenarioToCompletion does.
-// The footer stream is opened BEFORE SubmitPrompt so the transient push is
-// queued in order rather than possibly missed.
+// cpDriveObservingInProgress submits prompt, waits for the turn's terminal and
+// the sidecar's durable cursor advance exactly as driveScenarioToCompletion
+// does, and then requires the footer's OWN RECORD that it published the
+// `working · compacting` step during the turn (SPEC.md #22-25 all name the
+// `status{compacting}` signal explicitly).
+//
+// THE RECORD, NOT THE STREAM. The footer's topic is LATEST-ONLY
+// (daemon/internal/resolve/footer resolver.go topicLocked): a reader that has
+// not yet taken a queued view has it replaced by the newer one. A compaction
+// the fake vendor runs stands for a few milliseconds, so a client stream can
+// legitimately never see it, and watching for it raced the reader against the
+// cut. `daemon.footer.substatus_changed` is written for every published step
+// change, so it is a durable statement that the step WAS published whatever
+// any reader took. Measured alone, the step stands 2-12ms before the cut
+// publishes idle.
 func cpDriveObservingInProgress(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, configDir, prompt string) *conversationv1.TurnId {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
@@ -143,16 +150,21 @@ func cpDriveObservingInProgress(t *testing.T, w *World, ws *workspacev1.Workspac
 	cancel()
 	baseline := cursorOffsetsUnder(before, harness.ProjectDir(configDir, ws.GetDir()))
 
+	// The footer's participant pair must stand for the turn: without a host
+	// and a web stream open the strip reads `agent_repl_fault · severed`,
+	// which outranks the step, and the compacting step is never published.
+	// Its views are drained, not read: the record below is the observation.
 	footer := w.WatchFooter(ws)
 	defer footer.Close()
+	footer.Drain()
 
 	turn := SubmitPrompt(t, w, ws, prompt)
-	cpAwaitFooterView(t, w, footer.Stream, "compacting sub-status for "+prompt, func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetWorking().GetCompacting() != nil
-	})
-
 	AwaitTurnEnded(t, w, ws, turn)
 	awaitCursorAdvance(t, w, harness.ProjectDir(configDir, ws.GetDir()), baseline)
+
+	w.AwaitLogRecord(harness.WorkspaceLogPath(ws.GetDir(), "daemon"), "the footer's record of publishing the compacting step for "+prompt, func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.footer.substatus_changed" && r.Context["arm"] == "working" && r.Context["substatus"] == "compacting"
+	})
 	return turn
 }
 

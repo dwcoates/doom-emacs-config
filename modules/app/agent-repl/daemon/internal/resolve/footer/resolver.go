@@ -263,6 +263,9 @@ type publication struct {
 	arm          string
 	armChanged   bool
 	previousArm  string
+	sub          string
+	subChanged   bool
+	previousSub  string
 	line         activityLine
 	lineChanged  bool
 	previousLine activityLine
@@ -275,6 +278,7 @@ func (r *resolver) publishLocked(ws ids.WorkspaceID, s *wsState) publication {
 	view := r.render(ws, s)
 	p := publication{logger: r.logOf(ws, s), jumps: s.drainJumpNotes()}
 	p.arm, p.armChanged, p.previousArm = s.observeArm(view)
+	p.sub, p.subChanged, p.previousSub = s.observeSubstatus(view)
 	p.line, p.lineChanged, p.previousLine = s.observeLine(view)
 	r.topicLocked(ws).Publish(view)
 	return p
@@ -284,6 +288,7 @@ func (r *resolver) publishLocked(ws ids.WorkspaceID, s *wsState) publication {
 func (p publication) log(operation, message string, ctx dlog.Context) {
 	p.logger.Debug(operation, message, ctx)
 	logArmChange(p.logger, operation, p.arm, p.armChanged, p.previousArm)
+	logSubstatusChange(p.logger, operation, p.arm, p.sub, p.subChanged, p.previousSub)
 	logLineChange(p.logger, operation, p.arm, p.line, p.lineChanged, p.previousLine)
 	logJumpNotes(p.logger, p.jumps)
 }
@@ -298,6 +303,19 @@ func logArmChange(log dlog.Logger, operation, arm string, changed bool, previous
 	}
 	log.Info("daemon.footer.status_arm_changed", "the footer published a new status arm",
 		dlog.Context{"arm": arm, "previous_arm": previous, "cause": operation})
+}
+
+// logSubstatusChange records the PUBLISHED substatus whenever it changes, and
+// only then. A step can stand for a few milliseconds (a quick compaction), and
+// the footer's stream hands a slow reader only its newest view, so this record
+// is the one durable statement that the step WAS published, and by what.
+// DEBUG: the step moves with every tool call.
+func logSubstatusChange(log dlog.Logger, operation, arm, sub string, changed bool, previous string) {
+	if !changed {
+		return
+	}
+	log.Debug("daemon.footer.substatus_changed", "the footer published a new substatus",
+		dlog.Context{"arm": arm, "substatus": sub, "previous_substatus": previous, "cause": operation})
 }
 
 // logLineChange records the PUBLISHED activity line whenever it changes — set,
