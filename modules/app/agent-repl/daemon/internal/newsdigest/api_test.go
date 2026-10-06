@@ -18,6 +18,7 @@ func TestNewRefusesAMissingCollaboratorOrWindow(t *testing.T) {
 		{name: "no lock path", mutate: func(d *Deps) { d.LockPath = "" }},
 		{name: "no serving answer", mutate: func(d *Deps) { d.Serves = nil }},
 		{name: "no id minter", mutate: func(d *Deps) { d.MintID = nil }},
+		{name: "no sdk version answer", mutate: func(d *Deps) { d.SDKVersion = nil }},
 		{name: "no logger", mutate: func(d *Deps) { d.Log = nil }},
 		{name: "a zero cadence", mutate: func(d *Deps) { d.Every = 0 }},
 		{name: "a zero start delay", mutate: func(d *Deps) { d.StartDelay = 0 }},
@@ -33,8 +34,8 @@ func TestNewRefusesAMissingCollaboratorOrWindow(t *testing.T) {
 			deps := Deps{
 				Sources: w.sources, Fetcher: w.fetcher, Headless: w.runner, PromptsDir: repoPromptsDir,
 				Store: w.store, Clock: w.clock, LockPath: w.lock, Serves: func() bool { return true },
-				MintID: func() string { return "x" },
-				Every:  DefaultEvery, StartDelay: DefaultStartDelay, Recheck: DefaultRecheck, Log: w.log,
+				MintID: func() string { return "x" }, SDKVersion: func() (string, bool) { return "", false },
+				Every: DefaultEvery, StartDelay: DefaultStartDelay, Recheck: DefaultRecheck, Log: w.log,
 			}
 			tt.mutate(&deps)
 

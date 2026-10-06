@@ -528,3 +528,36 @@ func TestAnUnreadableWeekFailsTheRefresh(t *testing.T) {
 		t.Fatal("a digest whose week could not be read was published")
 	}
 }
+
+func TestADigestsHeaderCarriesTheSDKVersion(t *testing.T) {
+	tests := []struct {
+		name        string
+		sdk         string
+		wantKnown   string
+		wantUnknown bool
+	}{
+		{name: "a reported version is known", sdk: "0.2.97", wantKnown: "0.2.97"},
+		{name: "no reported version is the unknown arm", sdk: "", wantUnknown: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			w := newWorld(t)
+			w.withNewFeedEntry()
+			w.runner.text = answerJSON
+			w.sdk = tt.sdk
+			d := w.digester()
+
+			// Act
+			if _, err := d.Refresh(context.Background()); err != nil {
+				t.Fatalf("Refresh: %v", err)
+			}
+
+			// Assert
+			got := latestStanding(t, d).GetShown().GetHeader().GetSdkVersion()
+			if got.GetKnown().GetVersion() != tt.wantKnown || (got.GetUnknown() != nil) != tt.wantUnknown {
+				t.Fatalf("sdk version = %v, want known %q / unknown %v", got, tt.wantKnown, tt.wantUnknown)
+			}
+		})
+	}
+}

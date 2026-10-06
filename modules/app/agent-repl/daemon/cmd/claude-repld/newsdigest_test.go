@@ -46,7 +46,8 @@ func digestInputs(t *testing.T, env map[string]string) (newsDigestInputs, *dlog.
 	return newsDigestInputs{
 		Guard: allowAll{}, Headless: noRunner{}, PromptsDir: t.TempDir(), Store: noDigestStore{},
 		RunDir: t.TempDir(), Serves: func() bool { return true },
-		Getenv: func(k string) string { return env[k] }, Log: log,
+		SDKVersion: func() (string, bool) { return "", false },
+		Getenv:     func(k string) string { return env[k] }, Log: log,
 	}, log
 }
 
