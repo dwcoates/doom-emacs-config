@@ -18,12 +18,21 @@ import (
 // paths relative to the package, after making its npm deps satisfy the
 // lockfile through the one sanctioned path (bin/ensure-deps.sh).
 func vitestFiles(module, dir string) ([]string, error) {
+	return vitestFilesUnder(module, dir, "")
+}
+
+// vitestFilesUnder is vitestFiles under CONFIG ("" is the default config).
+func vitestFilesUnder(module, dir, config string) ([]string, error) {
 	ensure := exec.Command(filepath.Join(module, "bin", "ensure-deps.sh"), dir)
 	ensure.Env = os.Environ()
 	if out, err := ensure.CombinedOutput(); err != nil {
 		return nil, fmt.Errorf("suites: ensure the npm deps of %s: %w\n%s", dir, err, out)
 	}
-	list := exec.Command("npx", "vitest", "list", "--filesOnly", "--json")
+	args := []string{"vitest", "list", "--filesOnly", "--json"}
+	if config != "" {
+		args = append(args, "--config", config)
+	}
+	list := exec.Command("npx", args...)
 	list.Dir = dir
 	list.Env = os.Environ()
 	out, err := command.Output(list)
@@ -68,7 +77,48 @@ func vitestUnits(l Layout, s roster.Suite) (Units, error) {
 	if len(files) == 0 {
 		return Units{}, fmt.Errorf("suites: %s lists no test files under %s", s.Name, dir)
 	}
-	return vitestUnitsForFiles(l, s, dir, files)
+	u, err := vitestUnitsForFiles(l, s, dir, files)
+	if err != nil || s.IntegrationConfig == "" {
+		return u, err
+	}
+	ifiles, err := vitestFilesUnder(l.Module, dir, s.IntegrationConfig)
+	if err != nil {
+		return Units{}, err
+	}
+	if len(ifiles) == 0 {
+		return Units{}, fmt.Errorf("suites: %s lists no test files under %s's %s", s.Name, dir, s.IntegrationConfig)
+	}
+	split, err := vitestIntegrationSplit(l, s, dir, ifiles)
+	if err != nil {
+		return Units{}, err
+	}
+	u.Splits = append(u.Splits, split)
+	return u, nil
+}
+
+// vitestIntegrationSplit is the suite's integration files, run under its
+// integration config one worker at a time, exactly as the unit files are. The
+// typecheck already covers the package, and coverage is the unit pass's
+// question, so neither is repeated here.
+func vitestIntegrationSplit(l Layout, s roster.Suite, dir string, files []string) (Split, error) {
+	group := s.Name + "[integration]"
+	work := filepath.Join(l.Work, "vitest", s.Name+"-integration")
+	if err := os.MkdirAll(filepath.Join(work, "items"), 0o755); err != nil {
+		return Split{}, fmt.Errorf("suites: create %s: %w", work, err)
+	}
+	reporter := filepath.Join(l.Module, "testrun", "vitest", "items-reporter.mjs")
+	chunk := func(id string, items []string) run.Spec {
+		itemsOut := filepath.Join(work, "items", filepath.Base(id)+".json")
+		argv := []string{
+			"npx", "vitest", "run", "--config", s.IntegrationConfig,
+			"--maxWorkers=1", "--minWorkers=1",
+			"--reporter=default", "--reporter=" + reporter,
+		}
+		sp := spec(id, s.Name, dir, append(argv, items...), VitestItemsEnv+"="+itemsOut)
+		sp.Items = func([]byte) (map[string]float64, error) { return ParseVitestItems(itemsOut, dir, items) }
+		return sp
+	}
+	return Split{Group: group, Suite: s.Name, Items: files, Chunk: chunk}, nil
 }
 
 func vitestUnitsForFiles(l Layout, s roster.Suite, dir string, files []string) (Units, error) {
