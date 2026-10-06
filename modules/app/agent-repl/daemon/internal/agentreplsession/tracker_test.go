@@ -120,15 +120,15 @@ func TestNewStatesNothingBeforeAnySessionBegan(t *testing.T) {
 
 func TestNewCarriesThePersistedSessionAcrossADaemonRestart(t *testing.T) {
 	// Arrange: the session a daemon before this one persisted.
-	store := &fakeStore{session: &wsm.AgentReplSession{StartedAt: t0, Began: wsm.SessionBeganLogin, BytesReceived: 900, BytesSent: 90}}
+	store := &fakeStore{session: &wsm.AgentReplSession{StartedAt: t0, Began: wsm.SessionBeganLogin}}
 
 	// Act.
 	_, pub, _ := newTracker(t, store)
 
 	// Assert.
 	got := pub.last(t)
-	if got.GetStartedAtMs() != t0.UnixMilli() || got.GetLogin() == nil || got.GetBytesReceived() != 900 || got.GetBytesSent() != 90 {
-		t.Fatalf("stated %v, want the persisted login session with its traffic", got)
+	if got.GetStartedAtMs() != t0.UnixMilli() || got.GetLogin() == nil {
+		t.Fatalf("stated %v, want the persisted login session", got)
 	}
 }
 
@@ -158,8 +158,8 @@ func TestAnEditorStartBeginsASession(t *testing.T) {
 
 	// Assert.
 	got := pub.last(t)
-	if got.GetStartedAtMs() != t0.UnixMilli() || got.GetEditorStart() == nil || got.GetBytesReceived() != 0 {
-		t.Fatalf("stated %v, want an editor-start session at t0 with no traffic", got)
+	if got.GetStartedAtMs() != t0.UnixMilli() || got.GetEditorStart() == nil {
+		t.Fatalf("stated %v, want an editor-start session at t0", got)
 	}
 	if store.session == nil || store.session.Began != wsm.SessionBeganEditorStart {
 		t.Fatalf("persisted %+v, want the editor-start session", store.session)

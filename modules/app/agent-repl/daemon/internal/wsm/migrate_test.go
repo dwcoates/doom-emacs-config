@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -792,21 +793,47 @@ func TestEveryMigrationDeclaresItsKind(t *testing.T) {
 	}
 }
 
+// markLastStepAdditive re-marks this build's last migration step additive for
+// the test's duration.
+//
+// THE LAST STEP IS BREAKING (layout 26 drops the session's traffic), so no
+// chain in the real list reaches this build's layout by additive steps alone.
+// The join of an additive chain is still a path the daemon takes the moment
+// an additive step is appended, so its tests run it over the real steps with
+// only the last one's kind changed. The package's tests are not parallel, so
+// the swap is not raced.
+func markLastStepAdditive(t *testing.T) {
+	t.Helper()
+	real := migrations
+	swapped := slices.Clone(real)
+	swapped[len(swapped)-1].Kind = MigrationAdditive
+	migrations = swapped
+	t.Cleanup(func() { migrations = real })
+}
+
 func TestChainKind(t *testing.T) {
 	tests := []struct {
 		name    string
 		from    int
 		want    MigrationKind
 		wantErr bool
+		// additiveLast runs the case under markLastStepAdditive.
+		additiveLast bool
 	}{
-		{name: "the last step alone is additive", from: LayoutVersion - 1, want: MigrationAdditive},
+		{name: "the last step alone is breaking", from: LayoutVersion - 1, want: MigrationBreaking},
 		{name: "a chain through the dropped column is breaking", from: 5, want: MigrationBreaking},
-		{name: "a chain past the dropped column is additive", from: 6, want: MigrationAdditive},
+		{name: "a chain past the dropped column still crosses the dropped traffic", from: 6, want: MigrationBreaking},
+		{name: "a chain of additive steps alone is additive", from: 6, want: MigrationAdditive, additiveLast: true},
 		{name: "this build's own layout needs no chain", from: LayoutVersion, wantErr: true},
 		{name: "a layout no chain reaches is refused", from: 2, wantErr: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			if tt.additiveLast {
+				markLastStepAdditive(t)
+			}
+
 			// Act
 			got, err := ChainKind(tt.from)
 
@@ -838,6 +865,7 @@ func TestMigrationKindString(t *testing.T) {
 
 func TestOpenJoiningCarriesAnAdditiveChainForward(t *testing.T) {
 	// Arrange
+	markLastStepAdditive(t)
 	path := fixtureAt(t, LayoutVersion-1)
 
 	// Act
@@ -874,6 +902,26 @@ func TestOpenJoiningRefusesABreakingChainAndChangesNothing(t *testing.T) {
 	}
 	if copies := backupsBeside(t, path); len(copies) != 0 {
 		t.Fatalf("copies = %v, want nothing written beside a refused file", copies)
+	}
+}
+
+// THE TRAFFIC DROP IS A RESTART: a successor joining a file the build before
+// it still writes refuses the layout-26 step rather than dropping columns the
+// incumbent's statements name.
+func TestOpenJoiningRefusesTheSessionTrafficDrop(t *testing.T) {
+	// Arrange
+	path := fixtureAt(t, 25)
+
+	// Act
+	_, err := OpenJoining(context.Background(), path, WithUnsyncedWrites())
+
+	// Assert
+	var refusal *LayoutError
+	if !errors.As(err, &refusal) || !strings.Contains(refusal.Error(), "breaking migration") {
+		t.Fatalf("OpenJoining = %v, want a *LayoutError naming the breaking migration", err)
+	}
+	if got := rawScalar[int](t, path, `SELECT count(*) FROM pragma_table_info('agent_repl_session') WHERE name IN ('bytes_received', 'bytes_sent')`); got != 2 {
+		t.Fatalf("traffic columns after the refusal = %d, want both left in place", got)
 	}
 }
 
@@ -939,6 +987,7 @@ func TestOpenJoiningRefusesAMissingFile(t *testing.T) {
 // statements after the joining successor carried the file forward.
 func TestAnIncumbentHandleKeepsWritingAcrossTheJoiningMigration(t *testing.T) {
 	// Arrange
+	markLastStepAdditive(t)
 	path := fixtureAt(t, LayoutVersion-1)
 	incumbent, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(OFF)")
 	if err != nil {
