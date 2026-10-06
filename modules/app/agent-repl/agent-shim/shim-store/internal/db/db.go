@@ -182,6 +182,11 @@ type DB struct {
 	// AND given the write slot back. It is the seam a test uses to prove the
 	// sweep does not hold the slot across the whole sweep. Nil in production.
 	afterPruneBatch func()
+	// ledgerFileSwept, when set, is called after each file a sweep batch
+	// removes from, still holding the slot. It is the seam a test uses to
+	// advance the monotonic clock across the batch's time bound without
+	// sleeping. Nil in production.
+	ledgerFileSwept func()
 	// budgetMu guards budgets, which holds one rolling window of over-budget
 	// verdicts per statement family. Every producer's rpc runs on its own
 	// goroutine against this one DB, so the windows are shared state.
