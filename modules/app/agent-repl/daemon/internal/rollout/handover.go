@@ -337,6 +337,11 @@ type transferOutcome struct {
 	err error
 }
 
+// transferFinishedMessage is followHandover's record of taking one transfer's
+// outcome. Without it the follower's progress through a successful transfer
+// was invisible: only a failure was recorded.
+const transferFinishedMessage = "a workspace's transfer request finished"
+
 // followHandover waits for every requested transfer to finish, names the
 // holdouts on the cadence, and exits once every workspace has moved.
 func (c *controller) followHandover(ctx context.Context, plan *handoverPlan, outcomes <-chan transferOutcome, requested, refused int, windows *sync.WaitGroup) {
@@ -355,6 +360,8 @@ func (c *controller) followHandover(ctx context.Context, plan *handoverPlan, out
 		case out := <-outcomes:
 			requested--
 			delete(pending, out.ws)
+			c.log.Debug(opTransfer, transferFinishedMessage,
+				merge(fields, dlog.Context{"workspace": string(out.ws), "pending": requested}))
 			if out.err != nil {
 				failed++
 				c.log.Error(opTransfer, "a workspace's transfer failed; it stays served by this daemon",
