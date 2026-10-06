@@ -574,15 +574,21 @@ func TestProbeBootClaimFlagIsParsed(t *testing.T) {
 }
 
 func TestAnswerMigrationKind(t *testing.T) {
+	// No chain in this build's own list is additive while its last step (the
+	// layout-26 traffic drop) is breaking, so the additive answer is asked of
+	// a chain that says so.
+	additive := func(int) (wsm.MigrationKind, error) { return wsm.MigrationAdditive, nil }
 	tests := []struct {
 		name       string
 		from       int
+		chainKind  func(int) (wsm.MigrationKind, error)
 		wantCode   int
 		wantStdout string
 	}{
-		{name: "an additive chain", from: wsm.LayoutVersion - 1, wantCode: exitSuccess, wantStdout: "additive\n"},
-		{name: "a breaking chain", from: 5, wantCode: exitSuccess, wantStdout: "breaking\n"},
-		{name: "no chain reaches this layout", from: 1, wantCode: exitFailure},
+		{name: "an additive chain", from: wsm.LayoutVersion - 1, chainKind: additive, wantCode: exitSuccess, wantStdout: "additive\n"},
+		{name: "a breaking chain", from: 5, chainKind: wsm.ChainKind, wantCode: exitSuccess, wantStdout: "breaking\n"},
+		{name: "the last step alone is breaking", from: wsm.LayoutVersion - 1, chainKind: wsm.ChainKind, wantCode: exitSuccess, wantStdout: "breaking\n"},
+		{name: "no chain reaches this layout", from: 1, chainKind: wsm.ChainKind, wantCode: exitFailure},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -590,7 +596,7 @@ func TestAnswerMigrationKind(t *testing.T) {
 			var stdout, stderr bytes.Buffer
 
 			// Act.
-			code := answerMigrationKind(tt.from, &stdout, &stderr)
+			code := answerMigrationKind(tt.from, tt.chainKind, &stdout, &stderr)
 
 			// Assert.
 			if code != tt.wantCode || stdout.String() != tt.wantStdout {

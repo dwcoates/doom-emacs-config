@@ -130,11 +130,7 @@ func (t *Tracker) begin(ctx context.Context, at time.Time, began wsm.SessionBega
 
 // view is the session as the topbar states it.
 func view(s wsm.AgentReplSession) *frontendv1.TopbarAgentReplSession {
-	out := &frontendv1.TopbarAgentReplSession{
-		StartedAtMs:   s.StartedAt.UnixMilli(),
-		BytesReceived: s.BytesReceived,
-		BytesSent:     s.BytesSent,
-	}
+	out := &frontendv1.TopbarAgentReplSession{StartedAtMs: s.StartedAt.UnixMilli()}
 	switch s.Began {
 	case wsm.SessionBeganLogin:
 		out.Began = &frontendv1.TopbarAgentReplSession_Login{Login: &frontendv1.TopbarSessionBeganLogin{}}

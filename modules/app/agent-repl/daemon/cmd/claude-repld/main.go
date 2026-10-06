@@ -196,7 +196,7 @@ func main() {
 	if opts.migrationKindFrom != 0 {
 		// THE ANSWER IS THE BINARY'S OWN migration list, and it starts
 		// nothing: no state is opened and nothing is logged.
-		os.Exit(answerMigrationKind(opts.migrationKindFrom, os.Stdout, os.Stderr))
+		os.Exit(answerMigrationKind(opts.migrationKindFrom, wsm.ChainKind, os.Stdout, os.Stderr))
 	}
 	if opts.probeBootClaim {
 		// THE PROBE STARTS NOTHING. No log surfaces, no state root creation, no
@@ -386,9 +386,10 @@ func resolveStoreSocket(flagValue, envValue string, userHome func() (string, err
 // answerMigrationKind prints what the migration steps from a running layout up
 // to this binary's own mean for the build that wrote it, and answers the exit
 // status: success with `additive` or `breaking` on stdout, failure with the
-// reason on stderr when no chain reaches this binary's layout.
-func answerMigrationKind(from int, stdout, stderr io.Writer) int {
-	kind, err := wsm.ChainKind(from)
+// reason on stderr when no chain reaches this binary's layout. chainKind is
+// wsm.ChainKind, the binary's own migration list.
+func answerMigrationKind(from int, chainKind func(int) (wsm.MigrationKind, error), stdout, stderr io.Writer) int {
+	kind, err := chainKind(from)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return exitFailure
