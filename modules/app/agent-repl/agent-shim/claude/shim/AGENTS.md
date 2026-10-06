@@ -1239,6 +1239,33 @@ found, ERROR not-found or failed.
   stream names is looked up by its id. `agentFor` answers a promise only then,
   and an ask whose lookup spans a stand-down is denied with that stand-down.
 
+## A task message the fold cannot type is typed by the store (2026-10-06)
+
+Only `task_started` states a task's kind; a `task_notification` states none,
+and the fold forgets a kind once its task settles. A keep-alive rewind's
+replacement vendor query re-reports an earlier query's ended background shell
+as `stopped`, with no start and no type, so every rewind recorded an ERROR
+refusal (workspace ship-gns, 2026-10-02 onward). The record holds the run's kind
+and end by its spawning call's unit (`store.v1.GetDetachedWork`,
+`src/store/detached-work.ts`).
+
+- **The ask.** `EngineFold.taskAwaitingKind` (convert/detached.ts
+  `taskAwaitingKind`) names a `task_started`, a backgrounding `task_updated`, or
+  a `task_notification` whose kind nothing this process holds names, once per
+  task. `kindFromStore` in `engine/session.ts` awaits the store inside the
+  serial message loop BEFORE the agent ask (which needs the kind), and hands
+  the answer to the fold (`EngineFold.learnTaskKind`).
+- **A recorded kind** becomes the task's kind (`vendorTaskTypeOf`), so a live
+  run is folded exactly as if its start had been seen.
+- **A recorded end** makes a notification a RE-REPORT: recorded at INFO ("a
+  re-report of a concluded task; nothing to restate"), nothing written, the
+  task's facts forgotten.
+- **Not on record** keeps the fold's ERROR refusal ("a task names no kind this
+  shim knows"), now with `store_answer`; the lookup itself is INFO.
+- **A store that cannot answer** is recorded at ERROR by `kindFromStore`, and
+  the fold refuses as before; it is never masked.
+- Mocked vendor: `!bash-rereported <task_id> <tool_use_id>`.
+
 ## A background subagent a network outage killed is resumed (2026-09-27)
 
 Owner ruling after the 2026-09-27 DNS outage. `src/engine/network-resume.ts`
