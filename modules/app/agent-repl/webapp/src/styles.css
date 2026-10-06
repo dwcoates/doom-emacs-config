@@ -6371,6 +6371,12 @@ ar-button.outcome-marker-pill {
   max-height: var(--gate-dock-height, 18.4vh);
   overflow-y: auto;
   box-sizing: border-box;
+  /* THE FRAME'S BOTTOM EDGE STAYS ON SCREEN (owner, 2026-10-06): flush with
+     the page's last row, the card's bottom border lost half its width to the
+     webview's clipped last device row (measured: card bottom == innerHeight,
+     top at a fractional 1087.23 px, devicePixelRatio 2). One pixel of lift
+     keeps all four sides the same width. */
+  padding-bottom: 1px;
 }
 #gate-dock[hidden] { display: none; }
 /* The docked card wears the Emacs input window's background, as the card does
