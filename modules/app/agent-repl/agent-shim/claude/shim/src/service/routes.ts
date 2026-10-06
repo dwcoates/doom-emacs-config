@@ -208,10 +208,10 @@ export function shimRoutes(engine: Engine): (router: ConnectRouter) => void {
         return answering("StartTurn", () => engine.startTurn(request, context.signal));
       },
 
-      async *watchAgent(request) {
+      async *watchAgent(request, context) {
         entered("WatchAgent");
         validateWatchAgentRequest(request);
-        yield* streaming("WatchAgent", () => engine.watchAgent(request));
+        yield* streaming("WatchAgent", () => engine.watchAgent(request, context.signal));
       },
 
       async updateAgent(request) {
