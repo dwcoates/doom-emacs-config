@@ -88,6 +88,17 @@ func footerEnduringUsage(v *frontendv1.FooterView) *frontendv1.FooterActivityEnd
 	return enduring.Interface().(*frontendv1.FooterActivityEnduring).GetUsage()
 }
 
+// footerEnduringSeatSpend is the unpinned cell's enduring seat spend, nil when
+// the cell is not unpinned or the account is not drawn per seat.
+func footerEnduringSeatSpend(v *frontendv1.FooterView) *frontendv1.FooterActivityEnduringSeatSpend {
+	unpinned := footerTier(v, "unpinned")
+	if unpinned == nil {
+		return nil
+	}
+	enduring := unpinned.Get(unpinned.Descriptor().Fields().ByName("enduring")).Message()
+	return enduring.Interface().(*frontendv1.FooterActivityEnduring).GetSeatSpend()
+}
+
 // feedItemDerivedLine matches the wording of a line composed from a feed item
 // that landed ("✅ Read finished — handling result...", "❌ Bash failed",
 // "✅ Prompt delivered — awaiting response...", "✅ Moved to background —

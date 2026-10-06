@@ -331,6 +331,17 @@ const USAGE_SAMPLING_FAILURE = usageScenario(
   "SessionAccountUsage.outcome=unavailable reason=sampling_failure",
 );
 
+const USAGE_SEAT_SPEND = usageScenario(
+  "usage-seat-spend",
+  "seat_spend",
+  "SessionAccountUsage.outcome=seat_spend with allotment and spent — an enterprise seat billed by spend, every window null",
+);
+const USAGE_SEAT_SPEND_UNREPORTED = usageScenario(
+  "usage-seat-spend-unreported",
+  "seat_spend_unreported",
+  "SessionAccountUsage.outcome=seat_spend with the allotment and spent UNSET — the seat before the vendor reports any spend",
+);
+
 const RATE_LIMIT = scenario({
   name: "rate-limit",
   prompt: "!rate-limit",
@@ -730,6 +741,8 @@ export const SESSION_SCENARIOS = [
   USAGE_WINDOW_UNAVAILABLE,
   USAGE_UTILIZATION_UNAVAILABLE,
   USAGE_SAMPLING_FAILURE,
+  USAGE_SEAT_SPEND,
+  USAGE_SEAT_SPEND_UNREPORTED,
   RATE_LIMIT,
   RATE_LIMIT_FIVE_HOUR,
   RATE_LIMIT_SEVEN_DAY,

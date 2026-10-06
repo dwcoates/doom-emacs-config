@@ -7,7 +7,6 @@ import {
 } from "../../../proto/gen/ts/frontend/v1/footer_pb";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import {
-  ENDURING_NO_ALLOWANCE_TEXT,
   ENDURING_UNOBSERVED_TEXT,
   FOOTER_RATE_SEPARATOR_GAP,
   drawFooterRateDivider,
@@ -188,6 +187,19 @@ function allowance(
     utilization,
     resetsAtS: BigInt((NOW + resetInMs) / 1000),
     ...(arm === undefined ? {} : { status: { case: arm, value: {} } }),
+  };
+}
+
+/** An amount in USD cents. */
+function usd(amountMinor: bigint): Record<string, unknown> {
+  return { amountMinor, currency: "USD" };
+}
+
+/** A seat with a $12,000 allotment and, when given, its spend and utilization. */
+function seatSpend(spentMinor?: bigint, utilization?: number): Record<string, unknown> {
+  return {
+    allotment: usd(1_200_000n),
+    ...(spentMinor === undefined ? {} : { spent: usd(spentMinor), utilization }),
   };
 }
 
@@ -1181,11 +1193,42 @@ describe("the enduring line", () => {
     ).toBe(ENDURING_UNOBSERVED_TEXT);
   });
 
-  it("draws words for an account with no allowance window", () => {
+  it("draws a seat's spend against its allotment in dollars", () => {
     expect(
-      enduringCell({ noAllowance: true }).querySelector(".footer-activity-enduring")
+      enduringCell({ seatSpend: seatSpend(22_388n, 0.0187) }).querySelector(".footer-activity-enduring")
         ?.textContent,
-    ).toBe(ENDURING_NO_ALLOWANCE_TEXT);
+    ).toBe("$223.88 of $12,000 this month");
+  });
+
+  it("draws a seat whose spend is not yet seen against its allotment", () => {
+    expect(
+      enduringCell({ seatSpend: seatSpend() }).querySelector(".footer-activity-enduring")
+        ?.textContent,
+    ).toBe("spend not yet seen of $12,000 this month");
+  });
+
+  it("colors a seat's spend by its utilization through the percent gradient", () => {
+    const spent = enduringCell({ seatSpend: seatSpend(1_080_000n, 0.9) }).querySelector<HTMLElement>(
+      '[data-datum="spent"]',
+    );
+    expect(spent?.style.color).toBe(paintedAs(90));
+  });
+
+  it("colors nothing of a seat's line but its spend", () => {
+    const line = enduringCell({ seatSpend: seatSpend(1_080_000n, 0.9) }).querySelector<HTMLElement>(
+      ".footer-activity-enduring",
+    );
+    expect(line?.style.color).toBe("");
+  });
+
+  it("refuses a seat's spend drawn with no utilization", () => {
+    expect(() => enduringCell({ seatSpend: { allotment: usd(1_200_000n), spent: usd(1n) } })).toThrow(MalformedView);
+  });
+
+  it("refuses a seat's money in a currency the runtime cannot name", () => {
+    expect(() =>
+      enduringCell({ seatSpend: { allotment: { amountMinor: 100n, currency: "NOT A CODE" } } }),
+    ).toThrow(MalformedView);
   });
 
   it.each(UNPINNED_ARMS)(
@@ -1196,10 +1239,10 @@ describe("the enduring line", () => {
   );
 
   it.each(UNPINNED_ARMS)(
-    "never draws an empty %s cell on an account with no allowance window",
+    "never draws an empty %s cell on a seat whose spend is not yet seen",
     (arm) => {
       expect(
-        drawCell(arm, unpinnedInit(undefined, { noAllowance: true })).cell.textContent,
+        drawCell(arm, unpinnedInit(undefined, { seatSpend: seatSpend() })).cell.textContent,
       ).not.toBe("");
     },
   );
@@ -1434,7 +1477,7 @@ describe("the enduring line", () => {
   it.each([
     ["usage", { usage: { session: allowance(0.2, false, 60_000) } }],
     ["unobserved", {}],
-    ["noAllowance", { noAllowance: true }],
+    ["seatSpend", { seatSpend: seatSpend() }],
   ] as const)("stamps the %s line on the enduring line", (line, figures) => {
     expect(
       enduringCell(figures)
