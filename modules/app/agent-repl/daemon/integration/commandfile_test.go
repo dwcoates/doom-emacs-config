@@ -413,10 +413,26 @@ func TestIngestionIsAtomicAHalfWrittenFileIsNotClaimedUntilComplete(t *testing.T
 	d := harness.StartDaemon(t, harness.Opts{})
 	partial := `[{"type":"task-cre`
 	path := commandfileWrite(t, d, "workspace_commands_atomic.json", partial)
+	// THE FILE'S YOUTH IS PINNED, NOT RACED. The ingress claims a file once it
+	// is one poll interval old whether or not it parses, so a wall-clock probe
+	// shorter than that interval raced the sweep: under a loaded run the
+	// completing write landed after the partial had aged out and was
+	// quarantined. A future mtime keeps the partial young for every sweep this
+	// test can see, which is exactly the condition under test.
+	future := time.Now().Add(time.Hour)
+	if err := os.Chtimes(path, future, future); err != nil {
+		t.Fatalf("pin the partial command file's youth: %v", err)
+	}
 
-	// Act / Assert: a half-written file is left alone while still young —
+	// Act / Assert: a sweep judges the half-written file and leaves it alone —
 	// never claimed on a truncated snapshot.
-	d.ExpectFileUnchanged(path, partial, 150*time.Millisecond)
+	d.AwaitLogRecord(d.RunLogPath(), "the sweep leaving the half-written file", func(r harness.LogRecord) bool {
+		return r.PID == d.PID() && r.Operation == "daemon.commandfile.run" && r.Level == "debug" &&
+			r.Message == "leaving a command file that is still being written" && r.Context["path"] == path
+	})
+	if body, err := os.ReadFile(path); err != nil || string(body) != partial {
+		t.Fatalf("after a sweep left it, %s = (%q, %v), want it unchanged at %q", path, body, err, partial)
+	}
 
 	// Act: complete the write before the file ages out.
 	if err := os.WriteFile(path, []byte(`[{"type":"task-create","title":"atomic-cmdfile-task"}]`), 0o644); err != nil {
