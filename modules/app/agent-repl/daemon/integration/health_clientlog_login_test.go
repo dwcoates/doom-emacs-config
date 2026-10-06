@@ -725,6 +725,43 @@ func TestClientLogNeverAppearsInTheDaemonRunLog(t *testing.T) {
 	}
 }
 
+func TestClientLogForAWorkspaceWhoseDirectoryIsGoneLandsInTheRunLog(t *testing.T) {
+	t.Parallel()
+	// Arrange: a registered workspace whose directory is then deleted.
+	f := newRegistered(t, harness.Opts{})
+	if err := os.RemoveAll(f.ws.GetDir()); err != nil {
+		t.Fatalf("remove the workspace directory: %v", err)
+	}
+
+	// Act.
+	resp, err := f.d.Client().ClientLog(f.d.Ctx(), connect.NewRequest(&agentreplv1.ClientLogRequest{
+		Workspace: f.ws,
+		Record: &agentreplv1.ClientLogRecord{
+			Level:     &agentreplv1.ClientLogRecord_Info{Info: &agentreplv1.ClientLogLevelInfo{}},
+			Operation: "sidecar.transcript.read",
+			Message:   "the sidecar read a transcript",
+			Runtime:   &agentreplv1.ClientLogRecord_Sidecar{Sidecar: &agentreplv1.ClientLogRuntimeSidecar{}},
+		},
+	}))
+
+	// Assert: the rpc succeeds and the record lands centrally, naming its
+	// workspace.
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("ClientLog = (%v, %v), want a success", resp, err)
+	}
+	// A forwarded record carries its CLIENT's pid (none here), never the
+	// daemon's, so the own-pid run-log await would never see it.
+	rec := f.d.AwaitRunLogRecordFromAnyProcess("the sidecar's record in the run log", func(r harness.LogRecord) bool {
+		return r.Operation == "sidecar.transcript.read"
+	})
+	if rec.WorkspaceID != f.ws.GetId() {
+		t.Fatalf("the centrally routed record's workspace_id = %q, want %q", rec.WorkspaceID, f.ws.GetId())
+	}
+	if _, statErr := os.Stat(f.ws.GetDir()); !os.IsNotExist(statErr) {
+		t.Fatalf("the deleted workspace directory exists again after the record (stat = %v)", statErr)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // The login pty
 // ---------------------------------------------------------------------------
