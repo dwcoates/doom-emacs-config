@@ -142,11 +142,18 @@ type pageLoad struct {
 	drew bool
 	// quiet are the rows this load drew new below the cutoff.
 	quiet map[string]bool
+	// rows counts every row this load drew in its feed, so the replay can
+	// tell an entry that drew one from an entry that drew none.
+	rows int
+	// outcomes tallies what became of each entry the load replayed, by
+	// entry kind and outcome (outcomes.go).
+	outcomes entryOutcomes
 }
 
 // noteDrawn records one row a load drew in its feed, and reports whether it is
 // quiet: new, and below what was loaded before.
 func (l *pageLoad) noteDrawn(id, key string, fresh bool) bool {
+	l.rows++
 	if !l.drew || key < l.low {
 		l.low, l.drew = key, true
 	}
@@ -185,7 +192,7 @@ func (r *resolver) redrawPending(s *wsState, agent *conversationv1.AgentId, load
 			still = append(still, at)
 			continue
 		}
-		r.replayPageEntry(s, agent, at)
+		r.replayLoadedEntry(s, agent, at, load, outcomeCompleted)
 		drawn++
 	}
 	if drawn > 0 {
@@ -393,6 +400,7 @@ func (r *resolver) load(ctx context.Context, plan loadPlan) (loaded, error) {
 			"feed": f.key, "agent": plan.target.GetValue(), "newest": plan.newest,
 			"entries": len(entries), "floor": f.book.floor, "drew_rows": l.drew,
 			"bound": l.low, "quiet": len(l.quiet), "pending": len(f.book.pending),
+			"outcomes": l.outcomes.String(),
 		})
 	return loaded{low: l.low, drew: l.drew}, nil
 }
@@ -550,15 +558,26 @@ func (r *resolver) loadPushed(ctx context.Context, ws ids.WorkspaceID, addr feed
 	if err != nil {
 		return false, err
 	}
+	if got, err = r.loadUntilDrawn(ctx, s, addr, got); err != nil {
+		return false, err
+	}
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	moved := 0
 	for _, w := range s.readers {
-		if w.feedKey != f.key || w.top || w.oldest == nil || !got.drew {
+		if w.feedKey != f.key || !got.drew {
 			continue
 		}
-		if prevLow != "" && *w.oldest > prevLow {
+		if w.top {
+			// A WALK SERVED NOTHING HOLDS EXACTLY WHAT WAS PUSHED TO IT: its
+			// next page is the one below the rows this load drew.
+			low := got.low
+			w.oldest, w.top = &low, false
+			moved++
+			continue
+		}
+		if w.oldest == nil || (prevLow != "" && *w.oldest > prevLow) {
 			continue
 		}
 		if got.low < *w.oldest {
@@ -571,4 +590,58 @@ func (r *resolver) loadPushed(ctx context.Context, ws ids.WorkspaceID, addr feed
 		"a page was loaded for no reader's page and pushed; the walks that held everything loaded were moved to it",
 		dlog.Context{"feed": f.key, "newest": newest, "walks_moved": moved, "drew_rows": got.drew})
 	return true, nil
+}
+
+// maxUndrawnChain bounds the older pages one pushed load reads past a page
+// that drew nothing. History longer than this many drawless store pages is
+// left to the reader's walk, which loads until a page owes a row (stepPage).
+const maxUndrawnChain = 64
+
+// loadUntilDrawn continues a pushed load whose page drew NO ROW, whatever the
+// reason: every entry waits on its turn's starting entry on an older page
+// (owner ruling 5 still holds: such rows draw only once that page is loaded),
+// or every entry is one that draws nothing (a succeeded hook a restart
+// writes). It reads the next older page, pushed, until one draws, the start
+// or a separation is reached, or maxUndrawnChain pages were read. Without it
+// a reader no page delivers to holds an empty feed while history sits one
+// page further down. It answers what the chain drew, GOT when it read
+// nothing more.
+func (r *resolver) loadUntilDrawn(ctx context.Context, s *wsState, addr feedid.Feed, got loaded) (loaded, error) {
+	ws := s.id
+	for pages := 0; !got.drew; pages++ {
+		r.mu.Lock()
+		f := r.feed(s, addr)
+		pending := len(f.book.pending)
+		_, bounded := r.deliverable(s, f, "load_pushed")
+		plan, ok := r.planLoad(s, f, false)
+		current := r.workspaces[ws] == s
+		r.mu.Unlock()
+		if !current || !ok || bounded {
+			r.lockedLogger(ws).Debug("daemon.feed.undrawn_chain_ended",
+				"a pushed load that drew nothing reads no further: the start or a separation was reached, or the feed was reset",
+				dlog.Context{"feed": f.key, "pages": pages, "pending": pending, "reset": !current, "bounded_by_separation": bounded})
+			return got, nil
+		}
+		if pages == maxUndrawnChain {
+			r.lockedLogger(ws).Info("daemon.feed.undrawn_chain_capped",
+				"a pushed load read its cap of older pages without drawing a row; the reader's walk brings in the rest",
+				dlog.Context{"feed": f.key, "pages": pages, "pending": pending})
+			return got, nil
+		}
+		r.lockedLogger(ws).Info("daemon.feed.undrawn_chain",
+			"a pushed load drew no row and the conversation's start was not reached; the next older page is loaded",
+			dlog.Context{"feed": f.key, "pages": pages, "pending": pending})
+		plan.pushAll = true
+		more, err := r.load(ctx, plan)
+		if errors.Is(err, ErrNoHistorySource) {
+			// THE SOURCE WENT MID-CHAIN: what was drawn stays, and the reader's
+			// walk reads the rest once one is up.
+			return got, nil
+		}
+		if err != nil {
+			return got, err
+		}
+		got = more
+	}
+	return got, nil
 }

@@ -28,9 +28,9 @@ var ErrTargetNotFound = errors.New("feed: the walk reached the conversation's st
 // standing begins one at the top, so its first page is the newest.
 //
 // It fails with ErrTargetNotFound when the walk reaches the start without the
-// target, ErrHistoryUnavailable (wrapped) when a page could not be read, and
-// EMIT's own error when the page could not be handed over. Pages already
-// handed over stay loaded either way.
+// target, ErrHistoryUnavailable (wrapped) when a page could not be read or no
+// source is up to read the next one from, and EMIT's own error when the page
+// could not be handed over. Pages already handed over stay loaded either way.
 func (r *resolver) LoadThrough(ctx context.Context, ws ids.WorkspaceID, reader ReaderID, target *frontendv1.FeedId, emit func(*frontendv1.FeedPage) error) (*frontendv1.FeedId, error) {
 	mu := r.loadMu(ws)
 	mu.Lock()
@@ -68,6 +68,15 @@ func (r *resolver) LoadThrough(ctx context.Context, ws ids.WorkspaceID, reader R
 				"a walk to a target row reached the conversation's start without drawing it",
 				dlog.Context{"target": target.GetValue(), "reader": string(reader), "pages": pages, "no_source": step.noSource})
 			return nil, ErrTargetNotFound
+		}
+		if step.unsourced {
+			// NO SOURCE IS NOT THE CONVERSATION'S START: the target may lie on a
+			// page no shim is up to read, so the walk is history unavailable,
+			// never not found.
+			r.lockedLogger(ws).Info("daemon.feed.load_through_no_source",
+				"a walk to a target row ran out of held rows with no source up to read older ones",
+				dlog.Context{"target": target.GetValue(), "reader": string(reader), "pages": pages})
+			return nil, fmt.Errorf("%w: %w", ErrHistoryUnavailable, ErrNoHistorySource)
 		}
 		if err := emit(page); err != nil {
 			return nil, fmt.Errorf("feed: a page of the walk to %q could not be handed over: %w", target.GetValue(), err)

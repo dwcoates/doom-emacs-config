@@ -84,10 +84,11 @@ func (r *resolver) replayPage(ws ids.WorkspaceID, agent *conversationv1.AgentId,
 	var withheld []*conversationv1.HistoryEntryAt
 	for i := len(entries) - 1; i >= 0; i-- {
 		if load != nil && r.withholds(s, entries[i]) {
+			load.outcomes.note(entries[i], outcomeWithheld)
 			withheld = append(withheld, entries[i])
 			continue
 		}
-		r.replayPageEntry(s, agent, entries[i])
+		r.replayLoadedEntry(s, agent, entries[i], load, outcomeDrew)
 	}
 	if load != nil {
 		withheld = append(withheld, r.redrawPending(s, agent, load)...)
@@ -132,6 +133,23 @@ func (r *resolver) replayPage(ws ids.WorkspaceID, agent *conversationv1.AgentId,
 			"agent": agent.GetValue(), "entries": len(entries),
 			"boundary": boundaryName(page), "loaded": load != nil,
 		})
+}
+
+// replayLoadedEntry draws one page entry and, for a reader's load, tallies
+// whether it drew a row in the load's feed: DREW names the outcome when it
+// did, and outcomeNoRow when it did not.
+func (r *resolver) replayLoadedEntry(s *wsState, agent *conversationv1.AgentId, at *conversationv1.HistoryEntryAt, load *pageLoad, drew entryOutcome) {
+	if load == nil {
+		r.replayPageEntry(s, agent, at)
+		return
+	}
+	before := load.rows
+	r.replayPageEntry(s, agent, at)
+	if load.rows > before {
+		load.outcomes.note(at, drew)
+		return
+	}
+	load.outcomes.note(at, outcomeNoRow)
 }
 
 // replayPageEntry draws one page entry in the plane its lineage names.

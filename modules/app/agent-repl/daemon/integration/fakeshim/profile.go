@@ -123,6 +123,10 @@ type Profile struct {
 	// frame of a stream the daemon opens during bring-up, which a control
 	// socket script would race.
 	ResumeHistory [][]byte `json:"resume_history,omitempty"`
+	// ResumeTurns stamps ResumeHistory's entries with the turn each belongs
+	// to, at the same index (newest first); absent or "" leaves an entry
+	// unstamped, as pre-contract data is.
+	ResumeTurns []string `json:"resume_turns,omitempty"`
 	// HistoryPageSize is the fake store's page size, DefaultHistoryPageSize
 	// when unset: what ReadHistory pages each agent's book in (book.go).
 	HistoryPageSize int `json:"history_page_size,omitempty"`

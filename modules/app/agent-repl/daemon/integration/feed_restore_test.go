@@ -312,3 +312,85 @@ func TestAColdGatedWorkspacesWholeConversationIsWalkableBeforeTheGateIsAnswered(
 			len(pages), responses, pagingRows, prompt)
 	}
 }
+
+// A NEWEST PAGE THAT DRAWS NO ROW NEVER LEAVES THE FEED EMPTY (owner's report,
+// 2026-10-06: after a restart two workspaces' feeds stayed empty). The reader
+// opens before any shim is up, so the newest page is loaded for it by the
+// kick when one comes up, and a page that draws nothing must read on to the
+// page that does.
+
+// emptyNewestPageStore is a store page of two, so the newest pages of the
+// books below draw nothing.
+const emptyNewestPageStore = 2
+
+// olderTurnPrompt is a prompt older than the relaunch turn, so the page that
+// draws the relaunch turn is not the conversation's start.
+func olderTurnPrompt() *conversationv1.HistoryEntry {
+	return &conversationv1.HistoryEntry{Entry: &conversationv1.HistoryEntry_UserPrompt{UserPrompt: &conversationv1.AgentPrompt{
+		Id:     &conversationv1.TurnId{Value: "turn-older"},
+		Agent:  &conversationv1.AgentId{Value: mainAgent},
+		Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT,
+		Said:   said("an older question"),
+	}}}
+}
+
+// succeededHook is a settled, succeeded SessionStart hook: the entry every
+// restart writes, which draws no row.
+func succeededHook(id string) *conversationv1.HistoryEntry {
+	return &conversationv1.HistoryEntry{Entry: &conversationv1.HistoryEntry_AgentFrame{AgentFrame: activityFrame(mainAgent, &conversationv1.AgentActivity{
+		ActivityId: activityID(id),
+		Item: &conversationv1.AgentActivity_Hook{Hook: &conversationv1.AgentHook{
+			Result: &conversationv1.AgentHook_Succeeded{Succeeded: &conversationv1.AgentHookSucceeded{Command: "session-start"}},
+		}},
+	})}}
+}
+
+func TestARestartWhoseNewestPageDrawsNoRowPushesTheConversation(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		book  []*conversationv1.HistoryEntry
+		turns []string
+	}{
+		{
+			// agent-repl-streaming: the last turn is longer than the newest
+			// page, every entry of which waits on the turn's prompt.
+			name: "a last turn longer than a page",
+			book: []*conversationv1.HistoryEntry{
+				relaunchAnswerEntry(), relaunchAnswerEntry(), relaunchAnswerEntry(),
+				relaunchPromptEntry(), olderTurnPrompt(),
+			},
+			turns: []string{relaunchTurnID, relaunchTurnID, relaunchTurnID},
+		},
+		{
+			// definitions: the newest page is the restarts' succeeded
+			// SessionStart hooks.
+			name: "a newest page of succeeded hooks",
+			book: []*conversationv1.HistoryEntry{
+				succeededHook("hook-3"), succeededHook("hook-2"), succeededHook("hook-1"),
+				relaunchAnswerEntry(), relaunchPromptEntry(), olderTurnPrompt(),
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			// Arrange: the reader opens while no shim is up.
+			f := restarted(newOpened(t, harness.Opts{}), harness.ShimProfile{
+				DelayDiagnostics: true,
+				HistoryPageSize:  emptyNewestPageStore,
+				ResumeHistory:    harness.EncodeHistory(t, tt.book...),
+				ResumeTurns:      tt.turns,
+			})
+			tail := f.watchRootFeed()
+
+			// Act.
+			f.d.Shim(f.ws).PushHealthyWhenSubscribed()
+
+			// Assert: the conversation reaches the reader.
+			awaitRow(t, f, tail, "the relaunch turn's answer pushed to the waiting reader", func(r *frontendv1.FeedRow) bool {
+				return r.GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown() == relaunchAnswer
+			})
+		})
+	}
+}

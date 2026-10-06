@@ -78,6 +78,10 @@ type pageStep struct {
 	// exhausted is set by a step that found nothing older to serve or load:
 	// the walk stands at the feed's start.
 	exhausted bool
+	// unsourced is set by a step that served nothing older because no source
+	// was up to read it from: whether older history exists is NOT KNOWN, so the
+	// walk is not at the feed's start and stays open for the reader to continue.
+	unsourced bool
 }
 
 // stepPage composes the page a walk owes, or answers the load it needs first.
@@ -114,14 +118,27 @@ func (r *resolver) stepPage(ws ids.WorkspaceID, feed feedid.Feed, reader ReaderI
 	}
 	durable, bounded := r.deliverable(s, f, action)
 	end := w.end(f, durable)
-	// MORE IS LOADABLE while the feed is an agent's book with a source, its
-	// start was not reached, and no separation bounds delivery: a cut withholds
-	// everything before it, so nothing older could ever be served.
-	plan, loadable := r.planLoad(s, f, false)
-	loadable = loadable && !bounded && !step.noSource
+	// OLDER HISTORY MAY EXIST while the feed is an agent's book, its start was
+	// not reached, and no separation bounds delivery: a cut withholds
+	// everything before it, so nothing older could ever be served. It is
+	// LOADABLE when, besides, a source is up to read it from.
+	plan, older := r.planLoad(s, f, false)
+	older = older && !bounded
+	loadable := older && !step.noSource
 	if end <= 0 {
 		if loadable {
 			return nil, nil, &plan, nil
+		}
+		if older {
+			// NO SOURCE IS NOT THE FEED'S START. With no shim up nothing says
+			// whether older history exists, so the page claims more and the walk
+			// stays open: the reader asks again, and a source coming up loads
+			// the page it is waiting on (awaitSource).
+			step.unsourced = true
+			log.Info("daemon.feed.next_page_no_source",
+				"a reader asked for an older page and no source is up to read it from; the walk stays open and is served nothing older yet",
+				dlog.Context{"feed": f.key, "reader": string(reader), "open": step.open})
+			return r.servePage(s, f, w, reader, durable, 0, 0, true, step.open), r.openToken(ws, f, step.open), nil, nil
 		}
 		step.exhausted = true
 		log.Info("daemon.feed.next_page_nothing_older",
@@ -139,7 +156,7 @@ func (r *resolver) stepPage(ws ids.WorkspaceID, feed feedid.Feed, reader ReaderI
 		}
 		start = 0
 	}
-	page := r.servePage(s, f, w, reader, durable, start, end, start > 0 || loadable, step.open)
+	page := r.servePage(s, f, w, reader, durable, start, end, start > 0 || older, step.open)
 	return page, r.openToken(ws, f, step.open), nil, nil
 }
 
@@ -147,10 +164,13 @@ func (r *resolver) stepPage(ws ids.WorkspaceID, feed feedid.Feed, reader ReaderI
 // records it. An opening's walk replaces whatever the reader had.
 func (r *resolver) servePage(s *wsState, f *feedState, w *walk, reader ReaderID, order []string, start, end int, more, open bool) *frontendv1.FeedPage {
 	page := r.composePageRange(s, f, order, start, end, more)
+	// A WALK SERVED NOTHING STANDS AT THE FEED'S START only when the page says
+	// so; one served nothing while older history may exist (no source yet)
+	// stays above every row, so its next page is the newest held.
 	if start < end {
 		w.oldest = servedFrom(f, order, start)
 		w.top = false
-	} else if w.top {
+	} else if w.top && !more {
 		w.top = false
 	}
 	if open {
