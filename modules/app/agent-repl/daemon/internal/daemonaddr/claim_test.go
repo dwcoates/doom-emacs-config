@@ -1024,3 +1024,63 @@ func TestPublishWhileAWaitIsUnderWayIsAHeldClaim(t *testing.T) {
 		t.Fatalf("Publish = %v, want ErrClaimed naming the wait under way", err)
 	}
 }
+
+func TestAWaitAbandonedBeforeCloseCreatesNoLockFileAfterIt(t *testing.T) {
+	// Arrange: a successor's wait is begun and abandoned, the successor is
+	// closed, and its state root's lock file is then taken away -- what a
+	// teardown removing the state root does.
+	path := filepath.Join(t.TempDir(), "daemon.addr")
+	incumbent, err := Bind(path, 0)
+	if err != nil {
+		t.Fatalf("Bind: %v", err)
+	}
+	successor, err := BindJoining(path, 0)
+	if err != nil {
+		t.Fatalf("BindJoining: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := successor.AwaitBootClaim(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("AwaitBootClaim = %v, want context.Canceled", err)
+	}
+	if err := successor.Close(); err != nil {
+		t.Fatalf("successor Close: %v", err)
+	}
+	if err := os.Remove(LockPath(path)); err != nil {
+		t.Fatalf("remove the lock file: %v", err)
+	}
+
+	// Act: the incumbent lets go, so the abandoned wait lands and settles.
+	if err := incumbent.Close(); err != nil {
+		t.Fatalf("incumbent Close: %v", err)
+	}
+	<-successor.(*claim).bootWait
+
+	// Assert: the wait never named the path again, so nothing recreated it.
+	if _, err := os.Stat(LockPath(path)); !os.IsNotExist(err) {
+		t.Fatalf("stat the lock file after the wait settled = %v, want it absent", err)
+	}
+}
+
+func TestAwaitBootClaimOnAClosedClaimStartsNoWait(t *testing.T) {
+	// Arrange: a successor closed before it ever waited.
+	path := filepath.Join(t.TempDir(), "daemon.addr")
+	successor, err := BindJoining(path, 0)
+	if err != nil {
+		t.Fatalf("BindJoining: %v", err)
+	}
+	if err := successor.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// Act
+	err = successor.AwaitBootClaim(context.Background())
+
+	// Assert: refused, and the lock file was never created.
+	if err == nil || !strings.Contains(err.Error(), "the claim was closed") {
+		t.Fatalf("AwaitBootClaim on a closed claim = %v, want the closed refusal", err)
+	}
+	if _, err := os.Stat(LockPath(path)); !os.IsNotExist(err) {
+		t.Fatalf("stat the lock file = %v, want it absent", err)
+	}
+}

@@ -64,21 +64,26 @@ func stateOf(stat int8, flag int32) (processState, error) {
 	}
 }
 
-// groupExited reports whether every process in process group pgid has
-// exited: a group of zombies, or no group at all.
-func groupExited(pgid int) (bool, error) {
+// liveGroupMembers answers the members of process group pgid that have not
+// exited: everything in the group but its zombies and exiting processes.
+func liveGroupMembers(pgid int) ([]groupMember, error) {
 	members, err := unix.SysctlKinfoProcSlice("kern.proc.pgrp", pgid)
 	if err != nil {
-		return false, fmt.Errorf("list process group %d: %w", pgid, err)
+		return nil, fmt.Errorf("list process group %d: %w", pgid, err)
 	}
+	var live []groupMember
 	for _, m := range members {
 		state, err := stateOf(m.Proc.P_stat, m.Proc.P_flag)
 		if err != nil {
-			return false, fmt.Errorf("process %d of group %d: %w", m.Proc.P_pid, pgid, err)
+			return nil, fmt.Errorf("process %d of group %d: %w", m.Proc.P_pid, pgid, err)
 		}
 		if !state.exited {
-			return false, nil
+			live = append(live, groupMember{
+				pid:   int(m.Proc.P_pid),
+				comm:  unix.ByteSliceToString(m.Proc.P_comm[:]),
+				state: state.name,
+			})
 		}
 	}
-	return true, nil
+	return live, nil
 }
