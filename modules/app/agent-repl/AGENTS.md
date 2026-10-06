@@ -1432,7 +1432,13 @@ with no input window; the webapp reads the second (`src/feed/gate-dock.ts`)
 and moves the banner into `#gate-dock`, a full-width row at the page's very
 bottom spanning the sidebar's column too (the sidebar keeps its height),
 fit to its content and at most the input window's height, drawing no inline
-gate. Its buttons sit on one line, equal width, each choice's explanation a
+gate. Emacs tells the page that height and the input window's background
+(`--gate-dock-height`, `--gate-dock-bg`, one script from `lisp/window.el`
+before the input hides), and the docked card wears that background. The
+gate's token figure, docked and on the footer's cold-gate line, is colored by
+its window fill on the cold-gate gradient (`coldGateFigureColor`,
+`src/pressure-color.ts`: green under 20%, yellow 35, orange 50, red 70+),
+against the window the context chip measures by. Its buttons sit on one line, equal width, each choice's explanation a
 hover tooltip. Answering
 or retracting the gate restores both. Never gate either side on a signal the
 other cannot see.
