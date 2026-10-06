@@ -407,6 +407,11 @@ type Deps struct {
 	// TailRetention is how many published rows a feed retains for a tail's
 	// replay. Defaults to DefaultTailRetention.
 	TailRetention int
+	// Pacing is the daemon's record of streamed-fragment gaps, which puts a
+	// reveal window on the main agent's live prose and thinking bubbles
+	// (revealpace.go). nil measures nothing and serves no window, which is
+	// what a test that is not about pacing wants. Production always wires it.
+	Pacing RevealPacing
 }
 
 // WarningRaiser is the topbar's raised-warning channel, as this resolver needs
