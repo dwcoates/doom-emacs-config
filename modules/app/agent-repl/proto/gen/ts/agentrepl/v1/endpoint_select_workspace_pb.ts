@@ -17,7 +17,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_select_workspace.proto.
  */
 export const file_agentrepl_v1_endpoint_select_workspace: GenFile = /*@__PURE__*/
-  fileDesc("CixhZ2VudHJlcGwvdjEvZW5kcG9pbnRfc2VsZWN0X3dvcmtzcGFjZS5wcm90bxIMYWdlbnRyZXBsLnYxIkcKFlNlbGVjdFdvcmtzcGFjZVJlcXVlc3QSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZiKRAQoXU2VsZWN0V29ya3NwYWNlUmVzcG9uc2USNwoHc3VjY2VzcxgBIAEoCzIkLmFnZW50cmVwbC52MS5TZWxlY3RXb3Jrc3BhY2VTdWNjZXNzSAASMwoFZXJyb3IYAiABKAsyIi5hZ2VudHJlcGwudjEuU2VsZWN0V29ya3NwYWNlRXJyb3JIAEIICgZyZXN1bHQiGAoWU2VsZWN0V29ya3NwYWNlU3VjY2VzcyLTAgoUU2VsZWN0V29ya3NwYWNlRXJyb3ISSgoRdW5rbm93bl93b3Jrc3BhY2UYASABKAsyLS5hZ2VudHJlcGwudjEuU2VsZWN0V29ya3NwYWNlVW5rbm93bldvcmtzcGFjZUgAElMKFndvcmtzcGFjZV9yZWZfbWlzbWF0Y2gYAiABKAsyMS5hZ2VudHJlcGwudjEuU2VsZWN0V29ya3NwYWNlV29ya3NwYWNlUmVmTWlzbWF0Y2hIABJKChF0cmFuc2ZlcnJpbmdfYXdheRgDIAEoCzItLmFnZW50cmVwbC52MS5TZWxlY3RXb3Jrc3BhY2VUcmFuc2ZlcnJpbmdBd2F5SAASRQoPbm90X3lldF9hZG9wdGVkGAQgASgLMiouYWdlbnRyZXBsLnYxLlNlbGVjdFdvcmtzcGFjZU5vdFlldEFkb3B0ZWRIAEIHCgVjYXVzZSIhCh9TZWxlY3RXb3Jrc3BhY2VVbmtub3duV29ya3NwYWNlIjsKI1NlbGVjdFdvcmtzcGFjZVdvcmtzcGFjZVJlZk1pc21hdGNoEhQKDHJlZ2lzdHJ5X2RpchgBIAEoCSIyCh9TZWxlY3RXb3Jrc3BhY2VUcmFuc2ZlcnJpbmdBd2F5Eg8KB2FkZHJlc3MYASABKAkiHgocU2VsZWN0V29ya3NwYWNlTm90WWV0QWRvcHRlZEIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_workspace_v1_workspace]);
+  fileDesc("CixhZ2VudHJlcGwvdjEvZW5kcG9pbnRfc2VsZWN0X3dvcmtzcGFjZS5wcm90bxIMYWdlbnRyZXBsLnYxIkcKFlNlbGVjdFdvcmtzcGFjZVJlcXVlc3QSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZiKRAQoXU2VsZWN0V29ya3NwYWNlUmVzcG9uc2USNwoHc3VjY2VzcxgBIAEoCzIkLmFnZW50cmVwbC52MS5TZWxlY3RXb3Jrc3BhY2VTdWNjZXNzSAASMwoFZXJyb3IYAiABKAsyIi5hZ2VudHJlcGwudjEuU2VsZWN0V29ya3NwYWNlRXJyb3JIAEIICgZyZXN1bHQiGAoWU2VsZWN0V29ya3NwYWNlU3VjY2VzcyKXAwoUU2VsZWN0V29ya3NwYWNlRXJyb3ISSgoRdW5rbm93bl93b3Jrc3BhY2UYASABKAsyLS5hZ2VudHJlcGwudjEuU2VsZWN0V29ya3NwYWNlVW5rbm93bldvcmtzcGFjZUgAElMKFndvcmtzcGFjZV9yZWZfbWlzbWF0Y2gYAiABKAsyMS5hZ2VudHJlcGwudjEuU2VsZWN0V29ya3NwYWNlV29ya3NwYWNlUmVmTWlzbWF0Y2hIABJKChF0cmFuc2ZlcnJpbmdfYXdheRgDIAEoCzItLmFnZW50cmVwbC52MS5TZWxlY3RXb3Jrc3BhY2VUcmFuc2ZlcnJpbmdBd2F5SAASRQoPbm90X3lldF9hZG9wdGVkGAQgASgLMiouYWdlbnRyZXBsLnYxLlNlbGVjdFdvcmtzcGFjZU5vdFlldEFkb3B0ZWRIABJCCg1zdGFuZGluZ19kb3duGAUgASgLMikuYWdlbnRyZXBsLnYxLlNlbGVjdFdvcmtzcGFjZVN0YW5kaW5nRG93bkgAQgcKBWNhdXNlIiEKH1NlbGVjdFdvcmtzcGFjZVVua25vd25Xb3Jrc3BhY2UiOwojU2VsZWN0V29ya3NwYWNlV29ya3NwYWNlUmVmTWlzbWF0Y2gSFAoMcmVnaXN0cnlfZGlyGAEgASgJIjIKH1NlbGVjdFdvcmtzcGFjZVRyYW5zZmVycmluZ0F3YXkSDwoHYWRkcmVzcxgBIAEoCSIeChxTZWxlY3RXb3Jrc3BhY2VOb3RZZXRBZG9wdGVkIh0KG1NlbGVjdFdvcmtzcGFjZVN0YW5kaW5nRG93bkIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.SelectWorkspaceRequest
@@ -124,6 +124,17 @@ export type SelectWorkspaceError = Message<"agentrepl.v1.SelectWorkspaceError"> 
      */
     value: SelectWorkspaceNotYetAdopted;
     case: "notYetAdopted";
+  } | {
+    /**
+     * This daemon is standing down (a stop, a restart, a drain at its end)
+     * and starts no session. The SELECTION IS RECORDED; only the revival is
+     * not attempted here. The client re-asserts the selection on the daemon
+     * that serves next (a successor, or a fresh boot), which revives it.
+     *
+     * @generated from field: agentrepl.v1.SelectWorkspaceStandingDown standing_down = 5;
+     */
+    value: SelectWorkspaceStandingDown;
+    case: "standingDown";
   } | { case: undefined; value?: undefined };
 };
 
@@ -197,4 +208,23 @@ export type SelectWorkspaceNotYetAdopted = Message<"agentrepl.v1.SelectWorkspace
  */
 export const SelectWorkspaceNotYetAdoptedSchema: GenMessage<SelectWorkspaceNotYetAdopted> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_select_workspace, 7);
+
+/**
+ * The answer of a daemon that is leaving: the selection stands in the state
+ * it shares with whatever serves next, and no session is started for a
+ * workspace this daemon is about to stop serving. It carries no address,
+ * because a plain stand-down has no successor to name; a handover's departing
+ * daemon answers `transferring_away` instead.
+ *
+ * @generated from message agentrepl.v1.SelectWorkspaceStandingDown
+ */
+export type SelectWorkspaceStandingDown = Message<"agentrepl.v1.SelectWorkspaceStandingDown"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.SelectWorkspaceStandingDown.
+ * Use `create(SelectWorkspaceStandingDownSchema)` to create a new message.
+ */
+export const SelectWorkspaceStandingDownSchema: GenMessage<SelectWorkspaceStandingDown> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_select_workspace, 8);
 
