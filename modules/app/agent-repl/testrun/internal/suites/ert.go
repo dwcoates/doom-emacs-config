@@ -49,7 +49,9 @@ func ertUnits(l Layout, s roster.Suite) (Units, error) {
 	fakeDir := filepath.Join(lispDir, "testsupport", "fakedaemon")
 	fake := filepath.Join(l.Work, "ert", "fakedaemon")
 	build := spec(s.Name+":fakedaemon", s.Name, fakeDir,
-		[]string{"go", "build", "-o", fake, "."}, "GOPROXY=off", "GOFLAGS=-mod=mod -p=1")
+		// -buildvcs=false: a test build never asks git to stamp the binary
+		// (no test runs real git, owner rule).
+		[]string{"go", "build", "-buildvcs=false", "-o", fake, "."}, "GOPROXY=off", "GOFLAGS=-mod=mod -p=1")
 	driver := filepath.Join(l.Module, "testrun", "ert", "driver.el")
 	rosterForm := lispList(files)
 	chunk := func(id string, items []string) run.Spec {

@@ -107,7 +107,9 @@ func TestMain(m *testing.M) {
 	}
 	storeBinary = filepath.Join(binDir, "shim-store")
 
-	build := exec.Command("go", "build", "-o", storeBinary, "./")
+	// -buildvcs=false: a test build never asks git to stamp the binary (no
+	// test runs real git, owner rule).
+	build := exec.Command("go", "build", "-buildvcs=false", "-o", storeBinary, "./")
 	build.Dir = ".."
 	build.Stdout = os.Stderr
 	build.Stderr = os.Stderr

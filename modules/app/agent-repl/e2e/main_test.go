@@ -487,7 +487,9 @@ func goBuildCovered(moduleDir, out string) (string, error) {
 }
 
 func goBuild(moduleDir, out string, instrumented bool) (string, error) {
-	args := []string{"build"}
+	// -buildvcs=false: a test build never asks git to stamp the binary (no
+	// test runs real git, owner rule).
+	args := []string{"build", "-buildvcs=false"}
 	if instrumented {
 		args = append(args, harness.CoverageBuildArgs(harness.CoverageRoot())...)
 	}
