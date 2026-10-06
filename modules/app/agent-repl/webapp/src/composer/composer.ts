@@ -170,7 +170,14 @@ export function mountComposer(
     // takes keystrokes while nothing can be sent invites a draft the reader
     // then watches be refused.
     input.disabled = closed;
-    send.disabled = closed;
+    // AN OPEN GATE NEVER RE-ENABLES SEND UNDER A SUBMISSION IN FLIGHT. The
+    // footer restates the gate on EVERY push, and a turn's own end is pushed
+    // before its SubmitPrompt unary answers; re-enabling here offered a press
+    // that submit() then dropped for being in flight (the webapp layer's
+    // `!hook-failed`, pressed 10ms after `!hook-blocked`'s turn ended and
+    // before its unary answered). The submission's own finally re-applies the
+    // gate once it has answered.
+    send.disabled = closed || inFlight;
     notice.textContent = closed ? (reason ?? "composer closed") : "";
     root.toggleAttribute("data-gate-closed", closed);
   };
@@ -178,9 +185,23 @@ export function mountComposer(
   const unsubscribeGate = opts.gate.subscribe(applyGate);
 
   const submit = (): void => {
-    if (send.disabled || inFlight) return;
+    // A PRESS THE COMPOSER DOES NOT TAKE IS RECORDED: it submits nothing and
+    // draws nothing, so the record is the only trace that it happened.
     const text = input.value.trim();
-    if (text === "") return;
+    const dropped = inFlight
+      ? "in_flight"
+      : send.disabled
+        ? "gate_closed"
+        : text === ""
+          ? "empty"
+          : null;
+    if (dropped !== null) {
+      log.info("the composer did not take a press", {
+        operation: "composer.press-dropped",
+        context: { reason: dropped },
+      });
+      return;
+    }
     // THE KEY IS THE ATTEMPT'S, NOT THE PRESS'S: the same unsent words retried
     // are the same submission, and the daemon refuses the duplicate rather than
     // minting a second turn.
