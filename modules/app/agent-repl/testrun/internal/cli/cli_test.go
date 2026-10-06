@@ -558,6 +558,28 @@ func TestRunWithSuitesRunsOnlyThoseAndNamesTheRest(t *testing.T) {
 	}
 }
 
+func TestRunWithTheStoreAndShimSuitesRunsExactlyTheNamedFour(t *testing.T) {
+	// Arrange: the selection a hook-records change ran on 2026-10-06, whose
+	// report showed proto, webapp and ert instead of shim and store. That
+	// report was another agent's run writing the same scratch log; this pins
+	// that the runner itself runs exactly what was named.
+	h := newHarness(t, nil, nil)
+
+	// Act
+	code := h.run(t, "--suites", "shim,store,daemon,e2e")
+
+	// Assert
+	if code != 0 {
+		t.Fatalf("exit = %d", code)
+	}
+	if got := len(h.exec.ran); got != 4 {
+		t.Fatalf("ran %v, want only shim, store, daemon and e2e", h.exec.ran)
+	}
+	if !strings.Contains(h.out.String(), "selected agent-repl suites passed: shim store daemon e2e") {
+		t.Fatalf("stdout lacks the four named suites as the selection:\n%s", h.out.String())
+	}
+}
+
 func TestRunRecordStagesEveryPassingSuiteWithoutTouchingTheCSV(t *testing.T) {
 	// Arrange
 	h := newHarness(t, nil, nil)
