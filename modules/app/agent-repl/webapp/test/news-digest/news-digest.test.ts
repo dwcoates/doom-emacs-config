@@ -353,6 +353,55 @@ function quietInit(): OverlayInit {
   return init;
 }
 
+describe("mountNewsDigest: the SDK version", () => {
+  it("draws a known version in the middle of the header", () => {
+    // ARRANGE
+    const init = overlayInit();
+    if (init.header) init.header.sdkVersion = { answer: { case: "known", value: { version: "0.2.97" } } };
+    // ACT
+    w.digest.apply(shown(init));
+    // ASSERT
+    const row = [...(w.host.querySelector(".news-digest-header")?.children ?? [])].map((c) => c.className);
+    expect([row, w.host.querySelector('[data-sdk-version="known"]')?.textContent]).toEqual([
+      ["news-digest-heading", "news-digest-sdk-version", "news-digest-actions"],
+      "SDK Version: 0.2.97",
+    ]);
+  });
+
+  it("says an unknown version is unknown", () => {
+    // ARRANGE
+    const init = overlayInit();
+    if (init.header) init.header.sdkVersion = { answer: { case: "unknown", value: {} } };
+    // ACT
+    w.digest.apply(shown(init));
+    // ASSERT
+    expect(w.host.querySelector('[data-sdk-version="unknown"]')?.textContent).toBe("SDK Version: unknown");
+  });
+
+  it("draws no version for a digest made before the header carried one", () => {
+    // ACT
+    w.digest.apply(shown());
+    // ASSERT
+    expect(w.host.querySelector("[data-sdk-version]")).toBeNull();
+  });
+
+  it("refuses a version naming no answer", () => {
+    // ARRANGE
+    const init = overlayInit();
+    if (init.header) init.header.sdkVersion = {};
+    // ACT + ASSERT
+    expect(() => w.digest.apply(shown(init))).toThrow(MalformedView);
+  });
+
+  it("refuses a known version that is empty", () => {
+    // ARRANGE
+    const init = overlayInit();
+    if (init.header) init.header.sdkVersion = { answer: { case: "known", value: { version: "" } } };
+    // ACT + ASSERT
+    expect(() => w.digest.apply(shown(init))).toThrow(MalformedView);
+  });
+});
+
 describe("mountNewsDigest: since last week", () => {
   it("draws the week first, before the run's sections", () => {
     // ACT
