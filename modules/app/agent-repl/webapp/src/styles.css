@@ -6566,6 +6566,11 @@ bubble-body.bubble-body { display: block; }
   text-align: center;
 }
 
+/* A glyph that opens agent-repl's session says it can be clicked. */
+.topbar-connectivity[data-reveal-anchor] {
+  cursor: pointer;
+}
+
 /* The three right-hand controls share one quiet button treatment, so a reader
    learns the affordance once. THE SHARED TREATMENT IS THE BOX AND NOT THE
    COLOR — see the muted rule just below it. */
@@ -6736,7 +6741,9 @@ bubble-body.bubble-body { display: block; }
 }
 
 /* The token breakdown: label left, count right, share after it. Tabular
-   figures so the column of counts lines up. */
+   figures so the column of counts lines up. The connectivity glyph's session
+   dropdown (src/topbar/session.ts) is the same label-and-figure list, so its
+   rows share these rules rather than restating them. */
 .token-breakdown-section + .token-breakdown-section {
   border-top: 1px solid var(--border);
 }
@@ -6746,13 +6753,15 @@ bubble-body.bubble-body { display: block; }
   font-size: 0.8em;
   text-transform: lowercase;
 }
-.token-breakdown-row {
+.token-breakdown-row,
+.topbar-session-row {
   display: flex;
   align-items: baseline;
   gap: 0.5rem;
   padding: 0.25rem 0.7rem;
 }
-.token-breakdown-label {
+.token-breakdown-label,
+.topbar-session-label {
   flex: 1 1 auto;
   min-width: 0;
   color: var(--muted);
@@ -6761,7 +6770,8 @@ bubble-body.bubble-body { display: block; }
   color: var(--fg);
   font-weight: 600;
 }
-.token-breakdown-tokens {
+.token-breakdown-tokens,
+.topbar-session-value {
   font-variant-numeric: tabular-nums;
 }
 .token-breakdown-share {

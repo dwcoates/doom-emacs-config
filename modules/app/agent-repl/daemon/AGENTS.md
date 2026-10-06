@@ -2217,6 +2217,70 @@ republished at prime (so it survives restarts and handovers), and pushed on
 WEBVIEW `WatchDaemon` streams only. A dismiss naming the newest digest takes
 it down everywhere (twice is success); any other id is `unknown_digest`.
 
+## agent-repl's session and its vendor traffic (`internal/agentreplsession`, `internal/vendortraffic`)
+
+The topbar's connectivity glyph opens a dropdown stating agent-repl's SESSION
+(owner ruling, 2026-10-06): how long it has run and the vendor network traffic
+since it began. Contract: `frontend.v1.TopbarConnectivity.session`
+(`TopbarAgentReplSession`), ABSENT until a session began.
+
+**The session** begins at the LATER of the last login made THROUGH agent-repl
+and this Emacs's start. Each event begins a new session unless the standing
+one began at or after it (`Tracker.begin`), and a new session's traffic starts
+at zero: the duration and the traffic count from one `started_at_ms`. It is
+the wsm singleton `agent_repl_session` (layout 21, additive), and the STORE IS
+ITS ONE SOURCE OF TRUTH: every begin and every flush reads it, changes it and
+writes it back, so a successor that took over mid-session continues from the
+incumbent's last write. A daemon restart under the same Emacs keeps it; only a
+new Emacs process (`internal/editorinstance`, judged by the serving daemon)
+begins one.
+
+**A login made through agent-repl** is read off the account root, because
+nothing parses the login TUI: the login manager tells its `login.Observer` each
+flow's opening and ending (under its lock, so an ending never precedes its
+opening), and `agentreplsession.LoginWatch` reads the root's `oauthAccount`
+block (`account.ReadLoginRecord`) at both. A block that changed is a login the
+flow made, begun at the vendor's own `profileFetchedAt` stamp when it falls
+inside the flow, else when the change was seen; an unchanged block, or a root
+naming no account, made none. A login made anywhere else opens no flow and
+begins nothing. The session switches when the login terminal closes.
+
+**The traffic** is every live shim's process group less its lock holders
+(`sessionlock.HolderBinary`): the shim itself (its API reachability probe) and
+its direct children (the vendor CLI); a tool the CLI runs is a grandchild and
+is not counted. Only sockets whose peer is off the machine count. The sampler
+subscribes one kernel network-statistics control socket
+(`com.apple.network.statistics`, unprivileged) per process with the kernel's
+pid filter, polls its live sockets every `vendortraffic.DefaultEvery` (5s),
+and takes each socket's FINAL counts the instant it closes, so the per-socket
+ledger counts every byte once across connection churn and process restarts.
+A process that started before the sampler's epoch (the first round its daemon
+served) has the sockets it already held baselined, never recounted. Only the
+SERVING daemon samples (`rolloutController.ServesIntake`); one that stops
+serving closes its subscriptions. The tracker persists and pushes the traffic
+once per round in which anything was counted: that round is the push throttle.
+
+Measured (2026-10-06, Darwin 25): exact counts (a 259,166-byte HTTPS fetch;
+1+2+4 MB loopback transfers, one opened and closed between polls, excluded by
+the off-machine filter); about 0.8ms of CPU per subscribed process per second.
+Refused alternatives: one-shot `nettop -L 1` loses every socket's tail and
+every socket opened and closed between samples; a continuous `nettop -L 0`
+keeps them but spins a core (64s of CPU in 60s, every flag combination);
+rusage carries no network counters.
+
+**Tests never read the kernel's network statistics.** A process whose vendor
+calls are forbidden (`AGENT_REPL_FORBID_VENDOR_CALLS`, which every test
+process exports) builds no sampler; the unit suites inject the dialer, the
+process table and the sink. `KernelProcesses` reads the real process table in
+its own test (no network); `DialStatistics` is the one leaf no test reaches.
+
+**Records.** `daemon.agentreplsession.{load,begin,flush,login_opened,login_ended}`
+and `daemon.vendortraffic.{run,discover,subscribe,poll,retire,read,close}`;
+every failure (a store that cannot be read or written, a control socket that
+cannot be opened or written, a kernel refusal, a malformed datagram, a counter
+that shrank) is ERROR with its cause, and a process whose subscription failed
+is not subscribed again for its lifetime.
+
 ## Coverage deliberately not attainable under the no-git-in-tests directive
 
 The git client's tests pin argv, env scrubbing, `-C` selection and output

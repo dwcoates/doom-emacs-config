@@ -5,7 +5,8 @@
 // the same on every stream it opens until it exits. The daemon records the
 // last one it saw DURABLY (wsm's editor_instance), so a daemon restart under a
 // live Emacs reads that Emacs's reconnect as the same Emacs, and only a new
-// process reads as new. What a new Emacs is owed (the day's digest stood
+// process reads as new. A new Emacs begins agent-repl's session here (Starts).
+// What else a new Emacs is owed (the day's digest stood
 // again; the startup bring-up) is the caller's to do.
 //
 // Only the daemon that SERVES judges: a joining successor holds a read-only
@@ -25,6 +26,12 @@ import (
 // op is the operation every record here is written under.
 const op = "daemon.editorinstance.connected"
 
+// Starts is told of every new Emacs process: it begins agent-repl's session
+// (internal/agentreplsession).
+type Starts interface {
+	EditorStarted(ctx context.Context, at time.Time)
+}
+
 // Store is the durable record of the last Emacs instance seen.
 type Store interface {
 	// NoteEditorInstance records instance and answers whether it differs from
@@ -38,10 +45,11 @@ type Tracker struct {
 	serves func() bool
 	now    func() time.Time
 	log    dlog.Logger
+	starts Starts
 }
 
 // New builds a tracker, refusing a missing collaborator.
-func New(store Store, serves func() bool, now func() time.Time, log dlog.Logger) (*Tracker, error) {
+func New(store Store, serves func() bool, now func() time.Time, log dlog.Logger, starts Starts) (*Tracker, error) {
 	switch {
 	case store == nil:
 		return nil, errors.New("editorinstance: a store is required")
@@ -51,8 +59,10 @@ func New(store Store, serves func() bool, now func() time.Time, log dlog.Logger)
 		return nil, errors.New("editorinstance: a clock is required")
 	case log == nil:
 		return nil, errors.New("editorinstance: a logger is required")
+	case starts == nil:
+		return nil, errors.New("editorinstance: a session to begin is required")
 	}
-	return &Tracker{store: store, serves: serves, now: now, log: log}, nil
+	return &Tracker{store: store, serves: serves, now: now, log: log, starts: starts}, nil
 }
 
 // Connected records the instance an Emacs WatchDaemon carried and answers
@@ -64,7 +74,8 @@ func (t *Tracker) Connected(ctx context.Context, instance string) (bool, error) 
 		t.log.Debug(op, "this daemon does not serve yet; an attaching Emacs is the one the incumbent recorded", fields)
 		return false, nil
 	}
-	isNew, err := t.store.NoteEditorInstance(ctx, instance, t.now())
+	at := t.now()
+	isNew, err := t.store.NoteEditorInstance(ctx, instance, at)
 	if err != nil {
 		fields["cause"] = err.Error()
 		t.log.Error(op, "the Emacs instance could not be recorded", fields)
@@ -72,6 +83,9 @@ func (t *Tracker) Connected(ctx context.Context, instance string) (bool, error) 
 	}
 	if isNew {
 		t.log.Info(op, "a new Emacs process connected", fields)
+		// A NEW EMACS BEGINS AGENT-REPL'S SESSION; a reconnect, and a daemon
+		// restart under the same Emacs, keep the one standing.
+		t.starts.EditorStarted(ctx, at)
 	} else {
 		t.log.Debug(op, "the same Emacs process reconnected", fields)
 	}

@@ -215,6 +215,9 @@ type Resolver interface {
 	// every strip draws as its persistent-wifi chip. The persistent-wifi
 	// controller calls it on every change.
 	SetPersistentWifi(state *agentreplv1.PersistentWifiState)
+	// SetAgentReplSession states agent-repl's session, which every strip's
+	// connectivity indicator carries for its dropdown.
+	SetAgentReplSession(session *frontendv1.TopbarAgentReplSession)
 	// Topic is the workspace's topbar publication.
 	Topic(ws ids.WorkspaceID) *publish.Topic[*frontendv1.TopbarView]
 	// StatusFacts answers the session facts the /status panel splices —
