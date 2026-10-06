@@ -101,7 +101,7 @@ func TestMergedWorkspaceSessionStopsBeforeWorktreeRemoval(t *testing.T) {
 	if stopAt == 0 || removeAt == 0 || stopAt >= removeAt {
 		t.Fatalf("stop sequence=%d remove sequence=%d, want the session reaped before removal", stopAt, removeAt)
 	}
-	record, found := recordWith(h, "debug", "daemon.merge.teardown")
+	record, found := recordWith(h, "info", "daemon.merge.teardown")
 	if !found || record.Context["workspace"] != string(theWorkspace) || record.Context["worktree"] != h.sourceD || record.Context["force"] != true {
 		t.Fatalf("teardown record = %+v found=%v, want the workspace, worktree, and force=true", record, found)
 	}

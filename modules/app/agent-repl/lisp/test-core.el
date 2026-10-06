@@ -229,6 +229,10 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
         ("core.el" agent-repl--emit-log-record agent-repl--do-log-to-file)
         ("core.el" agent-repl--emit-log-record agent-repl--do-log-to-file)
         ("core.el" agent-repl--emit-log-record agent-repl--log-record)
+        ("core.el" agent-repl--emit-log-record agent-repl--do-log-to-file)
+        ;; The last pair is the same record rerouted centrally when the
+        ;; workspace's directory went between routing and writing.
+        ("core.el" agent-repl--emit-log-record agent-repl--log-record)
         ("core.el" agent-repl--emit-log-record agent-repl--do-log-to-file))))))
 
 (ert-deftest agent-repl-test-every-logging-rung-calls-the-canonical-emitter ()
@@ -3329,24 +3333,55 @@ unattributed teardown is visible in the log rather than silently blank."
     (agent-repl--ws-put "none" :repl-state :inactive)
     (should-not (agent-repl--ws-log-routable-p "none"))))
 
-(ert-deftest agent-repl-test-log-dir-truename-asks-the-filesystem-once ()
+(ert-deftest agent-repl-test-log-dir-truename-walks-the-path-once ()
   "A directory's canonical spelling is resolved once, not on every record."
   (agent-repl-test--with-clean-state
     ;; Arrange
     (let ((dir (make-temp-file "agent-repl-log-dir" t))
-          (asks 0))
+          (walks 0)
+          (after-first nil))
       (unwind-protect
-          ;; `file-directory-p' is asked once per resolution (`file-truename'
-          ;; recurses on itself, so it cannot be counted this way).
-          (cl-letf* ((real (symbol-function 'file-directory-p))
-                     ((symbol-function 'file-directory-p)
-                      (lambda (f) (cl-incf asks) (funcall real f))))
+          ;; `file-truename' recurses through its own symbol, so one
+          ;; resolution counts several calls; what is pinned is that later
+          ;; lookups add none.
+          (cl-letf* ((real (symbol-function 'file-truename))
+                     ((symbol-function 'file-truename)
+                      (lambda (&rest args) (cl-incf walks) (apply real args))))
+            (agent-repl--log-dir-truename dir)
+            (setq after-first walks)
             ;; Act
             (agent-repl--log-dir-truename dir)
             (agent-repl--log-dir-truename dir)
-            (agent-repl--log-dir-truename dir)
             ;; Assert
-            (should (= asks 1)))
+            (should (> after-first 0))
+            (should (= walks after-first)))
+        (delete-directory dir)))))
+
+(ert-deftest agent-repl-test-log-dir-truename-forgets-a-directory-that-vanished ()
+  "A remembered directory that has since gone answers nil, not its old spelling."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((dir (make-temp-file "agent-repl-log-dir" t)))
+      (should (agent-repl--log-dir-truename dir))
+      ;; Act
+      (delete-directory dir)
+      ;; Assert
+      (should-not (agent-repl--log-dir-truename dir)))))
+
+(ert-deftest agent-repl-test-log-dir-truename-routes-a-recreated-directory-again ()
+  "A directory that vanished and came back is answered again."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((dir (make-temp-file "agent-repl-log-dir" t)))
+      (unwind-protect
+          (progn
+            (agent-repl--log-dir-truename dir)
+            (delete-directory dir)
+            (agent-repl--log-dir-truename dir)
+            ;; Act
+            (make-directory dir)
+            ;; Assert
+            (should (agent-repl--log-dir-truename dir)))
         (delete-directory dir)))))
 
 (ert-deftest agent-repl-test-log-dir-truename-is-canonical ()
@@ -3382,6 +3417,18 @@ unattributed teardown is visible in the log rather than silently blank."
       (agent-repl--ws-put "gone-ws" :project-dir project)
       (delete-directory project t)
       (should-not (agent-repl--ws-log-routable-p "gone-ws")))))
+
+(ert-deftest agent-repl-test-log-routable-rejects-a-project-dir-that-vanished-after-routing ()
+  "A workspace that routed once and whose directory then went owns no sink."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((project (make-temp-file "agent-repl-routable-went-" t)))
+      (agent-repl--ws-put "went-ws" :project-dir project)
+      (should (agent-repl--ws-log-routable-p "went-ws"))
+      ;; Act
+      (delete-directory project t)
+      ;; Assert
+      (should-not (agent-repl--ws-log-routable-p "went-ws")))))
 
 (ert-deftest agent-repl-test-log-routable-accepts-registered-workspace ()
   "A registered workspace with an existing project directory owns a sink."
@@ -3517,6 +3564,70 @@ ladder made a debug line abort `doom-init-ui-hook'."
         (cl-letf (((symbol-function 'display-warning) #'ignore))
           ;; Act / Assert: a returned record, not a signal.
           (should (agent-repl--log "vanished-ws" "line after the worktree went away")))))))
+
+(defmacro agent-repl-test--with-dir-vanishing-after-routing (ws &rest body)
+  "Run BODY with WS registered at a directory removed right after routing.
+The directory exists when `agent-repl--resolve-log-workspace' routes the
+record and is gone before the record is stamped or written, as a worktree
+another process removes is."
+  (declare (indent 1))
+  `(let ((project (make-temp-file "agent-repl-vanish-mid-record-" t))
+         (agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal)))
+     (agent-repl--ws-put ,ws :project-dir project)
+     (should (agent-repl--ws-log-routable-p ,ws))
+     (cl-letf* ((real-resolve (symbol-function 'agent-repl--resolve-log-workspace))
+                ((symbol-function 'agent-repl--resolve-log-workspace)
+                 (lambda (&rest args)
+                   (prog1 (apply real-resolve args)
+                     (when (file-directory-p project)
+                       (delete-directory project t)))))
+                ((symbol-function 'display-warning) #'ignore))
+       ,@body)))
+
+(ert-deftest agent-repl-test-a-directory-vanishing-mid-record-does-not-signal ()
+  "A worktree removed between routing and writing never signals into the caller."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-temp-logfile path
+      (agent-repl-test--with-dir-vanishing-after-routing "mid-record-ws"
+        ;; Act / Assert: a returned record, not a signal.
+        (should (agent-repl--info "mid-record-ws" "elisp.test.mid-record payload"))))))
+
+(ert-deftest agent-repl-test-a-directory-vanishing-mid-record-lands-the-original-centrally ()
+  "The record a vanished worktree could not host is written centrally, naming its workspace."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-temp-logfile path
+      (agent-repl-test--with-dir-vanishing-after-routing "mid-record-ws"
+        ;; Act
+        (agent-repl--info "mid-record-ws" "elisp.test.mid-record payload"))
+      ;; Assert
+      (let ((record (agent-repl-test--log-record-for path "elisp-test-mid-record")))
+        (should (equal (alist-get 'unroutable_workspace record) "mid-record-ws"))))))
+
+(ert-deftest agent-repl-test-a-directory-vanishing-mid-record-announces-the-fallback ()
+  "The vanish is announced once, as any other central fallback is."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-temp-logfile path
+      (agent-repl-test--with-dir-vanishing-after-routing "mid-record-ws"
+        ;; Act
+        (agent-repl--info "mid-record-ws" "elisp.test.mid-record payload"))
+      ;; Assert
+      (let ((record (agent-repl-test--log-record-for path "log-central-fallback")))
+        (should (equal (alist-get 'unroutable_workspace record) "mid-record-ws"))))))
+
+(ert-deftest agent-repl-test-a-sink-failure-while-still-routable-is-signalled ()
+  "A write failure for a workspace that still owns its sink is not rerouted."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-temp-logfile path
+      ;; Arrange
+      (let ((project (make-temp-file "agent-repl-sink-broken-" t)))
+        (unwind-protect
+            (progn
+              (agent-repl--ws-put "sink-broken-ws" :project-dir project)
+              (cl-letf (((symbol-function 'agent-repl--workspace-emacs-log-target)
+                         (lambda (_ws) (error "simulated sink failure"))))
+                ;; Act / Assert
+                (should-error (agent-repl--info "sink-broken-ws" "elisp.test.broken payload"))))
+          (delete-directory project t))))))
 
 (ert-deftest agent-repl-test-deleted-worktree-records-the-central-fallback-at-warn ()
   "A REGISTERED directory that is gone is a stale row, announced at WARN."

@@ -1283,6 +1283,38 @@ answers `:unknown' and records the breach rather than opening."
     ;; Act / Assert
     (should (null (agent-repl-host-vendor-session-id "ws-1")))))
 
+(ert-deftest agent-repl-test-host-a-push-that-names-the-vendor-conversation-is-recorded-at-info ()
+  "The moment Emacs learns the durable id is visible in the logs."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (agent-repl-test-host--push
+     "ws-1" (list :arm :host
+                  :value (agent-repl-test-host--live :vendor-info nil)))
+    (setq agent-repl-test-host--logs nil)
+    ;; Act
+    (agent-repl-test-host--push
+     "ws-1" (list :arm :host :value (agent-repl-test-host--live)))
+    ;; Assert
+    (should (member '(:info . "elisp.host.vendor-session ws=ws-1 from=nil to=\"vendor-1\"")
+                    agent-repl-test-host--logs))))
+
+(ert-deftest agent-repl-test-host-a-push-that-keeps-the-vendor-conversation-records-no-change ()
+  "An unchanged vendor id is not a change and writes no record."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (agent-repl-test-host--push
+     "ws-1" (list :arm :host :value (agent-repl-test-host--live)))
+    (setq agent-repl-test-host--logs nil)
+    ;; Act
+    (agent-repl-test-host--push
+     "ws-1" (list :arm :host :value (agent-repl-test-host--live)))
+    ;; Assert
+    (should-not (cl-find-if (lambda (entry)
+                              (string-prefix-p "elisp.host.vendor-session" (cdr entry)))
+                            agent-repl-test-host--logs))))
+
 (ert-deftest agent-repl-test-host-state-push-runs-the-update-hook ()
   "Every host push is whole-replace, and consumers hear about it."
   (agent-repl-test-host--with-harness
