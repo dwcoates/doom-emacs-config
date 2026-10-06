@@ -15,7 +15,10 @@ const (
 	// the daemon's own SHIM_BUILD_SHA is set from; the two move together.
 	DefaultBuildSHA = "fake"
 	DefaultModel    = "opus"
-	MainAgentID     = "main"
+	// SDKVersion is the Agent SDK version the fake shim reports on every
+	// session start, as the real shim reports its installed package's.
+	SDKVersion  = "0.0.0-fakeshim"
+	MainAgentID = "main"
 	// DefaultColdContextTokens is the context size the fake measures a model
 	// switch against, matching DefaultContextUsage's own figure. A switch is
 	// refused `cold` when the caller's stated threshold is BELOW it, which is

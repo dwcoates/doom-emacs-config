@@ -517,7 +517,7 @@ func (s *server) StartSession(ctx context.Context, req *connect.Request[shimv1.S
 		Result: &shimv1.StartSessionResponse_Success{Success: &shimv1.StartSessionSuccess{
 			Session: &conversationv1.SessionStarted{
 				VendorSessionId: vendorID,
-				Runtime:         &conversationv1.SessionRuntime{ShimBuildSha: s.buildSHA()},
+				Runtime:         &conversationv1.SessionRuntime{ShimBuildSha: s.buildSHA(), SdkVersion: SDKVersion},
 				EffectiveModel:  &conversationv1.AgentModel{Name: DefaultModel},
 				// THE REAL SHIM'S UNSTATED MODE, which is `auto` (owner
 				// ruling 2026-09-14) and no longer the vendor's `default`.
