@@ -31,6 +31,7 @@ import type {
   NewsDigestOverlay,
   NewsDigestSection,
   NewsDigestSource,
+  NewsDigestWeek,
 } from "../../../proto/gen/ts/frontend/v1/news_digest_pb";
 import { createControl } from "../control.js";
 import { escapeHtml } from "../highlight.js";
@@ -263,6 +264,9 @@ export function drawOverlay(
 
   const body = document.createElement("div");
   body.className = "news-digest-body";
+  // "Since last week" leads, before the run's own sections. A digest made
+  // before the weekly section existed carries none and draws none.
+  if (overlay.week !== undefined) body.append(drawWeek(ctx, overlay.week, "NewsDigestOverlay.week"));
   overlay.sections.forEach((section, i) => body.append(drawSection(ctx, section, `NewsDigestOverlay.sections[${i}]`)));
 
   const footer = document.createElement("div");
@@ -308,8 +312,55 @@ export function drawSection(ctx: AppContext, section: NewsDigestSection, path: s
   return element;
 }
 
-/** One item: title, the effective date when one is stated, summary, links. */
-export function drawItem(ctx: AppContext, item: NewsDigestItem, path: string): HTMLElement {
+/**
+ * "Since last week": its heading, then either the week's regression risks,
+ * each drawn as any section's item with its reason under the summary, or the
+ * daemon's sentence saying nothing could regress agent-repl. The outcome arm
+ * is the section's `data-week`.
+ */
+export function drawWeek(ctx: AppContext, week: NewsDigestWeek, path: string): HTMLElement {
+  const heading = requireMessage(week.heading, `${path}.heading`);
+  const outcome = requireCase(week.outcome, `${path}.outcome`);
+  const element = document.createElement("section");
+  element.className = "news-digest-section";
+  element.setAttribute("data-week", outcome.case);
+  const headingElement = document.createElement("h2");
+  headingElement.className = "news-digest-section-heading";
+  headingElement.textContent = heading.text;
+  element.append(headingElement);
+  switch (outcome.case) {
+    case "risks": {
+      const items = outcome.value.items;
+      if (items.length === 0) throw new MalformedView(`${path}.outcome.risks.items`, "a week's risks are never empty");
+      items.forEach((risk, i) => {
+        const at = `${path}.outcome.risks.items[${i}]`;
+        const reason = requireMessage(risk.reason, `${at}.reason`);
+        element.append(drawItem(ctx, requireMessage(risk.item, `${at}.item`), `${at}.item`, reason.text));
+      });
+      break;
+    }
+    case "quiet": {
+      const quiet = document.createElement("div");
+      quiet.className = "news-digest-summary";
+      quiet.setAttribute("data-week-quiet", "");
+      quiet.textContent = outcome.value.text;
+      element.append(quiet);
+      break;
+    }
+    default: {
+      const other: { case: string } = outcome;
+      return unreachableArm(`${path}.outcome`, other.case);
+    }
+  }
+  return element;
+}
+
+/**
+ * One item: title, the effective date when one is stated, summary, the
+ * regression-risk REASON when the item is drawn in "Since last week" (as
+ * markdown, the summary's way), links.
+ */
+export function drawItem(ctx: AppContext, item: NewsDigestItem, path: string, reason?: string): HTMLElement {
   const title = requireMessage(item.title, `${path}.title`);
   const summary = requireMessage(item.summary, `${path}.summary`);
   if (item.links.length === 0) throw new MalformedView(`${path}.links`, "an item always links to its source");
@@ -336,7 +387,15 @@ export function drawItem(ctx: AppContext, item: NewsDigestItem, path: string): H
   const links = document.createElement("div");
   links.className = "news-digest-links";
   for (const link of item.links) links.append(renderExternalLink(ctx, { text: link.label, url: link.url }));
-  element.append(head, summaryElement, links);
+  element.append(head, summaryElement);
+  if (reason !== undefined) {
+    const reasonElement = document.createElement("div");
+    reasonElement.className = "news-digest-summary md";
+    reasonElement.setAttribute("data-risk-reason", "");
+    reasonElement.innerHTML = renderMarkdown(reason);
+    element.append(reasonElement);
+  }
+  element.append(links);
   return element;
 }
 
