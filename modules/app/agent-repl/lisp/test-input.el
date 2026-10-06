@@ -1781,6 +1781,32 @@ used to interrupt before the overhaul."
 
 ;;;; ---- Feed text zoom (C-+ / C--) --------------------------------------
 
+(ert-deftest agent-repl-test-input-zoom-keys-are-planted-in-every-evil-state ()
+  "Both zoom chords go into each Evil state map, where Doom's own would win."
+  ;; Arrange
+  (let ((planted nil)
+        (map (make-sparse-keymap)))
+    (cl-letf (((symbol-function 'evil-define-key*)
+               (lambda (state _map key def)
+                 (push (list state (key-description key) def) planted))))
+      ;; Act
+      (agent-repl-bind-feed-zoom-keys map))
+    ;; Assert
+    (should (= (length planted) (* 5 2)))
+    (should (member '(normal "C-+" agent-repl-feed-text-scale-increase) planted))
+    (should (member '(insert "C--" agent-repl-feed-text-scale-decrease) planted))))
+
+(ert-deftest agent-repl-test-input-zoom-keys-bind-the-map-itself ()
+  "The chords bind in the map itself too, observable under -Q."
+  ;; Arrange
+  (let ((map (make-sparse-keymap)))
+    (cl-letf (((symbol-function 'evil-define-key*) #'ignore))
+      ;; Act
+      (agent-repl-bind-feed-zoom-keys map))
+    ;; Assert
+    (should (eq (lookup-key map (kbd "C-+")) #'agent-repl-feed-text-scale-increase))
+    (should (eq (lookup-key map (kbd "C--")) #'agent-repl-feed-text-scale-decrease))))
+
 (ert-deftest agent-repl-test-input-feed-text-scale-increase-is-a-command ()
   "The zoom-in target is a real interactive command (so auto-repeat works)."
   (should (commandp #'agent-repl-feed-text-scale-increase)))

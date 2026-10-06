@@ -2182,6 +2182,13 @@ xwidget event handler would once the answer arrives."
                    (list #'agent-repl-frontend-copy-selection)))
     (should (= (length planted) (* 5 3)))))
 
+(ert-deftest agent-repl-test-the-webview-zooms-the-feed-too ()
+  "The webview buffer's map carries the zoom chords, as the composer's does."
+  (should (eq (lookup-key agent-repl-frontend-webview-mode-map (kbd "C-+"))
+              #'agent-repl-feed-text-scale-increase))
+  (should (eq (lookup-key agent-repl-frontend-webview-mode-map (kbd "C--"))
+              #'agent-repl-feed-text-scale-decrease)))
+
 (ert-deftest agent-repl-test-copy-mode-arms-on-every-adopted-webview ()
   "The adoption hook enables the copy chords."
   (should (memq #'agent-repl-frontend-webview-mode

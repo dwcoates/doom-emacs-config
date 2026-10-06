@@ -1955,12 +1955,14 @@ sits behind a harness re-read."
 ;; FEED TEXT ZOOM.  Bound with `define-key' rather than through the `map!' form
 ;; above for the same reasons `C-c C-k' is: the binding is OBSERVABLE under
 ;; `emacs -Q' (where `map!' is a no-op stub) so the keybinding suite can assert
-;; it, and it lives in BOTH evil states so the zoom works while typing.  These
-;; SHADOW Doom's global `C-+'/`C--' text-scale bindings inside the composer,
+;; it, and it lives in EVERY evil state (`agent-repl-bind-feed-zoom-keys') so
+;; the zoom works while typing.  These SHADOW Doom's `C-+'/`C--' bindings inside
+;; the composer and the webview (frontend.el binds the same chords there),
 ;; which is the intended override -- the agent-repl commands send the daemon
 ;; RPC and never change Emacs's own font.
-(define-key agent-repl-input-mode-map (kbd "C-+") #'agent-repl-feed-text-scale-increase)
-(define-key agent-repl-input-mode-map (kbd "C--") #'agent-repl-feed-text-scale-decrease)
+(agent-repl-bind-feed-zoom-keys agent-repl-input-mode-map)
+(with-eval-after-load 'evil
+  (agent-repl-bind-feed-zoom-keys agent-repl-input-mode-map))
 
 ;; PROMPT SELECTION (`C-S-p' / `C-S-n'): step through the prompts a rollback
 ;; can reach.  Bound with `define-key' for the same reasons as the zoom: the
