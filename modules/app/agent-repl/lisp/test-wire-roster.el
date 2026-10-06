@@ -485,10 +485,11 @@ WatchWorkspaceRoster push and every tab falls back to a stale blue status."
                   (concat "{\"key\":{\"taskId\":\"t-9\"},"
                           "\"header\":{\"label\":{\"text\":\"ship codec\"},"
                           "\"done\":{\"done\":true}},"
-                          "\"rows\":{\"rows\":[]}}"))
+                          "\"rows\":{\"rows\":[]},\"expanded\":{}}"))
                  '(:key (:task-id "t-9")
                    :header (:label (:text "ship codec") :done (:done t))
-                   :rows (:rows nil)))))
+                   :rows (:rows nil)
+                   :fold (:arm :expanded :value nil)))))
 
 (ert-deftest agent-repl-test-wire-roster-task-header-without-done-is-a-breach ()
   "The done check is an element of the task header, not an optional extra."
@@ -502,8 +503,9 @@ WatchWorkspaceRoster push and every tab falls back to a stale blue status."
   (should (equal (agent-repl-test-wire-roster--decode
                   #'agent-repl-wire-decode-roster-merged-section
                   (concat "{\"header\":{\"label\":{\"text\":\"Recently Merged\"},\"count\":{\"workspaces\":2}},"
-                          "\"rows\":{\"rows\":[]}}"))
-                 '(:header (:label (:text "Recently Merged") :count (:workspaces 2)) :rows (:rows nil)))))
+                          "\"rows\":{\"rows\":[]},\"collapsed\":{}}"))
+                 '(:header (:label (:text "Recently Merged") :count (:workspaces 2)) :rows (:rows nil)
+                   :fold (:arm :collapsed :value nil)))))
 
 (ert-deftest agent-repl-test-wire-roster-merged-section-refuses-a-key ()
   "A key on the merged section is an unknown field, refused."
@@ -528,8 +530,9 @@ WatchWorkspaceRoster push and every tab falls back to a stale blue status."
           "\"rows\":{\"rows\":[]},\"expanded\":{}}]},"
           "\"task\":{\"sections\":[]},"
           "\"recentlyMerged\":{\"header\":{\"label\":{\"text\":\"Recently Merged\"},\"count\":{\"workspaces\":2}},"
-          "\"rows\":{\"rows\":[]}},"
-          "\"current\":{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/1\"}}}")
+          "\"rows\":{\"rows\":[]},\"collapsed\":{}},"
+          "\"current\":{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/1\"}},"
+          "\"shownRepository\":{}}")
   "A whole roster: both groupings resolved, the merged section, and current.")
 
 (ert-deftest agent-repl-test-wire-roster-decodes-the-whole-roster ()
@@ -543,8 +546,10 @@ WatchWorkspaceRoster push and every tab falls back to a stale blue status."
                                             :fold (:arm :expanded :value nil))))
                    :task (:sections nil)
                    :recently-merged (:header (:label (:text "Recently Merged") :count (:workspaces 2))
-                                     :rows (:rows nil))
-                   :current (:workspace (:id "ws-1" :dir "/w/1"))))))
+                                     :rows (:rows nil)
+                                     :fold (:arm :collapsed :value nil))
+                   :current (:workspace (:id "ws-1" :dir "/w/1"))
+                   :shown (:arm :shown-repository :value nil)))))
 
 (ert-deftest agent-repl-test-wire-roster-absent-current-is-nil ()
   "UNSET current means there is no selected workspace."
@@ -553,7 +558,7 @@ WatchWorkspaceRoster push and every tab falls back to a stale blue status."
                              (concat "{\"repository\":{\"sections\":[]},"
                                      "\"task\":{\"sections\":[]},"
                                      "\"recentlyMerged\":{\"header\":{\"label\":{},\"count\":{}},"
-                                     "\"rows\":{}}}"))
+                                     "\"rows\":{},\"collapsed\":{}},\"shownRepository\":{}}"))
                             :current)
                  nil)))
 
@@ -588,6 +593,74 @@ WatchWorkspaceRoster push and every tab falls back to a stale blue status."
                           "\"recentlyMerged\":{\"header\":{\"label\":{},\"count\":{}},\"rows\":{}},"
                           "\"hibernating\":{}}"))
                  '("WorkspaceRoster" hibernating "unknown field"))))
+
+;;;; ---- The view state: folds and the grouping shown ----
+
+(defconst agent-repl-test-wire-roster--merged-json
+  "\"recentlyMerged\":{\"header\":{\"label\":{},\"count\":{}},\"rows\":{},\"collapsed\":{}}"
+  "A merged band, collapsed, as a JSON member.")
+
+(defun agent-repl-test-wire-roster--with-shown (shown)
+  "A roster JSON whose `shown' members are SHOWN (a JSON fragment, maybe empty)."
+  (concat "{\"repository\":{\"sections\":[]},\"task\":{\"sections\":[]},"
+          agent-repl-test-wire-roster--merged-json
+          (if (string-empty-p shown) "" (concat "," shown))
+          "}"))
+
+(ert-deftest agent-repl-test-wire-roster-decodes-the-task-grouping-shown ()
+  "WHICH GROUPING IS SHOWN is the daemon's view state, decoded as its arm."
+  (should (equal (plist-get (agent-repl-test-wire-roster--decode
+                             #'agent-repl-wire-decode-workspace-roster
+                             (agent-repl-test-wire-roster--with-shown "\"shownTask\":{}"))
+                            :shown)
+                 '(:arm :shown-task :value nil))))
+
+(ert-deftest agent-repl-test-wire-roster-without-a-grouping-shown-is-a-breach ()
+  "The grouping shown is never unset on the wire."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-workspace-roster
+                  (agent-repl-test-wire-roster--with-shown ""))
+                 '("WorkspaceRoster" shown "oneof is unset"))))
+
+(ert-deftest agent-repl-test-wire-roster-with-both-groupings-shown-is-a-breach ()
+  "Exactly one grouping is shown."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-workspace-roster
+                  (agent-repl-test-wire-roster--with-shown "\"shownTask\":{},\"shownRepository\":{}"))
+                 '("WorkspaceRoster" shown "oneof has more than one arm set"))))
+
+(ert-deftest agent-repl-test-wire-roster-decodes-a-task-section-fold ()
+  "A task section's fold is the daemon's view state, decoded as its arm."
+  (should (equal (plist-get (agent-repl-test-wire-roster--decode
+                             #'agent-repl-wire-decode-roster-task-section
+                             (concat "{\"key\":{\"taskId\":\"t1\"},"
+                                     "\"header\":{\"label\":{},\"done\":{}},"
+                                     "\"rows\":{},\"collapsed\":{}}"))
+                            :fold)
+                 '(:arm :collapsed :value nil))))
+
+(ert-deftest agent-repl-test-wire-roster-a-task-section-without-a-fold-is-a-breach ()
+  "A task section's fold is never unset on the wire."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-task-section
+                  (concat "{\"key\":{\"taskId\":\"t1\"},"
+                          "\"header\":{\"label\":{},\"done\":{}},\"rows\":{}}"))
+                 '("RosterTaskSection" fold "oneof is unset"))))
+
+(ert-deftest agent-repl-test-wire-roster-decodes-the-merged-band-fold ()
+  "The merged band's fold is the daemon's view state, decoded as its arm."
+  (should (equal (plist-get (agent-repl-test-wire-roster--decode
+                             #'agent-repl-wire-decode-roster-merged-section
+                             "{\"header\":{\"label\":{},\"count\":{}},\"rows\":{},\"expanded\":{}}")
+                            :fold)
+                 '(:arm :expanded :value nil))))
+
+(ert-deftest agent-repl-test-wire-roster-a-merged-band-without-a-fold-is-a-breach ()
+  "The merged band's fold is never unset on the wire."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-merged-section
+                  "{\"header\":{\"label\":{},\"count\":{}},\"rows\":{}}")
+                 '("RosterMergedSection" fold "oneof is unset"))))
 
 ;;;; ---- The rpc ----
 
