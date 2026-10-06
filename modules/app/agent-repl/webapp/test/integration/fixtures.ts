@@ -33,6 +33,7 @@ import { PromptOrigin } from "../../../proto/gen/ts/conversation/v1/prompt_origi
 import {
   FeedIdSchema,
   FeedPageSchema,
+  FeedOutcomeMarkerSchema,
   FeedRowSchema,
   FeedTurnActivitySchema,
   type FeedId,
@@ -529,7 +530,13 @@ export const planUnit = (state: PlanState): ActivityUnit => ({
       state === "planned"
         ? { case: "planned", value: { prose: { markdown: "1. do it" }, edit: { path: PLAN_EDIT_PATH } } }
         : state === "failed"
-          ? { case: "failed", value: { text: "planning refused" } }
+          ? {
+              case: "failed",
+              value: {
+                text: "planning refused",
+                marker: { label: { text: "plan failed" }, detail: { text: "planning refused" }, family: { case: "neutral", value: {} } },
+              },
+            }
           : { case: "planning", value: {} },
   },
 });
@@ -789,6 +796,58 @@ export const turnEndedConcludedRow = (answer: FeedId, overrides?: Partial<RowIni
     overrides,
   );
 
+/** The vendor's message an errored fixture's marker expands to, by default. */
+export const turnErrorMessage = (arm: TurnErrorArm): string => `the turn failed: ${arm}`;
+
+/**
+ * The OUTCOME MARKER the daemon composes for an errored ending of ARM: the
+ * agent-repl family for a query or process death, neutral for a Stop hook,
+ * and the vendor family, its detail the arm, for everything else.
+ */
+export function turnErrorMarker(
+  arm: TurnErrorArm,
+  init?: { retryAtMs?: bigint; message?: string },
+): MessageInitShape<typeof FeedOutcomeMarkerSchema> {
+  if (arm === "stopHookPrevented") {
+    return { label: { text: "Stop hook ended the run" }, family: { case: "neutral", value: {} } };
+  }
+  if (arm === "queryDied" || arm === "agentProcessDied") {
+    const process = arm === "agentProcessDied";
+    return {
+      label: { text: "agent-repl" },
+      detail: { text: process ? "process died" : "query died" },
+      family: {
+        case: "agentReplFault",
+        value: {
+          expansion: {
+            time: { atMs: 9_000n },
+            whatDied: process
+              ? { what: { case: "process", value: { line: { text: TURN_ERROR_HEADLINES[arm] } } } }
+              : { what: { case: "query", value: { line: { text: TURN_ERROR_HEADLINES[arm] } } } },
+          },
+        },
+      },
+    };
+  }
+  // AN UNMODELED CLASS is named by the vendor's own type, as the daemon names it.
+  const cause = arm === "vendorUnmodeled" ? "vendor_teapot" : arm;
+  return {
+    label: { text: "vendor error" },
+    detail: { text: cause },
+    family: {
+      case: "vendorFault",
+      value: {
+        expansion: {
+          time: { atMs: 9_000n },
+          errorType: { text: cause },
+          message: { text: init?.message ?? turnErrorMessage(arm) },
+          retryAt: init?.retryAtMs === undefined ? undefined : { atMs: init.retryAtMs },
+        },
+      },
+    },
+  };
+}
+
 export const turnEndedErroredRow = (
   arm: TurnErrorArm,
   init?: { retryAfterMs?: bigint; message?: string; headline?: string },
@@ -797,9 +856,13 @@ export const turnEndedErroredRow = (
   const outcome = {
     case: "errored",
     value: {
-      message: { text: init?.message ?? `the turn failed: ${arm}` },
+      message: { text: init?.message ?? turnErrorMessage(arm) },
       headline: { text: init?.headline ?? TURN_ERROR_HEADLINES[arm] },
       error: turnErrorValue(arm, init?.retryAfterMs),
+      marker: turnErrorMarker(arm, {
+        message: init?.message,
+        retryAtMs: init?.retryAfterMs === undefined ? undefined : 9_000n + init.retryAfterMs,
+      }),
     },
   } as TurnEndedOutcome;
   return feedRow({ case: "turnEnded", value: { endedAtMs: 9_000n, outcome } }, overrides);
@@ -807,7 +870,16 @@ export const turnEndedErroredRow = (
 
 export const turnEndedInterruptedRow = (overrides?: Partial<RowInit>): FeedRow =>
   feedRow(
-    { case: "turnEnded", value: { endedAtMs: 9_000n, outcome: { case: "interrupted", value: {} } } },
+    {
+      case: "turnEnded",
+      value: {
+        endedAtMs: 9_000n,
+        outcome: {
+          case: "interrupted",
+          value: { marker: { label: { text: "interrupted" }, family: { case: "neutral", value: {} } } },
+        },
+      },
+    },
     overrides,
   );
 
@@ -844,13 +916,20 @@ export function permissionRow(
                     case: "deniedUndecidable",
                     value: { text: "denied for want of a decider" },
                   }
-                : {
-                    case: state as Exclude<
-                      PermissionAnswer,
-                      "deniedByPolicy" | "deniedUndecidable"
-                    >,
-                    value: {},
-                  },
+                : state === "deniedByUser"
+                  ? {
+                      case: "deniedByUser",
+                      value: {
+                        marker: { label: { text: "permission denied by you" }, family: { case: "neutral", value: {} } },
+                      },
+                    }
+                  : {
+                      case: state as Exclude<
+                        PermissionAnswer,
+                        "deniedByPolicy" | "deniedUndecidable" | "deniedByUser"
+                      >,
+                      value: {},
+                    },
         },
       }
     : state === "abandoned"
@@ -990,7 +1069,21 @@ const separationKind = (arm: SeparationArm): SeparationKind => {
         value: { outcome: { case: "kept", value: { path: { text: WORKTREE_PATH } } } },
       };
     case "compactionFailed":
-      return { case: "compactionFailed", value: { error: COMPACTION_FAILED_ERROR } };
+      return {
+        case: "compactionFailed",
+        value: {
+          error: COMPACTION_FAILED_ERROR,
+          marker: {
+            label: { text: "compaction failed" },
+            family: {
+              case: "vendorFault",
+              value: {
+                expansion: { errorType: { text: "compaction_failed" }, message: { text: COMPACTION_FAILED_ERROR } },
+              },
+            },
+          },
+        },
+      };
   }
 };
 
@@ -1541,6 +1634,7 @@ export const FOOTER_SALIENT_KINDS: Record<string, object> = {
   contextBudget: { text: "84% of the window" },
   vendorStart: { text: "Claude SDK did not start (attempt 3): overloaded · retrying" },
   offline: { text: "cannot reach api.anthropic.com: no route to host" },
+  turnEnded: { text: "rate limited by the vendor", retryAt: { atMs: 60_000n } },
 };
 
 /** The salient kinds every status arm carries after its own and `update`. */
@@ -1570,8 +1664,8 @@ export const FOOTER_STATUS_SALIENTS: Record<string, readonly string[]> = {
   mergeFailed: ["mergeStep", "update", ...SHARED_SALIENTS],
   merged: ["mergeStep", "update", ...SHARED_SALIENTS],
   background: ["update", ...SHARED_SALIENTS],
-  vendorFault: ["authenticating", "fault", "update", "retrying", "vendorStart", ...SHARED_SALIENTS],
-  agentReplFault: ["startFailed", "fault", "update", ...SHARED_SALIENTS],
+  vendorFault: ["authenticating", "fault", "update", "retrying", "vendorStart", "turnEnded", ...SHARED_SALIENTS],
+  agentReplFault: ["startFailed", "fault", "update", "turnEnded", ...SHARED_SALIENTS],
   networkFault: ["offline", "update", ...SHARED_SALIENTS],
   closing: ["closeBlocked", "update", ...SHARED_SALIENTS],
   loading: ["update", ...SHARED_SALIENTS],
@@ -2187,6 +2281,7 @@ export const ROSTER_STATUS_ARMS = [
   "startFailed",
   "degraded",
   "dead",
+  "turnDied",
   "merging",
   "mergeQueued",
   "mergeFailed",

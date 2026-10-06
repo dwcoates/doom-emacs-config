@@ -24,7 +24,6 @@ import {
   FEED_PAGE_ERROR_ARMS,
   RETRYING_TURN_ERROR_ARMS,
   TURN_ERROR_ARMS,
-  TURN_ERROR_HEADLINES,
   WORKSPACE_ID,
   clientFailure,
   feedId,
@@ -32,6 +31,7 @@ import {
   turnEndedConcludedRow,
   turnEndedErroredRow,
   turnEndedInterruptedRow,
+  turnErrorMarker,
   type ClientFailureArm,
 } from "./fixtures";
 
@@ -135,7 +135,7 @@ describe("turn error arms", () => {
     expect(harness.row("row-1")?.querySelector(`[data-turn-error="${arm}"]`)).not.toBeNull();
   });
 
-  it.each(TURN_ERROR_ARMS)("draws the %s arm's composed headline verbatim", async (arm) => {
+  it.each(TURN_ERROR_ARMS)("draws the %s arm as the outcome marker the daemon composed", async (arm) => {
     // Arrange
     harness = await startHarness();
     await harness.fake.awaitStream("watchFeed");
@@ -143,23 +143,30 @@ describe("turn error arms", () => {
     harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, turnEndedErroredRow(arm));
     await harness.settle();
     // Assert: the daemon composed it; the client holds no per-arm table.
-    expect(harness.row("row-1")?.textContent).toContain(TURN_ERROR_HEADLINES[arm]);
+    const marker = turnErrorMarker(arm);
+    const words = marker.detail === undefined ? marker.label?.text : `${marker.label?.text ?? ""} · ${marker.detail.text}`;
+    expect(harness.row("row-1")?.querySelector(".outcome-marker-text")?.textContent).toBe(words);
   });
 
-  it.each(TURN_ERROR_ARMS)("draws the %s arm's composed message verbatim", async (arm) => {
-    // Arrange
-    harness = await startHarness();
-    await harness.fake.awaitStream("watchFeed");
-    // Act
-    harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, turnEndedErroredRow(arm, { message: `it broke: ${arm}` }));
-    await harness.settle();
-    // Assert
-    expect(harness.row("row-1")?.textContent).toContain(`it broke: ${arm}`);
-  });
+  it.each(TURN_ERROR_ARMS.filter((arm) => turnErrorMarker(arm).family?.case === "vendorFault"))(
+    "carries the %s arm's vendor message verbatim in the marker's expansion",
+    async (arm) => {
+      // Arrange
+      harness = await startHarness();
+      await harness.fake.awaitStream("watchFeed");
+      // Act
+      harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, turnEndedErroredRow(arm, { message: `it broke: ${arm}` }));
+      await harness.settle();
+      // Assert
+      expect(harness.row("row-1")?.querySelector('[data-line="message"] .outcome-marker-value')?.textContent).toBe(
+        `it broke: ${arm}`,
+      );
+    },
+  );
 });
 
-describe("the ended-turn bubble (owner ruling 2026-09-24)", () => {
-  it.each(TURN_ERROR_ARMS)("draws a red-bordered response bubble stating the %s ending", async (arm) => {
+describe("the outcome marker replaces the ended-turn bubble (owner ruling 2026-10-06)", () => {
+  it.each(TURN_ERROR_ARMS)("draws no bubble for the %s ending", async (arm) => {
     // Arrange
     harness = await startHarness();
     await harness.fake.awaitStream("watchFeed");
@@ -167,11 +174,23 @@ describe("the ended-turn bubble (owner ruling 2026-09-24)", () => {
     harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, turnEndedErroredRow(arm));
     await harness.settle();
     // Assert
-    const bubble = harness.row("row-1")?.querySelector('.bubble[data-role="response"][data-variant="turn-ended"]');
-    expect(bubble?.textContent).toBe(TURN_ERROR_HEADLINES[arm]);
+    expect(harness.row("row-1")?.querySelector(".bubble")).toBeNull();
   });
 
-  it("draws one for an interrupted turn", async () => {
+  it.each(TURN_ERROR_ARMS)("paints the %s ending's marker with its family", async (arm) => {
+    // Arrange
+    harness = await startHarness();
+    await harness.fake.awaitStream("watchFeed");
+    // Act
+    harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, turnEndedErroredRow(arm));
+    await harness.settle();
+    // Assert
+    expect(harness.row("row-1")?.querySelector(".outcome-marker")?.getAttribute("data-family")).toBe(
+      turnErrorMarker(arm).family?.case,
+    );
+  });
+
+  it("draws the neutral interrupted marker for an interrupted turn", async () => {
     // Arrange
     harness = await startHarness();
     await harness.fake.awaitStream("watchFeed");
@@ -179,10 +198,14 @@ describe("the ended-turn bubble (owner ruling 2026-09-24)", () => {
     harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, turnEndedInterruptedRow());
     await harness.settle();
     // Assert
-    expect(harness.row("row-1")?.querySelector('.bubble[data-variant="turn-ended"]')).not.toBeNull();
+    const marker = harness.row("row-1")?.querySelector(".outcome-marker");
+    expect([marker?.getAttribute("data-family"), marker?.querySelector(".outcome-marker-label")?.textContent]).toEqual([
+      "neutral",
+      "interrupted",
+    ]);
   });
 
-  it("draws none for a normal completed turn", async () => {
+  it("draws nothing for a normal completed turn", async () => {
     // Arrange
     harness = await startHarness();
     await harness.fake.awaitStream("watchFeed");
@@ -190,12 +213,26 @@ describe("the ended-turn bubble (owner ruling 2026-09-24)", () => {
     harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, turnEndedConcludedRow(feedId("r1")));
     await harness.settle();
     // Assert
-    expect(harness.row("row-1")?.querySelector(".bubble")).toBeNull();
+    expect([harness.row("row-1")?.querySelector(".bubble"), harness.row("row-1")?.querySelector(".outcome-marker")]).toEqual([null, null]);
+  });
+
+  it("opens a fault's expansion on a click, inside the row", async () => {
+    // Arrange
+    harness = await startHarness();
+    await harness.fake.awaitStream("watchFeed");
+    harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, turnEndedErroredRow("internal"));
+    await harness.settle();
+    const pill = harness.row("row-1")?.querySelector<HTMLElement>(".outcome-marker-pill");
+    // Act
+    pill?.click();
+    await harness.settle();
+    // Assert
+    expect((harness.row("row-1")?.querySelector(".outcome-marker-expansion") as HTMLElement | null)?.hidden).toBe(false);
   });
 });
 
 describe.each(RETRYING_TURN_ERROR_ARMS)("the %s arm's retry countdown", (arm) => {
-  it("draws a countdown from the served deadline", async () => {
+  it("counts down to the served instant in the marker's expansion", async () => {
     // Arrange
     harness = await startHarness();
     await harness.fake.awaitStream("watchFeed");
@@ -203,7 +240,7 @@ describe.each(RETRYING_TURN_ERROR_ARMS)("the %s arm's retry countdown", (arm) =>
     harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, turnEndedErroredRow(arm, { retryAfterMs: 30_000n }));
     await harness.settle();
     // Assert
-    expect(harness.row("row-1")?.querySelector("[data-retry-countdown]")).not.toBeNull();
+    expect(harness.row("row-1")?.querySelector(".outcome-marker-retry")).not.toBeNull();
   });
 
   it("ticks the countdown down as time passes", async () => {
@@ -212,26 +249,22 @@ describe.each(RETRYING_TURN_ERROR_ARMS)("the %s arm's retry countdown", (arm) =>
     await harness.fake.awaitStream("watchFeed");
     harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, turnEndedErroredRow(arm, { retryAfterMs: 30_000n }));
     await harness.settle();
-    const before = harness.$("[data-retry-countdown]")?.textContent;
+    const before = harness.$(".outcome-marker-retry")?.textContent;
     // Act
     await harness.tick(10_000);
     // Assert
-    expect(harness.$("[data-retry-countdown]")?.textContent).not.toBe(before);
+    expect(harness.$(".outcome-marker-retry")?.textContent).not.toBe(before);
   });
 
-  it("draws no countdown when the arm carries no deadline", async () => {
+  it("draws no countdown when the vendor stated no wait", async () => {
     // Arrange
     harness = await startHarness();
     await harness.fake.awaitStream("watchFeed");
-    // Act: retry_after_ms is `optional`; absent means draw nothing, never tick.
-    harness.fake.pushRow(
-      WORKSPACE_ID,
-      ROOT_FEED,
-      turnEndedErroredRow(arm, { retryAfterMs: undefined }),
-    );
+    // Act
+    harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, turnEndedErroredRow(arm, { retryAfterMs: undefined }));
     await harness.settle();
     // Assert
-    expect(harness.$("[data-retry-countdown]")).not.toBeNull();
+    expect(harness.$(".outcome-marker-retry")).toBeNull();
   });
 });
 
@@ -259,35 +292,18 @@ describe("the two token-limit arms", () => {
   });
 
   it("reads the two arms differently because the DAEMON worded them differently", async () => {
-    // Arrange: the distinction lives in the served headline, not in a client
-    // table — the renderer holds no per-arm sentences at all.
+    // Arrange: the distinction lives in the served marker, not in a client
+    // table — the renderer holds no per-arm words at all.
     harness = await startHarness();
     await harness.fake.awaitStream("watchFeed");
     harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, turnEndedErroredRow("maxTokens"));
     await harness.settle();
-    const truncated = harness.row("row-1")?.textContent ?? "";
+    const truncated = harness.row("row-1")?.querySelector(".outcome-marker-text")?.textContent ?? "";
     // Act
     harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, turnEndedErroredRow("maxOutputTokens"));
     await harness.settle();
     // Assert
-    expect(harness.row("row-1")?.textContent).not.toBe(truncated);
-  });
-
-  it("draws whatever headline the daemon serves, holding no table of its own", async () => {
-    // Arrange: serve max_output_tokens' wording ON the max_tokens arm. A
-    // renderer with its own per-arm sentence would override this; a renderer
-    // that draws the headline verbatim shows exactly what arrived.
-    harness = await startHarness();
-    await harness.fake.awaitStream("watchFeed");
-    // Act
-    harness.fake.pushRow(
-      WORKSPACE_ID,
-      ROOT_FEED,
-      turnEndedErroredRow("maxTokens", { headline: TURN_ERROR_HEADLINES.maxOutputTokens }),
-    );
-    await harness.settle();
-    // Assert
-    expect(harness.row("row-1")?.textContent).toContain(TURN_ERROR_HEADLINES.maxOutputTokens);
+    expect(harness.row("row-1")?.querySelector(".outcome-marker-text")?.textContent).not.toBe(truncated);
   });
 });
 
@@ -300,7 +316,7 @@ describe("the unmodeled vendor arm", () => {
     harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, turnEndedErroredRow("vendorUnmodeled"));
     await harness.settle();
     // Assert
-    expect(harness.row("row-1")?.textContent).toContain("vendor_teapot");
+    expect(harness.row("row-1")?.querySelector(".outcome-marker-detail")?.textContent).toContain("vendor_teapot");
   });
 });
 

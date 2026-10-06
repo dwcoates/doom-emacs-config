@@ -550,6 +550,39 @@ describe("the salient kinds", () => {
     ).toBe(text);
   });
 
+  it.each([
+    ["vendorFault", "the vendor API is overloaded"],
+    ["agentReplFault", "the agent process died, and the turn it was running ended with it"],
+  ])("draws a %s turn fault's per-cause sentence verbatim", (status, text) => {
+    const cell = salientCell("turnEnded", { text }, status);
+    expect(cell.querySelector(".footer-activity-turn-ended")?.textContent).toBe(text);
+  });
+
+  it("counts a turn fault's stated wait down beside its sentence", () => {
+    const cell = salientCell(
+      "turnEnded",
+      { text: "rate limited by the vendor", retryAt: { atMs: BigInt(NOW + 42_000) } },
+      "vendorFault",
+    );
+    expect(cell.querySelector(".footer-activity-turn-ended")?.textContent).toBe(
+      "rate limited by the vendor · retry in 42s",
+    );
+  });
+
+  it("says a turn fault's wait is over once it has passed", () => {
+    const cell = salientCell(
+      "turnEnded",
+      { text: "rate limited by the vendor", retryAt: { atMs: BigInt(NOW - 1_000) } },
+      "vendorFault",
+    );
+    expect(cell.querySelector(".footer-turn-retry")?.textContent).toBe("ready to retry");
+  });
+
+  it("draws no countdown for a turn fault that stated no wait", () => {
+    const cell = salientCell("turnEnded", { text: "stopped at the turn limit" }, "vendorFault");
+    expect(cell.querySelector(".footer-turn-retry")).toBeNull();
+  });
+
   it("colours the retry ATTEMPT as its own datum", () => {
     const cell = salientCell(
       "retrying",
