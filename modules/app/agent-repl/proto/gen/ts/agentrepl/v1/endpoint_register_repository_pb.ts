@@ -48,7 +48,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_register_repository.proto.
  */
 export const file_agentrepl_v1_endpoint_register_repository: GenFile = /*@__PURE__*/
-  fileDesc("Ci9hZ2VudHJlcGwvdjEvZW5kcG9pbnRfcmVnaXN0ZXJfcmVwb3NpdG9yeS5wcm90bxIMYWdlbnRyZXBsLnYxIikKGVJlZ2lzdGVyUmVwb3NpdG9yeVJlcXVlc3QSDAoEcGF0aBgBIAEoCSKaAQoaUmVnaXN0ZXJSZXBvc2l0b3J5UmVzcG9uc2USOgoHc3VjY2VzcxgBIAEoCzInLmFnZW50cmVwbC52MS5SZWdpc3RlclJlcG9zaXRvcnlTdWNjZXNzSAASNgoFZXJyb3IYAiABKAsyJS5hZ2VudHJlcGwudjEuUmVnaXN0ZXJSZXBvc2l0b3J5RXJyb3JIAEIICgZyZXN1bHQiswEKGVJlZ2lzdGVyUmVwb3NpdG9yeVN1Y2Nlc3MSLwoKcmVwb3NpdG9yeRgBIAEoCzIbLndvcmtzcGFjZS52MS5SZXBvc2l0b3J5UmVmEhUKDWFscmVhZHlfa25vd24YAiABKAgSLQoJd29ya3NwYWNlGAMgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhIfChd3b3Jrc3BhY2VfYWxyZWFkeV9rbm93bhgEIAEoCCK+AQoXUmVnaXN0ZXJSZXBvc2l0b3J5RXJyb3ISTwoTbm90X2luX2FfcmVwb3NpdG9yeRgBIAEoCzIwLmFnZW50cmVwbC52MS5SZWdpc3RlclJlcG9zaXRvcnlOb3RJbkFSZXBvc2l0b3J5SAASSQoPdW5yZWFkYWJsZV9wYXRoGAIgASgLMi4uYWdlbnRyZXBsLnYxLlJlZ2lzdGVyUmVwb3NpdG9yeVVucmVhZGFibGVQYXRoSABCBwoFY2F1c2UiJAoiUmVnaXN0ZXJSZXBvc2l0b3J5Tm90SW5BUmVwb3NpdG9yeSIiCiBSZWdpc3RlclJlcG9zaXRvcnlVbnJlYWRhYmxlUGF0aEIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_workspace_v1_workspace]);
+  fileDesc("Ci9hZ2VudHJlcGwvdjEvZW5kcG9pbnRfcmVnaXN0ZXJfcmVwb3NpdG9yeS5wcm90bxIMYWdlbnRyZXBsLnYxIikKGVJlZ2lzdGVyUmVwb3NpdG9yeVJlcXVlc3QSDAoEcGF0aBgBIAEoCSKaAQoaUmVnaXN0ZXJSZXBvc2l0b3J5UmVzcG9uc2USOgoHc3VjY2VzcxgBIAEoCzInLmFnZW50cmVwbC52MS5SZWdpc3RlclJlcG9zaXRvcnlTdWNjZXNzSAASNgoFZXJyb3IYAiABKAsyJS5hZ2VudHJlcGwudjEuUmVnaXN0ZXJSZXBvc2l0b3J5RXJyb3JIAEIICgZyZXN1bHQiswEKGVJlZ2lzdGVyUmVwb3NpdG9yeVN1Y2Nlc3MSLwoKcmVwb3NpdG9yeRgBIAEoCzIbLndvcmtzcGFjZS52MS5SZXBvc2l0b3J5UmVmEhUKDWFscmVhZHlfa25vd24YAiABKAgSLQoJd29ya3NwYWNlGAMgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhIfChd3b3Jrc3BhY2VfYWxyZWFkeV9rbm93bhgEIAEoCCKeAgoXUmVnaXN0ZXJSZXBvc2l0b3J5RXJyb3ISTwoTbm90X2luX2FfcmVwb3NpdG9yeRgBIAEoCzIwLmFnZW50cmVwbC52MS5SZWdpc3RlclJlcG9zaXRvcnlOb3RJbkFSZXBvc2l0b3J5SAASSQoPdW5yZWFkYWJsZV9wYXRoGAIgASgLMi4uYWdlbnRyZXBsLnYxLlJlZ2lzdGVyUmVwb3NpdG9yeVVucmVhZGFibGVQYXRoSAASXgoaaW5zaWRlX3RlbXBvcmFyeV9kaXJlY3RvcnkYAyABKAsyOC5hZ2VudHJlcGwudjEuUmVnaXN0ZXJSZXBvc2l0b3J5SW5zaWRlVGVtcG9yYXJ5RGlyZWN0b3J5SABCBwoFY2F1c2UiJAoiUmVnaXN0ZXJSZXBvc2l0b3J5Tm90SW5BUmVwb3NpdG9yeSIiCiBSZWdpc3RlclJlcG9zaXRvcnlVbnJlYWRhYmxlUGF0aCJRCipSZWdpc3RlclJlcG9zaXRvcnlJbnNpZGVUZW1wb3JhcnlEaXJlY3RvcnkSCwoDZGlyGAEgASgJEhYKDnRlbXBvcmFyeV9yb290GAIgASgJQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.RegisterRepositoryRequest
@@ -198,6 +198,14 @@ export type RegisterRepositoryError = Message<"agentrepl.v1.RegisterRepositoryEr
      */
     value: RegisterRepositoryUnreadablePath;
     case: "unreadablePath";
+  } | {
+    /**
+     * The repository's main worktree lies inside a temporary directory.
+     *
+     * @generated from field: agentrepl.v1.RegisterRepositoryInsideTemporaryDirectory inside_temporary_directory = 3;
+     */
+    value: RegisterRepositoryInsideTemporaryDirectory;
+    case: "insideTemporaryDirectory";
   } | { case: undefined; value?: undefined };
 };
 
@@ -233,4 +241,36 @@ export type RegisterRepositoryUnreadablePath = Message<"agentrepl.v1.RegisterRep
  */
 export const RegisterRepositoryUnreadablePathSchema: GenMessage<RegisterRepositoryUnreadablePath> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_register_repository, 5);
+
+/**
+ * The directory lies inside a temporary directory (owner ruling,
+ * 2026-10-06): agent-repl does not register temporary folders. A temporary
+ * folder is scratch space the OS or a test run purges, so a roster row for
+ * it names a directory about to vanish.
+ *
+ * @generated from message agentrepl.v1.RegisterRepositoryInsideTemporaryDirectory
+ */
+export type RegisterRepositoryInsideTemporaryDirectory = Message<"agentrepl.v1.RegisterRepositoryInsideTemporaryDirectory"> & {
+  /**
+   * The refused directory, canonical (symlinks resolved, on-disk case).
+   *
+   * @generated from field: string dir = 1;
+   */
+  dir: string;
+
+  /**
+   * The canonical temporary root `dir` lies inside: the process's own
+   * temporary directory, `/tmp`, `/var/tmp` or `/var/folders`.
+   *
+   * @generated from field: string temporary_root = 2;
+   */
+  temporaryRoot: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.RegisterRepositoryInsideTemporaryDirectory.
+ * Use `create(RegisterRepositoryInsideTemporaryDirectorySchema)` to create a new message.
+ */
+export const RegisterRepositoryInsideTemporaryDirectorySchema: GenMessage<RegisterRepositoryInsideTemporaryDirectory> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_register_repository, 6);
 
