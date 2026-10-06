@@ -326,9 +326,12 @@ func (o *orchestrator) recoverResumable(ctx context.Context, repo wsm.RepoKey, l
 	label := branchLabel(doc.Subject.Branch, doc.Subject.subject().targetLabel())
 	o.deps.Feed.UpsertDurable(ws, feedid.Feed{Root: true}, headRow(ws, lease.ID, label, doc.QueuedMS, nil))
 	o.publish(ws, doc.Facts.footerFacts(o.deps.Now()))
-	o.log(ctx, ws).Info(op, "a merge a restart interrupted resumes at the step it recorded", dlog.Context{
-		"workspace": string(ws), "repo": string(repo), "lease": string(lease.ID), "step": doc.Step,
-		"round": doc.Active.N, "turn": doc.Turn})
+	// THE RUN LOG CARRIES IT TOO: a merge resumed is a fact about the
+	// restart, and the durable run log is where a boot sequence is read.
+	fields := dlog.Context{"workspace": string(ws), "repo": string(repo), "lease": string(lease.ID), "step": doc.Step,
+		"round": doc.Active.N, "turn": doc.Turn}
+	o.log(ctx, ws).Info(op, "a merge a restart interrupted resumes at the step it recorded", fields)
+	o.deps.Log.Global().Info(op, "a merge a restart interrupted resumes at the step it recorded", fields)
 	return nil
 }
 

@@ -264,10 +264,17 @@ func (r *run) label() string {
 
 // runAdmitted is one admitted merge, from its start to its end: the run, then
 // the release of everything it held. It answers the error the run ended on.
+//
+// A RUN THE DAEMON'S EXIT SUSPENDED DID NOT FAIL: its step's error is the exit
+// taking it away, which its suspension already recorded, so the pump is told
+// nothing went wrong.
 func (o *orchestrator) runAdmitted(ctx context.Context, repo wsm.RepoKey, ws ids.WorkspaceID, lock *repoLock) error {
 	r, err := o.start(ctx, repo, ws, lock)
 	if r == nil {
 		return err
+	}
+	if r.exiting() {
+		err = nil
 	}
 	close(r.finished)
 	return err
@@ -412,13 +419,14 @@ func (r *run) admit(ctx context.Context) error {
 	// no longer counted among the waiting; it stands "next" until its first
 	// step begins.
 	r.queueRound = r.openTab(ctx, TabQueue)
+	r.setStep(ctx, footer.StepEnqueued, func(f *footer.MergeFacts) { f.QueuePlace, f.QueueWaiting = 1, 1 })
 	// THE FIRST RECORD IS WRITTEN BEFORE ANY STEP ACTS: from here on a
-	// restart resumes this merge rather than starting it again.
+	// restart resumes this merge rather than starting it again. It follows
+	// the step's facts, so a resume draws the footer on the step it names.
 	if err := r.checkpoint(ctx, TabQueue, nil); err != nil {
 		r.end(ctx, err)
 		return err
 	}
-	r.setStep(ctx, footer.StepEnqueued, func(f *footer.MergeFacts) { f.QueuePlace, f.QueueWaiting = 1, 1 })
 	r.head(nil)
 	if err := o.republishQueue(ctx, r.repo); err != nil {
 		r.end(ctx, fmt.Errorf("could not publish the queue: %w", err))

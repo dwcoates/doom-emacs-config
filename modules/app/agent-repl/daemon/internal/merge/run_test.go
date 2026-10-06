@@ -642,3 +642,26 @@ func TestAwaitWorkspacesFreeAnswersTheFailedWait(t *testing.T) {
 		t.Fatalf("awaitWorkspacesFree = %v, want the wait's failure", err)
 	}
 }
+
+func TestASuspendedRunTellsThePumpNothingFailed(t *testing.T) {
+	// Arrange: a merge held inside its test gate.
+	h := newHarness(t)
+	h.emacsRepo()
+	inGate, release := make(chan struct{}), make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	h.runner.before = func() {
+		close(inGate)
+		<-release
+	}
+	enqueue(t, h)
+	done := admitAsync(h, context.Background())
+	<-inGate
+
+	// Act.
+	h.o.Drain(context.Background())
+
+	// Assert.
+	if err := <-done; err != nil {
+		t.Fatalf("the pump was told %v, want no failure for a suspended run", err)
+	}
+}
