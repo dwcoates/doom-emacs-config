@@ -848,6 +848,28 @@ unchanged.
   - The tray draws the new verdict with a green badge; the footer reads
     "after this tool call".
 
+### 7. The usage line is the account's, and it is never empty (2026-10-06)
+
+- **Decided by** the owner: the activity cell always shows something, and with
+  nothing salient or transient standing it shows the account's usage.
+  - Live, two workspaces on the work account drew an empty cell after a daemon
+    restart while one on the personal account drew its figures.
+  - The work account is an enterprise seat: the vendor's usage service answers
+    for it with no five-hour or weekly window, which the line had no arm for.
+- **What changed, on the wire:**
+  - `FooterActivityEnduring.no_allowance` (tag 4,
+    `FooterActivityEnduringNoAllowance`) is the account whose usage service
+    reports no session allowance.
+  - `FooterActivityEnduring.unobserved` is now drawn as words: "usage not yet
+    seen for this account".
+  - `FooterAllowance.resets_at_s` now states that a passed reset draws the
+    allowance as "<label> reset since last seen" with no percentage.
+- **What changed, in the systems:**
+  - The daemon keeps the usage per account root, shared by every workspace on
+    it, and persists the last figures per account in its state store.
+  - The webapp words every enduring arm, and lapses an allowance on its own
+    clock.
+
 ## Sweep
 
 - Nothing in `footer.proto` is left unreferenced after the change.

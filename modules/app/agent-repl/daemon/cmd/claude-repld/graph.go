@@ -376,7 +376,18 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// accumulation that edge is read from, and the queue it tells is built
 	// later, so the edge rides a forwarder bound once the queue exists.
 	vendorServes := &vendorServesForwarder{log: log}
-	footerOpts := []footer.Option{footer.WithVendorServes(vendorServes.VendorServes)}
+	// THE USAGE LINE IS THE ACCOUNT'S AND OUTLIVES THE DAEMON (owner ruling,
+	// 2026-10-06): the last figures kept per account root are drawn from the
+	// first view, and every change is kept again.
+	usages, err := p.DB.AccountUsages(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("claude-repld: read the kept account usage: %w", err)
+	}
+	footerOpts := []footer.Option{
+		footer.WithVendorServes(vendorServes.VendorServes),
+		footer.WithAccountUsages(usages),
+		footer.WithAccountUsageSink(accountUsageSink(p.DB)),
+	}
 	if p.Opts.footerMomentaryDwell > 0 {
 		footerOpts = append(footerOpts, footer.WithMomentaryDwell(p.Opts.footerMomentaryDwell))
 	}
