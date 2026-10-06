@@ -299,7 +299,23 @@ func run(ctx context.Context, opts options, h hooks) error {
 		"roots": temporary.Roots(), "test_root": os.Getenv(tempdirs.EnvTestRoot),
 	})
 
-	db, err := openState(ctx, layout, log, joining, temporary)
+	// A TEST RUN'S STATE DATABASE SKIPS SQLITE'S FORCED FLUSHES (owner ruling,
+	// 2026-10-06): honored only under the vendor guard, so a live daemon handed
+	// the flag refuses to boot rather than run without durability.
+	unsynced, err := wsm.UnsyncedFromEnv(contracts, os.Getenv)
+	if err != nil {
+		log.Error("daemon.cmd.state", "the state database's durability could not be settled", dlog.Context{
+			"error": err.Error(),
+		})
+		return fmt.Errorf("claude-repld: settle the state database's durability: %w", err)
+	}
+	if unsynced {
+		log.Info("daemon.cmd.state", "test run: the state database skips SQLite's forced flushes (synchronous=OFF)", dlog.Context{
+			"path": layout.DB(), "env": wsm.EnvTestUnsyncedWrites,
+		})
+	}
+
+	db, err := openState(ctx, layout, log, joining, temporary, unsynced)
 	if err != nil {
 		return err
 	}
@@ -595,12 +611,19 @@ func reconcile(ctx context.Context, log dlog.Logger, sequence boot.Sequence, bou
 // exists to prevent. Its one write is carrying an older file forward by
 // ADDITIVE steps, which leave the incumbent's statements working
 // (wsm.OpenJoining).
-func openState(ctx context.Context, layout stateroot.Layout, log dlog.Logger, joining bool, temporary tempdirs.Guard) (wsm.DB, error) {
+//
+// unsynced is the test run's seam (wsm.UnsyncedFromEnv), already proved by the
+// boot; a live daemon always passes false.
+func openState(ctx context.Context, layout stateroot.Layout, log dlog.Logger, joining bool, temporary tempdirs.Guard, unsynced bool) (wsm.DB, error) {
 	open := wsm.Open
 	if joining {
 		open = wsm.OpenJoining
 	}
-	db, err := open(ctx, layout.DB(), wsm.WithLogger(log), wsm.WithTemporaryGuard(temporary))
+	opts := []wsm.Option{wsm.WithLogger(log), wsm.WithTemporaryGuard(temporary)}
+	if unsynced {
+		opts = append(opts, wsm.WithUnsyncedWrites())
+	}
+	db, err := open(ctx, layout.DB(), opts...)
 	if err != nil {
 		log.Error("daemon.cmd.state", "the state client could not be opened", dlog.Context{
 			"path":    layout.DB(),

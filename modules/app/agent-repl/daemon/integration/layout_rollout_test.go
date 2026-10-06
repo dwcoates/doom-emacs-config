@@ -48,7 +48,7 @@ func stateDB(t *testing.T, d *harness.Daemon) string {
 // incident's database carries a layout this build's own handles refuse.
 func rawStateDB(t *testing.T, d *harness.Daemon) *sql.DB {
 	t.Helper()
-	db, err := sql.Open("sqlite", stateDB(t, d)+"?_pragma=busy_timeout(5000)")
+	db, err := sql.Open("sqlite", stateDB(t, d)+"?_pragma=busy_timeout(5000)&_pragma=synchronous(OFF)")
 	if err != nil {
 		t.Fatalf("open the state database: %v", err)
 	}

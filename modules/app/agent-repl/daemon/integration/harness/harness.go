@@ -32,6 +32,7 @@
 //
 //	AGENT_REPL_STATE_DIR                  the state root
 //	AGENT_REPL_FORBID_VENDOR_CALLS=1      set in every spawned process
+//	AGENT_REPL_TEST_SQLITE_UNSYNCED=1     the state database skips SQLite's forced flushes
 //	AGENT_REPL_STORE_SOCKET               the store socket a flag beats
 //	MULTI_REPO_ROOT                       the tree whose workspaces use the multi-repo account
 //	AGENT_REPL_LOCK_DIR                   redirects ~/.cache/agent-repl/run for the kernel locks
