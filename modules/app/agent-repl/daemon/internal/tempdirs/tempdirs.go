@@ -65,6 +65,18 @@ type InsideError struct {
 	Dir string
 	// Root is the temporary root Dir lies inside, canonical.
 	Root string
+	// SeamMissing marks a refusal by a TEST-RUN daemon (the vendor guard is
+	// set) that was given no EnvTestRoot. Such a daemon refusing a temporary
+	// folder is almost certainly a harness that never stated the seam -- the
+	// refusal is still the answer, but the harness defect behind it must not
+	// pass silently (MissingSeam).
+	SeamMissing bool
+}
+
+// MissingSeam is the account a test-run daemon gives of a refusal whose
+// harness stated no EnvTestRoot: what is wrong and how to fix it.
+func (e *InsideError) MissingSeam() string {
+	return fmt.Sprintf("a test-run daemon (%s set) refused %s with no %s: the harness that launched it must name its run's root there", envc.EnvForbidVendorCalls, e.Dir, EnvTestRoot)
 }
 
 // Error is the sentence the user and the log read.
@@ -116,6 +128,10 @@ func Roots(tmpdir string) ([]string, error) {
 // that refuses nothing is not a guard.
 type Guard struct {
 	roots []string
+	// testRun is whether the daemon may not call the vendor, which is what
+	// every test run states (FromEnv). It never changes what is refused; it
+	// marks a refusal SeamMissing when testRoot is empty.
+	testRun bool
 	// testRoot is the canonical directory beneath which a test-run daemon may
 	// register temporary directories; empty in every daemon but a test run's.
 	testRoot string
@@ -163,7 +179,12 @@ func FromEnv(contracts envc.Contracts, tmpdir string, getenv func(string) string
 	if testRoot != "" && !contracts.ForbidVendorCalls() {
 		return Guard{}, fmt.Errorf("tempdirs: %s=%q is a test-run seam and is honored only with %s set", EnvTestRoot, testRoot, envc.EnvForbidVendorCalls)
 	}
-	return New(tmpdir, testRoot)
+	g, err := New(tmpdir, testRoot)
+	if err != nil {
+		return Guard{}, err
+	}
+	g.testRun = contracts.ForbidVendorCalls()
+	return g, nil
 }
 
 // Check refuses dir when it lies inside a temporary root: it answers an
@@ -185,7 +206,7 @@ func (g Guard) Check(dir string) error {
 	if g.testRoot != "" && within(canonical, g.testRoot) {
 		return nil
 	}
-	return &InsideError{Dir: canonical, Root: root}
+	return &InsideError{Dir: canonical, Root: root, SeamMissing: g.testRun && g.testRoot == ""}
 }
 
 // Built reports whether the guard was built by New or FromEnv. The zero Guard

@@ -569,6 +569,14 @@ func StartEmacs(t *testing.T, box sandbox, opts EmacsOpts) *Emacs {
 		"AGENT_REPL_E2E_SETTINGS=" + e.settingsPath(),
 		"AGENT_REPL_STATE_DIR=" + e.StateDir,
 		"AGENT_REPL_FORBID_VENDOR_CALLS=1",
+		// THE TEMPORARY-REGISTRATION SEAM. Every directory a scenario
+		// registers lives under this test's sandbox scratch, which is under
+		// /tmp -- a temporary root the daemon otherwise refuses to register
+		// (owner ruling, 2026-10-06). Emacs launches the daemon, so the
+		// statement travels as Emacs's environment. TMPDIR stays the run
+		// root: the scratch is a sibling of it, never the daemon's own
+		// temporary directory, so the exemption is not a root itself.
+		harness.TemporaryRegistrationRootEnv(box.Scratch()),
 		"AGENT_REPL_CLAUDE_BIN=" + fakeClaude,
 		"AGENT_REPL_NOTIFIER_CMD=" + fakeNotifier.Path,
 		"AGENT_REPL_BROWSER_CMD=" + fakeBrowser.Path,
