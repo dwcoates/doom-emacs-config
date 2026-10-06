@@ -70,7 +70,7 @@ each update how long to spread the not-yet-shown text over.
 - **Window served.** Only on the live plane and for the main agent, for the
   same reason samples are only taken there. A replayed draw carries no
   window (it is drawn whole anyway).
-- **Persistence.** `wsm` table `reveal_gaps` (layout 24, additive). The
+- **Persistence.** `wsm` table `reveal_gaps` (layout 27, additive). The
   pacer holds the windows in memory, loaded at boot, and writes a
   (model, kind) window when a live block of it settles: one write per block
   rather than per fragment, under the feed lock. Accepted cost: samples of a
