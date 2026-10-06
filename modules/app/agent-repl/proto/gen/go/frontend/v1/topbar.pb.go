@@ -1535,8 +1535,14 @@ func (x *TopbarConnectivity) GetSession() *TopbarAgentReplSession {
 }
 
 // agent-repl's session: since the LATER of the last login made through
-// agent-repl and the start of this Emacs. ONE SOURCE OF TRUTH: the dropdown's
-// duration and its traffic both count from `started_at_ms`.
+// agent-repl and the start of this Emacs. The dropdown draws how long it has
+// run, labeled by what began it.
+//
+// IT CARRIES NO NETWORK TRAFFIC. Fields 4 and 5 once counted the vendor
+// processes' bytes received and sent; they are reserved because measuring
+// them took one kernel network-statistics control socket per vendor process,
+// and those sockets are the inferred cause of the kernel's network buffer
+// (mbuf) exhaustion. No producer measures traffic, so none is stated.
 type TopbarAgentReplSession struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// When the session began, epoch milliseconds. The client ticks the
@@ -1548,13 +1554,7 @@ type TopbarAgentReplSession struct {
 	//
 	//	*TopbarAgentReplSession_Login
 	//	*TopbarAgentReplSession_EditorStart
-	Began isTopbarAgentReplSession_Began `protobuf_oneof:"began"`
-	// The vendor network traffic of every agent-repl workspace since
-	// `started_at_ms`, as the operating system counted it for agent-repl's own
-	// vendor processes: bytes actually received and sent, across restarts of
-	// those processes. The client formats ("412 MB ↓ · 38 MB ↑").
-	BytesReceived uint64 `protobuf:"varint,4,opt,name=bytes_received,json=bytesReceived,proto3" json:"bytes_received,omitempty"`
-	BytesSent     uint64 `protobuf:"varint,5,opt,name=bytes_sent,json=bytesSent,proto3" json:"bytes_sent,omitempty"`
+	Began         isTopbarAgentReplSession_Began `protobuf_oneof:"began"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1619,20 +1619,6 @@ func (x *TopbarAgentReplSession) GetEditorStart() *TopbarSessionBeganEditorStart
 		}
 	}
 	return nil
-}
-
-func (x *TopbarAgentReplSession) GetBytesReceived() uint64 {
-	if x != nil {
-		return x.BytesReceived
-	}
-	return 0
-}
-
-func (x *TopbarAgentReplSession) GetBytesSent() uint64 {
-	if x != nil {
-		return x.BytesSent
-	}
-	return 0
 }
 
 type isTopbarAgentReplSession_Began interface {
@@ -2991,15 +2977,13 @@ const file_frontend_v1_topbar_proto_rawDesc = "" +
 	"\x05title\x18\x03 \x01(\tR\x05title\x12B\n" +
 	"\asession\x18\x04 \x01(\v2#.frontend.v1.TopbarAgentReplSessionH\x00R\asession\x88\x01\x01B\n" +
 	"\n" +
-	"\b_session\"\x9a\x02\n" +
+	"\b_session\"\xfc\x01\n" +
 	"\x16TopbarAgentReplSession\x12\"\n" +
 	"\rstarted_at_ms\x18\x01 \x01(\x03R\vstartedAtMs\x12<\n" +
 	"\x05login\x18\x02 \x01(\v2$.frontend.v1.TopbarSessionBeganLoginH\x00R\x05login\x12O\n" +
-	"\feditor_start\x18\x03 \x01(\v2*.frontend.v1.TopbarSessionBeganEditorStartH\x00R\veditorStart\x12%\n" +
-	"\x0ebytes_received\x18\x04 \x01(\x04R\rbytesReceived\x12\x1d\n" +
-	"\n" +
-	"bytes_sent\x18\x05 \x01(\x04R\tbytesSentB\a\n" +
-	"\x05began\"\x19\n" +
+	"\feditor_start\x18\x03 \x01(\v2*.frontend.v1.TopbarSessionBeganEditorStartH\x00R\veditorStartB\a\n" +
+	"\x05beganJ\x04\b\x04\x10\x05J\x04\b\x05\x10\x06R\x0ebytes_receivedR\n" +
+	"bytes_sent\"\x19\n" +
 	"\x17TopbarSessionBeganLogin\"\x1f\n" +
 	"\x1dTopbarSessionBeganEditorStart\"L\n" +
 	"\x12TopbarWarningStrip\x126\n" +
