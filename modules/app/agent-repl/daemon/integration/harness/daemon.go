@@ -376,7 +376,10 @@ type Daemon struct {
 	exitErr   error
 	waitOnce  sync.Once
 	expected  map[string]bool
-	shims     map[string]*ShimControl
+	// required are the expected operations a test also REQUIRES to have been
+	// produced (RequireWarnings): the sweep fails on one that never was.
+	required map[string]bool
+	shims    map[string]*ShimControl
 }
 
 // installFakeGit copies the scripted `git` into the directory that leads the
@@ -473,6 +476,7 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 		HostToolsDir:       NewFakeHostTools(t, filepath.Join(root, "host-tools")),
 		t:                  t,
 		expected:           map[string]bool{},
+		required:           map[string]bool{},
 		shims:              map[string]*ShimControl{},
 	}
 	if opts.DefaultSettings != "" {
@@ -510,6 +514,7 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 	// end with an empty expected set, so a test that never calls ExpectWarnings
 	// still gets the assertion. ExpectWarnings only widens this set.
 	t.Cleanup(d.assertNoUnexpectedWarnings)
+	t.Cleanup(d.assertNoUnproducedRequiredWarnings)
 	// THE LOCK DIRECTORY IS A CROSS-DAEMON RENDEZVOUS, not a per-start temp
 	// dir, so it is keyed to the STATE ROOT and settled only now that the root
 	// is known.

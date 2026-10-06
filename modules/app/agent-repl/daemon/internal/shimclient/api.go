@@ -197,6 +197,16 @@ type Client interface {
 	// the session's shim_died fault — reads it here instead of racing that
 	// waiter for the value.
 	Reaped() (ExitInfo, bool)
+	// AwaitDeath answers whether the shim died, with its exit and how long
+	// the verdict was waited for. A stream or call that broke can see the
+	// break before the death is decided (a SIGKILL's EOF outruns the reap),
+	// so a verdict not yet in is waited for, on the client's own death
+	// signal, for at most DeathVerdictBudget or until ctx ends. It is how a
+	// consumer attributes a break to the death that caused it -- at INFO,
+	// since daemon.shimclient.exit records the death -- rather than
+	// recording a second fault. False is a shim not known to have died:
+	// the break stays the consumer's to report.
+	AwaitDeath(ctx context.Context) (ExitInfo, time.Duration, bool)
 	// StandingDown answers whether a KillSession has been asked of this shim.
 	//
 	// IT IS THE ONE PLACE THE DAEMON'S OWN TEARDOWN IS RECORDED, and every

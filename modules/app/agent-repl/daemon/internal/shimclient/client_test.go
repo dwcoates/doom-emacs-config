@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net"
 	"os/exec"
 	"path/filepath"
 	"syscall"
@@ -1106,14 +1107,19 @@ func TestPublishExitRecordsAnUnaskedInferredDepartureAsADeath(t *testing.T) {
 // ask came after it, which is the ordering a forget produces: the shim link
 // had already broken, the ladder was climbing against a held workspace lock,
 // and the forget then stood the session down and freed that lock.
+//
+// ONE DEATH IS ONE ERROR (2026-10-06). The ladder ends here because the lock
+// probe witnessed the adopted shim's death, so nobody asking for it makes the
+// DEATH loud -- `daemon.shimclient.exit` at ERROR -- and the ladder's own end
+// is that death's effect, never a second WARN.
 func TestTheRedialLadderEndsLoudlyOnlyWhenNobodyAskedForTheTeardown(t *testing.T) {
 	tests := []struct {
-		name      string
-		standDown bool
-		wantWarn  bool
+		name          string
+		standDown     bool
+		wantExitError bool
 	}{
-		{name: "the daemon asked while the ladder was climbing", standDown: true, wantWarn: false},
-		{name: "nobody asked at all", standDown: false, wantWarn: true},
+		{name: "the daemon asked while the ladder was climbing", standDown: true, wantExitError: false},
+		{name: "nobody asked at all", standDown: false, wantExitError: true},
 	}
 
 	for _, tc := range tests {
@@ -1136,8 +1142,11 @@ func TestTheRedialLadderEndsLoudlyOnlyWhenNobodyAskedForTheTeardown(t *testing.T
 			runMonitorToCompletion(t, c, frames, errs)
 
 			// Assert.
-			if got := hasRecordSaying(log, "warn", "daemon.shimclient.redial", "redial stopped"); got != tc.wantWarn {
-				t.Fatalf("a warn record saying the redial stopped = %v, want %v", got, tc.wantWarn)
+			if hasRecordSaying(log, "warn", "daemon.shimclient.redial", "redial stopped") {
+				t.Fatalf("the ladder's end was recorded as a warn of its own: %+v", log.Records())
+			}
+			if got := hasRecordAt(log, "error", "daemon.shimclient.exit"); got != tc.wantExitError {
+				t.Fatalf("an error record of the death = %v, want %v: %+v", got, tc.wantExitError, log.Records())
 			}
 		})
 	}
@@ -1381,7 +1390,10 @@ func TestTheRedialLadderEndsAtDebugInsideTheDaemonsStandDown(t *testing.T) {
 
 // TestTheRedialLadderStillWarnsOutsideAnyStandDown is that rule's other half:
 // a daemon that ordered nothing still gets the loud record.
-func TestTheRedialLadderStillWarnsOutsideAnyStandDown(t *testing.T) {
+// TestTheRedialLadderEndedByAWitnessedDeathAttributesToIt pins the ladder's
+// record when the death it witnessed ended it outside any stand-down: INFO,
+// naming the death as its cause, beside the one ERROR the death writes.
+func TestTheRedialLadderEndedByAWitnessedDeathAttributesToIt(t *testing.T) {
 	// Arrange.
 	log := dlog.NewTestLogger()
 	c := newClient(log, ids.WorkspaceID("ws-1"), filepath.Join(shortDir(t), "absent.sock"),
@@ -1396,8 +1408,8 @@ func TestTheRedialLadderStillWarnsOutsideAnyStandDown(t *testing.T) {
 	runMonitorToCompletion(t, c, frames, errs)
 
 	// Assert.
-	if !hasRecordSaying(log, "warn", "daemon.shimclient.redial", "redial stopped") {
-		t.Fatal("the redial ladder ended quietly with no stand-down behind it")
+	if !hasRecordSaying(log, "info", "daemon.shimclient.redial", "the redial ladder ended because the shim died; the death is recorded by daemon.shimclient.exit") {
+		t.Fatalf("the ladder's end was not attributed to the death: %+v", log.Records())
 	}
 }
 
@@ -1825,5 +1837,93 @@ func TestAUnaryCallTheShimsDeathCutIsNotAFault(t *testing.T) {
 				t.Fatalf("the failed call was ALSO recorded at %q: %+v", tt.wrongLvl, log.Records())
 			}
 		})
+	}
+}
+
+// TestALivenessBreakOnASpawnedShimWaitsForTheDeathItMayBe pins the monitor's
+// read of a broken liveness stream on a shim this daemon spawned: a SIGKILL's
+// EOF outruns the reap, so the reap is waited for, and a death that lands in
+// the wait is the break's cause -- INFO, no "link broke" WARN, no redial. A
+// shim still alive when the wait ends is a severed link, as loud as before.
+func TestALivenessBreakOnASpawnedShimWaitsForTheDeathItMayBe(t *testing.T) {
+	tests := []struct {
+		name     string
+		dies     bool
+		wantWarn bool
+	}{
+		{name: "the death lands while the break waits", dies: true, wantWarn: false},
+		{name: "the shim is alive", dies: false, wantWarn: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: a spawned client whose liveness stream has broken.
+			log := dlog.NewTestLogger()
+			c := newClient(log, ids.WorkspaceID("ws-1"), filepath.Join(shortDir(t), "absent.sock"),
+				backoff{Initial: time.Millisecond, Max: 2 * time.Millisecond, Factor: 1}, nil, nil)
+			c.cmd = &exec.Cmd{}
+			if tt.dies {
+				c.awaitingDeathVerdict = func() { go c.publishExit(ExitInfo{PID: 4242, Code: -1, Signal: "killed"}) }
+			} else {
+				c.deathVerdictBudget = time.Millisecond
+			}
+			frames := make(chan *shimv1.WatchSessionResponse)
+			errs := make(chan error, 1)
+			errs <- io.ErrUnexpectedEOF
+			done := make(chan struct{})
+
+			// Act.
+			go func() {
+				defer close(done)
+				c.monitor(&inertSessionStream{}, frames, errs)
+			}()
+			if !tt.dies {
+				// The live shim's break climbs the ladder; its first rung is
+				// the cue to end the client.
+				for state := range c.Connectivity() {
+					if state == LinkRedialing {
+						c.cancelMonitor()
+						break
+					}
+				}
+			}
+			<-done
+
+			// Assert.
+			if got := hasRecordSaying(log, "warn", "daemon.shimclient.redial", "shim link broke; redialing"); got != tt.wantWarn {
+				t.Fatalf("a warn record of the broken link = %v, want %v: %+v", got, tt.wantWarn, log.Records())
+			}
+			wantInfo := !tt.wantWarn
+			if got := hasRecordSaying(log, "info", "daemon.shimclient.redial",
+				"the liveness stream ended because the shim died; the death is recorded by daemon.shimclient.exit"); got != wantInfo {
+				t.Fatalf("an info record attributing the break to the death = %v, want %v: %+v", got, wantInfo, log.Records())
+			}
+		})
+	}
+}
+
+// TestAnAdoptedShimsWitnessedDeathIsOneError pins that the witness's evidence
+// and the death it decides are ONE error between them: the death's.
+func TestAnAdoptedShimsWitnessedDeathIsOneError(t *testing.T) {
+	// Arrange.
+	log := dlog.NewTestLogger()
+	c := newClient(log, ids.WorkspaceID("ws-1"), filepath.Join(shortDir(t), "absent.sock"),
+		defaultBackoff, func(ids.WorkspaceID) (bool, error) { return true, nil }, nil)
+	dialErr := &net.OpError{Op: "dial", Net: "unix", Err: syscall.ENOENT}
+
+	// Act.
+	witnessed := c.witnessAdoptedDeath(dialErr)
+
+	// Assert.
+	if !witnessed {
+		t.Fatalf("the death was not witnessed: %+v", log.Records())
+	}
+	errorsRecorded := 0
+	for _, r := range log.Records() {
+		if r.Level == "error" {
+			errorsRecorded++
+		}
+	}
+	if errorsRecorded != 1 {
+		t.Fatalf("the death wrote %d error records, want 1: %+v", errorsRecorded, log.Records())
 	}
 }
