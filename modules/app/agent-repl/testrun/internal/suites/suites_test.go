@@ -1188,3 +1188,27 @@ func TestTheRosterRunsEveryIntegrationSuite(t *testing.T) {
 		})
 	}
 }
+
+func TestVitestIntegrationBuildRunsInThePackage(t *testing.T) {
+	// Arrange
+	s := roster.Suite{Name: "shim", IntegrationBuild: []string{"npm", "run", "pretest:integration"}}
+
+	// Act
+	build, ok := vitestIntegrationBuild(s, "/pkg")
+
+	// Assert
+	if !ok || build.ID != "shim:integration-build" || strings.Join(build.Argv, " ") != "npm run pretest:integration" || build.Dir != "/pkg" {
+		t.Fatalf("build = %+v, %v; want the package's integration build", build, ok)
+	}
+}
+
+func TestVitestIntegrationBuildIsAbsentWhenTheRosterNamesNone(t *testing.T) {
+	// Act
+	_, ok := vitestIntegrationBuild(roster.Suite{Name: "webapp"}, "/pkg")
+
+	// Assert
+	if ok {
+		t.Fatal("an integration build unit was made for a suite that names none")
+	}
+}
+
