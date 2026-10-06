@@ -63,7 +63,7 @@ func (v *verbs) Resolve(ctx context.Context, ref *workspacev1.WorkspaceRef) (wsm
 // sidebarRegistry composes the roster's durable half. It lives beside Resolve
 // because both are pure translations of WSM facts into another package's
 // vocabulary.
-func sidebarRegistry(log dlog.Logger, workspaces []wsm.Workspace, repositories []wsm.Repository, tasks []wsm.Task, sessions []wsm.Session, current *ids.WorkspaceID) sidebar.Registry {
+func sidebarRegistry(log dlog.Logger, workspaces []wsm.Workspace, repositories []wsm.Repository, tasks []wsm.Task, sessions []wsm.Session, current *ids.WorkspaceID, view wsm.SidebarView) sidebar.Registry {
 	repositories, workspaces, sessions = withoutGoneRepositories(log, repositories, workspaces, sessions)
 	return sidebar.Registry{
 		Workspaces:   workspaces,
@@ -71,6 +71,7 @@ func sidebarRegistry(log dlog.Logger, workspaces []wsm.Workspace, repositories [
 		Tasks:        tasks,
 		Sessions:     sessions,
 		Current:      current,
+		View:         view,
 	}
 }
 

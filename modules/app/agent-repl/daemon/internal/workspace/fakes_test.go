@@ -66,8 +66,19 @@ type fakeDB struct {
 	// surface rather than read as "the repository is not registered".
 	listRepositoriesErr error
 	tasks               []wsm.Task
-	current             *ids.WorkspaceID
-	sessions            map[ids.WorkspaceID]wsm.Session
+	// setTaskFoldedErr fails the task fold write, which the slice cannot.
+	setTaskFoldedErr error
+	// view is the sidebar's recorded view state, nil when nobody changed it
+	// (read back as wsm.DefaultSidebarView); setMergedFoldedErr and
+	// setGroupingErr fail its writes and viewErr its read.
+	view               *wsm.SidebarView
+	setMergedFoldedErr error
+	setGroupingErr     error
+	viewErr            error
+	// workspaceErr fails the one-workspace read, which the map cannot.
+	workspaceErr error
+	current      *ids.WorkspaceID
+	sessions     map[ids.WorkspaceID]wsm.Session
 	// sessionErr makes every session read fail, which is the only way to
 	// reach the roster's session-read error branch: the fake's own map
 	// cannot fail.
@@ -247,9 +258,12 @@ func (d *fakeDB) with(ws wsm.Workspace) *fakeDB {
 }
 
 func (d *fakeDB) Workspace(_ context.Context, id ids.WorkspaceID) (wsm.Workspace, error) {
+	if d.workspaceErr != nil {
+		return wsm.Workspace{}, d.workspaceErr
+	}
 	ws, ok := d.workspaces[id]
 	if !ok {
-		return wsm.Workspace{}, errors.New("no such workspace")
+		return wsm.Workspace{}, fmt.Errorf("fake: no such workspace %s: %w", id, wsm.ErrNotFound)
 	}
 	return ws, nil
 }
@@ -2314,6 +2328,59 @@ func (f *fixture) selectAsync(ctx context.Context, ws ids.WorkspaceID) <-chan er
 	done := make(chan error, 1)
 	go func() { done <- f.verbs.Select(ctx, ws) }()
 	return done
+}
+
+// SetTaskFolded records the fold on the fake's task row; an unknown task is
+// wsm.ErrNotFound, as the store answers it.
+func (d *fakeDB) SetTaskFolded(_ context.Context, id ids.TaskID, folded bool) error {
+	if d.setTaskFoldedErr != nil {
+		return d.setTaskFoldedErr
+	}
+	for i := range d.tasks {
+		if d.tasks[i].ID == id {
+			d.tasks[i].Folded = folded
+			return nil
+		}
+	}
+	return fmt.Errorf("fake: task %s: %w", id, wsm.ErrNotFound)
+}
+
+// currentView is the recorded view, or the store's default.
+func (d *fakeDB) currentView() wsm.SidebarView {
+	if d.view == nil {
+		return wsm.DefaultSidebarView
+	}
+	return *d.view
+}
+
+// SetMergedSectionFolded records the band's fold.
+func (d *fakeDB) SetMergedSectionFolded(_ context.Context, folded bool) error {
+	if d.setMergedFoldedErr != nil {
+		return d.setMergedFoldedErr
+	}
+	view := d.currentView()
+	view.MergedFolded = folded
+	d.view = &view
+	return nil
+}
+
+// SetGrouping records the grouping shown.
+func (d *fakeDB) SetGrouping(_ context.Context, grouping wsm.Grouping) error {
+	if d.setGroupingErr != nil {
+		return d.setGroupingErr
+	}
+	view := d.currentView()
+	view.Grouping = grouping
+	d.view = &view
+	return nil
+}
+
+// SidebarView answers the recorded view, or the store's default.
+func (d *fakeDB) SidebarView(context.Context) (wsm.SidebarView, error) {
+	if d.viewErr != nil {
+		return wsm.SidebarView{}, d.viewErr
+	}
+	return d.currentView(), nil
 }
 
 // SetRepositoryFolded records the fold on the fake's repository row; an

@@ -401,6 +401,62 @@ func TestRepositorySectionStatesItsFold(t *testing.T) {
 	}
 }
 
+func TestTaskSectionStatesItsFold(t *testing.T) {
+	tests := []struct {
+		name          string
+		folded        bool
+		wantCollapsed bool
+	}{
+		{"an expanded task", false, false},
+		{"a collapsed task", true, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			r, _ := newResolver(t)
+			reg := registry(workspace("w1", "one"))
+			reg.Tasks = []wsm.Task{{ID: ids.TaskID("task-1"), Title: "the task", Folded: tt.folded, CreatedAt: epoch}}
+
+			// Act.
+			r.SetRegistry(reg)
+
+			// Assert: the arm is always set, and it is the recorded fold.
+			section := latest(t, r).GetTask().GetSections()[0]
+			if (section.GetCollapsed() != nil) != tt.wantCollapsed || (section.GetExpanded() != nil) == tt.wantCollapsed {
+				t.Fatalf("fold = %v, want collapsed=%v", section.GetFold(), tt.wantCollapsed)
+			}
+		})
+	}
+}
+
+func TestMergedSectionStatesItsFold(t *testing.T) {
+	tests := []struct {
+		name          string
+		folded        bool
+		wantCollapsed bool
+	}{
+		{"an expanded band", false, false},
+		{"a collapsed band", true, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			r, _ := newResolver(t)
+			reg := registry(workspace("w1", "one"))
+			reg.View.MergedFolded = tt.folded
+
+			// Act.
+			r.SetRegistry(reg)
+
+			// Assert: the arm is always set, and it is the recorded fold.
+			section := latest(t, r).GetRecentlyMerged()
+			if (section.GetCollapsed() != nil) != tt.wantCollapsed || (section.GetExpanded() != nil) == tt.wantCollapsed {
+				t.Fatalf("fold = %v, want collapsed=%v", section.GetFold(), tt.wantCollapsed)
+			}
+		})
+	}
+}
+
 func TestRepoSectionCountsEveryRowItsRegionCarries(t *testing.T) {
 	// Arrange: two unrelated workspaces.
 	r, _ := newResolver(t)
@@ -464,4 +520,51 @@ func TestRecentlyMergedCountsItsRows(t *testing.T) {
 	if got != 1 {
 		t.Fatalf("count = %d, want 1", got)
 	}
+}
+
+func TestTheRosterStatesTheShownGrouping(t *testing.T) {
+	tests := []struct {
+		name     string
+		grouping wsm.Grouping
+		wantTask bool
+	}{
+		{"the repository grouping", wsm.GroupingRepository, false},
+		{"the task grouping", wsm.GroupingTask, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			r, _ := newResolver(t)
+			reg := registry(workspace("w1", "one"))
+			reg.View.Grouping = tt.grouping
+
+			// Act.
+			r.SetRegistry(reg)
+
+			// Assert: the arm is always set, and it is the recorded grouping.
+			got := latest(t, r)
+			if (got.GetShownTask() != nil) != tt.wantTask || (got.GetShownRepository() != nil) == tt.wantTask {
+				t.Fatalf("shown = %v, want task=%v", got.GetShown(), tt.wantTask)
+			}
+		})
+	}
+}
+
+func TestSetRegistryRefusesAViewGroupingThatIsNeither(t *testing.T) {
+	// Arrange.
+	r, surfaces := newResolver(t)
+	reg := registry(workspace("w1", "one"))
+	reg.View.Grouping = ""
+
+	// Act.
+	defer func() {
+		// Assert: it failed hard, and said so at ERROR first.
+		if recover() == nil {
+			t.Fatal("SetRegistry accepted a view with no grouping")
+		}
+		if !hasError(surfaces.Records(), "daemon.sidebar.set_registry") {
+			t.Fatal("the invariant violation was not recorded at ERROR")
+		}
+	}()
+	r.SetRegistry(reg)
 }
