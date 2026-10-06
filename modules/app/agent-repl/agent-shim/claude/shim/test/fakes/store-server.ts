@@ -207,7 +207,7 @@ export interface FakeStore {
 }
 
 /** A read verb that can be made to refuse. */
-export type StoreReadVerb = "OpenAgentSession" | "ReadAgentPage" | "GetLiveWork";
+export type StoreReadVerb = "OpenAgentSession" | "ReadAgentPage" | "GetLiveWork" | "GetDetachedWork";
 
 /**
  * The typed refusal arms a read can be MADE to carry, as the protos declare
@@ -235,6 +235,7 @@ export interface FakeStoreRead {
   readonly rpc:
     | "GetLiveWork"
     | "GetAgentByVendorTask"
+    | "GetDetachedWork"
     | "OpenAgentSession"
     | "ReadAgentPage"
     | "WatchBashRun"
@@ -315,6 +316,17 @@ export async function startFakeStore(socketPath: string, options: FakeStoreOptio
   const bashRowsByRun = new Map<string, Array<{ readonly key: string; row: storev1.StoreAgentBash }>>();
   /** Runs a terminal bash row has ENDED — what `GetLiveWork` reads; never cleared. */
   const bashEndedRuns = new Set<string>();
+  /**
+   * The kind each detached run's row records, by ORIGIN UNIT — the real store's
+   * `detached_work.kind`, which `GetDetachedWork` answers. A `detached`-origin
+   * announcement states no kind the store classifies (`unstated`); a shell
+   * run's own rows say `bash`; a specific kind is never relabeled.
+   */
+  const detachedKinds = new Map<string, "subagent" | "bash" | "workflow" | "monitor" | "unstated">();
+  const recordDetachedKind = (unit: string, kind: "subagent" | "bash" | "workflow" | "monitor" | "unstated"): void => {
+    const held = detachedKinds.get(unit);
+    if (held === undefined || held === "unstated") detachedKinds.set(unit, kind);
+  };
   /**
    * Detached work a unit's TERMINAL ACTIVITY ARM ended (`success`, `failure`,
    * `ended`, `blocking_error`, exactly the arms the real store's
@@ -482,6 +494,7 @@ export async function startFakeStore(socketPath: string, options: FakeStoreOptio
           ? created.value.createdAgentId?.value
           : undefined;
     detachedAnnounced.set(workId, runId);
+    if (runId !== undefined && runId !== "") recordDetachedKind(runId, created === undefined ? "unstated" : "subagent");
     const owner = frame.agentId?.value;
     if (owner !== undefined && owner !== "") detachedOwner.set(workId, owner);
   };
@@ -604,6 +617,7 @@ export async function startFakeStore(socketPath: string, options: FakeStoreOptio
         if (held !== undefined) held.row = info.value;
         else rows.push({ key: entry.upsertKey, row: info.value });
         bashRowsByRun.set(run, rows);
+        recordDetachedKind(run, "bash");
         const arm = info.value.frame.result.case;
         if (arm === "success" || arm === "failure") bashEndedRuns.add(run);
         for (const watcher of bashWatchers) {
@@ -1063,6 +1077,65 @@ export async function startFakeStore(socketPath: string, options: FakeStoreOptio
             });
       },
 
+      async getDetachedWork(request) {
+        noteRead("GetDetachedWork", request);
+        const failure = (detail: string, kind: storev1.GetDetachedWorkFailure["kind"]): storev1.GetDetachedWorkResponse =>
+          create(storev1.GetDetachedWorkResponseSchema, {
+            result: { case: "failure", value: create(storev1.GetDetachedWorkFailureSchema, { detail, kind }) },
+          });
+        const unit = request.unit?.value ?? "";
+        if (unit === "") {
+          return failure("unit: the lookup names no unit", {
+            case: "invalidRequest",
+            value: create(storev1.GetDetachedWorkInvalidRequestSchema, { field: "unit" }),
+          });
+        }
+        const refusal = refusalFor("GetDetachedWork");
+        if (refusal !== undefined) {
+          return failure(
+            refusal.detail,
+            refusal.arm === "invalid_request"
+              ? { case: "invalidRequest", value: create(storev1.GetDetachedWorkInvalidRequestSchema, { field: "unit" }) }
+              : { case: "storageFailure", value: create(storev1.GetDetachedWorkStorageFailureSchema, {}) },
+          );
+        }
+        const recorded = detachedKinds.get(unit);
+        if (recorded === undefined) {
+          return create(storev1.GetDetachedWorkResponseSchema, {
+            result: { case: "notFound", value: create(storev1.GetDetachedWorkNotFoundSchema, {}) },
+          });
+        }
+        // ENDED as the real store's row ends: a shell run's terminal row, or the
+        // origin unit's own terminal activity arm.
+        const ended =
+          bashEndedRuns.has(unit) || [...detachedAnnounced].some(([work, run]) => run === unit && endedByUnit.has(work));
+        const kind: storev1.GetDetachedWorkKind["kind"] = (() => {
+          switch (recorded) {
+            case "subagent":
+              return { case: "subagent" as const, value: create(storev1.GetDetachedWorkKindSubagentSchema, {}) };
+            case "bash":
+              return { case: "bash" as const, value: create(storev1.GetDetachedWorkKindBashSchema, {}) };
+            case "workflow":
+              return { case: "workflow" as const, value: create(storev1.GetDetachedWorkKindWorkflowSchema, {}) };
+            case "monitor":
+              return { case: "monitor" as const, value: create(storev1.GetDetachedWorkKindMonitorSchema, {}) };
+            case "unstated":
+              return { case: "unstated" as const, value: create(storev1.GetDetachedWorkKindUnstatedSchema, {}) };
+          }
+        })();
+        return create(storev1.GetDetachedWorkResponseSchema, {
+          result: {
+            case: "success",
+            value: create(storev1.GetDetachedWorkSuccessSchema, {
+              kind: create(storev1.GetDetachedWorkKindSchema, { kind }),
+              state: ended
+                ? { case: "ended", value: create(storev1.GetDetachedWorkEndedSchema, { endedAtMs: BigInt(Date.now()) }) }
+                : { case: "live", value: create(storev1.GetDetachedWorkLiveSchema, {}) },
+            }),
+          },
+        });
+      },
+
       async writeBatch(request) {
         receivedWrites.push(request);
         // AN UNCLASSIFIED WRITE IS REFUSED, as the real store refuses it: the
@@ -1170,13 +1243,13 @@ export async function startFakeStore(socketPath: string, options: FakeStoreOptio
         readFailures.delete(verb);
         return;
       }
-      if (verb === "GetLiveWork" && arm === "stale_pointer") {
+      if ((verb === "GetLiveWork" || verb === "GetDetachedWork") && arm === "stale_pointer") {
         // REFUSED RATHER THAN FABRICATED: GetLiveWorkFailure declares
         // invalid_request and storage_failure, so serving another arm would put
         // a shape on the wire the proto forbids and let a consumer be tested
         // against a store that cannot exist.
         throw new Error(
-          `fake store: GetLiveWork declares invalid_request and storage_failure, not ${arm}`,
+          `fake store: ${verb} declares invalid_request and storage_failure, not ${arm}`,
         );
       }
       readFailures.set(verb, { arm, detail: detail ?? `fake store refuses ${verb}` });

@@ -26,6 +26,7 @@
 import type { conversationv1, storev1 } from "../proto.js";
 import type { SourceCoordinates } from "./keys.js";
 import type { StoreClient } from "./client.js";
+import type { DetachedWorkAnswer } from "./detached-work.js";
 import type { VendorTaskAnswer } from "./locator.js";
 
 // ---------------------------------------------------------------------------
@@ -478,6 +479,13 @@ export interface Persistence {
    */
   agentByVendorTask(session: conversationv1.AgentId, vendorTaskId: string): Promise<VendorTaskAnswer>;
   /**
+   * WHAT KIND of detached work `unit` left as, and whether the record holds it
+   * as ended (store/detached-work.ts). Never rejects: a failure is the
+   * `failed` answer, and the caller writes the one record for whatever came
+   * back.
+   */
+  detachedWork(unit: conversationv1.AgentActivityId): Promise<DetachedWorkAnswer>;
+  /**
    * One detached shell run's lifecycle frames: its start, its tail, its
    * terminal.
    *
@@ -657,6 +665,8 @@ export function unavailablePersistence(): Persistence {
     liveWork: () => Promise.reject(refuse("liveWork")),
     agentByVendorTask: () =>
       Promise.resolve({ kind: "failed", detail: "shim persistence: agentByVendorTask has no store to reach in this build" }),
+    detachedWork: () =>
+      Promise.resolve({ kind: "failed", detail: "shim persistence: detachedWork has no store to reach in this build" }),
     openBashRun: () => Promise.reject(refuse("openBashRun")),
     onFault: () => () => undefined,
     onDegradedWindow: () => () => undefined,

@@ -102,6 +102,7 @@ import {
   type PersistenceRetryPolicy,
 } from "./persistence.js";
 import { createReader } from "./reader.js";
+import { lookupDetachedWork, type DetachedWorkAnswer } from "./detached-work.js";
 import { lookupAgentByVendorTask, type VendorTaskAnswer } from "./locator.js";
 import { createReconciler } from "./reconcile.js";
 
@@ -1239,6 +1240,10 @@ export function createPersistence(options: PersistenceOptions): Persistence {
 
     agentByVendorTask(session: conversationv1.AgentId, vendorTaskId: string): Promise<VendorTaskAnswer> {
       return lookupAgentByVendorTask({ client: options.client, retry, sleep }, session, vendorTaskId);
+    },
+
+    detachedWork(unit: conversationv1.AgentActivityId): Promise<DetachedWorkAnswer> {
+      return lookupDetachedWork({ client: options.client, retry, sleep }, unit);
     },
 
     openBashRun(
