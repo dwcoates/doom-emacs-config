@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -597,10 +598,11 @@ func TestTheStateRootLayoutIsCreated(t *testing.T) {
 
 func TestJoinBackgroundLoopsReturnsWhenEveryLoopHasLeft(t *testing.T) {
 	// Arrange: a loop that has already ended.
-	var loops sync.WaitGroup
+	var loops runningLoops
 	log := dlog.NewTestLogger()
-	loops.Add(1)
-	loops.Done()
+	ended := make(chan struct{})
+	loops.Go("ended", func() { close(ended) })
+	<-ended
 
 	// Act.
 	joinBackgroundLoops(&loops, loopJoinBound, log)
@@ -614,23 +616,69 @@ func TestJoinBackgroundLoopsReturnsWhenEveryLoopHasLeft(t *testing.T) {
 func TestJoinBackgroundLoopsReportsALoopThatOutlivesTheBound(t *testing.T) {
 	// Arrange: a loop that is still running, released only at cleanup, so the
 	// wait ends on the bound rather than on the loop.
-	var loops sync.WaitGroup
-	log := dlog.NewTestLogger()
-	release := make(chan struct{})
-	loops.Add(1)
-	go func() {
-		defer loops.Done()
-		<-release
-	}()
-	t.Cleanup(func() { close(release); loops.Wait() })
+	loops, log := stuckLoop(t, "wedged")
 
 	// Act.
-	joinBackgroundLoops(&loops, 10*time.Millisecond, log)
+	joinBackgroundLoops(loops, 10*time.Millisecond, log)
 
 	// Assert: reported, never waited on forever.
 	if !holdsRecord(log.Records(), "error", "a background loop outlived its serving context; tearing down under it") {
 		t.Fatalf("records = %+v, want the overrun reported", log.Records())
 	}
+}
+
+func TestJoinBackgroundLoopsNamesTheLoopThatOutlivesTheBound(t *testing.T) {
+	// Arrange: one loop that ended and one still running.
+	loops, log := stuckLoop(t, "wedged")
+	ended := make(chan struct{})
+	loops.Go("ended", func() { close(ended) })
+	<-ended
+
+	// Act.
+	joinBackgroundLoops(loops, 10*time.Millisecond, log)
+
+	// Assert: only the loop still running is named.
+	rec := findRecord(t, log.Records(), "a background loop outlived its serving context; tearing down under it")
+	if got := fmt.Sprint(rec.Context["loops"]); got != "[wedged]" {
+		t.Fatalf("loops = %s, want [wedged]", got)
+	}
+}
+
+func TestJoinBackgroundLoopsDumpsWhatTheLoopIsBlockedOn(t *testing.T) {
+	// Arrange.
+	loops, log := stuckLoop(t, "wedged")
+
+	// Act.
+	joinBackgroundLoops(loops, 10*time.Millisecond, log)
+
+	// Assert: the goroutine dump names the blocking call's stack.
+	rec := findRecord(t, log.Records(), "a background loop outlived its serving context; tearing down under it")
+	if dump, _ := rec.Context["goroutine_dump"].(string); !strings.Contains(dump, "stuckLoop") {
+		t.Fatalf("goroutine_dump does not name the blocked loop's stack:\n%s", dump)
+	}
+}
+
+// stuckLoop starts one named loop that runs until the test's cleanup.
+func stuckLoop(t *testing.T, name string) (*runningLoops, *dlog.TestLogger) {
+	t.Helper()
+	loops := &runningLoops{}
+	release := make(chan struct{})
+	loops.Go(name, func() { <-release })
+	t.Cleanup(func() { close(release); loops.wg.Wait() })
+	return loops, dlog.NewTestLogger()
+}
+
+// findRecord answers the one record with that message, failing the test when
+// there is none.
+func findRecord(t *testing.T, records []dlog.Record, message string) dlog.Record {
+	t.Helper()
+	for _, r := range records {
+		if r.Message == message {
+			return r
+		}
+	}
+	t.Fatalf("records = %+v, want one with message %q", records, message)
+	return dlog.Record{}
 }
 
 // holdsRecord reports whether a captured record set names that level and

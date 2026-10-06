@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"sort"
 	"sync"
 	"time"
 
@@ -455,13 +456,9 @@ func run(ctx context.Context, opts options, h hooks) error {
 	// (reproduced at -count=10 -parallel 8). This defer is registered LAST, so
 	// it runs FIRST of every teardown: no loop is still running when the merge
 	// drain, the watchers or the state client are torn down.
-	var loops sync.WaitGroup
+	var loops runningLoops
 	for _, loop := range built.Background {
-		loops.Add(1)
-		go func(loop backgroundLoop) {
-			defer loops.Done()
-			loop.run(serving, log)
-		}(loop)
+		loops.Go(loop.Name, func() { loop.run(serving, log) })
 	}
 	// THE BRING-UP IS THE ONE BOOT STEP THAT DOES NOT GATE READINESS, and it
 	// starts here: after the bindings and the opening views, because it starts
@@ -479,17 +476,11 @@ func run(ctx context.Context, opts options, h hooks) error {
 	// It joins with the background loops, so an orderly exit waits for a
 	// session start in flight on the same bound they get rather than closing
 	// the state client under it.
-	loops.Add(1)
-	go func() {
-		defer loops.Done()
-		sequence.BringUp(serving, report.PendingBringUp)
-	}()
+	loops.Go("bring_up", func() { sequence.BringUp(serving, report.PendingBringUp) })
 	// AND THE STATE ROOT IS WATCHED FOR AS LONG AS IT IS SERVED. A loss ends
 	// the serving lifetime, and the exit reports it as the cause rather than
 	// as an orderly one. It joins with the loops above.
-	loops.Add(1)
-	go func() {
-		defer loops.Done()
+	loops.Go("state_root_watch", func() {
 		_ = rootWatch{
 			verify: claim.Verify,
 			every:  h.StateCheckEvery,
@@ -499,7 +490,7 @@ func run(ctx context.Context, opts options, h hooks) error {
 				stopServing()
 			},
 		}.run(serving)
-	}()
+	})
 	defer joinBackgroundLoops(&loops, loopJoinBound, log)
 	// AND THE QUEUE'S OWN GOROUTINES, for the same reason and on the same
 	// bound: a classification verdict and a background revival each read and
@@ -879,20 +870,70 @@ func joinDetachedStarts(drain func(time.Duration) bool, bound time.Duration, log
 	})
 }
 
+// runningLoops is the set of background loops the serving lifetime started,
+// with the names of those still running, so an exit that outlives
+// loopJoinBound names the loop it is tearing down under instead of only
+// counting it.
+type runningLoops struct {
+	wg      sync.WaitGroup
+	mu      sync.Mutex
+	running map[string]int
+}
+
+// Go runs one named loop on its own goroutine and joins it with the rest.
+func (r *runningLoops) Go(name string, run func()) {
+	r.mu.Lock()
+	if r.running == nil {
+		r.running = map[string]int{}
+	}
+	r.running[name]++
+	r.mu.Unlock()
+	r.wg.Add(1)
+	go func() {
+		defer r.wg.Done()
+		defer r.left(name)
+		run()
+	}()
+}
+
+func (r *runningLoops) left(name string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.running[name]--
+	if r.running[name] == 0 {
+		delete(r.running, name)
+	}
+}
+
+// outstanding names the loops still running, sorted.
+func (r *runningLoops) outstanding() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	names := make([]string, 0, len(r.running))
+	for name := range r.running {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
 // joinBackgroundLoops waits, bounded, for every background loop to leave, and
-// says so loudly when one does not.
-func joinBackgroundLoops(loops *sync.WaitGroup, bound time.Duration, log dlog.Logger) {
+// says so loudly when one does not: the record names the loops still running
+// and carries every goroutine's stack, which is what names the call each one
+// is blocked in.
+func joinBackgroundLoops(loops *runningLoops, bound time.Duration, log dlog.Logger) {
 	left := make(chan struct{})
 	go func() {
-		loops.Wait()
+		loops.wg.Wait()
 		close(left)
 	}()
 	select {
 	case <-left:
 		log.Debug("daemon.cmd.serve", "every background loop left before the teardown", nil)
 	case <-time.After(bound):
-		log.Error("daemon.cmd.serve", "a background loop outlived its serving context; tearing down under it", dlog.Context{
+		recordGoroutineDump(log, "daemon.cmd.serve", "a background loop outlived its serving context; tearing down under it", dlog.Context{
 			"bound_ms": bound.Milliseconds(),
+			"loops":    loops.outstanding(),
 		})
 	}
 }
