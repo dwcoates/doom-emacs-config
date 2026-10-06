@@ -110,7 +110,8 @@ message WorkspaceOpenStage {
   // that is not closed never enters `clearing_closed`.
   oneof stage {
     // The daemon is confirming the workspace's worktree is still on disk. An
-    // open whose directory is gone is refused here.
+    // open whose directory is gone goes on to `restoring_worktree` when its
+    // branch survives, and is refused here when it does not.
     WorkspaceOpenStageCheckingWorktree checking_worktree = 1;
     // The daemon is bringing the session up — spawning the shim and resuming
     // the vendor conversation. Usually the slowest stage.
@@ -123,6 +124,10 @@ message WorkspaceOpenStage {
     // The daemon is checking the shim against the deployed build and bouncing
     // it when stale.
     WorkspaceOpenStageCheckingBuild checking_build = 5;
+    // The workspace's directory was gone and its branch still exists, so the
+    // daemon is checking that branch out at the recorded directory again.
+    // Entered right after `checking_worktree`, and only by such an open.
+    WorkspaceOpenStageRestoringWorktree restoring_worktree = 6;
   }
 }
 
@@ -143,6 +148,10 @@ message WorkspaceOpenStageClearingClosed {}
 
 // The build check. It carries nothing: the arm being set is the whole fact.
 message WorkspaceOpenStageCheckingBuild {}
+
+// The worktree restore. It carries nothing: the arm being set is the whole
+// fact.
+message WorkspaceOpenStageRestoringWorktree {}
 
 // The progress of one CreateWorkspace, from just after the ack to the terminal
 // outcome. THE ARM IS THE STEP: a stage while the work runs, or exactly one of

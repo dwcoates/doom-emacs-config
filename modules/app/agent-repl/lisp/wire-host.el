@@ -1391,18 +1391,22 @@ shape is refused as an unknown field rather than misread."
   "Decode VALUE as the empty `WorkspaceOpenStageCheckingBuild'."
   (agent-repl-wire--decode-empty "WorkspaceOpenStageCheckingBuild" value))
 
+(defun agent-repl-wire-decode-workspace-open-stage-restoring-worktree (value)
+  "Decode VALUE as the empty `WorkspaceOpenStageRestoringWorktree'."
+  (agent-repl-wire--decode-empty "WorkspaceOpenStageRestoringWorktree" value))
+
 (defun agent-repl-wire-decode-workspace-open-stage (value)
   "Decode `WorkspaceOpenStage' from VALUE into the stage keyword.
 THE SET ARM IS THE STAGE, and every arm is an empty message, so the
-keyword is the whole fact: `:checking-worktree', `:starting-session',
-`:reviving', `:clearing-closed' or `:checking-build'.  An arm this codec
-does not hold is refused as an unknown field by the key check -- logged
-at ERROR and signalled, never a stage guessed at or dropped -- and an
-unset oneof is refused likewise."
+keyword is the whole fact: `:checking-worktree', `:restoring-worktree',
+`:starting-session', `:reviving', `:clearing-closed' or
+`:checking-build'.  An arm this codec does not hold is refused as an
+unknown field by the key check -- logged at ERROR and signalled, never a
+stage guessed at or dropped -- and an unset oneof is refused likewise."
   (let ((object (agent-repl-wire--object "WorkspaceOpenStage" value)))
     (agent-repl-wire--check-keys "WorkspaceOpenStage" object
-                                 '(checkingWorktree startingSession reviving
-                                   clearingClosed checkingBuild))
+                                 '(checkingWorktree restoringWorktree startingSession
+                                   reviving clearingClosed checkingBuild))
     (agent-repl-wire--decoded
      "WorkspaceOpenStage"
      (plist-get
@@ -1417,7 +1421,9 @@ unset oneof is refused likewise."
          (clearingClosed :clearing-closed
                          agent-repl-wire-decode-workspace-open-stage-clearing-closed)
          (checkingBuild :checking-build
-                        agent-repl-wire-decode-workspace-open-stage-checking-build)))
+                        agent-repl-wire-decode-workspace-open-stage-checking-build)
+         (restoringWorktree :restoring-worktree
+                            agent-repl-wire-decode-workspace-open-stage-restoring-worktree)))
       :arm))))
 
 (defun agent-repl-wire-decode-workspace-open-progress (value)

@@ -1014,6 +1014,131 @@ func TestAWorkspaceWhoseDirectoryIsGoneIsClosed(t *testing.T) {
 	}
 }
 
+// restoringDir makes the harness's restorer RECREATE the directory, as a
+// worktree add from a surviving branch does.
+func restoringDir(ws wsm.Workspace) (bool, error) {
+	return true, os.MkdirAll(ws.Dir, 0o755)
+}
+
+// TestAnOpenWorkspaceWhoseBranchSurvivesIsRecreatedNotClosed pins the owner's
+// ruling of 2026-10-06: a deleted worktree of an OPEN workspace whose branch
+// still exists is recreated, and the row stays open.
+func TestAnOpenWorkspaceWhoseBranchSurvivesIsRecreatedNotClosed(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	dir := t.TempDir()
+	ws := h.register(t, dir, sessionlock.StateFree)
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatalf("remove the workspace directory: %v", err)
+	}
+	h.restore = restoringDir
+
+	// Act.
+	report, err := h.seq.Run(context.Background())
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Run = error %v, want a completed boot", err)
+	}
+	if len(report.MissingDirRestored) != 1 || report.MissingDirRestored[0] != ws.ID || len(report.MissingDirClosed) != 0 {
+		t.Fatalf("report restored = %v, closed = %v, want [%v] restored and nothing closed",
+			report.MissingDirRestored, report.MissingDirClosed, ws.ID)
+	}
+	record, err := h.db.Workspace(context.Background(), ws.ID)
+	if err != nil {
+		t.Fatalf("Workspace(%v): %v", ws.ID, err)
+	}
+	if record.Closed {
+		t.Fatalf("workspace %v was closed though its worktree was recreated", ws.ID)
+	}
+}
+
+func TestARecreatedWorkspaceIsStatedAtInfo(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	dir := t.TempDir()
+	h.register(t, dir, sessionlock.StateFree)
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatalf("remove the workspace directory: %v", err)
+	}
+	h.restore = restoringDir
+
+	// Act.
+	if _, err := h.seq.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Assert.
+	if !h.hasRecord("info", "daemon.boot.close_missing_dir") {
+		t.Fatal("the recreation was not stated at INFO")
+	}
+}
+
+func TestAWorkspaceWhoseRestoreFailsIsClosedAndTheBootCompletes(t *testing.T) {
+	// Arrange: git could not recreate the tree; the restorer recorded its own
+	// ERROR, and the boot must still finish.
+	h := newHarness(t)
+	dir := t.TempDir()
+	ws := h.register(t, dir, sessionlock.StateFree)
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatalf("remove the workspace directory: %v", err)
+	}
+	h.restore = func(wsm.Workspace) (bool, error) { return false, errors.New("git exploded") }
+
+	// Act.
+	report, err := h.seq.Run(context.Background())
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Run = error %v, want a completed boot", err)
+	}
+	if len(report.MissingDirClosed) != 1 || report.MissingDirClosed[0] != ws.ID {
+		t.Fatalf("report.MissingDirClosed = %v, want [%v]", report.MissingDirClosed, ws.ID)
+	}
+}
+
+func TestAnAlreadyClosedMissingDirectoryIsNeverRecreated(t *testing.T) {
+	// Arrange: a closed row -- a merged, nuked or user-closed workspace --
+	// is not the boot's to bring back; only an explicit open restores one.
+	h := newHarness(t)
+	dir := t.TempDir()
+	ws := h.register(t, dir, sessionlock.StateFree)
+	if err := h.db.SetClosed(context.Background(), ws.ID, true); err != nil {
+		t.Fatalf("SetClosed: %v", err)
+	}
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatalf("remove the workspace directory: %v", err)
+	}
+	h.restore = restoringDir
+
+	// Act.
+	if _, err := h.seq.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Assert.
+	if len(h.restoreAsked) != 0 {
+		t.Fatalf("the restorer was asked about %v, want nothing for a closed row", h.restoreAsked)
+	}
+}
+
+func TestAPresentDirectoryIsNeverRestored(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.register(t, t.TempDir(), sessionlock.StateFree)
+	h.restore = restoringDir
+
+	// Act.
+	if _, err := h.seq.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Assert.
+	if len(h.restoreAsked) != 0 {
+		t.Fatalf("the restorer was asked about %v, want nothing for a directory that is there", h.restoreAsked)
+	}
+}
+
 // TestAWorkspaceWhoseDirectoryExistsIsLeftOpen is the negative arm: the step
 // closes nothing it was not asked to.
 func TestAWorkspaceWhoseDirectoryExistsIsLeftOpen(t *testing.T) {
@@ -2014,6 +2139,21 @@ func TestNewRefusesASequenceWithNoViewBinder(t *testing.T) {
 	// Assert
 	if err == nil {
 		t.Fatalf("New accepted a sequence that cannot bind the views")
+	}
+}
+
+func TestNewRefusesASequenceWithNoMissingWorktreeRestorer(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	deps := h.deps
+	deps.RestoreMissingWorktree = nil
+
+	// Act
+	_, err := New(deps)
+
+	// Assert
+	if err == nil {
+		t.Fatalf("New accepted a sequence that cannot restore a missing worktree")
 	}
 }
 

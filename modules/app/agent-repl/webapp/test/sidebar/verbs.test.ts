@@ -257,6 +257,11 @@ const CAUSE_FILL: Readonly<Record<string, Record<string, unknown>>> = {
   transcriptMissing: { vendorSessionId: "vs-1", searchedPaths: ["/a", "/b"] },
   spawnFailed: { detail: "exec format error" },
   vendorStartFailed: { detail: "the sdk threw before its first message" },
+  worktreeUnrestorable: {
+    dir: "/w/gone",
+    branch: "feature/gone",
+    detail: "the workspace's directory /w/gone is gone and its branch feature/gone no longer exists in /w; there is nothing to restore it from",
+  },
   lockHolderUnavailable: {
     failure: { binary: "/b/shim-lock", how: { case: "exited", value: { code: 1, stderr: "EACCES" } } },
   },
@@ -491,6 +496,13 @@ describe("the per-rpc causes, worded at their own site", () => {
     } as never);
     // Assert
     expect(text).toBe("the vendor failed to start the session");
+  });
+
+  it("draws the daemon's own sentence for an unrestorable workspace", async () => {
+    const refusal = await refuseWith(VERBS[0], "worktreeUnrestorable");
+    expect(refusal?.textContent).toContain(
+      "the workspace's directory /w/gone is gone and its branch feature/gone no longer exists in /w; there is nothing to restore it from",
+    );
   });
 
   it("says the shim's lock helper failed and how, naming the binary", async () => {

@@ -2223,8 +2223,10 @@ never set it.
   - The proto's framing wins.
 - Workspace id contract: the daemon's 16-hex id is the id on every record
   and sink across all runtimes.
-  - A workspace whose directory no longer exists is closed automatically
-    by the daemon.
+  - A workspace whose deleted directory's branch still exists is recreated
+    automatically: by the boot for an open row, by an open for a closed one.
+  - It is closed (boot) or refused as `worktree_unrestorable` (open) when the
+    branch is gone too or the workspace was merged.
 
 ## No warning or error anywhere is neglected
 

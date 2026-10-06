@@ -804,6 +804,19 @@ func (g *fakeGit) AddWorktree(_ context.Context, _, worktreeDir, branch string) 
 	return nil
 }
 
+// RestoreWorktree is never the merge's to call: a restore belongs to
+// OpenWorkspace. Reaching it here is a test failure, not an answer.
+func (g *fakeGit) RestoreWorktree(context.Context, string, string, string) error {
+	g.record("restore_worktree")
+	return errors.New("fakeGit: the merge never restores a workspace's worktree")
+}
+
+// UnregisterMissingWorktree is never the merge's to call either.
+func (g *fakeGit) UnregisterMissingWorktree(context.Context, string, string) error {
+	g.record("unregister_missing_worktree")
+	return errors.New("fakeGit: the merge never unregisters a missing worktree")
+}
+
 func (g *fakeGit) Fetch(_ context.Context, dir, remote string) error {
 	g.record("fetch")
 	g.mu.Lock()
