@@ -867,4 +867,8 @@ type MergeQueueEntry struct {
 	Source MergeSource
 	// EnqueuedAt is when it joined the queue.
 	EnqueuedAt time.Time
+	// Ledger is the merge bubble's ledger identity, written when the merge
+	// was put in line; empty while it is only requested, and on a row an
+	// earlier build queued.
+	Ledger LeaseID
 }

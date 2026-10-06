@@ -121,7 +121,7 @@ func queued(t *testing.T, s *store, repo RepoKey, id WorkspaceID, at time.Time) 
 	if err := s.RequestMerge(context.Background(), repo, id, ownBranch, at); err != nil {
 		t.Fatalf("RequestMerge: %v", err)
 	}
-	position, err := s.QueueMerge(context.Background(), repo, id)
+	position, err := s.QueueMerge(context.Background(), repo, id, NewLeaseID())
 	if err != nil {
 		t.Fatalf("QueueMerge: %v", err)
 	}
@@ -157,7 +157,7 @@ func TestQueueMergePlacesARequestAtTheBackWhenItIsQueued(t *testing.T) {
 	queued(t, s, repo, late.ID, instant.Add(time.Minute))
 
 	// Act
-	position, err := s.QueueMerge(context.Background(), repo, early.ID)
+	position, err := s.QueueMerge(context.Background(), repo, early.ID, NewLeaseID())
 
 	// Assert
 	if err != nil {
@@ -193,7 +193,7 @@ func TestQueueMergeRefusesAMergeThatWasNeverRequested(t *testing.T) {
 	ws := testWorkspace(t, s)
 
 	// Act
-	_, err := s.QueueMerge(context.Background(), RepoKey(t.TempDir()), ws.ID)
+	_, err := s.QueueMerge(context.Background(), RepoKey(t.TempDir()), ws.ID, NewLeaseID())
 
 	// Assert
 	if !errors.Is(err, ErrNotFound) {
@@ -209,7 +209,7 @@ func TestQueueMergeRefusesAMergeAlreadyInLine(t *testing.T) {
 	queued(t, s, repo, ws.ID, instant)
 
 	// Act
-	_, err := s.QueueMerge(context.Background(), repo, ws.ID)
+	_, err := s.QueueMerge(context.Background(), repo, ws.ID, NewLeaseID())
 
 	// Assert
 	if !errors.Is(err, ErrNotFound) {
@@ -236,7 +236,7 @@ func TestRequestMergeRefusesADuplicate(t *testing.T) {
 				t.Fatalf("RequestMerge: %v", err)
 			}
 			if tt.queue {
-				if _, err := s.QueueMerge(context.Background(), repo, ws.ID); err != nil {
+				if _, err := s.QueueMerge(context.Background(), repo, ws.ID, NewLeaseID()); err != nil {
 					t.Fatalf("QueueMerge: %v", err)
 				}
 			}
@@ -524,5 +524,67 @@ func TestForgetDeletesAWorkspacesQueueEntry(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Fatalf("queue = %+v after the nuke, want none", got)
+	}
+}
+
+func TestQueueMergeKeepsTheBubblesLedgerOnTheRow(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	repo := RepoKey(t.TempDir())
+	ws := testWorkspace(t, s)
+	if err := s.RequestMerge(context.Background(), repo, ws.ID, ownBranch, instant); err != nil {
+		t.Fatalf("RequestMerge: %v", err)
+	}
+	ledger := NewLeaseID()
+
+	// Act
+	if _, err := s.QueueMerge(context.Background(), repo, ws.ID, ledger); err != nil {
+		t.Fatalf("QueueMerge: %v", err)
+	}
+	entries, err := s.MergeQueue(context.Background(), repo)
+
+	// Assert
+	if err != nil || len(entries) != 1 || entries[0].Ledger != ledger {
+		t.Fatalf("queue = %+v (%v), want the entry carrying ledger %s", entries, err, ledger)
+	}
+}
+
+func TestQueueMergeRefusesAMergeWithNoLedger(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	repo := RepoKey(t.TempDir())
+	ws := testWorkspace(t, s)
+	if err := s.RequestMerge(context.Background(), repo, ws.ID, ownBranch, instant); err != nil {
+		t.Fatalf("RequestMerge: %v", err)
+	}
+
+	// Act
+	_, err := s.QueueMerge(context.Background(), repo, ws.ID, "")
+
+	// Assert
+	if err == nil {
+		t.Fatal("QueueMerge put a merge in line with no ledger identity, want a refusal")
+	}
+	entries, _ := s.MergeQueue(context.Background(), repo)
+	if len(entries) != 1 || entries[0].State != MergeRequested {
+		t.Fatalf("queue = %+v, want the request left as it was", entries)
+	}
+}
+
+func TestARequestedMergeCarriesNoLedger(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	repo := RepoKey(t.TempDir())
+	ws := testWorkspace(t, s)
+
+	// Act
+	if err := s.RequestMerge(context.Background(), repo, ws.ID, ownBranch, instant); err != nil {
+		t.Fatalf("RequestMerge: %v", err)
+	}
+	entries, err := s.MergeQueue(context.Background(), repo)
+
+	// Assert
+	if err != nil || len(entries) != 1 || entries[0].Ledger != "" {
+		t.Fatalf("queue = %+v (%v), want a request with no ledger yet", entries, err)
 	}
 }
