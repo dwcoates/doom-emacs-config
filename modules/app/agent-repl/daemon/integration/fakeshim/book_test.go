@@ -93,3 +93,19 @@ func TestBookRetiredEntryIsNoLongerServed(t *testing.T) {
 		t.Fatalf("page = %v, want the retired entry gone", page)
 	}
 }
+
+func TestBookSeedStampsEachEntrysTurn(t *testing.T) {
+	// Arrange.
+	b := newBook()
+	entries := harness.EncodeHistory(t, &conversationv1.HistoryEntry{}, &conversationv1.HistoryEntry{})
+
+	// Act: the newest entry names a turn, the oldest none.
+	b.seed(entries, []string{"turn-1"})
+	page, _ := b.page("", nil, 2)
+
+	// Assert.
+	got := []string{page.GetEntries()[0].GetTurn().GetValue(), page.GetEntries()[1].GetTurn().GetValue()}
+	if got[0] != "turn-1" || got[1] != "" {
+		t.Fatalf("turns = %q, want the newest stamped turn-1 and the oldest unstamped", got)
+	}
+}

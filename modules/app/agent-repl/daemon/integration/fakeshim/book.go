@@ -43,8 +43,9 @@ func bookAgent(agent string) string {
 
 // seed files a resumed session's history, stated NEWEST FIRST, into the main
 // agent's book. Each entry takes a resume pointer and a recorded place in its
-// order, as the store states one for every entry it holds.
-func (b *book) seed(newestFirst [][]byte) {
+// order, as the store states one for every entry it holds, and the turn TURNS
+// names at its index (newest first too; absent or "" is an unstamped entry).
+func (b *book) seed(newestFirst [][]byte, turns []string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	main := b.entries[MainAgentID][:0]
@@ -53,13 +54,17 @@ func (b *book) seed(newestFirst [][]byte) {
 		if err := proto.Unmarshal(newestFirst[i], entry); err != nil {
 			panic(sprintf("fakeshim: profile resume_history[%d] does not decode: %v", i, err))
 		}
-		main = append(main, &conversationv1.HistoryEntryAt{
+		at := &conversationv1.HistoryEntryAt{
 			At:    &conversationv1.HistoryPointer{Value: sprintf("resume-%d", i)},
 			Entry: entry,
 			Place: &conversationv1.HistoryEntryAt_RecordedPlace{RecordedPlace: &conversationv1.ConversationPlace{
 				AtMs: int64(len(newestFirst) - i),
 			}},
-		})
+		}
+		if i < len(turns) && turns[i] != "" {
+			at.Turn = &conversationv1.TurnId{Value: turns[i]}
+		}
+		main = append(main, at)
 	}
 	b.entries[MainAgentID] = main
 }
