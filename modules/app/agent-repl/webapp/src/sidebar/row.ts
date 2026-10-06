@@ -50,6 +50,7 @@ import { formatTickedAge } from "../duration.js";
 import { log } from "../log.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import type { SidebarContext } from "./context.js";
+import { toggleHiddenDropdown } from "./dropdowns.js";
 import { markReviving } from "./reviving.js";
 import { viewedMode } from "./viewed.js";
 import { armBreathes, armSpins, rosterArmMark, type RosterStatusCase } from "./tones.js";
@@ -148,8 +149,9 @@ export function drawRosterRow(
   if (closed) ws.setAttribute("data-closed", "true");
   if (current) ws.classList.add("current");
   if (closed) ws.classList.add("gone");
-  const expanded = sc.prefs.isExpanded(workspace.id);
-  if (expanded) ws.classList.add("open");
+  // THE DETAIL IS A DROPDOWN, transient to this page (owner ruling,
+  // 2026-10-06), so its openness is the page's own and survives a redraw.
+  if (sc.openDetails.has(workspace.id)) ws.classList.add("open");
 
   const line = document.createElement("div");
   line.className = "row";
@@ -490,9 +492,11 @@ export function drawStatusMark(arm: RosterStatusCase, path: string): HTMLElement
  * briefly over neither on its way in, and a close on the bare `mouseleave`
  * would snatch the panel away as it is being reached for.
  *
- * Openness is still the row's `.open` class and still persisted through
- * `prefs`, exactly as the chevron's click left it, so a redraw arriving while
- * the pointer rests on a row keeps that row's panel open.
+ * Openness is the row's `.open` class, remembered by THIS page
+ * (`SidebarContext.openDetails`), so a redraw arriving while the pointer rests
+ * on a row keeps that row's panel open. It is a dropdown, transient to the
+ * page that opened it, never the daemon's view state (owner ruling,
+ * 2026-10-06).
  *
  * THE POINTER'S TRIGGER IS THE STATUS DOT ALONE (owner request, 2026-10-02):
  * hovering the rest of the row opens nothing, and the pointer leaving the dot
@@ -511,6 +515,7 @@ function installHoverPanel(
   sc: SidebarContext,
   workspaceId: string,
 ): void {
+  const detail = ws.querySelector<HTMLElement>(":scope > .detail");
   let pointerOverRow = false;
   let pointerOverPanel = false;
   let focusWithin = false;
@@ -530,15 +535,33 @@ function installHoverPanel(
 
   const setOpen = (open: boolean, via: string): void => {
     if (ws.classList.contains("open") === open) return;
-    ws.classList.toggle("open", open);
-    sc.prefs.setExpanded(workspaceId, open);
     log.debug("toggling a row's detail panel", {
       operation: "sidebar.row.detail-toggle",
       context: { workspace: workspaceId, open, via },
     });
-    // The panel is fixed-positioned, so it is placed the moment it is shown,
-    // measured where it now stands rather than where the last draw left it.
-    if (open) placeRowDetail(ws);
+    if (open) sc.openDetails.add(workspaceId);
+    else sc.openDetails.delete(workspaceId);
+    paintRowDetail(ws, open);
+    if (open) registerDetail();
+    else if (detail !== null) sc.dropdowns.released(detail);
+  };
+
+  // THE POPOVER IS A DROPDOWN: a click in the rail outside it (and outside its
+  // row's line, which opens it on focus) closes it, and opening another
+  // dropdown closes it.
+  const registerDetail = (): void => {
+    if (detail === null) return;
+    sc.dropdowns.opened({
+      kind: "row-detail",
+      key: `row-detail:${workspaceId}`,
+      element: detail,
+      openers: [line],
+      close: () => {
+        cancelTimers();
+        sc.openDetails.delete(workspaceId);
+        paintRowDetail(ws, false);
+      },
+    });
   };
 
   const scheduleOpen = (): void => {
@@ -569,7 +592,6 @@ function installHoverPanel(
     scheduleClose();
   });
 
-  const detail = ws.querySelector<HTMLElement>(":scope > .detail");
   if (detail !== null) {
     detail.addEventListener("mouseenter", () => {
       pointerOverPanel = true;
@@ -580,6 +602,9 @@ function installHoverPanel(
       scheduleClose();
     });
   }
+
+  // A row a redraw drew open is still the page's open dropdown.
+  if (ws.classList.contains("open")) registerDetail();
 
   line.addEventListener("focusin", () => {
     focusWithin = true;
@@ -593,6 +618,16 @@ function installHoverPanel(
     focusWithin = next instanceof Node && line.contains(next);
     if (!focusWithin) scheduleClose();
   });
+}
+
+/**
+ * Show or hide a row's detail panel. The panel is fixed-positioned, so it is
+ * placed the moment it is shown, measured where it now stands rather than
+ * where the last draw left it.
+ */
+export function paintRowDetail(ws: HTMLElement, open: boolean): void {
+  ws.classList.toggle("open", open);
+  if (open) placeRowDetail(ws);
 }
 
 /**
@@ -671,10 +706,10 @@ function drawMenuControl(ws: HTMLElement, target: VerbTarget): HTMLElement {
  * stylesheet caps its height and scrolls it if the rail is short.
  */
 export function toggleRowMenu(ws: HTMLElement, target: VerbTarget): void {
-  void target;
   const menu = ws.querySelector<HTMLElement>(":scope > .sb-menu");
   if (menu === null) return;
-  menu.hidden = !menu.hidden;
+  const more = ws.querySelector<HTMLElement>(":scope > .row .sb-more");
+  toggleHiddenDropdown(target.sc.dropdowns, "row-menu", menu, more === null ? [] : [more]);
 }
 
 /** The row click: SelectWorkspace, echoed, idempotent, and nothing else. */

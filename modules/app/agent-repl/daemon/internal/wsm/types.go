@@ -689,6 +689,8 @@ type Task struct {
 	Title string
 	// Done reports whether it is complete.
 	Done bool
+	// Folded reports whether its roster section is collapsed.
+	Folded bool
 	// CreatedAt is when it was created.
 	CreatedAt time.Time
 }

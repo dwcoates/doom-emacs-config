@@ -567,6 +567,7 @@ func TestAParkedSessionStillShowsItsMerge(t *testing.T) {
 	// merge.
 	r := arrange(t)
 	r.SetRegistry(sidebar.Registry{
+		View:         wsm.DefaultSidebarView,
 		Workspaces:   []wsm.Workspace{workspace(string(theWS), "one")},
 		Repositories: []wsm.Repository{repo},
 		Sessions: []wsm.Session{{
@@ -857,6 +858,7 @@ func TestAParkedSessionKeepsAnIdleArm(t *testing.T) {
 
 	// Act: the park lands on the durable record.
 	r.SetRegistry(sidebar.Registry{
+		View:         wsm.DefaultSidebarView,
 		Workspaces:   []wsm.Workspace{workspace(string(theWS), "one")},
 		Repositories: []wsm.Repository{repo},
 		Sessions: []wsm.Session{{
@@ -892,6 +894,7 @@ func TestRowIsInitWhileTheSessionRecordExistsAndNoLinkHasBeenSeen(t *testing.T) 
 
 	// Act.
 	r.SetRegistry(sidebar.Registry{
+		View:         wsm.DefaultSidebarView,
 		Workspaces:   []wsm.Workspace{workspace(string(theWS), "one")},
 		Repositories: []wsm.Repository{repo},
 		Sessions:     []wsm.Session{{Workspace: theWS}},
@@ -912,6 +915,7 @@ func TestTheRowNeverReadsReadyBeforeInit(t *testing.T) {
 
 	// Act: the cold start, in the order the daemon produces it.
 	r.SetRegistry(sidebar.Registry{
+		View:         wsm.DefaultSidebarView,
 		Workspaces:   []wsm.Workspace{workspace(string(theWS), "one")},
 		Repositories: []wsm.Repository{repo},
 		Sessions:     []wsm.Session{{Workspace: theWS}},

@@ -43,6 +43,11 @@ type Registry struct {
 	Sessions []wsm.Session
 	// Current is the selected workspace, nil when none is.
 	Current *ids.WorkspaceID
+	// View is the sidebar's durable view state that belongs to no row: the
+	// recently-merged band's fold and the grouping every page shows
+	// (wsm.DefaultSidebarView when nobody has changed it). Its grouping is
+	// always one of the two; SetRegistry refuses anything else.
+	View wsm.SidebarView
 }
 
 // TurnStarted is the daemon's own fact that StartTurn was ACCEPTED. It aliases

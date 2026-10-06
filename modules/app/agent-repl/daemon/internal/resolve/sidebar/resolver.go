@@ -197,6 +197,7 @@ func (r *resolver) render(log dlog.Logger) *frontendv1.WorkspaceRoster {
 		Task:           r.taskView(live, rc, log),
 		RecentlyMerged: r.mergedSection(merged, rc, log),
 	}
+	setShownGrouping(out, r.state.reg.View.Grouping)
 	if cur := r.currentWorkspace(); cur != nil {
 		out.Current = cur
 	}
@@ -223,7 +224,20 @@ func (r *resolver) currentWorkspace() *frontendv1.RosterCurrentWorkspace {
 // ---- daemon-fact setters --------------------------------------------------
 
 // SetRegistry installs the durable half, whole.
+//
+// A VIEW WHOSE GROUPING IS NEITHER OF THE TWO IS A DEFECT, never a state to
+// draw around: the store refuses one on write and on read, so a registry
+// carrying one was composed by a caller that skipped the store.
 func (r *resolver) SetRegistry(reg Registry) {
+	if reg.View.Grouping != wsm.GroupingRepository && reg.View.Grouping != wsm.GroupingTask {
+		r.log.Global().Error("daemon.sidebar.set_registry", "the registry's view names a grouping that is neither repository nor task",
+			dlog.Context{
+				"grouping":            string(reg.View.Grouping),
+				"invariant_violation": "Registry.View.Grouping is repository or task",
+				"remediation":         "compose the registry's view from wsm.SidebarView",
+			})
+		panic(fmt.Sprintf("sidebar: registry view grouping %q is neither repository nor task", reg.View.Grouping))
+	}
 	r.mutate("daemon.sidebar.set_registry", "the roster took a registry snapshot",
 		dlog.Context{
 			"workspaces":   len(reg.Workspaces),

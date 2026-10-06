@@ -12,11 +12,12 @@
  * that never receives a roster keeps the single-column layout instead of
  * reserving a fifth of the window for an empty dock.
  *
- * WHAT IS LOCAL, AND ONLY WHAT IS LOCAL (R14). Three things are webview
- * preference and no element of the view: which grouping is shown, which
- * sections are folded, and which rows have their detail open. They live in
- * `localStorage` behind try/catch — a rail that cannot remember a fold must
- * still draw — and nothing else is persisted client-side.
+ * NOTHING ABOUT THE VIEW IS LOCAL. Which grouping is shown, which sections
+ * are folded and which rows have their detail open are the daemon's, carried
+ * on the roster push, so the sidebar looks the same in every workspace's page
+ * (owner rulings, 2026-10-06; `view.ts`). A page that still carries the
+ * preferences it once stored in `localStorage` starts from the daemon's view
+ * instead, says so once at INFO, and drops what it stored.
  */
 import { createControl, type Control } from "../control.js";
 import { WatchWorkspaceRosterResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_workspace_roster_pb";
@@ -25,8 +26,11 @@ import type { AppContext } from "../rpc/context.js";
 import { requireCase, requireMessage, unreachablePushArm } from "../rpc/strict.js";
 import { watchStream } from "../rpc/streams.js";
 import { AttentionRegistry, type BlinkTimers } from "./attention.js";
-import type { Grouping, SidebarContext, SidebarPrefs } from "./context.js";
-import { drawWorkspaceRoster } from "./roster.js";
+import { createDropdowns } from "./dropdowns.js";
+import { changeView } from "./view-change.js";
+import { createSidebarView, GROUPING_VIEW_KEY } from "./view.js";
+import type { Grouping, SidebarContext } from "./context.js";
+import { drawRosterShown, drawWorkspaceRoster } from "./roster.js";
 import { placeOpenRowDetails } from "./row.js";
 import { createSelectionEdge } from "./selection-edge.js";
 
@@ -35,19 +39,18 @@ export interface Handle {
   dispose(): void;
 }
 
-/** The `localStorage` key the rail's preferences live under. */
+/**
+ * The `localStorage` key the rail's preferences lived under before the view
+ * was the daemon's. Read only to retire it.
+ */
 export const PREFS_KEY = "agent-repl.sidebar";
-
-/** The shape stored under `PREFS_KEY`. Absent fields take their defaults. */
-interface StoredPrefs {
-  grouping?: Grouping;
-  folded?: Record<string, boolean>;
-  expanded?: Record<string, boolean>;
-}
 
 /** What a mount may have injected, for a suite that drives the cadence. */
 export interface SidebarDeps {
-  /** Where preferences persist. Defaults to the page's `localStorage`. */
+  /**
+   * Where the retired preferences may linger. Defaults to the page's
+   * `localStorage`.
+   */
   storage?: Storage | null;
   /** The blink timers. Defaults to the page's own. */
   timers?: BlinkTimers;
@@ -60,51 +63,30 @@ export interface SidebarDeps {
 }
 
 /**
- * The webview-local preference set, persisted behind try/catch.
+ * Drop the preferences a page stored before the view was the daemon's.
  *
- * EVERY ACCESS IS GUARDED, both directions. `localStorage` throws outright in
- * some embeddings — a private window, a webview with site data disabled — and
- * a preference is worth exactly nothing next to the rail drawing at all, so a
- * failure here costs the memory and is logged once, never raised.
+ * NOTHING IS MIGRATED: the daemon's view stands, and a page's old folds and
+ * grouping are not pushed into it. Their presence is said once at INFO, so a
+ * reader of the log knows why this page's sidebar changed under them. Every
+ * access is guarded: `localStorage` throws outright in some embeddings, and a
+ * failure here costs nothing but the tidy-up.
  */
-export function createSidebarPrefs(storage: Storage | null = pageStorage()): SidebarPrefs {
-  let state: StoredPrefs = read(storage);
-
-  const persist = (): void => {
-    if (storage === null) return;
-    try {
-      storage.setItem(PREFS_KEY, JSON.stringify(state));
-    } catch (err) {
-      log.warn(`the sidebar could not persist its preferences: ${String(err)}`, {
-        operation: "sidebar.prefs.write-failed",
-        context: { cause: err },
-      });
-    }
-  };
-
-  return {
-    grouping(): Grouping {
-      return state.grouping === "task" ? "task" : "repository";
-    },
-    setGrouping(grouping: Grouping): void {
-      state = { ...state, grouping };
-      persist();
-    },
-    isFolded(key: string, defaultFolded = false): boolean {
-      return state.folded?.[key] ?? defaultFolded;
-    },
-    setFolded(key: string, folded: boolean): void {
-      state = { ...state, folded: { ...state.folded, [key]: folded } };
-      persist();
-    },
-    isExpanded(id: string): boolean {
-      return state.expanded?.[id] ?? false;
-    },
-    setExpanded(id: string, expanded: boolean): void {
-      state = { ...state, expanded: { ...state.expanded, [id]: expanded } };
-      persist();
-    },
-  };
+export function retireStoredPrefs(storage: Storage | null): void {
+  if (storage === null) return;
+  try {
+    const stored = storage.getItem(PREFS_KEY);
+    if (stored === null) return;
+    storage.removeItem(PREFS_KEY);
+    log.info("the daemon's sidebar view supersedes the preferences this page stored; they are dropped", {
+      operation: "sidebar.prefs.superseded",
+      context: { stored },
+    });
+  } catch (err) {
+    log.warn(`the sidebar could not retire its stored preferences: ${String(err)}`, {
+      operation: "sidebar.prefs.retire-failed",
+      context: { cause: err },
+    });
+  }
 }
 
 /** The page's storage, or null where reaching for it throws. */
@@ -120,24 +102,6 @@ function pageStorage(): Storage | null {
   }
 }
 
-/** Read what was stored, treating anything unreadable as nothing stored. */
-function read(storage: Storage | null): StoredPrefs {
-  if (storage === null) return {};
-  try {
-    const raw = storage.getItem(PREFS_KEY);
-    if (raw === null) return {};
-    const parsed: unknown = JSON.parse(raw);
-    if (typeof parsed !== "object" || parsed === null) return {};
-    return parsed;
-  } catch (err) {
-    log.warn(`the sidebar could not read its preferences: ${String(err)}`, {
-      operation: "sidebar.prefs.read-failed",
-      context: { cause: err },
-    });
-    return {};
-  }
-}
-
 /**
  * Mount the rail on HOST and keep it drawn.
  *
@@ -148,7 +112,8 @@ function read(storage: Storage | null): StoredPrefs {
 export function mountSidebar(host: HTMLElement, ctx: AppContext, deps: SidebarDeps = {}): Handle {
   log.debug("mounting the workspaces rail", { operation: "sidebar.mount" });
 
-  const prefs = createSidebarPrefs(deps.storage === undefined ? pageStorage() : deps.storage);
+  retireStoredPrefs(deps.storage === undefined ? pageStorage() : deps.storage);
+  const view = createSidebarView();
   const attention = new AttentionRegistry(deps.timers);
   // THE ROSTER IS WHERE A SWITCH TO THIS WORKSPACE IS STATED, whichever path
   // made it, so the one edge every switch crosses is watched here.
@@ -166,7 +131,9 @@ export function mountSidebar(host: HTMLElement, ctx: AppContext, deps: SidebarDe
 
   const sc: SidebarContext = {
     ctx,
-    prefs,
+    view,
+    openDetails: new Set<string>(),
+    dropdowns: createDropdowns(),
     attention,
     tasks: [],
     onDispose: (fn) => {
@@ -176,8 +143,8 @@ export function mountSidebar(host: HTMLElement, ctx: AppContext, deps: SidebarDe
 
   const body = document.createElement("div");
   body.className = "sb-scroll";
-  const head = drawRailHead(prefs, body);
-  host.replaceChildren(head, body);
+  const head = drawRailHead(sc);
+  host.replaceChildren(head.element, body);
 
   // A FIXED PANEL DOES NOT TRAVEL WITH ITS ROW. It is anchored to the row's
   // rectangle at the moment it was placed, so anything that moves that
@@ -189,6 +156,12 @@ export function mountSidebar(host: HTMLElement, ctx: AppContext, deps: SidebarDe
   };
   window.addEventListener("resize", replace);
   window.addEventListener("scroll", replace, true);
+  // ANY CLICK IN THE RAIL OUTSIDE AN OPEN DROPDOWN CLOSES IT (owner ruling,
+  // 2026-10-06), empty space included; `dropdowns.ts` is the one rule.
+  const dismiss = (event: MouseEvent): void => {
+    sc.dropdowns.dismissOutside(event.target);
+  };
+  host.addEventListener("click", dismiss);
 
   const stream = watchStream(ctx, {
     name: "WatchWorkspaceRoster",
@@ -216,6 +189,8 @@ export function mountSidebar(host: HTMLElement, ctx: AppContext, deps: SidebarDe
       const drawn = drawWorkspaceRoster(roster, sc);
       attention.endPass();
       body.replaceChildren(drawn);
+      // The picker is a copy of the grouping too, drawn once at mount.
+      head.paintGrouping(sc.view.track(GROUPING_VIEW_KEY, drawRosterShown(roster.shown, "WorkspaceRoster.shown"), head.paintGrouping));
       // A detail panel is fixed-positioned so it can leave the rail, which
       // means it can only be measured once it is ON the page: a row drawn
       // already-expanded is placed here, after the draw is in the document.
@@ -232,6 +207,7 @@ export function mountSidebar(host: HTMLElement, ctx: AppContext, deps: SidebarDe
       stream.cancel();
       window.removeEventListener("resize", replace);
       window.removeEventListener("scroll", replace, true);
+      host.removeEventListener("click", dismiss);
       clear();
       attention.dispose();
       host.replaceChildren();
@@ -240,14 +216,24 @@ export function mountSidebar(host: HTMLElement, ctx: AppContext, deps: SidebarDe
   };
 }
 
+/** The rail's header, and how to paint its picker. */
+export interface RailHead {
+  element: HTMLElement;
+  /** Light the picker button for GROUPING. */
+  paintGrouping: (grouping: Grouping) => void;
+}
+
 /**
  * The rail's header: its title and the grouping picker.
  *
  * The picker SELECTS between two resolved views — it hides one pane and shows
- * the other — so switching costs no round trip and derives nothing. It is the
- * same segmented control the rail has always carried.
+ * the other — so switching costs no round trip to draw and derives nothing.
+ * Which one is shown is the daemon's view state: the click paints at once and
+ * asks (`view-change.ts`), and the push lights every page's picker alike. It
+ * is drawn once at mount, outside what a push replaces, so each push paints
+ * it again.
  */
-export function drawRailHead(prefs: SidebarPrefs, body: HTMLElement): HTMLElement {
+export function drawRailHead(sc: SidebarContext): RailHead {
   const head = document.createElement("div");
   head.className = "sb-head";
 
@@ -266,37 +252,36 @@ export function drawRailHead(prefs: SidebarPrefs, body: HTMLElement): HTMLElemen
     button.textContent = grouping === "repository" ? "Repo" : "Task";
     button.addEventListener("click", (event) => {
       event.preventDefault();
-      selectGrouping(grouping, prefs, body, buttons);
+      selectGrouping(grouping, sc, button);
     });
     buttons.set(grouping, button);
     views.appendChild(button);
   }
   head.appendChild(views);
-  paintPicker(prefs.grouping(), buttons);
-  return head;
+  return {
+    element: head,
+    paintGrouping: (grouping) => {
+      for (const [name, button] of buttons) button.classList.toggle("active", name === grouping);
+    },
+  };
 }
 
-/** Show one grouping's pane, hide the other, and remember the choice. */
-function selectGrouping(
-  grouping: Grouping,
-  prefs: SidebarPrefs,
-  body: HTMLElement,
-  buttons: ReadonlyMap<Grouping, Control>,
-): void {
-  log.info("switching the rail's grouping", {
+/** Show one grouping in every page: painted here at once, asked of the daemon. */
+function selectGrouping(grouping: Grouping, sc: SidebarContext, button: Control): void {
+  log.info("switching the rail's grouping for every page", {
     operation: "sidebar.grouping",
     context: { grouping },
   });
-  prefs.setGrouping(grouping);
-  for (const pane of body.querySelectorAll<HTMLElement>("[data-grouping]")) {
-    pane.hidden = pane.getAttribute("data-grouping") !== grouping;
-  }
-  paintPicker(grouping, buttons);
-}
-
-function paintPicker(
-  grouping: Grouping,
-  buttons: ReadonlyMap<Grouping, Control>,
-): void {
-  for (const [name, button] of buttons) button.classList.toggle("active", name === grouping);
+  void changeView(sc, {
+    key: GROUPING_VIEW_KEY,
+    value: grouping,
+    control: button,
+    outlivesPush: true,
+    change: {
+      case: "showGrouping",
+      value: {
+        grouping: grouping === "task" ? { case: "task", value: {} } : { case: "repository", value: {} },
+      },
+    },
+  });
 }

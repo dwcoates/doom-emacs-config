@@ -1106,3 +1106,67 @@ func TestValidateFoldRepositoryRequestRefusesAnIncompleteRequest(t *testing.T) {
 		})
 	}
 }
+
+// repositoryRPCs are every rpc that names a repository through
+// resolveRepository, each answering its unknown_repository arm or nil.
+var repositoryRPCs = []struct {
+	name string
+	call func(*harness, *workspacev1.RepositoryRef) (bool, error)
+}{
+	{"CreateWorkspace", func(h *harness, ref *workspacev1.RepositoryRef) (bool, error) {
+		resp, err := h.Client.CreateWorkspace(context.Background(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
+			Repository: ref,
+			Form:       &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{}},
+		}))
+		return err == nil && resp.Msg.GetError().GetUnknownRepository() != nil, err
+	}},
+	{"FoldRepository", func(h *harness, ref *workspacev1.RepositoryRef) (bool, error) {
+		resp, err := h.Client.FoldRepository(context.Background(), connect.NewRequest(&agentreplv1.FoldRepositoryRequest{
+			Repository: ref,
+			Fold:       &agentreplv1.FoldRepositoryRequest_Collapse{Collapse: &agentreplv1.FoldRepositoryCollapse{}},
+		}))
+		return err == nil && resp.Msg.GetError().GetUnknownRepository() != nil, err
+	}},
+	{"UpdateSidebarView", func(h *harness, ref *workspacev1.RepositoryRef) (bool, error) {
+		resp, err := h.Client.UpdateSidebarView(context.Background(), connect.NewRequest(foldChange(&agentreplv1.SidebarViewFoldSection{
+			Section: &agentreplv1.SidebarViewFoldSection_Repository{Repository: ref},
+			Fold:    collapseFold(),
+		})))
+		return err == nil && resp.Msg.GetError().GetUnknownRepository() != nil, err
+	}},
+}
+
+func TestEveryRepositoryRPCRefusesAnUnknownRepositoryTheSameWay(t *testing.T) {
+	for _, tt := range repositoryRPCs {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+
+			// Act
+			refused, err := tt.call(h, &workspacev1.RepositoryRef{Id: "repo-nope"})
+
+			// Assert
+			if err != nil || !refused {
+				t.Fatalf("%s = refused %v, error %v; want the unknown_repository arm", tt.name, refused, err)
+			}
+		})
+	}
+}
+
+func TestEveryRepositoryRPCFailsAnUnreadableRegistryAsInternal(t *testing.T) {
+	for _, tt := range repositoryRPCs {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.DB.listRepositoriesErr = errors.New("database is closed")
+
+			// Act
+			_, err := tt.call(h, &workspacev1.RepositoryRef{Id: "repo-1"})
+
+			// Assert
+			if connect.CodeOf(err) != connect.CodeInternal {
+				t.Fatalf("%s = %v, want an internal failure", tt.name, err)
+			}
+		})
+	}
+}

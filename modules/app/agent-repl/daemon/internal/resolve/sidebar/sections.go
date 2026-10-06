@@ -124,14 +124,16 @@ func (r *resolver) taskView(live []wsm.Workspace, rc rowContext, log dlog.Logger
 	for _, task := range tasks {
 		rows := r.sectionRows(byTask[task.ID], rc, log.With(dlog.Context{"task_id": string(task.ID)}))
 		delete(byTask, task.ID)
-		out.Sections = append(out.Sections, &frontendv1.RosterTaskSection{
+		section := &frontendv1.RosterTaskSection{
 			Key: &frontendv1.RosterTaskKey{TaskId: string(task.ID)},
 			Header: &frontendv1.RosterTaskSectionHeader{
 				Label: &frontendv1.RosterLabel{Text: task.Title},
 				Done:  &frontendv1.RosterTaskDone{Done: task.Done},
 			},
 			Rows: rows,
-		})
+		}
+		setTaskFold(section, task.Folded)
+		out.Sections = append(out.Sections, section)
 	}
 	for task, orphans := range byTask {
 		log.Error("daemon.sidebar.task_view",
@@ -156,10 +158,42 @@ func (r *resolver) mergedSection(merged []wsm.Workspace, rc rowContext, log dlog
 	for _, ws := range sortMerged(merged) {
 		rows.Rows = append(rows.Rows, r.row(ws, rc, log))
 	}
-	return &frontendv1.RosterMergedSection{
+	section := &frontendv1.RosterMergedSection{
 		Header: sectionHeader(MergedSectionLabel, rows),
 		Rows:   rows,
 	}
+	setMergedFold(section, r.state.reg.View.MergedFolded)
+	return section
+}
+
+// setShownGrouping states which grouping every page shows. The grouping is
+// one of the two: SetRegistry refuses a registry naming anything else.
+func setShownGrouping(roster *frontendv1.WorkspaceRoster, grouping wsm.Grouping) {
+	if grouping == wsm.GroupingTask {
+		roster.Shown = &frontendv1.WorkspaceRoster_ShownTask{ShownTask: &frontendv1.RosterShownTask{}}
+		return
+	}
+	roster.Shown = &frontendv1.WorkspaceRoster_ShownRepository{ShownRepository: &frontendv1.RosterShownRepository{}}
+}
+
+// setTaskFold states a task's fold on its section. The fold is the daemon's
+// so every page draws the same one (UpdateSidebarView).
+func setTaskFold(section *frontendv1.RosterTaskSection, folded bool) {
+	if folded {
+		section.Fold = &frontendv1.RosterTaskSection_Collapsed{Collapsed: &frontendv1.RosterTaskSectionCollapsed{}}
+		return
+	}
+	section.Fold = &frontendv1.RosterTaskSection_Expanded{Expanded: &frontendv1.RosterTaskSectionExpanded{}}
+}
+
+// setMergedFold states the recently-merged band's fold. The fold is the
+// daemon.s so every page draws the same one (UpdateSidebarView).
+func setMergedFold(section *frontendv1.RosterMergedSection, folded bool) {
+	if folded {
+		section.Fold = &frontendv1.RosterMergedSection_Collapsed{Collapsed: &frontendv1.RosterMergedSectionCollapsed{}}
+		return
+	}
+	section.Fold = &frontendv1.RosterMergedSection_Expanded{Expanded: &frontendv1.RosterMergedSectionExpanded{}}
 }
 
 // sectionHeader composes a repository or Recently Merged header: its label and

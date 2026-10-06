@@ -704,10 +704,27 @@ workspaces have no tabs on the bar."
   "Decode `RosterTaskSection''s `rows' field VALUE as RosterRows."
   (agent-repl-wire-decode-roster-rows value))
 
+(defun agent-repl-wire-decode-roster-task-section-expanded (value)
+  "Decode VALUE as the empty message `RosterTaskSectionExpanded'."
+  (agent-repl-wire--decode-empty "RosterTaskSectionExpanded" value))
+
+(defun agent-repl-wire-decode-roster-task-section-collapsed (value)
+  "Decode VALUE as the empty message `RosterTaskSectionCollapsed'."
+  (agent-repl-wire--decode-empty "RosterTaskSectionCollapsed" value))
+
+(defun agent-repl-wire-decode-roster-task-section-fold (object)
+  "Decode `RosterTaskSection''s `fold' oneof from OBJECT.
+THE ARM IS THE FOLD, the daemon's view state; it is never unset."
+  (agent-repl-wire--decode-oneof
+   "RosterTaskSection" 'fold object
+   '((expanded :expanded agent-repl-wire-decode-roster-task-section-expanded)
+     (collapsed :collapsed agent-repl-wire-decode-roster-task-section-collapsed))))
+
 (defun agent-repl-wire-decode-roster-task-section (value)
-  "Decode VALUE as `RosterTaskSection', a plist `(:key :header :rows)'."
+  "Decode VALUE as `RosterTaskSection', a plist `(:key :header :rows :fold)'."
   (let ((object (agent-repl-wire--object "RosterTaskSection" value)))
-    (agent-repl-wire--check-keys "RosterTaskSection" object '(key header rows))
+    (agent-repl-wire--check-keys "RosterTaskSection" object
+                                 '(key header rows expanded collapsed))
     (agent-repl-wire--decoded
      "RosterTaskSection"
      (list :key (agent-repl-wire--decode-message
@@ -718,7 +735,8 @@ workspaces have no tabs on the bar."
                     #'agent-repl-wire-decode-roster-task-section-header)
            :rows (agent-repl-wire--decode-message
                   "RosterTaskSection" 'rows object
-                  #'agent-repl-wire-decode-roster-task-section-rows)))))
+                  #'agent-repl-wire-decode-roster-task-section-rows)
+           :fold (agent-repl-wire-decode-roster-task-section-fold object)))))
 
 (defun agent-repl-wire-decode-roster-merged-section-header (value)
   "Decode `RosterMergedSection''s `header' field VALUE."
@@ -728,11 +746,28 @@ workspaces have no tabs on the bar."
   "Decode `RosterMergedSection''s `rows' field VALUE as RosterRows."
   (agent-repl-wire-decode-roster-rows value))
 
+(defun agent-repl-wire-decode-roster-merged-section-expanded (value)
+  "Decode VALUE as the empty message `RosterMergedSectionExpanded'."
+  (agent-repl-wire--decode-empty "RosterMergedSectionExpanded" value))
+
+(defun agent-repl-wire-decode-roster-merged-section-collapsed (value)
+  "Decode VALUE as the empty message `RosterMergedSectionCollapsed'."
+  (agent-repl-wire--decode-empty "RosterMergedSectionCollapsed" value))
+
+(defun agent-repl-wire-decode-roster-merged-section-fold (object)
+  "Decode `RosterMergedSection''s `fold' oneof from OBJECT.
+THE ARM IS THE FOLD, the daemon's view state; it is never unset."
+  (agent-repl-wire--decode-oneof
+   "RosterMergedSection" 'fold object
+   '((expanded :expanded agent-repl-wire-decode-roster-merged-section-expanded)
+     (collapsed :collapsed agent-repl-wire-decode-roster-merged-section-collapsed))))
+
 (defun agent-repl-wire-decode-roster-merged-section (value)
-  "Decode VALUE as `RosterMergedSection', a plist `(:header :rows)'.
+  "Decode VALUE as `RosterMergedSection', a plist `(:header :rows :fold)'.
 It has no key of its own — the roster carries exactly one."
   (let ((object (agent-repl-wire--object "RosterMergedSection" value)))
-    (agent-repl-wire--check-keys "RosterMergedSection" object '(header rows))
+    (agent-repl-wire--check-keys "RosterMergedSection" object
+                                 '(header rows expanded collapsed))
     (agent-repl-wire--decoded
      "RosterMergedSection"
      (list :header (agent-repl-wire--decode-message
@@ -740,7 +775,8 @@ It has no key of its own — the roster carries exactly one."
                     #'agent-repl-wire-decode-roster-merged-section-header)
            :rows (agent-repl-wire--decode-message
                   "RosterMergedSection" 'rows object
-                  #'agent-repl-wire-decode-roster-merged-section-rows)))))
+                  #'agent-repl-wire-decode-roster-merged-section-rows)
+           :fold (agent-repl-wire-decode-roster-merged-section-fold object)))))
 
 ;;;; ---- The two views and the roster ----
 
@@ -805,14 +841,32 @@ name, which is not unique."
   "Decode `WorkspaceRoster''s optional `current' field VALUE."
   (agent-repl-wire-decode-roster-current-workspace value))
 
+(defun agent-repl-wire-decode-roster-shown-repository (value)
+  "Decode VALUE as the empty message `RosterShownRepository'."
+  (agent-repl-wire--decode-empty "RosterShownRepository" value))
+
+(defun agent-repl-wire-decode-roster-shown-task (value)
+  "Decode VALUE as the empty message `RosterShownTask'."
+  (agent-repl-wire--decode-empty "RosterShownTask" value))
+
+(defun agent-repl-wire-decode-workspace-roster-shown (object)
+  "Decode `WorkspaceRoster''s `shown' oneof from OBJECT.
+THE ARM IS THE GROUPING every page shows; it is never unset."
+  (agent-repl-wire--decode-oneof
+   "WorkspaceRoster" 'shown object
+   '((shownRepository :shown-repository agent-repl-wire-decode-roster-shown-repository)
+     (shownTask :shown-task agent-repl-wire-decode-roster-shown-task))))
+
 (defun agent-repl-wire-decode-workspace-roster (value)
   "Decode VALUE as `WorkspaceRoster'.
-Returns `(:repository V :task V :recently-merged S :current C-or-nil)'.
-BOTH groupings arrive fully resolved: which one is drawn is client-local
-preference, a selection between two resolved views, never a derivation."
+Returns `(:repository V :task V :recently-merged S :current C-or-nil
+:shown ARM)'.  BOTH groupings arrive fully resolved: which one is drawn
+is the daemon's view state (`shown'), a selection between two resolved
+views, never a derivation."
   (let ((object (agent-repl-wire--object "WorkspaceRoster" value)))
     (agent-repl-wire--check-keys
-     "WorkspaceRoster" object '(repository task recentlyMerged current))
+     "WorkspaceRoster" object
+     '(repository task recentlyMerged current shownRepository shownTask))
     (agent-repl-wire--decoded
      "WorkspaceRoster"
      (list :repository (agent-repl-wire--decode-message
@@ -826,7 +880,8 @@ preference, a selection between two resolved views, never a derivation."
                              #'agent-repl-wire-decode-workspace-roster-recently-merged)
            :current (agent-repl-wire--decode-optional-message
                      "WorkspaceRoster" 'current object
-                     #'agent-repl-wire-decode-workspace-roster-current)))))
+                     #'agent-repl-wire-decode-workspace-roster-current)
+           :shown (agent-repl-wire-decode-workspace-roster-shown object)))))
 
 ;;;; ---- The rpc ----
 
