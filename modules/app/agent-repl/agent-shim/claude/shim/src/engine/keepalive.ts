@@ -394,6 +394,9 @@ export class KeepaliveRewind {
         keepalive_turns: this.keepaliveTurns,
         offending: offending.map(spanContext),
         span: this.spanTurns.map(spanContext),
+        detail: offending
+          .map((turn) => `${turn.kind} turn ${turn.turnId === "" ? "(none)" : turn.turnId}: ${turn.uuids.join(", ")}`)
+          .join("; "),
       },
       "the keep-alive rewind is REFUSED: the span since its anchor holds material that is not the keep-alive's, and the rewind would discard it; the content is kept and the anchor dropped",
     );
