@@ -142,11 +142,18 @@ type pageLoad struct {
 	drew bool
 	// quiet are the rows this load drew new below the cutoff.
 	quiet map[string]bool
+	// rows counts every row this load drew in its feed, so the replay can
+	// tell an entry that drew one from an entry that drew none.
+	rows int
+	// outcomes tallies what became of each entry the load replayed, by
+	// entry kind and outcome (outcomes.go).
+	outcomes entryOutcomes
 }
 
 // noteDrawn records one row a load drew in its feed, and reports whether it is
 // quiet: new, and below what was loaded before.
 func (l *pageLoad) noteDrawn(id, key string, fresh bool) bool {
+	l.rows++
 	if !l.drew || key < l.low {
 		l.low, l.drew = key, true
 	}
@@ -185,7 +192,7 @@ func (r *resolver) redrawPending(s *wsState, agent *conversationv1.AgentId, load
 			still = append(still, at)
 			continue
 		}
-		r.replayPageEntry(s, agent, at)
+		r.replayLoadedEntry(s, agent, at, load, outcomeCompleted)
 		drawn++
 	}
 	if drawn > 0 {
@@ -393,6 +400,7 @@ func (r *resolver) load(ctx context.Context, plan loadPlan) (loaded, error) {
 			"feed": f.key, "agent": plan.target.GetValue(), "newest": plan.newest,
 			"entries": len(entries), "floor": f.book.floor, "drew_rows": l.drew,
 			"bound": l.low, "quiet": len(l.quiet), "pending": len(f.book.pending),
+			"outcomes": l.outcomes.String(),
 		})
 	return loaded{low: l.low, drew: l.drew}, nil
 }
