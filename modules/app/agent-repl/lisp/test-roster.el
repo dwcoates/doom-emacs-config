@@ -2164,6 +2164,16 @@ LEVEL is the logging rung's symbol, e.g. `agent-repl--info'."
         ;; Assert
         (should logs)))))
 
+(ert-deftest agent-repl-test-roster-running-to-turn-died-is-a-finish-edge ()
+  "A turn that died with agent-repl's machinery has ended: thinking -> turn-died
+is the finish edge (owner ruling, 2026-10-06)."
+  (should (agent-repl-roster--finish-edge-p :thinking :turn-died)))
+
+(ert-deftest agent-repl-test-roster-running-to-vendor-blocked-is-a-finish-edge ()
+  "A turn the vendor ended stands as vendor-blocked: thinking -> vendor-blocked
+is the finish edge (owner ruling, 2026-10-06)."
+  (should (agent-repl-roster--finish-edge-p :thinking :vendor-blocked)))
+
 (ert-deftest agent-repl-test-roster-running-to-turn-failed-is-a-finish-edge ()
   "A turn that FAILED has ended: thinking -> turn-failed is the finish edge."
   ;; Act / Assert

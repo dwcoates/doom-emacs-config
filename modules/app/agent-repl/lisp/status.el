@@ -633,6 +633,7 @@ sits flush on the bar with no ground of its own.  See
     (:init            . "blue")
     (:severed         . "blue")
     (:dead            . "blue")
+    (:turn-died       . "blue")
     (:start-failed    . "blue")
 
     (:network-fault   . "blue")
@@ -689,7 +690,8 @@ user; purple, a merge in progress; TURQUOISE, something went wrong but
 the workspace is usable (`:turn-failed\=', `:merge-failed\=',
 `:degraded\=', and the VENDOR FAULTS `:vendor-blocked\=', `:vendor-fault\='
 and `:api-retrying\='); BLUE, the workspace is unusable right now (an
-agent-repl fault -- `:init\=', `:severed\=', `:dead\=', `:start-failed\=' --
+agent-repl fault -- `:init\=', `:severed\=', `:dead\=', `:start-failed\=',
+`:turn-died\=' (the last turn died with agent-repl\='s machinery) --
 or the NETWORK FAULT `:network-fault\=').  Owner ruling 2026-10-02:
 agent_repl_fault > network_fault > vendor_fault.
 
@@ -956,6 +958,13 @@ in `agent-repl--color-default-bracket'."
                'agent-repl-tab-init
                agent-repl--color-init-blue
                agent-repl--color-light))
+    ;; TURN-DIED is BLUE (owner ruling, 2026-10-06): the last turn died with
+    ;; agent-repl's own machinery -- its vendor query, or the agent process --
+    ;; an agent-repl fault standing until the next turn starts.
+    (:turn-died . ,(agent-repl--tab-palette-row
+                    'agent-repl-tab-init
+                    agent-repl--color-init-blue
+                    agent-repl--color-light))
     ;; DEGRADED is TURQUOISE (owner ruling, 2026-09-28): the session serves,
     ;; but the daemon's view of it is compromised — usable, with something
     ;; wrong.

@@ -165,9 +165,14 @@ arriving as an unknown field on some later push."
                        #'string<)))
     (should (equal spelled declared))))
 
-(ert-deftest agent-repl-test-wire-roster-row-status-count-is-twenty-five ()
-  "The status vocabulary is the 25 arms the contract declares."
-  (should (equal (length agent-repl-wire-roster-row-status-keywords) 25)))
+(ert-deftest agent-repl-test-wire-roster-row-status-count-is-twenty-six ()
+  "The status vocabulary is the 26 arms the contract declares."
+  (should (equal (length agent-repl-wire-roster-row-status-keywords) 26)))
+
+(ert-deftest agent-repl-test-wire-roster-decodes-the-turn-died-arm ()
+  "The turn-died arm decodes to its keyword (owner ruling, 2026-10-06)."
+  (should (assq 'turnDied agent-repl-wire-roster-row-status-arms))
+  (should (memq :turn-died agent-repl-wire-roster-row-status-keywords)))
 
 (ert-deftest agent-repl-test-wire-roster-row-unset-status-is-a-breach ()
   "A row with no lifecycle is a contract breach, not a default dot."
