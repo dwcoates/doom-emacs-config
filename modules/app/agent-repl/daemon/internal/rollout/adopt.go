@@ -712,6 +712,14 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 
 	c.log.Info(opAdopt, "adopted the workspace", fields)
 
+	// THE WORKSPACE'S MERGES ARE THIS DAEMON'S NOW: a merge the incumbent
+	// suspended for the transfer resumes here at its recorded step, in the
+	// bubble it already had (merge/transfer.go).
+	if err := c.deps.Merges.AdoptWorkspace(ctx, ws); err != nil {
+		c.log.Error(opAdopt, "could not take the adopted workspace's merges", withCause(fields, err))
+		return fmt.Errorf("rollout: adopt %q: take its merges: %w", ws, err)
+	}
+
 	if sessionless {
 		c.startSessionless([]wsm.Workspace{record}, fields)
 	}

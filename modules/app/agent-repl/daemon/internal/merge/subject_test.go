@@ -12,7 +12,7 @@ import (
 // subjectOf resolves the harness workspace's subject for one source.
 func subjectOf(t *testing.T, h *harness, source wsm.MergeSource) subject {
 	t.Helper()
-	r := &run{o: h.o, ws: theWorkspace, source: source, lease: wsm.Lease{ID: "lease-1"}}
+	r := &run{o: h.o, ws: theWorkspace, source: source, lease: wsm.Lease{ID: "lease-1"}, git: newGatedGit(h.o.deps.Git, h.o.deps.Now)}
 	s, err := h.o.resolveSubject(context.Background(), r)
 	if err != nil {
 		t.Fatalf("resolveSubject: %v", err)

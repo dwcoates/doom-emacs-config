@@ -97,7 +97,7 @@ func (o *orchestrator) resolveSubject(ctx context.Context, r *run) (subject, err
 		if err != nil {
 			return subject{}, err
 		}
-		main, err := o.deps.Git.MainWorktree(ctx, job.Layout.SourceDir)
+		main, err := r.git.MainWorktree(ctx, job.Layout.SourceDir)
 		if err != nil {
 			return subject{}, fmt.Errorf("merge: resolving the repository's main worktree: %w", err)
 		}
@@ -133,12 +133,12 @@ func (o *orchestrator) branchSubject(ctx context.Context, r *run) (subject, erro
 	if err != nil {
 		return subject{}, err
 	}
-	main, err := o.deps.Git.MainWorktree(ctx, record.Dir)
+	main, err := r.git.MainWorktree(ctx, record.Dir)
 	if err != nil {
 		return subject{}, fmt.Errorf("merge: resolving the repository's main worktree: %w", err)
 	}
 	s := subject{branch: r.source.Branch, targetDir: main}
-	worktrees, err := o.deps.Git.ListWorktrees(ctx, main)
+	worktrees, err := r.git.ListWorktrees(ctx, main)
 	if err != nil {
 		return subject{}, fmt.Errorf("merge: listing the repository's worktrees: %w", err)
 	}
@@ -154,7 +154,7 @@ func (o *orchestrator) branchSubject(ctx context.Context, r *run) (subject, erro
 	if err := os.MkdirAll(filepath.Dir(s.dir), 0o755); err != nil {
 		return subject{}, fmt.Errorf("merge: making the directory for the branch's worktree: %w", err)
 	}
-	if err := o.deps.Git.AddWorktree(ctx, main, s.dir, s.branch); err != nil {
+	if err := r.git.AddWorktree(ctx, main, s.dir, s.branch); err != nil {
 		return subject{}, fmt.Errorf("merge: checking %s out at %s: %w", s.branch, s.dir, err)
 	}
 	s.made = true

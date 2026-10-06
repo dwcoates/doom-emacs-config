@@ -86,6 +86,7 @@ Read `ARCHITECTURE.md` first: the package map, the seams, the conventions.
   | the `harness.Daemon` context (`DefaultTimeout * runBudgetWaits`) | 35s | the WHOLE-RUN budget one daemon process's test shares, and the lifetime of every watch stream held across it | **it used to be `DefaultTimeout` itself**, so a test's whole run was as short as its single longest permitted wait, and the LAST call in a test answered `deadline_exceeded` for budget the earlier ones had spent. That is what made `TestHostRequestedStopLeavesNoProcessBehind` fail ~1 in 20 at ~5.09s on the stop -- a step measured at 9ms p50 and 15ms max across 104 runs. Sized as five `DefaultTimeout` waits (25s) plus one `drain.DefaultStandBound` stand-down (6s, now 7s) = 31s (32s), rounded up to the next whole multiple (7 x 5s = 35s); it is a MULTIPLE so an `Opts.Timeout` override widens the run in the same proportion it widens the wait |
   | `harness.HandoverChainTimeout` (`Opts.Timeout`) | 15s wait bound (3x default), 90s run budget | the handful of tests whose ONE daemon context must span an entire self-reload handover — a merge landing, the rollout trigger, a SECOND real `claude-repld`'s full boot and adoption, and the incumbent's orderly exit, all on the incumbent's own budget rather than a fresh one | structurally two real process lifecycles sharing one budget, not one; run 8 already saw this chain finish inside 1.7s, so 15s is headroom, not a measured need |
   | `harness.MergeChainTimeout` (`Opts.Timeout`) | 15s wait bound (3x default), 105s run budget | every daemon that runs a merge's test gate (`AGENT_REPL_TEST_ALL_SCRIPT`) outside a handover: `mergeCleanRepo` and its siblings in `merge_test.go`, and `create_test.go`'s parent-target merge | one wait spans the WHOLE merge, a sequential chain of 36-52 subprocesses (fake git per call, plus the gate script), so its cost scales with process-spawn latency. MEASURED 2026-10-06 from the daemon logs, `-test.parallel=1 GOMAXPROCS=2` chunks: ~0.1s unloaded; 2.82s max under 24 chunks + `with-cpu-load.sh 24`; 4.22s passing max under 48 chunks + `with-cpu-load.sh 32`, where 16 runs were cut at 5s while still advancing (no record gap over 1.54s, target fast-forwarded at +3.9-4.95s). A bound under the healthy chain, not a stall; 15s is ~3.5x the passing max |
+  | `harness.ClaimRefusalTimeout` (`Opts.Timeout`) | `daemonaddr.ClaimWaitBound` + 5s (17.32s) | a second daemon that refuses to boot beside a SERVING incumbent (`TestSecondDaemonOnTheSameStateRootRefusesToBoot`) | the refusal is decided only once the claim wait expires, and that wait (12.32s) must outlast the incumbent's merge drain including its wait for a merge's git in flight (`merge.MergeGitStopBound`), so the exit lands one DefaultTimeout after it |
   | `harness.ProbeWindow` | 500ms | `harness.ExpectNoPush`, `harness.Daemon.ExpectFileUnchanged` | negative assertions that must wait out a bound rather than an event, so unlike every other row here it is paid IN FULL on a green run, at 27 sites. MEASURED BASIS (`AwaitView` arrival times over the whole suite at `-parallel 8`, 472 samples): p50 0.4ms, p90 5.8ms, p95 47ms, p97 99ms, max 294ms. The 294ms is `commandfile_test.go`'s ingress, which the daemon polls every 250ms and which is itself one of the negative-probe sites; the only slower arrivals in the run were the two gated by the footer's own 1.5s dwell. 500ms is ~1.7x that measured maximum, so it is NOT shrinkable on this evidence — shortening it would make the command-file and handover probes report "nothing came" about a push that was still on its way |
   | `shortTimeout` (integration/support_session_test.go) | 200ms | `TestSessionSurvivesADaemonRestart`-style old-PID-gone probes | a structural "is it already true" check that should fail fast rather than ride the whole test's deadline |
   | inline `context.WithTimeout` (drain_rollout_test.go, the drain-schedule-survives-a-restart test) | 2s | asserting the drain banner does NOT reappear after a restart | an expected-to-time-out negative probe, deliberately tighter than `DefaultTimeout` |
@@ -1055,6 +1056,51 @@ Owner rulings, 2026-09-30 (`internal/merge`; the contract is
   `OpenInEditor{merge_test_log}` resolves it through `TestLogPath` (the lease
   in the merge ledger, the file present), refuses with
   `unknown_merge_test_log`, and relays `HostOpenInEditor{path}`.
+- **A MERGE ALWAYS RESUMES WHERE IT LEFT OFF** (owner ruling, 2026-10-06;
+  `progress.go`, `resume.go`). A run writes its progress to
+  `wsm.merge_progress` (layout 28, one JSON document per workspace, keyed by
+  the merge's lease) at every step boundary, BEFORE the step acts: the step,
+  the tab rounds, the footer facts, the subject, the attempt's tip and target,
+  the rebase's commits and count, the agent turn it is about to submit, the
+  gated head and the merge commit before the fast-forward. The boot never reads
+  the target's working tree to decide a merge's fate -- content the merge never
+  wrote (an untracked file, the owner's edits) is no evidence. It ADOPTS the
+  lease (`wsm.AdoptMergeLease`, so the orphan sweep leaves it), redraws the same
+  bubble live at once, and the pump resumes the run first (a pause stops only
+  new admissions). Each step reads from git only what it can have left: a
+  rebase standing (continued, or its conflict handed to the session), the
+  branch on the tip (go to tests), the branch at its pre-rebase head (begin the
+  rebase), the target at the recorded merge commit (landed) or at the tip
+  (commit again). An agent turn is reattached by its id (closed in the turn
+  store, still running in the shim, still held, or submitted now under the
+  same id). A tree that contradicts the record fails the merge at ERROR
+  `daemon.merge.resume`, naming the contradiction. An admitted merge with no
+  record never took a step and runs again from the queue under its bubble.
+  A record that will not decode refuses the boot.
+  A QUEUED merge keeps its bubble too: its ledger identity is written on its
+  queue row with its place in line (`merge_queue.ledger_id`), and recovery and
+  adoption redraw it under that identity; only a row an earlier build queued
+  is given a fresh one (INFO `daemon.merge.recover`).
+- **THE DAEMON'S EXIT SUSPENDS A MERGE AT A STOPPING POINT** (`gatedgit.go`,
+  `Drain`). Every git a run makes goes through its gate; the drain stops every
+  gate (no git starts after it), waits for the command in flight within
+  `MergeGitStopBound` (10s; INFO with the measured wait, ERROR naming a
+  command that outlives it), then cuts the run's waits: an agent turn (it
+  lives on in the shim) and a test gate run (INFO: it runs again from its
+  start on resume). A suspended run publishes, records and releases nothing
+  durable (INFO `daemon.merge.suspend`); `daemonaddr.ClaimWaitBound` outlasts
+  both drain bounds so a replacement still replaces.
+- **A MERGE MOVES WITH ITS WORKSPACE ACROSS A HANDOVER** (`transfer.go`). A
+  merge drives its requester's own session, so a rolling deploy's transfer
+  suspends it (`SuspendForTransfer`, the drain's stopping point) after the
+  quiesce and before the shim is detached, and the daemon that adopts the
+  workspace -- the successor, or the incumbent taking a failed transfer back
+  -- takes every merge of it from the durable rows (`AdoptWorkspace`, the
+  boot's own per-entry recovery): the suspended merge resumes at its step, in
+  the same bubble. A daemon admits nothing behind a merge admitted elsewhere,
+  and nothing of a workspace it handed away. Holding the handover until the
+  merge ended was rejected: a handover never waits on work, and a merge's
+  tests and repairs are unbounded.
 - The integration fake: a branch with no commits is already on its target, so
   a test that exercises a merge's steps commits work first
   (`harness.CommitWork`); a rebase conflict is scripted per commit

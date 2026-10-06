@@ -595,9 +595,9 @@ func TestAWorkspaceWhoseMergeFailedTakesTheNextPromptAsAnOrdinaryTurn(t *testing
 // working test for this exact sentence
 // (TestADisplacedUserTurnIsResubmittedExactlyOnceAcrossADaemonBounce) never
 // lets its merge land either — it crashes the daemon inside the window
-// between the capture and everything that would close it, then makes the
-// target dirty so the restart REFUSES to resume the merge (an "abandoned",
-// not "landed", release), and it is the boot-time recovery sweep
+// between the capture and everything that would close it, which is BEFORE the
+// merge's first progress record, so the restart has no step to resume it at:
+// it runs again from the queue, and it is the boot-time recovery sweep
 // (internal/merge/recover.go's recoverDisplaced) that performs the resubmit.
 //
 // THE CRASH LANDS IN A HELD WINDOW, NEVER A RACED ONE. claude-repld's own
@@ -614,11 +614,10 @@ func TestDisplacedTurnCapturedEndedThenResubmittedExactlyOnce(t *testing.T) {
 	t.Parallel()
 	const displacedText = "keep going"
 	// A daemon killed mid-merge writes no stand-down manifest
-	// (daemon.rollout.reconcile), the restart refuses to resume the merge into
-	// an unclean target (daemon.merge.recover), and a turn left in flight by a
-	// killed daemon is closed by the next boot (daemon.promptqueue.restore_holds).
+	// (daemon.rollout.reconcile), and a turn left in flight by a killed daemon
+	// is closed by the next boot (daemon.promptqueue.restore_holds).
 	mqExpectedBounceWarnings := []string{
-		"daemon.rollout.reconcile", "daemon.merge.recover", "daemon.promptqueue.restore_holds",
+		"daemon.rollout.reconcile", "daemon.promptqueue.restore_holds",
 	}
 
 	// Arrange. The displaced turn is PARKED ON THE FAKE'S TURN GATE
@@ -685,12 +684,15 @@ func TestDisplacedTurnCapturedEndedThenResubmittedExactlyOnce(t *testing.T) {
 	// Act: crash the daemon while its merge is HELD after the capture — the
 	// pause's own record says the run can go no further — so nothing the
 	// merge would do next (the git merge, a target bring-up) is under way.
-	// Make the target dirty so the restart cannot resume the interrupted
-	// merge — the same fact daemon/integration/merge_test.go's own bounce test
-	// relies on (repo.SetDirty is USABLE against this suite's scripted fake
-	// git).
+	//
+	// THE QUEUE IS PAUSED FIRST, on purpose: the crash lands before the
+	// merge's first progress record, so the restart puts the merge back in
+	// line to run again, and this test is about the displaced turn, not that
+	// run. A paused queue admits nothing new (the held run is not stopped by
+	// it), so the merge waits in line across every bounce below, the
+	// workspace stays unlanded, and the boot sweep alone puts the turn back.
+	mqPauseQueue(t, w, repoRef)
 	w.AwaitRunLogOperation("daemon.merge.capture_pause")
-	repo.SetDirty(repo.Dir, true)
 	w.Kill()
 
 	// Act: a second real claude-repld boots on the SAME state root, store
@@ -707,9 +709,8 @@ func TestDisplacedTurnCapturedEndedThenResubmittedExactlyOnce(t *testing.T) {
 	d2.AwaitRunLogOperation("daemon.merge.recover")
 
 	// Assert: the boot sweep resubmitted the displaced turn EXACTLY ONCE,
-	// carrying its own words, on a turn id of its own. The merge was
-	// abandoned (never landed), so the workspace survived and a fresh
-	// OpenFeed is safe.
+	// carrying its own words, on a turn id of its own. The merge never
+	// landed, so the workspace survived and a fresh OpenFeed is safe.
 	rootAfterBoot, _ := mqOpenFeedRows(t, w, child, nil)
 	var resubmitTurn *conversationv1.TurnId
 	matches := 0
@@ -1324,5 +1325,17 @@ func TestAMergeOfABranchThatDoesNotExistIsRefused(t *testing.T) {
 	// Assert
 	if err != nil || resp.Msg.GetError().GetUnknownBranch() == nil {
 		t.Fatalf("MergeWorkspace of a missing branch = (%v, %v), want unknown_branch", resp.Msg.GetResult(), err)
+	}
+}
+
+// mqPauseQueue pauses one repository's merge queue: it admits nothing new
+// until resumed, and the pause is durable across daemon bounces.
+func mqPauseQueue(t *testing.T, w *World, repoRef *workspacev1.RepositoryRef) {
+	t.Helper()
+	resp, err := w.Client().UpdateMergeQueue(w.Ctx(), connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{
+		Action: &agentreplv1.UpdateMergeQueueRequest_Pause{Pause: &agentreplv1.UpdateMergeQueuePause{Repository: repoRef}},
+	}))
+	if err != nil || resp.Msg.GetError() != nil {
+		t.Fatalf("UpdateMergeQueue(pause) = %v, %v, want the repository's queue paused", resp.Msg, err)
 	}
 }

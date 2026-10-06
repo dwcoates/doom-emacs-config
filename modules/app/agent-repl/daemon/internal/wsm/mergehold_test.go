@@ -29,7 +29,7 @@ func queuedWith(t *testing.T, s *store, repo RepoKey, ws WorkspaceID, source Mer
 	if err := s.RequestMerge(context.Background(), repo, ws, source, instant); err != nil {
 		t.Fatalf("RequestMerge: %v", err)
 	}
-	if _, err := s.QueueMerge(context.Background(), repo, ws); err != nil {
+	if _, err := s.QueueMerge(context.Background(), repo, ws, NewLeaseID()); err != nil {
 		t.Fatalf("QueueMerge: %v", err)
 	}
 }

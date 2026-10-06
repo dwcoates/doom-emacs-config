@@ -1578,3 +1578,36 @@ func TestAnAdoptionWhoseViewsFailLowersTheMarkerAndStartsNothing(t *testing.T) {
 		t.Fatalf("marker edges = %v, want the raise taken back", got)
 	}
 }
+
+func TestAnAdoptionTakesTheWorkspacesMerges(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+
+	// Act
+	arm(t, h, ws, Participants{})
+
+	// Assert
+	if calls := h.merges.called(); len(calls) != 1 || calls[0] != "adopt "+string(ws) {
+		t.Fatalf("merge calls = %v, want the adopted workspace's merges taken", calls)
+	}
+	taken := h.order.Taken()
+	if drain, merges := indexOf(taken, "drain_intake"), indexOf(taken, "adopt_merges"); drain < 0 || merges < drain {
+		t.Fatalf("steps = %v, want the merges taken once the workspace is this daemon's", taken)
+	}
+}
+
+func TestAnAdoptionWhoseMergesCannotBeTakenSaysSo(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	h.merges.adoptErr = errors.New("the queue would not read")
+
+	// Act
+	arm(t, h, ws, Participants{})
+
+	// Assert
+	if !loggedError(h.log, opAdopt, "could not take the adopted workspace's merges") {
+		t.Fatalf("records = %+v, want the failure surfaced at ERROR", h.log.Records())
+	}
+}

@@ -433,7 +433,7 @@ type Orchestrator interface {
   RouteParked(ctx, ws, turn, said) error         // a parked merge's guidance: delivered to the workspace's own session and answered
   RetireConcluded(ctx, ws)                       // a failed/merged state retires once the workspace moves on
   Facts(ws) (MergeFacts, bool)                   // for the footer/sidebar
-  Drain(ctx); Recover(ctx) error                 // orderly exit; boot: resume or loudly fail in-flight merges
+  Drain(ctx); Recover(ctx) error                 // orderly exit suspends mid-step merges; boot resumes them from their progress record
 }
 ```
 Two methods keyed by `gitclient.SameRepo(target, daemonCheckout)`. Every other
@@ -832,7 +832,9 @@ Rulings already binding; code swaps to the generated arms when it lands:
   placeholder sets unchanged.
 - Recovery re-queues an in-flight merge at the FRONT of its repo queue
   rather than re-entering a tab: accepted as an override (recorded in
-  docs/overhaul/daemon.md).
+  docs/overhaul/daemon.md). SUPERSEDED 2026-10-06 (owner): a merge always
+  resumes at the step its durable progress record names, in the same bubble;
+  see daemon/AGENTS.md "A MERGE ALWAYS RESUMES WHERE IT LEFT OFF".
 - Terminal ordering post-prompt → terminal → release → worktree removal →
   displaced turn → rollout trigger: accepted.
 

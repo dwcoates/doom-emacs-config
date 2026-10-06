@@ -728,7 +728,9 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	if err != nil {
 		return nil, err
 	}
+	mergeMover := &mergeMoverForwarder{}
 	rolloutController, err := rollout.New(rollout.Deps{
+		Merges:           mergeMover,
 		HoldoutWarnEvery: holdoutWarnEvery,
 		FactsBound:       factsBound,
 		PublishHost:      relay.PublishHostWorkspace,
@@ -884,6 +886,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	if err != nil {
 		return nil, fmt.Errorf("claude-repld: build the merge orchestrator: %w", err)
 	}
+	mergeMover.bind(mergeOrchestrator)
 
 	// ---- health, login, the verbs ----
 

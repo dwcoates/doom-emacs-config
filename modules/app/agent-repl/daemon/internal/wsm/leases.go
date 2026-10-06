@@ -122,6 +122,39 @@ func (s *store) disown(id LeaseID) {
 	delete(s.owned, id)
 }
 
+// AdoptMergeLease takes ownership of a MERGE lease a previous process left
+// held, for the merge this process resumes under it: the lease becomes this
+// handle's, so the boot's orphan sweep (ForeignLeases) leaves it standing and
+// the resumed merge releases it at its end like any lease it took itself.
+//
+// ONLY A MERGE LEASE IS ADOPTED. Every other holder's lease dies with its
+// process (no lease outlives its owner); a merge's is the one a restart
+// carries forward, because the merge itself is carried forward. A lease that
+// is not held, or not a merge's, is refused.
+func (s *store) AdoptMergeLease(ctx context.Context, id WorkspaceID, lease LeaseID) (Lease, error) {
+	const op = "daemon.wsm.adopt_merge_lease"
+	fields := dlog.Context{"workspace": string(id), "lease": string(lease)}
+	held, ok, err := s.Lease(ctx, id)
+	if err != nil {
+		return Lease{}, err
+	}
+	switch {
+	case !ok:
+		err = fmt.Errorf("wsm: no lease is held on %s to adopt", id)
+	case held.ID != lease:
+		err = fmt.Errorf("wsm: the lease held on %s is %s, not %s", id, held.ID, lease)
+	case held.Holder != HolderMerge:
+		err = fmt.Errorf("wsm: the lease %s on %s is held by %s, not the merge", lease, id, held.Holder)
+	}
+	if err != nil {
+		s.log.Error(op, "refused to adopt a lease that is not the merge's standing lease", withError(fields, err))
+		return Lease{}, err
+	}
+	s.own(held)
+	s.log.Debug(op, "adopted a merge lease a previous process left held", fields)
+	return held, nil
+}
+
 // ForeignLeases lists every held lease THIS HANDLE did not acquire.
 //
 // OWNERSHIP IS THE ACQUIRING PROCESS. A daemon holds exactly one state handle
