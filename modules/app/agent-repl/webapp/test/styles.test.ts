@@ -3396,4 +3396,15 @@ describe("the cold gate's lead sentence", () => {
     // Assert
     expect(declarations).toMatch(/color:\s*var\(--fg\)/);
   });
+
+  it("draws its token figure bold", () => {
+    // Arrange
+    const rule = rulesOf(stylesheet).find((r) => r.selectors.includes(".cold-gate-tokens"));
+
+    // Act
+    const declarations = rule?.declarations ?? "";
+
+    // Assert
+    expect(declarations).toMatch(/font-weight:\s*700/);
+  });
 });

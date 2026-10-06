@@ -4041,6 +4041,9 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
   color: var(--fg);
   font-variant-numeric: tabular-nums;
 }
+/* The figure is the one emphasized word in the sentence: bold, and colored
+   inline on the cold-gate gradient (owner, 2026-10-06). */
+.cold-gate-tokens { font-weight: 700; }
 /* One ROW per option: its button, and the sentence saying what that option
    keeps. Stacked rather than laid out side by side, because five buttons in a
    row with their explanations elsewhere would be paired up by position — and a
