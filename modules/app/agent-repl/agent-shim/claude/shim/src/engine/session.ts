@@ -2075,13 +2075,20 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   }
 
   /**
-   * The turn a vendor record arrived under, as the rewind anchor needs it: the
-   * turn its echo attributes it to. A vendor-started turn is real
-   * conversation, so its assistant records ARE anchors, and a rewind past the
-   * keep-alive keeps them.
+   * The turn a vendor record arrived under, as the rewind anchor and its span
+   * need it: the turn its echo attributes it to. A vendor-started turn is real
+   * conversation but never an anchor (engine/keepalive.ts), so its records sit
+   * in the span, and the span invariant refuses a rewind that would discard
+   * them.
    */
   function recordTurn(attribution: KeepaliveAttribution, running: VendorTurn): RecordTurn | undefined {
-    if (attribution.keepalive) return open?.keepalive === true ? { turnId: open.id.value, keepalive: true } : undefined;
+    // A keep-alive-tagged record of a VENDOR turn is one the keep-alive's own
+    // rewind set off: keep-alive material, though its send did not start it.
+    if (attribution.keepalive) {
+      return open?.keepalive === true
+        ? { turnId: open.id.value, keepalive: true, consequence: running.kind === "vendor" }
+        : undefined;
+    }
     const turn = turnFor(false, running);
     return turn === undefined ? undefined : { turnId: turn.value, keepalive: false, adopted: running.kind === "vendor" };
   }
@@ -2786,6 +2793,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     if (waiting === undefined) return undefined;
     joining = undefined;
     setOpen(waiting.turn);
+    // The join runs after the turn it waited on, so its record lies past that
+    // turn's every anchor: it is in the span until its own reply anchors.
+    rewind.noteSend(promptUuid(waiting.turn.id.value), { turnId: waiting.turn.id.value, keepalive: false });
     const agentId = requireIdentity().agentId;
     deps.persistence.write([promptEntry(waiting.prompt, agentId, false)]);
     LOGGER.info(
@@ -2810,6 +2820,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       throw new Error(`shim session: the join ${waiting.turn.id.value} was folded into no turn this session holds`);
     }
     joining = undefined;
+    // Folded into the running turn: its record is that turn's, ahead of the
+    // turn's next anchor, which takes it out of the span again.
+    rewind.noteSend(promptUuid(waiting.turn.id.value), { turnId: into.value, keepalive: false });
     const agentId = requireIdentity().agentId;
     const prompt = create(conversationv1.AgentPromptSchema, {
       id: waiting.prompt.id,
@@ -2834,10 +2847,13 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       throw new Error(`shim session: turn ${turn.id.value} was sent to join ${into.id.value}, which is not the send slot's turn`);
     }
     // NO REWIND IS OWED WHILE A REAL TURN RUNS: the obligation is a keep-alive's
-    // debt, discharged by the send that opened the running turn.
-    const owed = rewind.obligation();
-    if (owed !== undefined) {
-      throw new Error(`shim session: a rewind to ${owed.resumeSessionAt} is owed while turn ${into.id.value} runs`);
+    // debt, discharged by the send that opened the running turn. Read as the
+    // bare debt, so asking never itself refuses or performs anything.
+    const debt = rewind.debt();
+    if (debt > 0 && rewind.anchorUuid() !== undefined) {
+      throw new Error(
+        `shim session: a rewind to ${rewind.anchorUuid()} past ${debt} keep-alive turn(s) is owed while turn ${into.id.value} runs`,
+      );
     }
     const queue = prompts;
     if (queue === undefined) throw new Error("shim session: no query is accepting prompts");
@@ -2845,7 +2861,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     if (said === undefined) throw new Error(`shim session: the join ${turn.id.value} carries no prompt`);
     joining = { turn, prompt, into };
     try {
-      pushSend(queue, saidText(said), { uuid: promptUuid(turn.id.value), turnId: turn.id.value, keepalive: false });
+      pushSend(queue, saidText(said), { uuid: promptUuid(turn.id.value), turnId: turn.id.value, keepalive: false }, true);
     } catch (err) {
       joining = undefined;
       throw err;
@@ -3237,7 +3253,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * A push the queue refuses retires the send it had just registered, so the
    * ledger never holds open a send the vendor never received.
    */
-  function pushSend(queue: PromptQueue, text: string, send: Send): void {
+  function pushSend(queue: PromptQueue, text: string, send: Send, join = false): void {
     sends.sent(send);
     try {
       queue.push(userMessage(text, send.uuid));
@@ -3245,6 +3261,12 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       sends.forget(send.turnId, `the push was refused: ${err instanceof Error ? err.message : String(err)}`);
       throw err;
     }
+    // THE SEND IS A RECORD IN THE REWIND'S SPAN: the vendor files it as a
+    // `user` record under its client uuid. A JOIN is booked later, where the
+    // vendor places it ({@link noteJoinFolded}, {@link openJoinAsOwnTurn}):
+    // pushed into a running turn, it may land before or after that turn's
+    // next anchor, and only the vendor's decision says which.
+    if (!join) rewind.noteSend(send.uuid, { turnId: send.turnId, keepalive: send.keepalive });
   }
 
   /**
@@ -3317,6 +3339,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       resume_session_at: owed.resumeSessionAt,
       anchor_turn_id: owed.anchorTurnId,
       discarded_keepalive_turns: owed.discardedKeepaliveTurns,
+      discarded_span: owed.span.map((turn) => ({ turn_id: turn.turnId, kind: turn.kind, uuids: [...turn.uuids] })),
       before: keepalive ? "keepalive" : "real_prompt",
     };
     if (keepalive) {
