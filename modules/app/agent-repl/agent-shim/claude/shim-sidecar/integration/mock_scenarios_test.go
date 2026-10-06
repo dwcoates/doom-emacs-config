@@ -209,7 +209,7 @@ var mockScenarios = []mockScenario{
 		// nothing. The universal invariants still cover the whole tree.
 		Prompt: "!subagent-failed", Wait: waitTerminal,
 	},
-	{Prompt: "!cancel-all", Wait: waitEntries, Subagent: true, Blocked: mockBlockedCancelAll},
+	{Prompt: "!cancel-all", Wait: waitEntries, Subagent: true},
 	{Prompt: "!plan", Wait: waitTerminal},
 	{Prompt: "!findings", Wait: waitTerminal},
 	{Prompt: "!worktree-keep", Wait: waitTerminal},
@@ -331,19 +331,6 @@ const mockBlockedContextBudget = "the mocked vendor writes the budget warning as
 	"`attachment/context_budget_warning` (corpus: attachments/context_budget_warning.jsonl, marked SYNTHETIC in " +
 	"testdata/corpus/MANIFEST.md with an explicit 're-check the attachment type spelling' note). The record is " +
 	"withheld as vendor_specific rather than lost, so nothing is dropped; which spelling wins is a lead-level call."
-
-// mockBlockedCancelAll records the second cross-plane disagreement: the mocked
-// vendor terminates its AGENT spools (`a*.output`) with an `EXIT=<code>` line.
-// An agent spool is the agent's own JSONL — the shim's own AGENTS.md says so in
-// the same breath as the shell spool's terminator ("agent spools are the
-// agent's own JSONL and carry no terminator") — so the sidecar reads `EXIT=143`
-// as a JSON line and files it, correctly, as unparsed residue. Nothing is lost;
-// the two documents simply disagree about what an agent spool ends with.
-const mockBlockedCancelAll = "the mocked vendor writes `EXIT=143` into the AGENT spools it opens " +
-	"(`<spool>/<slug>/<session>/tasks/a<hex>.output`, offset 513 in both of !cancel-all's), which the shim's own " +
-	"AGENTS.md forbids: `agent spools are the agent's own JSONL and carry no terminator`. The sidecar files the " +
-	"line as unparsed residue — nothing is dropped — but every universal residue assertion fails on it, so the " +
-	"whole row waits on the shim lead reconciling the two statements."
 
 // TestMockKeepAliveTurnsStoreNothing covers the keep-alive edge, which no
 // `!scenario` can: the marker is the SHIM's and the mocked vendor neither adds
