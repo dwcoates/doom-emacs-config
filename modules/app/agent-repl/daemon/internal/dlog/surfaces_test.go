@@ -1815,3 +1815,320 @@ func TestEachSpellingIsCanonicalizedOnce(t *testing.T) {
 		t.Fatalf("canonicalizations = %d, want 1", calls)
 	}
 }
+
+// goneWorkspaceDir answers a workspace directory that does not exist, spelled
+// the way the surfaces key it, so a test can predict its minted id.
+func goneWorkspaceDir(t *testing.T) string {
+	t.Helper()
+	return filepath.Join(sinkKey(t, t.TempDir()), "gone")
+}
+
+// clientRecordsIn answers the records of one operation in a JSONL file.
+func clientRecordsIn(t *testing.T, path, operation string) []map[string]any {
+	t.Helper()
+	var out []map[string]any
+	for _, rec := range readRecords(t, path) {
+		if rec["operation"] == operation {
+			out = append(out, rec)
+		}
+	}
+	return out
+}
+
+func TestClientLogOnAGoneDirectoryLandsInTheCentralSink(t *testing.T) {
+	tests := []struct {
+		name string
+		kind string
+	}{
+		{name: "sidecar", kind: RuntimeSidecar},
+		{name: "webapp", kind: RuntimeWebapp},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			s, runLogPath := testSurfaces(t)
+			dir := goneWorkspaceDir(t)
+
+			// Act.
+			err := s.ClientLog(dir, ClientRecord{ClientKind: tc.kind, Level: LevelInfo, Operation: "client.test.op", Message: "m"})
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("ClientLog on a gone directory = %v, want the record persisted", err)
+			}
+			if got := clientRecordsIn(t, runLogPath, "client.test.op"); len(got) != 1 {
+				t.Fatalf("central records = %d, want 1", len(got))
+			}
+		})
+	}
+}
+
+func TestClientLogOnAGoneDirectoryKeepsTheWorkspaceIdentity(t *testing.T) {
+	// Arrange.
+	s, runLogPath := testSurfaces(t)
+	dir := goneWorkspaceDir(t)
+
+	// Act.
+	if err := s.ClientLog(dir, sidecarRecord()); err != nil {
+		t.Fatalf("ClientLog: %v", err)
+	}
+
+	// Assert.
+	got := clientRecordsIn(t, runLogPath, "tail-pickup")
+	if len(got) != 1 {
+		t.Fatalf("central records = %d, want 1", len(got))
+	}
+	rec := got[0]
+	context, _ := rec["context"].(map[string]any)
+	if rec["workspace_id"] != mintedTestID(dir) || rec["workspace_dir"] != dir || context[KeyUnroutableWorkspace] != dir {
+		t.Fatalf("record = %v, want workspace_id %q, workspace_dir and unroutable_workspace %q", rec, mintedTestID(dir), dir)
+	}
+}
+
+func TestClientLogOnAGoneDirectoryKeepsTheClientsRuntime(t *testing.T) {
+	// Arrange.
+	s, runLogPath := testSurfaces(t)
+	dir := goneWorkspaceDir(t)
+
+	// Act.
+	if err := s.ClientLog(dir, sidecarRecord()); err != nil {
+		t.Fatalf("ClientLog: %v", err)
+	}
+
+	// Assert.
+	got := clientRecordsIn(t, runLogPath, "tail-pickup")
+	if len(got) != 1 || got[0]["runtime"] != RuntimeSidecar {
+		t.Fatalf("central records = %v, want one carrying runtime %q", got, RuntimeSidecar)
+	}
+}
+
+func TestClientLogOnAGoneDirectoryStatesTheFallbackOnceAtInfo(t *testing.T) {
+	// Arrange.
+	s, runLogPath := testSurfaces(t)
+	dir := goneWorkspaceDir(t)
+
+	// Act: many records about the one workspace.
+	for i := 0; i < 5; i++ {
+		if err := s.ClientLog(dir, sidecarRecord()); err != nil {
+			t.Fatalf("ClientLog: %v", err)
+		}
+	}
+
+	// Assert.
+	notes := clientRecordsIn(t, runLogPath, "daemon.dlog.client_central_fallback")
+	if len(notes) != 1 || notes[0]["level"] != LevelInfo {
+		t.Fatalf("client_central_fallback notes = %v, want exactly one at %q", notes, LevelInfo)
+	}
+}
+
+func TestClientLogOnAGoneDirectoryStatesEachWorkspaceSeparately(t *testing.T) {
+	// Arrange.
+	s, runLogPath := testSurfaces(t)
+	first, second := goneWorkspaceDir(t), goneWorkspaceDir(t)
+
+	// Act.
+	for _, dir := range []string{first, second} {
+		if err := s.ClientLog(dir, sidecarRecord()); err != nil {
+			t.Fatalf("ClientLog: %v", err)
+		}
+	}
+
+	// Assert.
+	if notes := clientRecordsIn(t, runLogPath, "daemon.dlog.client_central_fallback"); len(notes) != 2 {
+		t.Fatalf("client_central_fallback notes = %d, want 2", len(notes))
+	}
+}
+
+func TestClientLogOnAGoneDirectoryWritesNothingAtWarnOrError(t *testing.T) {
+	// Arrange.
+	s, runLogPath := testSurfaces(t)
+	dir := goneWorkspaceDir(t)
+
+	// Act.
+	if err := s.ClientLog(dir, sidecarRecord()); err != nil {
+		t.Fatalf("ClientLog: %v", err)
+	}
+
+	// Assert.
+	for _, rec := range readRecords(t, runLogPath) {
+		if rec["runtime"] == RuntimeDaemon && (rec["level"] == LevelWarn || rec["level"] == LevelError) {
+			t.Fatalf("a gone directory produced a daemon fault record: %v", rec)
+		}
+	}
+}
+
+func TestClientLogOnAGoneDirectoryCreatesNothingThere(t *testing.T) {
+	// Arrange.
+	s, _ := testSurfaces(t)
+	dir := goneWorkspaceDir(t)
+
+	// Act.
+	if err := s.ClientLog(dir, sidecarRecord()); err != nil {
+		t.Fatalf("ClientLog: %v", err)
+	}
+
+	// Assert.
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("the gone directory %s exists after a record about it (stat = %v)", dir, err)
+	}
+}
+
+func TestClientLogOnARestoredDirectoryLandsInItsOwnSinkAgain(t *testing.T) {
+	// Arrange: one record while the directory is gone, then the directory
+	// comes back (a restored worktree).
+	s, _ := testSurfaces(t)
+	dir := goneWorkspaceDir(t)
+	if err := s.ClientLog(dir, sidecarRecord()); err != nil {
+		t.Fatalf("ClientLog while gone: %v", err)
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	// Act.
+	if err := s.ClientLog(dir, sidecarRecord()); err != nil {
+		t.Fatalf("ClientLog once restored: %v", err)
+	}
+
+	// Assert.
+	if !hasOperation(workspaceRecords(t, dir, "sidecar"), "tail-pickup") {
+		t.Fatal("the restored workspace's record did not reach its own sidecar.log")
+	}
+}
+
+func TestClientLogOnAnUnstatableDirectoryIsStillAFailure(t *testing.T) {
+	// Arrange: the workspace path runs THROUGH a regular file, so its stat
+	// fails with "not a directory" rather than "does not exist".
+	s, runLogPath := testSurfaces(t)
+	file := filepath.Join(sinkKey(t, t.TempDir()), "file")
+	if err := os.WriteFile(file, nil, 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	dir := filepath.Join(file, "workspace")
+
+	// Act.
+	err := s.ClientLog(dir, sidecarRecord())
+
+	// Assert.
+	if err == nil {
+		t.Fatal("ClientLog on an unstatable directory succeeded, want a loud failure")
+	}
+	if got := clientRecordsIn(t, runLogPath, "tail-pickup"); len(got) != 0 {
+		t.Fatalf("an unstatable directory's record reached the central sink: %v", got)
+	}
+}
+
+func TestClientLogOnARegularFileIsStillAFailure(t *testing.T) {
+	// Arrange: the workspace path names a regular file.
+	s, _ := testSurfaces(t)
+	file := filepath.Join(sinkKey(t, t.TempDir()), "file")
+	if err := os.WriteFile(file, nil, 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	// Act.
+	err := s.ClientLog(file, sidecarRecord())
+
+	// Assert.
+	if err == nil {
+		t.Fatal("ClientLog on a regular file succeeded, want a loud failure")
+	}
+}
+
+func TestClientLogOnAGoneDirectoryTheRegistryCannotNameIsAFailure(t *testing.T) {
+	// Arrange.
+	s, _ := testSurfaces(t)
+	s.BindWorkspaceIDs(func(string) (string, error) { return "", errors.New("no such workspace") })
+	dir := goneWorkspaceDir(t)
+
+	// Act.
+	err := s.ClientLog(dir, sidecarRecord())
+
+	// Assert.
+	if err == nil {
+		t.Fatal("ClientLog for a workspace the registry cannot name succeeded, want a refusal")
+	}
+}
+
+func TestClientLogOnADirectoryGoneUnderAnOpenWorkspaceLandsInTheCentralSink(t *testing.T) {
+	// Arrange: the workspace already holds a sink (its daemon.log), then its
+	// directory is deleted underneath it.
+	s, runLogPath := testSurfaces(t)
+	dir := filepath.Join(sinkKey(t, t.TempDir()), "worktree")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	log, err := s.Workspace(dir)
+	if err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+	log.Info("daemon.workspace.opened", "opened", nil)
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+
+	// Act: a client's FIRST record, which needs a sink not yet open.
+	err = s.ClientLog(dir, sidecarRecord())
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ClientLog = %v, want the record persisted", err)
+	}
+	if got := clientRecordsIn(t, runLogPath, "tail-pickup"); len(got) != 1 {
+		t.Fatalf("central records = %d, want 1", len(got))
+	}
+}
+
+func TestANewSinkNeverResurrectsAGoneWorkspaceDirectory(t *testing.T) {
+	// Arrange: as above, a workspace with an open sink whose directory is
+	// deleted underneath it.
+	s, _ := testSurfaces(t)
+	dir := filepath.Join(sinkKey(t, t.TempDir()), "worktree")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	log, err := s.Workspace(dir)
+	if err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+	log.Info("daemon.workspace.opened", "opened", nil)
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+
+	// Act.
+	if err := s.ClientLog(dir, sidecarRecord()); err != nil {
+		t.Fatalf("ClientLog: %v", err)
+	}
+
+	// Assert.
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("the deleted directory %s exists again after a new sink was asked for (stat = %v)", dir, err)
+	}
+}
+
+func TestAnOpenSinkKeepsWritingAfterItsDirectoryIsGone(t *testing.T) {
+	// Arrange: the workspace's daemon.log is open, then its directory goes.
+	s, _ := testSurfaces(t)
+	dir := filepath.Join(sinkKey(t, t.TempDir()), "worktree")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	log, err := s.Workspace(dir)
+	if err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+	log.Info("daemon.workspace.opened", "opened", nil)
+	target := s.targets[mintedTestID(dir)+"/daemon"]
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+
+	// Act.
+	log.Info("daemon.workspace.after", "after the removal", nil)
+
+	// Assert: the open sink is not re-stat-ed; its target still receives.
+	if !hasOperation(readRecords(t, target), "daemon.workspace.after") {
+		t.Fatal("the open sink's target did not receive the record written after its directory was removed")
+	}
+}
