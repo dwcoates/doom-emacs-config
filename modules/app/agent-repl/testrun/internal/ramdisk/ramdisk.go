@@ -52,6 +52,22 @@ const EnvSizeMiB = "AGENT_REPL_TEST_RAMDISK_MIB"
 // section), with headroom.
 const DefaultSizeMiB = 8192
 
+// UnitIOTier is the disk I/O tier every unit of a RAM-disk run runs at.
+//
+// NOT THE THROTTLE TIER bin/background.sh gives the whole run. Throttled I/O
+// to a RAM disk stalls for hundreds of milliseconds whenever anything of a
+// higher tier touches the same volume (the kernel's throttle window for a
+// device it does not know to be solid state), measured at a max 378-622ms
+// per fsync against 0.4ms on the SSD; a run under it took 320-347s against
+// 158s and missed its timing bounds. The utility tier measured a max 0.7ms on
+// the RAM disk and still yields to the live runtime's normal-tier I/O on the
+// SSD, where every unit's remaining traffic (build caches, sources) goes.
+const UnitIOTier = "utility"
+
+// UnitPrefix is the command line every unit of a RAM-disk run is started
+// under.
+func UnitPrefix() []string { return []string{"/usr/sbin/taskpolicy", "-d", UnitIOTier} }
+
 // Runner runs one external command and answers its combined output.
 type Runner func(name string, args ...string) (string, error)
 

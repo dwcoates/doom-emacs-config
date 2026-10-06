@@ -39,6 +39,10 @@ type OSExec struct {
 	// (DefaultTmpParent): a unix socket path is capped at 104 bytes on macOS,
 	// and the user temp directory's own path spends 49 of them.
 	TmpParent string
+	// Prefix, when set, is prepended to every unit's command line: a run
+	// whose root is on a RAM disk starts each unit under
+	// `taskpolicy -d utility` (see ramdisk.UnitPrefix).
+	Prefix []string
 }
 
 // DefaultTmpParent is the parent of every unit's temp root.
@@ -86,7 +90,8 @@ func (e OSExec) start(spec Spec, out *bytes.Buffer, root string) (Process, error
 		f.Close()
 		return nil, fmt.Errorf("run: unlink the output file %s of %s: %w", f.Name(), spec.ID, err)
 	}
-	cmd := exec.Command(spec.Argv[0], spec.Argv[1:]...)
+	argv := append(append([]string(nil), e.Prefix...), spec.Argv...)
+	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Dir = spec.Dir
 	// The unit's own Env comes last, so a unit that names its TMPDIR keeps it.
 	cmd.Env = append(append(os.Environ(), "TMPDIR="+root), spec.Env...)
