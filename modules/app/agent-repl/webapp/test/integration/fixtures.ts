@@ -2123,7 +2123,7 @@ type TopbarInit = {
   tone?: string;
   glyph?: string;
   /** agent-repl's session on the connectivity indicator; omitted, none. */
-  agentReplSession?: { startedAtMs: bigint; began: "login" | "editorStart"; bytesReceived: bigint; bytesSent: bigint };
+  agentReplSession?: { startedAtMs: bigint; began: "login" | "editorStart" };
   connectivityTitle?: string;
   models?: { name: string; displayName: string; description: string }[];
   selected?: string;
@@ -2212,8 +2212,6 @@ export function topbarView(init?: TopbarInit): TopbarView {
           : {
               startedAtMs: init.agentReplSession.startedAtMs,
               began: { case: init.agentReplSession.began, value: {} },
-              bytesReceived: init.agentReplSession.bytesReceived,
-              bytesSent: init.agentReplSession.bytesSent,
             },
     },
     warnings: { warnings: init?.warnings ?? [] },

@@ -5,23 +5,37 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"math"
 	"time"
 
 	"claude-repld/internal/dlog"
 )
 
-// agentReplSessionDDL is the layout-21 addition: agent-repl's SESSION (owner
-// ruling, 2026-10-06) — when it began, what began it, and the vendor traffic
-// counted since — durable so a daemon restart under the same Emacs keeps it.
-// Kept apart from the rest of the schema for the reason portedPromptsDDL is: a
-// fresh file gets it as part of schemaDDL, a layout-20 file from the 20 -> 21
-// migration, so one text keeps the two shapes from drifting.
+// agentReplSessionDDL is agent-repl's SESSION (owner ruling, 2026-10-06) as
+// a fresh file declares it: when it began and what began it, durable so a
+// daemon restart under the same Emacs keeps it.
 //
 // It is a SINGLETON (CHECK (id = 1)): there is one session at a time, and a
 // new one replaces the row whole. `began` is the arm of
 // frontend.v1.TopbarAgentReplSession.began, spelled.
+//
+// A FILE OLDER THAN LAYOUT 26 REACHES THIS SHAPE BY TWO STEPS: layout 21
+// created the table with the vendor traffic counted since the session began
+// (agentReplSessionLayout21DDL), and layout 26 dropped those two columns
+// (agentReplSessionDropTrafficDDL) when the traffic measurement was removed.
+// TestAMigratedSessionTableMatchesAFreshOne keeps the two routes to one shape.
 const agentReplSessionDDL = `
+CREATE TABLE agent_repl_session (
+  id             INTEGER PRIMARY KEY CHECK (id = 1),
+  started_at     INTEGER NOT NULL,
+  began          TEXT NOT NULL CHECK (began IN ('login', 'editor_start'))
+);
+`
+
+// agentReplSessionLayout21DDL is the layout-21 step exactly as it shipped:
+// the session table with the vendor traffic counted since it began. Layout 26
+// drops the traffic again (agentReplSessionDropTrafficDDL); the text is kept
+// because a file older than layout 21 still migrates through it.
+const agentReplSessionLayout21DDL = `
 CREATE TABLE agent_repl_session (
   id             INTEGER PRIMARY KEY CHECK (id = 1),
   started_at     INTEGER NOT NULL,
@@ -29,6 +43,22 @@ CREATE TABLE agent_repl_session (
   bytes_received INTEGER NOT NULL CHECK (bytes_received >= 0),
   bytes_sent     INTEGER NOT NULL CHECK (bytes_sent >= 0)
 );
+`
+
+// agentReplSessionDropTrafficDDL is the layout-26 step: the session's vendor
+// traffic is REMOVED (owner ruling, 2026-10-06: the traffic measurement is
+// dropped in its entirety). Its sampler held one kernel network-statistics
+// control socket per vendor process, opened without close-on-exec, so every
+// daemon generation leaked them into its successor and children, where
+// nobody read them; they filled and are the inferred cause of the kernel's
+// network buffer (mbuf) exhaustion that froze the owner's keyboard.
+//
+// The step is BREAKING: the build before it reads and writes both columns.
+// Dropping them is lossless in the only sense that matters: nothing in this
+// build reads a byte count, and no fresh file declares them.
+const agentReplSessionDropTrafficDDL = `
+ALTER TABLE agent_repl_session DROP COLUMN bytes_sent;
+ALTER TABLE agent_repl_session DROP COLUMN bytes_received;
 `
 
 // SessionBegan is what began agent-repl's session.
@@ -48,19 +78,14 @@ type AgentReplSession struct {
 	StartedAt time.Time
 	// Began is what began it.
 	Began SessionBegan
-	// BytesReceived and BytesSent are the vendor traffic counted since.
-	BytesReceived uint64
-	BytesSent     uint64
 }
 
 // LogContext is the session's structured context, the one shape every record
 // about a session carries.
 func (s AgentReplSession) LogContext() dlog.Context {
 	return dlog.Context{
-		"started_at":     s.StartedAt.UTC().Format(time.RFC3339Nano),
-		"began":          string(s.Began),
-		"bytes_received": s.BytesReceived,
-		"bytes_sent":     s.BytesSent,
+		"started_at": s.StartedAt.UTC().Format(time.RFC3339Nano),
+		"began":      string(s.Began),
 	}
 }
 
@@ -71,8 +96,6 @@ func (s AgentReplSession) validate() error {
 		return errors.New("wsm: a session has the instant it began")
 	case s.Began != SessionBeganLogin && s.Began != SessionBeganEditorStart:
 		return fmt.Errorf("wsm: %q is not a cause a session can have", s.Began)
-	case s.BytesReceived > math.MaxInt64 || s.BytesSent > math.MaxInt64:
-		return fmt.Errorf("wsm: traffic of %d received / %d sent exceeds what the table holds", s.BytesReceived, s.BytesSent)
 	}
 	return nil
 }
@@ -85,13 +108,12 @@ func (s *store) AgentReplSession(ctx context.Context) (AgentReplSession, bool, e
 	)
 	err := s.read(ctx, "daemon.wsm.agent_repl_session", dlog.Context{}, func(ctx context.Context) error {
 		var (
-			startedAt      int64
-			began          string
-			received, sent int64
+			startedAt int64
+			began     string
 		)
 		err := s.db().QueryRowContext(ctx,
-			`SELECT started_at, began, bytes_received, bytes_sent FROM agent_repl_session WHERE id = 1`).
-			Scan(&startedAt, &began, &received, &sent)
+			`SELECT started_at, began FROM agent_repl_session WHERE id = 1`).
+			Scan(&startedAt, &began)
 		switch {
 		case errors.Is(err, sql.ErrNoRows):
 			return nil
@@ -99,10 +121,8 @@ func (s *store) AgentReplSession(ctx context.Context) (AgentReplSession, bool, e
 			return err
 		}
 		out = AgentReplSession{
-			StartedAt:     fromNanos(startedAt),
-			Began:         SessionBegan(began),
-			BytesReceived: uint64(received),
-			BytesSent:     uint64(sent),
+			StartedAt: fromNanos(startedAt),
+			Began:     SessionBegan(began),
 		}
 		if err := out.validate(); err != nil {
 			return &DecodeError{Table: "agent_repl_session", Row: "1", Err: err}
@@ -123,10 +143,9 @@ func (s *store) PutAgentReplSession(ctx context.Context, session AgentReplSessio
 	}
 	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx,
-			`INSERT INTO agent_repl_session (id, started_at, began, bytes_received, bytes_sent) VALUES (1, ?, ?, ?, ?)
-			 ON CONFLICT(id) DO UPDATE SET started_at = excluded.started_at, began = excluded.began,
-			   bytes_received = excluded.bytes_received, bytes_sent = excluded.bytes_sent`,
-			nanos(session.StartedAt), string(session.Began), int64(session.BytesReceived), int64(session.BytesSent))
+			`INSERT INTO agent_repl_session (id, started_at, began) VALUES (1, ?, ?)
+			 ON CONFLICT(id) DO UPDATE SET started_at = excluded.started_at, began = excluded.began`,
+			nanos(session.StartedAt), string(session.Began))
 		return err
 	})
 }

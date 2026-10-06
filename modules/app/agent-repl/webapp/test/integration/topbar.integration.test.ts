@@ -79,8 +79,6 @@ describe("the connectivity glyph's session dropdown", () => {
   const SESSION = {
     startedAtMs: BigInt(Date.now() - 2 * 60 * 60_000),
     began: "login" as const,
-    bytesReceived: 412_000_000n,
-    bytesSent: 38_000_000n,
   };
 
   it("opens agent-repl's session below the strip from the glyph", async () => {
@@ -89,8 +87,8 @@ describe("the connectivity glyph's session dropdown", () => {
     // Act
     await harness.click(".topbar-connectivity");
     // Assert
-    expect(harness.text('.topbar-reveal[data-reveal="agent-repl-session"] .topbar-session-traffic')).toContain(
-      "412 MB ↓ · 38 MB ↑",
+    expect(harness.text('.topbar-reveal[data-reveal="agent-repl-session"] .topbar-session-duration .topbar-session-value')).not.toBe(
+      "",
     );
   });
 
@@ -105,16 +103,16 @@ describe("the connectivity glyph's session dropdown", () => {
     );
   });
 
-  it("carries a newer push's traffic into the dropdown the reader has open", async () => {
+  it("carries a newer push's session into the dropdown the reader has open", async () => {
     // Arrange
     await withTopbar({ agentReplSession: SESSION });
     await harness.click(".topbar-connectivity");
     // Act
-    harness.fake.setTopbar(WORKSPACE_ID, topbarView({ agentReplSession: { ...SESSION, bytesReceived: 1_500_000_000n } }));
+    harness.fake.setTopbar(WORKSPACE_ID, topbarView({ agentReplSession: { ...SESSION, began: "editorStart" } }));
     await harness.settle();
     // Assert
-    expect(harness.text('.topbar-reveal[data-reveal="agent-repl-session"] .topbar-session-traffic')).toContain(
-      "1.5 GB ↓",
+    expect(harness.text('.topbar-reveal[data-reveal="agent-repl-session"] .topbar-session-duration')).toContain(
+      "since Emacs started",
     );
   });
 

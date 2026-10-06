@@ -336,8 +336,14 @@ message TopbarConnectivity {
 }
 
 // agent-repl's session: since the LATER of the last login made through
-// agent-repl and the start of this Emacs. ONE SOURCE OF TRUTH: the dropdown's
-// duration and its traffic both count from `started_at_ms`.
+// agent-repl and the start of this Emacs. The dropdown draws how long it has
+// run, labeled by what began it.
+//
+// IT CARRIES NO NETWORK TRAFFIC. Fields 4 and 5 once counted the vendor
+// processes' bytes received and sent; they are reserved because measuring
+// them took one kernel network-statistics control socket per vendor process,
+// and those sockets are the inferred cause of the kernel's network buffer
+// (mbuf) exhaustion. No producer measures traffic, so none is stated.
 message TopbarAgentReplSession {
   // When the session began, epoch milliseconds. The client ticks the
   // duration ("1h 12m") from it locally; the daemon never pushes a tick.
@@ -347,12 +353,8 @@ message TopbarAgentReplSession {
     TopbarSessionBeganLogin login = 2;
     TopbarSessionBeganEditorStart editor_start = 3;
   }
-  // The vendor network traffic of every agent-repl workspace since
-  // `started_at_ms`, as the operating system counted it for agent-repl's own
-  // vendor processes: bytes actually received and sent, across restarts of
-  // those processes. The client formats ("412 MB ↓ · 38 MB ↑").
-  uint64 bytes_received = 4;
-  uint64 bytes_sent = 5;
+  reserved 4, 5;
+  reserved "bytes_received", "bytes_sent";
 }
 // A login made through agent-repl began the session.
 message TopbarSessionBeganLogin {}
