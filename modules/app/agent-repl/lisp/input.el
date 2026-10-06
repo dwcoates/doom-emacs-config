@@ -1023,7 +1023,10 @@ state machine -- there is no separate counter to fall out of sync."
         (agent-repl--input-escape-default)
       (if (eq last-command 'agent-repl-input-selection-escape)
           (agent-repl--input-selection-clear ws)
-        (agent-repl--warn ws "elisp.input.selection-escape-armed ws=%s" ws)
+        ;; A USER'S ACT, NOT A FAULT: the first escape over a selection is
+        ;; the armed half of a deliberate two-key clear, so its record is
+        ;; INFO (once per keypress, and it must survive the info threshold).
+        (agent-repl--info ws "elisp.input.selection-escape-armed ws=%s" ws)
         (message "%s" agent-repl--input-selection-escape-warning)))))
 
 ;;;; ---- Input preparation and the metaprompt ----------------------------
