@@ -953,33 +953,34 @@ text — and holding the key auto-repeats the nudge for fine adjustment."
   (interactive)
   (agent-repl--feed-text-scale-adjust :decrease))
 
-(defconst agent-repl--input-digest-escape-script
+(defconst agent-repl--input-digest-dismiss-script
   "(function(){var c=document.querySelector('[data-component=\"news-digest\"]:not([hidden]) [data-news-digest-close]');if(!c){return 'none';}c.click();return 'dismissed';})()"
   "Close the workspace page's standing news digest, as its close control does.
 Answers \"dismissed\" when one stood, \"none\" otherwise.")
 
-(defun agent-repl--input-digest-escape-reply (value)
+(defun agent-repl--input-digest-dismiss-reply (value)
   "Record that escape closed a standing news digest (VALUE \"dismissed\").
 A named function: the webview read channel roots its callback by symbol."
   (when (equal value "dismissed")
     (agent-repl--info '(:agent-repl-central "the news digest stands in every webview")
                       "elisp.input.escape-dismissed-news-digest")))
 
-(defun agent-repl--input-escape-dismisses-digest (ws)
+(defun agent-repl--input-dismiss-digest (ws)
   "Ask WS's page to close its standing news digest, as escape there would.
 ESCAPE IN THE COMPOSER CLOSES THE DIGEST TOO (owner request, 2026-10-03):
 the page closes it on its own escape, but the composer usually holds the
-keyboard, so the key never reaches the page.  Fire-and-forget through the
-page's own close control; a page with no digest does nothing."
+keyboard, so the key never reaches the page.  SO DOES SENDING A PROMPT
+(owner request, 2026-10-06; `agent-repl--input-submit').  Fire-and-forget
+through the page's own close control; a page with no digest does nothing."
   (when-let ((buf (and ws (get-buffer (agent-repl--frontend-webview-buffer-name ws)))))
     (agent-repl--frontend-webview-read-script
-     buf agent-repl--input-digest-escape-script #'agent-repl--input-digest-escape-reply)))
+     buf agent-repl--input-digest-dismiss-script #'agent-repl--input-digest-dismiss-reply)))
 
 (defun agent-repl-input-insert-escape ()
   "Insert-state escape in the composer: close a standing news digest, then
 leave insert state exactly as escape always has."
   (interactive)
-  (agent-repl--input-escape-dismisses-digest (agent-repl--ws-current-name))
+  (agent-repl--input-dismiss-digest (agent-repl--ws-current-name))
   (evil-normal-state))
 
 (defun agent-repl--input-escape-default ()
@@ -1018,7 +1019,7 @@ re-arms the warning instead.  That is the whole two-consecutive-escapes
 state machine -- there is no separate counter to fall out of sync."
   (interactive)
   (let ((ws (agent-repl--ws-current-name)))
-    (agent-repl--input-escape-dismisses-digest ws)
+    (agent-repl--input-dismiss-digest ws)
     (if (not (agent-repl--input-selection-active-p ws))
         (agent-repl--input-escape-default)
       (if (eq last-command 'agent-repl-input-selection-escape)
@@ -1683,10 +1684,16 @@ submission belongs to, and it is the daemon-minted echo token, never a
 value Emacs constructs from a path."
   (let ((ref (agent-repl-host-ref ws))
         (conn (or (agent-repl-host-conn ws) (agent-repl-link-primary)))
+        (first-attempt (null key))
         (key (or key (agent-repl--uuid))))
     (agent-repl--with-log-context
      ws key
      (lambda ()
+       ;; SENDING CLOSES A STANDING NEWS DIGEST (owner request, 2026-10-06):
+       ;; the user has moved on to the conversation.  Only the first attempt
+       ;; closes it -- a retry re-drives a send the user made earlier.
+       (when first-attempt
+         (agent-repl--input-dismiss-digest ws))
        (unless ref
          (agent-repl--fatal ws "elisp.input.submit-no-ref ws=%s origin=%S" ws origin))
        (unless conn

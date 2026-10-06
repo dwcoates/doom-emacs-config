@@ -1105,6 +1105,32 @@ ring (owner ruling overrides the old keep-the-text contract)."
     (should (stringp (plist-get (car agent-repl-test-input--submitted)
                                 :idempotency-key)))))
 
+(ert-deftest agent-repl-input-a-first-send-closes-the-news-digest ()
+  "Sending a prompt closes a standing news digest on the workspace's page."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (let ((dismissed nil))
+      (cl-letf (((symbol-function 'agent-repl--input-dismiss-digest)
+                 (lambda (ws) (push ws dismissed))))
+        ;; Act
+        (agent-repl--input-submit "ws-1" (list :content (list :blocks nil))
+                                  :user-sent "hello"))
+      ;; Assert
+      (should (equal dismissed '("ws-1"))))))
+
+(ert-deftest agent-repl-input-a-retry-leaves-the-news-digest-alone ()
+  "A retry re-drives an earlier send, so it closes nothing."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (let ((dismissed nil))
+      (cl-letf (((symbol-function 'agent-repl--input-dismiss-digest)
+                 (lambda (ws) (push ws dismissed))))
+        ;; Act
+        (agent-repl--input-submit "ws-1" (list :content (list :blocks nil))
+                                  :deferred-prompt "hello" "key-failed"))
+      ;; Assert
+      (should-not dismissed))))
+
 (ert-deftest agent-repl-input-no-connection-writes-the-held-prompt-ingress ()
   "No connection at all is the same fact as a transport failure."
   (agent-repl-test-input--with
@@ -3019,8 +3045,8 @@ recorded; the response view is killed afterwards."
             (agent-repl-input-selection-escape)
             ;; Assert
             (should (equal scripts
-                           (list (list "*agent-frontend-ws*" agent-repl--input-digest-escape-script
-                                       #'agent-repl--input-digest-escape-reply)))))
+                           (list (list "*agent-frontend-ws*" agent-repl--input-digest-dismiss-script
+                                       #'agent-repl--input-digest-dismiss-reply)))))
         (kill-buffer buf)))))
 
 (ert-deftest agent-repl-test-input-insert-escape-closes-the-digest-then-leaves-insert ()
@@ -3048,7 +3074,7 @@ recorded; the response view is killed afterwards."
       (cl-letf (((symbol-function 'agent-repl--frontend-webview-read-script)
                  (lambda (&rest args) (push args scripts) t)))
         ;; Act
-        (agent-repl--input-escape-dismisses-digest "no-page-ws")
+        (agent-repl--input-dismiss-digest "no-page-ws")
         ;; Assert
         (should-not scripts)))))
 
@@ -3059,8 +3085,8 @@ recorded; the response view is killed afterwards."
     (let ((records nil))
       (cl-letf (((symbol-function 'agent-repl--info) (lambda (_scope fmt &rest _) (push fmt records))))
         ;; Act
-        (agent-repl--input-digest-escape-reply "none")
-        (agent-repl--input-digest-escape-reply "dismissed")
+        (agent-repl--input-digest-dismiss-reply "none")
+        (agent-repl--input-digest-dismiss-reply "dismissed")
         ;; Assert
         (should (equal records '("elisp.input.escape-dismissed-news-digest")))))))
 
