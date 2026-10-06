@@ -49,9 +49,6 @@ type joiningPrompt struct {
 	turn ids.TurnID
 	// into is the turn it was sent to join.
 	into ids.TurnID
-	// prompt is its text, the turn fact the footer and the roster take when
-	// it runs as its own turn.
-	prompt string
 	// said and origin are the prompt as it was submitted, kept so a prompt
 	// folded into a turn that then fails can be resubmitted as it was sent.
 	said   *conversationv1.UserSaid
@@ -163,7 +160,7 @@ func (q *queue) joinLocked(ctx context.Context, d *delivery, sub Submission, run
 	// a turn the queue never sent to join" (integration
 	// TestAFoldedJoinRunsNoTurnOfItsOwn under load, 2026-10-03). A refused
 	// send withdraws it.
-	q.setJoining(sub.WS, joiningPrompt{turn: sub.Turn, into: running, prompt: text, said: sub.Said, origin: sub.Origin})
+	q.setJoining(sub.WS, joiningPrompt{turn: sub.Turn, into: running, said: sub.Said, origin: sub.Origin})
 	var success *shimv1.StartTurnSuccess
 	d.outside(shimCall{what: "join", turn: sub.Turn, holds: []ids.TurnID{sub.Turn}}, log, func() {
 		success, err = sender.JoinRunningTurn(ctx, sub.Turn, sub.Said, sub.Origin)
@@ -175,7 +172,7 @@ func (q *queue) joinLocked(ctx context.Context, d *delivery, sub Submission, run
 		q.recordWaiting(ctx, sub, "the session would not take the prompt into the running turn, so it waits for it to end", log)
 		return
 	}
-	q.deps.Footer.OnSubmission(sub.WS, footer.Submission{Prompt: text, Stage: footer.StageAfterToolCall})
+	q.deps.Footer.OnSubmission(sub.WS, footer.Submission{Stage: footer.StageAfterToolCall})
 	handOver(sub.WS, success, watcher)
 	q.touchEngagement(ctx, sub.WS, log)
 	log.Info(opJoin, "sent the prompt to join the running turn after its current tool call; nothing was interrupted", nil)
@@ -266,7 +263,7 @@ func (q *queue) onFolded(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnI
 // prompt that now runs as its own turn: the turn it was sent to join ended
 // without folding it in.
 func (q *queue) onJoinedTurnStood(ws ids.WorkspaceID, joined joiningPrompt, log dlog.Logger) {
-	started := &footer.TurnStarted{At: q.deps.Now(), Act: footer.ActPrompt, Prompt: joined.prompt}
+	started := &footer.TurnStarted{At: q.deps.Now(), Act: footer.ActPrompt}
 	q.deps.Footer.SetTurn(ws, started)
 	q.deps.Sidebar.SetTurn(ws, started)
 	q.deps.Sidebar.AckTurn(ws)

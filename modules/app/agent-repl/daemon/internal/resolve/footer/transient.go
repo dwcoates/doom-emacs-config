@@ -100,61 +100,22 @@ func rowAgentLabel(row *agentRow) string {
 
 // ---- the kinds each source raises ----------------------------------------
 
-// raiseSubmitting raises the `submitting` line for one stage of a prompt's
-// delivery; LINE carries the stage, and the prompt's first line is filled in
-// here. A prompt with no text to state raises nothing.
-func (r *resolver) raiseSubmitting(ws ids.WorkspaceID, s *wsState, prompt string, line *frontendv1.FooterActivityTransientSubmitting) {
-	lead := firstLine(prompt)
-	if lead == "" {
-		return
-	}
-	line.PromptLead = truncate(lead, DefaultWarningRowWidth)
-	r.raiseTransient(ws, s, "", &frontendv1.FooterActivityTransient{
-		Kind: &frontendv1.FooterActivityTransient_Submitting{Submitting: line},
-	})
-}
-
-// submittingStage builds the `submitting` line's stage for a submission's
-// move, and reports false for a stage the footer does not declare.
-func submittingStage(sub Submission) (*frontendv1.FooterActivityTransientSubmitting, bool) {
-	line := &frontendv1.FooterActivityTransientSubmitting{}
-	switch sub.Stage {
-	case StageHeld:
-		line.Stage = &frontendv1.FooterActivityTransientSubmitting_Held{Held: &frontendv1.FooterActivityTransientSubmittingHeld{
-			Position: sub.Position, Queued: sub.Queued}}
-	case StageClassifying:
-		line.Stage = &frontendv1.FooterActivityTransientSubmitting_Classifying{
-			Classifying: &frontendv1.FooterActivityTransientSubmittingClassifying{}}
-	case StageInterjecting:
-		line.Stage = &frontendv1.FooterActivityTransientSubmitting_Interjecting{
-			Interjecting: &frontendv1.FooterActivityTransientSubmittingInterjecting{}}
-	case StageCoalesced:
-		line.Stage = &frontendv1.FooterActivityTransientSubmitting_Coalesced{
-			Coalesced: &frontendv1.FooterActivityTransientSubmittingCoalesced{}}
-	case StageAfterToolCall:
-		line.Stage = &frontendv1.FooterActivityTransientSubmitting_AfterToolCall{
-			AfterToolCall: &frontendv1.FooterActivityTransientSubmittingAfterToolCall{}}
-	default:
-		return nil, false
-	}
-	return line, true
-}
-
-// stageName names a submission stage for the record.
-func stageName(stage SubmissionStage) string {
+// stageName names a submission stage for the record, and reports false for a
+// stage the footer does not declare.
+func stageName(stage SubmissionStage) (string, bool) {
 	switch stage {
 	case StageHeld:
-		return "held"
+		return "held", true
 	case StageClassifying:
-		return "classifying"
+		return "classifying", true
 	case StageInterjecting:
-		return "interjecting"
+		return "interjecting", true
 	case StageCoalesced:
-		return "coalesced"
+		return "coalesced", true
 	case StageAfterToolCall:
-		return "after_tool_call"
+		return "after_tool_call", true
 	default:
-		return "unknown"
+		return "unknown", false
 	}
 }
 

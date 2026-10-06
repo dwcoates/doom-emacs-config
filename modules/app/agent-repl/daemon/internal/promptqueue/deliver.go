@@ -79,7 +79,7 @@ func (q *queue) deliver(ctx context.Context, d *delivery, sub Submission, sender
 	// starting. Both the footer and the roster take `thinking · submitting` now,
 	// each as its own immediate publish, so the STALL of the (blocking) StartTurn
 	// below is shown as submitting rather than as idle.
-	submitting := &footer.TurnStarted{At: q.deps.Now(), Act: footer.ActPrompt, Prompt: record.Text}
+	submitting := &footer.TurnStarted{At: q.deps.Now(), Act: footer.ActPrompt}
 	q.deps.Footer.SetTurn(sub.WS, submitting)
 	q.deps.Sidebar.SetTurn(sub.WS, submitting)
 
