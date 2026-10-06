@@ -126,16 +126,17 @@ func TestAwaitFrozenRefusesAProcessThatNeverStops(t *testing.T) {
 	}
 }
 
-func TestGroupExited(t *testing.T) {
+func TestLiveGroupMembers(t *testing.T) {
 	cases := []struct {
 		name string
 		// exit, when true, SIGKILLs the group's only process and awaits its
 		// exit, leaving it unreaped.
 		exit bool
-		want bool
+		// wantLeader is whether the leader is listed as a live member.
+		wantLeader bool
 	}{
-		{name: "a group with a running process has not exited", exit: false, want: false},
-		{name: "a group whose only process is exited and unreaped has exited", exit: true, want: true},
+		{name: "a group with a running process lists it", exit: false, wantLeader: true},
+		{name: "a group whose only process is exited and unreaped lists nobody", exit: true, wantLeader: false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -158,14 +159,15 @@ func TestGroupExited(t *testing.T) {
 			}
 
 			// Act
-			got, err := groupExited(cmd.Process.Pid)
+			got, err := liveGroupMembers(cmd.Process.Pid)
 
 			// Assert
 			if err != nil {
-				t.Fatalf("groupExited(%d) = %v", cmd.Process.Pid, err)
+				t.Fatalf("liveGroupMembers(%d) = %v", cmd.Process.Pid, err)
 			}
-			if got != tc.want {
-				t.Fatalf("groupExited(%d) = %v, want %v", cmd.Process.Pid, got, tc.want)
+			listed := len(got) == 1 && got[0].pid == cmd.Process.Pid && got[0].comm == "sleep"
+			if listed != tc.wantLeader || (!tc.wantLeader && len(got) != 0) {
+				t.Fatalf("liveGroupMembers(%d) = %+v, want the leader listed = %v and nothing else", cmd.Process.Pid, got, tc.wantLeader)
 			}
 		})
 	}
