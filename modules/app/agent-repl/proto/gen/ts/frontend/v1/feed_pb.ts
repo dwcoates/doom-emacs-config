@@ -8203,8 +8203,8 @@ export const FeedMergeAbandonedSchema: GenMessage<FeedMergeAbandoned> = /*@__PUR
  * The failed compaction. DRAWN AS ITS OUTCOME MARKER ALONE (owner ruling,
  * 2026-10-06): no divider rule, no label under one — a compaction that did not
  * happen cut nothing, so a dividing line there was mistaken. The producer's
- * account, verbatim, is the only evidence anyone has; the footer's
- * context-budget line still says the context is as it was.
+ * account, verbatim, is the only evidence anyone has. The footer raises no
+ * line for it (owner ruling, 2026-10-06): this marker is the whole account.
  *
  * @generated from message frontend.v1.FeedContextCutCompactionFailed
  */
