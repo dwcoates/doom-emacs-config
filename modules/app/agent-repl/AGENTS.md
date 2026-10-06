@@ -47,7 +47,10 @@ helper every test entry point goes through.
 
 - macOS and Linux: `nice -n 19` (owner ruling 2026-09-23, "very low").
   - The run keeps the performance cores but always yields the CPU to the live
-    runtime; disk I/O is not demoted.
+    runtime.
+- macOS also throttles the run's DISK I/O: `taskpolicy -d throttle` (owner
+  ruling 2026-10-06), so a full run's SQLite and build traffic waits behind
+  the live store's writes. It sets the I/O policy only; children inherit it.
   - `taskpolicy -b` was measured and rejected: it pinned runs to the
     efficiency cores and the webapp integration suite passed 56-58 of 1765.
   - Linux is reached only inside the e2e sandbox container.

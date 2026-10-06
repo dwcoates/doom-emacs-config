@@ -98,6 +98,15 @@ case $os in
         if (( niceness >= 19 )); then
             exec "$@"
         fi
+        # DISK, TOO, ON macOS (owner ruling 2026-10-06): the CPU demotion left a
+        # run's disk I/O at normal priority, and a full run's hundreds of
+        # SQLite files starved the live store (a 111-page checkpoint took 54 s,
+        # its writes 5-7 s). `taskpolicy -d throttle` sets the I/O policy ONLY
+        # -- not `-b`, which also pins to the efficiency cores and was rejected
+        # 2026-09-23 -- and children inherit it with the niceness.
+        if [[ $os == Darwin ]]; then
+            exec taskpolicy -d throttle nice -n 19 "$@"
+        fi
         exec nice -n 19 "$@"
         ;;
     *)

@@ -68,7 +68,13 @@ printf 'nice %s\n' "$*" >>"$STUB_LOG"
 shift 2
 exec "$@"
 STUB
-chmod +x "$STUBS/uname" "$STUBS/perl" "$STUBS/nice"
+cat >"$STUBS/taskpolicy" <<'STUB'
+#!/bin/bash
+printf 'taskpolicy %s\n' "$*" >>"$STUB_LOG"
+shift 2
+exec "$@"
+STUB
+chmod +x "$STUBS/uname" "$STUBS/perl" "$STUBS/nice" "$STUBS/taskpolicy"
 
 # run_helper DIR [ENV=VALUE...] -- <command...>
 # Runs the helper under the stubs with a CLEAN marker, the way a fresh entry
@@ -104,6 +110,25 @@ for platform in Darwin Linux; do
         pass "$platform: a normal-priority run is executed under nice -n 19 with the nice-19 marker"
     else
         fail "$platform: a normal-priority run is executed under nice -n 19 with the nice-19 marker" "rc=$RC log: $(cat "$d/log") out: $(cat "$d/out") err: $(cat "$d/err")"
+    fi
+    # --- 1a'. disk I/O: throttled on macOS, untouched on Linux ----------------
+    if [ "$platform" = Darwin ]; then
+        if grep -q '^taskpolicy -d throttle nice -n 19 bash -c' "$d/log"; then
+            pass "Darwin: a normal-priority run's disk I/O is throttled with taskpolicy -d throttle"
+        else
+            fail "Darwin: a normal-priority run's disk I/O is throttled with taskpolicy -d throttle" "log: $(cat "$d/log")"
+        fi
+        if grep -q '^taskpolicy .*-b' "$d/log"; then
+            fail "Darwin: the run is never put in the background band that pins to efficiency cores" "log: $(cat "$d/log")"
+        else
+            pass "Darwin: the run is never put in the background band that pins to efficiency cores"
+        fi
+    else
+        if grep -q '^taskpolicy' "$d/log"; then
+            fail "Linux: no taskpolicy is invoked" "log: $(cat "$d/log")"
+        else
+            pass "Linux: no taskpolicy is invoked"
+        fi
     fi
 
     # --- 1b. already at niceness 19: passes through --------------------------
