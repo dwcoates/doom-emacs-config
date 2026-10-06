@@ -712,6 +712,28 @@ describe("session facts with no message behind them", () => {
     watch.close();
   });
 
+  test("!usage-seat-spend reports the seat's spend against its allotment", async () => {
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    const watch = watchSession(shim);
+
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!usage-seat-spend" }));
+    const frame = await watch.until((f) => {
+      const update = sessionUpdate(f);
+      return update.update.case === "accountUsage" && update.update.value.outcome.case === "seatSpend";
+    });
+
+    const update = sessionUpdate(frame);
+    if (update.update.case !== "accountUsage") throw new Error("expected account_usage");
+    const sample = update.update.value;
+    if (sample.outcome.case !== "seatSpend") throw new Error("expected the seat_spend arm");
+    expect([sample.subscriptionType?.plan.case, sample.outcome.value.spent?.amountMinor]).toEqual([
+      "enterprise",
+      22_388n,
+    ]);
+    watch.close();
+  });
+
   // The four unavailable shapes are DISTINCT on the wire (rate_limits null, a
   // null WINDOW, a null utilization inside a present window, behaviors null),
   // so each is its own test rather than one "unavailable" assertion.

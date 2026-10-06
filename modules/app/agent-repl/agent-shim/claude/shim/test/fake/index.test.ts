@@ -887,6 +887,26 @@ describe("the account-usage probe", () => {
     });
   });
 
+  it("answers an enterprise plan with no five-hour window and a monthly limit under !usage-seat-spend", async () => {
+    // Arrange + Act
+    const answer = await usage(["!usage-seat-spend"]);
+
+    // Assert
+    expect({
+      plan: answer.subscription_type,
+      fiveHour: answer.rate_limits?.five_hour,
+      extra: answer.rate_limits?.extra_usage,
+    }).toMatchObject({ plan: "enterprise", fiveHour: null, extra: { monthly_limit: 1_200_000, used_credits: 22_388 } });
+  });
+
+  it("answers a null spend figure under !usage-seat-spend-unreported", async () => {
+    // Arrange + Act
+    const answer = await usage(["!usage-seat-spend-unreported"]);
+
+    // Assert
+    expect(answer.rate_limits?.extra_usage).toMatchObject({ used_credits: null });
+  });
+
   it("answers a null FIVE-HOUR window when the window is unavailable", async () => {
     // Arrange + Act
     const answer = await usage(["!usage-window-unavailable"]);

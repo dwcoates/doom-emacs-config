@@ -418,7 +418,9 @@ export type AccountUsageArm =
   | "service_unavailable"
   | "window_unavailable"
   | "utilization_unavailable"
-  | "sampling_failure";
+  | "sampling_failure"
+  | "seat_spend"
+  | "seat_spend_unreported";
 
 /** One registered mocked-vendor scenario. */
 export interface Scenario {
