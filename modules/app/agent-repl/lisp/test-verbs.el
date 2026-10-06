@@ -3000,6 +3000,29 @@ user where they were."
       (should (agent-repl-test-verbs--messaged-p
                "/private/tmp/scratch is inside the temporary directory /private/tmp; agent-repl does not register temporary folders")))))
 
+(ert-deftest agent-repl-verbs-register-repository-refusal-is-recorded-as-an-answer ()
+  "The handler records a refusal at INFO: an answer, not a fault (no WARN)."
+  (let (records)
+    (cl-letf (((symbol-function 'agent-repl--emit-log-record)
+               (lambda (_ws level _verbosity fmt &rest _)
+                 (push (cons level fmt) records))))
+      ;; Arrange.
+      (agent-repl-test-verbs--with
+          (list (cons :register-repository
+                  (list :response
+                        (list :arm :error
+                              :value (list :cause (list :arm :inside-temporary-directory
+                                                        :value (list :dir "/private/tmp/scratch"
+                                                                     :temporary-root "/private/tmp")))))))
+        (agent-repl-test-verbs--picking-file "/tmp/scratch/README.md"
+          ;; Act.
+          (agent-repl-register-repository))))
+    ;; Assert.
+    (let ((refused (seq-filter (lambda (r) (string-search "register-repository-refused" (cdr r)))
+                               records)))
+      (should refused)
+      (should (seq-every-p (lambda (r) (equal (car r) "info")) refused)))))
+
 (ert-deftest agent-repl-verbs-register-repository-falls-through-an-arm-it-has-no-sentence-for ()
   "An arm this command does not know still reports, through the generic path.
 A refusal the daemon adds later must reach the user the day it ships."
