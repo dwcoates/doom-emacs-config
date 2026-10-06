@@ -982,8 +982,18 @@ daemon has by then rather than wearing the bare canonical name forever."
   "Whole-replace WS's host state with HOST and run the update hooks.
 `shim_attached' false gets NO treatment: a parked workspace presents as
 live and unwired, and the frontend cannot tell parked from idle, on
-purpose."
-  (agent-repl-host--put ws :host host)
+purpose.
+
+A push that changes WS's vendor conversation id (see
+`agent-repl-host-vendor-session-id') is recorded at INFO: the id is the
+durable identity a resume replays, and the moment Emacs learns it is
+otherwise invisible in the logs."
+  (let ((vendor-before (agent-repl-host-vendor-session-id ws)))
+    (agent-repl-host--put ws :host host)
+    (let ((vendor-after (agent-repl-host-vendor-session-id ws)))
+      (unless (equal vendor-before vendor-after)
+        (agent-repl--info ws "elisp.host.vendor-session ws=%s from=%S to=%S"
+                          ws vendor-before vendor-after))))
   (agent-repl-host--settle-restart-hold ws)
   (agent-repl-host--apply-naming ws)
   (agent-repl--log ws "elisp.host.state ws=%s gate=%S backfill=%S faults=%d"
