@@ -267,5 +267,79 @@ the fake's own answer and not an echo of the request."
             (should-not agent-repl-itest--binary)))
       (delete-file path))))
 
+;;;; ---- A failed cleanup is surfaced, never swallowed ----
+
+(defun agent-repl-itest-fixture--refuse-removal (&rest args)
+  "Stand in for `delete-directory', refusing ARGS' directory."
+  (signal 'file-error (list "Removing directory" "Permission denied" (car args))))
+
+(ert-deftest agent-repl-itest-fixture-remove-tree-of-an-absent-dir-is-a-no-op ()
+  "An absent directory is already removed, so removing it again is quiet."
+  ;; Arrange
+  (let ((dir (expand-file-name "never-made" temporary-file-directory)))
+    ;; Act / Assert
+    (should-not (agent-repl-itest--remove-tree dir))))
+
+(ert-deftest agent-repl-itest-fixture-remove-tree-signals-a-failed-removal ()
+  "A directory that cannot be removed signals rather than being ignored."
+  ;; Arrange
+  (let ((dir (make-temp-file "remove-tree-test-" t)))
+    (unwind-protect
+        (cl-letf (((symbol-function 'delete-directory)
+                   #'agent-repl-itest-fixture--refuse-removal))
+          ;; Act / Assert
+          (should-error (agent-repl-itest--remove-tree dir) :type 'file-error))
+      (delete-directory dir t))))
+
+(ert-deftest agent-repl-itest-fixture-fixture-root-sweep-signals-a-failed-removal ()
+  "The per-scenario fixture-root sweep fails the scenario it cannot clean for."
+  ;; Arrange
+  (let ((agent-repl-itest--fixture-root (make-temp-file "fixture-root-test-" t)))
+    (unwind-protect
+        (cl-letf (((symbol-function 'delete-directory)
+                   #'agent-repl-itest-fixture--refuse-removal))
+          ;; Act / Assert
+          (should-error (agent-repl-itest--sweep-fixture-root) :type 'file-error))
+      (delete-directory agent-repl-itest--fixture-root t))))
+
+(ert-deftest agent-repl-itest-fixture-state-dir-sweep-signals-a-failed-removal ()
+  "The per-scenario state-root sweep fails on a leftover it cannot remove."
+  ;; Arrange
+  (let* ((root (make-temp-file "state-dir-test-" t))
+         (daemon (agent-repl-itest--make-daemon :state-dir root)))
+    (make-directory (expand-file-name "leftover" root))
+    (unwind-protect
+        (cl-letf (((symbol-function 'delete-directory)
+                   #'agent-repl-itest-fixture--refuse-removal))
+          ;; Act / Assert
+          (should-error (agent-repl-itest--sweep-state-dir daemon) :type 'file-error))
+      (delete-directory root t))))
+
+(ert-deftest agent-repl-itest-fixture-exit-time-fixture-root-failure-is-printed ()
+  "A fixture root that cannot be removed at exit is reported on stderr."
+  ;; Arrange
+  (let ((agent-repl-itest--fixture-root (make-temp-file "fixture-root-test-" t))
+        (printed ""))
+    (unwind-protect
+        (cl-letf (((symbol-function 'delete-directory)
+                   #'agent-repl-itest-fixture--refuse-removal)
+                  ((symbol-function 'princ)
+                   (lambda (object &optional _stream) (setq printed (concat printed object)))))
+          ;; Act
+          (agent-repl-itest--delete-fixture-root))
+      (delete-directory agent-repl-itest--fixture-root t))
+    ;; Assert
+    (should (string-match-p "ERROR: could not remove the fixture root" printed))))
+
+(ert-deftest agent-repl-itest-fixture-exit-time-fixture-root-removal-removes-it ()
+  "The exit-time removal deletes the fixture root and what is under it."
+  ;; Arrange
+  (let ((agent-repl-itest--fixture-root (make-temp-file "fixture-root-test-" t)))
+    (make-directory (expand-file-name "left/behind" agent-repl-itest--fixture-root) t)
+    ;; Act
+    (agent-repl-itest--delete-fixture-root)
+    ;; Assert
+    (should-not (file-exists-p agent-repl-itest--fixture-root))))
+
 (provide 'test-integration-fixture)
 ;;; test-integration-fixture.el ends here

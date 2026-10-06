@@ -793,6 +793,29 @@ func startStore(t *testing.T, socket, dbPath, logPath, lockDir string) *Store {
 	return s
 }
 
+// storeDumpBound is how long a store asked for its goroutines has to write
+// them and exit. The Go runtime's own SIGQUIT handler does both at once, so
+// this covers only the scheduling of a decided exit.
+const storeDumpBound = 2 * time.Second
+
+// dumpOnStall asks a live store to dump every goroutine: the Go runtime's own
+// SIGQUIT handler writes them to the store's stderr, which is this test's, and
+// exits. It answers a line for the failure message saying what happened.
+func (s *Store) dumpOnStall(bound time.Duration) string {
+	if err := s.cmd.Process.Signal(syscall.SIGQUIT); err != nil {
+		if errors.Is(err, os.ErrProcessDone) {
+			return "the store was already gone; no goroutine dump"
+		}
+		return fmt.Sprintf("could not ask the store for a goroutine dump: %v", err)
+	}
+	select {
+	case <-s.exit.done:
+		return "SIGQUIT sent; the Go runtime's goroutine dump of the store is on stderr above"
+	case <-time.After(bound):
+		return fmt.Sprintf("SIGQUIT sent for a goroutine dump, but the store did not exit within %s", bound)
+	}
+}
+
 func storeClient(socket string) storev1connect.ShimStoreClient {
 	return storev1connect.NewShimStoreClient(udsHTTPClient(socket), "http://store")
 }
@@ -821,8 +844,16 @@ func (s *Store) awaitReady() {
 		case <-s.exit.done:
 			s.t.Fatalf("e2e: store exited before readiness (%s):\n%s", s.exit.status(), tailStoreLog(s.t, s))
 		case <-ctx.Done():
-			s.t.Fatalf("e2e: store never answered GetSidecarCursors within %s; process is %s:\n%s",
-				DefaultTimeout, s.exit.status(), tailStoreLog(s.t, s))
+			// A STORE THAT IS ALIVE AND NOT ANSWERING IS ASKED WHERE IT IS
+			// before the failure is written: two stores and a daemon starting
+			// at one instant once each logged their first record and then
+			// nothing for 5s (2026-10-06, a full-suite run), where a quiet
+			// store boot measures 50-160ms. Only a stack names a stall like
+			// that.
+			status := s.exit.status()
+			dump := s.dumpOnStall(storeDumpBound)
+			s.t.Fatalf("e2e: store never answered GetSidecarCursors within %s; process was %s (%s):\n%s",
+				DefaultTimeout, status, dump, tailStoreLog(s.t, s))
 		case <-ticker.C:
 		}
 	}

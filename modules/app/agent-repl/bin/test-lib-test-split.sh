@@ -98,6 +98,17 @@ t_only_refuses_an_unknown_group() {
     fi
 }
 
+t_an_unknown_group_names_what_the_script_listed() {
+    local sum
+    sum="$(cksum <"$HARNESS")"
+    run --only delta
+    if [ "$RC" -eq 2 ] && [[ "$ERR" == *"$HARNESS lists: alpha,beta,gamma; read as cksum $sum"* ]]; then
+        pass "an unknown group's refusal names the groups the script listed and the bytes it read"
+    else
+        fail "an unknown group's refusal names the groups the script listed and the bytes it read" "rc=$RC out=$OUT err=$ERR"
+    fi
+}
+
 t_only_refuses_an_empty_list() {
     run --only ""
     if [ "$RC" -eq 2 ] && [[ "$ERR" == *"--only needs a nonempty test list"* ]]; then
@@ -167,6 +178,7 @@ t_no_argument_runs_every_group
 t_only_runs_exactly_the_named_groups
 t_item_line_is_the_runners_shape
 t_only_refuses_an_unknown_group
+t_an_unknown_group_names_what_the_script_listed
 t_only_refuses_an_empty_list
 t_only_refuses_a_missing_list
 t_unknown_argument_is_refused

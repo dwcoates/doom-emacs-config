@@ -266,7 +266,9 @@ func runSuite(m *testing.M) int {
 const sidecarIntegrationSharedSub = "sidecar-integration-bin"
 
 func goBuild(moduleDir, out string) error {
-	cmd := exec.Command("go", "build", "-o", out, ".")
+	// -buildvcs=false: a test build never asks git to stamp the binary (no
+	// test runs real git, owner rule).
+	cmd := exec.Command("go", "build", "-buildvcs=false", "-o", out, ".")
 	cmd.Dir = moduleDir
 	cmd.Env = append(os.Environ(), "GOFLAGS=")
 	combined, err := cmd.CombinedOutput()

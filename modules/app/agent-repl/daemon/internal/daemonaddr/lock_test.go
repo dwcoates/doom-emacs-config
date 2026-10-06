@@ -196,31 +196,13 @@ func TestAcquireBootLockWithinReleasesAClaimItWonAfterTheBound(t *testing.T) {
 	// polling, so nothing here depends on timing.
 	f, err := openBootLock(path)
 	if err != nil {
-		t.Fatalf("openBootLock: %v", err)
+		t.Fatalf("open: %v", err)
 	}
-	after, err := blockOnBootLock(f, path)
+	after, err := blockForBootLock(f, path)
 	if err != nil {
 		t.Fatalf("the claim was never handed back: %v", err)
 	}
 	after.release()
-}
-
-func TestBlockOnBootLockRefusesADescriptorItCannotLock(t *testing.T) {
-	// Arrange: a lock file whose descriptor is already closed.
-	path := filepath.Join(t.TempDir(), LockName)
-	f, err := openBootLock(path)
-	if err != nil {
-		t.Fatalf("openBootLock: %v", err)
-	}
-	f.Close()
-
-	// Act.
-	_, err = blockOnBootLock(f, path)
-
-	// Assert.
-	if err == nil || !strings.Contains(err.Error(), "wait for the boot lock") {
-		t.Fatalf("blockOnBootLock = %v, want the failed wait named", err)
-	}
 }
 
 func TestProbeBootClaimReportsAFreeClaim(t *testing.T) {
@@ -289,5 +271,52 @@ func TestProbeBootClaimSurfacesAnUndecidableClaim(t *testing.T) {
 	}
 	if errors.Is(err, ErrClaimed) {
 		t.Fatalf("an undecidable claim was reported as held: %v", err)
+	}
+}
+
+func TestABoundedWaitOpensTheLockFileBeforeItAnswers(t *testing.T) {
+	// Arrange: the incumbent holds the claim, and the lock file becomes
+	// unopenable the moment the first attempt is refused.
+	if os.Geteuid() == 0 {
+		t.Fatal("this test needs a non-root user: root opens a mode-000 file")
+	}
+	path := filepath.Join(t.TempDir(), LockName)
+	incumbent, err := acquireBootLock(path)
+	if err != nil {
+		t.Fatalf("incumbent: %v", err)
+	}
+	defer incumbent.release()
+	unopenable := func() {
+		if err := os.Chmod(path, 0); err != nil {
+			t.Errorf("chmod the lock file: %v", err)
+		}
+	}
+
+	// Act: the shortest bound there is, so an open left to a goroutine would
+	// lose the race to the timer and be dropped.
+	_, err = acquireBootLockWithin(path, time.Nanosecond, unopenable)
+
+	// Assert: the wait's own open ran synchronously and its failure is the
+	// answer, never a goroutine's error dropped behind a timeout.
+	if err == nil || errors.Is(err, ErrClaimed) || !errors.Is(err, os.ErrPermission) {
+		t.Fatalf("acquireBootLockWithin = %v, want the open's permission error", err)
+	}
+}
+
+func TestBlockForBootLockRefusesADescriptorItCannotLock(t *testing.T) {
+	// Arrange: a lock file whose descriptor is already closed.
+	path := filepath.Join(t.TempDir(), LockName)
+	f, err := openBootLock(path)
+	if err != nil {
+		t.Fatalf("openBootLock: %v", err)
+	}
+	f.Close()
+
+	// Act.
+	_, err = blockForBootLock(f, path)
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "wait for the boot lock") {
+		t.Fatalf("blockForBootLock = %v, want the failed wait named", err)
 	}
 }

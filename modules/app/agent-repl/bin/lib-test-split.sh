@@ -26,6 +26,15 @@ test_split_init() {
             while IFS= read -r requested; do
                 printf '%s\n' "$listed" | grep -Fxq "$requested" || {
                     echo "unknown harness item: $requested" >&2
+                    # WHAT THE SCRIPT LISTED, AND WHICH BYTES IT WAS READ
+                    # FROM. A runner plans its chunks from an earlier --list
+                    # of this same file, so an item it planned and this read
+                    # does not list means the file changed between the two
+                    # (seen once, 2026-10-03: build-frontend-harness#00 refused
+                    # revision-staleness in 0.03s, not reproduced in 25,000
+                    # runs). The listing and the content checksum say whether
+                    # the script was rewritten under the run.
+                    echo "$script lists: $(printf '%s\n' "$listed" | paste -sd, -); read as cksum $(cksum <"$script")" >&2
                     exit 2
                 }
             done < <(printf '%s\n' "$2" | tr ',' '\n')

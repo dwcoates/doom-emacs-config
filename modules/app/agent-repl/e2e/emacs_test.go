@@ -73,7 +73,16 @@ import (
 // set by the longest command a scenario runs. 3x that, because the failure
 // this exists to catch is a hang, and a hang that clears itself is still the
 // sentinel/kill-buffer recursion.
-const HeartbeatBound = 1250 * time.Millisecond
+//
+// RE-MEASURED UNDER testrun (2026-10-06), which is how this layer runs now:
+// its container four slots wide beside every other suite on the host, not
+// alone in the sandbox. Five full-suite runs reported heartbeat-probe-max
+// tops of 987, 889, 769, 743 and 660ms, and one scenario was failed as EMACS
+// WEDGED at 1.25s by a probe that queued past it (Emacs idle again by the time
+// its stack was taken). 1.25s was ~1.3x the loaded maximum; 3s is ~3x the
+// 987ms one, and still well under the 5s command-loop block this exists to
+// catch.
+const HeartbeatBound = 3 * time.Second
 
 // evalBound is how long ONE `emacsclient --eval` of a SCENARIO'S OWN FORM may
 // take before the running test fails.
@@ -106,13 +115,17 @@ const HeartbeatBound = 1250 * time.Millisecond
 // sits there. Deriving a bound from it would enshrine that defect as the
 // expectation.
 //
-// It lands on the same number HeartbeatBound carries, which is a coincidence
-// of two similar measurements and not a reason to fuse them again: they bound
-// different phenomena and will move apart the moment either one does.
+// It once landed on the same number HeartbeatBound carried, which was a
+// coincidence of two similar measurements and not a reason to fuse them
+// again: they bound different phenomena, and have since moved apart.
 //
 // `go test -v` prints `emacs phase eval-max` for every scenario, which is the
 // number a future revision must re-derive this from.
-const evalBound = 1250 * time.Millisecond
+//
+// RE-MEASURED UNDER testrun (2026-10-06), as HeartbeatBound was: five
+// full-suite runs reported eval-max tops of 861, 826, 733, 712 and 649ms, so
+// 1.25s was ~1.5x the loaded maximum. 2.6s is ~3x the 861ms one.
+const evalBound = 2600 * time.Millisecond
 
 // daemonStopForm is the teardown's stop, WAITED ON.
 //

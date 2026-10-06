@@ -110,6 +110,19 @@ describe("the page's one connection", () => {
   });
 });
 
+/**
+ * THE RECONNECT CASES' OWN BOUND. A reconnect is TWO page attaches -- the
+ * boot's, then the re-subscribe of every view over a fresh page stream, each a
+ * real stream over the fake daemon's socket with its replay -- where the 900ms
+ * global (vitest.integration.config.ts) was sized on single-attach pages
+ * (slowest healthy test 274.8ms). Measured 2026-10-06, the file run 12 times
+ * on a quiet host: these three tests' medians 63-67ms against 33-45ms for the
+ * single-attach ones, and their slowest 516ms, 457ms and 429ms. Under a full
+ * suite run two of them crossed 900ms twice in a day. ~3x the slowest healthy
+ * case.
+ */
+const RECONNECT_BOUND_MS = 1_500;
+
 describe("the page's stream dropping", () => {
   it("reports the degraded state the views share", async () => {
     // Arrange.
@@ -145,7 +158,7 @@ describe("the page's stream dropping", () => {
     // COUNT that carries the guarantee, not the names.
     expect(harness.fake.attachedPages()).toHaveLength(1);
     expect(harness.fake.pageSubscriptions()).toHaveLength(before.length);
-  });
+  }, RECONNECT_BOUND_MS);
 
   it("replays each view exactly as its own rpc replays it", async () => {
     // Arrange: the footer says one thing while the page is connected.
@@ -175,7 +188,7 @@ describe("the page's stream dropping", () => {
     // whatever the dead stream last said — which is indistinguishable from a
     // healthy page until the moment it matters.
     expect(harness.$(".footer-tokens")?.textContent).toContain("while-it-was-down");
-  });
+  }, RECONNECT_BOUND_MS);
 
   it("retracts the degraded state once the views are drawing again", async () => {
     // Arrange.
@@ -193,7 +206,7 @@ describe("the page's stream dropping", () => {
     // Assert: the card is a statement about NOW, so a recovered page must not
     // keep wearing it.
     expect(harness.failureArms()).not.toContain("daemonUnreachable");
-  });
+  }, RECONNECT_BOUND_MS);
 });
 
 describe("a view's planned ending", () => {
