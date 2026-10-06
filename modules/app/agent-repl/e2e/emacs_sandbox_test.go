@@ -316,6 +316,14 @@ func runHostPreflight(script string, bound time.Duration) string {
 
 	ctx, cancel := context.WithTimeout(context.Background(), bound)
 	defer cancel()
+	return hostPreflightUntil(ctx, script, bound)
+}
+
+// hostPreflightUntil is runHostPreflight with its bound as a context: the
+// preflight is reported as not answering the moment ctx is done, and bound
+// only names the wait in that report. A test ends the wait itself, at a
+// point it has observed, rather than racing a wall-clock bound.
+func hostPreflightUntil(ctx context.Context, script string, bound time.Duration) string {
 	out, err := exec.CommandContext(ctx, script, "preflight").CombinedOutput()
 	partial := strings.TrimRight(string(out), "\n")
 

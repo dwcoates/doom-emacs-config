@@ -1,10 +1,12 @@
 package e2e
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -52,12 +54,29 @@ func TestHostPreflightBoundReportsAScriptThatNeverAnswers(t *testing.T) {
 
 func TestHostPreflightBoundNamesTheWedgedEngine(t *testing.T) {
 	t.Parallel()
-	// Arrange: a preflight that prints, then blocks past the bound.
-	script := writeScript(t, t.TempDir(), "preflight-partial.sh",
-		"echo 'probing docker'\nexec sleep 120\n")
+	// Arrange: a preflight that prints, then blocks past the bound. The wait
+	// ends only once the script has printed -- it says so through a FIFO the
+	// test reads -- so the partial output is there to quote. Racing a 300ms
+	// wall-clock bound instead failed whenever a loaded host had not yet run
+	// the echo when the bound fired (2026-10-06, a full-suite run).
+	dir := t.TempDir()
+	printed := filepath.Join(dir, "printed")
+	if err := syscall.Mkfifo(printed, 0o600); err != nil {
+		t.Fatalf("mkfifo: %v", err)
+	}
+	script := writeScript(t, dir, "preflight-partial.sh",
+		"echo 'probing docker'\necho printed > "+printed+"\nexec sleep 120\n")
+	ctx, endTheWait := context.WithCancel(context.Background())
+	defer endTheWait()
+	go func() {
+		// Opening the FIFO for reading blocks until the script opens it to
+		// write, which is after its echo.
+		_, _ = os.ReadFile(printed)
+		endTheWait()
+	}()
 
 	// Act.
-	reason := runHostPreflight(script, 300*time.Millisecond)
+	reason := hostPreflightUntil(ctx, script, 300*time.Millisecond)
 
 	// Assert: the partial output is carried, so the reader knows which
 	// engine was being probed when the bound expired.
