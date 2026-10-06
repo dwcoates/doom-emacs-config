@@ -313,6 +313,15 @@ describe("the docked gate's background", () => {
     expect([rule.includes("border-width: 1px;"), rule.includes("border-width: 1px 0 0")]).toEqual([true, false]);
   });
 
+  it("lifts the docked gate off the page's last row so its bottom edge is whole", async () => {
+    // Arrange
+    const css = (await import("../../src/styles.css?raw")).default;
+    // Act
+    const rule = /#gate-dock\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
+    // Assert
+    expect(rule.includes("padding-bottom: 1px;")).toBe(true);
+  });
+
   it("paints the undocked card the input window's color too, never the revival yellow", async () => {
     // Arrange
     const css = (await import("../../src/styles.css?raw")).default;
