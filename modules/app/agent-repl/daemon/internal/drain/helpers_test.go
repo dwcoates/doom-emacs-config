@@ -485,16 +485,16 @@ type harness struct {
 	exits     chan struct{}
 }
 
-// newHarness builds a controller over a real WSM store in the test's temp dir —
+// newHarness builds a controller over a real (in-memory) WSM store —
 // the state client is the one collaborator worth exercising for real, because
 // the lease and the schedule row are what the drain's behavior is made of.
 func newHarness(t *testing.T, adjust ...func(*Deps)) *harness {
 	t.Helper()
 	t.Setenv(IdleCutoffEnv, "")
 	log := dlog.NewTestSurfaces()
-	db, err := wsm.Open(context.Background(), filepath.Join(t.TempDir(), "wsm.db"), wsm.WithLogger(log.Global()), wsm.WithTemporaryGuard(tempdirstest.Guard(t)))
+	db, err := wsm.OpenInMemory(context.Background(), wsm.WithLogger(log.Global()), wsm.WithTemporaryGuard(tempdirstest.Guard(t)))
 	if err != nil {
-		t.Fatalf("wsm.Open: %v", err)
+		t.Fatalf("wsm.OpenInMemory: %v", err)
 	}
 	t.Cleanup(func() { db.Close() })
 

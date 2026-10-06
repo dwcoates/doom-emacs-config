@@ -176,7 +176,7 @@ func TestSetGroupingRefusesAGroupingThatIsNeither(t *testing.T) {
 func TestSidebarViewSurvivesAReopen(t *testing.T) {
 	// Arrange
 	path := filepath.Join(t.TempDir(), "wsm.db")
-	first, err := Open(context.Background(), path)
+	first, err := Open(context.Background(), path, WithUnsyncedWrites())
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -198,7 +198,7 @@ func TestSidebarViewSurvivesAReopen(t *testing.T) {
 	}
 
 	// Act
-	second, err := Open(context.Background(), path)
+	second, err := Open(context.Background(), path, WithUnsyncedWrites())
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
@@ -240,7 +240,7 @@ func TestTheMigrationAddsTheSidebarView(t *testing.T) {
 	path := fixtureAt(t, 22)
 
 	// Act
-	handle, err := Open(context.Background(), path)
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites())
 	if err != nil {
 		t.Fatalf("Open on a layout-22 database: %v", err)
 	}

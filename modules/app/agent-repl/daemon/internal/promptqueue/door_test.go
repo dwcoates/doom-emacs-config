@@ -3,7 +3,6 @@ package promptqueue
 import (
 	"claude-repld/internal/tempdirs/tempdirstest"
 	"context"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -55,9 +54,9 @@ func doorAgent() *conversationv1.AgentId { return &conversationv1.AgentId{Value:
 func newDoorWorld(t *testing.T) *doorWorld {
 	t.Helper()
 	ctx := context.Background()
-	db, err := wsm.Open(ctx, filepath.Join(t.TempDir(), "wsm.db"), wsm.WithTemporaryGuard(tempdirstest.Guard(t)))
+	db, err := wsm.OpenInMemory(ctx, wsm.WithTemporaryGuard(tempdirstest.Guard(t)))
 	if err != nil {
-		t.Fatalf("wsm.Open: %v", err)
+		t.Fatalf("wsm.OpenInMemory: %v", err)
 	}
 	t.Cleanup(func() { db.Close() })
 	dir := t.TempDir()

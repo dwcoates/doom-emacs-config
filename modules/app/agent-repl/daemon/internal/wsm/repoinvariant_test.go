@@ -23,7 +23,7 @@ import (
 func orphanFixture(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "wsm.db")
-	handle, err := Open(context.Background(), path)
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites())
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestOpenReportsAWorkspaceWhoseRepositoryIsUnregistered(t *testing.T) {
 	log := dlog.NewTestLogger()
 
 	// Act.
-	handle, err := Open(context.Background(), path, WithLogger(log))
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites(), WithLogger(log))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestTheReportedViolationNamesTheRemedy(t *testing.T) {
 	log := dlog.NewTestLogger()
 
 	// Act.
-	handle, err := Open(context.Background(), path, WithLogger(log))
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites(), WithLogger(log))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -127,7 +127,7 @@ func TestTheReportedViolationIsRecordedExactlyOnce(t *testing.T) {
 	log := dlog.NewTestLogger()
 
 	// Act.
-	handle, err := Open(context.Background(), path, WithLogger(log))
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites(), WithLogger(log))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -150,7 +150,7 @@ func TestOpenDeletesNothingItReports(t *testing.T) {
 	path := orphanFixture(t)
 
 	// Act.
-	handle, err := Open(context.Background(), path, WithLogger(dlog.NewTestLogger()))
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites(), WithLogger(dlog.NewTestLogger()))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -166,7 +166,7 @@ func TestOpenDeletesNothingItReports(t *testing.T) {
 func TestOpenRecordsNoViolationWhenEveryRepositoryIsRegistered(t *testing.T) {
 	// Arrange — an ordinary file with one properly registered workspace.
 	path := filepath.Join(t.TempDir(), "wsm.db")
-	first, err := Open(context.Background(), path)
+	first, err := Open(context.Background(), path, WithUnsyncedWrites())
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -177,7 +177,7 @@ func TestOpenRecordsNoViolationWhenEveryRepositoryIsRegistered(t *testing.T) {
 	log := dlog.NewTestLogger()
 
 	// Act.
-	handle, err := Open(context.Background(), path, WithLogger(log))
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites(), WithLogger(log))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -207,7 +207,7 @@ func findRecord(log *dlog.TestLogger, level, message string) (dlog.Record, bool)
 // rather than in the field.
 func TestAMigratedFileStillRefusesAWorkspaceNamingAnUnregisteredRepository(t *testing.T) {
 	// Arrange — a layout-3 file carried forward to this build's layout.
-	handle, err := Open(context.Background(), layout3Fixture(t))
+	handle, err := Open(context.Background(), layout3Fixture(t), WithUnsyncedWrites())
 	if err != nil {
 		t.Fatalf("Open on a layout-3 database: %v", err)
 	}
@@ -236,7 +236,7 @@ func TestOpenReportsAViolationAlreadyInAMigratedFile(t *testing.T) {
 	log := dlog.NewTestLogger()
 
 	// Act.
-	handle, err := Open(context.Background(), path, WithLogger(log))
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites(), WithLogger(log))
 	if err != nil {
 		t.Fatalf("Open on a layout-3 database: %v", err)
 	}

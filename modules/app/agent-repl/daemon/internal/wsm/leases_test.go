@@ -265,7 +265,7 @@ func twoProcesses(t *testing.T) (previous, current *store, ws Workspace, log *dl
 // openStoreAt opens a handle on path with log.
 func openStoreAt(t *testing.T, path string, log *dlog.TestLogger) *store {
 	t.Helper()
-	handle, err := Open(context.Background(), path, WithLogger(log))
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites(), WithLogger(log))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}

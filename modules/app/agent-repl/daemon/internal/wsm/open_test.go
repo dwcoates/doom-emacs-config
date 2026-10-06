@@ -49,7 +49,7 @@ func TestOpenSetsTheDeclaredPragmas(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
-			s, _ := testStore(t)
+			s, _ := fileStore(t)
 
 			// Act
 			got := scalar[string](t, s, tc.query)
@@ -59,6 +59,61 @@ func TestOpenSetsTheDeclaredPragmas(t *testing.T) {
 				t.Fatalf("%s = %q, want %q", tc.query, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestOpenSynchronousPragma pins that SQLite's forced flushes are off ONLY on
+// a handle the test-run seam (WithUnsyncedWrites) asked for: a live daemon
+// opens without it and keeps SQLite's own default, FULL.
+func TestOpenSynchronousPragma(t *testing.T) {
+	tests := []struct {
+		name string
+		opts []Option
+		want int
+	}{
+		{name: "the production open keeps SQLite's default FULL", opts: nil, want: 2},
+		{name: "the test-run seam turns forced flushes off", opts: []Option{WithUnsyncedWrites()}, want: 0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			handle, err := Open(context.Background(), filepath.Join(t.TempDir(), "wsm.db"), tc.opts...)
+			if err != nil {
+				t.Fatalf("Open: %v", err)
+			}
+			t.Cleanup(func() { handle.Close() })
+
+			// Act
+			got := scalar[int](t, handle.(*store), `PRAGMA synchronous`)
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("PRAGMA synchronous = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestPromoteKeepsTheUnsyncedSeam pins that the writing handle a promotion
+// opens carries the seam the read-only open was given, so a promoted test
+// handle does not start forcing flushes.
+func TestPromoteKeepsTheUnsyncedSeam(t *testing.T) {
+	// Arrange
+	path := writableStore(t)
+	ro, err := OpenReadOnly(context.Background(), path, WithUnsyncedWrites())
+	if err != nil {
+		t.Fatalf("OpenReadOnly: %v", err)
+	}
+	t.Cleanup(func() { ro.Close() })
+
+	// Act
+	if err := ro.Promote(context.Background()); err != nil {
+		t.Fatalf("Promote: %v", err)
+	}
+
+	// Assert
+	if got := scalar[int](t, ro.(*store), `PRAGMA synchronous`); got != 0 {
+		t.Fatalf("PRAGMA synchronous after Promote = %d, want 0", got)
 	}
 }
 
@@ -77,7 +132,7 @@ func TestOpenUsesASingleConnection(t *testing.T) {
 
 func TestOpenCreatesTheSchemaOnAFreshFile(t *testing.T) {
 	// Arrange
-	s, log := testStore(t)
+	s, log := fileStore(t)
 
 	// Act
 	version := scalar[int](t, s, `SELECT version FROM layout WHERE id = 1`)
@@ -128,7 +183,7 @@ func TestOpenRefusesAForeignLayoutVersion(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
 			path := filepath.Join(t.TempDir(), "wsm.db")
-			first, err := Open(context.Background(), path)
+			first, err := Open(context.Background(), path, WithUnsyncedWrites())
 			if err != nil {
 				t.Fatalf("Open: %v", err)
 			}
@@ -137,7 +192,7 @@ func TestOpenRefusesAForeignLayoutVersion(t *testing.T) {
 
 			// Act
 			log := dlog.NewTestLogger()
-			_, err = Open(context.Background(), path, WithLogger(log))
+			_, err = Open(context.Background(), path, WithUnsyncedWrites(), WithLogger(log))
 
 			// Assert
 			var refusal *LayoutError
@@ -157,7 +212,7 @@ func TestOpenRefusesAForeignLayoutVersion(t *testing.T) {
 func TestOpenRefusesADatabaseWithNoLayoutRow(t *testing.T) {
 	// Arrange
 	path := filepath.Join(t.TempDir(), "wsm.db")
-	first, err := Open(context.Background(), path)
+	first, err := Open(context.Background(), path, WithUnsyncedWrites())
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -165,7 +220,7 @@ func TestOpenRefusesADatabaseWithNoLayoutRow(t *testing.T) {
 	first.Close()
 
 	// Act
-	_, err = Open(context.Background(), path)
+	_, err = Open(context.Background(), path, WithUnsyncedWrites())
 
 	// Assert
 	var refusal *DecodeError
@@ -179,7 +234,7 @@ func TestOpenReadOnlyRefusesAMissingFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "absent.db")
 
 	// Act
-	_, err := OpenReadOnly(context.Background(), path)
+	_, err := OpenReadOnly(context.Background(), path, WithUnsyncedWrites())
 
 	// Assert
 	if err == nil {
@@ -195,7 +250,7 @@ func TestOpenReadOnlyReportsItsMode(t *testing.T) {
 	path := writableStore(t)
 
 	// Act
-	ro, err := OpenReadOnly(context.Background(), path)
+	ro, err := OpenReadOnly(context.Background(), path, WithUnsyncedWrites())
 	if err != nil {
 		t.Fatalf("OpenReadOnly: %v", err)
 	}
@@ -211,7 +266,7 @@ func TestOpenReadOnlyRefusesEveryWrite(t *testing.T) {
 	// Arrange
 	path := writableStore(t)
 	log := dlog.NewTestLogger()
-	ro, err := OpenReadOnly(context.Background(), path, WithLogger(log))
+	ro, err := OpenReadOnly(context.Background(), path, WithUnsyncedWrites(), WithLogger(log))
 	if err != nil {
 		t.Fatalf("OpenReadOnly: %v", err)
 	}
@@ -233,7 +288,7 @@ func TestOpenReadOnlyChangesNothing(t *testing.T) {
 	// Arrange
 	path := writableStore(t)
 	before := digest(t, path)
-	ro, err := OpenReadOnly(context.Background(), path)
+	ro, err := OpenReadOnly(context.Background(), path, WithUnsyncedWrites())
 	if err != nil {
 		t.Fatalf("OpenReadOnly: %v", err)
 	}
@@ -256,7 +311,7 @@ func TestOpenReadOnlyRefusesEngineLevelWrites(t *testing.T) {
 	// Arrange — query_only(1) must refuse at the engine, not only in this
 	// package's guard, so a raw statement is the thing to try.
 	path := writableStore(t)
-	ro, err := OpenReadOnly(context.Background(), path)
+	ro, err := OpenReadOnly(context.Background(), path, WithUnsyncedWrites())
 	if err != nil {
 		t.Fatalf("OpenReadOnly: %v", err)
 	}
@@ -274,7 +329,7 @@ func TestOpenReadOnlyRefusesEngineLevelWrites(t *testing.T) {
 func TestOpenReadOnlyRefusesAForeignLayoutVersion(t *testing.T) {
 	// Arrange
 	path := writableStore(t)
-	first, err := Open(context.Background(), path)
+	first, err := Open(context.Background(), path, WithUnsyncedWrites())
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -282,7 +337,7 @@ func TestOpenReadOnlyRefusesAForeignLayoutVersion(t *testing.T) {
 	first.Close()
 
 	// Act
-	_, err = OpenReadOnly(context.Background(), path)
+	_, err = OpenReadOnly(context.Background(), path, WithUnsyncedWrites())
 
 	// Assert
 	var refusal *LayoutError
@@ -307,7 +362,7 @@ func TestWriteLogsTheOperationOnSuccess(t *testing.T) {
 func TestWithLoggerIgnoresANilLogger(t *testing.T) {
 	// Arrange / Act — a nil option value must not install a nil sink that would
 	// panic on the first record.
-	handle, err := Open(context.Background(), filepath.Join(t.TempDir(), "wsm.db"), WithLogger(nil))
+	handle, err := Open(context.Background(), filepath.Join(t.TempDir(), "wsm.db"), WithLogger(nil), WithUnsyncedWrites())
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -331,7 +386,7 @@ func stampLayout(t *testing.T, s *store, version int) {
 func writableStore(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "wsm.db")
-	handle, err := Open(context.Background(), path)
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites())
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}

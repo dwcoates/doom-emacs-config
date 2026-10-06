@@ -18,7 +18,7 @@ func TestOpenMigratesALayoutThreeDatabaseForward(t *testing.T) {
 	path := layout3Fixture(t)
 
 	// Act
-	handle, err := Open(context.Background(), path)
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites())
 	if err != nil {
 		t.Fatalf("Open on a layout-3 database: %v", err)
 	}
@@ -36,7 +36,7 @@ func TestTheMigrationCreatesTheTableTheNewLayoutAdded(t *testing.T) {
 	path := layout3Fixture(t)
 
 	// Act
-	handle, err := Open(context.Background(), path)
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites())
 	if err != nil {
 		t.Fatalf("Open on a layout-3 database: %v", err)
 	}
@@ -55,7 +55,7 @@ func TestTheMigrationDropsTheColumnTheNewLayoutRetired(t *testing.T) {
 	path := layout3Fixture(t)
 
 	// Act
-	handle, err := Open(context.Background(), path)
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites())
 	if err != nil {
 		t.Fatalf("Open on a layout-3 database: %v", err)
 	}
@@ -75,7 +75,7 @@ func TestTheMigrationLeavesThePreExistingRowsInPlace(t *testing.T) {
 	path := layout3Fixture(t)
 
 	// Act
-	handle, err := Open(context.Background(), path)
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites())
 	if err != nil {
 		t.Fatalf("Open on a layout-3 database: %v", err)
 	}
@@ -97,7 +97,7 @@ func TestTheOpenPathRecordsWhichMigrationsRan(t *testing.T) {
 	log := dlog.NewTestLogger()
 
 	// Act
-	handle, err := Open(context.Background(), path, WithLogger(log))
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites(), WithLogger(log))
 	if err != nil {
 		t.Fatalf("Open on a layout-3 database: %v", err)
 	}
@@ -119,7 +119,7 @@ func TestTheMigrationCopiesTheFileAsideFirst(t *testing.T) {
 	log := dlog.NewTestLogger()
 
 	// Act
-	handle, err := Open(context.Background(), path, WithLogger(log))
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites(), WithLogger(log))
 	if err != nil {
 		t.Fatalf("Open on a layout-3 database: %v", err)
 	}
@@ -145,7 +145,7 @@ func TestOpenLeavesADatabaseAlreadyAtThisLayoutAlone(t *testing.T) {
 	log := dlog.NewTestLogger()
 
 	// Act
-	handle, err := Open(context.Background(), path, WithLogger(log))
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites(), WithLogger(log))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -167,7 +167,7 @@ func TestOpenRefusesALayoutNewerThanThisBuild(t *testing.T) {
 	log := dlog.NewTestLogger()
 
 	// Act
-	_, err := Open(context.Background(), path, WithLogger(log))
+	_, err := Open(context.Background(), path, WithUnsyncedWrites(), WithLogger(log))
 
 	// Assert — a downgrade is not a migration.
 	var refusal *LayoutError
@@ -185,7 +185,7 @@ func TestOpenRefusesALayoutNoMigrationReaches(t *testing.T) {
 	stampRaw(t, path, 1)
 
 	// Act
-	_, err := Open(context.Background(), path)
+	_, err := Open(context.Background(), path, WithUnsyncedWrites())
 
 	// Assert
 	var refusal *LayoutError
@@ -199,7 +199,7 @@ func TestOpenReadOnlyRefusesAnOlderLayoutRatherThanMigratingIt(t *testing.T) {
 	path := layout3Fixture(t)
 
 	// Act
-	_, err := OpenReadOnly(context.Background(), path)
+	_, err := OpenReadOnly(context.Background(), path, WithUnsyncedWrites())
 
 	// Assert
 	var refusal *LayoutError
@@ -218,7 +218,7 @@ func TestAFailedMigrationIsRolledBackAndRefused(t *testing.T) {
 	execRaw(t, path, `CREATE TABLE ported_prompts (workspace_id TEXT PRIMARY KEY)`)
 
 	// Act
-	_, err := Open(context.Background(), path)
+	_, err := Open(context.Background(), path, WithUnsyncedWrites())
 
 	// Assert
 	var refusal *MigrationError
@@ -236,7 +236,7 @@ func TestAFailedMigrationLeavesTheFileAtItsOwnLayout(t *testing.T) {
 	execRaw(t, path, `CREATE TABLE ported_prompts (workspace_id TEXT PRIMARY KEY)`)
 
 	// Act
-	if _, err := Open(context.Background(), path); err == nil {
+	if _, err := Open(context.Background(), path, WithUnsyncedWrites()); err == nil {
 		t.Fatal("Open on an unmigratable layout-3 database succeeded, want a refusal")
 	}
 
@@ -252,7 +252,7 @@ func TestAFailedMigrationLeavesTheRowsIntact(t *testing.T) {
 	execRaw(t, path, `CREATE TABLE ported_prompts (workspace_id TEXT PRIMARY KEY)`)
 
 	// Act
-	if _, err := Open(context.Background(), path); err == nil {
+	if _, err := Open(context.Background(), path, WithUnsyncedWrites()); err == nil {
 		t.Fatal("Open on an unmigratable layout-3 database succeeded, want a refusal")
 	}
 
@@ -268,7 +268,7 @@ func TestAFailedMigrationNamesThePreMigrationCopy(t *testing.T) {
 	execRaw(t, path, `CREATE TABLE ported_prompts (workspace_id TEXT PRIMARY KEY)`)
 
 	// Act
-	_, err := Open(context.Background(), path)
+	_, err := Open(context.Background(), path, WithUnsyncedWrites())
 
 	// Assert
 	var refusal *MigrationError
@@ -358,7 +358,7 @@ func layout3Fixture(t *testing.T) string {
 // package's own open path would refuse to produce.
 func withRawDB(t *testing.T, path string, body func(*sql.DB)) {
 	t.Helper()
-	db, err := sql.Open("sqlite", path)
+	db, err := sql.Open("sqlite", path+"?_pragma=synchronous(OFF)")
 	if err != nil {
 		t.Fatalf("open %q raw: %v", path, err)
 	}
@@ -429,7 +429,7 @@ func TestTheMigrationMintsAnIdentityForASessionRowThatCarriesNone(t *testing.T) 
 	seedIdentitylessSession(t, path)
 
 	// Act
-	handle, err := Open(context.Background(), path)
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites())
 	if err != nil {
 		t.Fatalf("Open on a layout-3 database: %v", err)
 	}
@@ -449,7 +449,7 @@ func TestTheMintedIdentityHasTheShapeTheDaemonMints(t *testing.T) {
 	seedIdentitylessSession(t, path)
 
 	// Act
-	handle, err := Open(context.Background(), path)
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites())
 	if err != nil {
 		t.Fatalf("Open on a layout-3 database: %v", err)
 	}
@@ -470,7 +470,7 @@ func TestTheMigrationLeavesAnIdentityItAlreadyCarriesAlone(t *testing.T) {
 		VALUES ('ws-layout3', 'kept-identity', 'vendor-1', '/root/.claude', 'opus', 'default', 1, 1)`)
 
 	// Act
-	handle, err := Open(context.Background(), path)
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites())
 	if err != nil {
 		t.Fatalf("Open on a layout-3 database: %v", err)
 	}
@@ -496,7 +496,7 @@ func TestTheMigrationAddsTheSelectedAccountRootColumn(t *testing.T) {
 	path := layout3Fixture(t)
 
 	// Act
-	handle, err := Open(context.Background(), path)
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites())
 	if err != nil {
 		t.Fatalf("Open on a layout-3 database: %v", err)
 	}
@@ -519,7 +519,7 @@ func TestTheMigrationAddsTheSpawnedShimPidColumn(t *testing.T) {
 	path := layout3Fixture(t)
 
 	// Act
-	handle, err := Open(context.Background(), path)
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites())
 	if err != nil {
 		t.Fatalf("Open on a layout-3 database: %v", err)
 	}
@@ -542,7 +542,7 @@ func TestTheMigratedRowsCarryNoOutstandingSpawn(t *testing.T) {
 	path := layout3Fixture(t)
 
 	// Act
-	handle, err := Open(context.Background(), path)
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites())
 	if err != nil {
 		t.Fatalf("Open on a layout-3 database: %v", err)
 	}
@@ -565,7 +565,7 @@ func TestTheMigrationAddsTheLastActivityAtColumn(t *testing.T) {
 	path := layout3Fixture(t)
 
 	// Act
-	handle, err := Open(context.Background(), path)
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites())
 	if err != nil {
 		t.Fatalf("Open on a layout-3 database: %v", err)
 	}
@@ -588,7 +588,7 @@ func TestTheMigratedRowsCarryNoActivity(t *testing.T) {
 	path := layout3Fixture(t)
 
 	// Act
-	handle, err := Open(context.Background(), path)
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites())
 	if err != nil {
 		t.Fatalf("Open on a layout-3 database: %v", err)
 	}
@@ -611,7 +611,7 @@ func TestTheMigrationAddsTheIdempotencyAcceptedAtColumn(t *testing.T) {
 	path := layout3Fixture(t)
 
 	// Act
-	handle, err := Open(context.Background(), path)
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites())
 	if err != nil {
 		t.Fatalf("Open on a layout-3 database: %v", err)
 	}
@@ -656,7 +656,7 @@ func TestTheMigrationStampsOnlyAClaimTheQueueTook(t *testing.T) {
 			})
 
 			// Act
-			handle, err := Open(context.Background(), path)
+			handle, err := Open(context.Background(), path, WithUnsyncedWrites())
 			if err != nil {
 				t.Fatalf("Open on a layout-3 database: %v", err)
 			}
@@ -680,7 +680,7 @@ func TestTheMigrationAddsTheHeldPromptDeliveryColumn(t *testing.T) {
 	path := layout3Fixture(t)
 
 	// Act
-	handle, err := Open(context.Background(), path)
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites())
 	if err != nil {
 		t.Fatalf("Open on a layout-3 database: %v", err)
 	}
@@ -707,7 +707,7 @@ func TestTheMigratedHeldPromptsAreOrdinary(t *testing.T) {
 	})
 
 	// Act
-	handle, err := Open(context.Background(), path)
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites())
 	if err != nil {
 		t.Fatalf("Open on a layout-3 database: %v", err)
 	}
@@ -726,7 +726,7 @@ func TestTheMigrationAddsTheHeldActAndCoalescedColumns(t *testing.T) {
 	path := layout3Fixture(t)
 
 	// Act
-	handle, err := Open(context.Background(), path)
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites())
 	if err != nil {
 		t.Fatalf("Open on a layout-3 database: %v", err)
 	}
@@ -751,7 +751,7 @@ func TestTheMigratedHeldPromptsAreUncoalescedPrompts(t *testing.T) {
 	})
 
 	// Act
-	handle, err := Open(context.Background(), path)
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites())
 	if err != nil {
 		t.Fatalf("Open on a layout-3 database: %v", err)
 	}
@@ -841,7 +841,7 @@ func TestOpenJoiningCarriesAnAdditiveChainForward(t *testing.T) {
 	path := fixtureAt(t, LayoutVersion-1)
 
 	// Act
-	handle, err := OpenJoining(context.Background(), path)
+	handle, err := OpenJoining(context.Background(), path, WithUnsyncedWrites())
 
 	// Assert
 	if err != nil {
@@ -862,7 +862,7 @@ func TestOpenJoiningRefusesABreakingChainAndChangesNothing(t *testing.T) {
 	path := fixtureAt(t, 5)
 
 	// Act
-	_, err := OpenJoining(context.Background(), path)
+	_, err := OpenJoining(context.Background(), path, WithUnsyncedWrites())
 
 	// Assert
 	var refusal *LayoutError
@@ -883,7 +883,7 @@ func TestOpenJoiningRefusesANewerLayout(t *testing.T) {
 	stampRaw(t, path, LayoutVersion+1)
 
 	// Act
-	_, err := OpenJoining(context.Background(), path)
+	_, err := OpenJoining(context.Background(), path, WithUnsyncedWrites())
 
 	// Assert
 	var refusal *LayoutError
@@ -898,7 +898,7 @@ func TestOpenJoiningRefusesALayoutNoChainReaches(t *testing.T) {
 	stampRaw(t, path, 2)
 
 	// Act
-	_, err := OpenJoining(context.Background(), path)
+	_, err := OpenJoining(context.Background(), path, WithUnsyncedWrites())
 
 	// Assert
 	var refusal *LayoutError
@@ -912,7 +912,7 @@ func TestOpenJoiningLeavesTheCurrentLayoutAlone(t *testing.T) {
 	path := fixtureAt(t, LayoutVersion)
 
 	// Act
-	handle, err := OpenJoining(context.Background(), path)
+	handle, err := OpenJoining(context.Background(), path, WithUnsyncedWrites())
 
 	// Assert
 	if err != nil {
@@ -926,7 +926,7 @@ func TestOpenJoiningLeavesTheCurrentLayoutAlone(t *testing.T) {
 
 func TestOpenJoiningRefusesAMissingFile(t *testing.T) {
 	// Act
-	_, err := OpenJoining(context.Background(), filepath.Join(t.TempDir(), "absent.db"))
+	_, err := OpenJoining(context.Background(), filepath.Join(t.TempDir(), "absent.db"), WithUnsyncedWrites())
 
 	// Assert
 	if err == nil {
@@ -940,7 +940,7 @@ func TestOpenJoiningRefusesAMissingFile(t *testing.T) {
 func TestAnIncumbentHandleKeepsWritingAcrossTheJoiningMigration(t *testing.T) {
 	// Arrange
 	path := fixtureAt(t, LayoutVersion-1)
-	incumbent, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)")
+	incumbent, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(OFF)")
 	if err != nil {
 		t.Fatalf("open the incumbent: %v", err)
 	}
@@ -949,7 +949,7 @@ func TestAnIncumbentHandleKeepsWritingAcrossTheJoiningMigration(t *testing.T) {
 	if _, err := incumbent.Exec(`UPDATE workspaces SET attention = 1 WHERE id = ?`, string(fixtureWorkspaceID)); err != nil {
 		t.Fatalf("the incumbent's write before the join: %v", err)
 	}
-	joined, err := OpenJoining(context.Background(), path)
+	joined, err := OpenJoining(context.Background(), path, WithUnsyncedWrites())
 	if err != nil {
 		t.Fatalf("OpenJoining: %v", err)
 	}
