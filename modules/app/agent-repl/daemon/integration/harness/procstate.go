@@ -52,3 +52,10 @@ func awaitFrozen(pid int, bound time.Duration) error {
 		}
 	}
 }
+
+// groupMember is one process of a process group, as the kernel lists it.
+type groupMember struct {
+	pid   int
+	comm  string
+	state string
+}
