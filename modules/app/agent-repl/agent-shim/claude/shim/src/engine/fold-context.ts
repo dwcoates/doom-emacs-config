@@ -27,7 +27,8 @@ import { create } from "@bufbuild/protobuf";
 import { conversationv1 } from "../proto.js";
 import type { PersistEntry } from "../store/persistence.js";
 import type { SdkMessage } from "../sdk/types.js";
-import type { TaskAgentKnowledge } from "../convert/detached.js";
+import type { TaskAgentKnowledge, TaskAwaitingKind } from "../convert/detached.js";
+import type { DetachedWorkAnswer } from "../store/detached-work.js";
 import type { VendorTaskAnswer } from "../store/locator.js";
 
 /**
@@ -193,6 +194,15 @@ export interface EngineFold {
    */
   taskAwaitingAgent(message: SdkMessage, context: FoldContext): string | undefined;
   /**
+   * The task whose KIND the store must state before `message` is folded — a
+   * task message that names no kind the fold holds (a notification never
+   * states one) — and the unit it is asked by, or `undefined`. A read: it
+   * records nothing.
+   */
+  taskAwaitingKind(message: SdkMessage, context: FoldContext): TaskAwaitingKind | undefined;
+  /** Hand the fold the store's answer for a task {@link EngineFold.taskAwaitingKind} named. */
+  learnTaskKind(taskId: string, answer: DetachedWorkAnswer): void;
+  /**
    * The shim is about to ask the vendor to move the unit whose spawning call is
    * `toolUseId` to the background, at the user's request (`DetachForeground`):
    * the patch that moves it is announced `by_user` (convert/detached.ts).
@@ -244,6 +254,8 @@ export function turnBoundaryOnlyFold(): EngineFold {
     // knows none.
     taskAwaitingAgent: (): undefined => undefined,
     learnTaskAgent: (): void => undefined,
+    taskAwaitingKind: (): undefined => undefined,
+    learnTaskKind: (): void => undefined,
     // CONVERTS NO PATCH, so a request has nothing to name.
     noteUserDetach: (): void => undefined,
     retireUserDetach: (): void => undefined,
