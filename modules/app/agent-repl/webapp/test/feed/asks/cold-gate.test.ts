@@ -231,14 +231,14 @@ describe("the standing gate", () => {
     const el = drawFeedColdGate(gate(standing()), askHarness().rc);
     expect(
       [...el.querySelectorAll("[data-cold-gate]")].map((n) => n.getAttribute("data-cold-gate")),
-    ).toEqual(["pay", "clear", "compact"]);
+    ).toEqual(["clear", "pay", "compact"]);
   });
 
   it("draws only pay and clear for a gate that offers no compaction", () => {
     const el = drawFeedColdGate(gate(standing({ noCompact: true })), askHarness().rc);
     expect(
       [...el.querySelectorAll("[data-cold-gate]")].map((n) => n.getAttribute("data-cold-gate")),
-    ).toEqual(["pay", "clear"]);
+    ).toEqual(["clear", "pay"]);
   });
 
   it("draws no compact opener or submenu for a gate that offers no compaction", () => {
@@ -256,8 +256,8 @@ describe("the standing gate", () => {
     const el = drawFeedColdGate(gate(standing()), askHarness().rc);
     expect([...el.querySelectorAll<HTMLElement>(".cold-gate-buttons > *")].map((n) => n.title)).toEqual([
       COLD_GATE_COPY.compact.hint,
-      COLD_GATE_COPY.pay.hint,
       COLD_GATE_COPY.clear.hint,
+      COLD_GATE_COPY.pay.hint,
     ]);
   });
 
@@ -270,8 +270,8 @@ describe("the standing gate", () => {
     const el = drawFeedColdGate(gate(standing()), askHarness().rc);
     expect([...el.querySelectorAll(".cold-gate-buttons > *")].map((n) => n.textContent)).toEqual([
       COLD_GATE_COPY.compact.label,
-      COLD_GATE_COPY.pay.label,
       COLD_GATE_COPY.clear.label,
+      COLD_GATE_COPY.pay.label,
     ]);
   });
 
@@ -284,11 +284,27 @@ describe("the standing gate", () => {
   it("draws clear's label in the shared colour, borders half again as thick", async () => {
     const css = (await import("../../../src/styles.css?raw")).default;
     expect([
-      css.includes(".cold-gate-buttons > ar-button.hibernation-clear { color: var(--fg); }"),
+      css.includes(".cold-gate-buttons > ar-button.hibernation-clear { color: var(--fg); border-color: var(--info-tokens); }"),
       css.includes(".cold-gate-buttons > ar-button { border-width: 1.5px; }"),
       css.includes("--cold-gate-compact-border: #128a3d;"),
       css.includes(".cold-gate .hibernation-actions:has(> .cold-gate-buttons) { margin-bottom: 0.45rem; }"),
     ]).toEqual([true, true, true, true]);
+  });
+
+  it("draws pay and resume with the red border", async () => {
+    // Arrange
+    const css = (await import("../../../src/styles.css?raw")).default;
+    // Act
+    const rule = /\.cold-gate-buttons > ar-button\.hibernation-direct\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
+    // Assert
+    expect(rule.includes("border-color: var(--err)")).toBe(true);
+  });
+
+  it("labels the clear choice \"clear context\"", () => {
+    // Act
+    const el = drawFeedColdGate(gate(standing()), askHarness().rc);
+    // Assert
+    expect(el.querySelector(".cold-gate-buttons > .hibernation-clear")?.textContent).toBe("clear context");
   });
 
   it("sizes the buttons equal, to the widest label, centred", async () => {

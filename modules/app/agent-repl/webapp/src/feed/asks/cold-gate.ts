@@ -93,7 +93,7 @@ export const COLD_GATE_COPY = {
   /** {age} is the ticking lapse since the last vendor request. */
   lapse: "last vendor request {age} ago",
   pay: { label: "pay and resume", hint: "re-read everything now, in the background" },
-  clear: { label: "clear and start fresh", hint: "drop the conversation; keep the worktree" },
+  clear: { label: "clear context", hint: "drop the conversation; keep the worktree" },
   compact: { label: "compact first", hint: "summarize, then resume from the summary" },
   submenu: { model: "summarizer", scope: "what to summarize", send: "compact and resume" },
   scopes: {
@@ -352,7 +352,10 @@ function drawActions(
   const buttons: Control[] = [];
   const pay = actionButton("pay", COLD_GATE_COPY.pay, buttons);
   const clear = actionButton("clear", COLD_GATE_COPY.clear, buttons);
-  row.append(pay, clear);
+  // PAY GOES LAST, furthest right, in red (owner request, 2026-10-06): it is
+  // the weightiest choice on the gate, so it takes the end of the row and the
+  // red border; clear takes the place and the border pay had.
+  row.append(clear, pay);
   pay.addEventListener("click", () => {
     void answer(rc, actions, buttons, progress, { kind: "pay" });
   });
