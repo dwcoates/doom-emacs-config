@@ -147,7 +147,9 @@ is how broad a run is at each moment.
 ### One scheduled run at a time: `bin/test-all.sh` and `bin/suite-slot.sh`
 
 `bin/test-all.sh` builds `testrun`, which turns the whole roster into one DAG
-and schedules it across `runtime.NumCPU()-2` slots. There is no special case
+and schedules it across `runtime.NumCPU()/2` slots: HALF the host's cores
+(owner ruling, 2026-10-06), so a run never takes the machine from the owner's
+live runtime, input handling and apps. There is no special case
 for smaller hosts. The planner chooses each suite's chunk count by simulating
 the run against EWMA unit timings in
 `~/.cache/agent-repl/test-history.json`, then assigns the longest remaining

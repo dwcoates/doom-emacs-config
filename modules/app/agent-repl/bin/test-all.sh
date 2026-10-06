@@ -13,7 +13,7 @@
 # program this script builds and runs) turns every selected suite into units —
 # one Go package, one chunk of ERT files, one chunk of vitest files, one chunk
 # of e2e tests, one harness script — each pinned to ONE core, and runs them on
-# every core but two, longest chain first. How many chunks a suite is cut into
+# half the host's cores, longest chain first. How many chunks a suite is cut into
 # is chosen per run by simulating the schedule against this host's measured
 # timings (~/.cache/agent-repl/test-history.json). ../AGENTS.md has the whole
 # model.
