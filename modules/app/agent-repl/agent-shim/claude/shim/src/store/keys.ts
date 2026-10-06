@@ -240,28 +240,11 @@ export function sessionUpsertKey(arm: string, vendorRecordUuid: string): string 
 }
 
 /**
- * The vendor's context-budget warning, keyed by the record that stated it.
- *
- * A PAGE LINE of the agent's book (landing 4), so it needs a key of its own: it
- * is not an activity, so `activity:` would be a lie, and a key naming only the
- * warning would have each new one overwrite the last — leaving a conversation
- * with exactly one visible warning however often the window filled.
- *
- * IT IS A `session:<arm>:<uuid>` KEY, NOT A `budget:` ONE (ruling, landing 5).
- * BOTH PLANES produce this fact from ONE transcript line — the sidecar reads
- * the file, the shim reads the stream — and write_id dedup collapses them into
- * one row only if the key BYTES match. The sidecar mints `session:<arm>:<uuid>`
- * for every arm it serves, so this plane spells it the same way.
- */
-export function contextBudgetWarningUpsertKey(vendorRecordUuid: string): string {
-  return sessionUpsertKey("context_budget_warning", vendorRecordUuid);
-}
-
-/**
  * A CONTEXT CUT — a `/clear` or a compaction — keyed by WHAT THE CUT IS, in the
  * one spelling BOTH PLANES can reach.
  *
- * THE SAME RULING AS THE BUDGET WARNING ABOVE, and for the same reason. write_id
+ * IT IS A `session:<arm>:<id>` KEY (ruling, landing 5): BOTH PLANES produce
+ * this fact, and write_id
  * dedup collapses two writes into one row only if the key BYTES match, and the
  * sidecar mints `session:context_cut:<id>` (its `SessionKey`, pinned by
  * `internal/convert/entry_test.go` and its own AGENTS.md). Where the keys did

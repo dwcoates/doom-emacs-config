@@ -785,13 +785,9 @@ describe("session facts with no message behind them", () => {
   });
 
   // RETIRED AT LANDING 4 (tag 24): the budget warning is no longer a
-  // SessionUpdate arm. It is a transcript ATTACHMENT the SIDECAR reads, served
-  // as the page line `AgentUpdate.context_budget_warning{text}`, and the shim
-  // never emits it live — so the WatchSession coverage becomes a NEGATIVE one,
-  // and the positive coverage belongs to whoever tests the file plane.
-  test.todo(
-    "the budget warning appears as AgentUpdate.context_budget_warning on the SIDECAR's page line — the shim has no live producer, so this belongs to the file-plane suite",
-  );
+  // SessionUpdate arm, and its agent-plane successor
+  // `AgentUpdate.context_budget_warning` is retired too (owner ruling,
+  // 2026-10-06) — so the WatchSession coverage is a NEGATIVE one.
 
   test("!context-tip pushes NO session-level budget arm", async () => {
     // A shim still emitting the retired tag 24 would push a frame whose oneof
