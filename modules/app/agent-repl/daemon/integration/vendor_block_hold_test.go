@@ -63,3 +63,36 @@ func TestAPromptDuringAUsageLimitIsHeldAfterReconnectAndDeliveredWhenTheVendorSe
 		t.Fatalf("StartTurn turn = %q, want the held %q", started.GetTurn().GetValue(), turn.GetValue())
 	}
 }
+
+// TestASubmissionWhileHeldAndIdleTriesTheOldestHeldPromptNow is the owner's
+// try-now ruling (2026-10-06) end to end: under a usage limit that no vendor
+// event lifts, a second prompt is held behind the first, and the first is
+// delivered now.
+func TestASubmissionWhileHeldAndIdleTriesTheOldestHeldPromptNow(t *testing.T) {
+	t.Parallel()
+	// Arrange: one prompt held after reconnect under a standing usage limit.
+	f := newOpened(t, harness.Opts{})
+	footer := f.d.WatchFooter(f.ws)
+	holds := f.d.WatchHolds(f.ws)
+	f.shim.PushSessionUpdate(rateLimitVerdict(true))
+	awaitFooter(t, f, footer, "the footer paints vendor_fault · usage_limit", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetStatus().GetVendorFault().GetUsageLimit() != nil
+	})
+	first := f.submit("held first", "k-try-1", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT).GetSuccess().GetTurn().GetTurn()
+	awaitView(t, f, holds, "the first prompt held after reconnect", func(tray *frontendv1.DaemonHoldTray) bool {
+		return promptHeldEntry(tray, first).GetReconnect() != nil
+	})
+	expectRPCCount(t, f.shim, harness.RPCStartTurn, 0, harness.ProbeWindow)
+
+	// Act: the user sends again with nothing running.
+	second := f.submit("try now", "k-try-2", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT).GetSuccess().GetTurn().GetTurn()
+
+	// Assert: the first goes now, and the second is held behind it.
+	started := f.shim.ExpectStartTurn()
+	if started.GetTurn().GetValue() != first.GetValue() {
+		t.Fatalf("StartTurn turn = %q, want the oldest held %q", started.GetTurn().GetValue(), first.GetValue())
+	}
+	awaitView(t, f, holds, "the second prompt held behind the first", func(tray *frontendv1.DaemonHoldTray) bool {
+		return promptHeldEntry(tray, second) != nil && promptHeldEntry(tray, first) == nil
+	})
+}
