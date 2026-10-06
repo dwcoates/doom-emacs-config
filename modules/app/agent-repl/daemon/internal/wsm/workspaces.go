@@ -10,6 +10,7 @@ import (
 
 	"claude-repld/internal/dirpath"
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/tempdirs"
 )
 
 // normalizeDir is the ONE spelling of a worktree directory this store keys on:
@@ -101,6 +102,19 @@ func (s *store) RegisterWorkspace(ctx context.Context, dir string, facts Registe
 		return Workspace{}, false, err
 	}
 	fields := dlog.Context{"dir": normalized, "requested_dir": dir}
+	// BOTH DIRECTORIES ARE CHECKED BEFORE ANYTHING IS READ OR WRITTEN: the
+	// workspace's own, and the repository it would mint on first sight. A
+	// workspace row already standing for a temporary directory is refused too
+	// rather than handed back -- the boot retires such rows, and an
+	// announcement must not keep one alive.
+	if err := s.refuseTemporary(op, normalized); err != nil {
+		return Workspace{}, false, err
+	}
+	if facts.RepoDir != "" {
+		if err := s.refuseTemporary(op, facts.RepoDir); err != nil {
+			return Workspace{}, false, err
+		}
+	}
 
 	var (
 		out     Workspace
@@ -171,6 +185,9 @@ func (s *store) RegisterRepository(ctx context.Context, dir, defaultBranch strin
 		return Repository{}, false, err
 	}
 	fields := dlog.Context{"dir": normalized, "requested_dir": dir}
+	if err := s.refuseTemporary(op, normalized); err != nil {
+		return Repository{}, false, err
+	}
 
 	var (
 		out     Repository
@@ -203,6 +220,35 @@ func (s *store) RegisterRepository(ctx context.Context, dir, defaultBranch strin
 		return Repository{}, false, err
 	}
 	return out, created, nil
+}
+
+// RefuseTemporary is refuseTemporary for a verb that asks before it registers.
+func (s *store) RefuseTemporary(dir string) error {
+	return s.refuseTemporary("daemon.wsm.refuse_temporary", dir)
+}
+
+// refuseTemporary is the registry's ONE temporary-directory check, run by both
+// writes that mint a row (RegisterWorkspace, RegisterRepository) before they
+// touch the database: a directory inside a temporary root never becomes a
+// repository or a workspace (owner ruling, 2026-10-06).
+//
+// The refusal is an ANSWER the verb above reports at INFO through its typed
+// refusal, so here it is recorded at DEBUG; the answer surfaces as a
+// *tempdirs.InsideError the caller reads with tempdirs.AsInside. A dir the
+// guard cannot canonicalize is a fault and is recorded at ERROR.
+func (s *store) refuseTemporary(op, dir string) error {
+	err := s.temporary.Check(dir)
+	if err == nil {
+		return nil
+	}
+	if inside, ok := tempdirs.AsInside(err); ok {
+		s.log.Debug(op, "refused a directory inside a temporary root", dlog.Context{
+			"dir": inside.Dir, "temporary_root": inside.Root,
+		})
+		return fmt.Errorf("wsm: %w", err)
+	}
+	s.log.Error(op, "could not judge whether the directory is temporary", withError(dlog.Context{"dir": dir}, err))
+	return fmt.Errorf("wsm: judge %q: %w", dir, err)
 }
 
 // ensureRepo returns the repository for a canonicalized common dir, minting one

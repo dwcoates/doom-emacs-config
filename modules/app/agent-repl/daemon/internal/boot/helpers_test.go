@@ -1,6 +1,7 @@
 package boot
 
 import (
+	"claude-repld/internal/tempdirs/tempdirstest"
 	"context"
 	"errors"
 	"os"
@@ -344,7 +345,7 @@ func newHarness(t *testing.T, adjust ...func(*Deps, *harness)) *harness {
 		t.Fatalf("temp state root: %v", err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(root) })
-	db, err := wsm.Open(context.Background(), filepath.Join(root, "wsm.db"), wsm.WithLogger(log.Global()))
+	db, err := wsm.Open(context.Background(), filepath.Join(root, "wsm.db"), wsm.WithLogger(log.Global()), wsm.WithTemporaryGuard(tempdirstest.Guard(t)))
 	if err != nil {
 		t.Fatalf("wsm.Open: %v", err)
 	}
@@ -533,7 +534,7 @@ func (d failingLease) Lease(context.Context, wsm.WorkspaceID) (wsm.Lease, bool, 
 // would release what it holds.
 func (h *harness) previousProcessLease(t *testing.T, ws wsm.WorkspaceID, holder wsm.LeaseHolder) wsm.Lease {
 	t.Helper()
-	previous, err := wsm.Open(context.Background(), h.deps.Layout.DB())
+	previous, err := wsm.Open(context.Background(), h.deps.Layout.DB(), wsm.WithTemporaryGuard(tempdirstest.Guard(t)))
 	if err != nil {
 		t.Fatalf("wsm.Open for the previous process: %v", err)
 	}

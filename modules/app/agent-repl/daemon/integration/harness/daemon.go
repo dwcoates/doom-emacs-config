@@ -25,6 +25,7 @@ import (
 	"claude-repld/integration/fakegit"
 	"claude-repld/internal/daemonaddr"
 	"claude-repld/internal/stateroot"
+	"claude-repld/internal/tempdirs"
 
 	"connectrpc.com/connect"
 	"golang.org/x/net/http2"
@@ -95,6 +96,32 @@ const pollInterval = 5 * time.Millisecond
 // DefaultBuildSHA because the fake is a program, not an importable package;
 // the two constants are documented on each other and move together.
 const FakeShimDefaultBuildSHA = "fake"
+
+// TemporaryRegistrationEnv is the environment that lets a suite's daemon
+// register the directories the suite makes, every one of which lies under the
+// run root in /tmp -- a temporary root the registry otherwise refuses (owner
+// ruling, 2026-10-06; internal/tempdirs).
+//
+//   - tempdirs.EnvTestRoot names the RUN ROOT as the one exempt directory. It
+//     is honored only because AGENT_REPL_FORBID_VENDOR_CALLS is set too; every
+//     other temporary folder is still refused, which the suite can assert.
+//   - TMPDIR moves the daemon's own temporary directory one level down, into
+//     the run root. The guard counts the process's temporary directory as a
+//     root, and an exemption may not BE a root: left at the run root itself
+//     (the harness points TMPDIR there), the daemon would refuse to boot.
+//     Everything the daemon and its children write as temporary still lands
+//     under the run root, so a dead run's reclaim still finds it.
+func TemporaryRegistrationEnv(t testing.TB) []string {
+	t.Helper()
+	if runRoot == "" {
+		t.Fatal("harness: no run root; the suite's TestMain must run through harness.MainAt")
+	}
+	daemonTmp := filepath.Join(runRoot, "daemon-tmp")
+	if err := os.MkdirAll(daemonTmp, 0o755); err != nil {
+		t.Fatalf("harness: make the daemon's temporary directory %s: %v", daemonTmp, err)
+	}
+	return []string{"TMPDIR=" + daemonTmp, tempdirs.EnvTestRoot + "=" + runRoot}
+}
 
 // BuildIdentityEnv is the build-identity environment EVERY daemon this suite
 // starts must carry, and the only place the three variables are named. The
@@ -593,6 +620,7 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 		"PATH="+fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"),
 	)
 	env = append(env, BuildIdentityEnv(PinnedCheckout(t))...)
+	env = append(env, TemporaryRegistrationEnv(t)...)
 	// The daemon's OWN checkout identity is always overridden, whether or not
 	// a test cares which repository it is. The merge orchestrator's two
 	// methods key on it, so it resolves that identity for EVERY merge -- and
