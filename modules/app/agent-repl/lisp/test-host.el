@@ -557,6 +557,57 @@ looked at."
     ;; Assert
     (should (agent-repl-test-host--logged-p :error "elisp.host.mark-viewed-failed"))))
 
+(defun agent-repl-test-host--standing-down-answer ()
+  "The daemon's answer to a select while it is standing down."
+  (list :response (list :arm :error
+                        :value (list :cause (list :arm :standing-down :value nil)))))
+
+(ert-deftest agent-repl-test-host-select-standing-down-is-logged-at-info ()
+  "A leaving daemon's answer is an expected one, recorded at INFO."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (setq agent-repl-test-host--select-answer (agent-repl-test-host--standing-down-answer))
+    ;; Act
+    (agent-repl-host-select "ws-1")
+    ;; Assert
+    (should (agent-repl-test-host--logged-p :info "elisp.host.select-standing-down ws=ws-1"))))
+
+(ert-deftest agent-repl-test-host-select-standing-down-reports-no-refusal ()
+  "No ERROR is recorded for a select a leaving daemon answered."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (setq agent-repl-test-host--select-answer (agent-repl-test-host--standing-down-answer))
+    ;; Act
+    (agent-repl-host-select "ws-1")
+    ;; Assert
+    (should-not (cl-find-if (lambda (entry) (eq (car entry) :error))
+                            agent-repl-test-host--logs))))
+
+(ert-deftest agent-repl-test-host-select-standing-down-records-the-selection ()
+  "The leaving daemon stamped the selection, so Emacs records it as its own."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (setq agent-repl-test-host--select-answer (agent-repl-test-host--standing-down-answer))
+    ;; Act
+    (agent-repl-host-select "ws-1")
+    ;; Assert
+    (should (equal agent-repl-host-last-selected-id "ws-id-1"))))
+
+(ert-deftest agent-repl-test-host-select-standing-down-settles-as-standing-down ()
+  "The caller holding state on the selection hears the leaving daemon's answer."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (setq agent-repl-test-host--select-answer (agent-repl-test-host--standing-down-answer))
+    (let ((outcome nil))
+      ;; Act
+      (agent-repl-host-select "ws-1" (lambda (o) (setq outcome o)))
+      ;; Assert
+      (should (eq outcome :standing-down)))))
+
 (ert-deftest agent-repl-test-host-select-refusal-is-logged-at-error ()
   "A refused selection is surfaced, never swallowed."
   (agent-repl-test-host--with-harness
@@ -2136,6 +2187,31 @@ chose, addressed by the DIR, since the ids were re-minted."
       ;; Assert
       (should (agent-repl-test-host--logged-p
                :info "elisp.host.link-up-reselect ws=ws-1")))))
+
+(ert-deftest agent-repl-test-host-link-up-reasserts-a-selection-a-leaving-daemon-answered ()
+  "A select the leaving daemon answered `standing_down' is asked of the next one."
+  (agent-repl-test-host--with-harness
+    ;; Arrange: the frame shows ws-2; the user's select of ws-1 reached a
+    ;; daemon that was standing down.
+    (agent-repl-test-host--subscribe "ws-1")
+    (setq agent-repl-test-host--current-ws "ws-2"
+          agent-repl-test-host--select-answer (agent-repl-test-host--standing-down-answer))
+    (agent-repl-host-select "ws-1")
+    (setq agent-repl-test-host--select-answer
+          (list :response (list :arm :success :value nil)))
+    (let ((conn (agent-repl-connect-open "127.0.0.1:9002")))
+      (cl-letf (((symbol-function 'agent-repl--live-ws-names)
+                 (lambda () '("ws-2" "ws-1")))
+                ((symbol-function 'agent-repl--ws-get)
+                 (lambda (ws _key) (concat "/tmp/" ws)))
+                ((symbol-function 'agent-repl--ws-by-ref-id)
+                 (lambda (id) (and (equal id "ws-id-1") "ws-1")))
+                ((symbol-function 'agent-repl--ws-switch) (lambda (&rest _) nil)))
+        ;; Act: the next daemon's link comes up.
+        (agent-repl-host-on-link-up conn)))
+    ;; Assert
+    (should (agent-repl-test-host--logged-p
+             :info "elisp.host.link-up-reselect ws=ws-1"))))
 
 (ert-deftest agent-repl-test-host-link-up-reselect-waits-for-every-registration ()
   "The re-assertion comes AFTER the last workspace re-registered.

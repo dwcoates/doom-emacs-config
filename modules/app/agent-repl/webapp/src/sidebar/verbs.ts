@@ -474,7 +474,15 @@ export interface VerbCall<Res extends VerbResponse> {
    * leaving it for a redraw that never comes.
    */
   outlivesPush?: boolean;
+  /**
+   * Arms of this endpoint's error that are EXPECTED ANSWERS rather than
+   * refusals, each with the sentence recorded for it. Such an answer is logged
+   * at INFO, draws nothing beside the control and re-enables it: nothing about
+   * the request was wrong, and there is nothing for the user to act on here.
+   */
+  expectedArms?: Readonly<Record<string, string>>;
 }
+
 
 /**
  * Issue one verb, disable its control while it is in flight, and draw the
@@ -508,6 +516,15 @@ export async function runVerb<Res extends VerbResponse>(
       return true;
     }
     const cause = refusalCause(spec.rpc, result.value);
+    const expected = spec.expectedArms?.[cause.case];
+    if (expected !== undefined) {
+      log.info(`${spec.rpc} was answered ${cause.case}`, {
+        operation: "sidebar.verbs.expected_answer",
+        context: { rpc: spec.rpc, arm: cause.case, sentence: expected },
+      });
+      setDisabled(control, false);
+      return false;
+    }
     const say =
       crossCuttingSentence(spec.rpc, cause) ??
       spec.refusalText?.(cause) ??

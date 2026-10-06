@@ -1093,6 +1093,7 @@ new workspace did not come up."
              '(:agent-repl-central
                "a minted workspace awaiting its roster row has no sink"))
            "elisp.verbs.select-minted dir=%s" dir)
+          ;; Owner ruling 2026-10-06: a created workspace is landed on when it becomes available, even if the user selected another meanwhile.
           (if ws
               (funcall land ref "already-a-tab" ws)
             ;; THE TAB IS NOT HERE YET.  The minted ref is the daemon's

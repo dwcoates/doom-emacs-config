@@ -2,10 +2,12 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/shimclient"
 	"claude-repld/internal/wsm"
 )
 
@@ -45,6 +47,15 @@ func (v *verbs) Select(ctx context.Context, ws ids.WorkspaceID) error {
 		return err
 	}
 	if _, err := v.reviveIfSessionless(ctx, log, opSelect, ws); err != nil {
+		// A DAEMON THAT IS LEAVING ANSWERS `standing_down`. The selection
+		// above already stands; only the revival was not attempted, because
+		// this daemon starts no session for a workspace it is about to stop
+		// serving. The client re-asserts the selection on the daemon that
+		// serves next, which revives it. Recorded at INFO by refuse.
+		if errors.Is(err, shimclient.ErrStandingDown) {
+			return refuse(log, "SelectWorkspace", ArmStandingDown,
+				"this daemon is standing down; the selection is recorded and the next daemon revives the workspace", false)
+		}
 		return fmt.Errorf("select %q: %w", ws, err)
 	}
 	return nil

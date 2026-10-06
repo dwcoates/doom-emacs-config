@@ -56,7 +56,13 @@ import { viewedMode } from "./viewed.js";
 import { armBreathes, armSpins, rosterArmMark, type RosterStatusCase } from "./tones.js";
 import { guardMalformed } from "../rpc/guard.js";
 import { clampReveal } from "../topbar/clamp.js";
-import { buildSelectWorkspaceRequest, drawRowMenu, runVerb, type VerbTarget } from "./verbs.js";
+import {
+  buildSelectWorkspaceRequest,
+  drawRowMenu,
+  runVerb,
+  type VerbTarget,
+} from "./verbs.js";
+import { SELECT_WORKSPACE_EXPECTED_ARMS } from "../rpc/refusal.js";
 
 /** A row that survived the closed filter, carrying its own message path. */
 export interface VisibleRow {
@@ -729,6 +735,7 @@ async function selectWorkspace(
     rpc: "SelectWorkspace",
     call: (client) => client.selectWorkspace(buildSelectWorkspaceRequest(workspace)),
     schema: SelectWorkspaceResponseSchema,
+    expectedArms: SELECT_WORKSPACE_EXPECTED_ARMS,
   });
 }
 

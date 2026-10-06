@@ -36,6 +36,7 @@ import { log } from "../../log.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import { guardMalformed } from "../../rpc/guard.js";
 import { crossCuttingSentence } from "../../rpc/refuse.js";
+import { SELECT_WORKSPACE_EXPECTED_ARMS } from "../../rpc/refusal.js";
 import { callUnary } from "../../rpc/unary.js";
 import { isMalformedView } from "../../rpc/malformed.js";
 import { create } from "@bufbuild/protobuf";
@@ -186,6 +187,15 @@ export async function selectQueueEntryWorkspace(
       return;
     case "error": {
       const cause = requireCase(result.value.cause, "SelectWorkspaceError.cause");
+      const expected = SELECT_WORKSPACE_EXPECTED_ARMS[cause.case];
+      if (expected !== undefined) {
+        // An expected answer, not a refusal: nothing is drawn at the entry.
+        log.info(`SelectWorkspace was answered ${cause.case}: ${expected}`, {
+          operation: "merge.queue-select-expected-answer",
+          context: { arm: cause.case, workspace: workspace.id },
+        });
+        return;
+      }
       const sentence =
         crossCuttingSentence("SelectWorkspace", cause) ?? "that workspace could not be selected";
       log.warn(`SelectWorkspace was refused: ${sentence}`, {
