@@ -67,16 +67,9 @@ func (s *server) foldSection(
 	folded := fold.GetCollapse() != nil
 	switch section := fold.GetSection().(type) {
 	case *agentreplv1.SidebarViewFoldSection_Repository:
-		repository, readErr, known := s.repositoryFor(ctx, section.Repository)
-		if readErr != nil {
-			return true, fail(s.log, rpc, readErr), nil
-		}
-		if !known {
-			return true, s.refuse(s.log, rpc, resp, s.fill(refusal{
-				Arm:      "unknown_repository",
-				Reason:   fmt.Sprintf("no repository matches the ref %q", section.Repository.GetId()),
-				NotFound: true,
-			})), nil
+		repository, refused, done := s.resolveRepository(ctx, rpc, resp, section.Repository)
+		if done {
+			return true, refused, nil
 		}
 		return false, nil, s.deps.Verbs.FoldRepository(ctx, repository.ID, folded)
 	case *agentreplv1.SidebarViewFoldSection_Task:
