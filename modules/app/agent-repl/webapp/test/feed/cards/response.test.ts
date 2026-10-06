@@ -29,6 +29,7 @@ import {
   responseCapLines,
   thinkingLanded,
   REVEAL_SPEED_ATTRIBUTE,
+  carriedNumber,
   revealedSoFar,
   revealSpeedSoFar,
   revealWindowMs,
@@ -41,6 +42,7 @@ import { installTreeLayout, stagedCols, useTreeLayout } from "../../tree-layout.
 import { TICKING_ATTRIBUTE, stopClocks, stopTicking } from "../../../src/feed/ticking.js";
 import { fireResize } from "../../resize-observer.js";
 import stylesheet from "../../../src/styles.css?raw";
+import responseSource from "../../../src/feed/cards/response.ts?raw";
 import { cascadedValue, installStylesheet, selectorOf } from "../../stylesheet.js";
 import { EXPANDED_CLASS, installClickExpand } from "../../../src/expand.js";
 import { HAS_MORE_CLASS, refreshHasMore } from "../../../src/feed/bubble-more.js";
@@ -1198,6 +1200,37 @@ describe("revealedSoFar", () => {
     const previous = document.createElement("div");
     previous.setAttribute(REVEALED_ATTRIBUTE, "not-a-number");
     expect(revealedSoFar(previous)).toBe(0);
+  });
+});
+
+describe("carriedNumber", () => {
+  /** An element carrying VALUE on data-x. */
+  function carrying(value: string): HTMLElement {
+    const el = document.createElement("div");
+    el.setAttribute("data-x", value);
+    return el;
+  }
+
+  it.each([
+    { name: "reads a whole number", value: "4", want: 4 },
+    { name: "reads a fraction", value: "0.25", want: 0.25 },
+    { name: "reads zero", value: "0", want: 0 },
+    { name: "refuses a negative number", value: "-1", want: undefined },
+    { name: "refuses a value that is not a number", value: "abc", want: undefined },
+  ])("$name", ({ value, want }) => {
+    expect(carriedNumber(carrying(value), "data-x")).toBe(want);
+  });
+
+  it("answers nothing when there is no previous draw", () => {
+    expect(carriedNumber(undefined, "data-x")).toBeUndefined();
+  });
+
+  it("answers nothing when the attribute is absent", () => {
+    expect(carriedNumber(document.createElement("div"), "data-x")).toBeUndefined();
+  });
+
+  it("is the one parse every carried reveal fact goes through", () => {
+    expect(responseSource.match(/Number\.parse(?:Int|Float)\(/g)).toHaveLength(1);
   });
 });
 

@@ -641,12 +641,7 @@ function markRevealSpeed(bubble: HTMLElement, speed: number | undefined): void {
  * attribute is this renderer's own bookkeeping, never contract data.
  */
 export function revealedSoFar(previous: HTMLElement | undefined): number {
-  if (previous === undefined) return 0;
-  const raw = previous.getAttribute(REVEALED_ATTRIBUTE);
-  if (raw === null) return 0;
-  const parsed = Number.parseInt(raw, 10);
-  if (!Number.isFinite(parsed) || parsed <= 0) return 0;
-  return parsed;
+  return Math.floor(carriedNumber(previous, REVEALED_ATTRIBUTE) ?? 0);
 }
 
 /**
@@ -654,7 +649,17 @@ export function revealedSoFar(previous: HTMLElement | undefined): number {
  * carried none (a first draw, or an unpaced reveal).
  */
 export function revealSpeedSoFar(previous: HTMLElement | undefined): number | undefined {
-  const raw = previous?.getAttribute(REVEAL_SPEED_ATTRIBUTE);
+  return carriedNumber(previous, REVEAL_SPEED_ATTRIBUTE);
+}
+
+/**
+ * A non-negative number the previous draw of this row carried on ATTRIBUTE, or
+ * undefined when there is no previous draw, no attribute, or a value that is
+ * not a non-negative number. Every reveal fact carried across a redraw is read
+ * through here, so they share one parse.
+ */
+export function carriedNumber(previous: HTMLElement | undefined, attribute: string): number | undefined {
+  const raw = previous?.getAttribute(attribute);
   if (raw === undefined || raw === null) return undefined;
   const parsed = Number.parseFloat(raw);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
