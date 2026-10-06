@@ -349,6 +349,10 @@ the narrower/alternate state**:
   model truncated a read by length or read an image back through `Read`
   itself (the one captured image round trip, `bash-image-output`, read it
   back through `Bash`).
+- `!bash-rereported` — declared re-report of an ended background shell by a
+  keep-alive rewind's replacement query: a `stopped` `task_notification` with
+  no `task_started` and no `task_type`; no capture recorded one (the shape is
+  a live session's log, 2026-10-02, workspace ship-gns).
 - `!bash-hold`, `!bash-detach-fail`, `!bash-detach-live` — declared `Bash`
   states (parked, a failed detach, a still-live tail); no capture recorded
   any of the three.
