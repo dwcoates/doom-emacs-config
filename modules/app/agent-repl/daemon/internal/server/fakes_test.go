@@ -113,7 +113,9 @@ type fakeDB struct {
 	wsm.DB
 	workspaces   map[ids.WorkspaceID]wsm.Workspace
 	repositories []wsm.Repository
-	drainPut     []wsm.DrainSchedule
+	// listRepositoriesErr fails the repository read, which the slice cannot.
+	listRepositoriesErr error
+	drainPut            []wsm.DrainSchedule
 	// feedScalePut records every persisted feed text zoom; feedScalePutErr
 	// fails the write; feedScaleRead is what FeedTextScale answers (0 means the
 	// default).
@@ -178,6 +180,9 @@ func (f *fakeDB) Workspace(_ context.Context, id ids.WorkspaceID) (wsm.Workspace
 }
 
 func (f *fakeDB) ListRepositories(context.Context) ([]wsm.Repository, error) {
+	if f.listRepositoriesErr != nil {
+		return nil, f.listRepositoriesErr
+	}
 	return f.repositories, nil
 }
 
@@ -261,11 +266,17 @@ type fakeVerbs struct {
 	markViewedErr error
 	// folds records every FoldRepository the handler resolved onto the verb,
 	// and foldErr is what the verb answers instead.
-	folds     []repositoryFold
-	foldErr   error
-	closeErr  error
-	openErr   error
-	forgetErr error
+	folds   []repositoryFold
+	foldErr error
+	// sectionFolds and groupings record every sidebar view change
+	// the handler resolved onto the verbs, and sectionFoldErr is what each of
+	// those verbs answers instead.
+	sectionFolds   []sectionFold
+	groupings      []wsm.Grouping
+	sectionFoldErr error
+	closeErr       error
+	openErr        error
+	forgetErr      error
 
 	// openStages are replayed into whatever reporter the rpc armed, and
 	// openProgress is the reporter itself so a test can assert its absence.
@@ -1346,6 +1357,29 @@ type repositoryFold struct {
 func (v *fakeVerbs) FoldRepository(_ context.Context, repo ids.RepoID, folded bool) error {
 	v.folds = append(v.folds, repositoryFold{repo: repo, folded: folded})
 	return v.foldErr
+}
+
+// sectionFold is one FoldTaskSection (task set) or FoldMergedSection (task
+// empty) the verb received.
+type sectionFold struct {
+	task   ids.TaskID
+	merged bool
+	folded bool
+}
+
+func (v *fakeVerbs) FoldTaskSection(_ context.Context, task ids.TaskID, folded bool) error {
+	v.sectionFolds = append(v.sectionFolds, sectionFold{task: task, folded: folded})
+	return v.sectionFoldErr
+}
+
+func (v *fakeVerbs) FoldMergedSection(_ context.Context, folded bool) error {
+	v.sectionFolds = append(v.sectionFolds, sectionFold{merged: true, folded: folded})
+	return v.sectionFoldErr
+}
+
+func (v *fakeVerbs) ShowGrouping(_ context.Context, grouping wsm.Grouping) error {
+	v.groupings = append(v.groupings, grouping)
+	return v.sectionFoldErr
 }
 
 // fakePersistentWifi records every action and answers a scripted response.

@@ -7,20 +7,22 @@ import { createRouterTransport } from "@connectrpc/connect";
 import { createAgentReplClient } from "../../src/rpc/client.js";
 import { type AppContext } from "../../src/rpc/context.js";
 import { testAppContext } from "../rpc/app-context.js";
-import {
-  PREFS_KEY,
-  createSidebarPrefs,
-  drawRailHead,
-  mountSidebar,
-} from "../../src/sidebar/sidebar.js";
+import { UpdateSidebarViewResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_sidebar_view_pb";
+import type { ServiceImpl } from "@connectrpc/connect";
+import { PREFS_KEY, drawRailHead, mountSidebar, retireStoredPrefs } from "../../src/sidebar/sidebar.js";
+import { GROUPING_VIEW_KEY } from "../../src/sidebar/view.js";
+import { captureLogRecords, type LogCapture } from "../log-capture.js";
 import {
   NOW,
   SINK,
   WORKSPACE,
   fakeTicker,
+  appContext,
   fakeTimers,
-  memoryPrefs,
+  mergedSection,
   repoSection,
+  sidebarContext,
+  taskSection,
   roster,
   rosterStream,
   row,
@@ -39,17 +41,6 @@ function memoryStorage(seed: Record<string, string> = {}): Storage {
     removeItem: (key) => void map.delete(key),
     setItem: (key, value) => void map.set(key, value),
   };
-}
-
-/** The prefs record as it was actually persisted, typed rather than `any`. */
-function storedPrefs(storage: Storage): {
-  grouping?: string;
-  folded?: Record<string, boolean>;
-  expanded?: Record<string, boolean>;
-} {
-  const raw = storage.getItem(PREFS_KEY);
-  if (raw === null) throw new Error("no prefs were written");
-  return JSON.parse(raw) as ReturnType<typeof storedPrefs>;
 }
 
 function throwingStorage(): Storage {
@@ -75,9 +66,13 @@ function throwingStorage(): Storage {
   };
 }
 
-function ctxFor(rosters = [roster()]): AppContext {
+function ctxFor(rosters = [roster()], impl: Partial<ServiceImpl<typeof AgentRepl>> = {}): AppContext {
   const transport = createRouterTransport(({ service }) => {
-    service(AgentRepl, rosterStream(rosters));
+    service(AgentRepl, {
+      updateSidebarView: () => create(UpdateSidebarViewResponseSchema, { result: { case: "success", value: {} } }),
+      ...rosterStream(rosters),
+      ...impl,
+    });
   });
   return testAppContext({
     client: createAgentReplClient(transport),
@@ -98,96 +93,167 @@ async function click(control: Element): Promise<void> {
   await settle();
 }
 
-describe("the rail's preferences", () => {
-  it("start on the repository grouping", () => {
-    expect(createSidebarPrefs(memoryStorage()).grouping()).toBe("repository");
+describe("the preferences a page stored before the view was the daemon's", () => {
+  let capture: LogCapture;
+  beforeEach(() => {
+    capture = captureLogRecords("debug");
   });
 
-  it("read a remembered grouping back", () => {
-    const storage = memoryStorage({ [PREFS_KEY]: JSON.stringify({ grouping: "task" }) });
-    expect(createSidebarPrefs(storage).grouping()).toBe("task");
+  /** The levels of every forwarded record under OPERATION's prefix. */
+  async function levels(prefix: string): Promise<Array<string | undefined>> {
+    capture.logger.flush();
+    await Promise.resolve();
+    return capture.sent.filter((r) => r.operation.startsWith(prefix)).map((r) => r.level.case);
+  }
+
+  it("are dropped", () => {
+    const storage = memoryStorage({ [PREFS_KEY]: JSON.stringify({ grouping: "task", folded: { merged: false } }) });
+    retireStoredPrefs(storage);
+    expect(storage.getItem(PREFS_KEY)).toBeNull();
   });
 
-  it("persist a grouping change", () => {
-    const storage = memoryStorage();
-    createSidebarPrefs(storage).setGrouping("task");
-    expect(storedPrefs(storage).grouping).toBe("task");
+  it("are said to be superseded once, at INFO", async () => {
+    retireStoredPrefs(memoryStorage({ [PREFS_KEY]: JSON.stringify({ expanded: { "ws-1": true } }) }));
+    expect(await levels("sidebar.prefs.superseded")).toEqual(["info"]);
   });
 
-  it("persist a fold", () => {
-    const storage = memoryStorage();
-    createSidebarPrefs(storage).setFolded("repo:one", true);
-    expect(storedPrefs(storage).folded?.["repo:one"]).toBe(true);
+  it("say nothing when there were none", async () => {
+    retireStoredPrefs(memoryStorage());
+    expect(await levels("sidebar.prefs")).toEqual([]);
   });
 
-  it("persist a row's expansion", () => {
-    const storage = memoryStorage();
-    createSidebarPrefs(storage).setExpanded("ws-1", true);
-    expect(storedPrefs(storage).expanded?.["ws-1"]).toBe(true);
+  it("cost nothing but a warning when the storage throws", async () => {
+    retireStoredPrefs(throwingStorage());
+    expect(await levels("sidebar.prefs.retire-failed")).toEqual(["warn"]);
   });
 
-  it("keep a fold's own default for a section never folded", () => {
-    expect(createSidebarPrefs(memoryStorage()).isFolded("merged", true)).toBe(true);
+  it("cost nothing at all with no storage available", async () => {
+    retireStoredPrefs(null);
+    expect(await levels("sidebar.prefs")).toEqual([]);
   });
 
-  it("treat unreadable storage as nothing remembered", () => {
-    expect(createSidebarPrefs(throwingStorage()).grouping()).toBe("repository");
-  });
-
-  it("keep working when a write throws", () => {
-    const prefs = createSidebarPrefs(throwingStorage());
-    prefs.setGrouping("task");
-    expect(prefs.grouping()).toBe("task");
-  });
-
-  it("treat unparsable storage as nothing remembered", () => {
-    const storage = memoryStorage({ [PREFS_KEY]: "{not json" });
-    expect(createSidebarPrefs(storage).grouping()).toBe("repository");
-  });
-
-  it("treat a non-object payload as nothing remembered", () => {
-    const storage = memoryStorage({ [PREFS_KEY]: "42" });
-    expect(createSidebarPrefs(storage).grouping()).toBe("repository");
-  });
-
-  it("work at all with no storage available", () => {
-    const prefs = createSidebarPrefs(null);
-    prefs.setFolded("repo:one", true);
-    expect(prefs.isFolded("repo:one")).toBe(true);
+  it("never reach the view: a page with stored folds draws the daemon's", async () => {
+    const host = document.createElement("nav");
+    mountSidebar(host, ctxFor([roster({ merged: mergedSection([row({ id: "ws-9" })], 1, true) })]), {
+      storage: memoryStorage({ [PREFS_KEY]: JSON.stringify({ grouping: "task", folded: { merged: false } }) }),
+      timers: fakeTimers(),
+    });
+    await settle();
+    expect([
+      host.querySelector(".merged-section")?.classList.contains("folded"),
+      host.querySelector("[data-grouping-pick='repository']")?.classList.contains("active"),
+    ]).toEqual([true, true]);
   });
 });
 
 describe("the rail's header", () => {
   it("offers both groupings as a picker", () => {
-    const head = drawRailHead(memoryPrefs(), document.createElement("div"));
-    const picks = [...head.querySelectorAll("[data-grouping-pick]")].map((el) =>
+    const head = drawRailHead(sidebarContext());
+    const picks = [...head.element.querySelectorAll("[data-grouping-pick]")].map((el) =>
       el.getAttribute("data-grouping-pick"),
     );
     expect(picks).toEqual(["repository", "task"]);
   });
 
-  it("marks the grouping in force", () => {
-    const head = drawRailHead(memoryPrefs({ grouping: "task" }), document.createElement("div"));
-    expect(
-      head.querySelector("[data-grouping-pick='task']")?.classList.contains("active"),
-    ).toBe(true);
+  it("lights the grouping it is painted with", () => {
+    const head = drawRailHead(sidebarContext());
+    head.paintGrouping("task");
+    expect(head.element.querySelector("[data-grouping-pick='task']")?.classList.contains("active")).toBe(true);
   });
 
-  it("remembers the choice when it is switched", async () => {
-    const prefs = memoryPrefs();
-    const head = drawRailHead(prefs, document.createElement("div"));
-    await click(head.querySelector("[data-grouping-pick='task']") as Element);
-    expect(prefs.state.grouping).toBe("task");
+  it("asks the daemon to show the chosen grouping in every page", async () => {
+    const asked: string[] = [];
+    const sc = sidebarContext(
+      appContext({
+        updateSidebarView: (request) => {
+          if (request.change.case === "showGrouping") asked.push(request.change.value.grouping.case ?? "unset");
+          return create(UpdateSidebarViewResponseSchema, { result: { case: "success", value: {} } });
+        },
+      }),
+    );
+    const head = drawRailHead(sc);
+    sc.view.track(GROUPING_VIEW_KEY, "repository", head.paintGrouping);
+    await click(head.element.querySelector("[data-grouping-pick='task']") as Element);
+    expect(asked).toEqual(["task"]);
   });
 
-  it("swaps which pane is shown, rather than redrawing anything", async () => {
-    const body = document.createElement("div");
-    body.innerHTML =
-      "<div data-grouping='repository'></div><div data-grouping='task' hidden></div>";
-    const head = drawRailHead(memoryPrefs(), body);
-    await click(head.querySelector("[data-grouping-pick='task']") as Element);
-    const hidden = [...body.querySelectorAll<HTMLElement>("[data-grouping]")].map((el) => el.hidden);
-    expect(hidden).toEqual([true, false]);
+  it("lights the chosen grouping at once, before any push", async () => {
+    const sc = sidebarContext();
+    const head = drawRailHead(sc);
+    sc.view.track(GROUPING_VIEW_KEY, "repository", head.paintGrouping);
+    await click(head.element.querySelector("[data-grouping-pick='task']") as Element);
+    expect(head.element.querySelector("[data-grouping-pick='task']")?.classList.contains("active")).toBe(true);
+  });
+
+  it("stays clickable after a choice the daemon took, because no push redraws it", async () => {
+    const sc = sidebarContext();
+    const head = drawRailHead(sc);
+    sc.view.track(GROUPING_VIEW_KEY, "repository", head.paintGrouping);
+    const pick = head.element.querySelector("[data-grouping-pick='task']") as HTMLButtonElement;
+    await click(pick);
+    expect([pick.disabled, pick.classList.contains("is-busy")]).toEqual([false, false]);
+  });
+
+  it("puts the old grouping back when the daemon cannot be reached", async () => {
+    const sc = sidebarContext(
+      appContext({
+        updateSidebarView: () => {
+          throw new Error("down");
+        },
+      }),
+    );
+    const head = drawRailHead(sc);
+    sc.view.track(GROUPING_VIEW_KEY, "repository", head.paintGrouping);
+    await click(head.element.querySelector("[data-grouping-pick='task']") as Element);
+    expect(head.element.querySelector("[data-grouping-pick='repository']")?.classList.contains("active")).toBe(true);
+  });
+});
+
+describe("mounting the rail: the view is the daemon's", () => {
+  it("lights the picker for the grouping the push says", async () => {
+    const host = document.createElement("nav");
+    mountSidebar(host, ctxFor([roster({ shown: "task" })]), { timers: fakeTimers() });
+    await settle();
+    expect(host.querySelector("[data-grouping-pick='task']")?.classList.contains("active")).toBe(true);
+  });
+
+  it("shows the grouping's pane in the rail on a picker click, before any push", async () => {
+    const host = document.createElement("nav");
+    mountSidebar(host, ctxFor([roster()]), { timers: fakeTimers() });
+    await settle();
+    await click(host.querySelector("[data-grouping-pick='task']") as Element);
+    expect((host.querySelector("[data-grouping='task']") as HTMLElement).hidden).toBe(false);
+  });
+
+  it("draws two pages fed the same pushes identically", async () => {
+    const pushes = [
+      roster({
+        shown: "task",
+        repos: [repoSection({ id: "repo-1", collapsed: true, rows: [row({ id: "ws-1" })] })],
+        tasks: [taskSection({ id: "task-1", collapsed: true, rows: [row({ id: "ws-1" })] })],
+        merged: mergedSection([row({ id: "ws-9" })], 1, false),
+      }),
+    ];
+    const one = document.createElement("nav");
+    const two = document.createElement("nav");
+    mountSidebar(one, ctxFor(pushes), { timers: fakeTimers() });
+    mountSidebar(two, ctxFor(pushes), { timers: fakeTimers() });
+    await settle();
+    expect(one.innerHTML).toBe(two.innerHTML);
+  });
+
+  it("draws in one page a fold another page asked for, once the push carries it", async () => {
+    const host = document.createElement("nav");
+    mountSidebar(
+      host,
+      ctxFor([
+        roster({ merged: mergedSection([row({ id: "ws-9" })], 1, true) }),
+        roster({ merged: mergedSection([row({ id: "ws-9" })], 1, false) }),
+      ]),
+      { timers: fakeTimers() },
+    );
+    await settle();
+    expect(host.querySelector(".merged-section")?.classList.contains("folded")).toBe(false);
   });
 });
 
@@ -443,30 +509,131 @@ describe("the roster stream's planned ending", () => {
   });
 });
 
-describe("the page's own storage, when no storage was injected", () => {
-  /** Everything this section writes into the real jsdom storage. */
+describe("a click in the rail closes its open dropdowns", () => {
+  const mounted: Array<{ dispose(): void }> = [];
+  const hosts: HTMLElement[] = [];
   afterEach(() => {
-    globalThis.localStorage.removeItem(PREFS_KEY);
+    for (const handle of mounted.splice(0)) handle.dispose();
+    for (const host of hosts.splice(0)) host.remove();
   });
 
-  it("persists a preference into the page's localStorage", () => {
-    createSidebarPrefs().setGrouping("task");
-    expect(storedPrefs(globalThis.localStorage).grouping).toBe("task");
+  /** A rail with one row (in a repository and a task section), in the document. */
+  async function mountRail(): Promise<HTMLElement> {
+    const host = document.createElement("nav");
+    document.body.appendChild(host);
+    hosts.push(host);
+    mounted.push(
+      mountSidebar(
+        host,
+        ctxFor([
+          roster({
+            repos: [repoSection({ id: "repo-1", rows: [row({ id: "ws-1" }), row({ id: "ws-2" })] })],
+            tasks: [taskSection({ id: "task-1" })],
+          }),
+        ]),
+        { timers: fakeTimers() },
+      ),
+    );
+    await settle();
+    return host;
+  }
+
+  const rowOf = (host: HTMLElement, id: string): HTMLElement =>
+    host.querySelector(`[data-grouping='repository'] [data-roster-row='${id}']`) as HTMLElement;
+  const rowMenu = (host: HTMLElement, id: string): HTMLElement =>
+    rowOf(host, id).querySelector(":scope > .sb-menu") as HTMLElement;
+  const taskMenu = (host: HTMLElement): HTMLElement =>
+    host.querySelector(".task-head .sb-menu") as HTMLElement;
+  const emptySpace = (host: HTMLElement): HTMLElement => host.querySelector(".sb-head") as HTMLElement;
+
+  /** Open the row's detail popover the way the keyboard does, at once. */
+  const openDetail = (host: HTMLElement, id: string): void => {
+    (rowOf(host, id).querySelector(":scope > .row") as HTMLElement).dispatchEvent(
+      new FocusEvent("focusin", { bubbles: true }),
+    );
+  };
+
+  it("closes a row's menu on a click in empty space", async () => {
+    const host = await mountRail();
+    await click(rowOf(host, "ws-1").querySelector(".sb-more") as Element);
+    await click(emptySpace(host));
+    expect(rowMenu(host, "ws-1").hidden).toBe(true);
   });
 
-  it("reads a preference back out of the page's localStorage", () => {
-    globalThis.localStorage.setItem(PREFS_KEY, JSON.stringify({ grouping: "task" }));
-    expect(createSidebarPrefs().grouping()).toBe("task");
+  it("closes a task's menu on a click in empty space", async () => {
+    const host = await mountRail();
+    await click(host.querySelector(".task-head .sb-more") as Element);
+    await click(emptySpace(host));
+    expect(taskMenu(host).hidden).toBe(true);
   });
 
-  it("mounts on the page's storage, so a remembered grouping is the one drawn", async () => {
+  it("closes a row's detail popover on a click in empty space", async () => {
+    const host = await mountRail();
+    openDetail(host, "ws-1");
+    await click(emptySpace(host));
+    expect(rowOf(host, "ws-1").classList.contains("open")).toBe(false);
+  });
+
+  it("keeps a row's menu open on a click inside it", async () => {
+    const host = await mountRail();
+    await click(rowOf(host, "ws-1").querySelector(".sb-more") as Element);
+    await click(rowMenu(host, "ws-1"));
+    expect(rowMenu(host, "ws-1").hidden).toBe(false);
+  });
+
+  it("keeps a row's detail popover open on a click inside it", async () => {
+    const host = await mountRail();
+    openDetail(host, "ws-1");
+    await click(rowOf(host, "ws-1").querySelector(":scope > .detail") as Element);
+    expect(rowOf(host, "ws-1").classList.contains("open")).toBe(true);
+  });
+
+  it("swaps one row's menu for another's when the other opener is clicked", async () => {
+    const host = await mountRail();
+    await click(rowOf(host, "ws-1").querySelector(".sb-more") as Element);
+    await click(rowOf(host, "ws-2").querySelector(".sb-more") as Element);
+    expect([rowMenu(host, "ws-1").hidden, rowMenu(host, "ws-2").hidden]).toEqual([true, false]);
+  });
+
+  it("swaps a row's menu for a task's menu when the task's opener is clicked", async () => {
+    const host = await mountRail();
+    await click(rowOf(host, "ws-1").querySelector(".sb-more") as Element);
+    await click(host.querySelector(".task-head .sb-more") as Element);
+    expect([rowMenu(host, "ws-1").hidden, taskMenu(host).hidden]).toEqual([true, false]);
+  });
+
+  it("closes a row's detail popover when a menu opens", async () => {
+    const host = await mountRail();
+    openDetail(host, "ws-1");
+    await click(rowOf(host, "ws-2").querySelector(".sb-more") as Element);
+    expect(rowOf(host, "ws-1").classList.contains("open")).toBe(false);
+  });
+
+  it("closes a menu with its own opener, as before", async () => {
+    const host = await mountRail();
+    const more = rowOf(host, "ws-1").querySelector(".sb-more") as Element;
+    await click(more);
+    await click(more);
+    expect(rowMenu(host, "ws-1").hidden).toBe(true);
+  });
+
+  it("does nothing, and logs nothing, on a click with none open", async () => {
+    const host = await mountRail();
+    const capture = captureLogRecords("debug");
+    await click(emptySpace(host));
+    capture.logger.flush();
+    await Promise.resolve();
+    expect(capture.sent.filter((r) => r.operation.startsWith("sidebar.dropdowns"))).toEqual([]);
+  });
+});
+
+describe("the page's own storage, when no storage was injected", () => {
+  it("is where the retired preferences are dropped from", async () => {
     globalThis.localStorage.setItem(PREFS_KEY, JSON.stringify({ grouping: "task" }));
     const host = document.createElement("nav");
     mountSidebar(host, ctxFor(), { timers: fakeTimers() });
     await settle();
-    expect(
-      host.querySelector("[data-grouping-pick='task']")?.classList.contains("active"),
-    ).toBe(true);
+    expect(globalThis.localStorage.getItem(PREFS_KEY)).toBeNull();
   });
 });
 
@@ -479,7 +646,7 @@ describe("a page whose storage cannot even be reached", () => {
     Object.defineProperty(globalThis, "localStorage", real);
   });
 
-  it("keeps its preferences in memory rather than failing to draw", () => {
+  it("still draws the rail", async () => {
     // Arrange: an embedding where touching `localStorage` throws outright.
     Object.defineProperty(globalThis, "localStorage", {
       configurable: true,
@@ -487,25 +654,12 @@ describe("a page whose storage cannot even be reached", () => {
         throw new Error("site data is disabled");
       },
     });
+    const host = document.createElement("nav");
     // Act
-    const prefs = createSidebarPrefs();
-    prefs.setGrouping("task");
+    mountSidebar(host, ctxFor(), { timers: fakeTimers() });
+    await settle();
     // Assert
-    expect(prefs.grouping()).toBe("task");
-  });
-});
-
-describe("a row's remembered expansion", () => {
-  it("is closed for a row nothing was ever remembered about", () => {
-    const storage = memoryStorage({ [PREFS_KEY]: JSON.stringify({ grouping: "task" }) });
-    expect(createSidebarPrefs(storage).isExpanded("ws-1")).toBe(false);
-  });
-
-  it("is closed for a row absent from a remembered set", () => {
-    const storage = memoryStorage({
-      [PREFS_KEY]: JSON.stringify({ expanded: { "ws-2": true } }),
-    });
-    expect(createSidebarPrefs(storage).isExpanded("ws-1")).toBe(false);
+    expect(host.hidden).toBe(false);
   });
 });
 
@@ -546,7 +700,7 @@ describe("an open row's detail panel, placed by the rail", () => {
   });
 
   /**
-   * Mount a rail holding one row remembered as expanded, and stage its rects.
+   * Mount a rail holding one row with its detail open, and stage its rects.
    *
    * The host is put IN the document, because a captured `scroll` reaches the
    * window only by propagating down to a target the window can see — which is
@@ -558,14 +712,13 @@ describe("an open row's detail panel, placed by the rail", () => {
     const handle = mountSidebar(
       host,
       ctxFor([roster({ repos: [repoSection({ id: "repo-1", rows: [row({ id: "ws-1" })] })] })]),
-      {
-        storage: memoryStorage({ [PREFS_KEY]: JSON.stringify({ expanded: { "ws-1": true } }) }),
-        timers: fakeTimers(),
-      },
+      { timers: fakeTimers() },
     );
     mounted.push(handle);
     await settle();
     const ws = host.querySelector("[data-roster-row='ws-1']") as HTMLElement;
+    // Opened by keyboard focus, which opens at once, with no intent delay.
+    (ws.querySelector(":scope > .row") as HTMLElement).dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
     rects.set(ws.querySelector(":scope > .row") as Element, lineRect);
     rects.set(
       ws.querySelector(":scope > .detail") as Element,

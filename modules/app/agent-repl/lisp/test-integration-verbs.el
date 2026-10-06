@@ -1682,7 +1682,9 @@ rest of this suite already asserts against."
              (expanded . ()))])))
     (task . ((sections . [])))
     (recentlyMerged . ((header . ((label . ((text . "recently merged"))) (count . ((workspaces . 1)))))
-                        (rows . ((rows . [])))))))
+                        (rows . ((rows . [])))
+                        (collapsed . ())))
+    (shownRepository . ())))
 
 (defmacro agent-repl-itest-verbs--with-roster (daemon rows &rest body)
   "Subscribe to DAEMON's roster stream, push ROWS, wait for the view, run BODY.

@@ -455,7 +455,7 @@ function verbButton(verb: Verb): Control {
 type VerbResponse = Message & { result: { case?: string | undefined; value?: unknown } };
 
 /** What one verb call needs to run and to report. */
-interface VerbCall<Res extends VerbResponse> {
+export interface VerbCall<Res extends VerbResponse> {
   sc: SidebarContext;
   rpc: string;
   call: (client: SidebarContext["ctx"]["client"]) => Promise<Res>;
@@ -468,6 +468,12 @@ interface VerbCall<Res extends VerbResponse> {
    * this hook entirely, and an arm neither knows is a malformed view.
    */
   refusalText?: (cause: RefusalCause) => string;
+  /**
+   * The control OUTLIVES the push: it is drawn once, outside the roster the
+   * push replaces (the grouping picker), so success re-enables it rather than
+   * leaving it for a redraw that never comes.
+   */
+  outlivesPush?: boolean;
 }
 
 /**
@@ -476,8 +482,9 @@ interface VerbCall<Res extends VerbResponse> {
  *
  * SUCCESS DRAWS NOTHING and leaves the control disabled: the roster push that
  * follows replaces the row outright, and re-enabling a button about to be
- * thrown away would only flicker. Every other outcome re-enables, because the
- * user is going to want to try again.
+ * thrown away would only flicker — unless the control `outlivesPush`, which
+ * re-enables. Every other outcome re-enables, because the user is going to
+ * want to try again.
  *
  * ANSWERS TRUE ON SUCCESS, so a caller with a form to dismiss can dismiss it
  * on the answer rather than by inspecting the DOM for a refusal.
@@ -496,7 +503,10 @@ export async function runVerb<Res extends VerbResponse>(
       spec.schema,
     );
     const result = requireCase(response.result, `${spec.rpc}Response.result`);
-    if (result.case === "success") return true;
+    if (result.case === "success") {
+      if (spec.outlivesPush === true) setDisabled(control, false);
+      return true;
+    }
     const cause = refusalCause(spec.rpc, result.value);
     const say =
       crossCuttingSentence(spec.rpc, cause) ??

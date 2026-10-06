@@ -1559,12 +1559,22 @@ The rules that keep this true:
 - **The status ladder ranks every unusable rung above every usable one**
   (`daemon/internal/resolve/ladder`), so a blue claim is never hidden under a
   turquoise one.
-- **A repository's fold is the daemon's** (`agentrepl.v1.FoldRepository`,
-  `frontend.v1.RosterRepoSection.fold`): the sidebar draws it (header grey:
-  very light expanded, darker collapsed) and the Emacs tab bar hides a
-  collapsed repository's workspaces, numbering and navigating only the drawn
-  tabs (`agent-repl-roster-drawn-tab-order`). Task and merged folds stay
-  webview-local.
+- **The sidebar's view state is the daemon's, so the sidebar looks the same
+  in every workspace's page** (owner rulings, 2026-10-06). Every section's
+  fold (`RosterRepoSection.fold`, `RosterTaskSection.fold`,
+  `RosterMergedSection.fold`) and the grouping shown (`WorkspaceRoster.shown`)
+  ride the roster push, change through ONE verb,
+  `agentrepl.v1.UpdateSidebarView`, and are durable (`wsm` layout 23). The
+  webapp paints a gesture at once and holds it until the push agrees
+  (`webapp/src/sidebar/view.ts`, `view-change.ts`); nothing about the view is
+  kept in `localStorage`. A repository's fold also drives the Emacs tab bar,
+  which hides a collapsed repository's workspaces, numbering and navigating
+  only the drawn tabs (`agent-repl-roster-drawn-tab-order`). A dropdown (a
+  row's menu, a task's menu, a row's detail popover) or a form is NOT view
+  state: it is transient to the page that opened it. Every sidebar dropdown
+  shares ONE dismiss rule (`webapp/src/sidebar/dropdowns.ts`): a click in the
+  rail outside it closes it, a click inside it or on its opener keeps it, and
+  opening one closes the other.
 - **The webapp composer is closed exactly when the footer is blue**
   (`render-colors.json#composer_closed_colors`, read by
   `webapp/src/vocab.ts#composerClosedFor`). The gate is derived from the color,
