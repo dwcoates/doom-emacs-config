@@ -180,8 +180,29 @@ type Fault struct {
 type ColdGate struct {
 	// Standing reports whether a gate is open.
 	Standing bool
-	// Detail is what was refused cold.
-	Detail string
+	// Cost is the gate's composed cost line, in the parts it is drawn in.
+	Cost ColdGateCost
+}
+
+// ColdGateCost is the cold gate's cost line ("the conversation is cold at
+// 409,051 context tokens") in parts, so a client colors the figure alone
+// (footer.proto FooterStatusActivityColdGateCost).
+type ColdGateCost struct {
+	// Lead is the words before the figure.
+	Lead string
+	// Figure is the token count as drawn ("409,051").
+	Figure string
+	// Tail is the words after the figure.
+	Tail string
+	// WindowFill is how full the model's context window the count is, in
+	// [0, 1]: the figure's color.
+	WindowFill float64
+}
+
+// Text is the whole line, exactly Lead + Figure + Tail. It is DERIVED, never
+// stored beside the parts, so the line and its parts cannot disagree.
+func (c ColdGateCost) Text() string {
+	return c.Lead + c.Figure + c.Tail
 }
 
 // ColdGateAnswer is a standing cold gate's answer BEING SPENT — the whole

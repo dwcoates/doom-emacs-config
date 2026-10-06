@@ -2374,7 +2374,8 @@ func (f *Fleet) raiseColdGate(ws ids.WorkspaceID, vendorSessionID string, cold *
 		compact, menu = coldCompactMenu(cold)
 	}
 
-	detail := coldGateDetail(cold)
+	cost := coldGateCost(cold, f.deps.Topbar.ContextWindow(ws))
+	detail := cost.Text()
 
 	f.mu.Lock()
 	held, stood := f.coldGates[ws]
@@ -2390,14 +2391,15 @@ func (f *Fleet) raiseColdGate(ws ids.WorkspaceID, vendorSessionID string, cold *
 		Id: coldGateRowID(ws, vendorSessionID),
 		Row: &frontendv1.FeedRow_ColdGate{ColdGate: &frontendv1.FeedColdGate{
 			State: &frontendv1.FeedColdGate_Standing{Standing: &frontendv1.FeedColdGateStanding{
-				ContextTokens: &frontendv1.FeedColdGateContextTokens{Tokens: int64(cold.GetContextTokens())},
-				LastRequest:   &frontendv1.FeedColdGateLastRequest{AtMs: cold.GetLastRequestAtMs()},
-				Model:         &frontendv1.FeedColdGateModel{Model: cold.GetRequestedModel()},
-				Compact:       menu,
+				ContextTokens: &frontendv1.FeedColdGateContextTokens{
+					Tokens: int64(cold.GetContextTokens()), WindowFill: cost.WindowFill},
+				LastRequest: &frontendv1.FeedColdGateLastRequest{AtMs: cold.GetLastRequestAtMs()},
+				Model:       &frontendv1.FeedColdGateModel{Model: cold.GetRequestedModel()},
+				Compact:     menu,
 			}},
 		}},
 	})
-	f.deps.Footer.SetColdGate(ws, footer.ColdGate{Standing: true, Detail: detail})
+	f.deps.Footer.SetColdGate(ws, footer.ColdGate{Standing: true, Cost: cost})
 	f.deps.Topbar.SetColdGate(ws, topbar.ColdGate{
 		Standing:      true,
 		ContextTokens: int64(cold.GetContextTokens()),
@@ -2428,13 +2430,25 @@ func coldCompactMenu(cold *conversationv1.SessionCold) (*ServedColdGateCompact, 
 // englishPrinter groups digits ("409,051") in counts a user reads.
 var englishPrinter = message.NewPrinter(language.English)
 
-// coldGateDetail is the ONE sentence a standing gate is accounted for by. The
-// footer's cold-gate line, the served gate the verbs read, and the `cold_gate`
-// arm a prompt to a parked workspace is refused with all take it from here:
-// three surfaces wording one gate three ways is how a user comes to think they
-// are looking at three problems.
-func coldGateDetail(cold *conversationv1.SessionCold) string {
-	return englishPrinter.Sprintf("the conversation is cold at %d context tokens", cold.GetContextTokens())
+// coldGateCost is the ONE sentence a standing gate is accounted for by, in the
+// parts the footer draws it in. The footer's cold-gate line, the served gate
+// the verbs read, and the `cold_gate` arm a prompt to a parked workspace is
+// refused with all take it from here (its Text): three surfaces wording one
+// gate three ways is how a user comes to think they are looking at three
+// problems.
+//
+// The figure's window fill is the count over WINDOW, the window the context
+// chip measures against (topbar.Resolver.ContextWindow: the vendor's stated
+// window, else the assumed 1,000,000), so the gate and the chip agree on how
+// full one count is. The gate's fill and the feed figure's are this one value.
+func coldGateCost(cold *conversationv1.SessionCold, window int64) footer.ColdGateCost {
+	tokens := cold.GetContextTokens()
+	return footer.ColdGateCost{
+		Lead:       "the conversation is cold at ",
+		Figure:     englishPrinter.Sprintf("%d", tokens),
+		Tail:       " context tokens",
+		WindowFill: topbar.WindowFill(int64(tokens), window),
+	}
 }
 
 // ColdGateShown answers whether a cold gate stands on the workspace UNANSWERED:
