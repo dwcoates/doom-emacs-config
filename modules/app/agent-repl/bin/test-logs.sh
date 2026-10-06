@@ -28,6 +28,19 @@ fail() {
     FAIL=$((FAIL + 1))
 }
 
+# grep_in TEXT GREP-ARGS... -- grep TEXT, fed from a here-string, NEVER a
+# pipe. Under pipefail, `printf "$out" | grep -q` fails whenever grep -q
+# matches and exits before printf has written everything: printf dies of
+# SIGPIPE, the pipeline answers 141, and a check whose output was correct
+# fails. It flaked only under load, when the writer was descheduled mid-write
+# (2026-10-06: "--runtime accepts a comma-separated runtime list" in full runs;
+# 10 of 24 runs six-wide, across nine different cases).
+grep_in() {
+    local text="$1"
+    shift
+    grep "$@" <<<"$text"
+}
+
 bin="$TMP/bin"
 home="$TMP/home"
 state="$TMP/state"
@@ -140,7 +153,7 @@ test_workspace_directory_and_default_format() {
     last_operation="$(printf '%s\n' "$out" | tail -n 1 | awk '{print $4}')"
     if [ "$first_operation" = daemon.rotated ] &&
         [ "$last_operation" = daemon.third ] &&
-        printf '%s\n' "$out" | grep -q 'WARN  daemon.*daemon.warning.*workspace=alpha .*context={"order":1}'; then
+        grep_in "$out" -q 'WARN  daemon.*daemon.warning.*workspace=alpha .*context={"order":1}'; then
         pass "--workspace directory emits compact local-time records merged with rotations"
     else
         fail "--workspace directory emits compact local-time records merged with rotations"
@@ -150,7 +163,7 @@ test_workspace_directory_and_default_format() {
 test_workspace_id() {
     local out
     out="$(run_logs --workspace ws-a --runtime shim --json)"
-    if printf '%s\n' "$out" | grep -q '"operation":"shim.failure"'; then
+    if grep_in "$out" -q '"operation":"shim.failure"'; then
         pass "--workspace resolves a daemon workspace ID"
     else
         fail "--workspace resolves a daemon workspace ID"
@@ -160,7 +173,7 @@ test_workspace_id() {
 test_workspace_name() {
     local out
     out="$(run_logs --workspace alpha --runtime webapp --json)"
-    if printf '%s\n' "$out" | grep -q '"operation":"webapp.ready"'; then
+    if grep_in "$out" -q '"operation":"webapp.ready"'; then
         pass "--workspace resolves a daemon workspace name"
     else
         fail "--workspace resolves a daemon workspace name"
@@ -186,9 +199,9 @@ test_ambiguous_workspace_name() {
 test_central() {
     local out
     out="$(run_logs --central --json)"
-    if printf '%s\n' "$out" | grep -q '"operation":"emacs.ready"' &&
-        printf '%s\n' "$out" | grep -q '"operation":"daemon.boot"' &&
-        printf '%s\n' "$out" | grep -q '"operation":"store.failure"'; then
+    if grep_in "$out" -q '"operation":"emacs.ready"' &&
+        grep_in "$out" -q '"operation":"daemon.boot"' &&
+        grep_in "$out" -q '"operation":"store.failure"'; then
         pass "--central selects every central sink"
     else
         fail "--central selects every central sink"
@@ -202,7 +215,7 @@ test_central_default_emacs_sink() {
         >"$state/logs/emacs.central.log"
     out="$(AGENT_REPL_EMACS_GLOBAL_LOG_OVERRIDE= run_logs --central --runtime emacs --json)"
     rm -f "$state/logs/emacs.central.log"
-    if printf '%s\n' "$out" | grep -q '"operation":"emacs.durable"'; then
+    if grep_in "$out" -q '"operation":"emacs.durable"'; then
         pass "--central reads the durable <state>/logs/emacs.central.log by default"
     else
         fail "--central reads the durable <state>/logs/emacs.central.log by default"
@@ -212,9 +225,9 @@ test_central_default_emacs_sink() {
 test_all() {
     local out
     out="$(run_logs --all --level warn --json)"
-    if printf '%s\n' "$out" | grep -q '"workspace_id":"ws-a"' &&
-        printf '%s\n' "$out" | grep -q '"workspace_id":"ws-b"' &&
-        printf '%s\n' "$out" | grep -q '"runtime":"store"'; then
+    if grep_in "$out" -q '"workspace_id":"ws-a"' &&
+        grep_in "$out" -q '"workspace_id":"ws-b"' &&
+        grep_in "$out" -q '"runtime":"store"'; then
         pass "--all selects daemon-known workspaces and central sinks"
     else
         fail "--all selects daemon-known workspaces and central sinks"
@@ -224,8 +237,8 @@ test_all() {
 test_since_rfc3339() {
     local out
     out="$(run_logs --workspace "$workspace_a" --runtime daemon --since 2026-09-10T10:02:00Z --json)"
-    if printf '%s\n' "$out" | grep -q '"operation":"daemon.third"' &&
-        ! printf '%s\n' "$out" | grep -q '"operation":"daemon.warning"'; then
+    if grep_in "$out" -q '"operation":"daemon.third"' &&
+        ! grep_in "$out" -q '"operation":"daemon.warning"'; then
         pass "--since accepts an RFC3339 lower bound"
     else
         fail "--since accepts an RFC3339 lower bound"
@@ -235,8 +248,8 @@ test_since_rfc3339() {
 test_since_duration() {
     local out
     out="$(run_logs --workspace "$workspace_a" --runtime daemon --since 100000h --json)"
-    if printf '%s\n' "$out" | grep -q '"operation":"daemon.rotated"' &&
-        ! printf '%s\n' "$out" | grep -q '"operation":"daemon.old"'; then
+    if grep_in "$out" -q '"operation":"daemon.rotated"' &&
+        ! grep_in "$out" -q '"operation":"daemon.old"'; then
         pass "--since accepts a lookback duration"
     else
         fail "--since accepts a lookback duration"
@@ -246,8 +259,8 @@ test_since_duration() {
 test_until() {
     local out
     out="$(run_logs --workspace "$workspace_a" --runtime daemon --since 2026-01-01T00:00:00Z --until 2026-09-10T10:01:00Z --json)"
-    if printf '%s\n' "$out" | grep -q '"timestamp":"2026-09-10T10:01:00.000000Z"' &&
-        ! printf '%s\n' "$out" | grep -q '"timestamp":"2026-09-10T10:01:30.000000Z"'; then
+    if grep_in "$out" -q '"timestamp":"2026-09-10T10:01:00.000000Z"' &&
+        ! grep_in "$out" -q '"timestamp":"2026-09-10T10:01:30.000000Z"'; then
         pass "--until applies an inclusive RFC3339 upper bound"
     else
         fail "--until applies an inclusive RFC3339 upper bound"
@@ -277,7 +290,7 @@ test_window_finds_a_record_written_in_another_offset() {
     local out
     out="$(XDG_CACHE_HOME_OVERRIDE="$(mixed_offset_cache)" run_logs --central --runtime store \
         --since 2026-10-06T12:01:40+03:00 --until 2026-10-06T12:01:56+03:00 --json 2>/dev/null)"
-    if printf '%s\n' "$out" | grep -q '"message":"written at -04:00"'; then
+    if grep_in "$out" -q '"message":"written at -04:00"'; then
         pass "a window finds a record written in another UTC offset"
     else
         fail "a window finds a record written in another UTC offset"
@@ -288,7 +301,7 @@ test_window_excludes_a_record_whose_wall_clock_alone_matches() {
     local out
     out="$(XDG_CACHE_HOME_OVERRIDE="$(mixed_offset_cache)" run_logs --central --runtime store \
         --since 2026-10-06T12:01:40+03:00 --until 2026-10-06T12:01:56+03:00 --json 2>/dev/null)"
-    if ! printf '%s\n' "$out" | grep -q 'wall clock inside, instant outside'; then
+    if ! grep_in "$out" -q 'wall clock inside, instant outside'; then
         pass "a window excludes a record whose wall-clock text alone falls inside it"
     else
         fail "a window excludes a record whose wall-clock text alone falls inside it"
@@ -309,9 +322,9 @@ test_mixed_offsets_are_ordered_by_instant() {
 test_level() {
     local out
     out="$(run_logs --workspace "$workspace_a" --level warn --json)"
-    if printf '%s\n' "$out" | grep -q '"level":"warn"' &&
-        printf '%s\n' "$out" | grep -q '"level":"error"' &&
-        ! printf '%s\n' "$out" | grep -q '"level":"info"'; then
+    if grep_in "$out" -q '"level":"warn"' &&
+        grep_in "$out" -q '"level":"error"' &&
+        ! grep_in "$out" -q '"level":"info"'; then
         pass "--level applies the requested minimum severity"
     else
         fail "--level applies the requested minimum severity"
@@ -321,19 +334,20 @@ test_level() {
 test_runtime_list() {
     local out
     out="$(run_logs --workspace "$workspace_a" --runtime daemon,shim --json)"
-    if printf '%s\n' "$out" | grep -q '"runtime":"daemon"' &&
-        printf '%s\n' "$out" | grep -q '"runtime":"shim"' &&
-        ! printf '%s\n' "$out" | grep -q '"runtime":"webapp"'; then
+    if grep_in "$out" -q '"runtime":"daemon"' &&
+        grep_in "$out" -q '"runtime":"shim"' &&
+        ! grep_in "$out" -q '"runtime":"webapp"'; then
         pass "--runtime accepts a comma-separated runtime list"
     else
         fail "--runtime accepts a comma-separated runtime list"
+        printf '%s\n' "$out" >&2
     fi
 }
 
 test_json() {
     local out
     out="$(run_logs --workspace "$workspace_a" --runtime shim --json)"
-    if [ "${out#\{}" != "$out" ] && ! printf '%s\n' "$out" | grep -q 'context='; then
+    if [ "${out#\{}" != "$out" ] && ! grep_in "$out" -q 'context='; then
         pass "--json emits the original JSONL record"
     else
         fail "--json emits the original JSONL record"
@@ -343,8 +357,8 @@ test_json() {
 test_harvest() {
     local out
     out="$(run_logs --harvest 2026-09-10T10:00:00Z 2026-09-10T10:10:00Z)"
-    if printf '%s\n' "$out" | grep -Eq "ws-a +$workspace_a +warn +daemon +daemon.warning +repeated warning +2" &&
-        printf '%s\n' "$out" | grep -Eq 'central +- +error +store +store.failure +store failed +1'; then
+    if grep_in "$out" -Eq "ws-a +$workspace_a +warn +daemon +daemon.warning +repeated warning +2" &&
+        grep_in "$out" -Eq 'central +- +error +store +store.failure +store failed +1'; then
         pass "--harvest attributes and counts all warn/error records"
     else
         fail "--harvest attributes and counts all warn/error records"
@@ -358,7 +372,7 @@ test_empty_harvest_window() {
     rc=$?
     set -e
     if [ "$rc" -eq 0 ] && [ "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" -eq 1 ] &&
-        printf '%s\n' "$out" | grep -q '^WORKSPACE_ID'; then
+        grep_in "$out" -q '^WORKSPACE_ID'; then
         pass "an empty harvest window prints its header and exits zero"
     else
         fail "an empty harvest window prints its header and exits zero"
@@ -563,8 +577,8 @@ test_orphan_generations_absent_when_none_minted() {
 test_tally_counts_and_ordering() {
     local out
     out="$(run_logs --workspace "$workspace_a" --tally)"
-    if printf '%s\n' "$out" | grep -Eq '^2\s+warn\s+daemon\s+daemon.warning$' &&
-        printf '%s\n' "$out" | grep -Eq '^1\s+info\s+daemon\s+daemon.third$' &&
+    if grep_in "$out" -Eq '^2\s+warn\s+daemon\s+daemon.warning$' &&
+        grep_in "$out" -Eq '^1\s+info\s+daemon\s+daemon.third$' &&
         [ "$(printf '%s\n' "$out" | sed -n '2p' | awk '{print $1}')" = 2 ]; then
         pass "--tally counts groups and sorts by count descending"
     else
@@ -576,9 +590,9 @@ test_tally_counts_and_ordering() {
 test_sample_respects_n_and_width() {
     local out lines
     out="$(run_logs --workspace "$workspace_a" --runtime daemon --tally --sample 1 --width 10)"
-    lines="$(printf '%s\n' "$out" | grep -c 'daemon.warning' || true)"
+    lines="$(grep_in "$out" -c 'daemon.warning' || true)"
     if [ "$lines" -eq 2 ] &&
-        printf '%s\n' "$out" | grep -Eq 'daemon\.warning re.*\.\.\.$'; then
+        grep_in "$out" -Eq 'daemon\.warning re.*\.\.\.$'; then
         pass "--sample N caps representative records per group and --width truncates the message"
     else
         fail "--sample N caps representative records per group and --width truncates the message"
@@ -589,9 +603,9 @@ test_sample_respects_n_and_width() {
 test_sample_alone_without_tally() {
     local out
     out="$(run_logs --workspace "$workspace_a" --runtime daemon --sample 1)"
-    if ! printf '%s\n' "$out" | grep -q '^COUNT' &&
-        printf '%s\n' "$out" | grep -q 'daemon.warning' &&
-        printf '%s\n' "$out" | grep -q 'daemon.third'; then
+    if ! grep_in "$out" -q '^COUNT' &&
+        grep_in "$out" -q 'daemon.warning' &&
+        grep_in "$out" -q 'daemon.third'; then
         pass "--sample alone prints representative lines without a count table"
     else
         fail "--sample alone prints representative lines without a count table"
@@ -602,9 +616,9 @@ test_sample_alone_without_tally() {
 test_fields_projects_only_requested_including_context() {
     local out
     out="$(run_logs --workspace "$workspace_a" --runtime daemon --level warn --fields operation,order)"
-    if printf '%s\n' "$out" | grep -q '^operation=daemon.warning order=1$' &&
-        ! printf '%s\n' "$out" | grep -q 'message=' &&
-        ! printf '%s\n' "$out" | grep -q 'level='; then
+    if grep_in "$out" -q '^operation=daemon.warning order=1$' &&
+        ! grep_in "$out" -q 'message=' &&
+        ! grep_in "$out" -q 'level='; then
         pass "--fields projects only the named top-level and context fields"
     else
         fail "--fields projects only the named top-level and context fields"
@@ -619,7 +633,7 @@ test_timeline_time_ordered() {
     second="$(sed -n '2p' <<<"$out" | awk '{print $3}')"
     third="$(sed -n '3p' <<<"$out" | awk '{print $3}')"
     if [ "$first" = daemon.warning ] && [ "$second" = daemon.warning ] && [ "$third" = daemon.third ] &&
-        ! printf '%s\n' "$out" | grep -q '^COUNT'; then
+        ! grep_in "$out" -q '^COUNT'; then
         pass "--timeline prints one time-ordered line per record"
     else
         fail "--timeline prints one time-ordered line per record"
@@ -631,10 +645,10 @@ test_compact_modes_compose_with_level_and_runtime() {
     local tally_out timeline_out
     tally_out="$(run_logs --all --level error --runtime daemon,store --tally)"
     timeline_out="$(run_logs --all --level error --runtime daemon,store --timeline)"
-    if printf '%s\n' "$tally_out" | grep -q 'error.*store.*store.failure' &&
-        ! printf '%s\n' "$tally_out" | grep -q 'daemon.warning' &&
-        printf '%s\n' "$timeline_out" | grep -q 'store.failure' &&
-        ! printf '%s\n' "$timeline_out" | grep -q 'webapp.ready'; then
+    if grep_in "$tally_out" -q 'error.*store.*store.failure' &&
+        ! grep_in "$tally_out" -q 'daemon.warning' &&
+        grep_in "$timeline_out" -q 'store.failure' &&
+        ! grep_in "$timeline_out" -q 'webapp.ready'; then
         pass "--tally and --timeline compose with --level and --runtime"
     else
         fail "--tally and --timeline compose with --level and --runtime"
@@ -646,8 +660,8 @@ test_compact_modes_compose_with_level_and_runtime() {
 test_json_still_emits_raw_records() {
     local out
     out="$(run_logs --workspace "$workspace_a" --runtime daemon --json)"
-    if printf '%s\n' "$out" | grep -q '"operation":"daemon.third"' &&
-        ! printf '%s\n' "$out" | grep -Eq 'COUNT|context='; then
+    if grep_in "$out" -q '"operation":"daemon.third"' &&
+        ! grep_in "$out" -Eq 'COUNT|context='; then
         pass "--json is unaffected by the compact query modes and still emits raw JSONL"
     else
         fail "--json is unaffected by the compact query modes and still emits raw JSONL"
@@ -658,8 +672,8 @@ test_json_still_emits_raw_records() {
 test_stderr_source_in_tally() {
     local out
     out="$(run_logs --central --runtime store --tally)"
-    if printf '%s\n' "$out" | grep -Eq '^1\s+error\s+store\s+stderr$' &&
-        printf '%s\n' "$out" | grep -Eq '^1\s+warn\s+store\s+stderr$'; then
+    if grep_in "$out" -Eq '^1\s+error\s+store\s+stderr$' &&
+        grep_in "$out" -Eq '^1\s+warn\s+store\s+stderr$'; then
         pass "a stderr fixture line is inferred error or warn and appears in --tally"
     else
         fail "a stderr fixture line is inferred error or warn and appears in --tally"
@@ -670,8 +684,8 @@ test_stderr_source_in_tally() {
 test_stderr_source_in_timeline() {
     local out
     out="$(run_logs --central --runtime store --timeline)"
-    if printf '%s\n' "$out" | grep -q 'stderr unexpected error: disk write failed' &&
-        printf '%s\n' "$out" | grep -q 'stderr heartbeat skipped this cycle'; then
+    if grep_in "$out" -q 'stderr unexpected error: disk write failed' &&
+        grep_in "$out" -q 'stderr heartbeat skipped this cycle'; then
         pass "a stderr fixture line appears in --timeline with a synthetic stderr operation"
     else
         fail "a stderr fixture line appears in --timeline with a synthetic stderr operation"
@@ -682,8 +696,8 @@ test_stderr_source_in_timeline() {
 test_stderr_source_fields_and_level() {
     local out
     out="$(run_logs --central --runtime store --level error --fields operation,level,message)"
-    if printf '%s\n' "$out" | grep -q '^operation=stderr level=error message=unexpected error: disk write failed$' &&
-        ! printf '%s\n' "$out" | grep -q 'heartbeat skipped'; then
+    if grep_in "$out" -q '^operation=stderr level=error message=unexpected error: disk write failed$' &&
+        ! grep_in "$out" -q 'heartbeat skipped'; then
         pass "--fields and --level honor a stderr source's synthesized fields"
     else
         fail "--fields and --level honor a stderr source's synthesized fields"
@@ -694,8 +708,8 @@ test_stderr_source_fields_and_level() {
 test_messages_source_in_tally() {
     local out
     out="$(run_logs --central --runtime emacs --messages "$messages_file" --tally)"
-    if printf '%s\n' "$out" | grep -Eq '^1\s+warn\s+emacs\s+messages$' &&
-        printf '%s\n' "$out" | grep -Eq '^1\s+error\s+emacs\s+messages$'; then
+    if grep_in "$out" -Eq '^1\s+warn\s+emacs\s+messages$' &&
+        grep_in "$out" -Eq '^1\s+error\s+emacs\s+messages$'; then
         pass "a Messages fixture line is scraped and appears in --tally"
     else
         fail "a Messages fixture line is scraped and appears in --tally"
@@ -706,9 +720,9 @@ test_messages_source_in_tally() {
 test_messages_source_in_timeline() {
     local out
     out="$(run_logs --central --runtime emacs --messages "$messages_file" --timeline)"
-    if printf '%s\n' "$out" | grep -q 'messages WARNING: the module warned about a fixture condition' &&
-        printf '%s\n' "$out" | grep -q "messages Wrong type argument: stringp, nil" &&
-        ! printf '%s\n' "$out" | grep -q 'ordinary echo line'; then
+    if grep_in "$out" -q 'messages WARNING: the module warned about a fixture condition' &&
+        grep_in "$out" -q "messages Wrong type argument: stringp, nil" &&
+        ! grep_in "$out" -q 'ordinary echo line'; then
         pass "a Messages fixture line appears in --timeline and prose lines are skipped"
     else
         fail "a Messages fixture line appears in --timeline and prose lines are skipped"
@@ -719,8 +733,8 @@ test_messages_source_in_timeline() {
 test_messages_source_fields_and_level() {
     local out
     out="$(run_logs --central --messages "$messages_file" --level error --fields operation,level,message)"
-    if printf '%s\n' "$out" | grep -q '^operation=messages level=error message=Wrong type argument: stringp, nil$' &&
-        ! printf '%s\n' "$out" | grep -q 'WARNING: the module warned'; then
+    if grep_in "$out" -q '^operation=messages level=error message=Wrong type argument: stringp, nil$' &&
+        ! grep_in "$out" -q 'WARNING: the module warned'; then
         pass "--fields and --level honor a Messages source's synthesized fields"
     else
         fail "--fields and --level honor a Messages source's synthesized fields"
@@ -791,8 +805,8 @@ EOF
 test_human_names_the_workspace_and_hides_its_id() {
     local out
     out="$(run_logs --workspace "$workspace_a" --runtime daemon)"
-    if printf '%s\n' "$out" | grep -q 'workspace=alpha ' &&
-        ! printf '%s\n' "$out" | grep -q 'workspace_id=\|workspace_dir='; then
+    if grep_in "$out" -q 'workspace=alpha ' &&
+        ! grep_in "$out" -q 'workspace_id=\|workspace_dir='; then
         pass "the compact format names the workspace and hides its ID and directory"
     else
         fail "the compact format names the workspace and hides its ID and directory"
@@ -802,7 +816,7 @@ test_human_names_the_workspace_and_hides_its_id() {
 test_json_appends_the_workspace_name_last() {
     local out
     out="$(run_logs --workspace "$workspace_a" --runtime shim --json)"
-    if printf '%s\n' "$out" | grep -q '"workspace_id":"ws-a".*,"workspace_name":"alpha"}$'; then
+    if grep_in "$out" -q '"workspace_id":"ws-a".*,"workspace_name":"alpha"}$'; then
         pass "--json appends the synthetic workspace_name as the record's last key"
     else
         fail "--json appends the synthetic workspace_name as the record's last key"
@@ -812,7 +826,7 @@ test_json_appends_the_workspace_name_last() {
 test_fields_projects_the_workspace_name() {
     local out
     out="$(run_logs --workspace "$workspace_a" --runtime shim --fields workspace_name,operation)"
-    if printf '%s\n' "$out" | grep -q '^workspace_name=alpha operation=shim.failure$'; then
+    if grep_in "$out" -q '^workspace_name=alpha operation=shim.failure$'; then
         pass "--fields projects the synthetic workspace_name"
     else
         fail "--fields projects the synthetic workspace_name"
@@ -823,7 +837,7 @@ test_an_unknown_workspace_keeps_its_id() {
     local only_b="$TMP/only-beta-workspaces.tsv" out
     printf 'ws-b\t%s\tbeta\n' "$workspace_b" >"$only_b"
     out="$(AGENT_REPL_LOGS_TEST_ROWS_OVERRIDE="$only_b" run_logs --workspace "$workspace_a" --runtime daemon)"
-    if printf '%s\n' "$out" | grep -q 'workspace_id=ws-a' && ! printf '%s\n' "$out" | grep -q 'workspace='; then
+    if grep_in "$out" -q 'workspace_id=ws-a' && ! grep_in "$out" -q 'workspace='; then
         pass "a record whose workspace the daemon cannot name keeps its ID"
     else
         fail "a record whose workspace the daemon cannot name keeps its ID"
@@ -834,7 +848,7 @@ test_an_unnamed_daemon_workspace_is_refused() {
     local unnamed="$TMP/unnamed-workspaces.tsv" rc=0 err
     printf 'ws-a\t%s\t\nws-b\t%s\tbeta\n' "$workspace_a" "$workspace_b" >"$unnamed"
     err="$(AGENT_REPL_LOGS_TEST_ROWS_OVERRIDE="$unnamed" run_logs --workspace "$workspace_b" 2>&1 >/dev/null)" || rc=$?
-    if [ "$rc" -ne 0 ] && printf '%s\n' "$err" | grep -q 'daemon workspace ws-a has an empty name'; then
+    if [ "$rc" -ne 0 ] && grep_in "$err" -q 'daemon workspace ws-a has an empty name'; then
         pass "a daemon workspace with no name is refused rather than shown by its ID"
     else
         fail "a daemon workspace with no name is refused rather than shown by its ID"
@@ -847,8 +861,8 @@ test_reader_refuses_a_malformed_or_repeated_workspace_name() {
     reader="$(ls "$TMP"/build/logs-reader-* | head -n 1)"
     err1="$("$reader" --workspace-name "ws-a" 2>&1)" || rc1=$?
     err2="$("$reader" --workspace-name "ws-a=alpha" --workspace-name "ws-a=again" 2>&1)" || rc2=$?
-    if [ "$rc1" -ne 0 ] && printf '%s\n' "$err1" | grep -q 'is not ID=NAME' &&
-        [ "$rc2" -ne 0 ] && printf '%s\n' "$err2" | grep -q 'names workspace "ws-a" twice'; then
+    if [ "$rc1" -ne 0 ] && grep_in "$err1" -q 'is not ID=NAME' &&
+        [ "$rc2" -ne 0 ] && grep_in "$err2" -q 'names workspace "ws-a" twice'; then
         pass "the reader refuses a malformed or repeated --workspace-name"
     else
         fail "the reader refuses a malformed or repeated --workspace-name"
