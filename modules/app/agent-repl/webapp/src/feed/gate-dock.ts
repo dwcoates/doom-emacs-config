@@ -33,12 +33,25 @@ export const DOCKED_CARD_CLASS = "cold-gate-docked";
 export const DOCKED_ROW_CLASS = "gate-docked-row";
 /** The root custom property Emacs sets to the input window's pixel height. */
 export const DOCK_HEIGHT_PROPERTY = "--gate-dock-height";
+/** The root custom property Emacs sets to the input window's background. */
+export const DOCK_BACKGROUND_PROPERTY = "--gate-dock-bg";
+
+/** What Emacs set PROPERTY to on the root, or null when it never told it. */
+function toldRootProperty(doc: Document, property: string): string | null {
+  const told = doc.documentElement.style.getPropertyValue(property).trim();
+  return told === "" ? null : told;
+}
 
 /** The height the dock takes: what Emacs said, or null when it said nothing
  * and the stylesheet's fraction stands in. */
 export function toldDockHeight(doc: Document): string | null {
-  const told = doc.documentElement.style.getPropertyValue(DOCK_HEIGHT_PROPERTY).trim();
-  return told === "" ? null : told;
+  return toldRootProperty(doc, DOCK_HEIGHT_PROPERTY);
+}
+
+/** The background the docked card takes: the input window's, as Emacs said,
+ * or null when it said nothing and the card's own background stands in. */
+export function toldDockBackground(doc: Document): string | null {
+  return toldRootProperty(doc, DOCK_BACKGROUND_PROPERTY);
 }
 
 /** What `installGateDock` hands back. */
@@ -123,9 +136,17 @@ export function installGateDock(feed: HTMLElement, dock: HTMLElement): GateDock 
         operation: "feed.gate-dock.height-fallback",
       });
     }
+    const background = toldDockBackground(dock.ownerDocument);
+    if (background === null) {
+      // Emacs tells the input's background with its height; a page it never
+      // told keeps the card's own background instead.
+      log.info("a gate stands; Emacs never told the input's background, so the docked card keeps its own", {
+        operation: "feed.gate-dock.background-fallback",
+      });
+    }
     log.info("a gate stands; its banner docks below the footer", {
       operation: "feed.gate-dock.docked",
-      context: { height: height ?? "fallback" },
+      context: { height: height ?? "fallback", background: background ?? "fallback" },
     });
   };
 
