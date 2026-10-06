@@ -620,6 +620,26 @@ func (o *orchestrator) admitFront(ctx context.Context, repo wsm.RepoKey) (ids.Wo
 		return "", nil, false, nil
 	}
 	defer o.leaveAdmission()
+	o.mu.Lock()
+	busy := o.running[repo] != nil
+	o.mu.Unlock()
+	if busy {
+		return "", nil, false, nil
+	}
+	// A MERGE A RESTART INTERRUPTED GOES FIRST, paused queue or not: it was
+	// already running, and a pause stops only new admissions. Its entry is
+	// admitted already.
+	if ws, resuming := o.resumeIn(repo); resuming {
+		lock, taken, err := acquireRepoLock(o.lockDir, string(repo))
+		if err != nil {
+			return "", nil, false, err
+		}
+		if !taken {
+			o.deps.Log.Global().Warn(op, "another daemon holds this repository's merge queue", dlog.Context{"repo": string(repo)})
+			return "", nil, false, nil
+		}
+		return ws, lock, true, nil
+	}
 	paused, err := o.deps.DB.MergeQueuePaused(ctx, repo)
 	if err != nil {
 		return "", nil, false, err
@@ -627,18 +647,29 @@ func (o *orchestrator) admitFront(ctx context.Context, repo wsm.RepoKey) (ids.Wo
 	if paused {
 		return "", nil, false, nil
 	}
-	o.mu.Lock()
-	busy := o.running[repo] != nil
-	o.mu.Unlock()
-	if busy {
-		return "", nil, false, nil
-	}
 	entries, err := o.deps.DB.MergeQueue(ctx, repo)
 	if err != nil {
 		return "", nil, false, err
 	}
+	// ONE MERGE PER REPOSITORY AT A TIME, ACROSS DAEMONS. An entry admitted
+	// with no run here is a merge another daemon is driving, or one a
+	// handover is moving between them: nothing is admitted behind it until it
+	// ends or resumes here.
+	for _, entry := range entries {
+		if entry.State == wsm.MergeAdmitted {
+			o.deps.Log.Global().Debug(op, "a merge admitted elsewhere holds this repository's slot; nothing is admitted behind it",
+				dlog.Context{"repo": string(repo), "workspace": string(entry.Workspace)})
+			return "", nil, false, nil
+		}
+	}
 	front, found := nextInLine(entries)
 	if !found {
+		return "", nil, false, nil
+	}
+	// A WORKSPACE HANDED TO ANOTHER DAEMON HAS ITS MERGES THERE.
+	if o.movedAway(front.Workspace) {
+		o.deps.Log.Global().Debug(op, "the queue front's workspace moved to another daemon; it admits the merge there",
+			dlog.Context{"repo": string(repo), "workspace": string(front.Workspace)})
 		return "", nil, false, nil
 	}
 	lock, taken, err := acquireRepoLock(o.lockDir, string(repo))
@@ -654,6 +685,19 @@ func (o *orchestrator) admitFront(ctx context.Context, repo wsm.RepoKey) (ids.Wo
 		return "", nil, false, err
 	}
 	return front.Workspace, lock, true, nil
+}
+
+// resumeIn answers the merge of one repository the boot recovery handed the
+// pump to resume, if any.
+func (o *orchestrator) resumeIn(repo wsm.RepoKey) (ids.WorkspaceID, bool) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	for ws, doc := range o.resumes {
+		if doc.Repo == string(repo) {
+			return ws, true
+		}
+	}
+	return "", false
 }
 
 // nextInLine answers the first entry of a queue that is waiting in line: a

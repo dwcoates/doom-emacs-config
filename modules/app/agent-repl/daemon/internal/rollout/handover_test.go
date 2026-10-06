@@ -1474,3 +1474,55 @@ func TestAHandoverRemovesAStaleManifestBeforeItsSuccessorBoots(t *testing.T) {
 		t.Fatalf("the stale intent manifest was still on disk when the successor was spawned")
 	}
 }
+
+// TestATransferSuspendsTheWorkspacesMergeBeforeItsShimMoves pins the merge's
+// move: it drives the workspace's own session, so it stops while the shim is
+// still this daemon's.
+func TestATransferSuspendsTheWorkspacesMergeBeforeItsShimMoves(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+
+	// Act
+	if err := runHandover(t, h, 1); err != nil {
+		t.Fatalf("Handover: %v", err)
+	}
+
+	// Assert
+	taken := h.order.Taken()
+	quiesce, suspend, detach := indexOf(taken, "quiesce"), indexOf(taken, "suspend_merge"), indexOf(taken, "detach")
+	if quiesce < 0 || suspend < 0 || detach < 0 || quiesce > suspend || suspend > detach {
+		t.Fatalf("steps = %v, want the merge suspended after the quiesce and before the detach", taken)
+	}
+	if calls := h.merges.called(); len(calls) != 1 || calls[0] != "suspend "+string(ws) {
+		t.Fatalf("merge calls = %v, want one suspension of %s", calls, ws)
+	}
+}
+
+// TestATransferWhoseMergeWillNotSuspendIsTakenBack covers the refusal: a merge
+// still driving the session is never handed over under it, and the workspace
+// is served here again with its merges taken back.
+func TestATransferWhoseMergeWillNotSuspendIsTakenBack(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	shim := h.fleet.live[ws]
+	h.merges.suspendErr = errors.New("the merge did not let go")
+
+	// Act
+	if _, err := h.c.HandOver(context.Background(), false); err != nil {
+		t.Fatalf("HandOver: %v", err)
+	}
+	h.registry.wait()
+
+	// Assert
+	if shim.Detached() {
+		t.Fatal("a workspace whose merge would not suspend had its shim detached")
+	}
+	if calls := h.merges.called(); len(calls) != 2 || calls[1] != "adopt "+string(ws) {
+		t.Fatalf("merge calls = %v, want the suspension then this daemon taking the merges back", calls)
+	}
+	if !loggedError(h.log, opTransfer, "could not suspend the workspace's merge") {
+		t.Fatalf("records = %+v, want the refused suspension at ERROR", h.log.Records())
+	}
+}

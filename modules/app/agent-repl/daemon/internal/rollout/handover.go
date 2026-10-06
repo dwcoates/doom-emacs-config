@@ -445,6 +445,16 @@ func (c *controller) transfer(ctx context.Context, ws wsm.Workspace, plan *hando
 	c.log.Debug(opTransfer, "quiesced the workspace's intake", fields)
 	_, hadShim := c.deps.Shims.Client(ws.ID)
 
+	// THE MERGE STOPS BEFORE ITS SESSION MOVES. A merge drives this
+	// workspace's own session, so it is suspended at a stopping point here,
+	// while the shim is still this daemon's, and the adopting daemon resumes
+	// it at its recorded step (merge/transfer.go).
+	if err := c.deps.Merges.SuspendForTransfer(ctx, ws.ID); err != nil {
+		c.log.Error(opTransfer, "could not suspend the workspace's merge for its transfer; taking the workspace back", withCause(fields, err))
+		return errors.Join(fmt.Errorf("rollout: transfer %q: suspend the merge: %w", ws.ID, err),
+			c.takeBack(ctx, ws.ID, lease, hadShim, nil, fields))
+	}
+
 	// SEAL, THEN CARRY, BEFORE THE RELEASE. The queue's memory of the work
 	// in flight -- its acts, its running cut, its semantic head -- and the
 	// standing cold gate are written into the workspace's carry here, while
@@ -587,6 +597,12 @@ func (c *controller) reclaim(ctx context.Context, ws ids.WorkspaceID, lease ids.
 	}
 	if err := c.reRequest(ctx, ws, move, fields); err != nil {
 		failures = append(failures, err)
+	}
+	// THE MERGE A TRANSFER SUSPENDED RESUMES HERE, the workspace being this
+	// daemon's again.
+	if err := c.deps.Merges.AdoptWorkspace(ctx, ws); err != nil {
+		c.log.Error(opTransfer, "the taken-back workspace's merges could not be taken back", withCause(fields, err))
+		failures = append(failures, fmt.Errorf("rollout: reclaim %q: take its merges back: %w", ws, err))
 	}
 	if c.deps.PublishViews != nil {
 		if err := c.deps.PublishViews(ctx, ws); err != nil {

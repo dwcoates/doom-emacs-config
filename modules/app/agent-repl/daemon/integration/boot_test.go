@@ -57,7 +57,8 @@ func TestSecondDaemonOnTheSameStateRootRefusesToBoot(t *testing.T) {
 	}
 
 	// Act
-	second := harness.StartDaemon(t, harness.Opts{StateDir: incumbent.StateDir, ExpectEarlyExit: true})
+	// The refusal waits the whole claim bound first; see harness.ClaimRefusalTimeout.
+	second := harness.StartDaemon(t, harness.Opts{StateDir: incumbent.StateDir, ExpectEarlyExit: true, Timeout: harness.ClaimRefusalTimeout})
 	// The sweep covers every test; the declared records are evidence of the second daemon the test boots.
 	second.ExpectWarnings("daemon.cmd.claim")
 	code := second.AwaitExit()

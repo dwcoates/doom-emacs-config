@@ -15,6 +15,7 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/gitclient"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/resolve/footer"
 	"claude-repld/internal/wsm"
 )
 
@@ -388,6 +389,7 @@ func ledgeredRun(t *testing.T, h *harness) *run {
 		startedMS:  h.clock().UnixMilli(),
 		rounds:     map[string]int{},
 		openRounds: map[string]tabRound{},
+		git:        newGatedGit(h.o.deps.Git, h.o.deps.Now),
 	}
 }
 
@@ -527,5 +529,139 @@ func TestEveryPublishedTabCarriesItsRoundsLedgerStart(t *testing.T) {
 	}
 	if checked == 0 {
 		t.Fatal("the run published no tab to check")
+	}
+}
+
+func TestDrawLiveStandsAnAgenticRoundLive(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	r := ledgeredRun(t, h)
+	round := r.openTab(context.Background(), TabFixes)
+
+	// Act.
+	r.drawLive(context.Background(), round, footer.StepFixing, fixingLine([]string{"daemon"}),
+		func(f *footer.MergeFacts) { f.Attempt = 2 }, fixesTab(round.live(), 2))
+
+	// Assert: the turns are addressed, the footer is on the step with its
+	// line and facts, and the tab is drawn.
+	if len(h.feed.installed()) != 1 {
+		t.Fatalf("addresses = %v, want the round addressed once", h.feed.installed())
+	}
+	facts := h.footer.last()
+	if facts.Step != footer.StepFixing || facts.Attempt != 2 || facts.Line.GetFixing() == nil {
+		t.Fatalf("facts = %+v, want the fixing step with its attempt and line", facts)
+	}
+	if h.feed.lastTabOfKind(TabFixes) == nil {
+		t.Fatal("the round's tab was not drawn")
+	}
+}
+
+// TestEveryAgenticRoundOpensThroughDrawLive is the drift guard on the shared
+// shape: a round addressed anywhere else is a hand-rolled copy of drawLive.
+func TestEveryAgenticRoundOpensThroughDrawLive(t *testing.T) {
+	// Arrange.
+	sources := []string{"run.go", "process.go", "resume.go", "gate.go", "terminal.go", "recover.go"}
+
+	// Act.
+	sites := 0
+	for _, name := range sources {
+		body, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatalf("reading %s: %v", name, err)
+		}
+		sites += strings.Count(string(body), "r.address(round)")
+	}
+
+	// Assert.
+	if sites != 1 {
+		t.Fatalf("r.address(round) appears %d times, want once (inside drawLive)", sites)
+	}
+}
+
+func TestTakeSessionHoldsTheOccupancyGuard(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	r := ledgeredRun(t, h)
+
+	// Act.
+	err := r.takeSession(context.Background())
+
+	// Assert.
+	if err != nil || r.releaseOccupancy == nil {
+		t.Fatalf("takeSession = %v with release %v, want the guard held", err, r.releaseOccupancy != nil)
+	}
+}
+
+func TestTakeSessionFailsOnAnUnregisteredRepository(t *testing.T) {
+	// Arrange: the workspace names a repository the registry does not hold.
+	h := newHarness(t)
+	r := ledgeredRun(t, h)
+	h.db.mu.Lock()
+	ws := h.db.workspaces[theWorkspace]
+	ws.Repo = "repo-gone"
+	h.db.workspaces[theWorkspace] = ws
+	h.db.mu.Unlock()
+
+	// Act.
+	err := r.takeSession(context.Background())
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "merge policy") || r.releaseOccupancy != nil {
+		t.Fatalf("takeSession = %v, want the policy failure and no guard taken", err)
+	}
+}
+
+func TestAwaitWorkspacesFreeWaitsForTheOtherWorkspaceToo(t *testing.T) {
+	// Arrange: a merge of another workspace's branch, both busy.
+	h := newHarness(t)
+	r := ledgeredRun(t, h)
+	r.subject.other = otherWorkspace
+	h.freeness.busy = true
+
+	// Act.
+	err := r.awaitWorkspacesFree(context.Background())
+
+	// Assert.
+	if err != nil || h.freeness.awaits() != 2 {
+		t.Fatalf("awaitWorkspacesFree = %v after %d waits, want both workspaces waited for", err, h.freeness.awaits())
+	}
+}
+
+func TestAwaitWorkspacesFreeAnswersTheFailedWait(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	r := ledgeredRun(t, h)
+	h.freeness.busy = true
+	h.freeness.awaitErr = errors.New("watcher closed")
+
+	// Act.
+	err := r.awaitWorkspacesFree(context.Background())
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "watcher closed") {
+		t.Fatalf("awaitWorkspacesFree = %v, want the wait's failure", err)
+	}
+}
+
+func TestASuspendedRunTellsThePumpNothingFailed(t *testing.T) {
+	// Arrange: a merge held inside its test gate.
+	h := newHarness(t)
+	h.emacsRepo()
+	inGate, release := make(chan struct{}), make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	h.runner.before = func() {
+		close(inGate)
+		<-release
+	}
+	enqueue(t, h)
+	done := admitAsync(h, context.Background())
+	<-inGate
+
+	// Act.
+	h.o.Drain(context.Background())
+
+	// Assert.
+	if err := <-done; err != nil {
+		t.Fatalf("the pump was told %v, want no failure for a suspended run", err)
 	}
 }

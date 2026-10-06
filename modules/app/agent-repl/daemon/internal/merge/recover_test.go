@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
-	"strings"
+	"slices"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -83,11 +83,14 @@ func TestRecoverReleasesTheStuckLease(t *testing.T) {
 	}
 }
 
-// TestRecoverLoudlyFailsAnUncleanTarget covers the unresumable case: the daemon
-// does not know what the dead run staged, and guessing would land a tree nobody
-// reviewed.
-func TestRecoverLoudlyFailsAnUncleanTarget(t *testing.T) {
-	// Arrange: an interrupted merge over a dirty target.
+// TestRecoverRequeuesARecordlessMergeWhateverItsTargetHolds covers the
+// owner's ruling: a merge's fate is never decided from what its target's
+// working tree holds. An admitted merge with no progress record never took a
+// step, so content in the target -- an untracked file, the owner's own edits
+// -- is no evidence about it.
+func TestRecoverRequeuesARecordlessMergeWhateverItsTargetHolds(t *testing.T) {
+	// Arrange: an interrupted merge with no record, over a target whose
+	// status would read unclean.
 	h := newHarness(t)
 	enqueue(t, h)
 	interruptMerge(t, h)
@@ -99,27 +102,18 @@ func TestRecoverLoudlyFailsAnUncleanTarget(t *testing.T) {
 	}
 
 	// Assert.
-	facts, _ := h.o.Facts(theWorkspace)
-	if facts.State != StateFailed {
-		t.Fatalf("the merge is %q, want it failed loudly", facts.State)
-	}
-	if !strings.Contains(facts.Detail, "restart") {
-		t.Fatalf("the failure reads %q, want it to name the restart", facts.Detail)
-	}
-	entries, _ := h.db.MergeQueue(context.Background(), h.repoKey())
-	if len(entries) != 0 {
-		t.Fatalf("a loudly failed merge is still queued: %+v", entries)
+	if facts, _ := h.o.Facts(theWorkspace); facts.State != StateQueued {
+		t.Fatalf("the merge is %q, want it queued for another run", facts.State)
 	}
 }
 
-// TestRecoverLoudlyFailsWhenTheTargetCannotBeInspected covers the other
-// unresumable case: "could not tell" is never read as resumable.
-func TestRecoverLoudlyFailsWhenTheTargetCannotBeInspected(t *testing.T) {
-	// Arrange: a target git cannot answer for.
+// TestRecoverNeverReadsTheTargetsStatus pins the same ruling at its source: the
+// recovery asks git nothing about the target's working tree.
+func TestRecoverNeverReadsTheTargetsStatus(t *testing.T) {
+	// Arrange.
 	h := newHarness(t)
 	enqueue(t, h)
 	interruptMerge(t, h)
-	h.git.cleanErr = errors.New("the target is gone")
 
 	// Act.
 	if err := h.o.Recover(context.Background()); err != nil {
@@ -127,8 +121,8 @@ func TestRecoverLoudlyFailsWhenTheTargetCannotBeInspected(t *testing.T) {
 	}
 
 	// Assert.
-	if facts, _ := h.o.Facts(theWorkspace); facts.State != StateFailed {
-		t.Fatalf("the merge is %q, want it failed loudly", facts.State)
+	if slices.Contains(h.git.calls, "is_clean") {
+		t.Fatalf("the recovery read the target's status: %v", h.git.calls)
 	}
 }
 
@@ -178,21 +172,6 @@ func TestRecoverNeverLeavesAMergeInFlight(t *testing.T) {
 				t.Fatalf("%s in %s is still admitted after recovery", entry.Workspace, repo)
 			}
 		}
-	}
-}
-
-// TestLastTabDefaultsToTheQueue covers a merge with no ledger yet: it never
-// reached a phase, so the queue is where it resumes.
-func TestLastTabDefaultsToTheQueue(t *testing.T) {
-	// Arrange: a workspace with no ledger.
-	h := newHarness(t)
-
-	// Act.
-	got := h.o.lastTab(context.Background(), theWorkspace)
-
-	// Assert.
-	if got != TabQueue {
-		t.Fatalf("the last tab is %q, want %q", got, TabQueue)
 	}
 }
 

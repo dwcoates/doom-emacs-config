@@ -9,7 +9,7 @@ import (
 
 // steppedRun is a run of the harness workspace that publishes facts.
 func steppedRun(h *harness) *run {
-	return &run{o: h.o, ws: theWorkspace, repo: h.repoKey()}
+	return &run{o: h.o, ws: theWorkspace, repo: h.repoKey(), git: newGatedGit(h.o.deps.Git, h.o.deps.Now)}
 }
 
 func TestANewStepClearsTheLastStepsLine(t *testing.T) {

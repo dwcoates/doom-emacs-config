@@ -109,6 +109,14 @@ const HandoverChainTimeout = 3 * DefaultTimeout
 // chain, not a stall. 3x DefaultTimeout is ~3.5x that 4.22s passing max.
 const MergeChainTimeout = 3 * DefaultTimeout
 
+// ClaimRefusalTimeout bounds the wait for a daemon that REFUSES to boot because
+// a serving incumbent holds the boot claim. Its refusal is not a stall: it
+// waits the whole daemonaddr.ClaimWaitBound (12.32s, which must outlast the
+// incumbent's merge drain, git wait included) before it decides the incumbent
+// is serving, so the bound is that wait plus one DefaultTimeout for the exit
+// that follows it.
+const ClaimRefusalTimeout = daemonaddr.ClaimWaitBound + DefaultTimeout
+
 // pollInterval is how often a file-existence wait re-checks. Nothing in the
 // harness sleeps to let another party make progress.
 const pollInterval = 5 * time.Millisecond

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"testing"
 
@@ -112,4 +113,45 @@ func TestVendorServesForwarderWithNoQueueIsAWiringDefectAtError(t *testing.T) {
 		}
 	}
 	t.Fatalf("no ERROR record of an edge before the queue was bound")
+}
+
+func TestAnUnboundMergeMoverRefusesTheMove(t *testing.T) {
+	// Arrange.
+	f := &mergeMoverForwarder{}
+
+	// Act.
+	err := f.SuspendForTransfer(context.Background(), "ws-1")
+
+	// Assert.
+	if !errors.Is(err, errMergeMoverUnbound) {
+		t.Fatalf("SuspendForTransfer = %v, want errMergeMoverUnbound", err)
+	}
+}
+
+// recordingMover records the moves a bound forwarder carries.
+type recordingMover struct{ calls []string }
+
+func (m *recordingMover) SuspendForTransfer(_ context.Context, ws ids.WorkspaceID) error {
+	m.calls = append(m.calls, "suspend "+string(ws))
+	return nil
+}
+
+func (m *recordingMover) AdoptWorkspace(_ context.Context, ws ids.WorkspaceID) error {
+	m.calls = append(m.calls, "adopt "+string(ws))
+	return nil
+}
+
+func TestABoundMergeMoverCarriesBothMoves(t *testing.T) {
+	// Arrange.
+	f := &mergeMoverForwarder{}
+	target := &recordingMover{}
+	f.bind(target)
+
+	// Act.
+	errs := errors.Join(f.SuspendForTransfer(context.Background(), "ws-1"), f.AdoptWorkspace(context.Background(), "ws-1"))
+
+	// Assert.
+	if errs != nil || len(target.calls) != 2 || target.calls[0] != "suspend ws-1" || target.calls[1] != "adopt ws-1" {
+		t.Fatalf("calls = %v (%v), want both moves carried", target.calls, errs)
+	}
 }

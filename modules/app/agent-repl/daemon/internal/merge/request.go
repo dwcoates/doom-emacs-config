@@ -263,13 +263,18 @@ func (o *orchestrator) queueRequest(ctx context.Context, ws ids.WorkspaceID, rep
 			dlog.Context{"workspace": string(ws)})
 		return nil
 	}
-	position, err := o.deps.DB.QueueMerge(ctx, repo, ws)
+	// THE BUBBLE EXISTS FROM HERE: the ledger identity it is addressed by is
+	// minted as the merge takes its place, and written on its row with that
+	// place, so republishQueue can draw it -- and the next daemon to serve the
+	// workspace draws the same bubble.
+	ledger := o.mintLedger(ws)
+	position, err := o.deps.DB.QueueMerge(ctx, repo, ws, ledger)
 	if err != nil {
+		o.mu.Lock()
+		delete(o.ledgerOf, ws)
+		o.mu.Unlock()
 		return err
 	}
-	// THE BUBBLE EXISTS FROM HERE: the ledger identity it is addressed by is
-	// minted as the merge takes its place, so republishQueue can draw it.
-	o.mintLedger(ws)
 	o.log(ctx, ws).Info(op, "put a merge in line; it is reported from here", dlog.Context{
 		"workspace": string(ws), "repo": string(repo), "position": position})
 	if err := o.republishQueue(ctx, repo); err != nil {
