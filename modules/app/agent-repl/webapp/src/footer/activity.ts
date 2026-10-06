@@ -53,7 +53,6 @@ import type {
   FooterStatusActivityCloseBlocked,
   FooterStatusActivityColdGateCost,
   FooterStatusActivityCompaction,
-  FooterStatusActivityContextBudget,
   FooterStatusActivityFault,
   FooterStatusActivityGatedCall,
   FooterStatusActivityInterrupting,
@@ -411,8 +410,6 @@ function drawSalientKind(
       return drawFooterStatusActivityCloseBlocked(kind.value);
     case "notification":
       return drawFooterStatusActivityNotification(kind.value);
-    case "contextBudget":
-      return drawFooterStatusActivityContextBudget(kind.value);
     default: {
       const other: { case: string } = kind;
       return unreachableArm(path, other.case);
@@ -430,13 +427,6 @@ export function drawFooterStatusActivityNotification(
   u: FooterStatusActivityNotification,
 ): HTMLElement {
   return textLine("footer-activity-notification", u.text);
-}
-
-/** The context-budget warning, or a failed compaction's account, verbatim. */
-export function drawFooterStatusActivityContextBudget(
-  u: FooterStatusActivityContextBudget,
-): HTMLElement {
-  return textLine("footer-activity-context-budget", u.text);
 }
 
 // ---- the transient tier -----------------------------------------------------
