@@ -9,6 +9,10 @@ The repo-wide rules in the top-level `AGENTS.md` apply here in full; this file
 covers deploying and running THIS module, plus the color vocabulary every one
 of its surfaces shares.
 
+## Tests NEVER run real git or a real vendor
+
+Owner rule, reaffirmed 2026-10-06: no test of any form — unit, integration, e2e, e2e-emacs, harness, hook test — runs real `git` or reaches a real vendor (the Claude API, the Agent SDK against Anthropic, any network vendor). Git is the fake git executable (`bin/fake-git.sh`, `daemon/integration/fakegit`); the vendor is the mocked SDK. A test that needs either and cannot use the fake is a gap to report, never an exception to take.
+
 ## Elisp layout
 
 Every elisp source and every ERT suite lives in `lisp/`. Exactly three files
