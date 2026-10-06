@@ -2404,12 +2404,10 @@ func (f *Fleet) askToStartSession(ctx context.Context, log dlog.Logger, ws ids.W
 // Every scope but the unspecified one is offered, because an unspecified scope
 // is not a choice.
 func (f *Fleet) raiseColdGate(ws ids.WorkspaceID, vendorSessionID string, cold *conversationv1.SessionCold, configDir string) {
-	var compact *ServedColdGateCompact
-	var menu *frontendv1.FeedColdGateCompactMenu
-	offered := offersColdCompaction(f.deps.Accounts, configDir)
-	if offered {
-		compact, menu = coldCompactMenu(cold)
-	}
+	// EVERY ACCOUNT IS OFFERED COMPACTION (owner ruling 2026-10-06, reversing
+	// the 2026-09-30 work-account exclusion): the work account's gate offers
+	// compact too.
+	compact, menu := coldCompactMenu(cold)
 
 	cost := coldGateCost(cold, f.deps.Topbar.ContextWindow(ws))
 	detail := cost.Text()
@@ -2422,7 +2420,7 @@ func (f *Fleet) raiseColdGate(ws ids.WorkspaceID, vendorSessionID string, cold *
 	f.lastCold[ws] = cold
 	f.mu.Unlock()
 	f.logTransition(ws, "cold_gate_standing", stood, true,
-		dlog.Context{"vendor_session_id": vendorSessionID, "compaction_offered": offered})
+		dlog.Context{"vendor_session_id": vendorSessionID, "compaction_offered": compact != nil})
 
 	f.deps.Feed.UpsertSynthesized(ws, feedid.Feed{Root: true}, &frontendv1.FeedRow{
 		Id: coldGateRowID(ws, vendorSessionID),

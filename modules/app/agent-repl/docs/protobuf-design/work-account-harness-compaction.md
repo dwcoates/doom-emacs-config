@@ -1,5 +1,10 @@
 # Work-account harness compaction
 
+> **REVERSED (owner ruling, 2026-10-06):** the work account IS offered the
+> harness compaction at the cold gate, like every other account (`raiseColdGate`
+> always serves the compact menu; `offersColdCompaction` is gone). The record
+> below is kept as history.
+
 Work (multi-repo) accounts must never pay for the HARNESS's own compaction —
 the shim's throwaway summarizing session — while the VENDOR CLI's own
 auto-compaction stays on for every account. Before this change the inverse was
