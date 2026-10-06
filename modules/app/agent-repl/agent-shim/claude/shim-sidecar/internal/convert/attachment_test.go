@@ -316,6 +316,38 @@ func TestTheContextBudgetWarningLandsAsAPageLineOfTheAgentsBook(t *testing.T) {
 	}
 }
 
+func TestTheContextBudgetWarningReadsTheSameFieldsAsTheShim(t *testing.T) {
+	// The shim reads `content`, else `text`, and the mocked vendor writes
+	// `content`; a reader that skipped either would leave the warning undrawn.
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{name: "content", body: `{"type":"context_budget_warning","content":"Context low (9% remaining)"}`, want: "Context low (9% remaining)"},
+		{name: "text", body: `{"type":"context_budget_warning","text":"Context low (9% remaining)"}`, want: "Context low (9% remaining)"},
+		{name: "content wins over text", body: `{"type":"context_budget_warning","content":"from content","text":"from text"}`, want: "from content"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			c := newTestConverter(t)
+
+			// Act.
+			entries := convertLines(t, c, attachmentLineOf("cb1", tc.body))
+
+			// Assert.
+			if len(entries) != 1 {
+				t.Fatalf("entries = %d, want 1: keys=%v", len(entries), allKeys(entries))
+			}
+			warning := entries[0].GetAgentUpdate().GetServeableFrame().GetAgentItem().GetAgentFrame().GetUpdate().GetContextBudgetWarning()
+			if got := warning.GetText(); got != tc.want {
+				t.Fatalf("text = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestTheContextBudgetWarningIsKeyedByItsOwnRecord(t *testing.T) {
 	// Arrange. It is INSTANTANEOUS with no lifecycle: two warnings in one session
 	// are two facts, and collapsing them onto one key would leave only the last.
