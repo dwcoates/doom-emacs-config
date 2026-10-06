@@ -52,10 +52,9 @@ option go_package = "agentrepl/proto/frontend/v1;frontendv1";
 // Always whole, never a delta — the model is small, so a full replace makes a
 // partially-applied roster unrepresentable.
 message WorkspaceRoster {
-  // BOTH groupings, fully resolved. WHICH ONE IS DRAWN is webview-local
-  // preference (stage-3 ruling): the client shows one pane and hides the
-  // other — a selection between two resolved views, exactly as folding hides
-  // rows, never a derivation.
+  // BOTH groupings, fully resolved. WHICH ONE IS DRAWN is `shown`: the client
+  // shows one pane and hides the other — a selection between two resolved
+  // views, exactly as folding hides rows, never a derivation.
   RosterRepositoryView repository = 1;
   RosterTaskView task = 2;
   // Workspaces whose merge has settled, hoisted out of the groupings above
@@ -64,7 +63,21 @@ message WorkspaceRoster {
   // The selected workspace — the last SelectWorkspace the daemon received.
   // UNSET when there is none.
   optional RosterCurrentWorkspace current = 4;
+  // WHICH GROUPING EVERY PAGE SHOWS. DAEMON-HELD (UpdateSidebarView), because
+  // the sidebar looks the same in every workspace's page (owner ruling,
+  // 2026-10-06). Never shown otherwise, it is the repository grouping. Never
+  // unset on the wire.
+  oneof shown {
+    RosterShownRepository shown_repository = 5;
+    RosterShownTask shown_task = 6;
+  }
 }
+
+// The repository grouping is shown. DELIBERATELY EMPTY: the arm is the fact.
+message RosterShownRepository {}
+
+// The task grouping is shown. DELIBERATELY EMPTY: the arm is the fact.
+message RosterShownTask {}
 
 // The priority badge's drawn label.
 message RosterRowPriorityBadge {
@@ -239,7 +252,7 @@ message RosterRepoSection {
   RosterSectionHeader header = 2;
   // The rows below the header.
   RosterRows rows = 3;
-  // WHETHER THE SECTION IS FOLDED. DAEMON-HELD (FoldRepository), because two
+  // WHETHER THE SECTION IS FOLDED. DAEMON-HELD (UpdateSidebarView), because two
   // surfaces draw it: the sidebar hides a collapsed section's rows, and the
   // Emacs tab bar hides that repository's workspaces from its tabs, numbering
   // and navigation. Never unset on a wire section.
@@ -273,7 +286,23 @@ message RosterTaskSection {
   RosterTaskSectionHeader header = 2;
   // The rows below the header.
   RosterRows rows = 3;
+  // WHETHER THE SECTION IS FOLDED. DAEMON-HELD (UpdateSidebarView), because a
+  // fold is no page's own: every workspace's page draws the same one (owner
+  // ruling, 2026-10-06). A task never folded is expanded. Never unset on a
+  // wire section.
+  oneof fold {
+    // The rows are shown.
+    RosterTaskSectionExpanded expanded = 4;
+    // The rows are hidden; the header stays.
+    RosterTaskSectionCollapsed collapsed = 5;
+  }
 }
+
+// An expanded task section. DELIBERATELY EMPTY: the arm is the fact.
+message RosterTaskSectionExpanded {}
+
+// A collapsed task section. DELIBERATELY EMPTY: the arm is the fact.
+message RosterTaskSectionCollapsed {}
 
 // A task's stable identity.
 message RosterTaskKey {
@@ -285,16 +314,33 @@ message RosterTaskKey {
 message RosterMergedSection {
   RosterSectionHeader header = 1;
   RosterRows rows = 2;
+  // WHETHER THE BAND IS FOLDED. DAEMON-HELD (UpdateSidebarView), because a
+  // fold is no page's own: opening it in one workspace's page opens it in
+  // every page (owner ruling, 2026-10-06). Never folded or unfolded by
+  // anyone, it is COLLAPSED: settled history spends no rail height until it
+  // is asked for. Never unset on the wire.
+  oneof fold {
+    // The merged rows are shown.
+    RosterMergedSectionExpanded expanded = 3;
+    // The merged rows are hidden; the header and its count stay.
+    RosterMergedSectionCollapsed collapsed = 4;
+  }
 }
 
-// A section header as repos and the merged section draw it. Fold state is
-// WEBVIEW-LOCAL (stage-3 ruling) and is no element of this view.
+// An expanded recently-merged band. DELIBERATELY EMPTY: the arm is the fact.
+message RosterMergedSectionExpanded {}
+
+// A collapsed recently-merged band. DELIBERATELY EMPTY: the arm is the fact.
+message RosterMergedSectionCollapsed {}
+
+// A section header as repos and the merged section draw it. The fold it
+// toggles is the SECTION's (RosterRepoSection.fold, RosterMergedSection.fold),
+// never an element of the header.
 message RosterSectionHeader {
   RosterLabel label = 1;
   // How many workspaces the section holds, drawn as "(N)" beside the label
-  // while the section is FOLDED (fold state is webview-local, so the client
-  // shows or hides this resolved value by its own fold; it never counts rows
-  // itself). Always set.
+  // while the section is FOLDED (the client shows or hides this resolved value
+  // by the section's fold; it never counts rows itself). Always set.
   RosterSectionCount count = 2;
 }
 
