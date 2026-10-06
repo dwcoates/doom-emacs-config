@@ -56,6 +56,9 @@ type Suite struct {
 	// IntegrationConfig adds a Vitest suite's integration config (relative to
 	// Path) to the suite: its files are a second split run under that config.
 	IntegrationConfig string
+	// IntegrationBuild is the command (run in Path) that builds what the
+	// integration files spawn, run once before any of them. Empty means none.
+	IntegrationBuild []string
 	// Slots is a Script suite's width: the core slots its one unit holds.
 	// Zero is one slot. A wider suite is told its width in
 	// AGENT_REPL_UNIT_SLOTS and must cap itself to exactly that many cores.
@@ -99,7 +102,11 @@ var Suites = []Suite{
 	{Name: "lock", Kind: GoModule, Path: "agent-shim/shim-lock"},
 	{Name: "logging", Kind: GoModule, Path: "agent-shim/logging/go"},
 	{Name: "webapp", Kind: Vitest, Path: "webapp", IntegrationConfig: "vitest.integration.config.ts"},
-	{Name: "shim", Kind: Vitest, Path: "agent-shim/claude/shim", IntegrationConfig: "vitest.integration.config.ts"},
+	// The shim's integration files spawn its bundle and its lock helper
+	// (dist/main.js, dist/shim-lock): `pretest:integration` builds both, as
+	// `npm run test:integration` always has.
+	{Name: "shim", Kind: Vitest, Path: "agent-shim/claude/shim", IntegrationConfig: "vitest.integration.config.ts",
+		IntegrationBuild: []string{"npm", "run", "pretest:integration"}},
 	{Name: "proto", Kind: Script, Path: "bin/report-nonlisp-coverage.sh", Args: []string{"proto"}},
 	{Name: "logging-density", Kind: Script, Path: "bin/report-logging-density.sh"},
 	{Name: "e2e", Kind: E2E, Path: "e2e"},
