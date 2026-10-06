@@ -33,6 +33,7 @@
  */
 import type {
   FooterActivityEnduring,
+  FooterActivityEnduringSeatSpend,
   FooterActivityEnduringUsage,
   FooterActivityTransient,
   FooterActivityTransientApiRestored,
@@ -91,6 +92,7 @@ import type {
   FooterStatusWorkingSalient,
   FooterStatusWaitingActivity,
   FooterStatusWaitingSalient,
+  FooterMoney,
 } from "../../../proto/gen/ts/frontend/v1/footer_pb";
 import { formatAge, formatCountdown, formatTickedAge } from "../duration.js";
 import { tick } from "../feed/ticking.js";
@@ -666,14 +668,14 @@ export function drawGivesUpCountdown(
 // ---- the enduring tier ------------------------------------------------------
 
 /**
- * THE ENDURING LINE: the account's usage allowances, "session 41% · resets in
- * 2h 5m | weekly 12% · resets in 3d". It is always true while it stands, so it
+ * THE ENDURING LINE: the account's usage BY BILLING MODE (owner ruling,
+ * 2026-10-06). A subscription's allowances read "session 41% · resets in
+ * 2h 5m | weekly 12% · resets in 3d"; a per-seat account's spend reads
+ * "$223.88 of $12,000 this month". It is always true while it stands, so it
  * carries no age.
  *
  * IT IS NEVER EMPTY (owner ruling, 2026-10-06): an account never observed
- * reads "usage not yet seen for this account", and one whose usage service
- * reports no allowance window reads "no session or weekly allowance on this
- * account".
+ * reads "usage not yet seen for this account".
  * The figures ellipsize (newsworthy window first) inside an inline flex box no
  * wider than the cell.
  */
@@ -699,8 +701,8 @@ export function drawFooterActivityEnduring(
     case "unobserved":
       line.textContent = ENDURING_UNOBSERVED_TEXT;
       break;
-    case "noAllowance":
-      line.textContent = ENDURING_NO_ALLOWANCE_TEXT;
+    case "seatSpend":
+      line.append(...drawFooterActivityEnduringSeatSpend(chosen.value, `${path}.seat_spend`));
       break;
     default: {
       const other: { case: string } = chosen;
@@ -713,8 +715,65 @@ export function drawFooterActivityEnduring(
 /** The enduring line before anything is known of the account's usage. */
 export const ENDURING_UNOBSERVED_TEXT = "usage not yet seen for this account";
 
-/** The enduring line of an account whose usage service reports no allowance window. */
-export const ENDURING_NO_ALLOWANCE_TEXT = "no session or weekly allowance on this account";
+/** What a seat's spend reads before the vendor has reported one. */
+export const SEAT_SPEND_UNSEEN_TEXT = "spend not yet seen";
+
+/**
+ * A per-seat account's spend: "$223.88 of $12,000 this month", or "spend not
+ * yet seen of $12,000 this month" before the vendor reports one. The vendor
+ * states no billing-period reset, so none is drawn.
+ *
+ * THE SPENT FIGURE WEARS THE PERCENT GRADIENT, driven by spent/allotment
+ * (`utilization`) through the one path every footer percentage takes
+ * (`paintPressure`); the allotment and the words stay the line's color.
+ */
+export function drawFooterActivityEnduringSeatSpend(
+  u: FooterActivityEnduringSeatSpend,
+  path: string,
+): (HTMLElement | string)[] {
+  const allotment = formatMoney(requireMessage(u.allotment, `${path}.allotment`), `${path}.allotment`);
+  const tail = ` of ${allotment} this month`;
+  if (u.spent === undefined) {
+    if (u.utilization !== undefined) {
+      throw new MalformedView(`${path}.utilization`, "a utilization is set with no spend");
+    }
+    return [`${SEAT_SPEND_UNSEEN_TEXT}${tail}`];
+  }
+  if (u.utilization === undefined) {
+    throw new MalformedView(`${path}.utilization`, "a spend is set with no utilization");
+  }
+  const spent = document.createElement("span");
+  spent.className = "footer-seat-spent";
+  spent.setAttribute("data-datum", "spent");
+  spent.textContent = formatMoney(u.spent, `${path}.spent`);
+  paintPressure(spent, u.utilization);
+  return [spent, tail];
+}
+
+/**
+ * An amount of money as the footer draws it: dollars (or the currency's own
+ * major unit), with the minor digits only when the amount has any, so
+ * 1_200_000 USD cents reads "$12,000" and 22_388 reads "$223.88". A currency
+ * code the runtime cannot name is refused at PATH, never drawn.
+ */
+export function formatMoney(m: FooterMoney, path: string): string {
+  let digits: number;
+  try {
+    digits = new Intl.NumberFormat("en-US", { style: "currency", currency: m.currency })
+      .resolvedOptions().maximumFractionDigits ?? 0;
+  } catch (err) {
+    throw new MalformedView(`${path}.currency`, `${JSON.stringify(m.currency)} is not a currency: ${String(err)}`);
+  }
+  const scale = 10n ** BigInt(digits);
+  const whole = m.amountMinor % scale === 0n;
+  const amount = Number(m.amountMinor) / Number(scale);
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: m.currency,
+    minimumFractionDigits: whole ? 0 : digits,
+    maximumFractionDigits: whole ? 0 : digits,
+  }).format(amount);
+}
 
 /**
  * The usage line: EVERY window the vendor figured, newsworthy first.
@@ -796,8 +855,18 @@ export function drawFooterPercent(fraction: number): HTMLElement {
   percent.className = "footer-percent";
   percent.setAttribute("data-datum", "percent");
   percent.textContent = `${String(figure)}%`;
-  percent.style.color = pressurePercentColor(figure);
+  paintPressure(percent, fraction);
   return percent;
+}
+
+/**
+ * Color a footer figure by how full it is: a 0..1 fraction on the wire, as
+ * the whole percent it would be drawn, through `pressurePercentColor`. THE ONE
+ * GRADIENT PATH for every footer figure that says how full something is: an
+ * allowance's percentage and a seat's spend alike.
+ */
+export function paintPressure(figure: HTMLElement, fraction: number): void {
+  figure.style.color = pressurePercentColor(Math.round(fraction * 100));
 }
 
 /** One drawable allowance, under the label the strip and the sheet both use. */
