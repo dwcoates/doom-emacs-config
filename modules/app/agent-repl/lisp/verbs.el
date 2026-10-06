@@ -1694,7 +1694,11 @@ and the path is added by the caller that knows it.")
   "Claim a `RegisterRepositoryError' refusal of PATH from VALUE, else nil.
 An arm this command has a sentence for is reported as that sentence; any
 other arm answers nil and falls through to the arm-generic reporting, so a
-refusal the daemon adds later still reaches the user correctly."
+refusal the daemon adds later still reaches the user correctly.
+
+A REFUSAL IS AN ANSWER, NOT A FAULT, so it is recorded at INFO: the daemon
+did what it was asked and said no, and the user is told why.  The failure
+the user reads is the progress report's own."
   (let* ((arm (agent-repl-verbs--refusal-arm value))
          (keyword (plist-get arm :arm))
          (sentence
@@ -1705,7 +1709,7 @@ refusal the daemon adds later still reaches the user correctly."
             (when-let ((said (cdr (assq keyword agent-repl-verbs--register-repository-sentences))))
               (format "%s: %s" said path)))))
     (when sentence
-      (agent-repl--warn agent-repl--global-log-scope
+      (agent-repl--info agent-repl--global-log-scope
                         "elisp.verbs.register-repository-refused path=%S arm=%S"
                         path keyword)
       (agent-repl-workspace-progress-report :register-repository :failed sentence)
