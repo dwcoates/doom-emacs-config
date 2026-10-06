@@ -2930,6 +2930,73 @@ func TestResumeColdRecordsTheReopenedSessionFacts(t *testing.T) {
 	}
 }
 
+func TestResumeColdLiftsThePromptRefusalBeforeTheSessionIsWatched(t *testing.T) {
+	// Arrange: an answered gate, and a probe at the instant the session's
+	// watcher opens -- the edge from which the host view shows it live.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	parkedGate(t, f, ws)
+	if !f.fleet.TakeColdGate(ws.ID, "vendor-1") {
+		t.Fatal("TakeColdGate = false, want the standing gate taken")
+	}
+	refusingAtWatch := true
+	f.onStartWatcher = func() { _, refusingAtWatch = f.fleet.ColdGateDetail(ws.ID) }
+
+	// Act.
+	if err := f.fleet.ResumeCold(context.Background(), ws.ID,
+		ColdResume{VendorSessionID: "vendor-1", Remediation: payRemediation()}); err != nil {
+		t.Fatalf("ResumeCold: %v", err)
+	}
+
+	// Assert: a prompt sent once the session shows live is not refused cold.
+	if refusingAtWatch {
+		t.Fatal("ColdGateDetail still refused prompts as the re-opened session's watcher opened, want the refusal lifted once the shim accepted the remediation")
+	}
+}
+
+func TestResumeColdKeepsThePromptRefusalWhenTheShimRefusesAgain(t *testing.T) {
+	// Arrange: the shim states the cost a second time.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	parkedGate(t, f, ws)
+	if !f.fleet.TakeColdGate(ws.ID, "vendor-1") {
+		t.Fatal("TakeColdGate = false, want the standing gate taken")
+	}
+	f.client.response = coldResponse()
+
+	// Act.
+	_ = f.fleet.ResumeCold(context.Background(), ws.ID,
+		ColdResume{VendorSessionID: "vendor-1", Remediation: payRemediation()})
+
+	// Assert.
+	if _, gated := f.fleet.ColdGateDetail(ws.ID); !gated {
+		t.Fatal("ColdGateDetail = not gated after the remediated resume was refused cold again, want prompts still refused")
+	}
+}
+
+func TestAReraisedGateRefusesPromptsAgainAfterAFailedBringUp(t *testing.T) {
+	// Arrange: the shim accepts the remediation, then the bring-up breaks.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	parkedGate(t, f, ws)
+	if !f.fleet.TakeColdGate(ws.ID, "vendor-1") {
+		t.Fatal("TakeColdGate = false, want the standing gate taken")
+	}
+	f.watchErr = errors.New("watch refused")
+	if err := f.fleet.ResumeCold(context.Background(), ws.ID,
+		ColdResume{VendorSessionID: "vendor-1", Remediation: payRemediation()}); err == nil {
+		t.Fatal("ResumeCold = nil, want the broken bring-up's error")
+	}
+
+	// Act.
+	reraised := f.fleet.ReraiseColdGate(ws.ID, "vendor-1")
+
+	// Assert.
+	if _, gated := f.fleet.ColdGateDetail(ws.ID); !reraised || !gated {
+		t.Fatalf("ReraiseColdGate = %v, gated = %v, want the gate standing and refusing prompts again", reraised, gated)
+	}
+}
+
 func TestResumeColdKeepsTheParkedHostIdentity(t *testing.T) {
 	// Arrange: the remediated resume is the SAME session, so it must not mint a
 	// second host identity for a conversation that never ended.
