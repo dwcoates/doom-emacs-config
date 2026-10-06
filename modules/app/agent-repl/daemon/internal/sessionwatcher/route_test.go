@@ -329,21 +329,6 @@ func TestRouteContextCut(t *testing.T) {
 	assertNames(t, got, []string{"feed.OnContextCut", "footer.OnContextCut", "topbar.OnContextCut"})
 }
 
-// TestRouteContextBudgetWarning covers the arm's plane: the vendor's
-// context-budget warning is a transcript attachment on the AGENT plane, and
-// the footer's activity line is its only consumer.
-func TestRouteContextBudgetWarning(t *testing.T) {
-	// Arrange.
-	h := newHarness(t, Session{Started: sessionStarted("")})
-	h.quiet()
-
-	// Act.
-	got := h.routeNow(func(w *watcher) { w.routeUpdateLocked(agentID("main-1"), budgetWarningFrame(), nil, nil, nil) })
-
-	// Assert.
-	assertNames(t, got, []string{"footer.OnContextBudgetWarning"})
-}
-
 // TestRouteApiError covers mid-turn evidence: it is a page line, and the
 // footer's and the roster's retry block, and never a terminal — the turn goes
 // on.

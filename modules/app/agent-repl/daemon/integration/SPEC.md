@@ -348,7 +348,8 @@ the vendor (`AGENT_REPL_FORBID_VENDOR_CALLS=1` in every process).
   task_act state, monitors, crons from AgentCron listed; unset when zero
 - wakeup: schedule_wakeup scheduled → `waiting.wakeup` only when nothing
   else stands; a real status wins
-- rate_limited and context_budget precedence: notification outranks both
+- shared salient precedence: a deploy's progress outranks the notification;
+  no context-budget line exists (owner ruling, 2026-10-06)
 - topbar: title from naming; model selector from the catalog with the
   effective model selected; context chip from context_usage push; warnings
   for session faults (diagnostics unhealthy) retracted on the next healthy

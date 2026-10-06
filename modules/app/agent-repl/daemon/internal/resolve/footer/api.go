@@ -233,10 +233,10 @@ type ColdGateAnswer struct {
 	Text string
 	// Progress is the compaction phase the shim relayed that Text words, nil
 	// for the answer's own request line and for a remediation that is not a
-	// compaction. A CONCLUDED phase is the compaction's outcome: success ends
-	// the context-budget line and is announced as `compaction_concluded`, and
-	// failure stands the context-budget line, exactly as the vendor's own
-	// compaction's outcome does.
+	// compaction. A CONCLUDED phase is the compaction's outcome: success is
+	// announced as `compaction_concluded`, and failure raises no footer line
+	// (the feed's outcome marker is its whole account), exactly as the
+	// vendor's own compaction's outcome does.
 	Progress *conversationv1.SessionCompactionProgress
 }
 

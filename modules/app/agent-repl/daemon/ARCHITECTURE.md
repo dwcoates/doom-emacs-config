@@ -760,7 +760,9 @@ Rulings already binding; code swaps to the generated arms when it lands:
   `AgentUpdate.context_budget_warning = 7 {text}` — a page line, sidecar-
   produced, arriving via WatchAgent. Route it to the footer from the agent
   plane (sessionwatcher: new AgentUpdate arm → FooterSink; delete the
-  WatchSession routing; footer: unchanged consumer).
+  WatchSession routing; footer: unchanged consumer). Since RETIRED with the
+  footer's `context_budget` kind (owner ruling, 2026-10-06): tag 7 is
+  reserved, nothing routes it.
 - Restored live-work items route to the root feed (agreed).
 - The landing-4 batch also carries the ERROR-ARMS.md arms and the four e2e
   seam answers (arm names; the merge test-gate invocation; the .claude.json
