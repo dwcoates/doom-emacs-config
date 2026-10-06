@@ -213,6 +213,58 @@ webview).  Body does nothing but the external calls; tests mock via
       (xwidget-webkit-goto-uri (xwidget-webkit-current-session) url))
     buf))
 
+(defun agent-repl--frontend-widget-size (xw)
+  "External-boundary wrapper: XW's requested size, as (WIDTH HEIGHT).
+Registered in `agent-repl--external-boundary-functions'."
+  (xwidget-size-request xw)) ;; ALLOW-EXTERNAL-BOUNDARY
+
+(defun agent-repl--frontend-resize-widget (xw width height)
+  "External-boundary wrapper: resize XW to WIDTH x HEIGHT pixels.
+Registered in `agent-repl--external-boundary-functions'."
+  (xwidget-resize xw width height)) ;; ALLOW-EXTERNAL-BOUNDARY
+
+;;;; ---- Webview sizing -------------------------------------------------------
+;;
+;; (The mode variable is defined further down by its `define-minor-mode'.)
+;;
+;; A WEBVIEW IS SIZED BY ITS WINDOW, ALWAYS.  Emacs creates a webkit xwidget at
+;; the size of whatever window is SELECTED at that instant
+;; (`xwidget-webkit--create-new-session-buffer') and never resizes it: the
+;; stock auto-adjust hangs off `eval-after-load' on a feature nothing provides,
+;; so `xwidget-webkit-adjust-size-in-frame' is never on
+;; `window-size-change-functions'.  A page created while the composer window
+;; was selected was therefore drawn 255 px tall inside a 1189 px window, the
+;; rest blank (observed 2026-10-06).  So agent-repl fits each of its webviews
+;; to the window showing it whenever a window's size or buffer changes.
+
+(defvar agent-repl-frontend-webview-mode)
+
+(defun agent-repl--frontend-fit-webview-to-window (window)
+  "Resize the agent-repl webview WINDOW shows to WINDOW's body, when they differ.
+No-op for a window showing anything else, or a webview with no live widget."
+  (let ((buf (window-buffer window)))
+    (when (buffer-local-value 'agent-repl-frontend-webview-mode buf)
+      (when-let ((xw (agent-repl--frontend-webview-live-widget buf)))
+        (let* ((edges (window-inside-pixel-edges window))
+               (width (- (nth 2 edges) (nth 0 edges)))
+               (height (- (nth 3 edges) (nth 1 edges)))
+               (size (agent-repl--frontend-widget-size xw)))
+          (unless (and (equal (car size) width) (equal (cadr size) height))
+            (agent-repl--log '(:agent-repl-central "webview sizing walks every window of a frame")
+                             "elisp.frontend.webview-fit buffer=%s from=%Sx%S to=%dx%d"
+                             (buffer-name buf) (car size) (cadr size) width height)
+            (agent-repl--frontend-resize-widget xw width height)))))))
+
+(defun agent-repl--frontend-fit-webviews (&optional frame)
+  "Fit every agent-repl webview on FRAME to the window showing it.
+Registered on `window-size-change-functions' and
+`window-buffer-change-functions', which call it with FRAME."
+  (walk-windows #'agent-repl--frontend-fit-webview-to-window 'no-minibuf
+                (or frame (selected-frame))))
+
+(add-hook 'window-size-change-functions #'agent-repl--frontend-fit-webviews)
+(add-hook 'window-buffer-change-functions #'agent-repl--frontend-fit-webviews)
+
 (defun agent-repl--frontend-kill-webview (buf)
   "Kill webview BUF without the xwidget kill-query prompt.
 `xwidget-kill-buffer-query-function' (on `kill-buffer-query-functions')
