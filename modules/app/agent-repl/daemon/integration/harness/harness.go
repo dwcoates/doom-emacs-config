@@ -32,6 +32,7 @@
 //
 //	AGENT_REPL_STATE_DIR                  the state root
 //	AGENT_REPL_FORBID_VENDOR_CALLS=1      set in every spawned process
+//	AGENT_REPL_TEST_SQLITE_UNSYNCED=1     the state database skips SQLite's forced flushes
 //	AGENT_REPL_STORE_SOCKET               the store socket a flag beats
 //	MULTI_REPO_ROOT                       the tree whose workspaces use the multi-repo account
 //	AGENT_REPL_LOCK_DIR                   redirects ~/.cache/agent-repl/run for the kernel locks
@@ -117,11 +118,16 @@ func WithRunRoot(body func() int) int {
 	// A dead run's leftovers are reclaimed BEFORE this run adds its own. A
 	// reclaim that fails is a failed run, never a shrug: the leftovers are
 	// exactly the disk and the CPU the suite cannot spare.
-	if err := hostRunRoots.reclaimDeadRuns(); err != nil {
+	space, err := hostRunRoots()
+	if err != nil {
 		fmt.Fprintln(os.Stderr, "harness:", err)
 		return 1
 	}
-	root, lock, err := hostRunRoots.newRunRoot()
+	if err := space.reclaimDeadRuns(); err != nil {
+		fmt.Fprintln(os.Stderr, "harness:", err)
+		return 1
+	}
+	root, lock, err := space.newRunRoot()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "harness:", err)
 		return 1

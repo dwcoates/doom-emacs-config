@@ -103,7 +103,7 @@ func TestRegisterWorkspaceDoesNotHandBackAStandingTemporaryRow(t *testing.T) {
 	// file opened with the PRODUCTION guard, which exempts nothing.
 	path := filepath.Join(t.TempDir(), "wsm.db")
 	dir := t.TempDir()
-	first, err := Open(context.Background(), path)
+	first, err := Open(context.Background(), path, WithUnsyncedWrites())
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -115,7 +115,7 @@ func TestRegisterWorkspaceDoesNotHandBackAStandingTemporaryRow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build the production guard: %v", err)
 	}
-	handle, err := Open(context.Background(), path, WithTemporaryGuard(production))
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites(), WithTemporaryGuard(production))
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}

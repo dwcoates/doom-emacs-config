@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -878,8 +877,7 @@ func TestWriteBatchReportsTheLockWaitInsideItsMeasuredDuration(t *testing.T) {
 	// to begin is part of what the record calls the statement's duration —
 	// which is exactly why it is also reported on its own.
 	s, log := newSink(t)
-	path := filepath.Join(t.TempDir(), "store.db")
-	d, err := OpenWithOptions(path, log, Options{
+	d := memoryStore(t, log, Options{
 		Now:       func() int64 { return testNow },
 		SlowQuery: time.Nanosecond,
 		// The bulk budget has to come down with the interactive threshold, or
@@ -888,10 +886,6 @@ func TestWriteBatchReportsTheLockWaitInsideItsMeasuredDuration(t *testing.T) {
 		BulkBase:   time.Nanosecond,
 		BulkPerRow: time.Nanosecond,
 	})
-	if err != nil {
-		t.Fatalf("OpenWithOptions: %v", err)
-	}
-	t.Cleanup(func() { d.Close() }) //nolint:errcheck // best-effort test teardown
 
 	// Act
 	writeOK(t, d, pageEntry("w1", "u1", "agent-1", frameItem(activityFrame("agent-1", "act-1", prose()))))
@@ -1157,18 +1151,13 @@ var writeBatchStatements = []struct {
 func newBoundedStore(t *testing.T, clock *fakeClock, rows, bytes int, span time.Duration) (*DB, *sink) {
 	t.Helper()
 	s, log := newSink(t)
-	d, err := OpenWithOptions(filepath.Join(t.TempDir(), "store.db"), log, Options{
+	return memoryStore(t, log, Options{
 		Now:            func() int64 { return testNow },
 		Clock:          clock.Now,
 		BulkChunkRows:  rows,
 		BulkChunkBytes: bytes,
 		BulkChunkTime:  span,
-	})
-	if err != nil {
-		t.Fatalf("OpenWithOptions: %v", err)
-	}
-	t.Cleanup(func() { d.Close() }) //nolint:errcheck // best-effort test teardown
-	return d, s
+	}), s
 }
 
 // entriesOf builds n distinct page lines for one book.

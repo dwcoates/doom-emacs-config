@@ -1352,7 +1352,7 @@ func TestTheMigrationAddsTheRepositoriesFoldedColumn(t *testing.T) {
 	path := fixtureAt(t, 16)
 
 	// Act
-	handle, err := Open(context.Background(), path)
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites())
 	if err != nil {
 		t.Fatalf("Open on a layout-16 database: %v", err)
 	}

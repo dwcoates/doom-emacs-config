@@ -195,7 +195,7 @@ func TestReadWALIndexRefusesAHeaderThatCannotBeTrusted(t *testing.T) {
 
 func TestAWritersReleaseHandsTheWALReadingToTheCheckpointJob(t *testing.T) {
 	// Arrange
-	d, _ := newStore(t)
+	d, _ := newFileStore(t)
 
 	// Act
 	writeOne(t, d, "a")
@@ -214,7 +214,7 @@ func TestAWritersReleaseHandsTheWALReadingToTheCheckpointJob(t *testing.T) {
 
 func TestAFailedWALReadingIsLoggedAtErrorAndStillWakesTheJob(t *testing.T) {
 	// Arrange: a descriptor that can no longer be read.
-	d, s := newStore(t)
+	d, s := newFileStore(t)
 	broken := openBytes(t, walIndexBytes(walIndexVersion, 1, 1, 0))
 	broken.Close() //nolint:errcheck // closed on purpose: every read now fails
 	d.wal.shm = broken
@@ -239,7 +239,7 @@ func TestAFailedWALReadingIsLoggedAtErrorAndStillWakesTheJob(t *testing.T) {
 
 func TestCheckpointCopiesEveryWaitingFrame(t *testing.T) {
 	// Arrange
-	d, _ := newStore(t)
+	d, _ := newFileStore(t)
 	writeOne(t, d, "a")
 
 	// Act
@@ -256,7 +256,7 @@ func TestCheckpointCopiesEveryWaitingFrame(t *testing.T) {
 
 func TestCheckpointIsLoggedWithItsPagesDurationAndClass(t *testing.T) {
 	// Arrange
-	d, s := newStore(t)
+	d, s := newFileStore(t)
 	writeOne(t, d, "a")
 
 	// Act
@@ -290,7 +290,7 @@ func TestCheckpointIsLoggedWithItsPagesDurationAndClass(t *testing.T) {
 
 func TestCheckpointSkipsWhenNoFrameIsWaiting(t *testing.T) {
 	// Arrange
-	d, s := newStore(t)
+	d, s := newFileStore(t)
 	writeOne(t, d, "a")
 	if _, err := d.Checkpoint(ctx(), TriggerGrowth); err != nil {
 		t.Fatalf("first Checkpoint: %v", err)
@@ -315,7 +315,7 @@ func TestCheckpointSkipsWhenNoFrameIsWaiting(t *testing.T) {
 
 func TestCheckpointQueuesInTheBulkTierWhileAnInteractiveWriterHoldsTheWriter(t *testing.T) {
 	// Arrange: an interactive writer holds the one writer.
-	d, _ := newStore(t)
+	d, _ := newFileStore(t)
 	writeOne(t, d, "a")
 	queued := make(chan WriteClass, 1)
 	d.queuedForWrite = func(class WriteClass) { queued <- class }
@@ -355,7 +355,7 @@ func TestCheckpointQueuesInTheBulkTierWhileAnInteractiveWriterHoldsTheWriter(t *
 func TestAQueuedInteractiveWriterIsHandedTheWriterBeforeAQueuedCheckpoint(t *testing.T) {
 	// Arrange: hold the writer, queue a checkpoint, then queue an interactive
 	// write behind it.
-	d, _ := newStore(t)
+	d, _ := newFileStore(t)
 	writeOne(t, d, "a")
 	queued := make(chan WriteClass, 2)
 	d.queuedForWrite = func(class WriteClass) { queued <- class }
@@ -409,7 +409,7 @@ func TestAQueuedInteractiveWriterIsHandedTheWriterBeforeAQueuedCheckpoint(t *tes
 
 func TestAFailedCheckpointIsLoggedAtErrorAndReturned(t *testing.T) {
 	// Arrange
-	d, s := newStore(t)
+	d, s := newFileStore(t)
 	writeOne(t, d, "a")
 	failOnce(d)
 
@@ -432,7 +432,7 @@ func TestAFailedCheckpointIsLoggedAtErrorAndReturned(t *testing.T) {
 
 func TestCheckpointFailsLoudlyWhenTheWALIndexCannotBeRead(t *testing.T) {
 	// Arrange
-	d, s := newStore(t)
+	d, s := newFileStore(t)
 	broken := openBytes(t, walIndexBytes(walIndexVersion, 1, 1, 0))
 	broken.Close() //nolint:errcheck // closed on purpose: every read now fails
 	d.wal.shm = broken
@@ -450,7 +450,7 @@ func TestCheckpointFailsLoudlyWhenTheWALIndexCannotBeRead(t *testing.T) {
 
 func TestACheckpointThatCopiedNothingIsNarratedRatherThanRecorded(t *testing.T) {
 	// Arrange: a reader pins every waiting frame, so the pass copies none.
-	d, s := newStore(t)
+	d, s := newFileStore(t)
 	writeOne(t, d, "a")
 	d.runCheckpoint = func(context.Context) (int, int64, int64, error) { return 0, 5, 0, nil }
 
@@ -477,7 +477,7 @@ func TestACheckpointThatCopiedNothingIsNarratedRatherThanRecorded(t *testing.T) 
 
 func TestACheckpointWhoseCallerHungUpIsRecordedAsAbandoned(t *testing.T) {
 	// Arrange
-	d, s := newStore(t)
+	d, s := newFileStore(t)
 	canceled, cancel := context.WithCancel(ctx())
 	cancel()
 
@@ -498,7 +498,7 @@ func TestACheckpointWhoseCallerHungUpIsRecordedAsAbandoned(t *testing.T) {
 
 func TestTheJobCheckpointsOnceTheWALGrowsPastThePolicy(t *testing.T) {
 	// Arrange
-	d, _ := newStore(t)
+	d, _ := newFileStore(t)
 	_, runs := startCheckpoints(t, d, CheckpointPolicy{Pages: 1})
 
 	// Act
@@ -513,7 +513,7 @@ func TestTheJobCheckpointsOnceTheWALGrowsPastThePolicy(t *testing.T) {
 
 func TestTheJobWaitsBelowTheGrowthThresholdAndArmsTheIdleTrigger(t *testing.T) {
 	// Arrange
-	d, _ := newStore(t)
+	d, _ := newFileStore(t)
 	timers, runs := startCheckpoints(t, d, CheckpointPolicy{Pages: 1 << 30, Idle: 3 * time.Second})
 	<-timers.made // armed at start
 
@@ -535,7 +535,7 @@ func TestTheJobWaitsBelowTheGrowthThresholdAndArmsTheIdleTrigger(t *testing.T) {
 
 func TestTheJobCheckpointsWhenTheWriterGoesIdle(t *testing.T) {
 	// Arrange
-	d, _ := newStore(t)
+	d, _ := newFileStore(t)
 	timers, runs := startCheckpoints(t, d, CheckpointPolicy{Pages: 1 << 30})
 	<-timers.made
 	writeOne(t, d, "a")
@@ -553,7 +553,7 @@ func TestTheJobCheckpointsWhenTheWriterGoesIdle(t *testing.T) {
 
 func TestTheJobRetriesAFailedGrowthCheckpointAtTheNextWrite(t *testing.T) {
 	// Arrange
-	d, s := newStore(t)
+	d, s := newFileStore(t)
 	failOnce(d)
 	_, runs := startCheckpoints(t, d, CheckpointPolicy{Pages: 1})
 	writeOne(t, d, "a")
@@ -574,7 +574,7 @@ func TestTheJobRetriesAFailedGrowthCheckpointAtTheNextWrite(t *testing.T) {
 
 func TestTheJobRetriesAFailedIdleCheckpointAtTheNextIdle(t *testing.T) {
 	// Arrange
-	d, s := newStore(t)
+	d, s := newFileStore(t)
 	failOnce(d)
 	timers, runs := startCheckpoints(t, d, CheckpointPolicy{Pages: 1 << 30})
 	<-timers.made
@@ -597,7 +597,7 @@ func TestTheJobRetriesAFailedIdleCheckpointAtTheNextIdle(t *testing.T) {
 
 func TestTheJobArmsTheIdleTriggerWhenTheWALCannotBeRead(t *testing.T) {
 	// Arrange
-	d, _ := newStore(t)
+	d, _ := newFileStore(t)
 	timers, runs := startCheckpoints(t, d, CheckpointPolicy{Pages: 1})
 	<-timers.made
 	broken := openBytes(t, walIndexBytes(walIndexVersion, 1, 1, 0))
@@ -619,7 +619,7 @@ func TestTheJobArmsTheIdleTriggerWhenTheWALCannotBeRead(t *testing.T) {
 
 func TestTheJobRearmsTheIdleTriggerWhenAReaderCutACheckpointShort(t *testing.T) {
 	// Arrange: the pass leaves half the frames behind a reader.
-	d, _ := newStore(t)
+	d, _ := newFileStore(t)
 	d.runCheckpoint = func(context.Context) (int, int64, int64, error) { return 0, 10, 5, nil }
 	timers, runs := startCheckpoints(t, d, CheckpointPolicy{Pages: 1})
 	<-timers.made
@@ -649,7 +649,7 @@ func TestTheRealIdleTimerIsATimeTimer(t *testing.T) {
 
 func TestTheJobStopsWhenItsContextEnds(t *testing.T) {
 	// Arrange
-	d, _ := newStore(t)
+	d, _ := newFileStore(t)
 	d.newCheckpointTimer = newFakeTimers().new
 	jobCtx, cancel := context.WithCancel(ctx())
 	done := make(chan struct{})
@@ -723,7 +723,7 @@ func holdReadSnapshot(t *testing.T, d *DB) func() {
 func pinnedStore(t *testing.T, clock *fakeClock) (*DB, *sink, func()) {
 	t.Helper()
 	s, log := newSink(t)
-	d, err := OpenWithOptions(filepath.Join(t.TempDir(), "store.db"), log, Options{Now: func() int64 { return testNow }, Clock: clock.Now})
+	d, err := OpenWithOptions(filepath.Join(t.TempDir(), "store.db"), log, Options{Now: func() int64 { return testNow }, Clock: clock.Now, unsynced: true})
 	if err != nil {
 		t.Fatalf("OpenWithOptions: %v", err)
 	}
@@ -758,7 +758,7 @@ func TestACheckpointAReaderPinsCopiesNothingAndReportsTheReadMarks(t *testing.T)
 
 func TestACheckpointThatCopiesReportsWhatItCopied(t *testing.T) {
 	// Arrange
-	d, _ := newStore(t)
+	d, _ := newFileStore(t)
 	writeOne(t, d, "a")
 
 	// Act
@@ -1013,7 +1013,7 @@ func TestAReadAndAWriteCompleteWhileACheckpointIsStalled(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			// Arrange: a checkpoint stalled inside its pass.
-			d, _ := newStore(t)
+			d, _ := newFileStore(t)
 			writeOne(t, d, "a")
 			stalled, release := stallCheckpoints(t, d)
 			done := make(chan error, 1)
@@ -1047,7 +1047,7 @@ func TestAReadAndAWriteCompleteWhileACheckpointIsStalled(t *testing.T) {
 // write lock with its own uncommitted change.
 func TestTheCheckpointConnectionCheckpointsBesideAnOpenWriteTransaction(t *testing.T) {
 	// Arrange
-	d, _ := newStore(t)
+	d, _ := newFileStore(t)
 	writeOne(t, d, "a")
 	tx, release, err := d.beginWrite(ctx(), WriteInteractive)
 	if err != nil {
@@ -1077,7 +1077,7 @@ func TestTheCheckpointConnectionCheckpointsBesideAnOpenWriteTransaction(t *testi
 // the backfill mark of the NEW log.
 func TestACheckpointWhoseLogRestartedBeforeItsResultWasReadCountsTheWholeLog(t *testing.T) {
 	// Arrange
-	d, s := newStore(t)
+	d, s := newFileStore(t)
 	writeOne(t, d, "a")
 	d.runCheckpoint = func(c context.Context) (int, int64, int64, error) {
 		busy, frames, _, err := d.passiveCheckpoint(c)
@@ -1109,7 +1109,7 @@ func TestACheckpointWhoseLogRestartedBeforeItsResultWasReadCountsTheWholeLog(t *
 // is what the salt says.
 func TestTheSecondWALReadingNoticesARestart(t *testing.T) {
 	// Arrange
-	d, _ := newStore(t)
+	d, _ := newFileStore(t)
 	writeOne(t, d, "a")
 	before, _, err := d.readWALUnderWriter(ctx())
 	if err != nil {
@@ -1134,7 +1134,7 @@ func TestTheSecondWALReadingNoticesARestart(t *testing.T) {
 
 func TestCheckpointFailsLoudlyWhenTheSecondWALReadingFails(t *testing.T) {
 	// Arrange: the pass itself breaks the descriptor every reading uses.
-	d, s := newStore(t)
+	d, s := newFileStore(t)
 	writeOne(t, d, "a")
 	d.runCheckpoint = func(c context.Context) (int, int64, int64, error) {
 		busy, frames, checkpointed, err := d.passiveCheckpoint(c)
@@ -1156,7 +1156,7 @@ func TestCheckpointFailsLoudlyWhenTheSecondWALReadingFails(t *testing.T) {
 func TestACheckpointWhoseCallerHungUpDuringThePassIsRecordedAsAbandoned(t *testing.T) {
 	// Arrange: the caller hangs up while the pass runs, before the second
 	// reading queues.
-	d, s := newStore(t)
+	d, s := newFileStore(t)
 	writeOne(t, d, "a")
 	hungUp, cancel := context.WithCancel(ctx())
 	defer cancel()
@@ -1184,7 +1184,7 @@ func TestAWALReadingTakesTheWriterInTheBulkTierAndReportsItsWait(t *testing.T) {
 	// while the reading waits.
 	clock := &fakeClock{}
 	_, log := newSink(t)
-	d, err := OpenWithOptions(filepath.Join(t.TempDir(), "store.db"), log, Options{Now: func() int64 { return testNow }, Clock: clock.Now})
+	d, err := OpenWithOptions(filepath.Join(t.TempDir(), "store.db"), log, Options{Now: func() int64 { return testNow }, Clock: clock.Now, unsynced: true})
 	if err != nil {
 		t.Fatalf("OpenWithOptions: %v", err)
 	}
