@@ -164,7 +164,7 @@ func TestRecordNewsDigestRunRefusesMalformedRuns(t *testing.T) {
 func TestRecordNewsDigestRunRefusesAReadOnlyHandle(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)
-	s.readOnly = true
+	s.current.Store(&handleState{db: s.db(), readOnly: true})
 
 	// Act
 	err := s.RecordNewsDigestRun(context.Background(), NewsDigestRun{EndedAt: at, Recorded: true})

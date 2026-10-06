@@ -93,10 +93,10 @@ func buildTemplate(ctx context.Context) (*sql.DB, error) {
 		return nil, fmt.Errorf("wsm: open the in-memory schema template: %w", err)
 	}
 	if err := s.createSchema(ctx); err != nil {
-		s.handle.Close()
+		s.db().Close()
 		return nil, fmt.Errorf("wsm: create the in-memory schema template: %w", err)
 	}
-	return s.handle, nil
+	return s.db(), nil
 }
 
 // restoreTemplate copies the template's pages into the handle's own (empty)
