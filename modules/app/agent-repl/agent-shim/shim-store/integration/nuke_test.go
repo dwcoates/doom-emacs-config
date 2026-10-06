@@ -28,7 +28,7 @@ import (
 // file format, the wrong shape.
 func stampedForeignSchema(t *testing.T, path string) {
 	t.Helper()
-	handle, err := sql.Open("sqlite", "file:"+path)
+	handle, err := sql.Open("sqlite", "file:"+path+"?_pragma=synchronous(OFF)")
 	if err != nil {
 		t.Fatalf("staging a foreign database: %v", err)
 	}
@@ -46,7 +46,7 @@ func stampedForeignSchema(t *testing.T, path string) {
 // left behind.
 func stampedSupersededSchema(t *testing.T, path string) {
 	t.Helper()
-	handle, err := sql.Open("sqlite", "file:"+path)
+	handle, err := sql.Open("sqlite", "file:"+path+"?_pragma=synchronous(OFF)")
 	if err != nil {
 		t.Fatalf("staging a superseded database: %v", err)
 	}
@@ -273,7 +273,7 @@ func TestNukingRemovesTheStaleWalSibling(t *testing.T) {
 // rather than notional.
 func bulkyForeignSchema(t *testing.T, path string, megabytes int) {
 	t.Helper()
-	handle, err := sql.Open("sqlite", "file:"+path)
+	handle, err := sql.Open("sqlite", "file:"+path+"?_pragma=synchronous(OFF)")
 	if err != nil {
 		t.Fatalf("staging a bulky foreign database: %v", err)
 	}

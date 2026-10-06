@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"agentrepl/shim-store/internal/db"
 	"agentrepl/shim-store/internal/logging"
 	"agentrepl/shim-store/internal/pprofsurface"
 	"agentrepl/shim-store/internal/server"
@@ -20,6 +21,11 @@ func TestMain(m *testing.M) {
 	// Nothing in this process reaches a vendor, and the suite states so rather
 	// than relying on that remaining true.
 	if err := os.Setenv("AGENT_REPL_FORBID_VENDOR_CALLS", "1"); err != nil {
+		panic(err)
+	}
+	// Every database a test here opens is thrown away with it: no forced
+	// flushes (db.UnsyncedFromEnv).
+	if err := os.Setenv(db.EnvTestUnsyncedWrites, "1"); err != nil {
 		panic(err)
 	}
 	os.Exit(m.Run())
