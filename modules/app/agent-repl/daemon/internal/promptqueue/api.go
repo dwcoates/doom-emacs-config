@@ -238,6 +238,11 @@ type Queue interface {
 	// relaunch's resume, a cold-gate re-open): it un-stamps every reconnect
 	// hold and delivers the next entry down the ordinary path.
 	ReleaseReconnectHolds(ws ids.WorkspaceID)
+	// OnVendorServes is told that the workspace's mid-session vendor block
+	// stopped standing (footer.WithVendorServes): off the caller's goroutine,
+	// it releases the prompts held after reconnect while the block stood,
+	// classifies them and delivers them in order (vendorblock.go).
+	OnVendorServes(ws ids.WorkspaceID)
 	// Release delivers a held prompt now (UpdateHeldPrompt.release).
 	Release(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID) error
 	// Drop discards a held prompt (UpdateHeldPrompt.drop).

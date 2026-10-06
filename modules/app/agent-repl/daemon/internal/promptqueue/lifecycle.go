@@ -289,6 +289,13 @@ func (q *queue) mayPop(ctx context.Context, ws ids.WorkspaceID, log dlog.Logger)
 		})
 		return nil, false, nil
 	}
+	// A VENDOR THAT REFUSES THE SESSION IS DELIVERED NOTHING (owner ruling,
+	// 2026-10-06; vendorblock.go): what waits is held after reconnect, and the
+	// edge on which the vendor serves again releases and classifies it.
+	if block, blocked := q.vendorBlocked(ws); blocked {
+		q.holdFreeForVendorBlock(ctx, ws, block, log)
+		return nil, false, nil
+	}
 	// A REFUSING LEASE OWNS THE SESSION, so nothing held is delivered into it.
 	// PolicyHold stamps every standing hold and nextDeliverable filters those,
 	// but PolicyRefuse (a merge lease an older build wrote) stamps none — it
@@ -415,6 +422,13 @@ func (q *queue) OnLeaseChanged(ws ids.WorkspaceID) {
 		if _, live := q.deps.Client(ws); !live {
 			want = &leaseHold{kind: wsm.HoldReconnect}
 			revivalPending = true
+		} else if block, blocked := q.vendorBlocked(ws); blocked {
+			// A LEASE ENDING UNDER A MID-SESSION VENDOR BLOCK delivers
+			// nothing into it: its holds are held after reconnect, and the
+			// vendor serving again releases them (vendorblock.go).
+			log.Info(opLeaseChange, "the lease ended while the vendor does not serve the session; its holds are held after reconnect",
+				dlog.Context{"vendor_block": block, "holds": len(standing)})
+			want = &leaseHold{kind: wsm.HoldReconnect}
 		}
 	}
 
