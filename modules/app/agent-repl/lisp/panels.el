@@ -92,7 +92,7 @@
 
 (declare-function agent-repl-host-ref "host" (ws))
 (declare-function agent-repl-host-conn "host" (ws))
-(declare-function agent-repl-host-state "host" (ws))
+(declare-function agent-repl-host-stream "host" (ws))
 (declare-function agent-repl-host-subscribe "host" (conn ws ref))
 (declare-function agent-repl-host--apply-naming "host" (ws))
 (declare-function agent-repl-link-primary "daemon-link" ())
@@ -1421,7 +1421,10 @@ gesture over a fact that is seconds away."
      ((null ref)
       (agent-repl--info ws "elisp.panels.host-subscribe: skipped ws=%s reason=no-ref-yet" ws)
       nil)
-     ((and (fboundp 'agent-repl-host-state) (agent-repl-host-state ws))
+     ;; THE STREAM, NOT ITS FIRST PUSH, SAYS WHETHER WS IS SUBSCRIBED: the
+     ;; roster's tab-open subscribes a moment before the panels arrive, and
+     ;; asking for the snapshot instead opened a second stream in that gap.
+     ((and (fboundp 'agent-repl-host-stream) (agent-repl-host-stream ws))
       (agent-repl--log ws "elisp.panels.host-subscribe: ws=%s already-subscribed" ws)
       t)
      (t

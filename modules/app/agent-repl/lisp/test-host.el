@@ -1315,6 +1315,53 @@ answers `:unknown' and records the breach rather than opening."
                               (string-prefix-p "elisp.host.vendor-session" (cdr entry)))
                             agent-repl-test-host--logs))))
 
+(ert-deftest agent-repl-test-host-a-push-after-the-workspace-is-forgotten-is-dropped ()
+  "A frame that arrives after `agent-repl-host-forget' re-creates nothing."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let ((stream (agent-repl-test-host--subscribe "ws-1")))
+      (agent-repl-host-forget "ws-1")
+      ;; Act
+      (funcall (plist-get stream :on-push)
+               (list :arm :host :value (agent-repl-test-host--live)))
+      ;; Assert
+      (should-not (agent-repl-host--entry "ws-1")))))
+
+(ert-deftest agent-repl-test-host-a-push-after-the-workspace-is-forgotten-is-recorded ()
+  "The dropped frame is said at INFO, naming why."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let ((stream (agent-repl-test-host--subscribe "ws-1")))
+      (agent-repl-host-forget "ws-1")
+      ;; Act
+      (funcall (plist-get stream :on-push)
+               (list :arm :host :value (agent-repl-test-host--live)))
+      ;; Assert
+      (should (agent-repl-test-host--logged-p
+               :info "elisp.host.push-dropped ws=ws-1 arm=:host reason=forgotten")))))
+
+(ert-deftest agent-repl-test-host-a-push-on-a-replaced-stream-is-dropped ()
+  "A frame from a stream that no longer stands for WS does not touch its state."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let ((old (agent-repl-test-host--subscribe "ws-1")))
+      (agent-repl-test-host--subscribe "ws-1")
+      ;; Act
+      (funcall (plist-get old :on-push)
+               (list :arm :host :value (agent-repl-test-host--live)))
+      ;; Assert
+      (should-not (agent-repl-host-state "ws-1")))))
+
+(ert-deftest agent-repl-test-host-a-second-subscribe-cancels-the-standing-stream ()
+  "No workspace ever holds two streams: the standing one is cancelled first."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let ((old (agent-repl-test-host--subscribe "ws-1")))
+      ;; Act
+      (agent-repl-test-host--subscribe "ws-1")
+      ;; Assert
+      (should (memq old agent-repl-test-host--cancelled)))))
+
 (ert-deftest agent-repl-test-host-state-push-runs-the-update-hook ()
   "Every host push is whole-replace, and consumers hear about it."
   (agent-repl-test-host--with-harness
