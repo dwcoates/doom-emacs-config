@@ -10,6 +10,11 @@ THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 LOGS="$THIS_DIR/logs.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
+# CANONICAL, because the reader prints paths cleaned and resolved: macOS's
+# TMPDIR ends in a slash, so the raw mktemp path carried "T//tmp.X" and the
+# sink-finding cases, which match the reader's text exactly, failed whenever
+# the harness ran outside a TMPDIR without one.
+TMP="$(cd "$TMP" && pwd -P)"
 PASS=0
 FAIL=0
 
