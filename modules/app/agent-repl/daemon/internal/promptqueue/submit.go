@@ -94,6 +94,11 @@ func (q *queue) Submit(ctx context.Context, sub Submission) (Disposition, error)
 	// (owner ruling, 2026-10-06; vendorblock.go), and a vendor that serves
 	// again delivers the prompts it held before this one.
 	if sub.Target == nil {
+		// PROMPTS HELD WITH NOTHING RUNNING: the submission is the user's
+		// "try now" (owner ruling, 2026-10-06; trynow.go).
+		if disposition, handled, err := q.submitBehindHeld(ctx, d, sub, log); handled || err != nil {
+			return disposition, err
+		}
 		if block, blocked := q.vendorBlocked(sub.WS); blocked {
 			return q.holdForVendorBlock(ctx, sub, block, log)
 		}
