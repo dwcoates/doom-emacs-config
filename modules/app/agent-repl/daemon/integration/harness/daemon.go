@@ -849,9 +849,43 @@ func (d *Daemon) awaitFile(path string) string {
 		select {
 		case <-ticker.C:
 		case <-wait.Done():
-			d.t.Fatalf("waiting for %s: %v\nstderr:\n%s", path, wait.Err(), d.Stderr())
+			// A DAEMON THAT IS ALIVE AND NOT DOING WHAT IT WAS WAITED FOR IS
+			// ASKED WHERE IT IS, before the failure is written. Three processes
+			// starting at one instant (two stores and this boot) once each
+			// logged their first record and then nothing for 5s (2026-10-06,
+			// a full-suite run), where a quiet boot measures 50-160ms; only a
+			// stack names a stall like that.
+			dump := d.dumpOnStall(reapGrace)
+			d.t.Fatalf("waiting for %s: %v (%s)\nstderr:\n%s", path, wait.Err(), dump, d.Stderr())
 		}
 	}
+}
+
+// dumpOnStall asks a live daemon to dump every goroutine and exit -- its
+// SIGQUIT handler records daemon.cmd.sigquit with the whole dump, which its
+// stderr mirror carries -- and waits up to bound for it to go. It answers a
+// line for the failure message saying what happened.
+func (d *Daemon) dumpOnStall(bound time.Duration) string {
+	d.sigMu.Lock()
+	if d.reapBegun {
+		d.sigMu.Unlock()
+		return "the daemon was already reaped; no goroutine dump"
+	}
+	pid := d.cmd.Process.Pid
+	err := syscall.Kill(pid, syscall.SIGQUIT)
+	d.sigMu.Unlock()
+	if errors.Is(err, syscall.ESRCH) {
+		return "the daemon was already gone; no goroutine dump"
+	}
+	if err != nil {
+		return fmt.Sprintf("could not ask the daemon for a goroutine dump: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), bound)
+	defer cancel()
+	if err := WaitProcessExit(ctx, pid); err != nil {
+		return fmt.Sprintf("SIGQUIT sent for a goroutine dump, but the daemon did not exit within %s: %v", bound, err)
+	}
+	return "SIGQUIT sent; the daemon.cmd.sigquit record below holds its goroutine dump"
 }
 
 // AwaitFileGone waits for a path to disappear.
@@ -1218,31 +1252,56 @@ func (d *Daemon) Freeze() {
 // still ours. ESRCH is the benign race: the group left on its own between the
 // caller's decision and this signal, and the reap that follows confirms it.
 //
-// EPERM IS DARWIN'S ANSWER FOR A GROUP LEFT WITH ONLY ZOMBIES: it finds our
-// own exited, unreaped leader, which it will not signal, and nothing else.
-// That is the ordinary state of the group kill once the leader's exit has
-// orphaned the group and the kernel's SIGHUP has ended its members. It is
-// accepted ONLY once the kernel's process table confirms every process in the
-// group has exited; an EPERM with a live member left, and every other error,
-// is a real fault, reported, and ends the kill.
+// EPERM IS DARWIN'S ANSWER WHEN killpg SIGNALLED NOBODY: it skips the
+// group's zombies (our own exited, unreaped leader among them) and answers
+// EPERM when no member was left that it would signal. That is the ordinary
+// state of the group kill once the leader's exit has orphaned the group and
+// the kernel's SIGHUP has ended its members -- but an EPERM was also seen with
+// the group still holding a live member (2026-10-04, `killed process group
+// 28508: operation not permitted` in TestColdGate's cleanup), and the old
+// answer then was a report and an abandoned kill.
+//
+// So an EPERM is answered the way the webapp-layer harness answers it
+// (wlChild.killTree): the group's LIVING members are listed from the kernel's
+// process table and each is signalled by pid. Only a member that refuses its
+// own signal, a listing that fails, and every other error are faults, each
+// reported with the member it names, and each ends the kill.
 func (d *Daemon) signalGroup(pgid int, sig syscall.Signal) bool {
 	d.t.Helper()
-	err := syscall.Kill(-pgid, sig)
+	if err := signalGroupMembers(pgid, sig, syscall.Kill, liveGroupMembers); err != nil {
+		d.t.Errorf("harness: %v", err)
+		return false
+	}
+	return true
+}
+
+// signalGroupMembers sends sig to process group pgid through kill, and on
+// EPERM to each member live lists, by pid. It answers nil once every live
+// member was signalled or was already gone.
+func signalGroupMembers(pgid int, sig syscall.Signal, kill func(int, syscall.Signal) error,
+	live func(int) ([]groupMember, error)) error {
+	err := kill(-pgid, sig)
 	if err == nil || errors.Is(err, syscall.ESRCH) {
-		return true
+		return nil
 	}
-	if errors.Is(err, syscall.EPERM) {
-		exited, readErr := groupExited(pgid)
-		if readErr != nil {
-			d.t.Errorf("harness: %v process group %d: %v, and its members could not be read: %v", sig, pgid, err, readErr)
-			return false
-		}
-		if exited {
-			return true
+	if !errors.Is(err, syscall.EPERM) {
+		return fmt.Errorf("%v process group %d: %w", sig, pgid, err)
+	}
+	members, listErr := live(pgid)
+	if listErr != nil {
+		return fmt.Errorf("%v process group %d: %w, and its members could not be read: %v", sig, pgid, err, listErr)
+	}
+	var refused []error
+	for _, m := range members {
+		if kerr := kill(m.pid, sig); kerr != nil && !errors.Is(kerr, syscall.ESRCH) {
+			refused = append(refused, fmt.Errorf("member %d (%s, %s): %w", m.pid, m.comm, m.state, kerr))
 		}
 	}
-	d.t.Errorf("harness: %v process group %d: %v", sig, pgid, err)
-	return false
+	if len(refused) > 0 {
+		return fmt.Errorf("%v process group %d: %w, and signalling its live members one by one failed: %w",
+			sig, pgid, err, errors.Join(refused...))
+	}
+	return nil
 }
 
 // signalLeader sends sig to the daemon's own process, and only to it, and

@@ -15,7 +15,22 @@
 #
 #   fixture construction: init, add -A | add PATH..., commit -m, revert HEAD
 #   what the scripts ask: rev-parse HEAD | --show-toplevel |
-#                         --is-inside-work-tree, status --porcelain,
+#                         --is-inside-work-tree | --git-dir |
+#                         --git-common-dir, diff --cached --name-only,
+#                         config KEY VALUE, config --type=bool --get KEY,
+#   linked worktrees:     worktree add [-q|--quiet] (-b BRANCH | --detach) PATH,
+#                         which checks HEAD's tree out into PATH
+#   hooks:                rev-parse --git-path hooks (core.hooksPath, else
+#                         <repository>/hooks)
+#
+# A LINKED WORKTREE is a directory whose .fakegit is a FILE naming the main
+# worktree ("main <path>"), as a real linked worktree's .git file names its
+# repository. Only where a linked worktree belongs is modelled -- rev-parse
+# --git-dir / --git-common-dir / --show-toplevel and worktree list -- and not
+# its own index or branch: any other call inside one exits 2. A linked
+# worktree inside the main one is left out of the main one's snapshots, as
+# real git leaves a nested worktree out of its parent's status.
+#                         status --porcelain,
 #                         ls-files -s, log -1 --format, show -s --format=%ct,
 #                         rev-list --count A..B, worktree list --porcelain
 #
@@ -59,7 +74,7 @@ CMD="$1"; shift
 find_top() {
     local dir="$CWD"
     while :; do
-        if [ -d "$dir/.fakegit" ]; then printf '%s' "$dir"; return 0; fi
+        if [ -e "$dir/.fakegit" ]; then printf '%s' "$dir"; return 0; fi
         [ -n "${GIT_CEILING_DIRECTORIES:-}" ] && [ "$dir" = "$GIT_CEILING_DIRECTORIES" ] && return 1
         [ "$dir" = "/" ] && return 1
         dir="${dir%/*}"; [ -n "$dir" ] || dir=/
@@ -74,10 +89,31 @@ fi
 
 TOP="$(find_top)" || die "not a git repository (or any of the parent directories)"
 G="$TOP/.fakegit"
+# MAIN is the main worktree's top; LINKED is set inside a linked worktree.
+MAIN="$TOP"
+LINKED=""
+if [ -f "$G" ]; then
+    read -r tag MAIN < "$G" || true
+    [ "$tag" = main ] && [ -d "$MAIN/.fakegit" ] || die "a broken linked worktree at $TOP"
+    G="$MAIN/.fakegit"
+    LINKED=1
+fi
 # Where the -C directory sits in the tree: relative pathspecs resolve from it.
 PREFIX="${CWD#"$TOP"}"; PREFIX="${PREFIX#/}"
 
 # ---- helpers ----------------------------------------------------------------
+
+# config_get KEY — the repository config's value for KEY, failing when unset.
+config_get() {
+    local line value="" found=1
+    if [ -f "$G/config" ]; then
+        while IFS= read -r line; do
+            if [ "${line%%=*}" = "$1" ]; then value="${line#*=}"; found=0; fi
+        done < "$G/config"
+    fi
+    printf '%s' "$value"
+    return "$found"
+}
 
 IGNORES=()
 if [ -f "$TOP/.gitignore" ]; then
@@ -91,6 +127,12 @@ fi
 # is exactly the rule above; pruning also keeps the walk out of ignored trees
 # (node_modules, the fixture's dep store) altogether.
 PRUNE=(-path ./.fakegit)
+if [ -f "$G/worktrees" ]; then
+    TOP_PHYSICAL="$(cd "$TOP" && pwd -P)"
+    while IFS= read -r wt; do
+        case "$wt" in "$TOP_PHYSICAL"/*) PRUNE+=(-o -path "./${wt#"$TOP_PHYSICAL"/}") ;; esac
+    done < "$G/worktrees"
+fi
 for pat in ${IGNORES[@]+"${IGNORES[@]}"}; do
     case "$pat" in
         */) PRUNE+=(-o '(' -type d -name "${pat%/}" ')') ;;
@@ -281,13 +323,89 @@ format_commit() { # FORMAT SHA
 # ---- subcommands ------------------------------------------------------------
 
 split_dashdash "$@"
+if [ -n "$LINKED" ]; then
+    case "$CMD $*" in
+        "rev-parse --git-dir") printf '%s/worktrees/%s\n' "$G" "${TOP##*/}"; exit 0 ;;
+        "rev-parse --git-common-dir") printf '%s\n' "$G"; exit 0 ;;
+        "rev-parse --show-toplevel" | "rev-parse --git-path hooks" | "worktree list --porcelain" | "worktree add "*) ;;
+        *) EXIT=2 die "unmodelled invocation inside a linked worktree: $CMD $*" ;;
+    esac
+fi
 case "$CMD $*" in
     "rev-parse HEAD")
         head_sha || die "ambiguous argument 'HEAD': unknown revision"
         ;;
     "rev-parse --show-toplevel") printf '%s\n' "$TOP" ;;
     "rev-parse --is-inside-work-tree") printf 'true\n' ;;
-    "worktree list --porcelain") printf 'worktree %s\n\n' "$TOP" ;;
+    # The repository's own directory is .fakegit, and there is one worktree,
+    # so the common dir is the same directory.
+    "rev-parse --git-dir" | "rev-parse --git-common-dir") printf '%s\n' "$G" ;;
+    # Repository config is <top>/.fakegit/config, one KEY=VALUE per line, the
+    # last line for a key winning, as a later `git config` replaces it.
+    "config --type=bool --get "*)
+        [ "${#OPTS[@]}" -eq 3 ] || EXIT=2 die "unmodelled config form: $*"
+        key="${OPTS[2]}"
+        value="$(config_get "$key")" || exit 1
+        # git's own boolean spellings, case-insensitive; anything else is the
+        # fatal error real git answers with status 128.
+        case "$(printf '%s' "$value" | tr '[:upper:]' '[:lower:]')" in
+            true | yes | on | 1) printf 'true\n' ;;
+            false | no | off | 0 | "") printf 'false\n' ;;
+            *) die "bad boolean config value '$value' for '$key'" ;;
+        esac
+        ;;
+    "config "*)
+        [ "${#OPTS[@]}" -eq 2 ] || EXIT=2 die "unmodelled config form: $*"
+        case "${OPTS[0]}" in -*) EXIT=2 die "unmodelled config form: $*" ;; esac
+        printf '%s=%s\n' "${OPTS[0]}" "${OPTS[1]}" >> "$G/config"
+        ;;
+    "diff --cached --name-only"*)
+        [ "${OPTS[*]}" = "--cached --name-only" ] || EXIT=2 die "unmodelled diff form: $*"
+        changed_paths "$HEAD_TREE" "$G/index" | while IFS= read -r path; do
+            if path_matches "$path"; then printf '%s\n' "$path"; fi
+        done
+        ;;
+    # The main worktree first, then every linked one in the order added, each
+    # by its physical path as real git prints it.
+    "worktree list --porcelain")
+        printf 'worktree %s\n\n' "$(cd "$MAIN" && pwd -P)"
+        if [ -f "$G/worktrees" ]; then
+            while IFS= read -r wt; do printf 'worktree %s\n\n' "$wt"; done < "$G/worktrees"
+        fi
+        ;;
+    "rev-parse --git-path hooks")
+        if hooks="$(config_get core.hooksPath)"; then
+            printf '%s\n' "$hooks"
+        else
+            printf '%s/hooks\n' "$G"
+        fi
+        ;;
+    "worktree add "*)
+        wt=""
+        branch=""
+        i=1
+        while [ "$i" -lt "${#OPTS[@]}" ]; do
+            case "${OPTS[$i]}" in
+                --quiet | -q) ;;
+                -b) i=$((i + 1)); branch="${OPTS[$i]:-}" ;;
+                --detach) branch="(detached)" ;;
+                -*) EXIT=2 die "unmodelled worktree add form: $*" ;;
+                *) [ -z "$wt" ] || EXIT=2 die "unmodelled worktree add form: $*"; wt="${OPTS[$i]}" ;;
+            esac
+            i=$((i + 1))
+        done
+        [ -n "$wt" ] && [ -n "$branch" ] || EXIT=2 die "unmodelled worktree add form: $*"
+        case "$wt" in /*) ;; *) wt="$CWD/$wt" ;; esac
+        [ ! -e "$wt" ] || die "'$wt' already exists"
+        head_sha >/dev/null || die "invalid reference: HEAD"
+        mkdir -p "$wt"
+        while IFS=$'\t' read -r blob path; do
+            mkdir -p "$(dirname "$wt/$path")"
+            cp "$G/objects/$blob" "$wt/$path"
+        done < "$HEAD_TREE"
+        printf 'main %s\n' "$MAIN" > "$wt/.fakegit"
+        printf '%s\n' "$(cd "$wt" && pwd -P)" >> "$G/worktrees"
+        ;;
     "add -A")
         set_specs
         stage

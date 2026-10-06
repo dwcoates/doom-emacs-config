@@ -6,6 +6,12 @@
 # as a git repo, and runs install.sh against a fake HOME.  The real host
 # ~/.claude/ and the real repo's git config are never touched.
 #
+# NO REAL GIT RUNS HERE (owner rule).  The synthetic repo is bin/fake-git.sh's
+# model (its repository directory is .fakegit, so the hooks dir install.sh
+# resolves is .fakegit/hooks), installed as the only `git` on PATH for the
+# harness and install.sh; the harness refuses to start if any other `git`
+# would answer.
+#
 # Focuses on the skill install/uninstall logic (always symlink straight
 # to the canonical impl, NO cache fallback, FAIL HARD when an impl is
 # absent) and the pre-commit hook install/uninstall logic.
@@ -19,6 +25,17 @@ set -euo pipefail
 
 THIS_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$THIS_DIR/.." && pwd)"
+
+HARNESS_TMP="$(mktemp -d "${TMPDIR:-/tmp}/agent-repl-install-test.XXXXXX")"
+trap 'rm -rf "$HARNESS_TMP"' EXIT
+FAKE_GIT_BIN="$HARNESS_TMP/bin"
+mkdir -p "$FAKE_GIT_BIN"
+ln -s "$REPO_ROOT/modules/app/agent-repl/bin/fake-git.sh" "$FAKE_GIT_BIN/git"
+export PATH="$FAKE_GIT_BIN:$PATH"
+if [ "$(command -v git)" != "$FAKE_GIT_BIN/git" ]; then
+  echo "test-install.sh: the fake git is not the git on PATH; refusing to run real git" >&2
+  exit 2
+fi
 
 PASS=0
 FAIL=0
@@ -59,7 +76,7 @@ EOF
     printf 'name: %s\n' "$s" > "$root/modules/app/agent-repl/skills/$s/SKILL.md"
   done
   # Init git so install.sh can resolve --show-toplevel + --git-path.
-  (cd "$root" && git init -q && git config user.email t@t && git config user.name t)
+  git -C "$root" init
   echo "$root"
 }
 
@@ -214,8 +231,9 @@ test_install_fails_hard_when_impl_missing() {
 test_install_rejects_nonmain_worktree_impl() {
   local repo home; repo="$(mkfake_repo)"; home="$(mkfake_home)"
   # A linked worktree requires at least one commit to branch from.
-  (cd "$repo" && git add -A && git commit -qm init >/dev/null 2>&1)
-  git -C "$repo" worktree add -q --detach "$repo/linked-wt" >/dev/null 2>&1
+  git -C "$repo" add -A
+  git -C "$repo" commit -qm init >/dev/null
+  git -C "$repo" worktree add -q --detach "$repo/linked-wt" >/dev/null
   # Point the manifest's skill impl INSIDE the linked (non-main) worktree.
   mkdir -p "$repo/linked-wt/impl/bar"
   echo x > "$repo/linked-wt/impl/bar/SKILL.md"
@@ -237,8 +255,9 @@ EOF
 #     is invoked from a linked worktree (symlinks must never dangle on prune) ---
 test_local_skills_link_to_main_worktree() {
   local repo home; repo="$(mkfake_repo)"; home="$(mkfake_home)"
-  (cd "$repo" && git add -A && git commit -qm init >/dev/null 2>&1)
-  git -C "$repo" worktree add -q --detach "$repo/linked-wt" >/dev/null 2>&1
+  git -C "$repo" add -A
+  git -C "$repo" commit -qm init >/dev/null
+  git -C "$repo" worktree add -q --detach "$repo/linked-wt" >/dev/null
   # Invoke install.sh from the LINKED worktree's own checkout.
   set +e
   HOME="$home" \
@@ -277,9 +296,9 @@ test_install_preserves_non_symlink_file() {
 test_install_installs_pre_commit_hook() {
   local repo home; repo="$(mkfake_repo)"; home="$(mkfake_home)"
   run_install "$repo" "$home"
-  local dest="$repo/.git/hooks/pre-commit"
+  local dest="$repo/.fakegit/hooks/pre-commit"
   if [ -x "$dest" ] && grep -q "agent-repl-precommit" "$dest"; then
-    pass "pre-commit hook installed into repo .git/hooks"
+    pass "pre-commit hook installed into repo .fakegit/hooks"
   else
     fail "pre-commit install" "$(cat "$repo/.install.log")"
   fi
@@ -291,9 +310,9 @@ test_install_refreshes_managed_hook() {
   local repo home; repo="$(mkfake_repo)"; home="$(mkfake_home)"
   run_install "$repo" "$home"  # first install
   # Tamper: append junk so we can detect refresh.
-  echo "# tampered" >> "$repo/.git/hooks/pre-commit"
+  echo "# tampered" >> "$repo/.fakegit/hooks/pre-commit"
   run_install "$repo" "$home"  # rerun
-  if ! grep -q "^# tampered" "$repo/.git/hooks/pre-commit" \
+  if ! grep -q "^# tampered" "$repo/.fakegit/hooks/pre-commit" \
      && grep -q "Refreshed managed pre-commit hook" "$repo/.install.log"; then
     pass "managed pre-commit hook refreshed on rerun"
   else
@@ -309,14 +328,14 @@ test_install_refreshes_managed_hook() {
 # at a copy that greps a module path which no longer exists.
 test_install_refreshes_legacy_marked_hook() {
   local repo home; repo="$(mkfake_repo)"; home="$(mkfake_home)"
-  mkdir -p "$repo/.git/hooks"
+  mkdir -p "$repo/.fakegit/hooks"
   # A pre-rename copy: legacy marker only, plus a body we can detect.
   printf '#!/bin/sh\n# CLAUDE_REPL_MANAGED_HOOK: claude-repl-precommit\necho stale\n' \
-    > "$repo/.git/hooks/pre-commit"
-  chmod +x "$repo/.git/hooks/pre-commit"
+    > "$repo/.fakegit/hooks/pre-commit"
+  chmod +x "$repo/.fakegit/hooks/pre-commit"
   run_install "$repo" "$home"
-  if ! grep -q "echo stale" "$repo/.git/hooks/pre-commit" \
-     && grep -q "AGENT_REPL_MANAGED_HOOK" "$repo/.git/hooks/pre-commit" \
+  if ! grep -q "echo stale" "$repo/.fakegit/hooks/pre-commit" \
+     && grep -q "AGENT_REPL_MANAGED_HOOK" "$repo/.fakegit/hooks/pre-commit" \
      && grep -q "Refreshed managed pre-commit hook" "$repo/.install.log"; then
     pass "legacy-marked pre-commit hook is refreshed, not called foreign"
   else
@@ -328,12 +347,12 @@ test_install_refreshes_legacy_marked_hook() {
 # --- uninstall: a hook carrying only the LEGACY marker is removed ---
 test_uninstall_removes_legacy_marked_hook() {
   local repo home; repo="$(mkfake_repo)"; home="$(mkfake_home)"
-  mkdir -p "$repo/.git/hooks"
+  mkdir -p "$repo/.fakegit/hooks"
   printf '#!/bin/sh\n# CLAUDE_REPL_MANAGED_HOOK: claude-repl-precommit\necho stale\n' \
-    > "$repo/.git/hooks/pre-commit"
-  chmod +x "$repo/.git/hooks/pre-commit"
+    > "$repo/.fakegit/hooks/pre-commit"
+  chmod +x "$repo/.fakegit/hooks/pre-commit"
   run_install "$repo" "$home" uninstall
-  if [ ! -e "$repo/.git/hooks/pre-commit" ]; then
+  if [ ! -e "$repo/.fakegit/hooks/pre-commit" ]; then
     pass "uninstall removes a legacy-marked pre-commit hook"
   else
     fail "legacy-marked hook uninstall" "rc: $LAST_RC" "$(cat "$repo/.install.log")"
@@ -376,11 +395,11 @@ test_uninstall_keeps_checked_in_hook_under_hookspath() {
 # --- install: foreign pre-commit hook is preserved ---
 test_install_preserves_foreign_pre_commit() {
   local repo home; repo="$(mkfake_repo)"; home="$(mkfake_home)"
-  mkdir -p "$repo/.git/hooks"
-  printf '#!/bin/sh\necho foreign\n' > "$repo/.git/hooks/pre-commit"
-  chmod +x "$repo/.git/hooks/pre-commit"
+  mkdir -p "$repo/.fakegit/hooks"
+  printf '#!/bin/sh\necho foreign\n' > "$repo/.fakegit/hooks/pre-commit"
+  chmod +x "$repo/.fakegit/hooks/pre-commit"
   run_install "$repo" "$home"
-  if grep -q "echo foreign" "$repo/.git/hooks/pre-commit" \
+  if grep -q "echo foreign" "$repo/.fakegit/hooks/pre-commit" \
      && grep -q "foreign pre-commit hook" "$repo/.install.log"; then
     pass "foreign pre-commit hook is preserved"
   else
@@ -408,7 +427,7 @@ test_uninstall_only_removes_managed_hook() {
   local repo home; repo="$(mkfake_repo)"; home="$(mkfake_home)"
   run_install "$repo" "$home"
   run_install "$repo" "$home" uninstall
-  if [ ! -e "$repo/.git/hooks/pre-commit" ]; then
+  if [ ! -e "$repo/.fakegit/hooks/pre-commit" ]; then
     pass "uninstall removes managed pre-commit hook"
   else
     fail "uninstall managed hook"
@@ -416,11 +435,11 @@ test_uninstall_only_removes_managed_hook() {
   # Now seed a foreign hook and verify uninstall leaves it alone.
   cleanup "$repo" "$home"
   repo="$(mkfake_repo)"; home="$(mkfake_home)"
-  mkdir -p "$repo/.git/hooks"
-  printf '#!/bin/sh\necho keep\n' > "$repo/.git/hooks/pre-commit"
-  chmod +x "$repo/.git/hooks/pre-commit"
+  mkdir -p "$repo/.fakegit/hooks"
+  printf '#!/bin/sh\necho keep\n' > "$repo/.fakegit/hooks/pre-commit"
+  chmod +x "$repo/.fakegit/hooks/pre-commit"
   run_install "$repo" "$home" uninstall
-  if [ -f "$repo/.git/hooks/pre-commit" ] && grep -q "echo keep" "$repo/.git/hooks/pre-commit"; then
+  if [ -f "$repo/.fakegit/hooks/pre-commit" ] && grep -q "echo keep" "$repo/.fakegit/hooks/pre-commit"; then
     pass "uninstall leaves foreign pre-commit hook alone"
   else
     fail "uninstall preserves foreign hook"

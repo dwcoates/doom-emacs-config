@@ -195,7 +195,9 @@ func mainIn(m *testing.M, module, root string) int {
 		// An instrumented build when coverage is on; the plain build
 		// otherwise. `-cover` changes only what the binary WRITES, never
 		// what it does.
-		buildArgs := []string{"build"}
+		// -buildvcs=false: a test build never asks git to stamp the binary
+		// (no test runs real git, owner rule).
+		buildArgs := []string{"build", "-buildvcs=false"}
 		if b.covered {
 			buildArgs = append(buildArgs, CoverageBuildArgs(CoverageRoot())...)
 		}

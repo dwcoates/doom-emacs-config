@@ -36,13 +36,14 @@ func readProcessState(pid int) (processState, error) {
 	}
 }
 
-// groupExited reports whether every process in process group pgid has
-// exited: a group of zombies, or no group at all.
-func groupExited(pgid int) (bool, error) {
+// liveGroupMembers answers the members of process group pgid that have not
+// exited: everything in the group but its zombies and dead entries.
+func liveGroupMembers(pgid int) ([]groupMember, error) {
 	entries, err := os.ReadDir("/proc")
 	if err != nil {
-		return false, fmt.Errorf("list /proc: %w", err)
+		return nil, fmt.Errorf("list /proc: %w", err)
 	}
+	var live []groupMember
 	for _, e := range entries {
 		pid, err := strconv.Atoi(e.Name())
 		if err != nil {
@@ -53,14 +54,18 @@ func groupExited(pgid int) (bool, error) {
 			continue
 		}
 		if err != nil {
-			return false, err
+			return nil, err
 		}
 		// The state, ppid and pgrp follow the parenthesized command name.
 		stat := string(raw)
+		start := strings.IndexByte(stat, '(')
 		end := strings.LastIndexByte(stat, ')')
+		if start < 0 || end < start {
+			return nil, fmt.Errorf("unparseable /proc/%d/stat %q", pid, stat)
+		}
 		fields := strings.Fields(stat[end+1:])
-		if end < 0 || len(fields) < 3 {
-			return false, fmt.Errorf("unparseable /proc/%d/stat %q", pid, stat)
+		if len(fields) < 3 {
+			return nil, fmt.Errorf("unparseable /proc/%d/stat %q", pid, stat)
 		}
 		if fields[2] != strconv.Itoa(pgid) {
 			continue
@@ -68,8 +73,8 @@ func groupExited(pgid int) (bool, error) {
 		switch fields[0] {
 		case "Z", "X", "x":
 		default:
-			return false, nil
+			live = append(live, groupMember{pid: pid, comm: stat[start+1 : end], state: "in state " + fields[0]})
 		}
 	}
-	return true, nil
+	return live, nil
 }

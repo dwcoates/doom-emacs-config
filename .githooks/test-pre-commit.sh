@@ -7,19 +7,36 @@
 # merge.SuiteRunner), which tests each cherry-picked commit as it lands on the
 # target.  Every fixture below therefore asserts BOTH halves — the lint ran,
 # and the suite runner was never invoked.
+#
+# NO REAL GIT (owner rule: no test of any form runs real git).  Every fixture
+# repository is a bin/fake-git.sh repository, `git` on the hook's PATH is that
+# fake, and the hook is run the way git runs a pre-commit hook: from the
+# worktree's top, out of the repository's hooks directory.  Every git call the
+# hook makes is logged ($FAKE_GIT_LOG) and asserted, so a new call fails here
+# loudly (the fake exits 2 on anything it does not model) rather than reaching
+# a real repository.
 
 # Tests run only at background priority: re-exec once through bin/background.sh.
 [[ -n ${AGENT_REPL_BACKGROUND_PRIORITY:-} ]] || exec "$(dirname "${BASH_SOURCE[0]}")/../modules/app/agent-repl/bin/background.sh" bash "${BASH_SOURCE[0]}" "$@"
 
 set -euo pipefail
 
-# This harness creates scratch repositories and is itself run by pre-commit.
-# Clear the caller's live Git bindings before any fixture command can mutate
-# the real staging index.
+# This harness may itself be run from a git hook.  Clear the caller's live Git
+# bindings so nothing below can read them as its own.
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX
 
 THIS_DIR="$(cd "$(dirname "$0")" && pwd)"
 HOOK_SRC="$THIS_DIR/pre-commit"
+FAKE_GIT="$THIS_DIR/../modules/app/agent-repl/bin/fake-git.sh"
+
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/agent-repl-precommit-test.XXXXXX")"
+trap 'rm -rf "$TMP"' EXIT
+
+# The only `git` any fixture or the hook can reach.
+FAKE_BIN="$TMP/bin"
+mkdir -p "$FAKE_BIN"
+ln -s "$FAKE_GIT" "$FAKE_BIN/git"
+export PATH="$FAKE_BIN:$PATH"
 PASS=0
 FAIL=0
 
@@ -40,11 +57,8 @@ fail() {
 mkrepo() {
   local module="${1:-agent-repl}"
   local repo
-  repo="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
-  git -C "$repo" init -q
-  git -C "$repo" config user.email "test@example.com"
-  git -C "$repo" config user.name "Test"
-  git -C "$repo" symbolic-ref HEAD refs/heads/work
+  repo="$(mktemp -d "$TMP/repo.XXXXXXXXXX")"
+  git -C "$repo" init
 
   # The lint script IS the hook's gate.  It records that it ran and honors an
   # injected exit code so a fixture can drive the refusal path.
@@ -68,8 +82,9 @@ exit "${HOOK_TEST_RUN_EXIT:-0}"
 EOF
   chmod +x "$repo/modules/app/$module/bin/test-all.sh"
 
-  cp "$HOOK_SRC" "$repo/.git/hooks/pre-commit"
-  chmod +x "$repo/.git/hooks/pre-commit"
+  mkdir -p "$repo/.fakegit/hooks"
+  cp "$HOOK_SRC" "$repo/.fakegit/hooks/pre-commit"
+  chmod +x "$repo/.fakegit/hooks/pre-commit"
   printf '%s\n' "$repo"
 }
 
@@ -82,29 +97,53 @@ stage_module_file() {
   git -C "$repo" add "$path"
 }
 
-run_commit() {
-  local repo="$1"
-  local lint_exit="${2:-0}"
-  RUN_LOG="$repo/unified-called"
-  LINT_LOG="$repo/lint-called"
-  rm -f "$RUN_LOG" "$LINT_LOG"
+# run_hook WORKTREE HOOK [LINT_EXIT [SUITE_EXIT]] — run HOOK as git runs a
+# pre-commit hook for a commit in WORKTREE: from the worktree's top.  RUN_RC
+# and RUN_OUT hold its outcome and GIT_CALLS the git calls it made.
+run_hook() {
+  local worktree="$1"
+  local hook="$2"
+  local lint_exit="${3:-0}"
+  local suite_exit="${4:-0}"
+  RUN_LOG="$worktree/unified-called"
+  LINT_LOG="$worktree/lint-called"
+  local git_log="$worktree/git-calls"
+  rm -f "$RUN_LOG" "$LINT_LOG" "$git_log"
   set +e
   RUN_OUT="$(
-    HOOK_TEST_RUN_LOG="$RUN_LOG" \
-      HOOK_TEST_LINT_LOG="$LINT_LOG" \
-      HOOK_TEST_LINT_EXIT="$lint_exit" \
-      git -C "$repo" -c core.hooksPath=.git/hooks commit -m "test commit" 2>&1
+    cd "$worktree" &&
+      FAKE_GIT_LOG="$git_log" \
+        HOOK_TEST_RUN_LOG="$RUN_LOG" \
+        HOOK_TEST_RUN_EXIT="$suite_exit" \
+        HOOK_TEST_LINT_LOG="$LINT_LOG" \
+        HOOK_TEST_LINT_EXIT="$lint_exit" \
+        "$hook" 2>&1
   )"
   RUN_RC=$?
   set -e
+  GIT_CALLS="$(cat "$git_log" 2>/dev/null || true)"
 }
 
-# assert_gated NAME — the commit succeeded, the lint ran, the suite did not.
+run_commit() {
+  run_hook "$1" "$1/.fakegit/hooks/pre-commit" "${2:-0}"
+}
+
+# The git calls a hook that reaches its gate makes, in order: where the
+# repository is, which repository owns the hook, whether a cherry-pick is
+# being replayed, and what is staged.  Nothing else -- no branch, no history.
+GATED_CALLS="git rev-parse --show-toplevel
+git rev-parse --git-common-dir
+git rev-parse --git-dir
+git diff --cached --name-only"
+
+# assert_gated NAME — the commit succeeded, the lint ran, the suite did not,
+# and the hook asked git exactly what a gated commit asks.
 assert_gated() {
-  if [ "$RUN_RC" -eq 0 ] && [ -f "$LINT_LOG" ] && [ ! -f "$RUN_LOG" ]; then
+  if [ "$RUN_RC" -eq 0 ] && [ -f "$LINT_LOG" ] && [ ! -f "$RUN_LOG" ] && [ "$GIT_CALLS" = "$GATED_CALLS" ]; then
     pass "$1"
   else
-    fail "$1" "exit=$RUN_RC lint_ran=$([ -f "$LINT_LOG" ] && echo yes || echo no) suite_ran=$([ -f "$RUN_LOG" ] && echo yes || echo no)" "$RUN_OUT"
+    fail "$1" "exit=$RUN_RC lint_ran=$([ -f "$LINT_LOG" ] && echo yes || echo no) suite_ran=$([ -f "$RUN_LOG" ] && echo yes || echo no)" \
+      "git calls:" "$GIT_CALLS" "$RUN_OUT"
   fi
 }
 
@@ -112,10 +151,11 @@ test_cherry_pick_skips_the_gate() {
   local repo
   repo="$(mkrepo)"
   stage_module_file "$repo" "src/dummy.ts"
-  touch "$repo/.git/CHERRY_PICK_HEAD"
+  touch "$repo/.fakegit/CHERRY_PICK_HEAD"
   run_commit "$repo"
 
-  if [ ! -f "$LINT_LOG" ] && printf '%s\n' "$RUN_OUT" | grep -q "Cherry-pick detected"; then
+  if [ ! -f "$LINT_LOG" ] && printf '%s\n' "$RUN_OUT" | grep -q "Cherry-pick detected" &&
+    ! printf '%s\n' "$GIT_CALLS" | grep -q "^git diff"; then
     pass "cherry-pick replay skips the gate"
   else
     fail "cherry-pick replay skips the gate" "$RUN_OUT"
@@ -124,9 +164,11 @@ test_cherry_pick_skips_the_gate() {
 }
 
 test_direct_master_commit_runs_the_lint() {
+  # A commit on master is gated like any other: the hook never asks which
+  # branch it is on (assert_gated pins its git calls, and none names HEAD's
+  # branch), so no branch can be exempt.
   local repo
   repo="$(mkrepo)"
-  git -C "$repo" symbolic-ref HEAD refs/heads/master
   stage_module_file "$repo" "internal/dummy.go"
   run_commit "$repo"
   assert_gated "direct master commit runs the boundary lint"
@@ -216,24 +258,18 @@ test_unrelated_docs_skip_the_gate() {
 test_foreign_repo_skips_shared_hook() {
   local owner foreign
   owner="$(mkrepo)"
-  foreign="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
-  git -C "$foreign" init -q
-  git -C "$foreign" config user.email "test@example.com"
-  git -C "$foreign" config user.name "Test"
+  foreign="$(mktemp -d "$TMP/foreign.XXXXXXXXXX")"
+  git -C "$foreign" init
   mkdir -p "$foreign/modules/app/agent-repl"
   printf 'foreign fixture\n' >"$foreign/modules/app/agent-repl/dummy.ts"
   git -C "$foreign" add modules/app/agent-repl/dummy.ts
 
-  LINT_LOG="$foreign/lint-called"
-  set +e
-  RUN_OUT="$(
-    HOOK_TEST_LINT_LOG="$LINT_LOG" \
-      git -C "$foreign" -c core.hooksPath="$owner/.git/hooks" commit -m "foreign fixture" 2>&1
-  )"
-  RUN_RC=$?
-  set -e
+  # The OWNER's installed hook, inherited by a commit in the foreign repo (an
+  # absolute core.hooksPath does exactly this).
+  run_hook "$foreign" "$owner/.fakegit/hooks/pre-commit"
 
-  if [ "$RUN_RC" -eq 0 ] && [ ! -f "$LINT_LOG" ]; then
+  if [ "$RUN_RC" -eq 0 ] && [ ! -f "$LINT_LOG" ] &&
+    ! printf '%s\n' "$GIT_CALLS" | grep -q "^git diff"; then
     pass "foreign repository skips an inherited shared hook"
   else
     fail "foreign repository skips an inherited shared hook" "exit=$RUN_RC" "$RUN_OUT"
@@ -279,18 +315,7 @@ test_a_failing_suite_no_longer_blocks_commit() {
   local repo
   repo="$(mkrepo)"
   stage_module_file "$repo" "daemon/internal/would-have-failed.go"
-  RUN_LOG="$repo/unified-called"
-  LINT_LOG="$repo/lint-called"
-  rm -f "$RUN_LOG" "$LINT_LOG"
-  set +e
-  RUN_OUT="$(
-    HOOK_TEST_RUN_LOG="$RUN_LOG" \
-      HOOK_TEST_RUN_EXIT=7 \
-      HOOK_TEST_LINT_LOG="$LINT_LOG" \
-      git -C "$repo" -c core.hooksPath=.git/hooks commit -m "test commit" 2>&1
-  )"
-  RUN_RC=$?
-  set -e
+  run_hook "$repo" "$repo/.fakegit/hooks/pre-commit" 0 7
 
   if [ "$RUN_RC" -eq 0 ] && [ ! -f "$RUN_LOG" ]; then
     pass "a failing unified suite no longer blocks the commit"
@@ -299,9 +324,6 @@ test_a_failing_suite_no_longer_blocks_commit() {
   fi
   rm -rf "$repo"
 }
-
-TMP="$(mktemp -d "${TMPDIR:-/tmp}/agent-repl-precommit-test.XXXXXX")"
-trap 'rm -rf "$TMP"' EXIT
 
 test_cherry_pick_skips_the_gate
 test_direct_master_commit_runs_the_lint
