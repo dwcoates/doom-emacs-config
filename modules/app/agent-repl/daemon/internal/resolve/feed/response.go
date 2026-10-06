@@ -8,6 +8,7 @@ import (
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/feedid"
+	"claude-repld/internal/resolve/turnfault"
 )
 
 // THE PROSE FOLD. The shim forwards each fragment as the vendor emits it and
@@ -172,7 +173,7 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 		// producer ends the run with (AgentModelError) is an empty message, so
 		// this is the only frame that says the vendor refused rather than
 		// errored, and feed.proto's `refusal` arm is drawn from it.
-		if _, refused := state.Failure.GetReason().GetReason().(*conversationv1.AgentResponseFailureReason_Refused); refused && s.evidenceTurn() != nil {
+		if turnfault.RefusedResponse(response) && s.evidenceTurn() != nil {
 			turn := string(*s.evidenceTurn())
 			s.turnRefusals[turn] = true
 			log.Debug("daemon.feed.response_refused",

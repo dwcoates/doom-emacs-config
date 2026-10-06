@@ -3,6 +3,7 @@ package turnfault
 import (
 	"strings"
 	"testing"
+	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
@@ -355,6 +356,63 @@ func TestOfCloseWordsNothingForACloseThatIsNoFailure(t *testing.T) {
 			// Assert
 			if ok {
 				t.Fatalf("OfClose(%d) worded a close that is no failure", int(tc.how))
+			}
+		})
+	}
+}
+
+func TestRetryAfterIsTheVendorsStatedWaitAlone(t *testing.T) {
+	ms := int64(42_000)
+	cases := []struct {
+		name    string
+		failure *conversationv1.AgentFailure
+		want    time.Duration
+		wantOK  bool
+	}{
+		{name: "a rate limit with a wait", failure: failureOf(&conversationv1.ApiRequestFailed{Kind: &conversationv1.ApiRequestFailed_RateLimited{RateLimited: &conversationv1.ApiRateLimited{RetryAfterMs: &ms}}}), want: 42 * time.Second, wantOK: true},
+		{name: "an overload with a wait", failure: failureOf(&conversationv1.ApiRequestFailed{Kind: &conversationv1.ApiRequestFailed_Overloaded{Overloaded: &conversationv1.ApiOverloaded{RetryAfterMs: &ms}}}), want: 42 * time.Second, wantOK: true},
+		{name: "a rate limit that stated no wait", failure: failureOf(&conversationv1.ApiRequestFailed{Kind: &conversationv1.ApiRequestFailed_RateLimited{RateLimited: &conversationv1.ApiRateLimited{}}}), wantOK: false},
+		{name: "an overload that stated no wait", failure: failureOf(&conversationv1.ApiRequestFailed{Kind: &conversationv1.ApiRequestFailed_Overloaded{Overloaded: &conversationv1.ApiOverloaded{}}}), wantOK: false},
+		{name: "another api class", failure: failureOf(&conversationv1.ApiRequestFailed{Kind: &conversationv1.ApiRequestFailed_Internal{Internal: &conversationv1.ApiInternal{}}}), wantOK: false},
+		{name: "a producer failure", failure: failureOf(&conversationv1.AgentMaxTurnsReached{}), wantOK: false},
+		{name: "no failure", failure: nil, wantOK: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got, ok := RetryAfter(tc.failure)
+
+			// Assert
+			if ok != tc.wantOK || got != tc.want {
+				t.Fatalf("RetryAfter = (%s, %v), want (%s, %v)", got, ok, tc.want, tc.wantOK)
+			}
+		})
+	}
+}
+
+func TestRefusedResponseIsTheRefusalArmAlone(t *testing.T) {
+	failed := func(reason *conversationv1.AgentResponseFailureReason) *conversationv1.AgentResponse {
+		return &conversationv1.AgentResponse{Result: &conversationv1.AgentResponse_Failure{Failure: &conversationv1.AgentResponseFailure{Reason: reason}}}
+	}
+	cases := []struct {
+		name     string
+		response *conversationv1.AgentResponse
+		want     bool
+	}{
+		{name: "a refused response", response: failed(&conversationv1.AgentResponseFailureReason{Reason: &conversationv1.AgentResponseFailureReason_Refused{Refused: &conversationv1.AgentResponseRefused{}}}), want: true},
+		{name: "a response cut at the token ceiling", response: failed(&conversationv1.AgentResponseFailureReason{Reason: &conversationv1.AgentResponseFailureReason_MaxTokens{MaxTokens: &conversationv1.AgentResponseStoppedAtMaxTokens{}}}), want: false},
+		{name: "a failure stating no reason", response: failed(nil), want: false},
+		{name: "a response that succeeded", response: &conversationv1.AgentResponse{Result: &conversationv1.AgentResponse_Success{Success: &conversationv1.AgentResponseSuccess{}}}, want: false},
+		{name: "no response", response: nil, want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := RefusedResponse(tc.response)
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("RefusedResponse = %v, want %v", got, tc.want)
 			}
 		})
 	}

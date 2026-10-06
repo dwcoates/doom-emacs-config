@@ -15,6 +15,7 @@ package turnfault
 
 import (
 	"strings"
+	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
@@ -192,4 +193,41 @@ func OfClose(how wsm.TurnClose) (Words, bool) {
 		return Words{}, false
 	}
 	return Words{}, false
+}
+
+// RetryAfter is the wait the vendor asked for before trying again, for a turn
+// that ended on a rate limit or an overload that stated one: the one cause
+// whose account carries a countdown. It reports false for every other failure,
+// and for a rate limit or an overload that stated no wait — which is not
+// "retry now", and is never drawn as one.
+func RetryAfter(failure *conversationv1.AgentFailure) (time.Duration, bool) {
+	api, ok := failure.GetFailure().(*conversationv1.AgentFailure_ApiRequestFailed)
+	if !ok {
+		return 0, false
+	}
+	switch kind := api.ApiRequestFailed.GetKind().(type) {
+	case *conversationv1.ApiRequestFailed_RateLimited:
+		if kind.RateLimited.RetryAfterMs != nil {
+			return time.Duration(kind.RateLimited.GetRetryAfterMs()) * time.Millisecond, true
+		}
+	case *conversationv1.ApiRequestFailed_Overloaded:
+		if kind.Overloaded.RetryAfterMs != nil {
+			return time.Duration(kind.Overloaded.GetRetryAfterMs()) * time.Millisecond, true
+		}
+	}
+	return 0, false
+}
+
+// RefusedResponse reports whether a response frame ended on the vendor's
+// refusal. It is THE REFUSAL'S ONLY WITNESS (conversationv1.AgentModelError is
+// empty, so the turn's terminal cannot say it), and every resolver that words
+// a failed turn reads it the same way, so the feed's headline and the footer's
+// line say "refused" for the same turn.
+func RefusedResponse(response *conversationv1.AgentResponse) bool {
+	failure, ok := response.GetResult().(*conversationv1.AgentResponse_Failure)
+	if !ok {
+		return false
+	}
+	_, refused := failure.Failure.GetReason().GetReason().(*conversationv1.AgentResponseFailureReason_Refused)
+	return refused
 }

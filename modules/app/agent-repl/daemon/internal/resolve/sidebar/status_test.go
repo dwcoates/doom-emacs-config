@@ -356,9 +356,10 @@ func failedTurn(r sidebarResolver, failure *conversationv1.AgentFailure) {
 }
 
 // TestEveryAgentFailureArmTakesItsClassifiedArmAndColor walks every
-// AgentFailure arm (owner ruling, 2026-09-28): vendor_blocked ONLY for the
-// vendor or the account, the turn's own `turn_failed` for every other failure
-// (any future arm included), and a green `done` for the two expected stops.
+// AgentFailure arm (owner rulings, 2026-09-28 and 2026-10-06): every cause the
+// vendor ended or refused stands as `vendor_blocked` (any future arm
+// included), the query dying is agent-repl's `turn_died`, and the two
+// expected stops are a green `done`.
 // The colors are the real vocabulary's, on the shared assignment and on the
 // tab bar, which paints the same arm.
 func TestEveryAgentFailureArmTakesItsClassifiedArmAndColor(t *testing.T) {
@@ -376,27 +377,27 @@ func TestEveryAgentFailureArmTakesItsClassifiedArmAndColor(t *testing.T) {
 			Kind: &conversationv1.ApiRequestFailed_AuthenticationFailed{AuthenticationFailed: &conversationv1.ApiAuthenticationFailed{}}}}}, arm: "vendor_blocked", color: "turquoise"},
 		{name: "blocking_limit", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_BlockingLimit{BlockingLimit: &conversationv1.AgentStoppedAtBlockingLimit{}}}, arm: "vendor_blocked", color: "turquoise"},
 		{name: "rapid_refill_breaker", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_RapidRefillBreaker{RapidRefillBreaker: &conversationv1.AgentStoppedByRapidRefillBreaker{}}}, arm: "vendor_blocked", color: "turquoise"},
-		{name: "model_error", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ModelError{ModelError: &conversationv1.AgentModelError{}}}, arm: "turn_failed", color: "turquoise"},
+		{name: "model_error", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ModelError{ModelError: &conversationv1.AgentModelError{}}}, arm: "vendor_blocked", color: "turquoise"},
 		{name: "api_request_failed: overloaded", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ApiRequestFailed{ApiRequestFailed: &conversationv1.ApiRequestFailed{
-			Kind: &conversationv1.ApiRequestFailed_Overloaded{Overloaded: &conversationv1.ApiOverloaded{}}}}}, arm: "turn_failed", color: "turquoise"},
+			Kind: &conversationv1.ApiRequestFailed_Overloaded{Overloaded: &conversationv1.ApiOverloaded{}}}}}, arm: "vendor_blocked", color: "turquoise"},
 		{name: "api_request_failed: billing", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ApiRequestFailed{ApiRequestFailed: &conversationv1.ApiRequestFailed{
 			Kind: &conversationv1.ApiRequestFailed_BillingError{BillingError: &conversationv1.ApiBillingError{}}}}}, arm: "vendor_blocked", color: "turquoise"},
-		{name: "prompt_too_long", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_PromptTooLong{PromptTooLong: &conversationv1.AgentPromptTooLong{}}}, arm: "turn_failed", color: "turquoise"},
-		{name: "image_error", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ImageError{ImageError: &conversationv1.AgentImageRejected{}}}, arm: "turn_failed", color: "turquoise"},
-		{name: "malformed_tool_use_exhausted", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_MalformedToolUseExhausted{MalformedToolUseExhausted: &conversationv1.AgentMalformedToolUseExhausted{}}}, arm: "turn_failed", color: "turquoise"},
+		{name: "prompt_too_long", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_PromptTooLong{PromptTooLong: &conversationv1.AgentPromptTooLong{}}}, arm: "vendor_blocked", color: "turquoise"},
+		{name: "image_error", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ImageError{ImageError: &conversationv1.AgentImageRejected{}}}, arm: "vendor_blocked", color: "turquoise"},
+		{name: "malformed_tool_use_exhausted", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_MalformedToolUseExhausted{MalformedToolUseExhausted: &conversationv1.AgentMalformedToolUseExhausted{}}}, arm: "vendor_blocked", color: "turquoise"},
 		{name: "stop_hook_prevented", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_StopHookPrevented{StopHookPrevented: &conversationv1.AgentStoppedByStopHook{}}}, arm: "done", color: "green"},
-		{name: "hook_stopped", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_HookStopped{HookStopped: &conversationv1.AgentStoppedByHook{}}}, arm: "turn_failed", color: "turquoise"},
+		{name: "hook_stopped", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_HookStopped{HookStopped: &conversationv1.AgentStoppedByHook{}}}, arm: "vendor_blocked", color: "turquoise"},
 		{name: "tool_deferred", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ToolDeferred{ToolDeferred: &conversationv1.AgentToolDeferred{}}}, arm: "done", color: "green"},
-		{name: "tool_deferred_unavailable", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ToolDeferredUnavailable{ToolDeferredUnavailable: &conversationv1.AgentToolDeferredUnavailable{}}}, arm: "turn_failed", color: "turquoise"},
-		{name: "max_turns", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_MaxTurns{MaxTurns: &conversationv1.AgentMaxTurnsReached{}}}, arm: "turn_failed", color: "turquoise"},
-		{name: "budget_exhausted", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_BudgetExhausted{BudgetExhausted: &conversationv1.AgentBudgetExhausted{}}}, arm: "turn_failed", color: "turquoise"},
-		{name: "structured_output_retry_exhausted", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_StructuredOutputRetryExhausted{StructuredOutputRetryExhausted: &conversationv1.AgentStructuredOutputRetriesExhausted{}}}, arm: "turn_failed", color: "turquoise"},
-		{name: "turn_setup_failed", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_TurnSetupFailed{TurnSetupFailed: &conversationv1.AgentTurnSetupFailed{}}}, arm: "turn_failed", color: "turquoise"},
-		{name: "execution_error", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ExecutionError{ExecutionError: &conversationv1.AgentExecutionError{}}}, arm: "turn_failed", color: "turquoise"},
-		{name: "continuation_prevented", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ContinuationPrevented{ContinuationPrevented: &conversationv1.AgentContinuationPrevented{}}}, arm: "turn_failed", color: "turquoise"},
-		{name: "lost", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_Lost{Lost: &conversationv1.DetachedLost{}}}, arm: "turn_failed", color: "turquoise"},
-		{name: "query_died", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_QueryDied{QueryDied: &conversationv1.SessionQueryDied{}}}, arm: "turn_failed", color: "turquoise"},
-		{name: "an arm this build does not know", failure: &conversationv1.AgentFailure{}, arm: "turn_failed", color: "turquoise"},
+		{name: "tool_deferred_unavailable", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ToolDeferredUnavailable{ToolDeferredUnavailable: &conversationv1.AgentToolDeferredUnavailable{}}}, arm: "vendor_blocked", color: "turquoise"},
+		{name: "max_turns", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_MaxTurns{MaxTurns: &conversationv1.AgentMaxTurnsReached{}}}, arm: "vendor_blocked", color: "turquoise"},
+		{name: "budget_exhausted", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_BudgetExhausted{BudgetExhausted: &conversationv1.AgentBudgetExhausted{}}}, arm: "vendor_blocked", color: "turquoise"},
+		{name: "structured_output_retry_exhausted", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_StructuredOutputRetryExhausted{StructuredOutputRetryExhausted: &conversationv1.AgentStructuredOutputRetriesExhausted{}}}, arm: "vendor_blocked", color: "turquoise"},
+		{name: "turn_setup_failed", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_TurnSetupFailed{TurnSetupFailed: &conversationv1.AgentTurnSetupFailed{}}}, arm: "vendor_blocked", color: "turquoise"},
+		{name: "execution_error", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ExecutionError{ExecutionError: &conversationv1.AgentExecutionError{}}}, arm: "vendor_blocked", color: "turquoise"},
+		{name: "continuation_prevented", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ContinuationPrevented{ContinuationPrevented: &conversationv1.AgentContinuationPrevented{}}}, arm: "vendor_blocked", color: "turquoise"},
+		{name: "lost", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_Lost{Lost: &conversationv1.DetachedLost{}}}, arm: "vendor_blocked", color: "turquoise"},
+		{name: "query_died", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_QueryDied{QueryDied: &conversationv1.SessionQueryDied{}}}, arm: "turn_died", color: "blue"},
+		{name: "an arm this build does not know", failure: &conversationv1.AgentFailure{}, arm: "vendor_blocked", color: "turquoise"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -440,10 +441,14 @@ func TestASubagentFailureDoesNotBlockTheRow(t *testing.T) {
 	}
 }
 
+// THE FAULT STANDS OVER THE FAILED TURN'S END until the next turn starts
+// (owner ruling, 2026-10-06), whether or not the account block that also
+// stood lifts first; viewing the blocked row reads the failed turn's result,
+// which the durable result carries.
 func TestViewingAVendorBlockedRowReadsTheFailedTurnsResult(t *testing.T) {
 	// Arrange: a vendor failure blocks the row over the failed turn's end.
-	r := live(t, arrange(t))
-	failedTurn(r, &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_BlockingLimit{
+	r, reports := resultResolver(t, nil)
+	failedTurn(sidebarResolver{Resolver: r}, &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_BlockingLimit{
 		BlockingLimit: &conversationv1.AgentStoppedAtBlockingLimit{}}})
 	if got := statusName(onlyRow(t, r)); got != "vendor_blocked" {
 		t.Fatalf("status = %q, want vendor_blocked — the arrangement missed the arm", got)
@@ -453,26 +458,29 @@ func TestViewingAVendorBlockedRowReadsTheFailedTurnsResult(t *testing.T) {
 	r.SetViewed(theWS)
 	r.OnSessionStarted(theWS, &conversationv1.SessionStarted{VendorSessionId: "vendor-2"})
 
-	// Assert: the failed turn's end is READ, so it is drawn PARTIAL.
-	row := onlyRow(t, r)
-	if statusName(row) != "turn_failed" || row.GetViewed() == nil {
-		t.Fatalf("status = %q viewed = %v, want a READ turn_failed", statusName(row), row.GetViewed())
+	// Assert: the turn fault still stands, and the failed turn is READ.
+	if got := statusName(onlyRow(t, r)); got != "vendor_blocked" {
+		t.Fatalf("status = %q, want the vendor turn fault standing until the next turn", got)
+	}
+	last := (*reports)[len(*reports)-1].result
+	if last == nil || last.End != wsm.TurnResultFailed || !last.Read {
+		t.Fatalf("last reported result = %+v, want a READ failed turn", last)
 	}
 }
 
 func TestAnUnviewedVendorBlockedRowLeavesTheResultUnread(t *testing.T) {
 	// Arrange.
-	r := live(t, arrange(t))
-	failedTurn(r, &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_BlockingLimit{
+	r, reports := resultResolver(t, nil)
+	failedTurn(sidebarResolver{Resolver: r}, &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_BlockingLimit{
 		BlockingLimit: &conversationv1.AgentStoppedAtBlockingLimit{}}})
 
 	// Act: the block lifts with no view.
 	r.OnSessionStarted(theWS, &conversationv1.SessionStarted{VendorSessionId: "vendor-2"})
 
 	// Assert.
-	row := onlyRow(t, r)
-	if statusName(row) != "turn_failed" || row.GetViewed() != nil {
-		t.Fatalf("status = %q viewed = %v, want an UNREAD turn_failed", statusName(row), row.GetViewed())
+	last := (*reports)[len(*reports)-1].result
+	if last == nil || last.End != wsm.TurnResultFailed || last.Read {
+		t.Fatalf("last reported result = %+v, want an UNREAD failed turn", last)
 	}
 }
 
@@ -1142,44 +1150,43 @@ func TestAnUnreadTurnEndHoldsTheRowOverDetachedWork(t *testing.T) {
 			wantStatus: "idle_async",
 		},
 		{
-			name:       "failed with async live is turn_failed, full",
+			name:       "failed with async live is its vendor turn fault, full",
 			how:        wsm.CloseFailed,
 			act:        func(sidebarResolver) {},
-			wantStatus: "turn_failed",
+			wantStatus: "vendor_blocked",
 		},
 		{
-			name:       "orphaned with async live is turn_failed, full",
+			name:       "orphaned with async live is its vendor turn fault, full",
 			how:        wsm.CloseOrphaned,
 			act:        func(sidebarResolver) {},
-			wantStatus: "turn_failed",
+			wantStatus: "vendor_blocked",
 		},
 		{
-			name:       "agent died with async live is turn_failed, full",
+			name:       "agent died with async live is its agent-repl turn fault, full",
 			how:        wsm.CloseAgentDied,
 			act:        func(sidebarResolver) {},
-			wantStatus: "turn_failed",
+			wantStatus: "turn_died",
 		},
 		{
-			name:       "failed, viewed while async live is idle_async, full",
+			name:       "failed, viewed while async live is still its turn fault, full",
 			how:        wsm.CloseFailed,
 			act:        func(r sidebarResolver) { r.SetViewed(theWS) },
-			wantStatus: "idle_async",
+			wantStatus: "vendor_blocked",
 		},
 		{
-			name: "failed, async ends after read is turn_failed, partial",
+			name: "failed, async ends after read is still its turn fault, full",
 			how:  wsm.CloseFailed,
 			act: func(r sidebarResolver) {
 				r.SetViewed(theWS)
 				r.OnLiveWorkChanged(theWS, sidebar.LiveWorkSet{})
 			},
-			wantStatus: "turn_failed",
-			wantViewed: true,
+			wantStatus: "vendor_blocked",
 		},
 		{
-			name:       "failed, async ends while unread is turn_failed, full",
+			name:       "failed, async ends while unread is still its turn fault, full",
 			how:        wsm.CloseFailed,
 			act:        func(r sidebarResolver) { r.OnLiveWorkChanged(theWS, sidebar.LiveWorkSet{}) },
-			wantStatus: "turn_failed",
+			wantStatus: "vendor_blocked",
 		},
 		{
 			name: "failed, a new prompt clears the unread result",
@@ -1222,12 +1229,6 @@ func TestATurnEndWithNoAsyncShowsItsTurnEndArm(t *testing.T) {
 		{name: "completed, viewed", how: wsm.CloseCompleted, viewed: true, wantStatus: "done"},
 		{name: "interrupted, unread", how: wsm.CloseKilled, wantStatus: "interrupted"},
 		{name: "interrupted, viewed", how: wsm.CloseKilled, viewed: true, wantStatus: "interrupted"},
-		{name: "failed, unread", how: wsm.CloseFailed, wantStatus: "turn_failed"},
-		{name: "failed, viewed", how: wsm.CloseFailed, viewed: true, wantStatus: "turn_failed"},
-		{name: "orphaned, unread", how: wsm.CloseOrphaned, wantStatus: "turn_failed"},
-		{name: "orphaned, viewed", how: wsm.CloseOrphaned, viewed: true, wantStatus: "turn_failed"},
-		{name: "agent died, unread", how: wsm.CloseAgentDied, wantStatus: "turn_failed"},
-		{name: "agent died, viewed", how: wsm.CloseAgentDied, viewed: true, wantStatus: "turn_failed"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1253,6 +1254,105 @@ func TestATurnEndWithNoAsyncShowsItsTurnEndArm(t *testing.T) {
 	}
 }
 
+// A FAILED TURN'S FAULT STANDS OVER ITS END (owner ruling, 2026-10-06): the
+// row draws the fault's arm, read or not, and never the PARTIAL marker, which
+// is a turn end's alone.
+func TestAFailedTurnEndShowsItsFaultsArm(t *testing.T) {
+	cases := []struct {
+		name       string
+		how        sidebar.TurnClose
+		viewed     bool
+		wantStatus string
+	}{
+		{name: "failed, unread", how: wsm.CloseFailed, wantStatus: "vendor_blocked"},
+		{name: "failed, viewed", how: wsm.CloseFailed, viewed: true, wantStatus: "vendor_blocked"},
+		{name: "orphaned, unread", how: wsm.CloseOrphaned, wantStatus: "vendor_blocked"},
+		{name: "orphaned, viewed", how: wsm.CloseOrphaned, viewed: true, wantStatus: "vendor_blocked"},
+		{name: "agent died, unread", how: wsm.CloseAgentDied, wantStatus: "turn_died"},
+		{name: "agent died, viewed", how: wsm.CloseAgentDied, viewed: true, wantStatus: "turn_died"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			r := live(t, arrange(t))
+			r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
+			r.SetTurnEnded(theWS, tc.how)
+
+			// Act.
+			if tc.viewed {
+				r.SetViewed(theWS)
+			}
+
+			// Assert.
+			row := onlyRow(t, r)
+			if got := statusName(row); got != tc.wantStatus {
+				t.Fatalf("status = %q, want %q", got, tc.wantStatus)
+			}
+			if row.GetViewed() != nil {
+				t.Fatalf("viewed = %v, want none on a fault's arm", row.GetViewed())
+			}
+		})
+	}
+}
+
+func TestANewTurnEndsTheRowsTurnFault(t *testing.T) {
+	cases := []struct {
+		name string
+		how  sidebar.TurnClose
+	}{
+		{name: "a vendor turn fault", how: wsm.CloseFailed},
+		{name: "an agent-repl turn fault", how: wsm.CloseAgentDied},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			r := live(t, arrange(t))
+			r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
+			r.SetTurnEnded(theWS, tc.how)
+
+			// Act.
+			r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
+
+			// Assert.
+			if got := statusName(onlyRow(t, r)); got != "submitting" {
+				t.Fatalf("status = %q, want submitting once the next turn starts", got)
+			}
+		})
+	}
+}
+
+func TestATurnDiedFaultGivesWayToTheLinksOwnArm(t *testing.T) {
+	// Arrange.
+	r := live(t, arrange(t))
+	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
+	r.SetTurnEnded(theWS, wsm.CloseAgentDied)
+
+	// Act.
+	r.OnLink(theWS, shimclient.LinkRedialing)
+
+	// Assert.
+	if got := statusName(onlyRow(t, r)); got != "severed" {
+		t.Fatalf("status = %q, want the severed link's own arm", got)
+	}
+}
+
+func TestAQueryDeathMidTurnStandsAsTurnDied(t *testing.T) {
+	// Arrange.
+	r := live(t, arrange(t))
+	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
+	r.OnSessionUpdate(theWS, &conversationv1.SessionUpdate{
+		Update: &conversationv1.SessionUpdate_QueryDied{QueryDied: &conversationv1.SessionQueryDied{}},
+	})
+
+	// Act.
+	r.SetTurnEnded(theWS, wsm.CloseFailed)
+
+	// Assert.
+	if got := statusName(onlyRow(t, r)); got != "turn_died" {
+		t.Fatalf("status = %q, want turn_died", got)
+	}
+}
+
 func TestTheUnreadResultTransitionsAreRecorded(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -1267,7 +1367,6 @@ func TestTheUnreadResultTransitionsAreRecorded(t *testing.T) {
 			r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
 		}, operation: "daemon.sidebar.result_unread_cleared"},
 		{name: "a failed turn end sets unread", how: wsm.CloseFailed, act: func(sidebarResolver) {}, operation: "daemon.sidebar.result_unread"},
-		{name: "an unread failed result outranks async", how: wsm.CloseFailed, act: func(sidebarResolver) {}, operation: "daemon.sidebar.unread_outranks_async"},
 		{name: "a viewed report reads a failed result", how: wsm.CloseFailed, act: func(r sidebarResolver) { r.SetViewed(theWS) }, operation: "daemon.sidebar.result_read"},
 		{name: "a new prompt clears a failed result", how: wsm.CloseFailed, act: func(r sidebarResolver) {
 			r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})

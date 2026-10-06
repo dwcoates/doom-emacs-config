@@ -90,7 +90,18 @@ func rosterRung(claim ladder.Claim, s *wsState, session *wsm.Session, log dlog.L
 			// No session was ever created, so there is no route to be down.
 			return ""
 		}
-		return linkArm(s, session)
+		if arm := linkArm(s, session); arm != "" {
+			return arm
+		}
+		// THE ROUTE SERVES: the last turn dying with agent-repl's own
+		// machinery is the one claim left on the rung (owner ruling,
+		// 2026-10-06), as the footer's `agent_repl_fault · turn_died` is
+		// where the link serves and no vendor start stands.
+		if s.turnFault == ladder.AgentReplTurnFault && s.linkSeen && s.vendorStart == VendorStartNone {
+			log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "an agent-repl turn fault stands"})
+			return "turn_died"
+		}
+		return ""
 	case ladder.Closing:
 		// The roster observes no close refusal; only the footer claims it.
 		return ""
@@ -116,6 +127,12 @@ func rosterRung(claim ladder.Claim, s *wsState, session *wsm.Session, log dlog.L
 		}
 		if s.vendorBlocked {
 			log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case s.vendorBlocked"})
+			return "vendor_blocked"
+		}
+		if s.turnFault == ladder.VendorTurnFault {
+			// THE VENDOR ENDED OR REFUSED THE LAST TURN (owner ruling,
+			// 2026-10-06), the footer's `vendor_fault · vendor_error`.
+			log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "a vendor turn fault stands"})
 			return "vendor_blocked"
 		}
 		if s.retryBlocks() {
@@ -358,6 +375,9 @@ func setStatus(row *frontendv1.RosterRow, arm string, log dlog.Logger) {
 	case "degraded":
 		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"degraded\""})
 		row.Status = &frontendv1.RosterRow_Degraded{Degraded: &frontendv1.RosterRowStatusDegraded{}}
+	case "turn_died":
+		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"turn_died\""})
+		row.Status = &frontendv1.RosterRow_TurnDied{TurnDied: &frontendv1.RosterRowStatusTurnDied{}}
 	case "dead":
 		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"dead\""})
 		row.Status = &frontendv1.RosterRow_Dead{Dead: &frontendv1.RosterRowStatusDead{}}

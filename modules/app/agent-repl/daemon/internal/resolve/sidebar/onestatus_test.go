@@ -87,11 +87,17 @@ func (s *surfaces) startTurn() {
 }
 
 // endTurn delivers the main agent's terminal to both, and the daemon's own
-// close to the roster, which is the one surface told how the turn closed.
+// close to both, which is what raises a failed turn's fault on each.
 func (s *surfaces) endTurn(success *conversationv1.AgentSuccess, failure *conversationv1.AgentFailure, how wsm.TurnClose) {
 	turn := s.turn
 	s.footer.OnAgentTerminal(theWS, agent("main"), &turn, success, failure)
 	s.roster.OnAgentTerminal(theWS, agent("main"), &turn, success, failure)
+	s.closeTurn(how)
+}
+
+// closeTurn delivers the close the prompt queue's door recorded to both.
+func (s *surfaces) closeTurn(how wsm.TurnClose) {
+	s.footer.SetTurnEnded(theWS, how)
 	s.roster.SetTurnEnded(theWS, how)
 }
 
@@ -241,7 +247,22 @@ var turnCases = []turnCase{
 		}
 		s.footer.OnSessionUpdate(theWS, died)
 		s.roster.OnSessionUpdate(theWS, died)
-		s.roster.SetTurnEnded(theWS, wsm.CloseFailed)
+		s.closeTurn(wsm.CloseFailed)
+	}},
+	{name: "the agent process died with the turn", apply: func(s *surfaces) {
+		s.startTurn()
+		s.closeTurn(wsm.CloseAgentDied)
+	}},
+	{name: "a turn closed as orphaned", apply: func(s *surfaces) {
+		s.startTurn()
+		s.closeTurn(wsm.CloseOrphaned)
+	}},
+	{name: "a turn the vendor ended, then the next turn", apply: func(s *surfaces) {
+		s.startTurn()
+		s.endTurn(nil, &conversationv1.AgentFailure{
+			Failure: &conversationv1.AgentFailure_MaxTurns{MaxTurns: &conversationv1.AgentMaxTurnsReached{}},
+		}, wsm.CloseFailed)
+		s.startTurn()
 	}},
 	{name: "the allowance rejected", apply: func(s *surfaces) {
 		s.footer.OnSessionUpdate(theWS, rejectedRateLimit())
