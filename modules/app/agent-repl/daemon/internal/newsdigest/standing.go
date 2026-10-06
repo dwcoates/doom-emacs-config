@@ -164,5 +164,18 @@ func decodeStanding(stored []byte) (*frontendv1.NewsDigestOverlay, error) {
 			return nil, fmt.Errorf("newsdigest: the stored overlay's section %d has no items", i)
 		}
 	}
+	// A digest made before the weekly section existed carries none; one that
+	// carries it carries it whole.
+	if week := overlay.GetWeek(); week != nil {
+		switch outcome := week.GetOutcome().(type) {
+		case *frontendv1.NewsDigestWeek_Quiet:
+		case *frontendv1.NewsDigestWeek_Risks:
+			if len(outcome.Risks.GetItems()) == 0 {
+				return nil, errors.New("newsdigest: the stored overlay's week holds no risks")
+			}
+		default:
+			return nil, errors.New("newsdigest: the stored overlay's week carries no outcome")
+		}
+	}
 	return overlay, nil
 }
