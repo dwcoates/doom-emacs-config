@@ -381,12 +381,13 @@ func run(ctx context.Context, opts options, h hooks) error {
 		return err
 	}
 	log.Info("daemon.cmd.boot", "the boot reconciliation completed", dlog.Context{
-		"adopted":            len(report.Adopted),
-		"orphans_closed":     len(report.Orphaned),
-		"missing_dir_closed": len(report.MissingDirClosed),
-		"holds_restored":     report.HoldsRestored,
-		"pending_bring_up":   len(report.PendingBringUp),
-		"orphan_leases":      len(report.OrphanLeases),
+		"adopted":              len(report.Adopted),
+		"orphans_closed":       len(report.Orphaned),
+		"missing_dir_closed":   len(report.MissingDirClosed),
+		"missing_dir_restored": len(report.MissingDirRestored),
+		"holds_restored":       report.HoldsRestored,
+		"pending_bring_up":     len(report.PendingBringUp),
+		"orphan_leases":        len(report.OrphanLeases),
 	})
 
 	srv, err := h.Server(built.Server)
