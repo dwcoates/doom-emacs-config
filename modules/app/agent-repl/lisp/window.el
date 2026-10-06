@@ -50,6 +50,8 @@
 (declare-function agent-repl--info "core")
 (declare-function agent-repl-host-state "host")
 (declare-function agent-repl--frontend-webview-read-script "frontend" (buf script callback))
+(declare-function agent-repl--input-buffer "input" (ws))
+(declare-function json-encode-string "json" (string))
 
 ;; Special variables owned by other sources in this module, declared here
 ;; so the byte-compiler binds and reads them dynamically rather than
@@ -652,28 +654,62 @@ the height a mount would give it, its line count on the frame
         (window-pixel-height win)
       (* (agent-repl-window--input-height nil ws) (frame-char-height)))))
 
-(defun agent-repl-window--gate-dock-script (pixels)
-  "The page script that sizes the docked gate to PIXELS.
-The reply is always a string: a null reply is dropped without a callback."
-  (format "(function(){document.documentElement.style.setProperty('--gate-dock-height','%dpx');return 'ok';})()"
-          pixels))
+(defun agent-repl-window--remapped-background (specs)
+  "The background the first of SPECS that sets one paints, or nil.
+SPECS are a `face-remapping-alist' entry's remapping, highest priority
+first: a property list, a face, or a list of those.  A face counts by its
+own background, never `default''s."
+  (cl-some (lambda (spec)
+             (cond ((and (consp spec) (keywordp (car spec)))
+                    (plist-get spec :background))
+                   ((and spec (symbolp spec) (not (eq spec 'default)) (facep spec))
+                    (let ((bg (face-attribute spec :background)))
+                      (and (stringp bg) bg)))))
+           (if (keywordp (car-safe specs)) (list specs) specs)))
+
+(defun agent-repl-window--input-background (ws)
+  "The background WS's input window paints, or nil when it has no input buffer.
+Read in the input buffer itself: its `default' face remapping (the
+composer's tint, `agent-repl--set-buffer-background') wins, else the
+frame's `default' background, (face-background \='default nil t)."
+  (let ((buf (agent-repl--input-buffer ws)))
+    (and buf
+         (with-current-buffer buf
+           (or (agent-repl-window--remapped-background
+                (cdr (assq 'default face-remapping-alist)))
+               (face-background 'default nil t))))))
+
+(defun agent-repl-window--gate-dock-script (pixels background)
+  "The page script that fits the docked gate to the input's slot.
+PIXELS is its height; BACKGROUND, when non-nil, the color it paints.  The
+reply is always a string: a null reply is dropped without a callback."
+  (format "(function(){var s=document.documentElement.style;s.setProperty('--gate-dock-height','%dpx');%sreturn 'ok';})()"
+          pixels
+          (if background
+              (format "s.setProperty('--gate-dock-bg',%s);" (json-encode-string background))
+            "")))
 
 (defun agent-repl-window--gate-dock-told (_reply)
-  "The page took the docked gate's height; nothing is left to do."
+  "The page took the docked gate's slot; nothing is left to do."
   nil)
 
-(defun agent-repl-window-tell-gate-dock-height (ws)
-  "Tell WS's page the pixel height its docked gate takes: the input's space.
-Sent before the input window hides, so the banner fills exactly the slot
-the input had."
+(defun agent-repl-window-tell-gate-dock (ws)
+  "Tell WS's page the slot its docked gate takes: the input window's.
+Its pixel height and its background, in one script, sent before the
+input window hides, so the banner fills exactly the slot the input had
+and wears its color.  A workspace with no input buffer tells the height
+alone, and the page keeps the card's own background."
+  (require 'json)
   (let ((buf (agent-repl--ws-get ws :frontend-buffer))
-        (pixels (agent-repl-window--gate-dock-pixels ws)))
+        (pixels (agent-repl-window--gate-dock-pixels ws))
+        (background (agent-repl-window--input-background ws)))
     (if (and (buffer-live-p buf)
              (agent-repl--frontend-webview-read-script
-              buf (agent-repl-window--gate-dock-script pixels)
+              buf (agent-repl-window--gate-dock-script pixels background)
               #'agent-repl-window--gate-dock-told))
-        (agent-repl--info ws "elisp.gate.dock-height ws=%s pixels=%d" ws pixels)
-      (agent-repl--info ws "elisp.gate.dock-height-skipped ws=%s reason=no-webview" ws))
+        (agent-repl--info ws "elisp.gate.dock-slot ws=%s pixels=%d background=%s"
+                          ws pixels (or background "untold"))
+      (agent-repl--info ws "elisp.gate.dock-slot-skipped ws=%s reason=no-webview" ws))
     pixels))
 
 (defvar agent-repl-window--gates-applied (make-hash-table :test 'equal)
@@ -690,8 +726,8 @@ other workspace takes the right layout when it is next shown."
   (let ((gate (plist-get host :gate))
         (applied (gethash ws agent-repl-window--gates-applied)))
     (unless (equal gate applied)
-      ;; THE PAGE LEARNS THE INPUT'S HEIGHT BEFORE THE INPUT HIDES.
-      (when gate (agent-repl-window-tell-gate-dock-height ws))
+      ;; THE PAGE LEARNS THE INPUT'S SLOT BEFORE THE INPUT HIDES.
+      (when gate (agent-repl-window-tell-gate-dock ws))
       (if gate
           (puthash ws gate agent-repl-window--gates-applied)
         (remhash ws agent-repl-window--gates-applied))

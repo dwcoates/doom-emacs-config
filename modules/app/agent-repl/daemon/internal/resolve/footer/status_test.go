@@ -258,7 +258,7 @@ func TestTheColdGateIsAWaitingStep(t *testing.T) {
 	connected(h)
 
 	// Act
-	h.r.SetColdGate(testWS, ColdGate{Standing: true, Detail: "context cold — 182k tokens to re-read"})
+	h.r.SetColdGate(testWS, ColdGate{Standing: true, Cost: ColdGateCost{Lead: "context cold — 182k tokens to re-read"}})
 
 	// Assert
 	waiting := h.view(t).GetStrip().GetStatus().GetWaiting()
@@ -267,6 +267,42 @@ func TestTheColdGateIsAWaitingStep(t *testing.T) {
 	}
 	if waiting.GetActivity().GetSalient().GetColdGateCost().GetText() == "" {
 		t.Fatalf("the cold gate's composed cost line is missing")
+	}
+}
+
+func TestTheColdGatesCostLineCarriesItsParts(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	cost := ColdGateCost{Lead: "the conversation is cold at ", Figure: "409,051", Tail: " context tokens", WindowFill: 0.41}
+
+	// Act
+	h.r.SetColdGate(testWS, ColdGate{Standing: true, Cost: cost})
+
+	// Assert
+	line := h.view(t).GetStrip().GetStatus().GetWaiting().GetActivity().GetSalient().GetColdGateCost()
+	got := []any{line.GetLead(), line.GetFigure().GetText(), line.GetFigure().GetWindowFill(), line.GetTail()}
+	want := []any{"the conversation is cold at ", "409,051", 0.41, " context tokens"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("cost line parts = %v, want %v", got, want)
+		}
+	}
+}
+
+func TestTheColdGatesCostLineIsExactlyItsParts(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	cost := ColdGateCost{Lead: "the conversation is cold at ", Figure: "409,051", Tail: " context tokens", WindowFill: 0.41}
+
+	// Act
+	h.r.SetColdGate(testWS, ColdGate{Standing: true, Cost: cost})
+
+	// Assert
+	line := h.view(t).GetStrip().GetStatus().GetWaiting().GetActivity().GetSalient().GetColdGateCost()
+	if parts := line.GetLead() + line.GetFigure().GetText() + line.GetTail(); line.GetText() != parts {
+		t.Fatalf("text = %q, want lead+figure+tail %q", line.GetText(), parts)
 	}
 }
 
@@ -1275,7 +1311,7 @@ func TestEveryWaitingLineStandsFromWhenItsConditionOpened(t *testing.T) {
 		open func(h *harness)
 	}{
 		{name: "a question batch", open: func(h *harness) { h.r.OnQuestion(testWS, mainAgent, questionStart("q-1", "Which?")) }},
-		{name: "a cold gate", open: func(h *harness) { h.r.SetColdGate(testWS, ColdGate{Standing: true, Detail: "cold"}) }},
+		{name: "a cold gate", open: func(h *harness) { h.r.SetColdGate(testWS, ColdGate{Standing: true, Cost: ColdGateCost{Lead: "cold"}}) }},
 		{name: "an interrupt", open: func(h *harness) { h.r.SetInterrupting(testWS, true) }},
 	}
 	for _, tt := range tests {
@@ -1302,11 +1338,11 @@ func TestARestatedColdGateKeepsItsInstant(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	connected(h)
-	h.r.SetColdGate(testWS, ColdGate{Standing: true, Detail: "cold"})
+	h.r.SetColdGate(testWS, ColdGate{Standing: true, Cost: ColdGateCost{Lead: "cold"}})
 	h.clock.Advance(time.Minute)
 
 	// Act
-	h.r.SetColdGate(testWS, ColdGate{Standing: true, Detail: "still cold"})
+	h.r.SetColdGate(testWS, ColdGate{Standing: true, Cost: ColdGateCost{Lead: "still cold"}})
 
 	// Assert
 	at := h.view(t).GetStrip().GetStatus().GetWaiting().GetActivity().GetSalient().GetAt()

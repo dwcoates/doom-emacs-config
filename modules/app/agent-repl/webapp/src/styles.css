@@ -6298,7 +6298,13 @@ bubble-body.bubble-body { display: block; }
   box-sizing: border-box;
 }
 #gate-dock[hidden] { display: none; }
+/* The docked card wears the Emacs input window's background, which Emacs
+   tells the page with the height (--gate-dock-bg, lisp/window.el), so the
+   banner reads as the slot the input had; the card's own background stands in
+   only for a page Emacs never told, which gate-dock.ts records. Its border and
+   controls are the card's own. */
 #gate-dock > .cold-gate.cold-gate-docked {
+  background: var(--gate-dock-bg, var(--revival-gate-bg));
   box-sizing: border-box;
   border-radius: 0;
   border-width: 1px 0 0;
