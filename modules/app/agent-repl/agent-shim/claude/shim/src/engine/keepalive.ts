@@ -22,7 +22,13 @@
  * engine/cold.ts) is an API-BILLING window, not a subscription-billing one:
  * subscription billing's own window is ~1 hour, so the keep-alive fires every
  * 52 minutes to stay inside THAT window, with an eight-minute margin against a
- * slow turn.
+ * slow turn. The 52 minutes run from the conversation's LAST REQUEST, not from
+ * the process (see {@link KeepaliveCadence}), and a cache the vendor bought at
+ * the 5-minute tier gets no keep-alive at all: the keep-alive's own request is
+ * the CLI's like any other and buys whatever tier the CLI is buying (1-hour on
+ * 707 of the 710 keep-alive answers in the owner's transcripts on 2026-10-06,
+ * the other three pure cache reads), so a beat 52 minutes after a 5-minute
+ * write is only ever a cold read.
  *
  * THE YIELD OBLIGATION. A real prompt must never build on keep-alive context,
  * so before one is delivered the vendor context is ROLLED BACK to just after
@@ -752,69 +758,207 @@ function workOf(message: SdkMessage): WorkRef | undefined {
 export interface KeepaliveScheduler {
   setInterval(handler: () => void, ms: number): unknown;
   clearInterval(handle: unknown): void;
+  setTimeout(handler: () => void, ms: number): unknown;
+  clearTimeout(handle: unknown): void;
+}
+
+/**
+ * A keep-alive must never be the reason a process stays alive: the listener
+ * holds the shim open, and an unref'd timer keeps `--version`-style short lives
+ * short.
+ */
+function unref<T>(handle: T): T {
+  if (typeof (handle as { unref?: () => void }).unref === "function") {
+    (handle as { unref: () => void }).unref();
+  }
+  return handle;
 }
 
 /** The real one. */
 export const REAL_SCHEDULER: KeepaliveScheduler = {
-  setInterval: (handler, ms) => {
-    const handle = setInterval(handler, ms);
-    // A keep-alive must never be the reason a process stays alive: the listener
-    // holds the shim open, and an unref'd timer keeps `--version`-style short
-    // lives short.
-    if (typeof (handle as { unref?: () => void }).unref === "function") {
-      (handle as { unref: () => void }).unref();
-    }
-    return handle;
-  },
+  setInterval: (handler, ms) => unref(setInterval(handler, ms)),
   clearInterval: (handle) => clearInterval(handle as ReturnType<typeof setInterval>),
+  setTimeout: (handler, ms) => unref(setTimeout(handler, ms)),
+  clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
 };
+
+/**
+ * The request the vendor's cache was last written or read by: what the
+ * cadence keeps warm.
+ *
+ * `ttlMs` is the tier the cache was bought at (engine/cold.ts,
+ * `cacheRequestOf`), or absence when no request has stated one -- a fresh
+ * conversation that has made none yet.
+ */
+export interface CacheAnchor {
+  /** When that request happened, on the cadence's clock, in epoch milliseconds. */
+  readonly atMs: number;
+  readonly ttlMs: number | undefined;
+}
 
 /**
  * The cadence.
  *
+ * ANCHORED TO THE CONVERSATION'S LAST REQUEST, NOT TO THE PROCESS (2026-10-06).
+ * The vendor's cache lapses a TTL after the last request that read or wrote
+ * it, whatever process made that request. The cadence used to be an interval
+ * started with the session, so every shim restart moved the next beat to
+ * restart + 52 minutes: on 2026-10-06 three deploy bounces inside half an hour
+ * of the last turn (17:15:39, 1-hour cache) put the first beat at 18:38, the
+ * cache lapsed at 18:15:39 with no keep-alive sent, and the 18:23 bring-up
+ * parked at the cold gate. So the next beat is always
+ * `anchor + interval`, where the anchor is the last request: at a start, the
+ * transcript's (engine/cold.ts, the same reading the cold gate judged); after
+ * that, every main-thread API response this session receives, a keep-alive's
+ * included ({@link noteRequest}).
+ *
+ * - A beat whose time has PASSED while the cache is still warm is sent at once.
+ * - A cache already COLD gets no beat: keeping it warm is no longer possible,
+ *   and a keep-alive into it would buy the full-price read the cold gate exists
+ *   to make the user decide on. The next real request re-anchors.
+ * - A cache whose tier is no longer than the interval (the 5-minute tier) gets
+ *   no beat either: a beat every 52 minutes cannot keep it warm, so each would
+ *   be a cold read bought for nothing.
+ * - With no tier stated (no request yet), the cadence beats on the interval
+ *   from its anchor, as it always did.
+ *
  * STARTED BEFORE `StartSession` RETURNS SUCCESS, so a session that is never
  * prompted still keeps its cache warm. PAUSED while a turn is in flight,
  * because a keep-alive submitted into an open turn would be a second submitter
- * — the one thing the one-submitter invariant forbids. STOPPED at kill.
+ * — the one thing the one-submitter invariant forbids; resuming schedules from
+ * the anchor the turn's own requests moved. STOPPED at kill.
  */
 export class KeepaliveCadence {
   private handle: unknown;
   private paused = false;
+  private anchor: CacheAnchor | undefined;
+  /** The schedule last stated at INFO, so an unchanged reschedule is not restated. */
+  private stated: string | undefined;
 
   constructor(
     private readonly beat: () => void,
+    private readonly nowMs: () => number,
     private readonly intervalMs: number = KEEPALIVE_INTERVAL_MS,
     private readonly scheduler: KeepaliveScheduler = REAL_SCHEDULER,
   ) {}
 
-  /** Begin beating. Idempotent: a second start does not double the cadence. */
-  start(): void {
-    if (this.handle !== undefined) return;
-    this.handle = this.scheduler.setInterval(() => {
-      if (this.paused) {
-        LOGGER.logVerbose({ outcome: "skipped_turn_in_flight" }, "keep-alive beat skipped: a turn is in flight");
-        return;
-      }
-      this.beat();
-    }, this.intervalMs);
-    LOGGER.debug({ interval_ms: this.intervalMs }, "keep-alive cadence started");
+  /**
+   * Begin beating from `anchor`, or from now when the conversation states no
+   * request. A second start re-anchors; it never doubles the cadence.
+   */
+  start(anchor: CacheAnchor | undefined, reason: string): void {
+    this.anchor = anchor ?? { atMs: this.nowMs(), ttlMs: undefined };
+    this.arm(anchor === undefined ? `${reason}; no request stated, anchored at the start` : reason);
+  }
+
+  /**
+   * An API request just answered: the cache was read or written now. A request
+   * that wrote nothing states no tier and keeps the one the cache was bought at.
+   */
+  noteRequest(writtenTtlMs: number | undefined): void {
+    if (this.anchor === undefined) return;
+    this.anchor = { atMs: this.nowMs(), ttlMs: writtenTtlMs ?? this.anchor.ttlMs };
+    this.arm("an API request answered");
   }
 
   /** A turn is in flight; hold the beat. */
   pause(): void {
     this.paused = true;
+    this.disarm();
   }
 
-  /** The turn ended; beat again. */
+  /** The turn ended; beat again, from the last request. */
   resume(): void {
     this.paused = false;
+    this.arm("the session is idle again");
   }
 
   /** The session is ending. */
   stop(): void {
-    if (this.handle === undefined) return;
-    this.scheduler.clearInterval(this.handle);
-    this.handle = undefined;
-    LOGGER.debug({}, "keep-alive cadence stopped");
+    const running = this.handle !== undefined;
+    this.disarm();
+    this.anchor = undefined;
+    if (running) LOGGER.debug({}, "keep-alive cadence stopped");
   }
+
+  private disarm(): void {
+    if (this.handle === undefined) return;
+    this.scheduler.clearTimeout(this.handle);
+    this.handle = undefined;
+  }
+
+  /** Schedule the next beat from the anchor, or none when the cache cannot be kept warm. */
+  private arm(reason: string): void {
+    this.disarm();
+    const anchor = this.anchor;
+    if (anchor === undefined || this.paused) return;
+    if (!this.keepable(anchor, reason)) return;
+    const dueAtMs = anchor.atMs + this.intervalMs;
+    this.schedule(dueAtMs, Math.max(0, dueAtMs - this.nowMs()), reason);
+  }
+
+  /** Whether a beat can still keep the anchored cache warm; INFO when it cannot. */
+  private keepable(anchor: CacheAnchor, reason: string): boolean {
+    if (anchor.ttlMs === undefined) return true;
+    const expiresAtMs = anchor.atMs + anchor.ttlMs;
+    const why =
+      anchor.ttlMs <= this.intervalMs
+        ? "the cache tier is no longer than the keep-alive interval, so no beat can keep it warm"
+        : this.nowMs() >= expiresAtMs
+          ? "the cache has already lapsed; the cold gate owns the next request"
+          : undefined;
+    if (why === undefined) return true;
+    const statement = `none:${expiresAtMs}:${why}`;
+    if (this.stated !== statement) {
+      this.stated = statement;
+      LOGGER.info(
+        { ...anchorContext(anchor), cache_expires_at: new Date(expiresAtMs).toISOString(), interval_ms: this.intervalMs, reason },
+        `no keep-alive is scheduled: ${why}`,
+      );
+    }
+    return false;
+  }
+
+  private schedule(dueAtMs: number, delayMs: number, reason: string): void {
+    this.handle = this.scheduler.setTimeout(() => {
+      this.fire();
+    }, delayMs);
+    const statement = `beat:${dueAtMs}`;
+    if (this.stated === statement) return;
+    this.stated = statement;
+    LOGGER.info(
+      { ...anchorContext(this.anchor), next_beat_at: new Date(dueAtMs).toISOString(), delay_ms: delayMs, interval_ms: this.intervalMs, reason },
+      "keep-alive scheduled from the conversation's last request",
+    );
+  }
+
+  private fire(): void {
+    this.handle = undefined;
+    const anchor = this.anchor;
+    if (anchor === undefined) return;
+    if (this.paused) {
+      LOGGER.logVerbose({ outcome: "skipped_turn_in_flight" }, "keep-alive beat skipped: a turn is in flight");
+      return;
+    }
+    // THE CACHE IS RE-JUDGED AT THE BEAT: a timer that fires late (a sleeping
+    // host) must not buy a cold read the schedule never meant to.
+    if (!this.keepable(anchor, "the beat came due")) return;
+    this.beat();
+    // A BEAT THAT MAKES NO REQUEST (skipped, refused) must not end the cadence:
+    // the next falls one interval on, and the keep-alive's own answer, when it
+    // comes, re-anchors over it.
+    if (this.handle === undefined && this.anchor !== undefined && !this.paused) {
+      const dueAtMs = this.nowMs() + this.intervalMs;
+      this.schedule(dueAtMs, this.intervalMs, "the beat went out; the next falls one interval on unless its answer re-anchors");
+    }
+  }
+}
+
+/** The anchor as the log states it. */
+function anchorContext(anchor: CacheAnchor | undefined): Record<string, unknown> {
+  if (anchor === undefined) return {};
+  return {
+    anchor_at: new Date(anchor.atMs).toISOString(),
+    ...(anchor.ttlMs === undefined ? { cache_ttl: "unstated" } : { cache_ttl_ms: anchor.ttlMs }),
+  };
 }

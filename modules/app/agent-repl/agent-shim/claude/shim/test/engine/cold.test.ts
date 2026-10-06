@@ -17,6 +17,7 @@ import {
   CACHE_TTL_5M_MS,
   COLD_GATE_FLOOR_TOKENS,
   cwdSlug,
+  cacheRequestOf,
   judgeCold,
   readTranscriptFacts,
   sessionCold,
@@ -110,6 +111,30 @@ describe("reading the transcript's facts", () => {
     ]);
 
     expect(readTranscriptFacts(file)?.cacheTtlMs).toBe(CACHE_TTL_1H_MS);
+  });
+
+  it("keeps the tier the last write bought across a request that wrote nothing", () => {
+    // A request that only READ the cache refreshed the entry an earlier request
+    // wrote; it says nothing of its own about the tier.
+    const file = transcript([
+      assistant({
+        message: { model: "m", usage: { cache_creation: { ephemeral_1h_input_tokens: 500, ephemeral_5m_input_tokens: 0 } } },
+      }),
+      assistant({
+        message: {
+          model: "m",
+          usage: { cache_read_input_tokens: 900, cache_creation: { ephemeral_1h_input_tokens: 0, ephemeral_5m_input_tokens: 0 } },
+        },
+      }),
+    ]);
+
+    expect(readTranscriptFacts(file)?.cacheTtlMs).toBe(CACHE_TTL_1H_MS);
+  });
+
+  it("reads the 5-minute tier when the only request wrote nothing", () => {
+    const file = transcript([assistant({ message: { model: "m", usage: { cache_read_input_tokens: 900 } } })]);
+
+    expect(readTranscriptFacts(file)?.cacheTtlMs).toBe(CACHE_TTL_5M_MS);
   });
 
   it("recovers the model the conversation was last answered by", () => {
@@ -290,6 +315,48 @@ const FACTS: TranscriptFacts = {
   lastModel: "claude-opus-5",
   prompts: 1,
 };
+
+describe("what one assistant record states about its request", () => {
+  it("states the 1-hour tier for a request that wrote the 1h bucket", () => {
+    const record = { message: { model: "m", usage: { cache_creation: { ephemeral_1h_input_tokens: 3, ephemeral_5m_input_tokens: 0 } } } };
+
+    expect(cacheRequestOf(record)).toEqual({ writtenTtlMs: CACHE_TTL_1H_MS });
+  });
+
+  it("states the 5-minute tier for a request that wrote the 5m bucket", () => {
+    const record = { message: { model: "m", usage: { cache_creation: { ephemeral_1h_input_tokens: 0, ephemeral_5m_input_tokens: 3 } } } };
+
+    expect(cacheRequestOf(record)).toEqual({ writtenTtlMs: CACHE_TTL_5M_MS });
+  });
+
+  it("states the 5-minute tier for cache writes with no per-tier split", () => {
+    const record = { message: { model: "m", usage: { cache_creation_input_tokens: 3 } } };
+
+    expect(cacheRequestOf(record)).toEqual({ writtenTtlMs: CACHE_TTL_5M_MS });
+  });
+
+  it("states no tier for a request that wrote nothing", () => {
+    const record = { message: { model: "m", usage: { cache_read_input_tokens: 3 } } };
+
+    expect(cacheRequestOf(record)).toEqual({ writtenTtlMs: undefined });
+  });
+
+  it("is no request when the record states no usage", () => {
+    expect(cacheRequestOf({ message: { model: "m" } })).toBeUndefined();
+  });
+
+  it("is no request when the CLI wrote the record itself", () => {
+    const record = { message: { model: "<synthetic>", usage: { input_tokens: 0 } } };
+
+    expect(cacheRequestOf(record)).toBeUndefined();
+  });
+
+  it("is no request when the record is a failed API call", () => {
+    const record = { isApiErrorMessage: true, message: { model: "m", usage: { input_tokens: 0 } } };
+
+    expect(cacheRequestOf(record)).toBeUndefined();
+  });
+});
 
 describe("judging the cache", () => {
   it("is warm inside the tier", () => {
