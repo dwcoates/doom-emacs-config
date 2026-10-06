@@ -426,7 +426,7 @@ func TestAdoptParkedHoldsTheShimWithNoWatcherAndRaisesTheGate(t *testing.T) {
 	}
 }
 
-func TestAdoptParkedWithholdsTheCompactMenuForAWorkAccount(t *testing.T) {
+func TestAdoptParkedServesTheCompactMenuForAWorkAccount(t *testing.T) {
 	// Arrange: the parked session lives under the work account.
 	f := newFleetFixture(t)
 	f.accounts.multiRepoDir = "/work"
@@ -439,12 +439,12 @@ func TestAdoptParkedWithholdsTheCompactMenuForAWorkAccount(t *testing.T) {
 	}
 
 	// Assert.
-	if gate, standing := f.fleet.ColdGate(ws.ID); !standing || gate.Compact != nil {
-		t.Fatalf("ColdGate = (%+v, %v), want the gate raised with no compact menu", gate, standing)
+	if gate, standing := f.fleet.ColdGate(ws.ID); !standing || gate.Compact == nil {
+		t.Fatalf("ColdGate = (%+v, %v), want the gate raised with its compact menu", gate, standing)
 	}
 }
 
-func TestRaiseColdGateWithholdsTheCompactMenuForAWorkAccount(t *testing.T) {
+func TestRaiseColdGateServesTheCompactMenuForAWorkAccount(t *testing.T) {
 	// Arrange: the relaunched session is filed under the work account.
 	f := newFleetFixture(t)
 	f.accounts.multiRepoDir = "/work"
@@ -457,8 +457,8 @@ func TestRaiseColdGateWithholdsTheCompactMenuForAWorkAccount(t *testing.T) {
 	}
 
 	// Assert.
-	if gate, standing := f.fleet.ColdGate(ws.ID); !standing || gate.Compact != nil {
-		t.Fatalf("ColdGate = (%+v, %v), want the gate raised with no compact menu", gate, standing)
+	if gate, standing := f.fleet.ColdGate(ws.ID); !standing || gate.Compact == nil {
+		t.Fatalf("ColdGate = (%+v, %v), want the gate raised with its compact menu", gate, standing)
 	}
 }
 

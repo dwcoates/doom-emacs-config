@@ -1711,7 +1711,7 @@ func TestStartRemembersTheColdGateMenu(t *testing.T) {
 	}
 }
 
-func TestStartServesNoCompactMenuForAWorkAccountColdGate(t *testing.T) {
+func TestStartServesTheCompactMenuForAWorkAccountColdGate(t *testing.T) {
 	// Arrange: the routed config dir IS the work (multi-repo) account.
 	f := newFleetFixture(t)
 	f.accounts.multiRepoDir = "/config"
@@ -1726,11 +1726,11 @@ func TestStartServesNoCompactMenuForAWorkAccountColdGate(t *testing.T) {
 
 	// Assert.
 	gate, ok := f.fleet.ColdGate(ws.ID)
-	if !ok || gate.Compact != nil {
-		t.Fatalf("served cold gate = (%+v, %v), want a standing gate with no compact menu", gate, ok)
+	if !ok || gate.Compact == nil {
+		t.Fatalf("served cold gate = (%+v, %v), want a standing gate with its compact menu", gate, ok)
 	}
-	if len(f.feed.synthesized) != 1 || f.feed.synthesized[0].GetColdGate().GetStanding().Compact != nil {
-		t.Fatalf("synthesized rows = %v, want one standing gate row with no compact menu", f.feed.synthesized)
+	if len(f.feed.synthesized) != 1 || f.feed.synthesized[0].GetColdGate().GetStanding().Compact == nil {
+		t.Fatalf("synthesized rows = %v, want one standing gate row with its compact menu", f.feed.synthesized)
 	}
 }
 
@@ -4251,7 +4251,7 @@ func TestEveryEdgeOfTheShownGateRepublishesTheHostView(t *testing.T) {
 	}
 }
 
-func TestReraiseColdGateKeepsTheWorkAccountsMenuWithheld(t *testing.T) {
+func TestReraiseColdGateKeepsTheWorkAccountsMenu(t *testing.T) {
 	// Arrange: a work-account gate was raised, answered, and spent.
 	f := newFleetFixture(t)
 	f.accounts.multiRepoDir = "/work"
@@ -4264,8 +4264,8 @@ func TestReraiseColdGateKeepsTheWorkAccountsMenuWithheld(t *testing.T) {
 
 	// Assert.
 	gate, standing := f.fleet.ColdGate(ws.ID)
-	if !raised || !standing || gate.Compact != nil {
-		t.Fatalf("raised = %t, gate = (%+v, %t); want the gate stood again with no compact menu", raised, gate, standing)
+	if !raised || !standing || gate.Compact == nil {
+		t.Fatalf("raised = %t, gate = (%+v, %t); want the gate stood again with its compact menu", raised, gate, standing)
 	}
 }
 
