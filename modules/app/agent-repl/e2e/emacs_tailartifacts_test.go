@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // tailArtifactsSaid runs tailArtifacts over root and answers what it said.
@@ -98,5 +99,43 @@ func TestTailArtifactsNamesALogPastTheBudget(t *testing.T) {
 	// Assert
 	if !strings.Contains(strings.Join(said, "\n"), "not printed: the tail budget") {
 		t.Fatalf("no log was named as past the budget; a dropped tail must still be said")
+	}
+}
+
+func TestReadCgroupCPUStatReadsEveryCounter(t *testing.T) {
+	// Arrange
+	path := filepath.Join(t.TempDir(), "cpu.stat")
+	writeArtifact(t, filepath.Dir(path), "cpu.stat", "usage_usec 1500\nnr_throttled 3\nthrottled_usec 900\n")
+
+	// Act
+	got, err := readCgroupCPUStat(path)
+
+	// Assert
+	if err != nil || got["usage_usec"] != 1500 || got["nr_throttled"] != 3 || got["throttled_usec"] != 900 {
+		t.Fatalf("readCgroupCPUStat = (%v, %v), want the three counters", got, err)
+	}
+}
+
+func TestReadCgroupCPUStatRefusesAMalformedCounter(t *testing.T) {
+	// Arrange
+	path := filepath.Join(t.TempDir(), "cpu.stat")
+	writeArtifact(t, filepath.Dir(path), "cpu.stat", "usage_usec many\n")
+
+	// Act
+	_, err := readCgroupCPUStat(path)
+
+	// Assert
+	if err == nil {
+		t.Fatal("a malformed counter was read as a number; it must be refused loudly")
+	}
+}
+
+func TestCPUOverProbeSaysWhenTheBeforeReadFailed(t *testing.T) {
+	// Act
+	got := cpuOverProbe(nil, os.ErrNotExist, time.Second)
+
+	// Assert
+	if !strings.Contains(got, "could not be read before the probe") {
+		t.Fatalf("cpuOverProbe = %q, want the failed read said", got)
 	}
 }
