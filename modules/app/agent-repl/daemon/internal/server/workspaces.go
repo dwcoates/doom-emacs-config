@@ -280,6 +280,8 @@ func (r openProgressReporter) Stage(stage workspace.OpenStage) {
 		wire.Stage = &agentreplv1.WorkspaceOpenStage_ClearingClosed{ClearingClosed: &agentreplv1.WorkspaceOpenStageClearingClosed{}}
 	case workspace.OpenStageCheckingBuild:
 		wire.Stage = &agentreplv1.WorkspaceOpenStage_CheckingBuild{CheckingBuild: &agentreplv1.WorkspaceOpenStageCheckingBuild{}}
+	case workspace.OpenStageRestoringWorktree:
+		wire.Stage = &agentreplv1.WorkspaceOpenStage_RestoringWorktree{RestoringWorktree: &agentreplv1.WorkspaceOpenStageRestoringWorktree{}}
 	default:
 		// An unmapped stage is a bug in this switch, not a client condition —
 		// but an open's progress relay must never take the open down, so it is

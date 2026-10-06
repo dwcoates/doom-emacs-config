@@ -154,15 +154,16 @@ func (s *sequence) Run(ctx context.Context) (Report, error) {
 	}
 
 	log.Debug("daemon.boot.run", "the boot reconciliation is complete", dlog.Context{
-		"adopted":            len(report.Adopted),
-		"pending_bring_up":   len(report.PendingBringUp),
-		"orphan_leases":      len(report.OrphanLeases),
-		"undetermined":       len(report.Undetermined),
-		"orphans_closed":     len(report.Orphaned),
-		"missing_dir_closed": len(report.MissingDirClosed),
-		"holds_restored":     report.HoldsRestored,
-		"merges_recovered":   len(report.MergesRecovered),
-		"dispositions":       len(report.Dispositions),
+		"adopted":              len(report.Adopted),
+		"pending_bring_up":     len(report.PendingBringUp),
+		"orphan_leases":        len(report.OrphanLeases),
+		"undetermined":         len(report.Undetermined),
+		"orphans_closed":       len(report.Orphaned),
+		"missing_dir_closed":   len(report.MissingDirClosed),
+		"missing_dir_restored": len(report.MissingDirRestored),
+		"holds_restored":       report.HoldsRestored,
+		"merges_recovered":     len(report.MergesRecovered),
+		"dispositions":         len(report.Dispositions),
 	})
 	return report, nil
 }
@@ -249,6 +250,23 @@ func (s *sequence) closeMissingDirs(ctx context.Context, log dlog.Logger, worksp
 		if !errors.Is(statErr, fs.ErrNotExist) {
 			log.Warn("daemon.boot.close_missing_dir", "the workspace directory could not be stat-ed; never read as gone", context)
 			continue
+		}
+		// AN OPEN WORKSPACE WHOSE BRANCH SURVIVES IS RECREATED, NOT CLOSED
+		// (owner ruling, 2026-10-06): its directory was deleted underneath
+		// it, and the row is still the user's. Only when there is nothing to
+		// restore from -- the branch is gone too, or the workspace was merged
+		// (its tree removed on purpose) -- is it closed as before. A restore
+		// git could not perform is the restorer's own ERROR; the row is then
+		// closed like an unrestorable one, so the boot finishes and an
+		// explicit open retries the restore and surfaces its failure.
+		restored, err := s.deps.RestoreMissingWorktree(ctx, *ws)
+		if restored {
+			log.Info("daemon.boot.close_missing_dir", "the workspace directory was gone; its worktree was recreated from its branch", context)
+			report.MissingDirRestored = append(report.MissingDirRestored, ws.ID)
+			continue
+		}
+		if err != nil {
+			context["restore_error"] = err.Error()
 		}
 		if err := s.deps.DB.SetClosed(ctx, ws.ID, true); err != nil {
 			context["error"] = err.Error()
