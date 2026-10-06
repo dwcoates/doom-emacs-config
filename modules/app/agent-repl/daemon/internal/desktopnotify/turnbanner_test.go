@@ -67,7 +67,7 @@ func TestTurnBannerForEachTurnEnd(t *testing.T) {
 			wantTitle: "✅ my-ws turn completed 14:07", wantBody: "the summary"},
 		{name: "expected stop", how: wsm.CloseFailed, ending: feed.TurnEnding{Failure: ladder.ExpectedStop, Error: "stopped by a hook"},
 			wantTitle: "✅ my-ws turn completed 14:07", wantBody: "the summary"},
-		{name: "failed", how: wsm.CloseFailed, ending: feed.TurnEnding{Failure: ladder.TurnFailed, Error: "rate limited: slow down"},
+		{name: "failed", how: wsm.CloseFailed, ending: feed.TurnEnding{Failure: ladder.VendorFailed, Error: "rate limited: slow down"},
 			wantTitle: "❌ my-ws turn errored 14:07", wantBody: "rate limited: slow down"},
 		{name: "vendor blocked", how: wsm.CloseFailed, ending: feed.TurnEnding{Failure: ladder.VendorBlocked, Error: "usage limit"},
 			wantTitle: "❌ my-ws turn errored 14:07", wantBody: "usage limit"},

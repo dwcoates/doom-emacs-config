@@ -491,7 +491,7 @@ func (r *resolver) OnAgentTerminal(ws ids.WorkspaceID, agent *conversationv1.Age
 				s.blocked = r.blockFor(failure)
 				s.turnFailed = true
 				return
-			case ladder.TurnFailed:
+			case ladder.VendorFailed, ladder.AgentReplFailed:
 				s.turnFailed = true
 				return
 			case ladder.ExpectedStop, ladder.NoFailure:
