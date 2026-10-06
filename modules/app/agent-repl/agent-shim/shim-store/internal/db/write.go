@@ -471,6 +471,17 @@ func (d *DB) applyEntry(ctx context.Context, tx *sql.Tx, base logging.Fields, r 
 		return nil
 	}
 
+	if retiredFrom == kindHookDropped && hookDrawsNothing(r.pageLine.GetAgentItem().GetAgentFrame()) {
+		// A DROPPED HOOK ROW STAYS DROPPED. A shim still running a pre-rule
+		// build writes a firing's success onto the start the hook sweep already
+		// dropped; taking the row back would leave a page line that draws
+		// nothing below the sweep's mark, where no later sweep looks. A failed
+		// or blocked outcome does take it back: its card is drawn.
+		result.Absorbed++
+		d.log.LogVerbose(fields, "hook write not applied: the row was dropped by the hook sweep and this write draws nothing entries_index=%d", r.index)
+		return nil
+	}
+
 	held, err := d.fileTerminalHeld(ctx, tx, r)
 	if err != nil {
 		return d.refuse(fields, err)
@@ -538,17 +549,18 @@ func (d *DB) applyEntry(ctx context.Context, tx *sql.Tx, base logging.Fields, r 
 		info := fields
 		info.Level = "info"
 		what := "a retired keep-alive row"
-		if retiredFrom == kindRetired {
+		switch retiredFrom {
+		case kindRetired:
 			what = "a page line the file plane's re-derivation retired"
+		case kindHookDropped:
+			what = "a hook row the hook sweep dropped"
 		}
 		d.log.Log(info, "%s was superseded by a real record old_kind=%s new_kind=%s entries_index=%d",
 			what, retiredFrom, r.kind, r.index)
 	}
 	result.Written++
 	switch r.kind {
-	case kindPageLine, kindHookDropped:
-		// A HOOK LINE IS PUBLISHED LIKE ANY LINE, and that is the only time it
-		// is ever served: the row keeps none of it (kindHookDropped).
+	case kindPageLine:
 		result.Lines = append(result.Lines, LineWritten{
 			AgentID:  r.book.String,
 			Line:     lineAt(position, r.pageLine, r.entry.GetTurn(), place),
@@ -717,16 +729,15 @@ func (d *DB) recordApplied(ctx context.Context, tx *sql.Tx, r routed, cursor *st
 // written again, so the retired row names nothing a pointer could hold, and
 // the real record takes the key. The caller is told through `retiredFrom`.
 //
-// A HOOK LINE LANDING ON A ROW STORED AS A PAGE LINE IS NOT AN IDENTITY CHANGE
-// EITHER (hookLineDropsStoredLine): it is the same line, written before the
-// store stopped keeping hook records, and the write supersedes it in place as
-// any same-kind write would.
-//
 // A ROW THE FILE PLANE'S RE-DERIVATION RETIRED (kindRetired) IS THE SECOND. It
 // was a page line and still holds its book and position; a real page line under
 // the same key in the SAME book takes it back where it stood, so a pointer
 // already served for it names the line again. Into another book it is the
 // ordinary book-move skip, and as any other kind the ordinary refusal.
+//
+// A HOOK ROW THE HOOK SWEEP DROPPED (kindHookDropped) IS THE THIRD, and it is
+// taken back exactly as a retired row is: a pre-rule shim wrote a firing's
+// start, the sweep dropped it, and the firing's failed outcome lands after.
 //
 // The stored row is handed back (`prior`) whenever it was superseded in place,
 // so the caller can see whether the write changes anything at all.
@@ -744,13 +755,13 @@ func (d *DB) applyIdentityPolicy(ctx context.Context, tx *sql.Tx, fields logging
 	if row.kind == kindKeepaliveRetired && r.kind != kindKeepaliveRetired {
 		return nil, row.kind, nil, nil
 	}
-	if row.kind == kindRetired && r.kind == kindPageLine {
+	if (row.kind == kindRetired || row.kind == kindHookDropped) && r.kind == kindPageLine {
 		if row.book.Valid != r.book.Valid || row.book.String != r.book.String {
 			return &SkippedEntry{UpsertKey: r.upsertKey, FromBook: nullableBook(row.book), ToBook: nullableBook(r.book)}, "", nil, nil
 		}
 		return nil, row.kind, nil, d.carryStoredStamps(fields, r, row.frame)
 	}
-	if row.kind != r.kind && !hookLineDropsStoredLine(row.kind, r.kind) {
+	if row.kind != r.kind {
 		return nil, "", nil, invalidSitef(SiteUpsertChangesIdentity,
 			entryField(r.index, "agent_update"),
 			"entries[%d] (upsert_key=%q) would change the row's kind from %q to %q — an upsert supersedes a row's content, never its identity",
@@ -767,14 +778,6 @@ func (d *DB) applyIdentityPolicy(ctx context.Context, tx *sql.Tx, fields logging
 		return nil, "", nil, err
 	}
 	return nil, "", row, nil
-}
-
-// hookLineDropsStoredLine reports whether a write of kind `incoming` onto a row
-// of kind `stored` is a hook line superseding the page line its key held from
-// before kindHookDropped existed (a shim that wrote a hook's start as a page
-// line, its outcome arriving after the store began dropping hook records).
-func hookLineDropsStoredLine(stored, incoming string) bool {
-	return stored == kindPageLine && incoming == kindHookDropped
 }
 
 // placeUnownedLine places a page line its producer wrote `owner_unknown` in the
@@ -981,18 +984,9 @@ func (d *DB) upsertEntry(ctx context.Context, tx *sql.Tx, r routed, writeSeq uin
 	    frame = excluded.frame,
 	    last_written_at_ms = excluded.last_written_at_ms
 	  RETURNING position, first_inserted_at_ms`
-	frame := r.frame
-	if r.kind == kindHookDropped {
-		// THE RECORD IS NOT KEPT: only the envelope's identity and stamps.
-		stamps, err := hookStampsFrame(r.entry)
-		if err != nil {
-			return 0, 0, storagef(err, "serializing the stamps of hook line upsert_key=%q", r.upsertKey)
-		}
-		frame = stamps
-	}
 	var position, firstInsertedAtMs int64
 	err := tx.QueryRowContext(ctx, upsertSQL,
-		r.upsertKey, r.writeID, writeSeq, r.plane, r.kind, r.book, r.runID, r.topLevel, frame, now, now,
+		r.upsertKey, r.writeID, writeSeq, r.plane, r.kind, r.book, r.runID, r.topLevel, r.frame, now, now,
 	).Scan(&position, &firstInsertedAtMs)
 	if err != nil {
 		return 0, 0, storagef(err, "writing entry upsert_key=%q write_id=%q", r.upsertKey, r.writeID)

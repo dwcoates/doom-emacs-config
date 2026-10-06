@@ -325,25 +325,24 @@ the detector shadows every access, which makes the number about the detector.
 There is no `--` flag: the window is `Options.LedgerRetentionBytes`, which only
 a test sets, and a NEGATIVE value disables the sweep entirely.
 
-### A hook line is delivered live and never kept
+### Hook rows that draw nothing are dropped by the store's own sweep
 
 Owner ruling 2026-10-06: "we should stop storing hook records, they are just
-bloat." An agent frame whose update is an `AgentHook` activity is classified
-`hook_dropped` (`db/route.go`), whichever producer build wrote it:
+bloat." The shim no longer writes a hook's start, success, cancellation or
+progress. `SweepHookLines` (`db/hooksweep.go`) drops the ones already stored,
+and the ones a shim still running a pre-rule build writes:
 
-- The write PUBLISHES the whole line to every standing watch of its book, so a
-  failed or blocked hook's card is drawn while the session runs.
-- The row keeps only its identity: key, book, position, ledger row, and a frame
-  reduced to the envelope's turn and place (`hookStampsFrame`).
-- No page and no `LinesSince` replay reads it, so a reader opened after the
-  write (a restarted daemon) never sees it; its pointer stays a valid
-  `known_through` / `after`.
-
-Rows a pre-rule shim stored as page lines are dropped by `SweepHookLines`
-(`db/hooksweep.go`), run once per boot before the ledger sweep: stream-plane
-`activity:` rows only, bounded batches through the bulk write slot, no
-`write_seq` bump (they drew nothing, so no watcher has anything to withdraw),
-one INFO record with the count when it dropped any.
+- It runs before every ledger sweep pass; the first pass per boot reads every
+  stream-plane `activity:` row, later passes only rows past its mark.
+- A dropped row becomes kind `hook_dropped`: key, book, position, ledger row,
+  and a frame reduced to the envelope's turn and place (`hookStampsFrame`).
+- No `write_seq` bump: the row drew nothing, so no watcher withdraws anything.
+- Its pointer stays a valid `known_through` / `after`.
+- A failed or blocked outcome landing on a dropped start takes the row back as
+  a page line; a success landing on it is absorbed.
+- A failed or blocked firing is NOT dropped: the ruling that its card is drawn
+  live and never replayed needs a carrier for a line delivered but not kept,
+  which is an open contract question.
 
 ### The store is NUKED, never migrated
 
