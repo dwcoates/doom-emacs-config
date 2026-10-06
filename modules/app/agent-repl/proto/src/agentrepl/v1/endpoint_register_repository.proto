@@ -103,7 +103,20 @@ message RegisterRepositoryError {
     // The path cannot be read at all: it is not there, or its directory
     // cannot be stat'ed.
     RegisterRepositoryUnreadablePath unreadable_path = 2;
+    // The repository's main worktree lies inside a temporary directory.
+    RegisterRepositoryInsideTemporaryDirectory inside_temporary_directory = 3;
   }
 }
 message RegisterRepositoryNotInARepository {}
 message RegisterRepositoryUnreadablePath {}
+// The directory lies inside a temporary directory (owner ruling,
+// 2026-10-06): agent-repl does not register temporary folders. A temporary
+// folder is scratch space the OS or a test run purges, so a roster row for
+// it names a directory about to vanish.
+message RegisterRepositoryInsideTemporaryDirectory {
+  // The refused directory, canonical (symlinks resolved, on-disk case).
+  string dir = 1;
+  // The canonical temporary root `dir` lies inside: the process's own
+  // temporary directory, `/tmp`, `/var/tmp` or `/var/folders`.
+  string temporary_root = 2;
+}

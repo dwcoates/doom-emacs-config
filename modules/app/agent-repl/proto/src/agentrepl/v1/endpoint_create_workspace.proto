@@ -204,6 +204,9 @@ message CreateWorkspaceError {
     CreateWorkspaceOneShotPolicyMissing one_shot_policy_missing = 12;
     // The daemon could not mint a name for a create that supplied none.
     CreateWorkspaceNamingFailed naming_failed = 13;
+    // The repository, or the worktree the create would register, lies inside
+    // a temporary directory.
+    CreateWorkspaceInsideTemporaryDirectory inside_temporary_directory = 14;
   }
 }
 message CreateWorkspaceUngatedWithoutConsent {}
@@ -214,6 +217,17 @@ message CreateWorkspaceBriefMissing {
   string name = 1;
 }
 message CreateWorkspaceUnknownRepository {}
+// The directory lies inside a temporary directory (owner ruling,
+// 2026-10-06): agent-repl does not register temporary folders. A temporary
+// folder is scratch space the OS or a test run purges, so a roster row for
+// it names a directory about to vanish.
+message CreateWorkspaceInsideTemporaryDirectory {
+  // The refused directory, canonical (symlinks resolved, on-disk case).
+  string dir = 1;
+  // The canonical temporary root `dir` lies inside: the process's own
+  // temporary directory, `/tmp`, `/var/tmp` or `/var/folders`.
+  string temporary_root = 2;
+}
 message CreateWorkspaceUnknownParent {}
 message CreateWorkspaceBaseRefUnresolved {
   // The ref that did not resolve.
