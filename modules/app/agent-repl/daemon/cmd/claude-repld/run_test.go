@@ -63,7 +63,7 @@ func newTestHooks() *testHooks {
 			return nil, errServed
 		},
 		Server: func(server.Deps) (server.Server, error) { return nil, errServed },
-		Serve: func(_ context.Context, _ net.Listener, _ http.Handler, _, _ func()) error {
+		Serve: func(_ context.Context, _ net.Listener, _ http.Handler, _, _ func(), _ func(string, time.Time)) error {
 			th.served <- struct{}{}
 			return errServed
 		},
@@ -290,7 +290,7 @@ func TestServeWithdrawsTheAdvertisementBeforeItStopsAccepting(t *testing.T) {
 
 	// Act.
 	served := make(chan error, 1)
-	go func() { served <- serve(ctx, listener, gate, onShuttingDown, nil) }()
+	go func() { served <- serve(ctx, listener, gate, onShuttingDown, nil, nil) }()
 	cancel()
 	if err := <-served; err != nil {
 		t.Fatalf("serve() = %v, want an orderly shutdown", err)
@@ -731,7 +731,7 @@ func TestTheExitWaitsForTheStandingStreamsPushesBeforeShuttingDown(t *testing.T)
 
 	// Act
 	served := make(chan error, 1)
-	go func() { served <- serve(ctx, listener, gate, nil, nil) }()
+	go func() { served <- serve(ctx, listener, gate, nil, nil, nil) }()
 	cancel()
 	if err := <-served; err != nil {
 		t.Fatalf("serve() = %v, want an orderly shutdown", err)
@@ -766,7 +766,7 @@ func TestTheExitEndsEveryStandingStreamBeforeShuttingDown(t *testing.T) {
 
 	// Act
 	served := make(chan error, 1)
-	go func() { served <- serve(ctx, listener, gate, nil, endStreams) }()
+	go func() { served <- serve(ctx, listener, gate, nil, endStreams, nil) }()
 	cancel()
 	if err := <-served; err != nil {
 		t.Fatalf("serve() = %v, want an orderly shutdown", err)
@@ -995,3 +995,4 @@ func TestTheClaimLoserRecordsAtInfo(t *testing.T) {
 		t.Fatalf("daemon.run.log = %q, want an INFO daemon.cmd.claim record", string(raw))
 	}
 }
+
