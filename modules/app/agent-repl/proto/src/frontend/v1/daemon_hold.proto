@@ -130,7 +130,8 @@ message HeldPrompt {
     // new work.
     HeldPromptShutdownHold shutdown = 9;
     // The session is not up — coming up, being retried, or down until a
-    // restart — and the prompt waits for it to reconnect.
+    // restart — or the vendor refuses it mid-session, and the prompt waits
+    // for it to reconnect or for the vendor to serve again.
     HeldPromptReconnectHold reconnect = 11;
     // The session's build is being refreshed onto a newer one before it takes
     // more work.
@@ -340,11 +341,17 @@ message HeldPromptShutdownHold {
 // whose start failed outright and waits for the user's restart. The card's
 // badge reads "after reconnect".
 //
-// A FAILED BRING-UP NEVER DROPS THESE ENTRIES. The exits are delivery the
-// moment a session comes up on the workspace (however it comes up — a retry
-// that succeeds, a restart, a revival), or the user's cancel. The classifier
-// NEVER runs on such an entry and there is NO force-through: there is no
-// session to force a prompt into.
+// ALSO A SESSION THAT IS UP BUT REFUSED MID-SESSION (owner, 2026-10-06): while
+// the vendor refuses the session (usage limit, auth, billing, vendor error, an
+// API retry), a prompt is held here at once, unclassified, and nothing reaches
+// the vendor.
+//
+// A FAILED BRING-UP NEVER DROPS THESE ENTRIES. The exits are release the
+// moment the vendor serves again or a session comes up on the workspace
+// (however it comes up — a retry that succeeds, a restart, a revival), or the
+// user's cancel. The classifier NEVER runs while an entry is held; it runs
+// when the entry is RELEASED, against what is then ahead of it. There is NO
+// force-through.
 //
 // A prompt that reaches a shim holding no session — the daemon believed the
 // session was up and the shim answered `no_session` — lands here too, rather
