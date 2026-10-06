@@ -1999,10 +1999,21 @@ Owner ruling, 2026-10-06 (`internal/promptqueue/vendorblock.go`,
   behind it is judged against what is ahead of it. A submission landing
   between the lift and its release performs the release first
   (`releaseBeforeSubmit`), so it never overtakes them.
-- **GAP (owner question):** an account block lifted by nothing but a session
-  start or a vendor verdict (auth, billing, a usage limit with no further
-  rate-limit event) holds its prompts until the user restarts the workspace;
-  no timer releases a usage limit at its reset.
+- **A SUBMISSION WHILE PROMPTS ARE HELD AND NOTHING RUNS IS THE USER'S "TRY
+  NOW"** (owner ruling, 2026-10-06; `internal/promptqueue/trynow.go`). With
+  after-reconnect or free entries standing and no turn in flight, the new
+  prompt is ALWAYS held behind them (after reconnect, unclassified), and the
+  OLDEST of them is delivered now, past a standing vendor block; what waits
+  behind it is released and classified by the release path once the vendor
+  serves. A delivery the vendor refuses (StartTurn refused) puts it back on
+  the hold in its place. A turn in flight, nothing held, or only entries held
+  by another condition (drain, build refresh, merge) leaves the submission on
+  its ordinary path; an edit of the oldest withholds the try. So held prompts
+  never sit stuck with nothing running, even when no vendor event ends the
+  block.
+- **NO TIMER** releases a usage limit at its reset: an account block lifted
+  by nothing but a session start or a vendor verdict waits for the user's
+  next send (the try-now above) or a restart.
 
 ## The footer's activity cell has three tiers, and the daemon picks the one line
 
