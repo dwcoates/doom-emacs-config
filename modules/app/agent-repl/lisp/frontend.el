@@ -645,6 +645,12 @@ minor-mode map, so the chords must live in this mode's own state maps."
 (with-eval-after-load 'evil
   (agent-repl--frontend-copy-bind-evil-keys))
 
+;; FEED TEXT ZOOM in the webview too (owner request, 2026-10-06): `C-+' / `C--'
+;; zoom the feed whichever of the two windows holds the keyboard.
+(agent-repl-bind-feed-zoom-keys agent-repl-frontend-webview-mode-map)
+(with-eval-after-load 'evil
+  (agent-repl-bind-feed-zoom-keys agent-repl-frontend-webview-mode-map))
+
 (add-hook 'agent-repl-frontend-webview-adopt-hook
           #'agent-repl-frontend-webview-mode)
 

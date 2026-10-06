@@ -4111,4 +4111,28 @@ Returns `:checked' with the assertion result consed on, or `:deferred'."
      agent-repl--heartbeat-assert-deferral-timer)
     :deferred))
 
+;;;; ---- Feed text zoom keys ------------------------------------------------
+
+(declare-function evil-define-key* "evil-core" (state keymap key def &rest bindings))
+
+(defconst agent-repl-feed-zoom-keys
+  '(("C-+" . agent-repl-feed-text-scale-increase)
+    ("C--" . agent-repl-feed-text-scale-decrease))
+  "The feed text zoom chords and the commands they run.")
+
+(defun agent-repl-bind-feed-zoom-keys (map)
+  "Bind the feed text zoom chords in MAP and in each of its Evil state maps.
+Doom binds `C-+' and `C--' in `evil-normal-state-map', and an Evil state
+map outranks any major or minor mode map, so a plain binding in MAP alone
+never fires (observed 2026-10-06: the composer resolved `C-+' to
+`doom/reset-font-size').  Planting the chords in MAP's own state maps
+makes them win in every state; the plain binding keeps them observable
+under `emacs -Q', where Evil is absent."
+  (dolist (binding agent-repl-feed-zoom-keys)
+    (define-key map (kbd (car binding)) (cdr binding)))
+  (when (fboundp 'evil-define-key*)
+    (dolist (state '(normal motion visual insert emacs))
+      (dolist (binding agent-repl-feed-zoom-keys)
+        (evil-define-key* state map (kbd (car binding)) (cdr binding))))))
+
 (agent-repl--assert-heartbeat-armed-when-owners-load)
