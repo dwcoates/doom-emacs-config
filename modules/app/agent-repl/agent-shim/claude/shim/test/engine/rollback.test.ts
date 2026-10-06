@@ -482,3 +482,43 @@ describe("readLiveChain", () => {
     });
   });
 });
+
+describe("planCut, a turn the vendor refused for a usage limit", () => {
+  // THE SHAPE A RATE-LIMITED TURN LEAVES (the owner's own transcripts,
+  // 2026-10-06): the prompt's user record, its attachments, then a
+  // `<synthetic>` assistant record carrying the 429, then the turn's system
+  // records. The prompt IS recorded, so the daemon cuts it out before it holds
+  // the prompt again (daemon/internal/promptqueue/rehold.go).
+  const rateLimited = (): TranscriptChain =>
+    chainOf(
+      transcript([
+        user("p0", null),
+        assistant("a0", "p0"),
+        user("p1", "a0"),
+        { type: "attachment", uuid: "att1", parentUuid: "p1", attachment: { type: "queued_command" } },
+        {
+          type: "assistant",
+          uuid: "e1",
+          parentUuid: "att1",
+          isApiErrorMessage: true,
+          error: "rate_limit",
+          apiErrorStatus: 429,
+          message: { role: "assistant", model: "<synthetic>", content: [{ type: "text", text: "You've hit your session limit" }] },
+        },
+        { type: "system", subtype: "turn_duration", uuid: "s1", parentUuid: "e1" },
+      ]),
+    );
+
+  it("holds the refused prompt on the live chain", () => {
+    // Arrange, Act, Assert.
+    expect(uuids(rateLimited())).toContain("p1");
+  });
+
+  it("cuts just before the refused prompt", () => {
+    // Arrange, Act.
+    const plan = planCut(rateLimited(), "p1", ["p1"], "keep");
+
+    // Assert.
+    expect(plan).toMatchObject({ kind: "cut", promptUuid: "p1", forkPoint: "a0" });
+  });
+});

@@ -93,6 +93,13 @@ func (q *queue) tryOldestHeld(ctx context.Context, d *delivery, held []wsm.HeldP
 		q.rehold(ctx, d, oldest, err, log)
 		return
 	}
+	// THE TRY IS REMEMBERED UNTIL ITS TURN ENDS: a vendor that takes the
+	// prompt and then fails the turn with a block puts it back on the hold
+	// (reholdFailedTry).
+	tried := oldest
+	q.mu.Lock()
+	q.stateLocked(d.ws).tried = &tried
+	q.mu.Unlock()
 	log.Info(opSubmit, "the prompt tried now was delivered; what waits behind it is released when the vendor serves", fields)
 	q.releaseReconnectHoldsLocked(ctx, d, log)
 }

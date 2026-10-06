@@ -11,6 +11,7 @@ import (
 	shimv1 "agentrepl/proto/shim/v1"
 
 	"claude-repld/internal/ids"
+	"claude-repld/internal/promptqueue"
 	"claude-repld/internal/sessionwatcher"
 )
 
@@ -26,6 +27,13 @@ type fakeSenderClient struct {
 	setModelReq    *shimv1.SetSessionModelRequest
 	killTurnReq    *shimv1.KillTurnRequest
 	killTurnErr    error
+	rollBack       *shimv1.RollBackSessionResponse
+	rollBackReq    *shimv1.RollBackSessionRequest
+}
+
+func (c *fakeSenderClient) RollBackSession(_ context.Context, req *shimv1.RollBackSessionRequest) (*shimv1.RollBackSessionResponse, error) {
+	c.rollBackReq = req
+	return c.rollBack, nil
 }
 
 func (c *fakeSenderClient) StartTurn(_ context.Context, req *shimv1.StartTurnRequest) (*shimv1.StartTurnResponse, error) {
@@ -592,5 +600,54 @@ func TestSenderStartsAnInterjectionWithItsVendorNote(t *testing.T) {
 				t.Fatalf("vendor_note = %v, want %v", got, tt.wantNote)
 			}
 		})
+	}
+}
+
+func TestSenderRollBackTurnCutsTheOneTurnFilesKept(t *testing.T) {
+	// Arrange
+	client := &fakeSenderClient{rollBack: &shimv1.RollBackSessionResponse{
+		Result: &shimv1.RollBackSessionResponse_Success{Success: &shimv1.RollBackSessionSuccess{}}}}
+	s := &sender{client: client}
+
+	// Act
+	err := s.RollBackTurn(context.Background(), "turn-1")
+
+	// Assert
+	req := client.rollBackReq
+	if err != nil || req.GetToBefore().GetValue() != "turn-1" || len(req.GetDroppedTurns()) != 1 || req.GetKeepFiles() == nil {
+		t.Fatalf("RollBackTurn = %v, request = %v, want turn-1 alone cut with files kept", err, req)
+	}
+}
+
+func TestSenderRollBackTurnAnswersAPromptNeverRecorded(t *testing.T) {
+	// Arrange
+	client := &fakeSenderClient{rollBack: &shimv1.RollBackSessionResponse{
+		Result: &shimv1.RollBackSessionResponse_Failure{Failure: &shimv1.RollBackSessionFailure{
+			Cause: &shimv1.RollBackSessionFailure_PromptNotRecorded{PromptNotRecorded: &shimv1.RollBackSessionPromptNotRecorded{}}}}}}
+	s := &sender{client: client}
+
+	// Act
+	err := s.RollBackTurn(context.Background(), "turn-1")
+
+	// Assert
+	if !errors.Is(err, promptqueue.ErrPromptNotRecorded) {
+		t.Fatalf("RollBackTurn = %v, want ErrPromptNotRecorded", err)
+	}
+}
+
+func TestSenderRollBackTurnAnswersAnyOtherRefusalAsTheShimsRefusal(t *testing.T) {
+	// Arrange
+	client := &fakeSenderClient{rollBack: &shimv1.RollBackSessionResponse{
+		Result: &shimv1.RollBackSessionResponse_Failure{Failure: &shimv1.RollBackSessionFailure{
+			Cause: &shimv1.RollBackSessionFailure_FirstPrompt{FirstPrompt: &shimv1.RollBackSessionFirstPrompt{}}}}}}
+	s := &sender{client: client}
+
+	// Act
+	err := s.RollBackTurn(context.Background(), "turn-1")
+
+	// Assert
+	refusal, ok := AsShimRefusal(err)
+	if !ok || refusal.Arm != ArmShimFirstPrompt || errors.Is(err, promptqueue.ErrPromptNotRecorded) {
+		t.Fatalf("RollBackTurn = %v, want the first_prompt refusal and not ErrPromptNotRecorded", err)
 	}
 }

@@ -130,6 +130,11 @@ type wsState struct {
 	// pop) reads it. Guarded by q.mu; set by runContextCut, retired by the
 	// turn's end or a refused start.
 	cut *runningCut
+	// tried is the held prompt a try-now delivered (trynow.go), as it stood
+	// on the hold, until its turn ends: a turn the vendor then fails with a
+	// block puts it back on the hold in its place (reholdFailedTry). Guarded
+	// by q.mu; set under drain, taken by that turn's end.
+	tried *wsm.HeldPrompt
 }
 
 // runningCut is a context cut running as the session's turn.
