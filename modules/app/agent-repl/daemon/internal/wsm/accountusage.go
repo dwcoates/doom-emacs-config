@@ -47,6 +47,24 @@ CREATE TABLE account_usage (
 );
 `
 
+// accountUsageSeatDDL is the layout-25 addition: a per-seat account's spend
+// (owner ruling, 2026-10-06: the usage line is chosen by the account's billing
+// mode). The seat's allotment, currency and sample stamp are NULL together
+// when the account is not billed per seat; its month-to-date spend is NULL on
+// its own while the vendor has reported none.
+//
+// THE `no_allowance` COLUMN IS RETIRED BY THIS STEP. This build never reads
+// it and writes it 0, so a row the build before it stored with
+// no_allowance=1 reloads as unobserved and re-resolves on the account's next
+// sample. Dropping the column is a later breaking step; this one is additive,
+// so the build before it keeps working across it.
+const accountUsageSeatDDL = `
+ALTER TABLE account_usage ADD COLUMN seat_allotment_minor INTEGER;
+ALTER TABLE account_usage ADD COLUMN seat_spent_minor INTEGER;
+ALTER TABLE account_usage ADD COLUMN seat_currency TEXT;
+ALTER TABLE account_usage ADD COLUMN seat_sampled_at_ms INTEGER;
+`
+
 // AllowanceVerdict is the vendor's last verdict on one allowance window, as
 // the account_usage row stores it. Empty is "no verdict observed yet".
 type AllowanceVerdict string
@@ -81,21 +99,36 @@ type AllowanceFigures struct {
 	Verdict AllowanceVerdict
 }
 
+// SeatSpend is a per-seat account's month-to-date spend against its monthly
+// allotment, in minor units of one currency.
+type SeatSpend struct {
+	// AllotmentMinor is the seat's monthly allotment.
+	AllotmentMinor int64
+	// SpentMinor is the month-to-date spend, nil while the vendor has
+	// reported none.
+	SpentMinor *int64
+	// Currency is the ISO 4217 code both amounts are in.
+	Currency string
+	// SampledAtMs is the shim's stamp on the sample that read it.
+	SampledAtMs int64
+}
+
 // AccountUsage is the last usage evidence the daemon read for one account
-// root.
+// root. THE BILLING MODE IS ONE OF TWO: allowance windows (a subscription) or
+// a seat's spend (Seat set); never both, which validate refuses.
 type AccountUsage struct {
 	// ConfigDir is the account root's path.
 	ConfigDir string
 	// ObservedAt is when the daemon last filed evidence for the account.
 	ObservedAt time.Time
-	// NoAllowance reports that the vendor's usage service answered for the
-	// account with no five-hour session window.
-	NoAllowance bool
 	// Session, Weekly and Overage are the figured windows, nil when a window
 	// was never figured.
 	Session *AllowanceFigures
 	Weekly  *AllowanceFigures
 	Overage *AllowanceFigures
+	// Seat is a per-seat account's spend, nil when the account is not known
+	// to be billed per seat.
+	Seat *SeatSpend
 }
 
 // SetAccountUsage records an account root's usage evidence, replacing what
@@ -111,7 +144,7 @@ type AccountUsage struct {
 // evidence the successor had filed by the time it became the writer.
 func (s *store) SetAccountUsage(ctx context.Context, usage AccountUsage) error {
 	const op = "daemon.wsm.set_account_usage"
-	fields := dlog.Context{"config_dir": usage.ConfigDir, "no_allowance": usage.NoAllowance}
+	fields := dlog.Context{"config_dir": usage.ConfigDir, "seat": usage.Seat != nil}
 	if err := usage.validate(); err != nil {
 		s.log.Error(op, "refused account usage that cannot be stored", withError(fields, err))
 		return err
@@ -148,7 +181,7 @@ func (s *store) writeHeldUsageLocked(ctx context.Context) {
 	s.heldUsage = nil
 	s.heldMu.Unlock()
 	for _, usage := range held {
-		fields := dlog.Context{"config_dir": usage.ConfigDir, "no_allowance": usage.NoAllowance, "held": true}
+		fields := dlog.Context{"config_dir": usage.ConfigDir, "seat": usage.Seat != nil, "held": true}
 		if err := s.writeAccountUsage(ctx, op, fields, usage); err == nil {
 			s.log.Info(op, "wrote the account's usage held while this handle was read-only", fields)
 		}
@@ -157,17 +190,20 @@ func (s *store) writeHeldUsageLocked(ctx context.Context) {
 
 // writeAccountUsage is the row's upsert, through the package's one writer.
 func (s *store) writeAccountUsage(ctx context.Context, op string, fields dlog.Context, usage AccountUsage) error {
-	args := []any{usage.ConfigDir, usage.ObservedAt.UnixNano(), usage.NoAllowance}
+	// no_allowance is retired (layout 25) and always written 0.
+	args := []any{usage.ConfigDir, usage.ObservedAt.UnixNano(), 0}
 	for _, w := range []*AllowanceFigures{usage.Session, usage.Weekly, usage.Overage} {
 		args = append(args, windowArgs(w)...)
 	}
+	args = append(args, seatArgs(usage.Seat)...)
 	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, `
 INSERT INTO account_usage (config_dir, observed_at, no_allowance,
   session_utilization, session_resets_at_s, session_sampled_at_ms, session_verdict,
   weekly_utilization, weekly_resets_at_s, weekly_sampled_at_ms, weekly_verdict,
-  overage_utilization, overage_resets_at_s, overage_sampled_at_ms, overage_verdict)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  overage_utilization, overage_resets_at_s, overage_sampled_at_ms, overage_verdict,
+  seat_allotment_minor, seat_spent_minor, seat_currency, seat_sampled_at_ms)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(config_dir) DO UPDATE SET
   observed_at = excluded.observed_at, no_allowance = excluded.no_allowance,
   session_utilization = excluded.session_utilization, session_resets_at_s = excluded.session_resets_at_s,
@@ -175,7 +211,9 @@ ON CONFLICT(config_dir) DO UPDATE SET
   weekly_utilization = excluded.weekly_utilization, weekly_resets_at_s = excluded.weekly_resets_at_s,
   weekly_sampled_at_ms = excluded.weekly_sampled_at_ms, weekly_verdict = excluded.weekly_verdict,
   overage_utilization = excluded.overage_utilization, overage_resets_at_s = excluded.overage_resets_at_s,
-  overage_sampled_at_ms = excluded.overage_sampled_at_ms, overage_verdict = excluded.overage_verdict`, args...)
+  overage_sampled_at_ms = excluded.overage_sampled_at_ms, overage_verdict = excluded.overage_verdict,
+  seat_allotment_minor = excluded.seat_allotment_minor, seat_spent_minor = excluded.seat_spent_minor,
+  seat_currency = excluded.seat_currency, seat_sampled_at_ms = excluded.seat_sampled_at_ms`, args...)
 		return err
 	})
 }
@@ -190,7 +228,28 @@ func (u AccountUsage) validate() error {
 			return fmt.Errorf("wsm: invalid allowance verdict %q", w.Verdict)
 		}
 	}
+	if u.Seat != nil {
+		if u.Session != nil || u.Weekly != nil || u.Overage != nil {
+			return fmt.Errorf("wsm: account usage carries both allowance windows and a seat's spend")
+		}
+		if u.Seat.Currency == "" {
+			return fmt.Errorf("wsm: a seat's spend names no currency")
+		}
+	}
 	return nil
+}
+
+// seatArgs is the seat's four columns, all NULL when the account is not
+// billed per seat; the spend alone is NULL while none has been reported.
+func seatArgs(seat *SeatSpend) []any {
+	if seat == nil {
+		return []any{nil, nil, nil, nil}
+	}
+	var spent any
+	if seat.SpentMinor != nil {
+		spent = *seat.SpentMinor
+	}
+	return []any{seat.AllotmentMinor, spent, seat.Currency, seat.SampledAtMs}
 }
 
 // windowArgs is one window's four columns, all NULL for an unfigured window.
@@ -208,10 +267,11 @@ func (s *store) AccountUsages(ctx context.Context) ([]AccountUsage, error) {
 	var out []AccountUsage
 	err := s.read(ctx, "daemon.wsm.account_usages", dlog.Context{}, func(ctx context.Context) error {
 		rows, err := s.db().QueryContext(ctx, `
-SELECT config_dir, observed_at, no_allowance,
+SELECT config_dir, observed_at,
   session_utilization, session_resets_at_s, session_sampled_at_ms, session_verdict,
   weekly_utilization, weekly_resets_at_s, weekly_sampled_at_ms, weekly_verdict,
-  overage_utilization, overage_resets_at_s, overage_sampled_at_ms, overage_verdict
+  overage_utilization, overage_resets_at_s, overage_sampled_at_ms, overage_verdict,
+  seat_allotment_minor, seat_spent_minor, seat_currency, seat_sampled_at_ms
 FROM account_usage ORDER BY config_dir`)
 		if err != nil {
 			return err
@@ -222,11 +282,13 @@ FROM account_usage ORDER BY config_dir`)
 				usage    AccountUsage
 				observed int64
 				windows  [3]storedWindow
+				seat     storedSeat
 			)
-			dest := []any{&usage.ConfigDir, &observed, &usage.NoAllowance}
+			dest := []any{&usage.ConfigDir, &observed}
 			for i := range windows {
 				dest = append(dest, windows[i].dest()...)
 			}
+			dest = append(dest, seat.dest()...)
 			if err := rows.Scan(dest...); err != nil {
 				return err
 			}
@@ -238,6 +300,12 @@ FROM account_usage ORDER BY config_dir`)
 					return &DecodeError{Table: "account_usage", Row: usage.ConfigDir, Field: name, Err: err}
 				}
 				*decoded[i] = figures
+			}
+			if usage.Seat, err = seat.decode(); err != nil {
+				return &DecodeError{Table: "account_usage", Row: usage.ConfigDir, Field: "seat", Err: err}
+			}
+			if err := usage.validate(); err != nil {
+				return &DecodeError{Table: "account_usage", Row: usage.ConfigDir, Field: "billing_mode", Err: err}
 			}
 			out = append(out, usage)
 		}
@@ -284,4 +352,49 @@ func (w *storedWindow) decode() (*AllowanceFigures, error) {
 		SampledAtMs: w.sampledAtMs.Int64,
 		Verdict:     verdict,
 	}, nil
+}
+
+// storedSeat is the seat's four nullable columns as scanned.
+type storedSeat struct {
+	allotmentMinor sql.NullInt64
+	spentMinor     sql.NullInt64
+	currency       sql.NullString
+	sampledAtMs    sql.NullInt64
+}
+
+// dest is the scan destinations, in column order.
+func (w *storedSeat) dest() []any {
+	return []any{&w.allotmentMinor, &w.spentMinor, &w.currency, &w.sampledAtMs}
+}
+
+// decode is the seat's spend, nil when the account is not billed per seat.
+// The allotment, currency and stamp are set or NULL together; a spend with
+// no allotment is a corrupt record.
+func (w *storedSeat) decode() (*SeatSpend, error) {
+	set := 0
+	for _, valid := range []bool{w.allotmentMinor.Valid, w.currency.Valid, w.sampledAtMs.Valid} {
+		if valid {
+			set++
+		}
+	}
+	switch set {
+	case 0:
+		if w.spentMinor.Valid {
+			return nil, fmt.Errorf("a seat's spend is stored with no allotment")
+		}
+		return nil, nil
+	case 3:
+	default:
+		return nil, fmt.Errorf("a seat's allotment, currency and stamp are all set or all NULL, not %d of 3", set)
+	}
+	seat := &SeatSpend{
+		AllotmentMinor: w.allotmentMinor.Int64,
+		Currency:       w.currency.String,
+		SampledAtMs:    w.sampledAtMs.Int64,
+	}
+	if w.spentMinor.Valid {
+		spent := w.spentMinor.Int64
+		seat.SpentMinor = &spent
+	}
+	return seat, nil
 }
