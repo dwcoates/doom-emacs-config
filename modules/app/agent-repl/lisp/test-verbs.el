@@ -772,6 +772,34 @@ daemon starts sending it, with no table to update here."
     (agent-repl-verb-open (agent-repl-test-verbs--ref "closed-id" "/tmp/closed"))
     (should (agent-repl-test-verbs--messaged-p "the sdk threw"))))
 
+(defconst agent-repl-test-verbs--unrestorable-refusal
+  '((:open . (:response (:arm :error
+                         :value (:cause (:arm :worktree-unrestorable
+                                         :value (:dir "/tmp/gone" :branch "feature/gone"
+                                                 :detail "the workspace's directory /tmp/gone is gone and its branch feature/gone no longer exists in /tmp/repo; there is nothing to restore it from")))))))
+  "An OpenWorkspace refusal for a row with nothing left to restore from.")
+
+(ert-deftest agent-repl-verbs-open-unrestorable-draws-the-daemons-sentence ()
+  "An unrestorable row is drawn as the daemon's own sentence, not an arm keyword."
+  (agent-repl-test-verbs--with agent-repl-test-verbs--unrestorable-refusal
+    (agent-repl-verb-open (agent-repl-test-verbs--ref "closed-id" "/tmp/gone"))
+    (should (agent-repl-test-verbs--messaged-p
+             "open refused: the workspace's directory /tmp/gone is gone and its branch feature/gone no longer exists"))))
+
+(ert-deftest agent-repl-verbs-open-unrestorable-is-recorded-at-info ()
+  "A user picking an unrestorable row is an ordinary answer: INFO, never WARN or ERROR."
+  (agent-repl-test-verbs--with agent-repl-test-verbs--unrestorable-refusal
+    (let (infos faults)
+      (cl-letf (((symbol-function 'agent-repl--info)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) infos)))
+                ((symbol-function 'agent-repl--warn)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) faults)))
+                ((symbol-function 'agent-repl--error)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) faults))))
+        (agent-repl-verb-open (agent-repl-test-verbs--ref "closed-id" "/tmp/gone")))
+      (should (cl-some (lambda (m) (string-prefix-p "elisp.verbs.open-unrestorable" m)) infos))
+      (should-not (cl-some (lambda (m) (string-match-p "unrestorable\\|-refused" m)) faults)))))
+
 (defun agent-repl-test-verbs--lock-holder-refusal (how)
   "An OpenWorkspace refusal whose lock holder /b/shim-lock failed as HOW."
   `((:open . (:response (:arm :error
