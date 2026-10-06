@@ -10,6 +10,7 @@
  */
 import type { AppContext } from "../rpc/context.js";
 import type { AttentionRegistry } from "./attention.js";
+import type { Dropdowns } from "./dropdowns.js";
 import type { SidebarView } from "./view.js";
 
 /** The two resolved groupings; which one is drawn is the daemon's view state. */
@@ -35,6 +36,8 @@ export interface SidebarContext {
    * view state; it is kept here only so a redraw does not snap it shut.
    */
   openDetails: Set<string>;
+  /** The one dismiss rule every dropdown in the rail shares. */
+  dropdowns: Dropdowns;
   /** The blink registry the attention markers are driven from. */
   attention: AttentionRegistry;
   /**

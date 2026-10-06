@@ -33,6 +33,7 @@ import { testAppContext } from "../rpc/app-context.js";
 import { AttentionRegistry, type BlinkTimers } from "../../src/sidebar/attention.js";
 import type { Grouping, SidebarContext } from "../../src/sidebar/context.js";
 import { createSidebarView, type SidebarView } from "../../src/sidebar/view.js";
+import { createDropdowns } from "../../src/sidebar/dropdowns.js";
 
 /** The webview's own workspace. */
 export const WORKSPACE = create(WorkspaceRefSchema, { id: "ws-self", dir: "/w/self" });
@@ -118,6 +119,7 @@ export function sidebarContext(
     ctx,
     view,
     openDetails,
+    dropdowns: createDropdowns(),
     attention: new AttentionRegistry(timers),
     tasks: [],
     disposers,

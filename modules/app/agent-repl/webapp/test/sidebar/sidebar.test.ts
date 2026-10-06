@@ -509,6 +509,124 @@ describe("the roster stream's planned ending", () => {
   });
 });
 
+describe("a click in the rail closes its open dropdowns", () => {
+  const mounted: Array<{ dispose(): void }> = [];
+  const hosts: HTMLElement[] = [];
+  afterEach(() => {
+    for (const handle of mounted.splice(0)) handle.dispose();
+    for (const host of hosts.splice(0)) host.remove();
+  });
+
+  /** A rail with one row (in a repository and a task section), in the document. */
+  async function mountRail(): Promise<HTMLElement> {
+    const host = document.createElement("nav");
+    document.body.appendChild(host);
+    hosts.push(host);
+    mounted.push(
+      mountSidebar(
+        host,
+        ctxFor([
+          roster({
+            repos: [repoSection({ id: "repo-1", rows: [row({ id: "ws-1" }), row({ id: "ws-2" })] })],
+            tasks: [taskSection({ id: "task-1" })],
+          }),
+        ]),
+        { timers: fakeTimers() },
+      ),
+    );
+    await settle();
+    return host;
+  }
+
+  const rowOf = (host: HTMLElement, id: string): HTMLElement =>
+    host.querySelector(`[data-grouping='repository'] [data-roster-row='${id}']`) as HTMLElement;
+  const rowMenu = (host: HTMLElement, id: string): HTMLElement =>
+    rowOf(host, id).querySelector(":scope > .sb-menu") as HTMLElement;
+  const taskMenu = (host: HTMLElement): HTMLElement =>
+    host.querySelector(".task-head .sb-menu") as HTMLElement;
+  const emptySpace = (host: HTMLElement): HTMLElement => host.querySelector(".sb-head") as HTMLElement;
+
+  /** Open the row's detail popover the way the keyboard does, at once. */
+  const openDetail = (host: HTMLElement, id: string): void => {
+    (rowOf(host, id).querySelector(":scope > .row") as HTMLElement).dispatchEvent(
+      new FocusEvent("focusin", { bubbles: true }),
+    );
+  };
+
+  it("closes a row's menu on a click in empty space", async () => {
+    const host = await mountRail();
+    await click(rowOf(host, "ws-1").querySelector(".sb-more") as Element);
+    await click(emptySpace(host));
+    expect(rowMenu(host, "ws-1").hidden).toBe(true);
+  });
+
+  it("closes a task's menu on a click in empty space", async () => {
+    const host = await mountRail();
+    await click(host.querySelector(".task-head .sb-more") as Element);
+    await click(emptySpace(host));
+    expect(taskMenu(host).hidden).toBe(true);
+  });
+
+  it("closes a row's detail popover on a click in empty space", async () => {
+    const host = await mountRail();
+    openDetail(host, "ws-1");
+    await click(emptySpace(host));
+    expect(rowOf(host, "ws-1").classList.contains("open")).toBe(false);
+  });
+
+  it("keeps a row's menu open on a click inside it", async () => {
+    const host = await mountRail();
+    await click(rowOf(host, "ws-1").querySelector(".sb-more") as Element);
+    await click(rowMenu(host, "ws-1"));
+    expect(rowMenu(host, "ws-1").hidden).toBe(false);
+  });
+
+  it("keeps a row's detail popover open on a click inside it", async () => {
+    const host = await mountRail();
+    openDetail(host, "ws-1");
+    await click(rowOf(host, "ws-1").querySelector(":scope > .detail") as Element);
+    expect(rowOf(host, "ws-1").classList.contains("open")).toBe(true);
+  });
+
+  it("swaps one row's menu for another's when the other opener is clicked", async () => {
+    const host = await mountRail();
+    await click(rowOf(host, "ws-1").querySelector(".sb-more") as Element);
+    await click(rowOf(host, "ws-2").querySelector(".sb-more") as Element);
+    expect([rowMenu(host, "ws-1").hidden, rowMenu(host, "ws-2").hidden]).toEqual([true, false]);
+  });
+
+  it("swaps a row's menu for a task's menu when the task's opener is clicked", async () => {
+    const host = await mountRail();
+    await click(rowOf(host, "ws-1").querySelector(".sb-more") as Element);
+    await click(host.querySelector(".task-head .sb-more") as Element);
+    expect([rowMenu(host, "ws-1").hidden, taskMenu(host).hidden]).toEqual([true, false]);
+  });
+
+  it("closes a row's detail popover when a menu opens", async () => {
+    const host = await mountRail();
+    openDetail(host, "ws-1");
+    await click(rowOf(host, "ws-2").querySelector(".sb-more") as Element);
+    expect(rowOf(host, "ws-1").classList.contains("open")).toBe(false);
+  });
+
+  it("closes a menu with its own opener, as before", async () => {
+    const host = await mountRail();
+    const more = rowOf(host, "ws-1").querySelector(".sb-more") as Element;
+    await click(more);
+    await click(more);
+    expect(rowMenu(host, "ws-1").hidden).toBe(true);
+  });
+
+  it("does nothing, and logs nothing, on a click with none open", async () => {
+    const host = await mountRail();
+    const capture = captureLogRecords("debug");
+    await click(emptySpace(host));
+    capture.logger.flush();
+    await Promise.resolve();
+    expect(capture.sent.filter((r) => r.operation.startsWith("sidebar.dropdowns"))).toEqual([]);
+  });
+});
+
 describe("the page's own storage, when no storage was injected", () => {
   it("is where the retired preferences are dropped from", async () => {
     globalThis.localStorage.setItem(PREFS_KEY, JSON.stringify({ grouping: "task" }));
