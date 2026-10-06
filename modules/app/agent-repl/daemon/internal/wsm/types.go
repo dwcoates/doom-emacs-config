@@ -160,6 +160,15 @@ type ForgetReport struct {
 	RepositoryDir string
 }
 
+// RetireReport is what a RetireRepository removed.
+type RetireReport struct {
+	// RepositoryDir is the retired repository's directory, carried so the
+	// caller can name the path that stopped being registered.
+	RepositoryDir string
+	// Workspaces are the workspace records that went with it, in id order.
+	Workspaces []WorkspaceID
+}
+
 // RegisterFacts are the facts Emacs supplies when it announces a workspace.
 // Registration is idempotent by normalized dir; the daemon mints the ids.
 type RegisterFacts struct {

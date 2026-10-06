@@ -541,6 +541,24 @@ func (s *store) Current(ctx context.Context) (*WorkspaceID, error) {
 	return out, err
 }
 
+// deleteRepositoryRows deletes a repository's own records: its row, and the
+// merge queue's per-repository row. It is the ONE removal of a repository
+// record; Forget reaches it when a repository's last workspace goes, and
+// RetireRepository when a repository's directory is gone.
+func deleteRepositoryRows(ctx context.Context, tx *sql.Tx, repo RepoID, repoDir string) error {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM repositories WHERE id = ?`, repo); err != nil {
+		return err
+	}
+	// The merge queue's per-repository row is keyed by the repository's own
+	// dir rather than by its id, so the cascade cannot reach it. A pause flag
+	// for a repository no workspace is registered under names the same path
+	// the repository row just stopped naming.
+	if _, err := tx.ExecContext(ctx, `DELETE FROM merge_queue_repos WHERE repo_key = ?`, repoDir); err != nil {
+		return err
+	}
+	return nil
+}
+
 // Forget deletes a workspace's every record — the nuke's durable half, and the
 // whole of the forget verb. The dependent rows cascade; the creation job, which
 // predates registration and so carries no reference, is deleted here in the
@@ -591,14 +609,7 @@ func (s *store) Forget(ctx context.Context, id WorkspaceID) (ForgetReport, error
 		if remaining > 0 {
 			return nil
 		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM repositories WHERE id = ?`, repo); err != nil {
-			return err
-		}
-		// The merge queue's per-repository row is keyed by the repository's
-		// own dir rather than by its id, so the cascade cannot reach it. A
-		// pause flag for a repository no workspace is registered under names
-		// the same path the repository row just stopped naming.
-		if _, err := tx.ExecContext(ctx, `DELETE FROM merge_queue_repos WHERE repo_key = ?`, repoDir); err != nil {
+		if err := deleteRepositoryRows(ctx, tx, repo, repoDir); err != nil {
 			return err
 		}
 		out.Repository = repo

@@ -13,36 +13,55 @@ import (
 	sharedlogging "agentrepl/logging"
 )
 
+// Attribution is the workspace a session's transcript is filed against.
+type Attribution struct {
+	// Dir is the workspace directory: a cwd the transcript itself records.
+	Dir string
+	// ID is Dir's canonical workspace correlation key.
+	ID string
+	// FirstCWDFallback reports that no cwd in the transcript encodes to the
+	// project folder the file lives in, so Dir is the transcript's FIRST cwd.
+	FirstCWDFallback bool
+}
+
 // ResolveWorkspace reads the authoritative cwd from a target session's main
-// transcript or transcript-shaped target. The lossy project slug is used only
-// to locate that source; it is never decoded into a path or promoted as truth.
-func ResolveWorkspace(target Target) (string, string, error) {
+// transcript or transcript-shaped target.
+//
+// A SESSION CAN CHANGE DIRECTORY, so its transcript can record several cwds,
+// and the vendor files the transcript under the project folder of the cwd it
+// is now kept for. The attribution is the cwd whose vendor encoding
+// (VendorProjectSlug) names the folder the file lives in: a cwd is ENCODED and
+// compared, and the lossy slug is never decoded into a path. When no cwd
+// encodes to that folder the transcript's first cwd is used, and the
+// attribution says so, so the caller can state it; ingestion is never held
+// back for it.
+func ResolveWorkspace(target Target) (Attribution, error) {
 	if target.ConfigRoot == "" || target.SessionID == "" {
-		return "", "", fmt.Errorf("workspace resolution requires a config-root transcript target")
+		return Attribution{}, fmt.Errorf("workspace resolution requires a config-root transcript target")
 	}
 	projectsRoot := filepath.Join(target.ConfigRoot, "projects")
 	rel, err := filepath.Rel(projectsRoot, target.Path)
 	if err != nil || rel == "." || rel == ".." || filepath.IsAbs(rel) {
-		return "", "", fmt.Errorf("resolve project directory for %q beneath %q", target.Path, projectsRoot)
+		return Attribution{}, fmt.Errorf("resolve project directory for %q beneath %q", target.Path, projectsRoot)
 	}
 	segments := splitPath(rel)
 	if len(segments) < 2 || segments[0] == ".." {
-		return "", "", fmt.Errorf("target %q is not inside one project directory", target.Path)
+		return Attribution{}, fmt.Errorf("target %q is not inside one project directory", target.Path)
 	}
 	projectDir := filepath.Join(projectsRoot, segments[0])
 	transcript := target.Path
 	if filepath.Base(target.Path) == "journal.jsonl" {
 		transcript = filepath.Join(projectDir, target.SessionID+".jsonl")
 	}
-	workspaceDir, err := transcriptCWD(transcript)
+	workspaceDir, matched, err := transcriptCWD(transcript, segments[0])
 	if err != nil {
-		return "", "", err
+		return Attribution{}, err
 	}
 	workspaceID, err := sharedlogging.WorkspaceID(workspaceDir)
 	if err != nil {
-		return "", "", err
+		return Attribution{}, err
 	}
-	return workspaceDir, workspaceID, nil
+	return Attribution{Dir: workspaceDir, ID: workspaceID, FirstCWDFallback: !matched}, nil
 }
 
 func splitPath(path string) []string {
@@ -57,32 +76,45 @@ func splitPath(path string) []string {
 	return out
 }
 
-func transcriptCWD(path string) (cwd string, err error) {
+// transcriptCWD answers the first cwd in the transcript whose vendor encoding
+// is projectSlug, with matched true; failing that, the transcript's first cwd
+// with matched false. A transcript holding no cwd yet is an error.
+func transcriptCWD(path, projectSlug string) (cwd string, matched bool, err error) {
 	file, err := os.Open(path)
 	if err != nil {
-		return "", fmt.Errorf("open transcript %q for workspace attribution: %w", path, err)
+		return "", false, fmt.Errorf("open transcript %q for workspace attribution: %w", path, err)
 	}
 	defer func() {
 		if closeErr := file.Close(); closeErr != nil {
 			err = errors.Join(err, fmt.Errorf("close transcript %q after reading its cwd: %w", path, closeErr))
 		}
 	}()
+	first := ""
 	reader := bufio.NewReader(file)
 	for {
 		line, readErr := reader.ReadBytes('\n')
 		line = bytes.TrimSpace(line)
 		if len(line) != 0 {
-			if cwd, found, err := cwdToken(line); err != nil {
-				return "", fmt.Errorf("transcript %q has an invalid absolute cwd: %w", path, err)
-			} else if found {
-				return filepath.Clean(cwd), nil
+			if found, ok, err := cwdToken(line); err != nil {
+				return "", false, fmt.Errorf("transcript %q has an invalid absolute cwd: %w", path, err)
+			} else if ok {
+				found = filepath.Clean(found)
+				if sharedlogging.VendorProjectSlug(found) == projectSlug {
+					return found, true, nil
+				}
+				if first == "" {
+					first = found
+				}
 			}
 		}
 		if readErr != nil {
-			if errors.Is(readErr, io.EOF) {
-				return "", fmt.Errorf("transcript %q does not yet contain a cwd", path)
+			if !errors.Is(readErr, io.EOF) {
+				return "", false, fmt.Errorf("read transcript %q for workspace attribution: %w", path, readErr)
 			}
-			return "", fmt.Errorf("read transcript %q for workspace attribution: %w", path, readErr)
+			if first == "" {
+				return "", false, fmt.Errorf("transcript %q does not yet contain a cwd", path)
+			}
+			return first, false, nil
 		}
 	}
 }

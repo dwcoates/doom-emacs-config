@@ -68,6 +68,12 @@ type DB interface {
 	// registered under its repository, that repository's record too. The
 	// report names the repository that went, empty when one stayed.
 	Forget(ctx context.Context, id WorkspaceID) (ForgetReport, error)
+	// RetireRepository deletes a repository's record together with every
+	// workspace registered under it, in one transaction. It refuses with
+	// ErrRepositoryInUse while any of those workspaces is open or still holds
+	// live state (an undelivered held prompt, a lease, a merge-queue entry);
+	// an unknown repository is ErrNotFound.
+	RetireRepository(ctx context.Context, id RepoID) (RetireReport, error)
 
 	// PutCreationJob records a workspace's merge geometry, configured actions
 	// and materialization state.

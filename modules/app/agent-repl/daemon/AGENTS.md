@@ -281,7 +281,15 @@ environment. Every flag is optional.
    sessionwatcher instead, and any the shim's `turn_in_flight` no longer names
    is closed orphaned at INFO), recover the in-flight merges, RELEASE EVERY LEASE
    THIS PROCESS'S HANDLE DID NOT TAKE (one ERROR `daemon.boot.orphan_leases` per
-   lease; see "A lease dies with the process that took it"), and — for a successor
+   lease; see "A lease dies with the process that took it"), RETIRE every
+   repository whose directory is gone and whose workspaces are all closed
+   (`retireGoneRepositories` through `wsm.RetireRepository`, which takes the
+   closed workspaces' records with the repository row in one transaction;
+   INFO `daemon.boot.retire_gone_repository`, counted as
+   `repositories_retired`; a stat that does not say "not exist" is never read
+   as gone, and a gone repository that still has an OPEN workspace, or whose
+   closed workspaces still hold a held prompt, lease or merge-queue entry, is
+   KEPT at WARN), and — for a successor
    — `rollout.Controller.Join`. A JOINING SUCCESSOR RECONCILES NOTHING, so the
    missing-directory close is also done by `verbs.PublishRegistry`, the walk
    that publishes the opening roster;
