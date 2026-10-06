@@ -122,7 +122,7 @@ run_logs() {
         AGENT_REPL_LOGS_BUILD_DIR="$TMP/build" \
         AGENT_REPL_LOGS_TEST_ROWS="${AGENT_REPL_LOGS_TEST_ROWS_OVERRIDE:-$rows}" \
         AGENT_REPL_STATE_DIR="$state" \
-        XDG_CACHE_HOME="$cache" \
+        XDG_CACHE_HOME="${XDG_CACHE_HOME_OVERRIDE:-$cache}" \
         AGENT_REPL_EMACS_GLOBAL_LOG="${AGENT_REPL_EMACS_GLOBAL_LOG_OVERRIDE-$emacs_global}" \
         TZ=UTC \
         "$LOGS" "$@"
@@ -246,6 +246,58 @@ test_until() {
         pass "--until applies an inclusive RFC3339 upper bound"
     else
         fail "--until applies an inclusive RFC3339 upper bound"
+    fi
+}
+
+# MIXED UTC OFFSETS. A long-running service keeps the offset it started
+# under, so after a timezone change one central log holds -04:00 and +03:00
+# records side by side (the store's log, 2026-10-06). A window is a span of
+# instants, never of wall-clock text.
+mixed_offset_cache() {
+    local root="$TMP/mixed-offset-cache"
+    if [ ! -d "$root" ]; then
+        mkdir -p "$root/agent-repl/log"
+        cat >"$root/agent-repl/log/shim-store.log" <<'MIXED'
+{"timestamp":"2026-10-06T05:01:50.000000-04:00","runtime":"store","pid":60,"level":"info","verbosity":"normal","operation":"store.offset","message":"written at -04:00","context":{}}
+{"timestamp":"2026-10-06T12:01:45.000000+03:00","runtime":"store","pid":61,"level":"info","verbosity":"normal","operation":"store.offset","message":"written at +03:00","context":{}}
+{"timestamp":"2026-10-06T12:01:50.000000-04:00","runtime":"store","pid":60,"level":"info","verbosity":"normal","operation":"store.offset","message":"wall clock inside, instant outside","context":{}}
+MIXED
+        : >"$root/agent-repl/log/shim-claude-sidecar.log"
+        : >"$root/agent-repl/log/shim-store.err.log"
+    fi
+    printf '%s\n' "$root"
+}
+
+test_window_finds_a_record_written_in_another_offset() {
+    local out
+    out="$(XDG_CACHE_HOME_OVERRIDE="$(mixed_offset_cache)" run_logs --central --runtime store \
+        --since 2026-10-06T12:01:40+03:00 --until 2026-10-06T12:01:56+03:00 --json 2>/dev/null)"
+    if printf '%s\n' "$out" | grep -q '"message":"written at -04:00"'; then
+        pass "a window finds a record written in another UTC offset"
+    else
+        fail "a window finds a record written in another UTC offset"
+    fi
+}
+
+test_window_excludes_a_record_whose_wall_clock_alone_matches() {
+    local out
+    out="$(XDG_CACHE_HOME_OVERRIDE="$(mixed_offset_cache)" run_logs --central --runtime store \
+        --since 2026-10-06T12:01:40+03:00 --until 2026-10-06T12:01:56+03:00 --json 2>/dev/null)"
+    if ! printf '%s\n' "$out" | grep -q 'wall clock inside, instant outside'; then
+        pass "a window excludes a record whose wall-clock text alone falls inside it"
+    else
+        fail "a window excludes a record whose wall-clock text alone falls inside it"
+    fi
+}
+
+test_mixed_offsets_are_ordered_by_instant() {
+    local out
+    out="$(XDG_CACHE_HOME_OVERRIDE="$(mixed_offset_cache)" run_logs --central --runtime store \
+        --since 2026-10-06T00:00:00Z --fields message 2>/dev/null)"
+    if [ "$(printf '%s\n' "$out" | tr '\n' '|')" = "message=written at +03:00|message=written at -04:00|message=wall clock inside, instant outside|" ]; then
+        pass "records in mixed UTC offsets are ordered by instant"
+    else
+        fail "records in mixed UTC offsets are ordered by instant (got: $out)"
     fi
 }
 
@@ -808,6 +860,9 @@ test_all
 test_since_rfc3339
 test_since_duration
 test_until
+test_window_finds_a_record_written_in_another_offset
+test_window_excludes_a_record_whose_wall_clock_alone_matches
+test_mixed_offsets_are_ordered_by_instant
 test_level
 test_runtime_list
 test_json
