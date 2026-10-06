@@ -6376,13 +6376,14 @@ ar-button.outcome-marker-pill {
 /* The docked card wears the Emacs input window's background, as the card does
    everywhere (--input-bg, lisp/window.el), so the banner reads as the slot the
    input had; the page's dark background stands in only for a page Emacs never
-   told, which gate-dock.ts records. Its border and controls are the card's
-   own. */
+   told, which gate-dock.ts records. Its controls are the card's own, and so
+   is its frame: a border AROUND the gate in the token figure's heat, not a
+   rule between it and the rest of the page (owner, 2026-10-06). */
 #gate-dock > .cold-gate.cold-gate-docked {
   background: var(--input-bg, var(--bg));
   box-sizing: border-box;
   border-radius: 0;
-  border-width: 1px 0 0;
+  border-width: 1px;
 }
 #feed > .gate-docked-row { display: none; }
 /* ---- tool card input forms (src/feed/cards/tool-call.ts) ---- */
