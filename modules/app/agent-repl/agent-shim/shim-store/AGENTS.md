@@ -275,40 +275,52 @@ whose file has NO cursor row is kept too, because no cursor means that file is
 re-read FROM ZERO, which is exactly when the ledger is doing the most work.
 
 **THE SWEEP IS BOUNDED AND SHARES THE WRITE SLOT.** `DB.SweepWriteLedger` runs
-`PruneWriteLedger` every `DefaultLedgerSweepInterval` (and once at start), which
-deletes in transactions of `ledgerPruneBatch` rows, each taking and RELEASING
-the serialized write slot — so a producer's batch waits at most one batch of
-deletes, never a whole sweep. It is interruptible and commits as it goes; a
-sweep cut short by shutdown keeps what it removed and returns the caller's
-cancellation, not a storage failure. A sweep that removed rows is one info
+`PruneWriteLedger` every `DefaultLedgerSweepInterval` (and once at start). Each
+sweep batch is ONE transaction that takes and RELEASES the serialized write
+slot, so a producer's batch waits at most one batch, never a whole sweep. A
+batch reads one page of at most `ledgerSweepCursorsPerBatch` cursors, then
+deletes file by file, and commits at the first of: `ledgerPruneBatch` rows
+removed (the next batch asks about that file again), the page finished, or
+**the bulk time bound (`bulkBounds.time`, the same one a producer's bulk
+transaction uses) passed after a file**. It is interruptible and commits as it
+goes; a sweep cut short by shutdown keeps what it removed and returns the
+caller's cancellation, not a storage failure. Each batch leaves a verbose
+`ledger sweep transaction N committed deleted= files= ended_by=` record
+(`rows`, `time`, `page`, `last_page`); a sweep that removed rows is one info
 record with the counts; one that removed nothing is verbose. `main.go` stops it
 BEFORE closing the database.
 
-**AND THE SWEEP'S DELETE IS DRIVEN FROM `cursor`, NEVER FROM THE LEDGER.** The
-retention bound is `c.offset - ?` — a column of the OTHER table, not a constant
-— so with `write_ledger` outermost `write_ledger_source` is usable for nothing
-and SQLite reads the whole covering index probing `cursor` per row. That cost
-111ms per batch on a 318k-row ledger and 1464ms on the loaded box for the ONE
-batch that removed 870 rows, paid again by every later batch of the same sweep
-and by the empty batch that ends it, all of it HOLDING THE WRITE SLOT. Driven
-from `cursor` (2844 rows) the same index is an ordinary seek and the same sweep
-batch is 3.7ms. The statement is `ledgerPruneDeleteSQL` at package scope and
-`CROSS JOIN` states the order so the planner's row estimates cannot flip it
-back.
+**WHY TIME, AND NOT ONLY ROWS AND CURSORS.** Both limits bound a batch's WORK,
+and neither predicts a cold page cache or a loaded host. With both in place the
+owner's store logged single sweep batches holding the writer for 451ms, 1914ms
+and 2856ms while removing nothing (`store.db.slow-query` statement=ledger_sweep
+rows=0 lock_wait_ms=0, 2026-10-02 to 2026-10-06), and interactive `write_batch`
+records whose lock wait ended the same millisecond a sweep batch did (3237ms at
+2026-09-27 18:47:12, 6401ms at 2026-09-28 01:42:27). Checked after each file,
+the time bound holds an interactive write to the bound plus ONE file's delete.
 
-**A PLAN IS THE ASSERTION, NOT A DURATION.** A full scan of that index measures
-~200ms on a warm idle box — inside the 400ms write budget — and 1464ms on the
-owner's, so a wall-clock bound passes on both plans and only production can tell
-them apart. `TestTheSweepsDeleteSeeksTheLedgerRatherThanScanningIt` EXPLAINs the
-production statement itself, and
+**AND EACH DELETE IS ONE FILE'S, WITH A CONSTANT BOUND.** The sweep used to be
+one statement joining `cursor` to the ledger, whose bound `c.offset - ?` was a
+column of the OTHER table; with the ledger outermost `write_ledger_source` was
+usable for nothing and SQLite read the whole covering index probing `cursor`
+per row — 111ms per batch on a 318k-row ledger, all of it HOLDING THE WRITE
+SLOT. `ledgerPruneDeleteSQL` now binds `source_file_id = ?` and a constant
+`source_offset < ?` computed from the file's cursor read in the same
+transaction, so it is a seek whatever the planner's statistics say.
+
+**A PLAN AND A CLOCK RULE ARE THE ASSERTIONS, NOT A DURATION.** A full scan of
+that index measures ~200ms on a warm idle box — inside the 400ms write budget —
+and 1464ms on the owner's, so a wall-clock bound passes on both plans and only
+production can tell them apart. `TestTheSweepsDeleteSeeksTheLedgerRatherThanScanningIt`
+EXPLAINs the production statement itself, and
 `TestEveryStatementOfAWriteBatchSeeksRatherThanScans` does the same for every
-statement in the write transaction, so a column added without the index it is
-looked up by fails in the suite rather than in the owner's log. The wall-clock
-budgets beside them (`TestAThirtyRowBatchOnAFullSizedCorpusStaysWithinItsOwnBudget`,
-`TestASweepBatchAndAProducersBatchTogetherStayWithinTheProducersBudget`) are
-proved against a 600k-row synthetic corpus and SKIP under `-race`: the detector
-shadows every access, and the same pair that measures 5ms + 3ms uninstrumented
-measured 413ms + 50ms under it, which is a number about the detector.
+statement in the write transaction. The hold is asserted by
+`TestASweepBatchEndsOnceItsTimeBoundPasses` on the store's injected clock,
+moved per file by the `ledgerFileSwept` seam. The full-corpus wall-clock sum it
+replaced measured 9-14ms alone and 442ms in a full parallel run — a number
+about the host, not the sweep. `TestAThirtyRowBatchOnAFullSizedCorpusStaysWithinItsOwnBudget`
+is still proved against a 600k-row synthetic corpus and SKIPS under `-race`:
+the detector shadows every access, which makes the number about the detector.
 
 There is no `--` flag: the window is `Options.LedgerRetentionBytes`, which only
 a test sets, and a NEGATIVE value disables the sweep entirely.
