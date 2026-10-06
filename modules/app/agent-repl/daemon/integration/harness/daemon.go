@@ -88,6 +88,27 @@ const runBudgetWaits = 7
 // a slower successor boot) without reintroducing a blanket 30s bound.
 const HandoverChainTimeout = 3 * DefaultTimeout
 
+// MergeChainTimeout bounds the tests whose single wait spans a WHOLE merge:
+// from the enqueue (or the fixing turn's end) to the terminal row, through
+// the rebase, the test gate, the commit and the teardown. That wait is not one
+// daemon action but a sequential chain of 36-52 subprocesses (the fake git,
+// once per git call, plus the gate's script), so its cost scales with how
+// slowly the host spawns a process, and every one of them is on the critical
+// path.
+//
+// MEASURED (2026-10-06, daemon logs of the five merge tests that timed out in
+// full runs, `-test.parallel=1 GOMAXPROCS=2` chunks as testrun runs them):
+// unloaded, the chain is ~0.1s at ~4ms a git call. Under 24 chunks plus
+// `with-cpu-load.sh 24` its max was 2.82s; under 48 chunks plus
+// `with-cpu-load.sh 32` (load average ~170 on 16 cores) the passing max was
+// 4.22s, and 16 first-iteration runs of
+// TestATargetThatMovedBeforeCommittingStartsTheMergeOver were cut by the 5s
+// DefaultTimeout while still advancing: every step logged, no gap between
+// records over 1.54s, the target fast-forwarded at +3.9-4.95s, the terminal
+// row due a few git calls later. That is a bound shorter than the healthy
+// chain, not a stall. 3x DefaultTimeout is ~3.5x that 4.22s passing max.
+const MergeChainTimeout = 3 * DefaultTimeout
+
 // pollInterval is how often a file-existence wait re-checks. Nothing in the
 // harness sleeps to let another party make progress.
 const pollInterval = 5 * time.Millisecond
