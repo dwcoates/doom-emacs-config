@@ -300,6 +300,8 @@ type world struct {
 	lock    string
 	minted  int
 	sources []Source
+	// sdk is the Agent SDK version the digester is told; empty is unknown.
+	sdk string
 }
 
 func newWorld(t *testing.T) *world {
@@ -316,9 +318,10 @@ func (w *world) digester() *Digester {
 	d, err := New(Deps{
 		Sources: w.sources, Fetcher: w.fetcher, Headless: w.runner, PromptsDir: repoPromptsDir,
 		ConfigDir: "/accounts/default", Store: w.store, Clock: w.clock, LockPath: w.lock,
-		Serves: func() bool { return w.serves },
-		MintID: func() string { w.minted++; return fmt.Sprintf("digest-%d", w.minted) },
-		Every:  DefaultEvery, StartDelay: DefaultStartDelay, Recheck: DefaultRecheck, Log: w.log,
+		Serves:     func() bool { return w.serves },
+		MintID:     func() string { w.minted++; return fmt.Sprintf("digest-%d", w.minted) },
+		SDKVersion: func() (string, bool) { return w.sdk, w.sdk != "" },
+		Every:      DefaultEvery, StartDelay: DefaultStartDelay, Recheck: DefaultRecheck, Log: w.log,
 	})
 	if err != nil {
 		w.t.Fatalf("New: %v", err)

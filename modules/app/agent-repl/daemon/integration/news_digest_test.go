@@ -127,6 +127,20 @@ func TestARefreshedNewsDigestCarriesItsRiskSinceLastWeek(t *testing.T) {
 	}
 }
 
+func TestANewsDigestBeforeAnySessionStartsSaysTheSDKVersionIsUnknown(t *testing.T) {
+	t.Parallel()
+	// Arrange.
+	d := newDaemon(t, harness.Opts{ExtraEnv: newsDigestEnv(t)})
+
+	// Act.
+	shown := refreshDigest(t, d, d.WatchWebviewDaemonStream())
+
+	// Assert.
+	if shown.GetHeader().GetSdkVersion().GetUnknown() == nil {
+		t.Fatalf("sdk version = %v, want unknown: no session has started", shown.GetHeader().GetSdkVersion())
+	}
+}
+
 func TestADismissInOneWebviewTakesTheDigestDownInEvery(t *testing.T) {
 	t.Parallel()
 	// Arrange.

@@ -488,7 +488,8 @@ the vendor (`AGENT_REPL_FORBID_VENDOR_CALLS=1` in every process).
   condensing call (`AGENT_REPL_CLAUDE_BIN`), its schedule held off
   (`AGENT_REPL_NEWS_DIGEST_START_DELAY=24h`): a `RefreshNewsDigest` stands
   the digest on every webview `WatchDaemon` stream; its marked item is
-  carried in "Since last week" with its reason and date; a dismiss in one takes it
+  carried in "Since last week" with its reason and date; before any session
+  starts the header's SDK version is `unknown`; a dismiss in one takes it
   down in every one; an unknown id is `unknown_digest`; the standing digest
   survives a restart; a second refresh with nothing new is `nothing_new`.
   Every other edge case is the `internal/newsdigest` unit suite's

@@ -112,6 +112,10 @@ type Deps struct {
 	Serves func() bool
 	// MintID mints a digest's opaque id (wsm.NewNewsDigestID). REQUIRED.
 	MintID func() string
+	// SDKVersion answers the Agent SDK version agent-repl runs, as the shim
+	// last reported it; false when none has (workspace.Fleet.SDKVersion).
+	// REQUIRED.
+	SDKVersion func() (string, bool)
 	// Every, StartDelay and Recheck are the windows; see the defaults.
 	Every, StartDelay, Recheck time.Duration
 	// ModelTimeout bounds the condensing call; zero is DefaultModelTimeout.
@@ -154,6 +158,8 @@ func New(deps Deps) (*Digester, error) {
 		return nil, errors.New("newsdigest: Serves is required")
 	case deps.MintID == nil:
 		return nil, errors.New("newsdigest: MintID is required")
+	case deps.SDKVersion == nil:
+		return nil, errors.New("newsdigest: SDKVersion is required")
 	case deps.Log == nil:
 		return nil, errors.New("newsdigest: Log is required")
 	case deps.Every <= 0, deps.StartDelay <= 0, deps.Recheck <= 0:
