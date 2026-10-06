@@ -531,6 +531,55 @@ func TestHostSessionFactsAnswersTheDaemonsOwnSessionFacts(t *testing.T) {
 	}
 }
 
+func TestSDKVersionAnswersWhatTheLastSessionStartReported(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+
+	// Act.
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Assert.
+	if version, ok := f.fleet.SDKVersion(); !ok || version != fixtureSDKVersion {
+		t.Fatalf("SDKVersion = (%q, %v), want the reported %q", version, ok, fixtureSDKVersion)
+	}
+}
+
+func TestSDKVersionIsUnknownBeforeAnySessionStarts(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+
+	// Act.
+	version, ok := f.fleet.SDKVersion()
+
+	// Assert.
+	if ok || version != "" {
+		t.Fatalf("SDKVersion = (%q, %v), want unknown", version, ok)
+	}
+}
+
+func TestASessionStartReportingNoSDKVersionKeepsNoneAndIsAnError(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.client.response.GetSuccess().GetSession().GetRuntime().SdkVersion = ""
+
+	// Act.
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Assert.
+	if _, ok := f.fleet.SDKVersion(); ok {
+		t.Fatal("an empty reported version was kept")
+	}
+	if !recordedAt(f, "error", opBringUp, "the session start reported no Agent SDK version") {
+		t.Fatalf("the empty version was not recorded at ERROR: %v", f.log.logger.Records())
+	}
+}
+
 // TestHostSessionFactsAnswersNoSessionForAWorkspaceWithNone covers the host
 // stream's `none` arm: a registered workspace that never had a session.
 func TestHostSessionFactsAnswersNoSessionForAWorkspaceWithNone(t *testing.T) {

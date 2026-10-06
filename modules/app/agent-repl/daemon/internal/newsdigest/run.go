@@ -153,19 +153,13 @@ func (d *Digester) run(ctx context.Context, trigger string, onlyIfDue bool) (out
 		return outcome{}, err
 	}
 	period := since.Local().Format(time.RFC1123) + " to " + started.Local().Format(time.RFC1123)
-	sections, err := d.condenser.condense(ctx, period, material, carried.GetSections())
+	sections, marked, err := d.condenser.condense(ctx, period, material, carried.GetSections())
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			log.Info(opRun, "the news digest run ended with its context (the daemon stood down, or the refresh's caller left); nothing was recorded", dlog.Context{"cause": ctxErr.Error()})
 			return outcome{}, ctxErr
 		}
-		log.Error(opModel, "the model could not condense the news digest", dlog.Context{
-			"model": Model, "new_entries": newEntries, "cause": err.Error(),
-		})
-		if recErr := d.recordLocked(ctx, wsm.NewsDigestRun{EndedAt: d.deps.Clock.Now()}, nil); recErr != nil {
-			return outcome{}, recErr
-		}
-		return outcome{}, err
+		return outcome{}, d.modelFailed(ctx, log, "the model could not condense the news digest", newEntries, err)
 	}
 	ended := d.deps.Clock.Now()
 	if len(sections) == 0 {
@@ -176,19 +170,36 @@ func (d *Digester) run(ctx context.Context, trigger string, onlyIfDue bool) (out
 		return outcome{}, nil
 	}
 
-	id := d.deps.MintID()
 	from := since
 	if carried != nil {
 		from = time.UnixMilli(carried.GetHeader().GetPeriod().GetFromMs())
 	}
+	week, err := d.week(ctx, weekInput{
+		ended: ended, coversFrom: from, historySince: state.HistorySince,
+		current: markedItems(sections, marked, ended),
+	}, log)
+	if err != nil {
+		var modelFailed *ModelFailedError
+		if !errors.As(err, &modelFailed) {
+			return outcome{}, err
+		}
+		return outcome{}, d.modelFailed(ctx, log, "the model could not merge the week's news digest risks", newEntries, err)
+	}
+	history, err := keptHistory(sections, marked, from, ended)
+	if err != nil {
+		return outcome{}, err
+	}
+	id := d.deps.MintID()
 	overlay := &frontendv1.NewsDigestOverlay{
 		Id: &frontendv1.NewsDigestId{Value: id},
 		Header: &frontendv1.NewsDigestHeader{
-			Title:  &frontendv1.NewsDigestTitle{Text: "Claude news · " + ended.Local().Format("Jan 2")},
-			Period: &frontendv1.NewsDigestPeriod{FromMs: from.UnixMilli(), ToMs: ended.UnixMilli()},
+			Title:      &frontendv1.NewsDigestTitle{Text: "Claude news · " + ended.Local().Format("Jan 2")},
+			Period:     &frontendv1.NewsDigestPeriod{FromMs: from.UnixMilli(), ToMs: ended.UnixMilli()},
+			SdkVersion: d.sdkVersion(),
 		},
 		Sections: sections,
 		Sources:  &frontendv1.NewsDigestSources{Sources: sources},
+		Week:     week,
 	}
 	encoded, err := proto.Marshal(overlay)
 	if err != nil {
@@ -199,15 +210,40 @@ func (d *Digester) run(ctx context.Context, trigger string, onlyIfDue bool) (out
 		items += len(s.GetItems())
 	}
 	run := wsm.NewsDigestRun{EndedAt: ended, Recorded: true, Snapshots: snapshots,
-		Digest: &wsm.NewsDigestMinted{ID: id, Overlay: encoded}}
+		Digest: &wsm.NewsDigestMinted{ID: id, Overlay: encoded}, History: history}
 	if err := d.recordLocked(ctx, run, overlay); err != nil {
 		return outcome{}, err
 	}
 	log.Info(opRun, "made a news digest; it stands in every webview", dlog.Context{
 		"digest": id, "sections": len(sections), "items": items, "new_entries": newEntries,
-		"sources_failed": failed, "carried": carried != nil, "duration_ms": ended.Sub(started).Milliseconds(),
+		"sources_failed": failed, "carried": carried != nil, "marked": len(marked), "duration_ms": ended.Sub(started).Milliseconds(),
 	})
 	return outcome{items: items}, nil
+}
+
+// sdkVersion is the header's Agent SDK version: the one the shim last
+// reported, or the unknown arm when none has.
+func (d *Digester) sdkVersion() *frontendv1.NewsDigestSdkVersion {
+	version, known := d.deps.SDKVersion()
+	if !known {
+		return &frontendv1.NewsDigestSdkVersion{Answer: &frontendv1.NewsDigestSdkVersion_Unknown{
+			Unknown: &frontendv1.NewsDigestSdkVersionUnknown{},
+		}}
+	}
+	return &frontendv1.NewsDigestSdkVersion{Answer: &frontendv1.NewsDigestSdkVersion_Known{
+		Known: &frontendv1.NewsDigestSdkVersionKnown{Version: version},
+	}}
+}
+
+// modelFailed records a run whose model call failed: only its end is kept,
+// so the next run reads the same material again. It answers err, or the
+// record's own failure.
+func (d *Digester) modelFailed(ctx context.Context, log dlog.Logger, message string, newEntries int, err error) error {
+	log.Error(opModel, message, dlog.Context{"model": Model, "new_entries": newEntries, "cause": err.Error()})
+	if recErr := d.recordLocked(ctx, wsm.NewsDigestRun{EndedAt: d.deps.Clock.Now()}, nil); recErr != nil {
+		return recErr
+	}
+	return err
 }
 
 // recordLocked records run and, when it made a digest, publishes it, both

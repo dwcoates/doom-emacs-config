@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"time"
 
 	"claude-repld/internal/dlog"
@@ -57,6 +58,28 @@ CREATE TABLE editor_instance (
 );
 `
 
+// newsDigestHistoryDDL is the layout-22 addition (docs/protobuf-design/
+// news-digest.md, Addendum "Since last week"): every item of every digest a
+// run made, kept with its run's end and its regression-risk mark, so each run
+// can recompute the week's risks. news_digest_items holds the encoded
+// frontend.v1.NewsDigestItem at its position in the run, and risk is the
+// one-line reason it could regress agent-repl (NULL when unmarked). Rows are
+// pruned by the run that keeps newer ones. history_since is the start of the
+// span the FIRST kept run covered: the record's own start, so the weekly
+// section never claims a week it did not see. Applied after
+// newsDigestRedisplayDDL on a fresh file and as its own step on a migrated one.
+const newsDigestHistoryDDL = `
+CREATE TABLE news_digest_items (
+  run_end  INTEGER NOT NULL,
+  position INTEGER NOT NULL,
+  item     BLOB NOT NULL,
+  risk     TEXT,
+  PRIMARY KEY (run_end, position)
+);
+
+ALTER TABLE news_digest ADD COLUMN history_since INTEGER;
+`
+
 // NewsDigestState is the news digest's whole durable state.
 type NewsDigestState struct {
 	// LastRunEnd is when the last run ended; zero when no run ever has.
@@ -75,6 +98,9 @@ type NewsDigestState struct {
 	// LatestMadeAt is when the newest digest was minted (its run's end); zero
 	// when unknown.
 	LatestMadeAt time.Time
+	// HistorySince is the start of the span the item history covers: what the
+	// first run that kept items covered. Zero when no run has kept items.
+	HistorySince time.Time
 	// Snapshots are the sources' recorded snapshots, by source key.
 	Snapshots map[string]string
 }
@@ -94,6 +120,42 @@ type NewsDigestRun struct {
 	// Digest is the digest the run made, which now stands; nil when it made
 	// none (any digest already standing is left standing).
 	Digest *NewsDigestMinted
+	// History is the digest's items, kept for the weekly section, and the
+	// pruning of older ones. Only a run that made a digest carries it; nil
+	// keeps nothing and prunes nothing.
+	History *NewsDigestHistory
+}
+
+// NewsDigestHistory is what one digest-making run keeps of its items.
+type NewsDigestHistory struct {
+	// CoversFrom is the start of the span the run's digest covers. The first
+	// run that keeps items makes it the history's start. Required.
+	CoversFrom time.Time
+	// Items are the digest's items, in its order. Never empty: a digest
+	// always has an item.
+	Items []NewsDigestKeptItem
+	// KeepSince prunes every kept item of a run that ended before it.
+	// Required, and never after the run's end.
+	KeepSince time.Time
+}
+
+// NewsDigestKeptItem is one item of a digest, as kept.
+type NewsDigestKeptItem struct {
+	// Item is the encoded frontend.v1.NewsDigestItem. Required.
+	Item []byte
+	// Risk is the one-line reason the item could regress agent-repl; empty
+	// when the model did not mark it.
+	Risk string
+}
+
+// NewsDigestRisk is one kept item that was marked as a regression risk.
+type NewsDigestRisk struct {
+	// RunEnd is when the run that kept it ended.
+	RunEnd time.Time
+	// Item is the encoded frontend.v1.NewsDigestItem.
+	Item []byte
+	// Reason is why it could regress agent-repl. Never empty.
+	Reason string
 }
 
 // NewsDigestMinted is a digest a run made.
@@ -117,11 +179,12 @@ func (s *store) NewsDigestState(ctx context.Context) (NewsDigestState, error) {
 			standing   []byte
 			overlay    []byte
 			madeAt     sql.NullInt64
+			since      sql.NullInt64
 		)
 		loaded := NewsDigestState{Snapshots: map[string]string{}}
 		err := s.db().QueryRowContext(ctx,
-			`SELECT last_run_end, baseline, latest_digest_id, standing, latest_overlay, latest_made_at FROM news_digest WHERE id = 1`).
-			Scan(&lastRunEnd, &baseline, &latest, &standing, &overlay, &madeAt)
+			`SELECT last_run_end, baseline, latest_digest_id, standing, latest_overlay, latest_made_at, history_since FROM news_digest WHERE id = 1`).
+			Scan(&lastRunEnd, &baseline, &latest, &standing, &overlay, &madeAt, &since)
 		switch {
 		case errors.Is(err, sql.ErrNoRows):
 		case err != nil:
@@ -140,6 +203,9 @@ func (s *store) NewsDigestState(ctx context.Context) (NewsDigestState, error) {
 			loaded.LatestOverlay = overlay
 			if madeAt.Valid {
 				loaded.LatestMadeAt = fromNanos(madeAt.Int64)
+			}
+			if since.Valid {
+				loaded.HistorySince = fromNanos(since.Int64)
 			}
 		}
 		rows, err := s.db().QueryContext(ctx, `SELECT source_key, snapshot FROM news_digest_sources ORDER BY source_key`)
@@ -169,7 +235,7 @@ func (s *store) NewsDigestState(ctx context.Context) (NewsDigestState, error) {
 func (s *store) RecordNewsDigestRun(ctx context.Context, run NewsDigestRun) error {
 	const op = "daemon.wsm.record_news_digest_run"
 	fields := dlog.Context{"ended_at": run.EndedAt.UTC().Format(time.RFC3339Nano), "recorded": run.Recorded,
-		"sources": len(run.Snapshots), "digest": run.Digest != nil}
+		"sources": len(run.Snapshots), "digest": run.Digest != nil, "kept_items": keptItems(run.History)}
 	if err := validateNewsDigestRun(run); err != nil {
 		s.log.Error(op, "refused a malformed news digest run", withError(fields, err))
 		return err
@@ -199,8 +265,80 @@ func (s *store) RecordNewsDigestRun(ctx context.Context, run NewsDigestRun) erro
 				return err
 			}
 		}
+		if run.History != nil {
+			return keepNewsDigestHistory(ctx, tx, run.EndedAt, *run.History)
+		}
 		return nil
 	})
+}
+
+// keepNewsDigestHistory keeps one run's items, starts the history's span when
+// it is the first run to keep any, and prunes the items of runs that ended
+// before KeepSince. tx is the run's recording transaction.
+func keepNewsDigestHistory(ctx context.Context, tx *sql.Tx, ended time.Time, h NewsDigestHistory) error {
+	for i, it := range h.Items {
+		var risk sql.NullString
+		if it.Risk != "" {
+			risk = sql.NullString{String: it.Risk, Valid: true}
+		}
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO news_digest_items (run_end, position, item, risk) VALUES (?, ?, ?, ?)`,
+			nanos(ended), i, it.Item, risk); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE news_digest SET history_since = COALESCE(history_since, ?) WHERE id = 1`, nanos(h.CoversFrom)); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx, `DELETE FROM news_digest_items WHERE run_end < ?`, nanos(h.KeepSince))
+	return err
+}
+
+// keptItems counts the items a run keeps, for its record.
+func keptItems(h *NewsDigestHistory) int {
+	if h == nil {
+		return 0
+	}
+	return len(h.Items)
+}
+
+// NewsDigestRisksSince loads every kept item marked as a regression risk
+// whose run ended at or after since, oldest run first and in each run's order.
+func (s *store) NewsDigestRisksSince(ctx context.Context, since time.Time) ([]NewsDigestRisk, error) {
+	var out []NewsDigestRisk
+	fields := dlog.Context{"since": since.UTC().Format(time.RFC3339Nano)}
+	err := s.read(ctx, "daemon.wsm.news_digest_risks_since", fields, func(ctx context.Context) error {
+		rows, err := s.db().QueryContext(ctx,
+			`SELECT run_end, position, item, risk FROM news_digest_items
+			 WHERE run_end >= ? AND risk IS NOT NULL ORDER BY run_end, position`, nanos(since))
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		var loaded []NewsDigestRisk
+		for rows.Next() {
+			var (
+				runEnd, position int64
+				item             []byte
+				risk             string
+			)
+			if err := rows.Scan(&runEnd, &position, &item, &risk); err != nil {
+				return err
+			}
+			if risk == "" {
+				return &DecodeError{Table: "news_digest_items", Row: fmt.Sprintf("%d/%d", runEnd, position), Field: "risk",
+					Err: errors.New("a marked item carries its reason")}
+			}
+			loaded = append(loaded, NewsDigestRisk{RunEnd: fromNanos(runEnd), Item: item, Reason: risk})
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		out = loaded
+		return nil
+	})
+	return out, err
 }
 
 // validateNewsDigestRun refuses a run the store cannot record faithfully.
@@ -216,6 +354,23 @@ func validateNewsDigestRun(run NewsDigestRun) error {
 		return errors.New("wsm: a news digest carries its id")
 	case run.Digest != nil && len(run.Digest.Overlay) == 0:
 		return errors.New("wsm: a news digest carries its overlay")
+	case run.History != nil && run.Digest == nil:
+		return errors.New("wsm: only a run that made a digest keeps its items")
+	}
+	if h := run.History; h != nil {
+		switch {
+		case h.CoversFrom.IsZero() || h.CoversFrom.After(run.EndedAt):
+			return errors.New("wsm: kept news digest items state the span they cover, ending by the run's end")
+		case h.KeepSince.IsZero() || h.KeepSince.After(run.EndedAt):
+			return errors.New("wsm: kept news digest items state what is pruned, never past the run's end")
+		case len(h.Items) == 0:
+			return errors.New("wsm: a run that keeps a digest's items keeps at least one")
+		}
+		for _, it := range h.Items {
+			if len(it.Item) == 0 {
+				return errors.New("wsm: a kept news digest item carries its encoding")
+			}
+		}
 	}
 	for key := range run.Snapshots {
 		if key == "" {

@@ -318,7 +318,198 @@ describe("mountNewsDigest: drawing the standing", () => {
   });
 });
 
+/** An overlay whose "Since last week" holds one dated regression risk. */
+function riskyInit(): OverlayInit {
+  const init = overlayInit();
+  init.week = {
+    heading: { text: "Since last week" },
+    outcome: {
+      case: "risks",
+      value: {
+        items: [
+          {
+            item: {
+              title: { text: "Sonnet 4 retires" },
+              summary: { text: "It retires." },
+              effective: { text: "2026-11-01" },
+              links: [{ label: "Deprecations", url: "https://fixture.test/deprecations" }],
+            },
+            reason: { text: "The daemon's `claude -p` calls name it." },
+          },
+        ],
+      },
+    },
+  };
+  return init;
+}
+
+/** An overlay whose "Since last week" is quiet. */
+function quietInit(): OverlayInit {
+  const init = overlayInit();
+  init.week = {
+    heading: { text: "Since last week" },
+    outcome: { case: "quiet", value: { text: "Nothing since last week could regress agent-repl." } },
+  };
+  return init;
+}
+
+describe("mountNewsDigest: the SDK version", () => {
+  it("draws a known version in the middle of the header", () => {
+    // ARRANGE
+    const init = overlayInit();
+    if (init.header) init.header.sdkVersion = { answer: { case: "known", value: { version: "0.2.97" } } };
+    // ACT
+    w.digest.apply(shown(init));
+    // ASSERT
+    const row = [...(w.host.querySelector(".news-digest-header")?.children ?? [])].map((c) => c.className);
+    expect([row, w.host.querySelector('[data-sdk-version="known"]')?.textContent]).toEqual([
+      ["news-digest-heading", "news-digest-sdk-version", "news-digest-actions"],
+      "SDK Version: 0.2.97",
+    ]);
+  });
+
+  it("says an unknown version is unknown", () => {
+    // ARRANGE
+    const init = overlayInit();
+    if (init.header) init.header.sdkVersion = { answer: { case: "unknown", value: {} } };
+    // ACT
+    w.digest.apply(shown(init));
+    // ASSERT
+    expect(w.host.querySelector('[data-sdk-version="unknown"]')?.textContent).toBe("SDK Version: unknown");
+  });
+
+  it("draws no version for a digest made before the header carried one", () => {
+    // ACT
+    w.digest.apply(shown());
+    // ASSERT
+    expect(w.host.querySelector("[data-sdk-version]")).toBeNull();
+  });
+
+  it("refuses a version naming no answer", () => {
+    // ARRANGE
+    const init = overlayInit();
+    if (init.header) init.header.sdkVersion = {};
+    // ACT + ASSERT
+    expect(() => w.digest.apply(shown(init))).toThrow(MalformedView);
+  });
+
+  it("refuses a known version that is empty", () => {
+    // ARRANGE
+    const init = overlayInit();
+    if (init.header) init.header.sdkVersion = { answer: { case: "known", value: { version: "" } } };
+    // ACT + ASSERT
+    expect(() => w.digest.apply(shown(init))).toThrow(MalformedView);
+  });
+});
+
+describe("mountNewsDigest: since last week", () => {
+  it("draws the week first, before the run's sections", () => {
+    // ACT
+    w.digest.apply(shown(riskyInit()));
+    // ASSERT
+    const sections = [...w.host.querySelectorAll<HTMLElement>(".news-digest-body > .news-digest-section")];
+    expect(sections.map((s) => s.getAttribute("data-week") ?? s.getAttribute("data-kind"))).toEqual([
+      "risks",
+      "backend",
+      "feature",
+    ]);
+  });
+
+  it("titles the week with the daemon's heading", () => {
+    // ACT
+    w.digest.apply(shown(riskyInit()));
+    // ASSERT
+    expect(w.host.querySelector("[data-week] .news-digest-section-heading")?.textContent).toBe("Since last week");
+  });
+
+  it("draws a risk as any section's item, its date included", () => {
+    // ACT
+    w.digest.apply(shown(riskyInit()));
+    // ASSERT
+    const item = w.host.querySelector('[data-week="risks"] .news-digest-item');
+    expect([
+      item?.querySelector(".news-digest-item-title")?.textContent,
+      item?.querySelector("[data-effective]")?.textContent,
+      item?.querySelector(".news-digest-links .external-link")?.textContent,
+    ]).toEqual(["Sonnet 4 retires", "effective 2026-11-01", "Deprecations"]);
+  });
+
+  it("draws a risk's reason as markdown under its summary", () => {
+    // ACT
+    w.digest.apply(shown(riskyInit()));
+    // ASSERT
+    const reason = w.host.querySelector<HTMLElement>('[data-week="risks"] [data-risk-reason]');
+    expect([reason?.querySelector("code")?.textContent, reason?.previousElementSibling?.textContent?.trim()]).toEqual([
+      "claude -p",
+      "It retires.",
+    ]);
+  });
+
+  it("draws no reason on the run's own items", () => {
+    // ACT
+    w.digest.apply(shown(riskyInit()));
+    // ASSERT
+    expect(w.host.querySelectorAll("[data-risk-reason]").length).toBe(1);
+  });
+
+  it("tells a quiet week in the daemon's words", () => {
+    // ACT
+    w.digest.apply(shown(quietInit()));
+    // ASSERT
+    expect(w.host.querySelector('[data-week="quiet"] [data-week-quiet]')?.textContent).toBe(
+      "Nothing since last week could regress agent-repl.",
+    );
+  });
+
+  it("draws no item in a quiet week", () => {
+    // ACT
+    w.digest.apply(shown(quietInit()));
+    // ASSERT
+    expect(w.host.querySelectorAll("[data-week] .news-digest-item").length).toBe(0);
+  });
+
+  it("draws no week for a digest made before the week existed", () => {
+    // ACT
+    w.digest.apply(shown());
+    // ASSERT
+    expect(w.host.querySelector("[data-week]")).toBeNull();
+  });
+});
+
 describe("mountNewsDigest: refusing a malformed standing", () => {
+  it("refuses a week naming no outcome", () => {
+    // ARRANGE
+    const init = overlayInit();
+    init.week = { heading: { text: "Since last week" } };
+    // ACT + ASSERT
+    expect(() => w.digest.apply(shown(init))).toThrow(MalformedView);
+  });
+
+  it("refuses a week with no heading", () => {
+    // ARRANGE
+    const init = quietInit();
+    if (init.week) init.week.heading = undefined;
+    // ACT + ASSERT
+    expect(() => w.digest.apply(shown(init))).toThrow(MalformedView);
+  });
+
+  it("refuses a week of no risks", () => {
+    // ARRANGE
+    const init = overlayInit();
+    init.week = { heading: { text: "Since last week" }, outcome: { case: "risks", value: { items: [] } } };
+    // ACT + ASSERT
+    expect(() => w.digest.apply(shown(init))).toThrow(MalformedView);
+  });
+
+  it("refuses a risk with no reason", () => {
+    // ARRANGE
+    const init = riskyInit();
+    const risk = init.week?.outcome?.case === "risks" ? init.week.outcome.value.items?.[0] : undefined;
+    if (risk) risk.reason = undefined;
+    // ACT + ASSERT
+    expect(() => w.digest.apply(shown(init))).toThrow(MalformedView);
+  });
+
   it("refuses a standing naming no arm", () => {
     // ACT + ASSERT
     expect(() => w.digest.apply(create(NewsDigestStandingSchema, {}))).toThrow(MalformedView);

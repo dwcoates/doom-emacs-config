@@ -273,6 +273,9 @@ type Fleet struct {
 	// (HandOver), until a reclaim gives one back (Reclaimed). A start that
 	// spawns after its workspace was handed over must not serve it: see hold.
 	handedOver map[ids.WorkspaceID]bool
+	// sdkVersion is the Agent SDK version the shim last reported on a session
+	// start (SessionRuntime.sdk_version); empty until one has. Under mu.
+	sdkVersion string
 	// lastCold is the shim's own cold facts for a parked workspace, kept whole
 	// so the relaunch engine's cold arm carries what the shim stated rather
 	// than a reconstruction of it.
@@ -2531,6 +2534,7 @@ func (f *Fleet) recordFacts(ctx context.Context, log dlog.Logger, ws ids.Workspa
 		StartedAt:         previous.StartedAt,
 		LastEngagementAt:  now,
 	}
+	f.noteSDKVersion(log, started.GetRuntime().GetSdkVersion())
 	if next.StartedAt.IsZero() {
 		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "next.StartedAt.IsZero()"})
 		next.StartedAt = now
@@ -2549,6 +2553,35 @@ func (f *Fleet) recordFacts(ctx context.Context, log dlog.Logger, ws ids.Workspa
 		"shim_build_sha":    started.GetRuntime().GetShimBuildSha(),
 	})
 	return nil
+}
+
+// noteSDKVersion keeps the Agent SDK version a session start reported as the
+// one agent-repl runs. The shim states it on every start, so an empty one is
+// a malformed report: recorded at ERROR and not kept, never a guessed version.
+func (f *Fleet) noteSDKVersion(log dlog.Logger, version string) {
+	if version == "" {
+		log.Error(opBringUp, "the session start reported no Agent SDK version", dlog.Context{
+			"invariant_violation": "SessionRuntime.sdk_version is stated on every session start",
+		})
+		return
+	}
+	f.mu.Lock()
+	before := f.sdkVersion
+	f.sdkVersion = version
+	f.mu.Unlock()
+	if before != version {
+		log.Info(opBringUp, "the shim reported the Agent SDK version agent-repl runs", dlog.Context{
+			"sdk_version": version, "previous": before,
+		})
+	}
+}
+
+// SDKVersion answers the Agent SDK version the shim last reported on a session
+// start, false when no session has started since this daemon did.
+func (f *Fleet) SDKVersion() (string, bool) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.sdkVersion, f.sdkVersion != ""
 }
 
 // Stop ends a workspace's session. Forced stops kill the process; a graceful

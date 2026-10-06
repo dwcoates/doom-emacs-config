@@ -12,6 +12,7 @@ import (
 
 	"claude-repld/internal/flock"
 	"claude-repld/internal/headless"
+	"claude-repld/internal/wsm"
 )
 
 func TestARefreshWithNewsStandsADigest(t *testing.T) {
@@ -375,5 +376,188 @@ func TestAScheduledRunThatIsNoLongerDueDoesNotRun(t *testing.T) {
 	// Assert
 	if !errors.Is(err, errNotDue) || len(w.store.recorded()) != 0 {
 		t.Fatalf("run = %v with %v recorded, want errNotDue and nothing recorded", err, w.store.recorded())
+	}
+}
+
+// markedAnswerJSON is answerJSON with its item marked as a regression risk.
+const markedAnswerJSON = `{"sections":[{"kind":"backend","items":[{"title":"SDK drops subscription billing","summary":"The SDK now needs an API key.","effective":"2026-11-01","risk":"The shim's subscription sign-in stops working.","links":[{"label":"Release new","url":"https://fixture.test/releases/new"}]}]}]}`
+
+func TestADigestWithNothingMarkedCarriesTheQuietWeek(t *testing.T) {
+	// Arrange
+	w := newWorld(t)
+	w.withNewFeedEntry()
+	w.runner.text = answerJSON
+	d := w.digester()
+
+	// Act
+	if _, err := d.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+
+	// Assert
+	week := latestStanding(t, d).GetShown().GetWeek()
+	if week.GetQuiet() == nil || week.GetHeading().GetText() != "Since last week" {
+		t.Fatalf("week = %v, want the quiet arm", week)
+	}
+}
+
+func TestADigestCarriesItsMarkedItemsInTheWeek(t *testing.T) {
+	// Arrange
+	w := newWorld(t)
+	w.withNewFeedEntry()
+	w.runner.text = markedAnswerJSON
+	d := w.digester()
+
+	// Act
+	if _, err := d.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+
+	// Assert
+	shown := latestStanding(t, d).GetShown()
+	items := shown.GetWeek().GetRisks().GetItems()
+	if len(items) != 1 || !proto.Equal(items[0].GetItem(), shown.GetSections()[0].GetItems()[0]) ||
+		items[0].GetReason().GetText() != "The shim's subscription sign-in stops working." {
+		t.Fatalf("week = %v, want the marked item with its reason", shown.GetWeek())
+	}
+	if items[0].GetItem().GetEffective().GetText() != "2026-11-01" {
+		t.Fatalf("week item = %v, want its effective date kept", items[0])
+	}
+}
+
+func TestADigestKeepsItsItemsForTheWeek(t *testing.T) {
+	// Arrange
+	w := newWorld(t)
+	w.withNewFeedEntry()
+	w.runner.text = markedAnswerJSON
+	d := w.digester()
+
+	// Act
+	if _, err := d.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+
+	// Assert
+	runs := w.store.recorded()
+	h := runs[0].History
+	if h == nil || len(h.Items) != 1 || h.Items[0].Risk != "The shim's subscription sign-in stops working." {
+		t.Fatalf("history = %+v, want the one item kept with its mark", h)
+	}
+	if !h.CoversFrom.Equal(now.Add(-25*time.Hour)) || !h.KeepSince.Equal(now.Add(-Retention)) {
+		t.Fatalf("history covers from %v and prunes before %v, want the digest's period start and the retention", h.CoversFrom, h.KeepSince)
+	}
+}
+
+func TestTheNextDayMergesTheWeeksRepeatedStory(t *testing.T) {
+	// Arrange
+	w := newWorld(t)
+	w.withNewFeedEntry()
+	w.runner.text = markedAnswerJSON
+	first := w.digester()
+	if _, err := first.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+	w.clock.set(now.Add(25 * time.Hour))
+	w.fetcher.bodies[feedSource.URL] = atomWith(now.Add(24*time.Hour), "newer", "new", "old")
+	w.runner.text = strings.ReplaceAll(markedAnswerJSON, "https://fixture.test/releases/new", "https://fixture.test/releases/newer")
+	w.runner.weekText = `{"items":[{"members":["r1","r2"],"title":"SDK drops subscription billing","summary":"S.","reason":"R.","effective":"2026-11-01"}]}`
+
+	// Act
+	if _, err := w.digester().Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+
+	// Assert
+	runs := w.store.recorded()
+	shown := &frontendv1.NewsDigestOverlay{}
+	if err := proto.Unmarshal(runs[len(runs)-1].Digest.Overlay, shown); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if items := shown.GetWeek().GetRisks().GetItems(); len(items) != 1 || len(items[0].GetItem().GetLinks()) != 2 {
+		t.Fatalf("week = %v, want the story told once with both days' links", shown.GetWeek())
+	}
+}
+
+func TestAFailedWeekMergeIsAModelFailureAndNoDigest(t *testing.T) {
+	// Arrange
+	w := newWorld(t)
+	w.withNewFeedEntry()
+	w.runner.text = markedAnswerJSON
+	w.runner.weekErr = &headless.Error{Cause: headless.CauseExitStatus, Detail: "exit 1"}
+	encoded, err := proto.Marshal(newsItem("Earlier", "https://fixture.test/earlier", ""))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	w.store.kept = []wsm.NewsDigestRisk{{RunEnd: now.Add(-24 * time.Hour), Item: encoded, Reason: "R."}}
+	d := w.digester()
+
+	// Act
+	resp, err := d.Refresh(context.Background())
+
+	// Assert
+	if err != nil || !strings.Contains(resp.GetError().GetModelFailed().GetReason(), "exit_status") {
+		t.Fatalf("Refresh = (%v, %v), want model_failed naming the cause", resp, err)
+	}
+	if runs := w.store.recorded(); len(runs) != 1 || runs[0].Recorded || runs[0].History != nil {
+		t.Fatalf("runs = %+v, want one unrecorded run keeping nothing", runs)
+	}
+	if _, published := d.Topic().Latest(); published {
+		t.Fatal("a digest whose week failed was published")
+	}
+	if len(records(w.log, "error", opModel)) != 1 {
+		t.Fatalf("records = %v, want the merge failure at ERROR", w.log.Records())
+	}
+}
+
+func TestAnUnreadableWeekFailsTheRefresh(t *testing.T) {
+	// Arrange
+	w := newWorld(t)
+	w.withNewFeedEntry()
+	w.runner.text = markedAnswerJSON
+	w.store.risksErr = errScripted
+	d := w.digester()
+
+	// Act
+	_, err := d.Refresh(context.Background())
+
+	// Assert
+	if !errors.Is(err, errScripted) {
+		t.Fatalf("Refresh = %v, want the store's failure", err)
+	}
+	if _, published := d.Topic().Latest(); published {
+		t.Fatal("a digest whose week could not be read was published")
+	}
+}
+
+func TestADigestsHeaderCarriesTheSDKVersion(t *testing.T) {
+	tests := []struct {
+		name        string
+		sdk         string
+		wantKnown   string
+		wantUnknown bool
+	}{
+		{name: "a reported version is known", sdk: "0.2.97", wantKnown: "0.2.97"},
+		{name: "no reported version is the unknown arm", sdk: "", wantUnknown: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			w := newWorld(t)
+			w.withNewFeedEntry()
+			w.runner.text = answerJSON
+			w.sdk = tt.sdk
+			d := w.digester()
+
+			// Act
+			if _, err := d.Refresh(context.Background()); err != nil {
+				t.Fatalf("Refresh: %v", err)
+			}
+
+			// Assert
+			got := latestStanding(t, d).GetShown().GetHeader().GetSdkVersion()
+			if got.GetKnown().GetVersion() != tt.wantKnown || (got.GetUnknown() != nil) != tt.wantUnknown {
+				t.Fatalf("sdk version = %v, want known %q / unknown %v", got, tt.wantKnown, tt.wantUnknown)
+			}
+		})
 	}
 }
