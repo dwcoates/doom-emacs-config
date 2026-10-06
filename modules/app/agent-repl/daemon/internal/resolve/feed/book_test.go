@@ -922,3 +922,64 @@ func TestAFreshBooksFirstReadPagesOlderFromItsOwnBoundary(t *testing.T) {
 		t.Fatalf("last read after %q, want p-2", got)
 	}
 }
+
+// ---- what a load did with each entry ----
+
+// loadedOutcomes answers the outcomes tally of every history_loaded record,
+// oldest first.
+func (h *harness) loadedOutcomes() []string {
+	var out []string
+	for _, record := range h.records() {
+		if record.Operation == "daemon.feed.history_loaded" {
+			out = append(out, fmt.Sprint(record.Context["outcomes"]))
+		}
+	}
+	return out
+}
+
+func TestAHistoryLoadRecordsWhatBecameOfEachEntry(t *testing.T) {
+	hook := "agent_frame.update.activity.hook.succeeded"
+	answer := "agent_frame.update.activity.response.success"
+	tests := []struct {
+		name string
+		book []bookEntry
+		page int
+		next bool
+		// load is which history_loaded record, oldest first, is asserted.
+		load int
+		want string
+	}{
+		{
+			name: "entries that draw no row",
+			book: []bookEntry{{entry: promptEntry("turn-0", "first")}, {entry: succeededHookEntry("h-1")}, {entry: succeededHookEntry("h-2")}},
+			page: 2, want: hook + "=no_row:2",
+		},
+		{
+			name: "entries withheld for an older page",
+			book: splitTurnBook(), page: 1, want: answer + "=withheld:1",
+		},
+		{
+			name: "withheld entries completed by the older page",
+			book: splitTurnBook(), page: 3, next: true, load: 1, want: answer + "=completed:1 user_prompt=drew:1",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.mainBook(tt.page, tt.book)
+
+			// Act.
+			h.openPage(rootFeed(), "reader-1")
+			if tt.next {
+				h.nextPage("reader-1")
+			}
+
+			// Assert.
+			got := h.loadedOutcomes()
+			if len(got) <= tt.load || got[tt.load] != tt.want {
+				t.Fatalf("outcomes = %q, want load %d's %q", got, tt.load, tt.want)
+			}
+		})
+	}
+}
