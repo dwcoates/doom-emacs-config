@@ -21,7 +21,7 @@ import {
   type KeepaliveAttribution,
 } from "../../src/engine/keepalive.js";
 import { SendLedger } from "../../src/engine/sends.js";
-import { CACHE_TTL_1H_MS } from "../../src/engine/cold.js";
+import { CACHE_TTL_1H_MS, CACHE_TTL_5M_MS } from "../../src/engine/cold.js";
 import type { SdkMessage } from "../../src/sdk/types.js";
 import { ManualScheduler } from "./fakes.js";
 
@@ -502,77 +502,260 @@ describe("the span invariant", () => {
   });
 });
 
-describe("the cadence", () => {
-  it("beats when it is running", () => {
-    const scheduler = new ManualScheduler();
-    let beats = 0;
-    new KeepaliveCadence(() => beats++, 1, scheduler).start();
+const MINUTE = 60 * 1000;
+/** The instant of the conversation's last real request in the cadence tests. */
+const TURN_AT = 1_800_000_000_000;
 
-    scheduler.fire();
+/** A cadence on a hand-moved clock, counting its beats. */
+function cadenceAt(nowMs: number): {
+  readonly cadence: KeepaliveCadence;
+  readonly scheduler: ManualScheduler;
+  readonly clock: { now: number };
+  readonly beats: () => number;
+} {
+  const scheduler = new ManualScheduler();
+  const clock = { now: nowMs };
+  let beats = 0;
+  const cadence = new KeepaliveCadence(() => beats++, () => clock.now, KEEPALIVE_INTERVAL_MS, scheduler);
+  return { cadence, scheduler, clock, beats: () => beats };
+}
 
-    expect(beats).toBe(1);
+/** The 1-hour cache the conversation's last request bought at {@link TURN_AT}. */
+const HOUR_CACHE = { atMs: TURN_AT, ttlMs: CACHE_TTL_1H_MS };
+
+describe("the cadence, anchored to the conversation's last request", () => {
+  it("schedules a restart 5 minutes after a turn at turn + 52 minutes, not restart + 52", () => {
+    const { cadence, scheduler } = cadenceAt(TURN_AT + 5 * MINUTE);
+
+    cadence.start(HOUR_CACHE, "restart");
+
+    expect(scheduler.pendingTimeout()?.delayMs).toBe(47 * MINUTE);
   });
 
-  it("does not double the cadence on a second start", () => {
-    const scheduler = new ManualScheduler();
-    const cadence = new KeepaliveCadence(() => undefined, 1, scheduler);
+  it("beats AT ONCE on a restart past turn + 52 minutes while the cache is still warm", () => {
+    const { cadence, scheduler } = cadenceAt(TURN_AT + 55 * MINUTE);
 
-    cadence.start();
-    cadence.start();
+    cadence.start(HOUR_CACHE, "restart");
 
-    expect(scheduler.handlers).toHaveLength(1);
+    expect(scheduler.pendingTimeout()?.delayMs).toBe(0);
   });
 
-  it("SKIPS the beat while a turn is in flight", () => {
-    // A keep-alive submitted into an open turn would be a second submitter.
-    const scheduler = new ManualScheduler();
-    let beats = 0;
-    const cadence = new KeepaliveCadence(() => beats++, 1, scheduler);
-    cadence.start();
+  it("schedules NO beat on a restart after the cache expired", () => {
+    const { cadence, scheduler } = cadenceAt(TURN_AT + 61 * MINUTE);
+
+    cadence.start(HOUR_CACHE, "restart");
+
+    expect(scheduler.pendingTimeout()).toBeUndefined();
+  });
+
+  it("never lets repeated restarts push the beat past the cache's expiry", () => {
+    // THE 2026-10-06 CHAIN: a turn, then deploy bounces at +5, +21 and +31
+    // minutes. Every restart's beat falls at the same turn + 52.
+    const dueAt = [5, 21, 31].map((restartAfter) => {
+      const { cadence, scheduler, clock } = cadenceAt(TURN_AT + restartAfter * MINUTE);
+      cadence.start(HOUR_CACHE, "restart");
+      return clock.now + (scheduler.pendingTimeout()?.delayMs ?? Number.NaN);
+    });
+
+    expect(dueAt).toEqual([TURN_AT + 52 * MINUTE, TURN_AT + 52 * MINUTE, TURN_AT + 52 * MINUTE]);
+  });
+
+  it("schedules NO beat for a 5-minute cache, which a 52-minute cadence cannot keep warm", () => {
+    const { cadence, scheduler } = cadenceAt(TURN_AT + MINUTE);
+
+    cadence.start({ atMs: TURN_AT, ttlMs: CACHE_TTL_5M_MS }, "restart");
+
+    expect(scheduler.pendingTimeout()).toBeUndefined();
+  });
+
+  it("beats one interval after its start when the conversation states no request", () => {
+    const { cadence, scheduler } = cadenceAt(TURN_AT);
+
+    cadence.start(undefined, "a fresh conversation");
+
+    expect(scheduler.pendingTimeout()?.delayMs).toBe(KEEPALIVE_INTERVAL_MS);
+  });
+
+  it("beats when its timer fires on a warm cache", () => {
+    const { cadence, scheduler, beats } = cadenceAt(TURN_AT + 5 * MINUTE);
+    cadence.start(HOUR_CACHE, "restart");
+
+    scheduler.fireTimeout();
+
+    expect(beats()).toBe(1);
+  });
+
+  it("does NOT beat when its timer fires after the cache lapsed (a host that slept)", () => {
+    const { cadence, scheduler, clock, beats } = cadenceAt(TURN_AT + 5 * MINUTE);
+    cadence.start(HOUR_CACHE, "restart");
+    clock.now = TURN_AT + 70 * MINUTE;
+
+    scheduler.fireTimeout();
+
+    expect(beats()).toBe(0);
+  });
+
+  it("re-anchors on the beat's own answer: the next beat is that request + 52 minutes", () => {
+    // THE STEADY STATE: a beat every 52 minutes of idleness.
+    const { cadence, scheduler, clock } = cadenceAt(TURN_AT + 52 * MINUTE);
+    cadence.start(HOUR_CACHE, "restart");
+    scheduler.fireTimeout();
+    clock.now += 4000;
+
+    cadence.noteRequest(undefined);
+
+    expect(scheduler.pendingTimeout()?.delayMs).toBe(KEEPALIVE_INTERVAL_MS);
+  });
+
+  it("falls one interval on when a beat makes no request", () => {
+    const { cadence, scheduler } = cadenceAt(TURN_AT + 52 * MINUTE);
+    cadence.start(HOUR_CACHE, "restart");
+
+    scheduler.fireTimeout();
+
+    expect(scheduler.pendingTimeout()?.delayMs).toBe(KEEPALIVE_INTERVAL_MS);
+  });
+
+  it("re-anchors on a real turn's request: resuming schedules from that request", () => {
+    const { cadence, scheduler, clock } = cadenceAt(TURN_AT + 5 * MINUTE);
+    cadence.start(HOUR_CACHE, "restart");
     cadence.pause();
+    clock.now = TURN_AT + 30 * MINUTE;
+    cadence.noteRequest(CACHE_TTL_1H_MS);
+    clock.now = TURN_AT + 31 * MINUTE;
 
-    scheduler.fire();
-
-    expect(beats).toBe(0);
-  });
-
-  it("beats again once the turn ends", () => {
-    const scheduler = new ManualScheduler();
-    let beats = 0;
-    const cadence = new KeepaliveCadence(() => beats++, 1, scheduler);
-    cadence.start();
-    cadence.pause();
     cadence.resume();
 
-    scheduler.fire();
-
-    expect(beats).toBe(1);
+    expect(scheduler.pendingTimeout()?.delayMs).toBe(51 * MINUTE);
   });
 
-  it("clears its interval when stopped", () => {
-    const scheduler = new ManualScheduler();
-    const cadence = new KeepaliveCadence(() => undefined, 1, scheduler);
-    cadence.start();
+  it("revives a lapsed cadence on the next request", () => {
+    const { cadence, scheduler } = cadenceAt(TURN_AT + 61 * MINUTE);
+    cadence.start(HOUR_CACHE, "restart");
+
+    cadence.noteRequest(CACHE_TTL_1H_MS);
+
+    expect(scheduler.pendingTimeout()?.delayMs).toBe(KEEPALIVE_INTERVAL_MS);
+  });
+
+  it("keeps the cache's tier across a request that wrote nothing", () => {
+    const { cadence, scheduler } = cadenceAt(TURN_AT + MINUTE);
+    cadence.start({ atMs: TURN_AT, ttlMs: CACHE_TTL_5M_MS }, "restart");
+
+    cadence.noteRequest(undefined);
+
+    expect(scheduler.pendingTimeout()).toBeUndefined();
+  });
+
+  it("takes the tier a request bought", () => {
+    const { cadence, scheduler } = cadenceAt(TURN_AT + MINUTE);
+    cadence.start({ atMs: TURN_AT, ttlMs: CACHE_TTL_5M_MS }, "restart");
+
+    cadence.noteRequest(CACHE_TTL_1H_MS);
+
+    expect(scheduler.pendingTimeout()?.delayMs).toBe(KEEPALIVE_INTERVAL_MS);
+  });
+
+  it("holds no timer while a turn is in flight", () => {
+    // A keep-alive submitted into an open turn would be a second submitter.
+    const { cadence, scheduler } = cadenceAt(TURN_AT + 5 * MINUTE);
+    cadence.start(HOUR_CACHE, "restart");
+
+    cadence.pause();
+
+    expect(scheduler.pendingTimeout()).toBeUndefined();
+  });
+
+  it("records a request during a turn without scheduling", () => {
+    const { cadence, scheduler } = cadenceAt(TURN_AT + 5 * MINUTE);
+    cadence.start(HOUR_CACHE, "restart");
+    cadence.pause();
+
+    cadence.noteRequest(CACHE_TTL_1H_MS);
+
+    expect(scheduler.pendingTimeout()).toBeUndefined();
+  });
+
+  it("holds ONE timer across a second start", () => {
+    const { cadence, scheduler } = cadenceAt(TURN_AT + 5 * MINUTE);
+
+    cadence.start(HOUR_CACHE, "restart");
+    cadence.start(HOUR_CACHE, "restart");
+
+    expect(scheduler.timeouts.filter((timeout) => timeout.pending)).toHaveLength(1);
+  });
+
+  it("clears its timer when stopped", () => {
+    const { cadence, scheduler } = cadenceAt(TURN_AT + 5 * MINUTE);
+    cadence.start(HOUR_CACHE, "restart");
 
     cadence.stop();
 
-    expect(scheduler.cleared).toBe(1);
+    expect(scheduler.pendingTimeout()).toBeUndefined();
+  });
+
+  it("schedules nothing after it is stopped, whatever request lands", () => {
+    const { cadence, scheduler } = cadenceAt(TURN_AT + 5 * MINUTE);
+    cadence.start(HOUR_CACHE, "restart");
+    cadence.stop();
+
+    cadence.noteRequest(CACHE_TTL_1H_MS);
+
+    expect(scheduler.pendingTimeout()).toBeUndefined();
   });
 
   it("is a no-op to stop one that never started", () => {
-    const scheduler = new ManualScheduler();
+    const { cadence, scheduler } = cadenceAt(TURN_AT);
 
-    new KeepaliveCadence(() => undefined, 1, scheduler).stop();
+    cadence.stop();
 
-    expect(scheduler.cleared).toBe(0);
+    expect(scheduler.timeouts).toHaveLength(0);
+  });
+
+  it("states the schedule at INFO: the anchor, the cache's tier and the next beat", () => {
+    const { cadence } = cadenceAt(TURN_AT + 5 * MINUTE);
+    const before = logSinkMark();
+
+    cadence.start(HOUR_CACHE, "restart");
+
+    const record = logRecordsSince(before).find((held) => held.message.includes("keep-alive scheduled"));
+    expect([record?.level, record?.context["anchor_at"], record?.context["cache_ttl_ms"], record?.context["next_beat_at"]]).toEqual([
+      "info",
+      new Date(TURN_AT).toISOString(),
+      CACHE_TTL_1H_MS,
+      new Date(TURN_AT + 52 * MINUTE).toISOString(),
+    ]);
+  });
+
+  it("states at INFO why no beat is scheduled for a lapsed cache", () => {
+    const { cadence } = cadenceAt(TURN_AT + 61 * MINUTE);
+    const before = logSinkMark();
+
+    cadence.start(HOUR_CACHE, "restart");
+
+    const record = logRecordsSince(before).find((held) => held.message.includes("no keep-alive is scheduled"));
+    expect([record?.level, record?.context["cache_expires_at"]]).toEqual([
+      "info",
+      new Date(TURN_AT + CACHE_TTL_1H_MS).toISOString(),
+    ]);
+  });
+
+  it("does not restate an unchanged schedule", () => {
+    const { cadence } = cadenceAt(TURN_AT + 5 * MINUTE);
+    cadence.start(HOUR_CACHE, "restart");
+    const before = logSinkMark();
+
+    cadence.resume();
+
+    expect(logRecordsSince(before).filter((held) => held.message.includes("keep-alive scheduled"))).toHaveLength(0);
   });
 });
 
 /**
  * REAL_SCHEDULER is the cadence's default (every unit test above injects
  * ManualScheduler instead), wired in production whenever `createEngine` is
- * not handed a scheduler override. Pin the real setInterval/clearInterval
- * wiring directly rather than only through the fake.
+ * not handed a scheduler override. Pin the real timer wiring directly rather
+ * than only through the fake.
  */
 describe("REAL_SCHEDULER", () => {
   beforeEach(() => {
@@ -601,6 +784,25 @@ describe("REAL_SCHEDULER", () => {
     vi.advanceTimersByTime(100);
 
     expect(beats.length).toBe(1);
+  });
+
+  it("setTimeout fires the handler once after the delay", () => {
+    const beats: number[] = [];
+    REAL_SCHEDULER.setTimeout(() => beats.push(1), 10);
+
+    vi.advanceTimersByTime(35);
+
+    expect(beats.length).toBe(1);
+  });
+
+  it("clearTimeout stops a pending timer", () => {
+    const beats: number[] = [];
+    const handle = REAL_SCHEDULER.setTimeout(() => beats.push(1), 10);
+
+    REAL_SCHEDULER.clearTimeout(handle);
+    vi.advanceTimersByTime(35);
+
+    expect(beats.length).toBe(0);
   });
 });
 
