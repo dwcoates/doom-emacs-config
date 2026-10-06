@@ -2,6 +2,7 @@ package discover
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -167,8 +168,8 @@ func TestTranscriptCWDRefusesATranscriptWithNoCWDYet(t *testing.T) {
 	_, _, err := transcriptCWD(path, "-work-project")
 
 	// Assert.
-	if err == nil {
-		t.Fatal("transcriptCWD attributed a transcript that records no cwd")
+	if !errors.Is(err, ErrNoCWDYet) {
+		t.Fatalf("transcriptCWD error = %v, want ErrNoCWDYet", err)
 	}
 }
 
