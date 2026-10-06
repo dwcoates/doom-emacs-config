@@ -28,7 +28,7 @@ func TestNoSuiteScriptMakesATempFileWithoutNamingItsParent(t *testing.T) {
 	module := filepath.Clean(filepath.Join(filepath.Dir(self), "..", "..", ".."))
 	repo := filepath.Clean(filepath.Join(module, "..", "..", ".."))
 	var scripts []string
-	for _, dir := range []string{filepath.Join(module, "bin"), filepath.Join(module, "scripts"), filepath.Join(repo, ".githooks"), filepath.Join(repo, ".claude")} {
+	for _, dir := range []string{filepath.Join(module, "bin"), filepath.Join(module, "scripts"), filepath.Join(repo, ".githooks"), filepath.Join(repo, ".claude"), filepath.Join(repo, "bin")} {
 		matches, err := filepath.Glob(filepath.Join(dir, "*.sh"))
 		if err != nil {
 			t.Fatal(err)
