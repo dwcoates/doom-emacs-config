@@ -354,6 +354,17 @@ describe("the span invariant", () => {
     });
   });
 
+  it("states the offending turns in the refusal's detail text", () => {
+    const rewind = anchoredWithKeepalive();
+    rewind.noteRecord(assistant("vendor-answer-1"), vendorTurn);
+    const mark = logSinkMark();
+
+    rewind.obligation();
+
+    const record = logRecordsSince(mark).find((entry) => entry.message.startsWith("the keep-alive rewind is REFUSED"));
+    expect(record?.context.detail).toBe("vendor_started turn adopted-1: vendor-answer-1");
+  });
+
   it("names the anchor the refused rewind would have resumed at", () => {
     const rewind = anchoredWithKeepalive();
     rewind.noteRecord(assistant("vendor-answer-1"), vendorTurn);
