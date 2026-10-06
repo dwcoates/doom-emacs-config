@@ -20,7 +20,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
-	"time"
+	"syscall"
 
 	"claude-repld/internal/dlog"
 )
@@ -56,12 +56,17 @@ func cleanEnv(env []string) []string {
 	return out
 }
 
-// cancelOutputBound is how long a run whose context ended waits, after the
-// kill, for the script's output pipe to close. It covers the kernel closing a
-// killed process's descriptors; a child still holding the pipe past it is
-// cut off. It sits well under the daemon's own background-loop join bound
-// (claude-repld's loopJoinBound, 2s), so a cancelled run never spends it.
-const cancelOutputBound = 250 * time.Millisecond
+// killGroup SIGKILLs the process group the script leads. A group already gone
+// is the state the kill was asked to reach.
+func killGroup(pid int) error {
+	if err := syscall.Kill(-pid, syscall.SIGKILL); err != nil {
+		if errors.Is(err, syscall.ESRCH) {
+			return os.ErrProcessDone
+		}
+		return err
+	}
+	return nil
+}
 
 // Runner runs a script in a directory. It is stateless beyond its logger, so
 // one instance serves every caller in the daemon.
@@ -112,11 +117,15 @@ func (r *Runner) RunLines(ctx context.Context, dir string, argv []string, onLine
 
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir = dir
-	// A CANCELLED RUN RETURNS WITHIN cancelOutputBound. The context's end
-	// kills the script, but the output is a pipe, and a child the script
-	// started still holds it open: without a bound, Wait waits for that child
-	// as long as it lives, and the caller's cancellation is not honored.
-	cmd.WaitDelay = cancelOutputBound
+	// A CANCELLED RUN TAKES ITS CHILDREN WITH IT. The script runs in its own
+	// process group and the context's end kills the whole group: killing the
+	// script alone left a child it started holding the output pipe open, and
+	// Wait waited for that child as long as it lived, so the caller's
+	// cancellation was not honored. (exec's WaitDelay is NOT the bound here:
+	// it also runs after an ordinary exit, and under load it cut the output of
+	// scripts that had finished and answered.)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error { return killGroup(cmd.Process.Pid) }
 	cmd.Env = cleanEnv(os.Environ())
 	// stdout and stderr are combined, in order, into one buffer: a caller
 	// painting a test gate's output or a deploy step's log wants what a
