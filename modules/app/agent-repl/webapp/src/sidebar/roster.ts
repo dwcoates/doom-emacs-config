@@ -54,6 +54,7 @@ import {
   type SidebarContext,
 } from "./context.js";
 import { drawCreateWorkspaceControl } from "./create.js";
+import { toggleHiddenDropdown } from "./dropdowns.js";
 import { changeView } from "./view-change.js";
 import { foldViewKey, GROUPING_VIEW_KEY, paintSectionFold, paintTriangle } from "./view.js";
 import { drawRosterRow, expandVisibleRows } from "./row.js";
@@ -432,17 +433,7 @@ export function drawRosterTaskSectionHeader(
   more.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
-    menu.hidden = !menu.hidden;
-    if (menu.hidden) sc.dropdowns.released(menu);
-    else
-      sc.dropdowns.opened({
-        kind: "task-menu",
-        element: menu,
-        openers: [more],
-        close: () => {
-          menu.hidden = true;
-        },
-      });
+    toggleHiddenDropdown(sc.dropdowns, "task-menu", menu, [more]);
   });
   header.appendChild(more);
   header.appendChild(menu);
