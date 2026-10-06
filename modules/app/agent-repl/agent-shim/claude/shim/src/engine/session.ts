@@ -6441,20 +6441,22 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // never answers would leave KillSession hanging with the tail unconcluded.
     // Rejecting hands the caller's own catch the honest outcome -- the head
     // could not be read -- instead of stalling the stand-down.
-    const page = await deadline(
-      // A ONE-SHOT READ, AND IT SAYS SO. The head is a page and nothing more:
-      // `readFirstPage` opens page-only, so the store mints no watch token for
-      // a tail this teardown will never stand.
+    return deadline(
+      // A ONE-SHOT READ OF THE POINTER ALONE. `readBookHead` opens page-only,
+      // so the store mints no watch token for a tail this teardown will never
+      // stand, and tail-only, so it reads no line: the head comes off the
+      // store's place index. It was read off a repaint page, and that page's
+      // 50-frame scan is what outlasted this budget under disk contention
+      // (2026-10-06, `definitions`); watch for a page read creeping back here.
       //
       // THE PRODUCER VOUCHES HERE TOO. A session killed before its first turn
       // has an agent with no book, and asking the store for one earned an
       // `unknown_agent` refusal on every such teardown. The head of a book that
-      // does not exist is absence, which is exactly what an empty page answers.
-      deps.persistence.readFirstPage(agent, REPAINT, () => knowsAgent(agent)),
+      // does not exist is absence.
+      deps.persistence.readBookHead(agent, () => knowsAgent(agent)),
       watcherConclusionBudgetMs,
       `the store did not answer for ${agent.value}'s book within ${watcherConclusionBudgetMs}ms`,
     );
-    return page.entries[0]?.at;
   }
 
   /**

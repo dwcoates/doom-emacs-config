@@ -560,3 +560,77 @@ func TestAwaitKilledLeaderReportsAStuckExitAndKeepsWaiting(t *testing.T) {
 		})
 	}
 }
+
+// TestKillStopped pins the signals that end a process the harness may hold
+// stopped: its SIGKILL, then a SIGCONT to it alone, since on Darwin an
+// accepted SIGKILL never resumes a stopped process's suspended task.
+func TestKillStopped(t *testing.T) {
+	errRefused := syscall.EPERM
+	tests := []struct {
+		name      string
+		failKill  error
+		failCont  error
+		wantSent  []string
+		wantErrIs error
+		wantErr   bool
+	}{
+		{name: "the SIGKILL is followed by a SIGCONT to the same pid", wantSent: []string{"4242 killed", "4242 continued"}},
+		{name: "a refused SIGKILL is answered and nothing is continued", failKill: errRefused, wantSent: []string{"4242 killed"}, wantErrIs: errRefused, wantErr: true},
+		{name: "a process gone before its SIGCONT is no error", failCont: syscall.ESRCH, wantSent: []string{"4242 killed", "4242 continued"}},
+		{name: "a refused SIGCONT is answered", failCont: errRefused, wantSent: []string{"4242 killed", "4242 continued"}, wantErrIs: errRefused, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			var sent []string
+			kill := func(pid int, sig syscall.Signal) error {
+				sent = append(sent, strconv.Itoa(pid)+" "+sig.String())
+				if sig == syscall.SIGKILL {
+					return tt.failKill
+				}
+				return tt.failCont
+			}
+
+			// Act
+			err := killStopped(4242, kill)
+
+			// Assert
+			if strings.Join(sent, ",") != strings.Join(tt.wantSent, ",") {
+				t.Errorf("sent %q, want %q", sent, tt.wantSent)
+			}
+			if (err != nil) != tt.wantErr || (tt.wantErrIs != nil && !errors.Is(err, tt.wantErrIs)) {
+				t.Errorf("err = %v, want error %v (is %v)", err, tt.wantErr, tt.wantErrIs)
+			}
+		})
+	}
+}
+
+// TestKillStoppedEndsAStoppedProcess is the same against a real stopped
+// process: it exits on the kill, with nothing else sent to it.
+func TestKillStoppedEndsAStoppedProcess(t *testing.T) {
+	// Arrange
+	cmd := exec.Command("/bin/sleep", "100")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
+	if err := syscall.Kill(cmd.Process.Pid, syscall.SIGSTOP); err != nil {
+		t.Fatalf("SIGSTOP: %v", err)
+	}
+	if err := awaitFrozen(cmd.Process.Pid, freezeBound); err != nil {
+		t.Fatalf("the process did not stop: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), DefaultTimeout)
+	defer cancel()
+
+	// Act
+	err := killStopped(cmd.Process.Pid, syscall.Kill)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("killStopped: %v", err)
+	}
+	if err := WaitProcessExit(ctx, cmd.Process.Pid); err != nil {
+		t.Fatalf("the stopped process did not exit: %v", err)
+	}
+}

@@ -2256,6 +2256,38 @@ describe("a one-shot read of a book whose first row is still queued", () => {
     expect(store.asks()).toBe(1);
   });
 
+  it("holds a HEAD read until the row lands, as it holds a page read", async () => {
+    // Arrange.
+    const store = readableGatedStore();
+    const plane = boundedPlane(store.client);
+    store.hold();
+    plane.write([promptEntry(MAIN, "turn-1", "hello")]);
+
+    // Act.
+    void plane.readBookHead(MAIN, () => true);
+    await settle();
+
+    // Assert.
+    expect(store.asks()).toBe(0);
+    store.open();
+  });
+
+  it("asks the store for the head once the row lands", async () => {
+    // Arrange.
+    const store = readableGatedStore();
+    const plane = boundedPlane(store.client);
+    store.hold();
+    plane.write([promptEntry(MAIN, "turn-1", "hello")]);
+    const reading = plane.readBookHead(MAIN, () => true);
+
+    // Act.
+    store.open();
+    await reading;
+
+    // Assert.
+    expect(store.asks()).toBe(1);
+  });
+
   it("asks the store as it stands once the bound passes with the row unlanded", async () => {
     // Arrange.
     vi.useFakeTimers();
