@@ -1410,6 +1410,67 @@ func TestAFailedServiceEnsureIsRecordedAsAnError(t *testing.T) {
 	}
 }
 
+// TestTheBringUpsServiceStepEndsWithTheServingLifetime pins that the daemon's
+// exit cuts the service step: run detached from the serving lifetime, it kept
+// the exit waiting on its `launchctl` runs past the loops' join bound.
+func TestTheBringUpsServiceStepEndsWithTheServingLifetime(t *testing.T) {
+	// Arrange: a serving lifetime that has already ended.
+	var stepErr error
+	h := newHarness(t, func(deps *Deps, _ *harness) {
+		deps.EnsureServices = func(ctx context.Context) error {
+			stepErr = ctx.Err()
+			return stepErr
+		}
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act.
+	h.seq.BringUp(ctx, nil)
+
+	// Assert.
+	if !errors.Is(stepErr, context.Canceled) {
+		t.Fatalf("the service step's context error = %v, want it cancelled with the serving lifetime", stepErr)
+	}
+}
+
+// TestAServiceStepTheExitCutIsNotAnError pins the log half: the exit cutting
+// the step short is this daemon's own decision, recorded at INFO.
+func TestAServiceStepTheExitCutIsNotAnError(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, func(deps *Deps, _ *harness) {
+		deps.EnsureServices = func(ctx context.Context) error { return ctx.Err() }
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act.
+	h.seq.BringUp(ctx, nil)
+
+	// Assert.
+	if h.hasRecord("error", "daemon.boot.bring_up") {
+		t.Fatalf("an error record under daemon.boot.bring_up for a step the exit cut: %v", h.log.Records())
+	}
+}
+
+// TestAServiceStepTheExitCutIsRecordedAtInfo pins that the cut is still said.
+func TestAServiceStepTheExitCutIsRecordedAtInfo(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, func(deps *Deps, _ *harness) {
+		deps.EnsureServices = func(ctx context.Context) error { return ctx.Err() }
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act.
+	h.seq.BringUp(ctx, nil)
+
+	// Assert.
+	if !h.hasRecord("info", "daemon.boot.bring_up") {
+		t.Fatalf("no info record under daemon.boot.bring_up for the cut: %v", h.log.Records())
+	}
+}
+
 // bringUpBound bounds a bring-up test's wait on its own fakes. A healthy run
 // clears every barrier in microseconds; reaching it means the starts did not
 // overlap.

@@ -115,7 +115,7 @@ func (r *Restarter) RestartStore(ctx context.Context) error {
 	}
 	r.Log.Info(opServices, "kickstarting the store", fields)
 	if err := r.Launchd.Kickstart(ctx, StoreLabel); err != nil {
-		r.Log.Error(opServices, "the store kickstart failed; the sidecar is down and was NOT started again", withCause(fields, err))
+		r.failed("the store kickstart failed; the sidecar is down and was NOT started again", fields, err)
 		return fmt.Errorf("deploy: kickstart %s: %w", StoreLabel, err)
 	}
 	if err := r.awaitStoreSocket(ctx, fields); err != nil {
@@ -123,7 +123,7 @@ func (r *Restarter) RestartStore(ctx context.Context) error {
 	}
 	r.Log.Info(opServices, "the store is serving; bootstrapping the sidecar", fields)
 	if err := r.Launchd.Bootstrap(ctx, plist); err != nil {
-		r.Log.Error(opServices, "the sidecar could not be bootstrapped back", withCause(fields, err))
+		r.failed("the sidecar could not be bootstrapped back", fields, err)
 		return fmt.Errorf("deploy: bootstrap %s: %w", plist, err)
 	}
 	r.Log.Info(opServices, "restarted the store and the sidecar in the safe order", fields)
@@ -227,7 +227,7 @@ func (r *Restarter) runningStale(ctx context.Context, bootstrapped bool, compone
 	}
 	_, pid, err := r.Launchd.Print(ctx, label)
 	if err != nil {
-		r.Log.Error(opServices, "could not read a service's launchd state to judge its build", withCause(fields, err))
+		r.failed("could not read a service's launchd state to judge its build", fields, err)
 		return false, fmt.Errorf("deploy: read %s: %w", label, err)
 	}
 	if pid == 0 {
@@ -254,7 +254,7 @@ func (r *Restarter) ensureLoaded(ctx context.Context, label string, fields dlog.
 	fields = merge(fields, dlog.Context{"label": label, "plist": plist})
 	loaded, _, err := r.Launchd.Print(ctx, label)
 	if err != nil {
-		r.Log.Error(opServices, "could not read a service's launchd state", withCause(fields, err))
+		r.failed("could not read a service's launchd state", fields, err)
 		return false, fmt.Errorf("deploy: read %s: %w", label, err)
 	}
 	if loaded {
@@ -267,7 +267,7 @@ func (r *Restarter) ensureLoaded(ctx context.Context, label string, fields dlog.
 	}
 	r.Log.Info(opServices, "a service was not loaded; bootstrapping it", fields)
 	if err := r.Launchd.Bootstrap(ctx, plist); err != nil {
-		r.Log.Error(opServices, "a service could not be bootstrapped", withCause(fields, err))
+		r.failed("a service could not be bootstrapped", fields, err)
 		return false, fmt.Errorf("deploy: bootstrap %s: %w", plist, err)
 	}
 	return true, nil
@@ -278,7 +278,7 @@ func (r *Restarter) ensureLoaded(ctx context.Context, label string, fields dlog.
 func (r *Restarter) RestartSidecar(ctx context.Context) error {
 	fields := dlog.Context{"sidecar": SidecarLabel}
 	if err := r.Launchd.Kickstart(ctx, SidecarLabel); err != nil {
-		r.Log.Error(opServices, "the sidecar kickstart failed", withCause(fields, err))
+		r.failed("the sidecar kickstart failed", fields, err)
 		return fmt.Errorf("deploy: kickstart %s: %w", SidecarLabel, err)
 	}
 	r.Log.Info(opServices, "kickstarted the sidecar", fields)
@@ -289,7 +289,7 @@ func (r *Restarter) RestartSidecar(ctx context.Context) error {
 func (r *Restarter) stopSidecar(ctx context.Context, fields dlog.Context) error {
 	loaded, _, err := r.Launchd.Print(ctx, SidecarLabel)
 	if err != nil {
-		r.Log.Error(opServices, "could not read the sidecar's launchd state; nothing was stopped", withCause(fields, err))
+		r.failed("could not read the sidecar's launchd state; nothing was stopped", fields, err)
 		return fmt.Errorf("deploy: read %s: %w", SidecarLabel, err)
 	}
 	if !loaded {
@@ -310,7 +310,7 @@ func (r *Restarter) stopSidecar(ctx context.Context, fields dlog.Context) error 
 	for {
 		loaded, _, err := r.Launchd.Print(ctx, SidecarLabel)
 		if err != nil {
-			r.Log.Error(opServices, "could not read the sidecar's launchd state while stopping it", withCause(fields, err))
+			r.failed("could not read the sidecar's launchd state while stopping it", fields, err)
 			return fmt.Errorf("deploy: read %s: %w", SidecarLabel, err)
 		}
 		if !loaded {
@@ -348,7 +348,7 @@ func (r *Restarter) awaitStoreSocket(ctx context.Context, fields dlog.Context) e
 		}
 		_, pid, err := r.Launchd.Print(ctx, StoreLabel)
 		if err != nil {
-			r.Log.Error(opServices, "could not read the store's launchd state while it boots", withCause(fields, err))
+			r.failed("could not read the store's launchd state while it boots", fields, err)
 			return fmt.Errorf("deploy: read %s: %w", StoreLabel, err)
 		}
 		if pid == 0 {
@@ -382,11 +382,24 @@ func (r *Restarter) awaitStoreSocket(ctx context.Context, fields dlog.Context) e
 	}
 }
 
+// failed records a service step's failure at ERROR, unless its caller
+// CANCELLED it. A daemon standing down cuts its own service step short on
+// purpose; that is the caller's decision, not a failure of the step, so it is
+// INFO (as scriptrunner records the cancelled script under it). A deadline
+// that passed stays an ERROR: the step ran out of the time it was given.
+func (r *Restarter) failed(message string, fields dlog.Context, err error) {
+	if errors.Is(err, context.Canceled) {
+		r.Log.Info(opServices, "a service step was cut short by its caller: "+message, withCause(fields, err))
+		return
+	}
+	r.Log.Error(opServices, message, withCause(fields, err))
+}
+
 // wait is one poll interval on the injected clock, or the context's end.
 func (r *Restarter) wait(ctx context.Context) error {
 	select {
 	case <-ctx.Done():
-		r.Log.Error(opServices, "a service restart ended with its context", dlog.Context{"cause": ctx.Err().Error()})
+		r.failed("a service restart ended with its context", nil, ctx.Err())
 		return fmt.Errorf("deploy: service restart: %w", ctx.Err())
 	case <-r.Clock.After(r.Windows.Poll):
 		return nil

@@ -8,9 +8,11 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"agentrepl/logging/buildreport"
 
@@ -704,5 +706,101 @@ func TestEnsureCurrentSurfacesAnUnreadableInstalledBuild(t *testing.T) {
 	// Assert
 	if err == nil || !loggedTo(h.log, "error", "installed build could not be read") || len(h.acts()) != 0 {
 		t.Fatalf("EnsureCurrent = %v, acts %v, records %+v; want the error at ERROR and nothing touched", err, h.acts(), h.log.Records())
+	}
+}
+
+// --- a service step its caller cancels is not a failure ----------------------
+
+func levelsOf(log *dlog.TestLogger) []string {
+	var out []string
+	for _, r := range log.Records() {
+		out = append(out, r.Level)
+	}
+	return out
+}
+
+func TestEnsureCurrentCutShortByItsCallerRecordsNoError(t *testing.T) {
+	// Arrange: launchctl's print answers the cancellation its caller made.
+	h := newRestarter(t)
+	h.launchd.printErr = fmt.Errorf("deploy: run launchctl print: %w", context.Canceled)
+
+	// Act.
+	_ = h.r.EnsureCurrent(context.Background())
+
+	// Assert.
+	if slices.Contains(levelsOf(h.log), "error") {
+		t.Fatalf("record levels = %v, want no error for a step its caller cancelled", levelsOf(h.log))
+	}
+}
+
+func TestEnsureCurrentCutShortByItsCallerRecordsTheCutAtInfo(t *testing.T) {
+	// Arrange.
+	h := newRestarter(t)
+	h.launchd.printErr = fmt.Errorf("deploy: run launchctl print: %w", context.Canceled)
+
+	// Act.
+	_ = h.r.EnsureCurrent(context.Background())
+
+	// Assert.
+	if !loggedTo(h.log, "info", "a service step was cut short by its caller") {
+		t.Fatalf("records = %+v, want the cut recorded at info", h.log.Records())
+	}
+}
+
+func TestEnsureCurrentCutShortByItsCallerAnswersTheCancellation(t *testing.T) {
+	// Arrange.
+	h := newRestarter(t)
+	h.launchd.printErr = fmt.Errorf("deploy: run launchctl print: %w", context.Canceled)
+
+	// Act.
+	err := h.r.EnsureCurrent(context.Background())
+
+	// Assert.
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("EnsureCurrent = %v, want the cancellation", err)
+	}
+}
+
+func TestAServiceStepPastItsDeadlineIsStillAnError(t *testing.T) {
+	// Arrange.
+	h := newRestarter(t)
+	h.launchd.printErr = fmt.Errorf("deploy: run launchctl print: %w", context.DeadlineExceeded)
+
+	// Act.
+	_ = h.r.EnsureCurrent(context.Background())
+
+	// Assert.
+	if !loggedTo(h.log, "error", "could not read a service's launchd state") {
+		t.Fatalf("records = %+v, want the deadline recorded at error", h.log.Records())
+	}
+}
+
+// stoppedClock is a Clock whose poll interval never elapses, so a wait ends
+// only on its context.
+type stoppedClock struct{}
+
+func (stoppedClock) Now() time.Time                       { return instant }
+func (stoppedClock) After(time.Duration) <-chan time.Time { return nil }
+
+func TestAStoreSocketWaitItsCallerCancelsRecordsNoError(t *testing.T) {
+	// Arrange: a bootstrapped store that runs and has not bound its socket,
+	// awaited under a context its caller has cancelled.
+	h := newRestarter(t)
+	h.unload(t, StoreLabel)
+	h.launchd.onBootstrap = func(string) {
+		h.launchd.mu.Lock()
+		h.launchd.loaded[StoreLabel], h.launchd.pid[StoreLabel] = true, 10
+		h.launchd.mu.Unlock()
+	}
+	h.r.Clock = stoppedClock{}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act.
+	_ = h.r.EnsureLoaded(ctx)
+
+	// Assert.
+	if slices.Contains(levelsOf(h.log), "error") {
+		t.Fatalf("record levels = %v, want no error for a wait its caller cancelled", levelsOf(h.log))
 	}
 }
