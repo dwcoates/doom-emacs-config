@@ -3538,22 +3538,21 @@ describe("the keep-alive rewind's span invariant", () => {
     expect(adoptions(h)).toBe(1);
   });
 
-  it("REFUSES the rewind that would discard a completed task's served turn", async () => {
+  it("anchors the next rewind on a completed task's served turn, keeping it", async () => {
     // Arrange
     const h = harness();
     await started(h);
     await realTurn(h, "turn-0", [assistantMessage("real-uuid")]);
     await keepaliveBesideVendorTurn(h, "completed", "1");
-    const opened = h.queries.length;
 
     // Act
     await realPrompt(h, "turn-1");
 
-    // Assert: the vendor's context is kept whole -- no rewind query opened.
-    expect(h.queries.length).toBe(opened);
+    // Assert
+    expect(h.queries.at(-1)?.spec.resumeSessionAt).toBe("vendor-reply-1");
   });
 
-  it("records that refusal at ERROR, naming the vendor-started turn and its record", async () => {
+  it("discards only the keep-alive past a completed task's served turn", async () => {
     // Arrange
     const h = harness();
     await started(h);
@@ -3565,12 +3564,22 @@ describe("the keep-alive rewind's span invariant", () => {
     await realPrompt(h, "turn-1");
 
     // Assert
-    const record = refusal(mark);
-    const offending = record?.context.offending as { kind: string; uuids: string[] }[];
-    expect([record?.level, offending.map((turn) => [turn.kind, turn.uuids])]).toEqual([
-      "error",
-      [["vendor_started", ["vendor-reply-1"]]],
-    ]);
+    expect(rewoundSpans(mark)).toEqual([["keepalive"]]);
+  });
+
+  it("records no refusal for a completed task's served turn", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await realTurn(h, "turn-0", [assistantMessage("real-uuid")]);
+    await keepaliveBesideVendorTurn(h, "completed", "1");
+    const mark = logSinkMark();
+
+    // Act
+    await realPrompt(h, "turn-1");
+
+    // Assert
+    expect(refusal(mark)).toBeUndefined();
   });
 
   it("delivers the real prompt the refused rewind preceded", async () => {

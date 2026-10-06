@@ -90,10 +90,20 @@ describe("the yield obligation", () => {
     expect(rewind.obligation()).toBeUndefined();
   });
 
-  it("never anchors on a turn the vendor started on its own", () => {
+  it("anchors on a GENUINE turn the vendor started on its own", () => {
+    // Ruled 2026-10-06: a completed task's turn is real conversation, and a
+    // rewind past it would lose it. (A stop's answer is tagged, never adopted.)
     const rewind = new KeepaliveRewind();
     rewind.noteRecord(assistant("real-1"), realTurn);
     rewind.noteRecord(assistant("adopted-1"), { turnId: "adopted-1", keepalive: false, adopted: true });
+
+    expect(rewind.anchorUuid()).toBe("adopted-1");
+  });
+
+  it("never anchors on the answer to a stop the keep-alive's rewind caused", () => {
+    const rewind = new KeepaliveRewind();
+    rewind.noteRecord(assistant("real-1"), realTurn);
+    rewind.noteRecord(assistant("stop-answer-1"), { turnId: "keepalive-1", keepalive: true, consequence: true });
 
     expect(rewind.anchorUuid()).toBe("real-1");
   });
@@ -326,9 +336,9 @@ describe("the span invariant", () => {
     expect(rewind.obligation()).toBeUndefined();
   });
 
-  it("refuses a rewind whose span holds a genuine vendor-started turn", () => {
+  it("refuses a rewind whose span holds a genuine vendor-started turn's record past its last answer", () => {
     const rewind = anchoredWithKeepalive();
-    rewind.noteRecord(assistant("vendor-answer-1"), vendorTurn);
+    rewind.noteRecord(userRecord("vendor-answer-1"), vendorTurn);
 
     expect(rewind.obligation()).toBeUndefined();
   });
@@ -342,7 +352,7 @@ describe("the span invariant", () => {
 
   it("records a refusal at ERROR, naming each offending turn, its kind and its records", () => {
     const rewind = anchoredWithKeepalive();
-    rewind.noteRecord(assistant("vendor-answer-1"), vendorTurn);
+    rewind.noteRecord(userRecord("vendor-answer-1"), vendorTurn);
     const mark = logSinkMark();
 
     rewind.obligation();
@@ -356,7 +366,7 @@ describe("the span invariant", () => {
 
   it("states the offending turns in the refusal's detail text", () => {
     const rewind = anchoredWithKeepalive();
-    rewind.noteRecord(assistant("vendor-answer-1"), vendorTurn);
+    rewind.noteRecord(userRecord("vendor-answer-1"), vendorTurn);
     const mark = logSinkMark();
 
     rewind.obligation();
@@ -367,7 +377,7 @@ describe("the span invariant", () => {
 
   it("names the anchor the refused rewind would have resumed at", () => {
     const rewind = anchoredWithKeepalive();
-    rewind.noteRecord(assistant("vendor-answer-1"), vendorTurn);
+    rewind.noteRecord(userRecord("vendor-answer-1"), vendorTurn);
     const mark = logSinkMark();
 
     rewind.obligation();
@@ -378,7 +388,7 @@ describe("the span invariant", () => {
 
   it("drops the anchor on a refusal, so the content stays for good", () => {
     const rewind = anchoredWithKeepalive();
-    rewind.noteRecord(assistant("vendor-answer-1"), vendorTurn);
+    rewind.noteRecord(userRecord("vendor-answer-1"), vendorTurn);
 
     rewind.obligation();
 
@@ -387,11 +397,33 @@ describe("the span invariant", () => {
 
   it("settles the debt on a refusal, so it is refused once, not every beat", () => {
     const rewind = anchoredWithKeepalive();
-    rewind.noteRecord(assistant("vendor-answer-1"), vendorTurn);
+    rewind.noteRecord(userRecord("vendor-answer-1"), vendorTurn);
 
     rewind.obligation();
 
     expect(rewind.debt()).toBe(0);
+  });
+
+  it("keeps an outstanding keep-alive's send in the span across a vendor turn that anchored ahead of it", () => {
+    // The vendor ran a completed task's turn before answering the keep-alive's
+    // send: the anchor lies before the keep-alive's prompt record.
+    const rewind = new KeepaliveRewind();
+    rewind.noteRecord(assistant("real-1"), realTurn);
+    rewind.noteSend("keepalive-send-1", keepaliveTurn);
+
+    rewind.noteRecord(assistant("vendor-answer-1"), vendorTurn);
+
+    expect(rewind.span()).toEqual([
+      { turnId: "keepalive-1", kind: "keepalive", uuids: ["keepalive-send-1"], records: 1 },
+    ]);
+  });
+
+  it("forgets the keep-alive's send once its turn ended", () => {
+    const rewind = anchoredWithKeepalive();
+
+    rewind.noteRecord(assistant("vendor-answer-1"), vendorTurn);
+
+    expect(rewind.span()).toEqual([]);
   });
 
   it("empties the span on a new anchor", () => {
