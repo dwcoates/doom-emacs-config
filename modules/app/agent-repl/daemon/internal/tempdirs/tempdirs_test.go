@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"claude-repld/internal/dirpath"
@@ -311,5 +312,58 @@ func TestFromEnvHonorsTheTestRootOnlyUnderTheVendorGuard(t *testing.T) {
 				t.Fatalf("a dir beneath the test root: refused=%v, want exempted=%v", refused, tc.exempted)
 			}
 		})
+	}
+}
+
+func TestARefusalIsMarkedSeamMissingOnlyOnATestRunWithNoTestRoot(t *testing.T) {
+	testRoot := t.TempDir()
+	tests := []struct {
+		name     string
+		forbid   string
+		testRoot string
+		want     bool
+	}{
+		{name: "a live daemon", forbid: "", testRoot: "", want: false},
+		{name: "a test-run daemon whose harness stated no root", forbid: "1", testRoot: "", want: true},
+		{name: "a test-run daemon refusing outside its stated root", forbid: "1", testRoot: testRoot, want: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			t.Setenv(envc.EnvForbidVendorCalls, tc.forbid)
+			g, err := FromEnv(envc.Load(), os.TempDir(), func(key string) string {
+				if key == EnvTestRoot {
+					return tc.testRoot
+				}
+				return ""
+			})
+			if err != nil {
+				t.Fatalf("FromEnv: %v", err)
+			}
+
+			// Act
+			inside, ok := AsInside(g.Check("/var/tmp/agent-repl-seam-test"))
+
+			// Assert
+			if !ok {
+				t.Fatal("Check of a /var/tmp folder was not refused")
+			}
+			if inside.SeamMissing != tc.want {
+				t.Fatalf("SeamMissing = %v, want %v", inside.SeamMissing, tc.want)
+			}
+		})
+	}
+}
+
+func TestMissingSeamNamesTheVariableToSet(t *testing.T) {
+	// Arrange
+	err := &InsideError{Dir: "/tmp/x", Root: "/tmp", SeamMissing: true}
+
+	// Act
+	said := err.MissingSeam()
+
+	// Assert
+	if !strings.Contains(said, EnvTestRoot) || !strings.Contains(said, "/tmp/x") {
+		t.Fatalf("MissingSeam() = %q, want it to name %s and the dir", said, EnvTestRoot)
 	}
 }
