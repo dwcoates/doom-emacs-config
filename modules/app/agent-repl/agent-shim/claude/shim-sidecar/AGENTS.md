@@ -1109,7 +1109,12 @@ foreground harnesses may use `logging.NewAtLevel`.
   continued elsewhere is the second directory's, not the first's). When NO cwd
   encodes to the folder, the transcript's FIRST cwd is used and that is stated
   once per file at `info` (`resolve-transcript-workspace`, reason
-  `first_cwd_fallback`); ingestion is never held back for it. Spawn
+  `first_cwd_fallback`); ingestion is never held back for it. A transcript
+  that records NO cwd YET is the ordinary start of every session (the vendor
+  writes a cwd-less `queue-operation` line before the cwd-bearing prompt
+  record), so it is held and stated once at `info` (reason
+  `first_cwd_pending`) and warned only if it still has no cwd once
+  `FirstCWDWindow` has lapsed. Spawn
   observations carry that identity plus `claude_session_id` to task spools.
   These three identifiers are promoted top-level record fields and every
   downstream tail/handler/converter logger inherits them.
