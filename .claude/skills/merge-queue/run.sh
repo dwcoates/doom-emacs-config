@@ -59,7 +59,7 @@ log() {
 # lists.
 main_worktree() {
   local line
-  line="$(git worktree list --porcelain 2>/dev/null | head -n 1)" || return 1
+  line="$(git worktree list --porcelain 2>/dev/null | sed -n 1p)" || return 1
   [ "${line#worktree }" != "$line" ] || return 1
   printf '%s\n' "${line#worktree }"
 }

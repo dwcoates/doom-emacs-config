@@ -126,7 +126,7 @@ on_call() {
 }
 
 # line_of WORLD PATTERN -- the first output line matching PATTERN, or empty.
-line_of() { grep -nE -- "$2" "$1/out" | head -1 | cut -d: -f1; }
+line_of() { grep -nE -- "$2" "$1/out" | sed -n 1p | cut -d: -f1; }
 
 # ---- the daemon stands itself and its shims down first ----------------------
 

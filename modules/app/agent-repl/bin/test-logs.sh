@@ -848,7 +848,7 @@ test_an_unnamed_daemon_workspace_is_refused() {
 
 test_reader_refuses_a_malformed_or_repeated_workspace_name() {
     local reader rc1=0 rc2=0 err1 err2
-    reader="$(ls "$TMP"/build/logs-reader-* | head -n 1)"
+    reader="$(ls "$TMP"/build/logs-reader-* | sed -n 1p)"
     err1="$("$reader" --workspace-name "ws-a" 2>&1)" || rc1=$?
     err2="$("$reader" --workspace-name "ws-a=alpha" --workspace-name "ws-a=again" 2>&1)" || rc2=$?
     if [ "$rc1" -ne 0 ] && grep_in "$err1" -q 'is not ID=NAME' &&
