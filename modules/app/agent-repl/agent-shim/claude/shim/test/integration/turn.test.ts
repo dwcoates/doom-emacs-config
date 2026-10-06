@@ -503,6 +503,37 @@ describe("the turn-stop taxonomy", () => {
 });
 
 describe("WatchAgent", () => {
+  test("a consumer that cancels over HTTP/1.1 leaves no error behind when its book grows and the shim stands down", async () => {
+    // THE !cancel-all SHUTDOWN SHAPE. The consumer cancels its standing watch,
+    // the book keeps growing, and the shim stands down. The departure used to
+    // be learned only when the adapter wrote the next frame onto the destroyed
+    // response, which reached the route as an "exception no handler
+    // anticipated" at ERROR; a watch parked at a yield was never learned of,
+    // and the teardown waited out its conclusion budget at ERROR.
+    // Arrange.
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    const watch = openStream((options) =>
+      shim.clients.h1.watchAgent(watchAgentRequest(), options),
+    );
+    watchAgentPage(await watch.next());
+    watch.close();
+    await shim.log.record(
+      (record) => record.message === "the WatchAgent consumer departed; its tail is closed and nothing more is written to it",
+    );
+
+    // Act.
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!md" }));
+    await shim.standDown();
+
+    // Assert.
+    const loud = shim.log
+      .records()
+      .filter((record) => record.level === "warn" || record.level === "error")
+      .map((record) => `${String(record.operation)}: ${record.message}`);
+    expect(loud).toEqual([]);
+  });
+
   test("opened before any turn, it opens with an EMPTY page and a floor boundary", async () => {
     // The counterpart to R15's StartTurn page: nothing has been written yet, so
     // this is the one open that legitimately paints nothing. An empty page is
