@@ -6520,7 +6520,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     hibernate,
     killSession,
     startTurn: (request, signal) => turns.startTurn(request, signal),
-    watchAgent: (request) => turns.watchAgent(request),
+    watchAgent: (request, signal) => turns.watchAgent(request, signal),
     updateAgent: (request) => turns.updateAgent(request),
     killTurn: (request) => turns.killTurn(request),
     rollBackSession,

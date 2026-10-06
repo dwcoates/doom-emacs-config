@@ -258,7 +258,6 @@ var mockScenarios = []mockScenario{
 	{Prompt: "!rate-limit", Wait: waitTerminal},
 	{
 		Prompt: "!context-budget-warning", Wait: waitTerminal, BudgetWarning: true,
-		BlockedExpectation: mockBlockedContextBudget,
 	},
 	{Prompt: "!compact", Wait: waitTerminal, ContextCut: true},
 	{Prompt: "!compact-auto", Wait: waitTerminal, ContextCut: true},
@@ -318,19 +317,6 @@ var mockScenarios = []mockScenario{
 		Prompt: "!keepalive", Wait: waitTerminal,
 	},
 }
-
-// mockBlockedContextBudget records the one cross-plane disagreement this suite
-// found: the mocked vendor writes the budget warning as a `context_tip`
-// attachment (the corpus's real capture, `attachments/context_tip.jsonl`),
-// while the sidecar's converter recognizes `context_budget_warning` (the
-// corpus's SYNTHETIC sample, which MANIFEST.md itself flags as composed from
-// the proto and asks to have its spelling re-checked against a real capture).
-// One of the two must move, and choosing which is not this suite's call.
-const mockBlockedContextBudget = "the mocked vendor writes the budget warning as an `attachment/context_tip` " +
-	"(corpus: attachments/context_tip.jsonl, a REAL capture) while internal/convert recognizes " +
-	"`attachment/context_budget_warning` (corpus: attachments/context_budget_warning.jsonl, marked SYNTHETIC in " +
-	"testdata/corpus/MANIFEST.md with an explicit 're-check the attachment type spelling' note). The record is " +
-	"withheld as vendor_specific rather than lost, so nothing is dropped; which spelling wins is a lead-level call."
 
 // TestMockKeepAliveTurnsStoreNothing covers the keep-alive edge, which no
 // `!scenario` can: the marker is the SHIM's and the mocked vendor neither adds

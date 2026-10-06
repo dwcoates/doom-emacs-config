@@ -1504,8 +1504,20 @@ export class TurnEngine {
    * empty opening page the contract promises and standing the tail on the first
    * row. An id this shim never announced still gets the store's refusal, and
    * every other refusal (an unreachable store) is untouched.
+   *
+   * THE CONSUMER'S DEPARTURE IS OBSERVED, NOT INFERRED. `signal` aborts when
+   * the transport closes the call. Without it this generator learned of a
+   * departed consumer only when the adapter next wrote a frame onto the dead
+   * stream (an `ERR_STREAM_DESTROYED` thrown back in), or never, when it sat
+   * parked at a `yield` the adapter would not resume: the tail stayed
+   * registered, and the teardown waited out its conclusion budget on a
+   * stream nobody was reading. On abort the tail is closed and the
+   * registration dropped at once, and nothing more is yielded.
    */
-  async *watchAgent(request: shimv1.WatchAgentRequest): AsyncIterable<shimv1.WatchAgentResponse> {
+  async *watchAgent(
+    request: shimv1.WatchAgentRequest,
+    signal?: AbortSignal,
+  ): AsyncIterable<shimv1.WatchAgentResponse> {
     const identity = this.session.identity();
     if (identity === undefined) throw notFound("no session has been started on this shim");
     const target = request.target ?? identity.agentId;
@@ -1561,6 +1573,30 @@ export class TurnEngine {
       },
     };
     const watcherEnded = this.session.watcherOpened(target, watched);
+    let released = false;
+    /** Drop the registration and stop following. Idempotent. */
+    const release = (): void => {
+      if (released) return;
+      released = true;
+      watcherEnded();
+      opened.close();
+    };
+    let departed = false;
+    const onDeparted = (): void => {
+      departed = true;
+      // info: a peer's departure is explained, never mourned (service/routes.ts);
+      // it is still a stream ending mid-serve, which only the log can tell.
+      LOGGER.info(
+        { agent_id: target.value },
+        "the WatchAgent consumer departed; its tail is closed and nothing more is written to it",
+      );
+      release();
+    };
+    if (signal?.aborted === true) {
+      onDeparted();
+    } else {
+      signal?.addEventListener("abort", onDeparted, { once: true });
+    }
     /**
      * How this stream ended. `consumer` until something else happens: a
      * generator abandoned at a `yield` runs its `finally` and nothing else, so
@@ -1568,10 +1604,14 @@ export class TurnEngine {
      */
     let ending: "consumer" | "concluded" | "unasked" | "failed" = "consumer";
     try {
+      if (departed) return;
       yield create(shimv1.WatchAgentResponseSchema, {
         frame: { case: "page", value: opened.page },
       });
       for await (const frame of opened.tail) {
+        // A frame the tail handed over after the consumer left is owed to
+        // nobody: writing it is exactly the write onto a destroyed stream.
+        if (departed) break;
         // The tail's arms ARE the response's `entry` and `retired` arms: a
         // retirement reaches the daemon as the entry it last drew, converted
         // exactly as a served line, so it can remove it.
@@ -1584,15 +1624,17 @@ export class TurnEngine {
             break;
         }
       }
-      ending = concluded ? "concluded" : "unasked";
+      ending = departed ? "consumer" : concluded ? "concluded" : "unasked";
     } catch (error) {
       // The route's own boundary records this one, with its detail and stack;
       // a second error record here would be the same defect counted twice.
-      ending = "failed";
+      // After a departure the error is the adapter's write onto the dead
+      // stream, which the route classifies as the departure it is.
+      ending = departed ? "consumer" : "failed";
       throw error;
     } finally {
-      watcherEnded();
-      opened.close();
+      signal?.removeEventListener("abort", onDeparted);
+      release();
       // EVERY ENDING OF A STANDING STREAM IS NAMED. A `WatchAgent` that ends
       // while the session lives is what the daemon reports as a severed link,
       // and it went unrecorded here at every level the shim runs at: the tail

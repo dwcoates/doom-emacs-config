@@ -87,8 +87,9 @@ export interface Engine {
   /**
    * One agent's page then its tail, served FROM THE STORE and never from
    * memory. Throws a Connect NotFound when the target names no agent.
+   * `signal` aborts when the consumer's call closes; the tail ends with it.
    */
-  watchAgent(request: shimv1.WatchAgentRequest): AsyncIterable<shimv1.WatchAgentResponse>;
+  watchAgent(request: shimv1.WatchAgentRequest, signal?: AbortSignal): AsyncIterable<shimv1.WatchAgentResponse>;
 
   /** Speak to an existing agent: stop it, answer its open ask, or prompt it. */
   updateAgent(request: shimv1.UpdateAgentRequest): Promise<shimv1.UpdateAgentResponse>;
