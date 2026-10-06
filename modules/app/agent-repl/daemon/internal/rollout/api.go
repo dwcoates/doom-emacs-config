@@ -254,6 +254,11 @@ type Deps struct {
 	Freeness Freeness
 	// Shims is how the controller reaches the shim fleet.
 	Shims ShimFleet
+	// Merges moves a workspace's merges with the workspace: a transfer
+	// suspends the merge at a stopping point before the shim is detached, and
+	// the adopting daemon -- the successor, or this one taking a transfer back
+	// -- resumes it at its recorded step. Required.
+	Merges MergeMover
 	// LockProbe probes a workspace's shim-held kernel lock. It is what makes a
 	// headless transfer and the bounce accounting possible without any channel.
 	LockProbe LockProbeFunc
@@ -334,6 +339,18 @@ type Deps struct {
 	Lifetime context.Context
 	// Log is the controller's logger.
 	Log dlog.Surfaces
+}
+
+// MergeMover is the slice of the merge orchestrator a handover moves a
+// workspace's merges through (merge.Orchestrator's SuspendForTransfer and
+// AdoptWorkspace).
+type MergeMover interface {
+	// SuspendForTransfer brings the workspace's merge to a stopping point and
+	// stops this daemon running any merge of it.
+	SuspendForTransfer(ctx context.Context, ws ids.WorkspaceID) error
+	// AdoptWorkspace takes every merge of a workspace this daemon now serves
+	// from its durable rows, resuming an admitted one at its recorded step.
+	AdoptWorkspace(ctx context.Context, ws ids.WorkspaceID) error
 }
 
 // BounceRegistry is the prompt queue's bounce registry, as the rollout asks it.
@@ -612,6 +629,9 @@ func New(deps Deps) (Controller, error) {
 	}
 	if deps.StartSession == nil {
 		return nil, errors.New("rollout: a session starter is required; a successor that serves an open workspace with no shim must start its session")
+	}
+	if deps.Merges == nil {
+		return nil, errors.New("rollout: the merge mover is required; a workspace whose merge runs must carry it across a handover")
 	}
 	if deps.BringingUp == nil {
 		return nil, errors.New("rollout: the bring-up marker is required; a workspace whose session is starting must not read as usable")
