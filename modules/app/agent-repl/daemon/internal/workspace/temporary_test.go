@@ -92,3 +92,18 @@ func TestCreateSurfacesARepositoryTheGuardCannotJudge(t *testing.T) {
 	}
 	awaitRecord(t, f, "error", opCreate)
 }
+
+func TestATestRunRefusalWithNoSeamIsRecordedAtError(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.db.registerErr = fmt.Errorf("wsm: %w", &tempdirs.InsideError{
+		Dir: "/tmp/emacs-e2e-1/repo", Root: "/tmp", SeamMissing: true,
+	})
+
+	// Act.
+	_, err := f.verbs.Register(context.Background(), worktreeDir(t), wsm.RegisterFacts{})
+
+	// Assert.
+	asRefusal(t, err, ArmInsideTemporaryDirectory)
+	awaitRecord(t, f, "error", opTemporarySeam)
+}
