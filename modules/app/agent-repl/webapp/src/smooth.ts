@@ -235,3 +235,61 @@ export class SmoothReveal {
     return Math.min(full, track.revealed + cps * dt);
   }
 }
+
+/** Where a daemon-paced reveal stands at one instant. */
+export interface WindowedRevealPoint {
+  /** Characters shown, fractional, for `revealSlice` to floor. */
+  at: number;
+  /** How fast the reveal is moving there, in characters per millisecond. */
+  speed: number;
+}
+
+/**
+ * The largest start speed a window takes, as a multiple of its own average
+ * speed. Within it the eased curve below never runs backwards (the
+ * Fritsch–Carlson bound for a cubic Hermite segment whose end slope is its
+ * average is a start slope of at most √8 ≈ 2.83 times that average).
+ */
+export const EASE_MAX_START_RATIO = 2.8;
+
+/**
+ * Where a reveal the daemon has paced (frontend.v1.FeedResponseRevealWindow)
+ * stands `elapsedMs` into its window: everything from `from` to `to` is
+ * revealed across `windowMs`, the time the daemon expects to pass before the
+ * next fragment arrives, so a steady stream reads as one continuous type-out
+ * rather than a burst and a stall per push.
+ *
+ * `from` is what was already on screen when the push was drawn, so text still
+ * unrevealed from the previous push is spread along with the new text rather
+ * than left behind.
+ *
+ * THE SPEED EASES ACROSS WINDOWS. A window starts at `startSpeed`, the speed
+ * the previous window was moving at when this push replaced it, and eases to
+ * its own average speed by its end (a cubic Hermite curve), so a big chunk
+ * followed by a small one slows down gradually instead of switching speed in
+ * one frame. With no start speed (the first paced push, or one following an
+ * unpaced reveal) the window runs at its average speed throughout. The start
+ * speed is capped at `EASE_MAX_START_RATIO` times the average, which keeps the
+ * curve from overshooting and running backwards. The window still ends
+ * exactly at `to` when `windowMs` has passed.
+ */
+export function windowedReveal(
+  from: number,
+  to: number,
+  elapsedMs: number,
+  windowMs: number,
+  startSpeed?: number,
+): WindowedRevealPoint {
+  const distance = to - from;
+  const average = distance / windowMs;
+  if (distance <= 0) return { at: to, speed: 0 };
+  if (elapsedMs >= windowMs) return { at: to, speed: average };
+  const start = Math.min(startSpeed ?? average, EASE_MAX_START_RATIO * average);
+  const s = Math.max(0, elapsedMs) / windowMs;
+  // Hermite basis on s in [0, 1], with the start tangent m0 = start * window
+  // and the end tangent m1 = distance (the average speed).
+  const m0 = start * windowMs;
+  const at = from + (s ** 3 - 2 * s ** 2 + s) * m0 + (-2 * s ** 3 + 3 * s ** 2) * distance + (s ** 3 - s ** 2) * distance;
+  const slope = (3 * s ** 2 - 4 * s + 1) * m0 + (-6 * s ** 2 + 6 * s) * distance + (3 * s ** 2 - 2 * s) * distance;
+  return { at, speed: slope / windowMs };
+}
