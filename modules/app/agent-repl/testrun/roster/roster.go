@@ -87,6 +87,9 @@ var Suites = []Suite{
 	{Name: "safe-test-run-harness", Kind: Script, Path: "/.claude/test-safe-test-run.sh"},
 	{Name: "merge-queue-hook-harness", Kind: Script, Path: "/.githooks/test-reference-transaction.sh"},
 	{Name: "merge-queue-skill-harness", Kind: Script, Path: "/.claude/skills/merge-queue/test-run.sh"},
+	{Name: "install-harness", Kind: Script, Path: "/.claude/test-install.sh"},
+	{Name: "workspace-cli-harness", Kind: Script, Path: "/bin/test-agent_repl_workspace.sh"},
+	{Name: "workspace-open-cli-harness", Kind: Script, Path: "/bin/test-agent_repl_workspace_open.sh"},
 	{Name: "ert", Kind: ERT, Path: "lisp"},
 	{Name: "testrun", Kind: GoModule, Path: "testrun"},
 	// THE INTEGRATION SUITES RIDE THEIR SYSTEM'S SUITE, so a full run and
