@@ -264,7 +264,7 @@ func newServer(rec *Recorder, p Profile, log *logSink) *server {
 	// seeded again by a resume exactly as before.
 	b := newBook()
 	if len(p.ResumeHistory) > 0 {
-		b.seed(p.ResumeHistory)
+		b.seed(p.ResumeHistory, p.ResumeTurns)
 	}
 	return &server{
 		rec:             rec,
@@ -508,7 +508,7 @@ func (s *server) StartSession(ctx context.Context, req *connect.Request[shimv1.S
 		s.mu.Lock()
 		s.resumed = true
 		s.mu.Unlock()
-		s.book.seed(s.profile.ResumeHistory)
+		s.book.seed(s.profile.ResumeHistory, s.profile.ResumeTurns)
 	}
 	if vendorID == "" {
 		vendorID = mintID()

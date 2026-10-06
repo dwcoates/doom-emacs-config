@@ -78,6 +78,10 @@ type ShimProfile struct {
 	// FIRST. They seed the main agent's book, which the daemon reads through
 	// ReadHistory when a reader opens the feed.
 	ResumeHistory [][]byte `json:"resume_history,omitempty"`
+	// ResumeTurns stamps ResumeHistory's entries with the turn each belongs
+	// to, at the same index (newest first); absent or "" leaves an entry
+	// unstamped, as pre-contract data is.
+	ResumeTurns []string `json:"resume_turns,omitempty"`
 	// HistoryPageSize is the fake store's page size in entries; zero is
 	// FeedPageSize. ReadHistory pages each agent's book in it.
 	HistoryPageSize int `json:"history_page_size,omitempty"`
