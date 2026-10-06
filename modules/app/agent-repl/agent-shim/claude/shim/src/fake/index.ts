@@ -218,6 +218,28 @@ const REFUSABLE = new Set([
  */
 const START_ONCE_MARK = ".agent-repl-fake-start-once";
 
+/** The previous process's background shell the stop replay names (a vendor-shaped shell id). */
+const STOP_REPLAY_TASK_ID = "bstop0001";
+/** The call that launched it, in the previous process: no call this process ever saw. */
+const STOP_REPLAY_TOOL_USE_ID = "toolu_fake_stop_replay_0001";
+/** The CLI's own summary for a shell a previous session left behind (ship-gns). */
+const STOP_REPLAY_SUMMARY = "Background shell command didn't finish before the previous session ended";
+
+/** The replayed notification's text, element for element as the CLI writes it. */
+function stopReplayNotification(taskId: string, toolUseId: string): string {
+  return [
+    "<task-notification>",
+    `<task-id>${taskId}</task-id>`,
+    `<tool-use-id>${toolUseId}</tool-use-id>`,
+    "<status>stopped</status>",
+    `<summary>${STOP_REPLAY_SUMMARY}</summary>`,
+    "<note>No completion record was found for it in the previous session. It may have been stopped (via the UI, " +
+      "Monitor timeout, or agent teardown \u2014 these leave no transcript marker), or it may have been running when " +
+      "the previous Claude Code process exited. Check the output file for partial results before assuming it completed.</note>",
+    "</task-notification>",
+  ].join("\n");
+}
+
 /**
  * The `!stop-on-rewind` lever's mark, one per vendor session, under the
  * account root: a FILE for the reason {@link START_ONCE_MARK} is one -- the
@@ -1175,6 +1197,7 @@ export function createFakeQuery(
           }
         : { errors: spec.errors ?? [] }),
     });
+    if (spec.streamOnly === true) return;
     files.transcript.append({
       type: "system",
       subtype: "turn_duration",
@@ -1473,8 +1496,15 @@ export function createFakeQuery(
   };
 
   /**
-   * The stop a rewind replays: the task's `stopped` notification, then the
-   * vendor's own unstamped turn answering it.
+   * The stop a resume replays, in the REAL CLI's shape (ship-gns, CLI 2.1.280,
+   * 2026-10-02 15:17:08Z; MANIFEST.md `!stop-on-rewind`). The CLI finds a
+   * background shell the previous process left with no completion record and
+   * writes, on the transcript, an enqueue/dequeue pair and a TRANSCRIPT-ONLY
+   * user record (`queueTranscriptOnly`, `origin: task-notification`,
+   * `promptSource: system`) parented on the resume's fork point; on the stream
+   * it reports `task_notification{stopped}` (no `task_type`) and runs a turn
+   * that answers nothing: a lone `result`, no reply, no turn record. The next
+   * send's prompt record then parents on the notification.
    */
   const runStopReplay = (): void => {
     turn++;
@@ -1484,13 +1514,32 @@ export function createFakeQuery(
       { claude_session_id: sessionUuid, turn },
       "fake vendor replays a task STOPPED by the rewind and answers it in a turn of its OWN before the next send",
     );
-    systemMessage("task_notification", {
-      task_id: "bstop0001",
-      status: "stopped",
-      summary: "Background command stopped",
+    const taskId = STOP_REPLAY_TASK_ID;
+    const toolUseId = STOP_REPLAY_TOOL_USE_ID;
+    const notification = stopReplayNotification(taskId, toolUseId);
+    files.transcript.appendUnchained({ type: "queue-operation", operation: "enqueue", timestamp: nowIso(), content: notification });
+    files.transcript.appendUnchained({ type: "queue-operation", operation: "dequeue", timestamp: nowIso() });
+    files.transcript.append({
+      isSidechain: false,
+      promptId: opts.newUuid(),
+      type: "user",
+      message: { role: "user", content: notification },
+      uuid: opts.newUuid(),
+      timestamp: nowIso(),
+      permissionMode,
+      origin: { kind: "task-notification" },
+      promptSource: "system",
+      queueSkipAttachments: true,
+      queueTranscriptOnly: true,
     });
-    assistant([{ type: "text", text: "The background task was stopped." }], { stopReason: "end_turn" });
-    result({ subtype: "success", result: "The background task was stopped.", origin: { kind: "task-notification" } });
+    systemMessage("task_notification", {
+      task_id: taskId,
+      tool_use_id: toolUseId,
+      status: "stopped",
+      output_file: files.spoolPathFor(taskId),
+      summary: STOP_REPLAY_SUMMARY,
+    });
+    result({ subtype: "success", result: "", origin: { kind: "task-notification" }, streamOnly: true });
   };
 
   const promptTextOf = (message: SdkUserMessage): string => {
