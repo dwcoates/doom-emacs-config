@@ -56,3 +56,59 @@ changed text is condensed):
   told to classify by the section kinds and to put anything touching the
   Agent SDK or Claude Code's supported use, billing or subscription terms in
   `backend`.
+
+## Addendum: "Since last week" (owner, 2026-10-06)
+
+Problem: a digest of the past seven days' digests holding ONLY what changed,
+or was announced to change, that could regress agent-repl (API/SDK breaking
+changes, deprecations, removals, changed defaults or behavior of the Agent
+SDK, Claude Code CLI or Messages API; pricing, billing, plan, usage-limit or
+rate-limit changes; auth, login or account changes; model retirements or
+renames; policy or terms changes touching automated or headless use). Bug
+fixes, performance work and new features that change no existing behavior
+are excluded. Drawn first in the overlay, titled "Since last week".
+
+Landed contract (`news_digest.proto`):
+
+- `NewsDigestOverlay.week = 5` → `NewsDigestWeek { heading, oneof outcome {
+  risks | quiet } }`.
+- `NewsDigestWeekRisks { repeated NewsDigestRiskItem items }`, never empty;
+  `NewsDigestRiskItem { NewsDigestItem item; NewsDigestRiskReason reason }`
+  — the item is drawn as any section's item (its `effective` carries an
+  announced future date), the reason is the one-line why, naming what in
+  agent-repl it touches.
+- `NewsDigestWeekQuiet { text }`: nothing regressive is TOLD, never left to
+  silence. The daemon composes the text, and names the span it covers when
+  its record of digests began inside the week.
+- `week` is set on every digest the daemon makes; it is unset only on a
+  digest made before the field existed and still standing across the deploy,
+  which draws no weekly section.
+
+Decisions:
+
+- Classification at the source: the condensing call marks each item that
+  could regress agent-repl with a one-line `risk` reason; the per-run
+  sections on the wire are unchanged.
+- Retention: every run's items are kept in wsm with their run's end and
+  their mark; rows older than 14 days are pruned by each run that keeps
+  items.
+- Dedupe: the same announcement recurs across runs (a page re-read, a
+  carried digest re-marked) under different titles and the same page URLs,
+  so neither title nor link is a reliable identity. A second Sonnet call over
+  only the week's marked items merges them; it answers groups of member ids,
+  every marked item belongs to exactly one group (validated hard), an item
+  with a stated date keeps one of its members' dates, and links are the
+  union of the members' links, composed by the daemon. No call is made for
+  zero or one marked item.
+
+## Addendum: the SDK version in the header (owner, 2026-10-06)
+
+- `NewsDigestHeader.sdk_version = 3` → `NewsDigestSdkVersion { oneof answer {
+  known { version } | unknown {} } }`, drawn as "SDK Version: <version>" in the
+  middle of the header row.
+- Source: the `conversation.v1.SessionRuntime.sdk_version` the shim reports on
+  every session start (its installed `@anthropic-ai/claude-agent-sdk`), the
+  latest one the daemon's fleet saw. Nothing reports it to a daemon before a
+  session starts (`SessionDiagnostics` carries only `shim_build`), so a daemon
+  that has started no session since it came up answers `unknown`, never a
+  guess.

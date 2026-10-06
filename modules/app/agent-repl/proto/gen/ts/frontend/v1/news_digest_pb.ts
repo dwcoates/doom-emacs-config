@@ -12,7 +12,14 @@
 //
 //   ┌─ NewsDigestOverlay ─────────────────────────────────────┐
 //   │ ┌ NewsDigestHeader ───────────────────────────────────┐ │
-//   │ │ [NewsDigestTitle]           [NewsDigestPeriod]  [×] │ │
+//   │ │ [Title]    [NewsDigestSdkVersion]    [Period]  [×]  │ │
+//   │ └─────────────────────────────────────────────────────┘ │
+//   │ ┌ NewsDigestWeek ("Since last week") ─────────────────┐ │
+//   │ │ [NewsDigestSectionHeading]                          │ │
+//   │ │ risks: ┌ NewsDigestRiskItem ──────────────────────┐ │ │
+//   │ │        │ [NewsDigestItem]  [NewsDigestRiskReason] │ │ │
+//   │ │        └──────────────────────────────────────────┘ │ │
+//   │ │ quiet: [NewsDigestWeekQuiet]                        │ │
 //   │ └─────────────────────────────────────────────────────┘ │
 //   │ ┌ NewsDigestSection (affects the agent-repl backend) ─┐ │
 //   │ │ [NewsDigestSectionHeading]                          │ │
@@ -40,7 +47,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file frontend/v1/news_digest.proto.
  */
 export const file_frontend_v1_news_digest: GenFile = /*@__PURE__*/
-  fileDesc("Ch1mcm9udGVuZC92MS9uZXdzX2RpZ2VzdC5wcm90bxILZnJvbnRlbmQudjEizAEKEU5ld3NEaWdlc3RPdmVybGF5EiUKAmlkGAEgASgLMhkuZnJvbnRlbmQudjEuTmV3c0RpZ2VzdElkEi0KBmhlYWRlchgCIAEoCzIdLmZyb250ZW5kLnYxLk5ld3NEaWdlc3RIZWFkZXISMAoIc2VjdGlvbnMYAyADKAsyHi5mcm9udGVuZC52MS5OZXdzRGlnZXN0U2VjdGlvbhIvCgdzb3VyY2VzGAQgASgLMh4uZnJvbnRlbmQudjEuTmV3c0RpZ2VzdFNvdXJjZXMiHQoMTmV3c0RpZ2VzdElkEg0KBXZhbHVlGAEgASgJIm4KEE5ld3NEaWdlc3RIZWFkZXISKwoFdGl0bGUYASABKAsyHC5mcm9udGVuZC52MS5OZXdzRGlnZXN0VGl0bGUSLQoGcGVyaW9kGAIgASgLMh0uZnJvbnRlbmQudjEuTmV3c0RpZ2VzdFBlcmlvZCIfCg9OZXdzRGlnZXN0VGl0bGUSDAoEdGV4dBgBIAEoCSIyChBOZXdzRGlnZXN0UGVyaW9kEg8KB2Zyb21fbXMYASABKAMSDQoFdG9fbXMYAiABKAMiqQEKEU5ld3NEaWdlc3RTZWN0aW9uEjYKB2hlYWRpbmcYASABKAsyJS5mcm9udGVuZC52MS5OZXdzRGlnZXN0U2VjdGlvbkhlYWRpbmcSMAoEa2luZBgCIAEoCzIiLmZyb250ZW5kLnYxLk5ld3NEaWdlc3RTZWN0aW9uS2luZBIqCgVpdGVtcxgDIAMoCzIbLmZyb250ZW5kLnYxLk5ld3NEaWdlc3RJdGVtIigKGE5ld3NEaWdlc3RTZWN0aW9uSGVhZGluZxIMCgR0ZXh0GAEgASgJIvECChVOZXdzRGlnZXN0U2VjdGlvbktpbmQSNQoHYmFja2VuZBgBIAEoCzIiLmZyb250ZW5kLnYxLk5ld3NEaWdlc3RLaW5kQmFja2VuZEgAEj0KC2RlcHJlY2F0aW9uGAIgASgLMiYuZnJvbnRlbmQudjEuTmV3c0RpZ2VzdEtpbmREZXByZWNhdGlvbkgAEjMKBnBvbGljeRgDIAEoCzIhLmZyb250ZW5kLnYxLk5ld3NEaWdlc3RLaW5kUG9saWN5SAASNQoHZmVhdHVyZRgEIAEoCzIiLmZyb250ZW5kLnYxLk5ld3NEaWdlc3RLaW5kRmVhdHVyZUgAEjUKB3JlbGVhc2UYBSABKAsyIi5mcm9udGVuZC52MS5OZXdzRGlnZXN0S2luZFJlbGVhc2VIABI3CghpbmNpZGVudBgGIAEoCzIjLmZyb250ZW5kLnYxLk5ld3NEaWdlc3RLaW5kSW5jaWRlbnRIAEIGCgRraW5kIhcKFU5ld3NEaWdlc3RLaW5kQmFja2VuZCIbChlOZXdzRGlnZXN0S2luZERlcHJlY2F0aW9uIhYKFE5ld3NEaWdlc3RLaW5kUG9saWN5IhcKFU5ld3NEaWdlc3RLaW5kRmVhdHVyZSIXChVOZXdzRGlnZXN0S2luZFJlbGVhc2UiGAoWTmV3c0RpZ2VzdEtpbmRJbmNpZGVudCLuAQoOTmV3c0RpZ2VzdEl0ZW0SLwoFdGl0bGUYASABKAsyIC5mcm9udGVuZC52MS5OZXdzRGlnZXN0SXRlbVRpdGxlEjMKB3N1bW1hcnkYAiABKAsyIi5mcm9udGVuZC52MS5OZXdzRGlnZXN0SXRlbVN1bW1hcnkSPAoJZWZmZWN0aXZlGAMgASgLMiQuZnJvbnRlbmQudjEuTmV3c0RpZ2VzdEl0ZW1FZmZlY3RpdmVIAIgBARIqCgVsaW5rcxgEIAMoCzIbLmZyb250ZW5kLnYxLk5ld3NEaWdlc3RMaW5rQgwKCl9lZmZlY3RpdmUiIwoTTmV3c0RpZ2VzdEl0ZW1UaXRsZRIMCgR0ZXh0GAEgASgJIiUKFU5ld3NEaWdlc3RJdGVtU3VtbWFyeRIMCgR0ZXh0GAEgASgJIicKF05ld3NEaWdlc3RJdGVtRWZmZWN0aXZlEgwKBHRleHQYASABKAkiLAoOTmV3c0RpZ2VzdExpbmsSDQoFbGFiZWwYASABKAkSCwoDdXJsGAIgASgJIkMKEU5ld3NEaWdlc3RTb3VyY2VzEi4KB3NvdXJjZXMYASADKAsyHS5mcm9udGVuZC52MS5OZXdzRGlnZXN0U291cmNlIqIBChBOZXdzRGlnZXN0U291cmNlEgwKBG5hbWUYASABKAkSCwoDdXJsGAIgASgJEjEKBHJlYWQYAyABKAsyIS5mcm9udGVuZC52MS5OZXdzRGlnZXN0U291cmNlUmVhZEgAEjUKBmZhaWxlZBgEIAEoCzIjLmZyb250ZW5kLnYxLk5ld3NEaWdlc3RTb3VyY2VGYWlsZWRIAEIJCgdvdXRjb21lIisKFE5ld3NEaWdlc3RTb3VyY2VSZWFkEhMKC25ld19lbnRyaWVzGAEgASgNIigKFk5ld3NEaWdlc3RTb3VyY2VGYWlsZWQSDgoGcmVhc29uGAEgASgJQihaJmFnZW50cmVwbC9wcm90by9mcm9udGVuZC92MTtmcm9udGVuZHYxYgZwcm90bzM");
+  fileDesc("Ch1mcm9udGVuZC92MS9uZXdzX2RpZ2VzdC5wcm90bxILZnJvbnRlbmQudjEi9wEKEU5ld3NEaWdlc3RPdmVybGF5EiUKAmlkGAEgASgLMhkuZnJvbnRlbmQudjEuTmV3c0RpZ2VzdElkEi0KBmhlYWRlchgCIAEoCzIdLmZyb250ZW5kLnYxLk5ld3NEaWdlc3RIZWFkZXISMAoIc2VjdGlvbnMYAyADKAsyHi5mcm9udGVuZC52MS5OZXdzRGlnZXN0U2VjdGlvbhIvCgdzb3VyY2VzGAQgASgLMh4uZnJvbnRlbmQudjEuTmV3c0RpZ2VzdFNvdXJjZXMSKQoEd2VlaxgFIAEoCzIbLmZyb250ZW5kLnYxLk5ld3NEaWdlc3RXZWVrIrkBCg5OZXdzRGlnZXN0V2VlaxI2CgdoZWFkaW5nGAEgASgLMiUuZnJvbnRlbmQudjEuTmV3c0RpZ2VzdFNlY3Rpb25IZWFkaW5nEjEKBXJpc2tzGAIgASgLMiAuZnJvbnRlbmQudjEuTmV3c0RpZ2VzdFdlZWtSaXNrc0gAEjEKBXF1aWV0GAMgASgLMiAuZnJvbnRlbmQudjEuTmV3c0RpZ2VzdFdlZWtRdWlldEgAQgkKB291dGNvbWUiRQoTTmV3c0RpZ2VzdFdlZWtSaXNrcxIuCgVpdGVtcxgBIAMoCzIfLmZyb250ZW5kLnYxLk5ld3NEaWdlc3RSaXNrSXRlbSJyChJOZXdzRGlnZXN0Umlza0l0ZW0SKQoEaXRlbRgBIAEoCzIbLmZyb250ZW5kLnYxLk5ld3NEaWdlc3RJdGVtEjEKBnJlYXNvbhgCIAEoCzIhLmZyb250ZW5kLnYxLk5ld3NEaWdlc3RSaXNrUmVhc29uIiQKFE5ld3NEaWdlc3RSaXNrUmVhc29uEgwKBHRleHQYASABKAkiIwoTTmV3c0RpZ2VzdFdlZWtRdWlldBIMCgR0ZXh0GAEgASgJIh0KDE5ld3NEaWdlc3RJZBINCgV2YWx1ZRgBIAEoCSKmAQoQTmV3c0RpZ2VzdEhlYWRlchIrCgV0aXRsZRgBIAEoCzIcLmZyb250ZW5kLnYxLk5ld3NEaWdlc3RUaXRsZRItCgZwZXJpb2QYAiABKAsyHS5mcm9udGVuZC52MS5OZXdzRGlnZXN0UGVyaW9kEjYKC3Nka192ZXJzaW9uGAMgASgLMiEuZnJvbnRlbmQudjEuTmV3c0RpZ2VzdFNka1ZlcnNpb24ilgEKFE5ld3NEaWdlc3RTZGtWZXJzaW9uEjcKBWtub3duGAEgASgLMiYuZnJvbnRlbmQudjEuTmV3c0RpZ2VzdFNka1ZlcnNpb25Lbm93bkgAEjsKB3Vua25vd24YAiABKAsyKC5mcm9udGVuZC52MS5OZXdzRGlnZXN0U2RrVmVyc2lvblVua25vd25IAEIICgZhbnN3ZXIiLAoZTmV3c0RpZ2VzdFNka1ZlcnNpb25Lbm93bhIPCgd2ZXJzaW9uGAEgASgJIh0KG05ld3NEaWdlc3RTZGtWZXJzaW9uVW5rbm93biIfCg9OZXdzRGlnZXN0VGl0bGUSDAoEdGV4dBgBIAEoCSIyChBOZXdzRGlnZXN0UGVyaW9kEg8KB2Zyb21fbXMYASABKAMSDQoFdG9fbXMYAiABKAMiqQEKEU5ld3NEaWdlc3RTZWN0aW9uEjYKB2hlYWRpbmcYASABKAsyJS5mcm9udGVuZC52MS5OZXdzRGlnZXN0U2VjdGlvbkhlYWRpbmcSMAoEa2luZBgCIAEoCzIiLmZyb250ZW5kLnYxLk5ld3NEaWdlc3RTZWN0aW9uS2luZBIqCgVpdGVtcxgDIAMoCzIbLmZyb250ZW5kLnYxLk5ld3NEaWdlc3RJdGVtIigKGE5ld3NEaWdlc3RTZWN0aW9uSGVhZGluZxIMCgR0ZXh0GAEgASgJIvECChVOZXdzRGlnZXN0U2VjdGlvbktpbmQSNQoHYmFja2VuZBgBIAEoCzIiLmZyb250ZW5kLnYxLk5ld3NEaWdlc3RLaW5kQmFja2VuZEgAEj0KC2RlcHJlY2F0aW9uGAIgASgLMiYuZnJvbnRlbmQudjEuTmV3c0RpZ2VzdEtpbmREZXByZWNhdGlvbkgAEjMKBnBvbGljeRgDIAEoCzIhLmZyb250ZW5kLnYxLk5ld3NEaWdlc3RLaW5kUG9saWN5SAASNQoHZmVhdHVyZRgEIAEoCzIiLmZyb250ZW5kLnYxLk5ld3NEaWdlc3RLaW5kRmVhdHVyZUgAEjUKB3JlbGVhc2UYBSABKAsyIi5mcm9udGVuZC52MS5OZXdzRGlnZXN0S2luZFJlbGVhc2VIABI3CghpbmNpZGVudBgGIAEoCzIjLmZyb250ZW5kLnYxLk5ld3NEaWdlc3RLaW5kSW5jaWRlbnRIAEIGCgRraW5kIhcKFU5ld3NEaWdlc3RLaW5kQmFja2VuZCIbChlOZXdzRGlnZXN0S2luZERlcHJlY2F0aW9uIhYKFE5ld3NEaWdlc3RLaW5kUG9saWN5IhcKFU5ld3NEaWdlc3RLaW5kRmVhdHVyZSIXChVOZXdzRGlnZXN0S2luZFJlbGVhc2UiGAoWTmV3c0RpZ2VzdEtpbmRJbmNpZGVudCLuAQoOTmV3c0RpZ2VzdEl0ZW0SLwoFdGl0bGUYASABKAsyIC5mcm9udGVuZC52MS5OZXdzRGlnZXN0SXRlbVRpdGxlEjMKB3N1bW1hcnkYAiABKAsyIi5mcm9udGVuZC52MS5OZXdzRGlnZXN0SXRlbVN1bW1hcnkSPAoJZWZmZWN0aXZlGAMgASgLMiQuZnJvbnRlbmQudjEuTmV3c0RpZ2VzdEl0ZW1FZmZlY3RpdmVIAIgBARIqCgVsaW5rcxgEIAMoCzIbLmZyb250ZW5kLnYxLk5ld3NEaWdlc3RMaW5rQgwKCl9lZmZlY3RpdmUiIwoTTmV3c0RpZ2VzdEl0ZW1UaXRsZRIMCgR0ZXh0GAEgASgJIiUKFU5ld3NEaWdlc3RJdGVtU3VtbWFyeRIMCgR0ZXh0GAEgASgJIicKF05ld3NEaWdlc3RJdGVtRWZmZWN0aXZlEgwKBHRleHQYASABKAkiLAoOTmV3c0RpZ2VzdExpbmsSDQoFbGFiZWwYASABKAkSCwoDdXJsGAIgASgJIkMKEU5ld3NEaWdlc3RTb3VyY2VzEi4KB3NvdXJjZXMYASADKAsyHS5mcm9udGVuZC52MS5OZXdzRGlnZXN0U291cmNlIqIBChBOZXdzRGlnZXN0U291cmNlEgwKBG5hbWUYASABKAkSCwoDdXJsGAIgASgJEjEKBHJlYWQYAyABKAsyIS5mcm9udGVuZC52MS5OZXdzRGlnZXN0U291cmNlUmVhZEgAEjUKBmZhaWxlZBgEIAEoCzIjLmZyb250ZW5kLnYxLk5ld3NEaWdlc3RTb3VyY2VGYWlsZWRIAEIJCgdvdXRjb21lIisKFE5ld3NEaWdlc3RTb3VyY2VSZWFkEhMKC25ld19lbnRyaWVzGAEgASgNIigKFk5ld3NEaWdlc3RTb3VyY2VGYWlsZWQSDgoGcmVhc29uGAEgASgJQihaJmFnZW50cmVwbC9wcm90by9mcm9udGVuZC92MTtmcm9udGVuZHYxYgZwcm90bzM");
 
 /**
  * The whole digest overlay. Always complete: a webview replaces whatever it
@@ -77,6 +84,17 @@ export type NewsDigestOverlay = Message<"frontend.v1.NewsDigestOverlay"> & {
    * @generated from field: frontend.v1.NewsDigestSources sources = 4;
    */
   sources?: NewsDigestSources | undefined;
+
+  /**
+   * "Since last week": the digest of the past seven days' digests, holding
+   * only what could regress agent-repl. Drawn FIRST, before the sections.
+   * Set on every digest the daemon makes; UNSET only on a digest made before
+   * the weekly section existed (kept standing across the deploy that added
+   * it), which draws no weekly section.
+   *
+   * @generated from field: frontend.v1.NewsDigestWeek week = 5;
+   */
+  week?: NewsDigestWeek | undefined;
 };
 
 /**
@@ -85,6 +103,145 @@ export type NewsDigestOverlay = Message<"frontend.v1.NewsDigestOverlay"> & {
  */
 export const NewsDigestOverlaySchema: GenMessage<NewsDigestOverlay> = /*@__PURE__*/
   messageDesc(file_frontend_v1_news_digest, 0);
+
+/**
+ * "Since last week": every item of the past seven days' digests that could
+ * regress agent-repl (a breaking, deprecated, removed or changed-default
+ * behavior of the Agent SDK, Claude Code or the Messages API; a pricing,
+ * billing, plan or limit change; an auth or account change; a model
+ * retirement or rename; a terms or policy change touching automated use),
+ * each told once however many digests repeated it. Recomputed by every run.
+ *
+ * @generated from message frontend.v1.NewsDigestWeek
+ */
+export type NewsDigestWeek = Message<"frontend.v1.NewsDigestWeek"> & {
+  /**
+   * The section's heading, composed by the daemon ("Since last week").
+   *
+   * @generated from field: frontend.v1.NewsDigestSectionHeading heading = 1;
+   */
+  heading?: NewsDigestSectionHeading | undefined;
+
+  /**
+   * THE ARM IS THE OUTCOME; exactly one is set.
+   *
+   * @generated from oneof frontend.v1.NewsDigestWeek.outcome
+   */
+  outcome: {
+    /**
+     * Something in the past week could regress agent-repl.
+     *
+     * @generated from field: frontend.v1.NewsDigestWeekRisks risks = 2;
+     */
+    value: NewsDigestWeekRisks;
+    case: "risks";
+  } | {
+    /**
+     * Nothing in the covered span could: told, never left to silence.
+     *
+     * @generated from field: frontend.v1.NewsDigestWeekQuiet quiet = 3;
+     */
+    value: NewsDigestWeekQuiet;
+    case: "quiet";
+  } | { case: undefined; value?: undefined };
+};
+
+/**
+ * Describes the message frontend.v1.NewsDigestWeek.
+ * Use `create(NewsDigestWeekSchema)` to create a new message.
+ */
+export const NewsDigestWeekSchema: GenMessage<NewsDigestWeek> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_news_digest, 1);
+
+/**
+ * The week's regression risks, most important first. Never empty.
+ *
+ * @generated from message frontend.v1.NewsDigestWeekRisks
+ */
+export type NewsDigestWeekRisks = Message<"frontend.v1.NewsDigestWeekRisks"> & {
+  /**
+   * @generated from field: repeated frontend.v1.NewsDigestRiskItem items = 1;
+   */
+  items: NewsDigestRiskItem[];
+};
+
+/**
+ * Describes the message frontend.v1.NewsDigestWeekRisks.
+ * Use `create(NewsDigestWeekRisksSchema)` to create a new message.
+ */
+export const NewsDigestWeekRisksSchema: GenMessage<NewsDigestWeekRisks> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_news_digest, 2);
+
+/**
+ * One piece of news that could regress agent-repl.
+ *
+ * @generated from message frontend.v1.NewsDigestRiskItem
+ */
+export type NewsDigestRiskItem = Message<"frontend.v1.NewsDigestRiskItem"> & {
+  /**
+   * The news itself, drawn as any section's item: its effective date is set
+   * when the change is announced for a stated future date.
+   *
+   * @generated from field: frontend.v1.NewsDigestItem item = 1;
+   */
+  item?: NewsDigestItem | undefined;
+
+  /**
+   * Why it could regress agent-repl, naming what in agent-repl it touches.
+   *
+   * @generated from field: frontend.v1.NewsDigestRiskReason reason = 2;
+   */
+  reason?: NewsDigestRiskReason | undefined;
+};
+
+/**
+ * Describes the message frontend.v1.NewsDigestRiskItem.
+ * Use `create(NewsDigestRiskItemSchema)` to create a new message.
+ */
+export const NewsDigestRiskItemSchema: GenMessage<NewsDigestRiskItem> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_news_digest, 3);
+
+/**
+ * Why an item could regress agent-repl: one line, drawn verbatim.
+ *
+ * @generated from message frontend.v1.NewsDigestRiskReason
+ */
+export type NewsDigestRiskReason = Message<"frontend.v1.NewsDigestRiskReason"> & {
+  /**
+   * @generated from field: string text = 1;
+   */
+  text: string;
+};
+
+/**
+ * Describes the message frontend.v1.NewsDigestRiskReason.
+ * Use `create(NewsDigestRiskReasonSchema)` to create a new message.
+ */
+export const NewsDigestRiskReasonSchema: GenMessage<NewsDigestRiskReason> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_news_digest, 4);
+
+/**
+ * A week in which nothing could regress agent-repl. The daemon says so, and
+ * says over what span: when its record of digests began within the week, the
+ * text names that start rather than claiming the whole week.
+ *
+ * @generated from message frontend.v1.NewsDigestWeekQuiet
+ */
+export type NewsDigestWeekQuiet = Message<"frontend.v1.NewsDigestWeekQuiet"> & {
+  /**
+   * Drawn verbatim ("Nothing since last week could regress agent-repl.").
+   *
+   * @generated from field: string text = 1;
+   */
+  text: string;
+};
+
+/**
+ * Describes the message frontend.v1.NewsDigestWeekQuiet.
+ * Use `create(NewsDigestWeekQuietSchema)` to create a new message.
+ */
+export const NewsDigestWeekQuietSchema: GenMessage<NewsDigestWeekQuiet> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_news_digest, 5);
 
 /**
  * A digest's identity: minted by the daemon, opaque to the client, echoed
@@ -107,11 +264,12 @@ export type NewsDigestId = Message<"frontend.v1.NewsDigestId"> & {
  * Use `create(NewsDigestIdSchema)` to create a new message.
  */
 export const NewsDigestIdSchema: GenMessage<NewsDigestId> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_news_digest, 1);
+  messageDesc(file_frontend_v1_news_digest, 6);
 
 /**
- * The overlay's header row: the title and the covered period. The dismiss
- * control beside them is the webview's own, wired to DismissNewsDigest.
+ * The overlay's header row: the title, the SDK version agent-repl runs (in
+ * the MIDDLE of the row), and the covered period. The dismiss control beside
+ * them is the webview's own, wired to DismissNewsDigest.
  *
  * @generated from message frontend.v1.NewsDigestHeader
  */
@@ -125,6 +283,15 @@ export type NewsDigestHeader = Message<"frontend.v1.NewsDigestHeader"> & {
    * @generated from field: frontend.v1.NewsDigestPeriod period = 2;
    */
   period?: NewsDigestPeriod | undefined;
+
+  /**
+   * The Claude Agent SDK version agent-repl currently runs, drawn as
+   * "SDK Version: <version>". Set on every digest the daemon makes; UNSET
+   * only on a digest made before the field existed, which draws none.
+   *
+   * @generated from field: frontend.v1.NewsDigestSdkVersion sdk_version = 3;
+   */
+  sdkVersion?: NewsDigestSdkVersion | undefined;
 };
 
 /**
@@ -132,7 +299,81 @@ export type NewsDigestHeader = Message<"frontend.v1.NewsDigestHeader"> & {
  * Use `create(NewsDigestHeaderSchema)` to create a new message.
  */
 export const NewsDigestHeaderSchema: GenMessage<NewsDigestHeader> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_news_digest, 2);
+  messageDesc(file_frontend_v1_news_digest, 7);
+
+/**
+ * The Claude Agent SDK version agent-repl runs, as the daemon knows it: the
+ * `SessionRuntime.sdk_version` the shim last reported on a session start.
+ * THE ARM IS THE ANSWER; exactly one is set.
+ *
+ * @generated from message frontend.v1.NewsDigestSdkVersion
+ */
+export type NewsDigestSdkVersion = Message<"frontend.v1.NewsDigestSdkVersion"> & {
+  /**
+   * @generated from oneof frontend.v1.NewsDigestSdkVersion.answer
+   */
+  answer: {
+    /**
+     * The version the shim reported.
+     *
+     * @generated from field: frontend.v1.NewsDigestSdkVersionKnown known = 1;
+     */
+    value: NewsDigestSdkVersionKnown;
+    case: "known";
+  } | {
+    /**
+     * No shim has reported one to this daemon (no session has started since
+     * the daemon did), drawn as unknown rather than guessed.
+     *
+     * @generated from field: frontend.v1.NewsDigestSdkVersionUnknown unknown = 2;
+     */
+    value: NewsDigestSdkVersionUnknown;
+    case: "unknown";
+  } | { case: undefined; value?: undefined };
+};
+
+/**
+ * Describes the message frontend.v1.NewsDigestSdkVersion.
+ * Use `create(NewsDigestSdkVersionSchema)` to create a new message.
+ */
+export const NewsDigestSdkVersionSchema: GenMessage<NewsDigestSdkVersion> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_news_digest, 8);
+
+/**
+ * A reported SDK version.
+ *
+ * @generated from message frontend.v1.NewsDigestSdkVersionKnown
+ */
+export type NewsDigestSdkVersionKnown = Message<"frontend.v1.NewsDigestSdkVersionKnown"> & {
+  /**
+   * The npm package version ("0.2.97"), drawn verbatim. Never empty.
+   *
+   * @generated from field: string version = 1;
+   */
+  version: string;
+};
+
+/**
+ * Describes the message frontend.v1.NewsDigestSdkVersionKnown.
+ * Use `create(NewsDigestSdkVersionKnownSchema)` to create a new message.
+ */
+export const NewsDigestSdkVersionKnownSchema: GenMessage<NewsDigestSdkVersionKnown> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_news_digest, 9);
+
+/**
+ * No SDK version is known.
+ *
+ * @generated from message frontend.v1.NewsDigestSdkVersionUnknown
+ */
+export type NewsDigestSdkVersionUnknown = Message<"frontend.v1.NewsDigestSdkVersionUnknown"> & {
+};
+
+/**
+ * Describes the message frontend.v1.NewsDigestSdkVersionUnknown.
+ * Use `create(NewsDigestSdkVersionUnknownSchema)` to create a new message.
+ */
+export const NewsDigestSdkVersionUnknownSchema: GenMessage<NewsDigestSdkVersionUnknown> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_news_digest, 10);
 
 /**
  * The title line, composed by the daemon ("Claude news · Oct 2").
@@ -153,7 +394,7 @@ export type NewsDigestTitle = Message<"frontend.v1.NewsDigestTitle"> & {
  * Use `create(NewsDigestTitleSchema)` to create a new message.
  */
 export const NewsDigestTitleSchema: GenMessage<NewsDigestTitle> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_news_digest, 3);
+  messageDesc(file_frontend_v1_news_digest, 11);
 
 /**
  * The wall-clock span the digest covers: from the previous digest's run to
@@ -182,7 +423,7 @@ export type NewsDigestPeriod = Message<"frontend.v1.NewsDigestPeriod"> & {
  * Use `create(NewsDigestPeriodSchema)` to create a new message.
  */
 export const NewsDigestPeriodSchema: GenMessage<NewsDigestPeriod> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_news_digest, 4);
+  messageDesc(file_frontend_v1_news_digest, 12);
 
 /**
  * One section: every item of one kind.
@@ -219,7 +460,7 @@ export type NewsDigestSection = Message<"frontend.v1.NewsDigestSection"> & {
  * Use `create(NewsDigestSectionSchema)` to create a new message.
  */
 export const NewsDigestSectionSchema: GenMessage<NewsDigestSection> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_news_digest, 5);
+  messageDesc(file_frontend_v1_news_digest, 13);
 
 /**
  * A section's heading text.
@@ -240,7 +481,7 @@ export type NewsDigestSectionHeading = Message<"frontend.v1.NewsDigestSectionHea
  * Use `create(NewsDigestSectionHeadingSchema)` to create a new message.
  */
 export const NewsDigestSectionHeadingSchema: GenMessage<NewsDigestSectionHeading> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_news_digest, 6);
+  messageDesc(file_frontend_v1_news_digest, 14);
 
 /**
  * What kind of news a section holds. THE ARM IS THE KIND; exactly one is set.
@@ -311,7 +552,7 @@ export type NewsDigestSectionKind = Message<"frontend.v1.NewsDigestSectionKind">
  * Use `create(NewsDigestSectionKindSchema)` to create a new message.
  */
 export const NewsDigestSectionKindSchema: GenMessage<NewsDigestSectionKind> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_news_digest, 7);
+  messageDesc(file_frontend_v1_news_digest, 15);
 
 /**
  * Affects agent-repl's backend.
@@ -326,7 +567,7 @@ export type NewsDigestKindBackend = Message<"frontend.v1.NewsDigestKindBackend">
  * Use `create(NewsDigestKindBackendSchema)` to create a new message.
  */
 export const NewsDigestKindBackendSchema: GenMessage<NewsDigestKindBackend> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_news_digest, 8);
+  messageDesc(file_frontend_v1_news_digest, 16);
 
 /**
  * A deprecation or announced removal.
@@ -341,7 +582,7 @@ export type NewsDigestKindDeprecation = Message<"frontend.v1.NewsDigestKindDepre
  * Use `create(NewsDigestKindDeprecationSchema)` to create a new message.
  */
 export const NewsDigestKindDeprecationSchema: GenMessage<NewsDigestKindDeprecation> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_news_digest, 9);
+  messageDesc(file_frontend_v1_news_digest, 17);
 
 /**
  * A pricing, plan, terms or policy change.
@@ -356,7 +597,7 @@ export type NewsDigestKindPolicy = Message<"frontend.v1.NewsDigestKindPolicy"> &
  * Use `create(NewsDigestKindPolicySchema)` to create a new message.
  */
 export const NewsDigestKindPolicySchema: GenMessage<NewsDigestKindPolicy> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_news_digest, 10);
+  messageDesc(file_frontend_v1_news_digest, 18);
 
 /**
  * A new feature, model or product.
@@ -371,7 +612,7 @@ export type NewsDigestKindFeature = Message<"frontend.v1.NewsDigestKindFeature">
  * Use `create(NewsDigestKindFeatureSchema)` to create a new message.
  */
 export const NewsDigestKindFeatureSchema: GenMessage<NewsDigestKindFeature> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_news_digest, 11);
+  messageDesc(file_frontend_v1_news_digest, 19);
 
 /**
  * A release or changelog entry.
@@ -386,7 +627,7 @@ export type NewsDigestKindRelease = Message<"frontend.v1.NewsDigestKindRelease">
  * Use `create(NewsDigestKindReleaseSchema)` to create a new message.
  */
 export const NewsDigestKindReleaseSchema: GenMessage<NewsDigestKindRelease> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_news_digest, 12);
+  messageDesc(file_frontend_v1_news_digest, 20);
 
 /**
  * An incident or outage.
@@ -401,7 +642,7 @@ export type NewsDigestKindIncident = Message<"frontend.v1.NewsDigestKindIncident
  * Use `create(NewsDigestKindIncidentSchema)` to create a new message.
  */
 export const NewsDigestKindIncidentSchema: GenMessage<NewsDigestKindIncident> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_news_digest, 13);
+  messageDesc(file_frontend_v1_news_digest, 21);
 
 /**
  * One piece of news.
@@ -441,7 +682,7 @@ export type NewsDigestItem = Message<"frontend.v1.NewsDigestItem"> & {
  * Use `create(NewsDigestItemSchema)` to create a new message.
  */
 export const NewsDigestItemSchema: GenMessage<NewsDigestItem> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_news_digest, 14);
+  messageDesc(file_frontend_v1_news_digest, 22);
 
 /**
  * An item's one-line title, drawn verbatim.
@@ -460,7 +701,7 @@ export type NewsDigestItemTitle = Message<"frontend.v1.NewsDigestItemTitle"> & {
  * Use `create(NewsDigestItemTitleSchema)` to create a new message.
  */
 export const NewsDigestItemTitleSchema: GenMessage<NewsDigestItemTitle> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_news_digest, 15);
+  messageDesc(file_frontend_v1_news_digest, 23);
 
 /**
  * An item's summary: two or three sentences, drawn verbatim, saying what
@@ -480,7 +721,7 @@ export type NewsDigestItemSummary = Message<"frontend.v1.NewsDigestItemSummary">
  * Use `create(NewsDigestItemSummarySchema)` to create a new message.
  */
 export const NewsDigestItemSummarySchema: GenMessage<NewsDigestItemSummary> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_news_digest, 16);
+  messageDesc(file_frontend_v1_news_digest, 24);
 
 /**
  * When an announced change takes effect.
@@ -502,7 +743,7 @@ export type NewsDigestItemEffective = Message<"frontend.v1.NewsDigestItemEffecti
  * Use `create(NewsDigestItemEffectiveSchema)` to create a new message.
  */
 export const NewsDigestItemEffectiveSchema: GenMessage<NewsDigestItemEffective> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_news_digest, 17);
+  messageDesc(file_frontend_v1_news_digest, 25);
 
 /**
  * A hyperlink to a source. Opened in the system browser.
@@ -530,7 +771,7 @@ export type NewsDigestLink = Message<"frontend.v1.NewsDigestLink"> & {
  * Use `create(NewsDigestLinkSchema)` to create a new message.
  */
 export const NewsDigestLinkSchema: GenMessage<NewsDigestLink> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_news_digest, 18);
+  messageDesc(file_frontend_v1_news_digest, 26);
 
 /**
  * The sources the digest read, in the daemon's order.
@@ -549,7 +790,7 @@ export type NewsDigestSources = Message<"frontend.v1.NewsDigestSources"> & {
  * Use `create(NewsDigestSourcesSchema)` to create a new message.
  */
 export const NewsDigestSourcesSchema: GenMessage<NewsDigestSources> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_news_digest, 19);
+  messageDesc(file_frontend_v1_news_digest, 27);
 
 /**
  * One watched source and how reading it went.
@@ -600,7 +841,7 @@ export type NewsDigestSource = Message<"frontend.v1.NewsDigestSource"> & {
  * Use `create(NewsDigestSourceSchema)` to create a new message.
  */
 export const NewsDigestSourceSchema: GenMessage<NewsDigestSource> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_news_digest, 20);
+  messageDesc(file_frontend_v1_news_digest, 28);
 
 /**
  * A source that was read.
@@ -619,7 +860,7 @@ export type NewsDigestSourceRead = Message<"frontend.v1.NewsDigestSourceRead"> &
  * Use `create(NewsDigestSourceReadSchema)` to create a new message.
  */
 export const NewsDigestSourceReadSchema: GenMessage<NewsDigestSourceRead> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_news_digest, 21);
+  messageDesc(file_frontend_v1_news_digest, 29);
 
 /**
  * A source that could not be read.
@@ -640,5 +881,5 @@ export type NewsDigestSourceFailed = Message<"frontend.v1.NewsDigestSourceFailed
  * Use `create(NewsDigestSourceFailedSchema)` to create a new message.
  */
 export const NewsDigestSourceFailedSchema: GenMessage<NewsDigestSourceFailed> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_news_digest, 22);
+  messageDesc(file_frontend_v1_news_digest, 30);
 
