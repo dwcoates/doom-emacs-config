@@ -519,7 +519,8 @@ type walk struct {
 	oldest *string
 	// top reports a walk that was served nothing and stands above every row:
 	// a LoadFeedThrough with no walk standing begins one here, so its first
-	// page is the newest.
+	// page is the newest, and an opening served nothing while no source was up
+	// stays here (pages.go, stepPage).
 	top bool
 	// standing reports whether the walk has been opened at all.
 	standing bool
