@@ -1038,6 +1038,10 @@ func (p *proxyStore) GetAgentByVendorTask(context.Context, *connect.Request[stor
 	return nil, p.unexpected("GetAgentByVendorTask")
 }
 
+func (p *proxyStore) GetDetachedWork(context.Context, *connect.Request[storev1.GetDetachedWorkRequest]) (*connect.Response[storev1.GetDetachedWorkResponse], error) {
+	return nil, p.unexpected("GetDetachedWork")
+}
+
 func (p *proxyStore) ListResidueShapes(context.Context, *connect.Request[storev1.ListResidueShapesRequest]) (*connect.Response[storev1.ListResidueShapesResponse], error) {
 	return nil, p.unexpected("ListResidueShapes")
 }

@@ -18,7 +18,7 @@ The vocabulary is `store.v1` and `conversation.v1`, not the old `agentshim.*` /
 `protocol.v1` packages. `store.v1.ShimStore` is a Connect service the shim and
 the sidecar call over a UNIX domain socket — WriteBatch, OpenAgentSession,
 WatchAgentSession, ReadAgentPage, GetWorkflow, GetLiveWork, GetAgentByVendorTask,
-GetSidecarCursors,
+GetDetachedWork, GetSidecarCursors,
 with no dial protocol and deliberately no health verb. Its `StoreEntry`
 envelope adds only storage concerns (plane, dedup `write_id`, `upsert_key`
 identity, pageability) around the `conversation.v1` facts it carries; the store

@@ -13,6 +13,7 @@ package store.v1;
 
 
 import "store/v1/endpoint_get_agent_by_vendor_task.proto";
+import "store/v1/endpoint_get_detached_work.proto";
 import "store/v1/endpoint_get_live_work.proto";
 import "store/v1/endpoint_get_run_settlements.proto";
 import "store/v1/endpoint_get_shell_run_claims.proto";
@@ -84,6 +85,13 @@ service ShimStore {
   // a run's file, so a run that settled before this process started is never
   // tracked again and never concluded LOST. Absent from the answer = not settled.
   rpc GetRunSettlements(GetRunSettlementsRequest) returns (GetRunSettlementsResponse);
+
+  // WHAT KIND of detached work one unit left as, and whether the record holds
+  // it as ENDED, by the spawning call's activity id. The shim asks before
+  // folding a task message whose kind it does not hold (a task_notification
+  // never states one): a re-report of an ended run is recognized as such, and
+  // a live run is typed by the record rather than refused.
+  rpc GetDetachedWork(GetDetachedWorkRequest) returns (GetDetachedWorkResponse);
 
   // ---- Writes: how a producer hands records to the store ----
 
