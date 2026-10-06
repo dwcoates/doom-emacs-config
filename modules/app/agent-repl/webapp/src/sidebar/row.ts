@@ -50,6 +50,7 @@ import { formatTickedAge } from "../duration.js";
 import { log } from "../log.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import type { SidebarContext } from "./context.js";
+import { toggleHiddenDropdown } from "./dropdowns.js";
 import { markReviving } from "./reviving.js";
 import { viewedMode } from "./viewed.js";
 import { armBreathes, armSpins, rosterArmMark, type RosterStatusCase } from "./tones.js";
@@ -707,20 +708,8 @@ function drawMenuControl(ws: HTMLElement, target: VerbTarget): HTMLElement {
 export function toggleRowMenu(ws: HTMLElement, target: VerbTarget): void {
   const menu = ws.querySelector<HTMLElement>(":scope > .sb-menu");
   if (menu === null) return;
-  menu.hidden = !menu.hidden;
-  if (menu.hidden) {
-    target.sc.dropdowns.released(menu);
-    return;
-  }
   const more = ws.querySelector<HTMLElement>(":scope > .row .sb-more");
-  target.sc.dropdowns.opened({
-    kind: "row-menu",
-    element: menu,
-    openers: more === null ? [] : [more],
-    close: () => {
-      menu.hidden = true;
-    },
-  });
+  toggleHiddenDropdown(target.sc.dropdowns, "row-menu", menu, more === null ? [] : [more]);
 }
 
 /** The row click: SelectWorkspace, echoed, idempotent, and nothing else. */
