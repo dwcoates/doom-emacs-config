@@ -4,8 +4,8 @@
  * # Most SessionUpdate arms are ANSWERS, not messages
  *
  * `sdk.d.ts` declares no `model_changed`, no `permission_mode_changed`, no
- * `fast_mode`, no `mcp_server`, no `account_usage` and no
- * `context_budget_warning` system message. Those arms are produced by the shim
+ * `fast_mode`, no `mcp_server` and no `account_usage` system message. Those
+ * arms are produced by the shim
  * from CONTROL ANSWERS (`mcpServerStatus`, the account-usage probe,
  * `getContextUsage`) and from fields that ride other messages
  * (`status.permissionMode`, `result.fast_mode_state`, `init.fast_mode_state`).
@@ -427,9 +427,8 @@ const CONTEXT_TIP = scenario({
   prompt: "!context-tip",
   emits:
     "prose only, plus the vendor's `context_tip` ATTACHMENT — a GENERIC CLI TIP, which is what the one real " +
-    "capture of this record actually is. IT IS NOT THE CONTEXT-BUDGET WARNING (ruling, landing 5): which " +
-    "attachment carries that warning is on the capture run's checklist, and mapping the tip to it would draw an " +
-    "unrelated tip as \"your context is filling\"",
+    "capture of this record actually is. It is recorded as itself and never read as a context-budget warning: " +
+    "no footer line warns that the context is nearly full (owner ruling, 2026-10-06)",
   writes: "a `context_tip` attachment line",
   arms: "residue `attachment/context_tip` — the tip is recorded as itself, unconverted, and reaches no arm",
   run(ctx) {
@@ -452,9 +451,8 @@ const TOKENS_REMINDER = scenario({
   emits:
     "prose only, plus the vendor's `total_tokens_reminder` ATTACHMENT — the ONE token-budget carrier any real " +
     "capture holds (`artifact-publish-and-list`, once): a bare `text` field spelling " +
-    "`<total_tokens>N tokens left</total_tokens>` and nothing else. IT IS NOT the context-budget warning either " +
-    "— no capture carries a `context_budget_warning` record of any spelling, so that producer stays ungrounded " +
-    "rather than guessed",
+    "`<total_tokens>N tokens left</total_tokens>` and nothing else. It is never read as a context-budget " +
+    "warning (owner ruling, 2026-10-06)",
   writes: "a `total_tokens_reminder` attachment line",
   arms:
     "NOTHING IS STORED for it: the sidecar reads and classifies the line and then drops it — " +
@@ -469,29 +467,6 @@ const TOKENS_REMINDER = scenario({
       text: "<total_tokens>15000000 tokens left</total_tokens>",
     });
     conclude(ctx, "The CLI restated the token budget.");
-  },
-});
-
-const CONTEXT_BUDGET_WARNING = scenario({
-  name: "context-budget-warning",
-  prompt: "!context-budget-warning",
-  emits:
-    "prose only, plus a `context_budget_warning` ATTACHMENT (`{type: \"context_budget_warning\", content}`), the " +
-    "shape `convertAttachment` already recognizes (`test/convert/attachments.test.ts`). UNGROUNDED, INVENTED: no " +
-    "capture — not even the one literally NAMED `context-budget-warning` (MANIFEST evidence gap; excluded from " +
-    "golden-conformance) — carries a record of this spelling. `!context-tip` and `!tokens-reminder` stay exactly " +
-    "as landing 5 ruled them (a generic CLI tip and the one observed token-count reminder, neither the budget " +
-    "warning); this is a SEPARATE, separately-named producer added only so the converter's arm has a fake-SDK " +
-    "path to drive it from, pending a grounding capture (orchestrator ruling, pending the project lead's)",
-  writes: "a `context_budget_warning` attachment line",
-  arms: "AgentUpdate.update=contextBudgetWarning(ContextBudgetWarning) — UNGROUNDED, invented; see MANIFEST.md",
-  run(ctx) {
-    ctx.log.debug({ turn: ctx.turn, branch: "context-budget-warning" }, "fake INVENTED context-budget-warning turn");
-    ctx.attachment({
-      type: "context_budget_warning",
-      content: "The conversation is approaching its context window budget.",
-    });
-    conclude(ctx, "The CLI warned that the context budget is filling.");
   },
 });
 
@@ -760,7 +735,6 @@ export const SESSION_SCENARIOS = [
   RATE_LIMIT_SEVEN_DAY,
   CONTEXT_TIP,
   TOKENS_REMINDER,
-  CONTEXT_BUDGET_WARNING,
   COMPACT,
   COMPACT_AUTO,
   COMPACT_FAILED,
