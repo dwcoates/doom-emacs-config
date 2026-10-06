@@ -1707,9 +1707,9 @@ func (w *watcher) recordActivityLocked(act *conversationv1.AgentActivity) {
 
 // ActivityToolName names the tool a unit called, empty for units that are not
 // tool calls (prose, thinking, injected context). ONE PLACE: every consumer of
-// a tool name reads it from here -- this package's permission notifications and
-// the footer's tool-call line alike -- and an arm added to the
-// contract without a name here is warned about at the call that needs one.
+// a tool name reads it from here -- this package's routing facts and permission
+// notifications -- and an arm added to the contract without a name here is
+// warned about at the call that needs one.
 func ActivityToolName(act *conversationv1.AgentActivity) string {
 	switch item := act.GetItem().(type) {
 	case *conversationv1.AgentActivity_Read:
