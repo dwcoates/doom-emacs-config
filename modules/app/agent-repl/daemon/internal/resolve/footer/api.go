@@ -274,11 +274,6 @@ type TurnStarted struct {
 	At time.Time
 	// Act is what the turn carries.
 	Act SessionAct
-	// Prompt is the text being delivered, whole: the prompt's text blocks, or
-	// the session act's own spelling ("/clear"). The footer's `submitting`
-	// transient draws its first line. EMPTY when the caller has no text to
-	// state, and then no submitting line is raised.
-	Prompt string
 }
 
 // SubmissionStage is where a prompt's delivery stands before the session takes
@@ -302,11 +297,10 @@ const (
 )
 
 // Submission is one move of a prompt's delivery, as the prompt queue reports
-// it. The footer draws each move as the `submitting` transient, and the first
-// of them is the next prompt that ends the agent's push notification.
+// it. The footer records each move and draws none of them (owner ruling,
+// 2026-10-06: the `submitting` substatus states the step); the first of them
+// is the next prompt that ends the agent's push notification.
 type Submission struct {
-	// Prompt is the prompt's text, whole; the line draws its first line.
-	Prompt string
 	// Stage is where the delivery stands.
 	Stage SubmissionStage
 	// Position is the prompt's 1-based place in the queue, for StageHeld.
