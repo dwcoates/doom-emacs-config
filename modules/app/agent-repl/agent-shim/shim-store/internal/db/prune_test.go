@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -315,11 +314,23 @@ func TestANonPositiveRetentionWindowSweepsNothing(t *testing.T) {
 
 // newPruningStore opens a store whose retention window is the caller's, so a
 // test states a distance in bytes rather than arranging megabytes of fixture.
+//
+// ITS MONOTONIC CLOCK IS STOPPED, so a sweep batch's time bound never passes
+// unless a test moves the clock itself: how many batches a sweep takes is then
+// a fact about the rows and the cursors, never about how loaded the host was.
 func newPruningStore(t *testing.T, window int64) (*DB, *sink) {
+	t.Helper()
+	return newClockedPruningStore(t, window, &fakeClock{now: time.Unix(0, 0)})
+}
+
+// newClockedPruningStore is newPruningStore on the caller's clock, for the
+// cases that move it across a sweep batch's time bound.
+func newClockedPruningStore(t *testing.T, window int64, clock *fakeClock) (*DB, *sink) {
 	t.Helper()
 	s, log := newSink(t)
 	return memoryStore(t, log, Options{
 		Now:                  func() int64 { return testNow },
+		Clock:                clock.Now,
 		LedgerRetentionBytes: window,
 	}), s
 }
@@ -360,13 +371,20 @@ func advanceCursor(t *testing.T, d *DB, fileID string, offset int64) {
 // through the real path.
 func seedLedgerRows(t *testing.T, d *DB, fileID string, offset int64, n int) {
 	t.Helper()
+	seedLedgerRowsAs(t, d, "seed", fileID, offset, n)
+}
+
+// seedLedgerRowsAs is seedLedgerRows with the caller's write-id prefix, for
+// the cases that seed more than one file and need the ids apart.
+func seedLedgerRowsAs(t *testing.T, d *DB, prefix, fileID string, offset int64, n int) {
+	t.Helper()
 	tx, err := d.sql.Begin()
 	if err != nil {
 		t.Fatalf("seeding the ledger: %v", err)
 	}
 	defer tx.Rollback() //nolint:errcheck // no-op after a successful Commit
 	for i := 0; i < n; i++ {
-		id := "seed-" + strconv.Itoa(i)
+		id := prefix + "-" + strconv.Itoa(i)
 		if _, err := tx.Exec(
 			`INSERT INTO write_ledger (write_id, upsert_key, write_seq, applied_at_ms, source_file_id, source_offset) VALUES (?,?,?,?,?,?)`,
 			id, id, i+1, testNow, fileID, offset); err != nil {
@@ -384,93 +402,153 @@ func ledgerHas(t *testing.T, d *DB, writeID string) bool {
 	return scalar[int](t, d, `SELECT COUNT(*) FROM write_ledger WHERE write_id = ?`, writeID) == 1
 }
 
-// TestASweepBatchAndAProducersBatchTogetherStayWithinTheProducersBudget is the
-// sweep's side of the same 400ms budget.
+// TestASweepBatchEndsOnceItsTimeBoundPasses is the sweep's side of the 400ms
+// producer budget, asserted as the bound that keeps it rather than as a
+// wall-clock sum.
 //
 // THE SWEEP SHARES THE WRITE SLOT, so a producer's batch can wait one sweep
-// batch and then do its own work, and the number the producer is judged on is
-// the SUM. Asserting the two halves separately would let a 380ms sweep batch
-// and a 380ms write both pass while the producer times at 760ms, so the
-// assertion here is the sum against the one budget the store would warn past.
+// batch and then do its own work. Counting rows and cursors bounded a batch's
+// WORK but not its HOLD: on the owner's store single batches that removed
+// nothing held the writer for 451ms to 2856ms, and interactive writes queued
+// behind them (see the note on ledgerSweepCursorsPerBatch). So a batch also
+// commits once the bulk time bound has passed, checked after each file — the
+// longest a producer waits is the bound plus one file's delete.
 //
-// IT IS A DETERMINISTIC SUM RATHER THAN A RACE. Timing the two against each
-// other and hoping they overlap proves the bound only on the runs where they
-// did; the worst case a producer can meet is exactly "the slowest sweep batch,
-// then my own batch", so that is what is measured. That the sweep RELEASES the
-// slot between batches — which is what bounds the wait at one batch rather than
-// one sweep — is pinned by TestTheSweepGivesTheWriteSlotBackBetweenBatches.
-//
-// THE PLAN IS WHAT THIS GUARDS. The sweep's delete drove from `write_ledger`
-// and could use no index for a bound that lives on `cursor`, so every batch —
-// the final empty one included — scanned the whole ledger: 111ms per batch on
-// the owner's 318k-row store and 4650ms for a 21-batch sweep, all of it holding
-// the slot. See the plan note in prune.go.
-func TestASweepBatchAndAProducersBatchTogetherStayWithinTheProducersBudget(t *testing.T) {
-	if raceEnabled {
-		t.Skip("a wall-clock budget measures the race detector's instrumentation, not the store; see racedetector_on_test.go")
+// A WALL CLOCK CANNOT ASSERT THIS. The same batch measured 9-14ms alone and
+// 442ms in a full parallel test run, which is a number about the host. The
+// clock here is moved by the test after each file, so what is asserted is the
+// rule itself: how many files a batch takes before the bound ends it.
+func TestASweepBatchEndsOnceItsTimeBoundPasses(t *testing.T) {
+	tests := []struct {
+		name string
+		// tick is how far the clock moves while each file is swept.
+		tick time.Duration
+		// want is how many files each batch asked about, in order.
+		want []int
+	}{
+		{name: "a stopped clock: the page ends the batch", tick: 0, want: []int{10}},
+		{name: "the bound passes part-way through the page", tick: 30 * time.Millisecond, want: []int{4, 4, 2}},
+		{name: "one file reaches the bound exactly", tick: DefaultBulkChunkTime, want: []int{1, 1, 1, 1, 1, 1, 1, 1, 1, 1}},
+		{name: "one file alone overruns the bound and still completes", tick: 3 * DefaultBulkChunkTime, want: []int{1, 1, 1, 1, 1, 1, 1, 1, 1, 1}},
 	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Arrange
+			clock := &fakeClock{now: time.Unix(0, 0)}
+			d, _ := newClockedPruningStore(t, 1000, clock)
+			seedCursorFiles(t, d, 10)
+			var files int
+			var perBatch []int
+			d.ledgerFileSwept = func() {
+				files++
+				clock.advance(test.tick)
+			}
+			d.afterPruneBatch = func() {
+				perBatch = append(perBatch, files)
+				files = 0
+			}
 
-	// Arrange: a full-sized corpus in the state a resident store is actually in
-	// — swept before, so only the OLDEST few writes of each file have fallen
-	// past the window since. That is the shape that costs: a sweep with a
-	// backlog finds its 2000 rows immediately whatever plan it runs, while one
-	// with a handful to remove is the case that either seeks to them or reads
-	// the whole ledger looking (the owner's 2026-09-13 17:51 sweep removed 870
-	// rows in ONE batch and took 1464ms).
-	s, log := newSink(t)
-	path := filepath.Join(t.TempDir(), "store.db")
-	d, err := OpenWithOptions(path, log, Options{Now: func() int64 { return testNow }, unsynced: true})
-	if err != nil {
-		t.Fatalf("OpenWithOptions: %v", err)
-	}
-	defer d.Close() //nolint:errcheck // best-effort test teardown
-	spread := seedSyntheticCorpus(t, d)
-	d.ledgerRetention = spread - 3*syntheticCorpusOffsetStep
-	budget := DefaultBulkBase + 30*DefaultBulkPerRow
+			// Act
+			result, err := d.PruneWriteLedger(ctx())
 
-	var slowestSweepBatch time.Duration
-	batchStarted := time.Now()
-	d.afterPruneBatch = func() {
-		if elapsed := time.Since(batchStarted); elapsed > slowestSweepBatch {
-			slowestSweepBatch = elapsed
-		}
-		batchStarted = time.Now()
+			// Assert
+			if err != nil {
+				t.Fatalf("PruneWriteLedger: %v", err)
+			}
+			if result.Deleted != 10 {
+				t.Fatalf("sweep removed %d rows, want 10 (one per file)", result.Deleted)
+			}
+			if fmt.Sprint(perBatch) != fmt.Sprint(test.want) {
+				t.Fatalf("files per sweep batch = %v, want %v", perBatch, test.want)
+			}
+		})
 	}
+}
+
+// TestASweepBatchThatFillsItsRowLimitMidPageResumesAtThatFile pins the row
+// limit's half of the resume: the file a batch filled its limit on may hold
+// more, so the next batch asks about it again rather than past it.
+func TestASweepBatchThatFillsItsRowLimitMidPageResumesAtThatFile(t *testing.T) {
+	// Arrange: two files that together hold more than one batch's limit, so the
+	// limit is reached on the SECOND file of the page.
+	d, _ := newPruningStore(t, 1000)
+	half := ledgerPruneBatch * 3 / 4
+	seedLedgerRowsAs(t, d, "a", "12:34", 5_000, half)
+	seedLedgerRowsAs(t, d, "b", "56:78", 5_000, half)
+	advanceCursor(t, d, "12:34", 5_000_000)
+	advanceCursor(t, d, "56:78", 5_000_000)
 
 	// Act
 	result, err := d.PruneWriteLedger(ctx())
+
+	// Assert
 	if err != nil {
 		t.Fatalf("PruneWriteLedger: %v", err)
 	}
-	writeStarted := time.Now()
-	if _, err := d.WriteBatch(ctx(), "test-sidecar", WriteInteractive, thirtyRowFileBatch("live", "corpus-file-0", 1<<40), nil); err != nil {
-		t.Fatalf("WriteBatch after the sweep: %v", err)
+	if result.Deleted != int64(2*half) {
+		t.Fatalf("sweep removed %d rows, want %d", result.Deleted, 2*half)
 	}
-	writeElapsed := time.Since(writeStarted)
-
-	// Assert
-	if result.Batches < 2 {
-		t.Fatalf("the sweep took %d batches over %d deletes; the fixture must give it more than one turn of the slot",
-			result.Batches, result.Deleted)
+	if left := scalar[int](t, d, `SELECT COUNT(*) FROM write_ledger`); left != 0 {
+		t.Fatalf("%d ledger rows survived the sweep", left)
 	}
-	if worst := slowestSweepBatch + writeElapsed; worst > budget {
-		t.Fatalf("a producer's 30-row batch behind the slowest of %d sweep batches would take %v (%v queued + %v writing), past its %v budget",
-			result.Batches, worst, slowestSweepBatch, writeElapsed, budget)
-	}
-	assertNoBusyRefusal(t, s)
 }
 
-// TestTheSweepsDeleteSeeksTheLedgerRatherThanScanningIt is the defect this
-// file's latency case cannot see, stated where it IS visible.
+// TestASweepBatchRecordsWhatEndedIt keeps the batch's verdict in the log: a
+// batch the time bound cut short is exactly what the owner's slow sweeps
+// would have needed to show.
+func TestASweepBatchRecordsWhatEndedIt(t *testing.T) {
+	tests := []struct {
+		name  string
+		files int
+		rows  int
+		tick  time.Duration
+		want  string
+	}{
+		{name: "the last page", files: 1, rows: 1, want: "ended_by=last_page"},
+		{name: "a full page", files: ledgerSweepCursorsPerBatch, rows: 1, want: "ended_by=page"},
+		{name: "the row limit", files: 1, rows: ledgerPruneBatch + 1, want: "ended_by=rows"},
+		{name: "the time bound", files: 2, rows: 1, tick: DefaultBulkChunkTime, want: "ended_by=time"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Arrange
+			clock := &fakeClock{now: time.Unix(0, 0)}
+			d, s := newClockedPruningStore(t, 1000, clock)
+			for i := 0; i < test.files; i++ {
+				fileID := fmt.Sprintf("file-%04d", i)
+				seedLedgerRowsAs(t, d, fileID, fileID, 5_000, test.rows)
+				advanceCursor(t, d, fileID, 5_000_000)
+			}
+			d.ledgerFileSwept = func() { clock.advance(test.tick) }
+
+			// Act
+			if _, err := d.PruneWriteLedger(ctx()); err != nil {
+				t.Fatalf("PruneWriteLedger: %v", err)
+			}
+
+			// Assert
+			for _, record := range s.records(t) {
+				message, _ := record["message"].(string)
+				if strings.HasPrefix(message, "ledger sweep transaction 1 committed") {
+					if !strings.Contains(message, test.want) {
+						t.Fatalf("first sweep batch record = %q, want it to name %s", message, test.want)
+					}
+					return
+				}
+			}
+			t.Fatalf("no record of the first sweep batch; log was:\n%s", s.file.String())
+		})
+	}
+}
+
+// TestTheSweepsDeleteSeeksTheLedgerRatherThanScanningIt is the defect a
+// latency case cannot see, stated where it IS visible.
 //
-// The retention bound is `c.offset - ?`: not a constant, but a column of the
-// OTHER table. Driven from `write_ledger`, the bound is unknown until `c` is
-// resolved, so `write_ledger_source` is usable for nothing and SQLite reads the
-// whole covering index probing `cursor` per row — 111ms per batch on the
-// owner's 318k-row ledger, 1464ms on the loaded box for the ONE batch that
-// removed 870 rows, and paid again by every later batch of the same sweep and
-// by the empty batch that ends it. All of it holds the write slot a producer's
-// WriteBatch queues on.
+// The sweep's earlier one-statement form joined `cursor` to the ledger, and a
+// bound that was a column of the OTHER table left `write_ledger_source` usable
+// for nothing: SQLite read the whole covering index — 111ms per batch on the
+// owner's 318k-row ledger, all of it holding the write slot. The per-file
+// delete binds the file and a constant bound, so the index is a seek.
 //
 // A WALL-CLOCK BOUND CANNOT GUARD THIS. That same scan measures ~200ms on a
 // warm, idle box, comfortably inside the 400ms budget, so a duration assertion
@@ -481,55 +559,37 @@ func TestTheSweepsDeleteSeeksTheLedgerRatherThanScanningIt(t *testing.T) {
 	d, _ := newPruningStore(t, DefaultLedgerRetentionBytes)
 
 	// Act
-	plan := queryPlan(t, d, ledgerPruneDeleteSQL, "", ledgerSweepCursorsPerBatch, DefaultLedgerRetentionBytes, ledgerPruneBatch)
+	plan := queryPlan(t, d, ledgerPruneDeleteSQL, "12:34", int64(5_000_000), ledgerPruneBatch)
 
-	// Assert: `cursor` is the one table the sweep may walk — it is the small
-	// side, and the window is a per-file question so every file must be asked.
-	// The ledger is reached only through write_ledger_source.
+	// Assert
 	for _, step := range strings.Split(plan, "\n") {
-		step = strings.TrimSpace(step)
-		if strings.HasPrefix(step, "SCAN ") && !strings.HasPrefix(step, "SCAN c") {
-			t.Fatalf("the sweep's delete walks something other than the cursor table:\n%s", plan)
+		if strings.HasPrefix(strings.TrimSpace(step), "SCAN ") {
+			t.Fatalf("the sweep's delete scans:\n%s", plan)
 		}
 	}
-	if !strings.Contains(plan, "SEARCH l USING COVERING INDEX write_ledger_source") {
+	if !strings.Contains(plan, "SEARCH write_ledger USING COVERING INDEX write_ledger_source (source_file_id=?") {
 		t.Fatalf("the sweep's delete does not seek the ledger through write_ledger_source:\n%s", plan)
 	}
 }
 
 // TestTheSweepsCursorPageSeeksTheCursorKey pins that a batch reaches its page
-// of cursors by a seek past the previous page, in both statements that read
-// the page — a scan would ask about every file again, which is the unbounded
-// batch the page exists to remove.
+// of cursors by a seek past the previous batch — a scan would ask about every
+// file again, which is the unbounded batch the page exists to remove.
 func TestTheSweepsCursorPageSeeksTheCursorKey(t *testing.T) {
-	tests := []struct {
-		name      string
-		statement string
-		args      []any
-	}{
-		{name: "the delete", statement: ledgerPruneDeleteSQL,
-			args: []any{"", ledgerSweepCursorsPerBatch, DefaultLedgerRetentionBytes, ledgerPruneBatch}},
-		{name: "the page read", statement: ledgerSweepPageSQL,
-			args: []any{"", ledgerSweepCursorsPerBatch}},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			// Arrange
-			d, _ := newPruningStore(t, DefaultLedgerRetentionBytes)
+	// Arrange
+	d, _ := newPruningStore(t, DefaultLedgerRetentionBytes)
 
-			// Act
-			plan := queryPlan(t, d, test.statement, test.args...)
+	// Act
+	plan := queryPlan(t, d, ledgerSweepPageSQL, "", ledgerSweepCursorsPerBatch)
 
-			// Assert
-			if !strings.Contains(plan, "SEARCH cursor USING") || !strings.Contains(plan, "(file_id>?)") {
-				t.Fatalf("the sweep's page does not seek cursor past the previous page:\n%s", plan)
-			}
-		})
+	// Assert
+	if !strings.Contains(plan, "SEARCH cursor USING") || !strings.Contains(plan, "(file_id>?)") {
+		t.Fatalf("the sweep's page does not seek cursor past the previous page:\n%s", plan)
 	}
 }
 
-// The sweep's delete joins cursor to the ledger through a subquery, which is
-// exactly the shape SQLite answers with an AUTOMATIC index when the join column
+// The sweep's delete selects its rows through a subquery, which is exactly the
+// shape SQLite answers with an AUTOMATIC index when the column it filters on
 // has no real one.
 func TestTheSweepsStatementsBuildNoAutomaticIndex(t *testing.T) {
 	tests := []struct {
@@ -538,7 +598,7 @@ func TestTheSweepsStatementsBuildNoAutomaticIndex(t *testing.T) {
 		args      []any
 	}{
 		{name: "the delete", statement: ledgerPruneDeleteSQL,
-			args: []any{"", ledgerSweepCursorsPerBatch, DefaultLedgerRetentionBytes, ledgerPruneBatch}},
+			args: []any{"12:34", int64(5_000_000), ledgerPruneBatch}},
 		{name: "the page read", statement: ledgerSweepPageSQL,
 			args: []any{"", ledgerSweepCursorsPerBatch}},
 	}
