@@ -1058,7 +1058,7 @@ Owner rulings, 2026-09-30 (`internal/merge`; the contract is
   `unknown_merge_test_log`, and relays `HostOpenInEditor{path}`.
 - **A MERGE ALWAYS RESUMES WHERE IT LEFT OFF** (owner ruling, 2026-10-06;
   `progress.go`, `resume.go`). A run writes its progress to
-  `wsm.merge_progress` (layout 27, one JSON document per workspace, keyed by
+  `wsm.merge_progress` (layout 28, one JSON document per workspace, keyed by
   the merge's lease) at every step boundary, BEFORE the step acts: the step,
   the tab rounds, the footer facts, the subject, the attempt's tip and target,
   the rebase's commits and count, the agent turn it is about to submit, the
