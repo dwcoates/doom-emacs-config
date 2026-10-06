@@ -2490,6 +2490,120 @@ describe("readFirstPage on a book whose id this shim minted", () => {
 });
 
 // ---------------------------------------------------------------------------
+// readBookHead: the pointer a teardown concludes its tails through, read
+// WITHOUT a page. Read off a repaint, the head cost a 50-frame scan, and under
+// disk contention that scan outlasted the teardown's budget (2026-10-06).
+// ---------------------------------------------------------------------------
+describe("readBookHead", () => {
+  /** The refusal the store gives for a book it holds no row for. */
+  function noSuchBook(): storev1.OpenAgentSessionResponse {
+    return create(storev1.OpenAgentSessionResponseSchema, {
+      result: {
+        case: "failure",
+        value: create(storev1.OpenAgentSessionFailureSchema, {
+          detail: "no agent row",
+          kind: {
+            case: "unknownAgent",
+            value: create(storev1.OpenAgentSessionUnknownAgentSchema, {}),
+          },
+        }),
+      },
+    });
+  }
+
+  it("asks for a TAIL-ONLY open, so the store reads no line", async () => {
+    // Arrange.
+    const requests: storev1.OpenAgentSessionRequest[] = [];
+    const reader = readerOver({
+      openAgentSession: async (request) => {
+        requests.push(request);
+        return opened(floorPage([]), undefined, "p9");
+      },
+    });
+
+    // Act.
+    await reader.readBookHead(BOOK);
+
+    // Assert.
+    expect(requests.map((request) => request.opening.case)).toEqual(["tailOnly"]);
+  });
+
+  it("asks for a PAGE-ONLY open, so the store mints no watch token", async () => {
+    // Arrange.
+    const requests: storev1.OpenAgentSessionRequest[] = [];
+    const reader = readerOver({
+      openAgentSession: async (request) => {
+        requests.push(request);
+        return opened(floorPage([]), undefined, "p9");
+      },
+    });
+
+    // Act.
+    await reader.readBookHead(BOOK);
+
+    // Assert.
+    expect(requests.map((request) => request.pageOnly)).toEqual([true]);
+  });
+
+  it("answers the store's NEWEST pointer", async () => {
+    // Arrange.
+    const reader = readerOver({ openAgentSession: async () => opened(floorPage([]), undefined, "p9") });
+
+    // Act.
+    const head = await reader.readBookHead(BOOK);
+
+    // Assert.
+    expect(head?.value).toBe("p9");
+  });
+
+  it("answers ABSENCE for a book the store holds no lines in", async () => {
+    // Arrange: the store answers with `newest` unset.
+    const reader = readerOver({ openAgentSession: async () => opened(floorPage([]), undefined) });
+
+    // Act.
+    const head = await reader.readBookHead(BOOK);
+
+    // Assert.
+    expect(head).toBeUndefined();
+  });
+
+  it("answers ABSENCE when the store refuses a book the producer vouches for", async () => {
+    // Arrange.
+    const reader = readerOver({ openAgentSession: async () => noSuchBook() });
+
+    // Act.
+    const head = await reader.readBookHead(BOOK, () => true);
+
+    // Assert.
+    expect(head).toBeUndefined();
+  });
+
+  it("surfaces unknown_agent when nobody vouches for the book", async () => {
+    // Arrange.
+    const reader = readerOver({ openAgentSession: async () => noSuchBook() });
+
+    // Act, Assert.
+    await expect(reader.readBookHead(BOOK, () => false)).rejects.toMatchObject({
+      kind: "unknown_agent",
+    });
+  });
+
+  it("refuses store_unavailable when the store CANNOT BE REACHED", async () => {
+    // Arrange.
+    const reader = readerOver({
+      openAgentSession: () => {
+        throw new ConnectError("the store socket is gone", Code.Unavailable);
+      },
+    });
+
+    // Act, Assert.
+    await expect(reader.readBookHead(BOOK, () => true)).rejects.toMatchObject({
+      kind: "store_unavailable",
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
 // The store, restarted under a live shim
 //
 // A deploy kickstarts the store's launchd service while every shim keeps
