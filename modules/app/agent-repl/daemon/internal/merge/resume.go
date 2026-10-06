@@ -87,17 +87,9 @@ func (r *run) resumeRun(ctx context.Context) error {
 		return err
 	}
 	r.job = job
-	policy, err := o.policyFor(ctx, ws)
-	if err != nil {
-		r.end(ctx, fmt.Errorf("could not resolve the repository's merge policy: %w", err))
+	if err := r.takeSession(ctx); err != nil {
+		r.end(ctx, err)
 		return err
-	}
-	r.policy = policy
-	if release, ok, err := o.deps.Occupy(ws, holderMerge); err != nil {
-		r.end(ctx, fmt.Errorf("could not take the session's occupancy: %w", err))
-		return err
-	} else if ok {
-		r.releaseOccupancy = release
 	}
 	// THE BUBBLE IS THE ONE THE MERGE ALREADY HAD, drawn live again, and the
 	// footer shows the step the merge stands on before that step speaks.
@@ -113,15 +105,9 @@ func (r *run) resumeRun(ctx context.Context) error {
 	if r.resume.Step == TabQueue {
 		// THE MERGE HAD NOT LEFT THE QUEUE: it waits for its workspaces to
 		// fall free exactly as a fresh admission does.
-		if err := r.awaitFree(ctx, ws); err != nil {
+		if err := r.awaitWorkspacesFree(ctx); err != nil {
 			r.end(ctx, err)
 			return err
-		}
-		if r.subject.other != "" {
-			if err := r.awaitFree(ctx, r.subject.other); err != nil {
-				r.end(ctx, err)
-				return err
-			}
 		}
 	}
 	return r.execute(ctx)

@@ -1651,3 +1651,47 @@ func TestIsMachinery(t *testing.T) {
 		})
 	}
 }
+
+func TestShasOfAnswersTheCommitsShasInOrder(t *testing.T) {
+	// Arrange, Act.
+	got := shasOf(commits(3))
+
+	// Assert.
+	if want := []string{"c000000000001", "c000000000002", "c000000000003"}; !slices.Equal(got, want) {
+		t.Fatalf("shasOf = %v, want %v", got, want)
+	}
+}
+
+// TestEveryRebaseIsStartedFromShasOf is the drift guard on the shared shape.
+func TestEveryRebaseIsStartedFromShasOf(t *testing.T) {
+	// Arrange.
+	body, err := os.ReadFile("process.go")
+	if err != nil {
+		t.Fatalf("reading process.go: %v", err)
+	}
+
+	// Act.
+	starts := strings.Count(string(body), "r.git.StartRebase(")
+	shared := strings.Count(string(body), "r.git.StartRebase(ctx, dir, tip, shasOf(")
+
+	// Assert.
+	if starts == 0 || starts != shared {
+		t.Fatalf("%d rebase starts, %d through shasOf, want every one through it", starts, shared)
+	}
+}
+
+func TestDrawFixingStandsTheAttemptLive(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	r := ledgeredRun(t, h)
+	round := r.openTab(context.Background(), TabFixes)
+
+	// Act.
+	r.drawFixing(context.Background(), round, 2, []string{"daemon"})
+
+	// Assert.
+	facts := h.footer.last()
+	if facts.Attempt != 2 || facts.MaxAttempts != MaxFixAttempts || h.feed.lastTabOfKind(TabFixes).GetFixes().GetAttempt().GetAttempt() != 2 {
+		t.Fatalf("facts = %+v, want attempt 2 of %d drawn", facts, MaxFixAttempts)
+	}
+}
