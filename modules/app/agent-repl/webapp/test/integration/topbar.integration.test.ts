@@ -75,6 +75,59 @@ describe("arm coverage", () => {
   });
 });
 
+describe("the connectivity glyph's session dropdown", () => {
+  const SESSION = {
+    startedAtMs: BigInt(Date.now() - 2 * 60 * 60_000),
+    began: "login" as const,
+    bytesReceived: 412_000_000n,
+    bytesSent: 38_000_000n,
+  };
+
+  it("opens agent-repl's session below the strip from the glyph", async () => {
+    // Arrange
+    await withTopbar({ agentReplSession: SESSION });
+    // Act
+    await harness.click(".topbar-connectivity");
+    // Assert
+    expect(harness.text('.topbar-reveal[data-reveal="agent-repl-session"] .topbar-session-traffic')).toContain(
+      "412 MB ↓ · 38 MB ↑",
+    );
+  });
+
+  it("states what began the session", async () => {
+    // Arrange
+    await withTopbar({ agentReplSession: SESSION });
+    // Act
+    await harness.click(".topbar-connectivity");
+    // Assert
+    expect(harness.text('.topbar-reveal[data-reveal="agent-repl-session"] .topbar-session-duration')).toContain(
+      "since login",
+    );
+  });
+
+  it("carries a newer push's traffic into the dropdown the reader has open", async () => {
+    // Arrange
+    await withTopbar({ agentReplSession: SESSION });
+    await harness.click(".topbar-connectivity");
+    // Act
+    harness.fake.setTopbar(WORKSPACE_ID, topbarView({ agentReplSession: { ...SESSION, bytesReceived: 1_500_000_000n } }));
+    await harness.settle();
+    // Assert
+    expect(harness.text('.topbar-reveal[data-reveal="agent-repl-session"] .topbar-session-traffic')).toContain(
+      "1.5 GB ↓",
+    );
+  });
+
+  it("opens the account options from a glyph that carries no session", async () => {
+    // Arrange
+    await withTopbar({});
+    // Act
+    await harness.click(".topbar-connectivity");
+    // Assert
+    expect(harness.$(".topbar-reveal")?.getAttribute("data-reveal")).toBe("account");
+  });
+});
+
 describe("the title and session line", () => {
   it("draws the served title verbatim", async () => {
     // Arrange / Act

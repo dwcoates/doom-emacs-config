@@ -57,6 +57,7 @@ import { drawTopbarPermissionModePicker } from "./permission-mode.js";
 import { drawTopbarPersistentWifi } from "./persistent-wifi.js";
 import { bindAccountReveal } from "./account.js";
 import { mountRevealLayer, type RevealGeometry } from "./reveal.js";
+import { bindAgentReplSessionReveal } from "./session.js";
 import {
   bindTitleSessionReveal,
   drawTopbarAccount,
@@ -219,10 +220,12 @@ export function drawTopbarView(u: TopbarView, tc: TopbarContext): HTMLElement {
   const accountCell = document.createElement("div");
   accountCell.className = "topbar-account-cell";
   const accountView = requireMessage(u.account, "TopbarView.account");
-  accountCell.append(
-    drawTopbarConnectivity(requireMessage(u.connectivity, "TopbarView.connectivity")),
-    drawTopbarAccount(accountView),
-  );
+  const connectivity = requireMessage(u.connectivity, "TopbarView.connectivity");
+  const glyph = drawTopbarConnectivity(connectivity);
+  // THE GLYPH OPENS AGENT-REPL'S SESSION (owner ruling, 2026-10-06), when the
+  // daemon states one; the rest of the cell keeps the login options.
+  bindAgentReplSessionReveal(glyph, connectivity.session, tc);
+  accountCell.append(glyph, drawTopbarAccount(accountView));
   // THE CELL'S CLICK IS THE LOGIN OPTIONS, in both arms (owner ruling,
   // 2026-09-13). The session line rides the TITLE, which carries it whatever
   // the account state.

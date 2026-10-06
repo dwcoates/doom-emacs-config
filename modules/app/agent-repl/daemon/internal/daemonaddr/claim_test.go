@@ -798,6 +798,79 @@ func TestAWaiterWhoseContextEndsIsAnsweredWithItsCause(t *testing.T) {
 	}
 }
 
+// TestAnAnsweredWaitTouchesNothingInTheStateDirectory pins where the wait's
+// lock file is opened: on the caller's goroutine. Opened by the waiting
+// goroutine instead, a late-scheduled one created daemon.lock after its caller
+// had answered, inside a directory already being removed.
+func TestAnAnsweredWaitTouchesNothingInTheStateDirectory(t *testing.T) {
+	// Arrange: a cancelled waiter, and the lock file removed after it answered.
+	path := filepath.Join(t.TempDir(), "daemon.addr")
+	incumbent, err := Bind(path, 0)
+	if err != nil {
+		t.Fatalf("Bind: %v", err)
+	}
+	successor, err := BindJoining(path, 0)
+	if err != nil {
+		t.Fatalf("BindJoining: %v", err)
+	}
+	defer successor.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := successor.AwaitBootClaim(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("AwaitBootClaim = %v, want the cancellation", err)
+	}
+	if err := os.Remove(LockPath(path)); err != nil {
+		t.Fatalf("remove the lock file: %v", err)
+	}
+
+	// Act: the incumbent lets go, so the parked wait completes.
+	incumbent.Close()
+	settled := awaitResult(context.Background(), successor)
+	select {
+	case err := <-settled:
+		if err != nil {
+			t.Fatalf("AwaitBootClaim = %v, want the claim", err)
+		}
+	case <-time.After(awaitBound):
+		t.Fatal("the parked wait never completed")
+	}
+
+	// Assert.
+	if _, err := os.Stat(LockPath(path)); !os.IsNotExist(err) {
+		t.Fatalf("stat the lock file = %v, want it never recreated", err)
+	}
+}
+
+func TestAWaitWhoseLockFileCannotBeOpenedIsAnsweredWithTheCause(t *testing.T) {
+	// Arrange: the lock file's path is a directory, which cannot be opened
+	// for writing.
+	path := filepath.Join(t.TempDir(), "daemon.addr")
+	incumbent, err := Bind(path, 0)
+	if err != nil {
+		t.Fatalf("Bind: %v", err)
+	}
+	defer incumbent.Close()
+	successor, err := BindJoining(path, 0)
+	if err != nil {
+		t.Fatalf("BindJoining: %v", err)
+	}
+	defer successor.Close()
+	if err := os.Remove(LockPath(path)); err != nil {
+		t.Fatalf("remove the lock file: %v", err)
+	}
+	if err := os.Mkdir(LockPath(path), 0o700); err != nil {
+		t.Fatalf("Mkdir: %v", err)
+	}
+
+	// Act.
+	err = successor.AwaitBootClaim(context.Background())
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "open the boot lock") {
+		t.Fatalf("AwaitBootClaim = %v, want the open's failure", err)
+	}
+}
+
 func TestAWaiterIsAnsweredWhenPublishTakesTheClaimFirst(t *testing.T) {
 	// Arrange: an incumbent holds the claim, and a waiter is parked on it.
 	path := filepath.Join(t.TempDir(), "daemon.addr")

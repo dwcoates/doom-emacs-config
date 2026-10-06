@@ -40,6 +40,7 @@ import (
 	"claude-repld/internal/health"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/rollout"
+	"claude-repld/internal/sessionlock"
 	"claude-repld/internal/wsm"
 )
 
@@ -555,7 +556,7 @@ func (d *Deployer) hashStaged(s Staged) (builds, error) {
 	step("daemon", &b.daemon, func() (string, error) { return buildid.File(s.DaemonBin()) })
 	step("store", &b.store, func() (string, error) { return buildid.File(s.CacheBin(buildreport.ServiceStore)) })
 	step("sidecar", &b.sidecar, func() (string, error) { return buildid.File(s.CacheBin(buildreport.ServiceSidecar)) })
-	step("lock", &b.lock, func() (string, error) { return buildid.File(s.CacheBin("shim-lock")) })
+	step("lock", &b.lock, func() (string, error) { return buildid.File(s.CacheBin(sessionlock.HolderBinary)) })
 	step("elisp", &b.elisp, func() (string, error) { return buildid.Elisp(d.deps.Live.ModuleRoot) })
 	return b, err
 }
@@ -597,7 +598,7 @@ func (d *Deployer) install(s Staged, fresh builds, nonce string, prev *previous)
 	daemonStamps := stampsBeside(filepath.Dir(s.DaemonBin()), filepath.Dir(live.DaemonBin()), "")
 	storeInstall, storeWrites := cacheBin(buildreport.ServiceStore)
 	sidecarInstall, sidecarWrites := cacheBin(buildreport.ServiceSidecar)
-	lockInstall, lockWrites := cacheBin("shim-lock")
+	lockInstall, lockWrites := cacheBin(sessionlock.HolderBinary)
 	artifacts := []artifact{
 		{component: ComponentShim, name: "shim", fresh: fresh.shim, installed: d.deps.Bundle.Build, install: func() error {
 			// THE BUNDLE IS REPLACED ONLY WHILE NO SPAWN HOLDS IT: a spawn
@@ -618,8 +619,8 @@ func (d *Deployer) install(s Staged, fresh builds, nonce string, prev *previous)
 		{component: ComponentSidecar, name: buildreport.ServiceSidecar, fresh: fresh.sidecar, installed: func() (string, error) {
 			return buildid.File(live.CacheBinPath(buildreport.ServiceSidecar))
 		}, install: sidecarInstall, writes: sidecarWrites},
-		{component: ComponentShim, name: "shim-lock", fresh: fresh.lock, installed: func() (string, error) {
-			return buildid.File(live.CacheBinPath("shim-lock"))
+		{component: ComponentShim, name: sessionlock.HolderBinary, fresh: fresh.lock, installed: func() (string, error) {
+			return buildid.File(live.CacheBinPath(sessionlock.HolderBinary))
 		}, install: lockInstall, writes: lockWrites},
 	}
 	for _, a := range artifacts {
