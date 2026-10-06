@@ -502,6 +502,28 @@ type fakeSender struct {
 	notes []string
 	// joinErr, when set, refuses every JoinRunningTurn.
 	joinErr error
+	// rollBacks is every turn RollBackTurn was asked to cut, in order.
+	rollBacks []ids.TurnID
+	// rollBackErr, when set, is every RollBackTurn's answer.
+	rollBackErr error
+}
+
+// RollBackTurn records the cut and answers rollBackErr.
+func (s *fakeSender) RollBackTurn(_ context.Context, turn ids.TurnID) error {
+	if hook := s.hookFor(); hook != nil {
+		hook("rollback")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.rollBacks = append(s.rollBacks, turn)
+	return s.rollBackErr
+}
+
+// rolledBack answers every turn RollBackTurn was asked to cut.
+func (s *fakeSender) rolledBack() []ids.TurnID {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]ids.TurnID(nil), s.rollBacks...)
 }
 
 func newFakeSender() *fakeSender { return &fakeSender{mainAgent: "main-agent"} }
@@ -826,9 +848,11 @@ func (b *fakeTurnBanners) raised() []bannerEnd {
 
 type fakeFeed struct {
 	feed.Resolver
-	mu      sync.Mutex
-	rows    []*frontendv1.FeedRow
-	address *sessionwatcher.OutputAddress
+	mu sync.Mutex
+	// rolledBack is every turn RollBackTurns removed, in order.
+	rolledBack []ids.TurnID
+	rows       []*frontendv1.FeedRow
+	address    *sessionwatcher.OutputAddress
 	// turnAddrs are the addresses AddressTurn handed over, by turn; nil
 	// entries are turns handed over with no address.
 	turnAddrs       map[ids.TurnID]*sessionwatcher.OutputAddress
@@ -848,6 +872,21 @@ type closedTell struct {
 }
 
 // OnPromptRetired records a mirrored prompt row taken back down.
+// RollBackTurns records the turns removed from the feed for good.
+func (f *fakeFeed) RollBackTurns(_ ids.WorkspaceID, turns []ids.TurnID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.rolledBack = append(f.rolledBack, turns...)
+	return nil
+}
+
+// rolledBackTurns answers every turn RollBackTurns removed.
+func (f *fakeFeed) rolledBackTurns() []ids.TurnID {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]ids.TurnID(nil), f.rolledBack...)
+}
+
 func (f *fakeFeed) OnPromptRetired(_ ids.WorkspaceID, prompt *conversationv1.AgentPrompt) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
