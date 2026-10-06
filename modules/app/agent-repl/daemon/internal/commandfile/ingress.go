@@ -196,13 +196,23 @@ func (i *ingress) ApplyFile(ctx context.Context, path string) error {
 
 	base := filepath.Base(path)
 	var failures []error
+	// faulted is whether any failure was a FAULT rather than an answer; it
+	// sets the level the file's quarantine is recorded at.
+	faulted := false
 	for index, entry := range entries {
 		if err := i.apply(ctx, log, base, index, entry); err != nil {
 			// A refused entry is HANDLED — recorded here and retired to
-			// quarantine below — so it is a warning, not an unhandled error.
-			log.Warn(opEntry, "a command-file entry was refused", dlog.Context{
-				"index": index, "type": entry.Type, "cause": err.Error(),
-			})
+			// quarantine below. A TYPED REFUSAL is the verb's ANSWER to what
+			// the command asked (a temporary repository, an unknown
+			// workspace, an unmergeable branch), so it is recorded at INFO;
+			// anything else is a failure to act and stays a warning.
+			fields := dlog.Context{"index": index, "type": entry.Type, "cause": err.Error()}
+			if answered(err) {
+				log.Info(opEntry, "a command-file entry was refused", fields)
+			} else {
+				faulted = true
+				log.Warn(opEntry, "a command-file entry failed", fields)
+			}
 			failures = append(failures, fmt.Errorf("entry %d (%s): %w", index, entry.Type, err))
 			continue
 		}
@@ -217,9 +227,12 @@ func (i *ingress) ApplyFile(ctx context.Context, path string) error {
 		// invisible — neither applied, nor swept again, nor anywhere a person
 		// would look.
 		joined := errors.Join(failures...)
-		log.Warn(opQuarantine, "quarantining a command file whose entries were refused", dlog.Context{
-			"entries": len(entries), "refused": len(failures), "cause": joined.Error(),
-		})
+		fields := dlog.Context{"entries": len(entries), "refused": len(failures), "cause": joined.Error()}
+		if faulted {
+			log.Warn(opQuarantine, "quarantining a command file whose entries failed", fields)
+		} else {
+			log.Info(opQuarantine, "quarantining a command file whose entries were refused", fields)
+		}
 		if qErr := i.quarantine(claimed); qErr != nil {
 			log.Error(opQuarantine, "could not quarantine the command file", dlog.Context{"cause": qErr.Error()})
 			return errors.Join(joined, qErr)
@@ -237,6 +250,17 @@ func (i *ingress) ApplyFile(ctx context.Context, path string) error {
 	}
 	log.Info(opApply, "applied a command file", dlog.Context{"entries": len(entries)})
 	return nil
+}
+
+// answered reports whether an entry's failure is a TYPED REFUSAL -- the
+// verb's or the merge orchestrator's answer to what the command asked, the
+// same refusals the rpc route answers on an arm -- rather than a fault.
+func answered(err error) bool {
+	if _, ok := workspace.AsRefusal(err); ok {
+		return true
+	}
+	_, ok := merge.Refused(err)
+	return ok
 }
 
 // claim renames the file into the claimed directory. The rename is the claim:
