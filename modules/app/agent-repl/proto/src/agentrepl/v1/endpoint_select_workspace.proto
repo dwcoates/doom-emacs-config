@@ -36,6 +36,11 @@ message SelectWorkspaceError {
     SelectWorkspaceTransferringAway transferring_away = 3;
     // A joining daemon has not finished adopting this workspace yet.
     SelectWorkspaceNotYetAdopted not_yet_adopted = 4;
+    // This daemon is standing down (a stop, a restart, a drain at its end)
+    // and starts no session. The SELECTION IS RECORDED; only the revival is
+    // not attempted here. The client re-asserts the selection on the daemon
+    // that serves next (a successor, or a fresh boot), which revives it.
+    SelectWorkspaceStandingDown standing_down = 5;
   }
 }
 message SelectWorkspaceUnknownWorkspace {}
@@ -48,3 +53,9 @@ message SelectWorkspaceTransferringAway {
   string address = 1;
 }
 message SelectWorkspaceNotYetAdopted {}
+// The answer of a daemon that is leaving: the selection stands in the state
+// it shares with whatever serves next, and no session is started for a
+// workspace this daemon is about to stop serving. It carries no address,
+// because a plain stand-down has no successor to name; a handover's departing
+// daemon answers `transferring_away` instead.
+message SelectWorkspaceStandingDown {}
