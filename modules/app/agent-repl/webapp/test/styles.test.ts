@@ -2470,7 +2470,6 @@ describe("the expanded response's eggshell border", () => {
     ["a thinking bubble (yellow)", { "data-role": "response", "data-variant": "thinking" }, []],
     ["an interim response (pear)", { "data-role": "response", "data-variant": "response", "data-state": "success" }, []],
     ["the turn's answer (green)", { "data-role": "response", "data-variant": "response", "data-state": "success" }, ["final-response"]],
-    ["a turn that ended (red)", { "data-role": "response", "data-variant": "turn-ended" }, []],
     ["an agentic card", { "data-role": "response", "data-variant": "agentic" }, []],
     ["a compaction summary", { "data-role": "response", "data-variant": "compaction" }, []],
   ] as const;
@@ -2625,11 +2624,11 @@ describe("the response border ladder", () => {
     expect(rule).toMatch(/border-color:\s*var\(--final-response\)/);
   });
 
-  it("borders a turn that ended abnormally in the error red (owner ruling 2026-09-24)", () => {
+  it("draws no bubble for a turn that ended abnormally: its outcome marker replaced it (owner ruling 2026-10-06)", () => {
     // Arrange / Act
     const rule = declarationsOf('.bubble[data-variant="turn-ended"]');
     // Assert
-    expect(rule).toMatch(/border-color:\s*var\(--err\)/);
+    expect(rule).toBeUndefined();
   });
 });
 
