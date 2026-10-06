@@ -268,7 +268,7 @@ export function drawCreateWorkspaceForm(
 type CreateWorkspaceCause = NonNullable<CreateWorkspaceError["cause"]> & { case: string };
 
 /**
- * What each of CreateWorkspace's thirteen refusals says.
+ * What each of CreateWorkspace's fourteen refusals says.
  *
  * NONE OF THE CROSS-CUTTING FOUR CAN REACH THIS RPC: a creation is addressed
  * to a repository, not to an existing workspace, so every arm here is the
@@ -308,6 +308,8 @@ export function createWorkspaceRefusal(cause: CreateWorkspaceCause): string {
       return `the workspace could not be named (${cause.value.cause}, ${cause.value.attempts} attempt${
         cause.value.attempts === 1 ? "" : "s"
       })${cause.value.answer !== "" ? `: the model answered "${cause.value.answer}"` : ""}`;
+    case "insideTemporaryDirectory":
+      return `${cause.value.dir} is inside the temporary directory ${cause.value.temporaryRoot}; agent-repl does not register temporary folders`;
     default: {
       const other: { case: string } = cause;
       return unreachableArm("CreateWorkspaceError.cause", other.case);

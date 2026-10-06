@@ -378,6 +378,7 @@ const CAUSE_FILL: Readonly<Record<string, Record<string, unknown>>> = {
     missingFiles: ["oneshot-success-suffix.md"],
   },
   namingFailed: { model: "haiku", cause: "invalid_answer", attempts: 2, answer: "Fix The Login" },
+  insideTemporaryDirectory: { dir: "/private/tmp/scratch", temporaryRoot: "/private/tmp" },
 };
 
 describe("CreateWorkspace's typed refusal", () => {
@@ -458,6 +459,17 @@ describe("CreateWorkspace's typed refusal", () => {
         value: { model: "haiku", cause: "invalid_answer", attempts: 2, answer: "Fix The Login" },
       } as never),
     ).toContain("Fix The Login");
+  });
+
+  it("names the temporary folder a create was refused for, and why", () => {
+    expect(
+      createWorkspaceRefusal({
+        case: "insideTemporaryDirectory",
+        value: { dir: "/private/tmp/scratch", temporaryRoot: "/private/tmp" },
+      } as never),
+    ).toBe(
+      "/private/tmp/scratch is inside the temporary directory /private/tmp; agent-repl does not register temporary folders",
+    );
   });
 
   it("refuses an arm this build does not know", () => {
