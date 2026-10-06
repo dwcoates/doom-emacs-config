@@ -83,7 +83,15 @@ import (
 // So the median area runs in about three seconds and every one of them has a
 // tail into the eights on a busy run — 10s was ~1.1x the observed max for
 // half the roster, not the ~3x this suite sets its bounds at, and areas kept
-// dying on it while doing nothing wrong. 30s is ~3.2x the 9.23s maximum.
+// dying on it while doing nothing wrong. 30s was ~3.2x the 9.23s maximum.
+//
+// RE-MEASURED UNDER testrun (2026-10-06), which is how the package runs now:
+// one e2e chunk per core slot beside every other suite, not `-parallel 8`
+// alone. Three green full-suite runs put the functional areas' walls at
+// 5.0-14.4s (client-log 14.43, proof-of-life 14.21, feed-families 13.33);
+// a heavier full run the same day had walls of 12.8-28.2s and three areas
+// killed at 30s while their children were still passing. 30s was ~2.1x the
+// green maximum. 45s is ~3.1x the 14.4s green maximum.
 //
 // FEED-FAMILIES NO LONGER NEEDS A BOUND OF ITS OWN, and the loaded figures are
 // why: it is the area with the longest MEDIAN (24 real turns in one child) but
@@ -100,7 +108,7 @@ import (
 // NOT RELAX THIS CONSTANT; it passes its own bound to wlChild.WaitFor. The
 // restart-handover area is the one such caller (WebappLayerHandoverTimeout),
 // and its child is two whole process lifecycles rather than a slow area.
-const WebappLayerTimeout = 30 * time.Second
+const WebappLayerTimeout = 45 * time.Second
 
 // WebappLayerHandoverTimeout bounds the RESTART-HANDOVER area's child, which
 // is structurally longer than a functional area's by two whole process
@@ -580,8 +588,14 @@ func TestWebappLayerRestartHandover(t *testing.T) {
 	defer child.Kill()
 
 	// Arrange: the rendezvous. The page is mounted and its streams stand.
-	w.Daemon.AwaitLogRecord(harness.ClientLogPath(ws),
-		"the page's own mounted marker, logged through ClientLog",
+	//
+	// THE MARKER WAITS ON THE VITEST CHILD'S OWN BOOT, not on a daemon step:
+	// npm, node, vite's transform and collect, then the page's mount. Bounded
+	// by one daemon wait (HandoverChainTimeout, 15s) it failed under a full
+	// suite run while the child was still booting -- its siblings' walls that
+	// run reached 17s -- so it takes the bound measured for a child's wall.
+	w.Daemon.AwaitLogRecordWithin(harness.ClientLogPath(ws),
+		"the page's own mounted marker, logged through ClientLog", WebappLayerTimeout,
 		func(r harness.LogRecord) bool { return r.Operation == wlPageMountedOperation })
 
 	// Act: a real landed commit on the daemon's own checkout fires the real
