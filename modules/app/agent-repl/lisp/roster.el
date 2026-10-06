@@ -212,10 +212,12 @@ the user, so permission -> thinking is a move within this set and no
 finish edge at all.")
 
 (defconst agent-repl-roster-settled-statuses
-  '(:ready :done :interrupted :turn-failed :idle-async)
+  '(:ready :done :interrupted :turn-failed :vendor-blocked :turn-died :idle-async)
   "The SETTLED half of the finish edge — the foreground turn has ended.
 `turn-failed' is settled: a turn that FAILED has ended as surely as one
-that finished or was stopped.
+that finished or was stopped.  So are `vendor-blocked' and `turn-died',
+the faults a failed turn now stands as until the next one (owner ruling,
+2026-10-06): the turn they report has ended.
 `idle-async' is settled deliberately: no FOREGROUND turn is running, and
 detached work is work the user may talk over.")
 
