@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"claude-repld/internal/dirpath"
@@ -79,13 +80,25 @@ var productionTemporaryGuard = func() (tempdirs.Guard, error) {
 // so every SELECT-then-write check in this package is race-free without a
 // table lock and two writers can never lose an update on the same file.
 type store struct {
-	// mu guards the handle and the read-only flag across a PROMOTION, which
-	// swaps both. Every other field is set once at open.
-	mu       sync.RWMutex
-	handle   *sql.DB
-	path     string
-	readOnly bool
-	log      dlog.Logger
+	// mu orders a PROMOTION against the account-usage writes that must land
+	// after the usage held while read-only (SetAccountUsage), and guards
+	// retired. Every other field but current is set once at open.
+	mu sync.RWMutex
+	// current is the handle in force and whether it is read-only, swapped
+	// WHOLE by a promotion. One atomic pointer makes the pair unsplittable:
+	// write() used to read the flag and then the handle as two plain fields
+	// while Promote assigned them, a data race in which a write could see
+	// the flag of one handle and the handle of the other.
+	current atomic.Pointer[handleState]
+	// retired is every handle a PROMOTION swapped out. It stays open until
+	// Close: a reader that db() answered just before the swap still holds it
+	// and may not have started its query yet, and closing it at the swap
+	// failed that read with `sql: database is closed` (the 2026-10-06
+	// handover, where it became a false unknown_workspace for an adopting
+	// page). Guarded by mu.
+	retired []*sql.DB
+	path    string
+	log     dlog.Logger
 	// canonicalDir is dirpath.Canonical, the spelling the open's directory
 	// reconciliation compares each row against (dirspelling.go). Injectable
 	// so a test can model a case-folding volume on any host.
@@ -110,6 +123,12 @@ type store struct {
 	// daemon process holds exactly one handle, so this set is exactly the
 	// leases whose owning process is alive: see ForeignLeases and Close.
 	owned map[LeaseID]Lease
+}
+
+// handleState is one handle and its read-only flag, published together.
+type handleState struct {
+	db       *sql.DB
+	readOnly bool
 }
 
 // Open opens the workspace-state-manager database at path, creating the file
@@ -178,13 +197,13 @@ func resolveOptions(opts []Option) *store {
 // handle.
 func (s *store) finishWritingOpen(ctx context.Context, load func(context.Context, *sql.DB) error) (DB, error) {
 	if load != nil {
-		if err := load(ctx, s.handle); err != nil {
-			s.handle.Close()
+		if err := load(ctx, s.db()); err != nil {
+			s.db().Close()
 			return nil, err
 		}
 	}
 	if err := s.ensureLayout(ctx); err != nil {
-		s.handle.Close()
+		s.db().Close()
 		return nil, err
 	}
 	// THE BOOT-TIME INVARIANT CHECK. The schema and the foreign_keys pragma
@@ -192,13 +211,13 @@ func (s *store) finishWritingOpen(ctx context.Context, load func(context.Context
 	// WRITE; this reports one that was already there, which only a handle
 	// opened without the pragma can have left. See repoinvariant.go.
 	if err := s.checkRepositoryInvariant(ctx); err != nil {
-		s.handle.Close()
+		s.db().Close()
 		return nil, err
 	}
 	// THE BOOT-TIME DIRECTORY RECONCILIATION: every row keyed by its
 	// directory's on-disk spelling, or said loudly why not. See dirspelling.go.
 	if err := s.reconcileDirSpellings(ctx); err != nil {
-		s.handle.Close()
+		s.db().Close()
 		return nil, err
 	}
 	return s, nil
@@ -220,7 +239,7 @@ func OpenReadOnly(ctx context.Context, path string, opts ...Option) (DB, error) 
 		return nil, err
 	}
 	if err := s.checkLayout(ctx); err != nil {
-		s.handle.Close()
+		s.db().Close()
 		return nil, err
 	}
 	return s, nil
@@ -256,7 +275,7 @@ func migrateAdditiveWhileJoining(ctx context.Context, path string, opts []Option
 	if err != nil {
 		return err
 	}
-	defer s.handle.Close()
+	defer s.db().Close()
 	version, err := s.layoutVersion(ctx)
 	if err != nil {
 		return err
@@ -302,7 +321,8 @@ func openStore(ctx context.Context, path, dsn string, readOnly bool, opts []Opti
 		handle.Close()
 		return nil, fmt.Errorf("wsm: open %q: %w", path, err)
 	}
-	s := &store{handle: handle, path: path, readOnly: readOnly, log: discardLogger{}, canonicalDir: dirpath.Canonical}
+	s := &store{path: path, log: discardLogger{}, canonicalDir: dirpath.Canonical}
+	s.current.Store(&handleState{db: handle, readOnly: readOnly})
 	for _, opt := range opts {
 		opt(s)
 	}
@@ -321,7 +341,7 @@ func openStore(ctx context.Context, path, dsn string, readOnly bool, opts []Opti
 // existing file forward to it.
 func (s *store) ensureLayout(ctx context.Context) error {
 	var count int
-	err := s.handle.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'layout'`).Scan(&count)
+	err := s.db().QueryRowContext(ctx, `SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'layout'`).Scan(&count)
 	if err != nil {
 		return fmt.Errorf("wsm: probe layout table in %q: %w", s.path, err)
 	}
@@ -370,7 +390,7 @@ func (s *store) checkLayout(ctx context.Context) error {
 // row is undecodable, not merely foreign.
 func (s *store) layoutVersion(ctx context.Context) (int, error) {
 	var version int
-	err := s.handle.QueryRowContext(ctx, `SELECT version FROM layout WHERE id = 1`).Scan(&version)
+	err := s.db().QueryRowContext(ctx, `SELECT version FROM layout WHERE id = 1`).Scan(&version)
 	if errors.Is(err, sql.ErrNoRows) {
 		refusal := &DecodeError{Table: "layout", Row: "1", Err: errors.New("no layout row")}
 		s.log.Error("daemon.wsm.open", "state database carries no layout version", dlog.Context{"path": s.path, "error": refusal.Error()})
@@ -396,7 +416,7 @@ func (s *store) refuseLayout(version int, reason string) error {
 // transaction, so a crash mid-create can never leave a half-schema file that
 // the next open would read as a valid store.
 func (s *store) createSchema(ctx context.Context) error {
-	tx, err := s.handle.BeginTx(ctx, nil)
+	tx, err := s.db().BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("wsm: begin schema creation on %q: %w", s.path, err)
 	}
@@ -429,24 +449,29 @@ func (s *store) createSchema(ctx context.Context) error {
 // A lease another process already released -- the successor that adopted a
 // handed-over workspace drains its quiesce hold -- is simply gone, and is
 // recorded at DEBUG. Every failure is returned, joined with the close's own.
+//
+// The handles a promotion retired close here too, after the one in force.
 func (s *store) Close() error {
 	released := s.releaseOwnedLeases(context.Background())
-	return errors.Join(released, s.db().Close())
+	s.mu.RLock()
+	handles := append([]*sql.DB{s.db()}, s.retired...)
+	s.mu.RUnlock()
+	errs := []error{released}
+	for _, handle := range handles {
+		errs = append(errs, handle.Close())
+	}
+	return errors.Join(errs...)
 }
 
 // db answers the handle in force. It is a method because a PROMOTION swaps it
 // under every reader.
 func (s *store) db() *sql.DB {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.handle
+	return s.current.Load().db
 }
 
 // ReadOnly reports whether this handle is read-only right now.
 func (s *store) ReadOnly() bool {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.readOnly
+	return s.current.Load().readOnly
 }
 
 // Promote turns a READ-ONLY handle into a writing one, IN PLACE.
@@ -464,7 +489,8 @@ func (s *store) Promote(ctx context.Context) error {
 	const op = "daemon.wsm.promote"
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if !s.readOnly {
+	previous := s.current.Load()
+	if !previous.readOnly {
 		s.log.Debug(op, "the handle already writes; nothing to promote", dlog.Context{"path": s.path})
 		return nil
 	}
@@ -479,15 +505,12 @@ func (s *store) Promote(ctx context.Context) error {
 		s.log.Error(op, "the writing handle could not be reached", dlog.Context{"path": s.path, "error": err.Error()})
 		return fmt.Errorf("wsm: promote %q: %w", s.path, err)
 	}
-	previous := s.handle
-	s.handle, s.readOnly = handle, false
-	if err := previous.Close(); err != nil {
-		// The writing handle is already in place; a stubborn read-only handle
-		// is reported and nothing is rolled back.
-		s.log.Warn(op, "the retired read-only handle would not close", dlog.Context{
-			"path": s.path, "error": err.Error(),
-		})
-	}
+	// THE READ-ONLY HANDLE IS RETIRED, NOT CLOSED. db() hands it out, but
+	// the reader runs its query afterward, so a read that took it just
+	// before this swap is still on its way to it. Close ends it with the
+	// store.
+	s.retired = append(s.retired, previous.db)
+	s.current.Store(&handleState{db: handle, readOnly: false})
 	s.log.Info(op, "promoted the state handle to writing", dlog.Context{"path": s.path})
 	// STILL UNDER THE EXCLUSIVE LOCK, so a usage write that arrives now
 	// waits and lands after the held one it supersedes, never before it.
@@ -500,11 +523,14 @@ func (s *store) Promote(ctx context.Context) error {
 // EVERY write in this package goes through it, so no mutation can escape the
 // transaction discipline or the log.
 func (s *store) write(ctx context.Context, op string, fields dlog.Context, fn func(context.Context, *sql.Tx) error) error {
-	if s.readOnly {
+	// ONE LOAD: the flag and the handle it is checked against are the same
+	// publication, never one of each side of a promotion.
+	current := s.current.Load()
+	if current.readOnly {
 		s.log.Error(op, "refused a write on a read-only handle", withError(fields, ErrReadOnly))
 		return ErrReadOnly
 	}
-	tx, err := s.handle.BeginTx(ctx, nil)
+	tx, err := current.db.BeginTx(ctx, nil)
 	if err != nil {
 		wrapped := fmt.Errorf("wsm: begin transaction: %w", err)
 		s.log.Error(op, "could not begin the transaction", withError(fields, wrapped))

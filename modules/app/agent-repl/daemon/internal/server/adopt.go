@@ -11,7 +11,6 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
-	"claude-repld/internal/ids"
 	"claude-repld/internal/rollout"
 )
 
@@ -82,6 +81,18 @@ func (s *server) AdoptWebWorkspace(
 // refusal a served verb makes: `not_yet_adopted` is exactly the state an
 // adoption call exists to leave, so refusing on it would make the rendezvous
 // unreachable. The unknown-workspace and ref-mismatch refusals still stand.
+//
+// IT IS resolveRegistered, the registry resolution every verb shares. Its own
+// copy here answered EVERY failed registry read as `unknown_workspace`: on the
+// 2026-10-06 handover the successor's read for queen-model's adopting page met
+// `sql: database is closed`, the page was told the daemon had never heard of
+// its workspace and failed its boot, and the host's adopt then waited out its
+// 10s for a web participant that never came. A broken read is a failure, and
+// only a read that found nothing is `unknown_workspace`.
+//
+// AN ADOPTION'S REFUSAL IS RECORDED AT INFO. An adopt call names a workspace a
+// transfer announced, so a refusal of it is never the background noise a
+// DEBUG refusal is; the page's own ERROR was the only record of it.
 func (s *server) subjectForAdoption(
 	ctx context.Context,
 	rpc string,
@@ -91,26 +102,13 @@ func (s *server) subjectForAdoption(
 	if err := validateWorkspaceRef("workspace", ref); err != nil {
 		return resolved{}, err, true
 	}
-	record, err := s.deps.DB.Workspace(ctx, ids.WorkspaceID(ref.GetId()))
+	subject, r, err := s.resolveRegistered(ctx, rpc, ref)
 	if err != nil {
-		r := s.fill(refusal{
-			Arm:      "unknown_workspace",
-			Reason:   "no workspace with that id is registered",
-			NotFound: true,
-		})
-		return resolved{}, s.refuse(s.log, rpc, resp, r), true
+		return resolved{}, failResolution(s.log, rpc, err), true
 	}
-	if dir := ref.GetDir(); dir != "" && dir != record.Dir {
-		r := s.fill(refusal{
-			Arm:    "workspace_ref_mismatch",
-			Reason: "the echoed ref's dir disagrees with the registry",
-			Fields: map[string]any{"registry_dir": record.Dir},
-		})
-		return resolved{}, s.refuse(s.log, rpc, resp, r), true
+	if r != nil {
+		r.Info = true
+		return resolved{}, s.refuse(s.log, rpc, resp, *r), true
 	}
-	log, err := s.deps.Log.Workspace(record.Dir)
-	if err != nil {
-		return resolved{}, fail(s.log, rpc, err), true
-	}
-	return resolved{Record: record, Log: log}, nil, false
+	return subject, nil, false
 }

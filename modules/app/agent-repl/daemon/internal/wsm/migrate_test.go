@@ -849,7 +849,7 @@ func TestOpenJoiningCarriesAnAdditiveChainForward(t *testing.T) {
 	}
 	defer handle.Close()
 	s := handle.(*store)
-	if !s.readOnly {
+	if !s.ReadOnly() {
 		t.Fatalf("the joining handle writes, want it read-only")
 	}
 	if got := rawScalar[int](t, path, `SELECT version FROM layout WHERE id = 1`); got != LayoutVersion {

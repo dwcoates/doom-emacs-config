@@ -404,7 +404,10 @@ func (c *controller) rendezvousCall(ctx context.Context, ws ids.WorkspaceID, ope
 		c.mu.Unlock()
 		c.logTransition(operation, ws, "participants_called", before, after,
 			dlog.Context{"rendezvous_satisfied": false})
-		c.log.Debug(operation, "an expected participant has not called yet; waiting for the rendezvous",
+		// INFO: a participant waiting on another is the handover's one
+		// silent wait. On 2026-10-06 queen-model's host adopt sat 10s on a
+		// page whose own adopt had been refused, and only DEBUG said so.
+		c.log.Info(operation, "an expected participant has not called yet; waiting for the rendezvous",
 			merge(fields, outstanding))
 		return c.awaitRendezvous(ctx, e, done, operation, fields)
 	}
@@ -484,7 +487,15 @@ func (c *controller) awaitRendezvous(ctx context.Context, e *entry, done <-chan 
 		c.log.Debug(operation, "the rendezvous completed while this caller waited", fields)
 		return nil
 	case <-ctx.Done():
-		c.log.Debug(operation, "the caller gave up before the rendezvous completed", fields)
+		// INFO, naming who never called: this is where a participant's own
+		// timeout ends its wait, and the record says which side it waited on.
+		c.mu.Lock()
+		outstanding := dlog.Context{
+			"expected_host": e.expected.Host, "expected_web": e.expected.Web,
+			"host_called": e.hostCalled, "web_called": e.webCalled,
+		}
+		c.mu.Unlock()
+		c.log.Info(operation, "the caller gave up before the rendezvous completed", merge(fields, outstanding))
 		return ErrNotYetAdopted
 	}
 }
