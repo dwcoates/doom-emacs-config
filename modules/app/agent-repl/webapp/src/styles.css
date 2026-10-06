@@ -6197,16 +6197,14 @@ bubble-body.bubble-body { display: block; }
 
 /* ---- feed asks: the cold-context gate (src/feed/asks/cold-gate.ts) ------ */
 
-/* THE GATE'S VISUAL ANCESTOR IS THE REVIVAL GATE, and it takes that card's own
-   look: a SOLID yellow fill inside a SOLID orange frame. Solid rather than a
-   wash, because this is the only interaction available while it stands — a card
-   the conversation shows through reads as one more notice to scroll past. The
-   revival gate's rule was keyed to its `#revival-gate` host, so the fill and
-   frame are restated here for a row that lives in the feed; every element
-   inside reuses the revival gate's own classes, so the two gates are one
-   visual idea rather than two. */
+/* THE GATE'S VISUAL ANCESTOR IS THE REVIVAL GATE: its SOLID orange frame and
+   its classes for every element inside. Its fill is NOT the revival gate's
+   yellow: it is ALWAYS the Emacs input window's background, docked or not
+   (owner, 2026-10-06), which Emacs tells every page on load (--input-bg,
+   lisp/window.el). A page Emacs never told falls back to the page's own dark
+   background, never to yellow. */
 .cold-gate {
-  background: var(--revival-gate-bg);
+  background: var(--input-bg, var(--bg));
   border: 1px solid var(--revival-gate-border);
   border-radius: 8px;
   padding: 0.6rem 0.85rem;
@@ -6304,13 +6302,13 @@ bubble-body.bubble-body { display: block; }
   box-sizing: border-box;
 }
 #gate-dock[hidden] { display: none; }
-/* The docked card wears the Emacs input window's background, which Emacs
-   tells the page with the height (--gate-dock-bg, lisp/window.el), so the
-   banner reads as the slot the input had; the card's own background stands in
-   only for a page Emacs never told, which gate-dock.ts records. Its border and
-   controls are the card's own. */
+/* The docked card wears the Emacs input window's background, as the card does
+   everywhere (--input-bg, lisp/window.el), so the banner reads as the slot the
+   input had; the page's dark background stands in only for a page Emacs never
+   told, which gate-dock.ts records. Its border and controls are the card's
+   own. */
 #gate-dock > .cold-gate.cold-gate-docked {
-  background: var(--gate-dock-bg, var(--revival-gate-bg));
+  background: var(--input-bg, var(--bg));
   box-sizing: border-box;
   border-radius: 0;
   border-width: 1px 0 0;

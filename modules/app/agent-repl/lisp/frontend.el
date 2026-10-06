@@ -41,6 +41,7 @@
 ;; so the declarations below exist for the byte-compiler alone.
 (declare-function agent-repl-input-hidden-p "window" (ws))
 (declare-function agent-repl-window-tell-gate-dock "window" (ws))
+(declare-function agent-repl-window-tell-input-background "window" (ws))
 (declare-function agent-repl--fatal "core")
 (declare-function agent-repl--info "core")
 (declare-function agent-repl--error "core")
@@ -687,7 +688,11 @@ No-op when BUF holds no live widget."
                (agent-repl-open-progress-note-loaded ws))
              ;; The editor's startup opens WS's tab only once its page drew.
              (when (fboundp 'agent-repl-startup-note-page-loaded)
-               (agent-repl-startup-note-page-loaded ws)))
+               (agent-repl-startup-note-page-loaded ws))
+             ;; A (RE)LOADED PAGE HAS LOST EVERY PROPERTY EMACS SET ON IT, so
+             ;; it learns the input window's color again: the gate wears it.
+             (when (fboundp 'agent-repl-window-tell-input-background)
+               (agent-repl-window-tell-input-background ws)))
            (when (functionp prior) (funcall prior xwidget event-type))))
         (agent-repl--log ws "elisp.frontend.watch-load: armed ws=%s" ws)))))
 
