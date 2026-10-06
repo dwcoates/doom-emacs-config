@@ -1636,14 +1636,13 @@ export const FOOTER_SALIENT_KINDS: Record<string, object> = {
   startFailed: { detail: "exit 1: no module", droppedPrompts: 0 },
   closeBlocked: { text: "a turn is live" },
   notification: { text: "the agent addressed you" },
-  contextBudget: { text: "84% of the window" },
   vendorStart: { text: "Claude SDK did not start (attempt 3): overloaded · retrying" },
   offline: { text: "cannot reach api.anthropic.com: no route to host" },
   turnEnded: { text: "rate limited by the vendor", retryAt: { atMs: 60_000n } },
 };
 
 /** The salient kinds every status arm carries after its own and `update`. */
-const SHARED_SALIENTS = ["notification", "contextBudget"] as const;
+const SHARED_SALIENTS = ["notification"] as const;
 
 /**
  * Which salient kinds each status arm's cell legally carries (footer.proto;

@@ -788,6 +788,10 @@ docs. File-per-area grouping is given in section E.
     This test asserts the WIRE SHAPE lands on `AgentUpdate`, not that it
     matches a real vendor recording — say so in the test's own header
     comment, mirroring the manifest's own caveat.
+    RETIRED (owner ruling, 2026-10-06): no footer line warns that the
+    context is nearly full. The scenario, the arm and this test are gone;
+    `TestCompactionFailed` instead guards that a failed compaction raises no
+    footer salient line.
 
 ### Subagents — sync / detached / nested (`subagents_e2e_test.go`)
 
@@ -1386,6 +1390,7 @@ SPEC APPROVED. Dispositions, binding on every writer:
    git facts belong to the git-client leaf's own tests.
 
 6. **`context-budget-warning` grounding — future housekeeping**, unchanged.
+   MOOT since 2026-10-06: the scenario is retired (owner ruling).
 
 The original text of these questions is retained below for provenance.
 

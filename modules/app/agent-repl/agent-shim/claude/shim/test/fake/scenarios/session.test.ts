@@ -263,9 +263,10 @@ describe("the total-tokens reminder", () => {
   });
 
   it("is NOT dressed as the context-budget warning", async () => {
-    // No capture carries a `context_budget_warning` record of any spelling, so
-    // that producer stays ungrounded. Mapping the nearest carrier to it would
-    // make every suite agree with a mapping the vendor never made.
+    // No capture carries a `context_budget_warning` record of any spelling,
+    // and the warning is retired (owner ruling, 2026-10-06). Mapping the
+    // nearest carrier to it would make every suite agree with a mapping the
+    // vendor never made.
     // Arrange + Act
     const driven = await driveScenario(["!tokens-reminder"]);
     const types = recordsOfType(driven.transcript(), "attachment").map(
@@ -274,45 +275,6 @@ describe("the total-tokens reminder", () => {
 
     // Assert
     expect(types).not.toContain("context_budget_warning");
-  });
-});
-
-describe("the invented context-budget-warning producer", () => {
-  // UNGROUNDED, INVENTED (orchestrator ruling, pending the project lead's): no
-  // capture — not even the one literally named `context-budget-warning`
-  // (MANIFEST evidence gap) — carries a record of this spelling. This producer
-  // is separate from `!context-tip` and `!tokens-reminder`, which stay exactly
-  // as landing 5 ruled them.
-  it("is an attachment carrying the context_budget_warning type", async () => {
-    // Arrange + Act
-    const driven = await driveScenario(["!context-budget-warning"]);
-    const attachment = recordsOfType(driven.transcript(), "attachment")[0]?.attachment as {
-      type: string;
-    };
-
-    // Assert
-    expect(attachment.type).toBe("context_budget_warning");
-  });
-
-  it("carries a content field, the shape the converter's arm reads", async () => {
-    // Arrange + Act
-    const driven = await driveScenario(["!context-budget-warning"]);
-    const attachment = recordsOfType(driven.transcript(), "attachment")[0]?.attachment as {
-      content?: string;
-    };
-
-    // Assert
-    expect(typeof attachment.content).toBe("string");
-    expect(attachment.content).not.toBe("");
-  });
-
-  it("does NOT touch the context-tip producer's shape", async () => {
-    // Arrange + Act
-    const tip = await driveScenario(["!context-tip"]);
-    const attachment = recordsOfType(tip.transcript(), "attachment")[0]?.attachment as { type: string };
-
-    // Assert. `!context-tip` still emits the generic tip, landing 5's ruling.
-    expect(attachment.type).toBe("context_tip");
   });
 });
 

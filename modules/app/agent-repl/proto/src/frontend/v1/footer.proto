@@ -132,11 +132,13 @@ message FooterStrip {
 //     SALIENT    ends when the condition it describes stops being true, never
 //                on a timer. STATUS-BOUND: each status arm declares its own
 //                salient kinds, so a salient line illegal under a status is
-//                unrepresentable. A deploy's progress, the agent's push
-//                notification and the context-budget warning ride every
-//                arm's salient oneof. A vendor rate-limit event draws no
-//                salient line: it feeds the enduring usage figures (owner
-//                ruling, 2026-10-01).
+//                unrepresentable. A deploy's progress and the agent's push
+//                notification ride every arm's salient oneof. A vendor
+//                rate-limit event draws no salient line: it feeds the
+//                enduring usage figures (owner ruling, 2026-10-01). No line
+//                warns that the context is nearly full (owner ruling,
+//                2026-10-06): a failed compaction is the feed's outcome
+//                marker alone.
 //     TRANSIENT  ends when a newer transient replaces it or its expiry
 //                instant passes. STATUS-INDEPENDENT (FooterActivityTransient):
 //                an event can land under any status, and the last event may
@@ -148,8 +150,8 @@ message FooterStrip {
 //   carries EITHER the salient line OR the unpinned tiers beneath it, never
 //   both. Within the salient tier a kind that explains the standing substatus
 //   ranks first, then a fault, then a deploy's progress (`update`), then the
-//   push notification, then the context-budget warning. Within the transient tier the NEWEST wins, so a push carries at
-//   most one transient.
+//   push notification. Within the transient tier the NEWEST wins, so a push
+//   carries at most one transient.
 // - THE DAEMON DECIDES A TRANSIENT'S EXPIRY; THE CLIENT APPLIES IT. The
 //   transient ships with its expiry instant beside the lines beneath it, and
 //   the client draws the transient until its clock passes the expiry, then
@@ -381,8 +383,7 @@ message FooterStatusIdleActivity {
 // The salient kinds legal while idle, and under the `turn_failed` and
 // `degraded` statuses, which share this cell. The dead-query line ranks
 // first, because it explains a `turn_failed` status; then a deploy's
-// progress; then the push notification and the context-budget warning, in
-// that order.
+// progress; then the push notification, in that order.
 message FooterStatusIdleSalient {
   // When this line began standing; the client ticks the relative age per the
   // clock convention. A push without it is a loud daemon fault.
@@ -403,13 +404,12 @@ message FooterStatusIdleSalient {
     // submitted. STATUS-INDEPENDENT: every status arm's salient oneof carries
     // it.
     FooterStatusActivityNotification notification = 5;
-    // THE CONTEXT-BUDGET WARNING: the vendor's warning that the context is
-    // nearly full, or the daemon's "compaction failed — …" line. It stands
-    // until a cut shrinks the context: a compaction that succeeds, a /clear,
-    // or a switch to another session. STATUS-INDEPENDENT: every status arm's
-    // salient oneof carries it.
-    FooterStatusActivityContextBudget context_budget = 6;
   }
+  // Tag 6 (`context_budget`) is RETIRED: no footer line warns that the
+  // context is nearly full (owner ruling, 2026-10-06). A failed compaction
+  // is the feed's outcome marker alone.
+  reserved 6;
+  reserved "context_budget";
   // Tag 4 (`rate_limit`) is RETIRED: the enduring usage line carries
   // the vendor's allowance figures (owner ruling, 2026-10-01).
   reserved 4;
@@ -514,8 +514,8 @@ message FooterStatusWorkingSalient {
   // When this line began standing; the client ticks the relative age.
   FooterStatusActivityAt at = 1;
   // The one salient line. A compaction ranks first, because it explains the
-  // `compacting` step; a retry next; then a deploy's progress, the push
-  // notification and the context-budget warning, in that order.
+  // `compacting` step; a retry next; then a deploy's progress and the push
+  // notification, in that order.
   oneof kind {
     // A COMPACTION'S OWN PROGRESS, phase by phase, standing while the
     // compaction RUNS and ending with the cut (or the turn's terminal) that
@@ -523,8 +523,8 @@ message FooterStatusWorkingSalient {
     // auto-compaction and the cold gate's `compact and resume` remediation —
     // so the two read the same under the same `working · compacting` step.
     // A CONCLUDED compaction is never this line: its outcome is the transient
-    // `compaction_concluded` (or `context_budget` when it failed), because a
-    // finished compaction blocks nothing.
+    // `compaction_concluded`, or the feed's outcome marker alone when it
+    // failed, because a finished compaction blocks nothing.
     FooterStatusActivityCompaction compaction = 2;
     // The vendor call is being retried, standing until a response lands or
     // the turn ends. The turn cannot advance while the call fails.
@@ -536,13 +536,12 @@ message FooterStatusWorkingSalient {
     // submitted. STATUS-INDEPENDENT: every status arm's salient oneof carries
     // it.
     FooterStatusActivityNotification notification = 6;
-    // THE CONTEXT-BUDGET WARNING: the vendor's warning that the context is
-    // nearly full, or the daemon's "compaction failed — …" line. It stands
-    // until a cut shrinks the context: a compaction that succeeds, a /clear,
-    // or a switch to another session. STATUS-INDEPENDENT: every status arm's
-    // salient oneof carries it.
-    FooterStatusActivityContextBudget context_budget = 7;
   }
+  // Tag 7 (`context_budget`) is RETIRED: no footer line warns that the
+  // context is nearly full (owner ruling, 2026-10-06). A failed compaction
+  // is the feed's outcome marker alone.
+  reserved 7;
+  reserved "context_budget";
   // Tag 5 (`rate_limit`) is RETIRED: the enduring usage line carries
   // the vendor's allowance figures (owner ruling, 2026-10-01).
   reserved 5;
@@ -624,7 +623,7 @@ message FooterStatusWaitingActivity {
 // The salient kinds legal while waiting. The kind that explains the standing
 // substatus ranks first (the interrupt, the gated call, the question lead,
 // the cold gate, the countdown), then a deploy's progress, then the push
-// notification and the context-budget warning, in that order.
+// notification, in that order.
 message FooterStatusWaitingSalient {
   // When this line began standing; the client ticks the relative age.
   FooterStatusActivityAt at = 1;
@@ -655,13 +654,12 @@ message FooterStatusWaitingSalient {
     // submitted. STATUS-INDEPENDENT: every status arm's salient oneof carries
     // it.
     FooterStatusActivityNotification notification = 10;
-    // THE CONTEXT-BUDGET WARNING: the vendor's warning that the context is
-    // nearly full, or the daemon's "compaction failed — …" line. It stands
-    // until a cut shrinks the context: a compaction that succeeds, a /clear,
-    // or a switch to another session. STATUS-INDEPENDENT: every status arm's
-    // salient oneof carries it.
-    FooterStatusActivityContextBudget context_budget = 11;
   }
+  // Tag 11 (`context_budget`) is RETIRED: no footer line warns that the
+  // context is nearly full (owner ruling, 2026-10-06). A failed compaction
+  // is the feed's outcome marker alone.
+  reserved 11;
+  reserved "context_budget";
   // Tag 9 (`rate_limit`) is RETIRED: the enduring usage line carries
   // the vendor's allowance figures (owner ruling, 2026-10-01).
   reserved 9;
@@ -736,8 +734,7 @@ message FooterStatusInterruptedActivity {
 }
 // The salient kinds legal while interrupted. A stopped turn has no line of
 // its own, so only the status-independent kinds can stand: a deploy's
-// progress, the push notification and the context-budget warning, in that
-// order.
+// progress and the push notification, in that order.
 message FooterStatusInterruptedSalient {
   // When this line began standing; the client ticks the relative age.
   FooterStatusActivityAt at = 1;
@@ -750,13 +747,12 @@ message FooterStatusInterruptedSalient {
     // submitted. STATUS-INDEPENDENT: every status arm's salient oneof carries
     // it.
     FooterStatusActivityNotification notification = 4;
-    // THE CONTEXT-BUDGET WARNING: the vendor's warning that the context is
-    // nearly full, or the daemon's "compaction failed — …" line. It stands
-    // until a cut shrinks the context: a compaction that succeeds, a /clear,
-    // or a switch to another session. STATUS-INDEPENDENT: every status arm's
-    // salient oneof carries it.
-    FooterStatusActivityContextBudget context_budget = 5;
   }
+  // Tag 5 (`context_budget`) is RETIRED: no footer line warns that the
+  // context is nearly full (owner ruling, 2026-10-06). A failed compaction
+  // is the feed's outcome marker alone.
+  reserved 5;
+  reserved "context_budget";
   // Tag 3 (`rate_limit`) is RETIRED: the enduring usage line carries
   // the vendor's allowance figures (owner ruling, 2026-10-01).
   reserved 3;
@@ -888,8 +884,8 @@ message FooterStatusMergingSalient {
   // When this line began standing; the client ticks the relative age.
   FooterStatusActivityAt at = 1;
   // The one salient line. The merge step's own line ranks first, because it
-  // explains the step; then a deploy's progress, the push notification and
-  // the context-budget warning, in that order.
+  // explains the step; then a deploy's progress and the push notification,
+  // in that order.
   oneof kind {
     // The current step's own line, standing until the step ends.
     FooterStatusActivityMergeStep merge_step = 7;
@@ -900,13 +896,12 @@ message FooterStatusMergingSalient {
     // submitted. STATUS-INDEPENDENT: every status arm's salient oneof carries
     // it.
     FooterStatusActivityNotification notification = 5;
-    // THE CONTEXT-BUDGET WARNING: the vendor's warning that the context is
-    // nearly full, or the daemon's "compaction failed — …" line. It stands
-    // until a cut shrinks the context: a compaction that succeeds, a /clear,
-    // or a switch to another session. STATUS-INDEPENDENT: every status arm's
-    // salient oneof carries it.
-    FooterStatusActivityContextBudget context_budget = 6;
   }
+  // Tag 6 (`context_budget`) is RETIRED: no footer line warns that the
+  // context is nearly full (owner ruling, 2026-10-06). A failed compaction
+  // is the feed's outcome marker alone.
+  reserved 6;
+  reserved "context_budget";
   // Tag 4 (`rate_limit`) is RETIRED: the enduring usage line carries
   // the vendor's allowance figures (owner ruling, 2026-10-01).
   reserved 4;
@@ -1050,8 +1045,8 @@ message FooterStatusBackgroundActivity {
 }
 // The salient kinds legal while background. Detached work has no line of
 // its own here (its landings are the feed's), so only the
-// status-independent kinds can stand: a deploy's progress, the push
-// notification and the context-budget warning, in that order.
+// status-independent kinds can stand: a deploy's progress and the push
+// notification, in that order.
 message FooterStatusBackgroundSalient {
   // When this line began standing; the client ticks the relative age.
   FooterStatusActivityAt at = 1;
@@ -1064,13 +1059,12 @@ message FooterStatusBackgroundSalient {
     // submitted. STATUS-INDEPENDENT: every status arm's salient oneof carries
     // it.
     FooterStatusActivityNotification notification = 4;
-    // THE CONTEXT-BUDGET WARNING: the vendor's warning that the context is
-    // nearly full, or the daemon's "compaction failed — …" line. It stands
-    // until a cut shrinks the context: a compaction that succeeds, a /clear,
-    // or a switch to another session. STATUS-INDEPENDENT: every status arm's
-    // salient oneof carries it.
-    FooterStatusActivityContextBudget context_budget = 5;
   }
+  // Tag 5 (`context_budget`) is RETIRED: no footer line warns that the
+  // context is nearly full (owner ruling, 2026-10-06). A failed compaction
+  // is the feed's outcome marker alone.
+  reserved 5;
+  reserved "context_budget";
   // Tag 3 (`rate_limit`) is RETIRED: the enduring usage line carries
   // the vendor's allowance figures (owner ruling, 2026-10-01).
   reserved 3;
@@ -1156,8 +1150,8 @@ message FooterStatusVendorFaultActivity {
 // The salient kinds legal while blocked. The kind that explains the standing
 // substatus ranks first (the auth prompt; `usage_limit` has no line of its
 // own, since the enduring usage line carries the allowance figures), then a
-// standing fault, then a deploy's progress, then the push notification and
-// the context-budget warning, in that order.
+// standing fault, then a deploy's progress, then the push notification, in
+// that order.
 message FooterStatusVendorFaultSalient {
   // When this line began standing; the client ticks the relative age.
   FooterStatusActivityAt at = 1;
@@ -1178,12 +1172,6 @@ message FooterStatusVendorFaultSalient {
     // submitted. STATUS-INDEPENDENT: every status arm's salient oneof carries
     // it.
     FooterStatusActivityNotification notification = 7;
-    // THE CONTEXT-BUDGET WARNING: the vendor's warning that the context is
-    // nearly full, or the daemon's "compaction failed — …" line. It stands
-    // until a cut shrinks the context: a compaction that succeeds, a /clear,
-    // or a switch to another session. STATUS-INDEPENDENT: every status arm's
-    // salient oneof carries it.
-    FooterStatusActivityContextBudget context_budget = 8;
     // THE RETRY LINE while `api_retrying` stands: the next attempt's number,
     // the vendor's status verbatim, and — when the vendor stated a schedule —
     // the countdown to the next attempt and the last attempt it will make.
@@ -1199,6 +1187,11 @@ message FooterStatusVendorFaultSalient {
     // lines that explain the step, after the auth prompt.
     FooterStatusActivityTurnEnded turn_ended = 11;
   }
+  // Tag 8 (`context_budget`) is RETIRED: no footer line warns that the
+  // context is nearly full (owner ruling, 2026-10-06). A failed compaction
+  // is the feed's outcome marker alone.
+  reserved 8;
+  reserved "context_budget";
   // Tag 6 (`rate_limit`) is RETIRED: the enduring usage line carries
   // the vendor's allowance figures (owner ruling, 2026-10-01).
   reserved 6;
@@ -1436,8 +1429,7 @@ message FooterStatusAgentReplFaultActivity {
 }
 // The salient kinds legal while disconnected. The bring-up failure ranks
 // first, because it explains the `start_failed` step; then a standing fault;
-// then a deploy's progress; then the push notification and the
-// context-budget warning, in that order.
+// then a deploy's progress; then the push notification, in that order.
 message FooterStatusAgentReplFaultSalient {
   // When this line began standing; the client ticks the relative age.
   FooterStatusActivityAt at = 1;
@@ -1463,13 +1455,12 @@ message FooterStatusAgentReplFaultSalient {
     // submitted. STATUS-INDEPENDENT: every status arm's salient oneof carries
     // it.
     FooterStatusActivityNotification notification = 6;
-    // THE CONTEXT-BUDGET WARNING: the vendor's warning that the context is
-    // nearly full, or the daemon's "compaction failed — …" line. It stands
-    // until a cut shrinks the context: a compaction that succeeds, a /clear,
-    // or a switch to another session. STATUS-INDEPENDENT: every status arm's
-    // salient oneof carries it.
-    FooterStatusActivityContextBudget context_budget = 7;
   }
+  // Tag 7 (`context_budget`) is RETIRED: no footer line warns that the
+  // context is nearly full (owner ruling, 2026-10-06). A failed compaction
+  // is the feed's outcome marker alone.
+  reserved 7;
+  reserved "context_budget";
   // Tag 5 (`rate_limit`) is RETIRED: the enduring usage line carries
   // the vendor's allowance figures (owner ruling, 2026-10-01).
   reserved 5;
@@ -1520,8 +1511,8 @@ message FooterStatusClosingActivity {
   }
 }
 // The salient kinds legal while closing. The refusal ranks first, because it
-// explains the `vendor_fault` step; then a deploy's progress, the push
-// notification and the context-budget warning, in that order.
+// explains the `vendor_fault` step; then a deploy's progress and the push
+// notification, in that order.
 message FooterStatusClosingSalient {
   // When this line began standing; the client ticks the relative age.
   FooterStatusActivityAt at = 1;
@@ -1538,13 +1529,12 @@ message FooterStatusClosingSalient {
     // submitted. STATUS-INDEPENDENT: every status arm's salient oneof carries
     // it.
     FooterStatusActivityNotification notification = 5;
-    // THE CONTEXT-BUDGET WARNING: the vendor's warning that the context is
-    // nearly full, or the daemon's "compaction failed — …" line. It stands
-    // until a cut shrinks the context: a compaction that succeeds, a /clear,
-    // or a switch to another session. STATUS-INDEPENDENT: every status arm's
-    // salient oneof carries it.
-    FooterStatusActivityContextBudget context_budget = 6;
   }
+  // Tag 6 (`context_budget`) is RETIRED: no footer line warns that the
+  // context is nearly full (owner ruling, 2026-10-06). A failed compaction
+  // is the feed's outcome marker alone.
+  reserved 6;
+  reserved "context_budget";
   // Tag 4 (`rate_limit`) is RETIRED: the enduring usage line carries
   // the vendor's allowance figures (owner ruling, 2026-10-01).
   reserved 4;
@@ -1592,8 +1582,8 @@ message FooterStatusLoadingActivity {
 }
 // The salient kinds legal while loading. An injection has no line of its own
 // (it is the `context_injected` transient), so only the status-independent
-// kinds can stand: a deploy's progress, the push notification and the
-// context-budget warning, in that order.
+// kinds can stand: a deploy's progress and the push notification, in that
+// order.
 message FooterStatusLoadingSalient {
   // When this line began standing; the client ticks the relative age.
   FooterStatusActivityAt at = 1;
@@ -1606,13 +1596,12 @@ message FooterStatusLoadingSalient {
     // submitted. STATUS-INDEPENDENT: every status arm's salient oneof carries
     // it.
     FooterStatusActivityNotification notification = 4;
-    // THE CONTEXT-BUDGET WARNING: the vendor's warning that the context is
-    // nearly full, or the daemon's "compaction failed — …" line. It stands
-    // until a cut shrinks the context: a compaction that succeeds, a /clear,
-    // or a switch to another session. STATUS-INDEPENDENT: every status arm's
-    // salient oneof carries it.
-    FooterStatusActivityContextBudget context_budget = 5;
   }
+  // Tag 5 (`context_budget`) is RETIRED: no footer line warns that the
+  // context is nearly full (owner ruling, 2026-10-06). A failed compaction
+  // is the feed's outcome marker alone.
+  reserved 5;
+  reserved "context_budget";
   // Tag 3 (`rate_limit`) is RETIRED: the enduring usage line carries
   // the vendor's allowance figures (owner ruling, 2026-10-01).
   reserved 3;
@@ -1694,13 +1683,6 @@ message FooterStatusActivityNotification {
   string text = 1;
 }
 
-// The context-budget warning.
-message FooterStatusActivityContextBudget {
-  // The vendor's warning, or the daemon's "compaction failed — …" line,
-  // drawn verbatim.
-  string text = 1;
-}
-
 // ---- The transient tier ------------------------------------------------------
 // Events that give the reader continual feedback that the session is doing
 // something. A transient ends when a newer one replaces it or its expiry
@@ -1742,8 +1724,9 @@ message FooterActivityTransient {
   optional FooterActivityTransientAgent agent = 3;
   // Tags 4 and 5 (the streamed reasoning and response tails) and 11 and 12
   // (the push notification and the context-budget warning) are RETIRED: the
-  // tails are the feed's to draw, and the notification and the budget
-  // warning stand on a condition, so they are salient kinds.
+  // tails are the feed's to draw, and the notification stands on a
+  // condition, so it is a salient kind. The budget warning draws no footer
+  // line at all (owner ruling, 2026-10-06).
   reserved 4, 5, 11, 12;
   // Tags 6 (`tool_call`, a tool call started) and 8 (`submitting`, a prompt's
   // delivery moved) are RETIRED (owner ruling, 2026-10-06): the substatus
@@ -1780,8 +1763,8 @@ message FooterActivityTransient {
     FooterActivityTransientNetworkResume network_resume = 18;
     // A compaction CONCLUDED and the session resumed. Announced, never
     // pinned: the compaction no longer blocks the turn once it is done. A
-    // compaction that FAILED is the salient `context_budget` line instead,
-    // because the context is still as large as it was.
+    // compaction that FAILED raises no footer line at all: it is the feed's
+    // outcome marker alone (owner ruling, 2026-10-06).
     FooterActivityTransientCompactionConcluded compaction_concluded = 19;
     // The API answered again after failed attempts: the retrying line ended
     // because a response landed.
@@ -2837,9 +2820,12 @@ message FooterStatusNetworkFaultSalient {
     FooterStatusActivityUpdate update = 3;
     // THE AGENT'S PUSH NOTIFICATION. STATUS-INDEPENDENT.
     FooterStatusActivityNotification notification = 4;
-    // THE CONTEXT-BUDGET WARNING. STATUS-INDEPENDENT.
-    FooterStatusActivityContextBudget context_budget = 5;
   }
+  // Tag 5 (`context_budget`) is RETIRED: no footer line warns that the
+  // context is nearly full (owner ruling, 2026-10-06). A failed compaction
+  // is the feed's outcome marker alone.
+  reserved 5;
+  reserved "context_budget";
 }
 // The offline line, composed by the daemon from the shim's observation.
 message FooterStatusActivityNetworkOffline {

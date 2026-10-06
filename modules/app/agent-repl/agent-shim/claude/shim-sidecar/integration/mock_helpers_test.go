@@ -1409,24 +1409,6 @@ func requireAPIErrorPageLine(t *testing.T, scenario string, entries []*storev1.S
 	t.Errorf("%s: no AgentUpdate.api_error page line was produced", scenario)
 }
 
-// requireContextBudgetWarning: the vendor's budget warning is a FILE-PLANE fact
-// with no stream producer, so the sidecar is its only producer and it must
-// arrive as a page line carrying the vendor's own sentence.
-func requireContextBudgetWarning(t *testing.T, scenario string, entries []*storev1.StoreEntry) {
-	t.Helper()
-	for _, line := range pageLinesOf(entries) {
-		warning := frameOf(line).GetUpdate().GetContextBudgetWarning()
-		if warning == nil {
-			continue
-		}
-		if warning.GetText() == "" {
-			t.Errorf("%s: the context-budget warning landed with no text; the sentence IS the record", scenario)
-		}
-		return
-	}
-	t.Errorf("%s: no AgentUpdate.context_budget_warning page line was produced", scenario)
-}
-
 // requireKeepAliveStoresNothing: a keep-alive turn's records are read and
 // converted, and not one of them becomes a page line. The keepalive arm is
 // retired from the contract, so no entry can carry one.

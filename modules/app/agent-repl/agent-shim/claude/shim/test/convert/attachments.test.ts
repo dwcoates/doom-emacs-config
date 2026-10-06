@@ -163,11 +163,10 @@ describe("vendor bookkeeping", () => {
   });
 });
 
-describe("the context-budget warning", () => {
-  it("records the vendor's warning as a PAGE LINE of the agent's book", () => {
-    // It exists only as a transcript attachment, so it is a file-plane fact
-    // with a position in the conversation — SessionUpdate tag 24 was retired
-    // because nothing on the live session stream ever produced one.
+describe("the retired context-budget warning", () => {
+  it("records a context_budget_warning attachment as RESIDUE, never as an update", () => {
+    // RULING (owner, 2026-10-06): no footer line warns that the context is
+    // nearly full, so no converter owns the record and it lands as itself.
     const entries = convertAttachment(
       {
         type: "attachment",
@@ -178,31 +177,10 @@ describe("the context-budget warning", () => {
       UNIT,
     );
 
-    const frame = entries[0]?.item.kind === "frame" ? entries[0].item.frame : undefined;
-    const update = (frame?.result.value as conversationv1.AgentUpdate).update;
-    expect(update.case).toBe("contextBudgetWarning");
-    expect((update.value as conversationv1.ContextBudgetWarning).text).toBe(
-      "the window is filling",
-    );
+    expect(entries[0]?.item.kind).toBe("residue");
   });
 
-  it("keys each warning under the CROSS-PLANE session:<arm>:<uuid> spelling", () => {
-    // Both planes produce this fact from one transcript line, and write_id
-    // dedup collapses them into one row only if the key bytes match.
-    const entries = convertAttachment(
-      {
-        type: "attachment",
-        uuid: "uuid-tip",
-        attachment: { type: "context_budget_warning", content: "the window is filling" },
-      },
-      foldContext(),
-      UNIT,
-    );
-
-    expect(entries[0]?.upsertKey).toBe("session:context_budget_warning:uuid-tip");
-  });
-
-  it("records a generic context_tip as RESIDUE, never as the budget warning", () => {
+  it("records a generic context_tip as RESIDUE", () => {
     // RULING (landing 5): the one real `context_tip` capture is a generic
     // `/goal` tip, so drawing it as "your context is filling" would put a
     // sentence in the feed that the vendor never said about the context.
@@ -217,16 +195,6 @@ describe("the context-budget warning", () => {
     );
 
     expect(entries[0]?.item.kind).toBe("residue");
-  });
-
-  it("produces no update at all when the record carried no text", () => {
-    const entries = convertAttachment(
-      { type: "attachment", uuid: "uuid-tip", attachment: { type: "context_budget_warning" } },
-      foldContext(),
-      UNIT,
-    );
-
-    expect(entries).toHaveLength(0);
   });
 });
 
@@ -459,18 +427,6 @@ describe("reading one injected-context record", () => {
     );
 
     expect(entries[0]?.source.vendorUuid).toBe("injected:injected-1");
-  });
-});
-
-describe("a uuid-less context-budget warning", () => {
-  it("keys the warning under the stand-in uuid, so a replay still absorbs", () => {
-    const entries = convertAttachment(
-      { type: "attachment", attachment: { type: "context_budget_warning", text: "filling" } },
-      foldContext(),
-      UNIT,
-    );
-
-    expect(entries[0]?.upsertKey).toBe("session:context_budget_warning:context-budget-warning");
   });
 });
 

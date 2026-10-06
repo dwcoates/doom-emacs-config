@@ -336,14 +336,6 @@ describe("writeId", () => {
 });
 
 describe("the cross-plane key spellings", () => {
-  it("spells a context-budget warning as session:context_budget_warning:<uuid>", () => {
-    // BOTH PLANES produce this fact from one transcript line, and write_id
-    // dedup collapses them into one row only if the key bytes match.
-    expect(keys.contextBudgetWarningUpsertKey("11111111-2222-4333-8444-555555555555")).toBe(
-      "session:context_budget_warning:11111111-2222-4333-8444-555555555555",
-    );
-  });
-
   it("spells a context cut as session:context_cut:<uuid>, the way the sidecar mints it", () => {
     // The stream's `compact_boundary` and the transcript's carry ONE uuid (see
     // testdata/captures/compaction-directed), so this is the one spelling that

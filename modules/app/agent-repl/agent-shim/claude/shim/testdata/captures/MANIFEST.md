@@ -85,7 +85,6 @@ in the shim's AGENTS.md scenario table carry the same DECLARED-ONLY mark.
 | `bash-nonzero-exit` | 2026-09-01 | `hook`, `thinking`, `bash`, `response` → `success.completed` | `!bash-fail` | single turn | 52 KB |
 | `bash-partial-output-with-spill` | 2026-09-01 | `hook`, `thinking`, `bash`, `read`, `response` → `success.completed` | `!bash-spill` | single turn | 1.8 MB |
 | `compaction-directed` | 2026-09-03 (re-captured; Haiku) | `hook`, `thinking`, `response` → `success.completed` | `!compact` | GROUNDED. 9 turn terminals (6 filler turns added so `/compact` has enough transcript to actually compact — the 2026-09-02 run's `/compact` had only 3 turns and answered `Not enough messages to compact.`); real `compact_boundary` with `compact_metadata{trigger:"manual", pre_tokens:48374, post_tokens:3759, cumulative_dropped_tokens:44615, duration_ms:45767, preserved_segment{head_uuid, anchor_uuid, tail_uuid}, preserved_messages{anchor_uuid, uuids, all_uuids}}`, plus a `logical_parent_uuid` naming the preserved head; no `preCompactDiscoveredTools` field anywhere on either plane (the fake used to invent one; fixed) and no `system:local_command_output` line anywhere in the run; the real post-boundary summary is a plain `user`-role message (not assistant prose) beginning "This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.\n\nSummary:\n1. Primary Request and Intent: ..." | 196 KB |
-| `context-budget-warning` | 2026-09-01 | `hook`, `thinking`, `response`, `bash`, `read` → `success.completed` | `!context-budget-warning` — NAME MATCHES, GROUNDING DOES NOT: the capture holds no budget-warning record of any kind (see Evidence gaps); UNGROUNDED | single turn | 120 KB |
 | `context-injected-memory` | 2026-09-01 | `hook`, `thinking`, `response` → `success.completed` | `!memory` | single turn | 40 KB |
 | `context-injected-skills` | 2026-09-01 | `hook`, `thinking`, `response` → `success.completed` | `!skills-injected` | single turn | 56 KB |
 | `context-usage` | 2026-09-02 | `hook`, `thinking`, `read`, `response` → `success.completed` | `!context-usage-drift` | single turn | 96 KB |
@@ -181,49 +180,14 @@ each is graded against the grounding named below, or marked ungrounded.
   `clearcompact_e2e_test.go`, `phaseword_e2e_test.go`, `revive_e2e_test.go`,
   `revivalhold_e2e_test.go` and `slashdurability_e2e_test.go`.
 
-- **`!context-budget-warning`** (`src/fake/scenarios/session.ts`). UNGROUNDED,
-  INVENTED, ORCHESTRATOR RULING (pending the project lead's): no capture in
-  this manifest — including the one literally NAMED `context-budget-warning`,
-  which the "Evidence gaps" section above and `golden-conformance.test.ts`'s
-  own `EXCLUDED` entry both record as holding no budget-warning record of any
-  kind — carries this record. `!context-tip` and `!tokens-reminder` are
-  UNCHANGED and still land 5's ruling (a generic `/goal` tip and the one
-  observed `total_tokens_reminder`, neither the budget warning): this is a
-  SEPARATE, separately-named producer, added only so the converter's
-  ALREADY-BUILT `context_budget_warning` arm
-  (`test/convert/attachments.test.ts`) has a fake-SDK path to drive it from,
-  pending a real grounding capture. STILL UNGROUNDED after two further
-  Haiku attempts (2026-09-03): attempt 1 gave the model a real 40×200KB
-  `bulk/` corpus (via a new `cwd_init`, replacing the old fully-manual note)
-  but the model shortcut the "read every file" instruction with `Bash`+`md5`
-  after one real `Read`, so it never occupied enough window to be warned.
-  Attempt 2 forbade `Bash`/hashing and demanded literal reads, but each
-  200KB file exceeds the `Read` tool's own 25000-token per-call cap, and the
-  model declined the task outright rather than page through a file — so this
-  scenario, too, produced no budget-warning attachment. Bailed per cost
-  discipline after the second attempt. `prompts.json`'s `cwd_init` now
-  generates smaller (80000-byte) files and the prompt tells the model to page
-  a file with successive offset/limit `Read` calls rather than one call per
-  file. STILL UNGROUNDED after that third lever was RUN (2026-09-04, Haiku,
-  `--only context-budget-warning`): the run produced NO attachment of any
-  kind — no `context_budget_warning`, no `context_tip`, no
-  `total_tokens_reminder` — and instead ended in a hard API 400. What the
-  vendor does as the window fills is now recorded evidence rather than
-  conjecture: it emits NO warning beat at all, then answers with a SYNTHETIC
-  assistant message (`model: "<synthetic>"`, `stop_reason: "stop_sequence"`,
-  all usage counters zero) whose only content is the text `Prompt is too
-  long`, carrying `error: "invalid_request"` and `is_api_error_message:
-  true`, and the turn's `result` is `is_error: true` with
-  `api_error_status: 400` and `terminal_reason: "prompt_too_long"`. That is a
-  FAILED run, so by the harness's own rule it is not a golden and is not
-  committed; the evidence sits at
-  `~/.config/doom-overhaul/captures-0904/_failed/context-budget-warning/`.
-  Two consequences for the taxonomy: `!context-budget-warning` remains
-  UNGROUNDED and INVENTED after THREE attempts, and the previously
-  DECLARED-ONLY `!context-window` / `!fail-prompt-too-long` arms now have
-  real observed evidence (not a golden) of the shape the vendor actually
-  produces. The scenario is not retried again without a NEW lever: three
-  attempts have shown the vendor has no low-context warning on this path.
+- **The context-budget warning producer** — RETIRED with the footer's
+  context-budget line (owner ruling, 2026-10-06): no footer line warns that
+  the context is nearly full. It was never grounded. Its capture entry and
+  golden are deleted: three Haiku attempts (2026-09-03, 2026-09-04) produced
+  no `context_budget_warning` attachment of any kind; as the window fills the
+  vendor emits no warning beat at all and answers with a synthetic
+  `Prompt is too long` message (`terminal_reason: "prompt_too_long"`), the
+  shape `!fail-prompt-too-long` already declares.
 
 - **`!skill [skill-name] [args]` parameterization** (`src/fake/scenarios/skills.ts`).
   GROUNDED: `skill-invocation` (this manifest, above) remains the golden for

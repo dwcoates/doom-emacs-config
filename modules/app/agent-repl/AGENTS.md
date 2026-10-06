@@ -1873,7 +1873,7 @@ tiers, and the tier is defined by WHAT ENDS the line:
 
 | tier | ends when | examples |
 | --- | --- | --- |
-| **salient** | the condition it describes stops being true — never a timer | escalating faults (a severed link, a failed bring-up, an impaired daemon); anything waiting on the user (a gated call, a question batch, the cold gate, the agent's `PushNotification` message, which ends at the next prompt); an act in progress with its own end signal (a compaction running, an interrupt, a refused close, a deploy, a pending wakeup, a retry until the response lands); the context-budget warning (ends when a cut shrinks the context); the dead-query line (ends at the next prompt) |
+| **salient** | the condition it describes stops being true — never a timer | escalating faults (a severed link, a failed bring-up, an impaired daemon); anything waiting on the user (a gated call, a question batch, the cold gate, the agent's `PushNotification` message, which ends at the next prompt); an act in progress with its own end signal (a compaction running, an interrupt, a refused close, a deploy, a pending wakeup, a retry until the response lands); the dead-query line (ends at the next prompt) |
 | **transient** | its 10 s display window lapses, or a newer transient replaces it | task-tracker moves; hook starts; injected context; a concluded compaction; every non-blocking error or warning (non-escalating faults, daemon Warn/Error records); session changes; a finished deploy; network-resume edges; a detached run finishing while the session is `background` |
 | **enduring** | never — it is always true, so the cell is never empty | the 5-hour and weekly usage (`unobserved` until a figure is read), fed by account-usage samples and by the vendor's rate-limit events, which stand no salient line of their own (owner ruling, 2026-10-01) |
 
@@ -1884,6 +1884,14 @@ salient tier the contract's precedence decides (the kind that explains the
 standing step first, then a fault, then a deploy's progress, and so on);
 within the transient tier the NEWEST wins, so a newer event replaces
 whatever transient stood.
+
+**NO LINE WARNS THAT THE CONTEXT IS NEARLY FULL** (owner ruling, 2026-10-06).
+The salient `context_budget` kind is retired from every status arm's salient
+oneof (its tags are reserved), and with it `AgentUpdate.context_budget_warning`:
+the real Claude CLI never writes the attachment it was read from, so the shim
+and the sidecar keep such a record as residue. A failed compaction raises no
+footer line either; it is recorded at WARN and drawn as the feed's outcome
+marker alone.
 
 **A TOOL CALL AND A PROMPT'S DELIVERY DRAW NO ACTIVITY LINE** (owner ruling,
 2026-10-06). The `tool_call` and `submitting` transients are retired (tags 6
