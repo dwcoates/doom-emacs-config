@@ -849,9 +849,43 @@ func (d *Daemon) awaitFile(path string) string {
 		select {
 		case <-ticker.C:
 		case <-wait.Done():
-			d.t.Fatalf("waiting for %s: %v\nstderr:\n%s", path, wait.Err(), d.Stderr())
+			// A DAEMON THAT IS ALIVE AND NOT DOING WHAT IT WAS WAITED FOR IS
+			// ASKED WHERE IT IS, before the failure is written. Three processes
+			// starting at one instant (two stores and this boot) once each
+			// logged their first record and then nothing for 5s (2026-10-06,
+			// a full-suite run), where a quiet boot measures 50-160ms; only a
+			// stack names a stall like that.
+			dump := d.dumpOnStall(reapGrace)
+			d.t.Fatalf("waiting for %s: %v (%s)\nstderr:\n%s", path, wait.Err(), dump, d.Stderr())
 		}
 	}
+}
+
+// dumpOnStall asks a live daemon to dump every goroutine and exit -- its
+// SIGQUIT handler records daemon.cmd.sigquit with the whole dump, which its
+// stderr mirror carries -- and waits up to bound for it to go. It answers a
+// line for the failure message saying what happened.
+func (d *Daemon) dumpOnStall(bound time.Duration) string {
+	d.sigMu.Lock()
+	if d.reapBegun {
+		d.sigMu.Unlock()
+		return "the daemon was already reaped; no goroutine dump"
+	}
+	pid := d.cmd.Process.Pid
+	err := syscall.Kill(pid, syscall.SIGQUIT)
+	d.sigMu.Unlock()
+	if errors.Is(err, syscall.ESRCH) {
+		return "the daemon was already gone; no goroutine dump"
+	}
+	if err != nil {
+		return fmt.Sprintf("could not ask the daemon for a goroutine dump: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), bound)
+	defer cancel()
+	if err := WaitProcessExit(ctx, pid); err != nil {
+		return fmt.Sprintf("SIGQUIT sent for a goroutine dump, but the daemon did not exit within %s: %v", bound, err)
+	}
+	return "SIGQUIT sent; the daemon.cmd.sigquit record below holds its goroutine dump"
 }
 
 // AwaitFileGone waits for a path to disappear.
