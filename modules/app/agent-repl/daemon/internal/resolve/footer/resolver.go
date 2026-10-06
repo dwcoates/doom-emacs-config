@@ -934,53 +934,101 @@ func anyWindowOpen(d *conversationv1.SessionDiagnostics) bool {
 	return false
 }
 
-// observeAccountUsage takes one usage sample and files BOTH windows' figures
-// on the ACCOUNT's evidence (account.go): five_hour is the session allowance,
-// seven_day the weekly one. A sample that could read no figure (the
-// unavailable arm) leaves the figures on hand standing, and a sample whose
-// seven_day window the vendor omitted leaves the weekly allowance unfigured,
-// which draws it absent rather than invented.
+// observeAccountUsage takes one usage sample and files it BY BILLING MODE
+// (owner ruling, 2026-10-06) on the ACCOUNT's evidence (account.go).
 //
-// A SAMPLE THE SERVICE ANSWERED WITHOUT A FIVE-HOUR WINDOW is a fact about the
-// account, not a failure: an account billed by spend has no allowance window
-// to report (live, 2026-10-06: the enterprise seat's usage answer carries
-// five_hour null). It marks the account `noAllowance`, which the enduring line
-// draws in words until any figure arrives.
+// A SUBSCRIPTION sample (the available arm) files both windows' figures —
+// five_hour is the session allowance, seven_day the weekly one — and ends any
+// seat mode the account was in. A sample whose seven_day window the vendor
+// omitted leaves the weekly allowance unfigured, drawn absent rather than
+// invented.
 //
-// The strip renders the figures LAST READ; an unreadable attempt leaves the
-// figures standing. The strip no longer draws a "usage unread" line (owner
-// ruling), but the unreadable outcome is still surfaced to the logs here so a
-// read that keeps failing does not vanish silently.
+// A PER-SEAT sample (the seat_spend arm, which the shim picks for an
+// enterprise account reporting a monthly limit and no five-hour window) files
+// the seat's spend and clears the windows: the two modes are never drawn
+// together.
+//
+// A sample that could read no figure (the unavailable arm) leaves what is on
+// hand standing and is surfaced to the logs, so a read that keeps failing
+// does not vanish silently.
 func (r *resolver) observeAccountUsage(ws ids.WorkspaceID, s *wsState, usage *conversationv1.SessionAccountUsage) {
 	if usage == nil {
 		return
 	}
 	account := s.usage
-	available, ok := usage.GetOutcome().(*conversationv1.SessionAccountUsage_Available)
-	if !ok {
-		r.logUnreadableSample(ws, s, usage)
-		if usage.GetUnavailable().GetWindowUnavailable() != nil {
-			account.noAllowance = true
+	at := usage.GetObservedAtMs()
+	switch outcome := usage.GetOutcome().(type) {
+	case *conversationv1.SessionAccountUsage_SeatSpend:
+		r.observeSeatSpend(ws, s, outcome.SeatSpend, at)
+	case *conversationv1.SessionAccountUsage_Available:
+		// EVERY SAMPLE THE ACCOUNT'S SESSIONS TAKE IS COMPARED BY ITS SHIM
+		// STAMP. The account's workspaces run separate shims, but on one
+		// machine: their stamps are one wall clock, so an older sample is
+		// refused whichever workspace took it.
+		if seat := account.seat; seat != nil && at < seat.sampledAtMs {
+			r.logOf(ws, s).Debug("daemon.footer.account_usage_stale",
+				"refused a subscription sample older than the account's seat-spend sample",
+				dlog.Context{"observed_at_ms": at, "seat_sampled_at_ms": seat.sampledAtMs})
+			return
+		}
+		leftSeat := account.seat != nil
+		account.seat = nil
+		moved := leftSeat
+		if five := outcome.Available.GetFiveHour(); five != nil {
+			moved = account.rate.session.observeSampledFigures(five.GetUtilizationPercent(), five.GetResetsAtMs(), at) || moved
+		}
+		if seven := outcome.Available.GetSevenDay(); seven != nil {
+			moved = account.rate.weekly.observeSampledFigures(seven.GetUtilizationPercent(), seven.GetResetsAtMs(), at) || moved
+		}
+		if moved {
 			account.touch(r.opts.clock.Now())
 		}
+	default:
+		r.logUnreadableSample(ws, s, usage)
+	}
+}
+
+// observeSeatSpend files a per-seat sample: the seat's spend replaces
+// whatever the account had, windows included. A sample older than the seat
+// spend or window figures on hand is refused, by the same shim stamp the
+// windows compare.
+func (r *resolver) observeSeatSpend(ws ids.WorkspaceID, s *wsState, spend *conversationv1.SessionAccountUsageSeatSpend, at int64) {
+	account := s.usage
+	newest := account.rate.session.sampledAtMs
+	newest = max(newest, account.rate.weekly.sampledAtMs)
+	if account.seat != nil {
+		newest = max(newest, account.seat.sampledAtMs)
+	}
+	if at < newest {
+		r.logOf(ws, s).Debug("daemon.footer.account_usage_stale",
+			"refused a seat-spend sample older than the account's newest sample",
+			dlog.Context{"observed_at_ms": at, "newest_sampled_at_ms": newest})
 		return
 	}
-	// EVERY SAMPLE THE ACCOUNT'S SESSIONS TAKE IS COMPARED BY ITS SHIM STAMP.
-	// The account's workspaces run separate shims, but on one machine: their
-	// stamps are one wall clock, so an older sample is refused whichever
-	// workspace took it.
-	at := usage.GetObservedAtMs()
-	moved := false
-	if five := available.Available.GetFiveHour(); five != nil {
-		moved = account.rate.session.observeSampledFigures(five.GetUtilizationPercent(), five.GetResetsAtMs(), at) || moved
+	allotment := spend.GetAllotment()
+	seat := &seatSpend{
+		allotmentMinor: allotment.GetAmountMinor(),
+		currency:       allotment.GetCurrency(),
+		sampledAtMs:    at,
 	}
-	if seven := available.Available.GetSevenDay(); seven != nil {
-		moved = account.rate.weekly.observeSampledFigures(seven.GetUtilizationPercent(), seven.GetResetsAtMs(), at) || moved
+	if seat.currency == "" {
+		r.logOf(ws, s).Error("daemon.footer.account_usage",
+			"refused a seat's spend that names no currency; the account's usage stands", nil)
+		return
 	}
-	if moved {
-		account.noAllowance = false
-		account.touch(r.opts.clock.Now())
+	if spent := spend.GetSpent(); spent != nil {
+		if spent.GetCurrency() != seat.currency {
+			r.logOf(ws, s).Error("daemon.footer.account_usage",
+				"refused a seat's spend stated in a different currency from its allotment; the account's usage stands",
+				dlog.Context{"allotment_currency": seat.currency, "spent_currency": spent.GetCurrency()})
+			return
+		}
+		amount := spent.GetAmountMinor()
+		seat.spentMinor = &amount
 	}
+	account.seat = seat
+	account.rate = rateState{}
+	account.touch(r.opts.clock.Now())
 }
 
 // logUnreadableSample surfaces a usage sample that read NO figure. It drives
@@ -1038,6 +1086,15 @@ func (r *resolver) observeRateLimitStatus(s *wsState, status *conversationv1.Ses
 		return
 	}
 	account := s.usage
+	if account.seat != nil {
+		// A PER-SEAT ACCOUNT DRAWS ITS SPEND, NEVER A WINDOW: the modes are
+		// never held together, and only a subscription sample ends the seat
+		// mode (observeAccountUsage).
+		r.logOf(s.id, s).Debug("daemon.footer.rate_limit_on_seat",
+			"a rate-limit event for a per-seat account is not filed as a window; the seat's spend stands",
+			dlog.Context{"window": rateWindowName(status)})
+		return
+	}
 	var window *allowanceWindow
 	switch status.GetRateLimitType().GetWindow().(type) {
 	case *conversationv1.SessionRateLimitType_FiveHour:
@@ -1055,7 +1112,6 @@ func (r *resolver) observeRateLimitStatus(s *wsState, status *conversationv1.Ses
 	window.verdict = verdictOf(status)
 	if status.UtilizationPercent != nil {
 		window.observeEventFigures(status.GetUtilizationPercent(), status.GetResetsAtMs())
-		account.noAllowance = false
 	}
 	account.touch(r.opts.clock.Now())
 }
@@ -1314,4 +1370,24 @@ func (r *resolver) SetParticipants(ws ids.WorkspaceID, host, web bool) {
 			s.hostStream = host
 			s.webStream = web
 		})
+}
+
+// rateWindowName names the window a rate-limit event is about, for the logs.
+func rateWindowName(status *conversationv1.SessionRateLimitStatus) string {
+	switch status.GetRateLimitType().GetWindow().(type) {
+	case *conversationv1.SessionRateLimitType_FiveHour:
+		return "five_hour"
+	case *conversationv1.SessionRateLimitType_SevenDay:
+		return "seven_day"
+	case *conversationv1.SessionRateLimitType_SevenDayOpus:
+		return "seven_day_opus"
+	case *conversationv1.SessionRateLimitType_SevenDaySonnet:
+		return "seven_day_sonnet"
+	case *conversationv1.SessionRateLimitType_SevenDayOverageIncluded:
+		return "seven_day_overage_included"
+	case *conversationv1.SessionRateLimitType_Overage:
+		return "overage"
+	default:
+		return "unset"
+	}
 }

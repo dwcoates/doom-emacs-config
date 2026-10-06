@@ -21,13 +21,26 @@ func fullUsage(root string) AccountUsage {
 	}
 }
 
+// seatUsage is a per-seat account with the given month-to-date spend.
+func seatUsage(root string, spent *int64) AccountUsage {
+	return AccountUsage{
+		ConfigDir:  root,
+		ObservedAt: time.Unix(1_791_294_066, 0).UTC(),
+		Seat:       &SeatSpend{AllotmentMinor: 1_200_000, SpentMinor: spent, Currency: "USD", SampledAtMs: 1_791_294_066_973},
+	}
+}
+
+func ptr[T any](v T) *T { return &v }
+
 func TestAccountUsageIsReadBack(t *testing.T) {
 	tests := []struct {
 		name  string
 		usage AccountUsage
 	}{
 		{name: "every window figured", usage: fullUsage("/home/a/.claude")},
-		{name: "no window figured", usage: AccountUsage{ConfigDir: "/home/a/.claude-work", ObservedAt: time.Unix(5, 0).UTC(), NoAllowance: true}},
+		{name: "no window figured", usage: AccountUsage{ConfigDir: "/home/a/.claude-work", ObservedAt: time.Unix(5, 0).UTC()}},
+		{name: "a seat's spend", usage: seatUsage("/home/a/.claude-work", ptr(int64(22_388)))},
+		{name: "a seat with no spend reported", usage: seatUsage("/home/a/.claude-work", nil)},
 		{name: "the weekly window alone unfigured", usage: func() AccountUsage {
 			u := fullUsage("/home/a/.claude")
 			u.Weekly = nil
@@ -186,6 +199,112 @@ func TestAccountUsagesIsEmptyOnAFreshStore(t *testing.T) {
 	// Assert
 	if err != nil || len(got) != 0 {
 		t.Fatalf("AccountUsages = %+v, %v, want none", got, err)
+	}
+}
+
+func TestAccountUsageWithBothWindowsAndASeatIsRefused(t *testing.T) {
+	// Arrange
+	s, log := testStore(t)
+	usage := fullUsage("/home/a/.claude")
+	usage.Seat = seatUsage("/home/a/.claude", nil).Seat
+
+	// Act
+	err := s.SetAccountUsage(context.Background(), usage)
+
+	// Assert
+	if err == nil || !loggedOperation(log, "daemon.wsm.set_account_usage", "error") {
+		t.Fatalf("SetAccountUsage = %v, want a logged refusal of both billing modes at once", err)
+	}
+}
+
+func TestASeatWithNoCurrencyIsRefused(t *testing.T) {
+	// Arrange
+	s, log := testStore(t)
+	usage := seatUsage("/home/a/.claude-work", nil)
+	usage.Seat.Currency = ""
+
+	// Act
+	err := s.SetAccountUsage(context.Background(), usage)
+
+	// Assert
+	if err == nil || !loggedOperation(log, "daemon.wsm.set_account_usage", "error") {
+		t.Fatalf("SetAccountUsage = %v, want a logged refusal of a currencyless seat", err)
+	}
+}
+
+func TestASeatHalfStoredIsADecodeError(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	if err := s.SetAccountUsage(context.Background(), seatUsage("/home/a/.claude-work", nil)); err != nil {
+		t.Fatalf("seed SetAccountUsage: %v", err)
+	}
+	if _, err := s.db().Exec(`UPDATE account_usage SET seat_currency = NULL`); err != nil {
+		t.Fatalf("corrupt the row: %v", err)
+	}
+
+	// Act
+	_, err := s.AccountUsages(context.Background())
+
+	// Assert
+	var decode *DecodeError
+	if !errors.As(err, &decode) || decode.Field != "seat" {
+		t.Fatalf("AccountUsages err = %v, want a DecodeError on the seat", err)
+	}
+}
+
+func TestAStoredSpendWithNoAllotmentIsADecodeError(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	if err := s.SetAccountUsage(context.Background(), AccountUsage{ConfigDir: "/home/a/.claude-work", ObservedAt: time.Unix(5, 0).UTC()}); err != nil {
+		t.Fatalf("seed SetAccountUsage: %v", err)
+	}
+	if _, err := s.db().Exec(`UPDATE account_usage SET seat_spent_minor = 7`); err != nil {
+		t.Fatalf("corrupt the row: %v", err)
+	}
+
+	// Act
+	_, err := s.AccountUsages(context.Background())
+
+	// Assert
+	var decode *DecodeError
+	if !errors.As(err, &decode) || decode.Field != "seat" {
+		t.Fatalf("AccountUsages err = %v, want a DecodeError on the seat", err)
+	}
+}
+
+func TestARowStoredWithNoAllowanceReloadsAsNothingKnown(t *testing.T) {
+	// Arrange: a row as the layout-24 build stored the enterprise seat.
+	s, _ := testStore(t)
+	if _, err := s.db().Exec(`INSERT INTO account_usage (config_dir, observed_at, no_allowance) VALUES ('/home/a/.claude-work', 5, 1)`); err != nil {
+		t.Fatalf("seed the layout-24 row: %v", err)
+	}
+
+	// Act
+	got, err := s.AccountUsages(context.Background())
+
+	// Assert
+	want := AccountUsage{ConfigDir: "/home/a/.claude-work", ObservedAt: fromNanos(5)}
+	if err != nil || len(got) != 1 || !reflect.DeepEqual(got[0], want) {
+		t.Fatalf("AccountUsages = %+v, %v, want [%+v]", got, err, want)
+	}
+}
+
+// TestTheMigrationAddsTheSeatColumns pins the layout-25 step.
+func TestTheMigrationAddsTheSeatColumns(t *testing.T) {
+	// Arrange
+	path := fixtureAt(t, 24)
+
+	// Act
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites())
+	if err != nil {
+		t.Fatalf("Open on a layout-24 database: %v", err)
+	}
+	defer handle.Close()
+
+	// Assert
+	s := handle.(*store)
+	if got := scalar[int](t, s, `SELECT count(*) FROM pragma_table_info('account_usage') WHERE name LIKE 'seat_%'`); got != 4 {
+		t.Fatalf("seat columns after the migration = %d, want 4", got)
 	}
 }
 
