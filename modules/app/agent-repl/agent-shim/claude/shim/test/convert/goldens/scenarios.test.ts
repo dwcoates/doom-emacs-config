@@ -39,7 +39,6 @@ const UNIT_KINDS: readonly (readonly [string, readonly string[]])[] = [
   // one, so `response` (turn 1's) is the SECOND kind seen, `thinking` the
   // THIRD.
   ["compaction-directed", ["hook", "response", "thinking"]],
-  ["context-budget-warning", ["hook", "thinking", "response", "bash", "read"]],
   ["context-injected-memory", ["hook", "thinking", "response"]],
   ["context-injected-skills", ["hook", "thinking", "response"]],
   ["context-usage", ["hook", "thinking", "read", "response"]],
@@ -118,7 +117,6 @@ const SESSION_ARMS: readonly (readonly [string, readonly string[]])[] = [
   // `system:init` finally carries a populated `mcp_servers` array — so
   // `fastMode` and `rateLimitStatus` are seen before `mcpServer`, not after.
   ["compaction-directed", ["fastMode", "rateLimitStatus", "mcpServer", "compacting"]],
-  ["context-budget-warning", ["mcpServer", "fastMode", "rateLimitStatus"]],
   ["context-injected-memory", ["mcpServer", "fastMode", "rateLimitStatus"]],
   ["context-injected-skills", ["mcpServer", "fastMode", "rateLimitStatus"]],
   ["context-usage", ["mcpServer", "fastMode", "rateLimitStatus"]],
@@ -238,7 +236,6 @@ const TERMINALS: readonly (readonly [string, readonly string[]])[] = [
       "success.completed",
     ],
   ],
-  ["context-budget-warning", ["success.completed"]],
   ["context-injected-memory", ["success.completed"]],
   ["context-injected-skills", ["success.completed"]],
   ["context-usage", ["success.completed"]],

@@ -5,7 +5,7 @@
  *
  * The SDK's message union declares NO attachment message. Every record this file
  * converts — the injected memory file, the injected skills, the IDE diagnostics,
- * the context-budget warning, the tool-availability deltas — is written to the
+ * the tool-availability deltas — is written to the
  * vendor's TRANSCRIPT and reaches this system through the SIDECAR's file plane,
  * not through the stream the shim watches. The converters are here anyway, and
  * they are pure functions over the record's own shape, for three reasons: the
@@ -29,7 +29,7 @@
 import { create } from "@bufbuild/protobuf";
 import { bindLog } from "../log.js";
 import { conversationv1 } from "../proto.js";
-import { activityUpsertKey, contextBudgetWarningUpsertKey } from "../store/keys.js";
+import { activityUpsertKey } from "../store/keys.js";
 import type { PersistEntry } from "../store/persistence.js";
 import { agentActivity, pageLineEntry, updateFrame } from "./entries.js";
 import type { FoldContext, LastChange } from "./fold-context.js";
@@ -268,50 +268,6 @@ function convertContextInjected(
 }
 
 /**
- * The vendor's own context-budget warning, injected into the prompt as the
- * window fills.
- *
- * A PAGE LINE OF THE AGENT'S BOOK, not a session fact (landing 4). It exists
- * only as an ATTACHMENT LINE in the transcript, so it is a file-plane fact with
- * a position in the conversation — and `SessionUpdate` tag 24 was retired
- * precisely because nothing on the live session stream ever produced one.
- * Instantaneous: one record, one row, no lifecycle.
- *
- * The producer composes the text and no structured figure rides the record, so
- * none is invented.
- */
-function convertContextBudgetWarning(
-  record: AttachmentRecord,
-  context: FoldContext,
-): readonly PersistEntry[] {
-  const text = record.attachment?.content ?? record.attachment?.text;
-  if (typeof text !== "string" || text === "") {
-    // warn: a defect because an incomplete context-budget warning is dropped from the conversation.
-    LOGGER.warn({}, "a context-budget warning carried no text; no row is produced");
-    return [];
-  }
-  const uuid = record.uuid ?? "context-budget-warning";
-  LOGGER.debug({}, "the vendor warned that the context window is filling");
-  return [
-    pageLineEntry(
-      context,
-      {
-        agentId: context.mainAgentId,
-        vendorUuid: uuid,
-        discriminator: "agent_update.context_budget_warning",
-      },
-      contextBudgetWarningUpsertKey(uuid),
-      create(conversationv1.AgentUpdateSchema, {
-        update: {
-          case: "contextBudgetWarning",
-          value: create(conversationv1.ContextBudgetWarningSchema, { text }),
-        },
-      }),
-    ),
-  ];
-}
-
-/**
  * Every attachment record, routed.
  *
  * `blockActivity` is the identity an injection unit takes; the caller mints it
@@ -369,14 +325,10 @@ export function convertAttachment(
     // last change was an edit or a write from the same remembered value.
     return convertDiagnostics(record, context, change);
   }
-  // `context_tip` IS NOT THE BUDGET WARNING (ruling, landing 5). The one real
-  // `context_tip` capture is a generic `/goal` tip, so mapping it to the
-  // warning would draw an unrelated tip as "your context is filling"; which
-  // attachment really carries the warning is on the capture run's checklist.
-  // Until a capture says, the tip lands as itself: residue.
-  if (type === "context_budget_warning") {
-    return convertContextBudgetWarning(record, context);
-  }
+  // NO ATTACHMENT IS A CONTEXT-BUDGET WARNING (owner ruling, 2026-10-06): no
+  // footer line warns that the context is nearly full, and the real vendor
+  // never wrote a `context_budget_warning` record. A `context_tip` is a generic
+  // CLI tip; it, like any record no converter owns, lands as residue below.
   if (type === "nested_memory" || type === "invoked_skills" || type === "dynamic_skill") {
     return convertContextInjected(record, context, activityId);
   }
