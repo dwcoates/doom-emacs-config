@@ -2,8 +2,8 @@
 // registry's temporary-directory guard (tempdirs).
 //
 // A package whose tests register directories in a real registry runs its tests
-// through Main: TMPDIR is pointed at a short directory made under /tmp, so every t.TempDir and os.MkdirTemp("") of the run lands
-// inside it, and Guard answers the production roots exempting that directory
+// through Main: TMPDIR is pointed at a short directory made under /tmp, so
+// every t.TempDir and os.MkdirTemp("") of the run lands inside it, and Guard answers the production roots exempting that directory
 // and nothing else. Every other temporary folder is still refused.
 //
 // It is a test package: nothing the daemon links imports it, so no running
@@ -27,7 +27,8 @@ var (
 )
 
 // Main runs m with TMPDIR pointed at the run's exempt root, and answers the
-// exit code. Call it from TestMain: `os.Exit(tempdirstest.Main(m))`.
+// exit code. A root it cannot set up is a harness failure and panics. Call
+// it from TestMain: `os.Exit(tempdirstest.Main(m))`.
 func Main(m *testing.M) int {
 	real := os.TempDir()
 	// THE ROOT IS UNDER /tmp AND SHORT, as the integration harness's run root
@@ -36,18 +37,15 @@ func Main(m *testing.M) int {
 	// the 104-byte sun_path limit.
 	root, err := os.MkdirTemp("/tmp", "arunit")
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "tempdirstest: make the exempt temporary root: %v\n", err)
-		return 2
+		panic(fmt.Errorf("tempdirstest: make the exempt temporary root: %w", err))
 	}
 	defer os.RemoveAll(root)
 	g, err := tempdirs.New(real, root)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "tempdirstest: build the guard: %v\n", err)
-		return 2
+		panic(fmt.Errorf("tempdirstest: build the guard: %w", err))
 	}
 	if err := os.Setenv("TMPDIR", root); err != nil {
-		fmt.Fprintf(os.Stderr, "tempdirstest: point TMPDIR at %s: %v\n", root, err)
-		return 2
+		panic(fmt.Errorf("tempdirstest: point TMPDIR at %s: %w", root, err))
 	}
 	guard, built = g, true
 	return m.Run()
