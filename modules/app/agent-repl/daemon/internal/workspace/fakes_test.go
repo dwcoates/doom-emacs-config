@@ -96,6 +96,8 @@ type fakeDB struct {
 	// cannot.
 	registeredRepos []registeredRepo
 	registerRepoErr error
+	// refuseTemporaryErr is what RefuseTemporary answers.
+	refuseTemporaryErr error
 
 	putJobs     []wsm.CreationJob
 	putJobErr   error
@@ -294,6 +296,9 @@ func (d *fakeDB) RegisterWorkspace(_ context.Context, dir string, facts wsm.Regi
 	d.createdNew = true
 	return ws, true, nil
 }
+
+// RefuseTemporary answers the scripted temporary-directory refusal.
+func (d *fakeDB) RefuseTemporary(string) error { return d.refuseTemporaryErr }
 
 // registeredRepo is one RegisterRepository call, as the fake recorded it.
 type registeredRepo struct{ Dir, DefaultBranch string }

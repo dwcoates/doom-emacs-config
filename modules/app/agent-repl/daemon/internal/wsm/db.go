@@ -44,6 +44,12 @@ type DB interface {
 	// mint RegisterWorkspace performs through ensureRepo, reachable without a
 	// workspace to hang it on.
 	RegisterRepository(ctx context.Context, dir, defaultBranch string) (Repository, bool, error)
+	// RefuseTemporary answers the *tempdirs.InsideError RegisterWorkspace and
+	// RegisterRepository would refuse dir with, or nil: the SAME check, for a
+	// verb that must refuse a temporary directory before it registers
+	// anything (CreateWorkspace's repository). A dir that cannot be judged is
+	// an ordinary error.
+	RefuseTemporary(dir string) error
 	// ListRepositories loads every repository, all-or-nothing.
 	ListRepositories(ctx context.Context) ([]Repository, error)
 	// SetRepositoryFolded records whether a repository's roster section is
