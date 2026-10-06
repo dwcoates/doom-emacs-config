@@ -1890,22 +1890,39 @@ message FooterActivityTransientUpdated {
 // true while it stands, so it carries no age: when it was drawn says nothing
 // a reader needs.
 //
+// THE USAGE IS THE ACCOUNT'S, NOT THE WORKSPACE'S (owner ruling, 2026-10-06).
+// Every workspace whose session spends from one account root (its Claude
+// config dir) draws that account's newest figures the moment any of them
+// learns them, and the daemon keeps the last figures per account durably, so
+// a restarted daemon draws them before any session has spoken.
+//
+// THE LINE IS NEVER EMPTY (owner ruling, 2026-10-06): every arm draws words.
+//
 // The client draws the line it is given and decides nothing.
 message FooterActivityEnduring {
-  // Whether a usage figure has been observed. Exactly one is set.
+  // What is known about the account's usage. Exactly one is set.
   oneof line {
     // The account's usage allowances.
     FooterActivityEnduringUsage usage = 1;
-    // No account-usage figure has been observed yet; the line is empty.
+    // No account-usage figure has ever been observed for this account.
+    // Drawn "usage not yet seen for this account".
     FooterActivityEnduringUnobserved unobserved = 3;
+    // The vendor's usage service answered for this account and reported no
+    // five-hour session allowance (an account billed by spend rather than by
+    // allowance windows, e.g. an enterprise seat). Drawn "no session or weekly
+    // allowance on this account". Any later usage figure for the account
+    // replaces it.
+    FooterActivityEnduringNoAllowance no_allowance = 4;
   }
   // Tag 2 (`context_window`, the main agent's context fill) is RETIRED: the
   // enduring line is the usage allowances alone.
   reserved 2;
   reserved "context_window";
 }
-// No usage figure has been observed yet.
+// No usage figure has ever been observed for the account.
 message FooterActivityEnduringUnobserved {}
+// The account has no session allowance to draw.
+message FooterActivityEnduringNoAllowance {}
 
 // The account's usage allowances. The vendor bills independent allowances
 // (rolling five-hour session, seven-day weekly, and an overage window beyond
@@ -1981,6 +1998,14 @@ message FooterAllowance {
   // an allowance that is not newsworthy is still drawn.
   bool newsworthy = 1;
   // When the allowance resets, epoch SECONDS, the vendor event's own unit.
+  //
+  // A FIGURE IS TRUE ONLY UNTIL ITS RESET. The figures are the last ones
+  // READ (they may have been read before a daemon restart), so once the
+  // client's clock passes this instant the utilization above describes a
+  // window that no longer exists: the client draws the allowance as
+  // "<label> reset since last seen", with NO percentage, until a newer figure
+  // arrives. The daemon ships the instant and pushes nothing when it passes
+  // (the transient expiry's rule).
   int64 resets_at_s = 2;
   // How much of the allowance is used, 0..1.
   double utilization = 3;
