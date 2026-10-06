@@ -1451,8 +1451,8 @@ against it), and this table is what it means.
 | Yellow | The main thread is idle while detached work (background subagents, shells) runs. | Yes | `idle_async`; footer `background` |
 | Green | Ready for you: idle, or waiting on your input. | Yes | ready, done, interrupted, permission; a merge that landed (`merged`); footer `idle`, `waiting`, `interrupted`; a Stop hook's deliberate stop and a deferred tool read as done |
 | Purple | A merge is in progress; the daemon holds the workspace. | No: the composer is closed. | `merge_queued`, `merging` |
-| Turquoise | Something unexpected went wrong and wants your attention, but the workspace is usable. | Yes | `turn_failed` (a failed, orphaned, agent-died, dead-query or lost turn, or a transient vendor failure such as an overloaded api or a model error); `merge_failed`; `degraded`; every VENDOR FAULT: roster `vendor_fault` / footer `vendor_fault · vendor_retry`, `vendor_rejection`, `vendor_failed` (the vendor will not start), roster `vendor_blocked` / footer `vendor_fault · auth`, `usage_limit`, `billing`, `vendor_error`, `query_died` (a vendor or account block), roster and footer `api_retrying` (the vendor is retrying the turn's failed API call) |
-| Blue | The workspace is unusable right now. | No: the composer is closed. | every AGENT-REPL FAULT: roster `init`, `severed`, `dead`, `start_failed` / footer `agent_repl_fault · starting`, `degraded`, `severed`, `dead`, `start_failed`, `daemon_impaired`; every NETWORK FAULT: roster `network_fault` / footer `network_fault · offline`; footer `closing` |
+| Turquoise | Something unexpected went wrong and wants your attention, but the workspace is usable. | Yes | roster `turn_failed` (a failed turn restored from the durable record only; live, a failed turn stands as its fault, below); `merge_failed`; `degraded`; every VENDOR FAULT: roster `vendor_fault` / footer `vendor_fault · vendor_retry`, `vendor_rejection`, `vendor_failed` (the vendor will not start), roster `vendor_blocked` / footer `vendor_fault · auth`, `usage_limit`, `billing`, `vendor_error` (a vendor or account block, and every turn the vendor ended or refused, until the next turn starts), roster and footer `api_retrying` (the vendor is retrying the turn's failed API call) |
+| Blue | The workspace is unusable right now. | No: the composer is closed (except under `turn_died`, declared in `composer_open_substatuses`). | every AGENT-REPL FAULT: roster `init`, `severed`, `dead`, `start_failed`, `turn_died` / footer `agent_repl_fault · starting`, `degraded`, `severed`, `dead`, `start_failed`, `daemon_impaired`, `turn_died` (the last turn's vendor query or agent process died, until the next turn starts); every NETWORK FAULT: roster `network_fault` / footer `network_fault · offline`; footer `closing` |
 | Uncolored | There is no lifecycle to report. | — | `none` (never had a session), `inactive` (no open perspective, drawn `?`) |
 
 ### The three fault domains
@@ -1521,10 +1521,19 @@ The rules that keep this true:
   permission ask) is green, never blue. A merge never parks: one that gives up
   is `merge_failed`, turquoise, and the workspace is back with you.
 - **One classifier decides a failure's color.** `ladder.ClassifyFailure` sorts
-  every turn-ending agent failure into a vendor or account block (a vendor
-  fault, turquoise), the
-  turn's own failure (turquoise) or an expected stop (green), and both the
-  footer and the roster call it.
+  every turn-ending agent failure into a vendor or account block, a failure the
+  vendor ended or refused, the query dying, or an expected stop, and
+  `ladder.ResolveTurnFault` turns the turn's close and that class into the
+  TURN FAULT both the footer and the roster raise from the same close (owner
+  ruling, 2026-10-06): a vendor fault (turquoise; footer `vendor_fault ·
+  vendor_error` or the block's own step, roster `vendor_blocked`), an
+  agent-repl fault for a query or agent-process death (blue; footer
+  `agent_repl_fault · turn_died`, roster `turn_died`, composer left open), or
+  none for an interrupt or an expected stop. It stands until the next turn
+  starts, and the footer's activity line is the daemon's per-cause sentence
+  (`resolve/turnfault`), the one the feed's turn-end row carries. The feed
+  draws the event as an OUTCOME MARKER (`frontend.v1.FeedOutcomeMarker`), never
+  a bubble.
 - **The status ladder ranks every unusable rung above every usable one**
   (`daemon/internal/resolve/ladder`), so a blue claim is never hidden under a
   turquoise one.
@@ -1539,8 +1548,9 @@ The rules that keep this true:
   `webapp/src/vocab.ts#composerClosedFor`). The gate is derived from the color,
   never from a list of arm names, with one kind of exception: a substatus
   DECLARED in `render-colors.json#composer_open_substatuses` keeps it open
-  under a closing color (none is declared today: `api_retrying` is a vendor
-  fault and turquoise, so its composer is open by color). A merge in flight (purple) leaves it open:
+  under a closing color (`agent_repl_fault · turn_died` alone: its fault ends
+  at the next turn, so a closed composer would make it permanent;
+  `api_retrying` is a vendor fault and turquoise, open by its color). A merge in flight (purple) leaves it open:
   what is submitted is held until the merge ends, and a prompt held so keeps
   the workspace open past the landing. Emacs's composer is gated by the
   daemon's host composer arm instead (a drain, a restart; a holding merge
