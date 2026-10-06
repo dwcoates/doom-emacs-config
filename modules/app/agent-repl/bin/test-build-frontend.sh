@@ -1434,6 +1434,11 @@ t_ensure_deps_fails_when_the_install_fails() {
 # package named by EED_FAIL_PACKAGE.
 eed_fixture() {
     local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
+    # THE ROOT IS NORMALIZED, because the scripts under test name packages by
+    # a path they resolved with cd: a TMPDIR ending in "/" (macOS's own
+    # /var/folders/.../T/) made this root carry a "//" the scripts' paths do
+    # not, and EED_ROOT then stripped nothing.
+    root="$(cd "$root" && pwd)"
     mkdir -p "$root/bin" "$root/agent-shim/claude/shim" "$root/webapp" "$root/e2e"
     cp "$THIS_DIR/ensure-e2e-deps.sh" "$THIS_DIR/test-e2e.sh" "$root/bin/"
     cat > "$root/bin/ensure-deps.sh" <<'EOF'
