@@ -1530,7 +1530,12 @@ export const FOOTER_SALIENT_KINDS: Record<string, object> = {
   gatedCall: { text: "Bash npm test" },
   questionLead: { text: "How far should the port go?" },
   blockedOnUser: { detail: "answer the permission card" },
-  coldGateCost: { text: "184k tokens uncached" },
+  coldGateCost: {
+    text: "the conversation is cold at 184,000 context tokens",
+    lead: "the conversation is cold at ",
+    figure: { text: "184,000", windowFill: 0.184 },
+    tail: " context tokens",
+  },
   interrupting: { text: "stopping 3 agents" },
   mergeStep: { step: { case: "testing", value: MERGE_STEP_LINES.testing.value } },
   authenticating: { line: "opening the login terminal" },

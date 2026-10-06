@@ -109,7 +109,8 @@ import type { TransientExpirySchedule } from "./expiry.js";
 import { footerClockSpan } from "./clock-span.js";
 import { drawFooterStatusActivityMergeStep } from "./merge-step.js";
 import { grabber, statusWords, textLine } from "./parts.js";
-import { pressurePercentColor } from "../pressure-color.js";
+import { coldGateFigureColor, pressurePercentColor } from "../pressure-color.js";
+import { MalformedView } from "../rpc/malformed.js";
 import { activityDatumClass } from "./tones.js";
 
 /**
@@ -933,11 +934,29 @@ export function drawFooterStatusActivityBlockedOnUser(
   return textLine("footer-activity-blocked-on-user", u.detail);
 }
 
-/** The cold gate's composed cost line, verbatim. */
+/**
+ * The cold gate's composed cost line, drawn from its parts so the token figure
+ * takes its color: the cold-gate gradient over its window fill
+ * (`coldGateFigureColor`, the same call the docked gate's figure makes). The
+ * parts must make exactly the composed line; a line that does not is refused.
+ */
 export function drawFooterStatusActivityColdGateCost(
   u: FooterStatusActivityColdGateCost,
 ): HTMLElement {
-  return textLine("footer-activity-cold-gate-cost", u.text);
+  const path = "FooterStatusActivityColdGateCost";
+  const figure = requireMessage(u.figure, `${path}.figure`);
+  if (u.lead + figure.text + u.tail !== u.text) {
+    throw new MalformedView(path, `its parts ${JSON.stringify([u.lead, figure.text, u.tail])} do not make its text ${JSON.stringify(u.text)}`);
+  }
+  const line = document.createElement("span");
+  line.className = "footer-activity-cold-gate-cost";
+  const number = document.createElement("span");
+  number.className = "footer-cold-gate-figure";
+  number.textContent = figure.text;
+  // INLINE: the figure's color IS its reading (as the context chip's).
+  number.style.color = coldGateFigureColor(figure.windowFill, `${path}.figure.window_fill`);
+  line.append(document.createTextNode(u.lead), number, document.createTextNode(u.tail));
+  return line;
 }
 
 /** The interrupting line, verbatim. */
