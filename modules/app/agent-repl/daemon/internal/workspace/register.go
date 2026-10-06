@@ -477,6 +477,11 @@ func (v *verbs) PublishRegistry(ctx context.Context) error {
 		log.Error(opRegister, "could not read the current workspace for the opening roster", dlog.Context{"cause": err.Error()})
 		return fmt.Errorf("publish the opening roster: read the current workspace: %w", err)
 	}
+	view, err := v.deps.DB.SidebarView(ctx)
+	if err != nil {
+		log.Error(opRegister, "could not read the sidebar's view state for the opening roster", dlog.Context{"cause": err.Error()})
+		return fmt.Errorf("publish the opening roster: read the sidebar's view state: %w", err)
+	}
 	// Every workspace the registry already holds is bound too: a daemon that
 	// has just restarted did not run Register for the rows it inherited, and
 	// an unbound resolver cannot serve their views.
@@ -533,7 +538,7 @@ func (v *verbs) PublishRegistry(ctx context.Context) error {
 		log.Error(opRegister, "could not read the session records for the opening roster", dlog.Context{"cause": err.Error()})
 		return fmt.Errorf("publish the opening roster: %w", err)
 	}
-	v.deps.Sidebar.SetRegistry(sidebarRegistry(log, workspaces, repositories, tasks, sessions, current))
+	v.deps.Sidebar.SetRegistry(sidebarRegistry(log, workspaces, repositories, tasks, sessions, current, view))
 	log.Debug(opRegister, "published the opening roster", dlog.Context{
 		"workspaces": len(workspaces), "repositories": len(repositories), "tasks": len(tasks),
 		"sessions": len(sessions),

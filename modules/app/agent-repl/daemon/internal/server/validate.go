@@ -535,6 +535,43 @@ func validateFoldRepositoryRequest(req *agentreplv1.FoldRepositoryRequest) *conn
 	return nil
 }
 
+// validateUpdateSidebarViewRequest is UpdateSidebarViewRequest's base
+// function: a change arm, and within it every arm and ref it names.
+func validateUpdateSidebarViewRequest(req *agentreplv1.UpdateSidebarViewRequest) *connect.Error {
+	switch change := req.GetChange().(type) {
+	case nil:
+		return invalid("change", "a change arm is required")
+	case *agentreplv1.UpdateSidebarViewRequest_FoldSection:
+		return validateSidebarViewFoldSection(change.FoldSection)
+	case *agentreplv1.UpdateSidebarViewRequest_ShowGrouping:
+		if change.ShowGrouping.GetGrouping() == nil {
+			return invalid("show_grouping.grouping", "a grouping arm is required")
+		}
+	}
+	return nil
+}
+
+// validateSidebarViewFoldSection is SidebarViewFoldSection's base function: a
+// section arm (a repository's or task's carrying its ref) and a fold arm.
+func validateSidebarViewFoldSection(fold *agentreplv1.SidebarViewFoldSection) *connect.Error {
+	switch section := fold.GetSection().(type) {
+	case nil:
+		return invalid("fold_section.section", "a section arm is required")
+	case *agentreplv1.SidebarViewFoldSection_Repository:
+		if err := validateRepositoryRef("fold_section.repository", section.Repository); err != nil {
+			return err
+		}
+	case *agentreplv1.SidebarViewFoldSection_Task:
+		if err := validateTaskRef("fold_section.task", section.Task); err != nil {
+			return err
+		}
+	}
+	if fold.GetFold() == nil {
+		return invalid("fold_section.fold", "a fold arm is required")
+	}
+	return nil
+}
+
 // validateUpdateHeldPromptRequest is UpdateHeldPromptRequest's base function.
 func validateUpdateHeldPromptRequest(req *agentreplv1.UpdateHeldPromptRequest) *connect.Error {
 	if err := validateWorkspaceRef("workspace", req.GetWorkspace()); err != nil {

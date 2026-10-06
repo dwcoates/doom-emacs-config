@@ -8,6 +8,7 @@
 import { create, type MessageInitShape } from "@bufbuild/protobuf";
 import { createRouterTransport, type ServiceImpl } from "@connectrpc/connect";
 import { AgentRepl } from "../../../proto/gen/ts/agentrepl/v1/service_pb";
+import { UpdateSidebarViewResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_sidebar_view_pb";
 import { WatchWorkspaceRosterResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_workspace_roster_pb";
 import {
   RosterRowSchema,
@@ -30,7 +31,9 @@ import { createAgentReplClient } from "../../src/rpc/client.js";
 import { type AppContext } from "../../src/rpc/context.js";
 import { testAppContext } from "../rpc/app-context.js";
 import { AttentionRegistry, type BlinkTimers } from "../../src/sidebar/attention.js";
-import type { SidebarContext, SidebarPrefs } from "../../src/sidebar/context.js";
+import type { Grouping, SidebarContext } from "../../src/sidebar/context.js";
+import { createSidebarView, type SidebarView } from "../../src/sidebar/view.js";
+import { createDropdowns } from "../../src/sidebar/dropdowns.js";
 
 /** The webview's own workspace. */
 export const WORKSPACE = create(WorkspaceRefSchema, { id: "ws-self", dir: "/w/self" });
@@ -83,36 +86,17 @@ export function fakeTimers(): BlinkTimers & { run(): boolean } {
   };
 }
 
-/** Preferences in memory: no storage, no persistence, fully inspectable. */
-export function memoryPrefs(initial: Partial<Record<string, unknown>> = {}): SidebarPrefs & {
-  state: { grouping: string; folded: Record<string, boolean>; expanded: Record<string, boolean> };
-} {
-  const state = {
-    grouping: (initial.grouping as string) ?? "repository",
-    folded: (initial.folded as Record<string, boolean>) ?? {},
-    expanded: (initial.expanded as Record<string, boolean>) ?? {},
-  };
-  return {
-    state,
-    grouping: () => (state.grouping === "task" ? "task" : "repository"),
-    setGrouping(grouping) {
-      state.grouping = grouping;
-    },
-    isFolded: (key, defaultFolded = false) => state.folded[key] ?? defaultFolded,
-    setFolded(key, folded) {
-      state.folded[key] = folded;
-    },
-    isExpanded: (id) => state.expanded[id] ?? false,
-    setExpanded(id, expanded) {
-      state.expanded[id] = expanded;
-    },
-  };
-}
-
-/** An AppContext whose daemon is IMPL, and nothing else. */
+/**
+ * An AppContext whose daemon is IMPL. UpdateSidebarView answers success unless
+ * IMPL says otherwise: every hover and fold asks it, so a suite about
+ * something else need not script it.
+ */
 export function appContext(impl: Partial<ServiceImpl<typeof AgentRepl>> = {}, ticker?: Ticker): AppContext {
   const transport = createRouterTransport(({ service }) => {
-    service(AgentRepl, impl);
+    service(AgentRepl, {
+      updateSidebarView: () => create(UpdateSidebarViewResponseSchema, { result: { case: "success", value: {} } }),
+      ...impl,
+    });
   });
   return testAppContext({
     client: createAgentReplClient(transport),
@@ -123,16 +107,19 @@ export function appContext(impl: Partial<ServiceImpl<typeof AgentRepl>> = {}, ti
   });
 }
 
-/** A SidebarContext over CTX, with in-memory preferences. */
+/** A SidebarContext over CTX, with a fresh view and no ask in flight. */
 export function sidebarContext(
   ctx: AppContext = appContext(),
-  prefs: SidebarPrefs = memoryPrefs(),
   timers: BlinkTimers = fakeTimers(),
+  view: SidebarView = createSidebarView(),
+  openDetails: Set<string> = new Set(),
 ): SidebarContext & { disposers: Array<() => void> } {
   const disposers: Array<() => void> = [];
   return {
     ctx,
-    prefs,
+    view,
+    openDetails,
+    dropdowns: createDropdowns(),
     attention: new AttentionRegistry(timers),
     tasks: [],
     disposers,
@@ -219,19 +206,30 @@ export function taskSection(init: {
   label?: string;
   done?: boolean;
   rows?: RosterRow[];
+  /** The daemon-held fold; expanded unless said, as a task never folded is. */
+  collapsed?: boolean;
 }): RosterTaskSection {
   return create(RosterTaskSectionSchema, {
     key: { taskId: init.id },
     header: { label: { text: init.label ?? init.id }, done: { done: init.done ?? false } },
     rows: { rows: init.rows ?? [] },
+    fold: init.collapsed === true ? { case: "collapsed", value: {} } : { case: "expanded", value: {} },
   });
 }
 
-/** The recently-merged band. */
-export function mergedSection(rows: RosterRow[] = [], count: number = rows.length): RosterMergedSection {
+/**
+ * The recently-merged band. Its daemon-held fold is COLLAPSED unless said, as
+ * the daemon draws a band nobody has unfolded.
+ */
+export function mergedSection(
+  rows: RosterRow[] = [],
+  count: number = rows.length,
+  collapsed: boolean = true,
+): RosterMergedSection {
   return create(RosterMergedSectionSchema, {
     header: { label: { text: "Recently Merged" }, count: { workspaces: count } },
     rows: { rows },
+    fold: collapsed ? { case: "collapsed", value: {} } : { case: "expanded", value: {} },
   });
 }
 
@@ -241,11 +239,17 @@ export function roster(init: {
   tasks?: RosterTaskSection[];
   merged?: RosterMergedSection;
   current?: string;
+  /** The daemon-held grouping every page shows; the repository's unless said. */
+  shown?: Grouping;
 } = {}): WorkspaceRoster {
   return create(WorkspaceRosterSchema, {
     repository: { sections: init.repos ?? [] },
     task: { sections: init.tasks ?? [] },
     recentlyMerged: init.merged ?? mergedSection(),
+    shown:
+      init.shown === "task"
+        ? { case: "shownTask", value: {} }
+        : { case: "shownRepository", value: {} },
     ...(init.current === undefined
       ? {}
       : { current: { workspace: { id: init.current, dir: `/w/${init.current}` } } }),
