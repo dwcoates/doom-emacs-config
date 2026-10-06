@@ -62,7 +62,24 @@ message OpenWorkspaceError {
     // NOBODY ELSE OWNS THE CONVERSATION: this is a broken lock helper, and
     // `failure` says how it broke, not an ownership conflict.
     OpenWorkspaceLockHolderUnavailable lock_holder_unavailable = 9;
+    // The workspace's directory is gone AND its branch no longer exists in
+    // the repository, so there is nothing to restore its worktree from. A
+    // directory that is gone while its branch survives is NOT refused: the
+    // open checks the branch out at the recorded directory again
+    // (WorkspaceOpenStage.restoring_worktree) and proceeds. A user picking a
+    // row that cannot be restored is an ordinary answer, not a fault.
+    OpenWorkspaceWorktreeUnrestorable worktree_unrestorable = 10;
   }
+}
+message OpenWorkspaceWorktreeUnrestorable {
+  // The recorded directory, which is gone.
+  string dir = 1;
+  // The recorded branch, which no longer exists. EMPTY when the registry
+  // recorded none for the workspace.
+  string branch = 2;
+  // The daemon's sentence saying both, for a human and for logs; never
+  // switched on.
+  string detail = 3;
 }
 message OpenWorkspaceLockHolderUnavailable {
   // Tags 1 and 2 (`binary`, `os_error`) are RETIRED: they could say only

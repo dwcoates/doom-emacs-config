@@ -97,6 +97,31 @@ killed outright).
   it, everything it started, and the loops at once.
 - `bin/test-with-cpu-load.sh` (the `cpu-load-harness` suite) holds all of this.
 
+### When to run which tests (owner ruling, 2026-10-06)
+
+Tests are not free: every suite here is sized to fill the host, and runs
+from several agents multiply. Tests are still used ACTIVELY; what this rules
+is how broad a run is at each moment.
+
+- WHILE DEVELOPING: run only the tests covering what you change — one ERT
+  file, one Go package or `-run` pattern, one vitest file or `-t` name. Never
+  a whole suite, never an untouched system's suite, never a repeat run for
+  confidence; a flaky test is rerun alone, not with its suite.
+- WHEN A COMPLETE SET OF CHANGES IS FINISHED (a feature fully added, a bug
+  fixed, a prescribed change made): one full unit + integration run of the
+  systems it touched, through the scheduler so it holds the host slot:
+  `bin/test-all.sh --suites <touched suites>` (roster names, e.g.
+  `daemon,webapp,ert`). Add `e2e` only with a stated reason — the change could
+  have systemic knock-on effects. A failure goes back to targeted runs; the set
+  then finishes with one more full run.
+- AFTER MERGING INTO MASTER (or otherwise applying changes there): the full
+  suite, unit + integration + e2e — `bin/test-all.sh` with no `--suites`.
+  Merges landed back to back with no run between them share one run, which
+  verifies the combined result.
+- Full runs go through `bin/test-all.sh`, never a hand-assembled set of
+  per-suite commands: the scheduler holds the host's one suite slot, so two
+  agents' full runs never overlap.
+
 ### One scheduled run at a time: `bin/test-all.sh` and `bin/suite-slot.sh`
 
 `bin/test-all.sh` builds `testrun`, which turns the whole roster into one DAG
@@ -2198,8 +2223,10 @@ never set it.
   - The proto's framing wins.
 - Workspace id contract: the daemon's 16-hex id is the id on every record
   and sink across all runtimes.
-  - A workspace whose directory no longer exists is closed automatically
-    by the daemon.
+  - A workspace whose deleted directory's branch still exists is recreated
+    automatically: by the boot for an open row, by an open for a closed one.
+  - It is closed (boot) or refused as `worktree_unrestorable` (open) when the
+    branch is gone too or the workspace was merged.
 
 ## No warning or error anywhere is neglected
 

@@ -163,7 +163,9 @@ template is reported as a caller bug and never invented, so a stage added to
 loudly rather than reaching the user as an enum name. A create's stages are
 `:deriving-name` (only for a daemon-minted name), `:creating-worktree` and
 `:starting-session` (every create past the worktree, until its terminal
-step); an open's are `:checking-worktree`, `:starting-session`, `:reviving` (only
+step); an open's are `:checking-worktree`, `:restoring-worktree` (only for a
+workspace whose deleted worktree is recreated from its branch),
+`:starting-session`, `:reviving` (only
 for a parked workspace), `:clearing-closed` (only for a closed one) and
 `:checking-build`. `wire-host.el` decodes each kind's stage from its
 `entered_stage` oneof arm and refuses an arm it does not hold, an unset

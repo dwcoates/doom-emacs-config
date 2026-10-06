@@ -149,6 +149,41 @@ func (c *client) CreateWorktree(ctx context.Context, repoDir, branch, baseRef, w
 	return nil
 }
 
+// RestoreWorktree checks an EXISTING branch out at worktreeDir again: the
+// worktree of a workspace whose directory was deleted while its branch
+// survived. It is CreateWorktree without the `-b`: no branch is made, so a
+// branch that is gone fails here, loudly, rather than being re-cut from
+// anything. The directory is re-attached to its log sinks exactly as a new
+// worktree's is, because it is the same workspace's directory again.
+func (c *client) RestoreWorktree(ctx context.Context, repoDir, worktreeDir, branch string) error {
+	const operation = "daemon.gitclient.restore_worktree"
+	if _, err := c.run(ctx, operation, repoDir,
+		"worktree", "add", worktreeDir, branch); err != nil {
+		return err
+	}
+	if err := c.log.AttachDir(worktreeDir); err != nil {
+		c.log.Global().Error(operation, "the restored worktree could not be re-attached to its log sinks", dlog.Context{
+			"dir": repoDir, "worktree_dir": worktreeDir, "branch": branch, "cause": err.Error(),
+		})
+		return fmt.Errorf("gitclient: attach the log sinks of %s: %w", worktreeDir, err)
+	}
+	return nil
+}
+
+// UnregisterMissingWorktree retires the ONE registration git still holds for a
+// worktree whose directory is gone: `git worktree remove <dir>`, which git
+// accepts for a missing tree and which then deletes only that tree's
+// `.git/worktrees/<name>` entry. It is the safe answer to `worktree add`'s
+// "missing but already registered worktree" refusal: `git worktree prune`
+// would retire EVERY missing registration in the repository, some of which
+// are not this daemon's to retire, and `worktree add -f` would also override
+// the refusal to check out a branch another live worktree holds. No --force
+// is passed, so git still refuses a LOCKED registration.
+func (c *client) UnregisterMissingWorktree(ctx context.Context, repoDir, worktreeDir string) error {
+	_, err := c.run(ctx, "daemon.gitclient.unregister_missing_worktree", repoDir, "worktree", "remove", worktreeDir)
+	return err
+}
+
 // AddDetachedWorktree checks commit out at worktreeDir with a detached HEAD.
 // No branch is created, so nothing but the directory names the tree and its
 // removal leaves no ref behind. It is NOT a workspace: no log sink is attached

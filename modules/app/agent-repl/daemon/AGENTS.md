@@ -265,7 +265,9 @@ environment. Every flag is optional.
    directory is gone opens no fault at all, only an INFO record; CLOSE every open workspace
    whose directory is gone (a row naming a path that is not there is a tab
    Emacs cannot serve; counted as `missing_dir_closed`, and a stat that does
-   not say "not exist" is never read as gone), adopt the shims whose
+   not say "not exist" is never read as gone; an open row whose BRANCH
+   SURVIVES is recreated instead of closed, see "A deleted worktree is
+   recreated from its branch"), adopt the shims whose
    workspace lock is still held (never kill-and-restart, and EVERY survivor is
    dialled concurrently so one adoption bound covers the whole boot), reconcile the intent
    manifest (all four dispositions persisted as faults; a manifest is CONSUMED
@@ -1367,7 +1369,15 @@ generations. Workspace-bound daemon records go to
 inherited descriptor, and forwarded webapp and sidecar records go to
 `webapp.log` and `sidecar.log`. Each canonical workspace path is a symlink to
 a daemon-owned target under `<state>/logs/`. Failing to resolve a workspace is
-an invariant violation, never a global write.
+an invariant violation, never a global write -- with ONE exception: a
+forwarded client record (`ClientLog`) about a registered workspace whose
+DIRECTORY IS GONE lands in the run log with `workspace_id`, `workspace_dir`
+and `unroutable_workspace` naming it, the rpc succeeds, and the condition is
+stated once per workspace at INFO (`daemon.dlog.client_central_fallback`).
+Only a stat that says "does not exist" qualifies; any other stat failure stays
+a failure. A NEW sink of a workspace is never opened once its directory is
+gone, because the open's `MkdirAll` would resurrect the deleted worktree as a
+bare `.claude/emacs` tree; sinks already open keep writing to their targets.
 
 THE WORKSPACE ID ON A RECORD AND IN A SINK NAME IS THE DAEMON-MINTED
 `ids.WorkspaceID` (16 hex characters, `wsm.IDLength`) -- the same id the shim,
@@ -1483,6 +1493,48 @@ It ends at the terminal step -- `succeeded` once the session is up and any
 initial prompt is accepted, or `failed` for anything that went wrong inside
 it. A create that fails at the worktree never enters it. Adding a stage is a
 proto change (a new `WorkspaceCreateStage` arm).
+
+## A deleted worktree is recreated from its branch
+
+Owner rulings 2026-10-06. A workspace whose directory was deleted underneath
+it -- by a plain `rm`, or by a landing outside the daemon's merge flow -- is
+still the user's, so its worktree is RECREATED from its recorded branch
+(`workspace.restoreWorktree`) in two places:
+
+- **Boot** (`closeMissingDirs`): an OPEN row whose directory is gone is
+  recreated instead of closed (`Report.MissingDirRestored`, INFO
+  `daemon.boot.close_missing_dir` "recreated"). It is still CLOSED when there
+  is nothing to restore from, and when git could not act (the restorer's own
+  ERROR; the boot finishes, and an explicit open retries and surfaces it). A
+  CLOSED row is never touched by the boot.
+- **Open** (`OpenWorkspace` on a closed row): the same restore, entered as
+  `WorkspaceOpenStage.restoring_worktree` between `checking_worktree` and
+  `starting_session`, then the ordinary open (session and history come back
+  from the store).
+
+The restore, in order: refuse when the workspace carries `merged_at` (a merged
+tree was removed ON PURPOSE; the queue stamps `merged_at` before it closes the
+row, so the stamp alone decides, even on a row a crash left open; a nuked
+workspace has no row at all), when no branch was recorded, when the repository
+is gone, or when the branch no longer exists; then retire a STALE GIT
+REGISTRATION for that one path (a plain `rm` leaves `.git/worktrees/<name>`,
+and `git worktree add` refuses "'<dir>' is a missing but already registered
+worktree"): `gitclient.UnregisterMissingWorktree` runs `git worktree remove
+<dir>`, which git accepts for a missing tree and which retires only that
+entry. NOT `git worktree prune` (it retires every missing registration in the
+repository, others' included) and NOT `worktree add -f` (it also overrides
+git's refusal to check out a branch another live worktree holds). A LOCKED
+registration is never forced: the restore fails at ERROR naming the lock.
+Then `git worktree add <dir> <branch>` (`gitclient.RestoreWorktree`, which
+re-attaches the directory to its log sinks), INFO with the directory and
+branch, and the views boot passed over are bound (`bindResolvers`,
+`publishNaming`).
+
+Nothing to restore from is the typed refusal
+`OpenWorkspaceError.worktree_unrestorable` (dir, branch, detail), recorded at
+INFO: a user picking such a row is an ordinary answer, not a fault. A git that
+cannot answer or act is an ERROR and a returned failure, never a refusal and
+never a bring-up in a directory that is not there.
 
 ## Workspace naming: one call, and a fork brings its conversation
 
@@ -2201,7 +2253,7 @@ could REGRESS agent-repl with a one-line `risk` (blank or multi-line refuses
 the answer); the per-run sections on the wire carry no mark.
 
 **Since last week** (`week.go`, `NewsDigestOverlay.week`). Every digest-making
-run keeps all its items in wsm `news_digest_items` (layout 21) with their run's
+run keeps all its items in wsm `news_digest_items` (layout 22) with their run's
 end and mark, pruning rows older than 14 days in the same transaction. The
 weekly section is the marked items of the runs that ended in the past 7 days
 plus this run's. Items of ONE run come from one answer that already merged
@@ -2237,6 +2289,70 @@ and moves it.
 republished at prime (so it survives restarts and handovers), and pushed on
 WEBVIEW `WatchDaemon` streams only. A dismiss naming the newest digest takes
 it down everywhere (twice is success); any other id is `unknown_digest`.
+
+## agent-repl's session and its vendor traffic (`internal/agentreplsession`, `internal/vendortraffic`)
+
+The topbar's connectivity glyph opens a dropdown stating agent-repl's SESSION
+(owner ruling, 2026-10-06): how long it has run and the vendor network traffic
+since it began. Contract: `frontend.v1.TopbarConnectivity.session`
+(`TopbarAgentReplSession`), ABSENT until a session began.
+
+**The session** begins at the LATER of the last login made THROUGH agent-repl
+and this Emacs's start. Each event begins a new session unless the standing
+one began at or after it (`Tracker.begin`), and a new session's traffic starts
+at zero: the duration and the traffic count from one `started_at_ms`. It is
+the wsm singleton `agent_repl_session` (layout 21, additive), and the STORE IS
+ITS ONE SOURCE OF TRUTH: every begin and every flush reads it, changes it and
+writes it back, so a successor that took over mid-session continues from the
+incumbent's last write. A daemon restart under the same Emacs keeps it; only a
+new Emacs process (`internal/editorinstance`, judged by the serving daemon)
+begins one.
+
+**A login made through agent-repl** is read off the account root, because
+nothing parses the login TUI: the login manager tells its `login.Observer` each
+flow's opening and ending (under its lock, so an ending never precedes its
+opening), and `agentreplsession.LoginWatch` reads the root's `oauthAccount`
+block (`account.ReadLoginRecord`) at both. A block that changed is a login the
+flow made, begun at the vendor's own `profileFetchedAt` stamp when it falls
+inside the flow, else when the change was seen; an unchanged block, or a root
+naming no account, made none. A login made anywhere else opens no flow and
+begins nothing. The session switches when the login terminal closes.
+
+**The traffic** is every live shim's process group less its lock holders
+(`sessionlock.HolderBinary`): the shim itself (its API reachability probe) and
+its direct children (the vendor CLI); a tool the CLI runs is a grandchild and
+is not counted. Only sockets whose peer is off the machine count. The sampler
+subscribes one kernel network-statistics control socket
+(`com.apple.network.statistics`, unprivileged) per process with the kernel's
+pid filter, polls its live sockets every `vendortraffic.DefaultEvery` (5s),
+and takes each socket's FINAL counts the instant it closes, so the per-socket
+ledger counts every byte once across connection churn and process restarts.
+A process that started before the sampler's epoch (the first round its daemon
+served) has the sockets it already held baselined, never recounted. Only the
+SERVING daemon samples (`rolloutController.ServesIntake`); one that stops
+serving closes its subscriptions. The tracker persists and pushes the traffic
+once per round in which anything was counted: that round is the push throttle.
+
+Measured (2026-10-06, Darwin 25): exact counts (a 259,166-byte HTTPS fetch;
+1+2+4 MB loopback transfers, one opened and closed between polls, excluded by
+the off-machine filter); about 0.8ms of CPU per subscribed process per second.
+Refused alternatives: one-shot `nettop -L 1` loses every socket's tail and
+every socket opened and closed between samples; a continuous `nettop -L 0`
+keeps them but spins a core (64s of CPU in 60s, every flag combination);
+rusage carries no network counters.
+
+**Tests never read the kernel's network statistics.** A process whose vendor
+calls are forbidden (`AGENT_REPL_FORBID_VENDOR_CALLS`, which every test
+process exports) builds no sampler; the unit suites inject the dialer, the
+process table and the sink. `KernelProcesses` reads the real process table in
+its own test (no network); `DialStatistics` is the one leaf no test reaches.
+
+**Records.** `daemon.agentreplsession.{load,begin,flush,login_opened,login_ended}`
+and `daemon.vendortraffic.{run,discover,subscribe,poll,retire,read,close}`;
+every failure (a store that cannot be read or written, a control socket that
+cannot be opened or written, a kernel refusal, a malformed datagram, a counter
+that shrank) is ERROR with its cause, and a process whose subscription failed
+is not subscribed again for its lifetime.
 
 ## Coverage deliberately not attainable under the no-git-in-tests directive
 

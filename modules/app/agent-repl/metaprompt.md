@@ -6,10 +6,21 @@
 
 - Create new commits freely and often for atomic, well-scoped units of work.
   - Do not ask first.
-  - Ensure applicable tests run and pass before each commit.
+  - Before each commit, run and pass the tests covering the code it changes (the test file, package or test name), not whole suites.
   - Every git operation is authorized by default and needs no per-use permission.
     - This includes rebase, pull, merge, reset, checkout, cherry-pick, force-push, and branch deletion.
     - Push with discretion per the rule below, but never wait for permission to run any git command.
+
+### When to run which tests
+
+- Tests are used actively throughout: written alongside the code and run often to drive the work.
+- While developing, run only the tests covering what you change.
+  - Never a whole suite, never a suite of a system the change does not touch, and never a repeat run for confidence.
+  - Chasing a flaky test reruns that test, not its suite.
+- When a complete set of changes is finished (a feature fully added, a bug fixed, a prescribed change made), run the full unit and integration suites of the systems it touched, once.
+  - Add the e2e suite only with a stated reason: the change could have systemic knock-on effects.
+  - A failure there goes back to targeted runs, and the set finishes with one more full run.
+- After merging a branch into master, or otherwise applying changes to it, run the full suite: unit, integration and e2e.
 
 ### Before committing
 

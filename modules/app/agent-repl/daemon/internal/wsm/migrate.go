@@ -108,7 +108,8 @@ var migrations = []migration{
 	{To: 18, Name: "rolled_back_turns", Kind: MigrationAdditive, DDL: rolledBackTurnsDDL},
 	{To: 19, Name: "news_digest", Kind: MigrationAdditive, DDL: newsDigestDDL},
 	{To: 20, Name: "news_digest_redisplay", Kind: MigrationAdditive, DDL: newsDigestRedisplayDDL},
-	{To: 21, Name: "news_digest_history", Kind: MigrationAdditive, DDL: newsDigestHistoryDDL},
+	{To: 21, Name: "agent_repl_session", Kind: MigrationAdditive, DDL: agentReplSessionDDL},
+	{To: 22, Name: "news_digest_history", Kind: MigrationAdditive, DDL: newsDigestHistoryDDL},
 }
 
 // repositoriesFoldedDDL adds whether a repository's roster section is

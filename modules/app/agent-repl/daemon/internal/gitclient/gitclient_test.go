@@ -485,6 +485,115 @@ func TestCreateWorktreeAttachFailureIsReturnedAndLogged(t *testing.T) {
 	}
 }
 
+func TestRestoreWorktreeChecksTheExistingBranchOutWithoutCreatingOne(t *testing.T) {
+	// Arrange.
+	git, _ := newTestClient(t)
+	fake := newFakeGit(t, ok(""))
+
+	// Act.
+	if err := git.RestoreWorktree(context.Background(), "/repo", "/wt", "feature/one"); err != nil {
+		t.Fatalf("RestoreWorktree: %v", err)
+	}
+
+	// Assert.
+	fake.assertSubject(0, "worktree", "add", "/wt", "feature/one")
+}
+
+func TestRestoreWorktreeFailurePropagatesTheGitEvidence(t *testing.T) {
+	// Arrange.
+	git, _ := newTestClient(t)
+	newFakeGit(t, fails(128, "fatal: invalid reference: feature/one\n"))
+
+	// Act.
+	err := git.RestoreWorktree(context.Background(), "/repo", "/wt", "feature/one")
+
+	// Assert.
+	var failure *Error
+	if !errors.As(err, &failure) {
+		t.Fatalf("RestoreWorktree error = %v (%T), want a *gitclient.Error", err, err)
+	}
+	if !strings.Contains(failure.Stderr, "invalid reference") {
+		t.Fatalf("Error.Stderr = %q, want git's own refusal", failure.Stderr)
+	}
+}
+
+func TestRestoreWorktreeReattachesTheDirectoryToItsLogSinks(t *testing.T) {
+	// Arrange.
+	git, surfaces := newTestClient(t)
+	newFakeGit(t, ok(""))
+
+	// Act.
+	if err := git.RestoreWorktree(context.Background(), "/repo", "/wt", "feature/one"); err != nil {
+		t.Fatalf("RestoreWorktree: %v", err)
+	}
+
+	// Assert.
+	if got := strings.Join(surfaces.dirEvents, ","); got != "attach /wt" {
+		t.Fatalf("log sink directory events = %q, want the restored worktree attached", got)
+	}
+}
+
+func TestRestoreWorktreeThatFailsAttachesNothing(t *testing.T) {
+	// Arrange.
+	git, surfaces := newTestClient(t)
+	newFakeGit(t, fails(128, "fatal: invalid reference: feature/one\n"))
+
+	// Act.
+	_ = git.RestoreWorktree(context.Background(), "/repo", "/wt", "feature/one")
+
+	// Assert.
+	if len(surfaces.dirEvents) != 0 {
+		t.Fatalf("log sink directory events = %v, want none for a worktree that was never restored", surfaces.dirEvents)
+	}
+}
+
+func TestRestoreWorktreeAttachFailureIsReturnedAndLogged(t *testing.T) {
+	// Arrange.
+	git, surfaces := newTestClient(t)
+	surfaces.dirFailure = errors.New("attach refused")
+	newFakeGit(t, ok(""))
+
+	// Act.
+	err := git.RestoreWorktree(context.Background(), "/repo", "/wt", "feature/one")
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "attach refused") {
+		t.Fatalf("RestoreWorktree = %v, want the attach failure", err)
+	}
+	if _, found := recordFor(surfaces.records(), "error", "daemon.gitclient.restore_worktree"); !found {
+		t.Fatal("the attach failure was not recorded at ERROR")
+	}
+}
+
+func TestUnregisterMissingWorktreeRemovesOnlyThatRegistration(t *testing.T) {
+	// Arrange.
+	git, _ := newTestClient(t)
+	fake := newFakeGit(t, ok(""))
+
+	// Act.
+	if err := git.UnregisterMissingWorktree(context.Background(), "/repo", "/wt"); err != nil {
+		t.Fatalf("UnregisterMissingWorktree: %v", err)
+	}
+
+	// Assert: no --force (git must still refuse a locked one), and no prune.
+	fake.assertSubject(0, "worktree", "remove", "/wt")
+}
+
+func TestUnregisterMissingWorktreeFailurePropagatesTheGitEvidence(t *testing.T) {
+	// Arrange.
+	git, _ := newTestClient(t)
+	newFakeGit(t, fails(128, "fatal: cannot remove a locked working tree;\nuse 'remove -f -f' to override or unlock first\n"))
+
+	// Act.
+	err := git.UnregisterMissingWorktree(context.Background(), "/repo", "/wt")
+
+	// Assert.
+	var failure *Error
+	if !errors.As(err, &failure) || !strings.Contains(failure.Stderr, "locked working tree") {
+		t.Fatalf("UnregisterMissingWorktree error = %v, want git's own refusal as a *gitclient.Error", err)
+	}
+}
+
 func TestAddDetachedWorktreeChecksTheCommitOutWithNoBranch(t *testing.T) {
 	// Arrange: the merge queue's scratch tree names no branch.
 	git, _ := newTestClient(t)

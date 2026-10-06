@@ -7,9 +7,12 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
+	"claude-repld/internal/dlog"
+	"claude-repld/internal/gitclient"
 	"claude-repld/internal/resolve/footer"
 	"claude-repld/internal/rollout"
 	"claude-repld/internal/sessionwatcher"
@@ -141,48 +144,395 @@ func TestOpenRefusesAnUnknownWorkspace(t *testing.T) {
 	asRefusal(t, err, ArmUnknownWorkspace)
 }
 
-// TestOpenRefusesAWorkspaceWhoseDirectoryIsGone pins the decision that a
-// re-open of a workspace whose worktree no longer exists is a NAMED refusal
-// rather than an internal error: boot already closes such a row, and there is
-// nothing to open.
-func TestOpenRefusesAWorkspaceWhoseDirectoryIsGone(t *testing.T) {
+// goneWorkspace arranges a workspace whose directory is gone, in a repository
+// that still exists, and answers its record. Whether its branch survives is
+// the caller's to arrange.
+func goneWorkspace(t *testing.T, f *fixture) wsm.Workspace {
+	t.Helper()
+	return f.workspace("w1", filepath.Join(t.TempDir(), "gone"))
+}
+
+// withBranch makes the repository hold ws's branch, so a restore can find it.
+func withBranch(f *fixture, ws wsm.Workspace) {
+	f.git.existingBranches = map[string]bool{ws.Branch: true}
+}
+
+func TestOpenRestoresAGoneWorktreeFromItsBranch(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
-	f.workspace("w1", filepath.Join(t.TempDir(), "gone"))
+	ws := goneWorkspace(t, f)
+	withBranch(f, ws)
 
 	// Act.
 	err := f.verbs.Open(context.Background(), "w1", nil)
 
 	// Assert.
-	asRefusal(t, err, ArmSpawnFailed)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	want := restoredWorktree{RepoDir: filepath.Dir(ws.Dir), WorktreeDir: ws.Dir, Branch: ws.Branch}
+	if len(f.git.restored) != 1 || f.git.restored[0] != want {
+		t.Fatalf("restored = %+v, want exactly %+v", f.git.restored, want)
+	}
 }
 
-func TestOpenNamesTheMissingDirectoryInItsRefusal(t *testing.T) {
+func TestOpenStartsTheSessionInARestoredWorktree(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
-	ws := f.workspace("w1", filepath.Join(t.TempDir(), "gone"))
+	ws := goneWorkspace(t, f)
+	withBranch(f, ws)
+
+	// Act.
+	if err := f.verbs.Open(context.Background(), "w1", nil); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	// Assert.
+	if len(f.fleet.started) != 1 {
+		t.Fatalf("sessions started = %d, want the restored workspace's session", len(f.fleet.started))
+	}
+}
+
+func TestOpenClearsTheClosedFlagOfARestoredWorkspace(t *testing.T) {
+	// Arrange: boot closed the row when it found the directory gone.
+	f := newFixture(t)
+	ws := goneWorkspace(t, f)
+	ws.Closed = true
+	f.db.with(ws)
+	withBranch(f, ws)
+
+	// Act.
+	if err := f.verbs.Open(context.Background(), "w1", nil); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	// Assert.
+	if closed, ok := f.db.closedFlags["w1"]; !ok || closed {
+		t.Fatalf("closed flag = (%v, %v), want it cleared", closed, ok)
+	}
+}
+
+func TestOpenRetiresTheStaleRegistrationBeforeRestoring(t *testing.T) {
+	// Arrange: the directory was deleted with rm, so git still registers it
+	// and a bare `worktree add` would refuse.
+	f := newFixture(t)
+	ws := goneWorkspace(t, f)
+	withBranch(f, ws)
+	f.git.worktrees = []gitclient.Worktree{{Dir: ws.Dir, Branch: ws.Branch, Prunable: true}}
 
 	// Act.
 	err := f.verbs.Open(context.Background(), "w1", nil)
 
-	// Assert: the refusal's evidence says WHICH directory is gone.
-	refusal := asRefusal(t, err, ArmSpawnFailed)
-	if !strings.Contains(refusal.Reason, ws.Dir) {
-		t.Fatalf("refusal reason = %q, want it to name %q", refusal.Reason, ws.Dir)
+	// Assert.
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	repo := filepath.Dir(ws.Dir)
+	want := []string{"list " + repo, "unregister " + ws.Dir, "restore " + ws.Dir}
+	if strings.Join(f.git.gitCalls, "|") != strings.Join(want, "|") {
+		t.Fatalf("git calls = %v, want %v", f.git.gitCalls, want)
 	}
 }
 
-func TestOpenStartsNoSessionWhenTheDirectoryIsGone(t *testing.T) {
+func TestOpenLeavesEveryOtherRegistrationAlone(t *testing.T) {
+	// Arrange: another missing worktree is registered too; it is not this
+	// workspace's to retire.
+	f := newFixture(t)
+	ws := goneWorkspace(t, f)
+	withBranch(f, ws)
+	other := gitclient.Worktree{Dir: filepath.Join(t.TempDir(), "someone-elses"), Branch: "theirs", Prunable: true}
+	f.git.worktrees = []gitclient.Worktree{other, {Dir: ws.Dir, Branch: ws.Branch, Prunable: true}}
+
+	// Act.
+	if err := f.verbs.Open(context.Background(), "w1", nil); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	// Assert.
+	if len(f.git.worktrees) != 1 || f.git.worktrees[0].Dir != other.Dir {
+		t.Fatalf("registrations left = %+v, want only %s", f.git.worktrees, other.Dir)
+	}
+}
+
+func TestOpenRetiresNoRegistrationWhenGitHoldsNone(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
-	f.workspace("w1", filepath.Join(t.TempDir(), "gone"))
+	ws := goneWorkspace(t, f)
+	withBranch(f, ws)
+
+	// Act.
+	if err := f.verbs.Open(context.Background(), "w1", nil); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	// Assert.
+	for _, call := range f.git.gitCalls {
+		if strings.HasPrefix(call, "unregister ") {
+			t.Fatalf("git calls = %v, want no unregister when nothing is registered", f.git.gitCalls)
+		}
+	}
+}
+
+func TestOpenRefusesToForceALockedMissingWorktree(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	ws := goneWorkspace(t, f)
+	withBranch(f, ws)
+	f.git.worktrees = []gitclient.Worktree{{Dir: ws.Dir, Branch: ws.Branch, Locked: true, LockedReason: "on a usb disk"}}
+
+	// Act.
+	err := f.verbs.Open(context.Background(), "w1", nil)
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "locked") {
+		t.Fatalf("Open = %v, want a failure naming the lock", err)
+	}
+	if !hasRecord(f, dlog.LevelError, opOpen) || len(f.git.restored) != 0 {
+		t.Fatalf("restored = %v, want nothing restored and the lock recorded at ERROR", f.git.restored)
+	}
+}
+
+func TestOpenRecordsTheRestoreAtInfoWithItsDirectoryAndBranch(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	ws := goneWorkspace(t, f)
+	withBranch(f, ws)
+
+	// Act.
+	if err := f.verbs.Open(context.Background(), "w1", nil); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	// Assert.
+	for _, r := range f.log.logger.Records() {
+		if r.Level == dlog.LevelInfo && r.Operation == opOpen && strings.Contains(r.Message, "restored its worktree") {
+			if r.Context["dir"] != ws.Dir || r.Context["branch"] != ws.Branch {
+				t.Fatalf("restore record context = %v, want dir %q and branch %q", r.Context, ws.Dir, ws.Branch)
+			}
+			return
+		}
+	}
+	t.Fatalf("no INFO record of the restore; records = %+v", f.log.logger.Records())
+}
+
+func TestOpenReportsTheRestoreStageBetweenTheCheckAndTheBringUp(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	ws := goneWorkspace(t, f)
+	withBranch(f, ws)
+	progress := &recordingOpenProgress{}
+
+	// Act.
+	if err := f.verbs.Open(context.Background(), "w1", progress); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	// Assert.
+	want := []OpenStage{OpenStageCheckingWorktree, OpenStageRestoringWorktree, OpenStageStartingSession, OpenStageCheckingBuild}
+	if len(progress.stages) != len(want) {
+		t.Fatalf("stages = %v, want %v", progress.stages, want)
+	}
+	for i := range want {
+		if progress.stages[i] != want[i] {
+			t.Fatalf("stages = %v, want %v", progress.stages, want)
+		}
+	}
+}
+
+func TestOpenBindsTheRestoredWorkspacesViews(t *testing.T) {
+	// Arrange: boot binds the views only of a workspace whose directory
+	// exists, so a restored one has none until the open binds them.
+	f := newFixture(t)
+	ws := goneWorkspace(t, f)
+	withBranch(f, ws)
+
+	// Act.
+	if err := f.verbs.Open(context.Background(), "w1", nil); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	// Assert.
+	if got := f.footer.dirs["w1"]; got != ws.Dir {
+		t.Fatalf("footer bound dir = %q, want the restored %q", got, ws.Dir)
+	}
+}
+
+func TestOpenBindsNoViewsForAnUnrestorableWorkspace(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	goneWorkspace(t, f)
+
+	// Act.
+	_ = f.verbs.Open(context.Background(), "w1", nil)
+
+	// Assert.
+	if got, bound := f.footer.dirs["w1"]; bound {
+		t.Fatalf("footer bound dir = %q, want nothing bound for a directory that is not there", got)
+	}
+}
+
+func TestOpenTouchesNoGitWhenTheDirectoryIsPresent(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+
+	// Act.
+	if err := f.verbs.Open(context.Background(), "w1", nil); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	// Assert.
+	if len(f.git.gitCalls) != 0 {
+		t.Fatalf("git calls = %v, want none for a workspace whose directory is there", f.git.gitCalls)
+	}
+}
+
+// TestOpenRefusesAGoneWorkspaceWithNothingToRestoreFrom pins the refusal arm
+// for every way there is nothing left to restore a gone directory from.
+func TestOpenRefusesAGoneWorkspaceWithNothingToRestoreFrom(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(t *testing.T, f *fixture, ws wsm.Workspace)
+		says    string
+	}{
+		{
+			name:    "the branch no longer exists",
+			arrange: func(*testing.T, *fixture, wsm.Workspace) {},
+			says:    "no longer exists",
+		},
+		{
+			name: "no branch was recorded",
+			arrange: func(_ *testing.T, f *fixture, ws wsm.Workspace) {
+				ws.Branch = ""
+				f.db.with(ws)
+			},
+			says: "no branch was recorded",
+		},
+		{
+			name: "the workspace was merged",
+			arrange: func(_ *testing.T, f *fixture, ws wsm.Workspace) {
+				withBranch(f, ws)
+				merged := time.Unix(1, 0)
+				ws.MergedAt = &merged
+				f.db.with(ws)
+			},
+			says: "merged",
+		},
+		{
+			name: "the repository is gone too",
+			arrange: func(t *testing.T, f *fixture, ws wsm.Workspace) {
+				withBranch(f, ws)
+				f.db.repositories = []wsm.Repository{{ID: "repo-1", Dir: filepath.Join(t.TempDir(), "gone-repo")}}
+			},
+			says: "so is its repository",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			ws := goneWorkspace(t, f)
+			tc.arrange(t, f, ws)
+
+			// Act.
+			err := f.verbs.Open(context.Background(), "w1", nil)
+
+			// Assert.
+			refusal := asRefusal(t, err, ArmWorktreeUnrestorable)
+			if !strings.Contains(refusal.Reason, ws.Dir) || !strings.Contains(refusal.Reason, tc.says) {
+				t.Fatalf("refusal reason = %q, want it to name %q and say %q", refusal.Reason, ws.Dir, tc.says)
+			}
+		})
+	}
+}
+
+func TestOpenCarriesTheGoneDirectoryAndBranchOnItsRefusal(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	ws := goneWorkspace(t, f)
+
+	// Act.
+	err := f.verbs.Open(context.Background(), "w1", nil)
+
+	// Assert.
+	refusal := asRefusal(t, err, ArmWorktreeUnrestorable)
+	if refusal.Fields["dir"] != ws.Dir || refusal.Fields["branch"] != ws.Branch {
+		t.Fatalf("refusal fields = %v, want dir %q and branch %q", refusal.Fields, ws.Dir, ws.Branch)
+	}
+}
+
+func TestOpenStartsNoSessionWhenThereIsNothingToRestore(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	goneWorkspace(t, f)
 
 	// Act.
 	_ = f.verbs.Open(context.Background(), "w1", nil)
 
 	// Assert: a shim with no working tree is never spawned.
-	if len(f.fleet.started) != 0 {
-		t.Fatalf("sessions started = %d, want none for a missing directory", len(f.fleet.started))
+	if len(f.fleet.started) != 0 || len(f.git.restored) != 0 {
+		t.Fatalf("sessions started = %d, restored = %v, want neither", len(f.fleet.started), f.git.restored)
+	}
+}
+
+func TestOpenRecordsAnUnrestorableWorkspaceAsNoFault(t *testing.T) {
+	// Arrange: a user picking a row that cannot be restored is an answer.
+	f := newFixture(t)
+	goneWorkspace(t, f)
+
+	// Act.
+	_ = f.verbs.Open(context.Background(), "w1", nil)
+
+	// Assert.
+	for _, r := range f.log.logger.Records() {
+		if r.Level == dlog.LevelWarn || r.Level == dlog.LevelError {
+			t.Fatalf("an unrestorable workspace produced a fault record: %+v", r)
+		}
+	}
+}
+
+// TestOpenFailsLoudlyWhenTheRestoreCannotRun pins that every git the restore
+// depends on failing is an ERROR and a returned failure, never a refusal and
+// never a bring-up in a directory that is not there.
+func TestOpenFailsLoudlyWhenTheRestoreCannotRun(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(f *fixture)
+	}{
+		{name: "the branch probe fails", arrange: func(f *fixture) { f.git.branchExistsErr = errors.New("git exploded") }},
+		{name: "the worktree listing fails", arrange: func(f *fixture) { f.git.listErr = errors.New("git exploded") }},
+		{name: "retiring the stale registration fails", arrange: func(f *fixture) {
+			f.git.worktrees = []gitclient.Worktree{{Dir: f.db.workspaces["w1"].Dir, Prunable: true}}
+			f.git.unregisterErr = errors.New("git exploded")
+		}},
+		{name: "the worktree add fails", arrange: func(f *fixture) { f.git.restoreErr = errors.New("git exploded") }},
+		{name: "the repository is not registered", arrange: func(f *fixture) { f.db.repositories = nil }},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			ws := goneWorkspace(t, f)
+			withBranch(f, ws)
+			tc.arrange(f)
+
+			// Act.
+			err := f.verbs.Open(context.Background(), "w1", nil)
+
+			// Assert.
+			if err == nil {
+				t.Fatal("Open succeeded, want the restore's failure")
+			}
+			if _, refused := AsRefusal(err); refused {
+				t.Fatalf("Open = refusal %v, want a failure: git that could not act is not an answer", err)
+			}
+			if !hasRecord(f, dlog.LevelError, opOpen) {
+				t.Fatal("the restore's failure was not recorded at ERROR")
+			}
+			if len(f.fleet.started) != 0 {
+				t.Fatalf("sessions started = %d, want none after a failed restore", len(f.fleet.started))
+			}
+		})
 	}
 }
 
@@ -581,5 +931,67 @@ func TestOpenSurfacesAFailedTerminalRetirement(t *testing.T) {
 	// Assert.
 	if err == nil || !strings.Contains(err.Error(), "the store is unreadable") {
 		t.Fatalf("Open = %v, want the failed retirement surfaced", err)
+	}
+}
+
+// TestRestoreMissingWorktreeAnswersTheBootsThreeOutcomes pins the boot's view
+// of a restore: restored, nothing to restore from (never an error), and a git
+// that could not act (an error).
+func TestRestoreMissingWorktreeAnswersTheBootsThreeOutcomes(t *testing.T) {
+	merged := time.Unix(1, 0)
+	tests := []struct {
+		name         string
+		arrange      func(f *fixture, ws wsm.Workspace)
+		wantRestored bool
+		wantErr      bool
+	}{
+		{name: "the branch survives", arrange: func(f *fixture, ws wsm.Workspace) { withBranch(f, ws) }, wantRestored: true},
+		{name: "the branch is gone", arrange: func(*fixture, wsm.Workspace) {}},
+		{name: "the workspace was merged", arrange: func(f *fixture, ws wsm.Workspace) {
+			withBranch(f, ws)
+			ws.MergedAt = &merged
+			f.db.with(ws)
+		}},
+		{name: "git cannot add the worktree", arrange: func(f *fixture, ws wsm.Workspace) {
+			withBranch(f, ws)
+			f.git.restoreErr = errors.New("git exploded")
+		}, wantErr: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			ws := goneWorkspace(t, f)
+			tc.arrange(f, ws)
+			ws = f.db.workspaces["w1"]
+
+			// Act.
+			restored, err := f.verbs.RestoreMissingWorktree(context.Background(), ws)
+
+			// Assert.
+			if restored != tc.wantRestored || (err != nil) != tc.wantErr {
+				t.Fatalf("RestoreMissingWorktree = (%v, %v), want restored %v and error %v", restored, err, tc.wantRestored, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestRestoreMissingWorktreeNeverRecreatesAMergedWorkspace(t *testing.T) {
+	// Arrange: the merge queue stamps merged_at BEFORE it closes the row and
+	// removes the tree, so a crash can leave an open, merged row whose tree
+	// is gone on purpose. Its branch still exists.
+	f := newFixture(t)
+	ws := goneWorkspace(t, f)
+	withBranch(f, ws)
+	merged := time.Unix(1, 0)
+	ws.MergedAt = &merged
+	f.db.with(ws)
+
+	// Act.
+	_, _ = f.verbs.RestoreMissingWorktree(context.Background(), ws)
+
+	// Assert.
+	if len(f.git.restored) != 0 || len(f.git.gitCalls) != 0 {
+		t.Fatalf("restored = %v, git calls = %v, want no git at all for a merged workspace", f.git.restored, f.git.gitCalls)
 	}
 }

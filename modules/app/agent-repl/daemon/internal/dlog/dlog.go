@@ -76,7 +76,11 @@ type Surfaces interface {
 	// ordinary turn-boundary roll; no request is repeated for the same target.
 	ShimRollRequests() <-chan ShimRollRequest
 	// ClientLog persists a console-less client's diagnostic record into that
-	// workspace's durable sink (the ClientLog rpc's landing place).
+	// workspace's durable sink (the ClientLog rpc's landing place). A
+	// workspace whose DIRECTORY IS GONE has no sink to open, so its record
+	// lands in the central sink still naming the workspace, and that is
+	// stated once per workspace at INFO; every other failure to resolve the
+	// workspace is still an error.
 	ClientLog(dir string, record ClientRecord) error
 	// Evict releases one workspace's sinks when the workspace closes. The
 	// canonical links and their targets stay on disk; only the descriptors go.

@@ -34,7 +34,7 @@ export const DOCKED_ROW_CLASS = "gate-docked-row";
 /** The root custom property Emacs sets to the input window's pixel height. */
 export const DOCK_HEIGHT_PROPERTY = "--gate-dock-height";
 /** The root custom property Emacs sets to the input window's background. */
-export const DOCK_BACKGROUND_PROPERTY = "--gate-dock-bg";
+export const DOCK_BACKGROUND_PROPERTY = "--input-bg";
 
 /** What Emacs set PROPERTY to on the root, or null when it never told it. */
 function toldRootProperty(doc: Document, property: string): string | null {
