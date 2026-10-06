@@ -502,6 +502,28 @@ type fakeSender struct {
 	notes []string
 	// joinErr, when set, refuses every JoinRunningTurn.
 	joinErr error
+	// rollBacks is every turn RollBackTurn was asked to cut, in order.
+	rollBacks []ids.TurnID
+	// rollBackErr, when set, is every RollBackTurn's answer.
+	rollBackErr error
+}
+
+// RollBackTurn records the cut and answers rollBackErr.
+func (s *fakeSender) RollBackTurn(_ context.Context, turn ids.TurnID) error {
+	if hook := s.hookFor(); hook != nil {
+		hook("rollback")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.rollBacks = append(s.rollBacks, turn)
+	return s.rollBackErr
+}
+
+// rolledBack answers every turn RollBackTurn was asked to cut.
+func (s *fakeSender) rolledBack() []ids.TurnID {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]ids.TurnID(nil), s.rollBacks...)
 }
 
 func newFakeSender() *fakeSender { return &fakeSender{mainAgent: "main-agent"} }
