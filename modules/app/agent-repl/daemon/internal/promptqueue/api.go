@@ -104,6 +104,10 @@ var (
 	ErrNotEditing = errors.New("promptqueue: no edit stands on that prompt")
 	// ErrNoEditor is a begin with no editor's host stream to edit in.
 	ErrNoEditor = errors.New("promptqueue: no editor is attached to this workspace")
+	// ErrPromptNotRecorded is a rewind of a turn whose prompt the vendor
+	// never recorded (shim.v1 RollBackSessionPromptNotRecorded): there is
+	// nothing in the vendor conversation to cut.
+	ErrPromptNotRecorded = errors.New("promptqueue: the vendor never recorded the prompt")
 )
 
 // The session-act kinds the one delivery path carries. They are constants
@@ -529,6 +533,10 @@ type Sender interface {
 	// SetPermissionMode switches the session's permission mode, for the same
 	// reason.
 	SetPermissionMode(ctx context.Context, mode string) error
+	// RollBackTurn cuts one turn's prompt, and everything after it, out of the
+	// vendor conversation, files kept (shim.v1 RollBackSession). A prompt the
+	// vendor never recorded answers ErrPromptNotRecorded.
+	RollBackTurn(ctx context.Context, turn ids.TurnID) error
 }
 
 // WatcherFunc resolves a workspace's session watcher, reporting false when the

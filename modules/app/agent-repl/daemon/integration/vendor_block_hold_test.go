@@ -96,3 +96,56 @@ func TestASubmissionWhileHeldAndIdleTriesTheOldestHeldPromptNow(t *testing.T) {
 		return promptHeldEntry(tray, second) != nil && promptHeldEntry(tray, first) == nil
 	})
 }
+
+// rateLimitedFailure is the turn's own terminal for a usage-limit refusal.
+func rateLimitedFailure() *conversationv1.AgentFailure {
+	return &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ApiRequestFailed{
+		ApiRequestFailed: &conversationv1.ApiRequestFailed{
+			Kind: &conversationv1.ApiRequestFailed_RateLimited{RateLimited: &conversationv1.ApiRateLimited{}}}}}
+}
+
+// TestATriedPromptTheVendorBlocksIsCutAndHeldAgainInItsPlace is the owner's
+// ruling (2026-10-06) end to end: a try-now the vendor accepts and then fails
+// with a usage limit is cut out of the vendor conversation and held again,
+// ahead of the prompt sent behind it, and the footer keeps the vendor fault.
+func TestATriedPromptTheVendorBlocksIsCutAndHeldAgainInItsPlace(t *testing.T) {
+	t.Parallel()
+	// Arrange: the first prompt held under a usage limit, then tried now by a
+	// second send.
+	f := newOpened(t, harness.Opts{})
+	footer := f.d.WatchFooter(f.ws)
+	holds := f.d.WatchHolds(f.ws)
+	f.shim.PushSessionUpdate(rateLimitVerdict(true))
+	awaitFooter(t, f, footer, "the footer paints vendor_fault · usage_limit", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetStatus().GetVendorFault().GetUsageLimit() != nil
+	})
+	first := f.submit("held first", "k-rehold-1", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT).GetSuccess().GetTurn().GetTurn()
+	awaitView(t, f, holds, "the first prompt held after reconnect", func(tray *frontendv1.DaemonHoldTray) bool {
+		return promptHeldEntry(tray, first).GetReconnect() != nil
+	})
+	second := f.submit("try now", "k-rehold-2", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT).GetSuccess().GetTurn().GetTurn()
+	if started := f.shim.ExpectStartTurn(); started.GetTurn().GetValue() != first.GetValue() {
+		t.Fatalf("StartTurn turn = %q, want the tried %q", started.GetTurn().GetValue(), first.GetValue())
+	}
+
+	// Act: the vendor fails the tried turn with a usage limit.
+	f.shim.PushAgentFrame(mainAgent, failureFrame(mainAgent, rateLimitedFailure()))
+
+	// Assert: the first prompt is held again, under a new turn, ahead of the
+	// second; it was cut from the vendor conversation; the fault stands.
+	tray := awaitView(t, f, holds, "the tried prompt held again ahead of the second", func(tray *frontendv1.DaemonHoldTray) bool {
+		items := tray.GetItems()
+		if len(items) != 2 {
+			return false
+		}
+		head, behind := items[0].GetPrompt(), items[1].GetPrompt()
+		return head.GetTurn().GetValue() != first.GetValue() && head.GetReconnect() != nil &&
+			behind.GetTurn().GetValue() == second.GetValue()
+	})
+	if got := f.shim.Count("RollBackSession"); got != 1 {
+		t.Fatalf("RollBackSession count = %d, want 1: the tried prompt is cut before it is held again (tray %v)", got, tray)
+	}
+	awaitFooter(t, f, footer, "the footer keeps vendor_fault", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetStatus().GetVendorFault() != nil
+	})
+}

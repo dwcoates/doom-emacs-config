@@ -100,6 +100,19 @@ func firstTurnOf(turns []ids.TurnID) string {
 // RollBackSession asks the shim to rewind the vendor conversation to just
 // before the first of TURNS, answering the paths a restore changed back.
 func (a *shimAdapter) RollBackSession(ctx context.Context, turns []ids.TurnID, restoreFiles bool) ([]string, error) {
+	return rollBackSession(ctx, a.client, turns, restoreFiles)
+}
+
+// sessionRollBacker is the one shim call rollBackSession needs, satisfied by
+// both the verbs' whole client and the queue's narrowed one.
+type sessionRollBacker interface {
+	RollBackSession(ctx context.Context, req *shimv1.RollBackSessionRequest) (*shimv1.RollBackSessionResponse, error)
+}
+
+// rollBackSession is THE ONE BUILDER of a RollBackSession request and the one
+// reading of its answer, shared by the verbs' rollback and the queue's rewind
+// of a failed try (sender.RollBackTurn), as killTurn is for KillTurn.
+func rollBackSession(ctx context.Context, client sessionRollBacker, turns []ids.TurnID, restoreFiles bool) ([]string, error) {
 	req := &shimv1.RollBackSessionRequest{ToBefore: &conversationv1.TurnId{Value: string(turns[0])}}
 	for _, turn := range turns {
 		req.DroppedTurns = append(req.DroppedTurns, &conversationv1.TurnId{Value: string(turn)})
@@ -109,7 +122,7 @@ func (a *shimAdapter) RollBackSession(ctx context.Context, turns []ids.TurnID, r
 	} else {
 		req.Files = &shimv1.RollBackSessionRequest_KeepFiles{KeepFiles: &shimv1.RollBackSessionKeepFiles{}}
 	}
-	response, err := a.client.RollBackSession(ctx, req)
+	response, err := client.RollBackSession(ctx, req)
 	if err != nil {
 		return nil, err
 	}

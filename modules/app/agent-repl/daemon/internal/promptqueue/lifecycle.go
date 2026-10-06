@@ -91,6 +91,7 @@ func (q *queue) OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how sessionwatc
 	if watcher, ok := q.deps.Watcher(ws); ok {
 		if running := watcher.TurnInFlight(); running != nil && *running != turn {
 			q.endTurn(ctx, ws, turn, how, log)
+			q.forgetTry(ws, turn, log)
 			log.Info(opTurnEnded, "the turn ended while another turn already runs; what is held waits for that one", dlog.Context{
 				"turn_in_flight": string(*running),
 			})
@@ -118,6 +119,10 @@ func (q *queue) OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how sessionwatc
 	// THE DOOR: the row closes and the feed draws the ending together. A
 	// failed write is recorded there, and the queue goes on to deliver.
 	q.endTurn(ctx, ws, turn, how, log)
+
+	// A TRY-NOW THE VENDOR TOOK AND THEN BLOCKED goes back on the hold, in its
+	// place, before anything queued is decided (rehold.go).
+	q.reholdFailedTry(ctx, d, turn, how, log)
 
 	// THE BOUNCE REGISTRY IS CHECKED FIRST, before anything queued is
 	// dispatched. A shim registered for a bounce that this turn end leaves
