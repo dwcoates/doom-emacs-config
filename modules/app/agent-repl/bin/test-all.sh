@@ -57,6 +57,42 @@
 
 set -euo pipefail
 
+# EVERY RUN WRITES ITS OWN FULL LOG, named by this run alone, and says where at
+# its start and at its end. A caller reads that file and never redirects the run
+# into a path of its own choosing: two agents that both chose
+# `<shared scratchpad>/testall.log` read each other's runs (2026-10-06, a
+# report that named suites the caller never selected). The directory is
+# <AGENT_REPL_TEST_LOG_ROOT>/<UTC timestamp>-<pid>; the newest
+# TEST_LOG_KEEP runs are kept and older ones are removed as each run starts.
+#
+# The script runs itself once more as the logged run; the marker says which of
+# the two this is, and the logged run drops it at once so nothing it starts (a
+# harness running a copy of this script) inherits it.
+if [ -z "${AGENT_REPL_TEST_ALL_LOGGED:-}" ]; then
+    TEST_LOG_ROOT="${AGENT_REPL_TEST_LOG_ROOT:-/tmp/agent-repl-test-runs}"
+    TEST_LOG_KEEP=100
+    RUN_LOG_DIR="$TEST_LOG_ROOT/$(date -u +%Y%m%dT%H%M%SZ)-$$"
+    mkdir -p "$RUN_LOG_DIR"
+    RUN_LOG="$RUN_LOG_DIR/test-all.log"
+    : >"$RUN_LOG"
+
+    # The oldest runs past the newest TEST_LOG_KEEP go; the glob sorts by the
+    # timestamp each directory is named by.
+    LOG_DIRS=("$TEST_LOG_ROOT"/*/)
+    for ((i = 0; i < ${#LOG_DIRS[@]} - TEST_LOG_KEEP; i++)); do
+        rm -rf "${LOG_DIRS[$i]}"
+    done
+
+    printf "[agent-repl-tests] this run's full log: %s\n" "$RUN_LOG" | tee -a "$RUN_LOG"
+    set +e
+    AGENT_REPL_TEST_ALL_LOGGED=1 bash "${BASH_SOURCE[0]}" "$@" 2>&1 | tee -a "$RUN_LOG"
+    RUN_RC=${PIPESTATUS[0]}
+    set -e
+    printf "[agent-repl-tests] exit %d; this run's full log: %s\n" "$RUN_RC" "$RUN_LOG" | tee -a "$RUN_LOG"
+    exit "$RUN_RC"
+fi
+unset AGENT_REPL_TEST_ALL_LOGGED
+
 THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MODULE_ROOT="$(cd "$THIS_DIR/.." && pwd)"
 REPO_ROOT="$(cd "$MODULE_ROOT/../../.." && pwd)"

@@ -60,6 +60,8 @@ printf 'go %s (in %s)\n' "$*" "$PWD" >>"$STUB_LOG"
 cat >"$3" <<'INNER'
 #!/usr/bin/env bash
 printf 'testrun %s\n' "$*" >>"$STUB_LOG"
+printf 'marker=%s\n' "${AGENT_REPL_TEST_ALL_LOGGED:-}" >>"$STUB_LOG"
+echo "stub testrun output"
 exit "${STUB_TESTRUN_EXIT:-0}"
 INNER
 chmod +x "$3"
@@ -74,7 +76,7 @@ run_test_all() {
     STUB_LOG="$tree/stub.log"
     : >"$STUB_LOG"
     set +e
-    PATH="$path" STUB_LOG="$STUB_LOG" \
+    PATH="$path" STUB_LOG="$STUB_LOG" AGENT_REPL_TEST_LOG_ROOT="$tree/test-runs" \
         STUB_GO_FAIL="${STUB_GO_FAIL:-0}" STUB_TESTRUN_EXIT="${STUB_TESTRUN_EXIT:-0}" \
         "$tree/modules/app/agent-repl/bin/test-all.sh" "$@" \
         >"$tree/stdout" 2>"$tree/stderr"
@@ -192,6 +194,7 @@ run_test_all_real_net() {
     set +e
     RUN_OUT="$(cd "$tree/repo" && PATH="$tree/stubs:/usr/bin:/bin" \
         FAKE_GIT_STATE="$STATE" FAKE_GIT_TOPLEVEL="$tree/repo" STUB_LOG="$STUB_LOG" \
+        AGENT_REPL_TEST_LOG_ROOT="$tree/test-runs" \
         STUB_RUN_EXIT="${STUB_RUN_EXIT:-0}" STUB_MOVE_HEAD="${STUB_MOVE_HEAD:-0}" \
         bash "$tree/repo/modules/app/agent-repl/bin/test-all.sh" "$@" 2>&1)"
     RUN_RC=$?
@@ -276,7 +279,7 @@ test_runs_testrun_inside_the_slot_and_the_git_net() {
     local module want
     module="$(cd "$tree/modules/app/agent-repl" && pwd)"
     want="$(printf 'slot\nsafe --\ntestrun run --module %s --suites ert,daemon' "$module")"
-    if [ "$RUN_RC" -eq 0 ] && [ "$(grep -v '^go ' "$STUB_LOG")" = "$want" ]; then
+    if [ "$RUN_RC" -eq 0 ] && [ "$(grep -v -e '^go ' -e '^marker=' "$STUB_LOG")" = "$want" ]; then
         pass "testrun runs under the suite slot, then the git net, with every argument"
     else
         fail "wrapper order or arguments (rc=$RUN_RC): $(cat "$STUB_LOG")"
@@ -355,11 +358,11 @@ test_a_failed_build_fails_before_anything_runs() {
     make_tree "$tree"
     STUB_GO_FAIL=1 run_test_all "$tree" "$(stub_path "$tree")"
     if [ "$RUN_RC" -eq 1 ] &&
-        grep -q 'ERROR: building the test runner in .*/testrun failed' "$tree/stderr" &&
+        grep -q 'ERROR: building the test runner in .*/testrun failed' "$tree/stdout" &&
         ! grep -qE '^(slot|safe|testrun)' "$STUB_LOG"; then
         pass "a runner that does not build fails the run before any suite"
     else
-        fail "build failure (rc=$RUN_RC): $(cat "$tree/stderr") / $(cat "$STUB_LOG")"
+        fail "build failure (rc=$RUN_RC): $(cat "$tree/stdout") / $(cat "$STUB_LOG")"
     fi
     rm -rf "$tree"
 }
@@ -369,10 +372,120 @@ test_no_go_toolchain_fails_loudly() {
     tree="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     make_tree "$tree"
     run_test_all "$tree" "/usr/bin:/bin"
-    if [ "$RUN_RC" -eq 1 ] && grep -q 'ERROR: go is not on PATH' "$tree/stderr" && [ ! -s "$STUB_LOG" ]; then
+    if [ "$RUN_RC" -eq 1 ] && grep -q 'ERROR: go is not on PATH' "$tree/stdout" && [ ! -s "$STUB_LOG" ]; then
         pass "a host without go fails loudly before anything runs"
     else
-        fail "missing go (rc=$RUN_RC): $(cat "$tree/stderr")"
+        fail "missing go (rc=$RUN_RC): $(cat "$tree/stdout")"
+    fi
+    rm -rf "$tree"
+}
+
+# ---- Every run writes its own full log and names it ----------------------
+
+# run_log_of answers the log path the run printed on its first stdout line.
+run_log_of() {
+    sed -n "1s/^\[agent-repl-tests\] this run's full log: //p" "$1/stdout"
+}
+
+test_the_run_names_its_own_log_first() {
+    local tree log
+    tree="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
+    make_tree "$tree"
+    run_test_all "$tree" "$(stub_path "$tree")"
+    log="$(run_log_of "$tree")"
+    if [ -n "$log" ] && [[ "$log" == "$tree/test-runs/"*"/test-all.log" ]] && [ -f "$log" ]; then
+        pass "the run's first line names its own log, under the log root"
+    else
+        fail "first line names the run's log" "$(cat "$tree/stdout")"
+    fi
+    rm -rf "$tree"
+}
+
+test_the_run_names_its_log_and_exit_last() {
+    local tree log last
+    tree="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
+    make_tree "$tree"
+    STUB_TESTRUN_EXIT=3 run_test_all "$tree" "$(stub_path "$tree")"
+    log="$(run_log_of "$tree")"
+    last="$(sed -n '$p' "$tree/stdout")"
+    if [ "$last" = "[agent-repl-tests] exit 3; this run's full log: $log" ]; then
+        pass "the run's last line names its exit status and its log"
+    else
+        fail "last line names exit and log" "last=$last"
+    fi
+    rm -rf "$tree"
+}
+
+test_the_log_holds_the_runners_output() {
+    local tree log
+    tree="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
+    make_tree "$tree"
+    run_test_all "$tree" "$(stub_path "$tree")"
+    log="$(run_log_of "$tree")"
+    if grep -qx 'stub testrun output' "$log"; then
+        pass "the run's log holds what the runner printed"
+    else
+        fail "the log holds the runner's output" "$(cat "$log")"
+    fi
+    rm -rf "$tree"
+}
+
+test_the_log_holds_the_scripts_own_errors() {
+    local tree log
+    tree="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
+    make_tree "$tree"
+    STUB_GO_FAIL=1 run_test_all "$tree" "$(stub_path "$tree")"
+    log="$(run_log_of "$tree")"
+    if grep -q 'ERROR: building the test runner' "$log"; then
+        pass "the run's log holds the script's own error lines"
+    else
+        fail "the log holds the script's errors" "$(cat "$log")"
+    fi
+    rm -rf "$tree"
+}
+
+test_two_runs_write_two_logs() {
+    local tree first second
+    tree="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
+    make_tree "$tree"
+    run_test_all "$tree" "$(stub_path "$tree")"
+    first="$(run_log_of "$tree")"
+    run_test_all "$tree" "$(stub_path "$tree")"
+    second="$(run_log_of "$tree")"
+    if [ -n "$first" ] && [ -n "$second" ] && [ "$first" != "$second" ] && [ -f "$first" ] && [ -f "$second" ]; then
+        pass "two runs write two logs, neither overwriting the other"
+    else
+        fail "two runs, two logs" "first=$first second=$second"
+    fi
+    rm -rf "$tree"
+}
+
+test_old_run_logs_past_the_keep_are_removed() {
+    local tree i kept
+    tree="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
+    make_tree "$tree"
+    for ((i = 0; i < 100; i++)); do
+        mkdir -p "$tree/test-runs/19700101T0000$(printf '%02d' $((i / 60)))$(printf '%02d' $((i % 60)))Z-1"
+    done
+    run_test_all "$tree" "$(stub_path "$tree")"
+    kept=("$tree/test-runs"/*/)
+    if [ "${#kept[@]}" -eq 100 ] && [ ! -d "$tree/test-runs/19700101T000000Z-1" ] && [ -f "$(run_log_of "$tree")" ]; then
+        pass "the newest 100 run logs are kept and the oldest past them removed"
+    else
+        fail "run-log retention" "kept=${#kept[@]}"
+    fi
+    rm -rf "$tree"
+}
+
+test_the_runner_does_not_inherit_the_logging_marker() {
+    local tree
+    tree="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
+    make_tree "$tree"
+    run_test_all "$tree" "$(stub_path "$tree")"
+    if grep -qx 'marker=' "$STUB_LOG"; then
+        pass "nothing the run starts inherits the logged-run marker"
+    else
+        fail "the marker leaked into the runner" "$(cat "$STUB_LOG")"
     fi
     rm -rf "$tree"
 }
@@ -388,6 +501,13 @@ test_integration_clean_record_run_exits_0_with_no_tag
 test_integration_real_drift_during_record_run_is_still_caught
 test_integration_failed_suite_records_nothing
 test_integration_moved_commit_during_record_run_records_nothing
+test_the_run_names_its_own_log_first
+test_the_run_names_its_log_and_exit_last
+test_the_log_holds_the_runners_output
+test_the_log_holds_the_scripts_own_errors
+test_two_runs_write_two_logs
+test_old_run_logs_past_the_keep_are_removed
+test_the_runner_does_not_inherit_the_logging_marker
 
 echo "-----"
 echo "passed: $PASS  failed: $FAIL"
