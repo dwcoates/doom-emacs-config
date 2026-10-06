@@ -12,7 +12,14 @@
 //
 //   ┌─ NewsDigestOverlay ─────────────────────────────────────┐
 //   │ ┌ NewsDigestHeader ───────────────────────────────────┐ │
-//   │ │ [NewsDigestTitle]           [NewsDigestPeriod]  [×] │ │
+//   │ │ [Title]    [NewsDigestSdkVersion]    [Period]  [×]  │ │
+//   │ └─────────────────────────────────────────────────────┘ │
+//   │ ┌ NewsDigestWeek ("Since last week") ─────────────────┐ │
+//   │ │ [NewsDigestSectionHeading]                          │ │
+//   │ │ risks: ┌ NewsDigestRiskItem ──────────────────────┐ │ │
+//   │ │        │ [NewsDigestItem]  [NewsDigestRiskReason] │ │ │
+//   │ │        └──────────────────────────────────────────┘ │ │
+//   │ │ quiet: [NewsDigestWeekQuiet]                        │ │
 //   │ └─────────────────────────────────────────────────────┘ │
 //   │ ┌ NewsDigestSection (affects the agent-repl backend) ─┐ │
 //   │ │ [NewsDigestSectionHeading]                          │ │
@@ -46,6 +53,57 @@ message NewsDigestOverlay {
   repeated NewsDigestSection sections = 3;
   // Every source the digest read, with whether reading it worked.
   NewsDigestSources sources = 4;
+  // "Since last week": the digest of the past seven days' digests, holding
+  // only what could regress agent-repl. Drawn FIRST, before the sections.
+  // Set on every digest the daemon makes; UNSET only on a digest made before
+  // the weekly section existed (kept standing across the deploy that added
+  // it), which draws no weekly section.
+  NewsDigestWeek week = 5;
+}
+
+// "Since last week": every item of the past seven days' digests that could
+// regress agent-repl (a breaking, deprecated, removed or changed-default
+// behavior of the Agent SDK, Claude Code or the Messages API; a pricing,
+// billing, plan or limit change; an auth or account change; a model
+// retirement or rename; a terms or policy change touching automated use),
+// each told once however many digests repeated it. Recomputed by every run.
+message NewsDigestWeek {
+  // The section's heading, composed by the daemon ("Since last week").
+  NewsDigestSectionHeading heading = 1;
+  // THE ARM IS THE OUTCOME; exactly one is set.
+  oneof outcome {
+    // Something in the past week could regress agent-repl.
+    NewsDigestWeekRisks risks = 2;
+    // Nothing in the covered span could: told, never left to silence.
+    NewsDigestWeekQuiet quiet = 3;
+  }
+}
+
+// The week's regression risks, most important first. Never empty.
+message NewsDigestWeekRisks {
+  repeated NewsDigestRiskItem items = 1;
+}
+
+// One piece of news that could regress agent-repl.
+message NewsDigestRiskItem {
+  // The news itself, drawn as any section's item: its effective date is set
+  // when the change is announced for a stated future date.
+  NewsDigestItem item = 1;
+  // Why it could regress agent-repl, naming what in agent-repl it touches.
+  NewsDigestRiskReason reason = 2;
+}
+
+// Why an item could regress agent-repl: one line, drawn verbatim.
+message NewsDigestRiskReason {
+  string text = 1;
+}
+
+// A week in which nothing could regress agent-repl. The daemon says so, and
+// says over what span: when its record of digests began within the week, the
+// text names that start rather than claiming the whole week.
+message NewsDigestWeekQuiet {
+  // Drawn verbatim ("Nothing since last week could regress agent-repl.").
+  string text = 1;
 }
 
 // A digest's identity: minted by the daemon, opaque to the client, echoed
@@ -56,12 +114,37 @@ message NewsDigestId {
   string value = 1;
 }
 
-// The overlay's header row: the title and the covered period. The dismiss
-// control beside them is the webview's own, wired to DismissNewsDigest.
+// The overlay's header row: the title, the SDK version agent-repl runs (in
+// the MIDDLE of the row), and the covered period. The dismiss control beside
+// them is the webview's own, wired to DismissNewsDigest.
 message NewsDigestHeader {
   NewsDigestTitle title = 1;
   NewsDigestPeriod period = 2;
+  // The Claude Agent SDK version agent-repl currently runs, drawn as
+  // "SDK Version: <version>". Set on every digest the daemon makes; UNSET
+  // only on a digest made before the field existed, which draws none.
+  NewsDigestSdkVersion sdk_version = 3;
 }
+
+// The Claude Agent SDK version agent-repl runs, as the daemon knows it: the
+// `SessionRuntime.sdk_version` the shim last reported on a session start.
+// THE ARM IS THE ANSWER; exactly one is set.
+message NewsDigestSdkVersion {
+  oneof answer {
+    // The version the shim reported.
+    NewsDigestSdkVersionKnown known = 1;
+    // No shim has reported one to this daemon (no session has started since
+    // the daemon did), drawn as unknown rather than guessed.
+    NewsDigestSdkVersionUnknown unknown = 2;
+  }
+}
+// A reported SDK version.
+message NewsDigestSdkVersionKnown {
+  // The npm package version ("0.2.97"), drawn verbatim. Never empty.
+  string version = 1;
+}
+// No SDK version is known.
+message NewsDigestSdkVersionUnknown {}
 
 // The title line, composed by the daemon ("Claude news · Oct 2").
 message NewsDigestTitle {
