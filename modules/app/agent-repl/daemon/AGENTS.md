@@ -1055,6 +1055,36 @@ Owner rulings, 2026-09-30 (`internal/merge`; the contract is
   `OpenInEditor{merge_test_log}` resolves it through `TestLogPath` (the lease
   in the merge ledger, the file present), refuses with
   `unknown_merge_test_log`, and relays `HostOpenInEditor{path}`.
+- **A MERGE ALWAYS RESUMES WHERE IT LEFT OFF** (owner ruling, 2026-10-06;
+  `progress.go`, `resume.go`). A run writes its progress to
+  `wsm.merge_progress` (layout 27, one JSON document per workspace, keyed by
+  the merge's lease) at every step boundary, BEFORE the step acts: the step,
+  the tab rounds, the footer facts, the subject, the attempt's tip and target,
+  the rebase's commits and count, the agent turn it is about to submit, the
+  gated head and the merge commit before the fast-forward. The boot never reads
+  the target's working tree to decide a merge's fate -- content the merge never
+  wrote (an untracked file, the owner's edits) is no evidence. It ADOPTS the
+  lease (`wsm.AdoptMergeLease`, so the orphan sweep leaves it), redraws the same
+  bubble live at once, and the pump resumes the run first (a pause stops only
+  new admissions). Each step reads from git only what it can have left: a
+  rebase standing (continued, or its conflict handed to the session), the
+  branch on the tip (go to tests), the branch at its pre-rebase head (begin the
+  rebase), the target at the recorded merge commit (landed) or at the tip
+  (commit again). An agent turn is reattached by its id (closed in the turn
+  store, still running in the shim, still held, or submitted now under the
+  same id). A tree that contradicts the record fails the merge at ERROR
+  `daemon.merge.resume`, naming the contradiction. An admitted merge with no
+  record never took a step and runs again from the queue under its bubble.
+  A record that will not decode refuses the boot.
+- **THE DAEMON'S EXIT SUSPENDS A MERGE AT A STOPPING POINT** (`gatedgit.go`,
+  `Drain`). Every git a run makes goes through its gate; the drain stops every
+  gate (no git starts after it), waits for the command in flight within
+  `MergeGitStopBound` (10s; INFO with the measured wait, ERROR naming a
+  command that outlives it), then cuts the run's waits: an agent turn (it
+  lives on in the shim) and a test gate run (INFO: it runs again from its
+  start on resume). A suspended run publishes, records and releases nothing
+  durable (INFO `daemon.merge.suspend`); `daemonaddr.ClaimWaitBound` outlasts
+  both drain bounds so a replacement still replaces.
 - The integration fake: a branch with no commits is already on its target, so
   a test that exercises a merge's steps commits work first
   (`harness.CommitWork`); a rebase conflict is scripted per commit
