@@ -1718,6 +1718,139 @@ describe("keep-alives", () => {
     expect(answer.turn?.value).toBe(opened[0]?.turn?.value);
   });
 
+  /** The message the span invariant's refusal is recorded under. */
+  const REFUSED = "the keep-alive rewind is REFUSED";
+
+  /** Resolves on the COUNT-th distinct record matching `predicate`. */
+  const nthRecord = async (
+    shim: Awaited<ReturnType<typeof spawnShim>>,
+    count: number,
+    predicate: (record: { message: string; context: Record<string, unknown> }) => boolean,
+  ) => {
+    const seen = new Set<unknown>();
+    return shim.log.record((record) => {
+      if (predicate(record)) seen.add(record);
+      return seen.size >= count;
+    });
+  };
+
+  /** True on the record of a rewind performed before a keep-alive beat. */
+  const rewoundBeforeBeat = (record: { message: string; context: Record<string, unknown> }): boolean =>
+    record.message.startsWith("REWINDING the vendor context") && record.context.before === "keepalive";
+
+  test("a task completing beside a keep-alive refuses the rewind that would discard its served turn, at ERROR", async () => {
+    // THE SPAN INVARIANT: the vendor's own turn is real conversation the
+    // anchor lies behind, so no rewind may discard it.
+    const shim = await spawnBeating();
+    await shim.clients.h1.startSession(freshSession());
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!queue-vendor-turn" }));
+
+    const refused = await shim.log.record((record) => record.message.startsWith(REFUSED));
+
+    const offending = refused.context.offending as { kind: string }[];
+    expect([refused.level, offending.map((turn) => turn.kind)]).toEqual(["error", ["vendor_started"]]);
+  });
+
+  test("a refused rewind keeps the conversation serving the next real prompt", async () => {
+    const shim = await spawnBeating();
+    await shim.clients.h1.startSession(freshSession());
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!queue-vendor-turn" }));
+    await shim.log.record((record) => record.message.startsWith(REFUSED));
+
+    turnStarted(await shim.clients.h1.startTurn(startTurnRequest({ turn: "t2", text: "after the refusal" })));
+
+    expect((await servedLanded(shim, "after the refusal")).upsertKey).not.toBe("");
+  });
+
+  test("a stop every rewind replays never loops: each rewind resumes at the same real anchor", async () => {
+    // THE SHIP-GNS LOOP (2026-10-02), driven by the mock's own replay lever.
+    const shim = await spawnBeating();
+    await shim.clients.h1.startSession(freshSession());
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!stop-on-rewind" }));
+
+    await nthRecord(shim, 3, rewoundBeforeBeat);
+
+    const anchors = shim.log.records().filter(rewoundBeforeBeat).map((record) => record.context.resume_session_at);
+    expect(new Set(anchors).size).toBe(1);
+  });
+
+  test("a stop every rewind replays stores no turn", async () => {
+    const shim = await spawnBeating();
+    await shim.clients.h1.startSession(freshSession());
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!stop-on-rewind" }));
+    await nthRecord(
+      shim,
+      2,
+      (record) => record.message === "fake vendor replays a task STOPPED by the rewind and answers it in a turn of its OWN before the next send",
+    );
+
+    turnStarted(await shim.clients.h1.startTurn(startTurnRequest({ turn: "t2", text: "after the replays" })));
+    await servedLanded(shim, "after the replays");
+
+    expect([
+      storedCarrying(shim, "PROMPT_ORIGIN_VENDOR_STARTED"),
+      storedCarrying(shim, "The background task was stopped."),
+    ]).toEqual([[], []]);
+  });
+
+  test("a stop every rewind replays never trips the span invariant", async () => {
+    const shim = await spawnBeating();
+    await shim.clients.h1.startSession(freshSession());
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!stop-on-rewind" }));
+    await nthRecord(shim, 2, rewoundBeforeBeat);
+
+    turnStarted(await shim.clients.h1.startTurn(startTurnRequest({ turn: "t2", text: "after the replays" })));
+    await servedLanded(shim, "after the replays");
+
+    expect(shim.log.records().filter((record) => record.message.startsWith(REFUSED))).toEqual([]);
+  });
+
+  test("a restarted shim holds no anchor: its keep-alives are carried, never rewound, until a real reply", async () => {
+    const first = await spawnShim();
+    const started = sessionStarted(await first.clients.h1.startSession(freshSession()));
+    const watch = openStream((options) => first.clients.h1.watchAgent(watchAgentRequest(), options));
+    await watch.next();
+    await first.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "before the restart" }));
+    await untilTerminal(watch);
+    watch.close();
+    await first.clients.h1.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
+    await first.exited;
+
+    const second = await spawnShim({ reuse: first.dirs, env: { AGENT_REPL_FAKE_KEEPALIVE_INTERVAL_MS: "200" } });
+    sessionStarted(await second.clients.h1.startSession(resumeSession(started.vendorSessionId)));
+    await nthRecord(second, 2, (record) => record.message === "closed a turn" && record.context.keepalive === true);
+
+    expect(second.log.records().filter((record) => record.message.startsWith("REWINDING the vendor context"))).toEqual([]);
+  });
+
+  test("a restarted shim's first real reply anchors the next rewind", async () => {
+    const first = await spawnShim();
+    const started = sessionStarted(await first.clients.h1.startSession(freshSession()));
+    const watch = openStream((options) => first.clients.h1.watchAgent(watchAgentRequest(), options));
+    await watch.next();
+    await first.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "before the restart" }));
+    await untilTerminal(watch);
+    watch.close();
+    await first.clients.h1.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
+    await first.exited;
+    const before = new Set(readTranscript(first.dirs, started.vendorSessionId).map((record) => record.uuid));
+    const second = await spawnShim({ reuse: first.dirs, env: { AGENT_REPL_FAKE_KEEPALIVE_INTERVAL_MS: "200" } });
+    sessionStarted(await second.clients.h1.startSession(resumeSession(started.vendorSessionId)));
+    const resumedWatch = openStream((options) => second.clients.h1.watchAgent(watchAgentRequest(), options));
+    await resumedWatch.next();
+    turnStarted(await second.clients.h1.startTurn(startTurnRequest({ turn: "t2", text: "after the restart" })));
+    await untilTerminal(resumedWatch);
+    resumedWatch.close();
+
+    const rewound = await second.log.record(rewoundBeforeBeat);
+
+    // An assistant record the RESUMED shim saw: none from before the restart.
+    const named = readTranscript(second.dirs, started.vendorSessionId).find(
+      (record) => record.uuid === rewound.context.resume_session_at,
+    );
+    expect([named?.type, before.has(rewound.context.resume_session_at as string)]).toEqual(["assistant", false]);
+  });
+
   test("a StartTurn sent the moment a keep-alive is submitted opens its turn exactly once", async () => {
     // THE KEEP-ALIVE IS INVISIBLE OUTSIDE THE SHIM. A StartTurn landing while
     // the keep-alive is still open is not refused: it waits inside the shim
