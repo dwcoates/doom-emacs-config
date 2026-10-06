@@ -458,6 +458,29 @@ const VENDOR_BACKGROUNDED = scenario({
   },
 });
 
+const BASH_REREPORTED = scenario({
+  name: "bash-rereported",
+  prompt: "!bash-rereported <task_id> <tool_use_id>",
+  emits:
+    "a `task_notification` with `status: \"stopped\"` for a backgrounded shell task this query never started — " +
+    "no `task_started`, no `task_type` — naming the prompt's task id and spawning call, then a conclusion. A " +
+    "keep-alive rewind's replacement query re-reports an earlier query's ended shell exactly so",
+  writes: "the closing text line",
+  arms: "nothing for the re-reported task: its conclusion is already on record",
+  run(ctx) {
+    ctx.log.debug({ turn: ctx.turn, branch: "bash-rereported" }, "fake re-reported-shell turn");
+    const [taskId = ctx.mintShellTaskId(), toolUseId = "toolu_rereported"] = ctx.args.split(/\s+/).filter((word) => word !== "");
+    ctx.systemMessage("task_notification", {
+      task_id: taskId,
+      tool_use_id: toolUseId,
+      status: "stopped",
+      output_file: ctx.files.spoolPathFor(taskId),
+      summary: "Background command stopped",
+    });
+    conclude(ctx, "Noted the stopped command.");
+  },
+});
+
 export const SHELL_SCENARIOS = [
   BASH,
   BASH_HOLD,
@@ -470,4 +493,5 @@ export const SHELL_SCENARIOS = [
   BASH_DETACH_FAIL,
   BASH_DETACH_LIVE,
   VENDOR_BACKGROUNDED,
+  BASH_REREPORTED,
 ];

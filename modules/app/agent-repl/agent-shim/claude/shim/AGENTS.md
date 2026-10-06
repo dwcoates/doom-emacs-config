@@ -318,6 +318,9 @@ is still a contract — but nothing has confirmed the vendor spells them this wa
   or `Skill` instead: `!glob`, `!grep-content`, `!grep-files`, `!grep-count`,
   `!artifact-publish`, `!artifact-list`, `!wakeup-schedule`, `!wakeup-stop`,
   `!worktree-keep`, `!worktree-remove`, `!memory`, `!skills-injected`;
+- `!bash-rereported` — no capture spans a keep-alive rewind; its untyped
+  `stopped` notification is a live session's log (2026-10-02, workspace
+  ship-gns);
 - `!send-message-resumed` / `!send-message-refused` / `!subagent-resumed` — no
   capture addresses a subagent; `!subagent-resumed`'s resume `task_started`
   from the send is the shape a live session's log showed (2026-09-27);
@@ -373,6 +376,7 @@ is still a contract — but nothing has confirmed the vendor spells them this wa
 | `!bash-detach-fail` | a detached `Bash` that ends non-zero: `task_updated{status:"failed"}` and a failed `task_notification` | the tool_use and tool_result lines, and a spool terminated by `EXIT=3` | AgentBash detached_work terminating in a non-zero exit |
 | `!bash-detach-live` | a detached `Bash` that NEVER finishes: no terminal notification, and the task stays in the live set | an unterminated spool with no `EXIT=` line — the corpus's `bash-midoutput.output` shape | AgentBash detached_work still live; what a fan-wide cancel and a StopBash act on |
 | `!vendor-backgrounded` | a FOREGROUND `Bash` the vendor detaches mid-flight: the scenario parks, `backgroundTasks(toolUseId)` marks it `is_backgrounded`, and the foreground result then reports `backgroundedByUser: true` | the tool_use line, the tool_result line carrying `backgroundedByUser`, an unterminated spool | AgentBackgrounded — a vendor-backgrounded foreground unit |
+| `!bash-rereported <task_id> <tool_use_id>` | a `task_notification` with `status: "stopped"` for a backgrounded shell task this query never started — no `task_started`, no `task_type` — naming the prompt's task id and spawning call, then a conclusion. A keep-alive rewind's replacement query re-reports an earlier query's ended shell exactly so | the closing text line | nothing for the re-reported task: its conclusion is already on record |
 | `!web-fetch` | a `WebFetch` answered with the corpus shape: bytes, code, codeText, result, durationMs, url | the tool_use line, the tool_result line, the closing text line | AgentWebFetch.start + AgentWebFetchSuccess |
 | `!web-fetch-redirect` | a `WebFetch` answered with a 302 and the vendor's redirect instruction as the result body | the tool_use line, the tool_result line, the closing text line | AgentWebFetchSuccess carrying a non-2xx status |
 | `!web-search` | a `WebSearch` answered with BOTH result kinds — a hit list keyed by a server tool_use id, and a bare commentary string | the tool_use line, the tool_result line, the closing text line | AgentWebSearch.start + AgentWebSearchSuccess with entry=link AND entry=note |
