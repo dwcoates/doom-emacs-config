@@ -109,6 +109,10 @@ type orchestrator struct {
 	// keyed by workspace: the admission pump runs each from its record, ahead
 	// of anything waiting in its repository's line (Recover, startResumed).
 	resumes map[ids.WorkspaceID]progressDoc
+	// transferred are the workspaces a handover moved to another daemon:
+	// their merges are that daemon's, and this one admits nothing of them
+	// (transfer.go). A take-back clears the mark.
+	transferred map[ids.WorkspaceID]bool
 	// pumping guards one admission pump per repository.
 	pumping map[wsm.RepoKey]bool
 	// admissions counts the admission steps in flight -- the store reads and
@@ -203,6 +207,7 @@ func newOrchestrator(deps Deps) (*orchestrator, error) {
 		requested:       map[ids.WorkspaceID]*requestWait{},
 		ledgerOf:        map[ids.WorkspaceID]ids.LeaseID{},
 		resumes:         map[ids.WorkspaceID]progressDoc{},
+		transferred:     map[ids.WorkspaceID]bool{},
 		offers:          map[ids.WorkspaceID]bool{},
 		repoOf:          map[ids.WorkspaceID]wsm.RepoKey{},
 		pumping:         map[wsm.RepoKey]bool{},

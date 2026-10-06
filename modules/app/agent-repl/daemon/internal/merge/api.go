@@ -122,6 +122,13 @@ type Orchestrator interface {
 	// every merge that was queued but not started, in the order it was
 	// waiting in. It never silently abandons one.
 	Recover(ctx context.Context) error
+	// SuspendForTransfer brings a workspace's merge to a stopping point for a
+	// handover's transfer and stops this daemon admitting any merge of it;
+	// the successor resumes it (AdoptWorkspace).
+	SuspendForTransfer(ctx context.Context, ws ids.WorkspaceID) error
+	// AdoptWorkspace takes every merge of a workspace this daemon now serves
+	// from its durable rows, resuming an admitted one at its recorded step.
+	AdoptWorkspace(ctx context.Context, ws ids.WorkspaceID) error
 }
 
 // Request is one merge request: the REQUESTING workspace, which the merge

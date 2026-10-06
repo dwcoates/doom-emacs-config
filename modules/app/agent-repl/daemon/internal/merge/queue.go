@@ -651,8 +651,25 @@ func (o *orchestrator) admitFront(ctx context.Context, repo wsm.RepoKey) (ids.Wo
 	if err != nil {
 		return "", nil, false, err
 	}
+	// ONE MERGE PER REPOSITORY AT A TIME, ACROSS DAEMONS. An entry admitted
+	// with no run here is a merge another daemon is driving, or one a
+	// handover is moving between them: nothing is admitted behind it until it
+	// ends or resumes here.
+	for _, entry := range entries {
+		if entry.State == wsm.MergeAdmitted {
+			o.deps.Log.Global().Debug(op, "a merge admitted elsewhere holds this repository's slot; nothing is admitted behind it",
+				dlog.Context{"repo": string(repo), "workspace": string(entry.Workspace)})
+			return "", nil, false, nil
+		}
+	}
 	front, found := nextInLine(entries)
 	if !found {
+		return "", nil, false, nil
+	}
+	// A WORKSPACE HANDED TO ANOTHER DAEMON HAS ITS MERGES THERE.
+	if o.movedAway(front.Workspace) {
+		o.deps.Log.Global().Debug(op, "the queue front's workspace moved to another daemon; it admits the merge there",
+			dlog.Context{"repo": string(repo), "workspace": string(front.Workspace)})
 		return "", nil, false, nil
 	}
 	lock, taken, err := acquireRepoLock(o.lockDir, string(repo))

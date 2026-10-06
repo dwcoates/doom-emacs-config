@@ -171,8 +171,9 @@ func (r *run) reattachTurn(ctx context.Context, turn ids.TurnID, text string, or
 }
 
 // suspend lets go of what a run holds IN THIS PROCESS when the daemon's exit
-// took it away, and leaves its lease, its queue entry and its progress record
-// to the next boot, which resumes it. It writes nothing durable: the state
+// or its workspace's transfer took it away, and leaves its lease, its queue
+// entry and its progress record to the daemon that serves the workspace next,
+// which resumes it. It writes nothing durable: the state
 // client is closing.
 func (r *run) suspend(ctx context.Context, cause error) {
 	step := r.progressStep()
@@ -181,7 +182,7 @@ func (r *run) suspend(ctx context.Context, cause error) {
 		fields["cause"] = cause.Error()
 	}
 	r.o.deps.Log.Global().Info("daemon.merge.suspend",
-		"a merge stopped at a stopping point for the daemon's exit; the next boot resumes it at the step it recorded", fields)
+		"a merge stopped at a stopping point for the daemon's exit or its workspace's transfer; the daemon that serves the workspace next resumes it at the step it recorded", fields)
 	r.releaseInProcess(ctx)
 }
 
