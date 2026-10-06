@@ -50,6 +50,26 @@ DOCTOR_PATH="$BIN:$TOOL_DIRS:/usr/bin:/bin"
 # A sparse file exercises the size gate without consuming the represented disk.
 truncate -s 2048 "$STATE/store/events.db"
 
+# THE OWNER'S LAUNCHD IS NEVER ASKED. /bin is on the doctor's PATH, so without
+# this stub every case read the host's real store and sidecar services: the
+# "no loaded launchd services" premise held only on a host without them, and
+# the real services' `launchctl print` output is what met the doctor's
+# early-exiting pid reader (exit 141, 2026-10-06). The stub answers as
+# launchctl does for a service that is not loaded.
+#
+# DOCTOR_LAUNCHCTL_PRINT names a file the stub prints instead, as launchctl
+# prints a loaded service.
+cat >"$BIN/launchctl" <<'EOF'
+#!/usr/bin/env bash
+if [ -n "${DOCTOR_LAUNCHCTL_PRINT:-}" ]; then
+  cat "$DOCTOR_LAUNCHCTL_PRINT"
+  exit 0
+fi
+echo "Could not find service in domain for port" >&2
+exit 113
+EOF
+chmod +x "$BIN/launchctl"
+
 cat >"$BIN/sqlite3" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"$DOCTOR_SQLITE_CALLS"
@@ -269,5 +289,23 @@ grep_in "$DOCTOR_OUT" -q '"check":"store-db-integrity","status":"PASS"' ||
   fail "deep integrity did not pass: $DOCTOR_OUT"
 grep -q 'integrity_check' "$CALLS" ||
   fail "--deep-integrity did not execute PRAGMA integrity_check"
+
+# ---- a loaded service's long `launchctl print` is read whole -------------
+# The pid line comes first and 200KB follow it, so a reader that stopped at the
+# pid left the writer SIGPIPEd and the doctor exiting 141.
+
+PRINT="$TMP/launchctl-print"
+{
+  printf 'gui/501/com.agentrepl.shim-store = {\n\tpid = 4242\n'
+  for _ in $(seq 1 4000); do printf '\tfiller = 0123456789012345678901234567890123456789\n'; done
+  printf '}\n'
+} >"$PRINT"
+start_fake_store healthy
+export DOCTOR_LAUNCHCTL_PRINT="$PRINT"
+run_doctor --json
+unset DOCTOR_LAUNCHCTL_PRINT
+stop_fake_store
+grep_in "$DOCTOR_OUT" -q '"check":"launchd-shim-store","status":"PASS","detail":"com.agentrepl.shim-store loaded and running (pid 4242)"' ||
+  fail "a loaded service's long launchctl print was not read to its pid: $DOCTOR_OUT"
 
 printf 'PASS: doctor probes the store Connect endpoints and bounds integrity scans\n'
