@@ -516,7 +516,7 @@ func (r *resolver) waiting(s *wsState, log dlog.Logger) *frontendv1.FooterStatus
 			ColdGate: &frontendv1.FooterSubStatusWaitingColdGate{}}
 		arm.Activity = waitingSalient(s.coldGateAt, func(w *frontendv1.FooterStatusWaitingSalient) {
 			w.Kind = &frontendv1.FooterStatusWaitingSalient_ColdGateCost{
-				ColdGateCost: &frontendv1.FooterStatusActivityColdGateCost{Text: s.coldGate.Detail}}
+				ColdGateCost: coldGateCostLine(s.coldGate.Cost)}
 		})
 	default:
 		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "default"})
@@ -717,5 +717,16 @@ func statusName(status *frontendv1.FooterStatus) string {
 		return "merged"
 	default:
 		return "unset"
+	}
+}
+
+// coldGateCostLine is the cold gate's cost line on the wire: the whole line
+// and the parts it is exactly made of, the figure carrying its window fill.
+func coldGateCostLine(c ColdGateCost) *frontendv1.FooterStatusActivityColdGateCost {
+	return &frontendv1.FooterStatusActivityColdGateCost{
+		Text:   c.Text(),
+		Lead:   c.Lead,
+		Figure: &frontendv1.FooterColdGateFigure{Text: c.Figure, WindowFill: c.WindowFill},
+		Tail:   c.Tail,
 	}
 }

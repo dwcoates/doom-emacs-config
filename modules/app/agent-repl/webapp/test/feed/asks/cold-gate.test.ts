@@ -33,6 +33,10 @@ import {
 } from "../../../src/footer/progress.js";
 import { armsOf } from "../arms.js";
 import { askHarness, ROW_ID, settle as drain, WORKSPACE } from "./harness.js";
+import { installGateDock } from "../../../src/feed/gate-dock.js";
+import { coldGatePercentColor } from "../../../src/pressure-color.js";
+import { shellElements } from "../../../src/shell.js";
+import { shellHTML } from "../../shell-html.js";
 import { orderFor } from "../../feed-order.js";
 import { stopClocks } from "../../../src/feed/ticking.js";
 
@@ -45,6 +49,7 @@ const SUMMARIZER = "claude-haiku-4";
 function standing(
   opts: {
     tokens?: bigint;
+    windowFill?: number;
     lastRequestMs?: bigint;
     models?: string[];
     scopes?: SessionCompactScope[];
@@ -55,7 +60,7 @@ function standing(
   return {
     case: "standing",
     value: {
-      contextTokens: { tokens: opts.tokens ?? 182_000n },
+      contextTokens: { tokens: opts.tokens ?? 182_000n, windowFill: opts.windowFill ?? 0.182 },
       lastRequest: { atMs: opts.lastRequestMs ?? 0n },
       model: { model: { name: MODEL } },
       ...(opts.noCompact
@@ -158,6 +163,34 @@ describe("the standing gate", () => {
   it("formats the raw token count into the lead", () => {
     const el = drawFeedColdGate(gate(standing({ tokens: 182_000n })), askHarness().rc);
     expect(el.querySelector(".hibernation-context")?.textContent).toContain("182k");
+  });
+
+  it("colors the token figure by its window fill on the cold-gate gradient", () => {
+    // Arrange
+    const probe = document.createElement("span");
+    probe.style.color = coldGatePercentColor(50);
+    // Act
+    const el = drawFeedColdGate(gate(standing({ windowFill: 0.5 })), askHarness().rc);
+    // Assert
+    expect(el.querySelector<HTMLElement>(".cold-gate-tokens")?.style.color).toBe(probe.style.color);
+  });
+
+  it("keeps the figure's color once the card docks", async () => {
+    // Arrange
+    document.body.innerHTML = shellHTML();
+    const shell = shellElements(document);
+    const row = document.createElement("div");
+    row.className = "feed-item";
+    row.append(drawFeedColdGate(gate(standing({ windowFill: 0.7 })), askHarness().rc));
+    shell.feed.append(row);
+    const probe = document.createElement("span");
+    probe.style.color = coldGatePercentColor(70);
+    // Act
+    const dock = installGateDock(shell.feed, shell.gateDock);
+    await Promise.resolve();
+    // Assert
+    expect(shell.gateDock.querySelector<HTMLElement>(".cold-gate-tokens")?.style.color).toBe(probe.style.color);
+    dock.dispose();
   });
 
   it("names the session's model verbatim in the lead", () => {
@@ -812,6 +845,10 @@ describe("drawFeedColdGate malformed input", () => {
     const u = gate(standing());
     (u.state as unknown as { value: { lastRequest: undefined } }).value.lastRequest = undefined;
     expect(() => drawFeedColdGate(u, askHarness().rc)).toThrow(MalformedView);
+  });
+
+  it("refuses a window fill outside [0, 1]", () => {
+    expect(() => drawFeedColdGate(gate(standing({ windowFill: 1.2 })), askHarness().rc)).toThrow(MalformedView);
   });
 
   it("refuses a negative token count", () => {

@@ -654,8 +654,24 @@ message FooterStatusActivityInterrupting {
 }
 // The cold gate's composed cost line.
 message FooterStatusActivityColdGateCost {
-  // The composed line, drawn verbatim.
+  // The composed line, drawn verbatim. It is exactly `lead` + `figure.text`
+  // + `tail`, which a client draws instead so the figure takes its color.
   string text = 1;
+  // The words before the token figure ("the conversation is cold at ").
+  string lead = 2;
+  // The token figure, formatted and colored.
+  FooterColdGateFigure figure = 3;
+  // The words after it (" context tokens").
+  string tail = 4;
+}
+// The cold gate's token figure on the footer line.
+message FooterColdGateFigure {
+  // As drawn ("409,051").
+  string text = 1;
+  // How full the model's context window the figure is, in [0, 1] (clamped):
+  // its color, through the same cold-gate gradient as the gate's own figure
+  // (FeedColdGateContextTokens.window_fill).
+  double window_fill = 2;
 }
 // The gated call's composed line.
 message FooterStatusActivityGatedCall {
