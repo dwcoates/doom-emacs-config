@@ -37,6 +37,7 @@
  * UNSPECIFIED is never offered and never sent, and a resolved trace carrying it
  * is a MALFORMED VIEW rather than a scope this end quietly words as "everything".
  */
+import { closeStandingNewsDigest } from "../../news-digest/news-digest.js";
 import { createControl, type Control } from "../../control.js";
 import { formatTickedAge } from "../../duration.js";
 import { onCompactionProgress } from "../../footer/progress.js";
@@ -514,6 +515,9 @@ async function answer(
 ): Promise<void> {
   const id = requireMessage(rc.row.id, "FeedRow.id");
   clearRefusals(actions);
+  // ANSWERING THE GATE CLOSES A STANDING NEWS DIGEST, as sending a prompt does
+  // (owner, 2026-10-06): the user has moved on to the conversation.
+  closeStandingNewsDigest(actions.ownerDocument);
   log.info(`answering a cold gate with ${choice.kind}`, {
     operation: "feed.asks.cold-gate.answer",
     context: {
