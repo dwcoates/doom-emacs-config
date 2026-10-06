@@ -174,6 +174,7 @@ An event that is not a message is drawn in the feed as an **outcome marker**: a 
   - A glyph, a short label, and sometimes a detail: `◼ interrupted`, `◆ vendor error · rate limited`, `✕ agent-repl · process died`.
   - The glyph and the thin left edge carry the color: grey for your own acts and hooks, turquoise when the vendor ended or refused the work, blue when agent-repl's own machinery died.
   - The same marker stands for an interrupted turn, a Stop hook that ended the run, a permission you denied, a plan episode that broke, and a compaction that failed.
+  - A failed compaction is shown only by its marker; the footer draws no line for it.
 - **Opening a fault marker:**
   - Click a turquoise or blue marker (it draws a `›` chevron) to open its details in place; click it again to close them.
   - A grey marker has no chevron and does not open.

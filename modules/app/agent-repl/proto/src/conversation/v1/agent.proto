@@ -125,21 +125,12 @@ message AgentUpdate {
     // never a terminal: the turn's end is the frame-level failure arm
     // (AgentFailure.api_request_failed) and nothing else. A page line.
     ApiRequestFailed api_error = 6;
-    // The vendor's own CONTEXT-BUDGET WARNING, injected into the prompt as the
-    // window fills. A FILE-PLANE fact: it exists only as an attachment line in
-    // the agent's transcript, so the sidecar is its only producer and it
-    // reaches a consumer as a page line of the agent's book (moved here from
-    // SessionUpdate tag 24, which had no producer on the live session stream).
-    // The footer's activity line draws it; instantaneous, no lifecycle.
-    ContextBudgetWarning context_budget_warning = 7;
   }
-}
-
-// The vendor's context-budget warning as it appeared in the transcript.
-message ContextBudgetWarning {
-  // The vendor's warning text, verbatim — the producer composes it and no
-  // structured figure rides the record.
-  string text = 1;
+  // Tag 7 (`context_budget_warning`) is RETIRED: no footer line warns that
+  // the context is nearly full (owner ruling, 2026-10-06), and the real
+  // vendor never wrote the transcript attachment it was read from.
+  reserved 7;
+  reserved "context_budget_warning";
 }
 
 // The agent's stream ended on terms the consumer asked for. THE ARM IS HOW —
