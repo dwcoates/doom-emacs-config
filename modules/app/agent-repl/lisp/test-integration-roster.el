@@ -95,7 +95,9 @@ OVERRIDES replaces top-level entries (notably `current')."
              (expanded . ()))])))
      (task . ((sections . [])))
      (recentlyMerged . ((header . ((label . ((text . "recently merged"))) (count . ((workspaces . 1)))))
-                         (rows . ((rows . []))))))))
+                         (rows . ((rows . [])))
+                         (collapsed . ())))
+     (shownRepository . ()))))
 
 (defun agent-repl-itest-roster--push (daemon roster)
   "Push ROSTER on DAEMON's roster stream."
@@ -138,7 +140,9 @@ order apart from declaration order."
              (expanded . ()))])))
     (task . ((sections . [])))
     (recentlyMerged . ((header . ((label . ((text . "recently merged"))) (count . ((workspaces . 1)))))
-                        (rows . ((rows . [])))))))
+                        (rows . ((rows . [])))
+                        (collapsed . ())))
+    (shownRepository . ())))
 
 (defun agent-repl-itest-roster--row-missing (id name status omit)
   "Return a RosterRow like `--row', but with field OMIT entirely absent.
@@ -719,7 +723,8 @@ tucked ahead of the repo section would land its tab in the wrong slot."
                  (list (agent-repl-itest-roster--row "ws-repo" "ws-repo" 'ready))
                  `(recentlyMerged
                    . ((header . ((label . ((text . "recently merged"))) (count . ((workspaces . 1)))))
-                      (rows . ((rows . ,(vector merged-row))))))))
+                      (rows . ((rows . ,(vector merged-row))))
+                      (collapsed . ())))))
         ;; Assert.
         (agent-repl-itest--wait-until
          (lambda () (equal (agent-repl-roster-tab-order) '("ws-repo" "ws-merged-open")))
@@ -767,7 +772,8 @@ repository view's."
                           . ((rows
                               . ,(vector
                                   (agent-repl-itest-roster--row "ws-t2" "ws-t2" 'ready)
-                                  (agent-repl-itest-roster--row "ws-t1" "ws-t1" 'ready))))))])))))
+                                  (agent-repl-itest-roster--row "ws-t1" "ws-t1" 'ready)))))
+                         (expanded . ()))])))))
       ;; Assert.
       (agent-repl-itest--wait-until
        (lambda () (equal (agent-repl-roster-tab-order) '("ws-t1" "ws-t2")))
