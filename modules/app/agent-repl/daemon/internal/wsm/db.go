@@ -319,6 +319,9 @@ type DB interface {
 	NewsDigestState(ctx context.Context) (NewsDigestState, error)
 	// RecordNewsDigestRun records one finished news digest run, whole.
 	RecordNewsDigestRun(ctx context.Context, run NewsDigestRun) error
+	// NewsDigestRisksSince loads every kept digest item marked as a regression
+	// risk whose run ended at or after since, oldest first.
+	NewsDigestRisksSince(ctx context.Context, since time.Time) ([]NewsDigestRisk, error)
 	// DismissNewsDigest takes the standing digest down when id names the
 	// newest digest minted (true, also when already down); any other id is
 	// false and changes nothing.
