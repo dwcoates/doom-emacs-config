@@ -662,6 +662,7 @@ func TestOpenWorkspaceRelaysProgressStagesInOrder(t *testing.T) {
 	h := newHarness(t)
 	h.Verbs.openStages = []workspace.OpenStage{
 		workspace.OpenStageCheckingWorktree,
+		workspace.OpenStageRestoringWorktree,
 		workspace.OpenStageStartingSession,
 		workspace.OpenStageReviving,
 		workspace.OpenStageClearingClosed,
@@ -680,7 +681,7 @@ func TestOpenWorkspaceRelaysProgressStagesInOrder(t *testing.T) {
 	}
 
 	// Assert.
-	wantStages := []string{"checking_worktree", "starting_session", "reviving", "clearing_closed", "checking_build"}
+	wantStages := []string{"checking_worktree", "restoring_worktree", "starting_session", "reviving", "clearing_closed", "checking_build"}
 	for i, want := range wantStages {
 		if !stream.Receive() {
 			t.Fatalf("receive stage %d: %v", i, stream.Err())
@@ -710,6 +711,8 @@ func openStageArm(stage *agentreplv1.WorkspaceOpenStage) string {
 		return "clearing_closed"
 	case *agentreplv1.WorkspaceOpenStage_CheckingBuild:
 		return "checking_build"
+	case *agentreplv1.WorkspaceOpenStage_RestoringWorktree:
+		return "restoring_worktree"
 	case nil:
 		return "<unset>"
 	default:

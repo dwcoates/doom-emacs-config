@@ -272,6 +272,12 @@ type harness struct {
 	// binds counts the boot's BindViews calls; bindErr is what they answer.
 	binds      atomic.Int32
 	bindErr    error
+	// restore answers the boot's missing-worktree restorer; nil answers
+	// "nothing to restore from", which is what every arrangement that does
+	// not name a branch means. restoreAsked records every workspace it was
+	// asked about, in order.
+	restore      func(wsm.Workspace) (bool, error)
+	restoreAsked []ids.WorkspaceID
 	seq        Sequence
 	deps       Deps
 	db         wsm.DB
@@ -363,6 +369,13 @@ func newHarness(t *testing.T, adjust ...func(*Deps, *harness)) *harness {
 		BindViews: func(context.Context) error {
 			h.binds.Add(1)
 			return h.bindErr
+		},
+		RestoreMissingWorktree: func(_ context.Context, ws wsm.Workspace) (bool, error) {
+			h.restoreAsked = append(h.restoreAsked, ws.ID)
+			if h.restore == nil {
+				return false, nil
+			}
+			return h.restore(ws)
 		},
 		Layout:     layout,
 		DB:         db,
