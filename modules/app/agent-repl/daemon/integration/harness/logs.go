@@ -94,6 +94,20 @@ func (d *Daemon) AwaitLogRecord(path string, what string, pred func(LogRecord) b
 	})
 }
 
+// AwaitLogRecordWithin is AwaitLogRecord bounded by BOUND instead of one
+// daemon wait, for a record whose arrival waits on something other than this
+// daemon -- a child process's own boot -- and so on that thing's measured
+// bound. It is still a child of the daemon's whole-run budget.
+func (d *Daemon) AwaitLogRecordWithin(path, what string, bound time.Duration, pred func(LogRecord) bool) LogRecord {
+	d.t.Helper()
+	wait, cancelWait := context.WithTimeout(d.ctx, bound)
+	defer cancelWait()
+	own := filepath.Clean(path) == filepath.Clean(d.RunLogPath())
+	return awaitLogRecord(d.t, wait, path, what, func(r LogRecord) bool {
+		return (!own || r.PID == d.PID()) && pred(r)
+	})
+}
+
 // AwaitLogRecordAfter waits for a record satisfying pred that comes AFTER, in
 // the log's own order, a record satisfying after. The log is read from its
 // start on every poll, so an await keyed on pred alone is satisfied by a
