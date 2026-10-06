@@ -444,6 +444,27 @@ func TestOrdinaryPathIsLoggedAtDebug(t *testing.T) {
 	}
 }
 
+func TestOrdinaryPathIsRecordedWithHowLongGitRan(t *testing.T) {
+	// Arrange.
+	git, surfaces := newTestClient(t)
+	newFakeGit(t, ok("main\n"))
+
+	// Act.
+	if _, err := git.CurrentBranch(context.Background(), "/repo"); err != nil {
+		t.Fatalf("CurrentBranch: %v", err)
+	}
+
+	// Assert: a merge is a chain of dozens of git calls, and only a per-call
+	// duration tells one slow call from a slow chain of ordinary ones.
+	record, ok := recordFor(surfaces.records(), "debug", "daemon.gitclient.current_branch")
+	if !ok {
+		t.Fatalf("no debug record for daemon.gitclient.current_branch in %+v", surfaces.records())
+	}
+	if ms, isInt := record.Context["duration_ms"].(int64); !isInt || ms < 0 {
+		t.Fatalf("the record's duration_ms = %#v, want a non-negative int64; the record: %+v", record.Context["duration_ms"], record)
+	}
+}
+
 // --- a git somebody else killed -------------------------------------------
 //
 // A git ended by a signal with the caller's context ALIVE is neither an exit
@@ -624,6 +645,24 @@ func TestUnrunnableGitIsRecordedWithoutAPid(t *testing.T) {
 	}
 	if pid, named := record.Context["pid"]; named {
 		t.Fatalf("the record names pid %v for a git that never started", pid)
+	}
+}
+
+func TestUnrunnableGitIsRecordedWithoutADuration(t *testing.T) {
+	// Arrange.
+	git, surfaces := newTestClient(t)
+	t.Setenv("PATH", filepath.Join(t.TempDir(), "empty"))
+
+	// Act.
+	_, _ = git.CurrentBranch(context.Background(), "/repo")
+
+	// Assert: git never ran, so there is no run time to state.
+	record, ok := recordFor(surfaces.records(), "error", "daemon.gitclient.current_branch")
+	if !ok {
+		t.Fatalf("no error record for an unrunnable git in %+v", surfaces.records())
+	}
+	if ms, named := record.Context["duration_ms"]; named {
+		t.Fatalf("the record names duration_ms %v for a git that never started", ms)
 	}
 }
 
