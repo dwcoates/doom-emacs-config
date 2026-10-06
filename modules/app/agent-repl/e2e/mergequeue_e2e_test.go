@@ -614,15 +614,10 @@ func TestDisplacedTurnCapturedEndedThenResubmittedExactlyOnce(t *testing.T) {
 	t.Parallel()
 	const displacedText = "keep going"
 	// A daemon killed mid-merge writes no stand-down manifest
-	// (daemon.rollout.reconcile), a turn left in flight by a killed daemon is
-	// closed by the next boot (daemon.promptqueue.restore_holds), and the merge
-	// the restart runs again from the queue FAILS AT ITS GATE
-	// (daemon.merge.tests): this world sets no AGENT_REPL_TEST_ALL_SCRIPT, so
-	// the gate's script is the child worktree's own, which this fixture never
-	// writes. That deterministic failure is what hands the workspace back
-	// unlanded, which the rest of this test reads it through.
+	// (daemon.rollout.reconcile), and a turn left in flight by a killed daemon
+	// is closed by the next boot (daemon.promptqueue.restore_holds).
 	mqExpectedBounceWarnings := []string{
-		"daemon.rollout.reconcile", "daemon.promptqueue.restore_holds", "daemon.merge.tests",
+		"daemon.rollout.reconcile", "daemon.promptqueue.restore_holds",
 	}
 
 	// Arrange. The displaced turn is PARKED ON THE FAKE'S TURN GATE
@@ -689,6 +684,14 @@ func TestDisplacedTurnCapturedEndedThenResubmittedExactlyOnce(t *testing.T) {
 	// Act: crash the daemon while its merge is HELD after the capture — the
 	// pause's own record says the run can go no further — so nothing the
 	// merge would do next (the git merge, a target bring-up) is under way.
+	//
+	// THE QUEUE IS PAUSED FIRST, on purpose: the crash lands before the
+	// merge's first progress record, so the restart puts the merge back in
+	// line to run again, and this test is about the displaced turn, not that
+	// run. A paused queue admits nothing new (the held run is not stopped by
+	// it), so the merge waits in line across every bounce below, the
+	// workspace stays unlanded, and the boot sweep alone puts the turn back.
+	mqPauseQueue(t, w, repoRef)
 	w.AwaitRunLogOperation("daemon.merge.capture_pause")
 	w.Kill()
 
@@ -1322,5 +1325,17 @@ func TestAMergeOfABranchThatDoesNotExistIsRefused(t *testing.T) {
 	// Assert
 	if err != nil || resp.Msg.GetError().GetUnknownBranch() == nil {
 		t.Fatalf("MergeWorkspace of a missing branch = (%v, %v), want unknown_branch", resp.Msg.GetResult(), err)
+	}
+}
+
+// mqPauseQueue pauses one repository's merge queue: it admits nothing new
+// until resumed, and the pause is durable across daemon bounces.
+func mqPauseQueue(t *testing.T, w *World, repoRef *workspacev1.RepositoryRef) {
+	t.Helper()
+	resp, err := w.Client().UpdateMergeQueue(w.Ctx(), connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{
+		Action: &agentreplv1.UpdateMergeQueueRequest_Pause{Pause: &agentreplv1.UpdateMergeQueuePause{Repository: repoRef}},
+	}))
+	if err != nil || resp.Msg.GetError() != nil {
+		t.Fatalf("UpdateMergeQueue(pause) = %v, %v, want the repository's queue paused", resp.Msg, err)
 	}
 }
