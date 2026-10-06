@@ -1,6 +1,5 @@
 // Package agentreplsession owns agent-repl's SESSION (owner ruling,
-// 2026-10-06): the span the topbar's connectivity dropdown reports, and the
-// vendor traffic counted inside it.
+// 2026-10-06): the span the topbar's connectivity dropdown reports.
 //
 // # THE SESSION IS SINCE THE LATER OF TWO EVENTS
 //
@@ -11,21 +10,14 @@
 // replaced by a later one, which is the "later of" rule applied as the events
 // arrive.
 //
-// ONE SOURCE OF TRUTH: the dropdown's duration and its traffic both count from
-// the session's start. A new session therefore starts its traffic at zero.
-//
 // # IT OUTLIVES THE DAEMON, NOT THE EDITOR
 //
 // The session is durable in wsm (agent_repl_session), so a daemon restart under
-// the same Emacs — a bounce, a deploy — loads it and carries on counting. A
+// the same Emacs — a bounce, a deploy — loads it and carries on. A
 // new Emacs process is told apart from a reconnect by internal/editorinstance,
 // and only a new one begins a session.
 //
-// # THE PUSH IS THROTTLED BY THE SAMPLER'S ROUND
-//
-// Traffic accumulates as the sampler counts it and is stated — persisted and
-// pushed to every topbar — only when the sampler ends a round (FlushTraffic),
-// and only when something was counted. A session's start is pushed at once.
+// A session's start is persisted and pushed to every topbar at once.
 package agentreplsession
 
 import (
@@ -38,7 +30,6 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/dlog"
-	"claude-repld/internal/vendortraffic"
 	"claude-repld/internal/wsm"
 )
 
@@ -55,19 +46,17 @@ type Publisher interface {
 
 // Tracker is agent-repl's session.
 //
-// THE STORE IS THE ONE SOURCE OF TRUTH; the tracker holds only the traffic
-// counted since its last flush. Every begin and every flush reads the stored
-// session, applies its change and writes it back, so a successor daemon that
-// took over mid-session continues from what the incumbent last wrote rather
-// than from what it read when it was built.
+// THE STORE IS THE ONE SOURCE OF TRUTH; the tracker holds no session of its
+// own. Every begin reads the stored session, applies its change and writes it
+// back, so a successor daemon that took over mid-session continues from what
+// the incumbent last wrote rather than from what it read when it was built.
 type Tracker struct {
 	store   Store
 	publish Publisher
 	log     dlog.Logger
 
+	// mu serializes begins, so each one's read-decide-write is one step.
 	mu sync.Mutex
-	// pending is traffic counted since the last flush.
-	pending vendortraffic.Counts
 }
 
 // New loads the persisted session and states it, refusing a missing
@@ -135,64 +124,13 @@ func (t *Tracker) begin(ctx context.Context, at time.Time, began wsm.SessionBega
 		t.log.Error(op, "the new session could not be persisted; it was not begun", ctxFields)
 		return
 	}
-	// Traffic counted before this instant belongs to the session it replaced.
-	t.pending = vendortraffic.Counts{}
 	t.publish.SetAgentReplSession(view(next))
 	t.log.Info(op, "a new session began", fields(next))
 }
 
-// AddTraffic accumulates traffic the sampler counted, for the next flush.
-func (t *Tracker) AddTraffic(c vendortraffic.Counts) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	t.pending = t.pending.Plus(c)
-}
-
-// FlushTraffic states the accumulated traffic: added to the stored session,
-// persisted and pushed, once, when anything was counted since the last flush.
-// With no session standing there is nothing to count it toward, and it is
-// dropped. A store that cannot be read or written keeps the traffic pending
-// for the next flush, at ERROR.
-func (t *Tracker) FlushTraffic() {
-	const op = "daemon.agentreplsession.flush"
-	ctx := context.Background()
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if t.pending.IsZero() {
-		return
-	}
-	pendingFields := dlog.Context{"pending_received": t.pending.Received, "pending_sent": t.pending.Sent}
-	standing, found, err := t.store.AgentReplSession(ctx)
-	if err != nil {
-		pendingFields["cause"] = err.Error()
-		t.log.Error(op, "the standing session could not be read; the traffic stays pending", pendingFields)
-		return
-	}
-	if !found {
-		t.pending = vendortraffic.Counts{}
-		t.log.Debug(op, "traffic was counted with no session standing; it counts toward none", pendingFields)
-		return
-	}
-	next := standing
-	next.BytesReceived += t.pending.Received
-	next.BytesSent += t.pending.Sent
-	if err := t.store.PutAgentReplSession(ctx, next); err != nil {
-		ctxFields := fields(next)
-		ctxFields["cause"] = err.Error()
-		t.log.Error(op, "the session's traffic could not be persisted; it stays pending", ctxFields)
-		return
-	}
-	t.pending = vendortraffic.Counts{}
-	t.publish.SetAgentReplSession(view(next))
-}
-
 // view is the session as the topbar states it.
 func view(s wsm.AgentReplSession) *frontendv1.TopbarAgentReplSession {
-	out := &frontendv1.TopbarAgentReplSession{
-		StartedAtMs:   s.StartedAt.UnixMilli(),
-		BytesReceived: s.BytesReceived,
-		BytesSent:     s.BytesSent,
-	}
+	out := &frontendv1.TopbarAgentReplSession{StartedAtMs: s.StartedAt.UnixMilli()}
 	switch s.Began {
 	case wsm.SessionBeganLogin:
 		out.Began = &frontendv1.TopbarAgentReplSession_Login{Login: &frontendv1.TopbarSessionBeganLogin{}}

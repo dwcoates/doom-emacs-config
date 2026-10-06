@@ -695,7 +695,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// The span the connectivity indicator's dropdown reports (owner ruling,
 	// 2026-10-06): begun by a login made through the daemon's own login flow
 	// or by a new Emacs, whichever came later, and durable across daemon
-	// restarts. Its traffic is the vendor traffic sampler's (below).
+	// restarts.
 	agentReplSession, err := agentreplsession.New(ctx, p.DB, topbarResolver, log)
 	if err != nil {
 		return nil, fmt.Errorf("claude-repld: build agent-repl's session: %w", err)

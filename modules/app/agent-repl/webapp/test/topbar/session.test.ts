@@ -13,8 +13,6 @@ import {
   SESSION_REVEAL,
   bindAgentReplSessionReveal,
   drawAgentReplSession,
-  formatBytes,
-  formatTraffic,
 } from "../../src/topbar/session.js";
 import { drawTopbarConnectivity } from "../../src/topbar/strip.js";
 import { NOW, appContext, fakeTicker, openPanel, topbarContext } from "./fixtures.js";
@@ -25,13 +23,11 @@ const MINUTE = 60_000;
 const LOGIN = { case: "login" as const, value: create(TopbarSessionBeganLoginSchema, {}) };
 const EDITOR_START = { case: "editorStart" as const, value: create(TopbarSessionBeganEditorStartSchema, {}) };
 
-/** A session a login began 72 minutes before NOW, with some traffic. */
+/** A session a login began 72 minutes before NOW. */
 function session(overrides: Partial<TopbarAgentReplSession> = {}): TopbarAgentReplSession {
   const base = create(TopbarAgentReplSessionSchema, {
     startedAtMs: BigInt(NOW - 72 * MINUTE),
     began: { case: "login", value: {} },
-    bytesReceived: 412_000_000n,
-    bytesSent: 38_000_000n,
   });
   return { ...base, ...overrides };
 }
@@ -50,34 +46,6 @@ function boundGlyph(u: TopbarAgentReplSession | undefined) {
 function click(el: Element): void {
   el.dispatchEvent(new MouseEvent("click", { bubbles: true }));
 }
-
-describe("formatBytes", () => {
-  it.each([
-    ["nothing", 0n, "0 MB"],
-    ["less than a tenth of a megabyte", 50_000n, "< 0.1 MB"],
-    ["a tenth of a megabyte", 100_000n, "0.1 MB"],
-    ["a few megabytes, to one digit", 3_400_000n, "3.4 MB"],
-    ["a whole few megabytes, without a bare .0", 3_000_000n, "3 MB"],
-    ["just under ten megabytes rounding up to ten", 9_960_000n, "10 MB"],
-    ["hundreds of megabytes, whole", 412_400_000n, "412 MB"],
-    ["a figure that rounds to a thousand megabytes, as a gigabyte", 999_950_000n, "1 GB"],
-    ["a few gigabytes, to one digit", 1_250_000_000n, "1.3 GB"],
-    ["tens of gigabytes, whole", 38_400_000_000n, "38 GB"],
-    ["hundreds of gigabytes, whole", 120_000_000_000n, "120 GB"],
-  ])("draws %s", (_name, bytes, want) => {
-    expect(formatBytes(bytes)).toBe(want);
-  });
-
-  it("refuses a negative count", () => {
-    expect(() => formatBytes(-1n)).toThrow(RangeError);
-  });
-});
-
-describe("formatTraffic", () => {
-  it("draws received then sent, each with its arrow", () => {
-    expect(formatTraffic(412_000_000n, 38_000_000n)).toBe("412 MB ↓ · 38 MB ↑");
-  });
-});
 
 describe("bindAgentReplSessionReveal", () => {
   it("opens the session dropdown from the glyph", () => {
@@ -120,16 +88,16 @@ describe("bindAgentReplSessionReveal", () => {
     expect(reached).toBe(false);
   });
 
-  it("re-opens a refreshed dropdown with the newer push's traffic", () => {
+  it("re-opens a refreshed dropdown with the newer push's session", () => {
     // ARRANGE
     const { host, tc, glyph } = boundGlyph(session());
     click(glyph);
     // ACT
-    bindAgentReplSessionReveal(glyph, session({ bytesReceived: 2_000_000_000n }), tc);
+    bindAgentReplSessionReveal(glyph, session({ began: EDITOR_START }), tc);
     tc.reveals.refresh();
     // ASSERT
-    expect(openPanel(host)?.querySelector(".topbar-session-traffic .topbar-session-value")?.textContent).toBe(
-      "2 GB ↓ · 38 MB ↑",
+    expect(openPanel(host)?.querySelector(".topbar-session-duration .topbar-session-label")?.textContent).toBe(
+      "since Emacs started",
     );
   });
 
@@ -190,15 +158,13 @@ describe("drawAgentReplSession", () => {
     );
   });
 
-  it("draws the traffic in megabytes, received then sent", () => {
+  it("draws the span as the dropdown's only row", () => {
     // ARRANGE
     const { host, glyph } = boundGlyph(session());
     // ACT
     click(glyph);
     // ASSERT
-    expect(openPanel(host)?.querySelector(".topbar-session-traffic .topbar-session-value")?.textContent).toBe(
-      "412 MB ↓ · 38 MB ↑",
-    );
+    expect(openPanel(host)?.querySelectorAll(".topbar-session-row").length).toBe(1);
   });
 
   it.each([

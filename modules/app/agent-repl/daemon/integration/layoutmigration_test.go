@@ -130,6 +130,10 @@ var layout3Undo = map[int][]string{
 		`ALTER TABLE account_usage DROP COLUMN seat_spent_minor`,
 		`ALTER TABLE account_usage DROP COLUMN seat_allotment_minor`,
 	},
+	26: {
+		`ALTER TABLE agent_repl_session ADD COLUMN bytes_received INTEGER NOT NULL DEFAULT 0 CHECK (bytes_received >= 0)`,
+		`ALTER TABLE agent_repl_session ADD COLUMN bytes_sent INTEGER NOT NULL DEFAULT 0 CHECK (bytes_sent >= 0)`,
+	},
 }
 
 // demoteToLayout3 takes a stopped daemon's state database back to layout 3 by
