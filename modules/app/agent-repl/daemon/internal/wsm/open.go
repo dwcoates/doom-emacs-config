@@ -439,6 +439,13 @@ func (s *store) write(ctx context.Context, op string, fields dlog.Context, fn fu
 			s.log.Debug(op, "the merge lease is gone; the merge hold was refused", withError(fields, err))
 			return err
 		}
+		// A REPOSITORY STILL IN USE is the retirement refusing to discard
+		// what a user can act on; its caller (the boot) states the kept
+		// repository at its own level.
+		if errors.Is(err, ErrRepositoryInUse) {
+			s.log.Debug(op, "the repository is still in use; the retirement was refused", withError(fields, err))
+			return err
+		}
 		s.log.Error(op, "refused the write", withError(fields, err))
 		return err
 	}
