@@ -23,6 +23,13 @@ import (
 // WITHOUT docker: a fake `docker` on PATH answers `info`, `version`, `build`,
 // `image inspect` and `run`, and records every invocation. Real docker must
 // never be required to prove a lock works.
+//
+// NOR REAL GIT (owner rule: no test runs real git). The script stamps its
+// sources with git when the checkout is a repository; beside the fake docker
+// sits bin/fake-git.sh as `git`, which finds no fake repository above the
+// checkout and answers "not a git repository", so the script takes its own
+// content-digest stamp -- the same rule for the stamp this file asks for and
+// the stamp the script compares.
 
 const sandboxStampLabel = "org.agent-repl.sandbox-tree"
 
@@ -74,6 +81,9 @@ esac
 	if err := os.WriteFile(filepath.Join(bin, "docker"), []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake docker: %v", err)
 	}
+	if err := os.Symlink(fakeGitScript(t), filepath.Join(bin, "git")); err != nil {
+		t.Fatalf("link the fake git: %v", err)
+	}
 	return f
 }
 
@@ -114,6 +124,20 @@ func (f *fakeDocker) buildCount(t *testing.T) int {
 	return n
 }
 
+// fakeGitScript is bin/fake-git.sh, resolved from this package's dir.
+func fakeGitScript(t *testing.T) string {
+	t.Helper()
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	p := filepath.Join(wd, "..", "bin", "fake-git.sh")
+	if _, err := os.Stat(p); err != nil {
+		t.Fatalf("fake git not found: %v", err)
+	}
+	return p
+}
+
 // sandboxScript is the script under test, resolved from this package's dir.
 func sandboxScript(t *testing.T) string {
 	t.Helper()
@@ -130,7 +154,7 @@ func sandboxScript(t *testing.T) string {
 
 // currentSandboxStamp asks the script itself, so the test never re-derives the
 // stamp rule and cannot drift from it.
-func currentSandboxStamp(t *testing.T) string {
+func currentSandboxStamp(t *testing.T, f *fakeDocker) string {
 	t.Helper()
 	script := sandboxScript(t)
 	// The script's own stamp section is evaluated on its own -- sourcing the
@@ -139,6 +163,7 @@ func currentSandboxStamp(t *testing.T) string {
 	cmd := exec.Command("bash", "-c",
 		fmt.Sprintf(`set -euo pipefail; eval "$(sed -n '/^# --- the source stamp/,/^do_build() {$/p' %q | sed '$d')"; here=%q; sandbox_dir=$(cd -- "$here/.." && pwd); repo_root=$(cd -- "$sandbox_dir/../../../../.." && pwd); MODULE_REL=modules/app/agent-repl; IMAGE=x; log() { :; }; sandbox_stamp`,
 			script, filepath.Dir(script)))
+	cmd.Env = append(os.Environ(), "PATH="+f.bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("sandbox_stamp: %v\n%s", err, out)
@@ -167,7 +192,7 @@ func TestSandboxBuildSkipsWhenImageAlreadyCarriesTheStamp(t *testing.T) {
 	t.Parallel()
 	// Arrange.
 	f := newFakeDocker(t)
-	f.setLabel(t, currentSandboxStamp(t))
+	f.setLabel(t, currentSandboxStamp(t, f))
 	lock := filepath.Join(t.TempDir(), "build.lock")
 
 	// Act.
@@ -193,7 +218,7 @@ func TestSandboxBuildForceRebuildsDespiteMatchingStamp(t *testing.T) {
 	t.Parallel()
 	// Arrange.
 	f := newFakeDocker(t)
-	f.setLabel(t, currentSandboxStamp(t))
+	f.setLabel(t, currentSandboxStamp(t, f))
 	lock := filepath.Join(t.TempDir(), "build.lock")
 
 	// Act.
@@ -216,7 +241,7 @@ func TestSandboxBuildLabelsImageWithTheSandboxStamp(t *testing.T) {
 	t.Parallel()
 	// Arrange.
 	f := newFakeDocker(t)
-	stamp := currentSandboxStamp(t)
+	stamp := currentSandboxStamp(t, f)
 	lock := filepath.Join(t.TempDir(), "build.lock")
 
 	// Act.
@@ -246,7 +271,7 @@ func TestSandboxBuildTakesOverALockHeldByADeadPid(t *testing.T) {
 	t.Parallel()
 	// Arrange: a lock recording a pid that is certainly gone.
 	f := newFakeDocker(t)
-	f.setLabel(t, currentSandboxStamp(t))
+	f.setLabel(t, currentSandboxStamp(t, f))
 	lock := filepath.Join(t.TempDir(), "build.lock")
 	if err := os.MkdirAll(lock, 0o755); err != nil {
 		t.Fatalf("mkdir lock: %v", err)
