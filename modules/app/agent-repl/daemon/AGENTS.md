@@ -1077,6 +1077,10 @@ Owner rulings, 2026-09-30 (`internal/merge`; the contract is
   `daemon.merge.resume`, naming the contradiction. An admitted merge with no
   record never took a step and runs again from the queue under its bubble.
   A record that will not decode refuses the boot.
+  A QUEUED merge keeps its bubble too: its ledger identity is written on its
+  queue row with its place in line (`merge_queue.ledger_id`), and recovery and
+  adoption redraw it under that identity; only a row an earlier build queued
+  is given a fresh one (INFO `daemon.merge.recover`).
 - **THE DAEMON'S EXIT SUSPENDS A MERGE AT A STOPPING POINT** (`gatedgit.go`,
   `Drain`). Every git a run makes goes through its gate; the drain stops every
   gate (no git starts after it), waits for the command in flight within
