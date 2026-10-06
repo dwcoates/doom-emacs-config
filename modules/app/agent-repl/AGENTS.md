@@ -247,17 +247,24 @@ Every temp file a test makes lives under a root its runner owns and removes.
   also refuses every setuid binary, `/bin/ps` included, which the harnesses'
   stray reaping needs.
 
-### No script pipes into an early-exiting grep
+### No script pipes into a reader that can stop early
 
-A script asks grep about text it holds through `grep_in TEXT ARGS...`
-(`bin/lib-grep-in.sh`), never `printf '%s\n' "$out" | grep -q`. Under
-pipefail a pipe into `grep -q` fails whenever grep matches before the writer
-has finished: the writer dies of SIGPIPE and the pipeline answers 141. It
-flaked only under load (the logs harness: 10 of 24 runs six-wide). A
-command's output is captured first, `grep_in "$(cmd)" -q PATTERN`; a stub
-written by a harness cannot source the helper and uses its here-string,
-`grep -q PATTERN <<<"$text"`. `testrun/internal/run/grep_pipe_scan_test.go`
-fails a scanned script that pipes into `grep -q` again.
+Under pipefail a pipe fails whenever its reader exits before the writer has
+finished: the writer dies of SIGPIPE and the pipeline answers 141. It shows
+only under load or on long input (the logs harness: 10 of 24 runs six-wide;
+the doctor's pid read of a long `launchctl print`). So no script pipes into
+`grep -q`/`grep -m`, `head`, an `awk` that `exit`s, or a `sed` that quits:
+
+- text a script holds, or a command's captured output, is grepped through
+  `grep_in TEXT ARGS...` (`bin/lib-grep-in.sh`), e.g. `grep_in "$(cmd)" -q P`;
+- a first line is `sed -n 1p`, which reads its whole input;
+- an awk that wants the first match keeps reading, `!found {...; found = 1}`,
+  or reads a here-string;
+- a stub a harness writes cannot source the helper and uses the here-string,
+  `grep -q PATTERN <<<"$text"`.
+
+`testrun/internal/run/grep_pipe_scan_test.go` fails a scanned script that
+pipes into any of them.
 
 ### Suite timings: what a row measures
 
