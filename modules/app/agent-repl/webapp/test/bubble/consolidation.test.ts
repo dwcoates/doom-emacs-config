@@ -86,8 +86,8 @@ describe("no bubble kind carries its own copy of the shared logic", () => {
     expect(sourcesMatching(/\b(?:measureTreeCols|proseHtml|reconcileChildren)\(/)).toEqual(["bubble/body.ts"]);
   });
 
-  it("paints a body only through drawBubble, and repaints a slot only for the type-out", () => {
-    expect([sourcesMatching(/\bpaintBody\(/), sourcesMatching(/\brepaintSlot\(/)]).toEqual([
+  it("paints a body only through drawBubble, and reveals a slot only for the type-out", () => {
+    expect([sourcesMatching(/\bpaintBody\(/), sourcesMatching(/\brevealSlot\(/)]).toEqual([
       ["bubble/body.ts", "bubble/draw.ts"],
       ["bubble/body.ts", "feed/cards/response.ts"],
     ]);

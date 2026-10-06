@@ -1625,6 +1625,10 @@ pre {
    box's border and its padding, so this padding is the distance from the TEXT
    to the bar, never from the bar to the bubble. */
 .bubble-body { flex: 1; min-width: 0; padding-right: calc(0.9rem - var(--bubble-scroll-gap)); overflow-wrap: anywhere; }
+/* THE TYPE-OUT HIDES WHAT IT HAS NOT REACHED (src/bubble/text-reveal.ts): an
+   element none of whose text is revealed yet draws no box at all, so a bullet,
+   a code block's frame or a table row never appears ahead of its text. */
+.bubble-body [data-unrevealed] { display: none; }
 /* THE HEADER STRIP: full width, above the scroll box, outside it (every
    element a kind puts there wears `.bubble-strip`, src/bubble/draw.ts). It
    keeps the right inset the bubble's padding used to give it, so a label sits

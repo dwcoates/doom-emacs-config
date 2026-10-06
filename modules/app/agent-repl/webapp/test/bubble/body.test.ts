@@ -16,7 +16,9 @@ import {
   paintBody,
   paintGeneration,
   proseNeedsWidth,
-  repaintSlot,
+  revealSlot,
+  slotText,
+  whenSlotPainted,
   type BubbleBody,
 } from "../../src/bubble/body.js";
 import { drawBubble } from "../../src/bubble/draw.js";
@@ -467,26 +469,59 @@ describe("a slot holding a tree paints once the bubble is laid out", () => {
   });
 });
 
-describe("repaintSlot", () => {
-  it("repaints the slot with its new markdown", () => {
-    // Arrange
+describe("revealSlot", () => {
+  /** A body painted with one slot of MARKDOWN; answers both. */
+  function painted(markdown: string): { body: BubbleBody; slot: HTMLElement } {
     const body = createBubbleBody();
-    const slot = markdownSlot("prose", "one");
-    paintBody(body, [slot]);
+    const [slot] = paintBody(body, [markdownSlot("prose", markdown)]);
+    return { body, slot: slot as HTMLElement };
+  }
+
+  it("shows only the first characters of the rendered text", () => {
+    // Arrange
+    const { body, slot } = painted("hello world");
     // Act
-    repaintSlot(body, slot, "**two**");
+    revealSlot(body, slot, 5);
     // Assert
-    expect(slot.querySelector("strong")?.textContent).toBe("two");
+    expect(slot.textContent?.trim()).toBe("hello");
   });
 
-  it("keeps an unchanged leading paragraph's node while the tail grows", () => {
+  it("shows the whole text again when the reveal is cleared", () => {
     // Arrange
-    const body = createBubbleBody();
-    const slot = markdownSlot("prose", "first\n\nsec");
-    paintBody(body, [slot]);
+    const { body, slot } = painted("hello world");
+    revealSlot(body, slot, 5);
+    // Act
+    revealSlot(body, slot, undefined);
+    // Assert
+    expect(slot.textContent?.trim()).toBe("hello world");
+  });
+
+  it("never draws a half-typed construct as its raw syntax", () => {
+    // Arrange
+    const { body, slot } = painted("**bold** text");
+    // Act
+    revealSlot(body, slot, 2);
+    // Assert
+    expect([slot.querySelector("strong")?.textContent, slot.textContent?.includes("*")]).toEqual(["bo", false]);
+  });
+
+  it("keeps the cut when the slot repaints with a new source", () => {
+    // Arrange
+    const { body, slot } = painted("hello world");
+    revealSlot(body, slot, 3);
+    // Act
+    paintBody(body, [markdownSlot("prose", "hello there")]);
+    // Assert
+    expect(slot.textContent?.trim()).toBe("hel");
+  });
+
+  it("keeps an unchanged leading paragraph's node across a repaint while cut", () => {
+    // Arrange
+    const { body, slot } = painted("first\n\nsec");
+    revealSlot(body, slot, 7);
     const first = slot.firstElementChild;
     // Act
-    repaintSlot(body, slot, "first\n\nsecond");
+    paintBody(body, [markdownSlot("prose", "first\n\nsecond")]);
     // Assert
     expect(slot.firstElementChild).toBe(first);
   });
@@ -497,24 +532,67 @@ describe("repaintSlot", () => {
     const body = createBubbleBody();
     const stranger = markdownSlot("prose", "elsewhere");
     // Act + Assert
-    expect(() => repaintSlot(body, stranger, "x")).toThrow(/bubble body invariant/);
+    expect(() => revealSlot(body, stranger, 1)).toThrow(/bubble body invariant/);
     const record = await forwardedRecord(capture, BODY_INVARIANT);
     expect(record.context).toMatchObject({
-      reason: "a repaint named an element that is not a markdown slot of this body",
+      reason: "a reveal named an element that is not a markdown slot of this body",
     });
   });
 
-  it("leaves the stranger's source untouched when it refuses", () => {
+  it("leaves the generation alone", () => {
+    // Arrange
+    const { body, slot } = painted("one");
+    const before = paintGeneration(body);
+    // Act
+    revealSlot(body, slot, 1);
+    // Assert
+    expect(paintGeneration(body)).toBe(before);
+  });
+});
+
+describe("slotText", () => {
+  it("answers the whole rendered text while the slot is cut", () => {
     // Arrange
     const body = createBubbleBody();
-    const home = createBubbleBody();
-    const stranger = markdownSlot("prose", "kept");
-    paintBody(home, [stranger]);
+    const [slot] = paintBody(body, [markdownSlot("prose", "**hello** world")]);
+    revealSlot(body, slot as HTMLElement, 2);
     // Act
-    expect(() => repaintSlot(body, stranger, "changed")).toThrow();
-    paintBody(home, [stranger]);
-    // Assert — a repaint from the held source still draws the old words.
-    expect(stranger.textContent?.trim()).toBe("kept");
+    const text = slotText(slot as HTMLElement);
+    // Assert
+    expect(text?.trim()).toBe("hello world");
+  });
+});
+
+describe("a revealing slot holding a tree", () => {
+  useTreeLayout();
+
+  it("has no text before it paints", () => {
+    // Arrange / Act
+    const { slot } = slotted(TREE);
+    // Assert
+    expect(slotText(slot)).toBeUndefined();
+  });
+
+  it("runs a paint waiter once the tree paints", () => {
+    // Arrange
+    const { bubble, slot } = slotted(TREE);
+    const ran = vi.fn();
+    whenSlotPainted(slot, ran);
+    // Act
+    mount(bubble);
+    // Assert
+    expect(ran).toHaveBeenCalledTimes(1);
+  });
+
+  it("applies a reveal set before the paint to the paint itself", () => {
+    // Arrange
+    const { bubble, slot } = slotted(TREE);
+    const body = slot.parentElement as BubbleBody;
+    revealSlot(body, slot, 4);
+    // Act
+    mount(bubble);
+    // Assert
+    expect(slot.textContent?.replace(/\s/g, "")).toBe("Resp");
   });
 });
 
@@ -585,16 +663,6 @@ describe("paintBody: a repaint is in place", () => {
     expect(paintGeneration(body)).toBe(before + 1);
   });
 
-  it("leaves the generation alone on a slot repaint", () => {
-    // Arrange
-    const body = createBubbleBody();
-    const [slot] = paintBody(body, [markdownSlot("prose", "one")]);
-    const before = paintGeneration(body);
-    // Act
-    repaintSlot(body, slot as HTMLElement, "two");
-    // Assert
-    expect(paintGeneration(body)).toBe(before);
-  });
 });
 
 describe("isBubbleBody", () => {
