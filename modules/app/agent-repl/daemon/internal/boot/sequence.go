@@ -122,6 +122,13 @@ func (s *sequence) Run(ctx context.Context) (Report, error) {
 		if err := s.releaseOrphanLeases(ctx, log, &report); err != nil {
 			return Report{}, err
 		}
+		// THE GONE REPOSITORIES ARE RETIRED AFTER EVERY OTHER STEP, so the
+		// judgement reads the reconciled registry: closeMissingDirs has
+		// closed what lost its directory, the merges are recovered and the
+		// orphaned leases released, and nothing below reads a workspace row.
+		if err := s.retireGoneRepositories(ctx, log, &report); err != nil {
+			return Report{}, err
+		}
 		// What each taken-up carry leaves for after the drain: the re-judged
 		// verdicts and the carried shim replacements.
 		s.deps.Rollout.FinishCarries(ctx)
@@ -161,6 +168,7 @@ func (s *sequence) Run(ctx context.Context) (Report, error) {
 		"orphans_closed":       len(report.Orphaned),
 		"missing_dir_closed":   len(report.MissingDirClosed),
 		"missing_dir_restored": len(report.MissingDirRestored),
+		"repositories_retired": len(report.RetiredRepositories),
 		"holds_restored":       report.HoldsRestored,
 		"merges_recovered":     len(report.MergesRecovered),
 		"dispositions":         len(report.Dispositions),
