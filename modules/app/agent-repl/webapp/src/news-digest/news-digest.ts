@@ -75,6 +75,23 @@ export const CLOSE_LABEL = "close";
  * Mount the overlay on HOST. It ships hidden and draws nothing until a
  * `shown` standing arrives.
  */
+/**
+ * Close the page's standing news digest exactly as its own close control does,
+ * by clicking that control: the one dismissal path, so the daemon is told the
+ * same way whoever closes it. Answers whether one stood. Used where the user
+ * moves on to the conversation (owner, 2026-10-06): answering the cold gate.
+ * (Emacs closes it the same way on escape and on a send: lisp/input.el.)
+ */
+export function closeStandingNewsDigest(doc: Document): boolean {
+  const close = doc.querySelector<HTMLElement>('[data-component="news-digest"]:not([hidden]) [data-news-digest-close]');
+  if (close === null) return false;
+  log.info("the user moved on to the conversation; closing the standing news digest", {
+    operation: "news-digest.closed-by-moving-on",
+  });
+  close.click();
+  return true;
+}
+
 export function mountNewsDigest(
   host: HTMLElement,
   ctx: AppContext,

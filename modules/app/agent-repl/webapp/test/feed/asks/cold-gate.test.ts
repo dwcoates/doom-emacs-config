@@ -411,6 +411,52 @@ describe("the standing gate", () => {
 });
 
 describe("answering the gate", () => {
+  /** A standing digest host with its close control, counting the clicks. */
+  function standingDigest(hidden = false): { clicks: () => number; remove: () => void } {
+    const host = document.createElement("div");
+    host.setAttribute("data-component", "news-digest");
+    host.hidden = hidden;
+    const close = document.createElement("button");
+    close.setAttribute("data-news-digest-close", "");
+    let n = 0;
+    close.addEventListener("click", () => {
+      n += 1;
+    });
+    host.append(close);
+    document.body.append(host);
+    return { clicks: () => n, remove: () => host.remove() };
+  }
+
+  it("closes a standing news digest when the gate is answered", async () => {
+    // Arrange
+    const digest = standingDigest();
+    const h = askHarness();
+    const el = drawFeedColdGate(gate(standing()), h.rc);
+    document.body.append(el);
+    // Act
+    el.querySelector<Control>('[data-cold-gate="pay"]')?.click();
+    await settle();
+    // Assert
+    expect(digest.clicks()).toBe(1);
+    digest.remove();
+    el.remove();
+  });
+
+  it("closes nothing when no digest stands", async () => {
+    // Arrange
+    const digest = standingDigest(true);
+    const h = askHarness();
+    const el = drawFeedColdGate(gate(standing()), h.rc);
+    document.body.append(el);
+    // Act
+    el.querySelector<Control>('[data-cold-gate="clear"]')?.click();
+    await settle();
+    // Assert
+    expect(digest.clicks()).toBe(0);
+    digest.remove();
+    el.remove();
+  });
+
   const simple = [
     { hook: "pay", arm: "pay" },
     { hook: "clear", arm: "clear" },
