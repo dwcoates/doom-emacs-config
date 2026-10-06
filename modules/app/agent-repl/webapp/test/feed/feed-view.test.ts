@@ -3293,6 +3293,17 @@ describe("createFeedController: every row is placed by its order key", () => {
     expect(drawnIds(host)[0]).toBe("first");
   });
 
+  it("draws the rows pushed into a feed opened empty while older pages remain", () => {
+    // Arrange — an opening with no history source yet: no rows, has_more.
+    const { controller, host } = fixture();
+    controller.applyPage(page([], { hasMore: true }), "replace");
+    // Act — the daemon pushes the loaded history, oldest first.
+    controller.upsert(withOrder(userPromptRow("prompt", "why", "t1"), "k0100"));
+    controller.upsert(withOrder(responseRow("answer", "because", undefined, "t1"), "k0500"));
+    // Assert
+    expect(drawnIds(host)).toEqual(["prompt", "answer"]);
+  });
+
   it("never moves a held row when it is re-pushed", () => {
     // Arrange
     const { controller, host } = fixture();
