@@ -600,9 +600,9 @@ const maxUndrawnChain = 64
 // loadUntilDrawn continues a pushed load whose page drew NO ROW, whatever the
 // reason: every entry waits on its turn's starting entry on an older page
 // (owner ruling 5 still holds: such rows draw only once that page is loaded),
-// or every entry is one that draws nothing (a succeeded hook a restart
-// writes). It reads the next older page, pushed, until one draws, the start
-// or a separation is reached, or maxUndrawnChain pages were read. Without it
+// or every entry is one that draws nothing (hook records, which once filled
+// whole pages, are no longer stored at all). It reads the next older page,
+// pushed, until one draws, the start or a separation is reached, or maxUndrawnChain pages were read. Without it
 // a reader no page delivers to holds an empty feed while history sits one
 // page further down. It answers what the chain drew, GOT when it read
 // nothing more.
