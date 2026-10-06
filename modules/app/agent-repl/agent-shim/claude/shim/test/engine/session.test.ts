@@ -7405,6 +7405,95 @@ describe("the account's rate-limit windows", () => {
     expect(unavailableReason(pushed)).toBe("windowUnavailable");
   });
 
+  /** The usage answer of an enterprise seat billed by spend. */
+  function seatAnswer(extra: NonNullable<NonNullable<AccountUsageLike["rate_limits"]>["extra_usage"]>): AccountUsageLike {
+    return usage({ subscription_type: "enterprise", rate_limits: { five_hour: null, extra_usage: extra } });
+  }
+
+  it("reports a seat's spend and allotment for an enterprise answer with a monthly limit and no five-hour window", async () => {
+    const pushed = await accountUsagePushed(
+      seatAnswer({ is_enabled: true, monthly_limit: 1_200_000, used_credits: 22_388, utilization: 1.87, currency: "USD" }),
+    );
+    const seat = pushed.outcome.case === "seatSpend" ? pushed.outcome.value : undefined;
+
+    expect([seat?.allotment?.amountMinor, seat?.spent?.amountMinor, seat?.allotment?.currency]).toEqual([
+      1_200_000n,
+      22_388n,
+      "USD",
+    ]);
+  });
+
+  it("leaves a seat's spend unset while the vendor reports none", async () => {
+    const pushed = await accountUsagePushed(
+      seatAnswer({ is_enabled: true, monthly_limit: 1_200_000, used_credits: null, utilization: null, currency: "USD" }),
+    );
+    const seat = pushed.outcome.case === "seatSpend" ? pushed.outcome.value : undefined;
+
+    expect([seat?.allotment?.amountMinor, seat?.spent]).toEqual([1_200_000n, undefined]);
+  });
+
+  it("reports window_unavailable for an enterprise answer with no monthly limit", async () => {
+    const pushed = await accountUsagePushed(
+      seatAnswer({ is_enabled: false, monthly_limit: null, used_credits: null, utilization: null, currency: null }),
+    );
+
+    expect(unavailableReason(pushed)).toBe("windowUnavailable");
+  });
+
+  it("reads a non-enterprise answer with a monthly limit and no five-hour window as a subscription", async () => {
+    const pushed = await accountUsagePushed(
+      usage({
+        subscription_type: "max",
+        rate_limits: {
+          five_hour: null,
+          extra_usage: { is_enabled: true, monthly_limit: 5000, used_credits: 10, utilization: 0.2, currency: "USD" },
+        },
+      }),
+    );
+
+    expect(unavailableReason(pushed)).toBe("windowUnavailable");
+  });
+
+  it("reads an enterprise answer that reports a five-hour window as a subscription", async () => {
+    const pushed = await accountUsagePushed(
+      usage({
+        subscription_type: "enterprise",
+        rate_limits: {
+          five_hour: { utilization: 10, resets_at: "2026-01-01T00:00:00.000Z" },
+          extra_usage: { is_enabled: true, monthly_limit: 5000, used_credits: 10, utilization: 0.2, currency: "USD" },
+        },
+      }),
+    );
+
+    expect(pushed.outcome.case).toBe("available");
+  });
+
+  it("reports a sampling failure for a seat limit stated with no currency", async () => {
+    const pushed = await accountUsagePushed(
+      seatAnswer({ is_enabled: true, monthly_limit: 1_200_000, used_credits: 1, utilization: 0, currency: null }),
+    );
+
+    expect(unavailableReason(pushed)).toBe("samplingFailure");
+  });
+
+  it("types the vendor's enterprise plan word", async () => {
+    const pushed = await accountUsagePushed(usage({ subscription_type: "enterprise", rate_limits: null }));
+
+    expect(pushed.subscriptionType?.plan.case).toBe("enterprise");
+  });
+
+  it("leaves the plan unset when the vendor names none", async () => {
+    const pushed = await accountUsagePushed(usage({ subscription_type: null, rate_limits: null }));
+
+    expect(pushed.subscriptionType).toBeUndefined();
+  });
+
+  it("carries a plan word this schema does not name as the set plan with no arm", async () => {
+    const pushed = await accountUsagePushed(usage({ subscription_type: "galaxy", rate_limits: null }));
+
+    expect([pushed.subscriptionType !== undefined, pushed.subscriptionType?.plan.case]).toEqual([true, undefined]);
+  });
+
   it("reports utilization_unavailable when the five-hour window states no utilization", async () => {
     const pushed = await accountUsagePushed(
       usage({

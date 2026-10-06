@@ -296,6 +296,10 @@ the narrower/alternate state**:
   `!usage-window-unavailable`, `!usage-utilization-unavailable`,
   `!usage-sampling-failure` — declared `account-usage` outcomes; every
   capture that touches account usage recorded the `available` shape only.
+- `!usage-seat-spend`, `!usage-seat-spend-unreported` — the per-seat
+  enterprise answer (every window null, `extra_usage` carrying the monthly
+  limit and spend). Grounded only by the vendor CLI's own cached usage answer
+  for the owner's enterprise account (2026-10-06), not by a capture here.
 - `!fast-off`, `!fast-cooldown` — declared fast-mode states; no capture ran
   with fast mode off or in cooldown.
 - `!mcp-healthy` — a narrower MCP catalog than `!mcp-all` (which

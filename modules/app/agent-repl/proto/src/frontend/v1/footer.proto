@@ -1886,9 +1886,9 @@ message FooterActivityTransientUpdated {
 // Facts that are always true, drawn whenever nothing salient stands and no
 // transient is live.
 
-// The enduring line: the account's usage allowances. It is ENDURING, always
-// true while it stands, so it carries no age: when it was drawn says nothing
-// a reader needs.
+// The enduring line: the account's usage. It is ENDURING, always true while
+// it stands, so it carries no age: when it was drawn says nothing a reader
+// needs.
 //
 // THE USAGE IS THE ACCOUNT'S, NOT THE WORKSPACE'S (owner ruling, 2026-10-06).
 // Every workspace whose session spends from one account root (its Claude
@@ -1896,33 +1896,60 @@ message FooterActivityTransientUpdated {
 // learns them, and the daemon keeps the last figures per account durably, so
 // a restarted daemon draws them before any session has spoken.
 //
+// THE LINE IS CHOSEN BY THE ACCOUNT'S BILLING MODE (owner ruling,
+// 2026-10-06), never by which account it is: a subscription draws its
+// allowance windows, a per-seat account its month's spend; never both.
+//
 // THE LINE IS NEVER EMPTY (owner ruling, 2026-10-06): every arm draws words.
 //
 // The client draws the line it is given and decides nothing.
 message FooterActivityEnduring {
   // What is known about the account's usage. Exactly one is set.
   oneof line {
-    // The account's usage allowances.
+    // A subscription's usage allowances.
     FooterActivityEnduringUsage usage = 1;
     // No account-usage figure has ever been observed for this account.
     // Drawn "usage not yet seen for this account".
     FooterActivityEnduringUnobserved unobserved = 3;
-    // The vendor's usage service answered for this account and reported no
-    // five-hour session allowance (an account billed by spend rather than by
-    // allowance windows, e.g. an enterprise seat). Drawn "no session or weekly
-    // allowance on this account". Any later usage figure for the account
-    // replaces it.
-    FooterActivityEnduringNoAllowance no_allowance = 4;
+    // A per-seat account's spend this month against its allotment. Drawn
+    // "$223.88 of $12,000 this month".
+    FooterActivityEnduringSeatSpend seat_spend = 5;
   }
   // Tag 2 (`context_window`, the main agent's context fill) is RETIRED: the
-  // enduring line is the usage allowances alone.
+  // enduring line is the account's usage alone.
   reserved 2;
   reserved "context_window";
+  // Tag 4 (`no_allowance`, "no session or weekly allowance on this
+  // account") is RETIRED: an account billed by spend draws its spend
+  // (`seat_spend`), owner ruling 2026-10-06.
+  reserved 4;
+  reserved "no_allowance";
 }
 // No usage figure has ever been observed for the account.
 message FooterActivityEnduringUnobserved {}
-// The account has no session allowance to draw.
-message FooterActivityEnduringNoAllowance {}
+
+// A per-seat account's month-to-date spend against the seat's monthly
+// allotment. The vendor states no billing-period reset, so none is drawn.
+message FooterActivityEnduringSeatSpend {
+  // The seat's monthly allotment.
+  FooterMoney allotment = 1;
+  // What has been spent this month, in the allotment's currency. UNSET
+  // while the vendor has reported no spend figure; drawn "spend not yet seen
+  // of $12,000 this month".
+  optional FooterMoney spent = 2;
+  // spent / allotment, 0..1 (above 1 when the allotment is overrun). SET
+  // EXACTLY WHEN `spent` IS. The drawn spend wears the same percent gradient
+  // as the subscription line's percentages, driven by this figure.
+  optional double utilization = 3;
+}
+
+// An amount of money for the footer to draw.
+message FooterMoney {
+  // The amount in minor units of the currency (cents for USD).
+  int64 amount_minor = 1;
+  // The ISO 4217 currency code (e.g. "USD").
+  string currency = 2;
+}
 
 // The account's usage allowances. The vendor bills independent allowances
 // (rolling five-hour session, seven-day weekly, and an overage window beyond

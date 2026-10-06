@@ -630,6 +630,33 @@ function lockHolderUnavailable(err: LockHolderUnavailableError): shimv1.StartSes
   );
 }
 
+/**
+ * The vendor's plan word, typed. UNSET when the vendor named none (an API key
+ * or third-party provider session); a word this schema does not name is the
+ * set message with its oneof unassigned, never a guessed arm.
+ */
+export function subscriptionTypeOf(
+  word: string | null | undefined,
+): conversationv1.SessionSubscriptionType | undefined {
+  if (word === null || word === undefined) return undefined;
+  const plan = ((): conversationv1.SessionSubscriptionType["plan"] => {
+    switch (word) {
+      case "pro":
+        return { case: "pro", value: create(conversationv1.SessionSubscriptionTypeProSchema, {}) };
+      case "max":
+        return { case: "max", value: create(conversationv1.SessionSubscriptionTypeMaxSchema, {}) };
+      case "team":
+        return { case: "team", value: create(conversationv1.SessionSubscriptionTypeTeamSchema, {}) };
+      case "enterprise":
+        return { case: "enterprise", value: create(conversationv1.SessionSubscriptionTypeEnterpriseSchema, {}) };
+      default:
+        LOGGER.info({ subscription_type: word }, "the vendor named a plan this schema does not; it rides unassigned");
+        return { case: undefined };
+    }
+  })();
+  return create(conversationv1.SessionSubscriptionTypeSchema, { plan });
+}
+
 export function createEngine(deps: EngineDeps): SessionEngine {
   const workspaceKey = workspaceLockKey(deps.env.cwd);
   const identityStore =
@@ -1710,7 +1737,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    */
   function accountUsageUpdate(usage: AccountUsageLike): conversationv1.SessionUpdate {
     const observedAtMs = BigInt(deps.nowMs());
-    const subscriptionType = usage.subscription_type ?? "";
+    const subscriptionType = subscriptionTypeOf(usage.subscription_type);
     const unavailable = (
       reason: conversationv1.SessionAccountUsageUnavailable["reason"],
     ): conversationv1.SessionUpdate =>
@@ -1748,6 +1775,29 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // first onto the second left `window_unavailable` unproducible while
     // looking as though it were covered.
     const rawFiveHour = usage.rate_limits.five_hour;
+    // THE BILLING MODE (owner ruling, 2026-10-06): a per-seat account is an
+    // enterprise subscription whose usage answer reports a monthly limit and
+    // no five-hour window. Anything else that reports windows is a
+    // subscription, read below.
+    const seatLimit = usage.rate_limits.extra_usage?.monthly_limit ?? null;
+    const perSeat =
+      usage.subscription_type === "enterprise" &&
+      (rawFiveHour === null || rawFiveHour === undefined) &&
+      seatLimit !== null;
+    LOGGER.info(
+      {
+        subscription_type: usage.subscription_type,
+        five_hour_reported: rawFiveHour !== null && rawFiveHour !== undefined,
+        monthly_limit_reported: seatLimit !== null,
+        billing_mode: perSeat ? "seat_spend" : "subscription",
+      },
+      perSeat
+        ? "the account is billed per seat: enterprise, a monthly limit and no five-hour window"
+        : "the account is billed by subscription allowance windows",
+    );
+    if (perSeat) {
+      return seatSpendUpdate(observedAtMs, subscriptionType, usage.rate_limits.extra_usage, seatLimit);
+    }
     if (rawFiveHour === null || rawFiveHour === undefined) {
       return unavailable({
         case: "windowUnavailable",
@@ -1793,6 +1843,62 @@ export function createEngine(deps: EngineDeps): SessionEngine {
                       }),
                     ];
               }),
+            }),
+          },
+        }),
+      },
+    });
+  }
+
+  /**
+   * A per-seat account's month-to-date spend against its allotment. The
+   * vendor states both in minor units of one currency; a limit with no
+   * currency cannot be drawn, so it is the sampling failing, stated loudly.
+   */
+  function seatSpendUpdate(
+    observedAtMs: bigint,
+    subscriptionType: conversationv1.SessionSubscriptionType | undefined,
+    extra: { used_credits: number | null; currency?: string | null } | null | undefined,
+    monthlyLimit: number,
+  ): conversationv1.SessionUpdate {
+    const currency = extra?.currency ?? null;
+    if (currency === null || currency === "") {
+      const cause = "the vendor reported a monthly seat limit with no currency";
+      // warn: a defect because the vendor's declared money is unreadable without its currency.
+      LOGGER.warn({ monthly_limit: monthlyLimit }, cause);
+      return create(conversationv1.SessionUpdateSchema, {
+        update: {
+          case: "accountUsage",
+          value: create(conversationv1.SessionAccountUsageSchema, {
+            observedAtMs,
+            subscriptionType,
+            outcome: {
+              case: "unavailable",
+              value: create(conversationv1.SessionAccountUsageUnavailableSchema, {
+                reason: {
+                  case: "samplingFailure",
+                  value: create(conversationv1.SessionUsageSamplingFailureSchema, { cause }),
+                },
+              }),
+            },
+          }),
+        },
+      });
+    }
+    const money = (amountMinor: number): conversationv1.SessionMoney =>
+      create(conversationv1.SessionMoneySchema, { amountMinor: BigInt(Math.round(amountMinor)), currency });
+    const used = extra?.used_credits ?? null;
+    return create(conversationv1.SessionUpdateSchema, {
+      update: {
+        case: "accountUsage",
+        value: create(conversationv1.SessionAccountUsageSchema, {
+          observedAtMs,
+          subscriptionType,
+          outcome: {
+            case: "seatSpend",
+            value: create(conversationv1.SessionAccountUsageSeatSpendSchema, {
+              allotment: money(monthlyLimit),
+              ...(used === null ? {} : { spent: money(used) }),
             }),
           },
         }),
@@ -1873,7 +1979,6 @@ export function createEngine(deps: EngineDeps): SessionEngine {
             case: "accountUsage",
             value: create(conversationv1.SessionAccountUsageSchema, {
               observedAtMs: BigInt(deps.nowMs()),
-              subscriptionType: "",
               outcome: {
                 case: "unavailable",
                 value: create(conversationv1.SessionAccountUsageUnavailableSchema, {

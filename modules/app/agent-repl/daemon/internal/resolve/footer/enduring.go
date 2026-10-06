@@ -11,20 +11,19 @@ import (
 // It is ONE line: the account's usage allowances. Being always true, it
 // carries no age (owner ruling, 2026-09-30).
 
-// enduring composes the enduring line: the usage allowances, the account's
-// having none, or the unobserved arm before anything has been observed.
+// enduring composes the enduring line BY THE ACCOUNT'S BILLING MODE (owner
+// ruling, 2026-10-06): a per-seat account's spend, a subscription's
+// allowances, or the unobserved arm before anything has been observed.
 //
-// THE LINE IS THE ACCOUNT'S (account.go), and it is NEVER EMPTY: the figures
-// when any window is figured, else the account's having no allowance window
-// when its usage service said so, else the account never having been
-// observed — each arm drawn in words.
+// THE LINE IS THE ACCOUNT'S (account.go), and it is NEVER EMPTY: each arm is
+// drawn in words.
 func (r *resolver) enduring(s *wsState) *frontendv1.FooterActivityEnduring {
+	if seat := s.usage.seat; seat != nil {
+		return &frontendv1.FooterActivityEnduring{Line: &frontendv1.FooterActivityEnduring_SeatSpend{
+			SeatSpend: enduringSeatSpend(seat)}}
+	}
 	if usage := r.enduringUsage(s); usage != nil {
 		return &frontendv1.FooterActivityEnduring{Line: &frontendv1.FooterActivityEnduring_Usage{Usage: usage}}
-	}
-	if s.usage.noAllowance {
-		return &frontendv1.FooterActivityEnduring{Line: &frontendv1.FooterActivityEnduring_NoAllowance{
-			NoAllowance: &frontendv1.FooterActivityEnduringNoAllowance{}}}
 	}
 	return &frontendv1.FooterActivityEnduring{Line: &frontendv1.FooterActivityEnduring_Unobserved{
 		Unobserved: &frontendv1.FooterActivityEnduringUnobserved{}}}
@@ -77,4 +76,28 @@ func (r *resolver) allowance(w *allowanceWindow) *frontendv1.FooterAllowance {
 		allowance.Status = &frontendv1.FooterAllowance_Rejected{Rejected: &frontendv1.FooterAllowanceRejected{}}
 	}
 	return allowance
+}
+
+// enduringSeatSpend is a per-seat account's spend as the footer draws it. The
+// utilization, which drives the drawn spend's percent gradient, is
+// spent/allotment and is set exactly when the spend is. A zero allotment has
+// no ratio: any spend against it is drawn full (1), and none drawn empty (0).
+func enduringSeatSpend(seat *seatSpend) *frontendv1.FooterActivityEnduringSeatSpend {
+	out := &frontendv1.FooterActivityEnduringSeatSpend{
+		Allotment: &frontendv1.FooterMoney{AmountMinor: seat.allotmentMinor, Currency: seat.currency},
+	}
+	if seat.spentMinor == nil {
+		return out
+	}
+	spent := *seat.spentMinor
+	out.Spent = &frontendv1.FooterMoney{AmountMinor: spent, Currency: seat.currency}
+	var utilization float64
+	switch {
+	case seat.allotmentMinor > 0:
+		utilization = float64(spent) / float64(seat.allotmentMinor)
+	case spent > 0:
+		utilization = 1
+	}
+	out.Utilization = &utilization
+	return out
 }
