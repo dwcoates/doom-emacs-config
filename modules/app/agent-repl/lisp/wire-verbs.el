@@ -58,6 +58,7 @@
 ;; the `agent-repl-wire-error' definition.
 (declare-function agent-repl-wire--fail "agent-repl-wire-common" (message field reason))
 (declare-function agent-repl-wire--decoded "agent-repl-wire-common" (message-name value))
+(declare-function agent-repl-wire-decode-inside-temporary-directory "agent-repl-wire-common" (message-name value))
 (declare-function agent-repl-wire--object "agent-repl-wire-common" (message-name value))
 (declare-function agent-repl-wire--check-keys "agent-repl-wire-common" (message-name object allowed))
 (declare-function agent-repl-wire--decode-oneof "agent-repl-wire-common"
@@ -626,12 +627,19 @@ JSON."
   "Decode CreateWorkspaceError's `naming_failed' cause arm from JSON."
   (agent-repl-wire-decode-create-workspace-naming-failed json))
 
+(defun agent-repl-wire-decode-create-workspace-error-inside-temporary-directory (json)
+  "Decode CreateWorkspaceError's `inside_temporary_directory' cause arm.
+The repository, or the worktree the create would register, lies inside a
+temporary directory; JSON carries the canonical `dir' and `temporary_root'."
+  (agent-repl-wire-decode-inside-temporary-directory
+   "CreateWorkspaceInsideTemporaryDirectory" json))
+
 (defun agent-repl-wire-decode-create-workspace-error (json)
   "Decode CreateWorkspaceError from JSON into (:cause (:arm ARM :value V)).
 THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
 arm this codec does not know is refused as an unknown field."
   (let ((message "CreateWorkspaceError"))
-    (agent-repl-wire-verbs--check-keys message json '(ungatedWithoutConsent noSlug forkParentHasNoConversation briefMissing unknownRepository unknownParent baseRefUnresolved worktreeCreationFailed spawnFailed oneShotPolicyMissing namingFailed))
+    (agent-repl-wire-verbs--check-keys message json '(ungatedWithoutConsent noSlug forkParentHasNoConversation briefMissing unknownRepository unknownParent baseRefUnresolved worktreeCreationFailed spawnFailed oneShotPolicyMissing namingFailed insideTemporaryDirectory))
     (list :cause
           (agent-repl-wire-verbs--decode-oneof
            message "cause" json
@@ -645,7 +653,8 @@ arm this codec does not know is refused as an unknown field."
          (list 'worktreeCreationFailed :worktree-creation-failed #'agent-repl-wire-decode-create-workspace-error-worktree-creation-failed)
          (list 'spawnFailed :spawn-failed #'agent-repl-wire-decode-create-workspace-error-spawn-failed)
          (list 'oneShotPolicyMissing :one-shot-policy-missing #'agent-repl-wire-decode-create-workspace-error-one-shot-policy-missing)
-         (list 'namingFailed :naming-failed #'agent-repl-wire-decode-create-workspace-error-naming-failed))))))
+         (list 'namingFailed :naming-failed #'agent-repl-wire-decode-create-workspace-error-naming-failed)
+         (list 'insideTemporaryDirectory :inside-temporary-directory #'agent-repl-wire-decode-create-workspace-error-inside-temporary-directory))))))
 
 (defun agent-repl-wire-decode-create-workspace-response-success (json)
   "Decode CreateWorkspaceResponse's `success' arm from JSON."
@@ -2018,19 +2027,28 @@ be read at all."
   "Decode RegisterRepositoryError's `unreadable_path' cause arm from JSON."
   (agent-repl-wire-decode-register-repository-unreadable-path json))
 
+(defun agent-repl-wire-decode-register-repository-error-inside-temporary-directory (json)
+  "Decode RegisterRepositoryError's `inside_temporary_directory' cause arm.
+The repository's main worktree lies inside a temporary directory; JSON
+carries the canonical `dir' and `temporary_root'."
+  (agent-repl-wire-decode-inside-temporary-directory
+   "RegisterRepositoryInsideTemporaryDirectory" json))
+
 (defun agent-repl-wire-decode-register-repository-error (json)
   "Decode RegisterRepositoryError from JSON into (:cause (:arm ARM :value V)).
 THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
 arm this codec does not know is refused as an unknown field."
   (let ((message "RegisterRepositoryError"))
-    (agent-repl-wire-verbs--check-keys message json '(notInARepository unreadablePath))
+    (agent-repl-wire-verbs--check-keys message json '(notInARepository unreadablePath insideTemporaryDirectory))
     (list :cause
           (agent-repl-wire-verbs--decode-oneof
            message "cause" json
            (list (list 'notInARepository :not-in-a-repository
                        #'agent-repl-wire-decode-register-repository-error-not-in-a-repository)
                  (list 'unreadablePath :unreadable-path
-                       #'agent-repl-wire-decode-register-repository-error-unreadable-path))))))
+                       #'agent-repl-wire-decode-register-repository-error-unreadable-path)
+                 (list 'insideTemporaryDirectory :inside-temporary-directory
+                       #'agent-repl-wire-decode-register-repository-error-inside-temporary-directory))))))
 
 (defun agent-repl-wire-decode-register-repository-response-success (json)
   "Decode RegisterRepositoryResponse's `success' arm from JSON."

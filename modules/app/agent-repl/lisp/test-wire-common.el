@@ -54,6 +54,21 @@ does not write to the durable sink."
 
 ;;;; ---- WorkspaceRef ----
 
+(ert-deftest agent-repl-test-wire-common-inside-temporary-directory-decodes-both-fields ()
+  "The shared `inside_temporary_directory' arm decodes its dir and root."
+  (should (equal (agent-repl-test-wire-common--decode
+                  (lambda (v) (agent-repl-wire-decode-inside-temporary-directory "X" v))
+                  "{\"dir\":\"/private/tmp/s\",\"temporaryRoot\":\"/private/tmp\"}")
+                 '(:dir "/private/tmp/s" :temporary-root "/private/tmp"))))
+
+(ert-deftest agent-repl-test-wire-common-inside-temporary-directory-refuses-an-unknown-field ()
+  "A field the arm does not declare is a breach, never ignored."
+  (should (equal (agent-repl-test-wire-common--breach
+                  (lambda ()
+                    (agent-repl-wire-decode-inside-temporary-directory
+                     "X" (agent-repl-test-wire-common--parse "{\"other\":\"x\"}"))))
+                 '("X" other "unknown field"))))
+
 (ert-deftest agent-repl-test-wire-common-workspace-ref-decodes-both-halves ()
   "A WorkspaceRef decodes its opaque id and its display dir."
   (let ((decoded (agent-repl-test-wire-common--decode

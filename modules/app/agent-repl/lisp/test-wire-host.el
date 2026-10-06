@@ -1137,6 +1137,14 @@ carries."
                   "{\"notAWorktree\":{}}")
                  '(:cause (:arm :not-a-worktree :value nil)))))
 
+(ert-deftest agent-repl-test-wire-host-register-error-inside-temporary-directory-arm ()
+  "RegisterWorkspaceError's `inside_temporary_directory' arm decodes with the
+dir and the temporary root it carries."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-register-workspace-error
+                  "{\"insideTemporaryDirectory\":{\"dir\":\"/private/tmp/scratch\",\"temporaryRoot\":\"/private/tmp\"}}")
+                 '(:cause (:arm :inside-temporary-directory :value (:dir "/private/tmp/scratch" :temporary-root "/private/tmp"))))))
+
 (ert-deftest agent-repl-test-wire-host-register-error-unset-cause-is-a-breach ()
   "RegisterWorkspaceError with no arm set says nothing actionable, so it is a
 breach."
@@ -1155,7 +1163,7 @@ guessed at."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_register_workspace.pb.go" "RegisterWorkspaceError")
                        #'string<)
-                 (sort (list "notAWorktree")
+                 (sort (list "notAWorktree" "insideTemporaryDirectory")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-host-select-error-unknown-workspace-arm ()
