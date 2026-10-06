@@ -180,6 +180,8 @@ func TestCreateWorkspaceWithAParentNestsTheChildAndTargetsTheParentsWorktreeOnMe
 	d := newDaemon(t, harness.Opts{
 		SelfRepo: repo.Dir,
 		ExtraEnv: []string{"AGENT_REPL_TEST_ALL_SCRIPT=" + script.Path},
+		// A merge-spanning wait chains dozens of subprocesses; see harness.MergeChainTimeout.
+		Timeout: harness.MergeChainTimeout,
 	})
 	repository := createRepositoryRef(t, d, repo)
 	parentResp, err := d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
