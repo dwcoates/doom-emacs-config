@@ -983,3 +983,4 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - 2026-10-06 a joining successor's account usage is held on its read-only state handle and written at the promotion, not refused at ERROR twice per account on every handover(daemon/internal/wsm accountusage.go, open.go).
 - 2026-10-06 removing a merged workspace's worktree is INFO; a host push changing a workspace's vendor conversation id is INFO in Emacs; a failing integration test keeps its daemon's logs (AGENT_REPL_INTEGRATION_ARTIFACTS or tails).
 - 2026-10-06 the e2e durable-session-id test reads the id off the bring-up a look starts instead of racing it with a "nil before any turn" read (the shim pre-mints the vendor id at a fresh start).
+- 2026-10-06 the compaction e2e tests observe the compacting step through the footer's substatus_changed record, not its latest-only stream, which can hand a lagging reader only the newer idle view(e2e/compaction_e2e_test.go, footer resolver).
