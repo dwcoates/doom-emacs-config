@@ -145,3 +145,16 @@ func TestTheMigrationAddsTheAgentReplSessionTable(t *testing.T) {
 		t.Fatalf("agent_repl_session tables after the migration = %d, want 1", got)
 	}
 }
+
+func TestAgentReplSessionLogContextNamesEveryFact(t *testing.T) {
+	// Arrange
+	s := AgentReplSession{StartedAt: sessionAt, Began: SessionBeganLogin, BytesReceived: 5, BytesSent: 6}
+
+	// Act
+	got := s.LogContext()
+
+	// Assert
+	if got["started_at"] != "2026-10-06T09:30:00Z" || got["began"] != "login" || got["bytes_received"] != uint64(5) || got["bytes_sent"] != uint64(6) {
+		t.Fatalf("LogContext = %v, want every fact named", got)
+	}
+}
