@@ -16,6 +16,9 @@ type fakeHost struct {
 	fail  map[string]bool
 	info  string
 	mount string
+	// lsof is what `lsof` answers; lsofErr is its failure, if any.
+	lsof    string
+	lsofErr error
 }
 
 func (h *fakeHost) run(name string, args ...string) (string, error) {
@@ -33,11 +36,8 @@ func (h *fakeHost) run(name string, args ...string) (string, error) {
 		return "   Device Identifier:         disk10s1\n   Mount Point: /Volumes/x\n", nil
 	case strings.HasPrefix(call, "hdiutil info"):
 		return h.info, nil
-	case strings.HasPrefix(call, "hdiutil detach"):
-		// The real detach unmounts the volume, emptying the mount point.
-		if h.mount != "" {
-			os.Remove(filepath.Join(h.mount, ".metadata_never_index"))
-		}
+	case strings.HasPrefix(call, "lsof"):
+		return h.lsof, h.lsofErr
 	}
 	return "", nil
 }
@@ -70,7 +70,7 @@ func TestAcquireAttachesFormatsAndMountsUnderTheMountParent(t *testing.T) {
 		"diskutil eraseDisk APFS artr-4242 /dev/disk9",
 		"diskutil info /Volumes/artr-4242",
 		"diskutil unmount disk10s1",
-		"diskutil mount -mountPoint " + h.mount + " disk10s1",
+		"diskutil mount nobrowse -mountPoint " + h.mount + " disk10s1",
 	}
 	if strings.Join(h.calls, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("calls =\n%s\nwant\n%s", strings.Join(h.calls, "\n"), strings.Join(want, "\n"))
@@ -178,6 +178,83 @@ func TestReleaseForcesARefusedDetachAndSaysSo(t *testing.T) {
 	}
 	if last := h.calls[len(h.calls)-1]; last != "hdiutil detach -force /dev/disk9" {
 		t.Fatalf("last call = %q, want a forced detach", last)
+	}
+}
+
+func TestReleaseNamesWhoHeldTheVolumeBeforeForcing(t *testing.T) {
+	// Arrange
+	h := &fakeHost{lsof: "COMMAND   PID USER   FD   TYPE DEVICE SIZE/OFF NODE NAME\ntail    77001 me    cwd    DIR   1,30      96    2 /tmp/artr-4242/x\ntail    77001 me    3r     REG   1,30       0    5 /tmp/artr-4242/x/f\n"}
+	m := newManager(t, h)
+	v, err := m.Acquire(16)
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	h.fail = map[string]bool{"hdiutil detach /dev": true}
+
+	// Act
+	err = v.Release()
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "held by: tail[77001])") {
+		t.Fatalf("Release = %v, want the holder named once", err)
+	}
+}
+
+func TestReleaseListsTheHoldersBeforeTheForcedDetach(t *testing.T) {
+	// Arrange
+	h := &fakeHost{}
+	m := newManager(t, h)
+	v, err := m.Acquire(16)
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	h.fail = map[string]bool{"hdiutil detach /dev": true}
+
+	// Act
+	v.Release() //nolint:errcheck // the order of the calls is the subject
+
+	// Assert
+	tail := h.calls[len(h.calls)-2:]
+	if !strings.HasPrefix(tail[0], "lsof -n -P +f -- ") || tail[1] != "hdiutil detach -force /dev/disk9" {
+		t.Fatalf("last calls = %q, want lsof then the forced detach", tail)
+	}
+}
+
+func TestReleaseSaysSoWhenLsofSeesNoHolder(t *testing.T) {
+	// Arrange: lsof answers exit 1 and no output when nothing is open.
+	h := &fakeHost{lsofErr: errors.New("exit status 1")}
+	m := newManager(t, h)
+	v, err := m.Acquire(16)
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	h.fail = map[string]bool{"hdiutil detach /dev": true}
+
+	// Act
+	err = v.Release()
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "held by: no process lsof could see") {
+		t.Fatalf("Release = %v, want lsof's empty answer stated", err)
+	}
+}
+
+func TestReleaseNamesAnLsofFailureInPlaceOfTheHolders(t *testing.T) {
+	// Arrange
+	h := &fakeHost{lsof: "lsof: illegal option", lsofErr: errors.New("exit status 2")}
+	m := newManager(t, h)
+	v, err := m.Acquire(16)
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	h.fail = map[string]bool{"hdiutil detach /dev": true}
+
+	// Act
+	err = v.Release()
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "unknown, lsof failed: exit status 2") {
+		t.Fatalf("Release = %v, want lsof's failure named", err)
 	}
 }
 
