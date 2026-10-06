@@ -391,7 +391,7 @@ func (s *store) migrateForward(ctx context.Context, from int) error {
 // the next boot, and one that carried the NEW stamp would hide missing tables
 // behind a version that claims they exist.
 func (s *store) applyMigration(ctx context.Context, m migration) error {
-	tx, err := s.handle.BeginTx(ctx, nil)
+	tx, err := s.db().BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("wsm: begin migration to layout %d on %q: %w", m.To, s.path, err)
 	}
@@ -439,7 +439,7 @@ func (s *store) copyAsideBeforeMigrating(ctx context.Context, from int) (string,
 	case !errors.Is(err, os.ErrNotExist):
 		return "", fmt.Errorf("wsm: inspect the pre-migration copy %q: %w", path, err)
 	}
-	if _, err := s.handle.ExecContext(ctx, `VACUUM INTO `+quoteSQLText(path)); err != nil {
+	if _, err := s.db().ExecContext(ctx, `VACUUM INTO `+quoteSQLText(path)); err != nil {
 		return "", fmt.Errorf("wsm: copy %q aside as %q before migrating: %w", s.path, path, err)
 	}
 	return path, nil
