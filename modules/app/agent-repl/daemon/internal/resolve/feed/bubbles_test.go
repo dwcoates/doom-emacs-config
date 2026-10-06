@@ -912,11 +912,12 @@ func TestACancelledHookDrawsNothing(t *testing.T) {
 	}
 }
 
-// ---- A HOOK CARD IS LIVE ONLY ----
+// ---- A HOOK CARD DRAWN LIVE IS HELD BY THE DAEMON ----
 //
-// No hook record is stored (owner ruling 2026-10-06): the store hands a failed
-// or blocked firing to the standing watch and keeps nothing, so its card is a
-// row this daemon holds, never one a history page carries.
+// A failed or blocked firing's card is a row this daemon holds once it drew
+// it from the live stream, so a page reload — a new reader's OpenFeed — is
+// served it whether or not any history page carries the record (owner ruling
+// 2026-10-06: hook records are not to be stored).
 
 // failHookLive draws a failed hook's card from the live stream, as the shim
 // sends it: the start and the outcome together.
@@ -946,8 +947,8 @@ func hookCardsOn(t *testing.T, page *frontendv1.FeedPage) int {
 }
 
 func TestALiveHookCardIsServedToAReaderThatOpensAfterIt(t *testing.T) {
-	// Arrange: the store holds the conversation's prompts and no hook record;
-	// the card was drawn live. A page reload is a new reader's open.
+	// Arrange: the history holds the conversation's prompts and no hook
+	// record; the card was drawn live. A page reload is a new reader's open.
 	h := newHarness(t)
 	h.mainBook(3, promptsBook(2))
 	h.failHookLive("hook-1")
@@ -961,23 +962,5 @@ func TestALiveHookCardIsServedToAReaderThatOpensAfterIt(t *testing.T) {
 	}
 	if n := hookCardsOn(t, page); n != 1 {
 		t.Fatalf("hook cards on the reloaded page = %d, want the live one", n)
-	}
-}
-
-func TestARestartedDaemonDrawsNoHookCardFromHistory(t *testing.T) {
-	// Arrange: a fresh resolver over a store that, by the ruling, holds no
-	// hook record — what a daemon restart reads.
-	h := newHarness(t)
-	h.mainBook(3, promptsBook(2))
-
-	// Act.
-	page, _, err := h.resolver.OpenPage(context.Background(), testWorkspace, rootFeed(), "reader-1")
-
-	// Assert.
-	if err != nil {
-		t.Fatalf("OpenPage: %v", err)
-	}
-	if n := hookCardsOn(t, page); n != 0 {
-		t.Fatalf("hook cards = %d, want none after a restart", n)
 	}
 }
