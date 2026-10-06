@@ -452,6 +452,20 @@ the narrower/alternate state**:
   2026-09-23 (a turn's `init` and `result` arriving between a keep-alive's
   send and its answer), not in a capture: the captures predate the shim
   sending a client uuid at all.
+- `!stop-on-rewind` — GROUNDED ON A LIVE TRANSCRIPT, not a capture: the
+  owner's ship-gns session (CLI 2.1.280), 2026-10-02 15:17:08Z, where each
+  keep-alive rewind's truncating resume replayed a background shell the
+  previous process left unfinished. The shape copied (content redacted to the
+  CLI's own boilerplate): a `queue-operation` enqueue carrying the
+  notification and a dequeue; a user record with its own `promptId`,
+  `origin: {kind: "task-notification"}`, `promptSource: "system"`,
+  `queueSkipAttachments` and `queueTranscriptOnly` true, parented on the fork
+  point, whose content is `<task-notification>` with `<task-id>`,
+  `<tool-use-id>`, `<status>stopped</status>`, the summary "Background shell
+  command didn't finish before the previous session ended" and a `<note>`;
+  the next send's prompt parents on it. On the stream: a
+  `task_notification{stopped}` naming no `task_type`, then a turn whose first
+  and only frame is a `result` (no reply, no turn record).
 - `!query-fail` — PARTIALLY GROUNDED, evidence only, not a golden: a Haiku
   run (2026-09-03, `--only prose-streamed` into a scratch `--out`, not this
   repo's `captures/`) had its spawned vendor child `kill -9`'d mid-stream
