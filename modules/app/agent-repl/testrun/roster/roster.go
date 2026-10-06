@@ -82,8 +82,14 @@ var Suites = []Suite{
 	{Name: "test-split-harness", Kind: Script, Path: "bin/test-lib-test-split.sh", Harness: true},
 	{Name: "logs-harness", Kind: Script, Path: "bin/test-logs.sh", Harness: true},
 	{Name: "go-deps-harness", Kind: Script, Path: "bin/test-check-go-deps.sh", Harness: true},
+	{Name: "realtest-harness", Kind: Script, Path: "bin/test-realtest.sh", Harness: true},
+	{Name: "e2e-coverage-harness", Kind: Script, Path: "bin/test-e2e-coverage.sh", Harness: true},
+	// Its load-gate case waits out e2e-repeat.sh's own 5s poll on a real
+	// clock, which is most of its ~55s.
+	{Name: "e2e-repeat-harness", Kind: Script, Path: "bin/test-e2e-repeat.sh", Harness: true},
 	{Name: "doctor-harness", Kind: Script, Path: "scripts/test-agent-shim-doctor.sh"},
 	{Name: "bounce-harness", Kind: Script, Path: "scripts/test-bounce-agent-repl-forcefully.sh"},
+	{Name: "log-discovery-harness", Kind: Script, Path: "scripts/test-agent-repl-log-discovery.sh"},
 	{Name: "precommit-harness", Kind: Script, Path: "/.githooks/test-pre-commit.sh"},
 	{Name: "safe-test-run-harness", Kind: Script, Path: "/.claude/test-safe-test-run.sh"},
 	{Name: "merge-queue-hook-harness", Kind: Script, Path: "/.githooks/test-reference-transaction.sh"},
@@ -119,6 +125,19 @@ var Suites = []Suite{
 	// own parallelism bound of two Emacsen was measured on
 	// (e2e/EMACS-LAYER-SPEC.md, "The parallelism bound, measured").
 	{Name: "e2e-emacs", Kind: Script, Path: "bin/test-e2e-emacs.sh", MayDecline: true, Slots: 4},
+}
+
+// NotSuites is every test-named script that is deliberately NOT a suite, with
+// why. A harness file the roster neither runs nor lists here fails
+// TestEveryHarnessScriptIsRosteredOrExcluded: test-realtest.sh and
+// test-e2e-coverage.sh ran nowhere in the full run until 2026-10-06, and
+// nothing said so. Paths are spelled as Suite.Path is.
+var NotSuites = map[string]string{
+	// The scheduler itself: it runs the roster, it is not in it.
+	"bin/test-all.sh": "the runner every suite runs under",
+	// A container-free entry to the e2e Go suite, which the roster runs as
+	// the "e2e" suite directly (Kind E2E); rostering this would run it twice.
+	"bin/test-e2e.sh": "a manual entry to the e2e suite the roster already runs",
 }
 
 // Names is the roster's names, in roster order.
