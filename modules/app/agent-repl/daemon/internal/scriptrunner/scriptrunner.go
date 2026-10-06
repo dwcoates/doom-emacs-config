@@ -20,6 +20,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"syscall"
 
 	"claude-repld/internal/dlog"
 )
@@ -53,6 +54,18 @@ func cleanEnv(env []string) []string {
 		}
 	}
 	return out
+}
+
+// killGroup SIGKILLs the process group the script leads. A group already gone
+// is the state the kill was asked to reach.
+func killGroup(pid int) error {
+	if err := syscall.Kill(-pid, syscall.SIGKILL); err != nil {
+		if errors.Is(err, syscall.ESRCH) {
+			return os.ErrProcessDone
+		}
+		return err
+	}
+	return nil
 }
 
 // Runner runs a script in a directory. It is stateless beyond its logger, so
@@ -104,6 +117,15 @@ func (r *Runner) RunLines(ctx context.Context, dir string, argv []string, onLine
 
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir = dir
+	// A CANCELLED RUN TAKES ITS CHILDREN WITH IT. The script runs in its own
+	// process group and the context's end kills the whole group: killing the
+	// script alone left a child it started holding the output pipe open, and
+	// Wait waited for that child as long as it lived, so the caller's
+	// cancellation was not honored. (exec's WaitDelay is NOT the bound here:
+	// it also runs after an ordinary exit, and under load it cut the output of
+	// scripts that had finished and answered.)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error { return killGroup(cmd.Process.Pid) }
 	cmd.Env = cleanEnv(os.Environ())
 	// stdout and stderr are combined, in order, into one buffer: a caller
 	// painting a test gate's output or a deploy step's log wants what a
@@ -116,7 +138,14 @@ func (r *Runner) RunLines(ctx context.Context, dir string, argv []string, onLine
 	out.flush()
 	output := out.buf.String()
 
+	// A SCRIPT THE CONTEXT KILLED DID NOT ANSWER. exec reports the kill as an
+	// *ExitError (signal: killed, exit code -1), which read below as a script
+	// that ran and failed with code -1; it is the context ending, and is
+	// classified as that.
 	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == -1 && ctx.Err() != nil {
+		err = fmt.Errorf("%w (%v)", ctx.Err(), err)
+	}
 	if err == nil {
 		r.log.Debug("daemon.scriptrunner.run", "script ran to completion", dlog.Context{
 			"script": argv[0], "dir": dir, "exit_code": 0,
