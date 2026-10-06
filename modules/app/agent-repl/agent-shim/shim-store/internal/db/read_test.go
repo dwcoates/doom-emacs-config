@@ -843,7 +843,7 @@ func TestAReadIsAnsweredWhileAWriterHoldsTheWriteLock(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			// Arrange: a book to read, and another connection holding the
 			// write lock for the whole of this test.
-			d, _ := newStore(t)
+			d, _ := newFileStore(t)
 			seeded := seedBook(t, d, "reader-book", 3)
 			writer, err := d.sql.BeginTx(context.Background(), nil)
 			if err != nil {
@@ -908,7 +908,7 @@ func TestAReadCompletesWhileAWriteTransactionIsHeld(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			// Arrange: a book to read, then a write transaction held open.
-			d, _ := newStore(t)
+			d, _ := newFileStore(t)
 			seedBook(t, d, "agent-1", 1)
 			tx, release, err := d.beginWrite(ctx(), WriteInteractive)
 			if err != nil {
@@ -1105,7 +1105,7 @@ func cancelledOpenPages(t *testing.T, d *DB, book string) {
 // sat at 0 of 47,506 frames for four hours). This fails on that driver.
 func TestCancelledOpenPagesLeaveTheWALFullyCheckpointable(t *testing.T) {
 	// Arrange
-	d, _ := newStore(t)
+	d, _ := newFileStore(t)
 	seedBook(t, d, "b", 3000)
 	if _, err := d.Checkpoint(ctx(), TriggerIdle); err != nil {
 		t.Fatalf("Checkpoint: %v", err)
