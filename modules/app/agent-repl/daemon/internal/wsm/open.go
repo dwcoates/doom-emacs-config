@@ -13,6 +13,7 @@ import (
 
 	"claude-repld/internal/dirpath"
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/tempdirs"
 )
 
 // LayoutVersion is the schema version this build writes. The file carries its
@@ -40,6 +41,27 @@ func WithLogger(log dlog.Logger) Option {
 	}
 }
 
+// WithTemporaryGuard replaces the guard the two registration writes refuse a
+// temporary directory with (tempdirs). Without it a handle builds the
+// PRODUCTION guard -- this process's temporary directory, no test exemption --
+// so forgetting the option refuses rather than permits. The daemon passes the
+// guard its boot built from the environment (tempdirs.FromEnv); a test passes
+// one exempting its own temporary root.
+func WithTemporaryGuard(guard tempdirs.Guard) Option {
+	return func(s *store) {
+		s.temporary = guard
+	}
+}
+
+// productionTemporaryGuard builds the guard a handle opened without
+// WithTemporaryGuard runs: this process's temporary directory, no exemption.
+// It is a variable only so this package's OWN tests, which open handles at
+// dozens of sites, can exempt their run's temporary root in TestMain; nothing
+// outside the package can reach it.
+var productionTemporaryGuard = func() (tempdirs.Guard, error) {
+	return tempdirs.New(os.TempDir(), "")
+}
+
 // store is the one concrete DB. It owns a single *sql.DB with one connection,
 // so every SELECT-then-write check in this package is race-free without a
 // table lock and two writers can never lose an update on the same file.
@@ -55,6 +77,9 @@ type store struct {
 	// reconciliation compares each row against (dirspelling.go). Injectable
 	// so a test can model a case-folding volume on any host.
 	canonicalDir func(string) (string, error)
+	// temporary refuses a registration whose directory lies inside a
+	// temporary root (owner ruling, 2026-10-06). Set once at open.
+	temporary tempdirs.Guard
 
 	// leaseMu guards owned.
 	leaseMu sync.Mutex
@@ -212,6 +237,14 @@ func openStore(ctx context.Context, path, dsn string, readOnly bool, opts []Opti
 	s := &store{handle: handle, path: path, readOnly: readOnly, log: discardLogger{}, canonicalDir: dirpath.Canonical}
 	for _, opt := range opts {
 		opt(s)
+	}
+	if !s.temporary.Built() {
+		guard, err := productionTemporaryGuard()
+		if err != nil {
+			handle.Close()
+			return nil, fmt.Errorf("wsm: open %q: build the temporary-directory guard: %w", path, err)
+		}
+		s.temporary = guard
 	}
 	return s, nil
 }
