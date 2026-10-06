@@ -270,22 +270,22 @@ type bringingEdge struct {
 // harness is one boot sequence under test with every fake reachable.
 type harness struct {
 	// binds counts the boot's BindViews calls; bindErr is what they answer.
-	binds      atomic.Int32
-	bindErr    error
+	binds   atomic.Int32
+	bindErr error
 	// restore answers the boot's missing-worktree restorer; nil answers
 	// "nothing to restore from", which is what every arrangement that does
 	// not name a branch means. restoreAsked records every workspace it was
 	// asked about, in order.
 	restore      func(wsm.Workspace) (bool, error)
 	restoreAsked []ids.WorkspaceID
-	seq        Sequence
-	deps       Deps
-	db         wsm.DB
-	supervisor *fakeSupervisor
-	queue      *fakeQueue
-	merge      *fakeMerge
-	rollout    *fakeRollout
-	log        *dlog.TestSurfaces
+	seq          Sequence
+	deps         Deps
+	db           wsm.DB
+	supervisor   *fakeSupervisor
+	queue        *fakeQueue
+	merge        *fakeMerge
+	rollout      *fakeRollout
+	log          *dlog.TestSurfaces
 	// installed records every workspace whose adopted client was installed.
 	installed []ids.WorkspaceID
 	// sessionsAdopted records every adopted survivor stated to hold a session.
