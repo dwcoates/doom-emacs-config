@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -126,6 +127,17 @@ func TestRecordNewsDigestRunRefusesMalformedRuns(t *testing.T) {
 		{name: "a digest with no id", run: NewsDigestRun{EndedAt: at, Recorded: true, Digest: &NewsDigestMinted{Overlay: []byte("o")}}},
 		{name: "a digest with no overlay", run: NewsDigestRun{EndedAt: at, Recorded: true, Digest: &NewsDigestMinted{ID: "d"}}},
 		{name: "a snapshot naming no source", run: NewsDigestRun{EndedAt: at, Recorded: true, Snapshots: map[string]string{"": "x"}}},
+		{name: "kept items with no digest", run: NewsDigestRun{EndedAt: at, Recorded: true, History: history(at, keptItem("i", ""))}},
+		{name: "kept items covering no span", run: NewsDigestRun{EndedAt: at, Recorded: true, Digest: minted("d"),
+			History: &NewsDigestHistory{KeepSince: at, Items: []NewsDigestKeptItem{keptItem("i", "")}}}},
+		{name: "kept items covering past the run's end", run: NewsDigestRun{EndedAt: at, Recorded: true, Digest: minted("d"),
+			History: &NewsDigestHistory{CoversFrom: at.Add(time.Hour), KeepSince: at, Items: []NewsDigestKeptItem{keptItem("i", "")}}}},
+		{name: "kept items pruning nothing", run: NewsDigestRun{EndedAt: at, Recorded: true, Digest: minted("d"),
+			History: &NewsDigestHistory{CoversFrom: at, Items: []NewsDigestKeptItem{keptItem("i", "")}}}},
+		{name: "kept items pruning past the run's end", run: NewsDigestRun{EndedAt: at, Recorded: true, Digest: minted("d"),
+			History: &NewsDigestHistory{CoversFrom: at, KeepSince: at.Add(time.Hour), Items: []NewsDigestKeptItem{keptItem("i", "")}}}},
+		{name: "a history with no items", run: NewsDigestRun{EndedAt: at, Recorded: true, Digest: minted("d"), History: history(at)}},
+		{name: "a kept item with no encoding", run: NewsDigestRun{EndedAt: at, Recorded: true, Digest: minted("d"), History: history(at, keptItem("", "r"))}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -435,5 +447,198 @@ func TestTheMigrationAddsTheRedisplayColumnsAndTheEditorInstanceTable(t *testing
 	}
 	if got := scalar[int](t, s, `SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'editor_instance'`); got != 1 {
 		t.Fatalf("editor_instance tables after the migration = %d, want 1", got)
+	}
+}
+
+// minted is a digest named id with a placeholder overlay.
+func minted(id string) *NewsDigestMinted {
+	return &NewsDigestMinted{ID: id, Overlay: []byte("overlay-" + id)}
+}
+
+// keptItem is a kept item with encoding item and risk reason risk.
+func keptItem(item, risk string) NewsDigestKeptItem {
+	return NewsDigestKeptItem{Item: []byte(item), Risk: risk}
+}
+
+// history keeps items for a run ending at ended: it covers from ended and
+// prunes nothing newer than fourteen days before it.
+func history(ended time.Time, items ...NewsDigestKeptItem) *NewsDigestHistory {
+	return &NewsDigestHistory{CoversFrom: ended, KeepSince: ended.Add(-14 * 24 * time.Hour), Items: items}
+}
+
+// risksSince loads the marked items since since, failing the test on an error.
+func risksSince(t *testing.T, s *store, since time.Time) []NewsDigestRisk {
+	t.Helper()
+	risks, err := s.NewsDigestRisksSince(context.Background(), since)
+	if err != nil {
+		t.Fatalf("NewsDigestRisksSince: %v", err)
+	}
+	return risks
+}
+
+func TestNewsDigestRisksSinceAnswersOnlyMarkedItems(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	recordRun(t, s, NewsDigestRun{EndedAt: at, Recorded: true, Digest: minted("d1"),
+		History: history(at, keptItem("plain", ""), keptItem("risky", "breaks the shim"))})
+
+	// Act
+	risks := risksSince(t, s, at.Add(-time.Hour))
+
+	// Assert
+	if len(risks) != 1 || string(risks[0].Item) != "risky" || risks[0].Reason != "breaks the shim" || !risks[0].RunEnd.Equal(at) {
+		t.Fatalf("risks = %+v, want only the marked item", risks)
+	}
+}
+
+func TestNewsDigestRisksSinceOrdersByRunThenPosition(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	later := at.Add(24 * time.Hour)
+	recordRun(t, s, NewsDigestRun{EndedAt: later, Recorded: true, Digest: minted("d2"),
+		History: history(later, keptItem("c", "r"), keptItem("d", "r"))})
+	recordRun(t, s, NewsDigestRun{EndedAt: at, Recorded: true, Digest: minted("d1"),
+		History: history(at, keptItem("a", "r"), keptItem("b", "r"))})
+
+	// Act
+	risks := risksSince(t, s, at.Add(-time.Hour))
+
+	// Assert
+	var got []string
+	for _, r := range risks {
+		got = append(got, string(r.Item))
+	}
+	if strings.Join(got, ",") != "a,b,c,d" {
+		t.Fatalf("risk order = %v, want a,b,c,d", got)
+	}
+}
+
+func TestNewsDigestRisksSinceWindow(t *testing.T) {
+	tests := []struct {
+		name  string
+		since time.Time
+		want  int
+	}{
+		{name: "a run ending after since is in", since: at.Add(-time.Minute), want: 1},
+		{name: "a run ending exactly at since is in", since: at, want: 1},
+		{name: "a run ending before since is out", since: at.Add(time.Minute), want: 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			recordRun(t, s, NewsDigestRun{EndedAt: at, Recorded: true, Digest: minted("d1"), History: history(at, keptItem("i", "r"))})
+
+			// Act
+			risks := risksSince(t, s, tt.since)
+
+			// Assert
+			if len(risks) != tt.want {
+				t.Fatalf("risks = %d, want %d", len(risks), tt.want)
+			}
+		})
+	}
+}
+
+func TestKeepingItemsPrunesRunsEndedBeforeKeepSince(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	old := at.Add(-15 * 24 * time.Hour)
+	recent := at.Add(-13 * 24 * time.Hour)
+	recordRun(t, s, NewsDigestRun{EndedAt: old, Recorded: true, Digest: minted("d0"), History: history(old, keptItem("old", "r"))})
+	recordRun(t, s, NewsDigestRun{EndedAt: recent, Recorded: true, Digest: minted("d1"), History: history(recent, keptItem("recent", "r"))})
+
+	// Act
+	recordRun(t, s, NewsDigestRun{EndedAt: at, Recorded: true, Digest: minted("d2"), History: history(at, keptItem("now", ""))})
+
+	// Assert
+	if got := scalar[int](t, s, `SELECT count(*) FROM news_digest_items`); got != 2 {
+		t.Fatalf("kept items after the prune = %d, want 2 (the fifteen-day-old run pruned)", got)
+	}
+	if risks := risksSince(t, s, old.Add(-time.Hour)); len(risks) != 1 || string(risks[0].Item) != "recent" {
+		t.Fatalf("risks = %+v, want only the recent one", risks)
+	}
+}
+
+func TestARunWithNoHistoryPrunesNothing(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	old := at.Add(-30 * 24 * time.Hour)
+	recordRun(t, s, NewsDigestRun{EndedAt: old, Recorded: true, Digest: minted("d0"), History: history(old, keptItem("old", "r"))})
+
+	// Act
+	recordRun(t, s, NewsDigestRun{EndedAt: at, Recorded: true})
+
+	// Assert
+	if got := scalar[int](t, s, `SELECT count(*) FROM news_digest_items`); got != 1 {
+		t.Fatalf("kept items = %d, want 1", got)
+	}
+}
+
+func TestTheFirstKeptRunStartsTheHistorysSpan(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	first := at.Add(-3 * time.Hour)
+	recordRun(t, s, NewsDigestRun{EndedAt: at, Recorded: true, Digest: minted("d1"),
+		History: &NewsDigestHistory{CoversFrom: first, KeepSince: first, Items: []NewsDigestKeptItem{keptItem("a", "")}}})
+	later := at.Add(24 * time.Hour)
+
+	// Act
+	recordRun(t, s, NewsDigestRun{EndedAt: later, Recorded: true, Digest: minted("d2"), History: history(later, keptItem("b", ""))})
+
+	// Assert
+	if state := loadState(t, s); !state.HistorySince.Equal(first) {
+		t.Fatalf("history since = %v, want the first kept run's span start %v", state.HistorySince, first)
+	}
+}
+
+func TestHistorySinceIsZeroBeforeAnyItemIsKept(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+
+	// Act
+	recordRun(t, s, NewsDigestRun{EndedAt: at, Recorded: true, Digest: minted("d1")})
+
+	// Assert
+	if state := loadState(t, s); !state.HistorySince.IsZero() {
+		t.Fatalf("history since = %v, want zero", state.HistorySince)
+	}
+}
+
+func TestAMarkedRowWithABlankReasonIsADecodeError(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	if _, err := s.db().Exec(`INSERT INTO news_digest_items (run_end, position, item, risk) VALUES (?, 0, x'01', '')`, nanos(at)); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	// Act
+	_, err := s.NewsDigestRisksSince(context.Background(), at.Add(-time.Hour))
+
+	// Assert
+	var decode *DecodeError
+	if !errors.As(err, &decode) {
+		t.Fatalf("NewsDigestRisksSince = %v, want a DecodeError", err)
+	}
+}
+
+func TestTheMigrationAddsTheNewsDigestHistory(t *testing.T) {
+	// Arrange
+	path := fixtureAt(t, 20)
+
+	// Act
+	handle, err := Open(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Open on a layout-20 database: %v", err)
+	}
+	defer handle.Close()
+
+	// Assert
+	s := handle.(*store)
+	if got := scalar[int](t, s, `SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'news_digest_items'`); got != 1 {
+		t.Fatalf("news_digest_items tables after the migration = %d, want 1", got)
+	}
+	if got := scalar[int](t, s, `SELECT count(*) FROM pragma_table_info('news_digest') WHERE name = 'history_since'`); got != 1 {
+		t.Fatalf("history_since columns after the migration = %d, want 1", got)
 	}
 }
