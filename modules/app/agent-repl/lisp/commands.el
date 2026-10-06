@@ -68,7 +68,8 @@
 (declare-function agent-repl--send "agent-repl-input" (origin &optional prompt ws force))
 (declare-function agent-repl--read-input-buffer "agent-repl-input" (ws))
 (declare-function agent-repl-popup-open "agent-repl-popup" (path &optional line))
-(declare-function agent-repl-host-register "agent-repl-host" (conn dir on-done))
+(declare-function agent-repl-host-register "agent-repl-host" (conn dir on-done &optional workspace on-refused))
+(declare-function agent-repl-verbs-register-refusal-sentence "verbs" (dir value))
 (declare-function agent-repl-host-request-switch "host" (ws trigger))
 (declare-function agent-repl-host-pending-selection "host" ())
 (declare-function agent-repl-link-primary "agent-repl-daemon-link" ())
@@ -632,7 +633,14 @@ moves the user nowhere: there is no workspace to come up on."
          (agent-repl--warn '(:agent-repl-central "project setup and command generation precede workspace ownership") "elisp.commands.add-project-not-registered dir=%s"
                            canonical)
          (agent-repl-workspace-progress-report
-          :register :failed (format "the daemon did not register %s" canonical)))))))
+          :register :failed (format "the daemon did not register %s" canonical))))
+     nil
+     ;; A REFUSAL IS THE DAEMON'S ANSWER, and it is said in its own words: a
+     ;; temporary folder, or a directory that is not a git worktree, names
+     ;; the directory and why (owner ruling, 2026-10-06).
+     (lambda (refusal)
+       (agent-repl-workspace-progress-report
+        :register :failed (agent-repl-verbs-register-refusal-sentence canonical refusal))))))
 
 ;;;; ---- Workspace navigation ---------------------------------------------
 
