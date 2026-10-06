@@ -24,6 +24,8 @@
 [[ -n ${AGENT_REPL_BACKGROUND_PRIORITY:-} ]] || exec "$(dirname "${BASH_SOURCE[0]}")/background.sh" bash "${BASH_SOURCE[0]}" "$@"
 
 set -euo pipefail
+# shellcheck source=/dev/null
+. "$(dirname "${BASH_SOURCE[0]}")/lib-grep-in.sh"
 
 THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_UNDER_TEST="$THIS_DIR/realtest.sh"
@@ -136,7 +138,7 @@ test_backup_refuses_to_overwrite() {
         fail "$name" "the helper succeeded; it must refuse"
         return
     fi
-    if ! printf '%s' "$out" | grep -q 'refusing to overwrite'; then
+    if ! grep_in "$out" -q 'refusing to overwrite'; then
         fail "$name" "the refusal does not say what it refused: $out"
         return
     fi
@@ -223,7 +225,7 @@ test_clone_failure_falls_back_to_plain_copy() {
         fail "$name" "the fallback copy does not hold the source's bytes"
         return
     fi
-    if ! printf '%s' "$out" | grep -q 'falling back to a plain copy'; then
+    if ! grep_in "$out" -q 'falling back to a plain copy'; then
         fail "$name" "the fallback was not noted: $out"
         return
     fi
@@ -359,6 +361,7 @@ scratch_bin() {
     mkdir -p "$dir"
     cp "$SCRIPT_UNDER_TEST" "$dir/realtest.sh"
     cp "$LIB_UNDER_TEST" "$dir/lib-realtest-backup.sh"
+    cp "$THIS_DIR/lib-grep-in.sh" "$dir/lib-grep-in.sh"
 
     cat > "$dir/readiness-report.sh" <<'STUB'
 #!/usr/bin/env bash
@@ -386,7 +389,7 @@ held_name="${held_name%$}"
 printf '%s %s\n' "$held_name" "${AGENT_REPL_REALTEST_FOCUS_HELD:-unset}" \
     >> "${STUB_HELD_MARKER:?the case must state a focus-held marker path}"
 [ -n "${STUB_ALIVE_FLAG:-}" ] && : > "$STUB_ALIVE_FLAG"
-if [ -n "${STUB_SLOT_FAIL:-}" ] && printf '%s' "$name" | grep -q -- "$STUB_SLOT_FAIL"; then
+if [ -n "${STUB_SLOT_FAIL:-}" ] && grep -q -- "$STUB_SLOT_FAIL" <<<"$name"; then
     exit 1
 fi
 exit 0
@@ -451,7 +454,7 @@ done
 found=0
 while IFS= read -r line; do
     [ -n "$line" ] || continue
-    if printf '%s' "${line#* }" | grep -Eq -- "$pattern"; then
+    if grep -Eq -- "$pattern" <<<"${line#* }"; then
         printf '%s\n' "${line%% *}"
         found=1
     fi
@@ -668,7 +671,7 @@ test_declining_names_the_daemon_deploy_remedy() {
         fail "$name" "exit was $status, want $EXIT_DECLINED; output: $out"
         return
     fi
-    if ! printf '%s' "$out" | grep -qF 'run daemon/bin/claude-repld deploy, then try again'; then
+    if ! grep_in "$out" -qF 'run daemon/bin/claude-repld deploy, then try again'; then
         fail "$name" "the refusal does not name the deploy remedy: $out"
         return
     fi
@@ -687,11 +690,11 @@ test_declines_when_a_system_is_not_deployed() {
         fail "$name" "exit was $status, want $EXIT_DECLINED; output: $out"
         return
     fi
-    if ! printf '%s' "$out" | grep -q 'these systems are not at this checkout'; then
+    if ! grep_in "$out" -q 'these systems are not at this checkout'; then
         fail "$name" "the refusal does not name the problem: $out"
         return
     fi
-    if ! printf '%s' "$out" | grep -q 'shim'; then
+    if ! grep_in "$out" -q 'shim'; then
         fail "$name" "the refusal does not name the stale system: $out"
         return
     fi
@@ -715,7 +718,7 @@ test_declines_when_emacs_is_running_without_a_takeover() {
         fail "$name" "exit was $status, want $EXIT_DECLINED; output: $out"
         return
     fi
-    if ! printf '%s' "$out" | grep -q 'AGENT_REPL_REALTEST_TAKEOVER=1'; then
+    if ! grep_in "$out" -q 'AGENT_REPL_REALTEST_TAKEOVER=1'; then
         fail "$name" "the refusal does not say how to authorize the takeover: $out"
         return
     fi
@@ -779,11 +782,11 @@ test_runs_when_nothing_stands_in_the_way() {
         fail "$name" "the run was never reached; output: $out"
         return
     fi
-    if ! printf '%s' "$out" | grep -q 'the vendor is forbidden for this run'; then
+    if ! grep_in "$out" -q 'the vendor is forbidden for this run'; then
         fail "$name" "the run does not state that the vendor is forbidden: $out"
         return
     fi
-    if ! printf '%s' "$out" | grep -q "which editor the owner is left with is settled at the end"; then
+    if ! grep_in "$out" -q "which editor the owner is left with is settled at the end"; then
         fail "$name" "the run does not say the editor it leaves behind is settled at the end: $out"
         return
     fi
@@ -802,7 +805,7 @@ test_declines_when_the_backup_copy_totally_fails() {
         fail "$name" "exit was $status, want $EXIT_DECLINED; output: $out"
         return
     fi
-    if ! printf '%s' "$out" | grep -q 'could not be backed up'; then
+    if ! grep_in "$out" -q 'could not be backed up'; then
         fail "$name" "the refusal does not say the backup failed: $out"
         return
     fi
@@ -849,11 +852,11 @@ test_declines_when_a_listening_shim_lacks_the_guard() {
         fail "$name" "exit was $status, want $EXIT_DECLINED; output: $out"
         return
     fi
-    if ! printf '%s' "$out" | grep -q '94292'; then
+    if ! grep_in "$out" -q '94292'; then
         fail "$name" "the refusal does not name the pid to stop: $out"
         return
     fi
-    if ! printf '%s' "$out" | grep -q '0100059cb65649bc.n1.sock'; then
+    if ! grep_in "$out" -q '0100059cb65649bc.n1.sock'; then
         fail "$name" "the refusal does not name the socket the shim is listening on: $out"
         return
     fi
@@ -882,7 +885,7 @@ test_declines_on_an_owner_shim_whatever_the_callers_state_dir() {
         fail "$name" "exit was $status, want $EXIT_DECLINED; output: $out"
         return
     fi
-    if ! printf '%s' "$out" | grep -q '94292'; then
+    if ! grep_in "$out" -q '94292'; then
         fail "$name" "the refusal does not name the owner's unguarded shim: $out"
         return
     fi
@@ -950,7 +953,7 @@ test_declines_when_a_shim_lock_lacks_the_guard() {
         fail "$name" "exit was $status, want $EXIT_DECLINED; output: $out"
         return
     fi
-    if ! printf '%s' "$out" | grep -q 'shim-lock pid 81003'; then
+    if ! grep_in "$out" -q 'shim-lock pid 81003'; then
         fail "$name" "the refusal does not name the shim-lock pid: $out"
         return
     fi
@@ -973,7 +976,7 @@ test_declines_when_the_daemon_lacks_the_guard() {
         fail "$name" "exit was $status, want $EXIT_DECLINED; output: $out"
         return
     fi
-    if ! printf '%s' "$out" | grep -q '55501'; then
+    if ! grep_in "$out" -q '55501'; then
         fail "$name" "the refusal does not name the daemon pid to stop: $out"
         return
     fi
@@ -1002,7 +1005,7 @@ test_the_unguarded_daemon_refusal_names_the_consent() {
         fail "$name" "exit was $status, want $EXIT_DECLINED; output: $out"
         return
     fi
-    if ! printf '%s' "$out" | grep -q 'AGENT_REPL_REALTEST_STOP_DAEMON=1'; then
+    if ! grep_in "$out" -q 'AGENT_REPL_REALTEST_STOP_DAEMON=1'; then
         fail "$name" "the refusal does not name the consent that resolves it: $out"
         return
     fi
@@ -1031,7 +1034,7 @@ test_the_unguarded_daemon_is_stopped_under_the_consent() {
         fail "$name" "a daemon that answered its own door was signalled anyway: $(cat "$SCRATCH/kill-log")"
         return
     fi
-    if ! printf '%s' "$out" | grep -q "the owner's unguarded daemon pid 55501 was stopped under AGENT_REPL_REALTEST_STOP_DAEMON"; then
+    if ! grep_in "$out" -q "the owner's unguarded daemon pid 55501 was stopped under AGENT_REPL_REALTEST_STOP_DAEMON"; then
         fail "$name" "the run did not state that it stopped the owner's unguarded daemon: $out"
         return
     fi
@@ -1101,7 +1104,7 @@ test_the_unguarded_shim_refusal_names_the_consent() {
         fail "$name" "exit was $status, want $EXIT_DECLINED; output: $out"
         return
     fi
-    if ! printf '%s' "$out" | grep -q 'THE REMEDY IS AGENT_REPL_REALTEST_STOP_DAEMON=1'; then
+    if ! grep_in "$out" -q 'THE REMEDY IS AGENT_REPL_REALTEST_STOP_DAEMON=1'; then
         fail "$name" "the refusal does not name the consent that resolves it: $out"
         return
     fi
@@ -1133,11 +1136,11 @@ test_the_unguarded_shims_are_stopped_under_the_consent() {
         fail "$name" "the unguarded shim-lock was never signalled: $(cat "$SCRATCH/kill-log")"
         return
     fi
-    if ! printf '%s' "$out" | grep -q "the owner's unguarded shim pid 39689 listening on .*0100059cb65649bc.n1.sock was stopped under AGENT_REPL_REALTEST_STOP_DAEMON"; then
+    if ! grep_in "$out" -q "the owner's unguarded shim pid 39689 listening on .*0100059cb65649bc.n1.sock was stopped under AGENT_REPL_REALTEST_STOP_DAEMON"; then
         fail "$name" "the run did not state the shim it stopped: $out"
         return
     fi
-    if ! printf '%s' "$out" | grep -q "the owner's unguarded shim-lock pid 39736 was stopped under AGENT_REPL_REALTEST_STOP_DAEMON"; then
+    if ! grep_in "$out" -q "the owner's unguarded shim-lock pid 39736 was stopped under AGENT_REPL_REALTEST_STOP_DAEMON"; then
         fail "$name" "the run did not state the shim-lock it stopped: $out"
         return
     fi
@@ -1199,7 +1202,7 @@ test_unknown_selector_declines_before_anything() {
         fail "$name" "exit was $status, want $EXIT_DECLINED; output: $out"
         return
     fi
-    if ! printf '%s' "$out" | grep -q 'TestRealtestStartTheEditor'; then
+    if ! grep_in "$out" -q 'TestRealtestStartTheEditor'; then
         fail "$name" "the refusal does not list the realtests that do exist: $out"
         return
     fi
@@ -1225,7 +1228,7 @@ test_run_pattern_matching_nothing_declines() {
         fail "$name" "exit was $status, want $EXIT_DECLINED; output: $out"
         return
     fi
-    if ! printf '%s' "$out" | grep -q 'matches no realtest'; then
+    if ! grep_in "$out" -q 'matches no realtest'; then
         fail "$name" "the refusal does not say the pattern matched nothing: $out"
         return
     fi
@@ -1337,7 +1340,7 @@ test_declines_a_sweep_that_would_quit_a_standing_editor() {
         fail "$name" "exit was $status, want $EXIT_DECLINED; output: $out"
         return
     fi
-    if ! printf '%s' "$out" | grep -q 'quits Emacs 2 time(s)'; then
+    if ! grep_in "$out" -q 'quits Emacs 2 time(s)'; then
         fail "$name" "the refusal does not say how many quits the consent would authorize: $out"
         return
     fi
@@ -1366,7 +1369,7 @@ test_realtest_3_is_skipped_without_the_daemon_consent() {
         fail "$name" "exit was $status, want $EXIT_INCOMPLETE; output: $out"
         return
     fi
-    if ! printf '%s' "$out" | grep -q 'AGENT_REPL_REALTEST_STOP_DAEMON=1'; then
+    if ! grep_in "$out" -q 'AGENT_REPL_REALTEST_STOP_DAEMON=1'; then
         fail "$name" "the skip does not say what consent would let it run: $out"
         return
     fi
@@ -1481,7 +1484,7 @@ test_the_stop_goes_through_the_daemons_own_door() {
         fail "$name" "the daemon answered its door and was signalled anyway: $(cat "$SCRATCH/kill-log")"
         return
     fi
-    if ! printf '%s' "$out" | grep -q 'UpdateShutdownSchedule{now}'; then
+    if ! grep_in "$out" -q 'UpdateShutdownSchedule{now}'; then
         fail "$name" "the run does not name the door it stopped the daemon through: $out"
         return
     fi
@@ -1507,11 +1510,11 @@ test_the_sigterm_fallback_is_stated_when_the_door_is_unanswered() {
         fail "$name" "the unanswered daemon was not signalled: $(cat "$SCRATCH/kill-log" 2>/dev/null)"
         return
     fi
-    if ! printf '%s' "$out" | grep -q 'falls back to SIGTERM'; then
+    if ! grep_in "$out" -q 'falls back to SIGTERM'; then
         fail "$name" "the run took the fallback without saying so: $out"
         return
     fi
-    if ! printf '%s' "$out" | grep -q 'STANDS NO SESSION DOWN'; then
+    if ! grep_in "$out" -q 'STANDS NO SESSION DOWN'; then
         fail "$name" "the run does not say what the fallback costs: $out"
         return
     fi
@@ -1531,7 +1534,7 @@ test_realtest_2_is_skipped_when_no_daemon_is_serving() {
         fail "$name" "exit was $status, want $EXIT_DECLINED (nothing ran); output: $out"
         return
     fi
-    if ! printf '%s' "$out" | grep -q 'measures an ADOPTION'; then
+    if ! grep_in "$out" -q 'measures an ADOPTION'; then
         fail "$name" "the skip does not say why realtest 2 could not run: $out"
         return
     fi
@@ -1676,7 +1679,7 @@ test_declines_when_a_previous_sweep_left_registry_rows() {
         fail "$name" "exit was $status, want $EXIT_DECLINED; output: $out"
         return
     fi
-    if ! printf '%s' "$out" | grep -q -- '--clean-leftovers'; then
+    if ! grep_in "$out" -q -- '--clean-leftovers'; then
         fail "$name" "the refusal does not name the remedy; output: $out"
         return
     fi
@@ -1772,7 +1775,7 @@ test_a_row_the_sweep_could_not_remove_fails_the_run() {
         fail "$name" "exit was $status, want a failure; output: $out"
         return
     fi
-    if ! printf '%s' "$out" | grep -q 'REALTEST LEFTOVER WORKSPACES'; then
+    if ! grep_in "$out" -q 'REALTEST LEFTOVER WORKSPACES'; then
         fail "$name" "the finding is not named in the output: $out"
         return
     fi
@@ -1903,7 +1906,7 @@ test_a_take_that_failed_owes_no_handback() {
         fail "$name" "the realtest was told the sweep holds focus although the take failed: $(cat "$SCRATCH/focus-held")"
         return
     fi
-    if ! printf '%s' "$out" | grep -q 'COULD NOT TAKE FOCUS'; then
+    if ! grep_in "$out" -q 'COULD NOT TAKE FOCUS'; then
         fail "$name" "the failed take is not named in the output: $out"
         return
     fi
@@ -2089,11 +2092,11 @@ test_the_summary_names_the_editor_the_owner_gets_back() {
         fail "$name" "exit was $status, want 0; output: $out"
         return
     fi
-    if ! printf '%s' "$out" | grep -q "the owner's editor was restored: guarded Emacs pid 7777 quit"; then
+    if ! grep_in "$out" -q "the owner's editor was restored: guarded Emacs pid 7777 quit"; then
         fail "$name" "the summary does not name what was done: $out"
         return
     fi
-    if ! printf '%s' "$out" | grep -q "a guard-free Emacs launched"; then
+    if ! grep_in "$out" -q "a guard-free Emacs launched"; then
         fail "$name" "the summary does not name the editor the owner got back: $out"
         return
     fi
@@ -2122,7 +2125,7 @@ test_a_guard_free_editor_is_left_alone() {
         fail "$name" "a second editor was launched beside the owner's: $(cat "$SCRATCH/open-reached")"
         return
     fi
-    if ! printf '%s' "$out" | grep -q "the owner keeps it, untouched"; then
+    if ! grep_in "$out" -q "the owner keeps it, untouched"; then
         fail "$name" "the run does not say the editor was left alone: $out"
         return
     fi
@@ -2147,7 +2150,7 @@ test_a_guarded_daemon_is_stopped_under_its_consent() {
         fail "$name" "the guarded daemon was not asked to stop through its own door: $(cat "$SCRATCH/orderly-reached" 2>/dev/null); output: $out"
         return
     fi
-    if ! printf '%s' "$out" | grep -q "guarded daemon pid 4242 stopped"; then
+    if ! grep_in "$out" -q "guarded daemon pid 4242 stopped"; then
         fail "$name" "the summary does not say the daemon was stopped: $out"
         return
     fi
@@ -2172,11 +2175,11 @@ test_a_guarded_daemon_is_left_without_the_consent() {
         fail "$name" "the daemon was stopped without the consent that covers it; output: $out"
         return
     fi
-    if ! printf '%s' "$out" | grep -q "THE DAEMON LEFT RUNNING (pid(s) 4242) CARRIES"; then
+    if ! grep_in "$out" -q "THE DAEMON LEFT RUNNING (pid(s) 4242) CARRIES"; then
         fail "$name" "the run did not say loudly that a fake-vendor daemon is still up: $out"
         return
     fi
-    if ! printf '%s' "$out" | grep -q "guarded daemon pid 4242 LEFT RUNNING"; then
+    if ! grep_in "$out" -q "guarded daemon pid 4242 LEFT RUNNING"; then
         fail "$name" "the summary does not carry the daemon that was left: $out"
         return
     fi
@@ -2239,7 +2242,7 @@ test_a_run_states_which_editor_the_owner_gets_back_before_it_starts() {
         fail "$name" "exit was $status, want 0; output: $out"
         return
     fi
-    if ! printf '%s' "$out" | grep -q "when this run ends the owner gets a GUARD-FREE editor back"; then
+    if ! grep_in "$out" -q "when this run ends the owner gets a GUARD-FREE editor back"; then
         fail "$name" "the preflight does not name the editor the owner gets back: $out"
         return
     fi

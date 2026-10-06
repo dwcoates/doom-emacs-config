@@ -11,6 +11,8 @@
 [[ -n ${AGENT_REPL_BACKGROUND_PRIORITY:-} ]] || exec "$(dirname "${BASH_SOURCE[0]}")/background.sh" bash "${BASH_SOURCE[0]}" "$@"
 
 set -euo pipefail
+# shellcheck source=/dev/null
+. "$(dirname "${BASH_SOURCE[0]}")/lib-grep-in.sh"
 
 THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 RUNTIME="$THIS_DIR/agent-repl-runtime"
@@ -273,7 +275,7 @@ else
 fi
 
 reset
-if "$RUNTIME" help | grep -q 'bounce --hard'; then pass "help lists the verbs"; else fail "help lists the verbs"; fi
+if grep_in "$("$RUNTIME" help)" -q 'bounce --hard'; then pass "help lists the verbs"; else fail "help lists the verbs"; fi
 
 echo "agent-repl-runtime: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
