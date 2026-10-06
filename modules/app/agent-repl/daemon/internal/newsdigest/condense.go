@@ -92,7 +92,14 @@ type answerItem struct {
 	Summary   string       `json:"summary"`
 	Effective *string      `json:"effective,omitempty"`
 	Links     []answerLink `json:"links"`
+	// Risk is the one-line reason the item could regress agent-repl; absent
+	// when the model did not mark it.
+	Risk *string `json:"risk,omitempty"`
 }
+
+// risks are the regression-risk reasons the model gave, by the item it
+// marked. An item the model did not mark is absent.
+type risks map[*frontendv1.NewsDigestItem]string
 
 type answerLink struct {
 	Label string `json:"label"`
@@ -109,12 +116,13 @@ type condenser struct {
 
 // condense composes the brief over material (and the still-standing digest's
 // sections, carried forward), asks the model, and answers the validated
-// sections in rank order. Empty sections mean the model judged nothing worth
-// reporting. Every failure is a *ModelFailedError.
-func (c condenser) condense(ctx context.Context, period string, material []sourceNews, carried []*frontendv1.NewsDigestSection) ([]*frontendv1.NewsDigestSection, error) {
+// sections in rank order with the regression risks the model marked among
+// their items. Empty sections mean the model judged nothing worth reporting.
+// Every failure is a *ModelFailedError.
+func (c condenser) condense(ctx context.Context, period string, material []sourceNews, carried []*frontendv1.NewsDigestSection) ([]*frontendv1.NewsDigestSection, risks, error) {
 	brief, err := prompts.Load(c.promptsDir, Brief)
 	if err != nil {
-		return nil, &ModelFailedError{Reason: "the brief could not be read: " + err.Error()}
+		return nil, nil, &ModelFailedError{Reason: "the brief could not be read: " + err.Error()}
 	}
 	allowed := allowedLinks(material, carried)
 	question, err := brief.Splice(map[string]string{
@@ -123,7 +131,7 @@ func (c condenser) condense(ctx context.Context, period string, material []sourc
 		"carried":  renderCarried(carried),
 	})
 	if err != nil {
-		return nil, &ModelFailedError{Reason: "the brief could not be spliced: " + err.Error()}
+		return nil, nil, &ModelFailedError{Reason: "the brief could not be spliced: " + err.Error()}
 	}
 	resp, err := c.headless.Run(ctx, headless.Request{
 		Site:      Site,
@@ -134,13 +142,13 @@ func (c condenser) condense(ctx context.Context, period string, material []sourc
 		Timeout:   c.timeout,
 	})
 	if err != nil {
-		return nil, &ModelFailedError{Reason: headless.CauseOf(err) + ": " + err.Error()}
+		return nil, nil, &ModelFailedError{Reason: headless.CauseOf(err) + ": " + err.Error()}
 	}
-	sections, err := parseAnswer(resp.Text, allowed)
+	sections, marked, err := parseAnswer(resp.Text, allowed)
 	if err != nil {
-		return nil, &ModelFailedError{Reason: "the answer was not a well-formed digest: " + err.Error()}
+		return nil, nil, &ModelFailedError{Reason: "the answer was not a well-formed digest: " + err.Error()}
 	}
-	return sections, nil
+	return sections, marked, nil
 }
 
 // renderMaterial lays the new material out for the model: every source with
@@ -206,34 +214,35 @@ func allowedLinks(material []sourceNews, carried []*frontendv1.NewsDigestSection
 
 // parseAnswer decodes and validates the model's answer HARD: unknown fields,
 // trailing data, an unknown or repeated kind, an empty section, an item with
-// no title, summary or links, a blank effective date, and a link that is not
-// an absolute https URL from the allowed set each refuse the whole answer.
-// The one leniency is a single enclosing markdown code fence, which carries
-// no meaning of its own.
-func parseAnswer(text string, allowed map[string]bool) ([]*frontendv1.NewsDigestSection, error) {
+// no title, summary or links, a blank effective date, a blank or multi-line
+// risk reason, and a link that is not an absolute https URL from the allowed
+// set each refuse the whole answer. The one leniency is a single enclosing
+// markdown code fence, which carries no meaning of its own.
+func parseAnswer(text string, allowed map[string]bool) ([]*frontendv1.NewsDigestSection, risks, error) {
 	dec := json.NewDecoder(strings.NewReader(stripFence(text)))
 	dec.DisallowUnknownFields()
 	var a answer
 	if err := dec.Decode(&a); err != nil {
-		return nil, fmt.Errorf("the json did not decode: %w", err)
+		return nil, nil, fmt.Errorf("the json did not decode: %w", err)
 	}
 	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
-		return nil, errors.New("the answer carries data after its json object")
+		return nil, nil, errors.New("the answer carries data after its json object")
 	}
 	if a.Sections == nil {
-		return nil, errors.New("the answer carries no sections list")
+		return nil, nil, errors.New("the answer carries no sections list")
 	}
 	byToken := map[string]*frontendv1.NewsDigestSection{}
+	marked := risks{}
 	for i, s := range a.Sections {
 		spec, ok := kindByToken(s.Kind)
 		if !ok {
-			return nil, fmt.Errorf("section %d names the unknown kind %q", i, s.Kind)
+			return nil, nil, fmt.Errorf("section %d names the unknown kind %q", i, s.Kind)
 		}
 		if byToken[s.Kind] != nil {
-			return nil, fmt.Errorf("the kind %q appears in more than one section", s.Kind)
+			return nil, nil, fmt.Errorf("the kind %q appears in more than one section", s.Kind)
 		}
 		if len(s.Items) == 0 {
-			return nil, fmt.Errorf("the %q section has no items", s.Kind)
+			return nil, nil, fmt.Errorf("the %q section has no items", s.Kind)
 		}
 		section := &frontendv1.NewsDigestSection{
 			Heading: &frontendv1.NewsDigestSectionHeading{Text: spec.heading},
@@ -242,7 +251,14 @@ func parseAnswer(text string, allowed map[string]bool) ([]*frontendv1.NewsDigest
 		for j, it := range s.Items {
 			item, err := validItem(it, allowed)
 			if err != nil {
-				return nil, fmt.Errorf("the %q section's item %d: %w", s.Kind, j, err)
+				return nil, nil, fmt.Errorf("the %q section's item %d: %w", s.Kind, j, err)
+			}
+			if it.Risk != nil {
+				reason, err := oneLine(*it.Risk, "risk reason")
+				if err != nil {
+					return nil, nil, fmt.Errorf("the %q section's item %d: %w", s.Kind, j, err)
+				}
+				marked[item] = reason
 			}
 			section.Items = append(section.Items, item)
 		}
@@ -254,7 +270,20 @@ func parseAnswer(text string, allowed map[string]bool) ([]*frontendv1.NewsDigest
 			out = append(out, section)
 		}
 	}
-	return out, nil
+	return out, marked, nil
+}
+
+// oneLine trims a one-line text the model wrote, refusing one that is blank
+// or runs over more than one line. what names it in the refusal.
+func oneLine(text, what string) (string, error) {
+	t := strings.TrimSpace(text)
+	switch {
+	case t == "":
+		return "", fmt.Errorf("its %s is blank", what)
+	case strings.ContainsAny(t, "\r\n"):
+		return "", fmt.Errorf("its %s runs over more than one line", what)
+	}
+	return t, nil
 }
 
 // validItem converts one answered item, refusing one that is not whole.

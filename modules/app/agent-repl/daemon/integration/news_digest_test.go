@@ -21,8 +21,8 @@ import (
 )
 
 // newsDigestAnswer is the condensing call's answer the fake claude gives: one
-// backend item linking the fixture feed's entry.
-const newsDigestAnswer = `{\"sections\":[{\"kind\":\"backend\",\"items\":[{\"title\":\"SDK drops subscription billing\",\"summary\":\"The SDK now needs an API key.\",\"effective\":\"2026-11-01\",\"links\":[{\"label\":\"Release v9\",\"url\":\"https://fixture.test/releases/v9\"}]}]}]}`
+// backend item linking the fixture feed's entry, marked as a regression risk.
+const newsDigestAnswer = `{\"sections\":[{\"kind\":\"backend\",\"items\":[{\"title\":\"SDK drops subscription billing\",\"summary\":\"The SDK now needs an API key.\",\"effective\":\"2026-11-01\",\"risk\":\"Subscription sign-in in the shim stops working.\",\"links\":[{\"label\":\"Release v9\",\"url\":\"https://fixture.test/releases/v9\"}]}]}]}`
 
 // newsDigestEnv serves one Atom source from a loopback fixture server and
 // names a fake claude that answers the condensing call with newsDigestAnswer.
@@ -106,6 +106,24 @@ func TestARefreshedNewsDigestStandsInEveryWebview(t *testing.T) {
 	}
 	if row := shown.GetSources().GetSources()[0]; row.GetRead().GetNewEntries() != 1 || row.GetUrl() != "https://fixture.test/releases" {
 		t.Fatalf("source row = %v, want the feed read with one new entry", row)
+	}
+}
+
+func TestARefreshedNewsDigestCarriesItsRiskSinceLastWeek(t *testing.T) {
+	t.Parallel()
+	// Arrange.
+	d := newDaemon(t, harness.Opts{ExtraEnv: newsDigestEnv(t)})
+
+	// Act.
+	shown := refreshDigest(t, d, d.WatchWebviewDaemonStream())
+
+	// Assert.
+	week := shown.GetWeek()
+	items := week.GetRisks().GetItems()
+	if week.GetHeading().GetText() != "Since last week" || len(items) != 1 ||
+		items[0].GetReason().GetText() != "Subscription sign-in in the shim stops working." ||
+		items[0].GetItem().GetEffective().GetText() != "2026-11-01" {
+		t.Fatalf("week = %v, want the marked item with its reason and date", week)
 	}
 }
 
