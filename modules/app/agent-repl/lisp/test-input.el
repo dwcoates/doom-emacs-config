@@ -2106,6 +2106,20 @@ The host watch's selection kind is `agent-repl-test-input--selection-kind'."
     (should (member "selection: press escape again to clear the selection"
                     agent-repl-test-input--messages))))
 
+(ert-deftest agent-repl-test-input-first-escape-is-recorded-at-info ()
+  "The armed first escape is a user's act: recorded at INFO, never WARN."
+  (agent-repl-test-input--with-select nil
+    ;; Arrange
+    (setq agent-repl-test-input--selection-kind :prompt)
+    (agent-repl-test-input--capturing-rungs
+      ;; Act
+      (let ((last-command 'agent-repl-prompt-select-prev))
+        (agent-repl-input-selection-escape))
+      ;; Assert
+      (should (cl-some (lambda (m) (string-prefix-p "elisp.input.selection-escape-armed" m))
+                       agent-repl-test-input--info))
+      (should-not agent-repl-test-input--warn))))
+
 (ert-deftest agent-repl-test-input-first-escape-sends-nothing ()
   "The first command-mode escape over a selection clears nothing."
   (agent-repl-test-input--with-select nil
