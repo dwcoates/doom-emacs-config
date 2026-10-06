@@ -57,8 +57,6 @@ daemon/
     prompts/       prompts/ directory reader: header parse, placeholder validation, splice
     wsm/           the state client (SQLite; the durable fact inventory; lease policy metadata)
     sessionlock/   shim-held kernel lock PROBES (path derivation + flock probe); daemon never holds
-    vendortraffic/ the vendor processes' off-machine network traffic, counted per socket through the
-                   kernel's network statistics control (one subscription per process; see AGENTS.md)
     shimclient/    spawn/supervise/redial/adopt + every shim.v1 verb + watch streams + occupancy mutex
     gitclient/     git leaf: create/merge no-ff/revert/remove/nuke/identity/landed range/env hygiene
     account/       config-dir determination (path under $MULTI_REPO_ROOT), .claude.json email, transcript porting
@@ -88,7 +86,7 @@ daemon/
                    Sonnet condense it (through headless/), stands it over every webview's feed until
                    dismissed; a durable daily cadence, one run at a time across processes (see AGENTS.md)
     agentreplsession/ agent-repl's session (since the later of an agent-repl login and the editor's
-                   start), durable in wsm, with the vendor traffic counted since; the topbar's
+                   start), durable in wsm; the topbar's
                    connectivity dropdown states it (see AGENTS.md)
     runecap/       the one rune bound for every composed model prompt
     flock/         the one held non-blocking exclusive kernel lock (merge repo lock, reaper sweep
@@ -118,7 +116,7 @@ daemon/
 Package dependency direction (a package may import only what is at or
 below it in this list): proto gen, dlog, envc, stateroot, vocab, paint,
 feedid, prompts, publish, apiresponses, flock, clock, sessioncommand, runecap  <  wsm, sessionlock, shimclient, gitclient,
-account, externalbrowser, login, vendortraffic  <  sessionwatcher, resolve/*  <
+account, externalbrowser, login  <  sessionwatcher, resolve/*  <
 prompthandler, promptqueue, classifier, merge, drain, rollout, workspace,
 health, intakegate  <  commandfile, heldingress, worktreereap, newsdigest, agentreplsession  <  server, boot  <  cmd. The shim client and git
 client know no other daemon package. The prompt queue, merge orchestrator
