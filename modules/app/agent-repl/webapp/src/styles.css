@@ -3341,6 +3341,12 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
 .feed-item {
   content-visibility: auto;
   contain-intrinsic-size: auto 320px;
+  /* NOTHING IN THE FEED SPANS PAST THE FEED STREAM AREA (owner rule,
+     2026-10-06; test/webkit/containment.webkit.test.ts). A long unbroken run
+     -- a path, a url, a command -- may break anywhere rather than push its box
+     past the column; `anywhere` (unlike `break-word`) also lowers the
+     min-content width a flex item shrinks to, so a row's head can fit. */
+  overflow-wrap: anywhere;
 }
 
 /* The overscan buffer's pre-render band (overscan.ts). A row within ~5
@@ -4824,6 +4830,9 @@ bubble-body.bubble-body { display: block; }
 .bubble-head {
   cursor: pointer;
 }
+/* The head's slot may shrink below its widest word, which then wraps, rather
+   than push the head past the feed column. */
+.bubble-head-slot { min-width: 0; }
 
 /* The subagent head line: label, description, tokens, clock, quietness, stop.
    Laid out on one row in the fold's own pill, which the existing .async-ticker
@@ -5134,7 +5143,8 @@ ar-button.outcome-marker-pill {
   align-items: baseline;
   flex-wrap: wrap;
 }
-.panel-row-label { flex: 0 0 auto; }
+/* A label may shrink and wrap rather than push its row past the column. */
+.panel-row-label { flex: 0 1 auto; min-width: 0; }
 /* The figure hugs the right rail so a column of them lines up and can be read
    down rather than across. */
 .panel-row-value {
@@ -7019,9 +7029,12 @@ ar-button.outcome-marker-pill {
    workspace · stage · duration under a header row. Rows are delimited by the
    ONE shared `.list-rows` rule. */
 .merge-queue {
+  /* The stage column may shrink below its text (owner rule, 2026-10-06:
+     nothing in the feed spans past the stream area); its cell clips with an
+     ellipsis instead. */
   grid-template-columns:
     minmax(0, 1fr)
-    max-content
+    minmax(0, max-content)
     minmax(var(--footer-duration-col-min), max-content);
 }
 /* EVERY ROW THE SAME HEIGHT, its cells vertically centered: each cell is one
@@ -7034,6 +7047,8 @@ ar-button.outcome-marker-pill {
   padding-top: 0.15rem;
   padding-bottom: 0.15rem;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 /* The header reads as the agents panel's does: muted words above their columns. */
 .merge-queue-header { color: var(--muted); }
