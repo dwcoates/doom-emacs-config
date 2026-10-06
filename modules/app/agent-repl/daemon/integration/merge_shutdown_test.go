@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 
@@ -114,22 +115,10 @@ func daemonErrorRecords(t *testing.T, d *harness.Daemon) []harness.LogRecord {
 // the step it stood on. Nothing about the target's tree is read as evidence.
 func TestAMergeStoppedInItsTestGateResumesAfterARestartAndLands(t *testing.T) {
 	t.Parallel()
-	// Arrange: a gate whose FIRST run holds on a pipe nobody writes -- the
-	// daemon's exit cuts it -- and whose every later run passes.
+	// Arrange: a gate whose FIRST run holds -- the daemon's exit cuts it --
+	// and whose every later run passes.
 	repo := harness.NewRepo(t)
-	gateDir := t.TempDir()
-	started := filepath.Join(gateDir, "first-run")
-	if err := syscall.Mkfifo(filepath.Join(gateDir, "hold"), 0o600); err != nil {
-		t.Fatalf("making the gate's pipe: %v", err)
-	}
-	gate := filepath.Join(gateDir, "test-all.sh")
-	body := "#!/bin/sh\n" +
-		"if [ ! -f '" + started + "' ]; then : > '" + started + "'; cat '" + filepath.Join(gateDir, "hold") + "' > /dev/null; fi\n" +
-		"echo 'daemon: passed in 1s'\nexit 0\n"
-	if err := os.WriteFile(gate, []byte(body), 0o755); err != nil {
-		t.Fatalf("writing the gate: %v", err)
-	}
-	env := []string{"AGENT_REPL_TEST_ALL_SCRIPT=" + gate}
+	env, started := firstRunHoldsGate(t)
 	// A merge-spanning wait chains dozens of subprocesses; see harness.MergeChainTimeout.
 	d := harness.StartDaemon(t, harness.Opts{SelfRepo: repo.Dir, Timeout: harness.MergeChainTimeout, ExtraEnv: env})
 	repoRef := mergeRepositoryRef(t, d, repo)
@@ -172,4 +161,99 @@ func TestAMergeStoppedInItsTestGateResumesAfterARestartAndLands(t *testing.T) {
 			t.Errorf("the resumed merge recorded an error: %s: %s %v", record.Operation, record.Message, record.Context)
 		}
 	}
+}
+
+// firstRunHoldsGate writes a test gate whose FIRST run holds on a pipe nobody
+// writes -- whatever stops the merge cuts it -- and whose every later run
+// passes. It answers the daemon environment naming the gate and the file the
+// first run creates as it begins holding.
+func firstRunHoldsGate(t *testing.T) (env []string, started string) {
+	t.Helper()
+	gateDir := t.TempDir()
+	started = filepath.Join(gateDir, "first-run")
+	hold := filepath.Join(gateDir, "hold")
+	if err := syscall.Mkfifo(hold, 0o600); err != nil {
+		t.Fatalf("making the gate's pipe: %v", err)
+	}
+	gate := filepath.Join(gateDir, "test-all.sh")
+	body := "#!/bin/sh\n" +
+		"if [ ! -f '" + started + "' ]; then : > '" + started + "'; cat '" + hold + "' > /dev/null; fi\n" +
+		"echo 'daemon: passed in 1s'\nexit 0\n"
+	if err := os.WriteFile(gate, []byte(body), 0o755); err != nil {
+		t.Fatalf("writing the gate: %v", err)
+	}
+	return []string{"AGENT_REPL_TEST_ALL_SCRIPT=" + gate}, started
+}
+
+// TestAMergeRunningThroughAHandoverResumesInTheSuccessorAndLands covers the
+// rolling deploy, the most common restart of all: the incumbent's transfer of
+// the workspace suspends its merge mid-gate, and the successor that adopts the
+// workspace resumes THAT merge at its recorded step, under the same lease --
+// its bubble's identity -- and lands it.
+func TestAMergeRunningThroughAHandoverResumesInTheSuccessorAndLands(t *testing.T) {
+	t.Parallel()
+	// Arrange: a merge held inside its test gate.
+	repo := harness.NewRepo(t)
+	env, started := firstRunHoldsGate(t)
+	// The handover chains a second real daemon's boot onto this one's context.
+	d := harness.StartDaemon(t, harness.Opts{SelfRepo: repo.Dir, Timeout: harness.HandoverChainTimeout, ExtraEnv: env})
+	repoRef := mergeRepositoryRef(t, d, repo)
+	f := mergeCreateChild(t, d, repoRef, "handed", "do the handed thing", nil)
+	harness.CommitWork(t, f.ws.GetDir())
+	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws, Source: harness.OwnBranch(false)})); err != nil {
+		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
+	}
+	d.AwaitFileExists(started)
+	var lease string
+	d.WithDB(func(db *sql.DB) {
+		if err := db.QueryRow("SELECT id FROM leases WHERE workspace_id = ?", f.ws.GetId()).Scan(&lease); err != nil {
+			t.Fatalf("reading the merge's lease: %v", err)
+		}
+	})
+	daemonStream := d.WatchDaemonStream()
+
+	// Act: a deploy of a newer daemon hands every workspace over.
+	d.StageDeployBuild(harness.DeployStaleDaemon)
+	if _, err := d.Client().Deploy(d.Ctx(), connect.NewRequest(&agentreplv1.DeployRequest{})); err != nil {
+		t.Fatalf("Deploy = error %v, want the handover accepted", err)
+	}
+	announced := harness.AwaitView(t, d.Ctx(), daemonStream, "shutdown_announced", func(r *agentreplv1.WatchDaemonResponse) bool {
+		return r.GetShutdownAnnounced() != nil
+	}).GetShutdownAnnounced()
+	harness.AwaitView(t, d.Ctx(), f.host, "transferred", func(r *agentreplv1.WatchHostWorkspaceResponse) bool {
+		return r.GetTransferred() != nil
+	})
+	// THE RENDEZVOUS COMPLETES ON BOTH PARTICIPANTS' CALLS, so the two are
+	// made together, as the editor and the webview make them.
+	successor := drainDial(announced.GetAddress())
+	var wg sync.WaitGroup
+	var hostErr, webErr error
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		_, hostErr = successor.AdoptHostWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.AdoptHostWorkspaceRequest{Workspace: f.ws}))
+	}()
+	go func() {
+		defer wg.Done()
+		_, webErr = successor.AdoptWebWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.AdoptWebWorkspaceRequest{Workspace: f.ws}))
+	}()
+	wg.Wait()
+	if hostErr != nil || webErr != nil {
+		t.Fatalf("AdoptHostWorkspace = %v, AdoptWebWorkspace = %v; want the successor to adopt the workspace", hostErr, webErr)
+	}
+
+	// Assert: the incumbent suspended the merge for the transfer, the
+	// successor resumed it at its tests under the same lease, and it landed.
+	d.AwaitLogRecord(d.RunLogPath(), "the merge's suspension for the transfer", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.merge.transfer" && r.Context["step"] == "tests"
+	})
+	resumed := d.AwaitRunLogRecordFromAnyProcess("the successor's resume", func(r harness.LogRecord) bool {
+		return r.PID != d.PID() && r.Operation == "daemon.merge.recover" && strings.Contains(r.Message, "resumes at the step it recorded")
+	})
+	if resumed.Context["step"] != "tests" || resumed.Context["lease"] != lease {
+		t.Fatalf("the successor's resume record is %v, want step tests under lease %s", resumed.Context, lease)
+	}
+	d.AwaitRunLogRecordFromAnyProcess("the successor's landing", func(r harness.LogRecord) bool {
+		return r.PID != d.PID() && harness.IsLandingDeployed(r)
+	})
 }
