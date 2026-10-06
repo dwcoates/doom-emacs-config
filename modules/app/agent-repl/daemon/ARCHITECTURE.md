@@ -810,6 +810,11 @@ Rulings already binding; code swaps to the generated arms when it lands:
   unset status oneof is LEGAL ("no vendor verdict observed yet").
 - The allowance line draws as soon as a usage sample exists; the verdict
   arm joins when it arrives.
+- A per-seat sample (`SessionAccountUsage.seat_spend`) draws the seat's
+  spend instead (`FooterActivityEnduring.seat_spend`) and clears the windows;
+  a subscription sample ends the seat mode. While the account is per seat a
+  rate-limit event files no window (owner ruling, 2026-10-06: the line is by
+  billing mode, never both).
 - A rate-limit event carrying a utilization for the same window that is
   NEWER than the last sample wins for the figure.
 - Footer remediation owed: replace the "both windows from rate_limit_status"
