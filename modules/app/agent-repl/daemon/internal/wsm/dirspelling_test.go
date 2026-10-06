@@ -36,7 +36,7 @@ func spellingFixture(t *testing.T, arrange func(db *sql.DB, repo string, kept st
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "wsm.db")
 	kept := "/Volume/Users/me/ChessCom/iterm-1"
-	handle, err := Open(context.Background(), path)
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites())
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -68,7 +68,7 @@ func exec(t *testing.T, db *sql.DB, query string, args ...any) {
 func openSpelled(t *testing.T, path, kept string) (*store, *dlog.TestLogger) {
 	t.Helper()
 	log := dlog.NewTestLogger()
-	handle, err := Open(context.Background(), path, WithLogger(log), withCanonicalDir(foldingVolume(kept)))
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites(), WithLogger(log), withCanonicalDir(foldingVolume(kept)))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -234,7 +234,7 @@ func TestOpenReportsARowWhoseDirectoryCannotBeCanonicalized(t *testing.T) {
 	unreadable := func(string) (string, error) { return "", errors.New("permission denied") }
 
 	// Act
-	handle, err := Open(context.Background(), path, WithLogger(log), withCanonicalDir(unreadable))
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites(), WithLogger(log), withCanonicalDir(unreadable))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}

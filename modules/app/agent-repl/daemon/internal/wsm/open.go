@@ -53,6 +53,19 @@ func WithTemporaryGuard(guard tempdirs.Guard) Option {
 	}
 }
 
+// WithUnsyncedWrites turns SQLite's forced flushes OFF on every writing
+// connection this handle opens (`PRAGMA synchronous=OFF`). It is a TEST-RUN
+// seam and nothing else: a test's database is thrown away when the test ends,
+// so an fsync per commit buys it nothing and starved the owner's live store
+// of disk bandwidth on every full run (owner ruling, 2026-10-06). The daemon
+// passes it only when its boot proved the test-run gate (UnsyncedFromEnv); a
+// live daemon never does, so a power loss can never cost it a committed row.
+func WithUnsyncedWrites() Option {
+	return func(s *store) {
+		s.unsynced = true
+	}
+}
+
 // productionTemporaryGuard builds the guard a handle opened without
 // WithTemporaryGuard runs: this process's temporary directory, no exemption.
 // It is a variable only so this package's OWN tests, which open handles at
@@ -80,6 +93,9 @@ type store struct {
 	// temporary refuses a registration whose directory lies inside a
 	// temporary root (owner ruling, 2026-10-06). Set once at open.
 	temporary tempdirs.Guard
+	// unsynced is WithUnsyncedWrites: every writing connection this handle
+	// opens, the promotion's included, carries synchronous=OFF.
+	unsynced bool
 
 	// leaseMu guards owned.
 	leaseMu sync.Mutex
@@ -101,18 +117,62 @@ func Open(ctx context.Context, path string, opts ...Option) (DB, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, fmt.Errorf("wsm: create db dir for %q: %w", path, err)
 	}
-	// modernc.org/sqlite reads PRAGMAs from _pragma query params. Each one is
-	// here because its absence was a real bug: WAL for durable concurrent
-	// reads, busy_timeout so a momentarily locked file waits instead of
-	// erroring, _txlock=immediate so every transaction takes its write lock up
-	// front (a deferred transaction that upgrades halfway through fails with
-	// SQLITE_BUSY_SNAPSHOT rather than blocking, which is exactly how two
-	// writers on one file lose an update), and foreign_keys so a workspace's
-	// dependent rows cannot outlive it.
-	dsn := path + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_txlock=immediate&_pragma=foreign_keys(1)"
-	s, err := openStore(ctx, path, dsn, false, opts)
+	s, err := openStore(ctx, path, writingDSN(path, opts), false, opts)
 	if err != nil {
 		return nil, err
+	}
+	return s.finishWritingOpen(ctx, nil)
+}
+
+// writingPragmas are the pragmas of every WRITING connection on the file.
+// modernc.org/sqlite reads PRAGMAs from _pragma query params. Each one is here
+// because its absence was a real bug: WAL for durable concurrent reads,
+// busy_timeout so a momentarily locked file waits instead of erroring,
+// _txlock=immediate so every transaction takes its write lock up front (a
+// deferred transaction that upgrades halfway through fails with
+// SQLITE_BUSY_SNAPSHOT rather than blocking, which is exactly how two writers
+// on one file lose an update), and foreign_keys so a workspace's dependent
+// rows cannot outlive it.
+const writingPragmas = "_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_txlock=immediate&_pragma=foreign_keys(1)"
+
+// unsyncedPragma is what WithUnsyncedWrites adds to a writing connection.
+const unsyncedPragma = "&_pragma=synchronous(OFF)"
+
+// writingDSN is the DSN of a writing connection on path, under the options the
+// open was given.
+func writingDSN(path string, opts []Option) string {
+	return writingDSNFor(path, resolveOptions(opts).unsynced)
+}
+
+func writingDSNFor(path string, unsynced bool) string {
+	dsn := path + "?" + writingPragmas
+	if unsynced {
+		dsn += unsyncedPragma
+	}
+	return dsn
+}
+
+// resolveOptions applies opts to a bare store, so a DSN can be built from them
+// before any handle exists.
+func resolveOptions(opts []Option) *store {
+	s := &store{}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
+}
+
+// finishWritingOpen is the tail every writing open shares once its handle is
+// up: the schema stamped or carried forward, then the two boot-time checks.
+// load, when set, fills the handle's database before the layout is read; only
+// an in-memory test open (OpenInMemory) passes one. Any failure closes the
+// handle.
+func (s *store) finishWritingOpen(ctx context.Context, load func(context.Context, *sql.DB) error) (DB, error) {
+	if load != nil {
+		if err := load(ctx, s.handle); err != nil {
+			s.handle.Close()
+			return nil, err
+		}
 	}
 	if err := s.ensureLayout(ctx); err != nil {
 		s.handle.Close()
@@ -183,8 +243,7 @@ func OpenJoining(ctx context.Context, path string, opts ...Option) (DB, error) {
 // file to this build's layout, and nothing else: no schema is created, no row
 // is reconciled, and the writing handle is closed before the answer.
 func migrateAdditiveWhileJoining(ctx context.Context, path string, opts []Option) error {
-	dsn := path + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_txlock=immediate&_pragma=foreign_keys(1)"
-	s, err := openStore(ctx, path, dsn, false, opts)
+	s, err := openStore(ctx, path, writingDSN(path, opts), false, opts)
 	if err != nil {
 		return err
 	}
@@ -400,8 +459,7 @@ func (s *store) Promote(ctx context.Context) error {
 		s.log.Debug(op, "the handle already writes; nothing to promote", dlog.Context{"path": s.path})
 		return nil
 	}
-	dsn := s.path + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_txlock=immediate&_pragma=foreign_keys(1)"
-	handle, err := sql.Open("sqlite", dsn)
+	handle, err := sql.Open("sqlite", writingDSNFor(s.path, s.unsynced))
 	if err != nil {
 		s.log.Error(op, "the writing handle could not be opened", dlog.Context{"path": s.path, "error": err.Error()})
 		return fmt.Errorf("wsm: promote %q: %w", s.path, err)

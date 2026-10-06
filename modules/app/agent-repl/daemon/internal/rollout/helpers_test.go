@@ -1105,7 +1105,7 @@ func newHarness(t *testing.T, adjust ...func(*Deps)) *harness {
 	t.Helper()
 	log := dlog.NewTestSurfaces()
 	state := t.TempDir()
-	db, err := wsm.Open(context.Background(), filepath.Join(state, "wsm.db"), wsm.WithLogger(log.Global()), wsm.WithTemporaryGuard(tempdirstest.Guard(t)))
+	db, err := wsm.Open(context.Background(), filepath.Join(state, "wsm.db"), wsm.WithLogger(log.Global()), wsm.WithUnsyncedWrites(), wsm.WithTemporaryGuard(tempdirstest.Guard(t)))
 	if err != nil {
 		t.Fatalf("wsm.Open: %v", err)
 	}
@@ -1393,7 +1393,7 @@ func waitForForceKill(t *testing.T, shim *fakeShim) {
 // (wsm.OpenReadOnly): nothing may be written until the handle is promoted.
 func (h *harness) joiningHandle(t *testing.T) {
 	t.Helper()
-	ro, err := wsm.OpenReadOnly(context.Background(), filepath.Join(h.state, "wsm.db"), wsm.WithLogger(h.log.Global()), wsm.WithTemporaryGuard(tempdirstest.Guard(t)))
+	ro, err := wsm.OpenReadOnly(context.Background(), filepath.Join(h.state, "wsm.db"), wsm.WithLogger(h.log.Global()), wsm.WithUnsyncedWrites(), wsm.WithTemporaryGuard(tempdirstest.Guard(t)))
 	if err != nil {
 		t.Fatalf("wsm.OpenReadOnly: %v", err)
 	}
