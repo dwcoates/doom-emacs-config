@@ -28,6 +28,8 @@
 # Run with:   bash bin/test-build-frontend.sh
 
 set -euo pipefail
+# shellcheck source=/dev/null
+. "$(dirname "${BASH_SOURCE[0]}")/lib-grep-in.sh"
 
 # shellcheck source=lib-test-split.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib-test-split.sh"
@@ -1117,7 +1119,7 @@ t_build_records_the_source_tree_stamp() {
 go_builds_all_pass_buildvcs_false() {
     local log="$1"
     grep -q '^go build' "$log" || return 1
-    ! grep '^go build' "$log" | grep -qv -- ' -buildvcs=false '
+    ! grep '^go build' "$log" | grep -v -- ' -buildvcs=false ' >/dev/null
 }
 
 t_in_place_go_builds_pass_buildvcs_false() {

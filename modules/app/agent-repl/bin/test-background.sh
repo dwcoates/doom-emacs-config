@@ -27,6 +27,8 @@
 [[ -n ${AGENT_REPL_BACKGROUND_PRIORITY:-} ]] || exec "$(dirname "${BASH_SOURCE[0]}")/background.sh" bash "${BASH_SOURCE[0]}" "$@"
 
 set -euo pipefail
+# shellcheck source=/dev/null
+. "$(dirname "${BASH_SOURCE[0]}")/lib-grep-in.sh"
 
 THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 HELPER="$THIS_DIR/background.sh"
@@ -367,7 +369,7 @@ scan() {
     for file in "$root"/.githooks/* "$root"/.claude/*.sh; do
         [ -f "$file" ] || continue
         case "$(basename "$file")" in test-*) continue ;; esac
-        if grep -v '^[[:space:]]*#' "$file" | grep -Eq "$RUNNER_RE"; then
+        if grep_in "$(grep -v '^[[:space:]]*#' "$file")" -Eq "$RUNNER_RE"; then
             [[ "$(first_code_line "$file")" =~ $PROLOGUE_RE ]] ||
                 printf '%s: runs a test suite without the background prologue\n' "$file"
         fi
@@ -383,8 +385,8 @@ scan() {
             /\\$/ { acc = substr(line, 1, length(line) - 1); cont = 1; next }
             { cont = 0; acc = ""; if (line ~ /^\t/) print line }
         ' "$file" | while IFS= read -r recipe; do
-            if printf '%s\n' "$recipe" | grep -Eq "$RUNNER_RE" &&
-                ! printf '%s\n' "$recipe" | grep -Fq '$(BACKGROUND)'; then
+            if grep_in "$recipe" -Eq "$RUNNER_RE" &&
+                ! grep_in "$recipe" -Fq '$(BACKGROUND)'; then
                 printf '%s: recipe runs a suite without $(BACKGROUND): %s\n' "$file" "$(printf '%s' "$recipe" | tr -s '\t ' ' ' | sed 's/^ //')"
             fi
         done
@@ -540,7 +542,7 @@ EOF
 expect_violation() {
     local name="$1" dir="$2" pattern="$3" out
     out="$(scan "$dir")"
-    if printf '%s\n' "$out" | grep -Fq -- "$pattern"; then
+    if grep_in "$out" -Fq -- "$pattern"; then
         pass "scan catches: $name"
     else
         fail "scan catches: $name" "scan output: $out"

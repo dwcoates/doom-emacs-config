@@ -6,6 +6,8 @@
 [[ -n ${AGENT_REPL_BACKGROUND_PRIORITY:-} ]] || exec "$(dirname "${BASH_SOURCE[0]}")/background.sh" bash "${BASH_SOURCE[0]}" "$@"
 
 set -euo pipefail
+# shellcheck source=/dev/null
+. "$(dirname "${BASH_SOURCE[0]}")/lib-grep-in.sh"
 
 THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_SRC="$THIS_DIR/report-nonlisp-coverage.sh"
@@ -159,7 +161,7 @@ test_default_validates_proto_before_any_suite() {
     run_report "$tree"
 
     if [ "$RUN_RC" -eq 0 ] &&
-        head -n 1 "$tree/stub.log" | grep -q '|make -C .*proto validate'; then
+        grep_in "$(head -n 1 "$tree/stub.log")" -q '|make -C .*proto validate'; then
         pass "default run validates proto before any other component"
     else
         fail "default run validates proto before any other component"
@@ -175,7 +177,7 @@ test_proto_makefile_names_no_components() {
         grep 'report-nonlisp-coverage.sh' || true)"
 
     if [ -n "$recipe" ] &&
-        printf '%s\n' "$recipe" | grep -Eq 'report-nonlisp-coverage\.sh[[:space:]]*$'; then
+        grep_in "$recipe" -Eq 'report-nonlisp-coverage\.sh[[:space:]]*$'; then
         pass "proto coverage defers to the script's own component list"
     else
         fail "proto coverage defers to the script's own component list"

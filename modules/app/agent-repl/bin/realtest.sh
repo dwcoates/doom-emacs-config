@@ -131,6 +131,8 @@
 #      the remedy: bin/realtest.sh --clean-leftovers.
 
 set -euo pipefail
+# shellcheck source=/dev/null
+. "$(dirname "${BASH_SOURCE[0]}")/lib-grep-in.sh"
 
 THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MODULE_ROOT="$(cd "$THIS_DIR/.." && pwd)"
@@ -355,7 +357,7 @@ fi
 PLAN=""
 if [ -n "$RUN_REGEX" ]; then
     while IFS= read -r row; do
-        if printf '%s' "$(row_field "$row" 2)" | grep -Eq -- "$RUN_REGEX"; then
+        if grep_in "$(row_field "$row" 2)" -Eq -- "$RUN_REGEX"; then
             PLAN="$PLAN$row
 "
         fi
@@ -399,7 +401,7 @@ else
 "
 fi
 
-PLAN_COUNT="$(printf '%s' "$PLAN" | grep -c '|')"
+PLAN_COUNT="$(grep_in "$PLAN" -c '|')"
 
 # ---- preflight: the tools -------------------------------------------------
 
@@ -693,7 +695,7 @@ stop_daemons_orderly() {
 # environment carry the guard? Not the launcher's intention, not this shell's
 # exported environment: the copy `ps -Eww` prints beside the command line.
 process_carries_guard() {
-    ps -Eww -o command= -p "$1" 2>/dev/null | tr ' ' '\n' | grep -q "^$VENDOR_GUARD_ENV="
+    grep_in "$(ps -Eww -o command= -p "$1" 2>/dev/null | tr ' ' '\n')" -q "^$VENDOR_GUARD_ENV="
 }
 
 # daemon_pids — every resident daemon of THIS checkout, one pid per line, and

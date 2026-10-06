@@ -11,6 +11,8 @@
 [[ -n ${AGENT_REPL_BACKGROUND_PRIORITY:-} ]] || exec "$(dirname "${BASH_SOURCE[0]}")/../bin/background.sh" bash "${BASH_SOURCE[0]}" "$@"
 
 set -euo pipefail
+# shellcheck source=/dev/null
+. "$(dirname "${BASH_SOURCE[0]}")/../bin/lib-grep-in.sh"
 
 SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 DOCTOR="$SCRIPT_DIR/agent-shim-doctor.sh"
@@ -130,14 +132,14 @@ assert_probe_status() {
   # `|| true` is load-bearing: under `set -o pipefail` a zero-match grep would
   # otherwise abort the harness here, before this helper's own assertion could
   # report which status was actually emitted.
-  matches="$(printf '%s\n' "$DOCTOR_OUT" | grep -o "\"check\":\"store-connect-[a-z-]*\",\"status\":\"$want\"" || true)"
-  n="$(printf '%s' "$matches" | grep -c . || true)"
+  matches="$(grep_in "$DOCTOR_OUT" -o "\"check\":\"store-connect-[a-z-]*\",\"status\":\"$want\"" || true)"
+  n="$(grep_in "$matches" -c . || true)"
   [ "$n" -eq 2 ] ||
     fail "expected 2 store-connect records with status $want, got $n: $DOCTOR_OUT"
 }
 
 assert_probe_class() {
-  printf '%s\n' "$DOCTOR_OUT" | grep -q "\"failure_class\":\"$1\"" ||
+  grep_in "$DOCTOR_OUT" -q "\"failure_class\":\"$1\"" ||
     fail "probe lost its exact failure class $1: $DOCTOR_OUT"
 }
 
@@ -148,14 +150,14 @@ run_doctor --json
 stop_fake_store
 assert_valid_json "$DOCTOR_OUT"
 assert_probe_status PASS
-printf '%s\n' "$DOCTOR_OUT" | grep -q '"check":"store-connect-get-live-work","status":"PASS"' ||
+grep_in "$DOCTOR_OUT" -q '"check":"store-connect-get-live-work","status":"PASS"' ||
   fail "GetLiveWork probe did not pass: $DOCTOR_OUT"
-printf '%s\n' "$DOCTOR_OUT" | grep -q '"check":"store-connect-get-sidecar-cursors","status":"PASS"' ||
+grep_in "$DOCTOR_OUT" -q '"check":"store-connect-get-sidecar-cursors","status":"PASS"' ||
   fail "GetSidecarCursors probe did not pass: $DOCTOR_OUT"
-if printf '%s\n' "$DOCTOR_OUT" | grep -q '"check":"store-connect-[a-z-]*","status":"FAIL"'; then
+if grep_in "$DOCTOR_OUT" -q '"check":"store-connect-[a-z-]*","status":"FAIL"'; then
   fail "a healthy store fell through into a failure record: $DOCTOR_OUT"
 fi
-printf '%s\n' "$DOCTOR_OUT" | grep -Eq '"request_id":"doctor-[^"]+","latency_ms":[0-9]+,"component":"shim-store","rpc":"store\.v1\.ShimStore/GetLiveWork","healthy":true' ||
+grep_in "$DOCTOR_OUT" -Eq '"request_id":"doctor-[^"]+","latency_ms":[0-9]+,"component":"shim-store","rpc":"store\.v1\.ShimStore/GetLiveWork","healthy":true' ||
   fail "healthy probe metadata lost its request id, latency, or rpc: $DOCTOR_OUT"
 OUT_BOUNDED="$DOCTOR_OUT"
 
@@ -178,7 +180,7 @@ stop_fake_store
 assert_valid_json "$DOCTOR_OUT"
 assert_probe_status FAIL
 assert_probe_class failure_arm
-printf '%s\n' "$DOCTOR_OUT" | grep -q 'database is locked' ||
+grep_in "$DOCTOR_OUT" -q 'database is locked' ||
   fail "the failure arm's detail was not retained: $DOCTOR_OUT"
 
 # ---- non-200: the request never reached a handler ----------------------
@@ -189,7 +191,7 @@ stop_fake_store
 assert_valid_json "$DOCTOR_OUT"
 assert_probe_status FAIL
 assert_probe_class http_status
-printf '%s\n' "$DOCTOR_OUT" | grep -q '"http_status":503' ||
+grep_in "$DOCTOR_OUT" -q '"http_status":503' ||
   fail "the non-200 status was not reported: $DOCTOR_OUT"
 
 # ---- malformed body: HTTP 200 that is not a Connect response -----------
@@ -209,7 +211,7 @@ rm -f "$STORE_SOCK"
 assert_valid_json "$DOCTOR_OUT"
 assert_probe_status FAIL
 assert_probe_class connection_refused
-printf '%s\n' "$DOCTOR_OUT" | grep -q '"check":"store-socket-present","status":"PASS"' ||
+grep_in "$DOCTOR_OUT" -q '"check":"store-socket-present","status":"PASS"' ||
   fail "the refusing-socket fixture should still satisfy the presence check: $DOCTOR_OUT"
 
 # ---- missing socket: nothing to probe at all ---------------------------
@@ -219,7 +221,7 @@ run_doctor --json
 assert_valid_json "$DOCTOR_OUT"
 assert_probe_status FAIL
 assert_probe_class missing_socket
-printf '%s\n' "$DOCTOR_OUT" | grep -q '"check":"store-socket-present","status":"FAIL"' ||
+grep_in "$DOCTOR_OUT" -q '"check":"store-socket-present","status":"FAIL"' ||
   fail "a missing socket must also fail the presence check: $DOCTOR_OUT"
 
 # ---- timeout: the store accepts but never answers in time --------------
@@ -243,18 +245,18 @@ OUT_TEXT="$(DOCTOR_SQLITE_CALLS="$CALLS" \
   "$DOCTOR" 2>/dev/null)"
 set -e
 stop_fake_store
-printf '%s\n' "$OUT_TEXT" | grep -q 'answered the failure arm' ||
+grep_in "$OUT_TEXT" -q 'answered the failure arm' ||
   fail "text output did not report the failure arm: $OUT_TEXT"
-printf '%s\n' "$OUT_TEXT" | grep -q 'detail=database is locked' ||
+grep_in "$OUT_TEXT" -q 'detail=database is locked' ||
   fail "text output did not retain the store's detail: $OUT_TEXT"
-printf '%s\n' "$OUT_TEXT" | grep -q 'hint: the store is serving but REFUSED this read' ||
+grep_in "$OUT_TEXT" -q 'hint: the store is serving but REFUSED this read' ||
   fail "text output did not render the failure-arm hint: $OUT_TEXT"
 
 # ---- bounded integrity policy (unchanged behavior) ---------------------
 
-printf '%s\n' "$OUT_BOUNDED" | grep -q '"check":"store-db-openable","status":"PASS"' ||
+grep_in "$OUT_BOUNDED" -q '"check":"store-db-openable","status":"PASS"' ||
   fail "missing openable PASS: $OUT_BOUNDED"
-printf '%s\n' "$OUT_BOUNDED" | grep -q '"check":"store-db-integrity","status":"SKIP"' ||
+grep_in "$OUT_BOUNDED" -q '"check":"store-db-integrity","status":"SKIP"' ||
   fail "missing oversized integrity SKIP: $OUT_BOUNDED"
 if grep -q 'integrity_check' "$CALLS"; then
   fail "the bounded run executed the deep integrity scan"
@@ -263,7 +265,7 @@ fi
 start_fake_store healthy
 run_doctor --json --deep-integrity
 stop_fake_store
-printf '%s\n' "$DOCTOR_OUT" | grep -q '"check":"store-db-integrity","status":"PASS"' ||
+grep_in "$DOCTOR_OUT" -q '"check":"store-db-integrity","status":"PASS"' ||
   fail "deep integrity did not pass: $DOCTOR_OUT"
 grep -q 'integrity_check' "$CALLS" ||
   fail "--deep-integrity did not execute PRAGMA integrity_check"
