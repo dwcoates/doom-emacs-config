@@ -101,6 +101,14 @@ type AccountUsage struct {
 // SetAccountUsage records an account root's usage evidence, replacing what
 // the root had. An empty root or a verdict outside the vocabulary is a caller
 // defect, refused loudly rather than persisted.
+//
+// A READ-ONLY HANDLE HOLDS THE EVIDENCE INSTEAD, latest per root, and the
+// promotion writes it. A read-only handle is the joining successor's
+// ordinary state, not a failure: the incumbent is still the writer, yet the
+// successor's footer files every workspace's usage as it boots. Refusing
+// that at ERROR, as an ordinary write on a read-only handle is refused,
+// made every handover log two ERRORs per account root and lose the
+// evidence the successor had filed by the time it became the writer.
 func (s *store) SetAccountUsage(ctx context.Context, usage AccountUsage) error {
 	const op = "daemon.wsm.set_account_usage"
 	fields := dlog.Context{"config_dir": usage.ConfigDir, "no_allowance": usage.NoAllowance}
@@ -108,6 +116,47 @@ func (s *store) SetAccountUsage(ctx context.Context, usage AccountUsage) error {
 		s.log.Error(op, "refused account usage that cannot be stored", withError(fields, err))
 		return err
 	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.readOnly {
+		s.holdUsageLocked(usage)
+		s.log.Info(op, "held the account's usage until this handle writes; the incumbent is still the writer", fields)
+		return nil
+	}
+	return s.writeAccountUsage(ctx, op, fields, usage)
+}
+
+// holdUsageLocked keeps usage as its root's latest held evidence. The caller
+// holds mu (read side); the held map has its own exclusion through heldMu.
+func (s *store) holdUsageLocked(usage AccountUsage) {
+	s.heldMu.Lock()
+	defer s.heldMu.Unlock()
+	if s.heldUsage == nil {
+		s.heldUsage = make(map[string]AccountUsage)
+	}
+	s.heldUsage[usage.ConfigDir] = usage
+}
+
+// writeHeldUsageLocked writes every held account usage and forgets it. The
+// caller holds mu EXCLUSIVELY and the handle already writes. A failed write
+// is recorded at ERROR by the write itself and is not held again: the next
+// evidence the footer files for the root writes it afresh.
+func (s *store) writeHeldUsageLocked(ctx context.Context) {
+	const op = "daemon.wsm.set_account_usage"
+	s.heldMu.Lock()
+	held := s.heldUsage
+	s.heldUsage = nil
+	s.heldMu.Unlock()
+	for _, usage := range held {
+		fields := dlog.Context{"config_dir": usage.ConfigDir, "no_allowance": usage.NoAllowance, "held": true}
+		if err := s.writeAccountUsage(ctx, op, fields, usage); err == nil {
+			s.log.Info(op, "wrote the account's usage held while this handle was read-only", fields)
+		}
+	}
+}
+
+// writeAccountUsage is the row's upsert, through the package's one writer.
+func (s *store) writeAccountUsage(ctx context.Context, op string, fields dlog.Context, usage AccountUsage) error {
 	args := []any{usage.ConfigDir, usage.ObservedAt.UnixNano(), usage.NoAllowance}
 	for _, w := range []*AllowanceFigures{usage.Session, usage.Weekly, usage.Overage} {
 		args = append(args, windowArgs(w)...)

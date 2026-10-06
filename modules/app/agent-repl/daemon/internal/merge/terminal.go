@@ -333,7 +333,10 @@ func (r *run) closeLanded(ctx context.Context, log dlog.Logger) {
 			"workspace": string(closes), "worktree": dir, "error": err.Error()})
 		return
 	}
-	log.Debug(op, "stopped the merged workspace's session and removed its worktree", dlog.Context{
+	// INFO, not DEBUG: the worktree going is the edge every client sees its
+	// workspace's directory vanish at, and a diagnosis of what a client did
+	// next reads the removal off this record (owner SOP, 2026-10-06).
+	log.Info(op, "stopped the merged workspace's session and removed its worktree", dlog.Context{
 		"workspace": string(closes), "worktree": dir, "force": true})
 }
 

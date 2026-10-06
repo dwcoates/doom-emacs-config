@@ -129,10 +129,20 @@ func TestEmacsGuiCannotAdoptANamedSession(t *testing.T) {
 //
 // The durable id is the vendor conversation's uuid — the one a resume replays
 // — and Emacs holds no session state to answer from. It comes down the host
-// stream on the live arm's `vendor_info' oneof, so this drives a real turn
-// against the fake vendor and reads the capability back: nil until a vendor
-// conversation exists, then the id the daemon published, and never the
-// daemon-minted session token that rotates beside it.
+// stream on the live arm's `vendor_info' oneof, so this reads the capability
+// back off a real bring-up against the fake vendor: the id the daemon
+// published, never the daemon-minted session token that rotates beside it,
+// and the same id once a turn runs in that conversation.
+//
+// THE CONVERSATION'S ID EXISTS FROM THE BRING-UP, NOT FROM THE FIRST TURN.
+// The shim pre-mints it and hands it to the vendor as `Options.sessionId`
+// (agent-shim/claude/shim's src/engine/identity.ts), and since a1caff698 a
+// look starts the session of an open workspace with none behind it, so the
+// registration's own selection publishes the id within a few hundred
+// milliseconds. An earlier shape of this test asserted "nil before any turn"
+// right after the panel opened; that read raced the bring-up and failed
+// whenever the session came up first (the capability answering nil with no
+// live session is unit-covered in lisp/test-host.el).
 func TestEmacsGuiDurableSessionIdNamesTheVendorConversation(t *testing.T) {
 	t.Parallel()
 	// Arrange: a registered, selected workspace with its panel open.
@@ -143,17 +153,7 @@ func TestEmacsGuiDurableSessionIdNamesTheVendorConversation(t *testing.T) {
 
 	durableForm := `(or (agent-repl--gui-durable-session-id ` + elispString(ws) + `) "")`
 
-	// Assert: no conversation yet is an ANSWER, not a failure.
-	if got := e.EvalString(durableForm); got != "" {
-		t.Fatalf("%s durably identifies %q before any turn ran; a workspace with no vendor conversation identifies nothing", ws, got)
-	}
-
-	// Act: an ordinary submission, which is what starts the vendor
-	// conversation whose id this capability reports.
-	emGHISubmit(t, e, ws, "say hello")
-
-	// Assert: the capability answers the id the host stream published, and
-	// answers exactly it — a second source would be a second answer.
+	// Act: the bring-up the selection started publishes the conversation.
 	raw := e.AwaitEval("the workspace to name its vendor conversation", durableForm,
 		func(raw json.RawMessage) bool {
 			var got string
@@ -163,6 +163,9 @@ func TestEmacsGuiDurableSessionIdNamesTheVendorConversation(t *testing.T) {
 	if err := json.Unmarshal(raw, &durable); err != nil {
 		t.Fatalf("decode the durable session id for %s: %v", ws, err)
 	}
+
+	// Assert: the capability answers the id the host stream published, and
+	// answers exactly it — a second source would be a second answer.
 	if fromHost := e.EvalString(`(or (agent-repl-host-vendor-session-id ` + elispString(ws) + `) "")`); fromHost != durable {
 		t.Fatalf("the gui capability answers %q and the host stream holds %q; the capability must have exactly one source", durable, fromHost)
 	}
@@ -173,5 +176,16 @@ func TestEmacsGuiDurableSessionIdNamesTheVendorConversation(t *testing.T) {
 	hostRefID := e.EvalString(`(or (plist-get (agent-repl-host-ref ` + elispString(ws) + `) :id) "")`)
 	if durable == hostRefID {
 		t.Fatalf("the durable session id equals the workspace ref id %q; it must be the vendor conversation's uuid", hostRefID)
+	}
+
+	// Act: a turn in that conversation, parked mid-turn so "running" is a
+	// fact rather than a race.
+	emGHISubmit(t, e, ws, emGHIParkedPrompt)
+	emGHIAwaitStatus(t, e, ws, "the turn to be running in the conversation", emGHIRunningArms...)
+
+	// Assert: the turn runs in the SAME conversation; the durable id does not
+	// move under it.
+	if got := e.EvalString(durableForm); got != durable {
+		t.Fatalf("%s durably identifies %q while its first turn runs, want the bring-up's %q", ws, got, durable)
 	}
 }
