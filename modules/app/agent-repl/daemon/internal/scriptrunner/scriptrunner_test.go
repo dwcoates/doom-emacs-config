@@ -433,3 +433,45 @@ func TestRunWaitsForTheWholeOutputOfAScriptWhoseChildOutlivesIt(t *testing.T) {
 		t.Fatalf("Run = (%q, %d, %v), want the child's late line, 0, nil", out, code, err)
 	}
 }
+
+func TestKillGroupWithReadsTheKernelsAnswers(t *testing.T) {
+	tests := []struct {
+		name   string
+		answer error
+		want   error
+	}{
+		{name: "a group with no members has finished", answer: syscall.ESRCH, want: os.ErrProcessDone},
+		{name: "a group of members awaiting reaping has finished", answer: syscall.EPERM, want: os.ErrProcessDone},
+		{name: "a killed group was killed", answer: nil, want: nil},
+		{name: "any other answer is the kill failing", answer: syscall.EINVAL, want: syscall.EINVAL},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			kill := func(int, syscall.Signal) error { return tt.answer }
+
+			// Act
+			got := killGroupWith(kill, 4242)
+
+			// Assert
+			if !errors.Is(got, tt.want) && got != tt.want {
+				t.Fatalf("killGroupWith = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestKillGroupWithSignalsTheWholeGroup(t *testing.T) {
+	// Arrange
+	var pid int
+	var sig syscall.Signal
+	kill := func(p int, s syscall.Signal) error { pid, sig = p, s; return nil }
+
+	// Act
+	_ = killGroupWith(kill, 4242)
+
+	// Assert
+	if pid != -4242 || sig != syscall.SIGKILL {
+		t.Fatalf("kill(%d, %v), want kill(-4242, SIGKILL): the group, not the leader alone", pid, sig)
+	}
+}
