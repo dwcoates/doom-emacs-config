@@ -403,6 +403,9 @@ func (v *verbs) publishAccount(ctx context.Context, log dlog.Logger, record wsm.
 	v.deps.Topbar.SetAccount(record.ID, topbar.Account{Email: current.Email, Options: options})
 	// THE SAME ACCOUNT, for the feed's failed-turn markers to name.
 	v.deps.Feed.SetAccount(record.ID, current.Email)
+	// THE SAME ROOT, for the footer's usage line: the usage is the ACCOUNT'S,
+	// so every workspace on one root draws the figures any of them learns.
+	v.deps.Footer.SetAccount(record.ID, configDir)
 	log.Debug(opRegister, "installed the topbar's account cell", dlog.Context{
 		"workspace": string(record.ID), "config_dir": configDir,
 		"logged_in": current.LoggedIn, "options": len(options),
