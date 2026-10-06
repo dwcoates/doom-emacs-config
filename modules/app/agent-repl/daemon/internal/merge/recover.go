@@ -136,12 +136,10 @@ func (o *orchestrator) recoverWaiting(ctx context.Context, repo wsm.RepoKey, ent
 	if jobErr != nil {
 		o.deps.Log.Global().Warn(op, "abandoning a merge the restart could not put back on its queue", dlog.Context{
 			"workspace": string(ws), "repo": string(repo), "error": jobErr.Error()})
-		// THE LEDGER IDENTITY IS MINTED HERE. A merely-queued merge's bubble
-		// is addressed by an identity minted in memory at enqueue and never
-		// written down, so the pre-restart bubble is unreachable; without a
-		// fresh one the abandoned terminal would have nowhere to land and the
-		// cause would reach nobody.
-		ledger := o.mintLedger(ws)
+		// THE BUBBLE THE MERGE WAITED IN ENDS: its identity is on its row
+		// (an earlier build's row carries none, and is given one), so the
+		// abandoned terminal lands where the reader saw the merge wait.
+		ledger := o.ledgerOfEntry(entry)
 		o.mu.Lock()
 		delete(o.repoOf, ws)
 		delete(o.ledgerOf, ws)
@@ -155,11 +153,26 @@ func (o *orchestrator) recoverWaiting(ctx context.Context, repo wsm.RepoKey, ent
 	o.mu.Lock()
 	o.repoOf[ws] = repo
 	o.mu.Unlock()
-	// A FRESH BUBBLE: a merge in line has one, and the pre-restart bubble's
-	// identity lived in memory. Recover republishes the queue once every entry
-	// is back.
-	o.mintLedger(ws)
+	// THE SAME BUBBLE: the identity the merge was put in line with is on its
+	// row. Recover (or an adoption) republishes the queue once every entry is
+	// back, and redraws it there.
+	o.ledgerOfEntry(entry)
 	return true, nil
+}
+
+// ledgerOfEntry stands a queued merge's bubble identity as the one its row
+// carries -- the bubble it was drawn in before a restart or a handover -- and
+// mints one only for a row an earlier build queued without it.
+func (o *orchestrator) ledgerOfEntry(entry wsm.MergeQueueEntry) ids.LeaseID {
+	if entry.Ledger == "" {
+		o.deps.Log.Global().Info("daemon.merge.recover", "a queued merge an earlier build recorded carries no bubble identity; it is drawn in a fresh bubble",
+			dlog.Context{"workspace": string(entry.Workspace), "repo": string(entry.Repo)})
+		return o.mintLedger(entry.Workspace)
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.ledgerOf[entry.Workspace] = entry.Ledger
+	return entry.Ledger
 }
 
 // recoverAdmitted decides one in-flight merge's fate.
@@ -264,10 +277,13 @@ func (o *orchestrator) recoverAdmitted(ctx context.Context, repo wsm.RepoKey, en
 	if err := o.deps.DB.RequestMerge(ctx, repo, ws, entry.Source, o.deps.Now()); err != nil {
 		return err
 	}
-	if _, err := o.deps.DB.QueueMerge(ctx, repo, ws); err != nil {
+	ledger := o.mintLedger(ws)
+	if !held && entry.Ledger != "" {
+		ledger = o.ledgerOfEntry(entry)
+	}
+	if _, err := o.deps.DB.QueueMerge(ctx, repo, ws, ledger); err != nil {
 		return err
 	}
-	o.mintLedger(ws)
 	return nil
 }
 
