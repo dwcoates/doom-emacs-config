@@ -1149,13 +1149,44 @@ records in `said', the input painting BACKGROUND (nil: no input buffer)."
                   (lambda (_ws fmt &rest args) (push (apply #'format fmt args) said))))
          ,@body))))
 
+(ert-deftest agent-repl-window-test-a-page-load-tells-the-input-background ()
+  "The gate's color is told on its own, docked or not."
+  (agent-repl-window-test--with-told-scripts "#14141a"
+    ;; Act
+    (agent-repl-window-tell-input-background "ws")
+    ;; Assert
+    (should (equal (list "(function(){document.documentElement.style.setProperty('--input-bg',\"#14141a\");return 'ok';})()")
+                   scripts))))
+
+(ert-deftest agent-repl-window-test-a-page-load-without-an-input-buffer-tells-nothing ()
+  "No input buffer, no color to tell: nothing is sent."
+  (agent-repl-window-test--with-told-scripts nil
+    ;; Act
+    (agent-repl-window-tell-input-background "ws")
+    ;; Assert
+    (should-not scripts)))
+
+(ert-deftest agent-repl-window-test-a-page-load-without-a-webview-is-skipped ()
+  "No live webview: the tell is skipped, and says so."
+  (agent-repl-window-test--with-told-scripts "#14141a"
+    ;; Arrange
+    (let ((logged nil))
+      (cl-letf (((symbol-function 'agent-repl--ws-get) (lambda (_ws _key) nil))
+                ((symbol-function 'agent-repl--log)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+        ;; Act
+        (agent-repl-window-tell-input-background "ws"))
+      ;; Assert
+      (should-not scripts)
+      (should (cl-some (lambda (m) (string-match-p "input-bg-skipped.*no-webview" m)) logged)))))
+
 (ert-deftest agent-repl-window-test-the-dock-slot-tells-the-input-background ()
   "The input's background rides the same script as its height."
   (agent-repl-window-test--with-told-scripts "#1d1f21"
     ;; Act
     (agent-repl-window-tell-gate-dock "ws")
     ;; Assert
-    (should (string-match-p "--gate-dock-bg',\"#1d1f21\"" (car scripts)))))
+    (should (string-match-p "--input-bg',\"#1d1f21\"" (car scripts)))))
 
 (ert-deftest agent-repl-window-test-the-dock-slot-tells-the-height-in-the-same-script ()
   "One script carries both, so the page never holds one without the other."
@@ -1172,7 +1203,7 @@ records in `said', the input painting BACKGROUND (nil: no input buffer)."
     ;; Act
     (agent-repl-window-tell-gate-dock "ws")
     ;; Assert
-    (should-not (string-match-p "--gate-dock-bg" (car scripts)))))
+    (should-not (string-match-p "--input-bg" (car scripts)))))
 
 (ert-deftest agent-repl-window-test-the-dock-slot-records-the-background-told ()
   "The told background is on the INFO record."
