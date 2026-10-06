@@ -965,3 +965,4 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - 2026-10-06 a shim's teardown reads its book's head off the store's place index (tail-only, page-only open), never a repaint page(agent-shim/claude/shim/src/engine/session.ts, store/reader.ts).
 - 2026-10-06 the daemon harness continues every process it SIGKILLs out of its own stop, since a Darwin SIGKILL never resumes a stopped task(daemon/integration/harness/daemon.go killStopped).
 - 2026-10-06 the logs harness greps reader output from a here-string, never a pipe, so pipefail+SIGPIPE cannot fail a correct check(bin/test-logs.sh grep_in).
+- 2026-10-06 every harness asks grep through the shared grep_in (bin/lib-grep-in.sh), never a pipe into grep -q, and a testrun scan holds it(SIGPIPE under pipefail).
