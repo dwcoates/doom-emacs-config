@@ -563,12 +563,9 @@ func TestGoldenCorpusProducesTheSoleProducerConversions(t *testing.T) {
 	entries := driveWholeCorpus(t)
 
 	// Assert.
-	var memory, skills, diagnostics, budget int
+	var memory, skills, diagnostics int
 	for _, e := range entries {
 		frame := e.GetAgentUpdate().GetServeableFrame().GetAgentItem().GetAgentFrame()
-		if frame.GetUpdate().GetContextBudgetWarning() != nil {
-			budget++
-		}
 		activity := frame.GetUpdate().GetActivity()
 		if injected := activity.GetContextInjected(); injected != nil {
 			if injected.GetMemory() != nil {
@@ -589,7 +586,6 @@ func TestGoldenCorpusProducesTheSoleProducerConversions(t *testing.T) {
 		{"AgentContextInjected.memory (nested_memory)", memory},
 		{"AgentContextInjected.skills (dynamic_skill/invoked_skills/skill_listing)", skills},
 		{"the write/edit diagnostics consequence arm", diagnostics},
-		{"AgentUpdate.context_budget_warning", budget},
 	} {
 		if want.got == 0 {
 			t.Errorf("the corpus produced no %s; the sidecar is its ONLY producer, so a regression here loses the fact entirely", want.name)

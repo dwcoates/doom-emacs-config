@@ -867,10 +867,6 @@ func (s *footerSink) OnSubagent(_ ids.WorkspaceID, work *conversationv1.Detached
 	s.rec.emit(event{sink: "footer", method: "OnSubagent", detail: work.GetValue()})
 }
 
-func (s *footerSink) OnContextBudgetWarning(_ ids.WorkspaceID, agent *conversationv1.AgentId, w *conversationv1.ContextBudgetWarning) {
-	s.rec.emit(event{sink: "footer", method: "OnContextBudgetWarning", agent: agent.GetValue(), detail: w.GetText()})
-}
-
 func (s *footerSink) OnSessionUpdate(_ ids.WorkspaceID, update *conversationv1.SessionUpdate) {
 	s.rec.emit(event{sink: "footer", method: "OnSessionUpdate", detail: sessionArm(update)})
 }
@@ -1910,14 +1906,6 @@ func rateLimitStatusUpdate() *conversationv1.SessionUpdate {
 		RateLimitStatus: &conversationv1.SessionRateLimitStatus{
 			Status: &conversationv1.SessionRateLimitStatus_Allowed{Allowed: &conversationv1.SessionRateLimitAllowed{}},
 		},
-	}}
-}
-
-// budgetWarningFrame is the vendor's context-budget warning on the AGENT
-// plane, which is where the arm lives.
-func budgetWarningFrame() *conversationv1.AgentUpdate {
-	return &conversationv1.AgentUpdate{Update: &conversationv1.AgentUpdate_ContextBudgetWarning{
-		ContextBudgetWarning: &conversationv1.ContextBudgetWarning{Text: "the context is filling"},
 	}}
 }
 

@@ -521,12 +521,6 @@ describe("the salient kinds", () => {
       { text: "the agent addressed you" },
       "the agent addressed you",
     ],
-    [
-      "working",
-      "contextBudget",
-      { text: "compaction failed — the summary was empty" },
-      "compaction failed — the summary was empty",
-    ],
   ])("draws the %s cell's %s line", (statusCase, kindCase, value, expected) => {
     expect(salientCell(kindCase, value, statusCase).textContent).toContain(
       expected,

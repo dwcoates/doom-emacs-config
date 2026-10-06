@@ -100,8 +100,9 @@ func CompactionRequestLine(choice, detail string) string {
 //     the record exposes the missing cut, the clearing is not a fallback;
 //   - a CONCLUDED PHASE (`started`, `failed`): the act is over, so its line
 //     ends at once and the conclusion is announced as a TRANSIENT —
-//     `compaction_concluded` ("compacted and resumed (…)"), or `context_budget`
-//     for a failure that left the context as large as it was. NO TIMER ends
+//     `compaction_concluded` ("compacted and resumed (…)"); a failure raises
+//     no footer line, the feed's outcome marker is its whole account (owner
+//     ruling, 2026-10-06). NO TIMER ends
 //     the salient line (owner ruling, 2026-09-28: a timer may end only a
 //     transient);
 //   - the vendor query DYING: no turn survives it, so no compaction does;
@@ -142,13 +143,12 @@ func (r *resolver) endCompaction(ws ids.WorkspaceID, s *wsState, cause string) {
 }
 
 // concludeCompaction ends a compaction at its CONCLUDED phase: the running
-// compaction's salient line goes. A compaction that SUCCEEDED shrank the
-// context, so it ends the context-budget line and is announced as the
-// `compaction_concluded` transient ("compacted and resumed (…)"); a failure
-// stands the salient context-budget line, because the context is still as
-// large as it was. While a cold gate's answer is in flight the running line is
-// the ANSWER's, which its verb ends; the outcome is recorded beneath it all
-// the same.
+// compaction's salient line goes. A compaction that SUCCEEDED is announced as
+// the `compaction_concluded` transient ("compacted and resumed (…)"); a
+// failure raises no footer line at all (owner ruling, 2026-10-06): the feed's
+// outcome marker is its whole account. While a cold gate's answer is in
+// flight the running line is the ANSWER's, which its verb ends; the outcome
+// is recorded beneath it all the same.
 func (r *resolver) concludeCompaction(ws ids.WorkspaceID, s *wsState, progress *conversationv1.SessionCompactionProgress) {
 	const cause = "daemon.footer.on_session_update.compaction_progress"
 	if s.coldAnswer == nil {
@@ -156,10 +156,11 @@ func (r *resolver) concludeCompaction(ws ids.WorkspaceID, s *wsState, progress *
 	}
 	line := CompactionLine(progress)
 	if progress.GetPhase() == conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_FAILED {
-		r.standContextBudget(ws, s, "", line)
+		r.logOf(ws, s).Debug("daemon.footer.compaction_failed_no_line",
+			"a compaction failed; the footer raises no line, the feed's outcome marker carries it",
+			dlog.Context{"text": line, "cause": cause})
 		return
 	}
-	r.endContextBudget(ws, s, cause)
 	r.raiseTransient(ws, s, "", &frontendv1.FooterActivityTransient{
 		Kind: &frontendv1.FooterActivityTransient_CompactionConcluded{
 			CompactionConcluded: &frontendv1.FooterActivityTransientCompactionConcluded{Text: line}},

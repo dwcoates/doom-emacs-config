@@ -99,9 +99,8 @@ Two further limits, stated rather than hidden:
 | `!cold-seed` | ungrounded | coldgate_e2e_test.go | — | — | Go: TestColdGate subtests assert exact ContextTokens value, non-empty model name/compact menu, and resolved arm matches the chosen button. | covered |
 | `!compact` | grounded | compaction_e2e_test.go | feed-families.layer.test.ts | — | Go: TestCompactionDirected(+summary override) asserts exact FeedContextCutCompacted.Summary text, non-nil separation tokens. Web: feed-families.layer asserts .sep-compacted. | covered |
 | `!compact-auto` | ungrounded | compaction_e2e_test.go | — | — | Go: TestCompactionAuto asserts exact summary string + non-nil tokens. | covered |
-| `!compact-failed` | ungrounded | compaction_e2e_test.go | — | — | Go: TestCompactionFailed asserts exact FeedContextCutCompactionFailed.Error, no Compacted row drawn. | covered |
-| `!context-budget-warning` | ungrounded | compaction_e2e_test.go | — | — | Go: TestContextBudgetWarning asserts FooterStatusActivityContextBudget.text equals `The conversation is approaching its context window budget.` VERBATIM — the scenario's own attachment content, copied unchanged by the converter and stored uncomposed by the resolver, so one exact string pins the whole path. | covered |
-| `!context-tip` | ungrounded | producerfaults_e2e_test.go | — | — | Go: TestContextTipDrawsNoRow asserts the same only-prose-rows negative AND a second, named one — `FooterStatusBlockedActivity.context_budget` is nil, so a GENERIC CLI tip never draws as “your context is filling”. | covered |
+| `!compact-failed` | ungrounded | compaction_e2e_test.go | — | — | Go: TestCompactionFailed asserts exact FeedContextCutCompactionFailed.Error, no Compacted row drawn, and no footer salient line on the idle view that follows (owner ruling, 2026-10-06). | covered |
+| `!context-tip` | ungrounded | producerfaults_e2e_test.go | — | — | Go: TestContextTipDrawsNoRow asserts the same only-prose-rows negative AND a second one — no footer salient line stands after the tip turn, so a GENERIC CLI tip never draws as “your context is filling”. | covered |
 | `!context-usage-drift` | grounded | accounting_e2e_test.go | — | — | Go: TestContextUsage asserts ContextPanelView.Header non-empty and differs across two reads, Categories non-empty. | covered |
 | `!context-window` | ungrounded | producerfaults_e2e_test.go | — | — | Go: TestContextWindowExceededIsDrawnAsTurnFailed asserts the named arm `FeedTurnEndedErrored.turn_failed`, the exact `stop_reason` `prompt_too_long`, a non-empty composed headline, and the specific negative that `request_too_large` (feed.proto's 413-only arm) was NOT drawn. | covered |
 | `!cron` | grounded | remainder_e2e_test.go | — | — | Go: TestCronCreateListDelete asserts turn Concluded and footer LiveWork.Crons chip Count positive. | covered |
@@ -204,7 +203,7 @@ Two further limits, stated rather than hidden:
 | `!task-change` | grounded | remainder_e2e_test.go | — | — | Go: TestTaskActsCreateChangeReject asserts a checklist row with Status.GetRunning()!=nil. | covered |
 | `!task-create` | grounded | remainder_e2e_test.go | — | — | Go: TestTaskActsCreateChangeReject asserts turn concluded and footer LiveWork.Tasks.Total==2. | covered |
 | `!task-reject` | grounded | remainder_e2e_test.go | — | — | Go: TestTaskActsCreateChangeReject asserts checklist rows persist and LiveWork.Tasks chip still non-nil after rejection. | covered |
-| `!tokens-reminder` | ungrounded | producerfaults_e2e_test.go | — | — | Go: TestTokensReminderDrawsNoRow asserts the only-prose-rows negative AND the named negative that no `context_budget` footer line was minted from a TOKEN-COUNT reminder. | covered |
+| `!tokens-reminder` | ungrounded | producerfaults_e2e_test.go | — | — | Go: TestTokensReminderDrawsNoRow asserts the only-prose-rows negative AND the negative that no footer salient line was minted from a TOKEN-COUNT reminder. | covered |
 | `!unmodeled` | grounded | mcpmonitors_e2e_test.go | surfaces.layer.test.ts | — | Go: TestUnmodeledTool asserts exactly 1 TopbarWarning.UnmodeledTool for StructuredOutput, feed rows never mention it. Web: surfaces.layer asserts .topbar-warnings present and unchanged tool-call row count. | covered |
 | `!usage-available` | grounded | accounting_e2e_test.go | — | — | Go: TestAccountUsageAvailableArm drives this arm's OWN spelling (rather than only its `!usage-full` alias) and asserts both halves: the resolver's `daemon.footer.on_session_update` record with arm=account_usage, AND the specific negative that these sub-threshold figures draw NO FooterStatusActivityRateLimited line — so the sample landed and the newsworthiness gate held. | covered |
 | `!usage-full` | grounded | accounting_e2e_test.go | surfaces.layer.test.ts | — | Go: TestAccountUsage (same log-record assertion as usage-available). Web: surfaces.layer asserts .footer-tokens/.footer-clock elements and a footer panel with named data-panel. | covered |
@@ -233,13 +232,13 @@ a disagreement, so these are not hand tallies (they were, and they were
 wrong: the by-layer lines once read 33 and 5 where the table's columns held
 32 and 3).
 
-- Covered (at least one STRONG, specific-shape assertion in a counted layer): **153**
+- Covered (at least one STRONG, specific-shape assertion in a counted layer): **152**
 - Weak (a counted layer drives the scenario but only asserts turn-completion or a non-specific field, never a named arm/shape): **0**
 - Uncovered (no counted layer drives the scenario at all): **6**
-- Total canonical scenarios: 159
+- Total canonical scenarios: 158
 
 By layer, scenarios with at least one hit:
-- Go e2e (non-emacs): 152 scenarios referenced across 28 files
+- Go e2e (non-emacs): 151 scenarios referenced across 28 files
 - Webapp layer: 36 scenarios referenced across 8 files
 - Emacs e2e: 3 scenarios referenced across 3 files
 
@@ -293,7 +292,6 @@ plan.
 | `!fault-converter` / `!fault-recover` | Same — a malformed vendor message is a fabricated defect, not an observed one. | Not captureable; the malformed shape is inherently synthetic (missing a required field the real vendor never omits). |
 | `!cold-seed` | The cold-context condition is tripped on a LATER resume, which no single capture run spans. | Two linked captures: an initial run, then a resume captured ≥2 hours later against the same session. |
 | `!compact-auto` / `!compact-failed` | `!compact` itself is now grounded (re-captured 2026-09-03), but no capture exists with `trigger:"auto"` or with a failed compaction. | An auto-triggered compaction capture (context filled past the auto threshold without `/compact`), and a capture where `/compact` itself errors. |
-| `!context-budget-warning` | Explicit orchestrator ruling: invented so the converter's already-built arm has a fake-SDK path; two Haiku capture attempts (2026-09-03) both failed to produce a real budget-warning attachment. | A capture run that actually fills context enough to trigger the vendor's own budget-warning attachment — the MANIFEST records a third, untried lever (paginated `Read` over smaller files) as the next attempt. |
 | `!bash-detach-poll` | `TaskOutput` is a declared vendor tool but no capture ever calls it — every recorded backgrounded run was checked by re-reading its spool. | A capture run where the model explicitly calls `TaskOutput` to poll a backgrounded task instead of re-reading the spool. |
 | `!usage-historical` | No capture carries a FILE-plane-only historical usage record attributed to a nested (spawnDepth 2) subagent. | A capture with a nested subagent whose usage record arrives file-plane-only, with no paired stream-plane `message_start`. |
 | `!subagent-detached-live` | No capture leaves a subagent live post-turn with a gated ask raised under it. | A capture where a detached subagent is still running when the turn ends, and itself raises a `canUseTool` ask before the capture stops. |
@@ -374,7 +372,8 @@ prompts against the registry's 147 named scenarios:
   `BudgetWarning: true` field implies. This is a real drift in the sidecar's own
   test data (out of scope for e2e coverage per the owner's ruling, but likely worth
   a one-line fix — rename the prompt to `"!context-budget-warning"` — whenever
-  that file is next touched).
+  that file is next touched). MOOT since 2026-10-06: the scenario, its sidecar
+  row and the context-budget footer line are all retired (owner ruling).
 
 ## Arms without an e2e lever (project-lead ruling, 2026-09-04)
 

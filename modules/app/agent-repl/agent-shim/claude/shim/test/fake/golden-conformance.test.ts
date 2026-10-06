@@ -123,8 +123,6 @@ function comparableSessionArms(run: GoldenRun): string[] {
  * unit kinds, session arms, turn terminals.
  */
 const EXCLUDED: Readonly<Record<string, string>> = {
-  "context-budget-warning":
-    "no single counterpart: the capture holds no budget-warning record at all (MANIFEST evidence gap), so no mock scenario stands for it",
   "ctrl-b-detach-of-foreground-subagent":
     "PARKING: `!ctrl-b` waits on DetachForeground, a caller verb this harness does not issue; exercised in test/integration/detached.test.ts",
   "ctrl-b-detach-of-foreground-work":

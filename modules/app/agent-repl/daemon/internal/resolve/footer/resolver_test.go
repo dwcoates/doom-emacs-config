@@ -296,26 +296,6 @@ func TestAContextCutEndsTheClear(t *testing.T) {
 	}
 }
 
-func TestAFailedCompactionDrawsItsAccountAsEvidence(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActCompact})
-
-	// Act
-	h.r.OnContextCut(testWS, mainAgent, &conversationv1.ContextCut{
-		Cut: &conversationv1.ContextCut_CompactionFailed{
-			CompactionFailed: &conversationv1.ContextCompactionFailed{Error: "summary model refused"},
-		},
-	})
-
-	// Assert
-	idle := h.view(t).GetStrip().GetStatus().GetIdle()
-	text := idle.GetActivity().GetSalient().GetContextBudget().GetText()
-	if text == "" || !contains(text, "summary model refused") {
-		t.Fatalf("activity text = %q, want the producer's account", text)
-	}
-}
-
 func TestAFailedCompactionIsRecordedAtWarn(t *testing.T) {
 	// Arrange
 	h := newHarness(t)

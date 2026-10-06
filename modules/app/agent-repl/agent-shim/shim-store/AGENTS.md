@@ -1246,7 +1246,7 @@ make coverage                         # ../../bin/report-nonlisp-coverage.sh sto
 - Store-side fixture keys reproduce the producers' real spellings exactly:
   `bash:<run>:start` / `bash:<run>:tail` / `bash:<run>:terminal`,
   `detached:<work id>` for an announcement,
-  `session:context_budget_warning:<uuid>`, and
+  `session:<arm>:<uuid>` for a session-plane page line, and
   `residue:<vendor record uuid>` with the `residue:file:<path>:<offset>`
   fallback. A subject that keys an announcement by a unit key is testing a
   spelling no producer uses.

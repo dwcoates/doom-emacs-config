@@ -576,8 +576,8 @@ func (r *resolver) SetColdGateAnswer(ws ids.WorkspaceID, answer *ColdGateAnswer)
 			}
 			r.standCompaction(ws, s, answer.Text, "daemon.footer.set_cold_gate_answer")
 			// THE ANSWER'S COMPACTION CONCLUDING IS AN OUTCOME like the
-			// vendor's own: announced, and the context-budget line settled by
-			// it, beneath the answer's line that its verb ends.
+			// vendor's own: announced beneath the answer's line that its verb
+			// ends.
 			if answer.Progress != nil && concludedPhase(answer.Progress.GetPhase()) {
 				r.concludeCompaction(ws, s, answer.Progress)
 			}
@@ -643,25 +643,6 @@ func (r *resolver) retireMomentary(ws ids.WorkspaceID) {
 
 // ---- FooterSink -----------------------------------------------------------
 
-// OnContextBudgetWarning stands the vendor's context-budget warning as the
-// salient `context_budget` line (owner ruling, 2026-09-30). It is an
-// AGENT-PLANE fact — a page line of the agent's book — and it stands until a
-// cut shrinks the context; a SUBAGENT's warning also ends with that subagent's
-// run, whose context it was about.
-func (r *resolver) OnContextBudgetWarning(ws ids.WorkspaceID, agent *conversationv1.AgentId, warning *conversationv1.ContextBudgetWarning) {
-	if warning == nil {
-		return
-	}
-	r.mutate(ws, "daemon.footer.on_context_budget_warning", "the footer took a context-budget warning",
-		dlog.Context{"agent_id": agent.GetValue()}, func(s *wsState) {
-			owner := agent.GetValue()
-			if owner == s.mainAgent {
-				owner = ""
-			}
-			r.standContextBudget(ws, s, owner, warning.GetText())
-		})
-}
-
 // OnLink is the connectivity change the footer reflects.
 func (r *resolver) OnLink(ws ids.WorkspaceID, link sessionwatcher.LinkState) {
 	r.mutate(ws, "daemon.footer.on_link", "the footer took a link state",
@@ -698,10 +679,6 @@ func (r *resolver) OnLink(ws ids.WorkspaceID, link sessionwatcher.LinkState) {
 // line: a session that has (re)started is one the vendor served, which is the
 // roster's rule for its vendor_blocked on the same event, so the strip and
 // the dot lift together.
-//
-// A START NAMING ANOTHER VENDOR SESSION IS A SWITCH: the context the
-// context-budget line warned about is not this session's, so the line ends. A
-// restart of the same session keeps it, because its context is unchanged.
 func (r *resolver) OnSessionStarted(ws ids.WorkspaceID, started *conversationv1.SessionStarted) {
 	r.mutate(ws, "daemon.footer.on_session_started", "the footer took a session start",
 		dlog.Context{"vendor_session_id": started.GetVendorSessionId()}, func(s *wsState) {
@@ -713,12 +690,6 @@ func (r *resolver) OnSessionStarted(ws ids.WorkspaceID, started *conversationv1.
 			// raises the line again.
 			s.queryDied = nil
 			s.stateUnreported = false
-			if id := started.GetVendorSessionId(); id != "" {
-				if s.vendorSession != "" && s.vendorSession != id {
-					r.endContextBudget(ws, s, "daemon.footer.on_session_started.switch")
-				}
-				s.vendorSession = id
-			}
 		})
 }
 
@@ -1200,10 +1171,9 @@ func linkName(link sessionwatcher.LinkState) string {
 // and the turn is over either way.
 //
 // A FAILED COMPACTION IS NOT SILENCE: nothing was cut and the context is still
-// too large, which is exactly what the context-budget line says, so the
-// producer's account stands as the salient `context_budget` line and is
-// recorded at WARN. A cut that SUCCEEDED — a compaction or a /clear — shrank
-// the context, so it ends the context-budget line, whatever stood it.
+// too large, so the producer's account is recorded at WARN. It raises NO
+// footer line (owner ruling, 2026-10-06): the feed's outcome marker is its
+// whole account.
 func (r *resolver) OnContextCut(ws ids.WorkspaceID, agent *conversationv1.AgentId, cut *conversationv1.ContextCut) {
 	if cut == nil {
 		return
@@ -1223,16 +1193,13 @@ func (r *resolver) OnContextCut(ws ids.WorkspaceID, agent *conversationv1.AgentI
 			concludeCompactionID(s, cutCompactionID(cut))
 			// THE LINE GOES WITH THE ACT IT NARRATED. The cut is the
 			// compaction's end signal, so its progress sentence stops standing
-			// here; a failed cut still says what went wrong, through the
-			// context-budget line below.
+			// here; a failed cut says what went wrong through the feed's
+			// outcome marker, never a footer line.
 			r.endCompaction(ws, s, "daemon.footer.on_context_cut")
 			s.tok.settled = true
 			if failed == nil {
-				r.endContextBudget(ws, s, "daemon.footer.on_context_cut."+arm)
 				return
 			}
-			r.standContextBudget(ws, s, "",
-				"compaction failed — "+truncate(failed.CompactionFailed.GetError(), DefaultWarningRowWidth))
 			r.logOf(ws, s).Warn("daemon.footer.on_context_cut",
 				"a compaction failed, so nothing was cut and the context is still too large",
 				dlog.Context{"arm": arm, "error": failed.CompactionFailed.GetError()})

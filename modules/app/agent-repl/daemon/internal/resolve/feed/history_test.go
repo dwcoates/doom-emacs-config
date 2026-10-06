@@ -501,33 +501,6 @@ func TestAReplayedApiErrorStaysEvidenceAndNeverBecomesATerminal(t *testing.T) {
 	}
 }
 
-func TestAReplayedContextBudgetWarningDrawsNoRow(t *testing.T) {
-	// Arrange, Act: the vendor's own budget warning is a PAGE LINE whose home
-	// is the footer's activity line.
-	h := newHarness(t)
-	h.replay(historyPage(&conversationv1.HistoryFloor{},
-		frameEntry(mainAgent(), &conversationv1.AgentUpdate{
-			Update: &conversationv1.AgentUpdate_ContextBudgetWarning{
-				ContextBudgetWarning: &conversationv1.ContextBudgetWarning{
-					Text: "the context window is filling",
-				},
-			},
-		}),
-	))
-
-	// Assert: no row — and not the unset-arm warning either, because the arm
-	// is handled and simply draws nothing.
-	if rows := h.rows(rootFeed()); len(rows) != 0 {
-		t.Fatalf("rows = %d, want none", len(rows))
-	}
-	if h.hasRecord("warn", "daemon.feed.history_update_unset") {
-		t.Fatalf("records = %+v, want the arm handled rather than unrecognized", h.records())
-	}
-	if !h.hasRecord("debug", "daemon.feed.context_budget_warning_draws_nothing") {
-		t.Fatalf("records = %+v, want the draws-nothing branch recorded", h.records())
-	}
-}
-
 func TestAReplayedQuestionAndPermissionDrawTheirCards(t *testing.T) {
 	// Arrange, Act.
 	h := newHarness(t)

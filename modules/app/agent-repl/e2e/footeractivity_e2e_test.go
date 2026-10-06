@@ -15,7 +15,7 @@ import (
 // arm carries its cell under the same shape (footer.proto, the status family's
 // rules): a salient line, or the unpinned tiers — a transient over the one
 // enduring line. The status-independent
-// salient kinds (update, notification, context_budget) ride every
+// salient kinds (update, notification) ride every
 // arm's salient oneof under the same field names, so one reader serves every
 // arm and a test never misses a line because the status moved underneath it.
 
@@ -73,14 +73,6 @@ func footerSalientKind(v *frontendv1.FooterView, kind protoreflect.Name) protore
 func footerNotification(v *frontendv1.FooterView) string {
 	if m := footerSalientKind(v, "notification"); m != nil {
 		return m.Interface().(*frontendv1.FooterStatusActivityNotification).GetText()
-	}
-	return ""
-}
-
-// footerContextBudget answers the standing context-budget line's text, or "".
-func footerContextBudget(v *frontendv1.FooterView) string {
-	if m := footerSalientKind(v, "context_budget"); m != nil {
-		return m.Interface().(*frontendv1.FooterStatusActivityContextBudget).GetText()
 	}
 	return ""
 }

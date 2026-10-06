@@ -1861,35 +1861,6 @@ func TestFooterAPushNotificationStandsOverALiveTransient(t *testing.T) {
 	})
 }
 
-// A CONTEXT-BUDGET WARNING IS SALIENT (owner ruling, 2026-09-30), standing
-// until a cut shrinks the context.
-func TestFooterAContextBudgetWarningStandsUntilACut(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newOpened(t, harness.Opts{})
-	footer := f.d.WatchFooter(f.ws)
-	f.shim.PushAgentFrame(mainAgent, updateFrame(mainAgent, &conversationv1.AgentUpdate{
-		Update: &conversationv1.AgentUpdate_ContextBudgetWarning{ContextBudgetWarning: &conversationv1.ContextBudgetWarning{Text: "context filling"}},
-	}))
-	awaitFooter(t, f, footer, "the salient context-budget line", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetIdle().GetActivity().GetSalient().GetContextBudget().GetText() == "context filling"
-	})
-
-	// Act
-	f.shim.PushSessionUpdate(&conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_CompactionProgress{
-		CompactionProgress: &conversationv1.SessionCompactionProgress{
-			Phase:        conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_STARTED,
-			TokensBefore: 180_000,
-			TokensAfter:  20_000,
-		}}})
-
-	// Assert
-	awaitFooter(t, f, footer, "the budget line ended by the compaction", func(v *frontendv1.FooterView) bool {
-		activity := v.GetStrip().GetStatus().GetIdle().GetActivity()
-		return activity.GetSalient().GetContextBudget() == nil && activity.GetUnpinned().GetTransient().GetCompactionConcluded() != nil
-	})
-}
-
 // THE ENDURING LINE IS ALWAYS DRAWN: an idle session with no transient still
 // states how close the account is and how full the context window is, however
 // unremarkable the figures.
