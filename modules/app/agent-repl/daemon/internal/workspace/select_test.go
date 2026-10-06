@@ -3,12 +3,14 @@ package workspace
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"testing"
 	"time"
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/shimclient"
 	"claude-repld/internal/wsm"
 )
 
@@ -822,5 +824,42 @@ func TestSelectStartsAnOpenWorkspaceWithNoSession(t *testing.T) {
 	// Assert
 	if len(f.fleet.started) != 1 || f.fleet.started[0] != "w1" {
 		t.Fatalf("started = %v, want [w1]: a looked-at workspace is never session-less", f.fleet.started)
+	}
+}
+
+// standingDownStart is the error a revival meets on a daemon standing down,
+// spelled as the bring-up spells it: the sentinel wrapped beside the OPEN's
+// spawn_failed refusal.
+func standingDownStart() error {
+	return fmt.Errorf("%w: %w", shimclient.ErrStandingDown, &Refusal{Rpc: "OpenWorkspace", Arm: ArmSpawnFailed})
+}
+
+func TestSelectOnADaemonStandingDownAnswersTheStandingDownArm(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.hibernate("w1")
+	f.fleet.startErr = standingDownStart()
+
+	// Act.
+	err := f.verbs.Select(context.Background(), "w1")
+
+	// Assert: SelectWorkspaceError's own arm, never the open's spawn_failed.
+	asRefusal(t, err, ArmStandingDown)
+}
+
+func TestSelectOnADaemonStandingDownLeavesTheSelectionStanding(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.hibernate("w1")
+	f.fleet.startErr = standingDownStart()
+
+	// Act.
+	_ = f.verbs.Select(context.Background(), "w1")
+
+	// Assert: the next daemon serves this selection.
+	if f.db.current == nil || *f.db.current != "w1" {
+		t.Fatalf("current = %v, want w1", f.db.current)
 	}
 }

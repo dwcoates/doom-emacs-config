@@ -27,6 +27,7 @@ import { AnswerPermissionResponseSchema } from "../../../proto/gen/ts/agentrepl/
 import { UpdateHeldPromptResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_held_prompt_pb";
 
 import { bootColdOnce, chipFailureArms, startHarness, type Harness } from "./harness";
+import { SELECT_WORKSPACE_EXPECTED_ARMS } from "../../src/rpc/refusal";
 import { ROOT_FEED, REFUSAL_FACTS, refusalArmsOf, type RpcName } from "./fake-daemon";
 import {
   ACCOUNT_CONFIG_DIR,
@@ -825,6 +826,8 @@ describe("per-rpc refusal arms", () => {
         // `link_unresolved` is drawn nowhere by this page: the daemon publishes
         // the footer line and asks the question in the conversation.
         .filter((arm) => arm !== "linkUnresolved")
+        // SelectWorkspace's expected answers are not refusals; pinned below.
+        .filter((arm) => testCase.rpc !== "selectWorkspace" || SELECT_WORKSPACE_EXPECTED_ARMS[arm] === undefined)
         .map((arm) => ({ name: testCase.name, testCase, arm })),
     ),
   )("draws $name's $arm arm at its call site", async ({ testCase, arm }) => {
@@ -832,6 +835,16 @@ describe("per-rpc refusal arms", () => {
     harness = await provoke(testCase, arm);
     // Assert
     expect(harness.$(`${testCase.site} .refusal[data-arm="${arm}"]`)).not.toBeNull();
+  });
+});
+
+describe("SelectWorkspace's standing_down arm", () => {
+  it("draws nothing at the row, the next daemon taking the selection", async () => {
+    // Arrange / Act
+    const site = REFUSAL_SITES.find((s) => s.rpc === "selectWorkspace")!;
+    harness = await provoke(site, "standingDown");
+    // Assert
+    expect(harness.$(`${site.site} .refusal`)).toBeNull();
   });
 });
 

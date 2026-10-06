@@ -157,6 +157,9 @@ const (
 	ArmLinkUnresolved = "link_unresolved"
 	// ArmBlankCommand is a RequestCommandSupport with no command named.
 	ArmBlankCommand = "blank_command"
+	// ArmStandingDown is a select that reached a daemon standing down: the
+	// selection is recorded, no session is started (SelectWorkspaceError).
+	ArmStandingDown = "standing_down"
 	// ArmSpawnFailed is a bring-up whose shim process would not come up.
 	ArmSpawnFailed = "spawn_failed"
 	// ArmWorktreeUnrestorable is an open of a workspace whose directory is

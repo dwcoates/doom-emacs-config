@@ -500,8 +500,9 @@ naming another workspace until it is answered."
 
 (defun agent-repl-host-select (ws &optional on-settled)
   "Tell the daemon the user switched to workspace WS.
-ON-SETTLED, when given, is called with `:success', `:error' or
-`:failure' once the call has an outcome — the one moment a caller
+ON-SETTLED, when given, is called with `:success', `:error',
+`:standing-down' (the daemon is leaving: it stamped the selection, the
+next daemon is asked again) or `:failure' once the call has an outcome — the one moment a caller
 holding state on the selection\='s behalf (the link-up re-assertion) may
 let go of it, whichever way it went — and with `:superseded' when a
 newer selection replaced it before it was sent.
@@ -595,6 +596,20 @@ ON-SETTLED is as `agent-repl-host-select' documents."
      (setq agent-repl-host-last-selected-id (plist-get ref :id))
      (agent-repl--log ws "elisp.host.selected ws=%s id=%S" ws (plist-get ref :id))
      (when on-settled (funcall on-settled :success)))
+    ((and :error
+          (guard (eq (plist-get (plist-get (plist-get response :value) :cause) :arm)
+                     :standing-down)))
+     ;; A DAEMON THAT IS LEAVING STAMPED THE SELECTION and started no
+     ;; session for it.  It is an expected answer, not a refusal: the id is
+     ;; recorded as Emacs's selection exactly as an ack records it, because
+     ;; the daemon did stamp it, and that is what the next link-up
+     ;; re-asserts on the daemon that serves next
+     ;; (`agent-repl-host--selected-dir', `agent-repl-host--reassert-selection'),
+     ;; which revives the workspace.
+     (setq agent-repl-host-last-selected-id (plist-get ref :id))
+     (agent-repl--info ws "elisp.host.select-standing-down ws=%s id=%S reassert=next-daemon"
+                       ws (plist-get ref :id))
+     (when on-settled (funcall on-settled :standing-down)))
     (:error
      (agent-repl-host--on-refused ws "select" (plist-get response :value))
      (when on-settled (funcall on-settled :error)))

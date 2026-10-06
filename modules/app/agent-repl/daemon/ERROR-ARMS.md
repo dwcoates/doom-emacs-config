@@ -223,3 +223,16 @@ daemon that could not be reached. `AnswerColdGateError.reopen_failed` (tag 8)
 now carries it, `internal/workspace/answers.go` raises it under
 `AnswerColdGate`'s OWN vocabulary, and the same failure opens the
 `cold_gate_reopen_failed` fault that puts the line on the footer.
+
+## `SelectWorkspaceError.standing_down` landed, 2026-10-06
+
+A select that reached a daemon standing down recorded the selection, then had
+its revival refused by the supervisor, and answered under the OPEN's arm
+(`spawn_failed`), which `SelectWorkspaceError` does not carry: a WARN
+`daemon.refusal.unlanded_arm` here and an ERROR `elisp.host.select-failed` in
+Emacs for an expected answer. `SelectWorkspaceError.standing_down` (tag 5) now
+carries it, at INFO.
+
+| rpc | arm | daemon-side refusal | package |
+| --- | --- | --- | --- |
+| SelectWorkspace | `standing_down` | the select's revival met `shimclient.ErrStandingDown`; the selection is already recorded and the client re-asserts it on the next daemon | workspace |

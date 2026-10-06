@@ -201,6 +201,7 @@ type SelectWorkspaceError struct {
 	//	*SelectWorkspaceError_WorkspaceRefMismatch
 	//	*SelectWorkspaceError_TransferringAway
 	//	*SelectWorkspaceError_NotYetAdopted
+	//	*SelectWorkspaceError_StandingDown
 	Cause         isSelectWorkspaceError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -279,6 +280,15 @@ func (x *SelectWorkspaceError) GetNotYetAdopted() *SelectWorkspaceNotYetAdopted 
 	return nil
 }
 
+func (x *SelectWorkspaceError) GetStandingDown() *SelectWorkspaceStandingDown {
+	if x != nil {
+		if x, ok := x.Cause.(*SelectWorkspaceError_StandingDown); ok {
+			return x.StandingDown
+		}
+	}
+	return nil
+}
+
 type isSelectWorkspaceError_Cause interface {
 	isSelectWorkspaceError_Cause()
 }
@@ -303,6 +313,14 @@ type SelectWorkspaceError_NotYetAdopted struct {
 	NotYetAdopted *SelectWorkspaceNotYetAdopted `protobuf:"bytes,4,opt,name=not_yet_adopted,json=notYetAdopted,proto3,oneof"`
 }
 
+type SelectWorkspaceError_StandingDown struct {
+	// This daemon is standing down (a stop, a restart, a drain at its end)
+	// and starts no session. The SELECTION IS RECORDED; only the revival is
+	// not attempted here. The client re-asserts the selection on the daemon
+	// that serves next (a successor, or a fresh boot), which revives it.
+	StandingDown *SelectWorkspaceStandingDown `protobuf:"bytes,5,opt,name=standing_down,json=standingDown,proto3,oneof"`
+}
+
 func (*SelectWorkspaceError_UnknownWorkspace) isSelectWorkspaceError_Cause() {}
 
 func (*SelectWorkspaceError_WorkspaceRefMismatch) isSelectWorkspaceError_Cause() {}
@@ -310,6 +328,8 @@ func (*SelectWorkspaceError_WorkspaceRefMismatch) isSelectWorkspaceError_Cause()
 func (*SelectWorkspaceError_TransferringAway) isSelectWorkspaceError_Cause() {}
 
 func (*SelectWorkspaceError_NotYetAdopted) isSelectWorkspaceError_Cause() {}
+
+func (*SelectWorkspaceError_StandingDown) isSelectWorkspaceError_Cause() {}
 
 type SelectWorkspaceUnknownWorkspace struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -473,6 +493,47 @@ func (*SelectWorkspaceNotYetAdopted) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_select_workspace_proto_rawDescGZIP(), []int{7}
 }
 
+// The answer of a daemon that is leaving: the selection stands in the state
+// it shares with whatever serves next, and no session is started for a
+// workspace this daemon is about to stop serving. It carries no address,
+// because a plain stand-down has no successor to name; a handover's departing
+// daemon answers `transferring_away` instead.
+type SelectWorkspaceStandingDown struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SelectWorkspaceStandingDown) Reset() {
+	*x = SelectWorkspaceStandingDown{}
+	mi := &file_agentrepl_v1_endpoint_select_workspace_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SelectWorkspaceStandingDown) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SelectWorkspaceStandingDown) ProtoMessage() {}
+
+func (x *SelectWorkspaceStandingDown) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_select_workspace_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SelectWorkspaceStandingDown.ProtoReflect.Descriptor instead.
+func (*SelectWorkspaceStandingDown) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_select_workspace_proto_rawDescGZIP(), []int{8}
+}
+
 var File_agentrepl_v1_endpoint_select_workspace_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_select_workspace_proto_rawDesc = "" +
@@ -484,19 +545,21 @@ const file_agentrepl_v1_endpoint_select_workspace_proto_rawDesc = "" +
 	"\asuccess\x18\x01 \x01(\v2$.agentrepl.v1.SelectWorkspaceSuccessH\x00R\asuccess\x12:\n" +
 	"\x05error\x18\x02 \x01(\v2\".agentrepl.v1.SelectWorkspaceErrorH\x00R\x05errorB\b\n" +
 	"\x06result\"\x18\n" +
-	"\x16SelectWorkspaceSuccess\"\x9c\x03\n" +
+	"\x16SelectWorkspaceSuccess\"\xee\x03\n" +
 	"\x14SelectWorkspaceError\x12\\\n" +
 	"\x11unknown_workspace\x18\x01 \x01(\v2-.agentrepl.v1.SelectWorkspaceUnknownWorkspaceH\x00R\x10unknownWorkspace\x12i\n" +
 	"\x16workspace_ref_mismatch\x18\x02 \x01(\v21.agentrepl.v1.SelectWorkspaceWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12\\\n" +
 	"\x11transferring_away\x18\x03 \x01(\v2-.agentrepl.v1.SelectWorkspaceTransferringAwayH\x00R\x10transferringAway\x12T\n" +
-	"\x0fnot_yet_adopted\x18\x04 \x01(\v2*.agentrepl.v1.SelectWorkspaceNotYetAdoptedH\x00R\rnotYetAdoptedB\a\n" +
+	"\x0fnot_yet_adopted\x18\x04 \x01(\v2*.agentrepl.v1.SelectWorkspaceNotYetAdoptedH\x00R\rnotYetAdopted\x12P\n" +
+	"\rstanding_down\x18\x05 \x01(\v2).agentrepl.v1.SelectWorkspaceStandingDownH\x00R\fstandingDownB\a\n" +
 	"\x05cause\"!\n" +
 	"\x1fSelectWorkspaceUnknownWorkspace\"H\n" +
 	"#SelectWorkspaceWorkspaceRefMismatch\x12!\n" +
 	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\";\n" +
 	"\x1fSelectWorkspaceTransferringAway\x12\x18\n" +
 	"\aaddress\x18\x01 \x01(\tR\aaddress\"\x1e\n" +
-	"\x1cSelectWorkspaceNotYetAdoptedB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\x1cSelectWorkspaceNotYetAdopted\"\x1d\n" +
+	"\x1bSelectWorkspaceStandingDownB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_select_workspace_proto_rawDescOnce sync.Once
@@ -510,7 +573,7 @@ func file_agentrepl_v1_endpoint_select_workspace_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_select_workspace_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_select_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_agentrepl_v1_endpoint_select_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_agentrepl_v1_endpoint_select_workspace_proto_goTypes = []any{
 	(*SelectWorkspaceRequest)(nil),              // 0: agentrepl.v1.SelectWorkspaceRequest
 	(*SelectWorkspaceResponse)(nil),             // 1: agentrepl.v1.SelectWorkspaceResponse
@@ -520,21 +583,23 @@ var file_agentrepl_v1_endpoint_select_workspace_proto_goTypes = []any{
 	(*SelectWorkspaceWorkspaceRefMismatch)(nil), // 5: agentrepl.v1.SelectWorkspaceWorkspaceRefMismatch
 	(*SelectWorkspaceTransferringAway)(nil),     // 6: agentrepl.v1.SelectWorkspaceTransferringAway
 	(*SelectWorkspaceNotYetAdopted)(nil),        // 7: agentrepl.v1.SelectWorkspaceNotYetAdopted
-	(*v1.WorkspaceRef)(nil),                     // 8: workspace.v1.WorkspaceRef
+	(*SelectWorkspaceStandingDown)(nil),         // 8: agentrepl.v1.SelectWorkspaceStandingDown
+	(*v1.WorkspaceRef)(nil),                     // 9: workspace.v1.WorkspaceRef
 }
 var file_agentrepl_v1_endpoint_select_workspace_proto_depIdxs = []int32{
-	8, // 0: agentrepl.v1.SelectWorkspaceRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	9, // 0: agentrepl.v1.SelectWorkspaceRequest.workspace:type_name -> workspace.v1.WorkspaceRef
 	2, // 1: agentrepl.v1.SelectWorkspaceResponse.success:type_name -> agentrepl.v1.SelectWorkspaceSuccess
 	3, // 2: agentrepl.v1.SelectWorkspaceResponse.error:type_name -> agentrepl.v1.SelectWorkspaceError
 	4, // 3: agentrepl.v1.SelectWorkspaceError.unknown_workspace:type_name -> agentrepl.v1.SelectWorkspaceUnknownWorkspace
 	5, // 4: agentrepl.v1.SelectWorkspaceError.workspace_ref_mismatch:type_name -> agentrepl.v1.SelectWorkspaceWorkspaceRefMismatch
 	6, // 5: agentrepl.v1.SelectWorkspaceError.transferring_away:type_name -> agentrepl.v1.SelectWorkspaceTransferringAway
 	7, // 6: agentrepl.v1.SelectWorkspaceError.not_yet_adopted:type_name -> agentrepl.v1.SelectWorkspaceNotYetAdopted
-	7, // [7:7] is the sub-list for method output_type
-	7, // [7:7] is the sub-list for method input_type
-	7, // [7:7] is the sub-list for extension type_name
-	7, // [7:7] is the sub-list for extension extendee
-	0, // [0:7] is the sub-list for field type_name
+	8, // 7: agentrepl.v1.SelectWorkspaceError.standing_down:type_name -> agentrepl.v1.SelectWorkspaceStandingDown
+	8, // [8:8] is the sub-list for method output_type
+	8, // [8:8] is the sub-list for method input_type
+	8, // [8:8] is the sub-list for extension type_name
+	8, // [8:8] is the sub-list for extension extendee
+	0, // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_select_workspace_proto_init() }
@@ -551,6 +616,7 @@ func file_agentrepl_v1_endpoint_select_workspace_proto_init() {
 		(*SelectWorkspaceError_WorkspaceRefMismatch)(nil),
 		(*SelectWorkspaceError_TransferringAway)(nil),
 		(*SelectWorkspaceError_NotYetAdopted)(nil),
+		(*SelectWorkspaceError_StandingDown)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -558,7 +624,7 @@ func file_agentrepl_v1_endpoint_select_workspace_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_select_workspace_proto_rawDesc), len(file_agentrepl_v1_endpoint_select_workspace_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   8,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
