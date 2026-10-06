@@ -619,23 +619,14 @@ export function openWorkspaceRefusal(cause: CauseOf<OpenWorkspaceError>): string
       );
     }
     case "worktreeUnrestorable":
-      // NOT A FAULT: the row names a workspace whose directory and branch are
-      // both gone, so the sentence says exactly that and what it means.
-      return unrestorableWorktreeText(cause.value.dir, cause.value.branch);
+      // NOT A FAULT, and ONE ARM FOR SEVERAL REASONS: the branch is gone,
+      // none was recorded, the repository is gone, or the workspace was
+      // merged. The daemon's own sentence names which, with the directory and
+      // branch, so it is drawn as it came -- the same sentence Emacs shows.
+      return cause.value.detail;
     default:
       return unreachableArm("OpenWorkspaceError.cause", cause.case);
   }
-}
-
-/**
- * A workspace that cannot be opened because there is nothing left to restore
- * its worktree from: its directory is gone, and so is its branch (or none was
- * ever recorded). The same sentence Emacs draws for the arm.
- */
-export function unrestorableWorktreeText(dir: string, branch: string): string {
-  return branch === ""
-    ? `its directory ${dir} is gone and no branch was recorded to restore it from`
-    : `its directory ${dir} is gone and its branch ${branch} no longer exists, so there is nothing to restore it from`;
 }
 
 /**
