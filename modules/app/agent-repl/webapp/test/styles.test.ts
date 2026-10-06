@@ -3384,3 +3384,16 @@ describe("the persistent-wifi glyph button", () => {
     expect(declarationsOf(".topbar-wifi-button") ?? "").toMatch(/cursor:\s*pointer/);
   });
 });
+
+describe("the cold gate's lead sentence", () => {
+  it("is drawn in the ordinary foreground, leaving color to its token figure alone", () => {
+    // Arrange
+    const rule = rulesOf(stylesheet).find((r) => r.selectors.includes(".hibernation-context"));
+
+    // Act
+    const declarations = rule?.declarations ?? "";
+
+    // Assert
+    expect(declarations).toMatch(/color:\s*var\(--fg\)/);
+  });
+});
