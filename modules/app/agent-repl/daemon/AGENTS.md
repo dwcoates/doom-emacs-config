@@ -1918,6 +1918,40 @@ Owner rulings, 2026-09-30 (`internal/promptqueue/acts.go`, `ahead.go`,
   said and never records it; the prompt row and the feed carry the user's
   words alone.
 
+## A mid-session vendor block holds every prompt after reconnect, unclassified
+
+Owner ruling, 2026-10-06 (`internal/promptqueue/vendorblock.go`,
+`internal/resolve/footer/vendorblock.go`).
+
+- **THE BLOCK IS THE FOOTER'S FACT** (`footer.Resolver.VendorBlock`): a
+  standing account or vendor block (`auth`, `usage_limit`, `billing`,
+  `vendor_error`) or a retry holding the running turn (`api_retrying`). A
+  vendor that will not START is not one; `Deps.SessionStarted` covers it.
+- **WHILE IT STANDS NOTHING IS CLASSIFIED OR SENT.** `Submit` holds a
+  main-thread prompt on `wsm.HoldReconnect` (the tray's `reconnect` arm,
+  badge "after reconnect", verdict `daemon_held`); a turn-end pop
+  (`mayPop`) and a lease ending (`OnLeaseChanged`) move what waits onto the
+  same hold; a force-through is refused. Bubble-addressed prompts and
+  `SubmitSessionAct` are not held by it.
+- **THE RELEASE EDGE** is the footer mutation in which the block stops
+  standing (`footer.WithVendorServes`, bound through
+  `cmd/claude-repld`'s `vendorServesForwarder` to `Queue.OnVendorServes`,
+  which runs off the caller's goroutine and is joined by `Drain`): a session
+  (re)start, a rate-limit verdict that is not rejected, a new turn opening, the
+  retried call answered, the retried turn ending. A session coming up
+  (`ReleaseReconnectHolds`) releases them too, which carries them across a
+  daemon restart. No release happens while the block still stands, and the
+  vendor-serves edge releases nothing while no session is up.
+- **POPPED OFF THE HOLD, THEY ARE CLASSIFIED** (`classifyReleased`), in queue
+  order: with nothing running the head is delivered, and every released prompt
+  behind it is judged against what is ahead of it. A submission landing
+  between the lift and its release performs the release first
+  (`releaseBeforeSubmit`), so it never overtakes them.
+- **GAP (owner question):** an account block lifted by nothing but a session
+  start or a vendor verdict (auth, billing, a usage limit with no further
+  rate-limit event) holds its prompts until the user restarts the workspace;
+  no timer releases a usage limit at its reset.
+
 ## The footer's activity cell has three tiers, and the daemon picks the one line
 
 Design record `docs/protobuf-design/footer-activity-tiers.md` ("THE PLAN",
