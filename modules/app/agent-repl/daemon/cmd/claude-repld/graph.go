@@ -55,7 +55,6 @@ import (
 	"claude-repld/internal/shimclient"
 	"claude-repld/internal/startup"
 	"claude-repld/internal/titlesynth"
-	"claude-repld/internal/vendortraffic"
 	"claude-repld/internal/vocab"
 	"claude-repld/internal/workspace"
 	"claude-repld/internal/wsm"
@@ -1018,9 +1017,6 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		return nil, fmt.Errorf("claude-repld: build the editor instance tracker: %w", err)
 	}
 
-	// THE VENDOR TRAFFIC SAMPLER measures every live shim's processes through
-	// the kernel, only while this daemon serves, and states what it counted to
-	// agent-repl's session once per round.
 	background := []backgroundLoop{
 		{Name: "drain", Run: drainController.Run},
 		{Name: "command_file_ingress", Run: ingress.Run},
@@ -1033,29 +1029,6 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		{Name: "persistent_wifi", Run: wifi.Run},
 		{Name: "news_digest", Run: digest.Run},
 	}
-	// A PROCESS WHOSE VENDOR IS FORBIDDEN MEASURES NOTHING: every test process
-	// sets AGENT_REPL_FORBID_VENDOR_CALLS, its vendor is the fake SDK, and no
-	// test reads the real kernel's network statistics.
-	if !p.Contracts.ForbidVendorCalls() {
-		sampler, err := vendortraffic.New(vendortraffic.Config{
-			ShimPIDs:  fleet.ShimPIDs,
-			Serves:    rolloutController.ServesIntake,
-			Processes: vendortraffic.KernelProcesses{},
-			Dial:      vendortraffic.DialStatistics,
-			Sink:      agentReplSession,
-			Log:       log,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("claude-repld: build the vendor traffic sampler: %w", err)
-		}
-		background = append(background, backgroundLoop{Name: "vendor_traffic", Run: func(ctx context.Context) error {
-			sampler.Run(ctx)
-			return nil
-		}})
-	} else {
-		log.Info(graphOperation, "vendor traffic is not measured: vendor calls are forbidden in this process", dlog.Context{envc.EnvForbidVendorCalls: "1"})
-	}
-
 	log.Debug(graphOperation, "the component graph is built", dlog.Context{
 		"joining": p.Opts.joining != "",
 	})
