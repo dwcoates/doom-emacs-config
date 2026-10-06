@@ -681,6 +681,25 @@ testing and coverage, and observability-gap reporting. Keep implementation
 mandates in the scoped `AGENTS.md` files and keep diagnostic recipes in the
 skill.
 
+## A diagnosis is evidenced in the logs, end to end (owner SOP, 2026-10-06)
+
+A diagnosis states a CAUSE only when every link of the chain from trigger to
+symptom is visible in the logs. Inference is not a diagnosis.
+
+- Every claimed link names the log record that shows it (operation,
+  timestamp, workspace, the context fields that carry the fact).
+- A link the logs cannot show is a LOGGING GAP, and an invisible action is a
+  logging defect (see "An invisible action is a logging defect"): add the
+  records that would show it, at the level the logging rules assign.
+- WHEN THE FAILURE IS EASY TO REPRODUCE, REPRODUCE IT with that logging in
+  place and read the chain off the new records — before proposing a fix.
+  "Easy" includes a restart, a workspace switch, one prompt, or a scripted
+  e2e/integration scenario on the fake vendor.
+- A report separates what the logs CONFIRM from what is still INFERRED, and
+  the inferred part is never presented as the cause.
+- The fix is verified the same way: reproduce again and show the records that
+  prove the chain is now broken.
+
 ## Runtime operations go through one door and one skill
 
 Building, bouncing, hard bouncing, deploying, hot-reloading, health checks,
