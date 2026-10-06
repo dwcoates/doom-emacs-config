@@ -23,6 +23,7 @@ import type { RowContext } from "../../../src/feed/renderers.js";
 import { MalformedView } from "../../../src/rpc/malformed.js";
 import {
   COLD_GATE_COPY,
+  COLD_GATE_HEAT_PROPERTY,
   drawFeedColdGate,
   scopeLabel,
   scopeName,
@@ -289,6 +290,29 @@ describe("the standing gate", () => {
       css.includes("--cold-gate-compact-border: #128a3d;"),
       css.includes(".cold-gate .hibernation-actions:has(> .cold-gate-buttons) { margin-bottom: 0.45rem; }"),
     ]).toEqual([true, true, true, true]);
+  });
+
+  it("gives the card the token figure's color for its frame and dividers", () => {
+    // Act
+    const el = drawFeedColdGate(gate(standing()), askHarness().rc);
+    // Assert
+    const card = el.matches(".cold-gate") ? el : el.querySelector<HTMLElement>(".cold-gate");
+    const figure = el.querySelector<HTMLElement>(".cold-gate-tokens");
+    expect(figure?.style.color).not.toBe("");
+    expect(card?.style.getPropertyValue(COLD_GATE_HEAT_PROPERTY)).toBe(figure?.style.color);
+  });
+
+  it("draws the frame and the submenu divider in the card's heat", async () => {
+    // Arrange
+    const css = (await import("../../../src/styles.css?raw")).default;
+    // Act
+    const frame = /\n\.cold-gate\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
+    const divider = /\.cold-gate-submenu\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
+    // Assert
+    expect([
+      frame.includes("border: 1px solid var(--cold-gate-heat, var(--revival-gate-border))"),
+      divider.includes("border-top: 1px solid var(--cold-gate-heat, var(--revival-gate-border))"),
+    ]).toEqual([true, true]);
   });
 
   it("draws pay and resume with the red border", async () => {
