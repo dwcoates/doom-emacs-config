@@ -17,6 +17,7 @@
 #   what the scripts ask: rev-parse HEAD | --show-toplevel |
 #                         --is-inside-work-tree | --git-dir |
 #                         --git-common-dir, diff --cached --name-only,
+#                         config KEY VALUE, config --type=bool --get KEY,
 #                         status --porcelain,
 #                         ls-files -s, log -1 --format, show -s --format=%ct,
 #                         rev-list --count A..B, worktree list --porcelain
@@ -292,6 +293,32 @@ case "$CMD $*" in
     # The repository's own directory is .fakegit, and there is one worktree,
     # so the common dir is the same directory.
     "rev-parse --git-dir" | "rev-parse --git-common-dir") printf '%s\n' "$G" ;;
+    # Repository config is <top>/.fakegit/config, one KEY=VALUE per line, the
+    # last line for a key winning, as a later `git config` replaces it.
+    "config --type=bool --get "*)
+        [ "${#OPTS[@]}" -eq 3 ] || EXIT=2 die "unmodelled config form: $*"
+        key="${OPTS[2]}"
+        value=""
+        found=0
+        if [ -f "$G/config" ]; then
+            while IFS= read -r line; do
+                if [ "${line%%=*}" = "$key" ]; then value="${line#*=}"; found=1; fi
+            done < "$G/config"
+        fi
+        [ "$found" -eq 1 ] || exit 1
+        # git's own boolean spellings, case-insensitive; anything else is the
+        # fatal error real git answers with status 128.
+        case "$(printf '%s' "$value" | tr '[:upper:]' '[:lower:]')" in
+            true | yes | on | 1) printf 'true\n' ;;
+            false | no | off | 0 | "") printf 'false\n' ;;
+            *) die "bad boolean config value '$value' for '$key'" ;;
+        esac
+        ;;
+    "config "*)
+        [ "${#OPTS[@]}" -eq 2 ] || EXIT=2 die "unmodelled config form: $*"
+        case "${OPTS[0]}" in -*) EXIT=2 die "unmodelled config form: $*" ;; esac
+        printf '%s=%s\n' "${OPTS[0]}" "${OPTS[1]}" >> "$G/config"
+        ;;
     "diff --cached --name-only"*)
         [ "${OPTS[*]}" = "--cached --name-only" ] || EXIT=2 die "unmodelled diff form: $*"
         changed_paths "$HEAD_TREE" "$G/index" | while IFS= read -r path; do
