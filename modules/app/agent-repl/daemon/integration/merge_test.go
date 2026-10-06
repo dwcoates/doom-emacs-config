@@ -950,10 +950,10 @@ const displacedBounceText = "keep going"
 // root. It answers the fixture (rebound to the new daemon), that daemon, and
 // the resubmission's own StartTurn.
 //
-// THE MERGE MUST NOT COME BACK. An unclean merge target is not resumable, so
-// the restart FAILS the interrupted merge instead of running it again — which
-// is what leaves the displaced record to the boot sweep and keeps this test's
-// StartTurn trace free of a second run's traffic.
+// THE CRASH LANDS BEFORE THE MERGE'S FIRST PROGRESS RECORD (the capture
+// precedes it), so the restart has no step to resume the merge at: it runs
+// again from the queue, and the displaced record -- which no resumed merge
+// owns -- is the boot sweep's to put back.
 func displacedTurnAcrossABounce(t *testing.T) (*fixture, *harness.Daemon, *shimv1.StartTurnRequest) {
 	t.Helper()
 	repo := harness.NewRepo(t)
@@ -967,11 +967,11 @@ func displacedTurnAcrossABounce(t *testing.T) (*fixture, *harness.Daemon, *shimv
 		"AGENT_REPL_MERGE_PAUSE_AFTER_CAPTURE=" + rendezvous,
 	}})
 	// The sweep covers every test; these declared records are evidence of the
-	// crash this test stages. The restart refuses to resume the
-	// merge into an unclean target (daemon.merge.recover), and a turn left in
-	// flight by a killed daemon is closed by the next boot
-	// (daemon.promptqueue.restore_holds) -- which is what the RESUBMITTED turn
-	// becomes when this test kills the daemon that received it.
+	// crash this test stages. A turn left in flight by a killed daemon is
+	// closed by the next boot (daemon.promptqueue.restore_holds) -- which is
+	// what the RESUBMITTED turn becomes when this test kills the daemon that
+	// received it -- and a daemon killed mid-merge leaves a merge the next
+	// boot recovers (daemon.merge.recover).
 	displacedBounceWarnings(d)
 	repoRef := mergeRepositoryRef(t, d, repo)
 	f := mergeCreateChild(t, d, repoRef, "displaced", "do the clean thing", nil)
@@ -984,7 +984,6 @@ func displacedTurnAcrossABounce(t *testing.T) (*fixture, *harness.Daemon, *shimv
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 	}
 	d.AwaitFileExists(rendezvous)
-	repo.SetDirty(repo.Dir, true)
 	d.Kill()
 
 	// A merge-spanning wait chains dozens of subprocesses; see harness.MergeChainTimeout.
