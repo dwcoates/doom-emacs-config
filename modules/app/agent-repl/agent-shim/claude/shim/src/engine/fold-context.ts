@@ -188,6 +188,11 @@ export interface EngineFold {
    */
   endQuery(why: string): void;
   /**
+   * The session is standing down: the fold writes the INFO summary of the hook
+   * records it did not store (convert/fold.ts `reportDroppedHooks`).
+   */
+  reportDroppedHooks(why: string): void;
+  /**
    * The vendor task whose agent the STORE must name before `message` is
    * folded — a subagent resumed by a call that is not its spawn, whose spawn
    * this process never saw — or `undefined`. A read: it records nothing.
@@ -250,6 +255,8 @@ export function turnBoundaryOnlyFold(): EngineFold {
         : { entries: [] },
     // HOLDS NOTHING, so a query's end has nothing to let go.
     endQuery: (): void => undefined,
+    // CONVERTS NO HOOK, so it dropped none.
+    reportDroppedHooks: (): void => undefined,
     // NAMES NOTHING: it converts no task, so no task awaits an agent and it
     // knows none.
     taskAwaitingAgent: (): undefined => undefined,
