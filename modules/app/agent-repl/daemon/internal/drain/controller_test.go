@@ -299,7 +299,7 @@ func TestShutdownNowIsNotHeldByAWedgedShim(t *testing.T) {
 	// Arrange
 	bound := 50 * time.Millisecond
 	h := newHarness(t, func(d *Deps) { d.StandBound = bound })
-	h.workspace(t, instant)
+	wedged := h.workspace(t, instant)
 	h.stand.wedgeKillOnly()
 
 	// Act
@@ -313,11 +313,7 @@ func TestShutdownNowIsNotHeldByAWedgedShim(t *testing.T) {
 	if elapsed < bound {
 		t.Fatalf("ShutdownNow returned after %s, short of its own %s stand-down bound", elapsed, bound)
 	}
-	// Ten times the bound: the call is one bounded stand-down plus bookkeeping,
-	// so anything near a second means the bound was not applied at all.
-	if elapsed > 10*bound {
-		t.Fatalf("ShutdownNow took %s on one wedged shim, want it bounded by %s", elapsed, bound)
-	}
+	assertStandDownBounded(t, h, wedged, bound)
 	select {
 	case <-h.exits:
 	default:
@@ -393,10 +389,7 @@ func assertSteppedOverTheWedgedShim(
 	if elapsed < bound {
 		t.Fatalf("ShutdownNow returned after %s, short of the daemon's own %s stand-down bound; the bound came from the caller, not from the daemon", elapsed, bound)
 	}
-	// Ten times the bound: one wedged stand-down plus bookkeeping.
-	if elapsed > 10*bound {
-		t.Fatalf("ShutdownNow took %s on one wedged shim, want it bounded by %s", elapsed, bound)
-	}
+	assertStandDownBounded(t, h, wedged, bound)
 	stood := map[ids.WorkspaceID]bool{}
 	for _, call := range h.stand.Killed() {
 		stood[call.WS] = true
@@ -418,6 +411,26 @@ func assertSteppedOverTheWedgedShim(
 	default:
 		t.Fatalf("the orderly exit was never started after a wedged stand-down")
 	}
+}
+
+// assertStandDownBounded pins that the wedged workspace's stand-down was
+// handed a context bounded by StandBound, which is what keeps ShutdownNow from
+// hanging on it. It reads the budget the call ARRIVED with rather than timing
+// the whole ShutdownNow against a multiple of the bound: that wall-clock
+// ceiling (10x, 500ms) measured scheduling as much as the bound, and a loaded
+// full run overran it at 524ms with the bound applied exactly as written.
+func assertStandDownBounded(t *testing.T, h *harness, wedged ids.WorkspaceID, bound time.Duration) {
+	t.Helper()
+	for _, call := range h.stand.Killed() {
+		if call.WS != wedged {
+			continue
+		}
+		if !call.Bounded || call.Budget > bound {
+			t.Fatalf("the wedged stand-down arrived with budget (%s, bounded=%v), want a deadline no later than StandBound (%s)", call.Budget, call.Bounded, bound)
+		}
+		return
+	}
+	t.Fatalf("the wedged workspace %s was never asked to stand down", wedged)
 }
 
 // maintenanceReason is the typed reason the immediate-shutdown tests state
