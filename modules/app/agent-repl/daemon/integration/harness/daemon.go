@@ -1184,14 +1184,15 @@ func (d *Daemon) killGroup() bool {
 	if d.afterGroupStopped != nil {
 		d.afterGroupStopped()
 	}
-	if !d.signalLeader(syscall.SIGKILL) {
+	if !d.killLeader() {
 		return false
 	}
 	// THE LEADER'S EXIT IS AWAITED ON THE KERNEL'S EXIT EVENT, NOT A CLOCK.
-	// SIGKILL cannot be caught, blocked or ignored, and kill(2) has accepted
-	// it, so the leader WILL exit; only its scheduling is left, and a leader
-	// that never exits after an accepted SIGKILL is a kernel fault the test
-	// binary's own -timeout reports with every stack. The event does not reap
+	// SIGKILL cannot be caught, blocked or ignored, kill(2) has accepted it,
+	// and killLeader continued the leader the group stop held, so the leader
+	// WILL exit; only its scheduling is left, and a leader that never exits
+	// after that is a kernel fault the test binary's own -timeout reports
+	// with every stack. The event does not reap
 	// it, so the group id stays ours for the group kill below. A wait that
 	// fails is REPORTED and the kill still goes ahead: a group left running is
 	// worse than one whose leader might have seen a member go.
@@ -1233,18 +1234,42 @@ func awaitKilledLeader(pid int, reportAfter time.Duration, wait func(context.Con
 	return wait(context.Background(), pid)
 }
 
-// leaderStalled reports a SIGKILLed leader that has not exited, with the
-// kernel's view of every process in its group: the evidence a stuck kill
-// leaves nowhere else.
+// leaderStalled reports a SIGKILLed, continued leader that has not exited,
+// with the kernel's view of every process in its group: the evidence a stuck
+// kill leaves nowhere else.
 func (d *Daemon) leaderStalled(pid int, waited time.Duration) {
 	d.t.Helper()
 	out, err := exec.Command("ps", "-o", "pid,ppid,pgid,stat,wchan,flags,time,command", "-g", strconv.Itoa(pid)).CombinedOutput()
-	// THE ONE PROBE THE REPORT MAKES: continue the leader ALONE. Its members
-	// stay stopped, so none can see it go before the group kill, and a killed
-	// process runs no code of its own once continued; whether the exit then
-	// comes says whether the group stop was what held the kill.
-	contErr := syscall.Kill(pid, syscall.SIGCONT)
-	d.t.Errorf("harness: the daemon %d has not exited %s after its SIGKILL was accepted; sent it SIGCONT (err %v) and still waiting. Its group (ps err %v):\n%s", pid, waited, contErr, err, out)
+	d.t.Errorf("harness: the daemon %d has not exited %s after its SIGKILL was accepted and it was continued; still waiting. Its group (ps err %v):\n%s", pid, waited, err, out)
+}
+
+// killStopped SIGKILLs a process this harness may hold stopped, then
+// SIGCONTs it, through kill. It answers the SIGKILL's error as kill(2) gave
+// it, and a SIGCONT error other than ESRCH (the process already gone).
+//
+// ON DARWIN AN ACCEPTED SIGKILL DOES NOT CONTINUE A STOPPED PROCESS. A stop
+// suspends the process's task (bsd/kern/kern_sig.c, stop():
+// task_suspend_internal), and psignal's SIGKILL arm only marks the process
+// runnable and thread_aborts the ONE thread it picked to run the exit; it
+// never resumes the task. Only SIGCONT does (task_resume_internal). So the
+// exit hung on that one thread being pulled out of its suspension, and when
+// it was not, the killed process sat sleeping -- not stopped -- with its
+// signals pending unread, for good: Kill's unbounded wait hung fifteen
+// minutes (2026-10-03), and TestColdBringUpServesTheMainBookWithoutAsking
+// failed on a leader still alive 30s after its SIGKILL, whose exit the
+// report's own SIGCONT then let through (2026-10-06).
+//
+// CONTINUING IT OBSERVES NOTHING. The SIGKILL is already pending, so the
+// process's next return to user space is its exit; and only this pid is
+// continued, so every other process the harness stopped stays stopped.
+func killStopped(pid int, kill func(int, syscall.Signal) error) error {
+	if err := kill(pid, syscall.SIGKILL); err != nil {
+		return err
+	}
+	if err := kill(pid, syscall.SIGCONT); err != nil && !errors.Is(err, syscall.ESRCH) {
+		return fmt.Errorf("SIGCONT after its SIGKILL: %w", err)
+	}
+	return nil
 }
 
 // Freeze stops the daemon's process group and waits for the kernel to confirm
@@ -1332,19 +1357,19 @@ func signalGroupMembers(pgid int, sig syscall.Signal, kill func(int, syscall.Sig
 	return nil
 }
 
-// signalLeader sends sig to the daemon's own process, and only to it, and
-// reports whether the kill should go on. The caller holds sigMu and found the
-// reap not begun, so its pid is still ours, exactly as the group id is for
-// signalGroup: ESRCH is
-// a leader that already exited, which is what the caller awaits next. Every
-// other error is a real fault, reported, and ends the kill.
-func (d *Daemon) signalLeader(sig syscall.Signal) bool {
+// killLeader SIGKILLs the daemon's own process, and only it, continues it out
+// of the group stop (killStopped), and reports whether the kill should go on.
+// The caller holds sigMu and found the reap not begun, so its pid is still
+// ours, exactly as the group id is for signalGroup: ESRCH is a leader that
+// already exited, which is what the caller awaits next. Every other error is a
+// real fault, reported, and ends the kill.
+func (d *Daemon) killLeader() bool {
 	d.t.Helper()
-	err := syscall.Kill(d.cmd.Process.Pid, sig)
+	err := killStopped(d.cmd.Process.Pid, syscall.Kill)
 	if err == nil || errors.Is(err, syscall.ESRCH) {
 		return true
 	}
-	d.t.Errorf("harness: %v the daemon %d: %v", sig, d.cmd.Process.Pid, err)
+	d.t.Errorf("harness: SIGKILL the daemon %d: %v", d.cmd.Process.Pid, err)
 	return false
 }
 
@@ -1665,15 +1690,19 @@ func (d *Daemon) ReapStrays() {
 		}
 		var killedNow []int
 		for _, pid := range live {
-			if err := syscall.Kill(pid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
+			// Each is continued as it is killed (killStopped): the freeze
+			// suspended it, and a SIGKILL alone does not end a suspended
+			// process on Darwin.
+			if err := killStopped(pid, syscall.Kill); err != nil && !errors.Is(err, syscall.ESRCH) {
 				d.t.Errorf("harness: SIGKILL stray %d: %v", pid, err)
 				continue
 			}
 			killedNow = append(killedNow, pid)
 		}
 		// EACH EXIT IS AWAITED ON THE EXIT ITSELF, NOT RACED AGAINST A CLOCK,
-		// as in Kill: SIGKILL cannot be caught, blocked or ignored, and kill(2)
-		// accepted it, so the exit is decided and only its scheduling is left.
+		// as in Kill: SIGKILL cannot be caught, blocked or ignored, kill(2)
+		// accepted it and the stray was continued, so the exit is decided and
+		// only its scheduling is left.
 		// Under 16 CPU loads a clock bound here failed 2 of 10000 sweeps on
 		// strays that had done exactly what they were told. A stray that never
 		// exits after an accepted SIGKILL is a kernel fault the test binary's
