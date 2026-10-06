@@ -330,6 +330,11 @@ type DB interface {
 	// carried, answering true when it differs from the last one recorded (a
 	// full Emacs restart) and false for the same one (a reconnect).
 	NoteEditorInstance(ctx context.Context, instance string, at time.Time) (bool, error)
+	// AgentReplSession loads agent-repl's session, reporting false when none
+	// has begun.
+	AgentReplSession(ctx context.Context) (AgentReplSession, bool, error)
+	// PutAgentReplSession replaces agent-repl's session whole.
+	PutAgentReplSession(ctx context.Context, session AgentReplSession) error
 
 	// TurnStartedAt answers when a recorded turn was opened; ErrNotFound for a
 	// turn the workspace never recorded.

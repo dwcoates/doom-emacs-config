@@ -22,6 +22,11 @@ import (
 	"claude-repld/internal/dlog"
 )
 
+// HolderBinary is the name of the binary the shim spawns to hold each kernel
+// lock: deploy installs it under this name, and a process of that name in a
+// shim's group is a lock holder, which never touches the network.
+const HolderBinary = "shim-lock"
+
 // RunDir is the directory the kernel locks live in.
 const RunDir = "~/.cache/agent-repl/run"
 
