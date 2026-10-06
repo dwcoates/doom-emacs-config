@@ -417,14 +417,15 @@ message RosterRow {
     RosterRowStatusDone done = 8;
     // The turn was interrupted by the user. The same read rule as `done`.
     RosterRowStatusInterrupted interrupted = 9;
-    // The last turn ended by FAILING: an agent-side failure, a turn the
-    // daemon closed as orphaned on reconcile, or a turn the agent process cut
-    // by dying under it. It is a TURN END like `done` and `interrupted`, with
-    // the same read rule: while its result is UNREAD it outranks
-    // `idle_async`; once read it is drawn with `viewed` (see
+    // The last turn ended by FAILING. It is a TURN END like `done` and
+    // `interrupted`, with the same read rule: while its result is UNREAD it
+    // outranks `idle_async`; once read it is drawn with `viewed` (see
     // RosterRowViewed). TURQUOISE (owner ruling, 2026-09-28), where the
-    // other two turn ends are green: the turn did not produce the result it
-    // was asked for, but the workspace is usable.
+    // other two turn ends are green. While the failed turn's FAULT stands
+    // (until the next turn starts, owner ruling 2026-10-06) the row draws the
+    // fault's arm instead — `vendor_blocked` or `turn_died` — so this arm is
+    // drawn only for a failed turn whose fault this daemon did not see (a
+    // result restored from the durable record).
     RosterRowStatusTurnFailed turn_failed = 36;
     // Live, proven usable, and idle. BOTH the idle and ready render states
     // resolve here — the sidebar draws them identically.
@@ -435,9 +436,10 @@ message RosterRow {
     // Blocked on the vendor or the account, not on agent-repl — and ONLY
     // that (owner ruling, 2026-09-28): an api request the vendor refused or
     // failed, an account blocking limit, a rapid-refill breaker, a model
-    // error, or a rejected rate limit. Every other agent failure is the
-    // failed turn's own `turn_failed` end. A VENDOR FAULT: TURQUOISE, the
-    // workspace stays usable and prompts are held until the vendor serves.
+    // error, or a rejected rate limit. It is ALSO the row while a TURN the
+    // vendor ended or refused stands as a fault, until the next turn starts
+    // (owner ruling, 2026-10-06; the footer's `vendor_fault · vendor_error`).
+    // A VENDOR FAULT: TURQUOISE, the workspace stays usable.
     RosterRowStatusVendorBlocked vendor_blocked = 12;
     // The vendor will not START: its start is being retried, was rejected,
     // or kept failing for the whole retry window, while agent-repl's own
@@ -463,6 +465,13 @@ message RosterRow {
     RosterRowStatusDegraded degraded = 17;
     // Terminal: no live session backs the workspace.
     RosterRowStatusDead dead = 18;
+    // THE LAST TURN DIED WITH AGENT-REPL'S OWN MACHINERY: its vendor query
+    // died, or the agent process died under it (owner ruling, 2026-10-06). An
+    // AGENT-REPL FAULT: BLUE, the same coarse claim as the footer's
+    // `agent_repl_fault · turn_died`. It stands until the next turn starts,
+    // and like that substatus it leaves the composer open: the next prompt is
+    // what ends it.
+    RosterRowStatusTurnDied turn_died = 52;
 
     // The merge pipeline. These render a glyph rather than a lifecycle dot,
     // except merged, which is settled and files under recently_merged.
@@ -656,6 +665,9 @@ message RosterRowStatusReady {}
 message RosterRowStatusIdleAsync {}
 
 message RosterRowStatusVendorBlocked {}
+
+// The last turn died with agent-repl's own machinery.
+message RosterRowStatusTurnDied {}
 
 // The vendor is retrying a failed mid-turn call.
 message RosterRowStatusApiRetrying {}
