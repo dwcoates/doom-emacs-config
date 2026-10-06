@@ -380,7 +380,12 @@ describe("writeDurable's place in the buffer", () => {
       client,
       producer: PRODUCER,
       nowMs: () => 1_000,
-      sleep: async () => undefined,
+      // PARKS PAST THE SCHEDULE, NEVER SPINS. This test once used a free sleep
+      // and left rows fed after the durable write queued when the store closed:
+      // the writer, which never gives up on a held batch, then retried them at
+      // zero backoff for the rest of the worker's life (thousands of
+      // "retrying the held batch" lines per suite run).
+      sleep: schedule().sleep,
       retry: { ...DEFAULT_RETRY_POLICY, backoffMs: [0, 0, 0, 0] },
     });
     target.plane = plane;
@@ -389,9 +394,12 @@ describe("writeDurable's place in the buffer", () => {
     // Act
     await plane.writeDurable([promptEntry(BOOK, "turn-1", "hello")]);
     durable = true;
+    // Every row the producer fed lands before the store closes under it.
+    const drained = await plane.flush();
 
     // Assert: it waited out the one batch ahead of it, not the producer.
     expect(fed).toBeLessThan(cap);
+    expect(drained.lostRows).toBe(0);
   });
 });
 
