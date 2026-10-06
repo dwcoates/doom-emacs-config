@@ -11,16 +11,20 @@ import (
 	"testing"
 )
 
-// A grep that exits at its first match (-q) must never be fed by a pipe. Under
-// pipefail the writer is killed by SIGPIPE when grep exits before it has
-// written everything, the pipeline answers 141, and a check whose output was
-// correct fails -- only under load, when the writer is descheduled mid-write
-// (2026-10-06: the logs harness failed 10 of 24 runs six-wide). Text a script
-// already holds, or a command's captured output, goes through grep_in
-// (bin/lib-grep-in.sh), which feeds grep from a here-string.
-var pipedQuietGrep = regexp.MustCompile(`(^|[^|])\|\s*grep\b[^|;&)]*\s-[A-Za-z]*q`)
+// A reader that can stop before its input ends must never be fed by a pipe.
+// Under pipefail the writer is killed by SIGPIPE when the reader exits before
+// it has written everything, the pipeline answers 141, and a step whose output
+// was correct fails -- only under load or on long input. The class, as met:
+//   - grep -q / grep -m (2026-10-06: the logs harness, 10 of 24 runs six-wide);
+//   - awk that exits at a match, head, sed that quits (the doctor's pid read
+//     of a long `launchctl print` exited 141 in a full run).
+//
+// Text a script already holds, or a command's captured output, goes through
+// grep_in (bin/lib-grep-in.sh) or a here-string; a first line is `sed -n 1p`,
+// which reads its whole input.
+var pipedEarlyExit = regexp.MustCompile(`(^|[^|])\|\s*(grep\b[^|;&)]*\s-[A-Za-z]*[qm]|head\b|awk\b[^|]*\bexit\b|sed\b[^|]*[0-9/]q\b)`)
 
-func TestNoSuiteScriptPipesIntoAQuietGrep(t *testing.T) {
+func TestNoSuiteScriptPipesIntoAnEarlyExitingReader(t *testing.T) {
 	// Arrange
 	_, self, _, ok := runtime.Caller(0)
 	if !ok {
@@ -61,7 +65,7 @@ func TestNoSuiteScriptPipesIntoAQuietGrep(t *testing.T) {
 			if strings.HasPrefix(line, "#") {
 				continue
 			}
-			if pipedQuietGrep.MatchString(line) {
+			if pipedEarlyExit.MatchString(line) {
 				rel, _ := filepath.Rel(repo, path)
 				piped = append(piped, rel+":"+strconv.Itoa(n)+": "+line)
 			}
@@ -74,11 +78,11 @@ func TestNoSuiteScriptPipesIntoAQuietGrep(t *testing.T) {
 
 	// Assert
 	if len(piped) > 0 {
-		t.Fatalf("a pipe into an early-exiting grep fails under pipefail whenever grep matches first (the writer dies of SIGPIPE); use grep_in \"$text\" -q PATTERN from bin/lib-grep-in.sh:\n%s", strings.Join(piped, "\n"))
+		t.Fatalf("a pipe into a reader that can exit before its input ends fails under pipefail (the writer dies of SIGPIPE); use grep_in \"$text\" -q PATTERN (bin/lib-grep-in.sh), a here-string, or sed -n 1p:\n%s", strings.Join(piped, "\n"))
 	}
 }
 
-func TestThePipedQuietGrepPatternMatchesOnlyPipesIntoAQuietGrep(t *testing.T) {
+func TestTheEarlyExitPatternMatchesOnlyPipesIntoAReaderThatCanStopEarly(t *testing.T) {
 	tests := []struct {
 		line  string
 		piped bool
@@ -93,11 +97,18 @@ func TestThePipedQuietGrepPatternMatchesOnlyPipesIntoAQuietGrep(t *testing.T) {
 		{`grep -q foo "$file"`, false},
 		{`cmd | grep -v bar >/dev/null`, false},
 		{`cmd | grep foo | wc -l`, false},
+		{`cmd | grep -m1 foo`, true},
+		{`cmd | head -n1`, true},
+		{`printf '%s\n' "$out" | awk '/pid/{print $2; exit}'`, true},
+		{`cmd | sed 1q`, true},
+		{`cmd | sed -n 1p`, false},
+		{`awk '/pid/ && !f {print; f = 1}' <<<"$out"`, false},
+		{`cmd | awk '{print $1}'`, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.line, func(t *testing.T) {
 			// Act / Assert
-			if got := pipedQuietGrep.MatchString(tt.line); got != tt.piped {
+			if got := pipedEarlyExit.MatchString(tt.line); got != tt.piped {
 				t.Fatalf("piped = %v, want %v", got, tt.piped)
 			}
 		})
