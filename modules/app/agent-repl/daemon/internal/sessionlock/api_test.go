@@ -390,3 +390,16 @@ func TestWorkspaceLockPathOfADeletedWorktreeKeepsItsKey(t *testing.T) {
 		t.Fatalf("WorkspaceLockPath after the delete = %q, want the key it took, %q", after, before)
 	}
 }
+
+// TestHolderBinaryIsTheLockHoldersInstalledName pins the name deploy installs
+// the lock holder under (agent-shim/shim-lock) and the traffic measurement
+// recognizes it by.
+func TestHolderBinaryIsTheLockHoldersInstalledName(t *testing.T) {
+	// Act.
+	got := HolderBinary
+
+	// Assert.
+	if got != "shim-lock" {
+		t.Fatalf("HolderBinary = %q, want %q", got, "shim-lock")
+	}
+}
