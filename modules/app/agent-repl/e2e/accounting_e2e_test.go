@@ -190,6 +190,32 @@ func TestAccountUsageAvailableArm(t *testing.T) {
 	assertTheSampleDrawsOnlyTheEnduringUsage(t, w, ws)
 }
 
+// TestAccountUsageSeatSpendDrawsTheSeatsSpend drives `!usage-seat-spend`: the
+// mocked vendor answers as an enterprise seat billed by spend (every window
+// null, a monthly limit), the shim reports the seat_spend arm, and the footer
+// draws the seat's spend in place of any window (owner ruling, 2026-10-06).
+func TestAccountUsageSeatSpendDrawsTheSeatsSpend(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	w := NewWorld(t, WorldOpts{})
+	repo := harness.NewRepo(t)
+	ws := harness.Register(t, w.Daemon, repo.Dir)
+	footer := w.WatchFooter(ws)
+	defer footer.Close()
+
+	// Act
+	driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "usage-seat-spend")
+
+	// Assert
+	view := harness.AwaitView(t, w.Ctx(), footer.Stream, "the seat's spend on the enduring line", func(v *frontendv1.FooterView) bool {
+		return footerEnduringSeatSpend(v) != nil
+	})
+	seat := footerEnduringSeatSpend(view)
+	if seat.GetAllotment().GetAmountMinor() != 1_200_000 || seat.GetSpent().GetAmountMinor() != 22_388 {
+		t.Fatalf("seat_spend = %v, want the mocked seat's 22388 of 1200000 minor units", seat)
+	}
+}
+
 // assertTheSampleDrawsOnlyTheEnduringUsage fails if the footer stands a
 // salient line, or draws the sample's figures anywhere but the enduring usage
 // line. It opens a FRESH footer stream and reads its FIRST view: a newly
