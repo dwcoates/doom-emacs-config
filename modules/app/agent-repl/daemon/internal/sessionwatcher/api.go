@@ -188,6 +188,10 @@ type FeedSink interface {
 	OnSessionUpdate(ws ids.WorkspaceID, update *conversationv1.SessionUpdate)
 	// OnHistoryPage is a watch's opening catch-up page.
 	OnHistoryPage(ws ids.WorkspaceID, agent *conversationv1.AgentId, page *conversationv1.HistoryPage)
+	// OnSessionStarted is the session's start: the model it runs (which a
+	// failed turn's outcome marker names), and the edge on which an
+	// agent-repl fault's marker learns the restart that followed it worked.
+	OnSessionStarted(ws ids.WorkspaceID, started *conversationv1.SessionStarted)
 }
 
 // FooterSink receives what the footer's status tree, live-work chips and

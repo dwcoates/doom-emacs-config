@@ -18,6 +18,7 @@
  * bar (owner ruling, 2026-10-02), in its collapsed bubble form.
  */
 import { log } from "../../log.js";
+import { drawOutcomeMarker } from "../marker.js";
 import { markdownSlot } from "../../bubble/body.js";
 import { drawBubble } from "../../bubble/draw.js";
 import { renderEditorLink } from "../../link.js";
@@ -46,11 +47,14 @@ const ACCENTS = {
   compacted: "sep-accent-compacted",
   worktreeEntered: "sep-accent-worktree",
   worktreeLeft: "sep-accent-worktree",
-  compactionFailed: "sep-accent-compaction-failed",
 } as const satisfies Record<string, string>;
 
-/** Every separation arm this build draws, for the suite to hold to the schema. */
-export const SEPARATION_ARMS: readonly string[] = Object.keys(ACCENTS);
+/**
+ * Every separation arm this build draws, for the suite to hold to the schema.
+ * `compactionFailed` draws no divider at all, so it has no accent: it is its
+ * outcome marker alone (owner ruling, 2026-10-06).
+ */
+export const SEPARATION_ARMS: readonly string[] = [...Object.keys(ACCENTS), "compactionFailed"];
 
 /**
  * Whether this row is a separation that CUT CONTEXT — and so is where the feed
@@ -97,6 +101,16 @@ export function drawFeedSessionSeparation(
   el.setAttribute("data-arm", kind.case);
   el.setAttribute("data-state", kind.case);
 
+  // A FAILED COMPACTION CUT NOTHING, so it draws NO DIVIDER (owner ruling,
+  // 2026-10-06: a dividing line there was mistaken): its outcome marker is
+  // the whole of the row.
+  if (kind.case === "compactionFailed") {
+    // The label stays REQUIRED on every separation, drawn or not.
+    requireMessage(msg.label, `${PATH}.label`);
+    el.append(drawFeedContextCutCompactionFailed(kind.value, rc));
+    return el;
+  }
+
   const rule = document.createElement("div");
   rule.className = `sep-rule ${ACCENTS[kind.case]}`;
   el.append(rule);
@@ -117,8 +131,6 @@ export function drawFeedSessionSeparation(
         return drawFeedWorktreeEntered(kind.value, rc);
       case "worktreeLeft":
         return drawFeedWorktreeLeft(kind.value, rc);
-      case "compactionFailed":
-        return drawFeedContextCutCompactionFailed(kind.value);
       default:
         return unreachableArm(`${PATH}.kind`, armName(kind));
     }
@@ -218,21 +230,24 @@ export function drawFeedContextCutColdRead(coldRead: FeedContextCutColdRead): HT
 }
 
 /**
- * The compaction that was OFFERED AND DID NOT HAPPEN, drawn in the slot the
- * compacted divider would have taken.
- *
- * Nothing was cut, so there is no size change to draw beside the label (the
- * wire leaves `tokens` unset) and no summary to fold open. The producer's own
- * account of the failure is the only evidence anyone has, so it is STATED
- * verbatim rather than reworded here.
+ * The compaction that was OFFERED AND DID NOT HAPPEN: its OUTCOME MARKER, and
+ * nothing else. The producer's own account of the failure rides the marker's
+ * expansion, verbatim.
  */
 export function drawFeedContextCutCompactionFailed(
   failed: FeedContextCutCompactionFailed,
+  rc: RowContext,
 ): HTMLElement {
   const el = document.createElement("div");
   el.className = "sep-compaction-failed";
   el.setAttribute("data-compaction-failed", "true");
-  el.textContent = failed.error;
+  el.append(
+    drawOutcomeMarker(
+      requireMessage(failed.marker, `${PATH}.compaction_failed.marker`),
+      { ctx: rc.ctx, previous: rc.previous },
+      `${PATH}.compaction_failed.marker`,
+    ),
+  );
   log.warn("a compaction was offered and did not happen", {
     operation: "feed.separation-compaction-failed",
     context: { error: failed.error },

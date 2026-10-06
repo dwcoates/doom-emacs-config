@@ -372,6 +372,12 @@ BOTH the idle and ready render states resolve here."
   "Decode VALUE as the empty `RosterRowStatusVendorBlocked'."
   (agent-repl-wire--decode-empty "RosterRowStatusVendorBlocked" value))
 
+(defun agent-repl-wire-decode-roster-row-status-turn-died (value)
+  "Decode VALUE as the empty `RosterRowStatusTurnDied'.
+The last turn died with agent-repl's own machinery (its vendor query, or
+the agent process): an agent-repl fault, standing until the next turn."
+  (agent-repl-wire--decode-empty "RosterRowStatusTurnDied" value))
+
 (defun agent-repl-wire-decode-roster-row-status-vendor-fault (value)
   "Decode VALUE as the empty `RosterRowStatusVendorFault'.
 The vendor will not start while agent-repl serves: a vendor fault."
@@ -456,6 +462,7 @@ an assertion, where an unset oneof is the absence of one."
     (startFailed :start-failed agent-repl-wire-decode-roster-row-status-start-failed)
     (degraded :degraded agent-repl-wire-decode-roster-row-status-degraded)
     (dead :dead agent-repl-wire-decode-roster-row-status-dead)
+    (turnDied :turn-died agent-repl-wire-decode-roster-row-status-turn-died)
     (merging :merging agent-repl-wire-decode-roster-row-status-merging)
     (mergeQueued :merge-queued agent-repl-wire-decode-roster-row-status-merge-queued)
     (mergeFailed :merge-failed agent-repl-wire-decode-roster-row-status-merge-failed)

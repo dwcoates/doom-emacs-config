@@ -65,6 +65,7 @@ import type {
   FooterStatusActivityQuestionLead,
   FooterStatusActivityRetrying,
   FooterStatusActivityStartFailed,
+  FooterStatusActivityTurnEnded,
   FooterStatusActivityVendorStart,
   FooterStatusActivityUpdate,
   FooterStatusActivityUpdateComponent,
@@ -405,6 +406,8 @@ function drawSalientKind(
       return drawFooterStatusActivityStartFailed(kind.value);
     case "vendorStart":
       return drawFooterStatusActivityVendorStart(kind.value);
+    case "turnEnded":
+      return drawFooterStatusActivityTurnEnded(kind.value, deps, path);
     case "offline":
       return drawFooterStatusActivityNetworkOffline(kind.value);
     case "closeBlocked":
@@ -989,6 +992,34 @@ export function drawFooterStatusActivityStartFailed(
  * composes the whole line (attempt, cause, and the restart binding where one
  * applies), so it is drawn verbatim.
  */
+/**
+ * A TURN FAULT'S LINE (owner ruling, 2026-10-06): the daemon's per-cause
+ * sentence for how the last turn ended, verbatim, the same sentence the feed's
+ * turn-end row carries. A rate limit or an overload that stated a wait counts
+ * down to it beside the sentence, then says the wait is over.
+ */
+export function drawFooterStatusActivityTurnEnded(
+  u: FooterStatusActivityTurnEnded,
+  deps: AllowanceDeps,
+  path: string,
+): HTMLElement {
+  const line = document.createElement("span");
+  line.className = "footer-activity-turn-ended";
+  line.append(document.createTextNode(u.text));
+  if (u.retryAt !== undefined) {
+    const atMs = msOf(u.retryAt.atMs, `${path}.retry_at.at_ms`);
+    line.append(document.createTextNode(" · "));
+    line.append(
+      footerClockSpan(deps.ctx.ticker, "countdown", "footer-turn-retry", (span, nowMs) => {
+        const remaining = atMs - nowMs;
+        span.toggleAttribute("data-ready", remaining <= 0);
+        span.textContent = remaining > 0 ? `retry in ${remainingLabel(remaining)}` : "ready to retry";
+      }),
+    );
+  }
+  return line;
+}
+
 export function drawFooterStatusActivityVendorStart(
   u: FooterStatusActivityVendorStart,
 ): HTMLElement {

@@ -13,6 +13,7 @@ import (
 	"claude-repld/internal/figures"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/resolve/ladder"
+	"claude-repld/internal/resolve/turnfault"
 )
 
 // OnActivity advances the status tree, the token accounting, the live-work
@@ -84,6 +85,11 @@ func (r *resolver) applyActivity(ws ids.WorkspaceID, s *wsState, agent *conversa
 	case *conversationv1.AgentActivity_Response:
 		r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch", dlog.Context{"function": "chips", "branch": "case *conversationv1.AgentActivity_Response"})
 		r.applyResponse(s, unit, item.Response)
+		// THE REFUSAL'S ONLY WITNESS, read as the feed reads it, so the turn
+		// fault's line says "refused" exactly when the feed's row does.
+		if s.turn != nil && turnfault.RefusedResponse(item.Response) {
+			s.turnRefused = true
+		}
 	case *conversationv1.AgentActivity_Hook:
 		r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch", dlog.Context{"function": "chips", "branch": "case *conversationv1.AgentActivity_Hook"})
 		if start := item.Hook.GetStart(); start != nil {
@@ -486,13 +492,17 @@ func (r *resolver) OnAgentTerminal(ws ids.WorkspaceID, agent *conversationv1.Age
 			if _, died := failure.GetFailure().(*conversationv1.AgentFailure_QueryDied); died && s.queryDied == nil {
 				s.queryDied = &standing{text: deadQueryLine, at: r.opts.clock.Now()}
 			}
+			// HOW THE TURN FAILED IS RECORDED, NOT YET RAISED: the turn's
+			// close raises its fault (SetTurnEnded), the same close the roster
+			// raises its arm from, so the strip and the dot move together.
+			if failure != nil {
+				r.recordFailedEnding(s, failure, s.turnRefused)
+			}
 			switch ladder.ClassifyFailure(failure) {
 			case ladder.VendorBlocked:
 				s.blocked = r.blockFor(failure)
-				s.turnFailed = true
 				return
-			case ladder.TurnFailed:
-				s.turnFailed = true
+			case ladder.VendorFailed, ladder.AgentReplFailed:
 				return
 			case ladder.ExpectedStop, ladder.NoFailure:
 				// An expected stop reads exactly as a completion: idle·done.
@@ -569,38 +579,6 @@ func apiBlockKind(failed *conversationv1.ApiRequestFailed) blockedKind {
 		return blockedBilling
 	default:
 		return blockedVendorError
-	}
-}
-
-// apiErrorKind names a mid-turn api failure's arm for the record.
-func apiErrorKind(failed *conversationv1.ApiRequestFailed) string {
-	switch failed.GetKind().(type) {
-	case *conversationv1.ApiRequestFailed_RateLimited:
-		return "rate_limited"
-	case *conversationv1.ApiRequestFailed_Overloaded:
-		return "overloaded"
-	case *conversationv1.ApiRequestFailed_AuthenticationFailed:
-		return "authentication_failed"
-	case *conversationv1.ApiRequestFailed_PermissionDenied:
-		return "permission_denied"
-	case *conversationv1.ApiRequestFailed_InvalidRequest:
-		return "invalid_request"
-	case *conversationv1.ApiRequestFailed_RequestTooLarge:
-		return "request_too_large"
-	case *conversationv1.ApiRequestFailed_NotFound:
-		return "not_found"
-	case *conversationv1.ApiRequestFailed_Internal:
-		return "internal"
-	case *conversationv1.ApiRequestFailed_BillingError:
-		return "billing_error"
-	case *conversationv1.ApiRequestFailed_OauthOrgNotAllowed:
-		return "oauth_org_not_allowed"
-	case *conversationv1.ApiRequestFailed_MaxOutputTokens:
-		return "max_output_tokens"
-	case *conversationv1.ApiRequestFailed_Unmodeled:
-		return "unmodeled"
-	default:
-		return "unset"
 	}
 }
 

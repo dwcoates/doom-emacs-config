@@ -10,6 +10,8 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/feedid"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/resolve/ladder"
+	"claude-repld/internal/resolve/turnfault"
 	"claude-repld/internal/wsm"
 )
 
@@ -80,6 +82,7 @@ func (r *resolver) endClosedTurn(s *wsState, turn ids.TurnID, close wsm.Recorded
 		"a turn closed with no terminal of its own; its ending row was drawn from its recorded close",
 		dlog.Context{"turn": string(turn), "close": close.How.String(), "outcome": terminalArm(ended), "plane": s.plane.String()})
 	r.upsert(s, at, row, true)
+	s.awaitRestart(at, row)
 	r.fileLiveEnding(s, turn, ended, nil)
 	r.settleTurnPrompts(s, turn)
 
@@ -98,18 +101,10 @@ func (r *resolver) endClosedTurn(s *wsState, turn ids.TurnID, close wsm.Recorded
 // other close is the turn ending abnormally and says so in plain words.
 func (r *resolver) closedEnding(s *wsState, turn ids.TurnID, close wsm.RecordedClose) *frontendv1.FeedTurnEnded {
 	ended := &frontendv1.FeedTurnEnded{EndedAtMs: close.At.UnixMilli()}
-	errored := func(arm func(*frontendv1.FeedTurnEndedErrored), sentence string) {
-		e := &frontendv1.FeedTurnEndedErrored{}
-		arm(e)
-		applyHeadline(e, headline{Text: sentence}, "")
-		ended.Outcome = &frontendv1.FeedTurnEnded_Errored{Errored: e}
-	}
-	failed := func(reason string) func(*frontendv1.FeedTurnEndedErrored) {
-		return func(e *frontendv1.FeedTurnEndedErrored) { e.Error = turnFailedArm(reason) }
-	}
 	switch close.How {
 	case wsm.CloseCompleted:
 		concludedArm(&frontendv1.FeedTurnEndedConcluded{})(ended)
+		return ended
 	case wsm.CloseKilled:
 		// NO `by_user` REACHES THIS PATH. It draws only a turn whose terminal
 		// never reached this feed (a terminal that did reach it drew the
@@ -117,22 +112,35 @@ func (r *resolver) closedEnding(s *wsState, turn ids.TurnID, close wsm.RecordedC
 		// carries how and when, never the cause. So the command stays unset,
 		// through the same setter the terminal path uses.
 		interruptedArm(nil)(ended)
-	case wsm.CloseAgentDied:
-		errored(func(e *frontendv1.FeedTurnEndedErrored) {
-			e.Error = &frontendv1.FeedTurnEndedErrored_AgentProcessDied{
-				AgentProcessDied: &frontendv1.FeedTurnErrorAgentProcessDied{},
-			}
-		}, "the agent process died, and the turn it was running ended with it")
-	case wsm.CloseOrphaned:
-		errored(failed("closed:orphaned"), "the turn was dropped: nothing saw it end")
-	case wsm.CloseFailed:
-		errored(failed("closed:failed"), "the turn failed with an error, and no account of the failure was recorded")
-	default:
+		return ended
+	}
+	words, failed := turnfault.OfClose(close.How)
+	if !failed {
 		r.logger(s.id).Error("daemon.feed.turn_closed_undeclared",
 			"a turn's recorded close is not one this feed can draw; it is drawn as an unexplained end",
 			dlog.Context{"turn": string(turn), "close": int(close.How)})
-		errored(failed(fmt.Sprintf("closed:%d", int(close.How))), "the turn ended in a way this daemon does not know how to describe")
+		words = turnfault.Words{
+			Sentence: "the turn ended in a way this daemon does not know how to describe",
+			Cause:    fmt.Sprintf("closed:%d", int(close.How)),
+		}
 	}
+	e := &frontendv1.FeedTurnEndedErrored{}
+	if close.How == wsm.CloseAgentDied {
+		e.Error = &frontendv1.FeedTurnEndedErrored_AgentProcessDied{
+			AgentProcessDied: &frontendv1.FeedTurnErrorAgentProcessDied{},
+		}
+	} else {
+		e.Error = turnFailedArm(words.Cause)
+	}
+	applyHeadline(e, headline{Text: words.Sentence}, "")
+	fault, _ := ladder.ResolveTurnFault(close.How, ladder.NoFailure)
+	if !failed {
+		// AN UNDECLARED CLOSE is an unexplained end: a vendor turn fault, as
+		// the turn_failed stop reasons are.
+		fault = ladder.VendorTurnFault
+	}
+	e.Marker = r.endingMarker(s, ending{turn: turn, fault: fault, words: words, endedAtMs: ended.GetEndedAtMs()})
+	ended.Outcome = &frontendv1.FeedTurnEnded_Errored{Errored: e}
 	return ended
 }
 

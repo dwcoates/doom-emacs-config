@@ -996,6 +996,7 @@ Returns:
     (:api-retrying   . "🔁")
     (:start-failed   . "🚫")
     (:dead           . "❌")
+    (:turn-died      . "❌")
     (:degraded       . "📡")
     (:merged         . "🔀")
     (:merge-failed   . "⛔")

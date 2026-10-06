@@ -52,6 +52,7 @@ package frontend.v1;
 import "conversation/v1/api.proto";
 import "conversation/v1/session.proto";
 import "conversation/v1/turn.proto";
+import "conversation/v1/user.proto";
 import "frontend/v1/failure.proto";
 import "frontend/v1/status_panel.proto";
 import "frontend/v1/todos_panel.proto";
@@ -613,8 +614,16 @@ message FeedPlanEditTarget {
 }
 // The failed state.
 message FeedPlanFailed {
-  // The daemon's composed reason, drawn verbatim.
+  // The daemon's composed reason. The client no longer draws it as its own
+  // line: the marker below carries it as its detail (owner ruling,
+  // 2026-10-06). Kept so an older client still decodes the row.
   string text = 1;
+  // THE OUTCOME MARKER the card draws in place of its old red "failed"
+  // badge: NEUTRAL, labelled "plan failed", with the composed reason as its
+  // detail. Neutral because the episode breaking is a fact of the
+  // conversation, never a workspace fault: when the TURN failed, the turn's
+  // own marker carries the fault.
+  FeedOutcomeMarker marker = 2;
 }
 
 // The findings bubble: a review's typed findings, response-styled (purple).
@@ -1316,6 +1325,16 @@ message FeedTurnEndedErrored {
     // query_died: that is the query dying inside a live agent process.
     FeedTurnErrorAgentProcessDied agent_process_died = 24;
   }
+  // WHAT THE FEED DRAWS for this ending: the OUTCOME MARKER (owner ruling,
+  // 2026-10-06), placed where the turn ended, in place of the old red-bordered
+  // ended-turn bubble. The arms above, the headline and the message stay the
+  // row's DATA (the desktop banner and history replay read them); the client
+  // draws the marker alone.
+  //
+  // ITS FAMILY FOLLOWS THE CAUSE: every cause the vendor ended or refused is a
+  // `vendor_fault` marker; a query death and an agent-process death are an
+  // `agent_repl_fault` marker; a Stop hook that ended the run is `neutral`.
+  FeedOutcomeMarker marker = 25;
 }
 // The agent-process-death class. Empty: the arm is the cause.
 message FeedTurnErrorAgentProcessDied {}
@@ -1387,16 +1406,21 @@ message FeedTurnEndedInterrupted {
   // rebuilt alike. UNSET when the recorded cause did not say how; the client
   // draws it as a direct stop.
   oneof command {
-    // The user stopped the turn itself: the client draws the interruption
-    // bubble.
+    // The user stopped the turn itself: the client draws the neutral
+    // "interrupted" outcome marker (`marker`).
     FeedTurnEndedInterruptedDirect direct = 1;
     // A prompt the user sent superseded the turn: the client draws NOTHING
     // for this row. The superseding prompt, drawn as the active prompt, is the
-    // whole account of the stop, and an interruption bubble here would read as
-    // an error it is not. The row is still sent, because its existence is the
+    // whole account of the stop, and a marker here would only repeat it. The row is still sent, because its existence is the
     // turn's liveness anchor.
     FeedTurnEndedInterruptedInterjection interjection = 2;
   }
+  // THE NEUTRAL OUTCOME MARKER ("interrupted") the client draws for the stop,
+  // in place of the old interruption bubble: an interrupt is the user's own
+  // act, never an error (owner ruling, 2026-10-06). SET for a direct stop and
+  // for a stop whose command is unset; UNSET exactly for an interjection,
+  // which draws nothing.
+  optional FeedOutcomeMarker marker = 3;
 }
 
 // The user stopped the turn itself.
@@ -1405,6 +1429,238 @@ message FeedTurnEndedInterruptedDirect {}
 // A prompt the user sent superseded the turn, which was stopped so that
 // prompt could run next.
 message FeedTurnEndedInterruptedInterjection {}
+
+// ==========================================================================
+// THE OUTCOME MARKER — the ONE drawing for an event that is not a message.
+// ==========================================================================
+
+// THE OUTCOME MARKER (owner ruling, 2026-10-06): the one standardized
+// component the feed draws for an event that is not a message — how a turn
+// ended (FeedTurnEndedErrored.marker, FeedTurnEndedInterrupted.marker), a
+// permission the user denied (FeedPermissionDeniedByUser.marker), a plan
+// episode that broke (FeedPlanFailed.marker), and a compaction that failed
+// (FeedContextCutCompactionFailed.marker). It is placed exactly where the
+// event happened: a turn's ending marker after that turn's last output.
+//
+// A FAILED MERGE NEVER DRAWS ONE (owner ruling, 2026-10-06): its merge bubble,
+// continually updated, is its whole account in the feed.
+//
+// A small inline pill, about the height of the feed's badges, LEFT-ALIGNED in
+// the feed stream column, no wider than its text, and TRUNCATING rather than
+// overflowing the column. No bubble and no background fill:
+//
+//   ▏◆ vendor error · rate limited ›     a fault, collapsed
+//   ▏◆ vendor error · rate limited ⌄     a fault, expanded:
+//    ┌ FeedOutcomeVendorFaultExpansion ───────────────┐
+//    │ time · error type · message · retries · retry  │
+//    │ model · account · [sign in] · [resend]         │
+//    └────────────────────────────────────────────────┘
+//   ▏◼ interrupted                       neutral: no chevron, never expands
+//
+// ANATOMY, left to right: the family's GLYPH, the LABEL, then the optional
+// DETAIL after a separator. COLOR IS ONLY ON THE GLYPH AND A THIN LEFT EDGE;
+// the text stays the normal foreground.
+//
+// THE ARM IS THE FAMILY, and the family decides the glyph and the color from
+// the SHARED vocabulary (proto/vocab/render-colors.json
+// `feed_outcome_marker` and `feed_outcome_marker_glyphs`): neutral grey for
+// the user's own acts and hooks, turquoise for a vendor fault, blue for an
+// agent-repl fault. The client holds no table of its own.
+//
+// ONLY A FAULT ARM CARRIES AN EXPANSION, so a neutral marker structurally
+// cannot expand and draws no chevron. A fault marker expands in place (a
+// click on the pill or its chevron), inside the column, to its expansion's
+// lines. Every line is assembled by the daemon; the client draws each
+// verbatim and derives nothing. AN EXPANSION FIELD IS SET ONLY WHEN ITS SOURCE
+// EXISTS: absent is "the daemon has no such fact", never a default.
+message FeedOutcomeMarker {
+  // The short label ("interrupted", "vendor error", "agent-repl", "Stop hook
+  // ended the run"), drawn verbatim.
+  FeedOutcomeMarkerLabel label = 1;
+  // The detail drawn after the label ("rate limited", "process died"). UNSET
+  // draws the label alone.
+  optional FeedOutcomeMarkerDetail detail = 2;
+  // WHOSE event this was. Exactly one is set; a marker with none is malformed
+  // and rejected loudly.
+  oneof family {
+    // The user's own act or a hook's: an interrupt, a denial, a Stop hook.
+    // Grey; never expands.
+    FeedOutcomeMarkerNeutral neutral = 3;
+    // The vendor ended or refused the work (the workspace status takes a
+    // `vendor_fault`). Turquoise; expands.
+    FeedOutcomeMarkerVendorFault vendor_fault = 4;
+    // agent-repl's own machinery died under the work: the vendor query or the
+    // agent process (the workspace status takes an `agent_repl_fault`). Blue;
+    // expands.
+    FeedOutcomeMarkerAgentReplFault agent_repl_fault = 5;
+  }
+}
+// The label element.
+message FeedOutcomeMarkerLabel {
+  // Drawn verbatim.
+  string text = 1;
+}
+// The detail element.
+message FeedOutcomeMarkerDetail {
+  // Drawn verbatim.
+  string text = 1;
+}
+// The neutral family. EMPTY ON PURPOSE: it has no expansion to carry, so
+// none can be built for it.
+message FeedOutcomeMarkerNeutral {}
+// The vendor-fault family.
+message FeedOutcomeMarkerVendorFault {
+  // What the marker expands to. Always set.
+  FeedOutcomeVendorFaultExpansion expansion = 1;
+}
+// The agent-repl-fault family.
+message FeedOutcomeMarkerAgentReplFault {
+  // What the marker expands to. Always set.
+  FeedOutcomeAgentReplFaultExpansion expansion = 1;
+}
+
+// A VENDOR FAULT'S EXPANSION, line by line, top to bottom.
+//
+// NO REQUEST ID LINE: the vendor's request id never reaches the daemon
+// (conversation.v1 deliberately does not carry it), so there is nothing to
+// draw and no field for it.
+message FeedOutcomeVendorFaultExpansion {
+  // When it happened. UNSET when the daemon holds no instant for the event:
+  // a failed compaction states none, and one drawn from history has only
+  // its replay's.
+  optional FeedOutcomeTime time = 1;
+  // The vendor's error type, verbatim: the api error class it reported
+  // ("rate_limited", "overloaded", an unmodeled class by the vendor's own
+  // name) or the run's own stop word ("max_turns", "prompt_too_long").
+  FeedOutcomeVendorErrorType error_type = 2;
+  // The vendor's own message, verbatim. UNSET when it recorded none.
+  optional FeedOutcomeVendorMessage message = 3;
+  // How many retries the vendor made before it gave up, as its retry
+  // schedule counted them. UNSET when the vendor reported no retry for the
+  // turn.
+  optional FeedOutcomeRetriesMade retries = 4;
+  // The wait the vendor asked for before trying again (a rate limit, an
+  // overload), as the instant the wait ends; the client counts down to it.
+  // UNSET when the vendor stated no wait.
+  optional FeedOutcomeRetryAt retry_at = 5;
+  // The model the turn ran on. UNSET when the daemon did not see the
+  // session's model while the turn ran (a turn drawn from history).
+  optional FeedOutcomeModel model = 6;
+  // The account the turn spent as. UNSET when the daemon did not know the
+  // session's account while the turn ran (a turn drawn from history).
+  optional FeedOutcomeAccount account = 7;
+  // THE SIGN-IN ACTION, for an account cause (the credential was rejected,
+  // the organization is not allowed). Its click starts the existing login
+  // flow (agentrepl.v1.OpenLogin), the same request the topbar's account cell
+  // makes. UNSET for every other cause.
+  optional FeedOutcomeSignIn sign_in = 8;
+  // THE RESEND ACTION, when the turn produced nothing. UNSET otherwise.
+  optional FeedOutcomeResend resend = 9;
+}
+// An AGENT-REPL FAULT'S EXPANSION, line by line, top to bottom.
+//
+// NO EXIT CODE, NO PRINTED OUTPUT AND NO "OPEN LOG" LINE: a turn's close
+// carries only how and when it closed, and no request opens a workspace's
+// log, so none of the three has a source.
+message FeedOutcomeAgentReplFaultExpansion {
+  // When it happened.
+  FeedOutcomeTime time = 1;
+  // What died. Always set.
+  FeedOutcomeWhatDied what_died = 2;
+  // THE RESTART THAT FOLLOWED WORKED: the session started again after the
+  // death. UNSET while no such start has been seen — the restart is still
+  // under way, or it failed, which the footer's own fault line states.
+  optional FeedOutcomeRestarted restarted = 3;
+  // THE RESEND ACTION, when the turn produced nothing. UNSET otherwise.
+  optional FeedOutcomeResend resend = 4;
+}
+// When the event happened.
+message FeedOutcomeTime {
+  // Epoch ms. The client formats it.
+  int64 at_ms = 1;
+}
+// The vendor's error type element.
+message FeedOutcomeVendorErrorType {
+  // Drawn verbatim.
+  string text = 1;
+}
+// The vendor's message element.
+message FeedOutcomeVendorMessage {
+  // Drawn verbatim.
+  string text = 1;
+}
+// The retries-made element.
+message FeedOutcomeRetriesMade {
+  // How many retries were made. Never zero: no retry draws no line.
+  uint32 count = 1;
+}
+// The retry countdown element.
+message FeedOutcomeRetryAt {
+  // When the vendor's wait ends, epoch ms. The client ticks toward it.
+  int64 at_ms = 1;
+}
+// The model element.
+message FeedOutcomeModel {
+  // The model's id, verbatim ("claude-opus-5").
+  string name = 1;
+}
+// The account element.
+message FeedOutcomeAccount {
+  // The logged-in email, verbatim.
+  string email = 1;
+}
+// The sign-in action. EMPTY: presence draws the action, and its click opens
+// the workspace's login flow.
+message FeedOutcomeSignIn {}
+// THE RESEND ACTION. Its click submits `said` again through the ordinary
+// submission (agentrepl.v1.SubmitPrompt, origin WEBAPP_CARD_ACTION), so the
+// prompt is held, classified and delivered exactly as a typed one is.
+message FeedOutcomeResend {
+  // THE PROMPT AS IT WAS SAID, an ECHO VALUE the client hands back verbatim
+  // and never draws. It is the one conversation.v1 record a feed row carries
+  // besides the turn stamp, because SubmitPrompt takes exactly this type
+  // (the held-prompt tray carries it the same way, daemon_hold.proto).
+  conversation.v1.UserSaid said = 1;
+}
+// What died under the turn.
+message FeedOutcomeWhatDied {
+  // Exactly one; unset is malformed.
+  oneof what {
+    // The vendor query died inside a live agent process.
+    FeedOutcomeQueryDied query = 1;
+    // The agent process itself died.
+    FeedOutcomeProcessDied process = 2;
+  }
+}
+// The vendor query died.
+message FeedOutcomeQueryDied {
+  // How it died, composed by the daemon from the producer's stated cause
+  // ("the agent binary's stream ended without closing").
+  FeedOutcomeDeathLine line = 1;
+  // What the SDK threw, verbatim: the last thing the query said. UNSET when
+  // the query died without throwing.
+  optional FeedOutcomeThrown thrown = 2;
+}
+// The agent process died.
+message FeedOutcomeProcessDied {
+  // The composed line ("the agent process died with the turn").
+  FeedOutcomeDeathLine line = 1;
+}
+// The how-it-died line.
+message FeedOutcomeDeathLine {
+  // Drawn verbatim.
+  string text = 1;
+}
+// What the SDK threw.
+message FeedOutcomeThrown {
+  // Drawn verbatim.
+  string text = 1;
+}
+// The restart-worked element.
+message FeedOutcomeRestarted {
+  // When the session started again, epoch ms.
+  int64 at_ms = 1;
+}
 
 // ==========================================================================
 // ASYNC WORK — one wrapper per kind, adjacent to activity because it
@@ -1746,7 +2002,13 @@ message FeedPermissionDeniedUndecidable {
 }
 message FeedPermissionAllowedOnce {}
 message FeedPermissionAllowedStanding {}
-message FeedPermissionDeniedByUser {}
+// The user said no. A DENIAL IS AN ANSWER, not an error (owner ruling,
+// 2026-10-06): the card draws the NEUTRAL outcome marker ("permission denied
+// by you") where it drew a red badge.
+message FeedPermissionDeniedByUser {
+  // The neutral marker, composed by the daemon.
+  FeedOutcomeMarker marker = 1;
+}
 // The policy denial's composed wording.
 message FeedPermissionDeniedByPolicy {
   // The reason, drawn verbatim ("denied by rule").
@@ -2127,9 +2389,10 @@ message FeedSessionSeparation {
   // ONE LEVEL: a separation is a recorded fact; it is never in flight (a
   // compaction that read cold still compacted — see the cold-read notice; a
   // worktree call that failed is a tool failure, not a divider). The one
-  // failed shape it records is `compaction_failed`: the divider that was
+  // failed shape it records is `compaction_failed`: the compaction that was
   // offered (the /compact command, the cold gate's compact remedy) and did
-  // not happen, drawn in the slot the compacted divider would have taken.
+  // not happen, which the client draws as its outcome marker ALONE, with no
+  // divider (owner ruling, 2026-10-06).
   oneof kind {
     // The conversation was discarded outright.
     FeedContextCutCleared cleared = 2;
@@ -2330,10 +2593,19 @@ message FeedMergeAbandoned {
   string summary = 1;
 }
 
-// The failed-compaction divider. The producer's account, verbatim, is the
-// only evidence anyone has; the daemon composes the label.
+// The failed compaction. DRAWN AS ITS OUTCOME MARKER ALONE (owner ruling,
+// 2026-10-06): no divider rule, no label under one — a compaction that did not
+// happen cut nothing, so a dividing line there was mistaken. The producer's
+// account, verbatim, is the only evidence anyone has; the footer's
+// context-budget line still says the context is as it was.
 message FeedContextCutCompactionFailed {
+  // The producer's account, verbatim. The marker's expansion carries it as
+  // the vendor's message; kept so an older client still decodes the row.
   string error = 1;
+  // THE MARKER the client draws for the row, and nothing else: a
+  // `vendor_fault` marker labelled "compaction failed", expanding to the
+  // producer's account.
+  FeedOutcomeMarker marker = 2;
 }
 
 // The ▸/▾ state. UI preference the daemon holds; see the roster's fold.

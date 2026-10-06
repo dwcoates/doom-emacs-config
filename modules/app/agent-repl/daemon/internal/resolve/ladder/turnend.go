@@ -60,3 +60,71 @@ func ResolveTurnEnd(how wsm.TurnClose, class FailureClass) (TurnEnd, bool) {
 		return 0, false
 	}
 }
+
+// TurnFault is the fault a turn's end raises on the workspace status (owner
+// ruling, 2026-10-06): the domain whose machinery ended the turn, or none.
+// The footer and the roster both read it from ResolveTurnFault, so the strip,
+// the dot and the tab cannot disagree about a failed turn's fault, and the
+// feed's outcome marker takes its family from the same table.
+type TurnFault int
+
+// The turn faults.
+const (
+	// NoTurnFault is a turn end that raises no fault: a completion, an
+	// interrupt, an expected stop.
+	NoTurnFault TurnFault = iota
+	// VendorTurnFault is a turn the vendor ended or refused: the footer's
+	// `vendor_fault`, the roster's `vendor_blocked`, turquoise.
+	VendorTurnFault
+	// AgentReplTurnFault is a turn agent-repl's own machinery ended (the
+	// vendor query died, the agent process died): the footer's
+	// `agent_repl_fault · turn_died`, the roster's `turn_died`, blue.
+	AgentReplTurnFault
+)
+
+// String names a turn fault, for the record.
+func (f TurnFault) String() string {
+	switch f {
+	case NoTurnFault:
+		return "none"
+	case VendorTurnFault:
+		return "vendor"
+	case AgentReplTurnFault:
+		return "agent_repl"
+	default:
+		return "unknown"
+	}
+}
+
+// ResolveTurnFault is THE ONE TABLE from a turn's close, and the class of the
+// failure its terminal carried (NoFailure when no terminal reached the
+// resolver), to the fault the turn's end raises. It reports false for a close
+// this build does not know, which every caller surfaces loudly.
+//
+// A FAILED close is read by its class; one no terminal explained is the run
+// failing with no account of why, which the feed draws as the `closed:failed`
+// stop reason, a vendor turn fault. An ORPHANED close is the `closed:orphaned`
+// stop reason, a vendor turn fault too: the ruling names every turn_failed
+// stop reason a vendor fault. The AGENT PROCESS dying under the turn is
+// agent-repl's own machinery.
+//
+// AN EXPECTED STOP RAISES NO FAULT on any failing close, exactly as
+// ResolveTurnEnd reads it `done`: the terminal said the stop was configured or
+// asked for, whatever closed the row after it.
+func ResolveTurnFault(how wsm.TurnClose, class FailureClass) (TurnFault, bool) {
+	switch how {
+	case wsm.CloseCompleted, wsm.CloseKilled, wsm.CloseFolded:
+		return NoTurnFault, true
+	case wsm.CloseFailed, wsm.CloseOrphaned, wsm.CloseAgentDied:
+	default:
+		return NoTurnFault, false
+	}
+	switch {
+	case class == ExpectedStop:
+		return NoTurnFault, true
+	case how == wsm.CloseAgentDied, class == AgentReplFailed:
+		return AgentReplTurnFault, true
+	default:
+		return VendorTurnFault, true
+	}
+}

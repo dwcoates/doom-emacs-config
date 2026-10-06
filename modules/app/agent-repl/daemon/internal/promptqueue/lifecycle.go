@@ -108,8 +108,12 @@ func (q *queue) OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how sessionwatc
 		joinNotStood(log, joined)
 	}
 
-	// The roster's turn fact is the daemon's own, so its close is too.
+	// The roster's turn fact is the daemon's own, so its close is too. The
+	// footer takes the SAME close at the same instant: it is what raises a
+	// failed turn's fault on both surfaces (ladder.ResolveTurnFault), so the
+	// strip and the dot cannot disagree about it.
 	q.deps.Sidebar.SetTurnEnded(ws, how)
+	q.deps.Footer.SetTurnEnded(ws, how)
 
 	// THE DOOR: the row closes and the feed draws the ending together. A
 	// failed write is recorded there, and the queue goes on to deliver.

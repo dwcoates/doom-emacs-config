@@ -729,9 +729,11 @@ func TestTheColorAssignmentsFollowTheOwnersColorMeaningsWithNothingParked(t *tes
 }
 
 // A VENDOR FAULT OPENS THE COMPOSER BY ITS COLOR (owner ruling, 2026-10-02),
-// so the one declared exception there was (`blocked · api_retrying`) is gone
-// and none stands.
-func TestNoComposerOpenSubstatusIsDeclared(t *testing.T) {
+// so the one exception there was (`blocked · api_retrying`) is gone. The one
+// declared today is `agent_repl_fault · turn_died` (owner ruling, 2026-10-06):
+// the fault stands until the next turn starts, so a closed composer would make
+// it permanent.
+func TestTheTurnDiedFaultIsTheOneComposerOpenSubstatus(t *testing.T) {
 	// Arrange.
 	c := loadColors(t)
 
@@ -739,8 +741,8 @@ func TestNoComposerOpenSubstatusIsDeclared(t *testing.T) {
 	got := c.ComposerOpenSubstatuses
 
 	// Assert.
-	if len(got) != 0 {
-		t.Fatalf("composer_open_substatuses = %v, want none", got)
+	if len(got) != 1 || len(got["agent_repl_fault"]) != 1 || got["agent_repl_fault"][0] != "turn_died" {
+		t.Fatalf("composer_open_substatuses = %v, want exactly agent_repl_fault: [turn_died]", got)
 	}
 }
 

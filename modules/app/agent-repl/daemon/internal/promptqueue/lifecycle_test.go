@@ -617,3 +617,32 @@ func TestOnTurnEndedRaisesTheBannerAfterTheDoorClosedTheTurn(t *testing.T) {
 		t.Fatal("the banner was raised before the door closed the turn")
 	}
 }
+
+// THE FOOTER TAKES THE CLOSE THE ROSTER TAKES (owner ruling, 2026-10-06): a
+// failed turn's fault is raised from it on both, so both are told every close.
+func TestOnTurnEndedTellsTheFooterTheTurnsClose(t *testing.T) {
+	cases := []struct {
+		name string
+		how  wsm.TurnClose
+	}{
+		{name: "a completion", how: wsm.CloseCompleted},
+		{name: "a failure", how: wsm.CloseFailed},
+		{name: "the agent process dying", how: wsm.CloseAgentDied},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			running(t, h, "running-turn", "the running work")
+			h.watcher.idle()
+
+			// Act
+			h.q.OnTurnEnded(theWorkspace, "running-turn", tc.how)
+
+			// Assert
+			if got := h.footer.turnEnds(); len(got) != 1 || got[0] != tc.how {
+				t.Fatalf("footer closes = %v, want exactly [%s]", got, tc.how)
+			}
+		})
+	}
+}

@@ -63,16 +63,36 @@ const ARMS: ReadonlyArray<[string, SeparationInit["kind"]]> = [
   ],
   [
     "compactionFailed",
-    { case: "compactionFailed", value: { error: "the summarizing request was refused" } },
+    {
+      case: "compactionFailed",
+      value: {
+        error: "the summarizing request was refused",
+        marker: {
+        label: { text: "compaction failed" },
+        family: {
+          case: "vendorFault",
+          value: {
+            expansion: {
+              errorType: { text: "compaction_failed" },
+              message: { text: "the summarizing request was refused" },
+            },
+          },
+        },
+      },
+      },
+    },
   ],
 ];
+
+/** Every arm that draws a DIVIDER: all but the failed compaction. */
+const DIVIDER_ARMS = ARMS.filter(([name]) => name !== "compactionFailed");
 
 describe("drawFeedSessionSeparation: ONE renderer for every arm", () => {
   it("words every arm the schema declares", () => {
     expect([...SEPARATION_ARMS].sort()).toEqual(ARMS.map(([name]) => name).sort());
   });
 
-  it.each(ARMS)("gives %s the same rule-and-label structure", (_name, kind) => {
+  it.each(DIVIDER_ARMS)("gives %s the same rule-and-label structure", (_name, kind) => {
     const el = drawFeedSessionSeparation(separation(kind), ctxFor());
     expect([el.querySelector(".sep-rule") !== null, el.querySelector(".sep-label") !== null]).toEqual(
       [true, true],
@@ -107,21 +127,37 @@ describe("drawFeedSessionSeparation: ONE renderer for every arm", () => {
 });
 
 describe("drawFeedSessionSeparation: the compaction that did not happen", () => {
-  const failed: SeparationInit["kind"] = {
-    case: "compactionFailed",
-    value: { error: "the summarizing request was refused" },
-  };
+  const failed: SeparationInit["kind"] = ARMS[4][1];
 
-  it("takes the FAILURE accent, not the compacted one it stands in for", () => {
+  it("draws no divider rule: a failed compaction cut nothing (owner ruling 2026-10-06)", () => {
     const el = drawFeedSessionSeparation(separation(failed), ctxFor());
-    expect(el.querySelector(".sep-rule")?.className).toContain("sep-accent-compaction-failed");
+    expect(el.querySelector(".sep-rule")).toBeNull();
   });
 
-  it("states the producer's own account of the failure verbatim", () => {
+  it("draws no label under a rule either", () => {
     const el = drawFeedSessionSeparation(separation(failed), ctxFor());
-    expect(el.querySelector(".sep-compaction-failed")?.textContent).toBe(
+    expect(el.querySelector(".sep-label")).toBeNull();
+  });
+
+  it("draws its vendor-fault outcome marker", () => {
+    const el = drawFeedSessionSeparation(separation(failed), ctxFor());
+    const marker = el.querySelector(".sep-compaction-failed .outcome-marker");
+    expect([marker?.getAttribute("data-family"), marker?.querySelector(".outcome-marker-pill")?.textContent]).toEqual([
+      "vendorFault",
+      "◆compaction failed›",
+    ]);
+  });
+
+  it("carries the producer's own account of the failure in the marker's expansion, verbatim", () => {
+    const el = drawFeedSessionSeparation(separation(failed), ctxFor());
+    expect(el.querySelector('.outcome-marker-line[data-line="message"] .outcome-marker-value')?.textContent).toBe(
       "the summarizing request was refused",
     );
+  });
+
+  it("refuses a failed compaction with no marker", () => {
+    const msg = separation({ case: "compactionFailed", value: { error: "x" } });
+    expect(() => drawFeedSessionSeparation(msg, ctxFor())).toThrow(MalformedView);
   });
 
   it("draws no size change, nothing having been cut", () => {
