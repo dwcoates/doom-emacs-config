@@ -51,6 +51,7 @@ import "agentrepl/v1/endpoint_set_model.proto";
 import "agentrepl/v1/endpoint_set_effort.proto";
 import "agentrepl/v1/endpoint_set_permission_mode.proto";
 import "agentrepl/v1/endpoint_fold_repository.proto";
+import "agentrepl/v1/endpoint_update_sidebar_view.proto";
 import "agentrepl/v1/endpoint_set_workspace_priority.proto";
 import "agentrepl/v1/endpoint_watch_footer.proto";
 import "agentrepl/v1/endpoint_watch_daemon_holds.proto";
@@ -187,6 +188,10 @@ service AgentRepl {
   // endpoint_set_workspace_priority.proto.
   rpc SetWorkspacePriority(SetWorkspacePriorityRequest) returns (SetWorkspacePriorityResponse);
   rpc FoldRepository(FoldRepositoryRequest) returns (FoldRepositoryResponse);
+  // Change one piece of the sidebar's view state (a fold, the grouping),
+  // pushed to every page on the roster stream. See
+  // endpoint_update_sidebar_view.proto.
+  rpc UpdateSidebarView(UpdateSidebarViewRequest) returns (UpdateSidebarViewResponse);
 
   // A new user task; the roster's task view renders it. See
   // endpoint_create_task.proto.

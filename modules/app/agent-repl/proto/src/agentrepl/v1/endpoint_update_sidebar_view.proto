@@ -1,0 +1,113 @@
+// endpoint_update_sidebar_view.proto — UpdateSidebarView: change one piece of
+// the sidebar's VIEW state. SIDEBAR section.
+//
+// THE SIDEBAR LOOKS THE SAME IN EVERY WORKSPACE'S PAGE (owner rulings,
+// 2026-10-06). Every workspace has its own webview page, and view state a page
+// kept for itself — which sections are folded, which grouping is shown —
+// never reached the others. So it is the DAEMON'S: one verb changes it, and
+// the roster push every page already watches carries it, each piece on the
+// box it styles:
+//
+//   - a section's fold: RosterRepoSection.fold, RosterTaskSection.fold,
+//     RosterMergedSection.fold;
+//   - the grouping shown: WorkspaceRoster.shown.
+//
+// Both are DURABLE: they survive a daemon restart.
+//
+// NOT VIEW STATE, and so not here: anything that acts on one workspace (its
+// verbs), and a dropdown open mid-gesture — a row's menu, a row's detail
+// popover — or a form, all transient to the page that opened them (owner
+// ruling, 2026-10-06).
+//
+// The client applies the change to its own page AT ONCE and sends this; the
+// roster push that follows reconciles every page, the sender's included.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/task.proto";
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message UpdateSidebarViewRequest {
+  // THE ARM IS THE CHANGE. Unset is a malformed request (Connect
+  // InvalidArgument).
+  oneof change {
+    // Fold or unfold one section.
+    SidebarViewFoldSection fold_section = 1;
+    // Show one grouping.
+    SidebarViewShowGrouping show_grouping = 2;
+  }
+}
+
+// Fold or unfold one section.
+message SidebarViewFoldSection {
+  // WHICH SECTION. THE ARM IS THE SECTION; unset is malformed.
+  oneof section {
+    // A repository's section, echoed from RosterRepoKey. Its fold has a
+    // second reader: the Emacs tab bar hides a collapsed repository's
+    // workspaces.
+    workspace.v1.RepositoryRef repository = 1;
+    // A task's section, echoed from RosterTaskKey.
+    TaskRef task = 2;
+    // The recently-merged band; the roster carries exactly one.
+    SidebarViewRecentlyMerged recently_merged = 3;
+  }
+  // THE ARM IS THE FOLD ASKED FOR. Unset is malformed.
+  oneof fold {
+    SidebarViewExpand expand = 4;
+    SidebarViewCollapse collapse = 5;
+  }
+}
+
+// The recently-merged band. DELIBERATELY EMPTY: the arm is the section.
+message SidebarViewRecentlyMerged {}
+
+// Show the section's rows.
+message SidebarViewExpand {}
+
+// Hide the section's rows.
+message SidebarViewCollapse {}
+
+// Show one grouping.
+message SidebarViewShowGrouping {
+  // THE ARM IS THE GROUPING. Unset is malformed.
+  oneof grouping {
+    SidebarViewRepositoryGrouping repository = 1;
+    SidebarViewTaskGrouping task = 2;
+  }
+}
+
+// The repository grouping. DELIBERATELY EMPTY: the arm is the fact.
+message SidebarViewRepositoryGrouping {}
+
+// The task grouping. DELIBERATELY EMPTY: the arm is the fact.
+message SidebarViewTaskGrouping {}
+
+// THE ARM IS THE OUTCOME.
+message UpdateSidebarViewResponse {
+  oneof result {
+    UpdateSidebarViewSuccess success = 1;
+    UpdateSidebarViewError error = 2;
+  }
+}
+
+// Recorded; the roster push carries the change to every page.
+message UpdateSidebarViewSuccess {}
+
+// Validation failures (an unset field or arm, a blank id) are Connect
+// InvalidArgument, never an arm. A change to what the view already holds is
+// NOT refused: two pages may race to the same state, and both have what they
+// asked for.
+message UpdateSidebarViewError {
+  oneof cause {
+    // No registered repository matches the ref.
+    UpdateSidebarViewUnknownRepository unknown_repository = 1;
+    // No task by that id.
+    UpdateSidebarViewUnknownTask unknown_task = 2;
+  }
+}
+message UpdateSidebarViewUnknownRepository {}
+message UpdateSidebarViewUnknownTask {}
