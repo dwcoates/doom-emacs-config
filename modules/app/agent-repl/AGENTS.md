@@ -247,6 +247,18 @@ Every temp file a test makes lives under a root its runner owns and removes.
   also refuses every setuid binary, `/bin/ps` included, which the harnesses'
   stray reaping needs.
 
+### No script pipes into an early-exiting grep
+
+A script asks grep about text it holds through `grep_in TEXT ARGS...`
+(`bin/lib-grep-in.sh`), never `printf '%s\n' "$out" | grep -q`. Under
+pipefail a pipe into `grep -q` fails whenever grep matches before the writer
+has finished: the writer dies of SIGPIPE and the pipeline answers 141. It
+flaked only under load (the logs harness: 10 of 24 runs six-wide). A
+command's output is captured first, `grep_in "$(cmd)" -q PATTERN`; a stub
+written by a harness cannot source the helper and uses its here-string,
+`grep -q PATTERN <<<"$text"`. `testrun/internal/run/grep_pipe_scan_test.go`
+fails a scanned script that pipes into `grep -q` again.
+
 ### Suite timings: what a row measures
 
 `test_time.csv` is the canonical per-suite timing history (recording rules:
