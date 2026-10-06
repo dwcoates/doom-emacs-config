@@ -92,6 +92,7 @@ Two further limits, stated rather than hidden:
 | `!bash-fail` | grounded | detachedbash_e2e_test.go | — | — | Go: TestBashNonzeroExit asserts Succeeded verdict despite nonzero exit, exact stdout text, and FeedToolCallReturned.exit.code == 3 — the command's own verdict on itself, drawn on the same FeedShellExit chip the detached shell wears. | covered |
 | `!bash-hold` | ungrounded | deploy_e2e_test.go, detachedbash_e2e_test.go | — | — | Go: TestBashHoldStaysForegroundUntilInterrupted asserts the live FOREGROUND Bash unit, the negative that no detached_shell row is ever drawn for it, and that a real daemon Interrupt is the only terminal it reaches (turn_ended.interrupted). GAP recorded at the test: DetachForeground's `unsupported` refusal is a shim.v1 verb with no caller-facing rpc, so that arm stays out of reach from this layer. | covered |
 | `!bash-image` | grounded | detachedbash_e2e_test.go | — | — | Go: TestBashImageOutput asserts Succeeded verdict and specifically the FeedToolCallReturned.image arm — a FeedImageBlock whose src is the data url the daemon composed, captioned with the command line. | covered |
+| `!bash-rereported` | ungrounded | — | — | — | No counted e2e layer drives this scenario; the shim integration suite (test/integration/detached.test.ts) drives it end to end against the fake store. | uncovered |
 | `!bash-spill` | grounded | detachedbash_e2e_test.go | — | — | Go: TestBashPartialOutputWithSpill asserts Succeeded verdict, exact truncation-phrase text. | covered |
 | `!bash-timeout` | grounded | interrupt_e2e_test.go | — | — | Go: TestBashInterruptedByTimeout asserts terminal is Concluded (not Interrupted), detached shell stays Live, non-empty spool text. | covered |
 | `!cancel-all` | grounded | mergequeue_e2e_test.go | — | — | Go: TestFanWideCancel asserts InterruptedDetached.Count==3 and a second call returns NothingRunning. | covered |
@@ -233,8 +234,8 @@ wrong: the by-layer lines once read 33 and 5 where the table's columns held
 
 - Covered (at least one STRONG, specific-shape assertion in a counted layer): **151**
 - Weak (a counted layer drives the scenario but only asserts turn-completion or a non-specific field, never a named arm/shape): **1**
-- Uncovered (no counted layer drives the scenario at all): **5**
-- Total canonical scenarios: 157
+- Uncovered (no counted layer drives the scenario at all): **6**
+- Total canonical scenarios: 158
 
 By layer, scenarios with at least one hit:
 - Go e2e (non-emacs): 151 scenarios referenced across 27 files
@@ -254,6 +255,7 @@ each row's `Strongest assertion` cell, which is where a reader can act on it.
 
 <!-- BEGIN DERIVED: uncovered -->
 
+- `!bash-rereported`
 - `!fast-cooldown`
 - `!fast-off`
 - `!subagent-network-failed`

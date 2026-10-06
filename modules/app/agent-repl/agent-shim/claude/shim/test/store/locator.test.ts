@@ -35,6 +35,7 @@ function lookupClient(answer: () => Promise<storev1.GetAgentByVendorTaskResponse
       getWorkflow: refuse,
       getSidecarCursors: refuse,
       getLiveWork: refuse,
+      getDetachedWork: refuse,
       writeBatch: refuse,
       getAgentByVendorTask: (request) => {
         requests.push(request);

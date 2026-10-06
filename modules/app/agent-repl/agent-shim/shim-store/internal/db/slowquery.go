@@ -86,8 +86,10 @@ const (
 	StatementShellRunClaims = "shell_run_claims"
 	// StatementRunSettlements is the sidecar's settled-run lookup by run ids.
 	StatementRunSettlements = "run_settlements"
-	StatementListCursors    = "list_cursors"
-	StatementBashRun        = "bash_run"
+	// StatementDetachedWorkByUnit is the shim's detached-work lookup by unit.
+	StatementDetachedWorkByUnit = "detached_work_by_unit"
+	StatementListCursors        = "list_cursors"
+	StatementBashRun            = "bash_run"
 	// StatementResidueShapes is the residue shape catalog listing.
 	StatementResidueShapes = "residue_shapes"
 	// StatementLedgerSweep is one transaction of the write-ledger sweep. It

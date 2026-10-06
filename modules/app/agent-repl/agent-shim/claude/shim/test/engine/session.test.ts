@@ -13967,3 +13967,134 @@ describe("the network fault and the start's cause", () => {
     expect(networkFault(h)).toBeUndefined();
   });
 });
+
+/**
+ * A TASK MESSAGE THE FOLD CANNOT TYPE (2026-10-02 onward, workspace ship-gns).
+ *
+ * Only `task_started` states a task's kind, and a keep-alive rewind's new
+ * vendor query re-reports an earlier query's ended shell as `stopped` with no
+ * start and no type. The record holds the work's kind and end by its unit, so
+ * the engine asks the store before the fold, and hands the fold the answer.
+ */
+describe("a task message whose kind the fold does not hold", () => {
+  const UNIT = create(conversationv1.AgentActivityIdSchema, { value: "toolu_018xxcFy2bK97h1Xrh1KqbE2" });
+  const rereported = {
+    type: "system",
+    subtype: "task_notification",
+    task_id: "bujbjom65",
+    tool_use_id: UNIT.value,
+    status: "stopped",
+    uuid: "00000000-0000-4000-8000-0000000000e1",
+    session_id: "s",
+  } as never as SdkMessage;
+
+  /** A harness whose fold says the re-report awaits the store's kind, as the real fold would. */
+  async function kindHarness(): Promise<Harness> {
+    const h = harness();
+    h.fold.awaitingKindFor = (message) => (message === rereported ? { taskId: "bujbjom65", unit: UNIT } : undefined);
+    await started(h);
+    return h;
+  }
+
+  it("hands the fold the store's answer BEFORE folding the message", async () => {
+    // Arrange.
+    const h = await kindHarness();
+    h.persistence.detachedWorks.set(UNIT.value, { kind: "found", workKind: "bash", ended: true });
+    let learnedWhenFolded = -1;
+    h.fold.entriesFor = (message) => {
+      if (message === rereported) learnedWhenFolded = h.fold.learnedKinds.length;
+      return [];
+    };
+
+    // Act.
+    await h.engine.onSdkMessage(rereported);
+
+    // Assert.
+    expect(learnedWhenFolded).toBe(1);
+  });
+
+  it("asks the store by the task's unit", async () => {
+    // Arrange.
+    const h = await kindHarness();
+
+    // Act.
+    await h.engine.onSdkMessage(rereported);
+
+    // Assert.
+    expect(h.persistence.detachedWorkLookups).toEqual([UNIT.value]);
+  });
+
+  it("hands the fold the answer for the task the fold named", async () => {
+    // Arrange.
+    const h = await kindHarness();
+    h.persistence.detachedWorks.set(UNIT.value, { kind: "found", workKind: "bash", ended: false });
+
+    // Act.
+    await h.engine.onSdkMessage(rereported);
+
+    // Assert.
+    expect(h.fold.learnedKinds).toEqual([
+      { taskId: "bujbjom65", answer: { kind: "found", workKind: "bash", ended: false } },
+    ]);
+  });
+
+  it("records the store stating the work at INFO", async () => {
+    // Arrange.
+    const h = await kindHarness();
+    h.persistence.detachedWorks.set(UNIT.value, { kind: "found", workKind: "bash", ended: true });
+    const before = logSinkMark();
+
+    // Act.
+    await h.engine.onSdkMessage(rereported);
+
+    // Assert.
+    const stated = logRecordsSince(before).filter(
+      (record) => record.message === "the store stated the work a task this process cannot type itself left as",
+    );
+    expect(stated.map((record) => [record.level, record.context.answer])).toEqual([["info", "found ended bash"]]);
+  });
+
+  it("records a store holding no such work at INFO, leaving the refusal to the fold", async () => {
+    // Arrange.
+    const h = await kindHarness();
+    const before = logSinkMark();
+
+    // Act.
+    await h.engine.onSdkMessage(rereported);
+
+    // Assert.
+    const missed = logRecordsSince(before).filter(
+      (record) => record.message === "the store holds no work for a task this process cannot type itself",
+    );
+    expect(missed.map((record) => record.level)).toEqual(["info"]);
+  });
+
+  it("records a store that could not answer at ERROR, with its failure", async () => {
+    // Arrange.
+    const h = await kindHarness();
+    h.persistence.detachedWorks.set(UNIT.value, { kind: "failed", detail: "connect ECONNREFUSED" });
+    const before = logSinkMark();
+
+    // Act.
+    await h.engine.onSdkMessage(rereported);
+
+    // Assert.
+    const failed = logRecordsSince(before).filter(
+      (record) => record.message === "the store could not state the kind of a task this process cannot type itself",
+    );
+    expect(failed.map((record) => [record.level, record.context.answer])).toEqual([
+      ["error", "failed: connect ECONNREFUSED"],
+    ]);
+  });
+
+  it("asks the store nothing for a message no task awaits", async () => {
+    // Arrange.
+    const h = await kindHarness();
+
+    // Act.
+    await h.engine.onSdkMessage(assistantMessage("00000000-0000-4000-8000-0000000000e2"));
+
+    // Assert.
+    expect(h.persistence.detachedWorkLookups).toEqual([]);
+  });
+});

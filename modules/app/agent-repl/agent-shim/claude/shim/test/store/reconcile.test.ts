@@ -74,6 +74,7 @@ function stubClient(overrides: Partial<StoreClient>): StoreClient {
     getSidecarCursors: refuse,
     getLiveWork: refuse,
     getAgentByVendorTask: refuse,
+    getDetachedWork: refuse,
     writeBatch: refuse,
     ...overrides,
   };
@@ -367,6 +368,7 @@ describe("liveWork", () => {
           },
         }),
       getAgentByVendorTask: () => Promise.reject(new Error("unused")),
+      getDetachedWork: () => Promise.reject(new Error("unused")),
       writeBatch: async () => {
         throw new Error("unused");
       },
@@ -422,6 +424,7 @@ describe("liveWork", () => {
         });
       },
       getAgentByVendorTask: () => Promise.reject(new Error("unused")),
+      getDetachedWork: () => Promise.reject(new Error("unused")),
       writeBatch: async () => {
         throw new Error("unused");
       },
@@ -457,6 +460,7 @@ describe("liveWork", () => {
       },
       getLiveWork: async () => create(storev1.GetLiveWorkResponseSchema, {}),
       getAgentByVendorTask: () => Promise.reject(new Error("unused")),
+      getDetachedWork: () => Promise.reject(new Error("unused")),
       writeBatch: async () => {
         throw new Error("unused");
       },
@@ -1253,6 +1257,7 @@ describe("liveWork against a store that cannot be reached", () => {
       getSidecarCursors: refuse,
       getLiveWork: () => Promise.reject(new Error("connect ECONNREFUSED")),
       getAgentByVendorTask: () => Promise.reject(new Error("unused")),
+      getDetachedWork: () => Promise.reject(new Error("unused")),
       writeBatch: refuse,
     };
 

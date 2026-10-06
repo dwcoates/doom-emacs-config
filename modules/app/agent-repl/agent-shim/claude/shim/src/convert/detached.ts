@@ -164,6 +164,20 @@ const VENDOR_TASK_KINDS: ReadonlyMap<string, DetachedKindName> = new Map<string,
   ["monitor", "monitor"],
 ]);
 
+/**
+ * The vendor `task_type` word a kind is, for a kind learned from somewhere
+ * other than the vendor (the store's record of the work, `learnTaskKind`), so
+ * every reader of the registry reads one vocabulary.
+ */
+export function vendorTaskTypeOf(kind: DetachedKindName): string {
+  for (const [word, named] of VENDOR_TASK_KINDS) {
+    if (named === kind) return word;
+  }
+  // UNREACHABLE BY CONSTRUCTION: the table names every kind. Thrown, never
+  // defaulted, should a kind ever be added without its word.
+  throw new Error(`no vendor task_type word names the ${kind} kind`);
+}
+
 /** The kind a vendor `task_type` names, or `undefined` for a word this shim does not know. */
 export function taskKindOf(taskType: string | undefined): DetachedKindName | undefined {
   return taskType === undefined ? undefined : VENDOR_TASK_KINDS.get(taskType);
@@ -343,13 +357,17 @@ function runningAgent(facts: TaskFacts, taskKinds: TaskKindRegistry): conversati
 function announcedKind(facts: TaskFacts, taskKinds: TaskKindRegistry): AnnouncedKind | undefined {
   const kind = taskKindOf(facts.taskType);
   if (kind === undefined) {
+    // THE STORE WAS ASKED FIRST (engine: `taskAwaitingKind`), and its answer is
+    // part of this record: neither this process nor the record knows the task.
+    const store = taskKinds.kindAnswerOf(facts.taskId) ?? "not asked";
     LOGGER.error(
       {
         uuid: facts.uuid,
         task_id: facts.taskId,
         tool_use_id: facts.toolUseId,
         task_type: facts.taskType ?? "",
-        detail: `task_type ${JSON.stringify(facts.taskType ?? null)} is not one of ${[...VENDOR_TASK_KINDS.keys()].join(", ")}`,
+        store_answer: store,
+        detail: `task_type ${JSON.stringify(facts.taskType ?? null)} is not one of ${[...VENDOR_TASK_KINDS.keys()].join(", ")}, and the store answered ${store}`,
       },
       "a task names no kind this shim knows; its announcement is malformed and is refused",
     );
@@ -740,6 +758,30 @@ export interface TaskKindRegistry {
   /** The store's remembered answer for a task, or `undefined` if it was never asked. */
   storeAnswerOf(taskId: string): string | undefined;
   /**
+   * Remember what the STORE answered when asked what detached work a task's
+   * unit left as (`taskAwaitingKind`), for a task whose kind this process did
+   * not hold — so the refusal that may follow can say so, and the ask is not
+   * repeated for the task's later messages. Forgotten with the task's other
+   * facts.
+   */
+  rememberKindAnswer(taskId: string, answer: string): void;
+  /** The store's remembered kind answer for a task, or `undefined` if it was never asked. */
+  kindAnswerOf(taskId: string): string | undefined;
+  /**
+   * Remember that the RECORD holds a task's work as ENDED: its terminal is
+   * already stored, so a notification of it is a re-report with nothing to
+   * restate. Forgotten with the task's other facts.
+   */
+  rememberConcludedOnRecord(taskId: string): void;
+  /** Whether the record was found to hold a task's work as ended. */
+  concludedOnRecord(taskId: string): boolean;
+  /**
+   * Forget every fact held for a task that settles without a settle of its
+   * own: a re-report of a concluded task. The tables kept past a settle (an
+   * agent, a commission) are kept, exactly as an ordinary settle keeps them.
+   */
+  forgetTask(taskId: string): void;
+  /**
    * Remember WHY a task's work left the turn.
    *
    * THE CAUSE IS STATED ONCE AND RESTATED NEVER. A shell's cause rides its own
@@ -849,6 +891,8 @@ export function createTaskKindRegistry(): TaskKindRegistry {
       owner?: conversationv1.AgentId;
       call?: PendingCall;
       storeAnswer?: string;
+      kindAnswer?: string;
+      concludedOnRecord?: boolean;
     }
   >();
   /** Make room for one more task, forgetting the oldest when the cap is hit. */
@@ -934,6 +978,23 @@ export function createTaskKindRegistry(): TaskKindRegistry {
     storeAnswerOf(taskId) {
       return facts.get(taskId)?.storeAnswer;
     },
+    rememberKindAnswer(taskId, kindAnswer) {
+      reserve(facts, FACTS_LOST);
+      facts.set(taskId, { ...facts.get(taskId), kindAnswer });
+    },
+    kindAnswerOf(taskId) {
+      return facts.get(taskId)?.kindAnswer;
+    },
+    rememberConcludedOnRecord(taskId) {
+      reserve(facts, FACTS_LOST);
+      facts.set(taskId, { ...facts.get(taskId), concludedOnRecord: true });
+    },
+    concludedOnRecord(taskId) {
+      return facts.get(taskId)?.concludedOnRecord === true;
+    },
+    forgetTask(taskId) {
+      facts.delete(taskId);
+    },
     rememberCause(taskId, cause) {
       reserve(facts, FACTS_LOST);
       facts.set(taskId, { ...facts.get(taskId), cause });
@@ -983,6 +1044,54 @@ export function createTaskKindRegistry(): TaskKindRegistry {
 /** The task subtypes whose conversion names the agent a subagent task runs. */
 const AGENT_NAMING_SUBTYPES: ReadonlySet<string> = new Set(["task_started", "task_updated", "task_notification"]);
 
+/** A task whose kind the STORE must state before its message is folded, and the unit it is asked by. */
+export interface TaskAwaitingKind {
+  readonly taskId: string;
+  /** The unit the task's work detached from: its spawning call's activity id. */
+  readonly unit: conversationv1.AgentActivityId;
+}
+
+/**
+ * THE TASK WHOSE KIND THE STORE MUST STATE BEFORE THIS MESSAGE IS FOLDED, or
+ * `undefined` when the fold holds the kind (or need not type the message).
+ *
+ * Only `task_started` states a task's kind, and the fold forgets it once the
+ * task settles; a `task_notification` states none. So a shim that restarted
+ * since the start, or a keep-alive rewind whose new vendor query RE-REPORTS an
+ * old backgrounded shell as `stopped` (2026-10-02 onward, workspace ship-gns:
+ * eleven re-reports of one ended shell, each refused at ERROR), meets a
+ * message the fold cannot type. The run's record holds its kind and whether it
+ * ended, by the unit it detached from, so the engine asks the store
+ * (`store.v1.GetDetachedWork`), awaits the answer in its one serial loop, and
+ * hands it back through `learnTaskKind` before folding.
+ *
+ * Asked for the three subtypes that type their task (a `task_updated` only
+ * when it moves the work, the one patch that announces), when no statement
+ * this process holds names a kind, the task's call is known, and the store was
+ * not already asked for this task.
+ *
+ * A PURE READ of what the fold already holds: it records nothing.
+ */
+export function taskAwaitingKind(
+  message: SdkMessage,
+  context: FoldContext,
+  taskKinds: TaskKindRegistry,
+): TaskAwaitingKind | undefined {
+  if (message.type !== "system") return undefined;
+  const raw = message as unknown as RawTask;
+  if (raw.subtype === undefined || !AGENT_NAMING_SUBTYPES.has(raw.subtype)) return undefined;
+  if (raw.subtype === "task_updated" && !patchBackgrounds(raw.patch)) return undefined;
+  if (raw.skip_transcript === true) return undefined;
+  const taskId = raw.task_id;
+  if (typeof taskId !== "string" || taskId === "") return undefined;
+  const known = context.liveTask(taskId);
+  if (taskKindOf(raw.task_type ?? taskKinds.kindOf(taskId) ?? known?.taskType) !== undefined) return undefined;
+  if (taskKinds.kindAnswerOf(taskId) !== undefined) return undefined;
+  const toolUseId = raw.tool_use_id ?? known?.toolUseId ?? taskKinds.toolUseFor(taskId);
+  if (toolUseId === undefined || toolUseId === "") return undefined;
+  return { taskId, unit: toolCallActivityId(toolUseId) };
+}
+
 /**
  * THE TASK WHOSE AGENT THE STORE MUST NAME BEFORE THIS MESSAGE IS FOLDED, or
  * `undefined` when the fold can name it itself (or need not name one at all).
@@ -1018,6 +1127,9 @@ export function taskAwaitingAgent(
   if (raw.skip_transcript === true) return undefined;
   const taskId = raw.task_id;
   if (typeof taskId !== "string" || taskId === "") return undefined;
+  // A RE-REPORT OF A CONCLUDED TASK names no agent: the fold writes nothing for
+  // it (`convertDetached`), so there is nothing to name one for.
+  if (raw.subtype === "task_notification" && taskKinds.concludedOnRecord(taskId)) return undefined;
   const commissionKnown = taskKinds.commissionOf(taskId) !== undefined;
   if (taskKinds.agentOf(taskId) !== undefined && commissionKnown) return undefined;
   const known = context.liveTask(taskId);
@@ -1313,6 +1425,20 @@ export function convertDetached(
       // THE UNIT ENDED, so a move the user asked for that never came never will.
       if (toolUseId !== undefined && toolUseId !== "") {
         taskKinds.retireUserDetach(toolUseId, "the unit ended");
+      }
+      if (taskKinds.concludedOnRecord(taskId)) {
+        // A RE-REPORT OF A CONCLUDED TASK: the record already holds this work's
+        // terminal (engine: `taskAwaitingKind`, the store asked first), so the
+        // notification restates a conclusion and writes nothing. A keep-alive
+        // rewind's new vendor query re-reports an old backgrounded shell as
+        // `stopped`, once per rewind; refusing each untyped was an ERROR for an
+        // ordinary event, and settling each as an agent run was a lie.
+        taskKinds.forgetTask(taskId);
+        LOGGER.info(
+          { uuid, task_id: taskId, tool_use_id: toolUseId ?? "", status: raw.status ?? "" },
+          "a re-report of a concluded task; nothing to restate",
+        );
+        return [];
       }
       if (taskKinds.concludesInForeground(taskId)) {
         // FOREGROUND WORK THAT NEVER LEFT THE TURN ends on its own tool result,

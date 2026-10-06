@@ -34,8 +34,9 @@ import type {
   Persistence,
 } from "../../src/store/persistence.js";
 import { PersistenceError, REPAINT } from "../../src/store/persistence.js";
+import type { DetachedWorkAnswer } from "../../src/store/detached-work.js";
 import type { VendorTaskAnswer } from "../../src/store/locator.js";
-import type { TaskAgentKnowledge } from "../../src/convert/detached.js";
+import type { TaskAgentKnowledge, TaskAwaitingKind } from "../../src/convert/detached.js";
 import type { EngineFold, EngineFoldOutput, FoldContext } from "../../src/engine/fold-context.js";
 import type { KeepaliveScheduler } from "../../src/engine/keepalive.js";
 import type { ReachabilityProbe } from "../../src/engine/network-resume.js";
@@ -539,6 +540,17 @@ export class RecordingPersistence implements Persistence {
     return Promise.resolve(this.vendorTasks.get(vendorTaskId) ?? { kind: "not_found" });
   }
   /**
+   * The store's answer per unit, by its activity id; an unlisted unit answers
+   * `not_found`, which is what a store that never heard of it says.
+   */
+  readonly detachedWorks = new Map<string, DetachedWorkAnswer>();
+  /** Every detached-work lookup, by unit, in order. */
+  readonly detachedWorkLookups: string[] = [];
+  detachedWork(unit: conversationv1.AgentActivityId): Promise<DetachedWorkAnswer> {
+    this.detachedWorkLookups.push(unit.value);
+    return Promise.resolve(this.detachedWorks.get(unit.value) ?? { kind: "not_found" });
+  }
+  /**
    * The durable writes and shell-run opens, in the order they were made — so a
    * suite can say the start was made durable BEFORE the run was opened.
    */
@@ -663,6 +675,19 @@ export class RecordingFold implements EngineFold {
 
   taskAwaitingAgent(message: SdkMessage): string | undefined {
     return this.awaitingFor(message);
+  }
+
+  /** The task whose kind a message awaits the store for; none unless a suite says so. */
+  awaitingKindFor: (message: SdkMessage) => TaskAwaitingKind | undefined = () => undefined;
+  /** Every kind answer the engine handed back, in order. */
+  readonly learnedKinds: { taskId: string; answer: DetachedWorkAnswer }[] = [];
+
+  taskAwaitingKind(message: SdkMessage): TaskAwaitingKind | undefined {
+    return this.awaitingKindFor(message);
+  }
+
+  learnTaskKind(taskId: string, answer: DetachedWorkAnswer): void {
+    this.learnedKinds.push({ taskId, answer });
   }
 
   /** Every unit the engine said it asked the vendor to move, in order. */

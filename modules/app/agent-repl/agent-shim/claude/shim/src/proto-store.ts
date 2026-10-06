@@ -10,6 +10,7 @@
 export * from "../../../../proto/gen/ts/store/v1/service_pb.js";
 export * from "../../../../proto/gen/ts/store/v1/store_pb.js";
 export * from "../../../../proto/gen/ts/store/v1/endpoint_get_agent_by_vendor_task_pb.js";
+export * from "../../../../proto/gen/ts/store/v1/endpoint_get_detached_work_pb.js";
 export * from "../../../../proto/gen/ts/store/v1/endpoint_get_live_work_pb.js";
 export * from "../../../../proto/gen/ts/store/v1/endpoint_get_sidecar_cursors_pb.js";
 export * from "../../../../proto/gen/ts/store/v1/endpoint_get_workflow_pb.js";
