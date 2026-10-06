@@ -266,6 +266,56 @@ the doctor's pid read of a long `launchctl print`). So no script pipes into
 `testrun/internal/run/grep_pipe_scan_test.go` fails a scanned script that
 pipes into any of them.
 
+### Test databases stay off the SSD (owner ruling, 2026-10-06)
+
+A full run once wrote and fsynced hundreds of SQLite files on the host's one
+SSD, and the owner's live store waited 54s for a WAL checkpoint behind them.
+Production durability is untouched by everything below; every seam is
+unreachable from a live process.
+
+- UNIT TESTS USE IN-MEMORY SQLITE (the real engine).
+  - Daemon: `wsm.OpenInMemory` (refused outside a test binary via
+    `testing.Testing`); `testStore` and the drain, promptqueue and handover
+    harnesses use it.
+  - Store: `db.openInMemory` (unexported, same refusal): one shared memdb
+    database per handle, so the write, read and checkpoint pools see one
+    database; `newStore`/`newStoreWithClock` and the tuned-store helpers use it.
+  - THE SCHEMA IS BUILT ONCE PER TEST PROCESS into a memdb template and each
+    handle copies it with SQLite's online-backup API. Not
+    `sqlite3_deserialize`: modernc v1.46.1 hands SQLite a TLS-stack buffer
+    with FREEONCLOSE and the close segfaults.
+  - Migration tests still migrate from scratch.
+- TESTS WHOSE SUBJECT IS THE FILE STAY ON FILES: migrating or reopening a file,
+  read-only and joining opens, two handles on one file (leases, boot, rollout),
+  the WAL, the checkpoint job, a reader overlapping a held write lock, and the
+  connections' pragmas (`fileStore`, `newFileStore`, `newDurableFileStore`).
+- TEST DATABASES SKIP FORCED FLUSHES (`synchronous=OFF`).
+  - In process: `wsm.WithUnsyncedWrites()`, the store's unexported
+    `Options.unsynced`.
+  - Separate processes: `AGENT_REPL_TEST_SQLITE_UNSYNCED=1`, honored by the
+    daemon and the store only beside `AGENT_REPL_FORBID_VENDOR_CALLS`; with the
+    flag and without the guard (or with any other value) they refuse to boot,
+    and an honored flag is recorded at INFO. Every harness that spawns a daemon
+    or store sets it.
+- THE RUN'S ROOT IS A RAM DISK on macOS (`testrun/internal/ramdisk`).
+  - Mounted at `/tmp/artr-<pid>` (APFS), so paths stay temporary to the
+    registration guard and short enough for sockets; exported to units as
+    `AGENT_REPL_TEST_SHORT_BASE`, which the daemon integration harness's run
+    roots and the unit tests' exempt root follow (`tempdirstest.ShortBase`).
+  - Sized `ramdisk.DefaultSizeMiB` (override `AGENT_REPL_TEST_RAMDISK_MIB`):
+    the measured live peak of the run root is 1.5-1.8 GB for
+    `daemon,store,sidecar`; a RAM disk holds at most its size in memory.
+  - ITS UNITS RUN AT THE UTILITY I/O TIER (`taskpolicy -d utility`), not the
+    throttle tier `bin/background.sh` gives the run: throttled I/O to a RAM
+    disk stalled up to 622ms per fsync (the kernel treats the volume as a
+    non-SSD device), and a whole run under it took twice as long and missed
+    timing bounds. Utility still yields to the live runtime's normal-tier I/O
+    on the SSD. A run that fell back to `/tmp` keeps the throttle tier.
+  - Always detached when the run ends; a refused detach is forced and
+    reported. A run killed outright leaves an flock'd record in
+    `/tmp/agent-repl-test-ramdisks`, and the next run reclaims the disk.
+  - A RAM disk that cannot be made falls back to `/tmp` with an ERROR line.
+
 ### Suite timings: what a row measures
 
 `test_time.csv` is the canonical per-suite timing history (recording rules:

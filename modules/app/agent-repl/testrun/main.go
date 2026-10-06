@@ -21,6 +21,7 @@ import (
 	"agentrepl/testrun/internal/cli"
 	"agentrepl/testrun/internal/cover"
 	"agentrepl/testrun/internal/history"
+	"agentrepl/testrun/internal/ramdisk"
 	"agentrepl/testrun/internal/run"
 	"agentrepl/testrun/internal/suites"
 	"agentrepl/testrun/roster"
@@ -63,15 +64,30 @@ func runCmd(log *run.Log, argv []string) int {
 		log.Errorf("%v", err)
 		return 1
 	}
+	// THE RUN'S ROOT LIVES ON A RAM DISK on macOS (ramdisk), so the SQLite
+	// files and everything else the suites write never reach the SSD the
+	// owner's live store shares; a RAM disk that cannot be made falls back to
+	// the disk, saying so.
+	parent, prefix, release := runParent(log)
+	code := runRooted(log, args, self, histPath, parent, prefix)
+	if err := release(); err != nil {
+		log.Errorf("%v", err)
+		return 1
+	}
+	return code
+}
+
+// runRooted runs in a fresh temp root under parent and removes it after.
+func runRooted(log *run.Log, args cli.Args, self, histPath, parent string, prefix []string) int {
 	// THE RUN LIVES IN ITS OWN TEMP ROOT, and so does each unit under it
 	// (run.OSExec). TMPDIR moves to the root, so even planning's
 	// `go list`/`vitest list` write nothing in the user's temp directory.
-	root, err := os.MkdirTemp(run.DefaultTmpParent, "tr-")
+	root, err := os.MkdirTemp(parent, "tr-")
 	if err != nil {
 		log.Errorf("create the run's temp root: %v", err)
 		return 1
 	}
-	code := runIn(log, args, self, histPath, root)
+	code := runIn(log, args, self, histPath, root, prefix)
 	if err := os.RemoveAll(root); err != nil {
 		log.Errorf("remove the run's temp root %s: %v", root, err)
 		return 1
@@ -79,7 +95,46 @@ func runCmd(log *run.Log, argv []string) int {
 	return code
 }
 
-func runIn(log *run.Log, args cli.Args, self, histPath, root string) int {
+// runParent reclaims every dead run's RAM disk, then makes this run's, and
+// answers the directory the run's root goes in with the release to call after
+// it. On a RAM disk it also exports ramdisk.EnvShortBase, the base the
+// harnesses that need short, socket-safe roots make them in instead of /tmp.
+func runParent(log *run.Log) (string, []string, func() error) {
+	disk := func() error { return nil }
+	if runtime.GOOS != "darwin" {
+		return run.DefaultTmpParent, nil, disk
+	}
+	m := ramdisk.Default()
+	reclaimed, err := m.Reclaim()
+	for _, r := range reclaimed {
+		log.Infof("reclaimed the RAM disk %s at %s left by dead run pid %d (attached %v, killed %d leftover processes)", r.Device, r.Mount, r.Pid, r.Attached, r.Killed)
+	}
+	if err != nil {
+		log.Errorf("reclaiming a dead run's RAM disk failed: %v", err)
+	}
+	size, err := ramdisk.SizeFromEnv(os.Getenv)
+	if err != nil {
+		log.Errorf("RAM DISK UNAVAILABLE, this run's root falls back to the disk at %s: %v", run.DefaultTmpParent, err)
+		return run.DefaultTmpParent, nil, disk
+	}
+	v, err := m.Acquire(size)
+	if err != nil {
+		log.Errorf("RAM DISK UNAVAILABLE, this run's root falls back to the disk at %s: %v", run.DefaultTmpParent, err)
+		return run.DefaultTmpParent, nil, disk
+	}
+	if err := os.Setenv(ramdisk.EnvShortBase, v.Mount); err != nil {
+		log.Errorf("export %s: %v", ramdisk.EnvShortBase, err)
+	}
+	log.Infof("the run's root is on a %d MiB RAM disk at %s (%s); units run at the %s I/O tier", size, v.Mount, v.Device, ramdisk.UnitIOTier)
+	return v.Mount, ramdisk.UnitPrefix(), func() error {
+		if err := v.Release(); err != nil {
+			return fmt.Errorf("release the run's RAM disk: %w", err)
+		}
+		return nil
+	}
+}
+
+func runIn(log *run.Log, args cli.Args, self, histPath, root string, prefix []string) int {
 	if err := os.Setenv("TMPDIR", root); err != nil {
 		log.Errorf("point TMPDIR at the run's temp root %s: %v", root, err)
 		return 1
@@ -94,7 +149,7 @@ func runIn(log *run.Log, args cli.Args, self, histPath, root string) int {
 	defer stop()
 	return cli.Run(ctx, cli.Deps{
 		Log:         log,
-		Exec:        run.OSExec{Log: log, Grace: run.KillGrace, TmpParent: root},
+		Exec:        run.OSExec{Log: log, Grace: run.KillGrace, TmpParent: root, Prefix: prefix},
 		Clock:       run.WallClock{},
 		Slots:       slots,
 		HistoryPath: histPath,

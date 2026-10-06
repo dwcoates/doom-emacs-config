@@ -36,7 +36,12 @@ func Main(m *testing.M) int {
 	// is: tests bind unix sockets beneath their temporary directories, and a
 	// root nested inside macOS's long per-user $TMPDIR pushed those paths past
 	// the 104-byte sun_path limit.
-	root, err := os.MkdirTemp("/tmp", "arunit")
+	// On a run with a RAM disk the root goes there (ShortBase).
+	base, err := ShortBase(os.Getenv)
+	if err != nil {
+		panic(err)
+	}
+	root, err := os.MkdirTemp(base, "arunit")
 	if err != nil {
 		panic(fmt.Errorf("tempdirstest: make the exempt temporary root: %w", err))
 	}

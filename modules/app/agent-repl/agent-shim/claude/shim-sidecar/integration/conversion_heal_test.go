@@ -141,7 +141,7 @@ func writeLegacyNoticePrompt(ctx context.Context, t *testing.T, c storev1connect
 // cursor stating a conversion.
 func rewriteAsPreVersioning(t *testing.T, dbPath string) {
 	t.Helper()
-	db, err := sql.Open("sqlite", dbPath)
+	db, err := sql.Open("sqlite", dbPath+"?_pragma=synchronous(OFF)")
 	if err != nil {
 		t.Fatalf("open %s: %v", dbPath, err)
 	}

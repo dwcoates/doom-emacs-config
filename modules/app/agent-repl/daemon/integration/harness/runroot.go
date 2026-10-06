@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+
+	"claude-repld/internal/tempdirs/tempdirstest"
 )
 
 // A RUN ROOT IS ONE `go test` PROCESS'S WHOLE FOOTPRINT ON DISK, AND ITS
@@ -69,8 +71,17 @@ type runRootSpace struct {
 }
 
 // hostRunRoots is the space every real run lives in: under /tmp and short, so
-// the state roots beneath it carry unix sockets under a 103-byte budget.
-var hostRunRoots = runRootSpace{base: "/tmp", creationLock: "/tmp/agent-repl-itest-runroot.lock"}
+// the state roots beneath it carry unix sockets under a 103-byte budget. A
+// scheduled run on a RAM disk moves it onto the disk's mount
+// (tempdirstest.ShortBase), which is itself beneath /tmp; a set but unusable
+// base is an error, never a silent /tmp.
+func hostRunRoots() (runRootSpace, error) {
+	base, err := tempdirstest.ShortBase(os.Getenv)
+	if err != nil {
+		return runRootSpace{}, err
+	}
+	return runRootSpace{base: base, creationLock: filepath.Join(base, "agent-repl-itest-runroot.lock")}, nil
+}
 
 // withCreationLock runs body holding the space's creation lock exclusively.
 func (s runRootSpace) withCreationLock(body func() error) error {

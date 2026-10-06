@@ -278,7 +278,7 @@ func TestTheMigrationAddsTheNewsDigestTables(t *testing.T) {
 	path := layout3Fixture(t)
 
 	// Act
-	handle, err := Open(context.Background(), path)
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites())
 	if err != nil {
 		t.Fatalf("Open on a layout-3 database: %v", err)
 	}
@@ -434,7 +434,7 @@ func TestTheMigrationAddsTheRedisplayColumnsAndTheEditorInstanceTable(t *testing
 	path := fixtureAt(t, 19)
 
 	// Act
-	handle, err := Open(context.Background(), path)
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites())
 	if err != nil {
 		t.Fatalf("Open on a layout-19 database: %v", err)
 	}
@@ -627,7 +627,7 @@ func TestTheMigrationAddsTheNewsDigestHistory(t *testing.T) {
 	path := fixtureAt(t, 21)
 
 	// Act
-	handle, err := Open(context.Background(), path)
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites())
 	if err != nil {
 		t.Fatalf("Open on a layout-21 database: %v", err)
 	}

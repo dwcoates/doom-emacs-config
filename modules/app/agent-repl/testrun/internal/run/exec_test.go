@@ -32,6 +32,9 @@ func TestMain(m *testing.M) {
 func runHelper(mode string) int {
 	verb, arg, _ := strings.Cut(mode, ":")
 	switch verb {
+	case "print-env":
+		fmt.Fprintf(os.Stdout, "%s=%s\n", arg, os.Getenv(arg))
+		return 0
 	case "exit":
 		fmt.Fprint(os.Stdout, "to stdout\n")
 		fmt.Fprint(os.Stderr, "to stderr\n")
@@ -205,6 +208,28 @@ func TestOSExecReportsTheExitStatusAndBothStreams(t *testing.T) {
 				t.Fatalf("logged %q", errs)
 			}
 		})
+	}
+}
+
+func TestOSExecStartsTheUnitUnderItsPrefix(t *testing.T) {
+	// Arrange
+	log, _ := newExecLog()
+	out := &bytes.Buffer{}
+	e := OSExec{Log: log, Grace: time.Second, TmpParent: t.TempDir(), Prefix: []string{"/usr/bin/env", "AR_PREFIX_PROBE=prefixed"}}
+
+	// Act
+	p, err := e.Start(helperSpec([]string{helperEnv + "=print-env:AR_PREFIX_PROBE"}), out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	exit, err := waitBounded(t, p)
+
+	// Assert
+	if err != nil || exit != 0 {
+		t.Fatalf("Wait = %d, %v; want 0", exit, err)
+	}
+	if got := out.String(); !strings.Contains(got, "AR_PREFIX_PROBE=prefixed\n") {
+		t.Fatalf("output = %q, want the unit run under its prefix", got)
 	}
 }
 

@@ -179,7 +179,7 @@ func TestTheMigrationAddsTheDurableFeedRowsTable(t *testing.T) {
 	path := fixtureAt(t, 15)
 
 	// Act
-	handle, err := Open(context.Background(), path)
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites())
 	if err != nil {
 		t.Fatalf("Open on a layout-15 database: %v", err)
 	}

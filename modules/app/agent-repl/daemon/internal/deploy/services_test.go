@@ -1,6 +1,7 @@
 package deploy
 
 import (
+	"claude-repld/internal/tempdirs/tempdirstest"
 	"context"
 	"errors"
 	"fmt"
@@ -121,7 +122,11 @@ func newRestarter(t *testing.T) *restarterHarness {
 	t.Helper()
 	// A unix socket path must stay under the 104-byte sun_path budget, which
 	// the per-test temp dir on macOS overflows.
-	sockDir, err := os.MkdirTemp("/tmp", "dpl")
+	base, err := tempdirstest.ShortBase(os.Getenv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sockDir, err := os.MkdirTemp(base, "dpl")
 	if err != nil {
 		t.Fatal(err)
 	}

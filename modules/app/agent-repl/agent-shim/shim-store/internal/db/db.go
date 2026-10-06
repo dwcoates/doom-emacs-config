@@ -241,6 +241,11 @@ type Options struct {
 	// a caller says "keep every row" without the zero value meaning it by
 	// accident.
 	LedgerRetentionBytes int64
+	// unsynced turns SQLite's forced flushes OFF (synchronous=OFF) on the
+	// write and checkpoint connections. It is a TEST-RUN seam: unexported, so
+	// outside this package only Open reaches it, and Open sets it only from
+	// UnsyncedFromEnv, which refuses it to a store without the vendor guard.
+	unsynced bool
 }
 
 // Open opens (creating if absent) the store database at path with WAL enabled
@@ -267,7 +272,15 @@ func Open(path string, log *logging.Logger) (*DB, error) {
 		}
 		return nil, err
 	}
-	return OpenWithOptions(path, log, Options{SlowQuery: slowQuery, BulkBase: bulkBase, BulkPerRow: bulkPerRow})
+	unsynced, err := UnsyncedFromEnv()
+	if err != nil {
+		if log != nil {
+			log.Log(logging.Fields{Operation: "store.db.open", DatabasePath: path, Level: "error", ErrorCause: err.Error()},
+				"the database's durability could not be settled: %v", err)
+		}
+		return nil, err
+	}
+	return OpenWithOptions(path, log, Options{SlowQuery: slowQuery, BulkBase: bulkBase, BulkPerRow: bulkPerRow, unsynced: unsynced})
 }
 
 // OpenWithOptions is Open with the knobs supplied rather than read from the
@@ -278,6 +291,10 @@ func OpenWithOptions(path string, log *logging.Logger, opts Options) (*DB, error
 		panic("shim-store db: nil logger")
 	}
 	log.LogVerbose(logging.Fields{Operation: "store.db.open", DatabasePath: path}, "opening SQLite database")
+	if opts.unsynced {
+		log.Log(logging.Fields{Operation: "store.db.open", DatabasePath: path},
+			"test run: the database skips SQLite's forced flushes (synchronous=OFF)")
+	}
 
 	// THE LAYER THAT OWNS THE FILE OWNS ITS DIRECTORY. Nothing upstream may
 	// create it: doing so would move an unwritable --db path's failure ahead of
@@ -319,16 +336,16 @@ func OpenWithOptions(path string, log *logging.Logger, opts Options) (*DB, error
 	// cache_size and mmap_size: WriteCacheKiB and MmapSizeBytes, at the top of
 	// this file, say what they cost and why.
 	writeDSN := "file:" + path + "?" + url.Values{
-		"_pragma": {
+		"_pragma": syncFirstWhenUnsynced(opts, []string{
 			"journal_mode(WAL)",
 			"busy_timeout(5000)",
-			"synchronous(NORMAL)",
+			synchronousPragma(opts),
 			"foreign_keys(ON)",
 			"wal_autocheckpoint(0)",
 			fmt.Sprintf("journal_size_limit(%d)", JournalSizeLimitBytes),
 			fmt.Sprintf("cache_size(-%d)", WriteCacheKiB),
 			fmt.Sprintf("mmap_size(%d)", MmapSizeBytes),
-		},
+		}),
 		"_txlock": {"immediate"},
 	}.Encode()
 
@@ -370,12 +387,12 @@ func OpenWithOptions(path string, log *logging.Logger, opts Options) (*DB, error
 	//
 	// `query_only(true)` makes it unable to be a second writer: the PRAGMA is
 	// not a write statement, and everything that is one is refused.
-	// `synchronous(NORMAL)` is the write handle's setting, so the checkpoint
+	// synchronousPragma is the write handle's setting, so the checkpoint
 	// syncs exactly as it did when it ran there.
 	checkpointDSN := "file:" + path + "?" + url.Values{
 		"_pragma": {
 			"busy_timeout(5000)",
-			"synchronous(NORMAL)",
+			synchronousPragma(opts),
 			"query_only(true)",
 		},
 	}.Encode()
@@ -480,6 +497,33 @@ func OpenWithOptions(path string, log *logging.Logger, opts Options) (*DB, error
 		return nil, err
 	}
 	return finishOpen(d, log, path, opts)
+}
+
+// synchronousPragma is the write and checkpoint connections' sync level:
+// NORMAL, which is durable under WAL, unless a test run asked for none.
+func synchronousPragma(opts Options) string {
+	if opts.unsynced {
+		return "synchronous(OFF)"
+	}
+	return "synchronous(NORMAL)"
+}
+
+// syncFirstWhenUnsynced moves the sync level to the FRONT of an unsynced
+// connection's pragmas: the driver applies them in order, and the WAL
+// conversion journal_mode(WAL) commits would otherwise still run at SQLite's
+// default FULL, an F_FULLFSYNC that once stalled a test store's open for
+// seconds. A durable connection's pragmas keep their production order.
+func syncFirstWhenUnsynced(opts Options, pragmas []string) []string {
+	if !opts.unsynced {
+		return pragmas
+	}
+	out := []string{synchronousPragma(opts)}
+	for _, p := range pragmas {
+		if p != synchronousPragma(opts) {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // reopenAfterNuke is openAt, reached through a variable so a test can construct
