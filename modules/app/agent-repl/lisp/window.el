@@ -686,8 +686,36 @@ reply is always a string: a null reply is dropped without a callback."
   (format "(function(){var s=document.documentElement.style;s.setProperty('--gate-dock-height','%dpx');%sreturn 'ok';})()"
           pixels
           (if background
-              (format "s.setProperty('--gate-dock-bg',%s);" (json-encode-string background))
+              (format "s.setProperty('--input-bg',%s);" (json-encode-string background))
             "")))
+
+(defun agent-repl-window--input-background-script (background)
+  "The page script that tells it the input window's BACKGROUND.
+The gate wears that color in every state, docked or not.  The reply is
+always a string: a null reply is dropped without a callback."
+  (format "(function(){document.documentElement.style.setProperty('--input-bg',%s);return 'ok';})()"
+          (json-encode-string background)))
+
+(defun agent-repl-window-tell-input-background (ws)
+  "Tell WS's page the background its input window paints.
+Sent on every page load, so a gate the page draws -- docked or not, and
+after a reload -- always wears the input window's color, never the card's
+old yellow (owner, 2026-10-06).  A workspace with no input buffer or no
+live webview tells nothing, and says so at DEBUG."
+  (require 'json)
+  (let ((buf (agent-repl--ws-get ws :frontend-buffer))
+        (background (agent-repl-window--input-background ws)))
+    (cond
+     ((null background)
+      (agent-repl--log ws "elisp.gate.input-bg-skipped ws=%s reason=no-input-buffer" ws))
+     ((and (buffer-live-p buf)
+           (agent-repl--frontend-webview-read-script
+            buf (agent-repl-window--input-background-script background)
+            #'agent-repl-window--gate-dock-told))
+      (agent-repl--log ws "elisp.gate.input-bg ws=%s background=%s" ws background))
+     (t
+      (agent-repl--log ws "elisp.gate.input-bg-skipped ws=%s reason=no-webview" ws)))
+    background))
 
 (defun agent-repl-window--gate-dock-told (_reply)
   "The page took the docked gate's slot; nothing is left to do."
