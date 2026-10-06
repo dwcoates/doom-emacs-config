@@ -9895,10 +9895,11 @@ describe("the teardown's tails", () => {
     expect(h.persistence.lastKnownAgent?.()).toBe(true);
   });
 
-  it("reads the book's head with the ONE-SHOT verb, so no watch token is minted for it", async () => {
+  it("reads the book's head with the HEAD-ONLY verb, so no watch token is minted and no line is read", async () => {
     // Arrange. The head read stands no tail, and the store cannot learn that a
     // page was abandoned — OpenAgentSession is unary and there is no close — so
     // a reading session opened here would leave a token nothing ever spends.
+    // A page read would scan a page of frames for one pointer (2026-10-06).
     const h = harness({ watcherConclusionBudgetMs: 25 });
     await started(h);
     h.persistence.page = pageWithHead("p-9");
@@ -9911,10 +9912,11 @@ describe("the teardown's tails", () => {
     // Act.
     await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
 
-    // Assert. The head arrived as a one-shot read, and the teardown opened no
-    // further reading session.
-    expect([h.persistence.firstPageReads, h.persistence.pagesOpened]).toEqual([
+    // Assert. The head arrived as a head-only read, and the teardown read no
+    // page and opened no further reading session.
+    expect([h.persistence.bookHeadReads, h.persistence.firstPageReads, h.persistence.pagesOpened]).toEqual([
       1,
+      0,
       openedBeforeTeardown,
     ]);
   });
@@ -10534,7 +10536,7 @@ describe("a vendor failure that is not an Error", () => {
     const watching = h.engine
       .watchAgent(create(shimv1.WatchAgentRequestSchema, {}))[Symbol.asyncIterator]();
     await watching.next();
-    h.persistence.readFirstPage = () => Promise.reject("the store socket went away");
+    h.persistence.readBookHead = () => Promise.reject("the store socket went away");
     const before = logSinkMark();
 
     await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));

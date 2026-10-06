@@ -40,6 +40,12 @@ describe("unavailablePersistence", () => {
     });
   });
 
+  it("readBookHead rejects with store_unavailable", async () => {
+    await expect(persistence.readBookHead({} as never)).rejects.toMatchObject({
+      kind: "store_unavailable",
+    });
+  });
+
   it("readAgentPage rejects with store_unavailable", async () => {
     await expect(persistence.readAgentPage({} as never, {} as never)).rejects.toMatchObject({
       kind: "store_unavailable",

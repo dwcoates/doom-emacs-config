@@ -446,6 +446,20 @@ export interface Persistence {
     opening: AgentOpening,
     known?: () => boolean,
   ): Promise<conversationv1.HistoryPage>;
+  /**
+   * One book's HEAD: the pointer a repaint would serve first, or absence when
+   * the book holds no lines. Read WITHOUT a page — the store answers it from
+   * its place index — for a caller that needs the pointer and nothing else (a
+   * teardown concluding its tails through the head).
+   *
+   * Like {@link Persistence.readFirstPage} the store is always asked and
+   * `known` turns its `unknown_agent` into absence; every other refusal,
+   * an unreachable store included, is surfaced as it stands.
+   */
+  readBookHead(
+    agent: conversationv1.AgentId,
+    known?: () => boolean,
+  ): Promise<conversationv1.HistoryPointer | undefined>;
   /** An OLDER page of one book, walking down from a pointer already served. */
   readAgentPage(
     agent: conversationv1.AgentId,
@@ -660,6 +674,7 @@ export function unavailablePersistence(): Persistence {
     openAgentPage: () => Promise.reject(refuse("openAgentPage")),
     noteAgentMinted: () => undefined,
     readFirstPage: () => Promise.reject(refuse("readFirstPage")),
+    readBookHead: () => Promise.reject(refuse("readBookHead")),
     readAgentPage: () => Promise.reject(refuse("readAgentPage")),
     readPageThrough: () => Promise.reject(refuse("readPageThrough")),
     liveWork: () => Promise.reject(refuse("liveWork")),

@@ -437,6 +437,8 @@ export class RecordingPersistence implements Persistence {
    */
   pagesOpened = 0;
   firstPageReads = 0;
+  /** Head-only reads, counted apart from page reads: they read no line. */
+  bookHeadReads = 0;
   /** Every opening an open or a one-shot read was asked for, in call order. */
   readonly openings: AgentOpening[] = [];
   /**
@@ -495,6 +497,20 @@ export class RecordingPersistence implements Persistence {
     if (this.openError !== undefined) return Promise.reject(this.openError);
     this.closedPages++;
     return Promise.resolve(this.page);
+  }
+  /**
+   * The one-shot HEAD read: the newest pointer of `page`, exactly what the
+   * store's place index answers for the book `page` stands for.
+   */
+  readBookHead(
+    _agent?: conversationv1.AgentId,
+    known?: () => boolean,
+  ): Promise<conversationv1.HistoryPointer | undefined> {
+    this.lastKnownAgent = known;
+    this.bookHeadReads++;
+    if (this.openHangs) return new Promise<conversationv1.HistoryPointer | undefined>(() => undefined);
+    if (this.openError !== undefined) return Promise.reject(this.openError);
+    return Promise.resolve(this.page.entries[0]?.at);
   }
   /**
    * The older pages `readAgentPage` serves, oldest last, one per call; when
