@@ -1223,7 +1223,7 @@ func TestClaimIdempotencyKeyRedrivesAClaimAcrossARestart(t *testing.T) {
 	// Arrange
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "wsm.db")
-	before, err := Open(ctx, path)
+	before, err := Open(ctx, path, WithUnsyncedWrites())
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -1235,7 +1235,7 @@ func TestClaimIdempotencyKeyRedrivesAClaimAcrossARestart(t *testing.T) {
 	if err := before.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
-	after, err := Open(ctx, path)
+	after, err := Open(ctx, path, WithUnsyncedWrites())
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}

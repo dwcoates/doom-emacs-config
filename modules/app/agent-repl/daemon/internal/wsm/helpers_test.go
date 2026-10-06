@@ -12,12 +12,32 @@ import (
 	"claude-repld/internal/dlog"
 )
 
-// testStore opens a fresh durable store in the test's own temp dir, with a
-// capturing logger, and closes it at the end of the test.
+// testStore opens a fresh IN-MEMORY store (OpenInMemory), with a capturing
+// logger, and closes it at the end of the test. A test whose subject is the
+// FILE (reopening it, a second handle on it, migrating it, its read-only mode)
+// uses fileStore instead.
 func testStore(t *testing.T) (*store, *dlog.TestLogger) {
 	t.Helper()
 	log := dlog.NewTestLogger()
-	handle, err := Open(context.Background(), filepath.Join(t.TempDir(), "wsm.db"), WithLogger(log))
+	handle, err := OpenInMemory(context.Background(), WithLogger(log))
+	if err != nil {
+		t.Fatalf("OpenInMemory: %v", err)
+	}
+	t.Cleanup(func() { handle.Close() })
+	s, ok := handle.(*store)
+	if !ok {
+		t.Fatalf("Open returned %T, want *store", handle)
+	}
+	return s, log
+}
+
+// fileStore opens a fresh store on a real FILE in the test's own temp dir, for
+// a test whose subject is the file itself. Its writes skip SQLite's forced
+// flushes (WithUnsyncedWrites): the file is thrown away with the test.
+func fileStore(t *testing.T) (*store, *dlog.TestLogger) {
+	t.Helper()
+	log := dlog.NewTestLogger()
+	handle, err := Open(context.Background(), filepath.Join(t.TempDir(), "wsm.db"), WithLogger(log), WithUnsyncedWrites())
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}

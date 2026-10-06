@@ -133,7 +133,7 @@ func TestTheMigrationAddsTheAgentReplSessionTable(t *testing.T) {
 	path := fixtureAt(t, 20)
 
 	// Act
-	handle, err := Open(context.Background(), path)
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites())
 	if err != nil {
 		t.Fatalf("Open on a layout-20 database: %v", err)
 	}
