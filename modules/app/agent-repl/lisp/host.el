@@ -781,6 +781,13 @@ would then never advance again.  The REF ID is the tab identity, so the
 current name is looked up from it; the subscribe-time name is the
 fallback for the one case the id no longer resolves (a closed or
 tombstoned workspace), where it is the best name the record has."
+  ;; NO WORKSPACE EVER HOLDS TWO STREAMS.  The roster's tab-open and the
+  ;; panels' arrival both subscribe, and a second subscribe that overwrote
+  ;; `:stream' left the first one running unreferenced: nothing could cancel
+  ;; it, and its frames kept arriving after the workspace was forgotten.
+  (when (agent-repl-host-stream ws)
+    (agent-repl--info ws "elisp.host.subscribe-replaces-standing ws=%s" ws)
+    (agent-repl-host-unsubscribe ws))
   (agent-repl-host--attach ws conn ref)
   (let* ((id (plist-get ref :id))
          (current (lambda () (or (agent-repl--ws-by-ref-id id) ws)))
@@ -933,19 +940,38 @@ it.  STREAM nil means the caller did not name the stream."
 (defun agent-repl-host--handle-push (ws push &optional stream)
   "Dispatch one decoded `WatchHostWorkspace' PUSH for workspace WS.
 STREAM is the stream PUSH arrived on; nil means the caller did not name
-it, and the stream standing for WS now is meant."
+it, and the stream standing for WS now is meant.
+
+A PUSH ON A STREAM THAT NO LONGER STANDS FOR WS IS DROPPED.  A cancel is
+asynchronous, so frames the daemon sent before it can still arrive; and a
+forgotten workspace has no entry left to update.  Applying either would
+re-create bookkeeping for a workspace whose tab is gone (measured
+2026-10-06: a merged workspace's `:host' push landed 10ms after
+`elisp.host.forgotten' and re-created its entry).  Recorded at INFO."
   (let ((arm (plist-get push :arm))
         (value (plist-get push :value)))
-    (pcase arm
-      (:host (agent-repl-host--apply-state ws value))
-      (:notification-clicked (agent-repl-host--notification-clicked ws))
-      (:selection (agent-repl-host--apply-selection ws value))
-      (:transferred (agent-repl-host--transferred ws value))
-      (:reload-webapp (agent-repl-host--reload-webapp ws))
-      (:open-in-editor (agent-repl-host--open-in-editor ws value))
-      (:ending (agent-repl-host--note-ending ws stream))
-      (_ (agent-repl--error ws "elisp.host.unknown-push ws=%s arm=%S push=%S"
-                            ws arm push)))))
+    (cond
+     ((and stream (null (agent-repl-host--entry ws)))
+      (agent-repl--info ws "elisp.host.push-dropped ws=%s arm=%s reason=forgotten"
+                        ws arm))
+     ((and stream (not (eq stream (agent-repl-host-stream ws))))
+      (agent-repl--info ws "elisp.host.push-dropped ws=%s arm=%s reason=stale-stream"
+                        ws arm))
+     (t
+      (agent-repl-host--dispatch-push ws arm value stream)))))
+
+(defun agent-repl-host--dispatch-push (ws arm value stream)
+  "Apply one host push of ARM carrying VALUE to WS; STREAM carried it."
+  (pcase arm
+    (:host (agent-repl-host--apply-state ws value))
+    (:notification-clicked (agent-repl-host--notification-clicked ws))
+    (:selection (agent-repl-host--apply-selection ws value))
+    (:transferred (agent-repl-host--transferred ws value))
+    (:reload-webapp (agent-repl-host--reload-webapp ws))
+    (:open-in-editor (agent-repl-host--open-in-editor ws value))
+    (:ending (agent-repl-host--note-ending ws stream))
+    (_ (agent-repl--error ws "elisp.host.unknown-push ws=%s arm=%S value=%S"
+                          ws arm value))))
 
 (defun agent-repl-host--apply-naming (ws)
   "Rename WS's input buffer so its name carries WS's display title.
