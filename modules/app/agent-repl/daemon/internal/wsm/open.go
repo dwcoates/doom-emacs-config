@@ -81,8 +81,15 @@ var productionTemporaryGuard = func() (tempdirs.Guard, error) {
 type store struct {
 	// mu guards the handle and the read-only flag across a PROMOTION, which
 	// swaps both. Every other field is set once at open.
-	mu       sync.RWMutex
-	handle   *sql.DB
+	mu     sync.RWMutex
+	handle *sql.DB
+	// retired is every handle a PROMOTION swapped out. It stays open until
+	// Close: a reader that db() answered just before the swap still holds it
+	// and may not have started its query yet, and closing it at the swap
+	// failed that read with `sql: database is closed` (the 2026-10-06
+	// handover, where it became a false unknown_workspace for an adopting
+	// page). Guarded by mu.
+	retired  []*sql.DB
 	path     string
 	readOnly bool
 	log      dlog.Logger
@@ -429,9 +436,18 @@ func (s *store) createSchema(ctx context.Context) error {
 // A lease another process already released -- the successor that adopted a
 // handed-over workspace drains its quiesce hold -- is simply gone, and is
 // recorded at DEBUG. Every failure is returned, joined with the close's own.
+//
+// The handles a promotion retired close here too, after the one in force.
 func (s *store) Close() error {
 	released := s.releaseOwnedLeases(context.Background())
-	return errors.Join(released, s.db().Close())
+	s.mu.RLock()
+	handles := append([]*sql.DB{s.handle}, s.retired...)
+	s.mu.RUnlock()
+	errs := []error{released}
+	for _, handle := range handles {
+		errs = append(errs, handle.Close())
+	}
+	return errors.Join(errs...)
 }
 
 // db answers the handle in force. It is a method because a PROMOTION swaps it
@@ -479,15 +495,12 @@ func (s *store) Promote(ctx context.Context) error {
 		s.log.Error(op, "the writing handle could not be reached", dlog.Context{"path": s.path, "error": err.Error()})
 		return fmt.Errorf("wsm: promote %q: %w", s.path, err)
 	}
-	previous := s.handle
+	// THE READ-ONLY HANDLE IS RETIRED, NOT CLOSED. db() hands it out under
+	// mu's read side, but the reader runs its query after releasing it, so a
+	// read that took it just before this swap is still on its way to it.
+	// Close ends it with the store.
+	s.retired = append(s.retired, s.handle)
 	s.handle, s.readOnly = handle, false
-	if err := previous.Close(); err != nil {
-		// The writing handle is already in place; a stubborn read-only handle
-		// is reported and nothing is rolled back.
-		s.log.Warn(op, "the retired read-only handle would not close", dlog.Context{
-			"path": s.path, "error": err.Error(),
-		})
-	}
 	s.log.Info(op, "promoted the state handle to writing", dlog.Context{"path": s.path})
 	// STILL UNDER THE EXCLUSIVE LOCK, so a usage write that arrives now
 	// waits and lands after the held one it supersedes, never before it.
