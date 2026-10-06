@@ -117,6 +117,7 @@ var migrations = []migration{
 	{To: 24, Name: "account_usage", Kind: MigrationAdditive, DDL: accountUsageDDL},
 	{To: 25, Name: "account_usage_seat_spend", Kind: MigrationAdditive, DDL: accountUsageSeatDDL},
 	{To: 26, Name: "agent_repl_session_drop_traffic", Kind: MigrationBreaking, DDL: agentReplSessionDropTrafficDDL},
+	{To: 27, Name: "reveal_gaps", Kind: MigrationAdditive, DDL: revealGapsDDL},
 }
 
 // repositoriesFoldedDDL adds whether a repository's roster section is
