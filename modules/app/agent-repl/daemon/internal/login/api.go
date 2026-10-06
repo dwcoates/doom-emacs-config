@@ -96,6 +96,19 @@ type Manager interface {
 	CloseAll(ctx context.Context)
 }
 
+// Observer is told when an account root's login flow opens and when it ends,
+// in that order and once each per flow. A flow JOINED by a second workspace is
+// not a second opening. internal/agentreplsession reads the root's login record
+// at both, which is how a login made THROUGH agent-repl is known to have
+// completed without anything parsing the TUI.
+//
+// Both are called under the manager's lock, which is what orders an ending
+// after its opening; neither may call back into the manager.
+type Observer interface {
+	LoginOpened(configDir string)
+	LoginEnded(configDir string)
+}
+
 // ConfigDirFunc routes a workspace to the account config root its login flow
 // runs under. It is injected rather than imported so login stays a leaf
 // alongside account rather than depending on it.
@@ -104,13 +117,17 @@ type ConfigDirFunc func(ws ids.WorkspaceID) (string, error)
 // New builds the manager. guard refuses the pty spawn when vendor calls are
 // forbidden AND the binary is the default `claude`; vendorBin is the vendor
 // binary the pty runs (empty takes $AGENT_REPL_CLAUDE_BIN, then
-// DefaultVendorBin); configDirFor routes each workspace to its account root.
-func New(guard envc.VendorGuard, vendorBin string, configDirFor ConfigDirFunc, log dlog.Logger) (Manager, error) {
+// DefaultVendorBin); configDirFor routes each workspace to its account root;
+// observer is told of every flow's opening and ending.
+func New(guard envc.VendorGuard, vendorBin string, configDirFor ConfigDirFunc, log dlog.Logger, observer Observer) (Manager, error) {
 	if configDirFor == nil {
 		return nil, errors.New("login: a config-dir resolver is required (the account root is what a login is keyed by)")
 	}
 	if log == nil {
 		return nil, errors.New("login: a logger is required")
 	}
-	return newManager(guard, vendorBin, configDirFor, log), nil
+	if observer == nil {
+		return nil, errors.New("login: an observer is required (a completed login begins agent-repl's session)")
+	}
+	return newManager(guard, vendorBin, configDirFor, log, observer), nil
 }
