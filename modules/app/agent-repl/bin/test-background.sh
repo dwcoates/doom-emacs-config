@@ -441,7 +441,7 @@ scan() {
     # (e) Every vitest config imports the guard that refuses an unwrapped run.
     find "$module" -name node_modules -prune -o -name 'vitest*.config.ts' -print | sort | while IFS= read -r file; do
         local rel target
-        rel="$(sed -nE 's/^import "([^"]*require-background\.mjs)";$/\1/p' "$file" | head -1)"
+        rel="$(sed -nE 's/^import "([^"]*require-background\.mjs)";$/\1/p' "$file" | sed -n 1p)"
         target=""
         [ -n "$rel" ] && target="$(resolve "$(dirname "$file")/$rel")"
         [ "$target" = "$guard" ] ||

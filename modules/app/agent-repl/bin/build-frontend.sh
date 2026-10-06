@@ -595,7 +595,7 @@ build_shim() {
 # does.
 write_webapp_build_id() {
     local index="$WEBAPP_ARTIFACT" entry
-    entry="$(sed -n 's|.*src="/assets/index-\([A-Za-z0-9_-]*\)\.js".*|\1|p' "$index" | head -1)"
+    entry="$(sed -n 's|.*src="/assets/index-\([A-Za-z0-9_-]*\)\.js".*|\1|p' "$index" | sed -n 1p)"
     if [ -z "$entry" ]; then
         echo "[build-frontend] webapp: FAILED to read the entry bundle hash from $index" >&2
         return 1

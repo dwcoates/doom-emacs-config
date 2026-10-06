@@ -398,7 +398,10 @@ check_launchd_service() {
   # A loaded-and-running service reports a numeric pid; a loaded-but-dead one
   # reports "state = not running" with no pid.
   local pid
-  pid="$(printf '%s\n' "$out" | awk -F'= ' '/^\tpid = /{print $2; exit}')"
+  # READ WHOLE, never through a pipe into an awk that exits at its match: under
+  # pipefail the printf writing launchctl's output died of SIGPIPE whenever awk
+  # exited first, and the doctor itself exited 141 (2026-10-06).
+  pid="$(awk -F'= ' '/^\tpid = / && !found {print $2; found = 1}' <<<"$out")"
   if [ -n "$pid" ]; then
     record "$name" "PASS" "$label loaded and running (pid $pid)"
   else

@@ -739,7 +739,7 @@ standing_emacs_pid() {
 # costs a takeover, which is the consent the operator has already given for
 # every cold start in the plan; without it this declines rather than stopping a
 # daemon an editor would immediately replace.
-DAEMON_PID="$(daemon_pids | head -n1)"
+DAEMON_PID="$(daemon_pids | sed -n 1p)"
 if [ -n "$DAEMON_PID" ]; then
     note "a daemon is running as pid $DAEMON_PID; checking its environment for the vendor guard"
     if ! process_carries_guard "$DAEMON_PID"; then
@@ -826,7 +826,7 @@ scan_unguarded_shims() {
             *"--listen $SOCK_DIR/"*) ;;
             *) continue ;;
         esac
-        socket="$(printf '%s' "$command_line" | tr ' ' '\n' | grep "^$SOCK_DIR/" | head -n1)"
+        socket="$(printf '%s' "$command_line" | tr ' ' '\n' | grep "^$SOCK_DIR/" | sed -n 1p)"
         if ! process_carries_guard "$pid"; then
             UNGUARDED="$UNGUARDED
   shim pid $pid listening on ${socket:-(no socket named on its command line)}"
