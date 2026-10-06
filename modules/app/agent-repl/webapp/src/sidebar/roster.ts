@@ -94,6 +94,7 @@ export function drawWorkspaceRoster(u: WorkspaceRoster, sc: SidebarContext): HTM
 
   // The copies drawn from the last roster are about to be thrown away.
   sc.view.beginDraw();
+  sc.dropdowns.beginDraw();
   sc.tasks.length = 0;
   for (const [index, section] of task.sections.entries()) {
     sc.tasks.push({
@@ -432,6 +433,16 @@ export function drawRosterTaskSectionHeader(
     event.preventDefault();
     event.stopPropagation();
     menu.hidden = !menu.hidden;
+    if (menu.hidden) sc.dropdowns.released(menu);
+    else
+      sc.dropdowns.opened({
+        kind: "task-menu",
+        element: menu,
+        openers: [more],
+        close: () => {
+          menu.hidden = true;
+        },
+      });
   });
   header.appendChild(more);
   header.appendChild(menu);
