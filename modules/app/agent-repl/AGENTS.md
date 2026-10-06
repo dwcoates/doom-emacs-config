@@ -121,6 +121,21 @@ is how broad a run is at each moment.
 - Full runs go through `bin/test-all.sh`, never a hand-assembled set of
   per-suite commands: the scheduler holds the host's one suite slot, so two
   agents' full runs never overlap.
+- A SYSTEM'S SUITE IS ITS UNIT AND INTEGRATION TESTS TOGETHER. The roster
+  entry carries both (`testrun/roster/roster.go`), so `--suites daemon` runs
+  the daemon's packages and its `-tags integration` package
+  (`daemon/integration`, formerly only `make integration`), and `webapp` and
+  `shim` run their default vitest config and their
+  `vitest.integration.config.ts` (formerly only `npm run test:integration`;
+  the shim's builds the bundle and lock helper its files spawn first, as its
+  `pretest:integration` always did).
+  The store's and the sidecar's `integration` packages are untagged and were
+  always in their suites; the webapp-layer and the Emacs layer run in `e2e`
+  and `e2e-emacs`. `test:webkit` is the one suite outside the roster.
+- The repository's own harnesses are suites too: `install-harness`
+  (`.claude/test-install.sh`) and `workspace-cli-harness` /
+  `workspace-open-cli-harness` (`bin/test-agent_repl_workspace{,_open}.sh` at
+  the repository root).
 
 ### One scheduled run at a time: `bin/test-all.sh` and `bin/suite-slot.sh`
 

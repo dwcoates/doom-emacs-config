@@ -733,6 +733,13 @@ describe("graceful stand-down", () => {
     const stream = await openAgentStream(shim);
     shim.store?.failWrites("briefly down");
     await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!md" }));
+    // THE STORE'S ANSWER IS HELD across the signal. The stand-down's flush
+    // waits for ONE more outcome under a persistent failure, and that outcome
+    // was the writer's next retry on its own clock: when it came before this
+    // test let the store accept, it was refused and the shim exited 1 with
+    // the rows held (1 run in 15 under load, 2026-10-06). Held, the attempt
+    // in flight is answered only after the store is back.
+    const hold = shim.store?.holdWrites();
 
     shim.signal("SIGTERM");
     // The stand-down's own record, awaited rather than scanned.
@@ -741,6 +748,7 @@ describe("graceful stand-down", () => {
     expect(shim.child.exitCode).toBeNull();
 
     shim.store?.failWrites(null);
+    hold?.release();
     const exit = await shim.exited;
 
     expect(exit.code).toBe(0);

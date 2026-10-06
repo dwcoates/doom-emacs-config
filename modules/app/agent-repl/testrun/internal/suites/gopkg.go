@@ -58,14 +58,20 @@ type goPkg struct {
 	ChunkEnv []string
 	// Timeout is each chunk's -test.timeout.
 	Timeout string
+	// Tags are the build tags the package's tests compile under; "" is none.
+	Tags string
 }
 
 // sharePrebuilt makes this package's build process compile its test binary,
 // run TestMain once to fill a shared directory, and point every chunk there.
 func (p *goPkg) sharePrebuilt(dir string, before ...string) {
 	lines := append([]string{"set -euo pipefail"}, before...)
+	tags := ""
+	if p.Tags != "" {
+		tags = "-tags " + strconv.Quote(p.Tags) + " "
+	}
 	lines = append(lines,
-		"go test -c -o "+strconv.Quote(p.Bin)+" "+strconv.Quote(goPackageArg(p.Rel)),
+		"go test -c "+tags+"-o "+strconv.Quote(p.Bin)+" "+strconv.Quote(goPackageArg(p.Rel)),
 		testenv.Prebuild+"="+strconv.Quote(dir)+" "+strconv.Quote(p.Bin)+" -test.run '^$'",
 	)
 	p.Build = []string{"bash", "-c", strings.Join(lines, "\n")}
@@ -73,18 +79,28 @@ func (p *goPkg) sharePrebuilt(dir string, before ...string) {
 }
 
 // group is the package's chunk group, which is also its unit ID prefix.
-func (p goPkg) group() string { return p.Suite + ":" + p.Rel }
+// A tagged package's group names its tags, so it never collides with the
+// same directory's untagged pass.
+func (p goPkg) group() string {
+	if p.Tags != "" {
+		return p.Suite + ":" + p.Rel + "[" + p.Tags + "]"
+	}
+	return p.Suite + ":" + p.Rel
+}
 
 // units is the package's build unit and, when it has tests, its split.
 func (p goPkg) units() (run.Spec, *Split, error) {
 	dir := filepath.Join(p.Module, p.Rel)
-	tests, err := GoTopLevelTests(dir)
+	tests, err := goTopLevelTestsTagged(dir, p.Tags)
 	if err != nil {
 		return run.Spec{}, nil, err
 	}
 	argv := p.Build
 	if argv == nil {
 		argv = []string{"go", "test", "-c", "-o", p.Bin}
+		if p.Tags != "" {
+			argv = append(argv, "-tags", p.Tags)
+		}
 		if p.CovDir != "" {
 			argv = append(argv, "-cover", "-coverpkg=./...")
 		}
@@ -131,7 +147,16 @@ func (p goPkg) units() (run.Spec, *Split, error) {
 // in dir under the default build context: Test and Fuzz functions, and the
 // examples that carry an output comment. Name order.
 func GoTopLevelTests(dir string) ([]string, error) {
-	pkg, err := build.ImportDir(dir, 0)
+	return goTopLevelTestsTagged(dir, "")
+}
+
+// goTopLevelTestsTagged is GoTopLevelTests under build TAGS (comma-separated).
+func goTopLevelTestsTagged(dir, tags string) ([]string, error) {
+	ctx := build.Default
+	if tags != "" {
+		ctx.BuildTags = append(append([]string(nil), ctx.BuildTags...), strings.Split(tags, ",")...)
+	}
+	pkg, err := ctx.ImportDir(dir, 0)
 	if err != nil {
 		if _, noGo := err.(*build.NoGoError); noGo {
 			return nil, nil
