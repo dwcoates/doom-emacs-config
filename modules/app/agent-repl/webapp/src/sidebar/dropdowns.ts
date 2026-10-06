@@ -89,3 +89,29 @@ export function createDropdowns(): Dropdowns {
     },
   };
 }
+
+/**
+ * Reveal or hide a dropdown that is a `hidden` box (a "⋯" menu), keeping the
+ * registry in step: revealed, it is the open dropdown (closing any other);
+ * hidden by its own opener, it is let go.
+ */
+export function toggleHiddenDropdown(
+  dropdowns: Dropdowns,
+  kind: string,
+  element: HTMLElement,
+  openers: readonly HTMLElement[],
+): void {
+  element.hidden = !element.hidden;
+  if (element.hidden) {
+    dropdowns.released(element);
+    return;
+  }
+  dropdowns.opened({
+    kind,
+    element,
+    openers,
+    close: () => {
+      element.hidden = true;
+    },
+  });
+}
