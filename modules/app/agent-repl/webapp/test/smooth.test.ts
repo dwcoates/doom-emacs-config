@@ -5,6 +5,7 @@ import {
   RevealOptions,
   SmoothReveal,
   revealSlice,
+  windowedReveal,
 } from "../src/smooth.js";
 import type { RevealBlock, RevealItem, RevealState } from "../src/smooth.js";
 
@@ -312,5 +313,23 @@ describe("DEFAULT_REVEAL_OPTIONS", () => {
     // Arrange / Act / Assert — the shipped pacing is a real, forward reveal.
     expect(DEFAULT_REVEAL_OPTIONS.minCps).toBeGreaterThan(0);
     expect(DEFAULT_REVEAL_OPTIONS.catchupSeconds).toBeGreaterThan(0);
+  });
+});
+
+describe("windowedReveal", () => {
+  it.each([
+    { name: "shows only what was on screen at the window's start", elapsed: 0, want: 2 },
+    { name: "spreads the rest evenly, half shown at half the window", elapsed: 50, want: 6 },
+    { name: "shows everything once the window has passed", elapsed: 100, want: 10 },
+    { name: "shows everything when a frame lands after the window", elapsed: 250, want: 10 },
+    { name: "never shows less than was on screen before the window began", elapsed: -20, want: 2 },
+  ])("$name", ({ elapsed, want }) => {
+    // Arrange
+    const from = 2;
+    const to = 10;
+    // Act
+    const shown = windowedReveal(from, to, elapsed, 100);
+    // Assert
+    expect(shown).toBe(want);
   });
 });

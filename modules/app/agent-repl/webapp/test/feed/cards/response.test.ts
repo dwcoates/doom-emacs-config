@@ -29,6 +29,7 @@ import {
   responseCapLines,
   thinkingLanded,
   revealedSoFar,
+  revealWindowMs,
   usageAgeWithinReserve,
   usageReserveLabelsCss,
 } from "../../../src/feed/cards/response.js";
@@ -246,6 +247,80 @@ describe("the arriving state", () => {
     vi.advanceTimersByTime(5000);
     // Assert
     expect([el.getAttribute(REVEALED_ATTRIBUTE), shown === "5000"]).toEqual([shown, false]);
+  });
+});
+
+describe("the daemon's reveal window", () => {
+  /** The element a previous push of the row returned, LENGTH characters shown. */
+  function previousAt(length: number): HTMLElement {
+    const previous = document.createElement("div");
+    previous.setAttribute(REVEALED_ATTRIBUTE, String(length));
+    return previous;
+  }
+
+  /** A paced bubble: MARKDOWN in ARM, with a reveal window of WINDOWMS. */
+  function paced(arm: "update" | "success", markdown: string, windowMs: number): FeedResponse {
+    return response({ result: { case: arm, value: { prose: { markdown }, revealWindow: { expectedGapMs: windowMs } } } });
+  }
+
+  it("spreads an arriving bubble's unshown text evenly across the window", () => {
+    // Arrange
+    const el = drawFeedResponse(paced("update", "x".repeat(5000), 1000), rowContext());
+    document.body.appendChild(el);
+    // Act
+    vi.advanceTimersByTime(500);
+    // Assert: about half, where the backlog-chasing default would be nearly done.
+    const shown = Number(el.getAttribute(REVEALED_ATTRIBUTE));
+    expect(shown > 2300 && shown < 2700).toBe(true);
+  });
+
+  it("finishes an arriving bubble's reveal when the window ends", () => {
+    // Arrange
+    const el = drawFeedResponse(paced("update", "hello world", 100), rowContext(previousAt(1)));
+    document.body.appendChild(el);
+    // Act
+    vi.advanceTimersByTime(150);
+    // Assert
+    expect(el.getAttribute(REVEALED_ATTRIBUTE)).toBe("11");
+  });
+
+  it("spreads from what the previous push left on screen", () => {
+    // Arrange / Act: the previous push had only shown 4 of what had arrived.
+    const el = drawFeedResponse(paced("update", "abcdefghijklmnopqrstuvwxyz", 1000), rowContext(previousAt(4)));
+    // Assert
+    expect(el.querySelector(".bubble-body")?.textContent?.trim()).toBe("abcd");
+  });
+
+  it("types out a paced settled bubble's leftover text instead of drawing it at once", () => {
+    // Arrange
+    const el = drawFeedResponse(paced("success", "hello world", 100), rowContext(previousAt(5)));
+    document.body.appendChild(el);
+    // Act
+    const atDraw = el.getAttribute(REVEALED_ATTRIBUTE);
+    vi.advanceTimersByTime(150);
+    // Assert
+    expect([atDraw, el.getAttribute(REVEALED_ATTRIBUTE)]).toEqual(["5", "11"]);
+  });
+
+  it("draws an unpaced settled bubble whole at once", () => {
+    // Arrange / Act
+    const el = drawFeedResponse(
+      response({ result: { case: "success", value: { prose: { markdown: "hello world" } } } }),
+      rowContext(previousAt(5)),
+    );
+    // Assert
+    expect(el.getAttribute(REVEALED_ATTRIBUTE)).toBe("11");
+  });
+
+  it("answers no window when the daemon sent none", () => {
+    expect(revealWindowMs(undefined, "FeedResponse.update.reveal_window")).toBeUndefined();
+  });
+
+  it("refuses a window of zero as malformed", () => {
+    // Arrange
+    const draw = (): HTMLElement => drawFeedResponse(paced("update", "hi", 0), rowContext());
+    // Act / Assert
+    expect(draw).toThrow(MalformedView);
   });
 });
 
