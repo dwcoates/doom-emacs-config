@@ -2,6 +2,8 @@
 import { createControl, type Control } from "../../src/control.js";
 import { describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
+import { captureLogRecords, forwardedRecord } from "../log-capture.js";
+import { SELECT_WORKSPACE_EXPECTED_ARMS } from "../../src/rpc/refusal.js";
 import {
   CloseWorkspaceErrorSchema,
   CloseWorkspaceResponseSchema,
@@ -275,6 +277,8 @@ interface VerbUnderTest {
   responseSchema: Parameters<typeof create>[0];
   errorSchema: Parameters<typeof oneofArms>[0];
   call: (t: ReturnType<typeof target>, control: HTMLElement) => Promise<boolean>;
+  /** Arms that are expected answers rather than refusals (`VerbCall.expectedArms`). */
+  expected?: Readonly<Record<string, string>>;
 }
 
 const VERBS: readonly VerbUnderTest[] = [
@@ -400,7 +404,9 @@ const VERBS: readonly VerbUnderTest[] = [
         rpc: "SelectWorkspace",
         call: (client) => client.selectWorkspace(buildSelectWorkspaceRequest(TARGET_WS)),
         schema: SelectWorkspaceResponseSchema,
+        expectedArms: SELECT_WORKSPACE_EXPECTED_ARMS,
       }),
+    expected: SELECT_WORKSPACE_EXPECTED_ARMS,
   },
 ];
 
@@ -425,7 +431,8 @@ async function refuseWith(verb: VerbUnderTest, arm: string): Promise<Element | n
 describe.each(VERBS.map((verb) => [verb.rpc, verb] as const))(
   "%s's typed refusal",
   (_rpc, verb) => {
-    const arms = oneofArms(verb.errorSchema, "cause");
+    // An expected answer draws no refusal; it is pinned separately below.
+    const arms = oneofArms(verb.errorSchema, "cause").filter((arm) => verb.expected?.[arm] === undefined);
 
     it.each(arms)("labels the %s arm with its own case name", async (arm) => {
       expect((await refuseWith(verb, arm))?.getAttribute("data-arm")).toBe(arm);
@@ -436,6 +443,33 @@ describe.each(VERBS.map((verb) => [verb.rpc, verb] as const))(
     });
   },
 );
+
+describe("an expected answer", () => {
+  const select = VERBS.find((verb) => verb.rpc === "SelectWorkspace");
+
+  it("draws no refusal for a select a daemon standing down answered", async () => {
+    expect(await refuseWith(select!, "standingDown")).toBeNull();
+  });
+
+  it("records a select a daemon standing down answered at INFO", async () => {
+    const capture = captureLogRecords();
+    await refuseWith(select!, "standingDown");
+    const record = await forwardedRecord(capture, "sidebar.verbs.expected_answer");
+    expect(record.level.case).toBe("info");
+  });
+
+  it("re-enables the row a daemon standing down answered", async () => {
+    const t = target({
+      selectWorkspace: () =>
+        create(SelectWorkspaceResponseSchema, {
+          result: { case: "error", value: { cause: { case: "standingDown", value: {} } } },
+        }),
+    });
+    const control = createControl();
+    await select!.call(t, control);
+    expect(control.disabled).toBe(false);
+  });
+});
 
 describe("the cross-cutting causes, worded once", () => {
   it("names the registry's directory on a mismatch", async () => {
