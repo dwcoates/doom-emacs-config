@@ -1285,6 +1285,7 @@ func (e *Emacs) armHeartbeat() {
 			}
 			probe, probeCancel := context.WithTimeout(ctx, HeartbeatBound)
 			started := time.Now()
+			cpuBefore, cpuBeforeErr := readCgroupCPUStat(cgroupCPUStatPath)
 			out, err := e.box.Exec(probe, "emacsclient", "--socket-name", e.ServerSocket, "--eval", heartbeatProbe)
 			probeCancel()
 			if err == nil {
@@ -1304,10 +1305,55 @@ func (e *Emacs) armHeartbeat() {
 			if ctx.Err() != nil || e.proc.Exited() {
 				return
 			}
-			e.declareWedged(fmt.Sprintf("emacs did not answer a heartbeat probe within %s: %v", HeartbeatBound, err))
+			e.declareWedged(fmt.Sprintf("emacs did not answer a heartbeat probe within %s: %v%s",
+				HeartbeatBound, err, cpuOverProbe(cpuBefore, cpuBeforeErr, time.Since(started))))
 			return
 		}
 	}()
+}
+
+// cgroupCPUStatPath is the sandbox container's own CPU accounting (cgroup
+// v2): the container is CPU-limited, and a probe that went unanswered while
+// Emacs sat idle in select is told apart from a wedge by whether the
+// container was being throttled across it.
+const cgroupCPUStatPath = "/sys/fs/cgroup/cpu.stat"
+
+// readCgroupCPUStat reads a cgroup v2 cpu.stat file into its counters.
+func readCgroupCPUStat(path string) (map[string]int64, error) {
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]int64{}
+	for _, line := range strings.Split(strings.TrimSpace(string(body)), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) != 2 {
+			continue
+		}
+		n, perr := strconv.ParseInt(fields[1], 10, 64)
+		if perr != nil {
+			return nil, fmt.Errorf("%s: %q: %w", path, line, perr)
+		}
+		out[fields[0]] = n
+	}
+	return out, nil
+}
+
+// cpuOverProbe says what the container's CPU did across an unanswered probe
+// that began with BEFORE and lasted TOOK: how much CPU the container used
+// against what its quota allowed, and how often and how long it was
+// throttled. Every way it cannot be said is said instead.
+func cpuOverProbe(before map[string]int64, beforeErr error, took time.Duration) string {
+	if beforeErr != nil {
+		return fmt.Sprintf("\n  (the container's CPU accounting could not be read before the probe: %v)", beforeErr)
+	}
+	after, err := readCgroupCPUStat(cgroupCPUStatPath)
+	if err != nil {
+		return fmt.Sprintf("\n  (the container's CPU accounting could not be read after the probe: %v)", err)
+	}
+	delta := func(key string) int64 { return after[key] - before[key] }
+	return fmt.Sprintf("\n  the container's CPU across the %s probe: used %dms, throttled in %d of %d periods for %dms",
+		took.Round(time.Millisecond), delta("usage_usec")/1000, delta("nr_throttled"), delta("nr_periods"), delta("throttled_usec")/1000)
 }
 
 // heartbeatPrompt reads the probe's answer, which emacsclient prints as an
