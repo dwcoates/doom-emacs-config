@@ -23,6 +23,13 @@
 - After a git merge you made yourself, onto any branch, run the full suite: unit, integration and e2e.
   - Never after a merge routed through the merge queue: the queue already runs the full suite as its gate.
 
+### Master moves only through the merge queue
+
+- Merge into master only through the merge-queue skill (`.claude/skills/merge-queue/SKILL.md`, `/merge-queue`).
+  - This covers my own workspace's branch and every subagent's branch alike.
+  - Never merge, commit, cherry-pick, rebase, reset, or push onto master by hand.
+  - On a parked, failed, or refused merge, report the reason and stop rather than landing the work some other way.
+
 ### Before committing
 
 - Review the new or changed code for any similar pattern elsewhere in the codebase eligible for consolidation via helper extraction.

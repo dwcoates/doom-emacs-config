@@ -725,6 +725,24 @@ person or an agent uses the door.
 `/manage-agent-repl-runtime` skill and this section in the same commit.** Only
 the lead session runs `bounce`, `bounce --hard` or `deploy`; subagents never do.
 
+## Master moves only through the merge queue
+
+Owner plan, 2026-09-28 (`docs/investigations/2026-09-28-merge-queue-plan.md`,
+fixes 6-8). Every agent merges into master ONLY through the merge-queue skill
+(`.claude/skills/merge-queue/SKILL.md`): its own workspace's branch, another
+workspace, and every subagent's branch alike. The skill enqueues through the
+daemon (`claude-repld merge-queue`) and reports landed, parked or failed; on a
+park, failure or refusal it reports and stops, and never merges by hand.
+
+- The metaprompt carries the same rule, so every session has it loaded.
+- `.githooks/reference-transaction` refuses any move of master the queue did
+  not make (its fast-forward runs git with `AGENT_REPL_MERGE_QUEUE=1`), and names
+  the skill in its refusal. `AGENT_REPL_OWNER_OVERRIDE=1` is the owner's escape
+  hatch and says it bypassed the queue.
+- ENFORCEMENT IS OFF until the lead switches it on after deploying the queue:
+  `git config agentrepl.mergeQueueEnforce true` (off, the hook is a silent no-op).
+  Until then the hand merges the next section describes still land.
+
 ## A finished branch lands on master at once, with no question asked
 
 Owner policy, standing (2026-09-27). A branch whose work is done — its
