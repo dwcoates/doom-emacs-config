@@ -2019,6 +2019,23 @@ Owner ruling, 2026-10-06 (`internal/promptqueue/vendorblock.go`,
   its ordinary path; an edit of the oldest withholds the try. So held prompts
   never sit stuck with nothing running, even when no vendor event ends the
   block.
+- **A TRY THE VENDOR TAKES AND THEN BLOCKS GOES BACK ON THE HOLD** (owner
+  ruling, 2026-10-06; `internal/promptqueue/rehold.go`). When the tried
+  prompt's turn fails while a vendor block stands (the footer stands it from
+  the turn's own terminal), the queue first CUTS it out of the vendor
+  conversation (`Sender.RollBackTurn`, shim `RollBackSession` with files
+  kept, the rollback verb's own builder) and drops the attempt from the feed
+  (`Feed.RollBackTurns`), then holds it again after reconnect under a NEW turn
+  id with its original queue time, so it keeps its place. Why the cut: the
+  vendor records the prompt before refusing it (a rate-limited turn leaves the
+  user record and a `<synthetic>` `isApiErrorMessage` 429 record in the
+  transcript, and the next prompt chains after both), so a redelivery would
+  say it twice. The feed shows no failed exchange; the prompt is in the tray.
+  A cut that cannot be made (first prompt, unseen prompt, vendor refusal, no
+  session) leaves the attempt as the failed turn it was and re-holds nothing
+  (WARN); a prompt the vendor never recorded is re-held with nothing cut. The
+  try is remembered in memory only: a daemon restart while the tried turn runs
+  leaves it an ordinary turn.
 - **NO TIMER** releases a usage limit at its reset: an account block lifted
   by nothing but a session start or a vendor verdict waits for the user's
   next send (the try-now above) or a restart.
