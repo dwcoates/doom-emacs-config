@@ -500,7 +500,7 @@ const CANCEL_ALL = scenario({
   emits:
     "THREE detached items launched in one turn — two agents and a shell — left LIVE. The cancel is the caller's " +
     "`stopTask` per item; emptying the live set makes the engine write the vendor's `agents_killed` record",
-  writes: "both agents' `.meta.json` and transcripts, the shell's spool, and the main transcript's lines",
+  writes: "both agents' `.meta.json` and transcripts (each its commission and one response), the shell's spool, and the main transcript's lines",
   arms: "the fan-wide cancel: AgentSubagentFailure.cause=stopped_by_user per item, plus the agents_killed record",
   async run(ctx) {
     ctx.log.debug({ turn: ctx.turn, branch: "cancel-all" }, "fake fan-wide-cancel setup turn");
@@ -531,6 +531,12 @@ const CANCEL_ALL = scenario({
         outputFile: ctx.files.spoolPathFor(agentId),
         canReadOutputFile: true,
       });
+      // A LIVE AGENT IS WORKING, so its book holds what it has said so far.
+      // Its opening commission alone is withheld by the sidecar (the daemon
+      // draws it at both ends), so an agent that never spoke would leave a
+      // book no live agent has: one response lands before the cancel.
+      const agent = { agentId, parentToolUseId: call.toolUseId, subagentType: "general-purpose", taskDescription: description };
+      ctx.assistant([{ type: "text", text: `Working on ${description.toLowerCase()}.` }], { agent, model: "fake-sonnet-5" });
       ctx.files.spool(agentId).append(writer.read());
     }
     const shell = ctx.toolUse("Bash", { command: "sleep 100000", run_in_background: true });

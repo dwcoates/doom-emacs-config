@@ -397,6 +397,22 @@ describe("the fan-wide cancel setup", () => {
     ]);
   });
 
+  it("gives each live agent's transcript a response after its commission", async () => {
+    // A live agent is working; a transcript holding only the commission is
+    // a book with nothing in it, which no running agent leaves.
+    // Arrange + Act
+    const driven = await driveScenario(["!cancel-all"]);
+    const agentIds = ofType(driven, "system", "task_started")
+      .filter((m) => m.task_type === "local_agent")
+      .map((m) => String(m.task_id));
+
+    // Assert
+    expect(agentIds.map((id) => driven.subagent(id).map((l) => l.type))).toEqual([
+      ["user", "assistant"],
+      ["user", "assistant"],
+    ]);
+  });
+
   it("writes NO agents_killed record while the items are still live", async () => {
     // Arrange + Act
     const driven = await driveScenario(["!cancel-all"]);
