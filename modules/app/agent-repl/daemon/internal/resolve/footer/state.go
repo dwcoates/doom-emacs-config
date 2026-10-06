@@ -425,11 +425,18 @@ type wsState struct {
 	sessionStarted bool
 	// turnEverRan distinguishes idle·ready from idle·done.
 	turnEverRan bool
-	// turnFailed reports that the last turn ended by FAILING — its own
-	// failure or the vendor's (ladder.ClassifyFailure) — which is what draws
-	// idle·turn_failed rather than idle·done once nothing outranks it. The
-	// next turn resets it.
-	turnFailed bool
+	// pendingEnding is how the turn in flight failed, recorded from its
+	// terminal or the query's death, for the turn's close to raise its fault
+	// from (turnfault.go). The next turn resets it.
+	pendingEnding *pendingEnding
+	// turnFault is the standing TURN FAULT the last turn's close raised,
+	// nil when none stands. The next turn resets it (owner ruling,
+	// 2026-10-06: a turn fault stands until the next turn starts).
+	turnFault *turnFaultState
+	// turnRefused reports that a response in the turn in flight ended on the
+	// vendor's refusal: the refusal's only witness
+	// (turnfault.RefusedResponse). The next turn resets it.
+	turnRefused bool
 	// sawActivity reports whether this turn has produced an activity yet,
 	// which is what moves `submitting` to a working step.
 	sawActivity bool

@@ -15,7 +15,7 @@ import (
 var statusArms = []string{
 	"submitting", "thinking", "clearing", "compacting", "permission", "done",
 	"interrupted", "turn_failed", "ready", "idle_async", "vendor_blocked", "vendor_fault", "network_fault", "api_retrying", "init", "severed",
-	"start_failed", "degraded", "dead", "merging",
+	"start_failed", "degraded", "dead", "turn_died", "merging",
 	"merge_queued", "merge_failed", "merged", "none",
 	"inactive",
 }
@@ -60,6 +60,12 @@ type wsState struct {
 	// (ladder.ClassifyFailure). It refines a FAILED close: an expected stop —
 	// a Stop hook, a deferred tool — closes as failed but reads as `done`.
 	lastFailure ladder.FailureClass
+	// turnFault is the TURN FAULT the last turn's close raised
+	// (ladder.ResolveTurnFault): `vendor_blocked` on the vendor rung, or
+	// `turn_died` on the agent-repl rung. It stands until the next turn
+	// starts (owner ruling, 2026-10-06), and the footer raises the same fault
+	// from the same close.
+	turnFault ladder.TurnFault
 	// compacting reports a VENDOR-initiated auto-compaction in flight, which
 	// no accepted turn of ours announces.
 	compacting bool
@@ -198,6 +204,8 @@ func (s *wsState) startTurn(turn *footer.TurnStarted) {
 	// working until the API fails again.
 	s.retrying = ""
 	s.lastFailure = ladder.NoFailure
+	// A NEW TURN ENDS THE LAST ONE'S FAULT (owner ruling, 2026-10-06).
+	s.turnFault = ladder.NoTurnFault
 	s.compacting = turn.Act == footer.ActCompact
 	// A new turn is new foreground work: the detached items announced by the
 	// turn before it belong to that turn's account, not this one's. The
@@ -277,12 +285,12 @@ func isTurnEndArm(arm string) bool {
 }
 
 // readsResult reports whether a viewed report on arm READS the last turn's
-// result: a turn-end arm, or `vendor_blocked`, which a failed turn raised and
-// which stands over that turn's end until the block lifts (owner ruling,
-// 2026-09-28). The PARTIAL marker is still drawn on a turn end alone
-// (viewedOn).
+// result: a turn-end arm, or an arm a failed turn raised that stands over that
+// turn's end — `vendor_blocked` until the block or the turn fault lifts (owner
+// rulings, 2026-09-28 and 2026-10-06), `turn_died` until the next turn. The
+// PARTIAL marker is still drawn on a turn end alone (viewedOn).
 func readsResult(arm string) bool {
-	return isTurnEndArm(arm) || arm == "vendor_blocked"
+	return isTurnEndArm(arm) || arm == "vendor_blocked" || arm == "turn_died"
 }
 
 // turnEndArm names the turn-end arm the last close resolves to, through

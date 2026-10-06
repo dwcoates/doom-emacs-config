@@ -14,6 +14,7 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/health"
 	"claude-repld/internal/shimclient"
+	"claude-repld/internal/wsm"
 )
 
 // ptr is the address of a value, which is how an optional scalar is set.
@@ -593,11 +594,17 @@ func TestEachArmResolvesItsSalientKindsInPrecedenceThenUnpinnedWithNoStoppedMerg
 		{"idle after a dead query with no turn", func(h *harness) {
 			h.r.OnSessionUpdate(testWS, queryDiedUpdate())
 		}, "idle", "salient.query_died"},
-		{"a failed turn's dead query outranks a deploy", func(h *harness) {
+		{"a turn the query's death ended outranks a deploy with its cause", func(h *harness) {
 			deploying(h)
 			h.r.SetTurn(testWS, &TurnStarted{At: instant})
 			h.r.OnSessionUpdate(testWS, queryDiedUpdate())
-		}, "turn_failed", "salient.query_died"},
+			h.r.SetTurnEnded(testWS, wsm.CloseFailed)
+		}, "agent_repl_fault", "salient.turn_ended"},
+		{"a turn the vendor ended outranks a deploy with its cause", func(h *harness) {
+			deploying(h)
+			h.r.SetTurn(testWS, &TurnStarted{At: instant})
+			failTurn(h, &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_MaxTurns{MaxTurns: &conversationv1.AgentMaxTurnsReached{}}})
+		}, "vendor_fault", "salient.turn_ended"},
 		{"degraded shares the idle cell", func(h *harness) {
 			deploying(h)
 			h.r.SetStateUnreported(testWS, true)

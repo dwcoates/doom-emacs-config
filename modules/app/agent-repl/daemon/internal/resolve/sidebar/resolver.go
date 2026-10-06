@@ -439,6 +439,10 @@ func (r *resolver) SetTurnEnded(ws ids.WorkspaceID, how TurnClose) {
 			// contract breach: it is recorded loudly and leaves no tracked
 			// result, and since it is still a NEW ending, a read state from
 			// before it does not carry over.
+			fault, faultKnown := ladder.ResolveTurnFault(how, s.lastFailure)
+			if faultKnown {
+				s.turnFault = fault
+			}
 			end, known := ladder.ResolveTurnEnd(how, s.lastFailure)
 			if !known {
 				s.result = resultNone
@@ -646,6 +650,12 @@ func sessionUpdateArm(update *conversationv1.SessionUpdate) (string, func(*wsSta
 		// the roster draws `turn_failed`, and nothing about the vendor or the
 		// account refuses the session.
 		return "query_died", func(s *wsState) {
+			// THE TURN THE DEATH CUT DIED OF IT: its close raises the
+			// agent-repl turn fault (ladder.ResolveTurnFault), as the footer's
+			// does from the same close.
+			if s.turn != nil {
+				s.lastFailure = ladder.AgentReplFailed
+			}
 			s.turn = nil
 			s.retrying = ""
 		}

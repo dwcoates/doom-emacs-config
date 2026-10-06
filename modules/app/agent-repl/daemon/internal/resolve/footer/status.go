@@ -14,6 +14,10 @@ import (
 // against them at construction: an arm landing without a color would draw
 // unpainted, and a table row no arm claims is a state the vocabulary paints and
 // the resolver can never reach.
+//
+// `turn_failed` is NO LONGER EMITTED (owner ruling, 2026-10-06: a failed turn
+// is the fault its cause names). It stays in this list, and painted in the
+// table, because the arm stays in the contract for an older frame to decode.
 var statusArms = []string{
 	"agent_repl_fault", "network_fault", "closing", "interrupted", "loading", "vendor_fault", "merging",
 	"merge_failed", "merged", "degraded", "waiting",
@@ -193,9 +197,17 @@ func (r *resolver) agentReplFault(s *wsState, log dlog.Logger) *frontendv1.Foote
 			Severed: &frontendv1.FooterSubStatusAgentReplFaultSevered{}}
 	default:
 		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "default"})
-		// THE LINK SERVES. Only a standing agent-repl fault can still claim
-		// the rung.
-		return r.agentReplByFault(s, log)
+		// THE LINK SERVES. Only a standing agent-repl fault, or the last
+		// turn dying with agent-repl's own machinery, can still claim the rung.
+		if arm := r.agentReplByFault(s, log); arm != nil {
+			return arm
+		}
+		if !s.agentReplTurnFault() {
+			return nil
+		}
+		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "an agent-repl turn fault stands", "cause": s.turnFault.words.Cause})
+		arm.Substatus = &frontendv1.FooterStatusAgentReplFault_TurnDied{
+			TurnDied: &frontendv1.FooterSubStatusAgentReplFaultTurnDied{}}
 	}
 	arm.Activity = r.agentReplFaultActivity(s, log)
 	return &frontendv1.FooterStatus{
@@ -364,7 +376,18 @@ func (r *resolver) vendorFault(s *wsState, log dlog.Logger) *frontendv1.FooterSt
 	}
 	if s.blocked == nil {
 		if !s.retryBlocks() {
-			return nil
+			if !s.vendorTurnFault() {
+				return nil
+			}
+			// THE VENDOR ENDED OR REFUSED THE LAST TURN (owner ruling,
+			// 2026-10-06): a vendor fault standing until the next turn starts,
+			// its line the per-cause sentence. A standing account block keeps
+			// its own step instead (below).
+			log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "a vendor turn fault stands", "cause": s.turnFault.words.Cause})
+			return &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_VendorFault{VendorFault: &frontendv1.FooterStatusVendorFault{
+				Substatus: &frontendv1.FooterStatusVendorFault_VendorError{VendorError: &frontendv1.FooterSubStatusVendorFaultVendorError{}},
+				Activity:  r.vendorFaultActivity(s),
+			}}}
 		}
 		// A TURN WHOSE CALL THE VENDOR IS RETRYING CANNOT ADVANCE, so it is a
 		// vendor fault until the retried agent is answered (ladder/retry.go).
@@ -663,15 +686,10 @@ func (r *resolver) degraded(s *wsState, log dlog.Logger) *frontendv1.FooterStatu
 
 // idle is the bottom of the tree: nothing in flight.
 //
-// A FAILED TURN END is its own arm, `turn_failed` — the same turn end the
-// roster draws `turn_failed` (ladder.ClassifyFailure) — because it is
-// turquoise where idle is green (owner ruling, 2026-09-28). It stands where
-// `idle` would, and carries idle's activity kinds.
+// A FAILED TURN never stands here: its fault claims a rung above
+// (`vendor_fault`, `agent_repl_fault`), owner ruling 2026-10-06, so the
+// `turn_failed` arm is no longer emitted.
 func (r *resolver) idle(s *wsState) *frontendv1.FooterStatus {
-	if s.turnFailed {
-		return &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_TurnFailed{
-			TurnFailed: &frontendv1.FooterStatusTurnFailed{Activity: r.idleActivity(s)}}}
-	}
 	arm := &frontendv1.FooterStatusIdle{Activity: r.idleActivity(s)}
 	if s.turnEverRan {
 		arm.Substatus = &frontendv1.FooterStatusIdle_Done{Done: &frontendv1.FooterSubStatusIdleDone{}}

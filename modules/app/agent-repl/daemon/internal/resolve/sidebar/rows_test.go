@@ -606,7 +606,7 @@ func TestAContextCutsEndDrawsTheRowPartialAtOnce(t *testing.T) {
 		{name: "a completed clear is read at once", act: footer.ActClear, how: wsm.CloseCompleted, wantStatus: "done", wantViewed: true},
 		{name: "a completed compaction is read at once", act: footer.ActCompact, how: wsm.CloseCompleted, wantStatus: "done", wantViewed: true},
 		{name: "an interrupted clear stays unread", act: footer.ActClear, how: wsm.CloseKilled, wantStatus: "interrupted", wantViewed: false},
-		{name: "a failed compaction stays unread", act: footer.ActCompact, how: wsm.CloseFailed, wantStatus: "turn_failed", wantViewed: false},
+		{name: "a failed compaction stands as its turn fault", act: footer.ActCompact, how: wsm.CloseFailed, wantStatus: "vendor_blocked", wantViewed: false},
 		{name: "a completed prompt stays unread", act: footer.ActPrompt, how: wsm.CloseCompleted, wantStatus: "done", wantViewed: false},
 	}
 	for _, tc := range cases {
@@ -916,9 +916,12 @@ func TestAReadResultStaysReadAcrossALinkBlip(t *testing.T) {
 	}
 }
 
+// A FAILED TURN'S FAULT STANDS OVER ITS END until the next turn (owner
+// ruling, 2026-10-06), so its read state is observed where it lives: the
+// durable result the resolver reports.
 func TestAReadFailedResultStaysReadAcrossALinkBlip(t *testing.T) {
-	// Arrange: a turn_failed row the user has read.
-	r := live(t, arrange(t))
+	// Arrange: a failed turn the user has read.
+	r, reports := resultResolver(t, nil)
 	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
 	r.SetTurnEnded(theWS, wsm.CloseFailed)
 	r.SetViewed(theWS)
@@ -927,13 +930,14 @@ func TestAReadFailedResultStaysReadAcrossALinkBlip(t *testing.T) {
 	// Act: the route comes back; no new result arrived in between.
 	r.OnLink(theWS, shimclient.LinkConnected)
 
-	// Assert: the result is still read, so the row is PARTIAL again.
-	row := onlyRow(t, r)
-	if got := statusName(row); got != "turn_failed" {
-		t.Fatalf("status = %q, want turn_failed — the arrangement did not restore the link", got)
+	// Assert: the fault still stands over the turn's end, and its result is
+	// still the READ failed turn.
+	if got := statusName(onlyRow(t, r)); got != "vendor_blocked" {
+		t.Fatalf("status = %q, want the vendor turn fault — the arrangement did not restore the link", got)
 	}
-	if got := row.GetViewed(); got == nil {
-		t.Fatal("viewed = unset, want a read failed result to stay read across an arm change that is not a new result")
+	last := (*reports)[len(*reports)-1].result
+	if last == nil || last.End != wsm.TurnResultFailed || !last.Read {
+		t.Fatalf("last reported result = %+v, want a read failed turn", last)
 	}
 }
 
