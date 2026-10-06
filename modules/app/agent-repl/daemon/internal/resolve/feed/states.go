@@ -1,6 +1,8 @@
 package feed
 
 import (
+	"time"
+
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -191,6 +193,13 @@ type proseState struct {
 	// row is the fold's own row identity, so a settled sibling's whole can retire
 	// this fragment's row when the two are the same block under divergent ids.
 	row *frontendv1.FeedId
+	// lastFragmentAt is when the fold's previous text-bearing fragment arrived
+	// live, zero before the first; the gap to the next one is a reveal pacing
+	// sample (revealpace.go).
+	lastFragmentAt time.Time
+	// sampled records that this fold added a gap to its reveal pacing window
+	// that the window's durable record does not hold yet.
+	sampled bool
 }
 
 // prose resolves a response's fold, creating it on first sight.

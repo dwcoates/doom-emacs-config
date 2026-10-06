@@ -269,6 +269,11 @@ type DB interface {
 	// AccountUsages loads every account root's last usage evidence,
 	// all-or-nothing.
 	AccountUsages(ctx context.Context) ([]AccountUsage, error)
+	// PutRevealGapWindow replaces the stored fragment-gap window of one model
+	// and block kind.
+	PutRevealGapWindow(ctx context.Context, w RevealGapWindow) error
+	// RevealGapWindows loads every stored fragment-gap window.
+	RevealGapWindows(ctx context.Context) ([]RevealGapWindow, error)
 	// AssignWorkspaceTask assigns a workspace to a task, or unassigns it when
 	// task is nil.
 	AssignWorkspaceTask(ctx context.Context, id WorkspaceID, task *TaskID) error

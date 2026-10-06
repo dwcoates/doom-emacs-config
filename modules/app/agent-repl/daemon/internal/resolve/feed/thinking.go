@@ -1,11 +1,14 @@
 package feed
 
 import (
+	"time"
+
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/feedid"
+	"claude-repld/internal/wsm"
 )
 
 // THINKING IS THE AGENT'S INTERMEDIATE REASONING drawn as its own bubble, one
@@ -27,7 +30,7 @@ import (
 // fragment self-corrects and a settled bubble is always right.
 
 // drawThinking folds one reasoning block into its bubble.
-func (r *resolver) drawThinking(s *wsState, at placement, act *conversationv1.AgentActivity, thinking *conversationv1.AgentThinking) (*frontendv1.FeedRow, error) {
+func (r *resolver) drawThinking(s *wsState, at placement, agent *conversationv1.AgentId, act *conversationv1.AgentActivity, thinking *conversationv1.AgentThinking) (*frontendv1.FeedRow, error) {
 	unit := act.GetActivityId().GetValue()
 	fold := s.thinkingProse(unit)
 	log := r.logger(s.id)
@@ -44,6 +47,7 @@ func (r *resolver) drawThinking(s *wsState, at placement, act *conversationv1.Ag
 	// sink still files this unit's usage for the prose bubble; this handler
 	// simply never presents it.
 	bubble := &frontendv1.FeedResponse{Thinking: true}
+	pace, paced := r.paceKey(s, agent, wsm.RevealKindThinking)
 
 	switch state := thinking.GetResult().(type) {
 	case *conversationv1.AgentThinking_Start:
@@ -58,6 +62,7 @@ func (r *resolver) drawThinking(s *wsState, at placement, act *conversationv1.Ag
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawThinking", "branch": "case *conversationv1.AgentThinking_Start"})
 		fold.markdown = ""
 		fold.settled = false
+		fold.lastFragmentAt = time.Time{}
 		log.Debug("daemon.feed.thinking_deferred",
 			"a reasoning block opened; its bubble is deferred until it carries content",
 			dlog.Context{"unit": unit})
@@ -86,6 +91,9 @@ func (r *resolver) drawThinking(s *wsState, at placement, act *conversationv1.Ag
 			return nil, errNotARow
 		}
 		fold.markdown += text.Text.GetNewText()
+		if text.Text.GetNewText() != "" {
+			r.observeFragment(fold, pace, paced)
+		}
 		if fold.markdown == "" {
 			// A content-free delta (an empty fragment before any real text)
 			// carries no content yet, so it keeps the row deferred rather than
@@ -96,7 +104,8 @@ func (r *resolver) drawThinking(s *wsState, at placement, act *conversationv1.Ag
 			return nil, errNotARow
 		}
 		bubble.Result = &frontendv1.FeedResponse_Update{Update: &frontendv1.FeedResponseUpdate{
-			Prose: &frontendv1.FeedResponseProse{Markdown: fold.markdown},
+			Prose:        &frontendv1.FeedResponseProse{Markdown: fold.markdown},
+			RevealWindow: r.revealWindow(pace, paced),
 		}}
 	case *conversationv1.AgentThinking_Success:
 		text, ok := state.Success.GetReasoning().(*conversationv1.AgentThinkingSuccess_Text)
@@ -115,6 +124,7 @@ func (r *resolver) drawThinking(s *wsState, at placement, act *conversationv1.Ag
 		// accumulated — which is what makes a lost fragment harmless.
 		fold.markdown = text.Text.GetText()
 		fold.settled = true
+		r.settlePacing(s, fold, pace, paced)
 		if fold.markdown == "" {
 			// A shown block whose settled whole is empty carries no content, so
 			// it draws nothing rather than settling an empty card.
@@ -124,13 +134,15 @@ func (r *resolver) drawThinking(s *wsState, at placement, act *conversationv1.Ag
 			return nil, errNotARow
 		}
 		bubble.Result = &frontendv1.FeedResponse_Success{Success: &frontendv1.FeedResponseSuccess{
-			Prose: &frontendv1.FeedResponseProse{Markdown: fold.markdown},
+			Prose:        &frontendv1.FeedResponseProse{Markdown: fold.markdown},
+			RevealWindow: r.revealWindow(pace, paced),
 		}}
 	case *conversationv1.AgentThinking_Failure:
 		// The reasoning that landed stays drawn, marked broken — the mirror of
 		// the prose bubble's error arm. WHY it died is the turn's terminal row,
 		// never this bubble's business.
 		fold.settled = true
+		r.settlePacing(s, fold, pace, paced)
 		bubble.Result = &frontendv1.FeedResponse_Error{Error: &frontendv1.FeedResponseError{
 			Prose: &frontendv1.FeedResponseProse{Markdown: fold.markdown},
 		}}

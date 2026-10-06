@@ -5,6 +5,8 @@ import {
   RevealOptions,
   SmoothReveal,
   revealSlice,
+  windowedReveal,
+  EASE_MAX_START_RATIO,
 } from "../src/smooth.js";
 import type { RevealBlock, RevealItem, RevealState } from "../src/smooth.js";
 
@@ -312,5 +314,71 @@ describe("DEFAULT_REVEAL_OPTIONS", () => {
     // Arrange / Act / Assert — the shipped pacing is a real, forward reveal.
     expect(DEFAULT_REVEAL_OPTIONS.minCps).toBeGreaterThan(0);
     expect(DEFAULT_REVEAL_OPTIONS.catchupSeconds).toBeGreaterThan(0);
+  });
+});
+
+describe("windowedReveal", () => {
+  it.each([
+    { name: "shows only what was on screen at the window's start", elapsed: 0, want: 2 },
+    { name: "spreads the rest evenly, half shown at half the window", elapsed: 50, want: 6 },
+    { name: "shows everything once the window has passed", elapsed: 100, want: 10 },
+    { name: "shows everything when a frame lands after the window", elapsed: 250, want: 10 },
+    { name: "never shows less than was on screen before the window began", elapsed: -20, want: 2 },
+  ])("$name", ({ elapsed, want }) => {
+    // Arrange
+    const from = 2;
+    const to = 10;
+    // Act
+    const shown = windowedReveal(from, to, elapsed, 100).at;
+    // Assert
+    expect(shown).toBe(want);
+  });
+
+  it("moves at its average speed throughout when no start speed is carried", () => {
+    // Arrange / Act
+    const speeds = [0, 25, 50, 75].map((t) => windowedReveal(0, 100, t, 100).speed);
+    // Assert
+    expect(speeds).toEqual([1, 1, 1, 1]);
+  });
+
+  it("starts at the carried speed", () => {
+    // Arrange / Act
+    const point = windowedReveal(0, 100, 0, 100, 2);
+    // Assert
+    expect(point.speed).toBeCloseTo(2);
+  });
+
+  it("eases to its own average speed by the window's end", () => {
+    // Arrange / Act
+    const point = windowedReveal(0, 100, 99.999, 100, 2);
+    // Assert
+    expect(point.speed).toBeCloseTo(1, 3);
+  });
+
+  it("still ends exactly at the frontier when the window closes", () => {
+    // Arrange / Act
+    const point = windowedReveal(0, 100, 100, 100, 2);
+    // Assert
+    expect(point.at).toBe(100);
+  });
+
+  it("caps a carried speed so the reveal never runs backwards", () => {
+    // Arrange: a start speed far above what the window has to cover.
+    const at = Array.from({ length: 101 }, (_, t) => windowedReveal(0, 10, t, 100, 50).at);
+    // Act
+    const backwards = at.some((value, i) => i > 0 && value < at[i - 1]);
+    // Assert
+    expect([backwards, Math.max(...at) <= 10]).toEqual([false, true]);
+  });
+
+  it("starts no faster than the cap allows", () => {
+    // Arrange / Act
+    const point = windowedReveal(0, 100, 0, 100, 50);
+    // Assert
+    expect(point.speed).toBeCloseTo(EASE_MAX_START_RATIO);
+  });
+
+  it("shows everything with no speed when nothing is left to reveal", () => {
+    expect(windowedReveal(10, 10, 5, 100, 3)).toEqual({ at: 10, speed: 0 });
   });
 });

@@ -821,11 +821,40 @@ message FeedResponseNotice {
 message FeedResponseUpdate {
   // Markdown so far, drawn as it stands; type-out pacing is the client's.
   FeedResponseProse prose = 1;
+  // How long the client should take to reveal what it has not yet shown. SET
+  // once the daemon holds a full window of fragment timings for this bubble's
+  // model and kind; UNSET otherwise (a model never seen streaming, a subagent
+  // whose model the daemon does not know, a replayed draw), and the client
+  // then paces with its own default type-out.
+  optional FeedResponseRevealWindow reveal_window = 2;
 }
 // The settled state.
 message FeedResponseSuccess {
   // The whole markdown.
   FeedResponseProse prose = 1;
+  // How long the client should take to reveal the settled text it has not
+  // yet shown, so the last fragment types out instead of appearing at once.
+  // The same window, and the same reasons for absence, as
+  // FeedResponseUpdate.reveal_window. UNSET = the settled whole is drawn at
+  // once.
+  optional FeedResponseRevealWindow reveal_window = 2;
+}
+// The reveal pacing element: the time the daemon expects to pass before the
+// bubble's next fragment arrives.
+//
+// THE DAEMON MEASURES, THE CLIENT ONLY SPREADS. The daemon records the gap
+// between consecutive live fragments of one block, per model and per kind
+// (prose and thinking are kept apart), in a rolling window of the most recent
+// gaps that survives a restart, and states their recency-weighted average
+// here. The client spreads EVERYTHING it has not yet shown (this push's new
+// text plus anything still unrevealed from the previous one) across the
+// window, starting at the moment the push is drawn and finishing as it ends.
+// Only the client knows
+// how much is on screen, which is why the daemon states a duration rather
+// than a rate: a rate would assume the previous push had finished revealing.
+message FeedResponseRevealWindow {
+  // The expected gap until the next fragment, in milliseconds. Always > 0.
+  uint32 expected_gap_ms = 1;
 }
 // The broken state: what landed before the death.
 message FeedResponseError {
