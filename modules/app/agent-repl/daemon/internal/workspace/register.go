@@ -397,6 +397,8 @@ func (v *verbs) publishAccount(ctx context.Context, log dlog.Logger, record wsm.
 	// An EMPTY email is the logged-out arm, which the topbar draws as a
 	// warning rather than a blank label: it is an answer, never a gap.
 	v.deps.Topbar.SetAccount(record.ID, topbar.Account{Email: current.Email, Options: options})
+	// THE SAME ACCOUNT, for the feed's failed-turn markers to name.
+	v.deps.Feed.SetAccount(record.ID, current.Email)
 	log.Debug(opRegister, "installed the topbar's account cell", dlog.Context{
 		"workspace": string(record.ID), "config_dir": configDir,
 		"logged_in": current.LoggedIn, "options": len(options),

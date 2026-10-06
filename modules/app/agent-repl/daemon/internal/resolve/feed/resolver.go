@@ -195,6 +195,21 @@ type wsState struct {
 	// response's own AgentResponseFailureReason.refused is the only place that
 	// fact is stated, and the terminal row is drawn after it.
 	turnRefusals map[string]bool
+	// turnProduced records that a turn drew a row besides its prompt and its
+	// ending: a turn that produced nothing offers to resend its prompt on its
+	// ending's outcome marker (marker.go).
+	turnProduced map[ids.TurnID]bool
+	// awaitingRestart are the agent-repl-fault endings drawn live that wait
+	// on the session's next start, which says on each that the restart that
+	// followed worked (marker.go).
+	awaitingRestart []restartWatch
+	// model is the model the session runs, from its start and its model
+	// changes; "" until one is seen. A live ending's marker names it.
+	model string
+	// account is the logged-in email the session spends as, and accountKnown
+	// whether one is (SetAccount). A live ending's marker names it.
+	account      string
+	accountKnown bool
 	// turnInFlight is the turn the session is running, learned from the rows
 	// it stamps. It is what a session-scoped death (query_died) terminates.
 	turnInFlight *ids.TurnID
@@ -658,6 +673,7 @@ func newWSState(ws ids.WorkspaceID) *wsState {
 		gatedCalls:           map[string]string{},
 		turnEvidence:         map[string][]turnEvidenceLine{},
 		turnRefusals:         map[string]bool{},
+		turnProduced:         map[ids.TurnID]bool{},
 		clearTurns:           map[ids.TurnID]bool{},
 		clearConfirmed:       map[ids.TurnID]bool{},
 		clearedTurnByPointer: map[string]ids.TurnID{},
@@ -984,6 +1000,7 @@ func (r *resolver) upsert(s *wsState, at placement, row *frontendv1.FeedRow, dur
 		}
 	}
 	f.rows[id] = snapshot
+	s.noteProduced(snapshot)
 	if !durable {
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "!durable"})
 		f.nonDurable[id] = true

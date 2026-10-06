@@ -2285,3 +2285,6 @@ func (d *fakeDB) SetVendorSessionID(_ context.Context, id ids.WorkspaceID, vendo
 	d.sessions[id] = session
 	return replaced, nil
 }
+
+// SetAccount takes the session's account; the fake feed draws nothing from it.
+func (f *fakeFeed) SetAccount(ids.WorkspaceID, string) {}
