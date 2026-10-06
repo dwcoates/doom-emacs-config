@@ -13857,7 +13857,13 @@ func (x *FeedColdGateStanding) GetCompact() *FeedColdGateCompactMenu {
 type FeedColdGateContextTokens struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The count, raw.
-	Tokens        int64 `protobuf:"varint,1,opt,name=tokens,proto3" json:"tokens,omitempty"`
+	Tokens int64 `protobuf:"varint,1,opt,name=tokens,proto3" json:"tokens,omitempty"`
+	// How full the model's context window this count is, in [0, 1] (the daemon
+	// clamps): what the figure is COLORED by, through the cold-gate gradient
+	// (green below 20%, yellow at 35%, orange at 50%, red at 70%; owner,
+	// 2026-10-06) -- a warning of how costly paying to pass the gate is, which
+	// is why it is not the context chip's pressure gradient.
+	WindowFill    float64 `protobuf:"fixed64,2,opt,name=window_fill,json=windowFill,proto3" json:"window_fill,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -13895,6 +13901,13 @@ func (*FeedColdGateContextTokens) Descriptor() ([]byte, []int) {
 func (x *FeedColdGateContextTokens) GetTokens() int64 {
 	if x != nil {
 		return x.Tokens
+	}
+	return 0
+}
+
+func (x *FeedColdGateContextTokens) GetWindowFill() float64 {
+	if x != nil {
+		return x.WindowFill
 	}
 	return 0
 }
@@ -19110,9 +19123,11 @@ const file_frontend_v1_feed_proto_rawDesc = "" +
 	"\x05model\x18\x03 \x01(\v2\x1e.frontend.v1.FeedColdGateModelR\x05model\x12C\n" +
 	"\acompact\x18\x04 \x01(\v2$.frontend.v1.FeedColdGateCompactMenuH\x00R\acompact\x88\x01\x01B\n" +
 	"\n" +
-	"\b_compact\"3\n" +
+	"\b_compact\"T\n" +
 	"\x19FeedColdGateContextTokens\x12\x16\n" +
-	"\x06tokens\x18\x01 \x01(\x03R\x06tokens\".\n" +
+	"\x06tokens\x18\x01 \x01(\x03R\x06tokens\x12\x1f\n" +
+	"\vwindow_fill\x18\x02 \x01(\x01R\n" +
+	"windowFill\".\n" +
 	"\x17FeedColdGateLastRequest\x12\x13\n" +
 	"\x05at_ms\x18\x01 \x01(\x03R\x04atMs\"F\n" +
 	"\x11FeedColdGateModel\x121\n" +
