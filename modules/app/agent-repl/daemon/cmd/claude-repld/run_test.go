@@ -996,3 +996,66 @@ func TestTheClaimLoserRecordsAtInfo(t *testing.T) {
 	}
 }
 
+// TestARequestlessConnectionDoesNotHoldTheExit pins the 2026-10-06 stall: a
+// webview's spare socket, accepted and never written to, kept
+// `Server.Shutdown` polling for it until the grace ran out, and a replacement
+// daemon waited on the boot claim behind it.
+func TestARequestlessConnectionDoesNotHoldTheExit(t *testing.T) {
+	// Arrange: one connection that never sends a request, then one that
+	// does -- its answer proves the first was accepted (net/http marks a
+	// connection StateNew in its accept loop, in accept order).
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+	gate := &recordingGate{Handler: http.NotFoundHandler()}
+	ctx, cancel := context.WithCancel(context.Background())
+	served := make(chan error, 1)
+	go func() { served <- serve(ctx, listener, gate, nil, nil, nil) }()
+	idle, err := net.Dial("tcp", listener.Addr().String())
+	if err != nil {
+		t.Fatalf("dial the requestless connection: %v", err)
+	}
+	defer idle.Close()
+	resp, err := http.Get("http://" + listener.Addr().String() + "/")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	resp.Body.Close()
+
+	// Act
+	start := time.Now()
+	cancel()
+	if err := <-served; err != nil {
+		t.Fatalf("serve() = %v, want an orderly shutdown", err)
+	}
+
+	// Assert: well inside the grace the poll used to spend.
+	if took := time.Since(start); took >= shutdownGrace/2 {
+		t.Fatalf("the exit took %s with a requestless connection open, want it closed rather than waited on (grace %s)", took, shutdownGrace)
+	}
+}
+
+func TestCloseRequestlessClosesOnlyConnectionsWithNoRequest(t *testing.T) {
+	// Arrange
+	newSide, newPeer := net.Pipe()
+	idleSide, idlePeer := net.Pipe()
+	defer newPeer.Close()
+	defer idleSide.Close()
+	defer idlePeer.Close()
+	conns := &connStates{byConn: map[net.Conn]http.ConnState{}}
+	conns.track(newSide, http.StateNew)
+	conns.track(idleSide, http.StateIdle)
+
+	// Act
+	conns.closeRequestless()
+
+	// Assert
+	if _, err := newSide.Write([]byte("x")); err == nil {
+		t.Fatal("the StateNew connection is still open, want it closed")
+	}
+	go func() { _, _ = idlePeer.Read(make([]byte, 1)) }()
+	if _, err := idleSide.Write([]byte("x")); err != nil {
+		t.Fatalf("the idle connection was closed (%v), want it left to Shutdown", err)
+	}
+}

@@ -688,6 +688,18 @@ func serve(ctx context.Context, l net.Listener, h http.Handler, onShuttingDown, 
 	}
 	conns := &connStates{byConn: map[net.Conn]http.ConnState{}}
 	srv := &http.Server{Handler: h, ConnState: conns.track}
+	// A CONNECTION THAT HAS DELIVERED NO REQUEST OWES NOTHING, and
+	// `Server.Shutdown` waits for it anyway: it polls, on an interval that
+	// doubles to 500ms, until every connection it tracks is idle, and a
+	// connection still in StateNew is not idle until it is 5s old. A webview
+	// holds exactly such a spare socket open, so every exit sat in that poll
+	// (measured 2026-10-06: one StateNew connection on every exit, the poll
+	// 140-1100ms under load, and a replacement daemon waiting on the boot
+	// claim behind it until an e2e reconnect bound expired). Shutdown closes
+	// the listeners before it runs this hook, so no new connection can
+	// arrive; the ones that never sent a request are closed as a closed
+	// listener would have refused them.
+	srv.RegisterOnShutdown(conns.closeRequestless)
 	done := make(chan error, 1)
 	// SERVED THROUGH THE GATE'S OWN LISTENER, so the calls it counts are held
 	// open until their bytes are on the socket. A handler returning is not its
@@ -787,6 +799,9 @@ func serve(ctx context.Context, l net.Listener, h http.Handler, onShuttingDown, 
 type connStates struct {
 	mu     sync.Mutex
 	byConn map[net.Conn]http.ConnState
+	// closeFailures are the errors closing a requestless connection met,
+	// reported through summary rather than dropped.
+	closeFailures []string
 }
 
 func (c *connStates) track(conn net.Conn, state http.ConnState) {
@@ -800,6 +815,25 @@ func (c *connStates) track(conn net.Conn, state http.ConnState) {
 	}
 }
 
+// closeRequestless closes every connection that has not delivered a request.
+func (c *connStates) closeRequestless() {
+	c.mu.Lock()
+	var requestless []net.Conn
+	for conn, state := range c.byConn {
+		if state == http.StateNew {
+			requestless = append(requestless, conn)
+		}
+	}
+	c.mu.Unlock()
+	for _, conn := range requestless {
+		if err := conn.Close(); err != nil {
+			c.mu.Lock()
+			c.closeFailures = append(c.closeFailures, err.Error())
+			c.mu.Unlock()
+		}
+	}
+}
+
 // summary answers the held connections counted by state, as "new=N active=N idle=N".
 func (c *connStates) summary() string {
 	c.mu.Lock()
@@ -809,6 +843,9 @@ func (c *connStates) summary() string {
 		counts[state]++
 	}
 	out := fmt.Sprintf("new=%d active=%d idle=%d", counts[http.StateNew], counts[http.StateActive], counts[http.StateIdle])
+	if len(c.closeFailures) > 0 {
+		out += fmt.Sprintf(" close_failed=%q", c.closeFailures)
+	}
 	return out
 }
 
