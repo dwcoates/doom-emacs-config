@@ -252,14 +252,19 @@ func (r *run) rebase(ctx context.Context, tip, targetBranch string) (*outcome, e
 	}); err != nil {
 		return nil, err
 	}
+	r.o.log(ctx, r.ws).Info(op, "rebasing the branch onto the target's tip", dlog.Context{
+		"workspace": string(r.ws), "branch": branch, "worktree": dir, "onto": tip, "commits": len(commits)})
+	step, err := r.git.StartRebase(ctx, dir, tip, shasOf(commits))
+	return r.replayLoop(ctx, p, step, err, tip, targetBranch)
+}
+
+// shasOf answers the shas of commits, in order: what a rebase replays.
+func shasOf(commits []gitclient.Commit) []string {
 	shas := make([]string, len(commits))
 	for i, c := range commits {
 		shas[i] = c.SHA
 	}
-	r.o.log(ctx, r.ws).Info(op, "rebasing the branch onto the target's tip", dlog.Context{
-		"workspace": string(r.ws), "branch": branch, "worktree": dir, "onto": tip, "commits": len(commits)})
-	step, err := r.git.StartRebase(ctx, dir, tip, shas)
-	return r.replayLoop(ctx, p, step, err, tip, targetBranch)
+	return shas
 }
 
 // replayLoop follows a rebase from where one command left it to its end: each
@@ -359,11 +364,7 @@ func (r *run) resumeRebase(ctx context.Context, p *replay, tip, targetBranch, br
 	if head == branchHead && p.done == 0 {
 		r.o.log(ctx, r.ws).Info(op, "the rebase had not begun before the restart; it begins now", dlog.Context{
 			"workspace": string(r.ws), "worktree": dir, "total": len(p.commits)})
-		shas := make([]string, len(p.commits))
-		for i, c := range p.commits {
-			shas[i] = c.SHA
-		}
-		step, err := r.git.StartRebase(ctx, dir, tip, shas)
+		step, err := r.git.StartRebase(ctx, dir, tip, shasOf(p.commits))
 		return r.replayLoop(ctx, p, step, err, tip, targetBranch)
 	}
 	return r.contradiction(ctx, fmt.Sprintf("no rebase stands in %s, and %s is at %s: neither on %s's tip %s nor at %s, where it stood before the recorded rebase",
@@ -437,9 +438,7 @@ func (r *run) conflict(ctx context.Context, p *replay, files []string, targetBra
 	r.o.log(ctx, r.ws).Info(op, "a replayed commit conflicted; the requester's session resolves it", dlog.Context{
 		"workspace": string(r.ws), "commit": commit.SHA, "files": strings.Join(files, ", "), "worktree": r.subject.dir})
 	round := r.openTab(ctx, TabConflicts)
-	r.address(round)
-	r.setStep(ctx, footer.StepConflictResolution, func(f *footer.MergeFacts) { f.Line = conflictLine(commit.Subject, len(files)) })
-	r.upsert(round, conflictsTab(round.live()))
+	r.drawLive(ctx, round, footer.StepConflictResolution, conflictLine(commit.Subject, len(files)), nil, conflictsTab(round.live()))
 	if err := r.noteMachinery(ctx, targetBranch); err != nil {
 		return nil, err
 	}
@@ -547,9 +546,7 @@ func (r *run) resumeConflict(ctx context.Context, p *replay, tip, targetBranch s
 	}
 	commit := p.commits[min(p.done, len(p.commits)-1)]
 	round := r.activeRound()
-	r.address(round)
-	r.setStep(ctx, footer.StepConflictResolution, func(f *footer.MergeFacts) { f.Line = conflictLine(commit.Subject, len(res.ConflictFiles)) })
-	r.upsert(round, conflictsTab(round.live()))
+	r.drawLive(ctx, round, footer.StepConflictResolution, conflictLine(commit.Subject, len(res.ConflictFiles)), nil, conflictsTab(round.live()))
 	text, err := r.conflictBrief(commit, res.ConflictFiles, targetBranch)
 	if err != nil {
 		return nil, err
@@ -618,12 +615,7 @@ func (r *run) testAndFix(ctx context.Context, tip, targetBranch string, fromAtte
 func (r *run) fix(ctx context.Context, attempt int, failing GateResult, targetBranch string) (*outcome, error) {
 	suites := failedSuites(failing.Suites)
 	round := r.openTab(ctx, TabFixes)
-	r.address(round)
-	r.setStep(ctx, footer.StepFixing, func(f *footer.MergeFacts) {
-		f.Attempt, f.MaxAttempts = attempt, MaxFixAttempts
-		f.Line = fixingLine(suites)
-	})
-	r.upsert(round, fixesTab(round.live(), attempt))
+	r.drawFixing(ctx, round, attempt, suites)
 	if err := r.noteMachinery(ctx, targetBranch); err != nil {
 		return nil, err
 	}
@@ -645,6 +637,13 @@ func (r *run) fix(ctx context.Context, attempt int, failing GateResult, targetBr
 		return nil, err
 	}
 	return r.fixSettled(ctx, round, attempt, targetBranch)
+}
+
+// drawFixing stands fixing attempt x's round live, fresh or resumed.
+func (r *run) drawFixing(ctx context.Context, round tabRound, attempt int, suites []string) {
+	r.drawLive(ctx, round, footer.StepFixing, fixingLine(suites), func(f *footer.MergeFacts) {
+		f.Attempt, f.MaxAttempts = attempt, MaxFixAttempts
+	}, fixesTab(round.live(), attempt))
 }
 
 // fixBrief composes one fixing attempt's brief.
@@ -699,12 +698,7 @@ func (r *run) fixSettled(ctx context.Context, round tabRound, attempt int, targe
 // reattaches to the fixing turn and reads its end.
 func (r *run) resumeFix(ctx context.Context, res *progressDoc, targetBranch string) (*outcome, error) {
 	round := r.activeRound()
-	r.address(round)
-	r.setStep(ctx, footer.StepFixing, func(f *footer.MergeFacts) {
-		f.Attempt, f.MaxAttempts = res.FixAttempt, MaxFixAttempts
-		f.Line = fixingLine(res.FailingSuites)
-	})
-	r.upsert(round, fixesTab(round.live(), res.FixAttempt))
+	r.drawFixing(ctx, round, res.FixAttempt, res.FailingSuites)
 	text, err := r.fixBrief(res.FixAttempt, res.FailingSuites, res.FailingArchive, res.FailingTail, targetBranch)
 	if err != nil {
 		return nil, err
