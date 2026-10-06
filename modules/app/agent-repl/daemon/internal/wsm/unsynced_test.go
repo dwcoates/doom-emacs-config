@@ -44,3 +44,25 @@ func TestUnsyncedFromEnv(t *testing.T) {
 		})
 	}
 }
+
+func TestWritingDSNPutsTheUnsyncedPragmaFirst(t *testing.T) {
+	tests := []struct {
+		name     string
+		unsynced bool
+		want     string
+	}{
+		{name: "an unsynced handle turns sync off before the WAL conversion", unsynced: true, want: "/x.db?_pragma=synchronous(OFF)&" + writingPragmas},
+		{name: "a durable handle keeps the production pragmas", unsynced: false, want: "/x.db?" + writingPragmas},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := writingDSNFor("/x.db", tc.unsynced)
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("writingDSNFor = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
