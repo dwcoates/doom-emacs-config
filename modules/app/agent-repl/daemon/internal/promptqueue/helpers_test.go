@@ -1036,6 +1036,23 @@ type fakeFooter struct {
 	turns        []*footer.TurnStarted
 	submissions  []footer.Submission
 	retrying     bool
+	// vendorBlock is the standing mid-session vendor block the test stood
+	// with standVendorBlock, empty when none stands.
+	vendorBlock string
+}
+
+// VendorBlock answers the block the test stood with standVendorBlock.
+func (f *fakeFooter) VendorBlock(ids.WorkspaceID) (string, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.vendorBlock, f.vendorBlock != ""
+}
+
+// standVendorBlock stands (or, with "", lifts) a mid-session vendor block.
+func (f *fakeFooter) standVendorBlock(block string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.vendorBlock = block
 }
 
 // RetryStanding answers the retry the test stood with standRetry.

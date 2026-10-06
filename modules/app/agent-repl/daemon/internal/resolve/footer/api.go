@@ -334,6 +334,12 @@ type Resolver interface {
 	// so a prompt sent during the retry interrupts the wait instead of
 	// joining a turn that cannot reach a tool boundary until the API answers.
 	RetryStanding(ws ids.WorkspaceID) bool
+	// VendorBlock reports the standing MID-SESSION vendor block by name —
+	// auth, usage_limit, billing, vendor_error, or api_retrying — false when
+	// none stands (vendorblock.go). The prompt queue reads it: while one
+	// stands, a submitted prompt is held on the after-reconnect hold,
+	// unclassified, and the edge on which it stops standing releases it.
+	VendorBlock(ws ids.WorkspaceID) (string, bool)
 	// SetParked states that the idle sweep stood this workspace's shim down on
 	// purpose and recorded the `hibernated` session terminal. While it stands,
 	// a DEAD link is not a fault: the daemon put the route down and a prompt
@@ -410,6 +416,9 @@ type options struct {
 	alarmTokens     uint64
 	rateNewsworth   float64
 	transientWindow time.Duration
+	// vendorServes is told when a mid-session vendor block stops standing
+	// (WithVendorServes); nil tells no one.
+	vendorServes func(ws ids.WorkspaceID, was string)
 }
 
 // WithClock injects the clock the dwell and every `at` stamp are taken from.

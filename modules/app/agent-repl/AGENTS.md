@@ -1482,10 +1482,18 @@ exactly ONE of three domains, named for whose services are failing.
 - **A network-caused start failure does not spend the vendor's ten-minute
   window**: it closes the vendor retrying fault, stands as `network_fault`, and
   retries on its own backoff until the network returns.
-- **A vendor fault leaves the composer open.** A prompt sent while the vendor
-  will not start is held under the reconnect hold and delivered when the
-  session comes up; a prompt sent during a mid-session block is delivered to
-  the vendor as usual.
+- **A vendor fault leaves the composer open, and every prompt sent under it
+  is held "after reconnect"** (owner ruling, 2026-10-06). A prompt sent while
+  the vendor will not start is held under the reconnect hold and delivered
+  when the session comes up. A prompt sent during a MID-SESSION vendor block
+  (`auth`, `usage_limit`, `billing`, `vendor_error`, `api_retrying`;
+  `footer.Resolver.VendorBlock`) is held on the same hold at once, UNCLASSIFIED
+  and never sent; nothing is classified while it sits there. When the block
+  stops standing (the footer's vendor-serves edge: a session start, a
+  rate-limit verdict that is not rejected, a new turn, the retried call
+  answered, the retried turn ending) the held prompts are popped in order and
+  classified THEN, each against what is ahead of it, and delivered per the
+  verdict (`daemon/internal/promptqueue/vendorblock.go`).
 - **`network_unreachable` is recorded at INFO**, in the shim and the daemon:
   the machine being offline is the environment, not an agent-repl defect.
 
@@ -1504,9 +1512,9 @@ The rules that keep this true:
   footer `vendor_fault · api_retrying` with the retry line, roster
   `api_retrying`. It stands until the retried agent is answered
   (`ladder.RetryAnswered`), the turn ends, or a new turn opens. A prompt sent
-  during the retry interrupts the wait and runs as its own turn without asking
-  the classifier, so the workspace is red — footer `working` with its step and
-  no retry line — until the API fails again.
+  during the retry is held after reconnect, unclassified (owner ruling,
+  2026-10-06, superseding 2026-10-01's interrupt-the-wait), and is classified
+  against the running turn when the retry ends.
 - **Blue is only "unusable", and only an agent-repl or a network fault is
   blue.** Something that went wrong while the workspace stays usable is
   turquoise, never blue; a vendor fault is always turquoise. An expected state that awaits you (a
