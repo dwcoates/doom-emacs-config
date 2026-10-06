@@ -870,6 +870,50 @@ unchanged.
   - The webapp words every enduring arm, and lapses an allowance on its own
     clock.
 
+### 8. The usage line is chosen by the account's billing mode (2026-10-06)
+
+- **Decided by** the owner: the enduring usage line follows the account's
+  billing mode, never which account it is.
+  - A subscription (Pro, Max) draws its five-hour and weekly windows, as before.
+  - A per-seat Enterprise account draws its month-to-date spend against the
+    seat's allotment: "$223.88 of $12,000 this month".
+  - "no session or weekly allowance on this account" is gone.
+- **Evidence** (the vendor reports the spend):
+  - The SDK's get_usage reply declares `rate_limits.extra_usage {monthly_limit,
+    used_credits, currency}` in minor units, and `subscription_type`
+    ('pro' | 'max' | 'team' | 'enterprise').
+  - The work account's usage answer (the vendor CLI's own cache) carries every
+    window null and `extra_usage.monthly_limit` set.
+  - The seat tier itself (`enterprise_usage_based`) is not exposed by the SDK.
+- **The per-seat signal** (owner ruling): the subscription type is enterprise
+  AND the vendor reports a monthly limit with no five-hour window. Anything
+  else that reports windows is a subscription. The shim decides and logs the
+  decision with the raw subscription type at INFO.
+- **What changed, on the wire:**
+  - `SessionAccountUsage.outcome` gains `seat_spend` (tag 5,
+    `SessionAccountUsageSeatSpend {allotment, optional spent}`), with money as
+    `SessionMoney {amount_minor, currency}`.
+  - `SessionAccountUsage.subscription_type` is typed: tag 2 (the free string)
+    is reserved, and tag 6 is `optional SessionSubscriptionType` with arms
+    pro, max, team and enterprise. A plan this revision does not name is the
+    set message with its oneof unassigned; no Unknown arm.
+  - `FooterActivityEnduring.no_allowance` (tag 4) is RETIRED and reserved.
+  - `FooterActivityEnduring.seat_spend` (tag 5,
+    `FooterActivityEnduringSeatSpend {allotment, optional spent, optional
+    utilization}`), with money as `FooterMoney {amount_minor, currency}`.
+- **Who formats:** the webapp, where every other usage-line figure is formatted
+  today. The drawn spend wears the same percent gradient as the subscription
+  line's percentages, driven by `utilization` (one gradient path).
+- **No reset date:** the vendor states none.
+- **What changed, in the systems:**
+  - The shim reads `extra_usage` and the plan, and picks the arm.
+  - The daemon keeps one billing mode per account root (a seat-spend sample
+    clears the windows; a windows sample clears the seat spend), persisted in
+    wsm layout 25 (`account_usage` gains the seat columns; `no_allowance` is
+    no longer read and is written 0, to be dropped by a later breaking step).
+  - A row stored with `no_allowance=1` reloads as unobserved and re-resolves
+    on the account's next sample.
+
 ## Sweep
 
 - Nothing in `footer.proto` is left unreferenced after the change.
