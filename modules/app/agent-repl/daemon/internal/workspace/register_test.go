@@ -762,6 +762,23 @@ func TestRegisterPrimesTheFooter(t *testing.T) {
 	}
 }
 
+func TestRegisterBindsTheFooterToTheAccountRoot(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.account.configDir = "/config-work"
+
+	// Act.
+	record, err := f.verbs.Register(context.Background(), worktreeDir(t), wsm.RegisterFacts{})
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	// Assert.
+	if got := f.footer.accounts[record.ID]; !slices.Equal(got, []string{"/config-work"}) {
+		t.Fatalf("footer account roots for %q = %v, want the root the session spends from", record.ID, got)
+	}
+}
+
 // TestBindViewsBindsAnInheritedWorkspacesDirectory pins the boot's first step:
 // a restarted daemon never ran Register for the rows it inherited, and the
 // reconciliation publishes faults for them before PublishRegistry runs.
