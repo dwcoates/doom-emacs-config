@@ -101,8 +101,9 @@ func (r *resolver) drawPlan(s *wsState, at placement, agent *conversationv1.Agen
 		}
 	case *conversationv1.AgentPlanMode_Failure:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawPlan", "branch": "case *conversationv1.AgentPlanMode_Failure"})
+		reason := planFailureText(frame.Failure.GetError())
 		bubble.State = &frontendv1.FeedPlan_Failed{Failed: &frontendv1.FeedPlanFailed{
-			Text: planFailureText(frame.Failure.GetError()),
+			Text: reason, Marker: planFailedMarker(reason),
 		}}
 		episode.closed = true
 	default:
@@ -145,7 +146,7 @@ func (r *resolver) breakPlanEpisodes(s *wsState, reason string) {
 			}),
 			Row: &frontendv1.FeedRow_Activity{Activity: &frontendv1.FeedTurnActivity{
 				Unit: &frontendv1.FeedTurnActivity_Plan{Plan: &frontendv1.FeedPlan{
-					State: &frontendv1.FeedPlan_Failed{Failed: &frontendv1.FeedPlanFailed{Text: reason}},
+					State: &frontendv1.FeedPlan_Failed{Failed: &frontendv1.FeedPlanFailed{Text: reason, Marker: planFailedMarker(reason)}},
 				}},
 			}},
 		}

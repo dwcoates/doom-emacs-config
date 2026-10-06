@@ -83,6 +83,12 @@ type Tail interface {
 type Resolver interface {
 	sessionwatcher.FeedSink
 
+	// SetAccount installs the account the workspace's session spends as: the
+	// logged-in email, "" for a logged-out root. A failed turn's outcome
+	// marker names it (feed.proto FeedOutcomeAccount). The daemon calls it
+	// beside the topbar's account cell, from the one place that resolves it.
+	SetAccount(ws ids.WorkspaceID, email string)
+
 	// Tail opens the live row stream for one feed, pinned to the token minted
 	// by the OpenFeed that served this reader's page.
 	Tail(ctx context.Context, ws ids.WorkspaceID, feed feedid.Feed, token *agentreplv1.FeedWatchToken) (Tail, error)
