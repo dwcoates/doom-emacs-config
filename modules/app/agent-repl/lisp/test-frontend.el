@@ -2189,6 +2189,59 @@ xwidget event handler would once the answer arrives."
   (should (eq (lookup-key agent-repl-frontend-webview-mode-map (kbd "C--"))
               #'agent-repl-feed-text-scale-decrease)))
 
+(defmacro agent-repl-test--with-fitted-window (size &rest body)
+  "Run BODY with a webview buffer in the selected window whose widget reports SIZE.
+Binds `resized' to the resize calls made, newest first."
+  (declare (indent 1))
+  `(let ((resized nil)
+         (buf (generate-new-buffer "*agent-frontend-fit*")))
+     (unwind-protect
+         (with-current-buffer buf
+           (setq-local agent-repl-frontend-webview-mode t)
+           (set-window-buffer (selected-window) buf)
+           (cl-letf (((symbol-function 'agent-repl--frontend-webview-live-widget) (lambda (_b) 'xw))
+                     ((symbol-function 'agent-repl--frontend-widget-size) (lambda (_xw) ,size))
+                     ((symbol-function 'agent-repl--frontend-resize-widget)
+                      (lambda (xw w h) (push (list xw w h) resized)))
+                     ((symbol-function 'agent-repl--log) #'ignore))
+             ,@body))
+       (kill-buffer buf))))
+
+(ert-deftest agent-repl-test-a-webview-smaller-than-its-window-is-fitted ()
+  "A webview created at another window's size is resized to its own window."
+  (agent-repl-test--with-fitted-window '(10 10)
+    ;; Act
+    (agent-repl--frontend-fit-webviews)
+    ;; Assert
+    (let ((edges (window-inside-pixel-edges (selected-window))))
+      (should (equal resized (list (list 'xw (- (nth 2 edges) (nth 0 edges))
+                                         (- (nth 3 edges) (nth 1 edges)))))))))
+
+(ert-deftest agent-repl-test-a-webview-already-its-windows-size-is-left-alone ()
+  "A webview that already fits its window is not resized again."
+  (let* ((edges (window-inside-pixel-edges (selected-window)))
+         (fit (list (- (nth 2 edges) (nth 0 edges)) (- (nth 3 edges) (nth 1 edges)))))
+    (agent-repl-test--with-fitted-window fit
+      ;; Act
+      (agent-repl--frontend-fit-webviews)
+      ;; Assert
+      (should-not resized))))
+
+(ert-deftest agent-repl-test-a-window-showing-another-buffer-is-not-fitted ()
+  "Only agent-repl webviews are sized; any other buffer is ignored."
+  (agent-repl-test--with-fitted-window '(10 10)
+    ;; Arrange
+    (setq-local agent-repl-frontend-webview-mode nil)
+    ;; Act
+    (agent-repl--frontend-fit-webviews)
+    ;; Assert
+    (should-not resized)))
+
+(ert-deftest agent-repl-test-webviews-are-fitted-on-size-and-buffer-changes ()
+  "The fit runs whenever a window's size or buffer changes."
+  (should (memq #'agent-repl--frontend-fit-webviews (default-value 'window-size-change-functions)))
+  (should (memq #'agent-repl--frontend-fit-webviews (default-value 'window-buffer-change-functions))))
+
 (ert-deftest agent-repl-test-copy-mode-arms-on-every-adopted-webview ()
   "The adoption hook enables the copy chords."
   (should (memq #'agent-repl-frontend-webview-mode

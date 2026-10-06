@@ -3559,6 +3559,8 @@ introducing a sibling raw `make-process' site."
     agent-repl--frontend-make-webview-buffer
     agent-repl--frontend-webview-execute-script-value
     agent-repl--frontend-webview-live-widget
+    agent-repl--frontend-widget-size
+    agent-repl--frontend-resize-widget
     agent-repl--frontend-webview-reload-widget
     agent-repl--frontend-webview-navigate-widget
     agent-repl--frontend-webview-uri
