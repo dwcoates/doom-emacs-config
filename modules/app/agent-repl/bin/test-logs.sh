@@ -28,18 +28,8 @@ fail() {
     FAIL=$((FAIL + 1))
 }
 
-# grep_in TEXT GREP-ARGS... -- grep TEXT, fed from a here-string, NEVER a
-# pipe. Under pipefail, `printf "$out" | grep -q` fails whenever grep -q
-# matches and exits before printf has written everything: printf dies of
-# SIGPIPE, the pipeline answers 141, and a check whose output was correct
-# fails. It flaked only under load, when the writer was descheduled mid-write
-# (2026-10-06: "--runtime accepts a comma-separated runtime list" in full runs;
-# 10 of 24 runs six-wide, across nine different cases).
-grep_in() {
-    local text="$1"
-    shift
-    grep "$@" <<<"$text"
-}
+# shellcheck source=lib-grep-in.sh
+. "$THIS_DIR/lib-grep-in.sh"
 
 bin="$TMP/bin"
 home="$TMP/home"

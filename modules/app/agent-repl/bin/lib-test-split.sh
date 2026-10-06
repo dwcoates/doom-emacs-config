@@ -7,6 +7,9 @@
 # runner (testrun) reads into the host's timing history. The clock is bash's
 # own EPOCHREALTIME, so timing a group spawns no process.
 
+# shellcheck source=/dev/null
+. "$(dirname "${BASH_SOURCE[0]}")/lib-grep-in.sh"
+
 test_split_init() {
     local script="$1" listed requested; shift
     # EPOCHREALTIME is bash 5's; an older bash expands it to nothing, which
@@ -24,7 +27,7 @@ test_split_init() {
             [ "$#" -eq 2 ] || { echo "--only needs one comma-separated test list" >&2; exit 2; }
             [ -n "$2" ] || { echo "--only needs a nonempty test list" >&2; exit 2; }
             while IFS= read -r requested; do
-                printf '%s\n' "$listed" | grep -Fxq "$requested" || {
+                grep_in "$listed" -Fxq "$requested" || {
                     echo "unknown harness item: $requested" >&2
                     # WHAT THE SCRIPT LISTED, AND WHICH BYTES IT WAS READ
                     # FROM. A runner plans its chunks from an earlier --list

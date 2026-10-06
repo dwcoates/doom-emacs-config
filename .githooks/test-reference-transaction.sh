@@ -18,6 +18,8 @@
 [[ -n ${AGENT_REPL_BACKGROUND_PRIORITY:-} ]] || exec "$(dirname "${BASH_SOURCE[0]}")/../modules/app/agent-repl/bin/background.sh" bash "${BASH_SOURCE[0]}" "$@"
 
 set -euo pipefail
+# shellcheck source=/dev/null
+. "$(dirname "${BASH_SOURCE[0]}")/../modules/app/agent-repl/bin/lib-grep-in.sh"
 
 # This harness is itself run from inside git hooks and agent sessions. Clear
 # the caller's live Git bindings, and the hook's own markers, before any
@@ -142,7 +144,7 @@ test_enforced_master_commit_is_refused() {
   commit_on_master "$repo"
 
   if [ "$RUN_RC" -ne 0 ] &&
-    printf '%s\n' "$RUN_OUT" | grep -q "merge-queue/SKILL.md"; then
+    grep_in "$RUN_OUT" -q "merge-queue/SKILL.md"; then
     pass "enforcement on: a master commit is refused, naming the skill"
   else
     fail "enforcement on: a master commit is refused, naming the skill" "exit=$RUN_RC" "$RUN_OUT"
@@ -156,10 +158,10 @@ test_enforced_refusal_names_each_skill_form() {
   commit_on_master "$repo"
 
   if [ "$RUN_RC" -ne 0 ] &&
-    printf '%s\n' "$RUN_OUT" | grep -q "/merge-queue own" &&
-    printf '%s\n' "$RUN_OUT" | grep -q "/merge-queue workspace <worktree-dir>" &&
-    printf '%s\n' "$RUN_OUT" | grep -q "/merge-queue branch <branch-name>" &&
-    printf '%s\n' "$RUN_OUT" | grep -q "never set AGENT_REPL_OWNER_OVERRIDE"; then
+    grep_in "$RUN_OUT" -q "/merge-queue own" &&
+    grep_in "$RUN_OUT" -q "/merge-queue workspace <worktree-dir>" &&
+    grep_in "$RUN_OUT" -q "/merge-queue branch <branch-name>" &&
+    grep_in "$RUN_OUT" -q "never set AGENT_REPL_OWNER_OVERRIDE"; then
     pass "enforcement on: the refusal names every skill form and forbids the override to agents"
   else
     fail "enforcement on: the refusal names every skill form and forbids the override to agents" "exit=$RUN_RC" "$RUN_OUT"
@@ -173,7 +175,7 @@ test_enforced_master_fast_forward_is_refused() {
   attempt "$repo" fast_forward_tx prepared
 
   if [ "$RUN_RC" -ne 0 ] &&
-    printf '%s\n' "$RUN_OUT" | grep -q "merge-queue/SKILL.md"; then
+    grep_in "$RUN_OUT" -q "merge-queue/SKILL.md"; then
     pass "enforcement on: a hand fast-forward of master is refused, naming the skill"
   else
     fail "enforcement on: a hand fast-forward of master is refused, naming the skill" "exit=$RUN_RC" "$RUN_OUT"
@@ -226,7 +228,7 @@ test_enforced_owner_override_lands_and_says_so() {
   commit_on_master "$repo" AGENT_REPL_OWNER_OVERRIDE=1
 
   if [ "$RUN_RC" -eq 0 ] &&
-    printf '%s\n' "$RUN_OUT" | grep -q "BYPASSING the merge queue"; then
+    grep_in "$RUN_OUT" -q "BYPASSING the merge queue"; then
     pass "enforcement on: the owner override lands and says it bypassed the queue"
   else
     fail "enforcement on: the owner override lands and says it bypassed the queue" "exit=$RUN_RC" "$RUN_OUT"
@@ -253,7 +255,7 @@ test_unreadable_switch_is_refused() {
   commit_on_master "$repo"
 
   if [ "$RUN_RC" -ne 0 ] &&
-    printf '%s\n' "$RUN_OUT" | grep -q "agentrepl.mergeQueueEnforce is set but unreadable"; then
+    grep_in "$RUN_OUT" -q "agentrepl.mergeQueueEnforce is set but unreadable"; then
     pass "an unreadable enforcement switch refuses to move master"
   else
     fail "an unreadable enforcement switch refuses to move master" "exit=$RUN_RC" "$RUN_OUT"

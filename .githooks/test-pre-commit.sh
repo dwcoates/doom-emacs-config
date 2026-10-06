@@ -20,6 +20,8 @@
 [[ -n ${AGENT_REPL_BACKGROUND_PRIORITY:-} ]] || exec "$(dirname "${BASH_SOURCE[0]}")/../modules/app/agent-repl/bin/background.sh" bash "${BASH_SOURCE[0]}" "$@"
 
 set -euo pipefail
+# shellcheck source=/dev/null
+. "$(dirname "${BASH_SOURCE[0]}")/../modules/app/agent-repl/bin/lib-grep-in.sh"
 
 # This harness may itself be run from a git hook.  Clear the caller's live Git
 # bindings so nothing below can read them as its own.
@@ -154,8 +156,8 @@ test_cherry_pick_skips_the_gate() {
   touch "$repo/.fakegit/CHERRY_PICK_HEAD"
   run_commit "$repo"
 
-  if [ ! -f "$LINT_LOG" ] && printf '%s\n' "$RUN_OUT" | grep -q "Cherry-pick detected" &&
-    ! printf '%s\n' "$GIT_CALLS" | grep -q "^git diff"; then
+  if [ ! -f "$LINT_LOG" ] && grep_in "$RUN_OUT" -q "Cherry-pick detected" &&
+    ! grep_in "$GIT_CALLS" -q "^git diff"; then
     pass "cherry-pick replay skips the gate"
   else
     fail "cherry-pick replay skips the gate" "$RUN_OUT"
@@ -269,7 +271,7 @@ test_foreign_repo_skips_shared_hook() {
   run_hook "$foreign" "$owner/.fakegit/hooks/pre-commit"
 
   if [ "$RUN_RC" -eq 0 ] && [ ! -f "$LINT_LOG" ] &&
-    ! printf '%s\n' "$GIT_CALLS" | grep -q "^git diff"; then
+    ! grep_in "$GIT_CALLS" -q "^git diff"; then
     pass "foreign repository skips an inherited shared hook"
   else
     fail "foreign repository skips an inherited shared hook" "exit=$RUN_RC" "$RUN_OUT"
@@ -285,7 +287,7 @@ test_lint_failure_blocks_commit() {
 
   if [ "$RUN_RC" -ne 0 ] &&
     [ -f "$LINT_LOG" ] &&
-    printf '%s\n' "$RUN_OUT" | grep -q "refusing commit"; then
+    grep_in "$RUN_OUT" -q "refusing commit"; then
     pass "boundary lint failure blocks the commit"
   else
     fail "boundary lint failure blocks the commit" "exit=$RUN_RC" "$RUN_OUT"
@@ -301,7 +303,7 @@ test_missing_lint_blocks_commit() {
   run_commit "$repo"
 
   if [ "$RUN_RC" -ne 0 ] &&
-    printf '%s\n' "$RUN_OUT" | grep -q "external-boundary lint is missing"; then
+    grep_in "$RUN_OUT" -q "external-boundary lint is missing"; then
     pass "missing boundary lint blocks the commit"
   else
     fail "missing boundary lint blocks the commit" "exit=$RUN_RC" "$RUN_OUT"
