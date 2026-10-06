@@ -182,6 +182,10 @@ type Resolver interface {
 	// it takes none or its capabilities were never stated. SetEffort
 	// validates against it.
 	EffortLevels(ws ids.WorkspaceID) ([]conversationv1.AgentEffortLevel, bool)
+	// ContextWindow answers the window, in tokens, the context chip measures
+	// the workspace's figure against: the vendor's stated window, else the
+	// assumed 1,000,000. The cold gate's figure is measured against it too.
+	ContextWindow(ws ids.WorkspaceID) int64
 	// SetAccount installs the account cell: the root in force and EVERY root
 	// the daemon knows beside it. An EMPTY email is the logged-out arm, which
 	// is a drawn warning rather than a blank label.
