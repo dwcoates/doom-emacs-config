@@ -466,7 +466,6 @@ func (r *resolver) OnAgentTerminal(ws ids.WorkspaceID, agent *conversationv1.Age
 	r.mutate(ws, "daemon.footer.on_agent_terminal", "the footer took an agent terminal",
 		dlog.Context{"turn": turn != nil, "failed": failure != nil}, func(s *wsState) {
 			r.retireAgent(s, agent)
-			r.endSubagentBudget(ws, s, agent.GetValue())
 			if turn == nil {
 				return
 			}

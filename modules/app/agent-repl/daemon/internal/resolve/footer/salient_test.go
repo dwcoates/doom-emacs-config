@@ -96,23 +96,11 @@ func TestTheNextPromptEndsThePushNotification(t *testing.T) {
 	}
 }
 
-// ---- the context-budget line -----------------------------------------------
+// ---- a failed compaction raises no line ----------------------------------
 
-func TestAContextBudgetWarningStandsAsASalientLine(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	connected(h)
-
-	// Act
-	h.r.OnContextBudgetWarning(testWS, mainAgent, &conversationv1.ContextBudgetWarning{Text: "context is filling"})
-
-	// Assert
-	if got, want := lineNow(t, h), (activityLine{tier: "salient", kind: "context_budget", text: "context is filling"}); got != want {
-		t.Fatalf("activity = %+v, want %+v", got, want)
-	}
-}
-
-func TestAFailedCompactionCutStandsTheBudgetLine(t *testing.T) {
+// A failed compaction is the feed's outcome marker alone: no footer line warns
+// that the context is nearly full (owner ruling, 2026-10-06).
+func TestAFailedCompactionCutRaisesNoSalientLine(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	connected(h)
@@ -123,131 +111,8 @@ func TestAFailedCompactionCutStandsTheBudgetLine(t *testing.T) {
 		CompactionFailed: &conversationv1.ContextCompactionFailed{Error: "the summary was empty"}}})
 
 	// Assert
-	want := activityLine{tier: "salient", kind: "context_budget", text: "compaction failed — the summary was empty"}
-	if got := lineNow(t, h); got != want {
-		t.Fatalf("activity = %+v, want %+v", got, want)
-	}
-}
-
-func TestACutThatShrinksTheContextEndsTheBudgetLine(t *testing.T) {
-	tests := []struct {
-		name string
-		act  func(h *harness)
-	}{
-		{"a compaction's cut", func(h *harness) {
-			h.r.OnContextCut(testWS, mainAgent, &conversationv1.ContextCut{Cut: &conversationv1.ContextCut_Compacted{
-				Compacted: &conversationv1.ContextCompacted{}}})
-		}},
-		{"a /clear's cut", func(h *harness) {
-			h.r.OnContextCut(testWS, mainAgent, &conversationv1.ContextCut{Cut: &conversationv1.ContextCut_Cleared{
-				Cleared: &conversationv1.ContextCleared{}}})
-		}},
-		{"a compaction that concluded and resumed", func(h *harness) {
-			h.r.OnSessionUpdate(testWS, sessionCompactionProgress(
-				progress(conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_STARTED, 101_600, 12_400, "")))
-		}},
-		{"a cold gate's compaction that concluded and resumed", func(h *harness) {
-			h.r.SetColdGateAnswer(testWS, &ColdGateAnswer{Choice: ChoiceCompact, Text: "compacted",
-				Progress: progress(conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_STARTED, 101_600, 12_400, "")})
-			h.r.SetColdGateAnswer(testWS, nil)
-		}},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange
-			h := newHarness(t)
-			connected(h)
-			h.r.OnContextBudgetWarning(testWS, mainAgent, &conversationv1.ContextBudgetWarning{Text: "context is filling"})
-
-			// Act
-			tt.act(h)
-
-			// Assert
-			if got := lineNow(t, h); got.kind == "context_budget" {
-				t.Fatalf("activity = %+v, want the budget line ended by the cut", got)
-			}
-		})
-	}
-}
-
-func TestTheBudgetLineOutlivesAnyTimer(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	connected(h)
-	h.r.OnContextBudgetWarning(testWS, mainAgent, &conversationv1.ContextBudgetWarning{Text: "context is filling"})
-
-	// Act
-	h.clock.Advance(time.Hour)
-	h.r.SetParked(testWS, false)
-
-	// Assert
-	if got := lineNow(t, h); got.kind != "context_budget" {
-		t.Fatalf("activity = %+v, want the budget line still standing", got)
-	}
-}
-
-func TestASessionSwitchEndsTheBudgetLine(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	connected(h)
-	h.r.OnSessionStarted(testWS, &conversationv1.SessionStarted{VendorSessionId: "session-a"})
-	h.r.OnContextBudgetWarning(testWS, mainAgent, &conversationv1.ContextBudgetWarning{Text: "context is filling"})
-
-	// Act
-	h.r.OnSessionStarted(testWS, &conversationv1.SessionStarted{VendorSessionId: "session-b"})
-
-	// Assert
-	if got := lineNow(t, h); got.kind == "context_budget" {
-		t.Fatalf("activity = %+v, want the budget line ended by the switch", got)
-	}
-}
-
-func TestARestartOfTheSameSessionKeepsTheBudgetLine(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	connected(h)
-	h.r.OnSessionStarted(testWS, &conversationv1.SessionStarted{VendorSessionId: "session-a"})
-	h.r.OnContextBudgetWarning(testWS, mainAgent, &conversationv1.ContextBudgetWarning{Text: "context is filling"})
-
-	// Act
-	h.r.OnSessionStarted(testWS, &conversationv1.SessionStarted{VendorSessionId: "session-a"})
-
-	// Assert
-	if got := lineNow(t, h); got.kind != "context_budget" {
-		t.Fatalf("activity = %+v, want the budget line kept: the context is unchanged", got)
-	}
-}
-
-func TestASubagentsBudgetLineEndsWithItsRun(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	connected(h)
-	h.r.OnMainAgent(testWS, mainAgent)
-	sub := &conversationv1.AgentId{Value: "agent-sub"}
-	h.r.OnContextBudgetWarning(testWS, sub, &conversationv1.ContextBudgetWarning{Text: "subagent context is filling"})
-
-	// Act
-	h.r.OnAgentTerminal(testWS, sub, nil, completed(), nil)
-
-	// Assert
-	if got := lineNow(t, h); got.kind == "context_budget" {
-		t.Fatalf("activity = %+v, want the subagent's budget line ended with its run", got)
-	}
-}
-
-func TestTheMainAgentsBudgetLineOutlivesASubagentsRun(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	connected(h)
-	h.r.OnMainAgent(testWS, mainAgent)
-	h.r.OnContextBudgetWarning(testWS, mainAgent, &conversationv1.ContextBudgetWarning{Text: "context is filling"})
-
-	// Act
-	h.r.OnAgentTerminal(testWS, &conversationv1.AgentId{Value: "agent-sub"}, nil, completed(), nil)
-
-	// Assert
-	if got := lineNow(t, h); got.kind != "context_budget" {
-		t.Fatalf("activity = %+v, want the main agent's budget line kept", got)
+	if got := lineNow(t, h); got.tier == "salient" {
+		t.Fatalf("activity = %+v, want no salient line for a failed compaction", got)
 	}
 }
 
@@ -285,7 +150,7 @@ func TestARateLimitEventFeedsTheUsageFiguresAndStandsNoSalientLine(t *testing.T)
 
 // ---- precedence and the shared filling -------------------------------------
 
-func TestTheSharedSalientLinesRankUpdateNotificationBudget(t *testing.T) {
+func TestTheSharedSalientLinesRankUpdateNotification(t *testing.T) {
 	tests := []struct {
 		name    string
 		arrange func(h *harness)
@@ -295,10 +160,6 @@ func TestTheSharedSalientLinesRankUpdateNotificationBudget(t *testing.T) {
 			h.r.OnActivity(testWS, mainAgent, notificationFrame("look"))
 			h.r.SetDeployProgress(&deployprogress.Progress{Phase: deployprogress.Installing})
 		}, "update"},
-		{"the notification outranks the budget line", func(h *harness) {
-			h.r.OnContextBudgetWarning(testWS, mainAgent, &conversationv1.ContextBudgetWarning{Text: "filling"})
-			h.r.OnActivity(testWS, mainAgent, notificationFrame("look"))
-		}, "notification"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -347,11 +208,27 @@ var salientMessages = []proto.Message{
 	&frontendv1.FooterStatusLoadingSalient{},
 }
 
+// No status arm's salient oneof carries a context-budget kind: no footer line
+// warns that the context is nearly full (owner ruling, 2026-10-06).
+func TestNoSalientMessageCarriesAContextBudgetKind(t *testing.T) {
+	for _, msg := range salientMessages {
+		desc := msg.ProtoReflect().Descriptor()
+		t.Run(string(desc.Name()), func(t *testing.T) {
+			// Arrange, Act
+			field := desc.Fields().ByName("context_budget")
+
+			// Assert
+			if field != nil {
+				t.Fatalf("%s carries a context_budget kind, retired by the owner's ruling", desc.Name())
+			}
+		})
+	}
+}
+
 func TestEverySalientMessageCarriesTheSharedKinds(t *testing.T) {
 	shared := map[protoreflect.Name]protoreflect.FullName{
-		"update":         "frontend.v1.FooterStatusActivityUpdate",
-		"notification":   "frontend.v1.FooterStatusActivityNotification",
-		"context_budget": "frontend.v1.FooterStatusActivityContextBudget",
+		"update":       "frontend.v1.FooterStatusActivityUpdate",
+		"notification": "frontend.v1.FooterStatusActivityNotification",
 	}
 	for _, msg := range salientMessages {
 		desc := msg.ProtoReflect().Descriptor()
@@ -505,7 +382,7 @@ func TestAColdGatesConcludedCompactionIsAnnounced(t *testing.T) {
 	}
 }
 
-func TestAColdGatesFailedCompactionStandsTheBudgetLine(t *testing.T) {
+func TestAColdGatesFailedCompactionRaisesNoSalientLine(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	connected(h)
@@ -516,8 +393,8 @@ func TestAColdGatesFailedCompactionStandsTheBudgetLine(t *testing.T) {
 	h.r.SetColdGateAnswer(testWS, nil)
 
 	// Assert
-	if got := lineNow(t, h); got.kind != "context_budget" {
-		t.Fatalf("activity = %+v, want the failure standing as the budget line", got)
+	if got := lineNow(t, h); got.tier == "salient" {
+		t.Fatalf("activity = %+v, want no salient line for a failed compaction", got)
 	}
 }
 

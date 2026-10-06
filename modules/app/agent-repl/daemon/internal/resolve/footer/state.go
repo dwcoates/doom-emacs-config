@@ -526,12 +526,6 @@ type wsState struct {
 	// notification is the agent's standing push notification, nil when none
 	// stands. It stands until the next prompt (salient.go).
 	notification *standing
-	// contextBudget is the standing context-budget line, nil when none stands.
-	// It stands until a cut shrinks the context (salient.go).
-	contextBudget *budgetState
-	// vendorSession is the vendor session the last session start named, so a
-	// start naming another one is recognized as a switch.
-	vendorSession string
 	// contextWindow is the main agent's last readable context-usage report,
 	// nil until one arrives. The enduring line draws it.
 	// retrying is the standing mid-turn retry evidence. It stands until the

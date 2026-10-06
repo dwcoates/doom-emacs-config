@@ -230,8 +230,9 @@ func (r *resolver) drawContextCut(s *wsState, agent *conversationv1.AgentId, cut
 		// NOTHING WAS CUT, and the row says so as its OUTCOME MARKER ALONE
 		// (owner ruling, 2026-10-06): no divider, which would read as a cut,
 		// and no rider on the turn's headline. `tokens` stays UNSET — no size
-		// changed. It is still a WARNING; the footer's context-budget line
-		// says the context is as it was.
+		// changed. It is still a WARNING, and this marker is its whole
+		// account: the footer raises no line for it (owner ruling,
+		// 2026-10-06).
 		reason := arm.CompactionFailed.GetError()
 		log.Warn("daemon.feed.compaction_failed",
 			"a compaction failed and nothing was cut; the feed draws its outcome marker",

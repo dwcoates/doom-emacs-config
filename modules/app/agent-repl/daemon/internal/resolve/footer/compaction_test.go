@@ -630,7 +630,7 @@ func TestACompletedCompactionIsAnnouncedAsCompactionConcluded(t *testing.T) {
 	}
 }
 
-func TestAFailedCompactionStandsTheSalientBudgetLine(t *testing.T) {
+func TestAFailedCompactionPhaseRaisesNoSalientLine(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	connected(h)
@@ -641,10 +641,8 @@ func TestAFailedCompactionStandsTheSalientBudgetLine(t *testing.T) {
 		progress(conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_FAILED, 0, 0, "the summary was empty")))
 
 	// Assert
-	got := activityLineOf(h.view(t).GetStrip().GetStatus())
-	want := activityLine{tier: "salient", kind: "context_budget", text: "compaction failed — the summary was empty"}
-	if got != want {
-		t.Fatalf("activity = %+v, want the failure standing as the salient context_budget line", got)
+	if got := activityLineOf(h.view(t).GetStrip().GetStatus()); got.tier == "salient" {
+		t.Fatalf("activity = %+v, want no salient line: a failed compaction is the feed's marker alone", got)
 	}
 }
 

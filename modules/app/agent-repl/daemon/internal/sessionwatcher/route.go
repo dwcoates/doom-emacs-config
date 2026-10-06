@@ -804,15 +804,6 @@ func (w *watcher) routeUpdateLocked(agent *conversationv1.AgentId, update *conve
 		w.sinks.Footer.OnApiError(w.ws, agent, update.GetApiError())
 		w.sinks.Sidebar.OnApiError(w.ws, agent, update.GetApiError())
 
-	case update.GetContextBudgetWarning() != nil:
-		// THE AGENT PLANE owns the budget warning: it is a transcript
-		// attachment the sidecar produces, and the footer's activity line is
-		// its only consumer.
-		w.log.Debug("daemon.sessionwatcher.context_budget_warning", "the vendor warned the context window is filling", dlog.Context{
-			"agent_id": agent.GetValue(),
-		})
-		w.sinks.Footer.OnContextBudgetWarning(w.ws, agent, update.GetContextBudgetWarning())
-
 	default:
 		w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch", dlog.Context{"function": "routeUpdateLocked", "branch": "default"})
 		w.log.Warn("daemon.sessionwatcher.update_unrouted", "an AgentUpdate arm has no route", dlog.Context{
