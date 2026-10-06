@@ -222,6 +222,11 @@ func (s *store) RegisterRepository(ctx context.Context, dir, defaultBranch strin
 	return out, created, nil
 }
 
+// RefuseTemporary is refuseTemporary for a verb that asks before it registers.
+func (s *store) RefuseTemporary(dir string) error {
+	return s.refuseTemporary("daemon.wsm.refuse_temporary", dir)
+}
+
 // refuseTemporary is the registry's ONE temporary-directory check, run by both
 // writes that mint a row (RegisterWorkspace, RegisterRepository) before they
 // touch the database: a directory inside a temporary root never becomes a
