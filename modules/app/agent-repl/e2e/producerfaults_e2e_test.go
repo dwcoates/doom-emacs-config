@@ -549,8 +549,9 @@ func TestAwaySummaryDrawsNoRow(t *testing.T) {
 // ruling that "IT IS NOT THE CONTEXT-BUDGET WARNING ... mapping the tip to
 // it would draw an unrelated tip as \"your context is filling\"".
 //
-// Two negatives, then: no extra feed row, and specifically no
-// FooterStatusActivityContextBudget line minted from the tip.
+// Two negatives, then: no extra feed row, and no footer salient line minted
+// from the tip (no footer line warns that the context is nearly full, owner
+// ruling 2026-10-06).
 func TestContextTipDrawsNoRow(t *testing.T) {
 	t.Parallel()
 	// Arrange
@@ -569,13 +570,12 @@ func TestContextTipDrawsNoRow(t *testing.T) {
 	}
 	pfAssertOnlyProseRows(t, rows, turn)
 
-	// The footer's context-budget line rides every status arm's salient oneof;
-	// a generic tip must stand none, under any status.
+	// A generic tip must stand no salient line, under any status.
 	view := pfAwaitView(t, w, footer.Stream, "the footer after the tip turn", func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetStatus() != nil
 	})
-	if got := footerContextBudget(view); got != "" {
-		t.Errorf("footer drew a context-budget line %q from a GENERIC context tip, want none", got)
+	if salient := footerTier(view, "salient"); salient != nil {
+		t.Errorf("footer drew a salient line %v from a GENERIC context tip, want none", salient.Interface())
 	}
 }
 
@@ -605,8 +605,8 @@ func TestTokensReminderDrawsNoRow(t *testing.T) {
 	view := pfAwaitView(t, w, footer.Stream, "the footer after the token-reminder turn", func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetStatus() != nil
 	})
-	if got := footerContextBudget(view); got != "" {
-		t.Errorf("footer drew a context-budget line %q from a TOKEN-COUNT reminder, want none", got)
+	if salient := footerTier(view, "salient"); salient != nil {
+		t.Errorf("footer drew a salient line %v from a TOKEN-COUNT reminder, want none", salient.Interface())
 	}
 }
 
