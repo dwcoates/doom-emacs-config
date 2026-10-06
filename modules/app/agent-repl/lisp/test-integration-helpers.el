@@ -89,7 +89,9 @@ run never depends on the network."
              (process-environment (append '("GOFLAGS=-mod=mod" "GOPROXY=off")
                                           process-environment))
              (log (generate-new-buffer "*agent-repl-itest-go-build*"))
-             (status (call-process go nil log nil "build" "-o" output ".")))
+             ;; -buildvcs=false: a test build never asks git to stamp the
+             ;; binary (no test runs real git, owner rule).
+             (status (call-process go nil log nil "build" "-buildvcs=false" "-o" output ".")))
         (unless (eq status 0)
           (let ((text (with-current-buffer log (buffer-string))))
             (kill-buffer log)
