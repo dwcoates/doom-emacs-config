@@ -760,6 +760,27 @@ export class ManualScheduler implements KeepaliveScheduler {
   fire(index = 0): void {
     this.handlers[index]?.();
   }
+  /** Every one-shot timer ever set, in order, each with its delay and whether it is still pending. */
+  readonly timeouts: { readonly handler: () => void; readonly delayMs: number; pending: boolean }[] = [];
+  setTimeout(handler: () => void, delayMs: number): unknown {
+    this.timeouts.push({ handler, delayMs, pending: true });
+    return this.timeouts.length - 1;
+  }
+  clearTimeout(handle: unknown): void {
+    const timeout = this.timeouts[handle as number];
+    if (timeout !== undefined) timeout.pending = false;
+  }
+  /** The one-shot timer still pending, or absence; the cadence holds at most one. */
+  pendingTimeout(): { readonly delayMs: number } | undefined {
+    return [...this.timeouts].reverse().find((timeout) => timeout.pending);
+  }
+  /** Fire the pending one-shot timer, as its delay elapsing would. */
+  fireTimeout(): void {
+    const timeout = [...this.timeouts].reverse().find((held) => held.pending);
+    if (timeout === undefined) return;
+    timeout.pending = false;
+    timeout.handler();
+  }
 }
 
 function emptyContextUsage(): ContextUsageLike {
