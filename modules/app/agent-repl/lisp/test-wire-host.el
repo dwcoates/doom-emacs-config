@@ -1618,6 +1618,12 @@ replaces it."
                #'agent-repl-wire-decode-workspace-open-stage "{\"checkingWorktree\":{}}")
               :checking-worktree)))
 
+(ert-deftest agent-repl-test-wire-host-open-stage-restoring-worktree ()
+  "The restoring_worktree arm decodes to `:restoring-worktree'."
+  (should (eq (agent-repl-test-wire-host--decode
+               #'agent-repl-wire-decode-workspace-open-stage "{\"restoringWorktree\":{}}")
+              :restoring-worktree)))
+
 (ert-deftest agent-repl-test-wire-host-open-stage-starting-session ()
   "The starting_session arm decodes to `:starting-session'."
   (should (eq (agent-repl-test-wire-host--decode
