@@ -244,7 +244,7 @@ type ColdGateAnswer struct {
 const (
 	// ChoicePay is the gate's "pay and resume".
 	ChoicePay = "pay"
-	// ChoiceClear is the gate's "clear and start fresh".
+	// ChoiceClear is the gate's "clear context".
 	ChoiceClear = "clear"
 	// ChoiceCompact is the gate's "compact and resume".
 	ChoiceCompact = "compact"

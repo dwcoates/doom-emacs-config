@@ -6252,9 +6252,11 @@ bubble-body.bubble-body { display: block; }
   color: var(--fg);
   border-color: var(--cold-gate-compact-border);
 }
-/* Every label in the one colour (owner request, 2026-10-03): clear keeps its
-   red BORDER as the destructive mark, but not red text. */
-.cold-gate-buttons > ar-button.hibernation-clear { color: var(--fg); }
+/* Every label in the one colour (owner request, 2026-10-03). The RED BORDER
+   is pay's (owner request, 2026-10-06): pay and resume is the weightiest
+   choice, so it is red and last on the row; clear takes the border pay had. */
+.cold-gate-buttons > ar-button.hibernation-clear { color: var(--fg); border-color: var(--info-tokens); }
+.cold-gate-buttons > ar-button.hibernation-direct { border-color: var(--err); }
 /* Borders half again as thick as the shared 1px (owner request, 2026-10-03). */
 .cold-gate-buttons > ar-button { border-width: 1.5px; }
 /* A little more room under the buttons, so the gate stands a touch taller
