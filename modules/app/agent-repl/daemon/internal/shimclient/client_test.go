@@ -1678,3 +1678,152 @@ func TestOnlyConnectedAnnouncesALink(t *testing.T) {
 		t.Fatalf("production source publishes LinkConnected at %d sites; only connected() may", announcements)
 	}
 }
+
+// ---- a failure the shim's death caused ----
+
+// deathStaging says when, relative to a call's transport failure, the client
+// decides that its shim died.
+type deathStaging int
+
+const (
+	// diedBefore: the exit was decided before the call failed.
+	diedBefore deathStaging = iota
+	// diedWhileWaiting: the call failed first and the verdict landed while it
+	// waited, the order a SIGKILL's EOF and its reap race in.
+	diedWhileWaiting
+	// neverDied: no exit is decided; the link broke under a live shim.
+	neverDied
+)
+
+// stageDeath arranges c's death verdict per staging.
+func stageDeath(c *client, staging deathStaging) {
+	exit := ExitInfo{PID: 4242, Code: -1, Signal: "killed"}
+	switch staging {
+	case diedBefore:
+		c.publishExit(exit)
+	case diedWhileWaiting:
+		c.awaitingDeathVerdict = func() { go c.publishExit(exit) }
+	case neverDied:
+		c.deathVerdictBudget = time.Millisecond
+	}
+}
+
+// TestAStreamOpenTheShimsDeathCutIsNotARefusal pins that a WatchAgent-style
+// open failing `unavailable` on a shim that died is recorded at INFO with the
+// death as its cause and wrapped in ErrShimDied, whether the death verdict
+// landed before the failure or raced in after it; with no death the open
+// stays an ERROR refusal.
+//
+// MEASURED, full run on master 8f5ac5a15:
+// TestAShimThatDiesAgainBeforeAnyTurnEndsIsLeftDownUntilTheNextPrompt caught
+// `daemon.shimclient.watch_agent` ERROR "shim stream refused
+// {error=unavailable: unexpected EOF}" for a shim the test had SIGKILLed.
+func TestAStreamOpenTheShimsDeathCutIsNotARefusal(t *testing.T) {
+	tests := []struct {
+		name      string
+		staging   deathStaging
+		wantLevel string
+		wrongLvl  string
+		wantDied  bool
+	}{
+		{name: "the death was decided before the open failed", staging: diedBefore, wantLevel: "info", wrongLvl: "error", wantDied: true},
+		{name: "the death was decided while the failed open waited", staging: diedWhileWaiting, wantLevel: "info", wrongLvl: "error", wantDied: true},
+		{name: "the shim is alive", staging: neverDied, wantLevel: "error", wrongLvl: "info", wantDied: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f, uds := startFakeShim(t, shortDir(t))
+			f.watchBashRefusal = connect.NewError(connect.CodeUnavailable, errors.New("unexpected EOF"))
+			log := dlog.NewTestLogger()
+			c := newClient(log, ids.WorkspaceID("ws-1"), uds, defaultBackoff, nil, nil)
+			stageDeath(c, tt.staging)
+
+			// Act.
+			_, err := c.WatchBash(context.Background(), &conversationv1.DetachedWorkId{Value: "toolu_1"})
+
+			// Assert.
+			var opened *StreamOpenError
+			if !errors.As(err, &opened) {
+				t.Fatalf("WatchBash() error = %v, want a *StreamOpenError", err)
+			}
+			if got := errors.Is(err, ErrShimDied); got != tt.wantDied {
+				t.Fatalf("errors.Is(err, ErrShimDied) = %v, want %v: %v", got, tt.wantDied, err)
+			}
+			if connect.CodeOf(err) != connect.CodeUnavailable {
+				t.Fatalf("connect.CodeOf(err) = %v, want the transport's code kept in the chain", connect.CodeOf(err))
+			}
+			if !hasRecordAt(log, tt.wantLevel, "daemon.shimclient.watch_bash") {
+				t.Fatalf("no %q record for the failed open: %+v", tt.wantLevel, log.Records())
+			}
+			if hasRecordAt(log, tt.wrongLvl, "daemon.shimclient.watch_bash") {
+				t.Fatalf("the failed open was ALSO recorded at %q: %+v", tt.wrongLvl, log.Records())
+			}
+		})
+	}
+}
+
+// TestAGenuineRefusalFromAShimThatLaterDiedStaysARefusal pins that only a
+// transport failure is attributed to the death: a shim that answered the open
+// with its own refusal refused it, whatever happened to it afterwards.
+func TestAGenuineRefusalFromAShimThatLaterDiedStaysARefusal(t *testing.T) {
+	// Arrange.
+	f, uds := startFakeShim(t, shortDir(t))
+	f.watchBashRefusal = connect.NewError(connect.CodeInternal, errors.New("the fold came apart"))
+	log := dlog.NewTestLogger()
+	c := newClient(log, ids.WorkspaceID("ws-1"), uds, defaultBackoff, nil, nil)
+	stageDeath(c, diedBefore)
+
+	// Act.
+	_, err := c.WatchBash(context.Background(), &conversationv1.DetachedWorkId{Value: "toolu_1"})
+
+	// Assert.
+	if errors.Is(err, ErrShimDied) {
+		t.Fatalf("a refusal the shim answered was attributed to its death: %v", err)
+	}
+	if !hasRecordAt(log, "error", "daemon.shimclient.watch_bash") {
+		t.Fatalf("the shim's own refusal was not recorded at error: %+v", log.Records())
+	}
+}
+
+// TestAUnaryCallTheShimsDeathCutIsNotAFault is the unary half: a call failing
+// at the transport on a shim that died is the death's effect, recorded at INFO
+// and wrapped in ErrShimDied; with no death it stays an ERROR.
+func TestAUnaryCallTheShimsDeathCutIsNotAFault(t *testing.T) {
+	tests := []struct {
+		name      string
+		staging   deathStaging
+		wantLevel string
+		wrongLvl  string
+		wantDied  bool
+	}{
+		{name: "the death was decided before the call failed", staging: diedBefore, wantLevel: "info", wrongLvl: "error", wantDied: true},
+		{name: "the death was decided while the failed call waited", staging: diedWhileWaiting, wantLevel: "info", wrongLvl: "error", wantDied: true},
+		{name: "the shim is alive", staging: neverDied, wantLevel: "error", wrongLvl: "info", wantDied: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: a socket nothing is listening on, so the call fails
+			// `unavailable` at the transport exactly as a killed shim's does.
+			log := dlog.NewTestLogger()
+			c := newClient(log, ids.WorkspaceID("ws-1"),
+				filepath.Join(t.TempDir(), "absent.sock"), defaultBackoff, nil, nil)
+			stageDeath(c, tt.staging)
+			req := &shimv1.ReadTranscriptsRequest{}
+
+			// Act.
+			_, err := c.ReadTranscripts(context.Background(), req)
+
+			// Assert.
+			if got := errors.Is(err, ErrShimDied); got != tt.wantDied {
+				t.Fatalf("errors.Is(err, ErrShimDied) = %v, want %v: %v", got, tt.wantDied, err)
+			}
+			if !hasRecordAt(log, tt.wantLevel, "daemon.shimclient.read_transcripts") {
+				t.Fatalf("no %q record for the failed call: %+v", tt.wantLevel, log.Records())
+			}
+			if hasRecordAt(log, tt.wrongLvl, "daemon.shimclient.read_transcripts") {
+				t.Fatalf("the failed call was ALSO recorded at %q: %+v", tt.wrongLvl, log.Records())
+			}
+		})
+	}
+}
