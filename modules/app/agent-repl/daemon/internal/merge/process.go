@@ -578,7 +578,10 @@ func (r *run) testAndFix(ctx context.Context, tip, targetBranch string, fromAtte
 		} else {
 			round = r.openTab(ctx, TabTests)
 		}
+		// EVERY STEP'S RECORD NAMES ITS ATTEMPT'S TIP AND TARGET: a branch
+		// already on the tip took no rebasing step to record them.
 		if err := r.checkpoint(ctx, TabTests, func(d *progressDoc) {
+			d.TargetBranch, d.Tip = targetBranch, tip
 			d.FixAttempt, d.Turn, d.FailingSuites, d.FailingArchive, d.FailingTail = attempt, "", nil, "", ""
 		}); err != nil {
 			return "", nil, err
@@ -736,7 +739,9 @@ func (r *run) commit(ctx context.Context, tip, head, targetBranch string) (outco
 		return outcome{}, true, nil
 	}
 	round := r.openTab(ctx, TabCommitting)
-	if err := r.checkpoint(ctx, TabCommitting, func(d *progressDoc) { d.Head, d.MergeCommit, d.Turn = head, "", "" }); err != nil {
+	if err := r.checkpoint(ctx, TabCommitting, func(d *progressDoc) {
+		d.TargetBranch, d.Tip, d.Head, d.MergeCommit, d.Turn = targetBranch, tip, head, "", ""
+	}); err != nil {
 		return outcome{}, false, err
 	}
 	return r.commitIn(ctx, round, tip, head, targetBranch)
