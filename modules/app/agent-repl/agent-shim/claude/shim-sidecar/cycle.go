@@ -333,6 +333,10 @@ type sidecar struct {
 	// sidechain files can share it, so rediscovery reuses the proven identity.
 	workspaceBySession map[string]workspaceAttribution
 	workspaceFailures  map[string]string
+	// firstCWDPending is when each steady-state transcript that records no
+	// cwd yet was first seen, by session key, so its hold is warned only once
+	// FirstCWDWindow has lapsed (held.go awaitFirstCWD).
+	firstCWDPending map[string]time.Time
 	// attributedBooks is each watched transcript's attribution by the book its
 	// records land in, and unclaimedShells each held shell spool no launch
 	// claimed, by task id: together they let a claim the shim wrote to the
@@ -449,6 +453,7 @@ func newSidecar(options Options, log *logging.Bound) *sidecar {
 		rewound:            map[string]bool{},
 		workspaceBySession: map[string]workspaceAttribution{},
 		workspaceFailures:  map[string]string{},
+		firstCWDPending:    map[string]time.Time{},
 		attributedBooks:    map[string]bookAttribution{},
 		unclaimedShells:    map[string]string{},
 		rotationHeld:       map[string]discover.Target{},

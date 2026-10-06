@@ -480,8 +480,10 @@ func TestAnUnattributableTranscriptAfterCatchUpWarnsPerItem(t *testing.T) {
 	}
 	h.advance(time.Second)
 	h.unresolvableTranscript(t, "80000000-0000-4000-8000-000000000001")
+	h.sc.rescan()
+	h.advance(FirstCWDWindow)
 
-	// Act.
+	// Act: the re-check after the first-cwd window lapsed.
 	h.sc.rescan()
 
 	// Assert.
@@ -565,20 +567,96 @@ func TestATranscriptGoneBeforeItsFirstByteIsStatedOncePerFile(t *testing.T) {
 	h.requireOnce(t, "resolve-transcript-workspace", "info")
 }
 
-func TestAPresentTranscriptThatCannotBeAttributedStillWarns(t *testing.T) {
-	// Arrange: the file is there and carries no cwd, which is the condition an
-	// operator must look at.
-	h := newHarness(t, &fakeStore{})
-	h.unresolvableTranscript(t, "90000000-0000-4000-8000-000000000003")
-	target := discover.Target{
-		Path:       filepath.Join(h.rootA, "projects", "proj", "90000000-0000-4000-8000-000000000003.jsonl"),
+// noCWDTarget writes a present session transcript that records no cwd and
+// answers the target that names it.
+func (h *harness) noCWDTarget(t *testing.T, session string) discover.Target {
+	t.Helper()
+	h.unresolvableTranscript(t, session)
+	return discover.Target{
+		Path:       filepath.Join(h.rootA, "projects", "proj", session+".jsonl"),
 		Kind:       tail.KindSessionTranscript,
 		ConfigRoot: h.rootA,
 		ProjectKey: "proj",
-		SessionID:  "90000000-0000-4000-8000-000000000003",
+		SessionID:  session,
 	}
+}
+
+func TestAPresentTranscriptThatCannotBeAttributedStillWarns(t *testing.T) {
+	// Arrange: the file is there and has carried no cwd for a whole first-cwd
+	// window, which is the condition an operator must look at.
+	h := newHarness(t, &fakeStore{})
+	target := h.noCWDTarget(t, "90000000-0000-4000-8000-000000000003")
+	h.sc.resolveTranscriptWorkspace(target)
+	h.advance(FirstCWDWindow)
 
 	// Act.
+	h.sc.resolveTranscriptWorkspace(target)
+
+	// Assert.
+	h.requireOnce(t, "resolve-transcript-workspace", "warn")
+}
+
+func TestATranscriptWithNoCWDYetIsHeldAtInfoNotWarned(t *testing.T) {
+	// Arrange: the vendor's cwd-less queue line is written and the cwd-bearing
+	// prompt record is not yet, which is how every session's transcript begins.
+	h := newHarness(t, &fakeStore{})
+	target := h.noCWDTarget(t, "90000000-0000-4000-8000-000000000004")
+
+	// Act.
+	_, ok := h.sc.resolveTranscriptWorkspace(target)
+
+	// Assert.
+	if ok {
+		t.Fatal("a transcript that records no cwd was attributed")
+	}
+	h.requireNone(t, "resolve-transcript-workspace", "warn")
+	rec := h.requireOnce(t, "resolve-transcript-workspace", "info")
+	if got := ctxString(t, rec, "reason"); got != reasonFirstCWDPending {
+		t.Fatalf("the record's reason = %q, want %q", got, reasonFirstCWDPending)
+	}
+}
+
+func TestATranscriptStillWithoutACWDInsideTheWindowIsStatedOnce(t *testing.T) {
+	// Arrange: a rescan re-checks the held transcript every pass.
+	h := newHarness(t, &fakeStore{})
+	target := h.noCWDTarget(t, "90000000-0000-4000-8000-000000000005")
+	h.sc.resolveTranscriptWorkspace(target)
+	h.advance(FirstCWDWindow - time.Millisecond)
+
+	// Act.
+	h.sc.resolveTranscriptWorkspace(target)
+
+	// Assert.
+	h.requireNone(t, "resolve-transcript-workspace", "warn")
+	h.requireOnce(t, "resolve-transcript-workspace", "info")
+}
+
+func TestATranscriptWhoseCWDArrivesInsideTheWindowIsAttributed(t *testing.T) {
+	// Arrange: held once with no cwd, then the prompt record lands.
+	h := newHarness(t, &fakeStore{})
+	target := h.noCWDTarget(t, "90000000-0000-4000-8000-000000000006")
+	h.sc.resolveTranscriptWorkspace(target)
+	h.write(t, target.Path, promptLine+"\n"+`{"cwd":"/work/repo","type":"user"}`+"\n")
+
+	// Act.
+	got, ok := h.sc.resolveTranscriptWorkspace(target)
+
+	// Assert.
+	if !ok || got.WorkspaceDir != "/work/repo" {
+		t.Fatalf("attribution = (%q, %v), want /work/repo", got.WorkspaceDir, ok)
+	}
+	h.requireNone(t, "resolve-transcript-workspace", "warn")
+}
+
+func TestATranscriptWithoutACWDPastTheWindowIsWarnedOnce(t *testing.T) {
+	// Arrange: the window lapsed and the warning was stated.
+	h := newHarness(t, &fakeStore{})
+	target := h.noCWDTarget(t, "90000000-0000-4000-8000-000000000007")
+	h.sc.resolveTranscriptWorkspace(target)
+	h.advance(FirstCWDWindow)
+	h.sc.resolveTranscriptWorkspace(target)
+
+	// Act: a later rescan re-checks it again.
 	h.sc.resolveTranscriptWorkspace(target)
 
 	// Assert.

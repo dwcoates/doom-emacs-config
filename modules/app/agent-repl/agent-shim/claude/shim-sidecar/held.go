@@ -314,6 +314,52 @@ const reasonTranscriptVanished = "transcript_vanished"
 // its cwds encodes to the project folder the file lives in.
 const reasonFirstCWDFallback = "first_cwd_fallback"
 
+// reasonFirstCWDPending is the `resolve-transcript-workspace` record's
+// discriminator for a transcript held because no cwd-bearing record has been
+// written to it YET.
+const reasonFirstCWDPending = "first_cwd_pending"
+
+// FirstCWDWindow is how long a steady-state transcript may sit on disk with no
+// cwd before that is warned. The vendor writes the session's unchained
+// `queue-operation` enqueue line and then, at once, the cwd-bearing prompt
+// record; a discovery that lands between those two writes is the ordinary start
+// of every session, and the next re-check attributes it. A transcript still
+// without a cwd a whole window later is one no record will ever attribute, and
+// that is the condition an operator must look at. It shares the spool hold
+// window's default because both bound the same thing: a file the vendor has
+// begun and not yet finished naming.
+const FirstCWDWindow = UnownedSpoolWindow
+
+// awaitFirstCWD holds a steady-state transcript that records no cwd YET and
+// reports whether it did. The first sighting is stated once at info and starts
+// the window; every re-check inside the window is verbose. Once the window has
+// lapsed it reports false, so the caller warns exactly as it does for any other
+// present transcript it cannot attribute. A startup-catch-up transcript is not
+// held here either: it is backlog, and the caller summarizes it.
+func (s *sidecar) awaitFirstCWD(key string, target discover.Target, err error) bool {
+	ctx := logging.Context{
+		Operation: "resolve-transcript-workspace", Path: target.Path,
+		ClaudeSessionID: target.SessionID, Reason: reasonFirstCWDPending,
+	}
+	now := s.now()
+	if since, pending := s.firstCWDPending[key]; pending {
+		if now.Sub(since) < FirstCWDWindow {
+			ctx.Level = "debug"
+			s.log.With(ctx).LogVerbose("transcript still held until its first cwd-bearing record is written, %s after it was first seen: %v", now.Sub(since), err)
+			return true
+		}
+		delete(s.firstCWDPending, key)
+		return false
+	}
+	if s.workspaceFailures[key] != "" || s.isBacklog(fileActivityMs(target.Path, now.UnixMilli())) {
+		return false
+	}
+	s.firstCWDPending[key] = now
+	ctx.Level = "info"
+	s.log.With(ctx).Log("transcript held until its first cwd-bearing record is written; the vendor writes a cwd-less queue line first, so it is re-read every rescan and warned only if it still has no cwd after %s: %v", FirstCWDWindow, err)
+	return true
+}
+
 func (s *sidecar) resolveTranscriptWorkspace(target discover.Target) (discover.Target, bool) {
 	key := target.ConfigRoot + "\x00" + target.ProjectKey + "\x00" + target.SessionID
 	workspace, ok := s.workspaceBySession[key]
@@ -324,6 +370,9 @@ func (s *sidecar) resolveTranscriptWorkspace(target discover.Target) (discover.T
 			ctx := logging.Context{
 				Operation: "resolve-transcript-workspace", Path: target.Path,
 				ClaudeSessionID: target.SessionID, Level: "warn",
+			}
+			if errors.Is(err, discover.ErrNoCWDYet) && s.awaitFirstCWD(key, target, err) {
+				return discover.Target{}, false
 			}
 			if s.workspaceFailures[key] == detail {
 				// The same failure was already stated or counted; a rescan
@@ -348,6 +397,7 @@ func (s *sidecar) resolveTranscriptWorkspace(target discover.Target) (discover.T
 				return discover.Target{}, false
 			}
 			if errors.Is(err, fs.ErrNotExist) {
+				delete(s.firstCWDPending, key)
 				// THE TRANSCRIPT IS GONE, SO THERE IS NOTHING TO HOLD FOR. The
 				// attribution read is the FIRST thing done to a discovered
 				// transcript, and a vendor session directory deleted between the
@@ -373,6 +423,7 @@ func (s *sidecar) resolveTranscriptWorkspace(target discover.Target) (discover.T
 		workspace = workspaceAttribution{dir: dir, id: id}
 		s.workspaceBySession[key] = workspace
 		delete(s.workspaceFailures, key)
+		delete(s.firstCWDPending, key)
 		if attribution.FirstCWDFallback {
 			// Stated ONCE PER FILE: the attribution is cached under the
 			// session key just above, so no rescan resolves this file again.

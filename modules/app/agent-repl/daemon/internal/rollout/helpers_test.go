@@ -131,6 +131,29 @@ func (c *fakeClock) awaitArmed(t *testing.T, d time.Duration) {
 	}
 }
 
+// awaitArmedCount blocks until n windows of exactly d are armed and not yet
+// fired. Unlike awaitArmed it counts what is STANDING, not the arms it happens
+// to observe: an arm another await already consumed (and discarded for its
+// duration) still counts, so the answer does not depend on the order earlier
+// waits drained `asked` in.
+func (c *fakeClock) awaitArmedCount(t *testing.T, d time.Duration, n int) {
+	t.Helper()
+	for {
+		c.mu.Lock()
+		standing := len(c.armed[d])
+		c.mu.Unlock()
+		if standing >= n {
+			return
+		}
+		select {
+		case <-c.asked:
+		case <-time.After(10 * time.Second):
+			t.Fatalf("%d window(s) of %s armed, want %d", standing, d, n)
+			return
+		}
+	}
+}
+
 // armedSignal answers a channel that CLOSES once a window of exactly d has
 // been armed. It is awaitArmed's non-fatal form, for a test that has to race
 // that edge against a call answering early: the early answer is the failure

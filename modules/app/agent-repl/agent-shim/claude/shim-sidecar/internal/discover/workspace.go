@@ -13,6 +13,13 @@ import (
 	sharedlogging "agentrepl/logging"
 )
 
+// ErrNoCWDYet is the attribution read's answer for a transcript that is on
+// disk and records no cwd YET. The vendor writes an unchained
+// `queue-operation` line, which carries no cwd, BEFORE the first cwd-bearing
+// record of a session, so a transcript discovered between those two writes is
+// an ordinary start, not a fault: the caller holds it and re-reads it.
+var ErrNoCWDYet = errors.New("it does not yet contain a cwd")
+
 // Attribution is the workspace a session's transcript is filed against.
 type Attribution struct {
 	// Dir is the workspace directory: a cwd the transcript itself records.
@@ -78,7 +85,7 @@ func splitPath(path string) []string {
 
 // transcriptCWD answers the first cwd in the transcript whose vendor encoding
 // is projectSlug, with matched true; failing that, the transcript's first cwd
-// with matched false. A transcript holding no cwd yet is an error.
+// with matched false. A transcript holding no cwd yet answers ErrNoCWDYet.
 func transcriptCWD(path, projectSlug string) (cwd string, matched bool, err error) {
 	file, err := os.Open(path)
 	if err != nil {
@@ -112,7 +119,7 @@ func transcriptCWD(path, projectSlug string) (cwd string, matched bool, err erro
 				return "", false, fmt.Errorf("read transcript %q for workspace attribution: %w", path, readErr)
 			}
 			if first == "" {
-				return "", false, fmt.Errorf("transcript %q does not yet contain a cwd", path)
+				return "", false, fmt.Errorf("transcript %q: %w", path, ErrNoCWDYet)
 			}
 			return first, false, nil
 		}

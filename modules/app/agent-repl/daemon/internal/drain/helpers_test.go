@@ -245,6 +245,11 @@ type fakeStand struct {
 type killCall struct {
 	WS    ids.WorkspaceID
 	Force bool
+	// Budget is the deadline left on the call's context as it arrived, and
+	// Bounded whether it carried one at all: how a test pins that the
+	// stand-down was BOUNDED without timing the whole call on a wall clock.
+	Budget  time.Duration
+	Bounded bool
 }
 
 func newFakeStand() *fakeStand {
@@ -298,6 +303,9 @@ func (s *fakeStand) KillSession(ctx context.Context, ws ids.WorkspaceID, force b
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	call := killCall{WS: ws, Force: force}
+	if deadline, ok := ctx.Deadline(); ok {
+		call.Budget, call.Bounded = time.Until(deadline), true
+	}
 	s.killed = append(s.killed, call)
 	err := s.killErr[ws]
 	s.kills <- call
