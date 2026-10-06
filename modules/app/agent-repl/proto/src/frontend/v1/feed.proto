@@ -1437,9 +1437,13 @@ message FeedTurnEndedInterruptedInterjection {}
 // THE OUTCOME MARKER (owner ruling, 2026-10-06): the one standardized
 // component the feed draws for an event that is not a message — how a turn
 // ended (FeedTurnEndedErrored.marker, FeedTurnEndedInterrupted.marker), a
-// permission the user denied (FeedPermissionDeniedByUser.marker), and a plan
-// episode that broke (FeedPlanFailed.marker). It is placed exactly where the
+// permission the user denied (FeedPermissionDeniedByUser.marker), a plan
+// episode that broke (FeedPlanFailed.marker), and a compaction that failed
+// (FeedContextCutCompactionFailed.marker). It is placed exactly where the
 // event happened: a turn's ending marker after that turn's last output.
+//
+// A FAILED MERGE NEVER DRAWS ONE (owner ruling, 2026-10-06): its merge bubble,
+// continually updated, is its whole account in the feed.
 //
 // A small inline pill, about the height of the feed's badges, LEFT-ALIGNED in
 // the feed stream column, no wider than its text, and TRUNCATING rather than
@@ -1521,8 +1525,10 @@ message FeedOutcomeMarkerAgentReplFault {
 // (conversation.v1 deliberately does not carry it), so there is nothing to
 // draw and no field for it.
 message FeedOutcomeVendorFaultExpansion {
-  // When it happened.
-  FeedOutcomeTime time = 1;
+  // When it happened. UNSET when the daemon holds no instant for the event:
+  // a failed compaction states none, and one drawn from history has only
+  // its replay's.
+  optional FeedOutcomeTime time = 1;
   // The vendor's error type, verbatim: the api error class it reported
   // ("rate_limited", "overloaded", an unmodeled class by the vendor's own
   // name) or the run's own stop word ("max_turns", "prompt_too_long").
@@ -2377,9 +2383,10 @@ message FeedSessionSeparation {
   // ONE LEVEL: a separation is a recorded fact; it is never in flight (a
   // compaction that read cold still compacted — see the cold-read notice; a
   // worktree call that failed is a tool failure, not a divider). The one
-  // failed shape it records is `compaction_failed`: the divider that was
+  // failed shape it records is `compaction_failed`: the compaction that was
   // offered (the /compact command, the cold gate's compact remedy) and did
-  // not happen, drawn in the slot the compacted divider would have taken.
+  // not happen, which the client draws as its outcome marker ALONE, with no
+  // divider (owner ruling, 2026-10-06).
   oneof kind {
     // The conversation was discarded outright.
     FeedContextCutCleared cleared = 2;
@@ -2580,10 +2587,19 @@ message FeedMergeAbandoned {
   string summary = 1;
 }
 
-// The failed-compaction divider. The producer's account, verbatim, is the
-// only evidence anyone has; the daemon composes the label.
+// The failed compaction. DRAWN AS ITS OUTCOME MARKER ALONE (owner ruling,
+// 2026-10-06): no divider rule, no label under one — a compaction that did not
+// happen cut nothing, so a dividing line there was mistaken. The producer's
+// account, verbatim, is the only evidence anyone has; the footer's
+// context-budget line still says the context is as it was.
 message FeedContextCutCompactionFailed {
+  // The producer's account, verbatim. The marker's expansion carries it as
+  // the vendor's message; kept so an older client still decodes the row.
   string error = 1;
+  // THE MARKER the client draws for the row, and nothing else: a
+  // `vendor_fault` marker labelled "compaction failed", expanding to the
+  // producer's account.
+  FeedOutcomeMarker marker = 2;
 }
 
 // The ▸/▾ state. UI preference the daemon holds; see the roster's fold.
