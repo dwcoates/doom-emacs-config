@@ -122,6 +122,12 @@ func (c *fakeClient) KillTurn(_ context.Context, req *shimv1.KillTurnRequest) (*
 	return &shimv1.KillTurnResponse{Result: &shimv1.KillTurnResponse_Success{Success: &shimv1.KillTurnSuccess{}}}, nil
 }
 
+// AwaitDeath answers the fake's exit at once: this suite stages no race.
+func (c *fakeClient) AwaitDeath(context.Context) (shimclient.ExitInfo, time.Duration, bool) {
+	info, ok := c.Reaped()
+	return info, 0, ok
+}
+
 func (c *fakeClient) Reaped() (shimclient.ExitInfo, bool) {
 	if !c.reaped {
 		return shimclient.ExitInfo{}, false
