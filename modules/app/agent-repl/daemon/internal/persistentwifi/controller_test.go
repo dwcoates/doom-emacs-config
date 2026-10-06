@@ -151,6 +151,23 @@ func TestRefreshPublishesTheStanding(t *testing.T) {
 	}
 }
 
+func TestRefreshRecordsHowLongTheReadTook(t *testing.T) {
+	// Arrange.
+	h := newHarness(t).standing(pmsetOn, summary(true, "Home"))
+
+	// Act.
+	h.c.Refresh(context.Background())
+
+	// Assert.
+	changed := h.records("info", opProbe)
+	if len(changed) != 1 {
+		t.Fatalf("recorded %d probe records, want the one change", len(changed))
+	}
+	if _, ok := changed[0].Context["took_ms"]; !ok {
+		t.Fatalf("the change record %+v carries no took_ms; the boot reads it before serving, so its cost must be said", changed[0].Context)
+	}
+}
+
 func TestRefreshHandsAnUnchangedStandingToNobody(t *testing.T) {
 	// Arrange.
 	h := newHarness(t).standing(pmsetOn, summary(true, "Home"))
