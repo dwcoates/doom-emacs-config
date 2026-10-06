@@ -1057,3 +1057,177 @@ func TestParseVitestList(t *testing.T) {
 		})
 	}
 }
+
+func TestGoTopLevelTestsUnderTagsIncludesTheTaggedTests(t *testing.T) {
+	// Arrange: one ordinary test and one compiled only under the integration tag.
+	dir := t.TempDir()
+	write(t, filepath.Join(dir, "go.mod"), "module x\n\ngo 1.24\n", 0o644)
+	write(t, filepath.Join(dir, "x.go"), "package x\n", 0o644)
+	write(t, filepath.Join(dir, "a_test.go"), "package x\nimport \"testing\"\nfunc TestA(t *testing.T) {}\n", 0o644)
+	write(t, filepath.Join(dir, "i_test.go"), "//go:build integration\n\npackage x\nimport \"testing\"\nfunc TestI(t *testing.T) {}\n", 0o644)
+
+	// Act
+	got, err := goTopLevelTestsTagged(dir, "integration")
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"TestA", "TestI"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("goTopLevelTestsTagged = %v, want %v", got, want)
+	}
+}
+
+func TestGoIntegrationUnitsBuildAndVetUnderTheTags(t *testing.T) {
+	// Arrange
+	module := goPackageFixture(t, "func TestA(t *testing.T) {}\n")
+	l := Layout{Module: module, Work: t.TempDir()}
+	s := roster.Suite{Name: "daemon", IntegrationTags: "integration", IntegrationPackages: "./p"}
+
+	// Act
+	u, err := goIntegrationUnitsForPackages(l, s, module, []string{"p"})
+
+	// Assert: the vet and the build both carry the tags, and the group names
+	// them so it cannot collide with the untagged pass over the same package.
+	if err != nil {
+		t.Fatal(err)
+	}
+	vet := strings.Join(u.Atomic[0].Argv, " ")
+	build := strings.Join(u.Atomic[1].Argv, " ")
+	if !strings.Contains(vet, "go vet -tags integration") || !strings.HasSuffix(vet, "./p") {
+		t.Fatalf("vet = %q, want it under the tags over the integration packages", vet)
+	}
+	if !strings.Contains(build, "-tags integration") {
+		t.Fatalf("build = %q, want it under the tags", build)
+	}
+	if got := u.Splits[0].Group; got != "daemon:p[integration]" {
+		t.Fatalf("group = %q, want daemon:p[integration]", got)
+	}
+}
+
+func TestGoIntegrationUnitsSharePrebuiltBinariesUnderTheTags(t *testing.T) {
+	// Arrange
+	module := goPackageFixture(t, "func TestA(t *testing.T) {}\n")
+	l := Layout{Module: module, Work: t.TempDir()}
+	s := roster.Suite{Name: "daemon", IntegrationTags: "integration", IntegrationPackages: "./p", IntegrationPrebuildPackage: "p"}
+
+	// Act
+	u, err := goIntegrationUnitsForPackages(l, s, module, []string{"p"})
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	build := u.Atomic[1]
+	if len(build.Argv) != 3 || !strings.Contains(build.Argv[2], `go test -c -tags "integration" -o`) || !strings.Contains(build.Argv[2], "AGENT_REPL_TEST_PREBUILD") {
+		t.Fatalf("build = %q, want the tagged prebuild script", build.Argv)
+	}
+	chunk := u.Splits[0].Chunk("daemon:p[integration]#00", []string{"TestA"})
+	if !strings.Contains(strings.Join(chunk.Env, " "), "AGENT_REPL_TEST_PREBUILT") {
+		t.Fatalf("chunk env = %v, want the shared prebuilt binaries", chunk.Env)
+	}
+}
+
+func TestGoIntegrationUnitsRefuseAMissingPrebuildPackage(t *testing.T) {
+	// Arrange
+	module := goPackageFixture(t, "func TestA(t *testing.T) {}\n")
+	l := Layout{Module: module, Work: t.TempDir()}
+	s := roster.Suite{Name: "daemon", IntegrationTags: "integration", IntegrationPackages: "./p", IntegrationPrebuildPackage: "absent"}
+
+	// Act
+	_, err := goIntegrationUnitsForPackages(l, s, module, []string{"p"})
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), `integration prebuild package "absent" is not a tested package`) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestVitestIntegrationSplitRunsUnderItsConfig(t *testing.T) {
+	// Arrange
+	dir := t.TempDir()
+	l := Layout{Module: dir, Work: t.TempDir()}
+	s := roster.Suite{Name: "webapp", IntegrationConfig: "vitest.integration.config.ts"}
+
+	// Act
+	split, err := vitestIntegrationSplit(l, s, dir, []string{"test/integration/a.integration.test.ts"})
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	chunk := split.Chunk("webapp[integration]#00", []string{"test/integration/a.integration.test.ts"})
+	argv := strings.Join(chunk.Argv, " ")
+	if split.Group != "webapp[integration]" || !strings.Contains(argv, "--config vitest.integration.config.ts") || !strings.Contains(argv, "--maxWorkers=1") {
+		t.Fatalf("group %q argv %q, want the integration group under its config, one worker", split.Group, argv)
+	}
+}
+
+func TestTheRosterRunsEveryIntegrationSuite(t *testing.T) {
+	// The integration suites used to live outside the roster (`make
+	// integration`, `npm run test:integration`), so a full run never ran them.
+	tests := []struct {
+		suite string
+		check func(roster.Suite) bool
+	}{
+		{"daemon", func(s roster.Suite) bool {
+			return s.IntegrationTags == "integration" && s.IntegrationPackages == "./integration"
+		}},
+		{"webapp", func(s roster.Suite) bool { return s.IntegrationConfig == "vitest.integration.config.ts" }},
+		{"shim", func(s roster.Suite) bool { return s.IntegrationConfig == "vitest.integration.config.ts" }},
+	}
+	for _, tc := range tests {
+		t.Run(tc.suite, func(t *testing.T) {
+			// Act
+			s, ok := roster.Lookup(tc.suite)
+
+			// Assert
+			if !ok || !tc.check(s) {
+				t.Fatalf("roster entry %+v does not carry its integration suite", s)
+			}
+		})
+	}
+}
+
+func TestVitestIntegrationBuildRunsInThePackage(t *testing.T) {
+	// Arrange
+	s := roster.Suite{Name: "shim", IntegrationBuild: []string{"npm", "run", "pretest:integration"}}
+
+	// Act
+	build, ok := vitestIntegrationBuild(s, "/pkg")
+
+	// Assert
+	if !ok || build.ID != "shim:integration-build" || strings.Join(build.Argv, " ") != "npm run pretest:integration" || build.Dir != "/pkg" {
+		t.Fatalf("build = %+v, %v; want the package's integration build", build, ok)
+	}
+}
+
+func TestVitestIntegrationBuildIsAbsentWhenTheRosterNamesNone(t *testing.T) {
+	// Act
+	_, ok := vitestIntegrationBuild(roster.Suite{Name: "webapp"}, "/pkg")
+
+	// Assert
+	if ok {
+		t.Fatal("an integration build unit was made for a suite that names none")
+	}
+}
+
+func TestTheRosterRunsTheRepositoryHarnesses(t *testing.T) {
+	// These three ran only by hand until 2026-10-06, so no full run covered
+	// the install script or the repository's workspace CLIs.
+	for _, tc := range []struct{ name, path string }{
+		{"install-harness", "/.claude/test-install.sh"},
+		{"workspace-cli-harness", "/bin/test-agent_repl_workspace.sh"},
+		{"workspace-open-cli-harness", "/bin/test-agent_repl_workspace_open.sh"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			s, ok := roster.Lookup(tc.name)
+
+			// Assert
+			if !ok || s.Kind != roster.Script || s.Path != tc.path {
+				t.Fatalf("roster entry %+v, want a Script suite at %s", s, tc.path)
+			}
+		})
+	}
+}

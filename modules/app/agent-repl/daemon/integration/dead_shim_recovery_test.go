@@ -411,7 +411,17 @@ func TestATurnCutBeforeABootReplaysAsEnded(t *testing.T) {
 
 // THE DAEMON'S OWN WARNING ABOUT A WORKSPACE REACHES ITS STRIP, through the one
 // record tee at dlog's workspace-logger emit point: the watcher's warning that
-// the shim is gone is announced as the `daemon_warning` transient.
+// the shim is gone is taken by the footer as the `daemon_warning` transient.
+//
+// WHICH TRANSIENT IS ON SCREEN AFTERWARDS IS NOT THIS TEST'S TO PIN. A kill
+// writes several daemon records from different goroutines -- the exit's
+// error, the link warning, a standing stream's error -- and the newest
+// transient wins (owner ruling, 2026-09-28). The link warning was the one
+// drawn only when it happened to be written last; 3 runs in 30 it was not,
+// and this test failed waiting for a strip that had already moved on
+// (2026-10-06). So the tee is asserted where it lands (the footer's own
+// record of taking the warning), and the strip is asserted to announce the
+// kill's daemon records at all.
 func TestADaemonWarningAboutTheWorkspaceIsAnnouncedOnItsFooter(t *testing.T) {
 	t.Parallel()
 	// Arrange
@@ -424,12 +434,33 @@ func TestADaemonWarningAboutTheWorkspaceIsAnnouncedOnItsFooter(t *testing.T) {
 	// Act
 	killShim(t, f, f.shim)
 
-	// Assert
-	awaitFooter(t, f, footer, "the link warning announced", func(v *frontendv1.FooterView) bool {
-		warning := unpinnedWarning(v)
-		return warning.GetOperation() == "daemon.sessionwatcher.link_fault" && warning.GetMessage() != ""
+	// Assert: the footer took the link warning as a daemon warning.
+	f.d.AwaitWorkspaceLogRecord(f.repo.Dir, "the footer taking the link warning", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.footer.daemon_record" &&
+			r.Context["operation"] == "daemon.sessionwatcher.link_fault" && r.Context["level"] == "warn"
+	})
+	// Assert: the strip announces the kill's daemon records.
+	awaitFooter(t, f, footer, "a daemon record about the kill announced", func(v *frontendv1.FooterView) bool {
+		if warning := unpinnedWarning(v); warning.GetMessage() != "" {
+			return true
+		}
+		return unpinnedError(v).GetMessage() != ""
 	})
 	f.d.ShimAt(f.d.SocketPath(f.ws) + ".ctl").ExpectStartSession()
+}
+
+// unpinnedError is the daemon_error transient whatever status carries it.
+func unpinnedError(v *frontendv1.FooterView) *frontendv1.FooterActivityTransientDaemonError {
+	status := v.GetStrip().GetStatus()
+	for _, cell := range []*frontendv1.FooterActivityTransientOverEnduring{
+		status.GetIdle().GetActivity().GetUnpinned(),
+		status.GetAgentReplFault().GetActivity().GetUnpinned(),
+	} {
+		if e := cell.GetTransient().GetDaemonError(); e != nil {
+			return e
+		}
+	}
+	return nil
 }
 
 // unpinnedWarning is the daemon_warning transient whatever status carries it.

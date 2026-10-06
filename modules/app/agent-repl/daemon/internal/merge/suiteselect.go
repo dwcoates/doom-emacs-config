@@ -92,7 +92,8 @@ var suiteRules = []suiteRule{
 	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/claude/shim/", Suites: []string{"shim", "e2e"}},
 	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/claude/shim-sidecar/", Suites: []string{"sidecar", "e2e"}},
 	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/shim-store/", Suites: []string{"store", "e2e"}},
-	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/shim-lock/", Suites: []string{"lock", "e2e"}},
+	// The shim's integration files spawn the real lock helper too.
+	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/shim-lock/", Suites: []string{"lock", "shim", "e2e"}},
 	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/logging/", Suites: []string{"logging", "logging-density", "daemon", "store", "sidecar", "e2e"}},
 
 	// The wire contract every producer and consumer is generated from.

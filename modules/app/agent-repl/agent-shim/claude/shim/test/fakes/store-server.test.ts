@@ -463,6 +463,28 @@ describe("WriteBatch", () => {
     expect(fake.book("a")).toHaveLength(1);
   });
 
+  it("answers a held write only once released, under the setting at release", async () => {
+    // Arrange: a write held while the store is refusing.
+    const { store: fake, client } = await store();
+    fake.failWrites("store is down");
+    const hold = fake.holdWrites();
+    let settled = false;
+    const pending = write(client, pageLineEntry("a", "prompt:t1", "t1")).then(() => {
+      settled = true;
+    });
+    await hold.arrived;
+
+    // Act: the store comes back, then the held write is released.
+    const settledBeforeRelease = settled;
+    fake.failWrites(null);
+    hold.release();
+    await pending;
+
+    // Assert.
+    expect(settledBeforeRelease).toBe(false);
+    expect(fake.book("a")).toHaveLength(1);
+  });
+
   it("records session updates separately from page lines", async () => {
     // Arrange.
     const { store: fake, client } = await store();
